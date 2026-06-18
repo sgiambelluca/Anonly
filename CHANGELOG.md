@@ -35,6 +35,11 @@ Los cambios se generan automáticamente vía [Changesets](./.changeset/README.md
 - Commitlint con Conventional Commits.
 - Changesets para versionado semver + CHANGELOG automático.
 - Estructura de directorios `apps/` y `packages/anonymization-core/`.
+- Hito 2 — `@anonly/pdf-engine` (PRs #6, #7): ejecución inline en host thread con `pdfjs-dist`. Implementa `IEngine` con `process`, `fuseOcrPage`, `dispose`; emite `PAGE_PARSED`, `DOCUMENT_PARSED`, `PDF_PASSWORD_REQUIRED`, `PDF_INVALID`; errores `PdfPasswordRequiredError`, `PdfInvalidError`, `PdfCorruptedError`, `PdfTimeoutError`; configuración `PdfEngineConfig.maxPageCount` integrada en `EngineConfig.pdf`. Tests: `contract.test.ts`, `unit.test.ts`, `edge.test.ts`, `snapshot.test.ts`. Pendiente: migración a `PdfPool` (Hito 9) y tests stress/cancel (Hito 11).
+
+### Changed
+
+- `@anonly/shared`: `EngineConfig` ahora incluye `readonly pdf: PdfEngineConfig` (requerido por ADR-013). Source of truth de `PdfEngineConfig` movida a `core/Contracts.md` §6.
 
 ### Notes
 

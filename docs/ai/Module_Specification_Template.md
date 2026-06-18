@@ -72,13 +72,13 @@ Bloque de código TypeScript con **todas** las interfaces, tipos y funciones que
 ```ts
 export interface PdfEngineConfig {
   readonly maxPageCount: number;
-  readonly enableOCR: boolean;
 }
 
 export class PdfEngine implements IEngine {
   readonly id = EngineId.Pdf;
   init(ctx: EngineContext): Promise<void>;
   process(input: PdfEngineInput, ctx: EngineContext): Promise<PdfEngineOutput>;
+  fuseOcrPage(documentId: string, pageIndex: number, words: ReadonlyArray<Word>): Promise<Document>;
   dispose(): Promise<void>;
 }
 ```
