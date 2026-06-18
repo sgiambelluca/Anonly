@@ -6,7 +6,7 @@
   "description": "Plataforma de anonimización documental 100% local. Ver docs/00_Project_Vision.md.",
   "packageManager": "pnpm@9.12.0",
   "engines": {
-    "node": ">=20.11.0",
+    "node": ">=22.0.0",
     "pnpm": ">=9.0.0"
   },
   "scripts": {
