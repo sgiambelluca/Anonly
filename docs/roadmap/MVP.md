@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-mvp | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,ADR-011-Grouping-First.md | audiencia=humanos+IA | fase=5 -->
+<!-- CONTEXT: scope=roadmap-mvp | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,adr/ADR-011-Grouping-First.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md | audiencia=humanos+IA | fase=5 (Hito 2 cerrado vía PRs #6, #7) -->
 
 # Anonly — Roadmap MVP
 
@@ -103,9 +103,9 @@ Orden sugerido (cada hito = un set de PRs):
 - Fixtures en `tests/fixtures/`.
 
 ### Hito 2 — PDF Engine
-- Implementar `pdf-engine` siguiendo `core/PDF_Engine.md`.
-- Tests contract + unit + edge + snapshot.
-- Ejecución **inline** (sin `PdfPool`); integración con `PdfPool` difiere al Hito 9 (ver ADR-013).
+- ~~Implementar `pdf-engine` siguiendo `core/PDF_Engine.md`.~~ **CERRADO** (PRs #6, #7).
+- ~~Tests contract + unit + edge + snapshot.~~ **CERRADO** — `contract.test.ts`, `unit.test.ts`, `edge.test.ts`, `snapshot.test.ts` commiteados en `packages/anonymization-core/pdf-engine/src/__tests__/`. Pendientes: `stress.test.ts` y `cancel.test.ts` → Hito 11.
+- ~~Ejecución **inline** (sin `PdfPool`); integración con `PdfPool` difiere al Hito 9 (ver ADR-013).~~ **CERRADO** — ejecución inline confirmada; specs `core/PDF_Engine.md` v1.1.1, `core/Contracts.md` y ADRs 013/014 ya reconciliados. Migración a `PdfPool` queda en Hito 9.
 
 ### Hito 3 — OCR Engine
 - Implementar `ocr-engine` siguiendo `core/OCR_Engine.md`.
