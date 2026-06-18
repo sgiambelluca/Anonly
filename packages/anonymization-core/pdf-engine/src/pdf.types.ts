@@ -1,10 +1,5 @@
 import type { Document, DocumentSourceKind } from "@anonly/shared";
 
-export interface PdfEngineConfig {
-  readonly maxPageCount: number;
-  readonly parseTimeoutMsPerPage: number;
-}
-
 export interface PdfEngineInput {
   readonly documentId: string;
   readonly buffer: ArrayBuffer;

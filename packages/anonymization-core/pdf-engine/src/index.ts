@@ -1,5 +1,6 @@
 export { PdfEngine } from "./pdf.engine.js";
-export type { PdfEngineConfig, PdfEngineInput, PdfEngineOutput } from "./pdf.types.js";
+export type { PdfEngineConfig } from "@anonly/shared";
+export type { PdfEngineInput, PdfEngineOutput } from "./pdf.types.js";
 export {
   PdfPasswordRequiredError,
   PdfInvalidError,

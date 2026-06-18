@@ -1,19 +1,15 @@
+import {
+  type EngineConfig,
+  type EngineContext,
+  type ICache,
+  type IEventBus,
+  type ILogger,
+  type Unsubscribe,
+} from "@anonly/shared";
+import { getDocument } from "pdfjs-dist";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import type {
-  EngineContext,
-  ILogger,
-  ICache,
-  EngineConfig,
-  IEventBus,
-  Unsubscribe,
-} from "@anonly/shared";
-
-vi.mock("pdfjs-dist", () => ({
-  getDocument: vi.fn(),
-}));
-
-import { getDocument } from "pdfjs-dist";
+vi.mock("pdfjs-dist", () => ({ getDocument: vi.fn() }));
 
 import { PdfEngine } from "../pdf.engine.js";
 import type { PdfEngineInput } from "../pdf.types.js";
@@ -75,7 +71,14 @@ function createMockConfig(): EngineConfig {
       cancelSlaMs: 200,
       idleDisposeMs: 60000,
     },
-    ner: { modelId: "test", quantization: "q8", confidenceThreshold: 0.7, batchSize: 1, enabled: false },
+    pdf: { maxPageCount: 10000 },
+    ner: {
+      modelId: "test",
+      quantization: "q8",
+      confidenceThreshold: 0.7,
+      batchSize: 1,
+      enabled: false,
+    },
     ocr: { languages: ["spa"], dpi: 300, pageTimeoutMs: 60000 },
     grouping: { similarityThreshold: 0.88, minAliasFrequency: 1 },
     render: { previewScale: 0.5, fullScale: 2, jpegQuality: 80, cachePages: 16 },
@@ -103,52 +106,51 @@ function buildSnapshotInput(): PdfEngineInput {
   combined.set(pdfHeader, 0);
   combined.set(body, pdfHeader.length);
 
-  return {
-    documentId: "snapshot-doc",
-    buffer: combined.buffer,
-  };
+  return { documentId: "snapshot-doc", buffer: combined.buffer };
 }
 
 function createSnapshotPdfDocument(): Record<string, unknown> {
-  const pages: Record<string, unknown>[] = [
-    {
-      getViewport: vi.fn(() => ({ width: 595, height: 842 })),
-      getTextContent: vi.fn(() =>
-        Promise.resolve({
-          items: [
-            { str: "First", transform: [1, 0, 0, 1, 50, 800], width: 30, height: 12 },
-            { str: "Page", transform: [1, 0, 0, 1, 85, 800], width: 30, height: 12 },
-          ],
-        }),
-      ),
-    },
-    {
-      getViewport: vi.fn(() => ({ width: 612, height: 792 })),
-      getTextContent: vi.fn(() =>
-        Promise.resolve({
-          items: [
-            { str: "Second", transform: [1, 0, 0, 1, 50, 750], width: 40, height: 12 },
-            { str: "Page", transform: [1, 0, 0, 1, 100, 750], width: 30, height: 12 },
-            { str: "Content", transform: [1, 0, 0, 1, 140, 750], width: 50, height: 12 },
-          ],
-        }),
-      ),
-    },
-    {
-      getViewport: vi.fn(() => ({ width: 595, height: 842 })),
-      getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
-    },
-  ];
-
   return {
     numPages: 3,
-    getPage: vi.fn((pageNum: number) => Promise.resolve(pages[pageNum - 1])),
+    getPage: vi.fn((pageNum: number) => {
+      const pages: Record<string, unknown>[] = [
+        {
+          getViewport: vi.fn(() => ({ width: 595, height: 842 })),
+          getTextContent: vi.fn(() =>
+            Promise.resolve({
+              items: [
+                { str: "First", transform: [1, 0, 0, 1, 50, 800], width: 30, height: 12 },
+                { str: "Page", transform: [1, 0, 0, 1, 85, 800], width: 30, height: 12 },
+              ],
+            }),
+          ),
+        },
+        {
+          getViewport: vi.fn(() => ({ width: 612, height: 792 })),
+          getTextContent: vi.fn(() =>
+            Promise.resolve({
+              items: [
+                { str: "Second", transform: [1, 0, 0, 1, 50, 750], width: 40, height: 12 },
+                { str: "Page", transform: [1, 0, 0, 1, 100, 750], width: 30, height: 12 },
+                { str: "Content", transform: [1, 0, 0, 1, 140, 750], width: 50, height: 12 },
+              ],
+            }),
+          ),
+        },
+        {
+          getViewport: vi.fn(() => ({ width: 595, height: 842 })),
+          getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
+        },
+      ];
+      return Promise.resolve(pages[pageNum - 1]);
+    }),
     getMetadata: vi.fn(() =>
       Promise.resolve({
         info: { Title: "Snapshot Doc", Producer: "Test", Creator: "TestRunner" },
-        metadata: null,
+        metadata: undefined,
       }),
     ),
+    getViewport: vi.fn(),
     destroy: vi.fn(),
     isEncrypted: false,
     pdfVersion: "1.7",
@@ -161,11 +163,14 @@ describe("PdfEngine — snapshot", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.useFakeTimers();
+    vi.setSystemTime(1_234_567_890_000);
     engine = new PdfEngine();
     ctx = createEngineContext();
   });
 
   afterEach(async () => {
+    vi.useRealTimers();
     if (!engine["disposed"]) {
       await engine.dispose();
     }
@@ -174,7 +179,7 @@ describe("PdfEngine — snapshot", () => {
   it("DocumentModel snapshot is stable for a known PDF structure", async () => {
     vi.mocked(getDocument).mockReturnValue({
       promise: Promise.resolve(createSnapshotPdfDocument()),
-    });
+    } as unknown as ReturnType<typeof getDocument>);
 
     await engine.init(ctx);
     const input = buildSnapshotInput();

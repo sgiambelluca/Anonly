@@ -28,8 +28,13 @@ export interface EngineContext {
   readonly config: EngineConfig;
 }
 
+export interface PdfEngineConfig {
+  readonly maxPageCount: number;
+}
+
 export interface EngineConfig {
   readonly workerPool: WorkerPoolConfig;
+  readonly pdf: PdfEngineConfig;
   readonly ner: NerConfig;
   readonly ocr: OcrConfig;
   readonly grouping: GroupingConfig;

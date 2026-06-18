@@ -1,33 +1,20 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-
-import {
-  EngineNotInitializedError,
-  EngineDisposedError,
-  InvalidInputError,
-  CancelledError,
-} from "@anonly/shared";
+import { CancelledError, EngineDisposedError, InvalidInputError } from "@anonly/shared";
 import type {
-  EngineContext,
-  ILogger,
-  ICache,
   EngineConfig,
+  EngineContext,
+  ICache,
   IEventBus,
+  ILogger,
   Unsubscribe,
 } from "@anonly/shared";
-
-vi.mock("pdfjs-dist", () => ({
-  getDocument: vi.fn(),
-}));
-
 import { getDocument } from "pdfjs-dist";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+vi.mock("pdfjs-dist", () => ({ getDocument: vi.fn() }));
 
 import { PdfEngine } from "../pdf.engine.js";
+import { PdfCorruptedError, PdfInvalidError, PdfPasswordRequiredError } from "../pdf.errors.js";
 import type { PdfEngineInput } from "../pdf.types.js";
-import {
-  PdfPasswordRequiredError,
-  PdfInvalidError,
-  PdfCorruptedError,
-} from "../pdf.errors.js";
 
 function createMockBus(): IEventBus {
   return {
@@ -86,7 +73,14 @@ function createMockConfig(): EngineConfig {
       cancelSlaMs: 200,
       idleDisposeMs: 60000,
     },
-    ner: { modelId: "test", quantization: "q8", confidenceThreshold: 0.7, batchSize: 1, enabled: false },
+    pdf: { maxPageCount: 10000 },
+    ner: {
+      modelId: "test",
+      quantization: "q8",
+      confidenceThreshold: 0.7,
+      batchSize: 1,
+      enabled: false,
+    },
     ocr: { languages: ["spa"], dpi: 300, pageTimeoutMs: 60000 },
     grouping: { similarityThreshold: 0.88, minAliasFrequency: 1 },
     render: { previewScale: 0.5, fullScale: 2, jpegQuality: 80, cachePages: 16 },
@@ -114,25 +108,43 @@ function createValidInput(documentId: string, pwd?: string): PdfEngineInput {
   combined.set(pdfHeader, 0);
   combined.set(body, pdfHeader.length);
 
-  const input: PdfEngineInput = {
-    documentId,
-    buffer: combined.buffer,
-  };
   if (pwd !== undefined) {
-    input.password = pwd;
+    return { documentId, buffer: combined.buffer, password: pwd };
   }
-  return input;
+  return { documentId, buffer: combined.buffer };
 }
+
+type MockDocOptions = {
+  metadata?: Record<string, unknown>;
+  hasForms?: boolean;
+  textless?: boolean;
+  throwOnGetPage?: boolean;
+};
+
+type PageFactory = (pageIndex: number) => Record<string, unknown>;
 
 function createMockPdfDocument(
   pageCount: number,
-  options?: {
-    metadata?: Record<string, unknown>;
-    hasForms?: boolean;
-    textless?: boolean;
-    throwOnGetPage?: boolean;
-  },
+  options?: MockDocOptions | PageFactory,
 ): Record<string, unknown> {
+  const isFactory = typeof options === "function";
+
+  if (isFactory) {
+    const factory = options;
+    const pages: Record<string, unknown>[] = [];
+    for (let i = 0; i < pageCount; i++) {
+      pages.push(factory(i));
+    }
+    return {
+      numPages: pageCount,
+      getPage: vi.fn((pageNum: number) => Promise.resolve(pages[pageNum - 1])),
+      getMetadata: vi.fn(() => Promise.resolve({ info: { Title: "Test" }, metadata: undefined })),
+      destroy: vi.fn(),
+      isEncrypted: false,
+      pdfVersion: "1.7",
+    };
+  }
+
   const pages: Record<string, unknown>[] = [];
   for (let i = 0; i < pageCount; i++) {
     if (options?.throwOnGetPage) {
@@ -147,9 +159,7 @@ function createMockPdfDocument(
         getViewport: vi.fn(() => ({ width: 595, height: 842 })),
         getTextContent: vi.fn(() =>
           Promise.resolve({
-            items: [
-              { str: "Word1", transform: [1, 0, 0, 1, 50, 800], width: 30, height: 12 },
-            ],
+            items: [{ str: "Word1", transform: [1, 0, 0, 1, 50, 800], width: 30, height: 12 }],
           }),
         ),
       });
@@ -170,7 +180,7 @@ function createMockPdfDocument(
           ...(options?.metadata ?? { Title: "Test", Producer: "TestApp" }),
           IsAcroFormPresent: options?.hasForms === true,
         },
-        metadata: null,
+        metadata: undefined,
       }),
     ),
     destroy: vi.fn(),
@@ -198,10 +208,7 @@ describe("PdfEngine — edge case tests", () => {
   describe("Case 1: Empty buffer", () => {
     it("throws PdfInvalidError on empty buffer", async () => {
       await engine.init(ctx);
-      const input: PdfEngineInput = {
-        documentId: "doc-empty-buf",
-        buffer: new ArrayBuffer(0),
-      };
+      const input: PdfEngineInput = { documentId: "doc-empty-buf", buffer: new ArrayBuffer(0) };
 
       await expect(engine.process(input, ctx)).rejects.toThrow(PdfInvalidError);
       await expect(engine.process(input, ctx)).rejects.toThrow("Buffer vacío");
@@ -212,11 +219,7 @@ describe("PdfEngine — edge case tests", () => {
     it("throws PdfInvalidError on non-pdf header", async () => {
       await engine.init(ctx);
       const buffer = new Uint8Array([0x48, 0x65, 0x6c, 0x6c, 0x6f]).buffer;
-
-      const input: PdfEngineInput = {
-        documentId: "doc-nonpdf",
-        buffer,
-      };
+      const input: PdfEngineInput = { documentId: "doc-nonpdf", buffer };
 
       await expect(engine.process(input, ctx)).rejects.toThrow(PdfInvalidError);
       await expect(engine.process(input, ctx)).rejects.toThrow("no comienza con %PDF-");
@@ -226,54 +229,51 @@ describe("PdfEngine — edge case tests", () => {
   describe("Case 3: Null/undefined input", () => {
     it("throws InvalidInputError for null input", async () => {
       await engine.init(ctx);
-      await expect(
-        engine.process(null as unknown as PdfEngineInput, ctx),
-      ).rejects.toThrow(InvalidInputError);
+      await expect(engine.process(null as unknown as PdfEngineInput, ctx)).rejects.toThrow(
+        InvalidInputError,
+      );
     });
 
     it("throws InvalidInputError for undefined input", async () => {
       await engine.init(ctx);
-      await expect(
-        engine.process(undefined as unknown as PdfEngineInput, ctx),
-      ).rejects.toThrow(InvalidInputError);
+      await expect(engine.process(undefined as unknown as PdfEngineInput, ctx)).rejects.toThrow(
+        InvalidInputError,
+      );
     });
   });
 
   describe("Case 4: PDF with password", () => {
     it("throws PdfPasswordRequiredError when password is required but not provided", async () => {
-      vi.mocked(getDocument).mockImplementationOnce(() => {
-        const err = new Error("Password required");
-        err.name = "PasswordException";
-        return { promise: Promise.reject(err) };
-      });
+      const pwdErr = new Error("Password required");
+      pwdErr.name = "PasswordException";
+      vi.mocked(getDocument).mockReturnValueOnce({
+        promise: Promise.reject(pwdErr),
+      } as unknown as ReturnType<typeof getDocument>);
 
       await engine.init(ctx);
       const input = createValidInput("doc-pwd-required");
-
       await expect(engine.process(input, ctx)).rejects.toThrow(PdfPasswordRequiredError);
     });
 
     it("throws PdfPasswordRequiredError on wrong password", async () => {
-      vi.mocked(getDocument).mockImplementationOnce(() => {
-        const err = new Error("IncorrectPassword");
-        err.name = "PasswordException";
-        return { promise: Promise.reject(err) };
-      });
+      const pwdErr = new Error("IncorrectPassword");
+      pwdErr.name = "PasswordException";
+      vi.mocked(getDocument).mockReturnValueOnce({
+        promise: Promise.reject(pwdErr),
+      } as unknown as ReturnType<typeof getDocument>);
 
       await engine.init(ctx);
       const input = createValidInput("doc-wrong-pwd", "wrong");
-
       await expect(engine.process(input, ctx)).rejects.toThrow(PdfPasswordRequiredError);
     });
 
     it("parses normally with correct password", async () => {
       vi.mocked(getDocument).mockReturnValue({
         promise: Promise.resolve(createMockPdfDocument(1)),
-      });
+      } as unknown as ReturnType<typeof getDocument>);
 
       await engine.init(ctx);
       const input = createValidInput("doc-correct-pwd", "test1234");
-
       const output = await engine.process(input, ctx);
       expect(output.pageCount).toBe(1);
     });
@@ -283,10 +283,7 @@ describe("PdfEngine — edge case tests", () => {
     it("throws PdfInvalidError for corrupt header (no %PDF- starting)", async () => {
       await engine.init(ctx);
       const buffer = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x00, 0x0a]).buffer;
-      const input: PdfEngineInput = {
-        documentId: "doc-corrupt-header",
-        buffer,
-      };
+      const input: PdfEngineInput = { documentId: "doc-corrupt-header", buffer };
       await expect(engine.process(input, ctx)).rejects.toThrow(PdfInvalidError);
     });
   });
@@ -295,22 +292,20 @@ describe("PdfEngine — edge case tests", () => {
     it("throws PdfCorruptedError when pdfjs fails to parse a page", async () => {
       vi.mocked(getDocument).mockReturnValue({
         promise: Promise.resolve(createMockPdfDocument(3, { throwOnGetPage: true })),
-      });
+      } as unknown as ReturnType<typeof getDocument>);
 
       await engine.init(ctx);
       const input = createValidInput("doc-page-corrupt");
-
       await expect(engine.process(input, ctx)).rejects.toThrow(PdfCorruptedError);
     });
 
     it("throws PdfCorruptedError when pdfjs throws on getDocument", async () => {
       vi.mocked(getDocument).mockReturnValue({
-        promise: Promise.reject(new Error("PDF parsing failed: invalid object stream")),
-      });
+        promise: Promise.reject(new Error("PDF object reference: unknown type")),
+      } as unknown as ReturnType<typeof getDocument>);
 
       await engine.init(ctx);
       const input = createValidInput("doc-parse-error");
-
       await expect(engine.process(input, ctx)).rejects.toThrow(PdfCorruptedError);
     });
   });
@@ -329,7 +324,7 @@ describe("PdfEngine — edge case tests", () => {
             },
           }),
         ),
-      });
+      } as unknown as ReturnType<typeof getDocument>);
 
       await engine.init(ctx);
       const input = createValidInput("doc-meta");
@@ -338,7 +333,9 @@ describe("PdfEngine — edge case tests", () => {
       expect(output.document.metadata.title).toBe("My Document");
       expect(output.document.metadata.producer).toBe("LibreOffice");
       expect(output.document.metadata.creationTool).toBe("Jane Doe");
-      expect((output.document.metadata as Record<string, unknown>).Author).toBeUndefined();
+      expect(
+        (output.document.metadata as unknown as Record<string, unknown>).Author,
+      ).toBeUndefined();
     });
   });
 
@@ -346,24 +343,22 @@ describe("PdfEngine — edge case tests", () => {
     it("detects AcroForm in catalog and sets hasForms=true", async () => {
       vi.mocked(getDocument).mockReturnValue({
         promise: Promise.resolve(createMockPdfDocument(1, { hasForms: true })),
-      });
+      } as unknown as ReturnType<typeof getDocument>);
 
       await engine.init(ctx);
       const input = createValidInput("doc-forms");
       const output = await engine.process(input, ctx);
-
       expect(output.document.metadata.hasForms).toBe(true);
     });
 
     it("sets hasForms=false when no AcroForm", async () => {
       vi.mocked(getDocument).mockReturnValue({
         promise: Promise.resolve(createMockPdfDocument(1)),
-      });
+      } as unknown as ReturnType<typeof getDocument>);
 
       await engine.init(ctx);
       const input = createValidInput("doc-noforms");
       const output = await engine.process(input, ctx);
-
       expect(output.document.metadata.hasForms).toBe(false);
     });
   });
@@ -374,12 +369,12 @@ describe("PdfEngine — edge case tests", () => {
         promise: Promise.resolve({
           numPages: 0,
           getPage: vi.fn(),
-          getMetadata: vi.fn(() => Promise.resolve({ info: {}, metadata: null })),
+          getMetadata: vi.fn(() => Promise.resolve({ info: {}, metadata: undefined })),
           destroy: vi.fn(),
           isEncrypted: false,
           pdfVersion: "1.7",
         }),
-      });
+      } as unknown as ReturnType<typeof getDocument>);
 
       await engine.init(ctx);
       const input = createValidInput("doc-zero-pages");
@@ -396,7 +391,7 @@ describe("PdfEngine — edge case tests", () => {
     it("sourceKind = scanned when all pages are textless", async () => {
       vi.mocked(getDocument).mockReturnValue({
         promise: Promise.resolve(createMockPdfDocument(2, { textless: true })),
-      });
+      } as unknown as ReturnType<typeof getDocument>);
 
       await engine.init(ctx);
       const input = createValidInput("doc-all-scanned");
@@ -431,7 +426,7 @@ describe("PdfEngine — edge case tests", () => {
                 };
           }),
         ),
-      });
+      } as unknown as ReturnType<typeof getDocument>);
 
       await engine.init(ctx);
       const input = createValidInput("doc-mixed-kind");
@@ -459,7 +454,6 @@ describe("PdfEngine — edge case tests", () => {
 
       await engine.init(ctxWithAbort);
       const input = createValidInput("doc-cancelled");
-
       await expect(engine.process(input, ctxWithAbort)).rejects.toThrow(CancelledError);
     });
 
@@ -482,17 +476,16 @@ describe("PdfEngine — edge case tests", () => {
             }
             return Promise.resolve(mockPage);
           }),
-          getMetadata: vi.fn(() => Promise.resolve({ info: {}, metadata: null })),
+          getMetadata: vi.fn(() => Promise.resolve({ info: {}, metadata: undefined })),
           destroy: vi.fn(),
           isEncrypted: false,
           pdfVersion: "1.7",
         }),
-      });
+      } as unknown as ReturnType<typeof getDocument>);
 
       const ctxWithAbort = createEngineContext({ abortSignal: abortController.signal });
       await engine.init(ctxWithAbort);
       const input = createValidInput("doc-cancel-mid");
-
       await expect(engine.process(input, ctxWithAbort)).rejects.toThrow(CancelledError);
     });
   });
@@ -501,14 +494,13 @@ describe("PdfEngine — edge case tests", () => {
     it("parses normally when password field is absent", async () => {
       vi.mocked(getDocument).mockReturnValue({
         promise: Promise.resolve(createMockPdfDocument(1)),
-      });
+      } as unknown as ReturnType<typeof getDocument>);
 
       await engine.init(ctx);
       const input: PdfEngineInput = {
         documentId: "doc-no-pwd-field",
         buffer: createValidInput("tmp").buffer,
       };
-
       const output = await engine.process(input, ctx);
       expect(output.pageCount).toBe(1);
     });

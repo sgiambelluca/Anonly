@@ -1,30 +1,29 @@
 import {
+  CancelledError,
+  EngineDisposedError,
+  EngineEvents,
   EngineId,
   EngineNotInitializedError,
-  EngineDisposedError,
-  InvalidInputError,
-  CancelledError,
   EventChannel,
-  EngineEvents,
-} from "@anonly/shared";
-import type {
-  IEngine,
-  EngineContext,
-  Document,
-  Page,
-  Word,
-  BoundingBox,
-  DocumentMetadata,
+  InvalidInputError,
+  type BoundingBox,
+  type Document,
+  type DocumentMetadata,
+  type EngineContext,
+  type IEngine,
+  type Page,
+  type PdfEngineConfig,
+  type Word,
 } from "@anonly/shared";
 import { getDocument } from "pdfjs-dist";
 
-import type { PdfEngineConfig, PdfEngineInput, PdfEngineOutput } from "./pdf.types.js";
 import {
-  PdfPasswordRequiredError,
-  PdfInvalidError,
   PdfCorruptedError,
+  PdfInvalidError,
+  PdfPasswordRequiredError,
   PdfTimeoutError,
 } from "./pdf.errors.js";
+import type { PdfEngineInput, PdfEngineOutput } from "./pdf.types.js";
 
 const DEFAULT_MAX_PAGE_COUNT = 10_000;
 const DEFAULT_TIMEOUT_MS_PER_PAGE = 30_000;
@@ -72,27 +71,25 @@ export class PdfEngine implements IEngine {
   private ctx: EngineContext | null = null;
   private config: PdfEngineConfig = {
     maxPageCount: DEFAULT_MAX_PAGE_COUNT,
-    parseTimeoutMsPerPage: DEFAULT_TIMEOUT_MS_PER_PAGE,
   };
   private documents: Map<string, Document> = new Map();
   private initialized = false;
   private disposed = false;
 
-  async init(ctx: EngineContext): Promise<void> {
+  init(ctx: EngineContext): Promise<void> {
     this.ctx = ctx;
     this.config = {
-      maxPageCount: ctx.config.workerPool.maxQueuePerPool ?? DEFAULT_MAX_PAGE_COUNT,
-      parseTimeoutMsPerPage:
-        ctx.config.workerPool.timeouts["pdf-parse"] ?? DEFAULT_TIMEOUT_MS_PER_PAGE,
+      maxPageCount: ctx.config.pdf.maxPageCount ?? DEFAULT_MAX_PAGE_COUNT,
     };
     this.initialized = true;
     this.disposed = false;
     ctx.logger.info("PDF Engine initialized");
+    return Promise.resolve();
   }
 
   async process(input: PdfEngineInput, operationCtx: EngineContext): Promise<PdfEngineOutput> {
-    this.assertInitialized();
     this.assertNotDisposed();
+    this.assertInitialized();
 
     if (input == null) {
       throw new InvalidInputError("Input es null o undefined.", { engineId: EngineId.Pdf });
@@ -189,11 +186,9 @@ export class PdfEngine implements IEngine {
 
       let words: Word[];
       try {
-        const textContent = await this.parsePageTextWithTimeout(
-          pageProxy,
-          pageIndex,
-          this.config.parseTimeoutMsPerPage,
-        );
+        const timeoutMs =
+          operationCtx.config.workerPool.timeouts["pdf-parse"] ?? DEFAULT_TIMEOUT_MS_PER_PAGE;
+        const textContent = await this.parsePageTextWithTimeout(pageProxy, pageIndex, timeoutMs);
         words = this.convertTextItemsToWords(textContent, pageIndex, pageHeight);
       } catch (err: unknown) {
         pdfDocument.destroy();
@@ -272,72 +267,81 @@ export class PdfEngine implements IEngine {
     return output;
   }
 
-  async fuseOcrPage(
+  fuseOcrPage(
     documentId: string,
     pageIndex: number,
     words: ReadonlyArray<Word>,
   ): Promise<Document> {
-    this.assertInitialized();
-    this.assertNotDisposed();
+    try {
+      this.assertNotDisposed();
+      this.assertInitialized();
 
-    const doc = this.documents.get(documentId);
-    if (!doc) {
-      throw new InvalidInputError(`Documento ${documentId} no encontrado.`, {
-        documentId,
-      });
-    }
+      const doc = this.documents.get(documentId);
+      if (!doc) {
+        return Promise.reject(
+          new InvalidInputError(`Documento ${documentId} no encontrado.`, { documentId }),
+        );
+      }
 
-    if (pageIndex < 0 || pageIndex >= doc.pageCount) {
-      throw new InvalidInputError(
-        `pageIndex ${pageIndex} fuera de rango para documento con ${doc.pageCount} páginas.`,
-        { documentId, pageIndex, pageCount: doc.pageCount },
-      );
-    }
+      if (pageIndex < 0 || pageIndex >= doc.pageCount) {
+        return Promise.reject(
+          new InvalidInputError(
+            `pageIndex ${pageIndex} fuera de rango para documento con ${doc.pageCount} páginas.`,
+            { documentId, pageIndex, pageCount: doc.pageCount },
+          ),
+        );
+      }
 
-    const existingPage = doc.pages[pageIndex];
-    if (!existingPage) {
-      throw new InvalidInputError(`Página ${pageIndex} no encontrada en documento ${documentId}.`, {
-        documentId,
+      const existingPage = doc.pages[pageIndex];
+      if (!existingPage) {
+        return Promise.reject(
+          new InvalidInputError(`Página ${pageIndex} no encontrada en documento ${documentId}.`, {
+            documentId,
+            pageIndex,
+          }),
+        );
+      }
+
+      const normalizedWords: Word[] = words.map((w) => ({
+        text: w.text,
+        bbox: w.bbox,
         pageIndex,
-      });
+        confidence: w.confidence,
+        source: "ocr" as const,
+      }));
+
+      const sortedWords = this.sortWordsByReadingOrder(normalizedWords);
+      const mergedText = sortedWords.map((w) => w.text).join(" ");
+
+      const updatedPage: Page = {
+        ...existingPage,
+        words: sortedWords,
+        text: mergedText,
+        requiresOCR: true,
+        ocrCompleted: true,
+      };
+
+      const updatedPages = doc.pages.map((p) => (p.index === pageIndex ? updatedPage : p));
+
+      const updatedDocument: Document = {
+        ...doc,
+        pages: updatedPages,
+      };
+
+      this.documents.set(documentId, updatedDocument);
+
+      return Promise.resolve(updatedDocument);
+    } catch (err: unknown) {
+      return Promise.reject(err instanceof Error ? err : new Error(String(err)));
     }
-
-    const normalizedWords: Word[] = words.map((w) => ({
-      text: w.text,
-      bbox: w.bbox,
-      pageIndex,
-      confidence: w.confidence,
-      source: "ocr" as const,
-    }));
-
-    const sortedWords = this.sortWordsByReadingOrder(normalizedWords);
-    const mergedText = sortedWords.map((w) => w.text).join(" ");
-
-    const updatedPage: Page = {
-      ...existingPage,
-      words: sortedWords,
-      text: mergedText,
-      requiresOCR: true,
-      ocrCompleted: true,
-    };
-
-    const updatedPages = doc.pages.map((p) => (p.index === pageIndex ? updatedPage : p));
-
-    const updatedDocument: Document = {
-      ...doc,
-      pages: updatedPages,
-    };
-
-    this.documents.set(documentId, updatedDocument);
-
-    return updatedDocument;
   }
 
-  async dispose(): Promise<void> {
+  dispose(): Promise<void> {
     this.disposed = true;
     this.documents.clear();
     this.ctx = null;
     this.initialized = false;
+    return Promise.resolve();
   }
 
   private assertInitialized(): void {
@@ -428,9 +432,7 @@ export class PdfEngine implements IEngine {
     return "mixed";
   }
 
-  private async extractMetadata(
-    pdfDocument: InternalDocumentProxy,
-  ): Promise<DocumentMetadata> {
+  private async extractMetadata(pdfDocument: InternalDocumentProxy): Promise<DocumentMetadata> {
     let title: string | undefined;
     let producer: string | undefined;
     let creationTool: string | undefined;
@@ -466,13 +468,14 @@ export class PdfEngine implements IEngine {
         ? ((pdfDocument as unknown as Record<string, unknown>).pdfVersion as string)
         : pdfVersion;
 
-    return {
-      title,
-      producer,
-      creationTool,
+    const md: DocumentMetadata = {
       pdfVersion: version,
       encrypted,
       hasForms,
+      ...(title !== undefined ? { title } : {}),
+      ...(producer !== undefined ? { producer } : {}),
+      ...(creationTool !== undefined ? { creationTool } : {}),
     };
+    return md;
   }
 }

@@ -1,50 +1,30 @@
+import {
+  EngineDisposedError,
+  EngineEvents,
+  EngineId,
+  EngineNotInitializedError,
+  EventChannel,
+  InvalidInputError,
+  type EngineConfig,
+  type EngineContext,
+  type ICache,
+  type IEventBus,
+  type ILogger,
+  type Unsubscribe,
+  type Word,
+} from "@anonly/shared";
+import { getDocument } from "pdfjs-dist";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import {
-  EngineId,
-  EventChannel,
-  EngineEvents,
-  EngineNotInitializedError,
-  EngineDisposedError,
-  InvalidInputError,
-} from "@anonly/shared";
-import type {
-  EngineContext,
-  ILogger,
-  ICache,
-  EngineConfig,
-  IEventBus,
-  Unsubscribe,
-  Word,
-} from "@anonly/shared";
-
-vi.mock("pdfjs-dist", () => ({
-  getDocument: vi.fn(),
-}));
-
-import { getDocument } from "pdfjs-dist";
+vi.mock("pdfjs-dist", () => ({ getDocument: vi.fn() }));
 
 import { PdfEngine } from "../pdf.engine.js";
 import type { PdfEngineInput } from "../pdf.types.js";
 
 function createMockBus(): IEventBus {
-  const handlers = new Map<string, Set<(...args: unknown[]) => void>>();
   return {
-    on: vi.fn((_channel: string, event: string, handler: (...args: unknown[]) => void): Unsubscribe => {
-      const key = `${_channel}:${event}`;
-      const set = handlers.get(key) ?? new Set();
-      set.add(handler);
-      handlers.set(key, set);
-      return () => set.delete(handler);
-    }),
-    once: vi.fn((_channel: string, event: string, handler: (...args: unknown[]) => void): Unsubscribe => {
-      const wrapper = (...args: unknown[]) => {
-        handler(...args);
-        const key = `${_channel}:${event}`;
-        handlers.get(key)?.delete(wrapper);
-      };
-      return vi.fn();
-    }),
+    on: vi.fn((): Unsubscribe => vi.fn()),
+    once: vi.fn((): Unsubscribe => vi.fn()),
     off: vi.fn(),
     emit: vi.fn(),
     emitAsync: vi.fn(() => Promise.resolve()),
@@ -98,7 +78,14 @@ function createMockConfig(): EngineConfig {
       cancelSlaMs: 200,
       idleDisposeMs: 60000,
     },
-    ner: { modelId: "test", quantization: "q8", confidenceThreshold: 0.7, batchSize: 1, enabled: false },
+    pdf: { maxPageCount: 10000 },
+    ner: {
+      modelId: "test",
+      quantization: "q8",
+      confidenceThreshold: 0.7,
+      batchSize: 1,
+      enabled: false,
+    },
     ocr: { languages: ["spa"], dpi: 300, pageTimeoutMs: 60000 },
     grouping: { similarityThreshold: 0.88, minAliasFrequency: 1 },
     render: { previewScale: 0.5, fullScale: 2, jpegQuality: 80, cachePages: 16 },
@@ -113,7 +100,12 @@ function createMockPage(pageIndex: number): Record<string, unknown> {
       Promise.resolve({
         items: [
           { str: `Page${pageIndex}Word1`, transform: [1, 0, 0, 1, 50, 800], width: 50, height: 12 },
-          { str: `Page${pageIndex}Word2`, transform: [1, 0, 0, 1, 110, 800], width: 50, height: 12 },
+          {
+            str: `Page${pageIndex}Word2`,
+            transform: [1, 0, 0, 1, 110, 800],
+            width: 50,
+            height: 12,
+          },
         ],
       }),
     ),
@@ -145,7 +137,7 @@ function createMockPdfDocument(
           ...(options?.metadata ?? { Title: "Test Doc" }),
           IsAcroFormPresent: options?.hasForms === true,
         },
-        metadata: null,
+        metadata: undefined,
       }),
     ),
     destroy: vi.fn(),
@@ -174,10 +166,7 @@ function createValidInput(documentId: string): PdfEngineInput {
   combined.set(pdfHeader, 0);
   combined.set(body, pdfHeader.length);
 
-  return {
-    documentId,
-    buffer: combined.buffer,
-  };
+  return { documentId, buffer: combined.buffer };
 }
 
 describe("PdfEngine — contract tests", () => {
@@ -227,15 +216,15 @@ describe("PdfEngine — contract tests", () => {
 
     vi.mocked(getDocument).mockReturnValue({
       promise: Promise.resolve(createMockPdfDocument(pageCount)),
-    });
+    } as unknown as ReturnType<typeof getDocument>);
 
     await engine.init(ctx);
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
     const input = createValidInput(docId);
     const output = await engine.process(input, ctx);
-
-    expect(ctx.bus.emit).toHaveBeenCalledTimes(pageCount + 1);
+    expect(busEmitSpy).toHaveBeenCalledTimes(pageCount + 1);
     for (let i = 0; i < pageCount; i++) {
-      expect(ctx.bus.emit).toHaveBeenCalledWith(
+      expect(busEmitSpy).toHaveBeenCalledWith(
         EventChannel.Pdf,
         EngineEvents.PAGE_PARSED,
         expect.objectContaining({
@@ -255,13 +244,13 @@ describe("PdfEngine — contract tests", () => {
 
     vi.mocked(getDocument).mockReturnValue({
       promise: Promise.resolve(createMockPdfDocument(pageCount)),
-    });
+    } as unknown as ReturnType<typeof getDocument>);
 
     await engine.init(ctx);
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
     const input = createValidInput(docId);
     await engine.process(input, ctx);
-
-    expect(ctx.bus.emit).toHaveBeenCalledWith(
+    expect(busEmitSpy).toHaveBeenCalledWith(
       EventChannel.Pdf,
       EngineEvents.DOCUMENT_PARSED,
       expect.objectContaining({
@@ -279,7 +268,7 @@ describe("PdfEngine — contract tests", () => {
 
     vi.mocked(getDocument).mockReturnValue({
       promise: Promise.resolve(createMockPdfDocument(pageCount)),
-    });
+    } as unknown as ReturnType<typeof getDocument>);
 
     await engine.init(ctx);
     const input = createValidInput(docId);
@@ -296,7 +285,7 @@ describe("PdfEngine — contract tests", () => {
 
     vi.mocked(getDocument).mockReturnValue({
       promise: Promise.resolve(createMockPdfDocument(pageCount)),
-    });
+    } as unknown as ReturnType<typeof getDocument>);
 
     await engine.init(ctx);
     const input = createValidInput(docId);
@@ -314,7 +303,7 @@ describe("PdfEngine — contract tests", () => {
 
     vi.mocked(getDocument).mockReturnValue({
       promise: Promise.resolve(createMockPdfDocument(2, { textless: true })),
-    });
+    } as unknown as ReturnType<typeof getDocument>);
 
     await engine.init(ctx);
     const input = createValidInput(docId);
@@ -324,8 +313,20 @@ describe("PdfEngine — contract tests", () => {
     expect(output.textlessPages).toContain(1);
 
     const ocrWords: Word[] = [
-      { text: "OCR", bbox: { x: 50, y: 800, width: 30, height: 12 }, pageIndex: 0, confidence: 0.85, source: "ocr" },
-      { text: "Word", bbox: { x: 90, y: 800, width: 30, height: 12 }, pageIndex: 0, confidence: 0.85, source: "ocr" },
+      {
+        text: "OCR",
+        bbox: { x: 50, y: 800, width: 30, height: 12 },
+        pageIndex: 0,
+        confidence: 0.85,
+        source: "ocr",
+      },
+      {
+        text: "Word",
+        bbox: { x: 90, y: 800, width: 30, height: 12 },
+        pageIndex: 0,
+        confidence: 0.85,
+        source: "ocr",
+      },
     ];
 
     const updatedDoc = await engine.fuseOcrPage(docId, 0, ocrWords);
@@ -341,7 +342,7 @@ describe("PdfEngine — contract tests", () => {
   it("dispose releases resources and clears documents", async () => {
     vi.mocked(getDocument).mockReturnValue({
       promise: Promise.resolve(createMockPdfDocument(1)),
-    });
+    } as unknown as ReturnType<typeof getDocument>);
 
     await engine.init(ctx);
     const input = createValidInput("doc-dispose");
@@ -358,22 +359,18 @@ describe("PdfEngine — contract tests", () => {
 
   it("fuseOcrPage on unknown documentId throws InvalidInputError", async () => {
     await engine.init(ctx);
-    await expect(
-      engine.fuseOcrPage("unknown-doc", 0, []),
-    ).rejects.toThrow(InvalidInputError);
+    await expect(engine.fuseOcrPage("unknown-doc", 0, [])).rejects.toThrow(InvalidInputError);
   });
 
   it("fuseOcrPage with out-of-range pageIndex throws InvalidInputError", async () => {
     vi.mocked(getDocument).mockReturnValue({
       promise: Promise.resolve(createMockPdfDocument(2)),
-    });
+    } as unknown as ReturnType<typeof getDocument>);
 
     await engine.init(ctx);
     const input = createValidInput("doc-range");
     await engine.process(input, ctx);
 
-    await expect(
-      engine.fuseOcrPage("doc-range", 99, []),
-    ).rejects.toThrow(InvalidInputError);
+    await expect(engine.fuseOcrPage("doc-range", 99, [])).rejects.toThrow(InvalidInputError);
   });
 });

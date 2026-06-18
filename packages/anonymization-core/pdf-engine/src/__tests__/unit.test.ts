@@ -1,20 +1,16 @@
+import {
+  type EngineConfig,
+  type EngineContext,
+  type ICache,
+  type IEventBus,
+  type ILogger,
+  type Unsubscribe,
+  type Word,
+} from "@anonly/shared";
+import { getDocument } from "pdfjs-dist";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import type {
-  EngineContext,
-  ILogger,
-  ICache,
-  EngineConfig,
-  IEventBus,
-  Unsubscribe,
-  Word,
-} from "@anonly/shared";
-
-vi.mock("pdfjs-dist", () => ({
-  getDocument: vi.fn(),
-}));
-
-import { getDocument } from "pdfjs-dist";
+vi.mock("pdfjs-dist", () => ({ getDocument: vi.fn() }));
 
 import { PdfEngine } from "../pdf.engine.js";
 import type { PdfEngineInput } from "../pdf.types.js";
@@ -76,7 +72,14 @@ function createMockConfig(): EngineConfig {
       cancelSlaMs: 200,
       idleDisposeMs: 60000,
     },
-    ner: { modelId: "test", quantization: "q8", confidenceThreshold: 0.7, batchSize: 1, enabled: false },
+    pdf: { maxPageCount: 10000 },
+    ner: {
+      modelId: "test",
+      quantization: "q8",
+      confidenceThreshold: 0.7,
+      batchSize: 1,
+      enabled: false,
+    },
     ocr: { languages: ["spa"], dpi: 300, pageTimeoutMs: 60000 },
     grouping: { similarityThreshold: 0.88, minAliasFrequency: 1 },
     render: { previewScale: 0.5, fullScale: 2, jpegQuality: 80, cachePages: 16 },
@@ -104,10 +107,7 @@ function createValidInput(documentId: string): PdfEngineInput {
   combined.set(pdfHeader, 0);
   combined.set(body, pdfHeader.length);
 
-  return {
-    documentId,
-    buffer: combined.buffer,
-  };
+  return { documentId, buffer: combined.buffer };
 }
 
 function createMockPage(
@@ -146,7 +146,7 @@ function createMockPdfDocument(
   return {
     numPages: pageCount,
     getPage: vi.fn((pageNum: number) => Promise.resolve(pages[pageNum - 1])),
-    getMetadata: vi.fn(() => Promise.resolve({ info: { Title: "Test" }, metadata: null })),
+    getMetadata: vi.fn(() => Promise.resolve({ info: { Title: "Test" }, metadata: undefined })),
     destroy: vi.fn(),
     isEncrypted: false,
     pdfVersion: "1.7",
@@ -182,7 +182,7 @@ describe("PdfEngine — unit tests", () => {
             ]),
           ),
         ),
-      });
+      } as unknown as ReturnType<typeof getDocument>);
 
       await engine.init(ctx);
       const input = createValidInput("doc-sort");
@@ -206,7 +206,7 @@ describe("PdfEngine — unit tests", () => {
             ]),
           ),
         ),
-      });
+      } as unknown as ReturnType<typeof getDocument>);
 
       await engine.init(ctx);
       const input = createValidInput("doc-same-y");
@@ -228,7 +228,7 @@ describe("PdfEngine — unit tests", () => {
             getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
           })),
         ),
-      });
+      } as unknown as ReturnType<typeof getDocument>);
 
       await engine.init(ctx);
       const input = createValidInput("doc-textless");
@@ -242,7 +242,7 @@ describe("PdfEngine — unit tests", () => {
     it("marks page with text content as requiresOCR=false", async () => {
       vi.mocked(getDocument).mockReturnValue({
         promise: Promise.resolve(createMockPdfDocument(2)),
-      });
+      } as unknown as ReturnType<typeof getDocument>);
 
       await engine.init(ctx);
       const input = createValidInput("doc-text");
@@ -268,7 +268,7 @@ describe("PdfEngine — unit tests", () => {
               : createMockPage(i);
           }),
         ),
-      });
+      } as unknown as ReturnType<typeof getDocument>);
 
       await engine.init(ctx);
       const input = createValidInput("doc-textless-asc");
@@ -282,7 +282,7 @@ describe("PdfEngine — unit tests", () => {
     it("sourceKind = text when no textless pages", async () => {
       vi.mocked(getDocument).mockReturnValue({
         promise: Promise.resolve(createMockPdfDocument(3)),
-      });
+      } as unknown as ReturnType<typeof getDocument>);
 
       await engine.init(ctx);
       const input = createValidInput("doc-text-kind");
@@ -298,7 +298,7 @@ describe("PdfEngine — unit tests", () => {
             getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
           })),
         ),
-      });
+      } as unknown as ReturnType<typeof getDocument>);
 
       await engine.init(ctx);
       const input = createValidInput("doc-scanned");
@@ -319,7 +319,7 @@ describe("PdfEngine — unit tests", () => {
               : createMockPage(i);
           }),
         ),
-      });
+      } as unknown as ReturnType<typeof getDocument>);
 
       await engine.init(ctx);
       const input = createValidInput("doc-mixed");
@@ -337,7 +337,7 @@ describe("PdfEngine — unit tests", () => {
             getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
           })),
         ),
-      });
+      } as unknown as ReturnType<typeof getDocument>);
 
       await engine.init(ctx);
       const input = createValidInput("doc-fuse-unit");
@@ -347,8 +347,20 @@ describe("PdfEngine — unit tests", () => {
       expect(output.document.pages[0]!.ocrCompleted).toBe(false);
 
       const ocrWords: Word[] = [
-        { text: "Hello", bbox: { x: 50, y: 800, width: 30, height: 12 }, pageIndex: 0, confidence: 0.9, source: "ocr" },
-        { text: "World", bbox: { x: 90, y: 800, width: 30, height: 12 }, pageIndex: 0, confidence: 0.9, source: "ocr" },
+        {
+          text: "Hello",
+          bbox: { x: 50, y: 800, width: 30, height: 12 },
+          pageIndex: 0,
+          confidence: 0.9,
+          source: "ocr",
+        },
+        {
+          text: "World",
+          bbox: { x: 90, y: 800, width: 30, height: 12 },
+          pageIndex: 0,
+          confidence: 0.9,
+          source: "ocr",
+        },
       ];
 
       const updatedDoc = await engine.fuseOcrPage("doc-fuse-unit", 0, ocrWords);
@@ -368,14 +380,20 @@ describe("PdfEngine — unit tests", () => {
             getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
           })),
         ),
-      });
+      } as unknown as ReturnType<typeof getDocument>);
 
       await engine.init(ctx);
       const input = createValidInput("doc-immutable");
       const originalOutput = await engine.process(input, ctx);
 
       const words: Word[] = [
-        { text: "New", bbox: { x: 10, y: 800, width: 30, height: 12 }, pageIndex: 0, confidence: 0.9, source: "ocr" },
+        {
+          text: "New",
+          bbox: { x: 10, y: 800, width: 30, height: 12 },
+          pageIndex: 0,
+          confidence: 0.9,
+          source: "ocr",
+        },
       ];
 
       const updatedDoc = await engine.fuseOcrPage("doc-immutable", 0, words);
