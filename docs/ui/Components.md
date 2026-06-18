@@ -1,0 +1,415 @@
+<!-- CONTEXT: scope=componentes-ui | dependencias=ui/React_Client.md,ui/UX_Guidelines.md,ADR-001-Framework.md | audiencia=IA-implementador-ui | fase=4 -->
+
+# Anonly — Catálogo de Componentes
+
+> Catálogo de componentes de UI (Radix UI + Tailwind). Cada componente declara: props, estados, eventos que dispara (via `actions`), stores que consume, y mapeo al Core. Los componentes son **presentacionales** + **connectores**; la lógica vive en `core-adapter` y `store`.
+
+**Stack**: React + Tailwind CSS + Radix UI (primitives accesibles) + Zustand.
+
+---
+
+## 1. Estructura
+
+```
+apps/react-client/src/components/
+├── toolbar/
+│   ├── Toolbar.tsx
+│   ├── ImportButton.tsx
+│   ├── PipelineStatus.tsx
+│   ├── CancelButton.tsx
+│   └── ExportButton.tsx
+├── entities/
+│   ├── EntitiesPanel.tsx
+│   ├── EntityTypeGroup.tsx
+│   ├── EntityGroupItem.tsx
+│   ├── ReplacementModeSelect.tsx
+│   ├── GroupContextMenu.tsx
+│   ├── MergeDialog.tsx
+│   └── SplitDialog.tsx
+├── rules/
+│   ├── RulesPanel.tsx
+│   ├── RuleItem.tsx
+│   ├── RuleCreatorDialog.tsx
+│   └── RuleEditorDialog.tsx
+├── viewer/
+│   ├── PdfViewer.tsx
+│   ├── PageVirtualizer.tsx
+│   ├── PageCanvas.tsx
+│   ├── SideBySideViewer.tsx
+│   └── ZoomControls.tsx
+├── conflicts/
+│   ├── ConflictBadge.tsx
+│   └── ConflictDialog.tsx
+├── export/
+│   ├── ExportDialog.tsx
+│   └── ExportProgress.tsx
+├── common/
+│   ├── Button.tsx
+│   ├── Dialog.tsx           // wrapper sobre Radix Dialog
+│   ├── Select.tsx           // wrapper sobre Radix Select
+│   ├── Checkbox.tsx
+│   ├── Tooltip.tsx
+│   ├── Toast.tsx
+│   ├── Banner.tsx
+│   └── Skeleton.tsx
+└── App.tsx
+```
+
+---
+
+## 2. Componentes del Toolbar
+
+### 2.1 `Toolbar`
+
+- **Props**: ninguno (lee `pipeline.store`).
+- **Stores**: `pipeline`, `document`, `settings`.
+- **Estados**:
+  - `stage === Idle`: solo botón "Importar PDF".
+  - `stage ∈ {Importing, Extracting, OCRing, Detecting, Grouping}`: `PipelineStatus` + `CancelButton`.
+  - `stage === Ready`: `PipelineStatus` + `ExportButton` (+ `CancelButton` si hay jobs remanentes).
+  - `stage === Rendering/Exporting`: `PipelineStatus` + `CancelButton`.
+  - `stage === Failed`: banner de error + "Reintentar" o "Cerrar".
+- **Acciones**: ninguna directa; delega en hijos.
+
+### 2.2 `ImportButton`
+
+- **Comportamiento**: `<input type="file" accept="application/pdf">` oculto + label estilizado. Drag&drop en todo el App.
+- **Acción**: `actions.importDocument(file)`.
+- **Atajo**: `Cmd/Ctrl+O`.
+
+### 2.3 `PipelineStatus`
+
+- **Estados**: muestra icono + texto según `stage` (ver `UX_Guidelines.md` §7.1).
+- **Props**: ninguno (lee `pipeline.store`).
+- **Sub-estados**:
+  - `modelLoading != null`: "Cargando modelo NER… 45%".
+  - `exportProgress != null`: "Exportando página 7 de 10…".
+  - En otros casos: texto descriptivo + barra de progreso.
+
+### 2.4 `CancelButton`
+
+- **Visible**: cuando `stage ∉ {Idle, Done, Failed, Cancelled}`.
+- **Acción**: abre `ConfirmDialog` → `actions.cancel()`.
+- **Atajo**: `Cmd/Ctrl+.`.
+
+### 2.5 `ExportButton`
+
+- **Visible**: cuando `stage === Ready`.
+- **Acción**: abre `ExportDialog`.
+- **Atajo**: `Cmd/Ctrl+E`.
+
+---
+
+## 3. Componentes de Entidades
+
+### 3.1 `EntitiesPanel`
+
+- **Stores**: `entities`, `pipeline`.
+- **Comportamiento**: lista `groupsByType` ordenada por `EntityType` (orden fijo: Person, Organization, Address, DNI, CUIT, Phone, Email, IBAN, CreditCard, Date, License, Plate, Custom).
+- **Sub-componentes**: `EntityTypeGroup` por tipo.
+- **Header**: "Entidades" + input de búsqueda + "Colapsar todo" / "Expandir todo".
+- **Estado vacío**: ver `UX_Guidelines.md` §11.
+
+### 3.2 `EntityTypeGroup`
+
+- **Props**: `type: EntityType`, `groups: ReadonlyArray<EntityGroup>`.
+- **Render**: cabecera expandible con checkbox cascade + lista de `EntityGroupItem`.
+- **Eventos**:
+  - Click cabecera → toggle expand.
+  - Checkbox cabecera → `actions.updateGroup(g.id, { enabled: value })` para todos los grupos del tipo.
+- **ARIA**: `role="treeitem"` con `aria-expanded`.
+
+### 3.3 `EntityGroupItem`
+
+- **Props**: `group: EntityGroup`.
+- **Render**: checkbox + canonicalValue + badge ocurrencias + `ReplacementModeSelect` + `[⋯]` (`GroupContextMenu` trigger).
+- **Estados**:
+  - habilitado / deshabilitado.
+  - con conflicto (icono ⚠).
+  - editado manualmente (punto azul).
+- **Eventos**:
+  - Checkbox → `actions.updateGroup(group.id, { enabled: value })`.
+  - Click canonicalValue → popover con aliases y "Editar valor canónico".
+  - Click ⚠ → `ConflictDialog`.
+- **ARIA**: `role="treeitem"`, `aria-checked`, `aria-label` con tipo + count + estado.
+
+### 3.4 `ReplacementModeSelect`
+
+- **Props**: `groupId`, `currentMode`.
+- **Opciones**: `placeholder` (default), `mask`, `synthetic`, `redact`.
+- **Acción**: `actions.updateGroup(groupId, { replacementMode: newMode })`.
+- **Implementación**: Radix `Select` con iconos por modo y preview del valor resultante.
+
+### 3.5 `GroupContextMenu`
+
+- **Trigger**: botón `[⋯]` en `EntityGroupItem`.
+- **Opciones**:
+  - "Fusionar con…" → `MergeDialog`.
+  - "Dividir…" → `SplitDialog`.
+  - "Ver ocurrencias" → popover con lista `members` (pageIndex + bbox + value).
+  - "Editar valor canónico" → input inline.
+  - "Eliminar grupo" → `ConfirmDialog` → `actions.updateGroup(groupId, { enabled: false })` (no se elimina, se deshabilita; en MVP no se elimina completamente).
+
+### 3.6 `MergeDialog`
+
+- **Props**: `sourceGroupId`.
+- **Comportamiento**: autocomplete para elegir `targetGroupId` (filtrado por mismo `EntityType`).
+- **Acción**: `actions.mergeGroups(sourceGroupId, targetGroupId)`.
+- **Feedback**: toast "Grupos fusionados. Índice conservado: 01."
+
+### 3.7 `SplitDialog`
+
+- **Props**: `groupId`.
+- **Comportamiento**: lista de `members` con checkbox. Muestra bbox miniatura por ocurrencia.
+- **Acción**: `actions.splitGroup(groupId, selectedOccurrenceIds)`.
+- **Feedback**: toast "Grupo dividido. Nuevo grupo: <type> <NN>."
+
+---
+
+## 4. Componentes de Reglas
+
+### 4.1 `RulesPanel`
+
+- **Stores**: `rules`.
+- **Render**: tres secciones (Global / Por tipo / Por grupo) + botón "+ Nueva regla".
+- **Estado vacío**: placeholder "Aún no hay reglas…" (ver `UX_Guidelines.md` §11).
+
+### 4.2 `RuleItem`
+
+- **Props**: `rule: Rule`.
+- **Render**: descripción legible ("DNI → mask", "Juan Pérez → redact") + botones `[✎]` `[🗑]`.
+- **Acciones**:
+  - `[✎]` → `RuleEditorDialog`.
+  - `[🗑]` → `ConfirmDialog` → `actions.deleteRule(rule.id)` (vía `RULE_DELETED`).
+
+### 4.3 `RuleCreatorDialog`
+
+- **Comportamiento**: ver `UX_Guidelines.md` §4.1.
+- **Acción**: `actions.createRule(rule)` → `RULE_CREATED`.
+
+### 4.4 `RuleEditorDialog`
+
+- **Props**: `ruleId`.
+- **Acción**: `actions.updateRule(ruleId, patch)` → `RULE_UPDATED`.
+
+---
+
+## 5. Componentes del Visor
+
+### 5.1 `SideBySideViewer`
+
+- **Stores**: `viewer`, `document`.
+- **Render**: dos `PdfViewer` lado a lado (original + anonymized) con scroll sincronizado.
+- **Props**: ninguno (todo via store).
+- **Mobile** (< 1024 px): tabs en lugar de lado a lado.
+
+### 5.2 `PdfViewer`
+
+- **Props**: `kind: "original" | "anonymized"`.
+- **Stores**: `viewer`, `entities` (para highlights en `original`), `document`.
+- **Comportamiento**: usa `PageVirtualizer` para renderizar solo visibles. Escucha `PREVIEW_UPDATED` via `viewer.previewByPage` y pasa el `blobUrl` al `PageCanvas` correspondiente.
+- **Eventos**:
+  - Cambio de `visibleRange` → `actions.requestRender(visibleRange, kind)`.
+  - Cambio de `zoom` → re-render con nueva escala.
+
+### 5.3 `PageVirtualizer`
+
+- **Props**: `pageCount`, `renderItem: (index) => ReactNode`, `visibleRange`, `pageSize`.
+- **Comportamiento**: mantiene un pool de `<canvas>` reutilizables. Calcula scroll height total con `pageCount × pageSize`. Solo renderiza items en `visibleRange` + 1 antes + 1 después.
+- **Performance**: usa `IntersectionObserver` para detectar visibilidad y `requestAnimationFrame` para scroll suave.
+
+### 5.4 `PageCanvas`
+
+- **Props**: `pageIndex`, `kind`, `blobUrl?`, `annotations?`, `highlights?`.
+- **Render**: `<canvas>` con dimensión correcta. Si `blobUrl`, dibuja la imagen. Si `annotations` (kind=original), dibuja bordes color por tipo. Si `highlights` con conflicto, dibuja borde rojo.
+- **Skeleton**: si `!blobUrl`, dibuja skeleton gris con dimensión.
+- **Interacción**:
+  - Hover sobre highlight → tooltip.
+  - Click en highlight → selecciona grupo en `entities` store + scroll into view en `EntitiesPanel`.
+
+### 5.5 `ZoomControls`
+
+- **Botones**: `+`, `-`, `Reset`.
+- **Atajos**: `Cmd/Ctrl++`, `Cmd/Ctrl+-`, `Cmd/Ctrl+0`.
+- **Acción**: `viewer.setZoom(newZoom)`.
+
+---
+
+## 6. Componentes de Conflicto
+
+### 6.1 `ConflictBadge`
+
+- **Render**: icono ⚠ con tooltip "Conflicto".
+- **Click**: abre `ConflictDialog`.
+
+### 6.2 `ConflictDialog`
+
+- **Props**: `conflictId`.
+- **Stores**: `entities.conflicts`.
+- **Render**: ver `UX_Guidelines.md` §6. Muestra razón, candidatos, resolución sugerida.
+- **Acción**: `actions.resolveConflict(conflictId, mode)`.
+
+---
+
+## 7. Componentes de Export
+
+### 7.1 `ExportDialog`
+
+- **Stores**: `document`, `entities`, `settings`.
+- **Render**: ver `UX_Guidelines.md` §8.2. Form con nombre, formato, calidad, DPI, título.
+- **Pre-flight**: si `enabledGroups = 0`, modal de confirmación anidado.
+- **Acción**: `actions.requestExport(options)`.
+
+### 7.2 `ExportProgress`
+
+- **Stores**: `pipeline.exportProgress`.
+- **Render**: barra de progreso con `current/total`.
+- **Al finalizar** (`pipeline.exportResult != null`): botón "Descargar" (ancla a `blobUrl`) + "Exportar otro".
+
+---
+
+## 8. Componentes comunes
+
+### 8.1 `Button`
+
+- Variantes: `primary`, `secondary`, `ghost`, `danger`.
+- Tamaños: `sm`, `md`, `lg`.
+- Props estándar + `loading?: boolean`.
+
+### 8.2 `Dialog`
+
+- Wrapper sobre Radix `Dialog` con focus trap, escape para cerrar, backdrop.
+- Props: `open`, `onClose`, `title`, `children`.
+
+### 8.3 `Select`
+
+- Wrapper sobre Radix `Select` con estilos Tailwind.
+- Props: `value`, `onChange`, `options`.
+
+### 8.4 `Checkbox`
+
+- Wrapper sobre Radix `Checkbox`.
+- Estados: `checked`, `unchecked`, `indeterminate` (para cascade de tipos).
+
+### 8.5 `Tooltip`
+
+- Wrapper sobre Radix `Tooltip` con delay corto.
+
+### 8.6 `Toast`
+
+- Wrapper sobre Radix `Toast` (o `sonner` si se agrega con ADR).
+- Tipos: `info`, `success`, `warning`, `error`.
+
+### 8.7 `Banner`
+
+- Para mensajes persistentes (warning de NER desactivado, no grupos habilitados, etc.).
+- Variantes: `info`, `warning`, `error`.
+- Dismissible (con persistencia en `settings`).
+
+### 8.8 `Skeleton`
+
+- Placeholder gris para páginas en carga.
+- Props: `width`, `height`.
+
+---
+
+## 9. Paleta de colores (highlights por tipo)
+
+Paleta accesible (contrast ≥ 3:1 con fondo blanco), diferenciada también por patrón de borde:
+
+| Tipo | Color | Patrón de borde |
+|---|---|---|
+| Person | `#10b981` (verde) | sólido |
+| Organization | `#6366f1` (índigo) | sólido |
+| Address | `#f59e0b` (ámbar) | sólido |
+| DNI | `#3b82f6` (azul) | sólido |
+| CUIT | `#3b82f6` (azul) | punteado |
+| Phone | `#8b5cf6` (violeta) | sólido |
+| Email | `#8b5cf6` (violeta) | punteado |
+| IBAN | `#ec4899` (rosa) | sólido |
+| CreditCard | `#ec4899` (rosa) | punteado |
+| Date | `#14b8a6` (teal) | sólido |
+| License | `#a855f7` (púrpura) | sólido |
+| Plate | `#a855f7` (púrpura) | punteado |
+| Custom | `#64748b` (slate) | sólido |
+| Conflicto | `#ef4444` (rojo) | doble |
+
+El patrón de borde (sólido/punteado/doble) permite distinguir tipos incluso para usuarios con visión monocromática o daltonismo.
+
+---
+
+## 10. Tokens de diseño
+
+```css
+/* Tailwind config extend */
+--color-bg-primary: #ffffff;
+--color-bg-secondary: #f9fafb;
+--color-bg-tertiary: #f3f4f6;
+--color-border: #e5e7eb;
+--color-text-primary: #111827;
+--color-text-secondary: #6b7280;
+--color-accent: #3b82f6;       /* azul primario */
+--color-success: #10b981;
+--color-warning: #f59e0b;
+--color-error: #ef4444;
+--radius-sm: 4px;
+--radius-md: 8px;
+--radius-lg: 12px;
+--shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+--shadow-md: 0 4px 6px rgba(0,0,0,0.1);
+```
+
+Modo oscuro: en v1.0. MVP es solo claro.
+
+---
+
+## 11. Iconografía
+
+- Iconos: `lucide-react` (open source, consistente, tree-shakeable).
+- Tamaños: 16 px (inline), 20 px (botones), 24 px (toolbar), 32 px (hero).
+- `aria-label` siempre que el icono sea interactivo.
+
+---
+
+## 12. Mapeo Componente → Core
+
+| Componente | Lee del store | Dispara acción | Evento Core |
+|---|---|---|---|
+| `ImportButton` | – | `actions.importDocument` | `DOCUMENT_IMPORTED` + `pdf.process` |
+| `CancelButton` | `pipeline.stage` | `actions.cancel` | `CANCEL_REQUESTED` |
+| `ExportButton` | `pipeline.stage`, `document` | `actions.requestExport` (via dialog) | `EXPORT_REQUESTED` |
+| `EntityGroupItem` (checkbox) | `entities.groupsByType` | `actions.updateGroup` | `GROUP_UPDATE_REQUESTED` |
+| `ReplacementModeSelect` | `entities.groupsByType` | `actions.updateGroup` | `GROUP_UPDATE_REQUESTED` |
+| `MergeDialog` | `entities.groupsByType` | `actions.mergeGroups` | `GROUP_MERGE_REQUESTED` |
+| `SplitDialog` | `entities.groupsByType` | `actions.splitGroup` | `GROUP_SPLIT_REQUESTED` |
+| `RuleCreatorDialog` | `entities`, `rules` | `actions.createRule` | `RULE_CREATED` |
+| `RuleEditorDialog` | `rules` | `actions.updateRule` | `RULE_UPDATED` |
+| `RuleItem` (delete) | `rules` | `actions.deleteRule` | `RULE_DELETED` |
+| `ConflictDialog` | `entities.conflicts` | `actions.resolveConflict` | `CONFLICT_RESOLVE_REQUESTED` |
+| `PdfViewer` | `viewer`, `document` | (via `actions.requestRender`) | `RENDER_REQUESTED` |
+| `PageCanvas` (click highlight) | `entities` | selecciona grupo en store local | (ninguno, solo local) |
+| `ExportDialog` | `document`, `entities` | `actions.requestExport` | `EXPORT_REQUESTED` |
+
+---
+
+## 13. Reglas de implementación
+
+1. Los componentes **nunca** importan del Core directamente. Solo via `core-adapter`.
+2. Los componentes **nunca** mutar el store directamente. Siempre via `actions`.
+3. Los componentes son **presentacionales**: datos via props o selectors finos de Zustand.
+4. Selectors: `useEntitiesStore(s => s.groupsByType.get(type))` para evitar re-renders.
+5. Memoización: `React.memo` en items de lista larga (`EntityGroupItem`, `PageCanvas`).
+6. Sin `useEffect` para lógica de negocio; solo para suscripciones del adapter (que viven en `core-adapter`, no en componentes).
+7. Accesibilidad: todos los componentes interactivos pasan por wrappers de Radix (que son accesibles por default).
+8. Sin `dangerouslySetInnerHTML`. Sin `eval`. Sin `innerHtml`.
+
+---
+
+## 14. Referencias
+
+- `ui/React_Client.md` (UI Contract)
+- `ui/UX_Guidelines.md` (patrones UX)
+- `ADR-001-Framework.md` (stack)
+- `ADR-005-State-Management.md` (Zustand + bus)
+- `04_Event_System.md` §10 (eventos de UI)
+- `03_Data_Model.md` (tipos consumidos)
