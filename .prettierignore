@@ -6,3 +6,10 @@ pnpm-lock.yaml
 *.pdf
 **/fixtures/**
 .changeset/*.md
+
+# Documentación: el formateo automático de Prettier (especialmente printWidth)
+# rompe el wrap de los docs largos y no aporta valor. Se formatean manualmente.
+# Si necesitás formatear un doc, corré: pnpm exec prettier --write docs/path/file.md
+docs/
+README.md
+CHANGELOG.md
