@@ -126,8 +126,16 @@ jobs:
     name: E2E (Playwright)
     needs: install
     runs-on: ubuntu-latest
-    if: hashFiles('tests/e2e/**/*.spec.ts') != ''
     steps:
+      - name: Check if e2e tests exist
+        id: check_e2e
+        run: |
+          if [ -d "tests/e2e" ] && [ -n "$(find tests/e2e -name '*.spec.ts' -type f 2>/dev/null)" ]; then
+            echo "has_tests=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_tests=false" >> "$GITHUB_OUTPUT"
+            echo "No e2e tests found, skipping."
+          fi
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
         with:
@@ -137,15 +145,27 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps chromium
-      - run: pnpm test:e2e
+      - name: Install Playwright browsers
+        if: steps.check_e2e.outputs.has_tests == 'true'
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Run e2e tests
+        if: steps.check_e2e.outputs.has_tests == 'true'
+        run: pnpm test:e2e
 
   test-perf:
     name: Performance
     needs: install
     runs-on: ubuntu-latest
-    if: hashFiles('tests/perf/**/*.test.ts') != ''
     steps:
+      - name: Check if perf tests exist
+        id: check_perf
+        run: |
+          if [ -d "tests/perf" ] && [ -n "$(find tests/perf -name '*.test.ts' -type f 2>/dev/null)" ]; then
+            echo "has_tests=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_tests=false" >> "$GITHUB_OUTPUT"
+            echo "No perf tests found, skipping."
+          fi
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
         with:
@@ -155,14 +175,24 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm test:perf
+      - name: Run perf tests
+        if: steps.check_perf.outputs.has_tests == 'true'
+        run: pnpm test:perf
 
   test-leak:
     name: Memory leak
     needs: install
     runs-on: ubuntu-latest
-    if: hashFiles('tests/leak/**/*.test.ts') != ''
     steps:
+      - name: Check if leak tests exist
+        id: check_leak
+        run: |
+          if [ -d "tests/leak" ] && [ -n "$(find tests/leak -name '*.test.ts' -type f 2>/dev/null)" ]; then
+            echo "has_tests=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_tests=false" >> "$GITHUB_OUTPUT"
+            echo "No leak tests found, skipping."
+          fi
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
         with:
@@ -172,14 +202,24 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm test:leak
+      - name: Run leak tests
+        if: steps.check_leak.outputs.has_tests == 'true'
+        run: pnpm test:leak
 
   test-cancel:
     name: Cancellation SLA
     needs: install
     runs-on: ubuntu-latest
-    if: hashFiles('tests/cancel/**/*.test.ts') != ''
     steps:
+      - name: Check if cancel tests exist
+        id: check_cancel
+        run: |
+          if [ -d "tests/cancel" ] && [ -n "$(find tests/cancel -name '*.test.ts' -type f 2>/dev/null)" ]; then
+            echo "has_tests=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_tests=false" >> "$GITHUB_OUTPUT"
+            echo "No cancel tests found, skipping."
+          fi
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
         with:
@@ -189,14 +229,24 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm test:cancel
+      - name: Run cancel tests
+        if: steps.check_cancel.outputs.has_tests == 'true'
+        run: pnpm test:cancel
 
   test-security:
     name: Security gates
     needs: install
     runs-on: ubuntu-latest
-    if: hashFiles('tests/security/**/*.test.ts') != ''
     steps:
+      - name: Check if security tests exist
+        id: check_security
+        run: |
+          if [ -d "tests/security" ] && [ -n "$(find tests/security -name '*.test.ts' -type f 2>/dev/null)" ]; then
+            echo "has_tests=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_tests=false" >> "$GITHUB_OUTPUT"
+            echo "No security tests found, skipping."
+          fi
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
         with:
@@ -206,7 +256,9 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm test:security
+      - name: Run security tests
+        if: steps.check_security.outputs.has_tests == 'true'
+        run: pnpm test:security
 
   # Resumen: comentario automático en el PR con el estado de los gates.
   # Se activa cuando existe al menos un job opcional corriendo.
