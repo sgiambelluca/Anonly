@@ -1,0 +1,230 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "20"
+  PNPM_VERSION: "9"
+
+jobs:
+  install:
+    name: Install dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Upload pnpm store
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.local/share/pnpm/store
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+            packages/anonymization-core/*/node_modules
+          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+  lint:
+    name: Lint
+    needs: install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm format:check
+
+  typecheck:
+    name: Typecheck
+    needs: install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+
+  test:
+    name: Unit + Contract + Snapshot
+    needs: install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test -- --coverage
+      - name: Coverage gate
+        run: |
+          pnpm test -- --coverage --reporter=json --outputFile=coverage-summary.json || true
+          # Gate de cobertura: se activa por paquete en hitos posteriores.
+          # Hito 1: solo verificar que los tests pasan.
+
+  audit:
+    name: Security audit
+    needs: install
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --audit-level=high
+        continue-on-error: true
+      # Nota: en Hito 11 se elimina `continue-on-error` y se vuelve bloqueante.
+
+  # Gates que se activan en hitos posteriores.
+  # Cada uno corre solo si su directorio de tests existe (hashFiles check).
+
+  test-e2e:
+    name: E2E (Playwright)
+    needs: install
+    runs-on: ubuntu-latest
+    if: hashFiles('tests/e2e/**/*.spec.ts') != ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:e2e
+
+  test-perf:
+    name: Performance
+    needs: install
+    runs-on: ubuntu-latest
+    if: hashFiles('tests/perf/**/*.test.ts') != ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:perf
+
+  test-leak:
+    name: Memory leak
+    needs: install
+    runs-on: ubuntu-latest
+    if: hashFiles('tests/leak/**/*.test.ts') != ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:leak
+
+  test-cancel:
+    name: Cancellation SLA
+    needs: install
+    runs-on: ubuntu-latest
+    if: hashFiles('tests/cancel/**/*.test.ts') != ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:cancel
+
+  test-security:
+    name: Security gates
+    needs: install
+    runs-on: ubuntu-latest
+    if: hashFiles('tests/security/**/*.test.ts') != ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:security
+
+  # Resumen: comentario automático en el PR con el estado de los gates.
+  # Se activa cuando existe al menos un job opcional corriendo.
+  pr-summary:
+    name: PR summary
+    needs: [lint, typecheck, test, audit]
+    runs-on: ubuntu-latest
+    if: always() && github.event_name == 'pull_request'
+    steps:
+      - name: Summary
+        run: |
+          echo "## CI Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Gate | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| Lint | ${{ needs.lint.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Typecheck | ${{ needs.typecheck.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tests | ${{ needs.test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Audit | ${{ needs.audit.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "_Mergeá solo si todos dicen \`success\`._" >> $GITHUB_STEP_SUMMARY
