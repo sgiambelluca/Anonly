@@ -92,7 +92,7 @@ describe("generate.ts — empty.pdf", () => {
 });
 
 describe("generate.ts — corrupt.pdf", () => {
-  it("tiene header %PDF- pero el cuerpo es random (no es un PDF válido)", async () => {
+  it("tiene header %PDF- pero el cuerpo es determinista no-PDF (no es un PDF válido)", async () => {
     const bytes = await generateCorrupt();
     const header = new TextDecoder().decode(bytes.slice(0, 5));
     expect(header).toBe("%PDF-");
