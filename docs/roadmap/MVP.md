@@ -105,7 +105,7 @@ Orden sugerido (cada hito = un set de PRs):
 ### Hito 2 — PDF Engine
 - Implementar `pdf-engine` siguiendo `core/PDF_Engine.md`.
 - Tests contract + unit + edge + snapshot.
-- Integración con `PdfPool`.
+- Ejecución **inline** (sin `PdfPool`); integración con `PdfPool` difiere al Hito 9 (ver ADR-013).
 
 ### Hito 3 — OCR Engine
 - Implementar `ocr-engine` siguiendo `core/OCR_Engine.md`.
@@ -136,6 +136,8 @@ Orden sugerido (cada hito = un set de PRs):
 ### Hito 9 — Orchestrator
 - Pipeline orchestrator que secuencia etapas, despacha jobs, maneja cancelación.
 - Integración de todos los engines via bus.
+- Migración de `pdf-engine` (y demás motores pesados) a sus pools (`PdfPool`, `OcrPool`, `NerPool`, `RenderPool`); `WorkerPoolManager` + `AbortRegistry` (ver ADR-013).
+- Wiring Orchestrator→`PdfEngine.fuseOcrPage` para fusión OCR→PDF (ver ADR-014).
 
 ### Hito 10 — React Client
 - `apps/react-client` con Vite + Tailwind + Radix + Zustand.
