@@ -1,0 +1,117 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`PdfEngine — snapshot > DocumentModel snapshot is stable for a known PDF structure 1`] = `
+{
+  "document": {
+    "id": "snapshot-doc",
+    "importedAt": 1234567890000,
+    "metadata": {
+      "creationTool": "TestRunner",
+      "encrypted": false,
+      "hasForms": false,
+      "pdfVersion": "1.7",
+      "producer": "Test",
+      "title": "Snapshot Doc",
+    },
+    "name": "",
+    "pageCount": 3,
+    "pages": [
+      {
+        "height": 842,
+        "index": 0,
+        "ocrCompleted": false,
+        "requiresOCR": false,
+        "text": "First Page",
+        "width": 595,
+        "words": [
+          {
+            "bbox": {
+              "height": 12,
+              "width": 30,
+              "x": 50,
+              "y": 30,
+            },
+            "confidence": 1,
+            "pageIndex": 0,
+            "source": "pdf",
+            "text": "First",
+          },
+          {
+            "bbox": {
+              "height": 12,
+              "width": 30,
+              "x": 85,
+              "y": 30,
+            },
+            "confidence": 1,
+            "pageIndex": 0,
+            "source": "pdf",
+            "text": "Page",
+          },
+        ],
+      },
+      {
+        "height": 792,
+        "index": 1,
+        "ocrCompleted": false,
+        "requiresOCR": false,
+        "text": "Second Page Content",
+        "width": 612,
+        "words": [
+          {
+            "bbox": {
+              "height": 12,
+              "width": 40,
+              "x": 50,
+              "y": 30,
+            },
+            "confidence": 1,
+            "pageIndex": 1,
+            "source": "pdf",
+            "text": "Second",
+          },
+          {
+            "bbox": {
+              "height": 12,
+              "width": 30,
+              "x": 100,
+              "y": 30,
+            },
+            "confidence": 1,
+            "pageIndex": 1,
+            "source": "pdf",
+            "text": "Page",
+          },
+          {
+            "bbox": {
+              "height": 12,
+              "width": 50,
+              "x": 140,
+              "y": 30,
+            },
+            "confidence": 1,
+            "pageIndex": 1,
+            "source": "pdf",
+            "text": "Content",
+          },
+        ],
+      },
+      {
+        "height": 842,
+        "index": 2,
+        "ocrCompleted": false,
+        "requiresOCR": true,
+        "text": "",
+        "width": 595,
+        "words": [],
+      },
+    ],
+    "sourceKind": "mixed",
+  },
+  "pageCount": 3,
+  "sourceKind": "mixed",
+  "textlessPages": [
+    2,
+  ],
+}
+`;

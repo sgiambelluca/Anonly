@@ -532,6 +532,7 @@ describe("@anonly/shared — Contracts", () => {
           cancelSlaMs: 200,
           idleDisposeMs: 60000,
         },
+        pdf: { maxPageCount: 10000 },
         ner: {
           modelId: "Xenova/bert-base-NER",
           quantization: "q8",

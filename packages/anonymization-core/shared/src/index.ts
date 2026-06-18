@@ -62,6 +62,7 @@ export type {
   IEngine,
   EngineContext,
   EngineConfig,
+  PdfEngineConfig,
   IEventBus,
   EventChannelLike,
   EventHandler,
