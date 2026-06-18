@@ -77,9 +77,45 @@ Para fixtures que no se pueden generar automáticamente y pesan > 5 MB, descarga
 - Fixtures ≥ 5 MB (`scanned-10p.pdf`, `huge-1000p.pdf`): **Git LFS** o descarga con hash (Hito 11).
 - Patrones `.gitignore` ya excluyen `tests/fixtures/*.large.pdf` y `tests/fixtures/*.bin`.
 
-## Estado en Hito 1
+## Estado actual
 
-Sin fixtures todavía. El generador se crea en Hito 2 (PDF Engine) cuando los tests lo necesitan. Los tests de Hito 1 (shared, event-system) no requieren fixtures.
+### Generados por script (Hito 2, rama `chore/setup-test-fixtures`)
+
+| Fixture | Generador | Test que lo valida | Descripción |
+|---|---|---|---|
+| `text-10p.pdf` | `pnpm fixtures:generate` → `generateText10p()` | `generate.test.ts` → "generate.ts — text-10p.pdf" | 10 páginas, texto con entidades conocidas para Regex/NER/Grouping |
+| `empty.pdf` | `pnpm fixtures:generate` → `generateEmpty()` | `generate.test.ts` → "generate.ts — empty.pdf" | 1 página vacía sin contenido. El nombre "empty" es histórico: pdf-lib no permite PDFs con 0 páginas. Equivalente a "página textless" para el PDF Engine. |
+| `corrupt.pdf` | `pnpm fixtures:generate` → `generateCorrupt()` | `generate.test.ts` → "generate.ts — corrupt.pdf" | Header %PDF- + cuerpo random (no es un PDF válido) |
+
+### Pendientes (requieren tools externos)
+
+| Fixture | Cómo generarlo | Hito |
+|---|---|---|
+| `protected.pdf` | `qpdf --encrypt test1234 test1234 256 -- text-10p.pdf protected.pdf` | 2b (cuando se necesite password test) |
+| `text-50p.pdf` | Extender `generate.ts` con `generateText50p()` | 11 (perf) |
+| `huge-1000p.pdf` | Extender `generate.ts` (Git LFS) | 11 (stress) |
+| `scanned-10p.pdf` | `pdftoppm` + `pdf-lib` | 3 (OCR) |
+| `mixed-30p.pdf` | Combinar text + scanned | 3 (OCR integration) |
+
+### Flujo de trabajo
+
+```bash
+# 1. Instalar deps (incluye pdf-lib y tsx)
+pnpm install
+
+# 2. Generar los fixtures commiteables
+pnpm fixtures:generate
+
+# 3. Verificar con tests (los tests validan el output del script en memoria;
+#    no leen los archivos commiteados)
+pnpm test
+
+# 4. Commitear los PDFs
+git add tests/fixtures/*.pdf
+git commit -m "test: add generated PDF fixtures"
+```
+
+**Importante**: el test `generate.test.ts` valida las funciones del script **en memoria** (no los archivos commiteados). Esto permite que el test pase aunque los PDFs aún no estén commiteados. Una vez commiteados, el CI también puede validar que existen.
 
 ## Reglas
 
