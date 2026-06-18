@@ -142,6 +142,7 @@ export interface EngineContext {
 
 export interface EngineConfig {
   readonly workerPool: WorkerPoolConfig;
+  readonly pdf: PdfEngineConfig;
   readonly ner: NerConfig;
   readonly ocr: OcrConfig;
   readonly grouping: GroupingConfig;
@@ -371,6 +372,10 @@ export interface WorkerPoolConfig {
   readonly maxRetryDelayMs: number;
   readonly cancelSlaMs: number;
   readonly idleDisposeMs: number;
+}
+
+export interface PdfEngineConfig {
+  readonly maxPageCount: number; // default 10000
 }
 
 export interface NerConfig {
