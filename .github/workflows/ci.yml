@@ -1,0 +1,263 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "22"
+  # PNPM_VERSION se lee automáticamente del campo packageManager de package.json.
+  # No hardcodearla acá para evitar duplicación y drift.
+
+jobs:
+  install:
+    name: Install dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Upload pnpm store
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.local/share/pnpm/store
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+            packages/anonymization-core/*/node_modules
+          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+  lint:
+    name: Lint
+    needs: install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm format:check
+
+  typecheck:
+    name: Typecheck
+    needs: install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+
+  test:
+    name: Unit + Contract + Snapshot
+    needs: install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test -- --coverage
+      - name: Coverage gate
+        run: |
+          pnpm test -- --coverage --reporter=json --outputFile=coverage-summary.json || true
+          # Gate de cobertura: se activa por paquete en hitos posteriores.
+          # Hito 1: solo verificar que los tests pasan.
+
+  audit:
+    name: Security audit
+    needs: install
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --audit-level=high
+        continue-on-error: true
+      # Nota: en Hito 11 se elimina `continue-on-error` y se vuelve bloqueante.
+
+  # Gates que se activan en hitos posteriores.
+  # Cada uno corre solo si su directorio de tests existe (hashFiles check).
+
+  test-e2e:
+    name: E2E (Playwright)
+    needs: install
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if e2e tests exist
+        id: check_e2e
+        run: |
+          if [ -d "tests/e2e" ] && [ -n "$(find tests/e2e -name '*.spec.ts' -type f 2>/dev/null)" ]; then
+            echo "has_tests=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_tests=false" >> "$GITHUB_OUTPUT"
+            echo "No e2e tests found, skipping."
+          fi
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install Playwright browsers
+        if: steps.check_e2e.outputs.has_tests == 'true'
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Run e2e tests
+        if: steps.check_e2e.outputs.has_tests == 'true'
+        run: pnpm test:e2e
+
+  test-perf:
+    name: Performance
+    needs: install
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if perf tests exist
+        id: check_perf
+        run: |
+          if [ -d "tests/perf" ] && [ -n "$(find tests/perf -name '*.test.ts' -type f 2>/dev/null)" ]; then
+            echo "has_tests=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_tests=false" >> "$GITHUB_OUTPUT"
+            echo "No perf tests found, skipping."
+          fi
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Run perf tests
+        if: steps.check_perf.outputs.has_tests == 'true'
+        run: pnpm test:perf
+
+  test-leak:
+    name: Memory leak
+    needs: install
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if leak tests exist
+        id: check_leak
+        run: |
+          if [ -d "tests/leak" ] && [ -n "$(find tests/leak -name '*.test.ts' -type f 2>/dev/null)" ]; then
+            echo "has_tests=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_tests=false" >> "$GITHUB_OUTPUT"
+            echo "No leak tests found, skipping."
+          fi
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Run leak tests
+        if: steps.check_leak.outputs.has_tests == 'true'
+        run: pnpm test:leak
+
+  test-cancel:
+    name: Cancellation SLA
+    needs: install
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if cancel tests exist
+        id: check_cancel
+        run: |
+          if [ -d "tests/cancel" ] && [ -n "$(find tests/cancel -name '*.test.ts' -type f 2>/dev/null)" ]; then
+            echo "has_tests=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_tests=false" >> "$GITHUB_OUTPUT"
+            echo "No cancel tests found, skipping."
+          fi
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Run cancel tests
+        if: steps.check_cancel.outputs.has_tests == 'true'
+        run: pnpm test:cancel
+
+  test-security:
+    name: Security gates
+    needs: install
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if security tests exist
+        id: check_security
+        run: |
+          if [ -d "tests/security" ] && [ -n "$(find tests/security -name '*.test.ts' -type f 2>/dev/null)" ]; then
+            echo "has_tests=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_tests=false" >> "$GITHUB_OUTPUT"
+            echo "No security tests found, skipping."
+          fi
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Run security tests
+        if: steps.check_security.outputs.has_tests == 'true'
+        run: pnpm test:security
+
+  # Resumen: comentario automático en el PR con el estado de los gates.
+  # Se activa cuando existe al menos un job opcional corriendo.
+  pr-summary:
+    name: PR summary
+    needs: [lint, typecheck, test, audit]
+    runs-on: ubuntu-latest
+    if: always() && github.event_name == 'pull_request'
+    steps:
+      - name: Summary
+        run: |
+          echo "## CI Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Gate | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| Lint | ${{ needs.lint.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Typecheck | ${{ needs.typecheck.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tests | ${{ needs.test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Audit | ${{ needs.audit.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "_Mergeá solo si todos dicen \`success\`._" >> $GITHUB_STEP_SUMMARY

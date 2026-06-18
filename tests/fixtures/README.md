@@ -1,0 +1,89 @@
+# Tests Fixtures
+
+Fixtures (PDFs de prueba) para los tests del Core de Anonly.
+
+> Fuente de verdad: `docs/architecture/07_Performance_Strategy.md` §11.2.
+
+---
+
+## Fixtures requeridos (por spec)
+
+| Fixture | Tamaño aprox. | Propósito | Specs que lo usan |
+|---|---|---|---|
+| `text-10p.pdf` | ~100 KB | PDF con texto, 10 páginas, caso base | PDF Engine, Regex Engine, NER Engine, Grouping Engine, Render Engine, Export Engine, snapshot |
+| `text-50p.pdf` | ~500 KB | PDF con texto, 50 páginas, stress | PDF Engine, perf |
+| `scanned-10p.pdf` | ~5 MB | PDF escaneado, requiere OCR | OCR Engine |
+| `corrupt.pdf` | ~1 KB | header inválido | PDF Engine edge |
+| `protected.pdf` | ~100 KB | protegido con password `test1234` | PDF Engine edge |
+| `empty.pdf` | ~1 KB | 0 páginas | PDF Engine edge |
+| `huge-1000p.pdf` | ~10 MB | 1000 páginas, stress extremo | PDF Engine stress (LFS) |
+| `mixed-30p.pdf` | ~3 MB | 15 con texto + 15 escaneadas | PDF Engine + OCR integration |
+
+## Contenido conocido de `text-10p.pdf`
+
+Para que los tests de Regex y NER sean deterministas, `text-10p.pdf` debe contener texto conocido en posiciones conocidas:
+
+- **Página 0**: "Juan Pérez vive en Belgrano 1234, DNI 34.567.891, CUIT 20-12345678-9, teléfono +54 11 1234-5678, email juan.perez@example.com."
+- **Página 1**: "María Gómez, DNI 18.445.212, trabaja en Empresa S.A. con sede en Rivadavia 455."
+- **Página 2**: "Carlos López, DNI 42.998.103, IBAN ES00 1234 5678 9012 3456 7890, tarjeta 4532 1234 5678 9901."
+- **Páginas 3-9**: texto neutro sin entidades (para test de "no false positives").
+
+Las entidades esperadas (test de snapshot de Grouping):
+- 3 Personas (Juan Pérez, María Gómez, Carlos López)
+- 3 DNIs (34.567.891, 18.445.212, 42.998.103)
+- 2 Direcciones (Belgrano 1234, Rivadavia 455)
+- 1 Organización (Empresa S.A.)
+- 1 CUIT (20-12345678-9)
+- 1 Teléfono (+54 11 1234-5678)
+- 1 Email (juan.perez@example.com)
+- 1 IBAN (ES00...)
+- 1 Tarjeta (4532...)
+
+## Cómo conseguir los fixtures
+
+### Opción A — Generador (recomendado para Hito 2)
+
+Crear `tests/fixtures/generate.ts` que use `pdf-lib` para generar los PDFs con texto conocido. Ventajas: reproducible, sin datos reales, commiteable.
+
+```bash
+pnpm tsx tests/fixtures/generate.ts
+```
+
+Genera `text-10p.pdf`, `empty.pdf`, `corrupt.pdf` directamente. Para `protected.pdf`, `scanned-10p.pdf` y `mixed-30p.pdf` se requieren tools externos (ver Opción B).
+
+### Opción B — PDFs públicos + transformación
+
+- `text-10p.pdf`: generar con el script generador.
+- `scanned-10p.pdf`: tomar un PDF público (ej. sample de PDF.js), rasterizarlo a imagen con `pdftoppm`, y reconstruirlo como PDF de imágenes con `pdf-lib`.
+- `protected.pdf`: generar con `qpdf --encrypt test1234 test1234 256 -- text-10p.pdf protected.pdf`.
+- `corrupt.pdf`: tomar los primeros 100 bytes de un PDF + rellenar con random.
+- `empty.pdf`: `qpdf --empty-pages 0 -- empty.pdf` o generar con pdf-lib sin páginas.
+- `huge-1000p.pdf`: generar con el script (loop de 1000 páginas con texto neutro). Va a Git LFS por tamaño.
+
+### Opción C — Descarga con hash verificado (Hito 11)
+
+Para fixtures que no se pueden generar automáticamente y pesan > 5 MB, descargar en `postinstall` con hash verificado:
+
+```json
+// tests/fixtures/manifest.json
+{
+  "scanned-10p.pdf": { "url": "https://anonly.dev/fixtures/scanned-10p.pdf", "sha256": "..." }
+}
+```
+
+## Storage en git
+
+- Fixtures < 5 MB: commiteados directo en `tests/fixtures/`.
+- Fixtures ≥ 5 MB (`scanned-10p.pdf`, `huge-1000p.pdf`): **Git LFS** o descarga con hash (Hito 11).
+- Patrones `.gitignore` ya excluyen `tests/fixtures/*.large.pdf` y `tests/fixtures/*.bin`.
+
+## Estado en Hito 1
+
+Sin fixtures todavía. El generador se crea en Hito 2 (PDF Engine) cuando los tests lo necesitan. Los tests de Hito 1 (shared, event-system) no requieren fixtures.
+
+## Reglas
+
+- **NUNCA** commitear PDFs con datos personales reales. Los fixtures son sintéticos o públicos.
+- **NUNCA** commitear PDFs con passwords reales. `protected.pdf` usa `test1234` (documentado acá y en el test).
+- Cualquier fixture nuevo debe documentarse en esta tabla.
+- Si un fixture se usa en un test, el test debe fallar claro si el fixture no existe (no ignorarse silenciosamente).
