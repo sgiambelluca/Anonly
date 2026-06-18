@@ -13,9 +13,9 @@ Fixtures (PDFs de prueba) para los tests del Core de Anonly.
 | `text-10p.pdf` | ~100 KB | PDF con texto, 10 páginas, caso base | PDF Engine, Regex Engine, NER Engine, Grouping Engine, Render Engine, Export Engine, snapshot |
 | `text-50p.pdf` | ~500 KB | PDF con texto, 50 páginas, stress | PDF Engine, perf |
 | `scanned-10p.pdf` | ~5 MB | PDF escaneado, requiere OCR | OCR Engine |
-| `corrupt.pdf` | ~1 KB | header inválido | PDF Engine edge |
+| `corrupt.pdf` | ~1 KB | header %PDF- válido + cuerpo no-PDF determinista | PDF Engine edge |
 | `protected.pdf` | ~100 KB | protegido con password `test1234` | PDF Engine edge |
-| `empty.pdf` | ~1 KB | 0 páginas | PDF Engine edge |
+| `empty.pdf` | ~1 KB | 1 página sin contenido (pdf-lib no permite 0 páginas) | PDF Engine edge |
 | `huge-1000p.pdf` | ~10 MB | 1000 páginas, stress extremo | PDF Engine stress (LFS) |
 | `mixed-30p.pdf` | ~3 MB | 15 con texto + 15 escaneadas | PDF Engine + OCR integration |
 
@@ -56,7 +56,7 @@ Genera `text-10p.pdf`, `empty.pdf`, `corrupt.pdf` directamente. Para `protected.
 - `text-10p.pdf`: generar con el script generador.
 - `scanned-10p.pdf`: tomar un PDF público (ej. sample de PDF.js), rasterizarlo a imagen con `pdftoppm`, y reconstruirlo como PDF de imágenes con `pdf-lib`.
 - `protected.pdf`: generar con `qpdf --encrypt test1234 test1234 256 -- text-10p.pdf protected.pdf`.
-- `corrupt.pdf`: tomar los primeros 100 bytes de un PDF + rellenar con random.
+- `corrupt.pdf`: header %PDF- válido + cuerpo no-PDF determinista (e.g. 200 bytes de 0x41).
 - `empty.pdf`: `qpdf --empty-pages 0 -- empty.pdf` o generar con pdf-lib sin páginas.
 - `huge-1000p.pdf`: generar con el script (loop de 1000 páginas con texto neutro). Va a Git LFS por tamaño.
 
@@ -85,7 +85,7 @@ Para fixtures que no se pueden generar automáticamente y pesan > 5 MB, descarga
 |---|---|---|---|
 | `text-10p.pdf` | `pnpm fixtures:generate` → `generateText10p()` | `generate.test.ts` → "generate.ts — text-10p.pdf" | 10 páginas, texto con entidades conocidas para Regex/NER/Grouping |
 | `empty.pdf` | `pnpm fixtures:generate` → `generateEmpty()` | `generate.test.ts` → "generate.ts — empty.pdf" | 1 página vacía sin contenido. El nombre "empty" es histórico: pdf-lib no permite PDFs con 0 páginas. Equivalente a "página textless" para el PDF Engine. |
-| `corrupt.pdf` | `pnpm fixtures:generate` → `generateCorrupt()` | `generate.test.ts` → "generate.ts — corrupt.pdf" | Header %PDF- + cuerpo random (no es un PDF válido) |
+| `corrupt.pdf` | `pnpm fixtures:generate` → `generateCorrupt()` | `generate.test.ts` → "generate.ts — corrupt.pdf" | Header %PDF- válido + cuerpo no-PDF determinista (200 bytes de 0x41). No parseable por PDF.js pero con header que pasa la heurística inicial. |
 
 ### Pendientes (requieren tools externos)
 

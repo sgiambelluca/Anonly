@@ -1,15 +1,15 @@
 /**
  * Generador de fixtures (PDFs de prueba) para los tests del Core de Anonly.
  *
- * Fuente de verdad: docs/tests/fixtures/README.md
+ * Fuente de verdad: tests/fixtures/README.md
  *
  * Uso:
  *   pnpm tsx tests/fixtures/generate.ts
  *
  * Genera:
  *   - text-10p.pdf  (10 páginas, texto con entidades conocidas para Regex/NER/Grouping)
- *   - empty.pdf     (0 páginas, edge case)
- *   - corrupt.pdf   (header inválido, edge case)
+ *   - empty.pdf     (1 página sin contenido; pdf-lib no permite 0 páginas)
+ *   - corrupt.pdf   (header %PDF- válido + cuerpo no-PDF determinista)
  *
  * No genera (requieren tools externos):
  *   - protected.pdf (qpdf --encrypt; documentado en README)
@@ -18,7 +18,7 @@
  *
  * Reglas:
  *   - Sin datos personales reales. Todos los valores son sintéticos.
- *   - Reproducible: misma ejecución → mismos bytes.
+ *   - Reproducible: misma ejecución → mismo contenido semántico.
  *   - El contenido de text-10p.pdf coincide con la tabla de "Contenido conocido"
  *     en tests/fixtures/README.md. Si cambia el texto, actualizar el README.
  */
@@ -102,11 +102,10 @@ export async function generateEmpty(): Promise<Uint8Array> {
 }
 
 export async function generateCorrupt(): Promise<Uint8Array> {
-  // Header "%PDF-1.4\n" válido + cuerpo random.
+  // Header "%PDF-1.4\n" válido + cuerpo no-PDF determinista (200 bytes de 0x41).
   // Suficiente para que PDF.js detecte header pero falle al parsear.
   const header = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34, 0x0a]);
-  const body = new Uint8Array(200);
-  crypto.getRandomValues(body);
+  const body = new Uint8Array(200).fill(0x41);
   const result = new Uint8Array(header.length + body.length);
   result.set(header, 0);
   result.set(body, header.length);
@@ -153,8 +152,8 @@ async function main(): Promise<void> {
   process.stdout.write(
     `Fixtures generados en ${FIXTURE_DIR}:\n` +
       `  - text-10p.pdf (${text10p.byteLength} bytes, 10 páginas)\n` +
-      `  - empty.pdf (${empty.byteLength} bytes, 0 páginas)\n` +
-      `  - corrupt.pdf (${corrupt.byteLength} bytes, header inválido)\n` +
+      `  - empty.pdf (${empty.byteLength} bytes, 1 página sin contenido)\n` +
+      `  - corrupt.pdf (${corrupt.byteLength} bytes, header %PDF- + cuerpo no-PDF)\n` +
       `\n` +
       `Pendientes (requieren tools externos):\n` +
       `  - protected.pdf: qpdf --encrypt test1234 test1234 256 -- text-10p.pdf protected.pdf\n`,
