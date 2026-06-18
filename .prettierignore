@@ -13,3 +13,7 @@ pnpm-lock.yaml
 docs/
 README.md
 CHANGELOG.md
+
+# tsconfigs (con comments y formato específico de TS, prettier no los mejora)
+**/tsconfig*.json
+
