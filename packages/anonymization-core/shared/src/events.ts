@@ -17,7 +17,14 @@
 
 import type { EngineEvents, PipelineStage, ReplacementMode, WorkerJobType } from "./enums.js";
 import type { SerializedEngineError } from "./errors.js";
-import type { Conflict, EntityGroup, ExportOptions, Occurrence, Rule } from "./types.js";
+import type {
+  Conflict,
+  DocumentSourceKind,
+  EntityGroup,
+  ExportOptions,
+  Occurrence,
+  Rule,
+} from "./types.js";
 
 // ─── Pipeline ───
 export interface DocumentImported {
@@ -65,7 +72,7 @@ export interface DocumentParsed {
   readonly documentId: string;
   readonly pageCount: number;
   readonly textlessPages: ReadonlyArray<number>;
-  readonly sourceKind: "text" | "scanned" | "mixed";
+  readonly sourceKind: DocumentSourceKind;
 }
 export interface PdfPasswordRequired {
   readonly documentId: string;

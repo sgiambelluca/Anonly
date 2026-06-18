@@ -314,7 +314,7 @@ describe("@anonly/event-system — EventBus contracts", () => {
       expect(handler).not.toHaveBeenCalled();
     });
 
-    it("dispose es idempotente", () => {
+    it("dispose lanza si se llama dos veces", () => {
       expect(() => {
         bus.dispose();
         bus.dispose();
