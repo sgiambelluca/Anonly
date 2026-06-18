@@ -1,12 +1,13 @@
-<!-- CONTEXT: scope=pdf-engine | dependencias=core/Contracts.md,architecture/03_Data_Model.md,architecture/04_Event_System.md,architecture/05_Worker_Architecture.md | audiencia=IA-implementador | fase=3 -->
+<!-- CONTEXT: scope=pdf-engine | dependencias=core/Contracts.md,architecture/03_Data_Model.md,architecture/04_Event_System.md,architecture/05_Worker_Architecture.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md | audiencia=IA-implementador | fase=3 (Hito 2 cerrado, pendientes: 5b migración a PdfPool, items §15 diferidos a Hito 9/11) -->
 
 # PDF Engine — Spec de Motor
 
 > Extrae texto y posiciones de cada página del PDF. Marca las páginas sin texto para que OCR las procese. Descarta metadata sensible.
 
 **EngineId**: `pdf` (valor del enum `EngineId`)
-**Versión del spec**: 1.1.0
+**Versión del spec**: 1.1.1
 **Última actualización**: 2026-06-18
+**Estado de implementación**: Hito 2 cerrado (PRs #6, #7). Pendiente: migración a `PdfPool` en Hito 9 (item §15.5b) y tests stress/cancel/perf en Hito 11.
 
 ---
 
@@ -208,59 +209,63 @@ PdfEngineOutput {
 
 ## 14. Casos de prueba
 
-| Test | Archivo | Tipo | Descripción |
-|---|---|---|---|
-| `emits PAGE_PARSED for each page` | `contract.test.ts` | contract | valida un `PAGE_PARSED` por página |
-| `emits DOCUMENT_PARSED after all pages` | `contract.test.ts` | contract | valida `DOCUMENT_PARSED` al final |
-| `output has pageCount === pages.length` | `contract.test.ts` | contract | invariante |
-| `pages[i].index === i` | `contract.test.ts` | contract | invariante |
-| `words sorted by y then x` | `unit.test.ts` | unit | orden de lectura |
-| `textlessPages sorted asc` | `unit.test.ts` | unit | invariante |
-| `sourceKind = scanned when all textless` | `edge.test.ts` | edge | caso límite 11 |
-| `sourceKind = text when none textless` | `edge.test.ts` | edge | caso base |
-| `sourceKind = mixed` | `edge.test.ts` | edge | mixto |
-| `throws PdfPasswordRequiredError on protected without password` | `edge.test.ts` | edge | caso 4 |
-| `throws PdfPasswordRequiredError on wrong password` | `edge.test.ts` | edge | caso 4 |
-| `parses protected pdf with correct password` | `edge.test.ts` | edge | caso 3 |
-| `throws PdfInvalidError on empty buffer` | `edge.test.ts` | edge | buffer vacío |
-| `throws PdfInvalidError on non-pdf buffer` | `edge.test.ts` | edge | header inválido |
-| `throws PdfInvalidError on corrupt header` | `edge.test.ts` | edge | caso 6 |
-| `throws PdfCorruptedError on internal page corruption` | `edge.test.ts` | edge | caso 7 |
-| `metadata excludes author and XMP sensitive` | `edge.test.ts` | edge | caso 8 |
-| `hasForms = true for AcroForm pdf` | `edge.test.ts` | edge | caso 9 |
-| `ignores embedded JavaScript` | `edge.test.ts` | edge | caso 10 |
-| `0 pages document returns cleanly` | `edge.test.ts` | edge | caso 1 |
-| `1000 pages document completes within memory budget` | `stress.test.ts` (en `tests/stress/`) | stress | caso 2 |
-| `fuseOcrPage merges words correctly` | `contract.test.ts` | contract | integración con OCR |
-| `dispose releases PDFDocumentProxy` | `contract.test.ts` | contract | limpieza |
-| `process after dispose throws` | `edge.test.ts` | edge | caso 13 |
-| `cancel aborts within 200ms` | `cancel.test.ts` (en `tests/cancel/`) | cancel | SLA |
-| `DocumentModel snapshot stable (3-page deterministic in-memory fixture, 1 textless)` | `snapshot.test.ts` | snapshot | fixture estable, sin binario |
+| Test | Archivo | Tipo | Hito | Descripción |
+|---|---|---|---|---|
+| `emits PAGE_PARSED for each page` | `contract.test.ts` | contract | 2 | valida un `PAGE_PARSED` por página |
+| `emits DOCUMENT_PARSED after all pages` | `contract.test.ts` | contract | 2 | valida `DOCUMENT_PARSED` al final |
+| `output has pageCount === pages.length` | `contract.test.ts` | contract | 2 | invariante |
+| `pages[i].index === i` | `contract.test.ts` | contract | 2 | invariante |
+| `words sorted by y then x` | `unit.test.ts` | unit | 2 | orden de lectura |
+| `textlessPages sorted asc` | `unit.test.ts` | unit | 2 | invariante |
+| `sourceKind = scanned when all textless` | `edge.test.ts` | edge | 2 | caso límite 11 |
+| `sourceKind = text when none textless` | `edge.test.ts` | edge | 2 | caso base |
+| `sourceKind = mixed` | `edge.test.ts` | edge | 2 | mixto |
+| `throws PdfPasswordRequiredError on protected without password` | `edge.test.ts` | edge | 2 | caso 4 (requiere `protected.pdf`, ver §15) |
+| `throws PdfPasswordRequiredError on wrong password` | `edge.test.ts` | edge | 2 | caso 4 (requiere `protected.pdf`, ver §15) |
+| `parses protected pdf with correct password` | `edge.test.ts` | edge | 2 | caso 3 (requiere `protected.pdf`, ver §15) |
+| `throws PdfInvalidError on empty buffer` | `edge.test.ts` | edge | 2 | buffer vacío |
+| `throws PdfInvalidError on non-pdf buffer` | `edge.test.ts` | edge | 2 | header inválido |
+| `throws PdfInvalidError on corrupt header` | `edge.test.ts` | edge | 2 | caso 6 |
+| `throws PdfCorruptedError on internal page corruption` | `edge.test.ts` | edge | 2 | caso 7 |
+| `metadata excludes author and XMP sensitive` | `edge.test.ts` | edge | 2 | caso 8 |
+| `hasForms = true for AcroForm pdf` | `edge.test.ts` | edge | 2 | caso 9 |
+| `ignores embedded JavaScript` | `edge.test.ts` | edge | 2 | caso 10 |
+| `0 pages document returns cleanly` | `edge.test.ts` | edge | 2 | caso 1 |
+| `fuseOcrPage merges words correctly` | `contract.test.ts` | contract | 2 | integración con OCR (vía llamada directa, sin bus) |
+| `dispose releases PDFDocumentProxy` | `contract.test.ts` | contract | 2 | limpieza |
+| `process after dispose throws` | `edge.test.ts` | edge | 2 | caso 13 |
+| `DocumentModel snapshot stable (3-page deterministic in-memory fixture, 1 textless)` | `snapshot.test.ts` | snapshot | 2 | fixture estable, sin binario |
+| `1000 pages document completes within memory budget` | `stress.test.ts` (en `tests/stress/`) | stress | 11 | caso 2; pendiente, requiere `huge-1000p.pdf` (LFS) |
+| `cancel aborts within 200ms` | `cancel.test.ts` (en `tests/cancel/`) | cancel | 11 | SLA; pendiente, requiere `PdfPool` + `AbortRegistry` (Hito 9) |
 
-**Fixtures**: los binarios `.pdf` siguen el patrón definido en `tests/fixtures/README.md` (source of truth: PDFs < 5 MB commiteados en `tests/fixtures/`, ≥ 5 MB a Git LFS en Hito 11; `generate.ts` ya commiteado en Hito 1). Los tests **unit / contract / edge / snapshot** mockean la frontera `pdfjs-dist` (deterministas, sin wasm, sin dependencia de binarios físicos — consistente con `tests/fixtures/README.md` §109-118). Los tests **stress / cancel / perf** (Hito 11) usan PDFs reales generados por `generate.ts`. `generate.ts` debe saber producir: `text-10p`, `scanned-10p`, `protected` (password "test1234"), `corrupt`, `empty`, `text-50p`, `huge-1000p`, `mixed-30p`.
+**Fixtures**: los binarios `.pdf` siguen el patrón definido en `tests/fixtures/README.md` (source of truth: PDFs < 5 MB commiteados en `tests/fixtures/`, ≥ 5 MB a Git LFS en Hito 11; `generate.ts` ya commiteado en Hito 1). Estado actual en Hito 2: commiteados `text-10p.pdf`, `empty.pdf`, `corrupt.pdf` (generados por `generate.ts`); `protected.pdf` pendiente (Hito 2b, requiere `qpdf`); `huge-1000p.pdf` y resto pendientes Hito 11. Los tests **unit / contract / edge / snapshot** (Hito 2) mockean la frontera `pdfjs-dist` (deterministas, sin wasm, sin dependencia de binarios físicos — consistente con `tests/fixtures/README.md`). Los tests **stress / cancel / perf** (Hito 11) usarán PDFs reales generados por `generate.ts`. `generate.ts` debe saber producir: `text-10p`, `scanned-10p`, `protected` (password "test1234"), `corrupt`, `empty`, `text-50p`, `huge-1000p`, `mixed-30p`.
 
 ---
 
 ## 15. Checklist de implementación
 
-- [ ] 1. Crear paquete `packages/anonymization-core/pdf-engine/` con `package.json` y `tsconfig.json` extends base.
-- [ ] 2. Definir `types.ts` con `PdfEngineConfig`, `PdfEngineInput`, `PdfEngineOutput`.
-- [ ] 3. Definir `errors.ts` con `PdfPasswordRequiredError`, `PdfInvalidError`, `PdfCorruptedError`, `PdfTimeoutError`.
-- [ ] 4. Implementar `pdf.engine.ts` respetando `IEngine` y la firma pública de §6.
-- [ ] 5a. (Hito 2) Implementar `init` (cargar pdfjs-dist inline en host, sin `PdfPool`).
+> **Estado Hito 2 (cerrado en PRs #6, #7)**: items 1–4, 5a, 6, 7 (con mediación de Orchestrator, ver ADR-014), 8, 9 (sólo emisión; suscripción consumida por Orchestrator), 10–17.
+>
+> **Pendiente**: item 5b (migración a `PdfPool` → Hito 9); item 18 (cancelación con SLA estricto → Hito 11). El item 7 originalmente describía `fuseOcrPage` como escucha del bus; la firma pública no cambia, pero el wiring quedó en el Orchestrator (ver ADR-014 y §8).
+
+- [x] 1. Crear paquete `packages/anonymization-core/pdf-engine/` con `package.json` y `tsconfig.json` extends base.
+- [x] 2. Definir `types.ts` con `PdfEngineConfig`, `PdfEngineInput`, `PdfEngineOutput`.
+- [x] 3. Definir `errors.ts` con `PdfPasswordRequiredError`, `PdfInvalidError`, `PdfCorruptedError`, `PdfTimeoutError`.
+- [x] 4. Implementar `pdf.engine.ts` respetando `IEngine` y la firma pública de §6.
+- [x] 5a. (Hito 2) Implementar `init` (cargar pdfjs-dist inline en host, sin `PdfPool`).
 - [ ] 5b. (Hito 9) Migrar `init` a `PdfPool` cuando `WorkerPoolManager` exista.
-- [ ] 6. Implementar `process` con `AbortSignal`, transferencia de buffer, `PAGE_PARSED` por página, `DOCUMENT_PARSED` al final.
-- [ ] 7. Implementar `fuseOcrPage` (escucha `OCR_PAGE_FINISHED`, lee cache, fusiona).
-- [ ] 8. Implementar `dispose` (libera `PDFDocumentProxy` y workers inactivos).
-- [ ] 9. Cablear eventos emitidos/consumidos contra `IEventBus`.
-- [ ] 10. Escribir `contract.test.ts` con todos los tests contractuales de §14.
-- [ ] 11. Escribir `unit.test.ts` con cobertura ≥ 85%.
-- [ ] 12. Escribir `edge.test.ts` con todos los casos límite de §13.
-- [ ] 13. Escribir `snapshot.test.ts` con `DocumentModel` de `text-10p.pdf`.
-- [ ] 14. Ejecutar `pnpm lint && pnpm typecheck && pnpm test` y verificar verde.
-- [ ] 15. Verificar que `index.ts` exporta solo `PdfEngine`, `PdfEngineConfig`, `PdfEngineInput`, `PdfEngineOutput` y los errores.
-- [ ] 16. Verificar que ninguna dependencia prohibida aparece en imports (`grep -r 'react\|tesseract\|onnx\|pdf-lib' src/`).
-- [ ] 17. Verificar `no-network-from-core`: ningún `fetch`/`XMLHttpRequest`/`WebSocket` en `src/`.
+- [x] 6. Implementar `process` con `AbortSignal`, `PAGE_PARSED` por página, `DOCUMENT_PARSED` al final. En Hito 2 el `buffer` se trata como `ArrayBuffer` plano (sin transferencia zero-copy; ver §12 y ADR-013).
+- [x] 7. Implementar `fuseOcrPage` (firma intacta de §6; la escucha de `OCR_PAGE_FINISHED` y la lectura de `ctx.cache` quedan en el Orchestrator — ver ADR-014 y §8).
+- [x] 8. Implementar `dispose` (libera `PDFDocumentProxy` y limpia el cache interno de documentos).
+- [x] 9. Cablear eventos **emitidos** contra `IEventBus` (`PAGE_PARSED`, `DOCUMENT_PARSED`, `PDF_PASSWORD_REQUIRED`, `PDF_INVALID`). PDF Engine no se suscribe a ningún evento del bus (§8).
+- [x] 10. Escribir `contract.test.ts` con los tests contractuales de §14 correspondientes a Hito 2.
+- [x] 11. Escribir `unit.test.ts` con cobertura ≥ 85%.
+- [x] 12. Escribir `edge.test.ts` con los casos límite de §13 correspondientes a Hito 2.
+- [x] 13. Escribir `snapshot.test.ts` con `DocumentModel` de fixture determinista en memoria (3 páginas, 1 textless).
+- [x] 14. Ejecutar `pnpm lint && pnpm typecheck && pnpm test` y verificar verde.
+- [x] 15. Verificar que `index.ts` exporta solo `PdfEngine`, `PdfEngineConfig`, `PdfEngineInput`, `PdfEngineOutput` y los errores.
+- [x] 16. Verificar que ninguna dependencia prohibida aparece en imports (`grep -r 'react\|tesseract\|onnx\|pdf-lib' src/`).
+- [x] 17. Verificar `no-network-from-core`: ningún `fetch`/`XMLHttpRequest`/`WebSocket` en `src/`.
 - [ ] 18. (Hito 9/11) Verificar test de cancelación < 200 ms — requiere `PdfPool` + `AbortRegistry`. En Hito 2 se valida cancelación cooperativa inline (checkpoint por página) sin SLA estricto.
 
 ---
