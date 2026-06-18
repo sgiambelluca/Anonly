@@ -130,7 +130,7 @@ El reporte de ambigüedad incluye: archivo, sección, cita textual, pregunta con
 | I-4 | No inventar `EngineErrorCode`. Solo los de `core/Contracts.md`. |
 | I-5 | No agregar dependencias externas. Si el spec las requiere, ya están listadas en "Dependencias permitidas". |
 | I-6 | No modificar `tsconfig.json` base sin ADR. |
-| I-7 | No desactivar reglas de ESLint局部mente sin issue y justificación. |
+| I-7 | No desactivar reglas de ESLint localmente sin issue y justificación. |
 | I-8 | No commitear secrets, tokens ni variables de entorno. |
 | I-9 | No ejecutar `git push` ni `git commit` sin autorización explícita del humano. |
 

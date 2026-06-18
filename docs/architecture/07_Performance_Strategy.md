@@ -226,7 +226,7 @@ Fixtures pesados (> 5 MB) vía Git LFS o descargados en `postinstall` con hash v
 4. Cargar PDF enorme → cancelar a mitad → verificar cese de CPU < 200 ms.
 5. Editar grupo mientras NER sigue corriendo → verificar que no se pierden ediciones.
 6. Cargar PDF corrupto → verificar error tipado y mensaje claro.
-7. Abrir y cerrar 10 documentos consecutivos → verificar memoria回归 baseline.
+7. Abrir y cerrar 10 documentos consecutivos → verificar que la memoria regresa al baseline.
 8. Cargar PDF sin NER activado → verificar que solo Regex detecta.
 9. Activar NER en runtime → verificar que se descarga modelo y reanaliza.
 10. Fusionar y dividir grupos → verificar índices y reemplazos.
