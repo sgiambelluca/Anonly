@@ -15,9 +15,11 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "pnpm -r typecheck",
+    "build": "pnpm -r --filter \"./packages/anonymization-core/**\" run build",
+    "build:clean": "pnpm -r exec rm -rf dist && pnpm build",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:contract": "vitest run --dir **/__tests__/contract.test.ts",
+    "test:contract": "vitest run packages/**/src/__tests__/contract.test.ts",
     "test:ui": "vitest run --ui",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
@@ -28,7 +30,7 @@
     "test:all": "pnpm lint && pnpm typecheck && pnpm test && pnpm test:e2e",
     "changeset": "changeset",
     "version": "changeset version",
-    "release": "pnpm run build && changeset publish",
+    "release": "pnpm build && changeset publish",
     "prepare": "husky || true"
   },
   "devDependencies": {

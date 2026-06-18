@@ -145,7 +145,7 @@ export type Serializable =
   | boolean
   | null
   | undefined
-  | Serializable[]
+  | ReadonlyArray<Serializable>
   | { readonly [key: string]: Serializable };
 
 export interface WorkerInbound {
@@ -173,7 +173,7 @@ export type WorkerOutbound =
       readonly type: "COMPLETED";
       readonly jobId: string;
       readonly result: Serializable;
-      readonly transferred?: Transferable[];
+      readonly transferred?: ReadonlyArray<Transferable>;
     }
   | {
       readonly type: "FAILED";

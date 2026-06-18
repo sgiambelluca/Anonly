@@ -371,6 +371,14 @@ describe("@anonly/shared — Contracts", () => {
       expect(() => t.consume()).toThrow(/consumido/);
     });
 
+    it("buffer lanza si se accede después de consume()", () => {
+      const buf = new ArrayBuffer(10);
+      const t = makeTransferable(buf);
+      expect(t.buffer).toBe(buf);
+      t.consume();
+      expect(() => t.buffer).toThrow(/consumido/);
+    });
+
     it("isTransferable devuelve false para no-transferables", () => {
       expect(isTransferable({})).toBe(false);
       expect(isTransferable(null)).toBe(false);

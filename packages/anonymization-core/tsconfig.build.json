@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "noEmit": false
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/__tests__/**", "dist", "node_modules", "*/dist"],
+  "references": [
+    { "path": "./shared/tsconfig.build.json" },
+    { "path": "./event-system/tsconfig.build.json" }
+  ]
+}
