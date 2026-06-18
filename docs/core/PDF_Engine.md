@@ -5,8 +5,8 @@
 > Extrae texto y posiciones de cada página del PDF. Marca las páginas sin texto para que OCR las procese. Descarta metadata sensible.
 
 **EngineId**: `pdf` (valor del enum `EngineId`)
-**Versión del spec**: 1.0.0
-**Última actualización**: 2026-06-17
+**Versión del spec**: 1.1.0
+**Última actualización**: 2026-06-18
 
 ---
 
@@ -63,14 +63,16 @@ Recibir un `ArrayBuffer` con un PDF binario y producir un `DocumentModel` con p�
 ## 6. Interfaces públicas
 
 ```ts
+// PdfEngineConfig se define en core/Contracts.md §6 (source of truth) y se importa de @anonly/shared.
+// Solo contiene maxPageCount; el timeout por página se lee de ctx.config.workerPool.timeouts["pdf-parse"]
+// (default 30000, single source of truth, ver ADR-013).
 export interface PdfEngineConfig {
   readonly maxPageCount: number;        // default 10000
-  readonly parseTimeoutMsPerPpage: number; // default 30000
 }
 
 export interface PdfEngineInput {
   readonly documentId: string;
-  readonly buffer: ArrayBuffer;         // PDF binario, se transfiere (zero-copy)
+  readonly buffer: ArrayBuffer;         // PDF binario, se transfiere (zero-copy) — en Hito 2 se trata como ArrayBuffer plano (ver §12)
   readonly password?: string;           // si el PDF está protegido
 }
 
@@ -107,13 +109,13 @@ Canal: `EventChannel.Pdf`.
 
 ## 8. Eventos que consume
 
-| Evento | Cuándo | Payload | Acción |
-|---|---|---|---|
-| `OCR_PAGE_FINISHED` | cuando `ocr-engine` termina una página | `OcrPageFinished` + un side-channel con las `Word[]` (vía callback en `ctx` o payload extendido) | llama a `fuseOcrPage` para fusionar las palabras OCR en la `Page` correspondiente |
+**El PDF Engine no se suscribe a ningún evento del bus** (preserva la invariante de `04_Event_System.md` §11; ver ADR-014). La fusión de palabras OCR es **mediada por el Orchestrator**:
 
-> Nota de implementación: las `Word[]` no viajan en el evento (sería pesado). El `OcrPool` las deposita en `ctx.cache` con clave `ocr-words:<documentId>:<pageIndex>` y `OCR_PAGE_FINISHED` notifica al PDF Engine para que las lea de cache y fusione.
+1. `ocr-engine` emite `OCR_PAGE_FINISHED` (canal `ocr`); el `OcrPool` deposita las `Word[]` en `ctx.cache` con clave `ocr-words:<documentId>:<pageIndex>`.
+2. El **Orchestrator** (no el PDF Engine) escucha `OCR_PAGE_FINISHED`, lee las `Word[]` de `ctx.cache` e invoca `PdfEngine.fuseOcrPage(documentId, pageIndex, words)`.
+3. `fuseOcrPage` (método público, firma intacta de §6) fusiona y devuelve un nuevo `Document` inmutable.
 
-Canal escuchado: `EventChannel.Ocr`.
+El PDF Engine **sólo emite** eventos (ver §7); no consume ninguno del bus. En Hito 2, `fuseOcrPage` se testa con llamada directa (sin bus). El wiring Orchestrator→`fuseOcrPage` se completa en Hito 9.
 
 ---
 
@@ -173,14 +175,16 @@ PdfEngineOutput {
 
 ## 12. Consideraciones de rendimiento
 
-- Corre en `PdfPool` (Web Workers dedicados).
+- **Hito 2**: corre inline en el host thread (sin `PdfPool`); cancelación vía `AbortSignal` con checkpoint por página.
+- **Hito 9**: migra a `PdfPool` (Web Workers dedicados) cuando `WorkerPoolManager` exista. La interfaz pública (§6) no cambia entre ambos modos (ver ADR-013).
 - Costo: 0.5–3 s por página con texto; 0.1–0.5 s por página vacía/escaneada.
 - Memoria típica: 20–80 MB por PDF activo.
-- `buffer` se **transfiere** al worker (zero-copy). El host pierde acceso al buffer.
+- `buffer` se **transfiere** al worker (zero-copy). El host pierde acceso al buffer. En Hito 2 (inline) el `buffer` se trata como `ArrayBuffer` plano; no implementar lógica de `Transferable.consume()` hasta Hito 9 (sería dead code inline).
 - Streaming: `PAGE_PARSED` se emite por página, no al final. La UI puede mostrar páginas a medida que se parsean.
-- Tamaño de lote recomendado: 1 página por job (granularidad de cancelación óptima). El pool despacha en paralelo respetando `pdfPoolSize`.
+- Tamaño de lote recomendado: 1 página por job (granularidad de cancelación óptima). El pool despacha en paralelo respetando `pdfPoolSize` (aplica desde Hito 9; en Hito 2 el procesamiento es secuencial por página con checkpoint).
 - Reutiliza `PDFDocumentProxy` de PDF.js solo si el `documentId` coincide entre jobs; si cambia, lo cierra y abre uno nuevo.
 - Memoria del `PDFDocumentProxy` se libera en `dispose()` del engine o al cambiar `documentId`.
+- **Preparación para Hito 9 (normativa)**: aísla `parsePage(pdfDoc, pageIndex): Page` como función pura sin supuestos host/worker (Hito 9 la envuelve en un job del worker sin modificarla). La emisión de eventos (`PAGE_PARSED`, `DOCUMENT_PARSED`) queda en el engine (host), no en el worker. No buildar lógica de `Transferable.consume()` en Hito 2.
 
 ---
 
@@ -231,9 +235,9 @@ PdfEngineOutput {
 | `dispose releases PDFDocumentProxy` | `contract.test.ts` | contract | limpieza |
 | `process after dispose throws` | `edge.test.ts` | edge | caso 13 |
 | `cancel aborts within 200ms` | `cancel.test.ts` (en `tests/cancel/`) | cancel | SLA |
-| `DocumentModel snapshot stable for text-10p.pdf` | `snapshot.test.ts` | snapshot | fixture estable |
+| `DocumentModel snapshot stable (3-page deterministic in-memory fixture, 1 textless)` | `snapshot.test.ts` | snapshot | fixture estable, sin binario |
 
-Fixtures: `tests/fixtures/text-10p.pdf`, `scanned-10p.pdf`, `protected.pdf` (password "test1234"), `corrupt.pdf`, `empty.pdf`, `text-50p.pdf`, `huge-1000p.pdf`, `mixed-30p.pdf`.
+**Fixtures**: los binarios `.pdf` siguen el patrón definido en `tests/fixtures/README.md` (source of truth: PDFs < 5 MB commiteados en `tests/fixtures/`, ≥ 5 MB a Git LFS en Hito 11; `generate.ts` ya commiteado en Hito 1). Los tests **unit / contract / edge / snapshot** mockean la frontera `pdfjs-dist` (deterministas, sin wasm, sin dependencia de binarios físicos — consistente con `tests/fixtures/README.md` §109-118). Los tests **stress / cancel / perf** (Hito 11) usan PDFs reales generados por `generate.ts`. `generate.ts` debe saber producir: `text-10p`, `scanned-10p`, `protected` (password "test1234"), `corrupt`, `empty`, `text-50p`, `huge-1000p`, `mixed-30p`.
 
 ---
 
@@ -243,7 +247,8 @@ Fixtures: `tests/fixtures/text-10p.pdf`, `scanned-10p.pdf`, `protected.pdf` (pas
 - [ ] 2. Definir `types.ts` con `PdfEngineConfig`, `PdfEngineInput`, `PdfEngineOutput`.
 - [ ] 3. Definir `errors.ts` con `PdfPasswordRequiredError`, `PdfInvalidError`, `PdfCorruptedError`, `PdfTimeoutError`.
 - [ ] 4. Implementar `pdf.engine.ts` respetando `IEngine` y la firma pública de §6.
-- [ ] 5. Implementar `init` (cargar pdfjs-dist en worker, crear `PdfPool`).
+- [ ] 5a. (Hito 2) Implementar `init` (cargar pdfjs-dist inline en host, sin `PdfPool`).
+- [ ] 5b. (Hito 9) Migrar `init` a `PdfPool` cuando `WorkerPoolManager` exista.
 - [ ] 6. Implementar `process` con `AbortSignal`, transferencia de buffer, `PAGE_PARSED` por página, `DOCUMENT_PARSED` al final.
 - [ ] 7. Implementar `fuseOcrPage` (escucha `OCR_PAGE_FINISHED`, lee cache, fusiona).
 - [ ] 8. Implementar `dispose` (libera `PDFDocumentProxy` y workers inactivos).
@@ -256,7 +261,7 @@ Fixtures: `tests/fixtures/text-10p.pdf`, `scanned-10p.pdf`, `protected.pdf` (pas
 - [ ] 15. Verificar que `index.ts` exporta solo `PdfEngine`, `PdfEngineConfig`, `PdfEngineInput`, `PdfEngineOutput` y los errores.
 - [ ] 16. Verificar que ninguna dependencia prohibida aparece en imports (`grep -r 'react\|tesseract\|onnx\|pdf-lib' src/`).
 - [ ] 17. Verificar `no-network-from-core`: ningún `fetch`/`XMLHttpRequest`/`WebSocket` en `src/`.
-- [ ] 18. Verificar test de cancelación < 200 ms.
+- [ ] 18. (Hito 9/11) Verificar test de cancelación < 200 ms — requiere `PdfPool` + `AbortRegistry`. En Hito 2 se valida cancelación cooperativa inline (checkpoint por página) sin SLA estricto.
 
 ---
 

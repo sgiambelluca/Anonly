@@ -47,7 +47,7 @@
 | Evento | Emisor | Receptores | Payload | Timing | Idempotente | Orden | Notas |
 |---|---|---|---|---|---|---|---|
 | `OCR_STARTED` | OCR Engine | UI | `{ documentId, pagesToProcess: number[] }` | async | sí | none | |
-| `OCR_PAGE_FINISHED` | OCR Engine | Orchestrator, PDF Engine | `{ documentId, pageIndex, wordCount, confidence }` | async | sí | none | PDF Engine fusiona palabras OCR en `Page.words`. |
+| `OCR_PAGE_FINISHED` | OCR Engine | Orchestrator | `{ documentId, pageIndex, wordCount, confidence }` | async | sí | none | Orchestrator lee `Word[]` de `ctx.cache` (clave `ocr-words:<documentId>:<pageIndex>`) y llama `PdfEngine.fuseOcrPage` (ver ADR-014). PDF Engine no se suscribe a este evento. |
 | `OCR_FINISHED` | OCR Engine | Orchestrator | `{ documentId, durationMs }` | async | sí | none | Dispara detección. |
 | `OCR_PAGE_FAILED` | OCR Engine | Orchestrator | `{ documentId, pageIndex, error: EngineError }` | async | sí | none | Reintentable hasta `maxRetries`. |
 
@@ -149,14 +149,14 @@ Inputs del usuario que mutan el estado de grupos/reglas/pipeline. Siempre `sync`
 | UI | ✓ | – | – | – | – | – | ✓ | ✓ | ✓ |
 | Orchestrator | – | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | PDF Engine | ✓ | ✓ | – | – | – | – | – | – | – |
-| OCR Engine | ✓ | ✓ | ✓ | – | – | – | – | – | – |
+| OCR Engine | ✓ | ✓ | – | – | – | – | – | – | – |
 | Regex Engine | ✓ | – | – | – | – | – | ✓ | – | – |
 | NER Engine | ✓ | ✓ | – | – | – | – | ✓ | – | – |
 | Grouping Engine | ✓ | ✓ | – | – | – | – | – | ✓ | – |
 | Render Engine | ✓ | ✓ | – | – | – | – | – | – | – |
 | Export Engine | – | ✓ | – | – | – | – | – | – | – |
 
-**Invariante**: ningún motor escucha a otro motor excepto Grouping (que escucha `ENTITY_FOUND` de Regex y NER), y Render/Export (que escuchan cambios de grupos vía Orchestrator). Esta matriz se valida con un test de contrato del bus.
+**Invariante**: ningún motor escucha a otro motor excepto Grouping (que escucha `ENTITY_FOUND` de Regex y NER), y Render/Export (que escuchan cambios de grupos vía Orchestrator). La fusión OCR→PDF es mediada por el Orchestrator (PDF Engine no se suscribe a `OCR_PAGE_FINISHED`; ver ADR-014). Esta matriz se valida con un test de contrato del bus.
 
 ---
 
