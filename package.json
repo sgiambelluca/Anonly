@@ -1,0 +1,63 @@
+{
+  "name": "anonly",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Plataforma de anonimización documental 100% local. Ver docs/00_Project_Vision.md.",
+  "packageManager": "pnpm@9.12.0",
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "scripts": {
+    "lint": "eslint . --max-warnings=0",
+    "lint:fix": "eslint . --fix --max-warnings=0",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "pnpm -r typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:contract": "vitest run --dir **/__tests__/contract.test.ts",
+    "test:ui": "vitest run --ui",
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test",
+    "test:perf": "vitest run --dir tests/perf",
+    "test:leak": "vitest run --dir tests/leak",
+    "test:cancel": "vitest run --dir tests/cancel",
+    "test:security": "vitest run --dir tests/security",
+    "test:all": "pnpm lint && pnpm typecheck && pnpm test && pnpm test:e2e",
+    "changeset": "changeset",
+    "version": "changeset version",
+    "release": "pnpm run build && changeset publish",
+    "prepare": "husky || true"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.27.9",
+    "@commitlint/cli": "^19.5.0",
+    "@commitlint/config-conventional": "^19.5.0",
+    "@eslint/js": "^9.11.0",
+    "@playwright/test": "^1.48.0",
+    "@types/node": "^20.16.10",
+    "@typescript-eslint/eslint-plugin": "^8.8.0",
+    "@typescript-eslint/parser": "^8.8.0",
+    "@vitest/coverage-v8": "^2.1.2",
+    "eslint": "^9.11.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-import": "^2.31.0",
+    "husky": "^9.1.6",
+    "lint-staged": "^15.2.10",
+    "prettier": "^3.3.3",
+    "typescript": "^5.6.2",
+    "typescript-eslint": "^8.8.0",
+    "vitest": "^2.1.2"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx,mjs,cjs}": [
+      "eslint --fix --max-warnings=0 --no-warn-ignored",
+      "prettier --write"
+    ],
+    "*.{json,md,yml,yaml,css}": [
+      "prettier --write"
+    ]
+  }
+}

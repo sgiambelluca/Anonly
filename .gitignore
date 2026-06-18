@@ -1,0 +1,56 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# Cache
+.cache/
+.vite/
+.turbo/
+.eslintcache
+.parcel-cache/
+
+# Test artifacts
+coverage/
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# Fixtures pesados (LFS futuro); chicos se commitean
+tests/fixtures/*.large.pdf
+tests/fixtures/*.bin
+
+# Models / wasm cacheados localmente (dev)
+.models/
+.wasm/
+
+# Changesets temporales
+.changeset/*.md
+!.changeset/config.json
+!.changeset/README.md

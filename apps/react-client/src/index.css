@@ -1,0 +1,34 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+  }
+
+  body {
+    @apply bg-bg-secondary text-text-primary font-sans antialiased;
+  }
+}
+
+@layer components {
+  .anonly-button {
+    @apply inline-flex items-center justify-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50;
+  }
+  .anonly-button-primary {
+    @apply anonly-button bg-accent text-white hover:bg-blue-700;
+  }
+  .anonly-button-secondary {
+    @apply anonly-button bg-bg-tertiary text-text-primary hover:bg-border;
+  }
+  .anonly-button-ghost {
+    @apply anonly-button bg-transparent text-text-secondary hover:bg-bg-tertiary;
+  }
+  .anonly-button-danger {
+    @apply anonly-button bg-error text-white hover:bg-red-700;
+  }
+}
