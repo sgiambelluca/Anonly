@@ -1,4 +1,10 @@
-import { CancelledError, EngineDisposedError, InvalidInputError } from "@anonly/shared";
+import {
+  CancelledError,
+  EngineDisposedError,
+  EngineEvents,
+  EventChannel,
+  InvalidInputError,
+} from "@anonly/shared";
 import type {
   EngineConfig,
   EngineContext,
@@ -140,8 +146,7 @@ function createMockPdfDocument(
       getPage: vi.fn((pageNum: number) => Promise.resolve(pages[pageNum - 1])),
       getMetadata: vi.fn(() => Promise.resolve({ info: { Title: "Test" }, metadata: undefined })),
       destroy: vi.fn(),
-      isEncrypted: false,
-      pdfVersion: "1.7",
+      _pdfInfo: { encrypted: false, pdfVersion: "1.7" },
     };
   }
 
@@ -184,8 +189,7 @@ function createMockPdfDocument(
       }),
     ),
     destroy: vi.fn(),
-    isEncrypted: false,
-    pdfVersion: "1.7",
+    _pdfInfo: { encrypted: false, pdfVersion: "1.7" },
   };
 }
 
@@ -267,6 +271,22 @@ describe("PdfEngine — edge case tests", () => {
       await expect(engine.process(input, ctx)).rejects.toThrow(PdfPasswordRequiredError);
     });
 
+    it("emits PDF_PASSWORD_REQUIRED event on password error", async () => {
+      const pwdErr = new Error("Password required");
+      pwdErr.name = "PasswordException";
+      vi.mocked(getDocument).mockReturnValueOnce({
+        promise: Promise.reject(pwdErr),
+      } as unknown as ReturnType<typeof getDocument>);
+
+      await engine.init(ctx);
+      const emitSpy = vi.spyOn(ctx.bus, "emit");
+      const input = createValidInput("doc-pwd-spy");
+      await expect(engine.process(input, ctx)).rejects.toThrow(PdfPasswordRequiredError);
+      expect(emitSpy).toHaveBeenCalledWith(EventChannel.Pdf, EngineEvents.PDF_PASSWORD_REQUIRED, {
+        documentId: "doc-pwd-spy",
+      });
+    });
+
     it("parses normally with correct password", async () => {
       vi.mocked(getDocument).mockReturnValue({
         promise: Promise.resolve(createMockPdfDocument(1)),
@@ -276,6 +296,45 @@ describe("PdfEngine — edge case tests", () => {
       const input = createValidInput("doc-correct-pwd", "test1234");
       const output = await engine.process(input, ctx);
       expect(output.pageCount).toBe(1);
+    });
+  });
+
+  describe("Embedded JavaScript is ignored", () => {
+    it("parses normally when PDF has JavaScript actions", async () => {
+      vi.mocked(getDocument).mockReturnValue({
+        promise: Promise.resolve({
+          numPages: 2,
+          getPage: vi.fn((_pageNum: number) =>
+            Promise.resolve({
+              getViewport: vi.fn(() => ({ width: 595, height: 842 })),
+              getTextContent: vi.fn(() =>
+                Promise.resolve({
+                  items: [{ str: "Safe", transform: [1, 0, 0, 1, 50, 800], width: 30, height: 12 }],
+                }),
+              ),
+            }),
+          ),
+          getMetadata: vi.fn(() =>
+            Promise.resolve({ info: { Title: "JS Doc" }, metadata: undefined }),
+          ),
+          getJSActions: vi.fn(() =>
+            Promise.resolve({
+              doc: ["app.alert('Hello');"],
+              "page:1": ["this.print({bUI: true});"],
+            }),
+          ),
+          destroy: vi.fn(),
+          _pdfInfo: { encrypted: false, pdfVersion: "1.7" },
+        }),
+      } as unknown as ReturnType<typeof getDocument>);
+
+      await engine.init(ctx);
+      const input = createValidInput("doc-js-actions");
+      const output = await engine.process(input, ctx);
+
+      expect(output.pageCount).toBe(2);
+      expect(output.document.pages[0]!.words.length).toBe(1);
+      expect(output.document.pages[0]!.words[0]!.text).toBe("Safe");
     });
   });
 
@@ -337,6 +396,28 @@ describe("PdfEngine — edge case tests", () => {
         (output.document.metadata as unknown as Record<string, unknown>).Author,
       ).toBeUndefined();
     });
+
+    it("does not expose XMP metadata in DocumentMetadata", async () => {
+      vi.mocked(getDocument).mockReturnValue({
+        promise: Promise.resolve(
+          createMockPdfDocument(1, {
+            metadata: {
+              Title: "Doc Title",
+              Producer: "App",
+              Creator: "User",
+            },
+          }),
+        ),
+      } as unknown as ReturnType<typeof getDocument>);
+
+      await engine.init(ctx);
+      const input = createValidInput("doc-xmp");
+      const output = await engine.process(input, ctx);
+
+      const meta = output.document.metadata;
+      expect((meta as unknown as Record<string, unknown>).xmpMetadata).toBeUndefined();
+      expect((meta as unknown as Record<string, unknown>).metadata).toBeUndefined();
+    });
   });
 
   describe("Case 8: hasForms = true for AcroForm PDF", () => {
@@ -371,8 +452,7 @@ describe("PdfEngine — edge case tests", () => {
           getPage: vi.fn(),
           getMetadata: vi.fn(() => Promise.resolve({ info: {}, metadata: undefined })),
           destroy: vi.fn(),
-          isEncrypted: false,
-          pdfVersion: "1.7",
+          _pdfInfo: { encrypted: false, pdfVersion: "1.7" },
         }),
       } as unknown as ReturnType<typeof getDocument>);
 
@@ -478,8 +558,7 @@ describe("PdfEngine — edge case tests", () => {
           }),
           getMetadata: vi.fn(() => Promise.resolve({ info: {}, metadata: undefined })),
           destroy: vi.fn(),
-          isEncrypted: false,
-          pdfVersion: "1.7",
+          _pdfInfo: { encrypted: false, pdfVersion: "1.7" },
         }),
       } as unknown as ReturnType<typeof getDocument>);
 

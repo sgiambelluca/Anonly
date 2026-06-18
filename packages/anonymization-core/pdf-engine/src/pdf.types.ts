@@ -1,4 +1,4 @@
-import type { Document, DocumentSourceKind } from "@anonly/shared";
+import type { Document } from "@anonly/shared";
 
 export interface PdfEngineInput {
   readonly documentId: string;
@@ -10,5 +10,5 @@ export interface PdfEngineOutput {
   readonly document: Document;
   readonly pageCount: number;
   readonly textlessPages: ReadonlyArray<number>;
-  readonly sourceKind: DocumentSourceKind;
+  readonly sourceKind: "text" | "scanned" | "mixed";
 }

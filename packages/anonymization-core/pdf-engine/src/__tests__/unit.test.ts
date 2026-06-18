@@ -148,8 +148,7 @@ function createMockPdfDocument(
     getPage: vi.fn((pageNum: number) => Promise.resolve(pages[pageNum - 1])),
     getMetadata: vi.fn(() => Promise.resolve({ info: { Title: "Test" }, metadata: undefined })),
     destroy: vi.fn(),
-    isEncrypted: false,
-    pdfVersion: "1.7",
+    _pdfInfo: { encrypted: false, pdfVersion: "1.7" },
   };
 }
 

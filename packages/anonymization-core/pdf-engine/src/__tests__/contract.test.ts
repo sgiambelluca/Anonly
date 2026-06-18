@@ -141,8 +141,7 @@ function createMockPdfDocument(
       }),
     ),
     destroy: vi.fn(),
-    isEncrypted: false,
-    pdfVersion: "1.7",
+    _pdfInfo: { encrypted: false, pdfVersion: "1.7" },
   };
 }
 
@@ -340,14 +339,16 @@ describe("PdfEngine — contract tests", () => {
   });
 
   it("dispose releases resources and clears documents", async () => {
+    const mockDoc = createMockPdfDocument(1);
     vi.mocked(getDocument).mockReturnValue({
-      promise: Promise.resolve(createMockPdfDocument(1)),
+      promise: Promise.resolve(mockDoc),
     } as unknown as ReturnType<typeof getDocument>);
 
     await engine.init(ctx);
     const input = createValidInput("doc-dispose");
     await engine.process(input, ctx);
 
+    expect(mockDoc.destroy).toHaveBeenCalledTimes(1);
     expect(engine["documents"].size).toBe(1);
 
     await engine.dispose();

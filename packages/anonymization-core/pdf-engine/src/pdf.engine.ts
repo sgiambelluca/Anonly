@@ -15,7 +15,7 @@ import {
   type PdfEngineConfig,
   type Word,
 } from "@anonly/shared";
-import { getDocument } from "pdfjs-dist";
+import { getDocument, type PDFDocumentProxy, type PDFPageProxy } from "pdfjs-dist";
 
 import {
   PdfCorruptedError,
@@ -29,42 +29,10 @@ const DEFAULT_MAX_PAGE_COUNT = 10_000;
 const DEFAULT_TIMEOUT_MS_PER_PAGE = 30_000;
 
 /*
- * Interfaces internas mínimas para el proxy de pdfjs-dist.
- * El cast `as unknown as Internal*` es necesario porque pdfjs-dist
- * no exporta sus tipos internos (PDFDocumentProxy, PDFPageProxy)
- * directamente desde el entry point del paquete.
- * Issue asociado: pdfjs-dist#12345
+ * `_pdfInfo` es una propiedad pública en la clase PDFDocumentProxy
+ * (tipo `any`), usada para acceder a isEncrypted y pdfVersion que no
+ * están en la interfaz pública de TypeScript.
  */
-interface InternalTextItem {
-  readonly str: string;
-  readonly transform: readonly number[];
-  readonly width: number;
-  readonly height?: number;
-}
-
-interface InternalTextContent {
-  readonly items: ReadonlyArray<InternalTextItem>;
-}
-
-interface InternalViewport {
-  readonly width: number;
-  readonly height: number;
-}
-
-interface InternalPageProxy {
-  getViewport(options: { readonly scale: number }): InternalViewport;
-  getTextContent(): Promise<InternalTextContent>;
-}
-
-interface InternalDocumentProxy {
-  readonly numPages: number;
-  readonly pdfVersion?: string;
-  readonly isEncrypted?: boolean;
-  getPage(pageNum: number): Promise<InternalPageProxy>;
-  getMetadata(): Promise<{ info: Record<string, unknown>; metadata: unknown }>;
-  destroy(): void;
-}
-
 export class PdfEngine implements IEngine {
   readonly id = EngineId.Pdf;
 
@@ -98,10 +66,18 @@ export class PdfEngine implements IEngine {
     const { documentId, buffer, password } = input;
 
     if (buffer.byteLength === 0) {
+      operationCtx.bus.emit(EventChannel.Pdf, EngineEvents.PDF_INVALID, {
+        documentId,
+        reason: "Buffer vacío.",
+      });
       throw new PdfInvalidError(documentId, "Buffer vacío.");
     }
 
     if (password !== undefined && password.length === 0) {
+      operationCtx.bus.emit(EventChannel.Pdf, EngineEvents.PDF_INVALID, {
+        documentId,
+        reason: "Password vacío no permitido.",
+      });
       throw new PdfInvalidError(documentId, "Password vacío no permitido.");
     }
 
@@ -112,17 +88,21 @@ export class PdfEngine implements IEngine {
     const header = new Uint8Array(buffer, 0, 5);
     const headerStr = new TextDecoder().decode(header);
     if (headerStr !== "%PDF-") {
+      operationCtx.bus.emit(EventChannel.Pdf, EngineEvents.PDF_INVALID, {
+        documentId,
+        reason: "No es un PDF válido: header no comienza con %PDF-.",
+      });
       throw new PdfInvalidError(documentId, "No es un PDF válido: header no comienza con %PDF-.");
     }
 
-    let pdfDocument: InternalDocumentProxy;
+    let pdfDocument: PDFDocumentProxy;
     try {
       const loadingTask = getDocument({
         data: buffer,
         password,
         useWorkerFetch: false,
       });
-      pdfDocument = (await loadingTask.promise) as unknown as InternalDocumentProxy;
+      pdfDocument = await loadingTask.promise;
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       const name = err instanceof Error ? err.name : "";
@@ -133,6 +113,7 @@ export class PdfEngine implements IEngine {
         message.includes("NeedsPwd") ||
         message.includes("IncorrectPassword")
       ) {
+        operationCtx.bus.emit(EventChannel.Pdf, EngineEvents.PDF_PASSWORD_REQUIRED, { documentId });
         throw new PdfPasswordRequiredError(documentId);
       }
       if (
@@ -140,20 +121,24 @@ export class PdfEngine implements IEngine {
         message.toLowerCase().includes("invalid") ||
         message.toLowerCase().includes("corrupt")
       ) {
+        operationCtx.bus.emit(EventChannel.Pdf, EngineEvents.PDF_INVALID, {
+          documentId,
+          reason: message,
+        });
         throw new PdfInvalidError(documentId, message);
       }
       throw new PdfCorruptedError(documentId, message);
     }
 
     if (operationCtx.abortSignal.aborted) {
-      pdfDocument.destroy();
+      void pdfDocument.destroy();
       throw new CancelledError(documentId);
     }
 
     const pageCount = pdfDocument.numPages;
 
     if (pageCount > this.config.maxPageCount) {
-      pdfDocument.destroy();
+      void pdfDocument.destroy();
       throw new PdfInvalidError(
         documentId,
         `El documento supera el límite de ${this.config.maxPageCount} páginas.`,
@@ -165,17 +150,17 @@ export class PdfEngine implements IEngine {
 
     for (let i = 1; i <= pageCount; i++) {
       if (operationCtx.abortSignal.aborted) {
-        pdfDocument.destroy();
+        void pdfDocument.destroy();
         throw new CancelledError(documentId);
       }
 
       const pageIndex = i - 1;
 
-      let pageProxy: InternalPageProxy;
+      let pageProxy: PDFPageProxy;
       try {
         pageProxy = await pdfDocument.getPage(i);
       } catch (err: unknown) {
-        pdfDocument.destroy();
+        void pdfDocument.destroy();
         const message = err instanceof Error ? err.message : String(err);
         throw new PdfCorruptedError(documentId, message, pageIndex);
       }
@@ -191,7 +176,7 @@ export class PdfEngine implements IEngine {
         const textContent = await this.parsePageTextWithTimeout(pageProxy, pageIndex, timeoutMs);
         words = this.convertTextItemsToWords(textContent, pageIndex, pageHeight);
       } catch (err: unknown) {
-        pdfDocument.destroy();
+        void pdfDocument.destroy();
         if (err instanceof PdfTimeoutError) {
           throw err;
         }
@@ -230,7 +215,7 @@ export class PdfEngine implements IEngine {
     const sourceKind = this.determineSourceKind(textlessPages, pageCount);
 
     const metadata = await this.extractMetadata(pdfDocument);
-    pdfDocument.destroy();
+    void pdfDocument.destroy();
 
     const document: Document = {
       id: documentId,
@@ -356,11 +341,22 @@ export class PdfEngine implements IEngine {
     }
   }
 
+  /* TextContent from pdfjs-dist has items: Array<TextItem | TextMarkedContent>.
+   * TextMarkedContent (type/id only) is filtered out in convertTextItemsToWords.
+   * The `as` cast is valid because the structural subset (optional str/transform/width/height)
+   * is compatible with both TextItem and TextMarkedContent shapes. */
   private async parsePageTextWithTimeout(
-    pageProxy: InternalPageProxy,
+    pageProxy: PDFPageProxy,
     pageIndex: number,
     timeoutMs: number,
-  ): Promise<InternalTextContent> {
+  ): Promise<{
+    items: ReadonlyArray<{
+      str?: string;
+      transform?: readonly number[];
+      width?: number;
+      height?: number;
+    }>;
+  }> {
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
     const timeoutPromise = new Promise<never>((_, reject) => {
@@ -371,7 +367,14 @@ export class PdfEngine implements IEngine {
 
     try {
       const result = await Promise.race([pageProxy.getTextContent(), timeoutPromise]);
-      return result;
+      return result as {
+        items: ReadonlyArray<{
+          str?: string;
+          transform?: readonly number[];
+          width?: number;
+          height?: number;
+        }>;
+      };
     } finally {
       if (timeoutId !== undefined) {
         clearTimeout(timeoutId);
@@ -380,14 +383,21 @@ export class PdfEngine implements IEngine {
   }
 
   private convertTextItemsToWords(
-    textContent: InternalTextContent,
+    textContent: {
+      items: ReadonlyArray<{
+        str?: string;
+        transform?: readonly number[];
+        width?: number;
+        height?: number;
+      }>;
+    },
     pageIndex: number,
     pageHeight: number,
   ): Word[] {
     const words: Word[] = [];
 
     for (const item of textContent.items) {
-      if (!item.str || item.str.trim().length === 0) continue;
+      if (!item.str || item.str.trim().length === 0 || !item.transform) continue;
 
       const x = item.transform[4] ?? 0;
       const baselineY = item.transform[5] ?? 0;
@@ -432,7 +442,7 @@ export class PdfEngine implements IEngine {
     return "mixed";
   }
 
-  private async extractMetadata(pdfDocument: InternalDocumentProxy): Promise<DocumentMetadata> {
+  private async extractMetadata(pdfDocument: PDFDocumentProxy): Promise<DocumentMetadata> {
     let title: string | undefined;
     let producer: string | undefined;
     let creationTool: string | undefined;
@@ -442,7 +452,7 @@ export class PdfEngine implements IEngine {
 
     try {
       const result = await pdfDocument.getMetadata();
-      const info = result.info;
+      const info = result.info as Record<string, unknown> | undefined;
       if (info) {
         if (typeof info.Title === "string") title = info.Title;
         if (typeof info.Producer === "string") producer = info.Producer;
@@ -457,19 +467,19 @@ export class PdfEngine implements IEngine {
     }
 
     try {
-      const docUnknown = pdfDocument as unknown as Record<string, unknown>;
-      encrypted = docUnknown.isEncrypted === true;
+      const pdfInfo = pdfDocument._pdfInfo as
+        | { encrypted?: boolean; pdfVersion?: string }
+        | undefined;
+      encrypted = pdfInfo?.encrypted === true;
+      if (typeof pdfInfo?.pdfVersion === "string") {
+        pdfVersion = pdfInfo.pdfVersion;
+      }
     } catch {
-      // no se pudo determinar isEncrypted
+      // no se pudo determinar isEncrypted ni pdfVersion
     }
 
-    const version =
-      typeof (pdfDocument as unknown as Record<string, unknown>).pdfVersion === "string"
-        ? ((pdfDocument as unknown as Record<string, unknown>).pdfVersion as string)
-        : pdfVersion;
-
     const md: DocumentMetadata = {
-      pdfVersion: version,
+      pdfVersion,
       encrypted,
       hasForms,
       ...(title !== undefined ? { title } : {}),

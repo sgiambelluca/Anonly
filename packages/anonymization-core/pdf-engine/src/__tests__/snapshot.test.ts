@@ -152,8 +152,7 @@ function createSnapshotPdfDocument(): Record<string, unknown> {
     ),
     getViewport: vi.fn(),
     destroy: vi.fn(),
-    isEncrypted: false,
-    pdfVersion: "1.7",
+    _pdfInfo: { encrypted: false, pdfVersion: "1.7" },
   };
 }
 
