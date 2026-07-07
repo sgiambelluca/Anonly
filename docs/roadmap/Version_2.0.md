@@ -38,7 +38,7 @@ Convertir Anonly de "anonimizador de PDF web" a "plataforma de anonimización do
 
 ### 2.4 Export
 
-- **Modo "texto preservado"**: opción de export que preserva texto no sensible como capa seleccionable, con verificación criptográfica de que las regiones sensibles están eliminadas (no tapadas). ADR `ADR-018-Preserved-Text-Export.md`.
+- **Modo "texto preservado"**: opción de export que preserva texto no sensible como capa seleccionable, con verificación criptográfica de que las regiones sensibles están eliminadas (no tapadas). Requiere su propio ADR (Preserved Text Export).
 - **PDF/A-2b o PDF/A-3b**: para uso legal/archivo. Requiere pdf-lib con soporte o lib externa.
 - **Export a Word**: para usuarios que editaron el original y quieren el resultado editable.
 - **Export multi-formato simultáneo** (PDF + imágenes + Word).
@@ -52,7 +52,7 @@ Convertir Anonly de "anonimizador de PDF web" a "plataforma de anonimización do
 
 ### 2.6 Plugins / extensibilidad
 
-- **Sistema de plugins**: API para que terceros agreguen engines custom (ej. detector de IBAN de un país específico, detector de matrículas médicas). ADR `ADR-019-Plugin-System.md`.
+- **Sistema de plugins**: API para que terceros agreguen engines custom (ej. detector de IBAN de un país específico, detector de matrículas médicas). Requiere su propio ADR (Plugin System).
 - **API pública del Core**: publicar `@anonly/anonymization-core` como lib npm consumible por terceros.
 
 ### 2.7 Performance
@@ -65,16 +65,18 @@ Convertir Anonly de "anonimizador de PDF web" a "plataforma de anonimización do
 
 ## 3. ADRs nuevos esperados en v2.0
 
-- `ADR-018-Preserved-Text-Export.md`
-- `ADR-019-Plugin-System.md`
-- `ADR-020-Word-Engine.md`
-- `ADR-021-Image-Engine.md`
-- `ADR-022-Excel-Engine.md`
-- `ADR-023-Electron-Packaging.md`
-- `ADR-024-React-Native-Adaptation.md`
-- `ADR-025-Semantic-Grouping.md`
-- `ADR-026-PDFA-Export.md`
-- `ADR-027-Batch-Processing.md`
+> Sin número reservado: la numeración se asigna al crear cada ADR, tomando el siguiente número libre en `docs/adr/` (ver nota en `Version_1.0.md` §4).
+
+- Preserved Text Export
+- Plugin System
+- Word Engine
+- Image Engine
+- Excel Engine
+- Electron Packaging
+- React Native Adaptation
+- Semantic Grouping
+- PDF/A Export
+- Batch Processing
 
 ---
 

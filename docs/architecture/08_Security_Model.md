@@ -73,7 +73,7 @@ manifest-src 'self';
 Notas:
 - Sin `unsafe-eval`. ONNX Runtime Web y Transformers.js son compatibles con WASM sin `unsafe-eval` en versiones recientes. Verificar al integrar.
 - `unsafe-inline` en `style-src` es necesario para Tailwind inject; mitigable con build que extrae CSS a archivo (trabajar para eliminarlo en v1.0).
-- `connect-src 'self'` bloquea cualquier exfiltración. Los modelos se cargan desde el mismo origen (CDN first-party).
+- `connect-src 'self'` bloquea cualquier exfiltración y **no admite excepciones**: los modelos de IA y el wasm también se sirven desde el mismo origen (mirror first-party, ADR-018), por lo que Tesseract.js/Transformers.js se configuran para no tocar CDNs de terceros.
 
 ### 3.3 CORS
 
@@ -206,9 +206,9 @@ El logger se implementa en `event-system` o `shared` y se inyecta vía `EngineCo
 
 ### 8.3 Modelos IA
 
-- Modelos solo desde:
-  - HuggingFace, repos publicados con commit hash pinned.
-  - CDN propio que los mirror con SRI.
+- **Todos los modelos y wasm se sirven first-party** (mismo origen de la app o CDN propio bajo el mismo dominio), nunca desde HuggingFace/jsDelivr en runtime (ADR-018).
+- El mirror se construye en build con `assets.lock.json` (URL de origen + revisión + `sha256` pinneados, verificados al descargar y al cargar en runtime).
+- HuggingFace es solo la **fuente** del mirror (pinneada por commit hash), no un origen de runtime.
 - No se cargan modelos desde URLs arbitrarias o configurables por el usuario en MVP.
 
 ### 8.4 Origen de los chunks

@@ -54,9 +54,30 @@ export default defineConfig({
         "packages/**/*.d.ts",
         "packages/anonymization-core/src/index.ts",
       ],
-      // Gate de cobertura: se activa por paquete en hitos posteriores.
-      // Hito 1: sin thresholds globales (los paquetes aún no tienen implementación).
-      // thresholds: { lines: 85, functions: 85, branches: 80, statements: 85 },
+      // Gate de cobertura por paquete implementado (ai/Code_Standards.md §10: ≥ 85%
+      // líneas por motor). branches/functions en 80 como piso de seguridad (el gate
+      // documentado es solo de líneas). Al implementar un motor nuevo (Hito 3+),
+      // agregar su glob acá en el mismo PR.
+      thresholds: {
+        "packages/anonymization-core/shared/src/**": {
+          lines: 85,
+          statements: 85,
+          branches: 80,
+          functions: 80,
+        },
+        "packages/anonymization-core/event-system/src/**": {
+          lines: 85,
+          statements: 85,
+          branches: 80,
+          functions: 80,
+        },
+        "packages/anonymization-core/pdf-engine/src/**": {
+          lines: 85,
+          statements: 85,
+          branches: 80,
+          functions: 80,
+        },
+      },
     },
     pool: "forks",
     restoreMocks: true,

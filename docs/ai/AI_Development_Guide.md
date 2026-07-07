@@ -90,18 +90,17 @@ El proyecto se desarrolla bajo un modelo **planificador + implementador**:
 
 ## 4. Gates de calidad
 
-Un PR se considera mergeable solo si cumple **todos** estos gates:
+Un PR se considera mergeable solo si cumple **todos** los gates.
 
-| Gate | Comando | Falla si |
+**Gates ejecutables**: la tabla canónica (única fuente de verdad, con comandos y estado de activación) vive en `architecture/07_Performance_Strategy.md` §11.4. No se duplica acá. Comando mínimo pre-PR: `pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract`.
+
+**Gates de revisión** (los aplica el revisor humano/IA; no son un comando):
+
+| Gate | Cómo se valida | Falla si |
 |---|---|---|
-| Lint | `pnpm lint` | cualquier warning o error |
-| Typecheck | `pnpm typecheck` | cualquier error |
-| Tests unitarios | `pnpm test` | cualquier test rojo o cobertura < 85% en el módulo tocado |
-| Contract tests | `pnpm test:contract` | cualquier contrato rojo |
-| E2E (si aplica) | `pnpm test:e2e` | cualquier escenario crítico rojo |
 | Diff scope | revisión humana/IA | el PR toca más de un módulo o archivos fuera del módulo |
 | Spec sync | revisión humana/IA | el spec del motor no refleja la implementación |
-| Prohibiciones | grep automatizado | presencia de `any`, `console.`, `react` en `packages/` |
+| Prohibiciones | grep sobre el diff | presencia de `any`, `console.`, `react` en `packages/` (lista completa: `ai/Code_Standards.md` §12) |
 
 ---
 

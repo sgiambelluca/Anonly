@@ -109,7 +109,7 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribes {
   }));
 
   unsubs.push(bus.on(EventChannel.Render, EngineEvents.PREVIEW_UPDATED, (p) => {
-    stores.viewer.setPreview(p.pageIndex, p.canvasBlobUrl);
+    stores.viewer.setPreview(p.pageIndex, p.kind, p.canvasBlobUrl);
   }));
 
   unsubs.push(bus.on(EventChannel.Ner, EngineEvents.NER_MODEL_LOADING, (p) => {
@@ -135,13 +135,12 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribes {
 ```ts
 // core-adapter/actions.ts
 export const actions = {
-  importDocument(file: File): void {
+  async importDocument(file: File): Promise<void> {
     const documentId = crypto.randomUUID();
     const buffer = await file.arrayBuffer();
-    getCore().bus.emit(EventChannel.Pipeline, EngineEvents.DOCUMENT_IMPORTED, {
-      documentId, name: file.name, sizeBytes: file.byteLength,
-    });
-    getCore().engines.pdf.process({ documentId, buffer });
+    // DOCUMENT_IMPORTED lo emite el Orchestrator; la UI nunca invoca motores
+    // directamente para el flujo del pipeline (ver core/Orchestrator.md §6).
+    await getCore().orchestrator.importDocument({ documentId, name: file.name, buffer });
   },
 
   updateGroup(groupId: string, patch: Partial<Pick<EntityGroup, "replacementMode" | "replacementValue" | "enabled" | "canonicalValue">>): void {

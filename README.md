@@ -199,12 +199,19 @@ Toda la documentación técnica vive en [`docs/`](./docs) y está optimizada par
 | [`ADR-010`](./docs/adr/ADR-010-Testing-Strategy.md) | Estrategia de testing (Vitest + Playwright) |
 | [`ADR-011`](./docs/adr/ADR-011-Grouping-First.md) | Operación a nivel de grupo, no ocurrencia |
 | [`ADR-012`](./docs/adr/ADR-012-Replacement-Modes.md) | 4 modos de reemplazo (mask / synthetic / placeholder / redact) |
+| [`ADR-013`](./docs/adr/ADR-013-PDF-Engine-Hito2-Inline.md) | PDF Engine Hito 2: ejecución inline + reconciliación de config |
+| [`ADR-014`](./docs/adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md) | Fusión OCR→PDF mediada por el Orchestrator |
+| [`ADR-015`](./docs/adr/ADR-015-UI-Channel-Canonical.md) | Canal `ui` canónico para eventos emitidos por la UI |
+| [`ADR-016`](./docs/adr/ADR-016-Preview-Kind.md) | `kind` (original/anonimizado) en `PREVIEW_UPDATED` |
+| [`ADR-017`](./docs/adr/ADR-017-Claude-Code-Workflow.md) | Flujo de desarrollo con Claude Code (CLAUDE.md + subagentes) |
+| [`ADR-018`](./docs/adr/ADR-018-First-Party-Assets.md) | Modelos y wasm servidos first-party (mirror propio, CSP intacta) |
 
 ### Core (contratos y specs de motores)
 
 | Documento | Motor |
 |---|---|
 | [`docs/core/Contracts.md`](./docs/core/Contracts.md) | Tipos base, interfaces, enums, error codes, glosario |
+| [`docs/core/Orchestrator.md`](./docs/core/Orchestrator.md) | Componente host: secuenciación del pipeline, pools, façade `createCore` |
 | [`docs/core/PDF_Engine.md`](./docs/core/PDF_Engine.md) | Extracción de texto y posiciones |
 | [`docs/core/OCR_Engine.md`](./docs/core/OCR_Engine.md) | OCR para páginas sin texto |
 | [`docs/core/Regex_Engine.md`](./docs/core/Regex_Engine.md) | Patrones determinísticos AR |
@@ -243,7 +250,7 @@ Cada spec de motor sigue la plantilla canónica de 15 secciones (Objetivo → Ch
 
 ## Estado
 
-**En planificación**. La documentación técnica está completa (40 documentos). La implementación del MVP sigue los hitos de [`docs/roadmap/MVP.md`](./docs/roadmap/MVP.md).
+**En desarrollo (MVP)**. La documentación técnica está completa (43 documentos; ver índices arriba — al agregar un doc, actualizar también este README). La implementación sigue los hitos de [`docs/roadmap/MVP.md`](./docs/roadmap/MVP.md); estado actual: Hitos 1 y 2 cerrados.
 
 ## Contribuir
 
@@ -252,6 +259,8 @@ El proyecto se desarrolla bajo un modelo **planificador + implementador + reviso
 - [`docs/ai/AI_Development_Guide.md`](./docs/ai/AI_Development_Guide.md) — reglas de trabajo.
 - [`docs/ai/Code_Standards.md`](./docs/ai/Code_Standards.md) — estándares de código.
 - [`docs/ai/Prompting_Guide.md`](./docs/ai/Prompting_Guide.md) — prompts base reutilizables.
+
+Con **Claude Code** (herramienta principal, ver [`ADR-017`](./docs/adr/ADR-017-Claude-Code-Workflow.md)): [`CLAUDE.md`](./CLAUDE.md) se carga automáticamente en toda sesión, y los roles implementador (Sonnet) / revisor (Opus) están definidos como subagentes en [`.claude/agents/`](./.claude/agents/).
 
 Resumen de reglas clave:
 

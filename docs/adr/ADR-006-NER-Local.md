@@ -5,6 +5,7 @@
 - **Estado**: Accepted
 - **Fecha**: 2026-06-17
 - **Decidido por**: Planificación inicial
+- **Complementado por**: ADR-018 (los modelos se sirven first-party, nunca desde HuggingFace en runtime)
 
 ## Contexto
 

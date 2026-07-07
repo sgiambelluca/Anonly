@@ -243,7 +243,7 @@ Fixtures: `tests/fixtures/scanned-10p.pdf` (rasterizado a `ImageData` por el hos
 - [ ] 14. Ejecutar `pnpm lint && pnpm typecheck && pnpm test` verde.
 - [ ] 15. Verificar `index.ts` exporta solo lo público.
 - [ ] 16. Verificar imports sin dependencias prohibidas (`grep -r 'react\|pdfjs\|pdf-lib\|onnx\|transformers' src/`).
-- [ ] 17. Verificar `no-network-from-core` (sin `fetch`/`XMLHttpRequest`; Tesseract.js descarga el modelo desde su propio origen, que es parte de su contrato; documentar exception en `08_Security_Model.md` §8 si es necesario o mirror el modelo en CDN propio).
+- [ ] 17. Verificar `no-network-from-core` (sin `fetch`/`XMLHttpRequest` propios). Configurar Tesseract.js con `langPath`/`corePath`/`workerPath` apuntando al origen propio (`/models/tesseract/`, `/wasm/tesseract/`): los assets se sirven first-party con hash verificado según ADR-018 — nunca desde jsDelivr/GitHub en runtime.
 - [ ] 18. Verificar test de cancelación < 200 ms.
 
 ---

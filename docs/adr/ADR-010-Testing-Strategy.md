@@ -42,18 +42,7 @@ Tests globales (integration, e2e, perf, stress, leak, cancel) viven en `tests/` 
 
 ### Gates de CI (obligatorios para merge)
 
-| Gate | Comando | Falla si |
-|---|---|---|
-| Lint | `pnpm lint` | cualquier warning |
-| Typecheck | `pnpm typecheck` | cualquier error |
-| Unit + contract | `pnpm test` | cobertura < 85% en módulo tocado, o test rojo |
-| Snapshot | `pnpm test:snapshot` | drift |
-| E2E | `pnpm test:e2e` | escenario crítico rojo |
-| Performance | `pnpm test:perf` | métrica fuera de target ± 10% |
-| Leak | `pnpm test:leak` | memoria no regresa al baseline |
-| Cancel | `pnpm test:cancel` | SLA > 200 ms en cualquier motor |
-| Security | `pnpm test:security` | `no-recuperability`, `metadata-strip`, `no-network-from-core`, `no-password-in-logs` |
-| Audit | `pnpm audit` | high/critical |
+Este ADR decide **que** existen gates bloqueantes por tipo de test; la **lista canónica** de gates (comandos, condiciones de fallo y estado de activación) vive en `architecture/07_Performance_Strategy.md` §11.4 y no se duplica acá — mantener dos copias generaba drift (actualización 2026-07-07, junto con la unificación de las listas de gates en todos los docs).
 
 ### Reglas de IA (reflejan `ai/AI_Development_Guide.md`)
 

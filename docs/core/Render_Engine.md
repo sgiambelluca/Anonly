@@ -109,7 +109,7 @@ export class RenderEngine implements IEngine {
 
 | Evento | Cuándo | Payload | Sync/Async | Idempotente |
 |---|---|---|---|---|
-| `PREVIEW_UPDATED` | al renderizar preview de una página | `PreviewUpdated` con `canvasBlobUrl` | async | sí |
+| `PREVIEW_UPDATED` | al renderizar preview de una página | `PreviewUpdated` con `kind` (`"original" \| "anonymized"`, ver ADR-016) y `canvasBlobUrl` | async | sí |
 | `PREVIEW_PAGE_FAILED` | al fallar preview de una página | `PreviewPageFailed` | async | sí |
 | `RENDER_FINISHED` | al terminar un batch de render | `RenderFinished` | async | sí |
 | `RENDER_FAILED` | al fallar un batch | `RenderFailed` | async | sí |

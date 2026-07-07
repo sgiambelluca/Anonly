@@ -101,7 +101,11 @@ export default tseslint.config(
     },
   },
   {
+    // Motores, shared y event-system: nunca importan otro motor ni el façade.
+    // Los nombres reales de los paquetes son @anonly/<engine>-engine (ver package.json
+    // de cada paquete), no subpaths de @anonly/anonymization-core.
     files: ["packages/anonymization-core/**/*.{ts,tsx}"],
+    ignores: ["packages/anonymization-core/src/**"],
     rules: {
       "no-restricted-imports": [
         "error",
@@ -112,18 +116,34 @@ export default tseslint.config(
               message: "El Core no puede importar React. Ver ai/Code_Standards.md P-1.",
             },
             {
-              group: [
-                "@anonly/anonymization-core/pdf-engine",
-                "@anonly/anonymization-core/ocr-engine",
-                "@anonly/anonymization-core/regex-engine",
-                "@anonly/anonymization-core/ner-engine",
-                "@anonly/anonymization-core/grouping-engine",
-                "@anonly/anonymization-core/render-engine",
-                "@anonly/anonymization-core/export-engine",
-              ],
+              group: ["@anonly/*-engine"],
               message:
                 "Un motor no puede importar otro motor. Comunicación solo por eventos. Ver ai/Code_Standards.md P-2.",
               allowTypeImports: false,
+            },
+            {
+              group: ["@anonly/anonymization-core"],
+              message:
+                "Un motor no puede importar el façade del Core (dependencia circular). Ver ai/Code_Standards.md P-2.",
+              allowTypeImports: false,
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // Façade del Core (@anonly/anonymization-core): es la composition root (createCore,
+    // Orchestrator). Es el ÚNICO lugar del Core autorizado a importar motores.
+    files: ["packages/anonymization-core/src/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["react", "react-dom", "react/jsx-runtime"],
+              message: "El Core no puede importar React. Ver ai/Code_Standards.md P-1.",
             },
           ],
         },

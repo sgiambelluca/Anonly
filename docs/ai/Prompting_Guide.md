@@ -13,6 +13,8 @@
 - Todo prompt debe ir acompañado del archivo de spec correspondiente como contexto adjunto (no inline en el prompt para no inflarlo).
 - Si la IA reporta ambigüedad (ver `ai/AI_Development_Guide.md` §5), no se improvisa: se eleva al planificador.
 
+> **Con Claude Code** (herramienta principal del proyecto, ver ADR-017) no hace falta copiar/pegar: `CLAUDE.md` en la raíz del repo se carga automáticamente en toda sesión, y los prompts §2 (implementar) y §4 (revisar) están materializados como subagentes en `.claude/agents/implementador.md` (Sonnet) y `.claude/agents/revisor.md` (Opus). Esta guía sigue siendo la fuente de verdad de los roles y aplica tal cual para cualquier otra herramienta.
+
 ---
 
 ## 2. Prompt base — Implementar un motor desde su spec

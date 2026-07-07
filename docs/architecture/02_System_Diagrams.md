@@ -69,15 +69,15 @@ ASCII equivalente:
 ```mermaid
 flowchart LR
   A[PDF ArrayBuffer] --> B[PDF Engine]
-  B --> C[OCR Engine\n(solo páginas sin texto)]
-  C --> D[Normalización\n(dentro de shared)]
+  B --> C["OCR Engine\n(solo páginas sin texto)"]
+  C --> D["Normalización\n(dentro de shared)"]
   D --> E[Regex Engine]
   E --> F[NER Engine]
   F --> G[Grouping Engine]
-  G --> H[Conflictos\n(dentro de grouping)]
-  H --> I[Vista previa\n(Render Engine parcial)]
-  I --> J[Edición de grupos/reglas\n(UI)]
-  J --> K[Render Engine\n(completo)]
+  G --> H["Conflictos\n(dentro de grouping)"]
+  H --> I["Vista previa\n(Render Engine parcial)"]
+  I --> J["Edición de grupos/reglas\n(UI)"]
+  J --> K["Render Engine\n(completo)"]
   K --> L[Export Engine]
   L --> M[PDF nuevo]
 ```
@@ -120,7 +120,7 @@ flowchart TB
   ES --> Shared
 ```
 
-**Invariante**: ningún motor apunta a otro motor. Sin flechas `PDF --> Group`, `NER --> Group`, etc. La comunicación es por eventos, no por imports. Validado por regla de ESLint `no-restricted-imports` en `ai/Code_Standards.md`.
+**Invariante**: ningún motor apunta a otro motor. Sin flechas `PDF --> Group`, `NER --> Group`, etc. La comunicación es por eventos, no por imports. Validado por la regla de ESLint `no-restricted-imports` configurada en `eslint.config.js` (patrón `@anonly/*-engine`; documentado en `ai/Code_Standards.md` §12).
 
 ---
 
@@ -291,7 +291,13 @@ stateDiagram-v2
   Exporting --> Failed
   Failed --> [*]
   Ready --> Ready: edición de grupos/reglas
-  * --> Cancelled: CANCEL_REQUESTED
+  Importing --> Cancelled: CANCEL_REQUESTED
+  Extracting --> Cancelled: CANCEL_REQUESTED
+  OCRing --> Cancelled: CANCEL_REQUESTED
+  Detecting --> Cancelled: CANCEL_REQUESTED
+  Grouping --> Cancelled: CANCEL_REQUESTED
+  Rendering --> Cancelled: CANCEL_REQUESTED
+  Exporting --> Cancelled: CANCEL_REQUESTED
   Cancelled --> Idle
 ```
 

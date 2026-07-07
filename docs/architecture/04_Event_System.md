@@ -21,7 +21,7 @@
 
 | Evento | Emisor | Receptores | Payload | Timing | Idempotente | Orden | Notas |
 |---|---|---|---|---|---|---|---|
-| `DOCUMENT_IMPORTED` | Orchestrator | UI, PDF Engine | `{ documentId, name, sizeBytes }` | async | sí | none | Dispara `pdf-parse`. |
+| `DOCUMENT_IMPORTED` | Orchestrator | UI | `{ documentId, name, sizeBytes }` | async | sí | none | El PDF Engine no se suscribe: el Orchestrator lo invoca directamente (`PdfEngine.process`), consistente con ADR-014. Ver `core/Orchestrator.md`. |
 | `PIPELINE_STAGE_CHANGED` | Orchestrator | UI | `{ documentId, stage: PipelineStage, progress: number }` | async | sí | por-documento | Para la barra de progreso. |
 | `PIPELINE_PROGRESS` | Orchestrator | UI | `{ documentId, stage, current, total }` | async | sí | por-documento | Granular por página. |
 | `PIPELINE_READY` | Orchestrator | UI | `{ documentId, groupCount, conflictCount }` | async | sí | none | Cuando llega a `Ready`. |
@@ -90,11 +90,12 @@ Estos son los eventos que la UI **sí** escucha para construir el árbol de enti
 
 | Evento | Emisor | Receptores | Payload | Timing | Idempotente | Orden | Notas |
 |---|---|---|---|---|---|---|---|
-| `PREVIEW_UPDATED` | Render Engine | UI | `{ documentId, pageIndex, canvasBlobUrl }` | async | sí | por-página | Vista previa incremental de una página. |
+| `PREVIEW_UPDATED` | Render Engine | UI | `{ documentId, pageIndex, kind: "original" \| "anonymized", canvasBlobUrl }` | async | sí | por-página | Vista previa incremental de una página. `kind` indica a qué visor (original o anonimizado) corresponde el blob (ver ADR-016). |
 | `PREVIEW_PAGE_FAILED` | Render Engine | Orchestrator | `{ documentId, pageIndex, error }` | async | sí | none | |
-| `RENDER_REQUESTED` | UI | Render Engine | `{ documentId, pageIndices: number[], mode: "preview" \| "full" }` | sync | sí | none | |
 | `RENDER_FINISHED` | Render Engine | Orchestrator, UI | `{ documentId, pageIndices, durationMs }` | async | sí | none | |
 | `RENDER_FAILED` | Render Engine | Orchestrator | `{ documentId, error }` | async | sí | none | |
+
+> `RENDER_REQUESTED` es un evento emitido por la UI y viaja por el canal `ui` (ver §10 y ADR-015).
 
 ---
 
@@ -102,11 +103,12 @@ Estos son los eventos que la UI **sí** escucha para construir el árbol de enti
 
 | Evento | Emisor | Receptores | Payload | Timing | Idempotente | Orden | Notas |
 |---|---|---|---|---|---|---|---|
-| `EXPORT_REQUESTED` | UI | Export Engine | `{ documentId, options: ExportOptions }` | sync | sí | none | |
 | `EXPORT_STARTED` | Export Engine | UI | `{ documentId }` | async | sí | none | |
 | `EXPORT_PROGRESS` | Export Engine | UI | `{ documentId, current, total }` | async | sí | por-página | |
-| `EXPORT_FINISHED` | Export Engine | UI | `{ documentId, blobUrl, sizeBytes, durationMs }` | async | sí | none | `blobUrl` es `URL.createObjectURL`. |
-| `EXPORT_FAILED` | Export Engine | UI | `{ documentId, error: EngineError }` | async | sí | none | |
+| `EXPORT_FINISHED` | Export Engine | UI, Orchestrator | `{ documentId, blobUrl, sizeBytes, durationMs }` | async | sí | none | `blobUrl` es `URL.createObjectURL`. El Orchestrator lo escucha para transicionar `stage → Done`. |
+| `EXPORT_FAILED` | Export Engine | UI, Orchestrator | `{ documentId, error: EngineError }` | async | sí | none | El Orchestrator lo escucha para emitir `PIPELINE_FAILED` tras agotar reintentos (ver `06_Pipeline.md` §13). |
+
+> `EXPORT_REQUESTED` es un evento emitido por la UI y viaja por el canal `ui` (ver §10 y ADR-015).
 
 ---
 
@@ -127,10 +129,12 @@ No son eventos funcionales; son infraestructura del pool. El Orchestrator los tr
 
 ## 10. Eventos de UI (canal `ui`)
 
-Inputs del usuario que mutan el estado de grupos/reglas/pipeline. Siempre `sync` para que el Orchestrator pueda validar antes de confirmar.
+Inputs del usuario que mutan el estado de grupos/reglas/pipeline o solicitan trabajo a un motor. **Todo evento emitido por la UI viaja por el canal `ui`** (ADR-015). Siempre `sync` para que el Orchestrator pueda validar antes de confirmar.
 
 | Evento | Emisor | Receptores | Payload | Timing | Idempotente | Orden | Notas |
 |---|---|---|---|---|---|---|---|
+| `RENDER_REQUESTED` | UI | Render Engine | `{ documentId, pageIndices: number[], mode: "preview" \| "full" }` | sync | sí | none | Solicitud de render de páginas visibles. |
+| `EXPORT_REQUESTED` | UI | Export Engine | `{ documentId, options: ExportOptions }` | sync | sí | none | Dispara el flujo de export. |
 | `GROUP_UPDATE_REQUESTED` | UI | Grouping Engine | `{ documentId, groupId, patch: Partial<Pick<EntityGroup, "replacementMode" \| "replacementValue" \| "enabled" \| "canonicalValue">> }` | sync | sí | none | Grouping valida y emite `ENTITY_GROUP_UPDATED` + `GROUP_REPLACEMENT_CHANGED`. |
 | `GROUP_MERGE_REQUESTED` | UI | Grouping Engine | `{ documentId, sourceGroupId, targetGroupId }` | sync | sí | none | Fusiona dos grupos en uno. |
 | `GROUP_SPLIT_REQUESTED` | UI | Grouping Engine | `{ documentId, groupId, occurrenceIds: string[] }` | sync | sí | none | Crea un grupo nuevo con esas ocurrencias. |
@@ -154,7 +158,7 @@ Inputs del usuario que mutan el estado de grupos/reglas/pipeline. Siempre `sync`
 | NER Engine | ✓ | ✓ | – | – | – | – | ✓ | – | – |
 | Grouping Engine | ✓ | ✓ | – | – | – | – | – | ✓ | – |
 | Render Engine | ✓ | ✓ | – | – | – | – | – | – | – |
-| Export Engine | – | ✓ | – | – | – | – | – | – | – |
+| Export Engine | ✓ | ✓ | – | – | – | – | – | – | – |
 
 **Invariante**: ningún motor escucha a otro motor excepto Grouping (que escucha `ENTITY_FOUND` de Regex y NER), y Render/Export (que escuchan cambios de grupos vía Orchestrator). La fusión OCR→PDF es mediada por el Orchestrator (PDF Engine no se suscribe a `OCR_PAGE_FINISHED`; ver ADR-014). Esta matriz se valida con un test de contrato del bus.
 

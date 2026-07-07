@@ -62,7 +62,7 @@ anonly anonimize input.pdf --output output.pdf --mode placeholder
 
 ### 2.3 Server-side batch (producto separado)
 
-Servicio server-side para batch masivo (millones de documentos), dirigido a empresas. Sería un producto separado con su propio stack, que **reutiliza los specs y algoritmos** del Core. ADR `ADR-028-Server-Batch.md` definiría licenciamiento y diferenciación.
+Servicio server-side para batch masivo (millones de documentos), dirigido a empresas. Sería un producto separado con su propio stack, que **reutiliza los specs y algoritmos** del Core. Un ADR propio (Server Batch, número a asignar al crearlo) definiría licenciamiento y diferenciación.
 
 ### 2.4 VS Code extension
 
