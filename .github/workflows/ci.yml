@@ -86,12 +86,10 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # Gate de cobertura: los thresholds por paquete viven en vitest.config.ts
+      # (≥ 85% líneas por módulo tocado, ai/Code_Standards.md §10). Si un paquete
+      # implementado queda por debajo, este paso falla.
       - run: pnpm test -- --coverage
-      - name: Coverage gate
-        run: |
-          pnpm test -- --coverage --reporter=json --outputFile=coverage-summary.json || true
-          # Gate de cobertura: se activa por paquete en hitos posteriores.
-          # Hito 1: solo verificar que los tests pasan.
 
   audit:
     name: Security audit
@@ -118,6 +116,7 @@ jobs:
     needs: install
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - name: Check if e2e tests exist
         id: check_e2e
         run: |
@@ -127,7 +126,6 @@ jobs:
             echo "has_tests=false" >> "$GITHUB_OUTPUT"
             echo "No e2e tests found, skipping."
           fi
-      - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -146,6 +144,7 @@ jobs:
     needs: install
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - name: Check if perf tests exist
         id: check_perf
         run: |
@@ -155,7 +154,6 @@ jobs:
             echo "has_tests=false" >> "$GITHUB_OUTPUT"
             echo "No perf tests found, skipping."
           fi
-      - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -171,6 +169,7 @@ jobs:
     needs: install
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - name: Check if leak tests exist
         id: check_leak
         run: |
@@ -180,7 +179,6 @@ jobs:
             echo "has_tests=false" >> "$GITHUB_OUTPUT"
             echo "No leak tests found, skipping."
           fi
-      - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -196,6 +194,7 @@ jobs:
     needs: install
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - name: Check if cancel tests exist
         id: check_cancel
         run: |
@@ -205,7 +204,6 @@ jobs:
             echo "has_tests=false" >> "$GITHUB_OUTPUT"
             echo "No cancel tests found, skipping."
           fi
-      - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -216,11 +214,37 @@ jobs:
         if: steps.check_cancel.outputs.has_tests == 'true'
         run: pnpm test:cancel
 
+  test-stress:
+    name: Stress
+    needs: install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check if stress tests exist
+        id: check_stress
+        run: |
+          if [ -d "tests/stress" ] && [ -n "$(find tests/stress -name '*.test.ts' -type f 2>/dev/null)" ]; then
+            echo "has_tests=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_tests=false" >> "$GITHUB_OUTPUT"
+            echo "No stress tests found, skipping."
+          fi
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Run stress tests
+        if: steps.check_stress.outputs.has_tests == 'true'
+        run: pnpm test:stress
+
   test-security:
     name: Security gates
     needs: install
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - name: Check if security tests exist
         id: check_security
         run: |
@@ -230,7 +254,6 @@ jobs:
             echo "has_tests=false" >> "$GITHUB_OUTPUT"
             echo "No security tests found, skipping."
           fi
-      - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:

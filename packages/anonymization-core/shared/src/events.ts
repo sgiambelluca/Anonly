@@ -181,6 +181,8 @@ export interface GroupingFinished {
 export interface PreviewUpdated {
   readonly documentId: string;
   readonly pageIndex: number;
+  /** A qué visor corresponde el blob: original o anonimizado (ADR-016). */
+  readonly kind: "original" | "anonymized";
   readonly canvasBlobUrl: string;
 }
 export interface PreviewPageFailed {

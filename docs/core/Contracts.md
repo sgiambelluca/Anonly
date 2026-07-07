@@ -481,7 +481,7 @@ export namespace EventPayloads {
   export interface GroupingFinished { readonly documentId: string; readonly groupCount: number; readonly conflictCount: number; readonly durationMs: number; }
 
   // Render
-  export interface PreviewUpdated { readonly documentId: string; readonly pageIndex: number; readonly canvasBlobUrl: string; }
+  export interface PreviewUpdated { readonly documentId: string; readonly pageIndex: number; readonly kind: "original" | "anonymized"; readonly canvasBlobUrl: string; }
   export interface PreviewPageFailed { readonly documentId: string; readonly pageIndex: number; readonly error: SerializedEngineError; }
   export interface RenderRequested { readonly documentId: string; readonly pageIndices: ReadonlyArray<number>; readonly mode: "preview" | "full"; }
   export interface RenderFinished { readonly documentId: string; readonly pageIndices: ReadonlyArray<number>; readonly durationMs: number; }

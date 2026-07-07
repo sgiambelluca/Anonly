@@ -109,6 +109,7 @@ Orden sugerido (cada hito = un set de PRs):
 
 ### Hito 3 — OCR Engine
 - Implementar `ocr-engine` siguiendo `core/OCR_Engine.md`.
+- Assets de Tesseract servidos first-party: script `scripts/mirror-assets.ts` + `assets.lock.json` (ver ADR-018).
 - Integración con PDF Engine (`fuseOcrPage`).
 - Tests completos.
 
@@ -118,6 +119,7 @@ Orden sugerido (cada hito = un set de PRs):
 
 ### Hito 5 — NER Engine
 - Implementar `ner-engine` con Transformers.js + ONNX.
+- Modelo NER servido first-party (`env.allowRemoteModels = false`, mirror en `assets.lock.json`, ver ADR-018).
 - Cache del modelo en Cache Storage.
 - Tests de integración con Regex (ambos emiten `ENTITY_FOUND`).
 
@@ -134,6 +136,7 @@ Orden sugerido (cada hito = un set de PRs):
 - Tests de `no-recuperability` y `metadata-strip`.
 
 ### Hito 9 — Orchestrator
+- Implementar según `core/Orchestrator.md` (spec del componente host + façade `createCore`).
 - Pipeline orchestrator que secuencia etapas, despacha jobs, maneja cancelación.
 - Integración de todos los engines via bus.
 - Migración de `pdf-engine` (y demás motores pesados) a sus pools (`PdfPool`, `OcrPool`, `NerPool`, `RenderPool`); `WorkerPoolManager` + `AbortRegistry` (ver ADR-013).
@@ -161,11 +164,11 @@ Orden sugerido (cada hito = un set de PRs):
 
 | Métrica | Target MVP | Cómo se mide |
 |---|---|---|
-| Recall Regex | ≥ 90% | dataset de referencia |
+| Recall Regex | ≥ 90% | dataset de referencia (`tests/fixtures/README.md` §Dataset de referencia) |
 | Precision Regex | ≥ 98% | dataset de referencia |
-| Recall NER | ≥ 85% | dataset de referencia |
-| Precision NER | ≥ 90% | dataset de referencia |
-| Falsos negativos post-export | 0 (Regex), < 1% (NER) | `no-recuperability` test |
+| Recall NER | ≥ 85% — **informativa en MVP, gate en v1.0** | dataset de referencia |
+| Precision NER | ≥ 90% — **informativa en MVP, gate en v1.0** | dataset de referencia |
+| Falsos negativos post-export | 0 (Regex); < 1% (NER) — **NER informativa en MVP, gate en v1.0** | `no-recuperability` test |
 | Recuperabilidad info original | 0% | `no-recuperability` test |
 | PDF 10p texto end-to-end | < 8 s | perf test |
 | PDF 10p escaneado end-to-end | < 60 s | perf test |
@@ -175,7 +178,7 @@ Orden sugerido (cada hito = un set de PRs):
 | First preview página 1 | < 1.5 s | perf test |
 | Delta render 1 grupo | < 150 ms | perf test |
 
-Si alguna métrica no se cumple, el MVP **no** se libera.
+Si alguna métrica **gate** no se cumple, el MVP **no** se libera. Las métricas NER son **informativas** en MVP (se miden y reportan pero no bloquean el release) y pasan a gate en v1.0 — consistente con `00_Project_Vision.md` §7, que asigna los objetivos de calidad NER a v1.0, y con `core/NER_Engine.md` §14.
 
 ---
 

@@ -83,11 +83,13 @@ Producto pulido para uso profesional diario. Mejor calidad de detección, mejor 
 
 ## 4. ADRs nuevos esperados en v1.0
 
-- `ADR-013-WebGPU-NER.md` — backend WebGPU con fallback WASM.
-- `ADR-014-i18n.md` — decisión de `react-i18next` u otra lib.
-- `ADR-015-PWA-Offline.md` — service worker + COOP/COEP.
-- `ADR-016-Undo-Redo.md` — estrategia de historial de acciones.
-- `ADR-017-Custom-Entity-Types.md` — extensibilidad de tipos.
+> Sin número reservado: la numeración se asigna al crear cada ADR, tomando el siguiente número libre en `docs/adr/`. Reservar números en roadmaps generó colisiones (los "ADR-013/014" reservados acá fueron tomados por decisiones reales del Hito 2).
+
+- WebGPU NER — backend WebGPU con fallback WASM.
+- i18n — decisión de `react-i18next` u otra lib.
+- PWA Offline — service worker + COOP/COEP.
+- Undo/Redo — estrategia de historial de acciones.
+- Custom Entity Types — extensibilidad de tipos.
 
 ---
 

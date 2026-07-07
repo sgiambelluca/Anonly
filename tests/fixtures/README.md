@@ -117,6 +117,54 @@ git commit -m "test: add generated PDF fixtures"
 
 **Importante**: el test `generate.test.ts` valida las funciones del script **en memoria** (no los archivos commiteados). Esto permite que el test pase aunque los PDFs aún no estén commiteados. Una vez commiteados, el CI también puede validar que existen.
 
+## Dataset de referencia (recall / precision)
+
+Las métricas contractuales de detección (`00_Project_Vision.md` §7, `roadmap/MVP.md` §5) se miden contra un **dataset de referencia etiquetado** que vive en `tests/fixtures/reference/`. Sin este dataset, los gates de recall/precision no son ejecutables.
+
+### Estructura
+
+```
+tests/fixtures/reference/
+├── manifest.json          # índice: documento → ground truth
+├── doc-001.pdf            # PDF sintético generado
+├── doc-001.truth.json     # entidades esperadas del doc-001
+├── doc-002.pdf
+├── doc-002.truth.json
+└── ...
+```
+
+### Formato del ground truth (`*.truth.json`)
+
+```json
+{
+  "documentId": "doc-001",
+  "entities": [
+    { "entityType": "DNI", "value": "34.567.891", "pageIndex": 0, "detector": "regex" },
+    { "entityType": "PERSON", "value": "Juan Pérez", "pageIndex": 0, "detector": "ner" }
+  ]
+}
+```
+
+- `entityType`: valor del enum `EntityType` (`core/Contracts.md` §5).
+- `detector`: qué detector debería encontrarla (`regex` | `ner`), para separar las métricas de Regex de las de NER.
+- Un documento puede tener cero entidades (mide falsos positivos).
+
+### Construcción
+
+- **Generado por script**: extender `generate.ts` con `generateReferenceDataset()`, que produce los PDFs y sus `truth.json` desde la misma fuente (imposible que se desincronicen).
+- **Composición inicial** (mínimo para que las métricas sean significativas): ~20 documentos sintéticos con densidad variada — documentos "densos" (muchas entidades por página), "ralos" (1–2 entidades), "trampa" (textos que parecen entidades pero no lo son: números de expediente, códigos postales, fechas inválidas) y "vacíos" (sin entidades).
+- **Sin datos reales**: nombres, DNIs, CUITs y direcciones se generan con el mismo pool sintético de `shared/synthesizer.ts`.
+
+### Cuándo se necesita
+
+| Hito | Uso |
+|---|---|
+| Hito 4 (Regex) | recall/precision Regex — **gate MVP** |
+| Hito 5 (NER) | recall/precision NER — informativa en MVP, gate en v1.0 |
+| Hito 11 (Hardening) | gates de CI (`pnpm test:perf`) |
+
+El dataset debe existir **antes de cerrar el Hito 4**.
+
 ## Reglas
 
 - **NUNCA** commitear PDFs con datos personales reales. Los fixtures son sintéticos o públicos.

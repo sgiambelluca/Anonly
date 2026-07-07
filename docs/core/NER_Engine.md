@@ -57,7 +57,7 @@ Aplicar un modelo NER local sobre `Page.text` y emitir `Occurrence[]` para entid
 - `apps/react-client`
 - Cualquier otro motor
 - `pdfjs-dist`, `tesseract.js`, `pdf-lib`
-- Node builtins (`fs`, `http`), libs de network (la descarga del modelo la hace Transformers.js desde su origen; documentado en ADR-006)
+- Node builtins (`fs`, `http`), libs de network (la descarga del modelo la hace Transformers.js configurado contra el **origen propio** — `env.allowRemoteModels = false` + `env.localModelPath`; mirror first-party según ADR-018, nunca HuggingFace en runtime)
 
 ---
 
@@ -261,7 +261,7 @@ Fixtures: `tests/fixtures/text-10p.pdf` con nombres/organizaciones/direcciones c
 - [ ] 16. Verificar `index.ts` exporta solo `NerEngine`, tipos, errores.
 - [ ] 17. Verificar imports sin dependencias prohibidas (`grep -r 'react\|pdfjs\|pdf-lib\|tesseract' src/`).
 - [ ] 18. Verificar test de cancelación < 200 ms.
-- [ ] 19. Validar SRI/integrity del modelo al descargar (ver `08_Security_Model.md` §8.3).
+- [ ] 19. Validar integrity del modelo al cargar (hash de `assets.lock.json`, ver `08_Security_Model.md` §8.3 y ADR-018) y configurar Transformers.js/onnxruntime-web contra el origen propio (`env.localModelPath`, `env.wasm.wasmPaths`).
 
 ---
 

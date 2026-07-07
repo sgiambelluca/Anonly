@@ -182,7 +182,10 @@ Cada PR generado por IA o humano debe incluir:
 | Snapshot | `DocumentModel` de un PDF de fixture estable | `snapshot.test.ts` |
 | Edge | Todos los casos límite del spec del motor | `edge.test.ts` |
 
-Fixtures viven en `<engine>-engine/src/__tests__/fixtures/` y se versionan. Un PDF de fixture pesado > 5 MB va en Git LFS o como URL declarada en `fixtures/index.ts`.
+Ubicación de fixtures (fuente de verdad: `tests/fixtures/README.md`):
+
+- **Fixtures binarios compartidos** (PDFs de prueba): `tests/fixtures/` en la raíz del repo. Los ≥ 5 MB van a Git LFS o descarga con hash verificado.
+- **Fixtures propios del motor** (estructuras en memoria, mocks deterministas): `<engine>-engine/src/__tests__/fixtures/`, versionados junto al código.
 
 ---
 
@@ -191,7 +194,7 @@ Fixtures viven en `<engine>-engine/src/__tests__/fixtures/` y se versionan. Un P
 - Commits en formato **Conventional Commits** sin scope: `feat: ...`, `fix: ...`, `docs: ...`, `test: ...`, `refactor: ...`, `chore: ...`.
 - Un PR = un módulo. Nunca tocar dos motores en el mismo PR (ver `ai/AI_Development_Guide.md`).
 - Título del PR: `<tipo>: <motor> — <cambio>`. Ej: `feat: grouping-engine — soporte de alias manuales`.
-- El PR debe pasar `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm test:contract` antes de merge.
+- El PR debe pasar todos los gates ejecutables antes de merge. La tabla canónica de gates vive en `architecture/07_Performance_Strategy.md` §11.4 (única fuente de verdad; no se duplica acá).
 
 ---
 
@@ -209,6 +212,8 @@ Fixtures viven en `<engine>-engine/src/__tests__/fixtures/` y se versionan. Un P
 | P-8 | **Nunca** export default. |
 | P-9 | **Nunca** agregar dependencias externas a un motor sin ADR que lo justifique. |
 | P-10 | **Nunca** publicar tipos que no estén documentados en `core/Contracts.md` o el spec del motor. |
+
+**Enforcement automatizado**: P-1 y P-2 se validan por máquina con `no-restricted-imports` en `eslint.config.js` (raíz del repo). Los nombres reales de los paquetes son `@anonly/<engine>-engine` (bloqueados con el patrón `@anonly/*-engine` dentro de `packages/anonymization-core/`), no subpaths del façade. El único paquete del Core autorizado a importar motores es el façade `@anonly/anonymization-core` (`packages/anonymization-core/src/`), que es la composition root (`createCore`, Orchestrator). Al crear un motor nuevo no hay que tocar ESLint: el patrón lo cubre automáticamente.
 
 ---
 

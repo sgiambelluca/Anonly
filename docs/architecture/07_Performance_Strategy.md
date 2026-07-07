@@ -41,6 +41,7 @@
 ### 2.3 Carga de modelos IA
 
 - Modelo NER: `Xenova/bert-base-NER` o equivalente multilingüe, cuantizado Q8. Tamaño ~ 50–80 MB.
+- **Origen**: todos los modelos y wasm se sirven first-party (mirror propio con hash pinneado en `assets.lock.json`, ADR-018). Nunca HuggingFace/jsDelivr en runtime.
 - Cache en Cache Storage del navegador con versionado por `modelId`.
 - Lazy: solo se descarga la primera vez que se necesita NER. En sesiones siguientes, se sirve desde cache.
 - Progreso de descarga se reporta vía `NER_MODEL_LOADING`.
@@ -233,16 +234,27 @@ Fixtures pesados (> 5 MB) vía Git LFS o descargados en `postinstall` con hash v
 
 ### 11.4 Gates de CI
 
-| Gate | Comando | Falla si |
-|---|---|---|
-| Lint | `pnpm lint` | cualquier warning |
-| Typecheck | `pnpm typecheck` | cualquier error |
-| Unit + contract | `pnpm test` | cobertura < 85% en módulos tocados |
-| Snapshot | `pnpm test:snapshot` | cualquier drift |
-| E2E | `pnpm test:e2e` | cualquier escenario crítico rojo |
-| Performance | `pnpm test:perf` | cualquier métrica de `00_Project_Vision.md` §7 fuera de target ± 10% |
-| Leak | `pnpm test:leak` | memoria no regresa al baseline |
-| Cancel | `pnpm test:cancel` | SLA > 200 ms en cualquier motor |
+> **Tabla canónica — única fuente de verdad de los gates ejecutables.** Todo otro documento (README, `ai/AI_Development_Guide.md` §4, `ai/Code_Standards.md` §11, `adr/ADR-010-Testing-Strategy.md`) referencia esta sección en lugar de duplicarla. Si un gate cambia, se edita **solo acá** (y el workflow `.github/workflows/ci.yml`, que la implementa).
+
+| Gate | Comando | Falla si | Estado |
+|---|---|---|---|
+| Lint | `pnpm lint` | cualquier warning o error | activo (CI) |
+| Format | `pnpm format:check` | archivos fuera del estilo Prettier | activo (CI, dentro del job Lint) |
+| Typecheck | `pnpm typecheck` | cualquier error | activo (CI) |
+| Unit + contract + snapshot + cobertura | `pnpm test -- --coverage` | test rojo, o cobertura < 85% líneas en un paquete implementado (thresholds por paquete en `vitest.config.ts`) | activo (CI) |
+| Contract (aislado) | `pnpm test:contract` | cualquier contrato rojo | activo (local / pre-PR) |
+| Snapshot (aislado) | `pnpm test:snapshot` | cualquier drift | activo (local / pre-PR) |
+| E2E | `pnpm test:e2e` | cualquier escenario crítico de §11.3 rojo | auto-activa al existir `tests/e2e/` (Hito 10) |
+| Performance | `pnpm test:perf` | métrica gate de `00_Project_Vision.md` §7 fuera de target ± 10% | auto-activa al existir `tests/perf/` (Hito 11) |
+| Stress | `pnpm test:stress` | documento grande excede presupuesto de memoria/tiempo | auto-activa al existir `tests/stress/` (Hito 11) |
+| Leak | `pnpm test:leak` | memoria no regresa al baseline tras 10 open/close | auto-activa al existir `tests/leak/` (Hito 11) |
+| Cancel | `pnpm test:cancel` | SLA > 200 ms en cualquier motor | auto-activa al existir `tests/cancel/` (Hito 11) |
+| Security | `pnpm test:security` | `no-recuperability`, `metadata-strip`, `no-network-from-core` o `no-password-in-logs` rojo | auto-activa al existir `tests/security/` (Hito 8+) |
+| Audit | `pnpm audit --audit-level=high` | vulnerabilidad high/critical | activo no bloqueante; bloqueante desde Hito 11 |
+
+Comando mínimo pre-PR (subset local de esta tabla): `pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract`.
+
+Además de los ejecutables, hay **gates de revisión** (no automatizables por comando) definidos en `ai/AI_Development_Guide.md` §4: Diff scope, Spec sync y Prohibiciones.
 
 ### 11.5 Documentos corruptos y edge
 
