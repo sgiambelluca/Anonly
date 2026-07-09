@@ -87,6 +87,18 @@ Además, se documenta explícitamente la semántica ya implementada del bus (ant
 **Neutras**:
 - `EventBusOptions.logger` requerido obliga a todos los tests existentes de `event-system` a instanciar un logger de prueba; no cambia el comportamiento del bus en sí, solo hace explícito lo que ya era la única ruta de producción real.
 
+## Nota de actualización (2026-07-09)
+
+El code review del Hito 2 detectó que la regla "`as unknown as` prohibido también en tests" era
+impracticable en su forma absoluta: mockear la frontera de una librería externa con tipos complejos
+(el `PDFDocumentLoadingTask` de pdfjs-dist; luego tesseract.js en Hito 3 y @xenova/transformers en
+Hito 5) no admite mocks estructurales sin cast. Se **precisa** la regla: los casts de frontera
+contra tipos de librerías externas mockeadas se permiten **solo** concentrados en helpers de
+`__tests__/fixtures/` (uno por librería, con comentario justificativo); siguen prohibidos dispersos
+en los archivos de test y para verificar contratos de tipos propios. Aplicado en `pdf-engine` vía
+`mockGetDocumentResult`/`mockGetDocumentFailure` (46 ocurrencias dispersas → 1 concentrada). Ver
+`ai/Code_Standards.md` §10.
+
 ## Referencias
 
 - `core/Contracts.md` §3.2 (`IEventBus`), §3.3 (`LogLevel`), §4 (`EngineError`/`SerializedEngineError`), §8 (`EventPayloadMap`)

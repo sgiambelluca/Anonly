@@ -13,9 +13,32 @@ import type {
   ILogger,
   Unsubscribe,
 } from "@anonly/shared";
+import type { getDocument } from "pdfjs-dist";
 import { vi } from "vitest";
 
 import type { PdfEngineInput } from "../../pdf.types.js";
+
+/**
+ * Cast de frontera contra pdfjs-dist — ÚNICO lugar del paquete donde se
+ * permite `as unknown as` (Code_Standards.md §10; ADR-019, nota 2026-07-09):
+ * getDocument() devuelve un PDFDocumentLoadingTask, una clase con decenas de
+ * miembros que un mock estructural no puede satisfacer honestamente. Los tests
+ * construyen el mock vía mockGetDocumentResult / mockGetDocumentFailure y
+ * nunca castean por su cuenta.
+ */
+function asLoadingTask(promise: Promise<unknown>): ReturnType<typeof getDocument> {
+  return { promise } as unknown as ReturnType<typeof getDocument>;
+}
+
+export function mockGetDocumentResult(
+  doc: Record<string, unknown>,
+): ReturnType<typeof getDocument> {
+  return asLoadingTask(Promise.resolve(doc));
+}
+
+export function mockGetDocumentFailure(error: Error): ReturnType<typeof getDocument> {
+  return asLoadingTask(Promise.reject(error));
+}
 
 export function createMockBus(): IEventBus {
   return {
