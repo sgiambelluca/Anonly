@@ -187,6 +187,10 @@ Ubicación de fixtures (fuente de verdad: `tests/fixtures/README.md`):
 - **Fixtures binarios compartidos** (PDFs de prueba): `tests/fixtures/` en la raíz del repo. Los ≥ 5 MB van a Git LFS o descarga con hash verificado.
 - **Fixtures propios del motor** (estructuras en memoria, mocks deterministas): `<engine>-engine/src/__tests__/fixtures/`, versionados junto al código.
 
+### Asserts de compile-time en tests
+
+En tests (`*.test.ts`), `@ts-expect-error` con un comentario justificativo adyacente es válido para **asserts de compile-time** — por ejemplo, verificar que una propiedad `readonly` no se puede reasignar sin recurrir a un cast — y **no requiere un issue referenciado**, a diferencia de la regla general de la §2 ("Prohibido: ... `@ts-expect-error` sin justificación en comentario adyacente y issue referenciado"). El comentario adyacente basta como justificación en este caso porque el propio test documenta qué invariante de tipos está verificando. `as unknown as` **sigue prohibido también en tests**: un test que necesita bypassear el sistema de tipos para verificar un contrato de tipos está probando con la herramienta equivocada (ver `adr/ADR-019-Hito1-Hardening.md`).
+
 ---
 
 ## 11. Commits y PRs
@@ -214,6 +218,8 @@ Ubicación de fixtures (fuente de verdad: `tests/fixtures/README.md`):
 | P-10 | **Nunca** publicar tipos que no estén documentados en `core/Contracts.md` o el spec del motor. |
 
 **Enforcement automatizado**: P-1 y P-2 se validan por máquina con `no-restricted-imports` en `eslint.config.js` (raíz del repo). Los nombres reales de los paquetes son `@anonly/<engine>-engine` (bloqueados con el patrón `@anonly/*-engine` dentro de `packages/anonymization-core/`), no subpaths del façade. El único paquete del Core autorizado a importar motores es el façade `@anonly/anonymization-core` (`packages/anonymization-core/src/`), que es la composition root (`createCore`, Orchestrator). Al crear un motor nuevo no hay que tocar ESLint: el patrón lo cubre automáticamente.
+
+P-4 se valida a máquina con la regla `no-console` en modo **estricto** (sin `allow`) para todo `packages/**/*.{ts,tsx}` — a diferencia del resto del repo, donde `no-console` permite `warn`/`error`. Los motores tampoco pueden importar `@anonly/event-system` directamente: usan el `IEventBus` inyectado por `ctx` (`EngineContext.bus`, de `@anonly/shared`); ese patrón está bloqueado en `eslint.config.js` con `no-restricted-imports` (excepto en los tests de cada paquete, donde importar el bus real para tests de integración sí está permitido). Ver `adr/ADR-019-Hito1-Hardening.md`.
 
 ---
 

@@ -205,6 +205,7 @@ Toda la documentación técnica vive en [`docs/`](./docs) y está optimizada par
 | [`ADR-016`](./docs/adr/ADR-016-Preview-Kind.md) | `kind` (original/anonimizado) en `PREVIEW_UPDATED` |
 | [`ADR-017`](./docs/adr/ADR-017-Claude-Code-Workflow.md) | Flujo de desarrollo con Claude Code (CLAUDE.md + subagentes) |
 | [`ADR-018`](./docs/adr/ADR-018-First-Party-Assets.md) | Modelos y wasm servidos first-party (mirror propio, CSP intacta) |
+| [`ADR-019`](./docs/adr/ADR-019-Hito1-Hardening.md) | Hardening del Hito 1 (`shared` + `event-system`): canal tipado, logger requerido, `engineId: "core"`, `LogLevel` único, seed obligatorio, excepción a R-1 |
 
 ### Core (contratos y specs de motores)
 

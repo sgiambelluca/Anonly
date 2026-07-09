@@ -4,6 +4,7 @@
   "description": "Tipos, contratos, enums y error codes compartidos del Core de Anonly.",
   "type": "module",
   "license": "MIT",
+  "sideEffects": false,
   "files": [
     "dist"
   ],
@@ -34,6 +35,6 @@
   },
   "devDependencies": {
     "typescript": "^5.6.2",
-    "vitest": "^2.1.2"
+    "vitest": "^3.2.6"
   }
 }

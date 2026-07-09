@@ -15,6 +15,7 @@ import type {
   EntityType,
   PipelineStage,
   ReplacementMode,
+  RuleScope,
   WorkerJobType,
 } from "./enums.js";
 
@@ -114,14 +115,14 @@ export interface Replacement {
 }
 
 export interface RuleTarget {
-  readonly kind: "group" | "type" | "global";
+  readonly kind: RuleScope;
   readonly groupId?: string;
   readonly entityType?: EntityType;
 }
 
 export interface Rule {
   readonly id: string;
-  readonly scope: "group" | "type" | "global";
+  readonly scope: RuleScope;
   readonly target: RuleTarget;
   readonly mode: ReplacementMode;
   readonly priority: number;

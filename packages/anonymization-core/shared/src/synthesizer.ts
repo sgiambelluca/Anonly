@@ -7,7 +7,8 @@
  * - Determinista por (type, indexInType, seed): mismo input → mismo output.
  * - El valor sintético debe ser plausible y válido según el formato del tipo
  *   (checksum de CUIT, Luhn de tarjeta, formato de DNI, etc.).
- * - Seed default: aleatorio por sesión. Configurable por documento.
+ * - El seed es obligatorio: lo provee el caller. El seed aleatorio por sesión
+ *   es responsabilidad del Grouping Engine (ADR-012 §SAN, ADR-019).
  * - Nunca exponer el seed en el PDF resultante.
  */
 
@@ -18,14 +19,11 @@ import { EntityType } from "./enums.js";
  *
  * @param type Tipo de entidad.
  * @param indexInType Índice secuencial del grupo dentro de su tipo (1-based).
- * @param seed Seed determinista (string). Default: "anonly-default-seed".
+ * @param seed Seed determinista (string), obligatorio. La política del seed
+ *   (aleatorio por sesión) es del caller — ver ADR-012 §SAN y ADR-019.
  * @returns Valor sintético plausible para el tipo.
  */
-export function synthesize(
-  type: EntityType,
-  indexInType: number,
-  seed: string = "anonly-default-seed",
-): string {
+export function synthesize(type: EntityType, indexInType: number, seed: string): string {
   const rng = createSeededRng(seed, type, indexInType);
   switch (type) {
     case EntityType.DNI:
@@ -104,20 +102,32 @@ function randomDigits(rng: () => number, count: number): string {
 }
 
 function synthesizeDni(rng: () => number): string {
-  // DNI AR: 1-2 dígitos, punto, 3 dígitos, punto, 3 dígitos (8 total).
-  const n = randomDigits(rng, 8).padStart(8, "0");
+  // DNI AR de 8 dígitos en rango realista (10.000.000-99.999.999): el primer
+  // dígito nunca es 0. Formato XX.XXX.XXX.
+  const first = (Math.floor(rng() * 9) + 1).toString();
+  const n = `${first}${randomDigits(rng, 7)}`;
   return `${n.slice(0, 2)}.${n.slice(2, 5)}.${n.slice(5, 8)}`;
 }
 
 function synthesizeCuit(rng: () => number): string {
-  // CUIT AR: XX-XXXXXXXX-X con dígito verificador válido (algoritmo módulo 11).
+  // CUIT AR: XX-XXXXXXXX-X con dígito verificador AFIP válido (módulo 11).
+  // Si el dv daría 10 (no existe en CUITs reales), se regenera el cuerpo con el
+  // mismo rng: determinista (mismo seed → mismo resultado) y siempre válido (ADR-019).
   const prefix = pick(rng, ["20", "23", "24", "27", "30", "33", "34"]);
-  const body = randomDigits(rng, 8);
-  const checksum = computeCuitChecksum(prefix, body);
-  return `${prefix}-${body}-${checksum}`;
+  for (;;) {
+    const body = randomDigits(rng, 8);
+    const checksum = computeCuitChecksum(prefix, body);
+    if (checksum !== null) {
+      return `${prefix}-${body}-${checksum}`;
+    }
+  }
 }
 
-function computeCuitChecksum(prefix: string, body: string): string {
+/**
+ * Dígito verificador módulo 11 de AFIP. Devuelve null si el dv daría 10:
+ * ese CUIT no existe y el caller debe regenerar el cuerpo.
+ */
+function computeCuitChecksum(prefix: string, body: string): string | null {
   const weights = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2];
   const digits = `${prefix}${body}`.split("").map((c) => parseInt(c, 10));
   let sum = 0;
@@ -128,10 +138,9 @@ function computeCuitChecksum(prefix: string, body: string): string {
     sum += d * w;
   }
   const mod = sum % 11;
-  const checksum = 11 - mod;
-  if (checksum === 11) return "0";
-  if (checksum === 10) return "9";
-  return checksum.toString();
+  if (mod === 0) return "0";
+  if (mod === 1) return null;
+  return (11 - mod).toString();
 }
 
 function synthesizePhone(rng: () => number): string {
@@ -264,11 +273,11 @@ function synthesizeAddress(rng: () => number): string {
 }
 
 function synthesizeLicense(rng: () => number): string {
-  // Matrícula profesional AR ficticia: X-XXXX-XX.
-  const letters = randomDigits(rng, 1).replace("0", "1");
-  const num1 = randomDigits(rng, 4);
-  const num2 = randomDigits(rng, 2);
-  return `${letters}-${num1}-${num2}`;
+  // Matrícula profesional AR ficticia, formato XX-XXXX-XX (máscara de ADR-012).
+  const part1 = randomDigits(rng, 2);
+  const part2 = randomDigits(rng, 4);
+  const part3 = randomDigits(rng, 2);
+  return `${part1}-${part2}-${part3}`;
 }
 
 function synthesizePlate(rng: () => number): string {

@@ -441,6 +441,13 @@ export interface PipelineState {
   readonly cancelRequested: boolean;
 }
 
+export interface PipelineError {
+  readonly stage: PipelineStage;               // etapa en la que ocurrió el error
+  readonly code: string;                       // EngineErrorCode del error subyacente
+  readonly message: string;
+  readonly documentId: string;
+}
+
 export enum PipelineStage {
   Idle = "idle",
   Importing = "importing",

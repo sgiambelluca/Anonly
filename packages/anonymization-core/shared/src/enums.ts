@@ -161,13 +161,6 @@ export enum PipelineStage {
   Cancelled = "cancelled",
 }
 
-export enum LogLevel {
-  Debug = "debug",
-  Info = "info",
-  Warn = "warn",
-  Error = "error",
-}
-
 export type RuleScope = "group" | "type" | "global";
 
 export type WorkerJobType = "pdf-parse" | "ocr-page" | "ner-page" | "render-page" | "export-page";

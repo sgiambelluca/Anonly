@@ -7,8 +7,8 @@
  * - tipado de eventos (compila)
  * - canales
  * - handlers no bloquean al emisor
- * - handlers que lanzan se loguean y el bus continúa
- * - dispose libera todo
+ * - handlers que lanzan se reportan por el logger inyectado (requerido) y el bus continúa
+ * - dispose libera todo; off()/unsubscribe tras dispose son no-op (ADR-019)
  * - no loops (no se auto-suscribe)
  */
 
@@ -48,7 +48,7 @@ describe("@anonly/event-system — EventBus contracts", () => {
   let bus: EventBus;
 
   beforeEach(() => {
-    bus = createEventBus();
+    bus = createEventBus({ logger: makeLogger() });
   });
 
   describe("on / emit", () => {
@@ -258,22 +258,6 @@ describe("@anonly/event-system — EventBus contracts", () => {
       });
       expect(logger.calls.some((c) => c.level === "error" && c.msg.includes("Handler"))).toBe(true);
     });
-
-    it("sin logger, usa console.error como fallback", () => {
-      const spy = vi.spyOn(console, "error").mockImplementation(() => {});
-      const b = createEventBus();
-      b.on(EventChannel.Pdf, EngineEvents.PAGE_PARSED, () => {
-        throw new Error("boom");
-      });
-      b.emit(EventChannel.Pdf, EngineEvents.PAGE_PARSED, {
-        documentId: "d1",
-        pageIndex: 0,
-        wordCount: 10,
-        requiresOCR: false,
-      });
-      expect(spy).toHaveBeenCalled();
-      spy.mockRestore();
-    });
   });
 
   describe("unsubscribe durante iteración", () => {
@@ -325,6 +309,19 @@ describe("@anonly/event-system — EventBus contracts", () => {
       expect(bus.isDisposed()).toBe(false);
       bus.dispose();
       expect(bus.isDisposed()).toBe(true);
+    });
+
+    it("unsubscribe devuelto por on() es no-op después de dispose (no lanza)", () => {
+      const unsubscribe = bus.on(EventChannel.Pdf, EngineEvents.PAGE_PARSED, vi.fn());
+      bus.dispose();
+      expect(() => unsubscribe()).not.toThrow();
+    });
+
+    it("off() después de dispose es no-op (no lanza)", () => {
+      const handler = vi.fn();
+      bus.on(EventChannel.Pdf, EngineEvents.PAGE_PARSED, handler);
+      bus.dispose();
+      expect(() => bus.off(EventChannel.Pdf, EngineEvents.PAGE_PARSED, handler)).not.toThrow();
     });
   });
 
