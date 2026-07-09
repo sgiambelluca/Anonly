@@ -20,6 +20,7 @@ import {
   createEngineContext,
   createMockPdfDocument,
   createValidInput,
+  mockGetDocumentResult,
 } from "./fixtures/test-helpers.js";
 
 describe("PdfEngine — contract tests", () => {
@@ -67,9 +68,7 @@ describe("PdfEngine — contract tests", () => {
     const docId = "doc-parse-test";
     const pageCount = 3;
 
-    vi.mocked(getDocument).mockReturnValue({
-      promise: Promise.resolve(createMockPdfDocument(pageCount)),
-    } as unknown as ReturnType<typeof getDocument>);
+    vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(createMockPdfDocument(pageCount)));
 
     await engine.init(ctx);
     const busEmitSpy = vi.spyOn(ctx.bus, "emit");
@@ -95,9 +94,7 @@ describe("PdfEngine — contract tests", () => {
     const docId = "doc-parse-test-2";
     const pageCount = 2;
 
-    vi.mocked(getDocument).mockReturnValue({
-      promise: Promise.resolve(createMockPdfDocument(pageCount)),
-    } as unknown as ReturnType<typeof getDocument>);
+    vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(createMockPdfDocument(pageCount)));
 
     await engine.init(ctx);
     const busEmitSpy = vi.spyOn(ctx.bus, "emit");
@@ -119,9 +116,7 @@ describe("PdfEngine — contract tests", () => {
     const docId = "doc-invariant";
     const pageCount = 4;
 
-    vi.mocked(getDocument).mockReturnValue({
-      promise: Promise.resolve(createMockPdfDocument(pageCount)),
-    } as unknown as ReturnType<typeof getDocument>);
+    vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(createMockPdfDocument(pageCount)));
 
     await engine.init(ctx);
     const input = createValidInput(docId);
@@ -136,9 +131,7 @@ describe("PdfEngine — contract tests", () => {
     const docId = "doc-index-invariant";
     const pageCount = 5;
 
-    vi.mocked(getDocument).mockReturnValue({
-      promise: Promise.resolve(createMockPdfDocument(pageCount)),
-    } as unknown as ReturnType<typeof getDocument>);
+    vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(createMockPdfDocument(pageCount)));
 
     await engine.init(ctx);
     const input = createValidInput(docId);
@@ -154,9 +147,9 @@ describe("PdfEngine — contract tests", () => {
   it("fuseOcrPage merges words correctly", async () => {
     const docId = "doc-fuse";
 
-    vi.mocked(getDocument).mockReturnValue({
-      promise: Promise.resolve(createMockPdfDocument(2, { textless: true })),
-    } as unknown as ReturnType<typeof getDocument>);
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument(2, { textless: true })),
+    );
 
     await engine.init(ctx);
     const input = createValidInput(docId);
@@ -196,9 +189,7 @@ describe("PdfEngine — contract tests", () => {
     const docId = "doc-fuse-guard";
 
     // Documento con texto nativo (requiresOCR = false en todas las páginas).
-    vi.mocked(getDocument).mockReturnValue({
-      promise: Promise.resolve(createMockPdfDocument(1)),
-    } as unknown as ReturnType<typeof getDocument>);
+    vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(createMockPdfDocument(1)));
 
     await engine.init(ctx);
     const input = createValidInput(docId);
@@ -210,9 +201,7 @@ describe("PdfEngine — contract tests", () => {
 
   it("dispose releases PDFDocumentProxy", async () => {
     const mockDoc = createMockPdfDocument(1);
-    vi.mocked(getDocument).mockReturnValue({
-      promise: Promise.resolve(mockDoc),
-    } as unknown as ReturnType<typeof getDocument>);
+    vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(mockDoc));
 
     await engine.init(ctx);
     const input = createValidInput("doc-dispose");
@@ -234,9 +223,7 @@ describe("PdfEngine — contract tests", () => {
   });
 
   it("fuseOcrPage with out-of-range pageIndex throws InvalidInputError", async () => {
-    vi.mocked(getDocument).mockReturnValue({
-      promise: Promise.resolve(createMockPdfDocument(2)),
-    } as unknown as ReturnType<typeof getDocument>);
+    vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(createMockPdfDocument(2)));
 
     await engine.init(ctx);
     const input = createValidInput("doc-range");
@@ -246,9 +233,9 @@ describe("PdfEngine — contract tests", () => {
   });
 
   it("engine never subscribes to the bus (ADR-014)", async () => {
-    vi.mocked(getDocument).mockReturnValue({
-      promise: Promise.resolve(createMockPdfDocument(2, { textless: true })),
-    } as unknown as ReturnType<typeof getDocument>);
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument(2, { textless: true })),
+    );
 
     // Spies nombrados (no referencias de método del bus) para evitar
     // @typescript-eslint/unbound-method en los asserts.

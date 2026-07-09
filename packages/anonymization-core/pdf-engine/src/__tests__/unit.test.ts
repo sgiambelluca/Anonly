@@ -12,6 +12,7 @@ import {
   createMockPage,
   createMockPdfDocument,
   createValidInput,
+  mockGetDocumentResult,
 } from "./fixtures/test-helpers.js";
 
 describe("PdfEngine — unit tests", () => {
@@ -32,8 +33,8 @@ describe("PdfEngine — unit tests", () => {
 
   describe("Word sorting (reading order)", () => {
     it("words sorted by y then x", async () => {
-      vi.mocked(getDocument).mockReturnValue({
-        promise: Promise.resolve(
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
           createMockPdfDocument(1, () =>
             createMockPage(0, [
               { str: "Bottom", x: 10, y: 600, width: 40, height: 12 },
@@ -43,7 +44,7 @@ describe("PdfEngine — unit tests", () => {
             ]),
           ),
         ),
-      } as unknown as ReturnType<typeof getDocument>);
+      );
 
       await engine.init(ctx);
       const input = createValidInput("doc-sort");
@@ -57,8 +58,8 @@ describe("PdfEngine — unit tests", () => {
     });
 
     it("on same y line, sorts by x asc", async () => {
-      vi.mocked(getDocument).mockReturnValue({
-        promise: Promise.resolve(
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
           createMockPdfDocument(1, () =>
             createMockPage(0, [
               { str: "ZWord", x: 200, y: 800, width: 40, height: 12 },
@@ -67,7 +68,7 @@ describe("PdfEngine — unit tests", () => {
             ]),
           ),
         ),
-      } as unknown as ReturnType<typeof getDocument>);
+      );
 
       await engine.init(ctx);
       const input = createValidInput("doc-same-y");
@@ -82,14 +83,14 @@ describe("PdfEngine — unit tests", () => {
 
   describe("Textless pages detection", () => {
     it("marks page with empty text content as requiresOCR=true", async () => {
-      vi.mocked(getDocument).mockReturnValue({
-        promise: Promise.resolve(
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
           createMockPdfDocument(1, () => ({
             getViewport: vi.fn(() => ({ width: 595, height: 842 })),
             getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
           })),
         ),
-      } as unknown as ReturnType<typeof getDocument>);
+      );
 
       await engine.init(ctx);
       const input = createValidInput("doc-textless");
@@ -101,9 +102,7 @@ describe("PdfEngine — unit tests", () => {
     });
 
     it("marks page with text content as requiresOCR=false", async () => {
-      vi.mocked(getDocument).mockReturnValue({
-        promise: Promise.resolve(createMockPdfDocument(2)),
-      } as unknown as ReturnType<typeof getDocument>);
+      vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(createMockPdfDocument(2)));
 
       await engine.init(ctx);
       const input = createValidInput("doc-text");
@@ -117,8 +116,8 @@ describe("PdfEngine — unit tests", () => {
 
   describe("TextlessPages sorted asc", () => {
     it("textlessPages sorted asc", async () => {
-      vi.mocked(getDocument).mockReturnValue({
-        promise: Promise.resolve(
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
           createMockPdfDocument(4, (i: number) => {
             const textless = i === 1 || i === 3;
             return textless
@@ -129,7 +128,7 @@ describe("PdfEngine — unit tests", () => {
               : createMockPage(i);
           }),
         ),
-      } as unknown as ReturnType<typeof getDocument>);
+      );
 
       await engine.init(ctx);
       const input = createValidInput("doc-textless-asc");
@@ -143,13 +142,13 @@ describe("PdfEngine — unit tests", () => {
     it("splits multi-word TextItems into individual words with prorated bboxes", async () => {
       const accentedWord = "Juan Pérez 34.567.891";
 
-      vi.mocked(getDocument).mockReturnValue({
-        promise: Promise.resolve(
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
           createMockPdfDocument(1, () =>
             createMockPage(0, [{ str: accentedWord, x: 50, y: 800, width: 210, height: 12 }]),
           ),
         ),
-      } as unknown as ReturnType<typeof getDocument>);
+      );
 
       await engine.init(ctx);
       const input = createValidInput("doc-word-split");
@@ -176,13 +175,13 @@ describe("PdfEngine — unit tests", () => {
     });
 
     it("does not split a single-word TextItem (keeps original bbox, only NFC applies)", async () => {
-      vi.mocked(getDocument).mockReturnValue({
-        promise: Promise.resolve(
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
           createMockPdfDocument(1, () =>
             createMockPage(0, [{ str: "SingleWord", x: 50, y: 800, width: 60, height: 12 }]),
           ),
         ),
-      } as unknown as ReturnType<typeof getDocument>);
+      );
 
       await engine.init(ctx);
       const input = createValidInput("doc-single-word");
@@ -210,13 +209,13 @@ describe("PdfEngine — unit tests", () => {
       expect(nfdPerez).not.toBe(nfcPerez);
       expect(nfdPerez.normalize("NFC")).toBe(nfcPerez);
 
-      vi.mocked(getDocument).mockReturnValue({
-        promise: Promise.resolve(
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
           createMockPdfDocument(1, () =>
             createMockPage(0, [{ str: nfdPerez, x: 50, y: 800, width: 40, height: 12 }]),
           ),
         ),
-      } as unknown as ReturnType<typeof getDocument>);
+      );
 
       await engine.init(ctx);
       const input = createValidInput("doc-nfc");
@@ -233,8 +232,8 @@ describe("PdfEngine — unit tests", () => {
     it("throws PdfTimeoutError with documentId when page parse exceeds timeout", async () => {
       vi.useFakeTimers();
       try {
-        vi.mocked(getDocument).mockReturnValue({
-          promise: Promise.resolve({
+        vi.mocked(getDocument).mockReturnValue(
+          mockGetDocumentResult({
             numPages: 1,
             getPage: vi.fn(() =>
               Promise.resolve({
@@ -246,7 +245,7 @@ describe("PdfEngine — unit tests", () => {
             destroy: vi.fn(),
             _pdfInfo: { encrypted: false, pdfVersion: "1.7" },
           }),
-        } as unknown as ReturnType<typeof getDocument>);
+        );
 
         await engine.init(ctx);
         const input = createValidInput("doc-timeout");
@@ -267,14 +266,14 @@ describe("PdfEngine — unit tests", () => {
 
   describe("FuseOcrPage logic", () => {
     it("fuseOcrPage updates words and marks ocrCompleted", async () => {
-      vi.mocked(getDocument).mockReturnValue({
-        promise: Promise.resolve(
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
           createMockPdfDocument(1, () => ({
             getViewport: vi.fn(() => ({ width: 595, height: 842 })),
             getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
           })),
         ),
-      } as unknown as ReturnType<typeof getDocument>);
+      );
 
       await engine.init(ctx);
       const input = createValidInput("doc-fuse-unit");
@@ -310,14 +309,14 @@ describe("PdfEngine — unit tests", () => {
     });
 
     it("fuseOcrPage returns a new Document reference (immutable)", async () => {
-      vi.mocked(getDocument).mockReturnValue({
-        promise: Promise.resolve(
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
           createMockPdfDocument(1, () => ({
             getViewport: vi.fn(() => ({ width: 595, height: 842 })),
             getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
           })),
         ),
-      } as unknown as ReturnType<typeof getDocument>);
+      );
 
       await engine.init(ctx);
       const input = createValidInput("doc-immutable");
@@ -343,14 +342,14 @@ describe("PdfEngine — unit tests", () => {
 
   describe("releaseDocument (ADR-020 §7)", () => {
     it("releaseDocument evicts a single document", async () => {
-      vi.mocked(getDocument).mockReturnValue({
-        promise: Promise.resolve(
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
           createMockPdfDocument(1, () => ({
             getViewport: vi.fn(() => ({ width: 595, height: 842 })),
             getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
           })),
         ),
-      } as unknown as ReturnType<typeof getDocument>);
+      );
 
       await engine.init(ctx);
       const input = createValidInput("doc-release");

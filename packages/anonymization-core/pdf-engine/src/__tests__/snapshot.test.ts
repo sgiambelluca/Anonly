@@ -7,7 +7,7 @@ vi.mock("pdfjs-dist", () => ({ getDocument: vi.fn() }));
 import { PdfEngine } from "../pdf.engine.js";
 import type { PdfEngineInput } from "../pdf.types.js";
 
-import { createEngineContext } from "./fixtures/test-helpers.js";
+import { createEngineContext, mockGetDocumentResult } from "./fixtures/test-helpers.js";
 
 function buildSnapshotInput(): PdfEngineInput {
   const pdfHeader = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34, 0x0a]);
@@ -86,9 +86,7 @@ describe("PdfEngine — snapshot", () => {
   });
 
   it("DocumentModel snapshot stable (3-page deterministic in-memory fixture, 1 textless)", async () => {
-    vi.mocked(getDocument).mockReturnValue({
-      promise: Promise.resolve(createSnapshotPdfDocument()),
-    } as unknown as ReturnType<typeof getDocument>);
+    vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(createSnapshotPdfDocument()));
 
     await engine.init(ctx);
     const input = buildSnapshotInput();
