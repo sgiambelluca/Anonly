@@ -86,6 +86,8 @@ export interface PdfInvalid {
 export interface OcrStarted {
   readonly documentId: string;
   readonly pagesToProcess: ReadonlyArray<number>;
+  /** true si el modelo Tesseract se está descargando (primera vez; ADR-021 §3). */
+  readonly modelLoading?: boolean;
 }
 export interface OcrPageFinished {
   readonly documentId: string;
@@ -96,6 +98,8 @@ export interface OcrPageFinished {
 export interface OcrFinished {
   readonly documentId: string;
   readonly durationMs: number;
+  /** true si el modelo Tesseract se descargó durante esta corrida (ADR-021 §3). */
+  readonly modelDownloaded?: boolean;
 }
 export interface OcrPageFailed {
   readonly documentId: string;

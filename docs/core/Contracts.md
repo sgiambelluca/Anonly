@@ -408,7 +408,8 @@ export interface NerConfig {
 export interface OcrConfig {
   readonly languages: ReadonlyArray<string>;
   readonly dpi: number;
-  readonly pageTimeoutMs: number;
+  // Timeout y retries por pagina: fuente unica workerPool.timeouts["ocr-page"] y
+  // maxRetries["ocr-page"] (ADR-021 §2, precedente ADR-013).
 }
 
 export interface GroupingConfig {
@@ -477,9 +478,9 @@ export interface PdfPasswordRequired { readonly documentId: string; }
 export interface PdfInvalid { readonly documentId: string; readonly reason: string; }
 
 // OCR
-export interface OcrStarted { readonly documentId: string; readonly pagesToProcess: ReadonlyArray<number>; }
+export interface OcrStarted { readonly documentId: string; readonly pagesToProcess: ReadonlyArray<number>; readonly modelLoading?: boolean; }
 export interface OcrPageFinished { readonly documentId: string; readonly pageIndex: number; readonly wordCount: number; readonly confidence: number; }
-export interface OcrFinished { readonly documentId: string; readonly durationMs: number; }
+export interface OcrFinished { readonly documentId: string; readonly durationMs: number; readonly modelDownloaded?: boolean; }
 export interface OcrPageFailed { readonly documentId: string; readonly pageIndex: number; readonly error: SerializedEngineError; }
 
 // Detectores
@@ -642,7 +643,7 @@ export interface PipelineError {
 
 1. Todo tipo público se agrega primero aquí (en `Contracts.md` y en `shared/src/types.ts`).
 2. Todo `EngineErrorCode` nuevo se agrega al enum aquí y al spec del motor.
-3. Todo `EngineEvents` nuevo se agrega al enum aquí, al `EventPayloads` namespace, y a `04_Event_System.md`.
+3. Todo `EngineEvents` nuevo se agrega al enum aquí, a su interfaz de payload y al `EventPayloadMap`, y a `04_Event_System.md`.
 4. Ningún tipo puede referenciar tipos de librerías externas (pdfjs, tesseract, onnx). Se definen wrappers propios.
 5. Todo tipo es inmutable (`readonly`, `ReadonlyArray`).
 

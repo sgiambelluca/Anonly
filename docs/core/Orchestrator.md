@@ -33,7 +33,7 @@ Coordinar el ciclo de vida completo de un documento (etapas 0–11 de `06_Pipeli
 - Crear los `blobUrl` en el host (`URL.createObjectURL`) a partir de `ImageData`/`ArrayBuffer` transferidos por Render/Export, y revocarlos al reemplazar o cerrar (`07_Performance_Strategy.md` §8).
 - Serializar OCR y NER (no paralelos) cuando `deviceMemory < 4` GB (`07_Performance_Strategy.md` §5.1, §7.1).
 - Encolar exports: un segundo `EXPORT_REQUESTED` durante un export en curso se encola, no se superpone (`07_Performance_Strategy.md` §11.6).
-- Liberar todos los recursos ante `DOCUMENT_CLOSED` (caches, `Document`, blobUrls; los pools se disponen tras 60 s idle).
+- Liberar todos los recursos ante `DOCUMENT_CLOSED`: invocar `PdfEngine.releaseDocument(documentId)` (ADR-020 §7; patron general para motores con estado por documento, ADR-021 §7), limpiar caches y blobUrls; los pools se disponen tras 60 s idle.
 - Mantener `PipelineState` por documento, consultable vía `getState`.
 
 ---
@@ -136,7 +136,7 @@ Canal: `EventChannel.Pipeline`.
 | `PREVIEW_PAGE_FAILED`, `RENDER_FINISHED`, `RENDER_FAILED` (`render`) | reintento (1) / `PIPELINE_FAILED` según `06_Pipeline.md` §12 |
 | `EXPORT_FINISHED`, `EXPORT_FAILED` (`export`) | stage → `Done` / reintento → `PIPELINE_FAILED` (`06_Pipeline.md` §13) |
 | `CANCEL_REQUESTED` (`pipeline`) | abortar `AbortRegistry` + `CANCEL` a pools + `PIPELINE_CANCELLED` |
-| `DOCUMENT_CLOSED` (`ui`) | `closeDocument`: liberar recursos |
+| `DOCUMENT_CLOSED` (`ui`) | `closeDocument`: `PdfEngine.releaseDocument(documentId)` + liberar caches y blobUrls (ADR-021 §7) |
 | `WORKER_JOB_TIMEOUT`, `WORKER_POOL_SATURATED` (`workers`) | reintento/cancelación según config; backpressure (pausar ingest hasta que la cola baje del 50%) |
 
 El Orchestrator **no** escucha `ENTITY_FOUND` (interno Regex/NER → Grouping) ni los eventos `ENTITY_GROUP_*` (Grouping → UI/Render).

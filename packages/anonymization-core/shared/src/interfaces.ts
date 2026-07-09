@@ -110,7 +110,8 @@ export interface NerConfig {
 export interface OcrConfig {
   readonly languages: ReadonlyArray<string>;
   readonly dpi: number;
-  readonly pageTimeoutMs: number;
+  // Timeout y retries por página: fuente única workerPool.timeouts["ocr-page"] y
+  // maxRetries["ocr-page"] (ADR-021 §2, precedente ADR-013).
 }
 
 export interface GroupingConfig {
