@@ -5,11 +5,7 @@ import {
   EngineNotInitializedError,
   EventChannel,
   InvalidInputError,
-  type EngineConfig,
   type EngineContext,
-  type ICache,
-  type IEventBus,
-  type ILogger,
   type Unsubscribe,
   type Word,
 } from "@anonly/shared";
@@ -19,154 +15,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 vi.mock("pdfjs-dist", () => ({ getDocument: vi.fn() }));
 
 import { PdfEngine } from "../pdf.engine.js";
-import type { PdfEngineInput } from "../pdf.types.js";
 
-function createMockBus(): IEventBus {
-  return {
-    on: vi.fn((): Unsubscribe => vi.fn()),
-    once: vi.fn((): Unsubscribe => vi.fn()),
-    off: vi.fn(),
-    emit: vi.fn(),
-    emitAsync: vi.fn(() => Promise.resolve()),
-  };
-}
-
-function createMockLogger(): ILogger {
-  return {
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  };
-}
-
-function createMockCache(): ICache {
-  return {
-    get: vi.fn(),
-    set: vi.fn(),
-    delete: vi.fn(),
-    clear: vi.fn(),
-    size: 0,
-    bytes: 0,
-  };
-}
-
-function createMockConfig(): EngineConfig {
-  return {
-    workerPool: {
-      pdfPoolSize: 2,
-      ocrPoolSize: 1,
-      nerPoolSize: 1,
-      renderPoolSize: 2,
-      maxQueuePerPool: 32,
-      timeouts: {
-        "pdf-parse": 30000,
-        "ocr-page": 60000,
-        "ner-page": 20000,
-        "render-page": 10000,
-        "export-page": 30000,
-      },
-      maxRetries: {
-        "pdf-parse": 1,
-        "ocr-page": 2,
-        "ner-page": 1,
-        "render-page": 1,
-        "export-page": 1,
-      },
-      baseRetryDelayMs: 250,
-      maxRetryDelayMs: 2000,
-      cancelSlaMs: 200,
-      idleDisposeMs: 60000,
-    },
-    pdf: { maxPageCount: 10000 },
-    ner: {
-      modelId: "test",
-      quantization: "q8",
-      confidenceThreshold: 0.7,
-      batchSize: 1,
-      enabled: false,
-    },
-    ocr: { languages: ["spa"], dpi: 300, pageTimeoutMs: 60000 },
-    grouping: { similarityThreshold: 0.88, minAliasFrequency: 1 },
-    render: { previewScale: 0.5, fullScale: 2, jpegQuality: 80, cachePages: 16 },
-    export: { defaultDpi: 300, defaultImageFormat: "png", defaultJpegQuality: 80 },
-  };
-}
-
-function createMockPage(pageIndex: number): Record<string, unknown> {
-  return {
-    getViewport: vi.fn(() => ({ width: 595, height: 842 })),
-    getTextContent: vi.fn(() =>
-      Promise.resolve({
-        items: [
-          { str: `Page${pageIndex}Word1`, transform: [1, 0, 0, 1, 50, 800], width: 50, height: 12 },
-          {
-            str: `Page${pageIndex}Word2`,
-            transform: [1, 0, 0, 1, 110, 800],
-            width: 50,
-            height: 12,
-          },
-        ],
-      }),
-    ),
-  };
-}
-
-function createMockPdfDocument(
-  pageCount: number,
-  options?: { textless?: boolean; metadata?: Record<string, unknown>; hasForms?: boolean },
-): Record<string, unknown> {
-  const pages: Record<string, unknown>[] = [];
-  for (let i = 0; i < pageCount; i++) {
-    if (options?.textless) {
-      pages.push({
-        getViewport: vi.fn(() => ({ width: 595, height: 842 })),
-        getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
-      });
-    } else {
-      pages.push(createMockPage(i));
-    }
-  }
-
-  return {
-    numPages: pageCount,
-    getPage: vi.fn((pageNum: number) => Promise.resolve(pages[pageNum - 1])),
-    getMetadata: vi.fn(() =>
-      Promise.resolve({
-        info: {
-          ...(options?.metadata ?? { Title: "Test Doc" }),
-          IsAcroFormPresent: options?.hasForms === true,
-        },
-        metadata: undefined,
-      }),
-    ),
-    destroy: vi.fn(),
-    _pdfInfo: { encrypted: false, pdfVersion: "1.7" },
-  };
-}
-
-function createEngineContext(overrides?: Partial<EngineContext>): EngineContext {
-  const abortController = new AbortController();
-
-  return {
-    bus: createMockBus(),
-    logger: createMockLogger(),
-    cache: createMockCache(),
-    abortSignal: abortController.signal,
-    config: createMockConfig(),
-    ...overrides,
-  };
-}
-
-function createValidInput(documentId: string): PdfEngineInput {
-  const pdfHeader = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34, 0x0a]);
-  const body = new Uint8Array(100).fill(0x41);
-  const combined = new Uint8Array(pdfHeader.length + body.length);
-  combined.set(pdfHeader, 0);
-  combined.set(body, pdfHeader.length);
-
-  return { documentId, buffer: combined.buffer };
-}
+import {
+  createEngineContext,
+  createMockPdfDocument,
+  createValidInput,
+} from "./fixtures/test-helpers.js";
 
 describe("PdfEngine — contract tests", () => {
   let engine: PdfEngine;
@@ -278,7 +132,7 @@ describe("PdfEngine — contract tests", () => {
     expect(output.document.pages.length).toBe(pageCount);
   });
 
-  it("pages[i].index === i for all i", async () => {
+  it("pages[i].index === i", async () => {
     const docId = "doc-index-invariant";
     const pageCount = 5;
 
@@ -338,7 +192,23 @@ describe("PdfEngine — contract tests", () => {
     expect(updatedDoc.pages[1]!.ocrCompleted).toBe(false);
   });
 
-  it("dispose releases resources and clears documents", async () => {
+  it("fuseOcrPage on non-OCR page throws InvalidInputError", async () => {
+    const docId = "doc-fuse-guard";
+
+    // Documento con texto nativo (requiresOCR = false en todas las páginas).
+    vi.mocked(getDocument).mockReturnValue({
+      promise: Promise.resolve(createMockPdfDocument(1)),
+    } as unknown as ReturnType<typeof getDocument>);
+
+    await engine.init(ctx);
+    const input = createValidInput(docId);
+    const output = await engine.process(input, ctx);
+    expect(output.document.pages[0]!.requiresOCR).toBe(false);
+
+    await expect(engine.fuseOcrPage(docId, 0, [])).rejects.toThrow(InvalidInputError);
+  });
+
+  it("dispose releases PDFDocumentProxy", async () => {
     const mockDoc = createMockPdfDocument(1);
     vi.mocked(getDocument).mockReturnValue({
       promise: Promise.resolve(mockDoc),
@@ -373,5 +243,33 @@ describe("PdfEngine — contract tests", () => {
     await engine.process(input, ctx);
 
     await expect(engine.fuseOcrPage("doc-range", 99, [])).rejects.toThrow(InvalidInputError);
+  });
+
+  it("engine never subscribes to the bus (ADR-014)", async () => {
+    vi.mocked(getDocument).mockReturnValue({
+      promise: Promise.resolve(createMockPdfDocument(2, { textless: true })),
+    } as unknown as ReturnType<typeof getDocument>);
+
+    // Spies nombrados (no referencias de método del bus) para evitar
+    // @typescript-eslint/unbound-method en los asserts.
+    const onSpy = vi.fn((): Unsubscribe => vi.fn());
+    const onceSpy = vi.fn((): Unsubscribe => vi.fn());
+    const busCtx = createEngineContext({
+      bus: {
+        on: onSpy,
+        once: onceSpy,
+        off: vi.fn(),
+        emit: vi.fn(),
+        emitAsync: vi.fn(() => Promise.resolve()),
+      },
+    });
+
+    await engine.init(busCtx);
+    const input = createValidInput("doc-no-subscribe");
+    await engine.process(input, busCtx);
+    await engine.fuseOcrPage("doc-no-subscribe", 0, []);
+
+    expect(onSpy).not.toHaveBeenCalled();
+    expect(onceSpy).not.toHaveBeenCalled();
   });
 });

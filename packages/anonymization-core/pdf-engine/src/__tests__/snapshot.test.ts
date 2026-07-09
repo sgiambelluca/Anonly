@@ -1,11 +1,4 @@
-import {
-  type EngineConfig,
-  type EngineContext,
-  type ICache,
-  type IEventBus,
-  type ILogger,
-  type Unsubscribe,
-} from "@anonly/shared";
+import { type EngineContext } from "@anonly/shared";
 import { getDocument } from "pdfjs-dist";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
@@ -14,90 +7,7 @@ vi.mock("pdfjs-dist", () => ({ getDocument: vi.fn() }));
 import { PdfEngine } from "../pdf.engine.js";
 import type { PdfEngineInput } from "../pdf.types.js";
 
-function createMockBus(): IEventBus {
-  return {
-    on: vi.fn((): Unsubscribe => vi.fn()),
-    once: vi.fn((): Unsubscribe => vi.fn()),
-    off: vi.fn(),
-    emit: vi.fn(),
-    emitAsync: vi.fn(() => Promise.resolve()),
-  };
-}
-
-function createMockLogger(): ILogger {
-  return {
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  };
-}
-
-function createMockCache(): ICache {
-  return {
-    get: vi.fn(),
-    set: vi.fn(),
-    delete: vi.fn(),
-    clear: vi.fn(),
-    size: 0,
-    bytes: 0,
-  };
-}
-
-function createMockConfig(): EngineConfig {
-  return {
-    workerPool: {
-      pdfPoolSize: 2,
-      ocrPoolSize: 1,
-      nerPoolSize: 1,
-      renderPoolSize: 2,
-      maxQueuePerPool: 32,
-      timeouts: {
-        "pdf-parse": 30000,
-        "ocr-page": 60000,
-        "ner-page": 20000,
-        "render-page": 10000,
-        "export-page": 30000,
-      },
-      maxRetries: {
-        "pdf-parse": 1,
-        "ocr-page": 2,
-        "ner-page": 1,
-        "render-page": 1,
-        "export-page": 1,
-      },
-      baseRetryDelayMs: 250,
-      maxRetryDelayMs: 2000,
-      cancelSlaMs: 200,
-      idleDisposeMs: 60000,
-    },
-    pdf: { maxPageCount: 10000 },
-    ner: {
-      modelId: "test",
-      quantization: "q8",
-      confidenceThreshold: 0.7,
-      batchSize: 1,
-      enabled: false,
-    },
-    ocr: { languages: ["spa"], dpi: 300, pageTimeoutMs: 60000 },
-    grouping: { similarityThreshold: 0.88, minAliasFrequency: 1 },
-    render: { previewScale: 0.5, fullScale: 2, jpegQuality: 80, cachePages: 16 },
-    export: { defaultDpi: 300, defaultImageFormat: "png", defaultJpegQuality: 80 },
-  };
-}
-
-function createEngineContext(overrides?: Partial<EngineContext>): EngineContext {
-  const abortController = new AbortController();
-
-  return {
-    bus: createMockBus(),
-    logger: createMockLogger(),
-    cache: createMockCache(),
-    abortSignal: abortController.signal,
-    config: createMockConfig(),
-    ...overrides,
-  };
-}
+import { createEngineContext } from "./fixtures/test-helpers.js";
 
 function buildSnapshotInput(): PdfEngineInput {
   const pdfHeader = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34, 0x0a]);
@@ -175,7 +85,7 @@ describe("PdfEngine — snapshot", () => {
     }
   });
 
-  it("DocumentModel snapshot is stable for a known PDF structure", async () => {
+  it("DocumentModel snapshot stable (3-page deterministic in-memory fixture, 1 textless)", async () => {
     vi.mocked(getDocument).mockReturnValue({
       promise: Promise.resolve(createSnapshotPdfDocument()),
     } as unknown as ReturnType<typeof getDocument>);

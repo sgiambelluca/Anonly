@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`PdfEngine — snapshot > DocumentModel snapshot is stable for a known PDF structure 1`] = `
+exports[`PdfEngine — snapshot > DocumentModel snapshot stable (3-page deterministic in-memory fixture, 1 textless) 1`] = `
 {
   "document": {
     "id": "snapshot-doc",

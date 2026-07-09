@@ -1,13 +1,13 @@
-<!-- CONTEXT: scope=pdf-engine | dependencias=core/Contracts.md,architecture/03_Data_Model.md,architecture/04_Event_System.md,architecture/05_Worker_Architecture.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md | audiencia=IA-implementador | fase=3 (Hito 2 cerrado, pendientes: 5b migración a PdfPool, items §15 diferidos a Hito 9/11) -->
+<!-- CONTEXT: scope=pdf-engine | dependencias=core/Contracts.md,architecture/03_Data_Model.md,architecture/04_Event_System.md,architecture/05_Worker_Architecture.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-020-PdfEngine-Word-Granularity-Hardening.md | audiencia=IA-implementador | fase=3 (Hito 2 cerrado, hardening post-review vía ADR-020; pendientes: 5b migración a PdfPool, items §15 diferidos a Hito 9/11) -->
 
 # PDF Engine — Spec de Motor
 
 > Extrae texto y posiciones de cada página del PDF. Marca las páginas sin texto para que OCR las procese. Descarta metadata sensible.
 
 **EngineId**: `pdf` (valor del enum `EngineId`)
-**Versión del spec**: 1.1.1
-**Última actualización**: 2026-06-18
-**Estado de implementación**: Hito 2 cerrado (PRs #6, #7). Pendiente: migración a `PdfPool` en Hito 9 (item §15.5b) y tests stress/cancel/perf en Hito 11.
+**Versión del spec**: 1.2.0
+**Última actualización**: 2026-07-09
+**Estado de implementación**: Hito 2 cerrado (PRs #6, #7); hardening post-review vía ADR-020 (word-splitting, NFC, política de eventos, guard de `fuseOcrPage`, `releaseDocument`, `parsePage` puro). Pendiente: migración a `PdfPool` en Hito 9 (item §15.5b) y tests stress/cancel/perf en Hito 11.
 
 ---
 
@@ -89,6 +89,10 @@ export class PdfEngine implements IEngine {
   init(ctx: EngineContext): Promise<void>;
   process(input: PdfEngineInput, ctx: EngineContext): Promise<PdfEngineOutput>;
   fuseOcrPage(documentId: string, pageIndex: number, words: ReadonlyArray<Word>): Promise<Document>;
+  // Evicción individual de un documento parseado (ADR-020). Idempotente: no-op si
+  // documentId no existe (incluso tras dispose()). No libera el engine completo,
+  // a diferencia de dispose(). Necesario para DOCUMENT_CLOSED (Hito 9).
+  releaseDocument(documentId: string): void;
   dispose(): Promise<void>;
 }
 ```
@@ -105,6 +109,8 @@ export class PdfEngine implements IEngine {
 | `PDF_INVALID` | no es un PDF válido o corrupto | `PdfInvalid` | async | sí |
 
 Canal: `EventChannel.Pdf`.
+
+**Política de señalización (ADR-020)**: todo error fatal de parseo emite su evento antes de lanzar. Los fallos de página interna (`PdfCorruptedError`) emiten `PDF_INVALID` con `reason` (no existe un evento `PDF_CORRUPTED` en el bus; el código de error sí distingue el caso, ver §11).
 
 ---
 
@@ -163,12 +169,12 @@ PdfEngineOutput {
 | Code | Clase | Cuándo | Recuperable | Acción |
 |---|---|---|---|---|
 | `PDF_PASSWORD_REQUIRED` | `PdfPasswordRequiredError` | PDF protegido sin password o password incorrecto | sí | UI pide password, reintentar con `password` |
-| `PDF_INVALID` | `PdfInvalidError` | no es PDF, header inválido, corrupto | no | abortar pipeline, informar al usuario |
-| `PDF_CORRUPTED` | `PdfCorruptedError` | PDF.js lanza error de parseo en una página interna | no | abortar pipeline |
-| `PDF_TIMEOUT` | `PdfTimeoutError` | timeout por página excedido tras reintentos | sí (reintentar) | retry 1 vez, si persiste → `PDF_INVALID` |
+| `PDF_INVALID` | `PdfInvalidError` | no es PDF, header inválido, corrupto a nivel de documento (incl. `maxPageCount` excedido y errores desconocidos de `getDocument()`, ver ADR-020 §4) | no | abortar pipeline, informar al usuario |
+| `PDF_CORRUPTED` | `PdfCorruptedError` | PDF.js lanza error de parseo en una página interna (`getPage`/`getTextContent`); aplica solo a este caso, nunca a fallos a nivel de documento (ADR-020 §4) | no | abortar pipeline |
+| `PDF_TIMEOUT` | `PdfTimeoutError` | timeout por página excedido | sí (reintentar) | Hito 2 (inline): no reintenta, se propaga directo. Hito 9: retry es responsabilidad del `WorkerPool` (`maxRetries["pdf-parse"]`, ADR-020 §5); si persiste → `PDF_INVALID` |
 | `ENGINE_NOT_INITIALIZED` | `EngineNotInitializedError` | `process` llamado antes de `init` | no | bug del caller |
 | `ENGINE_DISPOSED` | `EngineDisposedError` | `process` llamado tras `dispose` | no | bug del caller |
-| `INVALID_INPUT` | `InvalidInputError` | input null/undefined o buffer vacío | no | bug del caller |
+| `INVALID_INPUT` | `InvalidInputError` | input null/undefined, buffer vacío, o `fuseOcrPage` sobre página con `requiresOCR === false` (ADR-020 §6) | no | bug del caller |
 
 `retryable`: `PDF_PASSWORD_REQUIRED = true`, `PDF_TIMEOUT = true`, resto `false`.
 
@@ -183,9 +189,10 @@ PdfEngineOutput {
 - `buffer` se **transfiere** al worker (zero-copy). El host pierde acceso al buffer. En Hito 2 (inline) el `buffer` se trata como `ArrayBuffer` plano; no implementar lógica de `Transferable.consume()` hasta Hito 9 (sería dead code inline).
 - Streaming: `PAGE_PARSED` se emite por página, no al final. La UI puede mostrar páginas a medida que se parsean.
 - Tamaño de lote recomendado: 1 página por job (granularidad de cancelación óptima). El pool despacha en paralelo respetando `pdfPoolSize` (aplica desde Hito 9; en Hito 2 el procesamiento es secuencial por página con checkpoint).
-- Reutiliza `PDFDocumentProxy` de PDF.js solo si el `documentId` coincide entre jobs; si cambia, lo cierra y abre uno nuevo.
-- Memoria del `PDFDocumentProxy` se libera en `dispose()` del engine o al cambiar `documentId`.
-- **Preparación para Hito 9 (normativa)**: aísla `parsePage(pdfDoc, pageIndex): Page` como función pura sin supuestos host/worker (Hito 9 la envuelve en un job del worker sin modificarla). La emisión de eventos (`PAGE_PARSED`, `DOCUMENT_PARSED`) queda en el engine (host), no en el worker. No buildar lógica de `Transferable.consume()` en Hito 2.
+- El `PDFDocumentProxy` se destruye al finalizar cada `process()` (ADR-020 §8; reemplaza el hint de reuse por `documentId` que documentaba esta sección — obsoleto en el modelo inline, nunca implementado, y descartado por riesgo de leak sin beneficio).
+- Los `TextItem` que devuelve PDF.js se dividen por whitespace en `Word`s individuales, con `x`/`width` prorrateados linealmente por longitud de caracteres respecto del `TextItem` original; `y`/`height` se conservan (ADR-020 §1).
+- `Word.text` y, por lo tanto, `Page.text`, se normalizan a NFC (invariante `03_Data_Model.md` §4; ADR-020 §2).
+- **Preparación para Hito 9 (normativa)**: `parsePage(pdfDoc, documentId, pageIndex, timeoutMs): Promise<Page>` es una función pura a nivel de módulo, sin supuestos host/worker (Hito 9 la envuelve en un job del worker sin modificarla). La emisión de eventos (`PAGE_PARSED`, `DOCUMENT_PARSED`) queda en el engine (host), no en el worker. No buildar lógica de `Transferable.consume()` en Hito 2.
 
 ---
 
@@ -202,8 +209,9 @@ PdfEngineOutput {
 9. **PDF con forms (AcroForm)**: `metadata.hasForms = true`. Forms no se parsean a `Word[]` (se ignoran; el export no los replica).
 10. **PDF con JavaScript embebido**: `process` lo ignora. No se ejecuta. No se replica en export.
 11. **PDF con 100 páginas todas escaneadas**: `sourceKind = "scanned"`, `textlessPages = [0..99]`.
-12. **Buffer ya transferido (consumido)**: lanza `InvalidInputError` con detalles.
+12. **Buffer ya transferido (consumido)**: lanza `InvalidInputError` con detalles (Hito 9; inline es indistinguible de buffer vacío → `PdfInvalidError`).
 13. **`process` llamado tras `dispose`**: lanza `EngineDisposedError`.
+14. **`fuseOcrPage` sobre página con texto nativo** (`requiresOCR === false`): lanza `InvalidInputError`; la fusión OCR solo aplica a páginas textless (ADR-020 §6).
 
 ---
 
@@ -235,6 +243,15 @@ PdfEngineOutput {
 | `dispose releases PDFDocumentProxy` | `contract.test.ts` | contract | 2 | limpieza |
 | `process after dispose throws` | `edge.test.ts` | edge | 2 | caso 13 |
 | `DocumentModel snapshot stable (3-page deterministic in-memory fixture, 1 textless)` | `snapshot.test.ts` | snapshot | 2 | fixture estable, sin binario |
+| `splits multi-word TextItems into individual words with prorated bboxes` | `unit.test.ts` | unit | 2 | ADR-020 §1 |
+| `normalizes word text to NFC` | `unit.test.ts` | unit | 2 | ADR-020 §2 |
+| `throws PdfTimeoutError with documentId when page parse exceeds timeout` | `unit.test.ts` | unit | 2 | ADR-020 §5 (bug de `documentId` vacío) |
+| `throws PdfInvalidError when page count exceeds maxPageCount` | `edge.test.ts` | edge | 2 | ADR-020 §3 |
+| `throws PdfInvalidError on empty password string` | `edge.test.ts` | edge | 2 | ADR-020 §3 |
+| `emits PDF_INVALID before throwing on fatal parse errors` | `edge.test.ts` | edge | 2 | ADR-020 §3, §4 |
+| `fuseOcrPage on non-OCR page throws InvalidInputError` | `contract.test.ts` | contract | 2 | caso 14; ADR-020 §6 |
+| `engine never subscribes to the bus (ADR-014)` | `contract.test.ts` | contract | 2 | ratifica ADR-014 |
+| `releaseDocument evicts a single document` | `unit.test.ts` | unit | 2 | ADR-020 §7 |
 | `1000 pages document completes within memory budget` | `stress.test.ts` (en `tests/stress/`) | stress | 11 | caso 2; pendiente, requiere `huge-1000p.pdf` (LFS) |
 | `cancel aborts within 200ms` | `cancel.test.ts` (en `tests/cancel/`) | cancel | 11 | SLA; pendiente, requiere `PdfPool` + `AbortRegistry` (Hito 9) |
 
@@ -267,6 +284,7 @@ PdfEngineOutput {
 - [x] 16. Verificar que ninguna dependencia prohibida aparece en imports (`grep -r 'react\|tesseract\|onnx\|pdf-lib' src/`).
 - [x] 17. Verificar `no-network-from-core`: ningún `fetch`/`XMLHttpRequest`/`WebSocket` en `src/`.
 - [ ] 18. (Hito 9/11) Verificar test de cancelación < 200 ms — requiere `PdfPool` + `AbortRegistry`. En Hito 2 se valida cancelación cooperativa inline (checkpoint por página) sin SLA estricto.
+- [x] 19. Hardening post-review (ADR-020): word-splitting, NFC, política de eventos, guard de `fuseOcrPage`, `releaseDocument`, `parsePage` puro.
 
 ---
 
@@ -277,3 +295,6 @@ PdfEngineOutput {
 - `architecture/08_Security_Model.md` §5 (strip metadata)
 - `adr/ADR-001-Framework.md` (pdfjs-dist)
 - `adr/ADR-003-Workers.md` (pools)
+- `adr/ADR-013-PDF-Engine-Hito2-Inline.md` (ejecución inline, `parsePage` puro)
+- `adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md` (`fuseOcrPage`, PDF Engine no se suscribe al bus)
+- `adr/ADR-020-PdfEngine-Word-Granularity-Hardening.md` (word-splitting, NFC, política de eventos, guard `fuseOcrPage`, `releaseDocument`, `parsePage` puro)
