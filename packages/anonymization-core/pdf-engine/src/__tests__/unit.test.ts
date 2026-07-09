@@ -1,156 +1,18 @@
-import {
-  type EngineConfig,
-  type EngineContext,
-  type ICache,
-  type IEventBus,
-  type ILogger,
-  type Unsubscribe,
-  type Word,
-} from "@anonly/shared";
+import { InvalidInputError, type EngineContext, type Word } from "@anonly/shared";
 import { getDocument } from "pdfjs-dist";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("pdfjs-dist", () => ({ getDocument: vi.fn() }));
 
 import { PdfEngine } from "../pdf.engine.js";
-import type { PdfEngineInput } from "../pdf.types.js";
+import { PdfTimeoutError } from "../pdf.errors.js";
 
-function createMockBus(): IEventBus {
-  return {
-    on: vi.fn((): Unsubscribe => vi.fn()),
-    once: vi.fn((): Unsubscribe => vi.fn()),
-    off: vi.fn(),
-    emit: vi.fn(),
-    emitAsync: vi.fn(() => Promise.resolve()),
-  };
-}
-
-function createMockLogger(): ILogger {
-  return {
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  };
-}
-
-function createMockCache(): ICache {
-  return {
-    get: vi.fn(),
-    set: vi.fn(),
-    delete: vi.fn(),
-    clear: vi.fn(),
-    size: 0,
-    bytes: 0,
-  };
-}
-
-function createMockConfig(): EngineConfig {
-  return {
-    workerPool: {
-      pdfPoolSize: 2,
-      ocrPoolSize: 1,
-      nerPoolSize: 1,
-      renderPoolSize: 2,
-      maxQueuePerPool: 32,
-      timeouts: {
-        "pdf-parse": 30000,
-        "ocr-page": 60000,
-        "ner-page": 20000,
-        "render-page": 10000,
-        "export-page": 30000,
-      },
-      maxRetries: {
-        "pdf-parse": 1,
-        "ocr-page": 2,
-        "ner-page": 1,
-        "render-page": 1,
-        "export-page": 1,
-      },
-      baseRetryDelayMs: 250,
-      maxRetryDelayMs: 2000,
-      cancelSlaMs: 200,
-      idleDisposeMs: 60000,
-    },
-    pdf: { maxPageCount: 10000 },
-    ner: {
-      modelId: "test",
-      quantization: "q8",
-      confidenceThreshold: 0.7,
-      batchSize: 1,
-      enabled: false,
-    },
-    ocr: { languages: ["spa"], dpi: 300, pageTimeoutMs: 60000 },
-    grouping: { similarityThreshold: 0.88, minAliasFrequency: 1 },
-    render: { previewScale: 0.5, fullScale: 2, jpegQuality: 80, cachePages: 16 },
-    export: { defaultDpi: 300, defaultImageFormat: "png", defaultJpegQuality: 80 },
-  };
-}
-
-function createEngineContext(overrides?: Partial<EngineContext>): EngineContext {
-  const abortController = new AbortController();
-
-  return {
-    bus: createMockBus(),
-    logger: createMockLogger(),
-    cache: createMockCache(),
-    abortSignal: abortController.signal,
-    config: createMockConfig(),
-    ...overrides,
-  };
-}
-
-function createValidInput(documentId: string): PdfEngineInput {
-  const pdfHeader = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34, 0x0a]);
-  const body = new Uint8Array(100).fill(0x41);
-  const combined = new Uint8Array(pdfHeader.length + body.length);
-  combined.set(pdfHeader, 0);
-  combined.set(body, pdfHeader.length);
-
-  return { documentId, buffer: combined.buffer };
-}
-
-function createMockPage(
-  pageIndex: number,
-  textItems?: ReadonlyArray<{ str: string; x: number; y: number; width: number; height: number }>,
-): Record<string, unknown> {
-  const items = textItems ?? [
-    { str: `Page${pageIndex}Word1`, x: 50, y: 800, width: 50, height: 12 },
-    { str: `Page${pageIndex}Word2`, x: 110, y: 800, width: 50, height: 12 },
-  ];
-
-  return {
-    getViewport: vi.fn(() => ({ width: 595, height: 842 })),
-    getTextContent: vi.fn(() =>
-      Promise.resolve({
-        items: items.map((item) => ({
-          str: item.str,
-          transform: [1, 0, 0, 1, item.x, item.y],
-          width: item.width,
-          height: item.height,
-        })),
-      }),
-    ),
-  };
-}
-
-function createMockPdfDocument(
-  pageCount: number,
-  pageFactory?: (pageIndex: number) => Record<string, unknown>,
-): Record<string, unknown> {
-  const pages: Record<string, unknown>[] = [];
-  for (let i = 0; i < pageCount; i++) {
-    pages.push(pageFactory ? pageFactory(i) : createMockPage(i));
-  }
-
-  return {
-    numPages: pageCount,
-    getPage: vi.fn((pageNum: number) => Promise.resolve(pages[pageNum - 1])),
-    getMetadata: vi.fn(() => Promise.resolve({ info: { Title: "Test" }, metadata: undefined })),
-    destroy: vi.fn(),
-    _pdfInfo: { encrypted: false, pdfVersion: "1.7" },
-  };
-}
+import {
+  createEngineContext,
+  createMockPage,
+  createMockPdfDocument,
+  createValidInput,
+} from "./fixtures/test-helpers.js";
 
 describe("PdfEngine — unit tests", () => {
   let engine: PdfEngine;
@@ -169,7 +31,7 @@ describe("PdfEngine — unit tests", () => {
   });
 
   describe("Word sorting (reading order)", () => {
-    it("sorts words by y asc then x asc", async () => {
+    it("words sorted by y then x", async () => {
       vi.mocked(getDocument).mockReturnValue({
         promise: Promise.resolve(
           createMockPdfDocument(1, () =>
@@ -254,7 +116,7 @@ describe("PdfEngine — unit tests", () => {
   });
 
   describe("TextlessPages sorted asc", () => {
-    it("returns textlessPages in ascending order", async () => {
+    it("textlessPages sorted asc", async () => {
       vi.mocked(getDocument).mockReturnValue({
         promise: Promise.resolve(
           createMockPdfDocument(4, (i: number) => {
@@ -277,53 +139,129 @@ describe("PdfEngine — unit tests", () => {
     });
   });
 
-  describe("SourceKind detection", () => {
-    it("sourceKind = text when no textless pages", async () => {
-      vi.mocked(getDocument).mockReturnValue({
-        promise: Promise.resolve(createMockPdfDocument(3)),
-      } as unknown as ReturnType<typeof getDocument>);
+  describe("Word splitting (ADR-020 §1)", () => {
+    it("splits multi-word TextItems into individual words with prorated bboxes", async () => {
+      const accentedWord = "Juan Pérez 34.567.891";
 
-      await engine.init(ctx);
-      const input = createValidInput("doc-text-kind");
-      const output = await engine.process(input, ctx);
-      expect(output.sourceKind).toBe("text");
-    });
-
-    it("sourceKind = scanned when all pages are textless", async () => {
       vi.mocked(getDocument).mockReturnValue({
         promise: Promise.resolve(
-          createMockPdfDocument(2, () => ({
-            getViewport: vi.fn(() => ({ width: 595, height: 842 })),
-            getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
-          })),
+          createMockPdfDocument(1, () =>
+            createMockPage(0, [{ str: accentedWord, x: 50, y: 800, width: 210, height: 12 }]),
+          ),
         ),
       } as unknown as ReturnType<typeof getDocument>);
 
       await engine.init(ctx);
-      const input = createValidInput("doc-scanned");
+      const input = createValidInput("doc-word-split");
       const output = await engine.process(input, ctx);
-      expect(output.sourceKind).toBe("scanned");
+      const words = output.document.pages[0]!.words;
+
+      expect(words.length).toBe(3);
+      expect(words.map((w) => w.text)).toEqual(["Juan", "Pérez", "34.567.891"]);
+
+      // x crece monotónicamente (orden de lectura preservado)
+      expect(words[0]!.bbox.x).toBeLessThan(words[1]!.bbox.x);
+      expect(words[1]!.bbox.x).toBeLessThan(words[2]!.bbox.x);
+
+      // y/height se conservan idénticos para todos los tokens del mismo TextItem
+      expect(words[0]!.bbox.y).toBe(words[1]!.bbox.y);
+      expect(words[1]!.bbox.y).toBe(words[2]!.bbox.y);
+      expect(words[0]!.bbox.height).toBe(12);
+
+      // Los widths prorrateados suman ≈ el width original (la diferencia es el
+      // ancho atribuido a los 2 espacios, que no pertenecen a ningún token).
+      const totalWidth = words.reduce((sum, w) => sum + w.bbox.width, 0);
+      expect(totalWidth).toBeGreaterThan(150);
+      expect(totalWidth).toBeLessThanOrEqual(210);
     });
 
-    it("sourceKind = mixed when some pages are textless", async () => {
+    it("does not split a single-word TextItem (keeps original bbox, only NFC applies)", async () => {
       vi.mocked(getDocument).mockReturnValue({
         promise: Promise.resolve(
-          createMockPdfDocument(3, (i: number) => {
-            const textless = i === 1;
-            return textless
-              ? {
-                  getViewport: vi.fn(() => ({ width: 595, height: 842 })),
-                  getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
-                }
-              : createMockPage(i);
+          createMockPdfDocument(1, () =>
+            createMockPage(0, [{ str: "SingleWord", x: 50, y: 800, width: 60, height: 12 }]),
+          ),
+        ),
+      } as unknown as ReturnType<typeof getDocument>);
+
+      await engine.init(ctx);
+      const input = createValidInput("doc-single-word");
+      const output = await engine.process(input, ctx);
+      const words = output.document.pages[0]!.words;
+
+      expect(words.length).toBe(1);
+      expect(words[0]!.text).toBe("SingleWord");
+      expect(words[0]!.bbox.x).toBe(50);
+      expect(words[0]!.bbox.width).toBe(60);
+    });
+  });
+
+  describe("NFC normalization (ADR-020 §2)", () => {
+    it("normalizes word text to NFC", async () => {
+      // Construidas con escapes Unicode explícitos (fuente 100% ASCII) para
+      // no depender de cómo el editor codifique un acento tipeado
+      // literalmente:
+      // NFD = "P" + "e" + combining acute accent (U+0301) + "rez" (6 chars).
+      // NFC = "P" + "é" precompuesta (U+00E9) + "rez" (5 chars).
+      const nfdPerez = "Pérez";
+      const nfcPerez = "Pérez";
+      expect(nfdPerez.length).toBe(6);
+      expect(nfcPerez.length).toBe(5);
+      expect(nfdPerez).not.toBe(nfcPerez);
+      expect(nfdPerez.normalize("NFC")).toBe(nfcPerez);
+
+      vi.mocked(getDocument).mockReturnValue({
+        promise: Promise.resolve(
+          createMockPdfDocument(1, () =>
+            createMockPage(0, [{ str: nfdPerez, x: 50, y: 800, width: 40, height: 12 }]),
+          ),
+        ),
+      } as unknown as ReturnType<typeof getDocument>);
+
+      await engine.init(ctx);
+      const input = createValidInput("doc-nfc");
+      const output = await engine.process(input, ctx);
+      const page = output.document.pages[0]!;
+
+      expect(page.words[0]!.text).toBe(nfcPerez);
+      expect(page.words[0]!.text.length).toBe(5);
+      expect(page.text).toContain(nfcPerez);
+    });
+  });
+
+  describe("Timeout handling (ADR-020 §5)", () => {
+    it("throws PdfTimeoutError with documentId when page parse exceeds timeout", async () => {
+      vi.useFakeTimers();
+      try {
+        vi.mocked(getDocument).mockReturnValue({
+          promise: Promise.resolve({
+            numPages: 1,
+            getPage: vi.fn(() =>
+              Promise.resolve({
+                getViewport: vi.fn(() => ({ width: 595, height: 842 })),
+                getTextContent: vi.fn(() => new Promise(() => {})),
+              }),
+            ),
+            getMetadata: vi.fn(() => Promise.resolve({ info: {}, metadata: undefined })),
+            destroy: vi.fn(),
+            _pdfInfo: { encrypted: false, pdfVersion: "1.7" },
           }),
-        ),
-      } as unknown as ReturnType<typeof getDocument>);
+        } as unknown as ReturnType<typeof getDocument>);
 
-      await engine.init(ctx);
-      const input = createValidInput("doc-mixed");
-      const output = await engine.process(input, ctx);
-      expect(output.sourceKind).toBe("mixed");
+        await engine.init(ctx);
+        const input = createValidInput("doc-timeout");
+        const resultPromise = engine.process(input, ctx);
+        const caught = resultPromise.catch((err: unknown) => err);
+
+        await vi.advanceTimersByTimeAsync(30001);
+
+        const err = await caught;
+        expect(err).toBeInstanceOf(PdfTimeoutError);
+        if (!(err instanceof PdfTimeoutError)) throw new Error("expected PdfTimeoutError");
+        expect(err.details.documentId).toBe("doc-timeout");
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 
@@ -400,6 +338,33 @@ describe("PdfEngine — unit tests", () => {
       expect(updatedDoc).not.toBe(originalOutput.document);
       expect(originalOutput.document.pages[0]!.words.length).toBe(0);
       expect(updatedDoc.pages[0]!.words.length).toBe(1);
+    });
+  });
+
+  describe("releaseDocument (ADR-020 §7)", () => {
+    it("releaseDocument evicts a single document", async () => {
+      vi.mocked(getDocument).mockReturnValue({
+        promise: Promise.resolve(
+          createMockPdfDocument(1, () => ({
+            getViewport: vi.fn(() => ({ width: 595, height: 842 })),
+            getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
+          })),
+        ),
+      } as unknown as ReturnType<typeof getDocument>);
+
+      await engine.init(ctx);
+      const input = createValidInput("doc-release");
+      await engine.process(input, ctx);
+
+      expect(engine["documents"].size).toBe(1);
+
+      engine.releaseDocument("doc-release");
+      expect(engine["documents"].size).toBe(0);
+
+      await expect(engine.fuseOcrPage("doc-release", 0, [])).rejects.toThrow(InvalidInputError);
+
+      expect(() => engine.releaseDocument("does-not-exist")).not.toThrow();
+      expect(() => engine.releaseDocument("doc-release")).not.toThrow();
     });
   });
 });

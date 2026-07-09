@@ -28,6 +28,178 @@ import type { PdfEngineInput, PdfEngineOutput } from "./pdf.types.js";
 const DEFAULT_MAX_PAGE_COUNT = 10_000;
 const DEFAULT_TIMEOUT_MS_PER_PAGE = 30_000;
 
+/* TextContent from pdfjs-dist has items: Array<TextItem | TextMarkedContent>.
+ * TextMarkedContent (type/id only) is filtered out in convertTextItemsToWords.
+ * The `as` cast at the call site is valid because the structural subset
+ * (optional str/transform/width/height) is compatible with both TextItem and
+ * TextMarkedContent shapes. */
+type TextContentLike = {
+  items: ReadonlyArray<{
+    str?: string;
+    transform?: readonly number[];
+    width?: number;
+    height?: number;
+  }>;
+};
+
+/*
+ * Funciones de módulo (ADR-013 §6, ADR-020 §10): parsePage() y sus helpers no
+ * asumen host ni worker — Hito 9 las envuelve en un job del worker sin
+ * modificarlas. No emiten eventos: la emisión queda en process() (host).
+ */
+
+async function parsePageTextWithTimeout(
+  pageProxy: PDFPageProxy,
+  documentId: string,
+  pageIndex: number,
+  timeoutMs: number,
+): Promise<TextContentLike> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new PdfTimeoutError(documentId, pageIndex, timeoutMs));
+    }, timeoutMs);
+  });
+
+  try {
+    const result = await Promise.race([pageProxy.getTextContent(), timeoutPromise]);
+    return result as TextContentLike;
+  } finally {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
+/*
+ * ADR-020 §1: PDF.js devuelve un TextItem por run (frecuentemente línea/frase
+ * entera), no por palabra. Se divide str por whitespace en Words individuales,
+ * prorrateando x/width linealmente por longitud de caracteres (aproximación:
+ * asume ancho de carácter constante dentro del run). y/height se conservan.
+ * Con un solo token, se conserva el bbox del item completo (comportamiento
+ * previo) y solo se aplica normalización NFC (ADR-020 §2).
+ */
+function convertTextItemsToWords(
+  textContent: TextContentLike,
+  pageIndex: number,
+  pageHeight: number,
+): Word[] {
+  const words: Word[] = [];
+
+  for (const item of textContent.items) {
+    if (!item.str || item.str.trim().length === 0 || !item.transform) continue;
+
+    const str = item.str;
+    const x = item.transform[4] ?? 0;
+    const baselineY = item.transform[5] ?? 0;
+    const width = item.width ?? 0;
+    const height = item.height ?? 12;
+    const y = pageHeight - baselineY - height;
+
+    const tokens = [...str.matchAll(/\S+/g)];
+
+    if (tokens.length <= 1) {
+      const text = (tokens[0]?.[0] ?? str).normalize("NFC");
+      const bbox: BoundingBox = { x, y, width, height };
+      words.push({ text, bbox, pageIndex, confidence: 1.0, source: "pdf" });
+      continue;
+    }
+
+    const charWidth = str.length > 0 ? width / str.length : 0;
+    for (const token of tokens) {
+      const tokenText = token[0];
+      if (tokenText === undefined) continue;
+      const offset = token.index ?? 0;
+      const bbox: BoundingBox = {
+        x: x + charWidth * offset,
+        y,
+        width: charWidth * tokenText.length,
+        height,
+      };
+      words.push({
+        text: tokenText.normalize("NFC"),
+        bbox,
+        pageIndex,
+        confidence: 1.0,
+        source: "pdf",
+      });
+    }
+  }
+
+  return words;
+}
+
+function sortWordsByReadingOrder(words: ReadonlyArray<Word>): Word[] {
+  const sorted = [...words];
+  sorted.sort((a, b) => {
+    const dy = a.bbox.y - b.bbox.y;
+    if (Math.abs(dy) > 1) return dy;
+    return a.bbox.x - b.bbox.x;
+  });
+  return sorted;
+}
+
+/*
+ * ADR-020 §10: parsePage() puro — obtiene la página, viewport y texto (con
+ * timeout), convierte a Words y arma la Page. Lanza PdfCorruptedError /
+ * PdfTimeoutError con el documentId correcto (ADR-020 §5). No emite eventos.
+ */
+async function parsePage(
+  pdfDocument: PDFDocumentProxy,
+  documentId: string,
+  pageIndex: number,
+  timeoutMs: number,
+): Promise<Page> {
+  const pageNum = pageIndex + 1;
+
+  let pageProxy: PDFPageProxy;
+  try {
+    pageProxy = await pdfDocument.getPage(pageNum);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new PdfCorruptedError(documentId, message, pageIndex);
+  }
+
+  const viewport = pageProxy.getViewport({ scale: 1 });
+  const pageWidth = viewport.width;
+  const pageHeight = viewport.height;
+
+  let words: Word[];
+  try {
+    const textContent = await parsePageTextWithTimeout(pageProxy, documentId, pageIndex, timeoutMs);
+    words = convertTextItemsToWords(textContent, pageIndex, pageHeight);
+  } catch (err: unknown) {
+    if (err instanceof PdfTimeoutError) {
+      throw err;
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    throw new PdfCorruptedError(documentId, message, pageIndex);
+  }
+
+  const sortedWords = sortWordsByReadingOrder(words);
+  const text = sortedWords.map((w) => w.text).join(" ");
+  const requiresOCR = sortedWords.length === 0;
+
+  const page: Page = {
+    index: pageIndex,
+    width: pageWidth,
+    height: pageHeight,
+    words: sortedWords,
+    text,
+    requiresOCR,
+    ocrCompleted: false,
+  };
+  return page;
+}
+
+// EngineError.details es Readonly<Record<string, unknown>>; `reason` es un
+// string en PdfCorruptedError, pero el tipo no lo garantiza estáticamente.
+function reasonFromCorruptedError(err: PdfCorruptedError): string {
+  const { reason } = err.details;
+  return typeof reason === "string" ? reason : err.message;
+}
+
 /*
  * `_pdfInfo` es una propiedad pública en la clase PDFDocumentProxy
  * (tipo `any`), usada para acceder a isEncrypted y pdfVersion que no
@@ -116,18 +288,14 @@ export class PdfEngine implements IEngine {
         operationCtx.bus.emit(EventChannel.Pdf, EngineEvents.PDF_PASSWORD_REQUIRED, { documentId });
         throw new PdfPasswordRequiredError(documentId);
       }
-      if (
-        name === "InvalidPDFException" ||
-        message.toLowerCase().includes("invalid") ||
-        message.toLowerCase().includes("corrupt")
-      ) {
-        operationCtx.bus.emit(EventChannel.Pdf, EngineEvents.PDF_INVALID, {
-          documentId,
-          reason: message,
-        });
-        throw new PdfInvalidError(documentId, message);
-      }
-      throw new PdfCorruptedError(documentId, message);
+      // ADR-020 §4: cualquier error a nivel de documento (matcheado por "invalid"/
+      // "corrupt" o desconocido) se reclasifica como PdfInvalidError. PDF_CORRUPTED
+      // queda reservado a fallos de página interna (getPage/getTextContent).
+      operationCtx.bus.emit(EventChannel.Pdf, EngineEvents.PDF_INVALID, {
+        documentId,
+        reason: message,
+      });
+      throw new PdfInvalidError(documentId, message);
     }
 
     if (operationCtx.abortSignal.aborted) {
@@ -139,75 +307,49 @@ export class PdfEngine implements IEngine {
 
     if (pageCount > this.config.maxPageCount) {
       void pdfDocument.destroy();
-      throw new PdfInvalidError(
-        documentId,
-        `El documento supera el límite de ${this.config.maxPageCount} páginas.`,
-      );
+      const reason = `El documento supera el límite de ${this.config.maxPageCount} páginas.`;
+      operationCtx.bus.emit(EventChannel.Pdf, EngineEvents.PDF_INVALID, { documentId, reason });
+      throw new PdfInvalidError(documentId, reason);
     }
 
     const pages: Page[] = [];
     const textlessPages: number[] = [];
+    const timeoutMs =
+      operationCtx.config.workerPool.timeouts["pdf-parse"] ?? DEFAULT_TIMEOUT_MS_PER_PAGE;
 
-    for (let i = 1; i <= pageCount; i++) {
+    for (let pageIndex = 0; pageIndex < pageCount; pageIndex++) {
       if (operationCtx.abortSignal.aborted) {
         void pdfDocument.destroy();
         throw new CancelledError(documentId);
       }
 
-      const pageIndex = i - 1;
-
-      let pageProxy: PDFPageProxy;
+      let page: Page;
       try {
-        pageProxy = await pdfDocument.getPage(i);
+        page = await parsePage(pdfDocument, documentId, pageIndex, timeoutMs);
       } catch (err: unknown) {
         void pdfDocument.destroy();
-        const message = err instanceof Error ? err.message : String(err);
-        throw new PdfCorruptedError(documentId, message, pageIndex);
-      }
-
-      const viewport = pageProxy.getViewport({ scale: 1 });
-      const pageWidth = viewport.width;
-      const pageHeight = viewport.height;
-
-      let words: Word[];
-      try {
-        const timeoutMs =
-          operationCtx.config.workerPool.timeouts["pdf-parse"] ?? DEFAULT_TIMEOUT_MS_PER_PAGE;
-        const textContent = await this.parsePageTextWithTimeout(pageProxy, pageIndex, timeoutMs);
-        words = this.convertTextItemsToWords(textContent, pageIndex, pageHeight);
-      } catch (err: unknown) {
-        void pdfDocument.destroy();
-        if (err instanceof PdfTimeoutError) {
-          throw err;
+        // ADR-020 §3: todo error fatal de parseo emite su evento antes de lanzar.
+        // PdfTimeoutError no emite (la señal es el rechazo de la promesa; el
+        // retry queda diferido al WorkerPool en Hito 9, ver ADR-020 §5).
+        if (err instanceof PdfCorruptedError) {
+          operationCtx.bus.emit(EventChannel.Pdf, EngineEvents.PDF_INVALID, {
+            documentId,
+            reason: reasonFromCorruptedError(err),
+          });
         }
-        const message = err instanceof Error ? err.message : String(err);
-        throw new PdfCorruptedError(documentId, message, pageIndex);
+        throw err;
       }
 
-      const sortedWords = this.sortWordsByReadingOrder(words);
-      const text = sortedWords.map((w) => w.text).join(" ");
-      const requiresOCR = sortedWords.length === 0;
-
-      if (requiresOCR) {
-        textlessPages.push(pageIndex);
+      if (page.requiresOCR) {
+        textlessPages.push(page.index);
       }
-
-      const page: Page = {
-        index: pageIndex,
-        width: pageWidth,
-        height: pageHeight,
-        words: sortedWords,
-        text,
-        requiresOCR,
-        ocrCompleted: false,
-      };
       pages.push(page);
 
       operationCtx.bus.emit(EventChannel.Pdf, EngineEvents.PAGE_PARSED, {
         documentId,
-        pageIndex,
-        wordCount: sortedWords.length,
-        requiresOCR,
+        pageIndex: page.index,
+        wordCount: page.words.length,
+        requiresOCR: page.requiresOCR,
       });
     }
 
@@ -287,22 +429,36 @@ export class PdfEngine implements IEngine {
         );
       }
 
+      // ADR-020 §6: fuseOcrPage solo aplica a páginas genuinamente textless.
+      // Antes se pisaban en silencio las palabras nativas de una página con
+      // texto real y se forzaba requiresOCR=true incondicionalmente.
+      if (existingPage.requiresOCR !== true) {
+        return Promise.reject(
+          new InvalidInputError(
+            `La página ${pageIndex} del documento ${documentId} no requiere OCR (requiresOCR=false); ` +
+              "fuseOcrPage solo aplica a páginas sin texto nativo.",
+            { documentId, pageIndex },
+          ),
+        );
+      }
+
       const normalizedWords: Word[] = words.map((w) => ({
-        text: w.text,
+        text: w.text.normalize("NFC"),
         bbox: w.bbox,
         pageIndex,
         confidence: w.confidence,
         source: "ocr" as const,
       }));
 
-      const sortedWords = this.sortWordsByReadingOrder(normalizedWords);
+      const sortedWords = sortWordsByReadingOrder(normalizedWords);
       const mergedText = sortedWords.map((w) => w.text).join(" ");
 
+      // requiresOCR ya es true (precondición del guard); no se fuerza, se
+      // hereda del spread de existingPage.
       const updatedPage: Page = {
         ...existingPage,
         words: sortedWords,
         text: mergedText,
-        requiresOCR: true,
         ocrCompleted: true,
       };
 
@@ -319,6 +475,12 @@ export class PdfEngine implements IEngine {
     } catch (err: unknown) {
       return Promise.reject(err instanceof Error ? err : new Error(String(err)));
     }
+  }
+
+  // ADR-020 §7: evicción individual, idempotente. Sin asserts: debe ser seguro
+  // llamarlo en cualquier secuencia de teardown, incluso tras dispose().
+  releaseDocument(documentId: string): void {
+    this.documents.delete(documentId);
   }
 
   dispose(): Promise<void> {
@@ -339,98 +501,6 @@ export class PdfEngine implements IEngine {
     if (this.disposed) {
       throw new EngineDisposedError(EngineId.Pdf);
     }
-  }
-
-  /* TextContent from pdfjs-dist has items: Array<TextItem | TextMarkedContent>.
-   * TextMarkedContent (type/id only) is filtered out in convertTextItemsToWords.
-   * The `as` cast is valid because the structural subset (optional str/transform/width/height)
-   * is compatible with both TextItem and TextMarkedContent shapes. */
-  private async parsePageTextWithTimeout(
-    pageProxy: PDFPageProxy,
-    pageIndex: number,
-    timeoutMs: number,
-  ): Promise<{
-    items: ReadonlyArray<{
-      str?: string;
-      transform?: readonly number[];
-      width?: number;
-      height?: number;
-    }>;
-  }> {
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timeoutId = setTimeout(() => {
-        reject(new PdfTimeoutError("", pageIndex, timeoutMs));
-      }, timeoutMs);
-    });
-
-    try {
-      const result = await Promise.race([pageProxy.getTextContent(), timeoutPromise]);
-      return result as {
-        items: ReadonlyArray<{
-          str?: string;
-          transform?: readonly number[];
-          width?: number;
-          height?: number;
-        }>;
-      };
-    } finally {
-      if (timeoutId !== undefined) {
-        clearTimeout(timeoutId);
-      }
-    }
-  }
-
-  private convertTextItemsToWords(
-    textContent: {
-      items: ReadonlyArray<{
-        str?: string;
-        transform?: readonly number[];
-        width?: number;
-        height?: number;
-      }>;
-    },
-    pageIndex: number,
-    pageHeight: number,
-  ): Word[] {
-    const words: Word[] = [];
-
-    for (const item of textContent.items) {
-      if (!item.str || item.str.trim().length === 0 || !item.transform) continue;
-
-      const x = item.transform[4] ?? 0;
-      const baselineY = item.transform[5] ?? 0;
-      const width = item.width ?? 0;
-      const height = item.height ?? 12;
-
-      const bbox: BoundingBox = {
-        x,
-        y: pageHeight - baselineY - height,
-        width,
-        height,
-      };
-
-      words.push({
-        text: item.str,
-        bbox,
-        pageIndex,
-        confidence: 1.0,
-        source: "pdf",
-      });
-    }
-
-    return words;
-  }
-
-  private sortWordsByReadingOrder(words: ReadonlyArray<Word>): Word[] {
-    const sorted = [...words];
-    sorted.sort((a, b) => {
-      const dy = a.bbox.y - b.bbox.y;
-      if (Math.abs(dy) > 1) return dy;
-      return a.bbox.x - b.bbox.x;
-    });
-    return sorted;
   }
 
   private determineSourceKind(
