@@ -101,11 +101,58 @@ export default tseslint.config(
     },
   },
   {
+    // P-4 estricto: nada de console.* en packages/ (ai/Code_Standards.md §12).
+    // Opciones {} explícitas — con severidad sola, flat config heredaría el
+    // allow: ["warn", "error"] del bloque general (y allow exige minItems 1,
+    // no admite []). Los tests (más abajo) re-habilitan console solo en tests.
+    files: ["packages/**/*.{ts,tsx}"],
+    rules: {
+      "no-console": ["error", {}],
+    },
+  },
+  {
     // Motores, shared y event-system: nunca importan otro motor ni el façade.
     // Los nombres reales de los paquetes son @anonly/<engine>-engine (ver package.json
     // de cada paquete), no subpaths de @anonly/anonymization-core.
     files: ["packages/anonymization-core/**/*.{ts,tsx}"],
     ignores: ["packages/anonymization-core/src/**"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["react", "react-dom", "react/jsx-runtime"],
+              message: "El Core no puede importar React. Ver ai/Code_Standards.md P-1.",
+            },
+            {
+              group: ["@anonly/*-engine"],
+              message:
+                "Un motor no puede importar otro motor. Comunicación solo por eventos. Ver ai/Code_Standards.md P-2.",
+              allowTypeImports: false,
+            },
+            {
+              group: ["@anonly/anonymization-core"],
+              message:
+                "Un motor no puede importar el façade del Core (dependencia circular). Ver ai/Code_Standards.md P-2.",
+              allowTypeImports: false,
+            },
+            {
+              group: ["@anonly/event-system"],
+              message:
+                "Los motores usan el IEventBus inyectado por ctx (@anonly/shared); no importan la implementación del bus. Ver ai/Code_Standards.md §12.",
+              allowTypeImports: false,
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // Tests de paquetes del Core: pueden importar @anonly/event-system para armar
+    // un bus real (tests de integración). El resto de prohibiciones se mantiene.
+    // no-restricted-imports no se mergea entre bloques: se redeclara completa.
+    files: ["packages/anonymization-core/**/__tests__/**/*.{ts,tsx}"],
     rules: {
       "no-restricted-imports": [
         "error",

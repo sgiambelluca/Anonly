@@ -1,54 +1,57 @@
 /**
  * @anonly/event-system — Implementación del Event Bus tipado.
  *
- * Fuente de verdad: docs/adr/ADR-007-Event-Bus.md y docs/core/Contracts.md §3.2.
+ * Fuente de verdad: docs/adr/ADR-007-Event-Bus.md (con la enmienda de ADR-019),
+ * docs/core/Contracts.md §3.2 y docs/architecture/04_Event_System.md §"API del bus".
  *
- * Reglas (ADR-007):
+ * Reglas (ADR-007 + ADR-019):
  * - Sin dependencias externas.
- * - Tipado end-to-end: el TS falla si alguien emite un evento con payload incorrecto.
- * - Canales como string (EventChannel de @anonly/shared).
- * - `emit` es fire-and-forget: el emisor no bloquea.
- * - `emitAsync` retorna Promise (para allow await en callers; handlers son sync).
- * - Handlers no pueden lanzar: si lanzan, se loguea y el bus continúa.
- * - Sin loops: el bus no se auto-suscribe.
+ * - Tipado end-to-end: canal (EventChannel), evento (EngineEvents) y payload
+ *   (EventPayloadMap[E]) fallan en compile-time si no coinciden.
+ * - `emit` despacha síncrono en línea a los handlers; sin suscriptores es no-op.
+ * - `emitAsync` es hoy un alias awaitable de `emit` (puerta abierta a handlers async).
+ * - Handlers que lanzan no rompen al emisor: se reporta por el logger y el bus continúa.
+ * - `logger` es requerido (P-4: prohibido console.* en packages/).
+ * - `off()` y los Unsubscribe devueltos son no-op tras dispose(); on/once/emit/emitAsync
+ *   sí lanzan tras dispose().
  * - Inmutabilidad: el payload se trata como readonly; el bus no lo freezea (costo runtime),
- *   el contrato se garantiza por tipos TS y tests.
+ *   el contrato se garantiza por tipos TS y tests (Code_Standards §6, ADR-019).
  */
 
 import {
   type EngineEvents,
+  type EventChannel,
   type EventPayloadMap,
   type IEventBus,
   type EventHandler,
   type Unsubscribe,
-  type EventChannelLike,
   type ILogger,
 } from "@anonly/shared";
 
 type HandlerSet<E extends EngineEvents> = Set<EventHandler<E>>;
 type EventMap<E extends EngineEvents> = Map<E, HandlerSet<E>>;
-type ChannelMap = Map<EventChannelLike, EventMap<EngineEvents>>;
+type ChannelMap = Map<EventChannel, EventMap<EngineEvents>>;
 
 export interface EventBusOptions {
   /**
-   * Logger opcional para reportar handlers que lanzan.
-   * Si no se provee, se usa console.error (solo para errores de handler).
-   * En el Core, el Orchestrator inyecta un logger real vía EngineContext.
+   * Logger para reportar handlers que lanzan. Requerido: el Core prohíbe
+   * console.* en packages/ (P-4). El Orchestrator inyecta el logger real
+   * vía EngineContext; los tests inyectan un spy.
    */
-  readonly logger?: ILogger;
+  readonly logger: ILogger;
 }
 
 export class EventBus implements IEventBus {
   private readonly channels: ChannelMap = new Map();
-  private readonly logger: ILogger | undefined;
+  private readonly logger: ILogger;
   private disposed = false;
 
-  constructor(options: EventBusOptions = {}) {
+  constructor(options: EventBusOptions) {
     this.logger = options.logger;
   }
 
   on<E extends EngineEvents>(
-    channel: EventChannelLike,
+    channel: EventChannel,
     event: E,
     handler: EventHandler<E>,
   ): Unsubscribe {
@@ -58,7 +61,7 @@ export class EventBus implements IEventBus {
   }
 
   once<E extends EngineEvents>(
-    channel: EventChannelLike,
+    channel: EventChannel,
     event: E,
     handler: EventHandler<E>,
   ): Unsubscribe {
@@ -70,8 +73,11 @@ export class EventBus implements IEventBus {
     return this.on(channel, event, wrapper);
   }
 
-  off<E extends EngineEvents>(channel: EventChannelLike, event: E, handler: EventHandler<E>): void {
-    this.assertNotDisposed();
+  /**
+   * No lanza tras dispose(): los Unsubscribe guardados por los engines pueden
+   * llamarse durante el teardown en cualquier orden sin romper (ADR-019).
+   */
+  off<E extends EngineEvents>(channel: EventChannel, event: E, handler: EventHandler<E>): void {
     const eventMap = this.channels.get(channel);
     if (!eventMap) return;
     const handlers = eventMap.get(event);
@@ -85,11 +91,7 @@ export class EventBus implements IEventBus {
     }
   }
 
-  emit<E extends EngineEvents>(
-    channel: EventChannelLike,
-    event: E,
-    payload: EventPayloadMap[E],
-  ): void {
+  emit<E extends EngineEvents>(channel: EventChannel, event: E, payload: EventPayloadMap[E]): void {
     this.assertNotDisposed();
     const handlers = this.getHandlers(channel, event);
     if (!handlers) return;
@@ -101,7 +103,7 @@ export class EventBus implements IEventBus {
   }
 
   emitAsync<E extends EngineEvents>(
-    channel: EventChannelLike,
+    channel: EventChannel,
     event: E,
     payload: EventPayloadMap[E],
   ): Promise<void> {
@@ -126,7 +128,7 @@ export class EventBus implements IEventBus {
    * Cantidad de suscriptores para un (channel, event).
    * Útil para tests de contrato de la matriz emisor→receptor.
    */
-  subscriberCount(channel: EventChannelLike, event: EngineEvents): number {
+  subscriberCount(channel: EventChannel, event: EngineEvents): number {
     return this.getHandlers(channel, event)?.size ?? 0;
   }
 
@@ -140,7 +142,7 @@ export class EventBus implements IEventBus {
   // ─── Internos ───
 
   private addHandler<E extends EngineEvents>(
-    channel: EventChannelLike,
+    channel: EventChannel,
     event: E,
     handler: EventHandler<E>,
   ): void {
@@ -158,7 +160,7 @@ export class EventBus implements IEventBus {
   }
 
   private getHandlers<E extends EngineEvents>(
-    channel: EventChannelLike,
+    channel: EventChannel,
     event: E,
   ): HandlerSet<E> | undefined {
     const eventMap = this.channels.get(channel);
@@ -169,23 +171,18 @@ export class EventBus implements IEventBus {
   private invokeHandler<E extends EngineEvents>(
     handler: EventHandler<E>,
     payload: EventPayloadMap[E],
-    channel: EventChannelLike,
+    channel: EventChannel,
     event: E,
   ): void {
     try {
       handler(payload);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (this.logger) {
-        this.logger.error("Handler lanzó en EventBus", {
-          channel,
-          event,
-          error: msg,
-        });
-      } else {
-        // Fallback: solo para errores de handler, no para loguear contenido del documento.
-        console.error(`[EventBus] Handler en channel="${channel}" event="${event}" lanzó: ${msg}`);
-      }
+      this.logger.error("Handler lanzó en EventBus", {
+        channel,
+        event,
+        error: msg,
+      });
     }
   }
 
@@ -200,6 +197,6 @@ export class EventBus implements IEventBus {
  * Factory público. Preferido sobre `new EventBus()` para permitir
  * cambios internos sin romper callers.
  */
-export function createEventBus(options?: EventBusOptions): EventBus {
-  return new EventBus(options ?? {});
+export function createEventBus(options: EventBusOptions): EventBus {
+  return new EventBus(options);
 }

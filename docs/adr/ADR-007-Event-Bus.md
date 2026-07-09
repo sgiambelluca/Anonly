@@ -60,9 +60,19 @@ Características:
 3. Handlers no pueden lanzar: si lanzan, el bus loguea `error` y continúa (no rompe el pipeline).
 4. El payload es inmutable desde el punto de vista del handler; mutarlo es error en dev.
 
+## Actualización (2026-07-08)
+
+El hardening del Hito 1 (ver `adr/ADR-019-Hito1-Hardening.md` para el detalle completo) ajusta cuatro puntos de la decisión original:
+
+- El **freeze-shallow del payload en dev** (mencionado arriba en Decisión y Reglas #4) se descarta: la inmutabilidad se garantiza por tipos (`readonly` en todo `EventPayloadMap`) y tests, consistente con `ai/Code_Standards.md` §6 ("se prohíbe `Object.freeze` en hot paths"). No se implementa ni en dev ni en producción.
+- La **matriz emisor→receptor** ("Auditable" en Consecuencias) se valida con un test de contrato del bus recién cuando existan motores reales que instanciar (Hito 9), no en el Hito 1 — hoy solo existen `shared` y `event-system`.
+- `EventBusOptions.logger` pasa a ser **requerido** (se elimina el fallback a `console.error` que violaba P-4 de `ai/Code_Standards.md` §12).
+- El `channel` de `IEventBus` se tipa con el enum `EventChannel` (no con un alias `string`), alineado con `core/Contracts.md` §3.2, que siempre lo definió así.
+
 ## Referencias
 
 - `04_Event_System.md` (documento completo)
 - `01_Technical_Architecture_Document.md` §2 A-5
 - `ai/Code_Standards.md` §6 (inmutabilidad)
-- `core/Contracts.md` (interfaces `IEventBus`, `EngineEvents`, `EventPayloads`)
+- `core/Contracts.md` (interfaces `IEventBus`, `EngineEvents`, `EventPayloadMap`)
+- `adr/ADR-019-Hito1-Hardening.md` (nota de actualización 2026-07-08)

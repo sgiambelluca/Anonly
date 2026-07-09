@@ -6,7 +6,7 @@
  * El logger y cache se inyectan vía EngineContext.
  */
 
-import type { EngineId, EngineEvents, WorkerJobType } from "./enums.js";
+import type { EngineId, EngineEvents, EventChannel, WorkerJobType } from "./enums.js";
 import type { SerializedEngineError } from "./errors.js";
 import type { EventPayloadMap } from "./events.js";
 import type { Transferable } from "./transferable.js";
@@ -44,41 +44,30 @@ export interface EngineConfig {
 
 export interface IEventBus {
   on<E extends EngineEvents>(
-    channel: EventChannelLike,
+    channel: EventChannel,
     event: E,
     handler: EventHandler<E>,
   ): Unsubscribe;
   once<E extends EngineEvents>(
-    channel: EventChannelLike,
+    channel: EventChannel,
     event: E,
     handler: EventHandler<E>,
   ): Unsubscribe;
-  off<E extends EngineEvents>(channel: EventChannelLike, event: E, handler: EventHandler<E>): void;
-  emit<E extends EngineEvents>(
-    channel: EventChannelLike,
-    event: E,
-    payload: EventPayloadMap[E],
-  ): void;
+  off<E extends EngineEvents>(channel: EventChannel, event: E, handler: EventHandler<E>): void;
+  emit<E extends EngineEvents>(channel: EventChannel, event: E, payload: EventPayloadMap[E]): void;
   emitAsync<E extends EngineEvents>(
-    channel: EventChannelLike,
+    channel: EventChannel,
     event: E,
     payload: EventPayloadMap[E],
   ): Promise<void>;
 }
 
-/**
- * Alias de canal como string para evitar import circular con enums.ts en algunos bundlers.
- * El valor concreto está en enums.ts como EventChannel.
- */
-export type EventChannelLike = string;
-
 export type EventHandler<E extends EngineEvents> = (payload: EventPayloadMap[E]) => void;
 
 /**
- * Niveles de log como string literal union.
- * El enum `LogLevel` de enums.ts es para uso runtime; este type es para tipos.
+ * Niveles de log. Única forma: union type (no enum). Ver docs/adr/ADR-019-Hito1-Hardening.md.
  */
-export type LogLevelString = "debug" | "info" | "warn" | "error";
+export type LogLevel = "debug" | "info" | "warn" | "error";
 
 export interface ILogger {
   debug(msg: string, meta?: Readonly<Record<string, unknown>>): void;
@@ -153,14 +142,17 @@ export type Serializable =
   | ReadonlyArray<Serializable>
   | { readonly [key: string]: Serializable };
 
-export interface WorkerInbound {
-  readonly type: "RUN" | "CANCEL" | "INIT" | "DISPOSE";
-  readonly jobId?: string;
-  readonly signalId?: string;
-  readonly jobType?: WorkerJobType;
-  readonly payload?: unknown;
-  readonly config?: unknown;
-}
+export type WorkerInbound =
+  | { readonly type: "INIT"; readonly config: unknown }
+  | {
+      readonly type: "RUN";
+      readonly jobId: string;
+      readonly signalId: string;
+      readonly jobType: WorkerJobType;
+      readonly payload: unknown;
+    }
+  | { readonly type: "CANCEL"; readonly jobId: string; readonly signalId: string }
+  | { readonly type: "DISPOSE" };
 
 export type WorkerOutbound =
   | {
@@ -192,7 +184,7 @@ export type WorkerOutbound =
     }
   | {
       readonly type: "LOG";
-      readonly level: LogLevelString;
+      readonly level: LogLevel;
       readonly message: string;
       readonly meta?: Serializable;
     };

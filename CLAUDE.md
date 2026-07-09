@@ -17,8 +17,8 @@ El estado de avance real (qué hito está cerrado, qué sigue) está en `docs/ro
 
 - **Un PR = un módulo.** Nunca tocar dos motores en el mismo cambio (R-1, R-5).
 - **Nunca** romper contratos públicos de `docs/core/Contracts.md`. Cambios de contrato: primero ADR + docs, después código (R-2, R-19).
-- **Nunca** importar un motor desde otro motor, ni React desde `packages/` (P-1, P-2; ESLint lo bloquea, patrón `@anonly/*-engine`). El único que importa motores es el façade `packages/anonymization-core/src/`.
-- Sin `any`, sin `@ts-ignore` sin issue, sin `console.*` en `packages/`, sin `export default`, sin network/filesystem desde el Core, todo dato público inmutable (`readonly`) (R-6..R-11).
+- **Nunca** importar un motor desde otro motor, ni React desde `packages/`, ni `@anonly/event-system` directo desde un motor (P-1, P-2; ESLint lo bloquea: patrón `@anonly/*-engine` y `@anonly/event-system` en `no-restricted-imports`, excepto en `__tests__` de cada paquete). El único que importa motores es el façade `packages/anonymization-core/src/`; los motores usan el `IEventBus` inyectado por `ctx`.
+- Sin `any`, sin `@ts-ignore` sin issue, sin `console.*` en `packages/` (P-4; ESLint lo bloquea con `no-console` estricto, sin `allow`, en `packages/**`), sin `export default`, sin network/filesystem desde el Core, todo dato público inmutable (`readonly`) (R-6..R-11).
 - Sin dependencias externas nuevas sin ADR (R-12). Los specs de motor no se editan desde un PR de implementación (R-21).
 - Todo PR incluye tests: contract + unit + edge (+ snapshot si aplica), cobertura ≥ 85% líneas del módulo (R-13).
 - **Nunca** `git commit` ni `git push` sin autorización explícita del humano (I-9).

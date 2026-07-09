@@ -46,6 +46,28 @@ import type {
   Word,
 } from "../index.js";
 
+/**
+ * Validador de CUIT de dominio (AFIP, módulo 11), independiente de la
+ * implementación del sintetizador: dv = 11 - (suma ponderada % 11); si el
+ * resto es 0 el dv es 0; si el resto es 1 (dv 10) el CUIT no existe.
+ */
+function isValidCuit(cuit: string): boolean {
+  const match = /^(\d{2})-(\d{8})-(\d)$/.exec(cuit);
+  if (!match) return false;
+  const [, prefix, body, dvRaw] = match;
+  if (!prefix || !body || !dvRaw) return false;
+  const digits = `${prefix}${body}`.split("").map((c) => parseInt(c, 10));
+  const weights = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2];
+  let sum = 0;
+  for (let i = 0; i < weights.length; i++) {
+    sum += (digits[i] ?? 0) * (weights[i] ?? 0);
+  }
+  const mod = sum % 11;
+  if (mod === 1) return false;
+  const dv = (11 - mod) % 11;
+  return dv === parseInt(dvRaw, 10);
+}
+
 describe("@anonly/shared — Contracts", () => {
   describe("EngineId", () => {
     it("tiene los 7 engines del TAD", () => {
@@ -120,61 +142,116 @@ describe("@anonly/shared — Contracts", () => {
   });
 
   describe("EngineEvents", () => {
-    it("tiene todos los eventos del 04_Event_System.md", () => {
-      // Pipeline
-      expect(EngineEvents.DOCUMENT_IMPORTED).toBe("DOCUMENT_IMPORTED");
-      expect(EngineEvents.PIPELINE_STAGE_CHANGED).toBe("PIPELINE_STAGE_CHANGED");
-      expect(EngineEvents.PIPELINE_READY).toBe("PIPELINE_READY");
-      expect(EngineEvents.CANCEL_REQUESTED).toBe("CANCEL_REQUESTED");
-      // PDF
-      expect(EngineEvents.PAGE_PARSED).toBe("PAGE_PARSED");
-      expect(EngineEvents.DOCUMENT_PARSED).toBe("DOCUMENT_PARSED");
-      expect(EngineEvents.PDF_PASSWORD_REQUIRED).toBe("PDF_PASSWORD_REQUIRED");
-      // OCR
-      expect(EngineEvents.OCR_STARTED).toBe("OCR_STARTED");
-      expect(EngineEvents.OCR_FINISHED).toBe("OCR_FINISHED");
-      // Detectores
-      expect(EngineEvents.ENTITY_FOUND).toBe("ENTITY_FOUND");
-      expect(EngineEvents.REGEX_FINISHED).toBe("REGEX_FINISHED");
-      expect(EngineEvents.NER_MODEL_LOADING).toBe("NER_MODEL_LOADING");
-      expect(EngineEvents.NER_FINISHED).toBe("NER_FINISHED");
-      // Grouping
-      expect(EngineEvents.ENTITY_GROUP_CREATED).toBe("ENTITY_GROUP_CREATED");
-      expect(EngineEvents.ENTITY_GROUP_UPDATED).toBe("ENTITY_GROUP_UPDATED");
-      expect(EngineEvents.GROUP_REPLACEMENT_CHANGED).toBe("GROUP_REPLACEMENT_CHANGED");
-      expect(EngineEvents.GROUPING_FINISHED).toBe("GROUPING_FINISHED");
-      expect(EngineEvents.CONFLICT_DETECTED).toBe("CONFLICT_DETECTED");
-      // Render
-      expect(EngineEvents.PREVIEW_UPDATED).toBe("PREVIEW_UPDATED");
-      expect(EngineEvents.RENDER_REQUESTED).toBe("RENDER_REQUESTED");
-      // Export
-      expect(EngineEvents.EXPORT_REQUESTED).toBe("EXPORT_REQUESTED");
-      expect(EngineEvents.EXPORT_FINISHED).toBe("EXPORT_FINISHED");
-      // UI
-      expect(EngineEvents.GROUP_UPDATE_REQUESTED).toBe("GROUP_UPDATE_REQUESTED");
-      expect(EngineEvents.GROUP_MERGE_REQUESTED).toBe("GROUP_MERGE_REQUESTED");
-      expect(EngineEvents.DOCUMENT_CLOSED).toBe("DOCUMENT_CLOSED");
+    it("tiene exactamente el set completo de eventos de 04_Event_System.md", () => {
+      const expected = [
+        // Pipeline (7)
+        "DOCUMENT_IMPORTED",
+        "PIPELINE_STAGE_CHANGED",
+        "PIPELINE_PROGRESS",
+        "PIPELINE_READY",
+        "PIPELINE_CANCELLED",
+        "PIPELINE_FAILED",
+        "CANCEL_REQUESTED",
+        // PDF (4)
+        "PAGE_PARSED",
+        "DOCUMENT_PARSED",
+        "PDF_PASSWORD_REQUIRED",
+        "PDF_INVALID",
+        // OCR (4)
+        "OCR_STARTED",
+        "OCR_PAGE_FINISHED",
+        "OCR_FINISHED",
+        "OCR_PAGE_FAILED",
+        // Detectores (7)
+        "ENTITY_FOUND",
+        "REGEX_FINISHED",
+        "NER_STARTED",
+        "NER_MODEL_LOADING",
+        "NER_MODEL_READY",
+        "NER_PAGE_FINISHED",
+        "NER_FINISHED",
+        // Grouping (8)
+        "ENTITY_GROUP_CREATED",
+        "ENTITY_GROUP_UPDATED",
+        "ENTITY_GROUP_REMOVED",
+        "GROUP_REPLACEMENT_CHANGED",
+        "GROUP_TOGGLED",
+        "CONFLICT_DETECTED",
+        "CONFLICT_RESOLVED",
+        "GROUPING_FINISHED",
+        // Render (5)
+        "PREVIEW_UPDATED",
+        "PREVIEW_PAGE_FAILED",
+        "RENDER_REQUESTED",
+        "RENDER_FINISHED",
+        "RENDER_FAILED",
+        // Export (5)
+        "EXPORT_REQUESTED",
+        "EXPORT_STARTED",
+        "EXPORT_PROGRESS",
+        "EXPORT_FINISHED",
+        "EXPORT_FAILED",
+        // Workers (6)
+        "WORKER_JOB_DISPATCHED",
+        "WORKER_JOB_COMPLETED",
+        "WORKER_JOB_FAILED",
+        "WORKER_JOB_CANCELLED",
+        "WORKER_JOB_TIMEOUT",
+        "WORKER_POOL_SATURATED",
+        // UI (8)
+        "GROUP_UPDATE_REQUESTED",
+        "GROUP_MERGE_REQUESTED",
+        "GROUP_SPLIT_REQUESTED",
+        "RULE_CREATED",
+        "RULE_UPDATED",
+        "RULE_DELETED",
+        "CONFLICT_RESOLVE_REQUESTED",
+        "DOCUMENT_CLOSED",
+      ];
+      // Igualdad exacta de conjuntos: un evento agregado o borrado sin pasar
+      // por Contracts.md/04_Event_System.md rompe este test (R-19).
+      expect(Object.values(EngineEvents).sort()).toEqual([...expected].sort());
     });
   });
 
   describe("EngineErrorCode", () => {
-    it("tiene los códigos por motor de Contracts.md §4", () => {
-      expect(EngineErrorCode.PDF_PASSWORD_REQUIRED).toBe("PDF_PASSWORD_REQUIRED");
-      expect(EngineErrorCode.PDF_INVALID).toBe("PDF_INVALID");
-      expect(EngineErrorCode.PDF_CORRUPTED).toBe("PDF_CORRUPTED");
-      expect(EngineErrorCode.OCR_PAGE_FAILED).toBe("OCR_PAGE_FAILED");
-      expect(EngineErrorCode.OCR_MODEL_MISSING).toBe("OCR_MODEL_MISSING");
-      expect(EngineErrorCode.REGEX_INVALID_PATTERN).toBe("REGEX_INVALID_PATTERN");
-      expect(EngineErrorCode.NER_MODEL_MISSING).toBe("NER_MODEL_MISSING");
-      expect(EngineErrorCode.GROUPING_INVALID_PATCH).toBe("GROUPING_INVALID_PATCH");
-      expect(EngineErrorCode.GROUPING_GROUP_NOT_FOUND).toBe("GROUPING_GROUP_NOT_FOUND");
-      expect(EngineErrorCode.RENDER_PAGE_FAILED).toBe("RENDER_PAGE_FAILED");
-      expect(EngineErrorCode.EXPORT_FAILED).toBe("EXPORT_FAILED");
-      expect(EngineErrorCode.EXPORT_NO_ENABLED_GROUPS).toBe("EXPORT_NO_ENABLED_GROUPS");
-      expect(EngineErrorCode.ENGINE_NOT_INITIALIZED).toBe("ENGINE_NOT_INITIALIZED");
-      expect(EngineErrorCode.ENGINE_DISPOSED).toBe("ENGINE_DISPOSED");
-      expect(EngineErrorCode.INVALID_INPUT).toBe("INVALID_INPUT");
-      expect(EngineErrorCode.CANCELLED).toBe("CANCELLED");
+    it("tiene exactamente el set completo de códigos de Contracts.md §4", () => {
+      const expected = [
+        // PDF (4)
+        "PDF_PASSWORD_REQUIRED",
+        "PDF_INVALID",
+        "PDF_CORRUPTED",
+        "PDF_TIMEOUT",
+        // OCR (3)
+        "OCR_PAGE_FAILED",
+        "OCR_TIMEOUT",
+        "OCR_MODEL_MISSING",
+        // Regex (1)
+        "REGEX_INVALID_PATTERN",
+        // NER (4)
+        "NER_MODEL_MISSING",
+        "NER_MODEL_LOAD_FAILED",
+        "NER_TIMEOUT",
+        "NER_PAGE_FAILED",
+        // Grouping (2)
+        "GROUPING_INVALID_PATCH",
+        "GROUPING_GROUP_NOT_FOUND",
+        // Render (2)
+        "RENDER_PAGE_FAILED",
+        "RENDER_TIMEOUT",
+        // Export (3)
+        "EXPORT_FAILED",
+        "EXPORT_NO_ENABLED_GROUPS",
+        "EXPORT_TIMEOUT",
+        // Generic (4)
+        "ENGINE_NOT_INITIALIZED",
+        "ENGINE_DISPOSED",
+        "INVALID_INPUT",
+        "CANCELLED",
+      ];
+      // Igualdad exacta de conjuntos: un código agregado o borrado sin pasar
+      // por Contracts.md §4 rompe este test (R-19).
+      expect(Object.values(EngineErrorCode).sort()).toEqual([...expected].sort());
     });
   });
 
@@ -238,7 +315,11 @@ describe("@anonly/shared — Contracts", () => {
   });
 
   describe("Inmutabilidad de tipos (ADR-008)", () => {
-    it("EntityGroup cumple readonly en todos sus campos", () => {
+    // La garantía es de compile-time (readonly/ReadonlyArray, sin Object.freeze
+    // en runtime — Code_Standards.md §6). Los asserts usan @ts-expect-error
+    // sobre funciones que no se ejecutan: si TS dejara de marcar el error
+    // (se perdió un readonly), el typecheck de este archivo falla.
+    it("EntityGroup no admite asignación a props readonly (compile-time)", () => {
       const group: EntityGroup = {
         id: "g1",
         type: EntityType.DNI,
@@ -252,28 +333,29 @@ describe("@anonly/shared — Contracts", () => {
         createdAt: 0,
         updatedAt: 0,
       };
+      const mutate = (): void => {
+        // @ts-expect-error — id es readonly (ADR-008); assert de compile-time
+        group.id = "x";
+      };
+      void mutate;
       expect(group.id).toBe("g1");
-      // El cast hace la asignación válida en TS; el contrato readonly se garantiza en compile-time sin cast.
-      (group as { id: string }).id = "x";
-      expect(group.id).toBe("x"); // TS bloquea compile-time; runtime no es garantía sin Object.freeze.
     });
 
-    it("Document tiene pages como ReadonlyArray", () => {
+    it("Document.pages es ReadonlyArray (sin push, compile-time)", () => {
+      const page: Page = {
+        index: 0,
+        width: 595,
+        height: 842,
+        words: [],
+        text: "",
+        requiresOCR: false,
+        ocrCompleted: false,
+      };
       const doc: Document = {
         id: "d1",
         name: "test.pdf",
         pageCount: 1,
-        pages: [
-          {
-            index: 0,
-            width: 595,
-            height: 842,
-            words: [],
-            text: "",
-            requiresOCR: false,
-            ocrCompleted: false,
-          },
-        ],
+        pages: [page],
         metadata: {
           pdfVersion: "1.7",
           encrypted: false,
@@ -282,18 +364,22 @@ describe("@anonly/shared — Contracts", () => {
         sourceKind: "text",
         importedAt: 0,
       };
-      // El cast hace el push válido en TS; ReadonlyArray se garantiza en compile-time sin cast.
-      expect(() => (doc.pages as unknown[]).push({})).not.toThrow();
-      // ReadonlyArray previene push en compile time; en runtime Array tiene push.
-      // El contrato se garantiza en TS, no en runtime (Code_Standards.md §6).
+      const mutate = (): void => {
+        // @ts-expect-error — ReadonlyArray<Page> no expone push (ADR-008)
+        doc.pages.push(page);
+      };
+      void mutate;
       expect(doc.pageCount).toBe(1);
     });
 
-    it("BoundingBox tiene coords readonly", () => {
+    it("BoundingBox tiene coords readonly (compile-time)", () => {
       const bbox: BoundingBox = { x: 0, y: 0, width: 100, height: 50 };
+      const mutate = (): void => {
+        // @ts-expect-error — width es readonly (ADR-008); assert de compile-time
+        bbox.width = 999;
+      };
+      void mutate;
       expect(bbox.width).toBe(100);
-      // El cast hace la asignación válida en TS; readonly se garantiza en compile-time sin cast.
-      (bbox as { width: number }).width = 999;
     });
   });
 
@@ -400,33 +486,32 @@ describe("@anonly/shared — Contracts", () => {
       expect(a).not.toBe(b);
     });
 
-    it("DNI sintético tiene formato XX.XXX.XXX (8 dígitos + 2 puntos)", () => {
-      const v = synthesize(EntityType.DNI, 1);
+    it("DNI sintético tiene formato XX.XXX.XXX y no arranca en 0", () => {
+      const v = synthesize(EntityType.DNI, 1, "seed-dni");
       expect(v).toMatch(/^\d{2}\.\d{3}\.\d{3}$/);
+      expect(v.startsWith("0")).toBe(false);
     });
 
-    it("CUIT sintético tiene dígito verificador válido", () => {
-      const v = synthesize(EntityType.CUIT, 1);
+    it("CUIT sintético pasa el validador AFIP de dominio", () => {
+      const v = synthesize(EntityType.CUIT, 1, "seed-cuit");
       expect(v).toMatch(/^\d{2}-\d{8}-\d$/);
-      const [prefix, body, check] = v.split(/[-]/);
-      void prefix;
-      void body;
-      expect(check).toBeDefined();
-      // Validar checksum real
-      const weights = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2];
-      const digits = `${v.split("-")[0]}${v.split("-")[1]}`.split("").map((c) => parseInt(c, 10));
-      let sum = 0;
-      for (let i = 0; i < digits.length; i++) {
-        sum += (digits[i] as number) * (weights[i] as number);
+      expect(isValidCuit(v)).toBe(true);
+    });
+
+    it("CUITs de 200 índices distintos son todos válidos (nunca dv 10)", () => {
+      for (let i = 1; i <= 200; i++) {
+        const v = synthesize(EntityType.CUIT, i, "seed-masivo");
+        expect(isValidCuit(v), `CUIT inválido en índice ${i}: ${v}`).toBe(true);
       }
-      const mod = sum % 11;
-      const expected = mod === 0 ? "0" : mod === 1 ? "9" : (11 - mod).toString();
-      const actualCheck = v.split("-")[2];
-      expect(actualCheck).toBe(expected);
+    });
+
+    it("License sintético respeta el formato XX-XXXX-XX (ADR-012)", () => {
+      const v = synthesize(EntityType.License, 1, "seed-lic");
+      expect(v).toMatch(/^\d{2}-\d{4}-\d{2}$/);
     });
 
     it("CreditCard sintético pasa Luhn", () => {
-      const v = synthesize(EntityType.CreditCard, 1);
+      const v = synthesize(EntityType.CreditCard, 1, "seed-cc");
       const digits = v
         .replace(/\s/g, "")
         .split("")
@@ -446,14 +531,38 @@ describe("@anonly/shared — Contracts", () => {
     });
 
     it("Email sintético tiene formato válido", () => {
-      const v = synthesize(EntityType.Email, 1);
+      const v = synthesize(EntityType.Email, 1, "seed-email");
       expect(v).toMatch(/^[^@\s]+@[^@\s]+\.[^@\s]+$/);
     });
 
     it("Person sintético es Nombre + Apellido", () => {
-      const v = synthesize(EntityType.Person, 1);
+      const v = synthesize(EntityType.Person, 1, "seed-person");
       // Soporta acentos (Fernández, María, etc.)
       expect(v).toMatch(/^[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+ [A-ZÁÉÍÓÚÑ][a-záéíóúñ]+$/u);
+    });
+  });
+
+  describe("Tipos internos del pipeline", () => {
+    it("Word y Occurrence tipan sus campos requeridos", () => {
+      const word: Word = {
+        text: "Juan",
+        bbox: { x: 0, y: 0, width: 40, height: 12 },
+        pageIndex: 0,
+        confidence: 1,
+        source: "pdf",
+      };
+      const occurrence: Occurrence = {
+        id: "o1",
+        value: "Juan Pérez",
+        normalizedValue: "juan perez",
+        bbox: word.bbox,
+        pageIndex: word.pageIndex,
+        source: DetectionSource.NER,
+        confidence: 0.93,
+        entityType: EntityType.Person,
+      };
+      expect(occurrence.entityType).toBe(EntityType.Person);
+      expect(word.source).toBe("pdf");
     });
   });
 
@@ -565,8 +674,3 @@ describe("@anonly/shared — Contracts", () => {
     });
   });
 });
-
-// Marker para evitar "unused" warnings en imports de tipos.
-void (0 as unknown as Occurrence);
-void (0 as unknown as Word);
-void (0 as unknown as Page);

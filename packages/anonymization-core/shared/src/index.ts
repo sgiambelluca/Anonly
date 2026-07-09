@@ -18,12 +18,9 @@ export {
   AnnotationKind,
   ConflictReason,
   PipelineStage,
-  LogLevel,
   EngineErrorCode,
 } from "./enums.js";
 export type { RuleScope, WorkerJobType } from "./enums.js";
-// Re-export del enum LogLevel como type también (el enum es ambos: valor + tipo).
-export type { LogLevel as LogLevelEnum } from "./enums.js";
 
 // Modelos de datos (03_Data_Model.md)
 export type {
@@ -64,7 +61,6 @@ export type {
   EngineConfig,
   PdfEngineConfig,
   IEventBus,
-  EventChannelLike,
   EventHandler,
   Unsubscribe,
   ILogger,
@@ -78,7 +74,7 @@ export type {
   Serializable,
   WorkerInbound,
   WorkerOutbound,
-  LogLevelString,
+  LogLevel,
 } from "./interfaces.js";
 
 // Errores (Contracts.md §4)

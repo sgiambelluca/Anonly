@@ -160,20 +160,24 @@ Inputs del usuario que mutan el estado de grupos/reglas/pipeline o solicitan tra
 | Render Engine | ✓ | ✓ | – | – | – | – | – | – | – |
 | Export Engine | ✓ | ✓ | – | – | – | – | – | – | – |
 
-**Invariante**: ningún motor escucha a otro motor excepto Grouping (que escucha `ENTITY_FOUND` de Regex y NER), y Render/Export (que escuchan cambios de grupos vía Orchestrator). La fusión OCR→PDF es mediada por el Orchestrator (PDF Engine no se suscribe a `OCR_PAGE_FINISHED`; ver ADR-014). Esta matriz se valida con un test de contrato del bus.
+**Invariante**: ningún motor escucha a otro motor excepto Grouping (que escucha `ENTITY_FOUND` de Regex y NER), y Render/Export (que escuchan cambios de grupos vía Orchestrator). La fusión OCR→PDF es mediada por el Orchestrator (PDF Engine no se suscribe a `OCR_PAGE_FINISHED`; ver ADR-014). Esta matriz se validará con un test de contrato del bus cuando los motores existan (Hito 9; ver ADR-019).
 
 ---
 
 ## 12. Tipos de payload
 
-Todos los payloads están definidos como interfaces en `core/Contracts.md` bajo el namespace `EventPayloads`. Ejemplo:
+Todos los payloads están definidos en `core/Contracts.md` §8 como **interfaces individuales exportadas + un type map (`EventPayloadMap`)** — no como un `namespace` (un `namespace EventPayloads` con indexed access no es compatible con `verbatimModuleSyntax` cuando se importa con `import type`; ver la nota técnica de `Contracts.md` §8). Ejemplo:
 
 ```ts
-export namespace EventPayloads {
-  export interface PageParsed { readonly documentId: string; readonly pageIndex: number; readonly wordCount: number; readonly requiresOCR: boolean; }
-  export interface EntityGroupCreated { readonly documentId: string; readonly group: EntityGroup; }
-  // ... etc, uno por evento
-}
+export interface PageParsed { readonly documentId: string; readonly pageIndex: number; readonly wordCount: number; readonly requiresOCR: boolean; }
+export interface EntityGroupCreated { readonly documentId: string; readonly group: EntityGroup; }
+// ... etc, uno por evento
+
+export type EventPayloadMap = {
+  [EngineEvents.PAGE_PARSED]: PageParsed;
+  [EngineEvents.ENTITY_GROUP_CREATED]: EntityGroupCreated;
+  // ... uno por cada valor de EngineEvents
+};
 ```
 
 Reglas para los payloads:
@@ -184,10 +188,26 @@ Reglas para los payloads:
 
 ---
 
-## 13. Referencias
+## 13. API del bus (implementación `@anonly/event-system`)
+
+La implementación concreta de `IEventBus` (`core/Contracts.md` §3.2) vive en `packages/anonymization-core/event-system/`. Reglas de la implementación, más allá del contrato de tipos (ver `adr/ADR-007-Event-Bus.md` y su nota de actualización, y `adr/ADR-019-Hito1-Hardening.md`):
+
+- `createEventBus(options)`: factory público. `options.logger: ILogger` es **requerido** (no hay fallback a `console.*`; cumple P-4 de forma estricta). El único logger válido es el que el Orchestrator inyecta vía `EngineContext` (o, en tests, un logger de prueba).
+- `dispose()` / `isDisposed()`: libera todos los handlers registrados y marca el bus como dispuesto. Tras `dispose()`:
+  - `on`, `once`, `emit`, `emitAsync` **lanzan** (error de programación: usar un bus muerto es un bug real).
+  - `off()` (y el `Unsubscribe` devuelto por `on()`/`once()`) es **no-op seguro**: un engine puede invocar su propio cleanup sin conocer si el bus ya fue dispuesto.
+- `subscriberCount(channel, event)` / `channelCount()`: utilidades de solo lectura para tests (no forman parte de `IEventBus`, son específicas de la clase `EventBus`).
+- **Semántica de `emit`**: despacho **síncrono en línea** a los handlers suscritos en el momento de la llamada. Si no hay suscriptores para `(channel, event)`, es un no-op silencioso (no es un error). Un handler que lanza se loguea vía `logger.error(...)` y no interrumpe la notificación al resto de los handlers ni al emisor.
+- **Semántica de `emitAsync`**: hoy es un alias awaitable de `emit` (los handlers siguen siendo síncronos). Existe para que los callers puedan `await` desde ya, dejando la puerta abierta a handlers async futuros sin cambiar el contrato público de `IEventBus`.
+- El freeze-shallow del payload prometido originalmente por ADR-007 **no está implementado y se descartó formalmente** (ADR-019): la inmutabilidad se garantiza por tipos (`readonly` en `EventPayloadMap`) y tests, no por costo de runtime en el hot path de `emit`.
+
+---
+
+## 14. Referencias
 
 - `03_Data_Model.md` — tipos de los payloads.
-- `core/Contracts.md` — definiciones TypeScript de `EngineEvents` y `EventPayloads`.
+- `core/Contracts.md` — definiciones TypeScript de `EngineEvents` y `EventPayloadMap`.
 - `core/event-system/` (spec) — implementación del bus.
 - `05_Worker_Architecture.md` — eventos `WORKER_*`.
 - `06_Pipeline.md` — qué evento dispara cada etapa.
+- `adr/ADR-007-Event-Bus.md`, `adr/ADR-019-Hito1-Hardening.md` — decisiones sobre la implementación del bus.

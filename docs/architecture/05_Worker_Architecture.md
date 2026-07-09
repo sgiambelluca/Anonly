@@ -47,24 +47,23 @@ Cada Pool
 
 ### 2.1 Mensaje Host → Worker
 
+`WorkerInbound` es una unión discriminada por `type` (alineada con `WorkerOutbound` §2.2): cada variante tiene exactamente los campos que necesita, todos `readonly`. `config` (en `INIT`) y `payload` (en `RUN`) quedan tipados `unknown` a este nivel de transporte — cada worker los afina a su propio tipo concreto (`PdfParsePayload`, `OcrPagePayload`, etc., ver `03_Data_Model.md` §18) cuando se implementa en su hito (ver `adr/ADR-019-Hito1-Hardening.md`).
+
 ```ts
-interface WorkerInbound {
-  readonly type: "RUN" | "CANCEL" | "INIT" | "DISPOSE";
-  readonly jobId: string;            // para RUN, CANCEL
-  readonly signalId: string;         // para RUN, CANCEL
-  readonly jobType: WorkerJobType;   // para RUN, INIT
-  readonly payload: WorkerJobPayload; // para RUN, INIT; Transferable donde aplique
-  readonly config?: EngineConfig;    // para INIT
-}
+export type WorkerInbound =
+  | { readonly type: "INIT"; readonly config: unknown }
+  | { readonly type: "RUN"; readonly jobId: string; readonly signalId: string; readonly jobType: WorkerJobType; readonly payload: unknown }
+  | { readonly type: "CANCEL"; readonly jobId: string; readonly signalId: string }
+  | { readonly type: "DISPOSE" };
 ```
 
 ### 2.2 Mensaje Worker → Host
 
 ```ts
-type WorkerOutbound =
+export type WorkerOutbound =
   | { readonly type: "READY"; readonly workerId: string; readonly capabilities: WorkerCapabilities }
   | { readonly type: "PROGRESS"; readonly jobId: string; readonly progress: number; readonly partial?: Serializable }
-  | { readonly type: "COMPLETED"; readonly jobId: string; readonly result: Serializable; readonly transferred?: Transferable[] }
+  | { readonly type: "COMPLETED"; readonly jobId: string; readonly result: Serializable; readonly transferred?: ReadonlyArray<Transferable> }
   | { readonly type: "FAILED"; readonly jobId: string; readonly error: SerializedEngineError }
   | { readonly type: "CANCELLED"; readonly jobId: string; readonly signalId: string }
   | { readonly type: "LOG"; readonly level: LogLevel; readonly message: string; readonly meta?: Serializable };
