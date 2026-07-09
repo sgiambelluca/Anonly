@@ -1,30 +1,32 @@
-<!-- CONTEXT: scope=ocr-engine | dependencias=core/Contracts.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md | audiencia=IA-implementador | fase=3 -->
+<!-- CONTEXT: scope=ocr-engine | dependencias=core/Contracts.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-018-First-Party-Assets.md,adr/ADR-021-Engines-Inline-Hasta-Hito9.md | audiencia=IA-implementador | fase=3 -->
 
 # OCR Engine — Spec de Motor
 
 > Ejecuta OCR sobre las páginas sin texto del PDF. Solo corre si `PdfEngineOutput.textlessPages.length > 0`. Devuelve `Word[]` con `BoundingBox` y `confidence` que el PDF Engine fusiona.
 
 **EngineId**: `ocr`
-**Versión del spec**: 1.0.0
-**Última actualización**: 2026-06-17
+**Versión del spec**: 1.1.0
+**Última actualización**: 2026-07-09
+
+> **Nota (ADR-021, 2026-07-09)**: este motor se implementa **inline** en el Hito 3, sin crear `OcrPool` propio; los pools llegan con el Orchestrator (Hito 9), sin cambio de interfaz pública (precedentes ADR-013/ADR-020). Ojo: tesseract.js crea sus **propios workers internos** — eso no es el `OcrPool` y no viola el modo inline. SLA de cancelación < 200 ms se valida en Hito 9/11.
 
 ---
 
 ## 1. Objetivo
 
-Recibir `ImageData` de páginas sin texto y producir `Word[]` con posiciones y confianza, reutilizando el modelo Tesseract cargado en cada worker del pool.
+Recibir `ImageData` de páginas sin texto y producir `Word[]` con posiciones y confianza, reutilizando el modelo Tesseract ya cargado (inline en Hito 3; en cada worker del `OcrPool` desde Hito 9 — ADR-021).
 
 ---
 
 ## 2. Responsabilidades
 
-- Cargar Tesseract.js y el modelo `spa+eng` (default) en cada worker del `OcrPool`.
+- Cargar Tesseract.js y el modelo `spa+eng` (default). Hito 3: inline; desde Hito 9: en cada worker del `OcrPool` (ADR-021).
 - Recibir `ImageData` por página y ejecutar OCR.
 - Producir `Word[]` con `BoundingBox`, `confidence`, `source: "ocr"`.
 - Cache el modelo en IndexedDB tras primera descarga.
 - Emitir `OCR_STARTED`, `OCR_PAGE_FINISHED`, `OCR_FINISHED`, `OCR_PAGE_FAILED`.
 - Transferir zero-copy `ImageData` al worker.
-- Depositar las `Word[]` en `ctx.cache` con clave `ocr-words:<documentId>:<pageIndex>` y notificar al PDF Engine vía `OCR_PAGE_FINISHED`.
+- Depositar las `Word[]` en `ctx.cache` con clave `ocr-words:<documentId>:<pageIndex>` y emitir `OCR_PAGE_FINISHED`; el **Orchestrator** (no el PDF Engine) lo escucha e invoca `PdfEngine.fuseOcrPage` (ADR-014).
 
 ---
 
@@ -61,11 +63,13 @@ Recibir `ImageData` de páginas sin texto y producir `Word[]` con posiciones y c
 ## 6. Interfaces públicas
 
 ```ts
-export interface OcrEngineConfig {
+// OcrConfig se define en core/Contracts.md §6 (source of truth) y se importa de @anonly/shared.
+// Solo contiene languages y dpi; el timeout y los retries por página se leen de
+// ctx.config.workerPool.timeouts["ocr-page"] (default 60000) y
+// ctx.config.workerPool.maxRetries["ocr-page"] (default 2) — fuente única, ver ADR-021 §2.
+export interface OcrConfig {
   readonly languages: ReadonlyArray<string>; // default ["spa", "eng"]
   readonly dpi: number;                       // default 300 (calidad OCR)
-  readonly pageTimeoutMs: number;             // default 60000
-  readonly maxRetries: number;                // default 2
 }
 
 export interface OcrPageInput {
@@ -149,7 +153,7 @@ OcrPageOutput {
 - `words[i].source === "ocr"`.
 - `words[i].pageIndex === input.pageIndex`.
 - `words[i].confidence ∈ [0,1]`.
-- Las `Word[]` también se depositan en `ctx.cache` con clave `ocr-words:<documentId>:<pageIndex>` para que el PDF Engine las fusione al recibir `OCR_PAGE_FINISHED`.
+- Las `Word[]` también se depositan en `ctx.cache` con clave `ocr-words:<documentId>:<pageIndex>`; el Orchestrator las lee al recibir `OCR_PAGE_FINISHED` e invoca `PdfEngine.fuseOcrPage` (ADR-014). En Hito 3 la integración con `fuseOcrPage` se testea con llamada directa, sin bus (igual que en Hito 2).
 
 ---
 
@@ -158,7 +162,7 @@ OcrPageOutput {
 | Code | Clase | Cuándo | Recuperable | Acción |
 |---|---|---|---|---|
 | `OCR_PAGE_FAILED` | `OcrPageFailedError` | Tesseract lanza error en una página tras `maxRetries` | no | esa página queda sin OCR; las detecciones posteriores se saltan sus ocurrencias; warning al usuario |
-| `OCR_TIMEOUT` | `OcrTimeoutError` | timeout por página excedido | sí | reintentar hasta `maxRetries`, luego `OCR_PAGE_FAILED` |
+| `OCR_TIMEOUT` | `OcrTimeoutError` | timeout por página excedido | sí | reintentar hasta `workerPool.maxRetries["ocr-page"]` (Hito 3 inline: loop del propio engine; Hito 9: el pool — ADR-021 §2), luego `OCR_PAGE_FAILED` |
 | `OCR_MODEL_MISSING` | `OcrModelMissingError` | no se pudo cargar/descargar el modelo Tesseract | no | abortar OCR; el usuario debe reintentar o desactivar OCR |
 | `ENGINE_NOT_INITIALIZED` | `EngineNotInitializedError` | `processPage` antes de `init` | no | bug del caller |
 | `ENGINE_DISPOSED` | `EngineDisposedError` | `processPage` tras `dispose` | no | bug del caller |
@@ -170,7 +174,7 @@ OcrPageOutput {
 
 ## 12. Consideraciones de rendimiento
 
-- Corre en `OcrPool` (1–2 workers default; 1 en móviles).
+- Hito 3: corre inline en el host (ADR-021; tesseract.js mantiene sus workers internos propios). Hito 9: `OcrPool` (1–2 workers default; 1 en móviles).
 - Costo: 3–10 s por página A4 a 300 DPI (depende de densidad de texto).
 - Memoria: 150–300 MB por worker (modelo cargado). El modelo se reutiliza entre jobs.
 - `imageData` se transfiere (zero-copy).
@@ -187,7 +191,7 @@ OcrPageOutput {
 1. **Página completamente vacía (blanca)**: `words = []`, `confidence = 0`. `OCR_PAGE_FINISHED` se emite normalmente.
 2. **Página con imagen sin texto**: `words = []`, `confidence = 0`. Normal.
 3. **Página con texto muy pequeño (calidad baja)**: `confidence < 0.5`. El usuario puede ver warning; las ocurrencias NER posteriores tendrán `confidence = min(ocrConf, nerConf)`.
-4. **`imageData` ya transferido**: lanza `InvalidInputError`.
+4. **`imageData` ya transferido**: lanza `InvalidInputError`. (Hito 9; inline no hay transferencia zero-copy — ADR-021 §1, precedente ADR-020 §9.)
 5. **Idioma no cargado en el modelo**: lanza `OcrModelMissingError`.
 6. **Timeout por página**: reintentar 2 veces. Si persiste, `OCR_PAGE_FAILED` y se continúa con las demás páginas.
 7. **Worker crashea (OOM)**: el pool reemplaza el worker, reintenta el job si `retryable`.
@@ -221,19 +225,20 @@ OcrPageOutput {
 | `model cached in IndexedDB after first run` | `integration.test.ts` (en `tests/integration/`) | integration | caso 10 |
 | `throws EngineDisposedError after dispose` | `edge.test.ts` | edge | caso 11 |
 
-Fixtures: `tests/fixtures/scanned-10p.pdf` (rasterizado a `ImageData` por el host), imagen blanca, imagen con texto pequeño.
+**Fixtures y mocks (ADR-021 §5)**: los tests **unit / contract / edge** (Hito 3) mockean la frontera `tesseract.js` — deterministas, sin wasm ni descargas; el cast de frontera va en un helper único de `__tests__/fixtures/` (Code_Standards §10, precedente `mockGetDocumentResult` del pdf-engine). Los tests **stress / cancel / integration** son Hito 11 y usan `tests/fixtures/scanned-10p.pdf` (rasterizado a `ImageData` por el host), imagen blanca e imagen con texto pequeño.
 
 ---
 
 ## 15. Checklist de implementación
 
 - [ ] 1. Crear paquete `packages/anonymization-core/ocr-engine/`.
-- [ ] 2. Definir `types.ts` con `OcrEngineConfig`, `OcrPageInput`, `OcrPageOutput`.
+- [ ] 2. Definir `types.ts` con `OcrPageInput`, `OcrPageOutput` (`OcrConfig` viene de `@anonly/shared`).
 - [ ] 3. Definir `errors.ts` con `OcrPageFailedError`, `OcrTimeoutError`, `OcrModelMissingError`.
 - [ ] 4. Implementar `ocr.engine.ts` respetando `IEngine` y la firma pública de §6.
-- [ ] 5. Implementar `init` (crear `OcrPool`, cargar Tesseract y modelo `spa+eng` en cada worker, cache en IndexedDB).
-- [ ] 6. Implementar `processPage` con transferencia de `ImageData`, `AbortSignal`, `PROGRESS` callback de Tesseract → `OCR_PAGE_FINISHED`.
-- [ ] 7. Implementar `processPages` (ordena por prioridad visible, despacha al pool, backpressure).
+- [ ] 5a. (Hito 3) Implementar `init` inline: cargar tesseract.js con `langPath`/`corePath`/`workerPath` first-party (ADR-018) y modelo `spa+eng`; el cache en IndexedDB lo maneja tesseract.js internamente (ADR-021 §6).
+- [ ] 5b. (Hito 9) Migrar a `OcrPool` cuando `WorkerPoolManager` exista.
+- [ ] 6. Implementar `processPage` con `AbortSignal` y callback de progreso de Tesseract como checkpoint de cancelación; `OCR_PAGE_FINISHED` al completar. (Transferencia zero-copy de `ImageData`: Hito 9, ADR-021 §1.)
+- [ ] 7. Implementar `processPages` (Hito 3: secuencial en el orden recibido, con checkpoint de cancelación entre páginas; la priorización por visibilidad y el despacho al pool son del Orchestrator, Hito 9).
 - [ ] 8. Implementar depósito en `ctx.cache` con clave `ocr-words:<documentId>:<pageIndex>`.
 - [ ] 9. Implementar `dispose` (libera Tesseract workers y memoria temporal; NO descarga el modelo cacheado).
 - [ ] 10. Cablear eventos emitidos contra `IEventBus`.
@@ -244,7 +249,7 @@ Fixtures: `tests/fixtures/scanned-10p.pdf` (rasterizado a `ImageData` por el hos
 - [ ] 15. Verificar `index.ts` exporta solo lo público.
 - [ ] 16. Verificar imports sin dependencias prohibidas (`grep -r 'react\|pdfjs\|pdf-lib\|onnx\|transformers' src/`).
 - [ ] 17. Verificar `no-network-from-core` (sin `fetch`/`XMLHttpRequest` propios). Configurar Tesseract.js con `langPath`/`corePath`/`workerPath` apuntando al origen propio (`/models/tesseract/`, `/wasm/tesseract/`): los assets se sirven first-party con hash verificado según ADR-018 — nunca desde jsDelivr/GitHub en runtime.
-- [ ] 18. Verificar test de cancelación < 200 ms.
+- [ ] 18. (Hito 9/11) Verificar test de cancelación < 200 ms; en Hito 3 se valida cancelación cooperativa (checkpoint por página) sin SLA estricto (ADR-021 §1).
 
 ---
 

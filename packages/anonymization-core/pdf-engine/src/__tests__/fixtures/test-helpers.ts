@@ -105,7 +105,7 @@ export function createMockConfig(): EngineConfig {
       batchSize: 1,
       enabled: false,
     },
-    ocr: { languages: ["spa"], dpi: 300, pageTimeoutMs: 60000 },
+    ocr: { languages: ["spa"], dpi: 300 },
     grouping: { similarityThreshold: 0.88, minAliasFrequency: 1 },
     render: { previewScale: 0.5, fullScale: 2, jpegQuality: 80, cachePages: 16 },
     export: { defaultDpi: 300, defaultImageFormat: "png", defaultJpegQuality: 80 },

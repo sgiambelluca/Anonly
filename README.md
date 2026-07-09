@@ -207,6 +207,7 @@ Toda la documentación técnica vive en [`docs/`](./docs) y está optimizada par
 | [`ADR-018`](./docs/adr/ADR-018-First-Party-Assets.md) | Modelos y wasm servidos first-party (mirror propio, CSP intacta) |
 | [`ADR-019`](./docs/adr/ADR-019-Hito1-Hardening.md) | Hardening del Hito 1 (`shared` + `event-system`): canal tipado, logger requerido, `engineId: "core"`, `LogLevel` único, seed obligatorio, excepción a R-1 |
 | [`ADR-020`](./docs/adr/ADR-020-PdfEngine-Word-Granularity-Hardening.md) | Hardening del Hito 2 (PDF Engine): word-splitting con bbox prorrateado, normalización NFC, política única de eventos fatales, `fuseOcrPage` con guard, `releaseDocument`, `parsePage` puro, excepción a R-1/R-21 |
+| [`ADR-021`](./docs/adr/ADR-021-Engines-Inline-Hasta-Hito9.md) | Motores restantes inline hasta Hito 9; OcrConfig con fuente unica de timeout/retries; campos modelLoading/modelDownloaded; spec OCR reconciliado con ADR-014; cache de assets publicos permitido (P-6) |
 
 ### Core (contratos y specs de motores)
 

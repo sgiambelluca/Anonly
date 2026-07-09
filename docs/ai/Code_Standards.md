@@ -211,7 +211,7 @@ En tests (`*.test.ts`), `@ts-expect-error` con un comentario justificativo adyac
 | P-3 | **Nunca** `any` ni `@ts-ignore` sin issue asociado. |
 | P-4 | **Nunca** `console.*` en `packages/`. |
 | P-5 | **Nunca** mutar props de entrada en funciones públicas del Core. |
-| P-6 | **Nunca** escribir en el sistema de archivos ni en `localStorage` desde el Core. El Core es puro procesamiento. |
+| P-6 | **Nunca** escribir en el sistema de archivos ni en `localStorage` desde el Core. El Core es puro procesamiento. Aplica a documentos y datos del usuario: cachear assets publicos (modelos OCR/NER) en IndexedDB/Cache Storage via la propia libreria esta permitido (ADR-021 §6). |
 | P-7 | **Nunca** hacer network requests desde el Core. |
 | P-8 | **Nunca** export default. |
 | P-9 | **Nunca** agregar dependencias externas a un motor sin ADR que lo justifique. |

@@ -68,7 +68,7 @@ Reporta: archivo, sección, cita textual, pregunta concreta.
 SALIDA ESPERADA
 Al terminar:
 - Paquete `packages/anonymization-core/<engine>-engine/` con: package.json, tsconfig.json, src/index.ts, src/<engine>.engine.ts, src/types.ts, src/errors.ts, src/__tests__/{contract,unit,edge,snapshot}.test.ts, src/__tests__/fixtures/.
-- Ejecución local: `pnpm lint && pnpm typecheck && pnpm test` verde.
+- Ejecución local: `pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract` verde.
 - Reporte final: archivos tocados, cobertura final, tests nuevos, ambigüedades detectadas (si las hubiera).
 - No ejecutar `git commit` ni `git push` sin autorización.
 
@@ -151,7 +151,7 @@ CHECKLIST DE REVISIÓN
 6. ¿Los tests cubren TODA la sección 14 "Casos de prueba"? Si no, RECHAZA con lista de tests faltantes.
 7. ¿Los casos límite de la sección 13 están todos cubiertos? Si no, RECHAZA.
 8. ¿El checklist de implementación (sección 15) está completo? Si no, RECHAZA con items pendientes.
-9. Lint, typecheck, tests pasan: `pnpm lint && pnpm typecheck && pnpm test`. Si no, RECHAZA.
+9. Lint, typecheck, tests pasan: `pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract`. Si no, RECHAZA.
 10. Verificar prohibiciones: sin `any`, sin `console.`, sin `react` en packages/, sin imports entre motores. Usa grep.
 
 SALIDA ESPERADA
@@ -436,7 +436,7 @@ Para un bug reportado por el revisor o por tests:
 ## 13. Reglas transversales a todos los prompts
 
 - **Nunca** enviar un prompt sin haber adjuntado el contexto indicado.
-- **Nunca** aceptar output sin la ejecución de `pnpm lint && pnpm typecheck && pnpm test`.
+- **Nunca** aceptar output sin la ejecución de `pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract`.
 - **Nunca** permitir `git commit` o `git push` sin autorización explícita del humano.
 - **Siempre** reportar ambigüedades en lugar de improvisar.
 - **Siempre** respetar las prohibiciones absolutas de `ai/Code_Standards.md` §12.
