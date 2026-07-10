@@ -24,7 +24,7 @@ Demostrar el producto end-to-end con el mínimo que resuelve el caso de uso base
 | PDF Engine | parseo de PDF con texto, detección de páginas sin texto, metadata no sensible, password-protected con reintento. |
 | OCR Engine | Tesseract.js con modelo `spa+eng`, páginas sin texto, cache IndexedDB. |
 | Regex Engine | patrones default AR (DNI, CUIT, teléfono, email, IBAN, tarjeta, fecha, matrícula, patente). Sin patrones custom del usuario. |
-| NER Engine | Transformers.js + ONNX, modelo Q8 multilingüe, Person/Org/Address, con toggle en settings. |
+| NER Engine | Transformers.js + ONNX, modelo Q8 multilingüe, Person/Org/Address/Date (fechas en lenguaje natural; las numéricas siguen siendo de Regex — ADR-023 §2), con toggle en settings. |
 | Grouping Engine | matching exacto + fuzzy Levenshtein, `indexInType` estable, fusión/división manual, conflictos auto-resueltos, reglas group/type/global. |
 | Render Engine | OffscreenCanvas, original + anonymized, 4 modos visuales, delta render, LRU cache. |
 | Export Engine | pdf-lib, reconstrucción, JPEG q 0.85, DPI 150/300, metadata mínima. |
@@ -120,10 +120,11 @@ Orden sugerido (cada hito = un set de PRs):
 - Corrección de contrato: patrón "Phone (AR mobile)" ajustado con límites de palabra (`\b`) porque el regex literal rompía el caso límite 3 del spec; formalizado en `adr/ADR-022-Regex-Phone-AR-Word-Boundaries.md`. `core/Regex_Engine.md` pasa a v1.0.1.
 
 ### Hito 5 — NER Engine
-- Implementar `ner-engine` con Transformers.js + ONNX.
-- Modelo NER servido first-party (`env.allowRemoteModels = false`, mirror en `assets.lock.json`, ver ADR-018).
+- Implementar `ner-engine` con Transformers.js + ONNX. Config canónica `NerConfig` (Contracts.md §6; alias `NerEngineConfig` eliminado) y modelo multilingüe default `Xenova/bert-base-multilingual-cased-ner-hrl` fijados en `adr/ADR-023-NER-Config-Canonical-Model-Multilingue.md`.
+- Modelo NER servido first-party (`env.allowRemoteModels = false`, `env.localModelPath`): agregar la entrada del modelo (URL de origen + `revision` + `sha256` + `sizeBytes`, destino `public/models/ner/`) a `assets.lock.json` y correr `pnpm assets:mirror` — mismo patrón que OCR en PR #11 (ver ADR-018, ADR-023 §2).
 - Cache del modelo en Cache Storage.
-- Tests de integración con Regex (ambos emiten `ENTITY_FOUND`).
+- Los tests de integración con Regex (ambos emiten `ENTITY_FOUND`) viven en `tests/integration/` y son Hito 9 (Orchestrator), **no** de este PR (ADR-010, `core/Orchestrator.md:239`, precedente `core/OCR_Engine.md:225`).
+- Pendiente: verificación de integridad en runtime del modelo (ADR-018 punto 3, `core/NER_Engine.md` §15.19) → Hito 11.
 
 ### Hito 6 — Grouping Engine
 - Implementar `grouping-engine` con matching, conflictos, reglas, fusión/división.

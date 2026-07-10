@@ -2,19 +2,21 @@
 
 # NER Engine — Spec de Motor
 
-> Detecta personas, organizaciones y direcciones mediante un modelo NER local (Transformers.js + ONNX Runtime Web). Emite `Occurrence[]` con `source: "ner"` y `confidence` según el modelo.
+> Detecta personas, organizaciones, direcciones y fechas mediante un modelo NER local (Transformers.js + ONNX Runtime Web). Emite `Occurrence[]` con `source: "ner"` y `confidence` según el modelo.
 
 **EngineId**: `ner`
 **Versión del spec**: 1.0.0
-**Última actualización**: 2026-06-17
+**Última actualización**: 2026-07-10
 
 > **Nota (ADR-021, 2026-07-09)**: este motor se implementa **inline** en su hito, sin crear su pool propio; `WorkerPoolManager` y los pools llegan con el Orchestrator (Hito 9), sin cambio de interfaz pública (precedentes ADR-013/ADR-020). Leer §12 y los ítems de workers/pool del §15 como Hito 9; cancelación cooperativa con checkpoints inline, el SLA < 200 ms se valida en Hito 9/11. Los tests unit/contract/edge mockean la frontera de la librería externa (Code_Standards §10, ADR-021 §5).
+>
+> **Nota (ADR-023, 2026-07-10)**: el tipo de config canónico es `NerConfig` (Contracts.md §6); el alias `NerEngineConfig` de §6/§15.2 queda eliminado. El `modelId` default es `Xenova/bert-base-multilingual-cased-ner-hrl` (multilingüe, conversión ONNX oficial), Q8 ~150–180 MB — corrige las estimaciones de ~50–80 MB de §12. El pin (URL + hash) se agrega a `assets.lock.json` en el paso de mirror del Hito 5; el mapeo de labels es `PER→Person`, `ORG→Organization`, `LOC→Address`, `DATE→Date` (contrato de salida ampliado a cuatro tipos, ver §10 y ADR-023 §2).
 
 ---
 
 ## 1. Objetivo
 
-Aplicar un modelo NER local sobre `Page.text` y emitir `Occurrence[]` para entidades de tipo `Person`, `Organization` y `Address`, con `bbox` mapeado desde las `Word` correspondientes.
+Aplicar un modelo NER local sobre `Page.text` y emitir `Occurrence[]` para entidades de tipo `Person`, `Organization`, `Address` y `Date`, con `bbox` mapeado desde las `Word` correspondientes.
 
 ---
 
@@ -66,8 +68,10 @@ Aplicar un modelo NER local sobre `Page.text` y emitir `Occurrence[]` para entid
 ## 6. Interfaces públicas
 
 ```ts
-export interface NerEngineConfig {
-  readonly modelId: string;                  // default "Xenova/bert-base-NER"
+// NerConfig es el tipo canónico de Contracts.md §6 (re-exportado por @anonly/shared);
+// se reproduce aquí solo para documentar sus defaults (ADR-023).
+export interface NerConfig {
+  readonly modelId: string;                  // default "Xenova/bert-base-multilingual-cased-ner-hrl" (ADR-023)
   readonly quantization: "q8" | "q4" | "f32"; // default "q8"
   readonly confidenceThreshold: number;       // default 0.7
   readonly batchSize: number;                 // default 256 tokens
@@ -153,7 +157,7 @@ NerPageOutput {
 
 Cada `Occurrence`:
 - `source: DetectionSource.NER`
-- `entityType ∈ {Person, Organization, Address}` (el modelo NER solo emite estos tres)
+- `entityType ∈ {Person, Organization, Address, Date}` (mapeo de los labels `PER`/`ORG`/`LOC`/`DATE` del modelo, ADR-023 §2)
 - `confidence ∈ [0,1]` (score del modelo)
 - `bbox` mapeado desde las `Word` que cubren el span detectado
 - `normalizedValue` lowercase, sin puntuación redundante
@@ -184,7 +188,7 @@ Las `Occurrence` también se emiten vía `ENTITY_FOUND` (incremental).
 - Corre en `NerPool` (1–2 workers default).
 - Costo: 5–15 s por página de texto denso.
 - Memoria: 200–400 MB por worker (modelo + sesión de inferencia).
-- Modelo cacheado en Cache Storage (~60 MB Q8). Lazy: solo descarga la primera vez.
+- Modelo cacheado en Cache Storage (~150–180 MB Q8 para mBERT, ADR-023). Lazy: solo descarga la primera vez.
 - Sin transferencia zero-copy de `text` (es string, se serializa normal).
 - Paralelismo: pool despacha en paralelo respetando `nerPoolSize`. Backpressure si `queue > 8`.
 - Cancelación: checkpoints entre batches de inferencia (cada `batchSize` tokens). SLA < 200 ms.
@@ -210,6 +214,7 @@ Las `Occurrence` también se emiten vía `ENTITY_FOUND` (incremental).
 12. **WebGPU disponible pero deshabilitado por config**: usa WASM. Sin error.
 13. **`processPage` tras `dispose`**: lanza `EngineDisposedError`.
 14. **Texto en idioma no soportado por el modelo**: el modelo multilingüe lo maneja con menor precisión. No lanza error; `confidence` será más baja.
+15. **Fecha escrita en palabras ("3 de mayo de 2024")**: el modelo la emite como `Date`. Si la misma fecha en formato numérico también la detecta Regex, la deduplicación no es responsabilidad de NER: Grouping resuelve por overlap (gana mayor `confidence`; Regex emite 1.0 y siempre gana). Ver ADR-023 §2.
 
 ---
 
@@ -222,7 +227,7 @@ Las `Occurrence` también se emiten vía `ENTITY_FOUND` (incremental).
 | `emits ENTITY_FOUND per occurrence` | `contract.test.ts` | contract | invariante |
 | `emits NER_FINISHED after all pages` | `contract.test.ts` | contract | invariante |
 | `occurrence.source === "ner"` | `contract.test.ts` | contract | invariante |
-| `occurrence.entityType ∈ {Person, Organization, Address}` | `contract.test.ts` | contract | invariante |
+| `occurrence.entityType ∈ {Person, Organization, Address, Date}` | `contract.test.ts` | contract | invariante |
 | `confidence ∈ [0,1]` | `unit.test.ts` | unit | rango |
 | `bbox mapped correctly to words` | `unit.test.ts` | unit | mapping |
 | `empty text returns empty occurrences` | `edge.test.ts` | edge | caso 1 |
@@ -234,19 +239,20 @@ Las `Occurrence` también se emiten vía `ENTITY_FOUND` (incremental).
 | `OOM worker replaced and retried` | `stress.test.ts` (en `tests/stress/`) | stress | caso 9 |
 | `cancel within 200ms` | `cancel.test.ts` | cancel | caso 10 |
 | `disabled NER returns empty occurrences without loading model` | `edge.test.ts` | edge | caso 11 |
+| `written-out date mapped to Date` | `edge.test.ts` | edge | caso 15 |
 | `throws EngineDisposedError after dispose` | `edge.test.ts` | edge | caso 13 |
 | `recall ≥ 85% on reference dataset` | `perf.test.ts` (en `tests/perf/`) | perf | gate de v1.0 |
 | `precision ≥ 90% on reference dataset` | `perf.test.ts` | perf | gate de v1.0 |
 | `snapshot of occurrences for text-10p.pdf stable` | `snapshot.test.ts` | snapshot | fixture |
 
-Fixtures: `tests/fixtures/text-10p.pdf` con nombres/organizaciones/direcciones conocidos, dataset de referencia para recall/precision.
+Fixtures: `tests/fixtures/text-10p.pdf` con nombres/organizaciones/direcciones/fechas conocidos (fechas tanto numéricas como escritas en palabras), dataset de referencia para recall/precision.
 
 ---
 
 ## 15. Checklist de implementación
 
 - [ ] 1. Crear paquete `packages/anonymization-core/ner-engine/`.
-- [ ] 2. Definir `types.ts` con `NerEngineConfig`, `NerPageInput`, `NerPageOutput`.
+- [ ] 2. Definir `types.ts` con `NerPageInput`, `NerPageOutput` (`NerConfig` viene de `@anonly/shared`/Contracts.md §6; ADR-023).
 - [ ] 3. Definir `errors.ts` con `NerModelMissingError`, `NerModelLoadFailedError`, `NerPageFailedError`, `NerTimeoutError`.
 - [ ] 4. Implementar `ner.engine.ts` respetando `IEngine` y la firma pública de §6.
 - [ ] 5. Implementar `init` (crear `NerPool`, cargar Transformers.js y modelo Q8 en cada worker, cache en Cache Storage).

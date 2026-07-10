@@ -5,7 +5,7 @@
 - **Estado**: Accepted
 - **Fecha**: 2026-06-17
 - **Decidido por**: Planificación inicial
-- **Complementado por**: ADR-018 (los modelos se sirven first-party, nunca desde HuggingFace en runtime)
+- **Complementado por**: ADR-018 (los modelos se sirven first-party, nunca desde HuggingFace en runtime); ADR-023 (resuelve el modelo default multilingüe concreto `Xenova/bert-base-multilingual-cased-ner-hrl` y corrige el tamaño Q8 a ~150–180 MB — el placeholder `Xenova/bert-base-NER` de §Decisión queda superado)
 
 ## Contexto
 
