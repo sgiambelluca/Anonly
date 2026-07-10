@@ -112,6 +112,7 @@ Orden sugerido (cada hito = un set de PRs):
 - Assets de Tesseract servidos first-party: script `scripts/mirror-assets.ts` + `assets.lock.json` (ver ADR-018).
 - Integración con PDF Engine (`fuseOcrPage`).
 - Tests completos.
+- Pendiente: verificación de integridad en runtime de assets (ADR-018 punto 3) → Hito 11.
 
 ### Hito 4 — Regex Engine
 - Implementar `regex-engine` con `DEFAULT_PATTERNS_AR`.
@@ -152,6 +153,7 @@ Orden sugerido (cada hito = un set de PRs):
 - Performance gates (todas las métricas de `00_Project_Vision.md` §7).
 - Leak tests, cancel tests.
 - Security tests.
+- Verificación de integridad en runtime de modelos/wasm (`crypto.subtle.digest` contra `assets.lock.json`, ADR-018 punto 3) en `ocr-engine` y `ner-engine`; hash mismatch → `OCR_MODEL_MISSING` / `NER_MODEL_LOAD_FAILED`. Incluye test de integridad: asset con hash alterado → error tipado, no se carga.
 - Audit `pnpm audit`.
 - Bundle size check.
 
