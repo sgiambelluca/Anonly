@@ -50,6 +50,12 @@ tests/fixtures/*.bin
 .models/
 .wasm/
 
+# Assets first-party mirroreados por scripts/mirror-assets.ts (ADR-018):
+# se descargan en build/deploy a partir de assets.lock.json, nunca se
+# commitean al repo.
+apps/react-client/public/wasm/
+apps/react-client/public/models/
+
 # Changesets temporales
 .changeset/*.md
 !.changeset/config.json
