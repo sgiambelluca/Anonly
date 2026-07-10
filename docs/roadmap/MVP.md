@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-mvp | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,adr/ADR-011-Grouping-First.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md | audiencia=humanos+IA | fase=5 (Hito 2 cerrado vía PRs #6, #7) -->
+<!-- CONTEXT: scope=roadmap-mvp | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,adr/ADR-011-Grouping-First.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md | audiencia=humanos+IA | fase=5 (Hito 2 cerrado vía PRs #6, #7; Hito 3 cerrado vía PR #10 + `feat/mirror-assets-hito-3`, pendiente diferido a Hito 11) -->
 
 # Anonly — Roadmap MVP
 
@@ -108,10 +108,10 @@ Orden sugerido (cada hito = un set de PRs):
 - ~~Ejecución **inline** (sin `PdfPool`); integración con `PdfPool` difiere al Hito 9 (ver ADR-013).~~ **CERRADO** — ejecución inline confirmada; specs `core/PDF_Engine.md` v1.1.1, `core/Contracts.md` y ADRs 013/014 ya reconciliados. Migración a `PdfPool` queda en Hito 9.
 
 ### Hito 3 — OCR Engine
-- Implementar `ocr-engine` siguiendo `core/OCR_Engine.md`.
-- Assets de Tesseract servidos first-party: script `scripts/mirror-assets.ts` + `assets.lock.json` (ver ADR-018).
-- Integración con PDF Engine (`fuseOcrPage`).
-- Tests completos.
+- ~~Implementar `ocr-engine` siguiendo `core/OCR_Engine.md`.~~ **CERRADO** (PR #10).
+- ~~Assets de Tesseract servidos first-party: script `scripts/mirror-assets.ts` + `assets.lock.json` (ver ADR-018).~~ **CERRADO** (PR de `feat/mirror-assets-hito-3`).
+- ~~Integración con PDF Engine (`fuseOcrPage`).~~ **CERRADO** (PR #10).
+- ~~Tests completos.~~ **CERRADO** — `contract.test.ts`, `unit.test.ts`, `edge.test.ts` commiteados en `packages/anonymization-core/ocr-engine/src/__tests__/`.
 - Pendiente: verificación de integridad en runtime de assets (ADR-018 punto 3) → Hito 11.
 
 ### Hito 4 — Regex Engine
