@@ -194,6 +194,19 @@ importers:
         specifier: ^3.2.6
         version: 3.2.6(@types/node@20.19.43)(jiti@2.6.1)(tsx@4.22.4)(yaml@2.9.0)
 
+  packages/anonymization-core/regex-engine:
+    dependencies:
+      '@anonly/shared':
+        specifier: workspace:*
+        version: link:../shared
+    devDependencies:
+      typescript:
+        specifier: ^5.6.2
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.6
+        version: 3.2.6(@types/node@20.19.43)(jiti@2.6.1)(tsx@4.22.4)(yaml@2.9.0)
+
   packages/anonymization-core/shared:
     devDependencies:
       typescript:

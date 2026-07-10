@@ -1,0 +1,139 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`RegexEngine — snapshot > snapshot of occurrences for text-10p.pdf stable 1`] = `
+{
+  "occurrences": [
+    {
+      "bbox": {
+        "height": 12,
+        "width": 66,
+        "x": 326,
+        "y": 100,
+      },
+      "confidence": 1,
+      "entityType": "DNI",
+      "normalizedValue": "34567891",
+      "pageIndex": 0,
+      "source": "regex",
+      "value": "34.567.891",
+      "wordSpan": {
+        "endIndexExclusive": 8,
+        "startIndex": 7,
+      },
+    },
+    {
+      "bbox": {
+        "height": 12,
+        "width": 84,
+        "x": 436,
+        "y": 100,
+      },
+      "confidence": 1,
+      "entityType": "CUIT",
+      "normalizedValue": "20345678914",
+      "pageIndex": 0,
+      "source": "regex",
+      "value": "20-34567891-4",
+      "wordSpan": {
+        "endIndexExclusive": 10,
+        "startIndex": 9,
+      },
+    },
+    {
+      "bbox": {
+        "height": 12,
+        "width": 132,
+        "x": 74,
+        "y": 100,
+      },
+      "confidence": 1,
+      "entityType": "EMAIL",
+      "normalizedValue": "juan.perez@example.com",
+      "pageIndex": 1,
+      "source": "regex",
+      "value": "juan.perez@example.com",
+      "wordSpan": {
+        "endIndexExclusive": 2,
+        "startIndex": 1,
+      },
+    },
+    {
+      "bbox": {
+        "height": 12,
+        "width": 110,
+        "x": 254,
+        "y": 100,
+      },
+      "confidence": 1,
+      "entityType": "PHONE",
+      "normalizedValue": "541112345678",
+      "pageIndex": 1,
+      "source": "regex",
+      "value": "+54 11 1234-5678",
+      "wordSpan": {
+        "endIndexExclusive": 7,
+        "startIndex": 4,
+      },
+    },
+    {
+      "bbox": {
+        "height": 12,
+        "width": 66,
+        "x": 150,
+        "y": 100,
+      },
+      "confidence": 1,
+      "entityType": "LICENSE",
+      "normalizedValue": "MP123456",
+      "pageIndex": 2,
+      "source": "regex",
+      "value": "MP-12345-6",
+      "wordSpan": {
+        "endIndexExclusive": 3,
+        "startIndex": 2,
+      },
+    },
+    {
+      "bbox": {
+        "height": 12,
+        "width": 52,
+        "x": 278,
+        "y": 100,
+      },
+      "confidence": 1,
+      "entityType": "PLATE",
+      "normalizedValue": "ABC123",
+      "pageIndex": 2,
+      "source": "regex",
+      "value": "ABC 123",
+      "wordSpan": {
+        "endIndexExclusive": 6,
+        "startIndex": 4,
+      },
+    },
+    {
+      "bbox": {
+        "height": 12,
+        "width": 66,
+        "x": 380,
+        "y": 100,
+      },
+      "confidence": 1,
+      "entityType": "DATE",
+      "normalizedValue": "15/03/2030",
+      "pageIndex": 2,
+      "source": "regex",
+      "value": "15/03/2030",
+      "wordSpan": {
+        "endIndexExclusive": 8,
+        "startIndex": 7,
+      },
+    },
+  ],
+  "output": {
+    "documentId": "snapshot-doc",
+    "durationMs": 0,
+    "occurrenceCount": 7,
+  },
+}
+`;

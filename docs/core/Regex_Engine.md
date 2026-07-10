@@ -5,8 +5,8 @@
 > Detecta patrones determinísticos (DNI, CUIT, teléfono, email, IBAN, tarjeta, fecha, matrícula, patente) en el texto de cada página. Emite `Occurrence[]` con `source: "regex"` y `confidence: 1.0`. Es determinista: mismo input → mismo output.
 
 **EngineId**: `regex`
-**Versión del spec**: 1.0.0
-**Última actualización**: 2026-06-17
+**Versión del spec**: 1.0.1
+**Última actualización**: 2026-07-10
 
 ---
 
@@ -266,7 +266,7 @@ Los patrones exactos viven en `patterns/default-ar.ts` y son parte del contrato 
 |---|---|---|---|
 | DNI (AR) | `\b\d{1,2}\.?\d{3}\.?\d{3}\b` | – | strip dots → "34567891" |
 | CUIT/CUIL (AR) | `\b\d{2}-?\d{8}-?\d\b` | algoritmo módulo 11 | strip dashes → "20123456789" |
-| Phone (AR mobile) | `(?:\+?54)?[\s-]?\d{2}[\s-]?\d{4}[\s-]?\d{4}` | – | strip no-digit → "541112345678" |
+| Phone (AR mobile) | `(?:\+?54)?[\s-]?\b\d{2}[\s-]?\d{4}[\s-]?\d{4}\b` | – | strip no-digit → "541112345678" |
 | Phone (AR landline) | `\b0\d{1,4}[\s-]?\d{6,8}\b` | – | strip no-digit |
 | Email | `\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b` | – | lowercase |
 | IBAN | `\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b` | ISO 13616 check | uppercase, strip spaces |
@@ -278,6 +278,11 @@ Los patrones exactos viven en `patterns/default-ar.ts` y son parte del contrato 
 
 La implementación debe respetar estos patrones y checksums. Cualquier cambio requiere ADR nuevo.
 
+> El patrón "Phone (AR mobile)" fue corregido en la versión 1.0.1 del spec agregando límites de
+> palabra (`\b`) en ambos extremos, consistente con los otros 10 patrones de la tabla. Ver
+> `adr/ADR-022-Regex-Phone-AR-Word-Boundaries.md` para el detalle del problema (rompía el caso
+> límite 3, §13) y la decisión.
+
 ---
 
 ## Referencias
@@ -287,3 +292,4 @@ La implementación debe respetar estos patrones y checksums. Cualquier cambio re
 - `04_Event_System.md` §5 (eventos `ENTITY_FOUND`, `REGEX_FINISHED`)
 - `adr/ADR-011-Grouping-First.md` (por qué Regex emite a Grouping, no a UI)
 - `adr/ADR-012-Replacement-Modes.md` (maskFormat por tipo)
+- `adr/ADR-022-Regex-Phone-AR-Word-Boundaries.md` (corrección del patrón Phone AR mobile, v1.0.1)
