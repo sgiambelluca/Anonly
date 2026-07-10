@@ -15,6 +15,10 @@ export default tseslint.config(
       "playwright-report/**",
       "test-results/**",
       "**/dist/**",
+      // Assets vendor mirroreados por scripts/mirror-assets.ts (ADR-018):
+      // bundles de terceros descargados tal cual, no código propio.
+      "apps/react-client/public/wasm/**",
+      "apps/react-client/public/models/**",
     ],
   },
   js.configs.recommended,

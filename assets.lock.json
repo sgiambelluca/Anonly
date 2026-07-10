@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "id": "tesseract-worker",
+      "url": "https://cdn.jsdelivr.net/npm/tesseract.js@6.0.1/dist/worker.min.js",
+      "revision": "6.0.1",
+      "sha256": "38645599043239c0eb6db08a6504a92dcdc292200535f3e9339cd77c4443b842",
+      "destination": "apps/react-client/public/wasm/tesseract/worker.min.js",
+      "sizeBytes": 111162
+    },
+    {
+      "id": "tesseract-core-lstm",
+      "url": "https://cdn.jsdelivr.net/npm/tesseract.js-core@6.1.2/tesseract-core-lstm.wasm.js",
+      "revision": "6.1.2",
+      "sha256": "775a35df6f2ae100e02609443e6bd5cafcd07983dd6175454ca4a432a7730687",
+      "destination": "apps/react-client/public/wasm/tesseract/tesseract-core-lstm.wasm.js",
+      "sizeBytes": 3954181
+    },
+    {
+      "id": "tesseract-core-simd-lstm",
+      "url": "https://cdn.jsdelivr.net/npm/tesseract.js-core@6.1.2/tesseract-core-simd-lstm.wasm.js",
+      "revision": "6.1.2",
+      "sha256": "9d7c43fb206dc9f48475228b46bf35f888fa9e6259da2e67d5a75c77049f2dc7",
+      "destination": "apps/react-client/public/wasm/tesseract/tesseract-core-simd-lstm.wasm.js",
+      "sizeBytes": 3954569
+    },
+    {
+      "id": "tesseract-lang-spa",
+      "url": "https://cdn.jsdelivr.net/npm/@tesseract.js-data/spa@1.0.0/4.0.0_best_int/spa.traineddata.gz",
+      "revision": "1.0.0",
+      "sha256": "40be52f97b5d4eb7460073dc1f94cd546b27150333c0bf854ed7e7132db6bceb",
+      "destination": "apps/react-client/public/models/tesseract/spa.traineddata.gz",
+      "sizeBytes": 2100190
+    },
+    {
+      "id": "tesseract-lang-eng",
+      "url": "https://cdn.jsdelivr.net/npm/@tesseract.js-data/eng@1.0.0/4.0.0_best_int/eng.traineddata.gz",
+      "revision": "1.0.0",
+      "sha256": "45b4cb346724ac1774f1c36f42f182b887bcdb28ebe63e6fff90ac41f3fcff91",
+      "destination": "apps/react-client/public/models/tesseract/eng.traineddata.gz",
+      "sizeBytes": 2952873
+    }
+  ]
+}
