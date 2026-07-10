@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-mvp | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,adr/ADR-011-Grouping-First.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md | audiencia=humanos+IA | fase=5 (Hito 2 cerrado vía PRs #6, #7; Hito 3 cerrado vía PRs #10, #11, pendiente diferido a Hito 11) -->
+<!-- CONTEXT: scope=roadmap-mvp | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,adr/ADR-011-Grouping-First.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md | audiencia=humanos+IA | fase=5 (Hito 2 cerrado vía PRs #6, #7; Hito 3 cerrado vía PRs #10, #11, pendiente diferido a Hito 11; Hito 4 cerrado vía PR #13, pendiente diferido a Hito 11) -->
 
 # Anonly — Roadmap MVP
 
@@ -115,8 +115,9 @@ Orden sugerido (cada hito = un set de PRs):
 - Pendiente: verificación de integridad en runtime de assets (ADR-018 punto 3) → Hito 11.
 
 ### Hito 4 — Regex Engine
-- Implementar `regex-engine` con `DEFAULT_PATTERNS_AR`.
-- Tests completos con casos límite por patrón.
+- ~~Implementar `regex-engine` con `DEFAULT_PATTERNS_AR`.~~ **CERRADO** (PR #13).
+- ~~Tests completos con casos límite por patrón.~~ **CERRADO** — `contract.test.ts`, `unit.test.ts`, `edge.test.ts`, `snapshot.test.ts` commiteados en `packages/anonymization-core/regex-engine/src/__tests__/`, cobertura 99.61% líneas. Pendientes: `cancel.test.ts` y `perf.test.ts` (§14 del spec) → Hito 11 (ver `core/Regex_Engine.md` §15).
+- Corrección de contrato: patrón "Phone (AR mobile)" ajustado con límites de palabra (`\b`) porque el regex literal rompía el caso límite 3 del spec; formalizado en `adr/ADR-022-Regex-Phone-AR-Word-Boundaries.md`. `core/Regex_Engine.md` pasa a v1.0.1.
 
 ### Hito 5 — NER Engine
 - Implementar `ner-engine` con Transformers.js + ONNX.
