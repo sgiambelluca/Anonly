@@ -1,12 +1,13 @@
-<!-- CONTEXT: scope=regex-engine | dependencias=core/Contracts.md,architecture/06_Pipeline.md | audiencia=IA-implementador | fase=3 -->
+<!-- CONTEXT: scope=regex-engine | dependencias=core/Contracts.md,architecture/06_Pipeline.md,adr/ADR-021-Engines-Inline-Hasta-Hito9.md,adr/ADR-022-Regex-Phone-AR-Word-Boundaries.md | audiencia=IA-implementador | fase=3 (items §15 1-18 implementados; tests cancel/perf de §14 diferidos a Hito 11) -->
 
 # Regex Engine — Spec de Motor
 
 > Detecta patrones determinísticos (DNI, CUIT, teléfono, email, IBAN, tarjeta, fecha, matrícula, patente) en el texto de cada página. Emite `Occurrence[]` con `source: "regex"` y `confidence: 1.0`. Es determinista: mismo input → mismo output.
 
 **EngineId**: `regex`
-**Versión del spec**: 1.0.0
-**Última actualización**: 2026-06-17
+**Versión del spec**: 1.0.1
+**Última actualización**: 2026-07-10
+**Estado de implementación**: Hito 4, checklist §15 (items 1-18) implementado. Pendiente: `cancel.test.ts`/`perf.test.ts` de §14 en Hito 11 (ver nota al final de §15).
 
 ---
 
@@ -224,9 +225,9 @@ Regex es determinista: si la regex compila, no hay errores de runtime. Errores d
 | `custom invalid regex throws and is discarded` | `edge.test.ts` | edge | caso 8 |
 | `custom catastrophic regex times out and is discarded` | `edge.test.ts` | edge | caso 9 |
 | `DNI inside CUIT only emits CUIT` | `edge.test.ts` | edge | caso 10 |
-| `cancel between pages within 50ms` | `cancel.test.ts` | cancel | caso 11 |
+| `cancel between pages within 50ms` | `cancel.test.ts` | cancel | caso 11; SLA — pendiente, diferido a Hito 11 (mismo tratamiento que PDF Engine, `MVP.md` §4 Hito 2). Comportamiento funcional (chequeo de `abortSignal` entre páginas) sí cubierto en `edge.test.ts` desde Hito 4 |
 | `throws EngineDisposedError after dispose` | `edge.test.ts` | edge | caso 12 |
-| `100 custom patterns complete within perf budget` | `perf.test.ts` (en `tests/perf/`) | perf | caso 13 |
+| `100 custom patterns complete within perf budget` | `perf.test.ts` (en `tests/perf/`) | perf | caso 13; pendiente, diferido a Hito 11 (mismo tratamiento que PDF Engine, `MVP.md` §4 Hito 2) |
 | `empty document returns 0 occurrences` | `edge.test.ts` | edge | caso 1 |
 | `textless page returns 0 occurrences` | `edge.test.ts` | edge | caso 2 |
 | `snapshot of occurrences for text-10p.pdf stable` | `snapshot.test.ts` | snapshot | fixture |
@@ -256,6 +257,13 @@ Fixtures: `tests/fixtures/text-10p.pdf` (con DNIs, CUITs, emails, teléfonos con
 - [ ] 17. Verificar `index.ts` exporta solo `RegexEngine`, tipos, `DEFAULT_PATTERNS_AR`, errores.
 - [ ] 18. Verificar imports sin dependencias prohibidas.
 
+> **Estado Hito 4**: items 1–18 implementados, incluyendo el comportamiento funcional de cancelación
+> cooperativa (chequeo de `abortSignal` entre páginas) y de timeout por patrón custom (1000 ms).
+> **Pendiente**: los archivos de test dedicados `cancel.test.ts` (SLA < 50 ms) y `perf.test.ts` (100
+> patrones custom) de la tabla §14 quedan diferidos a Hito 11 — mismo tratamiento que
+> `stress.test.ts`/`cancel.test.ts` del PDF Engine (`core/PDF_Engine.md` §14, `roadmap/MVP.md` §4
+> Hito 2).
+
 ---
 
 ## Patrones default (especificación exacta)
@@ -266,7 +274,7 @@ Los patrones exactos viven en `patterns/default-ar.ts` y son parte del contrato 
 |---|---|---|---|
 | DNI (AR) | `\b\d{1,2}\.?\d{3}\.?\d{3}\b` | – | strip dots → "34567891" |
 | CUIT/CUIL (AR) | `\b\d{2}-?\d{8}-?\d\b` | algoritmo módulo 11 | strip dashes → "20123456789" |
-| Phone (AR mobile) | `(?:\+?54)?[\s-]?\d{2}[\s-]?\d{4}[\s-]?\d{4}` | – | strip no-digit → "541112345678" |
+| Phone (AR mobile) | `(?:\+?54)?[\s-]?\b\d{2}[\s-]?\d{4}[\s-]?\d{4}\b` | – | strip no-digit → "541112345678" |
 | Phone (AR landline) | `\b0\d{1,4}[\s-]?\d{6,8}\b` | – | strip no-digit |
 | Email | `\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b` | – | lowercase |
 | IBAN | `\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b` | ISO 13616 check | uppercase, strip spaces |
@@ -278,6 +286,11 @@ Los patrones exactos viven en `patterns/default-ar.ts` y son parte del contrato 
 
 La implementación debe respetar estos patrones y checksums. Cualquier cambio requiere ADR nuevo.
 
+> El patrón "Phone (AR mobile)" fue corregido en la versión 1.0.1 del spec agregando límites de
+> palabra (`\b`) en ambos extremos, consistente con los otros 10 patrones de la tabla. Ver
+> `adr/ADR-022-Regex-Phone-AR-Word-Boundaries.md` para el detalle del problema (rompía el caso
+> límite 3, §13) y la decisión.
+
 ---
 
 ## Referencias
@@ -287,3 +300,4 @@ La implementación debe respetar estos patrones y checksums. Cualquier cambio re
 - `04_Event_System.md` §5 (eventos `ENTITY_FOUND`, `REGEX_FINISHED`)
 - `adr/ADR-011-Grouping-First.md` (por qué Regex emite a Grouping, no a UI)
 - `adr/ADR-012-Replacement-Modes.md` (maskFormat por tipo)
+- `adr/ADR-022-Regex-Phone-AR-Word-Boundaries.md` (corrección del patrón Phone AR mobile, v1.0.1)
