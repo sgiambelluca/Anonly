@@ -130,7 +130,7 @@ Notas: el archivo se lee como `ArrayBuffer` en el main thread y se mantiene en m
 ## 7. Etapa 5 — NER (NER Engine)
 
 **Entra**: `Page.text` por página.
-**Sale**: stream de `Occurrence[]` con `source: "ner"`, `entityType ∈ {Person, Organization, Address}`, `confidence` según el modelo.
+**Sale**: stream de `Occurrence[]` con `source: "ner"`, `entityType ∈ {Person, Organization, Address, Date}` (ADR-023 §2), `confidence` según el modelo.
 **Eventos emitidos**: `NER_STARTED`, `NER_MODEL_LOADING`, `NER_MODEL_READY`, `ENTITY_FOUND` (interno), `NER_PAGE_FINISHED`, `NER_FINISHED`.
 **Errores**:
 - `NER_MODEL_MISSING` → no recuperable en runtime; la UI debe ofrecer descargar el modelo o desactivar NER.

@@ -40,7 +40,7 @@
 
 ### 2.3 Carga de modelos IA
 
-- Modelo NER: `Xenova/bert-base-NER` o equivalente multilingüe, cuantizado Q8. Tamaño ~ 50–80 MB.
+- Modelo NER: `Xenova/bert-base-multilingual-cased-ner-hrl` (multilingüe, conversión ONNX oficial), cuantizado Q8. Tamaño ~ 150–180 MB (mBERT; ADR-023).
 - **Origen**: todos los modelos y wasm se sirven first-party (mirror propio con hash pinneado en `assets.lock.json`, ADR-018). Nunca HuggingFace/jsDelivr en runtime.
 - Cache en Cache Storage del navegador con versionado por `modelId`.
 - Lazy: solo se descarga la primera vez que se necesita NER. En sesiones siguientes, se sirve desde cache.
