@@ -9,6 +9,8 @@
 **Última actualización**: 2026-07-10
 **Estado de implementación**: Hito 4, checklist §15 (items 1-18) implementado. Pendiente: `cancel.test.ts`/`perf.test.ts` de §14 en Hito 11 (ver nota al final de §15).
 
+> **Nota (ADR-029, 2026-07-11)**: cada `Occurrence` emitida lleva `maskFormat` copiado del `RegexPattern.maskFormat` que matcheó (ver §10). Los `maskFormat` de `plate-mercosur-ar`/`plate-vieja-ar` en `default-ar.ts` se corrigen a `XX XXX XX` / `XXX XXX` (la fila Plate de ADR-012 estaba invertida y queda superada). Pendiente de implementación en un PR chico post-Hito 6.
+
 ---
 
 ## 1. Objetivo
@@ -159,6 +161,7 @@ Las `Occurrence` individuales no se retornan; se emiten vía `ENTITY_FOUND`. Cad
   source: DetectionSource.Regex;
   confidence: 1.0;
   entityType: EntityType;      // según el patrón que matcheó
+  maskFormat?: string;         // RegexPattern.maskFormat del patrón que matcheó (ADR-029)
   wordSpan?: WordSpan;         // referencia a Page.words[startIndex, endIndexExclusive)
 }
 ```

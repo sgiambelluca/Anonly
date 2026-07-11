@@ -11,6 +11,8 @@
 > **Nota (ADR-026, 2026-07-11)**: el tipo de config canónico es `GroupingConfig` (Contracts.md §6); el alias `GroupingEngineConfig` de §6/§15.2 queda eliminado (mismo patrón que ADR-021 §2 para OCR y ADR-023 §1 para NER).
 >
 > **Nota (ADR-028, 2026-07-11)**: `indexInType` es **provisional durante la sesión** (orden de llegada, `nextIndex = max + 1`) y se **renumera canónicamente una sola vez en `finishSession`** por orden de primera aparición documental, antes de emitir `GROUPING_FINISHED`. Resuelve la contradicción con `06_Pipeline.md` §8. Ver §Algoritmos y caso límite 21.
+>
+> **Nota (ADR-029, 2026-07-11)**: el formato del modo `mask` se resuelve por grupo desde `Occurrence.maskFormat` (campo nuevo que Regex puebla desde el patrón matcheado; caso Plate vieja vs Mercosur), con fallback a `MASK_FORMAT_BY_TYPE[type]`. Ver §`replacementValue` por modo y caso límite 22.
 
 ---
 
@@ -233,6 +235,7 @@ Grouping es determinista dadas las ocurrencias y reglas; sin errores de runtime 
 19. **`closeSession` libera todo**: tras `DOCUMENT_CLOSED`, el motor limpia grupos, reglas, conflictos y alias de la sesión.
 20. **`process` tras `dispose`**: lanza `EngineDisposedError`.
 21. **Renumeración canónica en `finishSession` (ADR-028)**: llegan ocurrencias fuera de orden documental (NER procesa por prioridad visible). Los índices provisionales reflejan el orden de llegada; al cerrar, la renumeración deja "Persona 1" como la primera del documento (`pageIndex`/`bbox.y`/`bbox.x`), emite `ENTITY_GROUP_UPDATED` por cada índice que cambió y recalcula el `replacementValue` de los placeholders afectados. Las ediciones del usuario hechas durante la sesión (caso 17) se preservan; solo puede cambiar el número.
+22. **Máscara por variante de patente (ADR-029)**: un grupo `Plate` cuyos members llevan `maskFormat: "XXX XXX"` (patente vieja `ABC 123`) enmascara `XXX XXX`; uno Mercosur (`AB 123 CD`, `maskFormat: "XX XXX XX"`) enmascara `XX XXX XX`. Grupo mixto (solo posible por fusión manual): gana el `maskFormat` más frecuente; empate → el del member con primera aparición documental. Sin `maskFormat` en ningún member: fallback `MASK_FORMAT_BY_TYPE[type]`.
 
 ---
 
@@ -268,6 +271,8 @@ Grouping es determinista dadas las ocurrencias y reglas; sin errores de runtime 
 | `empty document emits GROUPING_FINISHED with 0 groups` | `edge.test.ts` | edge | caso 1 |
 | `single occurrence creates group with indexInType 1` | `edge.test.ts` | edge | caso 2 |
 | `final indexInType deterministic regardless of event arrival order` | `contract.test.ts` | contract | invariante ADR-028 |
+| `mask uses occurrence maskFormat over type fallback` | `unit.test.ts` | unit | caso 22 (ADR-029) |
+| `mixed maskFormat group resolves by frequency then document order` | `edge.test.ts` | edge | caso 22 (ADR-029) |
 | `canonical renumbering at finishSession emits updates and recomputes placeholders` | `edge.test.ts` | edge | caso 21 |
 | `cancel between ENTITY_FOUND within 50ms` | `cancel.test.ts` | cancel | SLA |
 | `snapshot of groups for text-10p.pdf stable` | `snapshot.test.ts` | snapshot | fixture |
@@ -384,7 +389,7 @@ function resolveMode(group, rules):
 | Modo | replacementValue |
 |---|---|
 | `placeholder` | `[<TYPE_LABEL> <NN>]` con `NN = pad2(indexInType)` |
-| `mask` | formato tipo-dependiente (ver `core/Contracts.md` §6 y `adr/ADR-012-Replacement-Modes.md`) |
+| `mask` | resolución por grupo (ADR-029): si algún member lleva `Occurrence.maskFormat`, el más frecuente entre los que lo llevan (empate → el del member con primera aparición documental, mismo orden que ADR-028); si ninguno, fallback `MASK_FORMAT_BY_TYPE[type]` (ADR-012; `Plate` → `XX XXX XX` Mercosur) |
 | `synthetic` | sintetizador determinista por seed (delegado a `shared` o `export-engine` para pool faker) |
 | `redact` | `""` |
 

@@ -169,6 +169,7 @@ export interface Occurrence {
   readonly source: DetectionSource;
   readonly confidence: number;
   readonly entityType: EntityType;
+  readonly maskFormat?: string;              // formato de máscara del patrón que matcheó (Regex lo copia de RegexPattern.maskFormat; ausente en NER) — ADR-029
   readonly wordSpan?: WordSpan;              // referencia a palabras del Document, opcional
 }
 
