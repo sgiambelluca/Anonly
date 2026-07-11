@@ -121,6 +121,7 @@ export interface NerStarted {
   readonly documentId: string;
   readonly pageCount: number;
   readonly modelId: string;
+  readonly modelLoading?: boolean;
 }
 export interface NerModelLoading {
   readonly modelId: string;

@@ -40,6 +40,54 @@
       "sha256": "45b4cb346724ac1774f1c36f42f182b887bcdb28ebe63e6fff90ac41f3fcff91",
       "destination": "apps/react-client/public/models/tesseract/eng.traineddata.gz",
       "sizeBytes": 2952873
+    },
+    {
+      "id": "ner-model-config",
+      "url": "https://huggingface.co/Xenova/bert-base-multilingual-cased-ner-hrl/resolve/263e82c06569c8c2ac46238a7ae5107598934234/config.json",
+      "revision": "263e82c06569c8c2ac46238a7ae5107598934234",
+      "sha256": "7aa891abae067f95a40f5e2005b3de44824a083f256802934a993d301ec25076",
+      "destination": "apps/react-client/public/models/ner/Xenova/bert-base-multilingual-cased-ner-hrl/config.json",
+      "sizeBytes": 1207
+    },
+    {
+      "id": "ner-model-special-tokens-map",
+      "url": "https://huggingface.co/Xenova/bert-base-multilingual-cased-ner-hrl/resolve/263e82c06569c8c2ac46238a7ae5107598934234/special_tokens_map.json",
+      "revision": "263e82c06569c8c2ac46238a7ae5107598934234",
+      "sha256": "b6d346be366a7d1d48332dbc9fdf3bf8960b5d879522b7799ddba59e76237ee3",
+      "destination": "apps/react-client/public/models/ner/Xenova/bert-base-multilingual-cased-ner-hrl/special_tokens_map.json",
+      "sizeBytes": 125
+    },
+    {
+      "id": "ner-model-tokenizer",
+      "url": "https://huggingface.co/Xenova/bert-base-multilingual-cased-ner-hrl/resolve/263e82c06569c8c2ac46238a7ae5107598934234/tokenizer.json",
+      "revision": "263e82c06569c8c2ac46238a7ae5107598934234",
+      "sha256": "bf1b59b7b11c95f194f51708d918eea378e09d05f84c0e1656dc5180e8117088",
+      "destination": "apps/react-client/public/models/ner/Xenova/bert-base-multilingual-cased-ner-hrl/tokenizer.json",
+      "sizeBytes": 2919362
+    },
+    {
+      "id": "ner-model-tokenizer-config",
+      "url": "https://huggingface.co/Xenova/bert-base-multilingual-cased-ner-hrl/resolve/263e82c06569c8c2ac46238a7ae5107598934234/tokenizer_config.json",
+      "revision": "263e82c06569c8c2ac46238a7ae5107598934234",
+      "sha256": "e6f3b96db926a37d4039995fbf5ad17de158dfb8f6343d607e4dbaad18d75f5a",
+      "destination": "apps/react-client/public/models/ner/Xenova/bert-base-multilingual-cased-ner-hrl/tokenizer_config.json",
+      "sizeBytes": 367
+    },
+    {
+      "id": "ner-model-vocab",
+      "url": "https://huggingface.co/Xenova/bert-base-multilingual-cased-ner-hrl/resolve/263e82c06569c8c2ac46238a7ae5107598934234/vocab.txt",
+      "revision": "263e82c06569c8c2ac46238a7ae5107598934234",
+      "sha256": "fe0fda7c425b48c516fc8f160d594c8022a0808447475c1a7c6d6479763f310c",
+      "destination": "apps/react-client/public/models/ner/Xenova/bert-base-multilingual-cased-ner-hrl/vocab.txt",
+      "sizeBytes": 995526
+    },
+    {
+      "id": "ner-model-onnx-quantized",
+      "url": "https://huggingface.co/Xenova/bert-base-multilingual-cased-ner-hrl/resolve/263e82c06569c8c2ac46238a7ae5107598934234/onnx/model_quantized.onnx",
+      "revision": "263e82c06569c8c2ac46238a7ae5107598934234",
+      "sha256": "5b65139844be260b624a2a13782b01d122e613d64ce16ed0ba4d82e0b816f1a9",
+      "destination": "apps/react-client/public/models/ner/Xenova/bert-base-multilingual-cased-ner-hrl/onnx/model_quantized.onnx",
+      "sizeBytes": 178495423
     }
   ]
 }

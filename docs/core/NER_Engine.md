@@ -6,11 +6,13 @@
 
 **EngineId**: `ner`
 **Versión del spec**: 1.0.0
-**Última actualización**: 2026-07-10
+**Última actualización**: 2026-07-11
 
 > **Nota (ADR-021, 2026-07-09)**: este motor se implementa **inline** en su hito, sin crear su pool propio; `WorkerPoolManager` y los pools llegan con el Orchestrator (Hito 9), sin cambio de interfaz pública (precedentes ADR-013/ADR-020). Leer §12 y los ítems de workers/pool del §15 como Hito 9; cancelación cooperativa con checkpoints inline, el SLA < 200 ms se valida en Hito 9/11. Los tests unit/contract/edge mockean la frontera de la librería externa (Code_Standards §10, ADR-021 §5).
 >
 > **Nota (ADR-023, 2026-07-10)**: el tipo de config canónico es `NerConfig` (Contracts.md §6); el alias `NerEngineConfig` de §6/§15.2 queda eliminado. El `modelId` default es `Xenova/bert-base-multilingual-cased-ner-hrl` (multilingüe, conversión ONNX oficial), Q8 ~150–180 MB — corrige las estimaciones de ~50–80 MB de §12. El pin (URL + hash) se agrega a `assets.lock.json` en el paso de mirror del Hito 5; el mapeo de labels es `PER→Person`, `ORG→Organization`, `LOC→Address`, `DATE→Date` (contrato de salida ampliado a cuatro tipos, ver §10 y ADR-023 §2).
+>
+> **Nota (ADR-024, 2026-07-11)**: `NerStarted` gana `modelLoading?: boolean` (espejo de ADR-021 §3 para OCR; habilita el caso límite 7). `batchSize` se interpreta en **palabras** en la implementación inline (proxy de tokens; el tokenizer real vive tras la frontera de Transformers.js).
 
 ---
 
@@ -74,7 +76,7 @@ export interface NerConfig {
   readonly modelId: string;                  // default "Xenova/bert-base-multilingual-cased-ner-hrl" (ADR-023)
   readonly quantization: "q8" | "q4" | "f32"; // default "q8"
   readonly confidenceThreshold: number;       // default 0.7
-  readonly batchSize: number;                 // default 256 tokens
+  readonly batchSize: number;                 // default 256 palabras (proxy de tokens en la impl. inline, ADR-024 §2)
   readonly enabled: boolean;                  // default true
 }
 
@@ -191,7 +193,7 @@ Las `Occurrence` también se emiten vía `ENTITY_FOUND` (incremental).
 - Modelo cacheado en Cache Storage (~150–180 MB Q8 para mBERT, ADR-023). Lazy: solo descarga la primera vez.
 - Sin transferencia zero-copy de `text` (es string, se serializa normal).
 - Paralelismo: pool despacha en paralelo respetando `nerPoolSize`. Backpressure si `queue > 8`.
-- Cancelación: checkpoints entre batches de inferencia (cada `batchSize` tokens). SLA < 200 ms.
+- Cancelación: checkpoints entre batches de inferencia (cada `batchSize` palabras — proxy de tokens en la implementación inline, ADR-024 §2). SLA < 200 ms.
 - Modelo reutilizado entre jobs del mismo worker (no se recarga por página).
 - Si `deviceMemory < 4` GB, el Orchestrator serializa NER con OCR (no paralelos) para no exceder memoria.
 - WebGPU: si está disponible y el modelo lo soporta, se puede usar como backend faster (v1.0+). MVP usa WASM.
@@ -206,7 +208,7 @@ Las `Occurrence` también se emiten vía `ENTITY_FOUND` (incremental).
 4. **Múltiples entidades en la misma página**: una `Occurrence` por entidad detectada.
 5. **Confidence baja (`< 0.7`)**: la `Occurrence` se emite con `confidence` real; Grouping la marca como conflicto `low_confidence`.
 6. **Overlap con Regex (un DNI también matcheado como Organization por error del NER)**: Grouping resuelve con conflicto `disagree`; gana Regex (determinístico).
-7. **Modelo no descargado (primera vez)**: `NER_STARTED` indica `modelLoading: true`. `NER_MODEL_LOADING` reporta progreso. `NER_MODEL_READY` al final. La UI muestra "Descargando modelo NER…".
+7. **Modelo no descargado (primera vez)**: `NER_STARTED` indica `modelLoading: true` (campo opcional de `NerStarted`, ADR-024 §1; omitido si el modelo ya está cacheado). `NER_MODEL_LOADING` reporta progreso. `NER_MODEL_READY` al final. La UI muestra "Descargando modelo NER…".
 8. **Modelo corrupto en cache**: `NER_MODEL_LOAD_FAILED` → re-descargar → si persiste, `NER_MODEL_MISSING`.
 9. **Worker crashea (OOM)**: pool reemplaza, reintenta el job.
 10. **Cancelación a mitad de página**: aborta en < 200 ms, libera sesión temporal, responde `CANCELLED`. El modelo cargado no se descarta.
