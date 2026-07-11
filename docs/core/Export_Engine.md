@@ -59,7 +59,7 @@ Recibir `EXPORT_REQUESTED` con las `ExportOptions`, coordinar el render full de 
 - `react`, `react-dom`, `react/jsx-runtime`
 - `apps/react-client`
 - Cualquier otro motor (Export consume `RenderEngine` por evento/injection, no por import directo)
-- `pdfjs-dist`, `tesseract.js`, `@xenova/transformers`, `onnxruntime-web`
+- `pdfjs-dist`, `tesseract.js`, `@huggingface/transformers`, `onnxruntime-web`
 - Node builtins (`fs`, `http`), libs de network
 
 > Nota: Export no importa `render-engine` directamente. Recibe las imágenes renderizadas vía un contrato con el Orchestrator (que sí conoce ambos). Ver §6.

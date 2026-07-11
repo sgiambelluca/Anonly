@@ -13,6 +13,8 @@
 > **Nota (ADR-023, 2026-07-10)**: el tipo de config canónico es `NerConfig` (Contracts.md §6); el alias `NerEngineConfig` de §6/§15.2 queda eliminado. El `modelId` default es `Xenova/bert-base-multilingual-cased-ner-hrl` (multilingüe, conversión ONNX oficial), Q8 ~150–180 MB — corrige las estimaciones de ~50–80 MB de §12. El pin (URL + hash) se agrega a `assets.lock.json` en el paso de mirror del Hito 5; el mapeo de labels es `PER→Person`, `ORG→Organization`, `LOC→Address`, `DATE→Date` (contrato de salida ampliado a cuatro tipos, ver §10 y ADR-023 §2).
 >
 > **Nota (ADR-024, 2026-07-11)**: `NerStarted` gana `modelLoading?: boolean` (espejo de ADR-021 §3 para OCR; habilita el caso límite 7). `batchSize` se interpreta en **palabras** en la implementación inline (proxy de tokens; el tokenizer real vive tras la frontera de Transformers.js).
+>
+> **Nota (ADR-025, 2026-07-11)**: la librería es `@huggingface/transformers` (v4, sucesora de la deprecada `@xenova/transformers` v2). Cuantización vía `dtype: "q8"`; los wasm de su `onnxruntime-web` bundleado se sirven first-party desde `/wasm/onnxruntime/` con pin en `assets.lock.json`. Los assets del modelo (ADR-023) no cambian.
 
 ---
 
@@ -50,8 +52,7 @@ Aplicar un modelo NER local sobre `Page.text` y emitir `Occurrence[]` para entid
 ## 4. Dependencias permitidas
 
 - `@anonly/shared`
-- `@xenova/transformers` (ADR-001, ADR-006)
-- `onnxruntime-web` (ADR-001, ADR-006)
+- `@huggingface/transformers` (ADR-001, ADR-006, ADR-025 — bundlea su propio `onnxruntime-web`; el motor no depende de ort directamente, accede al backend vía `env.backends.onnx`)
 - Tipos de `core/Contracts.md`: `IEngine`, `EngineContext`, `Document`, `Page`, `Word`, `Occurrence`, `EntityType`, `DetectionSource`, `NerConfig`
 - `architecture/04_Event_System.md`: `NER_STARTED`, `NER_MODEL_LOADING`, `NER_MODEL_READY`, `NER_PAGE_FINISHED`, `NER_FINISHED`, `ENTITY_FOUND`
 
@@ -63,6 +64,7 @@ Aplicar un modelo NER local sobre `Page.text` y emitir `Occurrence[]` para entid
 - `apps/react-client`
 - Cualquier otro motor
 - `pdfjs-dist`, `tesseract.js`, `pdf-lib`
+- `onnxruntime-web` como import directo (el bundleado por `@huggingface/transformers` se configura vía `env.backends.onnx`, ADR-025)
 - Node builtins (`fs`, `http`), libs de network (la descarga del modelo la hace Transformers.js configurado contra el **origen propio** — `env.allowRemoteModels = false` + `env.localModelPath`; mirror first-party según ADR-018, nunca HuggingFace en runtime)
 
 ---

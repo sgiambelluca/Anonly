@@ -55,7 +55,7 @@ Recibir `ImageData` de páginas sin texto y producir `Word[]` con posiciones y c
 - `react`, `react-dom`, `react/jsx-runtime`
 - `apps/react-client`
 - Cualquier otro motor
-- `pdfjs-dist`, `pdf-lib`, `@xenova/transformers`, `onnxruntime-web`
+- `pdfjs-dist`, `pdf-lib`, `@huggingface/transformers`, `onnxruntime-web`
 - Node builtins (`fs`, `http`), libs de network
 
 ---

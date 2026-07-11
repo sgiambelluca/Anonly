@@ -61,7 +61,7 @@ Recibir requests de renderizado por página (`RENDER_REQUESTED` o invocación di
 - `react`, `react-dom`, `react/jsx-runtime`
 - `apps/react-client`
 - Cualquier otro motor
-- `tesseract.js`, `@xenova/transformers`, `onnxruntime-web`, `pdf-lib` (pdf-lib es del export-engine)
+- `tesseract.js`, `@huggingface/transformers`, `onnxruntime-web`, `pdf-lib` (pdf-lib es del export-engine)
 - Node builtins, libs de network
 
 ---

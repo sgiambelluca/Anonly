@@ -125,6 +125,7 @@ Orden sugerido (cada hito = un set de PRs):
 - Cache del modelo en Cache Storage.
 - Los tests de integración con Regex (ambos emiten `ENTITY_FOUND`) viven en `tests/integration/` y son Hito 9 (Orchestrator), **no** de este PR (ADR-010, `core/Orchestrator.md:239`, precedente `core/OCR_Engine.md:225`).
 - Pendiente: verificación de integridad en runtime del modelo (ADR-018 punto 3, `core/NER_Engine.md` §15.19) → Hito 11.
+- Post-cierre: migración de `@xenova/transformers` (v2, deprecada) a `@huggingface/transformers` (v4) por `adr/ADR-025-Migracion-Huggingface-Transformers.md` — motivada por el triage de Dependabot del 2026-07-11; incluye el mirror de los wasm de onnxruntime a `public/wasm/onnxruntime/` (gap detectado post-PR #14: `wasmPaths` apuntaba a un directorio sin binarios).
 
 ### Hito 6 — Grouping Engine
 - Implementar `grouping-engine` con matching, conflictos, reglas, fusión/división.

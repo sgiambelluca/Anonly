@@ -62,7 +62,7 @@ Como composition root, es el **único** paquete del Core que puede importar moto
 
 - `react`, `react-dom`, `react/jsx-runtime`
 - `apps/react-client`
-- `pdfjs-dist`, `tesseract.js`, `@xenova/transformers`, `onnxruntime-web`, `pdf-lib` (las libs externas pertenecen a los motores, nunca al Orchestrator)
+- `pdfjs-dist`, `tesseract.js`, `@huggingface/transformers`, `onnxruntime-web`, `pdf-lib` (las libs externas pertenecen a los motores, nunca al Orchestrator)
 - Node builtins (`fs`, `http`), libs de network
 
 ---
