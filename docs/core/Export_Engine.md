@@ -6,7 +6,9 @@
 
 **EngineId**: `export`
 **Versión del spec**: 1.0.0
-**Última actualización**: 2026-06-17
+**Última actualización**: 2026-07-11
+
+> **Nota (ADR-027, 2026-07-11)**: el tipo de config canónico es `ExportConfig` (Contracts.md §6); el alias `ExportEngineConfig` de §6/§15.2 queda eliminado (mismo patrón que ADR-021 §2, ADR-023 §1 y ADR-026).
 
 > **Nota (ADR-021, 2026-07-09)**: este motor se implementa **inline** en su hito, sin crear su pool propio; `WorkerPoolManager` y los pools llegan con el Orchestrator (Hito 9), sin cambio de interfaz pública (precedentes ADR-013/ADR-020). Leer §12 y los ítems de workers/pool del §15 como Hito 9; cancelación cooperativa con checkpoints inline, el SLA < 200 ms se valida en Hito 9/11. Los tests unit/contract/edge mockean la frontera de la librería externa (Code_Standards §10, ADR-021 §5).
 
@@ -69,7 +71,9 @@ Recibir `EXPORT_REQUESTED` con las `ExportOptions`, coordinar el render full de 
 ## 6. Interfaces públicas
 
 ```ts
-export interface ExportEngineConfig {
+// ExportConfig es el tipo canónico de Contracts.md §6 (re-exportado por @anonly/shared);
+// se reproduce aquí solo para documentar sus defaults (ADR-027).
+export interface ExportConfig {
   readonly defaultDpi: number;              // default 150
   readonly defaultImageFormat: "png" | "jpeg"; // default "jpeg"
   readonly defaultJpegQuality: number;      // default 0.85
@@ -268,7 +272,7 @@ Fixtures: `tests/fixtures/text-10p.pdf`, `text-50p.pdf`, `huge-1000p.pdf`.
 ## 15. Checklist de implementación
 
 - [ ] 1. Crear paquete `packages/anonymization-core/export-engine/`.
-- [ ] 2. Definir `types.ts` con `ExportEngineConfig`, `ExportEngineInput`, `ExportEngineOutput`, `RenderPageProvider`.
+- [ ] 2. Definir `types.ts` con `ExportEngineInput`, `ExportEngineOutput`, `RenderPageProvider` (`ExportConfig` viene de `@anonly/shared`/Contracts.md §6; ADR-027).
 - [ ] 3. Definir `errors.ts` con `ExportFailedError`, `ExportNoEnabledGroupsError`, `ExportTimeoutError`.
 - [ ] 4. Implementar `export.engine.ts` respetando `IEngine` y la firma pública de §6.
 - [ ] 5. Implementar `init` (crear worker de ensamblado pdf-lib, suscribirse a `EXPORT_REQUESTED`).

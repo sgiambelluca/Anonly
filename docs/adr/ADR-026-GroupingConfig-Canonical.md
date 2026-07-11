@@ -6,6 +6,7 @@
 - **Fecha**: 2026-07-11
 - **Decidido por**: Repaso de ambigüedades previo al Hito 6 (planificador)
 - **Relacionado con**: ADR-021 §2 (mismo defecto en OCR), ADR-023 §1 (mismo defecto en NER)
+- **Complementado por**: ADR-027 (resuelve los casos restantes de Render y Export; la revisión pendiente anotada en §Consecuencias queda cerrada)
 
 ## Contexto
 
