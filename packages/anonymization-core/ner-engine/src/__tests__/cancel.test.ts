@@ -9,10 +9,10 @@
  * ocr-engine/src/ocr.engine.ts (recognizeWithTimeout).
  */
 import { CancelledError, type EngineContext } from "@anonly/shared";
-import { pipeline } from "@xenova/transformers";
+import { pipeline } from "@huggingface/transformers";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-vi.mock("@xenova/transformers", () => ({
+vi.mock("@huggingface/transformers", () => ({
   pipeline: vi.fn(),
   env: {
     allowRemoteModels: true,

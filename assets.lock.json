@@ -88,6 +88,22 @@
       "sha256": "5b65139844be260b624a2a13782b01d122e613d64ce16ed0ba4d82e0b816f1a9",
       "destination": "apps/react-client/public/models/ner/Xenova/bert-base-multilingual-cased-ner-hrl/onnx/model_quantized.onnx",
       "sizeBytes": 178495423
+    },
+    {
+      "id": "onnxruntime-wasm-simd-threaded-asyncify-mjs",
+      "url": "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0-dev.20260416-b7804b056c/dist/ort-wasm-simd-threaded.asyncify.mjs",
+      "revision": "1.26.0-dev.20260416-b7804b056c",
+      "sha256": "5959c6733039619c9af710d8e1bae8d6e84402787990637be987c2b1bd6c5fa9",
+      "destination": "apps/react-client/public/wasm/onnxruntime/ort-wasm-simd-threaded.asyncify.mjs",
+      "sizeBytes": 47389
+    },
+    {
+      "id": "onnxruntime-wasm-simd-threaded-asyncify-wasm",
+      "url": "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0-dev.20260416-b7804b056c/dist/ort-wasm-simd-threaded.asyncify.wasm",
+      "revision": "1.26.0-dev.20260416-b7804b056c",
+      "sha256": "e0c0c6d3e73d43b8a249972f8358f845b08cc16fec3c80efafdf8bed40366786",
+      "destination": "apps/react-client/public/wasm/onnxruntime/ort-wasm-simd-threaded.asyncify.wasm",
+      "sizeBytes": 23567050
     }
   ]
 }

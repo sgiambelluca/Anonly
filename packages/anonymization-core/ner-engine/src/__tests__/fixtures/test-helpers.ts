@@ -1,8 +1,8 @@
 /**
  * Mocks y builders compartidos por los tests de @anonly/ner-engine.
  *
- * `vi.mock("@xenova/transformers", ...)` NO vive acá: por el hoisting de
- * Vitest, cada archivo de test debe declarar su propio `vi.mock` en su
+ * `vi.mock("@huggingface/transformers", ...)` NO vive acá: por el hoisting
+ * de Vitest, cada archivo de test debe declarar su propio `vi.mock` en su
  * propio módulo (mismo motivo documentado en
  * ocr-engine/src/__tests__/fixtures/test-helpers.ts). Este archivo solo
  * unifica los helpers de construcción de mocks (Code_Standards.md §10;
@@ -17,13 +17,30 @@ import type {
   Unsubscribe,
   Word,
 } from "@anonly/shared";
-import type {
-  TokenClassificationPipelineType,
-  TokenClassificationSingle,
-} from "@xenova/transformers";
+import type { pipeline, TokenClassificationOutput } from "@huggingface/transformers";
 import { vi, type Mock } from "vitest";
 
 import type { NerPageInput } from "../../ner.types.js";
+
+/*
+ * ADR-025: @huggingface/transformers v4 no exporta un alias público para el
+ * tipo del pipeline de token-classification (a diferencia de
+ * @xenova/transformers v2, que exportaba TokenClassificationPipelineType) ni
+ * para el elemento individual "raw" (no agrupado) de su resultado — solo
+ * TokenClassificationOutput<O>. Se derivan acá, en el único helper de
+ * frontera del paquete contra esta librería (Code_Standards.md §10), del
+ * único símbolo público relevante (pipeline()) sin cast: `entity: string` es
+ * el único miembro de la unión Raw/Grouped donde `entity` tipa `string` en
+ * vez de `undefined` — el shape que este motor siempre produce, porque nunca
+ * pasa aggregation_strategy.
+ */
+export type TokenClassificationPipelineType = Awaited<
+  ReturnType<typeof pipeline<"token-classification">>
+>;
+export type TokenClassificationSingle = Extract<
+  TokenClassificationOutput[number],
+  { entity: string }
+>;
 
 export function createMockBus(): IEventBus {
   return {
@@ -159,24 +176,25 @@ export function makeNerPageInput(
 
 /**
  * Token crudo de token-classification, misma forma real que
- * `TokenClassificationSingle` (@xenova/transformers): `entity` es el label
- * BIO crudo ("B-PER", "I-ORG", "O", ...), `word` es el texto decodificado del
- * token (con prefijo "##" para continuaciones de wordpiece de BERT).
+ * `TokenClassificationSingle` (@huggingface/transformers v4, derivado más
+ * arriba): `entity` es el label BIO crudo ("B-PER", "I-ORG", "O", ...),
+ * `word` es el texto decodificado del token (con prefijo "##" para
+ * continuaciones de wordpiece de BERT).
  */
 export function nerToken(entity: string, word: string, score = 0.95, index = 0): TokenClassificationSingle {
   return { entity, score, index, word };
 }
 
 /**
- * Cast de frontera contra @xenova/transformers — único lugar del paquete
- * donde se permite `as unknown as` (Code_Standards.md §10; precedente
- * `asTesseractWorker` en ocr-engine): `TokenClassificationPipelineType` es
- * `TextPipelineConstructorArgs & TokenClassificationPipelineCallback &
- * Disposable`. `TextPipelineConstructorArgs` expone `tokenizer`/`model`
- * reales que `ner.engine.ts` nunca toca (solo invoca el pipeline como
- * función y `.dispose()`); un mock estructural completo de esos miembros no
- * aporta seguridad real. `ner.engine.ts` solo llama al pipeline con un
- * string único (nunca batched), así que el mock no necesita soportar arrays.
+ * Cast de frontera contra @huggingface/transformers — único lugar del
+ * paquete donde se permite `as unknown as` (Code_Standards.md §10;
+ * precedente `asTesseractWorker` en ocr-engine): `TokenClassificationPipelineType`
+ * (derivado del tipo de retorno de `pipeline()`, ADR-025 — la librería no
+ * exporta un alias público) expone `tokenizer`/`model` reales que
+ * `ner.engine.ts` nunca toca (solo invoca el pipeline como función y
+ * `.dispose()`); un mock estructural completo de esos miembros no aporta
+ * seguridad real. `ner.engine.ts` solo llama al pipeline con un string único
+ * (nunca batched), así que el mock no necesita soportar arrays.
  */
 export function mockTokenClassificationPipeline(
   classify: (text: string) => Promise<ReadonlyArray<TokenClassificationSingle>>,
@@ -190,12 +208,12 @@ export function mockTokenClassificationPipeline(
 /**
  * Forma reducida (propia de los tests) de las opciones que ner.engine.ts le
  * pasa a pipeline(): `progress_callback` tipado como función (no como
- * `Function` suelto, la firma real y laxa de PretrainedOptions en
- * @xenova/transformers) para que los tests puedan invocarlo sin un cast
- * adicional.
+ * `Function` suelto, la firma real y laxa de PretrainedModelOptions en
+ * @huggingface/transformers) para que los tests puedan invocarlo sin un
+ * cast adicional. `dtype` reemplaza a `quantized` (ADR-025).
  */
 export interface PipelineCallOptions {
-  readonly quantized?: boolean;
+  readonly dtype?: string;
   readonly progress_callback?: (event: unknown) => void;
 }
 
@@ -204,18 +222,19 @@ type PipelineFactoryMock = Mock<
 >;
 
 /**
- * Segundo (y último) cast de frontera contra @xenova/transformers, separado
- * de `mockTokenClassificationPipeline` porque resuelve un problema distinto:
- * `pipeline` es genérica sobre `PipelineType` (`<T extends PipelineType>(task:
- * T, ...) => Promise<AllTasks[T]>`). `vi.mocked(pipeline)` tipa el mock
- * contra la unión completa de clases concretas de pipeline (incluyendo
- * miembros internos como `_call`, que ninguna librería mockeada implementa
- * de verdad), no contra `TokenClassificationPipelineType` — el alias
- * estructural que realmente usa `ner.engine.ts`. Los tests siguen declarando
- * su propio `vi.mock("@xenova/transformers", ...)` (hoisting de Vitest,
- * mismo criterio que ocr-engine); este helper solo tipa el resultado de esa
- * declaración para poder llamar `.mockResolvedValue`/`.mockRejectedValueOnce`
- * sin repetir el cast en cada archivo.
+ * Segundo (y último) cast de frontera contra @huggingface/transformers,
+ * separado de `mockTokenClassificationPipeline` porque resuelve un problema
+ * distinto: `pipeline` es genérica sobre `PipelineType` (`<T extends
+ * PipelineType>(task: T, ...) => Promise<AllTasks[T]>`). `vi.mocked(pipeline)`
+ * tipa el mock contra la unión completa de clases concretas de pipeline
+ * (incluyendo miembros internos como `_call`, que ninguna librería mockeada
+ * implementa de verdad), no contra `TokenClassificationPipelineType` — el
+ * alias estructural que realmente usa `ner.engine.ts`. Los tests siguen
+ * declarando su propio `vi.mock("@huggingface/transformers", ...)` (hoisting
+ * de Vitest, mismo criterio que ocr-engine); este helper solo tipa el
+ * resultado de esa declaración para poder llamar
+ * `.mockResolvedValue`/`.mockRejectedValueOnce` sin repetir el cast en cada
+ * archivo.
  */
 export function asPipelineMock(fn: unknown): PipelineFactoryMock {
   return fn as unknown as PipelineFactoryMock;
