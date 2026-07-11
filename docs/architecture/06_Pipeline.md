@@ -158,7 +158,7 @@ Notas: el archivo se lee como `ArrayBuffer` en el main thread y se mantiene en m
 3. Si no hay match, se crea un grupo nuevo con `indexInType = nextIndex(type)`.
 4. `canonicalValue` = el alias con mayor frecuencia; en empate, el más largo (más informativo).
 
-**`indexInType`** se asigna en el orden de primera aparición (recorrido por `pageIndex` asc, luego `bbox.y` asc, luego `bbox.x` asc). Es estable por sesión: si un grupo se elimina, su índice **no** se reasigna (se saltea). Si dos grupos se fusionan, el resultante conserva el menor `indexInType` y el otro se libera.
+**`indexInType`** es **provisional** durante el procesamiento incremental (orden de llegada de `ENTITY_FOUND`) y se **renumera canónicamente una sola vez en `finishSession`**, antes de emitir `GROUPING_FINISHED`, por orden de primera aparición documental (`pageIndex` asc, luego `bbox.y` asc, luego `bbox.x` asc) — así el resultado final es determinístico sin importar el orden de llegada (ADR-028). Tras la renumeración es estable por sesión: si un grupo se elimina, su índice **no** se reasigna (se saltea). Si dos grupos se fusionan, el resultante conserva el menor `indexInType` y el otro se libera. Export corre después de `GROUPING_FINISHED`, así que siempre ve índices canónicos.
 
 **Etapa siguiente**: Etapa 7.
 
