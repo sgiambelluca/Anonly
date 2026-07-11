@@ -6,6 +6,7 @@
 - **Fecha**: 2026-06-17
 - **Decidido por**: Aclaración del usuario en planificación
 - **Relacionado con**: ADR-011-Grouping-First
+- **Complementado por**: ADR-029 (la fila `Plate` de §"Formato por tipo para mask" tenía ambos formatos incorrectos y queda **superada**: Mercosur = `XX XXX XX`, vieja = `XXX XXX`; el formato por variante viaja en `Occurrence.maskFormat`)
 
 ## Contexto
 
