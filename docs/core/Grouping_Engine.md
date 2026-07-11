@@ -9,6 +9,8 @@
 **Última actualización**: 2026-07-11
 
 > **Nota (ADR-026, 2026-07-11)**: el tipo de config canónico es `GroupingConfig` (Contracts.md §6); el alias `GroupingEngineConfig` de §6/§15.2 queda eliminado (mismo patrón que ADR-021 §2 para OCR y ADR-023 §1 para NER).
+>
+> **Nota (ADR-028, 2026-07-11)**: `indexInType` es **provisional durante la sesión** (orden de llegada, `nextIndex = max + 1`) y se **renumera canónicamente una sola vez en `finishSession`** por orden de primera aparición documental, antes de emitir `GROUPING_FINISHED`. Resuelve la contradicción con `06_Pipeline.md` §8. Ver §Algoritmos y caso límite 21.
 
 ---
 
@@ -31,6 +33,7 @@ Recibir el stream de `ENTITY_FOUND` (ocurrencias crudas de Regex y NER) y produc
 - Procesar inputs del usuario: `GROUP_UPDATE_REQUESTED`, `GROUP_MERGE_REQUESTED`, `GROUP_SPLIT_REQUESTED`, `RULE_CREATED`, `RULE_UPDATED`, `RULE_DELETED`, `CONFLICT_RESOLVE_REQUESTED`.
 - Emitir `ENTITY_GROUP_CREATED`, `ENTITY_GROUP_UPDATED`, `ENTITY_GROUP_REMOVED`, `GROUP_REPLACEMENT_CHANGED`, `GROUP_TOGGLED`, `CONFLICT_RESOLVED`, `GROUPING_FINISHED`.
 - Mantener `indexInType` estable: si un grupo se elimina, su índice se saltea; si dos se fusionan, el resultante conserva el menor.
+- Renumerar `indexInType` canónicamente en `finishSession` (una sola vez, por orden de primera aparición documental) antes de emitir `GROUPING_FINISHED`, recalculando `replacementValue` de los grupos en modo `placeholder` afectados (ADR-028).
 
 ---
 
@@ -229,6 +232,7 @@ Grouping es determinista dadas las ocurrencias y reglas; sin errores de runtime 
 18. **`canonicalValue` editado manualmente**: el usuario puede setear `canonicalValue` arbitrario vía `patch.canonicalValue`. A partir de ahí, `canonicalValue ∉ aliases` es válido (es una excepción explícita).
 19. **`closeSession` libera todo**: tras `DOCUMENT_CLOSED`, el motor limpia grupos, reglas, conflictos y alias de la sesión.
 20. **`process` tras `dispose`**: lanza `EngineDisposedError`.
+21. **Renumeración canónica en `finishSession` (ADR-028)**: llegan ocurrencias fuera de orden documental (NER procesa por prioridad visible). Los índices provisionales reflejan el orden de llegada; al cerrar, la renumeración deja "Persona 1" como la primera del documento (`pageIndex`/`bbox.y`/`bbox.x`), emite `ENTITY_GROUP_UPDATED` por cada índice que cambió y recalcula el `replacementValue` de los placeholders afectados. Las ediciones del usuario hechas durante la sesión (caso 17) se preservan; solo puede cambiar el número.
 
 ---
 
@@ -263,6 +267,8 @@ Grouping es determinista dadas las ocurrencias y reglas; sin errores de runtime 
 | `throws EngineDisposedError after dispose` | `edge.test.ts` | edge | caso 20 |
 | `empty document emits GROUPING_FINISHED with 0 groups` | `edge.test.ts` | edge | caso 1 |
 | `single occurrence creates group with indexInType 1` | `edge.test.ts` | edge | caso 2 |
+| `final indexInType deterministic regardless of event arrival order` | `contract.test.ts` | contract | invariante ADR-028 |
+| `canonical renumbering at finishSession emits updates and recomputes placeholders` | `edge.test.ts` | edge | caso 21 |
 | `cancel between ENTITY_FOUND within 50ms` | `cancel.test.ts` | cancel | SLA |
 | `snapshot of groups for text-10p.pdf stable` | `snapshot.test.ts` | snapshot | fixture |
 
@@ -280,6 +286,7 @@ Fixtures: `tests/fixtures/text-10p.pdf` con entidades conocidas que generan grup
 - [ ] 6. Implementar `startSession`/`closeSession` (gestión de estado por `documentId`).
 - [ ] 7. Implementar algoritmo de matching: exacto por `normalizedValue`, luego fuzzy Levenshtein normalizado con umbral `similarityThreshold`.
 - [ ] 8. Implementar asignación de `indexInType` secuencial y estable (no reasigna tras eliminación).
+- [ ] 8b. Implementar la renumeración canónica de `indexInType` en `finishSession` (orden documental, `ENTITY_GROUP_UPDATED` por índice cambiado, recálculo de placeholders; ADR-028, §Algoritmos).
 - [ ] 9. Implementar cálculo de `canonicalValue` (alias más frecuente, en empate el más largo).
 - [ ] 10. Implementar detección de conflictos (`overlap`, `disagree`, `low_confidence`, `ambiguous_canonical`).
 - [ ] 11. Implementar resolución default automática de conflictos (ver §13 de `06_Pipeline.md`).
@@ -336,10 +343,26 @@ canonicalValue = argmax_frequency(alias); en empate, argmax_length(alias)
 ### `indexInType`
 
 ```text
+// Fase incremental (durante la sesión) — índices PROVISIONALES (ADR-028):
 nextIndex(type) = (max indexInType entre grupos del tipo) + 1
 si no hay grupos del tipo, nextIndex = 1
+
+// Renumeración canónica (una sola vez, en finishSession, antes de GROUPING_FINISHED):
+para cada entityType:
+  firstPos(g) = min sobre g.members de (pageIndex, bbox.y, bbox.x)  // lexicográfico
+  ordenar grupos por firstPos asc; empate: normalizedValue asc
+  asignar indexInType = 1..N contiguo
+  por cada grupo cuyo índice cambió:
+    emitir ENTITY_GROUP_UPDATED (changes incluye "indexInType")
+    si mode = placeholder: recalcular replacementValue, emitir GROUP_REPLACEMENT_CHANGED
+
+// Después de la renumeración (estabilidad, sin cambios):
 tras eliminar grupo: el índice se saltea (no se reasigna)
 tras fusionar A en B: B conserva min(A.index, B.index); A se elimina
+tras dividir: el grupo nuevo recibe nextIndex(type)
+
+// Invariante (ADR-028): mismo conjunto de Occurrence ⇒ mismos índices finales,
+// sin importar el orden de llegada de los ENTITY_FOUND.
 ```
 
 ### Resolución de modo
