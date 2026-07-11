@@ -218,6 +218,12 @@ export default tseslint.config(
       "@typescript-eslint/no-unsafe-assignment": "off",
       "@typescript-eslint/no-unsafe-return": "off",
       "@typescript-eslint/no-unsafe-call": "off",
+      // expect(mock.someMethod).toHaveBeenCalled() dispara un falso positivo:
+      // ILogger/IEventBus declaran sus miembros con sintaxis de método, y
+      // unbound-method los trata como tal sin importar cómo se referencien
+      // (asignarlos a una variable antes no cambia el tipo). Mismo criterio
+      // que require-await: off arriba.
+      "@typescript-eslint/unbound-method": "off",
     },
   },
   {
