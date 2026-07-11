@@ -486,7 +486,7 @@ export interface OcrPageFailed { readonly documentId: string; readonly pageIndex
 // Detectores
 export interface EntityFound { readonly documentId: string; readonly occurrence: Occurrence; }
 export interface RegexFinished { readonly documentId: string; readonly occurrenceCount: number; readonly durationMs: number; }
-export interface NerStarted { readonly documentId: string; readonly pageCount: number; readonly modelId: string; }
+export interface NerStarted { readonly documentId: string; readonly pageCount: number; readonly modelId: string; readonly modelLoading?: boolean; }
 export interface NerModelLoading { readonly modelId: string; readonly progress: number; }
 export interface NerModelReady { readonly modelId: string; }
 export interface NerPageFinished { readonly documentId: string; readonly pageIndex: number; readonly occurrenceCount: number; }
