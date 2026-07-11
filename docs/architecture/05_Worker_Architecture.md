@@ -199,7 +199,7 @@ Cada pool tiene una `PriorityQueue<WorkerJob>` ordenada por:
 **Responsabilidad**: ejecutar el modelo NER local (Transformers.js + ONNX Runtime Web) sobre el texto de una página y devolver `Occurrence[]` con `source: "ner"`.
 
 **Ciclo de vida**:
-- `INIT`: carga `@xenova/transformers` y el modelo ONNX (cuantizado Q8). Publica `READY` con `{ workerId, modelId, quantization: "q8" }`.
+- `INIT`: carga `@huggingface/transformers` y el modelo ONNX (cuantizado Q8). Publica `READY` con `{ workerId, modelId, quantization: "q8" }`.
 - `RUN(ner-page)`: recibe `{ documentId, pageIndex, text, modelId }`. Ejecuta tokenización + inferencia. Emite `PROGRESS`. Responde `COMPLETED` con `{ occurrences: Occurrence[] }`.
 - `CANCEL`: checkpoint entre batches de inferencia.
 - `DISPOSE`: libera sesión de ONNX y memoria. El modelo cargado se descarga solo si `DISPOSE` lo pide explícitamente (no por cancelación).

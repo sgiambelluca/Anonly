@@ -55,7 +55,7 @@ No requiere dependencias externas: usa `RegExp` nativo de JS.
 - `react`, `react-dom`, `react/jsx-runtime`
 - `apps/react-client`
 - Cualquier otro motor
-- `pdfjs-dist`, `tesseract.js`, `@xenova/transformers`, `onnxruntime-web`, `pdf-lib`
+- `pdfjs-dist`, `tesseract.js`, `@huggingface/transformers`, `onnxruntime-web`, `pdf-lib`
 - Node builtins, libs de network
 - Libs de regex externas (`xregexp`, etc.) sin ADR
 

@@ -55,7 +55,7 @@ Recibir un `ArrayBuffer` con un PDF binario y producir un `DocumentModel` con p√
 - `react`, `react-dom`, `react/jsx-runtime`
 - `apps/react-client`
 - Cualquier otro motor (`ocr-engine`, `regex-engine`, etc.)
-- `tesseract.js`, `@xenova/transformers`, `onnxruntime-web`, `pdf-lib`
+- `tesseract.js`, `@huggingface/transformers`, `onnxruntime-web`, `pdf-lib`
 - Node builtins (`fs`, `http`, etc.)
 - Cualquier lib de network (`axios`, `fetch` wrapper, etc.)
 
