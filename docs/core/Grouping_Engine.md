@@ -6,7 +6,9 @@
 
 **EngineId**: `grouping`
 **Versión del spec**: 1.0.0
-**Última actualización**: 2026-06-17
+**Última actualización**: 2026-07-11
+
+> **Nota (ADR-026, 2026-07-11)**: el tipo de config canónico es `GroupingConfig` (Contracts.md §6); el alias `GroupingEngineConfig` de §6/§15.2 queda eliminado (mismo patrón que ADR-021 §2 para OCR y ADR-023 §1 para NER).
 
 ---
 
@@ -66,7 +68,9 @@ Recibir el stream de `ENTITY_FOUND` (ocurrencias crudas de Regex y NER) y produc
 ## 6. Interfaces públicas
 
 ```ts
-export interface GroupingEngineConfig {
+// GroupingConfig es el tipo canónico de Contracts.md §6 (re-exportado por @anonly/shared);
+// se reproduce aquí solo para documentar sus defaults (ADR-026).
+export interface GroupingConfig {
   readonly similarityThreshold: number;   // default 0.88
   readonly minAliasFrequency: number;      // default 1
 }
@@ -269,7 +273,7 @@ Fixtures: `tests/fixtures/text-10p.pdf` con entidades conocidas que generan grup
 ## 15. Checklist de implementación
 
 - [ ] 1. Crear paquete `packages/anonymization-core/grouping-engine/`.
-- [ ] 2. Definir `types.ts` con `GroupingEngineConfig`, `GroupingEngineInput`, `GroupingEngineSnapshot`.
+- [ ] 2. Definir `types.ts` con `GroupingEngineInput`, `GroupingEngineSnapshot` (`GroupingConfig` viene de `@anonly/shared`/Contracts.md §6; ADR-026).
 - [ ] 3. Definir `errors.ts` con `GroupingInvalidPatchError`, `GroupingGroupNotFoundError`.
 - [ ] 4. Implementar `grouping.engine.ts` respetando `IEngine` y la firma pública de §6.
 - [ ] 5. Implementar `init` (suscribirse a `ENTITY_FOUND` en `regex` y `ner`, a `REGEX_FINISHED`/`NER_FINISHED`, a eventos de UI en `ui`).
