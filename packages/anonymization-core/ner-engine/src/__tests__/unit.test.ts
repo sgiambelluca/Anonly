@@ -7,10 +7,10 @@ import {
   type EntityFound,
   type NerFinished,
 } from "@anonly/shared";
-import { pipeline } from "@xenova/transformers";
+import { pipeline } from "@huggingface/transformers";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-vi.mock("@xenova/transformers", () => ({
+vi.mock("@huggingface/transformers", () => ({
   pipeline: vi.fn(),
   env: {
     allowRemoteModels: true,
@@ -381,7 +381,7 @@ describe("NerEngine — unit tests", () => {
     expect(pipeline).toHaveBeenCalledWith(
       "token-classification",
       "test-model",
-      expect.objectContaining({ quantized: false }),
+      expect.objectContaining({ dtype: "fp32" }),
     );
   });
 

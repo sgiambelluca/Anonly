@@ -12,10 +12,10 @@ import {
   type NerStarted,
   type Unsubscribe,
 } from "@anonly/shared";
-import { pipeline } from "@xenova/transformers";
+import { pipeline } from "@huggingface/transformers";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-vi.mock("@xenova/transformers", () => ({
+vi.mock("@huggingface/transformers", () => ({
   pipeline: vi.fn(),
   env: {
     allowRemoteModels: true,

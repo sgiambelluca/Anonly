@@ -21,10 +21,10 @@
  * palabras) — el conjunto de entidades que NER_Engine.md §14 pide cubrir.
  */
 import { EngineEvents, type EngineContext, type EntityFound } from "@anonly/shared";
-import { pipeline, type TokenClassificationSingle } from "@xenova/transformers";
+import { pipeline } from "@huggingface/transformers";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-vi.mock("@xenova/transformers", () => ({
+vi.mock("@huggingface/transformers", () => ({
   pipeline: vi.fn(),
   env: {
     allowRemoteModels: true,
@@ -42,6 +42,7 @@ import {
   mockTokenClassificationPipeline,
   nerToken,
   type PipelineCallOptions,
+  type TokenClassificationSingle,
 } from "./fixtures/test-helpers.js";
 
 const PAGE_0_TOKENS = [

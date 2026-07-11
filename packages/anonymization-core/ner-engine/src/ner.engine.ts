@@ -15,12 +15,7 @@ import {
   type Word,
   type WordSpan,
 } from "@anonly/shared";
-import {
-  env,
-  pipeline,
-  type TokenClassificationPipelineType,
-  type TokenClassificationSingle,
-} from "@xenova/transformers";
+import { env, pipeline, type TokenClassificationOutput } from "@huggingface/transformers";
 
 import {
   NerModelLoadFailedError,
@@ -40,14 +35,36 @@ const DEFAULT_MODEL_ID = "Xenova/bert-base-multilingual-cased-ner-hrl";
 const MODEL_LOAD_MAX_ATTEMPTS = 2;
 
 /*
- * ADR-018 + ADR-023 §2: el modelo y el runtime WASM de ONNX se sirven
- * first-party, nunca desde HuggingFace ni CDNs de terceros en runtime. Por
- * defecto, @xenova/transformers apunta env.backends.onnx.wasm.wasmPaths a
- * jsDelivr (node_modules/@xenova/transformers/src/env.js) — se sobreescribe
- * acá. env.localModelPath + modelId arman la ruta real que resuelve
- * getModelFile() de la librería (utils/hub.js:
- * pathJoin(env.localModelPath, path_or_repo_id, filename)); por eso el
- * destino real de los assets del modelo en assets.lock.json es
+ * ADR-025: @huggingface/transformers v4 no exporta un alias público para el
+ * tipo del pipeline de token-classification (a diferencia de
+ * @xenova/transformers v2, que exportaba TokenClassificationPipelineType) ni
+ * para el elemento individual "raw" (no agrupado) de su resultado — solo
+ * TokenClassificationOutput<O>, la unión array de spans "raw"/"grouped"
+ * parametrizada por las opciones de la llamada. Ambos se derivan del único
+ * símbolo público relevante (pipeline()) sin cast: NerClassifier via el tipo
+ * de retorno de pipeline() para la task "token-classification";
+ * TokenClassificationSingle aislando a nivel de tipos el shape "raw" (el
+ * único que produce este motor, que nunca pasa aggregation_strategy) — es el
+ * único elemento de la unión cuyo campo `entity` tipa `string` en vez de
+ * `undefined`.
+ */
+type NerClassifier = Awaited<ReturnType<typeof pipeline<"token-classification">>>;
+type TokenClassificationSingle = Extract<TokenClassificationOutput[number], { entity: string }>;
+
+/*
+ * ADR-018 + ADR-023 §2 + ADR-025: el modelo y el runtime WASM de ONNX se
+ * sirven first-party, nunca desde HuggingFace ni CDNs de terceros en
+ * runtime. Por defecto, @huggingface/transformers apunta
+ * env.backends.onnx.wasm.wasmPaths a jsDelivr
+ * (node_modules/@huggingface/transformers/src/backends/onnx.js) — se
+ * sobreescribe acá. env.backends.onnx es una copia shallow de env de
+ * onnxruntime-web tomada al importar el módulo (no la referencia original),
+ * pero su propiedad `wasm` sigue siendo el mismo objeto anidado que usa
+ * internamente onnxruntime-web, así que mutar wasmPaths acá sigue
+ * propagándose correctamente. env.localModelPath + modelId arman la ruta
+ * real que resuelve getModelFile() de la librería (utils/hub.js:
+ * pathJoin(env.localModelPath, pathJoin(path_or_repo_id, filename))); por
+ * eso el destino real de los assets del modelo en assets.lock.json es
  * apps/react-client/public/models/ner/<modelId>/..., no un directorio plano.
  */
 const NER_LOCAL_MODEL_PATH = "/models/ner/";
@@ -115,8 +132,8 @@ function isTokenClassificationSingle(value: unknown): value is TokenClassificati
   );
 }
 
-// @xenova/transformers 2.17.2 tipa el resultado de un pipeline de
-// token-classification como `TokenClassificationOutput | TokenClassificationOutput[]`
+// @huggingface/transformers v4 tipa el resultado de un pipeline de
+// token-classification como `TokenClassificationOutput<O> | TokenClassificationOutput<O>[]`
 // (la unión existe porque la misma función acepta texto único o batched).
 // Este motor siempre invoca con un string único (nunca un array), así que en
 // runtime la forma real siempre es la plana — pero se valida con un guard de
@@ -238,15 +255,16 @@ function computeWordChunks(
 
 /*
  * Reconstruye offsets de caracteres para cada token dentro de chunkText.
- * @xenova/transformers 2.17.2 no expone start/end reales para
- * token-classification (siempre null en la implementación real de
- * TokenClassificationPipeline._call): solo entrega `word` (el token
- * decodificado, con prefijo "##" para continuaciones de wordpiece en
- * modelos BERT). Se ubica cada token en el texto con un cursor que solo
- * avanza (garantiza orden y evita coincidencias espurias hacia atrás); un
- * token que no se puede ubicar se descarta de forma defensiva. Nunca se
- * loguea el contenido de los tokens (Code_Standards.md §9: nunca loguear
- * contenido del documento).
+ * @huggingface/transformers v4 sigue sin exponer start/end reales para
+ * token-classification (el campo es opcional en el tipo público, pero la
+ * implementación real de TokenClassificationPipeline._call nunca lo puebla —
+ * "TODO: Add support for start and end" en su código fuente): solo entrega
+ * `word` (el token decodificado, con prefijo "##" para continuaciones de
+ * wordpiece en modelos BERT). Se ubica cada token en el texto con un cursor
+ * que solo avanza (garantiza orden y evita coincidencias espurias hacia
+ * atrás); un token que no se puede ubicar se descarta de forma defensiva.
+ * Nunca se loguea el contenido de los tokens (Code_Standards.md §9: nunca
+ * loguear contenido del documento).
  */
 function positionTokens(
   tokens: ReadonlyArray<TokenClassificationSingle>,
@@ -272,12 +290,15 @@ function positionTokens(
 
 /*
  * Agrega tokens BIO (B-PER/I-PER/B-ORG/... ) en spans de entidad completos
- * (equivalente simplificado a aggregation_strategy="simple" de la librería
- * Python de HuggingFace, no disponible en @xenova/transformers 2.17.2). Un
- * "B-" siempre abre un span nuevo; un "I-" continúa el span abierto solo si
- * coincide el tipo; cualquier otra cosa (label no soportado, "O", o un "I-"
- * de tipo distinto al abierto) cierra el span en curso. confidence es el
- * promedio de los scores de los tokens que componen el span.
+ * (equivalente simplificado a aggregation_strategy="simple", que
+ * @huggingface/transformers v4 sí soporta de forma nativa — a diferencia de
+ * @xenova/transformers v2 — pero que este motor no usa: reimplementa su
+ * propia agregación para no cambiar de comportamiento en esta migración,
+ * ADR-025). Un "B-" siempre abre un span nuevo; un "I-" continúa el span
+ * abierto solo si coincide el tipo; cualquier otra cosa (label no soportado,
+ * "O", o un "I-" de tipo distinto al abierto) cierra el span en curso.
+ * confidence es el promedio de los scores de los tokens que componen el
+ * span.
  */
 function aggregateTokensToSpans(
   tokens: ReadonlyArray<TokenClassificationSingle>,
@@ -337,7 +358,7 @@ export class NerEngine implements IEngine {
   readonly id = EngineId.Ner;
 
   private ctx: EngineContext | null = null;
-  private classifier: TokenClassificationPipelineType | null = null;
+  private classifier: NerClassifier | null = null;
   private modelId: string | null = null;
   private initialized = false;
   private disposed = false;
@@ -603,13 +624,15 @@ export class NerEngine implements IEngine {
     const modelId = ctx.config.ner.modelId;
     configureTransformersEnv();
 
-    // @xenova/transformers 2.17.2 expone `quantized: boolean` (elige entre
-    // model.onnx y model_quantized.onnx), sin selección fina por dtype
-    // (model_q4/model_fp16, convención de v3+). "q8" (default, ADR-023) es
-    // el único nivel con mirror first-party en assets.lock.json para este
-    // hito; "q4"/"f32" degradan a `quantized: false` (model.onnx) con esta
-    // versión pinneada de la librería.
-    const quantized = ctx.config.ner.quantization === "q8";
+    // ADR-025: @huggingface/transformers v4 reemplaza `quantized: boolean`
+    // por `dtype` (elige el sufijo del archivo .onnx a cargar — DataType
+    // "q8" mapea a model_quantized.onnx, mismo archivo que `quantized: true`
+    // resolvía en v2). "q8" (default, ADR-023) es el único nivel con mirror
+    // first-party en assets.lock.json para este hito; "q4"/"f32" degradan a
+    // `dtype: "fp32"` (model.onnx sin cuantizar) con esta versión pinneada
+    // de la librería — mismo criterio de degradación que v2 aplicaba con
+    // `quantized: false`.
+    const dtype = ctx.config.ner.quantization === "q8" ? "q8" : "fp32";
 
     const onProgress = (raw: unknown): void => {
       if (!isRecord(raw)) return;
@@ -625,7 +648,7 @@ export class NerEngine implements IEngine {
     for (let attempt = 0; attempt < MODEL_LOAD_MAX_ATTEMPTS; attempt++) {
       try {
         this.classifier = await pipeline("token-classification", modelId, {
-          quantized,
+          dtype,
           progress_callback: onProgress,
         });
         this.modelId = modelId;
