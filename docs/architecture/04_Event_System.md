@@ -61,7 +61,7 @@ Ambos emiten el mismo evento `ENTITY_FOUND` pero con `source` distinto. **`ENTIT
 |---|---|---|---|---|---|---|---|
 | `ENTITY_FOUND` | Regex Engine, NER Engine | Grouping Engine | `{ documentId, occurrence: Occurrence }` | async | sí | por-página | `occurrence.source ∈ {regex, ner}`. |
 | `REGEX_FINISHED` | Regex Engine | Orchestrator | `{ documentId, occurrenceCount, durationMs }` | async | sí | none | |
-| `NER_STARTED` | NER Engine | UI | `{ documentId, pageCount, modelId }` | async | sí | none | Para indicar "cargando modelo". |
+| `NER_STARTED` | NER Engine | UI | `{ documentId, pageCount, modelId, modelLoading? }` | async | sí | none | `modelLoading?: true` solo en la primera descarga del modelo; omitido si ya está cacheado (ADR-024 §1). |
 | `NER_MODEL_LOADING` | NER Engine | UI | `{ modelId, progress: number }` | async | sí | none | Progreso de descarga/carga del modelo ONNX. |
 | `NER_MODEL_READY` | NER Engine | UI | `{ modelId }` | async | sí | none | |
 | `NER_PAGE_FINISHED` | NER Engine | Orchestrator | `{ documentId, pageIndex, occurrenceCount }` | async | sí | por-página | |
