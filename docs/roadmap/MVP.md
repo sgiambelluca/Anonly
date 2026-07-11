@@ -120,12 +120,14 @@ Orden sugerido (cada hito = un set de PRs):
 - Corrección de contrato: patrón "Phone (AR mobile)" ajustado con límites de palabra (`\b`) porque el regex literal rompía el caso límite 3 del spec; formalizado en `adr/ADR-022-Regex-Phone-AR-Word-Boundaries.md`. `core/Regex_Engine.md` pasa a v1.0.1.
 
 ### Hito 5 — NER Engine
-- Implementar `ner-engine` con Transformers.js + ONNX. Config canónica `NerConfig` (Contracts.md §6; alias `NerEngineConfig` eliminado) y modelo multilingüe default `Xenova/bert-base-multilingual-cased-ner-hrl` fijados en `adr/ADR-023-NER-Config-Canonical-Model-Multilingue.md`.
-- Modelo NER servido first-party (`env.allowRemoteModels = false`, `env.localModelPath`): agregar la entrada del modelo (URL de origen + `revision` + `sha256` + `sizeBytes`, destino `public/models/ner/`) a `assets.lock.json` y correr `pnpm assets:mirror` — mismo patrón que OCR en PR #11 (ver ADR-018, ADR-023 §2).
-- Cache del modelo en Cache Storage.
-- Los tests de integración con Regex (ambos emiten `ENTITY_FOUND`) viven en `tests/integration/` y son Hito 9 (Orchestrator), **no** de este PR (ADR-010, `core/Orchestrator.md:239`, precedente `core/OCR_Engine.md:225`).
+- ~~Implementar `ner-engine` con Transformers.js + ONNX. Config canónica `NerConfig` (Contracts.md §6; alias `NerEngineConfig` eliminado) y modelo multilingüe default `Xenova/bert-base-multilingual-cased-ner-hrl` fijados en `adr/ADR-023-NER-Config-Canonical-Model-Multilingue.md`.~~ **CERRADO** (PR #14).
+- ~~Modelo NER servido first-party (`env.allowRemoteModels = false`, `env.localModelPath`): agregar la entrada del modelo a `assets.lock.json` y correr `pnpm assets:mirror`.~~ **CERRADO** (PR #14) — modelo Q8 (178 MB) + tokenizer/config pinneados por hash (revision `263e82c0…`) y mirrorados a `public/models/ner/` (ADR-018, ADR-023 §2).
+- ~~Cache del modelo en Cache Storage.~~ **CERRADO** (PR #14).
+- ~~Migración de `@xenova/transformers` (v2, deprecada) a `@huggingface/transformers` (v4) por `adr/ADR-025-Migracion-Huggingface-Transformers.md`.~~ **CERRADO** (PR #15) — `@huggingface/transformers@^4.2.0` con `dtype: "q8"` (assets del modelo intactos), wasm de onnxruntime pinneados y mirrorados a `public/wasm/onnxruntime/` (cierra el gap de `wasmPaths` detectado post-PR #14), override `onnx-proto>protobufjs` eliminado, `pnpm audit` limpio.
+- Tests: `contract.test.ts`, `unit.test.ts`, `edge.test.ts`, `snapshot.test.ts`, `cancel.test.ts` commiteados en `packages/anonymization-core/ner-engine/src/__tests__/` (56 tests), cobertura 97.77% líneas. Pendientes: `stress.test.ts` (OOM/pool) → Hito 9; `perf.test.ts` (recall ≥ 85% / precision ≥ 90%, informativas en MVP, §6) → Hito 11.
+- Correcciones de contrato del hito: mapeo `DATE → Date` y contrato de salida de NER ampliado a cuatro tipos (ADR-023 §2); `NerStarted.modelLoading?` y `batchSize` en palabras (ADR-024).
+- Los tests de integración con Regex (ambos emiten `ENTITY_FOUND`) viven en `tests/integration/` y son Hito 9 (Orchestrator) (ADR-010, `core/Orchestrator.md:239`, precedente `core/OCR_Engine.md:225`).
 - Pendiente: verificación de integridad en runtime del modelo (ADR-018 punto 3, `core/NER_Engine.md` §15.19) → Hito 11.
-- Post-cierre: migración de `@xenova/transformers` (v2, deprecada) a `@huggingface/transformers` (v4) por `adr/ADR-025-Migracion-Huggingface-Transformers.md` — motivada por el triage de Dependabot del 2026-07-11; incluye el mirror de los wasm de onnxruntime a `public/wasm/onnxruntime/` (gap detectado post-PR #14: `wasmPaths` apuntaba a un directorio sin binarios).
 
 ### Hito 6 — Grouping Engine
 - Implementar `grouping-engine` con matching, conflictos, reglas, fusión/división.
