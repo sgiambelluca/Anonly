@@ -1,4 +1,10 @@
-import { EngineEvents, EntityType, EventChannel, type EngineContext } from "@anonly/shared";
+import {
+  EngineEvents,
+  EntityType,
+  EventChannel,
+  ReplacementMode,
+  type EngineContext,
+} from "@anonly/shared";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 
 import { GroupingEngine } from "../grouping.engine.js";
@@ -109,6 +115,30 @@ describe("GroupingEngine — unit tests", () => {
     expect(groups[0]?.aliases).toEqual(
       expect.arrayContaining(["Maria Fernandez", "Maria Fernandes"]),
     );
+  });
+
+  // Caso 22 (§13, ADR-029)
+  it("mask uses occurrence maskFormat over type fallback", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Plate,
+        value: "ABC 123",
+        normalizedValue: "platevieja",
+        maskFormat: "XXX XXX",
+      }),
+    });
+    const [group] = engine.getSnapshot("doc-1").groups;
+
+    const updated = await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group!.id,
+      patch: { replacementMode: ReplacementMode.Mask },
+    });
+
+    // El maskFormat de la Occurrence ("XXX XXX", patente vieja) gana sobre el
+    // fallback de tipo (MASK_FORMAT_BY_TYPE[Plate] = "XX XXX XX", Mercosur).
+    expect(updated.replacementValue).toBe("XXX XXX");
   });
 });
 

@@ -155,6 +155,8 @@ interface SessionOccurrenceRecord {
   readonly normalizedValue: string;
   readonly bbox: BoundingBox;
   readonly pageIndex: number;
+  /** ADR-029: formato de máscara del patrón que matcheó (ausente en NER). */
+  readonly maskFormat?: string;
   groupId: string;
 }
 
@@ -238,6 +240,66 @@ function bboxIntersectionRatio(a: BoundingBox, b: BoundingBox): number {
   return interArea / minArea;
 }
 
+/**
+ * Posición de primera aparición documental de un grupo (ADR-028, "Algoritmos
+ * clave" > `indexInType`), usada para la renumeración canónica en
+ * `finishSession`.
+ */
+interface DocumentPosition {
+  readonly pageIndex: number;
+  readonly y: number;
+  readonly x: number;
+  readonly normalizedValue: string;
+}
+
+/** Orden lexicográfico (pageIndex, y, x, normalizedValue) — ADR-028. */
+function compareDocumentPosition(a: DocumentPosition, b: DocumentPosition): number {
+  if (a.pageIndex !== b.pageIndex) return a.pageIndex - b.pageIndex;
+  if (a.y !== b.y) return a.y - b.y;
+  if (a.x !== b.x) return a.x - b.x;
+  if (a.normalizedValue < b.normalizedValue) return -1;
+  if (a.normalizedValue > b.normalizedValue) return 1;
+  return 0;
+}
+
+function recordPosition(rec: SessionOccurrenceRecord): DocumentPosition {
+  return {
+    pageIndex: rec.pageIndex,
+    y: rec.bbox.y,
+    x: rec.bbox.x,
+    normalizedValue: rec.normalizedValue,
+  };
+}
+
+type RecordWithMaskFormat = SessionOccurrenceRecord & { readonly maskFormat: string };
+
+/**
+ * Resolución de `mask` por grupo (ADR-029 §3): si algún member lleva
+ * `maskFormat`, gana el más frecuente entre los que lo llevan; empate → el
+ * del member con primera aparición documental (mismo comparador que ADR-028).
+ * Si ninguno lo lleva (grupo formado solo por NER), fallback
+ * `MASK_FORMAT_BY_TYPE[type]`.
+ */
+function resolveMaskFormatFromRecords(
+  records: ReadonlyArray<SessionOccurrenceRecord>,
+  type: EntityType,
+): string {
+  const withFormat = records.filter((r): r is RecordWithMaskFormat => r.maskFormat !== undefined);
+  if (withFormat.length === 0) return MASK_FORMAT_BY_TYPE[type];
+
+  const counts = new Map<string, number>();
+  for (const rec of withFormat) {
+    counts.set(rec.maskFormat, (counts.get(rec.maskFormat) ?? 0) + 1);
+  }
+  const maxFreq = Math.max(...counts.values());
+  const topCandidates = withFormat.filter((rec) => counts.get(rec.maskFormat) === maxFreq);
+
+  const winner = topCandidates.reduce((earliest, rec) =>
+    compareDocumentPosition(recordPosition(rec), recordPosition(earliest)) < 0 ? rec : earliest,
+  );
+  return winner.maskFormat;
+}
+
 /** "Algoritmos clave" > "Resolución de modo" (literal, ver nota 3 del header). */
 function resolveMode(
   group: Pick<InternalGroup, "id" | "type" | "replacementMode">,
@@ -269,10 +331,11 @@ function computeReplacementValue(
   mode: ReplacementMode,
   indexInType: number,
   seed: string,
+  maskFormat: string,
 ): string {
   switch (mode) {
     case ReplacementMode.Mask:
-      return MASK_FORMAT_BY_TYPE[type];
+      return maskFormat;
     case ReplacementMode.Synthetic:
       return synthesize(type, indexInType, seed);
     case ReplacementMode.Placeholder:
@@ -423,6 +486,8 @@ export class GroupingEngine implements IEngine {
     if (session.finished) return Promise.resolve();
     session.finished = true;
 
+    this.renumberGroupsCanonically(session);
+
     const durationMs = Date.now() - session.startedAt;
     const groupCount = session.groups.size;
     const conflictCount = session.conflicts.size;
@@ -433,6 +498,84 @@ export class GroupingEngine implements IEngine {
       durationMs,
     });
     return Promise.resolve();
+  }
+
+  /**
+   * Renumeración canónica de `indexInType` (ADR-028, una sola vez, antes de
+   * `GROUPING_FINISHED`): reemplaza los índices provisionales asignados por
+   * orden de llegada de `ENTITY_FOUND` (no-determinístico entre corridas —
+   * motores en paralelo, NER por prioridad visible) por el orden de primera
+   * aparición documental de cada grupo dentro de su `entityType`.
+   */
+  private renumberGroupsCanonically(session: Session): void {
+    const groupsByType = new Map<EntityType, InternalGroup[]>();
+    for (const group of session.groups.values()) {
+      const list = groupsByType.get(group.type);
+      if (list) list.push(group);
+      else groupsByType.set(group.type, [group]);
+    }
+
+    for (const [type, groups] of groupsByType) {
+      const ordered = groups
+        .map((group) => ({ group, pos: this.firstDocumentPosition(session, group) }))
+        .sort((a, b) => compareDocumentPosition(a.pos, b.pos));
+
+      ordered.forEach(({ group }, i) => {
+        const newIndex = i + 1;
+        if (newIndex === group.indexInType) return;
+
+        const beforeReplacement = {
+          replacementMode: group.replacementMode,
+          replacementValue: group.replacementValue,
+        };
+        group.indexInType = newIndex;
+        if (group.replacementMode === ReplacementMode.Placeholder) {
+          group.replacementValue = computeReplacementValue(
+            group.type,
+            group.replacementMode,
+            group.indexInType,
+            session.seed,
+            // maskFormat no aplica: esta rama solo corre en modo placeholder.
+            MASK_FORMAT_BY_TYPE[group.type],
+          );
+        }
+        group.updatedAt = Date.now();
+
+        const changed: (keyof EntityGroup)[] = [
+          "indexInType",
+          ...this.emitReplacementChangeIfNeeded(session, group, beforeReplacement),
+          "updatedAt",
+        ];
+        this.emitGroupUpdated(session, group, changed);
+      });
+
+      // Tras la renumeración los índices del tipo son 1..N contiguos: el
+      // contador de nextIndex() continúa en N (no en el máximo provisional).
+      session.nextIndexByType.set(type, ordered.length);
+    }
+  }
+
+  /**
+   * Primera aparición documental de un grupo: mínimo entre sus ocurrencias
+   * grabadas por (`pageIndex`, `bbox.y`, `bbox.x`) — desempate por
+   * `normalizedValue` asc para determinismo total (ADR-028).
+   */
+  private firstDocumentPosition(session: Session, group: InternalGroup): DocumentPosition {
+    let best: DocumentPosition | null = null;
+    for (const rec of session.recordedOccurrences) {
+      if (rec.groupId !== group.id) continue;
+      const candidate = recordPosition(rec);
+      if (!best || compareDocumentPosition(candidate, best) < 0) best = candidate;
+    }
+    // Invariante members.length >= 1 (Grouping_Engine.md §10): todo grupo
+    // tiene al menos una ocurrencia grabada.
+    return best ?? { pageIndex: 0, y: 0, x: 0, normalizedValue: group.canonicalValue };
+  }
+
+  /** ADR-029: resolución de `mask` para un grupo ya existente en la sesión. */
+  private resolveMaskFormat(session: Session, group: InternalGroup): string {
+    const records = session.recordedOccurrences.filter((rec) => rec.groupId === group.id);
+    return resolveMaskFormatFromRecords(records, group.type);
   }
 
   /*
@@ -456,7 +599,10 @@ export class GroupingEngine implements IEngine {
 
       const { replacementMode, replacementValue, enabled, canonicalValue } = req.patch;
       const changed = new Set<keyof EntityGroup>();
-      let replacementChanged = false;
+      const beforeReplacement = {
+        replacementMode: group.replacementMode,
+        replacementValue: group.replacementValue,
+      };
 
       if (canonicalValue !== undefined) {
         group.canonicalValue = canonicalValue;
@@ -471,23 +617,23 @@ export class GroupingEngine implements IEngine {
       if (replacementMode !== undefined) {
         group.replacementMode = replacementMode;
         group.replacementMode = resolveMode(group, session.rules);
-        changed.add("replacementMode");
-        replacementChanged = true;
         if (replacementValue === undefined) {
           group.replacementValue = computeReplacementValue(
             group.type,
             group.replacementMode,
             group.indexInType,
             session.seed,
+            this.resolveMaskFormat(session, group),
           );
-          changed.add("replacementValue");
         }
       }
 
       if (replacementValue !== undefined) {
         group.replacementValue = replacementValue;
-        changed.add("replacementValue");
-        replacementChanged = true;
+      }
+
+      for (const key of this.emitReplacementChangeIfNeeded(session, group, beforeReplacement)) {
+        changed.add(key);
       }
 
       if (changed.size === 0) {
@@ -503,14 +649,6 @@ export class GroupingEngine implements IEngine {
           documentId: req.documentId,
           groupId: group.id,
           enabled: group.enabled,
-        });
-      }
-      if (replacementChanged) {
-        this.ctx?.bus.emit(EventChannel.Grouping, EngineEvents.GROUP_REPLACEMENT_CHANGED, {
-          documentId: req.documentId,
-          groupId: group.id,
-          mode: group.replacementMode,
-          value: group.replacementValue,
         });
       }
 
@@ -536,7 +674,6 @@ export class GroupingEngine implements IEngine {
       // "Algoritmos clave" > indexInType: fusionar A(source) en B(target) ->
       // B conserva min(A.index, B.index); A se elimina.
       const newIndex = Math.min(source.indexInType, target.indexInType);
-      const indexChanged = newIndex !== target.indexInType;
       target.indexInType = newIndex;
 
       for (const [value, freq] of source.aliasFrequency) {
@@ -551,29 +688,39 @@ export class GroupingEngine implements IEngine {
       for (const nv of source.normalizedValues) target.normalizedValues.add(nv);
       target.members.push(...source.members);
 
+      // Reasignar ANTES de recalcular canonicalValue/replacementValue: ambos
+      // se derivan de session.recordedOccurrences, que debe reflejar ya la
+      // membresía fusionada (incluye resolveMaskFormat, ADR-029).
+      for (const rec of session.recordedOccurrences) {
+        if (rec.groupId === sourceGroupId) rec.groupId = targetGroupId;
+      }
+
       const beforeCanonical = target.canonicalValue;
       if (target.aliases.includes(target.canonicalValue)) {
         this.recomputeCanonicalValue(session, target);
       }
 
-      if (indexChanged) {
-        target.replacementValue = computeReplacementValue(
-          target.type,
-          target.replacementMode,
-          target.indexInType,
-          session.seed,
-        );
-      }
+      const beforeReplacement = {
+        replacementMode: target.replacementMode,
+        replacementValue: target.replacementValue,
+      };
+      // ADR-029: el replacementValue (mask, y por índice placeholder/
+      // synthetic) depende de la membresía fusionada — se recalcula siempre
+      // tras un merge, no solo cuando cambia el índice.
+      target.replacementValue = computeReplacementValue(
+        target.type,
+        target.replacementMode,
+        target.indexInType,
+        session.seed,
+        this.resolveMaskFormat(session, target),
+      );
       target.updatedAt = Date.now();
 
-      for (const rec of session.recordedOccurrences) {
-        if (rec.groupId === sourceGroupId) rec.groupId = targetGroupId;
-      }
       session.groups.delete(sourceGroupId);
 
       const changed: (keyof EntityGroup)[] = ["members", "aliases", "updatedAt", "indexInType"];
       if (target.canonicalValue !== beforeCanonical) changed.push("canonicalValue");
-      if (indexChanged) changed.push("replacementValue");
+      changed.push(...this.emitReplacementChangeIfNeeded(session, target, beforeReplacement));
 
       this.emitGroupUpdated(session, target, changed);
       this.ctx?.bus.emit(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_REMOVED, {
@@ -647,6 +794,9 @@ export class GroupingEngine implements IEngine {
       createdMode,
       created.indexInType,
       session.seed,
+      // movedRecords, no session.recordedOccurrences: la reasignación de
+      // groupId a `created.id` recién pasa más abajo.
+      resolveMaskFormatFromRecords(movedRecords, created.type),
     );
     session.groups.set(created.id, created);
 
@@ -661,13 +811,36 @@ export class GroupingEngine implements IEngine {
     } else if (group.aliases.length > 0) {
       this.recomputeCanonicalValue(session, group);
     }
+
+    const beforeReplacement = {
+      replacementMode: group.replacementMode,
+      replacementValue: group.replacementValue,
+    };
+    // ADR-029: el mask depende de los members remanentes tras la división.
+    // Se usa `remainingRecords` directo (no session.recordedOccurrences): la
+    // reasignación de groupId a `created.id` para los movidos pasa recién
+    // abajo.
+    group.replacementValue = computeReplacementValue(
+      group.type,
+      group.replacementMode,
+      group.indexInType,
+      session.seed,
+      resolveMaskFormatFromRecords(remainingRecords, group.type),
+    );
     group.updatedAt = now;
 
     for (const rec of session.recordedOccurrences) {
       if (idsToMove.has(rec.occurrenceId)) rec.groupId = created.id;
     }
 
-    this.emitGroupUpdated(session, group, ["members", "aliases", "canonicalValue", "updatedAt"]);
+    const changed: (keyof EntityGroup)[] = [
+      "members",
+      "aliases",
+      "canonicalValue",
+      "updatedAt",
+      ...this.emitReplacementChangeIfNeeded(session, group, beforeReplacement),
+    ];
+    this.emitGroupUpdated(session, group, changed);
     this.emitGroupCreated(session, created);
 
     return { merged: toPublicGroup(group), created: toPublicGroup(created) };
@@ -767,6 +940,10 @@ export class GroupingEngine implements IEngine {
 
       const group = session.groups.get(conflict.groupId);
       if (group) {
+        const beforeReplacement = {
+          replacementMode: group.replacementMode,
+          replacementValue: group.replacementValue,
+        };
         group.replacementMode = req.mode;
         group.replacementMode = resolveMode(group, session.rules);
         group.replacementValue = computeReplacementValue(
@@ -774,15 +951,15 @@ export class GroupingEngine implements IEngine {
           group.replacementMode,
           group.indexInType,
           session.seed,
+          this.resolveMaskFormat(session, group),
         );
         group.updatedAt = Date.now();
-        this.emitGroupUpdated(session, group, ["replacementMode", "replacementValue", "updatedAt"]);
-        this.ctx?.bus.emit(EventChannel.Grouping, EngineEvents.GROUP_REPLACEMENT_CHANGED, {
-          documentId: req.documentId,
-          groupId: group.id,
-          mode: group.replacementMode,
-          value: group.replacementValue,
-        });
+
+        const changed: (keyof EntityGroup)[] = [
+          ...this.emitReplacementChangeIfNeeded(session, group, beforeReplacement),
+          "updatedAt",
+        ];
+        this.emitGroupUpdated(session, group, changed);
       }
 
       this.ctx?.bus.emit(EventChannel.Grouping, EngineEvents.CONFLICT_RESOLVED, {
@@ -1029,6 +1206,9 @@ export class GroupingEngine implements IEngine {
       group.replacementMode,
       group.indexInType,
       session.seed,
+      // Única ocurrencia en el grupo recién creado: no hace falta pasar por
+      // session.recordedOccurrences (recordOccurrence() corre después).
+      occurrence.maskFormat ?? MASK_FORMAT_BY_TYPE[occurrence.entityType],
     );
     session.groups.set(group.id, group);
     return group;
@@ -1155,9 +1335,12 @@ export class GroupingEngine implements IEngine {
 
   private recomputeAllGroupModes(session: Session): void {
     for (const group of session.groups.values()) {
-      const beforeMode = group.replacementMode;
+      const beforeReplacement = {
+        replacementMode: group.replacementMode,
+        replacementValue: group.replacementValue,
+      };
       const effectiveMode = resolveMode(group, session.rules);
-      if (effectiveMode === beforeMode) continue;
+      if (effectiveMode === beforeReplacement.replacementMode) continue;
 
       group.replacementMode = effectiveMode;
       group.replacementValue = computeReplacementValue(
@@ -1165,15 +1348,15 @@ export class GroupingEngine implements IEngine {
         effectiveMode,
         group.indexInType,
         session.seed,
+        this.resolveMaskFormat(session, group),
       );
       group.updatedAt = Date.now();
-      this.emitGroupUpdated(session, group, ["replacementMode", "replacementValue", "updatedAt"]);
-      this.ctx?.bus.emit(EventChannel.Grouping, EngineEvents.GROUP_REPLACEMENT_CHANGED, {
-        documentId: session.documentId,
-        groupId: group.id,
-        mode: group.replacementMode,
-        value: group.replacementValue,
-      });
+
+      const changed: (keyof EntityGroup)[] = [
+        ...this.emitReplacementChangeIfNeeded(session, group, beforeReplacement),
+        "updatedAt",
+      ];
+      this.emitGroupUpdated(session, group, changed);
     }
   }
 
@@ -1188,6 +1371,9 @@ export class GroupingEngine implements IEngine {
       bbox: occurrence.bbox,
       pageIndex: occurrence.pageIndex,
       groupId,
+      // exactOptionalPropertyTypes: no asignar `undefined` explícito a un
+      // campo opcional — se omite la clave si la Occurrence no trae maskFormat.
+      ...(occurrence.maskFormat !== undefined ? { maskFormat: occurrence.maskFormat } : {}),
     });
   }
 
@@ -1232,6 +1418,37 @@ export class GroupingEngine implements IEngine {
       group: toPublicGroup(group),
       changes,
     });
+  }
+
+  /**
+   * Único punto de emisión de `GROUP_REPLACEMENT_CHANGED` (spec §7: "cuando
+   * replacementMode o replacementValue cambian" — incondicional a la causa de
+   * la mutación; Render lo consume para el delta render, `Render_Engine.md`
+   * §8). Compara el estado del grupo ANTES de la mutación contra su estado
+   * actual: si `replacementMode` o `replacementValue` difieren, emite el
+   * evento y devuelve las claves que cambiaron, para que el caller las sume
+   * al `changed` de `ENTITY_GROUP_UPDATED` que esté armando. Todos los
+   * caminos de mutación (`applyGroupUpdate`, `applyGroupMerge`,
+   * `doApplyGroupSplit`, recompute por reglas, renumeración de ADR-028) pasan
+   * por acá — un solo punto de verdad.
+   */
+  private emitReplacementChangeIfNeeded(
+    session: Session,
+    group: InternalGroup,
+    before: Pick<InternalGroup, "replacementMode" | "replacementValue">,
+  ): ReadonlyArray<keyof EntityGroup> {
+    const changed: (keyof EntityGroup)[] = [];
+    if (group.replacementMode !== before.replacementMode) changed.push("replacementMode");
+    if (group.replacementValue !== before.replacementValue) changed.push("replacementValue");
+    if (changed.length === 0) return changed;
+
+    this.ctx?.bus.emit(EventChannel.Grouping, EngineEvents.GROUP_REPLACEMENT_CHANGED, {
+      documentId: session.documentId,
+      groupId: group.id,
+      mode: group.replacementMode,
+      value: group.replacementValue,
+    });
+    return changed;
   }
 
   // ─── Internos: helpers de request ───

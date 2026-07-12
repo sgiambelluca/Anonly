@@ -3,16 +3,13 @@
  * en modo `placeholder` (`[<TYPE_LABEL> <NN>]`) y `mask` (Grouping_Engine.md
  * §"Algoritmos clave" > "replacementValue por modo"; adr/ADR-012-Replacement-Modes.md).
  *
+ * `MASK_FORMAT_BY_TYPE` es solo el FALLBACK de `mask` (cuando ningún member
+ * del grupo trae `Occurrence.maskFormat`, p.ej. grupos formados solo por
+ * NER). La resolución real por grupo — que sí distingue patente vieja de
+ * Mercosur — vive en `grouping.engine.ts` (`resolveMaskFormatFromRecords`,
+ * ADR-029). El valor de `Plate` acá es el fallback Mercosur (vigente).
+ *
  * AMBIGÜEDAD DOCUMENTADA (reportada, no bloqueante — ver mensaje final del PR):
- * - `MASK_FORMAT_BY_TYPE`: ADR-012 §"Formato por tipo para mask" da un valor
- *   fijo por tipo para 12 de los 13 EntityType, EXCEPTO Plate, que lista DOS
- *   formatos ("XXX XXX" Mercosur / "XXX XXXX" vieja) sin indicar cuál usa un
- *   grupo (Grouping opera a nivel de EntityType, no conoce qué sub-patrón de
- *   Regex generó cada Occurrence — `Occurrence` no tiene un campo
- *   "patternId"). Se asume "XXX XXX" (Mercosur, formato AR vigente) como
- *   default. Custom es explícitamente "configurable" en el ADR sin mecanismo
- *   de configuración definido en este Hito; se usa "XXXXXXXX" como placeholder
- *   fijo.
  * - `TYPE_LABEL_ES`: ADR-012 §"Formato para placeholder" solo da 4 ejemplos
  *   (DNI, PERSONA, DIRECCION, CUIT) de los 13 valores de `EntityType`; no hay
  *   una tabla completa en Contracts.md, Grouping_Engine.md, Data_Model.md ni
@@ -53,8 +50,9 @@ export const MASK_FORMAT_BY_TYPE: Readonly<Record<EntityType, string>> = {
   [EntityType.Address]: "XXXXXX XXX",
   [EntityType.Date]: "XX/XX/XXXX",
   [EntityType.License]: "XX-XXXX-XX",
-  // Asunción documentada arriba: variante Mercosur (formato AR vigente).
-  [EntityType.Plate]: "XXX XXX",
+  // Fallback Mercosur, vigente desde 2016 (ADR-029 §2). Solo se usa si
+  // ningún member del grupo trae `Occurrence.maskFormat`.
+  [EntityType.Plate]: "XX XXX XX",
   [EntityType.Custom]: "XXXXXXXX",
 };
 

@@ -13,6 +13,7 @@ import {
   type EntityGroup,
   type EntityGroupCreated,
   type EntityGroupRemoved,
+  type EntityGroupUpdated,
   type GroupingFinished,
   type GroupReplacementChanged,
   type GroupUpdateRequested,
@@ -795,5 +796,242 @@ describe("GroupingEngine — edge cases", () => {
     const { groups } = engine.getSnapshot("doc-1");
     expect(groups).toHaveLength(1);
     expect(groups[0]?.type).toBe(EntityType.Person);
+  });
+
+  // Caso 21 (§13, ADR-028): las ocurrencias llegan fuera de orden documental
+  // (NER procesa por prioridad visible) — los índices provisionales reflejan
+  // el orden de llegada; finishSession renumera canónicamente por posición
+  // documental antes de emitir GROUPING_FINISHED.
+  it("canonical renumbering at finishSession emits updates and recomputes placeholders", async () => {
+    // Llega primero (índice provisional 1) pero está SEGUNDO en el documento
+    // (pageIndex 1).
+    const occLate = makeOccurrence({
+      value: "99999999",
+      normalizedValue: "99999999",
+      pageIndex: 1,
+      bbox: makeBBox(10, 50, 60, 12),
+    });
+    // Llega segundo (índice provisional 2) pero está PRIMERO en el documento
+    // (pageIndex 0).
+    const occEarly = makeOccurrence({
+      value: "11111111",
+      normalizedValue: "11111111",
+      pageIndex: 0,
+      bbox: makeBBox(10, 50, 60, 12),
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: occLate,
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: occEarly,
+    });
+
+    const provisional = engine.getSnapshot("doc-1").groups;
+    const lateGroup = provisional.find((g) => g.canonicalValue === "99999999");
+    const earlyGroup = provisional.find((g) => g.canonicalValue === "11111111");
+    expect(lateGroup?.indexInType).toBe(1);
+    expect(earlyGroup?.indexInType).toBe(2);
+
+    // Edición manual sobre el grupo que va a BAJAR de índice (caso 17/21: se
+    // preserva, solo cambia el número; y al no ser placeholder no se
+    // recalcula replacementValue en la renumeración).
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: lateGroup!.id,
+      patch: { replacementMode: ReplacementMode.Mask },
+    });
+
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.REGEX_FINISHED, {
+      documentId: "doc-1",
+      occurrenceCount: 2,
+      durationMs: 1,
+    });
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.NER_FINISHED, {
+      documentId: "doc-1",
+      occurrenceCount: 0,
+      durationMs: 1,
+    });
+
+    const final = engine.getSnapshot("doc-1").groups;
+    const finalEarly = final.find((g) => g.canonicalValue === "11111111");
+    const finalLate = final.find((g) => g.canonicalValue === "99999999");
+    // Canónico: el de pageIndex 0 (documentalmente primero) pasa a índice 1.
+    expect(finalEarly?.indexInType).toBe(1);
+    expect(finalLate?.indexInType).toBe(2);
+    // La edición manual se preservó: solo cambió el número.
+    expect(finalLate?.replacementMode).toBe(ReplacementMode.Mask);
+
+    const updatedCalls = busEmitSpy.mock.calls.filter(
+      ([channel, event]) =>
+        channel === EventChannel.Grouping && event === EngineEvents.ENTITY_GROUP_UPDATED,
+    );
+    const updatedGroupIds = updatedCalls.map((c) => (c[2] as EntityGroupUpdated).group.id);
+    expect(updatedGroupIds).toEqual(expect.arrayContaining([earlyGroup!.id, lateGroup!.id]));
+    for (const call of updatedCalls) {
+      expect((call[2] as EntityGroupUpdated).changes).toContain("indexInType");
+    }
+
+    // Solo el grupo en modo placeholder (earlyGroup) recalcula
+    // replacementValue y emite GROUP_REPLACEMENT_CHANGED al renumerar.
+    const replacementChangedCalls = busEmitSpy.mock.calls.filter(
+      ([channel, event]) =>
+        channel === EventChannel.Grouping && event === EngineEvents.GROUP_REPLACEMENT_CHANGED,
+    );
+    expect(replacementChangedCalls).toHaveLength(1);
+    expect((replacementChangedCalls[0]?.[2] as GroupReplacementChanged).groupId).toBe(
+      earlyGroup!.id,
+    );
+    expect(finalEarly?.replacementValue).toBe("[DNI 01]");
+  });
+
+  // Caso 22 (§13, ADR-029): grupo "mixto" (members con distinto maskFormat)
+  // — solo alcanzable por fusión manual, ya que dos variantes de patente no
+  // se agrupan automáticamente (normalizedValue distinto, fuzzy < 0.88).
+  it("mixed maskFormat group resolves by frequency then document order", async () => {
+    // Empate 1 vs 1 en frecuencia tras la fusión: decide la primera
+    // aparición documental (pageIndex, bbox.y, bbox.x — mismo comparador de
+    // ADR-028). La Mercosur aparece antes en el documento (pageIndex 0).
+    const occOld = makeOccurrence({
+      entityType: EntityType.Plate,
+      value: "ABC 123",
+      normalizedValue: "platevieja",
+      maskFormat: "XXX XXX",
+      pageIndex: 1,
+      bbox: makeBBox(10, 50, 60, 12),
+    });
+    const occMercosur = makeOccurrence({
+      entityType: EntityType.Plate,
+      value: "AB 123 CD",
+      normalizedValue: "platemercosur",
+      maskFormat: "XX XXX XX",
+      pageIndex: 0,
+      bbox: makeBBox(10, 50, 70, 12),
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: occOld,
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: occMercosur,
+    });
+
+    const groups = engine.getSnapshot("doc-1").groups;
+    expect(groups).toHaveLength(2);
+    const groupOld = groups.find((g) => g.canonicalValue === "ABC 123");
+    const groupMercosur = groups.find((g) => g.canonicalValue === "AB 123 CD");
+
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: groupOld!.id,
+      patch: { replacementMode: ReplacementMode.Mask },
+    });
+
+    const merged = await engine.applyGroupMerge({
+      documentId: "doc-1",
+      sourceGroupId: groupMercosur!.id,
+      targetGroupId: groupOld!.id,
+    });
+
+    expect(merged.replacementMode).toBe(ReplacementMode.Mask);
+    expect(merged.replacementValue).toBe("XX XXX XX");
+  });
+
+  it("merge emits GROUP_REPLACEMENT_CHANGED when replacementValue changes", async () => {
+    for (const value of ["11111111", "22222222"]) {
+      ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: makeOccurrence({ value, normalizedValue: value }),
+      });
+    }
+    const [g1, g2] = engine.getSnapshot("doc-1").groups;
+
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+    // Fusiona g1 (índice menor) como source dentro de g2 (target, índice
+    // mayor): el target baja a índice 1, su placeholder pasa de
+    // "[DNI 02]" a "[DNI 01]" — replacementValue cambia de verdad.
+    const merged = await engine.applyGroupMerge({
+      documentId: "doc-1",
+      sourceGroupId: g1!.id,
+      targetGroupId: g2!.id,
+    });
+
+    expect(merged.replacementValue).toBe("[DNI 01]");
+    const replacementChangedCall = busEmitSpy.mock.calls.find(
+      ([channel, event]) =>
+        channel === EventChannel.Grouping && event === EngineEvents.GROUP_REPLACEMENT_CHANGED,
+    );
+    expect(replacementChangedCall).toBeDefined();
+    const payload = replacementChangedCall?.[2] as GroupReplacementChanged;
+    expect(payload.groupId).toBe(g2!.id);
+    expect(payload.value).toBe("[DNI 01]");
+  });
+
+  // Extiende "mixed maskFormat group resolves by frequency then document
+  // order": tras dividir un grupo mixto, AMBOS grupos resultantes deben
+  // recalcular su mask según sus members finales — antes del fix, el grupo
+  // "merged" (original) no recalculaba y quedaba con el valor stale del
+  // grupo mixto.
+  it("split recomputes mask of both resulting groups (mixed group)", async () => {
+    const occOld = makeOccurrence({
+      entityType: EntityType.Plate,
+      value: "ABC 123",
+      normalizedValue: "platevieja",
+      maskFormat: "XXX XXX",
+      pageIndex: 0,
+      bbox: makeBBox(10, 50, 60, 12),
+    });
+    const occMercosur = makeOccurrence({
+      entityType: EntityType.Plate,
+      value: "AB 123 CD",
+      normalizedValue: "platemercosur",
+      maskFormat: "XX XXX XX",
+      pageIndex: 1,
+      bbox: makeBBox(10, 50, 70, 12),
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: occOld,
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: occMercosur,
+    });
+
+    const groups = engine.getSnapshot("doc-1").groups;
+    const groupOld = groups.find((g) => g.canonicalValue === "ABC 123");
+    const groupMercosur = groups.find((g) => g.canonicalValue === "AB 123 CD");
+
+    // Regla de tipo (en vez de applyGroupUpdate sobre un solo grupo): así el
+    // grupo NUEVO que cree el split también nace en modo mask.
+    await engine.applyRuleCreated({
+      documentId: "doc-1",
+      rule: makeRule("type", ReplacementMode.Mask, { entityType: EntityType.Plate }),
+    });
+
+    // Empate 1 vs 1: gana la vieja (pageIndex 0, antes que Mercosur en 1).
+    const merged = await engine.applyGroupMerge({
+      documentId: "doc-1",
+      sourceGroupId: groupMercosur!.id,
+      targetGroupId: groupOld!.id,
+    });
+    expect(merged.replacementMode).toBe(ReplacementMode.Mask);
+    expect(merged.replacementValue).toBe("XXX XXX");
+
+    // Divide sacando la ocurrencia vieja: el grupo remanente se queda solo
+    // con la Mercosur.
+    const { merged: remaining, created } = await engine.applyGroupSplit({
+      documentId: "doc-1",
+      groupId: merged.id,
+      occurrenceIds: [occOld.id],
+    });
+
+    expect(created.replacementMode).toBe(ReplacementMode.Mask);
+    expect(created.replacementValue).toBe("XXX XXX");
+    expect(remaining.replacementMode).toBe(ReplacementMode.Mask);
+    expect(remaining.replacementValue).toBe("XX XXX XX");
   });
 });

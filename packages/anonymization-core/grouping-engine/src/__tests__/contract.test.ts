@@ -378,4 +378,68 @@ describe("GroupingEngine — contract tests", () => {
     expect(resolved.resolvedMode).toBe(ReplacementMode.Mask);
     expect(engine.getSnapshot("doc-1").groups[0]?.replacementMode).toBe(ReplacementMode.Mask);
   });
+
+  // ADR-028: indexInType es provisional (orden de llegada) durante la sesión
+  // y se renumera canónicamente en finishSession por posición documental —
+  // el mismo conjunto de Occurrence debe terminar con los mismos índices sin
+  // importar en qué orden llegaron los ENTITY_FOUND.
+  it("final indexInType deterministic regardless of event arrival order", async () => {
+    const occFirst = makeOccurrence({
+      value: "22222222",
+      normalizedValue: "22222222",
+      pageIndex: 0,
+      bbox: makeBBox(10, 50, 60, 12),
+    });
+    const occMiddle = makeOccurrence({
+      value: "33333333",
+      normalizedValue: "33333333",
+      pageIndex: 1,
+      bbox: makeBBox(10, 50, 60, 12),
+    });
+    const occLast = makeOccurrence({
+      value: "11111111",
+      normalizedValue: "11111111",
+      pageIndex: 2,
+      bbox: makeBBox(10, 50, 60, 12),
+    });
+
+    async function run(order: readonly [typeof occFirst, typeof occFirst, typeof occFirst]) {
+      const runEngine = new GroupingEngine();
+      const runCtx = createEngineContext();
+      await runEngine.init(runCtx);
+      runEngine.startSession("doc-1");
+      for (const occurrence of order) {
+        runCtx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+          documentId: "doc-1",
+          occurrence,
+        });
+      }
+      runCtx.bus.emit(EventChannel.Regex, EngineEvents.REGEX_FINISHED, {
+        documentId: "doc-1",
+        occurrenceCount: order.length,
+        durationMs: 1,
+      });
+      runCtx.bus.emit(EventChannel.Ner, EngineEvents.NER_FINISHED, {
+        documentId: "doc-1",
+        occurrenceCount: 0,
+        durationMs: 1,
+      });
+      const byValue = new Map(
+        runEngine.getSnapshot("doc-1").groups.map((g) => [g.canonicalValue, g.indexInType]),
+      );
+      await runEngine.dispose();
+      return byValue;
+    }
+
+    const arrivalOrderA = await run([occLast, occFirst, occMiddle]);
+    const arrivalOrderB = await run([occMiddle, occLast, occFirst]);
+
+    const expected = new Map([
+      ["22222222", 1],
+      ["33333333", 2],
+      ["11111111", 3],
+    ]);
+    expect(arrivalOrderA).toEqual(expected);
+    expect(arrivalOrderB).toEqual(expected);
+  });
 });
