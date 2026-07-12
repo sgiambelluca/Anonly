@@ -130,8 +130,12 @@ Orden sugerido (cada hito = un set de PRs):
 - Pendiente: verificación de integridad en runtime del modelo (ADR-018 punto 3, `core/NER_Engine.md` §15.19) → Hito 11.
 
 ### Hito 6 — Grouping Engine
-- Implementar `grouping-engine` con matching, conflictos, reglas, fusión/división.
-- Tests completos (es el motor más complejo en lógica).
+- ~~Implementar `grouping-engine` con matching, conflictos, reglas, fusión/división.~~ **CERRADO** (PR #16).
+- ~~Tests completos (es el motor más complejo en lógica).~~ **CERRADO** — `contract.test.ts`, `unit.test.ts`, `edge.test.ts`, `snapshot.test.ts`, `cancel.test.ts` commiteados en `packages/anonymization-core/grouping-engine/src/__tests__/` (66 tests), cobertura 96.95% líneas.
+- Renumeración canónica de `indexInType` en `finishSession` (`adr/ADR-028-IndexInType-Renumeracion-Canonica.md`): resuelve la contradicción entre `06_Pipeline.md` §8 (orden documental) y el pseudocódigo original del spec (orden de llegada) — los índices son provisionales durante la sesión y se renumeran una sola vez, antes de `GROUPING_FINISHED`.
+- `Occurrence.maskFormat` opcional y resolución de `mask` por grupo (`adr/ADR-029-Occurrence-MaskFormat-Plate-Variantes.md`): corrige de paso un error de datos en `adr/ADR-012-Replacement-Modes.md` (los formatos de máscara de patente vieja/Mercosur estaban invertidos).
+- Pendiente: PR chico de `regex-engine` para poblar `Occurrence.maskFormat` desde el patrón matcheado y corregir `default-ar.ts` (ADR-029 §4) → no bloqueante, el fallback actual mantiene el comportamiento previo sin regresión.
+- Los tests de integración con Regex/NER reales (ambos emiten `ENTITY_FOUND`) viven en `tests/integration/` y son Hito 9 (mismo criterio que Hito 5).
 
 ### Hito 7 — Render Engine
 - Implementar `render-engine` con OffscreenCanvas, 4 modos, delta render, LRU.
