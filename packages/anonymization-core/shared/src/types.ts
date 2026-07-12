@@ -80,6 +80,8 @@ export interface Occurrence {
   readonly source: DetectionSource;
   readonly confidence: number;
   readonly entityType: EntityType;
+  /** Formato de máscara del patrón que matcheó (Regex lo copia de `RegexPattern.maskFormat`; ausente en NER). ADR-029. */
+  readonly maskFormat?: string;
   readonly wordSpan?: WordSpan;
 }
 

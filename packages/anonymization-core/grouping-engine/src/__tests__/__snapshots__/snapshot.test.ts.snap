@@ -1,0 +1,204 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`GroupingEngine — snapshot > snapshot of groups for text-10p.pdf stable 1`] = `
+{
+  "conflictCount": 0,
+  "groupCount": 7,
+  "groups": [
+    {
+      "aliases": [
+        "20-34567891-4",
+      ],
+      "canonicalValue": "20-34567891-4",
+      "createdAt": 1234567890000,
+      "enabled": true,
+      "indexInType": 1,
+      "members": [
+        {
+          "bbox": {
+            "height": 12,
+            "width": 110,
+            "x": 250,
+            "y": 100,
+          },
+          "occurrenceId": "occ-cuit-1",
+          "pageIndex": 0,
+          "source": "regex",
+        },
+      ],
+      "replacementMode": "placeholder",
+      "replacementValue": "[CUIT 01]",
+      "type": "CUIT",
+      "updatedAt": 1234567890000,
+    },
+    {
+      "aliases": [
+        "15/03/2022",
+      ],
+      "canonicalValue": "15/03/2022",
+      "createdAt": 1234567890000,
+      "enabled": true,
+      "indexInType": 1,
+      "members": [
+        {
+          "bbox": {
+            "height": 12,
+            "width": 80,
+            "x": 10,
+            "y": 140,
+          },
+          "occurrenceId": "occ-date-1",
+          "pageIndex": 1,
+          "source": "regex",
+        },
+      ],
+      "replacementMode": "placeholder",
+      "replacementValue": "[FECHA 01]",
+      "type": "DATE",
+      "updatedAt": 1234567890000,
+    },
+    {
+      "aliases": [
+        "34.567.891",
+        "34567891",
+      ],
+      "canonicalValue": "34.567.891",
+      "createdAt": 1234567890000,
+      "enabled": true,
+      "indexInType": 1,
+      "members": [
+        {
+          "bbox": {
+            "height": 12,
+            "width": 80,
+            "x": 150,
+            "y": 100,
+          },
+          "occurrenceId": "occ-dni-1",
+          "pageIndex": 0,
+          "source": "regex",
+        },
+        {
+          "bbox": {
+            "height": 12,
+            "width": 70,
+            "x": 150,
+            "y": 130,
+          },
+          "occurrenceId": "occ-dni-2",
+          "pageIndex": 0,
+          "source": "regex",
+        },
+      ],
+      "replacementMode": "placeholder",
+      "replacementValue": "[DNI 01]",
+      "type": "DNI",
+      "updatedAt": 1234567890000,
+    },
+    {
+      "aliases": [
+        "juan.perez@example.com",
+      ],
+      "canonicalValue": "juan.perez@example.com",
+      "createdAt": 1234567890000,
+      "enabled": true,
+      "indexInType": 1,
+      "members": [
+        {
+          "bbox": {
+            "height": 12,
+            "width": 180,
+            "x": 10,
+            "y": 50,
+          },
+          "occurrenceId": "occ-email-1",
+          "pageIndex": 1,
+          "source": "regex",
+        },
+      ],
+      "replacementMode": "placeholder",
+      "replacementValue": "[EMAIL 01]",
+      "type": "EMAIL",
+      "updatedAt": 1234567890000,
+    },
+    {
+      "aliases": [
+        "Empresa S.A.",
+      ],
+      "canonicalValue": "Empresa S.A.",
+      "createdAt": 1234567890000,
+      "enabled": true,
+      "indexInType": 1,
+      "members": [
+        {
+          "bbox": {
+            "height": 12,
+            "width": 100,
+            "x": 10,
+            "y": 110,
+          },
+          "occurrenceId": "occ-org-1",
+          "pageIndex": 1,
+          "source": "ner",
+        },
+      ],
+      "replacementMode": "placeholder",
+      "replacementValue": "[ORGANIZACION 01]",
+      "type": "ORGANIZATION",
+      "updatedAt": 1234567890000,
+    },
+    {
+      "aliases": [
+        "Juan Pérez",
+      ],
+      "canonicalValue": "Juan Pérez",
+      "createdAt": 1234567890000,
+      "enabled": true,
+      "indexInType": 1,
+      "members": [
+        {
+          "bbox": {
+            "height": 12,
+            "width": 90,
+            "x": 10,
+            "y": 100,
+          },
+          "occurrenceId": "occ-person-1",
+          "pageIndex": 0,
+          "source": "ner",
+        },
+      ],
+      "replacementMode": "placeholder",
+      "replacementValue": "[PERSONA 01]",
+      "type": "PERSON",
+      "updatedAt": 1234567890000,
+    },
+    {
+      "aliases": [
+        "+54 11 1234-5678",
+      ],
+      "canonicalValue": "+54 11 1234-5678",
+      "createdAt": 1234567890000,
+      "enabled": true,
+      "indexInType": 1,
+      "members": [
+        {
+          "bbox": {
+            "height": 12,
+            "width": 140,
+            "x": 10,
+            "y": 80,
+          },
+          "occurrenceId": "occ-phone-1",
+          "pageIndex": 1,
+          "source": "regex",
+        },
+      ],
+      "replacementMode": "placeholder",
+      "replacementValue": "[TELEFONO 01]",
+      "type": "PHONE",
+      "updatedAt": 1234567890000,
+    },
+  ],
+}
+`;
