@@ -95,6 +95,12 @@ export default defineConfig({
           branches: 80,
           functions: 80,
         },
+        "packages/anonymization-core/grouping-engine/src/**": {
+          lines: 85,
+          statements: 85,
+          branches: 80,
+          functions: 80,
+        },
       },
     },
     pool: "forks",
