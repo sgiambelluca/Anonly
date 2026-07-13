@@ -1,12 +1,14 @@
-<!-- CONTEXT: scope=render-engine | dependencias=core/Contracts.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,ADR-004-Rendering.md,ADR-012-Replacement-Modes.md | audiencia=IA-implementador | fase=3 -->
+<!-- CONTEXT: scope=render-engine | dependencias=core/Contracts.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,ADR-004-Rendering.md,ADR-012-Replacement-Modes.md,ADR-030-RenderEngine-LoadDocument.md | audiencia=IA-implementador | fase=3 -->
 
 # Render Engine — Spec de Motor
 
 > Renderiza páginas del PDF (original o anonimado) a imágenes usando OffscreenCanvas en Web Workers. Produce highlight de grupos habilitados y aplica reemplazos visualmente según `ReplacementMode`. Soporta preview incremental y render full para export.
 
 **EngineId**: `render`
-**Versión del spec**: 1.0.0
-**Última actualización**: 2026-07-11
+**Versión del spec**: 1.1.0
+**Última actualización**: 2026-07-12
+
+> **Nota (ADR-030, 2026-07-12)**: se agregan `loadDocument`/`unloadDocument` a la interfaz pública (§6). El motor obtiene el PDF fuente por invocación directa del caller (Orchestrator en Hito 9; façade/tests en Hito 7) y mantiene un `Map<documentId, PDFDocumentProxy>` interno. `RenderPageInput` y los eventos no cambian.
 
 > **Nota (ADR-027, 2026-07-11)**: el tipo de config canónico es `RenderConfig` (Contracts.md §6); el alias `RenderEngineConfig` de §6/§15.2 queda eliminado (mismo patrón que ADR-021 §2, ADR-023 §1 y ADR-026).
 
@@ -23,6 +25,7 @@ Recibir requests de renderizado por página (`RENDER_REQUESTED` o invocación di
 ## 2. Responsabilidades
 
 - Renderizar páginas del PDF a `ImageData` o `Blob` (PNG/JPEG) usando OffscreenCanvas en `RenderPool`.
+- Cargar el PDF fuente por `documentId` (`loadDocument`) y mantener un `Map` interno de `PDFDocumentProxy` (pdfjs-dist) hasta `unloadDocument`/`dispose` (ADR-030).
 - Para `kind = "original"`: render del PDF sin reemplazos, con highlight de grupos habilitados (borde color sobre bbox).
 - Para `kind = "anonymized"`: render del PDF con reemplazos aplicados visualmente según `ReplacementMode`:
   - `placeholder` → texto `[<TYPE> <NN>]` sobre bbox.
@@ -102,12 +105,21 @@ export interface RenderPageOutput {
 export class RenderEngine implements IEngine {
   readonly id = EngineId.Render;
   init(ctx: EngineContext): Promise<void>;
+  loadDocument(documentId: string, buffer: ArrayBuffer): Promise<void>;
+  unloadDocument(documentId: string): Promise<void>;
   renderPage(input: RenderPageInput, ctx: EngineContext): Promise<RenderPageOutput>;
   renderPages(inputs: ReadonlyArray<RenderPageInput>, ctx: EngineContext): Promise<ReadonlyArray<RenderPageOutput>>;
   requestDeltaRender(documentId: string, groupIds: ReadonlyArray<string>): void;
   dispose(): Promise<void>;
 }
 ```
+
+Semántica de `loadDocument`/`unloadDocument` (ADR-030):
+
+- `loadDocument` invoca `getDocument({ data: buffer })` de pdfjs-dist y guarda el `PDFDocumentProxy` en un `Map<string, PDFDocumentProxy>` interno. **Toma posesión del buffer**: el caller no debe reutilizarlo (coherente con la semántica de transferencia del Hito 9).
+- `loadDocument` sobre un `documentId` ya cargado destruye el proxy anterior y carga el nuevo (re-carga determinística, sin leak).
+- `unloadDocument` destruye el proxy y libera la entrada; sobre un `documentId` desconocido es no-op idempotente.
+- `dispose()` destruye todos los proxies cargados.
 
 ---
 
@@ -136,6 +148,8 @@ Canal: `EventChannel.Render`.
 
 Canales escuchados: `EventChannel.UI`, `EventChannel.Grouping`.
 
+> Precondición (ADR-030): estas vías por eventos requieren que el documento esté cargado vía `loadDocument`. Si el `documentId` no está cargado, el motor loguea `warn` y no hace nada (no hay caller al que lanzarle) — mismo tratamiento que el Orchestrator da a `groupId` inexistente (06_Pipeline.md §11).
+
 ---
 
 ## 9. Entradas
@@ -154,6 +168,7 @@ RenderPageInput {
 ```
 
 **Restricciones**:
+- El `documentId` debe haber sido cargado con `loadDocument` antes de `renderPage`/`renderPages`; si no, `InvalidInputError` (ADR-030). En las vías por eventos, documento no cargado → `warn` + no-op (ver §8).
 - `pageIndex ∈ [0, pageCount)`.
 - Si `kind = "anonymized"`, `replacements` debe estar poblado.
 - `scale` si se omite usa `previewScale` o `fullScale` según `mode`.
@@ -183,10 +198,10 @@ El `ImageData` se transfiere zero-copy al host. El host lo convierte a `Blob` y 
 |---|---|---|---|---|
 | `RENDER_PAGE_FAILED` | `RenderPageFailedError` | error de renderizado de una página (PDF.js lanza, OOM en canvas) | sí | reintentar 1 vez, si persiste emitir `PREVIEW_PAGE_FAILED` y continuar con otras páginas |
 | `RENDER_TIMEOUT` | `RenderTimeoutError` | timeout (default 10 s por página preview, 30 s full) | sí | reintentar 1 vez |
-| `RENDER_FAILED` | `RenderFailedError` | error fatal en batch | no | emitir `RENDER_FAILED`, abortar batch |
+| `RENDER_FAILED` | `RenderFailedError` | error fatal en batch, o `getDocument()` falla en `loadDocument` (PDF ilegible para pdfjs; excepcional, la etapa 1 ya lo validó — ADR-030) | no | emitir `RENDER_FAILED`, abortar batch |
 | `ENGINE_NOT_INITIALIZED` | `EngineNotInitializedError` | `renderPage` antes de `init` | no | bug del caller |
 | `ENGINE_DISPOSED` | `EngineDisposedError` | `renderPage` tras `dispose` | no | bug del caller |
-| `INVALID_INPUT` | `InvalidInputError` | input null/undefined o `pageIndex` fuera de rango | no | bug del caller |
+| `INVALID_INPUT` | `InvalidInputError` | input null/undefined, `pageIndex` fuera de rango, `documentId` no cargado (`loadDocument` pendiente), o buffer vacío/null en `loadDocument` (ADR-030) | no | bug del caller |
 
 `retryable`: `RENDER_PAGE_FAILED = true`, `RENDER_TIMEOUT = true`. Resto `false`.
 
@@ -224,6 +239,8 @@ El `ImageData` se transfiere zero-copy al host. El host lo convierte a `Blob` y 
 13. **`renderPage` tras `dispose`**: lanza `EngineDisposedError`.
 14. **OffscreenCanvas no disponible (Safari viejo)**: fallback a canvas en main thread (más lento). Detectar con `typeof OffscreenCanvas`. v1.0 puede requerir OffscreenCanvas y mostrar warning si no está.
 15. **PDF con rotate (páginas rotadas 90/180/270)**: el render respeta la rotación de la página. Los bbox están en coords de página ya rotada (lo garantiza PDF Engine).
+16. **`renderPage` sin `loadDocument` previo**: lanza `InvalidInputError`. Por eventos (`RENDER_REQUESTED`, delta render): `warn` + no-op (ADR-030).
+17. **`loadDocument` dos veces con el mismo `documentId`**: destruye el proxy anterior y carga el nuevo. `unloadDocument` de un id desconocido: no-op idempotente (ADR-030).
 
 ---
 
@@ -249,6 +266,11 @@ El `ImageData` se transfiere zero-copy al host. El host lo convierte a `Blob` y 
 | `LRU cache evicts oldest when full` | `unit.test.ts` | unit | cache |
 | `cache hit skips render` | `unit.test.ts` | unit | cache |
 | `rotated page renders with correct orientation` | `edge.test.ts` | edge | caso 15 |
+| `throws InvalidInputError when document not loaded` | `edge.test.ts` | edge | caso 16 |
+| `RENDER_REQUESTED for unloaded document warns and no-ops` | `edge.test.ts` | edge | caso 16 |
+| `loadDocument twice replaces previous proxy` | `edge.test.ts` | edge | caso 17 |
+| `unloadDocument on unknown id is a no-op` | `edge.test.ts` | edge | caso 17 |
+| `dispose destroys loaded PDFDocumentProxies` | `contract.test.ts` | contract | limpieza (ADR-030) |
 | `1000 pages only render visible + adjacent` | `stress.test.ts` (en `tests/stress/`) | stress | caso 10 |
 | `OffscreenCanvas fallback when unavailable` | `edge.test.ts` | edge | caso 14 |
 
@@ -263,21 +285,22 @@ Fixtures: `tests/fixtures/text-10p.pdf`, `scanned-10p.pdf`, una página con rota
 - [ ] 3. Definir `errors.ts` con `RenderPageFailedError`, `RenderTimeoutError`, `RenderFailedError`.
 - [ ] 4. Implementar `render.engine.ts` respetando `IEngine` y la firma pública de §6.
 - [ ] 5. Implementar `init` (crear `RenderPool` con OffscreenCanvas workers, fallback a main thread si no disponible).
-- [ ] 6. Implementar `renderPage` con `AbortSignal`, transferencia de `ImageData` zero-copy, `PREVIEW_UPDATED` por página.
-- [ ] 7. Implementar los 4 modos de reemplazo visual (mask/synthetic/placeholder/redact).
-- [ ] 8. Implementar highlight de grupos habilitados y conflicto en `kind = "original"`.
-- [ ] 9. Implementar `renderPages` (paralelo, prioridad visible-first).
-- [ ] 10. Implementar `requestDeltaRender` (index `pageIndex → groupIds`, lookup, re-render solo afectadas).
-- [ ] 11. Implementar LRU cache en host (clave `documentId:pageIndex:kind:mode:hash(replacements)`).
-- [ ] 12. Implementar `dispose` (libera OffscreenCanvas y workers inactivos).
-- [ ] 13. Escuchar `RENDER_REQUESTED`, `GROUP_REPLACEMENT_CHANGED`, `GROUP_TOGGLED` del bus.
-- [ ] 14. Escribir `contract.test.ts` con todos los tests contractuales.
-- [ ] 15. Escribir `unit.test.ts` con cobertura ≥ 85%.
-- [ ] 16. Escribir `edge.test.ts` con todos los casos límite.
-- [ ] 17. Ejecutar `pnpm lint && pnpm typecheck && pnpm test` verde.
-- [ ] 18. Verificar `index.ts` exporta solo `RenderEngine`, tipos, errores.
-- [ ] 19. Verificar imports sin dependencias prohibidas (`grep -r 'react\|tesseract\|onnx\|transformers\|pdf-lib' src/`).
-- [ ] 20. Verificar test de cancelación < 200 ms.
+- [ ] 6. Implementar `loadDocument`/`unloadDocument` (`Map<documentId, PDFDocumentProxy>` interno, posesión del buffer, re-carga determinística; ADR-030).
+- [ ] 7. Implementar `renderPage` con `AbortSignal`, transferencia de `ImageData` zero-copy, `PREVIEW_UPDATED` por página.
+- [ ] 8. Implementar los 4 modos de reemplazo visual (mask/synthetic/placeholder/redact).
+- [ ] 9. Implementar highlight de grupos habilitados y conflicto en `kind = "original"`.
+- [ ] 10. Implementar `renderPages` (paralelo, prioridad visible-first).
+- [ ] 11. Implementar `requestDeltaRender` (index `pageIndex → groupIds`, lookup, re-render solo afectadas).
+- [ ] 12. Implementar LRU cache en host (clave `documentId:pageIndex:kind:mode:hash(replacements)`).
+- [ ] 13. Implementar `dispose` (libera OffscreenCanvas, workers inactivos y destruye los `PDFDocumentProxy` cargados; ADR-030).
+- [ ] 14. Escuchar `RENDER_REQUESTED`, `GROUP_REPLACEMENT_CHANGED`, `GROUP_TOGGLED` del bus.
+- [ ] 15. Escribir `contract.test.ts` con todos los tests contractuales.
+- [ ] 16. Escribir `unit.test.ts` con cobertura ≥ 85%.
+- [ ] 17. Escribir `edge.test.ts` con todos los casos límite.
+- [ ] 18. Ejecutar `pnpm lint && pnpm typecheck && pnpm test` verde.
+- [ ] 19. Verificar `index.ts` exporta solo `RenderEngine`, tipos, errores.
+- [ ] 20. Verificar imports sin dependencias prohibidas (`grep -r 'react\|tesseract\|onnx\|transformers\|pdf-lib' src/`).
+- [ ] 21. Verificar test de cancelación < 200 ms.
 
 ---
 
@@ -288,3 +311,4 @@ Fixtures: `tests/fixtures/text-10p.pdf`, `scanned-10p.pdf`, una página con rota
 - `architecture/07_Performance_Strategy.md` §3 (virtualización), §6 (cache), §10 (compresión)
 - `adr/ADR-004-Rendering.md` (reconstrucción)
 - `adr/ADR-012-Replacement-Modes.md` (modos visuales)
+- `adr/ADR-030-RenderEngine-LoadDocument.md` (carga del PDF fuente)

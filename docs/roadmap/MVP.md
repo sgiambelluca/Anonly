@@ -140,6 +140,7 @@ Orden sugerido (cada hito = un set de PRs):
 ### Hito 7 — Render Engine
 - Implementar `render-engine` con OffscreenCanvas, 4 modos, delta render, LRU.
 - Tests con visores en headless browser.
+- `RenderEngine.loadDocument`/`unloadDocument` (`adr/ADR-030-RenderEngine-LoadDocument.md`): resuelve la ambigüedad reportada por el implementador (ningún doc definía cómo Render obtiene el PDF fuente por `documentId`); spec de Render a v1.1.0, fe de erratas en `05_Worker_Architecture.md` §7.4 (decía pdf-lib).
 
 ### Hito 8 — Export Engine
 - Implementar `export-engine` con pdf-lib.
