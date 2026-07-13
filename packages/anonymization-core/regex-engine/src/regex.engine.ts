@@ -40,6 +40,7 @@ interface RawMatch {
   readonly rawValue: string;
   readonly normalizedValue: string;
   readonly checksumPassed: boolean;
+  readonly maskFormat: string;
 }
 
 interface WordMapping {
@@ -80,6 +81,7 @@ function runPattern(pattern: RegexPattern, text: string): RawMatch[] {
       rawValue,
       normalizedValue,
       checksumPassed,
+      maskFormat: pattern.maskFormat,
     });
   }
 
@@ -212,6 +214,11 @@ function buildOccurrence(match: RawMatch, page: Page): Occurrence {
     source: DetectionSource.Regex,
     confidence: 1.0,
     entityType: match.entityType,
+    // ADR-029: maskFormat se copia del RegexPattern que matcheó (vía RawMatch,
+    // ver runPattern). Siempre es un string definido acá (RegexPattern.maskFormat
+    // es obligatorio, regex.types.ts), así que se asigna directo — no necesita
+    // el mismo condicional que wordSpan (cuyo valor sí puede estar ausente).
+    maskFormat: match.maskFormat,
   };
   // exactOptionalPropertyTypes: wordSpan solo se incluye si se pudo mapear
   // (nunca se asigna explícitamente `undefined`).
