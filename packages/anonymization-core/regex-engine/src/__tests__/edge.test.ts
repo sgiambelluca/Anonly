@@ -119,6 +119,9 @@ describe("RegexEngine — edge case tests", () => {
       const occurrences = calls.map((c) => (c[2] as EntityFound).occurrence);
       expect(occurrences.every((o) => o.entityType === EntityType.Plate)).toBe(true);
       expect(occurrences.map((o) => o.value)).toEqual(["ABC 123", "AB 123 CD"]);
+      // ADR-029 §2: cada variante lleva su propio maskFormat, fiel a su forma
+      // real (no el fallback único que compartían antes de este PR).
+      expect(occurrences.map((o) => o.maskFormat)).toEqual(["XXX XXX", "XX XXX XX"]);
     });
   });
 

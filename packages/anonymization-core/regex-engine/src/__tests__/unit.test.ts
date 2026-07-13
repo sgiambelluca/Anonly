@@ -60,7 +60,7 @@ describe("RegexEngine — unit tests", () => {
       );
     });
 
-    it("maskFormat por tipo coincide con ADR-012", () => {
+    it("maskFormat por tipo coincide con ADR-012 (Plate: ADR-029, ambas variantes)", () => {
       const byId = new Map(DEFAULT_PATTERNS_AR.map((p) => [p.id, p.maskFormat]));
       expect(byId.get("dni-ar")).toBe("XX.XXX.XXX");
       expect(byId.get("cuit-ar")).toBe("XX-XXXXXXXX-X");
@@ -71,8 +71,10 @@ describe("RegexEngine — unit tests", () => {
       expect(byId.get("credit-card")).toBe("XXXX XXXX XXXX XXXX");
       expect(byId.get("date-ar")).toBe("XX/XX/XXXX");
       expect(byId.get("license-ar")).toBe("XX-XXXX-XX");
-      expect(byId.get("plate-vieja-ar")).toBe("XXX XXXX");
-      expect(byId.get("plate-mercosur-ar")).toBe("XXX XXX");
+      // ADR-029 §2: plate-vieja-ar ("ABC 123") y plate-mercosur-ar ("AB 123 CD")
+      // llevan cada una su propio maskFormat fiel a su forma real.
+      expect(byId.get("plate-vieja-ar")).toBe("XXX XXX");
+      expect(byId.get("plate-mercosur-ar")).toBe("XX XXX XX");
     });
   });
 
@@ -199,16 +201,65 @@ describe("RegexEngine — unit tests", () => {
   });
 
   describe("Plate", () => {
-    it("AR plate vieja matches", async () => {
+    it("AR plate vieja matches and carries its own maskFormat (ADR-029)", async () => {
       const occurrence = await firstOccurrence(engine, ctx, ["ABC", "123"]);
       expect(occurrence?.entityType).toBe(EntityType.Plate);
       expect(occurrence?.normalizedValue).toBe("ABC123");
+      expect(occurrence?.maskFormat).toBe("XXX XXX");
     });
 
-    it("AR plate Mercosur matches", async () => {
+    it("AR plate Mercosur matches and carries its own maskFormat (ADR-029)", async () => {
       const occurrence = await firstOccurrence(engine, ctx, ["AB", "123", "CD"]);
       expect(occurrence?.entityType).toBe(EntityType.Plate);
       expect(occurrence?.normalizedValue).toBe("AB123CD");
+      expect(occurrence?.maskFormat).toBe("XX XXX XX");
+    });
+  });
+
+  describe("occurrence.maskFormat (ADR-029)", () => {
+    it("every emitted occurrence carries the maskFormat of the pattern that matched it", async () => {
+      const document = makeSinglePageDocument("doc-maskformat-all", [
+        "DNI",
+        "34.567.891",
+        "CUIT",
+        "20-34567891-4",
+        "email",
+        "ana@example.com",
+        "patente",
+        "ABC",
+        "123",
+        "y",
+        "AB",
+        "123",
+        "CD",
+      ]);
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      await engine.process({ document }, ctx);
+
+      const occurrences = busEmitSpy.mock.calls
+        .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
+        .map((c) => (c[2] as EntityFound).occurrence);
+
+      const byType = new Map(occurrences.map((o) => [`${o.entityType}:${o.value}`, o.maskFormat]));
+      expect(byType.get("DNI:34.567.891")).toBe("XX.XXX.XXX");
+      expect(byType.get("CUIT:20-34567891-4")).toBe("XX-XXXXXXXX-X");
+      expect(byType.get("EMAIL:ana@example.com")).toBe("xxxx@xxxx.xx");
+      expect(byType.get("PLATE:ABC 123")).toBe("XXX XXX");
+      expect(byType.get("PLATE:AB 123 CD")).toBe("XX XXX XX");
+    });
+
+    it("a custom pattern's occurrence carries its own maskFormat", async () => {
+      engine.addPattern({
+        id: "custom-code",
+        entityType: EntityType.Custom,
+        pattern: /\bCODE-\d{4}\b/g,
+        normalizer: (v: string) => v.toUpperCase(),
+        maskFormat: "CODE-XXXX",
+      });
+
+      const occurrence = await firstOccurrence(engine, ctx, ["Referencia", "CODE-1234"]);
+      expect(occurrence?.entityType).toBe(EntityType.Custom);
+      expect(occurrence?.maskFormat).toBe("CODE-XXXX");
     });
   });
 

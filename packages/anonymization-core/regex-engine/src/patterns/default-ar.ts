@@ -7,10 +7,10 @@
  * requiere un ADR nuevo (ver spec, última línea de esa sección).
  *
  * maskFormat por tipo: docs/adr/ADR-012-Replacement-Modes.md, tabla "Formato
- * por tipo para mask". Para Plate, esa tabla asigna literalmente
- * "XXX XXX" a Mercosur y "XXX XXXX" a la vieja (aunque a primera vista
- * parezca invertido respecto de la longitud real de cada formato); se
- * respeta tal cual está documentado.
+ * por tipo para mask". Para Plate, esa fila quedó superada por
+ * docs/adr/ADR-029-Occurrence-MaskFormat-Plate-Variantes.md §2: cada variante
+ * de patente lleva su propio maskFormat (plate-mercosur-ar: "XX XXX XX",
+ * plate-vieja-ar: "XXX XXX").
  */
 
 import { EntityType } from "@anonly/shared";
@@ -220,13 +220,13 @@ export const DEFAULT_PATTERNS_AR: ReadonlyArray<RegexPattern> = [
     entityType: EntityType.Plate,
     pattern: /\b[A-Z]{3}\s?\d{3}\b/g,
     normalizer: normalizeUppercaseNoSpaces,
-    maskFormat: "XXX XXXX",
+    maskFormat: "XXX XXX",
   },
   {
     id: "plate-mercosur-ar",
     entityType: EntityType.Plate,
     pattern: /\b[A-Z]{2}\s?\d{3}\s?[A-Z]{2}\b/g,
     normalizer: normalizeUppercaseNoSpaces,
-    maskFormat: "XXX XXX",
+    maskFormat: "XX XXX XX",
   },
 ];
