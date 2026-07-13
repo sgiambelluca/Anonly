@@ -209,13 +209,14 @@ Cada pool tiene una `PriorityQueue<WorkerJob>` ordenada por:
 
 ### 7.4 RenderWorker
 
-**Responsabilidad**: renderizar una página (original o anonimizada) a `ImageData` o `Blob` PNG/JPEG usando OffscreenCanvas + pdf-lib. Produce highlight de grupos habilitados.
+**Responsabilidad**: renderizar una página (original o anonimizada) a `ImageData` o `Blob` PNG/JPEG usando OffscreenCanvas + pdfjs-dist (fe de erratas ADR-030 §5: decía pdf-lib, que es del ExportWorker y está prohibido en Render — `Render_Engine.md` §5). Produce highlight de grupos habilitados.
 
 **Ciclo de vida**:
 - `INIT`: crea OffscreenCanvas. Publica `READY`.
-- `RUN(render-page)`: recibe `{ documentId, pageIndex, kind: "original" | "anonymized", replacements?, scale }`. Transfiere `replacements` y referencias. Responde `COMPLETED` con `{ imageData: ImageData }` (transferido) o `{ blob: ArrayBuffer }`.
+- `RUN(load-document)`: recibe `{ documentId, buffer: ArrayBuffer }` (buffer transferido, una vez por worker). Crea el `PDFDocumentProxy` interno con pdfjs-dist (ADR-030). Responde `COMPLETED`.
+- `RUN(render-page)`: recibe `{ documentId, pageIndex, kind: "original" | "anonymized", replacements?, scale }`. Precondición: documento cargado vía `load-document` (ADR-030). Transfiere `replacements` y referencias. Responde `COMPLETED` con `{ imageData: ImageData }` (transferido) o `{ blob: ArrayBuffer }`.
 - `CANCEL`: checkpoint entre operaciones de Canvas.
-- `DISPOSE`: libera OffscreenCanvas.
+- `DISPOSE`: libera OffscreenCanvas y destruye los `PDFDocumentProxy` cargados.
 
 **Memoria típica**: 40–120 MB por worker.
 

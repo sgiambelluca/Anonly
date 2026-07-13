@@ -55,7 +55,7 @@ Notas: el archivo se lee como `ArrayBuffer` en el main thread y se mantiene en m
 
 ## 3. Etapa 1 — Extracción (PDF Engine)
 
-**Entra**: `{ documentId, buffer, password? }` → `PdfPool.dispatch({ type: "pdf-parse", payload })`. El `buffer` se **transfiere** (zero-copy).
+**Entra**: `{ documentId, buffer, password? }` → `PdfPool.dispatch({ type: "pdf-parse", payload })`. El `buffer` se **transfiere** (zero-copy). Lo transferido es una **copia**: el Orchestrator retiene el `ArrayBuffer` original de la etapa 0 para alimentar después `RenderEngine.loadDocument` (ADR-030).
 **Sale**: `DocumentModel` con `Page[]` (con `Word[]` y `BoundingBox`), `textlessPages: number[]`, `sourceKind`.
 **Eventos emitidos**: `PAGE_PARSED` (por página), `DOCUMENT_PARSED`, `PDF_PASSWORD_REQUIRED`, `PDF_INVALID`.
 **Errores**:
@@ -193,7 +193,7 @@ El usuario puede overridear cualquiera desde la UI, emitiendo `CONFLICT_RESOLVE_
 
 ## 10. Etapa 8 — Vista previa parcial (Render Engine)
 
-**Entra**: `Document` + `EntityGroup[]` + `Annotation[]`.
+**Entra**: `Document` + `EntityGroup[]` + `Annotation[]` + PDF fuente: antes del primer render, el Orchestrator carga los bytes retenidos en la etapa 0 vía `RenderEngine.loadDocument(documentId, buffer)` (una sola vez por documento; ADR-030).
 **Sale**: `canvasBlobUrl` por página visible en la UI (original + anonimizado).
 **Eventos emitidos**: `PREVIEW_UPDATED` (por página), `PREVIEW_PAGE_FAILED`.
 **Errores**: `PREVIEW_PAGE_FAILED` → reintento (1) → se muestra placeholder en la UI.
@@ -226,7 +226,7 @@ El usuario puede overridear cualquiera desde la UI, emitiendo `CONFLICT_RESOLVE_
 
 ## 12. Etapa 10 — Render completo (Render Engine)
 
-**Entra**: `Document` + `EntityGroup[]` (enabled) + `Replacement[]` resueltos.
+**Entra**: `Document` + `EntityGroup[]` (enabled) + `Replacement[]` resueltos. El PDF fuente ya está cargado en Render desde la etapa 8 (`loadDocument`; ADR-030).
 **Sale**: `ImageData` o `ArrayBuffer` PNG por página, lista para ensamblar en el Export Engine.
 **Eventos emitidos**: `RENDER_FINISHED`, `RENDER_FAILED`.
 **Errores**: `RENDER_FAILED` → reintento (1) → `EXPORT_FAILED`.
