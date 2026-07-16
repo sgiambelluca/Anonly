@@ -236,9 +236,10 @@ describe("@anonly/shared — Contracts", () => {
         // Grouping (2)
         "GROUPING_INVALID_PATCH",
         "GROUPING_GROUP_NOT_FOUND",
-        // Render (2)
+        // Render (3)
         "RENDER_PAGE_FAILED",
         "RENDER_TIMEOUT",
+        "RENDER_FAILED", // fatal de batch (ADR-031)
         // Export (3)
         "EXPORT_FAILED",
         "EXPORT_NO_ENABLED_GROUPS",
