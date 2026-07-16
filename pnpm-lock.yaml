@@ -240,6 +240,25 @@ importers:
         specifier: ^3.2.6
         version: 3.2.6(@types/node@20.19.43)(jiti@2.6.1)(tsx@4.22.4)(yaml@2.9.0)
 
+  packages/anonymization-core/render-engine:
+    dependencies:
+      '@anonly/shared':
+        specifier: workspace:*
+        version: link:../shared
+      pdfjs-dist:
+        specifier: ^4.0.379
+        version: 4.10.38
+    devDependencies:
+      '@anonly/event-system':
+        specifier: workspace:*
+        version: link:../event-system
+      typescript:
+        specifier: ^5.6.2
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.6
+        version: 3.2.6(@types/node@20.19.43)(jiti@2.6.1)(tsx@4.22.4)(yaml@2.9.0)
+
   packages/anonymization-core/shared:
     devDependencies:
       typescript:
