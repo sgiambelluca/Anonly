@@ -494,7 +494,35 @@ Ver `05_Worker_Architecture.md` para el detalle de cada job.
 
 ---
 
-## 19. Referencias
+## 19. `ExportOptions` y `ExportMetadata`
+
+Definidos originalmente en `adr/ADR-009-Export-Strategy.md`; se documentan acá formalmente
+(ADR-032 §4; P-10 exige que todo tipo publicado esté documentado en Contracts.md o en un doc
+canónico). Forma exacta del código (`shared/src/types.ts`):
+
+```ts
+export interface ExportOptions {
+  readonly imageFormat: "png" | "jpeg";
+  readonly jpegQuality: number;             // 0..1, default 0.85
+  readonly dpi: number;                     // default 150; 300 para "alta calidad"
+  readonly includeOriginalMetadata: false;  // SIEMPRE false; el tipo lo fuerza (garantía por tipos, ADR-009)
+  readonly title?: string;                  // opcional, metadata nueva
+  readonly filename: string;                // default "anonimizado.pdf"
+}
+
+export interface ExportMetadata {
+  readonly producer: "Anonly";
+  readonly creator: "Anonly";
+  readonly creationDate: Date;
+  readonly title?: string;
+}
+```
+
+Sin `author`, `subject`, `keywords` ni XMP del original (`08_Security_Model.md` §5).
+
+---
+
+## 20. Referencias
 
 - `core/Contracts.md` — definiciones TypeScript exactas.
 - `04_Event_System.md` — eventos que transportan estos tipos.

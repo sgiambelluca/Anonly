@@ -1,12 +1,14 @@
-<!-- CONTEXT: scope=export-engine | dependencias=core/Contracts.md,architecture/06_Pipeline.md,ADR-004-Rendering.md,ADR-009-Export-Strategy.md,ADR-012-Replacement-Modes.md | audiencia=IA-implementador | fase=3 -->
+<!-- CONTEXT: scope=export-engine | dependencias=core/Contracts.md,architecture/06_Pipeline.md,ADR-004-Rendering.md,ADR-009-Export-Strategy.md,ADR-012-Replacement-Modes.md,ADR-032-Export-EncodedPageImage-Requested-Warning.md | audiencia=IA-implementador | fase=3 -->
 
 # Export Engine — Spec de Motor
 
 > Construye el PDF final reconstruido desde cero, adjuntando las imágenes renderizadas (lado anonimizado) como páginas con pdf-lib. Garantiza no-recuperabilidad y metadata mínima.
 
 **EngineId**: `export`
-**Versión del spec**: 1.0.0
-**Última actualización**: 2026-07-11
+**Versión del spec**: 1.1.0
+**Última actualización**: 2026-07-16
+
+> **Nota (ADR-032, 2026-07-16)**: `RenderPageProvider.renderFull` devuelve `EncodedPageImage` (bytes codificados; pdf-lib no embebe `ImageData`); `EXPORT_REQUESTED` lo escucha el **Orchestrator**, que llama `export()` directamente (Export no se suscribe a eventos; patrón ADR-014); `EXPORT_NO_ENABLED_GROUPS` es `logger.warn` + continuar, la confirmación del usuario es pre-export. `ExportOptions`/`ExportMetadata` quedan formalizados en `03_Data_Model.md` §19.
 
 > **Nota (ADR-027, 2026-07-11)**: el tipo de config canónico es `ExportConfig` (Contracts.md §6); el alias `ExportEngineConfig` de §6/§15.2 queda eliminado (mismo patrón que ADR-021 §2, ADR-023 §1 y ADR-026).
 
@@ -16,14 +18,14 @@
 
 ## 1. Objetivo
 
-Recibir `EXPORT_REQUESTED` con las `ExportOptions`, coordinar el render full de las páginas anonimizadas, ensamblar un `PDFDocument` nuevo con pdf-lib y devolver un `ArrayBuffer` (transferido) que el host expone como `blobUrl` para descarga.
+Ejecutar el flujo de export al ser invocado por el Orchestrator (que escucha `EXPORT_REQUESTED` y arma el `ExportEngineInput`; ADR-032 §2): coordinar el render full de las páginas anonimizadas, ensamblar un `PDFDocument` nuevo con pdf-lib y devolver un `ArrayBuffer` (transferido) que el host expone como `blobUrl` para descarga.
 
 ---
 
 ## 2. Responsabilidades
 
-- Escuchar `EXPORT_REQUESTED` del canal `ui`.
-- Validar que haya al menos un grupo `enabled`; si no, emitir warning `EXPORT_NO_ENABLED_GROUPS` (no bloqueante).
+- Ejecutar `export(input)` cuando el Orchestrator lo invoca (el Orchestrator escucha `EXPORT_REQUESTED`; ADR-032 §2).
+- Validar que haya al menos un grupo `enabled`; si no, loguear warning (`ctx.logger.warn` con code `EXPORT_NO_ENABLED_GROUPS` en metadata) y continuar (ADR-032 §3).
 - Coordinar con `RenderEngine` el render full (`mode = "full"`, `kind = "anonymized"`) de cada página con los `Replacement[]` resueltos.
 - Construir un `PDFDocument` vacío con pdf-lib.
 - Adjuntar cada imagen renderizada como página (con dimensiones correctas según DPI).
@@ -51,7 +53,7 @@ Recibir `EXPORT_REQUESTED` con las `ExportOptions`, coordinar el render full de 
 - `@anonly/shared`
 - `pdf-lib` (ADR-001, ADR-009)
 - Tipos de `core/Contracts.md`: `IEngine`, `EngineContext`, `Document`, `Page`, `EntityGroup`, `Replacement`, `ExportOptions`, `ExportMetadata`, `ExportConfig`, `Rule`
-- `architecture/04_Event_System.md`: `EXPORT_REQUESTED`, `EXPORT_STARTED`, `EXPORT_PROGRESS`, `EXPORT_FINISHED`, `EXPORT_FAILED`, `RENDER_FINISHED`
+- `architecture/04_Event_System.md`: `EXPORT_STARTED`, `EXPORT_PROGRESS`, `EXPORT_FINISHED`, `EXPORT_FAILED` (solo emisión; Export no consume eventos — ADR-032 §2)
 - Sintetizadores: `shared/synthesizer.ts` para valores sintéticos deterministas por seed.
 
 ---
@@ -88,8 +90,15 @@ export interface ExportEngineInput {
   readonly renderPageProvider: RenderPageProvider; // abstraction over RenderEngine
 }
 
+export interface EncodedPageImage {
+  readonly bytes: ArrayBuffer;     // imagen codificada (PNG o JPEG), lista para embedPng/embedJpg
+  readonly format: "png" | "jpeg";
+  readonly widthPx: number;
+  readonly heightPx: number;
+}
+
 export interface RenderPageProvider {
-  renderFull(pageIndex: number, replacements: ReadonlyArray<Replacement>, abortSignal: AbortSignal): Promise<ImageData>;
+  renderFull(pageIndex: number, replacements: ReadonlyArray<Replacement>, abortSignal: AbortSignal): Promise<EncodedPageImage>;
 }
 
 export interface ExportEngineOutput {
@@ -109,6 +118,8 @@ export class ExportEngine implements IEngine {
 
 > El `RenderPageProvider` es inyectado por el Orchestrator (que conoce ambos engines). Esto evita la dependencia directa `export-engine → render-engine`, manteniendo el principio A-6 (sin dependencias entre motores).
 
+> `renderFull` devuelve bytes **codificados** (ADR-032 §1): pdf-lib solo embebe PNG/JPEG (`embedPng`/`embedJpg`), y codificar `ImageData` requiere canvas — dominio de Render/host, no del ensamblador (coherente con `ExportPagePayload.pageImage: ArrayBuffer` y 05 §7.4/§7.5). El Orchestrator construye el provider **preconfigurado con las `ExportOptions`** del request (dpi/formato/calidad); Export solo pasa `pageIndex`/`replacements`/`abortSignal`. Las dimensiones de página en puntos PDF salen de `document.pages[i].width/height`.
+
 ---
 
 ## 7. Eventos que emite
@@ -122,19 +133,15 @@ export class ExportEngine implements IEngine {
 
 Canal: `EventChannel.Export`.
 
-> `EXPORT_FINISHED.blobUrl` es creado por el host (no por el motor) a partir del `ArrayBuffer` transferido. El motor emite el evento con `blobUrl` ya poblado por el Orchestrator.
+> `EXPORT_FINISHED.blobUrl` (ADR-032 §4): en Hito 8 (inline) el motor lo crea él mismo con `URL.createObjectURL(new Blob([buffer], { type: "application/pdf" }))` — blob real, a diferencia del placeholder de Render (ADR-031 §5). En Hito 9 lo arma el host a partir del `ArrayBuffer` transferido (un worker no tiene `createObjectURL` garantizado); la revocación del URL es responsabilidad del host (mismo criterio que el pendiente de Render en MVP.md §4).
 
 ---
 
 ## 8. Eventos que consume
 
-| Evento | Cuándo | Acción |
-|---|---|---|
-| `EXPORT_REQUESTED` (canal `ui`) | usuario dispara export | inicia el flujo `export` |
+**Ninguno** (ADR-032 §2). `EXPORT_REQUESTED` lo escucha el **Orchestrator**, que arma `ExportEngineInput` y llama `ExportEngine.export()` directamente — mismo patrón que `DOCUMENT_IMPORTED`/ADR-014. En Hito 8 (inline) el caller directo son los tests/el façade (precedente ADR-030 §1).
 
-No escucha `RENDER_FINISHED` directamente; las imágenes llegan vía `renderPageProvider` (síncrono desde el punto de vista del flujo de export).
-
-Canal escuchado: `EventChannel.UI`.
+Tampoco escucha `RENDER_FINISHED`: las imágenes llegan vía `renderPageProvider` (síncrono desde el punto de vista del flujo de export).
 
 ---
 
@@ -194,7 +201,7 @@ Garantías del PDF final:
 | Code | Clase | Cuándo | Recuperable | Acción |
 |---|---|---|---|---|
 | `EXPORT_FAILED` | `ExportFailedError` | error fatal durante ensamblado o serialización | sí | reintentar 1 vez; si persiste, `EXPORT_FAILED` |
-| `EXPORT_NO_ENABLED_GROUPS` | `ExportNoEnabledGroupsError` | ningún grupo `enabled` (warning, no bloqueante) | no | emitir warning al usuario; el usuario decide si continuar (export = original reconstruido) |
+| `EXPORT_NO_ENABLED_GROUPS` | `ExportNoEnabledGroupsError` | ningún grupo `enabled`. `export()` **no la lanza**: loguea warn con el code en metadata y continúa (ADR-032 §3). La clase es el tipo de la validación **pre-export** del Orchestrator (Hito 9), donde el usuario confirma | no | warning al usuario en el flujo pre-export; si confirma, export = original reconstruido |
 | `EXPORT_TIMEOUT` | `ExportTimeoutError` | timeout (default 30 s por página) | sí | reintentar 1 vez |
 | `ENGINE_NOT_INITIALIZED` | `EngineNotInitializedError` | `export` antes de `init` | no | bug del caller |
 | `ENGINE_DISPOSED` | `EngineDisposedError` | `export` tras `dispose` | no | bug del caller |
@@ -221,7 +228,7 @@ Garantías del PDF final:
 ## 13. Casos límite
 
 1. **Documento con 0 páginas**: lanza `InvalidInputError`.
-2. **Todos los grupos `enabled = false`**: emite `EXPORT_NO_ENABLED_GROUPS` (warning). Si el usuario confirma, el export es idéntico al original (reconstruido, sin reemplazos).
+2. **Todos los grupos `enabled = false`**: `export()` loguea warn (code `EXPORT_NO_ENABLED_GROUPS`) y continúa; el export es idéntico al original (reconstruido, sin reemplazos). La confirmación del usuario es pre-export, en el Orchestrator/UI (Hito 9/10; ADR-032 §3).
 3. **Solo grupos Regex habilitados**: export normal, solo patrones determinísticos reemplazados.
 4. **Solo grupos NER habilitados**: export normal, solo personas/organizaciones/direcciones reemplazadas.
 5. **DPI 300 (alta calidad)**: páginas más grandes, archivo final ~4x más grande. Más lento.
@@ -248,7 +255,7 @@ Garantías del PDF final:
 | `emits EXPORT_PROGRESS per page` | `contract.test.ts` | contract | invariante |
 | `emits EXPORT_FINISHED with non-empty buffer` | `contract.test.ts` | contract | invariante |
 | `output buffer is a valid PDF (%PDF- header)` | `contract.test.ts` | contract | invariante |
-| `no original text recoverable in export` | `security.test.ts` (en `tests/`) | security | no-recuperabilidad |
+| `no original text recoverable in export` | `security.test.ts` (en `tests/security/`, donde corre `pnpm test:security`; ADR-032 §4) | security | no-recuperabilidad |
 | `export metadata has producer = Anonly` | `contract.test.ts` | contract | invariante |
 | `export metadata has no author/creator/title from original` | `security.test.ts` | security | metadata strip |
 | `export has no bookmarks` | `unit.test.ts` | unit | caso 8 |
@@ -256,13 +263,13 @@ Garantías del PDF final:
 | `export has no AcroForm` | `unit.test.ts` | unit | caso 10 |
 | `export has no XMP from original` | `security.test.ts` | security | caso 11 |
 | `export has no text layer` | `security.test.ts` | security | caso 12 |
-| `0 enabled groups emits EXPORT_NO_ENABLED_GROUPS warning` | `edge.test.ts` | edge | caso 2 |
+| `0 enabled groups logs EXPORT_NO_ENABLED_GROUPS warning and continues` | `edge.test.ts` | edge | caso 2 (ADR-032 §3) |
 | `DPI 300 produces larger file than DPI 150` | `unit.test.ts` | unit | caso 5 |
 | `PNG produces larger file than JPEG q 0.85` | `unit.test.ts` | unit | caso 6 |
 | `cancel within 200ms` | `cancel.test.ts` | cancel | caso 13 |
 | `throws EngineDisposedError after dispose` | `edge.test.ts` | edge | caso 15 |
 | `throws InvalidInputError on 0 pages` | `edge.test.ts` | edge | caso 1 |
-| `1000 pages completes within memory budget` | `stress.test.ts` (en `tests/stress/`) | stress | caso 17 |
+| `1000 pages completes within memory budget` | `stress.test.ts` (en `src/__tests__/` hasta que exista `tests/stress/`; mismo criterio que ADR-031 §5) | stress | caso 17 |
 | `filename sanitized for PDF injection` | `edge.test.ts` | edge | caso 16 |
 
 Fixtures: `tests/fixtures/text-10p.pdf`, `text-50p.pdf`, `huge-1000p.pdf`.
@@ -272,11 +279,11 @@ Fixtures: `tests/fixtures/text-10p.pdf`, `text-50p.pdf`, `huge-1000p.pdf`.
 ## 15. Checklist de implementación
 
 - [ ] 1. Crear paquete `packages/anonymization-core/export-engine/`.
-- [ ] 2. Definir `types.ts` con `ExportEngineInput`, `ExportEngineOutput`, `RenderPageProvider` (`ExportConfig` viene de `@anonly/shared`/Contracts.md §6; ADR-027).
+- [ ] 2. Definir `types.ts` con `ExportEngineInput`, `ExportEngineOutput`, `RenderPageProvider`, `EncodedPageImage` (ADR-032 §1; `ExportConfig` viene de `@anonly/shared`/Contracts.md §6; ADR-027).
 - [ ] 3. Definir `errors.ts` con `ExportFailedError`, `ExportNoEnabledGroupsError`, `ExportTimeoutError`.
 - [ ] 4. Implementar `export.engine.ts` respetando `IEngine` y la firma pública de §6.
-- [ ] 5. Implementar `init` (crear worker de ensamblado pdf-lib, suscribirse a `EXPORT_REQUESTED`).
-- [ ] 6. Implementar `export` con `AbortSignal`, `EXPORT_STARTED`, render full por página vía `renderPageProvider`, `EXPORT_PROGRESS` por página, ensamblado pdf-lib, `EXPORT_FINISHED` con `ArrayBuffer` transferido.
+- [ ] 5. Implementar `init` (sin suscripciones a eventos — ADR-032 §2; el worker de ensamblado es Hito 9/ADR-021).
+- [ ] 6. Implementar `export` con `AbortSignal`, `EXPORT_STARTED`, render full por página vía `renderPageProvider` (`EncodedPageImage`; ADR-032 §1), `EXPORT_PROGRESS` por página, ensamblado pdf-lib (`embedJpg`/`embedPng` de `bytes`), `EXPORT_FINISHED` con `ArrayBuffer` transferido.
 - [ ] 7. Implementar generación de metadata mínima (`ExportMetadata`).
 - [ ] 8. Implementar sanitización de `title`/`filename` para PDF injection.
 - [ ] 9. Implementar `dispose` (libera `PDFDocument` y worker de ensamblado).
@@ -297,20 +304,20 @@ Fixtures: `tests/fixtures/text-10p.pdf`, `text-50p.pdf`, `huge-1000p.pdf`.
 ## Flujo de export (diagrama)
 
 ```text
-EXPORT_REQUESTED (UI)
+EXPORT_REQUESTED (UI) → lo escucha el Orchestrator, que arma el input (ADR-032 §2)
         │
         ▼
 ExportEngine.export(input)
         │
         ├─ validar input (pageCount > 0, options válidas)
         ├─ emit EXPORT_STARTED
-        ├─ si no hay grupos enabled: emit EXPORT_NO_ENABLED_GROUPS (warning, no abort)
+        ├─ si no hay grupos enabled: logger.warn (EXPORT_NO_ENABLED_GROUPS), continuar (ADR-032 §3)
         │
         for each pageIndex:
         │   ├─ replacements = resolver replacements de grupos enabled para esta página
-        │   ├─ imageData = await renderPageProvider.renderFull(pageIndex, replacements, abortSignal)
-        │   ├─ pdfPage = pdfDoc.addPage([width, height])
-        │   ├─ pdfPage.drawImage(imageData → jpg/png embed)
+        │   ├─ pageImage = await renderPageProvider.renderFull(pageIndex, replacements, abortSignal)  // EncodedPageImage
+        │   ├─ pdfPage = pdfDoc.addPage([width, height])  // puntos PDF, de document.pages[pageIndex]
+        │   ├─ pdfPage.drawImage(embedJpg/embedPng(pageImage.bytes))
         │   ├─ emit EXPORT_PROGRESS(current, total)
         │   └─ si abortSignal.aborted: discard pdfDoc, return CANCELLED
         │
@@ -352,4 +359,6 @@ Mismo `(seed, type, index)` → mismo valor sintético. Seed default: aleatorio 
 - `adr/ADR-004-Rendering.md` (reconstrucción)
 - `adr/ADR-009-Export-Strategy.md` (estrategia completa)
 - `adr/ADR-012-Replacement-Modes.md` (modos y formatos)
+- `adr/ADR-032-Export-EncodedPageImage-Requested-Warning.md` (provider codificado, invocación directa, warning)
 - `core/Contracts.md` §6 (ExportConfig)
+- `architecture/03_Data_Model.md` §19 (ExportOptions, ExportMetadata)
