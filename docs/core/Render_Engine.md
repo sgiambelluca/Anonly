@@ -5,8 +5,10 @@
 > Renderiza páginas del PDF (original o anonimado) a imágenes usando OffscreenCanvas en Web Workers. Produce highlight de grupos habilitados y aplica reemplazos visualmente según `ReplacementMode`. Soporta preview incremental y render full para export.
 
 **EngineId**: `render`
-**Versión del spec**: 1.1.0
-**Última actualización**: 2026-07-12
+**Versión del spec**: 1.1.1
+**Última actualización**: 2026-07-16
+
+> **Nota (ADR-031, 2026-07-16)**: `EngineErrorCode.RENDER_FAILED` se agrega a Contracts.md §4 (la fila de §11 lo referenciaba sin respaldo desde v1.0.0). Erratas: la clave del cache LRU incluye `annotations` en el hash (§15.12); el highlight colorea por `AnnotationKind`, no "por tipo" (§13.7). Cast de frontera pdfjs↔OffscreenCanvas permitido en un único punto documentado (Code_Standards §10).
 
 > **Nota (ADR-030, 2026-07-12)**: se agregan `loadDocument`/`unloadDocument` a la interfaz pública (§6). El motor obtiene el PDF fuente por invocación directa del caller (Orchestrator en Hito 9; façade/tests en Hito 7) y mantiene un `Map<documentId, PDFDocumentProxy>` interno. `RenderPageInput` y los eventos no cambian.
 
@@ -230,7 +232,7 @@ El `ImageData` se transfiere zero-copy al host. El host lo convierte a `Blob` y 
 4. **Modo `mask`**: texto censurado (`XX.XXX.XXX`) centrado sobre el bbox, con fondo blanco y texto negro.
 5. **Modo `placeholder`**: `[DNI 01]` centrado sobre bbox. Fuente monospace si está disponible, fallback sans-serif.
 6. **Modo `synthetic`**: valor sintético (`39.123.456`) centrado sobre bbox, con la misma fuente del texto original si es accesible.
-7. **Highlight en `kind = "original"`**: borde color (configurable por tipo) sobre el bbox de cada ocurrencia de grupos habilitados. Sin fill, solo borde.
+7. **Highlight en `kind = "original"`**: borde color por `AnnotationKind` (ADR-031; `Annotation` no expone `EntityType`) sobre el bbox de cada ocurrencia de grupos habilitados. Sin fill, solo borde.
 8. **Conflicto**: en `kind = "original"`, marca adicional (borde rojo o icono) sobre el bbox en conflicto.
 9. **Página muy grande (A3 o más)**: preview scale reduce, full scale 150 DPI. Si el canvas excede limites del navegador (área máxima), se divide en tiles y se cosen (futuro; MVP limita a A4 150 DPI).
 10. **1000 páginas**: virtualización + LRU cache. Solo se renderizan visibles. Memoria pico controlada por `cachePages`.
@@ -271,7 +273,7 @@ El `ImageData` se transfiere zero-copy al host. El host lo convierte a `Blob` y 
 | `loadDocument twice replaces previous proxy` | `edge.test.ts` | edge | caso 17 |
 | `unloadDocument on unknown id is a no-op` | `edge.test.ts` | edge | caso 17 |
 | `dispose destroys loaded PDFDocumentProxies` | `contract.test.ts` | contract | limpieza (ADR-030) |
-| `1000 pages only render visible + adjacent` | `stress.test.ts` (en `tests/stress/`) | stress | caso 10 |
+| `1000 pages only render visible + adjacent` | `stress.test.ts` (en `src/__tests__/` hasta que exista `tests/stress/`; ADR-031 §5) | stress | caso 10 |
 | `OffscreenCanvas fallback when unavailable` | `edge.test.ts` | edge | caso 14 |
 
 Fixtures: `tests/fixtures/text-10p.pdf`, `scanned-10p.pdf`, una página con rotación.
@@ -291,7 +293,7 @@ Fixtures: `tests/fixtures/text-10p.pdf`, `scanned-10p.pdf`, una página con rota
 - [ ] 9. Implementar highlight de grupos habilitados y conflicto en `kind = "original"`.
 - [ ] 10. Implementar `renderPages` (paralelo, prioridad visible-first).
 - [ ] 11. Implementar `requestDeltaRender` (index `pageIndex → groupIds`, lookup, re-render solo afectadas).
-- [ ] 12. Implementar LRU cache en host (clave `documentId:pageIndex:kind:mode:hash(replacements)`).
+- [ ] 12. Implementar LRU cache en host (clave `documentId:pageIndex:kind:mode:hash(replacements ++ annotations)`; ADR-031 §2).
 - [ ] 13. Implementar `dispose` (libera OffscreenCanvas, workers inactivos y destruye los `PDFDocumentProxy` cargados; ADR-030).
 - [ ] 14. Escuchar `RENDER_REQUESTED`, `GROUP_REPLACEMENT_CHANGED`, `GROUP_TOGGLED` del bus.
 - [ ] 15. Escribir `contract.test.ts` con todos los tests contractuales.
@@ -312,3 +314,4 @@ Fixtures: `tests/fixtures/text-10p.pdf`, `scanned-10p.pdf`, una página con rota
 - `adr/ADR-004-Rendering.md` (reconstrucción)
 - `adr/ADR-012-Replacement-Modes.md` (modos visuales)
 - `adr/ADR-030-RenderEngine-LoadDocument.md` (carga del PDF fuente)
+- `adr/ADR-031-RenderFailed-ErrorCode-Erratas-Render.md` (error code + erratas)

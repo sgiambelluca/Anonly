@@ -141,6 +141,8 @@ Orden sugerido (cada hito = un set de PRs):
 - Implementar `render-engine` con OffscreenCanvas, 4 modos, delta render, LRU.
 - Tests con visores en headless browser.
 - `RenderEngine.loadDocument`/`unloadDocument` (`adr/ADR-030-RenderEngine-LoadDocument.md`): resuelve la ambigüedad reportada por el implementador (ningún doc definía cómo Render obtiene el PDF fuente por `documentId`); spec de Render a v1.1.0, fe de erratas en `05_Worker_Architecture.md` §7.4 (decía pdf-lib).
+- `EngineErrorCode.RENDER_FAILED` + erratas del spec (`adr/ADR-031-RenderFailed-ErrorCode-Erratas-Render.md`): el code faltaba en Contracts.md §4 (solo existía como evento; precedente `EXPORT_FAILED`); clave de cache LRU con `annotations`, highlight por `AnnotationKind`, cast de frontera pdfjs↔OffscreenCanvas sancionado en Code_Standards §10. Spec a v1.1.1. La línea en `enums.ts` viaja en el PR del hito (patrón ADR-029 §4).
+- Pendientes diferidos a Hito 9 (ADR-031 §5): `PREVIEW_UPDATED.canvasBlobUrl` real (`convertToBlob` en host; inline es placeholder de bytes crudos) y mover `stress.test.ts` a `tests/stress/` cuando exista la infra.
 
 ### Hito 8 — Export Engine
 - Implementar `export-engine` con pdf-lib.
