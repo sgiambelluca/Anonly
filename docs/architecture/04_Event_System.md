@@ -134,7 +134,7 @@ Inputs del usuario que mutan el estado de grupos/reglas/pipeline o solicitan tra
 | Evento | Emisor | Receptores | Payload | Timing | Idempotente | Orden | Notas |
 |---|---|---|---|---|---|---|---|
 | `RENDER_REQUESTED` | UI | Render Engine | `{ documentId, pageIndices: number[], mode: "preview" \| "full" }` | sync | sí | none | Solicitud de render de páginas visibles. |
-| `EXPORT_REQUESTED` | UI | Export Engine | `{ documentId, options: ExportOptions }` | sync | sí | none | Dispara el flujo de export. |
+| `EXPORT_REQUESTED` | UI | Orchestrator | `{ documentId, options: ExportOptions }` | sync | sí | none | Dispara el flujo de export. El Export Engine no se suscribe: el Orchestrator arma `ExportEngineInput` (incluido el `RenderPageProvider` preconfigurado con las `options`) y llama `ExportEngine.export()` directamente, consistente con ADR-014 (ver ADR-032 §2). |
 | `GROUP_UPDATE_REQUESTED` | UI | Grouping Engine | `{ documentId, groupId, patch: Partial<Pick<EntityGroup, "replacementMode" \| "replacementValue" \| "enabled" \| "canonicalValue">> }` | sync | sí | none | Grouping valida y emite `ENTITY_GROUP_UPDATED` + `GROUP_REPLACEMENT_CHANGED`. |
 | `GROUP_MERGE_REQUESTED` | UI | Grouping Engine | `{ documentId, sourceGroupId, targetGroupId }` | sync | sí | none | Fusiona dos grupos en uno. |
 | `GROUP_SPLIT_REQUESTED` | UI | Grouping Engine | `{ documentId, groupId, occurrenceIds: string[] }` | sync | sí | none | Crea un grupo nuevo con esas ocurrencias. |

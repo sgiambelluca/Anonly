@@ -239,7 +239,7 @@ El usuario puede overridear cualquiera desde la UI, emitiendo `CONFLICT_RESOLVE_
 
 ## 13. Etapa 11 — Exportación (Export Engine)
 
-**Entra**: `RenderPage[]` (imágenes de páginas anonimizadas) + `ExportMetadata` (mínima, sanitizada).
+**Entra**: `EncodedPageImage[]` (imágenes codificadas de páginas anonimizadas, obtenidas vía `RenderPageProvider`; ADR-032 §1) + `ExportMetadata` (mínima, sanitizada).
 **Sale**: `ArrayBuffer` del PDF nuevo (transferido de vuelta al host) + `blobUrl` para descarga.
 **Eventos emitidos**: `EXPORT_STARTED`, `EXPORT_PROGRESS`, `EXPORT_FINISHED`, `EXPORT_FAILED`.
 **Errores**:

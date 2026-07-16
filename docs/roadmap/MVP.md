@@ -150,6 +150,7 @@ Orden sugerido (cada hito = un set de PRs):
 ### Hito 8 — Export Engine
 - Implementar `export-engine` con pdf-lib.
 - Tests de `no-recuperability` y `metadata-strip`.
+- Auditoría previa del spec (`adr/ADR-032-Export-EncodedPageImage-Requested-Warning.md`): `RenderPageProvider.renderFull` devuelve `EncodedPageImage` (bytes codificados; pdf-lib no embebe `ImageData`), `EXPORT_REQUESTED` lo escucha el Orchestrator (patrón ADR-014), `EXPORT_NO_ENABLED_GROUPS` es `logger.warn` + continuar (confirmación pre-export), `ExportOptions`/`ExportMetadata` formalizados en `03_Data_Model.md` §19. Spec a v1.1.0.
 
 ### Hito 9 — Orchestrator
 - Implementar según `core/Orchestrator.md` (spec del componente host + façade `createCore`).
