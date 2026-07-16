@@ -138,11 +138,14 @@ Orden sugerido (cada hito = un set de PRs):
 - Los tests de integración con Regex/NER reales (ambos emiten `ENTITY_FOUND`) viven en `tests/integration/` y son Hito 9 (mismo criterio que Hito 5).
 
 ### Hito 7 — Render Engine
-- Implementar `render-engine` con OffscreenCanvas, 4 modos, delta render, LRU.
-- Tests con visores en headless browser.
+- ~~Implementar `render-engine` con OffscreenCanvas, 4 modos, delta render, LRU.~~ **CERRADO** (PR #17).
+- ~~Tests con visores en headless browser.~~ **CERRADO** — `contract.test.ts`, `unit.test.ts`, `edge.test.ts`, `cancel.test.ts`, `stress.test.ts` commiteados en `packages/anonymization-core/render-engine/src/__tests__/` (49 tests), cobertura 94.19% líneas / 100% funciones (threshold 85/80/80 en `vitest.config.ts`). La frontera de pdfjs-dist va mockeada (ADR-021 §5) en lugar de visores en headless browser; validación visual real → Hito 10 (UI).
 - `RenderEngine.loadDocument`/`unloadDocument` (`adr/ADR-030-RenderEngine-LoadDocument.md`): resuelve la ambigüedad reportada por el implementador (ningún doc definía cómo Render obtiene el PDF fuente por `documentId`); spec de Render a v1.1.0, fe de erratas en `05_Worker_Architecture.md` §7.4 (decía pdf-lib).
 - `EngineErrorCode.RENDER_FAILED` + erratas del spec (`adr/ADR-031-RenderFailed-ErrorCode-Erratas-Render.md`): el code faltaba en Contracts.md §4 (solo existía como evento; precedente `EXPORT_FAILED`); clave de cache LRU con `annotations`, highlight por `AnnotationKind`, cast de frontera pdfjs↔OffscreenCanvas sancionado en Code_Standards §10. Spec a v1.1.1. La línea en `enums.ts` viaja en el PR del hito (patrón ADR-029 §4).
-- Pendientes diferidos a Hito 9 (ADR-031 §5): `PREVIEW_UPDATED.canvasBlobUrl` real (`convertToBlob` en host; inline es placeholder de bytes crudos) y mover `stress.test.ts` a `tests/stress/` cuando exista la infra.
+- Pendientes diferidos a Hito 9 (ADR-031 §5 + observaciones no bloqueantes del revisor, PR #17):
+  - `PREVIEW_UPDATED.canvasBlobUrl` real (`convertToBlob` en host; inline es placeholder de bytes crudos). Incluye la **revocación de blob URLs como responsabilidad del host**: al recibir `PREVIEW_UPDATED` para `(documentId, pageIndex, kind)`, revocar el URL anterior de esa clave; en `DOCUMENT_CLOSED`, revocar todos. Hoy el placeholder inline crea un URL nuevo por render **y por cache hit** sin revocar (fuga sin efecto: nada consume `PREVIEW_UPDATED` hasta cablear la UI). Va al spec del Orchestrator.
+  - Mover `stress.test.ts` a `tests/stress/` cuando exista la infra (requiere hoistear `pdfjs-dist`).
+  - Rama defensiva de `RENDER_FAILED` en `renderPages` (hoy inalcanzable: `renderPage` no lanza `RenderFailedError`): revisitar cuando el pool defina el fatal de batch real. `renderPages` secuencial → el paralelismo lo aporta el pool (ADR-021).
 
 ### Hito 8 — Export Engine
 - Implementar `export-engine` con pdf-lib.
