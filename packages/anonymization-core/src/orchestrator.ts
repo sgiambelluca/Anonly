@@ -113,6 +113,14 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
   private readonly pendingFusions = new Map<string, Array<Promise<void>>>();
   private readonly exportQueues = new Map<string, ExportOptions[]>();
   private readonly exportInProgress = new Set<string>();
+  // Progreso granular por página (PIPELINE_PROGRESS, spec Orchestrator.md
+  // §8): un tracker por documento, reasignado al entrar a cada etapa con
+  // progreso granular (OCR, luego Detecting con NER activo). `current` nunca
+  // supera `total` (ver bumpProgress).
+  private readonly progressByDocument = new Map<
+    string,
+    { readonly total: number; readonly current: number }
+  >();
 
   private activeDocumentId: string | undefined;
   private disposed = false;
@@ -212,6 +220,7 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     this.pendingFusions.delete(documentId);
     this.exportQueues.delete(documentId);
     this.exportInProgress.delete(documentId);
+    this.progressByDocument.delete(documentId);
     this.blobTracker.revokeByPrefix(previewPrefixFor(documentId));
     this.blobTracker.revokeByPrefix(exportPrefixFor(documentId));
     this.state.delete(documentId);
@@ -238,6 +247,7 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     this.pendingFusions.clear();
     this.exportQueues.clear();
     this.exportInProgress.clear();
+    this.progressByDocument.clear();
 
     for (const unsubscribe of this.unsubscribers) unsubscribe();
     this.unsubscribers.length = 0;
@@ -336,6 +346,11 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       throw new InvalidInputError(`No hay buffer retenido para ${documentId}.`, { documentId });
     }
 
+    // Progreso granular OCR (spec Orchestrator.md §8): total fijo para toda
+    // la etapa (textlessPages.length de DOCUMENT_PARSED); current arranca en
+    // 0 y lo incrementa handleOcrPageFinished por cada OCR_PAGE_FINISHED.
+    this.progressByDocument.set(documentId, { total: textlessPages.length, current: 0 });
+
     // ADR-034 §1: adelanta loadDocument a la etapa 2 (bytes retenidos de la 0).
     if (!this.renderLoadedDocuments.has(documentId)) {
       await this.engines.render.loadDocument(documentId, retained.buffer);
@@ -389,6 +404,13 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     await this.engines.regex.process({ document }, ctx);
 
     if (!ctx.config.ner.enabled) return;
+
+    // Progreso granular de detección con NER activo (spec Orchestrator.md
+    // §8): total = pageCount del documento; current arranca en 0 y lo
+    // incrementa handleNerPageFinished por cada NER_PAGE_FINISHED.
+    // REGEX_FINISHED no emite progreso granular (es un evento por
+    // documento, no por página).
+    this.progressByDocument.set(documentId, { total: document.pageCount, current: 0 });
 
     const nerInputs: NerPageInput[] = document.pages.map((page) => ({
       documentId,
@@ -600,12 +622,21 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
   }
 
   private handlePageParsed(_payload: PageParsed): void {
-    // Progreso granular por página: fuera del alcance detallado de este hito
-    // (ver reporte final). Suscripción registrada para cumplir la matriz
+    // No emite PIPELINE_PROGRESS acá: PageParsed no trae `total` (pageCount
+    // recién llega con DOCUMENT_PARSED) y usar un sentinela `total: 0` está
+    // prohibido. El progreso de extracción se emite una única vez, en
+    // handleDocumentParsed, con current = total = pageCount. La
+    // granularidad por página en extracción requeriría un evento temprano
+    // con pageCount que hoy no existe; si la UI la necesita, se decide por
+    // ADR en el Hito 10. Suscripción registrada para cumplir la matriz
     // emisor→receptor (04_Event_System.md §11, ADR-034 §4).
   }
 
-  private handleDocumentParsed(_payload: DocumentParsed): void {}
+  private handleDocumentParsed(payload: DocumentParsed): void {
+    // Único punto de progreso de la etapa Extracting (ver handlePageParsed
+    // para por qué no se emite por página): current = total = pageCount.
+    this.emitProgress(payload.documentId, payload.pageCount, payload.pageCount);
+  }
 
   private handlePdfPasswordRequired(_payload: PdfPasswordRequired): void {
     // El stage ya queda en Extracting vía handleExtractionFailure (el
@@ -620,6 +651,16 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
   }
 
   private handleOcrPageFinished(payload: OcrPageFinished): void {
+    // Progreso granular OCR (spec Orchestrator.md §8): total fijado en
+    // runOcrStage; current incrementa una vez por cada OCR_PAGE_FINISHED,
+    // independientemente del resultado de la fusión de abajo. El progreso
+    // sub-página que Tesseract reporta vía `PROGRESS` (OCR_Engine.md §185:
+    // el worker emite `PROGRESS` al pool, que el Orchestrator traduciría a
+    // PIPELINE_PROGRESS) queda diferido: en Hito 9 los pools son colas de
+    // concurrencia in-process, sin transporte de eventos de worker real
+    // hasta que lleguen los Web Workers reales en el Hito 10 (ADR-035 §2).
+    this.bumpProgress(payload.documentId);
+
     const words = this.cache.get<ReadonlyArray<Word>>(
       ocrWordsCacheKey(payload.documentId, payload.pageIndex),
     );
@@ -658,13 +699,30 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
 
   private handleRegexFinished(payload: RegexFinished): void {
     if (!this.config.ner.enabled) {
+      // NER desactivado: la etapa de detección termina con Regex solo, no
+      // habrá NER_PAGE_FINISHED que incremente el progreso granular. Se
+      // emite acá directamente current = total = pageCount (spec
+      // Orchestrator.md §8). Tiene que ir *antes* de finishSession: como
+      // finishSession corre íntegramente síncrono hasta GROUPING_FINISHED
+      // (ver nota de cabecera del archivo), para cuando esa llamada retorna
+      // el stage ya pasó a Ready y este PIPELINE_PROGRESS quedaría con el
+      // stage equivocado.
+      const pageCount = this.documents.get(payload.documentId)?.pageCount;
+      if (pageCount !== undefined) {
+        this.emitProgress(payload.documentId, pageCount, pageCount);
+      }
       // ADR-034 §2: el despacho síncrono del bus garantiza que todos los
       // ENTITY_FOUND de Regex ya fueron procesados por Grouping acá.
       void this.engines.grouping.finishSession(payload.documentId);
     }
   }
 
-  private handleNerPageFinished(_payload: NerPageFinished): void {}
+  private handleNerPageFinished(payload: NerPageFinished): void {
+    // Progreso granular de detección con NER activo: total = pageCount
+    // fijado en runDetectionStage; current incrementa una vez por cada
+    // NER_PAGE_FINISHED (spec Orchestrator.md §8).
+    this.bumpProgress(payload.documentId);
+  }
 
   private handleGroupingFinished(payload: GroupingFinished): void {
     if (!this.state.has(payload.documentId)) return;
@@ -770,6 +828,39 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       stage,
       progress: updated.progress,
     });
+  }
+
+  /**
+   * Emite PIPELINE_PROGRESS con el `stage` vigente del documento en el
+   * momento de la emisión (payload canónico, `Contracts.md` §8:
+   * `{ documentId, stage, current, total }`). No-op si el documento no
+   * tiene `PipelineState` (p. ej. eventos emitidos sin un `importDocument`
+   * previo, como en los tests de la matriz emisor→receptor).
+   */
+  private emitProgress(documentId: string, current: number, total: number): void {
+    const state = this.state.get(documentId);
+    if (state === undefined) return;
+    this.bus.emit(EventChannel.Pipeline, EngineEvents.PIPELINE_PROGRESS, {
+      documentId,
+      stage: state.stage,
+      current,
+      total,
+    });
+  }
+
+  /**
+   * Incrementa en 1 el `current` del tracker de progreso granular por
+   * página del documento (OCR/NER, spec Orchestrator.md §8) y emite
+   * PIPELINE_PROGRESS. `current` nunca supera `total`. No-op si no hay un
+   * tracker activo para el documento (mismos casos defensivos que
+   * `emitProgress`).
+   */
+  private bumpProgress(documentId: string): void {
+    const progress = this.progressByDocument.get(documentId);
+    if (progress === undefined) return;
+    const current = Math.min(progress.current + 1, progress.total);
+    this.progressByDocument.set(documentId, { total: progress.total, current });
+    this.emitProgress(documentId, current, progress.total);
   }
 
   private releaseActiveDocument(documentId: string): void {

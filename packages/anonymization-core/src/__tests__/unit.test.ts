@@ -17,10 +17,13 @@ import { PipelineOrchestrator } from "../orchestrator.js";
 import { WorkerPool, WorkerPoolManager } from "../worker-pool.js";
 
 import {
+  createDocument,
   createEngineConfig,
   createImportInput,
   createMockEngines,
   createMockLogger,
+  createPage,
+  createPdfEngineOutput,
   createRealBus,
   wireHappyPathSpies,
 } from "./fixtures/test-helpers.js";
@@ -369,6 +372,224 @@ describe("Orchestrator — unit tests", () => {
         vi.useRealTimers();
       }
     });
+  });
+});
+
+describe("PIPELINE_PROGRESS (Orchestrator.md §8, ADR-034 §4)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  interface CapturedProgress {
+    readonly documentId: string;
+    readonly stage: PipelineStage;
+    readonly current: number;
+    readonly total: number;
+  }
+
+  // ─── Extracting: único punto de emisión, vía DOCUMENT_PARSED ───
+
+  it("Extracting: emits current = total = pageCount on DOCUMENT_PARSED", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    wireHappyPathSpies(engines, bus);
+    vi.spyOn(engines.pdf, "process").mockImplementation(async (input: { documentId: string }) => {
+      bus.emit(EventChannel.Pdf, EngineEvents.DOCUMENT_PARSED, {
+        documentId: input.documentId,
+        pageCount: 3,
+        textlessPages: [],
+        sourceKind: "text",
+      });
+      return createPdfEngineOutput({
+        document: createDocument({
+          pageCount: 3,
+          pages: [createPage({ index: 0 }), createPage({ index: 1 }), createPage({ index: 2 })],
+        }),
+      });
+    });
+
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    const progressSpy = vi.fn();
+    bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_PROGRESS, progressSpy);
+
+    await orchestrator.importDocument(createImportInput());
+
+    expect(progressSpy).toHaveBeenCalledTimes(1);
+    expect(progressSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentId: "doc-1",
+        stage: PipelineStage.Extracting,
+        current: 3,
+        total: 3,
+      }),
+    );
+  });
+
+  // ─── OCR: total = textlessPages.length, current por OCR_PAGE_FINISHED ───
+
+  it("OCR: current increments per OCR_PAGE_FINISHED up to total = textlessPages.length", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({
+        pageCount: 2,
+        pages: [
+          createPage({ index: 0, requiresOCR: true }),
+          createPage({ index: 1, requiresOCR: true }),
+        ],
+      }),
+      textlessPages: [0, 1],
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+    vi.spyOn(engines.ocr, "processPages").mockImplementation(async (inputs) => {
+      const outputs = [];
+      for (const input of inputs) {
+        bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
+          documentId: input.documentId,
+          pageIndex: input.pageIndex,
+          wordCount: 0,
+          confidence: 0.9,
+        });
+        outputs.push({
+          documentId: input.documentId,
+          pageIndex: input.pageIndex,
+          words: [],
+          confidence: 0.9,
+          durationMs: 1,
+        });
+      }
+      return outputs;
+    });
+
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    const progressEvents: CapturedProgress[] = [];
+    bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_PROGRESS, (p) => progressEvents.push(p));
+
+    await orchestrator.importDocument(createImportInput());
+
+    const ocrEvents = progressEvents.filter((e) => e.stage === PipelineStage.OCRing);
+    expect(ocrEvents.map((e) => e.current)).toEqual([1, 2]);
+    expect(ocrEvents.every((e) => e.total === 2)).toBe(true);
+    expect(ocrEvents.every((e) => e.current <= e.total)).toBe(true);
+    expect(ocrEvents.every((e) => e.documentId === "doc-1")).toBe(true);
+  });
+
+  // ─── Detección con NER activo: total = pageCount, current por NER_PAGE_FINISHED ───
+
+  it("Detecting (NER enabled): current increments per NER_PAGE_FINISHED up to total = pageCount", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({
+        pageCount: 2,
+        pages: [createPage({ index: 0 }), createPage({ index: 1 })],
+      }),
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+    vi.spyOn(engines.ner, "processPages").mockImplementation(async (inputs) => {
+      for (const input of inputs) {
+        bus.emit(EventChannel.Ner, EngineEvents.NER_PAGE_FINISHED, {
+          documentId: input.documentId,
+          pageIndex: input.pageIndex,
+          occurrenceCount: 0,
+        });
+      }
+      bus.emit(EventChannel.Ner, EngineEvents.NER_FINISHED, {
+        documentId: pdfOutput.document.id,
+        occurrenceCount: 0,
+        durationMs: 1,
+      });
+      await engines.grouping.finishSession(pdfOutput.document.id);
+      return inputs.map((input) => ({
+        documentId: input.documentId,
+        pageIndex: input.pageIndex,
+        occurrences: [],
+        durationMs: 1,
+      }));
+    });
+
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    const progressEvents: CapturedProgress[] = [];
+    bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_PROGRESS, (p) => progressEvents.push(p));
+
+    await orchestrator.importDocument(createImportInput());
+
+    const detectingEvents = progressEvents.filter((e) => e.stage === PipelineStage.Detecting);
+    expect(detectingEvents.map((e) => e.current)).toEqual([1, 2]);
+    expect(detectingEvents.every((e) => e.total === 2)).toBe(true);
+    expect(detectingEvents.every((e) => e.current <= e.total)).toBe(true);
+  });
+
+  // ─── current nunca supera total, incluso si se recibieran más eventos que páginas ───
+
+  it("current never exceeds total even with more finish events than pages tracked", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({
+        pageCount: 1,
+        pages: [createPage({ index: 0, requiresOCR: true })],
+      }),
+      textlessPages: [0],
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+    vi.spyOn(engines.ocr, "processPages").mockImplementation(async (inputs) => {
+      // Emite OCR_PAGE_FINISHED dos veces para la misma (única) página
+      // tracked, simulando una entrega duplicada del bus.
+      for (let i = 0; i < 2; i += 1) {
+        bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
+          documentId: inputs[0]?.documentId ?? "",
+          pageIndex: 0,
+          wordCount: 0,
+          confidence: 0.9,
+        });
+      }
+      return inputs.map((input) => ({
+        documentId: input.documentId,
+        pageIndex: input.pageIndex,
+        words: [],
+        confidence: 0.9,
+        durationMs: 1,
+      }));
+    });
+
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    const progressEvents: CapturedProgress[] = [];
+    bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_PROGRESS, (p) => progressEvents.push(p));
+
+    await orchestrator.importDocument(createImportInput());
+
+    const ocrEvents = progressEvents.filter((e) => e.stage === PipelineStage.OCRing);
+    expect(ocrEvents.map((e) => e.current)).toEqual([1, 1]);
+    expect(ocrEvents.every((e) => e.current <= e.total)).toBe(true);
   });
 });
 

@@ -155,6 +155,26 @@ describe("Orchestrator — edge cases", () => {
     expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
   });
 
+  // ─── Caso 6 (ADR-034 §2), progreso granular: PIPELINE_PROGRESS con NER off ───
+
+  it("NER disabled emits PIPELINE_PROGRESS current = total = pageCount after REGEX_FINISHED", async () => {
+    const { bus, orchestrator } = makeOrchestrator({ nerEnabled: false });
+    const progressSpy = vi.fn();
+    bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_PROGRESS, progressSpy);
+
+    await orchestrator.importDocument(createImportInput());
+
+    // Documento por defecto de los fixtures: pageCount 1 (createDocument()).
+    expect(progressSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentId: "doc-1",
+        stage: PipelineStage.Detecting,
+        current: 1,
+        total: 1,
+      }),
+    );
+  });
+
   // ─── Caso 10: doble export se encola ───
 
   it("double export queues second request", async () => {
