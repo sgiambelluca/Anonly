@@ -553,4 +553,36 @@ describe("RenderEngine — edge cases", () => {
       expect.objectContaining({ documentId: "doc-unloaded-3" }),
     );
   });
+
+  // ─── ADR-034 §1: rasterizePage validaciones ───
+
+  it("rasterizePage throws InvalidInputError when document not loaded", async () => {
+    await engine.init(ctx);
+    await expect(engine.rasterizePage("doc-not-loaded", 0, 2, ctx)).rejects.toThrow(
+      InvalidInputError,
+    );
+  });
+
+  it("rasterizePage throws InvalidInputError when scale <= 0", async () => {
+    const docId = "doc-rasterize-bad-scale";
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+    );
+    await engine.init(ctx);
+    await engine.loadDocument(docId, createValidBuffer());
+
+    await expect(engine.rasterizePage(docId, 0, 0, ctx)).rejects.toThrow(InvalidInputError);
+    await expect(engine.rasterizePage(docId, 0, -1, ctx)).rejects.toThrow(InvalidInputError);
+  });
+
+  it("rasterizePage throws InvalidInputError when pageIndex out of range", async () => {
+    const docId = "doc-rasterize-bad-page";
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+    );
+    await engine.init(ctx);
+    await engine.loadDocument(docId, createValidBuffer());
+
+    await expect(engine.rasterizePage(docId, 5, 2, ctx)).rejects.toThrow(InvalidInputError);
+  });
 });

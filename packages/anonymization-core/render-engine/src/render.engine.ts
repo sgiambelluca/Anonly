@@ -1,13 +1,22 @@
 /**
  * @anonly/render-engine — `RenderEngine` (implementa `IEngine`).
  *
- * Fuente de verdad: docs/core/Render_Engine.md (v1.1.1, ADR-030, ADR-031).
+ * Fuente de verdad: docs/core/Render_Engine.md (v1.2.0, ADR-030, ADR-031, ADR-034).
  *
  * ADR-021 (motores inline hasta Hito 9): sin pool propio, sin Workers
- * propios. Corre en el host (main thread) con `OffscreenCanvas` +
+ * propios — el motor sigue corriendo inline en Hito 9 (el `RenderPool` del
+ * Orchestrator lo invoca por sus métodos públicos existentes, sin cambio de
+ * interfaz). Corre en el host (main thread) con `OffscreenCanvas` +
  * `pdfjs-dist`. La cancelación es cooperativa vía `ctx.abortSignal` con
  * checkpoints entre operaciones de Canvas; el SLA estricto < 200ms se valida
  * en Hito 9/11 (mismo precedente que pdf-engine/ocr-engine/ner-engine).
+ *
+ * ADR-034 (auditoría pre-Hito 9): `rasterizePage` (rasterización pura sin
+ * eventos/cache, para el flujo OCR del Orchestrator) y `RenderPageOutput.encoded`
+ * (bytes codificados en mode "full", vía `convertToBlob`) son nuevos en este
+ * hito. La nota de implementación 4 (abajo) documentaba el placeholder de
+ * `PREVIEW_UPDATED.canvasBlobUrl` con bytes crudos (ADR-031 §5); este hito lo
+ * reemplaza por codificación real (`encodeImageData`, `convertToBlob`).
  *
  * ADR-030 (`RenderEngine.loadDocument`): el motor mantiene su propio
  * `Map<documentId, PDFDocumentProxy>`, poblado por `loadDocument` (toma
@@ -41,19 +50,14 @@
  *    `kind: "original"` sin `replacements` colisionaría entre distintos
  *    `annotations`; ADR-031 §2). No es una extensión propia: es el
  *    comportamiento especificado.
- * 4. `PREVIEW_UPDATED.canvasBlobUrl` (§7): la nota del spec describe que en
- *    la arquitectura de Worker (Hito 9) el host genera el blob a partir del
- *    `ImageData` transferido, para evitar `createObjectURL` en el worker. En
- *    Hito 7 (inline, ADR-021) no hay un host separado: el propio motor arma
- *    el blob (igual que `PdfEngine`/`OcrEngine` emiten sus propios eventos en
- *    modo inline) — item 7 del checklist ("Implementar `renderPage` con...
- *    `PREVIEW_UPDATED` por página") lo confirma. Como no hay codificador de
- *    imagen real disponible inline (eso es del Export Engine, Hito 8), el
- *    `Blob` envuelve los bytes crudos de `ImageData.data` con el
- *    `imageFormat` solicitado solo como pista de tipo MIME (`image/png` /
- *    `image/jpeg`), no como una codificación real. Aceptado como placeholder
- *    de Hito 7 (ADR-031 §5); la codificación real y el armado del blob en el
- *    host llegan con el Orchestrator (Hito 9) — pendiente a verificar ahí.
+ * 4. `PREVIEW_UPDATED.canvasBlobUrl` (§7): en Hito 7 (inline, ADR-021) el
+ *    propio motor arma el blob (igual que `PdfEngine`/`OcrEngine` emiten sus
+ *    propios eventos en modo inline). El motor sigue armando el blob en
+ *    Hito 9 (sigue sin haber un host separado — el `RenderPool` invoca los
+ *    métodos existentes del motor), pero ahora con codificación real
+ *    (`encodeImageData` → `OffscreenCanvas.convertToBlob`, ADR-034 §3),
+ *    reemplazando el placeholder de bytes crudos de ADR-031 §5. El
+ *    Orchestrator no crea el blob: solo lo rastrea y revoca (ADR-034 §5).
  * 5. `as unknown as CanvasRenderingContext2D` en `renderPageOntoContext`:
  *    ÚNICO cast de este tipo en código de producción de todo el Core (ver el
  *    comentario puntual, más abajo, para el detalle técnico completo).
@@ -72,6 +76,7 @@ import {
   ReplacementMode,
   type Annotation,
   type BoundingBox,
+  type EncodedPageImage,
   type EngineContext,
   type GroupReplacementChanged,
   type GroupToggled,
@@ -333,7 +338,7 @@ export class RenderEngine implements IEngine {
     const cached = this.cache.get(cacheKey);
     if (cached !== undefined) {
       this.touchCache(cacheKey);
-      if (mode === "preview") this.emitPreviewUpdated(ctx, cached, imageFormat);
+      if (mode === "preview") await this.emitPreviewUpdated(ctx, cached, imageFormat);
       return cached;
     }
 
@@ -384,16 +389,116 @@ export class RenderEngine implements IEngine {
 
     const imageData = context2d.getImageData(0, 0, viewport.width, viewport.height);
     const durationMs = Date.now() - startedAt;
-    const output: RenderPageOutput = { documentId, pageIndex, kind, imageData, durationMs };
+
+    // ADR-034 §3: `encoded` solo se computa para mode "full" (consumido por el
+    // RenderPageProvider del Orchestrator vía convertToBlob, no imageData crudo).
+    const encoded =
+      mode === "full"
+        ? await this.encodeImageData(
+            imageData,
+            imageFormat,
+            ctx.config.render.jpegQuality,
+            documentId,
+            pageIndex,
+          )
+        : undefined;
+
+    const output: RenderPageOutput = {
+      documentId,
+      pageIndex,
+      kind,
+      imageData,
+      durationMs,
+      ...(encoded !== undefined ? { encoded } : {}),
+    };
 
     this.cache.set(cacheKey, output);
     this.evictCacheIfNeeded(ctx);
 
     if (mode === "preview") {
-      this.emitPreviewUpdated(ctx, output, imageFormat);
+      await this.emitPreviewUpdated(ctx, output, imageFormat);
     }
 
     return output;
+  }
+
+  /**
+   * Rasterización pura de una página a `ImageData`, sin reemplazos ni
+   * highlights (ADR-034 §1): alimenta el OCR desde el Orchestrator, que no
+   * puede importar pdfjs. No emite eventos (ni `PREVIEW_UPDATED`) ni toca el
+   * cache LRU de previews.
+   */
+  async rasterizePage(
+    documentId: string,
+    pageIndex: number,
+    scale: number,
+    ctx: EngineContext,
+  ): Promise<ImageData> {
+    this.assertNotDisposed();
+    this.assertInitialized();
+
+    const pdfDocument = this.documents.get(documentId);
+    if (pdfDocument === undefined) {
+      throw new InvalidInputError(
+        `Documento ${documentId} no está cargado. Llamá loadDocument antes de rasterizePage (ADR-030, ADR-034 §1).`,
+        { documentId },
+      );
+    }
+
+    if (!Number.isInteger(pageIndex) || pageIndex < 0 || pageIndex >= pdfDocument.numPages) {
+      throw new InvalidInputError(
+        `pageIndex ${pageIndex} fuera de rango para documento con ${pdfDocument.numPages} páginas.`,
+        { documentId, pageIndex, pageCount: pdfDocument.numPages },
+      );
+    }
+
+    if (!(scale > 0)) {
+      throw new InvalidInputError(`scale debe ser mayor a 0. Recibido: ${scale}.`, {
+        documentId,
+        pageIndex,
+        scale,
+      });
+    }
+
+    if (ctx.abortSignal.aborted) {
+      throw new CancelledError(documentId);
+    }
+
+    const timeoutMs = ctx.config.workerPool.timeouts["render-page"] ?? DEFAULT_TIMEOUT_MS;
+
+    let pageProxy: PDFPageProxy;
+    try {
+      pageProxy = await pdfDocument.getPage(pageIndex + 1);
+    } catch (err: unknown) {
+      throw this.toPageFailure(documentId, pageIndex, err);
+    }
+
+    if (ctx.abortSignal.aborted) {
+      throw new CancelledError(documentId);
+    }
+
+    const viewport = pageProxy.getViewport({ scale });
+    const canvas = this.createCanvas(documentId, pageIndex, viewport.width, viewport.height);
+    const context2d = this.get2dContext(canvas, documentId, pageIndex);
+
+    try {
+      await this.renderPageOntoContext(
+        pageProxy,
+        context2d,
+        viewport,
+        documentId,
+        pageIndex,
+        timeoutMs,
+      );
+    } catch (err: unknown) {
+      throw this.toPageFailure(documentId, pageIndex, err);
+    }
+
+    if (ctx.abortSignal.aborted) {
+      throw new CancelledError(documentId);
+    }
+
+    return context2d.getImageData(0, 0, viewport.width, viewport.height);
   }
 
   async renderPages(
@@ -836,18 +941,24 @@ export class RenderEngine implements IEngine {
     return new RenderPageFailedError(documentId, pageIndex, reason);
   }
 
-  private emitPreviewUpdated(
+  private async emitPreviewUpdated(
     ctx: EngineContext,
     output: RenderPageOutput,
     imageFormat: "png" | "jpeg",
-  ): void {
-    // Nota de implementación 4 (cabecera del archivo): sin codificador de
-    // imagen real disponible inline; el Blob envuelve los bytes crudos con el
-    // tipo MIME solicitado como pista de formato. Aceptado como placeholder de
-    // Hito 7 (ADR-031 §5): la codificación real de imagen y el armado del
-    // blob en el host (spec §7, `convertToBlob`) llegan con el Orchestrator
-    // en Hito 9 — pendiente a verificar en ese hito, no perder de vista.
-    const blob = new Blob([output.imageData.data], { type: `image/${imageFormat}` });
+  ): Promise<void> {
+    // ADR-034 §3 (reemplaza el placeholder de bytes crudos de ADR-031 §5):
+    // codificación real vía `convertToBlob`, donde vive el canvas. `output.encoded`
+    // solo existe para mode "full" (§10), así que preview siempre re-codifica
+    // desde `imageData` acá — mismos bytes, sin duplicar el campo `encoded`
+    // en el output de un preview.
+    const encoded = await this.encodeImageData(
+      output.imageData,
+      imageFormat,
+      ctx.config.render.jpegQuality,
+      output.documentId,
+      output.pageIndex,
+    );
+    const blob = new Blob([encoded.bytes], { type: `image/${encoded.format}` });
     const canvasBlobUrl = URL.createObjectURL(blob);
     ctx.bus.emit(EventChannel.Render, EngineEvents.PREVIEW_UPDATED, {
       documentId: output.documentId,
@@ -855,6 +966,34 @@ export class RenderEngine implements IEngine {
       kind: output.kind,
       canvasBlobUrl,
     });
+  }
+
+  /**
+   * Codifica `ImageData` a PNG/JPEG vía `OffscreenCanvas.convertToBlob`
+   * (ADR-034 §3): "donde vive el canvas" — un `OffscreenCanvas` temporal
+   * pintado con `putImageData`, consistente con `07_Performance_Strategy.md`
+   * §10. Usado tanto para `RenderPageOutput.encoded` (mode "full") como para
+   * el blob de `PREVIEW_UPDATED` (mode "preview").
+   */
+  private async encodeImageData(
+    imageData: ImageData,
+    imageFormat: "png" | "jpeg",
+    quality: number,
+    documentId: string,
+    pageIndex: number,
+  ): Promise<EncodedPageImage> {
+    const canvas = this.createCanvas(documentId, pageIndex, imageData.width, imageData.height);
+    const context = this.get2dContext(canvas, documentId, pageIndex);
+    context.putImageData(imageData, 0, 0);
+
+    let blob: Blob;
+    try {
+      blob = await canvas.convertToBlob({ type: `image/${imageFormat}`, quality });
+    } catch (err: unknown) {
+      throw this.toPageFailure(documentId, pageIndex, err);
+    }
+    const bytes = await blob.arrayBuffer();
+    return { bytes, format: imageFormat, widthPx: imageData.width, heightPx: imageData.height };
   }
 
   private rememberInput(

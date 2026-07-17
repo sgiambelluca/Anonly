@@ -103,7 +103,7 @@ export function createMockPdfDocument(options?: MockPdfDocumentOptions): Record<
 // ─── Stub de OffscreenCanvas / contexto 2D (registra qué se dibujó) ───
 
 export interface DrawCall {
-  readonly op: "fillRect" | "strokeRect" | "fillText" | "drawImage" | "getImageData";
+  readonly op: "fillRect" | "strokeRect" | "fillText" | "drawImage" | "getImageData" | "putImageData";
   readonly args: ReadonlyArray<unknown>;
   readonly fillStyle?: string;
   readonly strokeStyle?: string;
@@ -149,6 +149,10 @@ class StubCanvasRenderingContext2D {
       colorSpace: "srgb",
     };
   }
+
+  putImageData(imageData: ImageData, x: number, y: number): void {
+    this.calls.push({ op: "putImageData", args: [imageData, x, y] });
+  }
 }
 
 export interface CreatedCanvas {
@@ -159,6 +163,27 @@ export interface CreatedCanvas {
 
 let stubContextAvailable = true;
 let createdCanvases: Array<{ width: number; height: number; context: StubCanvasRenderingContext2D }> = [];
+
+// ADR-034 §3: `convertToBlob` es la frontera real de codificación (`encodeImageData`
+// en render.engine.ts). El stub no codifica píxeles reales (no hay codec PNG/JPEG
+// disponible en el entorno `node` de Vitest, ADR-021 §5): produce un `Blob` real
+// y determinista cuyo tamaño refleja `{ type, quality }`, suficiente para que los
+// tests verifiquen que `RenderPageOutput.encoded`/`PREVIEW_UPDATED.canvasBlobUrl`
+// se construyen con el formato/calidad efectivos, sin depender de un encoder real.
+let convertToBlobError: Error | null = null;
+let convertToBlobCalls: Array<{ readonly type?: string; readonly quality?: number }> = [];
+
+export function setConvertToBlobError(error: Error | null): void {
+  convertToBlobError = error;
+}
+
+export function getConvertToBlobCalls(): ReadonlyArray<{ readonly type?: string; readonly quality?: number }> {
+  return convertToBlobCalls;
+}
+
+export function resetConvertToBlobCalls(): void {
+  convertToBlobCalls = [];
+}
 
 class StubOffscreenCanvas {
   width: number;
@@ -174,6 +199,16 @@ class StubOffscreenCanvas {
   getContext(contextId: string): StubCanvasRenderingContext2D | null {
     if (contextId !== "2d" || !stubContextAvailable) return null;
     return this.context;
+  }
+
+  convertToBlob(options?: { readonly type?: string; readonly quality?: number }): Promise<Blob> {
+    convertToBlobCalls.push({
+      ...(options?.type !== undefined ? { type: options.type } : {}),
+      ...(options?.quality !== undefined ? { quality: options.quality } : {}),
+    });
+    if (convertToBlobError !== null) return Promise.reject(convertToBlobError);
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, this.width & 0xff, this.height & 0xff]);
+    return Promise.resolve(new Blob([bytes], { type: options?.type ?? "image/png" }));
   }
 }
 
@@ -245,7 +280,7 @@ export function createMockConfig(overrides?: Partial<EngineConfig>): EngineConfi
       ocrPoolSize: 1,
       nerPoolSize: 1,
       renderPoolSize: 2,
-      maxQueuePerPool: 32,
+      maxQueuePerPool: { pdf: 32, ocr: 8, ner: 8, render: 32 },
       timeouts: {
         "pdf-parse": 30000,
         "ocr-page": 60000,

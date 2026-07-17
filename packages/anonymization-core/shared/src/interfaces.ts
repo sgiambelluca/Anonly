@@ -90,7 +90,9 @@ export interface WorkerPoolConfig {
   readonly ocrPoolSize: number;
   readonly nerPoolSize: number;
   readonly renderPoolSize: number;
-  readonly maxQueuePerPool: number;
+  // Por pool (ADR-034 §7): el default documentado (32 PDF/Render, 8 OCR/NER)
+  // no era expresable con un escalar.
+  readonly maxQueuePerPool: Readonly<Record<"pdf" | "ocr" | "ner" | "render", number>>;
   readonly timeouts: Readonly<Record<WorkerJobType, number>>;
   readonly maxRetries: Readonly<Record<WorkerJobType, number>>;
   readonly baseRetryDelayMs: number;

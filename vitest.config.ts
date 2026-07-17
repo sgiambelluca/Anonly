@@ -40,6 +40,18 @@ export default defineConfig({
         rootDir,
         "packages/anonymization-core/export-engine/src/index.ts",
       ),
+      // tests/integration/ (Hito 9, ADR-034 §6) importa estos motores
+      // directamente para el par crítico "Regex + NER → Grouping vía
+      // ENTITY_FOUND" con motores reales; mismo criterio que export-engine.
+      "@anonly/regex-engine": resolve(
+        rootDir,
+        "packages/anonymization-core/regex-engine/src/index.ts",
+      ),
+      "@anonly/ner-engine": resolve(rootDir, "packages/anonymization-core/ner-engine/src/index.ts"),
+      "@anonly/grouping-engine": resolve(
+        rootDir,
+        "packages/anonymization-core/grouping-engine/src/index.ts",
+      ),
     },
   },
   test: {
@@ -117,6 +129,12 @@ export default defineConfig({
           functions: 80,
         },
         "packages/anonymization-core/export-engine/src/**": {
+          lines: 85,
+          statements: 85,
+          branches: 80,
+          functions: 80,
+        },
+        "packages/anonymization-core/src/**": {
           lines: 85,
           statements: 85,
           branches: 80,

@@ -30,6 +30,7 @@ import { isTransferable } from "../index.js";
 import type {
   BoundingBox,
   Document,
+  EncodedPageImage,
   EngineConfig,
   EngineContext,
   EntityGroup,
@@ -565,6 +566,17 @@ describe("@anonly/shared — Contracts", () => {
       expect(occurrence.entityType).toBe(EntityType.Person);
       expect(word.source).toBe("pdf");
     });
+
+    it("EncodedPageImage tipa bytes/format/dimensiones (ADR-034 §3)", () => {
+      const encoded: EncodedPageImage = {
+        bytes: new Uint8Array([1, 2, 3]).buffer,
+        format: "jpeg",
+        widthPx: 100,
+        heightPx: 200,
+      };
+      expect(encoded.format).toBe("jpeg");
+      expect(encoded.bytes.byteLength).toBe(3);
+    });
   });
 
   describe("Interfaces base — firmas", () => {
@@ -622,7 +634,7 @@ describe("@anonly/shared — Contracts", () => {
           ocrPoolSize: 1,
           nerPoolSize: 1,
           renderPoolSize: 2,
-          maxQueuePerPool: 32,
+          maxQueuePerPool: { pdf: 32, ocr: 8, ner: 8, render: 32 },
           timeouts: {
             "pdf-parse": 30000,
             "ocr-page": 60000,

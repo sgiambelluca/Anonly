@@ -15,6 +15,7 @@ import { RenderEngine } from "../render.engine.js";
 
 import {
   createEngineContext,
+  createMockPage,
   createMockPdfDocument,
   createRenderPageInput,
   createValidBuffer,
@@ -185,5 +186,49 @@ describe("RenderEngine — contract tests", () => {
     await engine.unloadDocument("doc-roundtrip");
     expect(engine["documents"].has("doc-roundtrip")).toBe(false);
     expect(mockDoc.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  // ─── ADR-034 §1/§3 (Hito 9): rasterizePage + RenderPageOutput.encoded ───
+
+  it("rasterizePage returns ImageData without emitting events nor touching cache", async () => {
+    const docId = "doc-rasterize";
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(
+        createMockPdfDocument({
+          pageCount: 1,
+          pageFactory: () => createMockPage({ width: 200, height: 300 }),
+        }),
+      ),
+    );
+    await engine.init(ctx);
+    await engine.loadDocument(docId, createValidBuffer());
+    const emitSpy = vi.spyOn(ctx.bus, "emit");
+
+    const imageData = await engine.rasterizePage(docId, 0, 2, ctx);
+
+    expect(imageData.width).toBe(400); // 200 * scale(2)
+    expect(imageData.height).toBe(600);
+    expect(emitSpy).not.toHaveBeenCalled();
+    expect(engine["cache"].size).toBe(0);
+  });
+
+  it("full mode output includes encoded bytes with effective format and quality", async () => {
+    const docId = "doc-encoded-full";
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+    );
+    await engine.init(ctx);
+    await engine.loadDocument(docId, createValidBuffer());
+
+    const output = await engine.renderPage(
+      createRenderPageInput({ documentId: docId, pageIndex: 0, kind: "original", mode: "full" }),
+      ctx,
+    );
+
+    expect(output.encoded).toBeDefined();
+    expect(output.encoded?.format).toBe("jpeg"); // default full imageFormat (§9)
+    expect(output.encoded?.bytes.byteLength).toBeGreaterThan(0);
+    expect(output.encoded?.widthPx).toBe(output.imageData.width);
+    expect(output.encoded?.heightPx).toBe(output.imageData.height);
   });
 });

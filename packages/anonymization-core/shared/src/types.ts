@@ -254,3 +254,18 @@ export interface WorkerCapabilities {
   readonly languages?: ReadonlyArray<string>;
   readonly modelVersion?: string;
 }
+
+/**
+ * Imagen de página codificada (PNG/JPEG), lista para `embedPng`/`embedJpg` de
+ * pdf-lib. Definida originalmente en `export-engine` (ADR-032 §1) y promovida
+ * a `@anonly/shared` al aparecer el segundo consumidor: Render la produce
+ * (`RenderPageOutput.encoded`), Export la consume
+ * (`RenderPageProvider.renderFull`), el Orchestrator la transporta
+ * (ADR-034 §3). Fuente de verdad: Contracts.md §7.
+ */
+export interface EncodedPageImage {
+  readonly bytes: ArrayBuffer; // imagen codificada (PNG o JPEG)
+  readonly format: "png" | "jpeg";
+  readonly widthPx: number;
+  readonly heightPx: number;
+}

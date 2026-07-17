@@ -157,7 +157,7 @@ function createEngineConfig(): EngineConfig {
       ocrPoolSize: 1,
       nerPoolSize: 1,
       renderPoolSize: 1,
-      maxQueuePerPool: 32,
+      maxQueuePerPool: { pdf: 32, ocr: 8, ner: 8, render: 32 },
       timeouts: {
         "pdf-parse": 30000,
         "ocr-page": 60000,

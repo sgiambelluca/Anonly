@@ -11,9 +11,14 @@
       // resolve.alias en vitest.config.ts (única fuente de la ruta real);
       // se agrega acá solo lo que un test de tests/ importa, motor por motor.
       "@anonly/shared": ["../packages/anonymization-core/shared/src/index.ts"],
-      "@anonly/export-engine": ["../packages/anonymization-core/export-engine/src/index.ts"]
+      "@anonly/event-system": ["../packages/anonymization-core/event-system/src/index.ts"],
+      "@anonly/export-engine": ["../packages/anonymization-core/export-engine/src/index.ts"],
+      "@anonly/regex-engine": ["../packages/anonymization-core/regex-engine/src/index.ts"],
+      "@anonly/ner-engine": ["../packages/anonymization-core/ner-engine/src/index.ts"],
+      "@anonly/grouping-engine": ["../packages/anonymization-core/grouping-engine/src/index.ts"],
+      "@anonly/anonymization-core": ["../packages/anonymization-core/src/index.ts"]
     }
   },
   "include": ["**/*.ts"],
-  "exclude": ["**/node_modules/**", "e2e/**", "perf/**", "leak/**", "cancel/**", "integration/**"]
+  "exclude": ["**/node_modules/**", "e2e/**", "perf/**", "leak/**", "cancel/**"]
 }
