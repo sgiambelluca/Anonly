@@ -34,7 +34,14 @@
   },
   "dependencies": {
     "@anonly/shared": "workspace:*",
-    "@anonly/event-system": "workspace:*"
+    "@anonly/event-system": "workspace:*",
+    "@anonly/pdf-engine": "workspace:*",
+    "@anonly/ocr-engine": "workspace:*",
+    "@anonly/regex-engine": "workspace:*",
+    "@anonly/ner-engine": "workspace:*",
+    "@anonly/grouping-engine": "workspace:*",
+    "@anonly/render-engine": "workspace:*",
+    "@anonly/export-engine": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.6.2",

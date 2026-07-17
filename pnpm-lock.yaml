@@ -27,6 +27,9 @@ importers:
       '@eslint/js':
         specifier: ^9.11.0
         version: 9.39.4
+      '@huggingface/transformers':
+        specifier: ^4.2.0
+        version: 4.2.0
       '@playwright/test':
         specifier: ^1.48.0
         version: 1.61.0
@@ -60,9 +63,15 @@ importers:
       pdf-lib:
         specifier: ^1.17.1
         version: 1.17.1
+      pdfjs-dist:
+        specifier: ^4.0.379
+        version: 4.10.38
       prettier:
         specifier: ^3.3.3
         version: 3.8.4
+      tesseract.js:
+        specifier: ^6.0.1
+        version: 6.0.1
       tsx:
         specifier: ^4.19.1
         version: 4.22.4
@@ -139,6 +148,27 @@ importers:
       '@anonly/event-system':
         specifier: workspace:*
         version: link:event-system
+      '@anonly/export-engine':
+        specifier: workspace:*
+        version: link:export-engine
+      '@anonly/grouping-engine':
+        specifier: workspace:*
+        version: link:grouping-engine
+      '@anonly/ner-engine':
+        specifier: workspace:*
+        version: link:ner-engine
+      '@anonly/ocr-engine':
+        specifier: workspace:*
+        version: link:ocr-engine
+      '@anonly/pdf-engine':
+        specifier: workspace:*
+        version: link:pdf-engine
+      '@anonly/regex-engine':
+        specifier: workspace:*
+        version: link:regex-engine
+      '@anonly/render-engine':
+        specifier: workspace:*
+        version: link:render-engine
       '@anonly/shared':
         specifier: workspace:*
         version: link:shared

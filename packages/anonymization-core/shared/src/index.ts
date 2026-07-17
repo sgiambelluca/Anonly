@@ -52,6 +52,7 @@ export type {
   ExportOptions,
   ExportMetadata,
   WorkerCapabilities,
+  EncodedPageImage,
 } from "./types.js";
 
 // Interfaces base (Contracts.md §3)
