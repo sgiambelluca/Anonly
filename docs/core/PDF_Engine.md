@@ -176,14 +176,14 @@ PdfEngineOutput {
 | `ENGINE_DISPOSED` | `EngineDisposedError` | `process` llamado tras `dispose` | no | bug del caller |
 | `INVALID_INPUT` | `InvalidInputError` | input null/undefined, buffer vacío, o `fuseOcrPage` sobre página con `requiresOCR === false` (ADR-020 §6) | no | bug del caller |
 
-`retryable`: `PDF_PASSWORD_REQUIRED = true`, `PDF_TIMEOUT = true`, resto `false`.
+`retryable`: `PDF_TIMEOUT = true`, resto `false` — incluido `PDF_PASSWORD_REQUIRED` (errata ADR-035 §3: `retryable` significa auto-reintentable por el pool sin intervención del usuario; la recuperación por password es del flujo UI → `retryWithPassword`, no del flag. El fix del flag en `pdf.errors.ts` va en un PR chico posterior al Hito 9).
 
 ---
 
 ## 12. Consideraciones de rendimiento
 
 - **Hito 2**: corre inline en el host thread (sin `PdfPool`); cancelación vía `AbortSignal` con checkpoint por página.
-- **Hito 9**: migra a `PdfPool` (Web Workers dedicados) cuando `WorkerPoolManager` exista. La interfaz pública (§6) no cambia entre ambos modos (ver ADR-013).
+- **Hito 9**: migra a `PdfPool` in-process (cola de concurrencia del `WorkerPoolManager`, ADR-035 §1); el despacho a Web Workers dedicados llega en el Hito 10 (ADR-035 §2). La interfaz pública (§6) no cambia entre los tres modos (ver ADR-013).
 - Costo: 0.5–3 s por página con texto; 0.1–0.5 s por página vacía/escaneada.
 - Memoria típica: 20–80 MB por PDF activo.
 - `buffer` se **transfiere** al worker (zero-copy). El host pierde acceso al buffer. En Hito 2 (inline) el `buffer` se trata como `ArrayBuffer` plano; no implementar lógica de `Transferable.consume()` hasta Hito 9 (sería dead code inline).
