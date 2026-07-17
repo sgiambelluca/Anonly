@@ -55,7 +55,10 @@ let core: IAnonymizationCore | undefined;
 export async function initCore(): Promise<IAnonymizationCore> {
   if (core) return core;
   core = await createCore({ /* EngineConfig */ });
-  busBridge.subscribe(core.bus, core.stores);
+  // Los stores (Zustand) son del adapter, no del Core: IAnonymizationCore no
+  // expone `stores` (errata corregida, ADR-034 §7). El bridge suscribe los
+  // stores locales a los eventos del bus.
+  busBridge.subscribe(core.bus, stores);
   return core;
 }
 
@@ -315,7 +318,7 @@ export interface IAnonymizationCore {
   dispose(): Promise<void>;
 }
 
-export async function createCore(config: Partial<EngineConfig>): Promise<IAnonymizationCore>;
+export async function createCore(config?: Partial<EngineConfig>): Promise<IAnonymizationCore>;
 ```
 
 El adapter **solo** usa esta API. Nunca accede a `pdf.engine.ts` ni a internals.

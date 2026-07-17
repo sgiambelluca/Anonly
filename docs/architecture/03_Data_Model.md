@@ -490,6 +490,57 @@ export type WorkerJobType =
   | "export-page";
 ```
 
+Payloads concretos por job (forma exacta de `shared/src/types.ts`; `05_Worker_Architecture.md` §2.1 los tipa `unknown` a nivel de transporte y cada worker los afina a estos — ADR-019; documentados acá por P-10, ADR-034 §7):
+
+```ts
+export type WorkerJobPayload =
+  | PdfParsePayload
+  | OcrPagePayload
+  | NerPagePayload
+  | RenderPagePayload
+  | ExportPagePayload;
+
+export interface PdfParsePayload {
+  readonly documentId: string;
+  readonly buffer: ArrayBuffer;
+  readonly password?: string;
+  readonly pageRange?: ReadonlyArray<number>;
+}
+
+export interface OcrPagePayload {
+  readonly documentId: string;
+  readonly pageIndex: number;
+  readonly imageData: ArrayBuffer;
+  readonly dpi: number;
+  readonly languages: ReadonlyArray<string>;
+}
+
+export interface NerPagePayload {
+  readonly documentId: string;
+  readonly pageIndex: number;
+  readonly text: string;
+  readonly modelId: string;
+}
+
+export interface RenderPagePayload {
+  readonly documentId: string;
+  readonly pageIndex: number;
+  readonly kind: "original" | "anonymized";
+  readonly mode: "preview" | "full";
+  readonly replacements?: ReadonlyArray<Replacement>;
+  readonly annotations?: ReadonlyArray<Annotation>;
+  readonly scale?: number;
+  readonly imageFormat?: "png" | "jpeg";
+}
+
+export interface ExportPagePayload {
+  readonly documentId: string;
+  readonly pageIndex: number;
+  readonly pageImage: ArrayBuffer;
+  readonly metadata: ExportMetadata;
+}
+```
+
 Ver `05_Worker_Architecture.md` para el detalle de cada job.
 
 ---

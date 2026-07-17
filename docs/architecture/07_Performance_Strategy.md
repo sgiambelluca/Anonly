@@ -244,6 +244,7 @@ Fixtures pesados (> 5 MB) vía Git LFS o descargados en `postinstall` con hash v
 | Unit + contract + snapshot + cobertura | `pnpm test -- --coverage` | test rojo, o cobertura < 85% líneas en un paquete implementado (thresholds por paquete en `vitest.config.ts`) | activo (CI) |
 | Contract (aislado) | `pnpm test:contract` | cualquier contrato rojo | activo (local / pre-PR) |
 | Snapshot (aislado) | `pnpm test:snapshot` | cualquier drift | activo (local / pre-PR) |
+| Integration | `pnpm test:integration` | cualquier par crítico rojo (pares mínimos en ADR-034 §6) | auto-activa al existir `tests/integration/` (Hito 9); también corre dentro de `pnpm test` |
 | E2E | `pnpm test:e2e` | cualquier escenario crítico de §11.3 rojo | auto-activa al existir `tests/e2e/` (Hito 10) |
 | Performance | `pnpm test:perf` | métrica gate de `00_Project_Vision.md` §7 fuera de target ± 10% | auto-activa al existir `tests/perf/` (Hito 11) |
 | Stress | `pnpm test:stress` | documento grande excede presupuesto de memoria/tiempo | auto-activa al existir `tests/stress/` (Hito 11) |
