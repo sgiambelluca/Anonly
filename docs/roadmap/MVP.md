@@ -158,14 +158,16 @@ Orden sugerido (cada hito = un set de PRs):
 - Implementar según `core/Orchestrator.md` **v1.1.0** (spec del componente host + façade `createCore`), reconciliado por la auditoría pre-hito `adr/ADR-034-Auditoria-Pre-Hito9-Orchestrator.md`.
 - Pipeline orchestrator que secuencia etapas, despacha jobs, maneja cancelación.
 - Integración de todos los engines via bus; test de contrato de la matriz emisor→receptor (`04_Event_System.md` §11 corregida por ADR-034 §4).
-- Migración de los motores pesados a sus **cuatro** pools (`PdfPool`, `OcrPool`, `NerPool`, `RenderPool`); `WorkerPoolManager` + `AbortRegistry` (ver ADR-013, ADR-021).
+- Migración de los motores pesados a sus **cuatro** pools (`PdfPool`, `OcrPool`, `NerPool`, `RenderPool`); `WorkerPoolManager` + `AbortRegistry` (ver ADR-013, ADR-021). Los pools del Hito 9 son colas de concurrencia in-process con la semántica completa de `05_Worker_Architecture.md`; los Web Workers de SO reales → Hito 10 (ADR-035 §1/§2).
 - Wiring Orchestrator→`PdfEngine.fuseOcrPage` para fusión OCR→PDF (ver ADR-014).
 - Decisiones ADR-034 que amplían contratos (cambios de código de `shared`/`render-engine`/`export-engine` viajan en los PRs del hito, docs primero): `RenderEngine.rasterizePage` + `RenderPageOutput.encoded` (Render v1.2.0); gestión de sesión de Grouping (`startSession`/`finishSession` con NER off); `EncodedPageImage` promovido a `@anonly/shared`; `WorkerPoolConfig.maxQueuePerPool` por pool; blob URLs creados por motores y revocados por el Orchestrator.
 - Crear `tests/integration/` (pares críticos mínimos de ADR-034 §6: Regex+NER→Grouping, OCR→PDF vía Orchestrator, happy path `createCore`→`PIPELINE_READY`), con script `test:integration`, alias por motor y exclusión de `tests/tsconfig.json` removida (ADR-033).
-- Pendientes que hereda este hito de PRs anteriores: `PREVIEW_UPDATED.canvasBlobUrl` real + revocación (Hito 7); revisitar `Replacement.originalValue` del Export si Render llega a depender de él (Hito 8); PR chico de `regex-engine` para `Occurrence.maskFormat` (ADR-029 §4, no bloqueante).
+- Pendientes que hereda este hito de PRs anteriores: `PREVIEW_UPDATED.canvasBlobUrl` real + revocación (Hito 7); revisitar `Replacement.originalValue` del Export si Render llega a depender de él (Hito 8) — verificado en Hito 9: Render no lo consume, cerrado (ADR-035 §4); PR chico de `regex-engine` para `Occurrence.maskFormat` (ADR-029 §4, no bloqueante).
+- Pendiente que este hito deja: PR chico de `pdf-engine` para `PdfPasswordRequiredError.retryable = false` + retiro del override `isRetryable` del Orchestrator (ADR-035 §3, no bloqueante).
 
 ### Hito 10 — React Client
 - `apps/react-client` con Vite + Tailwind + Radix + Zustand.
+- Migrar los cuatro pools de in-process a **Web Workers de SO reales**: entry-points de worker por motor (`pdf-engine`, `ocr-engine`, `ner-engine`; render/export según `05_Worker_Architecture.md` §7), PRs por motor, bundling vía Vite, transferables §2.3 (ADR-035 §2).
 - `core-adapter` (bus bridge, actions, snapshots).
 - 4 paneles, todos los componentes de `ui/Components.md`.
 - E2E con Playwright.

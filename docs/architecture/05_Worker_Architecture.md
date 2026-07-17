@@ -6,6 +6,8 @@
 
 **Principio rector**: todo procesamiento pesado ocurre en Workers (principio A-9 del TAD). El main thread solo orquesta y renderiza UI.
 
+**Entrega por fases (ADR-035)**: el Hito 9 implementa los cuatro pools como colas de concurrencia **in-process** con la semántica completa de este documento (colas prioritarias, límites, backpressure, reintentos, eventos `WORKER_*`, cancelación), despachando por llamada directa a los métodos públicos de cada motor. El transporte por Web Workers de SO reales (`postMessage`, transferables §2.3, entry-points por motor) llega en el Hito 10, donde existe el bundler de `apps/react-client`. Este documento sigue siendo la arquitectura objetivo.
+
 ---
 
 ## 1. Modelo general
@@ -127,7 +129,7 @@ Política común:
 
 - `maxRetries` por job type (tabla arriba).
 - Backoff exponencial: `delay = baseDelayMs * 2^attempt`, con `baseDelayMs = 250`, cap `2000 ms`.
-- Solo se reintenta si el error es `retryable === true` en el `SerializedEngineError`.
+- Solo se reintenta si el error es `retryable === true` en el `SerializedEngineError`. Semántica canónica (ADR-035 §3): `retryable` significa **auto-reintentable por el pool sin intervención del usuario**; la recuperabilidad por acción del usuario (p. ej. password) se expresa por evento + flujo de UI, nunca por este flag.
 - Errores no retryables: `PDF_INVALID`, `PDF_PASSWORD_REQUIRED`, `NER_MODEL_MISSING`, cualquier error de tipo `InvalidInput`.
 - Tras `maxRetries`, se emite el evento de fallo correspondiente (tabla por job type).
 
