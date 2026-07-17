@@ -148,9 +148,11 @@ Orden sugerido (cada hito = un set de PRs):
   - Rama defensiva de `RENDER_FAILED` en `renderPages` (hoy inalcanzable: `renderPage` no lanza `RenderFailedError`): revisitar cuando el pool defina el fatal de batch real. `renderPages` secuencial → el paralelismo lo aporta el pool (ADR-021).
 
 ### Hito 8 — Export Engine
-- Implementar `export-engine` con pdf-lib.
-- Tests de `no-recuperability` y `metadata-strip`.
+- ~~Implementar `export-engine` con pdf-lib.~~ **CERRADO** (PR #18).
+- ~~Tests de `no-recuperability` y `metadata-strip`.~~ **CERRADO** — `contract.test.ts`, `unit.test.ts`, `edge.test.ts`, `cancel.test.ts`, `stress.test.ts` commiteados en `packages/anonymization-core/export-engine/src/__tests__/`; `no-recuperability` en `tests/security/security.test.ts` (`pnpm test:security`). 44 tests, cobertura ≥85% líneas (threshold en `vitest.config.ts`).
 - Auditoría previa del spec (`adr/ADR-032-Export-EncodedPageImage-Requested-Warning.md`): `RenderPageProvider.renderFull` devuelve `EncodedPageImage` (bytes codificados; pdf-lib no embebe `ImageData`), `EXPORT_REQUESTED` lo escucha el Orchestrator (patrón ADR-014), `EXPORT_NO_ENABLED_GROUPS` es `logger.warn` + continuar (confirmación pre-export), `ExportOptions`/`ExportMetadata` formalizados en `03_Data_Model.md` §19. Spec a v1.1.0.
+- Test-infra global reconciliada (`adr/ADR-033-Test-Infra-Global-Scripts-Alias.md`): los cinco scripts `test:<dir>` (`security`/`cancel`/`leak`/`perf`/`stress`) usaban `--dir`, roto contra el `include` glob de Vitest — pasan a filtro posicional; se ratifica el alias `resolve.alias`/`paths` por motor, a demanda, para que tests de `tests/` importen motores (primer caso: `security.test.ts` → `@anonly/export-engine`). ADR-032 queda con nota de corrección. Hito 9 hereda los cinco scripts funcionales y la convención documentada.
+- Pendientes diferidos a Hito 9 (observación no bloqueante del revisor, PR #18): `Replacement.originalValue` usa el `canonicalValue` del grupo (`export.engine.ts:111`) porque `OccurrenceRef` no guarda el valor original por ocurrencia — aproximación semántica, sin consumidores de esa garantía hoy. Revisitar si Render (consumidor real del `RenderPageProvider`) llega a depender de `originalValue`.
 
 ### Hito 9 — Orchestrator
 - Implementar según `core/Orchestrator.md` (spec del componente host + façade `createCore`).
