@@ -16,7 +16,7 @@
  * caller, igual que grouping-engine hace con GroupingConfig.
  */
 
-import type { Annotation, Replacement } from "@anonly/shared";
+import type { Annotation, EncodedPageImage, Replacement } from "@anonly/shared";
 
 export interface RenderPageInput {
   readonly documentId: string;
@@ -34,5 +34,11 @@ export interface RenderPageOutput {
   readonly pageIndex: number;
   readonly kind: "original" | "anonymized";
   readonly imageData: ImageData;
+  /**
+   * Bytes codificados (PNG/JPEG), presente cuando `mode === "full"`
+   * (ADR-034 §3). Generados donde vive el canvas (`convertToBlob`), consumidos
+   * por el `RenderPageProvider` del Orchestrator para el Export.
+   */
+  readonly encoded?: EncodedPageImage;
   readonly durationMs: number;
 }

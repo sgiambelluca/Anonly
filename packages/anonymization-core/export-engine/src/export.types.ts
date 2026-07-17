@@ -13,20 +13,28 @@
  * en @anonly/shared (03_Data_Model.md §19, ADR-032 §4). Se re-exportan desde
  * index.ts para conveniencia del caller.
  *
- * `EncodedPageImage`/`RenderPageProvider` sí se definen acá (ADR-032 §1): el
- * contrato del provider lo consume Export y lo implementa el Orchestrator, que
- * ya importa motores — no corresponden a @anonly/shared (superficie global)
- * mientras Export sea su único consumidor.
+ * `EncodedPageImage` se definía acá localmente (ADR-032 §1) y fue promovida a
+ * `@anonly/shared` (ADR-034 §3) al aparecer el segundo consumidor: Render la
+ * produce (`RenderPageOutput.encoded`), Export la sigue consumiendo acá, el
+ * Orchestrator la transporta. Se re-exporta desde `@anonly/shared` para no
+ * romper a los callers existentes de `@anonly/export-engine`.
+ *
+ * `RenderPageProvider` sí se sigue definiendo acá: el contrato del provider lo
+ * consume Export y lo implementa el Orchestrator, que ya importa motores — no
+ * corresponde a @anonly/shared (superficie global) mientras Export sea su
+ * único consumidor.
  */
 
-import type { Document, EntityGroup, ExportOptions, Replacement, Rule } from "@anonly/shared";
+import type {
+  Document,
+  EncodedPageImage,
+  EntityGroup,
+  ExportOptions,
+  Replacement,
+  Rule,
+} from "@anonly/shared";
 
-export interface EncodedPageImage {
-  readonly bytes: ArrayBuffer; // imagen codificada (PNG o JPEG), lista para embedPng/embedJpg
-  readonly format: "png" | "jpeg";
-  readonly widthPx: number;
-  readonly heightPx: number;
-}
+export type { EncodedPageImage };
 
 export interface RenderPageProvider {
   renderFull(

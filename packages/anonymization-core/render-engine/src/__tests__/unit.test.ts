@@ -501,4 +501,22 @@ describe("RenderEngine — unit tests", () => {
       expect(getPageSpy).toHaveBeenCalled();
     });
   });
+
+  // ─── ADR-034 §3 ───
+
+  it("preview mode output has no encoded field", async () => {
+    const docId = "doc-preview-no-encoded";
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+    );
+    await engine.init(ctx);
+    await engine.loadDocument(docId, createValidBuffer());
+
+    const output = await engine.renderPage(
+      createRenderPageInput({ documentId: docId, pageIndex: 0, kind: "original", mode: "preview" }),
+      ctx,
+    );
+
+    expect(output.encoded).toBeUndefined();
+  });
 });

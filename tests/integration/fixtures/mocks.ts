@@ -1,0 +1,163 @@
+/**
+ * Mocks de fronteras de librerías externas pesadas para `tests/integration/`
+ * (ADR-021 §5, ADR-034 §6, Code_Standards.md §10): mismo criterio que cada
+ * motor aplica en sus propios `__tests__/fixtures/` (precedentes:
+ * `mockGetDocumentResult`/`createMockPdfDocument` en pdf-engine,
+ * `mockTesseractWorker`/`mockRecognizeData` en ocr-engine, la instalación de
+ * `OffscreenCanvas` en render-engine) — replicados acá en vez de importarlos
+ * de las carpetas internas `__tests__/fixtures/` de otros paquetes (esos
+ * archivos no son parte del `index.ts` público de cada motor).
+ *
+ * `vi.mock(...)` NO vive acá (hoisting de Vitest): cada archivo de test lo
+ * declara en su propio módulo; este archivo solo unifica los builders.
+ */
+import type { getDocument } from "pdfjs-dist";
+import type { createWorker } from "tesseract.js";
+import { vi } from "vitest";
+
+// ─── pdfjs-dist (PdfEngine + RenderEngine) ───
+
+function asLoadingTask(promise: Promise<unknown>): ReturnType<typeof getDocument> {
+  return { promise } as unknown as ReturnType<typeof getDocument>;
+}
+
+export function mockGetDocumentResult(doc: Record<string, unknown>): ReturnType<typeof getDocument> {
+  return asLoadingTask(Promise.resolve(doc));
+}
+
+export interface MockTextItem {
+  readonly str: string;
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/**
+ * Página combinada para pdfjs-dist: sirve tanto al uso de `PdfEngine`
+ * (`getTextContent` + `getViewport({ scale: 1 })`) como al de `RenderEngine`
+ * (`getViewport({ scale })` + `render({ canvasContext, viewport })`).
+ * `textItems` vacío ⇒ página sin texto (`requiresOCR: true`).
+ */
+export function createMockPdfPage(textItems: ReadonlyArray<MockTextItem>): Record<string, unknown> {
+  return {
+    getViewport: vi.fn(({ scale }: { scale: number }) => ({ width: 595 * scale, height: 842 * scale })),
+    getTextContent: vi.fn(() =>
+      Promise.resolve({
+        items: textItems.map((item) => ({
+          str: item.str,
+          transform: [1, 0, 0, 1, item.x, item.y],
+          width: item.width,
+          height: item.height,
+        })),
+      }),
+    ),
+    render: vi.fn(() => ({ promise: Promise.resolve() })),
+  };
+}
+
+export function createMockPdfDocument(pages: ReadonlyArray<Record<string, unknown>>): Record<string, unknown> {
+  return {
+    numPages: pages.length,
+    getPage: vi.fn((pageNumber: number) => Promise.resolve(pages[pageNumber - 1])),
+    getMetadata: vi.fn(() => Promise.resolve({ info: { Title: "Integration" }, metadata: undefined })),
+    destroy: vi.fn(() => Promise.resolve()),
+    _pdfInfo: { encrypted: false, pdfVersion: "1.7" },
+  };
+}
+
+// ─── OffscreenCanvas (RenderEngine.rasterizePage + OcrEngine.toTesseractImage) ───
+
+class StubCanvasContext2D {
+  fillStyle = "#000000";
+  strokeStyle = "#000000";
+  lineWidth = 1;
+  font = "10px sans-serif";
+  textAlign = "start";
+  textBaseline = "alphabetic";
+  fillRect(): void {}
+  strokeRect(): void {}
+  fillText(): void {}
+  drawImage(): void {}
+  putImageData(): void {}
+  getImageData(x: number, y: number, w: number, h: number): ImageData {
+    return { data: new Uint8ClampedArray(Math.max(w, 0) * Math.max(h, 0) * 4), width: w, height: h, colorSpace: "srgb" };
+  }
+  convertToBlob(): never {
+    throw new Error("no usado en estos tests de integración");
+  }
+}
+
+class StubOffscreenCanvas {
+  width: number;
+  height: number;
+  private readonly context = new StubCanvasContext2D();
+  constructor(width: number, height: number) {
+    this.width = width;
+    this.height = height;
+  }
+  getContext(id: string): StubCanvasContext2D | null {
+    return id === "2d" ? this.context : null;
+  }
+}
+
+export function installOffscreenCanvasStub(): void {
+  if (typeof globalThis.OffscreenCanvas !== "undefined") return;
+  Object.defineProperty(globalThis, "OffscreenCanvas", {
+    value: StubOffscreenCanvas,
+    writable: true,
+    configurable: true,
+  });
+}
+
+// ─── tesseract.js (OcrEngine) ───
+
+type TesseractWorker = Awaited<ReturnType<typeof createWorker>>;
+
+function asTesseractWorker(partial: Record<string, unknown>): TesseractWorker {
+  return partial as unknown as TesseractWorker;
+}
+
+export interface MockRecognizeWord {
+  readonly text: string;
+  readonly confidence: number;
+  readonly bbox: { readonly x0: number; readonly y0: number; readonly x1: number; readonly y1: number };
+}
+
+export function mockRecognizeData(words: ReadonlyArray<MockRecognizeWord>): Record<string, unknown> {
+  const confidence = words.length > 0 ? words.reduce((sum, w) => sum + w.confidence, 0) / words.length : 0;
+  return {
+    confidence,
+    blocks: [
+      { paragraphs: [{ lines: [{ words: words.map((w) => ({ text: w.text, confidence: w.confidence, bbox: w.bbox })) }] }] },
+    ],
+  };
+}
+
+export function mockTesseractWorker(recognizeData: unknown): TesseractWorker {
+  return asTesseractWorker({
+    recognize: vi.fn(() => Promise.resolve({ jobId: "mock-job", data: recognizeData })),
+    terminate: vi.fn(() => Promise.resolve()),
+  });
+}
+
+// ─── @huggingface/transformers (NerEngine) ───
+
+export interface MockNerToken {
+  readonly entity: string;
+  readonly score: number;
+  readonly index: number;
+  readonly word: string;
+}
+
+/**
+ * Cast de frontera contra @huggingface/transformers — mismo criterio que
+ * `mockTokenClassificationPipeline` en ner-engine (Code_Standards.md §10):
+ * `NerEngine` solo invoca el pipeline como función callable y `.dispose()`.
+ */
+export function mockTokenClassificationPipeline(
+  classify: (text: string) => Promise<ReadonlyArray<MockNerToken>>,
+): unknown {
+  const callable = (text: string): Promise<ReadonlyArray<MockNerToken>> => classify(text);
+  return Object.assign(callable, { dispose: () => Promise.resolve() });
+}
