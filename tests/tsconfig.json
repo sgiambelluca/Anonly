@@ -3,8 +3,17 @@
   "compilerOptions": {
     "declaration": false,
     "declarationMap": false,
-    "noEmit": true
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      // Ningún @anonly/*-engine es dependencia del package.json de la raíz
+      // (P-2): tsc no lo resuelve vía node_modules ahí. Mismo criterio que
+      // resolve.alias en vitest.config.ts (única fuente de la ruta real);
+      // se agrega acá solo lo que un test de tests/ importa, motor por motor.
+      "@anonly/shared": ["../packages/anonymization-core/shared/src/index.ts"],
+      "@anonly/export-engine": ["../packages/anonymization-core/export-engine/src/index.ts"]
+    }
   },
   "include": ["**/*.ts"],
-  "exclude": ["**/node_modules/**", "e2e/**", "perf/**", "leak/**", "cancel/**", "security/**", "integration/**"]
+  "exclude": ["**/node_modules/**", "e2e/**", "perf/**", "leak/**", "cancel/**", "integration/**"]
 }
