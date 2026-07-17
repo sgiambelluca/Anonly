@@ -23,6 +23,7 @@ vi.mock("@huggingface/transformers", () => ({
 }));
 
 import {
+  asPipelineMock,
   createMockPdfDocument,
   createMockPdfPage,
   installOffscreenCanvasStub,
@@ -57,8 +58,8 @@ describe("integration — createCore() -> importDocument -> PIPELINE_READY (happ
       { str: "34.567.891", x: 90, y: 800, width: 60, height: 12 },
     ]);
     vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(createMockPdfDocument([page])));
-    vi.mocked(pipeline).mockResolvedValue(
-      mockTokenClassificationPipeline(() => Promise.resolve([])) as any,
+    asPipelineMock(pipeline).mockResolvedValue(
+      mockTokenClassificationPipeline(() => Promise.resolve([])),
     );
 
     core = await createCore();

@@ -11,9 +11,10 @@
  * `vi.mock(...)` NO vive acá (hoisting de Vitest): cada archivo de test lo
  * declara en su propio módulo; este archivo solo unifica los builders.
  */
+import type { pipeline } from "@huggingface/transformers";
 import type { getDocument } from "pdfjs-dist";
 import type { createWorker } from "tesseract.js";
-import { vi } from "vitest";
+import { vi, type Mock } from "vitest";
 
 // ─── pdfjs-dist (PdfEngine + RenderEngine) ───
 
@@ -150,14 +151,34 @@ export interface MockNerToken {
   readonly word: string;
 }
 
+type TokenClassificationPipelineType = Awaited<ReturnType<typeof pipeline<"token-classification">>>;
+
 /**
  * Cast de frontera contra @huggingface/transformers — mismo criterio que
  * `mockTokenClassificationPipeline` en ner-engine (Code_Standards.md §10):
- * `NerEngine` solo invoca el pipeline como función callable y `.dispose()`.
+ * `NerEngine` solo invoca el pipeline como función callable y `.dispose()`,
+ * nunca los miembros reales (`tokenizer`/`model`/`_call`) del tipo real.
  */
 export function mockTokenClassificationPipeline(
   classify: (text: string) => Promise<ReadonlyArray<MockNerToken>>,
-): unknown {
+): TokenClassificationPipelineType {
   const callable = (text: string): Promise<ReadonlyArray<MockNerToken>> => classify(text);
-  return Object.assign(callable, { dispose: () => Promise.resolve() });
+  const withDispose = Object.assign(callable, { dispose: () => Promise.resolve() });
+  return withDispose as unknown as TokenClassificationPipelineType;
+}
+
+type PipelineFactoryMock = Mock<
+  (task: string, model?: string, options?: Record<string, unknown>) => Promise<TokenClassificationPipelineType>
+>;
+
+/**
+ * Segundo (y último) cast de frontera contra @huggingface/transformers,
+ * precedente `asPipelineMock` en ner-engine: `vi.mocked(pipeline)` tipa el
+ * mock contra la unión completa de clases concretas de pipeline (genérica
+ * sobre `PipelineType`), no contra `TokenClassificationPipelineType` — el
+ * alias estructural que este mock realmente produce. Existe para que los
+ * archivos de test llamen `.mockResolvedValue(...)` sin repetir el cast.
+ */
+export function asPipelineMock(fn: unknown): PipelineFactoryMock {
+  return fn as unknown as PipelineFactoryMock;
 }

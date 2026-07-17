@@ -28,7 +28,7 @@ vi.mock("@huggingface/transformers", () => ({
   env: { allowRemoteModels: true, localModelPath: "/models/", backends: { onnx: { wasm: {} } } },
 }));
 
-import { mockTokenClassificationPipeline } from "./fixtures/mocks.js";
+import { asPipelineMock, mockTokenClassificationPipeline } from "./fixtures/mocks.js";
 
 function createLogger(): ILogger {
   return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
@@ -163,7 +163,7 @@ describe("integration — Regex + NER -> Grouping via ENTITY_FOUND", () => {
   });
 
   it("both detectors' ENTITY_FOUND land in the same session and produce groups per type", async () => {
-    vi.mocked(pipeline).mockResolvedValue(
+    asPipelineMock(pipeline).mockResolvedValue(
       mockTokenClassificationPipeline((text) => {
         const index = text.indexOf("Juan");
         if (index < 0) return Promise.resolve([]);
@@ -171,7 +171,7 @@ describe("integration — Regex + NER -> Grouping via ENTITY_FOUND", () => {
           { entity: "B-PER", score: 0.95, index, word: "Juan" },
           { entity: "I-PER", score: 0.93, index: index + 5, word: "Perez" },
         ]);
-      }) as any,
+      }),
     );
 
     const document = createDocument();
