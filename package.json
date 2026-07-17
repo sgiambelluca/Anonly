@@ -30,7 +30,7 @@
     "test:stress": "vitest run --dir tests/stress",
     "test:leak": "vitest run --dir tests/leak",
     "test:cancel": "vitest run --dir tests/cancel",
-    "test:security": "vitest run --dir tests/security",
+    "test:security": "vitest run tests/security",
     "test:all": "pnpm lint && pnpm typecheck && pnpm test && pnpm test:e2e",
     "changeset": "changeset",
     "version": "changeset version",

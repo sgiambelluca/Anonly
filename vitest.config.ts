@@ -31,6 +31,15 @@ export default defineConfig({
         "packages/anonymization-core/event-system/src/index.ts",
       ),
       "@anonly/anonymization-core": resolve(rootDir, "packages/anonymization-core/src/index.ts"),
+      // export-engine no es dependencia de ningún package.json de la raíz ni de
+      // otro motor (P-2): pnpm no lo enlaza en node_modules/@anonly desde la
+      // raíz. tests/security/security.test.ts (fuera del paquete) lo importa
+      // por contrato público; este alias lo resuelve al workspace real, mismo
+      // criterio que las tres entradas de arriba.
+      "@anonly/export-engine": resolve(
+        rootDir,
+        "packages/anonymization-core/export-engine/src/index.ts",
+      ),
     },
   },
   test: {
@@ -102,6 +111,12 @@ export default defineConfig({
           functions: 80,
         },
         "packages/anonymization-core/render-engine/src/**": {
+          lines: 85,
+          statements: 85,
+          branches: 80,
+          functions: 80,
+        },
+        "packages/anonymization-core/export-engine/src/**": {
           lines: 85,
           statements: 85,
           branches: 80,
