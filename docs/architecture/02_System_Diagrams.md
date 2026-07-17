@@ -130,7 +130,8 @@ Mapa alto nivel. Tabla exhaustiva en `04_Event_System.md`.
 
 ```mermaid
 flowchart LR
-  PDF["PDF Engine"] -->|DOCUMENT_IMPORTED, PAGE_PARSED, DOCUMENT_PARSED| Bus((Event Bus))
+  Orch["Orchestrator"] -->|DOCUMENT_IMPORTED, PIPELINE_STAGE_CHANGED, PIPELINE_READY| Bus((Event Bus))
+  PDF["PDF Engine"] -->|PAGE_PARSED, DOCUMENT_PARSED| Bus
   OCR -->|OCR_STARTED, OCR_PAGE_FINISHED, OCR_FINISHED| Bus
   Regex -->|ENTITY_FOUND| Bus
   NER -->|ENTITY_FOUND| Bus
@@ -140,11 +141,12 @@ flowchart LR
   UI -->|GROUP_UPDATE_REQUESTED, RULE_UPDATED, EXPORT_REQUESTED, CANCEL_REQUESTED| Bus
   Bus -->|RENDER_REQUESTED| Render
   Render -->|PREVIEW_UPDATED, RENDER_FINISHED| Bus
-  Bus -->|EXPORT_REQUESTED| Export
+  Bus -->|EXPORT_REQUESTED| Orch
+  Orch -.->|"export() — invocación directa (ADR-032)"| Export
   Export -->|EXPORT_STARTED, EXPORT_PROGRESS, EXPORT_FINISHED, EXPORT_FAILED| Bus
 ```
 
-Convención: `ENTITY_FOUND` es **interno** entre detectores y grouping. La UI se suscribe a `ENTITY_GROUP_*`, nunca a `ENTITY_FOUND`.
+Convención: `ENTITY_FOUND` es **interno** entre detectores y grouping. La UI se suscribe a `ENTITY_GROUP_*`, nunca a `ENTITY_FOUND`. `DOCUMENT_IMPORTED` lo emite el **Orchestrator** (no el PDF Engine) y `EXPORT_REQUESTED` lo recibe el **Orchestrator**, que invoca `ExportEngine.export()` directamente (erratas corregidas por ADR-034 §7; tabla exhaustiva y matriz canónica en `04_Event_System.md`).
 
 ---
 

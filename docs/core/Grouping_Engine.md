@@ -13,6 +13,8 @@
 > **Nota (ADR-028, 2026-07-11)**: `indexInType` es **provisional durante la sesión** (orden de llegada, `nextIndex = max + 1`) y se **renumera canónicamente una sola vez en `finishSession`** por orden de primera aparición documental, antes de emitir `GROUPING_FINISHED`. Resuelve la contradicción con `06_Pipeline.md` §8. Ver §Algoritmos y caso límite 21.
 >
 > **Nota (ADR-029, 2026-07-11)**: el formato del modo `mask` se resuelve por grupo desde `Occurrence.maskFormat` (campo nuevo que Regex puebla desde el patrón matcheado; caso Plate vieja vs Mercosur), con fallback a `MASK_FORMAT_BY_TYPE[type]`. Ver §`replacementValue` por modo y caso límite 22.
+>
+> **Nota (ADR-034, 2026-07-16)**: quién invoca la sesión — `startSession(documentId)` lo llama el **Orchestrator** al iniciar la etapa de detección (antes de despachar Regex/NER). `finishSession` se dispara solo (auto-finish al recibir `REGEX_FINISHED` + `NER_FINISHED`) o lo invoca el Orchestrator tras `REGEX_FINISHED` cuando `config.ner.enabled === false` (sin ese wiring, con NER off la sesión no cerraría nunca). `finishSession` es defensivo ante sesión inexistente/ya finalizada (warn + no-op). Sin cambios de firma ni de comportamiento del motor.
 
 ---
 

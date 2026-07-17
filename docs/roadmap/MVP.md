@@ -124,7 +124,7 @@ Orden sugerido (cada hito = un set de PRs):
 - ~~Modelo NER servido first-party (`env.allowRemoteModels = false`, `env.localModelPath`): agregar la entrada del modelo a `assets.lock.json` y correr `pnpm assets:mirror`.~~ **CERRADO** (PR #14) — modelo Q8 (178 MB) + tokenizer/config pinneados por hash (revision `263e82c0…`) y mirrorados a `public/models/ner/` (ADR-018, ADR-023 §2).
 - ~~Cache del modelo en Cache Storage.~~ **CERRADO** (PR #14).
 - ~~Migración de `@xenova/transformers` (v2, deprecada) a `@huggingface/transformers` (v4) por `adr/ADR-025-Migracion-Huggingface-Transformers.md`.~~ **CERRADO** (PR #15) — `@huggingface/transformers@^4.2.0` con `dtype: "q8"` (assets del modelo intactos), wasm de onnxruntime pinneados y mirrorados a `public/wasm/onnxruntime/` (cierra el gap de `wasmPaths` detectado post-PR #14), override `onnx-proto>protobufjs` eliminado, `pnpm audit` limpio.
-- Tests: `contract.test.ts`, `unit.test.ts`, `edge.test.ts`, `snapshot.test.ts`, `cancel.test.ts` commiteados en `packages/anonymization-core/ner-engine/src/__tests__/` (56 tests), cobertura 97.77% líneas. Pendientes: `stress.test.ts` (OOM/pool) → Hito 9; `perf.test.ts` (recall ≥ 85% / precision ≥ 90%, informativas en MVP, §6) → Hito 11.
+- Tests: `contract.test.ts`, `unit.test.ts`, `edge.test.ts`, `snapshot.test.ts`, `cancel.test.ts` commiteados en `packages/anonymization-core/ner-engine/src/__tests__/` (56 tests), cobertura 97.77% líneas. Pendientes: `stress.test.ts` (OOM/pool) → Hito 11 (junto con la infra `tests/stress/`; corregido de "Hito 9" por ADR-034 §6); `perf.test.ts` (recall ≥ 85% / precision ≥ 90%, informativas en MVP, §6) → Hito 11.
 - Correcciones de contrato del hito: mapeo `DATE → Date` y contrato de salida de NER ampliado a cuatro tipos (ADR-023 §2); `NerStarted.modelLoading?` y `batchSize` en palabras (ADR-024).
 - Los tests de integración con Regex (ambos emiten `ENTITY_FOUND`) viven en `tests/integration/` y son Hito 9 (Orchestrator) (ADR-010, `core/Orchestrator.md:239`, precedente `core/OCR_Engine.md:225`).
 - Pendiente: verificación de integridad en runtime del modelo (ADR-018 punto 3, `core/NER_Engine.md` §15.19) → Hito 11.
@@ -143,8 +143,8 @@ Orden sugerido (cada hito = un set de PRs):
 - `RenderEngine.loadDocument`/`unloadDocument` (`adr/ADR-030-RenderEngine-LoadDocument.md`): resuelve la ambigüedad reportada por el implementador (ningún doc definía cómo Render obtiene el PDF fuente por `documentId`); spec de Render a v1.1.0, fe de erratas en `05_Worker_Architecture.md` §7.4 (decía pdf-lib).
 - `EngineErrorCode.RENDER_FAILED` + erratas del spec (`adr/ADR-031-RenderFailed-ErrorCode-Erratas-Render.md`): el code faltaba en Contracts.md §4 (solo existía como evento; precedente `EXPORT_FAILED`); clave de cache LRU con `annotations`, highlight por `AnnotationKind`, cast de frontera pdfjs↔OffscreenCanvas sancionado en Code_Standards §10. Spec a v1.1.1. La línea en `enums.ts` viaja en el PR del hito (patrón ADR-029 §4).
 - Pendientes diferidos a Hito 9 (ADR-031 §5 + observaciones no bloqueantes del revisor, PR #17):
-  - `PREVIEW_UPDATED.canvasBlobUrl` real (`convertToBlob` en host; inline es placeholder de bytes crudos). Incluye la **revocación de blob URLs como responsabilidad del host**: al recibir `PREVIEW_UPDATED` para `(documentId, pageIndex, kind)`, revocar el URL anterior de esa clave; en `DOCUMENT_CLOSED`, revocar todos. Hoy el placeholder inline crea un URL nuevo por render **y por cache hit** sin revocar (fuga sin efecto: nada consume `PREVIEW_UPDATED` hasta cablear la UI). Va al spec del Orchestrator.
-  - Mover `stress.test.ts` a `tests/stress/` cuando exista la infra (requiere hoistear `pdfjs-dist`).
+  - `PREVIEW_UPDATED.canvasBlobUrl` real (`convertToBlob` en host; inline es placeholder de bytes crudos). Incluye la **revocación de blob URLs**: al recibir `PREVIEW_UPDATED` para `(documentId, pageIndex, kind)`, revocar el URL anterior de esa clave; en `DOCUMENT_CLOSED`, revocar todos. **Incorporado al spec del Orchestrator v1.1.0** (ADR-034 §5: crean los motores, revoca el Orchestrator) y al spec de Render §15.7c.
+  - Mover `stress.test.ts` a `tests/stress/` cuando exista la infra (requiere hoistear `pdfjs-dist`) → **Hito 11** (ADR-034 §6).
   - Rama defensiva de `RENDER_FAILED` en `renderPages` (hoy inalcanzable: `renderPage` no lanza `RenderFailedError`): revisitar cuando el pool defina el fatal de batch real. `renderPages` secuencial → el paralelismo lo aporta el pool (ADR-021).
 
 ### Hito 8 — Export Engine
@@ -155,11 +155,14 @@ Orden sugerido (cada hito = un set de PRs):
 - Pendientes diferidos a Hito 9 (observación no bloqueante del revisor, PR #18): `Replacement.originalValue` usa el `canonicalValue` del grupo (`export.engine.ts:111`) porque `OccurrenceRef` no guarda el valor original por ocurrencia — aproximación semántica, sin consumidores de esa garantía hoy. Revisitar si Render (consumidor real del `RenderPageProvider`) llega a depender de `originalValue`.
 
 ### Hito 9 — Orchestrator
-- Implementar según `core/Orchestrator.md` (spec del componente host + façade `createCore`).
+- Implementar según `core/Orchestrator.md` **v1.1.0** (spec del componente host + façade `createCore`), reconciliado por la auditoría pre-hito `adr/ADR-034-Auditoria-Pre-Hito9-Orchestrator.md`.
 - Pipeline orchestrator que secuencia etapas, despacha jobs, maneja cancelación.
-- Integración de todos los engines via bus.
-- Migración de `pdf-engine` (y demás motores pesados) a sus pools (`PdfPool`, `OcrPool`, `NerPool`, `RenderPool`); `WorkerPoolManager` + `AbortRegistry` (ver ADR-013).
+- Integración de todos los engines via bus; test de contrato de la matriz emisor→receptor (`04_Event_System.md` §11 corregida por ADR-034 §4).
+- Migración de los motores pesados a sus **cuatro** pools (`PdfPool`, `OcrPool`, `NerPool`, `RenderPool`); `WorkerPoolManager` + `AbortRegistry` (ver ADR-013, ADR-021).
 - Wiring Orchestrator→`PdfEngine.fuseOcrPage` para fusión OCR→PDF (ver ADR-014).
+- Decisiones ADR-034 que amplían contratos (cambios de código de `shared`/`render-engine`/`export-engine` viajan en los PRs del hito, docs primero): `RenderEngine.rasterizePage` + `RenderPageOutput.encoded` (Render v1.2.0); gestión de sesión de Grouping (`startSession`/`finishSession` con NER off); `EncodedPageImage` promovido a `@anonly/shared`; `WorkerPoolConfig.maxQueuePerPool` por pool; blob URLs creados por motores y revocados por el Orchestrator.
+- Crear `tests/integration/` (pares críticos mínimos de ADR-034 §6: Regex+NER→Grouping, OCR→PDF vía Orchestrator, happy path `createCore`→`PIPELINE_READY`), con script `test:integration`, alias por motor y exclusión de `tests/tsconfig.json` removida (ADR-033).
+- Pendientes que hereda este hito de PRs anteriores: `PREVIEW_UPDATED.canvasBlobUrl` real + revocación (Hito 7); revisitar `Replacement.originalValue` del Export si Render llega a depender de él (Hito 8); PR chico de `regex-engine` para `Occurrence.maskFormat` (ADR-029 §4, no bloqueante).
 
 ### Hito 10 — React Client
 - `apps/react-client` con Vite + Tailwind + Radix + Zustand.

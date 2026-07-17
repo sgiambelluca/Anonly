@@ -9,6 +9,8 @@
 **Última actualización**: 2026-07-16
 
 > **Nota (ADR-032, 2026-07-16)**: `RenderPageProvider.renderFull` devuelve `EncodedPageImage` (bytes codificados; pdf-lib no embebe `ImageData`); `EXPORT_REQUESTED` lo escucha el **Orchestrator**, que llama `export()` directamente (Export no se suscribe a eventos; patrón ADR-014); `EXPORT_NO_ENABLED_GROUPS` es `logger.warn` + continuar, la confirmación del usuario es pre-export. `ExportOptions`/`ExportMetadata` quedan formalizados en `03_Data_Model.md` §19.
+>
+> **Nota (ADR-034 §3, 2026-07-16)**: `EncodedPageImage` se **promueve a `@anonly/shared`** (apareció el segundo consumidor que ADR-032 anticipó: Render lo produce vía `RenderPageOutput.encoded`). La definición canónica pasa a `Contracts.md` §7 (forma intacta); la de §6 de este spec queda como réplica documental y `export-engine` re-importa el tipo desde shared — cambio de código en el PR del Hito 9 (patrón ADR-029 §4).
 
 > **Nota (ADR-027, 2026-07-11)**: el tipo de config canónico es `ExportConfig` (Contracts.md §6); el alias `ExportEngineConfig` de §6/§15.2 queda eliminado (mismo patrón que ADR-021 §2, ADR-023 §1 y ADR-026).
 

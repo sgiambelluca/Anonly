@@ -5,8 +5,10 @@
 > Renderiza páginas del PDF (original o anonimado) a imágenes usando OffscreenCanvas en Web Workers. Produce highlight de grupos habilitados y aplica reemplazos visualmente según `ReplacementMode`. Soporta preview incremental y render full para export.
 
 **EngineId**: `render`
-**Versión del spec**: 1.1.1
+**Versión del spec**: 1.2.0
 **Última actualización**: 2026-07-16
+
+> **Nota (ADR-034, 2026-07-16)**: dos ampliaciones de contrato para el Hito 9: (1) `rasterizePage(documentId, pageIndex, scale, ctx)` — rasterización pura a `ImageData` para el flujo OCR del Orchestrator, **sin** emisión de eventos ni cache LRU (§6); (2) `RenderPageOutput.encoded?: EncodedPageImage`, presente cuando `mode === "full"`, con los bytes codificados que consume el `RenderPageProvider` del Orchestrator (§6, §10; `EncodedPageImage` es canónico de `Contracts.md` §7 desde ADR-034 §3). La creación real del blob de `PREVIEW_UPDATED` (`convertToBlob`, reemplaza el placeholder inline de ADR-031 §5) también llega en el Hito 9.
 
 > **Nota (ADR-031, 2026-07-16)**: `EngineErrorCode.RENDER_FAILED` se agrega a Contracts.md §4 (la fila de §11 lo referenciaba sin respaldo desde v1.0.0). Erratas: la clave del cache LRU incluye `annotations` en el hash (§15.12); el highlight colorea por `AnnotationKind`, no "por tipo" (§13.7). Cast de frontera pdfjs↔OffscreenCanvas permitido en un único punto documentado (Code_Standards §10).
 
@@ -58,7 +60,7 @@ Recibir requests de renderizado por página (`RENDER_REQUESTED` o invocación di
 
 - `@anonly/shared`
 - `pdfjs-dist` (para render del PDF a canvas; ADR-001)
-- Tipos de `core/Contracts.md`: `IEngine`, `EngineContext`, `Document`, `Page`, `BoundingBox`, `EntityGroup`, `Replacement`, `ReplacementMode`, `Annotation`, `RenderConfig`, `Word`
+- Tipos de `core/Contracts.md`: `IEngine`, `EngineContext`, `Document`, `Page`, `BoundingBox`, `EntityGroup`, `Replacement`, `ReplacementMode`, `Annotation`, `RenderConfig`, `Word`, `EncodedPageImage` (ADR-034 §3)
 - `architecture/04_Event_System.md`: `RENDER_REQUESTED`, `RENDER_FINISHED`, `RENDER_FAILED`, `PREVIEW_UPDATED`, `PREVIEW_PAGE_FAILED`, `GROUP_REPLACEMENT_CHANGED`, `GROUP_TOGGLED`
 
 ---
@@ -101,6 +103,9 @@ export interface RenderPageOutput {
   readonly pageIndex: number;
   readonly kind: "original" | "anonymized";
   readonly imageData: ImageData;   // transferido (zero-copy) al host
+  readonly encoded?: EncodedPageImage; // presente si mode === "full": bytes codificados
+                                       // (imageFormat efectivo + config.render.jpegQuality),
+                                       // generados donde vive el canvas (ADR-034 §3)
   readonly durationMs: number;
 }
 
@@ -111,10 +116,18 @@ export class RenderEngine implements IEngine {
   unloadDocument(documentId: string): Promise<void>;
   renderPage(input: RenderPageInput, ctx: EngineContext): Promise<RenderPageOutput>;
   renderPages(inputs: ReadonlyArray<RenderPageInput>, ctx: EngineContext): Promise<ReadonlyArray<RenderPageOutput>>;
+  rasterizePage(documentId: string, pageIndex: number, scale: number, ctx: EngineContext): Promise<ImageData>; // ADR-034 §1
   requestDeltaRender(documentId: string, groupIds: ReadonlyArray<string>): void;
   dispose(): Promise<void>;
 }
 ```
+
+Semántica de `rasterizePage` (ADR-034 §1):
+
+- Rasteriza la página **sin reemplazos ni highlights** (uso: alimentar el OCR desde el Orchestrator, que no puede importar pdfjs).
+- **No emite eventos** (`PREVIEW_UPDATED` incluido) y **no toca el cache LRU** de previews.
+- Precondición: documento cargado vía `loadDocument`; si no, `InvalidInputError` (ADR-030). `pageIndex` fuera de rango o `scale <= 0` → `InvalidInputError`. Fallo de pdfjs/canvas → `RenderPageFailedError` (retryable).
+- En modo pool corre como job del `RenderPool`; el `ImageData` se transfiere zero-copy al host.
 
 Semántica de `loadDocument`/`unloadDocument` (ADR-030):
 
@@ -186,11 +199,12 @@ RenderPageOutput {
   pageIndex: number;
   kind: "original" | "anonymized";
   imageData: ImageData;  // transferido
+  encoded?: EncodedPageImage; // solo mode "full" (ADR-034 §3)
   durationMs: number;
 }
 ```
 
-El `ImageData` se transfiere zero-copy al host. El host lo convierte a `Blob` y luego `blobUrl` para la UI.
+El `ImageData` se transfiere zero-copy al host. El host lo convierte a `Blob` y luego `blobUrl` para la UI. En `mode: "full"`, `encoded` trae además los bytes PNG/JPEG ya codificados (`convertToBlob` donde vive el canvas, `07_Performance_Strategy.md` §10): es lo que consume el `RenderPageProvider` del Orchestrator para el Export (ADR-034 §3).
 
 ---
 
@@ -269,6 +283,10 @@ El `ImageData` se transfiere zero-copy al host. El host lo convierte a `Blob` y 
 | `cache hit skips render` | `unit.test.ts` | unit | cache |
 | `rotated page renders with correct orientation` | `edge.test.ts` | edge | caso 15 |
 | `throws InvalidInputError when document not loaded` | `edge.test.ts` | edge | caso 16 |
+| `rasterizePage returns ImageData without emitting events nor touching cache` | `contract.test.ts` | contract | ADR-034 §1 |
+| `rasterizePage throws InvalidInputError when document not loaded or scale <= 0` | `edge.test.ts` | edge | ADR-034 §1 |
+| `full mode output includes encoded bytes with effective format and quality` | `contract.test.ts` | contract | ADR-034 §3 |
+| `preview mode output has no encoded field` | `unit.test.ts` | unit | ADR-034 §3 |
 | `RENDER_REQUESTED for unloaded document warns and no-ops` | `edge.test.ts` | edge | caso 16 |
 | `loadDocument twice replaces previous proxy` | `edge.test.ts` | edge | caso 17 |
 | `unloadDocument on unknown id is a no-op` | `edge.test.ts` | edge | caso 17 |
@@ -289,6 +307,8 @@ Fixtures: `tests/fixtures/text-10p.pdf`, `scanned-10p.pdf`, una página con rota
 - [ ] 5. Implementar `init` (crear `RenderPool` con OffscreenCanvas workers, fallback a main thread si no disponible).
 - [ ] 6. Implementar `loadDocument`/`unloadDocument` (`Map<documentId, PDFDocumentProxy>` interno, posesión del buffer, re-carga determinística; ADR-030).
 - [ ] 7. Implementar `renderPage` con `AbortSignal`, transferencia de `ImageData` zero-copy, `PREVIEW_UPDATED` por página.
+- [ ] 7b. (Hito 9) Implementar `rasterizePage` (sin eventos, sin cache LRU; ADR-034 §1).
+- [ ] 7c. (Hito 9) Implementar `RenderPageOutput.encoded` para `mode: "full"` (`convertToBlob` donde vive el canvas; ADR-034 §3) y la codificación real del blob de `PREVIEW_UPDATED` (reemplaza el placeholder de ADR-031 §5).
 - [ ] 8. Implementar los 4 modos de reemplazo visual (mask/synthetic/placeholder/redact).
 - [ ] 9. Implementar highlight de grupos habilitados y conflicto en `kind = "original"`.
 - [ ] 10. Implementar `renderPages` (paralelo, prioridad visible-first).

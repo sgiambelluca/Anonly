@@ -216,6 +216,45 @@ export interface ICache {
 }
 ```
 
+### 3.5 Façade del Core (`createCore`)
+
+Contrato público del paquete `@anonly/anonymization-core` (ADR-034 §7: se comparte con la UI, por eso se refleja acá; el spec normativo completo es `core/Orchestrator.md` §6).
+
+```ts
+export interface IAnonymizationCore {
+  readonly bus: IEventBus;
+  readonly engines: {
+    readonly pdf: PdfEngine;
+    readonly ocr: OcrEngine;
+    readonly regex: RegexEngine;
+    readonly ner: NerEngine;
+    readonly grouping: GroupingEngine;
+    readonly render: RenderEngine;
+    readonly export: ExportEngine;
+  };
+  readonly orchestrator: IPipelineOrchestrator;
+  dispose(): Promise<void>;
+}
+
+export interface ImportDocumentInput {
+  readonly documentId: string;        // UUID v4 generado por el caller
+  readonly name: string;
+  readonly buffer: ArrayBuffer;       // PDF binario
+  readonly password?: string;
+}
+
+export interface IPipelineOrchestrator {
+  importDocument(input: ImportDocumentInput): Promise<void>;   // etapas 0..7 (hasta Ready)
+  retryWithPassword(documentId: string, password: string): Promise<void>;
+  cancel(documentId: string, jobId?: string): Promise<void>;
+  closeDocument(documentId: string): Promise<void>;
+  getState(documentId: string): PipelineState;
+  dispose(): Promise<void>;
+}
+
+export async function createCore(config?: Partial<EngineConfig>): Promise<IAnonymizationCore>;
+```
+
 ---
 
 ## 4. Error codes y clases
@@ -385,7 +424,9 @@ export interface WorkerPoolConfig {
   readonly ocrPoolSize: number;
   readonly nerPoolSize: number;
   readonly renderPoolSize: number;
-  readonly maxQueuePerPool: number;
+  // Por pool: el default documentado (32 PDF/Render, 8 OCR/NER) no era
+  // expresable con un escalar (ADR-034 §7).
+  readonly maxQueuePerPool: Readonly<Record<"pdf" | "ocr" | "ner" | "render", number>>;
   readonly timeouts: Readonly<Record<WorkerJobType, number>>;
   readonly maxRetries: Readonly<Record<WorkerJobType, number>>;
   readonly baseRetryDelayMs: number;
@@ -439,13 +480,13 @@ export interface ExportConfig {
 | `GROUPING_SIMILARITY_THRESHOLD` | `0.88` | `GroupingConfig.similarityThreshold` |
 | `NER_CONFIDENCE_THRESHOLD` | `0.7` | `NerConfig.confidenceThreshold` |
 | `CANCEL_SLA_MS` | `200` | `WorkerPoolConfig.cancelSlaMs` |
-| `MAX_QUEUE_PER_POOL` | `32` (PDF/Render), `8` (OCR/NER) | `WorkerPoolConfig.maxQueuePerPool` |
+| `MAX_QUEUE_PER_POOL` | `{ pdf: 32, ocr: 8, ner: 8, render: 32 }` | `WorkerPoolConfig.maxQueuePerPool` (ADR-034 §7) |
 | `PREVIEW_CACHE_PAGES` | `16` | `RenderConfig` |
 | `WORDS_CACHE_PAGES` | `32` | `EngineConfig.cache` |
 
 ---
 
-## 7. Tipos de `Transferable`
+## 7. Tipos de transporte binario (`Transferable`, `EncodedPageImage`)
 
 Wrapper para `ArrayBuffer` que se transfiere (zero-copy) al cruzar boundary de worker. Solo se puede consumir una vez.
 
@@ -453,6 +494,17 @@ Wrapper para `ArrayBuffer` que se transfiere (zero-copy) al cruzar boundary de w
 export interface Transferable<T extends ArrayBuffer | ImageData> {
   readonly buffer: T;
   consume(): T;   // lanza si ya fue consumido
+}
+```
+
+Imagen de página codificada (PNG/JPEG), lista para `embedPng`/`embedJpg` de pdf-lib. Definida originalmente en `export-engine` (ADR-032 §1) y promovida a `@anonly/shared` al aparecer el segundo consumidor: Render la produce (`RenderPageOutput.encoded`), Export la consume (`RenderPageProvider.renderFull`), el Orchestrator la transporta (ADR-034 §3).
+
+```ts
+export interface EncodedPageImage {
+  readonly bytes: ArrayBuffer;     // imagen codificada (PNG o JPEG)
+  readonly format: "png" | "jpeg";
+  readonly widthPx: number;
+  readonly heightPx: number;
 }
 ```
 

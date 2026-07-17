@@ -25,7 +25,7 @@
 | `PIPELINE_STAGE_CHANGED` | Orchestrator | UI | `{ documentId, stage: PipelineStage, progress: number }` | async | sí | por-documento | Para la barra de progreso. |
 | `PIPELINE_PROGRESS` | Orchestrator | UI | `{ documentId, stage, current, total }` | async | sí | por-documento | Granular por página. |
 | `PIPELINE_READY` | Orchestrator | UI | `{ documentId, groupCount, conflictCount }` | async | sí | none | Cuando llega a `Ready`. |
-| `PIPELINE_CANCELLED` | Orchestrator | UI, todos los engines | `{ documentId, reason }` | async | sí | none | Todo engine debe liberar recursos. |
+| `PIPELINE_CANCELLED` | Orchestrator | UI | `{ documentId, reason }` | async | sí | none | Los motores **no** se suscriben: la cancelación les llega por `AbortSignal`/`CANCEL` a pools (`05_Worker_Architecture.md` §3; ADR-034 §4). |
 | `PIPELINE_FAILED` | Orchestrator | UI | `{ documentId, error: EngineError }` | async | sí | none | Error fatal no recuperable. |
 | `CANCEL_REQUESTED` | UI | Orchestrator | `{ documentId, jobId? }` | sync | sí | none | Inicia abort. |
 
@@ -37,7 +37,7 @@
 |---|---|---|---|---|---|---|---|
 | `PAGE_PARSED` | PDF Engine | Orchestrator | `{ documentId, pageIndex, wordCount, requiresOCR }` | async | sí | por-página | Una emisión por página. |
 | `DOCUMENT_PARSED` | PDF Engine | Orchestrator | `{ documentId, pageCount, textlessPages: number[], sourceKind }` | async | sí | none | Dispara OCR si `textlessPages.length > 0`. |
-| `PDF_PASSWORD_REQUIRED` | PDF Engine | UI (vía Orchestrator) | `{ documentId }` | async | sí | none | UI pide password, reenvía input. |
+| `PDF_PASSWORD_REQUIRED` | PDF Engine | UI, Orchestrator | `{ documentId }` | async | sí | none | La UI se suscribe directo al canal `pdf` y pide el password (`retryWithPassword`); el Orchestrator solo deja el stage en `Extracting` a la espera (ADR-034 §4). |
 | `PDF_INVALID` | PDF Engine | Orchestrator | `{ documentId, reason }` | async | sí | none | Aborta pipeline. |
 
 ---
@@ -60,12 +60,12 @@ Ambos emiten el mismo evento `ENTITY_FOUND` pero con `source` distinto. **`ENTIT
 | Evento | Emisor | Receptores | Payload | Timing | Idempotente | Orden | Notas |
 |---|---|---|---|---|---|---|---|
 | `ENTITY_FOUND` | Regex Engine, NER Engine | Grouping Engine | `{ documentId, occurrence: Occurrence }` | async | sí | por-página | `occurrence.source ∈ {regex, ner}`. |
-| `REGEX_FINISHED` | Regex Engine | Orchestrator | `{ documentId, occurrenceCount, durationMs }` | async | sí | none | |
+| `REGEX_FINISHED` | Regex Engine | Orchestrator, Grouping Engine | `{ documentId, occurrenceCount, durationMs }` | async | sí | none | Grouping lo usa para su auto-finish (junto a `NER_FINISHED`); si NER está desactivado, el Orchestrator invoca `finishSession` directamente (ADR-034 §2). |
 | `NER_STARTED` | NER Engine | UI | `{ documentId, pageCount, modelId, modelLoading? }` | async | sí | none | `modelLoading?: true` solo en la primera descarga del modelo; omitido si ya está cacheado (ADR-024 §1). |
 | `NER_MODEL_LOADING` | NER Engine | UI | `{ modelId, progress: number }` | async | sí | none | Progreso de descarga/carga del modelo ONNX. |
 | `NER_MODEL_READY` | NER Engine | UI | `{ modelId }` | async | sí | none | |
 | `NER_PAGE_FINISHED` | NER Engine | Orchestrator | `{ documentId, pageIndex, occurrenceCount }` | async | sí | por-página | |
-| `NER_FINISHED` | NER Engine | Orchestrator | `{ documentId, occurrenceCount, durationMs }` | async | sí | none | |
+| `NER_FINISHED` | NER Engine | Orchestrator, Grouping Engine | `{ documentId, occurrenceCount, durationMs }` | async | sí | none | Grouping lo usa para su auto-finish (ADR-034 §2). |
 
 ---
 
@@ -90,7 +90,7 @@ Estos son los eventos que la UI **sí** escucha para construir el árbol de enti
 
 | Evento | Emisor | Receptores | Payload | Timing | Idempotente | Orden | Notas |
 |---|---|---|---|---|---|---|---|
-| `PREVIEW_UPDATED` | Render Engine | UI | `{ documentId, pageIndex, kind: "original" \| "anonymized", canvasBlobUrl }` | async | sí | por-página | Vista previa incremental de una página. `kind` indica a qué visor (original o anonimizado) corresponde el blob (ver ADR-016). |
+| `PREVIEW_UPDATED` | Render Engine | UI, Orchestrator | `{ documentId, pageIndex, kind: "original" \| "anonymized", canvasBlobUrl }` | async | sí | por-página | Vista previa incremental de una página. `kind` indica a qué visor (original o anonimizado) corresponde el blob (ver ADR-016). El `canvasBlobUrl` lo crea el lado host del motor; el Orchestrator lo escucha solo para revocar el URL anterior de la misma clave (ADR-034 §5). |
 | `PREVIEW_PAGE_FAILED` | Render Engine | Orchestrator | `{ documentId, pageIndex, error }` | async | sí | none | |
 | `RENDER_FINISHED` | Render Engine | Orchestrator, UI | `{ documentId, pageIndices, durationMs }` | async | sí | none | |
 | `RENDER_FAILED` | Render Engine | Orchestrator | `{ documentId, error }` | async | sí | none | |
@@ -105,7 +105,7 @@ Estos son los eventos que la UI **sí** escucha para construir el árbol de enti
 |---|---|---|---|---|---|---|---|
 | `EXPORT_STARTED` | Export Engine | UI | `{ documentId }` | async | sí | none | |
 | `EXPORT_PROGRESS` | Export Engine | UI | `{ documentId, current, total }` | async | sí | por-página | |
-| `EXPORT_FINISHED` | Export Engine | UI, Orchestrator | `{ documentId, blobUrl, sizeBytes, durationMs }` | async | sí | none | `blobUrl` es `URL.createObjectURL`. El Orchestrator lo escucha para transicionar `stage → Done`. |
+| `EXPORT_FINISHED` | Export Engine | UI, Orchestrator | `{ documentId, blobUrl, sizeBytes, durationMs }` | async | sí | none | `blobUrl` es `URL.createObjectURL` creado por el motor (lado host). El Orchestrator lo escucha para transicionar `stage → Done` y registrar/revocar el URL (ADR-034 §5). |
 | `EXPORT_FAILED` | Export Engine | UI, Orchestrator | `{ documentId, error: EngineError }` | async | sí | none | El Orchestrator lo escucha para emitir `PIPELINE_FAILED` tras agotar reintentos (ver `06_Pipeline.md` §13). |
 
 > `EXPORT_REQUESTED` es un evento emitido por la UI y viaja por el canal `ui` (ver §10 y ADR-015).
@@ -142,16 +142,18 @@ Inputs del usuario que mutan el estado de grupos/reglas/pipeline o solicitan tra
 | `RULE_UPDATED` | UI | Grouping Engine | `{ documentId, ruleId, patch }` | sync | sí | none | |
 | `RULE_DELETED` | UI | Grouping Engine | `{ documentId, ruleId }` | sync | sí | none | |
 | `CONFLICT_RESOLVE_REQUESTED` | UI | Grouping Engine | `{ documentId, conflictId, mode: ReplacementMode }` | sync | sí | none | |
-| `DOCUMENT_CLOSED` | UI | Orchestrator, todos | `{ documentId }` | sync | sí | none | Libera todo: workers, memoria, modelos. |
+| `DOCUMENT_CLOSED` | UI | Orchestrator, Grouping Engine | `{ documentId }` | sync | sí | none | Grouping limpia su sesión por suscripción propia; los demás motores liberan por **invocación directa** del Orchestrator (`releaseDocument`, `unloadDocument`, caches, blobUrls — ADR-021 §7, ADR-030, ADR-034 §4/§5). |
 
 ---
 
 ## 11. Matriz emisor → receptor (vista compacta)
 
+> **Semántica (ADR-034 §4)**: "receptor" = **suscripción registrada en el bus**, no flujo lógico. Es exactamente lo que valida el test de contrato de la matriz (Hito 9). Los motores que reciben trabajo por invocación directa del Orchestrator (PDF, OCR, Regex, NER, Export) **no registran ninguna suscripción** (ADR-014, ADR-032).
+
 | Emisor \ Receptor | Orch | UI | PDF | OCR | Regex | NER | Group | Render | Export |
 |---|---|---|---|---|---|---|---|---|---|
-| UI | ✓ | – | – | – | – | – | ✓ | ✓ | ✓ |
-| Orchestrator | – | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| UI | ✓ | – | – | – | – | – | ✓ | ✓ | – |
+| Orchestrator | – | ✓ | – | – | – | – | – | – | – |
 | PDF Engine | ✓ | ✓ | – | – | – | – | – | – | – |
 | OCR Engine | ✓ | ✓ | – | – | – | – | – | – | – |
 | Regex Engine | ✓ | – | – | – | – | – | ✓ | – | – |
@@ -160,7 +162,7 @@ Inputs del usuario que mutan el estado de grupos/reglas/pipeline o solicitan tra
 | Render Engine | ✓ | ✓ | – | – | – | – | – | – | – |
 | Export Engine | ✓ | ✓ | – | – | – | – | – | – | – |
 
-**Invariante**: ningún motor escucha a otro motor excepto Grouping (que escucha `ENTITY_FOUND` de Regex y NER), y Render/Export (que escuchan cambios de grupos vía Orchestrator). La fusión OCR→PDF es mediada por el Orchestrator (PDF Engine no se suscribe a `OCR_PAGE_FINISHED`; ver ADR-014). Esta matriz se validará con un test de contrato del bus cuando los motores existan (Hito 9; ver ADR-019).
+**Invariante**: ningún motor escucha a otro motor excepto Grouping (que escucha `ENTITY_FOUND` + `REGEX_FINISHED`/`NER_FINISHED` de Regex y NER) y Render (que escucha `GROUP_REPLACEMENT_CHANGED`/`GROUP_TOGGLED` de Grouping). La fusión OCR→PDF es mediada por el Orchestrator (PDF Engine no se suscribe a `OCR_PAGE_FINISHED`; ADR-014); `EXPORT_REQUESTED` lo escucha el Orchestrator, no Export (ADR-032 §2). La cancelación y la liberación de recursos llegan a los motores por `AbortSignal` e invocación directa, no por bus (ADR-034 §4). Esta matriz se valida con un test de contrato del bus en el Hito 9 (ver ADR-019).
 
 ---
 
