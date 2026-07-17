@@ -33,7 +33,7 @@ Si el spec no cubre un caso, dos docs se contradicen, o un tipo/evento/error cod
 pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract
 ```
 
-Ese es el subset mínimo pre-PR; la **tabla canónica completa** de gates está en `docs/architecture/07_Performance_Strategy.md` §11.4 (única fuente de verdad). La cobertura se aplica por paquete vía thresholds en `vitest.config.ts` — al implementar un motor nuevo, agregar su glob ahí en el mismo PR.
+Ese es el subset mínimo pre-PR; la **tabla canónica completa** de gates está en `docs/architecture/07_Performance_Strategy.md` §11.4 (única fuente de verdad). La cobertura se aplica por paquete vía thresholds en `vitest.config.ts` — al implementar un motor nuevo, agregar su glob ahí en el mismo PR. Los tests globales de `tests/` resuelven motores vía `resolve.alias` en `vitest.config.ts` + `paths` espejo en `tests/tsconfig.json`: al escribir el primer test global que importe un motor, agregar ambas entradas en el mismo PR; los scripts `test:<dir>` usan filtro posicional, nunca `--dir` (ADR-033).
 
 ## Roles y agentes
 

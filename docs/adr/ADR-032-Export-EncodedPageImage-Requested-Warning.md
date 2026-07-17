@@ -4,6 +4,12 @@
 
 - **Estado**: Accepted
 - **Fecha**: 2026-07-16
+
+> **Corregido en parte por ADR-033**: `test:security` corre `vitest run tests/security`
+> (filtro posicional); la forma `--dir tests/security` citada en el Contexto y en §4 nunca
+> funcionó (`--dir` reancla el root y el `include` global deja de matchear — bug latente,
+> detectado en Hito 8 al poblarse `tests/security/`).
+
 - **Decidido por**: El humano, sobre auditoría preventiva del planificador previa al Hito 8 (práctica adoptada tras las dos detenciones del Hito 7)
 - **Relacionado con**: ADR-004/ADR-009 (export por rasterización), ADR-014 (el Orchestrator invoca motores directamente para datos pesados), ADR-021 (inline hasta Hito 9), ADR-030 §1/§3 (precedentes de caller directo y warn+no-op), ADR-031 (erratas de spec pre-implementación)
 
