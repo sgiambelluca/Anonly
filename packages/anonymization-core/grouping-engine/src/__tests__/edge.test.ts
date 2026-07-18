@@ -9,6 +9,7 @@ import {
   ReplacementMode,
   synthesize,
   type ConflictDetected,
+  type ConflictResolved,
   type EngineContext,
   type EntityGroup,
   type EntityGroupCreated,
@@ -1033,5 +1034,179 @@ describe("GroupingEngine — edge cases", () => {
     expect(created.replacementValue).toBe("XXX XXX");
     expect(remaining.replacementMode).toBe(ReplacementMode.Mask);
     expect(remaining.replacementValue).toBe("XX XXX XX");
+  });
+
+  // Caso 23 (§13, ADR-038 §3): invariante PERMANENTE de dedup por identidad,
+  // no exclusivo de sesiones reabiertas.
+  it("duplicate ENTITY_FOUND with same identity is dropped silently", () => {
+    const occurrence = makeOccurrence({ value: "34.567.891", normalizedValue: "34567891" });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence,
+    });
+    expect(engine.getSnapshot("doc-1").groups[0]?.members).toHaveLength(1);
+
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+    // Misma identidad exacta (entityType, pageIndex, bbox, normalizedValue),
+    // UUID de ocurrencia nuevo (como en una re-pasada de Regex tras un
+    // reopenSession, o incluso dentro de la misma pasada).
+    const duplicate = makeOccurrence({
+      value: "34.567.891",
+      normalizedValue: "34567891",
+      entityType: occurrence.entityType,
+      pageIndex: occurrence.pageIndex,
+      bbox: occurrence.bbox,
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: duplicate,
+    });
+
+    const groupingCalls = busEmitSpy.mock.calls.filter(
+      ([channel]) => channel === EventChannel.Grouping,
+    );
+    expect(groupingCalls).toHaveLength(0);
+    expect(ctx.logger.debug).toHaveBeenCalled();
+
+    const { groups } = engine.getSnapshot("doc-1");
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.members).toHaveLength(1);
+    expect(groups[0]?.aliases).toEqual(["34.567.891"]);
+  });
+
+  // Caso 24 (§13, ADR-038 §2/§5.2): dropOccurrences({source: NER}) elimina
+  // los grupos cuyos únicos members eran NER (aunque el usuario los haya
+  // editado — se pierde por el invariante members.length >= 1) y conserva
+  // intactas las ediciones de los grupos con members Regex.
+  it("dropOccurrences by source removes NER-only groups, keeps edited Regex groups", async () => {
+    const regexOcc = makeOccurrence({
+      entityType: EntityType.DNI,
+      source: DetectionSource.Regex,
+      value: "11111111",
+      normalizedValue: "11111111",
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: regexOcc,
+    });
+    const [regexGroup] = engine.getSnapshot("doc-1").groups;
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: regexGroup!.id,
+      patch: { replacementMode: ReplacementMode.Mask },
+    });
+
+    const nerOcc = makeOccurrence({
+      entityType: EntityType.Person,
+      source: DetectionSource.NER,
+      value: "Juan Pérez",
+      normalizedValue: "juan pérez",
+      bbox: makeBBox(10, 300, 90, 12),
+    });
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: nerOcc,
+    });
+    const nerGroup = engine.getSnapshot("doc-1").groups.find((g) => g.type === EntityType.Person);
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: nerGroup!.id,
+      patch: { enabled: false },
+    });
+    expect(engine.getSnapshot("doc-1").groups).toHaveLength(2);
+
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+    engine.dropOccurrences("doc-1", { source: DetectionSource.NER });
+
+    const removedCall = busEmitSpy.mock.calls.find(
+      ([channel, event]) =>
+        channel === EventChannel.Grouping && event === EngineEvents.ENTITY_GROUP_REMOVED,
+    );
+    expect((removedCall?.[2] as EntityGroupRemoved)?.groupId).toBe(nerGroup!.id);
+
+    const remaining = engine.getSnapshot("doc-1").groups;
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]?.id).toBe(regexGroup!.id);
+    // La edición del usuario sobre el grupo Regex sobrevive intacta.
+    expect(remaining[0]?.replacementMode).toBe(ReplacementMode.Mask);
+  });
+
+  // Caso 25 (§13, ADR-038 §5.3): dropOccurrences por pageIndices (re-OCR de
+  // una página) descarta también los conflictos cuyo grupo quedó sin
+  // members, emitiendo CONFLICT_RESOLVED con el modo efectivo previo.
+  it("dropOccurrences by pageIndices discards stale conflicts", () => {
+    const existing = makeOccurrence({
+      entityType: EntityType.CreditCard,
+      source: DetectionSource.Regex,
+      confidence: 0.9,
+      bbox: makeBBox(0, 0, 100, 20),
+      pageIndex: 0,
+      value: "4111111111111111",
+      normalizedValue: "4111111111111111",
+    });
+    const overlapping = makeOccurrence({
+      entityType: EntityType.IBAN,
+      source: DetectionSource.Regex,
+      confidence: 0.5,
+      bbox: makeBBox(0, 0, 100, 20),
+      pageIndex: 0,
+      value: "ES1234",
+      normalizedValue: "es1234",
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: existing,
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: overlapping,
+    });
+
+    const [conflict] = engine.getSnapshot("doc-1").conflicts;
+    // Overlap/disagree se auto-resuelven al crearse (spec §13 caso 7: gana
+    // mayor confidence, acá el grupo existente CreditCard) — "resolved" no
+    // es la señal de staleness que dropOccurrences usa; lo es el grupo
+    // eliminado.
+    expect(conflict?.resolved).toBe(true);
+    const resolvedModeBefore = conflict?.resolvedMode;
+    expect(engine.getSnapshot("doc-1").groups).toHaveLength(1);
+
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+    engine.dropOccurrences("doc-1", { pageIndices: [0] });
+
+    const removedCall = busEmitSpy.mock.calls.find(
+      ([channel, event]) =>
+        channel === EventChannel.Grouping && event === EngineEvents.ENTITY_GROUP_REMOVED,
+    );
+    expect(removedCall).toBeDefined();
+
+    const resolvedCall = busEmitSpy.mock.calls.find(
+      ([channel, event]) =>
+        channel === EventChannel.Grouping && event === EngineEvents.CONFLICT_RESOLVED,
+    );
+    expect(resolvedCall).toBeDefined();
+    expect((resolvedCall?.[2] as ConflictResolved)?.conflictId).toBe(conflict!.id);
+    // Modo efectivo del grupo CreditCard antes de eliminarlo (placeholder,
+    // sin cambios entre la creación del conflicto y la eliminación).
+    expect((resolvedCall?.[2] as ConflictResolved)?.mode).toBe(resolvedModeBefore);
+
+    const after = engine.getSnapshot("doc-1").conflicts.find((c) => c.id === conflict!.id);
+    expect(after?.resolved).toBe(true);
+    expect(engine.getSnapshot("doc-1").groups).toHaveLength(0);
+  });
+
+  // Caso 25 (§13): filtro sin campos es inválido.
+  it("dropOccurrences with empty filter throws InvalidInputError", () => {
+    expect(() => engine.dropOccurrences("doc-1", {})).toThrow(InvalidInputError);
+  });
+
+  it("reopenSession() with no active session logs a warning and no-ops", () => {
+    engine.reopenSession("doc-without-session", { expectRegex: true, expectNer: true });
+    expect(ctx.logger.warn).toHaveBeenCalled();
+  });
+
+  it("dropOccurrences() with no active session logs a warning and no-ops", () => {
+    engine.dropOccurrences("doc-without-session", { source: DetectionSource.Regex });
+    expect(ctx.logger.warn).toHaveBeenCalled();
   });
 });
