@@ -1,12 +1,12 @@
-<!-- CONTEXT: scope=render-engine | dependencias=core/Contracts.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,ADR-004-Rendering.md,ADR-012-Replacement-Modes.md,ADR-030-RenderEngine-LoadDocument.md | audiencia=IA-implementador | fase=3 -->
+<!-- CONTEXT: scope=render-engine | dependencias=core/Contracts.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,ADR-004-Rendering.md,ADR-012-Replacement-Modes.md,ADR-030-RenderEngine-LoadDocument.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md | audiencia=IA-implementador | fase=3 (§6/§8/§12/§13 actualizados en fase 10: RENDER_REQUESTED.scale, guard MAX_RENDER_SCALE, cache LRU por escala + límite de bytes, supersede de renders obsoletos, ADR-037) -->
 
 # Render Engine — Spec de Motor
 
 > Renderiza páginas del PDF (original o anonimado) a imágenes usando OffscreenCanvas en Web Workers. Produce highlight de grupos habilitados y aplica reemplazos visualmente según `ReplacementMode`. Soporta preview incremental y render full para export.
 
 **EngineId**: `render`
-**Versión del spec**: 1.2.0
-**Última actualización**: 2026-07-16
+**Versión del spec**: 1.3.0
+**Última actualización**: 2026-07-17
 
 > **Nota (ADR-034, 2026-07-16)**: dos ampliaciones de contrato para el Hito 9: (1) `rasterizePage(documentId, pageIndex, scale, ctx)` — rasterización pura a `ImageData` para el flujo OCR del Orchestrator, **sin** emisión de eventos ni cache LRU (§6); (2) `RenderPageOutput.encoded?: EncodedPageImage`, presente cuando `mode === "full"`, con los bytes codificados que consume el `RenderPageProvider` del Orchestrator (§6, §10; `EncodedPageImage` es canónico de `Contracts.md` §7 desde ADR-034 §3). La creación real del blob de `PREVIEW_UPDATED` (`convertToBlob`, reemplaza el placeholder inline de ADR-031 §5) también llega en el Hito 9.
 
@@ -17,6 +17,8 @@
 > **Nota (ADR-027, 2026-07-11)**: el tipo de config canónico es `RenderConfig` (Contracts.md §6); el alias `RenderEngineConfig` de §6/§15.2 queda eliminado (mismo patrón que ADR-021 §2, ADR-023 §1 y ADR-026).
 
 > **Nota (ADR-021, 2026-07-09)**: este motor se implementa **inline** en su hito, sin crear su pool propio; `WorkerPoolManager` y los pools llegan con el Orchestrator (Hito 9), sin cambio de interfaz pública (precedentes ADR-013/ADR-020). Leer §12 y los ítems de workers/pool del §15 como Hito 9; cancelación cooperativa con checkpoints inline, el SLA < 200 ms se valida en Hito 9/11. Los tests unit/contract/edge mockean la frontera de la librería externa (Code_Standards §10, ADR-021 §5).
+
+> **Nota (ADR-037, 2026-07-17)**: zoom con re-render real. El pipeline de render ya era paramétrico en escala (`RenderPageInput.scale`, `rasterizePage`); lo que faltaba era transportarla en el evento `RENDER_REQUESTED` (`Contracts.md` §8) — ahora el handler del evento la propaga a `renderPages` (§8). Tres piezas nuevas: (1) guard de rango `0 < scale ≤ MAX_RENDER_SCALE` (`InvalidInputError` en invocación directa, `warn` + no-op por evento — §11, §13); (2) la clave del cache LRU de previews incorpora la escala efectiva, y el cache gana un límite adicional por bytes (`PREVIEW_CACHE_MAX_BYTES`, §12); (3) supersede por página: un `RENDER_REQUESTED` con escala distinta descarta el pendiente en cola de esa página o aborta el que está en vuelo, y nunca emite `PREVIEW_UPDATED` de una escala obsoleta (§8, §13). Todo esto vive íntegramente en este motor; el Orchestrator no se toca (no se suscribe a `RENDER_REQUESTED`, ADR-034 §7).
 
 ---
 
@@ -41,6 +43,7 @@ Recibir requests de renderizado por página (`RENDER_REQUESTED` o invocación di
 - Emitir `PREVIEW_UPDATED` (por página, preview), `RENDER_FINISHED`, `RENDER_FAILED`, `PREVIEW_PAGE_FAILED`.
 - Escuchar `RENDER_REQUESTED` y `GROUP_REPLACEMENT_CHANGED`/`GROUP_TOGGLED` para delta render.
 - Transferir zero-copy `ImageData`/`ArrayBuffer` de vuelta al host.
+- Propagar `RENDER_REQUESTED.scale` a `renderPages` (ADR-037 §1); validar contra `MAX_RENDER_SCALE` y aplicar el supersede por página de renders obsoletos (ADR-037 §4).
 
 ---
 
@@ -122,6 +125,8 @@ export class RenderEngine implements IEngine {
 }
 ```
 
+Validación de `scale` (ADR-037 §2): rango válido `0 < scale ≤ MAX_RENDER_SCALE` (`Contracts.md` §6, default 4). Vía invocación directa (`renderPage`/`renderPages`), `scale` inválido o no finito → `InvalidInputError` — endurece una laguna previa (el campo no declaraba validación). Vía evento (`RENDER_REQUESTED`), `scale` inválido → `warn` + no-op del evento (no hay caller al que lanzarle, mismo tratamiento que documento no cargado).
+
 Semántica de `rasterizePage` (ADR-034 §1):
 
 - Rasteriza la página **sin reemplazos ni highlights** (uso: alimentar el OCR desde el Orchestrator, que no puede importar pdfjs).
@@ -157,7 +162,7 @@ Canal: `EventChannel.Render`.
 
 | Evento | Cuándo | Acción |
 |---|---|---|
-| `RENDER_REQUESTED` (canal `ui`) | usuario pide preview/export | `renderPages` con los `pageIndices` indicados |
+| `RENDER_REQUESTED` (canal `ui`) | usuario pide preview/export | `renderPages` con los `pageIndices` indicados y el `scale` recibido (ausente → `previewScale`/`fullScale` según `mode`, ADR-037 §1); si hay un render pendiente en cola o en vuelo para la misma `(documentId, pageIndex, kind)` con otra escala, se descarta/aborta sin emitir `PREVIEW_UPDATED` (supersede, ADR-037 §4) |
 | `GROUP_REPLACEMENT_CHANGED` (canal `grouping`) | cambio de modo/valor en un grupo | `requestDeltaRender(documentId, [groupId])` |
 | `GROUP_TOGGLED` (canal `grouping`) | grupo habilitado/deshabilitado | `requestDeltaRender` |
 
@@ -217,7 +222,7 @@ El `ImageData` se transfiere zero-copy al host. El host lo convierte a `Blob` y 
 | `RENDER_FAILED` | `RenderFailedError` | error fatal en batch, o `getDocument()` falla en `loadDocument` (PDF ilegible para pdfjs; excepcional, la etapa 1 ya lo validó — ADR-030) | no | emitir `RENDER_FAILED`, abortar batch |
 | `ENGINE_NOT_INITIALIZED` | `EngineNotInitializedError` | `renderPage` antes de `init` | no | bug del caller |
 | `ENGINE_DISPOSED` | `EngineDisposedError` | `renderPage` tras `dispose` | no | bug del caller |
-| `INVALID_INPUT` | `InvalidInputError` | input null/undefined, `pageIndex` fuera de rango, `documentId` no cargado (`loadDocument` pendiente), o buffer vacío/null en `loadDocument` (ADR-030) | no | bug del caller |
+| `INVALID_INPUT` | `InvalidInputError` | input null/undefined, `pageIndex` fuera de rango, `documentId` no cargado (`loadDocument` pendiente), buffer vacío/null en `loadDocument` (ADR-030), o `scale` fuera de `(0, MAX_RENDER_SCALE]`/no finito en invocación directa (ADR-037 §2) | no | bug del caller |
 
 `retryable`: `RENDER_PAGE_FAILED = true`, `RENDER_TIMEOUT = true`. Resto `false`.
 
@@ -229,7 +234,7 @@ El `ImageData` se transfiere zero-copy al host. El host lo convierte a `Blob` y 
 - Costo: 100–500 ms por página preview; 300–1500 ms por página full (150 DPI).
 - Memoria: 40–120 MB por worker (canvas + PDF.js worker para render).
 - `ImageData` se transfiere zero-copy de vuelta al host.
-- Cache LRU: `cachePages = 16` páginas preview cacheadas en host. Si la página solicitada está en cache, no se re-renderiza.
+- Cache LRU: `cachePages = 16` páginas preview cacheadas en host. Si la página solicitada está en cache, no se re-renderiza. La clave incorpora la escala efectiva: `documentId:pageIndex:kind:mode:scale:hash(replacements ++ annotations)` (extiende la clave de ADR-031 §2 con `scale` — ADR-037 §3); entradas de escalas distintas coexisten y compiten por los mismos slots. Además del límite por items, el cache tiene un límite por bytes `PREVIEW_CACHE_MAX_BYTES = 200 MB` (`Contracts.md` §6, ADR-037 §3). Sin invalidación activa al cambiar de escala: las entradas viejas se evictan por LRU natural. Un cambio de escala **siempre re-renderiza** (no hay resampling del bitmap anterior en el motor; ese escalado transitorio es responsabilidad de la UI, ver `ui/Components.md` §5.2).
 - Virtualización: solo se renderizan páginas visibles + 1 antes + 1 después. El host envía `RENDER_REQUESTED` solo para visibles.
 - Delta render: cuando un grupo cambia, se re-renderizan solo las páginas que tienen `members` de ese grupo. El motor mantiene un index `pageIndex → groupIds` para lookup rápido.
 - Preview primero: si el usuario pide export (full), el motor prioriza preview de la página visible por encima del full de las demás.
@@ -257,6 +262,9 @@ El `ImageData` se transfiere zero-copy al host. El host lo convierte a `Blob` y 
 15. **PDF con rotate (páginas rotadas 90/180/270)**: el render respeta la rotación de la página. Los bbox están en coords de página ya rotada (lo garantiza PDF Engine).
 16. **`renderPage` sin `loadDocument` previo**: lanza `InvalidInputError`. Por eventos (`RENDER_REQUESTED`, delta render): `warn` + no-op (ADR-030).
 17. **`loadDocument` dos veces con el mismo `documentId`**: destruye el proxy anterior y carga el nuevo. `unloadDocument` de un id desconocido: no-op idempotente (ADR-030).
+18. **Zoom cambia mientras hay un render en cola/en vuelo para la misma página (ADR-037 §4)**: el pendiente en cola se descarta sin ejecutarse; el que está en vuelo se aborta en su próximo checkpoint de Canvas; ninguno de los dos emite `PREVIEW_UPDATED`. Solo el request final (post-debounce de la UI) llega a completarse.
+19. **`RENDER_REQUESTED.scale` fuera de rango o no finito**: `warn` + no-op del evento (sin caller al que lanzarle); vía `renderPage`/`renderPages` directo: `InvalidInputError` (ADR-037 §2).
+20. **Cache a distintas escalas del mismo `(documentId, pageIndex, kind, mode)`**: coexisten como entradas separadas del LRU (clave incluye `scale`); compiten por `cachePages` y `PREVIEW_CACHE_MAX_BYTES` igual que cualquier otra entrada (ADR-037 §3).
 
 ---
 
@@ -293,6 +301,12 @@ El `ImageData` se transfiere zero-copy al host. El host lo convierte a `Blob` y 
 | `dispose destroys loaded PDFDocumentProxies` | `contract.test.ts` | contract | limpieza (ADR-030) |
 | `1000 pages only render visible + adjacent` | `stress.test.ts` (en `src/__tests__/` hasta que exista `tests/stress/`; ADR-031 §5) | stress | caso 10 |
 | `OffscreenCanvas fallback when unavailable` | `edge.test.ts` | edge | caso 14 |
+| `RENDER_REQUESTED propagates scale to renderPages` | `contract.test.ts` | contract | ADR-037 §1 |
+| `scale out of range warns and no-ops via event, throws InvalidInputError via direct call` | `edge.test.ts` | edge | caso 19 (ADR-037 §2) |
+| `superseded render in queue is discarded without PREVIEW_UPDATED` | `edge.test.ts` | edge | caso 18 (ADR-037 §4) |
+| `superseded render in flight aborts at next checkpoint without PREVIEW_UPDATED` | `edge.test.ts` | edge | caso 18 (ADR-037 §4) |
+| `cache key includes scale; different scales coexist` | `unit.test.ts` | unit | caso 20 (ADR-037 §3) |
+| `cache evicts by PREVIEW_CACHE_MAX_BYTES in addition to cachePages` | `unit.test.ts` | unit | ADR-037 §3 |
 
 Fixtures: `tests/fixtures/text-10p.pdf`, `scanned-10p.pdf`, una página con rotación.
 
@@ -313,7 +327,8 @@ Fixtures: `tests/fixtures/text-10p.pdf`, `scanned-10p.pdf`, una página con rota
 - [ ] 9. Implementar highlight de grupos habilitados y conflicto en `kind = "original"`.
 - [ ] 10. Implementar `renderPages` (paralelo, prioridad visible-first).
 - [ ] 11. Implementar `requestDeltaRender` (index `pageIndex → groupIds`, lookup, re-render solo afectadas).
-- [ ] 12. Implementar LRU cache en host (clave `documentId:pageIndex:kind:mode:hash(replacements ++ annotations)`; ADR-031 §2).
+- [ ] 12. Implementar LRU cache en host (clave `documentId:pageIndex:kind:mode:scale:hash(replacements ++ annotations)`; ADR-031 §2, extendida con `scale` por ADR-037 §3) con límite adicional por bytes (`PREVIEW_CACHE_MAX_BYTES`).
+- [ ] 12b. Implementar guard de `scale` (`MAX_RENDER_SCALE`) y el supersede por página de renders obsoletos al recibir `RENDER_REQUESTED` con escala distinta (ADR-037 §2, §4).
 - [ ] 13. Implementar `dispose` (libera OffscreenCanvas, workers inactivos y destruye los `PDFDocumentProxy` cargados; ADR-030).
 - [ ] 14. Escuchar `RENDER_REQUESTED`, `GROUP_REPLACEMENT_CHANGED`, `GROUP_TOGGLED` del bus.
 - [ ] 15. Escribir `contract.test.ts` con todos los tests contractuales.
@@ -335,3 +350,5 @@ Fixtures: `tests/fixtures/text-10p.pdf`, `scanned-10p.pdf`, una página con rota
 - `adr/ADR-012-Replacement-Modes.md` (modos visuales)
 - `adr/ADR-030-RenderEngine-LoadDocument.md` (carga del PDF fuente)
 - `adr/ADR-031-RenderFailed-ErrorCode-Erratas-Render.md` (error code + erratas)
+- `adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md` (zoom con re-render real, decisiones de la v1.3.0)
+- `ui/Components.md` §5.2 (`ZoomControls`, CSS inmediato + debounce)

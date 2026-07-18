@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-mvp | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,adr/ADR-011-Grouping-First.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md | audiencia=humanos+IA | fase=5 (Hito 2 cerrado vía PRs #6, #7; Hito 3 cerrado vía PRs #10, #11, pendiente diferido a Hito 11; Hito 4 cerrado vía PR #13, pendiente diferido a Hito 11) -->
+<!-- CONTEXT: scope=roadmap-mvp | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,adr/ADR-011-Grouping-First.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md | audiencia=humanos+IA | fase=10 (Hitos 1–9 cerrados; pendientes puntuales diferidos a Hito 11 anotados por hito; Hito 10 auditado por ADR-036, con dos decisiones reabiertas por el humano vía ADR-037/038 — tabla de PRs canónica en ADR-038 §8) -->
 
 # Anonly — Roadmap MVP
 
@@ -167,11 +167,35 @@ Orden sugerido (cada hito = un set de PRs):
 - Hallazgos de revisión resueltos en el mismo PR antes de mergear: casts de frontera `as any` dispersos en `tests/integration/happy-path.test.ts`/`regex-ner-grouping.test.ts` concentrados en el helper `tests/integration/fixtures/mocks.ts` (`Code_Standards.md` §10, precedente `ner-engine`); emisión de `PIPELINE_PROGRESS` (`Orchestrator.md` §8), hasta entonces no-op, implementada en los 4 puntos de emisión (Extracting, OCR, Detección con/sin NER).
 
 ### Hito 10 — React Client
-- `apps/react-client` con Vite + Tailwind + Radix + Zustand.
-- Migrar los cuatro pools de in-process a **Web Workers de SO reales**: entry-points de worker por motor (`pdf-engine`, `ocr-engine`, `ner-engine`; render/export según `05_Worker_Architecture.md` §7), PRs por motor, bundling vía Vite, transferables §2.3 (ADR-035 §2).
-- `core-adapter` (bus bridge, actions, snapshots).
-- 4 paneles, todos los componentes de `ui/Components.md`.
-- E2E con Playwright.
+
+Auditoría pre-hito: `adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md` (reconcilia los docs de UI con ADR-014/015/032/034/035, fija el transporte de workers; pools ≠ workers — cuatro pools, cinco entry-points). El humano revisó la auditoría y pidió reabrir dos de sus decisiones "MVP-conservadoras": `adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md` (zoom con re-render real en vez de escalado CSS, supersede ADR-036 §6) y `adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md` (`Orchestrator.reanalyze` preservando ediciones del usuario en vez de recrear el core, supersede ADR-036 §5). La tabla de PRs canónica (17 PRs) es la de ADR-038 §8, que reemplaza a la de ADR-036 §8.
+
+- `apps/react-client` con Vite + Tailwind + Radix + Zustand (scaffold primero; CSP `08_Security_Model.md` §3.2).
+- `grouping-engine`: `reopenSession`/`dropOccurrences`/dedup por identidad/`finishSession` re-ejecutable (ADR-038 §2-§4; spec v1.1.0).
+- `packages/anonymization-core/src` (+ `shared`): `Orchestrator.reanalyze`/`ReanalyzeConfigPatch`, config efectiva por documento, transiciones nuevas, cancelación preservando estado (ADR-038 §1, §5-§6; spec v1.2.0).
+- `render-engine` (+ `shared`): `RenderRequested.scale`, `MAX_RENDER_SCALE`, cache LRU por escala + `PREVIEW_CACHE_MAX_BYTES`, supersede de renders obsoletos (ADR-037; spec v1.3.0).
+- `core-adapter` (bus bridge, actions **completas** — incluye `updateRule`/`deleteRule`/`requestRender(..., scale?)`/`retryWithPassword`/`reanalyze` —, snapshots, mapeo settings→`EngineConfig`; ADR-036 §5, ADR-038 §7) sobre el core **in-process** del Hito 9.
+- 4 paneles, todos los componentes de `ui/Components.md` (incluye los agregados por ADR-036 §7: `PasswordDialog`, `ConfirmDialog`, `SettingsDialog`).
+- E2E con Playwright (base antes de la migración de workers; suite completa al cierre — escenarios de `07_Performance_Strategy.md` §11.3, incluidos el 9 reescrito —preserva ediciones— y el 11 nuevo —zoom—).
+- Migrar los **cuatro pools** de in-process a Web Workers de SO reales, con **cinco entry-points de worker** (pools ≠ workers, ADR-036 §1): PdfWorker, OcrWorker, NerWorker, RenderWorker y ExportWorker (único, sin pool propio — ensamblado pdf-lib secuencial). PRs por motor (R-1), bundling vía Vite (`?worker` + subpath `"./worker"` por paquete), factories inyectadas en `createCore` (`CoreRuntimeOptions`, ADR-036 §2), transferables `05` §2.3 corregidos (ADR-036 §4; ADR-035 §2).
+
+Orden canónico de PRs (ADR-038 §8; los PRs 2-4 no dependen del scaffold y pueden correr en paralelo con el PR 1):
+
+| # | PR | Módulo |
+|---|---|---|
+| 1 | Scaffold | `apps/react-client` |
+| 2 | Grouping re-análisis | `grouping-engine` |
+| 3 | Orchestrator `reanalyze` | `packages/anonymization-core/src` (+ `shared`) |
+| 4 | Render zoom | `render-engine` (+ `shared`) |
+| 5 | `core-adapter` | `apps/react-client` |
+| 6 | Toolbar + diálogos de flujo | `apps/react-client` |
+| 7 | Visor | `apps/react-client` |
+| 8 | Panel Entidades + conflictos | `apps/react-client` |
+| 9 | Panel Reglas + Export | `apps/react-client` |
+| 10 | E2E base | `tests/e2e/` |
+| 11 | Transporte de workers | `packages/anonymization-core/src` |
+| 12–16 | Workers, uno por PR | `pdf-engine`, `render-engine`, `ocr-engine`, `ner-engine`, `export-engine` |
+| 17 | E2E completa | `tests/e2e/` |
 
 ### Hito 11 — Hardening
 - Performance gates (todas las métricas de `00_Project_Vision.md` §7).

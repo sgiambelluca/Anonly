@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=orchestrator | dependencias=core/Contracts.md,architecture/03_Data_Model.md,architecture/04_Event_System.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-015-UI-Channel-Canonical.md,adr/ADR-030-RenderEngine-LoadDocument.md,adr/ADR-031-RenderFailed-ErrorCode-Erratas-Render.md,adr/ADR-032-Export-EncodedPageImage-Requested-Warning.md,adr/ADR-034-Auditoria-Pre-Hito9-Orchestrator.md | audiencia=IA-implementador | fase=3 (Hito 9) -->
+<!-- CONTEXT: scope=orchestrator | dependencias=core/Contracts.md,architecture/03_Data_Model.md,architecture/04_Event_System.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-015-UI-Channel-Canonical.md,adr/ADR-030-RenderEngine-LoadDocument.md,adr/ADR-031-RenderFailed-ErrorCode-Erratas-Render.md,adr/ADR-032-Export-EncodedPageImage-Requested-Warning.md,adr/ADR-034-Auditoria-Pre-Hito9-Orchestrator.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md | audiencia=IA-implementador | fase=3 (Hito 9 cerrado; transporte de workers Hito 10, ADR-036; método `reanalyze` Hito 10, ADR-038) -->
 
 # Orchestrator — Spec del Componente Host
 
@@ -6,9 +6,9 @@
 
 **Componente**: Orchestrator + façade `@anonly/anonymization-core` (no es un motor: **no tiene `EngineId`** y no implementa `IEngine`; este spec adapta la plantilla de 15 secciones de `ai/Module_Specification_Template.md` a un componente host)
 **Ubicación**: `packages/anonymization-core/src/`
-**Versión del spec**: 1.1.0
-**Última actualización**: 2026-07-16
-**Estado de implementación**: pendiente (Hito 9). El façade actual (`src/index.ts`) es un placeholder.
+**Versión del spec**: 1.2.0
+**Última actualización**: 2026-07-17
+**Estado de implementación**: implementado (Hito 9, PR #19; pools en modo in-process — ADR-035 §1). Pendientes de Hito 10: transporte por Web Workers reales vía `CoreRuntimeOptions` (ADR-036 §2); método `reanalyze` para re-análisis parcial preservando ediciones (ADR-038 §1, §5-§6).
 
 > **Nota (ADR-034, 2026-07-16)**: este spec incorpora los cierres de Hitos 7–8 que le fueron diferidos y las decisiones de la auditoría pre-Hito 9: rasterización para OCR vía `RenderEngine.rasterizePage` (§2, §8); gestión de la sesión de Grouping (`startSession`/`finishSession`, incluido el caso NER desactivado — §2, §13.6); `RenderPageProvider` implementado sobre `RenderPageOutput.encoded` (§2); blob URLs creados por los motores y **revocados** por el Orchestrator (§2, §8); consumo de `EXPORT_REQUESTED` y `PREVIEW_UPDATED` (§8, ADR-032/031); `RenderEngine.loadDocument`/`unloadDocument` y retención del buffer original (§2, ADR-030); migración a los **cuatro** pools (§15.11, ADR-021).
 
@@ -30,6 +30,7 @@ Coordinar el ciclo de vida completo de un documento (etapas 0–11 de `06_Pipeli
 - Retener el `ArrayBuffer` original de la etapa 0 (lo transferido a `PdfPool` es una copia, `06_Pipeline.md` §3) e invocar `RenderEngine.loadDocument(documentId, buffer)` **una sola vez por documento**: en la etapa 2 si `textlessPages.length > 0`, si no antes del primer preview (etapa 8) (ADR-030, ADR-034 §1).
 - Obtener el `ImageData` de páginas sin texto para el OCR Engine vía `RenderEngine.rasterizePage(documentId, pageIndex, scale, ctx)` con `scale = ctx.config.ocr.dpi / 72` (ADR-034 §1; el Orchestrator **no** rasteriza por sí mismo — no puede importar pdfjs, §5).
 - Gestionar la sesión de Grouping: invocar `grouping.startSession(documentId)` al iniciar la etapa de detección (antes de despachar Regex/NER); si `ctx.config.ner.enabled === false`, invocar `grouping.finishSession(documentId)` tras `REGEX_FINISHED` (ADR-034 §2). Con NER activo, Grouping auto-finaliza al recibir ambos `*_FINISHED`.
+- Re-analizar un documento ya cargado (`reanalyze`, ADR-038 §1) sin perder las ediciones manuales del usuario: mantener una `EngineConfig` efectiva por documento que el patch actualiza, reabrir la sesión de Grouping (`grouping.reopenSession`) en vez de crear una nueva, invocar `grouping.dropOccurrences` para las ocurrencias que dejan de ser válidas, y re-despachar solo los motores de detección/OCR afectados por el patch (§13.18-§13.21, ADR-038 §5).
 - Ejecutar la etapa de normalización (`shared`) en main thread.
 - Gestionar `WorkerPoolManager` y `AbortRegistry` (`05_Worker_Architecture.md`): creación perezosa de pools, timeouts, reintentos con backoff, backpressure (pausar ingest ante `WORKER_POOL_SATURATED`), traducción de eventos `WORKER_*` a eventos funcionales.
 - Gestionar la cancelación: escuchar `CANCEL_REQUESTED`, abortar el `AbortController` del `signalId`, propagar `CANCEL` a los pools, emitir `PIPELINE_CANCELLED` (SLA < 200 ms, `05_Worker_Architecture.md` §3).
@@ -97,16 +98,22 @@ export interface ImportDocumentInput {
   readonly password?: string;
 }
 
+export interface ReanalyzeConfigPatch {
+  readonly ner?: { readonly enabled: boolean };
+  readonly ocr?: { readonly languages: ReadonlyArray<string> };
+}
+
 export interface IPipelineOrchestrator {
   importDocument(input: ImportDocumentInput): Promise<void>;   // dispara etapas 0..7 (hasta Ready)
   retryWithPassword(documentId: string, password: string): Promise<void>;
+  reanalyze(documentId: string, patch: ReanalyzeConfigPatch): Promise<void>;
   cancel(documentId: string, jobId?: string): Promise<void>;
   closeDocument(documentId: string): Promise<void>;
   getState(documentId: string): PipelineState;
   dispose(): Promise<void>;
 }
 
-export async function createCore(config?: Partial<EngineConfig>): Promise<IAnonymizationCore>;
+export async function createCore(config?: Partial<EngineConfig>, runtime?: CoreRuntimeOptions): Promise<IAnonymizationCore>;
 ```
 
 Notas:
@@ -114,6 +121,8 @@ Notas:
 - `importDocument` emite `DOCUMENT_IMPORTED` y encadena las etapas automáticas (1–7). No espera a la edición: resuelve cuando el pipeline llega a `Ready`, `Failed` o `Cancelled`.
 - La UI **no** llama a los motores directamente para el flujo del pipeline: usa `orchestrator.importDocument` y los eventos del canal `ui` (`GROUP_*`, `RULE_*`, `RENDER_REQUESTED`, `EXPORT_REQUESTED`, `CANCEL_REQUESTED`, `DOCUMENT_CLOSED`).
 - `config` se mergea con los defaults de `core/Contracts.md` §6.
+- `reanalyze(documentId, patch)` (ADR-038 §1): precondición `stage ∈ {Ready, Failed}`, si no `InvalidInputError`. Actualiza la config efectiva del documento mergeando `patch`, reabre la sesión de Grouping (`reopenSession`) y re-despacha únicamente lo que el patch afecta — ver §13.18-§13.21 para el detalle por combinación de campos. Resuelve cuando el pipeline vuelve a `Ready` (o rechaza si termina en `Failed`); no crea un documento nuevo ni descarta ediciones. Patch vacío, con campos no soportados, o idéntico a la config efectiva → ver §13.21.
+- `runtime?: CoreRuntimeOptions` (ADR-036 §2): factories de `Worker` por motor: ver `Contracts.md` §3.5. Sin factory para un kind, ese pool despacha in-process (comportamiento de Hito 9).
 
 ---
 
@@ -124,7 +133,7 @@ Notas:
 | `DOCUMENT_IMPORTED` | al iniciar `importDocument` | `DocumentImported` | async | sí |
 | `PIPELINE_STAGE_CHANGED` | en cada transición de etapa | `PipelineStageChanged` | async | sí |
 | `PIPELINE_PROGRESS` | progreso granular por página/etapa | `PipelineProgress` | async | sí |
-| `PIPELINE_READY` | al recibir `GROUPING_FINISHED` | `PipelineReady` | async | sí |
+| `PIPELINE_READY` | al recibir `GROUPING_FINISHED` (puede repetirse por documento: una vez por `reanalyze` exitoso, ADR-038 §5) | `PipelineReady` | async | sí |
 | `PIPELINE_CANCELLED` | cancelación completada en todos los pools | `PipelineCancelled` | async | sí |
 | `PIPELINE_FAILED` | error fatal no recuperable de cualquier etapa | `PipelineFailed` | async | sí |
 
@@ -213,6 +222,11 @@ El Orchestrator **no define códigos de error nuevos**: propaga `SerializedEngin
 15. **Edición del usuario mientras NER corre**: los eventos `ui` fluyen a Grouping sin pasar por el Orchestrator; el pipeline no se ve afectado.
 16. **`getState` de documento inexistente**: `InvalidInputError`.
 17. **`dispose()` global**: cancela todo, dispone todos los engines y pools, dessuscribe todos los handlers.
+18. **`reanalyze` con `ner.enabled: false → true`**: stage → `Detecting`; `grouping.reopenSession(documentId, { expectRegex: false, expectNer: true })`; solo NER se despacha sobre el documento retenido; `NER_FINISHED` → auto-finish → `Ready`. Regex no se re-corre (ADR-038 §5.1).
+19. **`reanalyze` con `ner.enabled: true → false`**: stage → `Grouping` (transitorio, sin despacho asíncrono); `reopenSession(..., { expectRegex: false, expectNer: false })` + `dropOccurrences(documentId, { source: DetectionSource.NER })` + `finishSession(documentId)` directo → `Ready` (ADR-038 §5.2).
+20. **`reanalyze` con `ocr.languages`** (documento con páginas `requiresOCR`): stage → `OCRing`; `dropOccurrences` de las páginas afectadas (todas sus ocurrencias, incluidas Regex); re-rasterización + OCR + `fuseOcrPage` de esas páginas; stage → `Detecting`: Regex sobre el documento completo (el dedup de Grouping descarta los duplicados de páginas intactas) + NER solo sobre las páginas re-OCR si está activo → `Ready` (ADR-038 §5.3). Sin páginas `requiresOCR`: no-op (nada que re-detectar).
+21. **`reanalyze` con `stage` fuera de `{Ready, Failed}`** (un `reanalyze`/`importDocument` ya en curso): `InvalidInputError`, sin efectos — esto además hace que un segundo `reanalyze` concurrente se rechace solo. Patch vacío o con campos no soportados por `ReanalyzeConfigPatch`: `InvalidInputError`. Patch idéntico a la config efectiva vigente: no-op, resuelve sin emitir eventos (ADR-038 §1).
+22. **`CANCEL_REQUESTED` durante un `reanalyze`**: se abortan los jobs OCR/NER en vuelo; las ocurrencias ya mergeadas se conservan; el Orchestrator invoca `grouping.finishSession` (renumeración determinista) **antes** de emitir `PIPELINE_CANCELLED`, suprimiendo el `PIPELINE_READY` derivado de ese `GROUPING_FINISHED`; el stage final es `Ready`, no `Cancelled` — a diferencia de cancelar un `importDocument` (caso 8), acá sí hay un estado editable previo al que volver (ADR-038 §6).
 
 ---
 
@@ -263,6 +277,7 @@ Los tests de contract/unit/edge mockean los motores (interfaces de `Contracts.md
 - [ ] 8. Implementar cola de export + `RenderPageProvider` sobre `renderPage(mode: "full")` → `output.encoded` (ADR-034 §3), inyectado al Export Engine.
 - [ ] 9. Implementar registro y revocación de blobUrls (por clave en `PREVIEW_UPDATED`/`EXPORT_FINISHED`; todos en `DOCUMENT_CLOSED` — ADR-034 §5).
 - [ ] 10. Implementar `closeDocument`/`dispose` con liberación total (`releaseDocument`, `unloadDocument`, buffer retenido, caches, blobUrls).
+- [ ] 11a. Implementar `reanalyze(documentId, patch)` (ADR-038 §1, §5-§6): config efectiva por documento, `grouping.reopenSession`/`dropOccurrences`, los cuatro flujos por combinación de patch (§13.18-§13.21) y la cancelación con cierre a `Ready` (§13.22). Depende del PR de `grouping-engine` que agrega `reopenSession`/`dropOccurrences`/dedup (ADR-038 §2-§4).
 - [ ] 11. Migrar los motores pesados a sus **cuatro** pools: `PdfPool` (item §15.5b de `core/PDF_Engine.md`, ADR-013, verificando misma salida inline vs pool), `OcrPool`, `NerPool` y `RenderPool` (ítems de pool de cada spec de motor, ADR-021; eventos siempre emitidos en host — ADR-013 §6; `ocr-words` al cache lo deposita el lado host del `OcrPool` — ADR-014 §1). En Hito 9 los pools son colas de concurrencia **in-process** (ADR-035 §1); el despacho por `postMessage` a Web Workers reales → Hito 10 (ADR-035 §2).
 - [ ] 12. Implementar `createCore` (façade) exportado desde `src/index.ts`.
 - [ ] 13. Escribir `contract.test.ts`, `unit.test.ts`, `edge.test.ts` según §14; agregar el glob del paquete a `thresholds` de `vitest.config.ts`.
@@ -281,5 +296,6 @@ Los tests de contract/unit/edge mockean los motores (interfaces de `Contracts.md
 - `architecture/04_Event_System.md` (tabla de eventos y matriz §11)
 - `architecture/07_Performance_Strategy.md` §5, §7, §8, §11.6
 - `adr/ADR-013-PDF-Engine-Hito2-Inline.md`, `adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md`, `adr/ADR-015-UI-Channel-Canonical.md`
-- `adr/ADR-030-RenderEngine-LoadDocument.md` (carga del PDF fuente en Render), `adr/ADR-031-RenderFailed-ErrorCode-Erratas-Render.md` §5 (blob real), `adr/ADR-032-Export-EncodedPageImage-Requested-Warning.md` (provider/export), `adr/ADR-033-Test-Infra-Global-Scripts-Alias.md` (scripts/alias), `adr/ADR-034-Auditoria-Pre-Hito9-Orchestrator.md` (decisiones de este spec v1.1.0)
+- `adr/ADR-030-RenderEngine-LoadDocument.md` (carga del PDF fuente en Render), `adr/ADR-031-RenderFailed-ErrorCode-Erratas-Render.md` §5 (blob real), `adr/ADR-032-Export-EncodedPageImage-Requested-Warning.md` (provider/export), `adr/ADR-033-Test-Infra-Global-Scripts-Alias.md` (scripts/alias), `adr/ADR-034-Auditoria-Pre-Hito9-Orchestrator.md` (decisiones de la v1.1.0), `adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md` (transporte de workers, `CoreRuntimeOptions`), `adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md` (`reanalyze`, decisiones de la v1.2.0)
+- `core/Grouping_Engine.md` §6 (`reopenSession`/`dropOccurrences`, ADR-038 §2-§4)
 - `ui/React_Client.md` §4 (cómo la UI consume el façade)

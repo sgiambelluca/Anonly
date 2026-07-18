@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=eventos | dependencias=03_Data_Model.md,core/Contracts.md | audiencia=IA+humanos | fase=1 -->
+<!-- CONTEXT: scope=eventos | dependencias=03_Data_Model.md,core/Contracts.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md | audiencia=IA+humanos | fase=1 (§2/§5/§6/§10 actualizados en fase 10: RENDER_REQUESTED.scale —ADR-037—, PIPELINE_READY/GROUPING_FINISHED emitibles más de una vez y dedup real de ENTITY_FOUND —ADR-038—) -->
 
 # Anonly — Sistema de Eventos (TAD bloque 7)
 
@@ -24,9 +24,9 @@
 | `DOCUMENT_IMPORTED` | Orchestrator | UI | `{ documentId, name, sizeBytes }` | async | sí | none | El PDF Engine no se suscribe: el Orchestrator lo invoca directamente (`PdfEngine.process`), consistente con ADR-014. Ver `core/Orchestrator.md`. |
 | `PIPELINE_STAGE_CHANGED` | Orchestrator | UI | `{ documentId, stage: PipelineStage, progress: number }` | async | sí | por-documento | Para la barra de progreso. |
 | `PIPELINE_PROGRESS` | Orchestrator | UI | `{ documentId, stage, current, total }` | async | sí | por-documento | Granular por página. |
-| `PIPELINE_READY` | Orchestrator | UI | `{ documentId, groupCount, conflictCount }` | async | sí | none | Cuando llega a `Ready`. |
+| `PIPELINE_READY` | Orchestrator | UI | `{ documentId, groupCount, conflictCount }` | async | sí | none | Cuando llega a `Ready`. Puede emitirse **más de una vez** por documento: una por cada pasada de `reanalyze` (ADR-038 §5). |
 | `PIPELINE_CANCELLED` | Orchestrator | UI | `{ documentId, reason }` | async | sí | none | Los motores **no** se suscriben: la cancelación les llega por `AbortSignal`/`CANCEL` a pools (`05_Worker_Architecture.md` §3; ADR-034 §4). |
-| `PIPELINE_FAILED` | Orchestrator | UI | `{ documentId, error: EngineError }` | async | sí | none | Error fatal no recuperable. |
+| `PIPELINE_FAILED` | Orchestrator | UI | `{ documentId, error: SerializedEngineError }` | async | sí | none | Error fatal no recuperable. (Errata ADR-036 §9: decía `EngineError`; los payloads del bus transportan la forma serializada, `Contracts.md` §8.) |
 | `CANCEL_REQUESTED` | UI | Orchestrator | `{ documentId, jobId? }` | sync | sí | none | Inicia abort. |
 
 ---
@@ -49,7 +49,7 @@
 | `OCR_STARTED` | OCR Engine | UI | `{ documentId, pagesToProcess: number[], modelLoading? }` | async | sí | none | |
 | `OCR_PAGE_FINISHED` | OCR Engine | Orchestrator | `{ documentId, pageIndex, wordCount, confidence }` | async | sí | none | Orchestrator lee `Word[]` de `ctx.cache` (clave `ocr-words:<documentId>:<pageIndex>`) y llama `PdfEngine.fuseOcrPage` (ver ADR-014). PDF Engine no se suscribe a este evento. |
 | `OCR_FINISHED` | OCR Engine | Orchestrator | `{ documentId, durationMs, modelDownloaded? }` | async | sí | none | Dispara detección. |
-| `OCR_PAGE_FAILED` | OCR Engine | Orchestrator | `{ documentId, pageIndex, error: EngineError }` | async | sí | none | Reintentable hasta `maxRetries`. |
+| `OCR_PAGE_FAILED` | OCR Engine | Orchestrator | `{ documentId, pageIndex, error: SerializedEngineError }` | async | sí | none | Reintentable hasta `maxRetries`. (Errata ADR-036 §9: decía `EngineError`.) |
 
 ---
 
@@ -59,7 +59,7 @@ Ambos emiten el mismo evento `ENTITY_FOUND` pero con `source` distinto. **`ENTIT
 
 | Evento | Emisor | Receptores | Payload | Timing | Idempotente | Orden | Notas |
 |---|---|---|---|---|---|---|---|
-| `ENTITY_FOUND` | Regex Engine, NER Engine | Grouping Engine | `{ documentId, occurrence: Occurrence }` | async | sí | por-página | `occurrence.source ∈ {regex, ner}`. |
+| `ENTITY_FOUND` | Regex Engine, NER Engine | Grouping Engine | `{ documentId, occurrence: Occurrence }` | async | sí | por-página | `occurrence.source ∈ {regex, ner}`. Idempotencia real: Grouping descarta en silencio una ocurrencia cuya identidad `(entityType, pageIndex, bbox, normalizedValue)` ya está registrada en la sesión — invariante permanente que sostiene el re-análisis parcial (ADR-038 §3), no solo un caso especial de reanalyze. |
 | `REGEX_FINISHED` | Regex Engine | Orchestrator, Grouping Engine | `{ documentId, occurrenceCount, durationMs }` | async | sí | none | Grouping lo usa para su auto-finish (junto a `NER_FINISHED`); si NER está desactivado, el Orchestrator invoca `finishSession` directamente (ADR-034 §2). |
 | `NER_STARTED` | NER Engine | UI | `{ documentId, pageCount, modelId, modelLoading? }` | async | sí | none | `modelLoading?: true` solo en la primera descarga del modelo; omitido si ya está cacheado (ADR-024 §1). |
 | `NER_MODEL_LOADING` | NER Engine | UI | `{ modelId, progress: number }` | async | sí | none | Progreso de descarga/carga del modelo ONNX. |
@@ -82,7 +82,7 @@ Estos son los eventos que la UI **sí** escucha para construir el árbol de enti
 | `GROUP_TOGGLED` | Grouping Engine | UI, Render Engine | `{ documentId, groupId, enabled }` | async | sí | none | |
 | `CONFLICT_DETECTED` | Grouping Engine | UI | `{ documentId, conflict: Conflict }` | async | sí | none | |
 | `CONFLICT_RESOLVED` | Grouping Engine | UI | `{ documentId, conflictId, mode }` | async | sí | none | |
-| `GROUPING_FINISHED` | Grouping Engine | Orchestrator | `{ documentId, groupCount, conflictCount, durationMs }` | async | sí | none | Dispara `PIPELINE_READY`. |
+| `GROUPING_FINISHED` | Grouping Engine | Orchestrator | `{ documentId, groupCount, conflictCount, durationMs }` | async | sí | none | Dispara `PIPELINE_READY`. Puede emitirse **más de una vez** por documento tras `reopenSession`/`finishSession` re-ejecutado tras un `reanalyze` (ADR-038 §2, §5). |
 
 ---
 
@@ -106,7 +106,7 @@ Estos son los eventos que la UI **sí** escucha para construir el árbol de enti
 | `EXPORT_STARTED` | Export Engine | UI | `{ documentId }` | async | sí | none | |
 | `EXPORT_PROGRESS` | Export Engine | UI | `{ documentId, current, total }` | async | sí | por-página | |
 | `EXPORT_FINISHED` | Export Engine | UI, Orchestrator | `{ documentId, blobUrl, sizeBytes, durationMs }` | async | sí | none | `blobUrl` es `URL.createObjectURL` creado por el motor (lado host). El Orchestrator lo escucha para transicionar `stage → Done` y registrar/revocar el URL (ADR-034 §5). |
-| `EXPORT_FAILED` | Export Engine | UI, Orchestrator | `{ documentId, error: EngineError }` | async | sí | none | El Orchestrator lo escucha para emitir `PIPELINE_FAILED` tras agotar reintentos (ver `06_Pipeline.md` §13). |
+| `EXPORT_FAILED` | Export Engine | UI, Orchestrator | `{ documentId, error: SerializedEngineError }` | async | sí | none | El Orchestrator lo escucha para emitir `PIPELINE_FAILED` tras agotar reintentos (ver `06_Pipeline.md` §13). (Errata ADR-036 §9: decía `EngineError`.) |
 
 > `EXPORT_REQUESTED` es un evento emitido por la UI y viaja por el canal `ui` (ver §10 y ADR-015).
 
@@ -133,7 +133,7 @@ Inputs del usuario que mutan el estado de grupos/reglas/pipeline o solicitan tra
 
 | Evento | Emisor | Receptores | Payload | Timing | Idempotente | Orden | Notas |
 |---|---|---|---|---|---|---|---|
-| `RENDER_REQUESTED` | UI | Render Engine | `{ documentId, pageIndices: number[], mode: "preview" \| "full" }` | sync | sí | none | Solicitud de render de páginas visibles. |
+| `RENDER_REQUESTED` | UI | Render Engine | `{ documentId, pageIndices: number[], mode: "preview" \| "full", scale?: number }` | sync | sí | none | Solicitud de render de páginas visibles. `scale?` (ADR-037 §1): ausente → `previewScale`/`fullScale` según `mode`; fuera de `(0, MAX_RENDER_SCALE]` → no-op con `warn`. Un request con escala distinta de una pendiente en cola la descarta; uno en vuelo se aborta cooperativamente (supersede por página, ADR-037 §4). |
 | `EXPORT_REQUESTED` | UI | Orchestrator | `{ documentId, options: ExportOptions }` | sync | sí | none | Dispara el flujo de export. El Export Engine no se suscribe: el Orchestrator arma `ExportEngineInput` (incluido el `RenderPageProvider` preconfigurado con las `options`) y llama `ExportEngine.export()` directamente, consistente con ADR-014 (ver ADR-032 §2). |
 | `GROUP_UPDATE_REQUESTED` | UI | Grouping Engine | `{ documentId, groupId, patch: Partial<Pick<EntityGroup, "replacementMode" \| "replacementValue" \| "enabled" \| "canonicalValue">> }` | sync | sí | none | Grouping valida y emite `ENTITY_GROUP_UPDATED` + `GROUP_REPLACEMENT_CHANGED`. |
 | `GROUP_MERGE_REQUESTED` | UI | Grouping Engine | `{ documentId, sourceGroupId, targetGroupId }` | sync | sí | none | Fusiona dos grupos en uno. |

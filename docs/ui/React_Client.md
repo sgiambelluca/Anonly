@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=ui-contract | dependencias=01_Technical_Architecture_Document.md,03_Data_Model.md,04_Event_System.md,ADR-005-State-Management.md | audiencia=IA-implementador-ui | fase=4 -->
+<!-- CONTEXT: scope=ui-contract | dependencias=01_Technical_Architecture_Document.md,03_Data_Model.md,04_Event_System.md,ADR-005-State-Management.md,adr/ADR-034-Auditoria-Pre-Hito9-Orchestrator.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md | audiencia=IA-implementador-ui | fase=4 (reconciliado en fase 10 por ADR-036: acciones completas §2.3, workers §2.4, settings §3.7, zoom §7, errores §8; §2.3/§3.7/§7 reescritos por ADR-037 —zoom con re-render real— y ADR-038 —reanalyze preservando ediciones, supersede el flujo "recrear el core") -->
 
 # Anonly — React Client (UI Contract, TAD bloque 9)
 
@@ -176,12 +176,56 @@ export const actions = {
     getCore().bus.emit(EventChannel.UI, EngineEvents.CONFLICT_RESOLVE_REQUESTED, { documentId, conflictId, mode });
   },
 
+  // Acciones agregadas por ADR-036 §5 (Components.md ya las invocaba):
+
+  updateRule(ruleId: string, patch: Partial<Rule>): void {
+    const documentId = stores.document.getState().id;
+    if (!documentId) return;
+    getCore().bus.emit(EventChannel.UI, EngineEvents.RULE_UPDATED, { documentId, ruleId, patch });
+  },
+
+  deleteRule(ruleId: string): void {
+    const documentId = stores.document.getState().id;
+    if (!documentId) return;
+    getCore().bus.emit(EventChannel.UI, EngineEvents.RULE_DELETED, { documentId, ruleId });
+  },
+
+  // Sin parámetro `kind`: el payload RenderRequested no lo tiene; Render decide
+  // solo (original primero, anonimizado después — 06_Pipeline.md §10).
+  // `scale?` (ADR-037 §1, §5): ausente → previewScale/fullScale según mode;
+  // ZoomControls la pasa como previewScale × zoom tras el debounce de 150 ms.
+  requestRender(pageIndices: ReadonlyArray<number>, mode: "preview" | "full" = "preview", scale?: number): void {
+    const documentId = stores.document.getState().id;
+    if (!documentId) return;
+    getCore().bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, { documentId, pageIndices, mode, scale });
+  },
+
+  // Re-análisis parcial preservando ediciones (ADR-038 §1, §7). Reemplaza el
+  // flujo "recrear el core" de una versión previa de este doc (ADR-036 §5,
+  // superseded): con documento abierto, el SettingsDialog confirma y llama
+  // esta acción en vez de closeDocument+dispose+createCore+reimport.
+  async reanalyze(patch: ReanalyzeConfigPatch): Promise<void> {
+    const documentId = stores.document.getState().id;
+    if (!documentId) return;
+    await getCore().orchestrator.reanalyze(documentId, patch);
+  },
+
+  // PDF_PASSWORD_REQUIRED → PasswordDialog → esta acción. La UI NUNCA llama a
+  // engines.pdf.process (Orchestrator.md §6; errata previa corregida, ADR-036 §5).
+  async retryWithPassword(password: string): Promise<void> {
+    const documentId = stores.document.getState().id;
+    if (!documentId) return;
+    await getCore().orchestrator.retryWithPassword(documentId, password);
+  },
+
   requestExport(options: ExportOptions): void {
     const documentId = stores.document.getState().id;
     if (!documentId) return;
     getCore().bus.emit(EventChannel.UI, EngineEvents.EXPORT_REQUESTED, { documentId, options });
   },
 
+  // CANCEL_REQUESTED viaja por el canal `pipeline` (excepción documentada de
+  // ADR-015: el canal se determina por el emisor, salvo este caso histórico).
   cancel(): void {
     const documentId = stores.document.getState().id;
     if (!documentId) return;
@@ -199,6 +243,24 @@ export const actions = {
     stores.pipeline.reset();
   },
 };
+```
+
+### 2.4 Wiring de Web Workers reales (Hito 10, ADR-036 §2)
+
+La app es la única con bundler: crea los `Worker` con los imports `?worker` de Vite y los inyecta a `createCore` como factories. Sin factory para un kind, ese despacho queda in-process (comportamiento del Hito 9).
+
+```ts
+// core-adapter/index.ts (wiring progresivo: un factory por PR de worker)
+import PdfWorker from "@anonly/pdf-engine/worker?worker";
+import RenderWorker from "@anonly/render-engine/worker?worker";
+// ... ocr, ner, export a medida que llegan sus PRs
+
+core = await createCore(buildEngineConfig(stores.settings.getState()), {
+  workers: {
+    pdf: () => new PdfWorker(),
+    render: () => new RenderWorker(),
+  },
+});
 ```
 
 ---
@@ -296,6 +358,22 @@ interface SettingsSlice {
 }
 ```
 
+### 3.7 Mapeo settings → `EngineConfig` (ADR-036 §5, reescrito por ADR-038 §7)
+
+| Setting | Destino | Regla |
+|---|---|---|
+| `nerEnabled` | `ner.enabled` | directo |
+| `ocrLanguages` | `ocr.languages` | directo |
+| `performancePreset` | `workerPool.*PoolSize` | `auto` = defaults de `05_Worker_Architecture.md` §1.1 (derivados de `hardwareConcurrency`; la serialización OCR/NER por `deviceMemory < 4` GB la aplica el Orchestrator solo); `low` = `{ pdf: 1, ocr: 1, ner: 1, render: 1 }`; `high` = `{ pdf: 4, ocr: 2, ner: 2, render: 4 }` |
+| `language` | (UI-only) | i18n del cliente; el Core no lo conoce |
+| `defaultReplacementMode` | (UI-only) | se materializa como regla global default vía `RULE_CREATED` |
+
+**`nerEnabled` / `ocrLanguages` con documento abierto → `reanalyze`, no recrear el core** (ADR-038 §1, §7; reemplaza el flujo "recrear el core" de una versión previa de este doc, que descartaba las ediciones del usuario): el `SettingsDialog` muestra `ConfirmDialog` ("¿Reanalizar el documento con la nueva configuración? Tus ediciones se conservan.") → `actions.reanalyze({ ner: { enabled }, ocr: { languages } })` (patch con solo el/los campo/s que cambiaron) → `orchestrator.reanalyze(documentId, patch)`. Tras el `PIPELINE_READY` de la pasada, la UI re-emite `actions.requestRender(visibleRange)` para refrescar previews con los grupos nuevos. Sin documento abierto, estos dos settings solo afectan al próximo `createCore`.
+
+**`performancePreset` con documento abierto**: **no** dispara `reanalyze` (no afecta resultados de detección, solo tamaños de pool) — el cambio queda persistido (`settings.persist()`) y aplica recién al próximo documento (hint visible en el `SettingsDialog`); efecto inmediato exigiría redimensionar pools en caliente, fuera de alcance MVP (ADR-038 §7, Q3).
+
+El escenario E2E 9 (`07_Performance_Strategy.md` §11.3: "activar NER en runtime → descarga modelo y reanaliza preservando las ediciones previas del usuario") se cumple con el flujo de `reanalyze`.
+
 ---
 
 ## 4. API pública del Core (consumida por el adapter)
@@ -318,10 +396,13 @@ export interface IAnonymizationCore {
   dispose(): Promise<void>;
 }
 
-export async function createCore(config?: Partial<EngineConfig>): Promise<IAnonymizationCore>;
+export async function createCore(
+  config?: Partial<EngineConfig>,
+  runtime?: CoreRuntimeOptions   // factories de Workers reales (ADR-036 §2, Contracts.md §3.5)
+): Promise<IAnonymizationCore>;
 ```
 
-El adapter **solo** usa esta API. Nunca accede a `pdf.engine.ts` ni a internals.
+El adapter **solo** usa esta API. Nunca accede a `pdf.engine.ts` ni a internals. `snapshots.ts` usa `core.engines.grouping.getSnapshot(documentId)` (U-6) como **hidratación puntual** (p. ej. montar un panel tarde); la fuente reactiva son los eventos del bus.
 
 ---
 
@@ -366,7 +447,7 @@ Detalle en `ui/Components.md`.
 ## 7. Reglas de rendering
 
 - El visor de PDF usa virtualización (ver `07_Performance_Strategy.md` §3). Solo se renderizan las páginas visibles + 1 antes + 1 después.
-- El adapter emite `RENDER_REQUESTED` cuando cambia `visibleRange` o `zoom`.
+- El adapter emite `RENDER_REQUESTED` cuando cambia `visibleRange` o `zoom` (ADR-037, supersede ADR-036 §6). Al cambiar `zoom`, `ZoomControls` escala **por CSS/canvas el bitmap ya renderizado** de inmediato (feedback a 60 fps durante el gesto) y emite `actions.requestRender(visibleRange, "preview", previewScale × zoom)` tras `ZOOM_RERENDER_DEBOUNCE_MS = 150 ms` sin nuevos ticks; el `PREVIEW_UPDATED` resultante reemplaza el bitmap CSS por el nítido re-renderizado. Un cambio de escala en cola/en vuelo descarta/aborta el anterior de la misma página (supersede, ADR-037 §4).
 - Los canvas reutilizables viven en el `PageVirtualizer` (componente), no en el store.
 - La suscripción a `PREVIEW_UPDATED` actualiza `viewer.previewByPage` con el `blobUrl`. El componente lo pinta en el canvas reciclado.
 - Lado a lado sincronizado: scroll vertical compartido vía `viewer.currentPageIndex`.
@@ -375,17 +456,19 @@ Detalle en `ui/Components.md`.
 
 ## 8. Manejo de errores en la UI
 
-| Evento | Acción UI |
+Tabla reconciliada por ADR-036 §5 (la versión previa refería un evento inexistente y una llamada directa a motor prohibida):
+
+| Señal | Acción UI |
 |---|---|
-| `PDF_PASSWORD_REQUIRED` | modal pidiendo password; al submittear, re-llama a `engines.pdf.process` con password |
-| `PDF_INVALID` | toast/mensaje: "El archivo no es un PDF válido" |
-| `PIPELINE_FAILED` | banner con error tipado + botón "Reintentar" o "Cerrar documento" |
-| `OCR_PAGE_FAILED` | toast: "No se pudo procesar la página X con OCR. Las demás continúan." |
-| `NER_PAGE_FAILED` | toast: "NER falló en la página X. Solo se aplicarán detecciones Regex." |
-| `NER_MODEL_MISSING` | modal: "Falta el modelo NER. ¿Descargar (~60 MB) o desactivar NER?" |
-| `PREVIEW_PAGE_FAILED` | placeholder gris en la página afectada |
-| `EXPORT_FAILED` | toast: "No se pudo exportar. Reintente." |
-| `EXPORT_NO_ENABLED_GROUPS` | modal de confirmación: "No hay grupos habilitados. El export será idéntico al original. ¿Continuar?" |
+| `PDF_PASSWORD_REQUIRED` (evento, canal `pdf`; la UI se suscribe **directo** — ADR-034 §4) | `PasswordDialog`; al submitear, `actions.retryWithPassword(password)` (**nunca** `engines.pdf.process` — Orchestrator.md §6) |
+| `PDF_INVALID` (evento) | toast/mensaje: "El archivo no es un PDF válido" |
+| `PIPELINE_FAILED` (evento) | banner con error tipado + botón "Reintentar" o "Cerrar documento" |
+| `PIPELINE_FAILED` con `error.code === "NER_MODEL_MISSING"` | modal: el modelo NER no pudo cargarse (assets first-party, ADR-018 — no hay "descarga manual"); ofrecer "Desactivar NER y reanalizar" (flujo §3.7) o "Reintentar" |
+| `OCR_PAGE_FAILED` (evento) | toast: "No se pudo procesar la página X con OCR. Las demás continúan." |
+| (fallo de página NER) | **sin señal en MVP**: no existe evento `NER_PAGE_FAILED` (`04_Event_System.md` §5); el motor descarta las ocurrencias NER de esa página con `logger.warn` y continúa (`NER_Engine.md` §7). Si v1.0 quiere el toast, el evento se crea vía ADR (R-19) |
+| `PREVIEW_PAGE_FAILED` (evento) | placeholder gris en la página afectada |
+| `EXPORT_FAILED` (evento) | toast: "No se pudo exportar. Reintente." |
+| `enabledGroups === 0` (pre-flight **local** del `ExportDialog`, calculado del store — no es un evento; el motor solo loguea warn, ADR-032 §3) | modal de confirmación: "No hay grupos habilitados. El export será idéntico al original. ¿Continuar?" |
 
 ---
 
@@ -395,6 +478,9 @@ Detalle en `ui/Components.md`.
 - `04_Event_System.md` §10 (eventos de UI)
 - `ADR-005-State-Management.md`
 - `ui/UX_Guidelines.md`
+- `adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md` (workers §2.4, catálogo de acciones original §2.3)
+- `adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md` (zoom real §7)
+- `adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md` (`reanalyze` §2.3/§3.7)
 - `ui/Components.md`
 - `07_Performance_Strategy.md` §3 (virtualización)
 - `core/Contracts.md` (tipos consumidos)

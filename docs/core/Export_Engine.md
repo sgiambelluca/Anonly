@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=export-engine | dependencias=core/Contracts.md,architecture/06_Pipeline.md,ADR-004-Rendering.md,ADR-009-Export-Strategy.md,ADR-012-Replacement-Modes.md,ADR-032-Export-EncodedPageImage-Requested-Warning.md | audiencia=IA-implementador | fase=3 -->
+<!-- CONTEXT: scope=export-engine | dependencias=core/Contracts.md,architecture/06_Pipeline.md,ADR-004-Rendering.md,ADR-009-Export-Strategy.md,ADR-012-Replacement-Modes.md,ADR-032-Export-EncodedPageImage-Requested-Warning.md,ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md | audiencia=IA-implementador | fase=3 (§12 corregido en fase 10: ExportWorker único, no RenderPool — ADR-036 §1) -->
 
 # Export Engine — Spec de Motor
 
@@ -215,7 +215,7 @@ Garantías del PDF final:
 
 ## 12. Consideraciones de rendimiento
 
-- Corre en `RenderPool` (workers de tipo `export-page`).
+- El ensamblado corre en el **ExportWorker único** de este motor (jobs `export-page`; sin pool propio — la redacción previa "corre en `RenderPool`" era errata, ADR-036 §1). `export()` sigue en host: dirige el loop, emite `EXPORT_*` (ADR-013 §6); solo la frontera pdf-lib cruza al worker. El render full por página sí corre en `RenderPool` (vía `RenderPageProvider`, prioridad 1000).
 - Costo: 200–800 ms por página (render full + ensamblado pdf-lib). Serialización final: 500–2000 ms.
 - Memoria: 60–200 MB por worker (pdf-lib `PDFDocument` crece con cada página adjuntada).
 - `ArrayBuffer` final se transfiere zero-copy al host.

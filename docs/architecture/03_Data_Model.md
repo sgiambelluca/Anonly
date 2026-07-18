@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=modelo-de-datos | dependencias=01_Technical_Architecture_Document.md,core/Contracts.md | audiencia=IA+humanos | fase=1 -->
+<!-- CONTEXT: scope=modelo-de-datos | dependencias=01_Technical_Architecture_Document.md,core/Contracts.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md | audiencia=IA+humanos | fase=1 (§18 actualizado en fase 10: OcrPagePayload.imageData→ImageData y payloads de transporte LoadDocument/RasterizePage/ExportSave, ADR-036 §4) -->
 
 # Anonly — Modelo de Datos (TAD bloque 5)
 
@@ -510,7 +510,10 @@ export interface PdfParsePayload {
 export interface OcrPagePayload {
   readonly documentId: string;
   readonly pageIndex: number;
-  readonly imageData: ArrayBuffer;
+  // Errata corregida (ADR-036 §4): era ArrayBuffer, que no transporta
+  // width/height y el OcrWorker no puede reconstruir la imagen. Coincide con
+  // OcrPageInput del motor. Transferencia: postMessage(msg, [imageData.data.buffer]).
+  readonly imageData: ImageData;
   readonly dpi: number;
   readonly languages: ReadonlyArray<string>;
 }
@@ -538,6 +541,31 @@ export interface ExportPagePayload {
   readonly pageIndex: number;
   readonly pageImage: ArrayBuffer;
   readonly metadata: ExportMetadata;
+}
+```
+
+Payloads del transporte real (Hito 10, ADR-036 §4) que **no** agregan `WorkerJobType` nuevos (los `Readonly<Record<WorkerJobType, …>>` de `WorkerPoolConfig` son totales; agregar claves produciría churn mecánico sin valor — lección ADR-035 §4):
+
+```ts
+// Mensaje de control broadcast a cada RenderWorker (no es un job encolable;
+// buffer CLONADO por worker — 05_Worker_Architecture.md §2.3/§7.4, ADR-030).
+export interface LoadDocumentPayload {
+  readonly documentId: string;
+  readonly buffer: ArrayBuffer;
+}
+
+// Rasterización para OCR (ADR-034 §1). Viaja bajo jobType "render-page",
+// prioridad 90/40 (espejo de ocr-page), timeouts/retries de render-page.
+export interface RasterizePagePayload {
+  readonly documentId: string;
+  readonly pageIndex: number;
+  readonly scale: number;
+}
+
+// Job final del ExportWorker bajo jobType "export-page": su COMPLETED devuelve
+// el ArrayBuffer del PDF transferido; DISPOSE solo libera (05 §7.5, ADR-036 §4).
+export interface ExportSavePayload {
+  readonly documentId: string;
 }
 ```
 

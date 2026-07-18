@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=componentes-ui | dependencias=ui/React_Client.md,ui/UX_Guidelines.md,ADR-001-Framework.md | audiencia=IA-implementador-ui | fase=4 -->
+<!-- CONTEXT: scope=componentes-ui | dependencias=ui/React_Client.md,ui/UX_Guidelines.md,ADR-001-Framework.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md | audiencia=IA-implementador-ui | fase=4 (reconciliado en fase 10 por ADR-036: PasswordDialog/SettingsDialog/ConfirmDialog agregados §2.6–2.7/§8.9, zoom §5.2, mapeo §12; §2.6/§5.2/§5.5/§12 reescritos por ADR-037 —zoom con re-render real— y ADR-038 —SettingsDialog dispara reanalyze, no recreación del core—) -->
 
 # Anonly — Catálogo de Componentes
 
@@ -17,7 +17,10 @@ apps/react-client/src/components/
 │   ├── ImportButton.tsx
 │   ├── PipelineStatus.tsx
 │   ├── CancelButton.tsx
-│   └── ExportButton.tsx
+│   ├── ExportButton.tsx
+│   ├── SettingsButton.tsx    // ADR-036 §7
+│   ├── SettingsDialog.tsx    // ADR-036 §7
+│   └── PasswordDialog.tsx    // ADR-036 §7
 ├── entities/
 │   ├── EntitiesPanel.tsx
 │   ├── EntityTypeGroup.tsx
@@ -46,6 +49,7 @@ apps/react-client/src/components/
 ├── common/
 │   ├── Button.tsx
 │   ├── Dialog.tsx           // wrapper sobre Radix Dialog
+│   ├── ConfirmDialog.tsx    // confirmación genérica (ADR-036 §7)
 │   ├── Select.tsx           // wrapper sobre Radix Select
 │   ├── Checkbox.tsx
 │   ├── Tooltip.tsx
@@ -97,6 +101,21 @@ apps/react-client/src/components/
 - **Visible**: cuando `stage === Ready`.
 - **Acción**: abre `ExportDialog`.
 - **Atajo**: `Cmd/Ctrl+E`.
+
+### 2.6 `SettingsButton` + `SettingsDialog` (ADR-036 §7)
+
+- **Trigger**: icono de engranaje en el Toolbar (siempre visible; `UX_Guidelines.md` §2).
+- **Stores**: `settings`, `document` (para saber si hay documento abierto).
+- **Form** (`MVP.md` §2.3): idioma (`es` default), performance preset (`auto`/`low`/`high`), NER toggle, OCR languages.
+- **Acción**: muta `settings.store` + `settings.persist()`. Si el cambio es `nerEnabled`/`ocrLanguages` y hay documento abierto: `ConfirmDialog` "¿Reanalizar el documento con la nueva configuración? Tus ediciones se conservan." → `actions.reanalyze(patch)` (ADR-038 §7, `React_Client.md` §3.7 — **no** recrea el core). Si es `performancePreset` con documento abierto: se persiste y aplica al próximo documento, sin diálogo de confirmación (ADR-038 §7 Q3).
+- **ARIA**: `aria-label="Configuración"`.
+
+### 2.7 `PasswordDialog` (ADR-036 §7)
+
+- **Se abre por**: `PDF_PASSWORD_REQUIRED` (suscripción **directa** de la UI al canal `pdf` — ADR-034 §4; el stage queda en `Extracting`).
+- **Acción**: submit → `actions.retryWithPassword(password)` (`orchestrator.retryWithPassword`; **nunca** `engines.pdf.process` — Orchestrator.md §6). Si el evento vuelve a llegar, muestra "Contraseña incorrecta" y re-pide.
+- **Cancelar**: cierra el diálogo y ofrece cerrar el documento (`actions.closeDocument`).
+- **Seguridad**: el input **nunca** se loguea ni persiste (`08_Security_Model.md` §7); `type="password"`, sin autocompletado.
 
 ---
 
@@ -208,9 +227,9 @@ apps/react-client/src/components/
 - **Props**: `kind: "original" | "anonymized"`.
 - **Stores**: `viewer`, `entities` (para highlights en `original`), `document`.
 - **Comportamiento**: usa `PageVirtualizer` para renderizar solo visibles. Escucha `PREVIEW_UPDATED` via `viewer.previewByPage` y pasa el `blobUrl` al `PageCanvas` correspondiente.
-- **Eventos**:
-  - Cambio de `visibleRange` → `actions.requestRender(visibleRange, kind)`.
-  - Cambio de `zoom` → re-render con nueva escala.
+- **Eventos** (reconciliados por ADR-036 §5, reescrito por ADR-037):
+  - Cambio de `visibleRange` → `actions.requestRender(pageIndices)` (sin `kind`: el payload `RenderRequested` no lo tiene; Render produce original y anonimizado según su estrategia, `06_Pipeline.md` §10).
+  - Cambio de `zoom` → escala **CSS/canvas** del bitmap ya renderizado de inmediato (feedback durante el gesto) y, tras 150 ms sin nuevos ticks, `actions.requestRender(visibleRange, "preview", previewScale × zoom)` para un **re-render real** (ADR-037 §1/§5, supersede ADR-036 §6). El `PREVIEW_UPDATED` resultante reemplaza el bitmap CSS transitorio por el nítido.
 
 ### 5.3 `PageVirtualizer`
 
@@ -231,7 +250,7 @@ apps/react-client/src/components/
 
 - **Botones**: `+`, `-`, `Reset`.
 - **Atajos**: `Cmd/Ctrl++`, `Cmd/Ctrl+-`, `Cmd/Ctrl+0`.
-- **Acción**: `viewer.setZoom(newZoom)`.
+- **Acción**: `viewer.setZoom(newZoom)` (aplica el escalado CSS inmediato vía `PdfViewer` §5.2); el re-render real se dispara con debounce, no en cada click/atajo individual (`ZOOM_RERENDER_DEBOUNCE_MS = 150 ms`, ADR-037 §5).
 
 ---
 
@@ -280,6 +299,12 @@ apps/react-client/src/components/
 
 - Wrapper sobre Radix `Dialog` con focus trap, escape para cerrar, backdrop.
 - Props: `open`, `onClose`, `title`, `children`.
+
+### 8.2b `ConfirmDialog` (ADR-036 §7)
+
+- Confirmación genérica sobre `Dialog`; ya era referenciado por `CancelButton` (§2.4), `GroupContextMenu` (§3.5) y `RuleItem` (§4.2) sin estar en el catálogo.
+- Props: `open`, `title`, `message`, `confirmLabel`, `cancelLabel`, `variant?: "danger"`, `onConfirm`, `onCancel`.
+- Usos MVP: cancelar pipeline (`UX_Guidelines.md` §7.3), deshabilitar grupo, borrar regla, reanalizar por cambio de settings (§2.6).
 
 ### 8.3 `Select`
 
@@ -375,7 +400,9 @@ Modo oscuro: en v1.0. MVP es solo claro.
 
 | Componente | Lee del store | Dispara acción | Evento Core |
 |---|---|---|---|
-| `ImportButton` | – | `actions.importDocument` | `DOCUMENT_IMPORTED` + `pdf.process` |
+| `ImportButton` | – | `actions.importDocument` → `orchestrator.importDocument` | `DOCUMENT_IMPORTED` (lo emite el Orchestrator; la UI nunca invoca `pdf.process` — errata corregida, ADR-036 §7) |
+| `PasswordDialog` | `document` | `actions.retryWithPassword` → `orchestrator.retryWithPassword` | (escucha `PDF_PASSWORD_REQUIRED`, canal `pdf`) |
+| `SettingsDialog` | `settings`, `document` | `settings.persist` (+ `actions.reanalyze` si `nerEnabled`/`ocrLanguages` cambian con documento abierto, `React_Client.md` §3.7, ADR-038 §7) | `orchestrator.reanalyze` (no es un evento del bus) |
 | `CancelButton` | `pipeline.stage` | `actions.cancel` | `CANCEL_REQUESTED` |
 | `ExportButton` | `pipeline.stage`, `document` | `actions.requestExport` (via dialog) | `EXPORT_REQUESTED` |
 | `EntityGroupItem` (checkbox) | `entities.groupsByType` | `actions.updateGroup` | `GROUP_UPDATE_REQUESTED` |
@@ -413,3 +440,5 @@ Modo oscuro: en v1.0. MVP es solo claro.
 - `ADR-005-State-Management.md` (Zustand + bus)
 - `04_Event_System.md` §10 (eventos de UI)
 - `03_Data_Model.md` (tipos consumidos)
+- `adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md` (zoom real, §5.2/§5.5)
+- `adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md` (`SettingsDialog` → `reanalyze`, §2.6/§12)

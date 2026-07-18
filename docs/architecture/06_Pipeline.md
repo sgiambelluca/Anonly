@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=pipeline | dependencias=03_Data_Model.md,04_Event_System.md,05_Worker_Architecture.md | audiencia=IA+humanos | fase=1 -->
+<!-- CONTEXT: scope=pipeline | dependencias=03_Data_Model.md,04_Event_System.md,05_Worker_Architecture.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md | audiencia=IA+humanos | fase=1 (§14 precisado en fase 10: etapa 11 en ExportWorker único, ADR-036 §1) -->
 
 # Anonly — Pipeline (TAD bloque 6)
 
@@ -271,10 +271,10 @@ El usuario puede overridear cualquiera desde la UI, emitiendo `CONFLICT_RESOLVE_
 | 7. Conflictos | (main thread) | – |
 | 8. Vista previa parcial | `RenderPool` | `render-page` |
 | 9. Edición | (main thread) | – |
-| 10. Render completo | `RenderPool` | `render-page` |
-| 11. Exportación | `RenderPool` | `export-page` |
+| 10. Render completo | `RenderPool` | `render-page` (en `mode: "full"`, prioridad 1000 — camino de export) |
+| 11. Exportación | ExportWorker único de `export-engine` (sin pool — ADR-036 §1); los renders full que consume corren en `RenderPool` | `export-page` |
 
-Regex y Agrupación corren en main thread porque son ligeros (< 5% del total). Si futuras versiones los hacen pesados (patrones custom complejos, agrupación semántica), migran a su propio pool vía ADR.
+Regex y Agrupación corren en main thread porque son ligeros (< 5% del total). Si futuras versiones los hacen pesados (patrones custom complejos, agrupación semántica), migran a su propio pool vía ADR. La etapa 2 usa además `RenderPool` para rasterizar las páginas sin texto (`RasterizePagePayload` bajo `render-page`, ADR-034 §1/ADR-036 §4).
 
 ---
 
@@ -335,3 +335,4 @@ sequenceDiagram
 - `05_Worker_Architecture.md` — pools y jobs.
 - `07_Performance_Strategy.md` — virtualización, streaming, memoria.
 - `core/<Engine>_Engine.md` — detalle de cada etapa.
+- `core/Orchestrator.md` §2, §6, §13.18-§13.22 y `core/Grouping_Engine.md` §6 — re-análisis parcial (`reanalyze`): transiciones adicionales `Ready → OCRing | Detecting | Grouping` y `Failed → Detecting | Grouping` sobre este mismo diagrama de etapas, preservando ediciones del usuario (ADR-038).

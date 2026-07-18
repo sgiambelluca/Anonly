@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=workers | dependencias=03_Data_Model.md,04_Event_System.md,06_Pipeline.md | audiencia=IA+humanos | fase=1 -->
+<!-- CONTEXT: scope=workers | dependencias=03_Data_Model.md,04_Event_System.md,06_Pipeline.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md | audiencia=IA+humanos | fase=1 (actualizado en fase 9/10: entrega por fases ADR-035; transporte, EVENT, payloads y ExportWorker por ADR-036) -->
 
 # Anonly — Arquitectura de Workers (TAD bloque 8)
 
@@ -7,6 +7,8 @@
 **Principio rector**: todo procesamiento pesado ocurre en Workers (principio A-9 del TAD). El main thread solo orquesta y renderiza UI.
 
 **Entrega por fases (ADR-035)**: el Hito 9 implementa los cuatro pools como colas de concurrencia **in-process** con la semántica completa de este documento (colas prioritarias, límites, backpressure, reintentos, eventos `WORKER_*`, cancelación), despachando por llamada directa a los métodos públicos de cada motor. El transporte por Web Workers de SO reales (`postMessage`, transferables §2.3, entry-points por motor) llega en el Hito 10, donde existe el bundler de `apps/react-client`. Este documento sigue siendo la arquitectura objetivo.
+
+**Pools ≠ workers (ADR-036 §1)**: hay **cuatro pools** (§1.1) y **cinco entry-points de worker** (§7.1–§7.5). El ExportWorker (§7.5) es un worker único dedicado sin `WorkerPool` propio: lo posee el lado host de `export-engine`, no hay quinta clave en `WorkerPoolConfig`. Los `Worker` reales entran al Core por factories inyectadas en `createCore` (`CoreRuntimeOptions`, `Contracts.md` §3.5); sin factory para un kind, ese despacho queda in-process (ADR-035 §1) — la migración es motor por motor. Cada motor entrega dos mitades en su propio paquete: el **entry-point** (corre el motor real en el worker con un `EngineContext` puente) y el **host-bridge** (re-emite los eventos en el bus real del host — ADR-013 §6 — y completa efectos de host: blob URLs, depósito en `ctx.cache`).
 
 ---
 
@@ -21,7 +23,8 @@ Cada tipo de trabajo tiene su **propio pool**, separado. No se mezclan tipos en 
 | `PdfPool` | `pdf-parse` | `min(max(nCPU-1, 1), 4)` | CPU-bound al parsear, pero PDF.js es mayormente sync en worker. |
 | `OcrPool` | `ocr-page` | `1` a `2` | Tesseract.js es muy pesado de memoria y CPU. Más de 2 satura RAM en móviles. |
 | `NerPool` | `ner-page` | `1` a `2` | ONNX Runtime Web con WASM/SIMD: un modelo cargado por worker. Más workers = más RAM. |
-| `RenderPool` | `render-page`, `export-page` | `min(max(nCPU-1, 1), 4)` | Canvas + pdf-lib son razonablemente paralelizables. |
+| `RenderPool` | `render-page` (incluye la rasterización para OCR — `RasterizePagePayload`, ADR-034 §1/ADR-036 §4) | `min(max(nCPU-1, 1), 4)` | Canvas + pdfjs son razonablemente paralelizables. |
+| ExportWorker (único, **no** es un pool) | `export-page` | `1` fijo | Ensamblado pdf-lib estrictamente secuencial sobre un solo `PDFDocument` (no thread-safe); una cola multi-worker no aporta. Dueño: lado host de `export-engine` (ADR-036 §1). |
 
 `nCPU = navigator.hardwareConcurrency ?? 4`. Override por config del usuario (setting "Rendimiento").
 
@@ -68,19 +71,24 @@ export type WorkerOutbound =
   | { readonly type: "COMPLETED"; readonly jobId: string; readonly result: Serializable; readonly transferred?: ReadonlyArray<Transferable> }
   | { readonly type: "FAILED"; readonly jobId: string; readonly error: SerializedEngineError }
   | { readonly type: "CANCELLED"; readonly jobId: string; readonly signalId: string }
-  | { readonly type: "LOG"; readonly level: LogLevel; readonly message: string; readonly meta?: Serializable };
+  | { readonly type: "LOG"; readonly level: LogLevel; readonly message: string; readonly meta?: Serializable }
+  // ADR-036 §3: el entry-point corre el motor real con un bus puente; cada emit
+  // viaja como EVENT y el host-bridge del motor lo afina y re-emite en el bus
+  // real (los eventos observables se emiten siempre en host, ADR-013 §6).
+  | { readonly type: "EVENT"; readonly channel: EventChannel; readonly event: EngineEvents; readonly payload: unknown };
 ```
 
 ### 2.3 Transferencia zero-copy
 
-Cualquier `ArrayBuffer` que viaje Host→Worker o Worker→Host se transfiere con `postMessage(msg, [buffer])`, no con structured clone. Esto vacía el buffer del lado emisor (zero-copy). Aplica a:
+Cualquier `ArrayBuffer` que viaje Host→Worker o Worker→Host se transfiere con `postMessage(msg, [buffer])`, no con structured clone. Esto vacía el buffer del lado emisor (zero-copy). Aplica a (precisiones ADR-036 §4):
 
-- `pdf-parse`: el `ArrayBuffer` del PDF se transfiere al worker (no se clona).
-- `ocr-page`: la `ImageData` de la página rasterizada se transfiere.
-- `render-page`: la `ImageData` resultante se transfiere de vuelta.
-- `export-page`: el `ArrayBuffer` final del PDF se transfiere de vuelta.
+- `pdf-parse`: el `ArrayBuffer` del PDF se transfiere al worker. Lo transferido es una **copia**: el Orchestrator retiene el original de la etapa 0 para `RenderEngine.loadDocument` (`06_Pipeline.md` §3, ADR-030).
+- `ocr-page`: la `ImageData` de la página rasterizada viaja con su buffer subyacente en la transfer list — `postMessage(msg, [imageData.data.buffer])` (una `ImageData` no es transferible por sí misma; su clon estructurado referencia el buffer transferido, zero-copy).
+- `load-document` (control, no job — §7.4): el buffer se **clona** por cada RenderWorker; transferirlo vaciaría el original retenido.
+- `render-page`: la `ImageData` resultante se transfiere de vuelta; en `mode: "full"`, también `encoded.bytes` (`EncodedPageImage`, ADR-034 §3).
+- `export-page`: el `ArrayBuffer` final del PDF se transfiere de vuelta en el `COMPLETED` del job `ExportSavePayload` (§7.5).
 
-El orchestrator debe asegurar que **no** se use el buffer transferido después de transferirlo. El type system lo garantiza con un wrapper `Transferable<T>` que se consume una sola vez.
+El orchestrator debe asegurar que **no** se use el buffer transferido después de transferirlo. El type system lo garantiza con un wrapper `Transferable<T>` que se consume una sola vez (`Contracts.md` §7). Nota de implementación: en archivos de worker (lib DOM), ese tipo sombrea al `Transferable` global del DOM — importarlo con alias (`import type { Transferable as TransferableBuffer }`).
 
 ---
 
@@ -156,9 +164,12 @@ Cada pool tiene una `PriorityQueue<WorkerJob>` ordenada por:
 | `ner-page` (página no visible) | 30 |
 | `render-page` (preview de página visible) | 70 |
 | `render-page` (preview de página no visible) | 20 |
+| `render-page` (rasterización para OCR, `RasterizePagePayload`) | 90 visible / 40 no visible (espejo de `ocr-page`, a la que alimenta — ADR-036 §4) |
 | `export-page` | 1000 (máxima: el usuario está esperando el archivo) |
 
 "Visible" = dentro del viewport de la UI (ver `07_Performance_Strategy.md` sobre virtualización).
+
+> La prioridad 1000 aplica al **camino completo** del export: los `render-page` en `mode: "full"` despachados por el `RenderPageProvider` durante un export también van a 1000 (así lo implementa `orchestrator.ts` desde el Hito 9); los jobs `export-page` propiamente dichos corren en el ExportWorker dedicado y no compiten en cola con nadie (ADR-036 §1).
 
 ### 6.3 Backpressure
 
@@ -215,8 +226,8 @@ Cada pool tiene una `PriorityQueue<WorkerJob>` ordenada por:
 
 **Ciclo de vida**:
 - `INIT`: crea OffscreenCanvas. Publica `READY`.
-- `RUN(load-document)`: recibe `{ documentId, buffer: ArrayBuffer }` (buffer transferido, una vez por worker). Crea el `PDFDocumentProxy` interno con pdfjs-dist (ADR-030). Responde `COMPLETED`.
-- `RUN(render-page)`: recibe `{ documentId, pageIndex, kind: "original" | "anonymized", replacements?, scale }`. Precondición: documento cargado vía `load-document` (ADR-030). Transfiere `replacements` y referencias. Responde `COMPLETED` con `{ imageData: ImageData }` (transferido) o `{ blob: ArrayBuffer }`.
+- `load-document`: mensaje de **control broadcast** (no es un `WorkerJobType` encolable — un job iría a un solo worker idle y los demás quedarían sin documento; ADR-036 §4): el host lo envía a **cada** worker del pool con `LoadDocumentPayload { documentId, buffer }` (buffer **clonado** por worker, ver §2.3). Crea el `PDFDocumentProxy` interno con pdfjs-dist (ADR-030). Responde `COMPLETED`.
+- `RUN(render-page)`: recibe `RenderPagePayload` (`03_Data_Model.md` §18) **o** `RasterizePagePayload { documentId, pageIndex, scale }` (rasterización para OCR, sin eventos de preview — ADR-034 §1/ADR-036 §4). Precondición: documento cargado vía `load-document` (ADR-030). Responde `COMPLETED` con `{ imageData: ImageData }` (transferido) y, en `mode: "full"`, `encoded` (`EncodedPageImage`, ADR-034 §3).
 - `CANCEL`: checkpoint entre operaciones de Canvas.
 - `DISPOSE`: libera OffscreenCanvas y destruye los `PDFDocumentProxy` cargados.
 
@@ -224,15 +235,17 @@ Cada pool tiene una `PriorityQueue<WorkerJob>` ordenada por:
 
 ### 7.5 ExportWorker
 
-**Responsabilidad**: construir el PDF final con pdf-lib, página por página, a partir de los `render-page` ya procesados (modo anonimizado) o regenerando directamente.
+**Responsabilidad**: construir el PDF final con pdf-lib, página por página, a partir de las `EncodedPageImage` producidas por el `RenderPageProvider` (ADR-032/ADR-034 §3). Es un **worker único dedicado, sin pool** (ADR-036 §1): lo posee el lado host de `export-engine`; `ExportEngine.export()` sigue en host (dirige el loop y emite `EXPORT_*` — ADR-013 §6) y solo la frontera pdf-lib cruza al worker.
 
 **Ciclo de vida**:
 - `INIT`: instancia `PDFDocument` vacío con pdf-lib. Publica `READY`.
-- `RUN(export-page)`: recibe `{ documentId, pageIndex, pageImage: ArrayBuffer, metadata: ExportMetadata }`. Adjunta la página al `PDFDocument`. Responde `COMPLETED`.
-- `CANCEL`: checkpoint entre páginas.
-- `DISPOSE`: serializa el `PDFDocument` a `ArrayBuffer` final (transferido), libera el documento.
+- `RUN(export-page)`: recibe `ExportPagePayload { documentId, pageIndex, pageImage, metadata }` (`pageImage` transferido). Adjunta la página al `PDFDocument`. Responde `COMPLETED`.
+- `RUN(export-page` con `ExportSavePayload { documentId })`: serializa el `PDFDocument` y responde `COMPLETED` con el `ArrayBuffer` final **transferido** (errata corregida por ADR-036 §4: la serialización era un efecto de `DISPOSE`, que no tiene mensaje de respuesta en `WorkerOutbound`).
+- `CANCEL`: checkpoint entre páginas; el `PDFDocument` parcial se descarta.
+- `DISPOSE`: libera el documento y memoria (sin respuesta con datos).
 
 **Memoria típica**: 60–200 MB dependiendo del tamaño final.
+**Creación**: perezosa al primer `EXPORT_REQUESTED`; disposición tras 60 s idle o `dispose()` del motor (§8).
 
 ---
 
@@ -244,7 +257,7 @@ Ningún pool se crea al cargar la app. Se crea bajo demanda:
 - `OcrPool` se crea si `DOCUMENT_PARSED` indica `textlessPages.length > 0`.
 - `NerPool` se crea si el usuario no desactivó NER en settings y hay texto para analizar.
 - `RenderPool` se crea cuando hay al menos una página lista para preview.
-- `ExportPool` (alias de RenderPool con workers de tipo export) se crea al primer `EXPORT_REQUESTED`.
+- El **ExportWorker** (worker único de `export-engine`, sin pool — ADR-036 §1; la redacción anterior "`ExportPool`, alias de RenderPool con workers de tipo export" era errata: mezclaba tipos de worker contra §1.1) se crea al primer `EXPORT_REQUESTED`.
 
 Cada pool puede destruirse tras `DOCUMENT_CLOSED` + `idle` por > 60 s para liberar memoria.
 

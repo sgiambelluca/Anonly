@@ -229,8 +229,9 @@ Fixtures pesados (> 5 MB) vía Git LFS o descargados en `postinstall` con hash v
 6. Cargar PDF corrupto → verificar error tipado y mensaje claro.
 7. Abrir y cerrar 10 documentos consecutivos → verificar que la memoria regresa al baseline.
 8. Cargar PDF sin NER activado → verificar que solo Regex detecta.
-9. Activar NER en runtime → verificar que se descarga modelo y reanaliza.
+9. Activar NER en runtime (`reanalyze`, ADR-038) → verificar que se descarga el modelo y reanaliza **preservando las ediciones previas del usuario**: un grupo que el usuario deshabilitó sigue deshabilitado, una regla creada sigue aplicando, un merge manual persiste.
 10. Fusionar y dividir grupos → verificar índices y reemplazos.
+11. Cambiar el zoom (`ZoomControls`, ADR-037) → verificar `PREVIEW_UPDATED` con la nueva escala y reemplazo del bitmap CSS transitorio por el bitmap nítido re-renderizado.
 
 ### 11.4 Gates de CI
 
@@ -267,6 +268,8 @@ Además de los ejecutables, hay **gates de revisión** (no automatizables por co
 - Edición concurrente con pipeline: el usuario edita un grupo mientras `ENTITY_FOUND` sigue llegando. Grouping debe **mergear** sin perder ediciones del usuario (gana el usuario en conflictos de `replacementMode`).
 - Doble export simultáneo: el segundo `EXPORT_REQUESTED` se encola, no se superpone.
 - Cancelar durante export: el export se aborta, el archivo parcial se descarta.
+- Segundo `reanalyze` mientras uno está en curso (ADR-038 §1): el `stage` ya no es `Ready`/`Failed`, así que el segundo se rechaza con `InvalidInputError` — no hay carrera real, el precondition check la resuelve.
+- Cambios de zoom en ráfaga (rueda/pinch, ADR-037 §4): cada tick re-escala CSS de inmediato; solo el request post-debounce (150 ms sin nuevos ticks) llega a `RENDER_REQUESTED`, y un request con escala distinta descarta/aborta el anterior en cola o en vuelo para la misma página — nunca se emite `PREVIEW_UPDATED` de una escala obsoleta.
 
 ---
 
