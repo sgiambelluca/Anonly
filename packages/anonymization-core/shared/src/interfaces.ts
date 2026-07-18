@@ -116,6 +116,20 @@ export interface OcrConfig {
   // maxRetries["ocr-page"] (ADR-021 §2, precedente ADR-013).
 }
 
+/**
+ * Re-análisis parcial preservando ediciones (Hito 10, ADR-038 §1). Cubre
+ * exactamente los dos settings de UI que afectan detección
+ * (`ui/React_Client.md` §3.6/§3.7): ampliar el patch (p. ej. otros campos de
+ * `NerConfig`) requiere ADR nuevo. La inmutabilidad de `EngineConfig` por
+ * sesión (nota de §3.1 de `Contracts.md`) se relaja únicamente por esta vía:
+ * el Orchestrator mantiene una config efectiva por documento que
+ * `IPipelineOrchestrator.reanalyze` actualiza mergeando este patch.
+ */
+export interface ReanalyzeConfigPatch {
+  readonly ner?: { readonly enabled: boolean };
+  readonly ocr?: { readonly languages: ReadonlyArray<string> };
+}
+
 export interface GroupingConfig {
   readonly similarityThreshold: number;
   readonly minAliasFrequency: number;

@@ -26,6 +26,7 @@ import { RenderFailedError } from "@anonly/render-engine";
 import type { RenderPageInput } from "@anonly/render-engine";
 import {
   CancelledError,
+  DetectionSource,
   EngineError,
   EngineErrorCode,
   EngineEvents,
@@ -55,6 +56,7 @@ import {
   type PipelineState,
   type PreviewPageFailed,
   type PreviewUpdated,
+  type ReanalyzeConfigPatch,
   type RegexFinished,
   type RenderFailed as RenderFailedPayload,
   type Unsubscribe,
@@ -86,6 +88,52 @@ function ocrWordsCacheKey(documentId: string, pageIndex: number): string {
   return `ocr-words:${documentId}:${pageIndex}`;
 }
 
+// ─── reanalyze (ADR-038 §1): helpers de módulo (sin estado de instancia) ───
+
+const REANALYZE_PATCH_KEYS = new Set(["ner", "ocr"]);
+
+/**
+ * Precondición de forma de `ReanalyzeConfigPatch` (ADR-038 §1, caso 21 del
+ * spec): vacío o con campos no soportados → `InvalidInputError`. No valida
+ * "patch idéntico a la config efectiva" (eso lo decide `reanalyze` una vez
+ * mergeado, comparando contra la config efectiva vigente).
+ */
+function validateReanalyzePatch(patch: ReanalyzeConfigPatch): void {
+  if (patch == null) {
+    throw new InvalidInputError("ReanalyzeConfigPatch es null o undefined.");
+  }
+  const keys = Object.keys(patch);
+  if (keys.length === 0) {
+    throw new InvalidInputError("ReanalyzeConfigPatch vacío: debe incluir 'ner' y/o 'ocr'.");
+  }
+  for (const key of keys) {
+    if (!REANALYZE_PATCH_KEYS.has(key)) {
+      throw new InvalidInputError(`Campo no soportado en ReanalyzeConfigPatch: '${key}'.`, {
+        field: key,
+      });
+    }
+  }
+  if (patch.ner !== undefined && typeof patch.ner.enabled !== "boolean") {
+    throw new InvalidInputError("patch.ner.enabled debe ser boolean.");
+  }
+  if (patch.ocr !== undefined && !Array.isArray(patch.ocr.languages)) {
+    throw new InvalidInputError("patch.ocr.languages debe ser un array de strings.");
+  }
+}
+
+/** Merge de un patch sobre la config efectiva vigente (solo ner.enabled/ocr.languages). */
+function mergeReanalyzePatch(current: EngineConfig, patch: ReanalyzeConfigPatch): EngineConfig {
+  return {
+    ...current,
+    ner: patch.ner !== undefined ? { ...current.ner, enabled: patch.ner.enabled } : current.ner,
+    ocr: patch.ocr !== undefined ? { ...current.ocr, languages: patch.ocr.languages } : current.ocr,
+  };
+}
+
+function stringArraysEqual(a: ReadonlyArray<string>, b: ReadonlyArray<string>): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
 export interface PipelineOrchestratorOptions {
   readonly bus: IEventBus;
   readonly logger: ILogger;
@@ -113,6 +161,15 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
   private readonly pendingFusions = new Map<string, Array<Promise<void>>>();
   private readonly exportQueues = new Map<string, ExportOptions[]>();
   private readonly exportInProgress = new Set<string>();
+  // Config efectiva por documento (ADR-038 §1): inicializada al `config` de
+  // la instancia en `importDocument`, actualizada por `reanalyze` mergeando
+  // el patch. Única excepción a la inmutabilidad de EngineConfig por sesión
+  // (Contracts.md §3.1).
+  private readonly effectiveConfigByDocument = new Map<string, EngineConfig>();
+  // Documentos con un `reanalyze` en curso (ADR-038 §5-§6): distingue, dentro
+  // de `cancel()`, la cancelación de un reanalyze (vuelve a Ready, caso 22)
+  // de la cancelación de un importDocument (va a Cancelled, caso 8).
+  private readonly reanalyzeInFlight = new Set<string>();
   // Progreso granular por página (PIPELINE_PROGRESS, spec Orchestrator.md
   // §8): un tracker por documento, reasignado al entrar a cada etapa con
   // progreso granular (OCR, luego Detecting con NER activo). `current` nunca
@@ -157,9 +214,12 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     this.documents.delete(documentId);
     this.retainedInputs.set(documentId, input);
     this.state.create(documentId);
+    // ADR-038 §1: seedea la config efectiva del documento con la config de la
+    // instancia; reanalyze la actualiza a partir de acá.
+    this.effectiveConfigByDocument.set(documentId, this.config);
 
     const controller = this.abortRegistry.create(documentId);
-    const ctx = this.ctxFor(controller.signal);
+    const ctx = this.ctxFor(controller.signal, documentId);
 
     this.bus.emit(EventChannel.Pipeline, EngineEvents.DOCUMENT_IMPORTED, {
       documentId,
@@ -180,11 +240,68 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     }
 
     const controller = this.abortRegistry.get(documentId) ?? this.abortRegistry.create(documentId);
-    const ctx = this.ctxFor(controller.signal);
+    const ctx = this.ctxFor(controller.signal, documentId);
     const retryInput: ImportDocumentInput = { ...retained, password };
 
     this.setStage(documentId, PipelineStage.Extracting);
     await this.runPipelineFrom(documentId, retryInput, ctx);
+  }
+
+  async reanalyze(documentId: string, patch: ReanalyzeConfigPatch): Promise<void> {
+    this.assertNotDisposed();
+
+    const state = this.state.get(documentId);
+    if (
+      state === undefined ||
+      !(state.stage === PipelineStage.Ready || state.stage === PipelineStage.Failed)
+    ) {
+      // Caso 21: precondición de stage. También hace que un segundo
+      // reanalyze/importDocument concurrente sobre el mismo documento se
+      // autorrechace (el stage ya no es Ready/Failed mientras uno corre).
+      throw new InvalidInputError(
+        `reanalyze requiere stage Ready o Failed para ${documentId} (actual: ${state?.stage ?? "inexistente"}).`,
+        { documentId, stage: state?.stage },
+      );
+    }
+
+    validateReanalyzePatch(patch);
+
+    const currentEffective = this.effectiveConfigFor(documentId);
+    const nextEffective = mergeReanalyzePatch(currentEffective, patch);
+    const nerChanged = currentEffective.ner.enabled !== nextEffective.ner.enabled;
+    const ocrChanged =
+      patch.ocr !== undefined &&
+      !stringArraysEqual(currentEffective.ocr.languages, nextEffective.ocr.languages);
+
+    if (!nerChanged && !ocrChanged) {
+      // Caso 21: patch idéntico a la config efectiva vigente -> no-op sin eventos.
+      return;
+    }
+
+    this.effectiveConfigByDocument.set(documentId, nextEffective);
+
+    const controller = this.abortRegistry.get(documentId) ?? this.abortRegistry.create(documentId);
+    const ctx = this.ctxFor(controller.signal, documentId);
+
+    this.reanalyzeInFlight.add(documentId);
+    try {
+      if (ocrChanged) {
+        // Caso 20/patch combinado (caso "4" de ADR-038 §5): OCR primero, la
+        // config NER final decide si además re-corre NER en las páginas re-OCR.
+        await this.runReanalyzeOcrFlow(documentId, ctx, nextEffective);
+      } else if (nextEffective.ner.enabled) {
+        await this.runReanalyzeNerOnFlow(documentId, ctx); // Caso 18.
+      } else {
+        await this.runReanalyzeNerOffFlow(documentId); // Caso 19.
+      }
+    } catch (err: unknown) {
+      // Caso 22: cancelReanalyze() ya completó la transición a Ready +
+      // PIPELINE_CANCELLED; acá no hay nada más que hacer.
+      if (err instanceof CancelledError) return;
+      this.failPipeline(documentId, err);
+    } finally {
+      this.reanalyzeInFlight.delete(documentId);
+    }
   }
 
   cancel(documentId: string, jobId?: string): Promise<void> {
@@ -192,6 +309,10 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     if (!this.state.has(documentId)) return Promise.resolve(); // idempotente
     const current = this.state.get(documentId);
     if (current?.stage === PipelineStage.Cancelled) return Promise.resolve();
+
+    if (this.reanalyzeInFlight.has(documentId)) {
+      return this.cancelReanalyze(documentId);
+    }
 
     this.abortRegistry.abort(documentId);
     this.state.update(documentId, { stage: PipelineStage.Cancelled, cancelRequested: true });
@@ -201,6 +322,135 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       reason: "user_requested",
     });
     return Promise.resolve();
+  }
+
+  /**
+   * Cancelación de un `reanalyze` en curso (ADR-038 §6, caso 22 del spec):
+   * a diferencia de cancelar un `importDocument` (caso 8, va a `Cancelled`),
+   * acá sí hay un estado editable previo al que volver — el documento sigue
+   * cargado, editable y exportable. Se abortan los jobs OCR/NER en vuelo (las
+   * ocurrencias ya mergeadas se conservan: Grouping no las descarta al
+   * abortar), se cierra la sesión con `finishSession` (renumeración
+   * determinista) ANTES de emitir `PIPELINE_CANCELLED`, suprimiendo el
+   * `PIPELINE_READY` derivado de ese `GROUPING_FINISHED` (guard por
+   * `cancelRequested` en `handleGroupingFinished`), y el stage final es
+   * `Ready`, no `Cancelled`. Se resetea el `AbortController` del documento
+   * para que operaciones futuras (otro `reanalyze`, un export) no vean una
+   * señal ya abortada.
+   */
+  private async cancelReanalyze(documentId: string): Promise<void> {
+    this.abortRegistry.abort(documentId);
+    this.state.update(documentId, { cancelRequested: true });
+
+    await this.engines.grouping.finishSession(documentId);
+
+    this.state.update(documentId, { stage: PipelineStage.Ready, cancelRequested: false });
+    this.reanalyzeInFlight.delete(documentId);
+    this.abortRegistry.release(documentId);
+    this.abortRegistry.create(documentId);
+
+    this.bus.emit(EventChannel.Pipeline, EngineEvents.PIPELINE_CANCELLED, {
+      documentId,
+      reason: "user_requested",
+    });
+  }
+
+  // ─── Flujos de reanalyze (ADR-038 §5) ───
+
+  /** Caso 18: `ner.enabled: false -> true`. Regex no se re-corre. */
+  private async runReanalyzeNerOnFlow(documentId: string, ctx: EngineContext): Promise<void> {
+    const document = this.documents.get(documentId);
+    if (document === undefined) {
+      throw new InvalidInputError(`Documento ${documentId} no disponible para reanalyze.`, {
+        documentId,
+      });
+    }
+
+    this.setStage(documentId, PipelineStage.Detecting);
+    this.engines.grouping.reopenSession(documentId, { expectRegex: false, expectNer: true });
+
+    this.progressByDocument.set(documentId, { total: document.pageCount, current: 0 });
+
+    const nerInputs: NerPageInput[] = document.pages.map((page) => ({
+      documentId,
+      pageIndex: page.index,
+      text: page.text,
+      words: page.words,
+    }));
+
+    await this.pools.getPool("ner").dispatch({
+      run: () => this.engines.ner.processPages(nerInputs, ctx),
+      signal: ctx.abortSignal,
+      priority: 80,
+    });
+    // Auto-finish vía la propia suscripción de GroupingEngine a NER_FINISHED
+    // (regexFinished ya es true por reopenSession(expectRegex: false)).
+  }
+
+  /** Caso 19: `ner.enabled: true -> false`. Sin despacho asíncrono. */
+  private async runReanalyzeNerOffFlow(documentId: string): Promise<void> {
+    this.setStage(documentId, PipelineStage.Grouping);
+    this.engines.grouping.reopenSession(documentId, { expectRegex: false, expectNer: false });
+    this.engines.grouping.dropOccurrences(documentId, { source: DetectionSource.NER });
+    await this.engines.grouping.finishSession(documentId);
+  }
+
+  /** Caso 20 (+ combinado): `ocr.languages` sobre páginas `requiresOCR`. */
+  private async runReanalyzeOcrFlow(
+    documentId: string,
+    ctx: EngineContext,
+    effectiveConfig: EngineConfig,
+  ): Promise<void> {
+    const document = this.documents.get(documentId);
+    if (document === undefined) {
+      throw new InvalidInputError(`Documento ${documentId} no disponible para reanalyze.`, {
+        documentId,
+      });
+    }
+
+    const ocrPages = document.pages.filter((page) => page.requiresOCR).map((page) => page.index);
+    if (ocrPages.length === 0) {
+      // Sin páginas OCR: los idiomas de OCR no afectan texto nativo, nada
+      // que re-detectar (la config efectiva ya quedó actualizada arriba).
+      return;
+    }
+
+    this.setStage(documentId, PipelineStage.OCRing);
+    this.engines.grouping.reopenSession(documentId, {
+      expectRegex: true,
+      expectNer: effectiveConfig.ner.enabled,
+    });
+    this.engines.grouping.dropOccurrences(documentId, { pageIndices: ocrPages });
+
+    await this.runOcrStage(documentId, ocrPages, ctx);
+
+    this.setStage(documentId, PipelineStage.Detecting);
+    const updatedDocument = this.documents.get(documentId);
+    if (updatedDocument === undefined) {
+      throw new InvalidInputError(`Documento ${documentId} no disponible tras re-OCR.`, {
+        documentId,
+      });
+    }
+
+    // Regex sobre el documento completo: el dedup de Grouping (ADR-038 §3)
+    // descarta los duplicados de las páginas intactas.
+    await this.engines.regex.process({ document: updatedDocument }, ctx);
+
+    if (!effectiveConfig.ner.enabled) return; // handleRegexFinished ya invoca finishSession (ner off).
+
+    const rerunPages = new Set(ocrPages);
+    const nerInputs: NerPageInput[] = updatedDocument.pages
+      .filter((page) => rerunPages.has(page.index))
+      .map((page) => ({ documentId, pageIndex: page.index, text: page.text, words: page.words }));
+
+    this.progressByDocument.set(documentId, { total: nerInputs.length, current: 0 });
+
+    await this.pools.getPool("ner").dispatch({
+      run: () => this.engines.ner.processPages(nerInputs, ctx),
+      signal: ctx.abortSignal,
+      priority: 80,
+    });
+    // Auto-finish vía GroupingEngine (regex + ner, ambos *_FINISHED).
   }
 
   async closeDocument(documentId: string): Promise<void> {
@@ -221,6 +471,8 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     this.exportQueues.delete(documentId);
     this.exportInProgress.delete(documentId);
     this.progressByDocument.delete(documentId);
+    this.effectiveConfigByDocument.delete(documentId);
+    this.reanalyzeInFlight.delete(documentId);
     this.blobTracker.revokeByPrefix(previewPrefixFor(documentId));
     this.blobTracker.revokeByPrefix(exportPrefixFor(documentId));
     this.state.delete(documentId);
@@ -248,6 +500,8 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     this.exportQueues.clear();
     this.exportInProgress.clear();
     this.progressByDocument.clear();
+    this.effectiveConfigByDocument.clear();
+    this.reanalyzeInFlight.clear();
 
     for (const unsubscribe of this.unsubscribers) unsubscribe();
     this.unsubscribers.length = 0;
@@ -477,7 +731,7 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     }
 
     const controller = this.abortRegistry.get(documentId) ?? this.abortRegistry.create(documentId);
-    const ctx = this.ctxFor(controller.signal);
+    const ctx = this.ctxFor(controller.signal, documentId);
 
     if (!this.renderLoadedDocuments.has(documentId)) {
       const retained = this.retainedInputs.get(documentId);
@@ -698,7 +952,10 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
   }
 
   private handleRegexFinished(payload: RegexFinished): void {
-    if (!this.config.ner.enabled) {
+    // ADR-038 §1: usa la config efectiva del documento (no this.config), ya
+    // que un reanalyze puede haber cambiado ner.enabled para este documento
+    // sin afectar la config default de la instancia.
+    if (!this.effectiveConfigFor(payload.documentId).ner.enabled) {
       // NER desactivado: la etapa de detección termina con Regex solo, no
       // habrá NER_PAGE_FINISHED que incremente el progreso granular. Se
       // emite acá directamente current = total = pageCount (spec
@@ -713,6 +970,10 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       }
       // ADR-034 §2: el despacho síncrono del bus garantiza que todos los
       // ENTITY_FOUND de Regex ya fueron procesados por Grouping acá.
+      // finishSession es re-ejecutable/idempotente (ADR-038 §2): si
+      // reopenSession ya dejó nerFinished=true (reanalyze con ner off,
+      // caso 19/20), esta llamada puede coincidir con el auto-finish interno
+      // de GroupingEngine; ambas convergen al mismo GROUPING_FINISHED.
       void this.engines.grouping.finishSession(payload.documentId);
     }
   }
@@ -725,7 +986,16 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
   }
 
   private handleGroupingFinished(payload: GroupingFinished): void {
-    if (!this.state.has(payload.documentId)) return;
+    const state = this.state.get(payload.documentId);
+    if (state === undefined) return;
+    if (state.cancelRequested) {
+      // ADR-038 §6, caso 22: GROUPING_FINISHED disparado por el
+      // finishSession que cancelReanalyze() invoca (o un evento tardío tras
+      // cancel() de un import) — el stage/PIPELINE_CANCELLED los gestiona
+      // cancel()/cancelReanalyze() directamente; acá se suprime el
+      // PIPELINE_READY derivado.
+      return;
+    }
     this.state.update(payload.documentId, { stage: PipelineStage.Ready, progress: 100 });
     this.bus.emit(EventChannel.Pipeline, EngineEvents.PIPELINE_READY, {
       documentId: payload.documentId,
@@ -811,14 +1081,19 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     }
   }
 
-  private ctxFor(signal: AbortSignal): EngineContext {
+  private ctxFor(signal: AbortSignal, documentId: string): EngineContext {
     return {
       bus: this.bus,
       logger: this.logger,
       cache: this.cache,
       abortSignal: signal,
-      config: this.config,
+      config: this.effectiveConfigFor(documentId),
     };
+  }
+
+  /** Config efectiva del documento (ADR-038 §1): la de `reanalyze`, o `this.config` si no hay override. */
+  private effectiveConfigFor(documentId: string): EngineConfig {
+    return this.effectiveConfigByDocument.get(documentId) ?? this.config;
   }
 
   private setStage(documentId: string, stage: PipelineStage): void {

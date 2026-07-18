@@ -69,6 +69,7 @@ export type {
   WorkerPoolConfig,
   NerConfig,
   OcrConfig,
+  ReanalyzeConfigPatch,
   GroupingConfig,
   RenderConfig,
   ExportConfig,

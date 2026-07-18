@@ -1,6 +1,7 @@
 import { PdfInvalidError, PdfPasswordRequiredError } from "@anonly/pdf-engine";
 import {
   CancelledError,
+  DetectionSource,
   EngineErrorCode,
   EngineEvents,
   EngineId,
@@ -15,10 +16,13 @@ import { PipelineOrchestrator } from "../orchestrator.js";
 
 import {
   createDeferred,
+  createDocument,
   createEngineConfig,
   createImportInput,
   createMockEngines,
   createMockLogger,
+  createPage,
+  createPdfEngineOutput,
   createRealBus,
   wireHappyPathSpies,
 } from "./fixtures/test-helpers.js";
@@ -285,6 +289,301 @@ describe("Orchestrator — edge cases", () => {
     await expect(orchestrator.importDocument(createImportInput())).rejects.toThrow(
       InvalidInputError,
     );
+  });
+
+  // ─── reanalyze (ADR-038 §1, casos 18-22 de Orchestrator.md §13) ───
+
+  describe("reanalyze", () => {
+    // ─── Caso 18: ner.enabled false -> true ───
+
+    it("case 18: ner false→true reopens session, dispatches NER only, Regex is not re-run", async () => {
+      const { bus, engines, orchestrator } = makeOrchestrator({ nerEnabled: false });
+      await orchestrator.importDocument(createImportInput());
+      expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+
+      (engines.regex.process as ReturnType<typeof vi.fn>).mockClear();
+      vi.spyOn(engines.ner, "processPages").mockImplementation(async (inputs) => {
+        bus.emit(EventChannel.Ner, EngineEvents.NER_FINISHED, {
+          documentId: "doc-1",
+          occurrenceCount: 0,
+          durationMs: 1,
+        });
+        await engines.grouping.finishSession("doc-1");
+        return inputs.map((i) => ({
+          documentId: i.documentId,
+          pageIndex: i.pageIndex,
+          occurrences: [],
+          durationMs: 1,
+        }));
+      });
+
+      const readySpy = vi.fn();
+      bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_READY, readySpy);
+
+      await orchestrator.reanalyze("doc-1", { ner: { enabled: true } });
+
+      expect(engines.grouping.reopenSession).toHaveBeenCalledWith("doc-1", {
+        expectRegex: false,
+        expectNer: true,
+      });
+      expect(engines.regex.process).not.toHaveBeenCalled();
+      expect(engines.ner.processPages).toHaveBeenCalled();
+      expect(readySpy).toHaveBeenCalledWith(expect.objectContaining({ documentId: "doc-1" }));
+      expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    });
+
+    // ─── Caso 19: ner.enabled true -> false ───
+
+    it("case 19: ner true→false drops NER occurrences and finishes synchronously (no dispatch)", async () => {
+      const { engines, orchestrator } = makeOrchestrator(); // ner enabled por defecto
+      await orchestrator.importDocument(createImportInput());
+      expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+
+      (engines.ner.processPages as ReturnType<typeof vi.fn>).mockClear();
+      (engines.regex.process as ReturnType<typeof vi.fn>).mockClear();
+
+      await orchestrator.reanalyze("doc-1", { ner: { enabled: false } });
+
+      expect(engines.grouping.reopenSession).toHaveBeenCalledWith("doc-1", {
+        expectRegex: false,
+        expectNer: false,
+      });
+      expect(engines.grouping.dropOccurrences).toHaveBeenCalledWith("doc-1", {
+        source: DetectionSource.NER,
+      });
+      expect(engines.ner.processPages).not.toHaveBeenCalled();
+      expect(engines.regex.process).not.toHaveBeenCalled();
+      expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    });
+
+    // ─── Caso 20: ocr.languages sobre páginas requiresOCR ───
+
+    it("case 20: ocr.languages re-OCRs requiresOCR pages, then Regex full-doc + NER on re-OCR pages only", async () => {
+      const bus = createRealBus();
+      const engines = createMockEngines();
+      const pdfOutput = createPdfEngineOutput({
+        document: createDocument({
+          pageCount: 2,
+          pages: [
+            createPage({ index: 0, requiresOCR: true }),
+            createPage({ index: 1, requiresOCR: false }),
+          ],
+        }),
+        textlessPages: [0],
+      });
+      wireHappyPathSpies(engines, bus, { pdfOutput });
+      const orchestrator = new PipelineOrchestrator({
+        bus,
+        logger: createMockLogger(),
+        cache: new LruCache(),
+        config: createEngineConfig(),
+        engines,
+      });
+
+      await orchestrator.importDocument(createImportInput());
+      expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+
+      (engines.render.rasterizePage as ReturnType<typeof vi.fn>).mockClear();
+      (engines.ocr.processPages as ReturnType<typeof vi.fn>).mockClear();
+      (engines.regex.process as ReturnType<typeof vi.fn>).mockClear();
+      (engines.ner.processPages as ReturnType<typeof vi.fn>).mockClear();
+
+      await orchestrator.reanalyze("doc-1", { ocr: { languages: ["eng"] } });
+
+      expect(engines.grouping.reopenSession).toHaveBeenCalledWith("doc-1", {
+        expectRegex: true,
+        expectNer: true,
+      });
+      expect(engines.grouping.dropOccurrences).toHaveBeenCalledWith("doc-1", {
+        pageIndices: [0],
+      });
+      expect(engines.render.rasterizePage).toHaveBeenCalledWith(
+        "doc-1",
+        0,
+        expect.any(Number),
+        expect.anything(),
+      );
+      expect(engines.ocr.processPages).toHaveBeenCalled();
+      expect(engines.regex.process).toHaveBeenCalled();
+      expect(engines.ner.processPages).toHaveBeenCalledWith(
+        [expect.objectContaining({ documentId: "doc-1", pageIndex: 0 })],
+        expect.anything(),
+      );
+      expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    });
+
+    it("case 20: ocr.languages with no requiresOCR pages is a no-op (config updates, no re-detection)", async () => {
+      const { bus, engines, orchestrator } = makeOrchestrator(); // doc default: sin páginas requiresOCR
+      await orchestrator.importDocument(createImportInput());
+
+      const stageChangedSpy = vi.fn();
+      bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_STAGE_CHANGED, stageChangedSpy);
+      (engines.ocr.processPages as ReturnType<typeof vi.fn>).mockClear();
+
+      await orchestrator.reanalyze("doc-1", { ocr: { languages: ["eng"] } });
+
+      expect(engines.ocr.processPages).not.toHaveBeenCalled();
+      expect(stageChangedSpy).not.toHaveBeenCalled();
+      expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    });
+
+    // ─── Caso 21: precondiciones y validación de patch ───
+
+    it("case 21: reanalyze while stage is not Ready/Failed rejects with InvalidInputError", async () => {
+      const { engines, orchestrator } = makeOrchestrator();
+      const deferred = createDeferred<never>();
+      (engines.pdf.process as ReturnType<typeof vi.fn>).mockReturnValue(deferred.promise);
+
+      const importPromise = orchestrator.importDocument(createImportInput());
+      await Promise.resolve();
+
+      await expect(orchestrator.reanalyze("doc-1", { ner: { enabled: false } })).rejects.toThrow(
+        InvalidInputError,
+      );
+
+      deferred.reject(new Error("cleanup"));
+      await importPromise.catch(() => undefined);
+    });
+
+    it("case 21: empty patch rejects with InvalidInputError", async () => {
+      const { orchestrator } = makeOrchestrator();
+      await orchestrator.importDocument(createImportInput());
+
+      await expect(orchestrator.reanalyze("doc-1", {})).rejects.toThrow(InvalidInputError);
+    });
+
+    it("case 21: patch with an unsupported field rejects with InvalidInputError", async () => {
+      const { orchestrator } = makeOrchestrator();
+      await orchestrator.importDocument(createImportInput());
+
+      // Objeto construido vía variable (no literal directo en la llamada):
+      // TS no aplica excess-property-check sobre variables, así que esto
+      // compila sin necesidad de ningún cast — el campo extra es real en
+      // runtime y es exactamente lo que valida la precondición del spec.
+      const invalidPatch = { ner: { enabled: true }, unsupported: true };
+      await expect(orchestrator.reanalyze("doc-1", invalidPatch)).rejects.toThrow(
+        InvalidInputError,
+      );
+    });
+
+    it("case 21: patch identical to the effective config is a no-op without events", async () => {
+      const { bus, orchestrator } = makeOrchestrator(); // default: ner enabled, ocr ["spa","eng"]
+      await orchestrator.importDocument(createImportInput());
+
+      const anySpy = vi.fn();
+      bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_STAGE_CHANGED, anySpy);
+      bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_READY, anySpy);
+
+      await orchestrator.reanalyze("doc-1", { ner: { enabled: true } });
+
+      expect(anySpy).not.toHaveBeenCalled();
+      expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    });
+
+    // ─── Caso 22: cancelación durante un reanalyze ───
+
+    it("case 22: CANCEL_REQUESTED during reanalyze preserves merged occurrences and returns to Ready (not Cancelled)", async () => {
+      const { bus, engines, orchestrator } = makeOrchestrator({ nerEnabled: false });
+      await orchestrator.importDocument(createImportInput());
+      expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+
+      const deferred = createDeferred<never>();
+      (engines.ner.processPages as ReturnType<typeof vi.fn>).mockImplementation(
+        (_inputs, ctx: { abortSignal: AbortSignal }) => {
+          ctx.abortSignal.addEventListener("abort", () => {
+            deferred.reject(new CancelledError("doc-1"));
+          });
+          return deferred.promise;
+        },
+      );
+
+      const readySpy = vi.fn();
+      const cancelledSpy = vi.fn();
+      bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_READY, readySpy);
+      bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_CANCELLED, cancelledSpy);
+
+      const reanalyzePromise = orchestrator.reanalyze("doc-1", { ner: { enabled: true } });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      await orchestrator.cancel("doc-1");
+      await expect(reanalyzePromise).resolves.toBeUndefined();
+
+      expect(cancelledSpy).toHaveBeenCalledWith(expect.objectContaining({ documentId: "doc-1" }));
+      expect(readySpy).not.toHaveBeenCalled(); // PIPELINE_READY derivado, suprimido
+      expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready); // no Cancelled
+      expect(engines.grouping.finishSession).toHaveBeenCalled();
+    });
+
+    it("case 22: reanalyze can run again after a cancelled reanalyze (AbortController reset)", async () => {
+      const bus = createRealBus();
+      const engines = createMockEngines();
+      const pdfOutput = createPdfEngineOutput({
+        document: createDocument({
+          pageCount: 1,
+          pages: [createPage({ index: 0, requiresOCR: true })],
+        }),
+        textlessPages: [0],
+      });
+      wireHappyPathSpies(engines, bus, { pdfOutput });
+      const orchestrator = new PipelineOrchestrator({
+        bus,
+        logger: createMockLogger(),
+        cache: new LruCache(),
+        config: createEngineConfig({
+          ner: {
+            modelId: "x",
+            quantization: "q8",
+            confidenceThreshold: 0.7,
+            batchSize: 1,
+            enabled: false,
+          },
+        }),
+        engines,
+      });
+
+      await orchestrator.importDocument(createImportInput());
+      expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+
+      const deferred = createDeferred<never>();
+      vi.spyOn(engines.ner, "processPages")
+        .mockImplementationOnce((_inputs, ctx) => {
+          ctx.abortSignal.addEventListener("abort", () => {
+            deferred.reject(new CancelledError("doc-1"));
+          });
+          return deferred.promise;
+        })
+        .mockImplementation(async (inputs) => {
+          bus.emit(EventChannel.Ner, EngineEvents.NER_FINISHED, {
+            documentId: "doc-1",
+            occurrenceCount: 0,
+            durationMs: 1,
+          });
+          await engines.grouping.finishSession("doc-1");
+          return inputs.map((i) => ({
+            documentId: i.documentId,
+            pageIndex: i.pageIndex,
+            occurrences: [],
+            durationMs: 1,
+          }));
+        });
+
+      // Primer reanalyze (ner off->on): se cancela en vuelo.
+      const reanalyzePromise = orchestrator.reanalyze("doc-1", { ner: { enabled: true } });
+      await Promise.resolve();
+      await Promise.resolve();
+      await orchestrator.cancel("doc-1");
+      await reanalyzePromise;
+      expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+
+      // Segundo reanalyze (ocr.languages): despacha un job real a un pool
+      // con `signal: ctx.abortSignal`. Si el AbortController del documento
+      // no se hubiera reseteado tras la cancelación, este dispatch
+      // rechazaría de inmediato con CancelledError y el stage quedaría
+      // trabado en OCRing en vez de volver a Ready.
+      await orchestrator.reanalyze("doc-1", { ocr: { languages: ["eng"] } });
+      expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    });
   });
 
   // ─── Handlers "pasivos" registrados solo para cumplir la matriz (§11) ───

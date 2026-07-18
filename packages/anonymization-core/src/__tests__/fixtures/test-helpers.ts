@@ -252,6 +252,11 @@ export function wireHappyPathSpies(
   vi.spyOn(engines.ner, "dispose").mockResolvedValue(undefined);
 
   vi.spyOn(engines.grouping, "startSession").mockImplementation(() => undefined);
+  // ADR-038 §2: no-op por defecto (mismo criterio que startSession) — los
+  // tests de reanalyze aseran los argumentos con los que se llaman, sin
+  // reimplementar la sesión real de GroupingEngine (ver nota de cabecera).
+  vi.spyOn(engines.grouping, "reopenSession").mockImplementation(() => undefined);
+  vi.spyOn(engines.grouping, "dropOccurrences").mockImplementation(() => undefined);
   vi.spyOn(engines.grouping, "finishSession").mockImplementation((docId) => {
     bus.emit(EventChannel.Grouping, EngineEvents.GROUPING_FINISHED, {
       documentId: docId,
