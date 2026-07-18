@@ -7,6 +7,9 @@
  * Fuente de verdad: docs/core/Contracts.md.
  */
 
+// Constantes nombradas (Contracts.md §6)
+export { MAX_RENDER_SCALE, PREVIEW_CACHE_MAX_BYTES } from "./constants.js";
+
 // Enums
 export {
   EngineId,

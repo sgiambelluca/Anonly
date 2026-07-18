@@ -23,6 +23,8 @@ import {
   EventChannel,
   InvalidInputError,
   makeTransferable,
+  MAX_RENDER_SCALE,
+  PREVIEW_CACHE_MAX_BYTES,
   ReplacementMode,
   synthesize,
 } from "../index.js";
@@ -44,6 +46,7 @@ import type {
   Occurrence,
   Page,
   PageParsed,
+  RenderRequested,
   Word,
 } from "../index.js";
 
@@ -427,6 +430,22 @@ describe("@anonly/shared — Contracts", () => {
       // `patch` es Partial<Pick<EntityGroup, ...>> sin `id`. Verificado por typecheck.
     });
 
+    it("RenderRequested.scale es opcional y viaja como escala absoluta pdfjs (ADR-037 §1)", () => {
+      const withoutScale: RenderRequested = {
+        documentId: "d1",
+        pageIndices: [0, 1],
+        mode: "preview",
+      };
+      const withScale: RenderRequested = {
+        documentId: "d1",
+        pageIndices: [0],
+        mode: "preview",
+        scale: 2.5,
+      };
+      expect(withoutScale.scale).toBeUndefined();
+      expect(withScale.scale).toBe(2.5);
+    });
+
     it("ExportRequested options.includeOriginalMetadata debe ser false", () => {
       const payload: ExportRequested = {
         documentId: "d1",
@@ -471,6 +490,16 @@ describe("@anonly/shared — Contracts", () => {
       expect(isTransferable({})).toBe(false);
       expect(isTransferable(null)).toBe(false);
       expect(isTransferable(new ArrayBuffer(10))).toBe(false);
+    });
+  });
+
+  describe("Constantes nombradas (ADR-037 §2/§3)", () => {
+    it("MAX_RENDER_SCALE es 4 (Contracts.md §6)", () => {
+      expect(MAX_RENDER_SCALE).toBe(4);
+    });
+
+    it("PREVIEW_CACHE_MAX_BYTES es 200 MB (Contracts.md §6)", () => {
+      expect(PREVIEW_CACHE_MAX_BYTES).toBe(200 * 1024 * 1024);
     });
   });
 

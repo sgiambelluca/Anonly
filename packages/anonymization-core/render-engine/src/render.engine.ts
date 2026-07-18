@@ -62,6 +62,60 @@
  *    ÚNICO cast de este tipo en código de producción de todo el Core (ver el
  *    comentario puntual, más abajo, para el detalle técnico completo).
  *    Excepción aprobada explícitamente por ADR-031 §4 (Code_Standards.md §10).
+ * 6. ADR-037 (zoom con re-render real, Hito 10): `RENDER_REQUESTED.scale` se
+ *    propaga a `renderPages` (ausente → `previewScale`/`fullScale` según
+ *    `mode`, igual que `renderPage` ya hacía con `RenderPageInput.scale`
+ *    desde v1.0.0). Tres piezas nuevas:
+ *    a. Guard de rango `0 < scale <= MAX_RENDER_SCALE`: `InvalidInputError`
+ *       en invocación directa (`renderPage`/`renderPages`), `warn` + no-op en
+ *       la vía por evento (mismo tratamiento que documento no cargado, ADR-030 §3).
+ *    b. La clave del cache LRU incorpora la escala efectiva (nunca `input.scale`
+ *       crudo, que puede ser `undefined`: usar la escala efectiva evita que un
+ *       `scale` explícito numéricamente igual al default invalide el hit —
+ *       nota de "Consecuencias" de ADR-037). El cache gana además un límite
+ *       por bytes (`PREVIEW_CACHE_MAX_BYTES`), evaluado junto al límite por
+ *       items (`cachePages`) en cada eviction.
+ *    c. Supersede por página: `pendingRenders` (`Map<"documentId:pageIndex:kind",
+ *       { scale, controller }>`) registra, para cada `RENDER_REQUESTED`, la
+ *       escala vigente por `(documentId, pageIndex, kind)`. Si una escala
+ *       nueva reemplaza a una pendiente, el `AbortController` de la anterior
+ *       se aborta. `renderPage` chequea esta tabla en varios checkpoints
+ *       (mismos puntos que el chequeo de `ctx.abortSignal`, vía
+ *       `throwIfSuperseded`): si su propia escala ya no coincide con la
+ *       vigente, o su controller fue abortado, lanza `CancelledError` — lo
+ *       que permite descartar un render "en cola" antes de que arranque, o
+ *       abortar uno "en vuelo" en su próximo checkpoint, sin ejecutar ni
+ *       emitir `PREVIEW_UPDATED`. `renderPages` distingue esta cancelación
+ *       (page-local, no aborta el resto del batch, no emite
+ *       `PREVIEW_PAGE_FAILED`) de una cancelación real de `ctx.abortSignal`
+ *       (aborta el batch completo, comportamiento preexistente) mirando si
+ *       `ctx.abortSignal.aborted` es la causa. Este mecanismo es enteramente
+ *       interno al motor (no usa `CANCEL_REQUESTED` ni el `AbortRegistry` del
+ *       Orchestrator, ADR-037 §4) y solo lo alimenta `handleRenderRequested`:
+ *       invocaciones directas de `renderPage`/`renderPages` (tests, o el
+ *       Orchestrator para export/OCR) nunca encuentran una entrada en
+ *       `pendingRenders` para su propia clave y no se ven afectadas.
+ *
+ *       LIMITACIÓN CONOCIDA (hallazgo de revisión del PR4, no resuelto acá):
+ *       las entradas de `pendingRenders` solo se limpian en `dispose`/
+ *       `unloadDocument`/`loadDocument` (reload), nunca al completar un
+ *       render con éxito. Si un preview a `previewScale` completa y deja su
+ *       entrada colgada, una invocación directa posterior con otra escala
+ *       para la misma clave (p. ej. un export en `mode: "full"` de la misma
+ *       página) puede cancelarse espuriamente. No se puede resolver
+ *       simplemente limpiando la entrada al completar: eso reintroduce una
+ *       carrera con el propio mecanismo de supersede (un request superado
+ *       "A" que todavía no llegó a su checkpoint dejaría de detectar que
+ *       fue reemplazado por "B" si "B" ya completó y limpió la entrada
+ *       primero). El fix correcto requiere distinguir invocaciones
+ *       originadas en `handleRenderRequested` (deben participar del
+ *       supersede) de invocaciones directas (deben ser inmunes a él),
+ *       algo que hoy ambas comparten sin distinción vía `renderPage`/
+ *       `renderPages`. Pendiente de diseño (ADR-037 es explícito en la
+ *       clave `(documentId, pageIndex, kind)` sin `mode`; el fix no debería
+ *       requerir cambiarla). No bloqueante hasta que la UI emita
+ *       `RENDER_REQUESTED` desde el visor (Hito 10, PR7) y el export (PR9)
+ *       puedan interactuar en la práctica.
  */
 
 import {
@@ -73,6 +127,8 @@ import {
   EngineNotInitializedError,
   EventChannel,
   InvalidInputError,
+  MAX_RENDER_SCALE,
+  PREVIEW_CACHE_MAX_BYTES,
   ReplacementMode,
   type Annotation,
   type BoundingBox,
@@ -120,6 +176,16 @@ interface GroupOverride {
   readonly enabled?: boolean;
 }
 
+/**
+ * Estado de supersede por `(documentId, pageIndex, kind)` (ver nota 6 de
+ * arriba, ADR-037 §4): `scale` es la escala vigente para esa clave; `controller`
+ * se aborta cuando una escala distinta la reemplaza.
+ */
+interface PendingRenderState {
+  readonly scale: number;
+  readonly controller: AbortController;
+}
+
 function scaleBbox(bbox: BoundingBox, scale: number): BoundingBox {
   return {
     x: bbox.x * scale,
@@ -159,19 +225,47 @@ function hashPageContent(
   return combined.length === 0 ? "0" : fnv1a(combined);
 }
 
+// ADR-037 §3: la clave incorpora la escala EFECTIVA (nunca `input.scale` crudo,
+// que puede ser `undefined`) — así un `scale` explícito numéricamente igual al
+// default de `mode` cae en la misma entrada de cache (nota de "Consecuencias"
+// de ADR-037: evita invalidar el hit entre "preview default" y "scale=1" explícito).
 function buildCacheKey(
   documentId: string,
   pageIndex: number,
   kind: "original" | "anonymized",
   mode: "preview" | "full",
+  scale: number,
   replacements: ReadonlyArray<Replacement>,
   annotations: ReadonlyArray<Annotation>,
 ): string {
-  return `${documentId}:${pageIndex}:${kind}:${mode}:${hashPageContent(replacements, annotations)}`;
+  return `${documentId}:${pageIndex}:${kind}:${mode}:${scale}:${hashPageContent(replacements, annotations)}`;
 }
 
 function pageKey(documentId: string, pageIndex: number): string {
   return `${documentId}:${pageIndex}`;
+}
+
+// ADR-037 §4: clave de coalescing del supersede por página — NO incluye `mode`
+// (la decisión del ADR es explícita: la clave es (documentId, pageIndex, kind)).
+function supersedeKey(
+  documentId: string,
+  pageIndex: number,
+  kind: "original" | "anonymized",
+): string {
+  return `${documentId}:${pageIndex}:${kind}`;
+}
+
+// ADR-037 §2: rango válido de scale, compartido por el guard de invocación
+// directa (InvalidInputError) y el de la vía por evento (warn + no-op).
+function isValidScale(scale: number): boolean {
+  return Number.isFinite(scale) && scale > 0 && scale <= MAX_RENDER_SCALE;
+}
+
+// ADR-037 §3: tamaño estimado de una entrada de cache para el límite por bytes
+// (PREVIEW_CACHE_MAX_BYTES) — los píxeles RGBA crudos dominan el costo; los
+// bytes codificados (mode "full") se suman cuando existen.
+function estimateOutputBytes(output: RenderPageOutput): number {
+  return output.imageData.data.byteLength + (output.encoded?.bytes.byteLength ?? 0);
 }
 
 // Nota de implementación 2: aplica el último GROUP_REPLACEMENT_CHANGED/GROUP_TOGGLED
@@ -218,6 +312,9 @@ export class RenderEngine implements IEngine {
 
   private readonly documents = new Map<string, PDFDocumentProxy>();
   private readonly cache = new Map<string, RenderPageOutput>();
+  // Bytes totales cacheados (ADR-037 §3), mantenido en paralelo a `cache` vía
+  // setCacheEntry/deleteCacheEntry — nunca se lee directo de `cache.values()`.
+  private cacheBytes = 0;
   // Índice pageIndex → groupIds (§12), clave `${documentId}:${pageIndex}`.
   private readonly pageGroupIndex = new Map<string, Set<string>>();
   // Último RenderPageInput usado por página (para RENDER_REQUESTED y delta render).
@@ -225,6 +322,9 @@ export class RenderEngine implements IEngine {
   private readonly lastOriginalInputs = new Map<string, RenderPageInput>();
   // Overrides pendientes por (documentId, groupId) — ver nota de implementación 2.
   private readonly groupOverrides = new Map<string, Map<string, GroupOverride>>();
+  // Supersede por página (ADR-037 §4, nota de implementación 6) — clave
+  // `documentId:pageIndex:kind`, poblada únicamente por handleRenderRequested.
+  private readonly pendingRenders = new Map<string, PendingRenderState>();
 
   init(ctx: EngineContext): Promise<void> {
     this.ctx = ctx;
@@ -319,6 +419,15 @@ export class RenderEngine implements IEngine {
       );
     }
 
+    // ADR-037 §2: guard de rango en invocación directa → InvalidInputError
+    // (endurece una laguna previa: RenderPageInput.scale no declaraba validación).
+    if (input.scale !== undefined && !isValidScale(input.scale)) {
+      throw new InvalidInputError(
+        `scale ${input.scale} fuera de rango (0, ${MAX_RENDER_SCALE}] o no finito.`,
+        { documentId, pageIndex, scale: input.scale },
+      );
+    }
+
     if (ctx.abortSignal.aborted) {
       throw new CancelledError(documentId);
     }
@@ -332,9 +441,22 @@ export class RenderEngine implements IEngine {
       (mode === "preview" ? ctx.config.render.previewScale : ctx.config.render.fullScale);
     const imageFormat = input.imageFormat ?? (mode === "preview" ? "png" : "jpeg");
 
+    // ADR-037 §4: checkpoint de supersede — un render "en cola" (nota 6 de
+    // cabecera) se descarta acá, antes de tocar rememberInput/cache, sin haber
+    // ejecutado nada.
+    this.throwIfSuperseded(ctx, documentId, pageIndex, kind, scale);
+
     this.rememberInput(input, replacements, annotations);
 
-    const cacheKey = buildCacheKey(documentId, pageIndex, kind, mode, replacements, annotations);
+    const cacheKey = buildCacheKey(
+      documentId,
+      pageIndex,
+      kind,
+      mode,
+      scale,
+      replacements,
+      annotations,
+    );
     const cached = this.cache.get(cacheKey);
     if (cached !== undefined) {
       this.touchCache(cacheKey);
@@ -352,9 +474,7 @@ export class RenderEngine implements IEngine {
       throw this.toPageFailure(documentId, pageIndex, err);
     }
 
-    if (ctx.abortSignal.aborted) {
-      throw new CancelledError(documentId);
-    }
+    this.throwIfSuperseded(ctx, documentId, pageIndex, kind, scale);
 
     const viewport = pageProxy.getViewport({ scale });
     const canvas = this.createCanvas(documentId, pageIndex, viewport.width, viewport.height);
@@ -373,9 +493,7 @@ export class RenderEngine implements IEngine {
       throw this.toPageFailure(documentId, pageIndex, err);
     }
 
-    if (ctx.abortSignal.aborted) {
-      throw new CancelledError(documentId);
-    }
+    this.throwIfSuperseded(ctx, documentId, pageIndex, kind, scale);
 
     if (kind === "anonymized") {
       this.paintReplacements(context2d, replacements, scale, ctx.abortSignal, documentId);
@@ -383,9 +501,7 @@ export class RenderEngine implements IEngine {
       this.paintAnnotations(context2d, annotations, scale, ctx.abortSignal, documentId);
     }
 
-    if (ctx.abortSignal.aborted) {
-      throw new CancelledError(documentId);
-    }
+    this.throwIfSuperseded(ctx, documentId, pageIndex, kind, scale);
 
     const imageData = context2d.getImageData(0, 0, viewport.width, viewport.height);
     const durationMs = Date.now() - startedAt;
@@ -412,7 +528,7 @@ export class RenderEngine implements IEngine {
       ...(encoded !== undefined ? { encoded } : {}),
     };
 
-    this.cache.set(cacheKey, output);
+    this.setCacheEntry(cacheKey, output);
     this.evictCacheIfNeeded(ctx);
 
     if (mode === "preview") {
@@ -527,6 +643,7 @@ export class RenderEngine implements IEngine {
 
       let lastError: unknown = null;
       let succeeded = false;
+      let superseded = false;
 
       for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         if (ctx.abortSignal.aborted) {
@@ -539,7 +656,16 @@ export class RenderEngine implements IEngine {
           succeeded = true;
           break;
         } catch (err: unknown) {
-          if (err instanceof CancelledError) throw err;
+          if (err instanceof CancelledError) {
+            // ADR-037 §4: distingue una cancelación real de batch/pipeline
+            // (ctx.abortSignal, comportamiento preexistente: aborta todo el
+            // batch) de un supersede page-local (throwIfSuperseded dentro de
+            // renderPage): se descarta esta página sin emitir nada y se
+            // continúa con las demás del batch.
+            if (ctx.abortSignal.aborted) throw err;
+            superseded = true;
+            break;
+          }
           if (err instanceof RenderPageFailedError || err instanceof RenderTimeoutError) {
             lastError = err;
             continue; // retryable: reintenta si quedan intentos.
@@ -555,7 +681,7 @@ export class RenderEngine implements IEngine {
         }
       }
 
-      if (!succeeded) {
+      if (!succeeded && !superseded) {
         // §11/§13 caso 12: falla una página tras reintentos → PREVIEW_PAGE_FAILED, continúa con las demás.
         const failure = this.toPageFailure(input.documentId, input.pageIndex, lastError);
         ctx.bus.emit(EventChannel.Render, EngineEvents.PREVIEW_PAGE_FAILED, {
@@ -647,10 +773,12 @@ export class RenderEngine implements IEngine {
     for (const doc of this.documents.values()) void doc.destroy();
     this.documents.clear();
     this.cache.clear();
+    this.cacheBytes = 0;
     this.pageGroupIndex.clear();
     this.lastAnonymizedInputs.clear();
     this.lastOriginalInputs.clear();
     this.groupOverrides.clear();
+    this.pendingRenders.clear();
     this.disposed = true;
     this.initialized = false;
     this.ctx = null;
@@ -671,6 +799,22 @@ export class RenderEngine implements IEngine {
       return;
     }
 
+    // ADR-037 §2: guard de rango en la vía por evento → warn + no-op (sin
+    // caller al que lanzarle, mismo tratamiento que documento no cargado).
+    if (payload.scale !== undefined && !isValidScale(payload.scale)) {
+      ctx.logger.warn(`RENDER_REQUESTED con scale fuera de rango: ${payload.scale}`, {
+        documentId: payload.documentId,
+        scale: payload.scale,
+      });
+      return;
+    }
+
+    // ADR-037 §1: escala efectiva del request completo (ausente → previewScale/
+    // fullScale según mode); se propaga a cada RenderPageInput reconstruido.
+    const effectiveScale =
+      payload.scale ??
+      (payload.mode === "preview" ? ctx.config.render.previewScale : ctx.config.render.fullScale);
+
     // 06_Pipeline.md §10: se renderiza "original" y luego "anonimizado" por
     // página visible. RenderRequested (Contracts.md §8) no trae kind ni
     // replacements/annotations: se reconstruyen desde el último input
@@ -679,23 +823,36 @@ export class RenderEngine implements IEngine {
     for (const pageIndex of payload.pageIndices) {
       const key = pageKey(payload.documentId, pageIndex);
 
+      // ADR-037 §4: registra la escala vigente para "original" y "anonymized"
+      // de esta página — aborta/descarta cualquier render pendiente con otra
+      // escala para la misma clave (ver nota 6 de cabecera).
+      this.registerPendingRender(payload.documentId, pageIndex, "original", effectiveScale);
+      this.registerPendingRender(payload.documentId, pageIndex, "anonymized", effectiveScale);
+
       const original = this.lastOriginalInputs.get(key);
       inputs.push(
         original !== undefined
-          ? { ...original, mode: payload.mode }
-          : { documentId: payload.documentId, pageIndex, kind: "original", mode: payload.mode },
+          ? { ...original, mode: payload.mode, scale: effectiveScale }
+          : {
+              documentId: payload.documentId,
+              pageIndex,
+              kind: "original",
+              mode: payload.mode,
+              scale: effectiveScale,
+            },
       );
 
       const anonymized = this.lastAnonymizedInputs.get(key);
       inputs.push(
         anonymized !== undefined
-          ? { ...anonymized, mode: payload.mode }
+          ? { ...anonymized, mode: payload.mode, scale: effectiveScale }
           : {
               documentId: payload.documentId,
               pageIndex,
               kind: "anonymized",
               mode: payload.mode,
               replacements: [],
+              scale: effectiveScale,
             },
       );
     }
@@ -771,6 +928,53 @@ export class RenderEngine implements IEngine {
       this.groupOverrides.set(documentId, overrides);
     }
     return overrides;
+  }
+
+  // ─── Supersede por página (ADR-037 §4, nota 6 de cabecera) ───
+
+  /**
+   * Registra `scale` como la escala vigente para `(documentId, pageIndex, kind)`.
+   * Si ya había una escala distinta pendiente, aborta su `AbortController`
+   * (descarta el render en cola / interrumpe el que está en vuelo en su
+   * próximo checkpoint, vía `throwIfSuperseded`). Poblado únicamente desde
+   * `handleRenderRequested`: invocaciones directas de `renderPage`/`renderPages`
+   * nunca encuentran una entrada para su propia clave.
+   */
+  private registerPendingRender(
+    documentId: string,
+    pageIndex: number,
+    kind: "original" | "anonymized",
+    scale: number,
+  ): void {
+    const key = supersedeKey(documentId, pageIndex, kind);
+    const existing = this.pendingRenders.get(key);
+    if (existing !== undefined && existing.scale === scale) return; // mismo request ya vigente.
+    if (existing !== undefined) existing.controller.abort();
+    this.pendingRenders.set(key, { scale, controller: new AbortController() });
+  }
+
+  /**
+   * Checkpoint combinado (ctx.abortSignal + supersede de página) — mismos
+   * puntos donde antes solo se chequeaba `ctx.abortSignal.aborted`. Lanza
+   * `CancelledError` si el batch fue cancelado, o si un `RENDER_REQUESTED`
+   * más reciente con otra escala ya reemplazó a este render para la misma
+   * `(documentId, pageIndex, kind)` (ADR-037 §4).
+   */
+  private throwIfSuperseded(
+    ctx: EngineContext,
+    documentId: string,
+    pageIndex: number,
+    kind: "original" | "anonymized",
+    scale: number,
+  ): void {
+    if (ctx.abortSignal.aborted) {
+      throw new CancelledError(documentId);
+    }
+    const pending = this.pendingRenders.get(supersedeKey(documentId, pageIndex, kind));
+    if (pending === undefined) return;
+    if (pending.scale !== scale || pending.controller.signal.aborted) {
+      throw new CancelledError(documentId);
+    }
   }
 
   // ─── Pintado sobre canvas (§13 casos 3-8) ───
@@ -1022,13 +1226,37 @@ export class RenderEngine implements IEngine {
     this.cache.set(key, value);
   }
 
+  // ADR-037 §3: setCacheEntry/deleteCacheEntry mantienen `cacheBytes` en
+  // sincronía con `cache` — todo alta/baja del cache pasa por acá (nunca
+  // `this.cache.set`/`.delete` directo fuera de estos dos métodos y `touchCache`,
+  // que reordena sin cambiar bytes).
+  private setCacheEntry(key: string, output: RenderPageOutput): void {
+    const existing = this.cache.get(key);
+    if (existing !== undefined) this.cacheBytes -= estimateOutputBytes(existing);
+    this.cache.set(key, output);
+    this.cacheBytes += estimateOutputBytes(output);
+  }
+
+  private deleteCacheEntry(key: string): void {
+    const existing = this.cache.get(key);
+    if (existing === undefined) return;
+    this.cacheBytes -= estimateOutputBytes(existing);
+    this.cache.delete(key);
+  }
+
   private evictCacheIfNeeded(ctx: EngineContext): void {
     const capacity =
       ctx.config.render.cachePages > 0 ? ctx.config.render.cachePages : DEFAULT_CACHE_PAGES;
-    while (this.cache.size > capacity) {
+    // ADR-037 §3: además del límite por items (cachePages), un límite por
+    // bytes (PREVIEW_CACHE_MAX_BYTES) — se evictan las entradas más viejas
+    // (orden de inserción del Map) hasta satisfacer ambos límites.
+    while (
+      this.cache.size > 0 &&
+      (this.cache.size > capacity || this.cacheBytes > PREVIEW_CACHE_MAX_BYTES)
+    ) {
       const oldestKey = this.cache.keys().next().value;
       if (oldestKey === undefined) break;
-      this.cache.delete(oldestKey);
+      this.deleteCacheEntry(oldestKey);
     }
   }
 
@@ -1036,7 +1264,9 @@ export class RenderEngine implements IEngine {
     // Los documentId son UUID v4 (03_Data_Model.md §2): sin ":" propio, así
     // que el prefijo `${documentId}:` no colisiona con otro documentId.
     const prefix = `${documentId}:`;
-    for (const key of [...this.cache.keys()]) if (key.startsWith(prefix)) this.cache.delete(key);
+    for (const key of [...this.cache.keys()]) {
+      if (key.startsWith(prefix)) this.deleteCacheEntry(key);
+    }
     for (const key of [...this.pageGroupIndex.keys()])
       if (key.startsWith(prefix)) this.pageGroupIndex.delete(key);
     for (const key of [...this.lastAnonymizedInputs.keys()]) {
@@ -1044,6 +1274,9 @@ export class RenderEngine implements IEngine {
     }
     for (const key of [...this.lastOriginalInputs.keys()]) {
       if (key.startsWith(prefix)) this.lastOriginalInputs.delete(key);
+    }
+    for (const key of [...this.pendingRenders.keys()]) {
+      if (key.startsWith(prefix)) this.pendingRenders.delete(key);
     }
     this.groupOverrides.delete(documentId);
   }

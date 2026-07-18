@@ -15,6 +15,7 @@ import { RenderEngine } from "../render.engine.js";
 
 import {
   createEngineContext,
+  createEngineContextWithRealBus,
   createMockPage,
   createMockPdfDocument,
   createRenderPageInput,
@@ -230,5 +231,35 @@ describe("RenderEngine — contract tests", () => {
     expect(output.encoded?.bytes.byteLength).toBeGreaterThan(0);
     expect(output.encoded?.widthPx).toBe(output.imageData.width);
     expect(output.encoded?.heightPx).toBe(output.imageData.height);
+  });
+
+  // ─── ADR-037 §1 (Hito 10): RENDER_REQUESTED.scale ───
+
+  it("RENDER_REQUESTED propagates scale to renderPages", async () => {
+    const docId = "doc-scale-propagate";
+    const mockDoc = createMockPdfDocument({ pageCount: 1 });
+    vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(mockDoc));
+    const realCtx = createEngineContextWithRealBus();
+    await engine.init(realCtx);
+    await engine.loadDocument(docId, createValidBuffer());
+
+    const renderPagesSpy = vi.spyOn(engine, "renderPages");
+
+    realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+      documentId: docId,
+      pageIndices: [0],
+      mode: "preview",
+      scale: 3,
+    });
+
+    await vi.waitFor(() => {
+      expect(renderPagesSpy).toHaveBeenCalled();
+    });
+
+    const calledInputs = renderPagesSpy.mock.calls[0]?.[0] ?? [];
+    expect(calledInputs.length).toBeGreaterThan(0);
+    for (const input of calledInputs) {
+      expect(input.scale).toBe(3);
+    }
   });
 });

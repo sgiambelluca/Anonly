@@ -16,6 +16,7 @@ import {
   createEngineContext,
   createEngineContextWithRealBus,
   createMockConfig,
+  createMockPage,
   createMockPdfDocument,
   createRenderPageInput,
   createValidBuffer,
@@ -518,5 +519,85 @@ describe("RenderEngine — unit tests", () => {
     );
 
     expect(output.encoded).toBeUndefined();
+  });
+
+  // ─── ADR-037 §3 (Hito 10): cache por escala + límite por bytes ───
+
+  it("cache key includes scale; different scales coexist", async () => {
+    const docId = "doc-scale-cache";
+    const mockDoc = createMockPdfDocument({ pageCount: 1 });
+    vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(mockDoc));
+    await engine.init(ctx);
+    await engine.loadDocument(docId, createValidBuffer());
+    const getPageSpy = mockDoc["getPage"] as ReturnType<typeof vi.fn>;
+
+    await engine.renderPage(
+      createRenderPageInput({ documentId: docId, pageIndex: 0, scale: 1 }),
+      ctx,
+    );
+    await engine.renderPage(
+      createRenderPageInput({ documentId: docId, pageIndex: 0, scale: 2 }),
+      ctx,
+    );
+
+    // Misma página/kind/mode, distinta escala: dos entradas separadas del LRU
+    // (ADR-037 §3), no un cache hit cruzado.
+    expect(engine["cache"].size).toBe(2);
+    expect(getPageSpy).toHaveBeenCalledTimes(2);
+
+    // Re-renderizar a escala 1 es cache hit: sin nueva llamada a getPage.
+    await engine.renderPage(
+      createRenderPageInput({ documentId: docId, pageIndex: 0, scale: 1 }),
+      ctx,
+    );
+    expect(getPageSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("cache evicts by PREVIEW_CACHE_MAX_BYTES in addition to cachePages", async () => {
+    const docId = "doc-cache-bytes";
+    const bigDimension = 5000; // 5000*5000*4 bytes = 100.000.000 bytes (~95.4 MiB) por página.
+    const mockDoc = createMockPdfDocument({
+      pageCount: 3,
+      pageFactory: () => createMockPage({ width: bigDimension, height: bigDimension }),
+    });
+    vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(mockDoc));
+    // cachePages generoso: el único límite que debe disparar la eviction acá
+    // es PREVIEW_CACHE_MAX_BYTES (200 MiB), no el límite por items.
+    const largeCachePagesCtx = createEngineContext({
+      config: createMockConfig({
+        render: { previewScale: 1, fullScale: 2.08, jpegQuality: 0.85, cachePages: 1000 },
+      }),
+    });
+    await engine.init(largeCachePagesCtx);
+    await engine.loadDocument(docId, createValidBuffer());
+    const getPageSpy = mockDoc["getPage"] as ReturnType<typeof vi.fn>;
+
+    await engine.renderPage(
+      createRenderPageInput({ documentId: docId, pageIndex: 0 }),
+      largeCachePagesCtx,
+    );
+    await engine.renderPage(
+      createRenderPageInput({ documentId: docId, pageIndex: 1 }),
+      largeCachePagesCtx,
+    );
+    // 2 páginas ≈ 190.7 MiB acumulados: todavía por debajo del límite de 200 MiB.
+    expect(engine["cache"].size).toBe(2);
+
+    await engine.renderPage(
+      createRenderPageInput({ documentId: docId, pageIndex: 2 }),
+      largeCachePagesCtx,
+    );
+
+    // 3 páginas ≈ 286 MiB > 200 MiB: se evictó la entrada más vieja (página 0),
+    // dejando 2 páginas (~190.7 MiB), que ya no excede el límite.
+    expect(engine["cache"].size).toBe(2);
+
+    const callsBefore = getPageSpy.mock.calls.length;
+    await engine.renderPage(
+      createRenderPageInput({ documentId: docId, pageIndex: 0 }),
+      largeCachePagesCtx,
+    );
+    // La página 0 ya no estaba cacheada (evictada por bytes): nueva llamada a getPage.
+    expect(getPageSpy.mock.calls.length).toBe(callsBefore + 1);
   });
 });

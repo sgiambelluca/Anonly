@@ -519,6 +519,31 @@ describe("RenderEngine — edge cases", () => {
     expect(engine["lastOriginalInputs"].size).toBe(0);
   });
 
+  it("loadDocument reload and unloadDocument also clear pendingRenders (ADR-037 §4)", async () => {
+    const docId = "doc-reload-pending";
+    const mockDocA = createMockPdfDocument({ pageCount: 1 });
+    const mockDocB = createMockPdfDocument({ pageCount: 1 });
+    vi.mocked(getDocument)
+      .mockReturnValueOnce(mockGetDocumentResult(mockDocA))
+      .mockReturnValueOnce(mockGetDocumentResult(mockDocB));
+
+    await engine.init(ctx);
+    await engine.loadDocument(docId, createValidBuffer());
+    // Registra un estado de supersede directo (mismo helper que usa
+    // handleRenderRequested), sin depender de un round-trip completo del bus.
+    engine["registerPendingRender"](docId, 0, "original", 1);
+    expect(engine["pendingRenders"].size).toBeGreaterThan(0);
+
+    await engine.loadDocument(docId, createValidBuffer());
+    expect(engine["pendingRenders"].size).toBe(0);
+
+    engine["registerPendingRender"](docId, 0, "anonymized", 1);
+    expect(engine["pendingRenders"].size).toBeGreaterThan(0);
+
+    await engine.unloadDocument(docId);
+    expect(engine["pendingRenders"].size).toBe(0);
+  });
+
   it("GROUP_REPLACEMENT_CHANGED for unloaded document warns and no-ops", async () => {
     const realCtx = createEngineContextWithRealBus();
     await engine.init(realCtx);
@@ -584,5 +609,168 @@ describe("RenderEngine — edge cases", () => {
     await engine.loadDocument(docId, createValidBuffer());
 
     await expect(engine.rasterizePage(docId, 5, 2, ctx)).rejects.toThrow(InvalidInputError);
+  });
+
+  // ─── ADR-037 §2/§4 (Hito 10): guard de scale + supersede por página ───
+
+  it("scale out of range warns and no-ops via event, throws InvalidInputError via direct call", async () => {
+    const docId = "doc-scale-range";
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+    );
+    const realCtx = createEngineContextWithRealBus();
+    await engine.init(realCtx);
+    await engine.loadDocument(docId, createValidBuffer());
+    const warnSpy = vi.spyOn(realCtx.logger, "warn");
+
+    // Vía evento: fuera de rango (> MAX_RENDER_SCALE = 4) → warn + no-op.
+    realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+      documentId: docId,
+      pageIndices: [0],
+      mode: "preview",
+      scale: 5,
+    });
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("scale"),
+      expect.objectContaining({ documentId: docId, scale: 5 }),
+    );
+
+    // Vía evento: no finito → warn + no-op.
+    warnSpy.mockClear();
+    realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+      documentId: docId,
+      pageIndices: [0],
+      mode: "preview",
+      scale: Number.POSITIVE_INFINITY,
+    });
+    expect(warnSpy).toHaveBeenCalled();
+
+    // Vía invocación directa: InvalidInputError (fuera de rango, <= 0, no finito).
+    await expect(
+      engine.renderPage(
+        createRenderPageInput({ documentId: docId, pageIndex: 0, scale: 5 }),
+        realCtx,
+      ),
+    ).rejects.toThrow(InvalidInputError);
+    await expect(
+      engine.renderPage(
+        createRenderPageInput({ documentId: docId, pageIndex: 0, scale: 0 }),
+        realCtx,
+      ),
+    ).rejects.toThrow(InvalidInputError);
+    await expect(
+      engine.renderPage(
+        createRenderPageInput({ documentId: docId, pageIndex: 0, scale: Number.NaN }),
+        realCtx,
+      ),
+    ).rejects.toThrow(InvalidInputError);
+  });
+
+  it("superseded render in queue is discarded without PREVIEW_UPDATED", async () => {
+    const docId = "doc-superseded-queue";
+    const mockDoc = createMockPdfDocument({ pageCount: 2 });
+    vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(mockDoc));
+    const realCtx = createEngineContextWithRealBus();
+    await engine.init(realCtx);
+    await engine.loadDocument(docId, createValidBuffer());
+    const getPageSpy = mockDoc["getPage"] as ReturnType<typeof vi.fn>;
+
+    // Request A pide render de las páginas 0 y 1 a escala 1. renderPages
+    // procesa secuencialmente: cuando llega el segundo emit (síncrono, el bus
+    // despacha en línea), A todavía no llamó getPage para la página 1 — sigue
+    // "en cola" dentro de su propio batch.
+    realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+      documentId: docId,
+      pageIndices: [0, 1],
+      mode: "preview",
+      scale: 1,
+    });
+
+    // Request B supersede la página 1 con otra escala antes de que el batch de
+    // A llegue a ejecutarla (ADR-037 §4: descarta el pendiente en cola).
+    realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+      documentId: docId,
+      pageIndices: [1],
+      mode: "preview",
+      scale: 2,
+    });
+
+    await vi.waitFor(() => {
+      // pageNumber 2 = pageIndex 1 + 1, invocado por B.
+      expect(getPageSpy).toHaveBeenCalledWith(2);
+    });
+    // Deja asentar cualquier microtask restante del batch de A antes de contar.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    // handleRenderRequested reconstruye "original" y "anonymized" por página
+    // (06_Pipeline.md §10): B por sí solo llama getPage(2) dos veces (una por
+    // kind). Si el intento en cola de A NO se hubiera descartado, habría 4
+    // llamadas en total (2 de A + 2 de B) en vez de 2.
+    const page1Calls = getPageSpy.mock.calls.filter((call) => call[0] === 2);
+    expect(page1Calls).toHaveLength(2); // solo B (ambos kinds); A se descartó sin ejecutar.
+  });
+
+  it("superseded render in flight aborts at next checkpoint without PREVIEW_UPDATED", async () => {
+    const docId = "doc-superseded-flight";
+    let resolvePage0Render: (() => void) | undefined;
+    const page0RenderPromise = new Promise<void>((resolve) => {
+      resolvePage0Render = resolve;
+    });
+    const renderSpy = vi.fn(() => ({ promise: page0RenderPromise }));
+    const mockDoc = createMockPdfDocument({
+      pageCount: 1,
+      pageFactory: () => ({
+        getViewport: vi.fn(() => ({ width: 100, height: 100 })),
+        render: renderSpy,
+      }),
+    });
+    vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(mockDoc));
+    const realCtx = createEngineContextWithRealBus();
+    await engine.init(realCtx);
+    await engine.loadDocument(docId, createValidBuffer());
+
+    const previewUpdates: Array<{ pageIndex: number; kind: string }> = [];
+    realCtx.bus.on(EventChannel.Render, EngineEvents.PREVIEW_UPDATED, (payload) => {
+      previewUpdates.push({ pageIndex: payload.pageIndex, kind: payload.kind });
+    });
+
+    realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+      documentId: docId,
+      pageIndices: [0],
+      mode: "preview",
+      scale: 1,
+    });
+
+    // Espera a que el render de A haya arrancado su render() (pasó getPage,
+    // entró a renderPageOntoContext) y quede bloqueado esperando la promesa.
+    await vi.waitFor(() => {
+      expect(renderSpy).toHaveBeenCalled();
+    });
+
+    // Supersede: misma página/kind, otra escala. Aborta el AbortController del
+    // render en vuelo de A (ADR-037 §4).
+    realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+      documentId: docId,
+      pageIndices: [0],
+      mode: "preview",
+      scale: 2,
+    });
+
+    resolvePage0Render?.();
+
+    await vi.waitFor(() => {
+      const originalUpdates = previewUpdates.filter(
+        (u) => u.pageIndex === 0 && u.kind === "original",
+      );
+      expect(originalUpdates).toHaveLength(1);
+    });
+
+    // Deja asentar cualquier microtask restante antes de la aserción final —
+    // si el render superseded de A hubiera emitido, ya habría llegado acá.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const finalOriginalUpdates = previewUpdates.filter(
+      (u) => u.pageIndex === 0 && u.kind === "original",
+    );
+    expect(finalOriginalUpdates).toHaveLength(1); // solo B: A se descartó sin emitir.
   });
 });
