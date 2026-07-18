@@ -206,3 +206,29 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribe {
     });
   };
 }
+
+/**
+ * Suscripción **directa** de la UI al canal `pdf` para `PDF_PASSWORD_REQUIRED`
+ * (`ui/Components.md` §2.7, `ADR-034-Auditoria-Pre-Hito9-Orchestrator.md` §4:
+ * "la UI se suscribe directamente al canal pdf", a diferencia del resto de los
+ * eventos de esta suscripción-adaptador — deliberadamente **no** incluidos en
+ * `subscribe()` de arriba porque no mutan ningún store (el comentario junto a
+ * `DOCUMENT_PARSED` ya lo aclaraba). Vive acá, y no en el componente, porque
+ * `ui/Components.md` §13 regla 6 exige que las suscripciones al bus vivan en
+ * `core-adapter`, no en componentes: `PasswordDialog` llama a esta función
+ * dentro de su propio `useEffect`, que solo conecta el callback del adapter al
+ * estado local del diálogo (abrir/cerrar), sin tocar el bus directamente.
+ *
+ * No hay evento equivalente para "contraseña incorrecta": el mismo
+ * `PDF_PASSWORD_REQUIRED` se re-emite para el mismo `documentId` cuando el
+ * reintento de `retryWithPassword` vuelve a fallar (`core/Orchestrator.md` §13
+ * caso 3) — el handler recibe la misma notificación las veces que haga falta.
+ */
+export function subscribePasswordRequired(
+  bus: IEventBus,
+  handler: (documentId: string) => void,
+): Unsubscribe {
+  return bus.on(EventChannel.Pdf, EngineEvents.PDF_PASSWORD_REQUIRED, (payload) => {
+    handler(payload.documentId);
+  });
+}

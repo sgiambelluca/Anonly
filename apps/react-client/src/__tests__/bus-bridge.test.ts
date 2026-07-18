@@ -15,7 +15,7 @@ import {
 } from "@anonly/anonymization-core";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { subscribe, type Stores } from "../core-adapter/bus-bridge.js";
+import { subscribe, subscribePasswordRequired, type Stores } from "../core-adapter/bus-bridge.js";
 import { useDocumentStore } from "../store/document.store.js";
 import { useEntitiesStore } from "../store/entities.store.js";
 import { usePipelineStore } from "../store/pipeline.store.js";
@@ -400,5 +400,47 @@ describe("bus-bridge", () => {
 
     expect(usePipelineStore.getState().stage).toBe(PipelineStage.Idle);
     expect(usePipelineStore.getState().groupCount).toBe(0);
+  });
+
+  describe("subscribePasswordRequired", () => {
+    it("invokes the handler with the documentId on PDF_PASSWORD_REQUIRED", () => {
+      const bus = createEventBus({ logger: createTestLogger() });
+      const received: string[] = [];
+      const unsubscribe = subscribePasswordRequired(bus, (documentId) => {
+        received.push(documentId);
+      });
+
+      bus.emit(EventChannel.Pdf, EngineEvents.PDF_PASSWORD_REQUIRED, { documentId: "doc-1" });
+      bus.emit(EventChannel.Pdf, EngineEvents.PDF_PASSWORD_REQUIRED, { documentId: "doc-1" });
+
+      expect(received).toEqual(["doc-1", "doc-1"]);
+
+      unsubscribe();
+    });
+
+    it("stops notifying after unsubscribe", () => {
+      const bus = createEventBus({ logger: createTestLogger() });
+      const received: string[] = [];
+      const unsubscribe = subscribePasswordRequired(bus, (documentId) => {
+        received.push(documentId);
+      });
+
+      unsubscribe();
+      bus.emit(EventChannel.Pdf, EngineEvents.PDF_PASSWORD_REQUIRED, { documentId: "doc-1" });
+
+      expect(received).toEqual([]);
+    });
+
+    it("does not touch any Zustand store (no mutation side effects)", () => {
+      const bus = createEventBus({ logger: createTestLogger() });
+      const unsubscribe = subscribePasswordRequired(bus, () => {});
+
+      bus.emit(EventChannel.Pdf, EngineEvents.PDF_PASSWORD_REQUIRED, { documentId: "doc-1" });
+
+      expect(usePipelineStore.getState().stage).toBe(PipelineStage.Idle);
+      expect(useDocumentStore.getState().id).toBeNull();
+
+      unsubscribe();
+    });
   });
 });

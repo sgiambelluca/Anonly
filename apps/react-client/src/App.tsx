@@ -1,36 +1,37 @@
 /**
- * App — Esqueleto del layout de 4 paneles (Hito 1, ampliado en Hito 10 PR1/PR5).
+ * App — Esqueleto del layout de 4 paneles (Hito 1, ampliado en Hitos 10 PR1/PR5/PR6).
  *
  * Fuente de verdad: docs/ui/UX_Guidelines.md §2/§11 y docs/ui/Components.md §1.
  *
- * Este PR (Hito 10, PR5 "core-adapter") conecta el Core al bus-bridge al
- * montar. Los componentes de negocio (Toolbar real, diálogos, visor, paneles)
- * siguen siendo los PRs 6-9: este archivo solo agrega el bootstrap mínimo
- * (`initCore()`); el layout visual sigue siendo el placeholder de PR1 (Hero +
- * estados vacíos de docs/ui/UX_Guidelines.md §11).
+ * Este PR (Hito 10, PR6 "Toolbar + diálogos de flujo") reemplaza el
+ * placeholder de Toolbar de PR1 por el componente real
+ * (`components/toolbar/Toolbar.tsx`). El resto del layout (paneles de
+ * Entidades/Reglas, visor, Hero) sigue siendo el placeholder de PR1: esos
+ * componentes llegan en los PRs 7-9 (fuera de alcance de este PR).
  */
 
 import {
   FileTextIcon,
   LockIcon,
   ScanSearchIcon,
-  SettingsIcon,
   ShieldCheckIcon,
-  ShieldIcon,
   UploadIcon,
   WifiOffIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect } from "react";
 
+import { Toolbar } from "./components/toolbar/Toolbar.js";
 import { initCore } from "./core-adapter/index.js";
 
 export function App() {
   useEffect(() => {
     initCore().catch((error: unknown) => {
-      // No hay banner de error todavía (eso es PR6, Toolbar/PipelineStatus):
-      // console.error es la única salida disponible en este PR sin ocultar el
-      // fallo (no-console permite warn/error en apps/, Code_Standards.md §12).
+      // console.error es la única salida disponible acá sin ocultar el fallo
+      // (no-console permite warn/error en apps/, Code_Standards.md §12). No
+      // hay UI dedicada para un fallo de initCore en sí (distinto de
+      // PIPELINE_FAILED, que sí cubre PipelineStatus): initCore falla solo si
+      // createCore() en sí lanza, un caso fuera del alcance de este PR.
       console.error("No se pudo inicializar el Core.", error);
     });
   }, []);
@@ -43,29 +44,6 @@ export function App() {
         <RightPanel />
       </div>
     </div>
-  );
-}
-
-function Toolbar() {
-  return (
-    <header className="flex h-14 items-center justify-between border-b border-border bg-bg-primary px-4">
-      <div className="flex items-center gap-3">
-        <ShieldIcon className="h-6 w-6 text-accent" aria-hidden />
-        <div className="flex flex-col">
-          <span className="text-sm font-semibold">Anonly</span>
-          <span className="text-xs text-text-secondary">Anonimización documental local</span>
-        </div>
-      </div>
-      <div className="flex items-center gap-2">
-        <button type="button" className="anonly-button-primary" disabled>
-          <UploadIcon className="h-4 w-4" aria-hidden />
-          Importar PDF
-        </button>
-        <button type="button" className="anonly-button-ghost" disabled aria-label="Configuración">
-          <SettingsIcon className="h-4 w-4" aria-hidden />
-        </button>
-      </div>
-    </header>
   );
 }
 
