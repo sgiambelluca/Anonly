@@ -11,8 +11,13 @@ const rootDir = fileURLToPath(new URL(".", import.meta.url));
  * Cobertura:
  * - packages: src/__tests__/*.test.ts (tests de paquetes)
  * - tests: *.test.ts (tests globales: integration, perf, leak, cancel, security, stress)
+ * - apps: src/__tests__/*.test.ts (tests de apps, p. ej. react-client/core-adapter,
+ *   Hito 10 PR5 — mismo patrón que packages, sin el mismo régimen de
+ *   contract/edge ni gate de cobertura por thresholds, ai/AI_Development_Guide.md)
  *
- * Environment: node (los tests del Core no necesitan DOM).
+ * Environment: node (los tests del Core no necesitan DOM; los de
+ * apps/react-client/core-adapter tampoco: ejercitan Zustand + un IEventBus
+ * real de node, sin renderizar componentes React).
  * Los tests E2E corren con Playwright, no con Vitest.
  *
  * Notas:
@@ -56,7 +61,11 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["packages/**/src/__tests__/**/*.test.ts", "tests/**/*.test.ts"],
+    include: [
+      "packages/**/src/__tests__/**/*.test.ts",
+      "tests/**/*.test.ts",
+      "apps/**/src/__tests__/**/*.test.ts",
+    ],
     exclude: ["node_modules/**", "**/node_modules/**", "dist/**", "tests/e2e/**"],
     globals: false,
     reporters: ["default"],

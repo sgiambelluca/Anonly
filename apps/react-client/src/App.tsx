@@ -1,15 +1,13 @@
 /**
- * App — Esqueleto del layout de 4 paneles (Hito 1, ampliado en Hito 10 PR1).
+ * App — Esqueleto del layout de 4 paneles (Hito 1, ampliado en Hito 10 PR1/PR5).
  *
  * Fuente de verdad: docs/ui/UX_Guidelines.md §2/§11 y docs/ui/Components.md §1.
  *
- * Este PR (Hito 10, PR1 "Scaffold") bootea **sin Core**: no hay
- * `core-adapter`, no hay conexión al bus (eso es el PR5, ver
- * docs/roadmap/MVP.md, Hito 10). El único estado alcanzable en este PR es el
- * "vacío" de docs/ui/UX_Guidelines.md §11: Hero de bienvenida en el área de
- * visores (fila "App recién abierta, sin documento") + estados vacíos por
- * panel en Entidades/Reglas. La lógica real (stores conectados al bus,
- * componentes de negocio) se implementa en los PRs siguientes del hito.
+ * Este PR (Hito 10, PR5 "core-adapter") conecta el Core al bus-bridge al
+ * montar. Los componentes de negocio (Toolbar real, diálogos, visor, paneles)
+ * siguen siendo los PRs 6-9: este archivo solo agrega el bootstrap mínimo
+ * (`initCore()`); el layout visual sigue siendo el placeholder de PR1 (Hero +
+ * estados vacíos de docs/ui/UX_Guidelines.md §11).
  */
 
 import {
@@ -23,8 +21,20 @@ import {
   WifiOffIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
+import { useEffect } from "react";
+
+import { initCore } from "./core-adapter/index.js";
 
 export function App() {
+  useEffect(() => {
+    initCore().catch((error: unknown) => {
+      // No hay banner de error todavía (eso es PR6, Toolbar/PipelineStatus):
+      // console.error es la única salida disponible en este PR sin ocultar el
+      // fallo (no-console permite warn/error en apps/, Code_Standards.md §12).
+      console.error("No se pudo inicializar el Core.", error);
+    });
+  }, []);
+
   return (
     <div className="flex h-screen flex-col overflow-hidden">
       <Toolbar />
