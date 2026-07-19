@@ -1,13 +1,16 @@
 /**
- * App — Esqueleto del layout de 4 paneles (Hito 1, ampliado en Hitos 10 PR1/PR5/PR6).
+ * App — Esqueleto del layout de 4 paneles (Hito 1, ampliado en Hitos 10
+ * PR1/PR5/PR6/PR7).
  *
  * Fuente de verdad: docs/ui/UX_Guidelines.md §2/§11 y docs/ui/Components.md §1.
  *
- * Este PR (Hito 10, PR6 "Toolbar + diálogos de flujo") reemplaza el
- * placeholder de Toolbar de PR1 por el componente real
- * (`components/toolbar/Toolbar.tsx`). El resto del layout (paneles de
- * Entidades/Reglas, visor, Hero) sigue siendo el placeholder de PR1: esos
- * componentes llegan en los PRs 7-9 (fuera de alcance de este PR).
+ * Este PR (Hito 10, PR7 "Visor") reemplaza el placeholder del área de
+ * visores por `SideBySideViewer` + `ZoomControls` cuando hay un documento
+ * cargado (`document.store.id !== null`); el Hero sigue siendo el estado
+ * vacío sin documento (`UX_Guidelines.md` §11, fila "App recién abierta, sin
+ * documento"). Los paneles de Entidades/Reglas siguen siendo el placeholder
+ * de PR1: esos componentes llegan en los PRs 8-9 (fuera de alcance de este
+ * PR).
  */
 
 import {
@@ -22,7 +25,10 @@ import type { ReactNode } from "react";
 import { useEffect } from "react";
 
 import { Toolbar } from "./components/toolbar/Toolbar.js";
+import { SideBySideViewer } from "./components/viewer/SideBySideViewer.js";
+import { ZoomControls } from "./components/viewer/ZoomControls.js";
 import { initCore } from "./core-adapter/index.js";
+import { useDocumentStore } from "./store/document.store.js";
 
 export function App() {
   useEffect(() => {
@@ -71,12 +77,24 @@ function LeftPanel() {
 }
 
 function RightPanel() {
-  // Sin core-adapter (PR5), nunca hay documento cargado en este PR: el área
-  // de visores siempre muestra el Hero de bienvenida
-  // (docs/ui/UX_Guidelines.md §11, fila "App recién abierta, sin documento").
+  const hasDocument = useDocumentStore((state) => state.id !== null);
+
+  if (!hasDocument) {
+    // Sin documento cargado, el área de visores muestra el Hero de bienvenida
+    // (docs/ui/UX_Guidelines.md §11, fila "App recién abierta, sin documento").
+    return (
+      <main className="flex flex-1 flex-col overflow-hidden">
+        <Hero />
+      </main>
+    );
+  }
+
   return (
-    <main className="flex flex-1 flex-col overflow-hidden">
-      <Hero />
+    <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div className="flex h-10 shrink-0 items-center justify-end border-b border-border bg-bg-primary px-3">
+        <ZoomControls />
+      </div>
+      <SideBySideViewer />
     </main>
   );
 }
