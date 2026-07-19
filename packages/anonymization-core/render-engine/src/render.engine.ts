@@ -1,7 +1,7 @@
 /**
  * @anonly/render-engine — `RenderEngine` (implementa `IEngine`).
  *
- * Fuente de verdad: docs/core/Render_Engine.md (v1.2.0, ADR-030, ADR-031, ADR-034).
+ * Fuente de verdad: docs/core/Render_Engine.md (v1.3.1, ADR-030, ADR-031, ADR-034, ADR-037).
  *
  * ADR-021 (motores inline hasta Hito 9): sin pool propio, sin Workers
  * propios — el motor sigue corriendo inline en Hito 9 (el `RenderPool` del
@@ -76,46 +76,52 @@
  *       por bytes (`PREVIEW_CACHE_MAX_BYTES`), evaluado junto al límite por
  *       items (`cachePages`) en cada eviction.
  *    c. Supersede por página: `pendingRenders` (`Map<"documentId:pageIndex:kind",
- *       { scale, controller }>`) registra, para cada `RENDER_REQUESTED`, la
- *       escala vigente por `(documentId, pageIndex, kind)`. Si una escala
- *       nueva reemplaza a una pendiente, el `AbortController` de la anterior
- *       se aborta. `renderPage` chequea esta tabla en varios checkpoints
- *       (mismos puntos que el chequeo de `ctx.abortSignal`, vía
- *       `throwIfSuperseded`): si su propia escala ya no coincide con la
- *       vigente, o su controller fue abortado, lanza `CancelledError` — lo
- *       que permite descartar un render "en cola" antes de que arranque, o
- *       abortar uno "en vuelo" en su próximo checkpoint, sin ejecutar ni
- *       emitir `PREVIEW_UPDATED`. `renderPages` distingue esta cancelación
- *       (page-local, no aborta el resto del batch, no emite
- *       `PREVIEW_PAGE_FAILED`) de una cancelación real de `ctx.abortSignal`
- *       (aborta el batch completo, comportamiento preexistente) mirando si
- *       `ctx.abortSignal.aborted` es la causa. Este mecanismo es enteramente
- *       interno al motor (no usa `CANCEL_REQUESTED` ni el `AbortRegistry` del
- *       Orchestrator, ADR-037 §4) y solo lo alimenta `handleRenderRequested`:
- *       invocaciones directas de `renderPage`/`renderPages` (tests, o el
- *       Orchestrator para export/OCR) nunca encuentran una entrada en
- *       `pendingRenders` para su propia clave y no se ven afectadas.
+ *       escalaVigente>`) registra, para cada `RENDER_REQUESTED`, la escala
+ *       vigente por `(documentId, pageIndex, kind)`. Participan del mecanismo
+ *       ÚNICAMENTE los renders originados en `handleRenderRequested`, que
+ *       invoca `renderPagesInternal` con `participatesInSupersede = true`: en
+ *       sus checkpoints (mismos puntos que el chequeo de `ctx.abortSignal`,
+ *       vía `throwIfSuperseded`) lanzan `CancelledError` si su escala ya no
+ *       coincide con la vigente — lo que descarta un render "en cola" antes
+ *       de que arranque, o aborta uno "en vuelo" en su próximo checkpoint,
+ *       sin ejecutar ni emitir `PREVIEW_UPDATED`. `renderPagesInternal`
+ *       distingue esa cancelación (page-local: no aborta el resto del batch,
+ *       no emite `PREVIEW_PAGE_FAILED`) de una cancelación real de
+ *       `ctx.abortSignal` (aborta el batch completo, comportamiento
+ *       preexistente) mirando si `ctx.abortSignal.aborted` es la causa. El
+ *       mecanismo es enteramente interno al motor (no usa `CANCEL_REQUESTED`
+ *       ni el `AbortRegistry` del Orchestrator, ADR-037 §4).
  *
- *       LIMITACIÓN CONOCIDA (hallazgo de revisión del PR4, no resuelto acá):
- *       las entradas de `pendingRenders` solo se limpian en `dispose`/
- *       `unloadDocument`/`loadDocument` (reload), nunca al completar un
- *       render con éxito. Si un preview a `previewScale` completa y deja su
- *       entrada colgada, una invocación directa posterior con otra escala
- *       para la misma clave (p. ej. un export en `mode: "full"` de la misma
- *       página) puede cancelarse espuriamente. No se puede resolver
- *       simplemente limpiando la entrada al completar: eso reintroduce una
- *       carrera con el propio mecanismo de supersede (un request superado
- *       "A" que todavía no llegó a su checkpoint dejaría de detectar que
- *       fue reemplazado por "B" si "B" ya completó y limpió la entrada
- *       primero). El fix correcto requiere distinguir invocaciones
- *       originadas en `handleRenderRequested` (deben participar del
- *       supersede) de invocaciones directas (deben ser inmunes a él),
- *       algo que hoy ambas comparten sin distinción vía `renderPage`/
- *       `renderPages`. Pendiente de diseño (ADR-037 es explícito en la
- *       clave `(documentId, pageIndex, kind)` sin `mode`; el fix no debería
- *       requerir cambiarla). No bloqueante hasta que la UI emita
- *       `RENDER_REQUESTED` desde el visor (Hito 10, PR7) y el export (PR9)
- *       puedan interactuar en la práctica.
+ *       Alcance del supersede (resolución del hallazgo de revisión del PR4
+ *       del Hito 10, antes "LIMITACIÓN CONOCIDA" en esta nota): las
+ *       invocaciones DIRECTAS de `renderPage`/`renderPages` (export del
+ *       Orchestrator vía `RenderPageProvider.renderFull`, tests, y el delta
+ *       render interno de `requestDeltaRender`) pasan
+ *       `participatesInSupersede = false` y NUNCA consultan `pendingRenders`:
+ *       son inmunes por construcción a las entradas que deja el flujo por
+ *       eventos (`rasterizePage` nunca participó del mecanismo). Antes ambas
+ *       vías compartían el checkpoint en `renderPage`, y una entrada residual
+ *       de un preview ya completado a otra escala cancelaba espuriamente un
+ *       export posterior en `mode: "full"` de la misma página (la clave no
+ *       incluye `mode`, decisión literal de ADR-037 §4, que este fix NO
+ *       cambia) o un delta render.
+ *
+ *       Las entradas de `pendingRenders` NO se limpian al completar un render
+ *       (solo en `dispose`/`unloadDocument`/`loadDocument` reload), y es
+ *       deliberado: la entrada significa "última escala pedida por evento
+ *       para esta clave", no "hay un render en curso". Limpiarla al completar
+ *       reintroduce una carrera con el propio supersede-en-cola: si el
+ *       request ganador B completa y borra la entrada antes de que el
+ *       perdedor A (todavía en cola) llegue a su checkpoint, A no encuentra
+ *       entrada y ejecuta como si no hubiera sido superado. Una entrada
+ *       residual es inofensiva: un próximo request por evento a la misma
+ *       escala coincide y procede, uno a otra escala la reemplaza, y las
+ *       invocaciones directas no la miran. Memoria acotada: ≤ 2 entradas
+ *       (una por kind) por página por documento cargado. La detección es por
+ *       comparación de escala pura; el `AbortController` por entrada de la
+ *       versión inicial del PR4 era código muerto (hallazgo cosmético del
+ *       revisor: el `.abort()` solo alcanzaba a la entrada ya reemplazada,
+ *       nunca a la vigente) y se eliminó junto con este fix.
  */
 
 import {
@@ -174,16 +180,6 @@ interface GroupOverride {
   readonly mode?: ReplacementMode;
   readonly value?: string;
   readonly enabled?: boolean;
-}
-
-/**
- * Estado de supersede por `(documentId, pageIndex, kind)` (ver nota 6 de
- * arriba, ADR-037 §4): `scale` es la escala vigente para esa clave; `controller`
- * se aborta cuando una escala distinta la reemplaza.
- */
-interface PendingRenderState {
-  readonly scale: number;
-  readonly controller: AbortController;
 }
 
 function scaleBbox(bbox: BoundingBox, scale: number): BoundingBox {
@@ -322,9 +318,11 @@ export class RenderEngine implements IEngine {
   private readonly lastOriginalInputs = new Map<string, RenderPageInput>();
   // Overrides pendientes por (documentId, groupId) — ver nota de implementación 2.
   private readonly groupOverrides = new Map<string, Map<string, GroupOverride>>();
-  // Supersede por página (ADR-037 §4, nota de implementación 6) — clave
-  // `documentId:pageIndex:kind`, poblada únicamente por handleRenderRequested.
-  private readonly pendingRenders = new Map<string, PendingRenderState>();
+  // Supersede por página (ADR-037 §4, nota 6c de cabecera) — clave
+  // `documentId:pageIndex:kind` → escala vigente registrada por el último
+  // RENDER_REQUESTED. Poblada únicamente por handleRenderRequested y
+  // consultada solo por renders con participatesInSupersede = true.
+  private readonly pendingRenders = new Map<string, number>();
 
   init(ctx: EngineContext): Promise<void> {
     this.ctx = ctx;
@@ -394,7 +392,21 @@ export class RenderEngine implements IEngine {
     return Promise.resolve();
   }
 
+  /**
+   * Render directo de una página (§6). No participa del supersede por página
+   * de ADR-037 §4 (spec §13 caso 21): las entradas de `pendingRenders` que
+   * deja el flujo de `RENDER_REQUESTED` no afectan a esta vía (export del
+   * Orchestrator, delta render, tests) — ver nota 6c de cabecera.
+   */
   async renderPage(input: RenderPageInput, ctx: EngineContext): Promise<RenderPageOutput> {
+    return this.renderPageInternal(input, ctx, false);
+  }
+
+  private async renderPageInternal(
+    input: RenderPageInput,
+    ctx: EngineContext,
+    participatesInSupersede: boolean,
+  ): Promise<RenderPageOutput> {
     this.assertNotDisposed();
     this.assertInitialized();
 
@@ -441,10 +453,21 @@ export class RenderEngine implements IEngine {
       (mode === "preview" ? ctx.config.render.previewScale : ctx.config.render.fullScale);
     const imageFormat = input.imageFormat ?? (mode === "preview" ? "png" : "jpeg");
 
-    // ADR-037 §4: checkpoint de supersede — un render "en cola" (nota 6 de
-    // cabecera) se descarta acá, antes de tocar rememberInput/cache, sin haber
-    // ejecutado nada.
-    this.throwIfSuperseded(ctx, documentId, pageIndex, kind, scale);
+    // ADR-037 §4, alcance precisado por el hallazgo del PR4 (nota 6c de
+    // cabecera): solo los renders originados en RENDER_REQUESTED participan
+    // del supersede; en la vía directa el checkpoint degrada al chequeo
+    // preexistente de ctx.abortSignal.
+    const checkpoint = participatesInSupersede
+      ? (): void => {
+          this.throwIfSuperseded(ctx, documentId, pageIndex, kind, scale);
+        }
+      : (): void => {
+          if (ctx.abortSignal.aborted) throw new CancelledError(documentId);
+        };
+
+    // ADR-037 §4: primer checkpoint — un render por evento "en cola" se
+    // descarta acá, antes de tocar rememberInput/cache, sin haber ejecutado nada.
+    checkpoint();
 
     this.rememberInput(input, replacements, annotations);
 
@@ -474,7 +497,7 @@ export class RenderEngine implements IEngine {
       throw this.toPageFailure(documentId, pageIndex, err);
     }
 
-    this.throwIfSuperseded(ctx, documentId, pageIndex, kind, scale);
+    checkpoint();
 
     const viewport = pageProxy.getViewport({ scale });
     const canvas = this.createCanvas(documentId, pageIndex, viewport.width, viewport.height);
@@ -493,7 +516,7 @@ export class RenderEngine implements IEngine {
       throw this.toPageFailure(documentId, pageIndex, err);
     }
 
-    this.throwIfSuperseded(ctx, documentId, pageIndex, kind, scale);
+    checkpoint();
 
     if (kind === "anonymized") {
       this.paintReplacements(context2d, replacements, scale, ctx.abortSignal, documentId);
@@ -501,7 +524,7 @@ export class RenderEngine implements IEngine {
       this.paintAnnotations(context2d, annotations, scale, ctx.abortSignal, documentId);
     }
 
-    this.throwIfSuperseded(ctx, documentId, pageIndex, kind, scale);
+    checkpoint();
 
     const imageData = context2d.getImageData(0, 0, viewport.width, viewport.height);
     const durationMs = Date.now() - startedAt;
@@ -617,9 +640,21 @@ export class RenderEngine implements IEngine {
     return context2d.getImageData(0, 0, viewport.width, viewport.height);
   }
 
+  /**
+   * Render directo de un batch (§6). Igual que `renderPage`, no participa del
+   * supersede por página (spec §13 caso 21) — ver nota 6c de cabecera.
+   */
   async renderPages(
     inputs: ReadonlyArray<RenderPageInput>,
     ctx: EngineContext,
+  ): Promise<ReadonlyArray<RenderPageOutput>> {
+    return this.renderPagesInternal(inputs, ctx, false);
+  }
+
+  private async renderPagesInternal(
+    inputs: ReadonlyArray<RenderPageInput>,
+    ctx: EngineContext,
+    participatesInSupersede: boolean,
   ): Promise<ReadonlyArray<RenderPageOutput>> {
     this.assertNotDisposed();
     this.assertInitialized();
@@ -650,7 +685,7 @@ export class RenderEngine implements IEngine {
           throw new CancelledError(documentId);
         }
         try {
-          const output = await this.renderPage(input, ctx);
+          const output = await this.renderPageInternal(input, ctx, participatesInSupersede);
           outputs.push(output);
           pageIndices.push(input.pageIndex);
           succeeded = true;
@@ -660,8 +695,10 @@ export class RenderEngine implements IEngine {
             // ADR-037 §4: distingue una cancelación real de batch/pipeline
             // (ctx.abortSignal, comportamiento preexistente: aborta todo el
             // batch) de un supersede page-local (throwIfSuperseded dentro de
-            // renderPage): se descarta esta página sin emitir nada y se
-            // continúa con las demás del batch.
+            // renderPageInternal): se descarta esta página sin emitir nada y
+            // se continúa con las demás del batch. En la vía directa
+            // (participatesInSupersede = false) un CancelledError solo puede
+            // venir de ctx.abortSignal, así que siempre re-lanza.
             if (ctx.abortSignal.aborted) throw err;
             superseded = true;
             break;
@@ -710,6 +747,10 @@ export class RenderEngine implements IEngine {
     // Sin caller síncrono al que lanzarle (mismo tratamiento que las vías por
     // evento, ADR-030 §3): si el motor no está listo o el documento no está
     // cargado, se ignora silenciosamente (con warning cuando hay logger).
+    // El delta render usa la vía directa de renderPage: NO participa del
+    // supersede por página (nota 6c de cabecera; observación PR4 — antes una
+    // entrada de RENDER_REQUESTED a otra escala podía cancelarlo espuriamente
+    // y el cambio de grupo se perdía visualmente hasta el próximo evento).
     if (this.disposed || !this.initialized || this.ctx === null) return;
     const ctx = this.ctx;
 
@@ -824,8 +865,9 @@ export class RenderEngine implements IEngine {
       const key = pageKey(payload.documentId, pageIndex);
 
       // ADR-037 §4: registra la escala vigente para "original" y "anonymized"
-      // de esta página — aborta/descarta cualquier render pendiente con otra
-      // escala para la misma clave (ver nota 6 de cabecera).
+      // de esta página — cualquier render POR EVENTO pendiente con otra escala
+      // para la misma clave se descarta/aborta en su próximo checkpoint
+      // (ver nota 6c de cabecera).
       this.registerPendingRender(payload.documentId, pageIndex, "original", effectiveScale);
       this.registerPendingRender(payload.documentId, pageIndex, "anonymized", effectiveScale);
 
@@ -857,7 +899,9 @@ export class RenderEngine implements IEngine {
       );
     }
 
-    void this.renderPages(inputs, ctx).catch((err: unknown) => {
+    // Única vía que participa del supersede (nota 6c de cabecera): los
+    // renders de este batch chequean pendingRenders en sus checkpoints.
+    void this.renderPagesInternal(inputs, ctx, true).catch((err: unknown) => {
       if (err instanceof CancelledError) return;
       ctx.logger.warn("Fallo al procesar RENDER_REQUESTED.", {
         documentId: payload.documentId,
@@ -933,12 +977,15 @@ export class RenderEngine implements IEngine {
   // ─── Supersede por página (ADR-037 §4, nota 6 de cabecera) ───
 
   /**
-   * Registra `scale` como la escala vigente para `(documentId, pageIndex, kind)`.
-   * Si ya había una escala distinta pendiente, aborta su `AbortController`
-   * (descarta el render en cola / interrumpe el que está en vuelo en su
-   * próximo checkpoint, vía `throwIfSuperseded`). Poblado únicamente desde
-   * `handleRenderRequested`: invocaciones directas de `renderPage`/`renderPages`
-   * nunca encuentran una entrada para su propia clave.
+   * Registra `scale` como la escala vigente para `(documentId, pageIndex, kind)`
+   * del flujo por eventos. Un render por evento ya en cola o en vuelo para esa
+   * clave con OTRA escala detecta el reemplazo en su próximo checkpoint
+   * (`throwIfSuperseded`) y se descarta. Poblado únicamente desde
+   * `handleRenderRequested`; las entradas persisten hasta `unloadDocument`/
+   * `loadDocument` (reload)/`dispose` — deliberadamente NO se limpian al
+   * completar un render (nota 6c de cabecera: limpiarlas reintroduce la
+   * carrera en la que el "perdedor" en cola deja de detectar que fue superado
+   * si el "ganador" completa y borra la entrada primero).
    */
   private registerPendingRender(
     documentId: string,
@@ -946,19 +993,18 @@ export class RenderEngine implements IEngine {
     kind: "original" | "anonymized",
     scale: number,
   ): void {
-    const key = supersedeKey(documentId, pageIndex, kind);
-    const existing = this.pendingRenders.get(key);
-    if (existing !== undefined && existing.scale === scale) return; // mismo request ya vigente.
-    if (existing !== undefined) existing.controller.abort();
-    this.pendingRenders.set(key, { scale, controller: new AbortController() });
+    this.pendingRenders.set(supersedeKey(documentId, pageIndex, kind), scale);
   }
 
   /**
-   * Checkpoint combinado (ctx.abortSignal + supersede de página) — mismos
-   * puntos donde antes solo se chequeaba `ctx.abortSignal.aborted`. Lanza
-   * `CancelledError` si el batch fue cancelado, o si un `RENDER_REQUESTED`
-   * más reciente con otra escala ya reemplazó a este render para la misma
-   * `(documentId, pageIndex, kind)` (ADR-037 §4).
+   * Checkpoint combinado (ctx.abortSignal + supersede de página) del flujo por
+   * eventos — mismos puntos donde la vía directa solo chequea
+   * `ctx.abortSignal.aborted`. Lanza `CancelledError` si el batch fue
+   * cancelado, o si un `RENDER_REQUESTED` más reciente registró OTRA escala
+   * para la misma `(documentId, pageIndex, kind)` (ADR-037 §4). Solo lo
+   * invocan renders con `participatesInSupersede = true` (originados en
+   * `handleRenderRequested`); las invocaciones directas nunca llegan acá
+   * (nota 6c de cabecera, spec §13 caso 21).
    */
   private throwIfSuperseded(
     ctx: EngineContext,
@@ -970,9 +1016,8 @@ export class RenderEngine implements IEngine {
     if (ctx.abortSignal.aborted) {
       throw new CancelledError(documentId);
     }
-    const pending = this.pendingRenders.get(supersedeKey(documentId, pageIndex, kind));
-    if (pending === undefined) return;
-    if (pending.scale !== scale || pending.controller.signal.aborted) {
+    const pendingScale = this.pendingRenders.get(supersedeKey(documentId, pageIndex, kind));
+    if (pendingScale !== undefined && pendingScale !== scale) {
       throw new CancelledError(documentId);
     }
   }

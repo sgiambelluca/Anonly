@@ -5,8 +5,10 @@
 > Renderiza páginas del PDF (original o anonimado) a imágenes usando OffscreenCanvas en Web Workers. Produce highlight de grupos habilitados y aplica reemplazos visualmente según `ReplacementMode`. Soporta preview incremental y render full para export.
 
 **EngineId**: `render`
-**Versión del spec**: 1.3.0
-**Última actualización**: 2026-07-17
+**Versión del spec**: 1.3.1
+**Última actualización**: 2026-07-19
+
+> **Nota (2026-07-19, hallazgo de revisión Hito 10 PR4)**: alcance del supersede de ADR-037 §4 precisado — participa únicamente el flujo originado en `RENDER_REQUESTED` (§8); las invocaciones directas de `renderPage`/`renderPages` (export del Orchestrator vía `RenderPageProvider`, tests) y el delta render interno son inmunes a las entradas de supersede que ese flujo deja registradas (§13 caso 21). `rasterizePage` nunca participó del mecanismo. Sin cambio de contrato público (detalle de implementación interno del motor; no requiere ADR): interfaz de §6, eventos y la clave `(documentId, pageIndex, kind)` de ADR-037 §4 quedan idénticos.
 
 > **Nota (ADR-034, 2026-07-16)**: dos ampliaciones de contrato para el Hito 9: (1) `rasterizePage(documentId, pageIndex, scale, ctx)` — rasterización pura a `ImageData` para el flujo OCR del Orchestrator, **sin** emisión de eventos ni cache LRU (§6); (2) `RenderPageOutput.encoded?: EncodedPageImage`, presente cuando `mode === "full"`, con los bytes codificados que consume el `RenderPageProvider` del Orchestrator (§6, §10; `EncodedPageImage` es canónico de `Contracts.md` §7 desde ADR-034 §3). La creación real del blob de `PREVIEW_UPDATED` (`convertToBlob`, reemplaza el placeholder inline de ADR-031 §5) también llega en el Hito 9.
 
@@ -162,7 +164,7 @@ Canal: `EventChannel.Render`.
 
 | Evento | Cuándo | Acción |
 |---|---|---|
-| `RENDER_REQUESTED` (canal `ui`) | usuario pide preview/export | `renderPages` con los `pageIndices` indicados y el `scale` recibido (ausente → `previewScale`/`fullScale` según `mode`, ADR-037 §1); si hay un render pendiente en cola o en vuelo para la misma `(documentId, pageIndex, kind)` con otra escala, se descarta/aborta sin emitir `PREVIEW_UPDATED` (supersede, ADR-037 §4) |
+| `RENDER_REQUESTED` (canal `ui`) | usuario pide preview/export | `renderPages` con los `pageIndices` indicados y el `scale` recibido (ausente → `previewScale`/`fullScale` según `mode`, ADR-037 §1); si hay un render pendiente en cola o en vuelo para la misma `(documentId, pageIndex, kind)` con otra escala, se descarta/aborta sin emitir `PREVIEW_UPDATED` (supersede, ADR-037 §4 — solo entre renders originados por `RENDER_REQUESTED`; las invocaciones directas de `renderPage`/`renderPages` y el delta render no participan, caso 21) |
 | `GROUP_REPLACEMENT_CHANGED` (canal `grouping`) | cambio de modo/valor en un grupo | `requestDeltaRender(documentId, [groupId])` |
 | `GROUP_TOGGLED` (canal `grouping`) | grupo habilitado/deshabilitado | `requestDeltaRender` |
 
@@ -265,6 +267,7 @@ El `ImageData` se transfiere zero-copy al host. El host lo convierte a `Blob` y 
 18. **Zoom cambia mientras hay un render en cola/en vuelo para la misma página (ADR-037 §4)**: el pendiente en cola se descarta sin ejecutarse; el que está en vuelo se aborta en su próximo checkpoint de Canvas; ninguno de los dos emite `PREVIEW_UPDATED`. Solo el request final (post-debounce de la UI) llega a completarse.
 19. **`RENDER_REQUESTED.scale` fuera de rango o no finito**: `warn` + no-op del evento (sin caller al que lanzarle); vía `renderPage`/`renderPages` directo: `InvalidInputError` (ADR-037 §2).
 20. **Cache a distintas escalas del mismo `(documentId, pageIndex, kind, mode)`**: coexisten como entradas separadas del LRU (clave incluye `scale`); compiten por `cachePages` y `PREVIEW_CACHE_MAX_BYTES` igual que cualquier otra entrada (ADR-037 §3).
+21. **Invocación directa vs. supersede (hallazgo de revisión Hito 10 PR4)**: las entradas de supersede que registra el flujo de `RENDER_REQUESTED` solo afectan a renders originados por ese mismo flujo. Una invocación directa (`renderPage`/`renderPages` — p. ej. el export del Orchestrator en `mode: "full"` — o el delta render interno de `requestDeltaRender`) nunca las consulta: un export posterior a un preview por evento a otra escala se ejecuta siempre, aunque la entrada del preview siga registrada. Las entradas persisten hasta `unloadDocument`/`loadDocument` (reload)/`dispose` — deliberadamente NO se limpian al completar un render: limpiarlas reintroduce la carrera en la que un render en cola ya superado deja de detectar su reemplazo si el ganador completa y borra la entrada primero. `rasterizePage` no participa del mecanismo (ADR-034 §1).
 
 ---
 
@@ -305,6 +308,8 @@ El `ImageData` se transfiere zero-copy al host. El host lo convierte a `Blob` y 
 | `scale out of range warns and no-ops via event, throws InvalidInputError via direct call` | `edge.test.ts` | edge | caso 19 (ADR-037 §2) |
 | `superseded render in queue is discarded without PREVIEW_UPDATED` | `edge.test.ts` | edge | caso 18 (ADR-037 §4) |
 | `superseded render in flight aborts at next checkpoint without PREVIEW_UPDATED` | `edge.test.ts` | edge | caso 18 (ADR-037 §4) |
+| `direct full render (export) ignores supersede entry left by a completed event render at another scale` | `edge.test.ts` | edge | caso 21 (hallazgo PR4 Hito 10) |
+| `delta render ignores supersede entry at another scale (group change is not lost)` | `edge.test.ts` | edge | caso 21 (hallazgo PR4 Hito 10) |
 | `cache key includes scale; different scales coexist` | `unit.test.ts` | unit | caso 20 (ADR-037 §3) |
 | `cache evicts by PREVIEW_CACHE_MAX_BYTES in addition to cachePages` | `unit.test.ts` | unit | ADR-037 §3 |
 

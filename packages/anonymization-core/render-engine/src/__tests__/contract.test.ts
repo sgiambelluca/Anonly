@@ -237,13 +237,26 @@ describe("RenderEngine — contract tests", () => {
 
   it("RENDER_REQUESTED propagates scale to renderPages", async () => {
     const docId = "doc-scale-propagate";
-    const mockDoc = createMockPdfDocument({ pageCount: 1 });
+    // Se observa la propagación en su efecto contractual (la escala con la que
+    // se construye el viewport de cada página del batch), no espiando el
+    // método por el que pasa: desde el fix del supersede (nota 6c de
+    // render.engine.ts) el handler despacha por la vía interna
+    // `renderPagesInternal` (con supersede), no por el `renderPages` público.
+    const getViewportSpy = vi.fn(({ scale }: { scale: number }) => ({
+      width: 100 * scale,
+      height: 100 * scale,
+    }));
+    const mockDoc = createMockPdfDocument({
+      pageCount: 1,
+      pageFactory: () => ({
+        getViewport: getViewportSpy,
+        render: vi.fn(() => ({ promise: Promise.resolve() })),
+      }),
+    });
     vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(mockDoc));
     const realCtx = createEngineContextWithRealBus();
     await engine.init(realCtx);
     await engine.loadDocument(docId, createValidBuffer());
-
-    const renderPagesSpy = vi.spyOn(engine, "renderPages");
 
     realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
       documentId: docId,
@@ -253,13 +266,14 @@ describe("RenderEngine — contract tests", () => {
     });
 
     await vi.waitFor(() => {
-      expect(renderPagesSpy).toHaveBeenCalled();
+      expect(getViewportSpy).toHaveBeenCalledWith({ scale: 3 });
     });
 
-    const calledInputs = renderPagesSpy.mock.calls[0]?.[0] ?? [];
-    expect(calledInputs.length).toBeGreaterThan(0);
-    for (const input of calledInputs) {
-      expect(input.scale).toBe(3);
+    // El batch reconstruye "original" y "anonymized" por página (nota 1 de
+    // render.engine.ts): TODOS los renders del request usan la escala del evento.
+    expect(getViewportSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
+    for (const call of getViewportSpy.mock.calls) {
+      expect(call[0]?.scale).toBe(3);
     }
   });
 });

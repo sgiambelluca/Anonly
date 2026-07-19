@@ -773,4 +773,104 @@ describe("RenderEngine — edge cases", () => {
     );
     expect(finalOriginalUpdates).toHaveLength(1); // solo B: A se descartó sin emitir.
   });
+
+  // ─── Caso 21 (hallazgo de revisión Hito 10 PR4): el supersede solo aplica al
+  // flujo por eventos; las invocaciones directas son inmunes a sus entradas ───
+
+  it("direct full render (export) ignores supersede entry left by a completed event render at another scale", async () => {
+    const docId = "doc-export-immune";
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+    );
+    const realCtx = createEngineContextWithRealBus();
+    await engine.init(realCtx);
+    await engine.loadDocument(docId, createValidBuffer());
+
+    // Preview vía RENDER_REQUESTED a escala 1: completa con éxito y deja su
+    // entrada de supersede registrada (las entradas no se limpian al completar,
+    // deliberadamente — ver nota 6c de render.engine.ts).
+    let renderFinished = false;
+    realCtx.bus.on(EventChannel.Render, EngineEvents.RENDER_FINISHED, () => {
+      renderFinished = true;
+    });
+    realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+      documentId: docId,
+      pageIndices: [0],
+      mode: "preview",
+      scale: 1,
+    });
+    await vi.waitFor(() => {
+      expect(renderFinished).toBe(true);
+    });
+    // Premisa del bug: la entrada del preview sigue registrada tras completar.
+    expect(engine["pendingRenders"].size).toBeGreaterThan(0);
+
+    // Export directo del Orchestrator (RenderPageProvider.renderFull →
+    // renderPage con mode "full" y otra escala): antes del fix, la entrada
+    // residual del preview (escala 1 ≠ 2) lo cancelaba espuriamente con
+    // CancelledError. La invocación directa no participa del supersede.
+    const output = await engine.renderPage(
+      createRenderPageInput({
+        documentId: docId,
+        pageIndex: 0,
+        kind: "anonymized",
+        mode: "full",
+        scale: 2,
+        replacements: [makeReplacement({ groupId: "g1" })],
+      }),
+      realCtx,
+    );
+
+    expect(output.pageIndex).toBe(0);
+    expect(output.kind).toBe("anonymized");
+    expect(output.encoded).toBeDefined(); // mode "full" → bytes para el export (ADR-034 §3).
+  });
+
+  it("delta render ignores supersede entry at another scale (group change is not lost)", async () => {
+    const docId = "doc-delta-immune";
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+    );
+    const realCtx = createEngineContextWithRealBus();
+    await engine.init(realCtx);
+    await engine.loadDocument(docId, createValidBuffer());
+
+    // Render directo previo: recuerda el input de la página (escala 2) y
+    // construye el índice pageIndex → groupIds para el delta render.
+    await engine.renderPage(
+      createRenderPageInput({
+        documentId: docId,
+        pageIndex: 0,
+        kind: "anonymized",
+        mode: "preview",
+        scale: 2,
+        replacements: [makeReplacement({ groupId: "g1" })],
+      }),
+      realCtx,
+    );
+
+    // Simula un RENDER_REQUESTED vigente a OTRA escala para la misma clave
+    // (mismo helper que usa handleRenderRequested; mismo patrón white-box que
+    // el test de reload de pendingRenders de arriba).
+    engine["registerPendingRender"](docId, 0, "anonymized", 1);
+    resetCreatedCanvases();
+
+    // GROUP_TOGGLED → requestDeltaRender → renderPage directo con el input
+    // recordado (escala 2). Antes del fix, la entrada a escala 1 lo cancelaba
+    // espuriamente y el cambio de grupo se perdía visualmente (observación
+    // PR4, Hito10_Observaciones_Revision.md).
+    realCtx.bus.emit(EventChannel.Grouping, EngineEvents.GROUP_TOGGLED, {
+      documentId: docId,
+      groupId: "g1",
+      enabled: false,
+    });
+
+    await vi.waitFor(() => {
+      expect(getCreatedCanvases().length).toBeGreaterThan(0);
+    });
+    const [canvas] = getCreatedCanvases();
+    // Grupo deshabilitado → sin texto de reemplazo (§13 caso 2): el delta
+    // render corrió de verdad y aplicó el toggle.
+    expect(canvas!.calls.filter((c) => c.op === "fillText")).toHaveLength(0);
+  });
 });
