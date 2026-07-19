@@ -1,16 +1,17 @@
 /**
  * App — Esqueleto del layout de 4 paneles (Hito 1, ampliado en Hitos 10
- * PR1/PR5/PR6/PR7).
+ * PR1/PR5/PR6/PR7/PR8).
  *
  * Fuente de verdad: docs/ui/UX_Guidelines.md §2/§11 y docs/ui/Components.md §1.
  *
- * Este PR (Hito 10, PR7 "Visor") reemplaza el placeholder del área de
- * visores por `SideBySideViewer` + `ZoomControls` cuando hay un documento
- * cargado (`document.store.id !== null`); el Hero sigue siendo el estado
- * vacío sin documento (`UX_Guidelines.md` §11, fila "App recién abierta, sin
- * documento"). Los paneles de Entidades/Reglas siguen siendo el placeholder
- * de PR1: esos componentes llegan en los PRs 8-9 (fuera de alcance de este
- * PR).
+ * Este PR (Hito 10, PR8 "Panel de Entidades") reemplaza el placeholder de
+ * estado vacío de la sección "Entidades" por `EntitiesPanel` cuando
+ * `entities.store.groupsByType` tiene contenido (`hasAnyGroup`); si no hay
+ * grupos (sin documento, o documento sin entidades detectadas todavía), se
+ * conserva el placeholder de estado vacío existente (alcance de este PR: solo
+ * ese toggle binario, sin distinguir "sin documento" de "documento sin
+ * entidades" — ver reporte del PR). El panel de Reglas sigue siendo el
+ * placeholder de PR1 (PR9, fuera de alcance de este PR).
  */
 
 import {
@@ -24,11 +25,14 @@ import {
 import type { ReactNode } from "react";
 import { useEffect } from "react";
 
+import { EntitiesPanel } from "./components/entities/EntitiesPanel.js";
+import { hasAnyGroup } from "./components/entities/entityTree.js";
 import { Toolbar } from "./components/toolbar/Toolbar.js";
 import { SideBySideViewer } from "./components/viewer/SideBySideViewer.js";
 import { ZoomControls } from "./components/viewer/ZoomControls.js";
 import { initCore } from "./core-adapter/index.js";
 import { useDocumentStore } from "./store/document.store.js";
+import { useEntitiesStore } from "./store/entities.store.js";
 
 export function App() {
   useEffect(() => {
@@ -54,15 +58,23 @@ export function App() {
 }
 
 function LeftPanel() {
+  const hasGroups = useEntitiesStore((state) => hasAnyGroup(state.groupsByType));
+
   return (
     <aside className="flex w-1/3 min-w-[280px] max-w-[480px] flex-col border-r border-border bg-bg-primary">
       <section className="flex flex-1 flex-col overflow-hidden border-b border-border">
-        <PanelHeader title="Entidades" />
-        <EmptyState
-          icon={<FileTextIcon className="h-8 w-8" aria-hidden />}
-          title="Sin documento"
-          description="Cargá un PDF para empezar a detectar entidades."
-        />
+        {hasGroups ? (
+          <EntitiesPanel />
+        ) : (
+          <>
+            <PanelHeader title="Entidades" />
+            <EmptyState
+              icon={<FileTextIcon className="h-8 w-8" aria-hidden />}
+              title="Sin documento"
+              description="Cargá un PDF para empezar a detectar entidades."
+            />
+          </>
+        )}
       </section>
       <section className="flex flex-1 flex-col overflow-hidden">
         <PanelHeader title="Reglas" />

@@ -58,6 +58,15 @@
 - `Components.md` §5.3 / `07_Performance_Strategy.md` §3 piden un "pool de canvas reutilizables"; la implementación monta/desmonta `PageCanvas` por reconciliación de React (`key={pageIndex}`) en vez de un pool explícito de `<canvas>`. El objetivo funcional (solo ±1 página montada) se cumple; es una diferencia de la letra del spec, no del comportamiento observable, con ≤ ~6 canvases vivos en la práctica. Candidato a ajustar la redacción del spec en vez de el código.
 - Doble emisión de `RENDER_REQUESTED` (uno por cada `PdfViewer`, mismo `pageIndices`/`scale`) cuando ambos reaccionan al mismo `zoom`/`visibleRange` global: inofensivo hoy (cache LRU + supersede lo absorben), pero **al resolver el bug de supersede del PR4 (arriba)**, conviene revisar si el `visibleRange` compartido entre dos `IntersectionObserver` sigue teniendo sentido o si debería pasar a ser por-`kind`.
 
+## PR8 — Panel de Entidades + conflictos
+
+- **`ConflictDialog` sin atajos "Usar Regex"/"Usar NER"**: `UX_Guidelines.md` §6 los menciona, pero `ConflictResolveRequested` (`Contracts.md`, `04_Event_System.md` §10) solo transporta `{documentId, conflictId, mode: ReplacementMode}` — no hay forma de expresar "qué fuente ganó" sin ampliar el contrato. Se implementó solo el flujo "Personalizado" (elegir un `ReplacementMode` real), confirmado como la única opción contract-consistente. Si se quieren los atajos literales, hace falta ADR + cambio de `Contracts.md`.
+- **"Ver ocurrencias" (members con pageIndex+bbox+value) no implementado**: `OccurrenceRef` (`03_Data_Model.md` §8) no tiene campo `value`. Confirmado, no es un descuido.
+- **Indicador "editado manualmente" (punto azul, `UX_Guidelines.md` §3.3) no implementado**: requeriría que la UI reimplemente la resolución de reglas de Grouping (fuera de su rol) para saber si el modo actual difiere del default. `EntityGroup` no expone ese dato.
+- **`GroupContextMenu` implementado a mano, sin `@radix-ui/react-dropdown-menu`**: `Components.md` §13.7 pide que los componentes interactivos pasen por wrappers de Radix, pero agregar esa dependencia nueva requeriría ADR (P-9/R-12, prohibición absoluta sin ADR). Se priorizó no agregar la dependencia. Consecuencia: el menú a mano no tiene navegación por flechas ni gestión de foco como daría el primitivo de Radix. **Necesita una decisión del planificador**: ¿ADR para agregar `@radix-ui/react-dropdown-menu`, o aceptar formalmente el hand-roll?
+- Estado vacío binario en `App.tsx` (`hasAnyGroup`): un documento cargado sin entidades detectadas sigue mostrando el estado "sin documento" en vez del mensaje específico de `UX_Guidelines.md` §11 fila 2 ("No se detectaron entidades..."). El dato para distinguir ambos casos existe (`pipeline.store.stage`), simplemente no se usó en este PR. Refinable en un PR posterior.
+- Toasts de feedback (Merge/Split) y popover de aliases/edición inline de `canonicalValue` (`Components.md` §3.3/§3.6/§3.7): diferidos por no existir un componente `Toast` todavía en ningún PR previo. Correctamente fuera de alcance.
+
 ---
 
 ## Tareas de seguimiento con entrada formal en el tasklist de la sesión
