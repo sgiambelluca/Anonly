@@ -11,6 +11,9 @@
  *
  * `PasswordDialog` se monta siempre acá (no depende de `stage`): se abre sola
  * al recibir `PDF_PASSWORD_REQUIRED` vía su propia suscripción directa al bus.
+ *
+ * `ExportButton` (Hito 10 PR9) se monta igual que `CancelButton`: sin
+ * condicional acá, decide su propia visibilidad (`stage === Ready`).
  */
 
 import { PipelineStage } from "@anonly/anonymization-core";
@@ -19,6 +22,7 @@ import { ShieldIcon } from "lucide-react";
 import { usePipelineStore } from "../../store/pipeline.store.js";
 
 import { CancelButton } from "./CancelButton.js";
+import { ExportButton } from "./ExportButton.js";
 import { ImportButton } from "./ImportButton.js";
 import { PasswordDialog } from "./PasswordDialog.js";
 import { PipelineStatus } from "./PipelineStatus.js";
@@ -39,6 +43,7 @@ export function Toolbar() {
       </div>
       <div className="flex items-center gap-2">
         {isIdle ? <ImportButton /> : <PipelineStatus />}
+        <ExportButton />
         <CancelButton />
         <SettingsButton />
       </div>

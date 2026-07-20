@@ -6,6 +6,11 @@
  * Fuente de verdad: docs/ui/React_Client.md §2.3 (+ acciones agregadas por
  * ADR-036 §5 y ADR-037/ADR-038: `updateRule`, `deleteRule`, `requestRender`
  * con `scale?`, `reanalyze`, `retryWithPassword`).
+ *
+ * Hito 10 PR9 (panel de Reglas): `createRule`/`updateRule`/`deleteRule` ahora
+ * también sincronizan `rules.store` (además de emitir el evento) — ver el
+ * comentario adyacente a `createRule` más abajo para la justificación
+ * completa (no hay evento Core→UI para reglas).
  */
 
 import {
@@ -75,10 +80,25 @@ export const actions = {
     });
   },
 
+  // `rules.store` no tiene ningún evento Core→UI que lo alimente (a
+  // diferencia de `entities.store`, poblado vía `ENTITY_GROUP_*`):
+  // RULE_CREATED/RULE_UPDATED/RULE_DELETED son estrictamente UI→Grouping
+  // Engine (`04_Event_System.md`: "UI | Grouping Engine | ... | none" — sin
+  // evento de vuelta) y el payload ya lleva el `Rule`/patch completo que la UI
+  // construyó; el Core solo recomputa `replacementMode` de los grupos
+  // afectados (`ENTITY_GROUP_UPDATED`, ya cubierto por `bus-bridge.ts`). Por
+  // eso estas tres acciones son la única fuente de verdad para `rules.store`
+  // (`ui/Components.md` §13 regla 2: los componentes nunca mutan el store
+  // directamente, siempre vía una acción) — agregado en el Hito 10 PR9
+  // (panel de Reglas), mismo criterio que `subscribePasswordRequired` en
+  // `bus-bridge.ts` (agregada por un PR de UI anterior por la misma razón:
+  // plomería de `core-adapter` que un componente necesita).
+
   createRule(rule: Rule): void {
     const documentId = activeDocumentId();
     if (documentId === null) return;
     getCore().bus.emit(EventChannel.UI, EngineEvents.RULE_CREATED, { documentId, rule });
+    useRulesStore.getState().addRule(rule);
   },
 
   resolveConflict(conflictId: string, mode: ReplacementMode): void {
@@ -97,12 +117,14 @@ export const actions = {
     const documentId = activeDocumentId();
     if (documentId === null) return;
     getCore().bus.emit(EventChannel.UI, EngineEvents.RULE_UPDATED, { documentId, ruleId, patch });
+    useRulesStore.getState().updateRule(ruleId, patch);
   },
 
   deleteRule(ruleId: string): void {
     const documentId = activeDocumentId();
     if (documentId === null) return;
     getCore().bus.emit(EventChannel.UI, EngineEvents.RULE_DELETED, { documentId, ruleId });
+    useRulesStore.getState().removeRule(ruleId);
   },
 
   // Sin parámetro `kind`: el payload RenderRequested no lo tiene; Render decide

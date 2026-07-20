@@ -137,13 +137,17 @@ describe("actions", () => {
       });
     });
 
-    it("createRule/updateRule/deleteRule emit their RULE_* events", () => {
+    it("createRule/updateRule/deleteRule emit their RULE_* events and sync rules.store", () => {
       const rule = makeRule();
       actions.createRule(rule);
       expect(emit).toHaveBeenCalledWith(EventChannel.UI, EngineEvents.RULE_CREATED, {
         documentId: "doc-1",
         rule,
       });
+      // rules.store no tiene ningún evento Core→UI que lo alimente
+      // (04_Event_System.md: RULE_* son UI→Grouping Engine, sin evento de
+      // vuelta) — estas acciones son su única fuente de verdad.
+      expect(useRulesStore.getState().rules).toEqual([rule]);
 
       actions.updateRule("rule-1", { enabled: false });
       expect(emit).toHaveBeenCalledWith(EventChannel.UI, EngineEvents.RULE_UPDATED, {
@@ -151,12 +155,25 @@ describe("actions", () => {
         ruleId: "rule-1",
         patch: { enabled: false },
       });
+      expect(useRulesStore.getState().rules[0]?.enabled).toBe(false);
 
       actions.deleteRule("rule-1");
       expect(emit).toHaveBeenCalledWith(EventChannel.UI, EngineEvents.RULE_DELETED, {
         documentId: "doc-1",
         ruleId: "rule-1",
       });
+      expect(useRulesStore.getState().rules).toEqual([]);
+    });
+
+    it("createRule/updateRule/deleteRule do not touch rules.store when no document is open", () => {
+      useDocumentStore.getState().reset();
+      const rule = makeRule();
+
+      actions.createRule(rule);
+      actions.updateRule("rule-1", { enabled: false });
+      actions.deleteRule("rule-1");
+
+      expect(useRulesStore.getState().rules).toEqual([]);
     });
 
     it("resolveConflict emits CONFLICT_RESOLVE_REQUESTED", () => {

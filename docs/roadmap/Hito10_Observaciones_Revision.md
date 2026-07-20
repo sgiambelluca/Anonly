@@ -68,6 +68,14 @@
 - Estado vacío binario en `App.tsx` (`hasAnyGroup`): un documento cargado sin entidades detectadas sigue mostrando el estado "sin documento" en vez del mensaje específico de `UX_Guidelines.md` §11 fila 2 ("No se detectaron entidades..."). El dato para distinguir ambos casos existe (`pipeline.store.stage`), simplemente no se usó en este PR. Refinable en un PR posterior.
 - Toasts de feedback (Merge/Split) y popover de aliases/edición inline de `canonicalValue` (`Components.md` §3.3/§3.6/§3.7): diferidos por no existir un componente `Toast` todavía en ningún PR previo. Correctamente fuera de alcance.
 
+## PR9 — Panel de Reglas + Export
+
+- **Cambio arquitectónico verificado, no una laguna**: `core-adapter/actions.ts` (`createRule`/`updateRule`/`deleteRule`) ahora muta `rules.store` directamente además de emitir el evento al bus. Confirmado por el revisor contra `04_Event_System.md` §6/§10 y `06_Pipeline.md` §11: los tres eventos `RULE_*` son estrictamente UI→Grouping, sin evento de vuelta Core→UI, y `bus-bridge.ts` no suscribe nada a `rules.store`. Consecuencia aceptada: si Grouping alguna vez rechazara una regla (hoy no lo hace), `rules.store` divergiría silenciosamente del Core — no hay evento de rechazo para reconciliar. Tradeoff inherente al diseño sin evento de retorno, aceptable para MVP; **revisar si algún ADR futuro agrega un evento de confirmación/rechazo de reglas**.
+- `ExportDialog` omite `settings.store` pese a que `Components.md` §7.1 lo lista como dependencia — ningún campo de settings aplica hoy a `ExportOptions` (los defaults salen de `ExportConfig`). Deviation documentada; candidato a una nota de spec más que a un fix de código.
+- `EXPORT_FAILED` se muestra como `Banner` dentro del `ExportDialog`, no como "toast" (letra de `React_Client.md` §8). Cosmético, ubicación natural dado que el flujo vive en el diálogo.
+- `MIN_EXPORT_DPI = 1` vs. `Export_Engine.md` §9 ("dpi > 0"): equivalente en la práctica para DPI entero, el `Select` solo ofrece 150/300. Matiz menor.
+- Estimación de tamaño de archivo del mockup de `UX_Guidelines.md` §8.2 no implementada — correctamente, no hay fórmula documentada que la sustente.
+
 ---
 
 ## Tareas de seguimiento con entrada formal en el tasklist de la sesión

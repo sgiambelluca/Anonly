@@ -10,8 +10,12 @@
  * grupos (sin documento, o documento sin entidades detectadas todavía), se
  * conserva el placeholder de estado vacío existente (alcance de este PR: solo
  * ese toggle binario, sin distinguir "sin documento" de "documento sin
- * entidades" — ver reporte del PR). El panel de Reglas sigue siendo el
- * placeholder de PR1 (PR9, fuera de alcance de este PR).
+ * entidades" — ver reporte del PR).
+ *
+ * El panel de Reglas (Hito 10 PR9) monta `RulesPanel` sin condicional (a
+ * diferencia de `EntitiesPanel`): `RulesPanel` maneja su propio estado vacío
+ * ("Aún no hay reglas…") y necesita estar visible con 0 reglas para que el
+ * usuario pueda crear la primera — ver el comentario en `RulesPanel.tsx`.
  */
 
 import {
@@ -27,6 +31,7 @@ import { useEffect } from "react";
 
 import { EntitiesPanel } from "./components/entities/EntitiesPanel.js";
 import { hasAnyGroup } from "./components/entities/entityTree.js";
+import { RulesPanel } from "./components/rules/RulesPanel.js";
 import { Toolbar } from "./components/toolbar/Toolbar.js";
 import { SideBySideViewer } from "./components/viewer/SideBySideViewer.js";
 import { ZoomControls } from "./components/viewer/ZoomControls.js";
@@ -77,12 +82,7 @@ function LeftPanel() {
         )}
       </section>
       <section className="flex flex-1 flex-col overflow-hidden">
-        <PanelHeader title="Reglas" />
-        <EmptyState
-          icon={<FileTextIcon className="h-8 w-8" aria-hidden />}
-          title="Sin reglas"
-          description="Aún no hay reglas. Se crean desde el panel cuando hay grupos."
-        />
+        <RulesPanel />
       </section>
     </aside>
   );
