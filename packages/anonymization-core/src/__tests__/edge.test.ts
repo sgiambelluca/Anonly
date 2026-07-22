@@ -316,23 +316,40 @@ describe("Orchestrator — edge cases", () => {
   });
 
   it("EXPORT_REQUESTED handler never produces unhandled rejection (caso 24, seatbelt .catch)", async () => {
-    const { bus, orchestrator } = makeOrchestrator();
+    const { bus, engines, orchestrator } = makeOrchestrator();
     await orchestrator.importDocument(createImportInput());
 
-    // Fuerza un rechazo en la cadena enqueueExport/runExportChain que no
-    // pasaría por el try/catch de runExport (defensa en profundidad: no
-    // depende de qué falle adentro). Sin el `.catch` terminal del handler,
-    // esto sería un unhandled rejection silencioso y `vi.waitFor` de abajo
-    // nunca resolvería (timeout de test).
-    vi.spyOn(
-      orchestrator as unknown as {
-        enqueueExport: (documentId: string, options: unknown) => Promise<void>;
-      },
-      "enqueueExport",
-    ).mockRejectedValueOnce(new Error("fallo inesperado en la cadena de export"));
+    // Fuerza el fallo real de siempre (buffer retenido ausente) para que
+    // runExport llegue a su catch -> failPipeline.
+    (engines.render.loadDocument as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new InvalidInputError("buffer vacío o null en loadDocument.", { documentId: "doc-1" }),
+    );
 
-    const failedSpy = vi.fn();
-    bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_FAILED, failedSpy);
+    // Fuerza un SEGUNDO fallo, esta vez DENTRO del propio catch de runExport:
+    // failPipeline emite PIPELINE_FAILED como su último paso — si ese emit
+    // lanza, la excepción escapa del catch que la originó (no se puede
+    // atrapar la excepción del propio catch), sube por
+    // runExportChain/enqueueExport, y solo el `.catch` terminal de
+    // handleExportRequested puede evitar que se vuelva un unhandled
+    // rejection. Es el único seam público (sin castear privados del
+    // Orchestrator, Code_Standards.md §10) para ejercitar el seatbelt de
+    // verdad: `bus` es la misma instancia real que recibió el Orchestrator
+    // en su constructor, así que espiar su método público `emit` no
+    // necesita ningún cast sobre un tipo propio.
+    const originalEmit = bus.emit.bind(bus);
+    vi.spyOn(bus, "emit").mockImplementation(((
+      channel: EventChannel,
+      event: EngineEvents,
+      payload: unknown,
+    ) => {
+      if (channel === EventChannel.Pipeline && event === EngineEvents.PIPELINE_FAILED) {
+        throw new Error("fallo inesperado al emitir PIPELINE_FAILED");
+      }
+      return originalEmit(channel, event, payload as never);
+    }) as typeof bus.emit);
+
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
 
     const options = {
       imageFormat: "jpeg" as const,
@@ -343,8 +360,14 @@ describe("Orchestrator — edge cases", () => {
     };
     bus.emit(EventChannel.UI, EngineEvents.EXPORT_REQUESTED, { documentId: "doc-1", options });
 
-    await vi.waitFor(() => expect(failedSpy).toHaveBeenCalled());
-    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Failed);
+    // Deja correr toda la cadena async (loadDocument rechaza -> failPipeline
+    // -> bus.emit(PIPELINE_FAILED) lanza -> escapa hasta el .catch de
+    // handleExportRequested) antes de verificar.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    process.off("unhandledRejection", unhandled);
+    expect(unhandled).not.toHaveBeenCalled();
   });
 
   // ─── Caso 11: DOCUMENT_CLOSED durante el pipeline ───
