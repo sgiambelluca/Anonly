@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=workers | dependencias=03_Data_Model.md,04_Event_System.md,06_Pipeline.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md | audiencia=IA+humanos | fase=1 (actualizado en fase 9/10: entrega por fases ADR-035; transporte, EVENT, payloads y ExportWorker por ADR-036) -->
+<!-- CONTEXT: scope=workers | dependencias=03_Data_Model.md,04_Event_System.md,06_Pipeline.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-042-WorkerOutbound-Completed-Result-Unknown.md | audiencia=IA+humanos | fase=1 (actualizado en fase 9/10: entrega por fases ADR-035; transporte, EVENT, payloads y ExportWorker por ADR-036; COMPLETED.result unknown por ADR-042) -->
 
 # Anonly — Arquitectura de Workers (TAD bloque 8)
 
@@ -64,11 +64,14 @@ export type WorkerInbound =
 
 ### 2.2 Mensaje Worker → Host
 
+`COMPLETED.result` queda tipado `unknown` a este nivel de transporte (ADR-042) — misma regla que `INIT.config`/`RUN.payload` (§2.1, ADR-019) y que `EVENT.payload` (ADR-036 §3): el tipo concreto se afina al cruzar la frontera, acá en el **host-bridge** de cada motor, que lo estrecha a su `*EngineOutput` esperado con comentario de frontera (los `*EngineOutput` son `interface`s, no asignables a un index signature — microsoft/TypeScript#15300). `PROGRESS.partial` y `LOG.meta` **conservan** `Serializable`: transportan literales ad-hoc (que sí chequean contra el index signature), y la garantía estática de clonabilidad ahí es gratis.
+
 ```ts
 export type WorkerOutbound =
   | { readonly type: "READY"; readonly workerId: string; readonly capabilities: WorkerCapabilities }
   | { readonly type: "PROGRESS"; readonly jobId: string; readonly progress: number; readonly partial?: Serializable }
-  | { readonly type: "COMPLETED"; readonly jobId: string; readonly result: Serializable; readonly transferred?: ReadonlyArray<Transferable> }
+  // ADR-042: result es unknown a nivel de transporte; el host-bridge lo afina.
+  | { readonly type: "COMPLETED"; readonly jobId: string; readonly result: unknown; readonly transferred?: ReadonlyArray<Transferable> }
   | { readonly type: "FAILED"; readonly jobId: string; readonly error: SerializedEngineError }
   | { readonly type: "CANCELLED"; readonly jobId: string; readonly signalId: string }
   | { readonly type: "LOG"; readonly level: LogLevel; readonly message: string; readonly meta?: Serializable }
