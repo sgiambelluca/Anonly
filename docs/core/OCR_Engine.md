@@ -1,12 +1,12 @@
-<!-- CONTEXT: scope=ocr-engine | dependencias=core/Contracts.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-018-First-Party-Assets.md,adr/ADR-021-Engines-Inline-Hasta-Hito9.md | audiencia=IA-implementador | fase=3 -->
+<!-- CONTEXT: scope=ocr-engine | dependencias=core/Contracts.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-018-First-Party-Assets.md,adr/ADR-021-Engines-Inline-Hasta-Hito9.md,adr/ADR-041-FuseOcrPage-Funcion-Pura-Sin-Estado-Retenido.md | audiencia=IA-implementador | fase=3 -->
 
 # OCR Engine — Spec de Motor
 
 > Ejecuta OCR sobre las páginas sin texto del PDF. Solo corre si `PdfEngineOutput.textlessPages.length > 0`. Devuelve `Word[]` con `BoundingBox` y `confidence` que el PDF Engine fusiona.
 
 **EngineId**: `ocr`
-**Versión del spec**: 1.1.0
-**Última actualización**: 2026-07-09
+**Versión del spec**: 1.1.1
+**Última actualización**: 2026-07-22
 
 > **Nota (ADR-021, 2026-07-09)**: este motor se implementa **inline** en el Hito 3, sin crear `OcrPool` propio; los pools llegan con el Orchestrator (Hito 9), sin cambio de interfaz pública (precedentes ADR-013/ADR-020). Ojo: tesseract.js crea sus **propios workers internos** — eso no es el `OcrPool` y no viola el modo inline. SLA de cancelación < 200 ms se valida en Hito 9/11.
 
@@ -26,7 +26,7 @@ Recibir `ImageData` de páginas sin texto y producir `Word[]` con posiciones y c
 - Cache el modelo en IndexedDB tras primera descarga.
 - Emitir `OCR_STARTED`, `OCR_PAGE_FINISHED`, `OCR_FINISHED`, `OCR_PAGE_FAILED`.
 - Transferir zero-copy `ImageData` al worker.
-- Depositar las `Word[]` en `ctx.cache` con clave `ocr-words:<documentId>:<pageIndex>` y emitir `OCR_PAGE_FINISHED`; el **Orchestrator** (no el PDF Engine) lo escucha e invoca `PdfEngine.fuseOcrPage` (ADR-014).
+- Depositar las `Word[]` en `ctx.cache` con clave `ocr-words:<documentId>:<pageIndex>` y emitir `OCR_PAGE_FINISHED`; el **Orchestrator** (no el PDF Engine) lo escucha y aplica la función pura `fuseOcrPage` de `pdf-engine` sobre su `Document` retenido (ADR-014, ADR-041).
 
 ---
 
@@ -153,7 +153,7 @@ OcrPageOutput {
 - `words[i].source === "ocr"`.
 - `words[i].pageIndex === input.pageIndex`.
 - `words[i].confidence ∈ [0,1]`.
-- Las `Word[]` también se depositan en `ctx.cache` con clave `ocr-words:<documentId>:<pageIndex>`; el Orchestrator las lee al recibir `OCR_PAGE_FINISHED` e invoca `PdfEngine.fuseOcrPage` (ADR-014). En Hito 3 la integración con `fuseOcrPage` se testea con llamada directa, sin bus (igual que en Hito 2).
+- Las `Word[]` también se depositan en `ctx.cache` con clave `ocr-words:<documentId>:<pageIndex>`; el Orchestrator las lee al recibir `OCR_PAGE_FINISHED` y aplica la función pura `fuseOcrPage` de `pdf-engine` sobre su `Document` retenido (ADR-014, ADR-041). La integración con `fuseOcrPage` se testea con llamada directa, sin bus.
 
 ---
 

@@ -47,7 +47,7 @@
 | Evento | Emisor | Receptores | Payload | Timing | Idempotente | Orden | Notas |
 |---|---|---|---|---|---|---|---|
 | `OCR_STARTED` | OCR Engine | UI | `{ documentId, pagesToProcess: number[], modelLoading? }` | async | sí | none | |
-| `OCR_PAGE_FINISHED` | OCR Engine | Orchestrator | `{ documentId, pageIndex, wordCount, confidence }` | async | sí | none | Orchestrator lee `Word[]` de `ctx.cache` (clave `ocr-words:<documentId>:<pageIndex>`) y llama `PdfEngine.fuseOcrPage` (ver ADR-014). PDF Engine no se suscribe a este evento. |
+| `OCR_PAGE_FINISHED` | OCR Engine | Orchestrator | `{ documentId, pageIndex, wordCount, confidence }` | async | sí | none | Orchestrator lee `Word[]` de `ctx.cache` (clave `ocr-words:<documentId>:<pageIndex>`) y aplica la función pura `fuseOcrPage` de `pdf-engine` sobre su `Document` retenido (ver ADR-014, ADR-041). PDF Engine no se suscribe a este evento. |
 | `OCR_FINISHED` | OCR Engine | Orchestrator | `{ documentId, durationMs, modelDownloaded? }` | async | sí | none | Dispara detección. |
 | `OCR_PAGE_FAILED` | OCR Engine | Orchestrator | `{ documentId, pageIndex, error: SerializedEngineError }` | async | sí | none | Reintentable hasta `maxRetries`. (Errata ADR-036 §9: decía `EngineError`.) |
 
@@ -142,7 +142,7 @@ Inputs del usuario que mutan el estado de grupos/reglas/pipeline o solicitan tra
 | `RULE_UPDATED` | UI | Grouping Engine | `{ documentId, ruleId, patch }` | sync | sí | none | |
 | `RULE_DELETED` | UI | Grouping Engine | `{ documentId, ruleId }` | sync | sí | none | |
 | `CONFLICT_RESOLVE_REQUESTED` | UI | Grouping Engine | `{ documentId, conflictId, mode: ReplacementMode }` | sync | sí | none | |
-| `DOCUMENT_CLOSED` | UI | Orchestrator, Grouping Engine | `{ documentId }` | sync | sí | none | Grouping limpia su sesión por suscripción propia; los demás motores liberan por **invocación directa** del Orchestrator (`releaseDocument`, `unloadDocument`, caches, blobUrls — ADR-021 §7, ADR-030, ADR-034 §4/§5). |
+| `DOCUMENT_CLOSED` | UI | Orchestrator, Grouping Engine | `{ documentId }` | sync | sí | none | Grouping limpia su sesión por suscripción propia; los demás motores liberan por **invocación directa** del Orchestrator (`unloadDocument`, caches, blobUrls — ADR-021 §7, ADR-030, ADR-034 §4/§5; `PdfEngine.releaseDocument` eliminado por ADR-041). |
 
 ---
 

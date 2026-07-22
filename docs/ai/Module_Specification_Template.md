@@ -78,9 +78,16 @@ export class PdfEngine implements IEngine {
   readonly id = EngineId.Pdf;
   init(ctx: EngineContext): Promise<void>;
   process(input: PdfEngineInput, ctx: EngineContext): Promise<PdfEngineOutput>;
-  fuseOcrPage(documentId: string, pageIndex: number, words: ReadonlyArray<Word>): Promise<Document>;
   dispose(): Promise<void>;
 }
+
+// Las funciones puras que el paquete exporta además de la clase también van acá
+// (ejemplo real: fuseOcrPage de pdf-engine, ADR-041).
+export function fuseOcrPage(
+  document: Document,
+  pageIndex: number,
+  words: ReadonlyArray<Word>,
+): Document;
 ```
 
 ### 7. Eventos que emite
