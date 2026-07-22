@@ -66,6 +66,16 @@ type TokenClassificationSingle = Extract<TokenClassificationOutput[number], { en
  * pathJoin(env.localModelPath, pathJoin(path_or_repo_id, filename))); por
  * eso el destino real de los assets del modelo en assets.lock.json es
  * apps/react-client/public/models/ner/<modelId>/..., no un directorio plano.
+ *
+ * env.allowLocalModels default es `false` en entorno browser (`true` en
+ * Node — por eso ningún test unit/contract/edge lo detectaba: todos mockean
+ * la frontera de @huggingface/transformers, ADR-021 §5, y los que no,
+ * corren en Node). Sin setearlo a `true` acá, con allowRemoteModels ya en
+ * `false`, pipeline() rechaza sincrónicamente con "Invalid configuration
+ * detected: both local and remote models are disabled" — indistinguible en
+ * la UI de un modelo realmente ausente/corrupto (mismo NER_MODEL_MISSING).
+ * Hallazgo del Escenario 1 E2E (Hito 10 PR10): primera vez que pipeline()
+ * corre de verdad, en un browser real.
  */
 const NER_LOCAL_MODEL_PATH = "/models/ner/";
 const NER_WASM_PATH = "/wasm/onnxruntime/";
@@ -159,6 +169,7 @@ function normalizeNerValue(value: string): string {
 
 function configureTransformersEnv(): void {
   env.allowRemoteModels = false;
+  env.allowLocalModels = true;
   env.localModelPath = NER_LOCAL_MODEL_PATH;
   if (env.backends.onnx.wasm) {
     env.backends.onnx.wasm.wasmPaths = NER_WASM_PATH;
