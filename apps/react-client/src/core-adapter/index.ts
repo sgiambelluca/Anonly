@@ -10,11 +10,19 @@
 
 import {
   createCore,
-  type EngineConfig,
+  type EngineConfigOverrides,
   type IAnonymizationCore,
   type Unsubscribe,
 } from "@anonly/anonymization-core";
 
+// ADR-039: `onnxruntime-web` (vía `ner-engine`) hace un `import()` dinámico
+// ESM de su glue `.mjs`, que Vite rechaza si el archivo vive en `public/`
+// (destino previo, ADR-025 punto 3). Movidos a `src/assets/` (ADR-039 §3,
+// `assets.lock.json`), la app —única capa con bundler— los resuelve acá con
+// `?url` y los inyecta vía `NerConfig.wasmPaths`, mismo patrón que
+// `GlobalWorkerOptions.workerSrc` de pdfjs-dist en `main.tsx`.
+import ortWasmMjsUrl from "../assets/onnxruntime/ort-wasm-simd-threaded.asyncify.mjs?url";
+import ortWasmUrl from "../assets/onnxruntime/ort-wasm-simd-threaded.asyncify.wasm?url";
 import { useDocumentStore } from "../store/document.store.js";
 import { useEntitiesStore } from "../store/entities.store.js";
 import { usePipelineStore } from "../store/pipeline.store.js";
@@ -39,15 +47,21 @@ let unsubscribeBridge: Unsubscribe | undefined;
 /**
  * Inicializa el Core (idempotente: una llamada repetida devuelve la misma
  * instancia) y suscribe el bus-bridge a los 6 stores. `config` es un override
- * parcial opcional de `EngineConfig`, pasado tal cual a `createCore` — este
- * PR no deriva un `EngineConfig` desde `settings.store` (ver nota de
- * ambigüedad en el reporte del PR: `Partial<EngineConfig>` exige sub-objetos
- * completos por campo, y el cliente no tiene visibilidad de varios defaults
- * internos del Core que no están en `core/Contracts.md` §6).
+ * parcial opcional de `EngineConfig` (`EngineConfigOverrides`, ADR-039 —
+ * parciales por sección, ya no exige sub-objetos completos), mergeado con la
+ * inyección de `ner.wasmPaths` de acá (el caller puede pisarla si alguna vez
+ * hiciera falta). Este PR no deriva el resto de `EngineConfig` desde
+ * `settings.store` todavía (gap documentado en `Hito10_Observaciones_Revision.md`
+ * entrada "PR5" — `EngineConfigOverrides` lo deja resuelto de raíz para
+ * cuando se cablee).
  */
-export async function initCore(config?: Partial<EngineConfig>): Promise<IAnonymizationCore> {
+export async function initCore(config?: EngineConfigOverrides): Promise<IAnonymizationCore> {
   if (core) return core;
-  const instance = await createCore(config);
+  const mergedConfig: EngineConfigOverrides = {
+    ...config,
+    ner: { wasmPaths: { wasm: ortWasmUrl, mjs: ortWasmMjsUrl }, ...config?.ner },
+  };
+  const instance = await createCore(mergedConfig);
   unsubscribeBridge = subscribe(instance.bus, stores);
   core = instance;
   return core;

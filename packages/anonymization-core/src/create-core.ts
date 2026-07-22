@@ -16,7 +16,7 @@ import { OcrEngine } from "@anonly/ocr-engine";
 import { PdfEngine } from "@anonly/pdf-engine";
 import { RegexEngine } from "@anonly/regex-engine";
 import { RenderEngine } from "@anonly/render-engine";
-import type { EngineConfig } from "@anonly/shared";
+import type { EngineConfigOverrides } from "@anonly/shared";
 
 import { LruCache } from "./cache.js";
 import { mergeEngineConfig } from "./config.js";
@@ -29,11 +29,15 @@ import type { AnonymizationCoreEngines, IAnonymizationCore } from "./types.js";
  * Orchestrator listo para usar (Contracts.md §3.5).
  *
  * `config` se mergea con los defaults de `core/Contracts.md` §6
- * (`Orchestrator.md` §6). El logger inyectado por defecto no usa
- * `console.*` (P-4, ver `src/logger.ts`): la façade no expone un parámetro
- * de logger propio, así que no hay otra fuente posible.
+ * (`Orchestrator.md` §6). Overrides parciales de dos niveles (ADR-039,
+ * `EngineConfigOverrides`): cada sección admite un subconjunto de campos —
+ * `mergeEngineConfig` ya hace merge por sub-objeto, esto solo expone esa
+ * semántica en el tipo (antes `Partial<EngineConfig>`, shallow, exigía
+ * secciones completas). El logger inyectado por defecto no usa `console.*`
+ * (P-4, ver `src/logger.ts`): la façade no expone un parámetro de logger
+ * propio, así que no hay otra fuente posible.
  */
-export async function createCore(config?: Partial<EngineConfig>): Promise<IAnonymizationCore> {
+export async function createCore(config?: EngineConfigOverrides): Promise<IAnonymizationCore> {
   const mergedConfig = mergeEngineConfig(config);
   const logger = createNullLogger();
   const cache = new LruCache();

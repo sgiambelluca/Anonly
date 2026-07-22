@@ -11,6 +11,7 @@ import {
   type BoundingBox,
   type EngineContext,
   type IEngine,
+  type NerConfig,
   type Occurrence,
   type Word,
   type WordSpan,
@@ -167,12 +168,21 @@ function normalizeNerValue(value: string): string {
     .replace(/^[.,;:!?()"'«»]+|[.,;:!?()"'«»]+$/g, "");
 }
 
-function configureTransformersEnv(): void {
+/**
+ * `wasmPaths` inyectado por config (ADR-039, `NerConfig.wasmPaths`,
+ * `Contracts.md` §6, caso límite 16 del spec): si está definido se asigna
+ * **tal cual** a `env.backends.onnx.wasm.wasmPaths` y nunca se pisa con el
+ * default — la app (única capa con bundler) lo resuelve vía `?url` e inyecta
+ * URLs reales porque `onnxruntime-web` hace un `import()` dinámico ESM de su
+ * glue `.mjs`, que Vite rechaza si el archivo vive en `public/`. Ausente →
+ * se mantiene `NER_WASM_PATH`, el comportamiento previo a ADR-039.
+ */
+function configureTransformersEnv(nerConfig: NerConfig): void {
   env.allowRemoteModels = false;
   env.allowLocalModels = true;
   env.localModelPath = NER_LOCAL_MODEL_PATH;
   if (env.backends.onnx.wasm) {
-    env.backends.onnx.wasm.wasmPaths = NER_WASM_PATH;
+    env.backends.onnx.wasm.wasmPaths = nerConfig.wasmPaths ?? NER_WASM_PATH;
   }
 }
 
@@ -633,7 +643,7 @@ export class NerEngine implements IEngine {
     if (this.classifier !== null) return;
 
     const modelId = ctx.config.ner.modelId;
-    configureTransformersEnv();
+    configureTransformersEnv(ctx.config.ner);
 
     // ADR-025: @huggingface/transformers v4 reemplaza `quantized: boolean`
     // por `dtype` (elige el sufijo del archivo .onnx a cargar — DataType

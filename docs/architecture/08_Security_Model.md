@@ -15,7 +15,7 @@
 | S-3 | El PDF exportado no permite recuperar la información original. | test de no-recuperabilidad: buscar texto original en el buffer del export. |
 | S-4 | Los modelos IA se cargan solo desde orígenes verificados (SRI). | SRI en todas las tags `<script>` y workers; integrity check al cargar wasm/modelos. |
 | S-5 | No se conservan metadatos sensibles del PDF original en el export. | test de metadata del export. |
-| S-6 | El procesamiento ocurre en Web Workers con CSP estricta. | CSP `worker-src 'self'` + sin `unsafe-eval`. |
+| S-6 | El procesamiento ocurre en Web Workers con CSP estricta. | CSP `worker-src 'self' blob:` + `script-src` con `'wasm-unsafe-eval'` acotado a compilar WASM (nunca `'unsafe-eval'` completo — ver §3.2). |
 | S-7 | Passwords de PDFs protegidos no se persisten ni loguean. | grep automatizado + test de logger. |
 | S-8 | Supply chain auditada: dependencias con hash, sin `postinstall` opaco. | `pnpm audit`, `pnpm-lock.yaml` inmutable, review de `postinstall`. |
 
@@ -33,7 +33,7 @@
 | Recuperación por caché del navegador | cache HTTP con el documento | el documento vive solo en RAM, no en cache HTTP |
 | Recuperación por IndexedDB | escenarios donde se persiste algo | solo modelos y wasm en IndexedDB/Cache; nunca documentos |
 | Supply chain attack | librería comprometida | S-4, S-8, SRI, lockfile inmutable, audit |
-| XSS que exfiltra el documento | script injectado | CSP estricta, sin `unsafe-inline`, sin `unsafe-eval` |
+| XSS que exfiltra el documento | script injectado | CSP estricta, sin `unsafe-inline` en `script-src`, sin `unsafe-eval`; la única concesión es `'wasm-unsafe-eval'` (acotada a compilar WebAssembly, no habilita `eval()`/`Function()`) — ver §3.2 |
 | Side channel por timing | – | out of scope MVP; mitigación general: sin telemetría |
 | Reidentificación por patrones | un DNI reemplazado por el mismo valor en todos lados | agrupación por defecto + modos `synthetic` y `placeholder` con índices únicos |
 | Malware en modelo IA | modelo ONNX malicioso | SRI, modelos solo de source verificada (HuggingFace publicadas con commit hash) |
@@ -53,12 +53,12 @@
 - El Core **nunca** hace `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource` ni ningún API de red. Regla R-10 de `ai/AI_Development_Guide.md`.
 - Las únicas requests permitidas son desde `apps/react-client` para cargar assets estáticos (chunks, wasm, modelos) desde el CDN propio, y están restringidas por CSP.
 
-### 3.2 CSP recomendada
+### 3.2 CSP verificada (ADR-039, Hito 10 PR10)
 
 ```
 default-src 'self';
-script-src 'self';
-worker-src 'self';
+script-src 'self' blob: 'wasm-unsafe-eval';
+worker-src 'self' blob:;
 style-src 'self' 'unsafe-inline';   /* Tailwind lo requiere; revisar ADR-005 */
 connect-src 'self';                 /* sin third-party */
 img-src 'self' data: blob:;
@@ -71,7 +71,8 @@ manifest-src 'self';
 ```
 
 Notas:
-- Sin `unsafe-eval`. ONNX Runtime Web y Transformers.js son compatibles con WASM sin `unsafe-eval` en versiones recientes. Verificar al integrar.
+- **`'wasm-unsafe-eval'` en `script-src`** (CSP Level 3, no `'unsafe-eval'` completo): la nota previa de este documento decía "sin `unsafe-eval`... verificar al integrar" — la verificación (Hito 10 PR10, Escenario 1 E2E, primera vez que `onnxruntime-web` corre en un browser real) confirmó que **hace falta** para el build `asyncify` pinneado en `assets.lock.json` (`WebAssembly.instantiate()` rechaza sin esto: `CompileError: ... violates ... "wasm-unsafe-eval" is not an allowed source`). `'wasm-unsafe-eval'` es la concesión mínima posible: habilita únicamente compilar/instanciar módulos WASM, **no** `eval()`, `new Function()` ni `setTimeout`/`setInterval` con string — el vector de XSS que S-6/§2.1 mitigan (inyectar y ejecutar JS arbitrario vía `eval`) sigue bloqueado.
+- **`blob:` en `worker-src` y `script-src`**: `onnxruntime-web` (build threaded/asyncify) construye su worker de inferencia a partir de un Blob del `.mjs` que la app le inyecta por `NerConfig.wasmPaths` (ADR-039) y lo `import()`a dinámicamente — sin `blob:` en ambas directivas, ese `import()` es rechazado (`Failed to fetch dynamically imported module: blob:...`). El blob solo puede originarse de JS same-origin ya en ejecución (no hay `connect-src` a terceros que permita traer un blob malicioso desde afuera), así que esto no abre un vector nuevo de inyección remota: sigue dependiendo de que `script-src 'self'` (sin `unsafe-inline`) ya esté comprometido.
 - `unsafe-inline` en `style-src` es necesario para Tailwind inject; mitigable con build que extrae CSS a archivo (trabajar para eliminarlo en v1.0).
 - `connect-src 'self'` bloquea cualquier exfiltración y **no admite excepciones**: los modelos de IA y el wasm también se sirven desde el mismo origen (mirror first-party, ADR-018), por lo que Tesseract.js/Transformers.js se configuran para no tocar CDNs de terceros.
 
