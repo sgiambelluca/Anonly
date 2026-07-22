@@ -31,6 +31,7 @@ import {
 import { isTransferable } from "../index.js";
 import type {
   BoundingBox,
+  CoreRuntimeOptions,
   Document,
   EncodedPageImage,
   EngineConfig,
@@ -48,6 +49,9 @@ import type {
   PageParsed,
   RenderRequested,
   Word,
+  WorkerFactory,
+  WorkerLike,
+  WorkerOutbound,
 } from "../index.js";
 
 /**
@@ -605,6 +609,65 @@ describe("@anonly/shared — Contracts", () => {
       };
       expect(encoded.format).toBe("jpeg");
       expect(encoded.bytes.byteLength).toBe(3);
+    });
+  });
+
+  describe("Transporte de Web Workers reales (Hito 10, ADR-036 §2/§3, Contracts.md §3.5)", () => {
+    it("WorkerLike es estructural: un objeto plano con postMessage/addEventListener/terminate lo satisface", () => {
+      const calls: string[] = [];
+      const worker: WorkerLike = {
+        postMessage: (message) => {
+          calls.push(String(message));
+        },
+        addEventListener: () => {},
+        terminate: () => {
+          calls.push("terminate");
+        },
+      };
+      worker.postMessage("x");
+      worker.terminate();
+      expect(calls).toEqual(["x", "terminate"]);
+    });
+
+    it("WorkerFactory es () => WorkerLike", () => {
+      const factory: WorkerFactory = () => ({
+        postMessage: () => {},
+        addEventListener: () => {},
+        terminate: () => {},
+      });
+      expect(typeof factory().postMessage).toBe("function");
+    });
+
+    it("CoreRuntimeOptions.workers admite un subconjunto parcial de los 5 WorkerEntryKind", () => {
+      const stub: WorkerLike = {
+        postMessage: () => {},
+        addEventListener: () => {},
+        terminate: () => {},
+      };
+      const runtime: CoreRuntimeOptions = {
+        workers: {
+          pdf: () => stub,
+          export: () => stub,
+        },
+      };
+      expect(Object.keys(runtime.workers ?? {}).sort()).toEqual(["export", "pdf"]);
+    });
+
+    it("CoreRuntimeOptions sin workers es válido (createCore in-process, comportamiento de hoy)", () => {
+      const runtime: CoreRuntimeOptions = {};
+      expect(runtime.workers).toBeUndefined();
+    });
+
+    it("WorkerOutbound admite la variante EVENT (ADR-036 §3)", () => {
+      const message: WorkerOutbound = {
+        type: "EVENT",
+        channel: EventChannel.Pdf,
+        event: EngineEvents.PAGE_PARSED,
+        payload: { documentId: "d1", pageIndex: 0, wordCount: 1, requiresOCR: false },
+      };
+      expect(message.type).toBe("EVENT");
+      expect(message.channel).toBe(EventChannel.Pdf);
+      expect(message.event).toBe(EngineEvents.PAGE_PARSED);
     });
   });
 

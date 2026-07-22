@@ -168,6 +168,37 @@ export interface ExportConfig {
   readonly defaultJpegQuality: number;
 }
 
+// ─── Transporte de Web Workers reales (Hito 10, ADR-036 §2, Contracts.md §3.5) ───
+//
+// Los `Worker` de SO los crea la app (única con bundler: Vite resuelve
+// `import X from "@anonly/<engine>/worker?worker"`) y los inyecta acá como
+// factories. Sin factory para un kind, ese despacho queda in-process
+// (comportamiento del Hito 9, ADR-035 §1) — la migración es motor por motor y
+// los tests del Core siguen corriendo en node sin `Worker`. Las factories van
+// en un parámetro aparte de `createCore` y NO dentro de `EngineConfig`:
+// `EngineConfig` viaja serializado al worker en INIT y las funciones no son
+// structured-cloneables.
+
+/**
+ * `WorkerLike` es estructural a propósito: un `Worker` real de DOM lo
+ * satisface (misma forma), y los tests del transporte pueden inyectar fakes
+ * con la misma forma sin necesitar un `Worker` de browser (ADR-036 §2).
+ */
+export interface WorkerLike {
+  postMessage(message: unknown, transfer?: ReadonlyArray<globalThis.Transferable>): void;
+  addEventListener(type: "message" | "error", listener: (ev: unknown) => void): void;
+  terminate(): void;
+}
+
+export type WorkerFactory = () => WorkerLike;
+
+// "export" refiere al ExportWorker único (sin pool propio, ADR-036 §1).
+export type WorkerEntryKind = "pdf" | "ocr" | "ner" | "render" | "export";
+
+export interface CoreRuntimeOptions {
+  readonly workers?: Partial<Readonly<Record<WorkerEntryKind, WorkerFactory>>>;
+}
+
 // ─── Tipos de mensajería worker (ver 05_Worker_Architecture.md §2) ───
 
 export type Serializable =
@@ -224,4 +255,15 @@ export type WorkerOutbound =
       readonly level: LogLevel;
       readonly message: string;
       readonly meta?: Serializable;
+    }
+  // ADR-036 §3: el entry-point de cada motor corre el motor real con un bus
+  // puente; cada `emit` viaja como EVENT y el host-bridge del motor lo afina
+  // y re-emite en el bus real (los eventos observables se emiten siempre en
+  // host, ADR-013 §6). `payload` es `unknown` a nivel de transporte, igual
+  // criterio que `INIT.config`/`RUN.payload` (ADR-019).
+  | {
+      readonly type: "EVENT";
+      readonly channel: EventChannel;
+      readonly event: EngineEvents;
+      readonly payload: unknown;
     };

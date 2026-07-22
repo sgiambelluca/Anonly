@@ -16,7 +16,7 @@ import { OcrEngine } from "@anonly/ocr-engine";
 import { PdfEngine } from "@anonly/pdf-engine";
 import { RegexEngine } from "@anonly/regex-engine";
 import { RenderEngine } from "@anonly/render-engine";
-import type { EngineConfigOverrides } from "@anonly/shared";
+import type { CoreRuntimeOptions, EngineConfigOverrides } from "@anonly/shared";
 
 import { LruCache } from "./cache.js";
 import { mergeEngineConfig } from "./config.js";
@@ -36,8 +36,17 @@ import type { AnonymizationCoreEngines, IAnonymizationCore } from "./types.js";
  * secciones completas). El logger inyectado por defecto no usa `console.*`
  * (P-4, ver `src/logger.ts`): la façade no expone un parámetro de logger
  * propio, así que no hay otra fuente posible.
+ *
+ * `runtime` (Hito 10, ADR-036 §2, Contracts.md §3.5): factories de `Worker`
+ * real por `WorkerEntryKind`, forwarded tal cual al `PipelineOrchestrator`
+ * (ver `PipelineOrchestratorOptions.runtime`). Ausente => todo in-process,
+ * comportamiento idéntico al Hito 9 (parámetro aditivo, no rompe callers
+ * existentes).
  */
-export async function createCore(config?: EngineConfigOverrides): Promise<IAnonymizationCore> {
+export async function createCore(
+  config?: EngineConfigOverrides,
+  runtime?: CoreRuntimeOptions,
+): Promise<IAnonymizationCore> {
   const mergedConfig = mergeEngineConfig(config);
   const logger = createNullLogger();
   const cache = new LruCache();
@@ -83,6 +92,7 @@ export async function createCore(config?: EngineConfigOverrides): Promise<IAnony
     cache,
     config: mergedConfig,
     engines,
+    ...(runtime !== undefined ? { runtime } : {}),
   });
 
   return {

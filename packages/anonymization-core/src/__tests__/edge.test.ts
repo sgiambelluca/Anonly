@@ -13,11 +13,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { LruCache } from "../cache.js";
 import { PipelineOrchestrator } from "../orchestrator.js";
+import { WorkerPool } from "../worker-pool.js";
 
 import {
   createDeferred,
   createDocument,
   createEngineConfig,
+  createFakeWorker,
   createImportInput,
   createMockEngines,
   createMockLogger,
@@ -865,5 +867,120 @@ describe("Orchestrator — edge cases", () => {
         queueLength: 1,
       });
     }).not.toThrow();
+  });
+});
+
+describe("WorkerPool — transporte postMessage, casos límite (Hito 10, ADR-036 §2/§3)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function makeRemotePool(worker: ReturnType<typeof createFakeWorker>): WorkerPool {
+    return new WorkerPool({
+      poolKey: "render",
+      jobType: "render-page",
+      size: 1,
+      maxQueue: 10,
+      maxRetries: 0,
+      baseRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      bus: createRealBus(),
+      logger: createMockLogger(),
+      workerFactory: () => worker,
+    });
+  }
+
+  it("un mensaje con `type` desconocido se ignora sin romper el job en curso", async () => {
+    const worker = createFakeWorker();
+    const pool = makeRemotePool(worker);
+
+    const dispatchPromise = pool.dispatch({
+      run: vi.fn(),
+      payload: {},
+      signal: new AbortController().signal,
+    });
+    await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalled());
+    const jobId = (worker.postMessage.mock.calls[0]?.[0] as { readonly jobId: string }).jobId;
+
+    // Mensaje sin `type` reconocido y mensaje sin forma de objeto: ambos se descartan.
+    worker.emitRawMessage({ foo: "bar" });
+    worker.emitRawMessage("not-an-object");
+
+    worker.emitMessage({ type: "COMPLETED", jobId, result: "ok" });
+    await expect(dispatchPromise).resolves.toBe("ok");
+  });
+
+  it("un mensaje tardío para un jobId ya resuelto no tiene efecto", async () => {
+    const worker = createFakeWorker();
+    const pool = makeRemotePool(worker);
+
+    const dispatchPromise = pool.dispatch({
+      run: vi.fn(),
+      payload: {},
+      signal: new AbortController().signal,
+    });
+    await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalled());
+    const jobId = (worker.postMessage.mock.calls[0]?.[0] as { readonly jobId: string }).jobId;
+
+    worker.emitMessage({ type: "COMPLETED", jobId, result: "first" });
+    await expect(dispatchPromise).resolves.toBe("first");
+
+    // Mensaje tardío (p. ej. una entrega duplicada): no debe lanzar ni afectar nada.
+    expect(() => worker.emitMessage({ type: "COMPLETED", jobId, result: "stale" })).not.toThrow();
+  });
+
+  it("LOG con meta no-objeto se envuelve antes de pasar a ctx.logger; meta objeto se reenvía tal cual", async () => {
+    const worker = createFakeWorker();
+    const logger = createMockLogger();
+    const pool = new WorkerPool({
+      poolKey: "render",
+      jobType: "render-page",
+      size: 1,
+      maxQueue: 10,
+      maxRetries: 0,
+      baseRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      bus: createRealBus(),
+      logger,
+      workerFactory: () => worker,
+    });
+
+    const dispatchPromise = pool.dispatch({
+      run: vi.fn(),
+      payload: {},
+      signal: new AbortController().signal,
+    });
+    await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalled());
+    const jobId = (worker.postMessage.mock.calls[0]?.[0] as { readonly jobId: string }).jobId;
+
+    worker.emitMessage({ type: "LOG", level: "warn", message: "primitivo", meta: 42 });
+    expect(logger.warn).toHaveBeenCalledWith("primitivo", { value: 42 });
+
+    worker.emitMessage({ type: "LOG", level: "info", message: "objeto", meta: { pageIndex: 1 } });
+    expect(logger.info).toHaveBeenCalledWith("objeto", { pageIndex: 1 });
+
+    worker.emitMessage({ type: "LOG", level: "debug", message: "sin meta" });
+    expect(logger.debug).toHaveBeenCalledWith("sin meta", undefined);
+
+    worker.emitMessage({ type: "COMPLETED", jobId, result: "ok" });
+    await expect(dispatchPromise).resolves.toBe("ok");
+  });
+
+  it("dispose() rechaza jobs remotos pendientes con CancelledError y manda DISPOSE + terminate al worker", async () => {
+    const worker = createFakeWorker();
+    const pool = makeRemotePool(worker);
+
+    const dispatchPromise = pool.dispatch({
+      run: vi.fn(),
+      payload: {},
+      signal: new AbortController().signal,
+    });
+    await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalled());
+
+    pool.dispose();
+
+    await expect(dispatchPromise).rejects.toThrow(CancelledError);
+    expect(worker.postMessage).toHaveBeenLastCalledWith({ type: "DISPOSE" });
+    expect(worker.terminate).toHaveBeenCalled();
   });
 });

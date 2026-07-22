@@ -34,6 +34,7 @@ import {
   InvalidInputError,
   PipelineStage,
   type CancelRequested,
+  type CoreRuntimeOptions,
   type Document,
   type DocumentClosed,
   type DocumentParsed,
@@ -60,6 +61,7 @@ import {
   type RegexFinished,
   type RenderFailed as RenderFailedPayload,
   type Unsubscribe,
+  type WorkerFactory,
   type Word,
   type WorkerJobTimeout,
   type WorkerPoolSaturated,
@@ -140,6 +142,19 @@ export interface PipelineOrchestratorOptions {
   readonly cache: ICache;
   readonly config: EngineConfig;
   readonly engines: AnonymizationCoreEngines;
+  /**
+   * Factories de `Worker` real inyectadas por `createCore(config, runtime)`
+   * (ADR-036 §2, Contracts.md §3.5). Ausente => los cuatro pools quedan
+   * in-process (comportamiento del Hito 9/ADR-035, sin cambios). Los
+   * factories `pdf`/`ocr`/`ner`/`render` se consumen acá mismo, en el
+   * constructor, pasándolos a `WorkerPoolManager`. `workers.export` (el
+   * ExportWorker único, sin pool — ADR-036 §1) se retiene en
+   * `exportWorkerFactory` para que el host-bridge de `export-engine` (PR16)
+   * lo use antes de invocar `engines.export.export()` en `runExport()`; sin
+   * consumidor funcional en este PR (R-1: un PR = un módulo, no se toca
+   * `export-engine`).
+   */
+  readonly runtime?: CoreRuntimeOptions;
 }
 
 export class PipelineOrchestrator implements IPipelineOrchestrator {
@@ -178,6 +193,10 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     string,
     { readonly total: number; readonly current: number }
   >();
+  // ADR-036 §1/§2: factory del ExportWorker único (sin pool propio); ver
+  // comentario de `PipelineOrchestratorOptions.runtime`. Sin lectura en este
+  // PR — punto de inyección para el host-bridge de export-engine (PR16).
+  private readonly exportWorkerFactory: WorkerFactory | undefined;
 
   private activeDocumentId: string | undefined;
   private disposed = false;
@@ -188,6 +207,19 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     this.cache = options.cache;
     this.config = options.config;
     this.engines = options.engines;
+    this.exportWorkerFactory = options.runtime?.workers?.export;
+    this.logger.debug("PipelineOrchestrator: transporte de workers configurado.", {
+      hasExportWorkerFactory: this.exportWorkerFactory !== undefined,
+    });
+
+    const poolWorkerFactories: Partial<Readonly<Record<PoolKey, WorkerFactory>>> = {
+      ...(options.runtime?.workers?.pdf !== undefined ? { pdf: options.runtime.workers.pdf } : {}),
+      ...(options.runtime?.workers?.ocr !== undefined ? { ocr: options.runtime.workers.ocr } : {}),
+      ...(options.runtime?.workers?.ner !== undefined ? { ner: options.runtime.workers.ner } : {}),
+      ...(options.runtime?.workers?.render !== undefined
+        ? { render: options.runtime.workers.render }
+        : {}),
+    };
 
     this.pools = new WorkerPoolManager({
       bus: this.bus,
@@ -198,6 +230,7 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       baseRetryDelayMs: this.config.workerPool.baseRetryDelayMs,
       maxRetryDelayMs: this.config.workerPool.maxRetryDelayMs,
       idleDisposeMs: this.config.workerPool.idleDisposeMs,
+      workerFactories: poolWorkerFactories,
     });
 
     this.wireSubscriptions();

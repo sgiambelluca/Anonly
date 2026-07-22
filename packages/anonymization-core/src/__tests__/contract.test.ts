@@ -48,6 +48,35 @@ describe("Orchestrator — contract tests", () => {
     }
   });
 
+  // ─── Transporte de workers (Hito 10, ADR-036 §2, Contracts.md §3.5) ───
+
+  it("createCore acepta runtime (CoreRuntimeOptions) sin romper el façade", async () => {
+    const pdfFactory = vi.fn(() => ({
+      postMessage: vi.fn(),
+      addEventListener: vi.fn(),
+      terminate: vi.fn(),
+    }));
+    const core = await createCore(undefined, { workers: { pdf: pdfFactory } });
+    try {
+      expect(core.bus).toBeDefined();
+      expect(core.orchestrator).toBeInstanceOf(PipelineOrchestrator);
+      // Los pools son perezosos (05_Worker_Architecture.md §8): sin
+      // importDocument, la factory inyectada nunca se invoca todavía.
+      expect(pdfFactory).not.toHaveBeenCalled();
+    } finally {
+      await core.dispose();
+    }
+  });
+
+  it("createCore() sin runtime sigue siendo 100% in-process (comportamiento del Hito 9)", async () => {
+    const core = await createCore();
+    try {
+      expect(core.orchestrator).toBeInstanceOf(PipelineOrchestrator);
+    } finally {
+      await core.dispose();
+    }
+  });
+
   // ─── Secuencia feliz ───
 
   it("importDocument emits DOCUMENT_IMPORTED then PIPELINE_STAGE_CHANGED", async () => {

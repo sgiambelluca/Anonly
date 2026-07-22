@@ -1,6 +1,7 @@
 import { PdfTimeoutError } from "@anonly/pdf-engine";
 import {
   CancelledError,
+  EngineError,
   EngineErrorCode,
   EngineEvents,
   EngineId,
@@ -19,6 +20,7 @@ import { WorkerPool, WorkerPoolManager } from "../worker-pool.js";
 import {
   createDocument,
   createEngineConfig,
+  createFakeWorker,
   createImportInput,
   createMockEngines,
   createMockLogger,
@@ -148,6 +150,61 @@ describe("Orchestrator — unit tests", () => {
     const normalConfig = buildDefaultEngineConfig({ deviceMemory: 8, hardwareConcurrency: 8 });
     expect(normalConfig.workerPool.ocrPoolSize).toBe(2);
     expect(normalConfig.workerPool.nerPoolSize).toBe(2);
+  });
+
+  // ─── Transporte de workers, plomería del Orchestrator (Hito 10, ADR-036 §2) ───
+
+  it("con runtime.workers.pdf configurado, el Orchestrator sigue siendo in-process hoy (los call sites no pasan payload todavía)", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    wireHappyPathSpies(engines, bus);
+    const pdfFactory = vi.fn(() => ({
+      postMessage: vi.fn(),
+      addEventListener: vi.fn(),
+      terminate: vi.fn(),
+    }));
+
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+      runtime: { workers: { pdf: pdfFactory } },
+    });
+
+    await orchestrator.importDocument(createImportInput());
+
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    expect(engines.pdf.process).toHaveBeenCalled();
+    // La factory nunca se invoca: el dispatch() de pdf-parse en el
+    // Orchestrator no pasa `payload` en este PR (plomería sin consumidor
+    // funcional todavía — CLAUDE.md: "la app sigue sin pasar runtime").
+    expect(pdfFactory).not.toHaveBeenCalled();
+  });
+
+  it("runtime.workers.export se retiene (debug log) sin invocar la factory (sin consumidor funcional en este PR)", () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    wireHappyPathSpies(engines, bus);
+    const logger = createMockLogger();
+    const exportFactory = vi.fn();
+
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- construir alcanza para el log de arranque
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger,
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+      runtime: { workers: { export: exportFactory } },
+    });
+
+    expect(logger.debug).toHaveBeenCalledWith(
+      expect.stringContaining("transporte de workers"),
+      expect.objectContaining({ hasExportWorkerFactory: true }),
+    );
+    expect(exportFactory).not.toHaveBeenCalled();
   });
 
   // ─── WorkerPool (05_Worker_Architecture.md) ───
@@ -341,6 +398,314 @@ describe("Orchestrator — unit tests", () => {
     });
   });
 
+  // ─── Transporte por postMessage (Hito 10, ADR-036 §2/§3) ───
+
+  describe("WorkerPool — transporte postMessage", () => {
+    let bus: ReturnType<typeof createRealBus>;
+
+    beforeEach(() => {
+      bus = createRealBus();
+    });
+
+    it("con workerFactory + payload, despacha por postMessage en vez de invocar run()", async () => {
+      const worker = createFakeWorker();
+      const pool = new WorkerPool({
+        poolKey: "pdf",
+        jobType: "pdf-parse",
+        size: 1,
+        maxQueue: 10,
+        maxRetries: 0,
+        baseRetryDelayMs: 1,
+        maxRetryDelayMs: 1,
+        bus,
+        logger: createMockLogger(),
+        workerFactory: () => worker,
+      });
+
+      const run = vi.fn().mockResolvedValue("no debería llamarse");
+      const dispatchPromise = pool.dispatch({
+        run,
+        payload: { documentId: "doc-1" },
+        signal: new AbortController().signal,
+      });
+
+      await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalled());
+      const runMessage = worker.postMessage.mock.calls[0]?.[0] as {
+        readonly type: string;
+        readonly jobId: string;
+        readonly jobType: string;
+        readonly payload: unknown;
+      };
+      expect(runMessage.type).toBe("RUN");
+      expect(runMessage.jobType).toBe("pdf-parse");
+      expect(runMessage.payload).toEqual({ documentId: "doc-1" });
+
+      worker.emitMessage({ type: "COMPLETED", jobId: runMessage.jobId, result: { ok: true } });
+
+      await expect(dispatchPromise).resolves.toEqual({ ok: true });
+      expect(run).not.toHaveBeenCalled();
+    });
+
+    it("READY y PROGRESS no requieren acción del pool: el job sigue pendiente hasta COMPLETED", async () => {
+      const worker = createFakeWorker();
+      const pool = new WorkerPool({
+        poolKey: "pdf",
+        jobType: "pdf-parse",
+        size: 1,
+        maxQueue: 10,
+        maxRetries: 0,
+        baseRetryDelayMs: 1,
+        maxRetryDelayMs: 1,
+        bus,
+        logger: createMockLogger(),
+        workerFactory: () => worker,
+      });
+
+      const dispatchPromise = pool.dispatch({
+        run: vi.fn(),
+        payload: {},
+        signal: new AbortController().signal,
+      });
+      await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalled());
+      const jobId = (worker.postMessage.mock.calls[0]?.[0] as { readonly jobId: string }).jobId;
+
+      worker.emitMessage({ type: "READY", workerId: "w1", capabilities: { maxPageBatchSize: 8 } });
+      worker.emitMessage({ type: "PROGRESS", jobId, progress: 0.5 });
+      worker.emitMessage({ type: "COMPLETED", jobId, result: "done" });
+
+      await expect(dispatchPromise).resolves.toBe("done");
+    });
+
+    it("con workerFactory pero sin payload, sigue siendo in-process (fallback, sin romper el Hito 9)", async () => {
+      const worker = createFakeWorker();
+      const pool = new WorkerPool({
+        poolKey: "pdf",
+        jobType: "pdf-parse",
+        size: 1,
+        maxQueue: 10,
+        maxRetries: 0,
+        baseRetryDelayMs: 1,
+        maxRetryDelayMs: 1,
+        bus,
+        logger: createMockLogger(),
+        workerFactory: () => worker,
+      });
+
+      const result = await pool.dispatch({
+        run: () => Promise.resolve("in-process"),
+        signal: new AbortController().signal,
+      });
+
+      expect(result).toBe("in-process");
+      expect(worker.postMessage).not.toHaveBeenCalled();
+    });
+
+    it("sin workerFactory, un payload no dispara transporte remoto (comportamiento de hoy)", async () => {
+      const pool = new WorkerPool({
+        poolKey: "render",
+        jobType: "render-page",
+        size: 1,
+        maxQueue: 10,
+        maxRetries: 0,
+        baseRetryDelayMs: 1,
+        maxRetryDelayMs: 1,
+        bus,
+        logger: createMockLogger(),
+      });
+
+      const run = vi.fn().mockResolvedValue("in-process");
+      const result = await pool.dispatch({
+        run,
+        payload: { pageIndex: 0 },
+        signal: new AbortController().signal,
+      });
+
+      expect(result).toBe("in-process");
+      expect(run).toHaveBeenCalled();
+    });
+
+    it("un mensaje FAILED remoto rechaza con el EngineError deserializado", async () => {
+      const worker = createFakeWorker();
+      const pool = new WorkerPool({
+        poolKey: "ner",
+        jobType: "ner-page",
+        size: 1,
+        maxQueue: 10,
+        maxRetries: 0,
+        baseRetryDelayMs: 1,
+        maxRetryDelayMs: 1,
+        bus,
+        logger: createMockLogger(),
+        workerFactory: () => worker,
+      });
+
+      const dispatchPromise = pool
+        .dispatch({ run: vi.fn(), payload: {}, signal: new AbortController().signal })
+        .catch((err: unknown) => err);
+
+      await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalled());
+      const jobId = (worker.postMessage.mock.calls[0]?.[0] as { readonly jobId: string }).jobId;
+
+      worker.emitMessage({
+        type: "FAILED",
+        jobId,
+        error: {
+          code: EngineErrorCode.NER_PAGE_FAILED,
+          engineId: EngineId.Ner,
+          message: "boom",
+          retryable: false,
+          details: {},
+        },
+      });
+
+      const result = await dispatchPromise;
+      expect(result).toBeInstanceOf(EngineError);
+      expect((result as InstanceType<typeof EngineError>).code).toBe(
+        EngineErrorCode.NER_PAGE_FAILED,
+      );
+    });
+
+    it("abortar un job remoto en curso envía CANCEL por postMessage; CANCELLED rechaza con CancelledError", async () => {
+      const worker = createFakeWorker();
+      const pool = new WorkerPool({
+        poolKey: "render",
+        jobType: "render-page",
+        size: 1,
+        maxQueue: 10,
+        maxRetries: 0,
+        baseRetryDelayMs: 1,
+        maxRetryDelayMs: 1,
+        bus,
+        logger: createMockLogger(),
+        workerFactory: () => worker,
+      });
+
+      const controller = new AbortController();
+      const dispatchPromise = pool.dispatch({
+        run: vi.fn(),
+        payload: {},
+        signal: controller.signal,
+      });
+
+      await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalledTimes(1));
+      const jobId = (worker.postMessage.mock.calls[0]?.[0] as { readonly jobId: string }).jobId;
+
+      controller.abort();
+
+      await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalledTimes(2));
+      const cancelMessage = worker.postMessage.mock.calls[1]?.[0] as { readonly type: string };
+      expect(cancelMessage.type).toBe("CANCEL");
+
+      worker.emitMessage({ type: "CANCELLED", jobId, signalId: jobId });
+      await expect(dispatchPromise).rejects.toThrow(CancelledError);
+    });
+
+    it("la variante EVENT se reenvía al bus real (transporte mecánico, ADR-036 §3)", async () => {
+      const worker = createFakeWorker();
+      const pool = new WorkerPool({
+        poolKey: "render",
+        jobType: "render-page",
+        size: 1,
+        maxQueue: 10,
+        maxRetries: 0,
+        baseRetryDelayMs: 1,
+        maxRetryDelayMs: 1,
+        bus,
+        logger: createMockLogger(),
+        workerFactory: () => worker,
+      });
+
+      const previewSpy = vi.fn();
+      bus.on(EventChannel.Render, EngineEvents.PREVIEW_UPDATED, previewSpy);
+
+      // Dispara la creación perezosa del worker (registra los listeners)
+      // sin depender de que el job resuelva: el EVENT es independiente del
+      // ciclo de vida de cualquier job puntual.
+      void pool.dispatch({ run: vi.fn(), payload: {}, signal: new AbortController().signal });
+      await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalled());
+
+      worker.emitMessage(
+        {
+          type: "EVENT",
+          channel: EventChannel.Render,
+          event: EngineEvents.PREVIEW_UPDATED,
+          payload: {
+            documentId: "doc-1",
+            pageIndex: 0,
+            kind: "original",
+            canvasBlobUrl: "blob:remote",
+          },
+        },
+        true, // simula la entrega real de un Worker de DOM (MessageEvent.data)
+      );
+
+      expect(previewSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ documentId: "doc-1", canvasBlobUrl: "blob:remote" }),
+      );
+    });
+
+    it("un worker que crashea (evento error) rechaza con InvalidInputError, NO reintenta, y se recrea perezosamente en el próximo dispatch", async () => {
+      const workerA = createFakeWorker();
+      const workerB = createFakeWorker();
+      const factory = vi.fn().mockReturnValueOnce(workerA).mockReturnValueOnce(workerB);
+      const pool = new WorkerPool({
+        poolKey: "render",
+        jobType: "render-page",
+        size: 1,
+        maxQueue: 10,
+        // maxRetries > 0 a propósito: el test prueba que un crash de
+        // transporte NO dispara reintento aunque el pool sí reintentaría
+        // otros errores retryable (ver handleWorkerTransportError).
+        maxRetries: 2,
+        baseRetryDelayMs: 1,
+        maxRetryDelayMs: 1,
+        bus,
+        logger: createMockLogger(),
+        workerFactory: factory,
+      });
+
+      const firstDispatch = pool
+        .dispatch({ run: vi.fn(), payload: {}, signal: new AbortController().signal })
+        .catch((err: unknown) => err);
+      await vi.waitFor(() => expect(workerA.postMessage).toHaveBeenCalled());
+
+      workerA.emitError();
+      const firstResult = await firstDispatch;
+
+      // InvalidInputError (Code_Standards.md §7), no un Error genérico: no
+      // hay un EngineErrorCode dedicado a "crash de transporte" (I-4) —
+      // mismo criterio que toSerializedError. retryable: false de fábrica
+      // (InvalidInputError, shared/src/errors.ts).
+      expect(firstResult).toBeInstanceOf(EngineError);
+      expect((firstResult as InstanceType<typeof EngineError>).code).toBe(
+        EngineErrorCode.INVALID_INPUT,
+      );
+      expect((firstResult as InstanceType<typeof EngineError>).retryable).toBe(false);
+
+      // Sin reintento: un solo postMessage("RUN") a workerA pese a
+      // maxRetries=2 — diferimiento deliberado (ver handleWorkerTransportError):
+      // sin worker real corriendo todavía (solo fakes), no hay contra qué
+      // validar un reintento genuino (re-priming de INIT/load-document,
+      // PR12+).
+      expect(workerA.postMessage).toHaveBeenCalledTimes(1);
+
+      // Slot liberado + worker descartado: el siguiente dispatch remoto pide
+      // una instancia nueva a la factory (workerB), no reutiliza workerA.
+      const secondDispatch = pool.dispatch({
+        run: vi.fn(),
+        payload: {},
+        signal: new AbortController().signal,
+      });
+      await vi.waitFor(() => expect(workerB.postMessage).toHaveBeenCalled());
+      expect(factory).toHaveBeenCalledTimes(2);
+
+      const secondJobId = (workerB.postMessage.mock.calls[0]?.[0] as { readonly jobId: string })
+        .jobId;
+      workerB.emitMessage({ type: "COMPLETED", jobId: secondJobId, result: "ok" });
+      await expect(secondDispatch).resolves.toBe("ok");
+    });
+  });
+
   describe("WorkerPoolManager", () => {
     it("disposes an idle pool after idleDisposeMs", async () => {
       vi.useFakeTimers();
@@ -371,6 +736,46 @@ describe("Orchestrator — unit tests", () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    it("workerFactories (ADR-036 §2) se pasa por pool: solo el pool con factory despacha remoto", async () => {
+      const bus = createRealBus();
+      const pdfWorker = createFakeWorker();
+      const manager = new WorkerPoolManager({
+        bus,
+        logger: createMockLogger(),
+        getPoolSize: () => 1,
+        getMaxQueue: () => 10,
+        getMaxRetries: () => 0,
+        baseRetryDelayMs: 1,
+        maxRetryDelayMs: 1,
+        idleDisposeMs: 60_000,
+        workerFactories: { pdf: () => pdfWorker },
+      });
+
+      const pdfPool = manager.getPool("pdf");
+      const pdfDispatch = pdfPool.dispatch({
+        run: vi.fn(),
+        payload: { documentId: "doc-1" },
+        signal: new AbortController().signal,
+      });
+      await vi.waitFor(() => expect(pdfWorker.postMessage).toHaveBeenCalled());
+      const jobId = (pdfWorker.postMessage.mock.calls[0]?.[0] as { readonly jobId: string }).jobId;
+      pdfWorker.emitMessage({ type: "COMPLETED", jobId, result: "remote" });
+      await expect(pdfDispatch).resolves.toBe("remote");
+
+      // ocr no tiene factory configurada: mismo comportamiento in-process de siempre.
+      const ocrPool = manager.getPool("ocr");
+      const ocrRun = vi.fn().mockResolvedValue("in-process");
+      const ocrResult = await ocrPool.dispatch({
+        run: ocrRun,
+        payload: { documentId: "doc-1" },
+        signal: new AbortController().signal,
+      });
+      expect(ocrResult).toBe("in-process");
+      expect(ocrRun).toHaveBeenCalled();
+
+      manager.disposeAll();
     });
   });
 });
