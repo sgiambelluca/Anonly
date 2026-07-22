@@ -5,8 +5,8 @@
 > Detecta personas, organizaciones, direcciones y fechas mediante un modelo NER local (Transformers.js + ONNX Runtime Web). Emite `Occurrence[]` con `source: "ner"` y `confidence` según el modelo.
 
 **EngineId**: `ner`
-**Versión del spec**: 1.0.0
-**Última actualización**: 2026-07-11
+**Versión del spec**: 1.1.0
+**Última actualización**: 2026-07-22
 
 > **Nota (ADR-021, 2026-07-09)**: este motor se implementa **inline** en su hito, sin crear su pool propio; `WorkerPoolManager` y los pools llegan con el Orchestrator (Hito 9), sin cambio de interfaz pública (precedentes ADR-013/ADR-020). Leer §12 y los ítems de workers/pool del §15 como Hito 9; cancelación cooperativa con checkpoints inline, el SLA < 200 ms se valida en Hito 9/11. Los tests unit/contract/edge mockean la frontera de la librería externa (Code_Standards §10, ADR-021 §5).
 >
@@ -15,6 +15,8 @@
 > **Nota (ADR-024, 2026-07-11)**: `NerStarted` gana `modelLoading?: boolean` (espejo de ADR-021 §3 para OCR; habilita el caso límite 7). `batchSize` se interpreta en **palabras** en la implementación inline (proxy de tokens; el tokenizer real vive tras la frontera de Transformers.js).
 >
 > **Nota (ADR-025, 2026-07-11)**: la librería es `@huggingface/transformers` (v4, sucesora de la deprecada `@xenova/transformers` v2). Cuantización vía `dtype: "q8"`; los wasm de su `onnxruntime-web` bundleado se sirven first-party desde `/wasm/onnxruntime/` con pin en `assets.lock.json`. Los assets del modelo (ADR-023) no cambian.
+>
+> **Nota (ADR-039, 2026-07-22)**: `NerConfig` gana `wasmPaths?: string | NerWasmPaths` (Contracts.md §6). Si está definido, `configureTransformersEnv()` lo asigna **tal cual** a `env.backends.onnx.wasm.wasmPaths` y no lo pisa nunca; ausente → default `/wasm/onnxruntime/` (comportamiento previo, tests sin cambio). Motivo: `onnxruntime-web` hace `import()` dinámico ESM de su glue `.mjs` y Vite prohíbe importar desde `public/` — la app (única capa con bundler) importa los archivos vía `?url` y los inyecta por config, mismo patrón que `GlobalWorkerOptions.workerSrc` de pdfjs-dist. El destino de esos dos assets en `assets.lock.json` pasa a `apps/react-client/src/assets/onnxruntime/` (supersede el destino de ADR-025 punto 3); `env.allowLocalModels = true` es obligatorio en browser (default `false`, hallazgo E2E del Hito 10 PR10). `env.localModelPath` y los assets del modelo no cambian.
 
 ---
 
@@ -80,6 +82,7 @@ export interface NerConfig {
   readonly confidenceThreshold: number;       // default 0.7
   readonly batchSize: number;                 // default 256 palabras (proxy de tokens en la impl. inline, ADR-024 §2)
   readonly enabled: boolean;                  // default true
+  readonly wasmPaths?: string | NerWasmPaths; // default ausente → "/wasm/onnxruntime/" (ADR-039; NerWasmPaths en Contracts.md §6)
 }
 
 export interface NerPageInput {
@@ -219,6 +222,7 @@ Las `Occurrence` también se emiten vía `ENTITY_FOUND` (incremental).
 13. **`processPage` tras `dispose`**: lanza `EngineDisposedError`.
 14. **Texto en idioma no soportado por el modelo**: el modelo multilingüe lo maneja con menor precisión. No lanza error; `confidence` será más baja.
 15. **Fecha escrita en palabras ("3 de mayo de 2024")**: el modelo la emite como `Date`. Si la misma fecha en formato numérico también la detecta Regex, la deduplicación no es responsabilidad de NER: Grouping resuelve por overlap (gana mayor `confidence`; Regex emite 1.0 y siempre gana). Ver ADR-023 §2.
+16. **`wasmPaths` inyectado por config (ADR-039)**: `configureTransformersEnv()` asigna el valor recibido tal cual a `env.backends.onnx.wasm.wasmPaths` (string u objeto `{wasm?, mjs?}`) y no lo sobreescribe con el default. Ausente → default `/wasm/onnxruntime/` (comportamiento previo).
 
 ---
 
@@ -245,6 +249,8 @@ Las `Occurrence` también se emiten vía `ENTITY_FOUND` (incremental).
 | `disabled NER returns empty occurrences without loading model` | `edge.test.ts` | edge | caso 11 |
 | `written-out date mapped to Date` | `edge.test.ts` | edge | caso 15 |
 | `throws EngineDisposedError after dispose` | `edge.test.ts` | edge | caso 13 |
+| `injected wasmPaths applied verbatim, not overridden by default` | `edge.test.ts` | edge | caso 16 (ADR-039; cubre string y objeto) |
+| `absent wasmPaths falls back to /wasm/onnxruntime/` | `edge.test.ts` | edge | caso 16 (ADR-039) |
 | `recall ≥ 85% on reference dataset` | `perf.test.ts` (en `tests/perf/`) | perf | gate de v1.0 |
 | `precision ≥ 90% on reference dataset` | `perf.test.ts` | perf | gate de v1.0 |
 | `snapshot of occurrences for text-10p.pdf stable` | `snapshot.test.ts` | snapshot | fixture |

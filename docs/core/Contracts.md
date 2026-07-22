@@ -294,8 +294,16 @@ export interface CoreRuntimeOptions {
   readonly workers?: Partial<Readonly<Record<WorkerEntryKind, WorkerFactory>>>;
 }
 
+// Overrides parciales de dos niveles (ADR-039): cada sección de EngineConfig
+// admite un subconjunto de campos; lo ausente cae a los defaults de §6. El
+// merge por sub-objeto ya era la semántica de runtime; este tipo la expone
+// (antes: Partial<EngineConfig>, shallow — exigía secciones completas).
+export type EngineConfigOverrides = {
+  readonly [K in keyof EngineConfig]?: Partial<EngineConfig[K]>;
+};
+
 export async function createCore(
-  config?: Partial<EngineConfig>,
+  config?: EngineConfigOverrides,
   runtime?: CoreRuntimeOptions
 ): Promise<IAnonymizationCore>;
 ```
@@ -484,12 +492,23 @@ export interface PdfEngineConfig {
   readonly maxPageCount: number; // default 10000
 }
 
+// Rutas del runtime WASM de onnxruntime-web, inyectadas por el host (la app,
+// única capa con bundler — ADR-036 §2, ADR-039). Solo strings (serializable:
+// EngineConfig viaja al worker en INIT). Forma objeto: URLs explícitas por
+// archivo (necesario con bundlers que hashean nombres); forma string: prefijo
+// de directorio. Ausente → el motor usa su default "/wasm/onnxruntime/".
+export interface NerWasmPaths {
+  readonly wasm?: string;
+  readonly mjs?: string;
+}
+
 export interface NerConfig {
   readonly modelId: string;
   readonly quantization: "q8" | "q4" | "f32";
   readonly confidenceThreshold: number;
   readonly batchSize: number;
   readonly enabled: boolean;
+  readonly wasmPaths?: string | NerWasmPaths; // ADR-039
 }
 
 export interface OcrConfig {
