@@ -186,17 +186,22 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribe {
     }),
   );
 
+  // EXPORT_FINISHED/EXPORT_FAILED limpian exportProgress (bug #7 del
+  // Escenario 1 E2E, 2026-07-22): sin esto, PipelineStatus (`toolbar/
+  // pipelineStageLabel.ts`) muestra el último "Exportando página N de N…"
+  // para siempre tras terminar el export (`React_Client.md` §2.2).
   unsubs.push(
     bus.on(EventChannel.Export, EngineEvents.EXPORT_FINISHED, (payload) => {
       stores.pipeline.setState({
         exportResult: { blobUrl: payload.blobUrl, sizeBytes: payload.sizeBytes },
+        exportProgress: null,
       });
     }),
   );
 
   unsubs.push(
     bus.on(EventChannel.Export, EngineEvents.EXPORT_FAILED, (payload) => {
-      stores.pipeline.setState({ error: payload.error });
+      stores.pipeline.setState({ error: payload.error, exportProgress: null });
     }),
   );
 

@@ -378,10 +378,34 @@ describe("bus-bridge", () => {
       blobUrl: "blob:export-1",
       sizeBytes: 1024,
     });
+    // bug #7 del Escenario 1 E2E (React_Client.md §2.2): EXPORT_FINISHED
+    // limpia exportProgress — si no, PipelineStatus queda mostrando
+    // "Exportando página N de N…" para siempre.
+    expect(usePipelineStore.getState().exportProgress).toBeNull();
 
     const error = makeSerializedError({ code: EngineErrorCode.EXPORT_FAILED });
     bus.emit(EventChannel.Export, EngineEvents.EXPORT_FAILED, { documentId: "doc-1", error });
     expect(usePipelineStore.getState().error).toEqual(error);
+
+    unsubscribe();
+  });
+
+  it("EXPORT_FAILED clears exportProgress (bug #7 del Escenario 1 E2E, React_Client.md §2.2)", () => {
+    const bus = createEventBus({ logger: createTestLogger() });
+    const unsubscribe = subscribe(bus, stores);
+
+    bus.emit(EventChannel.Export, EngineEvents.EXPORT_PROGRESS, {
+      documentId: "doc-1",
+      current: 3,
+      total: 10,
+    });
+    expect(usePipelineStore.getState().exportProgress).toEqual({ current: 3, total: 10 });
+
+    const error = makeSerializedError({ code: EngineErrorCode.EXPORT_FAILED });
+    bus.emit(EventChannel.Export, EngineEvents.EXPORT_FAILED, { documentId: "doc-1", error });
+
+    expect(usePipelineStore.getState().error).toEqual(error);
+    expect(usePipelineStore.getState().exportProgress).toBeNull();
 
     unsubscribe();
   });
