@@ -253,13 +253,19 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     const state = this.state.get(documentId);
     if (
       state === undefined ||
-      !(state.stage === PipelineStage.Ready || state.stage === PipelineStage.Failed)
+      !(
+        state.stage === PipelineStage.Ready ||
+        state.stage === PipelineStage.Done ||
+        state.stage === PipelineStage.Failed
+      )
     ) {
-      // Caso 21: precondición de stage. También hace que un segundo
+      // Caso 21: precondición de stage (ADR-040: Done es el equivalente
+      // operativo de Ready, "Ready con un export ya completado" — habilita
+      // SettingsDialog post-export). También hace que un segundo
       // reanalyze/importDocument concurrente sobre el mismo documento se
-      // autorrechace (el stage ya no es Ready/Failed mientras uno corre).
+      // autorrechace (el stage ya no es Ready/Done/Failed mientras uno corre).
       throw new InvalidInputError(
-        `reanalyze requiere stage Ready o Failed para ${documentId} (actual: ${state?.stage ?? "inexistente"}).`,
+        `reanalyze requiere stage Ready, Done o Failed para ${documentId} (actual: ${state?.stage ?? "inexistente"}).`,
         { documentId, stage: state?.stage },
       );
     }

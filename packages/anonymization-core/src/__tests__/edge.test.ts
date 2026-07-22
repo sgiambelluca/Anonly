@@ -602,6 +602,58 @@ describe("Orchestrator — edge cases", () => {
       expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
     });
 
+    // ─── Caso 21 (ADR-040): Done es el equivalente operativo de Ready ───
+
+    it("reanalyze accepted from Done stage", async () => {
+      const { bus, orchestrator } = makeOrchestrator();
+      await orchestrator.importDocument(createImportInput());
+      expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+
+      const options = {
+        imageFormat: "jpeg" as const,
+        jpegQuality: 0.85,
+        dpi: 150,
+        includeOriginalMetadata: false as const,
+        filename: "out.pdf",
+      };
+      bus.emit(EventChannel.UI, EngineEvents.EXPORT_REQUESTED, { documentId: "doc-1", options });
+      await vi.waitFor(() => expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Done));
+
+      await expect(
+        orchestrator.reanalyze("doc-1", { ner: { enabled: false } }),
+      ).resolves.toBeUndefined();
+      expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    });
+
+    it("reanalyze still rejected during Exporting", async () => {
+      const { bus, engines, orchestrator } = makeOrchestrator();
+      await orchestrator.importDocument(createImportInput());
+
+      const deferred = createDeferred<never>();
+      (engines.export.export as ReturnType<typeof vi.fn>).mockReturnValue(deferred.promise);
+
+      const options = {
+        imageFormat: "jpeg" as const,
+        jpegQuality: 0.85,
+        dpi: 150,
+        includeOriginalMetadata: false as const,
+        filename: "out.pdf",
+      };
+      bus.emit(EventChannel.UI, EngineEvents.EXPORT_REQUESTED, { documentId: "doc-1", options });
+      await vi.waitFor(() =>
+        expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Exporting),
+      );
+
+      await expect(orchestrator.reanalyze("doc-1", { ner: { enabled: false } })).rejects.toThrow(
+        InvalidInputError,
+      );
+
+      deferred.reject(new Error("cleanup"));
+      await vi.waitFor(() =>
+        expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Failed),
+      );
+    });
+
     // ─── Caso 22: cancelación durante un reanalyze ───
 
     it("case 22: CANCEL_REQUESTED during reanalyze preserves merged occurrences and returns to Ready (not Cancelled)", async () => {
