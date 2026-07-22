@@ -123,8 +123,14 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribes {
     stores.pipeline.setState({ exportProgress: { current: p.current, total: p.total } });
   }));
 
+  // EXPORT_FINISHED/EXPORT_FAILED limpian exportProgress (bug #7 del
+  // Escenario 1 E2E, 2026-07-22): sin esto, PipelineStatus muestra el último
+  // "Exportando página N de N…" para siempre tras terminar el export.
   unsubs.push(bus.on(EventChannel.Export, EngineEvents.EXPORT_FINISHED, (p) => {
-    stores.pipeline.setState({ exportResult: { blobUrl: p.blobUrl, sizeBytes: p.sizeBytes } });
+    stores.pipeline.setState({
+      exportResult: { blobUrl: p.blobUrl, sizeBytes: p.sizeBytes },
+      exportProgress: null,
+    });
   }));
 
   // ... etc

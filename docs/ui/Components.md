@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=componentes-ui | dependencias=ui/React_Client.md,ui/UX_Guidelines.md,ADR-001-Framework.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md | audiencia=IA-implementador-ui | fase=4 (reconciliado en fase 10 por ADR-036: PasswordDialog/SettingsDialog/ConfirmDialog agregados §2.6–2.7/§8.9, zoom §5.2, mapeo §12; §2.6/§5.2/§5.5/§12 reescritos por ADR-037 —zoom con re-render real— y ADR-038 —SettingsDialog dispara reanalyze, no recreación del core—) -->
+<!-- CONTEXT: scope=componentes-ui | dependencias=ui/React_Client.md,ui/UX_Guidelines.md,ADR-001-Framework.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md | audiencia=IA-implementador-ui | fase=4 (reconciliado en fase 10 por ADR-036: PasswordDialog/SettingsDialog/ConfirmDialog agregados §2.6–2.7/§8.9, zoom §5.2, mapeo §12; §2.6/§5.2/§5.5/§12 reescritos por ADR-037 —zoom con re-render real— y ADR-038 —SettingsDialog dispara reanalyze, no recreación del core—; §2.1/§2.5/§13.9 ajustados 2026-07-22 por el bug #7 del Escenario 1 E2E: gate de visibilidad por stage vs. vida del diálogo hijo abierto) -->
 
 # Anonly — Catálogo de Componentes
 
@@ -70,7 +70,7 @@ apps/react-client/src/components/
 - **Estados**:
   - `stage === Idle`: solo botón "Importar PDF".
   - `stage ∈ {Importing, Extracting, OCRing, Detecting, Grouping}`: `PipelineStatus` + `CancelButton`.
-  - `stage === Ready`: `PipelineStatus` + `ExportButton` (+ `CancelButton` si hay jobs remanentes).
+  - `stage ∈ {Ready, Done}`: `PipelineStatus` + `ExportButton` (+ `CancelButton` si hay jobs remanentes). (`Done` no tenía fila — gap cerrado al resolver el bug #7 del Escenario 1 E2E: tras un export el documento sigue abierto y re-exportable.)
   - `stage === Rendering/Exporting`: `PipelineStatus` + `CancelButton`.
   - `stage === Failed`: banner de error + "Reintentar" o "Cerrar".
 - **Acciones**: ninguna directa; delega en hijos.
@@ -98,9 +98,10 @@ apps/react-client/src/components/
 
 ### 2.5 `ExportButton`
 
-- **Visible**: cuando `stage === Ready`.
+- **Visible**: cuando `stage ∈ {Ready, Done}` (`Done` permite reabrir el diálogo con el resultado — "Descargar"/"Exportar otro", §7.2).
+- **Vida del diálogo (bug #7 del Escenario 1 E2E, 2026-07-22)**: el gate de visibilidad aplica **solo al botón**; mientras `ExportDialog` esté abierto, el componente permanece montado aunque `stage` salga del set (`Exporting` durante el export, `Done` al finalizar) — `if (!visible && !open) return null`, nunca `if (!visible) return null` a secas. Sin esto, la transición `Ready → Exporting → Done` que el Core hace por spec (`Orchestrator.md` §8) desmonta el diálogo abierto con todo su estado justo antes de pintar el link de descarga.
 - **Acción**: abre `ExportDialog`.
-- **Atajo**: `Cmd/Ctrl+E`.
+- **Atajo**: `Cmd/Ctrl+E` (activo solo cuando el botón es visible).
 
 ### 2.6 `SettingsButton` + `SettingsDialog` (ADR-036 §7)
 
@@ -429,6 +430,7 @@ Modo oscuro: en v1.0. MVP es solo claro.
 6. Sin `useEffect` para lógica de negocio; solo para suscripciones del adapter (que viven en `core-adapter`, no en componentes).
 7. Accesibilidad: todos los componentes interactivos pasan por wrappers de Radix (que son accesibles por default).
 8. Sin `dangerouslySetInnerHTML`. Sin `eval`. Sin `innerHtml`.
+9. **Auto-gating vs. diálogos hijos (bug #7 del Escenario 1 E2E, 2026-07-22)**: un componente que se auto-oculta por `stage` y renderiza un diálogo hijo controlado por estado local **nunca desmonta el diálogo mientras esté abierto** — el gate condiciona el trigger (botón), no la vida del diálogo: `if (!visible && !open) return null`. `stage` puede cambiar por debajo de un diálogo abierto en cualquier momento (el pipeline es asíncrono); desmontar destruye el estado en vuelo del diálogo. Aplica a `ExportButton` (§2.5) y a cualquier componente con el mismo patrón (`CancelButton` + `ConfirmDialog`, §2.4).
 
 ---
 

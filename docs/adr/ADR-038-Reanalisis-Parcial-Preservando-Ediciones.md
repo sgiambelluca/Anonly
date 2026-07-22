@@ -2,7 +2,7 @@
 
 # ADR-038 — Re-análisis parcial preservando ediciones: `reanalyze`, sesión de Grouping reabrible y dedup por identidad
 
-- **Estado**: Accepted
+- **Estado**: Accepted (precondición de stage de `reanalyze` amendada por ADR-040: acepta también `Done`, `stage ∈ {Ready, Done, Failed}`)
 - **Fecha**: 2026-07-17
 - **Decidido por**: El humano, al revisar ADR-036: aprobó la auditoría pero **rechazó la decisión "cambiar settings de Core en runtime = recrear el core" de §5** ("hay que preservar ediciones" — no alcanza con recrear el core y reimportar). Este ADR diseña la alternativa completa y **supersede ese bloque de ADR-036 §5** (el resto de §5 — acciones del adapter, erratas, mapeo de settings — sigue vigente).
 - **Relacionado con**: ADR-011 (Grouping first), ADR-014 (fusión OCR→PDF mediada), ADR-020 §6 (guard de `fuseOcrPage`), ADR-023/ADR-024 (NER config/modelo), ADR-028 (renumeración canónica de `indexInType`), ADR-029 (`maskFormat`), ADR-034 §2 (sesión de Grouping, wiring NER-off), ADR-035 §3 (semántica de `retryable`), ADR-036 §5 (superseded parcial), §8 (orden de PRs — reemplazado por §8 de este ADR), ADR-037 (par de este ADR en la misma revisión del humano)
