@@ -6,7 +6,7 @@
 
 **Componente**: Orchestrator + façade `@anonly/anonymization-core` (no es un motor: **no tiene `EngineId`** y no implementa `IEngine`; este spec adapta la plantilla de 15 secciones de `ai/Module_Specification_Template.md` a un componente host)
 **Ubicación**: `packages/anonymization-core/src/`
-**Versión del spec**: 1.3.0
+**Versión del spec**: 1.3.1
 **Última actualización**: 2026-07-22
 
 > **Nota (ADR-040, 2026-07-22)**: `Done` es el equivalente operativo de `Ready` ("`Ready` con un export ya completado", informativo para la UI, no restrictivo): `reanalyze` acepta `stage ∈ {Ready, Done, Failed}` (§13.21; amenda la precondición de ADR-038). Sin transición `Done → Ready` ni cambio de `PipelineStage`.
@@ -232,7 +232,7 @@ El Orchestrator **no define códigos de error nuevos**: propaga `SerializedEngin
 21. **`reanalyze` con `stage` fuera de `{Ready, Done, Failed}`** (un `reanalyze`/`importDocument` ya en curso): `InvalidInputError`, sin efectos — esto además hace que un segundo `reanalyze` concurrente se rechace solo (durante una corrida el stage está en `Detecting`/`OCRing`/`Exporting`/etc.). `Done` aceptado desde ADR-040 (equivalente operativo de `Ready`; habilita `SettingsDialog` post-export). Patch vacío o con campos no soportados por `ReanalyzeConfigPatch`: `InvalidInputError`. Patch idéntico a la config efectiva vigente: no-op, resuelve sin emitir eventos (ADR-038 §1).
 22. **`CANCEL_REQUESTED` durante un `reanalyze`**: se abortan los jobs OCR/NER en vuelo; las ocurrencias ya mergeadas se conservan; el Orchestrator invoca `grouping.finishSession` (renumeración determinista) **antes** de emitir `PIPELINE_CANCELLED`, suprimiendo el `PIPELINE_READY` derivado de ese `GROUPING_FINISHED`; el stage final es `Ready`, no `Cancelled` — a diferencia de cancelar un `importDocument` (caso 8), acá sí hay un estado editable previo al que volver (ADR-038 §6).
 23. **Un motor deja detached el buffer que recibió** (pdfjs-dist transfiere a su worker interno, v1.2.1): sin efecto sobre el resto del pipeline — cada motor recibió su propia copia (`slice(0)`); el buffer retenido del Orchestrator sigue íntegro (`byteLength > 0`) para `retryWithPassword`, `runOcrStage` y `runExport`.
-24. **Fallo en la preparación del export** (`loadDocument` rechaza, o no hay buffer retenido con el documento aún presente): `failPipeline` → `EXPORT_FAILED`/`PIPELINE_FAILED` visible en la UI; **nunca** un unhandled rejection ni un pipeline congelado en `Ready`/`Exporting` (v1.2.1). El guard "documento no disponible" (race con `DOCUMENT_CLOSED`) sigue siendo warn + return silencioso — ahí no hay pipeline que fallar.
+24. **Fallo en la preparación del export** (`loadDocument` rechaza, o no hay buffer retenido con el documento aún presente): `failPipeline` → `PIPELINE_FAILED` (stage `Failed`) visible en la UI; **nunca** un unhandled rejection ni un pipeline congelado en `Ready`/`Exporting` (v1.2.1). `EXPORT_FAILED` **no** se emite en este camino — es un evento del Export Engine y `export.export()` nunca llegó a invocarse (errata de v1.2.1 corregida en v1.3.1; `EXPORT_FAILED` solo aparece cuando el fallo ocurre dentro de `export.export()`, y ahí `handleExportFailed` → `failPipeline` igual). El guard "documento no disponible" (race con `DOCUMENT_CLOSED`) sigue siendo warn + return silencioso — ahí no hay pipeline que fallar.
 
 ---
 
@@ -268,7 +268,7 @@ El Orchestrator **no define códigos de error nuevos**: propaga `SerializedEngin
 | `blobUrls revoked on close` | `unit.test.ts` | unit | leak de object URLs |
 | `engines receive a copy: retained buffer stays intact if engine detaches its input` | `edge.test.ts` | edge | caso 23 (v1.2.1; el mock de PdfEngine debe simular el detach — `structuredClone(buf, {transfer:[buf]})`) |
 | `export after import loads Render with usable bytes` | `edge.test.ts` | edge | caso 23 (v1.2.1; primera llamada real a `loadDocument` en el flujo con texto) |
-| `loadDocument failure during export emits EXPORT_FAILED, no hang` | `edge.test.ts` | edge | caso 24 (v1.2.1) |
+| `loadDocument failure during export emits PIPELINE_FAILED, no hang` | `edge.test.ts` | edge | caso 24 (v1.2.1; errata corregida en v1.3.1 — decía `EXPORT_FAILED`, imposible en este camino) |
 | `EXPORT_REQUESTED handler never produces unhandled rejection` | `edge.test.ts` | edge | caso 24 (v1.2.1; seatbelt `.catch` sobre `enqueueExport`) |
 | `reanalyze accepted from Done stage` | `edge.test.ts` | edge | caso 21 (ADR-040; post-export → `Detecting`/…→ `Ready`) |
 | `reanalyze still rejected during Exporting` | `edge.test.ts` | edge | caso 21 (ADR-040; el auto-rechazo concurrente se preserva) |
