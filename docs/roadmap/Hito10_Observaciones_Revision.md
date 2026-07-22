@@ -78,6 +78,21 @@
 
 ---
 
+## PR10 — E2E base (BLOQUEADO, no commiteado)
+
+Suite de Playwright creada (`tests/e2e/`: escenarios 1, 6, 8 de `07_Performance_Strategy.md` §11.3 + `support/fixtures.ts`, que genera los PDFs en memoria vía `tests/fixtures/generate.ts` sin commitear binarios). Typecheck y eslint verdes. **No commiteado**: correr `pnpm test:e2e` de verdad (navegador Chromium real, no mocks) da:
+
+- **Escenario 6 (PDF corrupto)**: ✅ pasa.
+- **Escenario 8 (NER desactivado)**: bloqueado correctamente — no hay forma documentada de desactivar NER *antes* de importar (ambigüedad reportada por el implementador, no improvisada).
+- **Escenario 1 (importar → editar → exportar)**: ❌ **falla con un bug real, nunca detectado antes**: al importar `text-10p.pdf` (generado con `pdf-lib`, header `%PDF-1.7` confirmado válido con `xxd`), la app muestra el banner `PIPELINE_FAILED`: **"El archivo no es un PDF válido."** (evento `PDF_INVALID`).
+
+**Por qué nadie lo vio hasta ahora**: todos los tests de `pdf-engine`/`render-engine` (unit/contract/edge, Hitos 2-9) mockean la frontera de `pdfjs-dist` (ADR-021 §5) — **esta es la primera vez que un PDF generado por el proyecto pasa por el `pdfjs-dist` real dentro de un browser real.** El header es válido, así que la causa está más adentro: o bien `getDocument()` de pdfjs-dist tira un error real al parsear los bytes de `pdf-lib` (reclasificado a `PdfInvalidError` por el catch-all de `pdf.engine.ts` líneas ~291-298, que matchea "invalid"/"corrupt" en el mensaje) — o bien hay un problema de carga del worker de pdfjs-dist bajo Vite en este entorno. No alcancé a diagnosticarlo más profundo: la herramienta de browser disponible en esta sesión no tiene soporte para adjuntar archivos a un `<input type="file">` (sí lo tiene `Claude in Chrome`/`file_upload`, no usada acá), así que no pude reproducir con la consola del navegador abierta. Instalé Chromium sin `--with-deps` (el paso que instala librerías de sistema vía `sudo apt-get` se cuelga sin contraseña en shell no interactiva — si se reintenta, matar el proceso y usar `npx playwright install chromium` solo, sin `--with-deps`); no debería ser la causa (pdf.js no depende de libs gráficas de sistema para parsear, solo para renderizar a canvas, y el fallo ocurre en el parseo, antes de cualquier render), pero vale la pena confirmarlo si la próxima sesión sigue sin reproducir.
+
+**Estado dejado**: `tests/e2e/` queda en el working tree, sin commitear (no pasó por el revisor — un gate rojo real no se manda a revisión). Es trabajo real y bien hecho (infra de Playwright, generación de fixtures en memoria, escenarios 6 y 8 correctos); falta resolver el bug de importación que el propio escenario 1 destapó antes de poder commitear el PR10 completo.
+
+---
+
 ## Tareas de seguimiento con entrada formal en el tasklist de la sesión
 
 - ~~Diseñar el fix del supersede de render (leak de `pendingRenders` + clave sin `mode`) — bloquea que el PR9 (Export) se dé por completo.~~ **Resuelto 2026-07-19** — ver "Resolución" en la entrada "PR4" arriba.
+- **Investigar y arreglar el bug real de `PDF_INVALID` al importar `text-10p.pdf` en un browser real** (descubierto por el Escenario 1 del PR10) — bloquea que el PR10 se commitee. Ver entrada "PR10" arriba para el diagnóstico parcial.
