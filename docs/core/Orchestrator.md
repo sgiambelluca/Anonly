@@ -6,11 +6,13 @@
 
 **Componente**: Orchestrator + façade `@anonly/anonymization-core` (no es un motor: **no tiene `EngineId`** y no implementa `IEngine`; este spec adapta la plantilla de 15 secciones de `ai/Module_Specification_Template.md` a un componente host)
 **Ubicación**: `packages/anonymization-core/src/`
-**Versión del spec**: 1.2.0
-**Última actualización**: 2026-07-17
+**Versión del spec**: 1.2.1
+**Última actualización**: 2026-07-22
 **Estado de implementación**: implementado (Hito 9, PR #19; pools en modo in-process — ADR-035 §1). Pendientes de Hito 10: transporte por Web Workers reales vía `CoreRuntimeOptions` (ADR-036 §2); método `reanalyze` para re-análisis parcial preservando ediciones (ADR-038 §1, §5-§6).
 
 > **Nota (ADR-034, 2026-07-16)**: este spec incorpora los cierres de Hitos 7–8 que le fueron diferidos y las decisiones de la auditoría pre-Hito 9: rasterización para OCR vía `RenderEngine.rasterizePage` (§2, §8); gestión de la sesión de Grouping (`startSession`/`finishSession`, incluido el caso NER desactivado — §2, §13.6); `RenderPageProvider` implementado sobre `RenderPageOutput.encoded` (§2); blob URLs creados por los motores y **revocados** por el Orchestrator (§2, §8); consumo de `EXPORT_REQUESTED` y `PREVIEW_UPDATED` (§8, ADR-032/031); `RenderEngine.loadDocument`/`unloadDocument` y retención del buffer original (§2, ADR-030); migración a los **cuatro** pools (§15.11, ADR-021).
+>
+> **Nota (v1.2.1, 2026-07-22 — bug #6 del Escenario 1 E2E, sin ADR: no cambia ningún contrato, restaura invariantes ya especificadas)**: la invariante de §2/§12 ("lo entregado a un motor es una copia; el buffer retenido nunca se reutiliza tras una transferencia") quedó sin materializar cuando ADR-035 dejó los pools in-process: el Orchestrator pasaba `input.buffer` (el retenido) directo a `PdfEngine.process`, y `pdfjs-dist` lo **transfiere a su worker interno** (configurado real desde el Hito 10 PR10 vía `GlobalWorkerOptions.workerSrc`), dejándolo detached (`byteLength = 0`). La primera víctima es `RenderEngine.loadDocument` (rechaza con `InvalidInputError` por buffer vacío) — en `runExport` para PDFs con texto, en `runOcrStage` para escaneados. Se especifica explícito: **toda entrega de bytes del documento a un motor es una copia (`slice(0)`)**; el retenido es del Orchestrator y jamás sale de él (§13.23). Segunda parte del bug: en `runExport`, `loadDocument` corría **fuera** del `try/catch` que enruta a `failPipeline`, y como `EXPORT_REQUESTED` dispara con `void enqueueExport(...)`, el rechazo era un unhandled rejection silencioso — pipeline congelado sin `EXPORT_FAILED`. Se especifica: toda la preparación del export (incluido `loadDocument` y el guard de buffer retenido ausente, que pasa a lanzar en vez de log-warn-return) queda dentro del `try/catch` → `failPipeline`, y el handler de `EXPORT_REQUESTED` agrega un `.catch` terminal de última instancia (§13.24). Los tests en Node nunca lo detectaron: mockean `pdfjs-dist` (ADR-021 §5), que sin worker real no transfiere nada.
 
 ---
 
@@ -198,7 +200,7 @@ El Orchestrator **no define códigos de error nuevos**: propaga `SerializedEngin
 - Prioridades de jobs por visibilidad de página (`05_Worker_Architecture.md` §6.2): la priorización por visibilidad la aplica **Render** al despachar a su pool (recibe `RENDER_REQUESTED` con los `pageIndices` visibles); el Orchestrator no se suscribe a `RENDER_REQUESTED` (errata corregida, ADR-034 §7).
 - Si `deviceMemory < 4` GB o `hardwareConcurrency < 4`: pools reducidos y OCR/NER serializados (`07_Performance_Strategy.md` §5.1).
 - Regex y Grouping en main thread (< 5% del total, `06_Pipeline.md` §14); si crecen, migran a pool vía ADR.
-- Los `ArrayBuffer`/`ImageData` viajan como `Transferable` (zero-copy); el Orchestrator garantiza no reutilizar buffers transferidos.
+- Los `ArrayBuffer`/`ImageData` viajan como `Transferable` (zero-copy); el Orchestrator garantiza no reutilizar buffers transferidos. Con pools in-process (ADR-035) la transferencia igual ocurre **dentro** del motor (pdfjs-dist transfiere el buffer a su worker interno), así que la garantía se cumple entregando siempre una copia (`slice(0)`) del buffer retenido a `PdfEngine.process` y a `RenderEngine.loadDocument` — nunca el original (v1.2.1; costo: una copia transitoria por entrega, el pico de memoria ya estaba presupuestado en `06_Pipeline.md` §3).
 - Handlers del bus no bloqueantes (< 1 ms de trabajo propio; el resto se delega).
 
 ---
@@ -227,6 +229,8 @@ El Orchestrator **no define códigos de error nuevos**: propaga `SerializedEngin
 20. **`reanalyze` con `ocr.languages`** (documento con páginas `requiresOCR`): stage → `OCRing`; `dropOccurrences` de las páginas afectadas (todas sus ocurrencias, incluidas Regex); re-rasterización + OCR + `fuseOcrPage` de esas páginas; stage → `Detecting`: Regex sobre el documento completo (el dedup de Grouping descarta los duplicados de páginas intactas) + NER solo sobre las páginas re-OCR si está activo → `Ready` (ADR-038 §5.3). Sin páginas `requiresOCR`: no-op (nada que re-detectar).
 21. **`reanalyze` con `stage` fuera de `{Ready, Failed}`** (un `reanalyze`/`importDocument` ya en curso): `InvalidInputError`, sin efectos — esto además hace que un segundo `reanalyze` concurrente se rechace solo. Patch vacío o con campos no soportados por `ReanalyzeConfigPatch`: `InvalidInputError`. Patch idéntico a la config efectiva vigente: no-op, resuelve sin emitir eventos (ADR-038 §1).
 22. **`CANCEL_REQUESTED` durante un `reanalyze`**: se abortan los jobs OCR/NER en vuelo; las ocurrencias ya mergeadas se conservan; el Orchestrator invoca `grouping.finishSession` (renumeración determinista) **antes** de emitir `PIPELINE_CANCELLED`, suprimiendo el `PIPELINE_READY` derivado de ese `GROUPING_FINISHED`; el stage final es `Ready`, no `Cancelled` — a diferencia de cancelar un `importDocument` (caso 8), acá sí hay un estado editable previo al que volver (ADR-038 §6).
+23. **Un motor deja detached el buffer que recibió** (pdfjs-dist transfiere a su worker interno, v1.2.1): sin efecto sobre el resto del pipeline — cada motor recibió su propia copia (`slice(0)`); el buffer retenido del Orchestrator sigue íntegro (`byteLength > 0`) para `retryWithPassword`, `runOcrStage` y `runExport`.
+24. **Fallo en la preparación del export** (`loadDocument` rechaza, o no hay buffer retenido con el documento aún presente): `failPipeline` → `EXPORT_FAILED`/`PIPELINE_FAILED` visible en la UI; **nunca** un unhandled rejection ni un pipeline congelado en `Ready`/`Exporting` (v1.2.1). El guard "documento no disponible" (race con `DOCUMENT_CLOSED`) sigue siendo warn + return silencioso — ahí no hay pipeline que fallar.
 
 ---
 
@@ -260,6 +264,10 @@ El Orchestrator **no define códigos de error nuevos**: propaga `SerializedEngin
 | `cancel aborts all jobs of documentId within SLA` | `cancel.test.ts` (en `tests/cancel/`) | cancel | caso 8, Hito 11 |
 | `dispose cleans all subscriptions and pools` | `contract.test.ts` | contract | caso 17 |
 | `blobUrls revoked on close` | `unit.test.ts` | unit | leak de object URLs |
+| `engines receive a copy: retained buffer stays intact if engine detaches its input` | `edge.test.ts` | edge | caso 23 (v1.2.1; el mock de PdfEngine debe simular el detach — `structuredClone(buf, {transfer:[buf]})`) |
+| `export after import loads Render with usable bytes` | `edge.test.ts` | edge | caso 23 (v1.2.1; primera llamada real a `loadDocument` en el flujo con texto) |
+| `loadDocument failure during export emits EXPORT_FAILED, no hang` | `edge.test.ts` | edge | caso 24 (v1.2.1) |
+| `EXPORT_REQUESTED handler never produces unhandled rejection` | `edge.test.ts` | edge | caso 24 (v1.2.1; seatbelt `.catch` sobre `enqueueExport`) |
 
 Los tests de contract/unit/edge mockean los motores (interfaces de `Contracts.md`); la integración real con motores vive en `tests/integration/` (Hito 9) y E2E (Hito 10). Pares críticos mínimos de `tests/integration/` (ADR-034 §6): Regex+NER → Grouping vía `ENTITY_FOUND`; `OCR_PAGE_FINISHED` → Orchestrator → `PdfEngine.fuseOcrPage` (ADR-014); happy path `createCore` → `PIPELINE_READY` con motores reales y fronteras de libs mockeadas (ADR-021 §5). Corre bajo `pnpm test` y con `pnpm test:integration` (filtro posicional, ADR-033); al crearla, quitar `integration/**` del `exclude` de `tests/tsconfig.json` y agregar alias/`paths` por motor a demanda.
 
