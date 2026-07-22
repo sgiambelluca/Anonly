@@ -225,6 +225,128 @@ describe("Orchestrator — edge cases", () => {
     await vi.waitFor(() => expect(engines.export.export).toHaveBeenCalledTimes(2));
   });
 
+  // ─── Casos 23-24 (v1.2.1, bug #6 del Escenario 1 E2E — sin ADR, restaura
+  // invariantes ya especificadas en §2/§12; ver nota de cabecera del spec) ───
+
+  it("engines receive a copy: retained buffer stays intact if engine detaches its input (caso 23)", async () => {
+    const { bus, engines, orchestrator } = makeOrchestrator();
+    (engines.pdf.process as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      async (input: { documentId: string; buffer: ArrayBuffer }) => {
+        // Simula lo que hace pdfjs-dist de verdad: transfiere el buffer que
+        // recibió a su worker interno, dejándolo detached del lado del motor.
+        structuredClone(input.buffer, { transfer: [input.buffer] });
+        expect(input.buffer.byteLength).toBe(0);
+        return createPdfEngineOutput();
+      },
+    );
+
+    const importInput = createImportInput();
+    await orchestrator.importDocument(importInput);
+
+    // El buffer del caller (mismo que retiene el Orchestrator) nunca se tocó:
+    // el motor recibió una copia (`slice(0)`), no el original.
+    expect(importInput.buffer.byteLength).toBeGreaterThan(0);
+
+    const options = {
+      imageFormat: "jpeg" as const,
+      jpegQuality: 0.85,
+      dpi: 150,
+      includeOriginalMetadata: false as const,
+      filename: "out.pdf",
+    };
+    bus.emit(EventChannel.UI, EngineEvents.EXPORT_REQUESTED, { documentId: "doc-1", options });
+    await vi.waitFor(() => expect(engines.render.loadDocument).toHaveBeenCalled());
+
+    // El buffer retenido sigue íntegro para la siguiente entrega (Render, en
+    // el export): otra copia distinta, también con bytes usables.
+    const [, renderBuffer] = (engines.render.loadDocument as ReturnType<typeof vi.fn>).mock
+      .calls[0] as [string, ArrayBuffer];
+    expect(renderBuffer.byteLength).toBeGreaterThan(0);
+  });
+
+  it("export after import loads Render with usable bytes (caso 23)", async () => {
+    const { bus, engines, orchestrator } = makeOrchestrator(); // doc con texto, sin páginas requiresOCR
+    await orchestrator.importDocument(createImportInput());
+
+    // Sin OCR, `render.loadDocument` no se llamó todavía (§2: "una sola vez
+    // por documento": etapa 2 si hay textless, si no antes del primer export).
+    expect(engines.render.loadDocument).not.toHaveBeenCalled();
+
+    const options = {
+      imageFormat: "jpeg" as const,
+      jpegQuality: 0.85,
+      dpi: 150,
+      includeOriginalMetadata: false as const,
+      filename: "out.pdf",
+    };
+    bus.emit(EventChannel.UI, EngineEvents.EXPORT_REQUESTED, { documentId: "doc-1", options });
+    await vi.waitFor(() => expect(engines.export.export).toHaveBeenCalled());
+
+    expect(engines.render.loadDocument).toHaveBeenCalledTimes(1);
+    const [docId, buffer] = (engines.render.loadDocument as ReturnType<typeof vi.fn>).mock
+      .calls[0] as [string, ArrayBuffer];
+    expect(docId).toBe("doc-1");
+    expect(buffer.byteLength).toBeGreaterThan(0);
+  });
+
+  it("loadDocument failure during export emits PIPELINE_FAILED, no hang (caso 24)", async () => {
+    const { bus, engines, orchestrator } = makeOrchestrator();
+    await orchestrator.importDocument(createImportInput());
+
+    (engines.render.loadDocument as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new InvalidInputError("buffer vacío o null en loadDocument.", { documentId: "doc-1" }),
+    );
+
+    const failedSpy = vi.fn();
+    bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_FAILED, failedSpy);
+
+    const options = {
+      imageFormat: "jpeg" as const,
+      jpegQuality: 0.85,
+      dpi: 150,
+      includeOriginalMetadata: false as const,
+      filename: "out.pdf",
+    };
+    bus.emit(EventChannel.UI, EngineEvents.EXPORT_REQUESTED, { documentId: "doc-1", options });
+
+    await vi.waitFor(() => expect(failedSpy).toHaveBeenCalled());
+
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Failed);
+    expect(engines.export.export).not.toHaveBeenCalled();
+  });
+
+  it("EXPORT_REQUESTED handler never produces unhandled rejection (caso 24, seatbelt .catch)", async () => {
+    const { bus, orchestrator } = makeOrchestrator();
+    await orchestrator.importDocument(createImportInput());
+
+    // Fuerza un rechazo en la cadena enqueueExport/runExportChain que no
+    // pasaría por el try/catch de runExport (defensa en profundidad: no
+    // depende de qué falle adentro). Sin el `.catch` terminal del handler,
+    // esto sería un unhandled rejection silencioso y `vi.waitFor` de abajo
+    // nunca resolvería (timeout de test).
+    vi.spyOn(
+      orchestrator as unknown as {
+        enqueueExport: (documentId: string, options: unknown) => Promise<void>;
+      },
+      "enqueueExport",
+    ).mockRejectedValueOnce(new Error("fallo inesperado en la cadena de export"));
+
+    const failedSpy = vi.fn();
+    bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_FAILED, failedSpy);
+
+    const options = {
+      imageFormat: "jpeg" as const,
+      jpegQuality: 0.85,
+      dpi: 150,
+      includeOriginalMetadata: false as const,
+      filename: "out.pdf",
+    };
+    bus.emit(EventChannel.UI, EngineEvents.EXPORT_REQUESTED, { documentId: "doc-1", options });
+
+    await vi.waitFor(() => expect(failedSpy).toHaveBeenCalled());
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Failed);
+  });
+
   // ─── Caso 11: DOCUMENT_CLOSED durante el pipeline ───
 
   it("DOCUMENT_CLOSED during pipeline cancels and frees", async () => {

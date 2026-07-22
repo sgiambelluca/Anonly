@@ -531,7 +531,11 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
           this.engines.pdf.process(
             {
               documentId,
-              buffer: input.buffer,
+              // v1.2.1 (bug #6, Orchestrator.md nota de cabecera / §12 / caso 23):
+              // el motor puede dejar detached el buffer que recibe (pdfjs-dist lo
+              // transfiere a su worker interno) — se entrega siempre una copia, el
+              // buffer retenido en `retainedInputs` nunca sale del Orchestrator.
+              buffer: input.buffer.slice(0),
               ...(input.password !== undefined ? { password: input.password } : {}),
             },
             ctx,
@@ -606,8 +610,9 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     this.progressByDocument.set(documentId, { total: textlessPages.length, current: 0 });
 
     // ADR-034 §1: adelanta loadDocument a la etapa 2 (bytes retenidos de la 0).
+    // v1.2.1 (bug #6, caso 23): copia — el buffer retenido nunca sale del Orchestrator.
     if (!this.renderLoadedDocuments.has(documentId)) {
-      await this.engines.render.loadDocument(documentId, retained.buffer);
+      await this.engines.render.loadDocument(documentId, retained.buffer.slice(0));
       this.renderLoadedDocuments.add(documentId);
     }
 
@@ -733,39 +738,46 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     const controller = this.abortRegistry.get(documentId) ?? this.abortRegistry.create(documentId);
     const ctx = this.ctxFor(controller.signal, documentId);
 
-    if (!this.renderLoadedDocuments.has(documentId)) {
-      const retained = this.retainedInputs.get(documentId);
-      if (retained === undefined) {
-        this.logger.warn("No hay buffer retenido para cargar Render antes del export.", {
-          documentId,
-        });
-        return;
-      }
-      await this.engines.render.loadDocument(documentId, retained.buffer);
-      this.renderLoadedDocuments.add(documentId);
-    }
-
-    const snapshot = this.engines.grouping.getSnapshot(documentId);
-    const provider = this.makeRenderPageProvider(documentId, options, ctx);
-
-    const exportInput: ExportEngineInput = {
-      documentId,
-      document,
-      groups: snapshot.groups,
-      rules: snapshot.rules,
-      options,
-      renderPageProvider: provider,
-    };
-
-    this.setStage(documentId, PipelineStage.Exporting);
-
+    // v1.2.1 (bug #6, caso 24): toda la preparación del export (incluido
+    // `loadDocument`) vive dentro del try/catch → `failPipeline`. El guard de
+    // buffer retenido ausente pasa de warn+return silencioso a lanzar
+    // InvalidInputError — antes el `EXPORT_REQUESTED` no atendido dejaba el
+    // pipeline congelado en `Ready` sin ningún evento; ahora siempre resuelve
+    // en `EXPORT_FAILED`/`PIPELINE_FAILED` visible en la UI.
     try {
+      if (!this.renderLoadedDocuments.has(documentId)) {
+        const retained = this.retainedInputs.get(documentId);
+        if (retained === undefined) {
+          throw new InvalidInputError(
+            "No hay buffer retenido para cargar Render antes del export.",
+            { documentId },
+          );
+        }
+        await this.engines.render.loadDocument(documentId, retained.buffer.slice(0));
+        this.renderLoadedDocuments.add(documentId);
+      }
+
+      const snapshot = this.engines.grouping.getSnapshot(documentId);
+      const provider = this.makeRenderPageProvider(documentId, options, ctx);
+
+      const exportInput: ExportEngineInput = {
+        documentId,
+        document,
+        groups: snapshot.groups,
+        rules: snapshot.rules,
+        options,
+        renderPageProvider: provider,
+      };
+
+      this.setStage(documentId, PipelineStage.Exporting);
+
       await this.engines.export.export(exportInput, ctx);
     } catch (err: unknown) {
       if (err instanceof CancelledError) return; // caso 9: se descarta, sin más acción.
       // Cubre tanto el caso "EXPORT_FAILED ya emitido" (handleExportFailed ya
       // falló el pipeline; failPipeline es idempotente) como errores previos a
-      // cualquier emisión (p. ej. validateInput de Export).
+      // cualquier emisión (p. ej. loadDocument, buffer retenido ausente,
+      // validateInput de Export).
       this.failPipeline(documentId, err);
     }
   }
@@ -1023,7 +1035,14 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
   }
 
   private handleExportRequested(payload: ExportRequested): void {
-    void this.enqueueExport(payload.documentId, payload.options);
+    // v1.2.1 (bug #6, caso 24): `.catch` terminal de última instancia — `runExport`
+    // ya enruta sus fallos a `failPipeline`, pero `enqueueExport`/`runExportChain`
+    // corren disparados (`void`) desde un handler de evento síncrono que no puede
+    // propagar rechazos; sin este seatbelt, cualquier fallo no previsto en esa
+    // cadena se vuelve un unhandled rejection silencioso.
+    this.enqueueExport(payload.documentId, payload.options).catch((err: unknown) => {
+      this.failPipeline(payload.documentId, err);
+    });
   }
 
   private handleExportFinished(payload: ExportFinished): void {
