@@ -154,6 +154,21 @@ Alcance exacto de la fila de PR11 en ADR-036 §8: `WorkerLike`/`WorkerFactory`/`
 
 ---
 
+## PR13 — RenderEngine reparto host/worker (ADR-043) + fix real: visor en blanco para documentos con texto nativo (cerrado, revisor: APPROVED)
+
+Alcance: migración de `render-engine` al reparto host/worker de ADR-043 (la clase `RenderEngine` completa queda host-side; el worker corre un kernel sin estado por documento salvo los `PDFDocumentProxy`; todas las vías de render convergen en `RenderPool.dispatch`/`broadcast`; `unload-document` nuevo; re-priming de workers nuevos/reemplazados) — `Render_Engine.md` §15 items 22-24. En la misma sesión, fix real (sin ADR) de un bug de PR10 que había pasado desapercibido: para un documento con texto nativo (sin páginas OCR), `RenderEngine.loadDocument` nunca se invocaba hasta el export — la UI emite `RENDER_REQUESTED` en cuanto el pipeline llega a `Ready`, mucho antes, y `RenderEngine` lo descartaba en silencio (visor en blanco indefinido). Restaura la invariante ya escrita en `Orchestrator.md` §2 (v1.4.1, §13 caso 25, §14).
+
+**Observaciones no bloqueantes del revisor, sin acción tomada todavía**:
+- **Dead code intencional en `worker-pool.ts`**: la clave `"render"` en `PoolKey` (línea 52), `JOB_TYPE_BY_POOL` (línea 685) y `poolSizeFor` (`orchestrator.ts` líneas 1183-1184) quedó sin call site vivo — el `RenderPool` ahora lo crea `create-core.ts` directo. El implementador la dejó a propósito para no ampliar el diff de `WorkerPoolManager` más allá de lo que ADR-043 pide. Candidato a limpieza en un follow-up.
+- **Nombre del test de caso 24** (`Orchestrator.md` §14): `"loadDocument failure during export emits PIPELINE_FAILED, no hang"` ahora dispara vía `getSnapshot` (ya no puede fallar en `loadDocument` durante el export de un documento recién importado, porque el fix lo carga antes). El mecanismo que prueba sigue siendo el correcto (§13.24), pero el nombre quedó más específico que su disparador real — candidato a relabelar en un futuro PR de docs.
+- **E2E Escenario 1 no re-corrido por el revisor**: el implementador lo corrió (~42s, pass) contra el wiring real de `RenderWorker`; el revisor se apoyó en ese resultado + los 4 gates obligatorios (correr Playwright queda fuera del subset mínimo pre-PR). Si se quiere cierre de primera mano del checklist item 24, correr `pnpm test:e2e` del Escenario 1 antes del merge.
+- **Gap conocido del worker real**: en modo worker, el warning de "OffscreenCanvas no disponible" no tiene puente de bus/logger (solo cableado en el fallback in-process, mismo precedente que `PdfWorker`); el render igual falla con `RenderPageFailedError`, sin pérdida de robustez, solo de visibilidad del log.
+- **Redundancia benigna en `reprimeWorkers`**: el broadcast de re-priming reenvía `load-document` a **todos** los workers vivos, no solo al nuevo — recarga determinística (ADR-030), documentada como redundante pero inofensiva.
+
+**Estado dejado**: PR13 cerrado, revisor: **APPROVED** (checks de primera mano: kernel sin estado, despacho unificado, wire shape/orden de discriminación, re-priming con orden garantizado, interfaz/eventos/supersede/cache sin cambios, gates y prohibiciones). Gates verdes: `pnpm lint`, `pnpm typecheck`, `pnpm test` (807 tests), `pnpm test:contract` (192 tests); cobertura `render-engine` 92-95%. Working tree sin commitear en `feat/hito10-react-client`, a la espera de autorización explícita del humano para `git commit`.
+
+---
+
 ## Tareas de seguimiento con entrada formal en el tasklist de la sesión
 
 - ~~Diseñar el fix del supersede de render (leak de `pendingRenders` + clave sin `mode`) — bloquea que el PR9 (Export) se dé por completo.~~ **Resuelto 2026-07-19** — ver "Resolución" en la entrada "PR4" arriba.
