@@ -20,7 +20,7 @@
 import type { ExportEngineInput, RenderPageProvider } from "@anonly/export-engine";
 import type { NerPageInput } from "@anonly/ner-engine";
 import type { OcrPageInput } from "@anonly/ocr-engine";
-import { PdfPasswordRequiredError } from "@anonly/pdf-engine";
+import { fuseOcrPage, PdfPasswordRequiredError } from "@anonly/pdf-engine";
 import type { PdfEngineOutput } from "@anonly/pdf-engine";
 import { RenderFailedError } from "@anonly/render-engine";
 import type { RenderPageInput } from "@anonly/render-engine";
@@ -53,6 +53,7 @@ import {
   type OcrPageFinished,
   type PageParsed,
   type PdfInvalid,
+  type PdfParsePayload,
   type PdfPasswordRequired,
   type PipelineState,
   type PreviewPageFailed,
@@ -173,7 +174,6 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
   private readonly documents = new Map<string, Document>();
   private readonly retainedInputs = new Map<string, ImportDocumentInput>();
   private readonly renderLoadedDocuments = new Set<string>();
-  private readonly pendingFusions = new Map<string, Array<Promise<void>>>();
   private readonly exportQueues = new Map<string, ExportOptions[]>();
   private readonly exportInProgress = new Set<string>();
   // Config efectiva por documento (ADR-038 §1): inicializada al `config` de
@@ -500,13 +500,13 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
 
     this.abortRegistry.abort(documentId);
     this.abortRegistry.release(documentId);
-    this.engines.pdf.releaseDocument(documentId);
+    // ADR-041 §2: PdfEngine ya no retiene documentos (sin Map interno); no
+    // hay liberación por documento que invocarle (releaseDocument eliminado).
     await this.engines.render.unloadDocument(documentId);
 
     this.renderLoadedDocuments.delete(documentId);
     this.documents.delete(documentId);
     this.retainedInputs.delete(documentId);
-    this.pendingFusions.delete(documentId);
     this.exportQueues.delete(documentId);
     this.exportInProgress.delete(documentId);
     this.progressByDocument.delete(documentId);
@@ -535,7 +535,6 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     this.documents.clear();
     this.retainedInputs.clear();
     this.renderLoadedDocuments.clear();
-    this.pendingFusions.clear();
     this.exportQueues.clear();
     this.exportInProgress.clear();
     this.progressByDocument.clear();
@@ -565,22 +564,34 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
   ): Promise<void> {
     let pdfOutput: PdfEngineOutput;
     try {
-      pdfOutput = await this.pools.getPool("pdf").dispatch({
-        run: () =>
-          this.engines.pdf.process(
-            {
-              documentId,
-              // v1.2.1 (bug #6, Orchestrator.md nota de cabecera / §12 / caso 23):
-              // el motor puede dejar detached el buffer que recibe (pdfjs-dist lo
-              // transfiere a su worker interno) — se entrega siempre una copia, el
-              // buffer retenido en `retainedInputs` nunca sale del Orchestrator.
-              buffer: input.buffer.slice(0),
-              ...(input.password !== undefined ? { password: input.password } : {}),
-            },
-            ctx,
-          ),
+      // v1.2.1 (bug #6, Orchestrator.md nota de cabecera / §12 / caso 23): el
+      // motor puede dejar detached el buffer que recibe (pdfjs-dist lo
+      // transfiere a su worker interno) — se entrega siempre una copia, el
+      // buffer retenido en `retainedInputs` nunca sale del Orchestrator.
+      // El mismo objeto sirve como `PdfEngineInput` (fallback in-process,
+      // `run`) y como `PdfParsePayload` (ADR-036 §2/§3, `03_Data_Model.md`
+      // §18): con `workerFactory` real para "pdf", `payload` dispara el
+      // despacho remoto de `WorkerPool.dispatchRemote` (PR11, ya genérico);
+      // sin ella, `executeJob` sigue invocando `run()` in-process (sin cambios).
+      const pdfParsePayload: PdfParsePayload = {
+        documentId,
+        buffer: input.buffer.slice(0),
+        ...(input.password !== undefined ? { password: input.password } : {}),
+      };
+
+      // Cast de frontera de transporte (ADR-042): WorkerOutbound.COMPLETED.result
+      // es `unknown` a nivel de transporte (mismo criterio que RUN.payload/
+      // INIT.config, ADR-019) — WorkerPool.dispatchRemote lo afina genéricamente
+      // a `TResult` (transporte, ya genérico desde PR11, no se toca acá); el
+      // <PdfEngineOutput> explícito de abajo es el lado del host-bridge que fija
+      // ese `TResult` al tipo concreto que el entry-point del PdfWorker
+      // realmente produce (mismo patrón que `payload as PdfParsePayload` en
+      // `pdf-engine/src/worker/entry.ts`).
+      pdfOutput = await this.pools.getPool("pdf").dispatch<PdfEngineOutput>({
+        run: () => this.engines.pdf.process(pdfParsePayload, ctx),
         signal: ctx.abortSignal,
         priority: 100,
+        payload: pdfParsePayload,
         // 05_Worker_Architecture.md §5 documenta PDF_PASSWORD_REQUIRED como no
         // retryable, pero PdfPasswordRequiredError.retryable === true (pdf-engine,
         // fuera de alcance) — ver nota en DispatchParams.isRetryable.
@@ -683,10 +694,13 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       priority: 90,
     });
 
-    // La fusión (ADR-014) la dispara `handleOcrPageFinished` por cada página,
-    // asincrónicamente respecto del bus; hay que esperar a que todas terminen
-    // antes de que Regex/NER vean el Document ya fusionado.
-    await this.waitForPendingFusions(documentId);
+    // ADR-041 §3: la fusión (ADR-014) la dispara `handleOcrPageFinished` de
+    // forma síncrona por cada `OCR_PAGE_FINISHED` (IEventBus.emit despacha en
+    // línea, 04_Event_System.md §13): para cuando el `await` de arriba
+    // resuelve, todas las fusiones de este batch ya corrieron y persistieron
+    // en `this.documents`. Ya no hace falta esperar promesas de fusión
+    // pendientes (waitForPendingFusions se eliminó junto con el bookkeeping
+    // asíncrono que ya no existe).
   }
 
   private async runDetectionStage(documentId: string, ctx: EngineContext): Promise<void> {
@@ -733,12 +747,6 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       return true;
     }
     return false;
-  }
-
-  private async waitForPendingFusions(documentId: string): Promise<void> {
-    const pending = this.pendingFusions.get(documentId) ?? [];
-    this.pendingFusions.delete(documentId);
-    await Promise.all(pending);
   }
 
   // ─── Export (checklist §8, ADR-032 §2) ───
@@ -977,22 +985,31 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       return;
     }
 
-    const fusion = this.engines.pdf
-      .fuseOcrPage(payload.documentId, payload.pageIndex, words)
-      .then((updatedDocument) => {
-        this.documents.set(payload.documentId, updatedDocument);
-      })
-      .catch((err: unknown) => {
-        this.logger.warn("fuseOcrPage falló para una página OCR.", {
-          documentId: payload.documentId,
-          pageIndex: payload.pageIndex,
-          reason: err instanceof Error ? err.message : String(err),
-        });
+    const document = this.documents.get(payload.documentId);
+    if (document === undefined) {
+      this.logger.warn("OCR_PAGE_FINISHED para un documento no disponible; se ignora la fusión.", {
+        documentId: payload.documentId,
+        pageIndex: payload.pageIndex,
       });
+      return;
+    }
 
-    const list = this.pendingFusions.get(payload.documentId) ?? [];
-    list.push(fusion);
-    this.pendingFusions.set(payload.documentId, list);
+    // ADR-041 §3: fuseOcrPage es una función pura y síncrona, host-side — lee
+    // (this.documents), fusiona e inmediatamente guarda la copia canónica,
+    // todo dentro del mismo turno de evento (IEventBus.emit es síncrono en
+    // línea, 04_Event_System.md §13). Elimina de raíz la carrera lost-update
+    // entre dos OCR_PAGE_FINISHED cercanos que existía cuando la fusión
+    // cruzaba el worker de forma asíncrona.
+    try {
+      const updatedDocument = fuseOcrPage(document, payload.pageIndex, words);
+      this.documents.set(payload.documentId, updatedDocument);
+    } catch (err: unknown) {
+      this.logger.warn("fuseOcrPage falló para una página OCR.", {
+        documentId: payload.documentId,
+        pageIndex: payload.pageIndex,
+        reason: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   private handleOcrPageFailed(payload: OcrPageFailed): void {

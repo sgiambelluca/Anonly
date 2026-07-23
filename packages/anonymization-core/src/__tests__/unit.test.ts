@@ -154,15 +154,12 @@ describe("Orchestrator — unit tests", () => {
 
   // ─── Transporte de workers, plomería del Orchestrator (Hito 10, ADR-036 §2) ───
 
-  it("con runtime.workers.pdf configurado, el Orchestrator sigue siendo in-process hoy (los call sites no pasan payload todavía)", async () => {
+  it("con runtime.workers.pdf configurado, pdf-parse se despacha por postMessage (PR12, ADR-036 §2/§3)", async () => {
     const bus = createRealBus();
     const engines = createMockEngines();
     wireHappyPathSpies(engines, bus);
-    const pdfFactory = vi.fn(() => ({
-      postMessage: vi.fn(),
-      addEventListener: vi.fn(),
-      terminate: vi.fn(),
-    }));
+    const pdfWorker = createFakeWorker();
+    const pdfFactory = vi.fn(() => pdfWorker);
 
     const orchestrator = new PipelineOrchestrator({
       bus,
@@ -173,14 +170,48 @@ describe("Orchestrator — unit tests", () => {
       runtime: { workers: { pdf: pdfFactory } },
     });
 
-    await orchestrator.importDocument(createImportInput());
+    const importPromise = orchestrator.importDocument(createImportInput());
+
+    await vi.waitFor(() => expect(pdfWorker.postMessage).toHaveBeenCalled());
+    const runMessage = pdfWorker.postMessage.mock.calls[0]?.[0] as {
+      readonly type: string;
+      readonly jobId: string;
+      readonly jobType: string;
+      readonly payload: { readonly documentId: string };
+    };
+    expect(runMessage.type).toBe("RUN");
+    expect(runMessage.jobType).toBe("pdf-parse");
+    expect(runMessage.payload.documentId).toBe("doc-1");
+
+    // Literal fresco (sin pasar por el tipo PdfEngineOutput/Document, ambos
+    // `interface`): simula lo que un PdfWorker real devolvería por
+    // postMessage — el transporte real no distingue de dónde salió el dato.
+    pdfWorker.emitMessage({
+      type: "COMPLETED",
+      jobId: runMessage.jobId,
+      result: {
+        document: {
+          id: "doc-1",
+          name: "test.pdf",
+          pageCount: 1,
+          pages: [],
+          metadata: { pdfVersion: "1.7", encrypted: false, hasForms: false },
+          sourceKind: "text",
+          importedAt: 0,
+        },
+        pageCount: 1,
+        textlessPages: [],
+        sourceKind: "text",
+      },
+    });
+
+    await importPromise;
 
     expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
-    expect(engines.pdf.process).toHaveBeenCalled();
-    // La factory nunca se invoca: el dispatch() de pdf-parse en el
-    // Orchestrator no pasa `payload` en este PR (plomería sin consumidor
-    // funcional todavía — CLAUDE.md: "la app sigue sin pasar runtime").
-    expect(pdfFactory).not.toHaveBeenCalled();
+    expect(pdfFactory).toHaveBeenCalledTimes(1);
+    // El pool despachó por postMessage: el fallback run() in-process
+    // (engines.pdf.process) no se invoca (WorkerPool.executeJob, PR11).
+    expect(engines.pdf.process).not.toHaveBeenCalled();
   });
 
   it("runtime.workers.export se retiene (debug log) sin invocar la factory (sin consumidor funcional en este PR)", () => {

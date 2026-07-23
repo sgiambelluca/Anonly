@@ -234,10 +234,18 @@ export type WorkerOutbound =
       readonly progress: number;
       readonly partial?: Serializable;
     }
+  // ADR-042: `result` es `unknown` a nivel de transporte — mismo criterio que
+  // `INIT.config`/`RUN.payload` (ADR-019) y `EVENT.payload` (ADR-036 §3). Los
+  // `*EngineOutput` de cada motor son `interface`s (como todos los tipos de
+  // dominio del Core), que TypeScript no asigna a un tipo con index signature
+  // (`Serializable`) aunque todos sus campos sean datos planos compatibles
+  // (microsoft/TypeScript#15300) — recursivo, no se resuelve tocando un tipo.
+  // El host-bridge de cada motor afina `result` a su `*EngineOutput` esperado
+  // al consumirlo (mismo patrón que `RUN.payload` en el entry-point).
   | {
       readonly type: "COMPLETED";
       readonly jobId: string;
-      readonly result: Serializable;
+      readonly result: unknown;
       readonly transferred?: ReadonlyArray<Transferable>;
     }
   | {

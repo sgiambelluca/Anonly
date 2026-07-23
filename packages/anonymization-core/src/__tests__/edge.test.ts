@@ -394,7 +394,8 @@ describe("Orchestrator — edge cases", () => {
     await expect(importPromise).resolves.toBeUndefined();
 
     expect(() => orchestrator.getState("doc-1")).toThrow(InvalidInputError);
-    expect(engines.pdf.releaseDocument).toHaveBeenCalledWith("doc-1");
+    // ADR-041 §2: PdfEngine ya no retiene documentos; closeDocument() no
+    // invoca releaseDocument (eliminado junto con el método).
     expect(engines.render.unloadDocument).toHaveBeenCalledWith("doc-1");
   });
 

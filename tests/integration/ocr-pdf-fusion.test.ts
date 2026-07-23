@@ -1,11 +1,18 @@
 /**
  * Integración (Hito 9, ADR-034 §6, par crítico "b"): `OCR_PAGE_FINISHED` →
- * Orchestrator → `PdfEngine.fuseOcrPage` (ADR-014), con `createCore()` real
- * (los 7 motores reales) y solo las fronteras pesadas mockeadas (ADR-021 §5):
+ * Orchestrator → `fuseOcrPage` (ADR-014), con `createCore()` real (los 7
+ * motores reales) y solo las fronteras pesadas mockeadas (ADR-021 §5):
  * `pdfjs-dist` (PdfEngine + RenderEngine), `tesseract.js` (OcrEngine) y
  * `@huggingface/transformers` (NerEngine, aunque NER queda desactivado acá:
  * se mockea igual por higiene de import, mismo criterio que los tests
  * propios de ner-engine).
+ *
+ * ADR-041: `fuseOcrPage` pasa a ser una función pura sin instancia (no un
+ * método espiable de `PdfEngine`); la fusión corre host-side, síncrona, en
+ * el Orchestrator. Este test verifica el efecto observable en vez de espiar
+ * la llamada: el texto OCR fusionado ("34.567.891", un DNI) llega al
+ * `Document` que Regex procesa a continuación, y Grouping crea el grupo
+ * correspondiente — prueba de caja negra de que la fusión realmente ocurrió.
  */
 import { createCore, type IAnonymizationCore } from "@anonly/anonymization-core";
 import { EngineEvents, EventChannel, PipelineStage } from "@anonly/shared";
@@ -54,17 +61,19 @@ describe("integration — OCR_PAGE_FINISHED -> Orchestrator -> PdfEngine.fuseOcr
     await core?.dispose();
   });
 
-  it("fuses OCR words into the PdfEngine document for a textless page", async () => {
+  it("fuses OCR words into the retained Document so Regex/Grouping detect them", async () => {
     // Página sin texto -> requiresOCR/textlessPages=[0] (ADR-034 §1).
     const textlessPage = createMockPdfPage([]);
     vi.mocked(getDocument).mockReturnValue(
       mockGetDocumentResult(createMockPdfDocument([textlessPage])),
     );
 
+    // "34.567.891" matchea el patrón DNI de regex-engine (\b\d{1,2}\.?\d{3}\.?\d{3}\b) —
+    // prueba observable de que el texto OCR llegó al Document que Regex procesa.
     vi.mocked(createWorker).mockResolvedValue(
       mockTesseractWorker(
         mockRecognizeData([
-          { text: "Escaneado", confidence: 92, bbox: { x0: 10, y0: 10, x1: 100, y1: 30 } },
+          { text: "34.567.891", confidence: 92, bbox: { x0: 10, y0: 10, x1: 100, y1: 30 } },
         ]),
       ),
     );
@@ -79,9 +88,10 @@ describe("integration — OCR_PAGE_FINISHED -> Orchestrator -> PdfEngine.fuseOcr
       },
     });
 
-    const fuseSpy = vi.spyOn(core.engines.pdf, "fuseOcrPage");
     const ocrPageFinishedSpy = vi.fn();
     core.bus.on(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, ocrPageFinishedSpy);
+    const groupCreatedSpy = vi.fn();
+    core.bus.on(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_CREATED, groupCreatedSpy);
 
     await core.orchestrator.importDocument({
       documentId: "doc-ocr-fusion",
@@ -90,10 +100,11 @@ describe("integration — OCR_PAGE_FINISHED -> Orchestrator -> PdfEngine.fuseOcr
     });
 
     expect(ocrPageFinishedSpy).toHaveBeenCalled();
-    expect(fuseSpy).toHaveBeenCalledWith(
-      "doc-ocr-fusion",
-      0,
-      expect.arrayContaining([expect.objectContaining({ text: "Escaneado", source: "ocr" })]),
+    expect(groupCreatedSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentId: "doc-ocr-fusion",
+        group: expect.objectContaining({ canonicalValue: "34.567.891" }),
+      }),
     );
 
     // El pipeline sigue hasta Ready con el texto fusionado (Regex/Grouping corren sobre él).

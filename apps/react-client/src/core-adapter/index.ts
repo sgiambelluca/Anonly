@@ -3,9 +3,13 @@
  *
  * Fuente de verdad: docs/ui/React_Client.md §2.1.
  *
- * Este PR (Hito 10, PR5) conecta el Core **in-process**, sin `CoreRuntimeOptions`
- * todavía: el wiring de Web Workers reales es el PR 11+ del hito
- * (ADR-036 §2, `React_Client.md` §2.4 — no aplica acá).
+ * Wiring de Web Workers reales (ADR-036 §2, Hito 10 PR12): `@anonly/pdf-engine`
+ * es el primer motor con transporte real — `import PdfWorker from
+ * "@anonly/pdf-engine/worker?worker"` (subpath export del propio paquete)
+ * solo lo puede resolver Vite (única capa con bundler, `Code_Standards.md`
+ * §1); se inyecta acá vía `runtime: { workers: { pdf: () => new PdfWorker() } }`.
+ * El resto de los motores (ocr/ner/render/export) siguen in-process hasta
+ * sus propios PRs de worker (ADR-036 §8, fila 12-16).
  */
 
 import {
@@ -14,6 +18,7 @@ import {
   type IAnonymizationCore,
   type Unsubscribe,
 } from "@anonly/anonymization-core";
+import PdfWorker from "@anonly/pdf-engine/worker?worker";
 
 // ADR-039: `onnxruntime-web` (vía `ner-engine`) hace un `import()` dinámico
 // ESM de su glue `.mjs`, que Vite rechaza si el archivo vive en `public/`
@@ -61,7 +66,7 @@ export async function initCore(config?: EngineConfigOverrides): Promise<IAnonymi
     ...config,
     ner: { wasmPaths: { wasm: ortWasmUrl, mjs: ortWasmMjsUrl }, ...config?.ner },
   };
-  const instance = await createCore(mergedConfig);
+  const instance = await createCore(mergedConfig, { workers: { pdf: () => new PdfWorker() } });
   unsubscribeBridge = subscribe(instance.bus, stores);
   core = instance;
   return core;

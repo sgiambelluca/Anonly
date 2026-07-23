@@ -5,7 +5,13 @@ import { OcrEngine } from "@anonly/ocr-engine";
 import { PdfEngine } from "@anonly/pdf-engine";
 import { RegexEngine } from "@anonly/regex-engine";
 import { RenderEngine } from "@anonly/render-engine";
-import { EngineEvents, EventChannel, PipelineStage, type EngineContext } from "@anonly/shared";
+import {
+  EngineEvents,
+  EventChannel,
+  PipelineStage,
+  type Document,
+  type EngineContext,
+} from "@anonly/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { LruCache } from "../cache.js";
@@ -216,6 +222,25 @@ describe("Orchestrator — contract tests", () => {
       }));
     });
 
+    // ADR-041: fuseOcrPage ya no es un método espiable de PdfEngine (función
+    // pura host-side); se verifica el efecto observable — Regex recibe el
+    // Document ya fusionado (mediación ADR-014 intacta, solo cambia la forma
+    // de la invocación).
+    let regexInputDocument: Document | undefined;
+    vi.spyOn(engines.regex, "process").mockImplementation((input) => {
+      regexInputDocument = input.document;
+      bus.emit(EventChannel.Regex, EngineEvents.REGEX_FINISHED, {
+        documentId: input.document.id,
+        occurrenceCount: 0,
+        durationMs: 1,
+      });
+      return Promise.resolve({
+        documentId: input.document.id,
+        occurrenceCount: 0,
+        durationMs: 1,
+      });
+    });
+
     const orchestrator = new PipelineOrchestrator({
       bus,
       logger: createMockLogger(),
@@ -226,7 +251,8 @@ describe("Orchestrator — contract tests", () => {
 
     await orchestrator.importDocument(createImportInput());
 
-    expect(engines.pdf.fuseOcrPage).toHaveBeenCalledWith("doc-1", 0, words);
+    expect(regexInputDocument?.pages[0]?.words).toEqual(words);
+    expect(regexInputDocument?.pages[0]?.ocrCompleted).toBe(true);
   });
 
   // ─── Invariantes de la matriz (04_Event_System.md §11, ADR-034 §4) ───

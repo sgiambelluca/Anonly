@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("pdfjs-dist", () => ({ getDocument: vi.fn() }));
 
-import { PdfEngine } from "../pdf.engine.js";
+import { PdfEngine, fuseOcrPage } from "../pdf.engine.js";
 import { PdfTimeoutError } from "../pdf.errors.js";
 
 import {
@@ -299,7 +299,7 @@ describe("PdfEngine — unit tests", () => {
         },
       ];
 
-      const updatedDoc = await engine.fuseOcrPage("doc-fuse-unit", 0, ocrWords);
+      const updatedDoc = fuseOcrPage(output.document, 0, ocrWords);
 
       expect(updatedDoc.pages[0]!.ocrCompleted).toBe(true);
       expect(updatedDoc.pages[0]!.words.length).toBe(2);
@@ -332,7 +332,7 @@ describe("PdfEngine — unit tests", () => {
         },
       ];
 
-      const updatedDoc = await engine.fuseOcrPage("doc-immutable", 0, words);
+      const updatedDoc = fuseOcrPage(originalOutput.document, 0, words);
 
       expect(updatedDoc).not.toBe(originalOutput.document);
       expect(originalOutput.document.pages[0]!.words.length).toBe(0);
@@ -340,30 +340,17 @@ describe("PdfEngine — unit tests", () => {
     });
   });
 
-  describe("releaseDocument (ADR-020 §7)", () => {
-    it("releaseDocument evicts a single document", async () => {
+  describe("fuseOcrPage — pageIndex fuera de rango (ADR-041, caso 15)", () => {
+    it("fuseOcrPage on unknown pageIndex throws InvalidInputError", async () => {
       vi.mocked(getDocument).mockReturnValue(
-        mockGetDocumentResult(
-          createMockPdfDocument(1, () => ({
-            getViewport: vi.fn(() => ({ width: 595, height: 842 })),
-            getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
-          })),
-        ),
+        mockGetDocumentResult(createMockPdfDocument(2, { textless: true })),
       );
 
       await engine.init(ctx);
-      const input = createValidInput("doc-release");
-      await engine.process(input, ctx);
+      const input = createValidInput("doc-range-unit");
+      const output = await engine.process(input, ctx);
 
-      expect(engine["documents"].size).toBe(1);
-
-      engine.releaseDocument("doc-release");
-      expect(engine["documents"].size).toBe(0);
-
-      await expect(engine.fuseOcrPage("doc-release", 0, [])).rejects.toThrow(InvalidInputError);
-
-      expect(() => engine.releaseDocument("does-not-exist")).not.toThrow();
-      expect(() => engine.releaseDocument("doc-release")).not.toThrow();
+      expect(() => fuseOcrPage(output.document, 99, [])).toThrow(InvalidInputError);
     });
   });
 });

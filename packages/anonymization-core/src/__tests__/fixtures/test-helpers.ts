@@ -206,8 +206,9 @@ export function wireHappyPathSpies(
   const documentId = pdfOutput.document.id;
 
   vi.spyOn(engines.pdf, "process").mockResolvedValue(pdfOutput);
-  vi.spyOn(engines.pdf, "fuseOcrPage").mockResolvedValue(pdfOutput.document);
-  vi.spyOn(engines.pdf, "releaseDocument").mockImplementation(() => undefined);
+  // ADR-041: fuseOcrPage/releaseDocument ya no son métodos de PdfEngine
+  // (función pura host-side + motor sin estado por documento) — nada que
+  // espiar acá.
   vi.spyOn(engines.pdf, "dispose").mockResolvedValue(undefined);
 
   vi.spyOn(engines.ocr, "processPages").mockImplementation((inputs) =>
