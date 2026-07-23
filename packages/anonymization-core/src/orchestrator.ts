@@ -614,6 +614,24 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
         this.failPipeline(documentId, err);
         return;
       }
+    } else {
+      // v1.4.1 (caso 25, nota de cabecera del spec — visor en blanco para
+      // documentos con texto nativo): sin páginas OCR, el documento igual se
+      // carga en Render acá, simétrico a la rama de arriba, ANTES de
+      // Detecting (y por lo tanto antes de la cascada síncrona
+      // GROUPING_FINISHED -> handleGroupingFinished -> PIPELINE_READY — ver
+      // la nota de sincronía de cabecera del archivo: el fix no puede vivir
+      // dentro de handleGroupingFinished). Sin esto, el primer
+      // RENDER_REQUESTED que la UI emite en cuanto observa Ready (mucho antes
+      // de cualquier export) se descartaba en silencio por "documento no
+      // cargado" (Render_Engine.md §8), dejando el preview en blanco.
+      try {
+        await this.ensureRenderDocumentLoaded(documentId);
+      } catch (err: unknown) {
+        if (this.handleCancellationIfAny(documentId, err)) return;
+        this.failPipeline(documentId, err);
+        return;
+      }
     }
 
     // Etapa 3 (normalización, "shared"): sin acción adicional del Orchestrator.
@@ -634,6 +652,29 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     }
   }
 
+  /**
+   * Carga el documento en `RenderEngine` si todavía no lo está — invariante
+   * de `Orchestrator.md` §2: `loadDocument` se invoca **una sola vez por
+   * documento**, en la etapa 2 si hay páginas OCR (`runOcrStage`), si no
+   * antes de `Detecting` (v1.4.1, caso 25, rama `else` de `runPipelineFrom`)
+   * o, en su defecto (documento ya en Ready), antes del primer export
+   * (`runExport`). Entrega siempre una copia (`slice(0)`) del buffer
+   * retenido — nunca el original (v1.2.1, caso 23) — y es idempotente vía
+   * `renderLoadedDocuments` (no vuelve a invocar `loadDocument` si ya corrió
+   * para este `documentId`, sin importar desde cuál de los tres call sites).
+   */
+  private async ensureRenderDocumentLoaded(documentId: string): Promise<void> {
+    if (this.renderLoadedDocuments.has(documentId)) return;
+    const retained = this.retainedInputs.get(documentId);
+    if (retained === undefined) {
+      throw new InvalidInputError(`No hay buffer retenido para cargar Render (${documentId}).`, {
+        documentId,
+      });
+    }
+    await this.engines.render.loadDocument(documentId, retained.buffer.slice(0));
+    this.renderLoadedDocuments.add(documentId);
+  }
+
   private handleExtractionFailure(documentId: string, err: unknown): void {
     if (err instanceof PdfPasswordRequiredError) {
       // Stage queda en Extracting (ya seteado); espera retryWithPassword
@@ -649,35 +690,29 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     textlessPages: ReadonlyArray<number>,
     ctx: EngineContext,
   ): Promise<void> {
-    const retained = this.retainedInputs.get(documentId);
-    if (retained === undefined) {
-      throw new InvalidInputError(`No hay buffer retenido para ${documentId}.`, { documentId });
-    }
-
     // Progreso granular OCR (spec Orchestrator.md §8): total fijo para toda
     // la etapa (textlessPages.length de DOCUMENT_PARSED); current arranca en
     // 0 y lo incrementa handleOcrPageFinished por cada OCR_PAGE_FINISHED.
     this.progressByDocument.set(documentId, { total: textlessPages.length, current: 0 });
 
-    // ADR-034 §1: adelanta loadDocument a la etapa 2 (bytes retenidos de la 0).
-    // v1.2.1 (bug #6, caso 23): copia — el buffer retenido nunca sale del Orchestrator.
-    if (!this.renderLoadedDocuments.has(documentId)) {
-      await this.engines.render.loadDocument(documentId, retained.buffer.slice(0));
-      this.renderLoadedDocuments.add(documentId);
-    }
+    // ADR-034 §1: adelanta loadDocument a la etapa 2 (bytes retenidos de la
+    // 0). v1.2.1 (bug #6, caso 23): copia — el buffer retenido nunca sale del
+    // Orchestrator (garantizado por ensureRenderDocumentLoaded).
+    await this.ensureRenderDocumentLoaded(documentId);
 
     const scale = ctx.config.ocr.dpi / 72;
-    const renderPool = this.pools.getPool("render");
     const ocrInputs: OcrPageInput[] = [];
 
+    // ADR-043 §2: el Orchestrator deja de envolver `rasterizePage` en
+    // `pool.dispatch({run})` — invoca el método del motor directo; es el
+    // propio `RenderEngine` quien despacha internamente contra su
+    // `RenderPool` (inyectada por el façade en `create-core.ts`). La
+    // limitación de tasa por `waitForCapacity()` que existía acá desaparece
+    // junto con la referencia directa al pool: el límite de concurrencia real
+    // (`renderPoolSize`) lo sigue aplicando la propia pool del motor.
     for (const pageIndex of textlessPages) {
       if (ctx.abortSignal.aborted) throw new CancelledError(documentId);
-      await renderPool.waitForCapacity();
-      const imageData = await renderPool.dispatch({
-        run: () => this.engines.render.rasterizePage(documentId, pageIndex, scale, ctx),
-        signal: ctx.abortSignal,
-        priority: 90,
-      });
+      const imageData = await this.engines.render.rasterizePage(documentId, pageIndex, scale, ctx);
       ocrInputs.push({
         documentId,
         pageIndex,
@@ -786,23 +821,18 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     const ctx = this.ctxFor(controller.signal, documentId);
 
     // v1.2.1 (bug #6, caso 24): toda la preparación del export (incluido
-    // `loadDocument`) vive dentro del try/catch → `failPipeline`. El guard de
-    // buffer retenido ausente pasa de warn+return silencioso a lanzar
-    // InvalidInputError — antes el `EXPORT_REQUESTED` no atendido dejaba el
-    // pipeline congelado en `Ready` sin ningún evento; ahora siempre resuelve
-    // en `EXPORT_FAILED`/`PIPELINE_FAILED` visible en la UI.
+    // `ensureRenderDocumentLoaded`) vive dentro del try/catch → `failPipeline`.
+    // El guard de buffer retenido ausente pasa de warn+return silencioso a
+    // lanzar InvalidInputError — antes el `EXPORT_REQUESTED` no atendido
+    // dejaba el pipeline congelado en `Ready` sin ningún evento; ahora
+    // siempre resuelve en `EXPORT_FAILED`/`PIPELINE_FAILED` visible en la UI.
+    // Desde v1.4.1 (caso 25) `ensureRenderDocumentLoaded` es normalmente un
+    // no-op acá (el documento ya se cargó antes de Ready); se mantiene por
+    // los casos en que no fue así (p. ej. si el load de import falló y el
+    // documento sigue presente, o flujos que lleguen a export sin haber
+    // pasado por `runPipelineFrom`/`runOcrStage`).
     try {
-      if (!this.renderLoadedDocuments.has(documentId)) {
-        const retained = this.retainedInputs.get(documentId);
-        if (retained === undefined) {
-          throw new InvalidInputError(
-            "No hay buffer retenido para cargar Render antes del export.",
-            { documentId },
-          );
-        }
-        await this.engines.render.loadDocument(documentId, retained.buffer.slice(0));
-        this.renderLoadedDocuments.add(documentId);
-      }
+      await this.ensureRenderDocumentLoaded(documentId);
 
       const snapshot = this.engines.grouping.getSnapshot(documentId);
       const provider = this.makeRenderPageProvider(documentId, options, ctx);
@@ -835,9 +865,12 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     ctx: EngineContext,
   ): RenderPageProvider {
     return {
+      // ADR-043 §2: el Orchestrator deja de envolver `renderPage` en
+      // `pool.dispatch({run})` — invoca el método del motor directo;
+      // `RenderEngine` despacha internamente contra su propia `RenderPool`
+      // con prioridad 1000 para `mode: "full"` (05_Worker_Architecture.md
+      // §6.2, ver `render.engine.ts#renderPageInternal`).
       renderFull: async (pageIndex, replacements, abortSignal) => {
-        const pool = this.pools.getPool("render");
-        await pool.waitForCapacity();
         const pageCtx: EngineContext = { ...ctx, abortSignal };
         const renderInput: RenderPageInput = {
           documentId,
@@ -847,11 +880,7 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
           replacements,
           imageFormat: options.imageFormat,
         };
-        const output = await pool.dispatch({
-          run: () => this.engines.render.renderPage(renderInput, pageCtx),
-          signal: abortSignal,
-          priority: 1000, // export-page: máxima prioridad (05_Worker_Architecture.md §6.2)
-        });
+        const output = await this.engines.render.renderPage(renderInput, pageCtx);
         if (output.encoded === undefined) {
           // No debería pasar: renderPage siempre produce `encoded` en mode "full" (ADR-034 §3).
           throw new RenderFailedError(documentId, "renderPage en mode 'full' no produjo encoded.");

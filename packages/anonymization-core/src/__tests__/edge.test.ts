@@ -227,7 +227,8 @@ describe("Orchestrator — edge cases", () => {
     await vi.waitFor(() => expect(engines.export.export).toHaveBeenCalledTimes(2));
   });
 
-  // ─── Casos 23-24 (v1.2.1, bug #6 del Escenario 1 E2E — sin ADR, restaura
+  // ─── Casos 23-25 (v1.2.1 bug #6 del Escenario 1 E2E + v1.4.1 bug del visor
+  // en blanco para documentos con texto nativo — sin ADR, restauran
   // invariantes ya especificadas en §2/§12; ver nota de cabecera del spec) ───
 
   it("engines receive a copy: retained buffer stays intact if engine detaches its input (caso 23)", async () => {
@@ -266,13 +267,35 @@ describe("Orchestrator — edge cases", () => {
     expect(renderBuffer.byteLength).toBeGreaterThan(0);
   });
 
-  it("export after import loads Render with usable bytes (caso 23)", async () => {
+  it("no-OCR document loads Render right after extraction, before Ready (caso 25)", async () => {
+    const { bus, engines, orchestrator } = makeOrchestrator(); // doc con texto, sin páginas requiresOCR
+    const readySpy = vi.fn();
+    bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_READY, readySpy);
+
+    await orchestrator.importDocument(createImportInput());
+
+    // v1.4.1: `render.loadDocument` ya se invocó para cuando importDocument()
+    // resuelve (y por lo tanto para cuando ya se emitió PIPELINE_READY),
+    // *sin* haber emitido ningún EXPORT_REQUESTED — ya no queda diferido al
+    // export (fix del visor en blanco, nota de cabecera del spec).
+    expect(readySpy).toHaveBeenCalledTimes(1);
+    expect(engines.render.loadDocument).toHaveBeenCalledTimes(1);
+    const [docId, buffer] = (engines.render.loadDocument as ReturnType<typeof vi.fn>).mock
+      .calls[0] as [string, ArrayBuffer];
+    expect(docId).toBe("doc-1");
+    expect(buffer.byteLength).toBeGreaterThan(0);
+    expect(engines.export.export).not.toHaveBeenCalled();
+  });
+
+  it("export after import reuses the already-loaded Render document (no reload) (caso 23)", async () => {
     const { bus, engines, orchestrator } = makeOrchestrator(); // doc con texto, sin páginas requiresOCR
     await orchestrator.importDocument(createImportInput());
 
-    // Sin OCR, `render.loadDocument` no se llamó todavía (§2: "una sola vez
-    // por documento": etapa 2 si hay textless, si no antes del primer export).
-    expect(engines.render.loadDocument).not.toHaveBeenCalled();
+    // v1.4.1 (caso 25): sin OCR, `render.loadDocument` ya se invocó al cerrar
+    // la etapa de extracción, antes de Ready — ya no queda diferido al
+    // export (antes de v1.4.1 esta aserción era `not.toHaveBeenCalled()`,
+    // fijando el bug del visor en blanco como comportamiento esperado).
+    expect(engines.render.loadDocument).toHaveBeenCalledTimes(1);
 
     const options = {
       imageFormat: "jpeg" as const,
@@ -284,6 +307,8 @@ describe("Orchestrator — edge cases", () => {
     bus.emit(EventChannel.UI, EngineEvents.EXPORT_REQUESTED, { documentId: "doc-1", options });
     await vi.waitFor(() => expect(engines.export.export).toHaveBeenCalled());
 
+    // El guard `renderLoadedDocuments` (§2: "una sola vez por documento")
+    // evita una segunda carga: el export reusa el documento ya cargado.
     expect(engines.render.loadDocument).toHaveBeenCalledTimes(1);
     const [docId, buffer] = (engines.render.loadDocument as ReturnType<typeof vi.fn>).mock
       .calls[0] as [string, ArrayBuffer];
@@ -295,9 +320,21 @@ describe("Orchestrator — edge cases", () => {
     const { bus, engines, orchestrator } = makeOrchestrator();
     await orchestrator.importDocument(createImportInput());
 
-    (engines.render.loadDocument as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
-      new InvalidInputError("buffer vacío o null en loadDocument.", { documentId: "doc-1" }),
-    );
+    // v1.4.1 (caso 25): `render.loadDocument` ya se invocó y tuvo éxito
+    // durante la propia importación (antes de Ready) — `renderLoadedDocuments`
+    // ya tiene la entrada, así que `ensureRenderDocumentLoaded` en runExport
+    // ya no vuelve a invocar `loadDocument` (guard de "una sola vez por
+    // documento", §2; ver también el test anterior). El fallo de
+    // "preparación del export" del caso 24 se fuerza acá con el siguiente
+    // paso de esa preparación (`getSnapshot`) en lugar de `loadDocument`,
+    // preservando exactamente lo que el caso 24 verifica: cualquier fallo
+    // dentro del try de runExport enruta a failPipeline -> PIPELINE_FAILED,
+    // sin colgar el pipeline y sin invocar export.export().
+    (engines.grouping.getSnapshot as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+      throw new InvalidInputError("fallo simulado en preparación de export.", {
+        documentId: "doc-1",
+      });
+    });
 
     const failedSpy = vi.fn();
     bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_FAILED, failedSpy);
@@ -321,11 +358,15 @@ describe("Orchestrator — edge cases", () => {
     const { bus, engines, orchestrator } = makeOrchestrator();
     await orchestrator.importDocument(createImportInput());
 
-    // Fuerza el fallo real de siempre (buffer retenido ausente) para que
-    // runExport llegue a su catch -> failPipeline.
-    (engines.render.loadDocument as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
-      new InvalidInputError("buffer vacío o null en loadDocument.", { documentId: "doc-1" }),
-    );
+    // v1.4.1 (caso 25): igual que en el test anterior, `loadDocument` ya no
+    // puede fallar en este punto (ya se cargó con éxito durante el import) —
+    // se fuerza el primer fallo (el que hace entrar a runExport en su catch)
+    // con getSnapshot en lugar de loadDocument.
+    (engines.grouping.getSnapshot as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+      throw new InvalidInputError("fallo simulado en preparación de export.", {
+        documentId: "doc-1",
+      });
+    });
 
     // Fuerza un SEGUNDO fallo, esta vez DENTRO del propio catch de runExport:
     // failPipeline emite PIPELINE_FAILED como su último paso — si ese emit

@@ -233,6 +233,44 @@ export interface ExportPagePayload {
   readonly metadata: ExportMetadata;
 }
 
+// ─── Payloads del transporte real de RenderWorker (Hito 10, ADR-036 §4 /
+// ADR-043 §4) que NO agregan `WorkerJobType` nuevo: viajan como `RUN` con
+// `jobType: "render-page"` directo a cada worker, sin cola (por eso tienen
+// `jobId`/`COMPLETED` igual que un job). El entry-point discrimina el payload
+// de "render-page" por FORMA, en este orden exacto (ADR-043 §4): `"buffer" in
+// payload` -> load; `"kind" in payload` -> render (`RenderPagePayload`, ya
+// definido arriba); `"pageIndex" in payload` -> rasterize; si no -> unload. ───
+
+/**
+ * Mensaje de control broadcast a cada RenderWorker (no es un job encolable).
+ * El `buffer` se CLONA por worker (nunca se transfiere: transferirlo vaciaría
+ * el original retenido por el host — `05_Worker_Architecture.md` §2.3/§7.4,
+ * ADR-030).
+ */
+export interface LoadDocumentPayload {
+  readonly documentId: string;
+  readonly buffer: ArrayBuffer;
+}
+
+/**
+ * Control broadcast simétrico a `LoadDocumentPayload` (ADR-043 §4): libera el
+ * `PDFDocumentProxy` de ese documento en cada RenderWorker a mitad de sesión
+ * (`DOCUMENT_CLOSED`). Idempotente, sin transfer.
+ */
+export interface UnloadDocumentPayload {
+  readonly documentId: string;
+}
+
+/**
+ * Rasterización para OCR (ADR-034 §1). Viaja bajo `jobType: "render-page"`,
+ * prioridad 90/40 (espejo de `ocr-page`), timeouts/retries de `render-page`.
+ */
+export interface RasterizePagePayload {
+  readonly documentId: string;
+  readonly pageIndex: number;
+  readonly scale: number;
+}
+
 export interface ExportOptions {
   readonly imageFormat: "png" | "jpeg";
   readonly jpegQuality: number;

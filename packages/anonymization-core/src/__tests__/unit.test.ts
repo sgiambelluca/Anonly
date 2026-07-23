@@ -1,4 +1,5 @@
 import { PdfTimeoutError } from "@anonly/pdf-engine";
+import { RenderEngine } from "@anonly/render-engine";
 import {
   CancelledError,
   EngineError,
@@ -8,6 +9,7 @@ import {
   EventChannel,
   InvalidInputError,
   PipelineStage,
+  type EngineContext,
 } from "@anonly/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -734,6 +736,341 @@ describe("Orchestrator — unit tests", () => {
         .jobId;
       workerB.emitMessage({ type: "COMPLETED", jobId: secondJobId, result: "ok" });
       await expect(secondDispatch).resolves.toBe("ok");
+    });
+
+    // ─── broadcast() + onWorkerCreated (ADR-043 §4/§5, PR13) ───
+
+    it("broadcast() envía el mismo payload a cada worker vivo y agrega los COMPLETED", async () => {
+      const workerA = createFakeWorker();
+      const workerB = createFakeWorker();
+      const factory = vi.fn().mockReturnValueOnce(workerA).mockReturnValueOnce(workerB);
+      const pool = new WorkerPool({
+        poolKey: "render",
+        jobType: "render-page",
+        size: 2,
+        maxQueue: 10,
+        maxRetries: 0,
+        baseRetryDelayMs: 1,
+        maxRetryDelayMs: 1,
+        bus,
+        logger: createMockLogger(),
+        workerFactory: factory,
+      });
+
+      // Fuerza que existan DOS workers vivos: dos dispatch concurrentes sin
+      // resolver ocupan los slots 0 y 1 (assignRemoteSlot los reparte por
+      // orden de llegada, síncrono dentro de cada dispatchRemote).
+      const p1 = pool.dispatch({
+        run: vi.fn(),
+        payload: { a: 1 },
+        signal: new AbortController().signal,
+      });
+      await vi.waitFor(() => expect(workerA.postMessage).toHaveBeenCalledTimes(1));
+      const p2 = pool.dispatch({
+        run: vi.fn(),
+        payload: { b: 2 },
+        signal: new AbortController().signal,
+      });
+      await vi.waitFor(() => expect(workerB.postMessage).toHaveBeenCalledTimes(1));
+
+      const jobIdA = (workerA.postMessage.mock.calls[0]?.[0] as { readonly jobId: string }).jobId;
+      const jobIdB = (workerB.postMessage.mock.calls[0]?.[0] as { readonly jobId: string }).jobId;
+      workerA.emitMessage({ type: "COMPLETED", jobId: jobIdA, result: "a-done" });
+      workerB.emitMessage({ type: "COMPLETED", jobId: jobIdB, result: "b-done" });
+      await Promise.all([p1, p2]);
+
+      workerA.postMessage.mockClear();
+      workerB.postMessage.mockClear();
+
+      const broadcastPromise = pool.broadcast({ documentId: "doc-1" }, vi.fn());
+
+      await vi.waitFor(() => expect(workerA.postMessage).toHaveBeenCalledTimes(1));
+      expect(workerB.postMessage).toHaveBeenCalledTimes(1);
+      const msgA = workerA.postMessage.mock.calls[0]?.[0] as {
+        readonly type: string;
+        readonly jobId: string;
+        readonly payload: unknown;
+      };
+      const msgB = workerB.postMessage.mock.calls[0]?.[0] as {
+        readonly type: string;
+        readonly jobId: string;
+        readonly payload: unknown;
+      };
+      expect(msgA.type).toBe("RUN");
+      expect(msgA.payload).toEqual({ documentId: "doc-1" });
+      expect(msgB.payload).toEqual({ documentId: "doc-1" });
+      expect(msgA.jobId).not.toBe(msgB.jobId); // cada worker recibe su propio jobId de correlación
+
+      workerA.emitMessage({ type: "COMPLETED", jobId: msgA.jobId, result: "ra" });
+      workerB.emitMessage({ type: "COMPLETED", jobId: msgB.jobId, result: "rb" });
+
+      const results = await broadcastPromise;
+      expect(results).toHaveLength(2);
+      expect(results).toEqual(expect.arrayContaining(["ra", "rb"]));
+    });
+
+    it("broadcast() sin workers vivos asegura al menos uno (bootstrap) antes de despachar", async () => {
+      const worker = createFakeWorker();
+      const pool = new WorkerPool({
+        poolKey: "render",
+        jobType: "render-page",
+        size: 2,
+        maxQueue: 10,
+        maxRetries: 0,
+        baseRetryDelayMs: 1,
+        maxRetryDelayMs: 1,
+        bus,
+        logger: createMockLogger(),
+        workerFactory: () => worker,
+      });
+
+      const broadcastPromise = pool.broadcast({ documentId: "doc-boot" }, vi.fn());
+      await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalledTimes(1));
+      const msg = worker.postMessage.mock.calls[0]?.[0] as {
+        readonly jobId: string;
+        readonly payload: unknown;
+      };
+      expect(msg.payload).toEqual({ documentId: "doc-boot" });
+
+      worker.emitMessage({ type: "COMPLETED", jobId: msg.jobId, result: "ok" });
+      await expect(broadcastPromise).resolves.toEqual(["ok"]);
+    });
+
+    it("onWorkerCreated se espera (await) antes de que un worker nuevo reciba su primer RUN (ADR-043 §5)", async () => {
+      const worker = createFakeWorker();
+      const order: string[] = [];
+      let resolveHook: (() => void) | undefined;
+      const onWorkerCreated = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveHook = (): void => {
+              order.push("hook-done");
+              resolve();
+            };
+          }),
+      );
+      const pool = new WorkerPool({
+        poolKey: "render",
+        jobType: "render-page",
+        size: 1,
+        maxQueue: 10,
+        maxRetries: 0,
+        baseRetryDelayMs: 1,
+        maxRetryDelayMs: 1,
+        bus,
+        logger: createMockLogger(),
+        workerFactory: () => worker,
+        onWorkerCreated,
+      });
+
+      const dispatchPromise = pool.dispatch({
+        run: vi.fn(),
+        payload: {},
+        signal: new AbortController().signal,
+      });
+
+      // Deja correr microtasks: el worker ya se creó (la factory ya corrió)
+      // pero el RUN no debería postearse todavía porque onWorkerCreated no resolvió.
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(onWorkerCreated).toHaveBeenCalledTimes(1);
+      expect(worker.postMessage).not.toHaveBeenCalled();
+
+      resolveHook?.();
+      await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalledTimes(1));
+      order.push("run-posted");
+      expect(order).toEqual(["hook-done", "run-posted"]);
+
+      const jobId = (worker.postMessage.mock.calls[0]?.[0] as { readonly jobId: string }).jobId;
+      worker.emitMessage({ type: "COMPLETED", jobId, result: "ok" });
+      await expect(dispatchPromise).resolves.toBe("ok");
+    });
+  });
+
+  // ─── RenderEngine + RenderPool real (ADR-043, PR13): wiring façade↔motor,
+  // no solo la pool en aislamiento — cubre los dos puntos de "Validación" del
+  // ADR que el resto de la suite (render-engine, tests de WorkerPool de
+  // arriba) no ejercita directamente contra `RenderEngine`. ───
+
+  describe("RenderEngine + RenderPool real (ADR-043)", () => {
+    function makeRenderCtx(bus: ReturnType<typeof createRealBus>): EngineContext {
+      return {
+        bus,
+        logger: createMockLogger(),
+        cache: new LruCache(),
+        abortSignal: new AbortController().signal,
+        config: createEngineConfig(),
+      };
+    }
+
+    it("unloadDocument (DOCUMENT_CLOSED) hace broadcast de unload-document a cada RenderWorker vivo", async () => {
+      const bus = createRealBus();
+      const workerA = createFakeWorker();
+      const workerB = createFakeWorker();
+      const factory = vi.fn().mockReturnValueOnce(workerA).mockReturnValueOnce(workerB);
+      const pool = new WorkerPool({
+        poolKey: "render",
+        jobType: "render-page",
+        size: 2,
+        maxQueue: 10,
+        maxRetries: 0,
+        baseRetryDelayMs: 1,
+        maxRetryDelayMs: 1,
+        bus,
+        logger: createMockLogger(),
+        workerFactory: factory,
+      });
+
+      const engine = new RenderEngine(pool);
+      const ctx = makeRenderCtx(bus);
+      await engine.init(ctx);
+
+      // loadDocument bootstrapea slot 0 (workerA) — responde con pageCount.
+      const loadPromise = engine.loadDocument("doc-a", new Uint8Array([1, 2, 3, 4]).buffer);
+      await vi.waitFor(() => expect(workerA.postMessage).toHaveBeenCalledTimes(1));
+      const loadJobId = (workerA.postMessage.mock.calls[0]?.[0] as { readonly jobId: string })
+        .jobId;
+      workerA.emitMessage({ type: "COMPLETED", jobId: loadJobId, result: { pageCount: 3 } });
+      await loadPromise;
+
+      // Dos rasterizePage concurrentes ocupan slot 0 (workerA) y slot 1
+      // (workerB, recién creado) — así quedan DOS workers vivos para
+      // verificar que unloadDocument le llega a cada uno, no solo al primero.
+      workerA.postMessage.mockClear();
+      const r1 = engine.rasterizePage("doc-a", 0, 1, ctx);
+      await vi.waitFor(() => expect(workerA.postMessage).toHaveBeenCalledTimes(1));
+      const r2 = engine.rasterizePage("doc-a", 1, 1, ctx);
+      await vi.waitFor(() => expect(workerB.postMessage).toHaveBeenCalledTimes(1));
+
+      const fakeImageData = {
+        data: new Uint8ClampedArray(4),
+        width: 1,
+        height: 1,
+        colorSpace: "srgb",
+      };
+      const rasterJobIdA = (workerA.postMessage.mock.calls[0]?.[0] as { readonly jobId: string })
+        .jobId;
+      const rasterJobIdB = (workerB.postMessage.mock.calls[0]?.[0] as { readonly jobId: string })
+        .jobId;
+      workerA.emitMessage({ type: "COMPLETED", jobId: rasterJobIdA, result: fakeImageData });
+      workerB.emitMessage({ type: "COMPLETED", jobId: rasterJobIdB, result: fakeImageData });
+      await Promise.all([r1, r2]);
+
+      // Ahora sí: unloadDocument (lo que closeDocument()/DOCUMENT_CLOSED
+      // invoca en el Orchestrator, orchestrator.ts) debe llegarle a AMBOS
+      // workers vivos, con el payload de control (sin buffer/kind/pageIndex).
+      workerA.postMessage.mockClear();
+      workerB.postMessage.mockClear();
+      const unloadPromise = engine.unloadDocument("doc-a");
+
+      await vi.waitFor(() => expect(workerA.postMessage).toHaveBeenCalledTimes(1));
+      expect(workerB.postMessage).toHaveBeenCalledTimes(1);
+      const unloadMsgA = workerA.postMessage.mock.calls[0]?.[0] as {
+        readonly type: string;
+        readonly jobId: string;
+        readonly payload: unknown;
+      };
+      const unloadMsgB = workerB.postMessage.mock.calls[0]?.[0] as {
+        readonly jobId: string;
+        readonly payload: unknown;
+      };
+      expect(unloadMsgA.type).toBe("RUN");
+      expect(unloadMsgA.payload).toEqual({ documentId: "doc-a" });
+      expect(unloadMsgB.payload).toEqual({ documentId: "doc-a" });
+
+      workerA.emitMessage({ type: "COMPLETED", jobId: unloadMsgA.jobId, result: undefined });
+      workerB.emitMessage({ type: "COMPLETED", jobId: unloadMsgB.jobId, result: undefined });
+      await unloadPromise;
+    });
+
+    it("un RenderWorker nuevo/reemplazado se re-primea con load-document ANTES de aceptar su primer render-page (ADR-043 §5)", async () => {
+      const bus = createRealBus();
+      const workerA = createFakeWorker();
+      const workerB = createFakeWorker();
+      const factory = vi.fn().mockReturnValueOnce(workerA).mockReturnValueOnce(workerB);
+      // Casillero mutable (mismo patrón que create-core.ts): `onWorkerCreated`
+      // necesita `engine`, que a su vez necesita `pool` ya construida —
+      // referencia circular de inicializadores, resuelta con un box en vez
+      // de una variable directa (evita el ts(7022)/(7023) de tipo implícito).
+      const engineRef: { current?: RenderEngine } = {};
+      const pool = new WorkerPool({
+        poolKey: "render",
+        jobType: "render-page",
+        size: 1,
+        maxQueue: 10,
+        maxRetries: 0,
+        baseRetryDelayMs: 1,
+        maxRetryDelayMs: 1,
+        bus,
+        logger: createMockLogger(),
+        workerFactory: factory,
+        // El wiring real (create-core.ts) cablea esto a
+        // `renderEngine.reprimeWorkers()`; se reproduce igual acá para
+        // ejercitar la ruta completa façade↔motor, no un mock del hook.
+        onWorkerCreated: () => engineRef.current?.reprimeWorkers() ?? Promise.resolve(),
+      });
+      const engine = new RenderEngine(pool);
+      engineRef.current = engine;
+      const ctx = makeRenderCtx(bus);
+      await engine.init(ctx);
+
+      // Carga doc-a en workerA (slot 0).
+      const loadPromise = engine.loadDocument("doc-a", new Uint8Array([1, 2, 3, 4]).buffer);
+      await vi.waitFor(() => expect(workerA.postMessage).toHaveBeenCalledTimes(1));
+      const initialLoadJobId = (
+        workerA.postMessage.mock.calls[0]?.[0] as { readonly jobId: string }
+      ).jobId;
+      workerA.emitMessage({ type: "COMPLETED", jobId: initialLoadJobId, result: { pageCount: 2 } });
+      await loadPromise;
+
+      // Crash de workerA: el pool descarta la instancia (handleWorkerTransportError).
+      workerA.emitError();
+
+      // Reemplazo: el próximo render sobre doc-a crea workerB en el slot 0
+      // liberado. ANTES de que workerB reciba el RUN de rasterize-page,
+      // debería recibir un RUN de load-document (re-priming, ADR-043 §5).
+      const rasterizePromise = engine.rasterizePage("doc-a", 0, 1, ctx);
+      await vi.waitFor(() => expect(workerB.postMessage).toHaveBeenCalledTimes(1));
+
+      const firstMsgToB = workerB.postMessage.mock.calls[0]?.[0] as {
+        readonly type: string;
+        readonly jobId: string;
+        readonly payload: unknown;
+      };
+      expect(firstMsgToB.type).toBe("RUN");
+      expect(firstMsgToB.payload).toEqual(
+        expect.objectContaining({ documentId: "doc-a", buffer: expect.any(ArrayBuffer) }),
+      );
+
+      // Todavía no se posteó el rasterize-page: onWorkerCreated (reprimeWorkers)
+      // sigue esperando el COMPLETED del re-priming.
+      expect(workerB.postMessage).toHaveBeenCalledTimes(1);
+
+      workerB.emitMessage({
+        type: "COMPLETED",
+        jobId: firstMsgToB.jobId,
+        result: { pageCount: 2 },
+      });
+
+      // Recién ahora se postea el rasterize-page que disparó la creación de workerB.
+      await vi.waitFor(() => expect(workerB.postMessage).toHaveBeenCalledTimes(2));
+      const secondMsgToB = workerB.postMessage.mock.calls[1]?.[0] as {
+        readonly jobId: string;
+        readonly payload: unknown;
+      };
+      expect(secondMsgToB.payload).toEqual(
+        expect.objectContaining({ documentId: "doc-a", pageIndex: 0 }),
+      );
+
+      const fakeImageData = {
+        data: new Uint8ClampedArray(4),
+        width: 1,
+        height: 1,
+        colorSpace: "srgb",
+      };
+      workerB.emitMessage({ type: "COMPLETED", jobId: secondMsgToB.jobId, result: fakeImageData });
+      await expect(rasterizePromise).resolves.toEqual(fakeImageData);
     });
   });
 

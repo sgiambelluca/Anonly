@@ -349,7 +349,12 @@ describe("RenderEngine — edge cases", () => {
     await engine.loadDocument(docId, createValidBuffer());
 
     expect(mockDocA.destroy).toHaveBeenCalledTimes(1);
-    expect(engine["documents"].get(docId)).toBe(mockDocB);
+    // ADR-043 §3: `documents` host-side ya no guarda el `PDFDocumentProxy`
+    // (vive en el kernel/worker) — retiene `{ buffer, pageCount }`. La
+    // recarga determinística (mismo comportamiento, ADR-030 §1) se verifica
+    // acá por el `pageCount` reflejando el segundo proxy (mockDocB, 2
+    // páginas) en vez de por identidad de referencia del proxy.
+    expect(engine["documents"].get(docId)).toEqual(expect.objectContaining({ pageCount: 2 }));
   });
 
   it("unloadDocument on unknown id is a no-op", async () => {

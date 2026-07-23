@@ -103,6 +103,16 @@ export interface WorkerPoolOptions {
    * es 100% in-process, comportamiento idéntico al Hito 9 (ADR-035 §1).
    */
   readonly workerFactory?: WorkerFactory;
+  /**
+   * Re-priming (ADR-043 §5): invocado y esperado (`await`) por
+   * `workerForSlot` inmediatamente después de crear un worker real nuevo —
+   * ANTES de que ese worker reciba cualquier job — para que el motor dueño
+   * de este pool pueda re-enviarle su propio estado retenido (en `RenderPool`:
+   * `load-document` de todos los documentos vigentes vía `broadcast`, ver
+   * `RenderEngine#reprimeWorkers`). Sin uso fuera de `RenderPool`: los demás
+   * pools (pdf/ocr/ner) no tienen estado por documento que re-primear.
+   */
+  readonly onWorkerCreated?: () => Promise<void>;
 }
 
 export interface DispatchParams<TResult> {
@@ -269,6 +279,65 @@ export class WorkerPool {
     });
   }
 
+  /**
+   * Broadcast (ADR-043 §4): envía `payload` como `RUN` con el `jobType` de
+   * este pool directo a CADA worker vivo — sin pasar por la cola de
+   * prioridad (no es un job encolable) — y espera el `COMPLETED` de todos.
+   * Usado por `RenderPool` para los controles `load-document`/
+   * `unload-document` (`RenderEngine#loadDocument`/`unloadDocument`): a
+   * diferencia de `dispatch()` (un job va a UN worker), un control de
+   * `RenderEngine` debe llegar a TODOS, porque cualquiera de ellos podría
+   * recibir el próximo job `render-page` sobre ese documento.
+   *
+   * Sin `workerFactory` (in-process, ADR-035): degenera en una sola
+   * invocación de `run()` (el kernel local) — mismo criterio que
+   * `executeJob`. Con `workerFactory`: asegura que exista al menos un worker
+   * (`workerForSlot(0)`, bootstrap perezoso — el primer `load-document` de la
+   * sesión puede llegar antes que cualquier job real haya creado un worker) y
+   * despacha a TODOS los que ya viven en el pool en ese momento (incluidos
+   * los creados por jobs `render-page` previos).
+   */
+  async broadcast<TResult>(
+    payload: unknown,
+    run: () => Promise<TResult>,
+  ): Promise<ReadonlyArray<TResult>> {
+    if (this.disposed) {
+      return Promise.reject(new CancelledError(nextJobId(this.options.jobType)));
+    }
+    if (this.options.workerFactory === undefined) {
+      return [await run()];
+    }
+
+    await this.workerForSlot(0);
+    const entries = [...this.remoteWorkers.entries()];
+    return Promise.all(
+      entries.map(([slot, worker]) => this.sendBroadcastToWorker<TResult>(slot, worker, payload)),
+    );
+  }
+
+  private sendBroadcastToWorker<TResult>(
+    slot: number,
+    worker: WorkerLike,
+    payload: unknown,
+  ): Promise<TResult> {
+    const jobId = nextJobId(this.options.jobType);
+    return new Promise<TResult>((resolve, reject) => {
+      this.pendingRemoteJobs.set(jobId, {
+        slotIndex: slot,
+        resolve: (result) => resolve(result as TResult),
+        reject,
+      });
+      const runMessage: WorkerInbound = {
+        type: "RUN",
+        jobId,
+        signalId: jobId,
+        jobType: this.options.jobType,
+        payload,
+      };
+      worker.postMessage(runMessage);
+    });
+  }
+
   /** Rechaza todos los jobs en cola (no los que ya están corriendo) y marca el pool como dispuesto. */
   dispose(): void {
     this.disposed = true;
@@ -399,7 +468,6 @@ export class WorkerPool {
     signal: AbortSignal,
   ): Promise<TResult> {
     const slot = this.assignRemoteSlot();
-    const worker = this.workerForSlot(slot);
 
     return new Promise<TResult>((resolve, reject) => {
       this.pendingRemoteJobs.set(jobId, {
@@ -408,25 +476,43 @@ export class WorkerPool {
         reject,
       });
 
-      const sendCancel = (): void => {
-        if (!this.pendingRemoteJobs.has(jobId)) return;
-        const cancelMessage: WorkerInbound = { type: "CANCEL", jobId, signalId: jobId };
-        worker.postMessage(cancelMessage);
-      };
-      if (signal.aborted) {
-        sendCancel();
-      } else {
-        signal.addEventListener("abort", sendCancel, { once: true });
-      }
+      // `workerForSlot` es async (ADR-043 §5: un worker nuevo se re-primea —
+      // `onWorkerCreated`, awaited — antes de aceptar su primer job). El
+      // `RUN` recién se postea cuando el worker está listo.
+      void this.workerForSlot(slot)
+        .then((worker) => {
+          if (!this.pendingRemoteJobs.has(jobId)) return; // ya cancelado/resuelto mientras se creaba el worker.
 
-      const runMessage: WorkerInbound = {
-        type: "RUN",
-        jobId,
-        signalId: jobId,
-        jobType: this.options.jobType,
-        payload,
-      };
-      worker.postMessage(runMessage);
+          if (signal.aborted) {
+            // Abortado mientras se creaba/re-primeaba el worker: nunca llegó
+            // a postearse un RUN al que cancelar — se rechaza directo, sin
+            // enviar CANCEL (mismo criterio que el guard de `dispatch()` para
+            // un signal ya abortado antes de encolar).
+            this.pendingRemoteJobs.delete(jobId);
+            reject(new CancelledError(jobId));
+            return;
+          }
+
+          const sendCancel = (): void => {
+            if (!this.pendingRemoteJobs.has(jobId)) return;
+            const cancelMessage: WorkerInbound = { type: "CANCEL", jobId, signalId: jobId };
+            worker.postMessage(cancelMessage);
+          };
+          signal.addEventListener("abort", sendCancel, { once: true });
+
+          const runMessage: WorkerInbound = {
+            type: "RUN",
+            jobId,
+            signalId: jobId,
+            jobType: this.options.jobType,
+            payload,
+          };
+          worker.postMessage(runMessage);
+        })
+        .catch((err: unknown) => {
+          this.pendingRemoteJobs.delete(jobId);
+          reject(err instanceof Error ? err : new Error(String(err)));
+        });
     });
   }
 
@@ -451,14 +537,23 @@ export class WorkerPool {
     );
   }
 
-  /** Worker real para `slot`, creado perezosamente vía `workerFactory` (una instancia por slot, reutilizada entre jobs). */
-  private workerForSlot(slot: number): WorkerLike {
+  /**
+   * Worker real para `slot`, creado perezosamente vía `workerFactory` (una
+   * instancia por slot, reutilizada entre jobs). Async desde ADR-043 §5: un
+   * worker recién creado se re-primea (`onWorkerCreated`, awaited) ANTES de
+   * que el caller lo use para postear un job — el registro en
+   * `remoteWorkers` ocurre síncronamente, antes del primer `await`, así que
+   * dos llamadas concurrentes para el mismo `slot` (p. ej. un `broadcast` de
+   * bootstrap solapado con un `dispatchRemote` real) nunca crean dos workers
+   * para el mismo slot (la segunda ve `existing !== undefined` de inmediato).
+   */
+  private async workerForSlot(slot: number): Promise<WorkerLike> {
     const existing = this.remoteWorkers.get(slot);
     if (existing !== undefined) return existing;
 
     const factory = this.options.workerFactory;
-    // Invariante: solo se llama desde dispatchRemote(), que ya chequeó
-    // `workerFactory !== undefined` en executeJob().
+    // Invariante: solo se llama desde dispatchRemote()/broadcast(), que ya
+    // chequearon `workerFactory !== undefined`.
     if (factory === undefined) {
       throw new Error(
         `WorkerPool(${this.options.poolKey}): workerForSlot() llamado sin workerFactory configurada.`,
@@ -469,6 +564,11 @@ export class WorkerPool {
     worker.addEventListener("message", (ev) => this.handleWorkerMessage(ev));
     worker.addEventListener("error", (ev) => this.handleWorkerTransportError(slot, ev));
     this.remoteWorkers.set(slot, worker);
+
+    if (this.options.onWorkerCreated !== undefined) {
+      await this.options.onWorkerCreated();
+    }
+
     return worker;
   }
 

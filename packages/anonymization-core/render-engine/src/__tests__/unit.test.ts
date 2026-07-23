@@ -231,7 +231,15 @@ describe("RenderEngine — unit tests", () => {
 
     const second = await engine.renderPage(input, ctx);
     expect(getPageSpy).toHaveBeenCalledTimes(1); // sin nueva llamada: cache hit
-    expect(second).toBe(first); // misma referencia cacheada
+    // ADR-043: el cache interno guarda una entrada propia (`InternalCacheEntry`,
+    // siempre con `encoded`) distinta de `RenderPageOutput` (público, `encoded`
+    // opcional según `mode` — Render_Engine.md §10); un hit proyecta una copia
+    // nueva (`toPublicOutput`) en cada llamada, así que ya no es la MISMA
+    // referencia (antes de este PR el cache guardaba el propio
+    // `RenderPageOutput` devuelto). Se verifica igualdad estructural en su
+    // lugar — el invariante real de este test ("cache hit = sin re-render")
+    // ya lo cubre la aserción de `getPageSpy` de arriba.
+    expect(second).toStrictEqual(first);
   });
 
   it("renderPages retries a page that fails once and continues after exhausting retries", async () => {

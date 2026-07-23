@@ -1,31 +1,41 @@
 /**
  * @anonly/render-engine — `RenderEngine` (implementa `IEngine`).
  *
- * Fuente de verdad: docs/core/Render_Engine.md (v1.3.1, ADR-030, ADR-031, ADR-034, ADR-037).
+ * Fuente de verdad: docs/core/Render_Engine.md (v1.4.0, ADR-030, ADR-031,
+ * ADR-034, ADR-037, ADR-043).
  *
- * ADR-021 (motores inline hasta Hito 9): sin pool propio, sin Workers
- * propios — el motor sigue corriendo inline en Hito 9 (el `RenderPool` del
- * Orchestrator lo invoca por sus métodos públicos existentes, sin cambio de
- * interfaz). Corre en el host (main thread) con `OffscreenCanvas` +
- * `pdfjs-dist`. La cancelación es cooperativa vía `ctx.abortSignal` con
- * checkpoints entre operaciones de Canvas; el SLA estricto < 200ms se valida
- * en Hito 9/11 (mismo precedente que pdf-engine/ocr-engine/ner-engine).
+ * ADR-043 (reparto host/worker, Hito 10 PR13): la clase `RenderEngine` queda
+ * ENTERA host-side — todo su estado (`documents`, cache LRU, `groupOverrides`,
+ * `lastAnonymizedInputs`/`lastOriginalInputs`, `pageGroupIndex`,
+ * `pendingRenders`), sus suscripciones al bus, el supersede (ADR-037 §4), el
+ * delta render y la emisión de eventos/blob URLs. El trabajo que SÍ cruza al
+ * worker —rasterización pdfjs + composición OffscreenCanvas + encode— vive en
+ * el **kernel** sin estado por documento (`./worker/kernel.ts`,
+ * `05_Worker_Architecture.md` §7.4), invocado siempre a través de
+ * `this.pool.dispatch({ run, payload })`: con una `RenderPool` real
+ * (inyectada por el façade en `createCore`, ver `create-core.ts`) despacha
+ * por `postMessage`; sin ella (fallback, usado por los tests de este motor
+ * que construyen `new RenderEngine()` directo) invoca el kernel in-process,
+ * en el mismo proceso — comportamiento bit-idéntico al de antes de este PR
+ * (ADR-035). `documents` pasa de `Map<documentId, PDFDocumentProxy>` a
+ * `Map<documentId, { buffer, pageCount }>`: los proxies viven en cada
+ * RenderWorker (o en el kernel local, en fallback); el host retiene el
+ * `buffer` (para el broadcast/re-priming) y el `pageCount` (para las
+ * precondiciones de ADR-030 y la validación de `pageIndex`).
+ *
+ * ADR-021 (motores inline hasta Hito 9): sin pool PROPIO en el sentido de
+ * "instanciado por este archivo" — el pool lo inyecta el façade (constructor,
+ * ver `RenderJobPool` más abajo); ausente, cae al fallback in-process
+ * trivial. La cancelación es cooperativa vía `ctx.abortSignal` con
+ * checkpoints entre operaciones de canvas (ahora dentro del kernel).
  *
  * ADR-034 (auditoría pre-Hito 9): `rasterizePage` (rasterización pura sin
  * eventos/cache, para el flujo OCR del Orchestrator) y `RenderPageOutput.encoded`
- * (bytes codificados en mode "full", vía `convertToBlob`) son nuevos en este
- * hito. La nota de implementación 4 (abajo) documentaba el placeholder de
- * `PREVIEW_UPDATED.canvasBlobUrl` con bytes crudos (ADR-031 §5); este hito lo
- * reemplaza por codificación real (`encodeImageData`, `convertToBlob`).
+ * (bytes codificados en mode "full", vía `convertToBlob`, ahora en el kernel).
  *
- * ADR-030 (`RenderEngine.loadDocument`): el motor mantiene su propio
- * `Map<documentId, PDFDocumentProxy>`, poblado por `loadDocument` (toma
- * posesión del buffer) y liberado por `unloadDocument`/`dispose` — mismo
- * patrón que `PdfEngine` (pdf-engine/src/pdf.engine.ts: `getDocument()` +
- * `Map<string, Document>` + `dispose()` destruyendo proxies), adaptado a que
- * acá el proxy vive mientras el documento esté abierto (no se destruye al
- * terminar cada render, porque el delta render necesita re-renderizar en
- * cualquier momento posterior).
+ * ADR-030 (`RenderEngine.loadDocument`): el motor obtiene el PDF fuente por
+ * invocación directa del caller; en modo worker, el `PDFDocumentProxy` vive en
+ * cada RenderWorker — el host solo retiene `{ buffer, pageCount }` (ADR-043 §3).
  *
  * Notas de diseño no triviales (dentro del margen que el spec deja abierto,
  * ninguna rompe un contrato público de Contracts.md/Render_Engine.md):
@@ -44,84 +54,46 @@
  *    motor aplica el override sobre el último `Replacement`/`Annotation[]`
  *    conocido de cada página afectada (sin esto, el delta render no tendría
  *    ningún dato con el cual re-pintar).
- * 3. La clave de cache es `documentId:pageIndex:kind:mode:
- *    hash(replacements ++ annotations)` — letra corregida del spec §15 item 12
- *    (errata: la versión previa decía `hash(replacements)`, que para
- *    `kind: "original"` sin `replacements` colisionaría entre distintos
- *    `annotations`; ADR-031 §2). No es una extensión propia: es el
- *    comportamiento especificado.
- * 4. `PREVIEW_UPDATED.canvasBlobUrl` (§7): en Hito 7 (inline, ADR-021) el
- *    propio motor arma el blob (igual que `PdfEngine`/`OcrEngine` emiten sus
- *    propios eventos en modo inline). El motor sigue armando el blob en
- *    Hito 9 (sigue sin haber un host separado — el `RenderPool` invoca los
- *    métodos existentes del motor), pero ahora con codificación real
- *    (`encodeImageData` → `OffscreenCanvas.convertToBlob`, ADR-034 §3),
- *    reemplazando el placeholder de bytes crudos de ADR-031 §5. El
- *    Orchestrator no crea el blob: solo lo rastrea y revoca (ADR-034 §5).
- * 5. `as unknown as CanvasRenderingContext2D` en `renderPageOntoContext`:
- *    ÚNICO cast de este tipo en código de producción de todo el Core (ver el
- *    comentario puntual, más abajo, para el detalle técnico completo).
- *    Excepción aprobada explícitamente por ADR-031 §4 (Code_Standards.md §10).
- * 6. ADR-037 (zoom con re-render real, Hito 10): `RENDER_REQUESTED.scale` se
- *    propaga a `renderPages` (ausente → `previewScale`/`fullScale` según
- *    `mode`, igual que `renderPage` ya hacía con `RenderPageInput.scale`
- *    desde v1.0.0). Tres piezas nuevas:
- *    a. Guard de rango `0 < scale <= MAX_RENDER_SCALE`: `InvalidInputError`
- *       en invocación directa (`renderPage`/`renderPages`), `warn` + no-op en
- *       la vía por evento (mismo tratamiento que documento no cargado, ADR-030 §3).
- *    b. La clave del cache LRU incorpora la escala efectiva (nunca `input.scale`
- *       crudo, que puede ser `undefined`: usar la escala efectiva evita que un
- *       `scale` explícito numéricamente igual al default invalide el hit —
- *       nota de "Consecuencias" de ADR-037). El cache gana además un límite
- *       por bytes (`PREVIEW_CACHE_MAX_BYTES`), evaluado junto al límite por
- *       items (`cachePages`) en cada eviction.
- *    c. Supersede por página: `pendingRenders` (`Map<"documentId:pageIndex:kind",
- *       escalaVigente>`) registra, para cada `RENDER_REQUESTED`, la escala
- *       vigente por `(documentId, pageIndex, kind)`. Participan del mecanismo
- *       ÚNICAMENTE los renders originados en `handleRenderRequested`, que
- *       invoca `renderPagesInternal` con `participatesInSupersede = true`: en
- *       sus checkpoints (mismos puntos que el chequeo de `ctx.abortSignal`,
- *       vía `throwIfSuperseded`) lanzan `CancelledError` si su escala ya no
- *       coincide con la vigente — lo que descarta un render "en cola" antes
- *       de que arranque, o aborta uno "en vuelo" en su próximo checkpoint,
- *       sin ejecutar ni emitir `PREVIEW_UPDATED`. `renderPagesInternal`
- *       distingue esa cancelación (page-local: no aborta el resto del batch,
- *       no emite `PREVIEW_PAGE_FAILED`) de una cancelación real de
- *       `ctx.abortSignal` (aborta el batch completo, comportamiento
- *       preexistente) mirando si `ctx.abortSignal.aborted` es la causa. El
- *       mecanismo es enteramente interno al motor (no usa `CANCEL_REQUESTED`
- *       ni el `AbortRegistry` del Orchestrator, ADR-037 §4).
- *
- *       Alcance del supersede (resolución del hallazgo de revisión del PR4
- *       del Hito 10, antes "LIMITACIÓN CONOCIDA" en esta nota): las
- *       invocaciones DIRECTAS de `renderPage`/`renderPages` (export del
- *       Orchestrator vía `RenderPageProvider.renderFull`, tests, y el delta
- *       render interno de `requestDeltaRender`) pasan
- *       `participatesInSupersede = false` y NUNCA consultan `pendingRenders`:
- *       son inmunes por construcción a las entradas que deja el flujo por
- *       eventos (`rasterizePage` nunca participó del mecanismo). Antes ambas
- *       vías compartían el checkpoint en `renderPage`, y una entrada residual
- *       de un preview ya completado a otra escala cancelaba espuriamente un
- *       export posterior en `mode: "full"` de la misma página (la clave no
- *       incluye `mode`, decisión literal de ADR-037 §4, que este fix NO
- *       cambia) o un delta render.
- *
- *       Las entradas de `pendingRenders` NO se limpian al completar un render
- *       (solo en `dispose`/`unloadDocument`/`loadDocument` reload), y es
- *       deliberado: la entrada significa "última escala pedida por evento
- *       para esta clave", no "hay un render en curso". Limpiarla al completar
- *       reintroduce una carrera con el propio supersede-en-cola: si el
- *       request ganador B completa y borra la entrada antes de que el
- *       perdedor A (todavía en cola) llegue a su checkpoint, A no encuentra
- *       entrada y ejecuta como si no hubiera sido superado. Una entrada
- *       residual es inofensiva: un próximo request por evento a la misma
- *       escala coincide y procede, uno a otra escala la reemplaza, y las
- *       invocaciones directas no la miran. Memoria acotada: ≤ 2 entradas
- *       (una por kind) por página por documento cargado. La detección es por
- *       comparación de escala pura; el `AbortController` por entrada de la
- *       versión inicial del PR4 era código muerto (hallazgo cosmético del
- *       revisor: el `.abort()` solo alcanzaba a la entrada ya reemplazada,
- *       nunca a la vigente) y se eliminó junto con este fix.
+ * 3. La clave de cache es `documentId:pageIndex:kind:mode:scale:
+ *    hash(replacements ++ annotations)` (ADR-031 §2, extendida con `scale`
+ *    por ADR-037 §3).
+ * 4. `PREVIEW_UPDATED.canvasBlobUrl` (§7): el host arma el blob a partir del
+ *    `ImageData` que devuelve el kernel (`encodeImageData` → `convertToBlob`,
+ *    ADR-034 §3). El Orchestrator no crea el blob: solo lo rastrea y revoca
+ *    (ADR-034 §5).
+ * 5. El cast `as unknown as CanvasRenderingContext2D` (ADR-031 §4, único de
+ *    este paquete) vive ahora en `./worker/kernel.ts#renderPageOntoContext`
+ *    (relocalizado desde este archivo por ADR-043: es el kernel quien invoca
+ *    pdfjs, no `RenderEngine`).
+ * 6. ADR-037 (zoom con re-render real): guard de rango de `scale`, cache por
+ *    escala + límite por bytes, y supersede por página (`pendingRenders`) —
+ *    ver el detalle completo en la nota histórica de ADR-037 en versiones
+ *    previas de este archivo (comportamiento sin cambios; ADR-043 solo mueve
+ *    DÓNDE corre el trabajo de canvas, no la lógica de supersede/cache).
+ *    Único cambio de granularidad: el checkpoint de supersede que antes se
+ *    chequeaba en 4 puntos intermedios de `renderPageInternal` (antes/después
+ *    de cada paso de canvas) ahora se chequea en 2 (antes de despachar al
+ *    kernel, y una vez más cuando el kernel resuelve) — el trabajo de canvas
+ *    en sí corre atómicamente dentro del kernel. La cancelación real
+ *    (`ctx.abortSignal`) SÍ mantiene su granularidad fina: el kernel repite
+ *    los mismos checkpoints que antes vivían acá, contra la misma señal.
+ * 7. ADR-043 §2: puerto interno `RenderJobPool`/`RenderDispatchParams`
+ *    (definidos más abajo, NO exportados desde `index.ts` — detalle de
+ *    wiring interno, mismo criterio que `PipelineOrchestratorOptions` en
+ *    `orchestrator.ts`, tampoco documentado en `Orchestrator.md` §6).
+ *    Estructural a propósito (mismo patrón que `WorkerLike`, Contracts.md
+ *    §3.5): la `WorkerPool` real del façade (`packages/anonymization-core/
+ *    src/worker-pool.ts`) ya expone `dispatch<T>(params): Promise<T>` con
+ *    esta forma, así que la satisface sin ningún cast ni import cruzado
+ *    (P-2: este paquete no puede importar del façade, que es quien lo
+ *    importa a él). El façade inyecta la pool real vía el constructor
+ *    (`new RenderEngine(pool)`, en `create-core.ts`); sin argumento, cae al
+ *    fallback in-process trivial (usado por los ~150 tests de este motor,
+ *    que construyen `new RenderEngine()` sin pool y esperan exactamente el
+ *    comportamiento de antes de este PR — ejecución inmediata, sin cola).
+ *    `maxRetriesOverride: 0` en cada `dispatch(...)`: el reintento de
+ *    "1 vez" (spec §11) lo sigue implementando este motor en
+ *    `renderPagesInternal`, no la pool (evitar reintentos compuestos).
  */
 
 import {
@@ -135,45 +107,35 @@ import {
   InvalidInputError,
   MAX_RENDER_SCALE,
   PREVIEW_CACHE_MAX_BYTES,
-  ReplacementMode,
   type Annotation,
-  type BoundingBox,
   type EncodedPageImage,
   type EngineContext,
   type GroupReplacementChanged,
   type GroupToggled,
   type IEngine,
+  type LoadDocumentPayload,
+  type RasterizePagePayload,
+  type RenderPagePayload as RenderPagePayloadWire,
   type RenderRequested,
   type Replacement,
+  type ReplacementMode,
   type Unsubscribe,
+  type UnloadDocumentPayload,
 } from "@anonly/shared";
-import {
-  getDocument,
-  type PageViewport,
-  type PDFDocumentProxy,
-  type PDFPageProxy,
-} from "pdfjs-dist";
 
 import { RenderFailedError, RenderPageFailedError, RenderTimeoutError } from "./render.errors.js";
 import type { RenderPageInput, RenderPageOutput } from "./render.types.js";
+import {
+  kernelDisposeAll,
+  kernelLoadDocument,
+  kernelRasterizePage,
+  kernelRenderPage,
+  kernelUnloadDocument,
+} from "./worker/kernel.js";
 
 const DEFAULT_TIMEOUT_MS = 10_000; // render-page preview (05_Worker_Architecture.md §4); full=30s idem si config lo define.
 const MAX_RETRIES = 1; // spec §11: "reintentar 1 vez"
 const DEFAULT_CACHE_PAGES = 16;
-
-// §13 casos 3/4/5/6/7/8: colores/estilos de cada modo. Contracts.md no expone
-// `EntityType` en `Annotation` (solo `groupId`/`bbox`/`kind`), así que el
-// highlight usa un único color por `AnnotationKind` — letra corregida del
-// spec §13.7 (antes decía "borde color, configurable por tipo"; errata
-// corregida por ADR-031 §3), consistente con lo único verificable por los
-// tests del spec (§14: "highlight border" / "conflict marker", ambos por
-// `kind`, no por tipo de entidad).
-const HIGHLIGHT_COLOR = "#2563eb";
-const CONFLICT_COLOR = "#dc2626";
-const REDACT_FILL_COLOR = "#000000";
-const REPLACEMENT_BG_COLOR = "#ffffff";
-const REPLACEMENT_TEXT_COLOR = "#000000";
-const ANNOTATION_LINE_WIDTH = 2;
 
 /** Override pendiente de aplicar en el próximo (re)render de un grupo (ver nota 2 de arriba). */
 interface GroupOverride {
@@ -182,21 +144,43 @@ interface GroupOverride {
   readonly enabled?: boolean;
 }
 
-function scaleBbox(bbox: BoundingBox, scale: number): BoundingBox {
-  return {
-    x: bbox.x * scale,
-    y: bbox.y * scale,
-    width: bbox.width * scale,
-    height: bbox.height * scale,
-  };
+// ─── Puerto interno de despacho (ADR-043 §2; ver nota 7 de cabecera) ───
+
+interface RenderDispatchParams<T> {
+  readonly run: () => Promise<T>;
+  readonly signal: AbortSignal;
+  readonly priority?: number;
+  readonly payload?: unknown;
+  readonly maxRetriesOverride?: number;
 }
 
-function fontForMode(mode: ReplacementMode, boxHeight: number): string {
-  const size = Math.max(8, Math.round(boxHeight * 0.7));
-  // §13 caso 5: placeholder usa monospace si está disponible, fallback sans-serif.
-  const family = mode === ReplacementMode.Placeholder ? "monospace, sans-serif" : "sans-serif";
-  return `${size}px ${family}`;
+interface RenderJobPool {
+  dispatch<T>(params: RenderDispatchParams<T>): Promise<T>;
+  /**
+   * Broadcast (ADR-043 §4): usado por `loadDocument`/`unloadDocument` — a
+   * diferencia de `dispatch` (un job a UN worker), un control debe llegar a
+   * TODOS los workers vivos del pool. `run` es el fallback in-process
+   * (in-process: `broadcast` degenera en una sola invocación de `run()`,
+   * ADR-043 §4).
+   */
+  broadcast<T>(payload: unknown, run: () => Promise<T>): Promise<ReadonlyArray<T>>;
 }
+
+/**
+ * Fallback in-process trivial: sin `RenderPool` inyectada, ejecuta `run()`
+ * directo, sin cola ni reintentos propios (los reintentos de "1 vez" del
+ * spec §11 los sigue aplicando `renderPagesInternal`). Es EXACTAMENTE el
+ * comportamiento de este motor antes de ADR-043 (no había ninguna pool
+ * involucrada en `renderPage`/`rasterizePage`/`loadDocument`/`unloadDocument`
+ * — el Orchestrator envolvía por fuera, en `runOcrStage`/`makeRenderPageProvider`,
+ * y los tests de este paquete siempre invocaron los métodos directo).
+ */
+const IMMEDIATE_POOL: RenderJobPool = {
+  dispatch: <T>(params: RenderDispatchParams<T>): Promise<T> => params.run(),
+  broadcast: async <T>(_payload: unknown, run: () => Promise<T>): Promise<ReadonlyArray<T>> => [
+    await run(),
+  ],
+};
 
 // Hash determinista y compacto (FNV-1a), mismo estilo que shared/src/synthesizer.ts (hashStringToInt).
 function fnv1a(input: string): string {
@@ -257,11 +241,40 @@ function isValidScale(scale: number): boolean {
   return Number.isFinite(scale) && scale > 0 && scale <= MAX_RENDER_SCALE;
 }
 
+/**
+ * Entrada interna del cache LRU: a diferencia de `RenderPageOutput` (público,
+ * `encoded` opcional según `mode` — Render_Engine.md §10), acá `encoded`
+ * SIEMPRE está presente (el kernel lo computa incondicionalmente desde
+ * ADR-043, ver `KernelRenderResult`) — permite reusar los mismos bytes para
+ * el blob de `PREVIEW_UPDATED` en cache hits de `mode: "preview"` sin volver
+ * a tocar `OffscreenCanvas` fuera del kernel.
+ */
+interface InternalCacheEntry {
+  readonly documentId: string;
+  readonly pageIndex: number;
+  readonly kind: "original" | "anonymized";
+  readonly imageData: ImageData;
+  readonly encoded: EncodedPageImage;
+  readonly durationMs: number;
+}
+
 // ADR-037 §3: tamaño estimado de una entrada de cache para el límite por bytes
-// (PREVIEW_CACHE_MAX_BYTES) — los píxeles RGBA crudos dominan el costo; los
-// bytes codificados (mode "full") se suman cuando existen.
-function estimateOutputBytes(output: RenderPageOutput): number {
-  return output.imageData.data.byteLength + (output.encoded?.bytes.byteLength ?? 0);
+// (PREVIEW_CACHE_MAX_BYTES) — los píxeles RGBA crudos dominan el costo; se
+// suman los bytes codificados (siempre presentes en la entrada interna).
+function estimateEntryBytes(entry: InternalCacheEntry): number {
+  return entry.imageData.data.byteLength + entry.encoded.bytes.byteLength;
+}
+
+/** Proyecta la entrada interna al `RenderPageOutput` público: `encoded` solo se expone si `mode === "full"` (Render_Engine.md §10). */
+function toPublicOutput(entry: InternalCacheEntry, mode: "preview" | "full"): RenderPageOutput {
+  return {
+    documentId: entry.documentId,
+    pageIndex: entry.pageIndex,
+    kind: entry.kind,
+    imageData: entry.imageData,
+    durationMs: entry.durationMs,
+    ...(mode === "full" ? { encoded: entry.encoded } : {}),
+  };
 }
 
 // Nota de implementación 2: aplica el último GROUP_REPLACEMENT_CHANGED/GROUP_TOGGLED
@@ -298,16 +311,24 @@ function applyAnnotationOverrides(
   });
 }
 
+/** Documento retenido host-side desde ADR-043 §3: ya no es el `PDFDocumentProxy` (vive en el worker/kernel), solo lo necesario para las precondiciones de ADR-030 y el re-priming. */
+interface RetainedDocument {
+  readonly buffer: ArrayBuffer;
+  readonly pageCount: number;
+}
+
 export class RenderEngine implements IEngine {
   readonly id = EngineId.Render;
+
+  private readonly pool: RenderJobPool;
 
   private ctx: EngineContext | null = null;
   private initialized = false;
   private disposed = false;
   private unsubscribers: Unsubscribe[] = [];
 
-  private readonly documents = new Map<string, PDFDocumentProxy>();
-  private readonly cache = new Map<string, RenderPageOutput>();
+  private readonly documents = new Map<string, RetainedDocument>();
+  private readonly cache = new Map<string, InternalCacheEntry>();
   // Bytes totales cacheados (ADR-037 §3), mantenido en paralelo a `cache` vía
   // setCacheEntry/deleteCacheEntry — nunca se lee directo de `cache.values()`.
   private cacheBytes = 0;
@@ -318,11 +339,22 @@ export class RenderEngine implements IEngine {
   private readonly lastOriginalInputs = new Map<string, RenderPageInput>();
   // Overrides pendientes por (documentId, groupId) — ver nota de implementación 2.
   private readonly groupOverrides = new Map<string, Map<string, GroupOverride>>();
-  // Supersede por página (ADR-037 §4, nota 6c de cabecera) — clave
+  // Supersede por página (ADR-037 §4, nota 6 de cabecera) — clave
   // `documentId:pageIndex:kind` → escala vigente registrada por el último
   // RENDER_REQUESTED. Poblada únicamente por handleRenderRequested y
   // consultada solo por renders con participatesInSupersede = true.
   private readonly pendingRenders = new Map<string, number>();
+
+  /**
+   * `pool` (ADR-043 §2): inyectada por el façade en `createCore`
+   * (`create-core.ts`, que ya posee `WorkerPoolManager` — P-1 intacto). Sin
+   * argumento, cae al fallback in-process trivial (`IMMEDIATE_POOL`) — el
+   * comportamiento que este motor tenía antes de este PR, usado por sus
+   * propios tests.
+   */
+  constructor(pool?: RenderJobPool) {
+    this.pool = pool ?? IMMEDIATE_POOL;
+  }
 
   init(ctx: EngineContext): Promise<void> {
     this.ctx = ctx;
@@ -357,27 +389,29 @@ export class RenderEngine implements IEngine {
       throw new InvalidInputError("buffer vacío o null en loadDocument.", { documentId });
     }
 
-    // ADR-030 §1: recarga determinística — destruye el proxy anterior si existía.
-    const existing = this.documents.get(documentId);
-    if (existing !== undefined) {
-      void existing.destroy();
+    // ADR-043 §4: broadcast "load-document" (control, no job encolable) —
+    // llega a CADA RenderWorker vivo (buffer clonado por worker,
+    // 05_Worker_Architecture.md §2.3); en fallback, invoca el kernel local
+    // directo. `loadDocument` sobre un `documentId` ya cargado recarga
+    // determinísticamente (el kernel destruye el proxy anterior — ADR-030
+    // §1). Todos los workers parsean el mismo buffer clonado -> mismo
+    // `pageCount`; se toma el primero como canónico.
+    const payload: LoadDocumentPayload = { documentId, buffer };
+    const results = await this.pool.broadcast(payload, () => kernelLoadDocument(payload));
+    const result = results[0];
+    if (result === undefined) {
+      throw new RenderFailedError(
+        documentId,
+        "load-document no devolvió resultado de ningún worker.",
+      );
     }
 
-    let pdfDocument: PDFDocumentProxy;
-    try {
-      const loadingTask = getDocument({ data: buffer });
-      pdfDocument = await loadingTask.promise;
-    } catch (err: unknown) {
-      // ADR-030 §2: getDocument() fallando acá es excepcional (la etapa 1 ya validó el PDF).
-      const reason = err instanceof Error ? err.message : String(err);
-      throw new RenderFailedError(documentId, reason);
-    }
-
-    this.documents.set(documentId, pdfDocument);
+    // ADR-043 §3: el host retiene { buffer, pageCount } — nunca el proxy.
+    this.documents.set(documentId, { buffer, pageCount: result.pageCount });
     this.clearDocumentState(documentId);
     ctx.logger.info(`Documento cargado en Render Engine: ${documentId}`, {
       documentId,
-      pageCount: pdfDocument.numPages,
+      pageCount: result.pageCount,
     });
   }
 
@@ -386,17 +420,55 @@ export class RenderEngine implements IEngine {
     // teardown, incluso tras dispose() (mismo patrón que PdfEngine.releaseDocument).
     const existing = this.documents.get(documentId);
     if (existing === undefined) return Promise.resolve();
-    this.documents.delete(documentId);
-    void existing.destroy();
-    this.clearDocumentState(documentId);
-    return Promise.resolve();
+
+    // ADR-043 §4: broadcast "unload-document" simétrico a "load-document" —
+    // libera el PDFDocumentProxy de ese documento en cada RenderWorker (o en
+    // el kernel local, en fallback).
+    const payload: UnloadDocumentPayload = { documentId };
+    return this.pool
+      .broadcast(payload, () => kernelUnloadDocument(payload))
+      .then(() => {
+        this.documents.delete(documentId);
+        this.clearDocumentState(documentId);
+      });
+  }
+
+  /**
+   * Re-priming (ADR-043 §5): re-envía `load-document` (vía `broadcast`, que
+   * llega a TODOS los workers vivos, incluido el recién creado) para cada
+   * documento actualmente retenido. Invocado por el façade (`create-core.ts`)
+   * como `onWorkerCreated` de la `RenderPool` real — `WorkerPool#workerForSlot`
+   * lo espera (`await`) antes de que ese worker acepte cualquier job
+   * `render-page`. No forma parte de la interfaz pública documentada
+   * (Render_Engine.md §6): wiring interno entre este motor y su pool, mismo
+   * criterio que `PipelineOrchestratorOptions` en `orchestrator.ts`. Reenviar
+   * a workers que YA tienen el documento cargado es redundante pero
+   * inofensivo (recarga determinística, ADR-030 §1) — se prioriza la
+   * simplicidad de reusar `broadcast` tal cual sobre evitar ese resend.
+   */
+  async reprimeWorkers(): Promise<void> {
+    if (this.ctx === null) return;
+    const ctx = this.ctx;
+    await Promise.all(
+      [...this.documents.entries()].map(([documentId, doc]) => {
+        const payload: LoadDocumentPayload = { documentId, buffer: doc.buffer };
+        return this.pool
+          .broadcast(payload, () => kernelLoadDocument(payload))
+          .catch((err: unknown) => {
+            ctx.logger.warn("Fallo al re-primear un RenderWorker nuevo con un documento vigente.", {
+              documentId,
+              reason: err instanceof Error ? err.message : String(err),
+            });
+          });
+      }),
+    );
   }
 
   /**
    * Render directo de una página (§6). No participa del supersede por página
    * de ADR-037 §4 (spec §13 caso 21): las entradas de `pendingRenders` que
    * deja el flujo de `RENDER_REQUESTED` no afectan a esta vía (export del
-   * Orchestrator, delta render, tests) — ver nota 6c de cabecera.
+   * Orchestrator, delta render, tests) — ver nota 6 de cabecera.
    */
   async renderPage(input: RenderPageInput, ctx: EngineContext): Promise<RenderPageOutput> {
     return this.renderPageInternal(input, ctx, false);
@@ -415,8 +487,8 @@ export class RenderEngine implements IEngine {
     }
 
     const { documentId, pageIndex, kind, mode } = input;
-    const pdfDocument = this.documents.get(documentId);
-    if (pdfDocument === undefined) {
+    const doc = this.documents.get(documentId);
+    if (doc === undefined) {
       // §11 / ADR-030 §2: renderPage/renderPages sobre documentId no cargado → INVALID_INPUT.
       throw new InvalidInputError(
         `Documento ${documentId} no está cargado. Llamá loadDocument antes de renderPage/renderPages (ADR-030).`,
@@ -424,10 +496,10 @@ export class RenderEngine implements IEngine {
       );
     }
 
-    if (!Number.isInteger(pageIndex) || pageIndex < 0 || pageIndex >= pdfDocument.numPages) {
+    if (!Number.isInteger(pageIndex) || pageIndex < 0 || pageIndex >= doc.pageCount) {
       throw new InvalidInputError(
-        `pageIndex ${pageIndex} fuera de rango para documento con ${pdfDocument.numPages} páginas.`,
-        { documentId, pageIndex, pageCount: pdfDocument.numPages },
+        `pageIndex ${pageIndex} fuera de rango para documento con ${doc.pageCount} páginas.`,
+        { documentId, pageIndex, pageCount: doc.pageCount },
       );
     }
 
@@ -453,7 +525,7 @@ export class RenderEngine implements IEngine {
       (mode === "preview" ? ctx.config.render.previewScale : ctx.config.render.fullScale);
     const imageFormat = input.imageFormat ?? (mode === "preview" ? "png" : "jpeg");
 
-    // ADR-037 §4, alcance precisado por el hallazgo del PR4 (nota 6c de
+    // ADR-037 §4, alcance precisado por el hallazgo del PR4 (nota 6 de
     // cabecera): solo los renders originados en RENDER_REQUESTED participan
     // del supersede; en la vía directa el checkpoint degrada al chequeo
     // preexistente de ctx.abortSignal.
@@ -483,82 +555,72 @@ export class RenderEngine implements IEngine {
     const cached = this.cache.get(cacheKey);
     if (cached !== undefined) {
       this.touchCache(cacheKey);
-      if (mode === "preview") await this.emitPreviewUpdated(ctx, cached, imageFormat);
-      return cached;
+      if (mode === "preview") await this.emitPreviewUpdated(ctx, cached);
+      return toPublicOutput(cached, mode);
     }
 
     const startedAt = Date.now();
     const timeoutMs = ctx.config.workerPool.timeouts["render-page"] ?? DEFAULT_TIMEOUT_MS;
 
-    let pageProxy: PDFPageProxy;
-    try {
-      pageProxy = await pdfDocument.getPage(pageIndex + 1);
-    } catch (err: unknown) {
-      throw this.toPageFailure(documentId, pageIndex, err);
-    }
-
-    checkpoint();
-
-    const viewport = pageProxy.getViewport({ scale });
-    const canvas = this.createCanvas(documentId, pageIndex, viewport.width, viewport.height);
-    const context2d = this.get2dContext(canvas, documentId, pageIndex);
-
-    try {
-      await this.renderPageOntoContext(
-        pageProxy,
-        context2d,
-        viewport,
-        documentId,
-        pageIndex,
-        timeoutMs,
-      );
-    } catch (err: unknown) {
-      throw this.toPageFailure(documentId, pageIndex, err);
-    }
-
-    checkpoint();
-
-    if (kind === "anonymized") {
-      this.paintReplacements(context2d, replacements, scale, ctx.abortSignal, documentId);
-    } else {
-      this.paintAnnotations(context2d, annotations, scale, ctx.abortSignal, documentId);
-    }
-
-    checkpoint();
-
-    const imageData = context2d.getImageData(0, 0, viewport.width, viewport.height);
-    const durationMs = Date.now() - startedAt;
-
-    // ADR-034 §3: `encoded` solo se computa para mode "full" (consumido por el
-    // RenderPageProvider del Orchestrator vía convertToBlob, no imageData crudo).
-    const encoded =
-      mode === "full"
-        ? await this.encodeImageData(
-            imageData,
-            imageFormat,
-            ctx.config.render.jpegQuality,
-            documentId,
-            pageIndex,
-          )
-        : undefined;
-
-    const output: RenderPageOutput = {
+    const payload: RenderPagePayloadWire = {
       documentId,
       pageIndex,
       kind,
-      imageData,
-      durationMs,
-      ...(encoded !== undefined ? { encoded } : {}),
+      mode,
+      replacements,
+      annotations,
+      scale,
+      imageFormat,
     };
 
-    this.setCacheEntry(cacheKey, output);
+    // ADR-043 §2: única vía de despacho — converge en pool.dispatch (kernel
+    // remoto o in-process). maxRetriesOverride: 0 — ver nota 7 de cabecera
+    // (el reintento de "1 vez" lo sigue aplicando renderPagesInternal, no la
+    // pool). Prioridad (05_Worker_Architecture.md §6.2): el camino completo
+    // del export (mode "full") va a 1000; preview usa 70 (nivel "visible" —
+    // este motor no recibe información de visibilidad de página en su
+    // input, así que no distingue visible/no-visible dentro de "preview";
+    // el orden de despacho de `renderPagesInternal` ya prioriza por el orden
+    // en que el caller arma `inputs`, mismo criterio preexistente).
+    const kernelResult = await this.pool.dispatch({
+      run: () =>
+        kernelRenderPage(payload, {
+          jpegQuality: ctx.config.render.jpegQuality,
+          timeoutMs,
+          abortSignal: ctx.abortSignal,
+          onWarn: (message, meta) => ctx.logger.warn(message, meta),
+        }),
+      signal: ctx.abortSignal,
+      priority: mode === "full" ? 1000 : 70,
+      payload,
+      maxRetriesOverride: 0,
+    });
+
+    // Segundo checkpoint (ver nota 6 de cabecera): revalida supersede/abort
+    // una vez más ahora que el kernel resolvió, antes de cachear/emitir. El
+    // trabajo de canvas del kernel para un render ya superado no se
+    // interrumpe a mitad de camino (ADR-043 no lo prioriza), pero su
+    // resultado se descarta acá sin efectos observables.
+    checkpoint();
+
+    const durationMs = Date.now() - startedAt;
+    const entry: InternalCacheEntry = {
+      documentId,
+      pageIndex,
+      kind,
+      imageData: kernelResult.imageData,
+      encoded: kernelResult.encoded,
+      durationMs,
+    };
+
+    this.setCacheEntry(cacheKey, entry);
     this.evictCacheIfNeeded(ctx);
 
     if (mode === "preview") {
-      await this.emitPreviewUpdated(ctx, output, imageFormat);
+      await this.emitPreviewUpdated(ctx, entry);
     }
 
-    return output;
+    return toPublicOutput(entry, mode);
   }
 
   /**
@@ -576,18 +638,18 @@ export class RenderEngine implements IEngine {
     this.assertNotDisposed();
     this.assertInitialized();
 
-    const pdfDocument = this.documents.get(documentId);
-    if (pdfDocument === undefined) {
+    const doc = this.documents.get(documentId);
+    if (doc === undefined) {
       throw new InvalidInputError(
         `Documento ${documentId} no está cargado. Llamá loadDocument antes de rasterizePage (ADR-030, ADR-034 §1).`,
         { documentId },
       );
     }
 
-    if (!Number.isInteger(pageIndex) || pageIndex < 0 || pageIndex >= pdfDocument.numPages) {
+    if (!Number.isInteger(pageIndex) || pageIndex < 0 || pageIndex >= doc.pageCount) {
       throw new InvalidInputError(
-        `pageIndex ${pageIndex} fuera de rango para documento con ${pdfDocument.numPages} páginas.`,
-        { documentId, pageIndex, pageCount: pdfDocument.numPages },
+        `pageIndex ${pageIndex} fuera de rango para documento con ${doc.pageCount} páginas.`,
+        { documentId, pageIndex, pageCount: doc.pageCount },
       );
     }
 
@@ -604,45 +666,27 @@ export class RenderEngine implements IEngine {
     }
 
     const timeoutMs = ctx.config.workerPool.timeouts["render-page"] ?? DEFAULT_TIMEOUT_MS;
+    const payload: RasterizePagePayload = { documentId, pageIndex, scale };
 
-    let pageProxy: PDFPageProxy;
-    try {
-      pageProxy = await pdfDocument.getPage(pageIndex + 1);
-    } catch (err: unknown) {
-      throw this.toPageFailure(documentId, pageIndex, err);
-    }
-
-    if (ctx.abortSignal.aborted) {
-      throw new CancelledError(documentId);
-    }
-
-    const viewport = pageProxy.getViewport({ scale });
-    const canvas = this.createCanvas(documentId, pageIndex, viewport.width, viewport.height);
-    const context2d = this.get2dContext(canvas, documentId, pageIndex);
-
-    try {
-      await this.renderPageOntoContext(
-        pageProxy,
-        context2d,
-        viewport,
-        documentId,
-        pageIndex,
-        timeoutMs,
-      );
-    } catch (err: unknown) {
-      throw this.toPageFailure(documentId, pageIndex, err);
-    }
-
-    if (ctx.abortSignal.aborted) {
-      throw new CancelledError(documentId);
-    }
-
-    return context2d.getImageData(0, 0, viewport.width, viewport.height);
+    // Prioridad 90 (05_Worker_Architecture.md §6.2: espejo de ocr-page
+    // visible, a la que esta rasterización alimenta — ADR-036 §4).
+    return this.pool.dispatch({
+      run: () =>
+        kernelRasterizePage(payload, {
+          timeoutMs,
+          abortSignal: ctx.abortSignal,
+          onWarn: (message, meta) => ctx.logger.warn(message, meta),
+        }),
+      signal: ctx.abortSignal,
+      priority: 90,
+      payload,
+      maxRetriesOverride: 0,
+    });
   }
 
   /**
    * Render directo de un batch (§6). Igual que `renderPage`, no participa del
-   * supersede por página (spec §13 caso 21) — ver nota 6c de cabecera.
+   * supersede por página (spec §13 caso 21) — ver nota 6 de cabecera.
    */
   async renderPages(
     inputs: ReadonlyArray<RenderPageInput>,
@@ -748,7 +792,7 @@ export class RenderEngine implements IEngine {
     // evento, ADR-030 §3): si el motor no está listo o el documento no está
     // cargado, se ignora silenciosamente (con warning cuando hay logger).
     // El delta render usa la vía directa de renderPage: NO participa del
-    // supersede por página (nota 6c de cabecera; observación PR4 — antes una
+    // supersede por página (nota 6 de cabecera; observación PR4 — antes una
     // entrada de RENDER_REQUESTED a otra escala podía cancelarlo espuriamente
     // y el cambio de grupo se perdía visualmente hasta el próximo evento).
     if (this.disposed || !this.initialized || this.ctx === null) return;
@@ -811,7 +855,12 @@ export class RenderEngine implements IEngine {
   dispose(): Promise<void> {
     for (const unsubscribe of this.unsubscribers) unsubscribe();
     this.unsubscribers = [];
-    for (const doc of this.documents.values()) void doc.destroy();
+    // ADR-043 §2: no pasa por pool.dispatch (dispose no es una de las 4
+    // operaciones del puerto) — libera directo el kernel local. La
+    // liberación de PDFDocumentProxy en RenderWorkers reales llega por el
+    // mensaje genérico DISPOSE del protocolo, disparado por
+    // WorkerPoolManager.disposeAll() (05_Worker_Architecture.md §7.4).
+    kernelDisposeAll();
     this.documents.clear();
     this.cache.clear();
     this.cacheBytes = 0;
@@ -867,7 +916,7 @@ export class RenderEngine implements IEngine {
       // ADR-037 §4: registra la escala vigente para "original" y "anonymized"
       // de esta página — cualquier render POR EVENTO pendiente con otra escala
       // para la misma clave se descarta/aborta en su próximo checkpoint
-      // (ver nota 6c de cabecera).
+      // (ver nota 6 de cabecera).
       this.registerPendingRender(payload.documentId, pageIndex, "original", effectiveScale);
       this.registerPendingRender(payload.documentId, pageIndex, "anonymized", effectiveScale);
 
@@ -899,7 +948,7 @@ export class RenderEngine implements IEngine {
       );
     }
 
-    // Única vía que participa del supersede (nota 6c de cabecera): los
+    // Única vía que participa del supersede (nota 6 de cabecera): los
     // renders de este batch chequean pendingRenders en sus checkpoints.
     void this.renderPagesInternal(inputs, ctx, true).catch((err: unknown) => {
       if (err instanceof CancelledError) return;
@@ -983,7 +1032,7 @@ export class RenderEngine implements IEngine {
    * (`throwIfSuperseded`) y se descarta. Poblado únicamente desde
    * `handleRenderRequested`; las entradas persisten hasta `unloadDocument`/
    * `loadDocument` (reload)/`dispose` — deliberadamente NO se limpian al
-   * completar un render (nota 6c de cabecera: limpiarlas reintroduce la
+   * completar un render (nota 6 de cabecera: limpiarlas reintroduce la
    * carrera en la que el "perdedor" en cola deja de detectar que fue superado
    * si el "ganador" completa y borra la entrada primero).
    */
@@ -1004,7 +1053,7 @@ export class RenderEngine implements IEngine {
    * para la misma `(documentId, pageIndex, kind)` (ADR-037 §4). Solo lo
    * invocan renders con `participatesInSupersede = true` (originados en
    * `handleRenderRequested`); las invocaciones directas nunca llegan acá
-   * (nota 6c de cabecera, spec §13 caso 21).
+   * (nota 6 de cabecera, spec §13 caso 21).
    */
   private throwIfSuperseded(
     ctx: EngineContext,
@@ -1022,163 +1071,7 @@ export class RenderEngine implements IEngine {
     }
   }
 
-  // ─── Pintado sobre canvas (§13 casos 3-8) ───
-
-  private paintReplacements(
-    context: OffscreenCanvasRenderingContext2D,
-    replacements: ReadonlyArray<Replacement>,
-    scale: number,
-    abortSignal: AbortSignal,
-    documentId: string,
-  ): void {
-    for (const replacement of replacements) {
-      if (abortSignal.aborted) throw new CancelledError(documentId);
-      const bbox = scaleBbox(replacement.bbox, scale);
-
-      if (replacement.mode === ReplacementMode.Redact) {
-        // §13 caso 3: fill opaco negro, sin texto.
-        context.fillStyle = REDACT_FILL_COLOR;
-        context.fillRect(bbox.x, bbox.y, bbox.width, bbox.height);
-        continue;
-      }
-
-      // §13 casos 4/5/6 (mask/placeholder/synthetic): fondo + texto centrado.
-      // El spec solo pide "fondo blanco" explícitamente para `mask` (caso 4);
-      // se extiende a placeholder/synthetic por legibilidad (el texto se
-      // pinta sobre el contenido original ya renderizado) — no cambia el
-      // texto ni el modo, solo el tratamiento visual de fondo.
-      context.fillStyle = REPLACEMENT_BG_COLOR;
-      context.fillRect(bbox.x, bbox.y, bbox.width, bbox.height);
-      context.fillStyle = REPLACEMENT_TEXT_COLOR;
-      context.font = fontForMode(replacement.mode, bbox.height);
-      context.textAlign = "center";
-      context.textBaseline = "middle";
-      context.fillText(
-        replacement.replacementValue,
-        bbox.x + bbox.width / 2,
-        bbox.y + bbox.height / 2,
-      );
-    }
-  }
-
-  private paintAnnotations(
-    context: OffscreenCanvasRenderingContext2D,
-    annotations: ReadonlyArray<Annotation>,
-    scale: number,
-    abortSignal: AbortSignal,
-    documentId: string,
-  ): void {
-    for (const annotation of annotations) {
-      if (abortSignal.aborted) throw new CancelledError(documentId);
-      // §2/§13 casos 7-8: en kind="original" solo highlight y conflict aplican.
-      if (
-        annotation.kind !== AnnotationKind.Highlight &&
-        annotation.kind !== AnnotationKind.Conflict
-      ) {
-        continue;
-      }
-      const bbox = scaleBbox(annotation.bbox, scale);
-      context.strokeStyle =
-        annotation.kind === AnnotationKind.Conflict ? CONFLICT_COLOR : HIGHLIGHT_COLOR;
-      context.lineWidth = ANNOTATION_LINE_WIDTH;
-      context.strokeRect(bbox.x, bbox.y, bbox.width, bbox.height);
-    }
-  }
-
-  private async renderPageOntoContext(
-    pageProxy: PDFPageProxy,
-    context: OffscreenCanvasRenderingContext2D,
-    viewport: PageViewport,
-    documentId: string,
-    pageIndex: number,
-    timeoutMs: number,
-  ): Promise<void> {
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timeoutId = setTimeout(() => {
-        reject(new RenderTimeoutError(documentId, pageIndex, timeoutMs));
-      }, timeoutMs);
-    });
-
-    try {
-      /*
-       * pdfjs-dist@4.x tipa `PDFPageProxy.render({ canvasContext })` como
-       * `CanvasRenderingContext2D` (contexto de un <canvas> de DOM), pero en
-       * runtime pdf.js acepta cualquier contexto de canvas 2D válido —
-       * incluido `OffscreenCanvasRenderingContext2D`, que es exactamente lo
-       * que exige Render_Engine.md §1 y 05_Worker_Architecture.md §7.4
-       * (OffscreenCanvas + pdfjs-dist; fe de erratas ADR-030 §5, antes decía
-       * "pdf-lib"). El `.d.ts` de la librería no refleja ese soporte (gap de
-       * tipos conocido de pdfjs-dist, no corregible sin tocar el paquete).
-       *
-       * Se investigaron alternativas sin cast antes de usar este: los tipos
-       * que "pdfjs-dist" re-exporta en su raíz (`PDFPageProxy`,
-       * `RenderParameters`) son alias de tipo (`export type X =
-       * import(...).X`), no interfaces, por lo que no admiten declaration
-       * merging vía `declare module "pdfjs-dist" { interface ... }` (se
-       * comprobó). `CanvasRenderingContext2D` y
-       * `OffscreenCanvasRenderingContext2D` tampoco tienen overlap
-       * estructural suficiente para un `as` simple (TS2352: a
-       * `CanvasRenderingContext2D` le faltan `getContextAttributes` y
-       * `drawFocusIfNeeded` en el otro tipo) — se verificó con `tsc`.
-       *
-       * Este es el ÚNICO `as unknown as` de este paquete y el único de todo
-       * el Core fuera de un helper de test. Permitido explícitamente por
-       * ADR-031 §4: "Se permite `as unknown as CanvasRenderingContext2D`
-       * solo en esa frontera, en un único punto del motor, con comentario
-       * justificativo adyacente que cite este ADR" (Code_Standards.md §10
-       * documenta la excepción). No cambia ningún contrato público:
-       * `RenderPageInput`/`RenderPageOutput` y los eventos del motor son
-       * idénticos con o sin este cast.
-       */
-      await Promise.race([
-        pageProxy.render({
-          canvasContext: context as unknown as CanvasRenderingContext2D,
-          viewport,
-        }).promise,
-        timeoutPromise,
-      ]);
-    } finally {
-      if (timeoutId !== undefined) clearTimeout(timeoutId);
-    }
-  }
-
-  private createCanvas(
-    documentId: string,
-    pageIndex: number,
-    width: number,
-    height: number,
-  ): OffscreenCanvas {
-    // §13 caso 14: v1.0 puede requerir OffscreenCanvas y mostrar warning si no está.
-    if (typeof OffscreenCanvas === "undefined") {
-      this.ctx?.logger.warn(
-        "OffscreenCanvas no disponible en este entorno; Render Engine v1.0 lo requiere (spec §13 caso 14).",
-        { documentId, pageIndex },
-      );
-      throw new RenderPageFailedError(
-        documentId,
-        pageIndex,
-        "OffscreenCanvas no disponible en este entorno.",
-      );
-    }
-    return new OffscreenCanvas(width, height);
-  }
-
-  private get2dContext(
-    canvas: OffscreenCanvas,
-    documentId: string,
-    pageIndex: number,
-  ): OffscreenCanvasRenderingContext2D {
-    const context = canvas.getContext("2d");
-    if (context === null) {
-      throw new RenderPageFailedError(
-        documentId,
-        pageIndex,
-        "No se pudo obtener un contexto 2D de OffscreenCanvas.",
-      );
-    }
-    return context;
-  }
+  // ─── Helpers de host ───
 
   private toPageFailure(
     documentId: string,
@@ -1190,59 +1083,24 @@ export class RenderEngine implements IEngine {
     return new RenderPageFailedError(documentId, pageIndex, reason);
   }
 
-  private async emitPreviewUpdated(
-    ctx: EngineContext,
-    output: RenderPageOutput,
-    imageFormat: "png" | "jpeg",
-  ): Promise<void> {
-    // ADR-034 §3 (reemplaza el placeholder de bytes crudos de ADR-031 §5):
-    // codificación real vía `convertToBlob`, donde vive el canvas. `output.encoded`
-    // solo existe para mode "full" (§10), así que preview siempre re-codifica
-    // desde `imageData` acá — mismos bytes, sin duplicar el campo `encoded`
-    // en el output de un preview.
-    const encoded = await this.encodeImageData(
-      output.imageData,
-      imageFormat,
-      ctx.config.render.jpegQuality,
-      output.documentId,
-      output.pageIndex,
-    );
-    const blob = new Blob([encoded.bytes], { type: `image/${encoded.format}` });
+  /**
+   * Emite `PREVIEW_UPDATED` reusando `entry.encoded` (siempre presente en la
+   * entrada interna del cache, ver `InternalCacheEntry` — el kernel lo
+   * computa incondicionalmente desde ADR-043, tanto para `mode: "preview"`
+   * como `"full"`). No vuelve a tocar `OffscreenCanvas`: ni acá ni en ningún
+   * otro punto de esta clase — esa frontera vive exclusivamente en
+   * `./worker/kernel.ts` desde ADR-043 §1.
+   */
+  private emitPreviewUpdated(ctx: EngineContext, entry: InternalCacheEntry): Promise<void> {
+    const blob = new Blob([entry.encoded.bytes], { type: `image/${entry.encoded.format}` });
     const canvasBlobUrl = URL.createObjectURL(blob);
     ctx.bus.emit(EventChannel.Render, EngineEvents.PREVIEW_UPDATED, {
-      documentId: output.documentId,
-      pageIndex: output.pageIndex,
-      kind: output.kind,
+      documentId: entry.documentId,
+      pageIndex: entry.pageIndex,
+      kind: entry.kind,
       canvasBlobUrl,
     });
-  }
-
-  /**
-   * Codifica `ImageData` a PNG/JPEG vía `OffscreenCanvas.convertToBlob`
-   * (ADR-034 §3): "donde vive el canvas" — un `OffscreenCanvas` temporal
-   * pintado con `putImageData`, consistente con `07_Performance_Strategy.md`
-   * §10. Usado tanto para `RenderPageOutput.encoded` (mode "full") como para
-   * el blob de `PREVIEW_UPDATED` (mode "preview").
-   */
-  private async encodeImageData(
-    imageData: ImageData,
-    imageFormat: "png" | "jpeg",
-    quality: number,
-    documentId: string,
-    pageIndex: number,
-  ): Promise<EncodedPageImage> {
-    const canvas = this.createCanvas(documentId, pageIndex, imageData.width, imageData.height);
-    const context = this.get2dContext(canvas, documentId, pageIndex);
-    context.putImageData(imageData, 0, 0);
-
-    let blob: Blob;
-    try {
-      blob = await canvas.convertToBlob({ type: `image/${imageFormat}`, quality });
-    } catch (err: unknown) {
-      throw this.toPageFailure(documentId, pageIndex, err);
-    }
-    const bytes = await blob.arrayBuffer();
-    return { bytes, format: imageFormat, widthPx: imageData.width, heightPx: imageData.height };
+    return Promise.resolve();
   }
 
   private rememberInput(
@@ -1275,17 +1133,17 @@ export class RenderEngine implements IEngine {
   // sincronía con `cache` — todo alta/baja del cache pasa por acá (nunca
   // `this.cache.set`/`.delete` directo fuera de estos dos métodos y `touchCache`,
   // que reordena sin cambiar bytes).
-  private setCacheEntry(key: string, output: RenderPageOutput): void {
+  private setCacheEntry(key: string, entry: InternalCacheEntry): void {
     const existing = this.cache.get(key);
-    if (existing !== undefined) this.cacheBytes -= estimateOutputBytes(existing);
-    this.cache.set(key, output);
-    this.cacheBytes += estimateOutputBytes(output);
+    if (existing !== undefined) this.cacheBytes -= estimateEntryBytes(existing);
+    this.cache.set(key, entry);
+    this.cacheBytes += estimateEntryBytes(entry);
   }
 
   private deleteCacheEntry(key: string): void {
     const existing = this.cache.get(key);
     if (existing === undefined) return;
-    this.cacheBytes -= estimateOutputBytes(existing);
+    this.cacheBytes -= estimateEntryBytes(existing);
     this.cache.delete(key);
   }
 
