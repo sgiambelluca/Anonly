@@ -2,7 +2,7 @@
 
 # ADR-041 — `fuseOcrPage` como función pura: PdfEngine sin estado por documento
 
-- **Estado**: Accepted
+- **Estado**: Accepted (la decisión pre-PR13 que §5 dejó asignada al planificador — reparto host/worker del estado de `render-engine` — quedó tomada en ADR-043, 2026-07-22)
 - **Fecha**: 2026-07-22
 - **Decidido por**: El humano, sobre el informe de ambigüedad bloqueante que el implementador levantó al arrancar PR12 (PdfWorker) — se detuvo sin tocar archivos por la regla de `ai/AI_Development_Guide.md` §5. El registro completo del informe está en `roadmap/Hito10_Observaciones_Revision.md`, entrada "PR12".
 - **Relacionado con**: ADR-013 (envolver `process()` en worker), ADR-014 (fusión OCR→PDF mediada por el Orchestrator — la mediación se **preserva**, cambia la forma de la invocación), ADR-020 (§6 guard de `requiresOCR` — se preserva en la función pura; **§7 `releaseDocument` superseded** por este ADR), ADR-021 (§7 wiring `DOCUMENT_CLOSED`→`releaseDocument` — superseded en lo que respecta a Pdf), ADR-035 (pools in-process), ADR-036 (§4 `WorkerJobType` sin cambios — este ADR lo **ratifica**), ADR-038 (§8 tabla de PRs: PR12–16; contexto item 5: re-fusión idempotente — se preserva)

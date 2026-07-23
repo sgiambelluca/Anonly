@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=workers | dependencias=03_Data_Model.md,04_Event_System.md,06_Pipeline.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-042-WorkerOutbound-Completed-Result-Unknown.md | audiencia=IA+humanos | fase=1 (actualizado en fase 9/10: entrega por fases ADR-035; transporte, EVENT, payloads y ExportWorker por ADR-036; COMPLETED.result unknown por ADR-042) -->
+<!-- CONTEXT: scope=workers | dependencias=03_Data_Model.md,04_Event_System.md,06_Pipeline.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-042-WorkerOutbound-Completed-Result-Unknown.md,adr/ADR-043-RenderEngine-Reparto-Host-Worker-Kernel.md | audiencia=IA+humanos | fase=1 (actualizado en fase 9/10: entrega por fases ADR-035; transporte, EVENT, payloads y ExportWorker por ADR-036; COMPLETED.result unknown por ADR-042; RenderWorker kernel, unload-document y re-priming por ADR-043) -->
 
 # Anonly — Arquitectura de Workers (TAD bloque 8)
 
@@ -227,12 +227,17 @@ Cada pool tiene una `PriorityQueue<WorkerJob>` ordenada por:
 
 **Responsabilidad**: renderizar una página (original o anonimizada) a `ImageData` o `Blob` PNG/JPEG usando OffscreenCanvas + pdfjs-dist (fe de erratas ADR-030 §5: decía pdf-lib, que es del ExportWorker y está prohibido en Render — `Render_Engine.md` §5). Produce highlight de grupos habilitados.
 
-**Ciclo de vida**:
+**Ciclo de vida** (el RenderWorker es un **kernel sin estado por documento** salvo los `PDFDocumentProxy`; todo el estado del motor — cache, overrides, supersede, suscripciones — vive en la clase `RenderEngine` host-side, ADR-043 §1):
 - `INIT`: crea OffscreenCanvas. Publica `READY`.
-- `load-document`: mensaje de **control broadcast** (no es un `WorkerJobType` encolable — un job iría a un solo worker idle y los demás quedarían sin documento; ADR-036 §4): el host lo envía a **cada** worker del pool con `LoadDocumentPayload { documentId, buffer }` (buffer **clonado** por worker, ver §2.3). Crea el `PDFDocumentProxy` interno con pdfjs-dist (ADR-030). Responde `COMPLETED`.
+- `load-document`: mensaje de **control broadcast** (no es un `WorkerJobType` encolable — un job iría a un solo worker idle y los demás quedarían sin documento; ADR-036 §4): el host lo envía a **cada** worker del pool con `LoadDocumentPayload { documentId, buffer }` (buffer **clonado** por worker, ver §2.3). Crea el `PDFDocumentProxy` interno con pdfjs-dist (ADR-030). Responde `COMPLETED` con `{ pageCount }` (el host lo retiene junto al buffer — ADR-043 §3).
+- `unload-document`: control broadcast simétrico (`UnloadDocumentPayload { documentId }`, ADR-043 §4): libera el `PDFDocumentProxy` de ese documento en cada worker a mitad de sesión (`DOCUMENT_CLOSED`). Idempotente. Responde `COMPLETED`.
 - `RUN(render-page)`: recibe `RenderPagePayload` (`03_Data_Model.md` §18) **o** `RasterizePagePayload { documentId, pageIndex, scale }` (rasterización para OCR, sin eventos de preview — ADR-034 §1/ADR-036 §4). Precondición: documento cargado vía `load-document` (ADR-030). Responde `COMPLETED` con `{ imageData: ImageData }` (transferido) y, en `mode: "full"`, `encoded` (`EncodedPageImage`, ADR-034 §3).
 - `CANCEL`: checkpoint entre operaciones de Canvas.
 - `DISPOSE`: libera OffscreenCanvas y destruye los `PDFDocumentProxy` cargados.
+
+**Wire shape de los controles (ADR-043 §4)**: `load-document`/`unload-document` viajan como `RUN` con `jobType: "render-page"` enviado **directo a cada worker, sin cola** (por eso tienen `jobId` y responden `COMPLETED`; `WorkerInbound` no cambia). El entry-point discrimina el payload por forma, en este orden: `"buffer" in payload` → load; `"kind" in payload` → render; `"pageIndex" in payload` → rasterize; si no → unload. `WorkerPool` expone la operación genérica `broadcast(payload)` para estos envíos (in-process: una sola invocación del kernel local).
+
+**Re-priming (ADR-043 §5)**: un worker nuevo o reemplazado tras crash (§9) recibe `INIT` + `load-document` de todos los documentos vigentes (buffers retenidos por el host) **antes** de aceptar jobs `render-page`.
 
 **Memoria típica**: 40–120 MB por worker.
 

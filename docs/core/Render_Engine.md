@@ -1,12 +1,14 @@
-<!-- CONTEXT: scope=render-engine | dependencias=core/Contracts.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,ADR-004-Rendering.md,ADR-012-Replacement-Modes.md,ADR-030-RenderEngine-LoadDocument.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md | audiencia=IA-implementador | fase=3 (§6/§8/§12/§13 actualizados en fase 10: RENDER_REQUESTED.scale, guard MAX_RENDER_SCALE, cache LRU por escala + límite de bytes, supersede de renders obsoletos, ADR-037) -->
+<!-- CONTEXT: scope=render-engine | dependencias=core/Contracts.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,ADR-004-Rendering.md,ADR-012-Replacement-Modes.md,ADR-030-RenderEngine-LoadDocument.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-043-RenderEngine-Reparto-Host-Worker-Kernel.md | audiencia=IA-implementador | fase=10 (§6/§8/§12/§13 actualizados en fase 10: RENDER_REQUESTED.scale, guard MAX_RENDER_SCALE, cache LRU por escala + límite de bytes, supersede, ADR-037; reparto host/worker para PR13 por ADR-043) -->
 
 # Render Engine — Spec de Motor
 
 > Renderiza páginas del PDF (original o anonimado) a imágenes usando OffscreenCanvas en Web Workers. Produce highlight de grupos habilitados y aplica reemplazos visualmente según `ReplacementMode`. Soporta preview incremental y render full para export.
 
 **EngineId**: `render`
-**Versión del spec**: 1.3.1
-**Última actualización**: 2026-07-19
+**Versión del spec**: 1.4.0
+**Última actualización**: 2026-07-22
+
+> **Nota (ADR-043, 2026-07-22 — reparto host/worker para PR13)**: la clase `RenderEngine` queda **entera host-side** — estado (`documents`, cache LRU, `groupOverrides`, `lastAnonymizedInputs`/`lastOriginalInputs`, `pageGroupIndex`, `pendingRenders`), suscripciones (§8), supersede (ADR-037 §4), delta render y emisión de eventos/blob URLs. Al worker va un **kernel sin estado por documento** (pdfjs + OffscreenCanvas + encode; `05_Worker_Architecture.md` §7.4), salvo los `PDFDocumentProxy` cargados por broadcast. Todas las vías de render convergen en `RenderPool.dispatch({ payload, run })` (seam PR11): con factory despacha al worker; sin factory corre el kernel in-process (fallback bit-idéntico, ADR-035). En modo worker, `documents` retiene `{ buffer, pageCount }` (no proxies — viven en cada worker); `unloadDocument` emite el broadcast `unload-document` (ADR-043 §4) y los workers nuevos/reemplazados se re-primean con `load-document` de todos los documentos vigentes (ADR-043 §5). Interfaz pública de §6: sin cambios de firma.
 
 > **Nota (2026-07-19, hallazgo de revisión Hito 10 PR4)**: alcance del supersede de ADR-037 §4 precisado — participa únicamente el flujo originado en `RENDER_REQUESTED` (§8); las invocaciones directas de `renderPage`/`renderPages` (export del Orchestrator vía `RenderPageProvider`, tests) y el delta render interno son inmunes a las entradas de supersede que ese flujo deja registradas (§13 caso 21). `rasterizePage` nunca participó del mecanismo. Sin cambio de contrato público (detalle de implementación interno del motor; no requiere ADR): interfaz de §6, eventos y la clave `(documentId, pageIndex, kind)` de ADR-037 §4 quedan idénticos.
 
@@ -136,11 +138,11 @@ Semántica de `rasterizePage` (ADR-034 §1):
 - Precondición: documento cargado vía `loadDocument`; si no, `InvalidInputError` (ADR-030). `pageIndex` fuera de rango o `scale <= 0` → `InvalidInputError`. Fallo de pdfjs/canvas → `RenderPageFailedError` (retryable).
 - En modo pool corre como job del `RenderPool`; el `ImageData` se transfiere zero-copy al host.
 
-Semántica de `loadDocument`/`unloadDocument` (ADR-030):
+Semántica de `loadDocument`/`unloadDocument` (ADR-030; precisiones de modo worker por ADR-043 §3-§5):
 
-- `loadDocument` invoca `getDocument({ data: buffer })` de pdfjs-dist y guarda el `PDFDocumentProxy` en un `Map<string, PDFDocumentProxy>` interno. **Toma posesión del buffer**: el caller no debe reutilizarlo (coherente con la semántica de transferencia del Hito 9).
+- `loadDocument` invoca `getDocument({ data: buffer })` de pdfjs-dist y guarda el `PDFDocumentProxy` en un `Map<string, PDFDocumentProxy>` interno. **Toma posesión del buffer**: el caller no debe reutilizarlo (coherente con la semántica de transferencia del Hito 9). En modo worker (PR13), el host retiene `{ buffer, pageCount }` (el `pageCount` lo devuelve el `COMPLETED` del broadcast `load-document`; los proxies viven en cada worker — buffer clonado por worker, `05_Worker_Architecture.md` §2.3) y usa el buffer para re-primear workers nuevos/reemplazados.
 - `loadDocument` sobre un `documentId` ya cargado destruye el proxy anterior y carga el nuevo (re-carga determinística, sin leak).
-- `unloadDocument` destruye el proxy y libera la entrada; sobre un `documentId` desconocido es no-op idempotente.
+- `unloadDocument` destruye el proxy y libera la entrada; sobre un `documentId` desconocido es no-op idempotente. En modo worker, emite el broadcast `unload-document` (`UnloadDocumentPayload`, ADR-043 §4) para liberar el proxy de ese documento en cada worker.
 - `dispose()` destruye todos los proxies cargados.
 
 ---
@@ -343,6 +345,9 @@ Fixtures: `tests/fixtures/text-10p.pdf`, `scanned-10p.pdf`, una página con rota
 - [ ] 19. Verificar `index.ts` exporta solo `RenderEngine`, tipos, errores.
 - [ ] 20. Verificar imports sin dependencias prohibidas (`grep -r 'react\|tesseract\|onnx\|transformers\|pdf-lib' src/`).
 - [ ] 21. Verificar test de cancelación < 200 ms.
+- [ ] 22. (Hito 10, PR13 — ADR-043) Extraer el kernel de rasterización/composición a `worker/` (entry-point §7.4: discriminación por forma de los 4 payloads de `render-page` en el orden de ADR-043 §4) y hacer converger todas las vías de render en `RenderPool.dispatch({ payload, run })` (preview incluido; el Orchestrator deja de envolver `rasterizePage`/`renderPage` en `pool.dispatch`).
+- [ ] 23. (Hito 10, PR13 — ADR-043) Modo worker de `loadDocument`/`unloadDocument`: `documents` host con `{ buffer, pageCount }`, broadcast `load-document`/`unload-document` (`WorkerPool.broadcast`), re-priming de workers nuevos/reemplazados.
+- [ ] 24. (Hito 10, PR13 — ADR-043) Subpath export `"./worker"` + wiring en la app; E2E: preview real vía workers, `DOCUMENT_CLOSED` libera proxies por worker, crash-replace re-primea.
 
 ---
 

@@ -554,6 +554,15 @@ export interface LoadDocumentPayload {
   readonly buffer: ArrayBuffer;
 }
 
+// Control broadcast simétrico a load-document (ADR-043 §4): libera el
+// PDFDocumentProxy de ese documento en cada RenderWorker a mitad de sesión
+// (DOCUMENT_CLOSED). Idempotente, sin transfer. Los controles viajan como RUN
+// con jobType "render-page" directo a cada worker, sin cola; el entry-point
+// discrimina por forma en el orden de ADR-043 §4.
+export interface UnloadDocumentPayload {
+  readonly documentId: string;
+}
+
 // Rasterización para OCR (ADR-034 §1). Viaja bajo jobType "render-page",
 // prioridad 90/40 (espejo de ocr-page), timeouts/retries de render-page.
 export interface RasterizePagePayload {
