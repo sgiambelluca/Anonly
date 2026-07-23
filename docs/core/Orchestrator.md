@@ -6,8 +6,10 @@
 
 **Componente**: Orchestrator + façade `@anonly/anonymization-core` (no es un motor: **no tiene `EngineId`** y no implementa `IEngine`; este spec adapta la plantilla de 15 secciones de `ai/Module_Specification_Template.md` a un componente host)
 **Ubicación**: `packages/anonymization-core/src/`
-**Versión del spec**: 1.4.0
-**Última actualización**: 2026-07-22
+**Versión del spec**: 1.4.1
+**Última actualización**: 2026-07-23
+
+> **Nota (v1.4.1, 2026-07-23 — visor en blanco para documentos con texto nativo, sin ADR: no cambia ningún contrato, restaura una invariante ya especificada en §2)**: la invariante de §2 ("invocar `RenderEngine.loadDocument(documentId, buffer)` una sola vez por documento: en la etapa 2 si `textlessPages.length > 0`, si no antes del primer preview") nunca se materializó para la rama `else` — el único call site fuera de `runOcrStage` era `runExport` (§13 casos 23/24). Un documento con texto nativo (sin páginas `textless`) llegaba a `Ready` con el documento **sin cargar** en `RenderEngine`; la UI monta el visor y emite `RENDER_REQUESTED` en cuanto observa `Ready` (antes de cualquier export), y `RenderEngine` lo descarta con un `warn` silencioso por documento no cargado (`Render_Engine.md` §8) — el preview queda en blanco indefinidamente (hasta que algún export posterior dispare el primer `loadDocument` real). Se especifica: el Orchestrator invoca `RenderEngine.loadDocument` también al cerrar la etapa de extracción cuando `textlessPages.length === 0` (mismo guard idempotente `renderLoadedDocuments`, misma copia `slice(0)` del buffer retenido que ya usan `runOcrStage`/`runExport`), **antes** de iniciar la etapa de detección — y por lo tanto antes de la cascada síncrona que termina en `PIPELINE_READY` (ver la nota de sincronía de cabecera de `orchestrator.ts`: el fix no puede vivir dentro de `handleGroupingFinished`, que debe seguir resolviendo síncrono). Ver §13 caso 25 y §14 (test nuevo + corrección del test de caso 23 que fijaba el bug como comportamiento esperado).
 
 > **Nota (ADR-041, 2026-07-22)**: la fusión OCR→PDF mediada (ADR-014) pasa a invocar la **función pura** `fuseOcrPage(document, pageIndex, words)` de `pdf-engine` — síncrona, host-side, con el `Document` retenido por el Orchestrator como entrada y su resultado persistido como copia canónica. `PdfEngine.releaseDocument` desaparece (el motor ya no retiene documentos); `closeDocument` deja de invocarlo. La ejecución síncrona en el handler de `OCR_PAGE_FINISHED` elimina la carrera lost-update entre fusiones cercanas.
 
@@ -235,6 +237,7 @@ El Orchestrator **no define códigos de error nuevos**: propaga `SerializedEngin
 22. **`CANCEL_REQUESTED` durante un `reanalyze`**: se abortan los jobs OCR/NER en vuelo; las ocurrencias ya mergeadas se conservan; el Orchestrator invoca `grouping.finishSession` (renumeración determinista) **antes** de emitir `PIPELINE_CANCELLED`, suprimiendo el `PIPELINE_READY` derivado de ese `GROUPING_FINISHED`; el stage final es `Ready`, no `Cancelled` — a diferencia de cancelar un `importDocument` (caso 8), acá sí hay un estado editable previo al que volver (ADR-038 §6).
 23. **Un motor deja detached el buffer que recibió** (pdfjs-dist transfiere a su worker interno, v1.2.1): sin efecto sobre el resto del pipeline — cada motor recibió su propia copia (`slice(0)`); el buffer retenido del Orchestrator sigue íntegro (`byteLength > 0`) para `retryWithPassword`, `runOcrStage` y `runExport`.
 24. **Fallo en la preparación del export** (`loadDocument` rechaza, o no hay buffer retenido con el documento aún presente): `failPipeline` → `PIPELINE_FAILED` (stage `Failed`) visible en la UI; **nunca** un unhandled rejection ni un pipeline congelado en `Ready`/`Exporting` (v1.2.1). `EXPORT_FAILED` **no** se emite en este camino — es un evento del Export Engine y `export.export()` nunca llegó a invocarse (errata de v1.2.1 corregida en v1.3.1; `EXPORT_FAILED` solo aparece cuando el fallo ocurre dentro de `export.export()`, y ahí `handleExportFailed` → `failPipeline` igual). El guard "documento no disponible" (race con `DOCUMENT_CLOSED`) sigue siendo warn + return silencioso — ahí no hay pipeline que fallar.
+25. **Documento con texto nativo, sin páginas `textless`**: `RenderEngine.loadDocument` se invoca al cerrar la etapa de extracción (antes de `Detecting`), simétrico al caso 2 (OCR) — ya no queda diferido hasta el export (v1.4.1). Evita que el primer `RENDER_REQUESTED` (la UI lo emite en cuanto el pipeline llega a `Ready`) se descarte en silencio por documento no cargado (`Render_Engine.md` §8).
 
 ---
 
@@ -269,7 +272,8 @@ El Orchestrator **no define códigos de error nuevos**: propaga `SerializedEngin
 | `dispose cleans all subscriptions and pools` | `contract.test.ts` | contract | caso 17 |
 | `blobUrls revoked on close` | `unit.test.ts` | unit | leak de object URLs |
 | `engines receive a copy: retained buffer stays intact if engine detaches its input` | `edge.test.ts` | edge | caso 23 (v1.2.1; el mock de PdfEngine debe simular el detach — `structuredClone(buf, {transfer:[buf]})`) |
-| `export after import loads Render with usable bytes` | `edge.test.ts` | edge | caso 23 (v1.2.1; primera llamada real a `loadDocument` en el flujo con texto) |
+| `no-OCR document loads Render right after extraction, before Ready` | `edge.test.ts` | edge | caso 25 (v1.4.1; corrige la premisa de v1.2.1 abajo — `loadDocument` ya no queda diferido al export) |
+| `export after import reuses the already-loaded Render document (no reload)` | `edge.test.ts` | edge | caso 23 (v1.4.1; antes "primera llamada real a `loadDocument` en el flujo con texto" — dejó de serlo al resolverse el caso 25) |
 | `loadDocument failure during export emits PIPELINE_FAILED, no hang` | `edge.test.ts` | edge | caso 24 (v1.2.1; errata corregida en v1.3.1 — decía `EXPORT_FAILED`, imposible en este camino) |
 | `EXPORT_REQUESTED handler never produces unhandled rejection` | `edge.test.ts` | edge | caso 24 (v1.2.1; seatbelt `.catch` sobre `enqueueExport`) |
 | `reanalyze accepted from Done stage` | `edge.test.ts` | edge | caso 21 (ADR-040; post-export → `Detecting`/…→ `Ready`) |
