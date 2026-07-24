@@ -1,12 +1,14 @@
-<!-- CONTEXT: scope=export-engine | dependencias=core/Contracts.md,architecture/06_Pipeline.md,ADR-004-Rendering.md,ADR-009-Export-Strategy.md,ADR-012-Replacement-Modes.md,ADR-032-Export-EncodedPageImage-Requested-Warning.md,ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md | audiencia=IA-implementador | fase=3 (§12 corregido en fase 10: ExportWorker único, no RenderPool — ADR-036 §1) -->
+<!-- CONTEXT: scope=export-engine | dependencias=core/Contracts.md,architecture/06_Pipeline.md,ADR-004-Rendering.md,ADR-009-Export-Strategy.md,ADR-012-Replacement-Modes.md,ADR-032-Export-EncodedPageImage-Requested-Warning.md,ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,ADR-044-Preview-Grupos-Mediacion-Orchestrator.md | audiencia=IA-implementador | fase=3 (§12 corregido en fase 10: ExportWorker único, no RenderPool — ADR-036 §1; §15.16: export de `buildPageReplacements` — ADR-044 §4) -->
 
 # Export Engine — Spec de Motor
 
 > Construye el PDF final reconstruido desde cero, adjuntando las imágenes renderizadas (lado anonimizado) como páginas con pdf-lib. Garantiza no-recuperabilidad y metadata mínima.
 
 **EngineId**: `export`
-**Versión del spec**: 1.1.0
-**Última actualización**: 2026-07-16
+**Versión del spec**: 1.1.1
+**Última actualización**: 2026-07-23
+
+> **Nota (ADR-044 §4, 2026-07-23)**: `buildPageReplacements` (función pura interna: grupos → `Replacement[]` de una página, filtrando `enabled === false`) pasa a exportarse desde `index.ts`: el façade la importa para computar los reemplazos del preview mediado por el Orchestrator con la misma semántica que el export. Sin ningún otro cambio en este motor (§15.16).
 
 > **Nota (ADR-032, 2026-07-16)**: `RenderPageProvider.renderFull` devuelve `EncodedPageImage` (bytes codificados; pdf-lib no embebe `ImageData`); `EXPORT_REQUESTED` lo escucha el **Orchestrator**, que llama `export()` directamente (Export no se suscribe a eventos; patrón ADR-014); `EXPORT_NO_ENABLED_GROUPS` es `logger.warn` + continuar, la confirmación del usuario es pre-export. `ExportOptions`/`ExportMetadata` quedan formalizados en `03_Data_Model.md` §19.
 >
@@ -295,7 +297,7 @@ Fixtures: `tests/fixtures/text-10p.pdf`, `text-50p.pdf`, `huge-1000p.pdf`.
 - [ ] 13. Escribir `edge.test.ts` con todos los casos límite.
 - [ ] 14. Escribir `security.test.ts` con `no-recuperability` y `metadata-strip`.
 - [ ] 15. Ejecutar `pnpm lint && pnpm typecheck && pnpm test` verde.
-- [ ] 16. Verificar `index.ts` exporta solo `ExportEngine`, tipos, errores.
+- [ ] 16. Verificar `index.ts` exporta solo `ExportEngine`, tipos, errores — y, desde ADR-044 §4, la función pura `buildPageReplacements` (grupos → `Replacement[]` por página): la importa el façade para computar los reemplazos del preview mediado con la **misma** semántica que el export (única excepción sancionada; ningún otro helper interno se exporta).
 - [ ] 17. Verificar imports sin dependencias prohibidas (`grep -r 'react\|pdfjs\|tesseract\|onnx\|transformers' src/`).
 - [ ] 18. Verificar `no-network-from-core`.
 - [ ] 19. Verificar test de cancelación < 200 ms.

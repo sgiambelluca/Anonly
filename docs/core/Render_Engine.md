@@ -1,12 +1,14 @@
-<!-- CONTEXT: scope=render-engine | dependencias=core/Contracts.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,ADR-004-Rendering.md,ADR-012-Replacement-Modes.md,ADR-030-RenderEngine-LoadDocument.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-043-RenderEngine-Reparto-Host-Worker-Kernel.md | audiencia=IA-implementador | fase=10 (§6/§8/§12/§13 actualizados en fase 10: RENDER_REQUESTED.scale, guard MAX_RENDER_SCALE, cache LRU por escala + límite de bytes, supersede, ADR-037; reparto host/worker para PR13 por ADR-043) -->
+<!-- CONTEXT: scope=render-engine | dependencias=core/Contracts.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,ADR-004-Rendering.md,ADR-012-Replacement-Modes.md,ADR-030-RenderEngine-LoadDocument.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-043-RenderEngine-Reparto-Host-Worker-Kernel.md,adr/ADR-044-Preview-Grupos-Mediacion-Orchestrator.md | audiencia=IA-implementador | fase=10 (§6/§8/§12/§13 actualizados en fase 10: RENDER_REQUESTED.scale, guard MAX_RENDER_SCALE, cache LRU por escala + límite de bytes, supersede, ADR-037; reparto host/worker para PR13 por ADR-043; retiro del delta render por eventos de grouping por ADR-044) -->
 
 # Render Engine — Spec de Motor
 
 > Renderiza páginas del PDF (original o anonimado) a imágenes usando OffscreenCanvas en Web Workers. Produce highlight de grupos habilitados y aplica reemplazos visualmente según `ReplacementMode`. Soporta preview incremental y render full para export.
 
 **EngineId**: `render`
-**Versión del spec**: 1.4.0
-**Última actualización**: 2026-07-22
+**Versión del spec**: 1.5.0
+**Última actualización**: 2026-07-23
+
+> **Nota (ADR-044, 2026-07-23 — el motor deja de escuchar eventos de Grouping; el delta render por overrides se retira)**: los reemplazos autoritativos del preview `anonymized` le llegan al motor por invocación directa del Orchestrator (`renderPage({ kind: "anonymized", mode: "preview", replacements })`, computados desde el snapshot de Grouping — `Orchestrator.md` v1.5.0 §2/§8/§13 casos 26–27). Se retiran de este spec: las suscripciones a `GROUP_REPLACEMENT_CHANGED`/`GROUP_TOGGLED` (§8), `requestDeltaRender` (§6 — sin callers externos), el estado `groupOverrides` + `apply*Overrides` y el índice `pageIndex → groupIds` (`pageGroupIndex`, §12 — su único consumidor era `requestDeltaRender`). Motivo: el primer render `anonymized` salía con `replacements: []` y dejaba `pageGroupIndex` vacío para siempre (deadlock de arranque del preview), y el mecanismo de overrides era lossy (un toggle off→on no podía resucitar los `Replacement` filtrados del input recordado). `lastAnonymizedInputs`/`lastOriginalInputs` **se conservan** (reconstrucción de `RENDER_REQUESTED`, nota de implementación 1), igual que todo el reparto host/worker, supersede y cache de ADR-043/ADR-037. Canales escuchados: solo `EventChannel.UI`.
 
 > **Nota (ADR-043, 2026-07-22 — reparto host/worker para PR13)**: la clase `RenderEngine` queda **entera host-side** — estado (`documents`, cache LRU, `groupOverrides`, `lastAnonymizedInputs`/`lastOriginalInputs`, `pageGroupIndex`, `pendingRenders`), suscripciones (§8), supersede (ADR-037 §4), delta render y emisión de eventos/blob URLs. Al worker va un **kernel sin estado por documento** (pdfjs + OffscreenCanvas + encode; `05_Worker_Architecture.md` §7.4), salvo los `PDFDocumentProxy` cargados por broadcast. Todas las vías de render convergen en `RenderPool.dispatch({ payload, run })` (seam PR11): con factory despacha al worker; sin factory corre el kernel in-process (fallback bit-idéntico, ADR-035). En modo worker, `documents` retiene `{ buffer, pageCount }` (no proxies — viven en cada worker); `unloadDocument` emite el broadcast `unload-document` (ADR-043 §4) y los workers nuevos/reemplazados se re-primean con `load-document` de todos los documentos vigentes (ADR-043 §5). Interfaz pública de §6: sin cambios de firma.
 
@@ -43,9 +45,8 @@ Recibir requests de renderizado por página (`RENDER_REQUESTED` o invocación di
   - `mask` → texto censurado (`XX.XXX.XXX`) sobre bbox.
   - `redact` → fill opaco negro sobre bbox (sin texto).
 - Soportar dos calidades: `preview` (escala baja, rápido) y `full` (escala alta, para export).
-- Soportar delta render: re-render solo las páginas afectadas por un cambio de grupo.
 - Emitir `PREVIEW_UPDATED` (por página, preview), `RENDER_FINISHED`, `RENDER_FAILED`, `PREVIEW_PAGE_FAILED`.
-- Escuchar `RENDER_REQUESTED` y `GROUP_REPLACEMENT_CHANGED`/`GROUP_TOGGLED` para delta render.
+- Escuchar `RENDER_REQUESTED` (único evento consumido desde ADR-044; los cambios de grupos llegan mediados por el Orchestrator como invocaciones directas de `renderPage`).
 - Transferir zero-copy `ImageData`/`ArrayBuffer` de vuelta al host.
 - Propagar `RENDER_REQUESTED.scale` a `renderPages` (ADR-037 §1); validar contra `MAX_RENDER_SCALE` y aplicar el supersede por página de renders obsoletos (ADR-037 §4).
 
@@ -68,7 +69,7 @@ Recibir requests de renderizado por página (`RENDER_REQUESTED` o invocación di
 - `@anonly/shared`
 - `pdfjs-dist` (para render del PDF a canvas; ADR-001)
 - Tipos de `core/Contracts.md`: `IEngine`, `EngineContext`, `Document`, `Page`, `BoundingBox`, `EntityGroup`, `Replacement`, `ReplacementMode`, `Annotation`, `RenderConfig`, `Word`, `EncodedPageImage` (ADR-034 §3)
-- `architecture/04_Event_System.md`: `RENDER_REQUESTED`, `RENDER_FINISHED`, `RENDER_FAILED`, `PREVIEW_UPDATED`, `PREVIEW_PAGE_FAILED`, `GROUP_REPLACEMENT_CHANGED`, `GROUP_TOGGLED`
+- `architecture/04_Event_System.md`: `RENDER_REQUESTED`, `RENDER_FINISHED`, `RENDER_FAILED`, `PREVIEW_UPDATED`, `PREVIEW_PAGE_FAILED` (`GROUP_REPLACEMENT_CHANGED`/`GROUP_TOGGLED` retirados de este motor por ADR-044 — ver nota de cabecera)
 
 ---
 
@@ -124,10 +125,11 @@ export class RenderEngine implements IEngine {
   renderPage(input: RenderPageInput, ctx: EngineContext): Promise<RenderPageOutput>;
   renderPages(inputs: ReadonlyArray<RenderPageInput>, ctx: EngineContext): Promise<ReadonlyArray<RenderPageOutput>>;
   rasterizePage(documentId: string, pageIndex: number, scale: number, ctx: EngineContext): Promise<ImageData>; // ADR-034 §1
-  requestDeltaRender(documentId: string, groupIds: ReadonlyArray<string>): void;
   dispose(): Promise<void>;
 }
 ```
+
+> `requestDeltaRender` retirado por ADR-044 (sus únicos callers eran los handlers de `GROUP_REPLACEMENT_CHANGED`/`GROUP_TOGGLED`, también retirados; el re-render por cambio de grupo lo dispara el Orchestrator con `renderPage` y reemplazos del snapshot).
 
 Validación de `scale` (ADR-037 §2): rango válido `0 < scale ≤ MAX_RENDER_SCALE` (`Contracts.md` §6, default 4). Vía invocación directa (`renderPage`/`renderPages`), `scale` inválido o no finito → `InvalidInputError` — endurece una laguna previa (el campo no declaraba validación). Vía evento (`RENDER_REQUESTED`), `scale` inválido → `warn` + no-op del evento (no hay caller al que lanzarle, mismo tratamiento que documento no cargado).
 
@@ -166,11 +168,9 @@ Canal: `EventChannel.Render`.
 
 | Evento | Cuándo | Acción |
 |---|---|---|
-| `RENDER_REQUESTED` (canal `ui`) | usuario pide preview/export | `renderPages` con los `pageIndices` indicados y el `scale` recibido (ausente → `previewScale`/`fullScale` según `mode`, ADR-037 §1); si hay un render pendiente en cola o en vuelo para la misma `(documentId, pageIndex, kind)` con otra escala, se descarta/aborta sin emitir `PREVIEW_UPDATED` (supersede, ADR-037 §4 — solo entre renders originados por `RENDER_REQUESTED`; las invocaciones directas de `renderPage`/`renderPages` y el delta render no participan, caso 21) |
-| `GROUP_REPLACEMENT_CHANGED` (canal `grouping`) | cambio de modo/valor en un grupo | `requestDeltaRender(documentId, [groupId])` |
-| `GROUP_TOGGLED` (canal `grouping`) | grupo habilitado/deshabilitado | `requestDeltaRender` |
+| `RENDER_REQUESTED` (canal `ui`) | usuario pide preview/export | `renderPages` con los `pageIndices` indicados y el `scale` recibido (ausente → `previewScale`/`fullScale` según `mode`, ADR-037 §1); si hay un render pendiente en cola o en vuelo para la misma `(documentId, pageIndex, kind)` con otra escala, se descarta/aborta sin emitir `PREVIEW_UPDATED` (supersede, ADR-037 §4 — solo entre renders originados por `RENDER_REQUESTED`; las invocaciones directas de `renderPage`/`renderPages` no participan, caso 21) |
 
-Canales escuchados: `EventChannel.UI`, `EventChannel.Grouping`.
+Canales escuchados: `EventChannel.UI` (único desde ADR-044; las suscripciones a `EventChannel.Grouping` — `GROUP_REPLACEMENT_CHANGED`/`GROUP_TOGGLED` → `requestDeltaRender` — se retiraron: ese camino era el deadlock de arranque + toggle lossy, ver nota de cabecera).
 
 > Precondición (ADR-030): estas vías por eventos requieren que el documento esté cargado vía `loadDocument`. Si el `documentId` no está cargado, el motor loguea `warn` y no hace nada (no hay caller al que lanzarle) — mismo tratamiento que el Orchestrator da a `groupId` inexistente (06_Pipeline.md §11).
 
@@ -240,7 +240,7 @@ El `ImageData` se transfiere zero-copy al host. El host lo convierte a `Blob` y 
 - `ImageData` se transfiere zero-copy de vuelta al host.
 - Cache LRU: `cachePages = 16` páginas preview cacheadas en host. Si la página solicitada está en cache, no se re-renderiza. La clave incorpora la escala efectiva: `documentId:pageIndex:kind:mode:scale:hash(replacements ++ annotations)` (extiende la clave de ADR-031 §2 con `scale` — ADR-037 §3); entradas de escalas distintas coexisten y compiten por los mismos slots. Además del límite por items, el cache tiene un límite por bytes `PREVIEW_CACHE_MAX_BYTES = 200 MB` (`Contracts.md` §6, ADR-037 §3). Sin invalidación activa al cambiar de escala: las entradas viejas se evictan por LRU natural. Un cambio de escala **siempre re-renderiza** (no hay resampling del bitmap anterior en el motor; ese escalado transitorio es responsabilidad de la UI, ver `ui/Components.md` §5.2).
 - Virtualización: solo se renderizan páginas visibles + 1 antes + 1 después. El host envía `RENDER_REQUESTED` solo para visibles.
-- Delta render: cuando un grupo cambia, se re-renderizan solo las páginas que tienen `members` de ese grupo. El motor mantiene un index `pageIndex → groupIds` para lookup rápido.
+- Re-render por cambio de grupo (ADR-044): lo dispara el Orchestrator — solo las páginas afectadas, con reemplazos recomputados del snapshot de Grouping (`Orchestrator.md` §13 caso 27). El motor ya no mantiene el índice `pageIndex → groupIds` ni overrides; cada invocación llega autocontenida y el cache LRU absorbe los inputs idénticos.
 - Preview primero: si el usuario pide export (full), el motor prioriza preview de la página visible por encima del full de las demás.
 - Cancelación: entre operaciones de Canvas (fill, drawImage, convertToBlob). SLA < 200 ms.
 - Compresión: `convertToBlob({ type: "image/jpeg", quality: 0.85 })` para full; PNG para preview (sin pérdida, más rápido de comprimir en canvas chicos).
@@ -259,17 +259,17 @@ El `ImageData` se transfiere zero-copy al host. El host lo convierte a `Blob` y 
 8. **Conflicto**: en `kind = "original"`, marca adicional (borde rojo o icono) sobre el bbox en conflicto.
 9. **Página muy grande (A3 o más)**: preview scale reduce, full scale 150 DPI. Si el canvas excede limites del navegador (área máxima), se divide en tiles y se cosen (futuro; MVP limita a A4 150 DPI).
 10. **1000 páginas**: virtualización + LRU cache. Solo se renderizan visibles. Memoria pico controlada por `cachePages`.
-11. **Delta render sin páginas afectadas**: si un grupo cambia pero no tiene `members` en páginas visibles, no se renderiza nada (no-op).
+11. **(Retirado por ADR-044)** Delta render sin páginas afectadas: el caso vivía en `requestDeltaRender`; la selección de páginas afectadas por un cambio de grupo es ahora responsabilidad del Orchestrator (`Orchestrator.md` §13 caso 27).
 12. **Cancelación entre páginas**: aborta en < 200 ms. El `ImageData` parcial se descarta.
 13. **`renderPage` tras `dispose`**: lanza `EngineDisposedError`.
 14. **OffscreenCanvas no disponible (Safari viejo)**: fallback a canvas en main thread (más lento). Detectar con `typeof OffscreenCanvas`. v1.0 puede requerir OffscreenCanvas y mostrar warning si no está.
 15. **PDF con rotate (páginas rotadas 90/180/270)**: el render respeta la rotación de la página. Los bbox están en coords de página ya rotada (lo garantiza PDF Engine).
-16. **`renderPage` sin `loadDocument` previo**: lanza `InvalidInputError`. Por eventos (`RENDER_REQUESTED`, delta render): `warn` + no-op (ADR-030).
+16. **`renderPage` sin `loadDocument` previo**: lanza `InvalidInputError`. Por evento (`RENDER_REQUESTED`): `warn` + no-op (ADR-030).
 17. **`loadDocument` dos veces con el mismo `documentId`**: destruye el proxy anterior y carga el nuevo. `unloadDocument` de un id desconocido: no-op idempotente (ADR-030).
 18. **Zoom cambia mientras hay un render en cola/en vuelo para la misma página (ADR-037 §4)**: el pendiente en cola se descarta sin ejecutarse; el que está en vuelo se aborta en su próximo checkpoint de Canvas; ninguno de los dos emite `PREVIEW_UPDATED`. Solo el request final (post-debounce de la UI) llega a completarse.
 19. **`RENDER_REQUESTED.scale` fuera de rango o no finito**: `warn` + no-op del evento (sin caller al que lanzarle); vía `renderPage`/`renderPages` directo: `InvalidInputError` (ADR-037 §2).
 20. **Cache a distintas escalas del mismo `(documentId, pageIndex, kind, mode)`**: coexisten como entradas separadas del LRU (clave incluye `scale`); compiten por `cachePages` y `PREVIEW_CACHE_MAX_BYTES` igual que cualquier otra entrada (ADR-037 §3).
-21. **Invocación directa vs. supersede (hallazgo de revisión Hito 10 PR4)**: las entradas de supersede que registra el flujo de `RENDER_REQUESTED` solo afectan a renders originados por ese mismo flujo. Una invocación directa (`renderPage`/`renderPages` — p. ej. el export del Orchestrator en `mode: "full"` — o el delta render interno de `requestDeltaRender`) nunca las consulta: un export posterior a un preview por evento a otra escala se ejecuta siempre, aunque la entrada del preview siga registrada. Las entradas persisten hasta `unloadDocument`/`loadDocument` (reload)/`dispose` — deliberadamente NO se limpian al completar un render: limpiarlas reintroduce la carrera en la que un render en cola ya superado deja de detectar su reemplazo si el ganador completa y borra la entrada primero. `rasterizePage` no participa del mecanismo (ADR-034 §1).
+21. **Invocación directa vs. supersede (hallazgo de revisión Hito 10 PR4; alcance simplificado por ADR-044)**: las entradas de supersede que registra el flujo de `RENDER_REQUESTED` solo afectan a renders originados por ese mismo flujo. Una invocación directa (`renderPage`/`renderPages` — el export del Orchestrator en `mode: "full"`, los renders mediados del preview de ADR-044 en `mode: "preview"`, tests) nunca las consulta: un export posterior a un preview por evento a otra escala se ejecuta siempre, aunque la entrada del preview siga registrada. Las entradas persisten hasta `unloadDocument`/`loadDocument` (reload)/`dispose` — deliberadamente NO se limpian al completar un render: limpiarlas reintroduce la carrera en la que un render en cola ya superado deja de detectar su reemplazo si el ganador completa y borra la entrada primero. `rasterizePage` no participa del mecanismo (ADR-034 §1).
 
 ---
 
@@ -289,7 +289,7 @@ El `ImageData` se transfiere zero-copy al host. El host lo convierte a `Blob` y 
 | `synthetic mode renders synthetic value over bbox` | `edge.test.ts` | edge | caso 6 |
 | `highlight border on original kind` | `unit.test.ts` | unit | caso 7 |
 | `conflict marker on original kind` | `edge.test.ts` | edge | caso 8 |
-| `delta render only re-renders affected pages` | `unit.test.ts` | unit | caso 11 |
+| `no subscriptions on grouping channel` | `contract.test.ts` | contract | ADR-044 (reemplaza a `delta render only re-renders affected pages`; la matriz de `04_Event_System.md` §11 lo cubre además desde el Orchestrator) |
 | `cancel within 200ms` | `cancel.test.ts` | cancel | caso 12 |
 | `throws EngineDisposedError after dispose` | `edge.test.ts` | edge | caso 13 |
 | `LRU cache evicts oldest when full` | `unit.test.ts` | unit | cache |
@@ -311,7 +311,7 @@ El `ImageData` se transfiere zero-copy al host. El host lo convierte a `Blob` y 
 | `superseded render in queue is discarded without PREVIEW_UPDATED` | `edge.test.ts` | edge | caso 18 (ADR-037 §4) |
 | `superseded render in flight aborts at next checkpoint without PREVIEW_UPDATED` | `edge.test.ts` | edge | caso 18 (ADR-037 §4) |
 | `direct full render (export) ignores supersede entry left by a completed event render at another scale` | `edge.test.ts` | edge | caso 21 (hallazgo PR4 Hito 10) |
-| `delta render ignores supersede entry at another scale (group change is not lost)` | `edge.test.ts` | edge | caso 21 (hallazgo PR4 Hito 10) |
+| `direct preview render (mediated) ignores supersede entry at another scale (group change is not lost)` | `edge.test.ts` | edge | caso 21 (hallazgo PR4 Hito 10; reformulado sobre `renderPage` directo por ADR-044) |
 | `cache key includes scale; different scales coexist` | `unit.test.ts` | unit | caso 20 (ADR-037 §3) |
 | `cache evicts by PREVIEW_CACHE_MAX_BYTES in addition to cachePages` | `unit.test.ts` | unit | ADR-037 §3 |
 
@@ -333,11 +333,11 @@ Fixtures: `tests/fixtures/text-10p.pdf`, `scanned-10p.pdf`, una página con rota
 - [ ] 8. Implementar los 4 modos de reemplazo visual (mask/synthetic/placeholder/redact).
 - [ ] 9. Implementar highlight de grupos habilitados y conflicto en `kind = "original"`.
 - [ ] 10. Implementar `renderPages` (paralelo, prioridad visible-first).
-- [ ] 11. Implementar `requestDeltaRender` (index `pageIndex → groupIds`, lookup, re-render solo afectadas).
+- [ ] 11. ~~Implementar `requestDeltaRender` (index `pageIndex → groupIds`, lookup, re-render solo afectadas).~~ **Retirado por ADR-044** (junto con `groupOverrides`/`apply*Overrides`/`pageGroupIndex`); el re-render por cambio de grupo lo media el Orchestrator.
 - [ ] 12. Implementar LRU cache en host (clave `documentId:pageIndex:kind:mode:scale:hash(replacements ++ annotations)`; ADR-031 §2, extendida con `scale` por ADR-037 §3) con límite adicional por bytes (`PREVIEW_CACHE_MAX_BYTES`).
 - [ ] 12b. Implementar guard de `scale` (`MAX_RENDER_SCALE`) y el supersede por página de renders obsoletos al recibir `RENDER_REQUESTED` con escala distinta (ADR-037 §2, §4).
 - [ ] 13. Implementar `dispose` (libera OffscreenCanvas, workers inactivos y destruye los `PDFDocumentProxy` cargados; ADR-030).
-- [ ] 14. Escuchar `RENDER_REQUESTED`, `GROUP_REPLACEMENT_CHANGED`, `GROUP_TOGGLED` del bus.
+- [ ] 14. Escuchar `RENDER_REQUESTED` del bus (~~`GROUP_REPLACEMENT_CHANGED`, `GROUP_TOGGLED`~~ retirados por ADR-044).
 - [ ] 15. Escribir `contract.test.ts` con todos los tests contractuales.
 - [ ] 16. Escribir `unit.test.ts` con cobertura ≥ 85%.
 - [ ] 17. Escribir `edge.test.ts` con todos los casos límite.
@@ -360,5 +360,6 @@ Fixtures: `tests/fixtures/text-10p.pdf`, `scanned-10p.pdf`, una página con rota
 - `adr/ADR-012-Replacement-Modes.md` (modos visuales)
 - `adr/ADR-030-RenderEngine-LoadDocument.md` (carga del PDF fuente)
 - `adr/ADR-031-RenderFailed-ErrorCode-Erratas-Render.md` (error code + erratas)
+- `adr/ADR-044-Preview-Grupos-Mediacion-Orchestrator.md` (retiro del delta render por eventos; reemplazos mediados por el Orchestrator)
 - `adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md` (zoom con re-render real, decisiones de la v1.3.0)
 - `ui/Components.md` §5.2 (`ZoomControls`, CSS inmediato + debounce)

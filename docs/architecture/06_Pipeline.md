@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=pipeline | dependencias=03_Data_Model.md,04_Event_System.md,05_Worker_Architecture.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md | audiencia=IA+humanos | fase=1 (§14 precisado en fase 10: etapa 11 en ExportWorker único, ADR-036 §1) -->
+<!-- CONTEXT: scope=pipeline | dependencias=03_Data_Model.md,04_Event_System.md,05_Worker_Architecture.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md | audiencia=IA+humanos | fase=1 (§14 precisado en fase 10: etapa 11 en ExportWorker único, ADR-036 §1; §10/§11 y el diagrama de secuencia en fase 10: re-render por edición mediado por el Orchestrator, ADR-044) -->
 
 # Anonly — Pipeline (TAD bloque 6)
 
@@ -203,7 +203,7 @@ El usuario puede overridear cualquiera desde la UI, emitiendo `CONFLICT_RESOLVE_
 **Estrategia**:
 - Solo se renderizan las páginas visibles en el viewport + 1 página antes y después (preemptive).
 - Se renderiza primero el lado "original" (más rápido, sin reemplazos) y luego el "anonimizado".
-- Cuando el usuario edita un grupo, se re-renderizan solo las páginas que tienen `members` de ese grupo (delta render).
+- Cuando el usuario edita un grupo, se re-renderizan solo las páginas afectadas: el Orchestrator media los `ENTITY_GROUP_*` y re-invoca `renderPage` con los reemplazos recomputados del snapshot de Grouping (ADR-044; reemplaza al delta render interno de Render, retirado).
 - Ver `07_Performance_Strategy.md` para virtualización.
 
 **Etapa siguiente**: Etapa 9 (interactiva, puede durar indefinidamente).
@@ -314,7 +314,8 @@ sequenceDiagram
     U->>UI: edita grupo/regla
     UI->>GE: GROUP_UPDATE_REQUESTED
     GE-->>UI: ENTITY_GROUP_UPDATED + GROUP_REPLACEMENT_CHANGED
-    GE->>RP: render delta (páginas afectadas)
+    GE-->>Orch: ENTITY_GROUP_UPDATED
+    Orch->>RP: renderPage (páginas afectadas, reemplazos del snapshot — ADR-044)
     RP-->>UI: PREVIEW_UPDATED
   end
   U->>UI: Export

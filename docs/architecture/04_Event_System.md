@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=eventos | dependencias=03_Data_Model.md,core/Contracts.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md | audiencia=IA+humanos | fase=1 (§2/§5/§6/§10 actualizados en fase 10: RENDER_REQUESTED.scale —ADR-037—, PIPELINE_READY/GROUPING_FINISHED emitibles más de una vez y dedup real de ENTITY_FOUND —ADR-038—) -->
+<!-- CONTEXT: scope=eventos | dependencias=03_Data_Model.md,core/Contracts.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-044-Preview-Grupos-Mediacion-Orchestrator.md | audiencia=IA+humanos | fase=1 (§2/§5/§6/§10 actualizados en fase 10: RENDER_REQUESTED.scale —ADR-037—, PIPELINE_READY/GROUPING_FINISHED emitibles más de una vez y dedup real de ENTITY_FOUND —ADR-038—; §6/§11: ENTITY_GROUP_* al Orchestrator y Render sin suscripciones a grouping —ADR-044—) -->
 
 # Anonly — Sistema de Eventos (TAD bloque 7)
 
@@ -75,11 +75,11 @@ Estos son los eventos que la UI **sí** escucha para construir el árbol de enti
 
 | Evento | Emisor | Receptores | Payload | Timing | Idempotente | Orden | Notas |
 |---|---|---|---|---|---|---|---|
-| `ENTITY_GROUP_CREATED` | Grouping Engine | UI | `{ documentId, group: EntityGroup }` | async | no | none | Crea un nodo en el árbol. |
-| `ENTITY_GROUP_UPDATED` | Grouping Engine | UI | `{ documentId, group: EntityGroup, changes: ReadonlyArray<keyof EntityGroup> }` | async | sí | none | Mutación por copia: el `group` es una nueva ref. |
-| `ENTITY_GROUP_REMOVED` | Grouping Engine | UI | `{ documentId, groupId }` | async | sí | none | |
-| `GROUP_REPLACEMENT_CHANGED` | Grouping Engine | UI, Render Engine | `{ documentId, groupId, mode, value }` | async | sí | none | Dispara re-render de páginas afectadas. |
-| `GROUP_TOGGLED` | Grouping Engine | UI, Render Engine | `{ documentId, groupId, enabled }` | async | sí | none | |
+| `ENTITY_GROUP_CREATED` | Grouping Engine | UI, Orchestrator | `{ documentId, group: EntityGroup }` | async | no | none | Crea un nodo en el árbol. El Orchestrator lo media hacia el preview: mapa `groupId → páginas` + re-render con reemplazos del snapshot (ADR-044). |
+| `ENTITY_GROUP_UPDATED` | Grouping Engine | UI, Orchestrator | `{ documentId, group: EntityGroup, changes: ReadonlyArray<keyof EntityGroup> }` | async | sí | none | Mutación por copia: el `group` es una nueva ref. Mediado al preview igual que `CREATED` (ADR-044). |
+| `ENTITY_GROUP_REMOVED` | Grouping Engine | UI, Orchestrator | `{ documentId, groupId }` | async | sí | none | El Orchestrator re-renderiza las páginas que el grupo ocupaba (mapa retenido, ADR-044). |
+| `GROUP_REPLACEMENT_CHANGED` | Grouping Engine | UI | `{ documentId, groupId, mode, value }` | async | sí | none | Render ya no se suscribe (ADR-044): el re-render de páginas afectadas lo media el Orchestrator vía el `ENTITY_GROUP_UPDATED` que siempre acompaña a este evento (punto único de emisión en Grouping). |
+| `GROUP_TOGGLED` | Grouping Engine | UI | `{ documentId, groupId, enabled }` | async | sí | none | Ídem `GROUP_REPLACEMENT_CHANGED`: sin receptor en Render desde ADR-044. |
 | `CONFLICT_DETECTED` | Grouping Engine | UI | `{ documentId, conflict: Conflict }` | async | sí | none | |
 | `CONFLICT_RESOLVED` | Grouping Engine | UI | `{ documentId, conflictId, mode }` | async | sí | none | |
 | `GROUPING_FINISHED` | Grouping Engine | Orchestrator | `{ documentId, groupCount, conflictCount, durationMs }` | async | sí | none | Dispara `PIPELINE_READY`. Puede emitirse **más de una vez** por documento tras `reopenSession`/`finishSession` re-ejecutado tras un `reanalyze` (ADR-038 §2, §5). |
@@ -158,11 +158,11 @@ Inputs del usuario que mutan el estado de grupos/reglas/pipeline o solicitan tra
 | OCR Engine | ✓ | ✓ | – | – | – | – | – | – | – |
 | Regex Engine | ✓ | – | – | – | – | – | ✓ | – | – |
 | NER Engine | ✓ | ✓ | – | – | – | – | ✓ | – | – |
-| Grouping Engine | ✓ | ✓ | – | – | – | – | – | ✓ | – |
+| Grouping Engine | ✓ | ✓ | – | – | – | – | – | – | – |
 | Render Engine | ✓ | ✓ | – | – | – | – | – | – | – |
 | Export Engine | ✓ | ✓ | – | – | – | – | – | – | – |
 
-**Invariante**: ningún motor escucha a otro motor excepto Grouping (que escucha `ENTITY_FOUND` + `REGEX_FINISHED`/`NER_FINISHED` de Regex y NER) y Render (que escucha `GROUP_REPLACEMENT_CHANGED`/`GROUP_TOGGLED` de Grouping). La fusión OCR→PDF es mediada por el Orchestrator (PDF Engine no se suscribe a `OCR_PAGE_FINISHED`; ADR-014); `EXPORT_REQUESTED` lo escucha el Orchestrator, no Export (ADR-032 §2). La cancelación y la liberación de recursos llegan a los motores por `AbortSignal` e invocación directa, no por bus (ADR-034 §4). Esta matriz se valida con un test de contrato del bus en el Hito 9 (ver ADR-019).
+**Invariante**: ningún motor escucha a otro motor excepto Grouping (que escucha `ENTITY_FOUND` + `REGEX_FINISHED`/`NER_FINISHED` de Regex y NER). Render no tiene suscripciones al canal `grouping` desde ADR-044: los cambios de grupos le llegan mediados por el Orchestrator (mismo patrón que la fusión OCR→PDF — PDF Engine no se suscribe a `OCR_PAGE_FINISHED`, ADR-014); `EXPORT_REQUESTED` lo escucha el Orchestrator, no Export (ADR-032 §2). La cancelación y la liberación de recursos llegan a los motores por `AbortSignal` e invocación directa, no por bus (ADR-034 §4). Esta matriz se valida con un test de contrato del bus en el Hito 9 (ver ADR-019).
 
 ---
 
