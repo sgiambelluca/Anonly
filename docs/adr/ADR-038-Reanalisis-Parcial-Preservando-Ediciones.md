@@ -133,6 +133,8 @@ Tabla canónica del orden de PRs del Hito 10 (inserciones de ADR-037 y ADR-038 e
 
 Los PRs 2–4 no dependen del scaffold y pueden correr en paralelo con el PR 1; el PR 5 depende de 1–4.
 
+> **Inserción posterior (ADR-048 §7 punto 2, ratificada por el humano el 2026-07-24)**: **PR 16.5 — bootstrap `settings.store` → `EngineConfig`** (`apps/react-client`), entre el PR 16 y el PR 17. `App.tsx` deriva `EngineConfigOverrides` de los settings persistidos y llama `initCore(overrides)` (mapeo de `ui/React_Client.md` §3.7). Cierra el bug de producto del toggle de NER sin documento abierto y desbloquea el Escenario 8 del PR 17, en `test.fixme` desde el PR 10.
+
 ## Alternativas consideradas
 
 | Alternativa | Por qué no |

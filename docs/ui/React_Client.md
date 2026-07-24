@@ -374,7 +374,17 @@ interface SettingsSlice {
 | `language` | (UI-only) | i18n del cliente; el Core no lo conoce |
 | `defaultReplacementMode` | (UI-only) | se materializa como regla global default vía `RULE_CREATED` |
 
+> Sin documento abierto, el mapeo se aplica en el **bootstrap** (`initCore(overrides)`, PR16.5); con documento abierto, vía `reanalyze` — ambos casos abajo.
+
+**Bootstrap: los settings persistidos se aplican al crear el core (PR16.5, ADR-048 §7 punto 2)**. La tabla de arriba rige en **dos** momentos, no solo con documento abierto. Al montar la app, el bootstrap carga los settings persistidos (`settings.store.load()`, que ya existe) y llama `initCore(overrides)` con el `EngineConfigOverrides` derivado de la tabla — `initCore` acepta overrides desde ADR-039. Reglas:
+
+- `performancePreset: "auto"` ⇒ **se omite** la sección `workerPool` del override, para no pisar los defaults derivados de `hardwareConcurrency` (`05_Worker_Architecture.md` §1.1). `low`/`high` mandan los tamaños de la tabla.
+- El override de `ner.wasmPaths` que `initCore` ya inyecta (ADR-039) **gana siempre**: los overrides del usuario se mergean por debajo, nunca lo sobreescriben.
+- Sin este wiring —el estado hasta PR16.5— `nerEnabled: false` persistido antes de la primera importación no tenía **ningún** efecto observable: `App.tsx` llamaba `initCore()` sin argumentos una sola vez por carga de pestaña. Era la causa del Escenario 8 E2E bloqueado desde PR10 (`07_Performance_Strategy.md` §11.3).
+
 **`nerEnabled` / `ocrLanguages` con documento abierto → `reanalyze`, no recrear el core** (ADR-038 §1, §7; reemplaza el flujo "recrear el core" de una versión previa de este doc, que descartaba las ediciones del usuario): el `SettingsDialog` muestra `ConfirmDialog` ("¿Reanalizar el documento con la nueva configuración? Tus ediciones se conservan.") → `actions.reanalyze({ ner: { enabled }, ocr: { languages } })` (patch con solo el/los campo/s que cambiaron) → `orchestrator.reanalyze(documentId, patch)`. Tras el `PIPELINE_READY` de la pasada, la UI re-emite `actions.requestRender(visibleRange)` para refrescar previews con los grupos nuevos. Sin documento abierto, estos dos settings solo afectan al próximo `createCore`.
+
+Sin documento abierto, `nerEnabled`/`ocrLanguages` se persisten y aplican al **próximo `createCore`** — que desde PR16.5 es un momento real (recarga de la pestaña), no una promesa vacía.
 
 **`performancePreset` con documento abierto**: **no** dispara `reanalyze` (no afecta resultados de detección, solo tamaños de pool) — el cambio queda persistido (`settings.persist()`) y aplica recién al próximo documento (hint visible en el `SettingsDialog`); efecto inmediato exigiría redimensionar pools en caliente, fuera de alcance MVP (ADR-038 §7, Q3).
 

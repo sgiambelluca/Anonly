@@ -222,13 +222,13 @@ Fixtures pesados (> 5 MB) vía Git LFS o descargados en `postinstall` con hash v
 ### 11.3 Escenarios críticos E2E
 
 1. Cargar PDF con texto → ver grupos aparecer → editar modo de un grupo → exportar → descargar.
-2. Cargar PDF escaneado → ver progreso OCR → ver grupos → exportar.
-3. Cargar PDF protegido → UI pide password → reintenta → success.
+2. Cargar PDF escaneado → ver progreso OCR → ver grupos → exportar. **Fixture (ADR-048 §2)**: se genera en el browser dentro del propio spec (rasterizar `text-10p.pdf` con el `pdfjs-dist` que la app ya carga + re-armar con pdf-lib), no como binario del repo.
+3. Cargar PDF protegido → UI pide password → reintenta → success. **Fixture (ADR-048 §7 punto 1)**: `protected.pdf` es el único fixture **commiteado** — pdf-lib no encripta, así que se genera una sola vez con `qpdf --encrypt test1234 test1234 256 -- text-10p.pdf protected.pdf`.
 4. Cargar PDF enorme → cancelar a mitad → verificar cese de CPU < 200 ms.
 5. Editar grupo mientras NER sigue corriendo → verificar que no se pierden ediciones.
 6. Cargar PDF corrupto → verificar error tipado y mensaje claro.
-7. Abrir y cerrar 10 documentos consecutivos → verificar que la memoria regresa al baseline.
-8. Cargar PDF sin NER activado → verificar que solo Regex detecta.
+7. Abrir y cerrar 10 documentos consecutivos → verificar que la memoria regresa al baseline. **Reparto (ADR-048 §3)**: el E2E ejercita el **flujo** (cada `DOCUMENT_CLOSED` deja estado limpio —sin documento activo, sin preview, sin blob URLs vivos— y el ciclo 10 se comporta como el 1); la **medición de bytes contra baseline** es del gate `test:leak` (`tests/leak/`, Hito 11), porque `performance.measureUserAgentSpecificMemory()` exige `crossOriginIsolated` (COOP/COEP), headers que la app de producción no lleva.
+8. Cargar PDF sin NER activado → verificar que solo Regex detecta. **Desbloqueado por PR16.5** (ADR-048 §7 punto 2): hasta entonces no existía forma de desactivar NER antes de la primera importación (`App.tsx` llamaba `initCore()` sin derivar overrides de `settings.store`) y el spec estaba en `test.fixme` desde PR10. PR17 lo saca del `fixme`.
 9. Activar NER en runtime (`reanalyze`, ADR-038) → verificar que se descarga el modelo y reanaliza **preservando las ediciones previas del usuario**: un grupo que el usuario deshabilitó sigue deshabilitado, una regla creada sigue aplicando, un merge manual persiste.
 10. Fusionar y dividir grupos → verificar índices y reemplazos.
 11. Cambiar el zoom (`ZoomControls`, ADR-037) → verificar `PREVIEW_UPDATED` con la nueva escala y reemplazo del bitmap CSS transitorio por el bitmap nítido re-renderizado.
@@ -246,7 +246,7 @@ Fixtures pesados (> 5 MB) vía Git LFS o descargados en `postinstall` con hash v
 | Contract (aislado) | `pnpm test:contract` | cualquier contrato rojo | activo (local / pre-PR) |
 | Snapshot (aislado) | `pnpm test:snapshot` | cualquier drift | activo (local / pre-PR) |
 | Integration | `pnpm test:integration` | cualquier par crítico rojo (pares mínimos en ADR-034 §6) | auto-activa al existir `tests/integration/` (Hito 9); también corre dentro de `pnpm test` |
-| E2E | `pnpm test:e2e` | cualquier escenario crítico de §11.3 rojo | auto-activa al existir `tests/e2e/` (Hito 10) |
+| E2E | `pnpm assets:mirror && pnpm test:e2e` | cualquier escenario crítico de §11.3 rojo | auto-activa al existir `tests/e2e/` (Hito 10). **`pnpm assets:mirror` es prerequisito obligatorio** (ADR-048 §1): los assets first-party no se commitean (ADR-018) y sin ellos Vite ni siquiera resuelve el `import ?url` de `src/assets/onnxruntime/` — se cae la suite entera, no solo los escenarios de NER/OCR. En CI: paso previo al `pnpm test:e2e` del job `test-e2e`, con cache por hash de `assets.lock.json` |
 | Performance | `pnpm test:perf` | métrica gate de `00_Project_Vision.md` §7 fuera de target ± 10% | auto-activa al existir `tests/perf/` (Hito 11) |
 | Stress | `pnpm test:stress` | documento grande excede presupuesto de memoria/tiempo | auto-activa al existir `tests/stress/` (Hito 11) |
 | Leak | `pnpm test:leak` | memoria no regresa al baseline tras 10 open/close | auto-activa al existir `tests/leak/` (Hito 11) |

@@ -2,7 +2,7 @@
 
 # ADR-041 — `fuseOcrPage` como función pura: PdfEngine sin estado por documento
 
-- **Estado**: Accepted (la decisión pre-PR13 que §5 dejó asignada al planificador — reparto host/worker del estado de `render-engine` — quedó tomada en ADR-043, 2026-07-22)
+- **Estado**: Accepted (la decisión pre-PR13 que §5 dejó asignada al planificador — reparto host/worker del estado de `render-engine` — quedó tomada en ADR-043, 2026-07-22. La auditoría de §5 recibió un **matiz** en ADR-046 §9, 2026-07-24: mira estado retenido por documento, no el reparto de eventos/retry a través de la frontera — ver la nota de la tabla)
 - **Fecha**: 2026-07-22
 - **Decidido por**: El humano, sobre el informe de ambigüedad bloqueante que el implementador levantó al arrancar PR12 (PdfWorker) — se detuvo sin tocar archivos por la regla de `ai/AI_Development_Guide.md` §5. El registro completo del informe está en `roadmap/Hito10_Observaciones_Revision.md`, entrada "PR12".
 - **Relacionado con**: ADR-013 (envolver `process()` en worker), ADR-014 (fusión OCR→PDF mediada por el Orchestrator — la mediación se **preserva**, cambia la forma de la invocación), ADR-020 (§6 guard de `requiresOCR` — se preserva en la función pura; **§7 `releaseDocument` superseded** por este ADR), ADR-021 (§7 wiring `DOCUMENT_CLOSED`→`releaseDocument` — superseded en lo que respecta a Pdf), ADR-035 (pools in-process), ADR-036 (§4 `WorkerJobType` sin cambios — este ADR lo **ratifica**), ADR-038 (§8 tabla de PRs: PR12–16; contexto item 5: re-fusión idempotente — se preserva)
@@ -56,8 +56,10 @@ El handler de `OCR_PAGE_FINISHED` lee las `Word[]` de `ctx.cache` (ADR-014, sin 
 | `pdf-engine` (PR12) | `Map<string, Document>` — eliminado por este ADR | Resuelto acá |
 | `render-engine` (PR13) | `documents` (`PDFDocumentProxy` — cubierto por el broadcast `load-document`, ADR-036 §4), **más** `cache` LRU, `groupOverrides`, `lastAnonymizedInputs`/`lastOriginalInputs`, `pageGroupIndex`, `pendingRenders` (`render.engine.ts`) | **Bloqueante**: requiere decisión propia de reparto host/worker de ese estado **antes** de arrancar PR13 (ADR nuevo del planificador). No se decide acá. |
 | `ocr-engine` (PR14) | Ninguno (verificado; las `Word[]` van a `ctx.cache` en el lado host — ADR-014 §1) | Libre |
-| `ner-engine` (PR15) | Ninguno por documento; el modelo lazy es estado global por proceso, correcto por-worker (ADR-038 contexto item 4) | Libre |
+| `ner-engine` (PR15) | Ninguno por documento; el modelo lazy es estado global por proceso, correcto por-worker (ADR-038 contexto item 4) | Libre **en cuanto a estado**; el reparto de eventos/retry sí requirió decisión propia → **ADR-046** (ver nota abajo) |
 | `export-engine` (PR16) | Ninguno (verificado) | Libre |
+
+> **Alcance de esta auditoría (matiz agregado por ADR-046 §9, 2026-07-24)**: la tabla audita **estado retenido por documento**, que es lo que destapó PR12. No audita el otro eje que terminó bloqueando PR13, PR14 y PR15: **de qué lado de la frontera se emiten los eventos observables y dónde vive el loop de retry**. Un motor puede ser "Libre" acá y aun así necesitar un ADR de reparto host/worker — le pasó a `ocr-engine` (ADR-045) y a `ner-engine` (ADR-046). Para `export-engine` (PR16) ese segundo eje ya está resuelto de antemano por ADR-036 §1 (worker único propiedad del lado host; `ExportEngine.export()` dirige el loop y emite `EXPORT_*` en host).
 
 ### 6. Tests de PR12
 

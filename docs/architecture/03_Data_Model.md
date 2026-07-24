@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=modelo-de-datos | dependencias=01_Technical_Architecture_Document.md,core/Contracts.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md | audiencia=IA+humanos | fase=1 (§18 actualizado en fase 10: OcrPagePayload.imageData→ImageData y payloads de transporte LoadDocument/RasterizePage/ExportSave, ADR-036 §4) -->
+<!-- CONTEXT: scope=modelo-de-datos | dependencias=01_Technical_Architecture_Document.md,core/Contracts.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-043-RenderEngine-Reparto-Host-Worker-Kernel.md,adr/ADR-046-NerEngine-Pool-Propia-Kernel-Puro.md | audiencia=IA+humanos | fase=1 (§18 actualizado en fase 10: OcrPagePayload.imageData→ImageData y payloads de transporte LoadDocument/RasterizePage/ExportSave, ADR-036 §4; UnloadDocumentPayload, ADR-043 §4; NerPagePayload por batch + NerKernelSpan/NerKernelProgress, ADR-046) -->
 
 # Anonly — Modelo de Datos (TAD bloque 5)
 
@@ -518,11 +518,18 @@ export interface OcrPagePayload {
   readonly languages: ReadonlyArray<string>;
 }
 
+// ADR-046 §3/§5: `text` es el texto de UN BATCH de NerConfig.batchSize palabras
+// (la partición la hace NerEngine host-side, que es quien tiene las Word[] para
+// el bbox; ADR-024 §2). `quantization` y `wasmPaths` viajan en el job porque el
+// kernel es quien carga el modelo y configura Transformers.js contra el origen
+// propio (ADR-039), y WorkerPool todavía no transporta INIT con la config real.
 export interface NerPagePayload {
   readonly documentId: string;
   readonly pageIndex: number;
   readonly text: string;
   readonly modelId: string;
+  readonly quantization: "q8" | "q4" | "f32";
+  readonly wasmPaths?: string | NerWasmPaths;
 }
 
 export interface RenderPagePayload {
@@ -536,11 +543,18 @@ export interface RenderPagePayload {
   readonly imageFormat?: "png" | "jpeg";
 }
 
+// ADR-047 §3: la forma previa ({ documentId, pageIndex, pageImage, metadata })
+// era inejecutable — sin `imageFormat` el worker no sabe si llamar embedJpg o
+// embedPng, y sin las dimensiones en puntos PDF no puede crear la página. La
+// `metadata` se mueve a ExportSavePayload, que es donde pdf-lib la aplica (una
+// vez, al final) en vez de viajar repetida en cada página.
 export interface ExportPagePayload {
   readonly documentId: string;
   readonly pageIndex: number;
-  readonly pageImage: ArrayBuffer;
-  readonly metadata: ExportMetadata;
+  readonly pageImage: ArrayBuffer;          // EncodedPageImage.bytes, transferido
+  readonly imageFormat: "png" | "jpeg";
+  readonly pageWidthPt: number;             // document.pages[i].width
+  readonly pageHeightPt: number;            // document.pages[i].height
 }
 ```
 
@@ -571,11 +585,36 @@ export interface RasterizePagePayload {
   readonly scale: number;
 }
 
-// Job final del ExportWorker bajo jobType "export-page": su COMPLETED devuelve
-// el ArrayBuffer del PDF transferido; DISPOSE solo libera (05 §7.5, ADR-036 §4).
+// Job final del ExportWorker bajo jobType "export-page": aplica la metadata (ya
+// sanitizada en host, ADR-047 §1) y su COMPLETED devuelve el ArrayBuffer del PDF
+// transferido; DISPOSE solo libera (05 §7.5, ADR-036 §4). El entry-point
+// discrimina append vs save por forma: `"pageImage" in payload` (ADR-047 §3).
 export interface ExportSavePayload {
   readonly documentId: string;
+  readonly metadata: ExportMetadata;
 }
+
+// Salida del kernel del NerWorker (COMPLETED { spans }, ADR-046 §1): spans de
+// entidad ya agregados desde los tokens BIO, con offsets relativos al texto del
+// batch. Sin bbox, sin wordSpan y sin id: el mapeo a Occurrence lo hace
+// NerEngine en el host, que es quien tiene las Word[] de la página.
+export interface NerKernelSpan {
+  readonly entityType: EntityType;
+  readonly value: string;
+  readonly normalizedValue: string;
+  readonly confidence: number;              // ∈ [0,1], promedio de los tokens del span
+  readonly startIndex: number;              // relativo al texto del batch
+  readonly endIndexExclusive: number;
+}
+
+// Ciclo de vida del modelo NER reportado por el kernel en PROGRESS.partial
+// (ADR-046 §4): telemetría de transporte, NO eventos de dominio. El motor la
+// traduce en host a NER_MODEL_LOADING / NER_MODEL_READY (uno por instancia) /
+// logger.warn. El fraction de descarga viaja en PROGRESS.progress ∈ [0,1].
+export type NerKernelProgress =
+  | { readonly phase: "model-loading"; readonly modelId: string }
+  | { readonly phase: "model-ready"; readonly modelId: string }
+  | { readonly phase: "model-load-retry"; readonly modelId: string; readonly reason: string };
 ```
 
 Ver `05_Worker_Architecture.md` para el detalle de cada job.
