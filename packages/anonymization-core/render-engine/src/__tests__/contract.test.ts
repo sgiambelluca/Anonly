@@ -1,3 +1,4 @@
+import { createEventBus } from "@anonly/event-system";
 import {
   EngineDisposedError,
   EngineEvents,
@@ -152,6 +153,24 @@ describe("RenderEngine — contract tests", () => {
         durationMs: expect.any(Number),
       }),
     );
+  });
+
+  // ─── ADR-044: retiro del delta render por eventos de Grouping ───
+
+  it("no subscriptions on grouping channel", async () => {
+    // ADR-044 (reemplaza a "delta render only re-renders affected pages"):
+    // el re-render por cambio de grupo lo media el Orchestrator con
+    // invocaciones directas de renderPage; este motor deja de escuchar
+    // GROUP_REPLACEMENT_CHANGED/GROUP_TOGGLED (la matriz de
+    // `04_Event_System.md` §11 lo cubre además desde el lado del Orchestrator).
+    const bus = createEventBus({ logger: ctx.logger });
+    await engine.init(createEngineContext({ bus }));
+
+    expect(bus.subscriberCount(EventChannel.Grouping, EngineEvents.GROUP_REPLACEMENT_CHANGED)).toBe(
+      0,
+    );
+    expect(bus.subscriberCount(EventChannel.Grouping, EngineEvents.GROUP_TOGGLED)).toBe(0);
+    expect(bus.channelCount()).toBe(1); // solo EventChannel.UI (RENDER_REQUESTED)
   });
 
   it("dispose destroys loaded PDFDocumentProxies", async () => {

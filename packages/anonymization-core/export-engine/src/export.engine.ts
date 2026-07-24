@@ -94,7 +94,12 @@ function sanitizeMetadataString(value: string): string {
 }
 
 // Nota de implementación 1 (cabecera del archivo): originalValue = canonicalValue.
-function buildPageReplacements(
+// Exportada desde index.ts por ADR-044 §4: única excepción sancionada a "index.ts
+// exporta solo la clase/tipos/errores" (Export_Engine.md §15.16) — el façade
+// (Orchestrator) la importa para computar los reemplazos del preview mediado
+// con la MISMA semántica que el export (grupos → Replacement[] por página,
+// filtrando enabled === false).
+export function buildPageReplacements(
   pageIndex: number,
   groups: ReadonlyArray<EntityGroup>,
 ): ReadonlyArray<Replacement> {

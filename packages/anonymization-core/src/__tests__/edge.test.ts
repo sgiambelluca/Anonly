@@ -19,6 +19,7 @@ import {
   createDeferred,
   createDocument,
   createEngineConfig,
+  createEntityGroup,
   createFakeWorker,
   createImportInput,
   createMockEngines,
@@ -26,6 +27,7 @@ import {
   createPage,
   createPdfEngineOutput,
   createRealBus,
+  createRenderPageOutput,
   wireHappyPathSpies,
 } from "./fixtures/test-helpers.js";
 
@@ -756,6 +758,97 @@ describe("Orchestrator — edge cases", () => {
       expect(engines.grouping.finishSession).toHaveBeenCalled();
     });
 
+    // ─── ADR-044 §3, caso 26: el seed corre también en la vía suprimida ───
+
+    it("seed also runs on suppressed GROUPING_FINISHED after cancelled reanalyze", async () => {
+      const { bus, engines, orchestrator } = makeOrchestrator({ nerEnabled: false });
+      await orchestrator.importDocument(createImportInput());
+      expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+
+      const group = createEntityGroup({
+        id: "group-cancelled-reanalyze",
+        members: [
+          {
+            occurrenceId: "occ-1",
+            pageIndex: 0,
+            bbox: { x: 0, y: 0, width: 1, height: 1 },
+            source: DetectionSource.Regex,
+          },
+        ],
+      });
+      vi.spyOn(engines.grouping, "getSnapshot").mockImplementation((docId) => ({
+        documentId: docId,
+        groups: [group],
+        conflicts: [],
+        rules: [],
+      }));
+
+      const deferred = createDeferred<never>();
+      (engines.ner.processPages as ReturnType<typeof vi.fn>).mockImplementation(
+        (_inputs, ctx: { abortSignal: AbortSignal }) => {
+          ctx.abortSignal.addEventListener("abort", () => {
+            deferred.reject(new CancelledError("doc-1"));
+          });
+          return deferred.promise;
+        },
+      );
+
+      const readySpy = vi.fn();
+      bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_READY, readySpy);
+      // v1.5.1: el mock replica el guard real de renderPage (rechaza con
+      // CancelledError si la señal ya está abortada, `render.engine.ts`
+      // renderPageInternal) — sin esto, el test pasaría de forma vacía
+      // incluso si el seed reusara la señal (ya abortada) del documento en
+      // vez de la señal propia que exige el fix (Orchestrator.md v1.5.1).
+      vi.spyOn(engines.render, "renderPage").mockImplementation((input, ctx) => {
+        if (ctx.abortSignal.aborted) {
+          return Promise.reject(new CancelledError(input.documentId));
+        }
+        return Promise.resolve(
+          createRenderPageOutput({
+            documentId: input.documentId,
+            pageIndex: input.pageIndex,
+            kind: input.kind,
+          }),
+        );
+      });
+
+      const reanalyzePromise = orchestrator.reanalyze("doc-1", { ner: { enabled: true } });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      await orchestrator.cancel("doc-1");
+      await expect(reanalyzePromise).resolves.toBeUndefined();
+
+      expect(readySpy).not.toHaveBeenCalled(); // PIPELINE_READY derivado, suprimido (ADR-038 §6)
+      expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+      // El seed del preview (ADR-044) corre igual en la vía suprimida por la
+      // cancelación: no depende de que PIPELINE_READY llegue a emitirse.
+      expect(engines.render.renderPage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          documentId: "doc-1",
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+        }),
+        expect.anything(),
+      );
+
+      // v1.5.1: el invariante real que este caso prueba — el seed usa una
+      // señal PROPIA, nunca la del documento (ya abortada acá por
+      // cancelReanalyze, ADR-038 §6). `toHaveBeenCalledWith` de arriba no
+      // alcanza para probarlo (pasaría igual aunque el mock hubiera
+      // rechazado con CancelledError, ya que solo mira los argumentos, no la
+      // resolución) — se toma el `ctx` real recibido y se verifica
+      // explícitamente que su `abortSignal` NO está abortada.
+      const renderPageCalls = (engines.render.renderPage as ReturnType<typeof vi.fn>).mock.calls;
+      const seedCall = renderPageCalls.find(
+        (call) => call[0]?.documentId === "doc-1" && call[0]?.pageIndex === 0,
+      );
+      expect(seedCall).toBeDefined();
+      expect(seedCall?.[1]?.abortSignal.aborted).toBe(false);
+    });
+
     it("case 22: reanalyze can run again after a cancelled reanalyze (AbortController reset)", async () => {
       const bus = createRealBus();
       const engines = createMockEngines();
@@ -824,6 +917,206 @@ describe("Orchestrator — edge cases", () => {
       // trabado en OCRing en vez de volver a Ready.
       await orchestrator.reanalyze("doc-1", { ocr: { languages: ["eng"] } });
       expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    });
+  });
+
+  // ─── Mediación grupos→Render del preview (ADR-044, §13 caso 27) ───
+
+  it("toggle off then on restores the replacement in preview", async () => {
+    // Bug 2 de ADR-044: el flush recompone del snapshot completo en cada
+    // edición (no de un input previamente filtrado), así que un toggle
+    // off→on restaura el reemplazo por construcción.
+    const { bus, engines, orchestrator } = makeOrchestrator();
+    await orchestrator.importDocument(createImportInput());
+
+    const baseGroup = createEntityGroup({
+      id: "group-toggle",
+      members: [
+        {
+          occurrenceId: "occ-1",
+          pageIndex: 0,
+          bbox: { x: 0, y: 0, width: 1, height: 1 },
+          source: DetectionSource.Regex,
+        },
+      ],
+    });
+
+    // Paso 1: grupo creado habilitado -> el flush pinta el reemplazo.
+    vi.spyOn(engines.grouping, "getSnapshot").mockImplementation((docId) => ({
+      documentId: docId,
+      groups: [{ ...baseGroup, enabled: true }],
+      conflicts: [],
+      rules: [],
+    }));
+    (engines.render.renderPage as ReturnType<typeof vi.fn>).mockClear();
+    bus.emit(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_CREATED, {
+      documentId: "doc-1",
+      group: { ...baseGroup, enabled: true },
+    });
+    await vi.waitFor(() => {
+      expect(engines.render.renderPage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pageIndex: 0,
+          replacements: [expect.objectContaining({ groupId: "group-toggle" })],
+        }),
+        expect.anything(),
+      );
+    });
+
+    // Paso 2: toggle off -> el flush recomputa con replacements: [].
+    vi.spyOn(engines.grouping, "getSnapshot").mockImplementation((docId) => ({
+      documentId: docId,
+      groups: [{ ...baseGroup, enabled: false }],
+      conflicts: [],
+      rules: [],
+    }));
+    (engines.render.renderPage as ReturnType<typeof vi.fn>).mockClear();
+    bus.emit(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_UPDATED, {
+      documentId: "doc-1",
+      group: { ...baseGroup, enabled: false },
+      changes: ["enabled"],
+    });
+    await vi.waitFor(() => {
+      expect(engines.render.renderPage).toHaveBeenCalledWith(
+        expect.objectContaining({ pageIndex: 0, replacements: [] }),
+        expect.anything(),
+      );
+    });
+
+    // Paso 3 (bug 2): toggle back on -> el reemplazo se restaura porque el
+    // flush recompone del snapshot vigente, no de un input filtrado previo.
+    vi.spyOn(engines.grouping, "getSnapshot").mockImplementation((docId) => ({
+      documentId: docId,
+      groups: [{ ...baseGroup, enabled: true }],
+      conflicts: [],
+      rules: [],
+    }));
+    (engines.render.renderPage as ReturnType<typeof vi.fn>).mockClear();
+    bus.emit(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_UPDATED, {
+      documentId: "doc-1",
+      group: { ...baseGroup, enabled: true },
+      changes: ["enabled"],
+    });
+    await vi.waitFor(() => {
+      expect(engines.render.renderPage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pageIndex: 0,
+          replacements: [expect.objectContaining({ groupId: "group-toggle" })],
+        }),
+        expect.anything(),
+      );
+    });
+  });
+
+  it("group edit during Exporting flushes preview render", async () => {
+    // Caso 15/27: la edición fluye a Grouping sin pasar por el pipeline,
+    // incluso durante Exporting — el flush del preview corre igual.
+    const { bus, engines, orchestrator } = makeOrchestrator();
+    await orchestrator.importDocument(createImportInput());
+
+    const deferred = createDeferred<never>();
+    (engines.export.export as ReturnType<typeof vi.fn>).mockReturnValue(deferred.promise);
+
+    const options = {
+      imageFormat: "jpeg" as const,
+      jpegQuality: 0.85,
+      dpi: 150,
+      includeOriginalMetadata: false as const,
+      filename: "out.pdf",
+    };
+    bus.emit(EventChannel.UI, EngineEvents.EXPORT_REQUESTED, { documentId: "doc-1", options });
+    await vi.waitFor(() =>
+      expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Exporting),
+    );
+
+    const group = createEntityGroup({
+      id: "group-exporting-edit",
+      members: [
+        {
+          occurrenceId: "occ-1",
+          pageIndex: 0,
+          bbox: { x: 0, y: 0, width: 1, height: 1 },
+          source: DetectionSource.Regex,
+        },
+      ],
+    });
+    vi.spyOn(engines.grouping, "getSnapshot").mockImplementation((docId) => ({
+      documentId: docId,
+      groups: [group],
+      conflicts: [],
+      rules: [],
+    }));
+    (engines.render.renderPage as ReturnType<typeof vi.fn>).mockClear();
+
+    bus.emit(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_UPDATED, {
+      documentId: "doc-1",
+      group,
+      changes: ["replacementMode"],
+    });
+
+    await vi.waitFor(() => {
+      expect(engines.render.renderPage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          documentId: "doc-1",
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+        }),
+        expect.anything(),
+      );
+    });
+
+    deferred.reject(new Error("cleanup"));
+    await vi.waitFor(() => expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Failed));
+  });
+
+  it("seed render failure warns without PIPELINE_FAILED", async () => {
+    // El preview mediado es best-effort (ADR-044 §3): un fallo de render del
+    // seed nunca escala a PIPELINE_FAILED.
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    wireHappyPathSpies(engines, bus);
+
+    const group = createEntityGroup({
+      id: "group-seed-fail",
+      members: [
+        {
+          occurrenceId: "occ-1",
+          pageIndex: 0,
+          bbox: { x: 0, y: 0, width: 1, height: 1 },
+          source: DetectionSource.Regex,
+        },
+      ],
+    });
+    vi.spyOn(engines.grouping, "getSnapshot").mockImplementation((docId) => ({
+      documentId: docId,
+      groups: [group],
+      conflicts: [],
+      rules: [],
+    }));
+    vi.spyOn(engines.render, "renderPage").mockRejectedValue(new Error("seed render boom"));
+
+    const logger = createMockLogger();
+    const failedSpy = vi.fn();
+    bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_FAILED, failedSpy);
+
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger,
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    expect(failedSpy).not.toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining("preview"),
+        expect.objectContaining({ documentId: "doc-1" }),
+      );
     });
   });
 

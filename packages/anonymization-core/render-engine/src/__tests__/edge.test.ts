@@ -79,39 +79,37 @@ describe("RenderEngine — edge cases", () => {
   });
 
   it("disabled group's occurrences appear as original text", async () => {
+    // ADR-044: RenderEngine ya no filtra grupos deshabilitados por sí mismo
+    // (el delta render por GROUP_TOGGLED/GROUP_REPLACEMENT_CHANGED se retiró,
+    // junto con `Replacement`, que nunca tuvo un campo `enabled`). El filtro
+    // vive en el caller autoritativo (`buildPageReplacements`, export-engine,
+    // invocado por el Orchestrator — Render_Engine.md §13 caso 2): un grupo
+    // deshabilitado simplemente no llega en `replacements`. Se verifica acá
+    // que ese grupo ausente no deja ningún rastro pintado, mientras uno
+    // presente sí se pinta.
     const docId = "doc-toggle-disabled";
     vi.mocked(getDocument).mockReturnValue(
       mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
     );
-    const realCtx = createEngineContextWithRealBus();
-    await engine.init(realCtx);
+    await engine.init(ctx);
     await engine.loadDocument(docId, createValidBuffer());
 
-    await engine.renderPage(
+    const output = await engine.renderPage(
       createRenderPageInput({
         documentId: docId,
         pageIndex: 0,
         kind: "anonymized",
         mode: "preview",
-        replacements: [makeReplacement({ groupId: "g1", replacementValue: "[DNI 01]" })],
+        replacements: [makeReplacement({ groupId: "g-enabled", replacementValue: "[DNI 01]" })],
       }),
-      realCtx,
+      ctx,
     );
-    resetCreatedCanvases();
-
-    realCtx.bus.emit(EventChannel.Grouping, EngineEvents.GROUP_TOGGLED, {
-      documentId: docId,
-      groupId: "g1",
-      enabled: false,
-    });
-
-    await vi.waitFor(() => {
-      expect(getCreatedCanvases().length).toBeGreaterThan(0);
-    });
 
     const [canvas] = getCreatedCanvases();
     const fillTextCalls = canvas!.calls.filter((c) => c.op === "fillText");
-    expect(fillTextCalls).toHaveLength(0);
+    expect(fillTextCalls).toHaveLength(1);
+    expect(fillTextCalls[0]!.args[0]).toBe("[DNI 01]"); // solo el grupo habilitado se pinta
+    expect(output.kind).toBe("anonymized");
   });
 
   it("redact mode paints opaque black over bbox", async () => {
@@ -493,7 +491,6 @@ describe("RenderEngine — edge cases", () => {
     await engine.loadDocument(docId, createValidBuffer());
 
     expect(engine["cache"].size).toBe(0);
-    expect(engine["pageGroupIndex"].size).toBe(0);
     expect(engine["lastAnonymizedInputs"].size).toBe(0);
     expect(engine["lastOriginalInputs"].size).toBe(0);
   });
@@ -520,7 +517,6 @@ describe("RenderEngine — edge cases", () => {
     await engine.unloadDocument(docId);
 
     expect(engine["cache"].size).toBe(0);
-    expect(engine["pageGroupIndex"].size).toBe(0);
     expect(engine["lastOriginalInputs"].size).toBe(0);
   });
 
@@ -547,41 +543,6 @@ describe("RenderEngine — edge cases", () => {
 
     await engine.unloadDocument(docId);
     expect(engine["pendingRenders"].size).toBe(0);
-  });
-
-  it("GROUP_REPLACEMENT_CHANGED for unloaded document warns and no-ops", async () => {
-    const realCtx = createEngineContextWithRealBus();
-    await engine.init(realCtx);
-    const warnSpy = vi.spyOn(realCtx.logger, "warn");
-
-    realCtx.bus.emit(EventChannel.Grouping, EngineEvents.GROUP_REPLACEMENT_CHANGED, {
-      documentId: "doc-unloaded-2",
-      groupId: "g1",
-      mode: ReplacementMode.Redact,
-      value: "",
-    });
-
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("doc-unloaded-2"),
-      expect.objectContaining({ documentId: "doc-unloaded-2" }),
-    );
-  });
-
-  it("GROUP_TOGGLED for unloaded document warns and no-ops", async () => {
-    const realCtx = createEngineContextWithRealBus();
-    await engine.init(realCtx);
-    const warnSpy = vi.spyOn(realCtx.logger, "warn");
-
-    realCtx.bus.emit(EventChannel.Grouping, EngineEvents.GROUP_TOGGLED, {
-      documentId: "doc-unloaded-3",
-      groupId: "g1",
-      enabled: false,
-    });
-
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("doc-unloaded-3"),
-      expect.objectContaining({ documentId: "doc-unloaded-3" }),
-    );
   });
 
   // ─── ADR-034 §1: rasterizePage validaciones ───
@@ -831,8 +792,13 @@ describe("RenderEngine — edge cases", () => {
     expect(output.encoded).toBeDefined(); // mode "full" → bytes para el export (ADR-034 §3).
   });
 
-  it("delta render ignores supersede entry at another scale (group change is not lost)", async () => {
-    const docId = "doc-delta-immune";
+  it("direct preview render (mediated) ignores supersede entry at another scale (group change is not lost)", async () => {
+    // Reformulado por ADR-044 (el delta render por GROUP_TOGGLED se retira):
+    // el re-render por cambio de grupo lo dispara ahora el Orchestrator con
+    // una invocación DIRECTA de renderPage (mode "preview", reemplazos del
+    // snapshot) — mismo camino que el export, inmune al supersede de
+    // RENDER_REQUESTED (Render_Engine.md §13 caso 21).
+    const docId = "doc-mediated-immune";
     vi.mocked(getDocument).mockReturnValue(
       mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
     );
@@ -840,8 +806,8 @@ describe("RenderEngine — edge cases", () => {
     await engine.init(realCtx);
     await engine.loadDocument(docId, createValidBuffer());
 
-    // Render directo previo: recuerda el input de la página (escala 2) y
-    // construye el índice pageIndex → groupIds para el delta render.
+    // Render mediado previo (equivalente al seed/flush del Orchestrator):
+    // página a escala 2 con un reemplazo habilitado.
     await engine.renderPage(
       createRenderPageInput({
         documentId: docId,
@@ -860,22 +826,28 @@ describe("RenderEngine — edge cases", () => {
     engine["registerPendingRender"](docId, 0, "anonymized", 1);
     resetCreatedCanvases();
 
-    // GROUP_TOGGLED → requestDeltaRender → renderPage directo con el input
-    // recordado (escala 2). Antes del fix, la entrada a escala 1 lo cancelaba
-    // espuriamente y el cambio de grupo se perdía visualmente (observación
-    // PR4, Hito10_Observaciones_Revision.md).
-    realCtx.bus.emit(EventChannel.Grouping, EngineEvents.GROUP_TOGGLED, {
-      documentId: docId,
-      groupId: "g1",
-      enabled: false,
-    });
+    // Invocación directa mediada (ADR-044 §Decisión 1/3): un cambio de grupo
+    // (deshabilitar g1) recomputa `replacements: []` desde el snapshot de
+    // Grouping y vuelve a invocar renderPage directo, a la MISMA escala (2)
+    // que ya tenía la página. Antes del fix (hallazgo PR4), la entrada de
+    // supersede residual a escala 1 lo habría cancelado espuriamente (caso
+    // 21) y el cambio de grupo se hubiera perdido visualmente.
+    await engine.renderPage(
+      createRenderPageInput({
+        documentId: docId,
+        pageIndex: 0,
+        kind: "anonymized",
+        mode: "preview",
+        scale: 2,
+        replacements: [], // g1 deshabilitado: ya filtrado por el caller (buildPageReplacements)
+      }),
+      realCtx,
+    );
 
-    await vi.waitFor(() => {
-      expect(getCreatedCanvases().length).toBeGreaterThan(0);
-    });
     const [canvas] = getCreatedCanvases();
-    // Grupo deshabilitado → sin texto de reemplazo (§13 caso 2): el delta
-    // render corrió de verdad y aplicó el toggle.
+    // Grupo deshabilitado → sin texto de reemplazo (§13 caso 2): la
+    // invocación directa corrió de verdad (inmune al supersede) y aplicó el
+    // cambio.
     expect(canvas!.calls.filter((c) => c.op === "fillText")).toHaveLength(0);
   });
 });

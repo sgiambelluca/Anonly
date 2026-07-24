@@ -6,6 +6,7 @@ import { PdfEngine } from "@anonly/pdf-engine";
 import { RegexEngine } from "@anonly/regex-engine";
 import { RenderEngine } from "@anonly/render-engine";
 import {
+  DetectionSource,
   EngineEvents,
   EventChannel,
   PipelineStage,
@@ -21,6 +22,7 @@ import { PipelineOrchestrator } from "../orchestrator.js";
 import {
   createDocument,
   createEngineConfig,
+  createEntityGroup,
   createImportInput,
   createMockEngines,
   createMockLogger,
@@ -309,15 +311,14 @@ describe("Orchestrator — contract tests", () => {
     expect(bus.subscriberCount(EventChannel.Ner, EngineEvents.NER_FINISHED)).toBeGreaterThan(0);
     expect(bus.subscriberCount(EventChannel.UI, EngineEvents.DOCUMENT_CLOSED)).toBeGreaterThan(0);
 
-    // Render: RENDER_REQUESTED (ui) + GROUP_REPLACEMENT_CHANGED/GROUP_TOGGLED (grouping).
+    // Render: solo RENDER_REQUESTED (ui) desde ADR-044 — GROUP_REPLACEMENT_CHANGED/
+    // GROUP_TOGGLED ya no tienen suscriptor en Render (retiro del delta render).
     await render.init(ctx);
     expect(bus.subscriberCount(EventChannel.UI, EngineEvents.RENDER_REQUESTED)).toBeGreaterThan(0);
-    expect(
-      bus.subscriberCount(EventChannel.Grouping, EngineEvents.GROUP_REPLACEMENT_CHANGED),
-    ).toBeGreaterThan(0);
-    expect(bus.subscriberCount(EventChannel.Grouping, EngineEvents.GROUP_TOGGLED)).toBeGreaterThan(
+    expect(bus.subscriberCount(EventChannel.Grouping, EngineEvents.GROUP_REPLACEMENT_CHANGED)).toBe(
       0,
     );
+    expect(bus.subscriberCount(EventChannel.Grouping, EngineEvents.GROUP_TOGGLED)).toBe(0);
 
     // Orchestrator: todas las filas de §8 del spec.
     // eslint-disable-next-line @typescript-eslint/no-unused-vars -- construir alcanza para wireSubscriptions()
@@ -342,6 +343,17 @@ describe("Orchestrator — contract tests", () => {
     expect(bus.subscriberCount(EventChannel.Ner, EngineEvents.NER_FINISHED)).toBeGreaterThan(1); // grouping + orchestrator
     expect(
       bus.subscriberCount(EventChannel.Grouping, EngineEvents.GROUPING_FINISHED),
+    ).toBeGreaterThan(0);
+    // ADR-044: mediación grupos→Render del preview — únicamente el Orchestrator
+    // registra suscripción (Render ya no escucha el canal grouping, ver arriba).
+    expect(
+      bus.subscriberCount(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_CREATED),
+    ).toBeGreaterThan(0);
+    expect(
+      bus.subscriberCount(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_UPDATED),
+    ).toBeGreaterThan(0);
+    expect(
+      bus.subscriberCount(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_REMOVED),
     ).toBeGreaterThan(0);
     expect(bus.subscriberCount(EventChannel.Render, EngineEvents.PREVIEW_UPDATED)).toBeGreaterThan(
       0,
@@ -480,6 +492,118 @@ describe("Orchestrator — contract tests", () => {
     const call = (engines.export.export as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
     expect(call.renderPageProvider).toBeDefined();
     expect(typeof call.renderPageProvider.renderFull).toBe("function");
+  });
+
+  // ─── Mediación grupos→Render del preview (ADR-044, §13 casos 26-27) ───
+
+  it("GROUPING_FINISHED seeds anonymized preview with snapshot replacements", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    wireHappyPathSpies(engines, bus);
+
+    const group = createEntityGroup({
+      id: "group-seed",
+      members: [
+        {
+          occurrenceId: "occ-1",
+          pageIndex: 0,
+          bbox: { x: 1, y: 2, width: 3, height: 4 },
+          source: DetectionSource.Regex,
+        },
+      ],
+    });
+    vi.spyOn(engines.grouping, "getSnapshot").mockImplementation((docId) => ({
+      documentId: docId,
+      groups: [group],
+      conflicts: [],
+      rules: [],
+    }));
+
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+
+    expect(engines.render.renderPage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentId: "doc-1",
+        pageIndex: 0,
+        kind: "anonymized",
+        mode: "preview",
+        replacements: [
+          expect.objectContaining({
+            groupId: "group-seed",
+            occurrenceId: "occ-1",
+            pageIndex: 0,
+          }),
+        ],
+      }),
+      expect.anything(),
+    );
+  });
+
+  it("group events during detection accumulate without rendering", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    wireHappyPathSpies(engines, bus);
+
+    const group = createEntityGroup({
+      id: "group-mid-detect",
+      members: [
+        {
+          occurrenceId: "occ-1",
+          pageIndex: 0,
+          bbox: { x: 1, y: 2, width: 3, height: 4 },
+          source: DetectionSource.Regex,
+        },
+      ],
+    });
+    vi.spyOn(engines.grouping, "getSnapshot").mockImplementation((docId) => ({
+      documentId: docId,
+      groups: [group],
+      conflicts: [],
+      rules: [],
+    }));
+    vi.spyOn(engines.regex, "process").mockImplementation((input) => {
+      // caso 26: el evento llega durante Detecting (pre-Ready) — se acumula
+      // en el mapa retenido, sin disparar ningún render todavía.
+      bus.emit(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_CREATED, {
+        documentId: input.document.id,
+        group,
+      });
+      expect(engines.render.renderPage).not.toHaveBeenCalled();
+      bus.emit(EventChannel.Regex, EngineEvents.REGEX_FINISHED, {
+        documentId: input.document.id,
+        occurrenceCount: 1,
+        durationMs: 1,
+      });
+      return Promise.resolve({
+        documentId: input.document.id,
+        occurrenceCount: 1,
+        durationMs: 1,
+      });
+    });
+
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+
+    // El seed de GROUPING_FINISHED sí recoge el grupo acumulado durante detección.
+    expect(engines.render.renderPage).toHaveBeenCalledWith(
+      expect.objectContaining({ documentId: "doc-1", pageIndex: 0, kind: "anonymized" }),
+      expect.anything(),
+    );
   });
 
   // ─── dispose() global (caso 17) ───

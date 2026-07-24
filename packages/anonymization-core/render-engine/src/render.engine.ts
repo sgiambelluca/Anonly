@@ -1,14 +1,33 @@
 /**
  * @anonly/render-engine — `RenderEngine` (implementa `IEngine`).
  *
- * Fuente de verdad: docs/core/Render_Engine.md (v1.4.0, ADR-030, ADR-031,
- * ADR-034, ADR-037, ADR-043).
+ * Fuente de verdad: docs/core/Render_Engine.md (v1.5.0, ADR-030, ADR-031,
+ * ADR-034, ADR-037, ADR-043, ADR-044).
+ *
+ * ADR-044 (2026-07-23 — el motor deja de escuchar eventos de Grouping; el
+ * delta render por overrides se retira): los reemplazos autoritativos del
+ * preview `anonymized` llegan por invocación directa del Orchestrator
+ * (`renderPage({ kind: "anonymized", mode: "preview", replacements })`,
+ * computados desde el snapshot de Grouping — `Orchestrator.md` §2/§8/§13
+ * casos 26-27). Se retiran de este archivo: las suscripciones a
+ * `GROUP_REPLACEMENT_CHANGED`/`GROUP_TOGGLED`, el método público
+ * `requestDeltaRender` (sin callers externos), el estado `groupOverrides` +
+ * `applyReplacementOverrides`/`applyAnnotationOverrides`, y el índice
+ * `pageIndex → groupIds` (`pageGroupIndex`, cuyo único consumidor era
+ * `requestDeltaRender`). Motivo: el primer render `anonymized` salía con
+ * `replacements: []` y dejaba `pageGroupIndex` vacío para siempre (deadlock
+ * de arranque del preview), y el mecanismo de overrides era lossy (un toggle
+ * off→on no podía resucitar los `Replacement` filtrados del input recordado).
+ * `lastAnonymizedInputs`/`lastOriginalInputs` se conservan intactos
+ * (reconstrucción de `RENDER_REQUESTED`, nota 1 de abajo), igual que todo el
+ * reparto host/worker, supersede y cache de ADR-043/ADR-037. Canal
+ * escuchado: solo `EventChannel.UI` (`RENDER_REQUESTED`).
  *
  * ADR-043 (reparto host/worker, Hito 10 PR13): la clase `RenderEngine` queda
- * ENTERA host-side — todo su estado (`documents`, cache LRU, `groupOverrides`,
- * `lastAnonymizedInputs`/`lastOriginalInputs`, `pageGroupIndex`,
- * `pendingRenders`), sus suscripciones al bus, el supersede (ADR-037 §4), el
- * delta render y la emisión de eventos/blob URLs. El trabajo que SÍ cruza al
+ * ENTERA host-side — todo su estado (`documents`, cache LRU,
+ * `lastAnonymizedInputs`/`lastOriginalInputs`, `pendingRenders`), sus
+ * suscripciones al bus, el supersede (ADR-037 §4) y la emisión de
+ * eventos/blob URLs. El trabajo que SÍ cruza al
  * worker —rasterización pdfjs + composición OffscreenCanvas + encode— vive en
  * el **kernel** sin estado por documento (`./worker/kernel.ts`,
  * `05_Worker_Architecture.md` §7.4), invocado siempre a través de
@@ -46,14 +65,11 @@
  *    páginas visibles, así que el handler reconstruye ambos `RenderPageInput`
  *    por página a partir del último input recordado para esa página (o
  *    valores por defecto — `replacements: []` — si nunca se renderizó antes).
- * 2. El índice `pageIndex → groupIds` (§12) se construye a partir de
- *    `replacement.groupId`/`annotation.groupId` en cada `renderPage` con
- *    `mode: "preview"`. `requestDeltaRender` (§8, `GROUP_REPLACEMENT_CHANGED`
- *    / `GROUP_TOGGLED`) no recibe bbox/valor por evento (esos payloads solo
- *    llevan `{ groupId, mode, value }` / `{ groupId, enabled }`), así que el
- *    motor aplica el override sobre el último `Replacement`/`Annotation[]`
- *    conocido de cada página afectada (sin esto, el delta render no tendría
- *    ningún dato con el cual re-pintar).
+ * 2. (Retirado por ADR-044) El índice `pageIndex → groupIds` y el delta
+ *    render por overrides (`requestDeltaRender`, `groupOverrides`) vivían
+ *    acá; el re-render por cambio de grupo lo media ahora el Orchestrator con
+ *    reemplazos autoritativos del snapshot de Grouping (ver la nota ADR-044
+ *    de cabecera).
  * 3. La clave de cache es `documentId:pageIndex:kind:mode:scale:
  *    hash(replacements ++ annotations)` (ADR-031 §2, extendida con `scale`
  *    por ADR-037 §3).
@@ -97,7 +113,6 @@
  */
 
 import {
-  AnnotationKind,
   CancelledError,
   EngineDisposedError,
   EngineEvents,
@@ -110,15 +125,12 @@ import {
   type Annotation,
   type EncodedPageImage,
   type EngineContext,
-  type GroupReplacementChanged,
-  type GroupToggled,
   type IEngine,
   type LoadDocumentPayload,
   type RasterizePagePayload,
   type RenderPagePayload as RenderPagePayloadWire,
   type RenderRequested,
   type Replacement,
-  type ReplacementMode,
   type Unsubscribe,
   type UnloadDocumentPayload,
 } from "@anonly/shared";
@@ -136,13 +148,6 @@ import {
 const DEFAULT_TIMEOUT_MS = 10_000; // render-page preview (05_Worker_Architecture.md §4); full=30s idem si config lo define.
 const MAX_RETRIES = 1; // spec §11: "reintentar 1 vez"
 const DEFAULT_CACHE_PAGES = 16;
-
-/** Override pendiente de aplicar en el próximo (re)render de un grupo (ver nota 2 de arriba). */
-interface GroupOverride {
-  readonly mode?: ReplacementMode;
-  readonly value?: string;
-  readonly enabled?: boolean;
-}
 
 // ─── Puerto interno de despacho (ADR-043 §2; ver nota 7 de cabecera) ───
 
@@ -277,40 +282,6 @@ function toPublicOutput(entry: InternalCacheEntry, mode: "preview" | "full"): Re
   };
 }
 
-// Nota de implementación 2: aplica el último GROUP_REPLACEMENT_CHANGED/GROUP_TOGGLED
-// conocido sobre los Replacement cacheados de una página (delta render, §12).
-function applyReplacementOverrides(
-  replacements: ReadonlyArray<Replacement>,
-  overrides: ReadonlyMap<string, GroupOverride>,
-): ReadonlyArray<Replacement> {
-  const result: Replacement[] = [];
-  for (const replacement of replacements) {
-    const override = overrides.get(replacement.groupId);
-    if (override?.enabled === false) continue; // §13 caso 2: grupo deshabilitado → texto original.
-    if (override?.mode !== undefined || override?.value !== undefined) {
-      result.push({
-        ...replacement,
-        mode: override.mode ?? replacement.mode,
-        replacementValue: override.value ?? replacement.replacementValue,
-      });
-    } else {
-      result.push(replacement);
-    }
-  }
-  return result;
-}
-
-function applyAnnotationOverrides(
-  annotations: ReadonlyArray<Annotation>,
-  overrides: ReadonlyMap<string, GroupOverride>,
-): ReadonlyArray<Annotation> {
-  return annotations.filter((annotation) => {
-    if (annotation.kind !== AnnotationKind.Highlight) return true;
-    const override = overrides.get(annotation.groupId);
-    return override?.enabled !== false;
-  });
-}
-
 /** Documento retenido host-side desde ADR-043 §3: ya no es el `PDFDocumentProxy` (vive en el worker/kernel), solo lo necesario para las precondiciones de ADR-030 y el re-priming. */
 interface RetainedDocument {
   readonly buffer: ArrayBuffer;
@@ -332,13 +303,9 @@ export class RenderEngine implements IEngine {
   // Bytes totales cacheados (ADR-037 §3), mantenido en paralelo a `cache` vía
   // setCacheEntry/deleteCacheEntry — nunca se lee directo de `cache.values()`.
   private cacheBytes = 0;
-  // Índice pageIndex → groupIds (§12), clave `${documentId}:${pageIndex}`.
-  private readonly pageGroupIndex = new Map<string, Set<string>>();
-  // Último RenderPageInput usado por página (para RENDER_REQUESTED y delta render).
+  // Último RenderPageInput usado por página (para la reconstrucción de RENDER_REQUESTED).
   private readonly lastAnonymizedInputs = new Map<string, RenderPageInput>();
   private readonly lastOriginalInputs = new Map<string, RenderPageInput>();
-  // Overrides pendientes por (documentId, groupId) — ver nota de implementación 2.
-  private readonly groupOverrides = new Map<string, Map<string, GroupOverride>>();
   // Supersede por página (ADR-037 §4, nota 6 de cabecera) — clave
   // `documentId:pageIndex:kind` → escala vigente registrada por el último
   // RENDER_REQUESTED. Poblada únicamente por handleRenderRequested y
@@ -360,15 +327,11 @@ export class RenderEngine implements IEngine {
     this.ctx = ctx;
     this.initialized = true;
     this.disposed = false;
+    // ADR-044: único canal escuchado desde el retiro del delta render por
+    // eventos de Grouping (`GROUP_REPLACEMENT_CHANGED`/`GROUP_TOGGLED`).
     this.unsubscribers = [
       ctx.bus.on(EventChannel.UI, EngineEvents.RENDER_REQUESTED, (payload) =>
         this.handleRenderRequested(payload),
-      ),
-      ctx.bus.on(EventChannel.Grouping, EngineEvents.GROUP_REPLACEMENT_CHANGED, (payload) =>
-        this.handleGroupReplacementChanged(payload),
-      ),
-      ctx.bus.on(EventChannel.Grouping, EngineEvents.GROUP_TOGGLED, (payload) =>
-        this.handleGroupToggled(payload),
       ),
     ];
     ctx.logger.info("Render Engine initialized");
@@ -541,7 +504,7 @@ export class RenderEngine implements IEngine {
     // descarta acá, antes de tocar rememberInput/cache, sin haber ejecutado nada.
     checkpoint();
 
-    this.rememberInput(input, replacements, annotations);
+    this.rememberInput(input);
 
     const cacheKey = buildCacheKey(
       documentId,
@@ -787,71 +750,6 @@ export class RenderEngine implements IEngine {
     return outputs;
   }
 
-  requestDeltaRender(documentId: string, groupIds: ReadonlyArray<string>): void {
-    // Sin caller síncrono al que lanzarle (mismo tratamiento que las vías por
-    // evento, ADR-030 §3): si el motor no está listo o el documento no está
-    // cargado, se ignora silenciosamente (con warning cuando hay logger).
-    // El delta render usa la vía directa de renderPage: NO participa del
-    // supersede por página (nota 6 de cabecera; observación PR4 — antes una
-    // entrada de RENDER_REQUESTED a otra escala podía cancelarlo espuriamente
-    // y el cambio de grupo se perdía visualmente hasta el próximo evento).
-    if (this.disposed || !this.initialized || this.ctx === null) return;
-    const ctx = this.ctx;
-
-    if (!this.documents.has(documentId)) {
-      ctx.logger.warn(`requestDeltaRender para documento no cargado: ${documentId}`, {
-        documentId,
-      });
-      return;
-    }
-
-    const groupIdSet = new Set(groupIds);
-    const prefix = `${documentId}:`;
-    const affectedPageIndices: number[] = [];
-
-    for (const [key, groupSet] of this.pageGroupIndex) {
-      if (!key.startsWith(prefix)) continue;
-      let affected = false;
-      for (const groupId of groupSet) {
-        if (groupIdSet.has(groupId)) {
-          affected = true;
-          break;
-        }
-      }
-      if (affected) affectedPageIndices.push(Number(key.slice(prefix.length)));
-    }
-
-    if (affectedPageIndices.length === 0) return; // §13 caso 11: no-op.
-
-    const overrides = this.getGroupOverrides(documentId);
-
-    for (const pageIndex of affectedPageIndices) {
-      const key = pageKey(documentId, pageIndex);
-
-      const anonymizedInput = this.lastAnonymizedInputs.get(key);
-      if (anonymizedInput !== undefined) {
-        const updated: RenderPageInput = {
-          ...anonymizedInput,
-          replacements: applyReplacementOverrides(anonymizedInput.replacements ?? [], overrides),
-        };
-        void this.renderPage(updated, ctx).catch((err: unknown) => {
-          this.handleInternalRenderError(ctx, documentId, pageIndex, err);
-        });
-      }
-
-      const originalInput = this.lastOriginalInputs.get(key);
-      if (originalInput !== undefined) {
-        const updated: RenderPageInput = {
-          ...originalInput,
-          annotations: applyAnnotationOverrides(originalInput.annotations ?? [], overrides),
-        };
-        void this.renderPage(updated, ctx).catch((err: unknown) => {
-          this.handleInternalRenderError(ctx, documentId, pageIndex, err);
-        });
-      }
-    }
-  }
-
   dispose(): Promise<void> {
     for (const unsubscribe of this.unsubscribers) unsubscribe();
     this.unsubscribers = [];
@@ -864,10 +762,8 @@ export class RenderEngine implements IEngine {
     this.documents.clear();
     this.cache.clear();
     this.cacheBytes = 0;
-    this.pageGroupIndex.clear();
     this.lastAnonymizedInputs.clear();
     this.lastOriginalInputs.clear();
-    this.groupOverrides.clear();
     this.pendingRenders.clear();
     this.disposed = true;
     this.initialized = false;
@@ -959,70 +855,6 @@ export class RenderEngine implements IEngine {
     });
   }
 
-  private handleGroupReplacementChanged(payload: GroupReplacementChanged): void {
-    if (this.ctx === null) return;
-    if (!this.documents.has(payload.documentId)) {
-      this.ctx.logger.warn(
-        `GROUP_REPLACEMENT_CHANGED para documento no cargado: ${payload.documentId}`,
-        {
-          documentId: payload.documentId,
-          groupId: payload.groupId,
-        },
-      );
-      return;
-    }
-    const overrides = this.getGroupOverrides(payload.documentId);
-    const existing = overrides.get(payload.groupId) ?? {};
-    overrides.set(payload.groupId, { ...existing, mode: payload.mode, value: payload.value });
-    this.requestDeltaRender(payload.documentId, [payload.groupId]);
-  }
-
-  private handleGroupToggled(payload: GroupToggled): void {
-    if (this.ctx === null) return;
-    if (!this.documents.has(payload.documentId)) {
-      this.ctx.logger.warn(`GROUP_TOGGLED para documento no cargado: ${payload.documentId}`, {
-        documentId: payload.documentId,
-        groupId: payload.groupId,
-      });
-      return;
-    }
-    const overrides = this.getGroupOverrides(payload.documentId);
-    const existing = overrides.get(payload.groupId) ?? {};
-    overrides.set(payload.groupId, { ...existing, enabled: payload.enabled });
-    this.requestDeltaRender(payload.documentId, [payload.groupId]);
-  }
-
-  private handleInternalRenderError(
-    ctx: EngineContext,
-    documentId: string,
-    pageIndex: number,
-    err: unknown,
-  ): void {
-    if (err instanceof CancelledError) return;
-    const failure = this.toPageFailure(documentId, pageIndex, err);
-    ctx.bus.emit(EventChannel.Render, EngineEvents.PREVIEW_PAGE_FAILED, {
-      documentId,
-      pageIndex,
-      error: failure.serialize(),
-    });
-    ctx.logger.warn(
-      `Render interno (delta render / RENDER_REQUESTED) falló para la página ${pageIndex}.`,
-      {
-        documentId,
-        pageIndex,
-      },
-    );
-  }
-
-  private getGroupOverrides(documentId: string): Map<string, GroupOverride> {
-    let overrides = this.groupOverrides.get(documentId);
-    if (overrides === undefined) {
-      overrides = new Map<string, GroupOverride>();
-      this.groupOverrides.set(documentId, overrides);
-    }
-    return overrides;
-  }
-
   // ─── Supersede por página (ADR-037 §4, nota 6 de cabecera) ───
 
   /**
@@ -1103,23 +935,14 @@ export class RenderEngine implements IEngine {
     return Promise.resolve();
   }
 
-  private rememberInput(
-    input: RenderPageInput,
-    replacements: ReadonlyArray<Replacement>,
-    annotations: ReadonlyArray<Annotation>,
-  ): void {
+  /** Recuerda el último `RenderPageInput` por página, para la reconstrucción de `RENDER_REQUESTED` (nota 1 de cabecera). */
+  private rememberInput(input: RenderPageInput): void {
     const key = pageKey(input.documentId, input.pageIndex);
     if (input.kind === "anonymized") {
       this.lastAnonymizedInputs.set(key, input);
     } else {
       this.lastOriginalInputs.set(key, input);
     }
-
-    if (replacements.length === 0 && annotations.length === 0) return;
-    const groupIds = new Set<string>(this.pageGroupIndex.get(key) ?? []);
-    for (const replacement of replacements) groupIds.add(replacement.groupId);
-    for (const annotation of annotations) groupIds.add(annotation.groupId);
-    this.pageGroupIndex.set(key, groupIds);
   }
 
   private touchCache(key: string): void {
@@ -1170,8 +993,6 @@ export class RenderEngine implements IEngine {
     for (const key of [...this.cache.keys()]) {
       if (key.startsWith(prefix)) this.deleteCacheEntry(key);
     }
-    for (const key of [...this.pageGroupIndex.keys()])
-      if (key.startsWith(prefix)) this.pageGroupIndex.delete(key);
     for (const key of [...this.lastAnonymizedInputs.keys()]) {
       if (key.startsWith(prefix)) this.lastAnonymizedInputs.delete(key);
     }
@@ -1181,7 +1002,6 @@ export class RenderEngine implements IEngine {
     for (const key of [...this.pendingRenders.keys()]) {
       if (key.startsWith(prefix)) this.pendingRenders.delete(key);
     }
-    this.groupOverrides.delete(documentId);
   }
 
   private assertInitialized(): void {

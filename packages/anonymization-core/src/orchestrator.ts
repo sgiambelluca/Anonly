@@ -17,6 +17,7 @@
  * adicional basada en eventos para saber cuándo el pipeline llegó a `Ready`.
  */
 
+import { buildPageReplacements } from "@anonly/export-engine";
 import type { ExportEngineInput, RenderPageProvider } from "@anonly/export-engine";
 import type { NerPageInput } from "@anonly/ner-engine";
 import type { OcrPageInput } from "@anonly/ocr-engine";
@@ -40,6 +41,10 @@ import {
   type DocumentParsed,
   type EngineConfig,
   type EngineContext,
+  type EntityGroup,
+  type EntityGroupCreated,
+  type EntityGroupRemoved,
+  type EntityGroupUpdated,
   type ExportFailed,
   type ExportFinished,
   type ExportOptions,
@@ -61,6 +66,7 @@ import {
   type ReanalyzeConfigPatch,
   type RegexFinished,
   type RenderFailed as RenderFailedPayload,
+  type Replacement,
   type Unsubscribe,
   type WorkerFactory,
   type Word,
@@ -137,6 +143,25 @@ function stringArraysEqual(a: ReadonlyArray<string>, b: ReadonlyArray<string>): 
   return a.length === b.length && a.every((value, index) => value === b[index]);
 }
 
+// ─── Mediación grupos→Render del preview (ADR-044): helper de módulo ───
+
+/**
+ * Etapas anteriores a `Ready` (Orchestrator.md §13 caso 26): el seed de
+ * `GROUPING_FINISHED` cubre todas las páginas con reemplazos del snapshot
+ * completo, así que los eventos `ENTITY_GROUP_*` que llegan mientras el
+ * documento está en alguna de estas etapas (incluida `Idle`/sin
+ * `PipelineState` todavía) solo actualizan el mapa de páginas conocidas — no
+ * agendan flush.
+ */
+const PRE_READY_STAGES: ReadonlySet<PipelineStage> = new Set([
+  PipelineStage.Idle,
+  PipelineStage.Importing,
+  PipelineStage.Extracting,
+  PipelineStage.OCRing,
+  PipelineStage.Detecting,
+  PipelineStage.Grouping,
+]);
+
 export interface PipelineOrchestratorOptions {
   readonly bus: IEventBus;
   readonly logger: ILogger;
@@ -185,6 +210,18 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
   // de `cancel()`, la cancelación de un reanalyze (vuelve a Ready, caso 22)
   // de la cancelación de un importDocument (va a Cancelled, caso 8).
   private readonly reanalyzeInFlight = new Set<string>();
+  // ─── Mediación grupos→Render del preview (ADR-044) ───
+  // Por documento: groupId → páginas conocidas (members actuales de la última
+  // vez que se vio el grupo). Necesario para ENTITY_GROUP_REMOVED (el payload
+  // solo trae groupId) y para detectar páginas que un grupo abandonó por
+  // merge/split/dropOccurrences. Se limpia en DOCUMENT_CLOSED.
+  private readonly groupPagesByDocument = new Map<string, Map<string, Set<number>>>();
+  // Páginas marcadas sucias por documento, pendientes del flush coalescido
+  // por microtask (§13 caso 27). Vacío durante las etapas pre-Ready: el seed
+  // de GROUPING_FINISHED las cubre sin necesitar el flush incremental.
+  private readonly dirtyPagesByDocument = new Map<string, Set<number>>();
+  // Evita agendar más de un flush por documento por ráfaga de eventos.
+  private readonly flushScheduledDocuments = new Set<string>();
   // Progreso granular por página (PIPELINE_PROGRESS, spec Orchestrator.md
   // §8): un tracker por documento, reasignado al entrar a cada etapa con
   // progreso granular (OCR, luego Detecting con NER activo). `current` nunca
@@ -512,6 +549,9 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     this.progressByDocument.delete(documentId);
     this.effectiveConfigByDocument.delete(documentId);
     this.reanalyzeInFlight.delete(documentId);
+    this.groupPagesByDocument.delete(documentId);
+    this.dirtyPagesByDocument.delete(documentId);
+    this.flushScheduledDocuments.delete(documentId);
     this.blobTracker.revokeByPrefix(previewPrefixFor(documentId));
     this.blobTracker.revokeByPrefix(exportPrefixFor(documentId));
     this.state.delete(documentId);
@@ -540,6 +580,9 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     this.progressByDocument.clear();
     this.effectiveConfigByDocument.clear();
     this.reanalyzeInFlight.clear();
+    this.groupPagesByDocument.clear();
+    this.dirtyPagesByDocument.clear();
+    this.flushScheduledDocuments.clear();
 
     for (const unsubscribe of this.unsubscribers) unsubscribe();
     this.unsubscribers.length = 0;
@@ -924,6 +967,16 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       this.bus.on(EventChannel.Grouping, EngineEvents.GROUPING_FINISHED, (p) =>
         this.handleGroupingFinished(p),
       ),
+      // ADR-044: mediación grupos→Render del preview.
+      this.bus.on(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_CREATED, (p) =>
+        this.handleEntityGroupCreated(p),
+      ),
+      this.bus.on(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_UPDATED, (p) =>
+        this.handleEntityGroupUpdated(p),
+      ),
+      this.bus.on(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_REMOVED, (p) =>
+        this.handleEntityGroupRemoved(p),
+      ),
 
       this.bus.on(EventChannel.Render, EngineEvents.PREVIEW_UPDATED, (p) =>
         this.handlePreviewUpdated(p),
@@ -1085,6 +1138,12 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
   private handleGroupingFinished(payload: GroupingFinished): void {
     const state = this.state.get(payload.documentId);
     if (state === undefined) return;
+
+    // ADR-044 §3, caso 26: el seed del preview anonimizado corre siempre acá,
+    // incluida la vía suprimida por cancelación de reanalyze (ver el early
+    // return de abajo) — ADR-038 §6.
+    this.seedAnonymizedPreview(payload.documentId);
+
     if (state.cancelRequested) {
       // ADR-038 §6, caso 22: GROUPING_FINISHED disparado por el
       // finishSession que cancelReanalyze() invoca (o un evento tardío tras
@@ -1098,6 +1157,174 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       documentId: payload.documentId,
       groupCount: payload.groupCount,
       conflictCount: payload.conflictCount,
+    });
+  }
+
+  // ─── Mediación grupos→Render del preview (ADR-044) ───
+
+  private handleEntityGroupCreated(payload: EntityGroupCreated): void {
+    this.trackGroupPagesAndMarkDirty(payload.documentId, payload.group);
+  }
+
+  private handleEntityGroupUpdated(payload: EntityGroupUpdated): void {
+    this.trackGroupPagesAndMarkDirty(payload.documentId, payload.group);
+  }
+
+  private handleEntityGroupRemoved(payload: EntityGroupRemoved): void {
+    // El payload no trae `members` (Contracts.md §8): las páginas afectadas
+    // son las previamente conocidas del mapa retenido (§13 caso 27).
+    const groupMap = this.groupPagesByDocument.get(payload.documentId);
+    const knownPages = groupMap?.get(payload.groupId);
+    groupMap?.delete(payload.groupId);
+    if (knownPages !== undefined) this.markPagesDirty(payload.documentId, knownPages);
+  }
+
+  private trackGroupPagesAndMarkDirty(documentId: string, group: EntityGroup): void {
+    const groupMap = this.groupPagesByDocument.get(documentId) ?? new Map<string, Set<number>>();
+    this.groupPagesByDocument.set(documentId, groupMap);
+    const previousPages = groupMap.get(group.id) ?? new Set<number>();
+    const currentPages = new Set<number>(group.members.map((member) => member.pageIndex));
+    groupMap.set(group.id, currentPages);
+    // Páginas afectadas = actuales ∪ previamente conocidas (detecta páginas
+    // que el grupo abandonó por merge/split/dropOccurrences, §Decisión 3).
+    const affectedPages = new Set<number>([...previousPages, ...currentPages]);
+    this.markPagesDirty(documentId, affectedPages);
+  }
+
+  /**
+   * Marca páginas sucias para el flush del preview mediado (§Decisión 3). En
+   * las etapas pre-Ready (caso 26) es un no-op deliberado: el seed de
+   * GROUPING_FINISHED va a recomputar TODAS las páginas desde el snapshot
+   * completo, así que acumular acá sería redundante (y el flush nunca
+   * correría de todos modos, sin necesidad de guardarlas para más tarde).
+   */
+  private markPagesDirty(documentId: string, pages: ReadonlySet<number>): void {
+    if (pages.size === 0 || this.isPreReadyStage(documentId)) return;
+    const dirty = this.dirtyPagesByDocument.get(documentId) ?? new Set<number>();
+    for (const pageIndex of pages) dirty.add(pageIndex);
+    this.dirtyPagesByDocument.set(documentId, dirty);
+    this.scheduleFlush(documentId);
+  }
+
+  private isPreReadyStage(documentId: string): boolean {
+    const stage = this.state.get(documentId)?.stage;
+    return stage === undefined || PRE_READY_STAGES.has(stage);
+  }
+
+  /** Coalescido por microtask (§13 caso 27): una ráfaga de eventos en el mismo tick agenda un único flush. */
+  private scheduleFlush(documentId: string): void {
+    if (this.flushScheduledDocuments.has(documentId)) return;
+    this.flushScheduledDocuments.add(documentId);
+    queueMicrotask(() => {
+      this.flushScheduledDocuments.delete(documentId);
+      this.flushDirtyPages(documentId);
+    });
+  }
+
+  private flushDirtyPages(documentId: string): void {
+    const dirty = this.dirtyPagesByDocument.get(documentId);
+    if (dirty === undefined || dirty.size === 0) return;
+    this.dirtyPagesByDocument.delete(documentId);
+    // Defensivo: el documento pudo cerrarse mientras se esperaba el microtask.
+    if (!this.state.has(documentId)) return;
+
+    const snapshot = this.engines.grouping.getSnapshot(documentId);
+    const ctx = this.mediatedPreviewCtx(documentId);
+
+    // A diferencia del seed, el flush SIEMPRE renderiza cada página sucia,
+    // incluso si `replacements` quedó vacío (p. ej. único grupo de la página
+    // deshabilitado o eliminado): así el preview vuelve al original en vez de
+    // quedar con el `lastAnonymizedInputs` stale de antes de la edición (bug
+    // 2 de ADR-044 — el toggle off→on recompone del snapshot, no de un
+    // estado filtrado previo).
+    for (const pageIndex of dirty) {
+      const replacements = buildPageReplacements(pageIndex, snapshot.groups);
+      this.renderMediatedPreview(documentId, pageIndex, replacements, ctx);
+    }
+  }
+
+  /**
+   * Seed inicial del preview anonimizado (§Decisión 3, caso 26): corre en
+   * cada `GROUPING_FINISHED`, incluida la vía suprimida por cancelación de
+   * `reanalyze` (ADR-038 §6, ver `handleGroupingFinished`). La cascada
+   * síncrona hasta acá + el `rememberInput` síncrono de `RenderEngine.renderPage`
+   * garantizan que el primer `RENDER_REQUESTED` que la UI emita al observar
+   * `Ready` reconstruya ya con reemplazos reales — cierra el deadlock de
+   * arranque del preview (ADR-044 §Contexto, bug 1). Corre también en la vía
+   * suprimida por cancelación de `reanalyze` (`handleGroupingFinished`), donde
+   * la señal del documento ya está abortada — de ahí que use una señal propia
+   * (`mediatedPreviewCtx`, v1.5.1) y no la de `abortRegistry`.
+   */
+  private seedAnonymizedPreview(documentId: string): void {
+    const document = this.documents.get(documentId);
+    if (document === undefined) return;
+    // El barrido completo del snapshot cubre cualquier página que haya
+    // quedado marcada sucia durante las etapas pre-Ready (acumulada pero
+    // nunca flusheada, caso 26): se descarta para no duplicar el render.
+    this.dirtyPagesByDocument.delete(documentId);
+
+    const snapshot = this.engines.grouping.getSnapshot(documentId);
+    const ctx = this.mediatedPreviewCtx(documentId);
+
+    for (let pageIndex = 0; pageIndex < document.pageCount; pageIndex++) {
+      const replacements = buildPageReplacements(pageIndex, snapshot.groups);
+      // Caso 26: páginas sin ningún reemplazo habilitado no se siembran (la
+      // reconstrucción default de RENDER_REQUESTED con `replacements: []` ya
+      // es correcta — a diferencia del flush, acá no hay un estado previo que
+      // revertir).
+      if (replacements.length === 0) continue;
+      this.renderMediatedPreview(documentId, pageIndex, replacements, ctx);
+    }
+  }
+
+  /**
+   * `EngineContext` con una señal PROPIA, nunca ligada a `abortRegistry`
+   * (v1.5.1, `Orchestrator.md` nota de cabecera): `cancelReanalyze` (ADR-038
+   * §6) aborta la señal del documento **antes** de `await finishSession(...)`,
+   * y como esa llamada corre síncrona hasta `GROUPING_FINISHED`, el seed que
+   * `handleGroupingFinished` dispara en esa vía se ejecutaría con la señal ya
+   * abortada si reusara `abortRegistry` — `renderPage` rechazaría con
+   * `CancelledError` antes de `rememberInput`, y el seed nunca poblaría
+   * `lastAnonymizedInputs`. El seed/flush del preview mediado ya son
+   * "best-effort... inmunes al supersede" (ADR-044 §3); acá quedan además
+   * inmunes a la cancelación del documento, sin tocar el orden
+   * `abort`/`finishSession` de `cancelReanalyze` (ADR-038 intacto). Un
+   * `AbortController` nuevo por llamada nunca se aborta (no hay señal externa
+   * que corresponda mantener: OCR/NER/export siguen cancelables vía
+   * `abortRegistry`, sin cambios).
+   */
+  private mediatedPreviewCtx(documentId: string): EngineContext {
+    const signal = new AbortController().signal;
+    return this.ctxFor(signal, documentId);
+  }
+
+  /**
+   * Invocación directa de `renderPage` para el preview mediado (§Decisión 1):
+   * mismo patrón que el `RenderPageProvider` del export (ADR-014/ADR-043) —
+   * inmune al supersede de `RENDER_REQUESTED` (`Render_Engine.md` §13 caso 21).
+   * Best-effort: un fallo se loguea y no interrumpe las demás páginas ni
+   * escala a `PIPELINE_FAILED` (el preview nunca es una razón para fallar el
+   * pipeline).
+   */
+  private renderMediatedPreview(
+    documentId: string,
+    pageIndex: number,
+    replacements: ReadonlyArray<Replacement>,
+    ctx: EngineContext,
+  ): void {
+    const input: RenderPageInput = {
+      documentId,
+      pageIndex,
+      kind: "anonymized",
+      mode: "preview",
+      replacements,
+    };
+    this.engines.render.renderPage(input, ctx).catch((err: unknown) => {
+      this.logger.warn("Render mediado del preview anonimizado falló (best-effort, ADR-044).", {
+        documentId,
+        pageIndex,
+        reason: err instanceof Error ? err.message : String(err),
+      });
     });
   }
 

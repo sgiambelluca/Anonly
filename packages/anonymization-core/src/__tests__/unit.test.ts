@@ -2,6 +2,7 @@ import { PdfTimeoutError } from "@anonly/pdf-engine";
 import { RenderEngine } from "@anonly/render-engine";
 import {
   CancelledError,
+  DetectionSource,
   EngineError,
   EngineErrorCode,
   EngineEvents,
@@ -22,6 +23,7 @@ import { WorkerPool, WorkerPoolManager } from "../worker-pool.js";
 import {
   createDocument,
   createEngineConfig,
+  createEntityGroup,
   createFakeWorker,
   createImportInput,
   createMockEngines,
@@ -109,6 +111,168 @@ describe("Orchestrator — unit tests", () => {
     expect(revokeSpy).toHaveBeenCalledWith("blob:export-1");
 
     revokeSpy.mockRestore();
+  });
+
+  // ─── Mediación grupos→Render del preview (ADR-044, §13 caso 27) ───
+
+  it("burst of ENTITY_GROUP_UPDATED coalesces into one render per page", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    wireHappyPathSpies(engines, bus);
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+    (engines.render.renderPage as ReturnType<typeof vi.fn>).mockClear();
+
+    const group = createEntityGroup({
+      id: "group-burst",
+      members: [
+        {
+          occurrenceId: "occ-1",
+          pageIndex: 0,
+          bbox: { x: 0, y: 0, width: 1, height: 1 },
+          source: DetectionSource.Regex,
+        },
+      ],
+    });
+
+    // Ráfaga de varios ENTITY_GROUP_UPDATED en el mismo tick (p. ej. una
+    // regla de tipo, caso 12 de Grouping_Engine.md) — debe coalescer en un
+    // solo render por página afectada.
+    bus.emit(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_UPDATED, {
+      documentId: "doc-1",
+      group,
+      changes: ["replacementMode"],
+    });
+    bus.emit(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_UPDATED, {
+      documentId: "doc-1",
+      group,
+      changes: ["replacementMode"],
+    });
+    bus.emit(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_UPDATED, {
+      documentId: "doc-1",
+      group,
+      changes: ["replacementMode"],
+    });
+
+    await vi.waitFor(() => {
+      expect(engines.render.renderPage).toHaveBeenCalledTimes(1);
+    });
+
+    expect(engines.render.renderPage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentId: "doc-1",
+        pageIndex: 0,
+        kind: "anonymized",
+        mode: "preview",
+      }),
+      expect.anything(),
+    );
+  });
+
+  it("ENTITY_GROUP_REMOVED re-renders pages the group occupied", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    wireHappyPathSpies(engines, bus);
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+
+    const group = createEntityGroup({
+      id: "group-removed",
+      members: [
+        {
+          occurrenceId: "occ-1",
+          pageIndex: 2,
+          bbox: { x: 0, y: 0, width: 1, height: 1 },
+          source: DetectionSource.Regex,
+        },
+        {
+          occurrenceId: "occ-2",
+          pageIndex: 5,
+          bbox: { x: 0, y: 0, width: 1, height: 1 },
+          source: DetectionSource.Regex,
+        },
+      ],
+    });
+    bus.emit(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_CREATED, {
+      documentId: "doc-1",
+      group,
+    });
+    await vi.waitFor(() => {
+      expect(engines.render.renderPage).toHaveBeenCalledWith(
+        expect.objectContaining({ pageIndex: 2 }),
+        expect.anything(),
+      );
+    });
+    (engines.render.renderPage as ReturnType<typeof vi.fn>).mockClear();
+
+    // ENTITY_GROUP_REMOVED no trae `members` (Contracts.md §8): las páginas
+    // afectadas salen del mapa retenido por el Orchestrator, no del payload.
+    bus.emit(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_REMOVED, {
+      documentId: "doc-1",
+      groupId: "group-removed",
+    });
+
+    await vi.waitFor(() => {
+      expect(engines.render.renderPage).toHaveBeenCalledTimes(2);
+    });
+
+    const calledPages = (engines.render.renderPage as ReturnType<typeof vi.fn>).mock.calls
+      .map((call) => (call[0] as { pageIndex: number }).pageIndex)
+      .sort((a, b) => a - b);
+    expect(calledPages).toEqual([2, 5]);
+  });
+
+  it("group page map cleared on DOCUMENT_CLOSED", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    wireHappyPathSpies(engines, bus);
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+
+    const group = createEntityGroup({
+      id: "group-cleanup",
+      members: [
+        {
+          occurrenceId: "occ-1",
+          pageIndex: 0,
+          bbox: { x: 0, y: 0, width: 1, height: 1 },
+          source: DetectionSource.Regex,
+        },
+      ],
+    });
+    bus.emit(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_CREATED, {
+      documentId: "doc-1",
+      group,
+    });
+    await vi.waitFor(() => {
+      expect(orchestrator["groupPagesByDocument"].has("doc-1")).toBe(true);
+    });
+
+    await orchestrator.closeDocument("doc-1");
+
+    expect(orchestrator["groupPagesByDocument"].has("doc-1")).toBe(false);
+    expect(orchestrator["dirtyPagesByDocument"].has("doc-1")).toBe(false);
   });
 
   // ─── §10: getState inmutable ───
