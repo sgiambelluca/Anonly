@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=workers | dependencias=03_Data_Model.md,04_Event_System.md,06_Pipeline.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-042-WorkerOutbound-Completed-Result-Unknown.md,adr/ADR-043-RenderEngine-Reparto-Host-Worker-Kernel.md | audiencia=IA+humanos | fase=1 (actualizado en fase 9/10: entrega por fases ADR-035; transporte, EVENT, payloads y ExportWorker por ADR-036; COMPLETED.result unknown por ADR-042; RenderWorker kernel, unload-document y re-priming por ADR-043) -->
+<!-- CONTEXT: scope=workers | dependencias=03_Data_Model.md,04_Event_System.md,06_Pipeline.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-042-WorkerOutbound-Completed-Result-Unknown.md,adr/ADR-043-RenderEngine-Reparto-Host-Worker-Kernel.md,adr/ADR-045-OcrEngine-Pool-Propia-Kernel-Puro.md | audiencia=IA+humanos | fase=1 (actualizado en fase 9/10: entrega por fases ADR-035; transporte, EVENT, payloads y ExportWorker por ADR-036; COMPLETED.result unknown por ADR-042; RenderWorker kernel, unload-document y re-priming por ADR-043; OcrWorker kernel por ADR-045) -->
 
 # Anonly — Arquitectura de Workers (TAD bloque 8)
 
@@ -8,7 +8,7 @@
 
 **Entrega por fases (ADR-035)**: el Hito 9 implementa los cuatro pools como colas de concurrencia **in-process** con la semántica completa de este documento (colas prioritarias, límites, backpressure, reintentos, eventos `WORKER_*`, cancelación), despachando por llamada directa a los métodos públicos de cada motor. El transporte por Web Workers de SO reales (`postMessage`, transferables §2.3, entry-points por motor) llega en el Hito 10, donde existe el bundler de `apps/react-client`. Este documento sigue siendo la arquitectura objetivo.
 
-**Pools ≠ workers (ADR-036 §1)**: hay **cuatro pools** (§1.1) y **cinco entry-points de worker** (§7.1–§7.5). El ExportWorker (§7.5) es un worker único dedicado sin `WorkerPool` propio: lo posee el lado host de `export-engine`, no hay quinta clave en `WorkerPoolConfig`. Los `Worker` reales entran al Core por factories inyectadas en `createCore` (`CoreRuntimeOptions`, `Contracts.md` §3.5); sin factory para un kind, ese despacho queda in-process (ADR-035 §1) — la migración es motor por motor. Cada motor entrega dos mitades en su propio paquete: el **entry-point** (corre el motor real en el worker con un `EngineContext` puente) y el **host-bridge** (re-emite los eventos en el bus real del host — ADR-013 §6 — y completa efectos de host: blob URLs, depósito en `ctx.cache`).
+**Pools ≠ workers (ADR-036 §1)**: hay **cuatro pools** (§1.1) y **cinco entry-points de worker** (§7.1–§7.5). El ExportWorker (§7.5) es un worker único dedicado sin `WorkerPool` propio: lo posee el lado host de `export-engine`, no hay quinta clave en `WorkerPoolConfig`. Los `Worker` reales entran al Core por factories inyectadas en `createCore` (`CoreRuntimeOptions`, `Contracts.md` §3.5); sin factory para un kind, ese despacho queda in-process (ADR-035 §1) — la migración es motor por motor. Cada motor entrega dos mitades en su propio paquete: el **entry-point** (corre el motor real en el worker con un `EngineContext` puente) y el **host-bridge** (re-emite los eventos en el bus real del host — ADR-013 §6 — y completa efectos de host: blob URLs, depósito en `ctx.cache`). **Excepciones sancionadas al "corre el motor real"**: RenderWorker (ADR-043) y OcrWorker (ADR-045) corren **kernels sin estado por documento** — la clase del motor, con su estado, eventos y efectos de cache, queda entera host-side y despacha a su pool por un puerto interno; en esos dos, el entry-point no necesita bus puente ni cache local.
 
 ---
 
@@ -201,9 +201,9 @@ Cada pool tiene una `PriorityQueue<WorkerJob>` ordenada por:
 
 **Responsabilidad**: ejecutar Tesseract.js sobre la imagen rasterizada de una página sin texto.
 
-**Ciclo de vida**:
+**Ciclo de vida** (el OcrWorker es un **kernel de reconocimiento sin estado por documento**, ADR-045 §1: la clase `OcrEngine` — loop por página, retry/timeout, eventos, depósito en `ctx.cache` — vive entera host-side y le despacha por su puerto interno con `maxRetriesOverride: 0`; el único estado del kernel es la instancia tesseract con su set de idiomas):
 - `INIT`: carga `tesseract.js` y descarga/initializa el modelo `spa+eng` (default). Publica `READY` con `{ workerId, languages: ["spa","eng"], modelVersion }`.
-- `RUN(ocr-page)`: recibe `{ documentId, pageIndex, imageData, dpi, languages }`. Transfiere `imageData`. Procesa. Emite `PROGRESS`. Responde `COMPLETED` con `{ words: Word[], confidence }`.
+- `RUN(ocr-page)`: recibe `OcrPagePayload { documentId, pageIndex, imageData, dpi, languages }` (`03_Data_Model.md` §18; `imageData` transferida, §2.3). Si `languages` difiere del set cargado, re-crea la instancia tesseract (cubre `reanalyze` con `ocr.languages`, ADR-038 §5.3). Reconoce. Emite `PROGRESS` (opcional). Responde `COMPLETED` con `{ words: Word[], confidence }` — **sin** emitir eventos de dominio ni tocar cache: `OCR_PAGE_FINISHED` y el depósito de las `Word[]` los hace el motor en el host al resolver el job, en ese orden (ADR-014 §1, ADR-045 §4).
 - `CANCEL`: checkpoint entre líneas de texto reconocidas (Tesseract expone callback de progreso).
 - `DISPOSE`: libera Tesseract worker y memoria temporal.
 
