@@ -32,11 +32,13 @@ import { useEffect, useMemo, useRef } from "react";
 
 import { actions } from "../../core-adapter/actions.js";
 import { useDocumentStore } from "../../store/document.store.js";
+import { usePipelineStore } from "../../store/pipeline.store.js";
 import { useViewerStore } from "../../store/viewer.store.js";
 
 import { PageCanvas } from "./PageCanvas.js";
 import { computePageHeight, computePageWidth } from "./pageLayout.js";
 import { PageVirtualizer } from "./PageVirtualizer.js";
+import { shouldTriggerReadyRender } from "./readyRenderTrigger.js";
 import { computeMountRange, rangeToPageIndices, type VisibleRange } from "./visibleRange.js";
 import { computeZoomRenderScale } from "./zoomRenderScale.js";
 import { createZoomRenderScheduler } from "./zoomRenderScheduler.js";
@@ -51,7 +53,9 @@ const KIND_LABEL: Readonly<Record<PdfViewerProps["kind"], string>> = {
 };
 
 export function PdfViewer({ kind }: PdfViewerProps) {
+  const documentId = useDocumentStore((state) => state.id);
   const pageCount = useDocumentStore((state) => state.pageCount);
+  const pipelineStage = usePipelineStore((state) => state.stage);
   const zoom = useViewerStore((state) => state.zoom);
   const visibleRange = useViewerStore((state) => state.visibleRange);
   const previewByPage = useViewerStore((state) => state.previewByPage);
@@ -76,6 +80,30 @@ export function PdfViewer({ kind }: PdfViewerProps) {
   if (schedulerRef.current === null) {
     schedulerRef.current = createZoomRenderScheduler();
   }
+
+  // Fix del visor en blanco hasta que el usuario scrollea (`readyRenderTrigger.ts`):
+  // el pipeline puede llegar a `Ready` después de que este componente ya
+  // montó (y ya intentó, en vano, su primer `RENDER_REQUESTED` — ver el
+  // efecto de abajo) sin que cambie `mountRange` de nuevo. Se re-pide el
+  // render de las páginas montadas la primera vez que se observa `Ready` para
+  // este `documentId`, una sola vez (la ref evita pedidos redundantes en
+  // renders posteriores o tras un `reanalyze` que vuelve a `Ready`).
+  const triggeredReadyRenderForRef = useRef<string | null>(null);
+  useEffect(() => {
+    const indices = mountedPageIndicesRef.current;
+    if (
+      !shouldTriggerReadyRender({
+        documentId,
+        stage: pipelineStage,
+        mountedPageIndicesCount: indices.length,
+        triggeredForDocumentId: triggeredReadyRenderForRef.current,
+      })
+    ) {
+      return;
+    }
+    triggeredReadyRenderForRef.current = documentId;
+    actions.requestRender(indices, "preview", computeZoomRenderScale(zoom));
+  }, [documentId, pipelineStage, mountRange.start, mountRange.end]);
 
   // Cambio de visibleRange (scroll) → render inmediato, con la escala vigente.
   useEffect(() => {
