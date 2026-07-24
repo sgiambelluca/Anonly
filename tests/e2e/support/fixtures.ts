@@ -10,6 +10,8 @@
  * no hace falta que el archivo exista en `tests/fixtures/*.pdf` para este PR.
  */
 
+import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+
 import { generateCorrupt, generateText10p } from "../../fixtures/generate.js";
 
 export interface E2eFilePayload {
@@ -28,4 +30,31 @@ export async function textTenPagesFile(): Promise<E2eFilePayload> {
 export async function corruptFile(): Promise<E2eFilePayload> {
   const bytes = await generateCorrupt();
   return { name: "corrupt.pdf", mimeType: "application/pdf", buffer: Buffer.from(bytes) };
+}
+
+/**
+ * PDF sintético de `pageCount` páginas con texto neutro (sin entidades), solo
+ * para ejercitar el visor virtualizado con un documento largo (bug 3 del
+ * scroll — no forma parte de `tests/fixtures/README.md`: es específico de
+ * este spec, no un fixture compartido por el resto del Core).
+ */
+export async function manyNeutralPagesFile(pageCount: number): Promise<E2eFilePayload> {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  for (let i = 0; i < pageCount; i += 1) {
+    const page = doc.addPage([595, 842]);
+    page.drawText(`Página ${i + 1} sin datos sensibles.`, {
+      x: 50,
+      y: 750,
+      size: 12,
+      font,
+      color: rgb(0, 0, 0),
+    });
+  }
+  const bytes = await doc.save();
+  return {
+    name: `many-${pageCount}p.pdf`,
+    mimeType: "application/pdf",
+    buffer: Buffer.from(bytes),
+  };
 }
