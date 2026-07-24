@@ -40,21 +40,25 @@ import { WorkerPool } from "./worker-pool.js";
  *
  * `runtime` (Hito 10, ADR-036 §2, Contracts.md §3.5): factories de `Worker`
  * real por `WorkerEntryKind`, forwarded tal cual al `PipelineOrchestrator`
- * (ver `PipelineOrchestratorOptions.runtime`) para los pools pdf/ocr/ner.
+ * (ver `PipelineOrchestratorOptions.runtime`) para los pools pdf/ner.
  * Ausente => todo in-process, comportamiento idéntico al Hito 9 (parámetro
  * aditivo, no rompe callers existentes).
  *
- * `RenderPool` (ADR-043 §2, Hito 10 PR13): a diferencia de pdf/ocr/ner (cuyos
- * pools los crea y posee `PipelineOrchestrator`/`WorkerPoolManager`), la
- * `RenderPool` la construye este façade DIRECTO y se inyecta en el
- * constructor de `RenderEngine` — el motor despacha internamente contra ella
- * (`loadDocument`/`unloadDocument`/`renderPage`/`rasterizePage` convergen en
- * `pool.dispatch`/`pool.broadcast`); el Orchestrator ya no sostiene ninguna
- * referencia a un pool de render (dejó de envolver esas llamadas, ver
+ * `RenderPool` (ADR-043 §2, Hito 10 PR13) y `OcrPool` (ADR-045 §2, Hito 10
+ * PR14): a diferencia de pdf/ner (cuyos pools los crea y posee
+ * `PipelineOrchestrator`/`WorkerPoolManager`), estas dos las construye este
+ * façade DIRECTO y se inyectan en el constructor del motor correspondiente —
+ * el motor despacha internamente contra su propia pool
+ * (`RenderEngine.renderPage`/`rasterizePage`/`loadDocument`/`unloadDocument`
+ * convergen en `pool.dispatch`/`pool.broadcast`; `OcrEngine.processPage`
+ * converge en `pool.dispatch`). El Orchestrator ya no sostiene ninguna
+ * referencia a un pool de render u ocr (dejó de envolver esas llamadas, ver
  * `orchestrator.ts#runOcrStage`/`makeRenderPageProvider`). `onWorkerCreated`
- * cierra sobre `engines.render` (asignado más abajo, tras construir el
- * objeto `engines`) para re-primear un RenderWorker nuevo/reemplazado con los
- * documentos vigentes ANTES de que acepte jobs (ADR-043 §5).
+ * de `renderPool` cierra sobre `engines.render` (asignado más abajo, tras
+ * construir el objeto `engines`) para re-primear un RenderWorker nuevo/
+ * reemplazado con los documentos vigentes ANTES de que acepte jobs (ADR-043
+ * §5); `ocrPool` no necesita el equivalente — `ocr-engine` no retiene estado
+ * por documento (ADR-041 §5, "Ninguno... Libre").
  */
 export async function createCore(
   config?: EngineConfigOverrides,
@@ -87,9 +91,24 @@ export async function createCore(
     onWorkerCreated: () => renderEngineRef.current?.reprimeWorkers() ?? Promise.resolve(),
   });
 
+  // ADR-045 §2: espejo de renderPool, sin onWorkerCreated (sin estado por
+  // documento que re-primear, ADR-041 §5).
+  const ocrPool = new WorkerPool({
+    poolKey: "ocr",
+    jobType: "ocr-page",
+    size: mergedConfig.workerPool.ocrPoolSize,
+    maxQueue: mergedConfig.workerPool.maxQueuePerPool.ocr,
+    maxRetries: mergedConfig.workerPool.maxRetries["ocr-page"],
+    baseRetryDelayMs: mergedConfig.workerPool.baseRetryDelayMs,
+    maxRetryDelayMs: mergedConfig.workerPool.maxRetryDelayMs,
+    bus,
+    logger,
+    ...(runtime?.workers?.ocr !== undefined ? { workerFactory: runtime.workers.ocr } : {}),
+  });
+
   const engines: AnonymizationCoreEngines = {
     pdf: new PdfEngine(),
-    ocr: new OcrEngine(),
+    ocr: new OcrEngine(ocrPool),
     regex: new RegexEngine(),
     ner: new NerEngine(),
     grouping: new GroupingEngine(),
@@ -138,6 +157,7 @@ export async function createCore(
     dispose: async (): Promise<void> => {
       initAbortController.abort();
       renderPool.dispose();
+      ocrPool.dispose();
       await orchestrator.dispose();
       bus.dispose();
     },

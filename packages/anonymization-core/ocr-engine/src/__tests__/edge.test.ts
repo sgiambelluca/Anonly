@@ -1,6 +1,7 @@
 import {
   CancelledError,
   EngineDisposedError,
+  EngineError,
   EngineEvents,
   EventChannel,
   InvalidInputError,
@@ -12,7 +13,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 vi.mock("tesseract.js", () => ({ createWorker: vi.fn() }));
 
 import { OcrEngine } from "../ocr.engine.js";
-import { OcrModelMissingError, OcrPageFailedError } from "../ocr.errors.js";
+import { OcrModelMissingError, OcrPageFailedError, OcrTimeoutError } from "../ocr.errors.js";
 import type { OcrPageInput } from "../ocr.types.js";
 
 import {
@@ -262,6 +263,50 @@ describe("OcrEngine — edge case tests", () => {
 
       await expect(engine.processPages(inputs, abortedCtx)).rejects.toThrow(CancelledError);
       expect(recognize).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // ADR-045 §2: cualquier timeout que emerja del despacho (propio o del
+  // pool) se normaliza a OcrTimeoutError ANTES de que el loop de retry lo
+  // evalúe. Un timeout que cruzó un worker remoto llega deserializado
+  // (EngineError.deserialize, Contracts.md §4): misma `code` pero NO
+  // `instanceof OcrTimeoutError` — sin la normalización, el loop lo trataría
+  // como no-recuperable y la política de reintentos cambiaría de forma según
+  // haya pool real o fallback.
+  describe("Normalización de timeout en el borde del puerto (ADR-045 §2)", () => {
+    it("dispatch timeout normalized to OcrTimeoutError and retried by engine loop", async () => {
+      vi.mocked(createWorker).mockResolvedValue(mockTesseractWorker(mockEmptyRecognizeData()));
+
+      const realTimeout = new OcrTimeoutError("doc-normalize-timeout", 0, 60000);
+      const deserializedTimeout = EngineError.deserialize(realTimeout.serialize());
+      // Valida la premisa del test: la deserialización NO reconstruye la
+      // subclase concreta (Contracts.md §4).
+      expect(deserializedTimeout).not.toBeInstanceOf(OcrTimeoutError);
+
+      let dispatchCalls = 0;
+      const pool = {
+        dispatch: <T>(params: { readonly run: () => Promise<T> }): Promise<T> => {
+          dispatchCalls += 1;
+          if (dispatchCalls <= 2) {
+            return Promise.reject(deserializedTimeout) as Promise<T>;
+          }
+          return params.run();
+        },
+      };
+      const pooledEngine = new OcrEngine(pool);
+      await pooledEngine.init(ctx);
+
+      const output = await pooledEngine.processPage(
+        createValidOcrPageInput("doc-normalize-timeout", 0),
+        ctx,
+      );
+
+      expect(output).toBeDefined();
+      // 2 fallos "timeout" normalizados (reintentados) + 1 éxito = 3 llamadas
+      // (maxRetries default = 2, mismo presupuesto que un OcrTimeoutError real).
+      expect(dispatchCalls).toBe(3);
+
+      await pooledEngine.dispose();
     });
   });
 });

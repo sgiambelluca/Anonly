@@ -10,9 +10,14 @@
  * §1); se inyecta acá vía `runtime: { workers: { pdf: () => new PdfWorker() } }`.
  * `@anonly/render-engine` (PR13, ADR-043) es el segundo: mismo patrón,
  * `RenderWorker` corre el kernel de rasterización/composición/encode (la
- * clase `RenderEngine` queda host-side). El resto de los motores (ocr/ner/
- * export) siguen in-process hasta sus propios PRs de worker (ADR-036 §8,
- * filas 14-16).
+ * clase `RenderEngine` queda host-side). `@anonly/ocr-engine` (PR14, ADR-045)
+ * es el tercero, mismo reparto host/worker que Render: `OcrWorker` corre el
+ * kernel de reconocimiento (tesseract.js) sin estado por documento; la clase
+ * `OcrEngine` (loop por página, retry, depósito en cache, eventos) queda
+ * host-side y despacha por página contra su propia `OcrPool` (construida en
+ * `create-core.ts`, no acá — esta factory solo llega hasta esa pool). El
+ * resto de los motores (ner/export) siguen in-process hasta sus propios PRs
+ * de worker (ADR-036 §8, filas 15-16).
  */
 
 import {
@@ -21,6 +26,7 @@ import {
   type IAnonymizationCore,
   type Unsubscribe,
 } from "@anonly/anonymization-core";
+import OcrWorker from "@anonly/ocr-engine/worker?worker";
 import PdfWorker from "@anonly/pdf-engine/worker?worker";
 import RenderWorker from "@anonly/render-engine/worker?worker";
 
@@ -71,7 +77,11 @@ export async function initCore(config?: EngineConfigOverrides): Promise<IAnonymi
     ner: { wasmPaths: { wasm: ortWasmUrl, mjs: ortWasmMjsUrl }, ...config?.ner },
   };
   const instance = await createCore(mergedConfig, {
-    workers: { pdf: () => new PdfWorker(), render: () => new RenderWorker() },
+    workers: {
+      pdf: () => new PdfWorker(),
+      render: () => new RenderWorker(),
+      ocr: () => new OcrWorker(),
+    },
   });
   unsubscribeBridge = subscribe(instance.bus, stores);
   core = instance;

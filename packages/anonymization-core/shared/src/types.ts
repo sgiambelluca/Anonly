@@ -203,7 +203,11 @@ export interface PdfParsePayload {
 export interface OcrPagePayload {
   readonly documentId: string;
   readonly pageIndex: number;
-  readonly imageData: ArrayBuffer;
+  // Errata corregida (ADR-036 §4): era ArrayBuffer, que no transporta
+  // width/height y el OcrWorker no puede reconstruir la imagen. Coincide con
+  // OcrPageInput del motor (03_Data_Model.md §18). Transferencia:
+  // postMessage(msg, [imageData.data.buffer]).
+  readonly imageData: ImageData;
   readonly dpi: number;
   readonly languages: ReadonlyArray<string>;
 }

@@ -1,6 +1,22 @@
+/**
+ * `OcrEngine` — clase host-side completa (ADR-045 §1, espejo de
+ * `RenderEngine`/ADR-043): loop secuencial por página, retry/timeout,
+ * depósito en `ctx.cache` y emisión de los cuatro eventos. El reconocimiento
+ * en sí (tesseract.js) vive en `./worker/kernel.ts`, invocado a través de un
+ * puerto interno `OcrJobPool` — con pool real, cruza a un Web Worker de SO
+ * (`./worker/entry.ts`); sin ella (fallback in-process, ADR-035), invoca el
+ * mismo kernel directo.
+ *
+ * La secuencia por página es una sola ruta de código host-side: resultado
+ * del kernel → `ctx.cache.set` → `emit OCR_PAGE_FINISHED` — restaura ADR-014
+ * §1 literal ("las Word[] las deposita el lado host del OcrPool") y elimina
+ * por construcción la carrera EVENT/COMPLETED que motivó ADR-045.
+ */
 import {
   CancelledError,
   EngineDisposedError,
+  EngineError,
+  EngineErrorCode,
   EngineEvents,
   EngineId,
   EngineNotInitializedError,
@@ -8,207 +24,104 @@ import {
   InvalidInputError,
   type EngineContext,
   type IEngine,
-  type Word,
+  type OcrPagePayload,
 } from "@anonly/shared";
-import { createWorker } from "tesseract.js";
 
 import { OcrModelMissingError, OcrPageFailedError, OcrTimeoutError } from "./ocr.errors.js";
 import type { OcrPageInput, OcrPageOutput } from "./ocr.types.js";
+import { kernelDispose, kernelRecognize, type KernelOcrResult } from "./worker/kernel.js";
 
 const DEFAULT_LANGUAGES: ReadonlyArray<string> = ["spa", "eng"];
 const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_MAX_RETRIES = 2;
 // OCR_Engine.md §13 caso 3: "texto muy pequeño (calidad baja): confidence < 0.5".
 const LOW_CONFIDENCE_THRESHOLD = 0.5;
-
-/*
- * ADR-018: assets de Tesseract servidos first-party, nunca desde CDNs de
- * terceros (jsDelivr/GitHub) en runtime. langPath = datos de idioma
- * entrenados (spa.traineddata/eng.traineddata, ~30MB); corePath/workerPath =
- * wasm + script del worker interno de tesseract.js. El mirror real de estos
- * assets (scripts/mirror-assets.ts + assets.lock.json) es un PR aparte
- * (instrucción explícita del humano para este PR: solo los valores de
- * configuración, sin mirror — ver ADR-018 y OCR_Engine.md §15.17).
- */
-const TESSERACT_LANG_PATH = "/models/tesseract/";
-const TESSERACT_CORE_PATH = "/wasm/tesseract/";
-const TESSERACT_WORKER_PATH = "/wasm/tesseract/";
-
-type TesseractWorker = Awaited<ReturnType<typeof createWorker>>;
+// 05_Worker_Architecture.md §6.2 ("ocr-page, página visible" — la
+// distinción visible/no-visible, 90/40, nunca se implementó: el Orchestrator
+// ya despachaba el batch completo con 90 fijo antes de ADR-045). Preservado
+// tal cual al mover el despacho de por-batch a por-página.
+const DISPATCH_PRIORITY = 90;
 
 function cacheKey(documentId: string, pageIndex: number): string {
   return `ocr-words:${documentId}:${pageIndex}`;
 }
 
-/*
- * tesseract.js no acepta `ImageData` directamente: su `ImageLike` real
- * (node_modules/tesseract.js/src/index.d.ts) es
- * `string | HTMLImageElement | HTMLCanvasElement | HTMLVideoElement |
- * CanvasRenderingContext2D | File | Blob | Buffer | OffscreenCanvas` — sin
- * `ImageData`, a pesar de que varias guías públicas de la librería lo dan
- * por aceptado. `OcrPageInput.imageData: ImageData` es el contrato fijo de
- * OCR_Engine.md §6/§9 (no se puede romper, R-2), así que la conversión vive
- * acá, en la frontera con tesseract.js. `OffscreenCanvas` es global real en
- * todo navegador (el runtime de este motor, ADR-002 "no backend"); los
- * tests mockean tesseract.js completo y no dependen del contenido real de
- * los píxeles, así que instalan un stub mínimo de `OffscreenCanvas` en el
- * entorno `node` de Vitest (ver __tests__/fixtures/test-helpers.ts).
+// ─── Puerto interno de despacho (ADR-045 §2, espejo exacto de
+// RenderJobPool/RenderDispatchParams en render-engine/src/render.engine.ts).
+// No exportado desde index.ts — detalle de wiring interno, mismo criterio
+// que RenderJobPool. ───
+
+interface OcrDispatchParams<T> {
+  readonly run: () => Promise<T>;
+  readonly signal: AbortSignal;
+  readonly priority?: number;
+  readonly payload?: unknown;
+  readonly maxRetriesOverride?: number;
+}
+
+interface OcrJobPool {
+  dispatch<T>(params: OcrDispatchParams<T>): Promise<T>;
+}
+
+/**
+ * Fallback in-process trivial: sin `OcrPool` inyectada, ejecuta `run()`
+ * directo, sin cola ni reintentos propios (el único loop de retry es el de
+ * `processPage`). Es el comportamiento de este motor antes de ADR-045
+ * (ADR-035 §1) — el que los tests existentes de este paquete ya esperan
+ * (`new OcrEngine()` sin argumento).
  */
-function toTesseractImage(
-  imageData: ImageData,
+const IMMEDIATE_POOL: OcrJobPool = {
+  dispatch: <T>(params: OcrDispatchParams<T>): Promise<T> => params.run(),
+};
+
+/**
+ * Normaliza cualquier timeout emergente del despacho a `OcrTimeoutError`
+ * (ADR-045 §2): un `OcrTimeoutError` local (fallback in-process, lanzado por
+ * `kernel.ts#recognizeWithTimeout`) ya lo es. Uno que cruzó un worker remoto
+ * llega deserializado (`EngineError.deserialize`, `Contracts.md` §4) como una
+ * instancia genérica con el `code` correcto pero que NO es
+ * `instanceof OcrTimeoutError` — sin esta normalización, el loop de retry de
+ * abajo (`if (!(normalized instanceof OcrTimeoutError)) break;`) trataría un
+ * timeout remoto como no-recuperable, cambiando la política de reintentos
+ * según haya pool real o fallback.
+ */
+function normalizeTimeout(
+  err: unknown,
   documentId: string,
   pageIndex: number,
-): OffscreenCanvas {
-  const canvas = new OffscreenCanvas(imageData.width, imageData.height);
-  const context = canvas.getContext("2d");
-  if (context === null) {
-    // Falla de entorno (sin soporte de contexto 2D), no de Tesseract en sí;
-    // se clasifica como fallo de página (misma familia que un error de
-    // recognize()), no como OCR_MODEL_MISSING.
-    throw new OcrPageFailedError(
-      documentId,
-      pageIndex,
-      "No se pudo obtener un contexto 2D de OffscreenCanvas para convertir imageData.",
-    );
+  timeoutMs: number,
+): unknown {
+  if (err instanceof OcrTimeoutError) return err;
+  if (err instanceof EngineError && err.code === EngineErrorCode.OCR_TIMEOUT) {
+    return new OcrTimeoutError(documentId, pageIndex, timeoutMs);
   }
-  context.putImageData(imageData, 0, 0);
-  return canvas;
-}
-
-function clampConfidence(value: number): number {
-  if (Number.isNaN(value)) return 0;
-  return Math.max(0, Math.min(1, value));
-}
-
-/*
- * Copia local del criterio de orden de lectura (OCR_Engine.md §10: "ordenadas
- * por bbox.y asc, luego bbox.x asc"). Mismo criterio que pdf-engine
- * (tolerancia de 1px para "misma línea"), pero NO se importa de
- * @anonly/pdf-engine: P-2 prohíbe que un motor importe a otro en código de
- * producción (la excepción de eslint.config.js para @anonly/*-engine es solo
- * dentro de __tests__). Para OCR la tolerancia es más necesaria que para
- * PDF.js: dos palabras de Tesseract en la misma línea impresa casi nunca
- * comparten el mismo y0 en píxeles exactos (a diferencia de pdf-engine, donde
- * los tokens de un mismo TextItem heredan idéntico y por construcción).
- */
-function sortWordsByReadingOrder(words: ReadonlyArray<Word>): Word[] {
-  const sorted = [...words];
-  sorted.sort((a, b) => {
-    const dy = a.bbox.y - b.bbox.y;
-    if (Math.abs(dy) > 1) return dy;
-    return a.bbox.x - b.bbox.x;
-  });
-  return sorted;
-}
-
-// ─── Extracción defensiva del resultado de tesseract.js ───
-//
-// tesseract.js no tiene un tipo propio publicado en Contracts.md (regla §10:
-// "ningún tipo puede referenciar tipos de librerías externas"; wrappers
-// propios). En vez de castear el resultado real de recognize() contra un tipo
-// local asumido (riesgo real: la forma exacta de Page/Block/Word de
-// tesseract.js no está fijada por ningún contrato propio y no se puede
-// verificar con certeza total sin acoplarse a una versión concreta), se usan
-// guards de runtime sobre `unknown`. Es resiliente a diferencias menores de
-// forma entre versiones de la librería, a costa de descartar silenciosamente
-// entradas que no matchean la forma esperada (Block > Paragraph > Line > Word,
-// ver naptha/tesseract.js docs/api.md — recognize(image, {}, { blocks: true })).
-
-interface ExtractedWord {
-  readonly text: string;
-  readonly confidence: number;
-  readonly bbox: {
-    readonly x0: number;
-    readonly y0: number;
-    readonly x1: number;
-    readonly y1: number;
-  };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function isUnknownArray(value: unknown): value is ReadonlyArray<unknown> {
-  return Array.isArray(value);
-}
-
-function toBboxIfValid(value: unknown): ExtractedWord["bbox"] | null {
-  if (!isRecord(value)) return null;
-  const { x0, y0, x1, y1 } = value;
-  if (
-    typeof x0 !== "number" ||
-    typeof y0 !== "number" ||
-    typeof x1 !== "number" ||
-    typeof y1 !== "number"
-  ) {
-    return null;
-  }
-  return { x0, y0, x1, y1 };
-}
-
-function toWordIfValid(value: unknown): ExtractedWord | null {
-  if (!isRecord(value)) return null;
-  const { text, confidence, bbox } = value;
-  const parsedBbox = toBboxIfValid(bbox);
-  if (typeof text !== "string" || typeof confidence !== "number" || parsedBbox === null) {
-    return null;
-  }
-  return { text, confidence, bbox: parsedBbox };
-}
-
-function extractTesseractWords(data: unknown): ReadonlyArray<ExtractedWord> {
-  const words: ExtractedWord[] = [];
-  if (!isRecord(data) || !isUnknownArray(data.blocks)) return words;
-
-  for (const block of data.blocks) {
-    if (!isRecord(block) || !isUnknownArray(block.paragraphs)) continue;
-    for (const paragraph of block.paragraphs) {
-      if (!isRecord(paragraph) || !isUnknownArray(paragraph.lines)) continue;
-      for (const line of paragraph.lines) {
-        if (!isRecord(line) || !isUnknownArray(line.words)) continue;
-        for (const wordValue of line.words) {
-          const word = toWordIfValid(wordValue);
-          if (word !== null) words.push(word);
-        }
-      }
-    }
-  }
-  return words;
-}
-
-function extractPageConfidence(data: unknown): number {
-  if (isRecord(data) && typeof data.confidence === "number") {
-    return data.confidence;
-  }
-  return 0;
-}
-
-function toWords(data: unknown, pageIndex: number): Word[] {
-  const tesseractWords = extractTesseractWords(data);
-  const words: Word[] = tesseractWords.map((w) => ({
-    text: w.text.normalize("NFC"),
-    bbox: {
-      x: w.bbox.x0,
-      y: w.bbox.y0,
-      width: w.bbox.x1 - w.bbox.x0,
-      height: w.bbox.y1 - w.bbox.y0,
-    },
-    pageIndex,
-    confidence: clampConfidence(w.confidence / 100),
-    source: "ocr" as const,
-  }));
-  return sortWordsByReadingOrder(words);
+  return err;
 }
 
 export class OcrEngine implements IEngine {
   readonly id = EngineId.Ocr;
 
+  private readonly pool: OcrJobPool;
+
   private ctx: EngineContext | null = null;
-  private worker: TesseractWorker | null = null;
-  private loadedLanguages: ReadonlySet<string> = new Set();
   private initialized = false;
   private disposed = false;
+  // "Ningún reconocimiento completado aún" (ADR-045 §4) — reemplaza
+  // `this.worker !== null` de antes de ADR-045: misma semántica per-instancia
+  // (OCR_STARTED.modelLoading/OCR_FINISHED.modelDownloaded), pero el estado
+  // del worker de tesseract ahora vive en el kernel, no en la instancia.
+  private modelWarm = false;
+
+  /**
+   * `pool` (ADR-045 §2): inyectada por el façade en `createCore`
+   * (`create-core.ts`, espejo de `new RenderEngine(renderPool)`). Sin
+   * argumento, cae al fallback in-process trivial (`IMMEDIATE_POOL`) — el
+   * comportamiento que este motor tenía antes de ADR-045, usado por sus
+   * propios tests.
+   */
+  constructor(pool?: OcrJobPool) {
+    this.pool = pool ?? IMMEDIATE_POOL;
+  }
 
   init(ctx: EngineContext): Promise<void> {
     this.ctx = ctx;
@@ -246,12 +159,24 @@ export class OcrEngine implements IEngine {
       throw new CancelledError(documentId);
     }
 
-    await this.ensureWorkerLoaded(ctx);
-    this.assertLanguagesLoaded(languages, documentId, pageIndex);
+    const configuredLanguages =
+      ctx.config.ocr.languages.length > 0 ? ctx.config.ocr.languages : DEFAULT_LANGUAGES;
+    this.assertLanguagesRequestable(languages, configuredLanguages, documentId, pageIndex);
 
     const timeoutMs = ctx.config.workerPool.timeouts["ocr-page"] ?? DEFAULT_TIMEOUT_MS;
     const maxRetries = ctx.config.workerPool.maxRetries["ocr-page"] ?? DEFAULT_MAX_RETRIES;
     const startedAt = Date.now();
+
+    // El payload transporta la config EFECTIVA (con fallback de default ya
+    // resuelto), no `input.languages` crudo: es lo que el kernel debe tener
+    // cargado (ADR-045 §3); la restricción per-página ya se validó arriba.
+    const payload: OcrPagePayload = {
+      documentId,
+      pageIndex,
+      imageData,
+      dpi: input.dpi,
+      languages: configuredLanguages,
+    };
 
     let lastError: unknown = null;
 
@@ -261,15 +186,21 @@ export class OcrEngine implements IEngine {
       }
 
       try {
-        const data = await this.recognizeWithTimeout(
-          imageData,
-          documentId,
-          pageIndex,
-          timeoutMs,
-          ctx.abortSignal,
-        );
-        const words = toWords(data, pageIndex);
-        const confidence = clampConfidence(extractPageConfidence(data) / 100);
+        // ADR-045 §2: solo el reconocimiento cruza el puerto.
+        // `maxRetriesOverride: 0` — el pool nunca reintenta un `ocr-page`; el
+        // único loop de retry es este.
+        const result = await this.pool.dispatch<KernelOcrResult>({
+          run: () => kernelRecognize(payload, { timeoutMs, abortSignal: ctx.abortSignal }),
+          signal: ctx.abortSignal,
+          priority: DISPATCH_PRIORITY,
+          payload,
+          maxRetriesOverride: 0,
+        });
+        // El despacho no lanzó OcrModelMissingError: el modelo quedó cargado
+        // (independientemente de si esta página en particular tuvo éxito).
+        this.modelWarm = true;
+
+        const { words, confidence } = result;
         const durationMs = Date.now() - startedAt;
 
         // Caso 3 (§13): páginas con texto detectado pero de baja calidad. Las
@@ -284,8 +215,9 @@ export class OcrEngine implements IEngine {
           });
         }
 
+        // ADR-045 §1: depósito + emisión, en ese orden, host-side — restaura
+        // ADR-014 §1 literal y elimina la carrera EVENT/COMPLETED.
         ctx.cache.set(cacheKey(documentId, pageIndex), words);
-
         ctx.bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
           documentId,
           pageIndex,
@@ -296,8 +228,18 @@ export class OcrEngine implements IEngine {
         return { documentId, pageIndex, words, confidence, durationMs };
       } catch (err: unknown) {
         if (err instanceof CancelledError) throw err;
-        lastError = err;
-        if (!(err instanceof OcrTimeoutError)) break; // no recuperable: no reintentar
+        // No recuperable y no es "esta página falló" — es "el modelo no
+        // cargó": se propaga tal cual, sin envolver en OcrPageFailedError
+        // (mismo criterio que antes de ADR-045: ensureWorkerLoaded corría
+        // fuera del loop de retry).
+        if (err instanceof OcrModelMissingError) throw err;
+        // Cualquier otro resultado del despacho (éxito de carga, falla de
+        // reconocimiento) implica que el modelo sí quedó cargado.
+        this.modelWarm = true;
+
+        const normalized = normalizeTimeout(err, documentId, pageIndex, timeoutMs);
+        lastError = normalized;
+        if (!(normalized instanceof OcrTimeoutError)) break; // no recuperable: no reintentar
         // OcrTimeoutError: recuperable, el for reintenta si quedan intentos.
       }
     }
@@ -324,7 +266,7 @@ export class OcrEngine implements IEngine {
 
     const documentId = inputs[0]?.documentId ?? "";
     const pagesToProcess = inputs.map((i) => i.pageIndex);
-    const modelAlreadyLoaded = this.worker !== null;
+    const modelAlreadyLoaded = this.modelWarm;
     const startedAt = Date.now();
 
     ctx.bus.emit(EventChannel.Ocr, EngineEvents.OCR_STARTED, {
@@ -369,110 +311,36 @@ export class OcrEngine implements IEngine {
   }
 
   async dispose(): Promise<void> {
-    if (this.worker !== null) {
-      const worker = this.worker;
-      this.worker = null;
-      try {
-        await worker.terminate();
-      } catch {
-        // best-effort: liberar igual el estado interno aunque terminate() falle.
-      }
-    }
-    this.loadedLanguages = new Set();
+    // ADR-045 §2: no pasa por pool.dispatch (dispose no es la operación del
+    // puerto) — libera directo el kernel local. La liberación server-side en
+    // un OcrWorker real llega por el mensaje genérico DISPOSE del protocolo.
+    await kernelDispose();
+    this.modelWarm = false;
     this.disposed = true;
     this.initialized = false;
     this.ctx = null;
   }
 
-  private async ensureWorkerLoaded(ctx: EngineContext): Promise<void> {
-    if (this.worker !== null) return;
-
-    const configuredLanguages =
-      ctx.config.ocr.languages.length > 0 ? ctx.config.ocr.languages : DEFAULT_LANGUAGES;
-
-    let worker: TesseractWorker;
-    try {
-      worker = await createWorker([...configuredLanguages], undefined, {
-        langPath: TESSERACT_LANG_PATH,
-        corePath: TESSERACT_CORE_PATH,
-        workerPath: TESSERACT_WORKER_PATH,
-      });
-    } catch (err: unknown) {
-      const reason = err instanceof Error ? err.message : String(err);
-      throw new OcrModelMissingError(configuredLanguages, reason);
-    }
-
-    this.worker = worker;
-    this.loadedLanguages = new Set(configuredLanguages);
-  }
-
-  private assertLanguagesLoaded(
+  private assertLanguagesRequestable(
     languages: ReadonlyArray<string>,
+    configuredLanguages: ReadonlyArray<string>,
     documentId: string,
     pageIndex: number,
   ): void {
-    const missing = languages.filter((lang) => !this.loadedLanguages.has(lang));
+    const missing = languages.filter((lang) => !configuredLanguages.includes(lang));
     if (languages.length === 0 || missing.length > 0) {
       throw new OcrModelMissingError(
         languages,
-        `Idioma(s) no cargado(s) en el modelo para la página ${pageIndex} del documento ${documentId}: ` +
-          `[${missing.join(", ")}]. Cargados: [${[...this.loadedLanguages].join(", ")}].`,
+        `Idioma(s) no soportado(s) por la configuración para la página ${pageIndex} del documento ${documentId}: ` +
+          `[${missing.join(", ")}]. Configurados: [${configuredLanguages.join(", ")}].`,
       );
     }
   }
 
-  private async recognizeWithTimeout(
-    imageData: ImageData,
-    documentId: string,
-    pageIndex: number,
-    timeoutMs: number,
-    abortSignal: AbortSignal,
-  ): Promise<unknown> {
-    if (this.worker === null) {
-      throw new OcrModelMissingError([], "El worker de Tesseract no está inicializado.");
-    }
-    const worker = this.worker;
-
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timeoutId = setTimeout(() => {
-        reject(new OcrTimeoutError(documentId, pageIndex, timeoutMs));
-      }, timeoutMs);
-    });
-
-    let onAbort: (() => void) | undefined;
-    const abortPromise = new Promise<never>((_, reject) => {
-      if (abortSignal.aborted) {
-        reject(new CancelledError(documentId));
-        return;
-      }
-      onAbort = (): void => reject(new CancelledError(documentId));
-      abortSignal.addEventListener("abort", onAbort, { once: true });
-    });
-
-    try {
-      // El callback de progreso de Tesseract (`logger`, configurado en
-      // ensureWorkerLoaded a nivel de worker) es el checkpoint documentado en
-      // el checklist §15.6; tesseract.js no expone una API pública de
-      // cancelación por-job (a diferencia de un WorkerPool real, Hito 9), así
-      // que el mecanismo real de "dejar de esperar" es este Promise.race
-      // contra el AbortSignal — mismo patrón que el timeout de pdf-engine
-      // (parsePageTextWithTimeout): la computación WASM en curso no se
-      // interrumpe, el caller simplemente deja de esperarla. SLA estricto
-      // < 200ms: Hito 9/11 (ADR-021 §1).
-      const result = await Promise.race([
-        worker.recognize(toTesseractImage(imageData, documentId, pageIndex), {}, { blocks: true }),
-        timeoutPromise,
-        abortPromise,
-      ]);
-      return result.data;
-    } finally {
-      if (timeoutId !== undefined) clearTimeout(timeoutId);
-      if (onAbort !== undefined) abortSignal.removeEventListener("abort", onAbort);
-    }
-  }
-
   private toPageFailure(err: unknown, documentId: string, pageIndex: number): OcrPageFailedError {
+    // Evita doble-envoltura si el error ya es un OcrPageFailedError (p. ej.
+    // "sin contexto 2D de OffscreenCanvas", lanzado por el kernel).
+    if (err instanceof OcrPageFailedError) return err;
     const reason = err instanceof Error ? err.message : String(err);
     return new OcrPageFailedError(documentId, pageIndex, reason);
   }

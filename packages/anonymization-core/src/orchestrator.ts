@@ -765,12 +765,14 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       });
     }
 
-    const ocrPool = this.pools.getPool("ocr");
-    await ocrPool.dispatch({
-      run: () => this.engines.ocr.processPages(ocrInputs, ctx),
-      signal: ctx.abortSignal,
-      priority: 90,
-    });
+    // ADR-045 §2: el Orchestrator deja de envolver `processPages` en
+    // `pool.dispatch({run})` — invoca el método del motor directo; es el
+    // propio `OcrEngine` quien despacha internamente, por página, contra su
+    // `OcrPool` (inyectada por el façade en `create-core.ts`), mismo criterio
+    // que ADR-043 aplicó a `rasterizePage`/`renderPage`. El límite de
+    // concurrencia real (`ocrPoolSize`) lo sigue aplicando la propia pool del
+    // motor.
+    await this.engines.ocr.processPages(ocrInputs, ctx);
 
     // ADR-041 §3: la fusión (ADR-014) la dispara `handleOcrPageFinished` de
     // forma síncrona por cada `OCR_PAGE_FINISHED` (IEventBus.emit despacha en

@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@anonly/anonymization-core": "workspace:*",
+    "@anonly/ocr-engine": "workspace:*",
     "@anonly/pdf-engine": "workspace:*",
     "@anonly/render-engine": "workspace:*",
     "@radix-ui/react-checkbox": "^1.1.2",

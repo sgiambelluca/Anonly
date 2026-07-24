@@ -90,6 +90,9 @@ importers:
       '@anonly/anonymization-core':
         specifier: workspace:*
         version: link:../../packages/anonymization-core
+      '@anonly/ocr-engine':
+        specifier: workspace:*
+        version: link:../../packages/anonymization-core/ocr-engine
       '@anonly/pdf-engine':
         specifier: workspace:*
         version: link:../../packages/anonymization-core/pdf-engine
