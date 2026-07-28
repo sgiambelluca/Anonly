@@ -643,7 +643,7 @@ describe("Orchestrator — unit tests", () => {
       expect(run).not.toHaveBeenCalled();
     });
 
-    it("READY y PROGRESS no requieren acción del pool: el job sigue pendiente hasta COMPLETED", async () => {
+    it("READY y un PROGRESS sin onProgress registrado no requieren acción del pool: el job sigue pendiente hasta COMPLETED", async () => {
       const worker = createFakeWorker();
       const pool = new WorkerPool({
         poolKey: "pdf",
@@ -671,6 +671,83 @@ describe("Orchestrator — unit tests", () => {
       worker.emitMessage({ type: "COMPLETED", jobId, result: "done" });
 
       await expect(dispatchPromise).resolves.toBe("done");
+    });
+
+    // ─── PROGRESS -> onProgress (ADR-046 §4, PR15) ───
+
+    it("un PROGRESS con onProgress registrado se lo entrega, correlacionado por jobId", async () => {
+      const worker = createFakeWorker();
+      const pool = new WorkerPool({
+        poolKey: "ner",
+        jobType: "ner-page",
+        size: 1,
+        maxQueue: 10,
+        maxRetries: 0,
+        baseRetryDelayMs: 1,
+        maxRetryDelayMs: 1,
+        bus,
+        logger: createMockLogger(),
+        workerFactory: () => worker,
+      });
+
+      const onProgress = vi.fn();
+      const dispatchPromise = pool.dispatch({
+        run: vi.fn(),
+        payload: {},
+        signal: new AbortController().signal,
+        onProgress,
+      });
+      await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalled());
+      const jobId = (worker.postMessage.mock.calls[0]?.[0] as { readonly jobId: string }).jobId;
+
+      worker.emitMessage({
+        type: "PROGRESS",
+        jobId,
+        progress: 0.5,
+        partial: { phase: "model-loading", modelId: "test-model" },
+      });
+
+      expect(onProgress).toHaveBeenCalledTimes(1);
+      expect(onProgress).toHaveBeenCalledWith(0.5, {
+        phase: "model-loading",
+        modelId: "test-model",
+      });
+
+      worker.emitMessage({ type: "COMPLETED", jobId, result: "done" });
+      await expect(dispatchPromise).resolves.toBe("done");
+    });
+
+    it("un PROGRESS de un job ya resuelto se descarta sin lanzar", async () => {
+      const worker = createFakeWorker();
+      const pool = new WorkerPool({
+        poolKey: "ner",
+        jobType: "ner-page",
+        size: 1,
+        maxQueue: 10,
+        maxRetries: 0,
+        baseRetryDelayMs: 1,
+        maxRetryDelayMs: 1,
+        bus,
+        logger: createMockLogger(),
+        workerFactory: () => worker,
+      });
+
+      const onProgress = vi.fn();
+      const dispatchPromise = pool.dispatch({
+        run: vi.fn(),
+        payload: {},
+        signal: new AbortController().signal,
+        onProgress,
+      });
+      await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalled());
+      const jobId = (worker.postMessage.mock.calls[0]?.[0] as { readonly jobId: string }).jobId;
+
+      worker.emitMessage({ type: "COMPLETED", jobId, result: "done" });
+      await expect(dispatchPromise).resolves.toBe("done");
+
+      onProgress.mockClear();
+      expect(() => worker.emitMessage({ type: "PROGRESS", jobId, progress: 0.9 })).not.toThrow();
+      expect(onProgress).not.toHaveBeenCalled();
     });
 
     it("con workerFactory pero sin payload, sigue siendo in-process (fallback, sin romper el Hito 9)", async () => {

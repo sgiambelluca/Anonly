@@ -41,6 +41,7 @@ import {
   type EventPayloadMap,
   type IEventBus,
   type ILogger,
+  type Serializable,
   type SerializedEngineError,
   type WorkerFactory,
   type WorkerInbound,
@@ -82,6 +83,13 @@ interface PendingRemoteJob {
   readonly slotIndex: number;
   readonly resolve: (result: unknown) => void;
   readonly reject: (err: unknown) => void;
+  /**
+   * Ciclo de vida del modelo NER reportado por un worker remoto (ADR-046
+   * §4, primer consumidor de `PROGRESS`): enrutado por `jobId` desde
+   * `handleWorkerMessage`. Ausente para jobs que no lo necesitan (pdf/ocr/
+   * render) — no se llama nunca en ese caso.
+   */
+  readonly onProgress?: (progress: number, partial?: Serializable) => void;
 }
 
 export interface WorkerPoolOptions {
@@ -142,6 +150,17 @@ export interface DispatchParams<TResult> {
    * contraseña faltante.
    */
   readonly isRetryable?: (err: unknown) => boolean;
+  /**
+   * Ciclo de vida del modelo NER (ADR-046 §4): `WorkerPool` deja de
+   * descartar los `PROGRESS` — los enruta al job pendiente correspondiente
+   * (por `jobId`) para que el motor los traduzca a eventos de dominio en
+   * host. Un `PROGRESS` de un job ya resuelto se descarta en silencio
+   * (`handleWorkerMessage`). En modo in-process (`executeJob` invoca
+   * `params.run()` directo) este campo no lo usa el pool: el motor ya le
+   * pasa el mismo callback directo al kernel (ADR-035, comportamiento
+   * observable idéntico).
+   */
+  readonly onProgress?: (progress: number, partial?: Serializable) => void;
 }
 
 interface QueueEntry {
@@ -451,7 +470,7 @@ export class WorkerPool {
    */
   private executeJob<TResult>(jobId: string, params: DispatchParams<TResult>): Promise<TResult> {
     if (this.options.workerFactory !== undefined && params.payload !== undefined) {
-      return this.dispatchRemote<TResult>(jobId, params.payload, params.signal);
+      return this.dispatchRemote<TResult>(jobId, params.payload, params.signal, params.onProgress);
     }
     return params.run();
   }
@@ -460,12 +479,15 @@ export class WorkerPool {
    * Despacha un job por `postMessage` a una instancia real de worker (una
    * por slot de concurrencia, creada perezosamente — `workerForSlot`).
    * Correlaciona la respuesta por `jobId` vía `pendingRemoteJobs`,
-   * gestionado en `handleWorkerMessage`.
+   * gestionado en `handleWorkerMessage`. `onProgress` (ADR-046 §4) se
+   * registra junto al resto del job pendiente para que un `PROGRESS` de este
+   * `jobId` se lo entregue `handleWorkerMessage`.
    */
   private dispatchRemote<TResult>(
     jobId: string,
     payload: unknown,
     signal: AbortSignal,
+    onProgress?: (progress: number, partial?: Serializable) => void,
   ): Promise<TResult> {
     const slot = this.assignRemoteSlot();
 
@@ -474,6 +496,7 @@ export class WorkerPool {
         slotIndex: slot,
         resolve: (result) => resolve(result as TResult),
         reject,
+        ...(onProgress !== undefined ? { onProgress } : {}),
       });
 
       // `workerForSlot` es async (ADR-043 §5: un worker nuevo se re-primea —
@@ -578,9 +601,13 @@ export class WorkerPool {
    * reenvía EVENT al bus real (transporte mecánico — ADR-013 §6: "los
    * eventos observables se emiten siempre en host"; el afinado de payload
    * específico de motor es responsabilidad del host-bridge de cada motor,
-   * ADR-036 §3, fuera de alcance de este PR). READY/PROGRESS no requieren
-   * acción del pool: RUN ya se encola sin esperar READY, y el progreso
-   * granular hacia PIPELINE_PROGRESS queda para el host-bridge.
+   * ADR-036 §3, fuera de alcance de este PR). READY no requiere acción del
+   * pool: RUN ya se encola sin esperar READY. PROGRESS (ADR-046 §4) se
+   * enruta al `onProgress` del job pendiente correspondiente, por `jobId`
+   * — el primer consumidor es el ciclo de vida del modelo NER, que el motor
+   * traduce a `NER_MODEL_LOADING`/`NER_MODEL_READY` en host; no es una vía
+   * para emitir eventos observables desde el worker (eso sigue siendo
+   * terreno de `EVENT`).
    */
   private handleWorkerMessage(ev: unknown): void {
     const outbound = extractWorkerOutbound(ev);
@@ -602,7 +629,14 @@ export class WorkerPool {
       return;
     }
 
-    if (outbound.type === "READY" || outbound.type === "PROGRESS") {
+    if (outbound.type === "READY") {
+      return;
+    }
+
+    if (outbound.type === "PROGRESS") {
+      // Un PROGRESS de un job ya resuelto (o que nunca registró onProgress)
+      // se descarta en silencio (ADR-046 §4).
+      this.pendingRemoteJobs.get(outbound.jobId)?.onProgress?.(outbound.progress, outbound.partial);
       return;
     }
 

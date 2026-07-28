@@ -40,25 +40,28 @@ import { WorkerPool } from "./worker-pool.js";
  *
  * `runtime` (Hito 10, ADR-036 §2, Contracts.md §3.5): factories de `Worker`
  * real por `WorkerEntryKind`, forwarded tal cual al `PipelineOrchestrator`
- * (ver `PipelineOrchestratorOptions.runtime`) para los pools pdf/ner.
+ * (ver `PipelineOrchestratorOptions.runtime`) para el pool pdf.
  * Ausente => todo in-process, comportamiento idéntico al Hito 9 (parámetro
  * aditivo, no rompe callers existentes).
  *
- * `RenderPool` (ADR-043 §2, Hito 10 PR13) y `OcrPool` (ADR-045 §2, Hito 10
- * PR14): a diferencia de pdf/ner (cuyos pools los crea y posee
- * `PipelineOrchestrator`/`WorkerPoolManager`), estas dos las construye este
- * façade DIRECTO y se inyectan en el constructor del motor correspondiente —
- * el motor despacha internamente contra su propia pool
- * (`RenderEngine.renderPage`/`rasterizePage`/`loadDocument`/`unloadDocument`
- * convergen en `pool.dispatch`/`pool.broadcast`; `OcrEngine.processPage`
- * converge en `pool.dispatch`). El Orchestrator ya no sostiene ninguna
- * referencia a un pool de render u ocr (dejó de envolver esas llamadas, ver
- * `orchestrator.ts#runOcrStage`/`makeRenderPageProvider`). `onWorkerCreated`
- * de `renderPool` cierra sobre `engines.render` (asignado más abajo, tras
- * construir el objeto `engines`) para re-primear un RenderWorker nuevo/
- * reemplazado con los documentos vigentes ANTES de que acepte jobs (ADR-043
- * §5); `ocrPool` no necesita el equivalente — `ocr-engine` no retiene estado
- * por documento (ADR-041 §5, "Ninguno... Libre").
+ * `RenderPool` (ADR-043 §2, Hito 10 PR13), `OcrPool` (ADR-045 §2, Hito 10
+ * PR14) y `NerPool` (ADR-046 §2/§7, Hito 10 PR15): a diferencia de pdf (cuyo
+ * pool lo crea y posee `PipelineOrchestrator`/`WorkerPoolManager`), estas
+ * tres las construye este façade DIRECTO y se inyectan en el constructor del
+ * motor correspondiente — el motor despacha internamente contra su propia
+ * pool (`RenderEngine.renderPage`/`rasterizePage`/`loadDocument`/
+ * `unloadDocument` convergen en `pool.dispatch`/`pool.broadcast`;
+ * `OcrEngine.processPage`/`NerEngine.processPage` convergen en
+ * `pool.dispatch`). El Orchestrator ya no sostiene ninguna referencia a un
+ * pool de render, ocr o ner (dejó de envolver esas llamadas, ver
+ * `orchestrator.ts#runOcrStage`/`makeRenderPageProvider`/
+ * `runDetectionStage`/`runReanalyzeNerOnFlow`/`runReanalyzeOcrFlow`).
+ * `onWorkerCreated` de `renderPool` cierra sobre `engines.render` (asignado
+ * más abajo, tras construir el objeto `engines`) para re-primear un
+ * RenderWorker nuevo/reemplazado con los documentos vigentes ANTES de que
+ * acepte jobs (ADR-043 §5); `ocrPool`/`nerPool` no necesitan el equivalente —
+ * ni `ocr-engine` ni `ner-engine` retienen estado por documento (ADR-041
+ * §5/§9, "Ninguno... Libre").
  */
 export async function createCore(
   config?: EngineConfigOverrides,
@@ -106,11 +109,26 @@ export async function createCore(
     ...(runtime?.workers?.ocr !== undefined ? { workerFactory: runtime.workers.ocr } : {}),
   });
 
+  // ADR-046 §2/§7: tercer espejo de renderPool/ocrPool, sin onWorkerCreated
+  // (sin estado por documento que re-primear, ADR-041 §5/§9).
+  const nerPool = new WorkerPool({
+    poolKey: "ner",
+    jobType: "ner-page",
+    size: mergedConfig.workerPool.nerPoolSize,
+    maxQueue: mergedConfig.workerPool.maxQueuePerPool.ner,
+    maxRetries: mergedConfig.workerPool.maxRetries["ner-page"],
+    baseRetryDelayMs: mergedConfig.workerPool.baseRetryDelayMs,
+    maxRetryDelayMs: mergedConfig.workerPool.maxRetryDelayMs,
+    bus,
+    logger,
+    ...(runtime?.workers?.ner !== undefined ? { workerFactory: runtime.workers.ner } : {}),
+  });
+
   const engines: AnonymizationCoreEngines = {
     pdf: new PdfEngine(),
     ocr: new OcrEngine(ocrPool),
     regex: new RegexEngine(),
-    ner: new NerEngine(),
+    ner: new NerEngine(nerPool),
     grouping: new GroupingEngine(),
     render: new RenderEngine(renderPool),
     export: new ExportEngine(),
@@ -158,6 +176,7 @@ export async function createCore(
       initAbortController.abort();
       renderPool.dispose();
       ocrPool.dispose();
+      nerPool.dispose();
       await orchestrator.dispose();
       bus.dispose();
     },

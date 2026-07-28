@@ -15,9 +15,15 @@
  * kernel de reconocimiento (tesseract.js) sin estado por documento; la clase
  * `OcrEngine` (loop por página, retry, depósito en cache, eventos) queda
  * host-side y despacha por página contra su propia `OcrPool` (construida en
- * `create-core.ts`, no acá — esta factory solo llega hasta esa pool). El
- * resto de los motores (ner/export) siguen in-process hasta sus propios PRs
- * de worker (ADR-036 §8, filas 15-16).
+ * `create-core.ts`, no acá — esta factory solo llega hasta esa pool).
+ * `@anonly/ner-engine` (PR15, ADR-046) es el cuarto, mismo reparto host/
+ * worker: `NerWorker` corre el kernel de inferencia
+ * (`@huggingface/transformers`) sin estado por documento; la clase
+ * `NerEngine` (loop por página, partición en batches, retry, mapeo bbox,
+ * eventos) queda host-side y despacha por batch contra su propia `NerPool`
+ * (construida en `create-core.ts`, no acá). El resto de los motores
+ * (export) sigue in-process hasta su propio PR de worker (ADR-036 §8, fila
+ * 16).
  */
 
 import {
@@ -26,6 +32,7 @@ import {
   type IAnonymizationCore,
   type Unsubscribe,
 } from "@anonly/anonymization-core";
+import NerWorker from "@anonly/ner-engine/worker?worker";
 import OcrWorker from "@anonly/ocr-engine/worker?worker";
 import PdfWorker from "@anonly/pdf-engine/worker?worker";
 import RenderWorker from "@anonly/render-engine/worker?worker";
@@ -81,6 +88,7 @@ export async function initCore(config?: EngineConfigOverrides): Promise<IAnonymi
       pdf: () => new PdfWorker(),
       render: () => new RenderWorker(),
       ocr: () => new OcrWorker(),
+      ner: () => new NerWorker(),
     },
   });
   unsubscribeBridge = subscribe(instance.bus, stores);

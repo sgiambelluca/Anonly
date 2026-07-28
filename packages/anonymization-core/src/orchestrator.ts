@@ -454,11 +454,13 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       words: page.words,
     }));
 
-    await this.pools.getPool("ner").dispatch({
-      run: () => this.engines.ner.processPages(nerInputs, ctx),
-      signal: ctx.abortSignal,
-      priority: 80,
-    });
+    // ADR-046 §7: el Orchestrator deja de envolver `processPages` en
+    // `pools.getPool("ner").dispatch({run})` — invoca el método del motor
+    // directo; es el propio `NerEngine` quien despacha internamente, por
+    // batch, contra su `NerPool` (inyectada por el façade en
+    // `create-core.ts`), mismo criterio que ADR-043/ADR-045 aplicaron a
+    // render/OCR.
+    await this.engines.ner.processPages(nerInputs, ctx);
     // Auto-finish vía la propia suscripción de GroupingEngine a NER_FINISHED
     // (regexFinished ya es true por reopenSession(expectRegex: false)).
   }
@@ -521,11 +523,11 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
 
     this.progressByDocument.set(documentId, { total: nerInputs.length, current: 0 });
 
-    await this.pools.getPool("ner").dispatch({
-      run: () => this.engines.ner.processPages(nerInputs, ctx),
-      signal: ctx.abortSignal,
-      priority: 80,
-    });
+    // ADR-046 §7 (mismo tratamiento que el call site de
+    // `runReanalyzeNerOnFlow`, aplicado acá por consistencia: el motor ya no
+    // acepta ser envuelto en un `pool.dispatch` externo sin duplicar su
+    // propio retry interno — problema 2 del Contexto de ADR-046).
+    await this.engines.ner.processPages(nerInputs, ctx);
     // Auto-finish vía GroupingEngine (regex + ner, ambos *_FINISHED).
   }
 
@@ -811,11 +813,13 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       words: page.words,
     }));
 
-    await this.pools.getPool("ner").dispatch({
-      run: () => this.engines.ner.processPages(nerInputs, ctx),
-      signal: ctx.abortSignal,
-      priority: 80,
-    });
+    // ADR-046 §7: el Orchestrator deja de envolver `processPages` en
+    // `pools.getPool("ner").dispatch({run})` — invoca el método del motor
+    // directo; es el propio `NerEngine` quien despacha internamente, por
+    // batch, contra su `NerPool` (inyectada por el façade en
+    // `create-core.ts`), mismo criterio que ADR-045 aplicó a `processPages`
+    // de OCR.
+    await this.engines.ner.processPages(nerInputs, ctx);
     // Grouping auto-finaliza al recibir REGEX_FINISHED + NER_FINISHED por su
     // propia suscripción (sin cambios respecto de Hito 6); no hace falta
     // invocar finishSession acá.

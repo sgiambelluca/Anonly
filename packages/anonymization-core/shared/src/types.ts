@@ -18,6 +18,10 @@ import type {
   RuleScope,
   WorkerJobType,
 } from "./enums.js";
+// Import type-only circular con interfaces.ts (que ya importa WorkerCapabilities
+// desde este archivo): ambos son `import type`, se erosionan por completo en
+// runtime (verbatimModuleSyntax/isolatedModules), sin ciclo de módulos JS real.
+import type { NerWasmPaths } from "./interfaces.js";
 
 export interface BoundingBox {
   readonly x: number;
@@ -212,11 +216,19 @@ export interface OcrPagePayload {
   readonly languages: ReadonlyArray<string>;
 }
 
+// ADR-046 §3/§5: `text` es el texto de UN BATCH de NerConfig.batchSize
+// palabras (la partición la hace NerEngine host-side, que es quien tiene las
+// Word[] para el bbox; ADR-024 §2). `quantization` y `wasmPaths` viajan en el
+// job porque el kernel es quien carga el modelo y configura Transformers.js
+// contra el origen propio (ADR-039), y WorkerPool todavía no transporta INIT
+// con la config real.
 export interface NerPagePayload {
   readonly documentId: string;
   readonly pageIndex: number;
   readonly text: string;
   readonly modelId: string;
+  readonly quantization: "q8" | "q4" | "f32";
+  readonly wasmPaths?: string | NerWasmPaths;
 }
 
 export interface RenderPagePayload {
@@ -274,6 +286,28 @@ export interface RasterizePagePayload {
   readonly pageIndex: number;
   readonly scale: number;
 }
+
+// Salida del kernel del NerWorker (COMPLETED { spans }, ADR-046 §1): spans de
+// entidad ya agregados desde los tokens BIO, con offsets relativos al texto
+// del batch. Sin bbox, sin wordSpan y sin id: el mapeo a Occurrence lo hace
+// NerEngine en el host, que es quien tiene las Word[] de la página.
+export interface NerKernelSpan {
+  readonly entityType: EntityType;
+  readonly value: string;
+  readonly normalizedValue: string;
+  readonly confidence: number;
+  readonly startIndex: number;
+  readonly endIndexExclusive: number;
+}
+
+// Ciclo de vida del modelo NER reportado por el kernel en PROGRESS.partial
+// (ADR-046 §4): telemetría de transporte, NO eventos de dominio. El motor la
+// traduce en host a NER_MODEL_LOADING / NER_MODEL_READY (uno por instancia) /
+// logger.warn. El fraction de descarga viaja en PROGRESS.progress ∈ [0,1].
+export type NerKernelProgress =
+  | { readonly phase: "model-loading"; readonly modelId: string }
+  | { readonly phase: "model-ready"; readonly modelId: string }
+  | { readonly phase: "model-load-retry"; readonly modelId: string; readonly reason: string };
 
 export interface ExportOptions {
   readonly imageFormat: "png" | "jpeg";

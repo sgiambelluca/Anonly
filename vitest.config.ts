@@ -24,45 +24,75 @@ const rootDir = fileURLToPath(new URL(".", import.meta.url));
  * - `deps.moduleDirectories` evita que Vitest siga symlinks de pnpm y duplique tests.
  * - `resolve.alias` fuerza a que @anonly/shared y @anonly/event-system siempre
  *   resuelvan al workspace real (no al symlink dentro de node_modules).
+ * - `resolve.alias` es un ARRAY (no el objeto `{ find: replacement }` más
+ *   simple) porque `@anonly/ner-engine` necesita un `find` como RegExp
+ *   anclado (`^...$`), no un string: el alias de Vite con `find` string
+ *   matchea por PREFIJO (`id === find || id.startsWith(find + "/")`) y
+ *   reemplaza solo esa porción, concatenando el resto tal cual sobre el
+ *   `replacement` — que acá es un ARCHIVO (`.../ner-engine/src/index.ts`),
+ *   no un directorio. Desde que `ner-engine` ganó el subpath `"./worker"` en
+ *   su `package.json` (PR15, ADR-046), un import `@anonly/ner-engine/worker`
+ *   bajo este mismo config (p. ej. `apps/react-client/src/__tests__/
+ *   core-adapter.test.ts`, que corre bajo el `vitest.config.ts` raíz) caía en
+ *   ese alias de prefijo y resolvía a `.../src/index.ts/worker` (inexistente)
+ *   en vez de dejar que Node/Vite resuelvan la subpath real vía `exports`.
+ *   El resto de las entradas queda con `find` string (comportamiento
+ *   idéntico al objeto previo): ninguna otra expone subpaths propios hoy.
  * - `exclude` explícitamente excluye node_modules para que los tests dentro de
  *   symlinks no se dupliquen.
  */
 export default defineConfig({
   resolve: {
-    alias: {
-      "@anonly/shared": resolve(rootDir, "packages/anonymization-core/shared/src/index.ts"),
-      "@anonly/event-system": resolve(
-        rootDir,
-        "packages/anonymization-core/event-system/src/index.ts",
-      ),
-      "@anonly/anonymization-core": resolve(rootDir, "packages/anonymization-core/src/index.ts"),
+    alias: [
+      {
+        find: "@anonly/shared",
+        replacement: resolve(rootDir, "packages/anonymization-core/shared/src/index.ts"),
+      },
+      {
+        find: "@anonly/event-system",
+        replacement: resolve(rootDir, "packages/anonymization-core/event-system/src/index.ts"),
+      },
+      {
+        find: "@anonly/anonymization-core",
+        replacement: resolve(rootDir, "packages/anonymization-core/src/index.ts"),
+      },
       // export-engine no es dependencia de ningún package.json de la raíz ni de
       // otro motor (P-2): pnpm no lo enlaza en node_modules/@anonly desde la
       // raíz. tests/security/security.test.ts (fuera del paquete) lo importa
       // por contrato público; este alias lo resuelve al workspace real, mismo
       // criterio que las tres entradas de arriba.
-      "@anonly/export-engine": resolve(
-        rootDir,
-        "packages/anonymization-core/export-engine/src/index.ts",
-      ),
+      {
+        find: "@anonly/export-engine",
+        replacement: resolve(rootDir, "packages/anonymization-core/export-engine/src/index.ts"),
+      },
       // tests/integration/ (Hito 9, ADR-034 §6) importa estos motores
       // directamente para el par crítico "Regex + NER → Grouping vía
       // ENTITY_FOUND" con motores reales; mismo criterio que export-engine.
-      "@anonly/regex-engine": resolve(
-        rootDir,
-        "packages/anonymization-core/regex-engine/src/index.ts",
-      ),
-      "@anonly/ner-engine": resolve(rootDir, "packages/anonymization-core/ner-engine/src/index.ts"),
-      "@anonly/grouping-engine": resolve(
-        rootDir,
-        "packages/anonymization-core/grouping-engine/src/index.ts",
-      ),
-    },
+      {
+        find: "@anonly/regex-engine",
+        replacement: resolve(rootDir, "packages/anonymization-core/regex-engine/src/index.ts"),
+      },
+      // RegExp anclado (no string): ver nota de cabecera — evita que
+      // `@anonly/ner-engine/worker` (PR15, ADR-046) caiga en este alias.
+      {
+        find: /^@anonly\/ner-engine$/,
+        replacement: resolve(rootDir, "packages/anonymization-core/ner-engine/src/index.ts"),
+      },
+      {
+        find: "@anonly/grouping-engine",
+        replacement: resolve(rootDir, "packages/anonymization-core/grouping-engine/src/index.ts"),
+      },
+    ],
   },
   test: {
     environment: "node",
     include: [
-      "packages/**/src/__tests__/**/*.test.ts",
+      // `src/**/__tests__/` (no `src/__tests__/` literal): PR15/ADR-046 es el
+      // primer motor con tests anidados junto a un subdirectorio de código
+      // (`src/worker/__tests__/`, NER_Engine.md §14) — el `**` extra entre
+      // `src` y `__tests__` sigue matcheando el layout plano de todos los
+      // demás paquetes (`src/__tests__/*.test.ts`), verificado con picomatch.
+      "packages/**/src/**/__tests__/**/*.test.ts",
       "tests/**/*.test.ts",
       "apps/**/src/__tests__/**/*.test.ts",
     ],

@@ -55,6 +55,8 @@ export type {
   LoadDocumentPayload,
   UnloadDocumentPayload,
   RasterizePagePayload,
+  NerKernelSpan,
+  NerKernelProgress,
   ExportOptions,
   ExportMetadata,
   WorkerCapabilities,
