@@ -30,7 +30,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { actions } from "../../core-adapter/actions.js";
 import { subscribePasswordRequired } from "../../core-adapter/bus-bridge.js";
-import { initCore } from "../../core-adapter/index.js";
+import { getCoreAsync } from "../../core-adapter/index.js";
 import { usePipelineStore } from "../../store/pipeline.store.js";
 import { Button } from "../common/Button.js";
 import { ConfirmDialog } from "../common/ConfirmDialog.js";
@@ -48,7 +48,15 @@ export function PasswordDialog() {
     let cancelled = false;
     let unsubscribe: (() => void) | undefined;
 
-    void initCore().then((core) => {
+    // `getCoreAsync()`, no `initCore()` (PR17.3): este componente solo
+    // necesita `core.bus`, nunca debe tener autoridad para arrancar
+    // `createCore()` — eso es exclusivo de `App.tsx`, que le pasa el
+    // `EngineConfigOverrides` derivado de `settings.store` (PR16.5). Como los
+    // efectos de los hijos corren antes que los del padre en el mismo commit
+    // de montaje, `PasswordDialog` (hijo de `App`) monta primero: si llamara
+    // a `initCore()` acá, ganaría la carrera de inicialización y el override
+    // de `App.tsx` se perdería en silencio.
+    void getCoreAsync().then((core) => {
       if (cancelled) return;
       unsubscribe = subscribePasswordRequired(core.bus, () => {
         if (hasSubmittedRef.current) {

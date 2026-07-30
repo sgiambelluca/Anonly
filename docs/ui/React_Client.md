@@ -68,6 +68,8 @@ export function getCore(): IAnonymizationCore {
 }
 ```
 
+**`getCoreAsync` (PR17.3)**: además de `initCore`/`getCore`, el adapter expone `getCoreAsync(): Promise<IAnonymizationCore>` — espera la instancia ya en curso (o ya lista) **sin poder pasarle `config`**. Solo `App.tsx` llama a `initCore(overrides)` (el `EngineConfigOverrides` de §3.7); cualquier otro consumidor que solo necesite `core.bus` u otro miembro de la instancia (hoy, `PasswordDialog.tsx`, que se suscribe a `PDF_PASSWORD_REQUIRED`) debe llamar a `getCoreAsync()`, nunca a `initCore()`. Motivo: en React los efectos de los componentes hijos corren antes que los del padre en el mismo commit de montaje, así que un consumidor hijo que llamara a `initCore()` sin argumentos podría ganar la carrera de inicialización y hacer que el `config` de `App.tsx` nunca llegue a `createCore()` — `getCoreAsync` no puede arrancar la creación bajo ningún orden de montaje, así que esa carrera deja de ser posible.
+
 ### 2.2 Bus → Zustand (bridge)
 
 ```ts
