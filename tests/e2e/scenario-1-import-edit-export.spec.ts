@@ -43,8 +43,10 @@ test("cargar PDF con texto, ver grupos, editar modo, exportar y descargar", asyn
   await expect(dniGroup).toBeVisible({ timeout: 30_000 });
 
   // El pipeline llega a Ready: `ExportButton` decide su propia visibilidad
-  // por `stage === PipelineStage.Ready` (`ui/Components.md` §2.5) — esto
-  // implica que Detecting (Regex + NER) y Grouping ya terminaron.
+  // por `stage ∈ {Ready, Done}` (`ui/Components.md` §2.5, gate real
+  // post-bug #7) — esto implica que Detecting (Regex + NER) y Grouping ya
+  // terminaron (en este punto `stage` es `Ready`, no `Done` todavía: el
+  // export ni empezó).
   const exportButton = page.getByRole("button", { name: "Exportar" });
   await expect(exportButton).toBeVisible({ timeout: 150_000 });
 

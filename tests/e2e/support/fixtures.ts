@@ -10,6 +10,10 @@
  * no hace falta que el archivo exista en `tests/fixtures/*.pdf` para este PR.
  */
 
+import { readFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 
 import { generateCorrupt, generateText10p } from "../../fixtures/generate.js";
@@ -19,6 +23,8 @@ export interface E2eFilePayload {
   readonly mimeType: string;
   readonly buffer: Buffer;
 }
+
+const FIXTURES_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../fixtures");
 
 /** `text-10p.pdf` (`tests/fixtures/README.md`): 10 páginas, entidades conocidas. */
 export async function textTenPagesFile(): Promise<E2eFilePayload> {
@@ -30,6 +36,19 @@ export async function textTenPagesFile(): Promise<E2eFilePayload> {
 export async function corruptFile(): Promise<E2eFilePayload> {
   const bytes = await generateCorrupt();
   return { name: "corrupt.pdf", mimeType: "application/pdf", buffer: Buffer.from(bytes) };
+}
+
+/**
+ * `protected.pdf` (`tests/fixtures/README.md`, ADR-048 §7 punto 1): único
+ * fixture binario commiteado de este PR — pdf-lib no implementa encriptación,
+ * así que no se arma en memoria como el resto de este archivo. Generado una
+ * única vez con `qpdf --encrypt test1234 test1234 256 -- text-10p.pdf
+ * protected.pdf` (ver el comentario de cabecera de
+ * `scenario-3-protected-pdf.spec.ts` para el detalle). Password: "test1234".
+ */
+export async function protectedFile(): Promise<E2eFilePayload> {
+  const buffer = await readFile(resolve(FIXTURES_DIR, "protected.pdf"));
+  return { name: "protected.pdf", mimeType: "application/pdf", buffer };
 }
 
 /**
