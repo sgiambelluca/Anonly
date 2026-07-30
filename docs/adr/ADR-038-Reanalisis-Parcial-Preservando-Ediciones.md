@@ -135,6 +135,8 @@ Los PRs 2–4 no dependen del scaffold y pueden correr en paralelo con el PR 1; 
 
 > **Inserción posterior (ADR-048 §7 punto 2, ratificada por el humano el 2026-07-24)**: **PR 16.5 — bootstrap `settings.store` → `EngineConfig`** (`apps/react-client`), entre el PR 16 y el PR 17. `App.tsx` deriva `EngineConfigOverrides` de los settings persistidos y llama `initCore(overrides)` (mapeo de `ui/React_Client.md` §3.7). Cierra el bug de producto del toggle de NER sin documento abierto y desbloquea el Escenario 8 del PR 17, en `test.fixme` desde el PR 10.
 
+> **Inserción posterior (ADR-049 §7, 2026-07-30)**: **PR 17.1 — `PdfPasswordRequiredError.retryable = false`** (`pdf-engine`) y **PR 17.2 — discriminación de errores por `code` en el Orchestrator** (`packages/anonymization-core/src`), en ese orden obligatorio. Salen de un bug real destapado por el Escenario 3 de PR17: la subclase concreta de un `EngineError` no sobrevive al `postMessage`, así que los dos `instanceof PdfPasswordRequiredError` de `orchestrator.ts` fallan con transporte real (banner de pipeline fallido en vez de `PasswordDialog`, más reintentos espurios del pool). El PR 17.1 cierra de paso el pendiente que ADR-035 §3 arrastraba desde el Hito 9; el PR 17.2 lleva el des-`fixme` de `tests/e2e/scenario-3-protected-pdf.spec.ts` como evidencia del fix, y PR17 conserva los otros siete escenarios.
+
 ## Alternativas consideradas
 
 | Alternativa | Por qué no |

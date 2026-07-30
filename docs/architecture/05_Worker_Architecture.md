@@ -144,6 +144,7 @@ Política común:
 - Backoff exponencial: `delay = baseDelayMs * 2^attempt`, con `baseDelayMs = 250`, cap `2000 ms`.
 - Solo se reintenta si el error es `retryable === true` en el `SerializedEngineError`. Semántica canónica (ADR-035 §3): `retryable` significa **auto-reintentable por el pool sin intervención del usuario**; la recuperabilidad por acción del usuario (p. ej. password) se expresa por evento + flujo de UI, nunca por este flag.
 - Errores no retryables: `PDF_INVALID`, `PDF_PASSWORD_REQUIRED`, `NER_MODEL_MISSING`, cualquier error de tipo `InvalidInput`.
+- **Lo que cruza el boundary es el `SerializedEngineError`, no la clase** (ADR-049): el worker postea `FAILED` con `err.serialize()` y el host reconstruye con `EngineError.deserialize()` un `DeserializedEngineError` genérico — `postMessage` no transporta prototipos. Sobreviven `code`, `engineId`, `message`, `retryable` y `details`; la subclase concreta no. Por eso tanto la política de reintentos como cualquier caso especial de un consumidor se deciden por el **flag** o por el **`code`**, nunca por `instanceof <SubclaseConcreta>` (`ai/Code_Standards.md` §7). `instanceof EngineError` sigue siendo válido. **Excepción por construcción**: la cancelación no pasa por este camino — el entry-point discrimina `CancelledError` antes del `FAILED` y postea un frame `CANCELLED`, con el que el host instancia un `CancelledError` real (§2 y §3, paso 6).
 - Tras `maxRetries`, se emite el evento de fallo correspondiente (tabla por job type).
 
 ---

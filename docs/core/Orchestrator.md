@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=orchestrator | dependencias=core/Contracts.md,architecture/03_Data_Model.md,architecture/04_Event_System.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-015-UI-Channel-Canonical.md,adr/ADR-030-RenderEngine-LoadDocument.md,adr/ADR-031-RenderFailed-ErrorCode-Erratas-Render.md,adr/ADR-032-Export-EncodedPageImage-Requested-Warning.md,adr/ADR-034-Auditoria-Pre-Hito9-Orchestrator.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-041-FuseOcrPage-Funcion-Pura-Sin-Estado-Retenido.md,adr/ADR-044-Preview-Grupos-Mediacion-Orchestrator.md | audiencia=IA-implementador | fase=10 (Hito 9 cerrado; transporte de workers Hito 10, ADR-036; método `reanalyze` Hito 10, ADR-038; fusión OCR→PDF como función pura host-side, ADR-041; mediación de grupos→Render para el preview, ADR-044) -->
+<!-- CONTEXT: scope=orchestrator | dependencias=core/Contracts.md,architecture/03_Data_Model.md,architecture/04_Event_System.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-015-UI-Channel-Canonical.md,adr/ADR-030-RenderEngine-LoadDocument.md,adr/ADR-031-RenderFailed-ErrorCode-Erratas-Render.md,adr/ADR-032-Export-EncodedPageImage-Requested-Warning.md,adr/ADR-034-Auditoria-Pre-Hito9-Orchestrator.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-041-FuseOcrPage-Funcion-Pura-Sin-Estado-Retenido.md,adr/ADR-044-Preview-Grupos-Mediacion-Orchestrator.md,adr/ADR-049-Errores-Cruzando-Worker-Discriminacion-Por-Code.md | audiencia=IA-implementador | fase=10 (Hito 9 cerrado; transporte de workers Hito 10, ADR-036; método `reanalyze` Hito 10, ADR-038; fusión OCR→PDF como función pura host-side, ADR-041; mediación de grupos→Render para el preview, ADR-044; discriminación de errores por `code` a través del boundary de Worker, ADR-049) -->
 
 # Orchestrator — Spec del Componente Host
 
@@ -6,8 +6,10 @@
 
 **Componente**: Orchestrator + façade `@anonly/anonymization-core` (no es un motor: **no tiene `EngineId`** y no implementa `IEngine`; este spec adapta la plantilla de 15 secciones de `ai/Module_Specification_Template.md` a un componente host)
 **Ubicación**: `packages/anonymization-core/src/`
-**Versión del spec**: 1.5.1
-**Última actualización**: 2026-07-23
+**Versión del spec**: 1.5.2
+**Última actualización**: 2026-07-30
+
+> **Nota (v1.5.2, 2026-07-30 — ADR-049: el password-required se discrimina por `code`, no por `instanceof`)**: con transporte real de workers (ADR-036 §2/§3), el `PdfPasswordRequiredError` que lanza el motor dentro del Worker llega al host como `DeserializedEngineError` — `postMessage` no transporta prototipos y `EngineError.deserialize()` no reconstruye la subclase (`Contracts.md` §4). El `instanceof PdfPasswordRequiredError` de `handleExtractionFailure` daba `false` y el caso 3 caía a `failPipeline`: el usuario veía el banner genérico de pipeline fallido en vez del `PasswordDialog` (bug reproducible, PR17/Escenario 3). El mismo `instanceof` en el `isRetryable` propio del despacho de `pdf-parse` hacía que el pool además **reintentara** el PDF protegido. Se especifica: la discriminación es por `err.code === EngineErrorCode.PDF_PASSWORD_REQUIRED` (type-guard `isEngineErrorCode` en `src/errors.ts`), y el override de `isRetryable` **se elimina** porque `PdfPasswordRequiredError.retryable` pasa a `false` (ADR-049 §4, cierra el pendiente de ADR-035 §3). Sin cambio de contrato público ni de eventos.
 
 > **Nota (v1.5.1, 2026-07-23 — el seed/flush del preview mediado usa una señal propia, nunca abortada, sin ADR: precisa un detalle de ADR-044 §3 que quedó subespecificado)**: `cancelReanalyze` (ADR-038 §6) invoca `abortRegistry.abort(documentId)` **antes** de `await finishSession(...)`, y recién crea un `AbortController` nuevo después. Como `finishSession`/`GROUPING_FINISHED` corren síncronos (nota de sincronía de cabecera), el seed de ADR-044 que ese `GROUPING_FINISHED` dispara se ejecutaba con la señal **ya abortada** del documento — `RenderEngine.renderPage` rechazaba con `CancelledError` antes de `rememberInput`, así que el seed nunca llegaba a poblar `lastAnonymizedInputs` en ese camino, contradiciendo lo que §3/§13 caso 26 ya afirman ("se renderizan las páginas... `lastAnonymizedInputs` queda poblado"). No reabre el bug 1 (el documento ya estaba en `Ready` antes del `reanalyze`, con el preview ya poblado por un seed/flush previo), pero es una staleness real y evitable. Se especifica: `seedAnonymizedPreview`/`flushDirtyPages` arman su `EngineContext` con una señal **propia, nunca ligada a `abortRegistry`** (no la del documento, que sí debe seguir siendo cancelable para OCR/NER/export) — consistente con que ADR-044 §3 ya declara estos renders "best-effort... inmunes al supersede"; ahora también son inmunes a la cancelación del documento, sin tocar el orden `abort`/`finishSession` de `cancelReanalyze` (ADR-038 intacto).
 
@@ -221,7 +223,7 @@ El Orchestrator **no define códigos de error nuevos**: propaga `SerializedEngin
 
 1. **PDF sin páginas textless**: salta la etapa OCR; `Extracting → Detecting` directo.
 2. **Todas las páginas textless**: `sourceKind = "scanned"`; OCR de todas antes de detección.
-3. **`PDF_PASSWORD_REQUIRED`**: stage queda en `Extracting`; la UI llama `retryWithPassword`; el pipeline reintenta desde la etapa 1.
+3. **`PDF_PASSWORD_REQUIRED`**: stage queda en `Extracting`; la UI llama `retryWithPassword`; el pipeline reintenta desde la etapa 1. El fallo de extracción se reconoce **por `code`** (`isEngineErrorCode(err, EngineErrorCode.PDF_PASSWORD_REQUIRED)`), nunca por `instanceof PdfPasswordRequiredError`: con transporte real el error llega deserializado y el `instanceof` da `false`, con lo que el caso caía a `PIPELINE_FAILED` (v1.5.2, ADR-049). El despacho de `pdf-parse` **no** lleva `isRetryable` propio: el predicado por defecto del pool alcanza, porque `PdfPasswordRequiredError.retryable === false` (ADR-049 §4) y el flag sí sobrevive al boundary.
 4. **`PDF_INVALID`**: `PIPELINE_FAILED` inmediato; recursos de la importación liberados.
 5. **OCR falla en una página tras reintentos**: esa página queda sin texto; la detección la salta; el pipeline continúa con warning (no `PIPELINE_FAILED`).
 6. **NER desactivado en settings**: la etapa 5 se salta; tras `REGEX_FINISHED` el Orchestrator invoca `grouping.finishSession(documentId)` y Grouping emite `GROUPING_FINISHED` con solo lo de Regex (ADR-034 §2).
@@ -262,6 +264,8 @@ El Orchestrator **no define códigos de error nuevos**: propaga `SerializedEngin
 | `PdfEngine has no bus subscriptions` | `contract.test.ts` | contract | invariante matriz §11 |
 | `matrix emitter→receiver holds for all subscriptions` | `contract.test.ts` | contract | valida `04_Event_System.md` §11 |
 | `password retry re-runs extraction` | `edge.test.ts` | edge | caso 3 |
+| `deserialized PDF_PASSWORD_REQUIRED keeps stage at Extracting` | `edge.test.ts` | edge | caso 3 (ADR-049; el mock **debe** rechazar con `EngineError.deserialize(new PdfPasswordRequiredError(id).serialize())` — con la clase concreta el test pasa igual con el bug vivo) |
+| `deserialized PDF_PASSWORD_REQUIRED is not retried by the pool` | `edge.test.ts` | edge | caso 3 (ADR-049 §4; una sola invocación del despacho, sin backoff) |
 | `PDF_INVALID emits PIPELINE_FAILED and frees resources` | `edge.test.ts` | edge | caso 4 |
 | `failed OCR page skipped with warning, pipeline continues` | `edge.test.ts` | edge | caso 5 |
 | `NER disabled skips stage 5 and finishes grouping after REGEX_FINISHED` | `edge.test.ts` | edge | caso 6 (ADR-034 §2) |
@@ -322,6 +326,7 @@ Los tests de contract/unit/edge mockean los motores (interfaces de `Contracts.md
 - [ ] 16. `pnpm lint && pnpm typecheck && pnpm test` verde.
 - [ ] 17. Verificar que solo este paquete importa motores (ESLint lo permite únicamente en `packages/anonymization-core/src/`).
 - [ ] 18. Verificar `no-network-from-core`.
+- [ ] 19. (ADR-049, PR 17.2 — depende del PR 17.1 de `pdf-engine`) `isEngineErrorCode` en `src/errors.ts`; `handleExtractionFailure` discrimina por `code` (§13 caso 3); retiro del `isRetryable` propio del despacho de `pdf-parse` y del import huérfano de `PdfPasswordRequiredError`; los dos tests de §14 con el error **deserializado**; des-`fixme` de `tests/e2e/scenario-3-protected-pdf.spec.ts`. Grep de control: ningún `instanceof` de subclase concreta de `EngineError` —salvo `CancelledError`, exento por el frame `CANCELLED` del transporte— en `packages/anonymization-core/src/`.
 
 ---
 
@@ -335,4 +340,5 @@ Los tests de contract/unit/edge mockean los motores (interfaces de `Contracts.md
 - `adr/ADR-030-RenderEngine-LoadDocument.md` (carga del PDF fuente en Render), `adr/ADR-031-RenderFailed-ErrorCode-Erratas-Render.md` §5 (blob real), `adr/ADR-032-Export-EncodedPageImage-Requested-Warning.md` (provider/export), `adr/ADR-033-Test-Infra-Global-Scripts-Alias.md` (scripts/alias), `adr/ADR-034-Auditoria-Pre-Hito9-Orchestrator.md` (decisiones de la v1.1.0), `adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md` (transporte de workers, `CoreRuntimeOptions`), `adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md` (`reanalyze`, decisiones de la v1.2.0)
 - `core/Grouping_Engine.md` §6 (`reopenSession`/`dropOccurrences`, ADR-038 §2-§4)
 - `adr/ADR-044-Preview-Grupos-Mediacion-Orchestrator.md` (mediación grupos→Render del preview, decisiones de la v1.5.0)
+- `adr/ADR-049-Errores-Cruzando-Worker-Discriminacion-Por-Code.md` (discriminación por `code` en `handleExtractionFailure`, retiro del override `isRetryable`, decisiones de la v1.5.2)
 - `ui/React_Client.md` §4 (cómo la UI consume el façade)

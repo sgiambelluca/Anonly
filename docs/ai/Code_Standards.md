@@ -153,6 +153,24 @@ export class PdfPasswordRequiredError extends EngineError {
 }
 ```
 
+### Discriminar errores a través del boundary de un Worker (ADR-049)
+
+- **Prohibido `instanceof <SubclaseConcreta>`** en cualquier código que pueda recibir un error que cruzó —o pueda cruzar— un `postMessage`. La subclase **no sobrevive** al boundary: el worker envía `err.serialize()` y el host reconstruye siempre un `DeserializedEngineError` genérico (`EngineError.deserialize`, `Contracts.md` §4). Lo que se garantiza al cruzar es `code`, `engineId`, `message`, `retryable` y `details` — nunca el prototipo.
+- **Se discrimina por `code`** contra `EngineErrorCode`. `instanceof EngineError` **sí** es válido y necesario (distingue un error tipado del Core de un `Error` cualquiera): lo que no sobrevive es la subclase, no la jerarquía base.
+- Vale igual para el flag: la política de reintentos se decide sobre `err.retryable` del error serializado, nunca sobre el tipo (`05_Worker_Architecture.md` §5).
+
+```ts
+// ✗ MAL: verdadero con pool in-process, falso con el Worker real.
+if (err instanceof PdfPasswordRequiredError) { … }
+
+// ✓ BIEN: mismo resultado en los dos transportes.
+if (err instanceof EngineError && err.code === EngineErrorCode.PDF_PASSWORD_REQUIRED) { … }
+```
+
+Si además de discriminar hace falta la **subclase concreta** río abajo (para conservar el narrowing o los helpers de la clase), se reinstancia por `code` en el host-bridge del propio motor, que es el único lugar que conoce sus clases — patrón `normalizeNerError`/`normalizeExportError` (ADR-045/ADR-046/ADR-047). Nunca con un registry global en `shared/`: invertiría capas (P-1/P-2) y perdería el `message`/`details` originales.
+
+Regresión de referencia (ADR-049 §6): un test que **arroja la clase concreta** pasa con el bug vivo. Para cubrir el camino real hay que inyectar el error ya deserializado — `EngineError.deserialize(new XError(…).serialize())`.
+
 ---
 
 ## 8. Concurrencia y cancelación

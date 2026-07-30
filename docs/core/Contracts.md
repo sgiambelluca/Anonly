@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=contratos-base | dependencias=03_Data_Model.md,04_Event_System.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md | audiencia=IA-implementador | fase=3 (§3.5 actualizado en fase 10: CoreRuntimeOptions/WorkerLike/WorkerFactory para transporte de workers —ADR-036 §2—, IPipelineOrchestrator.reanalyze/ReanalyzeConfigPatch —ADR-038 §1—; §6 gana MAX_RENDER_SCALE/PREVIEW_CACHE_MAX_BYTES —ADR-037 §2-3—; §8 RenderRequested.scale —ADR-037 §1—) -->
+<!-- CONTEXT: scope=contratos-base | dependencias=03_Data_Model.md,04_Event_System.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-049-Errores-Cruzando-Worker-Discriminacion-Por-Code.md | audiencia=IA-implementador | fase=3 (§3.5 actualizado en fase 10: CoreRuntimeOptions/WorkerLike/WorkerFactory para transporte de workers —ADR-036 §2—, IPipelineOrchestrator.reanalyze/ReanalyzeConfigPatch —ADR-038 §1—; §6 gana MAX_RENDER_SCALE/PREVIEW_CACHE_MAX_BYTES —ADR-037 §2-3—; §8 RenderRequested.scale —ADR-037 §1—; §4 precisa qué garantiza deserialize() al cruzar el boundary, sin cambio de shape —ADR-049 §2—) -->
 
 # Anonly — Contratos Base (`@anonly/shared`)
 
@@ -371,8 +371,10 @@ export abstract class EngineError extends Error {
   }
 
   // Reconstruye un EngineError genérico a partir de su forma serializada (cruza
-  // el boundary de un Worker vía postMessage). Los motores concretos pueden
-  // hacer su propio override para devolver su subclase específica.
+  // el boundary de un Worker vía postMessage). Devuelve SIEMPRE un
+  // DeserializedEngineError: la subclase concreta no sobrevive al structured
+  // clone y no se reconstruye (ADR-049 §2). Discriminar por `code`, nunca por
+  // `instanceof <SubclaseConcreta>`.
   static deserialize(serialized: SerializedEngineError): EngineError {
     return new DeserializedEngineError(serialized);
   }
@@ -390,6 +392,8 @@ export interface SerializedEngineError {
 ```
 
 Cada motor define sus subclases concretas en su `<engine>.errors.ts`. Toda subclase setea `code`, `engineId`, `retryable` y `details`. Los errores genéricos compartidos (`EngineNotInitializedError`, `EngineDisposedError`, `InvalidInputError`, `CancelledError`, definidos en `shared/src/errors.ts`) usan `engineId: "core"` porque no pertenecen a ningún motor.
+
+**Qué se garantiza al cruzar el boundary de un Worker** (ADR-049): un error lanzado dentro de un worker viaja como `SerializedEngineError` (`postMessage` no transporta prototipos) y el host lo reconstruye con `EngineError.deserialize()` como `DeserializedEngineError`. Sobreviven `code`, `engineId`, `message`, `retryable` y `details`; **no sobrevive la clase concreta**. Por lo tanto todo consumidor discrimina por `err.code` — `instanceof EngineError` sigue siendo válido (la jerarquía base sí se conserva), `instanceof <SubclaseConcreta>` no (`ai/Code_Standards.md` §7). Si un motor necesita su subclase concreta río abajo, la reinstancia por `code` en su propio host-bridge (`normalizeNerError`/`normalizeExportError`, ADR-045/ADR-046/ADR-047). `CancelledError` es el único caso exento y por construcción: el transporte tiene un frame `CANCELLED` propio y el host instancia el error localmente, sin pasar por `serialize()`.
 
 ---
 
