@@ -36,12 +36,21 @@ import { Toolbar } from "./components/toolbar/Toolbar.js";
 import { SideBySideViewer } from "./components/viewer/SideBySideViewer.js";
 import { ZoomControls } from "./components/viewer/ZoomControls.js";
 import { initCore } from "./core-adapter/index.js";
+import { deriveEngineConfigOverrides } from "./core-adapter/settingsToEngineConfig.js";
 import { useDocumentStore } from "./store/document.store.js";
 import { useEntitiesStore } from "./store/entities.store.js";
+import { useSettingsStore } from "./store/settings.store.js";
 
 export function App() {
   useEffect(() => {
-    initCore().catch((error: unknown) => {
+    // PR16.5 (ADR-048 §7 punto 2): hidratar los settings persistidos ANTES
+    // de crear el core y derivar el EngineConfigOverrides (§3.7) para que
+    // nerEnabled/ocrLanguages/performancePreset guardados en una sesión
+    // previa tengan efecto real en el próximo createCore, no solo en
+    // reanalyze con documento abierto.
+    useSettingsStore.getState().load();
+    const overrides = deriveEngineConfigOverrides(useSettingsStore.getState());
+    initCore(overrides).catch((error: unknown) => {
       // console.error es la única salida disponible acá sin ocultar el fallo
       // (no-console permite warn/error en apps/, Code_Standards.md §12). No
       // hay UI dedicada para un fallo de initCore en sí (distinto de

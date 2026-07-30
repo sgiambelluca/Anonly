@@ -78,10 +78,10 @@ let unsubscribeBridge: Unsubscribe | undefined;
  * parcial opcional de `EngineConfig` (`EngineConfigOverrides`, ADR-039 —
  * parciales por sección, ya no exige sub-objetos completos), mergeado con la
  * inyección de `ner.wasmPaths` de acá (el caller puede pisarla si alguna vez
- * hiciera falta). Este PR no deriva el resto de `EngineConfig` desde
- * `settings.store` todavía (gap documentado en `Hito10_Observaciones_Revision.md`
- * entrada "PR5" — `EngineConfigOverrides` lo deja resuelto de raíz para
- * cuando se cablee).
+ * hiciera falta). Desde PR16.5 (ADR-048 §7 punto 2), el caller (`App.tsx`)
+ * deriva ese override de los settings persistidos vía
+ * `settingsToEngineConfig.ts` antes de llamar acá — esta función no lee
+ * `settings.store` directamente, solo mergea lo que recibe.
  */
 export async function initCore(config?: EngineConfigOverrides): Promise<IAnonymizationCore> {
   if (core) return core;
