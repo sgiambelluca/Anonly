@@ -21,7 +21,7 @@ import { buildPageReplacements } from "@anonly/export-engine";
 import type { ExportEngineInput, RenderPageProvider } from "@anonly/export-engine";
 import type { NerPageInput } from "@anonly/ner-engine";
 import type { OcrPageInput } from "@anonly/ocr-engine";
-import { fuseOcrPage, PdfPasswordRequiredError } from "@anonly/pdf-engine";
+import { fuseOcrPage } from "@anonly/pdf-engine";
 import type { PdfEngineOutput } from "@anonly/pdf-engine";
 import { RenderFailedError } from "@anonly/render-engine";
 import type { RenderPageInput } from "@anonly/render-engine";
@@ -82,7 +82,7 @@ import {
   previewBlobKey,
   previewPrefixFor,
 } from "./blob-tracker.js";
-import { OrchestratorDisposedError } from "./errors.js";
+import { isEngineErrorCode, OrchestratorDisposedError } from "./errors.js";
 import { PipelineStateStore } from "./pipeline-state.js";
 import type {
   AnonymizationCoreEngines,
@@ -622,16 +622,16 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       // ese `TResult` al tipo concreto que el entry-point del PdfWorker
       // realmente produce (mismo patrón que `payload as PdfParsePayload` en
       // `pdf-engine/src/worker/entry.ts`).
+      // Sin `isRetryable` propio (ADR-049 §4/§5): el predicado por defecto del
+      // pool (`err instanceof EngineError && err.retryable`) ya decide bien,
+      // incluso con el error deserializado tras cruzar un Worker real, porque
+      // `PdfPasswordRequiredError.retryable === false` (pdf-engine, PR 17.1)
+      // y el flag sí sobrevive al boundary (`Contracts.md` §4).
       pdfOutput = await this.pools.getPool("pdf").dispatch<PdfEngineOutput>({
         run: () => this.engines.pdf.process(pdfParsePayload, ctx),
         signal: ctx.abortSignal,
         priority: 100,
         payload: pdfParsePayload,
-        // 05_Worker_Architecture.md §5 documenta PDF_PASSWORD_REQUIRED como no
-        // retryable, pero PdfPasswordRequiredError.retryable === true (pdf-engine,
-        // fuera de alcance) — ver nota en DispatchParams.isRetryable.
-        isRetryable: (err) =>
-          err instanceof EngineError && err.retryable && !(err instanceof PdfPasswordRequiredError),
       });
     } catch (err: unknown) {
       this.handleExtractionFailure(documentId, err);
@@ -711,7 +711,12 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
   }
 
   private handleExtractionFailure(documentId: string, err: unknown): void {
-    if (err instanceof PdfPasswordRequiredError) {
+    // Discriminación por `code`, no por `instanceof PdfPasswordRequiredError`
+    // (ADR-049 §5): con transporte real de workers el error llega
+    // deserializado (`DeserializedEngineError`) y la subclase concreta no
+    // sobrevive al boundary — el `instanceof` daba `false` y este caso caía
+    // a `failPipeline` (bug del Escenario 3 E2E).
+    if (isEngineErrorCode(err, EngineErrorCode.PDF_PASSWORD_REQUIRED)) {
       // Stage queda en Extracting (ya seteado); espera retryWithPassword
       // (caso límite 3 del spec del Orchestrator).
       return;

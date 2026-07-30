@@ -2,6 +2,7 @@ import { PdfInvalidError, PdfPasswordRequiredError } from "@anonly/pdf-engine";
 import {
   CancelledError,
   DetectionSource,
+  EngineError,
   EngineErrorCode,
   EngineEvents,
   EngineId,
@@ -85,6 +86,40 @@ describe("Orchestrator — edge cases", () => {
 
     expect(engines.pdf.process).toHaveBeenCalledTimes(2);
     expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+  });
+
+  // ─── Caso 3 (ADR-049 §6): el error debe inyectarse deserializado — un test
+  // que arroja la clase concreta (como el de arriba) pasa igual con el bug
+  // vivo, porque el `instanceof` acierta contra la subclase real. Estos dos
+  // atraviesan el mismo camino que el transporte real por Worker: el motor
+  // sirve `err.serialize()` y el pool reconstruye con `EngineError.deserialize()`
+  // un `DeserializedEngineError` genérico, sin la subclase concreta.
+
+  it("deserialized PDF_PASSWORD_REQUIRED keeps stage at Extracting", async () => {
+    const { bus, engines, orchestrator } = makeOrchestrator();
+    const wireError = EngineError.deserialize(new PdfPasswordRequiredError("doc-1").serialize());
+    (engines.pdf.process as ReturnType<typeof vi.fn>).mockRejectedValueOnce(wireError);
+    const failedSpy = vi.fn();
+    bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_FAILED, failedSpy);
+
+    await orchestrator.importDocument(createImportInput());
+
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Extracting);
+    expect(failedSpy).not.toHaveBeenCalled();
+  });
+
+  it("deserialized PDF_PASSWORD_REQUIRED is not retried by the pool", async () => {
+    const { engines, orchestrator } = makeOrchestrator();
+    const wireError = EngineError.deserialize(new PdfPasswordRequiredError("doc-1").serialize());
+    (engines.pdf.process as ReturnType<typeof vi.fn>).mockRejectedValueOnce(wireError);
+
+    await orchestrator.importDocument(createImportInput());
+
+    // Una sola invocación del despacho (el `run` del pool): sin backoff, sin
+    // reintento — `wireError.retryable === false` sobrevive al boundary
+    // (ADR-049 §4) y el predicado por defecto del pool lo respeta.
+    expect(engines.pdf.process).toHaveBeenCalledTimes(1);
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Extracting);
   });
 
   // ─── Caso 4: PDF_INVALID ───
