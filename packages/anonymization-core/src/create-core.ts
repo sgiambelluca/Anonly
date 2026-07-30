@@ -45,23 +45,37 @@ import { WorkerPool } from "./worker-pool.js";
  * aditivo, no rompe callers existentes).
  *
  * `RenderPool` (ADR-043 §2, Hito 10 PR13), `OcrPool` (ADR-045 §2, Hito 10
- * PR14) y `NerPool` (ADR-046 §2/§7, Hito 10 PR15): a diferencia de pdf (cuyo
- * pool lo crea y posee `PipelineOrchestrator`/`WorkerPoolManager`), estas
- * tres las construye este façade DIRECTO y se inyectan en el constructor del
- * motor correspondiente — el motor despacha internamente contra su propia
- * pool (`RenderEngine.renderPage`/`rasterizePage`/`loadDocument`/
+ * PR14), `NerPool` (ADR-046 §2/§7, Hito 10 PR15) y `exportPool` (ADR-047 §2,
+ * Hito 10 PR16): a diferencia de pdf (cuyo pool lo crea y posee
+ * `PipelineOrchestrator`/`WorkerPoolManager`), estas cuatro las construye
+ * este façade DIRECTO y se inyectan en el constructor del motor
+ * correspondiente — el motor despacha internamente contra su propia pool
+ * (`RenderEngine.renderPage`/`rasterizePage`/`loadDocument`/
  * `unloadDocument` convergen en `pool.dispatch`/`pool.broadcast`;
- * `OcrEngine.processPage`/`NerEngine.processPage` convergen en
+ * `OcrEngine.processPage`/`NerEngine.processPage`/`ExportEngine.export`
+ * (internamente, por página y en el `save` final) convergen en
  * `pool.dispatch`). El Orchestrator ya no sostiene ninguna referencia a un
- * pool de render, ocr o ner (dejó de envolver esas llamadas, ver
+ * pool de render, ocr, ner o export (dejó de envolver esas llamadas, ver
  * `orchestrator.ts#runOcrStage`/`makeRenderPageProvider`/
- * `runDetectionStage`/`runReanalyzeNerOnFlow`/`runReanalyzeOcrFlow`).
- * `onWorkerCreated` de `renderPool` cierra sobre `engines.render` (asignado
- * más abajo, tras construir el objeto `engines`) para re-primear un
- * RenderWorker nuevo/reemplazado con los documentos vigentes ANTES de que
- * acepte jobs (ADR-043 §5); `ocrPool`/`nerPool` no necesitan el equivalente —
- * ni `ocr-engine` ni `ner-engine` retienen estado por documento (ADR-041
- * §5/§9, "Ninguno... Libre").
+ * `runDetectionStage`/`runReanalyzeNerOnFlow`/`runReanalyzeOcrFlow`; el
+ * campo `exportWorkerFactory` que retenía la factory sin consumidor se
+ * retiró en PR16). `onWorkerCreated` de `renderPool` cierra sobre
+ * `engines.render` (asignado más abajo, tras construir el objeto `engines`)
+ * para re-primear un RenderWorker nuevo/reemplazado con los documentos
+ * vigentes ANTES de que acepte jobs (ADR-043 §5); `ocrPool`/`nerPool`/
+ * `exportPool` no necesitan el equivalente — ni `ocr-engine` ni `ner-engine`
+ * retienen estado por documento (ADR-041 §5/§9, "Ninguno... Libre"), y el
+ * único estado con el que carga `export-engine` (el `PDFDocument` en
+ * construcción) vive en el propio ExportWorker, no en algo que este façade
+ * deba re-enviar.
+ *
+ * `exportPool` (ADR-047 §2): `WorkerPool` de `size: 1` — no es un quinto pool
+ * en el sentido de `05_Worker_Architecture.md` §1.1 (`PoolKey` lo etiqueta
+ * "export" solo como identificador interno; `WorkerPoolManager` sigue
+ * gestionando únicamente los cuatro pools "de verdad" vía `ManagedPoolKey` —
+ * ver `worker-pool.ts`). `maxQueue` usa el literal `EXPORT_QUEUE_LIMIT`
+ * (comentario junto a su construcción, más abajo): ADR-047 §2 lo nombra pero
+ * no fija un valor.
  */
 export async function createCore(
   config?: EngineConfigOverrides,
@@ -124,6 +138,29 @@ export async function createCore(
     ...(runtime?.workers?.ner !== undefined ? { workerFactory: runtime.workers.ner } : {}),
   });
 
+  // ADR-047 §2/§7: transporte del ExportWorker único, reusando `WorkerPool`
+  // con `size: 1` (espejo de `ocrPool`/`nerPool`; sin onWorkerCreated, sin
+  // estado por documento que re-primear — el ensamblador retiene su propio
+  // `PDFDocument` del otro lado de la frontera, `export-engine/src/worker/entry.ts`).
+  // `EXPORT_QUEUE_LIMIT`: sin fuente documentada de valor (ADR-047 §2 lo
+  // nombra pero no lo define; no es una clave nueva de `WorkerPoolConfig`,
+  // ADR-036 §1 se conserva). Se usa el mismo default que `ocr`/`ner`
+  // (`MAX_QUEUE_PER_POOL`, Contracts.md §6) por ser el pool de tamaño
+  // comparable (1-2); reportado como asunción a confirmar en el reporte del PR.
+  const EXPORT_QUEUE_LIMIT = 8;
+  const exportPool = new WorkerPool({
+    poolKey: "export",
+    jobType: "export-page",
+    size: 1,
+    maxQueue: EXPORT_QUEUE_LIMIT,
+    maxRetries: mergedConfig.workerPool.maxRetries["export-page"],
+    baseRetryDelayMs: mergedConfig.workerPool.baseRetryDelayMs,
+    maxRetryDelayMs: mergedConfig.workerPool.maxRetryDelayMs,
+    bus,
+    logger,
+    ...(runtime?.workers?.export !== undefined ? { workerFactory: runtime.workers.export } : {}),
+  });
+
   const engines: AnonymizationCoreEngines = {
     pdf: new PdfEngine(),
     ocr: new OcrEngine(ocrPool),
@@ -131,7 +168,7 @@ export async function createCore(
     ner: new NerEngine(nerPool),
     grouping: new GroupingEngine(),
     render: new RenderEngine(renderPool),
-    export: new ExportEngine(),
+    export: new ExportEngine(exportPool),
   };
   renderEngineRef.current = engines.render;
 
@@ -177,6 +214,7 @@ export async function createCore(
       renderPool.dispose();
       ocrPool.dispose();
       nerPool.dispose();
+      exportPool.dispose();
       await orchestrator.dispose();
       bus.dispose();
     },

@@ -21,9 +21,14 @@
  * (`@huggingface/transformers`) sin estado por documento; la clase
  * `NerEngine` (loop por página, partición en batches, retry, mapeo bbox,
  * eventos) queda host-side y despacha por batch contra su propia `NerPool`
- * (construida en `create-core.ts`, no acá). El resto de los motores
- * (export) sigue in-process hasta su propio PR de worker (ADR-036 §8, fila
- * 16).
+ * (construida en `create-core.ts`, no acá). `@anonly/export-engine` (PR16,
+ * ADR-047) es el quinto y último: `ExportWorker` corre el ensamblador
+ * pdf-lib (`append-page`/`save`) — a diferencia de los otros tres, SÍ
+ * retiene estado (el `PDFDocument` en construcción, un documento a la vez);
+ * la clase `ExportEngine` (validación, loop por página, `RenderPageProvider`,
+ * retry/timeout, los cuatro eventos, sanitización, blob URL) queda host-side
+ * y despacha contra su propio `WorkerPool` de `size: 1` (construido en
+ * `create-core.ts`, no acá).
  */
 
 import {
@@ -32,6 +37,7 @@ import {
   type IAnonymizationCore,
   type Unsubscribe,
 } from "@anonly/anonymization-core";
+import ExportWorker from "@anonly/export-engine/worker?worker";
 import NerWorker from "@anonly/ner-engine/worker?worker";
 import OcrWorker from "@anonly/ocr-engine/worker?worker";
 import PdfWorker from "@anonly/pdf-engine/worker?worker";
@@ -89,6 +95,7 @@ export async function initCore(config?: EngineConfigOverrides): Promise<IAnonymi
       render: () => new RenderWorker(),
       ocr: () => new OcrWorker(),
       ner: () => new NerWorker(),
+      export: () => new ExportWorker(),
     },
   });
   unsubscribeBridge = subscribe(instance.bus, stores);

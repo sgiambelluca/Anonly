@@ -50,7 +50,20 @@ import {
   type WorkerOutbound,
 } from "@anonly/shared";
 
-export type PoolKey = "pdf" | "ocr" | "ner" | "render";
+// "export" (ADR-047 §2): identificador interno del `WorkerPool` de size 1
+// que transporta el ExportWorker — su único uso observable es el string
+// `${poolKey}-pool` del `workerId` en la telemetría `WORKER_JOB_*`. NO es un
+// pool en el sentido de `05_Worker_Architecture.md` §1.1 (sin cola
+// prioritaria multi-worker, sin clave propia en `WorkerPoolConfig`): por eso
+// `WorkerPoolManager` (que sí gestiona los cuatro pools "de verdad", con
+// creación perezosa y disposición por idle) lo excluye vía `ManagedPoolKey`.
+export type PoolKey = "pdf" | "ocr" | "ner" | "render" | "export";
+
+// Unión de los cuatro pools que gestiona `WorkerPoolManager` (creación
+// perezosa, disposición por idle). Excluye "export": ese `WorkerPool` lo
+// construye e inyecta `create-core.ts` directo al `ExportEngine` (ADR-047
+// §2, espejo de `ocrPool`/`nerPool`), sin pasar por el manager.
+export type ManagedPoolKey = Exclude<PoolKey, "export">;
 
 const WORKER_OUTBOUND_TYPES: ReadonlySet<string> = new Set([
   "READY",
@@ -705,17 +718,17 @@ export class WorkerPool {
 export interface WorkerPoolManagerOptions {
   readonly bus: IEventBus;
   readonly logger: ILogger;
-  readonly getPoolSize: (key: PoolKey) => number;
-  readonly getMaxQueue: (key: PoolKey) => number;
+  readonly getPoolSize: (key: ManagedPoolKey) => number;
+  readonly getMaxQueue: (key: ManagedPoolKey) => number;
   readonly getMaxRetries: (jobType: WorkerJobType) => number;
   readonly baseRetryDelayMs: number;
   readonly maxRetryDelayMs: number;
   readonly idleDisposeMs: number;
   /** Factories de `Worker` real por pool (ADR-036 §2, `CoreRuntimeOptions.workers`). Ausente/sin entrada para `key` => ese pool queda in-process. */
-  readonly workerFactories?: Partial<Readonly<Record<PoolKey, WorkerFactory>>>;
+  readonly workerFactories?: Partial<Readonly<Record<ManagedPoolKey, WorkerFactory>>>;
 }
 
-const JOB_TYPE_BY_POOL: Readonly<Record<PoolKey, WorkerJobType>> = {
+const JOB_TYPE_BY_POOL: Readonly<Record<ManagedPoolKey, WorkerJobType>> = {
   pdf: "pdf-parse",
   ocr: "ocr-page",
   ner: "ner-page",
@@ -723,19 +736,22 @@ const JOB_TYPE_BY_POOL: Readonly<Record<PoolKey, WorkerJobType>> = {
 };
 
 /**
- * Gestiona los cuatro pools con creación perezosa (`05_Worker_Architecture.md`
- * §8) y disposición tras `idleDisposeMs` de inactividad.
+ * Gestiona los cuatro pools "de verdad" (`ManagedPoolKey`) con creación
+ * perezosa (`05_Worker_Architecture.md` §8) y disposición tras
+ * `idleDisposeMs` de inactividad. El `WorkerPool` de `size: 1` del
+ * ExportWorker (`poolKey: "export"`, ADR-047 §2) NO pasa por acá: lo
+ * construye e inyecta `create-core.ts` directo al `ExportEngine`.
  */
 export class WorkerPoolManager {
   private readonly options: WorkerPoolManagerOptions;
-  private readonly pools = new Map<PoolKey, WorkerPool>();
-  private readonly idleTimers = new Map<PoolKey, ReturnType<typeof setTimeout>>();
+  private readonly pools = new Map<ManagedPoolKey, WorkerPool>();
+  private readonly idleTimers = new Map<ManagedPoolKey, ReturnType<typeof setTimeout>>();
 
   constructor(options: WorkerPoolManagerOptions) {
     this.options = options;
   }
 
-  getPool(key: PoolKey): WorkerPool {
+  getPool(key: ManagedPoolKey): WorkerPool {
     this.touch(key);
     const existing = this.pools.get(key);
     if (existing !== undefined) return existing;
@@ -759,7 +775,7 @@ export class WorkerPoolManager {
   }
 
   /** Reinicia el temporizador de disposición-por-inactividad de `key`. */
-  private touch(key: PoolKey): void {
+  private touch(key: ManagedPoolKey): void {
     const existingTimer = this.idleTimers.get(key);
     if (existingTimer !== undefined) clearTimeout(existingTimer);
     const timer = setTimeout(() => {

@@ -52,6 +52,7 @@ export type {
   NerPagePayload,
   RenderPagePayload,
   ExportPagePayload,
+  ExportSavePayload,
   LoadDocumentPayload,
   UnloadDocumentPayload,
   RasterizePagePayload,

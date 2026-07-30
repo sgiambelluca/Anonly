@@ -1,21 +1,29 @@
 /**
  * @anonly/export-engine — `ExportEngine` (implementa `IEngine`).
  *
- * Fuente de verdad: docs/core/Export_Engine.md (v1.1.0, ADR-032).
+ * Fuente de verdad: docs/core/Export_Engine.md (v1.2.0, ADR-047).
  *
- * ADR-021 (motores inline hasta Hito 9): sin pool propio, sin Worker propio
- * de ensamblado. Corre en el host (main thread) con `pdf-lib`. La
- * cancelación es cooperativa vía `ctx.abortSignal`, con checkpoints entre
- * páginas; el SLA estricto < 200ms se valida en Hito 9/11.
+ * ADR-047 (PR16, reparto host/worker): `export()` queda entero host-side
+ * (validación, loop por página, `RenderPageProvider`, retry/timeout, los
+ * cuatro eventos, sanitización de `title`/`filename`, blob URL). Al
+ * **ExportWorker** cruzan solo dos operaciones de pdf-lib —`append-page` y
+ * `save`— a través del puerto interno `ExportJobPool` (espejo de
+ * `OcrJobPool`/ADR-045 §2, `NerJobPool`/ADR-046 §2): con `pool` inyectado por
+ * constructor, cada despacho corre por `WorkerPool` (Web Worker real si el
+ * façade lo configuró, `ADR-036 §2`); sin `pool` (`new ExportEngine()`),
+ * cae al fallback in-process trivial (`IMMEDIATE_POOL`), que invoca el mismo
+ * módulo de ensamblado (`./worker/assembler.js`) directo — bit-idéntico,
+ * ADR-035. El `PDFDocument` en construcción vive en `this.assemblerState`
+ * cuando se usa el fallback (el worker real lo retiene del otro lado de la
+ * frontera, `worker/entry.ts`).
  *
  * ADR-032 (auditoría pre-Hito 8): `RenderPageProvider.renderFull` devuelve
- * `EncodedPageImage` (bytes ya codificados PNG/JPEG, listos para
- * `embedJpg`/`embedPng`); el motor no se suscribe a ningún evento
- * (`EXPORT_REQUESTED` lo escucha el Orchestrator, que arma `ExportEngineInput`
- * y llama `export()` directamente — en Hito 8 el caller directo son los
- * tests); con 0 grupos `enabled`, `export()` **no lanza**: loguea
- * `ctx.logger.warn` con el code `EXPORT_NO_ENABLED_GROUPS` en metadata y
- * continúa (el export resultante es idéntico al original reconstruido).
+ * `EncodedPageImage` (bytes ya codificados PNG/JPEG); el motor no se
+ * suscribe a ningún evento (`EXPORT_REQUESTED` lo escucha el Orchestrator,
+ * que arma `ExportEngineInput` y llama `export()` directamente); con 0
+ * grupos `enabled`, `export()` **no lanza**: loguea `ctx.logger.warn` con el
+ * code `EXPORT_NO_ENABLED_GROUPS` en metadata y continúa (el export
+ * resultante es idéntico al original reconstruido).
  *
  * Notas de diseño no triviales (dentro del margen que el spec deja abierto,
  * ninguna rompe un contrato público de Contracts.md/Export_Engine.md):
@@ -53,6 +61,7 @@
 import {
   CancelledError,
   EngineDisposedError,
+  EngineError,
   EngineErrorCode,
   EngineEvents,
   EngineId,
@@ -61,10 +70,12 @@ import {
   InvalidInputError,
   type EngineContext,
   type EntityGroup,
+  type ExportMetadata,
+  type ExportPagePayload,
+  type ExportSavePayload,
   type IEngine,
   type Replacement,
 } from "@anonly/shared";
-import { PDFDocument, type PDFImage } from "pdf-lib";
 
 import { ExportFailedError, ExportTimeoutError } from "./export.errors.js";
 import type {
@@ -73,10 +84,101 @@ import type {
   ExportEngineOutput,
   RenderPageProvider,
 } from "./export.types.js";
+import {
+  appendPage,
+  discardState,
+  savePdf,
+  type AssemblerState,
+  EMPTY_ASSEMBLER_STATE,
+} from "./worker/assembler.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000; // spec §11/§12: "default 30 s por página".
 const MAX_RETRIES = 1; // spec §11: "reintentar 1 vez".
 const MAX_TITLE_LENGTH = 500; // spec §13 caso 16: "título muy largo".
+
+// ─── Puerto interno de despacho (ADR-047 §2, espejo exacto de
+// OcrJobPool/OcrDispatchParams en ocr-engine/src/ocr.engine.ts y
+// NerJobPool/NerDispatchParams en ner-engine/src/ner.engine.ts). No
+// exportado desde index.ts — detalle de wiring interno. ───
+
+interface ExportDispatchParams<T> {
+  readonly run: () => Promise<T>;
+  readonly signal: AbortSignal;
+  readonly priority?: number;
+  readonly payload?: unknown;
+  readonly maxRetriesOverride?: number;
+}
+
+interface ExportJobPool {
+  dispatch<T>(params: ExportDispatchParams<T>): Promise<T>;
+}
+
+/**
+ * Fallback in-process trivial: sin `ExportPool` inyectada, ejecuta `run()`
+ * directo, sin cola ni reintentos propios (los dos únicos loops de retry son
+ * los de `exportPage`/`saveWithRetry`, host-side). Es el comportamiento que
+ * este motor tenía antes de ADR-047 (ADR-035 §1) — el que los tests
+ * existentes de este paquete ya esperan (`new ExportEngine()` sin argumento).
+ */
+const IMMEDIATE_POOL: ExportJobPool = {
+  dispatch: <T>(params: ExportDispatchParams<T>): Promise<T> => params.run(),
+};
+
+/**
+ * Corre `dispatch()` en carrera contra un timeout local: `workerPool.timeouts
+ * ["export-page"]` (30 s) lo aplica el host envolviendo el despacho — el pool
+ * no tiene timeout propio (ADR-047 §5). Mismo patrón que `renderPageWithTimeout`
+ * más abajo, generalizado para los dos despachos nuevos (append-page/save).
+ */
+async function withDispatchTimeout<T>(
+  dispatch: () => Promise<T>,
+  timeoutMs: number,
+  onTimeout: () => Error,
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(onTimeout()), timeoutMs);
+  });
+  try {
+    return await Promise.race([dispatch(), timeoutPromise]);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
+}
+
+/**
+ * Normaliza un error emergente del despacho a la subclase concreta que
+ * corresponde por `code` (ADR-047 §5, espejo de `normalizeTimeout` de
+ * ocr-engine/ADR-045 §2 y `normalizeNerError` de ner-engine/ADR-046 §2): un
+ * error local (fallback in-process, lanzado por `worker/assembler.ts` o por
+ * el timeout local de `withDispatchTimeout`) ya es la instancia concreta.
+ * Uno que cruzó un worker remoto llega deserializado (`EngineError.deserialize`,
+ * `Contracts.md` §4) como instancia genérica con el `code` correcto, que NO
+ * es `instanceof ExportTimeoutError` ni `instanceof ExportFailedError` — sin
+ * esta normalización, el `error.code` final emitido en `EXPORT_FAILED`
+ * cambiaría de forma según haya worker real o fallback. `pageIndex` está
+ * ausente para el despacho de `save` (sin página asociada): en ese caso un
+ * `EXPORT_TIMEOUT` deserializado se trata como `ExportFailedError` (mismo
+ * criterio que el timeout local de `saveWithRetry`, que tampoco usa
+ * `ExportTimeoutError` — su mensaje es page-specific).
+ */
+function normalizeExportError(
+  err: unknown,
+  documentId: string,
+  timeoutMs: number,
+  pageIndex?: number,
+): unknown {
+  if (err instanceof ExportTimeoutError || err instanceof ExportFailedError) return err;
+  if (!(err instanceof EngineError)) return err;
+  if (err.code === EngineErrorCode.EXPORT_TIMEOUT && pageIndex !== undefined) {
+    return new ExportTimeoutError(documentId, pageIndex, timeoutMs);
+  }
+  if (err.code === EngineErrorCode.EXPORT_TIMEOUT || err.code === EngineErrorCode.EXPORT_FAILED) {
+    const reason = typeof err.details.reason === "string" ? err.details.reason : err.message;
+    return new ExportFailedError(documentId, reason, pageIndex !== undefined ? { pageIndex } : {});
+  }
+  return err;
+}
 
 /**
  * Elimina caracteres de control (incluye NUL, CR, LF) y trunca a un largo
@@ -150,9 +252,26 @@ async function renderPageWithTimeout(
 export class ExportEngine implements IEngine {
   readonly id = EngineId.Export;
 
+  private readonly pool: ExportJobPool;
+
   private ctx: EngineContext | null = null;
   private initialized = false;
   private disposed = false;
+  // El PDFDocument en construcción del fallback in-process (ADR-047 §1/§4):
+  // sin uso cuando `this.pool` despacha a un worker real (ese estado vive
+  // del otro lado de la frontera, `worker/entry.ts`).
+  private assemblerState: AssemblerState = EMPTY_ASSEMBLER_STATE;
+
+  /**
+   * `pool` (ADR-047 §2): inyectada por el façade en `createCore`
+   * (`create-core.ts`, espejo de `new OcrEngine(ocrPool)`/`new
+   * NerEngine(nerPool)`, sobre un `WorkerPool` de `size: 1`). Sin argumento,
+   * cae al fallback in-process trivial (`IMMEDIATE_POOL`) — el comportamiento
+   * que este motor tenía antes de ADR-047, usado por sus propios tests.
+   */
+  constructor(pool?: ExportJobPool) {
+    this.pool = pool ?? IMMEDIATE_POOL;
+  }
 
   init(ctx: EngineContext): Promise<void> {
     // §8/ADR-032 §2: sin suscripciones a eventos. EXPORT_REQUESTED lo escucha
@@ -192,7 +311,6 @@ export class ExportEngine implements IEngine {
       );
     }
 
-    const pdfDoc = await PDFDocument.create();
     const totalPages = input.document.pageCount;
     const timeoutMs = ctx.config.workerPool.timeouts["export-page"] ?? DEFAULT_TIMEOUT_MS;
 
@@ -201,7 +319,7 @@ export class ExportEngine implements IEngine {
         throw new CancelledError(input.documentId);
       }
 
-      await this.exportPage(input, ctx, pdfDoc, pageIndex, timeoutMs);
+      await this.exportPage(input, ctx, pageIndex, timeoutMs);
 
       ctx.bus.emit(EventChannel.Export, EngineEvents.EXPORT_PROGRESS, {
         documentId: input.documentId,
@@ -210,18 +328,20 @@ export class ExportEngine implements IEngine {
       });
     }
 
-    pdfDoc.setProducer("Anonly");
-    pdfDoc.setCreator("Anonly");
-    pdfDoc.setCreationDate(new Date());
-    if (input.options.title !== undefined) {
-      pdfDoc.setTitle(sanitizeMetadataString(input.options.title));
-    }
+    const metadata: ExportMetadata = {
+      producer: "Anonly",
+      creator: "Anonly",
+      creationDate: new Date(),
+      ...(input.options.title !== undefined
+        ? { title: sanitizeMetadataString(input.options.title) }
+        : {}),
+    };
 
-    const bytes = await this.saveWithRetry(input.documentId, ctx, pdfDoc);
-    const buffer = new ArrayBuffer(bytes.byteLength);
-    new Uint8Array(buffer).set(bytes);
+    const buffer = await this.saveWithRetry(input.documentId, ctx, metadata, timeoutMs);
 
     const durationMs = Date.now() - startedAt;
+    // ADR-047 §6: el blob URL se crea siempre en host, nunca en el worker
+    // (que no tiene `createObjectURL` garantizado).
     const blobUrl = URL.createObjectURL(new Blob([buffer], { type: "application/pdf" }));
 
     ctx.bus.emit(EventChannel.Export, EngineEvents.EXPORT_FINISHED, {
@@ -235,8 +355,10 @@ export class ExportEngine implements IEngine {
   }
 
   dispose(): Promise<void> {
-    // Sin estado persistente entre llamadas a export() (cada una arma su
-    // propio PDFDocument local); sin pool/worker propio en Hito 8 (ADR-021).
+    // ADR-047 §1/§4: libera el ensamblador local del fallback in-process (el
+    // de un worker real se libera por el DISPOSE del protocolo,
+    // `worker/entry.ts`).
+    this.assemblerState = discardState();
     this.ctx = null;
     this.initialized = false;
     this.disposed = true;
@@ -276,7 +398,6 @@ export class ExportEngine implements IEngine {
   private async exportPage(
     input: ExportEngineInput,
     ctx: EngineContext,
-    pdfDoc: PDFDocument,
     pageIndex: number,
     timeoutMs: number,
   ): Promise<void> {
@@ -295,7 +416,6 @@ export class ExportEngine implements IEngine {
       if (ctx.abortSignal.aborted) {
         throw new CancelledError(input.documentId);
       }
-      const pageCountBeforeAttempt = pdfDoc.getPageCount();
       try {
         const pageImage = await renderPageWithTimeout(
           input.renderPageProvider,
@@ -310,28 +430,37 @@ export class ExportEngine implements IEngine {
           throw new CancelledError(input.documentId);
         }
 
-        // §"Flujo de export": embedJpg/embedPng de bytes ya codificados
-        // (ADR-032 §1). Nunca copyPages del original (checklist §15.10).
-        const embeddedImage: PDFImage =
-          pageImage.format === "jpeg"
-            ? await pdfDoc.embedJpg(pageImage.bytes)
-            : await pdfDoc.embedPng(pageImage.bytes);
+        // ADR-047 §1/§3: solo la frontera pdf-lib cruza al worker
+        // (`append-page`), vía el puerto `ExportJobPool`. `maxRetriesOverride:
+        // 0` — el pool nunca reintenta un `export-page`; el único loop de
+        // retry es este. La idempotencia por `pageIndex` del ensamblador
+        // (ADR-047 §4) reemplaza al guard `pageCountBeforeAttempt` que tenía
+        // este método antes de ADR-047.
+        const payload: ExportPagePayload = {
+          documentId: input.documentId,
+          pageIndex,
+          pageImage: pageImage.bytes,
+          imageFormat: pageImage.format,
+          pageWidthPt: page.width,
+          pageHeightPt: page.height,
+        };
 
-        const pdfPage = pdfDoc.addPage([page.width, page.height]);
-        pdfPage.drawImage(embeddedImage, {
-          x: 0,
-          y: 0,
-          width: page.width,
-          height: page.height,
-        });
+        await withDispatchTimeout(
+          () =>
+            this.pool.dispatch<void>({
+              run: () => this.dispatchAppendPage(payload, ctx.abortSignal),
+              signal: ctx.abortSignal,
+              payload,
+              maxRetriesOverride: 0,
+            }),
+          timeoutMs,
+          () => new ExportTimeoutError(input.documentId, pageIndex, timeoutMs),
+        );
 
         return;
       } catch (err: unknown) {
         if (err instanceof CancelledError) throw err;
-        while (pdfDoc.getPageCount() > pageCountBeforeAttempt) {
-          pdfDoc.removePage(pdfDoc.getPageCount() - 1);
-        }
-        lastError = err;
+        lastError = normalizeExportError(err, input.documentId, timeoutMs, pageIndex);
       }
     }
 
@@ -343,11 +472,21 @@ export class ExportEngine implements IEngine {
     throw failure;
   }
 
+  /** `run()` del fallback in-process para `append-page`: invoca el ensamblador directo y reasigna el estado local (ADR-035, bit-idéntico). */
+  private async dispatchAppendPage(
+    payload: ExportPagePayload,
+    abortSignal: AbortSignal,
+  ): Promise<void> {
+    this.assemblerState = await appendPage(this.assemblerState, payload, { abortSignal });
+  }
+
   private async saveWithRetry(
     documentId: string,
     ctx: EngineContext,
-    pdfDoc: PDFDocument,
-  ): Promise<Uint8Array> {
+    metadata: ExportMetadata,
+    timeoutMs: number,
+  ): Promise<ArrayBuffer> {
+    const payload: ExportSavePayload = { documentId, metadata };
     let lastError: unknown;
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       if (ctx.abortSignal.aborted) {
@@ -355,9 +494,26 @@ export class ExportEngine implements IEngine {
       }
       try {
         // §12: "Tamaño del PDF... mitigado con save({ useObjectStreams: true })".
-        return await pdfDoc.save({ useObjectStreams: true });
+        // ADR-047 §1/§3: la serialización cruza al worker vía el mismo puerto
+        // (`save`), con `maxRetriesOverride: 0` — este es el único loop de retry.
+        return await withDispatchTimeout(
+          () =>
+            this.pool.dispatch<ArrayBuffer>({
+              run: () => this.dispatchSave(payload, ctx.abortSignal),
+              signal: ctx.abortSignal,
+              payload,
+              maxRetriesOverride: 0,
+            }),
+          timeoutMs,
+          () =>
+            new ExportFailedError(
+              documentId,
+              `Timeout esperando el save() del worker (${timeoutMs}ms).`,
+            ),
+        );
       } catch (err: unknown) {
-        lastError = err;
+        if (err instanceof CancelledError) throw err;
+        lastError = normalizeExportError(err, documentId, timeoutMs);
       }
     }
 
@@ -367,6 +523,16 @@ export class ExportEngine implements IEngine {
       error: failure.serialize(),
     });
     throw failure;
+  }
+
+  /** `run()` del fallback in-process para `save`: invoca el ensamblador directo, reasigna el estado local (vacío tras éxito, ADR-047 §4) y devuelve el `ArrayBuffer` final. */
+  private async dispatchSave(
+    payload: ExportSavePayload,
+    abortSignal: AbortSignal,
+  ): Promise<ArrayBuffer> {
+    const { buffer, state } = await savePdf(this.assemblerState, payload, { abortSignal });
+    this.assemblerState = state;
+    return buffer;
   }
 
   private toExportFailure(

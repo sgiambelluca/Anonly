@@ -380,30 +380,6 @@ describe("Orchestrator — unit tests", () => {
     expect(engines.pdf.process).not.toHaveBeenCalled();
   });
 
-  it("runtime.workers.export se retiene (debug log) sin invocar la factory (sin consumidor funcional en este PR)", () => {
-    const bus = createRealBus();
-    const engines = createMockEngines();
-    wireHappyPathSpies(engines, bus);
-    const logger = createMockLogger();
-    const exportFactory = vi.fn();
-
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- construir alcanza para el log de arranque
-    const orchestrator = new PipelineOrchestrator({
-      bus,
-      logger,
-      cache: new LruCache(),
-      config: createEngineConfig(),
-      engines,
-      runtime: { workers: { export: exportFactory } },
-    });
-
-    expect(logger.debug).toHaveBeenCalledWith(
-      expect.stringContaining("transporte de workers"),
-      expect.objectContaining({ hasExportWorkerFactory: true }),
-    );
-    expect(exportFactory).not.toHaveBeenCalled();
-  });
-
   // ─── WorkerPool (05_Worker_Architecture.md) ───
 
   describe("WorkerPool", () => {

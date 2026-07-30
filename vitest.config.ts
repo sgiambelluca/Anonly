@@ -25,19 +25,20 @@ const rootDir = fileURLToPath(new URL(".", import.meta.url));
  * - `resolve.alias` fuerza a que @anonly/shared y @anonly/event-system siempre
  *   resuelvan al workspace real (no al symlink dentro de node_modules).
  * - `resolve.alias` es un ARRAY (no el objeto `{ find: replacement }` más
- *   simple) porque `@anonly/ner-engine` necesita un `find` como RegExp
- *   anclado (`^...$`), no un string: el alias de Vite con `find` string
- *   matchea por PREFIJO (`id === find || id.startsWith(find + "/")`) y
- *   reemplaza solo esa porción, concatenando el resto tal cual sobre el
- *   `replacement` — que acá es un ARCHIVO (`.../ner-engine/src/index.ts`),
- *   no un directorio. Desde que `ner-engine` ganó el subpath `"./worker"` en
- *   su `package.json` (PR15, ADR-046), un import `@anonly/ner-engine/worker`
- *   bajo este mismo config (p. ej. `apps/react-client/src/__tests__/
- *   core-adapter.test.ts`, que corre bajo el `vitest.config.ts` raíz) caía en
- *   ese alias de prefijo y resolvía a `.../src/index.ts/worker` (inexistente)
- *   en vez de dejar que Node/Vite resuelvan la subpath real vía `exports`.
- *   El resto de las entradas queda con `find` string (comportamiento
- *   idéntico al objeto previo): ninguna otra expone subpaths propios hoy.
+ *   simple) porque `@anonly/ner-engine` y `@anonly/export-engine` necesitan
+ *   un `find` como RegExp anclado (`^...$`), no un string: el alias de Vite
+ *   con `find` string matchea por PREFIJO (`id === find || id.startsWith(find
+ *   + "/")`) y reemplaza solo esa porción, concatenando el resto tal cual
+ *   sobre el `replacement` — que acá es un ARCHIVO (`.../<engine>/src/index.ts`),
+ *   no un directorio. Desde que `ner-engine` (PR15, ADR-046) y
+ *   `export-engine` (PR16, ADR-047) ganaron el subpath `"./worker"` en su
+ *   `package.json`, un import `@anonly/<engine>/worker` bajo este mismo
+ *   config (p. ej. `apps/react-client/src/__tests__/core-adapter.test.ts`,
+ *   que corre bajo el `vitest.config.ts` raíz) caía en ese alias de prefijo y
+ *   resolvía a `.../src/index.ts/worker` (inexistente) en vez de dejar que
+ *   Node/Vite resuelvan la subpath real vía `exports`. El resto de las
+ *   entradas queda con `find` string (comportamiento idéntico al objeto
+ *   previo): ninguna otra expone subpaths propios hoy.
  * - `exclude` explícitamente excluye node_modules para que los tests dentro de
  *   symlinks no se dupliquen.
  */
@@ -56,13 +57,19 @@ export default defineConfig({
         find: "@anonly/anonymization-core",
         replacement: resolve(rootDir, "packages/anonymization-core/src/index.ts"),
       },
-      // export-engine no es dependencia de ningún package.json de la raíz ni de
-      // otro motor (P-2): pnpm no lo enlaza en node_modules/@anonly desde la
-      // raíz. tests/security/security.test.ts (fuera del paquete) lo importa
-      // por contrato público; este alias lo resuelve al workspace real, mismo
-      // criterio que las tres entradas de arriba.
+      // tests/security/security.test.ts (fuera del paquete) importa
+      // @anonly/export-engine por contrato público; este alias lo resuelve al
+      // workspace real, mismo criterio que las tres entradas de arriba.
+      // RegExp anclado (no string, PR16/ADR-047): export-engine ganó el
+      // subpath "./worker" en su package.json (mismo motivo que
+      // @anonly/ner-engine más abajo) — apps/react-client/src/core-adapter/
+      // index.ts (corre bajo este mismo config, ver `include`) importa
+      // "@anonly/export-engine/worker?worker"; con `find` string el alias de
+      // prefijo lo reescribiría a `.../export-engine/src/index.ts/worker`
+      // (inexistente) en vez de dejar que Node/Vite resuelvan la subpath real
+      // vía `exports`.
       {
-        find: "@anonly/export-engine",
+        find: /^@anonly\/export-engine$/,
         replacement: resolve(rootDir, "packages/anonymization-core/export-engine/src/index.ts"),
       },
       // tests/integration/ (Hito 9, ADR-034 §6) importa estos motores

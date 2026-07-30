@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@anonly/anonymization-core": "workspace:*",
+    "@anonly/export-engine": "workspace:*",
     "@anonly/ner-engine": "workspace:*",
     "@anonly/ocr-engine": "workspace:*",
     "@anonly/pdf-engine": "workspace:*",

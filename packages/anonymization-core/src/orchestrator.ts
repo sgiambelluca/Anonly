@@ -89,7 +89,7 @@ import type {
   ImportDocumentInput,
   IPipelineOrchestrator,
 } from "./types.js";
-import { WorkerPoolManager, type PoolKey } from "./worker-pool.js";
+import { WorkerPoolManager, type ManagedPoolKey } from "./worker-pool.js";
 
 function ocrWordsCacheKey(documentId: string, pageIndex: number): string {
   // Formato de clave documentado (ADR-014 §Decisión, ADR-021 §4): el lado
@@ -174,11 +174,10 @@ export interface PipelineOrchestratorOptions {
    * in-process (comportamiento del Hito 9/ADR-035, sin cambios). Los
    * factories `pdf`/`ocr`/`ner`/`render` se consumen acá mismo, en el
    * constructor, pasándolos a `WorkerPoolManager`. `workers.export` (el
-   * ExportWorker único, sin pool — ADR-036 §1) se retiene en
-   * `exportWorkerFactory` para que el host-bridge de `export-engine` (PR16)
-   * lo use antes de invocar `engines.export.export()` en `runExport()`; sin
-   * consumidor funcional en este PR (R-1: un PR = un módulo, no se toca
-   * `export-engine`).
+   * `WorkerPool` de `size: 1` del ExportWorker, ADR-047 §2) NO pasa por
+   * acá: `create-core.ts` lo construye e inyecta directo a
+   * `new ExportEngine(exportPool)`, espejo de `ocrPool`/`nerPool` — el
+   * Orchestrator no retiene ninguna factory de export (retirado en PR16).
    */
   readonly runtime?: CoreRuntimeOptions;
 }
@@ -230,11 +229,6 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     string,
     { readonly total: number; readonly current: number }
   >();
-  // ADR-036 §1/§2: factory del ExportWorker único (sin pool propio); ver
-  // comentario de `PipelineOrchestratorOptions.runtime`. Sin lectura en este
-  // PR — punto de inyección para el host-bridge de export-engine (PR16).
-  private readonly exportWorkerFactory: WorkerFactory | undefined;
-
   private activeDocumentId: string | undefined;
   private disposed = false;
 
@@ -244,12 +238,8 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     this.cache = options.cache;
     this.config = options.config;
     this.engines = options.engines;
-    this.exportWorkerFactory = options.runtime?.workers?.export;
-    this.logger.debug("PipelineOrchestrator: transporte de workers configurado.", {
-      hasExportWorkerFactory: this.exportWorkerFactory !== undefined,
-    });
 
-    const poolWorkerFactories: Partial<Readonly<Record<PoolKey, WorkerFactory>>> = {
+    const poolWorkerFactories: Partial<Readonly<Record<ManagedPoolKey, WorkerFactory>>> = {
       ...(options.runtime?.workers?.pdf !== undefined ? { pdf: options.runtime.workers.pdf } : {}),
       ...(options.runtime?.workers?.ocr !== undefined ? { ocr: options.runtime.workers.ocr } : {}),
       ...(options.runtime?.workers?.ner !== undefined ? { ner: options.runtime.workers.ner } : {}),
@@ -1405,7 +1395,7 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
 
   // ─── Helpers ───
 
-  private poolSizeFor(key: PoolKey): number {
+  private poolSizeFor(key: ManagedPoolKey): number {
     switch (key) {
       case "pdf":
         return this.config.workerPool.pdfPoolSize;

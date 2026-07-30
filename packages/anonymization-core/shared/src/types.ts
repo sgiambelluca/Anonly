@@ -242,10 +242,28 @@ export interface RenderPagePayload {
   readonly imageFormat?: "png" | "jpeg";
 }
 
+// ADR-047 §3: forma completa (reemplaza la anterior, inejecutable sin
+// `imageFormat`/dimensiones en puntos PDF — el worker no podía decidir
+// embedJpg vs embedPng ni crear la página). `metadata` se movió a
+// `ExportSavePayload`: se aplica una sola vez, al final, no en cada página.
 export interface ExportPagePayload {
   readonly documentId: string;
   readonly pageIndex: number;
-  readonly pageImage: ArrayBuffer;
+  readonly pageImage: ArrayBuffer; // EncodedPageImage.bytes, transferido
+  readonly imageFormat: "png" | "jpeg";
+  readonly pageWidthPt: number; // document.pages[i].width
+  readonly pageHeightPt: number; // document.pages[i].height
+}
+
+// Job final del ExportWorker bajo jobType "export-page" (ADR-047 §3/§4):
+// aplica la metadata (ya sanitizada en host) y su COMPLETED devuelve el
+// ArrayBuffer del PDF transferido; DISPOSE solo libera (05 §7.5, ADR-036
+// §4). El entry-point discrimina append vs save por forma:
+// `"pageImage" in payload` (ADR-047 §3) — mismo criterio que ADR-043 §4 para
+// `render-page`. No agrega un `WorkerJobType` nuevo (viaja bajo
+// "export-page", igual que `ExportPagePayload`).
+export interface ExportSavePayload {
+  readonly documentId: string;
   readonly metadata: ExportMetadata;
 }
 
