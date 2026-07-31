@@ -14,6 +14,10 @@
  *
  * `ExportButton` (Hito 10 PR9) se monta igual que `CancelButton`: sin
  * condicional acá, decide su propia visibilidad (`stage === Ready`).
+ *
+ * `CloseDocumentButton` (ADR-051) se monta con el mismo criterio: sin
+ * condicional acá, decide su propia visibilidad (documento activo + pipeline
+ * detenido, `closeDocumentButtonVisibility.ts`).
  */
 
 import { PipelineStage } from "@anonly/anonymization-core";
@@ -22,6 +26,7 @@ import { ShieldIcon } from "lucide-react";
 import { usePipelineStore } from "../../store/pipeline.store.js";
 
 import { CancelButton } from "./CancelButton.js";
+import { CloseDocumentButton } from "./CloseDocumentButton.js";
 import { ExportButton } from "./ExportButton.js";
 import { ImportButton } from "./ImportButton.js";
 import { PasswordDialog } from "./PasswordDialog.js";
@@ -45,6 +50,7 @@ export function Toolbar() {
         {isIdle ? <ImportButton /> : <PipelineStatus />}
         <ExportButton />
         <CancelButton />
+        <CloseDocumentButton />
         <SettingsButton />
       </div>
       <PasswordDialog />
