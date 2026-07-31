@@ -177,6 +177,8 @@ Canales escuchados: `EventChannel.UI` (único desde ADR-044; las suscripciones a
 
 > Precondición (ADR-030): estas vías por eventos requieren que el documento esté cargado vía `loadDocument`. Si el `documentId` no está cargado, el motor loguea `warn` y no hace nada (no hay caller al que lanzarle) — mismo tratamiento que el Orchestrator da a `groupId` inexistente (06_Pipeline.md §11).
 
+> **Cancelación de la vía por eventos (precisión ADR-052, 2026-07-30)**: `handleRenderRequested` corre con el `ctx` que el motor recibió en `init()` —el de la instancia, no el del documento—, así que un render originado en `RENDER_REQUESTED` **no** es cancelable con el `AbortSignal` por documento del Orchestrator (`abortRegistry.abort(documentId)`). Puede seguir en vuelo y emitir su `PREVIEW_UPDATED` después de un `DOCUMENT_CLOSED`; quien se hace cargo de ese caso es el Orchestrator, revocando el blob URL tardío (ADR-052 §2, `Orchestrator.md` §13 caso 11). El único mecanismo de descarte de esta vía es el supersede por escala (ADR-037 §4). No es un defecto del motor —el contrato de `IEngine.init(ctx)` es por instancia— pero conviene tenerlo escrito: sorprendió una vez.
+
 ---
 
 ## 9. Entradas

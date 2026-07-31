@@ -53,6 +53,8 @@ Por qué retirar y no convivir: como cada `GROUP_TOGGLED`/`GROUP_REPLACEMENT_CHA
 - Errores de estos renders: mismo tratamiento que el resto de los caminos por evento — `warn` + continuar, nunca `PIPELINE_FAILED` (el preview es best-effort; el reintento de `RENDER_PAGE_FAILED` vive dentro del motor).
 - Estos renders son invocaciones directas: **inmunes al supersede** de `RENDER_REQUESTED` (`Render_Engine.md` §13 caso 21) — una entrada de escala vieja no puede descartar un seed.
 
+> **Amendment (ADR-052 §3, 2026-07-30)**: la nota v1.5.1 de `Orchestrator.md` hizo estos renders inmunes también a la **cancelación** del documento, con un `AbortController` propio por llamada que nunca se abortaba. Eso era demasiado: quedaban corriendo incluso después de `closeDocument`, contra un documento cuyo proxy de Render ya fue destruido, y su `PREVIEW_UPDATED` tardío dejaba un blob URL que nadie revocaba. Se precisa: el seed/flush del preview mediado es inmune a la **cancelación** (`cancelReanalyze`, ADR-038 §6 — el motivo original de la señal propia) pero **no a la baja** del documento. El controlador pasa a ser por documento y lo abortan `closeDocument`/`dispose`. El resto de esta sección no cambia.
+
 ### 4. `buildPageReplacements` se comparte desde `export-engine`
 
 La función es pura (grupos → `Replacement[]` por página, filtrando `enabled === false` — exactamente la semántica del preview: `Render_Engine.md` §13 caso 2). Se exporta desde el `index.ts` de `export-engine` y la importa el façade (único autorizado a importar motores, `Code_Standards.md` §12). No es un cambio de contrato de `Contracts.md`; el uso interno del export no cambia.

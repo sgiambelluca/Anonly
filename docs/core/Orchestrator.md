@@ -6,8 +6,10 @@
 
 **Componente**: Orchestrator + façade `@anonly/anonymization-core` (no es un motor: **no tiene `EngineId`** y no implementa `IEngine`; este spec adapta la plantilla de 15 secciones de `ai/Module_Specification_Template.md` a un componente host)
 **Ubicación**: `packages/anonymization-core/src/`
-**Versión del spec**: 1.5.3
+**Versión del spec**: 1.5.4
 **Última actualización**: 2026-07-30
+
+> **Nota (v1.5.4, 2026-07-30 — ADR-052: ningún blob URL sobrevive al cierre, ni el que llega tarde)**: `handlePreviewUpdated` y `handleExportFinished` registraban el blob URL entrante **incondicionalmente**. Un `PREVIEW_UPDATED`/`EXPORT_FINISHED` que llegara después del `revokeByPrefix` de `closeDocument` quedaba registrado para un `documentId` que ningún cierre futuro vuelve a barrer: leak permanente. Las fuentes de una llegada tardía son tres, no una: el preview mediado (su `AbortController` propio de la v1.5.1 nunca se aborta), **la vía por evento de Render** (`handleRenderRequested` usa el `ctx` de `init`, así que ningún render de `RENDER_REQUESTED` es cancelable con `abortRegistry.abort(documentId)`) y el export. Se especifica: (a) los dos handlers, ante un `documentId` que ya no está en `state`, **revocan el URL entrante en el acto** + `warn`, y no lo registran —nunca lo ignoran a secas: el URL ya lo creó el motor (ADR-034 §5) y si el Orchestrator no lo toma, nadie lo revoca—; (b) `mediatedPreviewCtx` pasa a un controlador **por documento** que `closeDocument`/`dispose` abortan y `cancelReanalyze` **no** (ADR-038 §6 intacto: inmune a la *cancelación*, no a la *baja*).
 
 > **Nota (v1.5.3, 2026-07-30 — ADR-050: `retryWithPassword` persiste el password y lo propaga a Render)**: `retryWithPassword` armaba el input con la contraseña como variable local y **nunca reescribía `retainedInputs`**. Como `ensureRenderDocumentLoaded` lee ese mismo `retainedInputs`, `RenderEngine.loadDocument` recibía los bytes todavía encriptados y moría con `RenderFailedError("No password given")` → `PIPELINE_FAILED`: el mismo banner genérico, después de que el usuario hubiera ingresado la contraseña **correcta**. Rompía los tres caminos que dependen de la carga en Render (rasterización para OCR, seed del preview de ADR-044 y export en `mode: "full"`), y no dependía del transporte: fallaba igual con pools in-process. Se especifica: `retryWithPassword` **reescribe** `retainedInputs` con el input que incluye el password antes de re-correr el pipeline, y `ensureRenderDocumentLoaded` pasa `retained.password` como tercer argumento de `loadDocument` (ADR-050 §1/§4). El password se borra donde ya se borraba (`closeDocument`/`dispose`).
 
@@ -233,7 +235,7 @@ El Orchestrator **no define códigos de error nuevos**: propaga `SerializedEngin
 8. **Cancelación durante cualquier etapa**: aborto de todos los jobs del `documentId`, `PIPELINE_CANCELLED`, estado `Cancelled`, documento queda cargado en el último estado estable.
 9. **Cancelación durante export**: el `PDFDocument` parcial se descarta; no se emite `EXPORT_FINISHED`.
 10. **Doble `EXPORT_REQUESTED`**: el segundo se encola y corre al terminar el primero.
-11. **`DOCUMENT_CLOSED` con pipeline corriendo**: equivale a cancelar + liberar todo.
+11. **`DOCUMENT_CLOSED` con pipeline corriendo**: equivale a cancelar + liberar todo. **Invariante (v1.5.4, ADR-052 §1)**: tras el cierre no queda vivo **ningún** blob URL de ese documento — ni los vigentes al momento del barrido, ni los que lleguen después en un `PREVIEW_UPDATED`/`EXPORT_FINISHED` tardío (esos los revoca el guard de los handlers, §8). El cierre **no** espera a los renders en vuelo: los aborta y sigue (`DOCUMENT_CLOSED` tiene que ser inmediato — la UI lo usa para volver al estado vacío).
 12. **Segundo `importDocument` con otro documento** (MVP: un documento activo): el anterior debe cerrarse primero; si no, `InvalidInputError`.
 13. **`WORKER_POOL_SATURATED`**: pausa el ingest de jobs de ese tipo hasta que la cola baje del 50%; no OOM.
 14. **Worker crashea**: el pool lo reemplaza y reintenta si `retryable` (`05_Worker_Architecture.md` §9); el Orchestrator solo observa.
@@ -304,6 +306,10 @@ El Orchestrator **no define códigos de error nuevos**: propaga `SerializedEngin
 | `seed also runs on suppressed GROUPING_FINISHED after cancelled reanalyze` | `edge.test.ts` | edge | caso 26 (ADR-044, ADR-038 §6; v1.5.1 — el mock de `render.renderPage` debe rechazar con `CancelledError` si recibe `ctx.abortSignal.aborted === true`, igual que el motor real, para que el test no pase de forma vacía con una señal abortada) |
 | `seed render failure warns without PIPELINE_FAILED` | `edge.test.ts` | edge | caso 27 (ADR-044; preview best-effort) |
 | `group page map cleared on DOCUMENT_CLOSED` | `unit.test.ts` | unit | ADR-044 (sin leak entre documentos) |
+| `late PREVIEW_UPDATED after closeDocument revokes its blob url` | `edge.test.ts` | edge | caso 11 (ADR-052 §2; el render mediado queda pendiente **a través** del cierre y resuelve después — es el test que el E2E no puede dar de forma confiable) |
+| `late EXPORT_FINISHED after closeDocument revokes its blob url` | `edge.test.ts` | edge | caso 11 (ADR-052 §2) |
+| `PREVIEW_UPDATED during unloadDocument await is registered and swept` | `edge.test.ts` | edge | caso 11 (ADR-052 §2; el guard no debe adelantarse al `revokeByPrefix`) |
+| `cancelReanalyze still lets the mediated seed run` | `edge.test.ts` | edge | ADR-052 §3 + ADR-038 §6 (no-regresión de la v1.5.1: el controlador nuevo se ata a la baja, no a la cancelación) |
 
 Los tests de contract/unit/edge mockean los motores (interfaces de `Contracts.md`); la integración real con motores vive en `tests/integration/` (Hito 9) y E2E (Hito 10). Pares críticos mínimos de `tests/integration/` (ADR-034 §6): Regex+NER → Grouping vía `ENTITY_FOUND`; `OCR_PAGE_FINISHED` → Orchestrator → `fuseOcrPage` (función pura, ADR-014/ADR-041); happy path `createCore` → `PIPELINE_READY` con motores reales y fronteras de libs mockeadas (ADR-021 §5). Corre bajo `pnpm test` y con `pnpm test:integration` (filtro posicional, ADR-033); al crearla, quitar `integration/**` del `exclude` de `tests/tsconfig.json` y agregar alias/`paths` por motor a demanda.
 
@@ -333,6 +339,7 @@ Los tests de contract/unit/edge mockean los motores (interfaces de `Contracts.md
 - [ ] 18. Verificar `no-network-from-core`.
 - [ ] 19. (ADR-049, PR 17.2 — depende del PR 17.1 de `pdf-engine`) `isEngineErrorCode` en `src/errors.ts`; `handleExtractionFailure` discrimina por `code` (§13 caso 3); retiro del `isRetryable` propio del despacho de `pdf-parse` y del import huérfano de `PdfPasswordRequiredError`; los dos tests de §14 con el error **deserializado**; des-`fixme` de `tests/e2e/scenario-3-protected-pdf.spec.ts`. Grep de control: ningún `instanceof` de subclase concreta de `EngineError` —salvo `CancelledError`, exento por el frame `CANCELLED` del transporte— en `packages/anonymization-core/src/`.
 - [ ] 20. (ADR-050, PR 17.5 — depende del PR 17.4 de `render-engine`) `retryWithPassword` reescribe `retainedInputs` con el input que incluye el password; `ensureRenderDocumentLoaded` lo pasa como tercer argumento de `loadDocument`. Los tres tests de §14 (persistencia, propagación, limpieza en `closeDocument`) y el cierre del Escenario 3 E2E **con preview visible**.
+- [ ] 21. (ADR-052, PR 17.8) Guard en `handlePreviewUpdated`/`handleExportFinished`: `documentId` fuera de `state` → `URL.revokeObjectURL` del URL entrante + `warn`, sin registrar. `mediatedPreviewCtx` pasa a un `AbortController` por documento, abortado por `closeDocument`/`dispose` y **no** por `cancelReanalyze`, limpiado como el resto del estado por documento. Los cuatro tests de §14. Grep de control: ningún `blobTracker.set` sin guard en `orchestrator.ts`.
 
 ---
 

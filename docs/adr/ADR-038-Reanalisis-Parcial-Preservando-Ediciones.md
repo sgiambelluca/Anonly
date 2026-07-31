@@ -141,6 +141,8 @@ Los PRs 2–4 no dependen del scaffold y pueden correr en paralelo con el PR 1; 
 
 > **Inserción posterior (ADR-051 §6, 2026-07-30)**: **PR 17.7 — `CloseDocumentButton` en el `Toolbar`** (`apps/react-client`). Un documento que llega a `Ready` no se podía cerrar desde la UI —solo el banner de `Failed` y el cancelar de `PasswordDialog` invocan `closeDocument`—, y como `validateImportInput` exige cerrar antes de importar otro, tampoco se podía abrir un segundo PDF sin recargar la pestaña. Corrige el supuesto de ADR-048 §3 y desbloquea el Escenario 7 de PR17 y el gate `test:leak` de Hito 11. Cero cambios en `packages/`.
 
+> **Inserción posterior (ADR-052 §7, 2026-07-30)**: **PR 17.8 — blob URLs tardíos tras cerrar documento** (`packages/anonymization-core/src`), después del PR 17.7. El Escenario 7 hizo observable el ciclo open/close y con él una ventana real: `handlePreviewUpdated`/`handleExportFinished` registraban el blob URL entrante sin mirar si el documento seguía abierto, así que un render en vuelo que emitiera después del barrido de `closeDocument` dejaba un URL que ningún cierre futuro vuelve a revocar. Tres fuentes de llegada tardía, no una: el preview mediado (ADR-044 §3 + nota v1.5.1), la vía por evento de Render (usa el `ctx` de `init`, no es cancelable por documento) y el export. Fix: guard que **revoca** en los dos handlers + señal de baja por documento para el preview mediado. `cancelReanalyze` (§6 de este ADR) queda intacto.
+
 ## Alternativas consideradas
 
 | Alternativa | Por qué no |

@@ -204,6 +204,7 @@ Orden canónico de PRs (ADR-038 §8; los PRs 2-4 no dependen del scaffold y pued
 | 17.5 | `retryWithPassword` persiste y propaga el password; cierre del Escenario 3 con preview (ADR-050 §4) | `packages/anonymization-core/src` |
 | 17.6 | Rutas de tesseract: archivo en `workerPath` + absolutización contra `self.location.origin` (erratas `OCR_Engine.md` v1.2.1/v1.2.2, ADR-018 §2; sin ADR) | `ocr-engine` |
 | 17.7 | `CloseDocumentButton` en el Toolbar + cierre del Escenario 7 (ADR-051) | `apps/react-client` |
+| 17.8 | Blob URLs tardíos tras cerrar documento: guard que revoca + señal de baja del preview mediado (ADR-052) | `packages/anonymization-core/src` |
 
 ### Hito 11 — Hardening
 - Performance gates (todas las métricas de `00_Project_Vision.md` §7).
