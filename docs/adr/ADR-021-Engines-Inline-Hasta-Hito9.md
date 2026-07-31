@@ -2,7 +2,7 @@
 
 # ADR-021 — Motores restantes inline hasta Hito 9 + reconciliación del spec OCR
 
-- **Estado**: Accepted
+- **Estado**: Accepted (§7 superseded por ADR-041 en lo que respecta a Pdf, 2026-07-22: `PdfEngine.releaseDocument` eliminado — el motor ya no retiene documentos; el patrón sigue vigente para Render `unloadDocument`)
 - **Fecha**: 2026-07-09
 - **Decidido por**: Repaso documental post-hardening de Hitos 1 y 2, aprobado por el humano
 

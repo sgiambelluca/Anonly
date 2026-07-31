@@ -1,11 +1,13 @@
 import {
   CancelledError,
+  EngineError,
   EngineEvents,
   EntityType,
   EventChannel,
   type EngineContext,
   type EntityFound,
   type NerFinished,
+  type NerModelReady,
 } from "@anonly/shared";
 import { pipeline } from "@huggingface/transformers";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -20,7 +22,7 @@ vi.mock("@huggingface/transformers", () => ({
 }));
 
 import { NerEngine } from "../ner.engine.js";
-import { NerPageFailedError } from "../ner.errors.js";
+import { NerModelMissingError, NerPageFailedError, NerTimeoutError } from "../ner.errors.js";
 
 import {
   asPipelineMock,
@@ -29,6 +31,7 @@ import {
   makeNerPageInput,
   mockTokenClassificationPipeline,
   nerToken,
+  type NerPoolDispatchParams,
 } from "./fixtures/test-helpers.js";
 
 describe("NerEngine — unit tests", () => {
@@ -438,5 +441,108 @@ describe("NerEngine — unit tests", () => {
     expect(payload.occurrence.confidence).toBeCloseTo(0.77, 5);
     expect(typeof payload.occurrence.id).toBe("string");
     expect(payload.occurrence.id.length).toBeGreaterThan(0);
+  });
+
+  // ─── ADR-046 §4 (caso 17) / §2 (caso 18) ───
+
+  it("NER_MODEL_READY emitted once per instance across several model-ready reports", async () => {
+    asPipelineMock(pipeline).mockResolvedValue(
+      mockTokenClassificationPipeline(() => Promise.resolve([])),
+    );
+    const config = createMockConfig({
+      ner: {
+        modelId: "test-model-dedupe",
+        quantization: "q8",
+        confidenceThreshold: 0.7,
+        batchSize: 1,
+        enabled: true,
+      },
+    });
+    const dedupCtx = createEngineContext({ config });
+
+    // Simula el `model-ready` de un segundo worker (spec §13 caso 17): un
+    // reporte adicional, en cada batch, que no debería producir un segundo
+    // NER_MODEL_READY. Delega en `params.run()` para que el kernel real siga
+    // resolviendo el resultado (sin necesidad de fabricar un valor `T`).
+    const pool = {
+      dispatch: <T>(params: NerPoolDispatchParams<T>): Promise<T> => {
+        params.onProgress?.(1, { phase: "model-ready", modelId: "test-model-dedupe" });
+        return params.run();
+      },
+    };
+    const pooledEngine = new NerEngine(pool);
+    await pooledEngine.init(dedupCtx);
+    const busEmitSpy = vi.spyOn(dedupCtx.bus, "emit");
+    await pooledEngine.processPage(
+      makeNerPageInput("doc-dedupe-ready", 0, ["Juan", "Pérez"]),
+      dedupCtx,
+    );
+
+    const readyCalls = busEmitSpy.mock.calls.filter(
+      ([, event]) => event === EngineEvents.NER_MODEL_READY,
+    );
+    expect(readyCalls).toHaveLength(1);
+    expect((readyCalls[0]?.[2] as NerModelReady).modelId).toBe("test-model-dedupe");
+    expect(pooledEngine.isModelReady()).toBe(true);
+
+    await pooledEngine.dispose();
+  });
+
+  it("deserialized NER_TIMEOUT is retried; deserialized NER_MODEL_MISSING aborts", async () => {
+    asPipelineMock(pipeline).mockResolvedValue(
+      mockTokenClassificationPipeline(() => Promise.resolve([])),
+    );
+
+    // NER_TIMEOUT: el primer dispatch devuelve un error deserializado (no
+    // `instanceof NerTimeoutError`, tal como cruzaría un worker remoto vía
+    // `EngineError.deserialize`, Contracts.md §4). El motor debe reintentar
+    // igual que si el timeout fuera local.
+    let timeoutAttempts = 0;
+    const timeoutPool = {
+      dispatch: <T>(params: NerPoolDispatchParams<T>): Promise<T> => {
+        timeoutAttempts++;
+        if (timeoutAttempts === 1) {
+          const deserialized = EngineError.deserialize(
+            new NerTimeoutError("doc-deserialized-timeout", 0, 20000).serialize(),
+          );
+          expect(deserialized).not.toBeInstanceOf(NerTimeoutError);
+          return Promise.reject(deserialized);
+        }
+        return params.run();
+      },
+    };
+    const timeoutEngine = new NerEngine(timeoutPool);
+    await timeoutEngine.init(ctx);
+    const output = await timeoutEngine.processPage(
+      makeNerPageInput("doc-deserialized-timeout", 0, ["Hola"]),
+      ctx,
+    );
+    expect(output.occurrences).toEqual([]);
+    expect(timeoutAttempts).toBe(2); // 1 timeout deserializado + 1 reintento exitoso
+    await timeoutEngine.dispose();
+
+    // NER_MODEL_MISSING: deserializado también, pero aborta sin reintentar
+    // ni envolver en NerPageFailedError (ensureModelLoaded corría fuera del
+    // loop de retry; el equivalente en el kernel es que este error nunca es
+    // recuperable por el motor).
+    const missingPool = {
+      dispatch: <T>(): Promise<T> => {
+        const deserialized = EngineError.deserialize(
+          new NerModelMissingError("test-model", "no disponible").serialize(),
+        );
+        expect(deserialized).not.toBeInstanceOf(NerModelMissingError);
+        return Promise.reject(deserialized);
+      },
+    };
+    const missingEngine = new NerEngine(missingPool);
+    await missingEngine.init(ctx);
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+    await expect(
+      missingEngine.processPage(makeNerPageInput("doc-deserialized-missing", 0, ["Hola"]), ctx),
+    ).rejects.toBeInstanceOf(NerModelMissingError);
+    expect(
+      busEmitSpy.mock.calls.some(([, event]) => event === EngineEvents.NER_PAGE_FINISHED),
+    ).toBe(false);
+    await missingEngine.dispose();
   });
 });

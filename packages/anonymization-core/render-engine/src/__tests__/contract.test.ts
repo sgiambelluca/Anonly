@@ -1,3 +1,4 @@
+import { createEventBus } from "@anonly/event-system";
 import {
   EngineDisposedError,
   EngineEvents,
@@ -15,6 +16,7 @@ import { RenderEngine } from "../render.engine.js";
 
 import {
   createEngineContext,
+  createEngineContextWithRealBus,
   createMockPage,
   createMockPdfDocument,
   createRenderPageInput,
@@ -153,6 +155,24 @@ describe("RenderEngine — contract tests", () => {
     );
   });
 
+  // ─── ADR-044: retiro del delta render por eventos de Grouping ───
+
+  it("no subscriptions on grouping channel", async () => {
+    // ADR-044 (reemplaza a "delta render only re-renders affected pages"):
+    // el re-render por cambio de grupo lo media el Orchestrator con
+    // invocaciones directas de renderPage; este motor deja de escuchar
+    // GROUP_REPLACEMENT_CHANGED/GROUP_TOGGLED (la matriz de
+    // `04_Event_System.md` §11 lo cubre además desde el lado del Orchestrator).
+    const bus = createEventBus({ logger: ctx.logger });
+    await engine.init(createEngineContext({ bus }));
+
+    expect(bus.subscriberCount(EventChannel.Grouping, EngineEvents.GROUP_REPLACEMENT_CHANGED)).toBe(
+      0,
+    );
+    expect(bus.subscriberCount(EventChannel.Grouping, EngineEvents.GROUP_TOGGLED)).toBe(0);
+    expect(bus.channelCount()).toBe(1); // solo EventChannel.UI (RENDER_REQUESTED)
+  });
+
   it("dispose destroys loaded PDFDocumentProxies", async () => {
     const mockDocA = createMockPdfDocument({ pageCount: 1 });
     const mockDocB = createMockPdfDocument({ pageCount: 1 });
@@ -230,5 +250,49 @@ describe("RenderEngine — contract tests", () => {
     expect(output.encoded?.bytes.byteLength).toBeGreaterThan(0);
     expect(output.encoded?.widthPx).toBe(output.imageData.width);
     expect(output.encoded?.heightPx).toBe(output.imageData.height);
+  });
+
+  // ─── ADR-037 §1 (Hito 10): RENDER_REQUESTED.scale ───
+
+  it("RENDER_REQUESTED propagates scale to renderPages", async () => {
+    const docId = "doc-scale-propagate";
+    // Se observa la propagación en su efecto contractual (la escala con la que
+    // se construye el viewport de cada página del batch), no espiando el
+    // método por el que pasa: desde el fix del supersede (nota 6c de
+    // render.engine.ts) el handler despacha por la vía interna
+    // `renderPagesInternal` (con supersede), no por el `renderPages` público.
+    const getViewportSpy = vi.fn(({ scale }: { scale: number }) => ({
+      width: 100 * scale,
+      height: 100 * scale,
+    }));
+    const mockDoc = createMockPdfDocument({
+      pageCount: 1,
+      pageFactory: () => ({
+        getViewport: getViewportSpy,
+        render: vi.fn(() => ({ promise: Promise.resolve() })),
+      }),
+    });
+    vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(mockDoc));
+    const realCtx = createEngineContextWithRealBus();
+    await engine.init(realCtx);
+    await engine.loadDocument(docId, createValidBuffer());
+
+    realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+      documentId: docId,
+      pageIndices: [0],
+      mode: "preview",
+      scale: 3,
+    });
+
+    await vi.waitFor(() => {
+      expect(getViewportSpy).toHaveBeenCalledWith({ scale: 3 });
+    });
+
+    // El batch reconstruye "original" y "anonymized" por página (nota 1 de
+    // render.engine.ts): TODOS los renders del request usan la escala del evento.
+    expect(getViewportSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
+    for (const call of getViewportSpy.mock.calls) {
+      expect(call[0]?.scale).toBe(3);
+    }
   });
 });

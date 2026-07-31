@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=contratos-base | dependencias=03_Data_Model.md,04_Event_System.md | audiencia=IA-implementador | fase=3 -->
+<!-- CONTEXT: scope=contratos-base | dependencias=03_Data_Model.md,04_Event_System.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-049-Errores-Cruzando-Worker-Discriminacion-Por-Code.md | audiencia=IA-implementador | fase=3 (§3.5 actualizado en fase 10: CoreRuntimeOptions/WorkerLike/WorkerFactory para transporte de workers —ADR-036 §2—, IPipelineOrchestrator.reanalyze/ReanalyzeConfigPatch —ADR-038 §1—; §6 gana MAX_RENDER_SCALE/PREVIEW_CACHE_MAX_BYTES —ADR-037 §2-3—; §8 RenderRequested.scale —ADR-037 §1—; §4 precisa qué garantiza deserialize() al cruzar el boundary, sin cambio de shape —ADR-049 §2—) -->
 
 # Anonly — Contratos Base (`@anonly/shared`)
 
@@ -151,6 +151,8 @@ export interface EngineConfig {
 }
 ```
 
+`EngineConfig` es fija para la vida de un `createCore`, con una única excepción: `IPipelineOrchestrator.reanalyze` (§3.5) puede actualizar `ner.enabled`/`ocr.languages` en runtime vía una config efectiva mantenida por el Orchestrator (ADR-038 §1). Ningún otro campo es mutable en runtime.
+
 ### 3.2 `IEventBus`
 
 ```ts
@@ -246,13 +248,64 @@ export interface ImportDocumentInput {
 export interface IPipelineOrchestrator {
   importDocument(input: ImportDocumentInput): Promise<void>;   // etapas 0..7 (hasta Ready)
   retryWithPassword(documentId: string, password: string): Promise<void>;
+  // Re-corre detección (Regex/NER) y/o re-OCR sobre un documento ya cargado sin
+  // perder las ediciones manuales del usuario (grupos, reglas, conflictos
+  // resueltos). Ver ADR-038 §1. Precondición: stage ∈ {Ready, Failed}.
+  reanalyze(documentId: string, patch: ReanalyzeConfigPatch): Promise<void>;
   cancel(documentId: string, jobId?: string): Promise<void>;
   closeDocument(documentId: string): Promise<void>;
   getState(documentId: string): PipelineState;
   dispose(): Promise<void>;
 }
 
-export async function createCore(config?: Partial<EngineConfig>): Promise<IAnonymizationCore>;
+// ─── Re-análisis parcial preservando ediciones (Hito 10, ADR-038 §1) ───
+// Cubre exactamente los dos settings de UI que afectan detección
+// (React_Client.md §3.6/§3.7). Ampliar el patch (p. ej. otros campos de
+// NerConfig) requiere ADR nuevo. La inmutabilidad de EngineConfig por sesión
+// (§3.1) se relaja únicamente por esta vía: el Orchestrator mantiene una
+// config efectiva que reanalyze actualiza mergeando el patch.
+export interface ReanalyzeConfigPatch {
+  readonly ner?: { readonly enabled: boolean };
+  readonly ocr?: { readonly languages: ReadonlyArray<string> };
+}
+
+// ─── Transporte de Web Workers reales (Hito 10, ADR-036 §2) ───
+// Los Worker de SO los crea la app (única con bundler: Vite resuelve
+// `import X from "@anonly/<engine>/worker?worker"`) y los inyecta acá como
+// factories. Sin factory para un kind, ese despacho queda in-process
+// (comportamiento del Hito 9, ADR-035 §1) — la migración es motor por motor y
+// los tests del Core siguen corriendo en node sin `Worker`.
+// Las factories van en un parámetro aparte y NO dentro de EngineConfig:
+// EngineConfig viaja serializado al worker en INIT y las funciones no son
+// structured-cloneables.
+
+export interface WorkerLike {
+  postMessage(message: unknown, transfer?: ReadonlyArray<globalThis.Transferable>): void;
+  addEventListener(type: "message" | "error", listener: (ev: unknown) => void): void;
+  terminate(): void;
+}
+
+export type WorkerFactory = () => WorkerLike;
+
+// "export" refiere al ExportWorker único (sin pool propio, ADR-036 §1).
+export type WorkerEntryKind = "pdf" | "ocr" | "ner" | "render" | "export";
+
+export interface CoreRuntimeOptions {
+  readonly workers?: Partial<Readonly<Record<WorkerEntryKind, WorkerFactory>>>;
+}
+
+// Overrides parciales de dos niveles (ADR-039): cada sección de EngineConfig
+// admite un subconjunto de campos; lo ausente cae a los defaults de §6. El
+// merge por sub-objeto ya era la semántica de runtime; este tipo la expone
+// (antes: Partial<EngineConfig>, shallow — exigía secciones completas).
+export type EngineConfigOverrides = {
+  readonly [K in keyof EngineConfig]?: Partial<EngineConfig[K]>;
+};
+
+export async function createCore(
+  config?: EngineConfigOverrides,
+  runtime?: CoreRuntimeOptions
+): Promise<IAnonymizationCore>;
 ```
 
 ---
@@ -318,8 +371,10 @@ export abstract class EngineError extends Error {
   }
 
   // Reconstruye un EngineError genérico a partir de su forma serializada (cruza
-  // el boundary de un Worker vía postMessage). Los motores concretos pueden
-  // hacer su propio override para devolver su subclase específica.
+  // el boundary de un Worker vía postMessage). Devuelve SIEMPRE un
+  // DeserializedEngineError: la subclase concreta no sobrevive al structured
+  // clone y no se reconstruye (ADR-049 §2). Discriminar por `code`, nunca por
+  // `instanceof <SubclaseConcreta>`.
   static deserialize(serialized: SerializedEngineError): EngineError {
     return new DeserializedEngineError(serialized);
   }
@@ -337,6 +392,8 @@ export interface SerializedEngineError {
 ```
 
 Cada motor define sus subclases concretas en su `<engine>.errors.ts`. Toda subclase setea `code`, `engineId`, `retryable` y `details`. Los errores genéricos compartidos (`EngineNotInitializedError`, `EngineDisposedError`, `InvalidInputError`, `CancelledError`, definidos en `shared/src/errors.ts`) usan `engineId: "core"` porque no pertenecen a ningún motor.
+
+**Qué se garantiza al cruzar el boundary de un Worker** (ADR-049): un error lanzado dentro de un worker viaja como `SerializedEngineError` (`postMessage` no transporta prototipos) y el host lo reconstruye con `EngineError.deserialize()` como `DeserializedEngineError`. Sobreviven `code`, `engineId`, `message`, `retryable` y `details`; **no sobrevive la clase concreta**. Por lo tanto todo consumidor discrimina por `err.code` — `instanceof EngineError` sigue siendo válido (la jerarquía base sí se conserva), `instanceof <SubclaseConcreta>` no (`ai/Code_Standards.md` §7). Si un motor necesita su subclase concreta río abajo, la reinstancia por `code` en su propio host-bridge (`normalizeNerError`/`normalizeExportError`, ADR-045/ADR-046/ADR-047). `CancelledError` es el único caso exento y por construcción: el transporte tiene un frame `CANCELLED` propio y el host instancia el error localmente, sin pasar por `serialize()`.
 
 ---
 
@@ -439,12 +496,23 @@ export interface PdfEngineConfig {
   readonly maxPageCount: number; // default 10000
 }
 
+// Rutas del runtime WASM de onnxruntime-web, inyectadas por el host (la app,
+// única capa con bundler — ADR-036 §2, ADR-039). Solo strings (serializable:
+// EngineConfig viaja al worker en INIT). Forma objeto: URLs explícitas por
+// archivo (necesario con bundlers que hashean nombres); forma string: prefijo
+// de directorio. Ausente → el motor usa su default "/wasm/onnxruntime/".
+export interface NerWasmPaths {
+  readonly wasm?: string;
+  readonly mjs?: string;
+}
+
 export interface NerConfig {
   readonly modelId: string;
   readonly quantization: "q8" | "q4" | "f32";
   readonly confidenceThreshold: number;
   readonly batchSize: number;
   readonly enabled: boolean;
+  readonly wasmPaths?: string | NerWasmPaths; // ADR-039
 }
 
 export interface OcrConfig {
@@ -483,6 +551,8 @@ export interface ExportConfig {
 | `MAX_QUEUE_PER_POOL` | `{ pdf: 32, ocr: 8, ner: 8, render: 32 }` | `WorkerPoolConfig.maxQueuePerPool` (ADR-034 §7) |
 | `PREVIEW_CACHE_PAGES` | `16` | `RenderConfig` |
 | `WORDS_CACHE_PAGES` | `32` | `EngineConfig.cache` |
+| `MAX_RENDER_SCALE` | `4` | Guard de `RenderRequested.scale`/`RenderPageInput.scale` (ADR-037 §2) |
+| `PREVIEW_CACHE_MAX_BYTES` | `200 MB` | Límite por bytes del cache LRU de previews, además de `PREVIEW_CACHE_PAGES` (ADR-037 §3) |
 
 ---
 
@@ -558,7 +628,15 @@ export interface GroupingFinished { readonly documentId: string; readonly groupC
 // Render
 export interface PreviewUpdated { readonly documentId: string; readonly pageIndex: number; readonly kind: "original" | "anonymized"; readonly canvasBlobUrl: string; }
 export interface PreviewPageFailed { readonly documentId: string; readonly pageIndex: number; readonly error: SerializedEngineError; }
-export interface RenderRequested { readonly documentId: string; readonly pageIndices: ReadonlyArray<number>; readonly mode: "preview" | "full"; }
+export interface RenderRequested {
+  readonly documentId: string;
+  readonly pageIndices: ReadonlyArray<number>;
+  readonly mode: "preview" | "full";
+  // ADR-037 §1: escala absoluta pdfjs (1.0 = 72 DPI), misma semántica que
+  // RenderPageInput.scale (Render_Engine.md §6). Ausente → previewScale/fullScale
+  // según mode. Rango válido: 0 < scale ≤ MAX_RENDER_SCALE.
+  readonly scale?: number;
+}
 export interface RenderFinished { readonly documentId: string; readonly pageIndices: ReadonlyArray<number>; readonly durationMs: number; }
 export interface RenderFailed { readonly documentId: string; readonly error: SerializedEngineError; }
 

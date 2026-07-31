@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=componentes-ui | dependencias=ui/React_Client.md,ui/UX_Guidelines.md,ADR-001-Framework.md | audiencia=IA-implementador-ui | fase=4 -->
+<!-- CONTEXT: scope=componentes-ui | dependencias=ui/React_Client.md,ui/UX_Guidelines.md,ADR-001-Framework.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md | audiencia=IA-implementador-ui | fase=4 (reconciliado en fase 10 por ADR-036: PasswordDialog/SettingsDialog/ConfirmDialog agregados §2.6–2.7/§8.9, zoom §5.2, mapeo §12; §2.6/§5.2/§5.5/§12 reescritos por ADR-037 —zoom con re-render real— y ADR-038 —SettingsDialog dispara reanalyze, no recreación del core—; §2.1/§2.5/§13.9 ajustados 2026-07-22 por el bug #7 del Escenario 1 E2E: gate de visibilidad por stage vs. vida del diálogo hijo abierto) -->
 
 # Anonly — Catálogo de Componentes
 
@@ -17,7 +17,11 @@ apps/react-client/src/components/
 │   ├── ImportButton.tsx
 │   ├── PipelineStatus.tsx
 │   ├── CancelButton.tsx
-│   └── ExportButton.tsx
+│   ├── ExportButton.tsx
+│   ├── SettingsButton.tsx    // ADR-036 §7
+│   ├── SettingsDialog.tsx    // ADR-036 §7
+│   ├── PasswordDialog.tsx    // ADR-036 §7
+│   └── CloseDocumentButton.tsx  // ADR-051
 ├── entities/
 │   ├── EntitiesPanel.tsx
 │   ├── EntityTypeGroup.tsx
@@ -46,6 +50,7 @@ apps/react-client/src/components/
 ├── common/
 │   ├── Button.tsx
 │   ├── Dialog.tsx           // wrapper sobre Radix Dialog
+│   ├── ConfirmDialog.tsx    // confirmación genérica (ADR-036 §7)
 │   ├── Select.tsx           // wrapper sobre Radix Select
 │   ├── Checkbox.tsx
 │   ├── Tooltip.tsx
@@ -66,9 +71,10 @@ apps/react-client/src/components/
 - **Estados**:
   - `stage === Idle`: solo botón "Importar PDF".
   - `stage ∈ {Importing, Extracting, OCRing, Detecting, Grouping}`: `PipelineStatus` + `CancelButton`.
-  - `stage === Ready`: `PipelineStatus` + `ExportButton` (+ `CancelButton` si hay jobs remanentes).
+  - `stage ∈ {Ready, Done}`: `PipelineStatus` + `ExportButton` + `CloseDocumentButton` (+ `CancelButton` si hay jobs remanentes). (`Done` no tenía fila — gap cerrado al resolver el bug #7 del Escenario 1 E2E: tras un export el documento sigue abierto y re-exportable. `CloseDocumentButton` agregado por ADR-051.)
   - `stage === Rendering/Exporting`: `PipelineStatus` + `CancelButton`.
-  - `stage === Failed`: banner de error + "Reintentar" o "Cerrar".
+  - `stage === Failed`: banner de error + "Reintentar" o "Cerrar" (el "Cerrar" del banner, sin confirmación) + `CloseDocumentButton`.
+  - `stage === Cancelled`: `PipelineStatus` + `CloseDocumentButton`.
 - **Acciones**: ninguna directa; delega en hijos.
 
 ### 2.2 `ImportButton`
@@ -94,9 +100,35 @@ apps/react-client/src/components/
 
 ### 2.5 `ExportButton`
 
-- **Visible**: cuando `stage === Ready`.
+- **Visible**: cuando `stage ∈ {Ready, Done}` (`Done` permite reabrir el diálogo con el resultado — "Descargar"/"Exportar otro", §7.2).
+- **Vida del diálogo (bug #7 del Escenario 1 E2E, 2026-07-22)**: el gate de visibilidad aplica **solo al botón**; mientras `ExportDialog` esté abierto, el componente permanece montado aunque `stage` salga del set (`Exporting` durante el export, `Done` al finalizar) — `if (!visible && !open) return null`, nunca `if (!visible) return null` a secas. Sin esto, la transición `Ready → Exporting → Done` que el Core hace por spec (`Orchestrator.md` §8) desmonta el diálogo abierto con todo su estado justo antes de pintar el link de descarga.
 - **Acción**: abre `ExportDialog`.
-- **Atajo**: `Cmd/Ctrl+E`.
+- **Atajo**: `Cmd/Ctrl+E` (activo solo cuando el botón es visible).
+
+### 2.6 `SettingsButton` + `SettingsDialog` (ADR-036 §7)
+
+- **Trigger**: icono de engranaje en el Toolbar (siempre visible; `UX_Guidelines.md` §2).
+- **Stores**: `settings`, `document` (para saber si hay documento abierto).
+- **Form** (`MVP.md` §2.3): idioma (`es` default), performance preset (`auto`/`low`/`high`), NER toggle, OCR languages.
+- **Acción**: muta `settings.store` + `settings.persist()`. Si el cambio es `nerEnabled`/`ocrLanguages` y hay documento abierto: `ConfirmDialog` "¿Reanalizar el documento con la nueva configuración? Tus ediciones se conservan." → `actions.reanalyze(patch)` (ADR-038 §7, `React_Client.md` §3.7 — **no** recrea el core). Si es `performancePreset` con documento abierto: se persiste y aplica al próximo documento, sin diálogo de confirmación (ADR-038 §7 Q3).
+- **ARIA**: `aria-label="Configuración"`.
+
+### 2.7 `PasswordDialog` (ADR-036 §7)
+
+- **Se abre por**: `PDF_PASSWORD_REQUIRED` (suscripción **directa** de la UI al canal `pdf` — ADR-034 §4; el stage queda en `Extracting`).
+- **Acción**: submit → `actions.retryWithPassword(password)` (`orchestrator.retryWithPassword`; **nunca** `engines.pdf.process` — Orchestrator.md §6). Si el evento vuelve a llegar, muestra "Contraseña incorrecta" y re-pide.
+- **Cancelar**: cierra el diálogo y ofrece cerrar el documento (`actions.closeDocument`).
+- **Seguridad**: el input **nunca** se loguea ni persiste (`08_Security_Model.md` §7); `type="password"`, sin autocompletado.
+
+### 2.8 `CloseDocumentButton` (ADR-051)
+
+- **Visible**: hay documento activo y `stage ∈ {Ready, Done, Failed, Cancelled}` — o sea, con el pipeline detenido. Durante una corrida el control es `CancelButton` (§2.4), no este: cerrar a mitad de pipeline es "cancelar + liberar" (`Orchestrator.md` §13 caso 11) y dos botones para lo mismo solo multiplican caminos.
+- **Acción**: abre `ConfirmDialog` ("¿Cerrar el documento? Se perderán las ediciones y reglas de esta sesión.") → `actions.closeDocument()`.
+- **Vida del diálogo**: aplica la regla 9 de §13 (`if (!visible && !open) return null`) — un `PIPELINE_STAGE_CHANGED` por debajo no puede desmontar el `ConfirmDialog` abierto.
+- **Atajo**: ninguno en MVP (`Cmd/Ctrl+W` lo captura el navegador).
+- **ARIA**: `aria-label="Cerrar documento"`.
+- **Por qué existe** (ADR-051): sin este control, un documento que llega a `Ready` solo se puede cerrar recargando la pestaña, y como `validateImportInput` exige cerrar antes de importar otro (`Orchestrator.md` §13 caso 12), tampoco se podía abrir un segundo PDF. Bloqueaba además el Escenario 7 E2E y el gate `test:leak` de Hito 11.
+- **No confundir con** el "Cerrar documento" del banner de error de `PipelineStatus` (§2.3): ese cierra **sin** confirmación, porque en `Failed` no hay ediciones que perder. Los dos conviven a propósito.
 
 ---
 
@@ -208,9 +240,9 @@ apps/react-client/src/components/
 - **Props**: `kind: "original" | "anonymized"`.
 - **Stores**: `viewer`, `entities` (para highlights en `original`), `document`.
 - **Comportamiento**: usa `PageVirtualizer` para renderizar solo visibles. Escucha `PREVIEW_UPDATED` via `viewer.previewByPage` y pasa el `blobUrl` al `PageCanvas` correspondiente.
-- **Eventos**:
-  - Cambio de `visibleRange` → `actions.requestRender(visibleRange, kind)`.
-  - Cambio de `zoom` → re-render con nueva escala.
+- **Eventos** (reconciliados por ADR-036 §5, reescrito por ADR-037):
+  - Cambio de `visibleRange` → `actions.requestRender(pageIndices)` (sin `kind`: el payload `RenderRequested` no lo tiene; Render produce original y anonimizado según su estrategia, `06_Pipeline.md` §10).
+  - Cambio de `zoom` → escala **CSS/canvas** del bitmap ya renderizado de inmediato (feedback durante el gesto) y, tras 150 ms sin nuevos ticks, `actions.requestRender(visibleRange, "preview", previewScale × zoom)` para un **re-render real** (ADR-037 §1/§5, supersede ADR-036 §6). El `PREVIEW_UPDATED` resultante reemplaza el bitmap CSS transitorio por el nítido.
 
 ### 5.3 `PageVirtualizer`
 
@@ -231,7 +263,7 @@ apps/react-client/src/components/
 
 - **Botones**: `+`, `-`, `Reset`.
 - **Atajos**: `Cmd/Ctrl++`, `Cmd/Ctrl+-`, `Cmd/Ctrl+0`.
-- **Acción**: `viewer.setZoom(newZoom)`.
+- **Acción**: `viewer.setZoom(newZoom)` (aplica el escalado CSS inmediato vía `PdfViewer` §5.2); el re-render real se dispara con debounce, no en cada click/atajo individual (`ZOOM_RERENDER_DEBOUNCE_MS = 150 ms`, ADR-037 §5).
 
 ---
 
@@ -280,6 +312,12 @@ apps/react-client/src/components/
 
 - Wrapper sobre Radix `Dialog` con focus trap, escape para cerrar, backdrop.
 - Props: `open`, `onClose`, `title`, `children`.
+
+### 8.2b `ConfirmDialog` (ADR-036 §7)
+
+- Confirmación genérica sobre `Dialog`; ya era referenciado por `CancelButton` (§2.4), `GroupContextMenu` (§3.5) y `RuleItem` (§4.2) sin estar en el catálogo.
+- Props: `open`, `title`, `message`, `confirmLabel`, `cancelLabel`, `variant?: "danger"`, `onConfirm`, `onCancel`.
+- Usos MVP: cancelar pipeline (`UX_Guidelines.md` §7.3), deshabilitar grupo, borrar regla, reanalizar por cambio de settings (§2.6).
 
 ### 8.3 `Select`
 
@@ -375,8 +413,11 @@ Modo oscuro: en v1.0. MVP es solo claro.
 
 | Componente | Lee del store | Dispara acción | Evento Core |
 |---|---|---|---|
-| `ImportButton` | – | `actions.importDocument` | `DOCUMENT_IMPORTED` + `pdf.process` |
+| `ImportButton` | – | `actions.importDocument` → `orchestrator.importDocument` | `DOCUMENT_IMPORTED` (lo emite el Orchestrator; la UI nunca invoca `pdf.process` — errata corregida, ADR-036 §7) |
+| `PasswordDialog` | `document` | `actions.retryWithPassword` → `orchestrator.retryWithPassword` | (escucha `PDF_PASSWORD_REQUIRED`, canal `pdf`) |
+| `SettingsDialog` | `settings`, `document` | `settings.persist` (+ `actions.reanalyze` si `nerEnabled`/`ocrLanguages` cambian con documento abierto, `React_Client.md` §3.7, ADR-038 §7) | `orchestrator.reanalyze` (no es un evento del bus) |
 | `CancelButton` | `pipeline.stage` | `actions.cancel` | `CANCEL_REQUESTED` |
+| `CloseDocumentButton` (ADR-051) | `pipeline.stage`, `document` | `actions.closeDocument` (vía `ConfirmDialog`) → `orchestrator.closeDocument` | `DOCUMENT_CLOSED` |
 | `ExportButton` | `pipeline.stage`, `document` | `actions.requestExport` (via dialog) | `EXPORT_REQUESTED` |
 | `EntityGroupItem` (checkbox) | `entities.groupsByType` | `actions.updateGroup` | `GROUP_UPDATE_REQUESTED` |
 | `ReplacementModeSelect` | `entities.groupsByType` | `actions.updateGroup` | `GROUP_UPDATE_REQUESTED` |
@@ -402,6 +443,7 @@ Modo oscuro: en v1.0. MVP es solo claro.
 6. Sin `useEffect` para lógica de negocio; solo para suscripciones del adapter (que viven en `core-adapter`, no en componentes).
 7. Accesibilidad: todos los componentes interactivos pasan por wrappers de Radix (que son accesibles por default).
 8. Sin `dangerouslySetInnerHTML`. Sin `eval`. Sin `innerHtml`.
+9. **Auto-gating vs. diálogos hijos (bug #7 del Escenario 1 E2E, 2026-07-22)**: un componente que se auto-oculta por `stage` y renderiza un diálogo hijo controlado por estado local **nunca desmonta el diálogo mientras esté abierto** — el gate condiciona el trigger (botón), no la vida del diálogo: `if (!visible && !open) return null`. `stage` puede cambiar por debajo de un diálogo abierto en cualquier momento (el pipeline es asíncrono); desmontar destruye el estado en vuelo del diálogo. Aplica a `ExportButton` (§2.5) y a cualquier componente con el mismo patrón (`CancelButton` + `ConfirmDialog`, §2.4).
 
 ---
 
@@ -413,3 +455,5 @@ Modo oscuro: en v1.0. MVP es solo claro.
 - `ADR-005-State-Management.md` (Zustand + bus)
 - `04_Event_System.md` §10 (eventos de UI)
 - `03_Data_Model.md` (tipos consumidos)
+- `adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md` (zoom real, §5.2/§5.5)
+- `adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md` (`SettingsDialog` → `reanalyze`, §2.6/§12)

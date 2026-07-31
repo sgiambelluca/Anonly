@@ -1,12 +1,14 @@
-<!-- CONTEXT: scope=ner-engine | dependencias=core/Contracts.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,ADR-006-NER-Local.md | audiencia=IA-implementador | fase=3 -->
+<!-- CONTEXT: scope=ner-engine | dependencias=core/Contracts.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,ADR-006-NER-Local.md,adr/ADR-046-NerEngine-Pool-Propia-Kernel-Puro.md | audiencia=IA-implementador | fase=10 (§2/§6/§7/§11/§12/§13/§14/§15 actualizados en fase 10: clase host-side dueña de su pool + kernel de inferencia en el worker, ADR-046) -->
 
 # NER Engine — Spec de Motor
 
 > Detecta personas, organizaciones, direcciones y fechas mediante un modelo NER local (Transformers.js + ONNX Runtime Web). Emite `Occurrence[]` con `source: "ner"` y `confidence` según el modelo.
 
 **EngineId**: `ner`
-**Versión del spec**: 1.0.0
-**Última actualización**: 2026-07-11
+**Versión del spec**: 1.2.0
+**Última actualización**: 2026-07-24
+
+> **Nota (ADR-046, 2026-07-24 — reparto host/worker para PR15, tercer espejo de ADR-043/ADR-045)**: la clase `NerEngine` queda **entera host-side** — el loop secuencial por página de `processPages`, el retry/timeout por página de `processPage`, la partición en batches (ADR-024 §2), el mapeo de spans a `Occurrence` (bbox/`wordSpan`) y la emisión de los **seis** eventos. Al worker va un **kernel de inferencia sin estado por documento** (`05_Worker_Architecture.md` §7.3): `NerPagePayload` (el texto de **un batch**) → tokenización + inferencia + agregación BIO → `COMPLETED { spans }`; su único estado es el pipeline de `@huggingface/transformers` cargado para un `(modelId, dtype)` dado. El motor recibe su pool por constructor opcional (`new NerEngine(pool?)`, inyectado por el façade en `create-core.ts`; sin argumento → fallback in-process bit-idéntico, ADR-035) y despacha con `maxRetriesOverride: 0` — el único loop de retry es el del motor; los errores que cruzan un worker remoto llegan deserializados y se re-instancian por `code` (`NER_TIMEOUT`, `NER_MODEL_MISSING`) en el borde del puerto. **Sin bus puente en el worker**: `ENTITY_FOUND` y `NER_PAGE_FINISHED` salen de una sola ruta host-side, así que el orden evento/datos está garantizado y `grouping-engine` recibe el mismo stream de siempre. El **ciclo de vida del modelo** (que sí ocurre dentro del worker) cruza por el canal `PROGRESS` del transporte —no por eventos de dominio— y el motor lo traduce en host a `NER_MODEL_LOADING`/`NER_MODEL_READY` (este último, una vez por instancia). `isModelReady()` y `NerStarted.modelLoading` pasan a un flag host-side de la instancia, con la misma semántica per-instancia. Interfaz de §6: sin cambios de firma salvo el constructor.
 
 > **Nota (ADR-021, 2026-07-09)**: este motor se implementa **inline** en su hito, sin crear su pool propio; `WorkerPoolManager` y los pools llegan con el Orchestrator (Hito 9), sin cambio de interfaz pública (precedentes ADR-013/ADR-020). Leer §12 y los ítems de workers/pool del §15 como Hito 9; cancelación cooperativa con checkpoints inline, el SLA < 200 ms se valida en Hito 9/11. Los tests unit/contract/edge mockean la frontera de la librería externa (Code_Standards §10, ADR-021 §5).
 >
@@ -15,6 +17,8 @@
 > **Nota (ADR-024, 2026-07-11)**: `NerStarted` gana `modelLoading?: boolean` (espejo de ADR-021 §3 para OCR; habilita el caso límite 7). `batchSize` se interpreta en **palabras** en la implementación inline (proxy de tokens; el tokenizer real vive tras la frontera de Transformers.js).
 >
 > **Nota (ADR-025, 2026-07-11)**: la librería es `@huggingface/transformers` (v4, sucesora de la deprecada `@xenova/transformers` v2). Cuantización vía `dtype: "q8"`; los wasm de su `onnxruntime-web` bundleado se sirven first-party desde `/wasm/onnxruntime/` con pin en `assets.lock.json`. Los assets del modelo (ADR-023) no cambian.
+>
+> **Nota (ADR-039, 2026-07-22)**: `NerConfig` gana `wasmPaths?: string | NerWasmPaths` (Contracts.md §6). Si está definido, `configureTransformersEnv()` lo asigna **tal cual** a `env.backends.onnx.wasm.wasmPaths` y no lo pisa nunca; ausente → default `/wasm/onnxruntime/` (comportamiento previo, tests sin cambio). Motivo: `onnxruntime-web` hace `import()` dinámico ESM de su glue `.mjs` y Vite prohíbe importar desde `public/` — la app (única capa con bundler) importa los archivos vía `?url` y los inyecta por config, mismo patrón que `GlobalWorkerOptions.workerSrc` de pdfjs-dist. El destino de esos dos assets en `assets.lock.json` pasa a `apps/react-client/src/assets/onnxruntime/` (supersede el destino de ADR-025 punto 3); `env.allowLocalModels = true` es obligatorio en browser (default `false`, hallazgo E2E del Hito 10 PR10). `env.localModelPath` y los assets del modelo no cambian.
 
 ---
 
@@ -26,11 +30,12 @@ Aplicar un modelo NER local sobre `Page.text` y emitir `Occurrence[]` para entid
 
 ## 2. Responsabilidades
 
-- Cargar el modelo ONNX cuantizado (Q8) vía Transformers.js en cada worker del `NerPool`.
-- Tokenizar e inferir sobre `Page.text` por página.
-- Mapear los spans detectados a `Occurrence` con `bbox` (resolviendo offsets de tokenización a spans de `Word`).
+- Cargar el modelo ONNX cuantizado (Q8) vía Transformers.js. Hito 3: inline; desde PR15 (ADR-046): en el **kernel** — cada worker del `NerPool` carga su instancia; el fallback in-process usa el mismo módulo de kernel.
+- Tokenizar e inferir sobre `Page.text` por página, en batches de `NerConfig.batchSize` palabras (ADR-024 §2). La partición la hace el motor host-side; cada batch es un despacho al kernel (ADR-046 §3).
+- Mapear los spans detectados a `Occurrence` con `bbox` (resolviendo offsets de tokenización a spans de `Word`) — **host-side**: el kernel devuelve spans con offsets relativos al texto del batch y no conoce las `Word[]`.
 - Emitir `NER_STARTED`, `NER_MODEL_LOADING`, `NER_MODEL_READY`, `NER_PAGE_FINISHED`, `NER_FINISHED`.
 - Emitir `ENTITY_FOUND` por ocurrencia (evento interno, escuchado por Grouping).
+- Traducir el ciclo de vida del modelo reportado por el kernel (`PROGRESS.partial.phase`, ADR-046 §4) a `NER_MODEL_LOADING`/`NER_MODEL_READY`, deduplicando `NER_MODEL_READY` a uno por instancia del motor.
 - Marcar ocurrencias con `confidence < NER_CONFIDENCE_THRESHOLD` para que Grouping las marque conflicto `low_confidence`.
 - Cache del modelo en Cache Storage del navegador, versionado por `modelId`.
 - Lazy loading: solo se carga si NER está activado y hay texto.
@@ -80,6 +85,7 @@ export interface NerConfig {
   readonly confidenceThreshold: number;       // default 0.7
   readonly batchSize: number;                 // default 256 palabras (proxy de tokens en la impl. inline, ADR-024 §2)
   readonly enabled: boolean;                  // default true
+  readonly wasmPaths?: string | NerWasmPaths; // default ausente → "/wasm/onnxruntime/" (ADR-039; NerWasmPaths en Contracts.md §6)
 }
 
 export interface NerPageInput {
@@ -98,6 +104,11 @@ export interface NerPageOutput {
 
 export class NerEngine implements IEngine {
   readonly id = EngineId.Ner;
+  // pool (ADR-046 §2): puerto interno de despacho, inyectado por el façade en
+  // createCore (espejo de OcrEngine/ADR-045 §2 y RenderEngine/ADR-043 §2). Sin
+  // argumento → fallback in-process inmediato que invoca el mismo kernel
+  // (bit-idéntico, ADR-035); es lo que los tests del motor ya esperan.
+  constructor(pool?: NerJobPool);
   init(ctx: EngineContext): Promise<void>;
   processPage(input: NerPageInput, ctx: EngineContext): Promise<NerPageOutput>;
   processPages(inputs: ReadonlyArray<NerPageInput>, ctx: EngineContext): Promise<ReadonlyArray<NerPageOutput>>;
@@ -106,6 +117,10 @@ export class NerEngine implements IEngine {
   dispose(): Promise<void>;
 }
 ```
+
+**Semántica del despacho (ADR-046 §2–§4)**: `processPage` particiona la página en batches de `NerConfig.batchSize` palabras y envía **solo la inferencia** por el puerto, un despacho por batch — `dispatch({ jobType: "ner-page", payload: NerPagePayload, run: () => kernel, signal, priority: 80, maxRetriesOverride: 0, onProgress })`. El retry vive únicamente en el loop del motor (la política de §11 no cambia); antes de decidir si reintenta, el motor re-instancia por `code` los errores que cruzaron un worker remoto (`NER_TIMEOUT` → `NerTimeoutError`, reintenta; `NER_MODEL_MISSING` → `NerModelMissingError`, aborta NER sin envolver en `NerPageFailedError`), porque `EngineError.deserialize` devuelve una instancia genérica que falla el `instanceof`. El mapeo span→`Occurrence` (bbox, `wordSpan`, id), la emisión de `ENTITY_FOUND` por ocurrencia y la de `NER_PAGE_FINISHED` ocurren en el host, **en ese orden**, al resolver los batches de la página.
+
+`isModelReady()` devuelve el flag host-side de la instancia (`true` desde el primer `model-ready` reportado por un kernel), no la existencia de un clasificador local; `getModelId()` sigue saliendo de la config. Ambos válidos en modo pool y en fallback.
 
 ---
 
@@ -121,6 +136,8 @@ export class NerEngine implements IEngine {
 | `ENTITY_FOUND` | por cada ocurrencia detectada | `EntityFound` con `occurrence.source = "ner"` | async | sí |
 
 Canal: `EventChannel.Ner`.
+
+**Dónde se emite cada uno (ADR-046 §1/§4/§6)**: los seis se emiten **siempre en host** (ADR-013 §6), desde la clase `NerEngine`; el kernel del worker no emite ningún evento de dominio ni tiene bus puente. `NER_MODEL_LOADING`/`NER_MODEL_READY` se derivan de los reportes `PROGRESS` del kernel (`NerKernelProgress`, `03_Data_Model.md` §18): `phase: "model-loading"` → un `NER_MODEL_LOADING` con `progress`; `phase: "model-ready"` → `NER_MODEL_READY` **una sola vez por instancia del motor** (con `nerPoolSize: 2`, el segundo worker carga su propio modelo y reporta un `model-ready` que no es un cambio de estado observable); `phase: "model-load-retry"` no es un evento: es un `logger.warn` con el mensaje de `NerModelLoadFailedError`. Orden garantizado por construcción: `NER_MODEL_READY` precede al primer `ENTITY_FOUND` porque ambos salen del mismo hilo host, en la misma ruta de código.
 
 ---
 
@@ -185,18 +202,20 @@ Las `Occurrence` también se emiten vía `ENTITY_FOUND` (incremental).
 
 `retryable`: `NER_MODEL_LOAD_FAILED = true`, `NER_PAGE_FAILED = true`, `NER_TIMEOUT = true`. Resto `false`.
 
+**Dónde se originan y cómo cruzan (ADR-046 §2/§4)**: `NER_MODEL_MISSING`, `NER_MODEL_LOAD_FAILED` y `NER_TIMEOUT` nacen en el **kernel** (es donde corren `pipeline()` y la inferencia). `NER_MODEL_LOAD_FAILED` no cruza como error: el kernel lo reporta como `phase: "model-load-retry"` y reintenta una vez (§13 caso 8), y el host lo registra como `warn` — sin puente `LOG` en el worker. Los otros dos cruzan como `FAILED` y el motor los re-instancia por `code` antes de aplicar su política de reintento: `NER_TIMEOUT` reintenta dentro del loop; `NER_MODEL_MISSING` aborta NER y se propaga tal cual (no se envuelve en `NerPageFailedError`), como cuando `ensureModelLoaded` corría fuera del loop. `NER_PAGE_FAILED`, `ENGINE_NOT_INITIALIZED`, `ENGINE_DISPOSED` e `INVALID_INPUT` son host-side puros.
+
 ---
 
 ## 12. Consideraciones de rendimiento
 
-- Corre en `NerPool` (1–2 workers default).
+- Corre en `NerPool` (1–2 workers default), propiedad del propio motor desde ADR-046 §2/§7: la pool la construye el façade en `create-core.ts` y se inyecta por constructor; el Orchestrator ya no envuelve `processPages` en `pool.dispatch`. Un despacho por batch (`ceil(words / batchSize)` por página, típicamente 1–3 con el default de 256): el costo de mensajería es despreciable frente a la inferencia.
 - Costo: 5–15 s por página de texto denso.
 - Memoria: 200–400 MB por worker (modelo + sesión de inferencia).
 - Modelo cacheado en Cache Storage (~150–180 MB Q8 para mBERT, ADR-023). Lazy: solo descarga la primera vez.
 - Sin transferencia zero-copy de `text` (es string, se serializa normal).
 - Paralelismo: pool despacha en paralelo respetando `nerPoolSize`. Backpressure si `queue > 8`.
-- Cancelación: checkpoints entre batches de inferencia (cada `batchSize` palabras — proxy de tokens en la implementación inline, ADR-024 §2). SLA < 200 ms.
-- Modelo reutilizado entre jobs del mismo worker (no se recarga por página).
+- Cancelación: checkpoints entre batches de inferencia (cada `batchSize` palabras — proxy de tokens, ADR-024 §2), en el **loop host-side** del motor, más el mensaje `CANCEL` del protocolo para el batch en vuelo (ADR-046 §3). SLA < 200 ms.
+- Modelo reutilizado entre jobs del mismo worker (no se recarga por página): el kernel retiene su pipeline y solo lo re-crea si cambia `(modelId, dtype)`.
 - Si `deviceMemory < 4` GB, el Orchestrator serializa NER con OCR (no paralelos) para no exceder memoria.
 - WebGPU: si está disponible y el modelo lo soporta, se puede usar como backend faster (v1.0+). MVP usa WASM.
 
@@ -219,6 +238,9 @@ Las `Occurrence` también se emiten vía `ENTITY_FOUND` (incremental).
 13. **`processPage` tras `dispose`**: lanza `EngineDisposedError`.
 14. **Texto en idioma no soportado por el modelo**: el modelo multilingüe lo maneja con menor precisión. No lanza error; `confidence` será más baja.
 15. **Fecha escrita en palabras ("3 de mayo de 2024")**: el modelo la emite como `Date`. Si la misma fecha en formato numérico también la detecta Regex, la deduplicación no es responsabilidad de NER: Grouping resuelve por overlap (gana mayor `confidence`; Regex emite 1.0 y siempre gana). Ver ADR-023 §2.
+16. **`wasmPaths` inyectado por config (ADR-039)**: `configureTransformersEnv()` asigna el valor recibido tal cual a `env.backends.onnx.wasm.wasmPaths` (string u objeto `{wasm?, mjs?}`) y no lo sobreescribe con el default. Ausente → default `/wasm/onnxruntime/` (comportamiento previo). Desde ADR-046 §5 esa función vive en el **kernel** (es donde se carga el modelo) y el valor viaja en `NerPagePayload.wasmPaths` — no en `INIT`, que `WorkerPool` todavía no transporta con la config real (gap conocido, compartido con Pdf/Render/Ocr). Semántica sin cambios; lo que cambia es dónde se verifica.
+17. **Segundo worker del pool cargando su propio modelo**: cada worker carga el modelo en su primer job y reporta su propio `model-ready`. El motor emite `NER_MODEL_READY` **una sola vez por instancia** (el primero); los siguientes no producen evento. `NER_MODEL_LOADING` sí se emite por cada reporte de progreso recibido (la segunda carga suele ser un hit de Cache Storage, rápida).
+18. **Error de inferencia originado en un worker remoto**: llega deserializado (instancia genérica con el `code` correcto, `Contracts.md` §4). El motor lo re-instancia por `code` antes de decidir: `NER_TIMEOUT` se reintenta igual que el local; `NER_MODEL_MISSING` aborta NER; cualquier otro corta el loop y produce `NerPageFailedError` para esa página. La política observable es idéntica con pool real y con fallback in-process (ADR-035).
 
 ---
 
@@ -245,6 +267,17 @@ Las `Occurrence` también se emiten vía `ENTITY_FOUND` (incremental).
 | `disabled NER returns empty occurrences without loading model` | `edge.test.ts` | edge | caso 11 |
 | `written-out date mapped to Date` | `edge.test.ts` | edge | caso 15 |
 | `throws EngineDisposedError after dispose` | `edge.test.ts` | edge | caso 13 |
+| `injected wasmPaths applied verbatim, not overridden by default` | `edge.test.ts` | edge | caso 16 (ADR-039; cubre string y objeto; desde ADR-046 se verifica en el kernel) |
+| `absent wasmPaths falls back to /wasm/onnxruntime/` | `edge.test.ts` | edge | caso 16 (ADR-039) |
+| `kernel spans match the in-process path on the shared fixture` | `worker/__tests__/kernel.test.ts` | unit | ADR-046 §1 |
+| `kernel reports model-loading progress then model-ready` | `worker/__tests__/kernel.test.ts` | unit | ADR-046 §4 |
+| `kernel retries model load once, reports model-load-retry, then throws NerModelMissingError` | `worker/__tests__/kernel.test.ts` | unit | ADR-046 §4 (caso 8) |
+| `entry-point rejects a jobType other than ner-page` | `worker/__tests__/entry.test.ts` | unit | ADR-046 §Validación |
+| `entry-point CANCEL aborts the in-flight batch and answers CANCELLED` | `worker/__tests__/entry.test.ts` | unit | caso 10 |
+| `every dispatch uses maxRetriesOverride: 0` | `contract.test.ts` | contract | ADR-046 §2 |
+| `same six events, payloads and order with and without injected pool` | `contract.test.ts` | contract | fallback ADR-035 |
+| `NER_MODEL_READY emitted once per instance across several model-ready reports` | `unit.test.ts` | unit | caso 17 |
+| `deserialized NER_TIMEOUT is retried; deserialized NER_MODEL_MISSING aborts` | `unit.test.ts` | unit | caso 18 |
 | `recall ≥ 85% on reference dataset` | `perf.test.ts` (en `tests/perf/`) | perf | gate de v1.0 |
 | `precision ≥ 90% on reference dataset` | `perf.test.ts` | perf | gate de v1.0 |
 | `snapshot of occurrences for text-10p.pdf stable` | `snapshot.test.ts` | snapshot | fixture |
@@ -259,8 +292,8 @@ Fixtures: `tests/fixtures/text-10p.pdf` con nombres/organizaciones/direcciones/f
 - [ ] 2. Definir `types.ts` con `NerPageInput`, `NerPageOutput` (`NerConfig` viene de `@anonly/shared`/Contracts.md §6; ADR-023).
 - [ ] 3. Definir `errors.ts` con `NerModelMissingError`, `NerModelLoadFailedError`, `NerPageFailedError`, `NerTimeoutError`.
 - [ ] 4. Implementar `ner.engine.ts` respetando `IEngine` y la firma pública de §6.
-- [ ] 5. Implementar `init` (crear `NerPool`, cargar Transformers.js y modelo Q8 en cada worker, cache en Cache Storage).
-- [ ] 6. Implementar `processPage` con `AbortSignal`, checkpoints entre batches, emisión `ENTITY_FOUND` por ocurrencia, mapeo bbox.
+- [ ] 5. ~~Implementar `init` (crear `NerPool`, …)~~ **Superseded por ADR-046 §2**: el motor no crea su pool — la recibe por constructor (`new NerEngine(pool?)`); la carga del modelo Q8 y el cache en Cache Storage viven en el kernel, perezosos en su primer job.
+- [ ] 6. Implementar `processPage` con `AbortSignal`, checkpoints entre batches, emisión `ENTITY_FOUND` por ocurrencia, mapeo bbox (todo host-side desde ADR-046 §1).
 - [ ] 7. Implementar `processPages` (ordena por prioridad visible, despacha al pool, backpressure).
 - [ ] 8. Implementar `isModelReady`/`getModelId` para que la UI consulte estado.
 - [ ] 9. Implementar `dispose` (libera sesión de ONNX y memoria temporal; NO descarga el modelo cacheado).
@@ -275,6 +308,14 @@ Fixtures: `tests/fixtures/text-10p.pdf` con nombres/organizaciones/direcciones/f
 - [ ] 18. Verificar test de cancelación < 200 ms.
 - [ ] 19. Validar integrity del modelo al cargar (hash de `assets.lock.json`, ver `08_Security_Model.md` §8.3 y ADR-018) y configurar Transformers.js/onnxruntime-web contra el origen propio (`env.localModelPath`, `env.wasm.wasmPaths`).
 
+### PR15 — NerWorker (ADR-046)
+
+- [ ] 20. Extraer a `src/worker/kernel.ts` la inferencia y todo lo acoplado a la librería: `configureTransformersEnv` (ADR-039/§5 del ADR), carga perezosa del pipeline con su política de dos intentos, `classifyWithTimeout`, `positionTokens` y `aggregateTokensToSpans`. Exporta `kernelClassify(payload, { timeoutMs, abortSignal, onProgress })` → `ReadonlyArray<NerKernelSpan>` y `kernelDispose()`. Sin bus, sin logger, sin cache: no emite eventos ni loguea (espejo de `ocr-engine/src/worker/kernel.ts`).
+- [ ] 21. Escribir `src/worker/entry.ts` como kernel puro (espejo de `ocr-engine/src/worker/entry.ts`): `INIT`/`READY`, `RUN(ner-page)` → `COMPLETED { spans }`, `PROGRESS` con `NerKernelProgress` en `partial`, `CANCEL` por `signalId`, `DISPOSE`. `jobType` distinto de `ner-page` → `FAILED`. Agregar el subpath `"./worker"` al `package.json` del paquete.
+- [ ] 22. Reescribir `ner.engine.ts` como clase host-side: puerto interno `NerJobPool` + `IMMEDIATE_POOL` + `constructor(pool?)`; despacho por batch con `maxRetriesOverride: 0` y `priority: 80`; normalización por `code` de `NER_TIMEOUT`/`NER_MODEL_MISSING` en el borde del puerto; traducción de `onProgress` a `NER_MODEL_LOADING`/`NER_MODEL_READY` (dedup por instancia) y a `logger.warn` para `model-load-retry`; flag `modelWarm` para `isModelReady()`/`NerStarted.modelLoading`; `dispose()` invoca `kernelDispose()` directo (no por el puerto).
+- [ ] 23. Costuras ajenas sancionadas por ADR-046 §4/§7: `DispatchParams.onProgress` en `worker-pool.ts` (enrutar `PROGRESS` por `jobId` al job pendiente en vez de descartarlo); `create-core.ts` construye el `NerPool` (sin `onWorkerCreated`) e inyecta `new NerEngine(nerPool)` y lo dispone; `orchestrator.ts` deja de envolver `processPages` en `pools.getPool("ner").dispatch(...)` en `runDetectionStage` **y** en `runReanalyzeNerOnFlow`; wiring de la factory `ner` en la app (`apps/react-client`).
+- [ ] 24. Tests nuevos de §14 (kernel, entry-point, contract del despacho, dedup de `NER_MODEL_READY`, normalización por `code`) + glob de cobertura de `worker/**` del paquete en `vitest.config.ts`. Gates completos verdes.
+
 ---
 
 ## Referencias
@@ -285,3 +326,4 @@ Fixtures: `tests/fixtures/text-10p.pdf` con nombres/organizaciones/direcciones/f
 - `architecture/08_Security_Model.md` §8.3 (integridad de modelos)
 - `adr/ADR-006-NER-Local.md` (decisión de Transformers.js + ONNX)
 - `adr/ADR-002-No-Backend.md` (NER local)
+- `adr/ADR-046-NerEngine-Pool-Propia-Kernel-Puro.md` (reparto host/worker de PR15; espejo de ADR-043/ADR-045)

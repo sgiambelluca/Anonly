@@ -42,6 +42,15 @@ export interface EngineConfig {
   readonly export: ExportConfig;
 }
 
+// Overrides parciales de dos niveles (ADR-039): cada sección de EngineConfig
+// admite un subconjunto de campos; lo ausente cae a los defaults de
+// buildDefaultEngineConfig. El merge por sub-objeto ya era la semántica de
+// runtime de mergeEngineConfig; este tipo la expone (antes:
+// Partial<EngineConfig>, shallow — exigía secciones completas).
+export type EngineConfigOverrides = {
+  readonly [K in keyof EngineConfig]?: Partial<EngineConfig[K]>;
+};
+
 export interface IEventBus {
   on<E extends EngineEvents>(
     channel: EventChannel,
@@ -101,12 +110,23 @@ export interface WorkerPoolConfig {
   readonly idleDisposeMs: number;
 }
 
+// Rutas del runtime WASM de onnxruntime-web, inyectadas por el host (la app,
+// única capa con bundler — ADR-036 §2, ADR-039). Solo strings (serializable:
+// EngineConfig viaja al worker en INIT). Forma objeto: URLs explícitas por
+// archivo (necesario con bundlers que hashean nombres); forma string: prefijo
+// de directorio. Ausente → el motor usa su default "/wasm/onnxruntime/".
+export interface NerWasmPaths {
+  readonly wasm?: string;
+  readonly mjs?: string;
+}
+
 export interface NerConfig {
   readonly modelId: string;
   readonly quantization: "q8" | "q4" | "f32";
   readonly confidenceThreshold: number;
   readonly batchSize: number;
   readonly enabled: boolean;
+  readonly wasmPaths?: string | NerWasmPaths; // ADR-039
 }
 
 export interface OcrConfig {
@@ -114,6 +134,20 @@ export interface OcrConfig {
   readonly dpi: number;
   // Timeout y retries por página: fuente única workerPool.timeouts["ocr-page"] y
   // maxRetries["ocr-page"] (ADR-021 §2, precedente ADR-013).
+}
+
+/**
+ * Re-análisis parcial preservando ediciones (Hito 10, ADR-038 §1). Cubre
+ * exactamente los dos settings de UI que afectan detección
+ * (`ui/React_Client.md` §3.6/§3.7): ampliar el patch (p. ej. otros campos de
+ * `NerConfig`) requiere ADR nuevo. La inmutabilidad de `EngineConfig` por
+ * sesión (nota de §3.1 de `Contracts.md`) se relaja únicamente por esta vía:
+ * el Orchestrator mantiene una config efectiva por documento que
+ * `IPipelineOrchestrator.reanalyze` actualiza mergeando este patch.
+ */
+export interface ReanalyzeConfigPatch {
+  readonly ner?: { readonly enabled: boolean };
+  readonly ocr?: { readonly languages: ReadonlyArray<string> };
 }
 
 export interface GroupingConfig {
@@ -132,6 +166,37 @@ export interface ExportConfig {
   readonly defaultDpi: number;
   readonly defaultImageFormat: "png" | "jpeg";
   readonly defaultJpegQuality: number;
+}
+
+// ─── Transporte de Web Workers reales (Hito 10, ADR-036 §2, Contracts.md §3.5) ───
+//
+// Los `Worker` de SO los crea la app (única con bundler: Vite resuelve
+// `import X from "@anonly/<engine>/worker?worker"`) y los inyecta acá como
+// factories. Sin factory para un kind, ese despacho queda in-process
+// (comportamiento del Hito 9, ADR-035 §1) — la migración es motor por motor y
+// los tests del Core siguen corriendo en node sin `Worker`. Las factories van
+// en un parámetro aparte de `createCore` y NO dentro de `EngineConfig`:
+// `EngineConfig` viaja serializado al worker en INIT y las funciones no son
+// structured-cloneables.
+
+/**
+ * `WorkerLike` es estructural a propósito: un `Worker` real de DOM lo
+ * satisface (misma forma), y los tests del transporte pueden inyectar fakes
+ * con la misma forma sin necesitar un `Worker` de browser (ADR-036 §2).
+ */
+export interface WorkerLike {
+  postMessage(message: unknown, transfer?: ReadonlyArray<globalThis.Transferable>): void;
+  addEventListener(type: "message" | "error", listener: (ev: unknown) => void): void;
+  terminate(): void;
+}
+
+export type WorkerFactory = () => WorkerLike;
+
+// "export" refiere al ExportWorker único (sin pool propio, ADR-036 §1).
+export type WorkerEntryKind = "pdf" | "ocr" | "ner" | "render" | "export";
+
+export interface CoreRuntimeOptions {
+  readonly workers?: Partial<Readonly<Record<WorkerEntryKind, WorkerFactory>>>;
 }
 
 // ─── Tipos de mensajería worker (ver 05_Worker_Architecture.md §2) ───
@@ -169,10 +234,18 @@ export type WorkerOutbound =
       readonly progress: number;
       readonly partial?: Serializable;
     }
+  // ADR-042: `result` es `unknown` a nivel de transporte — mismo criterio que
+  // `INIT.config`/`RUN.payload` (ADR-019) y `EVENT.payload` (ADR-036 §3). Los
+  // `*EngineOutput` de cada motor son `interface`s (como todos los tipos de
+  // dominio del Core), que TypeScript no asigna a un tipo con index signature
+  // (`Serializable`) aunque todos sus campos sean datos planos compatibles
+  // (microsoft/TypeScript#15300) — recursivo, no se resuelve tocando un tipo.
+  // El host-bridge de cada motor afina `result` a su `*EngineOutput` esperado
+  // al consumirlo (mismo patrón que `RUN.payload` en el entry-point).
   | {
       readonly type: "COMPLETED";
       readonly jobId: string;
-      readonly result: Serializable;
+      readonly result: unknown;
       readonly transferred?: ReadonlyArray<Transferable>;
     }
   | {
@@ -190,4 +263,15 @@ export type WorkerOutbound =
       readonly level: LogLevel;
       readonly message: string;
       readonly meta?: Serializable;
+    }
+  // ADR-036 §3: el entry-point de cada motor corre el motor real con un bus
+  // puente; cada `emit` viaja como EVENT y el host-bridge del motor lo afina
+  // y re-emite en el bus real (los eventos observables se emiten siempre en
+  // host, ADR-013 §6). `payload` es `unknown` a nivel de transporte, igual
+  // criterio que `INIT.config`/`RUN.payload` (ADR-019).
+  | {
+      readonly type: "EVENT";
+      readonly channel: EventChannel;
+      readonly event: EngineEvents;
+      readonly payload: unknown;
     };

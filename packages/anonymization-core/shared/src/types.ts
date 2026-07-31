@@ -18,6 +18,10 @@ import type {
   RuleScope,
   WorkerJobType,
 } from "./enums.js";
+// Import type-only circular con interfaces.ts (que ya importa WorkerCapabilities
+// desde este archivo): ambos son `import type`, se erosionan por completo en
+// runtime (verbatimModuleSyntax/isolatedModules), sin ciclo de módulos JS real.
+import type { NerWasmPaths } from "./interfaces.js";
 
 export interface BoundingBox {
   readonly x: number;
@@ -203,16 +207,28 @@ export interface PdfParsePayload {
 export interface OcrPagePayload {
   readonly documentId: string;
   readonly pageIndex: number;
-  readonly imageData: ArrayBuffer;
+  // Errata corregida (ADR-036 §4): era ArrayBuffer, que no transporta
+  // width/height y el OcrWorker no puede reconstruir la imagen. Coincide con
+  // OcrPageInput del motor (03_Data_Model.md §18). Transferencia:
+  // postMessage(msg, [imageData.data.buffer]).
+  readonly imageData: ImageData;
   readonly dpi: number;
   readonly languages: ReadonlyArray<string>;
 }
 
+// ADR-046 §3/§5: `text` es el texto de UN BATCH de NerConfig.batchSize
+// palabras (la partición la hace NerEngine host-side, que es quien tiene las
+// Word[] para el bbox; ADR-024 §2). `quantization` y `wasmPaths` viajan en el
+// job porque el kernel es quien carga el modelo y configura Transformers.js
+// contra el origen propio (ADR-039), y WorkerPool todavía no transporta INIT
+// con la config real.
 export interface NerPagePayload {
   readonly documentId: string;
   readonly pageIndex: number;
   readonly text: string;
   readonly modelId: string;
+  readonly quantization: "q8" | "q4" | "f32";
+  readonly wasmPaths?: string | NerWasmPaths;
 }
 
 export interface RenderPagePayload {
@@ -226,12 +242,98 @@ export interface RenderPagePayload {
   readonly imageFormat?: "png" | "jpeg";
 }
 
+// ADR-047 §3: forma completa (reemplaza la anterior, inejecutable sin
+// `imageFormat`/dimensiones en puntos PDF — el worker no podía decidir
+// embedJpg vs embedPng ni crear la página). `metadata` se movió a
+// `ExportSavePayload`: se aplica una sola vez, al final, no en cada página.
 export interface ExportPagePayload {
   readonly documentId: string;
   readonly pageIndex: number;
-  readonly pageImage: ArrayBuffer;
+  readonly pageImage: ArrayBuffer; // EncodedPageImage.bytes, transferido
+  readonly imageFormat: "png" | "jpeg";
+  readonly pageWidthPt: number; // document.pages[i].width
+  readonly pageHeightPt: number; // document.pages[i].height
+}
+
+// Job final del ExportWorker bajo jobType "export-page" (ADR-047 §3/§4):
+// aplica la metadata (ya sanitizada en host) y su COMPLETED devuelve el
+// ArrayBuffer del PDF transferido; DISPOSE solo libera (05 §7.5, ADR-036
+// §4). El entry-point discrimina append vs save por forma:
+// `"pageImage" in payload` (ADR-047 §3) — mismo criterio que ADR-043 §4 para
+// `render-page`. No agrega un `WorkerJobType` nuevo (viaja bajo
+// "export-page", igual que `ExportPagePayload`).
+export interface ExportSavePayload {
+  readonly documentId: string;
   readonly metadata: ExportMetadata;
 }
+
+// ─── Payloads del transporte real de RenderWorker (Hito 10, ADR-036 §4 /
+// ADR-043 §4) que NO agregan `WorkerJobType` nuevo: viajan como `RUN` con
+// `jobType: "render-page"` directo a cada worker, sin cola (por eso tienen
+// `jobId`/`COMPLETED` igual que un job). El entry-point discrimina el payload
+// de "render-page" por FORMA, en este orden exacto (ADR-043 §4): `"buffer" in
+// payload` -> load; `"kind" in payload` -> render (`RenderPagePayload`, ya
+// definido arriba); `"pageIndex" in payload` -> rasterize; si no -> unload. ───
+
+/**
+ * Mensaje de control broadcast a cada RenderWorker (no es un job encolable).
+ * El `buffer` se CLONA por worker (nunca se transfiere: transferirlo vaciaría
+ * el original retenido por el host — `05_Worker_Architecture.md` §2.3/§7.4,
+ * ADR-030).
+ *
+ * `password` (ADR-050): password de un PDF protegido, opcional. El kernel lo
+ * usa en `getDocument({ data, password })` y NO lo retiene — una vez abierto
+ * el `PDFDocumentProxy`, no se vuelve a necesitar. El host sí lo retiene,
+ * junto a `{ buffer, pageCount }`, para re-primear workers nuevos o
+ * reemplazados (ADR-043 §5). Nunca en logs ni eventos (`08_Security_Model.md`
+ * §6, enmendada por ADR-050 §3).
+ */
+export interface LoadDocumentPayload {
+  readonly documentId: string;
+  readonly buffer: ArrayBuffer;
+  readonly password?: string;
+}
+
+/**
+ * Control broadcast simétrico a `LoadDocumentPayload` (ADR-043 §4): libera el
+ * `PDFDocumentProxy` de ese documento en cada RenderWorker a mitad de sesión
+ * (`DOCUMENT_CLOSED`). Idempotente, sin transfer.
+ */
+export interface UnloadDocumentPayload {
+  readonly documentId: string;
+}
+
+/**
+ * Rasterización para OCR (ADR-034 §1). Viaja bajo `jobType: "render-page"`,
+ * prioridad 90/40 (espejo de `ocr-page`), timeouts/retries de `render-page`.
+ */
+export interface RasterizePagePayload {
+  readonly documentId: string;
+  readonly pageIndex: number;
+  readonly scale: number;
+}
+
+// Salida del kernel del NerWorker (COMPLETED { spans }, ADR-046 §1): spans de
+// entidad ya agregados desde los tokens BIO, con offsets relativos al texto
+// del batch. Sin bbox, sin wordSpan y sin id: el mapeo a Occurrence lo hace
+// NerEngine en el host, que es quien tiene las Word[] de la página.
+export interface NerKernelSpan {
+  readonly entityType: EntityType;
+  readonly value: string;
+  readonly normalizedValue: string;
+  readonly confidence: number;
+  readonly startIndex: number;
+  readonly endIndexExclusive: number;
+}
+
+// Ciclo de vida del modelo NER reportado por el kernel en PROGRESS.partial
+// (ADR-046 §4): telemetría de transporte, NO eventos de dominio. El motor la
+// traduce en host a NER_MODEL_LOADING / NER_MODEL_READY (uno por instancia) /
+// logger.warn. El fraction de descarga viaja en PROGRESS.progress ∈ [0,1].
+export type NerKernelProgress =
+  | { readonly phase: "model-loading"; readonly modelId: string }
+  | { readonly phase: "model-ready"; readonly modelId: string }
+  | { readonly phase: "model-load-retry"; readonly modelId: string; readonly reason: string };
 
 export interface ExportOptions {
   readonly imageFormat: "png" | "jpeg";

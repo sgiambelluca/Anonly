@@ -1,21 +1,47 @@
+/**
+ * `NerEngine` — clase host-side completa (ADR-046 §1, tercer espejo de
+ * `RenderEngine`/ADR-043 y `OcrEngine`/ADR-045): loop secuencial por página,
+ * retry/timeout por página, partición en batches (ADR-024 §2), mapeo de
+ * spans a `Occurrence` (bbox) y emisión de los **seis** eventos. La
+ * inferencia en sí (`@huggingface/transformers`) vive en `./worker/kernel.ts`,
+ * invocada a través de un puerto interno `NerJobPool` — con pool real, cruza
+ * a un Web Worker de SO (`./worker/entry.ts`); sin ella (fallback
+ * in-process, ADR-035), invoca el mismo kernel directo.
+ *
+ * La secuencia por página es una sola ruta de código host-side: spans del
+ * kernel → `Occurrence[]` (bbox) → `ENTITY_FOUND × N` → `NER_PAGE_FINISHED`
+ * — restaura ADR-013 §6 y elimina por construcción la carrera EVENT/COMPLETED
+ * que motivó ADR-046 (mismo problema que ADR-043/ADR-045 ya resolvieron para
+ * Render/OCR).
+ *
+ * El ciclo de vida del modelo (que sí ocurre dentro del kernel) cruza por el
+ * canal `PROGRESS` del transporte (`NerKernelProgress`, ADR-046 §4), nunca
+ * por eventos de dominio: este motor lo traduce en host a
+ * `NER_MODEL_LOADING`/`NER_MODEL_READY` (deduplicado por instancia, flag
+ * `modelWarm`) y a `ctx.logger.warn` para los reintentos de carga.
+ */
 import {
   CancelledError,
   DetectionSource,
   EngineDisposedError,
+  EngineError,
+  EngineErrorCode,
   EngineEvents,
   EngineId,
   EngineNotInitializedError,
-  EntityType,
   EventChannel,
   InvalidInputError,
   type BoundingBox,
   type EngineContext,
   type IEngine,
+  type NerKernelProgress,
+  type NerKernelSpan,
+  type NerPagePayload,
   type Occurrence,
+  type Serializable,
   type Word,
   type WordSpan,
 } from "@anonly/shared";
-import { env, pipeline, type TokenClassificationOutput } from "@huggingface/transformers";
 
 import {
   NerModelLoadFailedError,
@@ -24,6 +50,7 @@ import {
   NerTimeoutError,
 } from "./ner.errors.js";
 import type { NerPageInput, NerPageOutput } from "./ner.types.js";
+import { kernelClassify, kernelDispose } from "./worker/kernel.js";
 
 // NER_Engine.md §11: "timeout por página (default 20 s)".
 const DEFAULT_TIMEOUT_MS = 20_000;
@@ -31,54 +58,10 @@ const DEFAULT_TIMEOUT_MS = 20_000;
 const DEFAULT_MAX_RETRIES = 1;
 // ADR-023 §2: modelo multilingüe default (reemplaza el placeholder de ADR-006).
 const DEFAULT_MODEL_ID = "Xenova/bert-base-multilingual-cased-ner-hrl";
-// Intento inicial + 1 re-descarga ("re-descargar una vez", spec §11 caso NER_MODEL_LOAD_FAILED).
-const MODEL_LOAD_MAX_ATTEMPTS = 2;
-
-/*
- * ADR-025: @huggingface/transformers v4 no exporta un alias público para el
- * tipo del pipeline de token-classification (a diferencia de
- * @xenova/transformers v2, que exportaba TokenClassificationPipelineType) ni
- * para el elemento individual "raw" (no agrupado) de su resultado — solo
- * TokenClassificationOutput<O>, la unión array de spans "raw"/"grouped"
- * parametrizada por las opciones de la llamada. Ambos se derivan del único
- * símbolo público relevante (pipeline()) sin cast: NerClassifier via el tipo
- * de retorno de pipeline() para la task "token-classification";
- * TokenClassificationSingle aislando a nivel de tipos el shape "raw" (el
- * único que produce este motor, que nunca pasa aggregation_strategy) — es el
- * único elemento de la unión cuyo campo `entity` tipa `string` en vez de
- * `undefined`.
- */
-type NerClassifier = Awaited<ReturnType<typeof pipeline<"token-classification">>>;
-type TokenClassificationSingle = Extract<TokenClassificationOutput[number], { entity: string }>;
-
-/*
- * ADR-018 + ADR-023 §2 + ADR-025: el modelo y el runtime WASM de ONNX se
- * sirven first-party, nunca desde HuggingFace ni CDNs de terceros en
- * runtime. Por defecto, @huggingface/transformers apunta
- * env.backends.onnx.wasm.wasmPaths a jsDelivr
- * (node_modules/@huggingface/transformers/src/backends/onnx.js) — se
- * sobreescribe acá. env.backends.onnx es una copia shallow de env de
- * onnxruntime-web tomada al importar el módulo (no la referencia original),
- * pero su propiedad `wasm` sigue siendo el mismo objeto anidado que usa
- * internamente onnxruntime-web, así que mutar wasmPaths acá sigue
- * propagándose correctamente. env.localModelPath + modelId arman la ruta
- * real que resuelve getModelFile() de la librería (utils/hub.js:
- * pathJoin(env.localModelPath, pathJoin(path_or_repo_id, filename))); por
- * eso el destino real de los assets del modelo en assets.lock.json es
- * apps/react-client/public/models/ner/<modelId>/..., no un directorio plano.
- */
-const NER_LOCAL_MODEL_PATH = "/models/ner/";
-const NER_WASM_PATH = "/wasm/onnxruntime/";
-
-// Mapeo de labels del modelo (ADR-023 §2): PER→Person, ORG→Organization,
-// LOC→Address (aproximación: "location" no es estrictamente "dirección
-// postal"), DATE→Date. Cualquier otro label (incluyendo "O") se ignora.
-const LABEL_TO_ENTITY_TYPE: Readonly<Record<string, EntityType>> = {
-  PER: EntityType.Person,
-  ORG: EntityType.Organization,
-  LOC: EntityType.Address,
-  DATE: EntityType.Date,
-};
+// 05_Worker_Architecture.md §6.2 ("ner-page, página visible"). Preservado tal
+// cual al mover el despacho de por-página a por-batch (ADR-046 §2/§3): es el
+// valor que el Orchestrator usaba al despachar la etapa completa.
+const DISPATCH_PRIORITY = 80;
 
 interface WordMapping {
   readonly bbox: BoundingBox;
@@ -89,80 +72,6 @@ interface WordChunk {
   readonly startIndex: number;
   readonly endIndexExclusive: number;
   readonly words: ReadonlyArray<Word>;
-}
-
-interface NerSpan {
-  readonly entityType: EntityType;
-  readonly value: string;
-  readonly normalizedValue: string;
-  readonly confidence: number;
-  // Relativo al texto sobre el que se ejecutó la inferencia (chunk-local en
-  // aggregateTokensToSpans; página-absoluto una vez sumado chunk.startIndex
-  // en runInferenceInBatches — misma forma, distinto marco de referencia).
-  readonly startIndex: number;
-  readonly endIndexExclusive: number;
-}
-
-interface PositionedToken {
-  readonly entity: string;
-  readonly score: number;
-  readonly startIndex: number;
-  readonly endIndexExclusive: number;
-}
-
-interface OpenSpan {
-  readonly label: string;
-  startIndex: number;
-  endIndexExclusive: number;
-  scores: number[];
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function isTokenClassificationSingle(value: unknown): value is TokenClassificationSingle {
-  if (!isRecord(value)) return false;
-  const { entity, score, index, word } = value;
-  return (
-    typeof entity === "string" &&
-    typeof score === "number" &&
-    typeof index === "number" &&
-    typeof word === "string"
-  );
-}
-
-// @huggingface/transformers v4 tipa el resultado de un pipeline de
-// token-classification como `TokenClassificationOutput<O> | TokenClassificationOutput<O>[]`
-// (la unión existe porque la misma función acepta texto único o batched).
-// Este motor siempre invoca con un string único (nunca un array), así que en
-// runtime la forma real siempre es la plana — pero se valida con un guard de
-// runtime (no un cast) para no asumir ciegamente la forma, mismo criterio
-// defensivo que ocr-engine usa con la respuesta de tesseract.js.
-function isTokenClassificationOutput(
-  value: unknown,
-): value is ReadonlyArray<TokenClassificationSingle> {
-  return Array.isArray(value) && value.every(isTokenClassificationSingle);
-}
-
-function stripContinuationMarker(word: string): string {
-  return word.startsWith("##") ? word.slice(2) : word;
-}
-
-function normalizeNerValue(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .replace(/^[.,;:!?()"'«»]+|[.,;:!?()"'«»]+$/g, "");
-}
-
-function configureTransformersEnv(): void {
-  env.allowRemoteModels = false;
-  env.localModelPath = NER_LOCAL_MODEL_PATH;
-  if (env.backends.onnx.wasm) {
-    env.backends.onnx.wasm.wasmPaths = NER_WASM_PATH;
-  }
 }
 
 /*
@@ -223,15 +132,11 @@ function mapSpanToWords(
  * Partición de `words` en lotes para los checkpoints de cancelación "entre
  * batches de inferencia" (spec §12/§15.6, NerConfig.batchSize). ADR-024 §2
  * ratifica NerConfig.batchSize como cantidad de PALABRAS por lote (no una
- * cuenta real de tokens de wordpiece): este motor corre inline sin un
- * tokenizer real disponible fuera de la llamada mockeada a Transformers.js
- * (ADR-021 §5), y `words` (Word[] de Page.words, ya provisto por
- * NerPageInput para el mapeo de bbox) es la única granularidad de entrada
- * disponible sin tokenizar. Preserva el mecanismo exigido por el spec
- * (checkpoint de ctx.abortSignal entre cada llamada a la librería, una
- * llamada por lote); reevaluable a tokens exactos cuando la inferencia pase
- * a workers con tokenizer real (Hito 9, ADR-024 §2). Offsets calculados
- * igual que Page.text = words.map(w => w.text).join(" ").
+ * cuenta real de tokens de wordpiece). Desde ADR-046 §3, cada lote es
+ * además un despacho independiente al kernel (un `NerPagePayload` por
+ * batch); esta función sigue siendo host-side porque necesita las `Word[]`
+ * de la página, que el kernel nunca ve. Offsets calculados igual que
+ * Page.text = words.map(w => w.text).join(" ").
  */
 function computeWordChunks(
   words: ReadonlyArray<Word>,
@@ -253,134 +158,135 @@ function computeWordChunks(
   return chunks;
 }
 
-/*
- * Reconstruye offsets de caracteres para cada token dentro de chunkText.
- * @huggingface/transformers v4 sigue sin exponer start/end reales para
- * token-classification (el campo es opcional en el tipo público, pero la
- * implementación real de TokenClassificationPipeline._call nunca lo puebla —
- * "TODO: Add support for start and end" en su código fuente): solo entrega
- * `word` (el token decodificado, con prefijo "##" para continuaciones de
- * wordpiece en modelos BERT). Se ubica cada token en el texto con un cursor
- * que solo avanza (garantiza orden y evita coincidencias espurias hacia
- * atrás); un token que no se puede ubicar se descarta de forma defensiva.
- * Nunca se loguea el contenido de los tokens (Code_Standards.md §9: nunca
- * loguear contenido del documento).
- */
-function positionTokens(
-  tokens: ReadonlyArray<TokenClassificationSingle>,
-  chunkText: string,
-): ReadonlyArray<PositionedToken> {
-  const positioned: PositionedToken[] = [];
-  let cursor = 0;
-  for (const token of tokens) {
-    const cleaned = stripContinuationMarker(token.word);
-    if (cleaned.length === 0) continue;
-    const foundAt = chunkText.indexOf(cleaned, cursor);
-    if (foundAt === -1) continue;
-    positioned.push({
-      entity: token.entity,
-      score: token.score,
-      startIndex: foundAt,
-      endIndexExclusive: foundAt + cleaned.length,
-    });
-    cursor = foundAt + cleaned.length;
-  }
-  return positioned;
+// ─── Puerto interno de despacho (ADR-046 §2, espejo exacto de
+// OcrJobPool/OcrDispatchParams en ocr-engine/src/ocr.engine.ts). No
+// exportado desde index.ts — detalle de wiring interno, mismo criterio que
+// OcrJobPool/RenderJobPool. ───
+
+interface NerDispatchParams<T> {
+  readonly run: () => Promise<T>;
+  readonly signal: AbortSignal;
+  readonly priority?: number;
+  readonly payload?: unknown;
+  readonly maxRetriesOverride?: number;
+  /** Ciclo de vida del modelo reportado por un worker remoto, enrutado por `WorkerPool` (ADR-046 §4). En fallback in-process, el `run()` ya lo pasa directo al kernel. */
+  readonly onProgress?: (progress: number, partial?: Serializable) => void;
 }
 
-/*
- * Agrega tokens BIO (B-PER/I-PER/B-ORG/... ) en spans de entidad completos
- * (equivalente simplificado a aggregation_strategy="simple", que
- * @huggingface/transformers v4 sí soporta de forma nativa — a diferencia de
- * @xenova/transformers v2 — pero que este motor no usa: reimplementa su
- * propia agregación para no cambiar de comportamiento en esta migración,
- * ADR-025). Un "B-" siempre abre un span nuevo; un "I-" continúa el span
- * abierto solo si coincide el tipo; cualquier otra cosa (label no soportado,
- * "O", o un "I-" de tipo distinto al abierto) cierra el span en curso.
- * confidence es el promedio de los scores de los tokens que componen el
- * span.
+interface NerJobPool {
+  dispatch<T>(params: NerDispatchParams<T>): Promise<T>;
+}
+
+/**
+ * Fallback in-process trivial: sin `NerPool` inyectada, ejecuta `run()`
+ * directo, sin cola ni reintentos propios (el único loop de retry es el de
+ * `processPage`). Es el comportamiento de este motor antes de ADR-046
+ * (ADR-035 §1) — el que los tests existentes de este paquete ya esperan
+ * (`new NerEngine()` sin argumento).
  */
-function aggregateTokensToSpans(
-  tokens: ReadonlyArray<TokenClassificationSingle>,
-  chunkText: string,
-): ReadonlyArray<NerSpan> {
-  const positioned = positionTokens(tokens, chunkText);
-  const spans: NerSpan[] = [];
-  let open: OpenSpan | null = null;
+const IMMEDIATE_POOL: NerJobPool = {
+  dispatch: <T>(params: NerDispatchParams<T>): Promise<T> => params.run(),
+};
 
-  const flush = (): void => {
-    if (open === null) return;
-    const entityType = LABEL_TO_ENTITY_TYPE[open.label];
-    if (entityType !== undefined) {
-      const value = chunkText.slice(open.startIndex, open.endIndexExclusive);
-      const confidence = open.scores.reduce((sum, s) => sum + s, 0) / open.scores.length;
-      spans.push({
-        entityType,
-        value,
-        normalizedValue: normalizeNerValue(value),
-        confidence: Math.max(0, Math.min(1, confidence)),
-        startIndex: open.startIndex,
-        endIndexExclusive: open.endIndexExclusive,
-      });
-    }
-    open = null;
-  };
-
-  for (const token of positioned) {
-    const isBegin = token.entity.startsWith("B-");
-    const isInside = token.entity.startsWith("I-");
-    const label = isBegin || isInside ? token.entity.slice(2) : null;
-
-    if (label === null || !(label in LABEL_TO_ENTITY_TYPE)) {
-      flush();
-      continue;
-    }
-
-    if (isBegin || open === null || open.label !== label) {
-      flush();
-      open = {
-        label,
-        startIndex: token.startIndex,
-        endIndexExclusive: token.endIndexExclusive,
-        scores: [token.score],
-      };
-    } else {
-      open.endIndexExclusive = token.endIndexExclusive;
-      open.scores.push(token.score);
-    }
+/**
+ * Normaliza un error emergente del despacho a la subclase concreta que
+ * corresponde por `code` (ADR-046 §2, espejo de `normalizeTimeout` de
+ * ocr-engine/ADR-045 §2, con **dos** códigos en vez de uno): un error local
+ * (fallback in-process, lanzado por `worker/kernel.ts`) ya es la instancia
+ * concreta. Uno que cruzó un worker remoto llega deserializado
+ * (`EngineError.deserialize`, `Contracts.md` §4) como instancia genérica con
+ * el `code` correcto, que NO es `instanceof NerTimeoutError` ni
+ * `instanceof NerModelMissingError` — sin esta normalización, la política de
+ * reintentos (`NER_TIMEOUT`) y de aborto (`NER_MODEL_MISSING`) cambiaría de
+ * forma según haya pool real o fallback.
+ */
+function normalizeNerError(
+  err: unknown,
+  documentId: string,
+  pageIndex: number,
+  timeoutMs: number,
+): unknown {
+  if (err instanceof NerTimeoutError || err instanceof NerModelMissingError) return err;
+  if (!(err instanceof EngineError)) return err;
+  if (err.code === EngineErrorCode.NER_TIMEOUT) {
+    return new NerTimeoutError(documentId, pageIndex, timeoutMs);
   }
-  flush();
+  if (err.code === EngineErrorCode.NER_MODEL_MISSING) {
+    const modelId =
+      typeof err.details.modelId === "string" ? err.details.modelId : DEFAULT_MODEL_ID;
+    const reason = typeof err.details.reason === "string" ? err.details.reason : err.message;
+    return new NerModelMissingError(modelId, reason);
+  }
+  return err;
+}
 
-  return spans;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Guarda de runtime que angosta `Serializable` (el tipo de `PROGRESS.partial`
+ * a nivel de transporte, `04_Event_System.md` §2.2) a `NerKernelProgress`
+ * (`03_Data_Model.md` §18). Pasa por `isRecord` (parámetro `unknown`, no
+ * `Serializable`): TS no narrowea correctamente `Array.isArray` contra un
+ * `ReadonlyArray<Serializable>` recursivo dentro de la propia unión de
+ * `Serializable` — angostar primero a `Record<string, unknown>` lo evita sin
+ * cast. Sin cast tampoco para las comparaciones: `value.phase` en un
+ * `Record<string, unknown>` tipa `unknown`, comparable contra un literal.
+ */
+function isNerKernelProgress(value: Serializable | undefined): value is NerKernelProgress {
+  if (!isRecord(value)) return false;
+  return (
+    value.phase === "model-loading" ||
+    value.phase === "model-ready" ||
+    value.phase === "model-load-retry"
+  );
 }
 
 export class NerEngine implements IEngine {
   readonly id = EngineId.Ner;
 
+  private readonly pool: NerJobPool;
+
   private ctx: EngineContext | null = null;
-  private classifier: NerClassifier | null = null;
   private modelId: string | null = null;
   private initialized = false;
   private disposed = false;
+  // "Ningún model-ready reportado aún para esta instancia" (ADR-046 §4) —
+  // reemplaza `this.classifier !== null` de antes de ADR-046: misma
+  // semántica per-instancia (NerStarted.modelLoading/isModelReady()), pero
+  // el pipeline de Transformers.js ahora vive en el kernel, no en la
+  // instancia. Deduplica NER_MODEL_READY: con nerPoolSize > 1, cada worker
+  // carga su propio modelo y reportaría un model-ready propio que no es un
+  // cambio de estado observable (spec §13 caso 17).
+  private modelWarm = false;
+
+  /**
+   * `pool` (ADR-046 §2): inyectada por el façade en `createCore`
+   * (`create-core.ts`, espejo de `new OcrEngine(ocrPool)`/`new
+   * RenderEngine(renderPool)`). Sin argumento, cae al fallback in-process
+   * trivial (`IMMEDIATE_POOL`) — el comportamiento que este motor tenía
+   * antes de ADR-046, usado por sus propios tests.
+   */
+  constructor(pool?: NerJobPool) {
+    this.pool = pool ?? IMMEDIATE_POOL;
+  }
 
   init(ctx: EngineContext): Promise<void> {
     this.ctx = ctx;
     this.modelId = ctx.config.ner.modelId;
-    this.classifier = null;
+    this.modelWarm = false;
     this.initialized = true;
     this.disposed = false;
     // Caso 11 (§13) / principio "Lazy loading" (§2): init NO carga el
     // modelo. Solo se carga en el primer processPage/processPages real,
-    // cuando ner.enabled === true y hay texto (ver ensureModelLoaded,
-    // invocado desde processPage). Precedente idéntico: OCR Engine
-    // (ensureWorkerLoaded se invoca desde processPage, no desde init —
-    // ADR-021, mismo conflicto ya resuelto para OCR).
+    // dentro del kernel, cuando ner.enabled === true y hay texto.
     ctx.logger.info("NER Engine initialized");
     return Promise.resolve();
   }
 
   isModelReady(): boolean {
-    return this.classifier !== null;
+    return this.modelWarm;
   }
 
   getModelId(): string {
@@ -420,8 +326,6 @@ export class NerEngine implements IEngine {
       throw new CancelledError(documentId);
     }
 
-    await this.ensureModelLoaded(ctx);
-
     const timeoutMs = ctx.config.workerPool.timeouts["ner-page"] ?? DEFAULT_TIMEOUT_MS;
     const maxRetries = ctx.config.workerPool.maxRetries["ner-page"] ?? DEFAULT_MAX_RETRIES;
     const batchSize = Math.max(1, ctx.config.ner.batchSize);
@@ -450,9 +354,17 @@ export class NerEngine implements IEngine {
 
         return { documentId, pageIndex, occurrences, durationMs };
       } catch (err: unknown) {
-        if (err instanceof CancelledError || err instanceof NerModelMissingError) throw err;
-        lastError = err;
-        if (!(err instanceof NerTimeoutError)) break; // no recuperable: no reintentar
+        if (err instanceof CancelledError) throw err;
+        // ADR-046 §2: normaliza antes de bifurcar (un error remoto llega
+        // deserializado, sin pasar el instanceof de abajo).
+        const normalized = normalizeNerError(err, documentId, pageIndex, timeoutMs);
+        // No recuperable y no es "esta página falló" — es "el modelo no
+        // cargó": se propaga tal cual, sin envolver en NerPageFailedError
+        // (mismo criterio que antes de ADR-046: ensureModelLoaded corría
+        // fuera del loop de retry).
+        if (normalized instanceof NerModelMissingError) throw normalized;
+        lastError = normalized;
+        if (!(normalized instanceof NerTimeoutError)) break; // no recuperable: no reintentar
         // NerTimeoutError: recuperable, el for reintenta si quedan intentos.
       }
     }
@@ -474,7 +386,7 @@ export class NerEngine implements IEngine {
 
     const documentId = inputs[0]?.documentId ?? "";
     const modelId = ctx.config.ner.modelId;
-    const modelAlreadyLoaded = this.classifier !== null;
+    const modelAlreadyLoaded = this.modelWarm;
     const startedAt = Date.now();
 
     ctx.bus.emit(EventChannel.Ner, EngineEvents.NER_STARTED, {
@@ -494,9 +406,9 @@ export class NerEngine implements IEngine {
       try {
         // Secuencial a propósito (mismo criterio que ocr-engine.processPages,
         // ADR-021: la priorización por visibilidad y el despacho paralelo al
-        // pool son del Orchestrator, Hito 9). ensureModelLoaded (dentro de
-        // processPage) es idempotente: el modelo se carga una sola vez y se
-        // reutiliza entre páginas (spec §12).
+        // pool son del Orchestrator, Hito 9). El modelo se carga una sola
+        // vez y se reutiliza entre páginas (spec §12) porque el kernel lo
+        // retiene por (modelId, dtype).
         const output = await this.processPage(input, ctx);
         outputs.push(output);
         occurrenceCount += output.occurrences.length;
@@ -526,19 +438,11 @@ export class NerEngine implements IEngine {
   }
 
   async dispose(): Promise<void> {
-    if (this.classifier !== null) {
-      const classifier = this.classifier;
-      this.classifier = null;
-      try {
-        // Libera la sesión de ONNX y la memoria temporal del pipeline
-        // (checklist §15.9). NO descarga el modelo cacheado: los archivos ya
-        // persistidos en Cache Storage por Transformers.js (ADR-021 §6)
-        // permanecen, así que una recarga posterior no vuelve a descargar.
-        await classifier.dispose();
-      } catch {
-        // best-effort: liberar igual el estado interno aunque dispose() falle.
-      }
-    }
+    // ADR-046 §2: no pasa por pool.dispatch (dispose no es la operación del
+    // puerto) — libera directo el kernel local. La liberación server-side en
+    // un NerWorker real llega por el mensaje genérico DISPOSE del protocolo.
+    await kernelDispose();
+    this.modelWarm = false;
     this.disposed = true;
     this.initialized = false;
     this.ctx = null;
@@ -560,7 +464,7 @@ export class NerEngine implements IEngine {
   }
 
   private buildOccurrence(
-    span: NerSpan,
+    span: NerKernelSpan,
     words: ReadonlyArray<Word>,
     pageIndex: number,
   ): Occurrence {
@@ -581,32 +485,54 @@ export class NerEngine implements IEngine {
     return wordMapping ? { ...base, wordSpan: wordMapping.wordSpan } : base;
   }
 
+  /**
+   * Un despacho por batch (ADR-046 §2/§3): particiona la página en
+   * `computeWordChunks`, y por cada chunk no-blanco despacha **solo la
+   * inferencia** por el puerto — `maxRetriesOverride: 0`, el único loop de
+   * retry es el de `processPage` (arriba). Los spans que devuelve el kernel
+   * traen offsets relativos al batch; acá se suma `chunk.startIndex` para
+   * volverlos absolutos dentro de la página (mismo mapeo que antes de
+   * ADR-046, cuando la clasificación ocurría in-process).
+   */
   private async runInferenceInBatches(
     input: NerPageInput,
     batchSize: number,
     timeoutMs: number,
     ctx: EngineContext,
-  ): Promise<ReadonlyArray<NerSpan>> {
+  ): Promise<ReadonlyArray<NerKernelSpan>> {
     const chunks = computeWordChunks(input.words, batchSize);
-    const spans: NerSpan[] = [];
+    const spans: NerKernelSpan[] = [];
 
     for (const chunk of chunks) {
-      // Checkpoint de cancelación entre batches de inferencia (spec §12/§15.6).
+      // Checkpoint de cancelación entre batches de inferencia (spec §12).
       if (ctx.abortSignal.aborted) {
         throw new CancelledError(input.documentId);
       }
       const chunkText = input.text.slice(chunk.startIndex, chunk.endIndexExclusive);
       if (chunkText.trim().length === 0) continue;
 
-      const rawTokens = await this.classifyWithTimeout(
-        chunkText,
-        input.documentId,
-        input.pageIndex,
-        timeoutMs,
-        ctx.abortSignal,
-      );
-      const aggregated = aggregateTokensToSpans(rawTokens, chunkText);
-      for (const span of aggregated) {
+      const payload: NerPagePayload = {
+        documentId: input.documentId,
+        pageIndex: input.pageIndex,
+        text: chunkText,
+        modelId: ctx.config.ner.modelId,
+        quantization: ctx.config.ner.quantization,
+        ...(ctx.config.ner.wasmPaths !== undefined ? { wasmPaths: ctx.config.ner.wasmPaths } : {}),
+      };
+
+      const onProgress = (progress: number, partial?: Serializable): void =>
+        this.handleKernelProgress(progress, partial, ctx);
+
+      const kernelSpans = await this.pool.dispatch<ReadonlyArray<NerKernelSpan>>({
+        run: () => kernelClassify(payload, { timeoutMs, abortSignal: ctx.abortSignal, onProgress }),
+        signal: ctx.abortSignal,
+        priority: DISPATCH_PRIORITY,
+        payload,
+        maxRetriesOverride: 0,
+        onProgress,
+      });
+
+      for (const span of kernelSpans) {
         spans.push({
           ...span,
           startIndex: span.startIndex + chunk.startIndex,
@@ -618,104 +544,39 @@ export class NerEngine implements IEngine {
     return spans;
   }
 
-  private async ensureModelLoaded(ctx: EngineContext): Promise<void> {
-    if (this.classifier !== null) return;
+  /**
+   * Traduce el ciclo de vida del modelo reportado por el kernel (ADR-046
+   * §4) a eventos de dominio / logging, en host. `model-loading` →
+   * `NER_MODEL_LOADING`; `model-ready` → `NER_MODEL_READY` **una sola vez
+   * por instancia** (dedup vía `modelWarm`, spec §13 caso 17);
+   * `model-load-retry` → `ctx.logger.warn` con el mensaje de
+   * `NerModelLoadFailedError` (sin puente `LOG` en el worker).
+   */
+  private handleKernelProgress(
+    progress: number,
+    partial: Serializable | undefined,
+    ctx: EngineContext,
+  ): void {
+    if (!isNerKernelProgress(partial)) return;
 
-    const modelId = ctx.config.ner.modelId;
-    configureTransformersEnv();
-
-    // ADR-025: @huggingface/transformers v4 reemplaza `quantized: boolean`
-    // por `dtype` (elige el sufijo del archivo .onnx a cargar — DataType
-    // "q8" mapea a model_quantized.onnx, mismo archivo que `quantized: true`
-    // resolvía en v2). "q8" (default, ADR-023) es el único nivel con mirror
-    // first-party en assets.lock.json para este hito; "q4"/"f32" degradan a
-    // `dtype: "fp32"` (model.onnx sin cuantizar) con esta versión pinneada
-    // de la librería — mismo criterio de degradación que v2 aplicaba con
-    // `quantized: false`.
-    const dtype = ctx.config.ner.quantization === "q8" ? "q8" : "fp32";
-
-    const onProgress = (raw: unknown): void => {
-      if (!isRecord(raw)) return;
-      const { status, progress } = raw;
-      if (status !== "progress" || typeof progress !== "number") return;
+    if (partial.phase === "model-loading") {
       ctx.bus.emit(EventChannel.Ner, EngineEvents.NER_MODEL_LOADING, {
-        modelId,
-        progress: Math.max(0, Math.min(1, progress / 100)),
+        modelId: partial.modelId,
+        progress,
       });
-    };
-
-    let lastReason = "modelo no disponible";
-    for (let attempt = 0; attempt < MODEL_LOAD_MAX_ATTEMPTS; attempt++) {
-      try {
-        this.classifier = await pipeline("token-classification", modelId, {
-          dtype,
-          progress_callback: onProgress,
-        });
-        this.modelId = modelId;
-        ctx.bus.emit(EventChannel.Ner, EngineEvents.NER_MODEL_READY, { modelId });
-        return;
-      } catch (err: unknown) {
-        lastReason = err instanceof Error ? err.message : String(err);
-        // Caso 8 (§13): "Modelo corrupto en cache: NER_MODEL_LOAD_FAILED →
-        // re-descargar → si persiste, NER_MODEL_MISSING." No se puede
-        // distinguir de forma confiable "nunca disponible" de "corrupto,
-        // recuperable con un reintento" a partir de un error genérico de la
-        // librería — se aplica la misma política de reintento a toda falla
-        // de pipeline(): la instancia de NerModelLoadFailedError documenta
-        // el intento fallido (recuperable) antes de reintentar.
-        const loadFailed = new NerModelLoadFailedError(modelId, lastReason);
-        ctx.logger.warn(loadFailed.message, { modelId, attempt });
-      }
+      return;
     }
 
-    throw new NerModelMissingError(modelId, lastReason);
-  }
-
-  private async classifyWithTimeout(
-    text: string,
-    documentId: string,
-    pageIndex: number,
-    timeoutMs: number,
-    abortSignal: AbortSignal,
-  ): Promise<ReadonlyArray<TokenClassificationSingle>> {
-    if (this.classifier === null) {
-      throw new NerModelMissingError(
-        this.modelId ?? DEFAULT_MODEL_ID,
-        "El clasificador NER no está inicializado.",
-      );
+    if (partial.phase === "model-ready") {
+      if (this.modelWarm) return; // dedup: ya emitido para esta instancia (caso 17).
+      this.modelWarm = true;
+      ctx.bus.emit(EventChannel.Ner, EngineEvents.NER_MODEL_READY, { modelId: partial.modelId });
+      return;
     }
-    const classifier = this.classifier;
 
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timeoutId = setTimeout(() => {
-        reject(new NerTimeoutError(documentId, pageIndex, timeoutMs));
-      }, timeoutMs);
-    });
-
-    let onAbort: (() => void) | undefined;
-    const abortPromise = new Promise<never>((_, reject) => {
-      if (abortSignal.aborted) {
-        reject(new CancelledError(documentId));
-        return;
-      }
-      onAbort = (): void => reject(new CancelledError(documentId));
-      abortSignal.addEventListener("abort", onAbort, { once: true });
-    });
-
-    try {
-      // Llamada opaca a la librería externa (mockeada en tests, ADR-021 §5):
-      // mismo patrón de Promise.race contra timeout + AbortSignal que
-      // ocr-engine (recognizeWithTimeout) y pdf-engine (parsePageTextWithTimeout)
-      // usan para envolver una computación WASM que no se puede preemptar
-      // desde JS sin un Worker real (Hito 9). SLA estricto < 200ms: Hito 9/11
-      // (ADR-021 §1).
-      const result = await Promise.race([classifier(text), timeoutPromise, abortPromise]);
-      return isTokenClassificationOutput(result) ? result : [];
-    } finally {
-      if (timeoutId !== undefined) clearTimeout(timeoutId);
-      if (onAbort !== undefined) abortSignal.removeEventListener("abort", onAbort);
-    }
+    // "model-load-retry"
+    const warning = new NerModelLoadFailedError(partial.modelId, partial.reason);
+    ctx.logger.warn(warning.message, { modelId: partial.modelId });
   }
 
   private assertInitialized(): void {

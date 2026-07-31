@@ -141,6 +141,13 @@ describe("PdfEngine — edge case tests", () => {
       const output = await engine.process(input, ctx);
       expect(output.pageCount).toBe(1);
     });
+
+    // ADR-049 §4: retryable pasa a false para que el flag sobreviva la serialización
+    // cruzando el Worker (el instanceof de subclase concreta no sobrevive, el flag sí).
+    it("PdfPasswordRequiredError is not retryable", () => {
+      const err = new PdfPasswordRequiredError("doc-pwd-retryable");
+      expect(err.retryable).toBe(false);
+    });
   });
 
   // No numerado en §13 (regla de §9: password vacío no permitido).

@@ -63,6 +63,30 @@
  *    para `conflictId`). `applyRuleUpdated`/`applyRuleDeleted` con `ruleId`
  *    desconocido son no-op con warning (mismo patrón que
  *    `RegexEngine.removePattern` con id desconocido).
+ *
+ * Notas de implementación agregadas en el Hito 10 (ADR-038, spec v1.1.0):
+ *
+ * 9. Dedup por identidad (§13 caso 23): se compara contra
+ *    `session.recordedOccurrences` — ocurrencias YA agrupadas — no contra
+ *    ocurrencias descartadas por `low_confidence` o por perder un conflicto
+ *    `overlap`/`disagree` (esas nunca se registran, nota 6/7 arriba). Esto es
+ *    literal con el texto del ADR-038 §3: "identidad ... ya registrada en la
+ *    sesión". Una ocurrencia duplicada de otra ya descartada simplemente
+ *    vuelve a pasar por el mismo camino (low_confidence/conflict) sin efecto
+ *    observable adicional.
+ * 10. `dropOccurrences` (§13 casos 24-25, ADR-038 §2): la condición del ADR
+ *    "conflictos cuyos candidates referencian ocurrencias eliminadas O cuyo
+ *    grupo se eliminó" se implementa como una única condición determinable:
+ *    **el `groupId` del conflicto ya no existe en la sesión**. `Conflict`/
+ *    `ConflictCandidate` (`03_Data_Model.md` §15) no retienen `occurrenceId`
+ *    por diseño (solo `source`/`entityType`/`confidence`/`value`), así que no
+ *    hay forma estructural de verificar "candidates referencian esta
+ *    ocurrencia puntual" sin agregar tracking privado inventado; la condición
+ *    "grupo eliminado" sí es exacta y cubre el escenario descrito en el caso
+ *    25 del spec (re-OCR de una página: el grupo cuyo único member vivía ahí
+ *    queda sin members y se elimina). Conflictos cuyo grupo sobrevive (con
+ *    otros members) no se tocan. Ver reporte final del PR para que el revisor
+ *    confirme esta lectura.
  */
 
 import {
@@ -102,7 +126,11 @@ import {
 } from "@anonly/shared";
 
 import { GroupingGroupNotFoundError, GroupingInvalidPatchError } from "./grouping.errors.js";
-import type { GroupingEngineSnapshot } from "./grouping.types.js";
+import type {
+  DropOccurrencesFilter,
+  GroupingEngineSnapshot,
+  ReopenSessionOptions,
+} from "./grouping.types.js";
 import { buildPlaceholderValue, MASK_FORMAT_BY_TYPE } from "./labels.js";
 import { levenshteinNormalized } from "./levenshtein.js";
 
@@ -238,6 +266,21 @@ function bboxIntersectionRatio(a: BoundingBox, b: BoundingBox): number {
   const minArea = Math.min(areaA, areaB);
   if (minArea <= 0) return 0;
   return interArea / minArea;
+}
+
+/** Igualdad estricta de bbox (ADR-038 §3: la identidad de una ocurrencia usa igualdad exacta, no tolerancia). */
+function bboxEquals(a: BoundingBox, b: BoundingBox): boolean {
+  return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+}
+
+/** `DropOccurrencesFilter`: al menos un campo presente, AND si ambos (ADR-038 §2). */
+function matchesDropFilter(
+  rec: Pick<SessionOccurrenceRecord, "source" | "pageIndex">,
+  filter: DropOccurrencesFilter,
+): boolean {
+  if (filter.source !== undefined && rec.source !== filter.source) return false;
+  if (filter.pageIndices !== undefined && !filter.pageIndices.includes(rec.pageIndex)) return false;
+  return true;
 }
 
 /**
@@ -498,6 +541,156 @@ export class GroupingEngine implements IEngine {
       durationMs,
     });
     return Promise.resolve();
+  }
+
+  /**
+   * Reabre una sesión existente (grupos/reglas/conflictos/ediciones
+   * intactos) para una segunda pasada de detección (ADR-038 §2). Setea
+   * `finished = false` (permite que `finishSession` vuelva a correr, incluida
+   * su renumeración canónica — ADR-028 extendido) y los flags de auto-finish
+   * según qué detector va a re-correr. Válido también sobre una sesión NO
+   * finalizada (recuperación desde `Failed` a mitad de detección — ADR-038
+   * §2, "mismo efecto sobre los flags"). Defensivo como `finishSession`:
+   * sesión inexistente → warn + no-op.
+   */
+  reopenSession(documentId: string, options: ReopenSessionOptions): void {
+    this.assertNotDisposed();
+    this.assertInitialized();
+    const session = this.sessions.get(documentId);
+    if (!session) {
+      this.ctx?.logger.warn("reopenSession() sin sesión activa.", { documentId });
+      return;
+    }
+    session.finished = false;
+    session.regexFinished = !options.expectRegex;
+    session.nerFinished = !options.expectNer;
+  }
+
+  /**
+   * Elimina del registro de sesión las ocurrencias que matchean `filter` y
+   * sus `members` de los grupos afectados (ADR-038 §2, casos 24-25).
+   * Recalcula `aliases`/frecuencias/`canonicalValue` de cada grupo afectado
+   * (salvo `canonicalValue` editado manualmente, caso 18, que se conserva) y
+   * `replacementValue` (depende de members vía `maskFormat`, ADR-029). Un
+   * grupo que queda sin members se elimina (`ENTITY_GROUP_REMOVED`,
+   * invariante `members.length >= 1`, `03_Data_Model.md` §9) aunque tuviera
+   * ediciones. Conflictos cuyo grupo fue eliminado se descartan con
+   * `CONFLICT_RESOLVED` (mode = modo efectivo del grupo antes de eliminarlo;
+   * ver nota 10 del header sobre el alcance exacto de esta condición). No
+   * renumera `indexInType` (eso ocurre en el próximo `finishSession`).
+   */
+  dropOccurrences(documentId: string, filter: DropOccurrencesFilter): void {
+    this.assertNotDisposed();
+    this.assertInitialized();
+    if (filter.source === undefined && filter.pageIndices === undefined) {
+      throw new InvalidInputError(
+        "DropOccurrencesFilter debe especificar al menos un campo (source o pageIndices).",
+        { documentId },
+      );
+    }
+    const session = this.sessions.get(documentId);
+    if (!session) {
+      this.ctx?.logger.warn("dropOccurrences() sin sesión activa.", { documentId });
+      return;
+    }
+    this.doDropOccurrences(session, filter);
+  }
+
+  private doDropOccurrences(session: Session, filter: DropOccurrencesFilter): void {
+    const documentId = session.documentId;
+    const toDrop = session.recordedOccurrences.filter((rec) => matchesDropFilter(rec, filter));
+    if (toDrop.length === 0) return;
+
+    const droppedIds = new Set(toDrop.map((rec) => rec.occurrenceId));
+    const keptRecords = session.recordedOccurrences.filter(
+      (rec) => !droppedIds.has(rec.occurrenceId),
+    );
+    session.recordedOccurrences.splice(0, session.recordedOccurrences.length, ...keptRecords);
+
+    const affectedGroupIds = new Set(toDrop.map((rec) => rec.groupId));
+    // "modo efectivo del grupo antes de eliminarlo" (ADR-038 §2): capturado
+    // ANTES de mutar/eliminar, para los conflictos que queden huérfanos.
+    const modeBeforeRemoval = new Map<string, ReplacementMode>();
+    for (const groupId of affectedGroupIds) {
+      const group = session.groups.get(groupId);
+      if (group) modeBeforeRemoval.set(groupId, group.replacementMode);
+    }
+
+    // Grupos efectivamente eliminados EN ESTA llamada (no re-derivado de
+    // "groupId ausente" en general: los conflictos overlap/disagree/
+    // low_confidence nacen con resolved=true desde su creación —
+    // emitOverlapOrDisagreeConflict/handleLowConfidence pasan resolved=true—,
+    // así que "ya resuelto" no sirve como marca de "ya procesado por
+    // dropOccurrences"; solo el conjunto preciso de grupos borrados AHORA
+    // dispara CONFLICT_RESOLVED, evitando reprocesar el mismo conflicto en
+    // llamadas futuras con un `mode` stale).
+    const removedGroupIds = new Set<string>();
+
+    for (const groupId of affectedGroupIds) {
+      const group = session.groups.get(groupId);
+      if (!group) continue;
+
+      const remainingMembers = group.members.filter((m) => !droppedIds.has(m.occurrenceId));
+      if (remainingMembers.length === 0) {
+        session.groups.delete(groupId);
+        removedGroupIds.add(groupId);
+        this.ctx?.bus.emit(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_REMOVED, {
+          documentId,
+          groupId,
+        });
+        continue;
+      }
+
+      const remainingRecords = session.recordedOccurrences.filter((rec) => rec.groupId === groupId);
+      // Caso 18 (§13): canonicalValue editado manualmente (ya no está entre
+      // los aliases derivables) se conserva, igual que en doApplyGroupSplit.
+      const preserveCanonical = !group.aliases.includes(group.canonicalValue);
+      const previousCanonical = group.canonicalValue;
+      group.members = remainingMembers;
+      this.rebuildAliasBookkeeping(group, remainingRecords);
+      if (preserveCanonical) {
+        group.canonicalValue = previousCanonical;
+      } else if (group.aliases.length > 0) {
+        this.recomputeCanonicalValue(session, group);
+      }
+
+      const beforeReplacement = {
+        replacementMode: group.replacementMode,
+        replacementValue: group.replacementValue,
+      };
+      // ADR-029: el mask depende de los members remanentes; se recalcula
+      // siempre (mismo criterio que applyGroupMerge/doApplyGroupSplit) y
+      // emitReplacementChangeIfNeeded decide si de verdad cambió.
+      group.replacementValue = computeReplacementValue(
+        group.type,
+        group.replacementMode,
+        group.indexInType,
+        session.seed,
+        this.resolveMaskFormat(session, group),
+      );
+      group.updatedAt = Date.now();
+
+      const changed: (keyof EntityGroup)[] = ["members", "aliases", "updatedAt"];
+      if (group.canonicalValue !== previousCanonical) changed.push("canonicalValue");
+      changed.push(...this.emitReplacementChangeIfNeeded(session, group, beforeReplacement));
+      this.emitGroupUpdated(session, group, changed);
+    }
+
+    // Nota 10 del header: un conflicto queda "stale" cuando su groupId fue
+    // eliminado EN ESTA llamada (no "resolved", ver comentario arriba: los
+    // conflictos overlap/disagree/low_confidence ya nacen resueltos). No hay
+    // evento CONFLICT_REMOVED (ADR-038 §2): se re-emite CONFLICT_RESOLVED con
+    // el modo efectivo previo, sobrescribiendo el resolvedMode anterior.
+    for (const [conflictId, conflict] of session.conflicts) {
+      if (!removedGroupIds.has(conflict.groupId)) continue;
+      const mode = modeBeforeRemoval.get(conflict.groupId) ?? ReplacementMode.Placeholder;
+      session.conflicts.set(conflictId, { ...conflict, resolved: true, resolvedMode: mode });
+      this.ctx?.bus.emit(EventChannel.Grouping, EngineEvents.CONFLICT_RESOLVED, {
+        documentId,
+        conflictId,
+        mode,
+      });
+    }
   }
 
   /**
@@ -1037,6 +1230,23 @@ export class GroupingEngine implements IEngine {
   private processOccurrence(session: Session, occurrence: Occurrence): void {
     if (!this.ctx) return;
 
+    // Caso 23 (§13, ADR-038 §3): invariante permanente de dedup por
+    // identidad — no exclusivo de sesiones reabiertas. Se descarta en
+    // silencio (sin eventos, sin tocar frecuencias/aliases) toda ocurrencia
+    // cuya (entityType, pageIndex, bbox, normalizedValue) ya está registrada.
+    if (this.isDuplicateIdentity(session, occurrence)) {
+      this.ctx.logger.debug(
+        "ENTITY_FOUND con identidad duplicada; se descarta en silencio (ADR-038 §3).",
+        {
+          documentId: session.documentId,
+          occurrenceId: occurrence.id,
+          entityType: occurrence.entityType,
+          pageIndex: occurrence.pageIndex,
+        },
+      );
+      return;
+    }
+
     // Caso 9 (§13): low_confidence — solo aplica a ocurrencias NER.
     if (
       occurrence.source === DetectionSource.NER &&
@@ -1080,6 +1290,23 @@ export class GroupingEngine implements IEngine {
       candidateGroup.replacementMode,
     );
     this.emitConflictDetected(session, conflict);
+  }
+
+  /**
+   * Identidad (entityType, pageIndex, bbox, normalizedValue) ya registrada en
+   * la sesión (ADR-038 §3). Solo compara contra ocurrencias YA agrupadas
+   * (`recordedOccurrences`); las descartadas por low_confidence o por perder
+   * un conflicto overlap/disagree nunca se registran (nota 6/7 del header),
+   * así que un duplicado de esas vuelve a pasar por ese mismo camino.
+   */
+  private isDuplicateIdentity(session: Session, occurrence: Occurrence): boolean {
+    return session.recordedOccurrences.some(
+      (rec) =>
+        rec.entityType === occurrence.entityType &&
+        rec.pageIndex === occurrence.pageIndex &&
+        rec.normalizedValue === occurrence.normalizedValue &&
+        bboxEquals(rec.bbox, occurrence.bbox),
+    );
   }
 
   private findOverlapConflict(

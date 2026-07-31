@@ -117,6 +117,15 @@ export function makeBBox(x = 10, y = 100, width = 60, height = 12): BoundingBox 
  * Construye una `Occurrence` válida con defaults razonables (tipo DNI). Cada
  * llamada sin `id` explícito genera uno distinto (`occ-N`) para que las
  * aserciones que comparan `members`/`occurrenceId` no choquen entre tests.
+ *
+ * El `bbox` por defecto varía por llamada (`y` corrido por `occurrenceSeq`):
+ * dos `Occurrence` sin bbox explícito representan ubicaciones DISTINTAS del
+ * documento (ADR-038 §3: la identidad de dedup es (entityType, pageIndex,
+ * bbox, normalizedValue) con igualdad estricta de bbox — dos llamadas con el
+ * mismo bbox por "casualidad" del default colisionarían con el invariante de
+ * dedup permanente). Los tests que necesitan a propósito el MISMO bbox
+ * (overlap/disagree, o el propio test de dedup) lo pasan explícito vía
+ * `overrides.bbox`, que siempre gana sobre este default.
  */
 export function makeOccurrence(overrides?: Partial<Occurrence>): Occurrence {
   occurrenceSeq += 1;
@@ -124,7 +133,7 @@ export function makeOccurrence(overrides?: Partial<Occurrence>): Occurrence {
     id: `occ-${occurrenceSeq}`,
     value: "34.567.891",
     normalizedValue: "34567891",
-    bbox: makeBBox(),
+    bbox: makeBBox(10, 100 + occurrenceSeq * 20, 60, 12),
     pageIndex: 0,
     source: DetectionSource.Regex,
     confidence: 1.0,

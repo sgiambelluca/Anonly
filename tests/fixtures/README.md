@@ -91,11 +91,24 @@ Para fixtures que no se pueden generar automáticamente y pesan > 5 MB, descarga
 
 | Fixture | Cómo generarlo | Hito |
 |---|---|---|
-| `protected.pdf` | `qpdf --encrypt test1234 test1234 256 -- text-10p.pdf protected.pdf` | 2b (cuando se necesite password test) |
+| `protected.pdf` | `qpdf --encrypt test1234 test1234 256 -- text-10p.pdf protected.pdf` — **único fixture commiteado** (pdf-lib no encripta): se genera una vez y el binario ~100 KB entra al repo. No lo cubre ADR-018 (eso rige los assets first-party mirroreados, no los fixtures de test) | 10 / PR17 (ADR-048 §7 punto 1) |
 | `text-50p.pdf` | Extender `generate.ts` con `generateText50p()` | 11 (perf) |
 | `huge-1000p.pdf` | Extender `generate.ts` (Git LFS) | 11 (stress) |
 | `scanned-10p.pdf` | `pdftoppm` + `pdf-lib` | 3 (OCR) |
 | `mixed-30p.pdf` | Combinar text + scanned | 3 (OCR integration) |
+
+### Fixtures del E2E — se generan en runtime, no se commitean (ADR-048 §2)
+
+`tests/e2e/support/fixtures.ts` arma los PDFs **en memoria** reusando los generadores de `generate.ts` y los adjunta al `<input type="file">`. Ningún binario nuevo entra al repo por esta vía.
+
+| Escenario (`07` §11.3) | Fixture | Dónde se genera | Estado |
+|---|---|---|---|
+| 1, 6 | `text-10p.pdf`, `corrupt.pdf` | Node (`generate.ts`), vía `support/fixtures.ts` | listo (PR10) |
+| 4 (PDF enorme → cancelar) | `many-Np.pdf` | Node; el generador ya existe en `viewer-scroll-jump.spec.ts`, se promueve a `support/fixtures.ts` | PR17 — **no** hace falta `huge-1000p.pdf` ni Git LFS |
+| 2 (escaneado → OCR) | PDF de imágenes sin capa de texto | **Browser**, dentro del spec: rasterizar `text-10p.pdf` con el `pdfjs-dist` que la app ya carga + re-armar con pdf-lib | PR17 (supersede el diferimiento a Hito 11 anotado en la entrada "PR14" del roadmap) |
+| 3 (protegido) | `protected.pdf` | **Commiteado** (pdf-lib no encripta): se genera una sola vez con `qpdf --encrypt test1234 test1234 256 -- text-10p.pdf protected.pdf` | PR17 — ratificado por el humano, ADR-048 §7 punto 1 |
+
+> Los **assets first-party** (modelo NER, wasm de tesseract/ort) son otra cosa y no viven acá: no se commitean (ADR-018) y se obtienen con `pnpm assets:mirror`, **prerequisito obligatorio de `pnpm test:e2e`** (`07` §11.4, ADR-048 §1).
 
 ### Flujo de trabajo
 

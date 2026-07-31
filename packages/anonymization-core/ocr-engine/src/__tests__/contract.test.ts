@@ -17,6 +17,7 @@ import { OcrEngine } from "../ocr.engine.js";
 
 import {
   createEngineContext,
+  createTrackingOcrPool,
   createValidOcrPageInput,
   mockEmptyRecognizeData,
   mockRecognizeData,
@@ -231,5 +232,69 @@ describe("OcrEngine — contract tests", () => {
     const outputs = await engine.processPages(inputs, ctx);
 
     expect(outputs.map((o) => o.pageIndex)).toEqual([2, 0, 1]);
+  });
+
+  // ─── ADR-045 §2/§4/§5 — puerto interno OcrJobPool ───
+
+  it("dispatch uses maxRetriesOverride 0 (pool never retries ocr-page)", async () => {
+    vi.mocked(createWorker).mockResolvedValue(mockTesseractWorker(mockEmptyRecognizeData()));
+
+    const pool = createTrackingOcrPool();
+    const pooledEngine = new OcrEngine(pool);
+    await pooledEngine.init(ctx);
+    await pooledEngine.processPage(createValidOcrPageInput("doc-max-retries-override", 0), ctx);
+
+    expect(pool.calls.length).toBe(1);
+    expect(pool.calls[0]!.maxRetriesOverride).toBe(0);
+
+    await pooledEngine.dispose();
+  });
+
+  it("cache set happens before OCR_PAGE_FINISHED on host", async () => {
+    vi.mocked(createWorker).mockResolvedValue(
+      mockTesseractWorker(
+        mockRecognizeData([
+          { text: "Hola", confidence: 90, bbox: { x0: 0, y0: 0, x1: 40, y1: 20 } },
+        ]),
+      ),
+    );
+    await engine.init(ctx);
+
+    const cacheSetSpy = vi.spyOn(ctx.cache, "set");
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+
+    await engine.processPage(createValidOcrPageInput("doc-order", 0), ctx);
+
+    const cacheOrder = cacheSetSpy.mock.invocationCallOrder[0]!;
+    const pageFinishedCallIndex = busEmitSpy.mock.calls.findIndex(
+      (call) => call[1] === EngineEvents.OCR_PAGE_FINISHED,
+    );
+    const emitOrder = busEmitSpy.mock.invocationCallOrder[pageFinishedCallIndex]!;
+
+    expect(cacheOrder).toBeLessThan(emitOrder);
+  });
+
+  it("events identical with and without pool (fallback ADR-035)", async () => {
+    const recognizeData = mockRecognizeData([
+      { text: "Parity", confidence: 90, bbox: { x0: 0, y0: 0, x1: 40, y1: 20 } },
+    ]);
+
+    vi.mocked(createWorker).mockResolvedValue(mockTesseractWorker(recognizeData));
+    await engine.init(ctx);
+    const busEmitSpyA = vi.spyOn(ctx.bus, "emit");
+    await engine.processPage(createValidOcrPageInput("doc-parity", 0), ctx);
+    const eventsA = busEmitSpyA.mock.calls.map((call) => call[1]);
+
+    vi.mocked(createWorker).mockResolvedValue(mockTesseractWorker(recognizeData));
+    const pool = createTrackingOcrPool();
+    const pooledEngine = new OcrEngine(pool);
+    const ctxB = createEngineContext();
+    await pooledEngine.init(ctxB);
+    const busEmitSpyB = vi.spyOn(ctxB.bus, "emit");
+    await pooledEngine.processPage(createValidOcrPageInput("doc-parity", 0), ctxB);
+    const eventsB = busEmitSpyB.mock.calls.map((call) => call[1]);
+
+    expect(eventsB).toEqual(eventsA);
+    await pooledEngine.dispose();
   });
 });

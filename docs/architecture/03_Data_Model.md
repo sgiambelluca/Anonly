@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=modelo-de-datos | dependencias=01_Technical_Architecture_Document.md,core/Contracts.md | audiencia=IA+humanos | fase=1 -->
+<!-- CONTEXT: scope=modelo-de-datos | dependencias=01_Technical_Architecture_Document.md,core/Contracts.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-043-RenderEngine-Reparto-Host-Worker-Kernel.md,adr/ADR-046-NerEngine-Pool-Propia-Kernel-Puro.md | audiencia=IA+humanos | fase=1 (§18 actualizado en fase 10: OcrPagePayload.imageData→ImageData y payloads de transporte LoadDocument/RasterizePage/ExportSave, ADR-036 §4; UnloadDocumentPayload, ADR-043 §4; NerPagePayload por batch + NerKernelSpan/NerKernelProgress, ADR-046) -->
 
 # Anonly — Modelo de Datos (TAD bloque 5)
 
@@ -510,16 +510,26 @@ export interface PdfParsePayload {
 export interface OcrPagePayload {
   readonly documentId: string;
   readonly pageIndex: number;
-  readonly imageData: ArrayBuffer;
+  // Errata corregida (ADR-036 §4): era ArrayBuffer, que no transporta
+  // width/height y el OcrWorker no puede reconstruir la imagen. Coincide con
+  // OcrPageInput del motor. Transferencia: postMessage(msg, [imageData.data.buffer]).
+  readonly imageData: ImageData;
   readonly dpi: number;
   readonly languages: ReadonlyArray<string>;
 }
 
+// ADR-046 §3/§5: `text` es el texto de UN BATCH de NerConfig.batchSize palabras
+// (la partición la hace NerEngine host-side, que es quien tiene las Word[] para
+// el bbox; ADR-024 §2). `quantization` y `wasmPaths` viajan en el job porque el
+// kernel es quien carga el modelo y configura Transformers.js contra el origen
+// propio (ADR-039), y WorkerPool todavía no transporta INIT con la config real.
 export interface NerPagePayload {
   readonly documentId: string;
   readonly pageIndex: number;
   readonly text: string;
   readonly modelId: string;
+  readonly quantization: "q8" | "q4" | "f32";
+  readonly wasmPaths?: string | NerWasmPaths;
 }
 
 export interface RenderPagePayload {
@@ -533,12 +543,82 @@ export interface RenderPagePayload {
   readonly imageFormat?: "png" | "jpeg";
 }
 
+// ADR-047 §3: la forma previa ({ documentId, pageIndex, pageImage, metadata })
+// era inejecutable — sin `imageFormat` el worker no sabe si llamar embedJpg o
+// embedPng, y sin las dimensiones en puntos PDF no puede crear la página. La
+// `metadata` se mueve a ExportSavePayload, que es donde pdf-lib la aplica (una
+// vez, al final) en vez de viajar repetida en cada página.
 export interface ExportPagePayload {
   readonly documentId: string;
   readonly pageIndex: number;
-  readonly pageImage: ArrayBuffer;
+  readonly pageImage: ArrayBuffer;          // EncodedPageImage.bytes, transferido
+  readonly imageFormat: "png" | "jpeg";
+  readonly pageWidthPt: number;             // document.pages[i].width
+  readonly pageHeightPt: number;            // document.pages[i].height
+}
+```
+
+Payloads del transporte real (Hito 10, ADR-036 §4) que **no** agregan `WorkerJobType` nuevos (los `Readonly<Record<WorkerJobType, …>>` de `WorkerPoolConfig` son totales; agregar claves produciría churn mecánico sin valor — lección ADR-035 §4):
+
+```ts
+// Mensaje de control broadcast a cada RenderWorker (no es un job encolable;
+// buffer CLONADO por worker — 05_Worker_Architecture.md §2.3/§7.4, ADR-030).
+export interface LoadDocumentPayload {
+  readonly documentId: string;
+  readonly buffer: ArrayBuffer;
+  // ADR-050: password de un PDF protegido. El kernel lo usa en getDocument y
+  // NO lo retiene; el host sí, para re-primear workers (ADR-043 §5).
+  // Nunca en logs ni eventos (08_Security_Model.md §6).
+  readonly password?: string;
+}
+
+// Control broadcast simétrico a load-document (ADR-043 §4): libera el
+// PDFDocumentProxy de ese documento en cada RenderWorker a mitad de sesión
+// (DOCUMENT_CLOSED). Idempotente, sin transfer. Los controles viajan como RUN
+// con jobType "render-page" directo a cada worker, sin cola; el entry-point
+// discrimina por forma en el orden de ADR-043 §4.
+export interface UnloadDocumentPayload {
+  readonly documentId: string;
+}
+
+// Rasterización para OCR (ADR-034 §1). Viaja bajo jobType "render-page",
+// prioridad 90/40 (espejo de ocr-page), timeouts/retries de render-page.
+export interface RasterizePagePayload {
+  readonly documentId: string;
+  readonly pageIndex: number;
+  readonly scale: number;
+}
+
+// Job final del ExportWorker bajo jobType "export-page": aplica la metadata (ya
+// sanitizada en host, ADR-047 §1) y su COMPLETED devuelve el ArrayBuffer del PDF
+// transferido; DISPOSE solo libera (05 §7.5, ADR-036 §4). El entry-point
+// discrimina append vs save por forma: `"pageImage" in payload` (ADR-047 §3).
+export interface ExportSavePayload {
+  readonly documentId: string;
   readonly metadata: ExportMetadata;
 }
+
+// Salida del kernel del NerWorker (COMPLETED { spans }, ADR-046 §1): spans de
+// entidad ya agregados desde los tokens BIO, con offsets relativos al texto del
+// batch. Sin bbox, sin wordSpan y sin id: el mapeo a Occurrence lo hace
+// NerEngine en el host, que es quien tiene las Word[] de la página.
+export interface NerKernelSpan {
+  readonly entityType: EntityType;
+  readonly value: string;
+  readonly normalizedValue: string;
+  readonly confidence: number;              // ∈ [0,1], promedio de los tokens del span
+  readonly startIndex: number;              // relativo al texto del batch
+  readonly endIndexExclusive: number;
+}
+
+// Ciclo de vida del modelo NER reportado por el kernel en PROGRESS.partial
+// (ADR-046 §4): telemetría de transporte, NO eventos de dominio. El motor la
+// traduce en host a NER_MODEL_LOADING / NER_MODEL_READY (uno por instancia) /
+// logger.warn. El fraction de descarga viaja en PROGRESS.progress ∈ [0,1].
+export type NerKernelProgress =
+  | { readonly phase: "model-loading"; readonly modelId: string }
+  | { readonly phase: "model-ready"; readonly modelId: string }
+  | { readonly phase: "model-load-retry"; readonly modelId: string; readonly reason: string };
 ```
 
 Ver `05_Worker_Architecture.md` para el detalle de cada job.

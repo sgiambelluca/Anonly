@@ -23,12 +23,15 @@ import {
   EventChannel,
   InvalidInputError,
   makeTransferable,
+  MAX_RENDER_SCALE,
+  PREVIEW_CACHE_MAX_BYTES,
   ReplacementMode,
   synthesize,
 } from "../index.js";
 import { isTransferable } from "../index.js";
 import type {
   BoundingBox,
+  CoreRuntimeOptions,
   Document,
   EncodedPageImage,
   EngineConfig,
@@ -44,7 +47,11 @@ import type {
   Occurrence,
   Page,
   PageParsed,
+  RenderRequested,
   Word,
+  WorkerFactory,
+  WorkerLike,
+  WorkerOutbound,
 } from "../index.js";
 
 /**
@@ -427,6 +434,22 @@ describe("@anonly/shared — Contracts", () => {
       // `patch` es Partial<Pick<EntityGroup, ...>> sin `id`. Verificado por typecheck.
     });
 
+    it("RenderRequested.scale es opcional y viaja como escala absoluta pdfjs (ADR-037 §1)", () => {
+      const withoutScale: RenderRequested = {
+        documentId: "d1",
+        pageIndices: [0, 1],
+        mode: "preview",
+      };
+      const withScale: RenderRequested = {
+        documentId: "d1",
+        pageIndices: [0],
+        mode: "preview",
+        scale: 2.5,
+      };
+      expect(withoutScale.scale).toBeUndefined();
+      expect(withScale.scale).toBe(2.5);
+    });
+
     it("ExportRequested options.includeOriginalMetadata debe ser false", () => {
       const payload: ExportRequested = {
         documentId: "d1",
@@ -471,6 +494,16 @@ describe("@anonly/shared — Contracts", () => {
       expect(isTransferable({})).toBe(false);
       expect(isTransferable(null)).toBe(false);
       expect(isTransferable(new ArrayBuffer(10))).toBe(false);
+    });
+  });
+
+  describe("Constantes nombradas (ADR-037 §2/§3)", () => {
+    it("MAX_RENDER_SCALE es 4 (Contracts.md §6)", () => {
+      expect(MAX_RENDER_SCALE).toBe(4);
+    });
+
+    it("PREVIEW_CACHE_MAX_BYTES es 200 MB (Contracts.md §6)", () => {
+      expect(PREVIEW_CACHE_MAX_BYTES).toBe(200 * 1024 * 1024);
     });
   });
 
@@ -576,6 +609,65 @@ describe("@anonly/shared — Contracts", () => {
       };
       expect(encoded.format).toBe("jpeg");
       expect(encoded.bytes.byteLength).toBe(3);
+    });
+  });
+
+  describe("Transporte de Web Workers reales (Hito 10, ADR-036 §2/§3, Contracts.md §3.5)", () => {
+    it("WorkerLike es estructural: un objeto plano con postMessage/addEventListener/terminate lo satisface", () => {
+      const calls: string[] = [];
+      const worker: WorkerLike = {
+        postMessage: (message) => {
+          calls.push(String(message));
+        },
+        addEventListener: () => {},
+        terminate: () => {
+          calls.push("terminate");
+        },
+      };
+      worker.postMessage("x");
+      worker.terminate();
+      expect(calls).toEqual(["x", "terminate"]);
+    });
+
+    it("WorkerFactory es () => WorkerLike", () => {
+      const factory: WorkerFactory = () => ({
+        postMessage: () => {},
+        addEventListener: () => {},
+        terminate: () => {},
+      });
+      expect(typeof factory().postMessage).toBe("function");
+    });
+
+    it("CoreRuntimeOptions.workers admite un subconjunto parcial de los 5 WorkerEntryKind", () => {
+      const stub: WorkerLike = {
+        postMessage: () => {},
+        addEventListener: () => {},
+        terminate: () => {},
+      };
+      const runtime: CoreRuntimeOptions = {
+        workers: {
+          pdf: () => stub,
+          export: () => stub,
+        },
+      };
+      expect(Object.keys(runtime.workers ?? {}).sort()).toEqual(["export", "pdf"]);
+    });
+
+    it("CoreRuntimeOptions sin workers es válido (createCore in-process, comportamiento de hoy)", () => {
+      const runtime: CoreRuntimeOptions = {};
+      expect(runtime.workers).toBeUndefined();
+    });
+
+    it("WorkerOutbound admite la variante EVENT (ADR-036 §3)", () => {
+      const message: WorkerOutbound = {
+        type: "EVENT",
+        channel: EventChannel.Pdf,
+        event: EngineEvents.PAGE_PARSED,
+        payload: { documentId: "d1", pageIndex: 0, wordCount: 1, requiresOCR: false },
+      };
+      expect(message.type).toBe("EVENT");
+      expect(message.channel).toBe(EventChannel.Pdf);
+      expect(message.event).toBe(EngineEvents.PAGE_PARSED);
     });
   });
 

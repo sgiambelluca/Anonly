@@ -1,5 +1,6 @@
 import {
   DetectionSource,
+  EngineError,
   EngineErrorCode,
   EngineEvents,
   EventChannel,
@@ -269,6 +270,50 @@ describe("ExportEngine — unit", () => {
 
     await expect(engine.export(createExportEngineInput(), ctx)).rejects.toThrow(ExportFailedError);
     expect(mockDoc["save"]).toHaveBeenCalledTimes(2);
+  });
+
+  // ─── ADR-047 §5 — normalización por code en el borde del puerto ───
+
+  it("deserialized EXPORT_TIMEOUT is retried like the local one", async () => {
+    vi.mocked(PDFDocument.create).mockResolvedValue(asPdfDocument(createMockPdfLibDocument()));
+    await engine.init(ctx);
+
+    // Un EXPORT_TIMEOUT que "cruzó el worker" llega deserializado: instancia
+    // genérica con el code correcto, NO instanceof ExportTimeoutError
+    // (Contracts.md §4, EngineError.deserialize).
+    const localTimeout = new ExportTimeoutError("doc-deserialized-timeout", 0, 30_000);
+    const deserialized = EngineError.deserialize(localTimeout.serialize());
+    expect(deserialized).not.toBeInstanceOf(ExportTimeoutError);
+
+    const pool = {
+      dispatch: <T>(_params: {
+        readonly run: () => Promise<T>;
+        readonly signal: AbortSignal;
+        readonly payload?: unknown;
+        readonly maxRetriesOverride?: number;
+      }): Promise<T> => Promise.reject(deserialized),
+    };
+    const pooledEngine = new ExportEngine(pool);
+    await pooledEngine.init(ctx);
+    const emitSpy = vi.spyOn(ctx.bus, "emit");
+
+    // Ambos intentos (inicial + 1 retry, MAX_RETRIES=1) fallan con el mismo
+    // deserializado: sin la normalización por code, `toExportFailure` lo
+    // envolvería como ExportFailedError genérico, perdiendo el code
+    // EXPORT_TIMEOUT (ADR-047 §5).
+    await expect(
+      pooledEngine.export(createExportEngineInput({ documentId: "doc-deserialized-timeout" }), ctx),
+    ).rejects.toThrow(ExportTimeoutError);
+
+    expect(emitSpy).toHaveBeenCalledWith(
+      EventChannel.Export,
+      EngineEvents.EXPORT_FAILED,
+      expect.objectContaining({
+        error: expect.objectContaining({ code: EngineErrorCode.EXPORT_TIMEOUT }),
+      }),
+    );
+
+    await pooledEngine.dispose();
   });
 
   it("throws ExportTimeoutError when renderFull exceeds the export-page timeout", async () => {
