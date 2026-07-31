@@ -1,4 +1,4 @@
-import { PdfTimeoutError } from "@anonly/pdf-engine";
+import { PdfPasswordRequiredError, PdfTimeoutError } from "@anonly/pdf-engine";
 import { RenderEngine } from "@anonly/render-engine";
 import {
   CancelledError,
@@ -111,6 +111,39 @@ describe("Orchestrator — unit tests", () => {
     expect(revokeSpy).toHaveBeenCalledWith("blob:export-1");
 
     revokeSpy.mockRestore();
+  });
+
+  // ─── ADR-050 §2 / §4 (`08_Security_Model.md` §6.2): borrado del password ───
+
+  it("closeDocument leaves no password behind", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    wireHappyPathSpies(engines, bus);
+    (engines.pdf.process as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new PdfPasswordRequiredError("doc-1"),
+    );
+
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+    await orchestrator.retryWithPassword("doc-1", "test1234");
+
+    // El password quedó retenido host-side mientras el documento está
+    // abierto (ADR-050 §2/§4; `08_Security_Model.md` §6.1.6) — precondición
+    // del test: sin esto, la aserción de abajo pasaría vacía.
+    expect(orchestrator["retainedInputs"].get("doc-1")?.password).toBe("test1234");
+
+    await orchestrator.closeDocument("doc-1");
+
+    // Tras closeDocument, ni la entrada ni el password sobreviven en el
+    // estado del Orchestrator (`retainedInputs.delete`, ya existente).
+    expect(orchestrator["retainedInputs"].has("doc-1")).toBe(false);
   });
 
   // ─── Mediación grupos→Render del preview (ADR-044, §13 caso 27) ───

@@ -27,7 +27,7 @@
  * escenarios más rápidos.
  */
 
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
 
 import { protectedFile } from "./support/fixtures.js";
 
@@ -35,6 +35,32 @@ import { protectedFile } from "./support/fixtures.js";
 // con PasswordDialog (contraseña incorrecta + reintento) antes de la
 // aserción final de detección — mismo criterio que scenario-8 (línea 57).
 test.setTimeout(60_000);
+
+/**
+ * ADR-050 §6 (cierre del Escenario 3): prueba que el `<canvas>` del preview
+ * (`role="img"`, `PageCanvas.tsx`) pintó la página real, no solo que el
+ * elemento existe en el DOM — `toBeVisible()` por sí solo no lo distingue
+ * del skeleton gris (`SKELETON_FILL = "#e5e7eb"`, `PageCanvas.tsx`) que se
+ * pinta mientras no hay `blobUrl` (documento sin cargar en Render, o
+ * `RenderFailedError` como el bug pre-ADR-050: "No password given"). Escanea
+ * todos los pixeles en vez de comparar contra un snapshot tomado antes
+ * (evita una carrera contra el momento exacto en que `PREVIEW_UPDATED`
+ * llega — mismo patrón de inspección de bitmap que
+ * `scenario-11-zoom.spec.ts`).
+ */
+async function isSkeletonOnly(canvas: Locator): Promise<boolean> {
+  return canvas.evaluate((el) => {
+    const canvasEl = el as HTMLCanvasElement;
+    const context = canvasEl.getContext("2d");
+    if (!context) return true;
+    const { data } = context.getImageData(0, 0, canvasEl.width, canvasEl.height);
+    // rgb(229, 231, 235) = "#e5e7eb" (SKELETON_FILL, PageCanvas.tsx).
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i] !== 229 || data[i + 1] !== 231 || data[i + 2] !== 235) return false;
+    }
+    return true;
+  });
+}
 
 test("Escenario 3: cargar PDF protegido → UI pide password → reintenta → success", async ({
   page,
@@ -80,4 +106,18 @@ test("Escenario 3: cargar PDF protegido → UI pide password → reintenta → s
   // página 0) aparece sin depender de que NER termine.
   const dniGroup = page.getByRole("treeitem", { name: "34.567.891" });
   await expect(dniGroup).toBeVisible({ timeout: 30_000 });
+
+  // Cierre del bug de ADR-050 (Contexto §1): `protected.pdf` no tiene
+  // páginas `textless`, así que `runPipelineFrom` invoca
+  // `ensureRenderDocumentLoaded` en su rama sin OCR **antes** de `Detecting`
+  // (v1.4.1, caso 25) — con el bug vivo (retainedInputs sin reescribir tras
+  // el retry) esa llamada fallaba con `RenderFailedError("No password
+  // given")` → `failPipeline` → `PIPELINE_FAILED`, y ni el `dniGroup` de
+  // arriba llegaba a existir (Detecting nunca corría). Con el fix,
+  // `RenderEngine.loadDocument` recibe el password retenido (ADR-050 §4) y,
+  // además de que Detecting corre normalmente, la página 1 del visor llega a
+  // pintarse de verdad — no solo el skeleton gris inicial.
+  const firstPagePreview = page.getByRole("img", { name: "Página 1, original" });
+  await expect(firstPagePreview).toBeVisible({ timeout: 30_000 });
+  await expect.poll(() => isSkeletonOnly(firstPagePreview), { timeout: 30_000 }).toBe(false);
 });

@@ -158,7 +158,14 @@ describe("Orchestrator — contract tests", () => {
 
     await orchestrator.importDocument(createImportInput());
 
-    expect(engines.render.loadDocument).toHaveBeenCalledWith("doc-1", expect.any(ArrayBuffer));
+    // ADR-050 §4: `loadDocument` recibe el password retenido como tercer
+    // argumento (`undefined` acá — el documento de este test no tiene uno,
+    // `createImportInput()` no lo setea).
+    expect(engines.render.loadDocument).toHaveBeenCalledWith(
+      "doc-1",
+      expect.any(ArrayBuffer),
+      undefined,
+    );
     expect(engines.render.rasterizePage).toHaveBeenCalledWith(
       "doc-1",
       0,

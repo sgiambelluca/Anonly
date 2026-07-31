@@ -302,6 +302,11 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     const controller = this.abortRegistry.get(documentId) ?? this.abortRegistry.create(documentId);
     const ctx = this.ctxFor(controller.signal, documentId);
     const retryInput: ImportDocumentInput = { ...retained, password };
+    // ADR-050 §4: reescribe `retainedInputs` con el input que incluye el
+    // password — `ensureRenderDocumentLoaded` lee este mismo mapa más
+    // adelante en el pipeline y sin esto el documento protegido se abría en
+    // PdfEngine pero no en Render (`RenderFailedError("No password given")`).
+    this.retainedInputs.set(documentId, retryInput);
 
     this.setStage(documentId, PipelineStage.Extracting);
     await this.runPipelineFrom(documentId, retryInput, ctx);
@@ -706,7 +711,11 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
         documentId,
       });
     }
-    await this.engines.render.loadDocument(documentId, retained.buffer.slice(0));
+    // ADR-050 §4: propaga el password retenido (si lo hay) como tercer
+    // argumento — sin esto `RenderEngine.loadDocument` recibe los bytes
+    // todavía encriptados de un PDF protegido y falla con
+    // `RenderFailedError("No password given")`.
+    await this.engines.render.loadDocument(documentId, retained.buffer.slice(0), retained.password);
     this.renderLoadedDocuments.add(documentId);
   }
 

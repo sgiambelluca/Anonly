@@ -122,6 +122,70 @@ describe("Orchestrator — edge cases", () => {
     expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Extracting);
   });
 
+  // ─── Caso 3 (ADR-050 §4): el password sobrevive a la re-extracción y llega
+  // hasta RenderEngine.loadDocument. Dos tests que ejercitan los dos call
+  // sites de `ensureRenderDocumentLoaded` (§2 del spec): el de abajo pasa por
+  // `runOcrStage` (documento con páginas `textless`); el siguiente pasa por
+  // la rama directa de `runPipelineFrom` (documento con texto nativo, sin
+  // OCR). Los dos leen `retainedInputs` — si `retryWithPassword` no lo
+  // reescribiera (defecto 1 del Contexto de ADR-050), `loadDocument`
+  // recibiría `undefined` como tercer argumento pese a que la contraseña
+  // correcta ya se ingresó.
+
+  it("retryWithPassword persists the password in retainedInputs", async () => {
+    const { engines, orchestrator } = makeOrchestrator();
+    (engines.pdf.process as ReturnType<typeof vi.fn>)
+      .mockRejectedValueOnce(new PdfPasswordRequiredError("doc-1"))
+      .mockResolvedValueOnce(
+        createPdfEngineOutput({
+          document: createDocument({
+            sourceKind: "scanned",
+            pages: [createPage({ index: 0, requiresOCR: true })],
+          }),
+          textlessPages: [0],
+          sourceKind: "scanned",
+        }),
+      );
+
+    await orchestrator.importDocument(createImportInput());
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Extracting);
+
+    await orchestrator.retryWithPassword("doc-1", "test1234");
+
+    // `ensureRenderDocumentLoaded` corre acá desde `runOcrStage` (ADR-034
+    // §1), que lee `retainedInputs` — no el `retryInput` local de
+    // `retryWithPassword`.
+    expect(engines.render.loadDocument).toHaveBeenCalledWith(
+      "doc-1",
+      expect.any(ArrayBuffer),
+      "test1234",
+    );
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+  });
+
+  it("render loadDocument receives the password after a successful retry", async () => {
+    const { engines, orchestrator } = makeOrchestrator(); // doc con texto, sin páginas requiresOCR
+    (engines.pdf.process as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new PdfPasswordRequiredError("doc-1"),
+    );
+
+    await orchestrator.importDocument(createImportInput());
+    // Antes del retry, el pipeline nunca llegó a ensureRenderDocumentLoaded.
+    expect(engines.render.loadDocument).not.toHaveBeenCalled();
+
+    await orchestrator.retryWithPassword("doc-1", "test1234");
+
+    // Documento sin páginas requiresOCR: ensureRenderDocumentLoaded se
+    // invoca directo desde runPipelineFrom, antes de Detecting (v1.4.1,
+    // caso 25) — único call site real a `loadDocument` para este documento.
+    expect(engines.render.loadDocument).toHaveBeenCalledTimes(1);
+    const [docId, buffer, password] = (engines.render.loadDocument as ReturnType<typeof vi.fn>).mock
+      .calls[0] as [string, ArrayBuffer, string | undefined];
+    expect(docId).toBe("doc-1");
+    expect(buffer.byteLength).toBeGreaterThan(0);
+    expect(password).toBe("test1234");
+  });
+
   // ─── Caso 4: PDF_INVALID ───
 
   it("PDF_INVALID emits PIPELINE_FAILED and frees resources", async () => {
