@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=componentes-ui | dependencias=ui/React_Client.md,ui/UX_Guidelines.md,ADR-001-Framework.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md | audiencia=IA-implementador-ui | fase=4 (reconciliado en fase 10 por ADR-036: PasswordDialog/SettingsDialog/ConfirmDialog agregados §2.6–2.7/§8.9, zoom §5.2, mapeo §12; §2.6/§5.2/§5.5/§12 reescritos por ADR-037 —zoom con re-render real— y ADR-038 —SettingsDialog dispara reanalyze, no recreación del core—; §2.1/§2.5/§13.9 ajustados 2026-07-22 por el bug #7 del Escenario 1 E2E: gate de visibilidad por stage vs. vida del diálogo hijo abierto) -->
+<!-- CONTEXT: scope=componentes-ui | dependencias=ui/React_Client.md,ui/UX_Guidelines.md,ADR-001-Framework.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-054-Scroll-Independiente-Por-Panel.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md | audiencia=IA-implementador-ui | fase=4 (reconciliado en fase 10 por ADR-036: PasswordDialog/SettingsDialog/ConfirmDialog agregados §2.6–2.7/§8.9, zoom §5.2, mapeo §12; §2.6/§5.2/§5.5/§12 reescritos por ADR-037 —zoom con re-render real— y ADR-038 —SettingsDialog dispara reanalyze, no recreación del core—; §2.1/§2.5/§13.9 ajustados 2026-07-22 por el bug #7 del Escenario 1 E2E: gate de visibilidad por stage vs. vida del diálogo hijo abierto) -->
 
 # Anonly — Catálogo de Componentes
 
@@ -40,7 +40,8 @@ apps/react-client/src/components/
 │   ├── PageVirtualizer.tsx
 │   ├── PageCanvas.tsx
 │   ├── SideBySideViewer.tsx
-│   └── ZoomControls.tsx
+│   ├── ZoomControls.tsx
+│   └── ScrollSyncToggle.tsx   # ADR-054 §2
 ├── conflicts/
 │   ├── ConflictBadge.tsx
 │   └── ConflictDialog.tsx
@@ -230,10 +231,12 @@ apps/react-client/src/components/
 
 ### 5.1 `SideBySideViewer`
 
-- **Stores**: `viewer`, `document`.
-- **Render**: dos `PdfViewer` lado a lado (original + anonymized) con scroll sincronizado.
+- **Stores**: `viewer`, `document`, `settings` (para `scrollSyncEnabled`).
+- **Render**: dos `PdfViewer` lado a lado (original + anonymized), con **scroll independiente por panel** (ADR-054 §1, reemplaza "con scroll sincronizado"). Cada uno monta su propio rango y pide sus propios renders; mover uno no mueve al otro.
 - **Props**: ninguno (todo via store).
-- **Mobile** (< 1024 px): tabs en lugar de lado a lado.
+- **Mobile** (< 1024 px): tabs en lugar de lado a lado. **Sin cambios por ADR-054**: es requisito explícito conservar este modo tal cual.
+- **Sincronización opcional** (ADR-054 §3/§4): con `settings.scrollSyncEnabled` en `true`, mover un panel arrastra al otro **a nivel de píxel** (`scrollTop` contra `scrollTop`; la geometría de los dos paneles es idéntica). Nunca por índice de página. La convergencia sale de la idempotencia —el seguidor, ya en el valor exacto, no propaga nada— así que **no** se implementa con bandera + temporizador. Casos límite, resueltos por comparación de valor: un panel que no puede alcanzar la posición (recorte del navegador) no propaga la suya; un panel oculto (alto cero, modo tabs) se saltea y se realinea al volverse visible.
+- El control que prende esa sincronización **no vive acá**: está en la barra del visor, junto a `ZoomControls` (§5.6).
 
 ### 5.2 `PdfViewer`
 
@@ -246,9 +249,10 @@ apps/react-client/src/components/
 
 ### 5.3 `PageVirtualizer`
 
-- **Props**: `pageCount`, `renderItem: (index) => ReactNode`, `visibleRange`, `pageSize`.
+- **Props**: `pageCount`, `renderItem: (index) => ReactNode`, `visibleRange`, `pageSize`. **Sin `scrollToPageIndex`** (ADR-054 §6): esa prop y el efecto de sincronización que la consumía se retiran junto con `scrollSync.ts`/`computeScrollSyncTarget` — con scroll independiente no existe el concepto de seguidor, y con la sincronización prendida la mecánica es la de §5.1, que no pasa por props.
 - **Comportamiento**: mantiene un pool de `<canvas>` reutilizables. Calcula scroll height total con `pageCount × pageSize`. Solo renderiza items en `visibleRange` + 1 antes + 1 después.
 - **Performance**: usa `IntersectionObserver` para detectar visibilidad y `requestAnimationFrame` para scroll suave.
+- **Alcance del `IntersectionObserver` (ADR-054 §5)**: decide **únicamente el rango de montaje**. Reducir el conjunto de índices que reporta a `min..max` es correcto para eso —un conjunto transitoriamente no contiguo monta una página de más, que es inofensivo— pero **no** sirve para derivar la página actual: ahí un índice viejo colapsaba el rango a `start: 0`. La página actual se calcula de la geometría del scroll (`React_Client.md` §3.5).
 
 ### 5.4 `PageCanvas`
 
@@ -264,6 +268,14 @@ apps/react-client/src/components/
 - **Botones**: `+`, `-`, `Reset`.
 - **Atajos**: `Cmd/Ctrl++`, `Cmd/Ctrl+-`, `Cmd/Ctrl+0`.
 - **Acción**: `viewer.setZoom(newZoom)` (aplica el escalado CSS inmediato vía `PdfViewer` §5.2); el re-render real se dispara con debounce, no en cada click/atajo individual (`ZOOM_RERENDER_DEBOUNCE_MS = 150 ms`, ADR-037 §5).
+
+### 5.6 `ScrollSyncToggle` (ADR-054 §2)
+
+- **Ubicación**: la barra del visor, junto a `ZoomControls`. Es un control **del visor**, hermano del zoom — no del `Toolbar` (acciones sobre el documento: exportar, cancelar, cerrar) ni del `SettingsDialog` (configuración de procesamiento: NER, idiomas de OCR, preset).
+- **Store**: `settings.scrollSyncEnabled` (persistido en `localStorage`; default `false`).
+- **Visibilidad**: solo en anchos `≥ lg` (`hidden lg:flex`), la misma media query con la que `SideBySideViewer` alterna a tabs. Por debajo hay un solo panel visible y sincronizar dos paneles que no se ven a la vez no significa nada.
+- **Al ocultarse no se apaga**: la preferencia se conserva intacta; al volver a ancho `≥ lg` el control reaparece con el valor que tenía y los paneles se realinean. Resetearla al redimensionar pisaría una elección que el usuario no tocó.
+- **Efecto**: ver `SideBySideViewer` §5.1 (sincronización a nivel de píxel, idempotente, sin temporizadores).
 
 ---
 

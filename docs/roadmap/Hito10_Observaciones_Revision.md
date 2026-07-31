@@ -468,6 +468,10 @@ Con el Hito 10 ya cerrado a nivel de PRs, el humano probó la app con **dos docu
 
 Lo que sigue es diagnóstico verificado contra el código, no hipótesis, salvo donde se aclara explícitamente.
 
+> **Actualización 2026-07-31 — los tres ADRs están escritos y los specs enmendados.** `ADR-053` (pdf.js dentro de un Worker), `ADR-054` (scroll independiente por panel) y `ADR-055` (decodificación del resultado que cruza un Worker), más las enmiendas a `Render_Engine.md` v1.7.0, `PDF_Engine.md` v1.3.1, `NER_Engine.md` v1.2.1, `05_Worker_Architecture.md` §2.2/§7, `React_Client.md` §3.5/§3.6/§7, `Components.md` §5.1/§5.3/§5.6, `07_Performance_Strategy.md` §3.1, `Code_Standards.md` §7 y notas de amendment en `ADR-018` y `ADR-042`. La tabla de PRs está en `MVP.md`, al final del Hito 10. Nada implementado todavía.
+>
+> **Hallazgo del propio trabajo de ADR-053**: al verificar la solución contra el código publicado de `pdfjs-dist@4.10.38` aparecieron **tres trampas** que habrían roto el fix, una de ellas catastrófica —pasar `cMapUrl`/`standardFontDataUrl` sin fijar `useWorkerFetch: false` hace que pdf.js evalúe `document.baseURI` dentro del Worker y tire `ReferenceError`, que `kernelLoadDocument` reclasifica como `RenderFailedError`: el visor entero deja de cargar documentos, con un error que no menciona fuentes—. Están en ADR-053, Contexto §6, con número de línea. Es el tipo de verificación que justifica escribir el ADR antes que el código.
+
 ### 1. Crítico — NER no detecta absolutamente nada con `NerPool` real
 
 **Síntoma**: desde que los motores pasaron a Workers reales, al escanear un PDF de texto solo aparecen las entidades de Regex (una patente). Ninguna de NER (personas, ubicaciones) llega nunca a la UI, sin error visible, con el pipeline llegando a `Ready` normalmente.

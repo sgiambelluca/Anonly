@@ -36,6 +36,10 @@ Operativamente:
 4. **CSP intacta**: `connect-src 'self'` sin excepciones. El test `no-third-party-connect` (§11 del Security Model) sigue siendo válido y bloqueante.
 5. Actualizar un modelo = actualizar `assets.lock.json` (URL/revisión/hash) en un PR revisable.
 
+> **Precisión (2026-07-31, ADR-053 §4) — assets que ya vienen dentro de una dependencia npm**: la regla de este ADR es *de dónde se sirven* (siempre first-party), no *por dónde entran al build*. `assets.lock.json` existe para los assets que hay que **descargar de un origen de terceros**: por eso pinnea URL, revisión y `sha256`. Un asset que ya viene dentro de un paquete npm pinneado por `pnpm-lock.yaml` —el caso de `cmaps/` y `standard_fonts/` de `pdfjs-dist`, 169 + 14 archivos— **no** pasa por `assets.lock.json`: se copia de `node_modules` a `public/` en un paso de build (`predev`/`prebuild`), y su integridad ya la garantiza el lockfile. Ponerlo ahí sería declarar 169 hashes de bytes que nunca se bajan de un CDN.
+>
+> Lo que **no** cambia: se siguen sirviendo desde el propio origen, no se commitean (`.gitignore`, mismo criterio que `public/wasm/` y `public/models/`), y la CSP queda igual. El origen se resuelve con `createRequire`/`import.meta.resolve` sobre el `package.json` de la dependencia, nunca con una ruta literal a `node_modules/.pnpm/...` (pnpm usa un store con hash en el path).
+
 ## Alternativas consideradas
 
 | Alternativa | Por qué no |

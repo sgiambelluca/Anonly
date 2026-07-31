@@ -46,6 +46,10 @@ La limitación de TS solo muerde con `interface`s **nombradas**; los objetos lit
 
 Los entry-points de Render/Ocr/Ner/Export replican el patrón sin volver a levantar la ambigüedad: `RUN.payload` se afina al payload del job en el entry-point (ADR-019); `COMPLETED.result` se afina al `*EngineOutput` en el host-bridge (este ADR); los eventos viajan por `EVENT` con `payload: unknown` y el host-bridge los re-emite afinados (ADR-036 §3). Ningún `as unknown as`, ningún `@ts-expect-error` de transporte.
 
+> **Amendment (2026-07-31, ADR-055) — "afinar" es decodificar, no castear**: este ADR declaró `result: unknown` a nivel de transporte pero dejó el lado del consumidor como "el host-bridge lo estrecha con comentario de frontera". Un cast anotado **no** es una verificación: el parámetro de tipo de `dispatch<T>` es una afirmación que el compilador no puede comprobar contra lo que de verdad llega por `postMessage`. La consecuencia se cobró en `ner-engine`, que estuvo semanas sin detectar **ninguna** entidad porque el worker posteaba `{ spans }` y el host iteraba el resultado como si fuera un array (ver ADR-055, Contexto §1).
+>
+> ADR-055 completa este ADR con la obligación correspondiente del lado del consumidor: **guard de runtime**, impuesto por tipos (el puerto interno de cada motor devuelve `Promise<unknown>`), y prohibición de que un decoder devuelva un default en silencio. Este ADR no se revisa: `result: unknown` sigue siendo la decisión correcta a nivel de transporte; lo que faltaba era decir qué obliga a hacer del otro lado.
+
 ## Alternativas consideradas
 
 | Alternativa | Por qué se rechaza |

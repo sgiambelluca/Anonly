@@ -215,6 +215,20 @@ Orden canónico de PRs (ADR-038 §8; los PRs 2-4 no dependen del scaffold y pued
 - **ADR-054 + PR `apps/react-client`** — scroll independiente por panel más un control opcional de sincronización a nivel de píxel; cierra los tres defectos compuestos del salto de scroll.
 - Sin ADR: pdf.js degrada a "fake worker" dentro de todo Web Worker (solo rendimiento, candidato a este hito 11); ruido de blob URLs revocados al scrollear; y una página escaneada suelta dentro de un PDF textual que no recibe cobertura de OCR (**único de los cinco con causa sin cerrar**, requiere diagnóstico propio).
 
+**Los tres ADRs quedaron escritos el 2026-07-31**, con los specs que cada uno enmienda ya actualizados (`Render_Engine.md` v1.7.0, `PDF_Engine.md` v1.3.1, `NER_Engine.md` v1.2.1, `05_Worker_Architecture.md` §2.2/§7, `React_Client.md` §3.5/§3.6/§7, `Components.md` §5.1/§5.3/§5.6, `07_Performance_Strategy.md` §3.1, `Code_Standards.md` §7, más notas de amendment en ADR-018 y ADR-042). Los PRs quedan listos para asignarse al implementador, en este orden:
+
+| # | PR | Módulo | ADR | Prioridad |
+|---|---|---|---|---|
+| A1 | Puerto `unknown` + decoder del sobre `{ spans }` + tests de sobre | `ner-engine` | ADR-055 §9 | **Crítica** — sin esto NER no detecta nada |
+| A2 | E2E que verifica una entidad NER en la UI | `tests/e2e/` | ADR-055 §6 | Alta |
+| B1 | Copia de `cmaps`/`standard_fonts` a `public/pdfjs/` + `predev`/`prebuild` + `.gitignore` | `apps/react-client` | ADR-053 §9 | Alta — bloquea B2/B3 |
+| B2 | `disableFontFace` + assets + factories propias en `kernelLoadDocument` | `render-engine` | ADR-053 §9 | Alta |
+| B3 | cMaps + standard fonts + factories propias en la extracción | `pdf-engine` | ADR-053 §5 | Media |
+| C1 | Scroll independiente por panel + `ScrollSyncToggle` + estado del visor por-kind | `apps/react-client` | ADR-054 §10 | Media |
+| D1..D4 | Puerto `unknown` + decoder, uno por motor | `ocr-engine`, `render-engine`, `pdf-engine`, `export-engine` | ADR-055 §7 | Preventiva, sin fecha |
+
+A y B y C son independientes entre sí y pueden correr en paralelo; dentro de B, el orden es estricto.
+
 ### Hito 11 — Hardening
 - Performance gates (todas las métricas de `00_Project_Vision.md` §7).
 - Leak tests, cancel tests.
