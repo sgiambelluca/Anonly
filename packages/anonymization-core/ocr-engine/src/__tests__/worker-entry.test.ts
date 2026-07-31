@@ -39,6 +39,11 @@ import {
 interface FakeWorkerSelf {
   readonly postMessage: ReturnType<typeof vi.fn>;
   readonly addEventListener: ReturnType<typeof vi.fn>;
+  // Ausente por default (mismo shape que un `self` de Worker real sin campo
+  // extra): ejercita la rama de `resolveTesseractPath` (`worker/kernel.ts`)
+  // que corre en la mayoría de estos tests. Los tests de absolutización
+  // (ADR-018 §2 precisión / OCR_Engine.md v1.2.2) lo setean antes del RUN.
+  location?: { readonly origin: string };
   emitMessage(message: WorkerInbound): void;
 }
 
@@ -310,5 +315,78 @@ describe("OcrWorker entry-point — kernel puro (ADR-045 §3)", () => {
     await vi.waitFor(() => expect(outboundOfType(fakeSelf, "COMPLETED")).toBeDefined());
     expect(createWorker).toHaveBeenCalledTimes(2);
     expect(terminateB).not.toHaveBeenCalled();
+  });
+
+  // Regresión de PR 17.6 parte a (errata de ADR-018 §2 / OCR_Engine.md
+  // v1.2.1 §15.22): `workerPath` apuntando al DIRECTORIO en vez de al
+  // archivo hace que tesseract.js falle en silencio (`importScripts(workerPath)`
+  // sin agregar nombre de archivo) — un test que solo verificara
+  // `createWorker` con `expect.anything()` en el tercer argumento (como el
+  // resto de los tests de este archivo, ver arriba) no habría detectado el
+  // bug. `langPath`/`corePath` SÍ deben seguir siendo directorios
+  // (tesseract.js resuelve adentro).
+  //
+  // Este `fakeSelf` (`beforeEach`) no tiene `location`: ejercita a propósito
+  // la rama "sin `self.location`" de `resolveTesseractPath` (`worker/kernel.ts`,
+  // PR 17.6 parte b) — los tres paths deben quedar root-relative, sin
+  // absolutizar, igual que en el fallback in-process real (sin `self`).
+  it("configures tesseract.js first-party paths with workerPath pointing to the file, not the directory, unresolved when self.location is absent (ADR-018 §2 errata)", async () => {
+    vi.mocked(createWorker).mockResolvedValue(mockTesseractWorker(mockEmptyRecognizeData()));
+
+    fakeSelf.emitMessage({
+      type: "RUN",
+      jobId: "job-paths",
+      signalId: "job-paths",
+      jobType: "ocr-page",
+      payload: basePayload({ documentId: "doc-paths" }),
+    });
+
+    await vi.waitFor(() => expect(outboundOfType(fakeSelf, "COMPLETED")).toBeDefined());
+    expect(createWorker).toHaveBeenCalledWith(
+      ["spa", "eng"],
+      undefined,
+      expect.objectContaining({
+        langPath: "/models/tesseract/",
+        corePath: "/wasm/tesseract/",
+        workerPath: "/wasm/tesseract/worker.min.js",
+      }),
+    );
+  });
+
+  // Regresión de PR 17.6 parte b (precisión de ADR-018 §2 / OCR_Engine.md
+  // v1.2.2 §15.22): dentro de un Worker REAL, tesseract.js no absolutiza los
+  // tres paths por su cuenta (`getEnvironment()` devuelve `'webworker'`, no
+  // `'browser'`) y su wrapper `workerBlobURL` corre con una base `blob:`
+  // contra la que un path root-relative no resuelve — confirmado en browser
+  // real, `new URL("/wasm/…", "blob:http://origen/uuid")` lanza
+  // `Invalid URL`. `resolveTesseractPath` tiene que absolutizar las TRES
+  // rutas contra `self.location.origin` cuando está presente — este test
+  // simula exactamente eso seteando `fakeSelf.location` antes del RUN
+  // (`self` real de un Worker SIEMPRE tiene `location`, a diferencia del
+  // `fakeSelf` default de arriba). Sin este fix, el Escenario 2 E2E pasa a
+  // "Listo" con 0 entidades incluso con la parte a) ya aplicada — el bug que
+  // PR 17.6 destapó al verificar en browser real, no solo con mocks.
+  it("absolutizes tesseract.js first-party paths against self.location.origin when running inside a real worker (ADR-018 §2 precisión)", async () => {
+    fakeSelf.location = { origin: "http://localhost:5173" };
+    vi.mocked(createWorker).mockResolvedValue(mockTesseractWorker(mockEmptyRecognizeData()));
+
+    fakeSelf.emitMessage({
+      type: "RUN",
+      jobId: "job-absolute-paths",
+      signalId: "job-absolute-paths",
+      jobType: "ocr-page",
+      payload: basePayload({ documentId: "doc-absolute-paths" }),
+    });
+
+    await vi.waitFor(() => expect(outboundOfType(fakeSelf, "COMPLETED")).toBeDefined());
+    expect(createWorker).toHaveBeenCalledWith(
+      ["spa", "eng"],
+      undefined,
+      expect.objectContaining({
+        langPath: "http://localhost:5173/models/tesseract/",
+        corePath: "http://localhost:5173/wasm/tesseract/",
+        workerPath: "http://localhost:5173/wasm/tesseract/worker.min.js",
+      }),
+    );
   });
 });

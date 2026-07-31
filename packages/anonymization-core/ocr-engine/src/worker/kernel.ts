@@ -40,10 +40,69 @@ type TesseractWorker = Awaited<ReturnType<typeof createWorker>>;
  * terceros (jsDelivr/GitHub) en runtime. langPath = datos de idioma
  * entrenados (spa.traineddata/eng.traineddata, ~30MB); corePath/workerPath =
  * wasm + script del worker interno de tesseract.js.
+ *
+ * `langPath`/`corePath` SON directorios a propósito (tesseract.js resuelve
+ * dentro de ellos: `<lang>.traineddata` y la variante de core SIMD/no-SIMD
+ * respectivamente). `workerPath`, en cambio, tiene que ser la ruta al
+ * ARCHIVO real: tesseract.js hace `importScripts(workerPath)` tal cual, sin
+ * agregarle nombre de archivo — apuntar a un directorio falla en silencio
+ * (errata corregida en ADR-018 §2 / OCR_Engine.md v1.2.1 §15.22, PR 17.6
+ * parte a).
  */
 const TESSERACT_LANG_PATH = "/models/tesseract/";
 const TESSERACT_CORE_PATH = "/wasm/tesseract/";
-const TESSERACT_WORKER_PATH = "/wasm/tesseract/";
+const TESSERACT_WORKER_PATH = "/wasm/tesseract/worker.min.js";
+
+/*
+ * ADR-018 §2 (precisión 2026-07-30) / OCR_Engine.md v1.2.2, §15.22 parte b:
+ * las tres rutas de arriba son root-relative ("/wasm/…"), y ese formato solo
+ * resuelve bien cuando tesseract.js las absolutiza contra `window.location`
+ * por su cuenta — cosa que SOLO hace si detecta el entorno `'browser'`
+ * (`typeof document === 'object'`). Este kernel corre, en producción, DENTRO
+ * de un Worker real (OcrWorker, ADR-045 §3, wireado sin condición desde
+ * PR14): ahí `WorkerGlobalScope` existe, tesseract.js detecta el entorno
+ * `'webworker'` y NO absolutiza nada. Encima, con `workerBlobURL: true`
+ * (default de tesseract.js) el worker interno que crea para `workerPath`
+ * corre con `self.location` = una URL `blob:<origen>/<uuid>` — y un path
+ * root-relative NO resuelve contra una base `blob:`
+ * (`new URL("/foo", "blob:http://origen/uuid")` lanza `Invalid URL`,
+ * verificado en browser real). Por eso el fix de más arriba (archivo, no
+ * directorio) alcanza para el fallback in-process (`window`/`document`
+ * existen ahí, tesseract.js sí absolutiza) pero NO para el camino real de
+ * producción.
+ *
+ * Fix: absolutizar acá, nosotros, las tres rutas contra `self.location.origin`
+ * ANTES de pasarlas a `createWorker` — sigue siendo first-party (mismo
+ * origen, ADR-018; lo único que cambia es la FORMA de la URL, no el
+ * destino). `self` no existe en el entorno de test de este paquete
+ * (`environment: "node"` de vitest, sin `self` global salvo que un test lo
+ * stubee explícitamente para `worker/entry.ts` — ver
+ * `__tests__/worker-entry.test.ts`) ni en el fallback in-process invocado
+ * fuera de un Worker (`ocr.engine.ts` sin pool real): en esos casos no hay
+ * `self`/`self.location` y esta función es un no-op (retorna el path
+ * root-relative tal cual, que además sigue siendo válido para esos dos
+ * casos, ver arriba).
+ *
+ * Palanca de reserva, NO usada acá (documentada para no reintentarla a
+ * ciegas si aparece un problema nuevo): `createWorker(..., { workerBlobURL:
+ * false })` elimina el wrapper `blob:` por completo (tesseract.js hace
+ * `new Worker(workerPath)` directo, `spawnWorker.js` líneas 17-19) — pero
+ * cambiar ESE mecanismo es una superficie más grande que absolutizar la URL,
+ * y no está confirmado que haga falta. Si tras este fix apareciera todavía
+ * una resolución interna root-relative de tesseract (candidato:
+ * `worker-script/browser/getCore.js`, que hace su propio
+ * `global.importScripts(corePathImportFile)` una vez que `workerPath` ya
+ * cargó, con el `self.location` heredado del worker que `importScripts`
+ * dejó — no verificado, la ejecución hoy no llega tan lejos), ahí sí
+ * correspondería agregar `workerBlobURL: false` con su propio comentario
+ * justificativo.
+ */
+function resolveTesseractPath(path: string): string {
+  if (typeof self === "undefined") return path;
+  const origin = self.location?.origin;
+  if (origin === undefined) return path;
+  return new URL(path, origin).href;
+}
 
 /** Instancia de tesseract cargada, y el set de idiomas con el que se cargó. */
 let worker: TesseractWorker | null = null;
@@ -76,9 +135,9 @@ async function ensureWorkerLoaded(languages: ReadonlyArray<string>): Promise<voi
   let nextWorker: TesseractWorker;
   try {
     nextWorker = await createWorker([...languages], undefined, {
-      langPath: TESSERACT_LANG_PATH,
-      corePath: TESSERACT_CORE_PATH,
-      workerPath: TESSERACT_WORKER_PATH,
+      langPath: resolveTesseractPath(TESSERACT_LANG_PATH),
+      corePath: resolveTesseractPath(TESSERACT_CORE_PATH),
+      workerPath: resolveTesseractPath(TESSERACT_WORKER_PATH),
     });
   } catch (err: unknown) {
     const reason = err instanceof Error ? err.message : String(err);
