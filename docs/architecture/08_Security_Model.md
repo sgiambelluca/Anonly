@@ -156,20 +156,22 @@ Nunca se copian campos del original. El test de no-recuperabilidad valida esto.
 
 1. PDF Engine detecta protección → emite `PDF_PASSWORD_REQUIRED`.
 2. UI pide password al usuario.
-3. El password viaja **solo en RAM**, en el payload del `pdf-parse` job, transferido al worker.
-4. Worker lo usa para abrir el PDF con PDF.js y lo descarta de su scope al terminar.
+3. El password viaja **solo en RAM**, en exactamente **dos** payloads del transporte (enmendado por ADR-050 §3): el job `pdf-parse` (PdfWorker) y el control broadcast `load-document` (RenderWorkers, `LoadDocumentPayload.password`). En ningún otro mensaje, payload ni evento.
+4. Cada worker lo usa para abrir el PDF con PDF.js y lo **descarta de su scope**: ni el PdfWorker ni el RenderWorker lo guardan en su estado (una vez abierto el `PDFDocumentProxy`, no se vuelve a necesitar en el worker).
 5. No se loguea (regla R-9 + regla específica de logger).
-6. No se persiste en ningún lado.
+6. **No se persiste fuera de RAM** (ADR-050 §3): ni disco, ni IndexedDB, ni `localStorage`, ni logs, ni eventos. En RAM se retiene **host-side** mientras el documento esté abierto — en `retainedInputs` del Orchestrator (para re-correr el pipeline) y junto a `{ buffer, pageCount }` del `RenderEngine` host (para re-primear workers nuevos o reemplazados, ADR-043 §5) — y se borra en `DOCUMENT_CLOSED`/`unloadDocument`/`dispose`.
+
+> **Por qué la retención host-side** (ADR-050, alternativa C descartada): sin ella, un RenderWorker reemplazado tras crash no puede recargar un documento protegido y el preview queda muerto en silencio hasta que el usuario reabra el archivo. La exposición adicional es nula en la práctica: es la misma RAM del mismo proceso donde ya vive el buffer del documento, en una app 100% local sin backend (ADR-002).
 
 ### 6.2 Garantías
 
 - El password **no** se incluye en ningún evento del bus.
 - El password **no** se incluye en logs (`ctx.logger` rechaza campos con nombre `password`, `pwd`, `secret`).
-- Tras `DOCUMENT_CLOSED`, el password se elimina de la memoria del worker (se sobreescribe con `new Uint8Array(len)` antes de GC, si el motor lo permite).
+- Tras `DOCUMENT_CLOSED`, el password se elimina de la memoria del worker (se sobreescribe con `new Uint8Array(len)` antes de GC, si el motor lo permite) y de las dos retenciones host-side de §6.1.6.
 
 ### 6.3 Test
 
-- Grep automatizado en CI: `grep -r "password" packages/ | grep -v "PDF_PASSWORD_REQUIRED\|errors.ts"` debe no encontrar usos sospechosos.
+- Grep automatizado en CI: `grep -r "password" packages/ | grep -v "PDF_PASSWORD_REQUIRED\|errors.ts"` debe no encontrar usos sospechosos **fuera de esta lista enumerada** (ADR-050 §3): `pdf-engine` (`pdf.types.ts`, `pdf.engine.ts`, `worker/entry.ts`), `render-engine` (`render.engine.ts`, `worker/kernel.ts`, `worker/entry.ts`), `shared/src/types.ts` (`LoadDocumentPayload`) y `src/orchestrator.ts` (`retainedInputs`, `retryWithPassword`). Cualquier aparición fuera de la lista es un hallazgo.
 - Test de logger: spy sobre `ctx.logger` y verificar que ningún argumento contenga el password de `protected.pdf`.
 
 ---

@@ -6,8 +6,10 @@
 
 **Componente**: Orchestrator + façade `@anonly/anonymization-core` (no es un motor: **no tiene `EngineId`** y no implementa `IEngine`; este spec adapta la plantilla de 15 secciones de `ai/Module_Specification_Template.md` a un componente host)
 **Ubicación**: `packages/anonymization-core/src/`
-**Versión del spec**: 1.5.2
+**Versión del spec**: 1.5.3
 **Última actualización**: 2026-07-30
+
+> **Nota (v1.5.3, 2026-07-30 — ADR-050: `retryWithPassword` persiste el password y lo propaga a Render)**: `retryWithPassword` armaba el input con la contraseña como variable local y **nunca reescribía `retainedInputs`**. Como `ensureRenderDocumentLoaded` lee ese mismo `retainedInputs`, `RenderEngine.loadDocument` recibía los bytes todavía encriptados y moría con `RenderFailedError("No password given")` → `PIPELINE_FAILED`: el mismo banner genérico, después de que el usuario hubiera ingresado la contraseña **correcta**. Rompía los tres caminos que dependen de la carga en Render (rasterización para OCR, seed del preview de ADR-044 y export en `mode: "full"`), y no dependía del transporte: fallaba igual con pools in-process. Se especifica: `retryWithPassword` **reescribe** `retainedInputs` con el input que incluye el password antes de re-correr el pipeline, y `ensureRenderDocumentLoaded` pasa `retained.password` como tercer argumento de `loadDocument` (ADR-050 §1/§4). El password se borra donde ya se borraba (`closeDocument`/`dispose`).
 
 > **Nota (v1.5.2, 2026-07-30 — ADR-049: el password-required se discrimina por `code`, no por `instanceof`)**: con transporte real de workers (ADR-036 §2/§3), el `PdfPasswordRequiredError` que lanza el motor dentro del Worker llega al host como `DeserializedEngineError` — `postMessage` no transporta prototipos y `EngineError.deserialize()` no reconstruye la subclase (`Contracts.md` §4). El `instanceof PdfPasswordRequiredError` de `handleExtractionFailure` daba `false` y el caso 3 caía a `failPipeline`: el usuario veía el banner genérico de pipeline fallido en vez del `PasswordDialog` (bug reproducible, PR17/Escenario 3). El mismo `instanceof` en el `isRetryable` propio del despacho de `pdf-parse` hacía que el pool además **reintentara** el PDF protegido. Se especifica: la discriminación es por `err.code === EngineErrorCode.PDF_PASSWORD_REQUIRED` (type-guard `isEngineErrorCode` en `src/errors.ts`), y el override de `isRetryable` **se elimina** porque `PdfPasswordRequiredError.retryable` pasa a `false` (ADR-049 §4, cierra el pendiente de ADR-035 §3). Sin cambio de contrato público ni de eventos.
 
@@ -223,7 +225,7 @@ El Orchestrator **no define códigos de error nuevos**: propaga `SerializedEngin
 
 1. **PDF sin páginas textless**: salta la etapa OCR; `Extracting → Detecting` directo.
 2. **Todas las páginas textless**: `sourceKind = "scanned"`; OCR de todas antes de detección.
-3. **`PDF_PASSWORD_REQUIRED`**: stage queda en `Extracting`; la UI llama `retryWithPassword`; el pipeline reintenta desde la etapa 1. El fallo de extracción se reconoce **por `code`** (`isEngineErrorCode(err, EngineErrorCode.PDF_PASSWORD_REQUIRED)`), nunca por `instanceof PdfPasswordRequiredError`: con transporte real el error llega deserializado y el `instanceof` da `false`, con lo que el caso caía a `PIPELINE_FAILED` (v1.5.2, ADR-049). El despacho de `pdf-parse` **no** lleva `isRetryable` propio: el predicado por defecto del pool alcanza, porque `PdfPasswordRequiredError.retryable === false` (ADR-049 §4) y el flag sí sobrevive al boundary.
+3. **`PDF_PASSWORD_REQUIRED`**: stage queda en `Extracting`; la UI llama `retryWithPassword`; el pipeline reintenta desde la etapa 1. El fallo de extracción se reconoce **por `code`** (`isEngineErrorCode(err, EngineErrorCode.PDF_PASSWORD_REQUIRED)`), nunca por `instanceof PdfPasswordRequiredError`: con transporte real el error llega deserializado y el `instanceof` da `false`, con lo que el caso caía a `PIPELINE_FAILED` (v1.5.2, ADR-049). El despacho de `pdf-parse` **no** lleva `isRetryable` propio: el predicado por defecto del pool alcanza, porque `PdfPasswordRequiredError.retryable === false` (ADR-049 §4) y el flag sí sobrevive al boundary. `retryWithPassword` **reescribe `retainedInputs`** con el input que incluye la contraseña (v1.5.3, ADR-050 §4): todo lo que corre después lee de ahí — `ensureRenderDocumentLoaded` la pasa a `RenderEngine.loadDocument`, sin lo cual el documento protegido se abre en `PdfEngine` pero no en Render, y el pipeline muere igual con el banner genérico.
 4. **`PDF_INVALID`**: `PIPELINE_FAILED` inmediato; recursos de la importación liberados.
 5. **OCR falla en una página tras reintentos**: esa página queda sin texto; la detección la salta; el pipeline continúa con warning (no `PIPELINE_FAILED`).
 6. **NER desactivado en settings**: la etapa 5 se salta; tras `REGEX_FINISHED` el Orchestrator invoca `grouping.finishSession(documentId)` y Grouping emite `GROUPING_FINISHED` con solo lo de Regex (ADR-034 §2).
@@ -266,6 +268,9 @@ El Orchestrator **no define códigos de error nuevos**: propaga `SerializedEngin
 | `password retry re-runs extraction` | `edge.test.ts` | edge | caso 3 |
 | `deserialized PDF_PASSWORD_REQUIRED keeps stage at Extracting` | `edge.test.ts` | edge | caso 3 (ADR-049; el mock **debe** rechazar con `EngineError.deserialize(new PdfPasswordRequiredError(id).serialize())` — con la clase concreta el test pasa igual con el bug vivo) |
 | `deserialized PDF_PASSWORD_REQUIRED is not retried by the pool` | `edge.test.ts` | edge | caso 3 (ADR-049 §4; una sola invocación del despacho, sin backoff) |
+| `retryWithPassword persists the password in retainedInputs` | `edge.test.ts` | edge | caso 3 (ADR-050 §4) |
+| `render loadDocument receives the password after a successful retry` | `edge.test.ts` | edge | caso 3 (ADR-050 §4; spy sobre `render.loadDocument`, tercer argumento) |
+| `closeDocument leaves no password behind` | `unit.test.ts` | unit | ADR-050 §2 (`08_Security_Model.md` §6.2) |
 | `PDF_INVALID emits PIPELINE_FAILED and frees resources` | `edge.test.ts` | edge | caso 4 |
 | `failed OCR page skipped with warning, pipeline continues` | `edge.test.ts` | edge | caso 5 |
 | `NER disabled skips stage 5 and finishes grouping after REGEX_FINISHED` | `edge.test.ts` | edge | caso 6 (ADR-034 §2) |
@@ -327,6 +332,7 @@ Los tests de contract/unit/edge mockean los motores (interfaces de `Contracts.md
 - [ ] 17. Verificar que solo este paquete importa motores (ESLint lo permite únicamente en `packages/anonymization-core/src/`).
 - [ ] 18. Verificar `no-network-from-core`.
 - [ ] 19. (ADR-049, PR 17.2 — depende del PR 17.1 de `pdf-engine`) `isEngineErrorCode` en `src/errors.ts`; `handleExtractionFailure` discrimina por `code` (§13 caso 3); retiro del `isRetryable` propio del despacho de `pdf-parse` y del import huérfano de `PdfPasswordRequiredError`; los dos tests de §14 con el error **deserializado**; des-`fixme` de `tests/e2e/scenario-3-protected-pdf.spec.ts`. Grep de control: ningún `instanceof` de subclase concreta de `EngineError` —salvo `CancelledError`, exento por el frame `CANCELLED` del transporte— en `packages/anonymization-core/src/`.
+- [ ] 20. (ADR-050, PR 17.5 — depende del PR 17.4 de `render-engine`) `retryWithPassword` reescribe `retainedInputs` con el input que incluye el password; `ensureRenderDocumentLoaded` lo pasa como tercer argumento de `loadDocument`. Los tres tests de §14 (persistencia, propagación, limpieza en `closeDocument`) y el cierre del Escenario 3 E2E **con preview visible**.
 
 ---
 

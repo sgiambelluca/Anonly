@@ -20,7 +20,8 @@ apps/react-client/src/components/
 │   ├── ExportButton.tsx
 │   ├── SettingsButton.tsx    // ADR-036 §7
 │   ├── SettingsDialog.tsx    // ADR-036 §7
-│   └── PasswordDialog.tsx    // ADR-036 §7
+│   ├── PasswordDialog.tsx    // ADR-036 §7
+│   └── CloseDocumentButton.tsx  // ADR-051
 ├── entities/
 │   ├── EntitiesPanel.tsx
 │   ├── EntityTypeGroup.tsx
@@ -70,9 +71,10 @@ apps/react-client/src/components/
 - **Estados**:
   - `stage === Idle`: solo botón "Importar PDF".
   - `stage ∈ {Importing, Extracting, OCRing, Detecting, Grouping}`: `PipelineStatus` + `CancelButton`.
-  - `stage ∈ {Ready, Done}`: `PipelineStatus` + `ExportButton` (+ `CancelButton` si hay jobs remanentes). (`Done` no tenía fila — gap cerrado al resolver el bug #7 del Escenario 1 E2E: tras un export el documento sigue abierto y re-exportable.)
+  - `stage ∈ {Ready, Done}`: `PipelineStatus` + `ExportButton` + `CloseDocumentButton` (+ `CancelButton` si hay jobs remanentes). (`Done` no tenía fila — gap cerrado al resolver el bug #7 del Escenario 1 E2E: tras un export el documento sigue abierto y re-exportable. `CloseDocumentButton` agregado por ADR-051.)
   - `stage === Rendering/Exporting`: `PipelineStatus` + `CancelButton`.
-  - `stage === Failed`: banner de error + "Reintentar" o "Cerrar".
+  - `stage === Failed`: banner de error + "Reintentar" o "Cerrar" (el "Cerrar" del banner, sin confirmación) + `CloseDocumentButton`.
+  - `stage === Cancelled`: `PipelineStatus` + `CloseDocumentButton`.
 - **Acciones**: ninguna directa; delega en hijos.
 
 ### 2.2 `ImportButton`
@@ -117,6 +119,16 @@ apps/react-client/src/components/
 - **Acción**: submit → `actions.retryWithPassword(password)` (`orchestrator.retryWithPassword`; **nunca** `engines.pdf.process` — Orchestrator.md §6). Si el evento vuelve a llegar, muestra "Contraseña incorrecta" y re-pide.
 - **Cancelar**: cierra el diálogo y ofrece cerrar el documento (`actions.closeDocument`).
 - **Seguridad**: el input **nunca** se loguea ni persiste (`08_Security_Model.md` §7); `type="password"`, sin autocompletado.
+
+### 2.8 `CloseDocumentButton` (ADR-051)
+
+- **Visible**: hay documento activo y `stage ∈ {Ready, Done, Failed, Cancelled}` — o sea, con el pipeline detenido. Durante una corrida el control es `CancelButton` (§2.4), no este: cerrar a mitad de pipeline es "cancelar + liberar" (`Orchestrator.md` §13 caso 11) y dos botones para lo mismo solo multiplican caminos.
+- **Acción**: abre `ConfirmDialog` ("¿Cerrar el documento? Se perderán las ediciones y reglas de esta sesión.") → `actions.closeDocument()`.
+- **Vida del diálogo**: aplica la regla 9 de §13 (`if (!visible && !open) return null`) — un `PIPELINE_STAGE_CHANGED` por debajo no puede desmontar el `ConfirmDialog` abierto.
+- **Atajo**: ninguno en MVP (`Cmd/Ctrl+W` lo captura el navegador).
+- **ARIA**: `aria-label="Cerrar documento"`.
+- **Por qué existe** (ADR-051): sin este control, un documento que llega a `Ready` solo se puede cerrar recargando la pestaña, y como `validateImportInput` exige cerrar antes de importar otro (`Orchestrator.md` §13 caso 12), tampoco se podía abrir un segundo PDF. Bloqueaba además el Escenario 7 E2E y el gate `test:leak` de Hito 11.
+- **No confundir con** el "Cerrar documento" del banner de error de `PipelineStatus` (§2.3): ese cierra **sin** confirmación, porque en `Failed` no hay ediciones que perder. Los dos conviven a propósito.
 
 ---
 
@@ -405,6 +417,7 @@ Modo oscuro: en v1.0. MVP es solo claro.
 | `PasswordDialog` | `document` | `actions.retryWithPassword` → `orchestrator.retryWithPassword` | (escucha `PDF_PASSWORD_REQUIRED`, canal `pdf`) |
 | `SettingsDialog` | `settings`, `document` | `settings.persist` (+ `actions.reanalyze` si `nerEnabled`/`ocrLanguages` cambian con documento abierto, `React_Client.md` §3.7, ADR-038 §7) | `orchestrator.reanalyze` (no es un evento del bus) |
 | `CancelButton` | `pipeline.stage` | `actions.cancel` | `CANCEL_REQUESTED` |
+| `CloseDocumentButton` (ADR-051) | `pipeline.stage`, `document` | `actions.closeDocument` (vía `ConfirmDialog`) → `orchestrator.closeDocument` | `DOCUMENT_CLOSED` |
 | `ExportButton` | `pipeline.stage`, `document` | `actions.requestExport` (via dialog) | `EXPORT_REQUESTED` |
 | `EntityGroupItem` (checkbox) | `entities.groupsByType` | `actions.updateGroup` | `GROUP_UPDATE_REQUESTED` |
 | `ReplacementModeSelect` | `entities.groupsByType` | `actions.updateGroup` | `GROUP_UPDATE_REQUESTED` |

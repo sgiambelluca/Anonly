@@ -566,6 +566,10 @@ Payloads del transporte real (Hito 10, ADR-036 §4) que **no** agregan `WorkerJo
 export interface LoadDocumentPayload {
   readonly documentId: string;
   readonly buffer: ArrayBuffer;
+  // ADR-050: password de un PDF protegido. El kernel lo usa en getDocument y
+  // NO lo retiene; el host sí, para re-primear workers (ADR-043 §5).
+  // Nunca en logs ni eventos (08_Security_Model.md §6).
+  readonly password?: string;
 }
 
 // Control broadcast simétrico a load-document (ADR-043 §4): libera el

@@ -240,6 +240,9 @@ export const actions = {
     getCore().bus.emit(EventChannel.Pipeline, EngineEvents.CANCEL_REQUESTED, { documentId });
   },
 
+  // Callers (ADR-051): CloseDocumentButton del Toolbar (con ConfirmDialog —
+  // Components.md §2.8), el "Cerrar documento" del banner de Failed
+  // (PipelineStatus, sin confirmación) y el cancelar de PasswordDialog.
   closeDocument(): void {
     const documentId = stores.document.getState().id;
     if (!documentId) return;

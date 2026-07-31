@@ -199,6 +199,11 @@ Orden canónico de PRs (ADR-038 §8; los PRs 2-4 no dependen del scaffold y pued
 | 17 | E2E completa | `tests/e2e/` |
 | 17.1 | `PdfPasswordRequiredError.retryable = false` (ADR-049 §4) | `pdf-engine` |
 | 17.2 | Discriminación de errores por `code` en el Orchestrator + des-`fixme` del Escenario 3 (ADR-049 §5–§7) | `packages/anonymization-core/src` |
+| 17.3 | Fix de race en `initCore()` (sin ADR) | `apps/react-client` |
+| 17.4 | `loadDocument(documentId, buffer, password?)` (ADR-050 §1–§3) | `render-engine` (+ `shared`) |
+| 17.5 | `retryWithPassword` persiste y propaga el password; cierre del Escenario 3 con preview (ADR-050 §4) | `packages/anonymization-core/src` |
+| 17.6 | Rutas de tesseract: archivo en `workerPath` + absolutización contra `self.location.origin` (erratas `OCR_Engine.md` v1.2.1/v1.2.2, ADR-018 §2; sin ADR) | `ocr-engine` |
+| 17.7 | `CloseDocumentButton` en el Toolbar + cierre del Escenario 7 (ADR-051) | `apps/react-client` |
 
 ### Hito 11 — Hardening
 - Performance gates (todas las métricas de `00_Project_Vision.md` §7).
