@@ -26,6 +26,7 @@ import { NerModelMissingError } from "../ner.errors.js";
 import {
   asPipelineMock,
   createEngineContext,
+  createResolvedNerPool,
   makeNerPageInput,
   mockTokenClassificationPipeline,
   nerToken,
@@ -357,6 +358,51 @@ describe("NerEngine — edge case tests", () => {
 
       await expect(engine.processPages(inputs, abortedCtx)).rejects.toThrow(CancelledError);
       expect(classify).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // Sobre del dispatch, obligatorio (ADR-055 §5, NER_Engine.md §14): un
+  // `NerJobPool.dispatch()` que resuelve una forma no reconocida (ni el sobre
+  // remoto `{ spans }` ni el array pelado in-process) tiene que lanzar
+  // `InvalidInputError` en vez de devolver un default en silencio — es
+  // exactamente el modo de falla que dejó a NER sin detectar ninguna entidad
+  // en producción durante semanas (nota v1.2.1, NER_Engine.md).
+  describe("Sobre del dispatch: forma no reconocida (ADR-055 §5)", () => {
+    it("throws on an unrecognized dispatch result", async () => {
+      const garbageValues: ReadonlyArray<unknown> = [{}, null, "not-a-recognized-shape"];
+
+      for (const garbage of garbageValues) {
+        const pool = createResolvedNerPool(garbage);
+        const pooledEngine = new NerEngine(pool);
+        await pooledEngine.init(ctx);
+        const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+        const inputs = [makeNerPageInput("doc-garbage-dispatch", 0, ["Juan"])];
+
+        // processPages() — no processPage() — es el path real de producción
+        // (orchestrator.ts nunca llama processPage() directo, ADR-055 §5):
+        // el bug original vivía específicamente en su warn+continue
+        // (ner.engine.ts, "NER de la página ... falló; se descartan..."),
+        // que convertía un TypeError en NER_FINISHED con occurrenceCount: 0
+        // sin dejar rastro salvo un logger.warn con el logger nulo de
+        // producción. El error tiene que propagarse hacia afuera de
+        // processPages(), no quedar atrapado ahí.
+        await expect(pooledEngine.processPages(inputs, ctx)).rejects.toBeInstanceOf(
+          InvalidInputError,
+        );
+
+        // "no se traga silenciosamente aguas arriba" (ADR-055 §5): ni la
+        // página ni el documento completo se reportan como terminados — a
+        // diferencia del bug original, en el que NER_FINISHED con
+        // occurrenceCount: 0 pasaba sin que nada lo delatara.
+        expect(
+          busEmitSpy.mock.calls.some(([, event]) => event === EngineEvents.NER_PAGE_FINISHED),
+        ).toBe(false);
+        expect(busEmitSpy.mock.calls.some(([, event]) => event === EngineEvents.NER_FINISHED)).toBe(
+          false,
+        );
+
+        await pooledEngine.dispose();
+      }
     });
   });
 });

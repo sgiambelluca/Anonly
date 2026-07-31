@@ -283,3 +283,22 @@ export function createTrackingNerPool(): TrackingNerPool {
     },
   };
 }
+
+/**
+ * Pool estructural que **ignora `params.run()`** y resuelve directo con
+ * `resolvedValue` (ADR-055 §5 / Code_Standards.md §7 "Test obligatorio por
+ * motor"): a diferencia de `createTrackingNerPool` (arriba) y de todos los
+ * fakes ad-hoc preexistentes de este paquete — que delegan en `run()`, o sea
+ * el camino in-process, y por lo tanto **nunca cruzan el sobre**
+ * `COMPLETED.result` — este es el único fake que reproduce lo que un
+ * `NerJobPool` real resolvería tras un `postMessage`. Es la pieza que faltaba
+ * y por la que el bug de la nota v1.2.1 (`NER_Engine.md`) vivió semanas sin
+ * que ningún test lo detectara.
+ */
+export function createResolvedNerPool(resolvedValue: unknown): {
+  readonly dispatch: (params: NerPoolDispatchParams<unknown>) => Promise<unknown>;
+} {
+  return {
+    dispatch: (): Promise<unknown> => Promise.resolve(resolvedValue),
+  };
+}

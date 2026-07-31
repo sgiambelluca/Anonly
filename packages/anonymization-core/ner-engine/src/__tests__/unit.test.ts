@@ -7,7 +7,9 @@ import {
   type EngineContext,
   type EntityFound,
   type NerFinished,
+  type NerKernelSpan,
   type NerModelReady,
+  type NerPageFinished,
 } from "@anonly/shared";
 import { pipeline } from "@huggingface/transformers";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -28,6 +30,7 @@ import {
   asPipelineMock,
   createEngineContext,
   createMockConfig,
+  createResolvedNerPool,
   makeNerPageInput,
   mockTokenClassificationPipeline,
   nerToken,
@@ -544,5 +547,127 @@ describe("NerEngine — unit tests", () => {
       busEmitSpy.mock.calls.some(([, event]) => event === EngineEvents.NER_PAGE_FINISHED),
     ).toBe(false);
     await missingEngine.dispose();
+  });
+
+  // ─── ADR-055 §5 — tests de sobre, obligatorios (NER_Engine.md §14) ───
+  //
+  // A diferencia de `createTrackingNerPool`/los pools ad-hoc de arriba (que
+  // delegan en `params.run()`, o sea el camino in-process), `createResolvedNerPool`
+  // IGNORA `run()` y resuelve directo con el valor dado — es el único fake de
+  // este paquete que cruza de verdad el sobre `COMPLETED.result` (ADR-055
+  // Contexto §2). Sin él, ningún test ejercita `decodeKernelSpans`.
+
+  describe("Sobre del dispatch (ADR-055)", () => {
+    const span: NerKernelSpan = {
+      entityType: EntityType.Person,
+      value: "Juan",
+      normalizedValue: "juan",
+      confidence: 0.9,
+      startIndex: 0,
+      endIndexExclusive: 4,
+    };
+
+    it("decodes the remote envelope { spans } from NerWorker", async () => {
+      const pool = createResolvedNerPool({ spans: [span] });
+      const pooledEngine = new NerEngine(pool);
+      await pooledEngine.init(ctx);
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      const input = makeNerPageInput("doc-envelope-decode", 0, ["Juan"]);
+
+      const output = await pooledEngine.processPage(input, ctx);
+
+      expect(output.occurrences).toHaveLength(1);
+      const entityFoundCalls = busEmitSpy.mock.calls.filter(
+        ([, event]) => event === EngineEvents.ENTITY_FOUND,
+      );
+      expect(entityFoundCalls).toHaveLength(1);
+      const pageFinishedCall = busEmitSpy.mock.calls.find(
+        ([, event]) => event === EngineEvents.NER_PAGE_FINISHED,
+      );
+      expect(pageFinishedCall).toBeDefined();
+      expect((pageFinishedCall?.[2] as NerPageFinished).occurrenceCount).toBeGreaterThan(0);
+
+      await pooledEngine.dispose();
+    });
+
+    it("decodes the in-process bare array identically", async () => {
+      const envelopePool = createResolvedNerPool({ spans: [span] });
+      const envelopeEngine = new NerEngine(envelopePool);
+      await envelopeEngine.init(ctx);
+      const envelopeOutput = await envelopeEngine.processPage(
+        makeNerPageInput("doc-envelope-parity", 0, ["Juan"]),
+        ctx,
+      );
+      await envelopeEngine.dispose();
+
+      const bareArrayCtx = createEngineContext();
+      const bareArrayPool = createResolvedNerPool([span]);
+      const bareArrayEngine = new NerEngine(bareArrayPool);
+      await bareArrayEngine.init(bareArrayCtx);
+      const bareArrayOutput = await bareArrayEngine.processPage(
+        makeNerPageInput("doc-envelope-parity", 0, ["Juan"]),
+        bareArrayCtx,
+      );
+      await bareArrayEngine.dispose();
+
+      // `id` es no determinista (crypto.randomUUID() por ocurrencia);
+      // `durationMs` depende de Date.now(). El resto tiene que ser idéntico
+      // — la paridad remoto/in-process que exige ADR-055 §2.
+      const stripNonDeterministic = (occ: (typeof envelopeOutput.occurrences)[number]) => {
+        const { id: _id, ...rest } = occ;
+        return rest;
+      };
+      expect(bareArrayOutput.occurrences).toHaveLength(1);
+      expect(bareArrayOutput.occurrences.map(stripNonDeterministic)).toEqual(
+        envelopeOutput.occurrences.map(stripNonDeterministic),
+      );
+    });
+
+    // Test de regresión: una revisión encontró que `processPages` había
+    // quedado abortando el batch entero ante CUALQUIER `InvalidInputError`,
+    // no solo los de `decodeKernelSpans` — incluyendo el `InvalidInputError`
+    // genérico que los guards tempranos de `processPage` (`input ==
+    // null`/`pageIndex < 0`, spec §9) ya lanzaban antes de ADR-055. Antes de
+    // esa regresión, ese caso caía en el warn+continue de `processPages`
+    // (fallo tolerable de esa página nada más); nada lo cubría vía
+    // `processPages` (solo existían tests de esos guards contra
+    // `processPage` directo), así que la regresión no rompió ningún test
+    // rojo. Este test cierra ese hueco.
+    it(
+      "processPages treats a per-page InvalidInputError (invalid pageIndex) as a " +
+        "tolerable page failure, unlike a genuine envelope decode failure",
+      async () => {
+        asPipelineMock(pipeline).mockResolvedValue(
+          mockTokenClassificationPipeline(() =>
+            Promise.resolve([nerToken("B-PER", "Ana", 0.9, 0)]),
+          ),
+        );
+        await engine.init(ctx);
+        const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+        const inputs = [
+          // pageIndex < 0: mismo guard temprano que "input == null"
+          // (ner.engine.ts, ANTES del loop de retry) — un InvalidInputError
+          // genérico, no un sobre roto (NerDispatchEnvelopeError). No tiene
+          // que abortar processPages entero.
+          makeNerPageInput("doc-invalid-page-tolerable", -1, ["Hola"]),
+          makeNerPageInput("doc-invalid-page-tolerable", 0, ["Ana"]),
+        ];
+
+        const outputs = await engine.processPages(inputs, ctx);
+
+        // La página -1 se descarta (fallo tolerable de ESA página); la
+        // página 0, válida, se sigue procesando — a diferencia de una falla
+        // de decodificación real ("throws on an unrecognized dispatch
+        // result", edge.test.ts), que sí debe abortar todo el batch.
+        expect(outputs).toHaveLength(1);
+        expect(outputs[0]?.pageIndex).toBe(0);
+
+        const finishedCall = busEmitSpy.mock.calls.find(
+          ([, event]) => event === EngineEvents.NER_FINISHED,
+        );
+        expect(finishedCall).toBeDefined();
+        expect((finishedCall?.[2] as NerFinished).occurrenceCount).toBe(1);
+      },
+    );
   });
 });
