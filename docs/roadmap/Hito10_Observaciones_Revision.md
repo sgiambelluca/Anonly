@@ -550,6 +550,22 @@ Con el control prendido, la sincronización **no** puede reimplementarse por ín
 
 ---
 
+## Gate `test` de CI — la suite unitaria dependía de assets no commiteados (detectado y corregido en el PR del Hito 10)
+
+Al abrir el PR del Hito 10, el job `test` (`pnpm test -- --coverage`) falló por primera vez: **904 tests pasaron y 2 suites no llegaron a cargar** — `apps/react-client/src/__tests__/core-adapter.test.ts` y `core-adapter-init-precedence.test.ts`, ambas con `Error: Denied ID ../assets/onnxruntime/ort-wasm-simd-threaded.asyncify.mjs?url`. Falla de colección, no de aserción.
+
+**Causa**: `core-adapter/index.ts` importa los dos assets de onnxruntime con `?url` (ADR-039 §3), y esos archivos viven en `apps/react-client/src/assets/onnxruntime/`, que está en `.gitignore` — los produce `pnpm assets:mirror`. En las máquinas de desarrollo existen (el mirror se corrió alguna vez), así que el gate pasaba local; en una checkout limpia de CI no existen y Vite rechaza el id al cargar cualquier suite que importe el `core-adapter`.
+
+Esto **estaba parcialmente anotado** más abajo, en la tarea de seguimiento sobre `assets:mirror` (ADR-048 §1), pero solo para el job `e2e` — cuyo paso de mirror + cache sí existe en `ci.yml` desde PR17, con un comentario que nombra exactamente este modo de falla. Lo que nadie había notado es que **el job `test` tiene la misma dependencia**. No es una regresión del Hito 10: es la primera vez que CI corre sobre esta rama.
+
+**Fix aplicado (no se copió el paso de mirror al job `test`)**: mirrorear para la suite unitaria significa bajar 219 MB —de los cuales 178 MB son el modelo NER que ninguna suite unitaria carga— para resolver dos imports, y ataría el gate más caliente del repo a una descarga de red. En su lugar, `vitest.config.ts` gana un plugin `anonly:ort-url-asset-stub` (`enforce: "pre"`) que intercepta esos dos ids antes que `vite:resolve` y los sirve como módulo virtual con una URL de juguete. Es todo lo que las suites necesitan: la única aserción sobre esos valores es `expect(receivedConfig?.ner?.wasmPaths).toBeDefined()` — les importa que la inyección de ADR-039 ocurra, no qué URL produjo el bundler (que en un build real es un nombre hasheado, no asertable).
+
+Alcance: solo `vitest.config.ts`, o sea solo `vitest`. El build de la app y el job `e2e` siguen usando los archivos reales, así que el camino de producción no queda sin cubrir.
+
+**Verificado localmente** moviendo `src/assets/onnxruntime/` fuera del árbol para reproducir la checkout limpia: las dos suites cargan y pasan. Con los assets presentes, `pnpm test -- --coverage` completo da 75/75 suites, 911/911 tests, thresholds de cobertura verdes.
+
+---
+
 ## Tareas de seguimiento con entrada formal en el tasklist de la sesión
 
 - ~~Diseñar el fix del supersede de render (leak de `pendingRenders` + clave sin `mode`) — bloquea que el PR9 (Export) se dé por completo.~~ **Resuelto 2026-07-19** — ver "Resolución" en la entrada "PR4" arriba.
@@ -563,7 +579,7 @@ Con el control prendido, la sincronización **no** puede reimplementarse por ín
 - ~~Alinear los docs de `ner-engine` al patrón host-side + kernel antes de arrancar PR15 (el spec v1.1.0 y `05` §7.3 describían el patrón pre-ADR-043/045, con el motor creando su pool y emitiendo `ENTITY_FOUND` desde el worker) — bloqueaba el arranque de PR15.~~ **Resuelto 2026-07-24 — ADR-046** (tercer espejo; incluye la decisión propia de NER: el ciclo de vida del modelo cruza por `PROGRESS`, no por eventos de dominio, y `worker-pool.ts` gana `DispatchParams.onProgress`). Ver la entrada "PR15" arriba. **PR15 desbloqueado.**
 - ~~Decisión del humano (ADR-048 §7 punto 1): Escenario 3 E2E (PDF protegido) — pdf-lib no encripta.~~ **Ratificado 2026-07-24**: `protected.pdf` se commitea, generado una vez con `qpdf`. Lo produce PR17.
 - ~~Decisión del humano (ADR-048 §7 punto 2): wiring `settings.store` → `EngineConfig`. Pregunta abierta desde PR10.~~ **Ratificado 2026-07-24**: se crea **PR16.5** (ver su entrada arriba). Pendiente de asignarse; desbloquea el Escenario 8.
-- **`pnpm assets:mirror` como prerequisito del gate E2E (ADR-048 §1)**: el job `test-e2e` de CI nunca lo corrió; la suite no puede pasar ahí. Lo aplica PR17 (paso + cache en `ci.yml`); los "gates E2E verdes" de PR10/PR13/PR14 fueron locales.
+- **`pnpm assets:mirror` como prerequisito del gate E2E (ADR-048 §1)**: el job `test-e2e` de CI nunca lo corrió; la suite no puede pasar ahí. Lo aplica PR17 (paso + cache en `ci.yml`); los "gates E2E verdes" de PR10/PR13/PR14 fueron locales. **Ampliación 2026-07-31**: el job `test` tenía la misma dependencia oculta (dos suites del `core-adapter` no cargaban en una checkout limpia) — resuelto sin mirror, con un stub de resolución en `vitest.config.ts`; ver la sección "Gate `test` de CI" arriba.
 - Idle-dispose de los pools construidos por el façade (render/ocr/ner/export): al salir de `WorkerPoolManager` perdieron el temporizador de 60 s de `05` §8. Los `Worker` reales se siguen creando perezosamente; lo que falta es la liberación por inactividad. Deuda común a los cuatro, candidata a un PR propio.
 - ~~**Implementar ADR-050** (password hasta `RenderEngine.loadDocument` — ver la entrada "Bugs destapados al cerrar el lote de PR17" §1): **PR 17.4** `render-engine` (+ `shared`) y después **PR 17.5** façade.~~ **Cerrado 2026-07-30** — PR17.4/17.5, revisor APPROVED. Escenario 3 E2E verde de punta a punta, incluido preview real.
 - ~~**PR 17.6 — rutas de tesseract** (`ocr-engine`, sin ADR).~~ **Cerrado 2026-07-30** — revisor APPROVED. Escenario 2 E2E verde con aserción de entidades reales.

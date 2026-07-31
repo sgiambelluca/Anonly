@@ -41,8 +41,61 @@ const rootDir = fileURLToPath(new URL(".", import.meta.url));
  *   previo): ninguna otra expone subpaths propios hoy.
  * - `exclude` explícitamente excluye node_modules para que los tests dentro de
  *   symlinks no se dupliquen.
+ * - `ortUrlAssetStub` (ver abajo) desacopla la suite unitaria de los assets
+ *   mirroreados de `assets.lock.json`.
  */
+
+/*
+ * Los dos assets de onnxruntime que `apps/react-client/src/core-adapter/index.ts`
+ * importa con `?url` (ADR-039 §3) NO se commitean: los produce `pnpm
+ * assets:mirror` en `apps/react-client/src/assets/onnxruntime/`, que está en
+ * `.gitignore`. En una checkout limpia esos archivos no existen, y Vite
+ * rechaza el id (`Denied ID ...?url`) al CARGAR las dos suites que importan
+ * el `core-adapter` — falla de colección, no de aserción: los tests ni
+ * llegan a correr.
+ *
+ * El job `e2e` de CI resuelve eso corriendo `assets:mirror` (necesita la app
+ * de verdad); el job `test` no puede: mirrorear 219 MB —de los cuales 178 MB
+ * son el modelo NER, que ninguna suite unitaria carga— para resolver dos
+ * imports es desproporcionado, y ataría el gate más caliente del repo a una
+ * descarga de red.
+ *
+ * Este plugin corta esa dependencia en la raíz: intercepta el id ANTES que
+ * `vite:resolve` (`enforce: "pre"`) y lo sirve como un módulo virtual cuyo
+ * default export es una URL de juguete. Es exactamente lo que las suites
+ * necesitan — la única aserción sobre estos valores es
+ * `expect(receivedConfig?.ner?.wasmPaths).toBeDefined()`
+ * (`core-adapter-init-precedence.test.ts:83`): les importa que la inyección
+ * de ADR-039 ocurra, no qué URL concreta produjo el bundler (que en un build
+ * real es un nombre hasheado, no asertable de todos modos).
+ *
+ * Alcance: solo este config, o sea solo `vitest`. El build de la app
+ * (`apps/react-client/vite.config.ts`) y el job `e2e` siguen usando los
+ * archivos reales, así que el camino de producción no queda sin cubrir.
+ *
+ * El `export default` del módulo generado no viola Code_Standards.md §3: es
+ * código emitido por el plugin, no fuente del repo, y un import `?url` es
+ * por definición un default import — no hay forma alternativa de expresarlo.
+ */
+const ORT_URL_ASSET_RE = /\/assets\/onnxruntime\/[^/]+\?url$/;
+const ORT_URL_STUB_PREFIX = "\0anonly-ort-url-stub:";
+
+const ortUrlAssetStub = {
+  name: "anonly:ort-url-asset-stub",
+  enforce: "pre" as const,
+  resolveId(id: string): string | null {
+    return ORT_URL_ASSET_RE.test(id) ? `${ORT_URL_STUB_PREFIX}${id}` : null;
+  },
+  load(id: string): string | null {
+    if (!id.startsWith(ORT_URL_STUB_PREFIX)) return null;
+    const source = id.slice(ORT_URL_STUB_PREFIX.length);
+    const fileName = source.slice(source.lastIndexOf("/") + 1).replace("?url", "");
+    return `export default ${JSON.stringify(`/__vitest_stub__/${fileName}`)};`;
+  },
+};
+
 export default defineConfig({
+  plugins: [ortUrlAssetStub],
   resolve: {
     alias: [
       {
