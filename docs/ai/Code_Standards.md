@@ -159,6 +159,15 @@ export class PdfPasswordRequiredError extends EngineError {
 - **Se discrimina por `code`** contra `EngineErrorCode`. `instanceof EngineError` **sí** es válido y necesario (distingue un error tipado del Core de un `Error` cualquiera): lo que no sobrevive es la subclase, no la jerarquía base.
 - Vale igual para el flag: la política de reintentos se decide sobre `err.retryable` del error serializado, nunca sobre el tipo (`05_Worker_Architecture.md` §5).
 
+### Decodificar resultados que cruzaron un Worker (ADR-055)
+
+Contracara de lo anterior, en el canal de **resultados** en vez del de errores.
+
+- **Prohibido consumir un `COMPLETED.result` (o un `PROGRESS.partial` que el motor interprete) sin verificar su forma en runtime.** El parámetro de tipo de un `dispatch<T>` es una afirmación que el compilador **no puede** verificar: del otro lado hay un `postMessage`. Un cast anotado con un comentario de frontera no alcanza.
+- **Mecanismo**: el puerto interno de despacho de cada motor devuelve `Promise<unknown>`, de modo que el compilador obliga a pasar por un guard. El puerto vive dentro del archivo del motor: no se toca `worker-pool.ts` (es transporte, y el transporte no conoce el contrato del payload de cada motor).
+- **Un decoder nunca devuelve un default en silencio.** Ante una forma que no reconoce, lanza (subclase de `EngineError`; `InvalidInputError` si no hay una específica). Devolver `[]`/`undefined`/un valor vacío es exactamente el modo de falla que motivó esta regla: `ner-engine` estuvo semanas sin detectar **ninguna** entidad en producción porque un `TypeError` terminaba tragado por un `logger.warn` con el logger nulo, y ningún test lo detectaba.
+- **Test obligatorio por motor**: un pool fake que **ignore `run()`** y resuelva exactamente lo que postea el `entry.ts` de ese motor. Los fakes que ejecutan `run()` prueban el camino in-process y **nunca cruzan el sobre** — que es justamente por donde entró el bug.
+
 ```ts
 // ✗ MAL: verdadero con pool in-process, falso con el Worker real.
 if (err instanceof PdfPasswordRequiredError) { … }

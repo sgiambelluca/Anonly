@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=performance | dependencias=05_Worker_Architecture.md,06_Pipeline.md,03_Data_Model.md | audiencia=IA+humanos | fase=1 -->
+<!-- CONTEXT: scope=performance | dependencias=05_Worker_Architecture.md,06_Pipeline.md,03_Data_Model.md,adr/ADR-054-Scroll-Independiente-Por-Panel.md | audiencia=IA+humanos | fase=1 (§3.1 actualizado en el cierre de fase 10: scroll independiente por panel, ADR-054) -->
 
 # Anonly — Estrategia de Performance (TAD bloque 10)
 
@@ -62,7 +62,8 @@ El visor de PDF virtualiza páginas: solo renderiza las visibles + 1 antes + 1 d
 
 ### 3.1 Lado a lado
 
-- Original y anonimizado son dos virtualizers sincronizados: scroll vertical compartido vía estado Zustand.
+- Original y anonimizado son dos virtualizers **independientes** (ADR-054 §1, reemplaza "sincronizados: scroll vertical compartido vía estado Zustand"): cada uno tiene su propio contenedor con scroll, su propio rango visible y su propia página actual en el store. Sincronizarlos es opt-in del usuario (`settings.scrollSyncEnabled`) y, cuando está activo, ocurre **fuera de React** por asignación directa de `scrollTop` — no por estado compartido, que re-renderizaría los dos paneles en cada cuadro de scroll (ADR-054 §3).
+- Consecuencia de rendimiento del scroll independiente: con los dos paneles en regiones distintas, el rango montado total puede ser el doble que antes (dos ventanas de páginas en vez de una compartida). Es el costo esperado de la funcionalidad; el cache LRU por escala de `render-engine` y el supersede por página (ADR-037 §3/§4) lo absorben igual que absorbían los dos pedidos idénticos del modelo anterior.
 - El render de "original" es más barato (sin reemplazos), se prioriza para first paint.
 - El de "anonimizado" se renderiza en segundo plano con prioridad menor.
 

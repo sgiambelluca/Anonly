@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=ui-contract | dependencias=01_Technical_Architecture_Document.md,03_Data_Model.md,04_Event_System.md,ADR-005-State-Management.md,adr/ADR-034-Auditoria-Pre-Hito9-Orchestrator.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md | audiencia=IA-implementador-ui | fase=4 (reconciliado en fase 10 por ADR-036: acciones completas §2.3, workers §2.4, settings §3.7, zoom §7, errores §8; §2.3/§3.7/§7 reescritos por ADR-037 —zoom con re-render real— y ADR-038 —reanalyze preservando ediciones, supersede el flujo "recrear el core") -->
+<!-- CONTEXT: scope=ui-contract | dependencias=01_Technical_Architecture_Document.md,03_Data_Model.md,04_Event_System.md,ADR-005-State-Management.md,adr/ADR-034-Auditoria-Pre-Hito9-Orchestrator.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-054-Scroll-Independiente-Por-Panel.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md | audiencia=IA-implementador-ui | fase=4 (reconciliado en fase 10 por ADR-036: acciones completas §2.3, workers §2.4, settings §3.7, zoom §7, errores §8; §2.3/§3.7/§7 reescritos por ADR-037 —zoom con re-render real— y ADR-038 —reanalyze preservando ediciones, supersede el flujo "recrear el core") -->
 
 # Anonly — React Client (UI Contract, TAD bloque 9)
 
@@ -341,19 +341,27 @@ interface PipelineSlice {
 ### 3.5 `viewer.store.ts`
 
 ```ts
+type ViewerKind = "original" | "anonymized";
+
 interface ViewerSlice {
-  readonly currentPageIndex: number;
-  readonly zoom: number;          // 0.5..3
-  readonly sideBySide: boolean;   // default true
+  // ADR-054 §1: por panel, no globales. Los dos PdfViewer scrollean independiente,
+  // así que cada uno tiene su propia página actual y su propio rango visible.
+  readonly currentPageIndex: Readonly<Record<ViewerKind, number>>;
+  readonly visibleRange: Readonly<Record<ViewerKind, { start: number; end: number }>>;
+  readonly zoom: number;          // 0.5..3 — sigue siendo global (los dos paneles comparten escala)
+  readonly sideBySide: boolean;   // default true — declarado, hoy sin setter ni consumidor (ambigüedad abierta; ADR-054 §7 decide NO reutilizarlo)
   readonly previewByPage: ReadonlyMap<number, { original?: string; anonymized?: string }>;
-  readonly visibleRange: { start: number; end: number };
-  setPage(index: number): void;
+  setPage(kind: ViewerKind, index: number): void;
   setZoom(z: number): void;
-  setPreview(pageIndex: number, kind: "original" | "anonymized", blobUrl: string): void;
-  setVisibleRange(start: number, end: number): void;
+  setPreview(pageIndex: number, kind: ViewerKind, blobUrl: string): void;
+  setVisibleRange(kind: ViewerKind, start: number, end: number): void;
   reset(): void;
 }
 ```
+
+**`currentPageIndex` se deriva de la geometría del scroll** (la página que ocupa el centro del viewport), **no** del mínimo del conjunto que reporta el `IntersectionObserver` (ADR-054 §5). El observador se queda decidiendo únicamente qué páginas montar, que es lo único para lo que es confiable: ahí `min..max` sobre un conjunto que puede quedar transitoriamente no contiguo es inofensivo (monta una página de más), mientras que usarlo para la página actual colapsaba el rango a `start: 0` y mandaba los dos visores al principio.
+
+El flag de sincronización de scroll **no** vive acá: es una preferencia persistida, va en `settings.store` (§3.6).
 
 ### 3.6 `settings.store.ts`
 
@@ -364,10 +372,13 @@ interface SettingsSlice {
   readonly defaultReplacementMode: ReplacementMode;
   readonly nerEnabled: boolean;
   readonly ocrLanguages: ReadonlyArray<string>;
+  readonly scrollSyncEnabled: boolean;  // default false — ADR-054 §2
   persist(): void;   // guarda en localStorage (solo settings, nunca documentos)
   load(): void;
 }
 ```
+
+No todo lo de este slice alimenta `EngineConfig`: `language`, `defaultReplacementMode` y `scrollSyncEnabled` son preferencias de la app que `settingsToEngineConfig` no mapea (§3.7). `scrollSyncEnabled` vive acá —y no en `viewer.store`— porque es una preferencia de flujo de trabajo, no de documento: se recuerda entre sesiones, como el idioma (ADR-054 §2).
 
 ### 3.7 Mapeo settings → `EngineConfig` (ADR-036 §5, reescrito por ADR-038 §7)
 
@@ -387,7 +398,7 @@ interface SettingsSlice {
 - El override de `ner.wasmPaths` que `initCore` ya inyecta (ADR-039) **gana siempre**: los overrides del usuario se mergean por debajo, nunca lo sobreescriben.
 - Sin este wiring —el estado hasta PR16.5— `nerEnabled: false` persistido antes de la primera importación no tenía **ningún** efecto observable: `App.tsx` llamaba `initCore()` sin argumentos una sola vez por carga de pestaña. Era la causa del Escenario 8 E2E bloqueado desde PR10 (`07_Performance_Strategy.md` §11.3).
 
-**`nerEnabled` / `ocrLanguages` con documento abierto → `reanalyze`, no recrear el core** (ADR-038 §1, §7; reemplaza el flujo "recrear el core" de una versión previa de este doc, que descartaba las ediciones del usuario): el `SettingsDialog` muestra `ConfirmDialog` ("¿Reanalizar el documento con la nueva configuración? Tus ediciones se conservan.") → `actions.reanalyze({ ner: { enabled }, ocr: { languages } })` (patch con solo el/los campo/s que cambiaron) → `orchestrator.reanalyze(documentId, patch)`. Tras el `PIPELINE_READY` de la pasada, la UI re-emite `actions.requestRender(visibleRange)` para refrescar previews con los grupos nuevos. Sin documento abierto, estos dos settings solo afectan al próximo `createCore`.
+**`nerEnabled` / `ocrLanguages` con documento abierto → `reanalyze`, no recrear el core** (ADR-038 §1, §7; reemplaza el flujo "recrear el core" de una versión previa de este doc, que descartaba las ediciones del usuario): el `SettingsDialog` muestra `ConfirmDialog` ("¿Reanalizar el documento con la nueva configuración? Tus ediciones se conservan.") → `actions.reanalyze({ ner: { enabled }, ocr: { languages } })` (patch con solo el/los campo/s que cambiaron) → `orchestrator.reanalyze(documentId, patch)`. Tras el `PIPELINE_READY` de la pasada, la UI re-emite `actions.requestRender(...)` para refrescar previews con los grupos nuevos, sobre la **unión** de los rangos visibles de los dos paneles (desde ADR-054 §1 el rango es por panel, y con scroll independiente eso son dos regiones distintas). Sin documento abierto, estos dos settings solo afectan al próximo `createCore`.
 
 Sin documento abierto, `nerEnabled`/`ocrLanguages` se persisten y aplican al **próximo `createCore`** — que desde PR16.5 es un momento real (recarga de la pestaña), no una promesa vacía.
 
@@ -471,7 +482,12 @@ Detalle en `ui/Components.md`.
 - El adapter emite `RENDER_REQUESTED` cuando cambia `visibleRange` o `zoom` (ADR-037, supersede ADR-036 §6). Al cambiar `zoom`, `ZoomControls` escala **por CSS/canvas el bitmap ya renderizado** de inmediato (feedback a 60 fps durante el gesto) y emite `actions.requestRender(visibleRange, "preview", previewScale × zoom)` tras `ZOOM_RERENDER_DEBOUNCE_MS = 150 ms` sin nuevos ticks; el `PREVIEW_UPDATED` resultante reemplaza el bitmap CSS por el nítido re-renderizado. Un cambio de escala en cola/en vuelo descarta/aborta el anterior de la misma página (supersede, ADR-037 §4).
 - Los canvas reutilizables viven en el `PageVirtualizer` (componente), no en el store.
 - La suscripción a `PREVIEW_UPDATED` actualiza `viewer.previewByPage` con el `blobUrl`. El componente lo pinta en el canvas reciclado.
-- Lado a lado sincronizado: scroll vertical compartido vía `viewer.currentPageIndex`.
+- **Lado a lado con scroll independiente por panel (ADR-054, reemplaza "scroll vertical compartido vía `viewer.currentPageIndex`")**: cada `PdfViewer` scrollea por su cuenta, monta su propio rango y pide sus propios renders. Es lo que permite revisar la página 3 del anonimizado contra la 1 del original.
+  - **Control opcional "sincronizar scroll"**, en la barra del visor junto a `ZoomControls` (no en el `Toolbar`, que son acciones sobre el documento, ni en el `SettingsDialog`, que es configuración de procesamiento). Default **apagado**; persistido en `localStorage` vía `settings.store` (§3.6).
+  - Visible solo en anchos `≥ lg`. Por debajo, `SideBySideViewer` muestra pestañas y hay un solo panel visible: el control se **oculta**, pero la preferencia **no se toca** — al volver a ancho `≥ lg` reaparece con el valor que tenía y los paneles se realinean. Ocultarlo no es apagarlo.
+  - Con el control prendido, la sincronización es **a nivel de píxel** (`scrollTop` contra `scrollTop`, geometría idéntica entre paneles), **nunca** por índice de página: alinear al seguidor al borde de una página mientras el líder está en un offset arbitrario es lo que producía el ping-pong. La convergencia sale de la **idempotencia** —al asignar el valor exacto, el evento de scroll del seguidor calcula un valor ya igual y no propaga nada—, así que **está prohibido cualquier diseño con bandera + temporizador** para ignorar los eventos del seguidor: no hay un valor correcto para ese timeout y reintroduce un bug dependiente de timing (ADR-054 §3). Los dos casos límite (seguidor que no puede llegar por recorte del navegador; panel oculto de alto cero) se resuelven por comparación de valor, no por ventana de tiempo (ADR-054 §4).
+  - El estado de scroll compartido vive **fuera de React** (módulo imperativo): el evento `scroll` dispara a la frecuencia del monitor y escribirlo en el store re-renderizaría los dos paneles en cada cuadro. Al store solo llega la página actual, que cambia una vez por página.
+  - Los contenedores con scroll **no** pueden llevar `scroll-behavior: smooth`: animaría la asignación de `scrollTop` y rompería la exactitud de la que depende la idempotencia.
 
 ---
 

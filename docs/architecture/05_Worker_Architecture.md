@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=workers | dependencias=03_Data_Model.md,04_Event_System.md,06_Pipeline.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-042-WorkerOutbound-Completed-Result-Unknown.md,adr/ADR-043-RenderEngine-Reparto-Host-Worker-Kernel.md,adr/ADR-045-OcrEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-046-NerEngine-Pool-Propia-Kernel-Puro.md | audiencia=IA+humanos | fase=1 (actualizado en fase 9/10: entrega por fases ADR-035; transporte, EVENT, payloads y ExportWorker por ADR-036; COMPLETED.result unknown por ADR-042; RenderWorker kernel, unload-document y re-priming por ADR-043; OcrWorker kernel por ADR-045; NerWorker kernel y enrutamiento de PROGRESS por ADR-046) -->
+<!-- CONTEXT: scope=workers | dependencias=03_Data_Model.md,04_Event_System.md,06_Pipeline.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-042-WorkerOutbound-Completed-Result-Unknown.md,adr/ADR-043-RenderEngine-Reparto-Host-Worker-Kernel.md,adr/ADR-045-OcrEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-046-NerEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-053-Pdfjs-Dentro-De-Un-Worker-Fuentes-Y-Cmaps.md,adr/ADR-055-Decodificacion-Del-Resultado-Que-Cruza-Un-Worker.md | audiencia=IA+humanos | fase=1 (actualizado en fase 9/10: entrega por fases ADR-035; transporte, EVENT, payloads y ExportWorker por ADR-036; COMPLETED.result unknown por ADR-042; RenderWorker kernel, unload-document y re-priming por ADR-043; OcrWorker kernel por ADR-045; NerWorker kernel y enrutamiento de PROGRESS por ADR-046; invariante de decodificación en §2.2 por ADR-055 y regla transversal de pdf.js-en-Worker en §7 por ADR-053, ambos del cierre de fase 10) -->
 
 # Anonly — Arquitectura de Workers (TAD bloque 8)
 
@@ -64,7 +64,13 @@ export type WorkerInbound =
 
 ### 2.2 Mensaje Worker → Host
 
-`COMPLETED.result` queda tipado `unknown` a este nivel de transporte (ADR-042) — misma regla que `INIT.config`/`RUN.payload` (§2.1, ADR-019) y que `EVENT.payload` (ADR-036 §3): el tipo concreto se afina al cruzar la frontera, acá en el **host-bridge** de cada motor, que lo estrecha a su `*EngineOutput` esperado con comentario de frontera (los `*EngineOutput` son `interface`s, no asignables a un index signature — microsoft/TypeScript#15300). `PROGRESS.partial` y `LOG.meta` **conservan** `Serializable`: transportan literales ad-hoc (que sí chequean contra el index signature), y la garantía estática de clonabilidad ahí es gratis.
+`COMPLETED.result` queda tipado `unknown` a este nivel de transporte (ADR-042) — misma regla que `INIT.config`/`RUN.payload` (§2.1, ADR-019) y que `EVENT.payload` (ADR-036 §3): el tipo concreto se afina al cruzar la frontera, acá en el **host-bridge** de cada motor, que lo estrecha a su `*EngineOutput` esperado (los `*EngineOutput` son `interface`s, no asignables a un index signature — microsoft/TypeScript#15300). `PROGRESS.partial` y `LOG.meta` **conservan** `Serializable`: transportan literales ad-hoc (que sí chequean contra el index signature), y la garantía estática de clonabilidad ahí es gratis.
+
+**Invariante de decodificación (ADR-055 §1)**: "afinar" significa **verificar la forma en runtime**, no afirmarla con un tipo. Ningún valor que haya cruzado la frontera de un Worker se consume sin decodificar — ni el `result` de `COMPLETED`, ni el `partial` de un `PROGRESS` que un motor interprete. Un cast anotado con un comentario de frontera **no** alcanza: el parámetro de tipo de `dispatch<T>` es una afirmación que el compilador no puede verificar, porque del otro lado hay un `postMessage`. Fue exactamente el modo de falla de ADR-055 (el `NerWorker` posteaba `{ spans }` y el host iteraba el resultado como si fuera un array, con el `TypeError` tragado por un logger nulo).
+
+El mecanismo que lo impone: **cada motor angosta su propio puerto interno de despacho a `Promise<unknown>`** (`NerJobPool`, `OcrJobPool`, `RenderJobPool` y el equivalente de Export — todos viven dentro del archivo de su motor). A partir de ahí el compilador obliga a pasar por un guard, porque `unknown` no se puede iterar, indexar ni desestructurar. `worker-pool.ts` **no** cambia: es transporte, y el transporte no conoce el contrato del payload de cada motor. Un decoder que ante una forma inesperada devuelva `[]`, `undefined` o cualquier default **está prohibido** (ADR-055 §3): lanza un `EngineError` de la subclase que corresponda. Que falle ruidosamente es el punto.
+
+El canal de errores tiene su equivalente ya resuelto: la identidad de clase tampoco sobrevive al `postMessage`, y se discrimina por `code` (ADR-049).
 
 ```ts
 export type WorkerOutbound =
@@ -187,13 +193,29 @@ Cada pool tiene una `PriorityQueue<WorkerJob>` ordenada por:
 
 ## 7. Detalle por Worker
 
+**Regla transversal — pdf.js hospedado en un Worker (ADR-053 §1)**: aplica a todo entry-point que corra la **capa de display** de `pdfjs-dist` dentro de un Web Worker; hoy, PdfWorker (§7.1) y RenderWorker (§7.4).
+
+Dentro de un Worker no existe `document`, así que la Font Loading API de pdf.js no está disponible: `FontLoader.isFontLoadingAPISupported` da `false` y el registro del `@font-face` falla con un `TypeError` que pdf.js **no loguea**. Con `disableFontFace` en `false` (su default en browser — solo se auto-activa bajo Node), el resultado es que pdf.js dibuja los `fontChar` del área de uso privado contra una fuente que nunca se registró: todo el texto sale como glifos `.notdef` (cuadrados). Falla en silencio y solo para algunos documentos, según cómo esté codificada cada fuente.
+
+Por lo tanto, todo `getDocument()` invocado desde un Worker configura:
+
+| Opción | Valor | Por qué |
+|---|---|---|
+| `disableFontFace` | `true` | Dibuja los glifos como `Path2D` desde el programa de fuente embebido, sin tocar el DOM. Además es lo que hace que el hilo de pdf.js construya y envíe las siluetas (`buildFontPaths`). **Solo para kernels que rasterizan**; el que solo extrae texto no lo lleva. |
+| `useSystemFonts` | `false` | Evita el camino `loadSystemFont`, que sin Font Loading API llega a un `unreachable()`. |
+| `useWorkerFetch` | `false` | **Obligatorio y explícito.** El default de pdf.js evalúa `document.baseURI`; hoy no explota solo porque `cMapUrl` es `null` y la cadena `&&` corta antes. Al pasar las URLs sin fijarlo, tira `ReferenceError` dentro del Worker. |
+| `cMapUrl` + `cMapPacked` | `"/pdfjs/cmaps/"`, `true` | Fuentes CID con CMap predefinido. Sin esto también se degrada la **extracción** de texto, no solo el dibujo. |
+| `standardFontDataUrl` | `"/pdfjs/standard_fonts/"` | Fuentes no embebidas (standard-14 y sustituciones). |
+
+Y **factories propias** para `CMapReaderFactory`/`StandardFontDataFactory`, inyectadas por `getDocument`: las `DOM*` de pdf.js tocan `document.baseURI` en su primer fetch, así que servir los assets no alcanza si quien los pide no puede pedirlos. El contrato de esas factories y las rutas de los assets están en ADR-053 §2/§4.
+
 ### 7.1 PdfWorker
 
 **Responsabilidad**: parsear páginas de un PDF con PDF.js, extraer `Word[]` con `BoundingBox`, identificar páginas sin texto.
 
 **Ciclo de vida**:
 - `INIT`: carga `pdfjs-dist` y su wasm. Publica `READY` con `{ workerId, capabilities: { maxPageBatchSize: 8 } }`.
-- `RUN(pdf-parse)`: recibe `{ documentId, buffer, password?, pageRange }`. Transfiere `buffer`. Procesa páginas en lotes. Emite `PROGRESS` por página. Responde `COMPLETED` con `{ pages: Page[], textlessPages: number[] }`.
+- `RUN(pdf-parse)`: recibe `{ documentId, buffer, password?, pageRange }`. Transfiere `buffer`. Procesa páginas en lotes. Emite `PROGRESS` por página. Responde `COMPLETED` con `{ pages: Page[], textlessPages: number[] }`. Su `getDocument()` sigue la regla transversal de §7 **sin** `disableFontFace`: esta ruta no rasteriza, así que el registro del `@font-face` le es indiferente; sí lleva `cMapUrl`/`cMapPacked`/`standardFontDataUrl` y las factories propias, porque sin CMaps un PDF con CID predefinido se **extrae** mal y eso degrada la detección de entidades aguas abajo (ADR-053 §5).
 - `CANCEL`: checkpoint entre páginas.
 - `DISPOSE`: libera `pdfjs-dist` worker interno y memoria.
 
@@ -234,7 +256,7 @@ Cada pool tiene una `PriorityQueue<WorkerJob>` ordenada por:
 
 **Ciclo de vida** (el RenderWorker es un **kernel sin estado por documento** salvo los `PDFDocumentProxy`; todo el estado del motor — cache, overrides, supersede, suscripciones — vive en la clase `RenderEngine` host-side, ADR-043 §1):
 - `INIT`: crea OffscreenCanvas. Publica `READY`.
-- `load-document`: mensaje de **control broadcast** (no es un `WorkerJobType` encolable — un job iría a un solo worker idle y los demás quedarían sin documento; ADR-036 §4): el host lo envía a **cada** worker del pool con `LoadDocumentPayload { documentId, buffer, password? }` (buffer **clonado** por worker, ver §2.3). Crea el `PDFDocumentProxy` interno con pdfjs-dist, `getDocument({ data, password })` (ADR-030; `password` por ADR-050). Responde `COMPLETED` con `{ pageCount }` (el host lo retiene junto al buffer — ADR-043 §3). **El worker no retiene el `password`**: lo usa para abrir el proxy y lo descarta de su scope (`08_Security_Model.md` §6.1.4). El que sí lo retiene es el host, junto al buffer, para el re-priming de §7.4/ADR-043 §5 — sin eso, un worker reemplazado tras crash no podría recargar un documento protegido.
+- `load-document`: mensaje de **control broadcast** (no es un `WorkerJobType` encolable — un job iría a un solo worker idle y los demás quedarían sin documento; ADR-036 §4): el host lo envía a **cada** worker del pool con `LoadDocumentPayload { documentId, buffer, password? }` (buffer **clonado** por worker, ver §2.3). Crea el `PDFDocumentProxy` interno con pdfjs-dist, `getDocument({ data, password, ...opciones de la regla transversal de §7 })` (ADR-030; `password` por ADR-050; fuentes, CMaps y factories propias por ADR-053 — este kernel **sí** lleva `disableFontFace: true`, porque rasteriza). Responde `COMPLETED` con `{ pageCount }` (el host lo retiene junto al buffer — ADR-043 §3). **El worker no retiene el `password`**: lo usa para abrir el proxy y lo descarta de su scope (`08_Security_Model.md` §6.1.4). El que sí lo retiene es el host, junto al buffer, para el re-priming de §7.4/ADR-043 §5 — sin eso, un worker reemplazado tras crash no podría recargar un documento protegido.
 - `unload-document`: control broadcast simétrico (`UnloadDocumentPayload { documentId }`, ADR-043 §4): libera el `PDFDocumentProxy` de ese documento en cada worker a mitad de sesión (`DOCUMENT_CLOSED`). Idempotente. Responde `COMPLETED`.
 - `RUN(render-page)`: recibe `RenderPagePayload` (`03_Data_Model.md` §18) **o** `RasterizePagePayload { documentId, pageIndex, scale }` (rasterización para OCR, sin eventos de preview — ADR-034 §1/ADR-036 §4). Precondición: documento cargado vía `load-document` (ADR-030). Responde `COMPLETED` con `{ imageData: ImageData }` (transferido) y, en `mode: "full"`, `encoded` (`EncodedPageImage`, ADR-034 §3).
 - `CANCEL`: checkpoint entre operaciones de Canvas.

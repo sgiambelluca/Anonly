@@ -1,12 +1,16 @@
-<!-- CONTEXT: scope=ner-engine | dependencias=core/Contracts.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,ADR-006-NER-Local.md,adr/ADR-046-NerEngine-Pool-Propia-Kernel-Puro.md | audiencia=IA-implementador | fase=10 (§2/§6/§7/§11/§12/§13/§14/§15 actualizados en fase 10: clase host-side dueña de su pool + kernel de inferencia en el worker, ADR-046) -->
+<!-- CONTEXT: scope=ner-engine | dependencias=core/Contracts.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,ADR-006-NER-Local.md,adr/ADR-046-NerEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-055-Decodificacion-Del-Resultado-Que-Cruza-Un-Worker.md | audiencia=IA-implementador | fase=10 (§2/§6/§7/§11/§12/§13/§14/§15 actualizados en fase 10: clase host-side dueña de su pool + kernel de inferencia en el worker, ADR-046; decodificación del sobre { spans } y tests de sobre en §14 por ADR-055, cierre de fase 10) -->
 
 # NER Engine — Spec de Motor
 
 > Detecta personas, organizaciones, direcciones y fechas mediante un modelo NER local (Transformers.js + ONNX Runtime Web). Emite `Occurrence[]` con `source: "ner"` y `confidence` según el modelo.
 
 **EngineId**: `ner`
-**Versión del spec**: 1.2.0
-**Última actualización**: 2026-07-24
+**Versión del spec**: 1.2.1
+**Última actualización**: 2026-07-31
+
+> **Nota (v1.2.1, ADR-055, 2026-07-31 — el sobre `{ spans }` se decodifica, no se castea)**: con `NerPool` real este motor **no detectaba ninguna entidad**, en silencio. El worker postea `COMPLETED { spans }` —que es lo correcto, ADR-046 §1— pero el host tipaba el despacho como `ReadonlyArray<NerKernelSpan>` e iteraba el resultado directo, y `WorkerPool.dispatch` resuelve con un cast a ciegas sobre un valor que acaba de cruzar un `postMessage`. En modo remoto llegaba el objeto → `for...of` sobre algo no iterable → `TypeError` → `NerPageFailedError` → tragado por el `ctx.logger.warn` de `processPages`, con el logger nulo de producción. Once páginas fallando sin dejar rastro y `NER_FINISHED` con `occurrenceCount: 0`.
+>
+> Fix: **`NerJobPool` deja de ser genérico y devuelve `Promise<unknown>`**, con lo que el compilador obliga a decodificar (ADR-055 §2). El decoder acepta `{ spans: [...] }` (camino remoto) y `[...]` (camino in-process, que es la prueba de paridad entre los dos), y ante cualquier otra forma **lanza** — devolver `[]` o un default en silencio está prohibido (ADR-055 §3): es literalmente el modo de falla que se está cerrando. **El worker no se toca**: `{ spans }` es el contrato y R-21 prohíbe editarlo desde un PR de implementación. `worker-pool.ts` tampoco: es transporte, y el transporte no conoce el contrato del payload de cada motor.
 
 > **Nota (ADR-046, 2026-07-24 — reparto host/worker para PR15, tercer espejo de ADR-043/ADR-045)**: la clase `NerEngine` queda **entera host-side** — el loop secuencial por página de `processPages`, el retry/timeout por página de `processPage`, la partición en batches (ADR-024 §2), el mapeo de spans a `Occurrence` (bbox/`wordSpan`) y la emisión de los **seis** eventos. Al worker va un **kernel de inferencia sin estado por documento** (`05_Worker_Architecture.md` §7.3): `NerPagePayload` (el texto de **un batch**) → tokenización + inferencia + agregación BIO → `COMPLETED { spans }`; su único estado es el pipeline de `@huggingface/transformers` cargado para un `(modelId, dtype)` dado. El motor recibe su pool por constructor opcional (`new NerEngine(pool?)`, inyectado por el façade en `create-core.ts`; sin argumento → fallback in-process bit-idéntico, ADR-035) y despacha con `maxRetriesOverride: 0` — el único loop de retry es el del motor; los errores que cruzan un worker remoto llegan deserializados y se re-instancian por `code` (`NER_TIMEOUT`, `NER_MODEL_MISSING`) en el borde del puerto. **Sin bus puente en el worker**: `ENTITY_FOUND` y `NER_PAGE_FINISHED` salen de una sola ruta host-side, así que el orden evento/datos está garantizado y `grouping-engine` recibe el mismo stream de siempre. El **ciclo de vida del modelo** (que sí ocurre dentro del worker) cruza por el canal `PROGRESS` del transporte —no por eventos de dominio— y el motor lo traduce en host a `NER_MODEL_LOADING`/`NER_MODEL_READY` (este último, una vez por instancia). `isModelReady()` y `NerStarted.modelLoading` pasan a un flag host-side de la instancia, con la misma semántica per-instancia. Interfaz de §6: sin cambios de firma salvo el constructor.
 
@@ -245,6 +249,16 @@ Las `Occurrence` también se emiten vía `ENTITY_FOUND` (incremental).
 ---
 
 ## 14. Casos de prueba
+
+**Tests de sobre, obligatorios (ADR-055 §5)** — son los que no existían y por los que el bug de la nota v1.2.1 pasó los 911 tests, los 203 de contrato y los 12 escenarios E2E. Los fakes de pool preexistentes **ejecutan `run()`**, o sea el camino in-process: ninguno cruza la frontera del worker.
+
+| Test | Archivo | Tipo | Descripción |
+|---|---|---|---|
+| `decodes the remote envelope { spans } from NerWorker` | `unit.test.ts` | unit | pool fake que **ignora `run()`** y resuelve exactamente lo que postea `worker/entry.ts`; se emiten `ENTITY_FOUND × N` y `NER_PAGE_FINISHED` con `occurrenceCount > 0` |
+| `decodes the in-process bare array identically` | `unit.test.ts` | unit | mismo fake resolviendo `[...]`; resultado idéntico al de arriba (paridad remoto/in-process) |
+| `throws on an unrecognized dispatch result` | `edge.test.ts` | edge | el fake resuelve `{}` / `null` / un string → `InvalidInputError`, y el error **no** se traga silenciosamente aguas arriba |
+
+Verificación del propio test: revirtiendo el decoder, el primero de los tres tiene que fallar. Si no falla, no está probando lo que dice.
 
 | Test | Archivo | Tipo | Descripción |
 |---|---|---|---|
