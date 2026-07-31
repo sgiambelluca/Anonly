@@ -88,16 +88,29 @@ test("cambiar el zoom re-escala de inmediato y reemplaza el bitmap transitorio",
   // reescalado, o un frame en blanco recién redimensionado).
   const transitionalBitmap = await canvasDataUrl(canvas);
 
-  // Espera más que `ZOOM_RERENDER_DEBOUNCE_MS` (150 ms) + margen para que
-  // `RENDER_REQUESTED`/`PREVIEW_UPDATED` completen un ciclo real a través del
-  // `RenderWorker` (transporte real desde PR13, ADR-043).
-  await page.waitForTimeout(800);
-  const rerenderedBitmap = await canvasDataUrl(canvas);
-
-  expect(
-    rerenderedBitmap,
-    "el bitmap nítido re-renderizado (post-debounce) debería reemplazar al transitorio",
-  ).not.toBe(transitionalBitmap);
+  // Espera a que `RENDER_REQUESTED`/`PREVIEW_UPDATED` completen un ciclo real
+  // a través del `RenderWorker` (transporte real desde PR13, ADR-043) y
+  // reemplacen el bitmap transitorio.
+  //
+  // Se espera por la CONDICIÓN, no por una duración fija. La versión anterior
+  // asumía que `ZOOM_RERENDER_DEBOUNCE_MS` (150 ms) + un ciclo completo de
+  // render entraban en 800 ms — cierto en una máquina de desarrollo, falso en
+  // un runner de CI: 2 cores, Chromium rasterizando por software, y pdf.js
+  // degradado a "fake worker" dentro del RenderWorker (parsea en el mismo
+  // hilo que rasteriza), con 3 páginas × 2 kinds en vuelo. Ese presupuesto
+  // fijo era además el ÚNICO de la suite: los demás specs que esperan a que
+  // un render aterrice ya usan `expect.poll` (30 s en el Escenario 3, 15 s en
+  // el 7).
+  //
+  // Esto no afloja la prueba: si el re-render de verdad no ocurriera, sigue
+  // fallando — solo que tras agotar el presupuesto, y entonces sí sería un bug
+  // de producto y no un número mal elegido en el test.
+  await expect
+    .poll(() => canvasDataUrl(canvas), {
+      timeout: 20_000,
+      message: "el bitmap nítido re-renderizado (post-debounce) debería reemplazar al transitorio",
+    })
+    .not.toBe(transitionalBitmap);
 
   // El visor sigue mostrando la página (sin quedar en un estado roto).
   await expect(firstPage).toBeVisible();

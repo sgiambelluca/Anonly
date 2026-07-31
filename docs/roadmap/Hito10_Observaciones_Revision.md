@@ -564,6 +564,16 @@ Alcance: solo `vitest.config.ts`, o sea solo `vitest`. El build de la app y el j
 
 **Verificado localmente** moviendo `src/assets/onnxruntime/` fuera del árbol para reproducir la checkout limpia: las dos suites cargan y pasan. Con los assets presentes, `pnpm test -- --coverage` completo da 75/75 suites, 911/911 tests, thresholds de cobertura verdes.
 
+### Y el gate `e2e`: el Escenario 11 asumía un presupuesto de tiempo fijo
+
+Con el job `test` ya en verde, la primera corrida real del job `e2e` dio 11 de 12 escenarios verdes. El que falló —`scenario-11-zoom.spec.ts`, "cambiar el zoom re-escala de inmediato y reemplaza el bitmap transitorio"— falló las tres veces (inicial + los 2 reintentos de `playwright.config.ts`), o sea que no era un flake marginal.
+
+**Causa**: el test capturaba el `toDataURL()` del canvas, esperaba `page.waitForTimeout(800)` y assertaba que el bitmap hubiera cambiado. Esos 800 ms tenían que cubrir `ZOOM_RERENDER_DEBOUNCE_MS` (150 ms) **más** un ciclo completo `RENDER_REQUESTED` → RenderWorker → `PREVIEW_UPDATED` → blob → `<img>` → `drawImage`, con 3 páginas × 2 kinds en vuelo. Alcanza en una máquina de desarrollo; no en un runner de CI de 2 cores, con Chromium rasterizando por software y pdf.js degradado a "fake worker" dentro del RenderWorker (hallazgo 3 de arriba: parsea en el mismo hilo que rasteriza). Era además **el único presupuesto fijo de la suite** para esperar un render: el Escenario 3 y el 7 ya usaban `expect.poll` con 30 s y 15 s.
+
+**Fix**: `expect.poll(() => canvasDataUrl(canvas), { timeout: 20_000 }).not.toBe(transitionalBitmap)` — se espera por la condición, no por una duración. No afloja la prueba: si el re-render de verdad no ocurriera, sigue fallando, solo que tras agotar el presupuesto, y ahí sí sería un bug de producto. Sin tocar código de producto.
+
+**Nota de método**: la verificación local de este fix no prueba nada (localmente el test ya pasaba con los 800 ms); la única verificación válida es la corrida de CI.
+
 ---
 
 ## Tareas de seguimiento con entrada formal en el tasklist de la sesión
