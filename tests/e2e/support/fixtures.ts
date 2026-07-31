@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 
-import { generateCorrupt, generateText10p } from "../../fixtures/generate.js";
+import { generateCorrupt, generateText10p, TEXT_10P_PAGES } from "../../fixtures/generate.js";
 
 export interface E2eFilePayload {
   readonly name: string;
@@ -73,6 +73,105 @@ export async function manyNeutralPagesFile(pageCount: number): Promise<E2eFilePa
   const bytes = await doc.save();
   return {
     name: `many-${pageCount}p.pdf`,
+    mimeType: "application/pdf",
+    buffer: Buffer.from(bytes),
+  };
+}
+
+// Constantes de layout replicadas de `tests/fixtures/generate.ts` (no
+// exportadas desde ahí) para que las páginas sin tocar de
+// `textTenPagesWithPersonFile` se rendericen idénticas a `generateText10p()`.
+const TEXT10P_PAGE_WIDTH = 595;
+const TEXT10P_PAGE_HEIGHT = 842;
+const TEXT10P_MARGIN_X = 50;
+const TEXT10P_MARGIN_Y = 750;
+const TEXT10P_FONT_SIZE = 12;
+const TEXT10P_LINE_HEIGHT = 18;
+
+/**
+ * Wrap manual copiado de `tests/fixtures/generate.ts#wrapText` — no está
+ * exportada desde ahí (detalle interno del generador commiteado) y este
+ * archivo no toca `tests/fixtures/` (alcance de ADR-055 §6: solo
+ * `tests/e2e/`). Mismo comportamiento: corta en líneas de ~95 chars
+ * respetando espacios.
+ */
+function wrapText(text: string, maxCharsPerLine: number): ReadonlyArray<string> {
+  const words = text.split(" ");
+  const lines: string[] = [];
+  let current = "";
+  for (const word of words) {
+    if (current.length === 0) {
+      current = word;
+    } else if (current.length + 1 + word.length <= maxCharsPerLine) {
+      current += " " + word;
+    } else {
+      lines.push(current);
+      current = word;
+    }
+  }
+  if (current.length > 0) {
+    lines.push(current);
+  }
+  return lines;
+}
+
+// Dos páginas neutras de `TEXT_10P_PAGES` (índices 3 y 4 — "Página 4"/"Página
+// 5 sin datos sensibles…") se reemplazan por una oración limpia con un
+// nombre de persona inequívoco cada una. Dos candidatos, no uno, para no
+// depender de que el modelo cuantizado reconozca un nombre puntual: la
+// oración de la página 1 ("Juan Pérez vive en Belgrano 1234, DNI…") está
+// confirmada empíricamente (dos corridas, ver docblock de
+// `scenario-9-ner-runtime-reanalyze.spec.ts`) como no reconocida por el
+// modelo en este fixture — el nombre queda pegado a una lista de otras
+// entidades en la misma oración. Acá cada nombre va solo, en una oración
+// corta sin otros datos alrededor, para maximizar la chance de que el
+// modelo lo etiquete B-PER/I-PER. Las páginas con los tres DNI (índices 0-2,
+// de las que depende el resto de cada escenario) no se tocan.
+const PERSON_PAGE_INDEX_A = 3;
+const PERSON_PAGE_INDEX_B = 4;
+const PERSON_SENTENCE_A =
+  "El informe fue redactado por Marina Suárez, coordinadora del área legal.";
+const PERSON_SENTENCE_B =
+  "La reunión fue presidida por Alberto Gutiérrez, director general de la institución.";
+
+/**
+ * Variante de `text-10p.pdf` para el E2E de ADR-055 §6 ("al menos una
+ * entidad NER de tipo Persona llega al panel de Entidades"): mismo
+ * contenido que `TEXT_10P_PAGES` — mismos tres DNI en las páginas 1-3, de
+ * los que depende el resto del escenario elegido — salvo dos páginas
+ * neutras (4 y 5) reemplazadas por `PERSON_SENTENCE_A`/`PERSON_SENTENCE_B`.
+ * Se arma enteramente en memoria, igual que el resto de este archivo: no se
+ * toca `tests/fixtures/generate.ts` ni se commitea ningún binario nuevo.
+ */
+export async function textTenPagesWithPersonFile(): Promise<E2eFilePayload> {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+
+  const pages = TEXT_10P_PAGES.map((text, index) => {
+    if (index === PERSON_PAGE_INDEX_A) return PERSON_SENTENCE_A;
+    if (index === PERSON_PAGE_INDEX_B) return PERSON_SENTENCE_B;
+    return text;
+  });
+
+  for (const text of pages) {
+    const page = doc.addPage([TEXT10P_PAGE_WIDTH, TEXT10P_PAGE_HEIGHT]);
+    const lines = wrapText(text, 95);
+    let y = TEXT10P_MARGIN_Y;
+    for (const line of lines) {
+      page.drawText(line, {
+        x: TEXT10P_MARGIN_X,
+        y,
+        size: TEXT10P_FONT_SIZE,
+        font,
+        color: rgb(0, 0, 0),
+      });
+      y -= TEXT10P_LINE_HEIGHT;
+    }
+  }
+
+  const bytes = await doc.save();
+  return {
+    name: "text-10p-person.pdf",
     mimeType: "application/pdf",
     buffer: Buffer.from(bytes),
   };

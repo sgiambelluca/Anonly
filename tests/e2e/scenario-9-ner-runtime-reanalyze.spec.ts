@@ -22,7 +22,12 @@
  * no reconoce "Juan Pérez" como Persona en este fixture sintético — cuestión
  * de precisión del modelo (dataset de referencia, Hito 11), no de integración
  * del pipeline, que es lo que corresponde a este E2E (mismo criterio que
- * `scenario-5-edit-during-ner.spec.ts`).
+ * `scenario-5-edit-during-ner.spec.ts`). La cobertura de ADR-055 §6 ("al
+ * menos una entidad NER llega a la UI") vive en ese escenario, no en este:
+ * ahí NER corre en el camino de una sola pasada (el que reportó el bug de
+ * ADR-055 Contexto §1), es más barato de correr (240 s vs. los 480 s de
+ * acá), y usa un fixture propio con nombres en oraciones limpias en vez de
+ * "Juan Pérez" — ver su docblock.
  *
  * El más caro en tiempo de corrida de los cuatro escenarios "sin fixture
  * nueva" (`07` §11.3, ADR-048 §4): a diferencia de scenario-5/10/11, acá el
