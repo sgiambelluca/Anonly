@@ -8,6 +8,9 @@
  * unifica los helpers de construcción de mocks (Code_Standards.md §10;
  * ADR-021 §5; precedente: `mockGetDocumentResult` en pdf-engine).
  */
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import { createEventBus } from "@anonly/event-system";
 import {
   AnnotationKind,
@@ -356,6 +359,33 @@ export function createEngineContextWithRealBus(overrides?: Partial<EngineContext
 
 export function createValidBuffer(): ArrayBuffer {
   return new Uint8Array([1, 2, 3, 4]).buffer;
+}
+
+/**
+ * Buffer real de `tests/fixtures/protected.pdf` (AES-256, password
+ * `test1234` — `tests/fixtures/README.md`, ADR-050 §6 caso 22).
+ *
+ * `getDocument` sigue mockeado en estos tests, igual que en el resto del
+ * archivo (Render_Engine.md nota ADR-021, Code_Standards.md §10: "los tests
+ * unit/contract/edge mockean la frontera de la librería externa"). Lo que
+ * `loadDocument with password opens an encrypted PDF`/`loadDocument without
+ * password on an encrypted PDF fails with RenderFailedError` verifican con
+ * este buffer es el CONTRATO de `loadDocument`: que el buffer y el password
+ * llegan intactos a `getDocument({ data, password })` — no una apertura real
+ * de pdfjs (esa validación end-to-end, con el password real decodificando el
+ * PDF real, vive en `tests/e2e/scenario-3-protected-pdf.spec.ts`, navegador
+ * real). `readFileSync` falla claro (ENOENT) si el fixture no está
+ * commiteado (Code_Standards.md §10).
+ */
+export function readProtectedPdfFixtureBuffer(): ArrayBuffer {
+  const fixturePath = fileURLToPath(
+    new URL("../../../../../../tests/fixtures/protected.pdf", import.meta.url),
+  );
+  const nodeBuffer = readFileSync(fixturePath);
+  // `nodeBuffer.buffer` puede exponer el pool interno de Node (más bytes que
+  // el archivo real) — `.slice` con offset/length devuelve un ArrayBuffer del
+  // tamaño exacto (mismo cuidado que tests/scripts/mirror-assets.test.ts).
+  return nodeBuffer.buffer.slice(nodeBuffer.byteOffset, nodeBuffer.byteOffset + nodeBuffer.byteLength);
 }
 
 export function makeReplacement(overrides?: Partial<Replacement>): Replacement {

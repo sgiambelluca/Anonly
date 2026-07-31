@@ -94,7 +94,7 @@
       "url": "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0-dev.20260416-b7804b056c/dist/ort-wasm-simd-threaded.asyncify.mjs",
       "revision": "1.26.0-dev.20260416-b7804b056c",
       "sha256": "5959c6733039619c9af710d8e1bae8d6e84402787990637be987c2b1bd6c5fa9",
-      "destination": "apps/react-client/public/wasm/onnxruntime/ort-wasm-simd-threaded.asyncify.mjs",
+      "destination": "apps/react-client/src/assets/onnxruntime/ort-wasm-simd-threaded.asyncify.mjs",
       "sizeBytes": 47389
     },
     {
@@ -102,7 +102,7 @@
       "url": "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0-dev.20260416-b7804b056c/dist/ort-wasm-simd-threaded.asyncify.wasm",
       "revision": "1.26.0-dev.20260416-b7804b056c",
       "sha256": "e0c0c6d3e73d43b8a249972f8358f845b08cc16fec3c80efafdf8bed40366786",
-      "destination": "apps/react-client/public/wasm/onnxruntime/ort-wasm-simd-threaded.asyncify.wasm",
+      "destination": "apps/react-client/src/assets/onnxruntime/ort-wasm-simd-threaded.asyncify.wasm",
       "sizeBytes": 23567050
     }
   ]

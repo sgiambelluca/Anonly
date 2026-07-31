@@ -18,6 +18,7 @@ import {
   createEngineContext,
   createExportEngineInput,
   createMockPdfLibDocument,
+  createTrackingExportPool,
 } from "./fixtures/test-helpers.js";
 
 describe("ExportEngine — contract tests", () => {
@@ -150,5 +151,77 @@ describe("ExportEngine — contract tests", () => {
     expect(mockDoc["setProducer"]).toHaveBeenCalledWith("Anonly");
     expect(mockDoc["setCreator"]).toHaveBeenCalledWith("Anonly");
     expect(mockDoc["setCreationDate"]).toHaveBeenCalledWith(expect.any(Date));
+  });
+
+  // ─── ADR-047 §2/§5/§6 — puerto interno ExportJobPool ───
+
+  it("every dispatch uses maxRetriesOverride: 0", async () => {
+    vi.mocked(PDFDocument.create).mockResolvedValue(asPdfDocument(createMockPdfLibDocument()));
+    const pool = createTrackingExportPool();
+    const pooledEngine = new ExportEngine(pool);
+    await pooledEngine.init(ctx);
+
+    await pooledEngine.export(
+      createExportEngineInput({
+        documentId: "doc-max-retries-override",
+        document: createDocumentWithPageCount(2),
+      }),
+      ctx,
+    );
+
+    // 2 páginas (append-page) + 1 save = 3 despachos.
+    expect(pool.calls.length).toBe(3);
+    for (const call of pool.calls) {
+      expect(call.maxRetriesOverride).toBe(0);
+    }
+
+    await pooledEngine.dispose();
+  });
+
+  it("same events, order and output bytes with and without injected pool", async () => {
+    vi.mocked(PDFDocument.create).mockResolvedValue(asPdfDocument(createMockPdfLibDocument()));
+    await engine.init(ctx);
+    const emitSpyA = vi.spyOn(ctx.bus, "emit");
+    const resultA = await engine.export(createExportEngineInput({ documentId: "doc-parity" }), ctx);
+    const eventsA = emitSpyA.mock.calls.map((call) => call[1]);
+
+    vi.mocked(PDFDocument.create).mockResolvedValue(asPdfDocument(createMockPdfLibDocument()));
+    const pool = createTrackingExportPool();
+    const pooledEngine = new ExportEngine(pool);
+    const ctxB = createEngineContext();
+    await pooledEngine.init(ctxB);
+    const emitSpyB = vi.spyOn(ctxB.bus, "emit");
+    const resultB = await pooledEngine.export(
+      createExportEngineInput({ documentId: "doc-parity" }),
+      ctxB,
+    );
+    const eventsB = emitSpyB.mock.calls.map((call) => call[1]);
+
+    expect(eventsB).toEqual(eventsA);
+    expect(resultB.sizeBytes).toBe(resultA.sizeBytes);
+    expect(new Uint8Array(resultB.buffer)).toEqual(new Uint8Array(resultA.buffer));
+
+    await pooledEngine.dispose();
+  });
+
+  it("blob URL is created in host, never in the worker", async () => {
+    vi.mocked(PDFDocument.create).mockResolvedValue(asPdfDocument(createMockPdfLibDocument()));
+    const pool = createTrackingExportPool();
+    const pooledEngine = new ExportEngine(pool);
+    await pooledEngine.init(ctx);
+    const createObjectURLSpy = vi.spyOn(URL, "createObjectURL");
+
+    const result = await pooledEngine.export(
+      createExportEngineInput({ documentId: "doc-bloburl" }),
+      ctx,
+    );
+
+    // Un único createObjectURL, en host: ninguno de los closures despachados
+    // al pool (ver ExportPoolDispatchParams.run en el fixture) toca
+    // createObjectURL — solo invocan el ensamblador (ADR-047 §6).
+    expect(createObjectURLSpy).toHaveBeenCalledTimes(1);
+    expect(result.buffer.byteLength).toBeGreaterThan(0);
+
+    await pooledEngine.dispose();
   });
 });

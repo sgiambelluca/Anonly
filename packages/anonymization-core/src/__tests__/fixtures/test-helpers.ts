@@ -40,6 +40,8 @@ import {
   type ILogger,
   type Page,
   type Rule,
+  type WorkerLike,
+  type WorkerOutbound,
 } from "@anonly/shared";
 import { vi } from "vitest";
 
@@ -204,8 +206,9 @@ export function wireHappyPathSpies(
   const documentId = pdfOutput.document.id;
 
   vi.spyOn(engines.pdf, "process").mockResolvedValue(pdfOutput);
-  vi.spyOn(engines.pdf, "fuseOcrPage").mockResolvedValue(pdfOutput.document);
-  vi.spyOn(engines.pdf, "releaseDocument").mockImplementation(() => undefined);
+  // ADR-041: fuseOcrPage/releaseDocument ya no son métodos de PdfEngine
+  // (función pura host-side + motor sin estado por documento) — nada que
+  // espiar acá.
   vi.spyOn(engines.pdf, "dispose").mockResolvedValue(undefined);
 
   vi.spyOn(engines.ocr, "processPages").mockImplementation((inputs) =>
@@ -252,6 +255,11 @@ export function wireHappyPathSpies(
   vi.spyOn(engines.ner, "dispose").mockResolvedValue(undefined);
 
   vi.spyOn(engines.grouping, "startSession").mockImplementation(() => undefined);
+  // ADR-038 §2: no-op por defecto (mismo criterio que startSession) — los
+  // tests de reanalyze aseran los argumentos con los que se llaman, sin
+  // reimplementar la sesión real de GroupingEngine (ver nota de cabecera).
+  vi.spyOn(engines.grouping, "reopenSession").mockImplementation(() => undefined);
+  vi.spyOn(engines.grouping, "dropOccurrences").mockImplementation(() => undefined);
   vi.spyOn(engines.grouping, "finishSession").mockImplementation((docId) => {
     bus.emit(EventChannel.Grouping, EngineEvents.GROUPING_FINISHED, {
       documentId: docId,
@@ -310,4 +318,61 @@ export function createDeferred<T>(): Deferred<T> {
     reject = rej;
   });
   return { promise, resolve, reject };
+}
+
+// ─── Transporte de workers (Hito 10, ADR-036 §2/§3) ───
+
+/**
+ * Fake estructural de `WorkerLike` (ADR-036 §2: "es estructural a propósito"
+ * — un `Worker` real de DOM lo satisface con la misma forma, y los tests del
+ * transporte inyectan este fake sin necesitar un `Worker` de browser).
+ * `emitMessage`/`emitError` simulan al worker real emitiendo mensajes hacia
+ * los listeners que `WorkerPool` registró vía `addEventListener`.
+ */
+export interface FakeWorker extends WorkerLike {
+  readonly postMessage: ReturnType<typeof vi.fn>;
+  readonly addEventListener: ReturnType<typeof vi.fn>;
+  readonly terminate: ReturnType<typeof vi.fn>;
+  /**
+   * `wrapInMessageEvent`: simula la entrega real de un `Worker` de DOM
+   * (`MessageEvent.data` envuelve el mensaje posteado) en vez de la entrega
+   * directa (mensaje tal cual) que usan la mayoría de los tests de este PR.
+   */
+  emitMessage(message: WorkerOutbound, wrapInMessageEvent?: boolean): void;
+  /**
+   * Entrega un valor arbitrario (no necesariamente `WorkerOutbound`) a los
+   * listeners de "message" — simula mensajes malformados/desconocidos para
+   * probar la robustez del transporte (`isWorkerOutboundShape`, ADR-036 §2)
+   * sin recurrir a un cast sobre el tipo propio `WorkerOutbound`
+   * (Code_Standards.md §10: un test que necesita bypassear el sistema de
+   * tipos de un tipo propio está probando con la herramienta equivocada; acá
+   * el valor es legítimamente `unknown` — así llega cualquier `postMessage`
+   * real antes de validarse).
+   */
+  emitRawMessage(raw: unknown): void;
+  emitError(errorEvent?: unknown): void;
+}
+
+export function createFakeWorker(): FakeWorker {
+  const messageListeners: Array<(ev: unknown) => void> = [];
+  const errorListeners: Array<(ev: unknown) => void> = [];
+  const addEventListener = vi.fn((type: "message" | "error", listener: (ev: unknown) => void) => {
+    (type === "message" ? messageListeners : errorListeners).push(listener);
+  });
+
+  return {
+    postMessage: vi.fn(),
+    addEventListener,
+    terminate: vi.fn(),
+    emitMessage(message: WorkerOutbound, wrapInMessageEvent = false): void {
+      const ev: unknown = wrapInMessageEvent ? { data: message } : message;
+      for (const listener of [...messageListeners]) listener(ev);
+    },
+    emitRawMessage(raw: unknown): void {
+      for (const listener of [...messageListeners]) listener(raw);
+    },
+    emitError(errorEvent: unknown = {}): void {
+      for (const listener of [...errorListeners]) listener(errorEvent);
+    },
+  };
 }

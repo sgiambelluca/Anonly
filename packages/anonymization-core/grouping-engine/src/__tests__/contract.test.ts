@@ -62,6 +62,34 @@ describe("GroupingEngine — contract tests", () => {
     expect(() => engine.startSession("doc-1")).toThrow(EngineDisposedError);
   });
 
+  it("reopenSession() before init() throws EngineNotInitializedError", () => {
+    expect(() => engine.reopenSession("doc-1", { expectRegex: true, expectNer: true })).toThrow(
+      EngineNotInitializedError,
+    );
+  });
+
+  it("reopenSession() after dispose() throws EngineDisposedError", async () => {
+    await engine.init(ctx);
+    await engine.dispose();
+    expect(() => engine.reopenSession("doc-1", { expectRegex: true, expectNer: true })).toThrow(
+      EngineDisposedError,
+    );
+  });
+
+  it("dropOccurrences() before init() throws EngineNotInitializedError", () => {
+    expect(() => engine.dropOccurrences("doc-1", { source: DetectionSource.Regex })).toThrow(
+      EngineNotInitializedError,
+    );
+  });
+
+  it("dropOccurrences() after dispose() throws EngineDisposedError", async () => {
+    await engine.init(ctx);
+    await engine.dispose();
+    expect(() => engine.dropOccurrences("doc-1", { source: DetectionSource.Regex })).toThrow(
+      EngineDisposedError,
+    );
+  });
+
   it("emits ENTITY_GROUP_CREATED on first occurrence of a value", async () => {
     await engine.init(ctx);
     engine.startSession("doc-1");
@@ -441,5 +469,138 @@ describe("GroupingEngine — contract tests", () => {
     ]);
     expect(arrivalOrderA).toEqual(expected);
     expect(arrivalOrderB).toEqual(expected);
+  });
+
+  // ADR-038 §2: reabrir una sesión NO descarta grupos/reglas/conflictos ni
+  // las ediciones del usuario; una ocurrencia nueva que matchea por valor
+  // hereda el grupo editado sin tocar su edición (mismo mecanismo del caso
+  // 17, ahora atravesando un reopenSession).
+  it("reopenSession preserves existing groups/rules/edits", async () => {
+    await engine.init(ctx);
+    engine.startSession("doc-1");
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "11111111", normalizedValue: "11111111" }),
+    });
+    const [group] = engine.getSnapshot("doc-1").groups;
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group!.id,
+      patch: { enabled: false },
+    });
+    const rule = makeRule("global", ReplacementMode.Redact);
+    await engine.applyRuleCreated({ documentId: "doc-1", rule });
+
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.REGEX_FINISHED, {
+      documentId: "doc-1",
+      occurrenceCount: 1,
+      durationMs: 1,
+    });
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.NER_FINISHED, {
+      documentId: "doc-1",
+      occurrenceCount: 0,
+      durationMs: 1,
+    });
+
+    const beforeReopen = engine.getSnapshot("doc-1");
+    expect(beforeReopen.groups[0]?.enabled).toBe(false);
+    expect(beforeReopen.rules).toHaveLength(1);
+
+    engine.reopenSession("doc-1", { expectRegex: false, expectNer: true });
+
+    // Reabrir por sí solo no dispara eventos ni cambia el estado observable.
+    const afterReopen = engine.getSnapshot("doc-1");
+    expect(afterReopen.groups).toEqual(beforeReopen.groups);
+    expect(afterReopen.rules).toEqual(beforeReopen.rules);
+    expect(afterReopen.conflicts).toEqual(beforeReopen.conflicts);
+
+    // Segunda pasada: una ocurrencia NER nueva del mismo valor se agrega al
+    // grupo existente sin reactivarlo (caso 17, ADR-038 §4: "un grupo
+    // deshabilitado no se re-habilita porque lleguen members nuevos").
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        source: DetectionSource.NER,
+        confidence: 0.9,
+        value: "11111111",
+        normalizedValue: "11111111",
+      }),
+    });
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.NER_FINISHED, {
+      documentId: "doc-1",
+      occurrenceCount: 1,
+      durationMs: 1,
+    });
+
+    const final = engine.getSnapshot("doc-1").groups[0];
+    expect(final?.enabled).toBe(false);
+    expect(final?.replacementMode).toBe(ReplacementMode.Redact);
+    expect(final?.members).toHaveLength(2);
+    expect(engine.getSnapshot("doc-1").rules).toHaveLength(1);
+  });
+
+  // Caso 26 (§13, ADR-038 §2): tras un reopenSession, finishSession vuelve a
+  // correr — incluida la renumeración canónica — sobre la UNIÓN de
+  // ocurrencias vigentes (las de la primera pasada + las de la segunda).
+  it("finishSession re-run after reopenSession renumbers over union of occurrences", async () => {
+    await engine.init(ctx);
+    engine.startSession("doc-1");
+
+    const occA = makeOccurrence({
+      value: "11111111",
+      normalizedValue: "11111111",
+      pageIndex: 0,
+      bbox: makeBBox(10, 50, 60, 12),
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: occA,
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.REGEX_FINISHED, {
+      documentId: "doc-1",
+      occurrenceCount: 1,
+      durationMs: 1,
+    });
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.NER_FINISHED, {
+      documentId: "doc-1",
+      occurrenceCount: 0,
+      durationMs: 1,
+    });
+    expect(engine.getSnapshot("doc-1").groups[0]?.indexInType).toBe(1);
+
+    // Segunda pasada de Regex (ej. tras reactivar OCR con nuevo idioma):
+    // trae una ocurrencia que aparece ANTES en el documento (bbox.y menor).
+    engine.reopenSession("doc-1", { expectRegex: true, expectNer: false });
+    const occB = makeOccurrence({
+      value: "22222222",
+      normalizedValue: "22222222",
+      pageIndex: 0,
+      bbox: makeBBox(10, 10, 60, 12),
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: occB,
+    });
+
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.REGEX_FINISHED, {
+      documentId: "doc-1",
+      occurrenceCount: 2,
+      durationMs: 1,
+    });
+
+    const finishedCalls = busEmitSpy.mock.calls.filter(
+      ([channel, event]) =>
+        channel === EventChannel.Grouping && event === EngineEvents.GROUPING_FINISHED,
+    );
+    expect(finishedCalls).toHaveLength(1);
+
+    const groups = engine.getSnapshot("doc-1").groups;
+    const gA = groups.find((g) => g.canonicalValue === "11111111");
+    const gB = groups.find((g) => g.canonicalValue === "22222222");
+    // occB (bbox.y=10) precede documentalmente a occA (bbox.y=50): la
+    // renumeración de la SEGUNDA pasada debe reflejar la unión completa.
+    expect(gB?.indexInType).toBe(1);
+    expect(gA?.indexInType).toBe(2);
   });
 });

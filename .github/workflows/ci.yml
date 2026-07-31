@@ -132,6 +132,24 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # Assets first-party (modelo NER, wasm de tesseract/ort) nunca se
+      # commitean (ADR-018): `pnpm test:e2e` los necesita para que Vite
+      # resuelva el `import ?url` de `src/assets/onnxruntime/` (si no, el
+      # webServer de Playwright no sirve una app funcional y toda la suite se
+      # cae, no solo los escenarios de NER/OCR — ADR-048 §1). Cache por hash
+      # de `assets.lock.json`, antes del mirror, para que sea no-op si pega.
+      - name: Cache first-party assets (wasm/models)
+        if: steps.check_e2e.outputs.has_tests == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            apps/react-client/public/wasm
+            apps/react-client/public/models
+            apps/react-client/src/assets/onnxruntime
+          key: assets-mirror-${{ hashFiles('assets.lock.json') }}
+      - name: Mirror first-party assets
+        if: steps.check_e2e.outputs.has_tests == 'true'
+        run: pnpm assets:mirror
       - name: Install Playwright browsers
         if: steps.check_e2e.outputs.has_tests == 'true'
         run: pnpm exec playwright install --with-deps chromium

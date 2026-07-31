@@ -1,12 +1,12 @@
-<!-- CONTEXT: scope=grouping-engine | dependencias=core/Contracts.md,architecture/03_Data_Model.md,architecture/04_Event_System.md,ADR-011-Grouping-First.md,ADR-012-Replacement-Modes.md | audiencia=IA-implementador | fase=3 -->
+<!-- CONTEXT: scope=grouping-engine | dependencias=core/Contracts.md,architecture/03_Data_Model.md,architecture/04_Event_System.md,ADR-011-Grouping-First.md,ADR-012-Replacement-Modes.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md | audiencia=IA-implementador | fase=3 (§2/§6/§7/§13 actualizados en fase 10: reopenSession/dropOccurrences/dedup por identidad/finishSession re-ejecutable, ADR-038 §2-§4) -->
 
 # Grouping Engine — Spec de Motor
 
 > Agrupa las `Occurrence` emitidas por Regex y NER en `EntityGroup` por tipo y valor canónico. Detecta conflictos. Expone grupos a la UI (la unidad de operación). Resuelve reemplazos según `ReplacementMode` y `Rule`.
 
 **EngineId**: `grouping`
-**Versión del spec**: 1.0.0
-**Última actualización**: 2026-07-11
+**Versión del spec**: 1.1.0
+**Última actualización**: 2026-07-17
 
 > **Nota (ADR-026, 2026-07-11)**: el tipo de config canónico es `GroupingConfig` (Contracts.md §6); el alias `GroupingEngineConfig` de §6/§15.2 queda eliminado (mismo patrón que ADR-021 §2 para OCR y ADR-023 §1 para NER).
 >
@@ -15,6 +15,8 @@
 > **Nota (ADR-029, 2026-07-11)**: el formato del modo `mask` se resuelve por grupo desde `Occurrence.maskFormat` (campo nuevo que Regex puebla desde el patrón matcheado; caso Plate vieja vs Mercosur), con fallback a `MASK_FORMAT_BY_TYPE[type]`. Ver §`replacementValue` por modo y caso límite 22.
 >
 > **Nota (ADR-034, 2026-07-16)**: quién invoca la sesión — `startSession(documentId)` lo llama el **Orchestrator** al iniciar la etapa de detección (antes de despachar Regex/NER). `finishSession` se dispara solo (auto-finish al recibir `REGEX_FINISHED` + `NER_FINISHED`) o lo invoca el Orchestrator tras `REGEX_FINISHED` cuando `config.ner.enabled === false` (sin ese wiring, con NER off la sesión no cerraría nunca). `finishSession` es defensivo ante sesión inexistente/ya finalizada (warn + no-op). Sin cambios de firma ni de comportamiento del motor.
+>
+> **Nota (ADR-038, 2026-07-17)**: soporte de re-análisis parcial (`Orchestrator.reanalyze`, `core/Orchestrator.md` §2/§6/§13.18-§13.22) sin perder ediciones del usuario. Tres piezas nuevas: `reopenSession` (reabre una sesión existente —grupos, reglas, conflictos y ediciones intactos— para una segunda pasada de detección, en vez de crear una sesión nueva); `dropOccurrences` (elimina selectivamente ocurrencias que dejaron de ser válidas, p. ej. las NER al desactivar NER); y un invariante permanente de **dedup por identidad** en el manejo de `ENTITY_FOUND` que hace real la idempotencia declarada en `04_Event_System.md` §5 (una ocurrencia con la misma identidad `(entityType, pageIndex, bbox, normalizedValue)` que ya está en la sesión se descarta en silencio). `finishSession` pasa a ser **re-ejecutable**: tras un `reopenSession`, el próximo cierre vuelve a correr la renumeración canónica de ADR-028 sobre la unión de ocurrencias. Ver §6, §13.23-§13.26.
 
 ---
 
@@ -37,7 +39,10 @@ Recibir el stream de `ENTITY_FOUND` (ocurrencias crudas de Regex y NER) y produc
 - Procesar inputs del usuario: `GROUP_UPDATE_REQUESTED`, `GROUP_MERGE_REQUESTED`, `GROUP_SPLIT_REQUESTED`, `RULE_CREATED`, `RULE_UPDATED`, `RULE_DELETED`, `CONFLICT_RESOLVE_REQUESTED`.
 - Emitir `ENTITY_GROUP_CREATED`, `ENTITY_GROUP_UPDATED`, `ENTITY_GROUP_REMOVED`, `GROUP_REPLACEMENT_CHANGED`, `GROUP_TOGGLED`, `CONFLICT_RESOLVED`, `GROUPING_FINISHED`.
 - Mantener `indexInType` estable: si un grupo se elimina, su índice se saltea; si dos se fusionan, el resultante conserva el menor.
-- Renumerar `indexInType` canónicamente en `finishSession` (una sola vez, por orden de primera aparición documental) antes de emitir `GROUPING_FINISHED`, recalculando `replacementValue` de los grupos en modo `placeholder` afectados (ADR-028).
+- Renumerar `indexInType` canónicamente en `finishSession` (por orden de primera aparición documental) antes de emitir `GROUPING_FINISHED`, recalculando `replacementValue` de los grupos en modo `placeholder` afectados (ADR-028). `finishSession` es re-ejecutable: tras un `reopenSession`, vuelve a renumerar sobre la unión de ocurrencias (ADR-038 §2).
+- Reabrir una sesión existente (`reopenSession`) para una segunda pasada de detección sin perder grupos, reglas, conflictos ni ediciones (ADR-038 §2).
+- Eliminar selectivamente ocurrencias que dejaron de ser válidas (`dropOccurrences`), recalculando o eliminando los grupos afectados según corresponda (ADR-038 §2).
+- Descartar en silencio, como invariante permanente, cualquier `ENTITY_FOUND` cuya identidad `(entityType, pageIndex, bbox, normalizedValue)` ya esté registrada en la sesión (dedup real de la idempotencia de `04_Event_System.md` §5, ADR-038 §3).
 
 ---
 
@@ -94,12 +99,31 @@ export interface GroupingEngineSnapshot {
   readonly rules: ReadonlyArray<Rule>;
 }
 
+// ADR-038 §2: re-análisis parcial preservando ediciones.
+export interface ReopenSessionOptions {
+  readonly expectRegex: boolean;  // la pasada re-correrá Regex (esperar REGEX_FINISHED)
+  readonly expectNer: boolean;    // la pasada re-correrá NER (esperar NER_FINISHED)
+}
+
+export interface DropOccurrencesFilter {
+  readonly source?: DetectionSource;
+  readonly pageIndices?: ReadonlyArray<number>;
+  // Al menos un campo; ambos presentes = AND.
+}
+
 export class GroupingEngine implements IEngine {
   readonly id = EngineId.Grouping;
   init(ctx: EngineContext): Promise<void>;
   startSession(documentId: string): void;
   getSnapshot(documentId: string): GroupingEngineSnapshot;
-  finishSession(documentId: string): Promise<void>;  // emite GROUPING_FINISHED
+  finishSession(documentId: string): Promise<void>;  // emite GROUPING_FINISHED; re-ejecutable (ADR-038 §2)
+  // Reabre una sesión existente (grupos/reglas/conflictos/ediciones intactos) para
+  // una segunda pasada de detección. Sesión inexistente → warn + no-op (ADR-038 §2).
+  reopenSession(documentId: string, options: ReopenSessionOptions): void;
+  // Elimina del registro de sesión las ocurrencias que matchean el filtro y sus
+  // members de los grupos; recalcula/elimina grupos afectados (ADR-038 §2).
+  // Filtro sin campos → InvalidInputError; sesión inexistente → warn + no-op.
+  dropOccurrences(documentId: string, filter: DropOccurrencesFilter): void;
   applyGroupUpdate(req: GroupUpdateRequested): Promise<EntityGroup>;
   applyGroupMerge(req: GroupMergeRequested): Promise<EntityGroup>;
   applyGroupSplit(req: GroupSplitRequested): Promise<{ merged: EntityGroup; created: EntityGroup }>;
@@ -120,12 +144,12 @@ export class GroupingEngine implements IEngine {
 |---|---|---|---|---|
 | `ENTITY_GROUP_CREATED` | al crear un grupo nuevo | `EntityGroupCreated` | async | no |
 | `ENTITY_GROUP_UPDATED` | al mutar un grupo por patch, fusión o regla | `EntityGroupUpdated` | async | sí |
-| `ENTITY_GROUP_REMOVED` | al eliminar un grupo (fusión o cierre) | `EntityGroupRemoved` | async | sí |
+| `ENTITY_GROUP_REMOVED` | al eliminar un grupo (fusión, cierre, o `dropOccurrences` que deja un grupo sin members) | `EntityGroupRemoved` | async | sí |
 | `GROUP_REPLACEMENT_CHANGED` | cuando `replacementMode` o `replacementValue` cambian | `GroupReplacementChanged` | async | sí |
 | `GROUP_TOGGLED` | cuando `enabled` cambia | `GroupToggled` | async | sí |
 | `CONFLICT_DETECTED` | al detectar un conflicto | `ConflictDetected` | async | sí |
 | `CONFLICT_RESOLVED` | al resolver un conflicto (auto o manual) | `ConflictResolved` | async | sí |
-| `GROUPING_FINISHED` | cuando Regex + NER terminaron y no hay más `ENTITY_FOUND` pendientes | `GroupingFinished` | async | sí |
+| `GROUPING_FINISHED` | cuando Regex + NER terminaron y no hay más `ENTITY_FOUND` pendientes; puede repetirse tras un `reopenSession` (ADR-038 §2) | `GroupingFinished` | async | sí |
 
 Canal: `EventChannel.Grouping`.
 
@@ -135,7 +159,7 @@ Canal: `EventChannel.Grouping`.
 
 | Evento | Cuándo | Acción |
 |---|---|---|
-| `ENTITY_FOUND` (canales `regex` y `ner`) | cada ocurrencia detectada | agregar a grupo existente o crear nuevo; emitir `ENTITY_GROUP_CREATED` o `ENTITY_GROUP_UPDATED` |
+| `ENTITY_FOUND` (canales `regex` y `ner`) | cada ocurrencia detectada | si su identidad `(entityType, pageIndex, bbox, normalizedValue)` ya está registrada en la sesión, descartar en silencio (dedup, ADR-038 §3); si no, agregar a grupo existente o crear nuevo; emitir `ENTITY_GROUP_CREATED` o `ENTITY_GROUP_UPDATED` |
 | `REGEX_FINISHED` (canal `regex`) | Regex terminó | marcar regex done |
 | `NER_FINISHED` (canal `ner`) | NER terminó | marcar ner done; si ambos done, emitir `GROUPING_FINISHED` |
 | `GROUP_UPDATE_REQUESTED` (canal `ui`) | usuario edita grupo | `applyGroupUpdate` |
@@ -238,6 +262,10 @@ Grouping es determinista dadas las ocurrencias y reglas; sin errores de runtime 
 20. **`process` tras `dispose`**: lanza `EngineDisposedError`.
 21. **Renumeración canónica en `finishSession` (ADR-028)**: llegan ocurrencias fuera de orden documental (NER procesa por prioridad visible). Los índices provisionales reflejan el orden de llegada; al cerrar, la renumeración deja "Persona 1" como la primera del documento (`pageIndex`/`bbox.y`/`bbox.x`), emite `ENTITY_GROUP_UPDATED` por cada índice que cambió y recalcula el `replacementValue` de los placeholders afectados. Las ediciones del usuario hechas durante la sesión (caso 17) se preservan; solo puede cambiar el número.
 22. **Máscara por variante de patente (ADR-029)**: un grupo `Plate` cuyos members llevan `maskFormat: "XXX XXX"` (patente vieja `ABC 123`) enmascara `XXX XXX`; uno Mercosur (`AB 123 CD`, `maskFormat: "XX XXX XX"`) enmascara `XX XXX XX`. Grupo mixto (solo posible por fusión manual): gana el `maskFormat` más frecuente; empate → el del member con primera aparición documental. Sin `maskFormat` en ningún member: fallback `MASK_FORMAT_BY_TYPE[type]`.
+23. **Dedup por identidad (ADR-038 §3)**: llega un `ENTITY_FOUND` cuya `(entityType, pageIndex, bbox, normalizedValue)` ya está registrada en la sesión (p. ej. una re-pasada de Regex tras `reopenSession`) → se descarta en silencio (`logger.debug`, sin eventos, sin tocar frecuencias ni `aliases`). No es exclusivo de sesiones reabiertas: es un invariante siempre activo.
+24. **`reopenSession` sobre grupos editados**: se reabre la sesión con `dropOccurrences({ source: DetectionSource.NER })` previo (desactivar NER) → los grupos cuyos únicos members eran NER se eliminan (`members.length ≥ 1`, `03_Data_Model.md` §9) aunque el usuario los haya editado; los grupos con members Regex restantes conservan sus ediciones intactas (ADR-038 §5.2, Q1 de ADR-038).
+25. **`dropOccurrences` por `pageIndices`** (re-OCR de páginas, ADR-038 §5.3): se eliminan todas las ocurrencias (Regex y NER) de esas páginas, incluidas las que un usuario ya fusionó o cuyo grupo editó; grupos que quedan sin members se eliminan con `ENTITY_GROUP_REMOVED`; conflictos cuyo grupo o candidatos referencian ocurrencias eliminadas se descartan con `CONFLICT_RESOLVED` (mode = el modo efectivo del grupo antes de eliminarlo). No renumera `indexInType`: eso ocurre en el próximo `finishSession`. `dropOccurrences` con filtro sin campos → `InvalidInputError`; sesión inexistente → warn + no-op.
+26. **`finishSession` re-ejecutado tras `reopenSession`**: la renumeración canónica corre de nuevo sobre la unión de ocurrencias vigentes; el resultado final es indistinguible de una corrida fresca con la config final más las ediciones del usuario (mismo invariante de determinismo de ADR-028, extendido a múltiples pasadas). Los índices de placeholder pueden correrse respecto de lo que el usuario ya vio (aceptado, ADR-038 §5, Q2).
 
 ---
 
@@ -278,6 +306,12 @@ Grouping es determinista dadas las ocurrencias y reglas; sin errores de runtime 
 | `canonical renumbering at finishSession emits updates and recomputes placeholders` | `edge.test.ts` | edge | caso 21 |
 | `cancel between ENTITY_FOUND within 50ms` | `cancel.test.ts` | cancel | SLA |
 | `snapshot of groups for text-10p.pdf stable` | `snapshot.test.ts` | snapshot | fixture |
+| `duplicate ENTITY_FOUND with same identity is dropped silently` | `edge.test.ts` | edge | caso 23 (ADR-038 §3) |
+| `reopenSession preserves existing groups/rules/edits` | `contract.test.ts` | contract | ADR-038 §2 |
+| `dropOccurrences by source removes NER-only groups, keeps edited Regex groups` | `edge.test.ts` | edge | caso 24 (ADR-038 §5.2) |
+| `dropOccurrences by pageIndices discards stale conflicts` | `edge.test.ts` | edge | caso 25 (ADR-038 §5.3) |
+| `dropOccurrences with empty filter throws InvalidInputError` | `edge.test.ts` | edge | caso 25 |
+| `finishSession re-run after reopenSession renumbers over union of occurrences` | `contract.test.ts` | contract | caso 26 (ADR-028 extendido) |
 
 Fixtures: `tests/fixtures/text-10p.pdf` con entidades conocidas que generan grupos predecibles.
 
@@ -301,6 +335,7 @@ Fixtures: `tests/fixtures/text-10p.pdf` con entidades conocidas que generan grup
 - [ ] 13. Implementar `applyGroupUpdate`/`Merge`/`Split`/`RuleCreated`/`Updated`/`Deleted`/`ConflictResolve`.
 - [ ] 14. Implementar `getSnapshot` (copia defensiva).
 - [ ] 15. Implementar `dispose` (dessuscribir todos los handlers del bus).
+- [ ] 15b. Implementar `reopenSession`/`dropOccurrences` y el dedup por identidad en el handler de `ENTITY_FOUND`; hacer `finishSession` re-ejecutable sobre la unión de ocurrencias (ADR-038 §2-§4, casos 23-26).
 - [ ] 16. Escribir `contract.test.ts` con todos los tests contractuales.
 - [ ] 17. Escribir `unit.test.ts` con cobertura ≥ 85%.
 - [ ] 18. Escribir `edge.test.ts` con todos los casos límite.
@@ -407,3 +442,6 @@ El sintetizador está en `shared/synthesizer.ts` (exportado desde `@anonly/share
 - `adr/ADR-011-Grouping-First.md`
 - `adr/ADR-012-Replacement-Modes.md`
 - `adr/ADR-008-Immutability.md`
+- `adr/ADR-028-IndexInType-Renumeracion-Canonica.md` (renumeración canónica, extendida a re-análisis)
+- `adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md` (`reopenSession`/`dropOccurrences`/dedup, decisiones de la v1.1.0)
+- `core/Orchestrator.md` §2, §6, §13.18-§13.22 (`reanalyze`, quién invoca estos métodos)

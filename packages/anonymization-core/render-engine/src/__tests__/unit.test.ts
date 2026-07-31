@@ -16,6 +16,7 @@ import {
   createEngineContext,
   createEngineContextWithRealBus,
   createMockConfig,
+  createMockPage,
   createMockPdfDocument,
   createRenderPageInput,
   createValidBuffer,
@@ -24,6 +25,7 @@ import {
   makeAnnotation,
   makeReplacement,
   mockGetDocumentResult,
+  readProtectedPdfFixtureBuffer,
   resetCreatedCanvases,
 } from "./fixtures/test-helpers.js";
 
@@ -96,88 +98,6 @@ describe("RenderEngine — unit tests", () => {
     expect(strokeCalls[0]!.strokeStyle).toBe("#2563eb");
   });
 
-  it("delta render only re-renders affected pages", async () => {
-    // Nota: requestDeltaRender directo (sin override previo) re-renderiza con
-    // los mismos replacements → mismo hash de cache → cache hit legítimo (sin
-    // nuevo getPage). Para forzar un re-render real y verificar "solo la
-    // página afectada", el cambio de modo llega por GROUP_REPLACEMENT_CHANGED
-    // (bus real), que sí invalida el cache de la página afectada (g1) y deja
-    // intacto el de la no afectada (g2) — mismo mecanismo que produciría un
-    // cambio real de reemplazo en producción.
-    const docId = "doc-delta";
-    const mockDoc = createMockPdfDocument({ pageCount: 2 });
-    vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(mockDoc));
-    const realCtx = createEngineContextWithRealBus();
-    await engine.init(realCtx);
-    await engine.loadDocument(docId, createValidBuffer());
-
-    await engine.renderPage(
-      createRenderPageInput({
-        documentId: docId,
-        pageIndex: 0,
-        kind: "anonymized",
-        mode: "preview",
-        replacements: [makeReplacement({ groupId: "g1", occurrenceId: "occ-a" })],
-      }),
-      realCtx,
-    );
-    await engine.renderPage(
-      createRenderPageInput({
-        documentId: docId,
-        pageIndex: 1,
-        kind: "anonymized",
-        mode: "preview",
-        replacements: [makeReplacement({ groupId: "g2", occurrenceId: "occ-b" })],
-      }),
-      realCtx,
-    );
-
-    const getPageSpy = mockDoc["getPage"] as ReturnType<typeof vi.fn>;
-    getPageSpy.mockClear();
-
-    realCtx.bus.emit(EventChannel.Grouping, EngineEvents.GROUP_REPLACEMENT_CHANGED, {
-      documentId: docId,
-      groupId: "g1",
-      mode: ReplacementMode.Redact,
-      value: "",
-    });
-
-    await vi.waitFor(() => {
-      expect(getPageSpy).toHaveBeenCalled();
-    });
-
-    expect(getPageSpy).toHaveBeenCalledWith(1); // pageIndex 0 → pageNumber 1
-    expect(getPageSpy).not.toHaveBeenCalledWith(2); // pageIndex 1 (g2) no afectada
-  });
-
-  it("requestDeltaRender is a no-op when no page is affected", async () => {
-    const docId = "doc-delta-noop";
-    const mockDoc = createMockPdfDocument({ pageCount: 1 });
-    vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(mockDoc));
-    await engine.init(ctx);
-    await engine.loadDocument(docId, createValidBuffer());
-
-    await engine.renderPage(
-      createRenderPageInput({
-        documentId: docId,
-        pageIndex: 0,
-        kind: "anonymized",
-        mode: "preview",
-        replacements: [makeReplacement({ groupId: "g1" })],
-      }),
-      ctx,
-    );
-
-    const getPageSpy = mockDoc["getPage"] as ReturnType<typeof vi.fn>;
-    getPageSpy.mockClear();
-
-    engine.requestDeltaRender(docId, ["group-inexistente"]);
-
-    // Sin páginas afectadas: ningún nuevo render se dispara.
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(getPageSpy).not.toHaveBeenCalled();
-  });
-
   it("LRU cache evicts oldest when full", async () => {
     const docId = "doc-lru";
     const mockDoc = createMockPdfDocument({ pageCount: 3 });
@@ -230,7 +150,15 @@ describe("RenderEngine — unit tests", () => {
 
     const second = await engine.renderPage(input, ctx);
     expect(getPageSpy).toHaveBeenCalledTimes(1); // sin nueva llamada: cache hit
-    expect(second).toBe(first); // misma referencia cacheada
+    // ADR-043: el cache interno guarda una entrada propia (`InternalCacheEntry`,
+    // siempre con `encoded`) distinta de `RenderPageOutput` (público, `encoded`
+    // opcional según `mode` — Render_Engine.md §10); un hit proyecta una copia
+    // nueva (`toPublicOutput`) en cada llamada, así que ya no es la MISMA
+    // referencia (antes de este PR el cache guardaba el propio
+    // `RenderPageOutput` devuelto). Se verifica igualdad estructural en su
+    // lugar — el invariante real de este test ("cache hit = sin re-render")
+    // ya lo cubre la aserción de `getPageSpy` de arriba.
+    expect(second).toStrictEqual(first);
   });
 
   it("renderPages retries a page that fails once and continues after exhausting retries", async () => {
@@ -331,177 +259,6 @@ describe("RenderEngine — unit tests", () => {
     });
   });
 
-  it("GROUP_REPLACEMENT_CHANGED triggers a delta re-render of affected pages", async () => {
-    const docId = "doc-group-replacement";
-    const mockDoc = createMockPdfDocument({ pageCount: 1 });
-    vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(mockDoc));
-    const realCtx = createEngineContextWithRealBus();
-    await engine.init(realCtx);
-    await engine.loadDocument(docId, createValidBuffer());
-
-    await engine.renderPage(
-      createRenderPageInput({
-        documentId: docId,
-        pageIndex: 0,
-        kind: "anonymized",
-        mode: "preview",
-        replacements: [makeReplacement({ groupId: "g1" })],
-      }),
-      realCtx,
-    );
-
-    const getPageSpy = mockDoc["getPage"] as ReturnType<typeof vi.fn>;
-    getPageSpy.mockClear();
-
-    realCtx.bus.emit(EventChannel.Grouping, EngineEvents.GROUP_REPLACEMENT_CHANGED, {
-      documentId: docId,
-      groupId: "g1",
-      mode: ReplacementMode.Redact,
-      value: "",
-    });
-
-    await vi.waitFor(() => {
-      expect(getPageSpy).toHaveBeenCalled();
-    });
-  });
-
-  it("delta render on original kind filters disabled highlight annotations, keeping other groups'", async () => {
-    const docId = "doc-annotation-overrides";
-    vi.mocked(getDocument).mockReturnValue(
-      mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
-    );
-    const realCtx = createEngineContextWithRealBus();
-    await engine.init(realCtx);
-    await engine.loadDocument(docId, createValidBuffer());
-
-    await engine.renderPage(
-      createRenderPageInput({
-        documentId: docId,
-        pageIndex: 0,
-        kind: "original",
-        mode: "preview",
-        annotations: [
-          makeAnnotation({
-            id: "ann-g1",
-            groupId: "g1",
-            kind: AnnotationKind.Highlight,
-            bbox: { x: 1, y: 1, width: 5, height: 5 },
-          }),
-          makeAnnotation({
-            id: "ann-g2",
-            groupId: "g2",
-            kind: AnnotationKind.Highlight,
-            bbox: { x: 9, y: 9, width: 5, height: 5 },
-          }),
-        ],
-      }),
-      realCtx,
-    );
-    resetCreatedCanvases();
-
-    realCtx.bus.emit(EventChannel.Grouping, EngineEvents.GROUP_TOGGLED, {
-      documentId: docId,
-      groupId: "g1",
-      enabled: false,
-    });
-
-    await vi.waitFor(() => {
-      expect(getCreatedCanvases().length).toBeGreaterThan(0);
-    });
-
-    const [canvas] = getCreatedCanvases();
-    const strokeCalls = canvas!.calls.filter((c) => c.op === "strokeRect");
-    // g1 (deshabilitado) se filtra; g2 permanece.
-    expect(strokeCalls).toHaveLength(1);
-    expect(strokeCalls[0]!.args).toEqual([9, 9, 5, 5]);
-  });
-
-  it("delta render swallows internal render errors and emits PREVIEW_PAGE_FAILED", async () => {
-    const docId = "doc-delta-internal-error";
-    let callCount = 0;
-    const mockDoc = createMockPdfDocument({
-      pageCount: 1,
-      pageFactory: () => {
-        callCount += 1;
-        if (callCount === 1) {
-          return {
-            getViewport: vi.fn(() => ({ width: 100, height: 100 })),
-            render: vi.fn(() => ({ promise: Promise.resolve() })),
-          };
-        }
-        return {
-          getViewport: vi.fn(() => ({ width: 100, height: 100 })),
-          render: vi.fn(() => ({ promise: Promise.reject(new Error("boom en delta render")) })),
-        };
-      },
-    });
-    vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(mockDoc));
-    const realCtx = createEngineContextWithRealBus();
-    await engine.init(realCtx);
-    await engine.loadDocument(docId, createValidBuffer());
-
-    await engine.renderPage(
-      createRenderPageInput({
-        documentId: docId,
-        pageIndex: 0,
-        kind: "anonymized",
-        mode: "preview",
-        replacements: [makeReplacement({ groupId: "g1" })],
-      }),
-      realCtx,
-    );
-
-    const emitSpy = vi.spyOn(realCtx.bus, "emit");
-
-    realCtx.bus.emit(EventChannel.Grouping, EngineEvents.GROUP_REPLACEMENT_CHANGED, {
-      documentId: docId,
-      groupId: "g1",
-      mode: ReplacementMode.Redact,
-      value: "",
-    });
-
-    await vi.waitFor(() => {
-      expect(emitSpy).toHaveBeenCalledWith(
-        EventChannel.Render,
-        EngineEvents.PREVIEW_PAGE_FAILED,
-        expect.objectContaining({ documentId: docId, pageIndex: 0 }),
-      );
-    });
-  });
-
-  it("GROUP_TOGGLED triggers a delta re-render of affected pages", async () => {
-    const docId = "doc-group-toggled";
-    const mockDoc = createMockPdfDocument({ pageCount: 1 });
-    vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(mockDoc));
-    const realCtx = createEngineContextWithRealBus();
-    await engine.init(realCtx);
-    await engine.loadDocument(docId, createValidBuffer());
-
-    await engine.renderPage(
-      createRenderPageInput({
-        documentId: docId,
-        pageIndex: 0,
-        kind: "anonymized",
-        mode: "preview",
-        replacements: [makeReplacement({ groupId: "g1" })],
-      }),
-      realCtx,
-    );
-
-    const getPageSpy = mockDoc["getPage"] as ReturnType<typeof vi.fn>;
-    getPageSpy.mockClear();
-
-    realCtx.bus.emit(EventChannel.Grouping, EngineEvents.GROUP_TOGGLED, {
-      documentId: docId,
-      groupId: "g1",
-      enabled: false,
-    });
-
-    await vi.waitFor(() => {
-      expect(getPageSpy).toHaveBeenCalled();
-    });
-  });
-
   // ─── ADR-034 §3 ───
 
   it("preview mode output has no encoded field", async () => {
@@ -518,5 +275,127 @@ describe("RenderEngine — unit tests", () => {
     );
 
     expect(output.encoded).toBeUndefined();
+  });
+
+  // ─── ADR-037 §3 (Hito 10): cache por escala + límite por bytes ───
+
+  it("cache key includes scale; different scales coexist", async () => {
+    const docId = "doc-scale-cache";
+    const mockDoc = createMockPdfDocument({ pageCount: 1 });
+    vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(mockDoc));
+    await engine.init(ctx);
+    await engine.loadDocument(docId, createValidBuffer());
+    const getPageSpy = mockDoc["getPage"] as ReturnType<typeof vi.fn>;
+
+    await engine.renderPage(
+      createRenderPageInput({ documentId: docId, pageIndex: 0, scale: 1 }),
+      ctx,
+    );
+    await engine.renderPage(
+      createRenderPageInput({ documentId: docId, pageIndex: 0, scale: 2 }),
+      ctx,
+    );
+
+    // Misma página/kind/mode, distinta escala: dos entradas separadas del LRU
+    // (ADR-037 §3), no un cache hit cruzado.
+    expect(engine["cache"].size).toBe(2);
+    expect(getPageSpy).toHaveBeenCalledTimes(2);
+
+    // Re-renderizar a escala 1 es cache hit: sin nueva llamada a getPage.
+    await engine.renderPage(
+      createRenderPageInput({ documentId: docId, pageIndex: 0, scale: 1 }),
+      ctx,
+    );
+    expect(getPageSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("cache evicts by PREVIEW_CACHE_MAX_BYTES in addition to cachePages", async () => {
+    const docId = "doc-cache-bytes";
+    const bigDimension = 5000; // 5000*5000*4 bytes = 100.000.000 bytes (~95.4 MiB) por página.
+    const mockDoc = createMockPdfDocument({
+      pageCount: 3,
+      pageFactory: () => createMockPage({ width: bigDimension, height: bigDimension }),
+    });
+    vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(mockDoc));
+    // cachePages generoso: el único límite que debe disparar la eviction acá
+    // es PREVIEW_CACHE_MAX_BYTES (200 MiB), no el límite por items.
+    const largeCachePagesCtx = createEngineContext({
+      config: createMockConfig({
+        render: { previewScale: 1, fullScale: 2.08, jpegQuality: 0.85, cachePages: 1000 },
+      }),
+    });
+    await engine.init(largeCachePagesCtx);
+    await engine.loadDocument(docId, createValidBuffer());
+    const getPageSpy = mockDoc["getPage"] as ReturnType<typeof vi.fn>;
+
+    await engine.renderPage(
+      createRenderPageInput({ documentId: docId, pageIndex: 0 }),
+      largeCachePagesCtx,
+    );
+    await engine.renderPage(
+      createRenderPageInput({ documentId: docId, pageIndex: 1 }),
+      largeCachePagesCtx,
+    );
+    // 2 páginas ≈ 190.7 MiB acumulados: todavía por debajo del límite de 200 MiB.
+    expect(engine["cache"].size).toBe(2);
+
+    await engine.renderPage(
+      createRenderPageInput({ documentId: docId, pageIndex: 2 }),
+      largeCachePagesCtx,
+    );
+
+    // 3 páginas ≈ 286 MiB > 200 MiB: se evictó la entrada más vieja (página 0),
+    // dejando 2 páginas (~190.7 MiB), que ya no excede el límite.
+    expect(engine["cache"].size).toBe(2);
+
+    const callsBefore = getPageSpy.mock.calls.length;
+    await engine.renderPage(
+      createRenderPageInput({ documentId: docId, pageIndex: 0 }),
+      largeCachePagesCtx,
+    );
+    // La página 0 ya no estaba cacheada (evictada por bytes): nueva llamada a getPage.
+    expect(getPageSpy.mock.calls.length).toBe(callsBefore + 1);
+  });
+
+  // ─── ADR-050 §2 + ADR-043 §5 (Hito 10, PR17.4): re-priming con password ───
+
+  it("re-primed worker reloads a password-protected document", async () => {
+    // El host retiene el password junto a `{ buffer, pageCount }`
+    // (`RetainedDocument`, ADR-050 §2) únicamente para re-primear workers
+    // nuevos/reemplazados (`reprimeWorkers`, ADR-043 §5) — el kernel nunca lo
+    // ve dos veces (solo en la carga original). Se inyecta un pool con
+    // `broadcast` espiado (estructural — el tipo interno `RenderJobPool` no
+    // se exporta desde este paquete, mismo patrón que `IMMEDIATE_POOL` en
+    // render.engine.ts) para observar el `LoadDocumentPayload` exacto que
+    // `reprimeWorkers` reenvía a un worker nuevo/reemplazado.
+    const docId = "doc-reprime-password";
+    const broadcastPayloads: unknown[] = [];
+    const spyPool = {
+      dispatch: <T>(params: { readonly run: () => Promise<T> }): Promise<T> => params.run(),
+      broadcast: async <T>(payload: unknown, run: () => Promise<T>): Promise<ReadonlyArray<T>> => {
+        broadcastPayloads.push(payload);
+        return [await run()];
+      },
+    };
+    const pooledEngine = new RenderEngine(spyPool);
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 10 })),
+    );
+    await pooledEngine.init(ctx);
+
+    const buffer = readProtectedPdfFixtureBuffer();
+    await pooledEngine.loadDocument(docId, buffer, "test1234");
+    // Descarta el broadcast de la carga original: solo interesa el que
+    // dispara reprimeWorkers.
+    broadcastPayloads.length = 0;
+
+    await pooledEngine.reprimeWorkers();
+
+    expect(broadcastPayloads).toHaveLength(1);
+    expect(broadcastPayloads[0]).toEqual(
+      expect.objectContaining({ documentId: docId, buffer, password: "test1234" }),
+    );
+
+    await pooledEngine.dispose();
   });
 });

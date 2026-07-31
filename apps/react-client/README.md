@@ -2,7 +2,13 @@
 
 Cliente web de Anonly (React + Vite + Tailwind + Radix UI + Zustand).
 
-> App SPA que consume el `@anonly/anonymization-core`. En Hito 1 esto es un esqueleto con el layout de 4 paneles y estados vacíos. La lógica (core-adapter, stores, componentes) se implementa en el Hito 10.
+> App SPA que consume el `@anonly/anonymization-core`. Esqueleto con el layout
+> de 4 paneles y estados vacíos (Hito 1), ampliado en Hito 10 PR1 ("Scaffold")
+> con los stores de Zustand (`src/store/`, placeholders sin conexión al bus) y
+> el Hero de bienvenida (`docs/ui/UX_Guidelines.md` §11). Este PR **bootea sin
+> Core**: no hay `core-adapter` ni conexión al bus todavía — eso llega en el
+> PR5 del hito (`docs/roadmap/MVP.md`, Hito 10). Los componentes de negocio del
+> catálogo (`docs/ui/Components.md`) se implementan en los PRs 6-9.
 
 ## Documentación
 
@@ -11,19 +17,28 @@ Cliente web de Anonly (React + Vite + Tailwind + Radix UI + Zustand).
 - Componentes: [`docs/ui/Components.md`](../../docs/ui/Components.md)
 - Layout: [`docs/00_Project_Vision.md`](../../docs/00_Project_Vision.md) §8
 
-## Layout (Hito 1 — placeholder)
+## Layout (estado vacío, sin Core conectado)
 
 ```
 ┌──────────────────────────────────────────────────────────┐
 │  Toolbar (Anonly + Importar PDF + Settings)               │
 ├──────────────────┬───────────────────────────────────────┤
-│  Entidades       │            PDF original               │
-│  (empty state)   │            (empty state)              │
-├──────────────────┼───────────────────────────────────────┤
-│  Reglas          │            PDF anonimizado            │
-│  (empty state)   │            (empty state)              │
+│  Entidades       │                                       │
+│  (empty state)   │              Hero                     │
+├──────────────────┤   (arrastrar PDF + features)          │
+│  Reglas          │                                       │
+│  (empty state)   │                                       │
 └──────────────────┴───────────────────────────────────────┘
 ```
+
+## Stores (Zustand, `src/store/`)
+
+Placeholders de `docs/ui/React_Client.md` §3: `document.store.ts`,
+`entities.store.ts`, `rules.store.ts`, `pipeline.store.ts`, `viewer.store.ts`,
+`settings.store.ts`. Cada uno implementa la forma exacta del spec y es
+autocontenido (sin dependencias entre stores, sin conexión al bus). La
+mutación por eventos del Core (`core-adapter/bus-bridge.ts`) llega en el PR5
+del Hito 10.
 
 ## Stack
 

@@ -37,13 +37,73 @@ import {
   EngineErrorCode,
   EngineEvents,
   EventChannel,
+  InvalidInputError,
+  type EventPayloadMap,
   type IEventBus,
   type ILogger,
+  type Serializable,
   type SerializedEngineError,
+  type WorkerFactory,
+  type WorkerInbound,
   type WorkerJobType,
+  type WorkerLike,
+  type WorkerOutbound,
 } from "@anonly/shared";
 
-export type PoolKey = "pdf" | "ocr" | "ner" | "render";
+// "export" (ADR-047 §2): identificador interno del `WorkerPool` de size 1
+// que transporta el ExportWorker — su único uso observable es el string
+// `${poolKey}-pool` del `workerId` en la telemetría `WORKER_JOB_*`. NO es un
+// pool en el sentido de `05_Worker_Architecture.md` §1.1 (sin cola
+// prioritaria multi-worker, sin clave propia en `WorkerPoolConfig`): por eso
+// `WorkerPoolManager` (que sí gestiona los cuatro pools "de verdad", con
+// creación perezosa y disposición por idle) lo excluye vía `ManagedPoolKey`.
+export type PoolKey = "pdf" | "ocr" | "ner" | "render" | "export";
+
+// Unión de los cuatro pools que gestiona `WorkerPoolManager` (creación
+// perezosa, disposición por idle). Excluye "export": ese `WorkerPool` lo
+// construye e inyecta `create-core.ts` directo al `ExportEngine` (ADR-047
+// §2, espejo de `ocrPool`/`nerPool`), sin pasar por el manager.
+export type ManagedPoolKey = Exclude<PoolKey, "export">;
+
+const WORKER_OUTBOUND_TYPES: ReadonlySet<string> = new Set([
+  "READY",
+  "PROGRESS",
+  "COMPLETED",
+  "FAILED",
+  "CANCELLED",
+  "LOG",
+  "EVENT",
+]);
+
+/** `addEventListener("message", ...)` puede recibir un `MessageEvent` real (DOM, `.data` envuelve el mensaje) o el mensaje directo (fakes de test, ADR-036 §2). */
+function hasDataProperty(value: unknown): value is { readonly data: unknown } {
+  return typeof value === "object" && value !== null && "data" in value;
+}
+
+function isWorkerOutboundShape(value: unknown): value is WorkerOutbound {
+  if (typeof value !== "object" || value === null || !("type" in value)) return false;
+  const type = (value as { readonly type: unknown }).type;
+  return typeof type === "string" && WORKER_OUTBOUND_TYPES.has(type);
+}
+
+/** Normaliza la entrega de un mensaje de worker (real o fake) a su `WorkerOutbound` tipado. */
+function extractWorkerOutbound(ev: unknown): WorkerOutbound | undefined {
+  const candidate = hasDataProperty(ev) ? ev.data : ev;
+  return isWorkerOutboundShape(candidate) ? candidate : undefined;
+}
+
+interface PendingRemoteJob {
+  readonly slotIndex: number;
+  readonly resolve: (result: unknown) => void;
+  readonly reject: (err: unknown) => void;
+  /**
+   * Ciclo de vida del modelo NER reportado por un worker remoto (ADR-046
+   * §4, primer consumidor de `PROGRESS`): enrutado por `jobId` desde
+   * `handleWorkerMessage`. Ausente para jobs que no lo necesitan (pdf/ocr/
+   * render) — no se llama nunca en ese caso.
+   */
+  readonly onProgress?: (progress: number, partial?: Serializable) => void;
+}
 
 export interface WorkerPoolOptions {
   readonly poolKey: PoolKey;
@@ -55,6 +115,25 @@ export interface WorkerPoolOptions {
   readonly maxRetryDelayMs: number;
   readonly bus: IEventBus;
   readonly logger: ILogger;
+  /**
+   * Factory de `Worker` real inyectada vía `CoreRuntimeOptions.workers`
+   * (ADR-036 §2, Contracts.md §3.5). Si está presente Y el `dispatch()` de un
+   * job trae `payload`, ese job se despacha por `postMessage` a una instancia
+   * real (una por slot de concurrencia, creada perezosamente — ver
+   * `workerForSlot`) en vez de invocar `run()` in-process. Ausente => el pool
+   * es 100% in-process, comportamiento idéntico al Hito 9 (ADR-035 §1).
+   */
+  readonly workerFactory?: WorkerFactory;
+  /**
+   * Re-priming (ADR-043 §5): invocado y esperado (`await`) por
+   * `workerForSlot` inmediatamente después de crear un worker real nuevo —
+   * ANTES de que ese worker reciba cualquier job — para que el motor dueño
+   * de este pool pueda re-enviarle su propio estado retenido (en `RenderPool`:
+   * `load-document` de todos los documentos vigentes vía `broadcast`, ver
+   * `RenderEngine#reprimeWorkers`). Sin uso fuera de `RenderPool`: los demás
+   * pools (pdf/ocr/ner) no tienen estado por documento que re-primear.
+   */
+  readonly onWorkerCreated?: () => Promise<void>;
 }
 
 export interface DispatchParams<TResult> {
@@ -65,6 +144,16 @@ export interface DispatchParams<TResult> {
   /** Reintentos propios de este dispatch (por defecto, el `maxRetries` del pool). */
   readonly maxRetriesOverride?: number;
   /**
+   * Payload serializable para despacho remoto (ADR-036 §2/§3): si el pool
+   * tiene `workerFactory` configurada Y este campo está presente, el job se
+   * despacha por `postMessage` (`{ type: "RUN", jobType: <jobType del pool>,
+   * payload }`) en vez de invocar `run()`. Ausente, o pool sin
+   * `workerFactory` => se invoca `run()` in-process (comportamiento de hoy,
+   * Hito 9/ADR-035). Callers existentes (Orchestrator, Hito 9) no pasan este
+   * campo: su comportamiento no cambia.
+   */
+  readonly payload?: unknown;
+  /**
    * Override del criterio de reintento (por defecto, `err.retryable`). Caso
    * de uso real: `05_Worker_Architecture.md` §5 documenta `PDF_PASSWORD_REQUIRED`
    * como no-retryable, pero `PdfPasswordRequiredError` (pdf-engine, fuera del
@@ -74,6 +163,17 @@ export interface DispatchParams<TResult> {
    * contraseña faltante.
    */
   readonly isRetryable?: (err: unknown) => boolean;
+  /**
+   * Ciclo de vida del modelo NER (ADR-046 §4): `WorkerPool` deja de
+   * descartar los `PROGRESS` — los enruta al job pendiente correspondiente
+   * (por `jobId`) para que el motor los traduzca a eventos de dominio en
+   * host. Un `PROGRESS` de un job ya resuelto se descarta en silencio
+   * (`handleWorkerMessage`). En modo in-process (`executeJob` invoca
+   * `params.run()` directo) este campo no lo usa el pool: el motor ya le
+   * pasa el mismo callback directo al kernel (ADR-035, comportamiento
+   * observable idéntico).
+   */
+  readonly onProgress?: (progress: number, partial?: Serializable) => void;
 }
 
 interface QueueEntry {
@@ -101,6 +201,15 @@ function isTimeoutError(err: unknown): boolean {
   return err instanceof EngineError && err.code.endsWith("_TIMEOUT");
 }
 
+/** `ILogger` exige `meta` objeto (`Record<string, unknown>`); `WorkerOutbound.LOG.meta` es `Serializable` (puede ser primitivo/array). Envuelve lo que no sea ya un objeto plano. */
+function toLogMeta(meta: unknown): Readonly<Record<string, unknown>> | undefined {
+  if (meta === undefined) return undefined;
+  if (typeof meta === "object" && meta !== null && !Array.isArray(meta)) {
+    return meta as Readonly<Record<string, unknown>>;
+  }
+  return { value: meta };
+}
+
 function toSerializedError(err: unknown): SerializedEngineError {
   if (err instanceof EngineError) return err.serialize();
   // Defensivo: todo método público de un motor está contractualmente
@@ -124,6 +233,11 @@ export class WorkerPool {
   private active = 0;
   private readonly queue: QueueEntry[] = [];
   private disposed = false;
+
+  // ─── Transporte por postMessage (ADR-036 §2/§3); vacío/no usado si no hay
+  // `workerFactory` (comportamiento in-process de hoy, sin cambios). ───
+  private readonly remoteWorkers = new Map<number, WorkerLike>();
+  private readonly pendingRemoteJobs = new Map<string, PendingRemoteJob>();
 
   constructor(options: WorkerPoolOptions) {
     this.options = options;
@@ -197,10 +311,82 @@ export class WorkerPool {
     });
   }
 
+  /**
+   * Broadcast (ADR-043 §4): envía `payload` como `RUN` con el `jobType` de
+   * este pool directo a CADA worker vivo — sin pasar por la cola de
+   * prioridad (no es un job encolable) — y espera el `COMPLETED` de todos.
+   * Usado por `RenderPool` para los controles `load-document`/
+   * `unload-document` (`RenderEngine#loadDocument`/`unloadDocument`): a
+   * diferencia de `dispatch()` (un job va a UN worker), un control de
+   * `RenderEngine` debe llegar a TODOS, porque cualquiera de ellos podría
+   * recibir el próximo job `render-page` sobre ese documento.
+   *
+   * Sin `workerFactory` (in-process, ADR-035): degenera en una sola
+   * invocación de `run()` (el kernel local) — mismo criterio que
+   * `executeJob`. Con `workerFactory`: asegura que exista al menos un worker
+   * (`workerForSlot(0)`, bootstrap perezoso — el primer `load-document` de la
+   * sesión puede llegar antes que cualquier job real haya creado un worker) y
+   * despacha a TODOS los que ya viven en el pool en ese momento (incluidos
+   * los creados por jobs `render-page` previos).
+   */
+  async broadcast<TResult>(
+    payload: unknown,
+    run: () => Promise<TResult>,
+  ): Promise<ReadonlyArray<TResult>> {
+    if (this.disposed) {
+      return Promise.reject(new CancelledError(nextJobId(this.options.jobType)));
+    }
+    if (this.options.workerFactory === undefined) {
+      return [await run()];
+    }
+
+    await this.workerForSlot(0);
+    const entries = [...this.remoteWorkers.entries()];
+    return Promise.all(
+      entries.map(([slot, worker]) => this.sendBroadcastToWorker<TResult>(slot, worker, payload)),
+    );
+  }
+
+  private sendBroadcastToWorker<TResult>(
+    slot: number,
+    worker: WorkerLike,
+    payload: unknown,
+  ): Promise<TResult> {
+    const jobId = nextJobId(this.options.jobType);
+    return new Promise<TResult>((resolve, reject) => {
+      this.pendingRemoteJobs.set(jobId, {
+        slotIndex: slot,
+        resolve: (result) => resolve(result as TResult),
+        reject,
+      });
+      const runMessage: WorkerInbound = {
+        type: "RUN",
+        jobId,
+        signalId: jobId,
+        jobType: this.options.jobType,
+        payload,
+      };
+      worker.postMessage(runMessage);
+    });
+  }
+
   /** Rechaza todos los jobs en cola (no los que ya están corriendo) y marca el pool como dispuesto. */
   dispose(): void {
     this.disposed = true;
     this.queue.length = 0;
+
+    // Jobs remotos en curso: se tratan igual que los de cola (dispose() es un
+    // flujo normal, 05_Worker_Architecture.md §8), no un error de programación.
+    for (const [jobId, pending] of this.pendingRemoteJobs) {
+      this.pendingRemoteJobs.delete(jobId);
+      pending.reject(new CancelledError(jobId));
+    }
+    for (const worker of this.remoteWorkers.values()) {
+      const disposeMessage: WorkerInbound = { type: "DISPOSE" };
+      worker.postMessage(disposeMessage);
+      worker.terminate();
+    }
+    this.remoteWorkers.clear();
   }
 
   private enqueue(entry: QueueEntry): void {
@@ -251,7 +437,7 @@ export class WorkerPool {
       }
 
       try {
-        const result = await params.run();
+        const result = await this.executeJob(jobId, params);
         this.options.bus.emit(EventChannel.Workers, EngineEvents.WORKER_JOB_COMPLETED, {
           jobId,
           result: null,
@@ -287,20 +473,262 @@ export class WorkerPool {
     });
     throw lastError;
   }
+
+  /**
+   * Punto único de bifurcación in-process vs. remoto (ADR-036 §2). Con
+   * `workerFactory` configurada Y `params.payload` presente, despacha por
+   * `postMessage`; si no, comportamiento de hoy (`run()` in-process). El
+   * resto de `runWithRetry` (reintentos, backoff, eventos `WORKER_JOB_*`) es
+   * idéntico para ambos caminos: no le importa de dónde vino el resultado.
+   */
+  private executeJob<TResult>(jobId: string, params: DispatchParams<TResult>): Promise<TResult> {
+    if (this.options.workerFactory !== undefined && params.payload !== undefined) {
+      return this.dispatchRemote<TResult>(jobId, params.payload, params.signal, params.onProgress);
+    }
+    return params.run();
+  }
+
+  /**
+   * Despacha un job por `postMessage` a una instancia real de worker (una
+   * por slot de concurrencia, creada perezosamente — `workerForSlot`).
+   * Correlaciona la respuesta por `jobId` vía `pendingRemoteJobs`,
+   * gestionado en `handleWorkerMessage`. `onProgress` (ADR-046 §4) se
+   * registra junto al resto del job pendiente para que un `PROGRESS` de este
+   * `jobId` se lo entregue `handleWorkerMessage`.
+   */
+  private dispatchRemote<TResult>(
+    jobId: string,
+    payload: unknown,
+    signal: AbortSignal,
+    onProgress?: (progress: number, partial?: Serializable) => void,
+  ): Promise<TResult> {
+    const slot = this.assignRemoteSlot();
+
+    return new Promise<TResult>((resolve, reject) => {
+      this.pendingRemoteJobs.set(jobId, {
+        slotIndex: slot,
+        resolve: (result) => resolve(result as TResult),
+        reject,
+        ...(onProgress !== undefined ? { onProgress } : {}),
+      });
+
+      // `workerForSlot` es async (ADR-043 §5: un worker nuevo se re-primea —
+      // `onWorkerCreated`, awaited — antes de aceptar su primer job). El
+      // `RUN` recién se postea cuando el worker está listo.
+      void this.workerForSlot(slot)
+        .then((worker) => {
+          if (!this.pendingRemoteJobs.has(jobId)) return; // ya cancelado/resuelto mientras se creaba el worker.
+
+          if (signal.aborted) {
+            // Abortado mientras se creaba/re-primeaba el worker: nunca llegó
+            // a postearse un RUN al que cancelar — se rechaza directo, sin
+            // enviar CANCEL (mismo criterio que el guard de `dispatch()` para
+            // un signal ya abortado antes de encolar).
+            this.pendingRemoteJobs.delete(jobId);
+            reject(new CancelledError(jobId));
+            return;
+          }
+
+          const sendCancel = (): void => {
+            if (!this.pendingRemoteJobs.has(jobId)) return;
+            const cancelMessage: WorkerInbound = { type: "CANCEL", jobId, signalId: jobId };
+            worker.postMessage(cancelMessage);
+          };
+          signal.addEventListener("abort", sendCancel, { once: true });
+
+          const runMessage: WorkerInbound = {
+            type: "RUN",
+            jobId,
+            signalId: jobId,
+            jobType: this.options.jobType,
+            payload,
+          };
+          worker.postMessage(runMessage);
+        })
+        .catch((err: unknown) => {
+          this.pendingRemoteJobs.delete(jobId);
+          reject(err instanceof Error ? err : new Error(String(err)));
+        });
+    });
+  }
+
+  /**
+   * Slot de concurrencia 0..size-1 no usado por ningún job remoto en curso.
+   * Siempre hay uno disponible por construcción: `pump()` solo ejecuta un
+   * job (remoto o no) dentro del gate `active < size`, así que el número de
+   * jobs remotos simultáneos nunca supera `size`.
+   */
+  private assignRemoteSlot(): number {
+    const used = new Set<number>();
+    for (const pending of this.pendingRemoteJobs.values()) used.add(pending.slotIndex);
+    for (let slot = 0; slot < this.options.size; slot += 1) {
+      if (!used.has(slot)) return slot;
+    }
+    // Invariante violado (ver comentario arriba): no es un fallo de dominio,
+    // es un bug del propio pool — no hay un EngineErrorCode que lo describa
+    // (I-4) y no es código público de cara al usuario (Code_Standards.md §7
+    // aplica a funciones públicas del Core).
+    throw new Error(
+      `WorkerPool(${this.options.poolKey}): no hay slot de worker remoto libre (invariante de concurrencia violado).`,
+    );
+  }
+
+  /**
+   * Worker real para `slot`, creado perezosamente vía `workerFactory` (una
+   * instancia por slot, reutilizada entre jobs). Async desde ADR-043 §5: un
+   * worker recién creado se re-primea (`onWorkerCreated`, awaited) ANTES de
+   * que el caller lo use para postear un job — el registro en
+   * `remoteWorkers` ocurre síncronamente, antes del primer `await`, así que
+   * dos llamadas concurrentes para el mismo `slot` (p. ej. un `broadcast` de
+   * bootstrap solapado con un `dispatchRemote` real) nunca crean dos workers
+   * para el mismo slot (la segunda ve `existing !== undefined` de inmediato).
+   */
+  private async workerForSlot(slot: number): Promise<WorkerLike> {
+    const existing = this.remoteWorkers.get(slot);
+    if (existing !== undefined) return existing;
+
+    const factory = this.options.workerFactory;
+    // Invariante: solo se llama desde dispatchRemote()/broadcast(), que ya
+    // chequearon `workerFactory !== undefined`.
+    if (factory === undefined) {
+      throw new Error(
+        `WorkerPool(${this.options.poolKey}): workerForSlot() llamado sin workerFactory configurada.`,
+      );
+    }
+
+    const worker = factory();
+    worker.addEventListener("message", (ev) => this.handleWorkerMessage(ev));
+    worker.addEventListener("error", (ev) => this.handleWorkerTransportError(slot, ev));
+    this.remoteWorkers.set(slot, worker);
+
+    if (this.options.onWorkerCreated !== undefined) {
+      await this.options.onWorkerCreated();
+    }
+
+    return worker;
+  }
+
+  /**
+   * Único listener de mensajes por worker (no por job): correlaciona
+   * COMPLETED/FAILED/CANCELLED contra `pendingRemoteJobs` por `jobId`, y
+   * reenvía EVENT al bus real (transporte mecánico — ADR-013 §6: "los
+   * eventos observables se emiten siempre en host"; el afinado de payload
+   * específico de motor es responsabilidad del host-bridge de cada motor,
+   * ADR-036 §3, fuera de alcance de este PR). READY no requiere acción del
+   * pool: RUN ya se encola sin esperar READY. PROGRESS (ADR-046 §4) se
+   * enruta al `onProgress` del job pendiente correspondiente, por `jobId`
+   * — el primer consumidor es el ciclo de vida del modelo NER, que el motor
+   * traduce a `NER_MODEL_LOADING`/`NER_MODEL_READY` en host; no es una vía
+   * para emitir eventos observables desde el worker (eso sigue siendo
+   * terreno de `EVENT`).
+   */
+  private handleWorkerMessage(ev: unknown): void {
+    const outbound = extractWorkerOutbound(ev);
+    if (outbound === undefined) return;
+
+    if (outbound.type === "EVENT") {
+      this.options.bus.emit(
+        outbound.channel,
+        outbound.event,
+        // `payload` es `unknown` a nivel de transporte (ADR-036 §3); el
+        // reenvío es tal cual, sin decidir enriquecimiento de motor.
+        outbound.payload as EventPayloadMap[typeof outbound.event],
+      );
+      return;
+    }
+
+    if (outbound.type === "LOG") {
+      this.options.logger[outbound.level](outbound.message, toLogMeta(outbound.meta));
+      return;
+    }
+
+    if (outbound.type === "READY") {
+      return;
+    }
+
+    if (outbound.type === "PROGRESS") {
+      // Un PROGRESS de un job ya resuelto (o que nunca registró onProgress)
+      // se descarta en silencio (ADR-046 §4).
+      this.pendingRemoteJobs.get(outbound.jobId)?.onProgress?.(outbound.progress, outbound.partial);
+      return;
+    }
+
+    const pending = this.pendingRemoteJobs.get(outbound.jobId);
+    if (pending === undefined) return; // Mensaje tardío de un job ya resuelto (timeout/cancel previo).
+
+    this.pendingRemoteJobs.delete(outbound.jobId);
+    switch (outbound.type) {
+      case "COMPLETED":
+        pending.resolve(outbound.result);
+        break;
+      case "FAILED":
+        pending.reject(EngineError.deserialize(outbound.error));
+        break;
+      case "CANCELLED":
+        pending.reject(new CancelledError(outbound.jobId));
+        break;
+    }
+  }
+
+  /**
+   * Worker crasheado (evento `error` de `WorkerLike`, `05_Worker_Architecture.md`
+   * §9): se descarta la instancia (se recrea perezosamente en el próximo
+   * dispatch remoto) y se rechazan sus jobs en curso.
+   *
+   * **Sin reintento** — a diferencia de lo que sugiere una lectura superficial
+   * de `05_Worker_Architecture.md` §9 ("Pool lo marca como dead, lo
+   * reemplaza, reintenta el job si retryable"): el rechazo usa
+   * `InvalidInputError`, que fija `retryable: false` en su constructor
+   * (`shared/src/errors.ts`), así que `runWithRetry` nunca reintenta este
+   * caso aunque el job tenga `maxRetries > 0`. Es un diferimiento
+   * deliberado, no un olvido: este PR es transporte puro — no hay ningún
+   * worker real corriendo, solo fakes estructurales de test — así que no
+   * hay contra qué validar un reintento genuino (que en el motor concreto
+   * implica re-primear `INIT` y, para `RenderPool`, volver a mandar
+   * `load-document` antes de reintentar el job, ADR-030). Ese
+   * comportamiento llega recién en los PR12-16, con un worker real por
+   * motor y un entry-point/host-bridge donde el re-priming tiene sentido.
+   *
+   * `InvalidInputError` (no un `Error` genérico — Code_Standards.md §7 exige
+   * una subclase de `EngineError`) sigue el mismo criterio defensivo que ya
+   * usa `toSerializedError` más arriba: no existe un `EngineErrorCode`
+   * dedicado a "crash de transporte a nivel de pool" (los codes de
+   * `EngineErrorCode`, `shared/src/enums.ts`, son todos por-motor —
+   * `PDF_*`/`OCR_*`/`NER_*`/`RENDER_*`/`EXPORT_*` — o los 4 genéricos, que no
+   * encajan semánticamente); inventar uno nuevo sin pasar por el proceso de
+   * docs (Contracts.md primero, R-19) violaría I-4. Queda como ambigüedad
+   * abierta para cuando exista un consumidor real del reintento (PR12+), no
+   * resuelta en silencio acá.
+   */
+  private handleWorkerTransportError(slot: number, _ev: unknown): void {
+    this.remoteWorkers.delete(slot);
+    for (const [jobId, pending] of this.pendingRemoteJobs) {
+      if (pending.slotIndex !== slot) continue;
+      this.pendingRemoteJobs.delete(jobId);
+      pending.reject(
+        new InvalidInputError(
+          `WorkerPool(${this.options.poolKey}): worker (slot ${slot}) emitió un error de transporte.`,
+          { poolKey: this.options.poolKey, slot, jobId },
+        ),
+      );
+    }
+  }
 }
 
 export interface WorkerPoolManagerOptions {
   readonly bus: IEventBus;
   readonly logger: ILogger;
-  readonly getPoolSize: (key: PoolKey) => number;
-  readonly getMaxQueue: (key: PoolKey) => number;
+  readonly getPoolSize: (key: ManagedPoolKey) => number;
+  readonly getMaxQueue: (key: ManagedPoolKey) => number;
   readonly getMaxRetries: (jobType: WorkerJobType) => number;
   readonly baseRetryDelayMs: number;
   readonly maxRetryDelayMs: number;
   readonly idleDisposeMs: number;
+  /** Factories de `Worker` real por pool (ADR-036 §2, `CoreRuntimeOptions.workers`). Ausente/sin entrada para `key` => ese pool queda in-process. */
+  readonly workerFactories?: Partial<Readonly<Record<ManagedPoolKey, WorkerFactory>>>;
 }
 
-const JOB_TYPE_BY_POOL: Readonly<Record<PoolKey, WorkerJobType>> = {
+const JOB_TYPE_BY_POOL: Readonly<Record<ManagedPoolKey, WorkerJobType>> = {
   pdf: "pdf-parse",
   ocr: "ocr-page",
   ner: "ner-page",
@@ -308,24 +736,28 @@ const JOB_TYPE_BY_POOL: Readonly<Record<PoolKey, WorkerJobType>> = {
 };
 
 /**
- * Gestiona los cuatro pools con creación perezosa (`05_Worker_Architecture.md`
- * §8) y disposición tras `idleDisposeMs` de inactividad.
+ * Gestiona los cuatro pools "de verdad" (`ManagedPoolKey`) con creación
+ * perezosa (`05_Worker_Architecture.md` §8) y disposición tras
+ * `idleDisposeMs` de inactividad. El `WorkerPool` de `size: 1` del
+ * ExportWorker (`poolKey: "export"`, ADR-047 §2) NO pasa por acá: lo
+ * construye e inyecta `create-core.ts` directo al `ExportEngine`.
  */
 export class WorkerPoolManager {
   private readonly options: WorkerPoolManagerOptions;
-  private readonly pools = new Map<PoolKey, WorkerPool>();
-  private readonly idleTimers = new Map<PoolKey, ReturnType<typeof setTimeout>>();
+  private readonly pools = new Map<ManagedPoolKey, WorkerPool>();
+  private readonly idleTimers = new Map<ManagedPoolKey, ReturnType<typeof setTimeout>>();
 
   constructor(options: WorkerPoolManagerOptions) {
     this.options = options;
   }
 
-  getPool(key: PoolKey): WorkerPool {
+  getPool(key: ManagedPoolKey): WorkerPool {
     this.touch(key);
     const existing = this.pools.get(key);
     if (existing !== undefined) return existing;
 
     const jobType = JOB_TYPE_BY_POOL[key];
+    const workerFactory = this.options.workerFactories?.[key];
     const pool = new WorkerPool({
       poolKey: key,
       jobType,
@@ -336,13 +768,14 @@ export class WorkerPoolManager {
       maxRetryDelayMs: this.options.maxRetryDelayMs,
       bus: this.options.bus,
       logger: this.options.logger,
+      ...(workerFactory !== undefined ? { workerFactory } : {}),
     });
     this.pools.set(key, pool);
     return pool;
   }
 
   /** Reinicia el temporizador de disposición-por-inactividad de `key`. */
-  private touch(key: PoolKey): void {
+  private touch(key: ManagedPoolKey): void {
     const existingTimer = this.idleTimers.get(key);
     if (existingTimer !== undefined) clearTimeout(existingTimer);
     const timer = setTimeout(() => {

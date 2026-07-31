@@ -1,4 +1,4 @@
-export { ExportEngine } from "./export.engine.js";
+export { ExportEngine, buildPageReplacements } from "./export.engine.js";
 export type { ExportConfig, ExportMetadata, ExportOptions } from "@anonly/shared";
 export type {
   EncodedPageImage,

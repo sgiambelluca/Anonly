@@ -19,6 +19,10 @@ export default tseslint.config(
       // bundles de terceros descargados tal cual, no código propio.
       "apps/react-client/public/wasm/**",
       "apps/react-client/public/models/**",
+      // ADR-039 §3: los dos archivos de onnxruntime-web movidos a src/assets/
+      // (Vite los procesa como módulos vía `?url`) siguen siendo vendor, no
+      // código propio — mismo criterio que los de public/ de arriba.
+      "apps/react-client/src/assets/onnxruntime/**",
     ],
   },
   js.configs.recommended,

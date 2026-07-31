@@ -29,6 +29,7 @@ import { NerEngine } from "../ner.engine.js";
 import {
   asPipelineMock,
   createEngineContext,
+  createTrackingNerPool,
   makeNerPageInput,
   mockTokenClassificationPipeline,
   nerToken,
@@ -268,5 +269,73 @@ describe("NerEngine — contract tests", () => {
 
     expect(onSpy).not.toHaveBeenCalled();
     expect(onceSpy).not.toHaveBeenCalled();
+  });
+
+  // ─── ADR-046 §2/§4/§5 — puerto interno NerJobPool ───
+
+  it("every dispatch uses maxRetriesOverride: 0", async () => {
+    asPipelineMock(pipeline).mockResolvedValue(
+      mockTokenClassificationPipeline(() => Promise.resolve([nerToken("B-PER", "Juan", 0.9, 0)])),
+    );
+
+    const pool = createTrackingNerPool();
+    const pooledEngine = new NerEngine(pool);
+    await pooledEngine.init(ctx);
+    await pooledEngine.processPage(makeNerPageInput("doc-max-retries-override", 0, ["Juan"]), ctx);
+
+    expect(pool.calls.length).toBeGreaterThan(0);
+    for (const call of pool.calls) {
+      expect(call.maxRetriesOverride).toBe(0);
+    }
+
+    await pooledEngine.dispose();
+  });
+
+  it("same six events, payloads and order with and without injected pool", async () => {
+    const classify = (): Promise<ReadonlyArray<ReturnType<typeof nerToken>>> =>
+      Promise.resolve([nerToken("B-PER", "Ana", 0.9, 0)]);
+
+    asPipelineMock(pipeline).mockResolvedValue(mockTokenClassificationPipeline(classify));
+    await engine.init(ctx);
+    const busEmitSpyA = vi.spyOn(ctx.bus, "emit");
+    await engine.processPages([makeNerPageInput("doc-fallback-parity", 0, ["Ana"])], ctx);
+    const eventsA = busEmitSpyA.mock.calls.map((call) => [call[1], call[2]]);
+
+    // El kernel es un singleton a nivel de módulo (ADR-046 §1): sin disponer
+    // acá, el segundo engine encontraría el pipeline ya cargado por el
+    // primero y nunca reportaría su propio "model-ready" (NER_MODEL_READY no
+    // se emitiría para eventsB) — no por una diferencia real de
+    // comportamiento entre pool real y fallback, sino por compartir el mismo
+    // kernel "tibio" entre dos instancias en el mismo test.
+    await engine.dispose();
+
+    asPipelineMock(pipeline).mockResolvedValue(mockTokenClassificationPipeline(classify));
+    const pool = createTrackingNerPool();
+    const pooledEngine = new NerEngine(pool);
+    const ctxB = createEngineContext();
+    await pooledEngine.init(ctxB);
+    const busEmitSpyB = vi.spyOn(ctxB.bus, "emit");
+    await pooledEngine.processPages([makeNerPageInput("doc-fallback-parity", 0, ["Ana"])], ctxB);
+    const eventsB = busEmitSpyB.mock.calls.map((call) => [call[1], call[2]]);
+
+    // Compara evento a evento (sin el `id` no determinista de la Occurrence
+    // ni `durationMs`, que depende de `Date.now()` y no es comparable entre
+    // dos ejecuciones reales de principio a fin).
+    expect(eventsB.map((e) => e[0])).toEqual(eventsA.map((e) => e[0]));
+    const stripNonDeterministic = (value: unknown): unknown => {
+      if (typeof value !== "object" || value === null) return value;
+      const { durationMs: _durationMs, ...rest } = value as { durationMs?: number };
+      if ("occurrence" in rest) {
+        const { occurrence, ...withoutOccurrence } = rest as { occurrence: { id: string } };
+        const { id: _id, ...occurrenceRest } = occurrence;
+        return { ...withoutOccurrence, occurrence: occurrenceRest };
+      }
+      return rest;
+    };
+    expect(eventsB.map((e) => stripNonDeterministic(e[1]))).toEqual(
+      eventsA.map((e) => stripNonDeterministic(e[1])),
+    );
+
+    await pooledEngine.dispose();
   });
 });

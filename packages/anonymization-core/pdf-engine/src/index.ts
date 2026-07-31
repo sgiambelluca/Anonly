@@ -1,4 +1,4 @@
-export { PdfEngine } from "./pdf.engine.js";
+export { PdfEngine, fuseOcrPage } from "./pdf.engine.js";
 export type { PdfEngineConfig } from "@anonly/shared";
 export type { PdfEngineInput, PdfEngineOutput } from "./pdf.types.js";
 export {

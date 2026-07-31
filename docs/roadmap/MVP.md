@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-mvp | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,adr/ADR-011-Grouping-First.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md | audiencia=humanos+IA | fase=5 (Hito 2 cerrado vía PRs #6, #7; Hito 3 cerrado vía PRs #10, #11, pendiente diferido a Hito 11; Hito 4 cerrado vía PR #13, pendiente diferido a Hito 11) -->
+<!-- CONTEXT: scope=roadmap-mvp | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,adr/ADR-011-Grouping-First.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md | audiencia=humanos+IA | fase=10 (Hitos 1–9 cerrados; pendientes puntuales diferidos a Hito 11 anotados por hito; Hito 10 auditado por ADR-036, con dos decisiones reabiertas por el humano vía ADR-037/038 — tabla de PRs canónica en ADR-038 §8) -->
 
 # Anonly — Roadmap MVP
 
@@ -163,15 +163,48 @@ Orden sugerido (cada hito = un set de PRs):
 - ~~Decisiones ADR-034 que amplían contratos (cambios de código de `shared`/`render-engine`/`export-engine` viajan en los PRs del hito, docs primero): `RenderEngine.rasterizePage` + `RenderPageOutput.encoded` (Render v1.2.0); gestión de sesión de Grouping (`startSession`/`finishSession` con NER off); `EncodedPageImage` promovido a `@anonly/shared`; `WorkerPoolConfig.maxQueuePerPool` por pool; blob URLs creados por motores y revocados por el Orchestrator.~~ **CERRADO**.
 - ~~Crear `tests/integration/` (pares críticos mínimos de ADR-034 §6: Regex+NER→Grouping, OCR→PDF vía Orchestrator, happy path `createCore`→`PIPELINE_READY`), con script `test:integration`, alias por motor y exclusión de `tests/tsconfig.json` removida (ADR-033).~~ **CERRADO** — `regex-ner-grouping.test.ts`, `ocr-pdf-fusion.test.ts`, `happy-path.test.ts` (3 tests), motores reales con solo las fronteras de libs pesadas mockeadas (ADR-021 §5).
 - Pendientes que hereda este hito de PRs anteriores: `PREVIEW_UPDATED.canvasBlobUrl` real + revocación (Hito 7); revisitar `Replacement.originalValue` del Export si Render llega a depender de él (Hito 8) — verificado en Hito 9: Render no lo consume, cerrado (ADR-035 §4); PR chico de `regex-engine` para `Occurrence.maskFormat` (ADR-029 §4, no bloqueante).
-- Pendiente que este hito deja: PR chico de `pdf-engine` para `PdfPasswordRequiredError.retryable = false` + retiro del override `isRetryable` del Orchestrator (ADR-035 §3, no bloqueante).
+- ~~Pendiente que este hito deja: PR chico de `pdf-engine` para `PdfPasswordRequiredError.retryable = false` + retiro del override `isRetryable` del Orchestrator (ADR-035 §3, no bloqueante).~~ **Absorbido por `adr/ADR-049` §4 (2026-07-30) y dejó de ser no bloqueante**: con transporte real de workers, el override se apoyaba en un `instanceof` que no sobrevive al boundary, así que el pool reintentaba el PDF protegido. Se implementa en los PRs 17.1 (`pdf-engine`) y 17.2 (façade) del Hito 10.
 - Hallazgos de revisión resueltos en el mismo PR antes de mergear: casts de frontera `as any` dispersos en `tests/integration/happy-path.test.ts`/`regex-ner-grouping.test.ts` concentrados en el helper `tests/integration/fixtures/mocks.ts` (`Code_Standards.md` §10, precedente `ner-engine`); emisión de `PIPELINE_PROGRESS` (`Orchestrator.md` §8), hasta entonces no-op, implementada en los 4 puntos de emisión (Extracting, OCR, Detección con/sin NER).
 
 ### Hito 10 — React Client
-- `apps/react-client` con Vite + Tailwind + Radix + Zustand.
-- Migrar los cuatro pools de in-process a **Web Workers de SO reales**: entry-points de worker por motor (`pdf-engine`, `ocr-engine`, `ner-engine`; render/export según `05_Worker_Architecture.md` §7), PRs por motor, bundling vía Vite, transferables §2.3 (ADR-035 §2).
-- `core-adapter` (bus bridge, actions, snapshots).
-- 4 paneles, todos los componentes de `ui/Components.md`.
-- E2E con Playwright.
+
+Auditoría pre-hito: `adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md` (reconcilia los docs de UI con ADR-014/015/032/034/035, fija el transporte de workers; pools ≠ workers — cuatro pools, cinco entry-points). El humano revisó la auditoría y pidió reabrir dos de sus decisiones "MVP-conservadoras": `adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md` (zoom con re-render real en vez de escalado CSS, supersede ADR-036 §6) y `adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md` (`Orchestrator.reanalyze` preservando ediciones del usuario en vez de recrear el core, supersede ADR-036 §5). La tabla de PRs canónica (17 PRs) es la de ADR-038 §8, que reemplaza a la de ADR-036 §8. Al arrancar PR12 (PdfWorker), el implementador destapó una ambigüedad bloqueante — `fuseOcrPage` dependía del estado retenido de la instancia de `PdfEngine`, incompatible con un pool multi-worker sin afinidad — resuelta por `adr/ADR-041-FuseOcrPage-Funcion-Pura-Sin-Estado-Retenido.md`: la fusión pasa a función pura ejecutada host-side por el Orchestrator, el motor queda sin estado por documento (`releaseDocument` eliminado) y el transporte no se toca; el ADR además audita el estado retenido de los demás motores y marca el de `render-engine` como decisión bloqueante previa a PR13, resuelta por `adr/ADR-043-RenderEngine-Reparto-Host-Worker-Kernel.md` (la clase queda host-side; el worker corre un kernel sin estado; broadcast `unload-document` y re-priming nuevos). El mismo fork reapareció en los dos PRs siguientes y se resolvió con el mismo patrón: `adr/ADR-045-OcrEngine-Pool-Propia-Kernel-Puro.md` (PR14, decidido por el humano sobre el fork que destapó el implementador: carrera EVENT/COMPLETED, retry duplicado) y `adr/ADR-046-NerEngine-Pool-Propia-Kernel-Puro.md` (PR15, detectado por el implementador **antes** de tocar código; agrega la única pieza que el patrón no cubría: el ciclo de vida del modelo NER cruza por el canal `PROGRESS` del transporte —`DispatchParams.onProgress` nuevo en `worker-pool.ts`— y el motor lo traduce en host a `NER_MODEL_LOADING`/`NER_MODEL_READY`). Los tres motores pesados comparten hoy un único patrón: clase host-side dueña de su pool, kernel sin estado por documento en el worker. `adr/ADR-047-ExportEngine-Ensamblador-Worker-Dedicado.md` (PR16) lo cierra para el quinto entry-point con la única variante inevitable —el ExportWorker retiene el `PDFDocument` incremental, así que es un **ensamblador de un documento a la vez**, no un kernel puro— y completa `ExportPagePayload`, que estaba inejecutable. `adr/ADR-048-Cierre-E2E-Hito10-Fixtures-Assets-Escenarios.md` (PR17) audita el cierre E2E: el gate `test:e2e` exige `pnpm assets:mirror` previo (los assets first-party no se commitean, ADR-018) y el job de CI nunca lo corría; los fixtures pesados se generan en runtime en vez de commitearse; y sus dos puntos de alcance quedaron **ratificados por el humano** (2026-07-24): `protected.pdf` se commitea como único fixture de test binario (pdf-lib no encripta), y se inserta **PR16.5** —bootstrap `settings.store` → `EngineConfig`, `apps/react-client`— que cierra el bug de producto del toggle de NER sin documento abierto y desbloquea el Escenario 8, en `fixme` desde PR10. Ya dentro de PR17, el Escenario 3 destapó un bug real del transporte que el implementador rastreó hasta su causa raíz: `adr/ADR-049-Errores-Cruzando-Worker-Discriminacion-Por-Code.md` — la subclase concreta de un `EngineError` no sobrevive al `postMessage` (`deserialize()` devuelve siempre un `DeserializedEngineError`), así que el `instanceof PdfPasswordRequiredError` del Orchestrator daba `false` y un PDF protegido mostraba el banner de pipeline fallido en vez del `PasswordDialog`, además de reintentarse en el pool. Se discrimina por `code`, `deserialize()` no se toca, y el fix se parte en **PR 17.1** (`pdf-engine`: el `retryable` que ADR-035 §3 dejó pendiente resulta ser la otra mitad del bug) y **PR 17.2** (façade: type-guard por `code`, retiro del override, des-`fixme` del Escenario 3).
+
+- `apps/react-client` con Vite + Tailwind + Radix + Zustand (scaffold primero; CSP `08_Security_Model.md` §3.2).
+- `grouping-engine`: `reopenSession`/`dropOccurrences`/dedup por identidad/`finishSession` re-ejecutable (ADR-038 §2-§4; spec v1.1.0).
+- `packages/anonymization-core/src` (+ `shared`): `Orchestrator.reanalyze`/`ReanalyzeConfigPatch`, config efectiva por documento, transiciones nuevas, cancelación preservando estado (ADR-038 §1, §5-§6; spec v1.2.0).
+- `render-engine` (+ `shared`): `RenderRequested.scale`, `MAX_RENDER_SCALE`, cache LRU por escala + `PREVIEW_CACHE_MAX_BYTES`, supersede de renders obsoletos (ADR-037; spec v1.3.0).
+- `core-adapter` (bus bridge, actions **completas** — incluye `updateRule`/`deleteRule`/`requestRender(..., scale?)`/`retryWithPassword`/`reanalyze` —, snapshots, mapeo settings→`EngineConfig`; ADR-036 §5, ADR-038 §7) sobre el core **in-process** del Hito 9.
+- 4 paneles, todos los componentes de `ui/Components.md` (incluye los agregados por ADR-036 §7: `PasswordDialog`, `ConfirmDialog`, `SettingsDialog`).
+- E2E con Playwright (base antes de la migración de workers; suite completa al cierre — escenarios de `07_Performance_Strategy.md` §11.3, incluidos el 9 reescrito —preserva ediciones— y el 11 nuevo —zoom—).
+- Migrar los **cuatro pools** de in-process a Web Workers de SO reales, con **cinco entry-points de worker** (pools ≠ workers, ADR-036 §1): PdfWorker, OcrWorker, NerWorker, RenderWorker y ExportWorker (único, sin pool propio — ensamblado pdf-lib secuencial). PRs por motor (R-1), bundling vía Vite (`?worker` + subpath `"./worker"` por paquete), factories inyectadas en `createCore` (`CoreRuntimeOptions`, ADR-036 §2), transferables `05` §2.3 corregidos (ADR-036 §4; ADR-035 §2).
+
+Orden canónico de PRs (ADR-038 §8; los PRs 2-4 no dependen del scaffold y pueden correr en paralelo con el PR 1):
+
+| # | PR | Módulo |
+|---|---|---|
+| 1 | Scaffold | `apps/react-client` |
+| 2 | Grouping re-análisis | `grouping-engine` |
+| 3 | Orchestrator `reanalyze` | `packages/anonymization-core/src` (+ `shared`) |
+| 4 | Render zoom | `render-engine` (+ `shared`) |
+| 5 | `core-adapter` | `apps/react-client` |
+| 6 | Toolbar + diálogos de flujo | `apps/react-client` |
+| 7 | Visor | `apps/react-client` |
+| 8 | Panel Entidades + conflictos | `apps/react-client` |
+| 9 | Panel Reglas + Export | `apps/react-client` |
+| 10 | E2E base | `tests/e2e/` |
+| 11 | Transporte de workers | `packages/anonymization-core/src` |
+| 12–16 | Workers, uno por PR | `pdf-engine`, `render-engine`, `ocr-engine`, `ner-engine`, `export-engine` |
+| 16.5 | Bootstrap `settings.store` → `EngineConfig` (ADR-048 §7) | `apps/react-client` |
+| 17 | E2E completa | `tests/e2e/` |
+| 17.1 | `PdfPasswordRequiredError.retryable = false` (ADR-049 §4) | `pdf-engine` |
+| 17.2 | Discriminación de errores por `code` en el Orchestrator + des-`fixme` del Escenario 3 (ADR-049 §5–§7) | `packages/anonymization-core/src` |
+| 17.3 | Fix de race en `initCore()` (sin ADR) | `apps/react-client` |
+| 17.4 | `loadDocument(documentId, buffer, password?)` (ADR-050 §1–§3) | `render-engine` (+ `shared`) |
+| 17.5 | `retryWithPassword` persiste y propaga el password; cierre del Escenario 3 con preview (ADR-050 §4) | `packages/anonymization-core/src` |
+| 17.6 | Rutas de tesseract: archivo en `workerPath` + absolutización contra `self.location.origin` (erratas `OCR_Engine.md` v1.2.1/v1.2.2, ADR-018 §2; sin ADR) | `ocr-engine` |
+| 17.7 | `CloseDocumentButton` en el Toolbar + cierre del Escenario 7 (ADR-051) | `apps/react-client` |
+| 17.8 | Blob URLs tardíos tras cerrar documento: guard que revoca + señal de baja del preview mediado (ADR-052) | `packages/anonymization-core/src` |
 
 ### Hito 11 — Hardening
 - Performance gates (todas las métricas de `00_Project_Vision.md` §7).

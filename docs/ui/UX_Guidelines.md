@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=ux | dependencias=00_Project_Vision.md,ui/React_Client.md,ADR-011-Grouping-First.md,ADR-012-Replacement-Modes.md | audiencia=IA-implementador-ui+humanos | fase=4 -->
+<!-- CONTEXT: scope=ux | dependencias=00_Project_Vision.md,ui/React_Client.md,ADR-011-Grouping-First.md,ADR-012-Replacement-Modes.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md | audiencia=IA-implementador-ui+humanos | fase=4 (§3.1 aclarado en fase 10, ADR-036 §9) -->
 
 # Anonly — UX Guidelines
 
@@ -70,7 +70,7 @@
 
 - **Cabecera de tipo**: `▶ <Tipo> (<n grupos>)`. Expandible/colapsable. Click en la cabecera expande/colapsa. Un checkbox en la cabecera habilita/deshabilita todos los grupos del tipo (cascade).
 - **Grupo**: `☑ <canonicalValue> (<n ocurrencias>) [modo ▾] [⋯]`.
-  - Checkbox: habilita/deshabilita el grupo (`GROUP_TOGGLED`).
+  - Checkbox: habilita/deshabilita el grupo. La UI emite `GROUP_UPDATE_REQUESTED` con `patch.enabled` (canal `ui`); `GROUP_TOGGLED` es el evento que **Grouping** emite como respuesta (`04_Event_System.md` §6/§10 — aclaración ADR-036 §9).
   - `<canonicalValue>`: el valor representativo del grupo. Click abre un popover con aliases, ocurrencias por página y opción de editar `canonicalValue`.
   - `(<n ocurrencias>)`: badge con `members.length`. No es editable.
   - `[modo ▾]`: selector de `ReplacementMode` (mask/synthetic/placeholder/redact). Cambio emite `GROUP_UPDATE_REQUESTED` con `patch.replacementMode`.

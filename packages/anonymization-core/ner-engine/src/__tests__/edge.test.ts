@@ -8,7 +8,7 @@ import {
   type EntityFound,
   type NerModelLoading,
 } from "@anonly/shared";
-import { pipeline } from "@huggingface/transformers";
+import { env, pipeline } from "@huggingface/transformers";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("@huggingface/transformers", () => ({
@@ -239,6 +239,44 @@ describe("NerEngine — edge case tests", () => {
       const dateOccurrence = output.occurrences.find((o) => o.entityType === EntityType.Date);
       expect(dateOccurrence).toBeDefined();
       expect(dateOccurrence?.value).toBe("3 de mayo de 2024");
+    });
+  });
+
+  // Caso 16 (§13, ADR-039): wasmPaths inyectado por config.
+  describe("Caso 16: wasmPaths inyectado por config", () => {
+    it("injected wasmPaths applied verbatim, not overridden by default", async () => {
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockTokenClassificationPipeline(() => Promise.resolve([])),
+      );
+
+      // Forma string (prefijo de directorio).
+      const stringCtx = createEngineContext({
+        config: { ...ctx.config, ner: { ...ctx.config.ner, wasmPaths: "/custom/onnxruntime/" } },
+      });
+      await engine.init(stringCtx);
+      await engine.processPage(makeNerPageInput("doc-wasm-string", 0, ["Hola"]), stringCtx);
+      expect(env.backends.onnx.wasm?.wasmPaths).toBe("/custom/onnxruntime/");
+      await engine.dispose();
+
+      // Forma objeto ({ wasm?, mjs? }, URLs explícitas por archivo).
+      engine = new NerEngine();
+      const objectPaths = { wasm: "/assets/ort.wasm", mjs: "/assets/ort.mjs" };
+      const objectCtx = createEngineContext({
+        config: { ...ctx.config, ner: { ...ctx.config.ner, wasmPaths: objectPaths } },
+      });
+      await engine.init(objectCtx);
+      await engine.processPage(makeNerPageInput("doc-wasm-object", 0, ["Hola"]), objectCtx);
+      expect(env.backends.onnx.wasm?.wasmPaths).toEqual(objectPaths);
+    });
+
+    it("absent wasmPaths falls back to /wasm/onnxruntime/", async () => {
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockTokenClassificationPipeline(() => Promise.resolve([])),
+      );
+
+      await engine.init(ctx);
+      await engine.processPage(makeNerPageInput("doc-wasm-default", 0, ["Hola"]), ctx);
+      expect(env.backends.onnx.wasm?.wasmPaths).toBe("/wasm/onnxruntime/");
     });
   });
 

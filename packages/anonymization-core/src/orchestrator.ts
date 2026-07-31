@@ -17,15 +17,17 @@
  * adicional basada en eventos para saber cuándo el pipeline llegó a `Ready`.
  */
 
+import { buildPageReplacements } from "@anonly/export-engine";
 import type { ExportEngineInput, RenderPageProvider } from "@anonly/export-engine";
 import type { NerPageInput } from "@anonly/ner-engine";
 import type { OcrPageInput } from "@anonly/ocr-engine";
-import { PdfPasswordRequiredError } from "@anonly/pdf-engine";
+import { fuseOcrPage } from "@anonly/pdf-engine";
 import type { PdfEngineOutput } from "@anonly/pdf-engine";
 import { RenderFailedError } from "@anonly/render-engine";
 import type { RenderPageInput } from "@anonly/render-engine";
 import {
   CancelledError,
+  DetectionSource,
   EngineError,
   EngineErrorCode,
   EngineEvents,
@@ -33,11 +35,16 @@ import {
   InvalidInputError,
   PipelineStage,
   type CancelRequested,
+  type CoreRuntimeOptions,
   type Document,
   type DocumentClosed,
   type DocumentParsed,
   type EngineConfig,
   type EngineContext,
+  type EntityGroup,
+  type EntityGroupCreated,
+  type EntityGroupRemoved,
+  type EntityGroupUpdated,
   type ExportFailed,
   type ExportFinished,
   type ExportOptions,
@@ -51,13 +58,17 @@ import {
   type OcrPageFinished,
   type PageParsed,
   type PdfInvalid,
+  type PdfParsePayload,
   type PdfPasswordRequired,
   type PipelineState,
   type PreviewPageFailed,
   type PreviewUpdated,
+  type ReanalyzeConfigPatch,
   type RegexFinished,
   type RenderFailed as RenderFailedPayload,
+  type Replacement,
   type Unsubscribe,
+  type WorkerFactory,
   type Word,
   type WorkerJobTimeout,
   type WorkerPoolSaturated,
@@ -71,14 +82,14 @@ import {
   previewBlobKey,
   previewPrefixFor,
 } from "./blob-tracker.js";
-import { OrchestratorDisposedError } from "./errors.js";
+import { isEngineErrorCode, OrchestratorDisposedError } from "./errors.js";
 import { PipelineStateStore } from "./pipeline-state.js";
 import type {
   AnonymizationCoreEngines,
   ImportDocumentInput,
   IPipelineOrchestrator,
 } from "./types.js";
-import { WorkerPoolManager, type PoolKey } from "./worker-pool.js";
+import { WorkerPoolManager, type ManagedPoolKey } from "./worker-pool.js";
 
 function ocrWordsCacheKey(documentId: string, pageIndex: number): string {
   // Formato de clave documentado (ADR-014 §Decisión, ADR-021 §4): el lado
@@ -86,12 +97,89 @@ function ocrWordsCacheKey(documentId: string, pageIndex: number): string {
   return `ocr-words:${documentId}:${pageIndex}`;
 }
 
+// ─── reanalyze (ADR-038 §1): helpers de módulo (sin estado de instancia) ───
+
+const REANALYZE_PATCH_KEYS = new Set(["ner", "ocr"]);
+
+/**
+ * Precondición de forma de `ReanalyzeConfigPatch` (ADR-038 §1, caso 21 del
+ * spec): vacío o con campos no soportados → `InvalidInputError`. No valida
+ * "patch idéntico a la config efectiva" (eso lo decide `reanalyze` una vez
+ * mergeado, comparando contra la config efectiva vigente).
+ */
+function validateReanalyzePatch(patch: ReanalyzeConfigPatch): void {
+  if (patch == null) {
+    throw new InvalidInputError("ReanalyzeConfigPatch es null o undefined.");
+  }
+  const keys = Object.keys(patch);
+  if (keys.length === 0) {
+    throw new InvalidInputError("ReanalyzeConfigPatch vacío: debe incluir 'ner' y/o 'ocr'.");
+  }
+  for (const key of keys) {
+    if (!REANALYZE_PATCH_KEYS.has(key)) {
+      throw new InvalidInputError(`Campo no soportado en ReanalyzeConfigPatch: '${key}'.`, {
+        field: key,
+      });
+    }
+  }
+  if (patch.ner !== undefined && typeof patch.ner.enabled !== "boolean") {
+    throw new InvalidInputError("patch.ner.enabled debe ser boolean.");
+  }
+  if (patch.ocr !== undefined && !Array.isArray(patch.ocr.languages)) {
+    throw new InvalidInputError("patch.ocr.languages debe ser un array de strings.");
+  }
+}
+
+/** Merge de un patch sobre la config efectiva vigente (solo ner.enabled/ocr.languages). */
+function mergeReanalyzePatch(current: EngineConfig, patch: ReanalyzeConfigPatch): EngineConfig {
+  return {
+    ...current,
+    ner: patch.ner !== undefined ? { ...current.ner, enabled: patch.ner.enabled } : current.ner,
+    ocr: patch.ocr !== undefined ? { ...current.ocr, languages: patch.ocr.languages } : current.ocr,
+  };
+}
+
+function stringArraysEqual(a: ReadonlyArray<string>, b: ReadonlyArray<string>): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
+// ─── Mediación grupos→Render del preview (ADR-044): helper de módulo ───
+
+/**
+ * Etapas anteriores a `Ready` (Orchestrator.md §13 caso 26): el seed de
+ * `GROUPING_FINISHED` cubre todas las páginas con reemplazos del snapshot
+ * completo, así que los eventos `ENTITY_GROUP_*` que llegan mientras el
+ * documento está en alguna de estas etapas (incluida `Idle`/sin
+ * `PipelineState` todavía) solo actualizan el mapa de páginas conocidas — no
+ * agendan flush.
+ */
+const PRE_READY_STAGES: ReadonlySet<PipelineStage> = new Set([
+  PipelineStage.Idle,
+  PipelineStage.Importing,
+  PipelineStage.Extracting,
+  PipelineStage.OCRing,
+  PipelineStage.Detecting,
+  PipelineStage.Grouping,
+]);
+
 export interface PipelineOrchestratorOptions {
   readonly bus: IEventBus;
   readonly logger: ILogger;
   readonly cache: ICache;
   readonly config: EngineConfig;
   readonly engines: AnonymizationCoreEngines;
+  /**
+   * Factories de `Worker` real inyectadas por `createCore(config, runtime)`
+   * (ADR-036 §2, Contracts.md §3.5). Ausente => los cuatro pools quedan
+   * in-process (comportamiento del Hito 9/ADR-035, sin cambios). Los
+   * factories `pdf`/`ocr`/`ner`/`render` se consumen acá mismo, en el
+   * constructor, pasándolos a `WorkerPoolManager`. `workers.export` (el
+   * `WorkerPool` de `size: 1` del ExportWorker, ADR-047 §2) NO pasa por
+   * acá: `create-core.ts` lo construye e inyecta directo a
+   * `new ExportEngine(exportPool)`, espejo de `ocrPool`/`nerPool` — el
+   * Orchestrator no retiene ninguna factory de export (retirado en PR16).
+   */
+  readonly runtime?: CoreRuntimeOptions;
 }
 
 export class PipelineOrchestrator implements IPipelineOrchestrator {
@@ -110,9 +198,34 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
   private readonly documents = new Map<string, Document>();
   private readonly retainedInputs = new Map<string, ImportDocumentInput>();
   private readonly renderLoadedDocuments = new Set<string>();
-  private readonly pendingFusions = new Map<string, Array<Promise<void>>>();
   private readonly exportQueues = new Map<string, ExportOptions[]>();
   private readonly exportInProgress = new Set<string>();
+  // Config efectiva por documento (ADR-038 §1): inicializada al `config` de
+  // la instancia en `importDocument`, actualizada por `reanalyze` mergeando
+  // el patch. Única excepción a la inmutabilidad de EngineConfig por sesión
+  // (Contracts.md §3.1).
+  private readonly effectiveConfigByDocument = new Map<string, EngineConfig>();
+  // Documentos con un `reanalyze` en curso (ADR-038 §5-§6): distingue, dentro
+  // de `cancel()`, la cancelación de un reanalyze (vuelve a Ready, caso 22)
+  // de la cancelación de un importDocument (va a Cancelled, caso 8).
+  private readonly reanalyzeInFlight = new Set<string>();
+  // ─── Mediación grupos→Render del preview (ADR-044) ───
+  // Por documento: groupId → páginas conocidas (members actuales de la última
+  // vez que se vio el grupo). Necesario para ENTITY_GROUP_REMOVED (el payload
+  // solo trae groupId) y para detectar páginas que un grupo abandonó por
+  // merge/split/dropOccurrences. Se limpia en DOCUMENT_CLOSED.
+  private readonly groupPagesByDocument = new Map<string, Map<string, Set<number>>>();
+  // Páginas marcadas sucias por documento, pendientes del flush coalescido
+  // por microtask (§13 caso 27). Vacío durante las etapas pre-Ready: el seed
+  // de GROUPING_FINISHED las cubre sin necesitar el flush incremental.
+  private readonly dirtyPagesByDocument = new Map<string, Set<number>>();
+  // Evita agendar más de un flush por documento por ráfaga de eventos.
+  private readonly flushScheduledDocuments = new Set<string>();
+  // Controlador por documento del seed/flush del preview mediado (ADR-052
+  // §3, v1.5.4): inmune a la cancelación del documento (abortRegistry) pero
+  // NO a su baja — closeDocument/dispose lo abortan y lo limpian de acá,
+  // cancelReanalyze NO lo toca (ver mediatedPreviewCtx).
+  private readonly mediatedPreviewControllers = new Map<string, AbortController>();
   // Progreso granular por página (PIPELINE_PROGRESS, spec Orchestrator.md
   // §8): un tracker por documento, reasignado al entrar a cada etapa con
   // progreso granular (OCR, luego Detecting con NER activo). `current` nunca
@@ -121,7 +234,6 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     string,
     { readonly total: number; readonly current: number }
   >();
-
   private activeDocumentId: string | undefined;
   private disposed = false;
 
@@ -132,6 +244,15 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     this.config = options.config;
     this.engines = options.engines;
 
+    const poolWorkerFactories: Partial<Readonly<Record<ManagedPoolKey, WorkerFactory>>> = {
+      ...(options.runtime?.workers?.pdf !== undefined ? { pdf: options.runtime.workers.pdf } : {}),
+      ...(options.runtime?.workers?.ocr !== undefined ? { ocr: options.runtime.workers.ocr } : {}),
+      ...(options.runtime?.workers?.ner !== undefined ? { ner: options.runtime.workers.ner } : {}),
+      ...(options.runtime?.workers?.render !== undefined
+        ? { render: options.runtime.workers.render }
+        : {}),
+    };
+
     this.pools = new WorkerPoolManager({
       bus: this.bus,
       logger: this.logger,
@@ -141,6 +262,7 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       baseRetryDelayMs: this.config.workerPool.baseRetryDelayMs,
       maxRetryDelayMs: this.config.workerPool.maxRetryDelayMs,
       idleDisposeMs: this.config.workerPool.idleDisposeMs,
+      workerFactories: poolWorkerFactories,
     });
 
     this.wireSubscriptions();
@@ -157,9 +279,12 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     this.documents.delete(documentId);
     this.retainedInputs.set(documentId, input);
     this.state.create(documentId);
+    // ADR-038 §1: seedea la config efectiva del documento con la config de la
+    // instancia; reanalyze la actualiza a partir de acá.
+    this.effectiveConfigByDocument.set(documentId, this.config);
 
     const controller = this.abortRegistry.create(documentId);
-    const ctx = this.ctxFor(controller.signal);
+    const ctx = this.ctxFor(controller.signal, documentId);
 
     this.bus.emit(EventChannel.Pipeline, EngineEvents.DOCUMENT_IMPORTED, {
       documentId,
@@ -180,11 +305,79 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     }
 
     const controller = this.abortRegistry.get(documentId) ?? this.abortRegistry.create(documentId);
-    const ctx = this.ctxFor(controller.signal);
+    const ctx = this.ctxFor(controller.signal, documentId);
     const retryInput: ImportDocumentInput = { ...retained, password };
+    // ADR-050 §4: reescribe `retainedInputs` con el input que incluye el
+    // password — `ensureRenderDocumentLoaded` lee este mismo mapa más
+    // adelante en el pipeline y sin esto el documento protegido se abría en
+    // PdfEngine pero no en Render (`RenderFailedError("No password given")`).
+    this.retainedInputs.set(documentId, retryInput);
 
     this.setStage(documentId, PipelineStage.Extracting);
     await this.runPipelineFrom(documentId, retryInput, ctx);
+  }
+
+  async reanalyze(documentId: string, patch: ReanalyzeConfigPatch): Promise<void> {
+    this.assertNotDisposed();
+
+    const state = this.state.get(documentId);
+    if (
+      state === undefined ||
+      !(
+        state.stage === PipelineStage.Ready ||
+        state.stage === PipelineStage.Done ||
+        state.stage === PipelineStage.Failed
+      )
+    ) {
+      // Caso 21: precondición de stage (ADR-040: Done es el equivalente
+      // operativo de Ready, "Ready con un export ya completado" — habilita
+      // SettingsDialog post-export). También hace que un segundo
+      // reanalyze/importDocument concurrente sobre el mismo documento se
+      // autorrechace (el stage ya no es Ready/Done/Failed mientras uno corre).
+      throw new InvalidInputError(
+        `reanalyze requiere stage Ready, Done o Failed para ${documentId} (actual: ${state?.stage ?? "inexistente"}).`,
+        { documentId, stage: state?.stage },
+      );
+    }
+
+    validateReanalyzePatch(patch);
+
+    const currentEffective = this.effectiveConfigFor(documentId);
+    const nextEffective = mergeReanalyzePatch(currentEffective, patch);
+    const nerChanged = currentEffective.ner.enabled !== nextEffective.ner.enabled;
+    const ocrChanged =
+      patch.ocr !== undefined &&
+      !stringArraysEqual(currentEffective.ocr.languages, nextEffective.ocr.languages);
+
+    if (!nerChanged && !ocrChanged) {
+      // Caso 21: patch idéntico a la config efectiva vigente -> no-op sin eventos.
+      return;
+    }
+
+    this.effectiveConfigByDocument.set(documentId, nextEffective);
+
+    const controller = this.abortRegistry.get(documentId) ?? this.abortRegistry.create(documentId);
+    const ctx = this.ctxFor(controller.signal, documentId);
+
+    this.reanalyzeInFlight.add(documentId);
+    try {
+      if (ocrChanged) {
+        // Caso 20/patch combinado (caso "4" de ADR-038 §5): OCR primero, la
+        // config NER final decide si además re-corre NER en las páginas re-OCR.
+        await this.runReanalyzeOcrFlow(documentId, ctx, nextEffective);
+      } else if (nextEffective.ner.enabled) {
+        await this.runReanalyzeNerOnFlow(documentId, ctx); // Caso 18.
+      } else {
+        await this.runReanalyzeNerOffFlow(documentId); // Caso 19.
+      }
+    } catch (err: unknown) {
+      // Caso 22: cancelReanalyze() ya completó la transición a Ready +
+      // PIPELINE_CANCELLED; acá no hay nada más que hacer.
+      if (err instanceof CancelledError) return;
+      this.failPipeline(documentId, err);
+    } finally {
+      this.reanalyzeInFlight.delete(documentId);
+    }
   }
 
   cancel(documentId: string, jobId?: string): Promise<void> {
@@ -192,6 +385,10 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     if (!this.state.has(documentId)) return Promise.resolve(); // idempotente
     const current = this.state.get(documentId);
     if (current?.stage === PipelineStage.Cancelled) return Promise.resolve();
+
+    if (this.reanalyzeInFlight.has(documentId)) {
+      return this.cancelReanalyze(documentId);
+    }
 
     this.abortRegistry.abort(documentId);
     this.state.update(documentId, { stage: PipelineStage.Cancelled, cancelRequested: true });
@@ -203,6 +400,137 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     return Promise.resolve();
   }
 
+  /**
+   * Cancelación de un `reanalyze` en curso (ADR-038 §6, caso 22 del spec):
+   * a diferencia de cancelar un `importDocument` (caso 8, va a `Cancelled`),
+   * acá sí hay un estado editable previo al que volver — el documento sigue
+   * cargado, editable y exportable. Se abortan los jobs OCR/NER en vuelo (las
+   * ocurrencias ya mergeadas se conservan: Grouping no las descarta al
+   * abortar), se cierra la sesión con `finishSession` (renumeración
+   * determinista) ANTES de emitir `PIPELINE_CANCELLED`, suprimiendo el
+   * `PIPELINE_READY` derivado de ese `GROUPING_FINISHED` (guard por
+   * `cancelRequested` en `handleGroupingFinished`), y el stage final es
+   * `Ready`, no `Cancelled`. Se resetea el `AbortController` del documento
+   * para que operaciones futuras (otro `reanalyze`, un export) no vean una
+   * señal ya abortada.
+   */
+  private async cancelReanalyze(documentId: string): Promise<void> {
+    this.abortRegistry.abort(documentId);
+    this.state.update(documentId, { cancelRequested: true });
+
+    await this.engines.grouping.finishSession(documentId);
+
+    this.state.update(documentId, { stage: PipelineStage.Ready, cancelRequested: false });
+    this.reanalyzeInFlight.delete(documentId);
+    this.abortRegistry.release(documentId);
+    this.abortRegistry.create(documentId);
+
+    this.bus.emit(EventChannel.Pipeline, EngineEvents.PIPELINE_CANCELLED, {
+      documentId,
+      reason: "user_requested",
+    });
+  }
+
+  // ─── Flujos de reanalyze (ADR-038 §5) ───
+
+  /** Caso 18: `ner.enabled: false -> true`. Regex no se re-corre. */
+  private async runReanalyzeNerOnFlow(documentId: string, ctx: EngineContext): Promise<void> {
+    const document = this.documents.get(documentId);
+    if (document === undefined) {
+      throw new InvalidInputError(`Documento ${documentId} no disponible para reanalyze.`, {
+        documentId,
+      });
+    }
+
+    this.setStage(documentId, PipelineStage.Detecting);
+    this.engines.grouping.reopenSession(documentId, { expectRegex: false, expectNer: true });
+
+    this.progressByDocument.set(documentId, { total: document.pageCount, current: 0 });
+
+    const nerInputs: NerPageInput[] = document.pages.map((page) => ({
+      documentId,
+      pageIndex: page.index,
+      text: page.text,
+      words: page.words,
+    }));
+
+    // ADR-046 §7: el Orchestrator deja de envolver `processPages` en
+    // `pools.getPool("ner").dispatch({run})` — invoca el método del motor
+    // directo; es el propio `NerEngine` quien despacha internamente, por
+    // batch, contra su `NerPool` (inyectada por el façade en
+    // `create-core.ts`), mismo criterio que ADR-043/ADR-045 aplicaron a
+    // render/OCR.
+    await this.engines.ner.processPages(nerInputs, ctx);
+    // Auto-finish vía la propia suscripción de GroupingEngine a NER_FINISHED
+    // (regexFinished ya es true por reopenSession(expectRegex: false)).
+  }
+
+  /** Caso 19: `ner.enabled: true -> false`. Sin despacho asíncrono. */
+  private async runReanalyzeNerOffFlow(documentId: string): Promise<void> {
+    this.setStage(documentId, PipelineStage.Grouping);
+    this.engines.grouping.reopenSession(documentId, { expectRegex: false, expectNer: false });
+    this.engines.grouping.dropOccurrences(documentId, { source: DetectionSource.NER });
+    await this.engines.grouping.finishSession(documentId);
+  }
+
+  /** Caso 20 (+ combinado): `ocr.languages` sobre páginas `requiresOCR`. */
+  private async runReanalyzeOcrFlow(
+    documentId: string,
+    ctx: EngineContext,
+    effectiveConfig: EngineConfig,
+  ): Promise<void> {
+    const document = this.documents.get(documentId);
+    if (document === undefined) {
+      throw new InvalidInputError(`Documento ${documentId} no disponible para reanalyze.`, {
+        documentId,
+      });
+    }
+
+    const ocrPages = document.pages.filter((page) => page.requiresOCR).map((page) => page.index);
+    if (ocrPages.length === 0) {
+      // Sin páginas OCR: los idiomas de OCR no afectan texto nativo, nada
+      // que re-detectar (la config efectiva ya quedó actualizada arriba).
+      return;
+    }
+
+    this.setStage(documentId, PipelineStage.OCRing);
+    this.engines.grouping.reopenSession(documentId, {
+      expectRegex: true,
+      expectNer: effectiveConfig.ner.enabled,
+    });
+    this.engines.grouping.dropOccurrences(documentId, { pageIndices: ocrPages });
+
+    await this.runOcrStage(documentId, ocrPages, ctx);
+
+    this.setStage(documentId, PipelineStage.Detecting);
+    const updatedDocument = this.documents.get(documentId);
+    if (updatedDocument === undefined) {
+      throw new InvalidInputError(`Documento ${documentId} no disponible tras re-OCR.`, {
+        documentId,
+      });
+    }
+
+    // Regex sobre el documento completo: el dedup de Grouping (ADR-038 §3)
+    // descarta los duplicados de las páginas intactas.
+    await this.engines.regex.process({ document: updatedDocument }, ctx);
+
+    if (!effectiveConfig.ner.enabled) return; // handleRegexFinished ya invoca finishSession (ner off).
+
+    const rerunPages = new Set(ocrPages);
+    const nerInputs: NerPageInput[] = updatedDocument.pages
+      .filter((page) => rerunPages.has(page.index))
+      .map((page) => ({ documentId, pageIndex: page.index, text: page.text, words: page.words }));
+
+    this.progressByDocument.set(documentId, { total: nerInputs.length, current: 0 });
+
+    // ADR-046 §7 (mismo tratamiento que el call site de
+    // `runReanalyzeNerOnFlow`, aplicado acá por consistencia: el motor ya no
+    // acepta ser envuelto en un `pool.dispatch` externo sin duplicar su
+    // propio retry interno — problema 2 del Contexto de ADR-046).
+    await this.engines.ner.processPages(nerInputs, ctx);
+    // Auto-finish vía GroupingEngine (regex + ner, ambos *_FINISHED).
+  }
+
   async closeDocument(documentId: string): Promise<void> {
     // Idempotente: closeDocument() se auto-dispara de nuevo vía la suscripción
     // a DOCUMENT_CLOSED que él mismo emite al final (para que Grouping, que
@@ -211,16 +539,26 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
 
     this.abortRegistry.abort(documentId);
     this.abortRegistry.release(documentId);
-    this.engines.pdf.releaseDocument(documentId);
+    // ADR-041 §2: PdfEngine ya no retiene documentos (sin Map interno); no
+    // hay liberación por documento que invocarle (releaseDocument eliminado).
     await this.engines.render.unloadDocument(documentId);
 
     this.renderLoadedDocuments.delete(documentId);
     this.documents.delete(documentId);
     this.retainedInputs.delete(documentId);
-    this.pendingFusions.delete(documentId);
     this.exportQueues.delete(documentId);
     this.exportInProgress.delete(documentId);
     this.progressByDocument.delete(documentId);
+    this.effectiveConfigByDocument.delete(documentId);
+    this.reanalyzeInFlight.delete(documentId);
+    this.groupPagesByDocument.delete(documentId);
+    this.dirtyPagesByDocument.delete(documentId);
+    this.flushScheduledDocuments.delete(documentId);
+    // ADR-052 §3: la baja del documento aborta el controlador del preview
+    // mediado (cancelReanalyze deliberadamente NO llega a esta línea — solo
+    // closeDocument/dispose bajan el documento).
+    this.mediatedPreviewControllers.get(documentId)?.abort();
+    this.mediatedPreviewControllers.delete(documentId);
     this.blobTracker.revokeByPrefix(previewPrefixFor(documentId));
     this.blobTracker.revokeByPrefix(exportPrefixFor(documentId));
     this.state.delete(documentId);
@@ -244,10 +582,18 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     this.documents.clear();
     this.retainedInputs.clear();
     this.renderLoadedDocuments.clear();
-    this.pendingFusions.clear();
     this.exportQueues.clear();
     this.exportInProgress.clear();
     this.progressByDocument.clear();
+    this.effectiveConfigByDocument.clear();
+    this.reanalyzeInFlight.clear();
+    this.groupPagesByDocument.clear();
+    this.dirtyPagesByDocument.clear();
+    this.flushScheduledDocuments.clear();
+    // ADR-052 §3: dispose() global es una baja para todo documento con un
+    // controlador de preview mediado todavía vivo.
+    for (const controller of this.mediatedPreviewControllers.values()) controller.abort();
+    this.mediatedPreviewControllers.clear();
 
     for (const unsubscribe of this.unsubscribers) unsubscribe();
     this.unsubscribers.length = 0;
@@ -272,23 +618,39 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
   ): Promise<void> {
     let pdfOutput: PdfEngineOutput;
     try {
-      pdfOutput = await this.pools.getPool("pdf").dispatch({
-        run: () =>
-          this.engines.pdf.process(
-            {
-              documentId,
-              buffer: input.buffer,
-              ...(input.password !== undefined ? { password: input.password } : {}),
-            },
-            ctx,
-          ),
+      // v1.2.1 (bug #6, Orchestrator.md nota de cabecera / §12 / caso 23): el
+      // motor puede dejar detached el buffer que recibe (pdfjs-dist lo
+      // transfiere a su worker interno) — se entrega siempre una copia, el
+      // buffer retenido en `retainedInputs` nunca sale del Orchestrator.
+      // El mismo objeto sirve como `PdfEngineInput` (fallback in-process,
+      // `run`) y como `PdfParsePayload` (ADR-036 §2/§3, `03_Data_Model.md`
+      // §18): con `workerFactory` real para "pdf", `payload` dispara el
+      // despacho remoto de `WorkerPool.dispatchRemote` (PR11, ya genérico);
+      // sin ella, `executeJob` sigue invocando `run()` in-process (sin cambios).
+      const pdfParsePayload: PdfParsePayload = {
+        documentId,
+        buffer: input.buffer.slice(0),
+        ...(input.password !== undefined ? { password: input.password } : {}),
+      };
+
+      // Cast de frontera de transporte (ADR-042): WorkerOutbound.COMPLETED.result
+      // es `unknown` a nivel de transporte (mismo criterio que RUN.payload/
+      // INIT.config, ADR-019) — WorkerPool.dispatchRemote lo afina genéricamente
+      // a `TResult` (transporte, ya genérico desde PR11, no se toca acá); el
+      // <PdfEngineOutput> explícito de abajo es el lado del host-bridge que fija
+      // ese `TResult` al tipo concreto que el entry-point del PdfWorker
+      // realmente produce (mismo patrón que `payload as PdfParsePayload` en
+      // `pdf-engine/src/worker/entry.ts`).
+      // Sin `isRetryable` propio (ADR-049 §4/§5): el predicado por defecto del
+      // pool (`err instanceof EngineError && err.retryable`) ya decide bien,
+      // incluso con el error deserializado tras cruzar un Worker real, porque
+      // `PdfPasswordRequiredError.retryable === false` (pdf-engine, PR 17.1)
+      // y el flag sí sobrevive al boundary (`Contracts.md` §4).
+      pdfOutput = await this.pools.getPool("pdf").dispatch<PdfEngineOutput>({
+        run: () => this.engines.pdf.process(pdfParsePayload, ctx),
         signal: ctx.abortSignal,
         priority: 100,
-        // 05_Worker_Architecture.md §5 documenta PDF_PASSWORD_REQUIRED como no
-        // retryable, pero PdfPasswordRequiredError.retryable === true (pdf-engine,
-        // fuera de alcance) — ver nota en DispatchParams.isRetryable.
-        isRetryable: (err) =>
-          err instanceof EngineError && err.retryable && !(err instanceof PdfPasswordRequiredError),
+        payload: pdfParsePayload,
       });
     } catch (err: unknown) {
       this.handleExtractionFailure(documentId, err);
@@ -301,6 +663,24 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       this.setStage(documentId, PipelineStage.OCRing);
       try {
         await this.runOcrStage(documentId, pdfOutput.textlessPages, ctx);
+      } catch (err: unknown) {
+        if (this.handleCancellationIfAny(documentId, err)) return;
+        this.failPipeline(documentId, err);
+        return;
+      }
+    } else {
+      // v1.4.1 (caso 25, nota de cabecera del spec — visor en blanco para
+      // documentos con texto nativo): sin páginas OCR, el documento igual se
+      // carga en Render acá, simétrico a la rama de arriba, ANTES de
+      // Detecting (y por lo tanto antes de la cascada síncrona
+      // GROUPING_FINISHED -> handleGroupingFinished -> PIPELINE_READY — ver
+      // la nota de sincronía de cabecera del archivo: el fix no puede vivir
+      // dentro de handleGroupingFinished). Sin esto, el primer
+      // RENDER_REQUESTED que la UI emite en cuanto observa Ready (mucho antes
+      // de cualquier export) se descartaba en silencio por "documento no
+      // cargado" (Render_Engine.md §8), dejando el preview en blanco.
+      try {
+        await this.ensureRenderDocumentLoaded(documentId);
       } catch (err: unknown) {
         if (this.handleCancellationIfAny(documentId, err)) return;
         this.failPipeline(documentId, err);
@@ -326,8 +706,40 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     }
   }
 
+  /**
+   * Carga el documento en `RenderEngine` si todavía no lo está — invariante
+   * de `Orchestrator.md` §2: `loadDocument` se invoca **una sola vez por
+   * documento**, en la etapa 2 si hay páginas OCR (`runOcrStage`), si no
+   * antes de `Detecting` (v1.4.1, caso 25, rama `else` de `runPipelineFrom`)
+   * o, en su defecto (documento ya en Ready), antes del primer export
+   * (`runExport`). Entrega siempre una copia (`slice(0)`) del buffer
+   * retenido — nunca el original (v1.2.1, caso 23) — y es idempotente vía
+   * `renderLoadedDocuments` (no vuelve a invocar `loadDocument` si ya corrió
+   * para este `documentId`, sin importar desde cuál de los tres call sites).
+   */
+  private async ensureRenderDocumentLoaded(documentId: string): Promise<void> {
+    if (this.renderLoadedDocuments.has(documentId)) return;
+    const retained = this.retainedInputs.get(documentId);
+    if (retained === undefined) {
+      throw new InvalidInputError(`No hay buffer retenido para cargar Render (${documentId}).`, {
+        documentId,
+      });
+    }
+    // ADR-050 §4: propaga el password retenido (si lo hay) como tercer
+    // argumento — sin esto `RenderEngine.loadDocument` recibe los bytes
+    // todavía encriptados de un PDF protegido y falla con
+    // `RenderFailedError("No password given")`.
+    await this.engines.render.loadDocument(documentId, retained.buffer.slice(0), retained.password);
+    this.renderLoadedDocuments.add(documentId);
+  }
+
   private handleExtractionFailure(documentId: string, err: unknown): void {
-    if (err instanceof PdfPasswordRequiredError) {
+    // Discriminación por `code`, no por `instanceof PdfPasswordRequiredError`
+    // (ADR-049 §5): con transporte real de workers el error llega
+    // deserializado (`DeserializedEngineError`) y la subclase concreta no
+    // sobrevive al boundary — el `instanceof` daba `false` y este caso caía
+    // a `failPipeline` (bug del Escenario 3 E2E).
+    if (isEngineErrorCode(err, EngineErrorCode.PDF_PASSWORD_REQUIRED)) {
       // Stage queda en Extracting (ya seteado); espera retryWithPassword
       // (caso límite 3 del spec del Orchestrator).
       return;
@@ -341,34 +753,29 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     textlessPages: ReadonlyArray<number>,
     ctx: EngineContext,
   ): Promise<void> {
-    const retained = this.retainedInputs.get(documentId);
-    if (retained === undefined) {
-      throw new InvalidInputError(`No hay buffer retenido para ${documentId}.`, { documentId });
-    }
-
     // Progreso granular OCR (spec Orchestrator.md §8): total fijo para toda
     // la etapa (textlessPages.length de DOCUMENT_PARSED); current arranca en
     // 0 y lo incrementa handleOcrPageFinished por cada OCR_PAGE_FINISHED.
     this.progressByDocument.set(documentId, { total: textlessPages.length, current: 0 });
 
-    // ADR-034 §1: adelanta loadDocument a la etapa 2 (bytes retenidos de la 0).
-    if (!this.renderLoadedDocuments.has(documentId)) {
-      await this.engines.render.loadDocument(documentId, retained.buffer);
-      this.renderLoadedDocuments.add(documentId);
-    }
+    // ADR-034 §1: adelanta loadDocument a la etapa 2 (bytes retenidos de la
+    // 0). v1.2.1 (bug #6, caso 23): copia — el buffer retenido nunca sale del
+    // Orchestrator (garantizado por ensureRenderDocumentLoaded).
+    await this.ensureRenderDocumentLoaded(documentId);
 
     const scale = ctx.config.ocr.dpi / 72;
-    const renderPool = this.pools.getPool("render");
     const ocrInputs: OcrPageInput[] = [];
 
+    // ADR-043 §2: el Orchestrator deja de envolver `rasterizePage` en
+    // `pool.dispatch({run})` — invoca el método del motor directo; es el
+    // propio `RenderEngine` quien despacha internamente contra su
+    // `RenderPool` (inyectada por el façade en `create-core.ts`). La
+    // limitación de tasa por `waitForCapacity()` que existía acá desaparece
+    // junto con la referencia directa al pool: el límite de concurrencia real
+    // (`renderPoolSize`) lo sigue aplicando la propia pool del motor.
     for (const pageIndex of textlessPages) {
       if (ctx.abortSignal.aborted) throw new CancelledError(documentId);
-      await renderPool.waitForCapacity();
-      const imageData = await renderPool.dispatch({
-        run: () => this.engines.render.rasterizePage(documentId, pageIndex, scale, ctx),
-        signal: ctx.abortSignal,
-        priority: 90,
-      });
+      const imageData = await this.engines.render.rasterizePage(documentId, pageIndex, scale, ctx);
       ocrInputs.push({
         documentId,
         pageIndex,
@@ -378,17 +785,22 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       });
     }
 
-    const ocrPool = this.pools.getPool("ocr");
-    await ocrPool.dispatch({
-      run: () => this.engines.ocr.processPages(ocrInputs, ctx),
-      signal: ctx.abortSignal,
-      priority: 90,
-    });
+    // ADR-045 §2: el Orchestrator deja de envolver `processPages` en
+    // `pool.dispatch({run})` — invoca el método del motor directo; es el
+    // propio `OcrEngine` quien despacha internamente, por página, contra su
+    // `OcrPool` (inyectada por el façade en `create-core.ts`), mismo criterio
+    // que ADR-043 aplicó a `rasterizePage`/`renderPage`. El límite de
+    // concurrencia real (`ocrPoolSize`) lo sigue aplicando la propia pool del
+    // motor.
+    await this.engines.ocr.processPages(ocrInputs, ctx);
 
-    // La fusión (ADR-014) la dispara `handleOcrPageFinished` por cada página,
-    // asincrónicamente respecto del bus; hay que esperar a que todas terminen
-    // antes de que Regex/NER vean el Document ya fusionado.
-    await this.waitForPendingFusions(documentId);
+    // ADR-041 §3: la fusión (ADR-014) la dispara `handleOcrPageFinished` de
+    // forma síncrona por cada `OCR_PAGE_FINISHED` (IEventBus.emit despacha en
+    // línea, 04_Event_System.md §13): para cuando el `await` de arriba
+    // resuelve, todas las fusiones de este batch ya corrieron y persistieron
+    // en `this.documents`. Ya no hace falta esperar promesas de fusión
+    // pendientes (waitForPendingFusions se eliminó junto con el bookkeeping
+    // asíncrono que ya no existe).
   }
 
   private async runDetectionStage(documentId: string, ctx: EngineContext): Promise<void> {
@@ -419,11 +831,13 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       words: page.words,
     }));
 
-    await this.pools.getPool("ner").dispatch({
-      run: () => this.engines.ner.processPages(nerInputs, ctx),
-      signal: ctx.abortSignal,
-      priority: 80,
-    });
+    // ADR-046 §7: el Orchestrator deja de envolver `processPages` en
+    // `pools.getPool("ner").dispatch({run})` — invoca el método del motor
+    // directo; es el propio `NerEngine` quien despacha internamente, por
+    // batch, contra su `NerPool` (inyectada por el façade en
+    // `create-core.ts`), mismo criterio que ADR-045 aplicó a `processPages`
+    // de OCR.
+    await this.engines.ner.processPages(nerInputs, ctx);
     // Grouping auto-finaliza al recibir REGEX_FINISHED + NER_FINISHED por su
     // propia suscripción (sin cambios respecto de Hito 6); no hace falta
     // invocar finishSession acá.
@@ -435,12 +849,6 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       return true;
     }
     return false;
-  }
-
-  private async waitForPendingFusions(documentId: string): Promise<void> {
-    const pending = this.pendingFusions.get(documentId) ?? [];
-    this.pendingFusions.delete(documentId);
-    await Promise.all(pending);
   }
 
   // ─── Export (checklist §8, ADR-032 §2) ───
@@ -477,41 +885,43 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     }
 
     const controller = this.abortRegistry.get(documentId) ?? this.abortRegistry.create(documentId);
-    const ctx = this.ctxFor(controller.signal);
+    const ctx = this.ctxFor(controller.signal, documentId);
 
-    if (!this.renderLoadedDocuments.has(documentId)) {
-      const retained = this.retainedInputs.get(documentId);
-      if (retained === undefined) {
-        this.logger.warn("No hay buffer retenido para cargar Render antes del export.", {
-          documentId,
-        });
-        return;
-      }
-      await this.engines.render.loadDocument(documentId, retained.buffer);
-      this.renderLoadedDocuments.add(documentId);
-    }
-
-    const snapshot = this.engines.grouping.getSnapshot(documentId);
-    const provider = this.makeRenderPageProvider(documentId, options, ctx);
-
-    const exportInput: ExportEngineInput = {
-      documentId,
-      document,
-      groups: snapshot.groups,
-      rules: snapshot.rules,
-      options,
-      renderPageProvider: provider,
-    };
-
-    this.setStage(documentId, PipelineStage.Exporting);
-
+    // v1.2.1 (bug #6, caso 24): toda la preparación del export (incluido
+    // `ensureRenderDocumentLoaded`) vive dentro del try/catch → `failPipeline`.
+    // El guard de buffer retenido ausente pasa de warn+return silencioso a
+    // lanzar InvalidInputError — antes el `EXPORT_REQUESTED` no atendido
+    // dejaba el pipeline congelado en `Ready` sin ningún evento; ahora
+    // siempre resuelve en `EXPORT_FAILED`/`PIPELINE_FAILED` visible en la UI.
+    // Desde v1.4.1 (caso 25) `ensureRenderDocumentLoaded` es normalmente un
+    // no-op acá (el documento ya se cargó antes de Ready); se mantiene por
+    // los casos en que no fue así (p. ej. si el load de import falló y el
+    // documento sigue presente, o flujos que lleguen a export sin haber
+    // pasado por `runPipelineFrom`/`runOcrStage`).
     try {
+      await this.ensureRenderDocumentLoaded(documentId);
+
+      const snapshot = this.engines.grouping.getSnapshot(documentId);
+      const provider = this.makeRenderPageProvider(documentId, options, ctx);
+
+      const exportInput: ExportEngineInput = {
+        documentId,
+        document,
+        groups: snapshot.groups,
+        rules: snapshot.rules,
+        options,
+        renderPageProvider: provider,
+      };
+
+      this.setStage(documentId, PipelineStage.Exporting);
+
       await this.engines.export.export(exportInput, ctx);
     } catch (err: unknown) {
       if (err instanceof CancelledError) return; // caso 9: se descarta, sin más acción.
       // Cubre tanto el caso "EXPORT_FAILED ya emitido" (handleExportFailed ya
       // falló el pipeline; failPipeline es idempotente) como errores previos a
-      // cualquier emisión (p. ej. validateInput de Export).
+      // cualquier emisión (p. ej. loadDocument, buffer retenido ausente,
+      // validateInput de Export).
       this.failPipeline(documentId, err);
     }
   }
@@ -522,9 +932,12 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     ctx: EngineContext,
   ): RenderPageProvider {
     return {
+      // ADR-043 §2: el Orchestrator deja de envolver `renderPage` en
+      // `pool.dispatch({run})` — invoca el método del motor directo;
+      // `RenderEngine` despacha internamente contra su propia `RenderPool`
+      // con prioridad 1000 para `mode: "full"` (05_Worker_Architecture.md
+      // §6.2, ver `render.engine.ts#renderPageInternal`).
       renderFull: async (pageIndex, replacements, abortSignal) => {
-        const pool = this.pools.getPool("render");
-        await pool.waitForCapacity();
         const pageCtx: EngineContext = { ...ctx, abortSignal };
         const renderInput: RenderPageInput = {
           documentId,
@@ -534,11 +947,7 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
           replacements,
           imageFormat: options.imageFormat,
         };
-        const output = await pool.dispatch({
-          run: () => this.engines.render.renderPage(renderInput, pageCtx),
-          signal: abortSignal,
-          priority: 1000, // export-page: máxima prioridad (05_Worker_Architecture.md §6.2)
-        });
+        const output = await this.engines.render.renderPage(renderInput, pageCtx);
         if (output.encoded === undefined) {
           // No debería pasar: renderPage siempre produce `encoded` en mode "full" (ADR-034 §3).
           throw new RenderFailedError(documentId, "renderPage en mode 'full' no produjo encoded.");
@@ -581,6 +990,16 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
 
       this.bus.on(EventChannel.Grouping, EngineEvents.GROUPING_FINISHED, (p) =>
         this.handleGroupingFinished(p),
+      ),
+      // ADR-044: mediación grupos→Render del preview.
+      this.bus.on(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_CREATED, (p) =>
+        this.handleEntityGroupCreated(p),
+      ),
+      this.bus.on(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_UPDATED, (p) =>
+        this.handleEntityGroupUpdated(p),
+      ),
+      this.bus.on(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_REMOVED, (p) =>
+        this.handleEntityGroupRemoved(p),
       ),
 
       this.bus.on(EventChannel.Render, EngineEvents.PREVIEW_UPDATED, (p) =>
@@ -672,22 +1091,31 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       return;
     }
 
-    const fusion = this.engines.pdf
-      .fuseOcrPage(payload.documentId, payload.pageIndex, words)
-      .then((updatedDocument) => {
-        this.documents.set(payload.documentId, updatedDocument);
-      })
-      .catch((err: unknown) => {
-        this.logger.warn("fuseOcrPage falló para una página OCR.", {
-          documentId: payload.documentId,
-          pageIndex: payload.pageIndex,
-          reason: err instanceof Error ? err.message : String(err),
-        });
+    const document = this.documents.get(payload.documentId);
+    if (document === undefined) {
+      this.logger.warn("OCR_PAGE_FINISHED para un documento no disponible; se ignora la fusión.", {
+        documentId: payload.documentId,
+        pageIndex: payload.pageIndex,
       });
+      return;
+    }
 
-    const list = this.pendingFusions.get(payload.documentId) ?? [];
-    list.push(fusion);
-    this.pendingFusions.set(payload.documentId, list);
+    // ADR-041 §3: fuseOcrPage es una función pura y síncrona, host-side — lee
+    // (this.documents), fusiona e inmediatamente guarda la copia canónica,
+    // todo dentro del mismo turno de evento (IEventBus.emit es síncrono en
+    // línea, 04_Event_System.md §13). Elimina de raíz la carrera lost-update
+    // entre dos OCR_PAGE_FINISHED cercanos que existía cuando la fusión
+    // cruzaba el worker de forma asíncrona.
+    try {
+      const updatedDocument = fuseOcrPage(document, payload.pageIndex, words);
+      this.documents.set(payload.documentId, updatedDocument);
+    } catch (err: unknown) {
+      this.logger.warn("fuseOcrPage falló para una página OCR.", {
+        documentId: payload.documentId,
+        pageIndex: payload.pageIndex,
+        reason: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   private handleOcrPageFailed(payload: OcrPageFailed): void {
@@ -698,7 +1126,10 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
   }
 
   private handleRegexFinished(payload: RegexFinished): void {
-    if (!this.config.ner.enabled) {
+    // ADR-038 §1: usa la config efectiva del documento (no this.config), ya
+    // que un reanalyze puede haber cambiado ner.enabled para este documento
+    // sin afectar la config default de la instancia.
+    if (!this.effectiveConfigFor(payload.documentId).ner.enabled) {
       // NER desactivado: la etapa de detección termina con Regex solo, no
       // habrá NER_PAGE_FINISHED que incremente el progreso granular. Se
       // emite acá directamente current = total = pageCount (spec
@@ -713,6 +1144,10 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       }
       // ADR-034 §2: el despacho síncrono del bus garantiza que todos los
       // ENTITY_FOUND de Regex ya fueron procesados por Grouping acá.
+      // finishSession es re-ejecutable/idempotente (ADR-038 §2): si
+      // reopenSession ya dejó nerFinished=true (reanalyze con ner off,
+      // caso 19/20), esta llamada puede coincidir con el auto-finish interno
+      // de GroupingEngine; ambas convergen al mismo GROUPING_FINISHED.
       void this.engines.grouping.finishSession(payload.documentId);
     }
   }
@@ -725,7 +1160,22 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
   }
 
   private handleGroupingFinished(payload: GroupingFinished): void {
-    if (!this.state.has(payload.documentId)) return;
+    const state = this.state.get(payload.documentId);
+    if (state === undefined) return;
+
+    // ADR-044 §3, caso 26: el seed del preview anonimizado corre siempre acá,
+    // incluida la vía suprimida por cancelación de reanalyze (ver el early
+    // return de abajo) — ADR-038 §6.
+    this.seedAnonymizedPreview(payload.documentId);
+
+    if (state.cancelRequested) {
+      // ADR-038 §6, caso 22: GROUPING_FINISHED disparado por el
+      // finishSession que cancelReanalyze() invoca (o un evento tardío tras
+      // cancel() de un import) — el stage/PIPELINE_CANCELLED los gestiona
+      // cancel()/cancelReanalyze() directamente; acá se suprime el
+      // PIPELINE_READY derivado.
+      return;
+    }
     this.state.update(payload.documentId, { stage: PipelineStage.Ready, progress: 100 });
     this.bus.emit(EventChannel.Pipeline, EngineEvents.PIPELINE_READY, {
       documentId: payload.documentId,
@@ -734,7 +1184,205 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     });
   }
 
+  // ─── Mediación grupos→Render del preview (ADR-044) ───
+
+  private handleEntityGroupCreated(payload: EntityGroupCreated): void {
+    this.trackGroupPagesAndMarkDirty(payload.documentId, payload.group);
+  }
+
+  private handleEntityGroupUpdated(payload: EntityGroupUpdated): void {
+    this.trackGroupPagesAndMarkDirty(payload.documentId, payload.group);
+  }
+
+  private handleEntityGroupRemoved(payload: EntityGroupRemoved): void {
+    // El payload no trae `members` (Contracts.md §8): las páginas afectadas
+    // son las previamente conocidas del mapa retenido (§13 caso 27).
+    const groupMap = this.groupPagesByDocument.get(payload.documentId);
+    const knownPages = groupMap?.get(payload.groupId);
+    groupMap?.delete(payload.groupId);
+    if (knownPages !== undefined) this.markPagesDirty(payload.documentId, knownPages);
+  }
+
+  private trackGroupPagesAndMarkDirty(documentId: string, group: EntityGroup): void {
+    const groupMap = this.groupPagesByDocument.get(documentId) ?? new Map<string, Set<number>>();
+    this.groupPagesByDocument.set(documentId, groupMap);
+    const previousPages = groupMap.get(group.id) ?? new Set<number>();
+    const currentPages = new Set<number>(group.members.map((member) => member.pageIndex));
+    groupMap.set(group.id, currentPages);
+    // Páginas afectadas = actuales ∪ previamente conocidas (detecta páginas
+    // que el grupo abandonó por merge/split/dropOccurrences, §Decisión 3).
+    const affectedPages = new Set<number>([...previousPages, ...currentPages]);
+    this.markPagesDirty(documentId, affectedPages);
+  }
+
+  /**
+   * Marca páginas sucias para el flush del preview mediado (§Decisión 3). En
+   * las etapas pre-Ready (caso 26) es un no-op deliberado: el seed de
+   * GROUPING_FINISHED va a recomputar TODAS las páginas desde el snapshot
+   * completo, así que acumular acá sería redundante (y el flush nunca
+   * correría de todos modos, sin necesidad de guardarlas para más tarde).
+   */
+  private markPagesDirty(documentId: string, pages: ReadonlySet<number>): void {
+    if (pages.size === 0 || this.isPreReadyStage(documentId)) return;
+    const dirty = this.dirtyPagesByDocument.get(documentId) ?? new Set<number>();
+    for (const pageIndex of pages) dirty.add(pageIndex);
+    this.dirtyPagesByDocument.set(documentId, dirty);
+    this.scheduleFlush(documentId);
+  }
+
+  private isPreReadyStage(documentId: string): boolean {
+    const stage = this.state.get(documentId)?.stage;
+    return stage === undefined || PRE_READY_STAGES.has(stage);
+  }
+
+  /** Coalescido por microtask (§13 caso 27): una ráfaga de eventos en el mismo tick agenda un único flush. */
+  private scheduleFlush(documentId: string): void {
+    if (this.flushScheduledDocuments.has(documentId)) return;
+    this.flushScheduledDocuments.add(documentId);
+    queueMicrotask(() => {
+      this.flushScheduledDocuments.delete(documentId);
+      this.flushDirtyPages(documentId);
+    });
+  }
+
+  private flushDirtyPages(documentId: string): void {
+    const dirty = this.dirtyPagesByDocument.get(documentId);
+    if (dirty === undefined || dirty.size === 0) return;
+    this.dirtyPagesByDocument.delete(documentId);
+    // Defensivo: el documento pudo cerrarse mientras se esperaba el microtask.
+    if (!this.state.has(documentId)) return;
+
+    const snapshot = this.engines.grouping.getSnapshot(documentId);
+    const ctx = this.mediatedPreviewCtx(documentId);
+
+    // A diferencia del seed, el flush SIEMPRE renderiza cada página sucia,
+    // incluso si `replacements` quedó vacío (p. ej. único grupo de la página
+    // deshabilitado o eliminado): así el preview vuelve al original en vez de
+    // quedar con el `lastAnonymizedInputs` stale de antes de la edición (bug
+    // 2 de ADR-044 — el toggle off→on recompone del snapshot, no de un
+    // estado filtrado previo).
+    for (const pageIndex of dirty) {
+      const replacements = buildPageReplacements(pageIndex, snapshot.groups);
+      this.renderMediatedPreview(documentId, pageIndex, replacements, ctx);
+    }
+  }
+
+  /**
+   * Seed inicial del preview anonimizado (§Decisión 3, caso 26): corre en
+   * cada `GROUPING_FINISHED`, incluida la vía suprimida por cancelación de
+   * `reanalyze` (ADR-038 §6, ver `handleGroupingFinished`). La cascada
+   * síncrona hasta acá + el `rememberInput` síncrono de `RenderEngine.renderPage`
+   * garantizan que el primer `RENDER_REQUESTED` que la UI emita al observar
+   * `Ready` reconstruya ya con reemplazos reales — cierra el deadlock de
+   * arranque del preview (ADR-044 §Contexto, bug 1). Corre también en la vía
+   * suprimida por cancelación de `reanalyze` (`handleGroupingFinished`), donde
+   * la señal del documento ya está abortada — de ahí que use una señal propia
+   * (`mediatedPreviewCtx`, v1.5.1) y no la de `abortRegistry`.
+   */
+  private seedAnonymizedPreview(documentId: string): void {
+    const document = this.documents.get(documentId);
+    if (document === undefined) return;
+    // El barrido completo del snapshot cubre cualquier página que haya
+    // quedado marcada sucia durante las etapas pre-Ready (acumulada pero
+    // nunca flusheada, caso 26): se descarta para no duplicar el render.
+    this.dirtyPagesByDocument.delete(documentId);
+
+    const snapshot = this.engines.grouping.getSnapshot(documentId);
+    const ctx = this.mediatedPreviewCtx(documentId);
+
+    for (let pageIndex = 0; pageIndex < document.pageCount; pageIndex++) {
+      const replacements = buildPageReplacements(pageIndex, snapshot.groups);
+      // Caso 26: páginas sin ningún reemplazo habilitado no se siembran (la
+      // reconstrucción default de RENDER_REQUESTED con `replacements: []` ya
+      // es correcta — a diferencia del flush, acá no hay un estado previo que
+      // revertir).
+      if (replacements.length === 0) continue;
+      this.renderMediatedPreview(documentId, pageIndex, replacements, ctx);
+    }
+  }
+
+  /**
+   * `EngineContext` con una señal PROPIA, nunca ligada a `abortRegistry`
+   * (v1.5.1, `Orchestrator.md` nota de cabecera): `cancelReanalyze` (ADR-038
+   * §6) aborta la señal del documento **antes** de `await finishSession(...)`,
+   * y como esa llamada corre síncrona hasta `GROUPING_FINISHED`, el seed que
+   * `handleGroupingFinished` dispara en esa vía se ejecutaría con la señal ya
+   * abortada si reusara `abortRegistry` — `renderPage` rechazaría con
+   * `CancelledError` antes de `rememberInput`, y el seed nunca poblaría
+   * `lastAnonymizedInputs`. El seed/flush del preview mediado ya son
+   * "best-effort... inmunes al supersede" (ADR-044 §3); acá quedan además
+   * inmunes a la cancelación del documento, sin tocar el orden
+   * `abort`/`finishSession` de `cancelReanalyze` (ADR-038 intacto).
+   *
+   * (v1.5.4, ADR-052 §3 — amendment de ADR-044 §3): "nunca abortada" era
+   * demasiado ancho — dejaba renders mediados corriendo contra un documento
+   * cuyo proxy de Render `closeDocument`/`dispose` ya destruyeron, con su
+   * `PREVIEW_UPDATED` tardío dejando un blob URL que nadie iba a revocar. La
+   * señal pasa a ser **por documento** (`mediatedPreviewControllers`),
+   * reutilizada entre llamadas de `seedAnonymizedPreview`/`flushDirtyPages`
+   * para el mismo documento: inmune a la **cancelación** (`cancelReanalyze`
+   * no la toca, invariante intacto) pero no a la **baja**
+   * (`closeDocument`/`dispose` la abortan y la limpian del mapa).
+   */
+  private mediatedPreviewCtx(documentId: string): EngineContext {
+    let controller = this.mediatedPreviewControllers.get(documentId);
+    if (controller === undefined) {
+      controller = new AbortController();
+      this.mediatedPreviewControllers.set(documentId, controller);
+    }
+    return this.ctxFor(controller.signal, documentId);
+  }
+
+  /**
+   * Invocación directa de `renderPage` para el preview mediado (§Decisión 1):
+   * mismo patrón que el `RenderPageProvider` del export (ADR-014/ADR-043) —
+   * inmune al supersede de `RENDER_REQUESTED` (`Render_Engine.md` §13 caso 21).
+   * Best-effort: un fallo se loguea y no interrumpe las demás páginas ni
+   * escala a `PIPELINE_FAILED` (el preview nunca es una razón para fallar el
+   * pipeline).
+   */
+  private renderMediatedPreview(
+    documentId: string,
+    pageIndex: number,
+    replacements: ReadonlyArray<Replacement>,
+    ctx: EngineContext,
+  ): void {
+    const input: RenderPageInput = {
+      documentId,
+      pageIndex,
+      kind: "anonymized",
+      mode: "preview",
+      replacements,
+    };
+    this.engines.render.renderPage(input, ctx).catch((err: unknown) => {
+      this.logger.warn("Render mediado del preview anonimizado falló (best-effort, ADR-044).", {
+        documentId,
+        pageIndex,
+        reason: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }
+
+  /**
+   * Guard de llegada tardía (ADR-052 §2, v1.5.4): si `documentId` ya no está
+   * en `state` (el documento cerró), el `PREVIEW_UPDATED` es tardío — llegó
+   * después del `revokeByPrefix` de `closeDocument`, y ese `documentId` no
+   * lo vuelve a barrer ningún cierre futuro. El URL ya lo creó el motor
+   * (ADR-034 §5); si el Orchestrator no lo revoca acá, nadie lo revoca
+   * nunca. Es determinista: entre `revokeByPrefix` y `state.delete` de
+   * `closeDocument` no hay ningún `await`, así que un `PREVIEW_UPDATED` que
+   * llegue **durante** el `await unloadDocument` todavía ve `state.has ===
+   * true` y se registra normal (lo barre el `revokeByPrefix` de después).
+   */
   private handlePreviewUpdated(payload: PreviewUpdated): void {
+    if (!this.state.has(payload.documentId)) {
+      URL.revokeObjectURL(payload.canvasBlobUrl);
+      this.logger.warn("PREVIEW_UPDATED tardío para un documento ya cerrado; blob URL revocado.", {
+        documentId: payload.documentId,
+        pageIndex: payload.pageIndex,
+      });
+      return;
+    }
     this.blobTracker.set(
       previewBlobKey(payload.documentId, payload.pageIndex, payload.kind),
       payload.canvasBlobUrl,
@@ -753,14 +1401,27 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
   }
 
   private handleExportRequested(payload: ExportRequested): void {
-    void this.enqueueExport(payload.documentId, payload.options);
+    // v1.2.1 (bug #6, caso 24): `.catch` terminal de última instancia — `runExport`
+    // ya enruta sus fallos a `failPipeline`, pero `enqueueExport`/`runExportChain`
+    // corren disparados (`void`) desde un handler de evento síncrono que no puede
+    // propagar rechazos; sin este seatbelt, cualquier fallo no previsto en esa
+    // cadena se vuelve un unhandled rejection silencioso.
+    this.enqueueExport(payload.documentId, payload.options).catch((err: unknown) => {
+      this.failPipeline(payload.documentId, err);
+    });
   }
 
+  /** Guard de llegada tardía (ADR-052 §2, v1.5.4) — mismo tratamiento que `handlePreviewUpdated`. */
   private handleExportFinished(payload: ExportFinished): void {
-    this.blobTracker.set(exportBlobKey(payload.documentId), payload.blobUrl);
-    if (this.state.has(payload.documentId)) {
-      this.state.update(payload.documentId, { stage: PipelineStage.Done });
+    if (!this.state.has(payload.documentId)) {
+      URL.revokeObjectURL(payload.blobUrl);
+      this.logger.warn("EXPORT_FINISHED tardío para un documento ya cerrado; blob URL revocado.", {
+        documentId: payload.documentId,
+      });
+      return;
     }
+    this.blobTracker.set(exportBlobKey(payload.documentId), payload.blobUrl);
+    this.state.update(payload.documentId, { stage: PipelineStage.Done });
   }
 
   private handleExportFailed(payload: ExportFailed): void {
@@ -798,7 +1459,7 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
 
   // ─── Helpers ───
 
-  private poolSizeFor(key: PoolKey): number {
+  private poolSizeFor(key: ManagedPoolKey): number {
     switch (key) {
       case "pdf":
         return this.config.workerPool.pdfPoolSize;
@@ -811,14 +1472,19 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     }
   }
 
-  private ctxFor(signal: AbortSignal): EngineContext {
+  private ctxFor(signal: AbortSignal, documentId: string): EngineContext {
     return {
       bus: this.bus,
       logger: this.logger,
       cache: this.cache,
       abortSignal: signal,
-      config: this.config,
+      config: this.effectiveConfigFor(documentId),
     };
+  }
+
+  /** Config efectiva del documento (ADR-038 §1): la de `reanalyze`, o `this.config` si no hay override. */
+  private effectiveConfigFor(documentId: string): EngineConfig {
+    return this.effectiveConfigByDocument.get(documentId) ?? this.config;
   }
 
   private setStage(documentId: string, stage: PipelineStage): void {

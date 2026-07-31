@@ -1,12 +1,16 @@
-<!-- CONTEXT: scope=export-engine | dependencias=core/Contracts.md,architecture/06_Pipeline.md,ADR-004-Rendering.md,ADR-009-Export-Strategy.md,ADR-012-Replacement-Modes.md,ADR-032-Export-EncodedPageImage-Requested-Warning.md | audiencia=IA-implementador | fase=3 -->
+<!-- CONTEXT: scope=export-engine | dependencias=core/Contracts.md,architecture/06_Pipeline.md,ADR-004-Rendering.md,ADR-009-Export-Strategy.md,ADR-012-Replacement-Modes.md,ADR-032-Export-EncodedPageImage-Requested-Warning.md,ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,ADR-044-Preview-Grupos-Mediacion-Orchestrator.md,adr/ADR-047-ExportEngine-Ensamblador-Worker-Dedicado.md | audiencia=IA-implementador | fase=10 (§12 corregido en fase 10: ExportWorker único, no RenderPool — ADR-036 §1; §15.16: export de `buildPageReplacements` — ADR-044 §4; §2/§6/§12/§13/§14/§15 por ADR-047: ensamblado pdf-lib en el worker, motor host-side dueño de su despacho) -->
 
 # Export Engine — Spec de Motor
 
 > Construye el PDF final reconstruido desde cero, adjuntando las imágenes renderizadas (lado anonimizado) como páginas con pdf-lib. Garantiza no-recuperabilidad y metadata mínima.
 
 **EngineId**: `export`
-**Versión del spec**: 1.1.0
-**Última actualización**: 2026-07-16
+**Versión del spec**: 1.2.0
+**Última actualización**: 2026-07-24
+
+> **Nota (ADR-047, 2026-07-24 — reparto host/worker para PR16)**: `export()` queda **entero host-side** (validación, loop por página, `RenderPageProvider`, retry/timeout, los cuatro eventos, sanitización de `title`/`filename` y la creación del blob URL). Al ExportWorker cruzan **dos operaciones de pdf-lib**: `append-page` (`embedJpg`/`embedPng` + `addPage` + `drawImage`) y `save` (metadata + `save({ useObjectStreams: true })` → `ArrayBuffer` transferido). A diferencia de Render/Ocr/Ner, este worker **sí retiene estado**: el `PDFDocument` en construcción y el `documentId` al que pertenece — es un **ensamblador de un documento a la vez**, no un kernel puro, porque pdf-lib ensambla incrementalmente y no es thread-safe (§12). Reglas del estado: `documentId` distinto → descarta el parcial y arranca de nuevo; `append-page` con un `pageIndex` ya adjuntado → no-op idempotente (hace seguro el reintento del host y elimina el modo de falla "página duplicada" que el guard `pageCountBeforeAttempt` cubría cuando el `pdfDoc` era local); `CANCEL` descarta el parcial; tras un `save` exitoso, el estado se limpia. El transporte reusa `WorkerPool` con `size: 1` construido por el façade e inyectado por constructor (`new ExportEngine(pool?)`, sin argumento → fallback in-process bit-idéntico, ADR-035), con `maxRetriesOverride: 0` y normalización por `code` de `EXPORT_TIMEOUT`/`EXPORT_FAILED` en el borde del puerto — **matiza** ADR-036 §1 ("sin `WorkerPool`") sin revertir su sustancia: no hay quinta clave en `WorkerPoolConfig` ni cola multi-worker. Interfaz de §6: sin cambios de firma salvo el constructor.
+
+> **Nota (ADR-044 §4, 2026-07-23)**: `buildPageReplacements` (función pura interna: grupos → `Replacement[]` de una página, filtrando `enabled === false`) pasa a exportarse desde `index.ts`: el façade la importa para computar los reemplazos del preview mediado por el Orchestrator con la misma semántica que el export. Sin ningún otro cambio en este motor (§15.16).
 
 > **Nota (ADR-032, 2026-07-16)**: `RenderPageProvider.renderFull` devuelve `EncodedPageImage` (bytes codificados; pdf-lib no embebe `ImageData`); `EXPORT_REQUESTED` lo escucha el **Orchestrator**, que llama `export()` directamente (Export no se suscribe a eventos; patrón ADR-014); `EXPORT_NO_ENABLED_GROUPS` es `logger.warn` + continuar, la confirmación del usuario es pre-export. `ExportOptions`/`ExportMetadata` quedan formalizados en `03_Data_Model.md` §19.
 >
@@ -29,9 +33,9 @@ Ejecutar el flujo de export al ser invocado por el Orchestrator (que escucha `EX
 - Ejecutar `export(input)` cuando el Orchestrator lo invoca (el Orchestrator escucha `EXPORT_REQUESTED`; ADR-032 §2).
 - Validar que haya al menos un grupo `enabled`; si no, loguear warning (`ctx.logger.warn` con code `EXPORT_NO_ENABLED_GROUPS` en metadata) y continuar (ADR-032 §3).
 - Coordinar con `RenderEngine` el render full (`mode = "full"`, `kind = "anonymized"`) de cada página con los `Replacement[]` resueltos.
-- Construir un `PDFDocument` vacío con pdf-lib.
-- Adjuntar cada imagen renderizada como página (con dimensiones correctas según DPI).
-- Generar metadata mínima (`ExportMetadata`) sin copiar nada del original.
+- Construir un `PDFDocument` vacío con pdf-lib. Hito 8: inline; desde PR16 (ADR-047): en el **ExportWorker** — el `PDFDocument` vive del otro lado de la frontera; el fallback in-process usa el mismo módulo de ensamblado.
+- Adjuntar cada imagen renderizada como página (con dimensiones correctas según DPI), vía el mensaje `append-page` (idempotente por `pageIndex`, ADR-047 §4).
+- Generar metadata mínima (`ExportMetadata`) sin copiar nada del original — se arma y sanitiza en host y viaja en `ExportSavePayload`, que es donde pdf-lib la aplica.
 - Serializar el `PDFDocument` a `ArrayBuffer` y transferirlo al host.
 - Emitir `EXPORT_STARTED`, `EXPORT_PROGRESS`, `EXPORT_FINISHED`, `EXPORT_FAILED`.
 - Garantizar no-recuperabilidad (sin capas de texto, sin bookmarks, sin JS, sin forms, sin XMP del original).
@@ -112,11 +116,18 @@ export interface ExportEngineOutput {
 
 export class ExportEngine implements IEngine {
   readonly id = EngineId.Export;
+  // pool (ADR-047 §2): puerto interno de despacho (espejo de OcrJobPool/ADR-045
+  // §2), inyectado por el façade en createCore sobre un WorkerPool de size 1.
+  // Sin argumento → fallback in-process que invoca el mismo ensamblador
+  // (bit-idéntico, ADR-035); es lo que los tests del motor ya esperan.
+  constructor(pool?: ExportJobPool);
   init(ctx: EngineContext): Promise<void>;
   export(input: ExportEngineInput, ctx: EngineContext): Promise<ExportEngineOutput>;
   dispose(): Promise<void>;
 }
 ```
+
+**Semántica del despacho (ADR-047 §1–§5)**: por cada página, tras obtener el `EncodedPageImage` del `renderPageProvider`, el motor despacha `append-page` (`ExportPagePayload`, `03_Data_Model.md` §18: bytes + `imageFormat` + `pageWidthPt`/`pageHeightPt`) con `maxRetriesOverride: 0`; al terminar el loop despacha `save` (`ExportSavePayload` con la `ExportMetadata` ya sanitizada) y recibe el `ArrayBuffer` transferido. Los dos loops de retry (render y `save`) y el timeout de 30 s (`workerPool.timeouts["export-page"]`) siguen siendo host-side; un `EXPORT_TIMEOUT`/`EXPORT_FAILED` que cruzó el worker llega deserializado y se re-instancia por `code` antes de decidir el reintento. El blob URL de `EXPORT_FINISHED` lo crea el motor en host, nunca el worker.
 
 > El `RenderPageProvider` es inyectado por el Orchestrator (que conoce ambos engines). Esto evita la dependencia directa `export-engine → render-engine`, manteniendo el principio A-6 (sin dependencias entre motores).
 
@@ -215,7 +226,8 @@ Garantías del PDF final:
 
 ## 12. Consideraciones de rendimiento
 
-- Corre en `RenderPool` (workers de tipo `export-page`).
+- El ensamblado corre en el **ExportWorker único** de este motor (jobs `export-page`; la redacción previa "corre en `RenderPool`" era errata, ADR-036 §1). `export()` sigue en host: dirige el loop, emite `EXPORT_*` (ADR-013 §6); solo la frontera pdf-lib cruza al worker. El render full por página sí corre en `RenderPool` (vía `RenderPageProvider`, prioridad 1000). Desde ADR-047 §2 el transporte es un `WorkerPool` de `size: 1` construido por el façade e inyectado al motor: un solo slot ⇒ el ensamblado sigue siendo estrictamente secuencial (pdf-lib no es thread-safe sobre el mismo `PDFDocument`) y dos exports concurrentes se serializan solos (§13 caso 14), sin cola prioritaria ni clave nueva en `WorkerPoolConfig`.
+- Cada `ArrayBuffer` de página hace dos saltos zero-copy (RenderWorker → host → ExportWorker): el encode vive donde vive el canvas (ADR-034 §3) y el ensamblado donde vive pdf-lib.
 - Costo: 200–800 ms por página (render full + ensamblado pdf-lib). Serialización final: 500–2000 ms.
 - Memoria: 60–200 MB por worker (pdf-lib `PDFDocument` crece con cada página adjuntada).
 - `ArrayBuffer` final se transfiere zero-copy al host.
@@ -246,6 +258,9 @@ Garantías del PDF final:
 15. **`export` tras `dispose`**: lanza `EngineDisposedError`.
 16. **Título muy largo o caracteres especiales**: pdf-lib los maneja; se sanitiza para evitar PDF injection.
 17. **1000 páginas**: memoria del `PDFDocument` puede llegar a 500 MB. Mitigado: ensamblar en chunks y usar `pdf-lib` con `save({ useObjectStreams: true })` para compresión.
+18. **Reintento de una página que el worker sí adjuntó (ADR-047 §4)**: el host reintenta tras un timeout, pero el `append-page` original había terminado del otro lado. El worker ignora el `pageIndex` ya adjuntado y responde `COMPLETED`: el PDF final no tiene páginas duplicadas. Sin esta idempotencia el fallo sería silencioso (salida incorrecta, ningún error).
+19. **`append-page` con un `documentId` distinto del retenido (ADR-047 §4)**: el worker descarta el `PDFDocument` parcial y arranca uno nuevo. Cubre un export abandonado por fallo o cancelación seguido de otro, sin mensaje de control nuevo.
+20. **Fallback in-process (sin factory de worker, ADR-035)**: el ensamblado corre en el mismo módulo, en el host. Eventos, orden, bytes de salida y garantías de §10 idénticos; los tests del motor corren por este camino.
 
 ---
 
@@ -273,6 +288,14 @@ Garantías del PDF final:
 | `throws InvalidInputError on 0 pages` | `edge.test.ts` | edge | caso 1 |
 | `1000 pages completes within memory budget` | `stress.test.ts` (en `src/__tests__/` hasta que exista `tests/stress/`; mismo criterio que ADR-031 §5) | stress | caso 17 |
 | `filename sanitized for PDF injection` | `edge.test.ts` | edge | caso 16 |
+| `re-appending the same pageIndex does not duplicate the page` | `worker/__tests__/entry.test.ts` | unit | caso 18 (ADR-047 §4) |
+| `append-page with a new documentId discards the partial document` | `worker/__tests__/entry.test.ts` | unit | caso 19 |
+| `entry-point discriminates append-page vs save by payload shape` | `worker/__tests__/entry.test.ts` | unit | ADR-047 §3 |
+| `CANCEL discards the partial PDFDocument and answers CANCELLED` | `worker/__tests__/entry.test.ts` | unit | caso 13 |
+| `every dispatch uses maxRetriesOverride: 0` | `contract.test.ts` | contract | ADR-047 §2 |
+| `same events, order and output bytes with and without injected pool` | `contract.test.ts` | contract | caso 20 (fallback ADR-035) |
+| `deserialized EXPORT_TIMEOUT is retried like the local one` | `unit.test.ts` | unit | ADR-047 §5 |
+| `blob URL is created in host, never in the worker` | `contract.test.ts` | contract | ADR-047 §6 |
 
 Fixtures: `tests/fixtures/text-10p.pdf`, `text-50p.pdf`, `huge-1000p.pdf`.
 
@@ -295,11 +318,19 @@ Fixtures: `tests/fixtures/text-10p.pdf`, `text-50p.pdf`, `huge-1000p.pdf`.
 - [ ] 13. Escribir `edge.test.ts` con todos los casos límite.
 - [ ] 14. Escribir `security.test.ts` con `no-recuperability` y `metadata-strip`.
 - [ ] 15. Ejecutar `pnpm lint && pnpm typecheck && pnpm test` verde.
-- [ ] 16. Verificar `index.ts` exporta solo `ExportEngine`, tipos, errores.
+- [ ] 16. Verificar `index.ts` exporta solo `ExportEngine`, tipos, errores — y, desde ADR-044 §4, la función pura `buildPageReplacements` (grupos → `Replacement[]` por página): la importa el façade para computar los reemplazos del preview mediado con la **misma** semántica que el export (única excepción sancionada; ningún otro helper interno se exporta).
 - [ ] 17. Verificar imports sin dependencias prohibidas (`grep -r 'react\|pdfjs\|tesseract\|onnx\|transformers' src/`).
 - [ ] 18. Verificar `no-network-from-core`.
 - [ ] 19. Verificar test de cancelación < 200 ms.
 - [ ] 20. Validar gate `no-recuperability` en CI.
+
+### PR16 — ExportWorker (ADR-047)
+
+- [ ] 21. Extraer a `src/worker/assembler.ts` la frontera pdf-lib: `appendPage(state, payload)` (embed + `addPage` + `drawImage`, idempotente por `pageIndex`) y `savePdf(state, metadata)` (setters + `save({ useObjectStreams: true })`), sobre un estado explícito `{ documentId, pdfDoc, appendedPages }`. Sin bus, sin logger, sin eventos.
+- [ ] 22. Escribir `src/worker/entry.ts`: `INIT`/`READY`, `RUN(export-page)` discriminando por forma (`"pageImage" in payload` → append; si no → save), `COMPLETED` (el `save` devuelve el `ArrayBuffer` **transferido**), `CANCEL` (descarta el parcial), `DISPOSE`. `jobType ≠ "export-page"` → `FAILED`. Agregar el subpath `"./worker"` al `package.json` del paquete.
+- [ ] 23. Adaptar `export.engine.ts`: puerto `ExportJobPool` + `IMMEDIATE_POOL` + `constructor(pool?)`; despacho `append-page` por página y `save` al final con `maxRetriesOverride: 0`; normalización por `code` de `EXPORT_TIMEOUT`/`EXPORT_FAILED`; retirar el guard `pageCountBeforeAttempt` (lo reemplaza la idempotencia por índice del worker); `dispose()` libera el ensamblador local.
+- [ ] 24. Costuras ajenas sancionadas por ADR-047 §2/§7: `PoolKey` gana `"export"` en `worker-pool.ts` y `WorkerPoolManager` conserva su unión de cuatro vía `ManagedPoolKey = Exclude<PoolKey, "export">`; `create-core.ts` construye el `exportPool` (`size: 1`) e inyecta `new ExportEngine(exportPool)` y lo dispone; `orchestrator.ts` **retira** `exportWorkerFactory` (campo, log y comentario); wiring de la factory `export` en `apps/react-client`.
+- [ ] 25. Tests nuevos de §14 + glob de cobertura de `worker/**` en `vitest.config.ts`; `pnpm test:security` verde por el camino nuevo (no-recuperabilidad y metadata-strip no dependen de dónde corre pdf-lib). Gates completos verdes.
 
 ---
 

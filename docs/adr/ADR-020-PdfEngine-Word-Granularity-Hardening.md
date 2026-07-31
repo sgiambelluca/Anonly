@@ -2,7 +2,7 @@
 
 # ADR-020 — PDF Engine: granularidad de Word, NFC y hardening post-review del Hito 2
 
-- **Estado**: Accepted
+- **Estado**: Accepted (§7 `releaseDocument` **superseded por ADR-041**, 2026-07-22: `PdfEngine` deja de retener documentos y `fuseOcrPage` pasa a función pura — el guard de §6 y la normalización NFC de §2 se preservan en la función)
 - **Fecha**: 2026-07-09
 - **Decidido por**: Code review integral del Hito 2 aprobado por el humano
 - **Relacionado con**: ADR-013 (PDF Engine Hito 2: ejecución inline), ADR-014 (Fusión OCR→PDF mediada por Orchestrator), ADR-019 (Hardening del Hito 1)

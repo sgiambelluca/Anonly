@@ -29,6 +29,7 @@ import {
   makeReplacement,
   mockGetDocumentFailure,
   mockGetDocumentResult,
+  readProtectedPdfFixtureBuffer,
   removeOffscreenCanvasStub,
   resetCreatedCanvases,
   setStubCanvasContextAvailable,
@@ -79,39 +80,37 @@ describe("RenderEngine — edge cases", () => {
   });
 
   it("disabled group's occurrences appear as original text", async () => {
+    // ADR-044: RenderEngine ya no filtra grupos deshabilitados por sí mismo
+    // (el delta render por GROUP_TOGGLED/GROUP_REPLACEMENT_CHANGED se retiró,
+    // junto con `Replacement`, que nunca tuvo un campo `enabled`). El filtro
+    // vive en el caller autoritativo (`buildPageReplacements`, export-engine,
+    // invocado por el Orchestrator — Render_Engine.md §13 caso 2): un grupo
+    // deshabilitado simplemente no llega en `replacements`. Se verifica acá
+    // que ese grupo ausente no deja ningún rastro pintado, mientras uno
+    // presente sí se pinta.
     const docId = "doc-toggle-disabled";
     vi.mocked(getDocument).mockReturnValue(
       mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
     );
-    const realCtx = createEngineContextWithRealBus();
-    await engine.init(realCtx);
+    await engine.init(ctx);
     await engine.loadDocument(docId, createValidBuffer());
 
-    await engine.renderPage(
+    const output = await engine.renderPage(
       createRenderPageInput({
         documentId: docId,
         pageIndex: 0,
         kind: "anonymized",
         mode: "preview",
-        replacements: [makeReplacement({ groupId: "g1", replacementValue: "[DNI 01]" })],
+        replacements: [makeReplacement({ groupId: "g-enabled", replacementValue: "[DNI 01]" })],
       }),
-      realCtx,
+      ctx,
     );
-    resetCreatedCanvases();
-
-    realCtx.bus.emit(EventChannel.Grouping, EngineEvents.GROUP_TOGGLED, {
-      documentId: docId,
-      groupId: "g1",
-      enabled: false,
-    });
-
-    await vi.waitFor(() => {
-      expect(getCreatedCanvases().length).toBeGreaterThan(0);
-    });
 
     const [canvas] = getCreatedCanvases();
     const fillTextCalls = canvas!.calls.filter((c) => c.op === "fillText");
-    expect(fillTextCalls).toHaveLength(0);
+    expect(fillTextCalls).toHaveLength(1);
+    expect(fillTextCalls[0]!.args[0]).toBe("[DNI 01]"); // solo el grupo habilitado se pinta
+    expect(output.kind).toBe("anonymized");
   });
 
   it("redact mode paints opaque black over bbox", async () => {
@@ -349,7 +348,12 @@ describe("RenderEngine — edge cases", () => {
     await engine.loadDocument(docId, createValidBuffer());
 
     expect(mockDocA.destroy).toHaveBeenCalledTimes(1);
-    expect(engine["documents"].get(docId)).toBe(mockDocB);
+    // ADR-043 §3: `documents` host-side ya no guarda el `PDFDocumentProxy`
+    // (vive en el kernel/worker) — retiene `{ buffer, pageCount }`. La
+    // recarga determinística (mismo comportamiento, ADR-030 §1) se verifica
+    // acá por el `pageCount` reflejando el segundo proxy (mockDocB, 2
+    // páginas) en vez de por identidad de referencia del proxy.
+    expect(engine["documents"].get(docId)).toEqual(expect.objectContaining({ pageCount: 2 }));
   });
 
   it("unloadDocument on unknown id is a no-op", async () => {
@@ -399,6 +403,42 @@ describe("RenderEngine — edge cases", () => {
     await expect(engine.loadDocument("doc-getdocument-fails", createValidBuffer())).rejects.toThrow(
       RenderFailedError,
     );
+  });
+
+  // ─── Caso 22 (ADR-050): password de un PDF protegido en loadDocument ───
+
+  it("loadDocument with password opens an encrypted PDF", async () => {
+    const docId = "doc-protected-with-password";
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 10 })),
+    );
+    await engine.init(ctx);
+
+    const buffer = readProtectedPdfFixtureBuffer();
+    await engine.loadDocument(docId, buffer, "test1234");
+
+    expect(getDocument).toHaveBeenCalledWith({ data: buffer, password: "test1234" });
+    // ADR-050 §2: el host retiene { buffer, pageCount, password } — verificado
+    // acá porque es lo que después usa reprimeWorkers (ver unit.test.ts).
+    expect(engine["documents"].get(docId)).toEqual(
+      expect.objectContaining({ pageCount: 10, password: "test1234" }),
+    );
+  });
+
+  it("loadDocument without password on an encrypted PDF fails with RenderFailedError", async () => {
+    // Bug que motivó ADR-050: antes del fix, un PDF protegido abierto sin
+    // password moría acá con el mismo tratamiento que cualquier otro fallo
+    // de getDocument en loadDocument (§11) — no es un camino nuevo (§13 caso 22).
+    const pwdErr = new Error("No password given");
+    pwdErr.name = "PasswordException";
+    vi.mocked(getDocument).mockReturnValue(mockGetDocumentFailure(pwdErr));
+    await engine.init(ctx);
+
+    const buffer = readProtectedPdfFixtureBuffer();
+    await expect(engine.loadDocument("doc-protected-no-password", buffer)).rejects.toThrow(
+      RenderFailedError,
+    );
+    expect(getDocument).toHaveBeenCalledWith({ data: buffer, password: undefined });
   });
 
   it("throws RenderTimeoutError when render exceeds the configured timeout", async () => {
@@ -488,7 +528,6 @@ describe("RenderEngine — edge cases", () => {
     await engine.loadDocument(docId, createValidBuffer());
 
     expect(engine["cache"].size).toBe(0);
-    expect(engine["pageGroupIndex"].size).toBe(0);
     expect(engine["lastAnonymizedInputs"].size).toBe(0);
     expect(engine["lastOriginalInputs"].size).toBe(0);
   });
@@ -515,43 +554,32 @@ describe("RenderEngine — edge cases", () => {
     await engine.unloadDocument(docId);
 
     expect(engine["cache"].size).toBe(0);
-    expect(engine["pageGroupIndex"].size).toBe(0);
     expect(engine["lastOriginalInputs"].size).toBe(0);
   });
 
-  it("GROUP_REPLACEMENT_CHANGED for unloaded document warns and no-ops", async () => {
-    const realCtx = createEngineContextWithRealBus();
-    await engine.init(realCtx);
-    const warnSpy = vi.spyOn(realCtx.logger, "warn");
+  it("loadDocument reload and unloadDocument also clear pendingRenders (ADR-037 §4)", async () => {
+    const docId = "doc-reload-pending";
+    const mockDocA = createMockPdfDocument({ pageCount: 1 });
+    const mockDocB = createMockPdfDocument({ pageCount: 1 });
+    vi.mocked(getDocument)
+      .mockReturnValueOnce(mockGetDocumentResult(mockDocA))
+      .mockReturnValueOnce(mockGetDocumentResult(mockDocB));
 
-    realCtx.bus.emit(EventChannel.Grouping, EngineEvents.GROUP_REPLACEMENT_CHANGED, {
-      documentId: "doc-unloaded-2",
-      groupId: "g1",
-      mode: ReplacementMode.Redact,
-      value: "",
-    });
+    await engine.init(ctx);
+    await engine.loadDocument(docId, createValidBuffer());
+    // Registra un estado de supersede directo (mismo helper que usa
+    // handleRenderRequested), sin depender de un round-trip completo del bus.
+    engine["registerPendingRender"](docId, 0, "original", 1);
+    expect(engine["pendingRenders"].size).toBeGreaterThan(0);
 
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("doc-unloaded-2"),
-      expect.objectContaining({ documentId: "doc-unloaded-2" }),
-    );
-  });
+    await engine.loadDocument(docId, createValidBuffer());
+    expect(engine["pendingRenders"].size).toBe(0);
 
-  it("GROUP_TOGGLED for unloaded document warns and no-ops", async () => {
-    const realCtx = createEngineContextWithRealBus();
-    await engine.init(realCtx);
-    const warnSpy = vi.spyOn(realCtx.logger, "warn");
+    engine["registerPendingRender"](docId, 0, "anonymized", 1);
+    expect(engine["pendingRenders"].size).toBeGreaterThan(0);
 
-    realCtx.bus.emit(EventChannel.Grouping, EngineEvents.GROUP_TOGGLED, {
-      documentId: "doc-unloaded-3",
-      groupId: "g1",
-      enabled: false,
-    });
-
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("doc-unloaded-3"),
-      expect.objectContaining({ documentId: "doc-unloaded-3" }),
-    );
+    await engine.unloadDocument(docId);
+    expect(engine["pendingRenders"].size).toBe(0);
   });
 
   // ─── ADR-034 §1: rasterizePage validaciones ───
@@ -584,5 +612,279 @@ describe("RenderEngine — edge cases", () => {
     await engine.loadDocument(docId, createValidBuffer());
 
     await expect(engine.rasterizePage(docId, 5, 2, ctx)).rejects.toThrow(InvalidInputError);
+  });
+
+  // ─── ADR-037 §2/§4 (Hito 10): guard de scale + supersede por página ───
+
+  it("scale out of range warns and no-ops via event, throws InvalidInputError via direct call", async () => {
+    const docId = "doc-scale-range";
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+    );
+    const realCtx = createEngineContextWithRealBus();
+    await engine.init(realCtx);
+    await engine.loadDocument(docId, createValidBuffer());
+    const warnSpy = vi.spyOn(realCtx.logger, "warn");
+
+    // Vía evento: fuera de rango (> MAX_RENDER_SCALE = 4) → warn + no-op.
+    realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+      documentId: docId,
+      pageIndices: [0],
+      mode: "preview",
+      scale: 5,
+    });
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("scale"),
+      expect.objectContaining({ documentId: docId, scale: 5 }),
+    );
+
+    // Vía evento: no finito → warn + no-op.
+    warnSpy.mockClear();
+    realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+      documentId: docId,
+      pageIndices: [0],
+      mode: "preview",
+      scale: Number.POSITIVE_INFINITY,
+    });
+    expect(warnSpy).toHaveBeenCalled();
+
+    // Vía invocación directa: InvalidInputError (fuera de rango, <= 0, no finito).
+    await expect(
+      engine.renderPage(
+        createRenderPageInput({ documentId: docId, pageIndex: 0, scale: 5 }),
+        realCtx,
+      ),
+    ).rejects.toThrow(InvalidInputError);
+    await expect(
+      engine.renderPage(
+        createRenderPageInput({ documentId: docId, pageIndex: 0, scale: 0 }),
+        realCtx,
+      ),
+    ).rejects.toThrow(InvalidInputError);
+    await expect(
+      engine.renderPage(
+        createRenderPageInput({ documentId: docId, pageIndex: 0, scale: Number.NaN }),
+        realCtx,
+      ),
+    ).rejects.toThrow(InvalidInputError);
+  });
+
+  it("superseded render in queue is discarded without PREVIEW_UPDATED", async () => {
+    const docId = "doc-superseded-queue";
+    const mockDoc = createMockPdfDocument({ pageCount: 2 });
+    vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(mockDoc));
+    const realCtx = createEngineContextWithRealBus();
+    await engine.init(realCtx);
+    await engine.loadDocument(docId, createValidBuffer());
+    const getPageSpy = mockDoc["getPage"] as ReturnType<typeof vi.fn>;
+
+    // Request A pide render de las páginas 0 y 1 a escala 1. renderPages
+    // procesa secuencialmente: cuando llega el segundo emit (síncrono, el bus
+    // despacha en línea), A todavía no llamó getPage para la página 1 — sigue
+    // "en cola" dentro de su propio batch.
+    realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+      documentId: docId,
+      pageIndices: [0, 1],
+      mode: "preview",
+      scale: 1,
+    });
+
+    // Request B supersede la página 1 con otra escala antes de que el batch de
+    // A llegue a ejecutarla (ADR-037 §4: descarta el pendiente en cola).
+    realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+      documentId: docId,
+      pageIndices: [1],
+      mode: "preview",
+      scale: 2,
+    });
+
+    await vi.waitFor(() => {
+      // pageNumber 2 = pageIndex 1 + 1, invocado por B.
+      expect(getPageSpy).toHaveBeenCalledWith(2);
+    });
+    // Deja asentar cualquier microtask restante del batch de A antes de contar.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    // handleRenderRequested reconstruye "original" y "anonymized" por página
+    // (06_Pipeline.md §10): B por sí solo llama getPage(2) dos veces (una por
+    // kind). Si el intento en cola de A NO se hubiera descartado, habría 4
+    // llamadas en total (2 de A + 2 de B) en vez de 2.
+    const page1Calls = getPageSpy.mock.calls.filter((call) => call[0] === 2);
+    expect(page1Calls).toHaveLength(2); // solo B (ambos kinds); A se descartó sin ejecutar.
+  });
+
+  it("superseded render in flight aborts at next checkpoint without PREVIEW_UPDATED", async () => {
+    const docId = "doc-superseded-flight";
+    let resolvePage0Render: (() => void) | undefined;
+    const page0RenderPromise = new Promise<void>((resolve) => {
+      resolvePage0Render = resolve;
+    });
+    const renderSpy = vi.fn(() => ({ promise: page0RenderPromise }));
+    const mockDoc = createMockPdfDocument({
+      pageCount: 1,
+      pageFactory: () => ({
+        getViewport: vi.fn(() => ({ width: 100, height: 100 })),
+        render: renderSpy,
+      }),
+    });
+    vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(mockDoc));
+    const realCtx = createEngineContextWithRealBus();
+    await engine.init(realCtx);
+    await engine.loadDocument(docId, createValidBuffer());
+
+    const previewUpdates: Array<{ pageIndex: number; kind: string }> = [];
+    realCtx.bus.on(EventChannel.Render, EngineEvents.PREVIEW_UPDATED, (payload) => {
+      previewUpdates.push({ pageIndex: payload.pageIndex, kind: payload.kind });
+    });
+
+    realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+      documentId: docId,
+      pageIndices: [0],
+      mode: "preview",
+      scale: 1,
+    });
+
+    // Espera a que el render de A haya arrancado su render() (pasó getPage,
+    // entró a renderPageOntoContext) y quede bloqueado esperando la promesa.
+    await vi.waitFor(() => {
+      expect(renderSpy).toHaveBeenCalled();
+    });
+
+    // Supersede: misma página/kind, otra escala. Aborta el AbortController del
+    // render en vuelo de A (ADR-037 §4).
+    realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+      documentId: docId,
+      pageIndices: [0],
+      mode: "preview",
+      scale: 2,
+    });
+
+    resolvePage0Render?.();
+
+    await vi.waitFor(() => {
+      const originalUpdates = previewUpdates.filter(
+        (u) => u.pageIndex === 0 && u.kind === "original",
+      );
+      expect(originalUpdates).toHaveLength(1);
+    });
+
+    // Deja asentar cualquier microtask restante antes de la aserción final —
+    // si el render superseded de A hubiera emitido, ya habría llegado acá.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const finalOriginalUpdates = previewUpdates.filter(
+      (u) => u.pageIndex === 0 && u.kind === "original",
+    );
+    expect(finalOriginalUpdates).toHaveLength(1); // solo B: A se descartó sin emitir.
+  });
+
+  // ─── Caso 21 (hallazgo de revisión Hito 10 PR4): el supersede solo aplica al
+  // flujo por eventos; las invocaciones directas son inmunes a sus entradas ───
+
+  it("direct full render (export) ignores supersede entry left by a completed event render at another scale", async () => {
+    const docId = "doc-export-immune";
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+    );
+    const realCtx = createEngineContextWithRealBus();
+    await engine.init(realCtx);
+    await engine.loadDocument(docId, createValidBuffer());
+
+    // Preview vía RENDER_REQUESTED a escala 1: completa con éxito y deja su
+    // entrada de supersede registrada (las entradas no se limpian al completar,
+    // deliberadamente — ver nota 6c de render.engine.ts).
+    let renderFinished = false;
+    realCtx.bus.on(EventChannel.Render, EngineEvents.RENDER_FINISHED, () => {
+      renderFinished = true;
+    });
+    realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+      documentId: docId,
+      pageIndices: [0],
+      mode: "preview",
+      scale: 1,
+    });
+    await vi.waitFor(() => {
+      expect(renderFinished).toBe(true);
+    });
+    // Premisa del bug: la entrada del preview sigue registrada tras completar.
+    expect(engine["pendingRenders"].size).toBeGreaterThan(0);
+
+    // Export directo del Orchestrator (RenderPageProvider.renderFull →
+    // renderPage con mode "full" y otra escala): antes del fix, la entrada
+    // residual del preview (escala 1 ≠ 2) lo cancelaba espuriamente con
+    // CancelledError. La invocación directa no participa del supersede.
+    const output = await engine.renderPage(
+      createRenderPageInput({
+        documentId: docId,
+        pageIndex: 0,
+        kind: "anonymized",
+        mode: "full",
+        scale: 2,
+        replacements: [makeReplacement({ groupId: "g1" })],
+      }),
+      realCtx,
+    );
+
+    expect(output.pageIndex).toBe(0);
+    expect(output.kind).toBe("anonymized");
+    expect(output.encoded).toBeDefined(); // mode "full" → bytes para el export (ADR-034 §3).
+  });
+
+  it("direct preview render (mediated) ignores supersede entry at another scale (group change is not lost)", async () => {
+    // Reformulado por ADR-044 (el delta render por GROUP_TOGGLED se retira):
+    // el re-render por cambio de grupo lo dispara ahora el Orchestrator con
+    // una invocación DIRECTA de renderPage (mode "preview", reemplazos del
+    // snapshot) — mismo camino que el export, inmune al supersede de
+    // RENDER_REQUESTED (Render_Engine.md §13 caso 21).
+    const docId = "doc-mediated-immune";
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+    );
+    const realCtx = createEngineContextWithRealBus();
+    await engine.init(realCtx);
+    await engine.loadDocument(docId, createValidBuffer());
+
+    // Render mediado previo (equivalente al seed/flush del Orchestrator):
+    // página a escala 2 con un reemplazo habilitado.
+    await engine.renderPage(
+      createRenderPageInput({
+        documentId: docId,
+        pageIndex: 0,
+        kind: "anonymized",
+        mode: "preview",
+        scale: 2,
+        replacements: [makeReplacement({ groupId: "g1" })],
+      }),
+      realCtx,
+    );
+
+    // Simula un RENDER_REQUESTED vigente a OTRA escala para la misma clave
+    // (mismo helper que usa handleRenderRequested; mismo patrón white-box que
+    // el test de reload de pendingRenders de arriba).
+    engine["registerPendingRender"](docId, 0, "anonymized", 1);
+    resetCreatedCanvases();
+
+    // Invocación directa mediada (ADR-044 §Decisión 1/3): un cambio de grupo
+    // (deshabilitar g1) recomputa `replacements: []` desde el snapshot de
+    // Grouping y vuelve a invocar renderPage directo, a la MISMA escala (2)
+    // que ya tenía la página. Antes del fix (hallazgo PR4), la entrada de
+    // supersede residual a escala 1 lo habría cancelado espuriamente (caso
+    // 21) y el cambio de grupo se hubiera perdido visualmente.
+    await engine.renderPage(
+      createRenderPageInput({
+        documentId: docId,
+        pageIndex: 0,
+        kind: "anonymized",
+        mode: "preview",
+        scale: 2,
+        replacements: [], // g1 deshabilitado: ya filtrado por el caller (buildPageReplacements)
+      }),
+      realCtx,
+    );
+
+    const [canvas] = getCreatedCanvases();
+    // Grupo deshabilitado → sin texto de reemplazo (§13 caso 2): la
+    // invocación directa corrió de verdad (inmune al supersede) y aplicó el
+    // cambio.
+    expect(canvas!.calls.filter((c) => c.op === "fillText")).toHaveLength(0);
   });
 });

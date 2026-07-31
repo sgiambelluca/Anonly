@@ -14,7 +14,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("pdfjs-dist", () => ({ getDocument: vi.fn() }));
 
-import { PdfEngine } from "../pdf.engine.js";
+import { PdfEngine, fuseOcrPage } from "../pdf.engine.js";
 
 import {
   createEngineContext,
@@ -175,7 +175,7 @@ describe("PdfEngine — contract tests", () => {
       },
     ];
 
-    const updatedDoc = await engine.fuseOcrPage(docId, 0, ocrWords);
+    const updatedDoc = fuseOcrPage(output.document, 0, ocrWords);
 
     expect(updatedDoc.pages[0]!.words.length).toBe(2);
     expect(updatedDoc.pages[0]!.words[0]!.text).toBe("OCR");
@@ -196,7 +196,7 @@ describe("PdfEngine — contract tests", () => {
     const output = await engine.process(input, ctx);
     expect(output.document.pages[0]!.requiresOCR).toBe(false);
 
-    await expect(engine.fuseOcrPage(docId, 0, [])).rejects.toThrow(InvalidInputError);
+    expect(() => fuseOcrPage(output.document, 0, [])).toThrow(InvalidInputError);
   });
 
   it("dispose releases PDFDocumentProxy", async () => {
@@ -208,28 +208,11 @@ describe("PdfEngine — contract tests", () => {
     await engine.process(input, ctx);
 
     expect(mockDoc.destroy).toHaveBeenCalledTimes(1);
-    expect(engine["documents"].size).toBe(1);
 
     await engine.dispose();
 
-    expect(engine["documents"].size).toBe(0);
     expect(engine["initialized"]).toBe(false);
     expect(engine["disposed"]).toBe(true);
-  });
-
-  it("fuseOcrPage on unknown documentId throws InvalidInputError", async () => {
-    await engine.init(ctx);
-    await expect(engine.fuseOcrPage("unknown-doc", 0, [])).rejects.toThrow(InvalidInputError);
-  });
-
-  it("fuseOcrPage with out-of-range pageIndex throws InvalidInputError", async () => {
-    vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(createMockPdfDocument(2)));
-
-    await engine.init(ctx);
-    const input = createValidInput("doc-range");
-    await engine.process(input, ctx);
-
-    await expect(engine.fuseOcrPage("doc-range", 99, [])).rejects.toThrow(InvalidInputError);
   });
 
   it("engine never subscribes to the bus (ADR-014)", async () => {
@@ -254,7 +237,6 @@ describe("PdfEngine — contract tests", () => {
     await engine.init(busCtx);
     const input = createValidInput("doc-no-subscribe");
     await engine.process(input, busCtx);
-    await engine.fuseOcrPage("doc-no-subscribe", 0, []);
 
     expect(onSpy).not.toHaveBeenCalled();
     expect(onceSpy).not.toHaveBeenCalled();

@@ -5,8 +5,9 @@
  * SLA estricto se valida en Hito 9/11 con un pool real, ADR-021 §1) — este
  * test usa timers reales (no vi.useFakeTimers) para ejercitar el mecanismo
  * de principio a fin: Promise.race contra AbortSignal dentro de
- * classifyWithTimeout (ner.engine.ts), mismo patrón que
- * ocr-engine/src/ocr.engine.ts (recognizeWithTimeout).
+ * `classifyWithTimeout` (desde ADR-046, en `worker/kernel.ts` — invocado por
+ * el fallback in-process de `ner.engine.ts` vía `kernelClassify`), mismo
+ * patrón que `ocr-engine/src/worker/kernel.ts` (`recognizeWithTimeout`).
  */
 import { CancelledError, type EngineContext } from "@anonly/shared";
 import { pipeline } from "@huggingface/transformers";

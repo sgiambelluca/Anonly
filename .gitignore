@@ -52,9 +52,12 @@ tests/fixtures/*.bin
 
 # Assets first-party mirroreados por scripts/mirror-assets.ts (ADR-018):
 # se descargan en build/deploy a partir de assets.lock.json, nunca se
-# commitean al repo.
+# commitean al repo. Los que se fetch()ean por URL van a public/; los que
+# Vite tiene que procesar como módulo (import ?url) van a src/assets/ —
+# ADR-039, ort-wasm-simd-threaded.{mjs,wasm} son los únicos hoy.
 apps/react-client/public/wasm/
 apps/react-client/public/models/
+apps/react-client/src/assets/onnxruntime/
 
 # Changesets temporales
 .changeset/*.md

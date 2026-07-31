@@ -138,15 +138,17 @@ flowchart LR
   Bus -->|ENTITY_FOUND| Group["Grouping Engine"]
   Group -->|ENTITY_GROUP_CREATED, ENTITY_GROUP_UPDATED, ENTITY_GROUP_REMOVED, GROUP_REPLACEMENT_CHANGED, GROUP_TOGGLED| Bus
   Bus -->|ENTITY_GROUP_*| UI
+  Bus -->|"ENTITY_GROUP_* (ADR-044)"| Orch
   UI -->|GROUP_UPDATE_REQUESTED, RULE_UPDATED, EXPORT_REQUESTED, CANCEL_REQUESTED| Bus
   Bus -->|RENDER_REQUESTED| Render
+  Orch -.->|"renderPage(reemplazos del snapshot) — invocación directa (ADR-044)"| Render
   Render -->|PREVIEW_UPDATED, RENDER_FINISHED| Bus
   Bus -->|EXPORT_REQUESTED| Orch
   Orch -.->|"export() — invocación directa (ADR-032)"| Export
   Export -->|EXPORT_STARTED, EXPORT_PROGRESS, EXPORT_FINISHED, EXPORT_FAILED| Bus
 ```
 
-Convención: `ENTITY_FOUND` es **interno** entre detectores y grouping. La UI se suscribe a `ENTITY_GROUP_*`, nunca a `ENTITY_FOUND`. `DOCUMENT_IMPORTED` lo emite el **Orchestrator** (no el PDF Engine) y `EXPORT_REQUESTED` lo recibe el **Orchestrator**, que invoca `ExportEngine.export()` directamente (erratas corregidas por ADR-034 §7; tabla exhaustiva y matriz canónica en `04_Event_System.md`).
+Convención: `ENTITY_FOUND` es **interno** entre detectores y grouping. La UI se suscribe a `ENTITY_GROUP_*`, nunca a `ENTITY_FOUND`. `DOCUMENT_IMPORTED` lo emite el **Orchestrator** (no el PDF Engine) y `EXPORT_REQUESTED` lo recibe el **Orchestrator**, que invoca `ExportEngine.export()` directamente (erratas corregidas por ADR-034 §7; tabla exhaustiva y matriz canónica en `04_Event_System.md`). Desde ADR-044, Render no se suscribe a ningún evento de Grouping: los cambios de grupos le llegan como invocaciones directas de `renderPage` mediadas por el Orchestrator.
 
 ---
 

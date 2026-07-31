@@ -10,7 +10,7 @@
  * runtime Node de los tests; se lee de forma defensiva.
  */
 
-import type { EngineConfig, WorkerJobType } from "@anonly/shared";
+import type { EngineConfig, EngineConfigOverrides, WorkerJobType } from "@anonly/shared";
 
 const DEFAULT_TIMEOUTS: Readonly<Record<WorkerJobType, number>> = {
   "pdf-parse": 30_000,
@@ -101,12 +101,15 @@ export function buildDefaultEngineConfig(hints?: DeviceHints): EngineConfig {
 }
 
 /**
- * Mergea `overrides` (parcial, de `createCore(config?)`) sobre los defaults.
- * Merge de un nivel por sub-objeto (cada sub-objeto de `EngineConfig` es
- * plano; no hace falta un deep-merge recursivo genérico).
+ * Mergea `overrides` (`EngineConfigOverrides` de `createCore(config?)`,
+ * ADR-039) sobre los defaults. Merge de un nivel por sub-objeto (cada
+ * sub-objeto de `EngineConfig` es plano; no hace falta un deep-merge
+ * recursivo genérico) — el spread ya tolera overrides parciales dentro de
+ * cada sección, así que ensanchar el tipo de `Partial<EngineConfig>` a
+ * `EngineConfigOverrides` no cambia nada acá, solo en la firma.
  */
 export function mergeEngineConfig(
-  overrides?: Partial<EngineConfig>,
+  overrides?: EngineConfigOverrides,
   hints?: DeviceHints,
 ): EngineConfig {
   const base = buildDefaultEngineConfig(hints);

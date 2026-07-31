@@ -5,7 +5,7 @@ export class PdfPasswordRequiredError extends EngineError {
   readonly engineId = EngineId.Pdf;
 
   constructor(documentId: string) {
-    super("PDF protegido requiere contraseña.", true, { documentId });
+    super("PDF protegido requiere contraseña.", false, { documentId });
   }
 }
 

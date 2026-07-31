@@ -201,6 +201,65 @@ function reasonFromCorruptedError(err: PdfCorruptedError): string {
 }
 
 /*
+ * ADR-041: fuseOcrPage es una función pura y síncrona, sin instancia ni
+ * estado retenido. El caller (Orchestrator) provee el Document que él mismo
+ * retiene como copia canónica y persiste el resultado — no hay lookup por
+ * documentId ni asserts de initialized/disposed (no hay instancia). Preserva
+ * el guard de ADR-020 §6 (requiresOCR) y la normalización NFC (ADR-020 §2).
+ * Reemplaza al método PdfEngine.fuseOcrPage; el caso "documento no
+ * encontrado" desaparece porque el caller siempre provee el Document.
+ */
+export function fuseOcrPage(
+  document: Document,
+  pageIndex: number,
+  words: ReadonlyArray<Word>,
+): Document {
+  const existingPage = document.pages[pageIndex];
+  if (pageIndex < 0 || pageIndex >= document.pageCount || existingPage === undefined) {
+    throw new InvalidInputError(
+      `pageIndex ${pageIndex} fuera de rango para documento con ${document.pageCount} páginas.`,
+      { pageIndex },
+    );
+  }
+
+  // ADR-020 §6: fuseOcrPage solo aplica a páginas genuinamente textless.
+  if (existingPage.requiresOCR !== true) {
+    throw new InvalidInputError(
+      `La página ${pageIndex} del documento ${document.id} no requiere OCR (requiresOCR=false); ` +
+        "fuseOcrPage solo aplica a páginas sin texto nativo.",
+      { documentId: document.id, pageIndex },
+    );
+  }
+
+  const normalizedWords: Word[] = words.map((w) => ({
+    text: w.text.normalize("NFC"),
+    bbox: w.bbox,
+    pageIndex,
+    confidence: w.confidence,
+    source: "ocr" as const,
+  }));
+
+  const sortedWords = sortWordsByReadingOrder(normalizedWords);
+  const mergedText = sortedWords.map((w) => w.text).join(" ");
+
+  // requiresOCR ya es true (precondición del guard); no se fuerza, se
+  // hereda del spread de existingPage.
+  const updatedPage: Page = {
+    ...existingPage,
+    words: sortedWords,
+    text: mergedText,
+    ocrCompleted: true,
+  };
+
+  const updatedPages = document.pages.map((p) => (p.index === pageIndex ? updatedPage : p));
+
+  return {
+    ...document,
+    pages: updatedPages,
+  };
+}
+
+/*
  * `_pdfInfo` es una propiedad pública en la clase PDFDocumentProxy
  * (tipo `any`), usada para acceder a isEncrypted y pdfVersion que no
  * están en la interfaz pública de TypeScript.
@@ -212,7 +271,6 @@ export class PdfEngine implements IEngine {
   private config: PdfEngineConfig = {
     maxPageCount: DEFAULT_MAX_PAGE_COUNT,
   };
-  private documents: Map<string, Document> = new Map();
   private initialized = false;
   private disposed = false;
 
@@ -369,8 +427,6 @@ export class PdfEngine implements IEngine {
       importedAt: Date.now(),
     };
 
-    this.documents.set(documentId, document);
-
     operationCtx.bus.emit(EventChannel.Pdf, EngineEvents.DOCUMENT_PARSED, {
       documentId,
       pageCount,
@@ -394,98 +450,8 @@ export class PdfEngine implements IEngine {
     return output;
   }
 
-  fuseOcrPage(
-    documentId: string,
-    pageIndex: number,
-    words: ReadonlyArray<Word>,
-  ): Promise<Document> {
-    try {
-      this.assertNotDisposed();
-      this.assertInitialized();
-
-      const doc = this.documents.get(documentId);
-      if (!doc) {
-        return Promise.reject(
-          new InvalidInputError(`Documento ${documentId} no encontrado.`, { documentId }),
-        );
-      }
-
-      if (pageIndex < 0 || pageIndex >= doc.pageCount) {
-        return Promise.reject(
-          new InvalidInputError(
-            `pageIndex ${pageIndex} fuera de rango para documento con ${doc.pageCount} páginas.`,
-            { documentId, pageIndex, pageCount: doc.pageCount },
-          ),
-        );
-      }
-
-      const existingPage = doc.pages[pageIndex];
-      if (!existingPage) {
-        return Promise.reject(
-          new InvalidInputError(`Página ${pageIndex} no encontrada en documento ${documentId}.`, {
-            documentId,
-            pageIndex,
-          }),
-        );
-      }
-
-      // ADR-020 §6: fuseOcrPage solo aplica a páginas genuinamente textless.
-      // Antes se pisaban en silencio las palabras nativas de una página con
-      // texto real y se forzaba requiresOCR=true incondicionalmente.
-      if (existingPage.requiresOCR !== true) {
-        return Promise.reject(
-          new InvalidInputError(
-            `La página ${pageIndex} del documento ${documentId} no requiere OCR (requiresOCR=false); ` +
-              "fuseOcrPage solo aplica a páginas sin texto nativo.",
-            { documentId, pageIndex },
-          ),
-        );
-      }
-
-      const normalizedWords: Word[] = words.map((w) => ({
-        text: w.text.normalize("NFC"),
-        bbox: w.bbox,
-        pageIndex,
-        confidence: w.confidence,
-        source: "ocr" as const,
-      }));
-
-      const sortedWords = sortWordsByReadingOrder(normalizedWords);
-      const mergedText = sortedWords.map((w) => w.text).join(" ");
-
-      // requiresOCR ya es true (precondición del guard); no se fuerza, se
-      // hereda del spread de existingPage.
-      const updatedPage: Page = {
-        ...existingPage,
-        words: sortedWords,
-        text: mergedText,
-        ocrCompleted: true,
-      };
-
-      const updatedPages = doc.pages.map((p) => (p.index === pageIndex ? updatedPage : p));
-
-      const updatedDocument: Document = {
-        ...doc,
-        pages: updatedPages,
-      };
-
-      this.documents.set(documentId, updatedDocument);
-
-      return Promise.resolve(updatedDocument);
-    } catch (err: unknown) {
-      return Promise.reject(err instanceof Error ? err : new Error(String(err)));
-    }
-  }
-
-  // ADR-020 §7: evicción individual, idempotente. Sin asserts: debe ser seguro
-  // llamarlo en cualquier secuencia de teardown, incluso tras dispose().
-  releaseDocument(documentId: string): void {
-    this.documents.delete(documentId);
-  }
-
   dispose(): Promise<void> {
     this.disposed = true;
-    this.documents.clear();
     this.ctx = null;
     this.initialized = false;
     return Promise.resolve();

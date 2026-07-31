@@ -14,6 +14,7 @@ import type {
   ICache,
   IEventBus,
   ILogger,
+  Serializable,
   Unsubscribe,
   Word,
 } from "@anonly/shared";
@@ -238,4 +239,47 @@ type PipelineFactoryMock = Mock<
  */
 export function asPipelineMock(fn: unknown): PipelineFactoryMock {
   return fn as unknown as PipelineFactoryMock;
+}
+
+// ─── Puerto interno NerJobPool (ADR-046 §2) — fake estructural para tests ───
+//
+// `NerJobPool` no se exporta desde `ner.engine.ts` (detalle de wiring
+// interno, mismo criterio que `OcrJobPool` en ocr-engine): esta interfaz
+// estructuralmente compatible alcanza sin importarla — TypeScript acepta
+// pasar este objeto a `new NerEngine(pool)` por duck typing.
+
+export interface NerPoolDispatchParams<T> {
+  readonly run: () => Promise<T>;
+  readonly signal: AbortSignal;
+  readonly priority?: number;
+  readonly payload?: unknown;
+  readonly maxRetriesOverride?: number;
+  readonly onProgress?: (progress: number, partial?: Serializable) => void;
+}
+
+export interface NerDispatchCall {
+  readonly payload: unknown;
+  readonly maxRetriesOverride: number | undefined;
+}
+
+export interface TrackingNerPool {
+  readonly dispatch: <T>(params: NerPoolDispatchParams<T>) => Promise<T>;
+  readonly calls: NerDispatchCall[];
+}
+
+/**
+ * Pool estructural mínima (ADR-046 §2, espejo de `createTrackingOcrPool` de
+ * ocr-engine) que registra cada dispatch y delega en `params.run()` — usada
+ * por los tests que necesitan inspeccionar los parámetros de despacho
+ * (`maxRetriesOverride`, `payload`) sin depender de un `WorkerPool` real.
+ */
+export function createTrackingNerPool(): TrackingNerPool {
+  const calls: NerDispatchCall[] = [];
+  return {
+    calls,
+    dispatch: <T>(params: NerPoolDispatchParams<T>): Promise<T> => {
+      calls.push({ payload: params.payload, maxRetriesOverride: params.maxRetriesOverride });
+      return params.run();
+    },
+  };
 }

@@ -72,6 +72,7 @@ El test de contrato de la matriz (`04_Event_System.md` §11, Hito 9) valida **su
 - `PREVIEW_UPDATED.canvasBlobUrl` y `EXPORT_FINISHED.blobUrl` los crea el **lado host del motor emisor** (`convertToBlob` + `URL.createObjectURL`), como ya ocurre en el código de Hitos 7/8. En Hito 9, el placeholder inline de Render (bytes crudos sin codificación, ADR-031 §5) se reemplaza por la codificación real.
 - El **Orchestrator** se suscribe a `PREVIEW_UPDATED` y `EXPORT_FINISHED`, registra los URLs por clave `(documentId, pageIndex, kind)` (export: por `documentId`) y **revoca el anterior** de esa clave al recibir un reemplazo; en `DOCUMENT_CLOSED` revoca todos (cierra ADR-031 §5 y cumple `07` §8).
 - El bullet de §2 del spec del Orchestrator que decía "crear los blobUrl en el host" queda corregido: crear es del motor; **rastrear y revocar** es del Orchestrator.
+- **Completado por ADR-052 (2026-07-30) — llegadas tardías**: "en `DOCUMENT_CLOSED` revoca todos" no alcanzaba, porque `PREVIEW_UPDATED`/`EXPORT_FINISHED` pueden llegar **después** del barrido (renders en vuelo que el cierre no cancela) y quedaban registrados para un `documentId` que ningún cierre futuro vuelve a barrer. Regla agregada: ante un `documentId` ya cerrado, el Orchestrator **revoca el URL entrante en el acto** y no lo registra. Ignorarlo sin revocar sería peor que registrarlo: el URL ya existe —lo creó el motor— y nadie más lo va a liberar. El reparto de esta sección no cambia.
 
 ### 6. Test-infra del Hito 9: `tests/integration/` y stress
 

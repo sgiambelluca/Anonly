@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=pipeline | dependencias=03_Data_Model.md,04_Event_System.md,05_Worker_Architecture.md | audiencia=IA+humanos | fase=1 -->
+<!-- CONTEXT: scope=pipeline | dependencias=03_Data_Model.md,04_Event_System.md,05_Worker_Architecture.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md | audiencia=IA+humanos | fase=1 (§14 precisado en fase 10: etapa 11 en ExportWorker único, ADR-036 §1; §10/§11 y el diagrama de secuencia en fase 10: re-render por edición mediado por el Orchestrator, ADR-044) -->
 
 # Anonly — Pipeline (TAD bloque 6)
 
@@ -203,7 +203,7 @@ El usuario puede overridear cualquiera desde la UI, emitiendo `CONFLICT_RESOLVE_
 **Estrategia**:
 - Solo se renderizan las páginas visibles en el viewport + 1 página antes y después (preemptive).
 - Se renderiza primero el lado "original" (más rápido, sin reemplazos) y luego el "anonimizado".
-- Cuando el usuario edita un grupo, se re-renderizan solo las páginas que tienen `members` de ese grupo (delta render).
+- Cuando el usuario edita un grupo, se re-renderizan solo las páginas afectadas: el Orchestrator media los `ENTITY_GROUP_*` y re-invoca `renderPage` con los reemplazos recomputados del snapshot de Grouping (ADR-044; reemplaza al delta render interno de Render, retirado).
 - Ver `07_Performance_Strategy.md` para virtualización.
 
 **Etapa siguiente**: Etapa 9 (interactiva, puede durar indefinidamente).
@@ -271,10 +271,10 @@ El usuario puede overridear cualquiera desde la UI, emitiendo `CONFLICT_RESOLVE_
 | 7. Conflictos | (main thread) | – |
 | 8. Vista previa parcial | `RenderPool` | `render-page` |
 | 9. Edición | (main thread) | – |
-| 10. Render completo | `RenderPool` | `render-page` |
-| 11. Exportación | `RenderPool` | `export-page` |
+| 10. Render completo | `RenderPool` | `render-page` (en `mode: "full"`, prioridad 1000 — camino de export) |
+| 11. Exportación | ExportWorker único de `export-engine` (sin pool — ADR-036 §1); los renders full que consume corren en `RenderPool` | `export-page` |
 
-Regex y Agrupación corren en main thread porque son ligeros (< 5% del total). Si futuras versiones los hacen pesados (patrones custom complejos, agrupación semántica), migran a su propio pool vía ADR.
+Regex y Agrupación corren en main thread porque son ligeros (< 5% del total). Si futuras versiones los hacen pesados (patrones custom complejos, agrupación semántica), migran a su propio pool vía ADR. La etapa 2 usa además `RenderPool` para rasterizar las páginas sin texto (`RasterizePagePayload` bajo `render-page`, ADR-034 §1/ADR-036 §4).
 
 ---
 
@@ -314,7 +314,8 @@ sequenceDiagram
     U->>UI: edita grupo/regla
     UI->>GE: GROUP_UPDATE_REQUESTED
     GE-->>UI: ENTITY_GROUP_UPDATED + GROUP_REPLACEMENT_CHANGED
-    GE->>RP: render delta (páginas afectadas)
+    GE-->>Orch: ENTITY_GROUP_UPDATED
+    Orch->>RP: renderPage (páginas afectadas, reemplazos del snapshot — ADR-044)
     RP-->>UI: PREVIEW_UPDATED
   end
   U->>UI: Export
@@ -335,3 +336,4 @@ sequenceDiagram
 - `05_Worker_Architecture.md` — pools y jobs.
 - `07_Performance_Strategy.md` — virtualización, streaming, memoria.
 - `core/<Engine>_Engine.md` — detalle de cada etapa.
+- `core/Orchestrator.md` §2, §6, §13.18-§13.22 y `core/Grouping_Engine.md` §6 — re-análisis parcial (`reanalyze`): transiciones adicionales `Ready → OCRing | Detecting | Grouping` y `Failed → Detecting | Grouping` sobre este mismo diagrama de etapas, preservando ediciones del usuario (ADR-038).

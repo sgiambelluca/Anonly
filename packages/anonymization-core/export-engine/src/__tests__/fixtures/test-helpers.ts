@@ -156,6 +156,47 @@ export function asPdfDocument(doc: Record<string, unknown>): PDFDocument {
   return doc as unknown as PDFDocument;
 }
 
+// ─── Puerto interno ExportJobPool (ADR-047 §2) — fake estructural para tests ───
+
+export interface ExportPoolDispatchParams<T> {
+  readonly run: () => Promise<T>;
+  readonly signal: AbortSignal;
+  readonly priority?: number;
+  readonly payload?: unknown;
+  readonly maxRetriesOverride?: number;
+}
+
+export interface ExportDispatchCall {
+  readonly payload: unknown;
+  readonly maxRetriesOverride: number | undefined;
+}
+
+export interface TrackingExportPool {
+  readonly dispatch: <T>(params: ExportPoolDispatchParams<T>) => Promise<T>;
+  readonly calls: ExportDispatchCall[];
+}
+
+/**
+ * Pool estructural mínima (ADR-047 §2, espejo de `TrackingOcrPool`/
+ * `TrackingNerPool`) que registra cada dispatch y delega en `params.run()` —
+ * usada por los tests que necesitan inspeccionar los parámetros de despacho
+ * (`maxRetriesOverride`, `payload`) sin depender de un `WorkerPool` real.
+ * `ExportJobPool` no se exporta desde `export.engine.ts` (detalle de wiring
+ * interno, mismo criterio que `OcrJobPool`/`NerJobPool`); esta interfaz
+ * estructuralmente compatible alcanza sin importarlo — TypeScript acepta
+ * pasar esta pool a `new ExportEngine(pool)` por duck typing.
+ */
+export function createTrackingExportPool(): TrackingExportPool {
+  const calls: ExportDispatchCall[] = [];
+  return {
+    calls,
+    dispatch: <T>(params: ExportPoolDispatchParams<T>): Promise<T> => {
+      calls.push({ payload: params.payload, maxRetriesOverride: params.maxRetriesOverride });
+      return params.run();
+    },
+  };
+}
+
 // ─── Mock de RenderPageProvider ───
 
 export interface MockRenderPageProviderOptions {

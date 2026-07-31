@@ -10,11 +10,12 @@
     "pnpm": ">=9.0.0"
   },
   "scripts": {
+    "dev": "pnpm --filter @anonly/react-client dev",
     "lint": "eslint . --max-warnings=0",
     "lint:fix": "eslint . --fix --max-warnings=0",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "typecheck": "pnpm -r typecheck && tsc -p tests/tsconfig.json --noEmit && tsc -p scripts/tsconfig.json --noEmit",
+    "typecheck": "pnpm -r typecheck && tsc -p tests/tsconfig.json --noEmit && tsc -p tests/e2e/tsconfig.json --noEmit && tsc -p scripts/tsconfig.json --noEmit",
     "build": "pnpm -r --filter \"./packages/anonymization-core/**\" run build",
     "build:clean": "pnpm -r exec rm -rf dist && pnpm build",
     "fixtures:generate": "tsx tests/fixtures/generate.ts",

@@ -7,6 +7,9 @@
  * Fuente de verdad: docs/core/Contracts.md.
  */
 
+// Constantes nombradas (Contracts.md §6)
+export { MAX_RENDER_SCALE, PREVIEW_CACHE_MAX_BYTES } from "./constants.js";
+
 // Enums
 export {
   EngineId,
@@ -49,6 +52,12 @@ export type {
   NerPagePayload,
   RenderPagePayload,
   ExportPagePayload,
+  ExportSavePayload,
+  LoadDocumentPayload,
+  UnloadDocumentPayload,
+  RasterizePagePayload,
+  NerKernelSpan,
+  NerKernelProgress,
   ExportOptions,
   ExportMetadata,
   WorkerCapabilities,
@@ -60,6 +69,7 @@ export type {
   IEngine,
   EngineContext,
   EngineConfig,
+  EngineConfigOverrides,
   PdfEngineConfig,
   IEventBus,
   EventHandler,
@@ -68,10 +78,16 @@ export type {
   ICache,
   WorkerPoolConfig,
   NerConfig,
+  NerWasmPaths,
   OcrConfig,
+  ReanalyzeConfigPatch,
   GroupingConfig,
   RenderConfig,
   ExportConfig,
+  WorkerLike,
+  WorkerFactory,
+  WorkerEntryKind,
+  CoreRuntimeOptions,
   Serializable,
   WorkerInbound,
   WorkerOutbound,

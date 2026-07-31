@@ -199,6 +199,12 @@ export interface RenderRequested {
   readonly documentId: string;
   readonly pageIndices: ReadonlyArray<number>;
   readonly mode: "preview" | "full";
+  /**
+   * Escala absoluta pdfjs (1.0 = 72 DPI), misma semántica que
+   * `RenderPageInput.scale` (ADR-037 §1). Ausente → `previewScale`/`fullScale`
+   * según `mode`. Rango válido: `0 < scale <= MAX_RENDER_SCALE`.
+   */
+  readonly scale?: number;
 }
 export interface RenderFinished {
   readonly documentId: string;

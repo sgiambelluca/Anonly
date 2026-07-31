@@ -276,3 +276,44 @@ function installOffscreenCanvasStub(): void {
 }
 
 installOffscreenCanvasStub();
+
+// ─── Puerto interno OcrJobPool (ADR-045 §2) — fake estructural para tests ───
+
+export interface OcrPoolDispatchParams<T> {
+  readonly run: () => Promise<T>;
+  readonly signal: AbortSignal;
+  readonly priority?: number;
+  readonly payload?: unknown;
+  readonly maxRetriesOverride?: number;
+}
+
+export interface OcrDispatchCall {
+  readonly payload: unknown;
+  readonly maxRetriesOverride: number | undefined;
+}
+
+export interface TrackingOcrPool {
+  readonly dispatch: <T>(params: OcrPoolDispatchParams<T>) => Promise<T>;
+  readonly calls: OcrDispatchCall[];
+}
+
+/**
+ * Pool estructural mínima (ADR-045 §2, espejo del `RenderJobPool` de
+ * render-engine) que registra cada dispatch y delega en `params.run()` — usada
+ * por los tests que necesitan inspeccionar los parámetros de despacho
+ * (`maxRetriesOverride`, `payload`) sin depender de un `WorkerPool` real.
+ * `OcrJobPool` no se exporta desde `ocr.engine.ts` (detalle de wiring
+ * interno, mismo criterio que `RenderJobPool` en render-engine); esta
+ * interfaz estructuralmente compatible alcanza sin importarlo — TypeScript
+ * acepta pasar esta pool a `new OcrEngine(pool)` por duck typing.
+ */
+export function createTrackingOcrPool(): TrackingOcrPool {
+  const calls: OcrDispatchCall[] = [];
+  return {
+    calls,
+    dispatch: <T>(params: OcrPoolDispatchParams<T>): Promise<T> => {
+      calls.push({ payload: params.payload, maxRetriesOverride: params.maxRetriesOverride });
+      return params.run();
+    },
+  };
+}
