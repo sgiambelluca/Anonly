@@ -1,0 +1,20 @@
+Cambios para hacer:
+1) Que puedas manualmente seleccionar un nombre o contenido para agregarlo a los ítems a anonimizar, hay dos formas:
+* Arriba de las coincidencias ya encontradas, que haya un botón para poder agregar un nuevo nombre, valor o coincidencia a buscar. La idea es que te deje elegir que tipo de valor estas buscando (ej: Numero de teléfono, nombre, ubicación, etc) y después de seleccionarlo, escribís cual es el valor del mismo (EJ: la app no detecto a Jose Pérez, lo agrego de esta forma). Posterior a esto, se reinicia el NER y/o Regex buscando únicamente este valor para agregarlo a la lista. 
+
+* Vas buscando en el PDF que ya aparece como preview en la pantalla, podes seleccionar texto y agregar dicho texto como una ocurrencia de algún cierto tipo. EJ: No detecto a Tomas Juarez, lo encuentro en el PDF, lo selecciono, aparece un botón que dice "Agregar entidad como..." y ahí me aparezca un menú desplegable que me deje elegir el tipo de entidad. Una vez confirmado, se re dispara el NER y/o Regex buscando únicamente dicho dato. 
+
+2) La idea de que puedas compactar el menú de entidades y reglas de forma horizontal, y que la barra divisora de los dos pdfs puedan ser desplazables para poder agrandar uno de ellos con mayor detalle. 
+
+3) Ser un poco más explicativo con que significa el "Agregar Regla" o cualquiera de las 4 opciones que me deja elegir para cada una de las entidades. Ej: Un nuevo usuario no sabe que es Placeholder.
+
+4) Que al lado del "PDF ORIGINAL" Este un icono de una lupita que sirva como un CTRL F para poder buscar entidades, lo sumo como parte de los métodos para agregar entidades?
+
+5) Ancho del reemplazo reactivo, que no sea siempre lo mismo. A lo que me refiero, si la pagina tiene poso espacio y el reemplazo esta como placeholder:
+Si tiene poco espacio por que esta entre dos palabras:
+En vez de [PERSONA 04] -> [PERS 04] // Que intente acomodarse lo mas posible a la cantidad de caracteres de dicho nombre. 
+
+6) Reemplazo integral por genero para mayor sentido dentro del texto. Agregar opción de genero cuando sea una opción valida con el nombre. A que me refiero: Que si la persona es "Julia" (claramente mujer), que se pueda elegir [MUJER 01] como una opción extra. Esto para que, si en el transcurso del texto se hace referencia a esta persona utilizando su genero, se pueda identificar bien a que persona se refiere en vez de que simplemente se pierda si se utiliza placeholder. 
+
+Ejemplo del error:
+"[PERSONA 03] y [PERSONA 04] arreglaron para juntarse en la casa de ella." Quien es ella de las dos personas? a que se refiere? tenes que tener el contexto del texto original para saber a quien se refiere. 
