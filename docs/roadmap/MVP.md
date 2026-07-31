@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-mvp | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,adr/ADR-011-Grouping-First.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md | audiencia=humanos+IA | fase=10 (Hitos 1–9 cerrados; pendientes puntuales diferidos a Hito 11 anotados por hito; Hito 10 auditado por ADR-036, con dos decisiones reabiertas por el humano vía ADR-037/038 — tabla de PRs canónica en ADR-038 §8) -->
+<!-- CONTEXT: scope=roadmap-mvp | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,adr/ADR-011-Grouping-First.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md | audiencia=humanos+IA | fase=10-cierre (Hitos 1–10 cerrados y mergeados a main; pendientes puntuales diferidos a Hito 11 anotados por hito; antes de arrancar el Hito 11 queda la revisión integral de Hito10_Observaciones_Revision.md y los ADR-053/054/055 de los hallazgos del cierre — ver el bloque CERRADO al final del Hito 10) -->
 
 # Anonly — Roadmap MVP
 
@@ -205,6 +205,15 @@ Orden canónico de PRs (ADR-038 §8; los PRs 2-4 no dependen del scaffold y pued
 | 17.6 | Rutas de tesseract: archivo en `workerPath` + absolutización contra `self.location.origin` (erratas `OCR_Engine.md` v1.2.1/v1.2.2, ADR-018 §2; sin ADR) | `ocr-engine` |
 | 17.7 | `CloseDocumentButton` en el Toolbar + cierre del Escenario 7 (ADR-051) | `apps/react-client` |
 | 17.8 | Blob URLs tardíos tras cerrar documento: guard que revoca + señal de baja del preview mediado (ADR-052) | `packages/anonymization-core/src` |
+
+**CERRADO (2026-07-31)** — los 17 PRs de la tabla mergeados a `main`. Gates de CI verdes de punta a punta por primera vez: `lint`, `typecheck`, `test` (75 suites / 911 tests, thresholds de cobertura por paquete), `audit` y `e2e` (12 escenarios sobre Chromium real). El cierre destapó dos gates que **nunca habían corrido en CI** y que se arreglaron en la propia rama: el job `test` dependía de assets mirroreados que no se commitean (resuelto con un stub de resolución en `vitest.config.ts`, sin atar la suite unitaria a una descarga de 219 MB) y el Escenario 11 esperaba un ciclo de render con un presupuesto fijo de 800 ms en vez de esperar por la condición.
+
+**Pendiente, antes de arrancar el Hito 11**: revisión integral con el planificador de **todas** las observaciones no bloqueantes acumuladas en `Hito10_Observaciones_Revision.md` — el documento tiene entradas abiertas desde el PR2 y nunca se barrió completo. Incluye, con prioridad y ya diagnosticados, los cinco hallazgos de prueba manual del cierre (sección "Cierre del Hito 10" de ese doc), de los cuales tres tienen ADR pendiente de escribir y uno es **crítico**:
+
+- **ADR-055 + PR `ner-engine`** — NER no detecta ninguna entidad con `NerPool` real (desajuste de sobre `{ spans }` entre worker y host). Ningún test de ningún nivel verifica que una entidad NER llegue a la UI: ese es el agujero de fondo que el ADR debe cerrar.
+- **ADR-053 + 3 PRs** (app / `render-engine` / `pdf-engine`) — texto reconstruido como cuadrados `.notdef`: pdf.js corre su capa de display dentro de un Worker, sin Font Loading API, con `disableFontFace` en `false`.
+- **ADR-054 + PR `apps/react-client`** — scroll independiente por panel más un control opcional de sincronización a nivel de píxel; cierra los tres defectos compuestos del salto de scroll.
+- Sin ADR: pdf.js degrada a "fake worker" dentro de todo Web Worker (solo rendimiento, candidato a este hito 11); ruido de blob URLs revocados al scrollear; y una página escaneada suelta dentro de un PDF textual que no recibe cobertura de OCR (**único de los cinco con causa sin cerrar**, requiere diagnóstico propio).
 
 ### Hito 11 — Hardening
 - Performance gates (todas las métricas de `00_Project_Vision.md` §7).
