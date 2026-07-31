@@ -29,6 +29,7 @@ import {
   EngineEvents,
   EngineId,
   EngineNotInitializedError,
+  EntityType,
   EventChannel,
   InvalidInputError,
   type BoundingBox,
@@ -163,8 +164,14 @@ function computeWordChunks(
 // exportado desde index.ts — detalle de wiring interno, mismo criterio que
 // OcrJobPool/RenderJobPool. ───
 
-interface NerDispatchParams<T> {
-  readonly run: () => Promise<T>;
+// `dispatch` deja de ser genérico y devuelve `Promise<unknown>` (ADR-055 §2,
+// nota v1.2.1 de NER_Engine.md): el parámetro de tipo `<T>` que tenía antes
+// era una afirmación que el compilador no podía verificar — del otro lado de
+// `run()` puede haber cruzado un `postMessage` real. Con `unknown`, el
+// compilador obliga a pasar por `decodeKernelSpans` (más abajo) antes de
+// iterar el resultado: no hay otra forma de escribir el consumidor.
+interface NerDispatchParams {
+  readonly run: () => Promise<unknown>;
   readonly signal: AbortSignal;
   readonly priority?: number;
   readonly payload?: unknown;
@@ -174,7 +181,7 @@ interface NerDispatchParams<T> {
 }
 
 interface NerJobPool {
-  dispatch<T>(params: NerDispatchParams<T>): Promise<T>;
+  dispatch(params: NerDispatchParams): Promise<unknown>;
 }
 
 /**
@@ -182,11 +189,134 @@ interface NerJobPool {
  * directo, sin cola ni reintentos propios (el único loop de retry es el de
  * `processPage`). Es el comportamiento de este motor antes de ADR-046
  * (ADR-035 §1) — el que los tests existentes de este paquete ya esperan
- * (`new NerEngine()` sin argumento).
+ * (`new NerEngine()` sin argumento). El resultado de `run()` (el array
+ * pelado que produce `kernelClassify`) pasa igual por `decodeKernelSpans`
+ * en el call site — es la prueba de paridad entre los dos caminos (ADR-055 §2).
  */
 const IMMEDIATE_POOL: NerJobPool = {
-  dispatch: <T>(params: NerDispatchParams<T>): Promise<T> => params.run(),
+  dispatch: (params: NerDispatchParams): Promise<unknown> => params.run(),
 };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// ─── Decoder del sobre `COMPLETED.result` (ADR-055 §2-§4, nota v1.2.1 de
+// NER_Engine.md) ───
+//
+// `NerJobPool.dispatch` devuelve `Promise<unknown>`: no hay forma de iterar
+// ni desestructurar ese resultado sin pasar por acá primero. Acepta las dos
+// formas legítimas que puede resolver un despacho de este motor —
+// `{ spans: [...] }` (el sobre que postea `worker/entry.ts:104` en el camino
+// remoto, ADR-046 §1) y `[...]` (el array pelado que produce `kernelClassify`
+// en el camino in-process) — y ante cualquier otra forma **lanza**
+// `InvalidInputError` (ADR-055 §3): devolver `[]`/`undefined`/un default en
+// silencio es exactamente el modo de falla que este decoder cierra — el que
+// dejó a NER sin detectar ninguna entidad en producción durante semanas.
+
+const NER_ENTITY_TYPE_VALUES: ReadonlySet<string> = new Set(Object.values(EntityType));
+
+function isNerKernelSpan(value: unknown): value is NerKernelSpan {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.entityType === "string" &&
+    NER_ENTITY_TYPE_VALUES.has(value.entityType) &&
+    typeof value.value === "string" &&
+    typeof value.normalizedValue === "string" &&
+    typeof value.confidence === "number" &&
+    typeof value.startIndex === "number" &&
+    typeof value.endIndexExclusive === "number"
+  );
+}
+
+function isNerKernelSpanArray(value: unknown): value is ReadonlyArray<NerKernelSpan> {
+  return Array.isArray(value) && value.every(isNerKernelSpan);
+}
+
+/**
+ * Detalle legible de una forma no reconocida, para el `details` de
+ * `InvalidInputError` — nunca el contenido del documento (Code_Standards.md
+ * §9: "Nunca loguear contenido del documento"), solo la forma del valor.
+ */
+function describeDispatchResultShape(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return `array(length=${value.length})`;
+  if (isRecord(value)) return `object(keys=[${Object.keys(value).join(", ")}])`;
+  return typeof value;
+}
+
+/**
+ * Decodifica el `Promise<unknown>` que resuelve `NerJobPool.dispatch`
+ * (ADR-055 §2): el sobre remoto `{ spans }` y el array pelado in-process son
+ * las dos únicas formas válidas; cualquier otra lanza `InvalidInputError`
+ * (ADR-055 §3) en vez de devolver un default en silencio.
+ */
+function decodeKernelSpans(dispatchResult: unknown): ReadonlyArray<NerKernelSpan> {
+  if (isNerKernelSpanArray(dispatchResult)) return dispatchResult;
+  if (isRecord(dispatchResult) && isNerKernelSpanArray(dispatchResult.spans)) {
+    return dispatchResult.spans;
+  }
+  throw new InvalidInputError(
+    "NerJobPool.dispatch() resolvió con una forma no reconocida: se esperaba " +
+      "{ spans: NerKernelSpan[] } (sobre remoto, ADR-046 §1) o NerKernelSpan[] " +
+      "(camino in-process). Devolver un default en silencio está prohibido " +
+      "(ADR-055 §3).",
+    { engineId: EngineId.Ner, receivedShape: describeDispatchResultShape(dispatchResult) },
+  );
+}
+
+/**
+ * Subclase de `InvalidInputError` reservada para UNA causa específica: el
+ * sobre `COMPLETED.result` no matchea ninguna forma reconocida
+ * (`decodeKernelSpans`). No agrega un `EngineErrorCode` nuevo — sigue siendo
+ * `INVALID_INPUT` (ADR-055 §3: "InvalidInputError si no hay una específica")
+ * y sigue siendo `instanceof InvalidInputError` para cualquier caller externo
+ * (incluye los tests de sobre de `NER_Engine.md` §14, que assertan
+ * `InvalidInputError` genérico) — existe únicamente para que `processPages`
+ * pueda distinguir "el sobre está roto, esto es sistémico" de cualquier otro
+ * `InvalidInputError` genérico que `processPage` también puede lanzar (los
+ * guards de `input == null`/`pageIndex < 0`, arriba, que son un problema de
+ * ESA página nada más y tienen que seguir tratándose como fallo tolerable de
+ * página, spec §11 — ver el catch de `processPages` más abajo). No exportada
+ * desde `index.ts` (detalle de wiring interno).
+ */
+class NerDispatchEnvelopeError extends InvalidInputError {}
+
+/**
+ * Señal de control interna — extiende `Error` (exigido por
+ * `@typescript-eslint/only-throw-error`, que aplica a cualquier `throw`, no
+ * solo a los del Core) pero **no** es un `EngineError`: nunca cruza un
+ * `postMessage`, nunca se serializa/deserializa. Code_Standards.md §7/
+ * ADR-049 prohíben `instanceof <SubclaseConcreta>` de `EngineError` en
+ * código que pueda recibir un error cruzado, porque la identidad de
+ * subclase no sobrevive a `EngineError.deserialize`; esa restricción no
+ * aplica acá porque esta clase nunca pasa por ese mecanismo.
+ *
+ * Se construye ÚNICAMENTE en el `catch` síncrono que envuelve la llamada a
+ * `decodeKernelSpans` en `runInferenceInBatches`, inmediatamente después de
+ * que `await this.pool.dispatch(...)` ya resolvió (no rechazó): en ese
+ * punto exacto, por construcción del código —no por un chequeo de tipo en
+ * runtime—, `decodeErr` es 100% local, nunca algo que cruzó la frontera. El
+ * catch compartido de `processPage` (que sí puede recibir un `err`
+ * deserializado, porque también envuelve el `await` del propio
+ * `pool.dispatch(...)`) identifica este caso con `instanceof
+ * NerDispatchDecodeFailure` — seguro en cualquier catch, cruzado o no,
+ * precisamente porque nunca es lo que llega deserializado — y desenvuelve
+ * `decodeError` (un `NerDispatchEnvelopeError`, definida arriba) antes de
+ * relanzarlo, para que `processPage()` conserve su contrato público de
+ * lanzar siempre una subclase de `EngineError` (Code_Standards.md §7). El
+ * nombre del campo evita `cause`, que `Error` ya tipa de forma nativa
+ * (ES2022) con tipo `unknown`.
+ */
+class NerDispatchDecodeFailure extends Error {
+  readonly decodeError: NerDispatchEnvelopeError;
+
+  constructor(decodeError: NerDispatchEnvelopeError) {
+    super(decodeError.message);
+    this.name = "NerDispatchDecodeFailure";
+    this.decodeError = decodeError;
+  }
+}
 
 /**
  * Normaliza un error emergente del despacho a la subclase concreta que
@@ -218,10 +348,6 @@ function normalizeNerError(
     return new NerModelMissingError(modelId, reason);
   }
   return err;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**
@@ -355,6 +481,21 @@ export class NerEngine implements IEngine {
         return { documentId, pageIndex, occurrences, durationMs };
       } catch (err: unknown) {
         if (err instanceof CancelledError) throw err;
+        // ADR-055 §3 / Code_Standards.md §7 (ADR-049): `NerDispatchDecodeFailure`
+        // (definida arriba) es la única forma segura de identificar acá una
+        // falla de decodificación — este catch SÍ puede recibir un `err`
+        // deserializado (el `await this.pool.dispatch(...)` de
+        // `runInferenceInBatches` puede rechazar con un error cruzado), así
+        // que un `instanceof InvalidInputError` directo estaría prohibido.
+        // Se desenvuelve `decodeError` (un `NerDispatchEnvelopeError`, ver su
+        // definición arriba) y se propaga tal cual, sin envolver en
+        // NerPageFailedError — un dispatch con forma no reconocida no es
+        // "esta página falló", es "el resultado del despacho no se pudo
+        // decodificar" (mismo criterio sistémico que NerModelMissingError,
+        // abajo): ni este loop de retry ni el warn+continue de
+        // `processPages` lo tragan en silencio ("que falle ruidosamente es
+        // el punto").
+        if (err instanceof NerDispatchDecodeFailure) throw err.decodeError;
         // ADR-046 §2: normaliza antes de bifurcar (un error remoto llega
         // deserializado, sin pasar el instanceof de abajo).
         const normalized = normalizeNerError(err, documentId, pageIndex, timeoutMs);
@@ -413,7 +554,29 @@ export class NerEngine implements IEngine {
         outputs.push(output);
         occurrenceCount += output.occurrences.length;
       } catch (err: unknown) {
-        if (err instanceof CancelledError || err instanceof NerModelMissingError) {
+        // ADR-055 §3/§5: `processPage` puede lanzar `InvalidInputError` por
+        // DOS motivos distintos, y solo uno de los dos es sistémico. Los
+        // guards de `input == null`/`pageIndex < 0` (arriba, antes del loop
+        // de retry) lanzan `InvalidInputError` genérico — un problema de ESA
+        // página nada más, spec §9/§11: cae en el warn+continue de abajo,
+        // igual que cualquier otro fallo de página. Una falla de
+        // decodificación del sobre (`decodeKernelSpans`, vía
+        // `NerDispatchDecodeFailure`) llega en cambio como
+        // `NerDispatchEnvelopeError` — una subclase de `InvalidInputError`
+        // reservada para esa causa (ver su definición más arriba) — y ES
+        // sistémica (si el sobre no matchea, TODAS las páginas van a fallar
+        // igual): mismo criterio que `NerModelMissingError`, aborta
+        // `processPages` entero en vez de descartar la página y continuar.
+        // Chequear el `InvalidInputError` genérico acá abortaría el
+        // documento completo ante un `pageIndex` inválido de una sola
+        // página, que no es lo que pide el spec. Que un sobre roto falle
+        // ruidosamente es el punto — lo contrario es exactamente el modo de
+        // falla que reprodujo el bug original (nota v1.2.1, NER_Engine.md).
+        if (
+          err instanceof CancelledError ||
+          err instanceof NerModelMissingError ||
+          err instanceof NerDispatchEnvelopeError
+        ) {
           throw err;
         }
         // NerPageFailedError (u otro fallo de página): sin evento dedicado
@@ -523,7 +686,7 @@ export class NerEngine implements IEngine {
       const onProgress = (progress: number, partial?: Serializable): void =>
         this.handleKernelProgress(progress, partial, ctx);
 
-      const kernelSpans = await this.pool.dispatch<ReadonlyArray<NerKernelSpan>>({
+      const dispatchResult = await this.pool.dispatch({
         run: () => kernelClassify(payload, { timeoutMs, abortSignal: ctx.abortSignal, onProgress }),
         signal: ctx.abortSignal,
         priority: DISPATCH_PRIORITY,
@@ -531,6 +694,36 @@ export class NerEngine implements IEngine {
         maxRetriesOverride: 0,
         onProgress,
       });
+      // ADR-055 §2: `dispatchResult` es `unknown` — decodeKernelSpans es el
+      // único paso permitido antes de iterarlo (nunca un cast a ciegas).
+      let kernelSpans: ReadonlyArray<NerKernelSpan>;
+      try {
+        kernelSpans = decodeKernelSpans(dispatchResult);
+      } catch (decodeErr: unknown) {
+        // `decodeKernelSpans` es síncrona y `dispatchResult` ya resolvió (la
+        // línea de arriba ya esperó el `await`): este catch, a diferencia
+        // del de `processPage`, NO puede por construcción recibir un error
+        // que cruzó un `postMessage` — envolver acá (y no más arriba) es lo
+        // que permite identificar la falla de decodificación sin un
+        // `instanceof InvalidInputError` en código que sí está expuesto a
+        // errores deserializados (Code_Standards.md §7/ADR-049).
+        //
+        // Se reconstruye SIEMPRE como `NerDispatchEnvelopeError` (nunca se
+        // reusa `decodeErr` tal cual, aun si ya es `InvalidInputError`): es
+        // la marca que `processPages` necesita más abajo para distinguir
+        // "el sobre está roto" (sistémico) de cualquier otro
+        // `InvalidInputError` genérico que `processPage` también puede
+        // lanzar (los guards de `input == null`/`pageIndex < 0`, que son un
+        // problema de una sola página y deben seguir siendo tolerables).
+        const envelopeError =
+          decodeErr instanceof InvalidInputError
+            ? new NerDispatchEnvelopeError(decodeErr.message, { ...decodeErr.details })
+            : new NerDispatchEnvelopeError(
+                `decodeKernelSpans lanzó un valor inesperado: ${String(decodeErr)}`,
+                { engineId: EngineId.Ner },
+              );
+        throw new NerDispatchDecodeFailure(envelopeError);
+      }
 
       for (const span of kernelSpans) {
         spans.push({
