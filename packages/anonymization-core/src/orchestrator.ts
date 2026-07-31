@@ -221,6 +221,11 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
   private readonly dirtyPagesByDocument = new Map<string, Set<number>>();
   // Evita agendar más de un flush por documento por ráfaga de eventos.
   private readonly flushScheduledDocuments = new Set<string>();
+  // Controlador por documento del seed/flush del preview mediado (ADR-052
+  // §3, v1.5.4): inmune a la cancelación del documento (abortRegistry) pero
+  // NO a su baja — closeDocument/dispose lo abortan y lo limpian de acá,
+  // cancelReanalyze NO lo toca (ver mediatedPreviewCtx).
+  private readonly mediatedPreviewControllers = new Map<string, AbortController>();
   // Progreso granular por página (PIPELINE_PROGRESS, spec Orchestrator.md
   // §8): un tracker por documento, reasignado al entrar a cada etapa con
   // progreso granular (OCR, luego Detecting con NER activo). `current` nunca
@@ -549,6 +554,11 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     this.groupPagesByDocument.delete(documentId);
     this.dirtyPagesByDocument.delete(documentId);
     this.flushScheduledDocuments.delete(documentId);
+    // ADR-052 §3: la baja del documento aborta el controlador del preview
+    // mediado (cancelReanalyze deliberadamente NO llega a esta línea — solo
+    // closeDocument/dispose bajan el documento).
+    this.mediatedPreviewControllers.get(documentId)?.abort();
+    this.mediatedPreviewControllers.delete(documentId);
     this.blobTracker.revokeByPrefix(previewPrefixFor(documentId));
     this.blobTracker.revokeByPrefix(exportPrefixFor(documentId));
     this.state.delete(documentId);
@@ -580,6 +590,10 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     this.groupPagesByDocument.clear();
     this.dirtyPagesByDocument.clear();
     this.flushScheduledDocuments.clear();
+    // ADR-052 §3: dispose() global es una baja para todo documento con un
+    // controlador de preview mediado todavía vivo.
+    for (const controller of this.mediatedPreviewControllers.values()) controller.abort();
+    this.mediatedPreviewControllers.clear();
 
     for (const unsubscribe of this.unsubscribers) unsubscribe();
     this.unsubscribers.length = 0;
@@ -1298,14 +1312,25 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
    * `lastAnonymizedInputs`. El seed/flush del preview mediado ya son
    * "best-effort... inmunes al supersede" (ADR-044 §3); acá quedan además
    * inmunes a la cancelación del documento, sin tocar el orden
-   * `abort`/`finishSession` de `cancelReanalyze` (ADR-038 intacto). Un
-   * `AbortController` nuevo por llamada nunca se aborta (no hay señal externa
-   * que corresponda mantener: OCR/NER/export siguen cancelables vía
-   * `abortRegistry`, sin cambios).
+   * `abort`/`finishSession` de `cancelReanalyze` (ADR-038 intacto).
+   *
+   * (v1.5.4, ADR-052 §3 — amendment de ADR-044 §3): "nunca abortada" era
+   * demasiado ancho — dejaba renders mediados corriendo contra un documento
+   * cuyo proxy de Render `closeDocument`/`dispose` ya destruyeron, con su
+   * `PREVIEW_UPDATED` tardío dejando un blob URL que nadie iba a revocar. La
+   * señal pasa a ser **por documento** (`mediatedPreviewControllers`),
+   * reutilizada entre llamadas de `seedAnonymizedPreview`/`flushDirtyPages`
+   * para el mismo documento: inmune a la **cancelación** (`cancelReanalyze`
+   * no la toca, invariante intacto) pero no a la **baja**
+   * (`closeDocument`/`dispose` la abortan y la limpian del mapa).
    */
   private mediatedPreviewCtx(documentId: string): EngineContext {
-    const signal = new AbortController().signal;
-    return this.ctxFor(signal, documentId);
+    let controller = this.mediatedPreviewControllers.get(documentId);
+    if (controller === undefined) {
+      controller = new AbortController();
+      this.mediatedPreviewControllers.set(documentId, controller);
+    }
+    return this.ctxFor(controller.signal, documentId);
   }
 
   /**
@@ -1338,7 +1363,26 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     });
   }
 
+  /**
+   * Guard de llegada tardía (ADR-052 §2, v1.5.4): si `documentId` ya no está
+   * en `state` (el documento cerró), el `PREVIEW_UPDATED` es tardío — llegó
+   * después del `revokeByPrefix` de `closeDocument`, y ese `documentId` no
+   * lo vuelve a barrer ningún cierre futuro. El URL ya lo creó el motor
+   * (ADR-034 §5); si el Orchestrator no lo revoca acá, nadie lo revoca
+   * nunca. Es determinista: entre `revokeByPrefix` y `state.delete` de
+   * `closeDocument` no hay ningún `await`, así que un `PREVIEW_UPDATED` que
+   * llegue **durante** el `await unloadDocument` todavía ve `state.has ===
+   * true` y se registra normal (lo barre el `revokeByPrefix` de después).
+   */
   private handlePreviewUpdated(payload: PreviewUpdated): void {
+    if (!this.state.has(payload.documentId)) {
+      URL.revokeObjectURL(payload.canvasBlobUrl);
+      this.logger.warn("PREVIEW_UPDATED tardío para un documento ya cerrado; blob URL revocado.", {
+        documentId: payload.documentId,
+        pageIndex: payload.pageIndex,
+      });
+      return;
+    }
     this.blobTracker.set(
       previewBlobKey(payload.documentId, payload.pageIndex, payload.kind),
       payload.canvasBlobUrl,
@@ -1367,11 +1411,17 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     });
   }
 
+  /** Guard de llegada tardía (ADR-052 §2, v1.5.4) — mismo tratamiento que `handlePreviewUpdated`. */
   private handleExportFinished(payload: ExportFinished): void {
-    this.blobTracker.set(exportBlobKey(payload.documentId), payload.blobUrl);
-    if (this.state.has(payload.documentId)) {
-      this.state.update(payload.documentId, { stage: PipelineStage.Done });
+    if (!this.state.has(payload.documentId)) {
+      URL.revokeObjectURL(payload.blobUrl);
+      this.logger.warn("EXPORT_FINISHED tardío para un documento ya cerrado; blob URL revocado.", {
+        documentId: payload.documentId,
+      });
+      return;
     }
+    this.blobTracker.set(exportBlobKey(payload.documentId), payload.blobUrl);
+    this.state.update(payload.documentId, { stage: PipelineStage.Done });
   }
 
   private handleExportFailed(payload: ExportFailed): void {

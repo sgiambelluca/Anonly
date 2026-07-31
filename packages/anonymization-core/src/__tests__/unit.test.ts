@@ -47,7 +47,6 @@ describe("Orchestrator — unit tests", () => {
     wireHappyPathSpies(engines, bus);
     const revokeSpy = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
 
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- construir alcanza para wireSubscriptions()
     const orchestrator = new PipelineOrchestrator({
       bus,
       logger: createMockLogger(),
@@ -55,6 +54,14 @@ describe("Orchestrator — unit tests", () => {
       config: createEngineConfig(),
       engines,
     });
+
+    // ADR-052 §2 (v1.5.4): el guard de llegada tardía revoca-y-descarta un
+    // PREVIEW_UPDATED cuyo documentId no está abierto en `state` — el
+    // documento tiene que estar importado para que este test siga probando
+    // el replace-and-revoke de ADR-034 §5 (no el guard nuevo, cubierto por
+    // los tests de ADR-052 más abajo).
+    await orchestrator.importDocument(createImportInput());
+    revokeSpy.mockClear();
 
     bus.emit(EventChannel.Render, EngineEvents.PREVIEW_UPDATED, {
       documentId: "doc-1",

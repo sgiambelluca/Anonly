@@ -12,6 +12,7 @@ import {
 } from "@anonly/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { exportBlobKey, previewBlobKey } from "../blob-tracker.js";
 import { LruCache } from "../cache.js";
 import { PipelineOrchestrator } from "../orchestrator.js";
 import { WorkerPool } from "../worker-pool.js";
@@ -541,6 +542,176 @@ describe("Orchestrator — edge cases", () => {
     expect(engines.render.unloadDocument).toHaveBeenCalledWith("doc-1");
   });
 
+  // ─── Caso 11 (ADR-052 §2, v1.5.4): ningún blob URL tardío sobrevive al cierre ───
+
+  it("late PREVIEW_UPDATED after closeDocument revokes its blob url", async () => {
+    const { bus, engines, orchestrator } = makeOrchestrator();
+
+    // Grupo con un reemplazo habilitado en la página 0: el seed de
+    // GROUPING_FINISHED (ADR-044) dispara un renderPage mediado para esa
+    // página al terminar el import.
+    const group = createEntityGroup({
+      id: "group-late-preview",
+      members: [
+        {
+          occurrenceId: "occ-1",
+          pageIndex: 0,
+          bbox: { x: 0, y: 0, width: 1, height: 1 },
+          source: DetectionSource.Regex,
+        },
+      ],
+    });
+    vi.spyOn(engines.grouping, "getSnapshot").mockImplementation((docId) => ({
+      documentId: docId,
+      groups: [group],
+      conflicts: [],
+      rules: [],
+    }));
+
+    // El render mediado del seed queda pendiente "a través" del cierre: la
+    // promesa que devuelve renderPage nunca resuelve por sí sola durante el
+    // test (renderMediatedPreview es fire-and-forget, no bloquea Ready) --
+    // exactamente el render en vuelo del Contexto §1/§2 de ADR-052 que
+    // `closeDocument` no espera ni cancela de forma confiable (Contexto §2:
+    // ningún render de esta vía es cancelable con `abortRegistry`).
+    const deferred = createDeferred<ReturnType<typeof createRenderPageOutput>>();
+    vi.spyOn(engines.render, "renderPage").mockReturnValue(deferred.promise);
+
+    await orchestrator.importDocument(createImportInput());
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    expect(engines.render.renderPage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentId: "doc-1",
+        pageIndex: 0,
+        kind: "anonymized",
+        mode: "preview",
+      }),
+      expect.anything(),
+    );
+
+    const revokeSpy = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+
+    await orchestrator.closeDocument("doc-1");
+
+    // El render en vuelo "resuelve" después del cierre: lo que el motor real
+    // haría al completar ese render es emitir PREVIEW_UPDATED con el blob que
+    // ya creó (ADR-034 §5) -- el Orchestrator ya dejó de esperar esa promesa
+    // (closeDocument no espera renders en vuelo, ADR-052 §5), así que lo
+    // único observable de esa terminación tardía es el evento del bus.
+    bus.emit(EventChannel.Render, EngineEvents.PREVIEW_UPDATED, {
+      documentId: "doc-1",
+      pageIndex: 0,
+      kind: "anonymized",
+      canvasBlobUrl: "blob:late-preview",
+    });
+
+    expect(revokeSpy).toHaveBeenCalledWith("blob:late-preview");
+    expect(
+      orchestrator["blobTracker"].get(previewBlobKey("doc-1", 0, "anonymized")),
+    ).toBeUndefined();
+
+    revokeSpy.mockRestore();
+    // Limpieza: asienta el mock de renderPage que dejamos pendiente (no deja
+    // una promesa sin resolver colgando entre tests; renderMediatedPreview ya
+    // tiene su propio `.catch` best-effort, ADR-044 §3).
+    deferred.reject(new Error("cleanup"));
+    await deferred.promise.catch(() => undefined);
+  });
+
+  it("late EXPORT_FINISHED after closeDocument revokes its blob url", async () => {
+    const { bus, engines, orchestrator } = makeOrchestrator();
+    await orchestrator.importDocument(createImportInput());
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+
+    // El export queda en vuelo (deferred nunca resuelto durante el test) --
+    // closeDocument no lo espera (ADR-052 §5).
+    const deferred = createDeferred<never>();
+    (engines.export.export as ReturnType<typeof vi.fn>).mockReturnValue(deferred.promise);
+
+    const options = {
+      imageFormat: "jpeg" as const,
+      jpegQuality: 0.85,
+      dpi: 150,
+      includeOriginalMetadata: false as const,
+      filename: "out.pdf",
+    };
+    bus.emit(EventChannel.UI, EngineEvents.EXPORT_REQUESTED, { documentId: "doc-1", options });
+    await vi.waitFor(() =>
+      expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Exporting),
+    );
+
+    const revokeSpy = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+
+    await orchestrator.closeDocument("doc-1");
+
+    // EXPORT_FINISHED tardío del export en vuelo, llegado después del cierre.
+    bus.emit(EventChannel.Export, EngineEvents.EXPORT_FINISHED, {
+      documentId: "doc-1",
+      blobUrl: "blob:late-export",
+      sizeBytes: 1,
+      durationMs: 1,
+    });
+
+    expect(revokeSpy).toHaveBeenCalledWith("blob:late-export");
+    expect(orchestrator["blobTracker"].get(exportBlobKey("doc-1"))).toBeUndefined();
+
+    revokeSpy.mockRestore();
+    // Limpieza: asienta el mock de export() que dejamos pendiente.
+    deferred.reject(new Error("cleanup"));
+    await deferred.promise.catch(() => undefined);
+  });
+
+  it("PREVIEW_UPDATED during unloadDocument await is registered and swept", async () => {
+    // El guard nuevo (ADR-052 §2) no debe adelantarse: un PREVIEW_UPDATED que
+    // llega MIENTRAS closeDocument todavía está en el `await
+    // render.unloadDocument(...)` ve `state.has(documentId) === true` (el
+    // `state.delete` corre varias líneas después, sin ningún `await` de por
+    // medio hasta ahí) -- tiene que registrarse normal en blobTracker y ser
+    // barrido por el `revokeByPrefix` posterior, no revocado inline por el
+    // guard.
+    const logger = createMockLogger();
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    wireHappyPathSpies(engines, bus);
+
+    vi.spyOn(engines.render, "unloadDocument").mockImplementation(async () => {
+      bus.emit(EventChannel.Render, EngineEvents.PREVIEW_UPDATED, {
+        documentId: "doc-1",
+        pageIndex: 0,
+        kind: "original",
+        canvasBlobUrl: "blob:mid-unload",
+      });
+    });
+
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger,
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+
+    const revokeSpy = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+
+    await orchestrator.closeDocument("doc-1");
+
+    // Observable idéntico al del guard (URL revocado, no retenido en
+    // blobTracker) -- lo que distingue el camino es que NUNCA pasó por el
+    // guard de llegada tardía: si hubiera pasado por ahí, habría logueado el
+    // warn de "tardío para un documento ya cerrado".
+    expect(revokeSpy).toHaveBeenCalledWith("blob:mid-unload");
+    expect(orchestrator["blobTracker"].get(previewBlobKey("doc-1", 0, "original"))).toBeUndefined();
+    expect(logger.warn).not.toHaveBeenCalledWith(
+      expect.stringContaining("tardío"),
+      expect.anything(),
+    );
+
+    revokeSpy.mockRestore();
+  });
+
   // ─── Caso 12: segundo importDocument mientras hay uno activo ───
 
   it("second importDocument while active rejects", async () => {
@@ -946,6 +1117,88 @@ describe("Orchestrator — edge cases", () => {
       );
       expect(seedCall).toBeDefined();
       expect(seedCall?.[1]?.abortSignal.aborted).toBe(false);
+    });
+
+    // ─── ADR-052 §3 (v1.5.4): el controlador del preview mediado pasa a ser
+    // por documento, atado a la BAJA (closeDocument/dispose), no a la
+    // cancelación (cancelReanalyze). No-regresión de la v1.5.1: si el
+    // controlador nuevo se atara al lugar equivocado (p. ej. si
+    // cancelReanalyze terminara abortándolo), este test lo muestra —
+    // inspecciona el AbortController directamente, sin depender de que el
+    // mock de renderPage reaccione a la señal (a diferencia del caso de
+    // arriba, que sí lo necesita para no pasar vacío contra el bug de
+    // v1.5.1, ya cerrado).
+
+    it("cancelReanalyze still lets the mediated seed run", async () => {
+      const { engines, orchestrator } = makeOrchestrator({ nerEnabled: false });
+      await orchestrator.importDocument(createImportInput());
+      expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+
+      // Precondición: el seed del GROUPING_FINISHED del import ya creó el
+      // controlador por documento (mediatedPreviewCtx llama incondicional al
+      // arrancar seedAnonymizedPreview, aun sin páginas con reemplazos) — si
+      // esto fuera undefined, el resto del test probaría algo vacío.
+      const controllerBefore = orchestrator["mediatedPreviewControllers"].get("doc-1");
+      expect(controllerBefore).toBeDefined();
+      expect(controllerBefore?.signal.aborted).toBe(false);
+
+      const group = createEntityGroup({
+        id: "group-cancel-reanalyze-controller",
+        members: [
+          {
+            occurrenceId: "occ-1",
+            pageIndex: 0,
+            bbox: { x: 0, y: 0, width: 1, height: 1 },
+            source: DetectionSource.Regex,
+          },
+        ],
+      });
+      vi.spyOn(engines.grouping, "getSnapshot").mockImplementation((docId) => ({
+        documentId: docId,
+        groups: [group],
+        conflicts: [],
+        rules: [],
+      }));
+      (engines.render.renderPage as ReturnType<typeof vi.fn>).mockClear();
+
+      const deferred = createDeferred<never>();
+      (engines.ner.processPages as ReturnType<typeof vi.fn>).mockImplementation(
+        (_inputs, ctx: { abortSignal: AbortSignal }) => {
+          ctx.abortSignal.addEventListener("abort", () => {
+            deferred.reject(new CancelledError("doc-1"));
+          });
+          return deferred.promise;
+        },
+      );
+
+      const reanalyzePromise = orchestrator.reanalyze("doc-1", { ner: { enabled: true } });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // cancelReanalyze (ADR-038 §6) aborta abortRegistry.abort("doc-1")
+      // ANTES de finishSession — el invariante que este test protege: el
+      // controlador del preview mediado NO debe abortarse acá, a diferencia
+      // de abortRegistry.
+      await orchestrator.cancel("doc-1");
+      await expect(reanalyzePromise).resolves.toBeUndefined();
+
+      expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+
+      const controllerAfter = orchestrator["mediatedPreviewControllers"].get("doc-1");
+      expect(controllerAfter).toBe(controllerBefore); // mismo controlador: no se reemplazó ni se limpió.
+      expect(controllerAfter?.signal.aborted).toBe(false); // y sigue sin abortar.
+
+      // Y el seed del GROUPING_FINISHED suprimido (ADR-038 §6, ADR-044 §3)
+      // sigue corriendo de verdad con esa señal.
+      expect(engines.render.renderPage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          documentId: "doc-1",
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+        }),
+        expect.objectContaining({ abortSignal: controllerAfter?.signal }),
+      );
     });
 
     it("case 22: reanalyze can run again after a cancelled reanalyze (AbortController reset)", async () => {
