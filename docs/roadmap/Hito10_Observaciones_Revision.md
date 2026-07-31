@@ -462,6 +462,94 @@ Corrección a una de las dos opciones que planteaba el reporte: **"que el tracke
 
 ---
 
+## Cierre del Hito 10 — cinco hallazgos de prueba manual, abiertos al momento del merge (2026-07-31)
+
+Con el Hito 10 ya cerrado a nivel de PRs, el humano probó la app con **dos documentos propios** (un cuento de 11 páginas con texto real, y una pericia legal escaneada+texto) y reportó tres síntomas. El planificador los investigó contra el código antes de asignar nada (regla de ambigüedad: no improvisar diseño), y en el camino aparecieron dos hallazgos más. **Ninguno se arregló todavía**: se mergea el Hito 10 con los cinco documentados acá, y cada uno arranca desde su propia rama sobre `main`.
+
+Lo que sigue es diagnóstico verificado contra el código, no hipótesis, salvo donde se aclara explícitamente.
+
+### 1. Crítico — NER no detecta absolutamente nada con `NerPool` real
+
+**Síntoma**: desde que los motores pasaron a Workers reales, al escanear un PDF de texto solo aparecen las entidades de Regex (una patente). Ninguna de NER (personas, ubicaciones) llega nunca a la UI, sin error visible, con el pipeline llegando a `Ready` normalmente.
+
+**Causa, confirmada**: desajuste de sobre entre el worker y el host. `ner-engine/src/worker/entry.ts:104` postea `COMPLETED` con `result: { spans }` — que es exactamente lo que manda ADR-046 §1 y lo que documenta el comentario de `shared/src/types.ts` sobre `NerKernelSpan`. Pero `ner.engine.ts:526` tipa el dispatch como `ReadonlyArray<NerKernelSpan>` y en la línea 535 itera el resultado directo, y `WorkerPool.dispatch` resuelve con `outbound.result as TResult` (`worker-pool.ts:662`, cast a ciegas sobre un valor que cruzó un `postMessage`). En modo remoto llega el objeto `{ spans }` → `for...of` sobre algo no iterable → `TypeError`. Ese error no es un `EngineError`, así que `normalizeNerError` lo deja pasar tal cual, no es `NerTimeoutError` → no reintenta → `NerPageFailedError` → `processPages` lo traga con `ctx.logger.warn` (`ner.engine.ts:423`), y el logger de producción es el nulo (P-4). Once páginas fallando en silencio, `NER_FINISHED` con `occurrenceCount: 0`.
+
+Los otros cuatro motores no lo tienen: OCR/PDF/Render/Export postean `result` pelado. NER es el único que envuelve.
+
+**Por qué pasó todos los gates — y este es el hallazgo más importante de los cinco**: no existe **ningún** test, en ningún nivel, que verifique que una entidad detectada por NER llegue a la UI. Los unit de `ner-engine` usan pools fake que ejecutan `run()`, o sea el camino in-process, que devuelve el array pelado y nunca cruza el sobre. `worker/__tests__/entry.test.ts:291` assertea `expect(viaWorker).toEqual({ spans: viaDirect })` — testea el sobre y lo da por bueno, sin nadie del otro lado que lo abra. El E2E tampoco: el Escenario 1 dice textualmente que assertea un DNI de Regex "sin depender de NER"; los Escenarios 5 y 9 asserean sobre `NER_MODEL_LOADING` (que viaja por `PROGRESS` y sí funciona); el Escenario 8 assertea **ausencia** de entidades NER, y por lo tanto pasa igual de verde con el bug presente.
+
+**Decisión — ADR-055 primero (pendiente de escribir), fix de `ner-engine` como su primer adoptante.** El humano eligió explícitamente escribir el ADR antes que el código. El ADR no puede limitarse a enunciar el principio ("decodificá con un guard"): tiene que mandar un mecanismo, porque un principio no impide que el próximo `dispatch<Foo>()` vuelva a mentir. El mecanismo elegido: **cada motor angosta su propio puerto interno** (`NerJobPool`, `OcrJobPool`, `RenderJobPool` — todos viven dentro del archivo de su motor) para que devuelva `unknown`, de modo que el compilador obligue a decodificar. Como esos puertos son per-motor, no hay que tocar `worker-pool.ts` ni el façade, y cada motor se migra en su propio PR sin violar R-1/R-5. El ADR debe exigir además, por motor, un test que cruce el sobre real (pool fake que ignore `run()` y resuelva exactamente lo que postea su `entry.ts`).
+
+Los otros cuatro motores **no** tienen el bug hoy; su migración al puerto `unknown` es una serie de endurecimiento posterior, sin urgencia.
+
+### 2. Texto reconstruido como cuadrados (`.notdef`) en preview y export
+
+**Síntoma**: en una pericia legal real, todos los caracteres se dibujan como cuadrados de borde negro y relleno blanco, tanto en el panel original como en el anonimizado y en el PDF exportado. Único workaround que encontró el humano: pasar el PDF por un conversor online a `.docx` y de vuelta a PDF.
+
+**Diagnóstico, con la evidencia que lo cerró**:
+
+- La misma pericia **se renderiza perfecta en Firefox**, que usa pdf.js con toda su configuración por defecto. O sea: el PDF está sano, el problema es de configuración nuestra.
+- La consola de la app con el documento cargado **no emite ni un warning de fuentes**: ni `standardFontDataUrl`, ni `Unknown CMap name`, ni `Cannot load system font`. pdf.js avisa fuerte cuando le faltan esos assets, y no avisó — **las fuentes de ese documento están embebidas y no falta ningún asset**. Esto descartó la primera hipótesis del planificador (que el fix fuera servir `cmaps/`/`standard_fonts/`), y dejó como causa la única que falla en silencio.
+
+**Causa**: el kernel de render corre dentro del RenderWorker, donde `globalThis.document` no existe. pdf.js intenta registrar cada fuente embebida con un `@font-face`: `FontLoader.isFontLoadingAPISupported` da `false` (`pdf.mjs:5391`, es `!!this._document?.fonts`) y cae a `insertRule`, que hace `this._document.createElement("style")` (`pdf.mjs:5310`) → `TypeError`. Ese error lo captura un `.catch()` que **no loguea nada** (`pdf.mjs`, handler del commonobj `"Font"`) y dispara el fallback interno. Del lado del canvas, `disableFontFace` sigue en `false` — solo se auto-activa bajo Node (`pdf.mjs:11376`, `isNodeJS`), nunca en un Worker de browser — así que pdf.js dibuja con `ctx.fillText()` pasando códigos del área de uso privado de una fuente que nunca se registró. El navegador no tiene glifo para esos códigos: cuadrados. Silencioso de punta a punta, que es exactamente por qué el log está limpio.
+
+Explica también las dos anomalías que el humano observó en ese documento: **la página 1 se reconstruye bien porque es una imagen escaneada** (no tiene fuentes que registrar; su "fuente y tamaño distintos" era, en realidad, ausencia de fuentes), y las páginas 2+ tienen texto real con fuentes embebidas → cuadrados.
+
+**Decisión (ADR-053, pendiente de escribir)**, con las dos mitades que el humano eligió tomar juntas por robustez:
+
+- **(a) La que arregla el síntoma**: `disableFontFace: true` (+ `useSystemFonts: false` explícito) en `kernelLoadDocument`. pdf.js pasa a pedirle al worker las siluetas de glifo (`pdf.worker.mjs:30963` construye los commonobj `${loadedName}_path_${fontChar}`) y las dibuja como `Path2D` — sin DOM, correcto por construcción dentro de un Worker. Arregla preview y export, porque el export compone el mismo raster. Costo conocido: dibujar por silueta es más lento que `fillText`; hay que medirlo y reportarlo, no optimizarlo en ese PR.
+- **(b) La que previene el caso que hoy no tenemos**: servir `cmaps/` (169 archivos, 1.5 MB) y `standard_fonts/` (804 KB) de `pdfjs-dist` como assets first-party, y pasar `cMapUrl`/`cMapPacked`/`standardFontDataUrl` tanto en `render-engine` (rasterizado) como en `pdf-engine` (extracción de texto — sin cMaps, un PDF con CMap predefinido se extrae mal y degrada la detección de entidades). Cubre las fuentes **no embebidas** y las CID con CMap predefinido, que (a) no toca. Los bytes salen de una dependencia npm ya pinneada por `pnpm-lock.yaml`, así que **no** van a `assets.lock.json` (que es para mirrors de CDN): se copian desde `node_modules` en un paso de build, y `apps/react-client/public/pdfjs/` se agrega al `.gitignore` junto a `public/wasm/` y `public/models/`. pdf.js pide solo el archivo puntual que necesita, así que un documento que no los necesita no paga nada en runtime.
+
+Toca dos motores + la app, así que se parte en: PR de app (assets), PR `render-engine`, PR `pdf-engine` (R-1/R-5). El PR de app va primero: sin assets servidos, los otros dos no tienen a qué apuntar. La verificación manual con la pericia real es gate obligatorio del PR de `render-engine`.
+
+### 3. pdf.js degrada a "fake worker" dentro de todo Web Worker
+
+**Síntoma**: la consola emite `Warning: Setting up fake worker` cuatro veces (una por el hilo principal, tres desde `kernel.ts:289`, o sea un RenderWorker por slot).
+
+**Causa, confirmada leyendo el código publicado**: no es un olvido nuestro — `render-engine/src/worker/entry.ts:71` y `pdf-engine/src/worker/entry.ts:73` configuran `GlobalWorkerOptions.workerSrc` correctamente, cada uno en su scope. Es una limitación de pdf.js 4.10.38: `PDFWorker._initialize()` hace `PDFWorker._isSameOrigin(window.location.href, workerSrc)` (`pdf.mjs:12309`) y **`window` no existe dentro de un Web Worker** → `ReferenceError` → lo captura y llama `_setupFakeWorker()`. O sea, **pdf.js nunca puede spawnear su worker real desde adentro de un worker**, hagamos lo que hagamos con `workerSrc`.
+
+**Consecuencia: de rendimiento, no de corrección.** El parser de pdf.js corre en el mismo hilo del RenderWorker en vez de en uno propio (el camino de mensajes es el mismo, sobre un `LoopbackPort`). No causa el bug 2 ni ningún otro síntoma observado. Existe un workaround —definir un `window` mínimo en el scope global del worker antes de importar pdf.js— pero es un monkey-patch sobre una librería de terceros y **no debe aplicarse sin ADR propio**. Queda anotado, sin fix, para evaluarlo cuando el rendimiento de render sea el cuello de botella (candidato natural: Hito 11).
+
+### 4. `net::ERR_FILE_NOT_FOUND` de blob URLs al scrollear
+
+**Síntoma**: al scrollear el visor, la consola tira `GET blob:http://localhost:5173/<uuid> net::ERR_FILE_NOT_FOUND`, una por página.
+
+**Causa**: scrollear dispara `RENDER_REQUESTED` para el rango montado; cuando llega el preview nuevo de una página, `BlobUrlTracker.set` (`blob-tracker.ts:19`) revoca el URL anterior de esa clave en el acto. Si el `<img>` de `PageCanvas` todavía estaba cargando el URL viejo, su carga muere con ese error.
+
+**Impacto**: visualmente inofensivo — `PageCanvas` ya descarta el resultado obsoleto vía su flag `active`, así que el `onerror` no pinta nada. Es ruido de consola que indica que la ventana entre "revoco el viejo" y "el `<img>` viejo terminó" no está cerrada. Misma familia que ADR-052, pero del lado de la UI y sin consecuencia funcional conocida. **Sin fix**; anotado para revisarlo si algún día produce un síntoma visible.
+
+### 5. Una página escaneada dentro de un PDF de texto no recibe cobertura de OCR
+
+**Síntoma**: en la pericia, el nombre del fiscal —que está en el título de la página 1— es la única entidad que la app no detecta, mientras que los nombres de las páginas siguientes sí se detectan bien.
+
+**Causa parcial, confirmada por el humano**: la página 1 **es una imagen escaneada** (no permite seleccionar texto; las páginas 2+ sí). `getTextContent()` no devuelve nada para esa página, así que ni Regex ni NER pueden ver ese nombre. Ninguna configuración de pdf.js lo cambia: ese nombre solo es alcanzable por OCR.
+
+**Lo que queda abierto**: el pipeline debería detectar una página sin texto y mandarla a OCR. O no se está disparando para páginas sueltas dentro de un documento mayormente textual, o corre y no detecta. **No investigado todavía** — es el único de los cinco hallazgos cuya causa no está cerrada. Requiere su propio diagnóstico sobre `Orchestrator`/`OCR_Engine` antes de decidir nada.
+
+### Y la entrada 3 de "Post-PR13" (salto de scroll) deja de estar "no confirmada"
+
+El síntoma volvió a aparecer en prueba manual, con pasos precisos: pantalla lo bastante ancha como para mostrar los dos paneles a la vez, y cruzar de una página a otra en cualquiera de los dos. Resultado: los dos visores saltan a la primera página y el scroll queda trabado.
+
+La hipótesis que había quedado anotada (entradas viejas en el `Set` del `IntersectionObserver`) es correcta en su intuición pero **incompleta**: son tres defectos que se componen, y el del `Set` es solo el primero.
+
+1. `PdfViewer.tsx:141` hace `setPage(range.start)`, y `range.start` sale de `computeVisibleRangeFromIndices` (`visibleRange.ts:23`), que es literalmente `min(set)..max(set)`. Basta con que el `Set` contenga transitoriamente un índice viejo —esperable cuando el otro visor se desplaza miles de píxeles de golpe y las entradas de entrada y de salida caen en callbacks distintos, coalescidos por el `requestAnimationFrame` de `PageVirtualizer.tsx:108`— para que el rango colapse a `start: 0` y `setPage(0)` mande **los dos** visores al principio. `min..max` no tolera un `Set` no contiguo ni por un frame.
+2. No hay dueño del scroll: los dos visores son a la vez emisor y receptor. Cuando A scrollea, el efecto de `PageVirtualizer.tsx:70-82` desplaza B; B dispara su propio observer y **vuelve a escribir `currentPageIndex`**, lo que puede arrastrar a A. `computeScrollSyncTarget` corta la recursión infinita pero no impide que el seguidor mueva al líder.
+3. La sincronización es por índice de página, no por píxel (`scrollSync.ts:49`: `targetPageIndex * pageSize`): el seguidor queda alineado al borde de una página mientras el líder está en un offset arbitrario. Es lo que ya estaba anotado como limitación aceptada más arriba ("hasta ~1 página de diferencia"), pero es también lo que convierte el defecto 2 en un ping-pong estable — y cerca del final del documento el navegador recorta el `scrollTop` del seguidor, que entonces reporta siempre una página menos que el líder: eso es el "no me deja bajar".
+
+Que el implementador no pudiera reproducirlo en Playwright headless es coherente: los tres defectos dependen de timing de entrega del `IntersectionObserver`, que en headless es distinto.
+
+**Decisión del humano (ADR-054, pendiente de escribir)**: **scroll independiente por panel, más un control de "sincronizar scroll" que el usuario prende cuando quiere.** Con el control apagado —el estado por defecto— no hay ningún mecanismo de sincronización, así que los tres defectos desaparecen por eliminación, no por arreglo: se borran `scrollSync.ts` y la prop `scrollToPageIndex`, nadie mueve a nadie por código, y el `min(Set)` deja de ser peligroso porque solo decide qué páginas montar (equivocarse ahí significa montar una página de más, inofensivo).
+
+Implica que `viewer.store.visibleRange` y `currentPageIndex` pasan a ser **por panel** en vez de globales. Verificado: fuera del propio visor, el único consumidor externo es `SettingsDialog.tsx:159` (lee `visibleRange` para re-pedir previews al cambiar un setting), que pasaría a usar la unión de los dos rangos.
+
+Con el control prendido, la sincronización **no** puede reimplementarse por índice de página: tiene que ser a nivel de píxel (`seguidor.scrollTop = líder.scrollTop`, geometría idéntica entre paneles), de modo que el evento de scroll que genera el seguidor calcule un valor **ya igual** al compartido y no escriba nada. La convergencia sale de la idempotencia, no de suprimir eventos con banderas ni timeouts — cualquier diseño con una ventana temporal reintroduce un bug dependiente de timing como el actual. Casos límite a resolver de forma determinista en el ADR: panel que no puede alcanzar la posición (recorte del navegador cerca del final) no debe escribir su posición recortada, y panel oculto (alto cero) se saltea y se re-sincroniza al volver a mostrarse.
+
+**Restricción explícita del humano**: hay que preservar el comportamiento actual en anchos chicos (`< lg`), donde `SideBySideViewer` muestra pestañas para elegir qué documento previsualizar. El ADR tiene que definir qué hace el control de sincronización en ese modo.
+
+**Requiere ADR porque contradice tres specs**: `Components.md` §5.1 ("dos PdfViewer con scroll sincronizado"), `React_Client.md` §7 ("Lado a lado sincronizado: scroll vertical compartido vía `viewer.currentPageIndex`") y `07_Performance_Strategy.md` §3.1 ("dos virtualizers sincronizados vía estado Zustand"). También hay que decidir ahí si el flag nuevo reutiliza `viewer.store.sideBySide` —declarado en `React_Client.md` §3.5, hoy sin setter y sin consumidor, ya anotado como ambigüedad en `SideBySideViewer.tsx:20`— o si se agrega un campo propio; el planificador se inclina por un campo propio, para no darle a un campo documentado un significado que no tiene.
+
+---
+
 ## Tareas de seguimiento con entrada formal en el tasklist de la sesión
 
 - ~~Diseñar el fix del supersede de render (leak de `pendingRenders` + clave sin `mode`) — bloquea que el PR9 (Export) se dé por completo.~~ **Resuelto 2026-07-19** — ver "Resolución" en la entrada "PR4" arriba.
@@ -483,3 +571,9 @@ Corrección a una de las dos opciones que planteaba el reporte: **"que el tracke
 - ~~**Implementar ADR-052** (blob URLs tardíos tras cerrar documento — ver la entrada "Bug destapado durante PR17.7"): **PR 17.8**, `packages/anonymization-core/src`.~~ **Cerrado 2026-07-31** — revisor APPROVED. El Escenario 7 y el gate `test:leak` de Hito 11 ahora verifican un invariante que el código de verdad cumple.
 - ~~**Implementar ADR-049** (bug destapado en PR17: `PdfPasswordRequiredError` pierde su identidad de clase al cruzar el Worker — ver la entrada de arriba): **PR 17.1** `pdf-engine` (`retryable = false`) y después **PR 17.2** `packages/anonymization-core/src` (guard por `code`, retiro del override `isRetryable`, tests con error deserializado, des-`fixme` del Escenario 3). **Diseño resuelto 2026-07-30 — ADR-049**; implementación pendiente de asignarse al implementador. Bloquea que el Escenario 3 de PR17 salga de `fixme`.~~ **Cerrado 2026-07-30** — PR17.1 (`a55aa51`) y PR17.2 (`65ac29f`), revisor APPROVED. Destapó el bug de ADR-050 (ver arriba).
 - Limpieza conjunta de `poolWorkerFactories.render`/`ocr`/`ner` en `orchestrator.ts`: las tres quedan como dead code una vez que cada motor despacha contra su propia pool (ADR-043/045/046). Inofensivo (los pools se crean perezosamente); candidato a un PR de limpieza propio, fuera del alcance de PR15.
+- **Escribir ADR-055** (decodificación de `COMPLETED.result` por guard de runtime, con el mecanismo del puerto interno que devuelve `unknown` + test de sobre por motor) y después el **PR de `ner-engine`** que lo adopta primero y arregla el bug 1 del cierre de Hito 10. Prioridad máxima: sin esto, NER no detecta nada en producción. Los otros cuatro motores quedan como serie de endurecimiento posterior, sin urgencia.
+- **Escribir ADR-053** (pdf.js dentro de un Worker: `disableFontFace: true` + assets `cmaps`/`standard_fonts` first-party) y después los tres PRs en orden: app (copia de assets + `.gitignore`), `render-engine`, `pdf-engine`. Ver el bug 2 del cierre de Hito 10.
+- **Escribir ADR-054** (scroll independiente por panel + control opcional de sincronización a nivel de píxel; estado del visor por-kind; preservar el modo pestañas en anchos chicos) y después el PR sobre `apps/react-client`. Ver la entrada 3 revisada del cierre de Hito 10.
+- **Diagnosticar por qué OCR no cubre una página escaneada suelta dentro de un PDF mayormente textual** (bug 5 del cierre de Hito 10, único con causa sin cerrar). Investigación sobre `Orchestrator`/`OCR_Engine` antes de decidir nada.
+- pdf.js degrada a "fake worker" dentro de todo Web Worker (`window` inexistente en `PDFWorker._initialize`, bug 3 del cierre de Hito 10). Solo rendimiento. Evaluar el workaround —y su ADR— cuando el render sea cuello de botella; candidato a Hito 11.
+- Ruido de `ERR_FILE_NOT_FOUND` de blob URLs revocados mientras el `<img>` anterior seguía cargando (bug 4 del cierre de Hito 10). Sin consecuencia funcional conocida; revisar si alguna vez produce un síntoma visible.
