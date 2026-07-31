@@ -29,6 +29,7 @@ import {
   makeReplacement,
   mockGetDocumentFailure,
   mockGetDocumentResult,
+  readProtectedPdfFixtureBuffer,
   removeOffscreenCanvasStub,
   resetCreatedCanvases,
   setStubCanvasContextAvailable,
@@ -402,6 +403,42 @@ describe("RenderEngine — edge cases", () => {
     await expect(engine.loadDocument("doc-getdocument-fails", createValidBuffer())).rejects.toThrow(
       RenderFailedError,
     );
+  });
+
+  // ─── Caso 22 (ADR-050): password de un PDF protegido en loadDocument ───
+
+  it("loadDocument with password opens an encrypted PDF", async () => {
+    const docId = "doc-protected-with-password";
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 10 })),
+    );
+    await engine.init(ctx);
+
+    const buffer = readProtectedPdfFixtureBuffer();
+    await engine.loadDocument(docId, buffer, "test1234");
+
+    expect(getDocument).toHaveBeenCalledWith({ data: buffer, password: "test1234" });
+    // ADR-050 §2: el host retiene { buffer, pageCount, password } — verificado
+    // acá porque es lo que después usa reprimeWorkers (ver unit.test.ts).
+    expect(engine["documents"].get(docId)).toEqual(
+      expect.objectContaining({ pageCount: 10, password: "test1234" }),
+    );
+  });
+
+  it("loadDocument without password on an encrypted PDF fails with RenderFailedError", async () => {
+    // Bug que motivó ADR-050: antes del fix, un PDF protegido abierto sin
+    // password moría acá con el mismo tratamiento que cualquier otro fallo
+    // de getDocument en loadDocument (§11) — no es un camino nuevo (§13 caso 22).
+    const pwdErr = new Error("No password given");
+    pwdErr.name = "PasswordException";
+    vi.mocked(getDocument).mockReturnValue(mockGetDocumentFailure(pwdErr));
+    await engine.init(ctx);
+
+    const buffer = readProtectedPdfFixtureBuffer();
+    await expect(engine.loadDocument("doc-protected-no-password", buffer)).rejects.toThrow(
+      RenderFailedError,
+    );
+    expect(getDocument).toHaveBeenCalledWith({ data: buffer, password: undefined });
   });
 
   it("throws RenderTimeoutError when render exceeds the configured timeout", async () => {

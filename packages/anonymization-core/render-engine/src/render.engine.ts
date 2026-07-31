@@ -1,8 +1,22 @@
 /**
  * @anonly/render-engine — `RenderEngine` (implementa `IEngine`).
  *
- * Fuente de verdad: docs/core/Render_Engine.md (v1.5.0, ADR-030, ADR-031,
- * ADR-034, ADR-037, ADR-043, ADR-044).
+ * Fuente de verdad: docs/core/Render_Engine.md (v1.6.0, ADR-030, ADR-031,
+ * ADR-034, ADR-037, ADR-043, ADR-044, ADR-050).
+ *
+ * ADR-050 (2026-07-30 — el password de un PDF protegido llega hasta
+ * `loadDocument`): tercer parámetro opcional `password?: string`. Reparto
+ * exacto de dónde vive (ADR-050 §2): este archivo (host) lo retiene en
+ * `RetainedDocument.password`, junto a `{ buffer, pageCount }`, únicamente
+ * para re-primear workers nuevos o reemplazados (`reprimeWorkers`, ADR-043
+ * §5) — se borra en `unloadDocument`/`dispose` igual que el resto de
+ * `RetainedDocument` (nada nuevo que limpiar: ya viaja dentro del mismo
+ * objeto que `documents.delete`/`documents.clear` ya cubrían). El **kernel**
+ * (`./worker/kernel.ts#kernelLoadDocument`) lo usa en `getDocument({ data,
+ * password })` y no lo guarda — una vez abierto el `PDFDocumentProxy`, no se
+ * vuelve a necesitar. Nunca en logs ni eventos (`08_Security_Model.md` §6,
+ * enmendada por ADR-050 §3). Parámetro opcional: ningún call site existente
+ * cambia de comportamiento.
  *
  * ADR-044 (2026-07-23 — el motor deja de escuchar eventos de Grouping; el
  * delta render por overrides se retira): los reemplazos autoritativos del
@@ -282,10 +296,18 @@ function toPublicOutput(entry: InternalCacheEntry, mode: "preview" | "full"): Re
   };
 }
 
-/** Documento retenido host-side desde ADR-043 §3: ya no es el `PDFDocumentProxy` (vive en el worker/kernel), solo lo necesario para las precondiciones de ADR-030 y el re-priming. */
+/**
+ * Documento retenido host-side desde ADR-043 §3: ya no es el
+ * `PDFDocumentProxy` (vive en el worker/kernel), solo lo necesario para las
+ * precondiciones de ADR-030 y el re-priming. `password` (ADR-050 §2):
+ * retenido únicamente para re-primear workers nuevos/reemplazados
+ * (`reprimeWorkers`) — nunca expuesto fuera de este archivo/kernel, nunca en
+ * logs ni eventos.
+ */
 interface RetainedDocument {
   readonly buffer: ArrayBuffer;
   readonly pageCount: number;
+  readonly password?: string;
 }
 
 export class RenderEngine implements IEngine {
@@ -338,7 +360,7 @@ export class RenderEngine implements IEngine {
     return Promise.resolve();
   }
 
-  async loadDocument(documentId: string, buffer: ArrayBuffer): Promise<void> {
+  async loadDocument(documentId: string, buffer: ArrayBuffer, password?: string): Promise<void> {
     this.assertNotDisposed();
     this.assertInitialized();
     // assertInitialized ya garantiza this.ctx !== null; guard explícito solo
@@ -359,7 +381,13 @@ export class RenderEngine implements IEngine {
     // determinísticamente (el kernel destruye el proxy anterior — ADR-030
     // §1). Todos los workers parsean el mismo buffer clonado -> mismo
     // `pageCount`; se toma el primero como canónico.
-    const payload: LoadDocumentPayload = { documentId, buffer };
+    // ADR-050 §1: `password` opcional, conditional spread (exactOptionalPropertyTypes,
+    // Code_Standards.md §2) — sin password, `LoadDocumentPayload` no lleva la clave.
+    const payload: LoadDocumentPayload = {
+      documentId,
+      buffer,
+      ...(password !== undefined ? { password } : {}),
+    };
     const results = await this.pool.broadcast(payload, () => kernelLoadDocument(payload));
     const result = results[0];
     if (result === undefined) {
@@ -370,7 +398,12 @@ export class RenderEngine implements IEngine {
     }
 
     // ADR-043 §3: el host retiene { buffer, pageCount } — nunca el proxy.
-    this.documents.set(documentId, { buffer, pageCount: result.pageCount });
+    // ADR-050 §2: + password, solo para re-primear workers (reprimeWorkers).
+    this.documents.set(documentId, {
+      buffer,
+      pageCount: result.pageCount,
+      ...(password !== undefined ? { password } : {}),
+    });
     this.clearDocumentState(documentId);
     ctx.logger.info(`Documento cargado en Render Engine: ${documentId}`, {
       documentId,
@@ -408,13 +441,22 @@ export class RenderEngine implements IEngine {
    * a workers que YA tienen el documento cargado es redundante pero
    * inofensivo (recarga determinística, ADR-030 §1) — se prioriza la
    * simplicidad de reusar `broadcast` tal cual sobre evitar ese resend.
+   *
+   * ADR-050 §2: si el documento retenido tiene `password` (PDF protegido), se
+   * reenvía también en el `LoadDocumentPayload` — sin esto, un worker
+   * reemplazado tras crash no podría recargar un documento protegido y el
+   * preview quedaría muerto en silencio (alternativa C descartada del ADR).
    */
   async reprimeWorkers(): Promise<void> {
     if (this.ctx === null) return;
     const ctx = this.ctx;
     await Promise.all(
       [...this.documents.entries()].map(([documentId, doc]) => {
-        const payload: LoadDocumentPayload = { documentId, buffer: doc.buffer };
+        const payload: LoadDocumentPayload = {
+          documentId,
+          buffer: doc.buffer,
+          ...(doc.password !== undefined ? { password: doc.password } : {}),
+        };
         return this.pool
           .broadcast(payload, () => kernelLoadDocument(payload))
           .catch((err: unknown) => {

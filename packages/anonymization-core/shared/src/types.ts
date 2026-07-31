@@ -280,10 +280,18 @@ export interface ExportSavePayload {
  * El `buffer` se CLONA por worker (nunca se transfiere: transferirlo vaciaría
  * el original retenido por el host — `05_Worker_Architecture.md` §2.3/§7.4,
  * ADR-030).
+ *
+ * `password` (ADR-050): password de un PDF protegido, opcional. El kernel lo
+ * usa en `getDocument({ data, password })` y NO lo retiene — una vez abierto
+ * el `PDFDocumentProxy`, no se vuelve a necesitar. El host sí lo retiene,
+ * junto a `{ buffer, pageCount }`, para re-primear workers nuevos o
+ * reemplazados (ADR-043 §5). Nunca en logs ni eventos (`08_Security_Model.md`
+ * §6, enmendada por ADR-050 §3).
  */
 export interface LoadDocumentPayload {
   readonly documentId: string;
   readonly buffer: ArrayBuffer;
+  readonly password?: string;
 }
 
 /**

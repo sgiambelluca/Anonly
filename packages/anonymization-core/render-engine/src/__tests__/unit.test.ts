@@ -25,6 +25,7 @@ import {
   makeAnnotation,
   makeReplacement,
   mockGetDocumentResult,
+  readProtectedPdfFixtureBuffer,
   resetCreatedCanvases,
 } from "./fixtures/test-helpers.js";
 
@@ -354,5 +355,47 @@ describe("RenderEngine — unit tests", () => {
     );
     // La página 0 ya no estaba cacheada (evictada por bytes): nueva llamada a getPage.
     expect(getPageSpy.mock.calls.length).toBe(callsBefore + 1);
+  });
+
+  // ─── ADR-050 §2 + ADR-043 §5 (Hito 10, PR17.4): re-priming con password ───
+
+  it("re-primed worker reloads a password-protected document", async () => {
+    // El host retiene el password junto a `{ buffer, pageCount }`
+    // (`RetainedDocument`, ADR-050 §2) únicamente para re-primear workers
+    // nuevos/reemplazados (`reprimeWorkers`, ADR-043 §5) — el kernel nunca lo
+    // ve dos veces (solo en la carga original). Se inyecta un pool con
+    // `broadcast` espiado (estructural — el tipo interno `RenderJobPool` no
+    // se exporta desde este paquete, mismo patrón que `IMMEDIATE_POOL` en
+    // render.engine.ts) para observar el `LoadDocumentPayload` exacto que
+    // `reprimeWorkers` reenvía a un worker nuevo/reemplazado.
+    const docId = "doc-reprime-password";
+    const broadcastPayloads: unknown[] = [];
+    const spyPool = {
+      dispatch: <T>(params: { readonly run: () => Promise<T> }): Promise<T> => params.run(),
+      broadcast: async <T>(payload: unknown, run: () => Promise<T>): Promise<ReadonlyArray<T>> => {
+        broadcastPayloads.push(payload);
+        return [await run()];
+      },
+    };
+    const pooledEngine = new RenderEngine(spyPool);
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 10 })),
+    );
+    await pooledEngine.init(ctx);
+
+    const buffer = readProtectedPdfFixtureBuffer();
+    await pooledEngine.loadDocument(docId, buffer, "test1234");
+    // Descarta el broadcast de la carga original: solo interesa el que
+    // dispara reprimeWorkers.
+    broadcastPayloads.length = 0;
+
+    await pooledEngine.reprimeWorkers();
+
+    expect(broadcastPayloads).toHaveLength(1);
+    expect(broadcastPayloads[0]).toEqual(
+      expect.objectContaining({ documentId: docId, buffer, password: "test1234" }),
+    );
+
+    await pooledEngine.dispose();
   });
 });

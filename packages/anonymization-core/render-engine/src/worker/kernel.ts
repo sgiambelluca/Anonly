@@ -22,6 +22,13 @@
  * el fallback in-process, representa "el único kernel virtual" que corre en
  * el mismo proceso que el host — coherente con que en ese modo no hay
  * paralelismo real de todos modos (un solo hilo de JS).
+ *
+ * ADR-050 (`LoadDocumentPayload.password`): `kernelLoadDocument` lo pasa a
+ * `getDocument({ data, password })` y no lo retiene en ninguna variable de
+ * módulo — el único lugar de este archivo donde el password existe es el
+ * scope local de esa función, durante esa única llamada. Quien lo retiene
+ * para re-primear workers nuevos/reemplazados es el host (`render.engine.ts`,
+ * `RetainedDocument.password`), no este kernel (`08_Security_Model.md` §6).
  */
 
 import {
@@ -267,7 +274,11 @@ async function encodeImageData(
 export async function kernelLoadDocument(
   payload: LoadDocumentPayload,
 ): Promise<{ readonly pageCount: number }> {
-  const { documentId, buffer } = payload;
+  // ADR-050 §1/§2: `password` opcional — se usa una única vez acá, abajo, y
+  // no se guarda en ningún estado del kernel (ni en `documents`, ni en
+  // ninguna otra variable de módulo). Una vez que `getDocument` resuelve el
+  // `PDFDocumentProxy`, el password ya no se vuelve a necesitar.
+  const { documentId, buffer, password } = payload;
 
   // ADR-030 §1: recarga determinística — destruye el proxy anterior si existía.
   const existing = documents.get(documentId);
@@ -275,7 +286,7 @@ export async function kernelLoadDocument(
 
   let pdfDocument: PDFDocumentProxy;
   try {
-    const loadingTask = getDocument({ data: buffer });
+    const loadingTask = getDocument({ data: buffer, password });
     pdfDocument = await loadingTask.promise;
   } catch (err: unknown) {
     // ADR-030 §2: getDocument() fallando acá es excepcional (la etapa 1 ya validó el PDF).

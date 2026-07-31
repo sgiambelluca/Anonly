@@ -6,12 +6,12 @@ Renderiza páginas del PDF (original o anonimizado) a `ImageData` usando `Offscr
 
 ## Documentación
 
-- **Spec canónico**: [`docs/core/Render_Engine.md`](../../../docs/core/Render_Engine.md) (v1.5.0)
+- **Spec canónico**: [`docs/core/Render_Engine.md`](../../../docs/core/Render_Engine.md) (v1.6.0)
 - Contratos base: [`docs/core/Contracts.md`](../../../docs/core/Contracts.md)
 - Pipeline: [`docs/architecture/06_Pipeline.md`](../../../docs/architecture/06_Pipeline.md) §10, §12 (etapas 8 y 10)
 - Workers: [`docs/architecture/05_Worker_Architecture.md`](../../../docs/architecture/05_Worker_Architecture.md) §7.4 (RenderWorker; fe de erratas ADR-030 §5: pdfjs-dist, no pdf-lib)
 - Eventos: [`docs/architecture/04_Event_System.md`](../../../docs/architecture/04_Event_System.md) §7, §10
-- ADRs relevantes: [`ADR-004`](../../../docs/adr/ADR-004-Rendering.md) (reconstrucción, no redacción in-place), [`ADR-012`](../../../docs/adr/ADR-012-Replacement-Modes.md) (modos de reemplazo), [`ADR-021`](../../../docs/adr/ADR-021-Engines-Inline-Hasta-Hito9.md) (motores inline hasta Hito 9), [`ADR-027`](../../../docs/adr/ADR-027-RenderConfig-ExportConfig-Canonical.md) (`RenderConfig` canónico), [`ADR-030`](../../../docs/adr/ADR-030-RenderEngine-LoadDocument.md) (`loadDocument`/`unloadDocument`), [`ADR-031`](../../../docs/adr/ADR-031-RenderFailed-ErrorCode-Erratas-Render.md) (`EngineErrorCode.RENDER_FAILED` + erratas de cache key/highlight + cast pdfjs↔OffscreenCanvas)
+- ADRs relevantes: [`ADR-004`](../../../docs/adr/ADR-004-Rendering.md) (reconstrucción, no redacción in-place), [`ADR-012`](../../../docs/adr/ADR-012-Replacement-Modes.md) (modos de reemplazo), [`ADR-021`](../../../docs/adr/ADR-021-Engines-Inline-Hasta-Hito9.md) (motores inline hasta Hito 9), [`ADR-027`](../../../docs/adr/ADR-027-RenderConfig-ExportConfig-Canonical.md) (`RenderConfig` canónico), [`ADR-030`](../../../docs/adr/ADR-030-RenderEngine-LoadDocument.md) (`loadDocument`/`unloadDocument`), [`ADR-031`](../../../docs/adr/ADR-031-RenderFailed-ErrorCode-Erratas-Render.md) (`EngineErrorCode.RENDER_FAILED` + erratas de cache key/highlight + cast pdfjs↔OffscreenCanvas), [`ADR-050`](../../../docs/adr/ADR-050-Password-Del-PDF-Protegido-Hasta-RenderEngine.md) (`loadDocument` acepta el password de un PDF protegido, retenido solo host-side para el re-priming)
 
 ## Contenido
 
@@ -24,6 +24,7 @@ Renderiza páginas del PDF (original o anonimizado) a `ImageData` usando `Offscr
 
 - Nunca importa otro motor ni React (spec §5). Solo `@anonly/shared` y `pdfjs-dist`.
 - `loadDocument`/`unloadDocument`: en modo worker, el host retiene `{ buffer, pageCount }` (los proxies viven en cada worker/kernel, ADR-043 §3); `loadDocument` toma posesión del buffer y recarga determinísticamente; `unloadDocument`/`dispose` liberan los proxies (broadcast `unload-document`/`DISPOSE`). Sin `loadDocument` previo, `renderPage`/`renderPages` lanzan `InvalidInputError`; la vía por evento (`RENDER_REQUESTED`) solo loguea `warn` y no hace nada (ADR-030 §3).
+- `loadDocument(documentId, buffer, password?)` (ADR-050): tercer parámetro opcional para PDFs protegidos. El host retiene el `password` junto a `{ buffer, pageCount }` únicamente para re-primear workers nuevos/reemplazados (`reprimeWorkers`, ADR-043 §5); el kernel lo usa en `getDocument({ data, password })` y no lo guarda. Nunca en logs ni eventos (`08_Security_Model.md` §6).
 - Decisiones de diseño no triviales, documentadas también como comentario en `render.engine.ts`:
   - `RENDER_REQUESTED` no trae `kind`/`replacements`/`annotations` (Contracts.md §8); el motor reconstruye ambos lados (`original` + `anonymized`) por página a partir del último `RenderPageInput` recordado para esa página (o valores vacíos si nunca se renderizó).
   - (Retirado por ADR-044) El delta render por `GROUP_REPLACEMENT_CHANGED`/`GROUP_TOGGLED` (índice `pageIndex → groupIds`, `groupOverrides`, `requestDeltaRender`) se retira: el re-render por cambio de grupo lo media el Orchestrator con invocaciones directas de `renderPage`, con reemplazos ya resueltos desde el snapshot de Grouping (`buildPageReplacements`, `export-engine`). El motor pasa a escuchar solo `EventChannel.UI` (`RENDER_REQUESTED`).
