@@ -9,6 +9,6 @@
     "allowImportingTsExtensions": true,
     "moduleResolution": "Bundler"
   },
-  "include": ["src", "vite.config.ts"],
+  "include": ["src", "vite.config.ts", "scripts/copy-pdfjs-assets.ts"],
   "exclude": ["node_modules", "dist"]
 }

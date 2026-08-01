@@ -59,6 +59,13 @@ apps/react-client/public/wasm/
 apps/react-client/public/models/
 apps/react-client/src/assets/onnxruntime/
 
+# cmaps/ y standard_fonts/ de pdfjs-dist, copiados de node_modules por
+# apps/react-client/scripts/copy-pdfjs-assets.mjs (predev/prebuild, ADR-053
+# §4/§9): no vienen de un CDN de terceros, así que no pasan por
+# assets.lock.json (ya los pinnea pnpm-lock.yaml) ni se commitean — mismo
+# criterio que public/wasm/ y public/models/ de arriba.
+apps/react-client/public/pdfjs/
+
 # Changesets temporales
 .changeset/*.md
 !.changeset/config.json
