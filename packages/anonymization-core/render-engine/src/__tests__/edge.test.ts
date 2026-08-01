@@ -417,7 +417,13 @@ describe("RenderEngine — edge cases", () => {
     const buffer = readProtectedPdfFixtureBuffer();
     await engine.loadDocument(docId, buffer, "test1234");
 
-    expect(getDocument).toHaveBeenCalledWith({ data: buffer, password: "test1234" });
+    // objectContaining (no igualdad estricta): getDocument() también recibe
+    // las cinco opciones de fuentes/CMaps de ADR-053 (assert exacto y
+    // exhaustivo de esas cinco en kernel.test.ts) — acá solo interesa que
+    // data/password lleguen intactos junto a ellas.
+    expect(getDocument).toHaveBeenCalledWith(
+      expect.objectContaining({ data: buffer, password: "test1234" }),
+    );
     // ADR-050 §2: el host retiene { buffer, pageCount, password } — verificado
     // acá porque es lo que después usa reprimeWorkers (ver unit.test.ts).
     expect(engine["documents"].get(docId)).toEqual(
@@ -438,7 +444,11 @@ describe("RenderEngine — edge cases", () => {
     await expect(engine.loadDocument("doc-protected-no-password", buffer)).rejects.toThrow(
       RenderFailedError,
     );
-    expect(getDocument).toHaveBeenCalledWith({ data: buffer, password: undefined });
+    // objectContaining por el mismo motivo que el test anterior (ADR-053: más
+    // opciones en la llamada real, exhaustivas en kernel.test.ts).
+    expect(getDocument).toHaveBeenCalledWith(
+      expect.objectContaining({ data: buffer, password: undefined }),
+    );
   });
 
   it("throws RenderTimeoutError when render exceeds the configured timeout", async () => {

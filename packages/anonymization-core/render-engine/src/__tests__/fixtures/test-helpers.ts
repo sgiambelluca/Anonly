@@ -50,6 +50,38 @@ export function mockGetDocumentFailure(error: Error): ReturnType<typeof getDocum
   return asLoadingTask(Promise.reject(error));
 }
 
+/**
+ * Forma mínima que `kernel.test.ts` necesita leer del objeto de opciones que
+ * `kernelLoadDocument` pasa a `getDocument()` (ADR-053 §7). No es
+ * `DocumentInitParameters` completo: esa interfaz no la exporta pdfjs-dist
+ * desde su entrypoint público (`types/src/pdf.d.ts` solo re-exporta la
+ * función `getDocument`, no sus tipos de parámetro — ADR-053 Contexto §6).
+ */
+export interface CapturedGetDocumentOptions {
+  readonly data?: unknown;
+  readonly password?: string;
+  readonly disableFontFace?: boolean;
+  readonly useSystemFonts?: boolean;
+  readonly useWorkerFetch?: boolean;
+  readonly cMapUrl?: string;
+  readonly cMapPacked?: boolean;
+  readonly standardFontDataUrl?: string;
+  readonly CMapReaderFactory?: unknown;
+  readonly StandardFontDataFactory?: unknown;
+}
+
+/**
+ * Cast de frontera contra pdfjs-dist, concentrado acá (Code_Standards.md
+ * §10; mismo criterio que `asLoadingTask` arriba): el primer argumento de
+ * `getDocument()` es la unión `string | URL | TypedArray | ArrayBuffer |
+ * DocumentInitParameters`. El kernel real (`worker/kernel.ts#kernelLoadDocument`)
+ * SIEMPRE llama con la forma objeto — nunca con una URL o un buffer pelado,
+ * las otras variantes de esa unión — así que el narrowing es seguro.
+ */
+export function capturedGetDocumentOptions(arg: unknown): CapturedGetDocumentOptions {
+  return arg as unknown as CapturedGetDocumentOptions;
+}
+
 // ─── Mock de PDFDocumentProxy / PDFPageProxy ───
 
 export interface MockPageOptions {
