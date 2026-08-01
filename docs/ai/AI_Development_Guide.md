@@ -96,6 +96,8 @@ Un PR se considera mergeable solo si cumple **todos** los gates.
 
 **Quién corre qué alcance**: ese comando mínimo (repo completo) es responsabilidad del **revisor** — lo confirma una sola vez por PR, no en cada iteración. El **implementador**, mientras itera, corre el equivalente **scoped al módulo que está tocando** (lint/typecheck/test filtrados a su paquete) — nunca el lint/test del monorepo completo. Motivo: el lint type-aware del monorepo tarda ~10-12 min; repetirlo en cada ajuste chico durante la implementación no detecta nada que el scoped no detecte ya para ese módulo, y de todos modos el revisor hace la pasada completa sobre el diff final antes de aprobar. Si un implementador maneja varias tareas encadenadas en la misma branch, el revisor entra recién cuando **todas** están code-complete, no después de cada una.
 
+**Ejecución de gates lentos**: siempre en modo síncrono — nunca backgrounded (`run_in_background` o equivalente). Si un comando tarda varios minutos, esperar el resultado real en la misma llamada antes de reportar. Un agente que backgroundea un gate lento y dice "voy a esperar la notificación" no se reanuda solo cuando el comando termina — a diferencia de quien lo invocó, nada lo despierta — y su reporte final queda sin confirmar. El costo de retomarlo después (pedirle que confirme, lo que le reprocesa todo el transcript previo) es mayor que el de simplemente esperar el resultado en la misma llamada desde el principio.
+
 **Gates de revisión** (los aplica el revisor humano/IA; no son un comando):
 
 | Gate | Cómo se valida | Falla si |
