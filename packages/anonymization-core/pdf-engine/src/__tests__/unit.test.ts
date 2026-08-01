@@ -4,10 +4,16 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("pdfjs-dist", () => ({ getDocument: vi.fn() }));
 
-import { PdfEngine, fuseOcrPage } from "../pdf.engine.js";
+import {
+  PdfEngine,
+  PdfEngineCMapReaderFactory,
+  PdfEngineStandardFontDataFactory,
+  fuseOcrPage,
+} from "../pdf.engine.js";
 import { PdfTimeoutError } from "../pdf.errors.js";
 
 import {
+  capturedGetDocumentOptions,
   createEngineContext,
   createMockPage,
   createMockPdfDocument,
@@ -351,6 +357,151 @@ describe("PdfEngine — unit tests", () => {
       const output = await engine.process(input, ctx);
 
       expect(() => fuseOcrPage(output.document, 99, [])).toThrow(InvalidInputError);
+    });
+  });
+
+  describe("getDocument options — cMaps y standard fonts en la extracción (ADR-053 §5)", () => {
+    it("pasa cMapUrl, cMapPacked, standardFontDataUrl y useWorkerFetch con el valor exacto", async () => {
+      vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(createMockPdfDocument(1)));
+
+      await engine.init(ctx);
+      const input = createValidInput("doc-cmaps-options");
+      await engine.process(input, ctx);
+
+      expect(getDocument).toHaveBeenCalledTimes(1);
+      const options = capturedGetDocumentOptions(vi.mocked(getDocument).mock.calls[0]?.[0]);
+      expect(options.useWorkerFetch).toBe(false);
+      expect(options.cMapUrl).toBe("/pdfjs/cmaps/");
+      expect(options.cMapPacked).toBe(true);
+      expect(options.standardFontDataUrl).toBe("/pdfjs/standard_fonts/");
+    });
+
+    it("inyecta las factories propias, no las DOM* de pdf.js", async () => {
+      vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(createMockPdfDocument(1)));
+
+      await engine.init(ctx);
+      const input = createValidInput("doc-cmaps-factories");
+      await engine.process(input, ctx);
+
+      const options = capturedGetDocumentOptions(vi.mocked(getDocument).mock.calls[0]?.[0]);
+      // Identidad exacta de clase (no una instancia, no un objeto estructural
+      // parecido): pdf.js instancia la clase que recibe acá con `new`
+      // (ADR-053 §2). Si alguna vez alguien reemplaza esto por las DOM*
+      // importadas de pdfjs-dist, esta comparación por referencia lo detecta.
+      expect(options.CMapReaderFactory).toBe(PdfEngineCMapReaderFactory);
+      expect(options.StandardFontDataFactory).toBe(PdfEngineStandardFontDataFactory);
+    });
+
+    it("NO pasa disableFontFace (ruta de extracción, no rasteriza — ADR-053 §5)", async () => {
+      vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(createMockPdfDocument(1)));
+
+      await engine.init(ctx);
+      const input = createValidInput("doc-cmaps-no-disable-font-face");
+      await engine.process(input, ctx);
+
+      const options = capturedGetDocumentOptions(vi.mocked(getDocument).mock.calls[0]?.[0]);
+      expect(options.disableFontFace).toBeUndefined();
+      expect("disableFontFace" in (vi.mocked(getDocument).mock.calls[0]?.[0] as object)).toBe(
+        false,
+      );
+    });
+
+    it("pasa data/password intactos junto con las opciones de fuentes (no las reemplaza)", async () => {
+      vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(createMockPdfDocument(1)));
+
+      await engine.init(ctx);
+      const input = createValidInput("doc-cmaps-data-password", "s3cr3t");
+      await engine.process(input, ctx);
+
+      const options = capturedGetDocumentOptions(vi.mocked(getDocument).mock.calls[0]?.[0]);
+      expect(options.data).toBe(input.buffer);
+      expect(options.password).toBe("s3cr3t");
+    });
+  });
+
+  describe("PdfEngineCMapReaderFactory (ADR-053 §2/§5)", () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it("arma la URL baseUrl + name + .bcmap cuando isCompressed=true", async () => {
+      const bytes = new Uint8Array([1, 2, 3]).buffer;
+      const fetchMock = vi.fn().mockResolvedValue(new Response(bytes, { status: 200 }));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const factory = new PdfEngineCMapReaderFactory({
+        baseUrl: "/pdfjs/cmaps/",
+        isCompressed: true,
+      });
+      const result = await factory.fetch({ name: "Adobe-Japan1-UCS2" });
+
+      expect(fetchMock).toHaveBeenCalledWith("/pdfjs/cmaps/Adobe-Japan1-UCS2.bcmap");
+      expect(result.isCompressed).toBe(true);
+      expect(result.cMapData).toBeInstanceOf(Uint8Array);
+      expect(Array.from(result.cMapData)).toEqual([1, 2, 3]);
+    });
+
+    it("arma la URL sin sufijo .bcmap cuando isCompressed=false", async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(new Response(new ArrayBuffer(0), { status: 200 }));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const factory = new PdfEngineCMapReaderFactory({
+        baseUrl: "/pdfjs/cmaps/",
+        isCompressed: false,
+      });
+      await factory.fetch({ name: "Identity-H" });
+
+      expect(fetchMock).toHaveBeenCalledWith("/pdfjs/cmaps/Identity-H");
+    });
+
+    it("lanza si la respuesta no es ok", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 404 }));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const factory = new PdfEngineCMapReaderFactory({
+        baseUrl: "/pdfjs/cmaps/",
+        isCompressed: true,
+      });
+
+      await expect(factory.fetch({ name: "no-existe" })).rejects.toThrow();
+    });
+
+    it("no referencia `document` (corre en environment: node, donde no existe)", () => {
+      expect(typeof document).toBe("undefined");
+    });
+  });
+
+  describe("PdfEngineStandardFontDataFactory (ADR-053 §2/§5)", () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it("arma la URL baseUrl + filename y devuelve un Uint8Array", async () => {
+      const bytes = new Uint8Array([9, 8, 7, 6]).buffer;
+      const fetchMock = vi.fn().mockResolvedValue(new Response(bytes, { status: 200 }));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const factory = new PdfEngineStandardFontDataFactory({ baseUrl: "/pdfjs/standard_fonts/" });
+      const result = await factory.fetch({ filename: "FoxitSans.pfb" });
+
+      expect(fetchMock).toHaveBeenCalledWith("/pdfjs/standard_fonts/FoxitSans.pfb");
+      expect(result).toBeInstanceOf(Uint8Array);
+      expect(Array.from(result)).toEqual([9, 8, 7, 6]);
+    });
+
+    it("lanza si la respuesta no es ok", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 500 }));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const factory = new PdfEngineStandardFontDataFactory({ baseUrl: "/pdfjs/standard_fonts/" });
+
+      await expect(factory.fetch({ filename: "FoxitSans.pfb" })).rejects.toThrow();
+    });
+
+    it("no referencia `document` (corre en environment: node, donde no existe)", () => {
+      expect(typeof document).toBe("undefined");
     });
   });
 });

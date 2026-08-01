@@ -28,6 +28,86 @@ import type { PdfEngineInput, PdfEngineOutput } from "./pdf.types.js";
 const DEFAULT_MAX_PAGE_COUNT = 10_000;
 const DEFAULT_TIMEOUT_MS_PER_PAGE = 30_000;
 
+/**
+ * Prefijos first-party de los assets de pdfjs-dist que sirve la app bajo
+ * `/pdfjs/` (ADR-053 §3/§4/§5, copiados de `node_modules` en `predev`/
+ * `prebuild` de `apps/react-client` — PR B1 de ADR-053 §9). Constantes de
+ * módulo, NO un campo de `EngineConfig` (mismo patrón que
+ * `NER_LOCAL_MODEL_PATH`/`NER_WASM_PATH` en `ner-engine/src/worker/kernel.ts`
+ * y que `RENDER_PDFJS_CMAP_URL`/`RENDER_PDFJS_STANDARD_FONT_DATA_URL` en
+ * `render-engine/src/worker/kernel.ts`): `public/` se copia verbatim, sin
+ * hashear, así que pdfjs-dist resuelve estos 169 archivos por nombre contra
+ * un prefijo estable — no hace falta que el Core los conozca por config.
+ */
+const PDF_ENGINE_PDFJS_CMAP_URL = "/pdfjs/cmaps/";
+const PDF_ENGINE_PDFJS_STANDARD_FONT_DATA_URL = "/pdfjs/standard_fonts/";
+
+/**
+ * `CMapReaderFactory` propia para `getDocument()` (ADR-053 §2/§5, trampa 2 de
+ * Contexto §6): pdf.js instancia la CLASE que se le pasa en
+ * `CMapReaderFactory` — nunca una instancia —, así que esto es exactamente lo
+ * que necesita, ni más ni menos. Usa `fetch()` pelado: a diferencia de
+ * `DOMCMapReaderFactory` de pdf.js (no exportada por el paquete, por eso no se
+ * extiende — solo se implementa su forma), NUNCA referencia `document`, que no
+ * existe dentro del `PdfWorker` (ADR-036 §2/`05_Worker_Architecture.md` §7.1).
+ * Contrato (ADR-053 §2, verificado contra `pdfjs-dist@4.10.38/build/pdf.mjs`
+ * líneas 6032-6060, `BaseCMapReaderFactory`): constructor
+ * `{ baseUrl, isCompressed }`, `fetch({ name })` ->
+ * `{ cMapData: Uint8Array, isCompressed }`, URL = `baseUrl + name +
+ * (isCompressed ? ".bcmap" : "")`. Duplicada intencionalmente respecto de la
+ * homónima de `render-engine` (no se importa de ahí: P-2 lo prohíbe).
+ */
+export class PdfEngineCMapReaderFactory {
+  private readonly baseUrl: string;
+  private readonly isCompressed: boolean;
+
+  constructor(params: { readonly baseUrl: string; readonly isCompressed: boolean }) {
+    this.baseUrl = params.baseUrl;
+    this.isCompressed = params.isCompressed;
+  }
+
+  async fetch(params: {
+    readonly name: string;
+  }): Promise<{ readonly cMapData: Uint8Array; readonly isCompressed: boolean }> {
+    const url = `${this.baseUrl}${params.name}${this.isCompressed ? ".bcmap" : ""}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`No se pudo cargar el CMap en ${url} (status ${response.status}).`);
+    }
+    const buffer = await response.arrayBuffer();
+    return { cMapData: new Uint8Array(buffer), isCompressed: this.isCompressed };
+  }
+}
+
+/**
+ * `StandardFontDataFactory` propia para `getDocument()` (ADR-053 §2/§5, misma
+ * trampa 2 que la factory de arriba): reemplaza a `DOMStandardFontDataFactory`
+ * de pdf.js, que toca `document.baseURI` en su primer fetch. Contrato
+ * (ADR-053 §2, verificado contra `pdf.mjs` líneas 6407-6431,
+ * `BaseStandardFontDataFactory`): constructor `{ baseUrl }`, `fetch({
+ * filename })` -> `Uint8Array`, URL = `baseUrl + filename`. Duplicada
+ * intencionalmente respecto de la homónima de `render-engine` (P-2).
+ */
+export class PdfEngineStandardFontDataFactory {
+  private readonly baseUrl: string;
+
+  constructor(params: { readonly baseUrl: string }) {
+    this.baseUrl = params.baseUrl;
+  }
+
+  async fetch(params: { readonly filename: string }): Promise<Uint8Array> {
+    const url = `${this.baseUrl}${params.filename}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(
+        `No se pudo cargar la fuente estándar en ${url} (status ${response.status}).`,
+      );
+    }
+    const buffer = await response.arrayBuffer();
+    return new Uint8Array(buffer);
+  }
+}
+
 /* TextContent from pdfjs-dist has items: Array<TextItem | TextMarkedContent>.
  * TextMarkedContent (type/id only) is filtered out in convertTextItemsToWords.
  * The `as` cast at the call site is valid because the structural subset
@@ -327,10 +407,30 @@ export class PdfEngine implements IEngine {
 
     let pdfDocument: PDFDocumentProxy;
     try {
+      // ADR-053 §5: extracción de texto, no rasterización — por eso NO lleva
+      // disableFontFace (esta ruta nunca dibuja glifos como Path2D; agregarlo
+      // solo haría que pdf.js construya siluetas que nadie va a pintar, ver
+      // `05_Worker_Architecture.md` §7.1). Las opciones de abajo son la mitad
+      // de la regla transversal de §7 que SÍ aplica acá:
+      //  - useWorkerFetch: false EXPLÍCITO (trampa 1 de ADR-053 Contexto §6):
+      //    ya estaba puesto y es lo que protege esta llamada de que el default
+      //    de pdf.js evalúe `document.baseURI` dentro del PdfWorker en cuanto
+      //    se pasan cMapUrl/standardFontDataUrl. No se toca.
+      //  - cMapUrl/cMapPacked + standardFontDataUrl: sin esto, un PDF con
+      //    fuentes CID de CMap predefinido se EXTRAE con unicode incorrecto —
+      //    degrada regex-engine/ner-engine, no solo el dibujo (ADR-053 §5).
+      //  - CMapReaderFactory/StandardFontDataFactory propias (trampa 2): las
+      //    DOM* de pdf.js tocan document.baseURI en su primer fetch; servir
+      //    los assets sin esto no alcanza.
       const loadingTask = getDocument({
         data: buffer,
         password,
         useWorkerFetch: false,
+        cMapUrl: PDF_ENGINE_PDFJS_CMAP_URL,
+        cMapPacked: true,
+        standardFontDataUrl: PDF_ENGINE_PDFJS_STANDARD_FONT_DATA_URL,
+        CMapReaderFactory: PdfEngineCMapReaderFactory,
+        StandardFontDataFactory: PdfEngineStandardFontDataFactory,
       });
       pdfDocument = await loadingTask.promise;
     } catch (err: unknown) {
