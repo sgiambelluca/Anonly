@@ -78,7 +78,7 @@ El proyecto se desarrolla bajo un modelo **planificador + implementador**:
    - Escribir su test correspondiente.
    - Ejecutar el test aislado.
 7. Al terminar el Checklist:
-   - pnpm lint && pnpm typecheck && pnpm test
+   - Gates **scoped al módulo tocado** (ver §4 — el implementador nunca corre el lint/test del monorepo completo): p. ej. `eslint packages/anonymization-core/<engine>-engine --max-warnings=0`, `pnpm --filter @anonly/<engine>-engine typecheck`, tests filtrados a ese paquete.
    - Si algo falla, arreglar. No commitear con rojo.
 8. Generar el diff y el mensaje de commit.
 9. Reportar: archivos tocados, cobertura final, tests nuevos, cualquier ambigüedad detectada.
@@ -93,6 +93,8 @@ El proyecto se desarrolla bajo un modelo **planificador + implementador**:
 Un PR se considera mergeable solo si cumple **todos** los gates.
 
 **Gates ejecutables**: la tabla canónica (única fuente de verdad, con comandos y estado de activación) vive en `architecture/07_Performance_Strategy.md` §11.4. No se duplica acá. Comando mínimo pre-PR: `pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract`.
+
+**Quién corre qué alcance**: ese comando mínimo (repo completo) es responsabilidad del **revisor** — lo confirma una sola vez por PR, no en cada iteración. El **implementador**, mientras itera, corre el equivalente **scoped al módulo que está tocando** (lint/typecheck/test filtrados a su paquete) — nunca el lint/test del monorepo completo. Motivo: el lint type-aware del monorepo tarda ~10-12 min; repetirlo en cada ajuste chico durante la implementación no detecta nada que el scoped no detecte ya para ese módulo, y de todos modos el revisor hace la pasada completa sobre el diff final antes de aprobar. Si un implementador maneja varias tareas encadenadas en la misma branch, el revisor entra recién cuando **todas** están code-complete, no después de cada una.
 
 **Gates de revisión** (los aplica el revisor humano/IA; no son un comando):
 

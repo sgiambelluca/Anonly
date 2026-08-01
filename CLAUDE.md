@@ -46,4 +46,7 @@ Para otras herramientas, los prompts equivalentes están en `docs/ai/Prompting_G
 
 ## Entorno
 
-El desarrollo corre en **WSL Ubuntu** (node 22 vía nvm + pnpm); los binarios de `node_modules` son Linux. Desde Windows, invocar los comandos vía `wsl -d Ubuntu`.
+Los comandos (`pnpm ...`) requieren Node ≥22 y pnpm ≥9 en un shell POSIX. No hay dependencias nativas/compiladas específicas de plataforma en el repo.
+
+- **macOS/Linux**: corren directo en la shell nativa, sin nada adicional.
+- **Windows**: el desarrollo pasa por **WSL Ubuntu** (node 22 vía nvm + pnpm; los binarios de `node_modules` son Linux, no ejecutables desde Windows nativo). Invocar así: `wsl -d Ubuntu -- bash -c "cd /mnt/c/<ruta-del-repo> && source ~/.nvm/nvm.sh && <comando>"` (el `cd` va dentro del `bash -c`; el flag `--cd` de `wsl.exe` no es confiable en todos los entornos). Excepción: `git push` no depende de `pnpm` (no hay hook `pre-push`), así que corre directo desde Windows si las credenciales de Git están configuradas ahí — solo `git commit` (hook `pre-commit`/`commit-msg` con lint-staged) necesita WSL.

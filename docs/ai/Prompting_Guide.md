@@ -68,7 +68,7 @@ Reporta: archivo, sección, cita textual, pregunta concreta.
 SALIDA ESPERADA
 Al terminar:
 - Paquete `packages/anonymization-core/<engine>-engine/` con: package.json, tsconfig.json, src/index.ts, src/<engine>.engine.ts, src/types.ts, src/errors.ts, src/__tests__/{contract,unit,edge,snapshot}.test.ts, src/__tests__/fixtures/.
-- Ejecución local: `pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract` verde.
+- Ejecución local **scoped al módulo** (nunca el lint/test del monorepo completo — eso lo corre el revisor, ver `ai/AI_Development_Guide.md` §4): `eslint packages/anonymization-core/<engine>-engine --max-warnings=0`, `pnpm --filter @anonly/<engine>-engine typecheck`, tests filtrados a ese paquete. Verde obligatorio.
 - Reporte final: archivos tocados, cobertura final, tests nuevos, ambigüedades detectadas (si las hubiera).
 - No ejecutar `git commit` ni `git push` sin autorización.
 
@@ -212,6 +212,7 @@ REGLAS
 - Una decisión por ADR.
 - Las alternativas deben ser reales y evaluadas, no strawmen.
 - Las consecuencias deben incluir positivas, negativas y neutras.
+- Todo tipo, evento o error code que el ADR cite por nombre tiene que existir de verdad — verificalo con grep contra `core/Contracts.md`, `architecture/04_Event_System.md` y el enum `EngineErrorCode` (`shared/src/enums.ts`) antes de dar el ADR por terminado. Un ADR que cita algo inexistente pasa desapercibido en su propia revisión (nadie lo corre, nadie lo tipa) y el implementador que lo herede recién lo descubre mucho después.
 
 CONTEXTO A LEER
 1. docs/adr/ (todos los ADRs existentes, para estilo y numeración)
@@ -223,6 +224,7 @@ Redacta el ADR-<NNN>-<TITLE>.md para la decisión de `<DECISIÓN_A_DOCUMENTAR>`.
 
 ENTREGA
 Archivo completo siguiendo el formato, en docs/adr/ADR-<NNN>-<TITLE>.md.
+Antes de entregar: grep de cada tipo/evento/error code citado, confirmando que existe en los archivos de arriba (o que el ADR está proponiendo agregarlo explícitamente, no asumiéndolo existente).
 
 COMIENZA
 ```
@@ -436,7 +438,7 @@ Para un bug reportado por el revisor o por tests:
 ## 13. Reglas transversales a todos los prompts
 
 - **Nunca** enviar un prompt sin haber adjuntado el contexto indicado.
-- **Nunca** aceptar output sin la ejecución de `pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract`.
+- **Nunca** aceptar output sin gates verdes al alcance que le corresponde a cada rol (`ai/AI_Development_Guide.md` §4): el implementador, scoped a su módulo; el revisor, `pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract` sobre el repo completo, una sola vez por PR.
 - **Nunca** permitir `git commit` o `git push` sin autorización explícita del humano.
 - **Siempre** reportar ambigüedades en lugar de improvisar.
 - **Siempre** respetar las prohibiciones absolutas de `ai/Code_Standards.md` §12.
