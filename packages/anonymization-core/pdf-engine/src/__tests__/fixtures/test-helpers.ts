@@ -40,6 +40,39 @@ export function mockGetDocumentFailure(error: Error): ReturnType<typeof getDocum
   return asLoadingTask(Promise.reject(error));
 }
 
+/**
+ * Forma mínima que `unit.test.ts` necesita leer del objeto de opciones que
+ * `PdfEngine.process()` pasa a `getDocument()` (ADR-053 §5, §7). No es
+ * `DocumentInitParameters` completo: esa interfaz no la exporta pdfjs-dist
+ * desde su entrypoint público (mismo motivo documentado en
+ * render-engine/src/__tests__/fixtures/test-helpers.ts, ADR-053 Contexto §6).
+ * `disableFontFace` se incluye para poder assertar su AUSENCIA (§5: esta ruta
+ * no rasteriza, así que nunca debe pasarse).
+ */
+export interface CapturedGetDocumentOptions {
+  readonly data?: unknown;
+  readonly password?: string;
+  readonly disableFontFace?: boolean;
+  readonly useWorkerFetch?: boolean;
+  readonly cMapUrl?: string;
+  readonly cMapPacked?: boolean;
+  readonly standardFontDataUrl?: string;
+  readonly CMapReaderFactory?: unknown;
+  readonly StandardFontDataFactory?: unknown;
+}
+
+/**
+ * Cast de frontera contra pdfjs-dist, concentrado acá (Code_Standards.md
+ * §10; mismo criterio que `asLoadingTask` arriba): el primer argumento de
+ * `getDocument()` es la unión `string | URL | TypedArray | ArrayBuffer |
+ * DocumentInitParameters`. `PdfEngine.process()` SIEMPRE llama con la forma
+ * objeto — nunca con una URL o un buffer pelado, las otras variantes de esa
+ * unión — así que el narrowing es seguro.
+ */
+export function capturedGetDocumentOptions(arg: unknown): CapturedGetDocumentOptions {
+  return arg as unknown as CapturedGetDocumentOptions;
+}
+
 export function createMockBus(): IEventBus {
   return {
     on: vi.fn((): Unsubscribe => vi.fn()),
