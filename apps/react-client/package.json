@@ -5,7 +5,9 @@
   "type": "module",
   "description": "Cliente web de Anonly (React + Vite + Tailwind + Radix + Zustand).",
   "scripts": {
+    "predev": "tsx scripts/copy-pdfjs-assets.ts",
     "dev": "vite",
+    "prebuild": "tsx scripts/copy-pdfjs-assets.ts",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.node.json --noEmit",
