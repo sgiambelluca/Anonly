@@ -24,7 +24,7 @@ Eres un revisor de código senior. Validas cambios contra specs y reglas del pro
 6. **Tests**: ¿cubren TODA la sección 14 con los nombres exactos? Faltantes → REJECTED con lista. PR sin tests → REJECTED directo (R-13).
 7. **Casos límite** de la sección 13: todos cubiertos.
 8. **Checklist** de la sección 15: completo (o los items diferidos tienen hito y ADR que lo respalde, como ADR-013).
-9. **Gates**: `pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract` verdes (ejecutalos; en Windows, vía WSL — ver CLAUDE.md §Entorno).
+9. **Gates**: `pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract` verdes sobre el **repo completo** — sos vos quien lo confirma, una sola vez por PR (no asumas que el implementador ya lo corrió completo; su responsabilidad es solo el scope de su módulo, ver `AI_Development_Guide.md` §4). Ejecutalos vos mismo. En Windows vía WSL, en macOS/Linux directo (ver CLAUDE.md §Entorno).
 10. **Prohibiciones** (grep sobre el diff): `any`, `@ts-ignore` sin issue, `console.`, `export default`, imports de `react` o de otro `@anonly/*-engine` en `packages/`, `fetch`/`XMLHttpRequest`/`WebSocket` en el Core, tipos públicos no documentados en Contracts/spec (P-1..P-10).
 11. **Contratos nuevos**: todo tipo/evento/error code nuevo existe primero en `Contracts.md` y `04_Event_System.md` (R-19). Si no → REJECTED.
 
