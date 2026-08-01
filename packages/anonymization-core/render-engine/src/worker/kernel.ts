@@ -64,8 +64,84 @@ const REPLACEMENT_BG_COLOR = "#ffffff";
 const REPLACEMENT_TEXT_COLOR = "#000000";
 const ANNOTATION_LINE_WIDTH = 2;
 
+/**
+ * Prefijos first-party de los assets de pdfjs-dist que sirve la app bajo
+ * `/pdfjs/` (ADR-053 §3/§4, copiados de `node_modules` en `predev`/`prebuild`
+ * de `apps/react-client` — PR B1 de ADR-053 §9). Constantes de módulo, NO un
+ * campo de `EngineConfig` (mismo patrón que `NER_LOCAL_MODEL_PATH`/
+ * `NER_WASM_PATH` en `ner-engine/src/worker/kernel.ts`): `public/` se copia
+ * verbatim, sin hashear, así que pdfjs-dist resuelve estos 169 archivos por
+ * nombre contra un prefijo estable — no hace falta que el Core los conozca
+ * por config.
+ */
+const RENDER_PDFJS_CMAP_URL = "/pdfjs/cmaps/";
+const RENDER_PDFJS_STANDARD_FONT_DATA_URL = "/pdfjs/standard_fonts/";
+
 /** `PDFDocumentProxy` cargados por este kernel, indexados por `documentId`. */
 const documents = new Map<string, PDFDocumentProxy>();
+
+/**
+ * `CMapReaderFactory` propia para `getDocument()` (ADR-053 §2, trampa 2 de
+ * Contexto §6): pdf.js instancia la CLASE que se le pasa en
+ * `CMapReaderFactory` — nunca una instancia —, así que esto es exactamente lo
+ * que necesita, ni más ni menos. Usa `fetch()` pelado: a diferencia de
+ * `DOMCMapReaderFactory` de pdf.js (no exportada por el paquete, por eso no se
+ * extiende — solo se implementa su forma), NUNCA referencia `document`, que
+ * no existe dentro de un Worker. Contrato (ADR-053 §2, verificado contra
+ * `pdfjs-dist@4.10.38/build/pdf.mjs` líneas 6032-6060, `BaseCMapReaderFactory`):
+ * constructor `{ baseUrl, isCompressed }`, `fetch({ name })` ->
+ * `{ cMapData: Uint8Array, isCompressed }`, URL = `baseUrl + name +
+ * (isCompressed ? ".bcmap" : "")`.
+ */
+export class RenderKernelCMapReaderFactory {
+  private readonly baseUrl: string;
+  private readonly isCompressed: boolean;
+
+  constructor(params: { readonly baseUrl: string; readonly isCompressed: boolean }) {
+    this.baseUrl = params.baseUrl;
+    this.isCompressed = params.isCompressed;
+  }
+
+  async fetch(params: {
+    readonly name: string;
+  }): Promise<{ readonly cMapData: Uint8Array; readonly isCompressed: boolean }> {
+    const url = `${this.baseUrl}${params.name}${this.isCompressed ? ".bcmap" : ""}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`No se pudo cargar el CMap en ${url} (status ${response.status}).`);
+    }
+    const buffer = await response.arrayBuffer();
+    return { cMapData: new Uint8Array(buffer), isCompressed: this.isCompressed };
+  }
+}
+
+/**
+ * `StandardFontDataFactory` propia para `getDocument()` (ADR-053 §2, misma
+ * trampa 2 que la factory de arriba): reemplaza a `DOMStandardFontDataFactory`
+ * de pdf.js, que toca `document.baseURI` en su primer fetch. Contrato
+ * (ADR-053 §2, verificado contra `pdf.mjs` líneas 6407-6431,
+ * `BaseStandardFontDataFactory`): constructor `{ baseUrl }`, `fetch({
+ * filename })` -> `Uint8Array`, URL = `baseUrl + filename`.
+ */
+export class RenderKernelStandardFontDataFactory {
+  private readonly baseUrl: string;
+
+  constructor(params: { readonly baseUrl: string }) {
+    this.baseUrl = params.baseUrl;
+  }
+
+  async fetch(params: { readonly filename: string }): Promise<Uint8Array> {
+    const url = `${this.baseUrl}${params.filename}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(
+        `No se pudo cargar la fuente estándar en ${url} (status ${response.status}).`,
+      );
+    }
+    const buffer = await response.arrayBuffer();
+    return new Uint8Array(buffer);
+  }
+}
 
 function scaleBbox(bbox: BoundingBox, scale: number): BoundingBox {
   return {
@@ -286,7 +362,38 @@ export async function kernelLoadDocument(
 
   let pdfDocument: PDFDocumentProxy;
   try {
-    const loadingTask = getDocument({ data: buffer, password });
+    // Regla transversal de 05_Worker_Architecture.md §7 (ADR-053): este
+    // kernel corre la capa de display de pdf.js dentro de un Web Worker, sin
+    // `document`. Las cinco opciones de abajo + las dos factories propias son
+    // SOLIDARIAS — omitir cualquiera rompe el visor entero (ADR-053 Contexto
+    // §6):
+    //  - disableFontFace: dibuja los glifos como Path2D desde el programa de
+    //    fuente embebido en vez de un @font-face registrado en el DOM (que no
+    //    existe acá); además viaja en evaluatorOptions y es lo que hace que
+    //    pdf.js construya y envíe las siluetas (trampa 3).
+    //  - useSystemFonts: false evita el camino loadSystemFont, que sin Font
+    //    Loading API llega a un unreachable().
+    //  - useWorkerFetch: false EXPLÍCITO (trampa 1): el default de pdf.js
+    //    evalúa `document.baseURI` al calcularse — con las URLs de cMap/
+    //    standardFont ya pasadas, esa expresión se evalúa completa y tira
+    //    ReferenceError dentro del Worker.
+    //  - cMapUrl/cMapPacked + standardFontDataUrl: fuentes CID con CMap
+    //    predefinido y fuentes no embebidas (standard-14/sustituciones).
+    //  - CMapReaderFactory/StandardFontDataFactory propias (trampa 2): las
+    //    DOM* de pdf.js tocan document.baseURI en su primer fetch; servir los
+    //    assets sin esto no alcanza.
+    const loadingTask = getDocument({
+      data: buffer,
+      password,
+      disableFontFace: true,
+      useSystemFonts: false,
+      useWorkerFetch: false,
+      cMapUrl: RENDER_PDFJS_CMAP_URL,
+      cMapPacked: true,
+      standardFontDataUrl: RENDER_PDFJS_STANDARD_FONT_DATA_URL,
+      CMapReaderFactory: RenderKernelCMapReaderFactory,
+      StandardFontDataFactory: RenderKernelStandardFontDataFactory,
+    });
     pdfDocument = await loadingTask.promise;
   } catch (err: unknown) {
     // ADR-030 §2: getDocument() fallando acá es excepcional (la etapa 1 ya validó el PDF).
