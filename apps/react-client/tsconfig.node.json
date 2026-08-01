@@ -8,5 +8,10 @@
     "verbatimModuleSyntax": false,
     "allowImportingTsExtensions": true
   },
-  "include": ["vite.config.ts", "tailwind.config.js", "postcss.config.js"]
+  "include": [
+    "vite.config.ts",
+    "tailwind.config.js",
+    "postcss.config.js",
+    "scripts/copy-pdfjs-assets.ts"
+  ]
 }
