@@ -255,7 +255,7 @@ Para evitar reidentificación por patrones:
 
 | Test | Tipo | Validación |
 |---|---|---|
-| `no-network-from-core` | grep + unit | ningún `fetch`, `XMLHttpRequest`, `WebSocket` en `packages/` |
+| `no-network-from-core` | grep + unit | ningún `fetch`, `XMLHttpRequest`, `WebSocket` en `packages/`, salvo las factories de CMap/standard-fonts de `pdf-engine`/`render-engine` contra la constante same-origin `/pdfjs/` (ADR-053 §2) |
 | `no-recuperability` | integration | buscar texto original en export = 0 hits |
 | `metadata-strip` | integration | export no contiene `author`/`creator`/`title` del original |
 | `no-password-in-logs` | unit | spy de logger no recibe password |

@@ -241,7 +241,7 @@ En **código de producción**, `as unknown as` tiene una única excepción (ADR-
 | P-4 | **Nunca** `console.*` en `packages/`. |
 | P-5 | **Nunca** mutar props de entrada en funciones públicas del Core. |
 | P-6 | **Nunca** escribir en el sistema de archivos ni en `localStorage` desde el Core. El Core es puro procesamiento. Aplica a documentos y datos del usuario: cachear assets publicos (modelos OCR/NER) en IndexedDB/Cache Storage via la propia libreria esta permitido (ADR-021 §6). |
-| P-7 | **Nunca** hacer network requests desde el Core. |
+| P-7 | **Nunca** hacer network requests desde el Core. Aplica a red arbitraria y a datos del usuario: las factories propias de CMap/standard-fonts de `pdf-engine` y `render-engine` que usan `fetch()` pelado contra una constante same-origin (`/pdfjs/cmaps/`, `/pdfjs/standard_fonts/`) para servir assets first-party de `pdfjs-dist` dentro de un Worker sin `document` están permitidas (ADR-053 §2). |
 | P-8 | **Nunca** export default. |
 | P-9 | **Nunca** agregar dependencias externas a un motor sin ADR que lo justifique. |
 | P-10 | **Nunca** publicar tipos que no estén documentados en `core/Contracts.md` o el spec del motor. |

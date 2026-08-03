@@ -162,9 +162,11 @@ El 1 va primero: sin assets servidos, el 2 y el 3 apuntan a un 404. El 2 y el 3 
 ## Docs actualizados por este ADR
 
 - `core/Render_Engine.md`: nota de versión + sección de `kernelLoadDocument` con las cinco opciones y el porqué de las factories propias.
-- `core/PDF_Engine.md`: las opciones de §5 en el `getDocument` de extracción, con la nota de que `disableFontFace` no aplica ahí.
+- `core/PDF_Engine.md`: las opciones de §5 en el `getDocument` de extracción, con la nota de que `disableFontFace` no aplica ahí; y el ítem 17 de su checklist §15, para que siga siendo verdad tras las factories propias.
 - `architecture/05_Worker_Architecture.md`: la regla de §1 como invariante de cualquier kernel que hospede pdf.js.
 - `adr/ADR-018`: nota de que un asset que viene de una dependencia npm pinneada se sirve first-party sin pasar por `assets.lock.json`.
+- `ai/Code_Standards.md`: excepción a P-7 con la misma forma que la de P-6/ADR-021 §6, para las factories de CMap/standard-fonts same-origin.
+- `architecture/08_Security_Model.md`: nota en el gate `no-network-from-core` para las mismas factories.
 - `roadmap/MVP.md` y `roadmap/Hito10_Observaciones_Revision.md`: los tres PRs de §9.
 
 ## Validación

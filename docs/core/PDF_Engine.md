@@ -294,7 +294,7 @@ PdfEngineOutput {
 - [x] 14. Ejecutar `pnpm lint && pnpm typecheck && pnpm test` y verificar verde.
 - [x] 15. Verificar que `index.ts` exporta solo `PdfEngine`, `PdfEngineConfig`, `PdfEngineInput`, `PdfEngineOutput` y los errores.
 - [x] 16. Verificar que ninguna dependencia prohibida aparece en imports (`grep -r 'react\|tesseract\|onnx\|pdf-lib' src/`).
-- [x] 17. Verificar `no-network-from-core`: ningún `fetch`/`XMLHttpRequest`/`WebSocket` en `src/`.
+- [x] 17. Verificar `no-network-from-core`: ningún `fetch`/`XMLHttpRequest`/`WebSocket` en `src/`, salvo el `fetch()` same-origin de las factories de CMap/standard-fonts (`/pdfjs/cmaps/`, `/pdfjs/standard_fonts/`), sancionado por ADR-053 §2.
 - [ ] 18. (Hito 9/11) Verificar test de cancelación < 200 ms — requiere `PdfPool` + `AbortRegistry`. En Hito 2 se valida cancelación cooperativa inline (checkpoint por página) sin SLA estricto.
 - [x] 19. Hardening post-review (ADR-020): word-splitting, NFC, política de eventos, guard de `fuseOcrPage`, `releaseDocument`, `parsePage` puro.
 - [ ] 20. (Hito 10, PR12 — ADR-041) Extraer `fuseOcrPage` a función pura exportada (§6: sin `Map` interno, sin asserts de instancia, síncrona; conserva guard ADR-020 §6, validación de `pageIndex` y NFC); eliminar `releaseDocument` y el estado por documento del engine; adaptar los tests de fusión (casos 14–15 de §13, filas de §14) y `tests/integration/ocr-pdf-fusion.test.ts`.
