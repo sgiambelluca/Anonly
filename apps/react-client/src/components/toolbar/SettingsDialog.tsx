@@ -15,12 +15,15 @@
  *   `ConfirmDialog` ("¿Reanalizar el documento con la nueva configuración? Tus
  *   ediciones se conservan.") → al confirmar, `actions.reanalyze` (mitigación
  *   de doble llamada secuencial si ambos cambiaron, ver `reanalyzePlan.ts`) →
- *   `actions.requestRender(visibleRange)` para refrescar previews
- *   (`React_Client.md` §3.7, último párrafo). Sin documento abierto, se
- *   persisten sin diálogo ni `reanalyze` (solo afectan al próximo `createCore`,
- *   que hoy ocurre una sola vez por carga de la app — `core-adapter/index.ts`
- *   no deriva `EngineConfig` de `settings.store` todavía, gap heredado de PR5,
- *   fuera de alcance de este PR).
+ *   `actions.requestRender(...)` para refrescar previews, sobre la **unión**
+ *   de los rangos visibles de los dos paneles (`visibleRange` es por panel
+ *   desde ADR-054 §1: con scroll independiente son dos regiones distintas,
+ *   no una — `unionVisibleRange`, `React_Client.md` §3.7 último párrafo). Sin
+ *   documento abierto, se persisten sin diálogo ni `reanalyze` (solo afectan
+ *   al próximo `createCore`, que hoy ocurre una sola vez por carga de la
+ *   app — `core-adapter/index.ts` no deriva `EngineConfig` de
+ *   `settings.store` todavía, gap heredado de PR5, fuera de alcance de este
+ *   PR).
  *
  * El guardado es atómico: si se necesita confirmación y el usuario cancela,
  * NINGÚN campo se aplica (ni siquiera `language`/`performancePreset`) — el
@@ -42,6 +45,7 @@ import { Checkbox } from "../common/Checkbox.js";
 import { ConfirmDialog } from "../common/ConfirmDialog.js";
 import { Dialog } from "../common/Dialog.js";
 import { Select, type SelectOption } from "../common/Select.js";
+import { rangeToPageIndices, unionVisibleRange } from "../viewer/visibleRange.js";
 
 import { diffReanalyzeChange, planReanalyzePatches } from "./reanalyzePlan.js";
 
@@ -73,14 +77,6 @@ function toggleLanguage(
     return languages.includes(code) ? languages : [...languages, code];
   }
   return languages.filter((lang) => lang !== code);
-}
-
-function visibleRangeToIndices(range: { readonly start: number; readonly end: number }): number[] {
-  const indices: number[] = [];
-  for (let index = range.start; index <= range.end; index += 1) {
-    indices.push(index);
-  }
-  return indices;
 }
 
 export interface SettingsDialogProps {
@@ -156,8 +152,12 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
         // limitación conocida de un patch combinado, ver reanalyzePlan.ts.
         await actions.reanalyze(patch);
       }
-      const visibleRange = useViewerStore.getState().visibleRange;
-      actions.requestRender(visibleRangeToIndices(visibleRange));
+      // Unión de los dos rangos por panel (ADR-054 §1): `visibleRange` ya no
+      // es un único rango global, así que "lo que el usuario está viendo" son
+      // dos regiones — una por `PdfViewer` — que hay que refrescar juntas.
+      const { visibleRange } = useViewerStore.getState();
+      const unifiedRange = unionVisibleRange(visibleRange.original, visibleRange.anonymized);
+      actions.requestRender(rangeToPageIndices(unifiedRange));
       setConfirmOpen(false);
       onClose();
     } catch (error) {

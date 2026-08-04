@@ -7,6 +7,17 @@
  * tests en Node (`vitest.config.ts` raíz, sin jsdom), así que la única forma
  * de testear esta lógica es extraerla de cualquier código que dependa del DOM
  * (IntersectionObserver, canvas, refs).
+ *
+ * **Alcance tras ADR-054 §5/§6**: `computeVisibleRangeFromIndices` (min..max
+ * sobre lo que reporta el `IntersectionObserver`) decide **únicamente** el
+ * rango de montaje (`computeMountRange`) — qué páginas reciben contenido
+ * real. Ya **no** se usa para derivar la página actual del visor: eso vive en
+ * `currentPageIndex.ts`, calculado por geometría de scroll (la página que
+ * ocupa el centro del viewport). Un conjunto transitoriamente no contiguo acá
+ * solo hace que se monte una página de más — inofensivo. Usarlo para la
+ * página actual era justamente lo que colapsaba el rango a `start: 0` y
+ * mandaba los dos visores al principio (el bug que ADR-054 cierra por
+ * eliminación del mecanismo compartido, no por endurecer este cómputo).
  */
 
 import type { VisibleRange } from "../../store/viewer.store.js";
@@ -55,4 +66,15 @@ export function rangeToPageIndices(range: VisibleRange): ReadonlyArray<number> {
     indices.push(i);
   }
   return indices;
+}
+
+/**
+ * Une dos rangos visibles en el rango mínimo que contiene a ambos (`min`
+ * start, `max` end). Con `visibleRange` por panel (ADR-054 §1), `SettingsDialog`
+ * ya no puede re-pedir previews sobre un único rango global: usa la unión de
+ * los dos rangos por panel para cubrir las dos regiones que el usuario está
+ * viendo (`React_Client.md` §3.7, último párrafo).
+ */
+export function unionVisibleRange(a: VisibleRange, b: VisibleRange): VisibleRange {
+  return { start: Math.min(a.start, b.start), end: Math.max(a.end, b.end) };
 }
