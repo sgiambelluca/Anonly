@@ -33,6 +33,7 @@ import { EntitiesPanel } from "./components/entities/EntitiesPanel.js";
 import { hasAnyGroup } from "./components/entities/entityTree.js";
 import { RulesPanel } from "./components/rules/RulesPanel.js";
 import { Toolbar } from "./components/toolbar/Toolbar.js";
+import { ScrollSyncToggle } from "./components/viewer/ScrollSyncToggle.js";
 import { SideBySideViewer } from "./components/viewer/SideBySideViewer.js";
 import { ZoomControls } from "./components/viewer/ZoomControls.js";
 import { initCore } from "./core-adapter/index.js";
@@ -112,7 +113,8 @@ function RightPanel() {
 
   return (
     <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="flex h-10 shrink-0 items-center justify-end border-b border-border bg-bg-primary px-3">
+      <div className="flex h-10 shrink-0 items-center justify-end gap-2 border-b border-border bg-bg-primary px-3">
+        <ScrollSyncToggle />
         <ZoomControls />
       </div>
       <SideBySideViewer />

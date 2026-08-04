@@ -18,11 +18,36 @@
  * `Components.md` §5.3, pero necesario para cerrar el loop que esa misma
  * sección exige: "usa IntersectionObserver para detectar visibilidad" tiene
  * que llegar a alguna parte).
+ *
+ * **ADR-054**: cada panel scrollea de forma independiente. Este componente ya
+ * no recibe `scrollToPageIndex` (esa prop y el efecto que la consumía se
+ * retiraron junto con `scrollSync.ts`/`computeScrollSyncTarget`, ADR-054 §6):
+ * con scroll independiente no existe el concepto de "seguidor" por defecto.
+ * En su lugar:
+ * - Un listener nativo de `scroll` (no el `IntersectionObserver`, que solo
+ *   decide qué montar — ADR-054 §5) deriva la página actual por geometría
+ *   (`currentPageIndex.ts`) y la reporta vía `onCurrentPageIndexChange`, sin
+ *   necesidad de rAF: es aritmética barata y el resultado se dedupe (solo se
+ *   reporta si la página cambió), así que no escribe el store en cada tick.
+ * - El mismo evento `scroll` notifica a `scrollSync` (`scrollSyncController.ts`,
+ *   ADR-054 §3): si la sincronización opcional está prendida, empuja
+ *   `scrollTop` al otro panel a nivel de píxel — imperativo, fuera de
+ *   React/Zustand.
+ * - Un `ResizeObserver` sobre el contenedor detecta la transición de alto 0 a
+ *   alto > 0 (panel que se vuelve visible: cambio de tab, o la ventana que
+ *   ensancha a `≥ lg`, ADR-054 §4 caso 2) y llama `scrollSync.notifyVisible`.
+ *
+ * Ningún contenedor con scroll lleva `scroll-behavior: smooth` (ADR-054 §7):
+ * animaría la asignación de `scrollTop` y rompería la exactitud de la que
+ * depende la idempotencia de `scrollSyncController.ts`.
  */
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-import { computeScrollSyncTarget } from "./scrollSync.js";
+import type { ViewerKind } from "../../store/viewer.store.js";
+
+import { computeCurrentPageIndexFromScroll } from "./currentPageIndex.js";
+import type { ScrollSyncController } from "./scrollSyncController.js";
 import {
   computeMountRange,
   computeVisibleRangeFromIndices,
@@ -30,56 +55,98 @@ import {
 } from "./visibleRange.js";
 
 export interface PageVirtualizerProps {
+  readonly kind: ViewerKind;
   readonly pageCount: number;
   readonly renderItem: (pageIndex: number) => ReactNode;
   readonly visibleRange: VisibleRange;
   readonly pageSize: number;
   readonly onVisibleRangeChange: (range: VisibleRange) => void;
-  /**
-   * `viewer.store.currentPageIndex`, compartido entre los dos `PdfViewer` de
-   * `SideBySideViewer` (`Components.md` §5.1 / `React_Client.md` §7: scroll
-   * sincronizado). Cuando cambia por el scroll del OTRO visor, este
-   * contenedor se desplaza programáticamente para seguirlo (`scrollSync.ts`);
-   * si el cambio se originó en el propio scroll de este visor, no hace nada
-   * (evita el loop de realimentación entre los dos `IntersectionObserver`).
-   */
-  readonly scrollToPageIndex: number;
+  /** Página actual derivada de la geometría de scroll de este panel (ADR-054 §5). Se reporta solo cuando cambia. */
+  readonly onCurrentPageIndexChange: (pageIndex: number) => void;
+  /** Sincronización opcional de scroll a nivel de píxel entre los dos paneles (ADR-054 §3), creada una sola vez por `SideBySideViewer` y compartida entre sus dos `PdfViewer`. */
+  readonly scrollSync: ScrollSyncController;
 }
 
 const PAGE_INDEX_ATTR = "pageIndex";
 
 export function PageVirtualizer({
+  kind,
   pageCount,
   renderItem,
   visibleRange,
   pageSize,
   onVisibleRangeChange,
-  scrollToPageIndex,
+  onCurrentPageIndexChange,
+  scrollSync,
 }: PageVirtualizerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [observer, setObserver] = useState<IntersectionObserver | null>(null);
   const intersectingRef = useRef<Set<number>>(new Set());
   const rafRef = useRef<number | undefined>(undefined);
   const lastReportedRef = useRef<VisibleRange | undefined>(undefined);
+  const lastReportedPageIndexRef = useRef<number | undefined>(undefined);
 
-  // Sincronización de scroll (Components.md §5.1, React_Client.md §7): si
-  // `scrollToPageIndex` cambió por el scroll del OTRO PdfViewer, desplaza este
-  // contenedor para seguirlo. `computeScrollSyncTarget` corta el loop de
-  // realimentación comparando contra el último rango que ESTE virtualizador
-  // reportó (si coincide, el cambio se originó acá mismo).
+  // Registro en el controller de sincronización (ADR-054 §3): un solo
+  // register por montaje del contenedor real.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    const target = computeScrollSyncTarget({
-      targetPageIndex: scrollToPageIndex,
-      lastReportedStart: lastReportedRef.current?.start,
-      currentScrollTop: container.scrollTop,
-      pageSize,
-    });
-    if (target !== undefined) {
-      container.scrollTop = target;
+    return scrollSync.register(kind, container);
+  }, [scrollSync, kind]);
+
+  // Listener nativo de scroll: deriva la página actual por geometría
+  // (ADR-054 §5) y notifica al controller de sincronización (ADR-054 §3).
+  // Deliberadamente sin rAF: es aritmética barata sobre un solo número, y el
+  // reporte a React ya está dedupeado por `lastReportedPageIndexRef` (solo
+  // escribe el store si la página cambió, no en cada tick de scroll) — el rAF
+  // del IntersectionObserver de abajo resuelve un problema distinto (coalescer
+  // múltiples entradas del mismo frame en un Set).
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    function handleScroll(): void {
+      if (!container) return;
+      scrollSync.notifyScroll(kind);
+
+      const pageIndex = computeCurrentPageIndexFromScroll({
+        scrollTop: container.scrollTop,
+        clientHeight: container.clientHeight,
+        pageSize,
+        pageCount,
+      });
+      if (lastReportedPageIndexRef.current === pageIndex) return;
+      lastReportedPageIndexRef.current = pageIndex;
+      onCurrentPageIndexChange(pageIndex);
     }
-  }, [scrollToPageIndex, pageSize]);
+
+    container.addEventListener("scroll", handleScroll);
+    return () => container.removeEventListener("scroll", handleScroll);
+    // `onCurrentPageIndexChange` deliberadamente no es dependencia, mismo
+    // criterio que `onVisibleRangeChange` más abajo: es un callback estable en
+    // la práctica y no hay `eslint-plugin-react-hooks` en este repo que lo
+    // exija.
+  }, [scrollSync, kind, pageSize, pageCount]);
+
+  // ResizeObserver: detecta que este panel pasó de alto 0 (oculto, modo tabs)
+  // a alto > 0 (visible) para realinearlo una vez si la sincronización está
+  // prendida (ADR-054 §4, caso 2). `previousHeight` empieza `undefined` a
+  // propósito: la primera medición (montaje) no es una transición real, así
+  // que no dispara una realineación contra un panel que todavía no scrolleó.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    let previousHeight: number | undefined;
+    const resizeObserver = new ResizeObserver(() => {
+      const height = container.clientHeight;
+      if (previousHeight !== undefined && previousHeight <= 0 && height > 0) {
+        scrollSync.notifyVisible(kind);
+      }
+      previousHeight = height;
+    });
+    resizeObserver.observe(container);
+    return () => resizeObserver.disconnect();
+  }, [scrollSync, kind]);
 
   useEffect(() => {
     const container = containerRef.current;
