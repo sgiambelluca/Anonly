@@ -74,31 +74,44 @@ describe("rangeToPageIndices", () => {
 });
 
 describe("unionVisibleRange", () => {
-  it("returns the range that contains both inputs (min start, max end)", () => {
-    expect(unionVisibleRange({ start: 2, end: 5 }, { start: 10, end: 12 })).toEqual({
-      start: 2,
-      end: 12,
-    });
+  it("merges overlapping ranges into one", () => {
+    expect(unionVisibleRange({ start: 2, end: 8 }, { start: 5, end: 10 })).toEqual([
+      { start: 2, end: 10 },
+    ]);
   });
 
-  it("is order-independent", () => {
-    expect(unionVisibleRange({ start: 10, end: 12 }, { start: 2, end: 5 })).toEqual({
-      start: 2,
-      end: 12,
-    });
+  it("is order-independent for overlapping ranges", () => {
+    expect(unionVisibleRange({ start: 10, end: 12 }, { start: 2, end: 11 })).toEqual([
+      { start: 2, end: 12 },
+    ]);
   });
 
-  it("handles overlapping ranges", () => {
-    expect(unionVisibleRange({ start: 2, end: 8 }, { start: 5, end: 10 })).toEqual({
-      start: 2,
-      end: 10,
-    });
+  it("merges adjacent ranges (no gap between them) into one", () => {
+    expect(unionVisibleRange({ start: 2, end: 5 }, { start: 6, end: 9 })).toEqual([
+      { start: 2, end: 9 },
+    ]);
   });
 
-  it("returns the same range when both inputs are identical (two panels scrolled to the same place)", () => {
-    expect(unionVisibleRange({ start: 4, end: 6 }, { start: 4, end: 6 })).toEqual({
-      start: 4,
-      end: 6,
-    });
+  it("returns a single range when both inputs are identical (two panels scrolled to the same place)", () => {
+    expect(unionVisibleRange({ start: 4, end: 6 }, { start: 4, end: 6 })).toEqual([
+      { start: 4, end: 6 },
+    ]);
+  });
+
+  it("keeps disjoint ranges separate instead of spanning the gap between them", () => {
+    // Los dos paneles scrolleados a regiones lejanas del documento (p. ej.
+    // original en 0-2, anonymized en 40-42): un solo rango 0-42 pediría
+    // renders de las 40 páginas intermedias que ningún panel mira.
+    expect(unionVisibleRange({ start: 0, end: 2 }, { start: 40, end: 42 })).toEqual([
+      { start: 0, end: 2 },
+      { start: 40, end: 42 },
+    ]);
+  });
+
+  it("is order-independent for disjoint ranges (result always sorted by start)", () => {
+    expect(unionVisibleRange({ start: 40, end: 42 }, { start: 0, end: 2 })).toEqual([
+      { start: 0, end: 2 },
+      { start: 40, end: 42 },
+    ]);
   });
 });

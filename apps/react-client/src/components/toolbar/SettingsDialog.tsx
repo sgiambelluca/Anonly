@@ -155,9 +155,12 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
       // Unión de los dos rangos por panel (ADR-054 §1): `visibleRange` ya no
       // es un único rango global, así que "lo que el usuario está viendo" son
       // dos regiones — una por `PdfViewer` — que hay que refrescar juntas.
+      // `unionVisibleRange` devuelve 1 o 2 rangos (fusiona solo si se solapan
+      // o son adyacentes) para no pedir renders de páginas intermedias que
+      // ningún panel mira cuando están scrolleados lejos uno del otro.
       const { visibleRange } = useViewerStore.getState();
-      const unifiedRange = unionVisibleRange(visibleRange.original, visibleRange.anonymized);
-      actions.requestRender(rangeToPageIndices(unifiedRange));
+      const unifiedRanges = unionVisibleRange(visibleRange.original, visibleRange.anonymized);
+      actions.requestRender(unifiedRanges.flatMap(rangeToPageIndices));
       setConfirmOpen(false);
       onClose();
     } catch (error) {

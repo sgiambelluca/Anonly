@@ -68,7 +68,9 @@ export function PdfViewer({ kind, scrollSync }: PdfViewerProps) {
   // Por panel desde ADR-054 §1: este PdfViewer solo lee/escribe SU propia
   // entrada de `visibleRange`/`currentPageIndex`, nunca la del otro `kind`.
   const visibleRange = useViewerStore((state) => state.visibleRange[kind]);
-  const previewByPage = useViewerStore((state) => state.previewByPage);
+  // Por panel: leer solo la entrada de este `kind` evita que este PdfViewer
+  // se re-renderice cuando llega un preview del otro panel (viewer.store.ts).
+  const previewByPage = useViewerStore((state) => state.previewByPage[kind]);
 
   const pageHeight = computePageHeight(zoom);
   const pageWidth = computePageWidth(pageHeight);
@@ -171,9 +173,8 @@ export function PdfViewer({ kind, scrollSync }: PdfViewerProps) {
             // `exactOptionalPropertyTypes` (Code_Standards.md §2) distingue
             // "prop ausente" de "prop presente con valor undefined": no se
             // puede pasar `blobUrl={maybeUndefined}` directo a un `blobUrl?:
-            // string`. `pagePreview?.[kind]` puede dar `string | undefined`.
-            const pagePreview = previewByPage.get(pageIndex);
-            const blobUrl = pagePreview?.[kind];
+            // string`. `previewByPage.get(pageIndex)` puede dar `string | undefined`.
+            const blobUrl = previewByPage.get(pageIndex);
             return (
               <PageCanvas
                 pageIndex={pageIndex}

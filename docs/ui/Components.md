@@ -242,14 +242,18 @@ apps/react-client/src/components/
 
 - **Props**: `kind: "original" | "anonymized"`.
 - **Stores**: `viewer`, `entities` (para highlights en `original`), `document`.
-- **Comportamiento**: usa `PageVirtualizer` para renderizar solo visibles. Escucha `PREVIEW_UPDATED` via `viewer.previewByPage` y pasa el `blobUrl` al `PageCanvas` correspondiente.
+- **Comportamiento**: usa `PageVirtualizer` para renderizar solo visibles. Escucha `PREVIEW_UPDATED` via `viewer.previewByPage[kind]` (por panel, `React_Client.md` §3.5 — evita re-renderizar este `PdfViewer` cuando el preview que cambió es del otro panel) y pasa el `blobUrl` al `PageCanvas` correspondiente.
 - **Eventos** (reconciliados por ADR-036 §5, reescrito por ADR-037):
   - Cambio de `visibleRange` → `actions.requestRender(pageIndices)` (sin `kind`: el payload `RenderRequested` no lo tiene; Render produce original y anonimizado según su estrategia, `06_Pipeline.md` §10).
   - Cambio de `zoom` → escala **CSS/canvas** del bitmap ya renderizado de inmediato (feedback durante el gesto) y, tras 150 ms sin nuevos ticks, `actions.requestRender(visibleRange, "preview", previewScale × zoom)` para un **re-render real** (ADR-037 §1/§5, supersede ADR-036 §6). El `PREVIEW_UPDATED` resultante reemplaza el bitmap CSS transitorio por el nítido.
 
 ### 5.3 `PageVirtualizer`
 
-- **Props**: `pageCount`, `renderItem: (index) => ReactNode`, `visibleRange`, `pageSize`. **Sin `scrollToPageIndex`** (ADR-054 §6): esa prop y el efecto de sincronización que la consumía se retiran junto con `scrollSync.ts`/`computeScrollSyncTarget` — con scroll independiente no existe el concepto de seguidor, y con la sincronización prendida la mecánica es la de §5.1, que no pasa por props.
+- **Props**: `kind`, `pageCount`, `renderItem: (index) => ReactNode`, `visibleRange`, `pageSize`, `onVisibleRangeChange`, `onCurrentPageIndexChange`, `scrollSync`. **Sin `scrollToPageIndex`** (ADR-054 §6): esa prop y el efecto de sincronización que la consumía se retiran junto con `scrollSync.ts`/`computeScrollSyncTarget` — con scroll independiente no existe el concepto de seguidor, y con la sincronización prendida la mecánica es la de §5.1, que no pasa por props.
+  - `kind`: identifica el panel para registrarse en `scrollSync` y para derivar/reportar su propia página actual.
+  - `onVisibleRangeChange`: reporta al rango que detecta el `IntersectionObserver` (rango de **montaje** únicamente, ADR-054 §5) — cierra el loop de "usa `IntersectionObserver` para detectar visibilidad" hacia el estado controlado por `PdfViewer`.
+  - `onCurrentPageIndexChange(pageIndex)`: página actual derivada por geometría de scroll (ADR-054 §5), reportada solo cuando cambia.
+  - `scrollSync`: controller de sincronización opcional de scroll (ADR-054 §3), instanciado una sola vez por `SideBySideViewer` y compartido entre sus dos `PdfViewer`/`PageVirtualizer`.
 - **Comportamiento**: mantiene un pool de `<canvas>` reutilizables. Calcula scroll height total con `pageCount × pageSize`. Solo renderiza items en `visibleRange` + 1 antes + 1 después.
 - **Performance**: usa `IntersectionObserver` para detectar visibilidad y `requestAnimationFrame` para scroll suave.
 - **Alcance del `IntersectionObserver` (ADR-054 §5)**: decide **únicamente el rango de montaje**. Reducir el conjunto de índices que reporta a `min..max` es correcto para eso —un conjunto transitoriamente no contiguo monta una página de más, que es inofensivo— pero **no** sirve para derivar la página actual: ahí un índice viejo colapsaba el rango a `start: 0`. La página actual se calcula de la geometría del scroll (`React_Client.md` §3.5).

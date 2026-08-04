@@ -247,6 +247,58 @@ describe("createScrollSyncController", () => {
     expect(anonymized.scrollTop).toBe(9999);
   });
 
+  it("treats a 1px difference as an echo too (±1px tolerance, not strictly less than)", () => {
+    const controller = createScrollSyncController();
+    const original = createFakeContainer({ clientHeight: 500 });
+    const anonymized = createFakeContainer({ clientHeight: 500 });
+    controller.register("original", original);
+    controller.register("anonymized", anonymized);
+    controller.setEnabled(true);
+
+    original.scrollTop = 4000;
+    controller.notifyScroll("original"); // empuja anonymized a 4000
+
+    // El navegador reporta el evento de scroll de "anonymized" con 1px de
+    // diferencia por redondeo de sub-píxel — sigue siendo un eco (ADR-054 §4:
+    // "±1px", no "estrictamente menos de 1px").
+    anonymized.scrollTop = 4001;
+    controller.notifyScroll("anonymized");
+
+    expect(original.scrollTop).toBe(4000); // no se arrastra al líder
+  });
+
+  it("does not mistake a genuine return-to-value for an echo just because a stale lastPushed from before this panel last led happens to match (regresión, hallazgo del revisor sobre ADR-054)", () => {
+    const controller = createScrollSyncController();
+    const original = createFakeContainer({ clientHeight: 500 });
+    const anonymized = createFakeContainer({ clientHeight: 500 });
+    controller.register("original", original);
+    controller.register("anonymized", anonymized);
+    controller.setEnabled(true);
+
+    // "anonymized" lidera primero, a 5000: empuja "original" y fija
+    // lastPushed[original] = 5000. `pushTo` solo actualiza el `lastPushed`
+    // del empujado (original), nunca el del líder (anonymized).
+    anonymized.scrollTop = 5000;
+    controller.notifyScroll("anonymized");
+    expect(original.scrollTop).toBe(5000);
+
+    // "original" lidera después, a 9000: empuja "anonymized". Sin el fix,
+    // lastPushed[original] queda stale en 5000 en vez de invalidarse.
+    original.scrollTop = 9000;
+    controller.notifyScroll("original");
+    expect(anonymized.scrollTop).toBe(9000);
+
+    // "original" vuelve, por su cuenta, exactamente a 5000: es un movimiento
+    // genuino, no un eco de esta sincronización — nadie empujó ese valor
+    // ahora. Sin el fix, coincide con el lastPushed[original] stale de hace
+    // dos pasos y se descarta como eco, dejando a "anonymized" atrás en 9000
+    // sin motivo.
+    original.scrollTop = 5000;
+    controller.notifyScroll("original");
+
+    expect(anonymized.scrollTop).toBe(5000);
+  });
+
   it("does not error when notifying a kind that was never registered", () => {
     const controller = createScrollSyncController();
     controller.setEnabled(true);

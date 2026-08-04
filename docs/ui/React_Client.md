@@ -350,7 +350,12 @@ interface ViewerSlice {
   readonly visibleRange: Readonly<Record<ViewerKind, { start: number; end: number }>>;
   readonly zoom: number;          // 0.5..3 — sigue siendo global (los dos paneles comparten escala)
   readonly sideBySide: boolean;   // default true — declarado, hoy sin setter ni consumidor (ambigüedad abierta; ADR-054 §7 decide NO reutilizarlo)
-  readonly previewByPage: ReadonlyMap<number, { original?: string; anonymized?: string }>;
+  // Por panel, no un Map compartido: si "original" y "anonymized" comparten
+  // el mismo Map, cualquier PREVIEW_UPDATED de un panel cambia la referencia
+  // que el otro panel también lee, y ese PdfViewer se re-renderiza entero
+  // sin necesidad (con paneles independientes cada uno pide sus propios
+  // renders, ver §7). Un Map por kind evita el re-render cruzado.
+  readonly previewByPage: Readonly<Record<ViewerKind, ReadonlyMap<number, string>>>;
   setPage(kind: ViewerKind, index: number): void;
   setZoom(z: number): void;
   setPreview(pageIndex: number, kind: ViewerKind, blobUrl: string): void;
@@ -481,7 +486,7 @@ Detalle en `ui/Components.md`.
 - El visor de PDF usa virtualización (ver `07_Performance_Strategy.md` §3). Solo se renderizan las páginas visibles + 1 antes + 1 después.
 - El adapter emite `RENDER_REQUESTED` cuando cambia `visibleRange` o `zoom` (ADR-037, supersede ADR-036 §6). Al cambiar `zoom`, `ZoomControls` escala **por CSS/canvas el bitmap ya renderizado** de inmediato (feedback a 60 fps durante el gesto) y emite `actions.requestRender(visibleRange, "preview", previewScale × zoom)` tras `ZOOM_RERENDER_DEBOUNCE_MS = 150 ms` sin nuevos ticks; el `PREVIEW_UPDATED` resultante reemplaza el bitmap CSS por el nítido re-renderizado. Un cambio de escala en cola/en vuelo descarta/aborta el anterior de la misma página (supersede, ADR-037 §4).
 - Los canvas reutilizables viven en el `PageVirtualizer` (componente), no en el store.
-- La suscripción a `PREVIEW_UPDATED` actualiza `viewer.previewByPage` con el `blobUrl`. El componente lo pinta en el canvas reciclado.
+- La suscripción a `PREVIEW_UPDATED` actualiza `viewer.previewByPage` (por panel, §3.5) con el `blobUrl`. El componente lo pinta en el canvas reciclado.
 - **Lado a lado con scroll independiente por panel (ADR-054, reemplaza "scroll vertical compartido vía `viewer.currentPageIndex`")**: cada `PdfViewer` scrollea por su cuenta, monta su propio rango y pide sus propios renders. Es lo que permite revisar la página 3 del anonimizado contra la 1 del original.
   - **Control opcional "sincronizar scroll"**, en la barra del visor junto a `ZoomControls` (no en el `Toolbar`, que son acciones sobre el documento, ni en el `SettingsDialog`, que es configuración de procesamiento). Default **apagado**; persistido en `localStorage` vía `settings.store` (§3.6).
   - Visible solo en anchos `≥ lg`. Por debajo, `SideBySideViewer` muestra pestañas y hay un solo panel visible: el control se **oculta**, pero la preferencia **no se toca** — al volver a ancho `≥ lg` reaparece con el valor que tenía y los paneles se realinean. Ocultarlo no es apagarlo.
