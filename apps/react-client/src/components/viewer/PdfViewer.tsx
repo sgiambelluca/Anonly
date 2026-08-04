@@ -1,6 +1,7 @@
 /**
  * `PdfViewer` (`ui/Components.md` §5.2, reescrito por
- * `adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md` §5).
+ * `adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md` §5 y
+ * `adr/ADR-054-Scroll-Independiente-Por-Panel.md` §1/§5).
  *
  * - Cambio de `visibleRange` (reportado por `PageVirtualizer` a partir de su
  *   `IntersectionObserver`) → `actions.requestRender(pageIndices)` **inmediato**
@@ -16,16 +17,20 @@
  *   (`ZOOM_RERENDER_DEBOUNCE_MS`, `zoomRenderScheduler.ts`) con
  *   `scale = previewScale × zoom` (`zoomRenderScale.ts`).
  *
- * `SideBySideViewer` monta dos `PdfViewer` (uno por `kind`) que comparten
- * `viewer.store` (`visibleRange`/`zoom` son globales, no por-kind): cada
- * instancia reacciona de forma independiente, así que un cambio de zoom con
- * `sideBySide` activo puede emitir dos `RENDER_REQUESTED` idénticos (mismo
- * `pageIndices`/`scale`) — inofensivo por diseño: el cache LRU por escala y el
- * supersede por página del Render Engine (ADR-037 §3/§4) lo absorben sin
- * duplicar trabajo real ni violar el orden por-página. Centralizar esto en
- * `SideBySideViewer` para emitir una sola vez está fuera de alcance de este PR
- * (`Components.md` §5.2 asigna el disparo a `PdfViewer`, no a
- * `SideBySideViewer`).
+ * `SideBySideViewer` monta dos `PdfViewer` (uno por `kind`), cada uno con su
+ * propio `visibleRange`/`currentPageIndex` en `viewer.store` (ADR-054 §1: por
+ * panel, no globales) — scrollean, montan y piden renders de forma
+ * independiente. `zoom` sigue siendo global (los dos paneles comparten
+ * escala): un cambio de zoom puede emitir dos `RENDER_REQUESTED` idénticos
+ * (mismo `pageIndices`/`scale` si por coincidencia los rangos montados de
+ * los dos paneles coinciden, o dos pedidos distintos si no) — inofensivo por
+ * diseño: el cache LRU por escala y el supersede por página del Render
+ * Engine (ADR-037 §3/§4) lo absorben sin duplicar trabajo real ni violar el
+ * orden por-página (`07_Performance_Strategy.md` §3.1).
+ *
+ * `scrollSync` (creado una sola vez por `SideBySideViewer`, ADR-054 §3) se
+ * pasa tal cual a `PageVirtualizer`: este componente no lo consume
+ * directamente, solo lo reenvía junto con `kind`.
  */
 
 import { useEffect, useMemo, useRef } from "react";
@@ -33,18 +38,21 @@ import { useEffect, useMemo, useRef } from "react";
 import { actions } from "../../core-adapter/actions.js";
 import { useDocumentStore } from "../../store/document.store.js";
 import { usePipelineStore } from "../../store/pipeline.store.js";
-import { useViewerStore } from "../../store/viewer.store.js";
+import { useViewerStore, type ViewerKind } from "../../store/viewer.store.js";
 
 import { PageCanvas } from "./PageCanvas.js";
 import { computePageHeight, computePageWidth } from "./pageLayout.js";
 import { PageVirtualizer } from "./PageVirtualizer.js";
 import { shouldTriggerReadyRender } from "./readyRenderTrigger.js";
+import type { ScrollSyncController } from "./scrollSyncController.js";
 import { computeMountRange, rangeToPageIndices, type VisibleRange } from "./visibleRange.js";
 import { computeZoomRenderScale } from "./zoomRenderScale.js";
 import { createZoomRenderScheduler } from "./zoomRenderScheduler.js";
 
 export interface PdfViewerProps {
-  readonly kind: "original" | "anonymized";
+  readonly kind: ViewerKind;
+  /** Controller de sincronización opcional de scroll (ADR-054 §3), instanciado una sola vez por `SideBySideViewer` y compartido entre sus dos `PdfViewer`. */
+  readonly scrollSync: ScrollSyncController;
 }
 
 const KIND_LABEL: Readonly<Record<PdfViewerProps["kind"], string>> = {
@@ -52,17 +60,15 @@ const KIND_LABEL: Readonly<Record<PdfViewerProps["kind"], string>> = {
   anonymized: "PDF anonimizado",
 };
 
-export function PdfViewer({ kind }: PdfViewerProps) {
+export function PdfViewer({ kind, scrollSync }: PdfViewerProps) {
   const documentId = useDocumentStore((state) => state.id);
   const pageCount = useDocumentStore((state) => state.pageCount);
   const pipelineStage = usePipelineStore((state) => state.stage);
   const zoom = useViewerStore((state) => state.zoom);
-  const visibleRange = useViewerStore((state) => state.visibleRange);
+  // Por panel desde ADR-054 §1: este PdfViewer solo lee/escribe SU propia
+  // entrada de `visibleRange`/`currentPageIndex`, nunca la del otro `kind`.
+  const visibleRange = useViewerStore((state) => state.visibleRange[kind]);
   const previewByPage = useViewerStore((state) => state.previewByPage);
-  // Compartido entre los dos PdfViewer de SideBySideViewer: cuando el OTRO
-  // visor scrollea, este valor cambia y dispara la sincronización de scroll
-  // de PageVirtualizer (Components.md §5.1, React_Client.md §7).
-  const currentPageIndex = useViewerStore((state) => state.currentPageIndex);
 
   const pageHeight = computePageHeight(zoom);
   const pageWidth = computePageWidth(pageHeight);
@@ -136,9 +142,13 @@ export function PdfViewer({ kind }: PdfViewerProps) {
   }, [zoom]);
 
   function handleVisibleRangeChange(range: VisibleRange): void {
-    const store = useViewerStore.getState();
-    store.setVisibleRange(range.start, range.end);
-    store.setPage(range.start);
+    useViewerStore.getState().setVisibleRange(kind, range.start, range.end);
+  }
+
+  // Página actual derivada por geometría de scroll (ADR-054 §5), reportada
+  // por `PageVirtualizer` — ya no por el mínimo del `IntersectionObserver`.
+  function handleCurrentPageIndexChange(pageIndex: number): void {
+    useViewerStore.getState().setPage(kind, pageIndex);
   }
 
   return (
@@ -150,11 +160,13 @@ export function PdfViewer({ kind }: PdfViewerProps) {
       </div>
       <div className="flex-1 overflow-hidden" aria-label={KIND_LABEL[kind]}>
         <PageVirtualizer
+          kind={kind}
           pageCount={pageCount}
           visibleRange={visibleRange}
           pageSize={pageHeight}
           onVisibleRangeChange={handleVisibleRangeChange}
-          scrollToPageIndex={currentPageIndex}
+          onCurrentPageIndexChange={handleCurrentPageIndexChange}
+          scrollSync={scrollSync}
           renderItem={(pageIndex) => {
             // `exactOptionalPropertyTypes` (Code_Standards.md §2) distingue
             // "prop ausente" de "prop presente con valor undefined": no se

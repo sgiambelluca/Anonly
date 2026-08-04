@@ -1,15 +1,23 @@
 /**
- * `viewer.store.ts` — estado del visor (página actual, zoom, previews) (Zustand).
+ * `viewer.store.ts` — estado del visor (página actual por panel, zoom,
+ * previews) (Zustand).
  *
  * Fuente de verdad: docs/ui/React_Client.md §3.5.
  *
- * Placeholder de Hito 10 PR1 (scaffold): store puramente local, sin conexión
- * al bus todavía (eso es `bus-bridge.ts`, PR5 `core-adapter`). El rango de
- * zoom (0.5..3) está documentado como comentario junto al campo en el spec;
- * `setZoom` lo clampea porque es el único punto de escritura del store.
+ * ADR-054 §1: `currentPageIndex` y `visibleRange` dejan de ser globales y
+ * pasan a existir **por panel** (`ViewerKind`). Los dos `PdfViewer` scrollean
+ * independiente, así que cada uno tiene su propia página actual y su propio
+ * rango visible — nada los sincroniza a través de este store. La
+ * sincronización opcional de scroll (ADR-054 §3) vive fuera de Zustand, en
+ * `components/viewer/scrollSyncController.ts`: acá solo llega
+ * `currentPageIndex`, que cambia una vez por página, nunca el `scrollTop`
+ * crudo (eso re-renderizaría los dos paneles en cada cuadro de scroll).
  */
 
 import { create } from "zustand";
+
+/** `"original" | "anonymized"` — un panel del visor lado a lado (ADR-054 §1). */
+export type ViewerKind = "original" | "anonymized";
 
 export interface PagePreview {
   readonly original?: string;
@@ -22,15 +30,15 @@ export interface VisibleRange {
 }
 
 export interface ViewerSlice {
-  readonly currentPageIndex: number;
-  readonly zoom: number; // 0.5..3
-  readonly sideBySide: boolean; // default true
+  readonly currentPageIndex: Readonly<Record<ViewerKind, number>>;
+  readonly visibleRange: Readonly<Record<ViewerKind, VisibleRange>>;
+  readonly zoom: number; // 0.5..3 — global: los dos paneles comparten escala
+  readonly sideBySide: boolean; // default true — declarado, sin setter ni consumidor (ambigüedad abierta, ADR-054 §7: no reutilizado para el control de sincronización)
   readonly previewByPage: ReadonlyMap<number, PagePreview>;
-  readonly visibleRange: VisibleRange;
-  setPage(index: number): void;
+  setPage(kind: ViewerKind, index: number): void;
   setZoom(z: number): void;
-  setPreview(pageIndex: number, kind: "original" | "anonymized", blobUrl: string): void;
-  setVisibleRange(start: number, end: number): void;
+  setPreview(pageIndex: number, kind: ViewerKind, blobUrl: string): void;
+  setVisibleRange(kind: ViewerKind, start: number, end: number): void;
   reset(): void;
 }
 
@@ -47,17 +55,20 @@ type ViewerData = Pick<
 >;
 
 const initialState: ViewerData = {
-  currentPageIndex: 0,
+  currentPageIndex: { original: 0, anonymized: 0 },
   zoom: 1,
   sideBySide: true,
   previewByPage: new Map(),
-  visibleRange: { start: 0, end: 0 },
+  visibleRange: {
+    original: { start: 0, end: 0 },
+    anonymized: { start: 0, end: 0 },
+  },
 };
 
 export const useViewerStore = create<ViewerSlice>((set) => ({
   ...initialState,
-  setPage(index) {
-    set({ currentPageIndex: index });
+  setPage(kind, index) {
+    set((state) => ({ currentPageIndex: { ...state.currentPageIndex, [kind]: index } }));
   },
   setZoom(z) {
     set({ zoom: clampZoom(z) });
@@ -70,8 +81,8 @@ export const useViewerStore = create<ViewerSlice>((set) => ({
       return { previewByPage: next };
     });
   },
-  setVisibleRange(start, end) {
-    set({ visibleRange: { start, end } });
+  setVisibleRange(kind, start, end) {
+    set((state) => ({ visibleRange: { ...state.visibleRange, [kind]: { start, end } } }));
   },
   reset() {
     set(initialState);

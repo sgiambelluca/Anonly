@@ -4,7 +4,13 @@ import {
   computeMountRange,
   computeVisibleRangeFromIndices,
   rangeToPageIndices,
+  unionVisibleRange,
 } from "../components/viewer/visibleRange.js";
+
+// ADR-054 §5/§6/§8: `computeVisibleRangeFromIndices`/`computeMountRange`
+// siguen probados acá como lo que ahora son — entrada exclusiva del rango de
+// **montaje** de `PageVirtualizer`, nunca de la página actual (eso es
+// `currentPageIndex.test.ts`, geometría de scroll, no min/max de un Set).
 
 describe("computeVisibleRangeFromIndices", () => {
   it("returns undefined for an empty set (caller keeps the previous range)", () => {
@@ -64,5 +70,35 @@ describe("rangeToPageIndices", () => {
 
   it("returns [] for an empty range (end < start)", () => {
     expect(rangeToPageIndices({ start: 3, end: 2 })).toEqual([]);
+  });
+});
+
+describe("unionVisibleRange", () => {
+  it("returns the range that contains both inputs (min start, max end)", () => {
+    expect(unionVisibleRange({ start: 2, end: 5 }, { start: 10, end: 12 })).toEqual({
+      start: 2,
+      end: 12,
+    });
+  });
+
+  it("is order-independent", () => {
+    expect(unionVisibleRange({ start: 10, end: 12 }, { start: 2, end: 5 })).toEqual({
+      start: 2,
+      end: 12,
+    });
+  });
+
+  it("handles overlapping ranges", () => {
+    expect(unionVisibleRange({ start: 2, end: 8 }, { start: 5, end: 10 })).toEqual({
+      start: 2,
+      end: 10,
+    });
+  });
+
+  it("returns the same range when both inputs are identical (two panels scrolled to the same place)", () => {
+    expect(unionVisibleRange({ start: 4, end: 6 }, { start: 4, end: 6 })).toEqual({
+      start: 4,
+      end: 6,
+    });
   });
 });
