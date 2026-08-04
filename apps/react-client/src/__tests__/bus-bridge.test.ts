@@ -350,9 +350,30 @@ describe("bus-bridge", () => {
       canvasBlobUrl: "blob:original-2",
     });
 
-    expect(useViewerStore.getState().previewByPage.get(2)).toEqual({
-      original: "blob:original-2",
+    expect(useViewerStore.getState().previewByPage.original.get(2)).toBe("blob:original-2");
+    expect(useViewerStore.getState().previewByPage.anonymized.get(2)).toBeUndefined();
+
+    unsubscribe();
+  });
+
+  it("PREVIEW_UPDATED for one kind doesn't change the other kind's Map reference", () => {
+    // Regresión: previewByPage es por panel (viewer.store.ts) precisamente
+    // para que un PdfViewer no se re-renderice cuando el otro panel recibe
+    // un preview nuevo. Si esto rompe, la referencia de "anonymized" cambia
+    // aunque solo se haya actualizado "original".
+    const bus = createEventBus({ logger: createTestLogger() });
+    const unsubscribe = subscribe(bus, stores);
+
+    const anonymizedMapBefore = useViewerStore.getState().previewByPage.anonymized;
+
+    bus.emit(EventChannel.Render, EngineEvents.PREVIEW_UPDATED, {
+      documentId: "doc-1",
+      pageIndex: 2,
+      kind: "original",
+      canvasBlobUrl: "blob:original-2",
     });
+
+    expect(useViewerStore.getState().previewByPage.anonymized).toBe(anonymizedMapBefore);
 
     unsubscribe();
   });

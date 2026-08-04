@@ -29,7 +29,14 @@
  *   panel (`lastPushed`, el valor real tras el clamp del navegador, no el
  *   pedido); un evento cuyo `scrollTop` coincide con ese valor (±1px) es un
  *   eco de la propia sincronización y no se propaga — nunca arrastra al
- *   panel que originó el movimiento hacia atrás.
+ *   panel que originó el movimiento hacia atrás. `lastPushed[kind]` solo es
+ *   válido inmediatamente después de haber empujado `kind`: en cuanto `kind`
+ *   genera un movimiento genuino (no eco) — sea liderando en `notifyScroll`,
+ *   sea la referencia leída (no empujada) en `alignVisibleToReference`/
+ *   `notifyVisible` — su entrada se borra. Si no se borrara, un valor futuro
+ *   que coincida por casualidad con ese empuje viejo se trataría como eco y
+ *   el seguidor se quedaría atrás sin motivo (encontrado en la revisión de
+ *   ADR-054, corregido acá).
  * - **Panel oculto** (modo tabs, `display: none`, `clientHeight` 0): se
  *   saltea como destino de cualquier empuje (`pushTo`). Al volverse visible,
  *   `notifyVisible(kind)` lo realinea una vez contra el otro panel, sin
@@ -94,6 +101,7 @@ export function createScrollSyncController(): ScrollSyncController {
     if (reference === undefined) return;
     const referenceContainer = containers.get(reference);
     if (!referenceContainer) return;
+    lastPushed.delete(reference); // se lee como fuente, no se empuja: ver docblock.
     const value = referenceContainer.scrollTop;
     for (const kind of KIND_ORDER) {
       if (kind === reference) continue;
@@ -121,15 +129,19 @@ export function createScrollSyncController(): ScrollSyncController {
       const container = containers.get(kind);
       if (!container) return;
       const pushed = lastPushed.get(kind);
-      if (pushed !== undefined && Math.abs(container.scrollTop - pushed) < ECHO_TOLERANCE_PX) {
+      if (pushed !== undefined && Math.abs(container.scrollTop - pushed) <= ECHO_TOLERANCE_PX) {
         return; // eco de la propia sincronización (ADR-054 §4, caso 1): no propagar.
       }
+      // Movimiento genuino: `kind` vuelve a liderar, su `lastPushed` queda obsoleto (ver docblock).
+      lastPushed.delete(kind);
       pushTo(OTHER_KIND[kind], container.scrollTop);
     },
     notifyVisible(kind) {
       if (!enabled) return;
-      const leader = containers.get(OTHER_KIND[kind]);
+      const leaderKind = OTHER_KIND[kind];
+      const leader = containers.get(leaderKind);
       if (!leader || leader.clientHeight <= 0) return; // no hay otro panel visible del que seguir todavía
+      lastPushed.delete(leaderKind); // se lee como fuente, no se empuja: ver docblock.
       pushTo(kind, leader.scrollTop);
     },
   };
