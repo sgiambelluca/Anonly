@@ -34,7 +34,8 @@ import { protectedFile } from "./support/fixtures.js";
 // Margen sobre el default (30 s de Playwright) para las dos idas y vueltas
 // con PasswordDialog (contraseña incorrecta + reintento) antes de la
 // aserción final de detección — mismo criterio que scenario-8 (línea 57).
-test.setTimeout(60_000);
+// Ampliado a 120s (ADR-053, ver el comentario sobre el poll final más abajo).
+test.setTimeout(120_000);
 
 /**
  * ADR-050 §6 (cierre del Escenario 3): prueba que el `<canvas>` del preview
@@ -119,5 +120,20 @@ test("Escenario 3: cargar PDF protegido → UI pide password → reintenta → s
   // pintarse de verdad — no solo el skeleton gris inicial.
   const firstPagePreview = page.getByRole("img", { name: "Página 1, original" });
   await expect(firstPagePreview).toBeVisible({ timeout: 30_000 });
-  await expect.poll(() => isSkeletonOnly(firstPagePreview), { timeout: 30_000 }).toBe(false);
+  // Margen ampliado de 30s a 90s (2026-08-05): con ADR-053, `disableFontFace`
+  // fuerza a pdf.js a dibujar TODO el texto por Path2D glifo a glifo — no
+  // solo las fuentes embebidas subseteadas, también la sustituta de la
+  // fuente standard-14 no embebida que usa este fixture (Helvetica →
+  // LiberationSans, servida desde /pdfjs/standard_fonts/) — en vez de
+  // fillText nativo. Es un costo aceptado y documentado, no un bug: ADR-053
+  // Consecuencias dice literal "hay que medirlo y reportarlo, no optimizarlo
+  // en ese PR". Confirmado con un A/B controlado (mismo test, mismo
+  // throttling de CPU vía CDP): en `main` (sin ADR-053) el render completa
+  // en ~9s; en esta rama, según la carga de la máquina, entre ~5s y (en la
+  // corrida más lenta observada) más de 30s — variable, pero siempre más
+  // lento que antes. En el runner de CI (2 vCPU, sin aceleración de
+  // hardware) esa varianza superó los 30s originales de forma consistente
+  // (2/2 corridas, 3/3 intentos cada una). 90s da margen real sin abandonar
+  // la aserción: si el render nunca completara de verdad, sigue fallando.
+  await expect.poll(() => isSkeletonOnly(firstPagePreview), { timeout: 90_000 }).toBe(false);
 });
