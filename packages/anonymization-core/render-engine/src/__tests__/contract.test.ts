@@ -281,6 +281,7 @@ describe("RenderEngine — contract tests", () => {
       documentId: docId,
       pageIndices: [0],
       mode: "preview",
+      kind: "original",
       scale: 3,
     });
 
@@ -288,11 +289,72 @@ describe("RenderEngine — contract tests", () => {
       expect(getViewportSpy).toHaveBeenCalledWith({ scale: 3 });
     });
 
-    // El batch reconstruye "original" y "anonymized" por página (nota 1 de
-    // render.engine.ts): TODOS los renders del request usan la escala del evento.
-    expect(getViewportSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
+    // ADR-056: el evento trae un solo kind — un solo RenderPageInput por
+    // página, un solo render (antes reconstruía "original" y "anonymized" y
+    // esperaba >= 2).
+    expect(getViewportSpy.mock.calls.length).toBe(1);
     for (const call of getViewportSpy.mock.calls) {
       expect(call[0]?.scale).toBe(3);
     }
+  });
+
+  // ─── ADR-056 §1 (caso 23): un solo kind por evento ───
+
+  it('RENDER_REQUESTED with kind "original" renders only original (no anonymized render, no PREVIEW_UPDATED)', async () => {
+    const docId = "doc-kind-original-only";
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+    );
+    const realCtx = createEngineContextWithRealBus();
+    await engine.init(realCtx);
+    await engine.loadDocument(docId, createValidBuffer());
+
+    const previewUpdates: Array<{ pageIndex: number; kind: string }> = [];
+    realCtx.bus.on(EventChannel.Render, EngineEvents.PREVIEW_UPDATED, (payload) => {
+      previewUpdates.push({ pageIndex: payload.pageIndex, kind: payload.kind });
+    });
+
+    realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+      documentId: docId,
+      pageIndices: [0],
+      mode: "preview",
+      kind: "original",
+    });
+
+    await vi.waitFor(() => {
+      expect(previewUpdates.length).toBe(1);
+    });
+
+    expect(previewUpdates).toEqual([{ pageIndex: 0, kind: "original" }]);
+    expect(previewUpdates.some((update) => update.kind === "anonymized")).toBe(false);
+  });
+
+  it('RENDER_REQUESTED with kind "anonymized" renders only anonymized', async () => {
+    const docId = "doc-kind-anonymized-only";
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+    );
+    const realCtx = createEngineContextWithRealBus();
+    await engine.init(realCtx);
+    await engine.loadDocument(docId, createValidBuffer());
+
+    const previewUpdates: Array<{ pageIndex: number; kind: string }> = [];
+    realCtx.bus.on(EventChannel.Render, EngineEvents.PREVIEW_UPDATED, (payload) => {
+      previewUpdates.push({ pageIndex: payload.pageIndex, kind: payload.kind });
+    });
+
+    realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+      documentId: docId,
+      pageIndices: [0],
+      mode: "preview",
+      kind: "anonymized",
+    });
+
+    await vi.waitFor(() => {
+      expect(previewUpdates.length).toBe(1);
+    });
+
+    expect(previewUpdates).toEqual([{ pageIndex: 0, kind: "anonymized" }]);
+    expect(previewUpdates.some((update) => update.kind === "original")).toBe(false);
   });
 });

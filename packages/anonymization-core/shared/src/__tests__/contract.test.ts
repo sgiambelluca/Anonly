@@ -439,15 +439,34 @@ describe("@anonly/shared — Contracts", () => {
         documentId: "d1",
         pageIndices: [0, 1],
         mode: "preview",
+        kind: "original",
       };
       const withScale: RenderRequested = {
         documentId: "d1",
         pageIndices: [0],
         mode: "preview",
+        kind: "anonymized",
         scale: 2.5,
       };
       expect(withoutScale.scale).toBeUndefined();
       expect(withScale.scale).toBe(2.5);
+    });
+
+    it("RenderRequested.kind es requerido (ADR-056 §1)", () => {
+      const payload: RenderRequested = {
+        documentId: "d1",
+        pageIndices: [0],
+        mode: "preview",
+        kind: "original",
+      };
+      expect(payload.kind).toBe("original");
+      // @ts-expect-error ADR-056 §1: kind es requerido, no admite omitirse.
+      const missingKind: RenderRequested = {
+        documentId: "d1",
+        pageIndices: [0],
+        mode: "preview",
+      };
+      expect(missingKind).toBeDefined();
     });
 
     it("ExportRequested options.includeOriginalMetadata debe ser false", () => {
