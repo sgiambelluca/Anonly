@@ -251,6 +251,7 @@ describe("RenderEngine — unit tests", () => {
       documentId: docId,
       pageIndices: [0],
       mode: "preview",
+      kind: "original",
     });
 
     const getPageSpy = mockDoc["getPage"] as ReturnType<typeof vi.fn>;

@@ -27,7 +27,7 @@ import { useDocumentStore } from "../store/document.store.js";
 import { useEntitiesStore } from "../store/entities.store.js";
 import { usePipelineStore } from "../store/pipeline.store.js";
 import { useRulesStore } from "../store/rules.store.js";
-import { useViewerStore } from "../store/viewer.store.js";
+import { useViewerStore, type ViewerKind } from "../store/viewer.store.js";
 
 import { getCore } from "./index.js";
 
@@ -127,12 +127,16 @@ export const actions = {
     useRulesStore.getState().removeRule(ruleId);
   },
 
-  // Sin parámetro `kind`: el payload RenderRequested no lo tiene; Render decide
-  // solo (original primero, anonimizado después — 06_Pipeline.md §10).
+  // `kind` REQUERIDO (ADR-056 §1): identifica el panel que pide, y el motor
+  // renderiza solo ese lado. Lo pasa siempre el panel emisor — NUNCA se deriva
+  // de `settings.scrollSyncEnabled` (ADR-056 §2: sería una segunda fuente de
+  // verdad sobre quién necesita píxeles, capaz de desincronizarse del scroll
+  // real).
   // `scale?` (ADR-037 §1/§5): ausente → previewScale/fullScale según mode;
   // ZoomControls la pasa como previewScale × zoom tras el debounce de 150 ms.
   requestRender(
     pageIndices: ReadonlyArray<number>,
+    kind: ViewerKind,
     mode: "preview" | "full" = "preview",
     scale?: number,
   ): void {
@@ -141,6 +145,7 @@ export const actions = {
     getCore().bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
       documentId,
       pageIndices,
+      kind,
       mode,
       ...(scale !== undefined ? { scale } : {}),
     });

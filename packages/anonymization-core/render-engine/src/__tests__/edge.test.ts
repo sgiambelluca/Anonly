@@ -325,6 +325,7 @@ describe("RenderEngine — edge cases", () => {
       documentId: "doc-unloaded",
       pageIndices: [0],
       mode: "preview",
+      kind: "original",
     });
 
     expect(warnSpy).toHaveBeenCalledWith(
@@ -641,6 +642,7 @@ describe("RenderEngine — edge cases", () => {
       documentId: docId,
       pageIndices: [0],
       mode: "preview",
+      kind: "original",
       scale: 5,
     });
     expect(warnSpy).toHaveBeenCalledWith(
@@ -654,6 +656,7 @@ describe("RenderEngine — edge cases", () => {
       documentId: docId,
       pageIndices: [0],
       mode: "preview",
+      kind: "original",
       scale: Number.POSITIVE_INFINITY,
     });
     expect(warnSpy).toHaveBeenCalled();
@@ -688,23 +691,28 @@ describe("RenderEngine — edge cases", () => {
     await engine.loadDocument(docId, createValidBuffer());
     const getPageSpy = mockDoc["getPage"] as ReturnType<typeof vi.fn>;
 
-    // Request A pide render de las páginas 0 y 1 a escala 1. renderPages
-    // procesa secuencialmente: cuando llega el segundo emit (síncrono, el bus
-    // despacha en línea), A todavía no llamó getPage para la página 1 — sigue
-    // "en cola" dentro de su propio batch.
+    // Request A pide render de las páginas 0 y 1 a escala 1, kind "original".
+    // renderPages procesa secuencialmente: cuando llega el segundo emit
+    // (síncrono, el bus despacha en línea), A todavía no llamó getPage para
+    // la página 1 — sigue "en cola" dentro de su propio batch.
     realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
       documentId: docId,
       pageIndices: [0, 1],
       mode: "preview",
+      kind: "original",
       scale: 1,
     });
 
-    // Request B supersede la página 1 con otra escala antes de que el batch de
-    // A llegue a ejecutarla (ADR-037 §4: descarta el pendiente en cola).
+    // Request B, mismo kind "original" (ADR-056 §4: el supersede está acotado
+    // por (documentId, pageIndex, kind) — kinds distintos no se pisarían
+    // entre sí, ver caso 24 más abajo), supersede la página 1 con otra escala
+    // antes de que el batch de A llegue a ejecutarla (ADR-037 §4: descarta el
+    // pendiente en cola).
     realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
       documentId: docId,
       pageIndices: [1],
       mode: "preview",
+      kind: "original",
       scale: 2,
     });
 
@@ -715,12 +723,11 @@ describe("RenderEngine — edge cases", () => {
     // Deja asentar cualquier microtask restante del batch de A antes de contar.
     await new Promise((resolve) => setTimeout(resolve, 20));
 
-    // handleRenderRequested reconstruye "original" y "anonymized" por página
-    // (06_Pipeline.md §10): B por sí solo llama getPage(2) dos veces (una por
-    // kind). Si el intento en cola de A NO se hubiera descartado, habría 4
-    // llamadas en total (2 de A + 2 de B) en vez de 2.
+    // Con ADR-056 cada evento trae un solo kind: un pedido de la página 1
+    // produce un solo getPage(2). Si el intento en cola de A NO se hubiera
+    // descartado, habría 2 llamadas en total (1 de A + 1 de B) en vez de 1.
     const page1Calls = getPageSpy.mock.calls.filter((call) => call[0] === 2);
-    expect(page1Calls).toHaveLength(2); // solo B (ambos kinds); A se descartó sin ejecutar.
+    expect(page1Calls).toHaveLength(1); // solo B; A se descartó sin ejecutar.
   });
 
   it("superseded render in flight aborts at next checkpoint without PREVIEW_UPDATED", async () => {
@@ -751,6 +758,7 @@ describe("RenderEngine — edge cases", () => {
       documentId: docId,
       pageIndices: [0],
       mode: "preview",
+      kind: "original",
       scale: 1,
     });
 
@@ -766,6 +774,7 @@ describe("RenderEngine — edge cases", () => {
       documentId: docId,
       pageIndices: [0],
       mode: "preview",
+      kind: "original",
       scale: 2,
     });
 
@@ -810,6 +819,7 @@ describe("RenderEngine — edge cases", () => {
       documentId: docId,
       pageIndices: [0],
       mode: "preview",
+      kind: "anonymized",
       scale: 1,
     });
     await vi.waitFor(() => {
@@ -896,5 +906,93 @@ describe("RenderEngine — edge cases", () => {
     // invocación directa corrió de verdad (inmune al supersede) y aplicó el
     // cambio.
     expect(canvas!.calls.filter((c) => c.op === "fillText")).toHaveLength(0);
+  });
+
+  // ─── Caso 24 (ADR-056 §4): el supersede se registra SOLO para el kind pedido ───
+
+  it("RENDER_REQUESTED registers a supersede entry only for the requested kind", async () => {
+    const docId = "doc-supersede-scoped-kind";
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+    );
+    const realCtx = createEngineContextWithRealBus();
+    await engine.init(realCtx);
+    await engine.loadDocument(docId, createValidBuffer());
+
+    realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+      documentId: docId,
+      pageIndices: [0],
+      mode: "preview",
+      kind: "original",
+      scale: 2,
+    });
+
+    // registerPendingRender corre síncrono dentro de handleRenderRequested,
+    // antes de despachar el batch async — el estado ya es observable acá.
+    // Es la implementación mecánica incorrecta lo que este test previene:
+    // registrar TAMBIÉN "anonymized" "porque antes se registraban los dos".
+    expect(engine["pendingRenders"].has(`${docId}:0:original`)).toBe(true);
+    expect(engine["pendingRenders"].has(`${docId}:0:anonymized`)).toBe(false);
+  });
+
+  it("an in-flight anonymized render is not aborted by an original request at another scale", async () => {
+    const docId = "doc-cross-kind-immune";
+    let resolvePage0Render: (() => void) | undefined;
+    const page0RenderPromise = new Promise<void>((resolve) => {
+      resolvePage0Render = resolve;
+    });
+    const renderSpy = vi.fn(() => ({ promise: page0RenderPromise }));
+    const mockDoc = createMockPdfDocument({
+      pageCount: 1,
+      pageFactory: () => ({
+        getViewport: vi.fn(() => ({ width: 100, height: 100 })),
+        render: renderSpy,
+      }),
+    });
+    vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(mockDoc));
+    const realCtx = createEngineContextWithRealBus();
+    await engine.init(realCtx);
+    await engine.loadDocument(docId, createValidBuffer());
+
+    const previewUpdates: Array<{ pageIndex: number; kind: string }> = [];
+    realCtx.bus.on(EventChannel.Render, EngineEvents.PREVIEW_UPDATED, (payload) => {
+      previewUpdates.push({ pageIndex: payload.pageIndex, kind: payload.kind });
+    });
+
+    // A: el panel "anonymized" pide render a escala 1 — queda en vuelo,
+    // bloqueado esperando la promesa de render().
+    realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+      documentId: docId,
+      pageIndices: [0],
+      mode: "preview",
+      kind: "anonymized",
+      scale: 1,
+    });
+
+    await vi.waitFor(() => {
+      expect(renderSpy).toHaveBeenCalled();
+    });
+
+    // B: el OTRO panel ("original") pide la misma página a otra escala.
+    // ADR-056 §4: el supersede se registra solo para "original" — NO debe
+    // abortar el render "anonymized" en vuelo de A. Antes de este fix, B
+    // también registraba una entrada de supersede para "anonymized" y
+    // abortaba a A espuriamente — exactamente el error que ADR-056 §4 previene.
+    realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+      documentId: docId,
+      pageIndices: [0],
+      mode: "preview",
+      kind: "original",
+      scale: 2,
+    });
+
+    resolvePage0Render?.();
+
+    await vi.waitFor(() => {
+      const anonymizedUpdates = previewUpdates.filter(
+        (u) => u.pageIndex === 0 && u.kind === "anonymized",
+      );
+      expect(anonymizedUpdates).toHaveLength(1);
+    });
   });
 });

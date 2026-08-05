@@ -45,7 +45,7 @@ import { Checkbox } from "../common/Checkbox.js";
 import { ConfirmDialog } from "../common/ConfirmDialog.js";
 import { Dialog } from "../common/Dialog.js";
 import { Select, type SelectOption } from "../common/Select.js";
-import { rangeToPageIndices, unionVisibleRange } from "../viewer/visibleRange.js";
+import { computeReanalyzeRenderRequest } from "../viewer/reanalyzeRenderRequest.js";
 
 import { diffReanalyzeChange, planReanalyzePatches } from "./reanalyzePlan.js";
 
@@ -152,15 +152,19 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
         // limitación conocida de un patch combinado, ver reanalyzePlan.ts.
         await actions.reanalyze(patch);
       }
-      // Unión de los dos rangos por panel (ADR-054 §1): `visibleRange` ya no
-      // es un único rango global, así que "lo que el usuario está viendo" son
-      // dos regiones — una por `PdfViewer` — que hay que refrescar juntas.
-      // `unionVisibleRange` devuelve 1 o 2 rangos (fusiona solo si se solapan
-      // o son adyacentes) para no pedir renders de páginas intermedias que
-      // ningún panel mira cuando están scrolleados lejos uno del otro.
+      // Unión de los dos rangos por panel (ADR-054 §1) con `kind:
+      // "anonymized"` fijo (ADR-056 §3): el `original` se renderiza sin
+      // `replacements` y —hasta que exista el highlight de entidades— sin
+      // `annotations`, así que un reanalyze no puede cambiar un solo píxel de
+      // ese lado. Refrescarlo sería trabajo garantizado-inútil. Composición
+      // extraída a `computeReanalyzeRenderRequest` (misma razón que
+      // `canvasDimensions.ts`: testeable sin jsdom).
       const { visibleRange } = useViewerStore.getState();
-      const unifiedRanges = unionVisibleRange(visibleRange.original, visibleRange.anonymized);
-      actions.requestRender(unifiedRanges.flatMap(rangeToPageIndices));
+      const { pageIndices, kind } = computeReanalyzeRenderRequest(
+        visibleRange.original,
+        visibleRange.anonymized,
+      );
+      actions.requestRender(pageIndices, kind);
       setConfirmOpen(false);
       onClose();
     } catch (error) {
