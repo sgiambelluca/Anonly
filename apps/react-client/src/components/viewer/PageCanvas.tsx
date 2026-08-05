@@ -15,6 +15,8 @@
 
 import { memo, useEffect, useRef } from "react";
 
+import { shouldReassignCanvasDimensions } from "./canvasDimensions.js";
+
 export interface PageCanvasProps {
   readonly pageIndex: number;
   readonly kind: "original" | "anonymized";
@@ -32,8 +34,20 @@ function PageCanvasImpl({ pageIndex, kind, blobUrl, width, height }: PageCanvasP
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    canvas.width = Math.max(1, Math.round(width));
-    canvas.height = Math.max(1, Math.round(height));
+    const nextWidth = Math.max(1, Math.round(width));
+    const nextHeight = Math.max(1, Math.round(height));
+    // Reasignar canvas.width/height borra el bitmap aunque el valor sea
+    // idéntico (estándar HTML, ADR-056 §5): solo se reasigna cuando el
+    // tamaño calculado realmente difiere del actual.
+    if (
+      shouldReassignCanvasDimensions(
+        { width: canvas.width, height: canvas.height },
+        { width: nextWidth, height: nextHeight },
+      )
+    ) {
+      canvas.width = nextWidth;
+      canvas.height = nextHeight;
+    }
 
     const context = canvas.getContext("2d");
     if (!context) return;
