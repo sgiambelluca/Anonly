@@ -35,26 +35,34 @@ import { manyNeutralPagesFile } from "./support/fixtures.js";
 
 const PAGE_COUNT = 30;
 
+// Período de quietud (sin ningún draw nuevo) que hay que observar antes de
+// dar por terminado el asentamiento inicial y limpiar el registro — ver
+// `waitForDrawQuiescence` más abajo.
+const SETTLE_QUIET_MS = 500;
+
 test.setTimeout(90_000);
 
 /**
  * Instrumenta `drawImage` para registrar, por `aria-label`, cada bitmap
- * dibujado sobre un canvas de página. Se instala ANTES de subir el archivo
+ * dibujado sobre un canvas de página (y el timestamp del último draw, para
+ * `waitForDrawQuiescence`). Se instala ANTES de subir el archivo
  * (inmediatamente tras `page.goto`) para no perderse los draws del render
  * inicial, que este spec necesita observar para confirmar que el
  * asentamiento terminó antes de empezar a scrollear.
  */
 async function recordCanvasDraws(page: Page): Promise<void> {
   await page.evaluate(() => {
-    const scope = globalThis as unknown as { __draws?: string[] };
+    const scope = globalThis as unknown as { __draws?: string[]; __lastDrawAt?: number };
     if (scope.__draws !== undefined) return;
     scope.__draws = [];
+    scope.__lastDrawAt = Date.now();
     const proto = CanvasRenderingContext2D.prototype;
     const original = proto.drawImage as (this: CanvasRenderingContext2D, ...a: never[]) => void;
     proto.drawImage = function patched(this: CanvasRenderingContext2D, ...args: never[]): void {
       const label = this.canvas.getAttribute("aria-label");
       if (label !== null) {
         scope.__draws?.push(label);
+        scope.__lastDrawAt = Date.now();
       }
       original.apply(this, args);
     } as typeof proto.drawImage;
@@ -69,6 +77,31 @@ async function clearDraws(page: Page): Promise<void> {
   await page.evaluate(() => {
     (globalThis as unknown as { __draws?: string[] }).__draws = [];
   });
+}
+
+/**
+ * Espera a que no haya llegado ningún draw nuevo en los últimos `quietMs` ms.
+ * El rango montado (visible ± 1, `computeMountRange`) dispara renders para
+ * varias páginas por panel al cargar el documento, no solo la página 1:
+ * esperar únicamente "página 1 dibujada en los dos paneles" deja abierta la
+ * ventana en la que el render legítimo, todavía en vuelo, de las páginas
+ * 2/3 de "anonimizado" aterriza DESPUÉS de `clearDraws` y se cuenta como una
+ * violación falsa del escenario — mismo tipo de carrera que motivó los
+ * ajustes de timeout del escenario 3 y el fix de carrera del escenario 11.
+ */
+async function waitForDrawQuiescence(
+  page: Page,
+  quietMs: number,
+  timeoutMs: number,
+): Promise<void> {
+  await page.waitForFunction(
+    (quiet) => {
+      const lastDrawAt = (globalThis as unknown as { __lastDrawAt?: number }).__lastDrawAt ?? 0;
+      return Date.now() - lastDrawAt >= quiet;
+    },
+    quietMs,
+    { polling: 100, timeout: timeoutMs },
+  );
 }
 
 test("scrollear el panel original con la sincronización apagada no dispara ningún render de anonymized", async ({
@@ -94,10 +127,11 @@ test("scrollear el panel original con la sincronización apagada no dispara ning
 
   // Sincronización apagada por default (ADR-054 §2) — no se toca el toggle.
 
-  // Espera a que el render inicial de LOS DOS paneles asiente: al montar,
+  // Espera a que el render inicial de LOS DOS paneles arranque: al montar,
   // cada `PdfViewer` pide su propio preview de entrada (ADR-056 §2, tres
   // emisores por panel) — es trabajo legítimo, no el bug de este escenario.
-  // Solo después de este asentamiento tiene sentido empezar a observar.
+  // Página 1 en los dos paneles es solo la señal de arranque, no de
+  // asentamiento completo (ver `waitForDrawQuiescence` debajo).
   await page.waitForFunction(
     () => {
       const draws = (globalThis as unknown as { __draws?: string[] }).__draws ?? [];
@@ -108,6 +142,13 @@ test("scrollear el panel original con la sincronización apagada no dispara ning
     },
     { polling: 100, timeout: 30_000 },
   );
+
+  // El rango montado es visible ± 1: además de la página 1, cada panel sigue
+  // recibiendo renders de las páginas 2/3 un instante más. Esperar quietud
+  // real (no solo "llegó la página 1") antes de limpiar el registro evita
+  // que esos renders legítimos, tardíos, aterricen después de `clearDraws` y
+  // se cuenten como el bug.
+  await waitForDrawQuiescence(page, SETTLE_QUIET_MS, 15_000);
 
   const box = await originalContainer.boundingBox();
   if (!box) throw new Error('No se pudo ubicar el contenedor de "original".');
