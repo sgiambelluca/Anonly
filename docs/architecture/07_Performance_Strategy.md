@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=performance | dependencias=05_Worker_Architecture.md,06_Pipeline.md,03_Data_Model.md,adr/ADR-054-Scroll-Independiente-Por-Panel.md | audiencia=IA+humanos | fase=1 (§3.1 actualizado en el cierre de fase 10: scroll independiente por panel, ADR-054) -->
+<!-- CONTEXT: scope=performance | dependencias=05_Worker_Architecture.md,06_Pipeline.md,03_Data_Model.md,adr/ADR-054-Scroll-Independiente-Por-Panel.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md | audiencia=IA+humanos | fase=1 (§3.1 actualizado en el cierre de fase 10: scroll independiente por panel, ADR-054; §11.3 en fase 11: escenario 12 —un panel no dispara el render del otro—, ADR-056) -->
 
 # Anonly — Estrategia de Performance (TAD bloque 10)
 
@@ -63,9 +63,10 @@ El visor de PDF virtualiza páginas: solo renderiza las visibles + 1 antes + 1 d
 ### 3.1 Lado a lado
 
 - Original y anonimizado son dos virtualizers **independientes** (ADR-054 §1, reemplaza "sincronizados: scroll vertical compartido vía estado Zustand"): cada uno tiene su propio contenedor con scroll, su propio rango visible y su propia página actual en el store. Sincronizarlos es opt-in del usuario (`settings.scrollSyncEnabled`) y, cuando está activo, ocurre **fuera de React** por asignación directa de `scrollTop` — no por estado compartido, que re-renderizaría los dos paneles en cada cuadro de scroll (ADR-054 §3).
-- Consecuencia de rendimiento del scroll independiente: con los dos paneles en regiones distintas, el rango montado total puede ser el doble que antes (dos ventanas de páginas en vez de una compartida). Es el costo esperado de la funcionalidad; el cache LRU por escala de `render-engine` y el supersede por página (ADR-037 §3/§4) lo absorben igual que absorbían los dos pedidos idénticos del modelo anterior.
+- Consecuencia de rendimiento del scroll independiente: con los dos paneles en regiones distintas, el rango montado total puede ser el doble que antes (dos ventanas de páginas en vez de una compartida). Es el costo esperado de la funcionalidad.
+  - ~~el cache LRU por escala de `render-engine` y el supersede por página (ADR-037 §3/§4) lo absorben igual que absorbían los dos pedidos idénticos del modelo anterior~~ — **corregido por ADR-056**: no lo absorbían. Mientras `RENDER_REQUESTED` no transportaba `kind`, el pedido de **un** panel disparaba el render de **los dos** lados, así que el rango montado total no era el doble: era el cuádruple, y el panel que el usuario no tocó se recargaba a cada scroll. Con `kind` requerido (ADR-056 §1) cada panel paga solo lo suyo, y el doble nominal de esta viñeta pasa a ser real.
 - El render de "original" es más barato (sin reemplazos), se prioriza para first paint.
-- El de "anonimizado" se renderiza en segundo plano con prioridad menor.
+- El de "anonimizado" se renderiza en segundo plano con prioridad menor. **Dentro de un mismo pedido**, se entiende: desde ADR-056 §1 un `RENDER_REQUESTED` trae un solo `kind`, así que la prioridad relativa entre lados solo aplica cuando los dos paneles emiten a la vez y sus jobs compiten en la pool.
 
 ---
 
@@ -233,6 +234,7 @@ Fixtures pesados (> 5 MB) vía Git LFS o descargados en `postinstall` con hash v
 9. Activar NER en runtime (`reanalyze`, ADR-038) → verificar que se descarga el modelo y reanaliza **preservando las ediciones previas del usuario**: un grupo que el usuario deshabilitó sigue deshabilitado, una regla creada sigue aplicando, un merge manual persiste.
 10. Fusionar y dividir grupos → verificar índices y reemplazos.
 11. Cambiar el zoom (`ZoomControls`, ADR-037) → verificar `PREVIEW_UPDATED` con la nueva escala y reemplazo del bitmap CSS transitorio por el bitmap nítido re-renderizado.
+12. Con la sincronización de scroll **apagada** (el default), scrollear el panel `original` → verificar que **no** llega ningún `PREVIEW_UPDATED` con `kind: "anonymized"` (ADR-056 §1/§8). Es la prueba directa de que un panel no dispara el render del otro: el costo de render durante el scroll se reduce a la mitad y el panel que el usuario no tocó deja de recargarse. Complementa al escenario de ADR-054 §8 ("mover un panel no mueve al otro"), que cubre el scroll pero no el pipeline de render.
 
 ### 11.4 Gates de CI
 
