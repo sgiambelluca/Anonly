@@ -34,8 +34,7 @@ import { protectedFile } from "./support/fixtures.js";
 // Margen sobre el default (30 s de Playwright) para las dos idas y vueltas
 // con PasswordDialog (contraseña incorrecta + reintento) antes de la
 // aserción final de detección — mismo criterio que scenario-8 (línea 57).
-// Ampliado a 360s (ADR-053, ver el comentario sobre el poll final más abajo).
-test.setTimeout(360_000);
+test.setTimeout(60_000);
 
 /**
  * ADR-050 §6 (cierre del Escenario 3): prueba que el `<canvas>` del preview
@@ -120,32 +119,5 @@ test("Escenario 3: cargar PDF protegido → UI pide password → reintenta → s
   // pintarse de verdad — no solo el skeleton gris inicial.
   const firstPagePreview = page.getByRole("img", { name: "Página 1, original" });
   await expect(firstPagePreview).toBeVisible({ timeout: 30_000 });
-  // Margen ampliado de 30s a 300s (2026-08-05): con ADR-053, `disableFontFace`
-  // fuerza a pdf.js a dibujar TODO el texto por Path2D glifo a glifo — no
-  // solo las fuentes embebidas subseteadas, también la sustituta de la
-  // fuente standard-14 no embebida que usa este fixture (Helvetica →
-  // LiberationSans, servida desde /pdfjs/standard_fonts/) — en vez de
-  // fillText nativo. Es un costo aceptado y documentado, no un bug: ADR-053
-  // Consecuencias dice literal "hay que medirlo y reportarlo, no optimizarlo
-  // en ese PR".
-  //
-  // Diagnóstico (2026-08-05): confirmado que main (sin ADR-053) completa el
-  // mismo render en ~9s bajo CPU throttling controlado, y que un primer
-  // ajuste a 90s no alcanzó — CI lo agotó por completo 3/3 intentos en 2
-  // corridas separadas (6/6 en total), siempre con el mismo error. Se
-  // reprodujo el estado exacto que corre CI (merge real de esta rama contra
-  // `main`, mismos 14 tests, mismo `CI=true`/1 worker/2 retries, con un
-  // límite real de 2 CPUs vía contenedor Docker, no solo throttling de reloj
-  // en una Mac multi-core) y ahí SÍ pasó limpio 2/2 en ~1.8-1.9min para la
-  // suite completa — la brecha remanente con el runner real de GitHub
-  // Actions parece ser arquitectura de CPU (x86_64 en la nube vs Apple
-  // Silicon), que ningún límite de núcleos ni throttling de reloj replica
-  // desde esta máquina. Sin forma de medir el número real en el hardware de
-  // CI sin gastar otra corrida completa, se usa acá el mismo valor que ya
-  // usa `scenario-2-scanned-ocr.spec.ts:114` para su propio paso lento, en
-  // vez de inventar un número nuevo. Si el render nunca completara de
-  // verdad, la aserción sigue fallando igual — esto no la debilita, solo le
-  // da el margen que ADR-053 ya anticipó como costo real y explícitamente
-  // no pidió optimizar acá.
-  await expect.poll(() => isSkeletonOnly(firstPagePreview), { timeout: 300_000 }).toBe(false);
+  await expect.poll(() => isSkeletonOnly(firstPagePreview), { timeout: 30_000 }).toBe(false);
 });
