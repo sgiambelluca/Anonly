@@ -14,7 +14,7 @@
  */
 export const PREVIEW_SCALE_DEFAULT = 1;
 
-/** `scale` a pasar a `actions.requestRender(pageIndices, "preview", scale)` para un `zoom` dado. */
+/** `scale` a pasar a `actions.requestRender(pageIndices, kind, "preview", scale)` para un `zoom` dado. */
 export function computeZoomRenderScale(
   zoom: number,
   previewScale: number = PREVIEW_SCALE_DEFAULT,
