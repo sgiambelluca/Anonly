@@ -83,7 +83,7 @@ describe("actions", () => {
     actions.updateRule("rule-1", { enabled: false });
     actions.deleteRule("rule-1");
     actions.resolveConflict("conflict-1", ReplacementMode.Mask);
-    actions.requestRender([0, 1]);
+    actions.requestRender([0, 1], "original");
     actions.requestExport({
       imageFormat: "png",
       jpegQuality: 0.9,
@@ -186,21 +186,33 @@ describe("actions", () => {
     });
 
     it("requestRender omits scale when not provided", () => {
-      actions.requestRender([0, 1], "preview");
+      actions.requestRender([0, 1], "original", "preview");
       expect(emit).toHaveBeenCalledWith(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
         documentId: "doc-1",
         pageIndices: [0, 1],
+        kind: "original",
         mode: "preview",
       });
     });
 
     it("requestRender includes scale when provided", () => {
-      actions.requestRender([0], "full", 2.5);
+      actions.requestRender([0], "anonymized", "full", 2.5);
       expect(emit).toHaveBeenCalledWith(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
         documentId: "doc-1",
         pageIndices: [0],
+        kind: "anonymized",
         mode: "full",
         scale: 2.5,
+      });
+    });
+
+    it("requestRender includes the kind received in the emitted payload (ADR-056 §1)", () => {
+      actions.requestRender([2, 3], "anonymized");
+      expect(emit).toHaveBeenCalledWith(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+        documentId: "doc-1",
+        pageIndices: [2, 3],
+        kind: "anonymized",
+        mode: "preview",
       });
     });
 

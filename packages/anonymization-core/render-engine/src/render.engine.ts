@@ -73,12 +73,17 @@
  * Notas de diseño no triviales (dentro del margen que el spec deja abierto,
  * ninguna rompe un contrato público de Contracts.md/Render_Engine.md):
  *
- * 1. `RENDER_REQUESTED` (§8) no trae `kind` ni `replacements`/`annotations`
- *    — solo `{ documentId, pageIndices, mode }`. `06_Pipeline.md` §10 dice
- *    que se renderiza primero "original" y luego "anonimizado" para las
- *    páginas visibles, así que el handler reconstruye ambos `RenderPageInput`
- *    por página a partir del último input recordado para esa página (o
- *    valores por defecto — `replacements: []` — si nunca se renderizó antes).
+ * 1. `RENDER_REQUESTED` (§8) trae `kind` (ADR-056 §1, requerido) pero no
+ *    `replacements`/`annotations` — el handler reconstruye un único
+ *    `RenderPageInput` por página, del `kind` pedido, a partir del último
+ *    input recordado para esa página y ese kind (`lastOriginalInputs` o
+ *    `lastAnonymizedInputs` según corresponda; el mapa del otro lado ni se
+ *    consulta), o valores por defecto (`replacements: []` si `kind` es
+ *    `"anonymized"`) si nunca se renderizó antes. Antes de ADR-056 el handler
+ *    reconstruía incondicionalmente los dos lados por página (`06_Pipeline.md`
+ *    §10, válido mientras el scroll de los dos paneles estaba sincronizado
+ *    por diseño); con el scroll independiente de ADR-054 eso hacía que pedir
+ *    el render de un panel refrescara también el otro.
  * 2. (Retirado por ADR-044) El índice `pageIndex → groupIds` y el delta
  *    render por overrides (`requestDeltaRender`, `groupOverrides`) vivían
  *    acá; el re-render por cambio de grupo lo media ahora el Orchestrator con
@@ -843,46 +848,42 @@ export class RenderEngine implements IEngine {
       payload.scale ??
       (payload.mode === "preview" ? ctx.config.render.previewScale : ctx.config.render.fullScale);
 
-    // 06_Pipeline.md §10: se renderiza "original" y luego "anonimizado" por
-    // página visible. RenderRequested (Contracts.md §8) no trae kind ni
-    // replacements/annotations: se reconstruyen desde el último input
-    // recordado por página (o vacío, primera vez) — ver nota de implementación 1.
+    // ADR-056 §1/§4: RenderRequested trae kind requerido — se reconstruye un
+    // solo RenderPageInput por página, del kind pedido, leyendo únicamente el
+    // mapa correspondiente (el otro mapa ni se toca) — ver nota de
+    // implementación 1.
+    const lastInputs =
+      payload.kind === "original" ? this.lastOriginalInputs : this.lastAnonymizedInputs;
     const inputs: RenderPageInput[] = [];
     for (const pageIndex of payload.pageIndices) {
       const key = pageKey(payload.documentId, pageIndex);
 
-      // ADR-037 §4: registra la escala vigente para "original" y "anonymized"
-      // de esta página — cualquier render POR EVENTO pendiente con otra escala
-      // para la misma clave se descarta/aborta en su próximo checkpoint
-      // (ver nota 6 de cabecera).
-      this.registerPendingRender(payload.documentId, pageIndex, "original", effectiveScale);
-      this.registerPendingRender(payload.documentId, pageIndex, "anonymized", effectiveScale);
+      // ADR-037 §4 + ADR-056 §4: registra la escala vigente SOLO para el kind
+      // pedido — registrar también el otro kind dejaría una entrada de
+      // supersede sobre la clave del panel que no pidió nada y abortaría
+      // renders en vuelo legítimos de ese otro panel (ver nota 6 de cabecera).
+      this.registerPendingRender(payload.documentId, pageIndex, payload.kind, effectiveScale);
 
-      const original = this.lastOriginalInputs.get(key);
+      const lastInput = lastInputs.get(key);
       inputs.push(
-        original !== undefined
-          ? { ...original, mode: payload.mode, scale: effectiveScale }
-          : {
-              documentId: payload.documentId,
-              pageIndex,
-              kind: "original",
-              mode: payload.mode,
-              scale: effectiveScale,
-            },
-      );
-
-      const anonymized = this.lastAnonymizedInputs.get(key);
-      inputs.push(
-        anonymized !== undefined
-          ? { ...anonymized, mode: payload.mode, scale: effectiveScale }
-          : {
-              documentId: payload.documentId,
-              pageIndex,
-              kind: "anonymized",
-              mode: payload.mode,
-              replacements: [],
-              scale: effectiveScale,
-            },
+        lastInput !== undefined
+          ? { ...lastInput, mode: payload.mode, scale: effectiveScale }
+          : payload.kind === "original"
+            ? {
+                documentId: payload.documentId,
+                pageIndex,
+                kind: "original",
+                mode: payload.mode,
+                scale: effectiveScale,
+              }
+            : {
+                documentId: payload.documentId,
+                pageIndex,
+                kind: "anonymized",
+                mode: payload.mode,
+                replacements: [],
+                scale: effectiveScale,
+              },
       );
     }
 

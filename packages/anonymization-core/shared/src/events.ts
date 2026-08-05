@@ -200,6 +200,13 @@ export interface RenderRequested {
   readonly pageIndices: ReadonlyArray<number>;
   readonly mode: "preview" | "full";
   /**
+   * Panel que pide el render (ADR-056 §1). REQUERIDO — el motor renderiza
+   * solo ese lado, nunca los dos. Lo determina el panel emisor (un
+   * `PdfViewer` por kind), NUNCA el toggle de sincronización de scroll
+   * (ADR-056 §2).
+   */
+  readonly kind: "original" | "anonymized";
+  /**
    * Escala absoluta pdfjs (1.0 = 72 DPI), misma semántica que
    * `RenderPageInput.scale` (ADR-037 §1). Ausente → `previewScale`/`fullScale`
    * según `mode`. Rango válido: `0 < scale <= MAX_RENDER_SCALE`.

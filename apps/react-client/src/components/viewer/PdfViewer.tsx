@@ -1,12 +1,12 @@
 /**
  * `PdfViewer` (`ui/Components.md` §5.2, reescrito por
- * `adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md` §5 y
- * `adr/ADR-054-Scroll-Independiente-Por-Panel.md` §1/§5).
+ * `adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md` §5,
+ * `adr/ADR-054-Scroll-Independiente-Por-Panel.md` §1/§5 y
+ * `adr/ADR-056-RenderRequested-Kind-Por-Panel.md` §1/§2).
  *
  * - Cambio de `visibleRange` (reportado por `PageVirtualizer` a partir de su
- *   `IntersectionObserver`) → `actions.requestRender(pageIndices)` **inmediato**
- *   (sin `kind`: el payload `RenderRequested` no lo tiene — Render decide;
- *   `06_Pipeline.md` §10), con la escala vigente (`computeZoomRenderScale`).
+ *   `IntersectionObserver`) → `actions.requestRender(pageIndices, kind)`
+ *   **inmediato**, con la escala vigente (`computeZoomRenderScale`).
  *   `pageIndices` es el rango **montado** (visible ± 1, `computeMountRange`),
  *   no solo el estrictamente visible: son exactamente las páginas que
  *   `PageVirtualizer` ya monta con contenido real, incluyendo el buffer que
@@ -16,17 +16,29 @@
  *   (`pageLayout.ts`); el re-render real se dispara **debounced**
  *   (`ZOOM_RERENDER_DEBOUNCE_MS`, `zoomRenderScheduler.ts`) con
  *   `scale = previewScale × zoom` (`zoomRenderScale.ts`).
+ * - Los tres emisores (render inicial al observar `Ready`, cambio de rango
+ *   montado, re-render debounced de zoom) pasan **siempre** el `kind` de este
+ *   `PdfViewer` — nunca se deriva de `settings.scrollSyncEnabled` (ADR-056
+ *   §2: sería una segunda fuente de verdad sobre quién necesita píxeles,
+ *   capaz de desincronizarse del scroll real). Con la sincronización apagada
+ *   eso da el comportamiento lazy pedido (solo se refresca el panel que el
+ *   usuario mueve) sin ninguna rama condicional que lo implemente.
  *
  * `SideBySideViewer` monta dos `PdfViewer` (uno por `kind`), cada uno con su
  * propio `visibleRange`/`currentPageIndex` en `viewer.store` (ADR-054 §1: por
  * panel, no globales) — scrollean, montan y piden renders de forma
  * independiente. `zoom` sigue siendo global (los dos paneles comparten
- * escala): un cambio de zoom puede emitir dos `RENDER_REQUESTED` idénticos
- * (mismo `pageIndices`/`scale` si por coincidencia los rangos montados de
- * los dos paneles coinciden, o dos pedidos distintos si no) — inofensivo por
- * diseño: el cache LRU por escala y el supersede por página del Render
- * Engine (ADR-037 §3/§4) lo absorben sin duplicar trabajo real ni violar el
- * orden por-página (`07_Performance_Strategy.md` §3.1).
+ * escala): un cambio de zoom dispara el re-render debounced en los dos
+ * `PdfViewer` a la vez, y con `pageIndices`/`scale` coincidentes si los
+ * rangos montados de los dos paneles coinciden. Antes de ADR-056 (sin `kind`
+ * en el payload) esos dos pedidos podían ser literalmente idénticos, y el
+ * Render Engine igual reconstruía los dos lados por cada uno —trabajo
+ * duplicado que el cache LRU por escala y el supersede por página (ADR-037
+ * §3/§4) absorbían sin violar el orden por-página
+ * (`07_Performance_Strategy.md` §3.1). Con `kind` requerido los dos eventos
+ * ya nunca son idénticos —difieren siempre en `kind`— y el motor renderiza
+ * solo el lado pedido por cada uno: no hay redundancia que absorber, cada
+ * pedido es exactamente el trabajo que su panel necesita.
  *
  * `scrollSync` (creado una sola vez por `SideBySideViewer`, ADR-054 §3) se
  * pasa tal cual a `PageVirtualizer`: este componente no lo consume
@@ -110,13 +122,13 @@ export function PdfViewer({ kind, scrollSync }: PdfViewerProps) {
       return;
     }
     triggeredReadyRenderForRef.current = documentId;
-    actions.requestRender(indices, "preview", computeZoomRenderScale(zoom));
+    actions.requestRender(indices, kind, "preview", computeZoomRenderScale(zoom));
   }, [documentId, pipelineStage, mountRange.start, mountRange.end]);
 
   // Cambio de visibleRange (scroll) → render inmediato, con la escala vigente.
   useEffect(() => {
     if (mountedPageIndices.length === 0) return;
-    actions.requestRender(mountedPageIndices, "preview", computeZoomRenderScale(zoom));
+    actions.requestRender(mountedPageIndices, kind, "preview", computeZoomRenderScale(zoom));
     // Se dispara por cambios de rango montado, no de zoom (ese caso lo cubre
     // el efecto debounced de abajo) — `zoom` se lee fresco igual porque el
     // cuerpo del efecto se recrea en cada render; solo la re-ejecución está
@@ -138,7 +150,7 @@ export function PdfViewer({ kind, scrollSync }: PdfViewerProps) {
     scheduler.schedule(() => {
       const indices = mountedPageIndicesRef.current;
       if (indices.length === 0) return;
-      actions.requestRender(indices, "preview", computeZoomRenderScale(zoom));
+      actions.requestRender(indices, kind, "preview", computeZoomRenderScale(zoom));
     });
     return () => scheduler.cancel();
   }, [zoom]);
