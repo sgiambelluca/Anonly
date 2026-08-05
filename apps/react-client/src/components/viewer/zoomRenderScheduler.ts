@@ -2,8 +2,8 @@
  * `zoomRenderScheduler.ts` — debounce del re-render real de zoom
  * (`adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md` §5): agrupa los ticks
  * sucesivos de un gesto de zoom (rueda/pinch, ~16 ms cada uno) en un solo
- * `actions.requestRender(pageIndices, "preview", scale)` emitido recién tras
- * `ZOOM_RERENDER_DEBOUNCE_MS` sin nuevos ticks.
+ * `actions.requestRender(pageIndices, kind, "preview", scale)` emitido recién
+ * tras `ZOOM_RERENDER_DEBOUNCE_MS` sin nuevos ticks.
  *
  * Lógica separada de React/DOM a propósito, igual que `visibleRange.ts`: los
  * tests de `apps/react-client` corren en Node (`vitest.config.ts` raíz, sin

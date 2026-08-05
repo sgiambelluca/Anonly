@@ -1,8 +1,8 @@
 /**
  * @anonly/render-engine — `RenderEngine` (implementa `IEngine`).
  *
- * Fuente de verdad: docs/core/Render_Engine.md (v1.6.0, ADR-030, ADR-031,
- * ADR-034, ADR-037, ADR-043, ADR-044, ADR-050).
+ * Fuente de verdad: docs/core/Render_Engine.md (v1.8.0, ADR-030, ADR-031,
+ * ADR-034, ADR-037, ADR-043, ADR-044, ADR-050, ADR-053, ADR-056).
  *
  * ADR-050 (2026-07-30 — el password de un PDF protegido llega hasta
  * `loadDocument`): tercer parámetro opcional `password?: string`. Reparto
