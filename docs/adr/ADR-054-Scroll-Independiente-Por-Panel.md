@@ -88,6 +88,8 @@ El `IntersectionObserver` se queda haciendo lo único para lo que es confiable: 
 
 ### 7. Qué **no** cambia
 
+> **ERRATA (ADR-056, 2026-08-05)**: este párrafo es incorrecto. Sí había un contrato del Core que cambiar, y no haberlo visto produjo un bug reportado por el humano: con scroll independiente y sincronización apagada, scrollear rápido un panel hacía que el **otro** —el que no tocó— recargara su contenido constantemente. La causa: `RENDER_REQUESTED` no transporta `kind`, así que su único listener renderiza **los dos** lados por cada página pedida. Eso era correcto mientras los dos paneles mostraban siempre el mismo rango (scroll sincronizado por diseño) y dejó de serlo con este ADR. El argumento de abajo —"el cache LRU y el supersede lo absorben"— vale para dos pedidos **idénticos**, no para el acoplamiento de que el pedido de un panel arrastre el render del otro. `RenderRequested` gana `kind` requerido en ADR-056 §1. Lo que sigue queda como registro de lo que se decidió acá, no como descripción del estado actual.
+
 Ningún contrato del Core, ningún evento, ningún payload. `RENDER_REQUESTED` se sigue emitiendo por panel como hoy (`PdfViewer.tsx:109-117`), y el hecho de que con paneles independientes cada uno pida su propio rango es correcto: el cache LRU por escala y el supersede por página de ADR-037 §3/§4 lo absorben igual que hoy absorben los dos pedidos idénticos.
 
 El debounce de zoom (ADR-037 §5) no se toca. El modo pestañas de `SideBySideViewer` para `< lg` se conserva **tal cual**: es requisito explícito del humano.
@@ -136,7 +138,7 @@ Un solo PR, `apps/react-client` (visor + `viewer.store` + `settings.store` + `Se
 
 **Negativas**: comparar la misma región de los dos documentos ahora requiere prender el control (un click, recordado entre sesiones) o alinear a mano; el estado del visor por panel duplica dos campos del store y obliga a `SettingsDialog` a unir rangos; y aparece un módulo imperativo fuera de React, que es una excepción deliberada al patrón del resto de la app y necesita el comentario que explique por qué (§3).
 
-**Neutras**: ningún contrato del Core cambia; `RENDER_REQUESTED` y el debounce de zoom quedan igual; el modo pestañas se conserva tal cual; `viewer.store.sideBySide` sigue siendo la misma ambigüedad abierta que era.
+**Neutras**: ~~ningún contrato del Core cambia; `RENDER_REQUESTED` y el debounce de zoom quedan igual~~ (**errata ADR-056**, ver §7: `RENDER_REQUESTED` gana `kind` requerido; el debounce de zoom sí queda igual); el modo pestañas se conserva tal cual; `viewer.store.sideBySide` sigue siendo la misma ambigüedad abierta que era.
 
 ## Docs actualizados por este ADR
 

@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=ui-contract | dependencias=01_Technical_Architecture_Document.md,03_Data_Model.md,04_Event_System.md,ADR-005-State-Management.md,adr/ADR-034-Auditoria-Pre-Hito9-Orchestrator.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-054-Scroll-Independiente-Por-Panel.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md | audiencia=IA-implementador-ui | fase=4 (reconciliado en fase 10 por ADR-036: acciones completas §2.3, workers §2.4, settings §3.7, zoom §7, errores §8; §2.3/§3.7/§7 reescritos por ADR-037 —zoom con re-render real— y ADR-038 —reanalyze preservando ediciones, supersede el flujo "recrear el core") -->
+<!-- CONTEXT: scope=ui-contract | dependencias=01_Technical_Architecture_Document.md,03_Data_Model.md,04_Event_System.md,ADR-005-State-Management.md,adr/ADR-034-Auditoria-Pre-Hito9-Orchestrator.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-054-Scroll-Independiente-Por-Panel.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md | audiencia=IA-implementador-ui | fase=4 (reconciliado en fase 10 por ADR-036: acciones completas §2.3, workers §2.4, settings §3.7, zoom §7, errores §8; §2.3/§3.7/§7 reescritos por ADR-037 —zoom con re-render real— y ADR-038 —reanalyze preservando ediciones, supersede el flujo "recrear el core"; §2.3/§7 en fase 11 por ADR-056 —requestRender con kind requerido, cada panel pide lo suyo—) -->
 
 # Anonly — React Client (UI Contract, TAD bloque 9)
 
@@ -198,14 +198,16 @@ export const actions = {
     getCore().bus.emit(EventChannel.UI, EngineEvents.RULE_DELETED, { documentId, ruleId });
   },
 
-  // Sin parámetro `kind`: el payload RenderRequested no lo tiene; Render decide
-  // solo (original primero, anonimizado después — 06_Pipeline.md §10).
+  // `kind` REQUERIDO (ADR-056 §1): identifica el panel que pide, y el motor
+  // renderiza solo ese lado. Lo pasa siempre el panel emisor — NUNCA se deriva
+  // de `settings.scrollSyncEnabled` (ADR-056 §2: sería una segunda fuente de
+  // verdad sobre quién necesita píxeles, capaz de desincronizarse del scroll real).
   // `scale?` (ADR-037 §1, §5): ausente → previewScale/fullScale según mode;
   // ZoomControls la pasa como previewScale × zoom tras el debounce de 150 ms.
-  requestRender(pageIndices: ReadonlyArray<number>, mode: "preview" | "full" = "preview", scale?: number): void {
+  requestRender(pageIndices: ReadonlyArray<number>, kind: ViewerKind, mode: "preview" | "full" = "preview", scale?: number): void {
     const documentId = stores.document.getState().id;
     if (!documentId) return;
-    getCore().bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, { documentId, pageIndices, mode, scale });
+    getCore().bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, { documentId, pageIndices, kind, mode, scale });
   },
 
   // Re-análisis parcial preservando ediciones (ADR-038 §1, §7). Reemplaza el
@@ -403,7 +405,7 @@ No todo lo de este slice alimenta `EngineConfig`: `language`, `defaultReplacemen
 - El override de `ner.wasmPaths` que `initCore` ya inyecta (ADR-039) **gana siempre**: los overrides del usuario se mergean por debajo, nunca lo sobreescriben.
 - Sin este wiring —el estado hasta PR16.5— `nerEnabled: false` persistido antes de la primera importación no tenía **ningún** efecto observable: `App.tsx` llamaba `initCore()` sin argumentos una sola vez por carga de pestaña. Era la causa del Escenario 8 E2E bloqueado desde PR10 (`07_Performance_Strategy.md` §11.3).
 
-**`nerEnabled` / `ocrLanguages` con documento abierto → `reanalyze`, no recrear el core** (ADR-038 §1, §7; reemplaza el flujo "recrear el core" de una versión previa de este doc, que descartaba las ediciones del usuario): el `SettingsDialog` muestra `ConfirmDialog` ("¿Reanalizar el documento con la nueva configuración? Tus ediciones se conservan.") → `actions.reanalyze({ ner: { enabled }, ocr: { languages } })` (patch con solo el/los campo/s que cambiaron) → `orchestrator.reanalyze(documentId, patch)`. Tras el `PIPELINE_READY` de la pasada, la UI re-emite `actions.requestRender(...)` para refrescar previews con los grupos nuevos, sobre la **unión** de los rangos visibles de los dos paneles (desde ADR-054 §1 el rango es por panel, y con scroll independiente eso son dos regiones distintas). Sin documento abierto, estos dos settings solo afectan al próximo `createCore`.
+**`nerEnabled` / `ocrLanguages` con documento abierto → `reanalyze`, no recrear el core** (ADR-038 §1, §7; reemplaza el flujo "recrear el core" de una versión previa de este doc, que descartaba las ediciones del usuario): el `SettingsDialog` muestra `ConfirmDialog` ("¿Reanalizar el documento con la nueva configuración? Tus ediciones se conservan.") → `actions.reanalyze({ ner: { enabled }, ocr: { languages } })` (patch con solo el/los campo/s que cambiaron) → `orchestrator.reanalyze(documentId, patch)`. Tras el `PIPELINE_READY` de la pasada, la UI re-emite `actions.requestRender(..., "anonymized")` para refrescar previews con los grupos nuevos, sobre la **unión** de los rangos visibles de los dos paneles (desde ADR-054 §1 el rango es por panel, y con scroll independiente eso son dos regiones distintas). **Solo el `kind: "anonymized"`** (ADR-056 §3): el `original` no tiene reemplazos ni annotations, así que un reanalyze no puede cambiar sus píxeles — refrescarlo era trabajo garantizado-inútil. Sin documento abierto, estos dos settings solo afectan al próximo `createCore`.
 
 Sin documento abierto, `nerEnabled`/`ocrLanguages` se persisten y aplican al **próximo `createCore`** — que desde PR16.5 es un momento real (recarga de la pestaña), no una promesa vacía.
 
@@ -484,9 +486,11 @@ Detalle en `ui/Components.md`.
 ## 7. Reglas de rendering
 
 - El visor de PDF usa virtualización (ver `07_Performance_Strategy.md` §3). Solo se renderizan las páginas visibles + 1 antes + 1 después.
-- El adapter emite `RENDER_REQUESTED` cuando cambia `visibleRange` o `zoom` (ADR-037, supersede ADR-036 §6). Al cambiar `zoom`, `ZoomControls` escala **por CSS/canvas el bitmap ya renderizado** de inmediato (feedback a 60 fps durante el gesto) y emite `actions.requestRender(visibleRange, "preview", previewScale × zoom)` tras `ZOOM_RERENDER_DEBOUNCE_MS = 150 ms` sin nuevos ticks; el `PREVIEW_UPDATED` resultante reemplaza el bitmap CSS por el nítido re-renderizado. Un cambio de escala en cola/en vuelo descarta/aborta el anterior de la misma página (supersede, ADR-037 §4).
+- El adapter emite `RENDER_REQUESTED` cuando cambia `visibleRange` o `zoom` (ADR-037, supersede ADR-036 §6). Al cambiar `zoom`, `ZoomControls` escala **por CSS/canvas el bitmap ya renderizado** de inmediato (feedback a 60 fps durante el gesto) y emite `actions.requestRender(visibleRange, kind, "preview", previewScale × zoom)` tras `ZOOM_RERENDER_DEBOUNCE_MS = 150 ms` sin nuevos ticks; el `PREVIEW_UPDATED` resultante reemplaza el bitmap CSS por el nítido re-renderizado. Un cambio de escala en cola/en vuelo descarta/aborta el anterior de la misma página (supersede, ADR-037 §4).
+- **Cada panel pide solo lo suyo (ADR-056 §1/§2)**: los tres emisores de `PdfViewer` (render inicial al observar `Ready`, cambio de rango montado, re-render debounced de zoom) pasan el `kind` del panel que los hospeda, y el motor renderiza únicamente ese lado. Con la sincronización de scroll **apagada** eso da el comportamiento "lazy" —solo se refresca el panel que el usuario está moviendo— **sin ninguna rama condicional**: el otro panel no cambia su rango montado, así que no emite. Con la sincronización **prendida** los dos paneles se mueven de verdad, los dos detectan rango nuevo y los dos emiten. **Está prohibido derivar el `kind` de `settings.scrollSyncEnabled`**.
+- **El `SettingsDialog` tras un `reanalyze` pide solo `kind: "anonymized"`** sobre la unión de los rangos de los dos paneles (ADR-056 §3): el `original` se renderiza sin `replacements` y —hasta que exista el highlight de entidades— sin `annotations`, así que un reanalyze no puede cambiar un solo píxel de ese lado. Cuando ese highlight exista, hay que volver a emitir también el pedido `original` (condición de validez escrita en ADR-056 §3).
 - Los canvas reutilizables viven en el `PageVirtualizer` (componente), no en el store.
-- La suscripción a `PREVIEW_UPDATED` actualiza `viewer.previewByPage` (por panel, §3.5) con el `blobUrl`. El componente lo pinta en el canvas reciclado.
+- La suscripción a `PREVIEW_UPDATED` actualiza `viewer.previewByPage` (por panel, §3.5) con el `blobUrl`. El componente lo pinta en el canvas reciclado. **El `blobUrl` cambia aunque los píxeles no**: el motor acuña un `URL.createObjectURL` nuevo también en aciertos de cache (ADR-056 §6, deliberado), así que `PageCanvas` no puede tratar "`blobUrl` nuevo" como "hay que reconstruir el canvas" — ver `Components.md` §5.4.
 - **Lado a lado con scroll independiente por panel (ADR-054, reemplaza "scroll vertical compartido vía `viewer.currentPageIndex`")**: cada `PdfViewer` scrollea por su cuenta, monta su propio rango y pide sus propios renders. Es lo que permite revisar la página 3 del anonimizado contra la 1 del original.
   - **Control opcional "sincronizar scroll"**, en la barra del visor junto a `ZoomControls` (no en el `Toolbar`, que son acciones sobre el documento, ni en el `SettingsDialog`, que es configuración de procesamiento). Default **apagado**; persistido en `localStorage` vía `settings.store` (§3.6).
   - Visible solo en anchos `≥ lg`. Por debajo, `SideBySideViewer` muestra pestañas y hay un solo panel visible: el control se **oculta**, pero la preferencia **no se toca** — al volver a ancho `≥ lg` reaparece con el valor que tenía y los paneles se realinean. Ocultarlo no es apagarlo.

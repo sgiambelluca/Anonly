@@ -1,12 +1,14 @@
-<!-- CONTEXT: scope=render-engine | dependencias=core/Contracts.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,ADR-004-Rendering.md,ADR-012-Replacement-Modes.md,ADR-030-RenderEngine-LoadDocument.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-043-RenderEngine-Reparto-Host-Worker-Kernel.md,adr/ADR-044-Preview-Grupos-Mediacion-Orchestrator.md,adr/ADR-053-Pdfjs-Dentro-De-Un-Worker-Fuentes-Y-Cmaps.md | audiencia=IA-implementador | fase=10 (§6/§8/§12/§13 actualizados en fase 10: RENDER_REQUESTED.scale, guard MAX_RENDER_SCALE, cache LRU por escala + límite de bytes, supersede, ADR-037; reparto host/worker para PR13 por ADR-043; retiro del delta render por eventos de grouping por ADR-044; opciones de fuentes/CMaps de pdf.js en el kernel por ADR-053, cierre de fase 10) -->
+<!-- CONTEXT: scope=render-engine | dependencias=core/Contracts.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,ADR-004-Rendering.md,ADR-012-Replacement-Modes.md,ADR-030-RenderEngine-LoadDocument.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-043-RenderEngine-Reparto-Host-Worker-Kernel.md,adr/ADR-044-Preview-Grupos-Mediacion-Orchestrator.md,adr/ADR-053-Pdfjs-Dentro-De-Un-Worker-Fuentes-Y-Cmaps.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md | audiencia=IA-implementador | fase=10 (§6/§8/§12/§13 actualizados en fase 10: RENDER_REQUESTED.scale, guard MAX_RENDER_SCALE, cache LRU por escala + límite de bytes, supersede, ADR-037; reparto host/worker para PR13 por ADR-043; retiro del delta render por eventos de grouping por ADR-044; opciones de fuentes/CMaps de pdf.js en el kernel por ADR-053, cierre de fase 10; §2/§8/§13/§14/§15 en fase 11: RENDER_REQUESTED.kind requerido y render de un solo lado por ADR-056) -->
 
 # Render Engine — Spec de Motor
 
 > Renderiza páginas del PDF (original o anonimado) a imágenes usando OffscreenCanvas en Web Workers. Produce highlight de grupos habilitados y aplica reemplazos visualmente según `ReplacementMode`. Soporta preview incremental y render full para export.
 
 **EngineId**: `render`
-**Versión del spec**: 1.7.0
-**Última actualización**: 2026-07-31
+**Versión del spec**: 1.8.0
+**Última actualización**: 2026-08-05
+
+> **Nota (v1.8.0, ADR-056, 2026-08-05 — `RENDER_REQUESTED` dice de qué panel viene; el motor renderiza un solo lado)**: `RenderRequested` (`Contracts.md` §8) gana `kind: "original" | "anonymized"` **requerido**, y `handleRenderRequested` deja de reconstruir incondicionalmente los dos `RenderPageInput` por página: renderiza **solo** el `kind` pedido. Renderizar los dos era correcto mientras los dos paneles del visor mostraban siempre el mismo rango (scroll sincronizado por diseño); con el scroll independiente de ADR-054 dejó de serlo, y scrollear un panel refrescaba el otro — el usuario veía recargarse un visor que no había tocado, y la mitad del trabajo de render se iba en páginas que nadie miraba. Restricción dura que acompaña al cambio (ADR-056 §4): la entrada de supersede (`registerPendingRender`, ADR-037 §4) se registra **únicamente para el `kind` pedido** — registrar los dos haría que el pedido de un panel abortara renders en vuelo legítimos del otro, que es el error natural al hacer este cambio de forma mecánica. Interfaz pública de §6: sin cambios de firma (`renderPage`/`renderPages` ya recibían `kind` en su input).
 
 > **Nota (v1.7.0, ADR-053, 2026-07-31 — pdf.js dentro del RenderWorker no puede usar la Font Loading API)**: el kernel corre la capa de display de pdf.js dentro de un Web Worker, donde no existe `document`. El registro del `@font-face` falla con un `TypeError` que pdf.js **no loguea**, y como `disableFontFace` queda en `false` (su default en browser), el motor dibuja los `fontChar` del área de uso privado contra una fuente que nunca se registró: todo el texto de esas páginas sale como glifos `.notdef` (cuadrados), en preview **y** en export, que compone el mismo raster. Falla en silencio y solo para los documentos cuyas fuentes están subseteadas o usan encodings no triviales — de ahí que unos PDFs se vieran perfectos y otros no. `kernelLoadDocument` pasa a configurar `getDocument()` según la regla transversal de `05_Worker_Architecture.md` §7: `disableFontFace: true` (glifos por `Path2D`, sin DOM), `useSystemFonts: false`, `useWorkerFetch: false` **explícito**, `cMapUrl`/`cMapPacked`/`standardFontDataUrl` first-party, y **factories propias** de CMap y de standard fonts porque las `DOM*` de pdf.js tocan `document.baseURI` en su primer fetch. Las tres trampas que hacen que omitir cualquiera de esas piezas rompa el visor entero están en ADR-053, Contexto §6. Interfaz pública de §6: sin cambios de firma.
 >
@@ -52,7 +54,8 @@ Recibir requests de renderizado por página (`RENDER_REQUESTED` o invocación di
 - Emitir `PREVIEW_UPDATED` (por página, preview), `RENDER_FINISHED`, `RENDER_FAILED`, `PREVIEW_PAGE_FAILED`.
 - Escuchar `RENDER_REQUESTED` (único evento consumido desde ADR-044; los cambios de grupos llegan mediados por el Orchestrator como invocaciones directas de `renderPage`).
 - Transferir zero-copy `ImageData`/`ArrayBuffer` de vuelta al host.
-- Propagar `RENDER_REQUESTED.scale` a `renderPages` (ADR-037 §1); validar contra `MAX_RENDER_SCALE` y aplicar el supersede por página de renders obsoletos (ADR-037 §4).
+- Propagar `RENDER_REQUESTED.scale` a `renderPages` (ADR-037 §1); validar contra `MAX_RENDER_SCALE` y aplicar el supersede por página de renders obsoletos (ADR-037 §4), registrando la entrada de supersede **solo para el `kind` pedido** (ADR-056 §4).
+- Renderizar **únicamente el `kind` que trae `RENDER_REQUESTED`** (ADR-056 §1), nunca los dos: cada panel del visor pide lo suyo y el motor no infiere nada sobre el otro.
 
 ---
 
@@ -174,7 +177,9 @@ Canal: `EventChannel.Render`.
 
 | Evento | Cuándo | Acción |
 |---|---|---|
-| `RENDER_REQUESTED` (canal `ui`) | usuario pide preview/export | `renderPages` con los `pageIndices` indicados y el `scale` recibido (ausente → `previewScale`/`fullScale` según `mode`, ADR-037 §1); si hay un render pendiente en cola o en vuelo para la misma `(documentId, pageIndex, kind)` con otra escala, se descarta/aborta sin emitir `PREVIEW_UPDATED` (supersede, ADR-037 §4 — solo entre renders originados por `RENDER_REQUESTED`; las invocaciones directas de `renderPage`/`renderPages` no participan, caso 21) |
+| `RENDER_REQUESTED` (canal `ui`) | un panel del visor pide preview/export de sus páginas | `renderPages` con los `pageIndices` indicados, **un solo `RenderPageInput` por página, del `kind` recibido** (ADR-056 §1), y el `scale` recibido (ausente → `previewScale`/`fullScale` según `mode`, ADR-037 §1); si hay un render pendiente en cola o en vuelo para la misma `(documentId, pageIndex, kind)` con otra escala, se descarta/aborta sin emitir `PREVIEW_UPDATED` (supersede, ADR-037 §4 — solo entre renders originados por `RENDER_REQUESTED`; las invocaciones directas de `renderPage`/`renderPages` no participan, caso 21) |
+
+> **Reconstrucción del input y `kind` (ADR-056 §1/§4)**: el payload sigue sin traer `replacements`/`annotations`, así que el input se reconstruye desde el último recordado para esa página (`lastOriginalInputs`/`lastAnonymizedInputs`, nota de implementación 1) — pero **solo el del `kind` pedido**; el mapa del otro lado ni se consulta. Igual con `registerPendingRender`: se registra una sola entrada, la del `kind` pedido. Registrar las dos deja una entrada de supersede sobre la clave del **otro** panel y aborta renders en vuelo legítimos de ese panel apenas las escalas difieran. Antes de ADR-056 el handler reconstruía los dos lados sin condición posible, lo que era correcto mientras el visor tenía scroll sincronizado y dejó de serlo con ADR-054.
 
 Canales escuchados: `EventChannel.UI` (único desde ADR-044; las suscripciones a `EventChannel.Grouping` — `GROUP_REPLACEMENT_CHANGED`/`GROUP_TOGGLED` → `requestDeltaRender` — se retiraron: ese camino era el deadlock de arranque + toggle lossy, ver nota de cabecera).
 
@@ -280,6 +285,8 @@ El `ImageData` se transfiere zero-copy al host. El host lo convierte a `Blob` y 
 20. **Cache a distintas escalas del mismo `(documentId, pageIndex, kind, mode)`**: coexisten como entradas separadas del LRU (clave incluye `scale`); compiten por `cachePages` y `PREVIEW_CACHE_MAX_BYTES` igual que cualquier otra entrada (ADR-037 §3).
 21. **Invocación directa vs. supersede (hallazgo de revisión Hito 10 PR4; alcance simplificado por ADR-044)**: las entradas de supersede que registra el flujo de `RENDER_REQUESTED` solo afectan a renders originados por ese mismo flujo. Una invocación directa (`renderPage`/`renderPages` — el export del Orchestrator en `mode: "full"`, los renders mediados del preview de ADR-044 en `mode: "preview"`, tests) nunca las consulta: un export posterior a un preview por evento a otra escala se ejecuta siempre, aunque la entrada del preview siga registrada. Las entradas persisten hasta `unloadDocument`/`loadDocument` (reload)/`dispose` — deliberadamente NO se limpian al completar un render: limpiarlas reintroduce la carrera en la que un render en cola ya superado deja de detectar su reemplazo si el ganador completa y borra la entrada primero. `rasterizePage` no participa del mecanismo (ADR-034 §1).
 22. **PDF protegido (ADR-050)**: `loadDocument` sin `password` sobre un PDF encriptado falla en `getDocument` (pdfjs: "No password given") y se mapea a `RenderFailedError` como cualquier otro fallo de carga (§11) — mismo tratamiento que ya tenía, no un camino nuevo. Con `password` correcto carga normal. El password retenido host-side sobrevive a un crash de worker (re-priming, ADR-043 §5) y muere con `unloadDocument`/`dispose`. Un `loadDocument` de re-carga (caso 17) sobre el mismo `documentId` reemplaza también el password retenido, incluido el caso "antes sin password, ahora con".
+23. **`RENDER_REQUESTED` de un panel no toca al otro (ADR-056 §1)**: un evento con `kind: "original"` produce exactamente los renders de `original` para sus `pageIndices` — cero renders y cero `PREVIEW_UPDATED` de `anonymized`, aunque el otro panel esté mostrando esas mismas páginas. Simétrico para `anonymized`. El motor no tiene ninguna vía para inferir que el otro lado hace falta: si hace falta, el otro panel emite su propio evento.
+24. **Supersede acotado al `kind` pedido (ADR-056 §4)**: un `RENDER_REQUESTED { kind: "original", scale: S }` **no** deja entrada de supersede sobre `(documentId, pageIndex, "anonymized")`. Un render de `anonymized` en vuelo a otra escala, originado por el pedido del otro panel, sobrevive y emite su `PREVIEW_UPDATED` normalmente. Es el caso que protege contra la implementación mecánica del cambio (registrar los dos kinds "porque antes se registraban los dos").
 
 ---
 
@@ -319,7 +326,11 @@ El `ImageData` se transfiere zero-copy al host. El host lo convierte a `Blob` y 
 | `dispose destroys loaded PDFDocumentProxies` | `contract.test.ts` | contract | limpieza (ADR-030) |
 | `1000 pages only render visible + adjacent` | `stress.test.ts` (en `src/__tests__/` hasta que exista `tests/stress/`; ADR-031 §5) | stress | caso 10 |
 | `OffscreenCanvas fallback when unavailable` | `edge.test.ts` | edge | caso 14 |
-| `RENDER_REQUESTED propagates scale to renderPages` | `contract.test.ts` | contract | ADR-037 §1 |
+| `RENDER_REQUESTED propagates scale to renderPages` | `contract.test.ts` | contract | ADR-037 §1 (adaptado por ADR-056: un solo `kind` por evento, ya no `>= 2` renders) |
+| `RENDER_REQUESTED with kind "original" renders only original (no anonymized render, no PREVIEW_UPDATED)` | `contract.test.ts` | contract | caso 23 (ADR-056 §1) |
+| `RENDER_REQUESTED with kind "anonymized" renders only anonymized` | `contract.test.ts` | contract | caso 23 (ADR-056 §1) |
+| `RENDER_REQUESTED registers a supersede entry only for the requested kind` | `edge.test.ts` | edge | caso 24 (ADR-056 §4) |
+| `an in-flight anonymized render is not aborted by an original request at another scale` | `edge.test.ts` | edge | caso 24 (ADR-056 §4) |
 | `scale out of range warns and no-ops via event, throws InvalidInputError via direct call` | `edge.test.ts` | edge | caso 19 (ADR-037 §2) |
 | `superseded render in queue is discarded without PREVIEW_UPDATED` | `edge.test.ts` | edge | caso 18 (ADR-037 §4) |
 | `superseded render in flight aborts at next checkpoint without PREVIEW_UPDATED` | `edge.test.ts` | edge | caso 18 (ADR-037 §4) |
@@ -349,6 +360,7 @@ Fixtures: `tests/fixtures/text-10p.pdf`, `scanned-10p.pdf`, una página con rota
 - [ ] 11. ~~Implementar `requestDeltaRender` (index `pageIndex → groupIds`, lookup, re-render solo afectadas).~~ **Retirado por ADR-044** (junto con `groupOverrides`/`apply*Overrides`/`pageGroupIndex`); el re-render por cambio de grupo lo media el Orchestrator.
 - [ ] 12. Implementar LRU cache en host (clave `documentId:pageIndex:kind:mode:scale:hash(replacements ++ annotations)`; ADR-031 §2, extendida con `scale` por ADR-037 §3) con límite adicional por bytes (`PREVIEW_CACHE_MAX_BYTES`).
 - [ ] 12b. Implementar guard de `scale` (`MAX_RENDER_SCALE`) y el supersede por página de renders obsoletos al recibir `RENDER_REQUESTED` con escala distinta (ADR-037 §2, §4).
+- [ ] 12c. (Fase 11, ADR-056) `handleRenderRequested` construye **un solo** `RenderPageInput` por página, del `kind` del evento, y registra la entrada de supersede **solo para ese kind** (§8, casos 23–24).
 - [ ] 13. Implementar `dispose` (libera OffscreenCanvas, workers inactivos y destruye los `PDFDocumentProxy` cargados; ADR-030).
 - [ ] 14. Escuchar `RENDER_REQUESTED` del bus (~~`GROUP_REPLACEMENT_CHANGED`, `GROUP_TOGGLED`~~ retirados por ADR-044).
 - [ ] 15. Escribir `contract.test.ts` con todos los tests contractuales.

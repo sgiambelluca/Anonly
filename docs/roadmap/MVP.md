@@ -226,8 +226,12 @@ Orden canónico de PRs (ADR-038 §8; los PRs 2-4 no dependen del scaffold y pued
 | B3 | cMaps + standard fonts + factories propias en la extracción | `pdf-engine` | ADR-053 §5 | Media |
 | C1 | Scroll independiente por panel + `ScrollSyncToggle` + estado del visor por-kind | `apps/react-client` | ADR-054 §10 | Media |
 | D1..D4 | Puerto `unknown` + decoder, uno por motor | `ocr-engine`, `render-engine`, `pdf-engine`, `export-engine` | ADR-055 §7 | Preventiva, sin fecha |
+| E1 | `PageCanvas` no reasigna dimensiones si no cambiaron (mata el parpadeo del visor al scrollear) | `apps/react-client` | ADR-056 §5 | Alta |
+| E2 | `RenderRequested.kind` requerido + handler por kind + supersede acotado + emisores | `shared` + `render-engine` + `apps/react-client` (**atómico**, excepción a R-1 justificada en ADR-056 §7) | ADR-056 §1–§4, §7 | Alta |
 
 A y B y C son independientes entre sí y pueden correr en paralelo; dentro de B, el orden es estricto.
+
+**E1/E2 (ADR-056, 2026-08-05)** — cierran el bug reportado por el humano tras C1: con scroll independiente y sincronización apagada, scrollear rápido un panel recargaba constantemente el otro. Son dos defectos que se componen (el evento no dice de qué panel viene → el motor renderiza los dos lados; y un `blobUrl` nuevo por acierto de cache hacía que `PageCanvas` se borrara), independientes entre sí: E1 mata el síntoma visible y no depende de nada, E2 elimina el trabajo de render desperdiciado. E1 va primero por criterio de alivio, pero no bloquea a E2. **El ADR y todas las actualizaciones de spec/doc ya están mergeados en `main`** (excepción explícita a R-21 pedida por el humano, ADR-056 §7): los implementadores arrancan con la documentación al día.
 
 ### Hito 11 — Hardening
 - Performance gates (todas las métricas de `00_Project_Vision.md` §7).

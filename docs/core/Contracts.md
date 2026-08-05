@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=contratos-base | dependencias=03_Data_Model.md,04_Event_System.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-049-Errores-Cruzando-Worker-Discriminacion-Por-Code.md | audiencia=IA-implementador | fase=3 (§3.5 actualizado en fase 10: CoreRuntimeOptions/WorkerLike/WorkerFactory para transporte de workers —ADR-036 §2—, IPipelineOrchestrator.reanalyze/ReanalyzeConfigPatch —ADR-038 §1—; §6 gana MAX_RENDER_SCALE/PREVIEW_CACHE_MAX_BYTES —ADR-037 §2-3—; §8 RenderRequested.scale —ADR-037 §1—; §4 precisa qué garantiza deserialize() al cruzar el boundary, sin cambio de shape —ADR-049 §2—) -->
+<!-- CONTEXT: scope=contratos-base | dependencias=03_Data_Model.md,04_Event_System.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-049-Errores-Cruzando-Worker-Discriminacion-Por-Code.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md | audiencia=IA-implementador | fase=3 (§3.5 actualizado en fase 10: CoreRuntimeOptions/WorkerLike/WorkerFactory para transporte de workers —ADR-036 §2—, IPipelineOrchestrator.reanalyze/ReanalyzeConfigPatch —ADR-038 §1—; §6 gana MAX_RENDER_SCALE/PREVIEW_CACHE_MAX_BYTES —ADR-037 §2-3—; §8 RenderRequested.scale —ADR-037 §1—; §4 precisa qué garantiza deserialize() al cruzar el boundary, sin cambio de shape —ADR-049 §2—; fase 11: §8 RenderRequested.kind requerido —ADR-056 §1—) -->
 
 # Anonly — Contratos Base (`@anonly/shared`)
 
@@ -632,6 +632,10 @@ export interface RenderRequested {
   readonly documentId: string;
   readonly pageIndices: ReadonlyArray<number>;
   readonly mode: "preview" | "full";
+  // ADR-056 §1: panel que pide el render. REQUERIDO — el motor renderiza solo
+  // ese lado, nunca los dos. Lo determina el panel emisor (un PdfViewer por
+  // kind), NUNCA el toggle de sincronización de scroll (ADR-056 §2).
+  readonly kind: "original" | "anonymized";
   // ADR-037 §1: escala absoluta pdfjs (1.0 = 72 DPI), misma semántica que
   // RenderPageInput.scale (Render_Engine.md §6). Ausente → previewScale/fullScale
   // según mode. Rango válido: 0 < scale ≤ MAX_RENDER_SCALE.

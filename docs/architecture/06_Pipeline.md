@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=pipeline | dependencias=03_Data_Model.md,04_Event_System.md,05_Worker_Architecture.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md | audiencia=IA+humanos | fase=1 (§14 precisado en fase 10: etapa 11 en ExportWorker único, ADR-036 §1; §10/§11 y el diagrama de secuencia en fase 10: re-render por edición mediado por el Orchestrator, ADR-044) -->
+<!-- CONTEXT: scope=pipeline | dependencias=03_Data_Model.md,04_Event_System.md,05_Worker_Architecture.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md | audiencia=IA+humanos | fase=1 (§14 precisado en fase 10: etapa 11 en ExportWorker único, ADR-036 §1; §10/§11 y el diagrama de secuencia en fase 10: re-render por edición mediado por el Orchestrator, ADR-044; §10 en fase 11: un RENDER_REQUESTED renderiza un solo kind, ADR-056) -->
 
 # Anonly — Pipeline (TAD bloque 6)
 
@@ -202,7 +202,7 @@ El usuario puede overridear cualquiera desde la UI, emitiendo `CONFLICT_RESOLVE_
 
 **Estrategia**:
 - Solo se renderizan las páginas visibles en el viewport + 1 página antes y después (preemptive).
-- Se renderiza primero el lado "original" (más rápido, sin reemplazos) y luego el "anonimizado".
+- ~~Se renderiza primero el lado "original" (más rápido, sin reemplazos) y luego el "anonimizado".~~ **Enmendado por ADR-056 §1 (2026-08-05)**: un `RENDER_REQUESTED` produce el render de **un solo lado**, el que indica su `kind` requerido — no de los dos. Cada panel del visor pide lo suyo; si los dos lados hacen falta, son dos eventos. Renderizar los dos ante un solo pedido era correcto mientras el visor tenía scroll sincronizado (los dos paneles mostraban siempre el mismo rango) y dejó de serlo con ADR-054: scrollear un panel refrescaba el otro. Este bullet era la justificación citada por el código que lo hacía.
 - Cuando el usuario edita un grupo, se re-renderizan solo las páginas afectadas: el Orchestrator media los `ENTITY_GROUP_*` y re-invoca `renderPage` con los reemplazos recomputados del snapshot de Grouping (ADR-044; reemplaza al delta render interno de Render, retirado).
 - Ver `07_Performance_Strategy.md` para virtualización.
 

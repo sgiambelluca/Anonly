@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=componentes-ui | dependencias=ui/React_Client.md,ui/UX_Guidelines.md,ADR-001-Framework.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-054-Scroll-Independiente-Por-Panel.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md | audiencia=IA-implementador-ui | fase=4 (reconciliado en fase 10 por ADR-036: PasswordDialog/SettingsDialog/ConfirmDialog agregados §2.6–2.7/§8.9, zoom §5.2, mapeo §12; §2.6/§5.2/§5.5/§12 reescritos por ADR-037 —zoom con re-render real— y ADR-038 —SettingsDialog dispara reanalyze, no recreación del core—; §2.1/§2.5/§13.9 ajustados 2026-07-22 por el bug #7 del Escenario 1 E2E: gate de visibilidad por stage vs. vida del diálogo hijo abierto) -->
+<!-- CONTEXT: scope=componentes-ui | dependencias=ui/React_Client.md,ui/UX_Guidelines.md,ADR-001-Framework.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-054-Scroll-Independiente-Por-Panel.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md | audiencia=IA-implementador-ui | fase=4 (reconciliado en fase 10 por ADR-036: PasswordDialog/SettingsDialog/ConfirmDialog agregados §2.6–2.7/§8.9, zoom §5.2, mapeo §12; §2.6/§5.2/§5.5/§12 reescritos por ADR-037 —zoom con re-render real— y ADR-038 —SettingsDialog dispara reanalyze, no recreación del core—; §2.1/§2.5/§13.9 ajustados 2026-07-22 por el bug #7 del Escenario 1 E2E: gate de visibilidad por stage vs. vida del diálogo hijo abierto; §5.2/§5.4 en fase 11 por ADR-056 —requestRender con kind por panel, canvas que no se borra—) -->
 
 # Anonly — Catálogo de Componentes
 
@@ -243,9 +243,11 @@ apps/react-client/src/components/
 - **Props**: `kind: "original" | "anonymized"`.
 - **Stores**: `viewer`, `entities` (para highlights en `original`), `document`.
 - **Comportamiento**: usa `PageVirtualizer` para renderizar solo visibles. Escucha `PREVIEW_UPDATED` via `viewer.previewByPage[kind]` (por panel, `React_Client.md` §3.5 — evita re-renderizar este `PdfViewer` cuando el preview que cambió es del otro panel) y pasa el `blobUrl` al `PageCanvas` correspondiente.
-- **Eventos** (reconciliados por ADR-036 §5, reescrito por ADR-037):
-  - Cambio de `visibleRange` → `actions.requestRender(pageIndices)` (sin `kind`: el payload `RenderRequested` no lo tiene; Render produce original y anonimizado según su estrategia, `06_Pipeline.md` §10).
-  - Cambio de `zoom` → escala **CSS/canvas** del bitmap ya renderizado de inmediato (feedback durante el gesto) y, tras 150 ms sin nuevos ticks, `actions.requestRender(visibleRange, "preview", previewScale × zoom)` para un **re-render real** (ADR-037 §1/§5, supersede ADR-036 §6). El `PREVIEW_UPDATED` resultante reemplaza el bitmap CSS transitorio por el nítido.
+- **Eventos** (reconciliados por ADR-036 §5, reescrito por ADR-037, `kind` agregado por ADR-056 §1/§2):
+  - Cambio de `visibleRange` → `actions.requestRender(pageIndices, kind)` — **con el `kind` de este panel**: el motor renderiza solo ese lado. Antes se emitía sin `kind` y Render producía original y anonimizado, lo que con scroll independiente (ADR-054) hacía que scrollear este panel refrescara el otro.
+  - Cambio de `zoom` → escala **CSS/canvas** del bitmap ya renderizado de inmediato (feedback durante el gesto) y, tras 150 ms sin nuevos ticks, `actions.requestRender(visibleRange, kind, "preview", previewScale × zoom)` para un **re-render real** (ADR-037 §1/§5, supersede ADR-036 §6). El `PREVIEW_UPDATED` resultante reemplaza el bitmap CSS transitorio por el nítido.
+  - Primer render al observar `Ready` (`readyRenderTrigger.ts`) → también con el `kind` de este panel.
+  - **El `kind` sale siempre de la prop de este componente, nunca de `settings.scrollSyncEnabled`** (ADR-056 §2). Con la sincronización apagada el comportamiento lazy —solo se refresca el panel que se está moviendo— sale gratis de que cada panel hable por sí mismo; con ella prendida los dos paneles se mueven y los dos emiten. No hay condicional que escribir.
 
 ### 5.3 `PageVirtualizer`
 
@@ -263,6 +265,7 @@ apps/react-client/src/components/
 - **Props**: `pageIndex`, `kind`, `blobUrl?`, `annotations?`, `highlights?`.
 - **Render**: `<canvas>` con dimensión correcta. Si `blobUrl`, dibuja la imagen. Si `annotations` (kind=original), dibuja bordes color por tipo. Si `highlights` con conflicto, dibuja borde rojo.
 - **Skeleton**: si `!blobUrl`, dibuja skeleton gris con dimensión.
+- **Las dimensiones del `<canvas>` solo se asignan cuando cambian (ADR-056 §5)**. Asignar `canvas.width`/`canvas.height` **borra el bitmap aunque el valor sea idéntico** — es comportamiento del estándar HTML, no del navegador. Como el `blobUrl` cambia en cada `PREVIEW_UPDATED` aunque los píxeles sean los mismos (el motor acuña un `URL.createObjectURL` nuevo también en aciertos de cache, ADR-056 §6), asignarlas incondicionalmente al re-ejecutarse el efecto dejaba la página en gris hasta que la `Image` nueva terminaba de cargar: ese era el parpadeo constante que se veía al scrollear. La comprobación va en una **función pura testeable en Node** (los tests de `apps/react-client` corren sin jsdom), no en un `if` inline sin cobertura.
 - **Interacción**:
   - Hover sobre highlight → tooltip.
   - Click en highlight → selecciona grupo en `entities` store + scroll into view en `EntitiesPanel`.
