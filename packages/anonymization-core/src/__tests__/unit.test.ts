@@ -1143,6 +1143,96 @@ describe("Orchestrator — unit tests", () => {
       worker.emitMessage({ type: "COMPLETED", jobId, result: "ok" });
       await expect(dispatchPromise).resolves.toBe("ok");
     });
+
+    // ─── Regresión: broadcast en vuelo vs. dispatch concurrente ───
+    // Los controles de `broadcast()` van "directo a cada worker, sin cola"
+    // (`05_Worker_Architecture.md` §7.4): no pasan por el gate `active < size`
+    // de `pump()`, así que no pueden contar como slots ocupados ni llegarle a
+    // un worker mezclados con un job encolado.
+
+    it("un dispatch concurrente con un broadcast en vuelo no agota los slots (los envíos de broadcast no ocupan slot)", async () => {
+      const worker = createFakeWorker();
+      const pool = new WorkerPool({
+        poolKey: "render",
+        jobType: "render-page",
+        size: 1,
+        maxQueue: 10,
+        maxRetries: 0,
+        baseRetryDelayMs: 1,
+        maxRetryDelayMs: 1,
+        bus,
+        logger: createMockLogger(),
+        workerFactory: () => worker,
+      });
+
+      // Broadcast en vuelo: ocupa el único worker del pool sin resolver.
+      const broadcastPromise = pool.broadcast({ documentId: "doc-1" }, vi.fn());
+      await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalledTimes(1));
+      const broadcastJobId = (worker.postMessage.mock.calls[0]?.[0] as { readonly jobId: string })
+        .jobId;
+
+      // Antes del fix, este dispatch moría acá con "no hay slot de worker
+      // remoto libre" (InvalidInputError, retryable: false → la página se
+      // quedaba sin PREVIEW_UPDATED para siempre).
+      const dispatchPromise = pool.dispatch({
+        run: vi.fn(),
+        payload: { kind: "original" },
+        signal: new AbortController().signal,
+      });
+
+      worker.emitMessage({ type: "COMPLETED", jobId: broadcastJobId, result: "loaded" });
+      await expect(broadcastPromise).resolves.toEqual(["loaded"]);
+
+      await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalledTimes(2));
+      const dispatchJobId = (worker.postMessage.mock.calls[1]?.[0] as { readonly jobId: string })
+        .jobId;
+      worker.emitMessage({ type: "COMPLETED", jobId: dispatchJobId, result: "rendered" });
+      await expect(dispatchPromise).resolves.toBe("rendered");
+    });
+
+    it("un dispatch no postea su RUN mientras hay un broadcast de control en vuelo", async () => {
+      const worker = createFakeWorker();
+      const pool = new WorkerPool({
+        poolKey: "render",
+        jobType: "render-page",
+        size: 2,
+        maxQueue: 10,
+        maxRetries: 0,
+        baseRetryDelayMs: 1,
+        maxRetryDelayMs: 1,
+        bus,
+        logger: createMockLogger(),
+        workerFactory: () => worker,
+      });
+
+      const broadcastPromise = pool.broadcast({ documentId: "doc-1" }, vi.fn());
+      await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalledTimes(1));
+      const broadcastJobId = (worker.postMessage.mock.calls[0]?.[0] as { readonly jobId: string })
+        .jobId;
+
+      const dispatchPromise = pool.dispatch({
+        run: vi.fn(),
+        payload: { kind: "original" },
+        signal: new AbortController().signal,
+      });
+
+      // El `load-document` sigue sin responder: el `render-page` no puede
+      // haber llegado al worker todavía (trabajaría contra un
+      // PDFDocumentProxy a medio recrear).
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(worker.postMessage).toHaveBeenCalledTimes(1);
+
+      worker.emitMessage({ type: "COMPLETED", jobId: broadcastJobId, result: "loaded" });
+      await expect(broadcastPromise).resolves.toEqual(["loaded"]);
+
+      await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalledTimes(2));
+      const dispatchJobId = (worker.postMessage.mock.calls[1]?.[0] as { readonly jobId: string })
+        .jobId;
+      worker.emitMessage({ type: "COMPLETED", jobId: dispatchJobId, result: "rendered" });
+      await expect(dispatchPromise).resolves.toBe("rendered");
+    });
   });
 
   // ─── RenderEngine + RenderPool real (ADR-043, PR13): wiring façade↔motor,

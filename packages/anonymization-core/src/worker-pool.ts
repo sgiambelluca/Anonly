@@ -94,6 +94,18 @@ function extractWorkerOutbound(ev: unknown): WorkerOutbound | undefined {
 
 interface PendingRemoteJob {
   readonly slotIndex: number;
+  /**
+   * `true` para los envíos de `broadcast()` (los controles `load-document`/
+   * `unload-document` de `05_Worker_Architecture.md` §7.4, que van "directo
+   * a cada worker, **sin cola**"). No consumen un slot de concurrencia —
+   * apuntan a un worker que ya existe, no piden uno libre —, así que
+   * `assignRemoteSlot()` no los cuenta: contarlos hacía que cualquier
+   * `dispatch()` concurrente con un re-priming (ADR-043 §5) muriera con el
+   * error de invariante, y ese error no es reintentable (`InvalidInputError`,
+   * `retryable: false`) — la página quedaba sin `PREVIEW_UPDATED` para
+   * siempre.
+   */
+  readonly isBroadcast?: boolean;
   readonly resolve: (result: unknown) => void;
   readonly reject: (err: unknown) => void;
   /**
@@ -238,6 +250,18 @@ export class WorkerPool {
   // `workerFactory` (comportamiento in-process de hoy, sin cambios). ───
   private readonly remoteWorkers = new Map<number, WorkerLike>();
   private readonly pendingRemoteJobs = new Map<string, PendingRemoteJob>();
+  /**
+   * Broadcasts de control en vuelo (`broadcast()`). Un `dispatch()` remoto
+   * espera a que se vacíen antes de postear su `RUN`: los controles de
+   * `05_Worker_Architecture.md` §7.4 mutan el estado por documento del worker
+   * (`load-document` recrea el `PDFDocumentProxy`, `unload-document` lo
+   * libera), así que un `render-page` entregado al mismo worker en el medio
+   * trabaja contra un proxy que se está destruyendo — pdf.js lo rechaza con
+   * "Rendering cancelled". Los broadcasts nunca esperan a un dispatch, así
+   * que esta espera es unidireccional y no puede deadlockear (incluido el
+   * broadcast anidado que dispara `onWorkerCreated` desde `workerForSlot`).
+   */
+  private readonly inFlightBroadcasts = new Set<Promise<unknown>>();
 
   constructor(options: WorkerPoolOptions) {
     this.options = options;
@@ -342,9 +366,28 @@ export class WorkerPool {
 
     await this.workerForSlot(0);
     const entries = [...this.remoteWorkers.entries()];
-    return Promise.all(
+    const all = Promise.all(
       entries.map(([slot, worker]) => this.sendBroadcastToWorker<TResult>(slot, worker, payload)),
     );
+    // Registrado para que `dispatchRemote` no entregue un job a un worker
+    // mientras este control le está mutando el estado por documento (ver
+    // `inFlightBroadcasts`).
+    this.inFlightBroadcasts.add(all);
+    try {
+      return await all;
+    } finally {
+      this.inFlightBroadcasts.delete(all);
+    }
+  }
+
+  /**
+   * Espera a los `broadcast()` de control en vuelo (una sola pasada: un
+   * broadcast que arranque *después* de esta llamada no la extiende, así
+   * que un dispatch no puede quedar postergado indefinidamente).
+   */
+  private async settleInFlightBroadcasts(): Promise<void> {
+    if (this.inFlightBroadcasts.size === 0) return;
+    await Promise.allSettled([...this.inFlightBroadcasts]);
   }
 
   private sendBroadcastToWorker<TResult>(
@@ -356,6 +399,7 @@ export class WorkerPool {
     return new Promise<TResult>((resolve, reject) => {
       this.pendingRemoteJobs.set(jobId, {
         slotIndex: slot,
+        isBroadcast: true,
         resolve: (result) => resolve(result as TResult),
         reject,
       });
@@ -514,10 +558,17 @@ export class WorkerPool {
 
       // `workerForSlot` es async (ADR-043 §5: un worker nuevo se re-primea —
       // `onWorkerCreated`, awaited — antes de aceptar su primer job). El
-      // `RUN` recién se postea cuando el worker está listo.
+      // `RUN` recién se postea cuando el worker está listo Y no hay ningún
+      // control de `broadcast()` en vuelo sobre el pool (ver
+      // `inFlightBroadcasts`): el worker de un slot que YA existía no pasa
+      // por `onWorkerCreated`, así que sin esta espera recibiría su
+      // `render-page` en el medio del `load-document` que le está recreando
+      // el `PDFDocumentProxy`.
       void this.workerForSlot(slot)
-        .then((worker) => {
+        .then(async (worker) => {
           if (!this.pendingRemoteJobs.has(jobId)) return; // ya cancelado/resuelto mientras se creaba el worker.
+          await this.settleInFlightBroadcasts();
+          if (!this.pendingRemoteJobs.has(jobId)) return;
 
           if (signal.aborted) {
             // Abortado mientras se creaba/re-primeaba el worker: nunca llegó
@@ -553,14 +604,26 @@ export class WorkerPool {
   }
 
   /**
-   * Slot de concurrencia 0..size-1 no usado por ningún job remoto en curso.
-   * Siempre hay uno disponible por construcción: `pump()` solo ejecuta un
-   * job (remoto o no) dentro del gate `active < size`, así que el número de
-   * jobs remotos simultáneos nunca supera `size`.
+   * Slot de concurrencia 0..size-1 no usado por ningún job **encolado** en
+   * curso. Siempre hay uno disponible por construcción: `pump()` solo ejecuta
+   * un job (remoto o no) dentro del gate `active < size`, así que el número
+   * de jobs remotos simultáneos nunca supera `size`.
+   *
+   * Los envíos de `broadcast()` quedan fuera de esa cuenta (`isBroadcast`):
+   * no pasan por la cola ni por el gate de `pump()` — van directo a cada
+   * worker vivo (`05_Worker_Architecture.md` §7.4) —, así que contarlos
+   * rompía el invariante desde afuera. Con `renderPoolSize: 2` (el default de
+   * un equipo `lowResource`, `config.ts`) bastaba un re-priming en vuelo
+   * (ADR-043 §5) para que sus 2 envíos ocuparan los 2 slots y cualquier
+   * `render-page` concurrente muriera acá.
    */
   private assignRemoteSlot(): number {
     const used = new Set<number>();
-    for (const pending of this.pendingRemoteJobs.values()) used.add(pending.slotIndex);
+    for (const pending of this.pendingRemoteJobs.values()) {
+      // Los controles de `broadcast()` no ocupan slot (ver `isBroadcast`).
+      if (pending.isBroadcast === true) continue;
+      used.add(pending.slotIndex);
+    }
     for (let slot = 0; slot < this.options.size; slot += 1) {
       if (!used.has(slot)) return slot;
     }
