@@ -277,6 +277,9 @@ El Orchestrator **no define códigos de error nuevos**: propaga `SerializedEngin
 | `failed OCR page skipped with warning, pipeline continues` | `edge.test.ts` | edge | caso 5 |
 | `NER disabled skips stage 5 and finishes grouping after REGEX_FINISHED` | `edge.test.ts` | edge | caso 6 (ADR-034 §2) |
 | `startSession invoked before dispatching detection` | `contract.test.ts` | contract | ADR-034 §2 |
+| `con runtime.workers.pdf configurado, pdf-parse se despacha por postMessage (PR12, ADR-036 §2/§3)` | `unit.test.ts` | unit | PR12 (transporte); desde ADR-055 §10 (D3.2) es además el test de sobre del §5 de ADR-055 en su único consumidor: el pool fake **ignora `run()`** y resuelve el `PdfEngineOutput` que postea el `PdfWorker` — el pipeline avanza igual |
+| `garbage from the pdf pool fails the pipeline loudly` | `edge.test.ts` | edge | ADR-055 §3/§10 (D3.2): el mismo fake resolviendo `{}`/`null` → `PIPELINE_FAILED` con `INVALID_INPUT`, nunca un avance silencioso con un `Document` roto |
+| `an enveloped pdf result fails the pipeline instead of advancing silently` | `edge.test.ts` | edge | ADR-055 §10 (D3.2): un `PdfEngineOutput` correcto pero envuelto (`{ output: {...} }`) — la regresión exacta de Contexto §1 (el sobre `{ spans }` de NER) trasladada a PDF — también falla ruidoso en vez de avanzar con campos `undefined` |
 | `textless pages rasterized via RenderEngine before OCR dispatch` | `contract.test.ts` | contract | ADR-034 §1 |
 | `EXPORT_REQUESTED builds provider and calls export directly` | `contract.test.ts` | contract | ADR-032 §2 |
 | `PREVIEW_UPDATED replaces and revokes previous blob URL for same key` | `unit.test.ts` | unit | ADR-034 §5 |

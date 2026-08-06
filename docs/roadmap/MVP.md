@@ -225,7 +225,8 @@ Orden canónico de PRs (ADR-038 §8; los PRs 2-4 no dependen del scaffold y pued
 | B2 | `disableFontFace` + assets + factories propias en `kernelLoadDocument` | `render-engine` | ADR-053 §9 | Alta |
 | B3 | cMaps + standard fonts + factories propias en la extracción | `pdf-engine` | ADR-053 §5 | Media |
 | C1 | Scroll independiente por panel + `ScrollSyncToggle` + estado del visor por-kind | `apps/react-client` | ADR-054 §10 | Media |
-| D1..D4 | Puerto `unknown` + decoder, uno por motor | `ocr-engine`, `render-engine`, `pdf-engine`, `export-engine` | ADR-055 §7 | Preventiva, sin fecha |
+| D1, D2, D4 | Puerto `unknown` + decoder, uno por motor | `ocr-engine`, `render-engine`, `export-engine` | ADR-055 §7 | Preventiva, sin fecha |
+| D3.1 → D3.2 | `decodePdfEngineOutput` exportado, después el call site del façade a `unknown` + decoder. **Orden estricto**, dos módulos, dos PRs (mismo reparto que ADR-049 → PR 17.1/17.2) | `pdf-engine` → `packages/anonymization-core/src` (façade) | ADR-055 §10 | Preventiva, sin fecha |
 | E1 | `PageCanvas` no reasigna dimensiones si no cambiaron (mata el parpadeo del visor al scrollear) | `apps/react-client` | ADR-056 §5 | Alta |
 | E2 | `RenderRequested.kind` requerido + handler por kind + supersede acotado + emisores | `shared` + `render-engine` + `apps/react-client` (**atómico**, excepción a R-1 justificada en ADR-056 §7) | ADR-056 §1–§4, §7 | Alta |
 
