@@ -2,7 +2,64 @@
  * @anonly/render-engine — `RenderEngine` (implementa `IEngine`).
  *
  * Fuente de verdad: docs/core/Render_Engine.md (v1.8.0, ADR-030, ADR-031,
- * ADR-034, ADR-037, ADR-043, ADR-044, ADR-050, ADR-053, ADR-056).
+ * ADR-034, ADR-037, ADR-043, ADR-044, ADR-050, ADR-053, ADR-056). ADR-055 NO
+ * está en esa lista: es un PR preventivo de endurecimiento (D2 de la serie
+ * D1..D4 de `roadmap/MVP.md`, ADR-055 §9 fila "3-5") que no cambia ningún
+ * contrato público ni comportamiento
+ * documentado en el spec — solo angosta el puerto interno de este archivo
+ * (nota más abajo), así que Render_Engine.md no se toca (R-21).
+ *
+ * ADR-055 (2026-07-31 — el resultado que cruza un Worker se decodifica con
+ * un guard, nunca con un cast): `RenderJobPool` angosta `dispatch` Y
+ * `broadcast` (nota 7, más abajo) de `Promise<T>` genérico a
+ * `Promise<unknown>`/`Promise<ReadonlyArray<unknown>>`. Ese `<T>` era una
+ * afirmación que el compilador no podía verificar — del otro lado de `run()`
+ * puede haber cruzado un `postMessage` real. Con `unknown`, el compilador
+ * obliga a pasar por uno de los tres decoders definidos junto a
+ * `IMMEDIATE_POOL` (`decodeKernelRenderResult`, `decodeRasterizeResult`,
+ * `decodeLoadDocumentResult`) antes de tocar `imageData`/`encoded`/
+ * `pageCount`: no hay otra forma de escribir el consumidor. Este motor NUNCA
+ * tuvo el bug de ADR-055 Contexto §1 (exclusivo de `ner-engine`): las cuatro
+ * operaciones que cruzan el puerto (`renderPageInternal`/`rasterizePage` vía
+ * `dispatch`; `loadDocument`/`unloadDocument`/`reprimeWorkers` vía
+ * `broadcast`) tienen cada una UNA sola forma legítima de resultado,
+ * idéntica en el camino remoto (`worker/entry.ts` postea el `result` pelado
+ * de la función de kernel correspondiente, sin sobre adicional) y en el
+ * in-process (`IMMEDIATE_POOL` invoca la misma función de kernel) — ver el
+ * comentario de cada decoder para la prueba de paridad puntual.
+ *
+ * Alcance de `broadcast` (decisión propia de este PR: ADR-055 §2 enumera los
+ * puertos por motor — `RenderJobPool` entre ellos — sin bifurcar método por
+ * método dentro de cada uno): se angosta igual que `dispatch` porque el
+ * invariante de ADR-055 §1 ("ningún valor que haya cruzado la frontera de un
+ * Worker se consume sin decodificar") no distingue por qué método del puerto
+ * cruzó — `broadcast` pasa por el mismo `postMessage`/mismo cast a ciegas
+ * (`result as TResult` en `WorkerPool#sendBroadcastToWorker`,
+ * `../../src/worker-pool.ts`, que ADR-055 §8 deja intacto por ser
+ * transporte) que `dispatch`. De las tres operaciones que usan `broadcast`,
+ * solo `loadDocument` CONSUME un campo del resultado (`pageCount`) — tiene
+ * decoder real. `unloadDocument`/`reprimeWorkers` nunca leen ningún campo
+ * del valor resuelto (ver sus comentarios puntuales, más abajo en este
+ * archivo) — deliberadamente sin decoder: no hay "consumo" que proteger.
+ *
+ * Fallo de decodificación por operación (criterio ADR-055 §3: nunca
+ * `[]`/`undefined` en silencio, "que falle ruidosamente es el punto"; razón
+ * completa en el comentario de cada decoder): `renderPageInternal`/
+ * `rasterizePage` lanzan `RenderPageFailedError` — spec §11/§6 ya mapean
+ * "Fallo de pdfjs/canvas" a esa clase, y una forma de kernel irreconocible
+ * ES esa categoría de fallo; retryable, y agotados los reintentos de
+ * `renderPagesInternal` emite `PREVIEW_PAGE_FAILED` y continúa con las demás
+ * páginas del batch — mismo patrón que `ocr-engine` (evento observable de
+ * fallo puntual por página, nada se disfraza de resultado sano).
+ * `loadDocument` lanza `RenderFailedError` (misma clase que el chequeo
+ * preexistente, inmediatamente adyacente en el código, para "load-document
+ * no devolvió resultado de ningún worker": no recuperable, aborta la carga
+ * del documento completo — acá no hay noción de "página" que tolerar).
+ * Ninguna de las cuatro operaciones necesitó la maquinaria de escalada de
+ * `ner-engine` (`NerDispatchEnvelopeError`/`NerDispatchDecodeFailure`): a
+ * diferencia de NER, acá ninguna forma de fallo de decodificación puede
+ * disfrazarse de "no había nada que renderizar" — o hay una imagen usable o
+ * hay un error observable, nunca un silencio.
  *
  * ADR-050 (2026-07-30 — el password de un PDF protegido llega hasta
  * `loadDocument`): tercer parámetro opcional `password?: string`. Reparto
@@ -118,14 +175,25 @@
  *    `orchestrator.ts`, tampoco documentado en `Orchestrator.md` §6).
  *    Estructural a propósito (mismo patrón que `WorkerLike`, Contracts.md
  *    §3.5): la `WorkerPool` real del façade (`packages/anonymization-core/
- *    src/worker-pool.ts`) ya expone `dispatch<T>(params): Promise<T>` con
- *    esta forma, así que la satisface sin ningún cast ni import cruzado
+ *    src/worker-pool.ts`) expone `dispatch<TResult>(params): Promise<TResult>`
+ *    y `broadcast<TResult>(payload, run): Promise<ReadonlyArray<TResult>>`,
+ *    genéricos — eso no cambia con ADR-055 (`worker-pool.ts` no se toca,
+ *    ADR-055 §8: es transporte, no conoce el contrato de payload de cada
+ *    motor). Desde ADR-055 §2 este puerto (`RenderJobPool`) deja de ser
+ *    genérico y declara `Promise<unknown>`/`Promise<ReadonlyArray<unknown>>`;
+ *    contra eso, la `WorkerPool` real simplemente instancia
+ *    `TResult = unknown` y lo sigue satisfaciendo sin cast ni import cruzado
  *    (P-2: este paquete no puede importar del façade, que es quien lo
- *    importa a él). El façade inyecta la pool real vía el constructor
- *    (`new RenderEngine(pool)`, en `create-core.ts`); sin argumento, cae al
- *    fallback in-process trivial (usado por los ~150 tests de este motor,
- *    que construyen `new RenderEngine()` sin pool y esperan exactamente el
- *    comportamiento de antes de este PR — ejecución inmediata, sin cola).
+ *    importa a él) — el mismo razonamiento que ADR-055 §2 documenta para
+ *    `NerJobPool`/`OcrJobPool` ("`create-core.ts` no cambia"). El façade
+ *    inyecta la pool real vía el constructor (`new RenderEngine(pool)`, en
+ *    `create-core.ts`); sin argumento, cae al fallback in-process trivial
+ *    (usado por los ~150 tests de este motor, que construyen
+ *    `new RenderEngine()` sin pool y esperan exactamente el comportamiento
+ *    de antes de este PR — ejecución inmediata, sin cola). Su resultado
+ *    (remoto o in-process) pasa igual por el decoder correspondiente
+ *    (`decodeKernelRenderResult`/`decodeRasterizeResult`) antes de tocarlo:
+ *    es la prueba de paridad entre los dos caminos (ADR-055 §2).
  *    `maxRetriesOverride: 0` en cada `dispatch(...)`: el reintento de
  *    "1 vez" (spec §11) lo sigue implementando este motor en
  *    `renderPagesInternal`, no la pool (evitar reintentos compuestos).
@@ -162,6 +230,7 @@ import {
   kernelRasterizePage,
   kernelRenderPage,
   kernelUnloadDocument,
+  type KernelRenderResult,
 } from "./worker/kernel.js";
 
 const DEFAULT_TIMEOUT_MS = 10_000; // render-page preview (05_Worker_Architecture.md §4); full=30s idem si config lo define.
@@ -170,8 +239,15 @@ const DEFAULT_CACHE_PAGES = 16;
 
 // ─── Puerto interno de despacho (ADR-043 §2; ver nota 7 de cabecera) ───
 
-interface RenderDispatchParams<T> {
-  readonly run: () => Promise<T>;
+// `dispatch`/`broadcast` dejan de ser genéricos (ADR-055 §2, nota de
+// cabecera "Alcance de broadcast"): el parámetro de tipo `<T>` que tenían
+// antes era una afirmación que el compilador no podía verificar — del otro
+// lado de `run()` puede haber cruzado un `postMessage` real. Con `unknown`,
+// el compilador obliga a pasar por uno de los decoders definidos más abajo
+// antes de leer cualquier campo del resultado: no hay otra forma de escribir
+// el consumidor.
+interface RenderDispatchParams {
+  readonly run: () => Promise<unknown>;
   readonly signal: AbortSignal;
   readonly priority?: number;
   readonly payload?: unknown;
@@ -179,15 +255,15 @@ interface RenderDispatchParams<T> {
 }
 
 interface RenderJobPool {
-  dispatch<T>(params: RenderDispatchParams<T>): Promise<T>;
+  dispatch(params: RenderDispatchParams): Promise<unknown>;
   /**
-   * Broadcast (ADR-043 §4): usado por `loadDocument`/`unloadDocument` — a
-   * diferencia de `dispatch` (un job a UN worker), un control debe llegar a
-   * TODOS los workers vivos del pool. `run` es el fallback in-process
-   * (in-process: `broadcast` degenera en una sola invocación de `run()`,
-   * ADR-043 §4).
+   * Broadcast (ADR-043 §4): usado por `loadDocument`/`unloadDocument`/
+   * `reprimeWorkers` — a diferencia de `dispatch` (un job a UN worker), un
+   * control debe llegar a TODOS los workers vivos del pool. `run` es el
+   * fallback in-process (in-process: `broadcast` degenera en una sola
+   * invocación de `run()`, ADR-043 §4).
    */
-  broadcast<T>(payload: unknown, run: () => Promise<T>): Promise<ReadonlyArray<T>>;
+  broadcast(payload: unknown, run: () => Promise<unknown>): Promise<ReadonlyArray<unknown>>;
 }
 
 /**
@@ -197,14 +273,182 @@ interface RenderJobPool {
  * comportamiento de este motor antes de ADR-043 (no había ninguna pool
  * involucrada en `renderPage`/`rasterizePage`/`loadDocument`/`unloadDocument`
  * — el Orchestrator envolvía por fuera, en `runOcrStage`/`makeRenderPageProvider`,
- * y los tests de este paquete siempre invocaron los métodos directo).
+ * y los tests de este paquete siempre invocaron los métodos directo). El
+ * resultado de `run()` (la forma pelada que produce cada función del kernel)
+ * pasa igual por el decoder correspondiente en el call site — es la prueba
+ * de paridad entre los dos caminos (ADR-055 §2).
  */
 const IMMEDIATE_POOL: RenderJobPool = {
-  dispatch: <T>(params: RenderDispatchParams<T>): Promise<T> => params.run(),
-  broadcast: async <T>(_payload: unknown, run: () => Promise<T>): Promise<ReadonlyArray<T>> => [
-    await run(),
-  ],
+  dispatch: (params: RenderDispatchParams): Promise<unknown> => params.run(),
+  broadcast: async (
+    _payload: unknown,
+    run: () => Promise<unknown>,
+  ): Promise<ReadonlyArray<unknown>> => [await run()],
 };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Detalle legible de una forma no reconocida, para el mensaje/`details` de
+ * los errores de decodificación de abajo — nunca contenido del documento
+ * (Code_Standards.md §9: "Nunca loguear contenido del documento"), solo la
+ * forma del valor.
+ */
+function describeDispatchResultShape(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return `array(length=${value.length})`;
+  if (isRecord(value)) return `object(keys=[${Object.keys(value).join(", ")}])`;
+  return typeof value;
+}
+
+// ─── Decoders del `Promise<unknown>` que resuelven dispatch/broadcast
+// (ADR-055 §2-§4; ver "ADR-055" en la nota de cabecera del archivo para el
+// resumen de las 4 operaciones). Cada uno acepta la ÚNICA forma legítima que
+// puede producir la operación correspondiente — idéntica en el camino remoto
+// (`worker/entry.ts` postea el `result` pelado de la función de kernel, sin
+// sobre) y en el in-process (`IMMEDIATE_POOL` invoca la misma función) — y
+// ante cualquier otra forma LANZA (ADR-055 §3): devolver un default en
+// silencio es exactamente el modo de falla que este mecanismo cierra. ───
+
+function isImageData(value: unknown): value is ImageData {
+  return (
+    isRecord(value) &&
+    value.data instanceof Uint8ClampedArray &&
+    typeof value.width === "number" &&
+    typeof value.height === "number"
+  );
+}
+
+const ENCODED_IMAGE_FORMATS: ReadonlySet<string> = new Set(["png", "jpeg"]);
+
+function isEncodedPageImage(value: unknown): value is EncodedPageImage {
+  return (
+    isRecord(value) &&
+    value.bytes instanceof ArrayBuffer &&
+    typeof value.format === "string" &&
+    ENCODED_IMAGE_FORMATS.has(value.format) &&
+    typeof value.widthPx === "number" &&
+    typeof value.heightPx === "number"
+  );
+}
+
+function isKernelRenderResult(value: unknown): value is KernelRenderResult {
+  return isRecord(value) && isImageData(value.imageData) && isEncodedPageImage(value.encoded);
+}
+
+/**
+ * Decodifica el resultado de `pool.dispatch` en `renderPageInternal`
+ * (operación 1/4): única forma legítima, `KernelRenderResult`
+ * (`{ imageData: ImageData, encoded: EncodedPageImage }`,
+ * `worker/kernel.ts#kernelRenderPage`) — ver `worker/entry.ts`, que postea
+ * el `result` de esa función pelado, sin sobre ("ADR-042: COMPLETED.result
+ * es unknown a nivel de transporte — compila directo, sin cast").
+ *
+ * Ante cualquier otra forma lanza `RenderPageFailedError` en vez de
+ * `InvalidInputError` genérico (Code_Standards.md §7: "InvalidInputError si
+ * no hay una específica" — acá SÍ la hay): el spec (§11) ya mapea "Fallo de
+ * pdfjs/canvas (PDF.js lanza, OOM en canvas)" a esa clase, y una forma de
+ * kernel irreconocible es exactamente esa categoría — "el kernel no produjo
+ * algo usable" — no un error de input del caller. `InvalidInputError` sería
+ * la clase equivocada: `renderPageInternal` ya la usa para SUS propios
+ * errores (documento no cargado, pageIndex fuera de rango) y esos SIEMPRE
+ * abortan el batch completo en `renderPagesInternal` sin tolerancia por
+ * página (ver el comentario "RenderFailedError / InvalidInputError: no
+ * recuperable → aborta el batch" en esa función) — mezclar ahí un fallo de
+ * decodificación cambiaría silenciosamente esa semántica. `RenderPageFailedError`
+ * en cambio es retryable: mismo tratamiento que "PDF.js lanza" — se
+ * reintenta 1 vez y, si persiste, `renderPagesInternal` emite
+ * `PREVIEW_PAGE_FAILED` y continúa con las demás páginas del batch. Mismo
+ * criterio que `ocr-engine` (ver el comentario de cabecera de
+ * `ocr.engine.ts`): ya hay un evento observable por fallo de página, así que
+ * un sobre roto nunca se disfraza de resultado sano — no hace falta la
+ * maquinaria de escalada de `ner-engine`.
+ */
+function decodeKernelRenderResult(
+  dispatchResult: unknown,
+  documentId: string,
+  pageIndex: number,
+): KernelRenderResult {
+  if (isKernelRenderResult(dispatchResult)) return dispatchResult;
+  throw new RenderPageFailedError(
+    documentId,
+    pageIndex,
+    "RenderJobPool.dispatch() resolvió con una forma no reconocida: se esperaba " +
+      "{ imageData: ImageData, encoded: EncodedPageImage } (KernelRenderResult, " +
+      "worker/kernel.ts#kernelRenderPage) — misma forma en el camino remoto y en " +
+      "el in-process (ADR-055 §2). Devolver un default en silencio está prohibido " +
+      `(ADR-055 §3). Forma recibida: ${describeDispatchResultShape(dispatchResult)}.`,
+  );
+}
+
+/**
+ * Decodifica el resultado de `pool.dispatch` en `rasterizePage` (operación
+ * 2/4): única forma legítima, `ImageData` pelado
+ * (`worker/kernel.ts#kernelRasterizePage`) — mismo razonamiento de paridad
+ * remoto/in-process que `decodeKernelRenderResult`.
+ *
+ * Mismo mapeo de clase que arriba y por el mismo motivo (spec §6: "Fallo de
+ * pdfjs/canvas → RenderPageFailedError (retryable)"): `RenderPageFailedError`,
+ * no `InvalidInputError` genérico. A diferencia de `renderPageInternal`,
+ * `rasterizePage` no envuelve su dispatch en un retry loop propio (spec §6:
+ * sin reintentos documentados acá — el único "reintentar 1 vez" del spec
+ * §11 es de `renderPage`/`renderPages`); el error simplemente se propaga tal
+ * cual al caller (el Orchestrator, que alimenta OCR), que decide qué hacer.
+ */
+function decodeRasterizeResult(
+  dispatchResult: unknown,
+  documentId: string,
+  pageIndex: number,
+): ImageData {
+  if (isImageData(dispatchResult)) return dispatchResult;
+  throw new RenderPageFailedError(
+    documentId,
+    pageIndex,
+    "RenderJobPool.dispatch() resolvió con una forma no reconocida: se esperaba " +
+      "ImageData pelado (worker/kernel.ts#kernelRasterizePage) — misma forma en " +
+      "el camino remoto y en el in-process (ADR-055 §2). Devolver un default en " +
+      `silencio está prohibido (ADR-055 §3). Forma recibida: ${describeDispatchResultShape(dispatchResult)}.`,
+  );
+}
+
+interface LoadDocumentKernelResult {
+  readonly pageCount: number;
+}
+
+function isLoadDocumentKernelResult(value: unknown): value is LoadDocumentKernelResult {
+  return isRecord(value) && typeof value.pageCount === "number";
+}
+
+/**
+ * Decodifica `results[0]` de `pool.broadcast` en `loadDocument` (operación
+ * 3/4): única forma legítima, `{ pageCount: number }`
+ * (`worker/kernel.ts#kernelLoadDocument`) — mismo razonamiento de paridad
+ * remoto/in-process que los decoders de arriba.
+ *
+ * A diferencia de `renderPageInternal`/`rasterizePage`, acá no hay noción de
+ * "página": una forma no reconocida es un fallo de la carga del documento
+ * COMPLETO, así que la clase que corresponde es `RenderFailedError` (no
+ * recuperable) — la misma que ya usa, dos líneas más arriba en
+ * `loadDocument`, el chequeo preexistente para "load-document no devolvió
+ * resultado de ningún worker" (`results.length === 0`): ambos casos son
+ * "esta carga no puede continuar", solo difieren en si hubo cero resultados
+ * o un resultado con forma inválida.
+ */
+function decodeLoadDocumentResult(
+  dispatchResult: unknown,
+  documentId: string,
+): LoadDocumentKernelResult {
+  if (isLoadDocumentKernelResult(dispatchResult)) return dispatchResult;
+  throw new RenderFailedError(
+    documentId,
+    "RenderJobPool.broadcast() resolvió load-document con una forma no reconocida: " +
+      "se esperaba { pageCount: number } (worker/kernel.ts#kernelLoadDocument) — " +
+      "misma forma en el camino remoto y en el in-process (ADR-055 §2). Devolver un " +
+      `default en silencio está prohibido (ADR-055 §3). Forma recibida: ${describeDispatchResultShape(dispatchResult)}.`,
+  );
+}
 
 // Hash determinista y compacto (FNV-1a), mismo estilo que shared/src/synthesizer.ts (hashStringToInt).
 function fnv1a(input: string): string {
@@ -394,13 +638,17 @@ export class RenderEngine implements IEngine {
       ...(password !== undefined ? { password } : {}),
     };
     const results = await this.pool.broadcast(payload, () => kernelLoadDocument(payload));
-    const result = results[0];
-    if (result === undefined) {
+    const rawResult = results[0];
+    if (rawResult === undefined) {
       throw new RenderFailedError(
         documentId,
         "load-document no devolvió resultado de ningún worker.",
       );
     }
+    // ADR-055 §2/§4: decodeLoadDocumentResult es el único paso permitido
+    // antes de leer `pageCount` (nunca un cast a ciegas) — ver su comentario
+    // más arriba.
+    const result = decodeLoadDocumentResult(rawResult, documentId);
 
     // ADR-043 §3: el host retiene { buffer, pageCount } — nunca el proxy.
     // ADR-050 §2: + password, solo para re-primear workers (reprimeWorkers).
@@ -425,6 +673,16 @@ export class RenderEngine implements IEngine {
     // ADR-043 §4: broadcast "unload-document" simétrico a "load-document" —
     // libera el PDFDocumentProxy de ese documento en cada RenderWorker (o en
     // el kernel local, en fallback).
+    //
+    // ADR-055 (operación 4/4 — ver nota de cabecera del archivo): el
+    // resultado que resuelve `broadcast` acá NUNCA se lee — el `.then` de
+    // abajo no liga ningún parámetro, por construcción. `kernelUnloadDocument`
+    // es `Promise<void>`: "no importa qué devuelva" ES el contrato real de
+    // esta operación, a diferencia de `loadDocument` (arriba), que sí lee
+    // `.pageCount` y por eso sí tiene un decoder real
+    // (`decodeLoadDocumentResult`). Agregar un decoder acá sería validar una
+    // forma sin ningún consumidor que proteger — lo opuesto al problema que
+    // ADR-055 cierra (un valor que SÍ se consume sin verificar).
     const payload: UnloadDocumentPayload = { documentId };
     return this.pool
       .broadcast(payload, () => kernelUnloadDocument(payload))
@@ -462,6 +720,14 @@ export class RenderEngine implements IEngine {
           buffer: doc.buffer,
           ...(doc.password !== undefined ? { password: doc.password } : {}),
         };
+        // ADR-055 (operación 4/4 — ver nota de cabecera): el resultado que
+        // resuelve `broadcast` tampoco se lee acá, mismo motivo que
+        // `unloadDocument`. A diferencia de `loadDocument`, re-primear no
+        // necesita revalidar `pageCount` (el host ya lo tiene, retenido de
+        // la carga original en `RetainedDocument`) — solo le interesa si el
+        // broadcast RECHAZÓ (capturado por `.catch` abajo), nunca la forma
+        // de lo que resolvió. Sin decoder por el mismo motivo que
+        // `unloadDocument`: no hay consumo que proteger.
         return this.pool
           .broadcast(payload, () => kernelLoadDocument(payload))
           .catch((err: unknown) => {
@@ -592,7 +858,7 @@ export class RenderEngine implements IEngine {
     // input, así que no distingue visible/no-visible dentro de "preview";
     // el orden de despacho de `renderPagesInternal` ya prioriza por el orden
     // en que el caller arma `inputs`, mismo criterio preexistente).
-    const kernelResult = await this.pool.dispatch({
+    const dispatchResult = await this.pool.dispatch({
       run: () =>
         kernelRenderPage(payload, {
           jpegQuality: ctx.config.render.jpegQuality,
@@ -605,6 +871,10 @@ export class RenderEngine implements IEngine {
       payload,
       maxRetriesOverride: 0,
     });
+    // ADR-055 §2: dispatchResult es unknown — decodeKernelRenderResult es el
+    // único paso permitido antes de tocar imageData/encoded (nunca un cast a
+    // ciegas). Ver su comentario más arriba (junto a IMMEDIATE_POOL).
+    const kernelResult = decodeKernelRenderResult(dispatchResult, documentId, pageIndex);
 
     // Segundo checkpoint (ver nota 6 de cabecera): revalida supersede/abort
     // una vez más ahora que el kernel resolvió, antes de cachear/emitir. El
@@ -680,7 +950,7 @@ export class RenderEngine implements IEngine {
 
     // Prioridad 90 (05_Worker_Architecture.md §6.2: espejo de ocr-page
     // visible, a la que esta rasterización alimenta — ADR-036 §4).
-    return this.pool.dispatch({
+    const dispatchResult = await this.pool.dispatch({
       run: () =>
         kernelRasterizePage(payload, {
           timeoutMs,
@@ -692,6 +962,9 @@ export class RenderEngine implements IEngine {
       payload,
       maxRetriesOverride: 0,
     });
+    // ADR-055 §2: idem renderPageInternal — decodeRasterizeResult antes de
+    // devolver el ImageData al caller (nunca un cast a ciegas).
+    return decodeRasterizeResult(dispatchResult, documentId, pageIndex);
   }
 
   /**
