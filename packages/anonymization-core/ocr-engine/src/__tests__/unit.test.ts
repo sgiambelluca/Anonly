@@ -1,4 +1,10 @@
-import { CancelledError, EngineEvents, EventChannel, type EngineContext } from "@anonly/shared";
+import {
+  CancelledError,
+  EngineEvents,
+  EventChannel,
+  type EngineContext,
+  type Word,
+} from "@anonly/shared";
 import { createWorker } from "tesseract.js";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
@@ -10,6 +16,7 @@ import { OcrModelMissingError, OcrPageFailedError } from "../ocr.errors.js";
 import {
   createEngineContext,
   createMockConfig,
+  createResolvedOcrPool,
   createValidOcrPageInput,
   mockEmptyRecognizeData,
   mockRecognizeData,
@@ -499,6 +506,80 @@ describe("OcrEngine — unit tests", () => {
       abortController.abort();
 
       await expect(resultPromise).rejects.toThrow(CancelledError);
+    });
+  });
+
+  // ─── ADR-055 §5 — tests de sobre, obligatorios ───
+  //
+  // A diferencia de `createTrackingOcrPool`/los pools ad-hoc de arriba (que
+  // delegan en `params.run()`, o sea el camino in-process), `createResolvedOcrPool`
+  // IGNORA `run()` y resuelve directo con el valor dado — es el único fake de
+  // este paquete que cruza de verdad el sobre `COMPLETED.result` (ADR-055
+  // Contexto §2). Sin él, ningún test ejercita `decodeKernelOcrResult`.
+  describe("Sobre del dispatch (ADR-055)", () => {
+    const remoteWord: Word = {
+      text: "Remoto",
+      bbox: { x: 1, y: 2, width: 30, height: 10 },
+      pageIndex: 0,
+      confidence: 0.93,
+      source: "ocr",
+    };
+
+    it("decodes the bare COMPLETED.result posted by worker/entry.ts (no envelope, ADR-055 §2)", async () => {
+      // worker/entry.ts:96 postea `result` pelado (el KernelOcrResult tal
+      // cual, sin envolver en un sobre adicional) — a diferencia de NER, que
+      // envuelve en `{ spans }`. Este fake reproduce exactamente eso.
+      const pool = createResolvedOcrPool({ words: [remoteWord], confidence: 0.93 });
+      const pooledEngine = new OcrEngine(pool);
+      await pooledEngine.init(ctx);
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+
+      const output = await pooledEngine.processPage(
+        createValidOcrPageInput("doc-envelope-decode", 0),
+        ctx,
+      );
+
+      expect(output.words).toEqual([remoteWord]);
+      expect(output.confidence).toBe(0.93);
+      expect(busEmitSpy).toHaveBeenCalledWith(
+        EventChannel.Ocr,
+        EngineEvents.OCR_PAGE_FINISHED,
+        expect.objectContaining({ documentId: "doc-envelope-decode", pageIndex: 0, wordCount: 1 }),
+      );
+
+      await pooledEngine.dispose();
+    });
+
+    it("decodes the identical in-process shape (parity: OCR has no envelope, ADR-055 §2)", async () => {
+      // En NER el sobre remoto (`{ spans }`) y el array pelado in-process son
+      // DOS formas distintas que el decoder tiene que aceptar. En OCR no hay
+      // tal distinción: `kernelRecognize` (invocado directo por
+      // IMMEDIATE_POOL cuando no hay pool real) y `worker/entry.ts` (cuando
+      // sí la hay) producen la MISMA forma `KernelOcrResult`. Este test usa
+      // el mismo fake que ignora `run()` con un valor con la forma
+      // "in-process" — que es bit-a-bit la misma que la del test de arriba —
+      // para demostrar explícitamente esa paridad: el decoder no necesita
+      // (ni tiene) una rama especial para un segundo caso.
+      const inProcessWord: Word = {
+        text: "InProcess",
+        bbox: { x: 5, y: 6, width: 20, height: 8 },
+        pageIndex: 0,
+        confidence: 0.42,
+        source: "ocr",
+      };
+      const pool = createResolvedOcrPool({ words: [inProcessWord], confidence: 0.42 });
+      const pooledEngine = new OcrEngine(pool);
+      await pooledEngine.init(ctx);
+
+      const output = await pooledEngine.processPage(
+        createValidOcrPageInput("doc-envelope-parity", 0),
+        ctx,
+      );
+
+      expect(output.words).toEqual([inProcessWord]);
+      expect(output.confidence).toBe(0.42);
+
+      await pooledEngine.dispose();
     });
   });
 });

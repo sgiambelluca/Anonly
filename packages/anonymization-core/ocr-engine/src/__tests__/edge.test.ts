@@ -19,6 +19,7 @@ import type { OcrPageInput } from "../ocr.types.js";
 import {
   createEngineContext,
   createImageData,
+  createResolvedOcrPool,
   createValidOcrPageInput,
   mockEmptyRecognizeData,
   mockRecognizeData,
@@ -305,6 +306,118 @@ describe("OcrEngine — edge case tests", () => {
       // 2 fallos "timeout" normalizados (reintentados) + 1 éxito = 3 llamadas
       // (maxRetries default = 2, mismo presupuesto que un OcrTimeoutError real).
       expect(dispatchCalls).toBe(3);
+
+      await pooledEngine.dispose();
+    });
+  });
+
+  // Sobre del dispatch, obligatorio (ADR-055 §5): un `OcrJobPool.dispatch()`
+  // que resuelve una forma no reconocida (ni `KernelOcrResult` remoto ni
+  // in-process — en OCR son la misma forma, así que cualquier otra cosa es
+  // simplemente inválida) tiene que lanzar `InvalidInputError` en vez de
+  // devolver un default en silencio (`[]`/`undefined`/`{ words: [],
+  // confidence: 0 }`). Decisión de este motor (ver comentario de cabecera de
+  // ocr.engine.ts): a diferencia de NER, la falla de decodificación se trata
+  // como un fallo más de ESA página (mismo camino que `OcrPageFailedError` /
+  // `OCR_PAGE_FAILED`) — no aborta `processPages` entero — porque OCR ya
+  // tiene un evento observable por página para cualquier fallo; nada se
+  // disfraza de resultado sano.
+  describe("Sobre del dispatch: forma no reconocida (ADR-055 §5)", () => {
+    it("processPage throws OcrPageFailedError and emits OCR_PAGE_FAILED (never a silent default)", async () => {
+      const garbageValues: ReadonlyArray<unknown> = [{}, null, "not-a-recognized-shape"];
+
+      for (const garbage of garbageValues) {
+        const pool = createResolvedOcrPool(garbage);
+        const pooledEngine = new OcrEngine(pool);
+        await pooledEngine.init(ctx);
+        const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+        const input = createValidOcrPageInput("doc-garbage-dispatch", 0);
+
+        const rejection: unknown = await pooledEngine
+          .processPage(input, ctx)
+          .catch((err: unknown) => err);
+        expect(rejection).toBeInstanceOf(OcrPageFailedError);
+        // Prueba de regresión real (Validación del ADR-055: "revirtiendo el
+        // decoder, ese test tiene que fallar"): el mensaje tiene que venir
+        // específicamente de `decodeKernelOcrResult`, no de un TypeError
+        // accidental al desestructurar `words`/`confidence` de un valor mal
+        // formado (que también terminaría envuelto en OcrPageFailedError,
+        // pero por una causa distinta — sin este assert, este test seguiría
+        // en verde con el decoder revertido).
+        expect((rejection as OcrPageFailedError).message).toContain(
+          "OcrJobPool.dispatch() resolvió con una forma no reconocida",
+        );
+
+        const pageFailedCall = busEmitSpy.mock.calls.find(
+          ([, event]) => event === EngineEvents.OCR_PAGE_FAILED,
+        );
+        expect(pageFailedCall).toBeDefined();
+        // OCR_PAGE_FINISHED nunca se emite para un dispatch que no se pudo
+        // decodificar — la falla no se disfraza de página procesada.
+        expect(
+          busEmitSpy.mock.calls.some(([, event]) => event === EngineEvents.OCR_PAGE_FINISHED),
+        ).toBe(false);
+
+        await pooledEngine.dispose();
+      }
+    });
+
+    // Regresión de referencia (mismo criterio que Code_Standards.md §7,
+    // párrafo final, para el canal de errores): un test que solo verifica
+    // "se lanza algo" pasa igual con el bug vivo, porque el destructuring
+    // ciego de `words`/`confidence` sobre un valor con forma parcialmente
+    // válida NO siempre explota — a veces produce un resultado incorrecto
+    // que se cuela como si fuera sano. `{ words: "no-es-un-array",
+    // confidence: 0.9 }` es ese caso: sin decoder, `words.length` (13, el
+    // length de la STRING) es `> 0` y `confidence` (0.9) no es `< 0.5`, así
+    // que el código viejo (cast ciego) resolvía "exitosamente" con
+    // `words: "no-es-un-array"` — exactamente la clase de corrupción
+    // silenciosa que ADR-055 prohíbe. Con el decoder, `isWordArray` rechaza
+    // el string y lanza.
+    it("throws even when the malformed shape would NOT crash a blind destructure (ADR-055 §3)", async () => {
+      const pool = createResolvedOcrPool({ words: "no-es-un-array", confidence: 0.9 });
+      const pooledEngine = new OcrEngine(pool);
+      await pooledEngine.init(ctx);
+      const input = createValidOcrPageInput("doc-garbage-silent", 0);
+
+      await expect(pooledEngine.processPage(input, ctx)).rejects.toBeInstanceOf(OcrPageFailedError);
+
+      await pooledEngine.dispose();
+    });
+
+    it("processPages treats the decode failure as a tolerable page failure and continues (OCR_Engine.md §13 caso 6)", async () => {
+      // processPages(), no processPage() directo, es el path real por el que
+      // pasan las páginas en producción (Orchestrator/checklist §15.7): el
+      // error tiene que llegar hasta acá sin que el warn+continue existente
+      // (pensado para OcrPageFailedError "genuinos") lo trague de una forma
+      // distinta a como trata cualquier otro fallo de página.
+      const pool = createResolvedOcrPool("not-a-recognized-shape");
+      const pooledEngine = new OcrEngine(pool);
+      await pooledEngine.init(ctx);
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      const inputs = [
+        createValidOcrPageInput("doc-garbage-batch", 0),
+        createValidOcrPageInput("doc-garbage-batch", 1),
+      ];
+
+      // No aborta el batch: a diferencia de OcrModelMissingError/CancelledError,
+      // una forma no reconocida por página no impide que se siga intentando
+      // con las páginas siguientes (documento parcial, cada fallo visible).
+      const outputs = await pooledEngine.processPages(inputs, ctx);
+
+      expect(outputs).toEqual([]);
+      const pageFailedCalls = busEmitSpy.mock.calls.filter(
+        ([, event]) => event === EngineEvents.OCR_PAGE_FAILED,
+      );
+      expect(pageFailedCalls.length).toBe(2);
+      // OCR_FINISHED sigue emitiéndose al final del batch (§7): el documento
+      // no se cuelga, aunque ninguna página haya producido words reales —
+      // muy distinto del bug de NER, donde un batch íntegro fallando de este
+      // modo terminaba pareciendo "0 entidades" sin ninguna señal de que algo
+      // se rompió.
+      expect(busEmitSpy.mock.calls.some(([, event]) => event === EngineEvents.OCR_FINISHED)).toBe(
+        true,
+      );
 
       await pooledEngine.dispose();
     });
