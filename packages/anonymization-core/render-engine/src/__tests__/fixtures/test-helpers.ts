@@ -453,3 +453,61 @@ export function createRenderPageInput(overrides?: Partial<RenderPageInput>): Ren
     ...overrides,
   };
 }
+
+// ─── Puerto interno RenderJobPool (ADR-043 §2, angostado por ADR-055 §2) —
+// fakes estructurales para los tests de sobre/paridad/basura obligatorios de
+// ADR-055 §5. `RenderJobPool` no se exporta desde `render.engine.ts`
+// (detalle de wiring interno) — este tipo es una copia estructural mínima,
+// mismo criterio que `spyPool` en unit.test.ts y `TrackingOcrPool` en
+// ocr-engine.
+//
+// Cada fake IGNORA `run`/el `run` de `broadcast()` SOLO en el método que el
+// test quiere ejercitar y resuelve ahí directo con el valor dado — es lo que
+// cruza de verdad el sobre `COMPLETED.result` (ADR-055 Contexto §2). En el
+// otro método delega en `run()` (comportamiento in-process real, igual que
+// `IMMEDIATE_POOL`): `loadDocument`/`renderPage`/`rasterizePage` comparten un
+// solo `RenderEngine`/una sola pool inyectada, así que un test que ejercita
+// `dispatch` (p. ej. `renderPage`) igual necesita que el `loadDocument`
+// previo (que usa `broadcast`) funcione de verdad — y viceversa.
+export interface ResolvedRenderPool {
+  readonly dispatch: (params: { readonly run: () => Promise<unknown> }) => Promise<unknown>;
+  readonly broadcast: (
+    payload: unknown,
+    run: () => Promise<unknown>,
+  ) => Promise<ReadonlyArray<unknown>>;
+}
+
+/**
+ * Resuelve `dispatch()` con `resolvedValue` sin invocar `run()` — usado por
+ * los tests de `renderPage`/`renderPages` (kernelRenderPage) y
+ * `rasterizePage` (kernelRasterizePage), las dos operaciones que cruzan el
+ * puerto por `dispatch`. `broadcast()` delega en `run()` (in-process real):
+ * el `loadDocument` previo, necesario para que estas operaciones no fallen
+ * con "documento no cargado", sigue funcionando normalmente.
+ */
+export function createResolvedRenderDispatchPool(resolvedValue: unknown): ResolvedRenderPool {
+  return {
+    dispatch: (): Promise<unknown> => Promise.resolve(resolvedValue),
+    broadcast: async (
+      _payload: unknown,
+      run: () => Promise<unknown>,
+    ): Promise<ReadonlyArray<unknown>> => [await run()],
+  };
+}
+
+/**
+ * Resuelve `broadcast()` con `resolvedValues` (un elemento por worker "vivo"
+ * simulado) sin invocar `run()` — usado por los tests de `loadDocument`/
+ * `unloadDocument`/`reprimeWorkers`. `dispatch()` delega en `run()`
+ * (in-process real), por si el test también necesita renderizar algo con la
+ * misma pool.
+ */
+export function createResolvedRenderBroadcastPool(
+  resolvedValues: ReadonlyArray<unknown>,
+): ResolvedRenderPool {
+  return {
+    dispatch: (params: { readonly run: () => Promise<unknown> }): Promise<unknown> =>
+      params.run(),
+    broadcast: (): Promise<ReadonlyArray<unknown>> => Promise.resolve(resolvedValues),
+  };
+}

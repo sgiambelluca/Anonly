@@ -22,6 +22,8 @@ import {
   createMockPage,
   createMockPdfDocument,
   createRenderPageInput,
+  createResolvedRenderBroadcastPool,
+  createResolvedRenderDispatchPool,
   createValidBuffer,
   getCreatedCanvases,
   installOffscreenCanvasStub,
@@ -993,6 +995,197 @@ describe("RenderEngine — edge cases", () => {
         (u) => u.pageIndex === 0 && u.kind === "anonymized",
       );
       expect(anonymizedUpdates).toHaveLength(1);
+    });
+  });
+
+  // ─── ADR-055 §5 — sobre del dispatch/broadcast: forma no reconocida ───
+  //
+  // Un `RenderJobPool.dispatch()`/`broadcast()` que resuelve una forma no
+  // reconocida (ni remota ni in-process — en este motor son la misma forma,
+  // así que cualquier otra cosa es simplemente inválida) tiene que lanzar en
+  // vez de devolver un default en silencio (`[]`/`undefined`/una `ImageData`
+  // vacía). Decisión de este motor (ver la sección "ADR-055" del comentario
+  // de cabecera de `render.engine.ts`): las fallas de decodificación de
+  // `renderPage`/`rasterizePage` se tratan como un fallo más de ESA página
+  // (`RenderPageFailedError`, mismo camino que "PDF.js lanza, OOM en
+  // canvas") — no abortan `renderPages` entero, mismo criterio que
+  // `ocr-engine`. La de `loadDocument` (`RenderFailedError`) sí aborta la
+  // carga completa del documento — ahí no hay noción de "página" que
+  // tolerar.
+  describe("Sobre del dispatch/broadcast: forma no reconocida (ADR-055 §5)", () => {
+    beforeEach(() => {
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument({ pageCount: 3 })),
+      );
+    });
+
+    it("renderPage throws RenderPageFailedError for each garbage dispatch result (never a silent default)", async () => {
+      const garbageValues: ReadonlyArray<unknown> = [{}, null, "not-a-recognized-shape"];
+
+      for (const garbage of garbageValues) {
+        const pool = createResolvedRenderDispatchPool(garbage);
+        const pooledEngine = new RenderEngine(pool);
+        await pooledEngine.init(ctx);
+        await pooledEngine.loadDocument("doc-garbage-render", createValidBuffer());
+
+        const rejection: unknown = await pooledEngine
+          .renderPage(
+            createRenderPageInput({ documentId: "doc-garbage-render", pageIndex: 0 }),
+            ctx,
+          )
+          .catch((err: unknown) => err);
+
+        expect(rejection).toBeInstanceOf(RenderPageFailedError);
+        // Prueba de regresión real (Validación del ADR-055: "revirtiendo el
+        // decoder, ese test tiene que fallar"): el mensaje tiene que venir
+        // específicamente de `decodeKernelRenderResult`, no de un TypeError
+        // accidental al desestructurar `imageData`/`encoded` de un valor
+        // mal formado.
+        expect((rejection as RenderPageFailedError).message).toContain(
+          "RenderJobPool.dispatch() resolvió con una forma no reconocida",
+        );
+
+        await pooledEngine.dispose();
+      }
+    });
+
+    // Regresión de referencia (mismo criterio que Code_Standards.md §7,
+    // párrafo final, para el canal de errores): un test que solo verifica
+    // "se lanza algo" pasa igual con el bug vivo, porque un cast ciego sobre
+    // una forma parcialmente válida no siempre explota con una excepción.
+    // Acá: un `ImageData` sin `width` — `isImageData` lo rechaza por el
+    // guard de tipo explícito, no porque leer `.width` lance.
+    it("renderPage throws even when the malformed shape would NOT crash a blind destructure (ImageData without width, ADR-055 §3)", async () => {
+      const pool = createResolvedRenderDispatchPool({
+        imageData: { data: new Uint8ClampedArray(4), height: 1, colorSpace: "srgb" },
+        encoded: { bytes: new ArrayBuffer(1), format: "png", widthPx: 1, heightPx: 1 },
+      });
+      const pooledEngine = new RenderEngine(pool);
+      await pooledEngine.init(ctx);
+      await pooledEngine.loadDocument("doc-garbage-partial-render", createValidBuffer());
+
+      await expect(
+        pooledEngine.renderPage(
+          createRenderPageInput({ documentId: "doc-garbage-partial-render", pageIndex: 0 }),
+          ctx,
+        ),
+      ).rejects.toBeInstanceOf(RenderPageFailedError);
+
+      await pooledEngine.dispose();
+    });
+
+    it("renderPages treats the decode failure as a tolerable page failure and continues (mismo criterio que ocr-engine, ADR-055)", async () => {
+      const pool = createResolvedRenderDispatchPool("not-a-recognized-shape");
+      const pooledEngine = new RenderEngine(pool);
+      await pooledEngine.init(ctx);
+      await pooledEngine.loadDocument("doc-garbage-batch-render", createValidBuffer());
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+
+      const outputs = await pooledEngine.renderPages(
+        [
+          createRenderPageInput({ documentId: "doc-garbage-batch-render", pageIndex: 0 }),
+          createRenderPageInput({ documentId: "doc-garbage-batch-render", pageIndex: 1 }),
+        ],
+        ctx,
+      );
+
+      expect(outputs).toEqual([]);
+      const pageFailedCalls = busEmitSpy.mock.calls.filter(
+        ([, event]) => event === EngineEvents.PREVIEW_PAGE_FAILED,
+      );
+      expect(pageFailedCalls.length).toBe(2);
+      // RENDER_FAILED (fatal de batch) NUNCA se emite para un dispatch que
+      // no se pudo decodificar: no es "no recuperable, aborta el batch" — es
+      // un fallo puntual, retryable, de cada página.
+      expect(busEmitSpy.mock.calls.some(([, event]) => event === EngineEvents.RENDER_FAILED)).toBe(
+        false,
+      );
+      // RENDER_FINISHED sigue emitiéndose al final del batch: el documento
+      // no se cuelga, aunque ninguna página haya producido una imagen real.
+      expect(
+        busEmitSpy.mock.calls.some(([, event]) => event === EngineEvents.RENDER_FINISHED),
+      ).toBe(true);
+
+      await pooledEngine.dispose();
+    });
+
+    it("rasterizePage throws RenderPageFailedError for each garbage dispatch result (never a silent default)", async () => {
+      const garbageValues: ReadonlyArray<unknown> = [{}, null, "not-a-recognized-shape"];
+
+      for (const garbage of garbageValues) {
+        const pool = createResolvedRenderDispatchPool(garbage);
+        const pooledEngine = new RenderEngine(pool);
+        await pooledEngine.init(ctx);
+        await pooledEngine.loadDocument("doc-garbage-rasterize", createValidBuffer());
+
+        const rejection: unknown = await pooledEngine
+          .rasterizePage("doc-garbage-rasterize", 0, 1, ctx)
+          .catch((err: unknown) => err);
+
+        expect(rejection).toBeInstanceOf(RenderPageFailedError);
+        expect((rejection as RenderPageFailedError).message).toContain(
+          "RenderJobPool.dispatch() resolvió con una forma no reconocida",
+        );
+
+        await pooledEngine.dispose();
+      }
+    });
+
+    it("rasterizePage throws even when the malformed shape would NOT crash a blind destructure (ImageData without height, ADR-055 §3)", async () => {
+      const pool = createResolvedRenderDispatchPool({
+        data: new Uint8ClampedArray(4),
+        width: 2,
+        colorSpace: "srgb",
+      });
+      const pooledEngine = new RenderEngine(pool);
+      await pooledEngine.init(ctx);
+      await pooledEngine.loadDocument("doc-garbage-partial-rasterize", createValidBuffer());
+
+      await expect(
+        pooledEngine.rasterizePage("doc-garbage-partial-rasterize", 0, 1, ctx),
+      ).rejects.toBeInstanceOf(RenderPageFailedError);
+
+      await pooledEngine.dispose();
+    });
+
+    it("loadDocument throws RenderFailedError for each garbage broadcast result (never a silent default)", async () => {
+      const garbageValues: ReadonlyArray<unknown> = [{}, null, "not-a-recognized-shape"];
+
+      for (const garbage of garbageValues) {
+        const pool = createResolvedRenderBroadcastPool([garbage]);
+        const pooledEngine = new RenderEngine(pool);
+        await pooledEngine.init(ctx);
+
+        const rejection: unknown = await pooledEngine
+          .loadDocument("doc-garbage-load", createValidBuffer())
+          .catch((err: unknown) => err);
+
+        expect(rejection).toBeInstanceOf(RenderFailedError);
+        expect((rejection as RenderFailedError).message).toContain(
+          "RenderJobPool.broadcast() resolvió load-document con una forma no reconocida",
+        );
+        // El documento nunca queda retenido con una forma inválida.
+        expect(pooledEngine["documents"].has("doc-garbage-load")).toBe(false);
+
+        await pooledEngine.dispose();
+      }
+    });
+
+    it("loadDocument throws even when the malformed shape would NOT crash a blind destructure (pageCount as string, ADR-055 §3)", async () => {
+      // Sin decoder, `result.pageCount` ("7", un string) pasaría intacto a
+      // `RetainedDocument.pageCount` (tipado `number`, pero JS no lo valida
+      // en runtime) y cualquier guard posterior de `pageIndex < doc.pageCount`
+      // se comportaría de forma impredecible (comparación number < string) —
+      // exactamente la clase de corrupción silenciosa que ADR-055 prohíbe.
+      const pool = createResolvedRenderBroadcastPool([{ pageCount: "7" }]);
+      const pooledEngine = new RenderEngine(pool);
+      await pooledEngine.init(ctx);
+
+      await expect(
+        pooledEngine.loadDocument("doc-garbage-partial-load", createValidBuffer()),
+      ).rejects.toBeInstanceOf(RenderFailedError);
+
+      await pooledEngine.dispose();
     });
   });
 });
