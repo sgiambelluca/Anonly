@@ -11,7 +11,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("pdfjs-dist", () => ({ getDocument: vi.fn() }));
 
-import { PdfEngine } from "../pdf.engine.js";
+import { PdfEngine, decodePdfEngineOutput } from "../pdf.engine.js";
 import { PdfCorruptedError, PdfInvalidError, PdfPasswordRequiredError } from "../pdf.errors.js";
 import type { PdfEngineInput } from "../pdf.types.js";
 
@@ -490,6 +490,82 @@ describe("PdfEngine — edge case tests", () => {
         EngineEvents.PDF_INVALID,
         expect.objectContaining({ documentId: "doc-emit-before-throw" }),
       );
+    });
+  });
+
+  // ADR-055 §3/§10, PDF_Engine.md §13 caso 17. Lo que se prueba acá no es que
+  // el decoder "valide": es que ante una forma que no reconoce LANCE, en vez
+  // de devolver un default y dejar que el pipeline avance con un Document
+  // roto. Ese fallo mudo es el modo de falla que ADR-055 existe para cerrar.
+  describe("decodePdfEngineOutput rejects anything that is not a PdfEngineOutput", () => {
+    const validOutput = {
+      document: {
+        id: "doc-1",
+        name: "d.pdf",
+        pageCount: 1,
+        pages: [],
+        metadata: {},
+        sourceKind: "text",
+        importedAt: 0,
+      },
+      pageCount: 1,
+      textlessPages: [],
+      sourceKind: "text",
+    };
+
+    it("decodePdfEngineOutput throws InvalidInputError on garbage", () => {
+      const garbage: ReadonlyArray<unknown> = [null, undefined, "x", 42, true, [], {}];
+
+      for (const value of garbage) {
+        expect(() => decodePdfEngineOutput(value)).toThrow(InvalidInputError);
+      }
+    });
+
+    it("decodePdfEngineOutput throws on missing or mistyped fields", () => {
+      const broken: ReadonlyArray<unknown> = [
+        { ...validOutput, document: undefined },
+        { ...validOutput, pageCount: undefined },
+        { ...validOutput, textlessPages: undefined },
+        { ...validOutput, sourceKind: undefined },
+        { ...validOutput, sourceKind: "raster" }, // fuera del union
+        { ...validOutput, pageCount: "1" },
+        { ...validOutput, textlessPages: [0, "1"] }, // array con un no-number
+        { ...validOutput, document: { id: "doc-1" } }, // sin `pages`
+        { ...validOutput, document: { id: 7, pages: [] } }, // `id` no-string
+        { ...validOutput, document: { id: "doc-1", pages: {} } }, // `pages` no-array
+      ];
+
+      for (const value of broken) {
+        expect(() => decodePdfEngineOutput(value)).toThrow(InvalidInputError);
+      }
+    });
+
+    it("decodePdfEngineOutput throws on an enveloped result", () => {
+      // La regresión concreta de ADR-055 (Contexto §1) trasladada a PDF: un
+      // resultado por lo demás perfecto, envuelto. Antes de este decoder,
+      // `dispatch<PdfEngineOutput>` lo aceptaba en silencio y el pipeline
+      // seguía con `document`/`textlessPages` undefined.
+      expect(() => decodePdfEngineOutput({ output: validOutput })).toThrow(InvalidInputError);
+      expect(() => decodePdfEngineOutput({ result: validOutput })).toThrow(InvalidInputError);
+    });
+
+    it("decodePdfEngineOutput error details carry shape, never content", () => {
+      // Code_Standards.md §9: el valor sospechoso puede traer el texto
+      // extraído entero; el `details` reporta claves y tipos, nunca contenido.
+      const secret = "Juan Pérez, DNI 30123456";
+      let caught: unknown;
+      try {
+        decodePdfEngineOutput({ output: { text: secret } });
+      } catch (err: unknown) {
+        caught = err;
+      }
+
+      expect(caught).toBeInstanceOf(InvalidInputError);
+      const details = (caught as InvalidInputError).details;
+      const serialized = JSON.stringify(details);
+      expect(serialized).not.toContain(secret);
+      expect(serialized).not.toContain("Juan");
+      expect(details).toMatchObject({ receivedShape: "object(keys=[output])" });
     });
   });
 });

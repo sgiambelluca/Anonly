@@ -8,6 +8,7 @@ import {
   PdfEngine,
   PdfEngineCMapReaderFactory,
   PdfEngineStandardFontDataFactory,
+  decodePdfEngineOutput,
   fuseOcrPage,
 } from "../pdf.engine.js";
 import { PdfTimeoutError } from "../pdf.errors.js";
@@ -470,6 +471,61 @@ describe("PdfEngine — unit tests", () => {
 
     it("no referencia `document` (corre en environment: node, donde no existe)", () => {
       expect(typeof document).toBe("undefined");
+    });
+  });
+
+  // ADR-055 §10 / PDF_Engine.md §13 casos 16-17, §14. Los casos de rechazo
+  // viven en edge.test.ts; acá van los dos de aceptación, y en particular el
+  // de paridad, que es el que ADR-055 §5 pide por motor.
+  describe("decodePdfEngineOutput (ADR-055 §10)", () => {
+    it("decodePdfEngineOutput returns a valid PdfEngineOutput unchanged", async () => {
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () =>
+            createMockPage(0, [{ str: "Hola", x: 10, y: 700, width: 30, height: 12 }]),
+          ),
+        ),
+      );
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-decode-identity"), ctx);
+
+      // Identidad referencial: el decoder verifica, no copia ni normaliza.
+      expect(decodePdfEngineOutput(output)).toBe(output);
+    });
+
+    it("decodePdfEngineOutput accepts the exact shape PdfWorker posts", async () => {
+      // Paridad remoto/in-process (ADR-055 §5). El valor NO es un literal
+      // escrito a mano: `worker/entry.ts` postea `COMPLETED.result` = lo que
+      // devuelve `engine.process()`, sin envolverlo en ningún sobre, así que
+      // el resultado de este `process()` ES la forma que cruza el
+      // `postMessage`. Lo que este test protege es esa igualdad: el día que
+      // alguien envuelva el resultado del entry-point en un `{ output }`, la
+      // forma remota deja de coincidir con lo que el decoder acepta, y el
+      // test de sobre del façade (Orchestrator.md §14, D3.2) se pone rojo.
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(2, (i) =>
+            createMockPage(
+              i,
+              i === 0 ? [{ str: "Texto", x: 5, y: 700, width: 30, height: 12 }] : [],
+            ),
+          ),
+        ),
+      );
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-decode-parity"), ctx);
+
+      // Round-trip por una copia estructural: es lo que el structured clone
+      // del `postMessage` le hace al valor (pierde prototipos y readonly,
+      // conserva la forma). Si el decoder dependiera de algo que el clone no
+      // preserva, este assert lo destapa.
+      const cloned: unknown = structuredClone(output);
+      const decoded = decodePdfEngineOutput(cloned);
+
+      expect(decoded).toEqual(output);
+      expect(decoded.sourceKind).toBe("mixed");
+      expect(decoded.textlessPages).toEqual([1]);
+      expect(decoded.document.pages).toHaveLength(2);
     });
   });
 
