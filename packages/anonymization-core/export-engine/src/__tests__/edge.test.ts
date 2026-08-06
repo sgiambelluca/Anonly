@@ -1,6 +1,7 @@
 import {
   EngineDisposedError,
   EngineErrorCode,
+  EngineEvents,
   InvalidInputError,
   type EngineContext,
 } from "@anonly/shared";
@@ -10,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("pdf-lib", () => ({ PDFDocument: { create: vi.fn() } }));
 
 import { ExportEngine } from "../export.engine.js";
+import { ExportFailedError } from "../export.errors.js";
 
 import {
   asPdfDocument,
@@ -19,6 +21,7 @@ import {
   createExportEngineInput,
   createExportOptions,
   createMockPdfLibDocument,
+  createResolvedExportPool,
 } from "./fixtures/test-helpers.js";
 
 describe("ExportEngine — edge cases", () => {
@@ -135,5 +138,65 @@ describe("ExportEngine — edge cases", () => {
     expect(sanitizedTitle).not.toContain("\n");
     expect(sanitizedTitle.startsWith("Documento Confidencial")).toBe(true);
     expect(sanitizedTitle.length).toBeLessThanOrEqual(500);
+  });
+
+  // Sobre del dispatch, obligatorio (ADR-055 §5): un `ExportJobPool.dispatch()`
+  // que resuelve `save` con una forma no reconocida (ni el ArrayBuffer pelado
+  // remoto ni el in-process — en este motor son la misma forma, así que
+  // cualquier otra cosa es simplemente inválida) tiene que lanzar
+  // `ExportFailedError` en vez de dejar que `export()` reviente con un
+  // `TypeError` nativo al tratar la basura como `ArrayBuffer` (`new
+  // Blob([buffer], ...)`/`buffer.byteLength`, fuera del try/catch de
+  // `saveWithRetry` — Code_Standards.md §7: "Prohibido lanzar... Error
+  // genérico"; sin el decoder ESE habría sido el modo de falla real). Cada
+  // valor de `garbageValues` se usa como resultado de TODOS los dispatch
+  // (`createResolvedExportPool`, no `createShapeAwareExportPool`) a
+  // propósito: demuestra que `append-page` tolera la misma basura sin
+  // problema (no la consume — ver la nota "ADR-055" de cabecera de
+  // `export.engine.ts`) mientras `save` no.
+  describe("Sobre del dispatch: forma no reconocida (ADR-055 §5)", () => {
+    it("save() throws ExportFailedError and emits EXPORT_FAILED for any unrecognized shape (never a silent default)", async () => {
+      const garbageValues: ReadonlyArray<unknown> = [
+        {},
+        null,
+        "not-a-recognized-shape",
+        // TypedArray, no ArrayBuffer -- el error real que `savePdf()` evita
+        // copiando explícitamente a un ArrayBuffer plano antes de resolver.
+        new Uint8Array([0x25, 0x50, 0x44, 0x46]),
+      ];
+
+      for (const garbage of garbageValues) {
+        const pool = createResolvedExportPool(garbage);
+        const pooledEngine = new ExportEngine(pool);
+        await pooledEngine.init(ctx);
+        const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+
+        const rejection: unknown = await pooledEngine
+          .export(createExportEngineInput({ documentId: "doc-save-garbage" }), ctx)
+          .catch((err: unknown) => err);
+
+        expect(rejection).toBeInstanceOf(ExportFailedError);
+        // Prueba de regresión real (Validación del ADR-055: "revirtiendo el
+        // decoder, ese test tiene que fallar"): el mensaje tiene que venir
+        // específicamente de `decodeSaveResult`, no de un TypeError
+        // accidental al construir el Blob final / leer `.byteLength` de un
+        // valor que no es un ArrayBuffer real.
+        expect((rejection as ExportFailedError).message).toContain(
+          "ExportJobPool.dispatch() resolvió save con una forma no reconocida",
+        );
+
+        const failedCall = busEmitSpy.mock.calls.find(
+          ([, event]) => event === EngineEvents.EXPORT_FAILED,
+        );
+        expect(failedCall).toBeDefined();
+        // EXPORT_FINISHED nunca se emite para un save que no se pudo
+        // decodificar — la falla no se disfraza de export exitoso.
+        expect(
+          busEmitSpy.mock.calls.some(([, event]) => event === EngineEvents.EXPORT_FINISHED),
+        ).toBe(false);
+
+        await pooledEngine.dispose();
+      }
+    });
   });
 });
