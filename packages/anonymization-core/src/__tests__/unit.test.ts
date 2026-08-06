@@ -392,6 +392,14 @@ describe("Orchestrator — unit tests", () => {
     // Literal fresco (sin pasar por el tipo PdfEngineOutput/Document, ambos
     // `interface`): simula lo que un PdfWorker real devolvería por
     // postMessage — el transporte real no distingue de dónde salió el dato.
+    //
+    // ADR-055 §5/§10: este ES el test de sobre de PDF. El pool ignora `run()`
+    // (se asevera abajo: `engines.pdf.process` nunca se invoca) y resuelve
+    // exactamente lo que postea el entry-point, así que el valor que llega a
+    // `decodePdfEngineOutput` en `orchestrator.ts` cruzó el transporte de
+    // verdad. Si alguien envolviera el resultado del PdfWorker en un sobre,
+    // este literal dejaría de matchear el decoder y el import fallaría acá.
+    // Los rechazos (basura, sobre, campos faltantes) están en edge.test.ts.
     pdfWorker.emitMessage({
       type: "COMPLETED",
       jobId: runMessage.jobId,

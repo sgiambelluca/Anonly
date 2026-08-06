@@ -21,7 +21,7 @@ import { buildPageReplacements } from "@anonly/export-engine";
 import type { ExportEngineInput, RenderPageProvider } from "@anonly/export-engine";
 import type { NerPageInput } from "@anonly/ner-engine";
 import type { OcrPageInput } from "@anonly/ocr-engine";
-import { fuseOcrPage } from "@anonly/pdf-engine";
+import { decodePdfEngineOutput, fuseOcrPage } from "@anonly/pdf-engine";
 import type { PdfEngineOutput } from "@anonly/pdf-engine";
 import { RenderFailedError } from "@anonly/render-engine";
 import type { RenderPageInput } from "@anonly/render-engine";
@@ -633,25 +633,42 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
         ...(input.password !== undefined ? { password: input.password } : {}),
       };
 
-      // Cast de frontera de transporte (ADR-042): WorkerOutbound.COMPLETED.result
-      // es `unknown` a nivel de transporte (mismo criterio que RUN.payload/
-      // INIT.config, ADR-019) — WorkerPool.dispatchRemote lo afina genéricamente
-      // a `TResult` (transporte, ya genérico desde PR11, no se toca acá); el
-      // <PdfEngineOutput> explícito de abajo es el lado del host-bridge que fija
-      // ese `TResult` al tipo concreto que el entry-point del PdfWorker
-      // realmente produce (mismo patrón que `payload as PdfParsePayload` en
-      // `pdf-engine/src/worker/entry.ts`).
+      // Frontera de transporte (ADR-042): WorkerOutbound.COMPLETED.result es
+      // `unknown` a nivel de transporte (mismo criterio que RUN.payload/
+      // INIT.config, ADR-019) y WorkerPool.dispatchRemote lo afina
+      // genéricamente a `TResult` (transporte, ya genérico desde PR11, no se
+      // toca acá — ADR-055 §8: el transporte no conoce el contrato del payload
+      // de cada motor).
+      //
+      // El `<unknown>` de abajo es deliberado (ADR-055 §10). Acá había un
+      // `<PdfEngineOutput>` explícito: una afirmación que el compilador NO
+      // puede verificar, porque del otro lado de `run()` puede haber cruzado
+      // un `postMessage` real. Era el último `dispatch<T>` con tipo concreto
+      // que quedaba en producción. Con `unknown`, el compilador obliga a pasar
+      // por `decodePdfEngineOutput` antes de tocar el resultado.
+      //
+      // El decoder lo exporta `pdf-engine`, no vive acá: es el motor el que
+      // conoce el contrato de su propio worker (ADR-055 §8). Que el consumidor
+      // esté en el façade es la particularidad de PDF —único motor sin puerto
+      // interno, porque su entry-point corre el motor real completo (ADR-036
+      // §3) en vez de un kernel— y por eso este call site es el que angosta,
+      // en lugar de un `PdfJobPool` que no existe. Misma forma que
+      // `fuseOcrPage` (ADR-041): función pura del motor, ejecutada host-side
+      // por el façade, que como façade sí puede importar de un motor (P-1).
+      //
       // Sin `isRetryable` propio (ADR-049 §4/§5): el predicado por defecto del
       // pool (`err instanceof EngineError && err.retryable`) ya decide bien,
       // incluso con el error deserializado tras cruzar un Worker real, porque
       // `PdfPasswordRequiredError.retryable === false` (pdf-engine, PR 17.1)
       // y el flag sí sobrevive al boundary (`Contracts.md` §4).
-      pdfOutput = await this.pools.getPool("pdf").dispatch<PdfEngineOutput>({
-        run: () => this.engines.pdf.process(pdfParsePayload, ctx),
-        signal: ctx.abortSignal,
-        priority: 100,
-        payload: pdfParsePayload,
-      });
+      pdfOutput = decodePdfEngineOutput(
+        await this.pools.getPool("pdf").dispatch<unknown>({
+          run: () => this.engines.pdf.process(pdfParsePayload, ctx),
+          signal: ctx.abortSignal,
+          priority: 100,
+          payload: pdfParsePayload,
+        }),
+      );
     } catch (err: unknown) {
       this.handleExtractionFailure(documentId, err);
       return;

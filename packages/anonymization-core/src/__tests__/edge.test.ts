@@ -213,6 +213,100 @@ describe("Orchestrator — edge cases", () => {
     ).resolves.toBeUndefined();
   });
 
+  // ─── ADR-055 §3/§10: lo que resuelve el PdfPool se decodifica, no se castea ───
+  //
+  // Estos dos tests son el punto entero de D3.2. El pool ignora `run()` y
+  // resuelve algo que NO es un `PdfEngineOutput`, tal como haría un PdfWorker
+  // desalineado con su consumidor. Con el `dispatch<PdfEngineOutput>` anterior
+  // eso compilaba y el pipeline avanzaba con `document`/`textlessPages`
+  // undefined — el fallo mudo que ADR-055 existe para cerrar. Ahora
+  // `decodePdfEngineOutput` lanza dentro del try de `runExtraction`, y
+  // `handleExtractionFailure` lo manda a `failPipeline` (no es
+  // PDF_PASSWORD_REQUIRED ni cancelación).
+
+  /**
+   * Corre un import completo contra un PdfWorker fake que resuelve `result`
+   * (lo que sea) y devuelve el payload del `PIPELINE_FAILED`, si hubo.
+   */
+  async function importWithPdfWorkerResult(result: unknown): Promise<{
+    readonly failedSpy: ReturnType<typeof vi.fn>;
+    readonly orchestrator: PipelineOrchestrator;
+    readonly engines: ReturnType<typeof createMockEngines>;
+  }> {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    wireHappyPathSpies(engines, bus);
+    const pdfWorker = createFakeWorker();
+
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+      runtime: { workers: { pdf: () => pdfWorker } },
+    });
+
+    const failedSpy = vi.fn();
+    bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_FAILED, failedSpy);
+
+    const importPromise = orchestrator.importDocument(createImportInput());
+    await vi.waitFor(() => expect(pdfWorker.postMessage).toHaveBeenCalled());
+    const runMessage = pdfWorker.postMessage.mock.calls[0]?.[0] as { readonly jobId: string };
+
+    pdfWorker.emitMessage({ type: "COMPLETED", jobId: runMessage.jobId, result });
+    await importPromise;
+
+    return { failedSpy, orchestrator, engines };
+  }
+
+  it("garbage from the pdf pool fails the pipeline loudly", async () => {
+    for (const garbage of [{}, null, "unexpected", []] as ReadonlyArray<unknown>) {
+      const { failedSpy, orchestrator, engines } = await importWithPdfWorkerResult(garbage);
+
+      expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Failed);
+      expect(failedSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          documentId: "doc-1",
+          error: expect.objectContaining({ code: EngineErrorCode.INVALID_INPUT }),
+        }),
+      );
+      // El pool despachó remoto de verdad: el fallback in-process nunca corrió,
+      // así que el valor decodificado es genuinamente el que cruzó el transporte.
+      expect(engines.pdf.process).not.toHaveBeenCalled();
+      // Y nunca llegó a etapas posteriores con un documento roto.
+      expect(engines.render.loadDocument).not.toHaveBeenCalled();
+    }
+  });
+
+  it("an enveloped pdf result fails the pipeline instead of advancing silently", async () => {
+    // Un `PdfEngineOutput` perfecto, envuelto: la regresión exacta de ADR-055
+    // (Contexto §1, donde el NerWorker posteaba `{ spans }`) trasladada a PDF.
+    const { failedSpy, orchestrator } = await importWithPdfWorkerResult({
+      output: {
+        document: {
+          id: "doc-1",
+          name: "test.pdf",
+          pageCount: 1,
+          pages: [],
+          metadata: { pdfVersion: "1.7", encrypted: false, hasForms: false },
+          sourceKind: "text",
+          importedAt: 0,
+        },
+        pageCount: 1,
+        textlessPages: [],
+        sourceKind: "text",
+      },
+    });
+
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Failed);
+    expect(failedSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: expect.objectContaining({ code: EngineErrorCode.INVALID_INPUT }),
+      }),
+    );
+  });
+
   // ─── Caso 5: OCR de una página falla, el pipeline continúa ───
 
   it("failed OCR page skipped with warning, pipeline continues", async () => {
