@@ -1,11 +1,12 @@
-<!-- CONTEXT: scope=adr | dependencias=core/Contracts.md,core/NER_Engine.md,architecture/05_Worker_Architecture.md,ai/Code_Standards.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-042-WorkerOutbound-Completed-Result-Unknown.md,adr/ADR-043-RenderEngine-Reparto-Host-Worker-Kernel.md,adr/ADR-045-OcrEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-046-NerEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-047-ExportEngine-Ensamblador-Worker-Dedicado.md,adr/ADR-049-Errores-Cruzando-Worker-Discriminacion-Por-Code.md | audiencia=humanos+IA | fase=10-cierre -->
+<!-- CONTEXT: scope=adr | dependencias=core/Contracts.md,core/NER_Engine.md,core/PDF_Engine.md,core/Orchestrator.md,architecture/05_Worker_Architecture.md,ai/Code_Standards.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-041-FuseOcrPage-Funcion-Pura-Sin-Estado-Retenido.md,adr/ADR-042-WorkerOutbound-Completed-Result-Unknown.md,adr/ADR-043-RenderEngine-Reparto-Host-Worker-Kernel.md,adr/ADR-045-OcrEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-046-NerEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-047-ExportEngine-Ensamblador-Worker-Dedicado.md,adr/ADR-049-Errores-Cruzando-Worker-Discriminacion-Por-Code.md | audiencia=humanos+IA | fase=10-cierre (enmendado 2026-08-05: §10, alcance real de pdf-engine) -->
 
 # ADR-055 — El resultado que cruza un Worker se decodifica con un guard, nunca con un cast
 
 - **Estado**: Accepted
 - **Fecha**: 2026-07-31
 - **Decidido por**: El planificador, sobre un bug crítico que el humano reportó probando la app ("dejó de detectar entidades") y que el planificador rastreó hasta un desajuste de sobre entre el `NerWorker` y su host. El humano eligió explícitamente escribir el ADR **antes** del fix, para que el fix nazca en la forma definitiva.
-- **Relacionado con**: ADR-042 (que hizo `COMPLETED.result` un `unknown` a nivel de transporte — este ADR es su otra mitad, la del consumidor), ADR-049 (mismo problema en el canal de **errores**: la identidad de clase no sobrevive al `postMessage`, y se resolvió discriminando por `code`), ADR-043/045/046/047 (los cuatro repartos host/worker que crearon los puertos internos que este ADR angosta), ADR-036 §2/§3 (el transporte)
+- **Relacionado con**: ADR-042 (que hizo `COMPLETED.result` un `unknown` a nivel de transporte — este ADR es su otra mitad, la del consumidor), ADR-049 (mismo problema en el canal de **errores**: la identidad de clase no sobrevive al `postMessage`, y se resolvió discriminando por `code`), ADR-043/045/046/047 (los cuatro repartos host/worker que crearon los puertos internos que este ADR angosta), ADR-036 §2/§3 (el transporte), ADR-041 (precedente de función pura exportada por `pdf-engine` y ejecutada host-side por el façade — la forma que toma el decoder de PDF, ver §10)
+- **Enmendado**: 2026-08-05 — §10 corrige el alcance de `pdf-engine` en la tabla de §9, que asumía para PDF una arquitectura interna que ese motor no tiene. El invariante (§1) y el mecanismo (§2) no cambian.
 
 > Convención de citas: `ADR-055 §N` refiere a **Decisión §N**; el contexto se cita como `ADR-055, Contexto §N`.
 
@@ -61,6 +62,8 @@ Aplica al `result` de `COMPLETED` y a cualquier `partial` de `PROGRESS` que un m
 
 Los puertos internos de despacho —`NerJobPool` (`ner.engine.ts:176`), `OcrJobPool`, `RenderJobPool` y el equivalente de Export— dejan de ser genéricos y pasan a devolver `Promise<unknown>`.
 
+> **`pdf-engine` no tiene puerto interno y por eso no aparece en esta enumeración** (ver §10): es el único motor que nunca se partió en host + kernel, así que el consumidor de su resultado remoto vive en el façade. El invariante de §1 le aplica igual; lo que cambia es **dónde** se aplica el mecanismo, no si se aplica.
+
 A partir de ahí **el compilador obliga a decodificar**: no hay forma de escribir el consumidor sin pasar por un guard, porque `unknown` no se puede iterar, indexar ni desestructurar.
 
 Tres propiedades que hacen que esto sea implementable sin romper nada:
@@ -111,7 +114,30 @@ ADR-042 queda intacto (este ADR lo completa, no lo revisa). ADR-046 §1 queda in
 |---|---|---|---|
 | 1 | Puerto `unknown` + decoder + tests de §5; arregla el bug de Contexto §1 | `ner-engine` | **Crítica** |
 | 2 | E2E que verifica una entidad NER en la UI (§6) | `tests/e2e/` | Alta |
-| 3-6 | Mismo patrón, uno por motor | `ocr-engine`, `render-engine`, `pdf-engine`, `export-engine` | Preventiva, sin fecha |
+| 3-5 | Mismo patrón, uno por motor | `ocr-engine`, `render-engine`, `export-engine` | Preventiva, sin fecha |
+| 6.1 | Decoder puro exportado (§10) | `pdf-engine` | Preventiva, sin fecha |
+| 6.2 | Call site a `unknown` + decoder (§10); **después** de 6.1 | `packages/anonymization-core/src` (façade) | Preventiva, sin fecha |
+
+*(Enmienda 2026-08-05: la fila original decía `3-6 | Mismo patrón, uno por motor | ocr-engine, render-engine, pdf-engine, export-engine`. Ver §10.)*
+
+**Mapeo con `roadmap/MVP.md`**, que numera esta serie como D1..D4: `D1 = ocr-engine`, `D2 = render-engine`, `D4 = export-engine` (filas 3-5 de acá), y `D3.1 → D3.2` = las filas 6.1/6.2 de PDF. Las etiquetas D se conservan tal como se asignaron; lo único que se parte es D3.
+
+### 10. Enmienda (2026-08-05) — `pdf-engine` no tiene puerto interno: su decoder es host-side
+
+La tabla original de §9 metía a `pdf-engine` en la fila "mismo patrón, uno por motor". Es incorrecto, y se contradice con la enumeración de §2, que nombra cuatro puertos y **no** incluye a PDF. Un implementador con la tarea "aplicar ADR-055 a `pdf-engine`" no encuentra nada que angostar dentro de ese paquete: `grep "JobPool\|dispatch" pdf-engine/src/pdf.engine.ts` no devuelve nada.
+
+**Por qué**: los otros cuatro motores se partieron en una mitad host liviana y un kernel remoto (ADR-043 Render, ADR-045 OCR, ADR-046 NER, ADR-047 Export), y esa mitad host —que vive dentro del paquete del motor— es la que recibe el resultado del Worker. Es la que tiene puerto y la que se angosta. `pdf-engine` nunca se partió: conserva el modelo original de ADR-036 §3, donde el entry-point instancia el **motor real** completo y lo corre dentro del Worker (`pdf-engine/src/worker/entry.ts`, que se declara "pura mensajería"). No es un descuido: es la consecuencia de que a PDF nunca le hizo falta un reparto host/kernel propio, y ningún ADR posterior se lo dio.
+
+**Consecuencia**: el único consumidor de un resultado de PDF que cruzó un `postMessage` es el façade, en `orchestrator.ts` (el `dispatch<PdfEngineOutput>` del stage de extracción) — que a la fecha de esta enmienda es, además, el **único** `dispatch<T>` con parámetro de tipo explícito que queda en producción en todo el Core: los otros cuatro ya se resolvieron dentro de sus motores en los PRs 3-5. No hay nada que generalizar a los cinco.
+
+**Forma de la solución**: dos PRs en orden estricto, sin excepción a R-1, mismo reparto que ADR-049 (PR 17.1 `pdf-engine` → PR 17.2 façade):
+
+- **6.1 — `pdf-engine`**: exporta `decodePdfEngineOutput(value: unknown): PdfEngineOutput`, función pura, más sus tests. La responsabilidad de decodificar sigue siendo **del motor dueño del contrato** (§8): lo único que cambia es que su consumidor está afuera. Precedente exacto de forma: `fuseOcrPage` (ADR-041) — función pura exportada por `pdf-engine` y ejecutada host-side por el façade, que como façade sí puede importar de un motor (P-1).
+- **6.2 — façade**: el call site pasa a `dispatch<unknown>` y el resultado atraviesa `decodePdfEngineOutput` antes de tocarse. `worker-pool.ts` no se toca (§8 intacto: sigue siendo transporte genérico).
+
+**Qué significa el test de sobre de §5 acá**: PDF **no tiene sobre**. `entry.ts` postea el `PdfEngineOutput` pelado (`post({ type: "COMPLETED", jobId, result })` con `result` = lo que devolvió `engine.process()`), así que el camino remoto y el in-process resuelven la misma forma y el test de paridad es trivialmente el mismo caso. El que carga el peso es el tercero de §5: el fake que resuelve basura (`{}`, `null`, un string, un `PdfEngineOutput` al que le falta un campo) verificando que **lanza** y que el error no se traga aguas arriba. El de paridad se conserva igual, porque es lo que detectaría el día que alguien envuelva el resultado.
+
+**Qué NO cambia**: §1, §2 (mecanismo para los cuatro motores con puerto), §3 (un decoder nunca devuelve un default), §8. ADR-036 §3 queda intacto y **no** se reabre: esta enmienda no propone partir `pdf-engine` en host + kernel. Esa sería una reestructuración mucho mayor, sin ningún problema que la justifique, y fuera del espíritu de una serie preventiva.
 
 ## Alternativas consideradas
 
@@ -123,6 +149,8 @@ ADR-042 queda intacto (este ADR lo completa, no lo revisa). ADR-046 §1 queda in
 | **Decodificar centralizado en `worker-pool.ts`** | El transporte no conoce el contrato de cada motor; meterle esa lógica lo acopla a los cinco. Además tocaría un archivo compartido por todos, o sea un PR que cruza cinco motores (R-1/R-5). |
 | **`dispatch` con un parámetro `decode` obligatorio** | Cambia la firma de `worker-pool.ts` y con ella los cinco call sites en un solo PR: mismo choque con R-1. El puerto por motor logra lo mismo sin tocar nada compartido (§2). |
 | **Validar con un schema (zod o similar)** | Dependencia externa nueva (R-12) para lo que son guards de treinta líneas, en un Core que no tiene dependencias de validación. |
+| **Partir `pdf-engine` en host + kernel para que tenga puerto propio como los otros cuatro** (evaluada en la enmienda de §10) | Reestructuración mayor de un motor que hoy no tiene ningún problema, solo para que encaje en la forma de la tabla de §9. Reabre ADR-036 §3 sin una causa que lo justifique, y excede por completo el alcance de una serie preventiva. El decoder host-side logra el mismo invariante con una función pura. |
+| **Dejar `pdf-engine` fuera de la serie** (evaluada en la enmienda de §10) | Deja vivo el único `dispatch<T>` con tipo explícito que queda en producción — exactamente la construcción que este ADR existe para cerrar. Que el consumidor esté en otro módulo no cambia el riesgo. |
 
 ## Consecuencias
 
@@ -140,12 +168,18 @@ ADR-042 queda intacto (este ADR lo completa, no lo revisa). ADR-046 §1 queda in
 - `adr/ADR-042`: nota de que su `unknown` de transporte tiene ahora una obligación correspondiente del lado del consumidor.
 - `roadmap/MVP.md` y `roadmap/Hito10_Observaciones_Revision.md`: los PRs de §9.
 
+Sumados por la enmienda de §10 (2026-08-05):
+
+- `core/PDF_Engine.md`: `decodePdfEngineOutput` en §6 (interfaces públicas), su error en §11, sus casos en §13/§14.
+- `core/Orchestrator.md`: los tests del call site decodificado.
+- `architecture/05_Worker_Architecture.md` §2.2 y `ai/Code_Standards.md`: la salvedad de PDF sobre "el puerto vive dentro del archivo del motor".
+
 ## Validación
 
 - Los tests de §5 verdes en `ner-engine`, en particular el de sobre remoto: revirtiendo el decoder, ese test tiene que fallar. Si no falla, el test no está probando lo que dice.
 - El E2E de §6 verde, con una entidad de tipo Persona visible en el panel.
 - Verificación manual: cargar el PDF de prueba del humano y confirmar que aparecen personas y ubicaciones, no solo la patente de Regex.
-- Grep de control: ningún `as` sobre el resultado de un `dispatch` en el motor migrado.
+- Grep de control: ningún `as` sobre el resultado de un `dispatch` en el motor migrado. Cerrada la serie completa (incluido §10), el grep de control global es que **no quede ningún `.dispatch<` con parámetro de tipo explícito** en `packages/anonymization-core/src/` ni en ningún motor — solo `dispatch<unknown>`.
 - Gates: `pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract`, más el piso de cobertura de `ner-engine`.
 
 ## Referencias

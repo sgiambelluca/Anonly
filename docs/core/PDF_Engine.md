@@ -1,13 +1,15 @@
-<!-- CONTEXT: scope=pdf-engine | dependencias=core/Contracts.md,architecture/03_Data_Model.md,architecture/04_Event_System.md,architecture/05_Worker_Architecture.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-020-PdfEngine-Word-Granularity-Hardening.md,adr/ADR-041-FuseOcrPage-Funcion-Pura-Sin-Estado-Retenido.md,adr/ADR-049-Errores-Cruzando-Worker-Discriminacion-Por-Code.md,adr/ADR-053-Pdfjs-Dentro-De-Un-Worker-Fuentes-Y-Cmaps.md | audiencia=IA-implementador | fase=10 (Hito 2 cerrado, hardening ADR-020; fuseOcrPage función pura y motor sin estado por documento vía ADR-041 — PR12 del Hito 10; `PdfPasswordRequiredError.retryable = false` vía ADR-049 §4 — PR 17.1; CMaps y standard fonts en getDocument vía ADR-053 §5 — cierre de fase 10; pendientes: items §15 diferidos a Hito 11) -->
+<!-- CONTEXT: scope=pdf-engine | dependencias=core/Contracts.md,architecture/03_Data_Model.md,architecture/04_Event_System.md,architecture/05_Worker_Architecture.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-020-PdfEngine-Word-Granularity-Hardening.md,adr/ADR-041-FuseOcrPage-Funcion-Pura-Sin-Estado-Retenido.md,adr/ADR-049-Errores-Cruzando-Worker-Discriminacion-Por-Code.md,adr/ADR-053-Pdfjs-Dentro-De-Un-Worker-Fuentes-Y-Cmaps.md,adr/ADR-055-Decodificacion-Del-Resultado-Que-Cruza-Un-Worker.md | audiencia=IA-implementador | fase=10 (Hito 2 cerrado, hardening ADR-020; fuseOcrPage función pura y motor sin estado por documento vía ADR-041 — PR12 del Hito 10; `PdfPasswordRequiredError.retryable = false` vía ADR-049 §4 — PR 17.1; CMaps y standard fonts en getDocument vía ADR-053 §5 — cierre de fase 10; `decodePdfEngineOutput` vía ADR-055 §10 — D3.1; pendientes: items §15 diferidos a Hito 11) -->
 
 # PDF Engine — Spec de Motor
 
 > Extrae texto y posiciones de cada página del PDF. Marca las páginas sin texto para que OCR las procese. Descarta metadata sensible.
 
 **EngineId**: `pdf` (valor del enum `EngineId`)
-**Versión del spec**: 1.3.1
-**Última actualización**: 2026-07-31
+**Versión del spec**: 1.4.0
+**Última actualización**: 2026-08-05
 **Estado de implementación**: Hito 2 cerrado (PRs #6, #7); hardening post-review vía ADR-020 (word-splitting, NFC, política de eventos, guard de `fuseOcrPage`, `parsePage` puro); migración a `PdfPool` cerrada en Hito 9 (ADR-035). Pendiente: PdfWorker real (PR12, Hito 10 — incluye la extracción de `fuseOcrPage` a función pura, ADR-041) y tests stress/cancel/perf en Hito 11.
+
+> **Nota (ADR-055 §10, 2026-08-05)**: el paquete gana un segundo export puro, `decodePdfEngineOutput(value: unknown): PdfEngineOutput` (§6), y su error dedicado (§11). Motivo: `pdf-engine` es el único motor sin puerto interno de despacho —el `PdfWorker` corre el motor real completo (ADR-036 §3), no un kernel— así que el consumidor de su `COMPLETED.result` es el façade. El decoder lo escribe y exporta **este** motor, que es el que conoce el contrato de su worker (ADR-055 §8); el façade lo invoca host-side sobre un `dispatch<unknown>`, misma forma que `fuseOcrPage` (ADR-041). El motor, el worker y `PdfEngineOutput` **no cambian**: `process()` sigue devolviendo el tipo concreto y nadie lo decodifica en el camino in-process del propio motor.
 
 > **Nota (ADR-041, 2026-07-22)**: `fuseOcrPage` deja de ser método de la clase y pasa a **función pura** exportada por el paquete — `(document, pageIndex, words) → Document`, síncrona, ejecutada host-side por el Orchestrator con su copia retenida. El motor **no retiene documentos** (se elimina el `Map` interno) y `releaseDocument` desaparece de la interfaz pública (ADR-020 §7 superseded). El guard de `requiresOCR` (ADR-020 §6) y la normalización NFC (ADR-020 §2) se preservan en la función.
 
@@ -105,6 +107,20 @@ export function fuseOcrPage(
   pageIndex: number,
   words: ReadonlyArray<Word>,
 ): Document;
+
+// ADR-055 §10: función pura, sin instancia ni estado. Verifica en RUNTIME que un
+// valor que cruzó el PdfWorker tenga la forma de PdfEngineOutput, y lo devuelve
+// tipado. La escribe este motor (es el que conoce el contrato de su worker,
+// ADR-055 §8) y la invoca el façade, que es el único consumidor de ese resultado
+// remoto — pdf-engine no tiene puerto interno de despacho que angostar.
+// Verificación superficial y deliberada (§13 caso 17): los cuatro campos de
+// PdfEngineOutput, más que `document` tenga `id: string` y `pages: Array`. NO
+// recorre words/bboxes: correría por cada import sobre documentos de miles de
+// páginas, y una corrupción parcial de ese nivel no es el modo de falla que
+// ADR-055 cierra (un sobre con forma distinta lo es).
+// Ante cualquier otra forma LANZA InvalidInputError con details.receivedShape
+// (§11). Devolver un default en silencio está prohibido (ADR-055 §3).
+export function decodePdfEngineOutput(value: unknown): PdfEngineOutput;
 ```
 
 ---
@@ -184,7 +200,9 @@ PdfEngineOutput {
 | `PDF_TIMEOUT` | `PdfTimeoutError` | timeout por página excedido | sí (reintentar) | Hito 2 (inline): no reintenta, se propaga directo. Hito 9: retry es responsabilidad del `WorkerPool` (`maxRetries["pdf-parse"]`, ADR-020 §5); si persiste → `PDF_INVALID` |
 | `ENGINE_NOT_INITIALIZED` | `EngineNotInitializedError` | `process` llamado antes de `init` | no | bug del caller |
 | `ENGINE_DISPOSED` | `EngineDisposedError` | `process` llamado tras `dispose` | no | bug del caller |
-| `INVALID_INPUT` | `InvalidInputError` | input null/undefined, buffer vacío, o `fuseOcrPage` sobre página con `requiresOCR === false` (ADR-020 §6) o con `pageIndex` inexistente (ADR-041) | no | bug del caller |
+| `INVALID_INPUT` | `InvalidInputError` | input null/undefined, buffer vacío, o `fuseOcrPage` sobre página con `requiresOCR === false` (ADR-020 §6) o con `pageIndex` inexistente (ADR-041), o `decodePdfEngineOutput` sobre una forma que no es `PdfEngineOutput` (ADR-055 §3/§10) | no | bug del caller; en el caso del decoder, un desajuste entre el `PdfWorker` y su consumidor → `failPipeline` |
+
+**Sobre el error del decoder (ADR-055 §10)**: es `InvalidInputError` a secas —sin clase ni `EngineErrorCode` nuevos— por dos motivos. `PdfInvalidError`/`PDF_INVALID` sería **mentirle al usuario**: significa "tu archivo no es un PDF válido", cuando el archivo puede estar perfecto y lo roto ser el sobre del worker. Y a diferencia de `ner-engine` —que sí necesitó una subclase interna para distinguir "el sobre está roto, es sistémico" de un fallo tolerable de página— acá ningún caller discrimina: el façade manda todo lo que no es `PDF_PASSWORD_REQUIRED` ni cancelación a `failPipeline`, que es exactamente el fallo ruidoso que ADR-055 §3 pide. El `details` lleva `receivedShape` con la **forma** del valor (claves y tipos), nunca su contenido (`Code_Standards.md` §9: no loguear contenido del documento).
 
 `retryable`: `PDF_TIMEOUT = true`, resto `false` — incluido `PDF_PASSWORD_REQUIRED` (errata ADR-035 §3: `retryable` significa auto-reintentable por el pool sin intervención del usuario; la recuperación por password es del flujo UI → `retryWithPassword`, no del flag). El fix del flag en `pdf.errors.ts` (`super(..., true, ...)` → `false`) es el **PR 17.1** de ADR-049 §4/§7: dejó de ser cosmético al llegar el transporte real de workers — el override `isRetryable` con el que el Orchestrator lo compensaba se apoyaba en un `instanceof` que no sobrevive al boundary, así que el pool reintentaba el PDF protegido (ADR-049, Contexto §3). El flag **sí** sobrevive; por eso corregirlo permite retirar el override.
 
@@ -223,6 +241,8 @@ PdfEngineOutput {
 13. **`process` llamado tras `dispose`**: lanza `EngineDisposedError`.
 14. **`fuseOcrPage` sobre página con texto nativo** (`requiresOCR === false`): lanza `InvalidInputError`; la fusión OCR solo aplica a páginas textless (ADR-020 §6; función pura desde ADR-041 — el caso "documento no encontrado" desapareció, el caller provee el `Document`).
 15. **`fuseOcrPage` con `pageIndex` fuera de rango**: lanza `InvalidInputError` con `details: { pageIndex }` (ADR-041).
+16. **`decodePdfEngineOutput` sobre un `PdfEngineOutput` válido** (la forma que postea `worker/entry.ts` y la que devuelve `process()` in-process — son la **misma**, este motor no envuelve el resultado en ningún sobre): lo devuelve tal cual, sin copiarlo ni normalizarlo.
+17. **`decodePdfEngineOutput` sobre cualquier otra forma** (`null`, `undefined`, un string, `[]`, `{}`, un objeto al que le falta un campo o le sobra con el tipo equivocado, o un `{ output: {...} }` que envuelva el resultado): lanza `InvalidInputError` con `details.receivedShape`. La verificación es superficial por diseño (§6): valida los cuatro campos de `PdfEngineOutput` y que `document` tenga `id: string` y `pages: Array`, pero **no** recorre `words`/`bbox` — un `document.pages` con elementos corruptos adentro pasa el decoder. Es deliberado: el modo de falla que ADR-055 cierra es el sobre de forma distinta, no la corrupción campo a campo, y un walk profundo correría por cada import sobre documentos de miles de páginas (§12).
 
 ---
 
@@ -264,6 +284,12 @@ PdfEngineOutput {
 | `fuseOcrPage on non-OCR page throws InvalidInputError` | `contract.test.ts` | contract | 2 | caso 14; ADR-020 §6 (función pura desde ADR-041) |
 | `engine never subscribes to the bus (ADR-014)` | `contract.test.ts` | contract | 2 | ratifica ADR-014 |
 | `fuseOcrPage on unknown pageIndex throws InvalidInputError` | `unit.test.ts` | unit | 10 | caso 15 (ADR-041; reemplaza al test de `releaseDocument`, eliminado con el método — ADR-020 §7 superseded) |
+| `decodePdfEngineOutput returns a valid PdfEngineOutput unchanged` | `unit.test.ts` | unit | 10 | caso 16 (ADR-055 §10); identidad referencial, no copia |
+| `decodePdfEngineOutput accepts the exact shape PdfWorker posts` | `unit.test.ts` | unit | 10 | ADR-055 §5 (paridad remoto/in-process): el valor lo produce el mismo helper que arma el `COMPLETED.result` del entry-point, no un literal escrito a mano. Es el test que se pondría rojo el día que alguien envuelva el resultado en un sobre |
+| `decodePdfEngineOutput throws InvalidInputError on garbage` | `edge.test.ts` | edge | 10 | caso 17 (ADR-055 §3): `null`, `undefined`, `"x"`, `42`, `[]`, `{}` |
+| `decodePdfEngineOutput throws on missing or mistyped fields` | `edge.test.ts` | edge | 10 | caso 17: falta `document`/`pageCount`/`textlessPages`/`sourceKind`, `sourceKind` fuera del union, `pages` no-array, `document.id` no-string |
+| `decodePdfEngineOutput throws on an enveloped result` | `edge.test.ts` | edge | 10 | caso 17: `{ output: <válido> }` — la regresión concreta de ADR-055 (Contexto §1) trasladada a PDF |
+| `decodePdfEngineOutput error details carry shape, never content` | `edge.test.ts` | edge | 10 | `Code_Standards.md` §9: `receivedShape` lista claves y tipos, nunca texto del documento |
 | `1000 pages document completes within memory budget` | `stress.test.ts` (en `tests/stress/`) | stress | 11 | caso 2; pendiente, requiere `huge-1000p.pdf` (LFS) |
 | `cancel aborts within 200ms` | `cancel.test.ts` (en `tests/cancel/`) | cancel | 11 | SLA; pendiente, requiere `PdfPool` + `AbortRegistry` (Hito 9) |
 

@@ -70,6 +70,8 @@ export type WorkerInbound =
 
 El mecanismo que lo impone: **cada motor angosta su propio puerto interno de despacho a `Promise<unknown>`** (`NerJobPool`, `OcrJobPool`, `RenderJobPool` y el equivalente de Export — todos viven dentro del archivo de su motor). A partir de ahí el compilador obliga a pasar por un guard, porque `unknown` no se puede iterar, indexar ni desestructurar. `worker-pool.ts` **no** cambia: es transporte, y el transporte no conoce el contrato del payload de cada motor. Un decoder que ante una forma inesperada devuelva `[]`, `undefined` o cualquier default **está prohibido** (ADR-055 §3): lanza un `EngineError` de la subclase que corresponda. Que falle ruidosamente es el punto.
 
+**Excepción de ubicación — `pdf-engine` (ADR-055 §10)**: los cuatro puertos de arriba existen porque sus motores se partieron en mitad host + kernel (§7.2-§7.5; ADR-043/045/046/047). `pdf-engine` conserva el modelo original de ADR-036 §3 —el entry-point corre el **motor real** completo (§7.1)— así que no tiene puerto interno ni host-bridge propio: el consumidor de su `COMPLETED.result` es el **façade** (`orchestrator.ts`, stage de extracción). El invariante aplica igual y el decoder sigue siendo del motor (`decodePdfEngineOutput`, exportado por `pdf-engine`, `core/PDF_Engine.md` §6); lo único distinto es que lo **invoca** el façade, host-side — misma forma que `fuseOcrPage` (ADR-041). Angostar ahí significa `dispatch<unknown>` en el call site, no un puerto nuevo.
+
 El canal de errores tiene su equivalente ya resuelto: la identidad de clase tampoco sobrevive al `postMessage`, y se discrimina por `code` (ADR-049).
 
 ```ts
