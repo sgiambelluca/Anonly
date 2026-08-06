@@ -197,6 +197,61 @@ export function createTrackingExportPool(): TrackingExportPool {
   };
 }
 
+/**
+ * Pool estructural que **ignora `params.run()`** y resuelve directo con
+ * `resolvedValue` (ADR-055 §5 / Code_Standards.md §7 "Test obligatorio por
+ * motor"): a diferencia de `createTrackingExportPool` (arriba), que delega en
+ * `run()` —el camino in-process— y por lo tanto **nunca cruza el sobre**
+ * `COMPLETED.result`, este es el único fake de este paquete que reproduce lo
+ * que un `ExportJobPool` real resolvería tras un `postMessage`. Mismo
+ * precedente que `createResolvedOcrPool` (ocr-engine, D1) /
+ * `createResolvedRenderDispatchPool`/`createResolvedRenderBroadcastPool`
+ * (render-engine, D2).
+ *
+ * Usado solo para ejercitar `decodeSaveResult` (save): `append-page` no tiene
+ * decoder que probar (ver la nota "ADR-055" de cabecera de `export.engine.ts`
+ * — el resultado nunca se consume), así que los tests de `append-page` no
+ * necesitan discriminar por forma de payload, a diferencia de
+ * `createShapeAwareExportPool` (más abajo), que sí resuelve cada operación
+ * con un valor distinto.
+ */
+export function createResolvedExportPool(resolvedValue: unknown): {
+  readonly dispatch: (params: ExportPoolDispatchParams<unknown>) => Promise<unknown>;
+} {
+  return {
+    dispatch: (): Promise<unknown> => Promise.resolve(resolvedValue),
+  };
+}
+
+/**
+ * Pool estructural que discrimina por forma del payload (mismo criterio que
+ * `worker/entry.ts#isExportPagePayload`: `"pageImage" in payload` →
+ * append-page; si no → save) para resolver cada operación con un valor
+ * distinto — necesario para ejercitar el decoder de `save` en el flujo
+ * completo de `export()` (que primero despacha N `append-page` y luego un
+ * `save`) sin que la forma de basura de `save` contamine también los
+ * despachos de `append-page` anteriores en el mismo loop. `appendResolvedValue`
+ * default `null` (la forma que postea `worker/entry.ts` para append-page,
+ * ADR-055 — sin impacto: `exportPage` nunca lee este valor).
+ */
+export function createShapeAwareExportPool(options: {
+  readonly saveResolvedValue: unknown;
+  readonly appendResolvedValue?: unknown;
+}): {
+  readonly dispatch: (params: ExportPoolDispatchParams<unknown>) => Promise<unknown>;
+} {
+  return {
+    dispatch: (params: ExportPoolDispatchParams<unknown>): Promise<unknown> => {
+      const payload = params.payload;
+      const isAppendPage =
+        typeof payload === "object" && payload !== null && "pageImage" in payload;
+      return Promise.resolve(
+        isAppendPage ? (options.appendResolvedValue ?? null) : options.saveResolvedValue,
+      );
+    },
+  };
+}
+
 // ─── Mock de RenderPageProvider ───
 
 export interface MockRenderPageProviderOptions {

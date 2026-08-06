@@ -30,6 +30,7 @@ import {
   createExportOptions,
   createMockPdfLibDocument,
   createMockRenderPageProvider,
+  createShapeAwareExportPool,
 } from "./fixtures/test-helpers.js";
 
 describe("ExportEngine — unit", () => {
@@ -426,6 +427,111 @@ describe("ExportEngine — unit", () => {
     );
 
     expect(pngResult.sizeBytes).toBeGreaterThan(jpegResult.sizeBytes);
+  });
+
+  // ─── ADR-055 §5 — tests de sobre, obligatorios ───
+  //
+  // A diferencia de `createTrackingExportPool` (usada arriba en
+  // contract.test.ts, que delega en `params.run()` — el camino in-process)
+  // `createShapeAwareExportPool` IGNORA `run()` y resuelve directo con el
+  // valor dado por operación — es el único fake de este paquete que cruza de
+  // verdad el sobre `COMPLETED.result` (ADR-055 Contexto §2). Sin él, ningún
+  // test ejercita `decodeSaveResult` de verdad ni demuestra por qué
+  // `append-page` no necesita uno (ver la nota "ADR-055" de cabecera de
+  // `export.engine.ts`).
+  describe("Sobre del dispatch (ADR-055)", () => {
+    it("append-page: export() completa igual con result: null (forma que postea worker/entry.ts, ADR-055 §2)", async () => {
+      // worker/entry.ts:100 postea `result: null` para append-page ("Sin
+      // datos que devolver: el host solo necesita la confirmación de
+      // COMPLETED"). El call site de `exportPage` nunca liga ese valor (nota
+      // de cabecera de export.engine.ts) — este test demuestra que export()
+      // completa exactamente igual con esa forma remota.
+      const remoteSaveBuffer = new TextEncoder().encode("%PDF-remote-append").buffer;
+      const pool = createShapeAwareExportPool({
+        appendResolvedValue: null,
+        saveResolvedValue: remoteSaveBuffer,
+      });
+      const pooledEngine = new ExportEngine(pool);
+      await pooledEngine.init(ctx);
+
+      const result = await pooledEngine.export(
+        createExportEngineInput({ documentId: "doc-append-envelope" }),
+        ctx,
+      );
+
+      expect(new Uint8Array(result.buffer)).toEqual(new Uint8Array(remoteSaveBuffer));
+
+      await pooledEngine.dispose();
+    });
+
+    it("append-page: export() completa igual con result: undefined (forma in-process, parity — nota la asimetría null/undefined, ADR-055 §2)", async () => {
+      // `dispatchAppendPage` (fallback in-process) devuelve `Promise<void>`:
+      // el valor resuelto real es `undefined`, una forma DISTINTA de la que
+      // postea el worker remoto (`null` — ver test de arriba). A diferencia
+      // de las operaciones CON decoder (donde esta clase de asimetría
+      // obligaría a que el decoder acepte ambas formas), acá no importa:
+      // ninguna de las dos se lee jamás, así que ninguna puede producir un
+      // resultado distinto observable.
+      const inProcessSaveBuffer = new TextEncoder().encode("%PDF-inprocess-append").buffer;
+      const pool = createShapeAwareExportPool({
+        appendResolvedValue: undefined,
+        saveResolvedValue: inProcessSaveBuffer,
+      });
+      const pooledEngine = new ExportEngine(pool);
+      await pooledEngine.init(ctx);
+
+      const result = await pooledEngine.export(
+        createExportEngineInput({ documentId: "doc-append-parity" }),
+        ctx,
+      );
+
+      expect(new Uint8Array(result.buffer)).toEqual(new Uint8Array(inProcessSaveBuffer));
+
+      await pooledEngine.dispose();
+    });
+
+    it("save: decodes the bare COMPLETED.result posted by worker/entry.ts (ArrayBuffer pelado, ADR-055 §2)", async () => {
+      // worker/entry.ts:111 postea `result: buffer` sin envolver — el mismo
+      // ArrayBuffer que produce savePdf(). decodeSaveResult acepta esa forma
+      // y export() devuelve exactamente ese buffer como resultado final.
+      const remoteBuffer = new TextEncoder().encode("%PDF-remote-save").buffer;
+      const pool = createShapeAwareExportPool({ saveResolvedValue: remoteBuffer });
+      const pooledEngine = new ExportEngine(pool);
+      await pooledEngine.init(ctx);
+
+      const result = await pooledEngine.export(
+        createExportEngineInput({ documentId: "doc-save-envelope" }),
+        ctx,
+      );
+
+      expect(new Uint8Array(result.buffer)).toEqual(new Uint8Array(remoteBuffer));
+      expect(result.sizeBytes).toBe(remoteBuffer.byteLength);
+
+      await pooledEngine.dispose();
+    });
+
+    it("save: decodes the identical in-process shape (parity: save has no envelope, ADR-055 §2)", async () => {
+      // A diferencia de NER (`{ spans }` remoto vs. array pelado in-process),
+      // `dispatchSave` (fallback in-process) resuelve el mismo ArrayBuffer
+      // pelado que produce savePdf() — la MISMA forma que worker/entry.ts
+      // postea en el camino remoto (ver test de arriba). Este test usa el
+      // mismo fake con un buffer distinto para demostrar explícitamente esa
+      // paridad: decodeSaveResult no necesita (ni tiene) una rama especial
+      // para un segundo caso.
+      const inProcessBuffer = new TextEncoder().encode("%PDF-inprocess-save").buffer;
+      const pool = createShapeAwareExportPool({ saveResolvedValue: inProcessBuffer });
+      const pooledEngine = new ExportEngine(pool);
+      await pooledEngine.init(ctx);
+
+      const result = await pooledEngine.export(
+        createExportEngineInput({ documentId: "doc-save-parity" }),
+        ctx,
+      );
+
+      expect(new Uint8Array(result.buffer)).toEqual(new Uint8Array(inProcessBuffer));
+
+      await pooledEngine.dispose();
+    });
   });
 });
 
