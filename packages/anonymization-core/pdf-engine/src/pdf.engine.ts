@@ -339,6 +339,93 @@ export function fuseOcrPage(
   };
 }
 
+// ─── Decoder del `COMPLETED.result` del PdfWorker (ADR-055 §10, nota v1.4.0
+// de PDF_Engine.md) ───
+//
+// A diferencia de los otros cuatro motores, `pdf-engine` NO tiene puerto
+// interno de despacho que angostar a `Promise<unknown>` (ADR-055 §2): nunca se
+// partió en mitad host + kernel (ADR-043/045/046/047), su entry-point corre el
+// motor real completo (ADR-036 §3) y por lo tanto el único consumidor de un
+// resultado suyo que cruzó un `postMessage` vive en el façade
+// (`orchestrator.ts`, stage de extracción). El guard lo escribe igual ESTE
+// motor —es el que conoce el contrato de su propio worker, ADR-055 §8— y se
+// exporta para que el façade lo invoque host-side sobre un `dispatch<unknown>`.
+// Misma forma que `fuseOcrPage` (ADR-041): función pura de este paquete,
+// ejecutada por el façade, que como façade sí puede importar de un motor (P-1).
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+const PDF_SOURCE_KINDS: ReadonlySet<string> = new Set(["text", "scanned", "mixed"]);
+
+/**
+ * Detalle legible de una forma no reconocida, para el `details` del
+ * `InvalidInputError`. Reporta SOLO la forma —claves y tipos—, nunca el
+ * contenido del valor (`Code_Standards.md` §9: nunca loguear contenido del
+ * documento; acá el valor sospechoso puede contener el texto extraído entero).
+ */
+function describeDispatchResultShape(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return `array(length=${value.length})`;
+  if (isRecord(value)) return `object(keys=[${Object.keys(value).join(", ")}])`;
+  return typeof value;
+}
+
+/**
+ * Type predicate, no un `as`: es lo que permite que `decodePdfEngineOutput`
+ * devuelva `PdfEngineOutput` sin un solo cast sobre el valor que cruzó la
+ * frontera (ADR-055, Validación: "ningún `as` sobre el resultado de un
+ * `dispatch`"). Lo que el guard no chequea —el interior de `pages`— queda
+ * cubierto por el contrato del propio motor, que es quien produjo ese array:
+ * la duda que ADR-055 cierra es si el valor viene del `PdfEngine` o de otra
+ * cosa, no si `PdfEngine` construyó mal sus propias páginas.
+ */
+function isPdfEngineOutput(value: unknown): value is PdfEngineOutput {
+  return (
+    isRecord(value) &&
+    isRecord(value.document) &&
+    typeof value.document.id === "string" &&
+    Array.isArray(value.document.pages) &&
+    typeof value.pageCount === "number" &&
+    Array.isArray(value.textlessPages) &&
+    value.textlessPages.every((p): boolean => typeof p === "number") &&
+    typeof value.sourceKind === "string" &&
+    PDF_SOURCE_KINDS.has(value.sourceKind)
+  );
+}
+
+/**
+ * Decodifica un valor que cruzó la frontera del `PdfWorker` y lo devuelve
+ * tipado como `PdfEngineOutput` (ADR-055 §1: verificar la forma en runtime, no
+ * afirmarla con un `dispatch<T>` que el compilador no puede verificar).
+ *
+ * Este motor NO envuelve su resultado en ningún sobre: `worker/entry.ts` postea
+ * `result` = lo que devolvió `engine.process()`, así que el camino remoto y el
+ * in-process resuelven exactamente la misma forma. Esa es la única válida
+ * (PDF_Engine.md §13 casos 16-17); cualquier otra —incluido un `{ output }` que
+ * envuelva un resultado por lo demás correcto— **lanza**. Devolver un default
+ * en silencio está prohibido (ADR-055 §3): que falle ruidosamente es el punto.
+ *
+ * Verificación superficial y deliberada: los cuatro campos de `PdfEngineOutput`
+ * más `document.id`/`document.pages`, sin recorrer `words`/`bbox`. Corre una
+ * vez por import sobre documentos de hasta 10.000 páginas, y una corrupción
+ * campo a campo no es el modo de falla que ADR-055 cierra (el sobre de forma
+ * distinta sí lo es).
+ */
+export function decodePdfEngineOutput(value: unknown): PdfEngineOutput {
+  if (isPdfEngineOutput(value)) return value;
+
+  throw new InvalidInputError(
+    "El resultado del despacho de pdf-parse no tiene la forma de PdfEngineOutput: " +
+      "se esperaba { document: { id, pages }, pageCount, textlessPages, sourceKind } " +
+      "(la misma forma en el camino remoto y en el in-process — este motor no envuelve " +
+      "su resultado, PDF_Engine.md §13 caso 16). Devolver un default en silencio está " +
+      "prohibido (ADR-055 §3).",
+    { engineId: EngineId.Pdf, receivedShape: describeDispatchResultShape(value) },
+  );
+}
+
 /*
  * `_pdfInfo` es una propiedad pública en la clase PDFDocumentProxy
  * (tipo `any`), usada para acceder a isEncrypted y pdfVersion que no
