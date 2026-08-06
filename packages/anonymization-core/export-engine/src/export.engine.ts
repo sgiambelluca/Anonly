@@ -25,6 +25,67 @@
  * code `EXPORT_NO_ENABLED_GROUPS` en metadata y continúa (el export
  * resultante es idéntico al original reconstruido).
  *
+ * ADR-055 (2026-07-31 — el resultado que cruza un Worker se decodifica con
+ * un guard, nunca con un cast; D4 de la serie preventiva D1..D4 de
+ * `roadmap/MVP.md`, ADR-055 §9 fila "3-5" — este motor NUNCA tuvo el bug de
+ * ADR-055 Contexto §1, exclusivo de `ner-engine`): `ExportJobPool.dispatch`
+ * deja de ser genérico (`dispatch<T>(...): Promise<T>`) y pasa a
+ * `dispatch(...): Promise<unknown>`. Las DOS operaciones que cruzan el
+ * puerto reciben trato distinto, decidido caso por caso (mismo criterio que
+ * `render-engine`/D2 para `broadcast`, ver su comentario de cabecera
+ * "Alcance de broadcast"):
+ *
+ * - **`append-page`** (`exportPage`/`dispatchAppendPage`, más abajo): el
+ *   call site nunca liga el valor resuelto (`await withDispatchTimeout(...);
+ *   return;` — sin desestructurar, sin nombrar una variable). El worker
+ *   remoto postea `result: null` (`worker/entry.ts`: "Sin datos que
+ *   devolver: el host solo necesita la confirmación de COMPLETED") mientras
+ *   que el camino in-process resuelve `undefined` (`dispatchAppendPage`
+ *   devuelve `Promise<void>`) — una asimetría real y observable entre los
+ *   dos caminos, a diferencia de las operaciones de `render-engine` que sí
+ *   tienen decoder. Aun así, **sin decoder**: el invariante de ADR-055 §1
+ *   ("ningún valor... se consume sin decodificar") protege consumo, y acá no
+ *   hay ningún campo que un guard pudiera proteger de una lectura corrupta —
+ *   agregar uno validaría una forma sin consumidor, exactamente lo que el
+ *   comentario de `unloadDocument`/`reprimeWorkers` en `render.engine.ts`
+ *   (D2) señala como "lo opuesto al problema que ADR-055 cierra". La
+ *   asimetría `null`/`undefined` no cambia esa conclusión: ninguna de las dos
+ *   formas se lee jamás, así que ninguna puede producir un `TypeError` ni un
+ *   resultado incorrecto silencioso — el modo de falla que motivó ADR-055
+ *   (Contexto §1) requiere que el valor se toque. La confirmación de éxito
+ *   de la página ya la da la resolución misma de la Promise (vs. `FAILED`/
+ *   `CANCELLED`, discriminados por `worker-pool.ts`, sin relación con la
+ *   forma de `result`), no un campo de su contenido.
+ * - **`save`** (`saveWithRetry`/`dispatchSave`, más abajo): el call site SÍ
+ *   consume el valor completo — es el `ArrayBuffer` final que `export()`
+ *   devuelve al caller y que se transfiere como `blobUrl`. Una sola forma
+ *   legítima, idéntica en los dos caminos (`worker/entry.ts` postea
+ *   `result: buffer` pelado; `dispatchSave` resuelve el mismo `ArrayBuffer`
+ *   de `savePdf()`, sin sobre en ningún lado — a diferencia de NER, no hay
+ *   dos formas que reconciliar). Decoder real: `decodeSaveResult`, que exige
+ *   `dispatchResult instanceof ArrayBuffer` y ante cualquier otra forma
+ *   lanza `ExportFailedError` (Code_Standards.md §7: "InvalidInputError si
+ *   no hay una específica" — acá SÍ la hay, y es exactamente la clase que
+ *   spec §11 mapea a "error fatal durante ensamblado o serialización": un
+ *   `save()` que no produjo un `ArrayBuffer` usable ES esa categoría, no un
+ *   error de input del caller). Retryable, como cualquier otro
+ *   `ExportFailedError` — mismo tratamiento que un `save()` que lanza de
+ *   verdad: reintenta 1 vez (`saveWithRetry`), y si persiste, `EXPORT_FAILED`
+ *   se emite (evento observable, `Contracts.md` §8) — ningún sobre roto se
+ *   disfraza de PDF exportado con éxito. Sin la maquinaria de escalada de
+ *   `ner-engine` (`NerDispatchEnvelopeError`/`NerDispatchDecodeFailure`, ADR-
+ *   055 §5): a diferencia de NER, acá no hay forma de que un fallo de
+ *   decodificación se disfrace de "no había nada que exportar".
+ * - `withDispatchTimeout<T>` (más abajo) **sigue genérico, sin narrowing**:
+ *   no es un decoder — es una carrera contra un timeout que nunca inspecciona
+ *   ni afirma nada sobre la forma de lo que resuelve, solo reenvía lo que
+ *   `dispatch()` produzca (mismo rol que `Promise.race` de la lib estándar).
+ *   Su `T` se infiere del cierre que se le pasa (`() => this.pool.dispatch(...)`,
+ *   que ahora devuelve `Promise<unknown>`), así que en los dos call sites
+ *   queda instanciado en `unknown` sin ningún cambio en su propia firma —
+ *   angostarlo a mano sería redundante (y menos reusable, si en el futuro
+ *   envuelve algo que no sea `pool.dispatch`).
+ *
  * Notas de diseño no triviales (dentro del margen que el spec deja abierto,
  * ninguna rompe un contrato público de Contracts.md/Export_Engine.md):
  *
@@ -101,8 +162,15 @@ const MAX_TITLE_LENGTH = 500; // spec §13 caso 16: "título muy largo".
 // NerJobPool/NerDispatchParams en ner-engine/src/ner.engine.ts). No
 // exportado desde index.ts — detalle de wiring interno. ───
 
-interface ExportDispatchParams<T> {
-  readonly run: () => Promise<T>;
+// `dispatch` deja de ser genérico y devuelve `Promise<unknown>` (ADR-055 §2,
+// ver nota de cabecera del archivo): el parámetro de tipo `<T>` que tenía
+// antes era una afirmación que el compilador no podía verificar — del otro
+// lado de `run()` puede haber cruzado un `postMessage` real. Con `unknown`,
+// el compilador obliga a pasar por `decodeSaveResult` (más abajo) antes de
+// tratar el resultado de `save` como `ArrayBuffer`; `append-page` no
+// desestructura nada (ver nota de cabecera — sin consumo, sin decoder).
+interface ExportDispatchParams {
+  readonly run: () => Promise<unknown>;
   readonly signal: AbortSignal;
   readonly priority?: number;
   readonly payload?: unknown;
@@ -110,7 +178,7 @@ interface ExportDispatchParams<T> {
 }
 
 interface ExportJobPool {
-  dispatch<T>(params: ExportDispatchParams<T>): Promise<T>;
+  dispatch(params: ExportDispatchParams): Promise<unknown>;
 }
 
 /**
@@ -119,16 +187,71 @@ interface ExportJobPool {
  * los de `exportPage`/`saveWithRetry`, host-side). Es el comportamiento que
  * este motor tenía antes de ADR-047 (ADR-035 §1) — el que los tests
  * existentes de este paquete ya esperan (`new ExportEngine()` sin argumento).
+ * El resultado de `run()` (`undefined` para `dispatchAppendPage`, el
+ * `ArrayBuffer` pelado para `dispatchSave`) pasa por el mismo call site que
+ * el camino remoto — es la prueba de paridad entre los dos caminos (ADR-055
+ * §2): `save` la ejercita vía `decodeSaveResult`; `append-page` no necesita
+ * ejercitarla porque no hay decoder que probar (nota de cabecera).
  */
 const IMMEDIATE_POOL: ExportJobPool = {
-  dispatch: <T>(params: ExportDispatchParams<T>): Promise<T> => params.run(),
+  dispatch: (params: ExportDispatchParams): Promise<unknown> => params.run(),
 };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Detalle legible de una forma no reconocida, para el `details` de
+ * `ExportFailedError` — nunca contenido del documento (Code_Standards.md §9:
+ * "Nunca loguear contenido del documento"), solo la forma del valor.
+ */
+function describeDispatchResultShape(value: unknown): string {
+  if (value === null) return "null";
+  if (value instanceof ArrayBuffer) return `ArrayBuffer(byteLength=${value.byteLength})`;
+  if (Array.isArray(value)) return `array(length=${value.length})`;
+  if (isRecord(value)) return `object(keys=[${Object.keys(value).join(", ")}])`;
+  return typeof value;
+}
+
+/**
+ * Decodifica el `Promise<unknown>` que resuelve `ExportJobPool.dispatch` para
+ * `save` (ADR-055 §2, nota de cabecera del archivo): la única forma legítima
+ * es un `ArrayBuffer` pelado — el PDF final serializado por `savePdf()`,
+ * idéntica en el camino remoto (`worker/entry.ts` postea `result: buffer` sin
+ * envolver) y en el in-process (`dispatchSave` resuelve el mismo `buffer`).
+ * Ante cualquier otra forma lanza `ExportFailedError` (ADR-055 §3: nunca un
+ * default en silencio) — es la clase que spec §11 ya asigna a "error fatal
+ * durante ensamblado o serialización", y un `save()` que no produjo un
+ * `ArrayBuffer` usable ES esa categoría.
+ */
+function decodeSaveResult(dispatchResult: unknown, documentId: string): ArrayBuffer {
+  if (dispatchResult instanceof ArrayBuffer) return dispatchResult;
+  const receivedShape = describeDispatchResultShape(dispatchResult);
+  throw new ExportFailedError(
+    documentId,
+    "ExportJobPool.dispatch() resolvió save con una forma no reconocida: se " +
+      "esperaba un ArrayBuffer pelado (worker/assembler.ts#savePdf) — misma " +
+      "forma en el camino remoto y en el in-process (ADR-055 §2). Devolver un " +
+      `default en silencio está prohibido (ADR-055 §3). Forma recibida: ${receivedShape}.`,
+    { receivedShape },
+  );
+}
 
 /**
  * Corre `dispatch()` en carrera contra un timeout local: `workerPool.timeouts
  * ["export-page"]` (30 s) lo aplica el host envolviendo el despacho — el pool
  * no tiene timeout propio (ADR-047 §5). Mismo patrón que `renderPageWithTimeout`
  * más abajo, generalizado para los dos despachos nuevos (append-page/save).
+ *
+ * ADR-055: `<T>` acá NO es la afirmación de forma que tenía el `<T>` de
+ * `ExportJobPool.dispatch` antes de angostarlo (nota de cabecera) — esta
+ * función nunca inspecciona `T`, solo reenvía lo que `dispatch()` resuelva
+ * (igual que `Promise.race`). Se mantiene genérica a propósito: en los dos
+ * call sites, `T` queda instanciado en `unknown` por inferencia (el cierre
+ * que reciben devuelve `Promise<unknown>`, ya que `ExportJobPool.dispatch` lo
+ * es), así que el guard sigue siendo obligatorio en el call site — angostarla
+ * a mano acá no cambiaría nada y la haría menos reusable.
  */
 async function withDispatchTimeout<T>(
   dispatch: () => Promise<T>,
@@ -445,9 +568,14 @@ export class ExportEngine implements IEngine {
           pageHeightPt: page.height,
         };
 
+        // ADR-055: `dispatch()` devuelve `Promise<unknown>`, pero acá nunca se
+        // liga el valor resuelto — ni `null` (remoto) ni `undefined`
+        // (in-process, ver `dispatchAppendPage`) se leen jamás (nota de
+        // cabecera del archivo). Sin decoder por diseño: nada que un guard
+        // pudiera proteger.
         await withDispatchTimeout(
           () =>
-            this.pool.dispatch<void>({
+            this.pool.dispatch({
               run: () => this.dispatchAppendPage(payload, ctx.abortSignal),
               signal: ctx.abortSignal,
               payload,
@@ -496,9 +624,9 @@ export class ExportEngine implements IEngine {
         // §12: "Tamaño del PDF... mitigado con save({ useObjectStreams: true })".
         // ADR-047 §1/§3: la serialización cruza al worker vía el mismo puerto
         // (`save`), con `maxRetriesOverride: 0` — este es el único loop de retry.
-        return await withDispatchTimeout(
+        const dispatchResult = await withDispatchTimeout(
           () =>
-            this.pool.dispatch<ArrayBuffer>({
+            this.pool.dispatch({
               run: () => this.dispatchSave(payload, ctx.abortSignal),
               signal: ctx.abortSignal,
               payload,
@@ -511,6 +639,10 @@ export class ExportEngine implements IEngine {
               `Timeout esperando el save() del worker (${timeoutMs}ms).`,
             ),
         );
+        // ADR-055 §2: `dispatchResult` es `unknown` — `decodeSaveResult` es el
+        // único paso permitido antes de tratarlo como el ArrayBuffer final
+        // (nunca un cast a ciegas).
+        return decodeSaveResult(dispatchResult, documentId);
       } catch (err: unknown) {
         if (err instanceof CancelledError) throw err;
         lastError = normalizeExportError(err, documentId, timeoutMs);
