@@ -317,3 +317,22 @@ export function createTrackingOcrPool(): TrackingOcrPool {
     },
   };
 }
+
+/**
+ * Pool estructural que **ignora `params.run()`** y resuelve directo con
+ * `resolvedValue` (ADR-055 §5 / Code_Standards.md §7 "Test obligatorio por
+ * motor"): a diferencia de `createTrackingOcrPool` (arriba) y de todos los
+ * fakes ad-hoc preexistentes de este paquete — que delegan en `run()`, o sea
+ * el camino in-process, y por lo tanto **nunca cruzan el sobre**
+ * `COMPLETED.result` — este es el único fake que reproduce lo que un
+ * `OcrJobPool` real resolvería tras un `postMessage`. Es la pieza que faltaba
+ * para poder ejercitar `decodeKernelOcrResult` de verdad (mismo precedente:
+ * `createResolvedNerPool` en ner-engine).
+ */
+export function createResolvedOcrPool(resolvedValue: unknown): {
+  readonly dispatch: (params: OcrPoolDispatchParams<unknown>) => Promise<unknown>;
+} {
+  return {
+    dispatch: (): Promise<unknown> => Promise.resolve(resolvedValue),
+  };
+}

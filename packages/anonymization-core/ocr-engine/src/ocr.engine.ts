@@ -11,6 +11,24 @@
  * del kernel → `ctx.cache.set` → `emit OCR_PAGE_FINISHED` — restaura ADR-014
  * §1 literal ("las Word[] las deposita el lado host del OcrPool") y elimina
  * por construcción la carrera EVENT/COMPLETED que motivó ADR-045.
+ *
+ * `OcrJobPool.dispatch` devuelve `Promise<unknown>` y su resultado se
+ * decodifica con `decodeKernelOcrResult` antes de tocarlo (ADR-055 §2, PR
+ * preventivo — este motor nunca tuvo el bug de ADR-055 Contexto §1, que fue
+ * exclusivo de `ner-engine`). A diferencia de NER, una forma no reconocida
+ * ACÁ se trata como un fallo más de la página en curso (mismo camino que
+ * `OcrPageFailedError`: `OCR_PAGE_FAILED` se emite y `processPages` continúa
+ * con las demás páginas) en vez de abortar el batch completo. La razón: NER
+ * escaló porque su único síntoma era `NER_FINISHED` con `occurrenceCount: 0`
+ * — nada distinguía "no había entidades" de "el sobre venía roto". OCR ya
+ * emite `OCR_PAGE_FAILED` (evento observable, `Contracts.md` §8) por
+ * cualquier fallo de página, con el detalle de la forma recibida embebido en
+ * `error.details.reason` (ver comentario de `decodeKernelOcrResult` más
+ * abajo) — un sobre roto en OCR nunca se disfraza de resultado sano, así que
+ * no hace falta la maquinaria adicional de
+ * `NerDispatchEnvelopeError`/`NerDispatchDecodeFailure` (ADR-055 §5 exige que
+ * la falla "no se trague en silencio", no que se escale a nivel de
+ * documento).
  */
 import {
   CancelledError,
@@ -22,9 +40,11 @@ import {
   EngineNotInitializedError,
   EventChannel,
   InvalidInputError,
+  type BoundingBox,
   type EngineContext,
   type IEngine,
   type OcrPagePayload,
+  type Word,
 } from "@anonly/shared";
 
 import { OcrModelMissingError, OcrPageFailedError, OcrTimeoutError } from "./ocr.errors.js";
@@ -51,8 +71,14 @@ function cacheKey(documentId: string, pageIndex: number): string {
 // No exportado desde index.ts — detalle de wiring interno, mismo criterio
 // que RenderJobPool. ───
 
-interface OcrDispatchParams<T> {
-  readonly run: () => Promise<T>;
+// `dispatch` deja de ser genérico y devuelve `Promise<unknown>` (ADR-055 §2):
+// el parámetro de tipo `<T>` que tenía antes era una afirmación que el
+// compilador no podía verificar — del otro lado de `run()` puede haber
+// cruzado un `postMessage` real. Con `unknown`, el compilador obliga a pasar
+// por `decodeKernelOcrResult` (más abajo) antes de desestructurar
+// `words`/`confidence`: no hay otra forma de escribir el consumidor.
+interface OcrDispatchParams {
+  readonly run: () => Promise<unknown>;
   readonly signal: AbortSignal;
   readonly priority?: number;
   readonly payload?: unknown;
@@ -60,7 +86,7 @@ interface OcrDispatchParams<T> {
 }
 
 interface OcrJobPool {
-  dispatch<T>(params: OcrDispatchParams<T>): Promise<T>;
+  dispatch(params: OcrDispatchParams): Promise<unknown>;
 }
 
 /**
@@ -68,11 +94,104 @@ interface OcrJobPool {
  * directo, sin cola ni reintentos propios (el único loop de retry es el de
  * `processPage`). Es el comportamiento de este motor antes de ADR-045
  * (ADR-035 §1) — el que los tests existentes de este paquete ya esperan
- * (`new OcrEngine()` sin argumento).
+ * (`new OcrEngine()` sin argumento). El resultado de `run()` (el
+ * `KernelOcrResult` pelado que produce `kernelRecognize`) pasa igual por
+ * `decodeKernelOcrResult` en el call site — es la prueba de paridad entre los
+ * dos caminos (ADR-055 §2): a diferencia de NER, acá el camino remoto y el
+ * in-process producen exactamente la misma forma (`worker/entry.ts` postea
+ * `result` pelado, sin sobre, ver su comentario de cabecera).
  */
 const IMMEDIATE_POOL: OcrJobPool = {
-  dispatch: <T>(params: OcrDispatchParams<T>): Promise<T> => params.run(),
+  dispatch: (params: OcrDispatchParams): Promise<unknown> => params.run(),
 };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// ─── Decoder del sobre `COMPLETED.result` (ADR-055 §2-§4) ───
+//
+// `OcrJobPool.dispatch` devuelve `Promise<unknown>`: no hay forma de
+// desestructurar `words`/`confidence` sin pasar por acá primero. A diferencia
+// de NER, `worker/entry.ts:96` postea `result` pelado —el `KernelOcrResult`
+// que produce `kernelRecognize` tal cual, sin sobre adicional (ver su
+// comentario "ADR-042: COMPLETED.result es unknown a nivel de transporte —
+// compila directo, sin cast")— y el camino in-process invoca el mismo
+// `kernelRecognize`: una sola forma legítima, no una unión. Ante cualquier
+// otra forma **lanza** `InvalidInputError` (ADR-055 §3): devolver
+// `[]`/`undefined`/un default en silencio es exactamente el modo de falla que
+// este decoder cierra — el que dejó a NER sin detectar ninguna entidad en
+// producción durante semanas (ADR-055, Contexto §1).
+
+const WORD_SOURCE_VALUES: ReadonlySet<string> = new Set(["pdf", "ocr"]);
+
+function isBoundingBox(value: unknown): value is BoundingBox {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.x === "number" &&
+    typeof value.y === "number" &&
+    typeof value.width === "number" &&
+    typeof value.height === "number"
+  );
+}
+
+function isWord(value: unknown): value is Word {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.text === "string" &&
+    isBoundingBox(value.bbox) &&
+    typeof value.pageIndex === "number" &&
+    typeof value.confidence === "number" &&
+    typeof value.source === "string" &&
+    WORD_SOURCE_VALUES.has(value.source)
+  );
+}
+
+function isWordArray(value: unknown): value is ReadonlyArray<Word> {
+  return Array.isArray(value) && value.every(isWord);
+}
+
+function isKernelOcrResult(value: unknown): value is KernelOcrResult {
+  return isRecord(value) && isWordArray(value.words) && typeof value.confidence === "number";
+}
+
+/**
+ * Detalle legible de una forma no reconocida, para el `details` de
+ * `InvalidInputError` — nunca el contenido del documento (Code_Standards.md
+ * §9: "Nunca loguear contenido del documento"), solo la forma del valor.
+ */
+function describeDispatchResultShape(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return `array(length=${value.length})`;
+  if (isRecord(value)) return `object(keys=[${Object.keys(value).join(", ")}])`;
+  return typeof value;
+}
+
+/**
+ * Decodifica el `Promise<unknown>` que resuelve `OcrJobPool.dispatch`
+ * (ADR-055 §2): la única forma válida es `KernelOcrResult`
+ * (`{ words: Word[]; confidence: number }`), idéntica en el camino remoto y
+ * en el in-process (ver comentario de `IMMEDIATE_POOL` más arriba). Cualquier
+ * otra forma lanza `InvalidInputError` (ADR-055 §3) en vez de devolver un
+ * default en silencio.
+ */
+function decodeKernelOcrResult(dispatchResult: unknown): KernelOcrResult {
+  if (isKernelOcrResult(dispatchResult)) return dispatchResult;
+  const receivedShape = describeDispatchResultShape(dispatchResult);
+  throw new InvalidInputError(
+    "OcrJobPool.dispatch() resolvió con una forma no reconocida: se esperaba " +
+      "{ words: Word[], confidence: number } (KernelOcrResult, worker/kernel.ts) " +
+      "— misma forma en el camino remoto y en el in-process (ADR-055 §2). " +
+      "Devolver un default en silencio está prohibido (ADR-055 §3). " +
+      // El texto (no solo `details.receivedShape`) lleva la forma recibida:
+      // `toPageFailure` (más abajo) envuelve este error en un
+      // `OcrPageFailedError` copiando solo `.message` a `details.reason` —
+      // sin esto, `OCR_PAGE_FAILED.error.details.reason` perdería la forma
+      // recibida al cruzar esa envoltura.
+      `Forma recibida: ${receivedShape}.`,
+    { engineId: EngineId.Ocr, receivedShape },
+  );
+}
 
 /**
  * Normaliza cualquier timeout emergente del despacho a `OcrTimeoutError`
@@ -189,13 +308,20 @@ export class OcrEngine implements IEngine {
         // ADR-045 §2: solo el reconocimiento cruza el puerto.
         // `maxRetriesOverride: 0` — el pool nunca reintenta un `ocr-page`; el
         // único loop de retry es este.
-        const result = await this.pool.dispatch<KernelOcrResult>({
+        const dispatchResult = await this.pool.dispatch({
           run: () => kernelRecognize(payload, { timeoutMs, abortSignal: ctx.abortSignal }),
           signal: ctx.abortSignal,
           priority: DISPATCH_PRIORITY,
           payload,
           maxRetriesOverride: 0,
         });
+        // ADR-055 §2: `dispatchResult` es `unknown` — decodeKernelOcrResult es
+        // el único paso permitido antes de desestructurar `words`/`confidence`
+        // (nunca un cast a ciegas). Una forma no reconocida lanza acá mismo y
+        // cae en el catch de abajo, que la trata como cualquier otro fallo no
+        // recuperable de ESTA página (ver comentario de cabecera sobre por qué
+        // no se escala a nivel de `processPages`, a diferencia de NER).
+        const result = decodeKernelOcrResult(dispatchResult);
         // El despacho no lanzó OcrModelMissingError: el modelo quedó cargado
         // (independientemente de si esta página en particular tuvo éxito).
         this.modelWarm = true;
