@@ -19,6 +19,8 @@ import {
   createMockPage,
   createMockPdfDocument,
   createRenderPageInput,
+  createResolvedRenderBroadcastPool,
+  createResolvedRenderDispatchPool,
   createValidBuffer,
   getCreatedCanvases,
   installOffscreenCanvasStub,
@@ -27,6 +29,7 @@ import {
   mockGetDocumentResult,
   readProtectedPdfFixtureBuffer,
   resetCreatedCanvases,
+  type ResolvedRenderPool,
 } from "./fixtures/test-helpers.js";
 
 describe("RenderEngine — unit tests", () => {
@@ -398,5 +401,205 @@ describe("RenderEngine — unit tests", () => {
     );
 
     await pooledEngine.dispose();
+  });
+
+  // ─── ADR-055 §5 — tests de sobre, obligatorios ───
+  //
+  // A diferencia de `spyPool` (arriba, que delega en `params.run()`/el `run`
+  // de `broadcast()` — el camino in-process real), `createResolvedRenderDispatchPool`/
+  // `createResolvedRenderBroadcastPool` (fixtures/test-helpers.ts) IGNORAN el
+  // método bajo prueba y resuelven directo con el valor dado — son los
+  // únicos fakes de este paquete que cruzan de verdad el sobre
+  // `COMPLETED.result` (ADR-055 Contexto §2). Sin ellos, ningún test
+  // ejercita `decodeKernelRenderResult`/`decodeRasterizeResult`/
+  // `decodeLoadDocumentResult`.
+  describe("Sobre del dispatch/broadcast (ADR-055)", () => {
+    beforeEach(() => {
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument({ pageCount: 3 })),
+      );
+    });
+
+    it("renderPage decodes the bare COMPLETED.result posted by worker/entry.ts for render-page (no envelope, ADR-055 §2)", async () => {
+      // worker/entry.ts:163 postea `result` pelado (el KernelRenderResult
+      // que produce kernelRenderPage tal cual, sin sobre adicional). Este
+      // fake reproduce exactamente eso.
+      const remoteImageData = {
+        data: new Uint8ClampedArray(16),
+        width: 2,
+        height: 2,
+        colorSpace: "srgb",
+      };
+      const remoteEncoded = {
+        bytes: new Uint8Array([1, 2, 3]).buffer,
+        format: "png",
+        widthPx: 2,
+        heightPx: 2,
+      };
+      const pool = createResolvedRenderDispatchPool({
+        imageData: remoteImageData,
+        encoded: remoteEncoded,
+      });
+      const pooledEngine = new RenderEngine(pool);
+      await pooledEngine.init(ctx);
+      await pooledEngine.loadDocument("doc-envelope-render", createValidBuffer());
+
+      const output = await pooledEngine.renderPage(
+        createRenderPageInput({ documentId: "doc-envelope-render", pageIndex: 0, mode: "full" }),
+        ctx,
+      );
+
+      expect(output.imageData).toBe(remoteImageData);
+      expect(output.encoded).toBe(remoteEncoded);
+
+      await pooledEngine.dispose();
+    });
+
+    it("renderPage decodes the identical in-process shape (parity: render-page has no envelope, ADR-055 §2)", async () => {
+      // En NER el sobre remoto (`{ spans }`) y la forma in-process son DOS
+      // formas distintas que el decoder tiene que aceptar. En Render (como
+      // en OCR) no hay tal distinción: `kernelRenderPage` (invocado directo
+      // por IMMEDIATE_POOL cuando no hay pool real) y `worker/entry.ts`
+      // (con pool real) producen la MISMA forma `KernelRenderResult`. Este
+      // test usa el mismo fake con un valor "in-process" — bit a bit la
+      // misma forma que el test de arriba — para demostrar explícitamente
+      // esa paridad: el decoder no tiene (ni necesita) una rama especial
+      // para un segundo caso.
+      const inProcessImageData = {
+        data: new Uint8ClampedArray(4),
+        width: 1,
+        height: 1,
+        colorSpace: "srgb",
+      };
+      const inProcessEncoded = {
+        bytes: new Uint8Array([9]).buffer,
+        format: "jpeg",
+        widthPx: 1,
+        heightPx: 1,
+      };
+      const pool = createResolvedRenderDispatchPool({
+        imageData: inProcessImageData,
+        encoded: inProcessEncoded,
+      });
+      const pooledEngine = new RenderEngine(pool);
+      await pooledEngine.init(ctx);
+      await pooledEngine.loadDocument("doc-envelope-parity-render", createValidBuffer());
+
+      const output = await pooledEngine.renderPage(
+        createRenderPageInput({
+          documentId: "doc-envelope-parity-render",
+          pageIndex: 0,
+          mode: "full",
+        }),
+        ctx,
+      );
+
+      expect(output.imageData).toBe(inProcessImageData);
+      expect(output.encoded).toBe(inProcessEncoded);
+
+      await pooledEngine.dispose();
+    });
+
+    it("rasterizePage decodes the bare COMPLETED.result posted by worker/entry.ts for rasterize (ImageData pelado, ADR-055 §2)", async () => {
+      const remoteImageData = {
+        data: new Uint8ClampedArray(8),
+        width: 2,
+        height: 1,
+        colorSpace: "srgb",
+      };
+      const pool = createResolvedRenderDispatchPool(remoteImageData);
+      const pooledEngine = new RenderEngine(pool);
+      await pooledEngine.init(ctx);
+      await pooledEngine.loadDocument("doc-envelope-rasterize", createValidBuffer());
+
+      const imageData = await pooledEngine.rasterizePage("doc-envelope-rasterize", 0, 1, ctx);
+
+      expect(imageData).toBe(remoteImageData);
+
+      await pooledEngine.dispose();
+    });
+
+    it("rasterizePage decodes the identical in-process shape (parity, ADR-055 §2)", async () => {
+      // Mismo razonamiento que el par de tests de renderPage arriba:
+      // kernelRasterizePage produce la misma forma ImageData pelada en
+      // ambos caminos.
+      const inProcessImageData = {
+        data: new Uint8ClampedArray(8),
+        width: 2,
+        height: 1,
+        colorSpace: "srgb",
+      };
+      const pool = createResolvedRenderDispatchPool(inProcessImageData);
+      const pooledEngine = new RenderEngine(pool);
+      await pooledEngine.init(ctx);
+      await pooledEngine.loadDocument("doc-envelope-parity-rasterize", createValidBuffer());
+
+      const imageData = await pooledEngine.rasterizePage(
+        "doc-envelope-parity-rasterize",
+        0,
+        1,
+        ctx,
+      );
+
+      expect(imageData).toBe(inProcessImageData);
+
+      await pooledEngine.dispose();
+    });
+
+    it("loadDocument decodes the bare COMPLETED.result posted by worker/entry.ts for load-document ({ pageCount }, ADR-055 §2)", async () => {
+      // worker/entry.ts postea el `{ pageCount }` de kernelLoadDocument
+      // pelado. broadcast() resuelve un array con un elemento por worker
+      // "vivo" simulado — acá, uno solo.
+      const pool = createResolvedRenderBroadcastPool([{ pageCount: 7 }]);
+      const pooledEngine = new RenderEngine(pool);
+      await pooledEngine.init(ctx);
+
+      await pooledEngine.loadDocument("doc-envelope-load", createValidBuffer());
+
+      expect(pooledEngine["documents"].get("doc-envelope-load")?.pageCount).toBe(7);
+
+      await pooledEngine.dispose();
+    });
+
+    it("loadDocument decodes the identical in-process shape (parity, ADR-055 §2)", async () => {
+      // Mismo razonamiento: kernelLoadDocument produce la misma forma
+      // { pageCount } en ambos caminos — un segundo valor, misma forma.
+      const pool = createResolvedRenderBroadcastPool([{ pageCount: 12 }]);
+      const pooledEngine = new RenderEngine(pool);
+      await pooledEngine.init(ctx);
+
+      await pooledEngine.loadDocument("doc-envelope-parity-load", createValidBuffer());
+
+      expect(pooledEngine["documents"].get("doc-envelope-parity-load")?.pageCount).toBe(12);
+
+      await pooledEngine.dispose();
+    });
+
+    it("unloadDocument completes regardless of what broadcast resolves — the result is never consumed (ADR-055, operación 4/4)", async () => {
+      // A diferencia de las tres operaciones de arriba, unloadDocument no
+      // tiene decoder (ver el comentario de `unloadDocument` en
+      // render.engine.ts): el `.then(() => {...})` que consume el resultado
+      // de broadcast() no liga ningún parámetro, así que ninguna forma —
+      // incluida basura evidente como un string suelto — puede hacerlo
+      // fallar. Este pool discrimina por forma del payload (mismo criterio
+      // que `worker/entry.ts#dispatchKernel`: "buffer" in payload → carga)
+      // para que loadDocument, arriba en la misma prueba, siga funcionando
+      // normalmente y unloadDocument reciba la basura.
+      const pool: ResolvedRenderPool = {
+        dispatch: (params) => params.run(),
+        broadcast: (payload) => {
+          const isLoad = typeof payload === "object" && payload !== null && "buffer" in payload;
+          return Promise.resolve(isLoad ? [{ pageCount: 3 }] : ["basura-no-reconocida"]);
+        },
+      };
+      const pooledEngine = new RenderEngine(pool);
+      await pooledEngine.init(ctx);
+      await pooledEngine.loadDocument("doc-unload-garbage", createValidBuffer());
+
+      await expect(pooledEngine.unloadDocument("doc-unload-garbage")).resolves.toBeUndefined();
+      expect(pooledEngine["documents"].has("doc-unload-garbage")).toBe(false);
+
+      await pooledEngine.dispose();
+    });
   });
 });
