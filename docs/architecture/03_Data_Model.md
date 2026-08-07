@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=modelo-de-datos | dependencias=01_Technical_Architecture_Document.md,core/Contracts.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-043-RenderEngine-Reparto-Host-Worker-Kernel.md,adr/ADR-046-NerEngine-Pool-Propia-Kernel-Puro.md | audiencia=IA+humanos | fase=1 (§18 actualizado en fase 10: OcrPagePayload.imageData→ImageData y payloads de transporte LoadDocument/RasterizePage/ExportSave, ADR-036 §4; UnloadDocumentPayload, ADR-043 §4; NerPagePayload por batch + NerKernelSpan/NerKernelProgress, ADR-046) -->
+<!-- CONTEXT: scope=modelo-de-datos | dependencias=01_Technical_Architecture_Document.md,core/Contracts.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-043-RenderEngine-Reparto-Host-Worker-Kernel.md,adr/ADR-046-NerEngine-Pool-Propia-Kernel-Puro.md | audiencia=IA+humanos | fase=1 (§18 actualizado en fase 10: OcrPagePayload.imageData→ImageData y payloads de transporte LoadDocument/RasterizePage/ExportSave, ADR-036 §4; UnloadDocumentPayload, ADR-043 §4; NerPagePayload por batch + NerKernelSpan/NerKernelProgress, ADR-046; fase 10.5/10.6: §9 EntityGroup.personGender + PersonGender —ADR-060 §2—, §11 escalera de abreviaturas del placeholder —ADR-057 §1—, §18 RenderPagePayload.lineWords —ADR-058 §5—, ExportSavePayload.legendImage + MarkerLegendEntry/MarkerLegendRow + RenderLegendPayload —ADR-059 §3/§5/§6—, §19 ExportOptions.includeMarkerLegend —ADR-059 §1—) -->
 
 # Anonly — Modelo de Datos (TAD bloque 5)
 
@@ -214,9 +214,14 @@ export interface EntityGroup {
   readonly indexInType: number;                     // 1-based; se renderiza con padding 2: 01, 02, 03
   readonly enabled: boolean;                        // si false, no se aplica reemplazo
   readonly aliases: ReadonlyArray<string>;          // variantes detectadas que se unifican a canonicalValue
+  // ADR-060 §2: solo para type === Person. Ausente = sin determinar (no es una
+  // tercera categoría: es la falta de información). Se ignora en los demás tipos.
+  readonly personGender?: PersonGender;
   readonly createdAt: number;
   readonly updatedAt: number;
 }
+
+export type PersonGender = "f" | "m";
 ```
 
 **Atributos**
@@ -228,10 +233,11 @@ export interface EntityGroup {
 | `canonicalValue` | El valor a mostrar en el árbol de entidades. Típicamente el más frecuente de `aliases` o el más completo. |
 | `members` | Referencias a las ocurrencias agrupadas. La UI muestra `members.length` como contador. |
 | `replacementMode` | `mask \| synthetic \| placeholder \| redact`. |
-| `replacementValue` | Valor ya resuelto. Para `placeholder` = `[DNI 01]`. Para `synthetic` = valor generado con seed. Para `mask` = `XX.XXX.XXX`. Para `redact` = cadena vacía (la censura es visual, en el render). |
-| `indexInType` | Entero 1-based, secuencial y estable por tipo dentro de la sesión. Se renderiza con padding a 2 dígitos. |
+| `replacementValue` | Valor ya resuelto. Para `placeholder` = `[DNI 01]` — desde ADR-057, el label puede venir abreviado según el ancho disponible del grupo (`[PERS 01]`, `[PRS-01]`); ver §11. Para `synthetic` = valor generado con seed. Para `mask` = `XX.XXX.XXX`. Para `redact` = cadena vacía (la censura es visual, en el render). |
+| `indexInType` | Entero 1-based, secuencial y estable por tipo dentro de la sesión. Se renderiza con padding a 2 dígitos. **No se abrevia nunca** (ADR-057 §1) y **no se segmenta por género** (ADR-060 §7): los grupos `Person` comparten una sola secuencia. |
 | `enabled` | Si `false`, las ocurrencias del grupo se dejan intactas en el render. |
 | `aliases` | Variantes de valor unificadas (ej. `"J. Pérez"` y `"Juan Pérez"` en el mismo grupo). |
+| `personGender` | Solo `type === Person` (ADR-060 §2). `"f"`/`"m"` cambian el label resuelto del `placeholder` (`MUJER`/`HOMBRE` en vez de `PERSONA`); ausente = sin determinar → label neutro y marca en el árbol de entidades. Inferido de un léxico first-party o puesto por el usuario, que gana siempre. |
 | `createdAt`, `updatedAt` | Epoch ms. Para UX y merge de ediciones. |
 
 **Invariantes**
@@ -240,6 +246,8 @@ export interface EntityGroup {
 - `canonicalValue ∈ aliases` (el canónico es siempre una de las variantes observadas, salvo edición manual explícita).
 - `replacementValue` es consistente con `replacementMode` (ver §11).
 - Si `enabled === false`, `replacementValue` no se aplica pero se conserva el último valor para re-activación.
+- **Todas** las `Replacement` derivadas de un mismo grupo comparten `replacementValue` (ADR-012, re-asertado por ADR-057 §4: el nivel de abreviatura se elige por grupo con la ocurrencia más apretada y se aplica a todas — nunca por ocurrencia).
+- `personGender` solo puede estar presente si `type === EntityType.Person` (ADR-060 §2).
 
 ---
 
@@ -288,10 +296,14 @@ export enum ReplacementMode {
 |---|---|---|
 | `mask` | cadena con formato tipo-dependiente (`XX.XXX.XXX`) | texto censurado sobre bbox |
 | `synthetic` | valor sintético válido que preserva formato (`39.123.456`) | texto sintético sobre bbox |
-| `placeholder` | `[<TYPE> <NN>]` (`[DNI 01]`) | texto placeholder sobre bbox |
+| `placeholder` | `[<LABEL> <NN>]` en uno de **tres niveles** de abreviatura (ADR-057 §1): `[PERSONA 01]` / `[PERS 01]` / `[PRS-01]` | texto placeholder sobre bbox |
 | `redact` | `""` (cadena vacía) | bloque negro sólido sobre bbox |
 
 Default: `placeholder`. Justificación en `adr/ADR-012-Replacement-Modes.md`.
+
+**Nivel de abreviatura del `placeholder` (ADR-057)**. El nivel se elige **por grupo**, no por ocurrencia: se toma el primer nivel cuyo token entra —estimado— en **todos** los `members` del grupo, y se aplica a todos. La estimación usa `estimateTokenWidth` (`core/Contracts.md` §6) sobre `bbox.width`/`bbox.height`, magnitudes cuya razón es invariante a la escala, así que el nivel no depende del zoom al que se renderice después. Es una **optimización**: la garantía de que el texto no se derrama vive en el render (ADR-058 §1), no acá. `<NN>` nunca se abrevia. Un `replacementValue` editado a mano por el usuario gana siempre y la escalera no lo toca (ADR-057 §7).
+
+Para `type === Person`, el `<LABEL>` depende además de `personGender` (§9): `PERSONA`/`PERS`/`PRS` sin género, `MUJER`/`MUJER`/`MUJ` femenino, `HOMBRE`/`HOMB`/`HOM` masculino (ADR-060 §3). Los otros tres modos no abrevian: el formato de `mask` **es** la información que transmite, un `synthetic` abreviado deja de ser plausible, y `redact` no tiene texto (ADR-057 §6).
 
 ---
 
@@ -541,6 +553,15 @@ export interface RenderPagePayload {
   readonly annotations?: ReadonlyArray<Annotation>;
   readonly scale?: number;
   readonly imageFormat?: "png" | "jpeg";
+  // ADR-058 §5: palabras que comparten línea con algún reemplazo de esta página,
+  // seleccionadas host-side por una función pura del Orchestrator desde Page.words
+  // (precedente de reparto: fuseOcrPage, ADR-041). El kernel las usa para calibrar
+  // la tipografía y reposicionar la línea al repintarla.
+  // Se adjuntan SOLO cuando algún token podría no entrar (estimado con
+  // estimateTokenWidth, ADR-057 §5, con margen conservador). Ausente es el caso
+  // normal y nunca es un error: sin ellas el kernel cae al shrink-to-fit de
+  // ADR-058 §1. Incluye palabras de OCR (source: "ocr") igual que las de PDF.
+  readonly lineWords?: ReadonlyArray<Word>;
 }
 
 // ADR-047 §3: la forma previa ({ documentId, pageIndex, pageImage, metadata })
@@ -589,6 +610,20 @@ export interface RasterizePagePayload {
   readonly scale: number;
 }
 
+// Página de leyenda del export (ADR-059 §5). Viaja bajo jobType "render-page",
+// sin WorkerJobType nuevo, y es el QUINTO caso de la discriminación por forma del
+// entry-point (ADR-043 §4) — se reconoce por `"rows" in payload`.
+// Es el único payload de render-page SIN documentId: no corresponde a ninguna
+// página de ningún PDF, es un dibujo puro sobre un OffscreenCanvas en blanco.
+// Sin pageProxy, sin pdfjs, sin cache LRU, sin supersede, sin eventos — mismo
+// perfil que RasterizePagePayload (ADR-034 §1).
+export interface RenderLegendPayload {
+  readonly rows: ReadonlyArray<MarkerLegendRow>;
+  readonly pageWidthPt: number;
+  readonly pageHeightPt: number;
+  readonly imageFormat?: "png" | "jpeg";
+}
+
 // Job final del ExportWorker bajo jobType "export-page": aplica la metadata (ya
 // sanitizada en host, ADR-047 §1) y su COMPLETED devuelve el ArrayBuffer del PDF
 // transferido; DISPOSE solo libera (05 §7.5, ADR-036 §4). El entry-point
@@ -596,6 +631,55 @@ export interface RasterizePagePayload {
 export interface ExportSavePayload {
   readonly documentId: string;
   readonly metadata: ExportMetadata;
+  // ADR-059 §6: página de leyenda YA RASTERIZADA (la produce render-engine vía
+  // RenderPageProvider.renderLegend, mediado por el Orchestrator). El assembler la
+  // embebe con embedPng/embedJpg + addPage + drawImage, igual que una página del
+  // documento — el export sigue siendo 100% imagen, sin excepciones.
+  // Ausente cuando ExportOptions.includeMarkerLegend === false, o cuando no quedó
+  // ninguna fila tras el filtro de §2 (en ese caso no se agrega página).
+  // Viaja en `save` y no en `append-page` porque se aplica una sola vez al final,
+  // igual que la metadata (ADR-047 §3), y no tiene pageIndex del que ser idempotente.
+  readonly legendImage?: EncodedPageImage;
+  readonly legendPageWidthPt?: number;
+  readonly legendPageHeightPt?: number;
+}
+
+// ADR-059 §3: la entrada de la leyenda NO tiene ningún campo capaz de transportar
+// contenido del documento — no hay canonicalValue, no hay originalValue, no hay
+// Document. Filtrar un valor original a la leyenda no requiere disciplina del
+// implementador: requiere cambiar este tipo. Mismo mecanismo que
+// `includeOriginalMetadata: false` de ADR-009 (garantía por tipos, no por convención).
+export interface MarkerLegendEntry {
+  readonly type: EntityType;
+  readonly prefixes: ReadonlyArray<string>;   // p. ej. ["PERSONA", "PERS", "PRS"]
+  readonly markerCount: number;
+}
+
+// ADR-059 §5: lo que efectivamente cruza a render-engine. Strings YA COMPUESTOS:
+// el kernel dibuja texto y no ve EntityType ni EntityGroup, así que no gana ninguna
+// dependencia semántica sobre el dominio de entidades. La proyección
+// MarkerLegendEntry -> MarkerLegendRow vive host-side (buildMarkerLegend).
+// ADR-061 §3/§6: pedido de agregado manual. Las tres vías de entrada —diálogo,
+// selección sobre el canvas del original, resultado del buscador— construyen el
+// mismo objeto; solo cambia de dónde sale el `value`.
+export interface ManualEntityRequest {
+  readonly value: string;
+  readonly entityType: EntityType;
+}
+
+// ADR-061 §8: resultado del buscador del visor. Es la MISMA búsqueda literal que
+// alimenta el agregado manual, con otra salida — no una implementación paralela.
+export interface TextMatch {
+  readonly pageIndex: number;
+  readonly bbox: BoundingBox;
+  readonly text: string;
+  readonly wordSpan: WordSpan;
+}
+
+export interface MarkerLegendRow {
+  readonly prefixes: string;    // "PERSONA, PERS, PRS"
+  readonly typeName: string;    // "Persona" (label de nivel 0 de ADR-057 §2, en título)
+  readonly countLabel: string;  // "7 marcadores"
 }
 
 // Salida del kernel del NerWorker (COMPLETED { spans }, ADR-046 §1): spans de
@@ -639,6 +723,10 @@ export interface ExportOptions {
   readonly includeOriginalMetadata: false;  // SIEMPRE false; el tipo lo fuerza (garantía por tipos, ADR-009)
   readonly title?: string;                  // opcional, metadata nueva
   readonly filename: string;                // default "anonimizado.pdf"
+  // ADR-059 §1: página final con la referencia `prefijo → tipo` de los marcadores
+  // que ADR-057 pudo abreviar. Default false: sin el flag, el export no cambia en
+  // nada. Con el flag, el PDF tiene document.pageCount + 1 páginas.
+  readonly includeMarkerLegend: boolean;    // default false
 }
 
 export interface ExportMetadata {

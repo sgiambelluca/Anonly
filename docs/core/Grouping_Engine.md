@@ -1,12 +1,16 @@
-<!-- CONTEXT: scope=grouping-engine | dependencias=core/Contracts.md,architecture/03_Data_Model.md,architecture/04_Event_System.md,ADR-011-Grouping-First.md,ADR-012-Replacement-Modes.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md | audiencia=IA-implementador | fase=3 (§2/§6/§7/§13 actualizados en fase 10: reopenSession/dropOccurrences/dedup por identidad/finishSession re-ejecutable, ADR-038 §2-§4) -->
+<!-- CONTEXT: scope=grouping-engine | dependencias=core/Contracts.md,architecture/03_Data_Model.md,architecture/04_Event_System.md,ADR-011-Grouping-First.md,ADR-012-Replacement-Modes.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md | audiencia=IA-implementador | fase=3 (§13 caso 36 en fase 10.7: ocurrencia manual, ADR-061; §2/§6/§7/§13 actualizados en fase 10: reopenSession/dropOccurrences/dedup por identidad/finishSession re-ejecutable, ADR-038 §2-§4; fase 10.5: escalera de abreviaturas del placeholder + resolveLabelSet por grupo, ADR-057; fase 10.6: personGender e inferencia por léxico, ADR-060) -->
 
 # Grouping Engine — Spec de Motor
 
 > Agrupa las `Occurrence` emitidas por Regex y NER en `EntityGroup` por tipo y valor canónico. Detecta conflictos. Expone grupos a la UI (la unidad de operación). Resuelve reemplazos según `ReplacementMode` y `Rule`.
 
 **EngineId**: `grouping`
-**Versión del spec**: 1.1.0
-**Última actualización**: 2026-07-17
+**Versión del spec**: 1.3.0
+**Última actualización**: 2026-08-06
+
+> **Nota (v1.3.0, ADR-060, 2026-08-06 — reemplazo por género para `Person`)**: `EntityGroup` gana `personGender?: "f" | "m"` (`03_Data_Model.md` §9), que cambia el label resuelto del `placeholder` a `MUJER`/`HOMBRE`. **No es un `ReplacementMode` nuevo**: el modo sigue siendo `placeholder` y ni el selector de modo ni las `Rule` ni su resolución por prioridad se tocan. Resuelve el problema de que el texto anonimizado pierde su coherencia referencial —"[PERSONA 03] y [PERSONA 04] arreglaron para juntarse en la casa de ella" deja de ser interpretable—. El género se infiere de un léxico first-party sobre el `canonicalValue` (secuencia completa de nombres de pila primero, primer token después) y **ante cualquier duda no se decide**: nombre ausente, ambiguo ("Andrea", "Cruz") o iniciales → sin determinar, token neutro y marca en el árbol. Sin heurística de terminación: el costo de equivocarse es imprimirlo en un documento que va a manos de un tercero. El override del usuario gana siempre y es permanente. `indexInType` **no** se segmenta por género (§13 caso 35). Se apoya en la indirección `resolveLabelSet` que ADR-057 §3 dejó puesta; sin ella habría que reescribir la escalera. Ver §"Escalera de abreviaturas", §13 casos 32-35 y §14.
+>
+> **Nota (v1.2.0, ADR-057, 2026-08-06 — escalera de abreviaturas del `placeholder`)**: `[<TYPE> <NN>]` deja de ser el único formato y pasa a ser el **nivel 0** de una escalera de tres (`[PERSONA 01]` → `[PERS 01]` → `[PRS-01]`). El nivel se elige **por grupo** con la ocurrencia más apretada de `members[].bbox` y se aplica a **todas** las ocurrencias, para conservar el invariante de ADR-012 (mismo grupo → mismo `replacementValue`): abreviar por ocurrencia haría que el mismo dato apareciera con dos nombres distintos en el mismo documento. La medición es necesariamente una **estimación** (este motor no tiene canvas ni debe tenerlo, `estimateTokenWidth` en `Contracts.md` §6) y por eso la escalera es una optimización, no una garantía: quien garantiza que el texto no se derrame es el render (ADR-058 §1). `<NN>` no se abrevia nunca; `mask`/`synthetic`/`redact` no participan; la edición manual gana siempre. La resolución del label pasa de ser por **tipo** a ser por **grupo** (`resolveLabelSet`), indirección que ADR-060 necesita. Cierra además la ambigüedad que `labels.ts` documentaba desde su implementación: ADR-012 solo daba 4 ejemplos de los 13 tipos y la tabla completa queda ratificada acá. Ver §"Escalera de abreviaturas", §13 casos 27-31 y §14.
 
 > **Nota (ADR-026, 2026-07-11)**: el tipo de config canónico es `GroupingConfig` (Contracts.md §6); el alias `GroupingEngineConfig` de §6/§15.2 queda eliminado (mismo patrón que ADR-021 §2 para OCR y ADR-023 §1 para NER).
 >
@@ -60,9 +64,10 @@ Recibir el stream de `ENTITY_FOUND` (ocurrencias crudas de Regex y NER) y produc
 ## 4. Dependencias permitidas
 
 - `@anonly/shared`
-- Tipos de `core/Contracts.md`: `IEngine`, `EngineContext`, `Occurrence`, `OccurrenceRef`, `EntityGroup`, `EntityType`, `ReplacementMode`, `Rule`, `Conflict`, `ConflictReason`, `Annotation`, `GroupingConfig`
+- Tipos de `core/Contracts.md`: `IEngine`, `EngineContext`, `Occurrence`, `OccurrenceRef`, `EntityGroup`, `EntityType`, `ReplacementMode`, `Rule`, `Conflict`, `ConflictReason`, `Annotation`, `GroupingConfig`, `PersonGender` (ADR-060 §2)
+- De `@anonly/shared`: `estimateTokenWidth` y sus constantes `REPLACEMENT_FONT_HEIGHT_RATIO`/`AVG_GLYPH_ADVANCE_RATIO` (`Contracts.md` §6, ADR-057 §5). **Este motor no tiene canvas ni debe tenerlo**: no puede medir texto, así que la selección de nivel usa esta estimación pura. La comparte con `render-engine` a través de `shared` porque P-1 impide que un motor importe a otro — y **no se duplica**.
 - `architecture/04_Event_System.md`: todos los eventos de grouping + UI inputs
-- No requiere dependencias externas: usa algoritmos propios (Levenshtein).
+- Sin dependencias externas nuevas: usa algoritmos propios (Levenshtein). El léxico de nombres de ADR-060 §9 son **datos commiteados en el repo**, no un paquete de npm — pero su procedencia y licencia son un R-12 que hay que cerrar antes de escribir el PR 10.
 
 ---
 
@@ -266,6 +271,16 @@ Grouping es determinista dadas las ocurrencias y reglas; sin errores de runtime 
 24. **`reopenSession` sobre grupos editados**: se reabre la sesión con `dropOccurrences({ source: DetectionSource.NER })` previo (desactivar NER) → los grupos cuyos únicos members eran NER se eliminan (`members.length ≥ 1`, `03_Data_Model.md` §9) aunque el usuario los haya editado; los grupos con members Regex restantes conservan sus ediciones intactas (ADR-038 §5.2, Q1 de ADR-038).
 25. **`dropOccurrences` por `pageIndices`** (re-OCR de páginas, ADR-038 §5.3): se eliminan todas las ocurrencias (Regex y NER) de esas páginas, incluidas las que un usuario ya fusionó o cuyo grupo editó; grupos que quedan sin members se eliminan con `ENTITY_GROUP_REMOVED`; conflictos cuyo grupo o candidatos referencian ocurrencias eliminadas se descartan con `CONFLICT_RESOLVED` (mode = el modo efectivo del grupo antes de eliminarlo). No renumera `indexInType`: eso ocurre en el próximo `finishSession`. `dropOccurrences` con filtro sin campos → `InvalidInputError`; sesión inexistente → warn + no-op.
 26. **`finishSession` re-ejecutado tras `reopenSession`**: la renumeración canónica corre de nuevo sobre la unión de ocurrencias vigentes; el resultado final es indistinguible de una corrida fresca con la config final más las ediciones del usuario (mismo invariante de determinismo de ADR-028, extendido a múltiples pasadas). Los índices de placeholder pueden correrse respecto de lo que el usuario ya vio (aceptado, ADR-038 §5, Q2).
+27. **Grupo con una sola ocurrencia apretada (ADR-057 §4)**: un grupo con 40 apariciones holgadas y una sobre un bbox angosto baja al nivel que entra en **esa**, y el token corto se aplica a las 41. Es deliberado: elegir por ocurrencia rompería el invariante de que todas las `Replacement` de un grupo comparten valor.
+28. **Ni el nivel 2 entra (ADR-057 §4)**: el grupo se queda en nivel 2 sin error ni warning. Grouping no tiene otra carta; el shrink-to-fit del render (ADR-058 §1) es quien garantiza que no se derrame.
+29. **Tipos con niveles degenerados (ADR-057 §2)**: `DNI`, `CUIT` e `IBAN` tienen niveles 0 y 1 idénticos, y `MUJER` tiene 0 y 1 idénticos. La selección devuelve el primero que entra, así que los niveles repetidos se saltean solos — no hay rama especial ni error por la igualdad.
+30. **`replacementValue` editado a mano frente a la escalera (ADR-057 §7)**: el usuario escribe `[P1]` para un grupo; la selección de nivel no lo toca, ni en ese momento ni en un `finishSession` posterior. Misma precedencia que ADR-028 le da a las ediciones frente a la renumeración.
+31. **Re-análisis que cambia el nivel (ADR-057 §7)**: tras `reopenSession` + `finishSession`, un member nuevo más angosto puede bajar el nivel del grupo y cambiar su token respecto de lo que el usuario ya vio. Aceptado por el mismo criterio que el corrimiento de `indexInType` (caso 26): el estado post-`finishSession` es el canónico.
+32. **Género inferido, ambiguo y sin determinar (ADR-060 §4/§9)**: "Julia" → `personGender: "f"` → `[MUJER 03]`. Un nombre marcado `A` en la fuente base (unisex), ausente del léxico, por debajo del umbral de probabilidad, o unas iniciales ("J. Pérez") → **sin determinar**: token neutro `[PERSONA 03]` y marca en el árbol. Nunca se elige un género dudoso: el error se imprimiría en un documento que va a manos de un tercero. **"Andrea" sí resuelve `f`**: la fuente base es el registro civil argentino y es autoritativa — que datos anglosajones digan otra cosa no la vuelve ambigua acá.
+33. **Orden de resolución del nombre de pila (ADR-060 §4)**: "José María Gómez" → `m` y "María José Gómez" → `f`. Se busca primero la secuencia completa de nombres de pila y recién después el primer token solo; si los tokens conocidos discrepan, sin determinar.
+34. **`personGender` puesto por el usuario (ADR-060 §4)**: gana sobre cualquier inferencia y sobrevive a `finishSession`, a `reopenSession` y a una re-inferencia posterior. Sobre un grupo de `type` distinto de `Person`, el campo se ignora y no altera el `replacementValue`.
+35. **Secuencia única de `Person` con género (ADR-060 §7)**: `[MUJER 03]` y `[HOMBRE 04]` son la tercera y la cuarta persona del documento. No se abren secuencias por género — coexistirían `[MUJER 01]` y `[HOMBRE 01]`, rompiendo la unicidad de `indexInType` que `08_Security_Model.md` §9 exige.
+36. **Ocurrencia manual sobre un grupo existente (ADR-061 §6)**: llega un `ENTITY_FOUND` con `source: DetectionSource.Manual` cuyo valor ya tiene grupo. No hay camino nuevo: el matching de siempre lo suma como member, y si la identidad `(entityType, pageIndex, bbox, normalizedValue)` ya estaba, el dedup de ADR-038 §3 la descarta en silencio. **Es lo que hace segura la repetición**: agregar dos veces el mismo valor, o uno que el detector ya había encontrado, es idempotente sin escribir nada para eso.
 
 ---
 
@@ -312,6 +327,23 @@ Grouping es determinista dadas las ocurrencias y reglas; sin errores de runtime 
 | `dropOccurrences by pageIndices discards stale conflicts` | `edge.test.ts` | edge | caso 25 (ADR-038 §5.3) |
 | `dropOccurrences with empty filter throws InvalidInputError` | `edge.test.ts` | edge | caso 25 |
 | `finishSession re-run after reopenSession renumbers over union of occurrences` | `contract.test.ts` | contract | caso 26 (ADR-028 extendido) |
+| `all three abbreviation levels respect their format for the 13 entity types` | `contract.test.ts` | contract | ADR-057 §1-§2 |
+| `all members of a group share the same replacementValue` | `contract.test.ts` | contract | invariante ADR-012, re-asertado por ADR-057 §4 |
+| `group with only wide bboxes stays at level 0 (no behaviour change)` | `unit.test.ts` | unit | ADR-057 §4 — **no-regresión**: donde no había problema, el token no cambia |
+| `one narrow member lowers the level for the whole group` | `unit.test.ts` | unit | caso 27 (ADR-057 §4) |
+| `group where not even level 2 fits stays at level 2 without error` | `edge.test.ts` | edge | caso 28 (ADR-057 §4) |
+| `degenerate levels (DNI/CUIT/IBAN) produce expected tokens` | `edge.test.ts` | edge | caso 29 (ADR-057 §2) |
+| `hand-edited replacementValue survives finishSession and level selection` | `edge.test.ts` | edge | caso 30 (ADR-057 §7) |
+| `mask/synthetic/redact values unchanged by the abbreviation ladder` | `edge.test.ts` | edge | ADR-057 §6 |
+| `reopenSession + finishSession with a narrower member changes the level` | `edge.test.ts` | edge | caso 31 (ADR-057 §7) |
+| `unambiguously feminine/masculine name infers personGender` | `unit.test.ts` | unit | caso 32 (ADR-060 §4) |
+| `"José María" → m and "María José" → f` | `unit.test.ts` | unit | caso 33 (ADR-060 §4) — protege el orden de los pasos |
+| `name absent from lexicon, unisex name ("A"), below-threshold name and initials → undetermined + neutral token` | `unit.test.ts` | unit | caso 32 (ADR-060 §4/§5/§9) |
+| `"Andrea" resolves to f: the local registry is authoritative over anglophone data` | `unit.test.ts` | unit | caso 32 (ADR-060 §9) — protege la decisión de no cruzar fuentes para nombres locales |
+| `user-set personGender survives finishSession and re-inference` | `edge.test.ts` | edge | caso 34 (ADR-060 §4) |
+| `personGender on a non-Person group does not alter replacementValue` | `edge.test.ts` | edge | caso 34 (ADR-060 §2) |
+| `gendered groups keep the single Person indexInType sequence` | `edge.test.ts` | edge | caso 35 (ADR-060 §7) |
+| `gendered labels use the same ladder, no extra branches` | `edge.test.ts` | edge | ADR-060 §3 |
 
 Fixtures: `tests/fixtures/text-10p.pdf` con entidades conocidas que generan grupos predecibles.
 
@@ -336,6 +368,9 @@ Fixtures: `tests/fixtures/text-10p.pdf` con entidades conocidas que generan grup
 - [ ] 14. Implementar `getSnapshot` (copia defensiva).
 - [ ] 15. Implementar `dispose` (dessuscribir todos los handlers del bus).
 - [ ] 15b. Implementar `reopenSession`/`dropOccurrences` y el dedup por identidad en el handler de `ENTITY_FOUND`; hacer `finishSession` re-ejecutable sobre la unión de ocurrencias (ADR-038 §2-§4, casos 23-26).
+- [ ] 15c. (Hito 10.5, PR 3 — ADR-057) Tablas de los tres niveles en `labels.ts`; reemplazar el acceso directo a `TYPE_LABEL_ES` por `resolveLabelSet(group)`; selección de nivel por peor caso de `members[].bbox` con `estimateTokenWidth` de `@anonly/shared`, enganchada en `computeReplacementValue` sin agregar disparadores nuevos. La edición manual del usuario no se toca. Casos 27-31 en §13.
+- [ ] 15d. (Hito 10.6, PR 11 — ADR-060) `personGender` en la resolución de `resolveLabelSet`; inferencia por secuencia de nombres de pila y luego primer token, con caída a "sin determinar" ante ausencia, ambigüedad o discrepancia. Sin heurística de terminación. Casos 32-35 en §13.
+- [ ] 15e. (Hito 10.6, PR 11 — ADR-060 §9-§11) Script de build determinista que fusiona las dos fuentes CC-BY —Buenos Aires Data como base, UCI Gender by Name como complemento y señal de probabilidad— y emite el artefacto `nombre → f | m | ambiguo`. Buenos Aires es **autoritativo** y usa `F`/`M`/`A`: la `A` marca los nombres que no determinan género y cae a "sin determinar" sin consultar UCI. UCI **solo cubre nombres ausentes** de la base, con su probabilidad como umbral de confianza; **no se contrasta contra Buenos Aires ni cuando discrepan** ("Andrea" es `F` acá y `M` en datos anglosajones — en un documento argentino la respuesta correcta es `F`). **Los CSV originales no entran al repo; el artefacto sí.** Se carga **a demanda + Cache Storage** (mismo patrón que el modelo de NER), no en el bundle inicial: gate de `roadmap/MVP.md` §5, medir y reportar en el PR. **Precondición que no es un detalle**: atribución CC-BY visible en el producto, más procedencia y hash auditables al estilo ADR-018.
 - [ ] 16. Escribir `contract.test.ts` con todos los tests contractuales.
 - [ ] 17. Escribir `unit.test.ts` con cobertura ≥ 85%.
 - [ ] 18. Escribir `edge.test.ts` con todos los casos límite.
@@ -425,12 +460,66 @@ function resolveMode(group, rules):
 
 | Modo | replacementValue |
 |---|---|
-| `placeholder` | `[<TYPE_LABEL> <NN>]` con `NN = pad2(indexInType)` |
+| `placeholder` | `[<LABEL> <NN>]` con `NN = pad2(indexInType)`, en uno de **tres niveles de abreviatura** elegidos por grupo (ADR-057; ver el bloque siguiente) |
 | `mask` | resolución por grupo (ADR-029): si algún member lleva `Occurrence.maskFormat`, el más frecuente entre los que lo llevan (empate → el del member con primera aparición documental, mismo orden que ADR-028); si ninguno, fallback `MASK_FORMAT_BY_TYPE[type]` (ADR-012; `Plate` → `XX XXX XX` Mercosur) |
 | `synthetic` | sintetizador determinista por seed (delegado a `shared` o `export-engine` para pool faker) |
 | `redact` | `""` |
 
 El sintetizador está en `shared/synthesizer.ts` (exportado desde `@anonly/shared`) para que Grouping y Export usen la misma implementación.
+
+### Escalera de abreviaturas del `placeholder` (ADR-057)
+
+Tres niveles, por longitud decreciente. El nivel 2 además colapsa el separador (espacio → guion):
+
+```
+nivel 0:  [<LABEL> <NN>]     [PERSONA 01]
+nivel 1:  [<ABREV> <NN>]     [PERS 01]
+nivel 2:  [<CORTO>-<NN>]     [PRS-01]
+```
+
+Tabla canónica por `EntityType` — ratifica y completa ADR-012 §"Formato para `placeholder`", que solo daba 4 ejemplos de los 13 tipos (la ambigüedad que `labels.ts` arrastraba documentada desde su implementación queda cerrada acá):
+
+| `EntityType` | Nivel 0 | Nivel 1 | Nivel 2 |
+|---|---|---|---|
+| `Person` | `PERSONA` | `PERS` | `PRS` |
+| `Organization` | `ORGANIZACION` | `ORGA` | `ORG` |
+| `Address` | `DIRECCION` | `DIRE` | `DIR` |
+| `DNI` | `DNI` | `DNI` | `DNI` |
+| `CUIT` | `CUIT` | `CUIT` | `CUIT` |
+| `Phone` | `TELEFONO` | `TELE` | `TEL` |
+| `Email` | `EMAIL` | `MAIL` | `EML` |
+| `IBAN` | `IBAN` | `IBAN` | `IBAN` |
+| `CreditCard` | `TARJETA` | `TARJ` | `TRJ` |
+| `Date` | `FECHA` | `FECH` | `FEC` |
+| `License` | `MATRICULA` | `MATR` | `MAT` |
+| `Plate` | `PATENTE` | `PATE` | `PAT` |
+| `Custom` | `CUSTOM` | `CUST` | `CST` |
+| `Person` + `personGender: "f"` (ADR-060 §3) | `MUJER` | `MUJER` | `MUJ` |
+| `Person` + `personGender: "m"` (ADR-060 §3) | `HOMBRE` | `HOMB` | `HOM` |
+
+**Las columnas repetidas son correctas, no un descuido.** Para `DNI`, `CUIT` e `IBAN` el label ya es una sigla y acortarla más produce tokens ilegibles a cambio de un carácter; para `MUJER` pasa lo mismo con el nivel 1. La selección elige el primero que entra, así que los niveles degenerados se saltean solos, sin ninguna rama especial.
+
+**Selección del nivel** (ADR-057 §4):
+
+```
+nivelElegido(group) =
+  el primer nivel L ∈ [0, 1, 2] tal que, para TODOS los members del grupo,
+  estimateTokenWidth(len(tokenDeNivel_L), member.bbox.height) ≤ member.bbox.width;
+  si ninguno cumple, nivel 2.
+```
+
+Reglas que la gobiernan:
+
+- **Se elige por el peor caso y se aplica a todo el grupo.** Un grupo con 40 apariciones holgadas y una apretada baja de nivel entero. La alternativa —abreviar por ocurrencia— rompe el invariante de ADR-012 (todas las `Replacement` de un grupo comparten valor) y, peor, haría que el mismo dato apareciera con dos nombres distintos en el mismo documento.
+- **`<NN>` no se abrevia nunca.** Es lo único que distingue dos entidades del mismo tipo.
+- **El nivel 2 no garantiza que entre.** Si ni `[PRS-01]` cabe, el grupo se queda en nivel 2; quien resuelve es el render (ADR-058 §1, shrink-to-fit con `measureText` real). Esta escalera es una **optimización**, no la garantía.
+- **Es una estimación, y no puede ser otra cosa**: este motor no tiene canvas ni debe tenerlo. `estimateTokenWidth` y sus constantes viven en `@anonly/shared` (`Contracts.md` §6) y las comparten Grouping y Render sin duplicarlas (P-1 impide que un motor importe a otro; los dos pueden importar `shared`).
+- **Invariante a la escala**: el criterio compara dos magnitudes del mismo bbox, así que el nivel elegido no depende del zoom al que se renderice después.
+- **Se recalcula donde ya se recalculaba `replacementValue`** — sin disparadores nuevos —, incluida la renumeración canónica de `finishSession` (ADR-028).
+- **La edición manual gana siempre**: un `replacementValue` escrito por el usuario (caso 17) no lo toca la escalera, ni en ese momento ni en un `finishSession` posterior.
+- **`mask`, `synthetic` y `redact` no participan** (ADR-057 §6): el formato de `mask` *es* la información que transmite, un `synthetic` abreviado deja de ser plausible y `redact` no tiene texto.
+
+**La resolución del label es por grupo, no por tipo** (ADR-057 §3). El acceso directo a `TYPE_LABEL_ES` se reemplaza por `resolveLabelSet(group)`, que hoy es un lookup por `group.type` y desde ADR-060 considera además `personGender`. La indirección existe para eso: sin ella, el género obligaría a reescribir la escalera entera.
 
 ---
 

@@ -113,6 +113,18 @@ Entre usuarios de la misma organización.
 
 Modo que muestra el texto original con diff visual contra el anonimizado (estilo GitHub PR). Útil para revisión.
 
+### 5.1b Búsqueda difusa de variantes al agregar una entidad a mano
+
+**Limitación conocida del Hito 10.7 (ADR-061 §2), anotada al decidirla, no descubierta después.**
+
+El agregado manual busca el valor **exacto**, insensible a mayúsculas y acentos: "JOSE PEREZ" encuentra "José Pérez", pero **"J. Pérez" no**. Si el documento nombra a la misma persona de dos formas, el usuario tiene que agregar las dos por separado.
+
+Lo que sí funciona ya: una vez agregadas, Grouping **las fusiona solo** en un mismo grupo — su matching fuzzy por Levenshtein y aliases hace exactamente eso (`Grouping_Engine.md` §Matching). Lo que falta es que la **búsqueda** las encuentre sin que el usuario las escriba.
+
+Se arrancó exacto a propósito: la búsqueda difusa trae falsos positivos, y esta es una función cuyo punto es que el usuario corrija con precisión lo que el detector automático erró. La decisión fue medir en uso real cuántas apariciones se escapan antes de invertir.
+
+Cuando se retome, el candidato natural es reusar el mismo Levenshtein normalizado que ya usa Grouping —umbral `GROUPING_SIMILARITY_THRESHOLD`, `Contracts.md` §6— en lugar de introducir un algoritmo nuevo, más un tratamiento explícito de abreviaturas e inversiones ("Apellido, Nombre"), que Levenshtein solo no resuelve bien.
+
 ### 5.2 Búsqueda en el documento anonimizado
 
 Buscar texto en el PDF anonimizado (sobre la imagen, con OCR en vivo) para validar que un dato específico fue reemplazado.

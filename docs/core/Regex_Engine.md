@@ -1,13 +1,15 @@
-<!-- CONTEXT: scope=regex-engine | dependencias=core/Contracts.md,architecture/06_Pipeline.md,adr/ADR-021-Engines-Inline-Hasta-Hito9.md,adr/ADR-022-Regex-Phone-AR-Word-Boundaries.md | audiencia=IA-implementador | fase=3 (items §15 1-18 implementados; tests cancel/perf de §14 diferidos a Hito 11) -->
+<!-- CONTEXT: scope=regex-engine | dependencias=core/Contracts.md,architecture/06_Pipeline.md,adr/ADR-021-Engines-Inline-Hasta-Hito9.md,adr/ADR-022-Regex-Phone-AR-Word-Boundaries.md | audiencia=IA-implementador | fase=3 (items §15 1-18 implementados; tests cancel/perf de §14 diferidos a Hito 11; §6/§14/§15 en fase 10.7: findLiteral para el agregado manual de entidades, ADR-061) -->
 
 # Regex Engine — Spec de Motor
 
 > Detecta patrones determinísticos (DNI, CUIT, teléfono, email, IBAN, tarjeta, fecha, matrícula, patente) en el texto de cada página. Emite `Occurrence[]` con `source: "regex"` y `confidence: 1.0`. Es determinista: mismo input → mismo output.
 
 **EngineId**: `regex`
-**Versión del spec**: 1.0.1
-**Última actualización**: 2026-07-10
-**Estado de implementación**: Hito 4, checklist §15 (items 1-18) implementado. Pendiente: `cancel.test.ts`/`perf.test.ts` de §14 en Hito 11 (ver nota al final de §15).
+**Versión del spec**: 1.1.0
+**Última actualización**: 2026-08-06
+**Estado de implementación**: Hito 4, checklist §15 (items 1-18) implementado. Pendiente: `cancel.test.ts`/`perf.test.ts` de §14 en Hito 11 (ver nota al final de §15); `findLiteral` en Hito 10.7.
+
+> **Nota (v1.1.0, ADR-061, 2026-08-06 — `findLiteral`: agregado manual de entidades)**: este motor gana un método **dedicado** para buscar un valor literal que el usuario escribió o señaló, y emitir sus ocurrencias con `source: DetectionSource.Manual`. Cubre el agujero de que una entidad no detectada no tenía ninguna vía de corrección — y el recall del NER es métrica **informativa** en MVP (`roadmap/MVP.md` §5), o sea que el roadmap ya asume que se escapan. Vive acá, y no en un motor nuevo ni host-side, porque es exactamente la responsabilidad de este motor (encontrar cadenas en un documento y emitir `Occurrence`) y porque `mapSpanToWords` —el bbox unión de un rango de texto, la parte difícil— ya está implementado y testeado acá. **No usa `addPattern`**: ese registro es para patrones que participan de todas las corridas siguientes, y un valor puntual del usuario no debe re-evaluarse contra cada documento futuro; la durabilidad la resuelve el Orchestrator (ADR-061 §5). Búsqueda **exacta**, insensible a mayúsculas y acentos: `"J. Pérez"` **no** matchea `"José Pérez"` — limitación conocida y asertada por un test, con la búsqueda difusa anotada en `roadmap/Future_Ideas.md` §5.1b. Al NER, en cambio, **no se le puede pedir que busque un valor**: es un clasificador de tokens, no un buscador (ADR-061, Contexto §5). Ver §6, §13 y §14.
 
 > **Nota (ADR-029, 2026-07-11)**: cada `Occurrence` emitida lleva `maskFormat` copiado del `RegexPattern.maskFormat` que matcheó (ver §10). Los `maskFormat` de `plate-mercosur-ar`/`plate-vieja-ar` en `default-ar.ts` se corrigen a `XX XXX XX` / `XXX XXX` (la fila Plate de ADR-012 estaba invertida y queda superada). Pendiente de implementación en un PR chico post-Hito 6.
 
@@ -96,9 +98,27 @@ export class RegexEngine implements IEngine {
   process(input: RegexEngineInput, ctx: EngineContext): Promise<RegexEngineOutput>;
   addPattern(pattern: RegexPattern): void;       // runtime, para UI
   removePattern(patternId: string): void;
+  findLiteral(input: FindLiteralInput, ctx: EngineContext): Promise<RegexEngineOutput>;  // ADR-061 §1
   dispose(): Promise<void>;
 }
+
+// ADR-061 §1: búsqueda de un valor que el usuario escribió o señaló en el visor.
+export interface FindLiteralInput {
+  readonly document: Document;
+  readonly value: string;
+  readonly entityType: EntityType;
+}
 ```
+
+Semántica de `findLiteral` (ADR-061 §1/§2):
+
+- Busca el `value` en el documento y emite una `Occurrence` por coincidencia, con `source: DetectionSource.Manual`, `confidence: 1.0` y el bbox resuelto por `mapSpanToWords` — el mismo camino que usa `process`.
+- **No emite `REGEX_FINISHED`** y **no toca el registro de patrones**: no es una corrida de detección, es una consulta puntual. `addPattern` sigue siendo para patrones que participan de todas las corridas.
+- **Matcheo exacto, normalizado**: NFC + minúsculas + sin diacríticos, mismo criterio que el `normalizedValue` de `Occurrence`. `"JOSE PEREZ"` encuentra `"José Pérez"`.
+- **Valores multi-palabra** matchean sobre `Word` contiguas de la misma línea (agrupación por banda vertical, la misma primitiva que ADR-058 §5 introduce para el repintado — no dos implementaciones).
+- **`"J. Pérez"` no matchea `"José Pérez"`.** Limitación deliberada, con test explícito (§14) para que no se implemente por accidente ni se rompa en silencio. La búsqueda difusa de variantes está anotada en `roadmap/Future_Ideas.md` §5.1b.
+- Valor ausente del documento → `occurrenceCount: 0`, **sin eventos y sin error**: no es un fallo del Core que el usuario haya escrito algo que no está.
+- Funciona igual sobre páginas cuyas palabras vienen de OCR (`Word.source === "ocr"`): opera sobre `Page.words`, que no distingue el origen.
 
 Patrones default exportados desde `index.ts`:
 
@@ -233,6 +253,13 @@ Regex es determinista: si la regex compila, no hay errores de runtime. Errores d
 | `100 custom patterns complete within perf budget` | `perf.test.ts` (en `tests/perf/`) | perf | caso 13; pendiente, diferido a Hito 11 (mismo tratamiento que PDF Engine, `MVP.md` §4 Hito 2) |
 | `empty document returns 0 occurrences` | `edge.test.ts` | edge | caso 1 |
 | `textless page returns 0 occurrences` | `edge.test.ts` | edge | caso 2 |
+| `findLiteral emits ENTITY_FOUND with source "manual" and correct bbox` | `contract.test.ts` | contract | ADR-061 §1 |
+| `findLiteral emits no REGEX_FINISHED and does not touch the pattern registry` | `contract.test.ts` | contract | ADR-061 §1 — no es una corrida de detección |
+| `findLiteral matches case- and accent-insensitively` | `unit.test.ts` | unit | ADR-061 §2 |
+| `findLiteral matches a multi-word value over contiguous words of the same line` | `unit.test.ts` | unit | ADR-061 §2 |
+| **`findLiteral does NOT match "J. Pérez" for "José Pérez"`** | `unit.test.ts` | unit | ADR-061 §2 — asertar la **limitación** deliberada: protege contra implementarla por accidente y contra romperla en silencio (`Future_Ideas.md` §5.1b) |
+| `findLiteral with a value absent from the document returns 0 and emits nothing` | `edge.test.ts` | edge | ADR-061 §6 |
+| `findLiteral works over OCR-sourced words` | `edge.test.ts` | edge | ADR-061 §1 |
 | `snapshot of occurrences for text-10p.pdf stable` | `snapshot.test.ts` | snapshot | fixture |
 
 Fixtures: `tests/fixtures/text-10p.pdf` (con DNIs, CUITs, emails, teléfonos conocidos).
@@ -251,6 +278,7 @@ Fixtures: `tests/fixtures/text-10p.pdf` (con DNIs, CUITs, emails, teléfonos con
 - [ ] 8. Implementar priorización de match más largo en overlap (caso 10).
 - [ ] 9. Implementar timeout por patrón custom (1000 ms).
 - [ ] 10. Implementar `addPattern`/`removePattern` (recompila la lista activa).
+- [ ] 10b. (Hito 10.7, PR 2 — ADR-061 §1/§2) Implementar `findLiteral`: normalización NFC + minúsculas + sin diacríticos, matcheo sobre secuencias de `Word` contiguas de la misma línea, `Occurrence` con `source: Manual` y bbox por `mapSpanToWords`. **Sin emitir `REGEX_FINISHED` y sin tocar el registro de patrones.** Valor ausente → `occurrenceCount: 0` sin eventos ni error. El test de que `"J. Pérez"` **no** matchea `"José Pérez"` es parte del entregable, no un extra.
 - [ ] 11. Implementar `dispose` (limpia lista de patrones, sin recursos externos que liberar).
 - [ ] 12. Escribir `contract.test.ts` con todos los tests contractuales.
 - [ ] 13. Escribir `unit.test.ts` con cobertura ≥ 85%.

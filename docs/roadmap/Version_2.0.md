@@ -26,7 +26,14 @@ Convertir Anonly de "anonimizador de PDF web" a "plataforma de anonimización do
 
 ### 2.2 Plataformas
 
-- **Electron**: empaquetar el `react-client` + Core como app de escritorio. Reutiliza todo el Core sin cambios (es 100% browser-compatible).
+- **App de escritorio empaquetada**: instalador que el usuario baja una vez, instala, y usa **sin conexión** desde ese momento — con la ventaja de que, si hay red, puede actualizarse solo. Reutiliza todo el Core sin cambios (es 100% browser-compatible). Es el destino final de la promesa "100% local"; el escalón previo es la PWA instalable de `Version_1.0.md` §2.7.
+
+  Cuatro cosas que este empaquetado cambia respecto de la web y que **no** son detalles de packaging:
+
+  1. **El actualizador es la primera salida de red legítima del producto.** El gate `no-network-from-core` (`08_Security_Model.md` §11) sigue verde —el updater vive en el shell, no en `packages/`— pero la aplicación pasa a hacer requests salientes, y eso hay que enunciarlo con precisión antes de que se lea como contradicción del pitch: *el Core nunca habla con la red; el contenedor puede, exclusivamente para consultar versiones y bajar actualizaciones firmadas, y nunca con contenido de un documento*. Requiere ADR propio, con firma de releases y política de qué se envía en el chequeo (idealmente: nada más que la versión actual).
+  2. **Se invierte la estrategia de assets de ADR-018.** Hoy los ~219 MB de modelo NER y wasm de Tesseract se descargan a demanda y se cachean; en un instalador viajan **dentro del paquete** y no se descarga nada después. Mejor producto, y vuelve irrelevante buena parte del razonamiento de bundle-size del cliente web (incluido el del léxico de nombres de ADR-060 §10). El `assets.lock.json` pasa de ser un manifiesto de mirroring a ser parte del build del instalador.
+  3. **El modelo de seguridad hay que reescribirlo, no adaptarlo.** `08_Security_Model.md` §3.2 está escrito para un origen web con CSP. Un contenedor de escritorio tiene otra postura —aislamiento de contexto, acceso a filesystem, origen `file://` o local— y el `no-third-party-connect` de E2E asume un browser. Es un ADR, no una nota al pie.
+  4. **Electron vs Tauri no es obvio, y este proyecto tiene un motivo fuerte para Electron.** Tauri produce instaladores mucho más chicos porque usa el webview del sistema, pero entonces la versión del motor la decide el SO. Anonly depende fuerte de `OffscreenCanvas`, Web Workers y WASM SIMD, y ADR-053 ya mostró lo sensible que es el render a los detalles del motor de renderizado. Electron fija qué Chromium corre; Tauri no. La ganancia de tamaño de Tauri además se diluye contra los 219 MB de modelos que hay que empaquetar igual.
 - **React Native (móvil)**: nuevo cliente `apps/mobile-client` que consume el Core. Requiere que el Core sea compatible con React Native (sin DOM, sin Web Workers → usar Worker threads nativos o JSC). Posible ADR de adaptación.
 - **Extensiones de navegador**: packaging del cliente web como extensión Chrome/Firefox. Procesa PDFs abiertos en el navegador.
 
@@ -72,7 +79,7 @@ Convertir Anonly de "anonimizador de PDF web" a "plataforma de anonimización do
 - Word Engine
 - Image Engine
 - Excel Engine
-- Electron Packaging
+- Desktop Packaging (Electron vs Tauri, actualizador firmado, assets en el instalador, modelo de seguridad del contenedor — §2.2)
 - React Native Adaptation
 - Semantic Grouping
 - PDF/A Export
@@ -87,7 +94,7 @@ Mantienen las v1.0 con adiciones:
 | Métrica | Target v2.0 |
 |---|---|
 | Soporte formatos | PDF, Word, Excel, PowerPoint, PNG, JPEG, TIFF |
-| Plataformas | Web, Electron (Win/Mac/Linux), React Native (iOS/Android), extensiones |
+| Plataformas | Web, escritorio empaquetado (Win/Mac/Linux), React Native (iOS/Android), extensiones |
 | Batch | hasta 50 documentos encolados sin OOM |
 | Plugin API | pública y estable |
 
@@ -98,7 +105,7 @@ Mantienen las v1.0 con adiciones:
 1. Word engine.
 2. Image engine.
 3. Modo texto preservado (con research previo).
-4. Electron packaging.
+4. Desktop packaging (instalador + actualizador; ADRs previos: contenedor y actualizador, §2.2).
 5. React Native adaptation.
 6. Batch UI.
 7. Plugin system.

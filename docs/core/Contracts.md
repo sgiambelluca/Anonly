@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=contratos-base | dependencias=03_Data_Model.md,04_Event_System.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-049-Errores-Cruzando-Worker-Discriminacion-Por-Code.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md | audiencia=IA-implementador | fase=3 (§3.5 actualizado en fase 10: CoreRuntimeOptions/WorkerLike/WorkerFactory para transporte de workers —ADR-036 §2—, IPipelineOrchestrator.reanalyze/ReanalyzeConfigPatch —ADR-038 §1—; §6 gana MAX_RENDER_SCALE/PREVIEW_CACHE_MAX_BYTES —ADR-037 §2-3—; §8 RenderRequested.scale —ADR-037 §1—; §4 precisa qué garantiza deserialize() al cruzar el boundary, sin cambio de shape —ADR-049 §2—; fase 11: §8 RenderRequested.kind requerido —ADR-056 §1—) -->
+<!-- CONTEXT: scope=contratos-base | dependencias=03_Data_Model.md,04_Event_System.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-049-Errores-Cruzando-Worker-Discriminacion-Por-Code.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md | audiencia=IA-implementador | fase=3 (§3.5 actualizado en fase 10: CoreRuntimeOptions/WorkerLike/WorkerFactory para transporte de workers —ADR-036 §2—, IPipelineOrchestrator.reanalyze/ReanalyzeConfigPatch —ADR-038 §1—; §6 gana MAX_RENDER_SCALE/PREVIEW_CACHE_MAX_BYTES —ADR-037 §2-3—; §8 RenderRequested.scale —ADR-037 §1—; §4 precisa qué garantiza deserialize() al cruzar el boundary, sin cambio de shape —ADR-049 §2—; fase 11: §8 RenderRequested.kind requerido —ADR-056 §1—; fase 10.5/10.6: §5 AnnotationKind.Degraded —ADR-058 §7— y PersonGender —ADR-060 §2—, §6 REPLACEMENT_FONT_HEIGHT_RATIO/AVG_GLYPH_ADVANCE_RATIO/estimateTokenWidth —ADR-057 §5— y DEGRADED_FONT_RATIO —ADR-058 §7—) -->
 
 # Anonly — Contratos Base (`@anonly/shared`)
 
@@ -252,6 +252,19 @@ export interface IPipelineOrchestrator {
   // perder las ediciones manuales del usuario (grupos, reglas, conflictos
   // resueltos). Ver ADR-038 §1. Precondición: stage ∈ {Ready, Failed}.
   reanalyze(documentId: string, patch: ReanalyzeConfigPatch): Promise<void>;
+  /**
+   * ADR-061 §6: agrega a mano una entidad que el detector no encontró.
+   * Orquesta reopenSession -> regex.findLiteral -> ENTITY_FOUND (source: Manual)
+   * -> finishSession. Idempotente por el dedup de identidad de ADR-038 §3.
+   * Valor ausente del documento -> no crea grupo, sin error.
+   * Precondición: stage in {Ready, Failed} (si no, InvalidInputError).
+   */
+  addManualEntity(documentId: string, request: ManualEntityRequest): Promise<void>;
+  /** ADR-061 §8: misma búsqueda literal, salida para el buscador del visor. */
+  findText(documentId: string, query: string): ReadonlyArray<TextMatch>;
+  /** ADR-061 §4: habilitan el hit-test de selección sobre el canvas del original. */
+  getPageWords(documentId: string, pageIndex: number): ReadonlyArray<Word>;
+  getPageSize(documentId: string, pageIndex: number): { readonly width: number; readonly height: number };
   cancel(documentId: string, jobId?: string): Promise<void>;
   closeDocument(documentId: string): Promise<void>;
   getState(documentId: string): PipelineState;
@@ -437,7 +450,17 @@ export enum AnnotationKind {
   Replacement = "replacement",
   Redact = "redact",
   Conflict = "conflict",
+  // ADR-058 §7: el reemplazo hubo que encogerlo por debajo del umbral de
+  // legibilidad (DEGRADED_FONT_RATIO). Es una señal de RENDER, no de datos: marca
+  // que esos píxeles quedaron comprometidos. No confundir con la marca de
+  // "género sin determinar" del árbol de entidades, que es una afordancia de UI
+  // sobre información faltante y no se pinta en el canvas (ADR-060 §5).
+  Degraded = "degraded",
 }
+
+// ADR-060 §2: solo aplicable a EntityGroup de type === Person. Ausente = sin
+// determinar; no es una tercera categoría (03_Data_Model.md §9).
+export type PersonGender = "f" | "m";
 
 export enum ConflictReason {
   Overlap = "overlap",
@@ -553,6 +576,13 @@ export interface ExportConfig {
 | `WORDS_CACHE_PAGES` | `32` | `EngineConfig.cache` |
 | `MAX_RENDER_SCALE` | `4` | Guard de `RenderRequested.scale`/`RenderPageInput.scale` (ADR-037 §2) |
 | `PREVIEW_CACHE_MAX_BYTES` | `200 MB` | Límite por bytes del cache LRU de previews, además de `PREVIEW_CACHE_PAGES` (ADR-037 §3) |
+| `REPLACEMENT_FONT_HEIGHT_RATIO` | `0.7` | Fracción de `bbox.height` que el render usa como tamaño de fuente del reemplazo. Deja de ser número mágico de `fontForMode` (ADR-057 §5) |
+| `AVG_GLYPH_ADVANCE_RATIO` | `0.6` | Avance medio de glifo como fracción del tamaño de fuente, para estimar ancho sin canvas (ADR-057 §5) |
+| `DEGRADED_FONT_RATIO` | `0.6` | Umbral del aviso de degradación: se marca cuando `tamañoEfectivo / tamañoNatural` cae por debajo (ADR-058 §7) |
+
+> **`estimateTokenWidth(charCount, boxHeight)`** (ADR-057 §5) — función pura y determinista de `@anonly/shared`, derivada de las dos primeras constantes. La usan **dos** motores: `grouping-engine` para elegir el nivel de abreviatura del `placeholder` y `render-engine` como punto de partida de su medición real con `measureText`. Vive en `shared` precisamente porque dos motores no pueden importarse entre sí (P-1) pero los dos pueden importar `shared`. **No se duplica en ninguno de los dos.**
+>
+> **`DEGRADED_FONT_RATIO` es una razón, no un tamaño en píxeles, y eso es deliberado** (ADR-058 §7): el preview y el export renderizan a escalas distintas, así que un piso absoluto haría que discreparan sobre si hay que avisar por el mismo reemplazo. La razón es invariante a la escala. El piso de 8px de `fontForMode` se conserva, pero es un piso de dibujo, no un criterio de aviso.
 
 ---
 

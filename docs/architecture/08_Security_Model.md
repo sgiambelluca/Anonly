@@ -234,6 +234,15 @@ Para evitar reidentificación por patrones:
 
 - Si el documento tiene un solo grupo de un tipo (ej. un solo DNI), `placeholder` `[DNI 01]` podría revelar que hay un único DNI. No revela el valor, pero sí el conteo. Aceptable para el producto; documentado en la UI ("X ocurrencias" se muestra al usuario, pero no al receptor del PDF).
 - Modo `synthetic` con seed predecible: si el atacante conoce el seed, puede revertir el sintético. Mitigación: seed default aleatorio por sesión, configurable pero nunca expuesto en el PDF resultante.
+- **Divulgación de género (ADR-060, opt-in por grupo)**. `[MUJER 01]` revela un atributo que `[PERSONA 01]` ocultaba, y ese atributo **reduce activamente el conjunto de candidatos** de reidentificación: se compone con cualquier otro dato que sobreviva en el texto (profesión, ciudad, cargo, fecha). Un documento con un solo `[MUJER 01]` entre tres personas es sustancialmente más identificable que el mismo con tres `[PERSONA nn]`.
+
+  Es la **primera función del producto que agrega un atributo** al documento anonimizado en vez de quitarlo, y es una categoría sensible por sí misma. Se acepta como trade-off explícito a cambio de la coherencia referencial del texto —sin género, "en la casa de ella" pierde su antecedente y el documento deja de entenderse—, con tres mitigaciones de diseño:
+  - **Opt-in por grupo, nunca global ni por tipo** (ADR-060 §6): el atributo se divulga de a una persona por vez, con el usuario mirando. No hay casilla que lo active sobre todo el documento.
+  - **Ante la duda no se decide** (ADR-060 §4): nombre ausente del léxico, ambiguo o iniciales → token neutro. Nunca se imprime una inferencia dudosa, porque el error viajaría en un documento que va a manos de un tercero.
+  - **Sin secuencias separadas** (ADR-060 §7): los grupos `Person` comparten una sola secuencia de `indexInType`, así que la unicidad que exige §9 se conserva y el índice no revela cuántas personas hay de cada género.
+
+  Riesgo residual reconocido y no mitigado: en un documento con pocas personas, la sola presencia de un token con género ya es información. La contramedida disponible es no usar la función en esos documentos, o editar el `replacementValue` de ese grupo a mano.
+- **Leyenda de marcadores (ADR-059, opt-in por export)**. Lista `prefijo → tipo` con conteos — **nunca valores originales**, imposibilidad garantizada **por tipo** y no por convención: `MarkerLegendEntry` no tiene ningún campo capaz de transportar contenido del documento, así que filtrar un dato exige cambiar el contrato (mismo mecanismo que `includeOriginalMetadata: false`). Divulga, como los tokens del cuerpo ya divulgaban, cuántos marcadores de cada tipo hay; no agrega información nueva. **Se rasteriza como cualquier otra página** (ADR-059 §4): el export sigue siendo 100% imagen sin excepciones, y §4 de este documento no necesita ninguna salvedad. Validado por dos tests en `tests/security/`: el `no-recuperability` sobre el camino con leyenda, y la aserción de que **ninguna página del export contiene objetos de texto** — que es lo que hace de "100% imagen" una propiedad verificable en vez de una convención.
 
 ---
 
@@ -257,6 +266,8 @@ Para evitar reidentificación por patrones:
 |---|---|---|
 | `no-network-from-core` | grep + unit | ningún `fetch`, `XMLHttpRequest`, `WebSocket` en `packages/`, salvo las factories de CMap/standard-fonts de `pdf-engine`/`render-engine` contra la constante same-origin `/pdfjs/` (ADR-053 §2) |
 | `no-recuperability` | integration | buscar texto original en export = 0 hits |
+| `no-recuperability-with-legend` | integration | ídem sobre el camino con `includeMarkerLegend: true`: la leyenda es la única página cuyo contenido no proviene del render de una página del documento, así que es el único lugar donde un valor original podría entrar por otra vía (ADR-059 §8) |
+| `export-has-no-text-objects` | integration | ninguna página del export contiene objetos de texto — hace **verificable** la propiedad "el export es 100% imagen" en vez de dejarla como convención (ADR-004, ADR-059 §4) |
 | `metadata-strip` | integration | export no contiene `author`/`creator`/`title` del original |
 | `no-password-in-logs` | unit | spy de logger no recibe password |
 | `csp-strict` | E2E | response headers tienen CSP de §3.2 |

@@ -43,6 +43,7 @@ La redacción in-place tiene una falla crítica de seguridad: las herramientas q
 
 **Negativas**:
 - El PDF resultante **no tiene texto seleccionable** ni buscable. Es un PDF "scanned-like".
+  > **Confirmado por ADR-059 §4 (2026-08-06)**: sigue valiendo **sin excepciones**. La leyenda opcional de marcadores se evaluó con `drawText` de pdf-lib —mucho más barato— y se **rechazó** precisamente para no romper esta propiedad: se rasteriza y se embebe como cualquier otra página. El motivo es que "el export es 100% imagen" se audita en un segundo (abrir el PDF, intentar seleccionar texto, no hay nada), mientras que con una sola capa de texto auditar pasa a ser un juicio sobre su contenido.
 - Mayor tamaño de archivo (imágenes vs texto vectorial).
 - Se pierden bookmarks, links, forms del original.
 - Calidad de texto en zoom depende de la resolución de render (mitigado con DPI configurable, default 150).

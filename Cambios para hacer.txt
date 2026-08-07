@@ -2,7 +2,7 @@ Cambios para hacer:
 1) Que puedas manualmente seleccionar un nombre o contenido para agregarlo a los ítems a anonimizar, hay dos formas:
 * Arriba de las coincidencias ya encontradas, que haya un botón para poder agregar un nuevo nombre, valor o coincidencia a buscar. La idea es que te deje elegir que tipo de valor estas buscando (ej: Numero de teléfono, nombre, ubicación, etc) y después de seleccionarlo, escribís cual es el valor del mismo (EJ: la app no detecto a Jose Pérez, lo agrego de esta forma). Posterior a esto, se reinicia el NER y/o Regex buscando únicamente este valor para agregarlo a la lista. 
 
-* Vas buscando en el PDF que ya aparece como preview en la pantalla, podes seleccionar texto y agregar dicho texto como una ocurrencia de algún cierto tipo. EJ: No detecto a Tomas Juarez, lo encuentro en el PDF, lo selecciono, aparece un botón que dice "Agregar entidad como..." y ahí me aparezca un menú desplegable que me deje elegir el tipo de entidad. Una vez confirmado, se re dispara el NER y/o Regex buscando únicamente dicho dato. 
+* Vas buscando en el PDF que ya aparece como preview en la pantalla, podes seleccionar texto sobre el archivo original y agregar dicho texto como una ocurrencia de algún cierto tipo. EJ: No detecto a Tomas Juarez, lo encuentro en el PDF, lo selecciono, aparece un botón que dice "Agregar entidad como..." y ahí me aparezca un menú desplegable que me deje elegir el tipo de entidad. Una vez confirmado, se re dispara el NER y/o Regex buscando únicamente dicho dato. 
 
 2) La idea de que puedas compactar el menú de entidades y reglas de forma horizontal, y que la barra divisora de los dos pdfs puedan ser desplazables para poder agrandar uno de ellos con mayor detalle. 
 
