@@ -7,6 +7,7 @@
 - **Decidido por**: Aclaración del usuario en planificación
 - **Relacionado con**: ADR-011-Grouping-First
 - **Complementado por**: ADR-029 (la fila `Plate` de §"Formato por tipo para mask" tenía ambos formatos incorrectos y queda **superada**: Mercosur = `XX XXX XX`, vieja = `XXX XXX`; el formato por variante viaja en `Occurrence.maskFormat`)
+- **Modificado por**: ADR-057 (§"Formato para `placeholder`": `[<TYPE> <NN>]` deja de ser el único formato y pasa a ser el **nivel 0** de una escalera de tres; ADR-057 §2 ratifica además la tabla completa de los 13 tipos, de la que este ADR solo daba 4 ejemplos), ADR-060 (§"Formato para `placeholder`": para `Person`, el label depende además de `EntityGroup.personGender` — `MUJER`/`HOMBRE`; **no** se agrega un quinto `ReplacementMode`)
 
 ## Contexto
 
@@ -91,6 +92,10 @@ Síntesis **determinista por seed** (seed default: aleatorio por sesión, config
 
 Ejemplos: `[DNI 01]`, `[PERSONA 03]`, `[DIRECCION 02]`, `[CUIT 01]`.
 
+> **Modificado por ADR-057 (2026-08-06)**. Este formato pasa a ser el **nivel 0** de una escalera de tres, elegida **por grupo** según el ancho disponible de su ocurrencia más apretada: `[PERSONA 01]` → `[PERS 01]` → `[PRS-01]`. Motivo: un token más largo que el dato que reemplaza se derramaba encima del texto original. Lo que **no** cambia es el invariante de §"Validación": el nivel se aplica a **todas** las ocurrencias del grupo, así que las `Replacement` de un mismo `groupId` siguen compartiendo `replacementValue`. `<NN>` no se abrevia nunca. La tabla completa de los 13 tipos —de los que acá solo hay 4 ejemplos, ambigüedad que `grouping-engine/src/labels.ts` arrastraba documentada— queda ratificada en ADR-057 §2 y replicada en `core/Grouping_Engine.md`.
+>
+> **Modificado por ADR-060 (2026-08-06)**. Para `EntityType.Person`, el `<TYPE>` depende además de `EntityGroup.personGender`: `MUJER`/`MUJER`/`MUJ` o `HOMBRE`/`HOMB`/`HOM`. **No es un `ReplacementMode` nuevo** — el enum de este ADR sigue teniendo cuatro valores. Ver ADR-060 §1-§3, y su análisis SAN: el token con género divulga un atributo que el neutro ocultaba.
+
 ### Formato para `redact`
 
 `replacementValue = ""`. El render pinta el bbox de negro sólido. No se incluye texto en la imagen resultante (se pinta fill opaco antes del `convertToBlob`).
@@ -136,7 +141,7 @@ Riesgo residual documentado en `08_Security_Model.md` §9.
 - Test por modo: para cada tipo y cada modo, el `replacementValue` respeta el formato.
 - Test de coherencia: `Replacement` de un mismo `groupId` tienen el mismo `replacementValue`.
 - Test de sintético determinista: mismo seed → mismo sintético.
-- Test de placeholder: `[<TYPE> <NN>]` con padding correcto.
+- Test de placeholder: `[<TYPE> <NN>]` con padding correcto — extendido por ADR-057 §9 a los **tres niveles** de la escalera, más el test explícito del invariante "todos los `members` de un grupo comparten `replacementValue`", que antes estaba implícito en que había un solo formato posible.
 - Test de `redact`: `replacementValue === ""` y el render pinta fill opaco.
 
 ## Referencias

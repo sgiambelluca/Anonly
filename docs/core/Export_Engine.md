@@ -1,12 +1,14 @@
-<!-- CONTEXT: scope=export-engine | dependencias=core/Contracts.md,architecture/06_Pipeline.md,ADR-004-Rendering.md,ADR-009-Export-Strategy.md,ADR-012-Replacement-Modes.md,ADR-032-Export-EncodedPageImage-Requested-Warning.md,ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,ADR-044-Preview-Grupos-Mediacion-Orchestrator.md,adr/ADR-047-ExportEngine-Ensamblador-Worker-Dedicado.md | audiencia=IA-implementador | fase=10 (§12 corregido en fase 10: ExportWorker único, no RenderPool — ADR-036 §1; §15.16: export de `buildPageReplacements` — ADR-044 §4; §2/§6/§12/§13/§14/§15 por ADR-047: ensamblado pdf-lib en el worker, motor host-side dueño de su despacho) -->
+<!-- CONTEXT: scope=export-engine | dependencias=core/Contracts.md,architecture/06_Pipeline.md,ADR-004-Rendering.md,ADR-009-Export-Strategy.md,ADR-012-Replacement-Modes.md,ADR-032-Export-EncodedPageImage-Requested-Warning.md,ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,ADR-044-Preview-Grupos-Mediacion-Orchestrator.md,adr/ADR-047-ExportEngine-Ensamblador-Worker-Dedicado.md | audiencia=IA-implementador | fase=10 (§12 corregido en fase 10: ExportWorker único, no RenderPool — ADR-036 §1; §15.16: export de `buildPageReplacements` — ADR-044 §4; §2/§6/§12/§13/§14/§15 por ADR-047: ensamblado pdf-lib en el worker, motor host-side dueño de su despacho; §9/§10/§13/§14/§15 en fase 10.5: leyenda opcional de marcadores, ADR-059) -->
 
 # Export Engine — Spec de Motor
 
 > Construye el PDF final reconstruido desde cero, adjuntando las imágenes renderizadas (lado anonimizado) como páginas con pdf-lib. Garantiza no-recuperabilidad y metadata mínima.
 
 **EngineId**: `export`
-**Versión del spec**: 1.2.0
-**Última actualización**: 2026-07-24
+**Versión del spec**: 1.3.0
+**Última actualización**: 2026-08-06
+
+> **Nota (v1.3.0, ADR-059, 2026-08-06 — leyenda opcional de marcadores)**: `ExportOptions` gana `includeMarkerLegend: boolean` (default `false`). Con el flag, el `save` agrega una **página final** con la referencia `prefijo → tipo` de los marcadores que ADR-057 pudo abreviar — `MAT` y `PAT` no se leen solos, y son matrícula y patente. **Regla dura: `token → tipo`, nunca `token → valor original`**, garantizada **por tipo** y no por convención: `MarkerLegendEntry` no tiene ningún campo capaz de transportar contenido del documento, así que filtrar un dato exige cambiar el contrato (mismo mecanismo que `includeOriginalMetadata: false`). **La leyenda se rasteriza como cualquier otra página**: este motor no tiene canvas, así que la imagen se pide por `RenderPageProvider.renderLegend` —el puerto que ya existía para pedirle imágenes a Render, mediado por el Orchestrator (P-1)— y se embebe con `embedPng`/`embedJpg` + `addPage` + `drawImage`. Se evaluó dibujarla con `drawText` de pdf-lib, que era mucho más barato, y **se rechazó** para no romper que el export sea 100% imagen: esa propiedad se audita en un segundo, mientras que una sola capa de texto convierte la auditoría en un juicio sobre su contenido. Consecuencia: ADR-004 y ADR-009 quedan intactos, sin erratas ni salvedades. Va en el `save` y no en `appendPage` —se aplica una vez al final, igual que la metadata, y no tiene `pageIndex` del que ser idempotente—. Sin el flag, el export no cambia en nada. Ver §6, §9, §13 casos 21-25 y §14, incluidos los dos tests de `tests/security/`.
 
 > **Nota (ADR-047, 2026-07-24 — reparto host/worker para PR16)**: `export()` queda **entero host-side** (validación, loop por página, `RenderPageProvider`, retry/timeout, los cuatro eventos, sanitización de `title`/`filename` y la creación del blob URL). Al ExportWorker cruzan **dos operaciones de pdf-lib**: `append-page` (`embedJpg`/`embedPng` + `addPage` + `drawImage`) y `save` (metadata + `save({ useObjectStreams: true })` → `ArrayBuffer` transferido). A diferencia de Render/Ocr/Ner, este worker **sí retiene estado**: el `PDFDocument` en construcción y el `documentId` al que pertenece — es un **ensamblador de un documento a la vez**, no un kernel puro, porque pdf-lib ensambla incrementalmente y no es thread-safe (§12). Reglas del estado: `documentId` distinto → descarta el parcial y arranca de nuevo; `append-page` con un `pageIndex` ya adjuntado → no-op idempotente (hace seguro el reintento del host y elimina el modo de falla "página duplicada" que el guard `pageCountBeforeAttempt` cubría cuando el `pdfDoc` era local); `CANCEL` descarta el parcial; tras un `save` exitoso, el estado se limpia. El transporte reusa `WorkerPool` con `size: 1` construido por el façade e inyectado por constructor (`new ExportEngine(pool?)`, sin argumento → fallback in-process bit-idéntico, ADR-035), con `maxRetriesOverride: 0` y normalización por `code` de `EXPORT_TIMEOUT`/`EXPORT_FAILED` en el borde del puerto — **matiza** ADR-036 §1 ("sin `WorkerPool`") sin revertir su sustancia: no hay quinta clave en `WorkerPoolConfig` ni cola multi-worker. Interfaz de §6: sin cambios de firma salvo el constructor.
 
@@ -105,6 +107,12 @@ export interface EncodedPageImage {
 
 export interface RenderPageProvider {
   renderFull(pageIndex: number, replacements: ReadonlyArray<Replacement>, abortSignal: AbortSignal): Promise<EncodedPageImage>;
+  // ADR-059 §5: la leyenda se rasteriza como cualquier otra página, y este motor
+  // no tiene canvas. Se extiende el puerto que ya existía en vez de inventar un
+  // canal nuevo entre motores: lo implementa el Orchestrator, único autorizado a
+  // hablarle a los dos (P-1). Recibe filas de strings YA COMPUESTAS — el kernel de
+  // Render no ve EntityType ni EntityGroup. Solo se invoca con includeMarkerLegend.
+  renderLegend(rows: ReadonlyArray<MarkerLegendRow>, abortSignal: AbortSignal): Promise<EncodedPageImage>;
 }
 
 export interface ExportEngineOutput {
@@ -177,6 +185,7 @@ ExportOptions {
   includeOriginalMetadata: false;  // SIEMPRE false por tipo
   title?: string;
   filename: string;
+  includeMarkerLegend: boolean;    // ADR-059 §1, default false
 }
 ```
 
@@ -201,7 +210,7 @@ ExportEngineOutput {
 ```
 
 Garantías del PDF final:
-- Sin capas de texto del original.
+- Sin capas de texto del original. **Sin capas de texto, punto** (ADR-059 §4): ninguna página del export contiene objetos de texto, incluida la de leyenda, que se rasteriza como cualquier otra. Verificado por el test `export-has-no-text-objects` (`08_Security_Model.md` §11), que convierte "el export es 100% imagen" en una aserción de CI en vez de una convención.
 - Sin bookmarks, links, JavaScript, forms del original.
 - Sin XMP ni metadata sensible del original.
 - Metadata propia: `producer = "Anonly"`, `creator = "Anonly"`, `creationDate = now`, `title` opcional.
@@ -252,7 +261,7 @@ Garantías del PDF final:
 9. **PDF original con JavaScript**: el export no lo replica. Sin error.
 10. **PDF original con forms (AcroForm)**: el export no los replica. Sin error.
 11. **PDF original con XMP sensible**: el export no lo replica. Test `metadata-strip` valida.
-12. **PDF original con texto seleccionable**: el export no tiene texto seleccionable (es "scanned-like"). Trade-off aceptado por ADR-004.
+12. **PDF original con texto seleccionable**: el export no tiene texto seleccionable (es "scanned-like"). Trade-off aceptado por ADR-004. **Sin excepciones, tampoco la leyenda** (ADR-059 §4): se rasteriza como cualquier otra página, y hay un test de CI que lo verifica.
 13. **Cancelación a mitad de ensamblado**: aborta en < 200 ms, `PDFDocument` parcial descartado, no se emite `EXPORT_FINISHED`.
 14. **Doble export simultáneo**: el segundo `EXPORT_REQUESTED` se encola (no se superpone). El Orchestrator serializa.
 15. **`export` tras `dispose`**: lanza `EngineDisposedError`.
@@ -261,6 +270,11 @@ Garantías del PDF final:
 18. **Reintento de una página que el worker sí adjuntó (ADR-047 §4)**: el host reintenta tras un timeout, pero el `append-page` original había terminado del otro lado. El worker ignora el `pageIndex` ya adjuntado y responde `COMPLETED`: el PDF final no tiene páginas duplicadas. Sin esta idempotencia el fallo sería silencioso (salida incorrecta, ningún error).
 19. **`append-page` con un `documentId` distinto del retenido (ADR-047 §4)**: el worker descarta el `PDFDocument` parcial y arranca uno nuevo. Cubre un export abandonado por fallo o cancelación seguido de otro, sin mensaje de control nuevo.
 20. **Fallback in-process (sin factory de worker, ADR-035)**: el ensamblado corre en el mismo módulo, en el host. Eventos, orden, bytes de salida y garantías de §10 idénticos; los tests del motor corren por este camino.
+21. **Leyenda de marcadores activa (ADR-059 §5/§6)**: con `options.includeMarkerLegend === true`, el PDF final tiene `document.pageCount + 1` páginas. La imagen se pide por `RenderPageProvider.renderLegend` —el mismo puerto mediado por el Orchestrator que ya se usa para `renderFull`— y se embebe dentro del `save`, **antes** de aplicar la metadata y serializar, con las mismas cuatro llamadas de pdf-lib que usa `appendPage`. **No pasa por `appendPage`** aunque el dibujo sea idéntico: esa función es idempotente por `pageIndex` y la leyenda no tiene uno — no es una página del documento (caso 18). Con el flag apagado (default), `renderLegend` **no se invoca** y el export es bit a bit el mismo que antes de ADR-059.
+22. **Qué puede y qué no puede contener la leyenda (ADR-059 §2/§3)**: una fila por `EntityType` presente, con los **prefijos efectivamente usados** —pueden ser varios, porque ADR-057 elige el nivel por grupo y dos grupos del mismo tipo pueden quedar en niveles distintos— y el conteo de marcadores. **Nunca un valor original.** La imposibilidad está garantizada **por tipo**: `MarkerLegendEntry` (`03_Data_Model.md` §18) no tiene ningún campo capaz de transportar contenido del documento, así que filtrar un dato no requiere disciplina del implementador sino cambiar el contrato. Mismo mecanismo que `includeOriginalMetadata: false` de ADR-009. Solo participan grupos `enabled` en modo `placeholder`: el `mask` de todos los DNI del documento es el mismo, listarlo no dice nada; `synthetic` produce valores que se leen como reales; `redact` no produce marcador. Los prefijos de género de ADR-060 (`MUJER`/`MUJ`/`HOMBRE`/`HOM`) caen bajo la fila `Person` sin cambio alguno en `buildMarkerLegend`.
+23. **Flag activo sin ningún grupo `placeholder` (ADR-059 §2)**: **no se agrega página** y se loguea `warn`. Nunca una página en blanco.
+24. **Cota de tamaño de la leyenda (ADR-059 §2)**: el número de filas está acotado por la cardinalidad de `EntityType` (13), así que la leyenda es **siempre una sola página**. No hay caso multipágina y no hay que escribir paginación.
+25. **Fallo al renderizar la leyenda (ADR-059 §8)**: se trata como un fallo de página —retry y, si persiste, `EXPORT_FAILED`—, nunca dejando el PDF a medio ensamblar ni emitiendo `EXPORT_FINISHED` con un documento incompleto. Una leyenda que no se pudo dibujar **no** degrada a "export sin leyenda" en silencio: el usuario la pidió explícitamente.
 
 ---
 
@@ -296,6 +310,17 @@ Garantías del PDF final:
 | `same events, order and output bytes with and without injected pool` | `contract.test.ts` | contract | caso 20 (fallback ADR-035) |
 | `deserialized EXPORT_TIMEOUT is retried like the local one` | `unit.test.ts` | unit | ADR-047 §5 |
 | `blob URL is created in host, never in the worker` | `contract.test.ts` | contract | ADR-047 §6 |
+| `includeMarkerLegend: false yields exactly pageCount pages and never calls renderLegend` | `contract.test.ts` | contract | caso 21 (ADR-059) — **no-regresión de todos los exports existentes** |
+| `includeMarkerLegend: true yields pageCount + 1 pages` | `contract.test.ts` | contract | caso 21 |
+| `legend groups by type and lists the distinct prefixes used, including mixed levels` | `unit.test.ts` | unit | caso 22 (ADR-059 §2) |
+| `mask/synthetic/redact groups and disabled groups produce no legend rows` | `unit.test.ts` | unit | caso 22 |
+| `rows reaching renderLegend are composed strings, never EntityType or EntityGroup` | `unit.test.ts` | unit | ADR-059 §5 |
+| `legend active with no placeholder groups adds no page, does not call renderLegend, and warns` | `edge.test.ts` | edge | caso 23 |
+| `all 13 entity types still fit in a single legend page` | `edge.test.ts` | edge | caso 24 |
+| `renderLegend failure retries and then fails the export; never a half-assembled PDF` | `edge.test.ts` | edge | caso 25 (ADR-059 §8) |
+| `gender prefixes fall under the Person row without touching buildMarkerLegend` | `unit.test.ts` | unit | caso 22 (ADR-060 §8) |
+| **`export buffer with legend contains no canonicalValue nor originalValue`** | `tests/security/` | security | caso 22 — **el test que no puede faltar**; mismo criterio y dataset que el `no-recuperability` de ADR-009, corrido específicamente sobre el camino con leyenda |
+| **`no page of the export contains text objects`** | `tests/security/` | security | ADR-059 §4 — convierte "el export es 100% imagen" en una aserción de CI en vez de una convención |
 
 Fixtures: `tests/fixtures/text-10p.pdf`, `text-50p.pdf`, `huge-1000p.pdf`.
 
@@ -331,6 +356,14 @@ Fixtures: `tests/fixtures/text-10p.pdf`, `text-50p.pdf`, `huge-1000p.pdf`.
 - [ ] 23. Adaptar `export.engine.ts`: puerto `ExportJobPool` + `IMMEDIATE_POOL` + `constructor(pool?)`; despacho `append-page` por página y `save` al final con `maxRetriesOverride: 0`; normalización por `code` de `EXPORT_TIMEOUT`/`EXPORT_FAILED`; retirar el guard `pageCountBeforeAttempt` (lo reemplaza la idempotencia por índice del worker); `dispose()` libera el ensamblador local.
 - [ ] 24. Costuras ajenas sancionadas por ADR-047 §2/§7: `PoolKey` gana `"export"` en `worker-pool.ts` y `WorkerPoolManager` conserva su unión de cuatro vía `ManagedPoolKey = Exclude<PoolKey, "export">`; `create-core.ts` construye el `exportPool` (`size: 1`) e inyecta `new ExportEngine(exportPool)` y lo dispone; `orchestrator.ts` **retira** `exportWorkerFactory` (campo, log y comentario); wiring de la factory `export` en `apps/react-client`.
 - [ ] 25. Tests nuevos de §14 + glob de cobertura de `worker/**` en `vitest.config.ts`; `pnpm test:security` verde por el camino nuevo (no-recuperabilidad y metadata-strip no dependen de dónde corre pdf-lib). Gates completos verdes.
+
+### Hito 10.5, PR 8 — Leyenda de marcadores (ADR-059)
+
+- [ ] 26. Proyección host-side `EntityGroup[] → MarkerLegendEntry[]`, en el mismo lugar donde ya se proyectan los grupos para el export: solo `enabled` en modo `placeholder`, agrupados por `type`, con los prefijos distintos usados y el conteo (§13 caso 22). **La proyección es el único punto donde se ve un `EntityGroup`**; de ahí en adelante solo viajan tipo/prefijos/conteo, y después solo strings.
+- [ ] 27. `buildMarkerLegend(entries) → MarkerLegendRow[]` (strings ya compuestos) y `RenderPageProvider.renderLegend` en el puerto (§6), con su implementación en el Orchestrator delegando a `RenderEngine.renderLegendPage` (ADR-059 §5). **Toca motor y façade en el mismo diff** — excepción acotada a R-1 justificada en ADR-059 §7: un método nuevo en un puerto no admite estado intermedio verde.
+- [ ] 28. Embebido en `savePdf` con `embedPng`/`embedJpg` + `addPage` + `drawImage`, antes de aplicar la metadata y serializar. **No** por `appendPage` (§13 caso 21). Sin filas → no se invoca `renderLegend`, no se agrega página, `warn` (caso 23). Un fallo de `renderLegend` sigue el camino de fallo de página (caso 25).
+- [ ] 29. La imagen de la leyenda en `ExportSavePayload`; `includeMarkerLegend` en la validación de `options` (§9).
+- [ ] 30. Tests de §14, **incluidos los dos de `tests/security/`**. Verificación manual: abrir el PDF exportado e **intentar seleccionar texto en cualquier página, incluida la leyenda — no debe seleccionarse nada**. Es la verificación de un segundo que motivó rasterizarla (ADR-059 §4).
 
 ---
 

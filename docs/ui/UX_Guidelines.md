@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=ux | dependencias=00_Project_Vision.md,ui/React_Client.md,ADR-011-Grouping-First.md,ADR-012-Replacement-Modes.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md | audiencia=IA-implementador-ui+humanos | fase=4 (§3.1 aclarado en fase 10, ADR-036 §9) -->
+<!-- CONTEXT: scope=ux | dependencias=00_Project_Vision.md,ui/React_Client.md,ADR-011-Grouping-First.md,ADR-012-Replacement-Modes.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md | audiencia=IA-implementador-ui+humanos | fase=4 (§3.1 aclarado en fase 10, ADR-036 §9; §3.3/§5.4 en fase 10.5 por ADR-057 —tokens abreviados— y ADR-058 —el reemplazo no se derrama, marca de degradado—, §8.2 por ADR-059 —checkbox de referencia de marcadores—; §3.3/§5.4 en fase 10.6 por ADR-060 —género—; §5.4b en fase 10.7 por ADR-061 —agregado manual de entidades—) -->
 
 # Anonly — UX Guidelines
 
@@ -89,6 +89,8 @@
 - **Grupo deshabilitado**: checkbox desmarcado, texto atenuado.
 - **Grupo con conflicto**: icono ⚠ al lado del nombre. Click abre el conflicto.
 - **Grupo editado manualmente**: punto azul al lado del nombre (indica que el `replacementMode` difiere del default de las reglas).
+- **Grupo con reemplazo degradado** (ADR-058 §7): marca al lado del nombre cuando alguna de sus ocurrencias quedó por debajo del umbral de legibilidad — el token no entraba, no se pudo repintar la línea y hubo que encogerlo. Click ofrece las tres salidas: editar el texto de reemplazo a mano, pasar el grupo a `redact` (que nunca tiene problema de espacio) o deshabilitarlo. **La marca existe para que el usuario sepa dónde mirar**: sin ella, el token quedó chico en la página 7 y solo se descubre haciendo zoom página por página. Por eso mismo tiene umbral y no aparece en cada fallback — una señal que aparece siempre no es una señal.
+- **Grupo `Person` con género sin determinar** (ADR-060 §5): marca discreta cuando el modo es `placeholder` y no hay `personGender` resuelto. Click abre el selector. **No comparte tratamiento visual con la marca de degradación**: aquélla dice "esto se ve mal", ésta dice "falta un dato y el documento se entendería mejor con él". El grupo se renderiza perfecto.
 
 ---
 
@@ -149,11 +151,29 @@ Scope: Por grupo
 ### 5.4 Lado anonimizado
 
 - Muestra el resultado con reemplazos aplicados visualmente.
-- `placeholder`: texto `[DNI 01]` sobre bbox.
+- `placeholder`: texto `[DNI 01]` sobre bbox — o su forma abreviada (`[PERS 01]`, `[PRS-01]`) cuando el dato original era corto (ADR-057). Para personas con género asignado, `[MUJER 01]` / `[HOMBRE 01]` (ADR-060).
 - `mask`: texto `XX.XXX.XXX` sobre bbox.
 - `synthetic`: texto sintético (`39.123.456`).
 - `redact`: bloque negro sólido sobre bbox.
 - Hover sobre un reemplazo: tooltip con valor original y modo aplicado.
+- **Ningún texto de reemplazo se sale de su espacio** (ADR-058 §1). Cuando no entra, pasan dos cosas en orden: si la línea lo permite, se **repinta** —el texto que sigue se corre a la derecha y el resultado se lee como una línea normal—; si no, el token se **encoge** hasta entrar. Este segundo caso es el que puede quedar chico, y es el que enciende la marca de §3.3 en el árbol.
+- El repintado es **conservador por diseño**: no se activa sobre líneas centradas, filas de tabla, texto rotado ni renglones sin margen a la derecha. En documentos con mucha tabla se va a ver poco, y eso es lo esperado, no una falla.
+
+### 5.4b Agregar una entidad que el detector no encontró (ADR-061)
+
+Hay **tres vías**, y todas terminan en lo mismo — cambia de dónde sale el valor:
+
+1. **Botón sobre el árbol de entidades**: elegís el tipo, escribís el valor.
+2. **Señalar en el PDF original**: clickeás una palabra o arrastrás un recuadro sobre el panel izquierdo; aparece "Agregar entidad como…" con el selector de tipo.
+3. **Desde el buscador**: cada resultado de la lupa ofrece agregarlo como entidad.
+
+**Solo se puede señalar sobre el panel original.** En el anonimizado lo que se ve puede ser un reemplazo, y señalarlo no tendría sentido.
+
+**La selección no es selección de texto**, aunque se sienta parecida: el visor resuelve qué palabras caen bajo el cursor o el recuadro. Es lo que hace que funcione igual en un PDF escaneado, donde no hay texto que seleccionar y es justamente donde más se necesita corregir lo que el OCR se comió.
+
+**Qué esperar de la búsqueda, y hay que decirlo en la UI**: encuentra el valor **exacto**, sin distinguir mayúsculas ni acentos — "JOSE PEREZ" encuentra "José Pérez". **No** encuentra "J. Pérez". Si el documento nombra a la misma persona de dos formas, hay que agregar las dos; una vez agregadas, la app las agrupa sola. Decirlo por adelantado en el diálogo evita que el usuario crea que falló.
+
+**Efecto sobre los números**: agregar una entidad recalcula el orden de los marcadores, así que los índices de los grupos ya visibles pueden correrse — `[PERSONA 03]` puede pasar a `[PERSONA 04]`. Es coherente con que los números siempre reflejen el orden de aparición en el documento. Al agregar varias seguidas conviene que la UI no llame la atención sobre cada renumeración.
 
 ### 5.5 Sincronización
 
@@ -236,6 +256,11 @@ Calidad JPEG: ─────●────── 0.85
 DPI: ( ) 150 (estándar)  ( ) 300 (alta calidad)
 Título (metadata): _______________
 
+[ ] Incluir referencia de marcadores
+    Agrega una página final que explica qué significa cada
+    marcador (PRS = Persona, MAT = Matrícula…). Solo los
+    tipos: nunca los datos originales.
+
 Resumen:
   • 10 páginas
   • 23 grupos anonimizados (de 25 detectados)
@@ -244,6 +269,8 @@ Resumen:
 
 [Exportar] [Cancelar]
 ```
+
+**Sobre el checkbox de referencia** (ADR-059): apagado por default. El copy tiene que decir las dos cosas que el usuario necesita para decidir — que **suma una página** al documento, y que lista **tipos y no valores originales**. Lo segundo no es una aclaración legal: es lo primero que un usuario asume que hace la opción, y no lo hace ni puede hacerlo. Con el resumen de arriba, el conteo de páginas mostrado pasa a ser `páginas + 1` cuando está activo.
 
 ### 8.3 Progreso de export
 

@@ -1,13 +1,17 @@
-<!-- CONTEXT: scope=render-engine | dependencias=core/Contracts.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,ADR-004-Rendering.md,ADR-012-Replacement-Modes.md,ADR-030-RenderEngine-LoadDocument.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-043-RenderEngine-Reparto-Host-Worker-Kernel.md,adr/ADR-044-Preview-Grupos-Mediacion-Orchestrator.md,adr/ADR-053-Pdfjs-Dentro-De-Un-Worker-Fuentes-Y-Cmaps.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md | audiencia=IA-implementador | fase=10 (§6/§8/§12/§13 actualizados en fase 10: RENDER_REQUESTED.scale, guard MAX_RENDER_SCALE, cache LRU por escala + límite de bytes, supersede, ADR-037; reparto host/worker para PR13 por ADR-043; retiro del delta render por eventos de grouping por ADR-044; opciones de fuentes/CMaps de pdf.js en el kernel por ADR-053, cierre de fase 10; §2/§8/§13/§14/§15 en fase 11: RENDER_REQUESTED.kind requerido y render de un solo lado por ADR-056) -->
+<!-- CONTEXT: scope=render-engine | dependencias=core/Contracts.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,ADR-004-Rendering.md,ADR-012-Replacement-Modes.md,ADR-030-RenderEngine-LoadDocument.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-043-RenderEngine-Reparto-Host-Worker-Kernel.md,adr/ADR-044-Preview-Grupos-Mediacion-Orchestrator.md,adr/ADR-053-Pdfjs-Dentro-De-Un-Worker-Fuentes-Y-Cmaps.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md | audiencia=IA-implementador | fase=10 (§6/§8/§12/§13 actualizados en fase 10: RENDER_REQUESTED.scale, guard MAX_RENDER_SCALE, cache LRU por escala + límite de bytes, supersede, ADR-037; reparto host/worker para PR13 por ADR-043; retiro del delta render por eventos de grouping por ADR-044; opciones de fuentes/CMaps de pdf.js en el kernel por ADR-053, cierre de fase 10; §2/§8/§13/§14/§15 en fase 11: RENDER_REQUESTED.kind requerido y render de un solo lado por ADR-056; §2/§6/§9/§13/§14/§15 en fase 10.5: shrink-to-fit, repintado de línea por calibración, lineWords y AnnotationKind.Degraded por ADR-058; renderLegendPage y RenderLegendPayload por ADR-059 §5) -->
 
 # Render Engine — Spec de Motor
 
 > Renderiza páginas del PDF (original o anonimado) a imágenes usando OffscreenCanvas en Web Workers. Produce highlight de grupos habilitados y aplica reemplazos visualmente según `ReplacementMode`. Soporta preview incremental y render full para export.
 
 **EngineId**: `render`
-**Versión del spec**: 1.8.0
-**Última actualización**: 2026-08-05
+**Versión del spec**: 1.10.0
+**Última actualización**: 2026-08-06
 
+> **Nota (v1.10.0, ADR-059 §5, 2026-08-06 — `renderLegendPage`: el único render que no es de una página del documento)**: la leyenda opcional de marcadores del export **se rasteriza como cualquier otra página** —decisión de ADR-059 §4, para que "el export es 100% imagen" siga siendo auditable en un segundo en vez de convertirse en un juicio sobre el contenido de una capa de texto—, y `export-engine` no tiene canvas. Este motor gana `renderLegendPage(rows, pageWidthPt, pageHeightPt, ctx): Promise<EncodedPageImage>`: un dibujo **puro sobre un `OffscreenCanvas` en blanco**, sin `pageProxy`, sin pdfjs, sin cache LRU, sin supersede y sin eventos — mismo perfil que `rasterizePage` (ADR-034 §1), que ya estableció el precedente de "render sin efectos". **No requiere `loadDocument` previo**, a diferencia de todo el resto del motor: es la única entrada del spec que no habla de un documento. Recibe `MarkerLegendRow`, que son **strings ya compuestos** — el kernel dibuja texto y no gana ninguna dependencia semántica sobre `EntityType`, `EntityGroup` ni labels. Cruza al RenderWorker como `RenderLegendPayload` bajo `jobType: "render-page"`, **sin agregar un `WorkerJobType` nuevo**, sumando un quinto caso al orden estricto de discriminación por forma de ADR-043 §4. Quien lo invoca es el Orchestrator, implementando `RenderPageProvider.renderLegend` para Export (P-1: los motores no se importan entre sí). Ver §2, §6, §13 caso 29, §14 y §15.
+>
+> **Nota (v1.9.0, ADR-058, 2026-08-06 — el reemplazo deja de derramarse, y la línea afectada se repinta)**: `paintReplacements` derivaba el tamaño de fuente **solo de la altura** del bbox y llamaba `fillText` **sin `maxWidth`**, con el texto centrado: un token más ancho que su caja se derramaba hacia los dos lados, más allá del rectángulo blanco, encima de palabras del original que seguían dibujadas debajo. Afectaba a `mask`, `synthetic` y `placeholder` (`redact` es inmune). Se resuelve con una **cascada de cuatro piezas, de las cuales solo la primera es una garantía**: (1) **shrink-to-fit** con `measureText` — nada se derrama nunca, en ningún caso, y cierra el defecto por sí solo; (2) **repintado de línea**, solo cuando el token no entra: se tapa de la entidad al fin de línea y se redibuja cada palabra siguiente **en su propia x desplazada por el delta** —reposicionamiento, no re-maquetado, para que el error no se acumule y el texto justificado sobreviva—; (3) la tipografía se deduce por **calibración inversa** contra los anchos reales de `lineWords` y el color se **muestrea del canvas** con `getImageData`, sin extraer nada del PDF — lo que hace que funcione **igual en documentos escaneados**; (4) cuando el repintado no es seguro se cae a (1) y, si el encogido pasó `DEGRADED_FONT_RATIO`, se marca con `AnnotationKind.Degraded`. `RenderPagePayload` gana `lineWords?` (seleccionadas host-side por el Orchestrator, precedente `fuseOcrPage`/ADR-041; ausentes es el caso normal y nunca un error). **ADR-004 y ADR-009 quedan intactos**: todo pasa sobre el canvas, antes del `convertToBlob`, y el export sigue siendo raster. El reparto host/worker de ADR-043 tampoco se toca: la lógica nueva vive entera en el kernel sin estado. Ver §6, §9, §13 casos 4-6 reescritos y 25-28 nuevos, §14, §15.
+>
 > **Nota (v1.8.0, ADR-056, 2026-08-05 — `RENDER_REQUESTED` dice de qué panel viene; el motor renderiza un solo lado)**: `RenderRequested` (`Contracts.md` §8) gana `kind: "original" | "anonymized"` **requerido**, y `handleRenderRequested` deja de reconstruir incondicionalmente los dos `RenderPageInput` por página: renderiza **solo** el `kind` pedido. Renderizar los dos era correcto mientras los dos paneles del visor mostraban siempre el mismo rango (scroll sincronizado por diseño); con el scroll independiente de ADR-054 dejó de serlo, y scrollear un panel refrescaba el otro — el usuario veía recargarse un visor que no había tocado, y la mitad del trabajo de render se iba en páginas que nadie miraba. Restricción dura que acompaña al cambio (ADR-056 §4): la entrada de supersede (`registerPendingRender`, ADR-037 §4) se registra **únicamente para el `kind` pedido** — registrar los dos haría que el pedido de un panel abortara renders en vuelo legítimos del otro, que es el error natural al hacer este cambio de forma mecánica. Interfaz pública de §6: sin cambios de firma (`renderPage`/`renderPages` ya recibían `kind` en su input).
 
 > **Nota (v1.7.0, ADR-053, 2026-07-31 — pdf.js dentro del RenderWorker no puede usar la Font Loading API)**: el kernel corre la capa de display de pdf.js dentro de un Web Worker, donde no existe `document`. El registro del `@font-face` falla con un `TypeError` que pdf.js **no loguea**, y como `disableFontFace` queda en `false` (su default en browser), el motor dibuja los `fontChar` del área de uso privado contra una fuente que nunca se registró: todo el texto de esas páginas sale como glifos `.notdef` (cuadrados), en preview **y** en export, que compone el mismo raster. Falla en silencio y solo para los documentos cuyas fuentes están subseteadas o usan encodings no triviales — de ahí que unos PDFs se vieran perfectos y otros no. `kernelLoadDocument` pasa a configurar `getDocument()` según la regla transversal de `05_Worker_Architecture.md` §7: `disableFontFace: true` (glifos por `Path2D`, sin DOM), `useSystemFonts: false`, `useWorkerFetch: false` **explícito**, `cMapUrl`/`cMapPacked`/`standardFontDataUrl` first-party, y **factories propias** de CMap y de standard fonts porque las `DOM*` de pdf.js tocan `document.baseURI` en su primer fetch. Las tres trampas que hacen que omitir cualquiera de esas piezas rompa el visor entero están en ADR-053, Contexto §6. Interfaz pública de §6: sin cambios de firma.
@@ -46,10 +50,14 @@ Recibir requests de renderizado por página (`RENDER_REQUESTED` o invocación di
 - Cargar el PDF fuente por `documentId` (`loadDocument`) y mantener un `Map` interno de `PDFDocumentProxy` (pdfjs-dist) hasta `unloadDocument`/`dispose` (ADR-030).
 - Para `kind = "original"`: render del PDF sin reemplazos, con highlight de grupos habilitados (borde color sobre bbox).
 - Para `kind = "anonymized"`: render del PDF con reemplazos aplicados visualmente según `ReplacementMode`:
-  - `placeholder` → texto `[<TYPE> <NN>]` sobre bbox.
+  - `placeholder` → texto `[<LABEL> <NN>]` sobre bbox (el label puede venir abreviado por ADR-057; este motor no lo decide, solo lo dibuja).
   - `synthetic` → texto sintético sobre bbox.
   - `mask` → texto censurado (`XX.XXX.XXX`) sobre bbox.
   - `redact` → fill opaco negro sobre bbox (sin texto).
+- **Garantizar que ningún texto de reemplazo se salga de su ancho disponible** (ADR-058 §1): medir con `measureText` y ajustar el tamaño de fuente hasta que entre, con el piso de 8px. Aplica a los tres modos con texto, siempre. Es la única garantía dura de ADR-058; el resto de sus piezas son calidad.
+- Cuando el token **no** entra y las condiciones de ADR-058 §6 se cumplen, **repintar la línea**: tapar de la entidad al fin de línea y redibujar el token más cada palabra siguiente de `lineWords` en su propia x desplazada por el delta, con la tipografía calibrada (§6) y los colores muestreados del canvas. Si el token entra, no se repinta nada.
+- Emitir `AnnotationKind.Degraded` sobre las ocurrencias cuyo encogido cayó por debajo de `DEGRADED_FONT_RATIO` (ADR-058 §7).
+- Rasterizar la **página de leyenda** del export (`renderLegendPage`, ADR-059 §5): dibujo puro de filas de texto sobre un canvas en blanco, sin documento, sin eventos y sin cache. Es el único render de este motor que no corresponde a una página de un PDF.
 - Soportar dos calidades: `preview` (escala baja, rápido) y `full` (escala alta, para export).
 - Emitir `PREVIEW_UPDATED` (por página, preview), `RENDER_FINISHED`, `RENDER_FAILED`, `PREVIEW_PAGE_FAILED`.
 - Escuchar `RENDER_REQUESTED` (único evento consumido desde ADR-044; los cambios de grupos llegan mediados por el Orchestrator como invocaciones directas de `renderPage`).
@@ -111,6 +119,7 @@ export interface RenderPageInput {
   readonly annotations?: ReadonlyArray<Annotation>;     // highlights, conflicts
   readonly scale?: number;                              // override
   readonly imageFormat?: "png" | "jpeg";               // default png preview, jpeg full
+  readonly lineWords?: ReadonlyArray<Word>;             // ADR-058 §5; ver abajo
 }
 
 export interface RenderPageOutput {
@@ -132,11 +141,27 @@ export class RenderEngine implements IEngine {
   renderPage(input: RenderPageInput, ctx: EngineContext): Promise<RenderPageOutput>;
   renderPages(inputs: ReadonlyArray<RenderPageInput>, ctx: EngineContext): Promise<ReadonlyArray<RenderPageOutput>>;
   rasterizePage(documentId: string, pageIndex: number, scale: number, ctx: EngineContext): Promise<ImageData>; // ADR-034 §1
+  renderLegendPage(                                                                        // ADR-059 §5
+    rows: ReadonlyArray<MarkerLegendRow>,
+    pageWidthPt: number,
+    pageHeightPt: number,
+    ctx: EngineContext,
+  ): Promise<EncodedPageImage>;
   dispose(): Promise<void>;
 }
 ```
 
 > `requestDeltaRender` retirado por ADR-044 (sus únicos callers eran los handlers de `GROUP_REPLACEMENT_CHANGED`/`GROUP_TOGGLED`, también retirados; el re-render por cambio de grupo lo dispara el Orchestrator con `renderPage` y reemplazos del snapshot).
+
+Semántica de `lineWords` y del repintado de línea (ADR-058 §2-§6):
+
+- **Quién las produce**: el Orchestrator, con una función pura host-side que filtra desde `Page.words` las palabras que comparten línea con cada reemplazo. Mismo reparto que `fuseOcrPage` (ADR-041): lógica pura que necesita el `Document` completo, ejecutada por el host, sin estado retenido y sin que ningún motor importe a otro. **Incluye palabras de OCR** (`source: "ocr"`) exactamente igual que las de PDF — es lo que hace que el repintado funcione en documentos escaneados.
+- **Cuándo llegan**: solo cuando algún token de esa página podría no entrar, estimado con `estimateTokenWidth` (`Contracts.md` §6) y con margen conservador — ante la duda, se adjuntan. En una página donde todo entra van ausentes y el transporte no cambia respecto de antes de ADR-058.
+- **Ausentes nunca es un error.** Si el kernel mide que el token no entra y no tiene `lineWords`, cae al shrink-to-fit (ADR-058 §1) y produce un resultado correcto.
+- **Por qué no las extrae el worker**: el kernel tiene el `pageProxy` y podría llamar `getTextContent()` él mismo, ahorrando el cambio de contrato — pero en un PDF escaneado eso devuelve vacío, y las únicas palabras que existen son las de OCR, que viven en el `Document` del Orchestrator. Sería duplicar acá una responsabilidad de `pdf-engine` para obtener un resultado peor.
+- **Calibración de la tipografía**: se prueban candidatos —familia genérica (`serif`/`sans-serif`/`monospace`) × peso × estilo, tamaño desde `REPLACEMENT_FONT_HEIGHT_RATIO`— y se elige el que minimiza el error entre `measureText` y los anchos reales de las palabras de la línea. **Se ajusta sobre el conjunto de la línea, no palabra por palabra**: ADR-020 prorratea el ancho dentro de cada run, así que la suma es exacta y los individuales aproximados. **Solo familias genéricas**: el kernel corre con `disableFontFace: true` dentro de un Worker (ADR-053), donde no hay Font Loading API. Si el mejor candidato queda por encima del umbral de error, **no se calibra** y se cae al fallback: una calibración mala produce exactamente la costura visible que se quería evitar.
+- **Colores**: `getImageData` sobre el bbox de la palabra original, **antes** de tapar nada y una sola vez por línea repintada. El píxel más oscuro dentro del glifo es la tinta; el color dominante del borde de la caja es el fondo. `REPLACEMENT_BG_COLOR`/`REPLACEMENT_TEXT_COLOR` dejan de ser constantes fijas en este camino, lo que resuelve de paso los fondos de color y sombreados. En una página sin reemplazos que no entren, este mecanismo no agrega ni una lectura del backing store.
+- **Reposicionamiento, no re-maquetado**: cada palabra se redibuja en su propia x más un desplazamiento **uniforme**. Es lo que evita que el error de calibración se acumule a lo largo del renglón y lo que preserva el espaciado del texto justificado.
 
 Validación de `scale` (ADR-037 §2): rango válido `0 < scale ≤ MAX_RENDER_SCALE` (`Contracts.md` §6, default 4). Vía invocación directa (`renderPage`/`renderPages`), `scale` inválido o no finito → `InvalidInputError` — endurece una laguna previa (el campo no declaraba validación). Vía evento (`RENDER_REQUESTED`), `scale` inválido → `warn` + no-op del evento (no hay caller al que lanzarle, mismo tratamiento que documento no cargado).
 
@@ -146,6 +171,16 @@ Semántica de `rasterizePage` (ADR-034 §1):
 - **No emite eventos** (`PREVIEW_UPDATED` incluido) y **no toca el cache LRU** de previews.
 - Precondición: documento cargado vía `loadDocument`; si no, `InvalidInputError` (ADR-030). `pageIndex` fuera de rango o `scale <= 0` → `InvalidInputError`. Fallo de pdfjs/canvas → `RenderPageFailedError` (retryable).
 - En modo pool corre como job del `RenderPool`; el `ImageData` se transfiere zero-copy al host.
+
+Semántica de `renderLegendPage` (ADR-059 §5):
+
+- Dibuja la **página de leyenda del export** sobre un `OffscreenCanvas` en blanco del tamaño pedido y devuelve un `EncodedPageImage`. Es el único método del motor que **no requiere `loadDocument` previo** y que no corresponde a ninguna página de ningún PDF: no toca `pageProxy`, no toca pdfjs.
+- **No emite eventos, no toca el cache LRU y no participa del supersede por escala** — mismo perfil que `rasterizePage` (ADR-034 §1).
+- **Recibe strings ya compuestos** (`MarkerLegendRow`), no `EntityType` ni `EntityGroup`. La proyección desde los grupos y el armado de las filas viven del lado de Export/host; este motor dibuja texto y nada más, y no gana ninguna dependencia semántica nueva. Es lo que mantiene barato el cambio.
+- **Layout**: una tabla de hasta 13 filas (cota de `EntityType`, ADR-059 §2) a `y` incremental con columnas a `x` fijas. Sin salto de línea, sin paginación, sin caso multipágina.
+- **Quién lo invoca**: el Orchestrator, implementando `RenderPageProvider.renderLegend` para `export-engine` — que no puede importar este motor (P-1). Solo se invoca con `ExportOptions.includeMarkerLegend` activo.
+- Cruza al RenderWorker como `RenderLegendPayload` bajo `jobType: "render-page"`, sin `WorkerJobType` nuevo; el entry-point lo discrimina por forma como quinto caso del orden de ADR-043 §4.
+- Un fallo se propaga como `RenderPageFailedError` y el Export lo trata como fallo de página (retry, y si persiste `EXPORT_FAILED`): una leyenda que no se pudo dibujar **no** degrada a "export sin leyenda" en silencio (`Export_Engine.md` §13 caso 25).
 
 Semántica de `loadDocument`/`unloadDocument` (ADR-030; precisiones de modo worker por ADR-043 §3-§5):
 
@@ -201,6 +236,7 @@ RenderPageInput {
   annotations?: ReadonlyArray<Annotation>;
   scale?: number;
   imageFormat?: "png" | "jpeg";
+  lineWords?: ReadonlyArray<Word>;
 }
 ```
 
@@ -210,6 +246,7 @@ RenderPageInput {
 - Si `kind = "anonymized"`, `replacements` debe estar poblado.
 - `scale` si se omite usa `previewScale` o `fullScale` según `mode`.
 - `imageFormat` default: `"png"` para preview (calidad), `"jpeg"` para full (tamaño).
+- `lineWords` es **opcional y su ausencia no es un error** (ADR-058 §5): habilita el repintado de línea cuando está, y el motor cae al shrink-to-fit cuando no. No se valida contra `Page.words` ni contra `pageIndex`: el motor confía en la selección host-side y, si viniera vacío o incoherente, las condiciones de §13 caso 26 lo llevan al fallback sin error.
 
 ---
 
@@ -266,9 +303,9 @@ El `ImageData` se transfiere zero-copy al host. El host lo convierte a `Blob` y 
 1. **Página sin entidades**: render del PDF sin reemplazos. `kind = "anonymized"` con `replacements = []` → idéntico al original (sin highlights).
 2. **Grupo `enabled = false`**: las ocurrencias del grupo no se reemplazan en el render anonimizado. Aparecen como texto original.
 3. **Modo `redact`**: fill opaco negro sobre bbox. El texto debajo no se incluye (se pinta antes del `convertToBlob`).
-4. **Modo `mask`**: texto censurado (`XX.XXX.XXX`) centrado sobre el bbox, con fondo blanco y texto negro.
-5. **Modo `placeholder`**: `[DNI 01]` centrado sobre bbox. Fuente monospace si está disponible, fallback sans-serif.
-6. **Modo `synthetic`**: valor sintético (`39.123.456`) centrado sobre bbox, con la misma fuente del texto original si es accesible.
+4. **Modo `mask`** (reescrito por ADR-058): texto censurado (`XX.XXX.XXX`) sobre el bbox, **ajustado a su ancho disponible** (`measureText` + `maxWidth`, ADR-058 §1). Es el modo con más riesgo de derrame porque sus formatos son de longitud fija por tipo y no se pueden acortar: el `mask` de IBAN son 24 caracteres, quepan o no.
+5. **Modo `placeholder`** (reescrito por ADR-058): `[DNI 01]` sobre bbox, ajustado a su ancho disponible. El label puede llegar ya abreviado por ADR-057 (`[PERS 01]`, `[PRS-01]`); **este motor no elige el nivel, solo dibuja lo que recibe**. Fuente monospace si está disponible, fallback sans-serif — salvo en el camino de repintado, donde la familia sale de la calibración (§6).
+6. **Modo `synthetic`** (reescrito por ADR-058): valor sintético (`39.123.456`) sobre bbox, ajustado a su ancho disponible. En el camino de repintado, la fuente sale de la calibración contra la línea real (§6), que es lo más cerca que se puede estar de "la misma fuente del texto original" sin extraer metadata del PDF.
 7. **Highlight en `kind = "original"`**: borde color por `AnnotationKind` (ADR-031; `Annotation` no expone `EntityType`) sobre el bbox de cada ocurrencia de grupos habilitados. Sin fill, solo borde.
 8. **Conflicto**: en `kind = "original"`, marca adicional (borde rojo o icono) sobre el bbox en conflicto.
 9. **Página muy grande (A3 o más)**: preview scale reduce, full scale 150 DPI. Si el canvas excede limites del navegador (área máxima), se divide en tiles y se cosen (futuro; MVP limita a A4 150 DPI).
@@ -287,6 +324,11 @@ El `ImageData` se transfiere zero-copy al host. El host lo convierte a `Blob` y 
 22. **PDF protegido (ADR-050)**: `loadDocument` sin `password` sobre un PDF encriptado falla en `getDocument` (pdfjs: "No password given") y se mapea a `RenderFailedError` como cualquier otro fallo de carga (§11) — mismo tratamiento que ya tenía, no un camino nuevo. Con `password` correcto carga normal. El password retenido host-side sobrevive a un crash de worker (re-priming, ADR-043 §5) y muere con `unloadDocument`/`dispose`. Un `loadDocument` de re-carga (caso 17) sobre el mismo `documentId` reemplaza también el password retenido, incluido el caso "antes sin password, ahora con".
 23. **`RENDER_REQUESTED` de un panel no toca al otro (ADR-056 §1)**: un evento con `kind: "original"` produce exactamente los renders de `original` para sus `pageIndices` — cero renders y cero `PREVIEW_UPDATED` de `anonymized`, aunque el otro panel esté mostrando esas mismas páginas. Simétrico para `anonymized`. El motor no tiene ninguna vía para inferir que el otro lado hace falta: si hace falta, el otro panel emite su propio evento.
 24. **Supersede acotado al `kind` pedido (ADR-056 §4)**: un `RENDER_REQUESTED { kind: "original", scale: S }` **no** deja entrada de supersede sobre `(documentId, pageIndex, "anonymized")`. Un render de `anonymized` en vuelo a otra escala, originado por el pedido del otro panel, sobrevive y emite su `PREVIEW_UPDATED` normalmente. Es el caso que protege contra la implementación mecánica del cambio (registrar los dos kinds "porque antes se registraban los dos").
+25. **Token más ancho que su bbox (ADR-058 §1)**: se encoge hasta entrar, con piso de 8px, y **nunca** se dibuja fuera del ancho disponible. Vale para los tres modos con texto, con `lineWords` o sin ellas, se cumplan o no las condiciones de repintado. Es el caso que representa la garantía del ADR: si algún otro caso de esta lista falla, éste tiene que seguir valiendo.
+26. **Condiciones de repintado no cumplidas (ADR-058 §6)**: el repintado se activa de forma conservadora y **cualquier duda cae al caso 25**. Requiere las cinco: (a) `lineWords` trae al menos una palabra a la derecha compartiendo banda vertical; (b) los huecos entre palabras consecutivas están en un rango plausible — un hueco desproporcionado delata una fila de tabla o columnas, no una línea; (c) la línea está alineada a la izquierda, inferido de las posiciones — en una centrada o alineada a la derecha, desplazar hacia la derecha es la operación equivocada; (d) el desplazamiento cabe antes del extremo derecho de la caja de texto inferida; (e) la calibración cerró bajo su umbral de error. En documentos con mucha tabla o mucho texto centrado el repintado casi no se va a activar, y eso es el comportamiento buscado, no una falla.
+27. **Texto rotado (ADR-058 §6, gap conocido)**: `Word` no lleva rotación — `pdf-engine` descarta `transform[0]`/`[3]`. El texto a **90°/270°** no pasa la condición (a) del caso 26 (sus palabras no comparten banda vertical) y se filtra solo. El texto a **180°** sí comparte banda y **no es distinguible con los datos disponibles**: gap residual reconocido, no bloqueante — el peor caso es una línea de sello o marca de agua repintada con las palabras corridas hacia el lado equivocado, sin superposición. Se verifica en el E2E manual con un PDF sellado. Cerrarlo requiere extender `Word` con la escala de la matriz, que es trabajo aparte con ADR propio.
+28. **Aviso de degradación (ADR-058 §7)**: si el encogido del caso 25 dejó `tamañoEfectivo / tamañoNatural` por debajo de `DEGRADED_FONT_RATIO`, la ocurrencia se marca con `AnnotationKind.Degraded`, que `paintAnnotations` dibuja como cualquier otro `AnnotationKind`. **El umbral es una razón y no un tamaño en píxeles**, deliberadamente: preview y export renderizan a escalas distintas y un piso absoluto los haría discrepar sobre el mismo reemplazo. Caer al fallback **no** basta para avisar — si la señal apareciera en cada fallback aparecería en medio documento y el usuario aprendería a ignorarla.
+29. **`renderLegendPage` sin documento cargado (ADR-059 §5)**: funciona. Es la **única excepción** a la precondición de `loadDocument` que rige todo el resto del motor (casos 16 y 22): no hay documento del que hablar, es un dibujo sobre un canvas en blanco. Tampoco emite eventos, ni toca el cache LRU, ni deja entradas de supersede — mismo perfil que `rasterizePage`. Recibe filas de strings ya compuestos: si alguna vez apareciera un `EntityType` o un `EntityGroup` en esa firma, es una regresión de ADR-059 §5, no una mejora.
 
 ---
 
@@ -338,8 +380,32 @@ El `ImageData` se transfiere zero-copy al host. El host lo convierte a `Blob` y 
 | `direct preview render (mediated) ignores supersede entry at another scale (group change is not lost)` | `edge.test.ts` | edge | caso 21 (hallazgo PR4 Hito 10; reformulado sobre `renderPage` directo por ADR-044) |
 | `cache key includes scale; different scales coexist` | `unit.test.ts` | unit | caso 20 (ADR-037 §3) |
 | `cache evicts by PREVIEW_CACHE_MAX_BYTES in addition to cachePages` | `unit.test.ts` | unit | ADR-037 §3 |
+| **`replacement text never exceeds its available width` (propiedad, sobre casos generados)** | `unit.test.ts` | unit | caso 25 (ADR-058 §1) — **es la aserción que representa la garantía; la única de ADR-058 que no puede quedar en amarillo** |
+| `token much wider than its bbox is drawn at the 8px floor without overflow` | `edge.test.ts` | edge | caso 25 |
+| `all three text modes respect the fit; redact is unchanged` | `edge.test.ts` | edge | caso 25 |
+| `line repaint does not trigger when the token fits (current path preserved)` | `unit.test.ts` | unit | ADR-058 §2 — no-regresión |
+| `token that does not fit with lineWords absent falls back without error` | `unit.test.ts` | unit | ADR-058 §5 |
+| `calibration picks the lowest-error candidate over a known set of widths` | `unit.test.ts` | unit | ADR-058 §3 |
+| `shift is uniform: relative distances between repainted words are preserved` | `unit.test.ts` | unit | ADR-058 §2 — protege la decisión de reposicionar en vez de re-maquetar |
+| `no trailing word to the right → fallback` | `edge.test.ts` | edge | caso 26 (a) |
+| `disproportionate gap (table row) → fallback` | `edge.test.ts` | edge | caso 26 (b) |
+| `centered line → fallback` | `edge.test.ts` | edge | caso 26 (c) |
+| `no room before the right margin → fallback` | `edge.test.ts` | edge | caso 26 (d) |
+| `calibration error above threshold → fallback` | `edge.test.ts` | edge | caso 26 (e) |
+| `90° rotated text does not activate repaint (no shared vertical band)` | `edge.test.ts` | edge | caso 27 |
+| `ink and background colours sampled from a page with a non-white background` | `edge.test.ts` | edge | ADR-058 §4 |
+| `OCR words (source: "ocr") drive the repaint like PDF words` | `edge.test.ts` | edge | ADR-058 §5 — la propiedad que hace que los escaneados entren sin código propio |
+| `Degraded annotation emitted only below DEGRADED_FONT_RATIO, not on every fallback` | `unit.test.ts` | unit | caso 28 (ADR-058 §7) |
+| `same replacement yields the same degraded verdict in preview and full` | `unit.test.ts` | unit | caso 28 — prueba de que el umbral es invariante a la escala |
+| `renderLegendPage returns EncodedPageImage with the requested dimensions` | `contract.test.ts` | contract | caso 29 (ADR-059 §5) |
+| `renderLegendPage works without a loaded document` | `contract.test.ts` | contract | caso 29 — la única excepción a la precondición de `loadDocument` |
+| `renderLegendPage emits no events, does not touch the LRU cache nor supersede` | `contract.test.ts` | contract | caso 29 — mismo perfil que `rasterizePage` |
+| `13 rows fit in one legend page, drawn at incremental y with fixed columns` | `unit.test.ts` | unit | ADR-059 §5 |
+| `worker entry-point discriminates RenderLegendPayload without colliding with the other four render-page shapes` | `unit.test.ts` | unit | ADR-043 §4, quinto caso |
 
 Fixtures: `tests/fixtures/text-10p.pdf`, `scanned-10p.pdf`, una página con rotación.
+
+> **El criterio de aceptación de ADR-058 §2-§4 es visual y ninguna suite automatizada puede juzgarlo.** Los tests de arriba garantizan que nada se derrama, que el fallback dispara donde debe y que las invariantes se cumplen; **no** garantizan que la línea repintada se vea bien. Eso se verifica a mano, en browser real, con cuatro documentos —texto con nombres cortos, escaneado, tablas/justificado, sello— y es **gate del PR de repintado** (ADR-058 §11), mismo criterio que ADR-053 §8, ADR-054 §9 y ADR-056 §9.
 
 ---
 
@@ -355,6 +421,10 @@ Fixtures: `tests/fixtures/text-10p.pdf`, `scanned-10p.pdf`, una página con rota
 - [ ] 7b. (Hito 9) Implementar `rasterizePage` (sin eventos, sin cache LRU; ADR-034 §1).
 - [ ] 7c. (Hito 9) Implementar `RenderPageOutput.encoded` para `mode: "full"` (`convertToBlob` donde vive el canvas; ADR-034 §3) y la codificación real del blob de `PREVIEW_UPDATED` (reemplaza el placeholder de ADR-031 §5).
 - [ ] 8. Implementar los 4 modos de reemplazo visual (mask/synthetic/placeholder/redact).
+- [ ] 8b. (Hito 10.5, PR 1 — ADR-058 §1) Shrink-to-fit en `paintReplacements`: `measureText` + ajuste del tamaño de fuente con piso de 8px, más `maxWidth` en el `fillText` como red final. **No depende de nada más de ADR-058 y cierra el defecto por sí solo** — va primero por criterio de alivio, como el PR 1 de ADR-056. Caso 25 y su test de propiedad en §14.
+- [ ] 8c. (Hito 10.5, PR 5 — ADR-058 §2-§4, §6) Repintado de línea: calibración inversa de la tipografía contra `lineWords`, muestreo de tinta y fondo con `getImageData`, tapado de la entidad al fin de línea y redibujado palabra por palabra con desplazamiento **uniforme**. Las cinco condiciones de activación del caso 26 y el gap de rotación del caso 27. **Gate del PR: la verificación manual en browser real de ADR-058 §11** — el criterio de aceptación es visual y no automatizable.
+- [ ] 8d. (Hito 10.5, PR 6 — ADR-058 §7) Umbral `DEGRADED_FONT_RATIO` (razón, no píxeles) y emisión de `AnnotationKind.Degraded` por `paintAnnotations`. Caso 28.
+- [ ] 8e. (Hito 10.5, PR 7 — ADR-059 §5) `renderLegendPage(rows, pageWidthPt, pageHeightPt, ctx)`: dibujo puro sobre `OffscreenCanvas` en blanco, sin documento, sin eventos, sin cache, sin supersede. `RenderLegendPayload` como quinto caso de la discriminación por forma del entry-point (ADR-043 §4). **La firma recibe `MarkerLegendRow` (strings compuestos) y no debe ganar nunca `EntityType` ni `EntityGroup`** — es lo que mantiene a este motor sin dependencias semánticas del dominio de entidades. Caso 29.
 - [ ] 9. Implementar highlight de grupos habilitados y conflicto en `kind = "original"`.
 - [ ] 10. Implementar `renderPages` (paralelo, prioridad visible-first).
 - [ ] 11. ~~Implementar `requestDeltaRender` (index `pageIndex → groupIds`, lookup, re-render solo afectadas).~~ **Retirado por ADR-044** (junto con `groupOverrides`/`apply*Overrides`/`pageGroupIndex`); el re-render por cambio de grupo lo media el Orchestrator.
@@ -388,4 +458,7 @@ Fixtures: `tests/fixtures/text-10p.pdf`, `scanned-10p.pdf`, una página con rota
 - `adr/ADR-031-RenderFailed-ErrorCode-Erratas-Render.md` (error code + erratas)
 - `adr/ADR-044-Preview-Grupos-Mediacion-Orchestrator.md` (retiro del delta render por eventos; reemplazos mediados por el Orchestrator)
 - `adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md` (zoom con re-render real, decisiones de la v1.3.0)
+- `adr/ADR-057-Escalera-Abreviaturas-Placeholder-Por-Grupo.md` (quién decide el token que este motor dibuja)
+- `adr/ADR-058-Repintado-De-Linea-Por-Calibracion.md` (la cascada de la v1.9.0)
+- `adr/ADR-041-FuseOcrPage-Funcion-Pura-Sin-Estado-Retenido.md` (precedente del reparto host-side de `lineWords`)
 - `ui/Components.md` §5.2 (`ZoomControls`, CSS inmediato + debounce)

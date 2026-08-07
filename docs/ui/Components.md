@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=componentes-ui | dependencias=ui/React_Client.md,ui/UX_Guidelines.md,ADR-001-Framework.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-054-Scroll-Independiente-Por-Panel.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md | audiencia=IA-implementador-ui | fase=4 (reconciliado en fase 10 por ADR-036: PasswordDialog/SettingsDialog/ConfirmDialog agregados §2.6–2.7/§8.9, zoom §5.2, mapeo §12; §2.6/§5.2/§5.5/§12 reescritos por ADR-037 —zoom con re-render real— y ADR-038 —SettingsDialog dispara reanalyze, no recreación del core—; §2.1/§2.5/§13.9 ajustados 2026-07-22 por el bug #7 del Escenario 1 E2E: gate de visibilidad por stage vs. vida del diálogo hijo abierto; §5.2/§5.4 en fase 11 por ADR-056 —requestRender con kind por panel, canvas que no se borra—) -->
+<!-- CONTEXT: scope=componentes-ui | dependencias=ui/React_Client.md,ui/UX_Guidelines.md,ADR-001-Framework.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-054-Scroll-Independiente-Por-Panel.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md | audiencia=IA-implementador-ui | fase=4 (reconciliado en fase 10 por ADR-036: PasswordDialog/SettingsDialog/ConfirmDialog agregados §2.6–2.7/§8.9, zoom §5.2, mapeo §12; §2.6/§5.2/§5.5/§12 reescritos por ADR-037 —zoom con re-render real— y ADR-038 —SettingsDialog dispara reanalyze, no recreación del core—; §2.1/§2.5/§13.9 ajustados 2026-07-22 por el bug #7 del Escenario 1 E2E: gate de visibilidad por stage vs. vida del diálogo hijo abierto; §5.2/§5.4 en fase 11 por ADR-056 —requestRender con kind por panel, canvas que no se borra—; §3.3/§3.4/§7.1/§12 en fase 10.5 por ADR-058 —marca de reemplazo degradado— y ADR-059 —checkbox de leyenda—; §3.3/§3.4b/§12 en fase 10.6 por ADR-060 —PersonGenderSelect y marca de género sin determinar—; §3.4c/§5.4b/§5.4c/§12 en fase 10.7 por ADR-061 —agregado manual, hit-test de selección y buscador—) -->
 
 # Anonly — Catálogo de Componentes
 
@@ -160,6 +160,8 @@ apps/react-client/src/components/
   - habilitado / deshabilitado.
   - con conflicto (icono ⚠).
   - editado manualmente (punto azul).
+  - **reemplazo degradado** (ADR-058 §7): alguna ocurrencia del grupo recibió `AnnotationKind.Degraded` — el token hubo que encogerlo por debajo de `DEGRADED_FONT_RATIO` y quedó comprometido. Es una marca **accionable**, no informativa: existe porque la palanca para arreglarlo ya existía y era invisible. Al abrirla, ofrece las tres salidas —editar el `replacementValue` a mano, cambiar el modo a `redact` (que no tiene problema de espacio) o deshabilitar el grupo—. **No** aparece cada vez que el repintado de línea no se activó: solo bajo el umbral, para que la señal signifique algo.
+  - **género sin determinar** (ADR-060 §5): solo sobre grupos `Person` en modo `placeholder` sin `personGender` resuelto. Abre el selector de §3.4b. Es una **afordancia de UI sobre información faltante**, distinta de la marca de degradación: el grupo se renderiza perfecto, lo que falta es un dato — por eso **no** usa `AnnotationKind.Degraded` ni se pinta en el canvas.
 - **Eventos**:
   - Checkbox → `actions.updateGroup(group.id, { enabled: value })`.
   - Click canonicalValue → popover con aliases y "Editar valor canónico".
@@ -172,6 +174,25 @@ apps/react-client/src/components/
 - **Opciones**: `placeholder` (default), `mask`, `synthetic`, `redact`.
 - **Acción**: `actions.updateGroup(groupId, { replacementMode: newMode })`.
 - **Implementación**: Radix `Select` con iconos por modo y preview del valor resultante.
+- **Nota (ADR-057)**: el preview es `group.replacementValue`, ya resuelto por el Grouping Engine — así que **muestra el token abreviado sin ningún cambio en este componente**. Un grupo apretado va a previsualizar `[PRS-01]` y no `[PERSONA 01]`, y eso es correcto: es exactamente lo que va a salir en el documento.
+
+### 3.4b `PersonGenderSelect` (ADR-060 §6)
+
+- **Props**: `groupId`, `currentGender: PersonGender | undefined`.
+- **Visibilidad**: **solo** sobre grupos con `type === EntityType.Person`. En cualquier otro tipo no se renderiza.
+- **Opciones**: femenino / masculino / sin determinar (tres estados; "sin determinar" es la ausencia del campo, no un valor).
+- **Acción**: `actions.updateGroup(groupId, { personGender: value })`.
+- **Implementación**: Radix `Select`, con preview del token resultante igual que §3.4 (`[MUJER 03]` / `[HOMBRE 03]` / `[PERSONA 03]`).
+- **Por qué es por grupo y no un ajuste global**: el género es un atributo sensible que el token neutro ocultaba (`08_Security_Model.md` §9.1). Se divulga de a una persona por vez, con el usuario mirando. No hay —ni debe haber— una casilla que lo active sobre todo el documento.
+
+### 3.4c `AddEntityButton` + `AddEntityDialog` (ADR-061 §3, ruta A)
+
+- **Ubicación**: sobre el árbol de entidades, encima de las coincidencias ya encontradas.
+- **Render del diálogo**: selector de `EntityType` + campo de texto para el valor + confirmar.
+- **Acción**: `actions.addManualEntity(documentId, { value, entityType })`.
+- **Sin coincidencias**: si el valor no está en el documento, **no se crea grupo** y el diálogo lo informa ("no se encontró ese texto en el documento"). No es un error: `findLiteral` devuelve 0 y ya (ADR-061 §6).
+- **Valor ya detectado**: se fusiona en el grupo existente en vez de duplicar — lo resuelve el dedup por identidad de ADR-038 §3, sin nada que implementar acá.
+- **Advertencia de alcance en el copy**: la búsqueda es **exacta** (insensible a mayúsculas y acentos). Si el documento nombra a la persona de dos formas —"José Pérez" y "J. Pérez"— hay que agregar las dos. Decirlo en el diálogo evita el reporte de "no encontró todas". Limitación de ADR-061 §2, anotada en `Future_Ideas.md` §5.1b.
 
 ### 3.5 `GroupContextMenu`
 
@@ -270,6 +291,22 @@ apps/react-client/src/components/
   - Hover sobre highlight → tooltip.
   - Click en highlight → selecciona grupo en `entities` store + scroll into view en `EntitiesPanel`.
 
+### 5.4b `WordSelectionOverlay` (ADR-061 §3/§4, ruta B)
+
+- **Solo sobre el panel `original`.** En el `anonymized` el texto visible puede ser un reemplazo, y señalarlo no significaría nada.
+- **Interacción**: click sobre una palabra, o arrastre de un recuadro sobre varias. Al soltar, aparece "Agregar entidad como…" con el selector de `EntityType`.
+- **Cómo resuelve qué se señaló**: **hit-test contra `Page.words`, no selección de texto**. El overlay traduce coordenadas de pantalla a coordenadas de página y aplica `wordsInRect(words, rect)` (función pura de `@anonly/shared`). Los datos salen de `actions.getPageWords(documentId, pageIndex)`.
+- **Por qué no una capa de texto de pdf.js**: en un PDF escaneado **no hay texto** — es una foto —, y es justo donde más falta hace corregir a mano. Las palabras de OCR tienen bbox igual que las de PDF, así que el hit-test no distingue el origen y no hay una rama por tipo de documento. Además evita meter pdf.js en el cliente y una copia del texto original en el DOM (ADR-061 §4).
+- **Coordenadas**: usa `getPageSize` para el mapeo, **no** la estimación de `pageLayout.ts`. Con zoom, el factor de escala del visor entra en la misma transformación.
+- **Acción**: `actions.addManualEntity(documentId, { value, entityType })` con el texto de las palabras señaladas.
+
+### 5.4c `DocumentSearchBox` (ADR-061 §8)
+
+- **Ubicación**: junto al encabezado "PDF ORIGINAL", con icono de lupa (punto 4 de `Cambios para hacer.txt`).
+- **Acción**: `actions.findText(documentId, query)` → `TextMatch[]` con bbox por coincidencia.
+- **Render**: contador de resultados, navegación anterior/siguiente con scroll a la página, y resaltado del match activo sobre el canvas (reusa el mismo overlay de §5.4b).
+- **Tercera vía de agregado**: cada resultado ofrece "agregar como entidad", que abre el selector de tipo y llama a `addManualEntity`. Sale gratis: es la misma búsqueda literal que alimenta el agregado manual (ADR-061 §8).
+
 ### 5.5 `ZoomControls`
 
 - **Botones**: `+`, `-`, `Reset`.
@@ -307,9 +344,10 @@ apps/react-client/src/components/
 ### 7.1 `ExportDialog`
 
 - **Stores**: `document`, `entities`, `settings`.
-- **Render**: ver `UX_Guidelines.md` §8.2. Form con nombre, formato, calidad, DPI, título.
+- **Render**: ver `UX_Guidelines.md` §8.2. Form con nombre, formato, calidad, DPI, título y **checkbox "Incluir referencia de marcadores"** (ADR-059 §1, default **apagado**).
 - **Pre-flight**: si `enabledGroups = 0`, modal de confirmación anidado.
-- **Acción**: `actions.requestExport(options)`.
+- **Acción**: `actions.requestExport(options)` con `includeMarkerLegend`.
+- **Sobre el checkbox de leyenda** (ADR-059): agrega una página final con la referencia `prefijo → tipo` — `MAT` y `PAT` no se leen solos, y son matrícula y patente. El copy tiene que dejar claras las dos cosas que el usuario necesita saber para decidir: que **suma una página** al documento, y que lista **tipos, nunca los valores originales**. Lo segundo importa: es lo primero que un usuario asume que hace, y no lo hace ni puede hacerlo.
 
 ### 7.2 `ExportProgress`
 
@@ -440,6 +478,10 @@ Modo oscuro: en v1.0. MVP es solo claro.
 | `ExportButton` | `pipeline.stage`, `document` | `actions.requestExport` (via dialog) | `EXPORT_REQUESTED` |
 | `EntityGroupItem` (checkbox) | `entities.groupsByType` | `actions.updateGroup` | `GROUP_UPDATE_REQUESTED` |
 | `ReplacementModeSelect` | `entities.groupsByType` | `actions.updateGroup` | `GROUP_UPDATE_REQUESTED` |
+| `PersonGenderSelect` (ADR-060 §6) | `entities.groupsByType` | `actions.updateGroup({ personGender })` | `GROUP_UPDATE_REQUESTED` |
+| `AddEntityDialog` (ADR-061 §3) | `document` | `actions.addManualEntity` → `orchestrator.addManualEntity` | `ENTITY_FOUND` (`source: Manual`) + `ENTITY_GROUP_CREATED` |
+| `WordSelectionOverlay` (ADR-061 §4) | `document`, `viewer` | `actions.getPageWords` / `actions.addManualEntity` | ídem (los accesores no son eventos del bus) |
+| `DocumentSearchBox` (ADR-061 §8) | `document` | `actions.findText` | (ninguno; consulta síncrona al Orchestrator) |
 | `MergeDialog` | `entities.groupsByType` | `actions.mergeGroups` | `GROUP_MERGE_REQUESTED` |
 | `SplitDialog` | `entities.groupsByType` | `actions.splitGroup` | `GROUP_SPLIT_REQUESTED` |
 | `RuleCreatorDialog` | `entities`, `rules` | `actions.createRule` | `RULE_CREATED` |

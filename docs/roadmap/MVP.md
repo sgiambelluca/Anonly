@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-mvp | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,adr/ADR-011-Grouping-First.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md | audiencia=humanos+IA | fase=10-cierre (Hitos 1–10 cerrados y mergeados a main; pendientes puntuales diferidos a Hito 11 anotados por hito; antes de arrancar el Hito 11 queda la revisión integral de Hito10_Observaciones_Revision.md y los ADR-053/054/055 de los hallazgos del cierre — ver el bloque CERRADO al final del Hito 10) -->
+<!-- CONTEXT: scope=roadmap-mvp | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,adr/ADR-011-Grouping-First.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md | audiencia=humanos+IA | fase=10-cierre (Hitos 1–10 cerrados y mergeados a main; pendientes puntuales diferidos a Hito 11 anotados por hito; antes de arrancar el Hito 11 queda la revisión integral de Hito10_Observaciones_Revision.md y los ADR-053/054/055 de los hallazgos del cierre — ver el bloque CERRADO al final del Hito 10. §4 gana los Hitos **10.5** —legibilidad del reemplazo, ADR-057/058/059— y **10.6** —reemplazo por género, ADR-060—, y **10.7** —agregado manual de entidades, ADR-061—, insertados con la convención decimal del repo sin renumerar Hardening ni Release) -->
 
 # Anonly — Roadmap MVP
 
@@ -234,6 +234,86 @@ A y B y C son independientes entre sí y pueden correr en paralelo; dentro de B,
 
 **E1/E2 (ADR-056, 2026-08-05)** — cierran el bug reportado por el humano tras C1: con scroll independiente y sincronización apagada, scrollear rápido un panel recargaba constantemente el otro. Son dos defectos que se componen (el evento no dice de qué panel viene → el motor renderiza los dos lados; y un `blobUrl` nuevo por acierto de cache hacía que `PageCanvas` se borrara), independientes entre sí: E1 mata el síntoma visible y no depende de nada, E2 elimina el trabajo de render desperdiciado. E1 va primero por criterio de alivio, pero no bloquea a E2. **El ADR y todas las actualizaciones de spec/doc ya están mergeados en `main`** (excepción explícita a R-21 pedida por el humano, ADR-056 §7): los implementadores arrancan con la documentación al día.
 
+### Hito 10.5 — Legibilidad del reemplazo
+
+Convención decimal, sin renumerar Hardening ni Release — la misma que el repo ya usa para PR16.5 (ADR-048 §7) y PR17.1–17.8 (ADR-049/050/051/052).
+
+**El problema**: `paintReplacements` derivaba el tamaño de fuente **solo de la altura** del bbox y llamaba `fillText` **sin `maxWidth`**, con el texto centrado. Un token más largo que el dato que reemplaza —`[PERSONA 01]` sobre "Ana"— se derramaba hacia los dos lados, más allá del rectángulo blanco, encima de palabras del original que seguían dibujadas debajo. Afecta a `mask`, `synthetic` y `placeholder`; `redact` es inmune. Es el punto 5 de `Cambios para hacer.txt`.
+
+**La forma de la solución**: una cascada de cuatro pasos, cada uno absorbiendo lo que el anterior no pudo. Cada paso cierra con gates verdes y entrega valor por sí solo — se puede frenar en cualquiera de ellos.
+
+- **Paso 1 — que nada se derrame nunca** (ADR-058 §1). Shrink-to-fit con `measureText` dentro del kernel. **Es la única garantía dura de todo el hito**: si los pasos 2-4 no se hicieran nunca, el defecto reportado igual quedaría cerrado. Va primero por criterio de alivio, como el PR 1 de ADR-056.
+- **Paso 2 — escalera de abreviaturas** (ADR-057). `[PERSONA 01]` → `[PERS 01]` → `[PRS-01]`, con el nivel elegido **por grupo** desde la ocurrencia más apretada y aplicado a todas, para conservar el invariante de ADR-012. Se resuelve entero en `grouping-engine`; la UI muestra el token abreviado sin ningún cambio, porque el árbol ya lee `group.replacementValue`. Cierra además la tabla de labels incompleta que `labels.ts` arrastraba documentada. **Requisito no negociable de este paso**: la resolución del label pasa de ser por *tipo* a ser por *grupo* (`resolveLabelSet`, ADR-057 §3) — sin esa indirección, el Hito 10.6 obliga a reescribir la escalera entera, y cuesta lo mismo hacerlo bien ahora.
+- **Paso 3 — repintado de línea** (ADR-058 §2-§6). Solo cuando el token no entra: se tapa de la entidad al fin de línea y se redibuja cada palabra siguiente en su propia x desplazada por el delta. La tipografía se deduce **calibrando** contra los anchos reales de la línea y el color se **muestrea del canvas** — sin extraer fuentes del PDF, lo que hace que funcione **igual en documentos escaneados**. Es el paso grande y el único cuyo criterio de aceptación es visual.
+- **Paso 4 — aviso y leyenda** (ADR-058 §7, ADR-059). Marca de degradación con umbral (razón, no píxeles) sobre una palanca que **ya existía y era invisible**: editar el `replacementValue` del grupo. Más el checkbox opcional de referencia de marcadores en el export, con la regla dura `token → tipo`, nunca valores originales, garantizada por tipo. La leyenda **se rasteriza** como cualquier otra página: se evaluó dibujarla con `drawText` de pdf-lib —mucho más barato— y se rechazó para que "el export es 100% imagen" siga siendo auditable en un segundo en vez de volverse un juicio sobre el contenido de una capa de texto (ADR-059 §4).
+
+**Lo que este hito no toca**: ADR-004 y ADR-009 quedan intactos, **sin erratas ni salvedades** —todo pasa sobre el canvas, antes del `convertToBlob`, y ninguna página del export lleva capa de texto—; el reparto host/worker de ADR-043; y `pdf-engine`, que no necesita ninguna metadata nueva. Se descartó explícitamente redibujar el documento entero (es el "modo texto preservado" de `Version_1.0.md`/`Version_2.0.md:41`, con ADR y research propios) y expandir el bbox hacia el blanco vecino (subsumido por el paso 3).
+
+| # | PR | Módulo | Depende de |
+|---|---|---|---|
+| 1 | Shrink-to-fit en `paintReplacements` (ADR-058 §1) | `render-engine` | — |
+| 2 | Tipos: `lineWords`, `AnnotationKind.Degraded`, `DEGRADED_FONT_RATIO`, `estimateTokenWidth` + sus constantes, `includeMarkerLegend`, `MarkerLegendEntry`, `MarkerLegendRow`, `RenderLegendPayload` | `shared` | — |
+| 3 | Tablas de los tres niveles, `resolveLabelSet` por grupo, selección de nivel (ADR-057) | `grouping-engine` | 2 |
+| 4 | Selección host-side de las palabras de la línea (ADR-058 §5) | `packages/anonymization-core/src` | 2 |
+| 5 | Calibración, muestreo de color, repintado y condiciones de activación (ADR-058 §2-§4, §6) | `render-engine` | 2, 4 |
+| 6 | Umbral y emisión de `AnnotationKind.Degraded` (ADR-058 §7) | `render-engine` | 5 |
+| 7 | `renderLegendPage` + `RenderLegendPayload` en el entry-point (ADR-059 §5) | `render-engine` | 2 |
+| 8 | Proyección, `buildMarkerLegend`, `RenderPageProvider.renderLegend` + su mediación, embebido en `savePdf` (ADR-059 §5-§6) | `export-engine` + `packages/anonymization-core/src` (**atómico**, excepción a R-1 justificada en ADR-059 §7) | 2, 7 |
+| 9 | Checkbox de leyenda + marca de degradación en el árbol | `apps/react-client` | 2 |
+
+Los PRs 1 y 2 no dependen de nada y pueden correr en paralelo. **El ADR y todas las actualizaciones de spec/doc se escriben antes de los PRs de implementación**, mismo criterio y misma excepción explícita a R-21 que ADR-056 §7: los implementadores arrancan con la documentación al día.
+
+**Gate propio del PR 5**: verificación manual en browser real (ADR-058 §11), con cuatro documentos —texto con nombres cortos, escaneado, tablas/justificado, sello—. El criterio de aceptación es que **las líneas repintadas no se distingan de las que no se tocaron a tamaño de lectura**, y ninguna suite headless puede juzgar eso. Mismo criterio que ADR-053 §8, ADR-054 §9 y ADR-056 §9. Si la costura canta, el escalón siguiente —anotado, no incluido— es extender `Word` con `fontName` y la escala de la matriz.
+
+### Hito 10.6 — Reemplazo por género
+
+Punto 6 de `Cambios para hacer.txt`. Independiente del 10.5 salvo por el requisito del paso 2: **no arranca antes de que el PR 3 esté mergeado**.
+
+**El problema**: con placeholders neutros, el texto anonimizado pierde su coherencia referencial. *"[PERSONA 03] y [PERSONA 04] arreglaron para juntarse en la casa de ella"* deja de ser interpretable — el "ella" sigue ahí, pero perdió su antecedente. Con `[MUJER 03] y [HOMBRE 04]` vuelve a entenderse sin el original a mano.
+
+**Diseño** (ADR-060): **no** es un `ReplacementMode` nuevo — el modo sigue siendo `placeholder` y cambia el label resuelto, apoyándose en la indirección que ADR-057 §3 dejó puesta. `EntityGroup` gana `personGender?: "f" | "m"`, inferido de un léxico first-party sobre el `canonicalValue` y corregible por el usuario, que gana siempre. **Ante cualquier duda no se decide**: nombre ausente, ambiguo ("Andrea", "Cruz") o iniciales → token neutro y marca en el árbol. Sin heurística de terminación: un error acá se imprime en un documento que va a manos de un tercero. `indexInType` no se segmenta por género.
+
+**Consideración de privacidad, que va en el ADR y no como nota al pie**: es la primera función del producto que **agrega** un atributo al documento anonimizado en vez de quitarlo, y el género es una categoría sensible que reduce activamente el conjunto de candidatos de reidentificación (`08_Security_Model.md` §9.1). Trade-off aceptado, opt-in por grupo, documentado.
+
+| # | PR | Módulo | Depende de |
+|---|---|---|---|
+| 10 | `PersonGender`, `EntityGroup.personGender` | `shared` | PR 3 del Hito 10.5 |
+| 11 | Léxico + inferencia + variantes de label + marca de "sin determinar" | `grouping-engine` | 10, y el punto abierto de ADR-060 §9 |
+| 12 | `PersonGenderSelect` por grupo + marca en el árbol | `apps/react-client` | 10 |
+
+**El léxico** (ADR-060 §9-§11): dos fuentes, las dos **CC-BY**. [Nombres — Buenos Aires Data](https://data.buenosaires.gob.ar/dataset/nombres) (CC-BY-2.5-AR) como base **autoritativa**: trae el género declarado por el registro con tres valores `F`/`M`/`A`, y la `A` ya marca los nombres que no determinan género — o sea que la ambigüedad local no hay que inferirla. Y [Gender by Name — UCI](https://archive.ics.uci.edu/dataset/591/gender+by+name) (CC BY 4.0) **solo para nombres ausentes de la base**, con su probabilidad como criterio de confianza. Buenos Aires **no se contrasta** contra UCI ni cuando discrepan: "Andrea" es `F` acá y `M` en datos anglosajones, y en un documento argentino la respuesta correcta es `F`.
+
+**Cómo viaja**: los CSV no entran al repo. Un script de build determinista los procesa y emite un artefacto `nombre → f | m | ambiguo` —se descartan conteos, probabilidades, origen y significado— que **sí** se commitea (precedente ADR-048 §7). En runtime lo sirve la propia app, mismo origen, con carga a demanda + Cache Storage, igual que el modelo de NER. **Nada se descarga de terceros en tiempo de ejecución**: la CSP lo impide. No entra en el bundle inicial; el PR mide y reporta contra el gate de §5 (< 800 KB gz).
+
+**Lo que hay que cerrar en el PR 11**: la **atribución CC-BY visible en el producto** (créditos / "Acerca de", no solo el README), más procedencia y hash del artefacto en el repo. Es obligación de licencia, no cortesía. El punto abierto sobre el marcado de unisex quedó **resuelto** (los tres valores `F`/`M`/`A`, ADR-060 §9).
+
+### Hito 10.7 — Agregado manual de entidades
+
+Punto 1 de `Cambios para hacer.txt`. **Independiente de los Hitos 10.5 y 10.6**: no comparte contratos ni módulos críticos con ellos y puede correr en paralelo. La única primitiva compartida es la agrupación de palabras por línea, que ADR-058 §5 introduce y este hito reusa.
+
+**El problema**: si el detector no encuentra una entidad, **no hay ninguna forma de agregarla**. El usuario puede fusionar, dividir, deshabilitar y editar grupos existentes; no puede crear uno. Y no es un caso raro: el recall del NER es una métrica **informativa** en MVP (§5, pasa a gate recién en v1.0), o sea que el propio roadmap asume que se escapan entidades y hoy no hay red de contención. Lo que se escapa se exporta sin anonimizar.
+
+**Diseño** (ADR-061): una **búsqueda literal sobre `Page.words`**, no una re-corrida de detección. Al NER no se le puede pedir que busque un valor —es un clasificador de tokens, no un buscador—, y cuando el usuario escribió el valor exacto no hay nada que inferir. `RegexEngine` gana `findLiteral`, que emite `ENTITY_FOUND` con `source: Manual`, y de ahí en adelante el camino es el de siempre: Grouping agrupa, el dedup por identidad de ADR-038 §3 hace segura la repetición, `finishSession` renumera.
+
+**Tres vías de entrada, un solo camino interno**: el botón con tipo + valor escrito; la selección sobre el panel `original`; y los resultados del buscador. La selección es **hit-test contra `Page.words`, no capa de texto** — porque en un PDF escaneado no hay texto que seleccionar, y es justo donde más falta hace corregir a mano. Las palabras de OCR tienen bbox igual que las de PDF, así que el hit-test no distingue el origen y no hay una sola rama por tipo de documento.
+
+**Lo que hace esto barato**: la mitad ya existe. `mapSpanToWords` (el bbox unión de un rango de texto), `DetectionSource.Manual`, `RegexEngine.addPattern` documentado como *"runtime, para UI"*, y toda la maquinaria de `reopenSession`/`dropOccurrences`/dedup de ADR-038. El código nuevo es sobre todo cableado y UI.
+
+| # | PR | Módulo | Depende de |
+|---|---|---|---|
+| 1 | `wordsInRect`, `TextMatch`, `ManualEntityRequest` y tipos de los accesores | `shared` | — |
+| 2 | `findLiteral` + matcheo de secuencias de palabras normalizado | `regex-engine` | 1 |
+| 3 | `addManualEntity`, `findText`, `getPageWords`, `getPageSize`; retención y re-aplicación de literales manuales | `packages/anonymization-core/src` | 1, 2 |
+| 4 | Botón + diálogo "Agregar entidad" sobre el árbol | `apps/react-client` | 3 |
+| 5 | Hit-test sobre el canvas del `original` + "Agregar entidad como…" | `apps/react-client` | 3 |
+| 6 | Lupa de búsqueda con navegación y resaltado (punto 4 de `Cambios para hacer.txt`) | `apps/react-client` | 3 |
+
+Los PRs 4, 5 y 6 son independientes entre sí una vez mergeado el 3. **El punto 4 sale de la misma primitiva que el punto 1** — es la misma búsqueda literal con otra UI encima —, por eso van juntos: separarlos significaría escribir dos veces el mismo matcheo.
+
+**Cierra de paso un hueco preexistente**: el cliente no tiene dimensiones reales de página (`PageCanvas` las estima en `pageLayout.ts`, con un comentario reconociéndolo). El hit-test las necesita, así que `getPageSize` corrige esa aproximación.
+
+**Dos cosas asumidas conscientemente**: la búsqueda es exacta —insensible a mayúsculas y acentos, pero "J. Pérez" no encuentra "José Pérez"—, anotada como trabajo futuro en `Future_Ideas.md`; y cada agregado dispara `finishSession`, así que los índices de los grupos ya vistos pueden correrse (ADR-028 se conserva intacto, decisión explícita).
+
 ### Hito 11 — Hardening
 - Performance gates (todas las métricas de `00_Project_Vision.md` §7).
 - Leak tests, cancel tests.
@@ -256,7 +336,7 @@ A y B y C son independientes entre sí y pueden correr en paralelo; dentro de B,
 | Recall NER | ≥ 85% — **informativa en MVP, gate en v1.0** | dataset de referencia |
 | Precision NER | ≥ 90% — **informativa en MVP, gate en v1.0** | dataset de referencia |
 | Falsos negativos post-export | 0 (Regex); < 1% (NER) — **NER informativa en MVP, gate en v1.0** | `no-recuperability` test |
-| Recuperabilidad info original | 0% | `no-recuperability` test |
+| Recuperabilidad info original | 0% | `no-recuperability` test, **más `no-recuperability-with-legend`** (ADR-059 §7): la página de leyenda es la única del export con capa de texto, así que es el único lugar donde un valor original podría entrar por error |
 | PDF 10p texto end-to-end | < 8 s | perf test |
 | PDF 10p escaneado end-to-end | < 60 s | perf test |
 | Pico de memoria 50p | < 512 MB | leak test |
@@ -279,6 +359,11 @@ Si alguna métrica **gate** no se cumple, el MVP **no** se libera. Las métricas
 | Bundle initial > 800 KB | media | bajo | code splitting agresivo, lazy load engines |
 | Cancelación > 200 ms en NER | media | medio | checkpoints más finos en el loop de inferencia |
 | `no-recuperability` falla por texto residual en imagen | baja | alto | fill opaco confirmado en render; test estricto |
+| La calibración del repintado de línea produce costura visible en documentos reales | media | medio | el criterio de aceptación es visual y es gate del PR 5 (ADR-058 §11), con cuatro documentos en browser real. Si canta, el escalón siguiente está anotado: extender `Word` con `fontName` y la escala de la matriz. El paso 1 garantiza que igual no se derrame nada |
+| El usuario cree que el agregado manual falló porque no encuentra las variantes | media | bajo | la búsqueda es exacta por decisión (ADR-061 §2); el diálogo lo dice por adelantado en vez de dejar que se descubra. La búsqueda difusa está anotada en `Future_Ideas.md` §5.1b, no olvidada |
+| Una ocurrencia manual desaparece tras un `reanalyze` | baja | **alto** | el Orchestrator retiene los literales manuales y los re-aplica tras cualquier re-detección (ADR-061 §5). Sin eso el dato se exporta sin anonimizar **en silencio**; hay un test unitario dedicado a ese modo de falla |
+| Se incumple la atribución CC-BY de las fuentes del léxico | media | alto | las dos licencias exigen crédito **visible en el producto**, no solo en el README (ADR-060 §11). Va como ítem propio del checklist del PR 11, con procedencia y hash auditables al estilo ADR-018 |
+| Se infiere un género equivocado y se imprime en el documento | baja | alto | la fuente base es el registro civil y marca los unisex con `A` (ADR-060 §9); ante ausencia, `A` o baja probabilidad, **no se decide**: token neutro y marca en el árbol. Sin heurística de terminación. El override del usuario gana siempre |
 
 ---
 
@@ -288,4 +373,5 @@ Si alguna métrica **gate** no se cumple, el MVP **no** se libera. Las métricas
 - `01_Technical_Architecture_Document.md` (arquitectura completa)
 - `roadmap/Version_1.0.md` (qué sigue)
 - `adr/ADR-001-Framework.md` a `ADR-012-Replacement-Modes.md`
+- `adr/ADR-057` (escalera de abreviaturas) — `adr/ADR-058` (repintado de línea) — `adr/ADR-059` (leyenda de marcadores) — `adr/ADR-060` (reemplazo por género) — `adr/ADR-061` (agregado manual de entidades): los cinco de los Hitos 10.5 a 10.7
 - `ai/AI_Development_Guide.md` (cómo se implementa)
