@@ -11,7 +11,10 @@
 import { describe, it, expect } from "vitest";
 
 import {
+  AnnotationKind,
+  AVG_GLYPH_ADVANCE_RATIO,
   CancelledError,
+  DEGRADED_FONT_RATIO,
   DetectionSource,
   EngineDisposedError,
   EngineError,
@@ -20,11 +23,13 @@ import {
   EngineId,
   EngineNotInitializedError,
   EntityType,
+  estimateTokenWidth,
   EventChannel,
   InvalidInputError,
   makeTransferable,
   MAX_RENDER_SCALE,
   PREVIEW_CACHE_MAX_BYTES,
+  REPLACEMENT_FONT_HEIGHT_RATIO,
   ReplacementMode,
   synthesize,
 } from "../index.js";
@@ -37,16 +42,22 @@ import type {
   EngineConfig,
   EngineContext,
   EntityGroup,
+  ExportOptions,
   ExportRequested,
+  ExportSavePayload,
   GroupUpdateRequested,
   EntityGroupCreated,
   ICache,
   IEngine,
   IEventBus,
   ILogger,
+  MarkerLegendEntry,
+  MarkerLegendRow,
   Occurrence,
   Page,
   PageParsed,
+  RenderLegendPayload,
+  RenderPagePayload,
   RenderRequested,
   Word,
   WorkerFactory,
@@ -146,6 +157,22 @@ describe("@anonly/shared — Contracts", () => {
       expect(DetectionSource.NER).toBe("ner");
       expect(DetectionSource.OCR).toBe("ocr");
       expect(DetectionSource.Manual).toBe("manual");
+    });
+  });
+
+  describe("AnnotationKind.Degraded (ADR-058 §7)", () => {
+    it("existe con el string 'degraded'", () => {
+      expect(AnnotationKind.Degraded).toBe("degraded");
+    });
+
+    it("convive con los 4 kinds previos sin reemplazarlos", () => {
+      expect(AnnotationKind.Highlight).toBe("highlight");
+      expect(AnnotationKind.Replacement).toBe("replacement");
+      expect(AnnotationKind.Redact).toBe("redact");
+      expect(AnnotationKind.Conflict).toBe("conflict");
+      expect(Object.values(AnnotationKind).sort()).toEqual(
+        ["highlight", "replacement", "redact", "conflict", "degraded"].sort(),
+      );
     });
   });
 
@@ -478,6 +505,7 @@ describe("@anonly/shared — Contracts", () => {
           dpi: 150,
           includeOriginalMetadata: false,
           filename: "out.pdf",
+          includeMarkerLegend: false,
         },
       };
       expect(payload.options.includeOriginalMetadata).toBe(false);
@@ -523,6 +551,68 @@ describe("@anonly/shared — Contracts", () => {
 
     it("PREVIEW_CACHE_MAX_BYTES es 200 MB (Contracts.md §6)", () => {
       expect(PREVIEW_CACHE_MAX_BYTES).toBe(200 * 1024 * 1024);
+    });
+  });
+
+  describe("Constantes de la escalera de abreviaturas y degradación (ADR-057 §5, ADR-058 §7)", () => {
+    it("REPLACEMENT_FONT_HEIGHT_RATIO es 0.7 (Contracts.md §6)", () => {
+      expect(REPLACEMENT_FONT_HEIGHT_RATIO).toBe(0.7);
+    });
+
+    it("AVG_GLYPH_ADVANCE_RATIO es 0.6 (Contracts.md §6)", () => {
+      expect(AVG_GLYPH_ADVANCE_RATIO).toBe(0.6);
+    });
+
+    it("DEGRADED_FONT_RATIO es 0.6 (Contracts.md §6)", () => {
+      expect(DEGRADED_FONT_RATIO).toBe(0.6);
+    });
+  });
+
+  describe("estimateTokenWidth (ADR-057 §5, §9)", () => {
+    it("es determinista: mismo (charCount, boxHeight) → mismo resultado", () => {
+      const a = estimateTokenWidth(8, 12);
+      const b = estimateTokenWidth(8, 12);
+      expect(a).toBe(b);
+    });
+
+    it("es monótona no decreciente en charCount, a boxHeight fijo", () => {
+      const boxHeight = 14;
+      const widths = [0, 1, 2, 3, 5, 8, 13, 21].map((charCount) =>
+        estimateTokenWidth(charCount, boxHeight),
+      );
+      for (let i = 1; i < widths.length; i++) {
+        expect(widths[i]).toBeGreaterThanOrEqual(widths[i - 1] as number);
+      }
+    });
+
+    it("es monótona no decreciente en boxHeight, a charCount fijo", () => {
+      const charCount = 7;
+      const widths = [0, 2, 4, 8, 10, 16, 24, 40].map((boxHeight) =>
+        estimateTokenWidth(charCount, boxHeight),
+      );
+      for (let i = 1; i < widths.length; i++) {
+        expect(widths[i]).toBeGreaterThanOrEqual(widths[i - 1] as number);
+      }
+    });
+
+    it("charCount=0 da ancho 0, independientemente de boxHeight", () => {
+      expect(estimateTokenWidth(0, 12)).toBe(0);
+      expect(estimateTokenWidth(0, 999)).toBe(0);
+    });
+
+    it("boxHeight=0 da ancho 0, independientemente de charCount", () => {
+      expect(estimateTokenWidth(11, 0)).toBe(0);
+    });
+
+    it("aplica la fórmula exacta del ADR: charCount * (boxHeight * REPLACEMENT_FONT_HEIGHT_RATIO) * AVG_GLYPH_ADVANCE_RATIO", () => {
+      const charCount = 11; // "[PERSONA 01]"
+      const boxHeight = 12;
+      const expected =
+        charCount * (boxHeight * REPLACEMENT_FONT_HEIGHT_RATIO) * AVG_GLYPH_ADVANCE_RATIO;
+      // toBeCloseTo, no toBe: la asociatividad de la multiplicación de punto
+      // flotante no es exacta bit a bit entre esta expresión y la de la
+      // implementación aunque sean la misma fórmula matemática.
+      expect(estimateTokenWidth(charCount, boxHeight)).toBeCloseTo(expected, 10);
     });
   });
 
@@ -628,6 +718,175 @@ describe("@anonly/shared — Contracts", () => {
       };
       expect(encoded.format).toBe("jpeg");
       expect(encoded.bytes.byteLength).toBe(3);
+    });
+  });
+
+  describe("RenderPagePayload.lineWords (ADR-058 §5)", () => {
+    const baseWord: Word = {
+      text: "Pérez",
+      bbox: { x: 40, y: 100, width: 30, height: 10 },
+      pageIndex: 0,
+      confidence: 1,
+      source: "pdf",
+    };
+
+    it("es opcional: un payload sin lineWords sigue siendo válido (caso normal, ADR-058 §5)", () => {
+      const payload: RenderPagePayload = {
+        documentId: "d1",
+        pageIndex: 0,
+        kind: "anonymized",
+        mode: "full",
+      };
+      expect(payload.lineWords).toBeUndefined();
+    });
+
+    it("acepta un ReadonlyArray<Word>, incluidas palabras de OCR (source: 'ocr')", () => {
+      const ocrWord: Word = { ...baseWord, source: "ocr" };
+      const payload: RenderPagePayload = {
+        documentId: "d1",
+        pageIndex: 0,
+        kind: "anonymized",
+        mode: "full",
+        lineWords: [baseWord, ocrWord],
+      };
+      expect(payload.lineWords).toHaveLength(2);
+      expect(payload.lineWords?.[1]?.source).toBe("ocr");
+    });
+  });
+
+  describe("Leyenda de marcadores del export (ADR-059 §3, §5)", () => {
+    it("MarkerLegendEntry tipa type/prefixes/markerCount", () => {
+      const entry: MarkerLegendEntry = {
+        type: EntityType.Person,
+        prefixes: ["PERSONA", "PERS", "PRS"],
+        markerCount: 7,
+      };
+      expect(entry.markerCount).toBe(7);
+      expect(entry.prefixes).toContain("PRS");
+    });
+
+    it("MarkerLegendEntry no transporta ningún campo capaz de llevar contenido del documento (ADR-059 §3)", () => {
+      const entry: MarkerLegendEntry = {
+        type: EntityType.DNI,
+        prefixes: ["DNI"],
+        markerCount: 3,
+      };
+      // Garantía por tipos: las únicas claves posibles son type/prefixes/markerCount.
+      // Ni canonicalValue, ni originalValue, ni Document caben en este tipo.
+      expect(Object.keys(entry).sort()).toEqual(["markerCount", "prefixes", "type"]);
+    });
+
+    it("MarkerLegendRow son strings ya compuestos, sin EntityType ni EntityGroup (ADR-059 §5)", () => {
+      const row: MarkerLegendRow = {
+        prefixes: "PERSONA, PERS, PRS",
+        typeName: "Persona",
+        countLabel: "7 marcadores",
+      };
+      expect(typeof row.prefixes).toBe("string");
+      expect(typeof row.typeName).toBe("string");
+      expect(typeof row.countLabel).toBe("string");
+    });
+
+    it("RenderLegendPayload no lleva documentId — no corresponde a ninguna página de ningún PDF (ADR-059 §5)", () => {
+      const row: MarkerLegendRow = {
+        prefixes: "DNI",
+        typeName: "DNI",
+        countLabel: "3 marcadores",
+      };
+      const payload: RenderLegendPayload = {
+        rows: [row],
+        pageWidthPt: 595,
+        pageHeightPt: 842,
+      };
+      expect(payload.rows).toHaveLength(1);
+      expect("documentId" in payload).toBe(false);
+    });
+
+    it("RenderLegendPayload.imageFormat es opcional", () => {
+      const payload: RenderLegendPayload = {
+        rows: [],
+        pageWidthPt: 595,
+        pageHeightPt: 842,
+        imageFormat: "png",
+      };
+      expect(payload.imageFormat).toBe("png");
+    });
+  });
+
+  describe("ExportSavePayload extendido con la leyenda (ADR-059 §6)", () => {
+    it("legendImage/legendPageWidthPt/legendPageHeightPt son opcionales (caso sin leyenda)", () => {
+      const payload: ExportSavePayload = {
+        documentId: "d1",
+        metadata: {
+          producer: "Anonly",
+          creator: "Anonly",
+          creationDate: new Date(0),
+        },
+      };
+      expect(payload.legendImage).toBeUndefined();
+      expect(payload.legendPageWidthPt).toBeUndefined();
+      expect(payload.legendPageHeightPt).toBeUndefined();
+    });
+
+    it("acepta legendImage ya rasterizada junto a sus dimensiones en puntos PDF", () => {
+      const legendImage: EncodedPageImage = {
+        bytes: new Uint8Array([9, 9]).buffer,
+        format: "png",
+        widthPx: 595,
+        heightPx: 842,
+      };
+      const payload: ExportSavePayload = {
+        documentId: "d1",
+        metadata: {
+          producer: "Anonly",
+          creator: "Anonly",
+          creationDate: new Date(0),
+        },
+        legendImage,
+        legendPageWidthPt: 595,
+        legendPageHeightPt: 842,
+      };
+      expect(payload.legendImage?.format).toBe("png");
+      expect(payload.legendPageWidthPt).toBe(595);
+      expect(payload.legendPageHeightPt).toBe(842);
+    });
+  });
+
+  describe("ExportOptions.includeMarkerLegend (ADR-059 §1)", () => {
+    it("default documentado es false y el campo es requerido, no opcional", () => {
+      const options: ExportOptions = {
+        imageFormat: "png",
+        jpegQuality: 0.85,
+        dpi: 150,
+        includeOriginalMetadata: false,
+        filename: "anonimizado.pdf",
+        includeMarkerLegend: false,
+      };
+      expect(options.includeMarkerLegend).toBe(false);
+    });
+
+    it("acepta true cuando el usuario pide la leyenda", () => {
+      const options: ExportOptions = {
+        imageFormat: "png",
+        jpegQuality: 0.85,
+        dpi: 150,
+        includeOriginalMetadata: false,
+        filename: "anonimizado.pdf",
+        includeMarkerLegend: true,
+      };
+      expect(options.includeMarkerLegend).toBe(true);
+    });
+
+    it("es requerido: omitirlo no tipa (ADR-059 §1, campo no opcional)", () => {
+      // @ts-expect-error ADR-059 §1: includeMarkerLegend es requerido, no admite omitirse.
+      const missingFlag: ExportOptions = {
+        imageFormat: "png",
+        jpegQuality: 0.85,
+        dpi: 150,
+        includeOriginalMetadata: false,
+        filename: "anonimizado.pdf",
+      };
+      expect(missingFlag).toBeDefined();
     });
   });
 

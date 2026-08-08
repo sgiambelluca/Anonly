@@ -137,6 +137,12 @@ export enum AnnotationKind {
   Replacement = "replacement",
   Redact = "redact",
   Conflict = "conflict",
+  // ADR-058 §7: el reemplazo hubo que encogerlo por debajo del umbral de
+  // legibilidad (DEGRADED_FONT_RATIO). Es una señal de RENDER, no de datos: marca
+  // que esos píxeles quedaron comprometidos. No confundir con la marca de
+  // "género sin determinar" del árbol de entidades, que es una afordancia de UI
+  // sobre información faltante y no se pinta en el canvas (ADR-060 §5).
+  Degraded = "degraded",
 }
 
 export enum ConflictReason {

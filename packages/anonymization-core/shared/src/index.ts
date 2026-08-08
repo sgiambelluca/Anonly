@@ -8,7 +8,16 @@
  */
 
 // Constantes nombradas (Contracts.md §6)
-export { MAX_RENDER_SCALE, PREVIEW_CACHE_MAX_BYTES } from "./constants.js";
+export {
+  MAX_RENDER_SCALE,
+  PREVIEW_CACHE_MAX_BYTES,
+  REPLACEMENT_FONT_HEIGHT_RATIO,
+  AVG_GLYPH_ADVANCE_RATIO,
+  DEGRADED_FONT_RATIO,
+} from "./constants.js";
+
+// Estimación de ancho de token de la escalera de abreviaturas (ADR-057 §5)
+export { estimateTokenWidth } from "./estimate-token-width.js";
 
 // Enums
 export {
@@ -56,6 +65,9 @@ export type {
   LoadDocumentPayload,
   UnloadDocumentPayload,
   RasterizePagePayload,
+  RenderLegendPayload,
+  MarkerLegendEntry,
+  MarkerLegendRow,
   NerKernelSpan,
   NerKernelProgress,
   ExportOptions,
