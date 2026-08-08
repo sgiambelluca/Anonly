@@ -414,6 +414,7 @@ describe("Orchestrator — edge cases", () => {
       jpegQuality: 0.85,
       dpi: 150,
       includeOriginalMetadata: false as const,
+      includeMarkerLegend: false,
       filename: "out.pdf",
     };
     bus.emit(EventChannel.UI, EngineEvents.EXPORT_REQUESTED, { documentId: "doc-1", options });
@@ -454,6 +455,7 @@ describe("Orchestrator — edge cases", () => {
       jpegQuality: 0.85,
       dpi: 150,
       includeOriginalMetadata: false as const,
+      includeMarkerLegend: false,
       filename: "out.pdf",
     };
     bus.emit(EventChannel.UI, EngineEvents.EXPORT_REQUESTED, { documentId: "doc-1", options });
@@ -501,6 +503,7 @@ describe("Orchestrator — edge cases", () => {
       jpegQuality: 0.85,
       dpi: 150,
       includeOriginalMetadata: false as const,
+      includeMarkerLegend: false,
       filename: "out.pdf",
     };
     bus.emit(EventChannel.UI, EngineEvents.EXPORT_REQUESTED, { documentId: "doc-1", options });
@@ -543,6 +546,7 @@ describe("Orchestrator — edge cases", () => {
       jpegQuality: 0.85,
       dpi: 150,
       includeOriginalMetadata: false as const,
+      includeMarkerLegend: false,
       filename: "out.pdf",
     };
     bus.emit(EventChannel.UI, EngineEvents.EXPORT_REQUESTED, { documentId: "doc-1", options });
@@ -598,6 +602,7 @@ describe("Orchestrator — edge cases", () => {
       jpegQuality: 0.85,
       dpi: 150,
       includeOriginalMetadata: false as const,
+      includeMarkerLegend: false,
       filename: "out.pdf",
     };
     bus.emit(EventChannel.UI, EngineEvents.EXPORT_REQUESTED, { documentId: "doc-1", options });
@@ -730,6 +735,7 @@ describe("Orchestrator — edge cases", () => {
       jpegQuality: 0.85,
       dpi: 150,
       includeOriginalMetadata: false as const,
+      includeMarkerLegend: false,
       filename: "out.pdf",
     };
     bus.emit(EventChannel.UI, EngineEvents.EXPORT_REQUESTED, { documentId: "doc-1", options });
@@ -1050,6 +1056,7 @@ describe("Orchestrator — edge cases", () => {
         jpegQuality: 0.85,
         dpi: 150,
         includeOriginalMetadata: false as const,
+        includeMarkerLegend: false,
         filename: "out.pdf",
       };
       bus.emit(EventChannel.UI, EngineEvents.EXPORT_REQUESTED, { documentId: "doc-1", options });
@@ -1073,6 +1080,7 @@ describe("Orchestrator — edge cases", () => {
         jpegQuality: 0.85,
         dpi: 150,
         includeOriginalMetadata: false as const,
+        includeMarkerLegend: false,
         filename: "out.pdf",
       };
       bus.emit(EventChannel.UI, EngineEvents.EXPORT_REQUESTED, { documentId: "doc-1", options });
@@ -1471,6 +1479,7 @@ describe("Orchestrator — edge cases", () => {
       jpegQuality: 0.85,
       dpi: 150,
       includeOriginalMetadata: false as const,
+      includeMarkerLegend: false,
       filename: "out.pdf",
     };
     bus.emit(EventChannel.UI, EngineEvents.EXPORT_REQUESTED, { documentId: "doc-1", options });

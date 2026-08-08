@@ -280,6 +280,77 @@ describe("Orchestrator — unit tests", () => {
     expect(calledPages).toEqual([2, 5]);
   });
 
+  it("flushDirtyPages attaches lineWords to the mediated render (ADR-058 §5)", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const neighborWord = createWord({
+      text: "vecino",
+      bbox: { x: 30, y: 0, width: 30, height: 12 },
+    });
+    const document = createDocument({
+      pages: [createPage({ index: 0, words: [neighborWord] })],
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput: createPdfEngineOutput({ document }) });
+
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+    // getSnapshot por defecto (wireHappyPathSpies) devuelve grupos vacíos, así
+    // que el seed de GROUPING_FINISHED no renderizó nada para esta página
+    // (caso 26): el único render que este test necesita es el del flush.
+    (engines.render.renderPage as ReturnType<typeof vi.fn>).mockClear();
+
+    const group = createEntityGroup({
+      id: "group-flush-linewords",
+      // bbox angosto + "[DNI 01]" (8 caracteres): desborda (ADR-057 §5) y
+      // dispara la selección de lineWords.
+      members: [
+        {
+          occurrenceId: "occ-1",
+          pageIndex: 0,
+          bbox: { x: 0, y: 0, width: 20, height: 12 },
+          source: DetectionSource.Regex,
+        },
+      ],
+    });
+    // flushDirtyPages relee el snapshot vigente al procesar la ráfaga (no el
+    // que estaba activo cuando llegó el evento) -- hace falta que getSnapshot
+    // ya devuelva este grupo para que buildPageReplacements produzca el
+    // reemplazo que desborda.
+    vi.spyOn(engines.grouping, "getSnapshot").mockImplementation((docId) => ({
+      documentId: docId,
+      groups: [group],
+      conflicts: [],
+      rules: [],
+    }));
+
+    bus.emit(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_UPDATED, {
+      documentId: "doc-1",
+      group,
+      changes: ["replacementMode"],
+    });
+
+    await vi.waitFor(() => {
+      expect(engines.render.renderPage).toHaveBeenCalledTimes(1);
+    });
+
+    expect(engines.render.renderPage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentId: "doc-1",
+        pageIndex: 0,
+        mode: "preview",
+        lineWords: [neighborWord],
+      }),
+      expect.anything(),
+    );
+  });
+
   it("group page map cleared on DOCUMENT_CLOSED", async () => {
     const bus = createRealBus();
     const engines = createMockEngines();
@@ -1846,6 +1917,7 @@ describe("Orchestrator — export failure propagation", () => {
       jpegQuality: 0.85,
       dpi: 150,
       includeOriginalMetadata: false as const,
+      includeMarkerLegend: false,
       filename: "out.pdf",
     };
     bus.emit(EventChannel.UI, EngineEvents.EXPORT_REQUESTED, { documentId: "doc-1", options });
@@ -1861,11 +1933,79 @@ describe("Orchestrator — export failure propagation", () => {
   });
 });
 
+describe("makeRenderPageProvider.renderFull — lineWords (ADR-058 §5 / Orchestrator.md v1.7.1)", () => {
+  it("renderFull omits lineWords when every token of the page fits", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const document = createDocument({ pages: [createPage({ index: 0, words: [] })] });
+    wireHappyPathSpies(engines, bus, { pdfOutput: createPdfEngineOutput({ document }) });
+
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+
+    const options = {
+      imageFormat: "jpeg" as const,
+      jpegQuality: 0.85,
+      dpi: 150,
+      includeOriginalMetadata: false as const,
+      includeMarkerLegend: false,
+      filename: "out.pdf",
+    };
+    bus.emit(EventChannel.UI, EngineEvents.EXPORT_REQUESTED, { documentId: "doc-1", options });
+
+    await vi.waitFor(() => {
+      expect(engines.export.export).toHaveBeenCalled();
+    });
+    const exportCall = (engines.export.export as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
+      renderPageProvider: {
+        renderFull(
+          pageIndex: number,
+          replacements: ReadonlyArray<unknown>,
+          abortSignal: AbortSignal,
+        ): Promise<unknown>;
+      };
+    };
+    (engines.render.renderPage as ReturnType<typeof vi.fn>).mockClear();
+
+    // bbox generoso: "[DNI 01]" (8 caracteres) entra sin problema
+    // (estimateTokenWidth no desborda, ADR-057 §5) -- mismo caso "fits" que
+    // el test de `selectLineWords` de abajo.
+    const fittingReplacement = createReplacement({
+      bbox: { x: 0, y: 0, width: 200, height: 12 },
+      replacementValue: "[DNI 01]",
+    });
+
+    await exportCall.renderPageProvider.renderFull(
+      0,
+      [fittingReplacement],
+      new AbortController().signal,
+    );
+
+    expect(engines.render.renderPage).toHaveBeenCalledTimes(1);
+    const fullInput = (engines.render.renderPage as ReturnType<typeof vi.fn>).mock
+      .calls[0]?.[0] as {
+      readonly mode: string;
+      readonly lineWords: ReadonlyArray<unknown> | undefined;
+    };
+    expect(fullInput.mode).toBe("full");
+    expect(fullInput.lineWords).toBeUndefined();
+  });
+});
+
 // ─── selectLineWords: selección host-side de las palabras de línea (ADR-058 §5) ───
 //
-// PR 4 del Hito 10.5 (`docs/roadmap/MVP.md` §4): función pura y aislada, sin
-// cablear todavía a `renderMediatedPreview`/`buildPageReplacements` (eso
-// depende de que `render-engine` gane `RenderPageInput.lineWords`, PR 5).
+// PR 4 del Hito 10.5 (`docs/roadmap/MVP.md` §4): función pura y aislada.
+// Cableada a `renderMediatedPreview`/`makeRenderPageProvider.renderFull` en
+// `orchestrator.ts` desde el PR 4b (Hito 10.5) -- ver los tests de arriba y
+// los de `contract.test.ts` para la cobertura de ese cableado; los de acá
+// prueban la función en aislamiento.
 describe("selectLineWords — selección host-side de las palabras de línea (ADR-058 §5)", () => {
   it("line-word selection is pure: same input, same output, no retained state", () => {
     const replacement = createReplacement({

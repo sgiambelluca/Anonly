@@ -83,6 +83,7 @@ import {
   previewPrefixFor,
 } from "./blob-tracker.js";
 import { isEngineErrorCode, OrchestratorDisposedError } from "./errors.js";
+import { selectLineWords } from "./line-words.js";
 import { PipelineStateStore } from "./pipeline-state.js";
 import type {
   AnonymizationCoreEngines,
@@ -956,6 +957,17 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       // §6.2, ver `render.engine.ts#renderPageInternal`).
       renderFull: async (pageIndex, replacements, abortSignal) => {
         const pageCtx: EngineContext = { ...ctx, abortSignal };
+        // ADR-058 §5 / Orchestrator.md v1.7.1 ítem 22b: mismo cálculo que
+        // `renderMediatedPreview` (misma función pura, mismo criterio), pero
+        // repetido acá en vez de compartido — `RenderPageProvider` no gana un
+        // método nuevo para esto (`Export_Engine.md` §6 queda literal: Export
+        // no tiene por qué conocer `lineWords`, es un derivado host-side del
+        // `Document` retenido) y todo lo necesario ya está en este scope
+        // (`documentId` del closure, `pageIndex`/`replacements` propios). Es
+        // el punto que hace que el repintado de línea exista también en el
+        // PDF exportado, no solo en el preview.
+        const pageWords = this.documents.get(documentId)?.pages[pageIndex]?.words ?? [];
+        const lineWords = selectLineWords(pageWords, replacements);
         const renderInput: RenderPageInput = {
           documentId,
           pageIndex,
@@ -963,6 +975,7 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
           mode: "full",
           replacements,
           imageFormat: options.imageFormat,
+          ...(lineWords !== undefined ? { lineWords } : {}),
         };
         const output = await this.engines.render.renderPage(renderInput, pageCtx);
         if (output.encoded === undefined) {
@@ -1357,6 +1370,13 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
    * Best-effort: un fallo se loguea y no interrumpe las demás páginas ni
    * escala a `PIPELINE_FAILED` (el preview nunca es una razón para fallar el
    * pipeline).
+   *
+   * ADR-058 §5 / Orchestrator.md v1.7.1 ítem 22b: adjunta `lineWords` acá,
+   * centralizado, en vez de en cada call site — `flushDirtyPages` y
+   * `seedAnonymizedPreview` son los dos únicos caminos que llegan a este
+   * método y lo heredan sin tocarlos. `makeRenderPageProvider.renderFull`
+   * (el del export) no pasa por acá — ver el comentario en ese método para
+   * por qué repite el cálculo en vez de compartirlo.
    */
   private renderMediatedPreview(
     documentId: string,
@@ -1364,12 +1384,19 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     replacements: ReadonlyArray<Replacement>,
     ctx: EngineContext,
   ): void {
+    // `Page.words` del Document retenido; ausente (documento ya cerrado,
+    // página fuera de rango) degrada a [] — `selectLineWords` sobre un
+    // array vacío ya se comporta bien (ADR-058 §5: sin vecinas utilizables,
+    // el kernel cae a shrink-to-fit).
+    const pageWords = this.documents.get(documentId)?.pages[pageIndex]?.words ?? [];
+    const lineWords = selectLineWords(pageWords, replacements);
     const input: RenderPageInput = {
       documentId,
       pageIndex,
       kind: "anonymized",
       mode: "preview",
       replacements,
+      ...(lineWords !== undefined ? { lineWords } : {}),
     };
     this.engines.render.renderPage(input, ctx).catch((err: unknown) => {
       this.logger.warn("Render mediado del preview anonimizado falló (best-effort, ADR-044).", {

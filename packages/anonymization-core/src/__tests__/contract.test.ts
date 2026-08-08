@@ -29,6 +29,7 @@ import {
   createPage,
   createPdfEngineOutput,
   createRealBus,
+  createWord,
   wireHappyPathSpies,
 } from "./fixtures/test-helpers.js";
 
@@ -488,6 +489,7 @@ describe("Orchestrator — contract tests", () => {
       jpegQuality: 0.85,
       dpi: 150,
       includeOriginalMetadata: false as const,
+      includeMarkerLegend: false,
       filename: "out.pdf",
     };
     bus.emit(EventChannel.UI, EngineEvents.EXPORT_REQUESTED, { documentId: "doc-1", options });
@@ -549,9 +551,118 @@ describe("Orchestrator — contract tests", () => {
             pageIndex: 0,
           }),
         ],
+        // ADR-058 §5 / Orchestrator.md v1.7.1: `[DNI 01]` no entra en un bbox
+        // de 3x4 (estimateTokenWidth desborda), así que `renderMediatedPreview`
+        // adjunta `lineWords` -- vacío acá porque el documento de fixture no
+        // tiene palabras en esa página, pero el campo está presente (no
+        // `undefined`), que es lo que prueba que el seed quedó cableado.
+        lineWords: [],
       }),
       expect.anything(),
     );
+  });
+
+  it("renderFull attaches the same lineWords as the preview for the same page", async () => {
+    // v1.7.1 -- el test del falso positivo del gate: sin esto, el repintado
+    // de línea (ADR-058 §2-§6) podría quedar solo en el preview mientras el
+    // PDF exportado sigue con el shrink-to-fit de §1, en silencio.
+    const bus = createRealBus();
+    const engines = createMockEngines();
+
+    const neighborWord = createWord({
+      text: "vecino",
+      bbox: { x: 30, y: 0, width: 30, height: 12 },
+    });
+    const document = createDocument({
+      pages: [createPage({ index: 0, words: [neighborWord] })],
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput: createPdfEngineOutput({ document }) });
+
+    const group = createEntityGroup({
+      id: "group-line",
+      // bbox angosto + "[DNI 01]" (8 caracteres): estimateTokenWidth lo hace
+      // desbordar (ADR-057 §5), así que selectLineWords adjunta la vecina.
+      members: [
+        {
+          occurrenceId: "occ-line",
+          pageIndex: 0,
+          bbox: { x: 0, y: 0, width: 20, height: 12 },
+          source: DetectionSource.Regex,
+        },
+      ],
+    });
+    vi.spyOn(engines.grouping, "getSnapshot").mockImplementation((docId) => ({
+      documentId: docId,
+      groups: [group],
+      conflicts: [],
+      rules: [],
+    }));
+
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+
+    // El seed de GROUPING_FINISHED (ADR-044) ya disparó el único render
+    // "preview" de este test para la página 0.
+    const previewCall = (engines.render.renderPage as ReturnType<typeof vi.fn>).mock.calls.find(
+      ([input]) => (input as { mode: string }).mode === "preview",
+    );
+    expect(previewCall).toBeDefined();
+    const previewInput = previewCall![0] as {
+      readonly replacements: ReadonlyArray<unknown>;
+      readonly lineWords: ReadonlyArray<unknown> | undefined;
+    };
+    // No-vacuo: si esto viniera ausente o vacío, la comparación de abajo
+    // pasaría igual sin haber probado nada.
+    expect(previewInput.lineWords).toEqual([neighborWord]);
+
+    (engines.render.renderPage as ReturnType<typeof vi.fn>).mockClear();
+
+    const options = {
+      imageFormat: "jpeg" as const,
+      jpegQuality: 0.85,
+      dpi: 150,
+      includeOriginalMetadata: false as const,
+      includeMarkerLegend: false,
+      filename: "out.pdf",
+    };
+    bus.emit(EventChannel.UI, EngineEvents.EXPORT_REQUESTED, { documentId: "doc-1", options });
+
+    await vi.waitFor(() => {
+      expect(engines.export.export).toHaveBeenCalled();
+    });
+    const exportCall = (engines.export.export as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
+      renderPageProvider: {
+        renderFull(
+          pageIndex: number,
+          replacements: ReadonlyArray<unknown>,
+          abortSignal: AbortSignal,
+        ): Promise<unknown>;
+      };
+    };
+
+    // Mismos reemplazos que recibió el preview: Orchestrator.md v1.7.1 pide
+    // comparar "para la misma página/reemplazos", no dos implementaciones
+    // que coincidan por casualidad.
+    await exportCall.renderPageProvider.renderFull(
+      0,
+      previewInput.replacements,
+      new AbortController().signal,
+    );
+
+    const fullCall = (engines.render.renderPage as ReturnType<typeof vi.fn>).mock.calls.find(
+      ([input]) => (input as { mode: string }).mode === "full",
+    );
+    expect(fullCall).toBeDefined();
+    const fullInput = fullCall![0] as { readonly lineWords: ReadonlyArray<unknown> | undefined };
+    expect(fullInput.lineWords).toEqual(previewInput.lineWords);
+    expect(fullInput.lineWords).toEqual([neighborWord]);
   });
 
   it("group events during detection accumulate without rendering", async () => {
