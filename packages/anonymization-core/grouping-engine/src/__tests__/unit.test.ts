@@ -10,7 +10,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { GroupingEngine } from "../grouping.engine.js";
 import { levenshtein, levenshteinNormalized } from "../levenshtein.js";
 
-import { createEngineContext, makeOccurrence } from "./fixtures/test-helpers.js";
+import { createEngineContext, makeBBox, makeOccurrence } from "./fixtures/test-helpers.js";
 
 describe("GroupingEngine — unit tests", () => {
   let engine: GroupingEngine;
@@ -139,6 +139,71 @@ describe("GroupingEngine — unit tests", () => {
     // El maskFormat de la Occurrence ("XXX XXX", patente vieja) gana sobre el
     // fallback de tipo (MASK_FORMAT_BY_TYPE[Plate] = "XX XXX XX", Mercosur).
     expect(updated.replacementValue).toBe("XXX XXX");
+  });
+
+  // ADR-057 §4 — no-regresión: un grupo cuyos bboxes son todos holgados
+  // conserva exactamente el formato pre-ADR-057 (nivel 0, `TYPE_LABEL_ES` de
+  // siempre). "El comportamiento previo a este ADR no cambia" (spec §14).
+  it("group with only wide bboxes stays at level 0 (no behaviour change)", () => {
+    // Dos apariciones DISTINTAS (bbox.y difiere) del mismo valor: mismo
+    // grupo, dos members — bbox idéntico colisionaría con el dedup por
+    // identidad de ADR-038 §3 (entityType, pageIndex, bbox, normalizedValue).
+    for (const y of [0, 40]) {
+      ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: makeOccurrence({
+          entityType: EntityType.Person,
+          value: "Juan Perez",
+          normalizedValue: "juan perez",
+          bbox: makeBBox(0, y, 150, 20),
+        }),
+      });
+    }
+
+    const [group] = engine.getSnapshot("doc-1").groups;
+    expect(group?.members).toHaveLength(2);
+    expect(group?.replacementValue).toBe("[PERSONA 01]");
+  });
+
+  // Caso 27 (§13, ADR-057 §4): sumar al grupo (acá, por fusión manual — un
+  // disparador existente que YA recalcula replacementValue sin condiciones)
+  // un member angosto baja el nivel de TODO el grupo, incluidos los members
+  // holgados que ya tenía.
+  it("one narrow member lowers the level for the whole group", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: "Juan Perez",
+        normalizedValue: "juan perez",
+        bbox: makeBBox(0, 0, 200, 20),
+      }),
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: "Ana Diaz",
+        normalizedValue: "ana diaz",
+        bbox: makeBBox(0, 0, 70, 20),
+      }),
+    });
+
+    const groups = engine.getSnapshot("doc-1").groups;
+    const wideGroup = groups.find((g) => g.canonicalValue === "Juan Perez");
+    const narrowGroup = groups.find((g) => g.canonicalValue === "Ana Diaz");
+    expect(wideGroup?.replacementValue).toBe("[PERSONA 01]");
+
+    const merged = await engine.applyGroupMerge({
+      documentId: "doc-1",
+      sourceGroupId: narrowGroup!.id,
+      targetGroupId: wideGroup!.id,
+    });
+
+    // El member de 70 de ancho no entra ni en nivel 0 ni en nivel 1: el
+    // grupo combinado cae directo a nivel 2 aunque su otro member (200) por
+    // sí solo entraba cómodo en nivel 0.
+    expect(merged.replacementValue).toBe("[PRS-01]");
   });
 });
 

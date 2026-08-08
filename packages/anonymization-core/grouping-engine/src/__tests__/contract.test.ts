@@ -5,6 +5,7 @@ import {
   EngineId,
   EngineNotInitializedError,
   EntityType,
+  estimateTokenWidth,
   EventChannel,
   ReplacementMode,
   type Conflict,
@@ -602,5 +603,117 @@ describe("GroupingEngine — contract tests", () => {
     // renumeración de la SEGUNDA pasada debe reflejar la unión completa.
     expect(gB?.indexInType).toBe(1);
     expect(gA?.indexInType).toBe(2);
+  });
+
+  // ADR-057 §1-§2: la tabla canónica de la escalera de abreviaturas —
+  // reproducida acá desde Grouping_Engine.md §"Escalera de abreviaturas",
+  // NO desde la implementación, porque este es un test de contrato contra el
+  // documento, no un espejo del código. Verifica, para los 13 EntityType,
+  // que los tres niveles respetan el formato `[<LABEL> <NN>]` (0/1) /
+  // `[<CORTO>-<NN>]` (2) y que `<NN>` conserva el padding a 2 dígitos.
+  it("all three abbreviation levels respect their format for the 13 entity types", async () => {
+    await engine.init(ctx);
+
+    const LADDER_TABLE: ReadonlyArray<readonly [EntityType, string, string, string]> = [
+      [EntityType.Person, "PERSONA", "PERS", "PRS"],
+      [EntityType.Organization, "ORGANIZACION", "ORGA", "ORG"],
+      [EntityType.Address, "DIRECCION", "DIRE", "DIR"],
+      [EntityType.DNI, "DNI", "DNI", "DNI"],
+      [EntityType.CUIT, "CUIT", "CUIT", "CUIT"],
+      [EntityType.Phone, "TELEFONO", "TELE", "TEL"],
+      [EntityType.Email, "EMAIL", "MAIL", "EML"],
+      [EntityType.IBAN, "IBAN", "IBAN", "IBAN"],
+      [EntityType.CreditCard, "TARJETA", "TARJ", "TRJ"],
+      [EntityType.Date, "FECHA", "FECH", "FEC"],
+      [EntityType.License, "MATRICULA", "MATR", "MAT"],
+      [EntityType.Plate, "PATENTE", "PATE", "PAT"],
+      [EntityType.Custom, "CUSTOM", "CUST", "CST"],
+    ];
+
+    const HEIGHT = 20;
+    const WIDE_WIDTH = 100_000; // entra el token más largo de cualquier tipo.
+    const TINY_WIDTH = 0.01; // no entra ni el token más corto.
+
+    let docSeq = 0;
+    function replacementValueFor(type: EntityType, width: number): string | undefined {
+      docSeq += 1;
+      const documentId = `ladder-doc-${docSeq}`;
+      engine.startSession(documentId);
+      ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+        documentId,
+        occurrence: makeOccurrence({
+          entityType: type,
+          value: `v-${docSeq}`,
+          normalizedValue: `v-${docSeq}`,
+          bbox: makeBBox(0, 0, width, HEIGHT),
+        }),
+      });
+      return engine.getSnapshot(documentId).groups[0]?.replacementValue;
+    }
+
+    for (const [type, label0, label1, label2] of LADDER_TABLE) {
+      // Nivel 0: bbox holgado, entra el token más largo -> `<NN>` = "01".
+      expect(replacementValueFor(type, WIDE_WIDTH)).toBe(`[${label0} 01]`);
+
+      // Nivel 2: bbox tan angosto que ni el nivel 2 entra -> fallback nivel 2
+      // (separador colapsado a guion, ADR-057 §1/§4).
+      expect(replacementValueFor(type, TINY_WIDTH)).toBe(`[${label2}-01]`);
+
+      // Nivel 1: bbox intermedio, solo tiene sentido para tipos NO
+      // degenerados (DNI/CUIT/IBAN ya quedan cubiertos arriba: nivel 0 ==
+      // nivel 1, ADR-057 §2).
+      if (label0 !== label1) {
+        const midWidth = estimateTokenWidth(label1.length + 5, HEIGHT) + 1;
+        expect(replacementValueFor(type, midWidth)).toBe(`[${label1} 01]`);
+      }
+    }
+  });
+
+  // ADR-012, re-asertado por ADR-057 §4: `EntityGroup.replacementValue` es un
+  // único campo por grupo (no hay forma estructural de que dos members
+  // "vean" valores distintos), y ese único valor refleja el PEOR CASO de
+  // TODOS los members — no el del primero, ni el de la mayoría.
+  it("all members of a group share the same replacementValue", async () => {
+    await engine.init(ctx);
+    engine.startSession("doc-1");
+
+    // Dos apariciones DISTINTAS (bbox.y difiere) del mismo valor: bbox
+    // idéntico colisionaría con el dedup por identidad de ADR-038 §3.
+    for (const y of [0, 40]) {
+      ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: makeOccurrence({
+          entityType: EntityType.Person,
+          value: "Juan Perez",
+          normalizedValue: "juan perez",
+          bbox: makeBBox(0, y, 150, 20),
+        }),
+      });
+    }
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: "Ana Diaz",
+        normalizedValue: "ana diaz",
+        bbox: makeBBox(0, 0, 90, 20),
+      }),
+    });
+
+    const groups = engine.getSnapshot("doc-1").groups;
+    const wideGroup = groups.find((g) => g.canonicalValue === "Juan Perez");
+    const narrowGroup = groups.find((g) => g.canonicalValue === "Ana Diaz");
+    expect(wideGroup?.replacementValue).toBe("[PERSONA 01]");
+
+    const merged = await engine.applyGroupMerge({
+      documentId: "doc-1",
+      sourceGroupId: narrowGroup!.id,
+      targetGroupId: wideGroup!.id,
+    });
+
+    // Un único `replacementValue` para los 3 members combinados, y refleja
+    // el peor caso (90 de ancho) — no el de los dos members holgados.
+    expect(merged.members).toHaveLength(3);
+    expect(merged.replacementValue).toBe("[PERS 01]");
   });
 });

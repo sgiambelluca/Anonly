@@ -87,6 +87,39 @@
  *    queda sin members y se elimina). Conflictos cuyo grupo sobrevive (con
  *    otros members) no se tocan. Ver reporte final del PR para que el revisor
  *    confirme esta lectura.
+ *
+ * Nota agregada en el Hito 10.5 (ADR-057, spec v1.2.0, escalera de
+ * abreviaturas del `placeholder`):
+ *
+ * 11. `computeReplacementValue` pasó de recibir `(type, mode, indexInType,
+ *    seed, maskFormat)` a recibir `(group, seed, maskFormat)`: el modo
+ *    `placeholder` (ADR-057 §4) necesita además `members` para elegir el
+ *    nivel de abreviatura por el peor caso de sus bbox, y en los 10 call
+ *    sites reales de esta función (no 3: `dropOccurrences`,
+ *    `renumberGroupsCanonically`, `applyGroupUpdate`, `applyGroupMerge`,
+ *    `doApplyGroupSplit` ×2, `applyConflictResolve`, `createGroup`,
+ *    `recomputeAllGroupModes`) `group.replacementMode`/`indexInType`/
+ *    `members` ya reflejan el valor final deseado en el momento de llamar —
+ *    pasar el grupo completo evita repetir esos tres campos sueltos.
+ *    `resolveLabelSet`/`buildPlaceholderValue` (`labels.ts`) toman
+ *    `EntityGroup`, no `InternalGroup`: es estructuralmente compatible
+ *    (`Code_Standards.md`), sin conversión explícita.
+ * 12. Ningún disparador de recálculo se agregó ni se quitó (ADR-057 §7:
+ *    "se recalcula donde ya se recalculaba, sin disparadores nuevos"). En
+ *    particular, `renumberGroupsCanonically` conserva intacto el
+ *    `if (newIndex === group.indexInType) return;` de ADR-028: es,
+ *    incidentalmente, el mismo mecanismo que hace sobrevivir una edición
+ *    manual de `replacementValue` a un `finishSession` posterior (caso 30) —
+ *    si el índice no cambia, ni siquiera se intenta recomputar. La
+ *    contracara (caso 31: un member más angosto sumado en un
+ *    `reopenSession` cambia el nivel) se cubre con un escenario donde
+ *    TAMBIÉN cambia el índice (dos grupos del mismo tipo reordenados), que sí
+ *    dispara el recálculo existente — no se tocó la condición de guarda. No
+ *    hay tracking de "este valor fue editado a mano" más allá de ese guard
+ *    heredado: si un grupo con `replacementValue` manual además cambia de
+ *    índice en una renumeración, ADR-028 ya lo recomputa desde antes de este
+ *    PR (comportamiento pre-existente, fuera de alcance de ADR-057 §7, que
+ *    solo promete la misma precedencia que ADR-028 ya tenía).
  */
 
 import {
@@ -369,24 +402,28 @@ function topPriority(rules: ReadonlyArray<Rule>): Rule {
   return rules.reduce((best, r) => (r.priority > best.priority ? r : best));
 }
 
-function computeReplacementValue(
-  type: EntityType,
-  mode: ReplacementMode,
-  indexInType: number,
-  seed: string,
-  maskFormat: string,
-): string {
-  switch (mode) {
+/**
+ * `group` es siempre un `InternalGroup` en runtime, estructuralmente
+ * compatible con `EntityGroup` (tiene todos sus campos más bookkeeping
+ * interno) — sin conversión explícita, `Code_Standards.md`. Se le pide el
+ * grupo completo (no `type`/`mode`/`indexInType` sueltos) porque el modo
+ * `placeholder` (ADR-057) necesita además `group.members` para elegir el
+ * nivel de abreviatura por el peor caso de sus bbox; en todos los call
+ * sites, `group.replacementMode`/`indexInType`/`members` ya reflejan el
+ * valor final deseado en el momento de llamar.
+ */
+function computeReplacementValue(group: EntityGroup, seed: string, maskFormat: string): string {
+  switch (group.replacementMode) {
     case ReplacementMode.Mask:
       return maskFormat;
     case ReplacementMode.Synthetic:
-      return synthesize(type, indexInType, seed);
+      return synthesize(group.type, group.indexInType, seed);
     case ReplacementMode.Placeholder:
-      return buildPlaceholderValue(type, indexInType);
+      return buildPlaceholderValue(group);
     case ReplacementMode.Redact:
       return "";
     default:
-      return buildPlaceholderValue(type, indexInType);
+      return buildPlaceholderValue(group);
   }
 }
 
@@ -660,11 +697,11 @@ export class GroupingEngine implements IEngine {
       };
       // ADR-029: el mask depende de los members remanentes; se recalcula
       // siempre (mismo criterio que applyGroupMerge/doApplyGroupSplit) y
-      // emitReplacementChangeIfNeeded decide si de verdad cambió.
+      // emitReplacementChangeIfNeeded decide si de verdad cambió. group.members
+      // ya refleja remainingMembers (arriba): la escalera de ADR-057 usa el
+      // conjunto correcto.
       group.replacementValue = computeReplacementValue(
-        group.type,
-        group.replacementMode,
-        group.indexInType,
+        group,
         session.seed,
         this.resolveMaskFormat(session, group),
       );
@@ -723,10 +760,10 @@ export class GroupingEngine implements IEngine {
         };
         group.indexInType = newIndex;
         if (group.replacementMode === ReplacementMode.Placeholder) {
+          // ADR-057: la escalera usa group.members (sin cambios acá) contra
+          // el indexInType YA actualizado arriba.
           group.replacementValue = computeReplacementValue(
-            group.type,
-            group.replacementMode,
-            group.indexInType,
+            group,
             session.seed,
             // maskFormat no aplica: esta rama solo corre en modo placeholder.
             MASK_FORMAT_BY_TYPE[group.type],
@@ -811,10 +848,11 @@ export class GroupingEngine implements IEngine {
         group.replacementMode = replacementMode;
         group.replacementMode = resolveMode(group, session.rules);
         if (replacementValue === undefined) {
+          // ADR-057 §7: solo se llega acá cuando el patch NO trae
+          // replacementValue explícito — la edición manual del usuario nunca
+          // pasa por la escalera.
           group.replacementValue = computeReplacementValue(
-            group.type,
-            group.replacementMode,
-            group.indexInType,
+            group,
             session.seed,
             this.resolveMaskFormat(session, group),
           );
@@ -899,11 +937,11 @@ export class GroupingEngine implements IEngine {
       };
       // ADR-029: el replacementValue (mask, y por índice placeholder/
       // synthetic) depende de la membresía fusionada — se recalcula siempre
-      // tras un merge, no solo cuando cambia el índice.
+      // tras un merge, no solo cuando cambia el índice. target.members ya
+      // incluye los de `source` (arriba): la escalera de ADR-057 ve el peor
+      // caso del grupo fusionado completo.
       target.replacementValue = computeReplacementValue(
-        target.type,
-        target.replacementMode,
-        target.indexInType,
+        target,
         session.seed,
         this.resolveMaskFormat(session, target),
       );
@@ -982,10 +1020,10 @@ export class GroupingEngine implements IEngine {
     if (created.aliases.length > 0) this.recomputeCanonicalValue(session, created);
     const createdMode = resolveMode(created, session.rules);
     created.replacementMode = createdMode;
+    // ADR-057: created.members ya es movedMembers (arriba) — la escalera ve
+    // exactamente los members del grupo nuevo.
     created.replacementValue = computeReplacementValue(
-      created.type,
-      createdMode,
-      created.indexInType,
+      created,
       session.seed,
       // movedRecords, no session.recordedOccurrences: la reasignación de
       // groupId a `created.id` recién pasa más abajo.
@@ -1012,11 +1050,10 @@ export class GroupingEngine implements IEngine {
     // ADR-029: el mask depende de los members remanentes tras la división.
     // Se usa `remainingRecords` directo (no session.recordedOccurrences): la
     // reasignación de groupId a `created.id` para los movidos pasa recién
-    // abajo.
+    // abajo. group.members ya es remainingMembers (arriba): la escalera de
+    // ADR-057 ve el grupo original ya reducido.
     group.replacementValue = computeReplacementValue(
-      group.type,
-      group.replacementMode,
-      group.indexInType,
+      group,
       session.seed,
       resolveMaskFormatFromRecords(remainingRecords, group.type),
     );
@@ -1140,9 +1177,7 @@ export class GroupingEngine implements IEngine {
         group.replacementMode = req.mode;
         group.replacementMode = resolveMode(group, session.rules);
         group.replacementValue = computeReplacementValue(
-          group.type,
-          group.replacementMode,
-          group.indexInType,
+          group,
           session.seed,
           this.resolveMaskFormat(session, group),
         );
@@ -1428,10 +1463,10 @@ export class GroupingEngine implements IEngine {
       ]),
     };
     group.replacementMode = resolveMode(group, session.rules);
+    // ADR-057: group.members ya es [toOccurrenceRef(occurrence)] (única
+    // ocurrencia del grupo recién creado) — la escalera arranca desde ahí.
     group.replacementValue = computeReplacementValue(
-      group.type,
-      group.replacementMode,
-      group.indexInType,
+      group,
       session.seed,
       // Única ocurrencia en el grupo recién creado: no hace falta pasar por
       // session.recordedOccurrences (recordOccurrence() corre después).
@@ -1571,9 +1606,7 @@ export class GroupingEngine implements IEngine {
 
       group.replacementMode = effectiveMode;
       group.replacementValue = computeReplacementValue(
-        group.type,
-        effectiveMode,
-        group.indexInType,
+        group,
         session.seed,
         this.resolveMaskFormat(session, group),
       );
