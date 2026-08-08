@@ -23,17 +23,13 @@
  * selección, que es lo que hace que el repintado funcione en documentos
  * escaneados (ADR-058 §5).
  *
- * **Sin cablear todavía**: esta función no se invoca desde
- * `renderMediatedPreview` ni desde los call sites de `buildPageReplacements`
- * ni desde `makeRenderPageProvider.renderFull` en `orchestrator.ts`.
- * `RenderPageInput` (`render-engine`) aún no tiene el campo `lineWords` —
- * solo `RenderPagePayload` (`@anonly/shared`) lo tiene desde el PR 2 de este
- * hito —, y ese campo es alcance del PR 5 (`render-engine` ya lo declara en
- * su propio spec, `Render_Engine.md` §6, y reenviarlo a `RenderPagePayload`
- * en `render.engine.ts` es indispensable para su propio kernel — no es una
- * dependencia que este PR le imponga). El cableado de los cuatro puntos de
- * enganche (incluido `renderFull`, `Orchestrator.md` v1.7.1 ítem 22b) es el
- * PR 4b (Hito 10.5, `docs/roadmap/MVP.md` §4), posterior al PR 5.
+ * **Cableada** (Hito 10.5, PR 4b, `Orchestrator.md` v1.7.1 ítem 22b) en los
+ * cuatro puntos que construyen un `RenderPageInput` con `kind: "anonymized"`
+ * en `orchestrator.ts`: `renderMediatedPreview` (de donde lo heredan sus dos
+ * únicos call sites, `flushDirtyPages` y `seedAnonymizedPreview`) y
+ * `makeRenderPageProvider.renderFull`, que repite el mismo cálculo en vez de
+ * compartirlo — es el del export, y es el punto que hace que el repintado de
+ * línea también exista en el PDF final, no solo en el preview.
  */
 
 import {
