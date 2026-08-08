@@ -44,6 +44,7 @@ import {
   type RenderPagePayload,
   type Replacement,
   type UnloadDocumentPayload,
+  type Word,
 } from "@anonly/shared";
 import {
   getDocument,
@@ -69,6 +70,448 @@ const ANNOTATION_LINE_WIDTH = 2;
 // `fitReplacementFont` — nunca se baja de acá aunque el token siga sin entrar
 // (spec Render_Engine.md §13 caso 25).
 const REPLACEMENT_MIN_FONT_PX = 8;
+
+// ─── ADR-058 §2-§4, §6 (Hito 10.5, PR 5) — repintado de línea por calibración ───
+//
+// Las cuatro constantes de abajo son heurísticas cuyo VALOR EXACTO el spec
+// (`Render_Engine.md` §6/§13 caso 26, ADR-058 §6) describe cualitativamente
+// ("un hueco desproporcionado", "un umbral de error razonable", "se infiere
+// de las posiciones") sin dar el número — el propio ADR-058 §6(e) lo admite
+// explícitamente para el umbral de calibración ("si el spec no te da el
+// valor exacto... elegí uno defendible y documentalo"). Se documentan acá
+// con el mismo criterio para las otras tres, no exportadas (mismo patrón que
+// `REPLACEMENT_MIN_FONT_PX`, que tampoco se exporta): son detalle interno del
+// kernel, no contrato público.
+
+/**
+ * (b) — huecos plausibles. El hueco entre dos palabras consecutivas de la
+ * línea (candidata + reemplazo) se compara contra la altura de la mayor de
+ * las dos cajas, como proxy del tamaño de fuente: un hueco de más de 4x esa
+ * altura excede por mucho el espaciado inter-palabra normal (~0.3-0.5x el
+ * tamaño de fuente) y delata una fila de tabla o columnas (celdas separadas
+ * por un tabulador o alineación fija), no una línea de cuerpo. El piso
+ * negativo tolera el ruido de OCR/el prorrateo de ADR-020 (Contexto §6): las
+ * posiciones individuales son aproximadas, así que un leve solape no debería
+ * bastar para descartar la línea.
+ */
+const MAX_LINE_GAP_TO_HEIGHT_RATIO = 4;
+const MIN_LINE_GAP_TO_HEIGHT_RATIO = -0.5;
+
+/**
+ * (c) — proxy de "alineación a la izquierda". `lineWords` (ADR-058 §5) solo
+ * trae palabras a la DERECHA del reemplazo — nunca las anteriores en la
+ * misma línea — así que no hay forma de medir la alineación real contra un
+ * margen izquierdo conocido (eso exigiría datos que este motor no recibe:
+ * `Render_Engine.md` §9 dice explícitamente "no se valida contra Page.words
+ * ... el motor confía en la selección host-side"). El proxy que SÍ se puede
+ * calcular con lo disponible: cuánto de la página que queda a la derecha del
+ * reemplazo ocupa la fila de vecinas (`densidad = tramoUsado / tramoDisponible`,
+ * ambos medidos desde `replacement.bbox.x` hasta el margen derecho FÍSICO de
+ * la página — sin inventar un margen tipográfico encima). Texto de cuerpo
+ * corrido (el reemplazo está en medio o al final de una oración) típicamente
+ * continúa hasta cerca del margen físico; un título o valor centrado/alineado
+ * a la derecha dentro de una fila corta deja mucho margen físico sin usar.
+ * Es conservador por diseño (ADR-058 §6: "cualquier duda cae al fallback") —
+ * cae al fallback en más casos de los estrictamente necesarios antes que
+ * arriesgar un repintado sobre una línea que no es texto de cuerpo corrido.
+ */
+const MIN_LINE_DENSITY_RATIO = 0.3;
+
+/**
+ * (e) — umbral de error de calibración (ADR-058 §3/§6, razonamiento pedido
+ * explícitamente por el spec). Error relativo = suma de |medido - real| /
+ * suma de real, sobre el conjunto de palabras de la línea (Contexto §6: se
+ * ajusta sobre el conjunto, no palabra por palabra). 0.15 (15%) deja pasar la
+ * variación normal entre una familia genérica (`serif`/`sans-serif`/
+ * `monospace`, las únicas candidatas posibles bajo `disableFontFace: true`,
+ * ADR-053) y la fuente real embebida del PDF —que casi nunca coincide
+ * exactamente—, pero rechaza un candidato que va claramente desencaminado
+ * (p. ej. confundir una tabla con texto corrido, o una fuente condensada con
+ * una expandida). Un umbral más laberíntico dejaría pasar candidatos
+ * visiblemente mal calibrados —exactamente la costura que ADR-058 §3 pide
+ * evitar—; uno más estricto rechazaría casi cualquier aproximación genérica,
+ * vaciando de contenido la pieza de calidad de la cascada.
+ */
+const LINE_CALIBRATION_ERROR_THRESHOLD = 0.15;
+
+type GenericFontFamily = "serif" | "sans-serif" | "monospace";
+type CalibrationFontWeight = "normal" | "bold";
+type CalibrationFontStyle = "normal" | "italic";
+
+interface FontCandidate {
+  readonly family: GenericFontFamily;
+  readonly weight: CalibrationFontWeight;
+  readonly style: CalibrationFontStyle;
+}
+
+// Orden deliberado (sans-serif primero): en un empate exacto de error entre
+// candidatos, `calibrateLineFont` se queda con el PRIMERO iterado — sin esto
+// el "candidato ganador" en un empate sería un detalle de iteración interno
+// y no una elección legible. 3 familias × 2 pesos × 2 estilos = 12,
+// exactamente el conjunto acotado que pide ADR-058 §3.
+const FONT_CANDIDATES: ReadonlyArray<FontCandidate> = (
+  ["sans-serif", "serif", "monospace"] as const
+).flatMap((family) =>
+  (["normal", "bold"] as const).flatMap((weight) =>
+    (["normal", "italic"] as const).map((style) => ({ family, weight, style })),
+  ),
+);
+
+function buildCalibratedFont(size: number, candidate: FontCandidate): string {
+  const stylePart = candidate.style === "italic" ? "italic " : "";
+  const weightPart = candidate.weight === "bold" ? "bold " : "";
+  return `${stylePart}${weightPart}${size}px ${candidate.family}`;
+}
+
+/** Una palabra real de la línea contra la que se calibra: texto conocido + ancho real (ya escalado a espacio canvas). */
+export interface CalibrationSample {
+  readonly text: string;
+  readonly actualWidth: number;
+}
+
+export interface CalibrationResult {
+  readonly font: string;
+  readonly errorRatio: number;
+}
+
+function candidateErrorRatio(
+  measureWidth: (font: string, text: string) => number,
+  font: string,
+  samples: ReadonlyArray<CalibrationSample>,
+): number {
+  let totalAbsError = 0;
+  let totalActual = 0;
+  for (const sample of samples) {
+    totalAbsError += Math.abs(measureWidth(font, sample.text) - sample.actualWidth);
+    totalActual += sample.actualWidth;
+  }
+  return totalActual > 0 ? totalAbsError / totalActual : Number.POSITIVE_INFINITY;
+}
+
+/**
+ * ADR-058 §3 — calibración inversa: prueba los `FONT_CANDIDATES` (familia
+ * genérica × peso × estilo) al tamaño `sizePx` y devuelve el que minimiza el
+ * error relativo agregado contra `samples` (los anchos REALES de la línea:
+ * la propia palabra reemplazada más las vecinas de `lineWords`, ADR-058 §5).
+ * Pura y testeable sin `OffscreenCanvas` — mismo criterio que
+ * `fitReplacementFont` (`measureWidth` inyectada). Exportada solo para test
+ * directo (`unit.test.ts`), no forma parte del `index.ts` público del
+ * paquete (ADR-043 §2).
+ */
+export function calibrateLineFont(
+  measureWidth: (font: string, text: string) => number,
+  samples: ReadonlyArray<CalibrationSample>,
+  sizePx: number,
+): CalibrationResult {
+  let best: CalibrationResult | undefined;
+  for (const candidate of FONT_CANDIDATES) {
+    const font = buildCalibratedFont(sizePx, candidate);
+    const errorRatio = candidateErrorRatio(measureWidth, font, samples);
+    if (best === undefined || errorRatio < best.errorRatio) {
+      best = { font, errorRatio };
+    }
+  }
+  // FONT_CANDIDATES es un literal no vacío (3×2×2): `best` siempre se asigna
+  // en la primera iteración. Este fallback es puramente defensivo (evita un
+  // `!` no-null) y, si alguna vez se ejecutara, produce un error "infinito"
+  // que hace caer la condición (e) al fallback igual — el resultado seguro.
+  return (
+    best ?? {
+      font: buildCalibratedFont(sizePx, {
+        family: "sans-serif",
+        weight: "normal",
+        style: "normal",
+      }),
+      errorRatio: Number.POSITIVE_INFINITY,
+    }
+  );
+}
+
+/** Dos bboxes comparten banda vertical cuando sus extensiones en Y se solapan (mismo criterio que `isLineNeighbor` del façade, ADR-058 §5 — duplicado acá porque el kernel no puede importar `packages/anonymization-core/src`, P-2). */
+function sharesVerticalBand(a: BoundingBox, b: BoundingBox): boolean {
+  return a.y < b.y + b.height && b.y < a.y + a.height;
+}
+
+/** Overlap 2D genérico (X e Y), no solo banda vertical. */
+function overlapsBbox(a: BoundingBox, b: BoundingBox): boolean {
+  return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+}
+
+interface LineRepaintPlan {
+  readonly font: string;
+  readonly delta: number;
+  readonly neighbors: ReadonlyArray<Word>; // ordenadas por x, bbox SIN escalar.
+  readonly lineTopPt: number; // banda vertical de la línea, SIN escalar.
+  readonly lineBottomPt: number;
+  readonly eraseRightPt: number; // extremo derecho a tapar, SIN escalar.
+}
+
+/**
+ * ADR-058 §6 — evalúa las cinco condiciones de activación del repintado y,
+ * si TODAS se cumplen, devuelve el plan geométrico (sin tocar el canvas
+ * todavía: el muestreo de color y el dibujo viven en `tryRepaintLine`, que sí
+ * tiene `context`). Cualquier condición que falle devuelve `undefined` —
+ * "cualquier duda cae al fallback" (spec §13 caso 26).
+ *
+ * Todo el cálculo geométrico corre en el espacio SIN escalar de
+ * `replacement.bbox`/`Word.bbox` (mismo espacio que `selectLineWords` del
+ * façade) y solo se multiplica por `scale` en los puntos que lo necesitan
+ * (tamaño de fuente, comparación contra `pageWidthPx`) — evita mezclar
+ * unidades a mitad de camino.
+ *
+ * Guard adicional, no numerado en ADR-058 §6 (que describe una única
+ * ocurrencia por línea): `otherReplacements` son el resto de los reemplazos
+ * de esta página (todos salvo `replacement`). Dos piezas, no una:
+ *
+ * 1. Cualquier `lineWord` cuyo bbox se solape con el de OTRO reemplazo se
+ *    excluye de las vecinas — nunca se REDIBUJA el texto ORIGINAL de otra
+ *    entidad (eso deshace su anonimización si esa entidad ya se pintó).
+ * 2. `nextReplacementBoundaryPt` — si otro reemplazo comparte banda vertical
+ *    y está a la derecha de `replacement`, su propio `bbox.x` es un límite
+ *    DURO para la selección de vecinas, la densidad (c), el margen (d) y el
+ *    tapado (`eraseRightPt`): ninguno de los cuatro puede cruzar hacia su
+ *    territorio, sin importar si el hueco que queda tras filtrar las
+ *    palabras de esa otra entidad da "plausible" por (b) — un reemplazo
+ *    corto (un DNI o teléfono enmascarado de pocos caracteres) dejaría un
+ *    hueco perfectamente plausible bajo `MAX_LINE_GAP_TO_HEIGHT_RATIO`, y sin
+ *    este límite el rectángulo de fondo de `replacement` se pintaría ENCIMA
+ *    de lo que esa otra entidad ya dibujó, borrándolo — sin exponer su texto
+ *    original (eso ya lo evita la pieza 1), pero igual destruyendo su
+ *    render. Es **independiente del orden** en que `paintReplacements`
+ *    procesa el array: se calcula siempre desde las posiciones de
+ *    `otherReplacements`, nunca desde lo que ya esté pintado en el canvas.
+ *
+ * Las dos piezas son puramente conservadoras (nunca agregan repintado, solo
+ * lo retiran o lo acortan) — mismo espíritu que las cinco condiciones del
+ * spec: cualquier duda cae al fallback.
+ */
+function planLineRepaint(
+  measureWidth: (font: string, text: string) => number,
+  replacement: Replacement,
+  scaledBbox: BoundingBox,
+  lineWords: ReadonlyArray<Word>,
+  otherReplacements: ReadonlyArray<Replacement>,
+  scale: number,
+  pageWidthPx: number,
+): LineRepaintPlan | undefined {
+  // Límite duro impuesto por el PRÓXIMO reemplazo a la derecha en la misma
+  // banda vertical (pieza 2 de arriba). Ausente → +Infinity (no acota nada).
+  const nextReplacementBoundaryPt = otherReplacements
+    .filter(
+      (other) =>
+        sharesVerticalBand(other.bbox, replacement.bbox) &&
+        other.bbox.x >= replacement.bbox.x + replacement.bbox.width,
+    )
+    .reduce((closest, other) => Math.min(closest, other.bbox.x), Number.POSITIVE_INFINITY);
+
+  // (a) — al menos una palabra a la derecha del reemplazo, compartiendo banda
+  // vertical, sin cruzar hacia el bbox de OTRO reemplazo (pieza 1) ni hacia
+  // `nextReplacementBoundaryPt` (pieza 2). El texto rotado 90°/270° no
+  // comparte banda (spec §13 caso 27) y se filtra acá mismo, sin código
+  // especial.
+  const neighbors = lineWords
+    .filter(
+      (word) =>
+        sharesVerticalBand(word.bbox, replacement.bbox) &&
+        word.bbox.x >= replacement.bbox.x + replacement.bbox.width &&
+        word.bbox.x < nextReplacementBoundaryPt &&
+        !otherReplacements.some((other) => overlapsBbox(word.bbox, other.bbox)),
+    )
+    .sort((wordA, wordB) => wordA.bbox.x - wordB.bbox.x);
+  if (neighbors.length === 0) return undefined;
+
+  // (b) — huecos plausibles entre palabras consecutivas (reemplazo incluido).
+  let previous: BoundingBox = replacement.bbox;
+  for (const neighbor of neighbors) {
+    const gap = neighbor.bbox.x - (previous.x + previous.width);
+    const refHeight = Math.max(previous.height, neighbor.bbox.height);
+    if (
+      gap > MAX_LINE_GAP_TO_HEIGHT_RATIO * refHeight ||
+      gap < MIN_LINE_GAP_TO_HEIGHT_RATIO * refHeight
+    ) {
+      return undefined;
+    }
+    previous = neighbor.bbox;
+  }
+
+  const lastNeighbor = neighbors[neighbors.length - 1];
+  if (lastNeighbor === undefined) return undefined; // defensivo; neighbors.length > 0 ya lo garantiza.
+
+  // (c) — proxy de alineación izquierda (ver comentario de MIN_LINE_DENSITY_RATIO),
+  // medido contra el límite derecho EFECTIVO: el menor entre el margen físico
+  // de la página y `nextReplacementBoundaryPt` (pieza 2 — nunca el margen
+  // físico solo, si hay otra entidad más cerca).
+  const pageWidthPt = pageWidthPx / scale;
+  const effectiveRightLimitPt = Math.min(pageWidthPt, nextReplacementBoundaryPt);
+  const runStart = replacement.bbox.x;
+  const runEnd = lastNeighbor.bbox.x + lastNeighbor.bbox.width;
+  const available = effectiveRightLimitPt - runStart;
+  if (available <= 0) return undefined;
+  if ((runEnd - runStart) / available < MIN_LINE_DENSITY_RATIO) return undefined;
+
+  // (e) — calibración inversa sobre el conjunto de la línea: la propia
+  // palabra reemplazada (ancho real conocido: su propio bbox) más las
+  // vecinas de `lineWords`.
+  const size = replacementFontSize(scaledBbox.height);
+  const samples: ReadonlyArray<CalibrationSample> = [
+    { text: replacement.originalValue, actualWidth: scaledBbox.width },
+    ...neighbors.map((word) => ({ text: word.text, actualWidth: word.bbox.width * scale })),
+  ];
+  const calibration = calibrateLineFont(measureWidth, samples, size);
+  if (calibration.errorRatio > LINE_CALIBRATION_ERROR_THRESHOLD) return undefined;
+
+  const newTokenWidth = measureWidth(calibration.font, replacement.replacementValue);
+  const delta = newTokenWidth - scaledBbox.width;
+
+  // (d) — el desplazamiento cabe antes del límite derecho EFECTIVO (margen
+  // físico de la página, o el próximo reemplazo a la derecha si está más
+  // cerca — pieza 2): nunca cruza hacia el territorio de otra entidad, sin
+  // importar si el hueco calculado en (b) dio "plausible".
+  const newRunEndPx = runEnd * scale + delta;
+  const effectiveRightLimitPx = effectiveRightLimitPt * scale;
+  if (newRunEndPx > effectiveRightLimitPx) return undefined;
+
+  const allBoxes = [replacement.bbox, ...neighbors.map((word) => word.bbox)];
+  const lineTopPt = Math.min(...allBoxes.map((box) => box.y));
+  const lineBottomPt = Math.max(...allBoxes.map((box) => box.y + box.height));
+  // `Math.min(..., effectiveRightLimitPt)` es redundante con el chequeo de
+  // (d) de arriba en el caso normal (si (d) pasó, ya está por debajo) — se
+  // mantiene como defensa en profundidad explícita, mismo criterio que el
+  // `maxWidth` del `fillText` del token en `tryRepaintLine`: el tapado nunca
+  // puede cruzar hacia el territorio de otra entidad, ni siquiera si algún
+  // cálculo de arriba tuviera un error.
+  const eraseRightPt = Math.min(Math.max(runEnd, newRunEndPx / scale), effectiveRightLimitPt);
+
+  return { font: calibration.font, delta, neighbors, lineTopPt, lineBottomPt, eraseRightPt };
+}
+
+/**
+ * ADR-058 §4 — muestrea, sobre el bbox ESCALADO de la palabra original y
+ * ANTES de tapar nada: la tinta (píxel más oscuro dentro de la caja) y el
+ * fondo (color dominante del borde/anillo exterior de la caja). Aproximación
+ * deliberada de "área del glifo" (no hay máscara de glifo disponible, solo
+ * el bbox de la palabra completa) — spec Render_Engine.md §6.
+ */
+function sampleInkAndBackground(
+  context: OffscreenCanvasRenderingContext2D,
+  scaledBbox: BoundingBox,
+): { readonly ink: string; readonly background: string } {
+  const x = Math.max(0, Math.round(scaledBbox.x));
+  const y = Math.max(0, Math.round(scaledBbox.y));
+  const width = Math.max(1, Math.round(scaledBbox.width));
+  const height = Math.max(1, Math.round(scaledBbox.height));
+  const { data } = context.getImageData(x, y, width, height);
+
+  let ink = { r: 0, g: 0, b: 0 };
+  let darkestLuminance = Number.POSITIVE_INFINITY;
+  const borderCounts = new Map<string, { count: number; r: number; g: number; b: number }>();
+
+  for (let py = 0; py < height; py += 1) {
+    for (let px = 0; px < width; px += 1) {
+      const idx = (py * width + px) * 4;
+      const r = data[idx] ?? 0;
+      const g = data[idx + 1] ?? 0;
+      const b = data[idx + 2] ?? 0;
+      const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
+      if (luminance < darkestLuminance) {
+        darkestLuminance = luminance;
+        ink = { r, g, b };
+      }
+      if (px === 0 || py === 0 || px === width - 1 || py === height - 1) {
+        const key = `${r},${g},${b}`;
+        const entry = borderCounts.get(key);
+        if (entry === undefined) borderCounts.set(key, { count: 1, r, g, b });
+        else entry.count += 1;
+      }
+    }
+  }
+
+  let background = { r: 255, g: 255, b: 255 };
+  let bestCount = -1;
+  for (const entry of borderCounts.values()) {
+    if (entry.count > bestCount) {
+      bestCount = entry.count;
+      background = { r: entry.r, g: entry.g, b: entry.b };
+    }
+  }
+
+  return {
+    ink: `rgb(${ink.r}, ${ink.g}, ${ink.b})`,
+    background: `rgb(${background.r}, ${background.g}, ${background.b})`,
+  };
+}
+
+/**
+ * ADR-058 §2 — si `planLineRepaint` aprueba las cinco condiciones, ejecuta
+ * el repintado: tapa desde `bbox.x` hasta el fin de línea con el color de
+ * fondo muestreado, dibuja el token en `bbox.x` con la tipografía calibrada
+ * y el color de tinta muestreado, y redibuja cada palabra vecina en su
+ * propia x **desplazada por el mismo delta uniforme** — reposicionamiento,
+ * no re-maquetado (Contexto §6: preserva el espaciado del texto justificado
+ * y evita que el error de calibración se acumule). Devuelve `true` si pintó
+ * (el caller no debe caer al shrink-to-fit) o `false` si alguna condición
+ * falló (el caller cae al camino existente de PR1, sin error ni warning).
+ */
+function tryRepaintLine(
+  context: OffscreenCanvasRenderingContext2D,
+  measureWidth: (font: string, text: string) => number,
+  replacement: Replacement,
+  scaledBbox: BoundingBox,
+  lineWords: ReadonlyArray<Word>,
+  otherReplacements: ReadonlyArray<Replacement>,
+  scale: number,
+  pageWidthPx: number,
+): boolean {
+  const plan = planLineRepaint(
+    measureWidth,
+    replacement,
+    scaledBbox,
+    lineWords,
+    otherReplacements,
+    scale,
+    pageWidthPx,
+  );
+  if (plan === undefined) return false;
+
+  // §4: muestreo ANTES de tapar nada, una sola vez por línea repintada.
+  const { ink, background } = sampleInkAndBackground(context, scaledBbox);
+
+  const eraseX = scaledBbox.x;
+  const eraseY = plan.lineTopPt * scale;
+  const eraseWidth = plan.eraseRightPt * scale - eraseX;
+  const eraseHeight = plan.lineBottomPt * scale - eraseY;
+  context.fillStyle = background;
+  context.fillRect(eraseX, eraseY, eraseWidth, eraseHeight);
+
+  // Dibujado a la izquierda (no centrado): el spec dice "dibujar el token en
+  // bbox.x" — el ancla es el borde izquierdo, no el centro de la caja.
+  // `maxWidth = eraseWidth` es redundante por construcción (la condición (d)
+  // ya garantizó que el token calibrado entra antes del margen) — defensa en
+  // profundidad, mismo espíritu que la red de seguridad de ADR-058 §1: si
+  // algún cálculo de arriba tuviera un error, esto sigue sin poder derramarse
+  // más allá de la propia zona tapada.
+  context.fillStyle = ink;
+  context.font = plan.font;
+  context.textAlign = "left";
+  context.textBaseline = "middle";
+  context.fillText(
+    replacement.replacementValue,
+    scaledBbox.x,
+    scaledBbox.y + scaledBbox.height / 2,
+    eraseWidth,
+  );
+
+  for (const neighbor of plan.neighbors) {
+    const neighborBbox = scaleBbox(neighbor.bbox, scale);
+    context.fillText(
+      neighbor.text,
+      neighborBbox.x + plan.delta,
+      neighborBbox.y + neighborBbox.height / 2,
+    );
+  }
+
+  return true;
+}
 
 /**
  * Prefijos first-party de los assets de pdfjs-dist que sirve la app bajo
@@ -316,10 +759,17 @@ async function renderPageOntoContext(
 function paintReplacements(
   context: OffscreenCanvasRenderingContext2D,
   replacements: ReadonlyArray<Replacement>,
+  lineWords: ReadonlyArray<Word>,
   scale: number,
+  pageWidthPx: number,
   abortSignal: AbortSignal,
   documentId: string,
 ): void {
+  const measureWidth = (font: string, text: string): number => {
+    context.font = font;
+    return context.measureText(text).width;
+  };
+
   for (const replacement of replacements) {
     if (abortSignal.aborted) throw new CancelledError(documentId);
     const bbox = scaleBbox(replacement.bbox, scale);
@@ -331,20 +781,51 @@ function paintReplacements(
       continue;
     }
 
+    // ADR-058 §2: punto de decisión. Si el token entra a su tamaño NATURAL
+    // (sin ningún encogido) en bbox.width, camino actual sin cambios — ni un
+    // byte distinto de antes de este PR (no-regresión, "line repaint does
+    // not trigger when the token fits"). Si no entra, se intenta el
+    // repintado de línea (§2-§4, condiciones de §6); si `tryRepaintLine`
+    // devuelve `false` (alguna condición no se cumple, o `lineWords` vino
+    // ausente/sin vecinas útiles), se cae al shrink-to-fit ya existente de
+    // PR1 — sin error, sin warning (spec §9: "ausentes nunca es un error").
+    const naturalFont = buildReplacementFont(
+      replacementFontSize(bbox.height),
+      replacementFontFamily(replacement.mode),
+    );
+    const fitsNaturally = measureWidth(naturalFont, replacement.replacementValue) <= bbox.width;
+
+    if (!fitsNaturally) {
+      // Guard defensivo (ver doc de `planLineRepaint`): el resto de los
+      // reemplazos de esta página nunca se pisan por el repintado de este.
+      const otherReplacements = replacements.filter((other) => other !== replacement);
+      const repainted = tryRepaintLine(
+        context,
+        measureWidth,
+        replacement,
+        bbox,
+        lineWords,
+        otherReplacements,
+        scale,
+        pageWidthPx,
+      );
+      if (repainted) continue;
+    }
+
     // §13 casos 4/5/6 (mask/placeholder/synthetic): fondo + texto centrado,
     // encogido para entrar en bbox.width (ADR-058 §1: shrink-to-fit, piso
     // REPLACEMENT_MIN_FONT_PX). `maxWidth` en `fillText` es la red de
-    // seguridad final para cuando ni el piso alcanza (caso 25 del spec).
+    // seguridad final para cuando ni el piso alcanza (caso 25 del spec). Es
+    // el mismo bloque de siempre: cuando `fitsNaturally` es `true`,
+    // `fitReplacementFont` no itera ni una vez y produce el mismo resultado
+    // de antes de ADR-058 §2-§6 (no-regresión bit a bit).
     context.fillStyle = REPLACEMENT_BG_COLOR;
     context.fillRect(bbox.x, bbox.y, bbox.width, bbox.height);
     context.fillStyle = REPLACEMENT_TEXT_COLOR;
     context.textAlign = "center";
     context.textBaseline = "middle";
     context.font = fitReplacementFont(
-      (font, text) => {
-        context.font = font;
-        return context.measureText(text).width;
-      },
+      measureWidth,
       replacement.replacementValue,
       replacement.mode,
       bbox.height,
@@ -557,7 +1038,19 @@ export async function kernelRenderPage(
   if (opts.abortSignal.aborted) throw new CancelledError(documentId);
 
   if (kind === "anonymized") {
-    paintReplacements(context2d, replacements, scale, opts.abortSignal, documentId);
+    // ADR-058 §5: `lineWords` ausente es el caso normal (página donde todo
+    // entra a tamaño natural) y nunca un error — se resuelve a `[]`, que hace
+    // que `tryRepaintLine` falle la condición (a) para cada reemplazo y el
+    // kernel caiga al shrink-to-fit de PR1 sin tocar `getImageData` ni una vez.
+    paintReplacements(
+      context2d,
+      replacements,
+      payload.lineWords ?? [],
+      scale,
+      viewport.width,
+      opts.abortSignal,
+      documentId,
+    );
   } else {
     paintAnnotations(context2d, annotations, scale, opts.abortSignal, documentId);
   }
