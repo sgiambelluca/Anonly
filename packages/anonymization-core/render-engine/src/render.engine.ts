@@ -461,14 +461,22 @@ function fnv1a(input: string): string {
 }
 
 // Nota de implementación 3 (cabecera del archivo): hash(replacements ++ annotations).
+// El `bbox` participa del hash porque determina el raster (posición/tamaño de
+// lo pintado, ADR-058 §1): dos llamadas que solo difieren en `bbox` no pueden
+// compartir entrada de cache. `pageIndex` y `originalValue` quedan afuera
+// deliberadamente: `pageIndex` ya está en `buildCacheKey` (redundante acá) y
+// `originalValue` no se pinta nunca (solo `replacementValue` llega al canvas).
 function hashPageContent(
   replacements: ReadonlyArray<Replacement>,
   annotations: ReadonlyArray<Annotation>,
 ): string {
   const replacementPart = replacements.map(
-    (r) => `R|${r.groupId}|${r.occurrenceId}|${r.mode}|${r.replacementValue}`,
+    (r) =>
+      `R|${r.groupId}|${r.occurrenceId}|${r.mode}|${r.replacementValue}|${r.bbox.x}|${r.bbox.y}|${r.bbox.width}|${r.bbox.height}`,
   );
-  const annotationPart = annotations.map((a) => `A|${a.id}|${a.kind}`);
+  const annotationPart = annotations.map(
+    (a) => `A|${a.id}|${a.kind}|${a.bbox.x}|${a.bbox.y}|${a.bbox.width}|${a.bbox.height}`,
+  );
   const combined = [...replacementPart, ...annotationPart].sort().join(";");
   return combined.length === 0 ? "0" : fnv1a(combined);
 }

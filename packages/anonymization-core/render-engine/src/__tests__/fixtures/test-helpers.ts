@@ -143,6 +143,45 @@ export interface DrawCall {
   readonly fillStyle?: string;
   readonly strokeStyle?: string;
   readonly font?: string;
+  // ADR-058 §1: SOLO en "fillText". Modela el clamp que el spec de Canvas 2D
+  // garantiza cuando `fillText` recibe `maxWidth` — "si el ancho natural del
+  // texto excede maxWidth, el UA comprime el renderizado para que el ancho
+  // dibujado sea maxWidth" (WHATWG HTML, algoritmo de "fill and stroke a
+  // shape" para texto). Por eso `drawnWidth = Math.min(anchoNatural,
+  // maxWidth ?? anchoNatural)`: es el ancho REALMENTE pintado, no el medido
+  // antes de dibujar. Un test que assertee sobre este campo en vez de
+  // recomputar `measureStubTextWidth` a mano verifica de punta a punta que
+  // `maxWidth` viajó correcto Y que nunca hay derrame — sin eximir el caso en
+  // que el shrink-to-fit se quedó corto (el piso de 8px).
+  readonly drawnWidth?: number;
+}
+
+// ─── measureText del stub (ADR-058 §1, Hito 10.5 PR 1) ───
+// Fórmula arbitraria y determinista, SOLO para tests: no es
+// `AVG_GLYPH_ADVANCE_RATIO` de Contracts.md — esa constante es de producción
+// (ADR-057 §5) y todavía no existe en `@anonly/shared` en este PR (ADR-058 §9
+// la trae recién en el PR 2 de `shared`, fuera de alcance acá). Lo único que
+// necesita el shrink-to-fit de `fitReplacementFont` (`../worker/kernel.ts`)
+// para poder ejercitarse de punta a punta sin un canvas real es que el ancho
+// medido crezca con el tamaño de fuente y con la longitud del texto.
+const STUB_GLYPH_ADVANCE_RATIO = 0.6;
+
+function parseStubFontSizePx(font: string): number {
+  const match = /^([\d.]+)px/.exec(font);
+  return match ? Number(match[1]) : 0;
+}
+
+/**
+ * Recomputa, con la MISMA fórmula que usa `StubCanvasRenderingContext2D.measureText`,
+ * el ancho que el stub le habría devuelto a `context.measureText(text)` con
+ * `font` seteado. Exportado para que los tests puedan verificar de forma
+ * independiente (no tautológica) el invariante de ADR-058 §1: dado el `font`
+ * final que `fitReplacementFont` produjo (recuperable de un `DrawCall.font`
+ * grabado), el ancho medido con esta misma fórmula no debe superar el ancho
+ * disponible — salvo que se haya llegado al piso de 8px.
+ */
+export function measureStubTextWidth(text: string, font: string): number {
+  return text.length * parseStubFontSizePx(font) * STUB_GLYPH_ADVANCE_RATIO;
 }
 
 class StubCanvasRenderingContext2D {
@@ -162,13 +201,23 @@ class StubCanvasRenderingContext2D {
     this.calls.push({ op: "strokeRect", args: [x, y, w, h], strokeStyle: String(this.strokeStyle) });
   }
 
-  fillText(text: string, x: number, y: number): void {
+  fillText(text: string, x: number, y: number, maxWidth?: number): void {
+    const naturalWidth = measureStubTextWidth(text, this.font);
     this.calls.push({
       op: "fillText",
-      args: [text, x, y],
+      args: maxWidth === undefined ? [text, x, y] : [text, x, y, maxWidth],
       fillStyle: String(this.fillStyle),
       font: this.font,
+      drawnWidth: maxWidth === undefined ? naturalWidth : Math.min(naturalWidth, maxWidth),
     });
+  }
+
+  // ADR-058 §1: `paintReplacements` mide con `measureText` antes de dibujar
+  // (shrink-to-fit). No es un "draw call" (no pinta nada, no se registra en
+  // `calls`) — mismo criterio que un getter: es una consulta de solo lectura
+  // sobre el estado actual de `font`.
+  measureText(text: string): { readonly width: number } {
+    return { width: measureStubTextWidth(text, this.font) };
   }
 
   drawImage(...args: unknown[]): void {

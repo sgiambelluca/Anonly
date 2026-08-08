@@ -164,6 +164,44 @@ describe("RenderEngine — unit tests", () => {
     expect(second).toStrictEqual(first);
   });
 
+  it("cache key is sensitive to bbox: replacements equal in every field but bbox do not share a cache entry", async () => {
+    const docId = "doc-cache-bbox";
+    const mockDoc = createMockPdfDocument({ pageCount: 1 });
+    vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(mockDoc));
+    await engine.init(ctx);
+    await engine.loadDocument(docId, createValidBuffer());
+
+    const baseInput = {
+      documentId: docId,
+      pageIndex: 0,
+      kind: "anonymized" as const,
+      mode: "preview" as const,
+    };
+    const getPageSpy = mockDoc["getPage"] as ReturnType<typeof vi.fn>;
+
+    await engine.renderPage(
+      createRenderPageInput({
+        ...baseInput,
+        replacements: [makeReplacement({ bbox: { x: 10, y: 20, width: 100, height: 14 } })],
+      }),
+      ctx,
+    );
+    expect(getPageSpy).toHaveBeenCalledTimes(1);
+
+    // Mismo groupId/occurrenceId/mode/replacementValue, solo cambia bbox.width:
+    // sin este fix, hashPageContent los ve como el mismo contenido y el
+    // segundo render sería un cache hit que devuelve el raster del primero.
+    await engine.renderPage(
+      createRenderPageInput({
+        ...baseInput,
+        replacements: [makeReplacement({ bbox: { x: 10, y: 20, width: 200, height: 14 } })],
+      }),
+      ctx,
+    );
+    expect(getPageSpy).toHaveBeenCalledTimes(2);
+    expect(engine["cache"].size).toBe(2);
+  });
+
   it("renderPages retries a page that fails once and continues after exhausting retries", async () => {
     const docId = "doc-retry";
     const mockDoc = createMockPdfDocument({
@@ -236,6 +274,90 @@ describe("RenderEngine — unit tests", () => {
     const fillTextCalls = canvas!.calls.filter((c) => c.op === "fillText");
     expect(fillTextCalls).toHaveLength(1);
     expect(fillTextCalls[0]!.args[0]).toBe("[DNI 01]");
+  });
+
+  // ─── ADR-058 §1 (Hito 10.5, PR 1): shrink-to-fit ───
+  //
+  // Test de propiedad exigido por Render_Engine.md §14 y ADR-058 §10 — "es la
+  // aserción que representa la garantía de ADR-058 §1 y no puede quedar en
+  // amarillo". Cubre las dos mitades de la cascada de una sola vez: (a) el
+  // shrink-to-fit reduce el tamaño de fuente cuando hace falta, y (b)
+  // `fillText` recibe siempre `maxWidth = bbox.width`. `DrawCall.drawnWidth`
+  // (fixtures/test-helpers.ts) modela el clamp real que el spec de Canvas 2D
+  // garantiza para `fillText(..., maxWidth)` — el ancho REALMENTE dibujado
+  // nunca puede superar `maxWidth`, así que esta aserción no exime ningún
+  // caso (ni siquiera cuando ni el piso de 8px alcanza): si `maxWidth`
+  // dejara de viajar, `drawnWidth` volvería a ser el ancho natural
+  // (potencialmente mayor a `width`) y el test fallaría de verdad.
+  it("replacement text never exceeds its available width", async () => {
+    const docId = "doc-shrink-property";
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(
+        createMockPdfDocument({
+          pageCount: 1,
+          pageFactory: () => createMockPage({ width: 2000, height: 2000 }),
+        }),
+      ),
+    );
+    await engine.init(ctx);
+    await engine.loadDocument(docId, createValidBuffer());
+
+    const modes = [ReplacementMode.Mask, ReplacementMode.Synthetic, ReplacementMode.Placeholder];
+    const tokenLengths = [1, 2, 4, 8, 16, 32, 64];
+    const boxWidths = [1, 4, 10, 25, 60, 150, 400];
+    const boxHeights = [3, 6, 10, 16, 24, 40];
+
+    let combinationsChecked = 0;
+    for (const mode of modes) {
+      for (const length of tokenLengths) {
+        for (const width of boxWidths) {
+          for (const height of boxHeights) {
+            resetCreatedCanvases();
+            const text = "X".repeat(length);
+            // `hashPageContent` (render.engine.ts) solo hashea
+            // `groupId|occurrenceId|mode|replacementValue` — NO el `bbox`.
+            // Sin un id único por combinación, dos combos con el mismo
+            // (mode, length) pero distinto width/height colisionarían en el
+            // cache LRU y el segundo saltaría el render (canvas vacío).
+            const comboId = `${String(mode)}-${length}-${width}-${height}`;
+
+            await engine.renderPage(
+              createRenderPageInput({
+                documentId: docId,
+                pageIndex: 0,
+                kind: "anonymized",
+                mode: "preview",
+                replacements: [
+                  makeReplacement({
+                    groupId: `g-${comboId}`,
+                    occurrenceId: `o-${comboId}`,
+                    mode,
+                    replacementValue: text,
+                    bbox: { x: 0, y: 0, width, height },
+                  }),
+                ],
+              }),
+              ctx,
+            );
+
+            const [canvas] = getCreatedCanvases();
+            const fillTextCall = canvas!.calls.find((c) => c.op === "fillText");
+            expect(fillTextCall).toBeDefined();
+            // La garantía completa: el ancho REALMENTE dibujado nunca excede
+            // el disponible, sin excepción para el piso de 8px.
+            expect(fillTextCall!.drawnWidth).toBeLessThanOrEqual(width);
+            // Y la red de seguridad viajó con el valor correcto (si esto
+            // fallara, `drawnWidth` de arriba dejaría de ser una garantía real).
+            expect(fillTextCall!.args[3]).toBe(width);
+            combinationsChecked += 1;
+          }
+        }
+      }
+    }
+
+    // Guard contra un refactor que vacíe los arrays de arriba y deje esta
+    // aserción pasando en verde sin haber comprobado ninguna combinación.
+    expect(combinationsChecked).toBeGreaterThan(500);
   });
 
   // ─── Consumo de eventos del bus (checklist §15 item 14) ───
