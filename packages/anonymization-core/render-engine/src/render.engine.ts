@@ -855,6 +855,13 @@ export class RenderEngine implements IEngine {
       annotations,
       scale,
       imageFormat,
+      // ADR-058 §5: reenvío puro, sin tocar hashPageContent/buildCacheKey — es
+      // función pura de (documentId, pageIndex, replacements), datos que ya
+      // integran la clave de cache (ver comentario de hashPageContent), mismo
+      // razonamiento por el que pageIndex tampoco entra ahí.
+      // exactOptionalPropertyTypes: conditional spread, no asignar `undefined`
+      // explícito (mismo patrón que `password` más arriba en este archivo).
+      ...(input.lineWords !== undefined ? { lineWords: input.lineWords } : {}),
     };
 
     // ADR-043 §2: única vía de despacho — converge en pool.dispatch (kernel

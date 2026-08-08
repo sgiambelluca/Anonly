@@ -16,7 +16,7 @@
  * caller, igual que grouping-engine hace con GroupingConfig.
  */
 
-import type { Annotation, EncodedPageImage, Replacement } from "@anonly/shared";
+import type { Annotation, EncodedPageImage, Replacement, Word } from "@anonly/shared";
 
 export interface RenderPageInput {
   readonly documentId: string;
@@ -27,6 +27,14 @@ export interface RenderPageInput {
   readonly annotations?: ReadonlyArray<Annotation>;
   readonly scale?: number;
   readonly imageFormat?: "png" | "jpeg";
+  /**
+   * ADR-058 §5: palabras que comparten línea con algún reemplazo de esta
+   * página, seleccionadas host-side por el Orchestrator (`Render_Engine.md`
+   * §6/§9). Reenviado tal cual a `RenderPagePayload` — este motor no las
+   * valida contra `Page.words` ni contra `pageIndex`: opcional, y su ausencia
+   * nunca es un error (el kernel cae a shrink-to-fit, ADR-058 §1).
+   */
+  readonly lineWords?: ReadonlyArray<Word>;
 }
 
 export interface RenderPageOutput {

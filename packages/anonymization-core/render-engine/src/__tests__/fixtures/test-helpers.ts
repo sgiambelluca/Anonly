@@ -23,6 +23,7 @@ import {
   type ILogger,
   type Replacement,
   type Unsubscribe,
+  type Word,
 } from "@anonly/shared";
 import type { getDocument } from "pdfjs-dist";
 import { vi } from "vitest";
@@ -226,6 +227,7 @@ class StubCanvasRenderingContext2D {
 
   getImageData(x: number, y: number, w: number, h: number): ImageData {
     this.calls.push({ op: "getImageData", args: [x, y, w, h] });
+    if (imageDataProvider !== null) return imageDataProvider(x, y, w, h);
     return {
       data: new Uint8ClampedArray(Math.max(w, 0) * Math.max(h, 0) * 4),
       width: w,
@@ -247,6 +249,50 @@ export interface CreatedCanvas {
 
 let stubContextAvailable = true;
 let createdCanvases: Array<{ width: number; height: number; context: StubCanvasRenderingContext2D }> = [];
+
+// ADR-058 §4: `sampleInkAndBackground` (`../worker/kernel.js`) lee
+// `context.getImageData` para muestrear tinta/fondo ANTES de repintar una
+// línea. El default de `getImageData` (arriba) devuelve un buffer en cero
+// (negro transparente) — determinista y suficiente para los tests que no
+// dependen del color exacto (posiciones, uniformidad del desplazamiento,
+// condiciones de activación). El único test que sí necesita colores
+// distinguibles ("ink and background colours sampled from a page with a
+// non-white background") instala un proveedor con `setImageDataProvider`.
+type ImageDataProvider = (x: number, y: number, w: number, h: number) => ImageData;
+let imageDataProvider: ImageDataProvider | null = null;
+
+export function setImageDataProvider(provider: ImageDataProvider | null): void {
+  imageDataProvider = provider;
+}
+
+/**
+ * Construye un `ImageData` sintético: todo el rectángulo relleno de
+ * `background`, con un bloque `ink` en el interior (nunca sobre el anillo del
+ * borde, que es justo lo que `sampleInkAndBackground` usa para el fondo) —
+ * modela "un glifo oscuro sobre un fondo de color" sin depender de un
+ * rasterizador de fuentes real.
+ */
+export function makeSampledImageData(params: {
+  readonly width: number;
+  readonly height: number;
+  readonly background: readonly [number, number, number];
+  readonly ink: readonly [number, number, number];
+}): ImageData {
+  const { width, height, background, ink } = params;
+  const data = new Uint8ClampedArray(width * height * 4);
+  for (let py = 0; py < height; py += 1) {
+    for (let px = 0; px < width; px += 1) {
+      const isBorder = px === 0 || py === 0 || px === width - 1 || py === height - 1;
+      const [r, g, b] = isBorder ? background : ink;
+      const idx = (py * width + px) * 4;
+      data[idx] = r;
+      data[idx + 1] = g;
+      data[idx + 2] = b;
+      data[idx + 3] = 255;
+    }
+  }
+  return { data, width, height, colorSpace: "srgb" };
+}
 
 // ADR-034 §3: `convertToBlob` es la frontera real de codificación (`encodeImageData`
 // en render.engine.ts). El stub no codifica píxeles reales (no hay codec PNG/JPEG
@@ -312,6 +358,10 @@ export function getCreatedCanvases(): ReadonlyArray<CreatedCanvas> {
 
 export function resetCreatedCanvases(): void {
   createdCanvases = [];
+  // ADR-058 §4: evita que un `setImageDataProvider` de un test se filtre al
+  // siguiente — mismo criterio de limpieza que `createdCanvases`, sin exigir
+  // que cada archivo de test recuerde llamar un reset aparte.
+  imageDataProvider = null;
 }
 
 export function installOffscreenCanvasStub(): void {
@@ -500,6 +550,109 @@ export function createRenderPageInput(overrides?: Partial<RenderPageInput>): Ren
     kind: "original",
     mode: "preview",
     ...overrides,
+  };
+}
+
+// ─── ADR-058 §2-§6 (Hito 10.5, PR 5): repintado de línea por calibración ───
+
+/**
+ * Tamaño de fuente "natural" con el que arranca la calibración para una caja
+ * de `height: 14` (`replacementFontSize(14) = max(8, round(14*0.7)) = 10`,
+ * `../worker/kernel.js`, no exportada). Fijo acá porque `makeLineRepaintScenario`
+ * construye sus bboxes a esa altura.
+ */
+export const LINE_REPAINT_FONT_SIZE_PX = 10;
+
+/**
+ * Ancho "real" de una palabra, consistente con la fórmula del stub de
+ * medición (`measureStubTextWidth`) al tamaño de fuente del repintado. Los
+ * escenarios de repintado exitoso construyen sus bboxes con este ancho para
+ * que la calibración (ADR-058 §3) cierre con error ~0 — los tests que
+ * quieren ejercitar la condición (e) rompen esta consistencia a propósito
+ * (ver `calibration error above threshold → fallback` en `edge.test.ts`).
+ */
+export function lineRepaintWordWidth(text: string): number {
+  return measureStubTextWidth(text, `${LINE_REPAINT_FONT_SIZE_PX}px sans-serif`);
+}
+
+export interface LineRepaintScenario {
+  readonly replacement: Replacement;
+  readonly lineWords: ReadonlyArray<Word>;
+  readonly pageWidth: number;
+  readonly pageHeight: number;
+}
+
+export interface LineRepaintScenarioOverrides {
+  readonly replacement?: Partial<Replacement>;
+  readonly lineWords?: ReadonlyArray<Word>;
+  readonly pageWidth?: number;
+  readonly pageHeight?: number;
+  readonly gapAfterReplacement?: number;
+  readonly gapBetweenNeighbors?: number;
+}
+
+/**
+ * Escenario mínimo donde el repintado de línea de ADR-058 §2-§6 SE ACTIVA:
+ * las cinco condiciones de activación (`Render_Engine.md` §13 caso 26) pasan
+ * con margen. Reemplazo `Placeholder` cuyo propio token no entra a tamaño
+ * natural en el bbox de "Ana" (angosto a propósito), con dos palabras vecinas
+ * a la derecha ("Garcia", "vive") en la misma banda vertical, huecos chicos y
+ * plausibles, y una página ancha en proporción al contenido (ni tan angosta
+ * que el desplazamiento no entre — condición (d) —, ni tan ancha que la
+ * fila de vecinas quede "perdida" en el resto de la página — condición (c),
+ * ver el comentario de `MIN_LINE_DENSITY_RATIO` en `../worker/kernel.js`).
+ *
+ * Cada test de condición de activación (`edge.test.ts`) perturba UN
+ * parámetro a la vez vía `overrides` para aislar exactamente esa condición,
+ * dejando las otras cuatro intactas.
+ */
+export function makeLineRepaintScenario(overrides?: LineRepaintScenarioOverrides): LineRepaintScenario {
+  const gapAfterReplacement = overrides?.gapAfterReplacement ?? 4;
+  const gapBetweenNeighbors = overrides?.gapBetweenNeighbors ?? 4;
+
+  const replacement = makeReplacement({
+    mode: ReplacementMode.Placeholder,
+    originalValue: "Ana",
+    replacementValue: "[PERSONA MUY LARGA 01]",
+    bbox: { x: 20, y: 10, width: lineRepaintWordWidth("Ana"), height: 14 },
+    ...overrides?.replacement,
+  });
+
+  const garciaX = replacement.bbox.x + replacement.bbox.width + gapAfterReplacement;
+  const garciaWidth = lineRepaintWordWidth("Garcia");
+  const viveX = garciaX + garciaWidth + gapBetweenNeighbors;
+  const defaultLineWords: ReadonlyArray<Word> = [
+    {
+      text: "Garcia",
+      bbox: { x: garciaX, y: replacement.bbox.y, width: garciaWidth, height: replacement.bbox.height },
+      pageIndex: 0,
+      confidence: 1,
+      source: "pdf",
+    },
+    {
+      text: "vive",
+      bbox: {
+        x: viveX,
+        y: replacement.bbox.y,
+        width: lineRepaintWordWidth("vive"),
+        height: replacement.bbox.height,
+      },
+      pageIndex: 0,
+      confidence: 1,
+      source: "pdf",
+    },
+  ];
+
+  return {
+    replacement,
+    lineWords: overrides?.lineWords ?? defaultLineWords,
+    // 260pt de ancho de página: con los valores por defecto de arriba deja
+    // margen holgado tanto para la densidad mínima de la condición (c)
+    // (~0.36, sobre el piso de 0.3) como para el desplazamiento de la
+    // condición (d) (~35pt de margen tras el delta) — verificado a mano,
+    // ver el reporte final del PR.
+    pageWidth: overrides?.pageWidth ?? 260,
+    pageHeight: overrides?.pageHeight ?? 50,
   };
 }
 
