@@ -39,9 +39,11 @@ import {
   type IEventBus,
   type ILogger,
   type Page,
+  type Replacement,
   type Rule,
   type WorkerLike,
   type WorkerOutbound,
+  type Word,
 } from "@anonly/shared";
 import { vi } from "vitest";
 
@@ -96,6 +98,32 @@ export function createPage(overrides?: Partial<Page>): Page {
     text: "",
     requiresOCR: false,
     ocrCompleted: false,
+    ...overrides,
+  };
+}
+
+/** `line-words.test` fixtures (ADR-058 §5): una palabra de página, PDF por defecto. */
+export function createWord(overrides?: Partial<Word>): Word {
+  return {
+    text: "word",
+    bbox: { x: 0, y: 0, width: 20, height: 12 },
+    pageIndex: 0,
+    confidence: 1,
+    source: "pdf",
+    ...overrides,
+  };
+}
+
+/** `line-words.test` fixtures (ADR-058 §5): un reemplazo de página, `placeholder` por defecto. */
+export function createReplacement(overrides?: Partial<Replacement>): Replacement {
+  return {
+    groupId: "group-1",
+    occurrenceId: "occ-1",
+    pageIndex: 0,
+    bbox: { x: 0, y: 0, width: 20, height: 12 },
+    originalValue: "Ana",
+    replacementValue: "[PRS-01]",
+    mode: ReplacementMode.Placeholder,
     ...overrides,
   };
 }

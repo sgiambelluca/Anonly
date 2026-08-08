@@ -10,6 +10,7 @@ import {
   EventChannel,
   InvalidInputError,
   PipelineStage,
+  ReplacementMode,
   type EngineContext,
 } from "@anonly/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -17,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LruCache } from "../cache.js";
 import { buildDefaultEngineConfig } from "../config.js";
 import { OrchestratorDisposedError } from "../errors.js";
+import { selectLineWords } from "../line-words.js";
 import { PipelineOrchestrator } from "../orchestrator.js";
 import { WorkerPool, WorkerPoolManager } from "../worker-pool.js";
 
@@ -31,6 +33,8 @@ import {
   createPage,
   createPdfEngineOutput,
   createRealBus,
+  createReplacement,
+  createWord,
   wireHappyPathSpies,
 } from "./fixtures/test-helpers.js";
 
@@ -1854,5 +1858,102 @@ describe("Orchestrator — export failure propagation", () => {
         error: expect.objectContaining({ code: "EXPORT_FAILED" }),
       }),
     );
+  });
+});
+
+// ─── selectLineWords: selección host-side de las palabras de línea (ADR-058 §5) ───
+//
+// PR 4 del Hito 10.5 (`docs/roadmap/MVP.md` §4): función pura y aislada, sin
+// cablear todavía a `renderMediatedPreview`/`buildPageReplacements` (eso
+// depende de que `render-engine` gane `RenderPageInput.lineWords`, PR 5).
+describe("selectLineWords — selección host-side de las palabras de línea (ADR-058 §5)", () => {
+  it("line-word selection is pure: same input, same output, no retained state", () => {
+    const replacement = createReplacement({
+      bbox: { x: 0, y: 100, width: 20, height: 12 },
+      replacementValue: "[PRS-01]",
+    });
+    const pageWords = [
+      createWord({ text: "Ana", bbox: { x: 0, y: 100, width: 20, height: 12 } }),
+      createWord({ text: "vive", bbox: { x: 30, y: 100, width: 25, height: 12 } }),
+      createWord({ text: "aquí", bbox: { x: 60, y: 100, width: 25, height: 12 } }),
+    ];
+    const replacements = [replacement];
+
+    const first = selectLineWords(pageWords, replacements);
+    const second = selectLineWords(pageWords, replacements);
+    expect(second).toEqual(first);
+    expect(first).toEqual([pageWords[1], pageWords[2]]);
+
+    // Una llamada intermedia con datos completamente distintos no puede
+    // contaminar una llamada posterior con los datos originales: sin estado
+    // retenido entre invocaciones (mismo criterio que los tests de
+    // `fuseOcrPage`, ADR-041).
+    const otherPageWords = [
+      createWord({ text: "otro", bbox: { x: 0, y: 900, width: 100, height: 12 } }),
+    ];
+    const otherReplacements = [
+      createReplacement({ bbox: { x: 0, y: 900, width: 5, height: 12 }, replacementValue: "X" }),
+    ];
+    selectLineWords(otherPageWords, otherReplacements);
+
+    const third = selectLineWords(pageWords, replacements);
+    expect(third).toEqual(first);
+  });
+
+  it("groups by vertical band and returns only words to the right of the replacement", () => {
+    const replacement = createReplacement({
+      bbox: { x: 50, y: 100, width: 20, height: 12 },
+      replacementValue: "[PRS-01]",
+    });
+    const leftWord = createWord({
+      text: "izquierda",
+      bbox: { x: 0, y: 100, width: 40, height: 12 },
+    });
+    const rightWord1 = createWord({
+      text: "derecha1",
+      bbox: { x: 70, y: 100, width: 30, height: 12 },
+    });
+    const rightWord2 = createWord({
+      text: "derecha2",
+      bbox: { x: 105, y: 100, width: 30, height: 12 },
+    });
+    // Otra línea (banda vertical distinta), aunque esté a la derecha en X.
+    const otherLineWord = createWord({
+      text: "otralinea",
+      bbox: { x: 70, y: 300, width: 30, height: 12 },
+    });
+
+    const result = selectLineWords(
+      [leftWord, rightWord1, otherLineWord, rightWord2],
+      [replacement],
+    );
+
+    expect(result).toEqual([rightWord1, rightWord2]);
+  });
+
+  it("page where every token fits omits lineWords from the payload", () => {
+    const replacement = createReplacement({
+      // bbox generoso: el token de 8 caracteres entra sin problema.
+      bbox: { x: 0, y: 0, width: 200, height: 12 },
+      replacementValue: "[DNI 01]",
+    });
+    const neighbor = createWord({ bbox: { x: 210, y: 0, width: 20, height: 12 } });
+
+    const result = selectLineWords([neighbor], [replacement]);
+
+    expect(result).toBeUndefined();
+  });
+
+  it("redact replacements never trigger lineWords attachment (ADR-058, Contexto §1: redact es inmune)", () => {
+    const replacement = createReplacement({
+      mode: ReplacementMode.Redact,
+      // bbox minúsculo + valor larguísimo: cualquier modo con texto
+      // desbordaría, pero redact nunca dibuja texto (kernel.ts, fill opaco).
+      bbox: { x: 0, y: 0, width: 5, height: 12 },
+      replacementValue: "[UNA-CADENA-MUY-LARGA-QUE-JAMAS-ENTRARIA-EN-5PX]",
+    });
+    const neighbor = createWord({ bbox: { x: 10, y: 0, width: 20, height: 12 } });
+
+    expect(selectLineWords([neighbor], [replacement])).toBeUndefined();
   });
 });
