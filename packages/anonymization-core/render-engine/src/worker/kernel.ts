@@ -63,6 +63,12 @@ const REDACT_FILL_COLOR = "#000000";
 const REPLACEMENT_BG_COLOR = "#ffffff";
 const REPLACEMENT_TEXT_COLOR = "#000000";
 const ANNOTATION_LINE_WIDTH = 2;
+// ADR-058 §1 (Hito 10.5, PR 1): piso del shrink-to-fit. Ya existía como el
+// número mágico `8` dentro de `fontForMode` (Math.max(8, ...)); queda nombrado
+// acá porque ahora es también la condición de corte del loop de encogido de
+// `fitReplacementFont` — nunca se baja de acá aunque el token siga sin entrar
+// (spec Render_Engine.md §13 caso 25).
+const REPLACEMENT_MIN_FONT_PX = 8;
 
 /**
  * Prefijos first-party de los assets de pdfjs-dist que sirve la app bajo
@@ -152,10 +158,56 @@ function scaleBbox(bbox: BoundingBox, scale: number): BoundingBox {
   };
 }
 
-function fontForMode(mode: ReplacementMode, boxHeight: number): string {
-  const size = Math.max(8, Math.round(boxHeight * 0.7));
-  const family = mode === ReplacementMode.Placeholder ? "monospace, sans-serif" : "sans-serif";
+function replacementFontSize(boxHeight: number): number {
+  return Math.max(REPLACEMENT_MIN_FONT_PX, Math.round(boxHeight * 0.7));
+}
+
+function replacementFontFamily(mode: ReplacementMode): string {
+  return mode === ReplacementMode.Placeholder ? "monospace, sans-serif" : "sans-serif";
+}
+
+function buildReplacementFont(size: number, family: string): string {
   return `${size}px ${family}`;
+}
+
+/**
+ * ADR-058 §1 (Hito 10.5, PR 1) — la garantía dura del ADR, la única de sus
+ * cuatro piezas que no es "calidad" (spec Render_Engine.md §2): `paintReplacements`
+ * derivaba el tamaño de fuente solo de `bbox.height` y llamaba `fillText` sin
+ * `maxWidth`, con el texto centrado — un token más ancho que su caja se
+ * derramaba hacia los dos lados, encima de palabras del original dibujadas
+ * debajo (ADR-058, Contexto §1). Esta función mide con `measureWidth` (que en
+ * producción es `context.measureText`, ver `paintReplacements` abajo) y
+ * encoge el tamaño de fuente hasta que `text` entra en `availableWidth`, sin
+ * bajar nunca de `REPLACEMENT_MIN_FONT_PX`. Si el token ya entraba al tamaño
+ * inicial, el loop no itera ni una vez y el resultado es exactamente el que
+ * producía la fórmula anterior — no-regresión bit a bit (ADR-058 §1: "si el
+ * token entra, no se toca nada").
+ *
+ * `measureWidth` desacopla la medición real de canvas (que exige
+ * `context.font` seteado antes de medir) de esta función, que queda pura y
+ * testeable con cualquier función de medición determinista, sin necesitar un
+ * `OffscreenCanvas`. Exportada para test directo (`kernel.test.ts`) — no
+ * forma parte del `index.ts` público del paquete, mismo patrón que el resto
+ * de las funciones exportadas de este archivo (ADR-043 §2).
+ */
+export function fitReplacementFont(
+  measureWidth: (font: string, text: string) => number,
+  text: string,
+  mode: ReplacementMode,
+  boxHeight: number,
+  availableWidth: number,
+): string {
+  const family = replacementFontFamily(mode);
+  let size = replacementFontSize(boxHeight);
+  let font = buildReplacementFont(size, family);
+
+  while (measureWidth(font, text) > availableWidth && size > REPLACEMENT_MIN_FONT_PX) {
+    size -= 1;
+    font = buildReplacementFont(size, family);
+  }
+
+  return font;
 }
 
 function toPageFailure(
@@ -279,17 +331,30 @@ function paintReplacements(
       continue;
     }
 
-    // §13 casos 4/5/6 (mask/placeholder/synthetic): fondo + texto centrado.
+    // §13 casos 4/5/6 (mask/placeholder/synthetic): fondo + texto centrado,
+    // encogido para entrar en bbox.width (ADR-058 §1: shrink-to-fit, piso
+    // REPLACEMENT_MIN_FONT_PX). `maxWidth` en `fillText` es la red de
+    // seguridad final para cuando ni el piso alcanza (caso 25 del spec).
     context.fillStyle = REPLACEMENT_BG_COLOR;
     context.fillRect(bbox.x, bbox.y, bbox.width, bbox.height);
     context.fillStyle = REPLACEMENT_TEXT_COLOR;
-    context.font = fontForMode(replacement.mode, bbox.height);
     context.textAlign = "center";
     context.textBaseline = "middle";
+    context.font = fitReplacementFont(
+      (font, text) => {
+        context.font = font;
+        return context.measureText(text).width;
+      },
+      replacement.replacementValue,
+      replacement.mode,
+      bbox.height,
+      bbox.width,
+    );
     context.fillText(
       replacement.replacementValue,
       bbox.x + bbox.width / 2,
       bbox.y + bbox.height / 2,
+      bbox.width,
     );
   }
 }

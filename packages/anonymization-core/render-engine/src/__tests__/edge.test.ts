@@ -234,6 +234,134 @@ describe("RenderEngine — edge cases", () => {
     expect(fillTextCalls[0]!.args[0]).toBe("39.123.456");
   });
 
+  // ─── ADR-058 §1 (Hito 10.5, PR 1): shrink-to-fit — casos límite ───
+
+  it("token much wider than its bbox is drawn at the 8px floor without overflow", async () => {
+    const docId = "doc-shrink-extreme";
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+    );
+    await engine.init(ctx);
+    await engine.loadDocument(docId, createValidBuffer());
+
+    const text = "X".repeat(300);
+    await engine.renderPage(
+      createRenderPageInput({
+        documentId: docId,
+        pageIndex: 0,
+        kind: "anonymized",
+        mode: "preview",
+        replacements: [
+          makeReplacement({
+            mode: ReplacementMode.Placeholder,
+            replacementValue: text,
+            bbox: { x: 5, y: 5, width: 20, height: 14 },
+          }),
+        ],
+      }),
+      ctx,
+    );
+
+    const [canvas] = getCreatedCanvases();
+    const fillTextCalls = canvas!.calls.filter((c) => c.op === "fillText");
+    expect(fillTextCalls).toHaveLength(1);
+    // Piso: nunca baja de 8px, aunque el token siga sin entrar (ADR-058 §1).
+    expect(fillTextCalls[0]!.font).toBe("8px monospace, sans-serif");
+    // Red de seguridad final: `maxWidth` = bbox.width, siempre presente.
+    expect(fillTextCalls[0]!.args[3]).toBe(20);
+    // Y lo que de verdad se dibuja (post-clamp de `fillText`) nunca se derrama.
+    expect(fillTextCalls[0]!.drawnWidth).toBeLessThanOrEqual(20);
+  });
+
+  it("all three text modes respect the fit; redact is unchanged", async () => {
+    const docId = "doc-shrink-modes";
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+    );
+    await engine.init(ctx);
+    await engine.loadDocument(docId, createValidBuffer());
+
+    // mask (IBAN-like, 26 caracteres fijos — ADR-058 Contexto §2: "el mask de
+    // IBAN son 24 caracteres, quepan o no") en una caja angosta: ni al piso
+    // entra. synthetic: entra directo al tamaño inicial, sin encoger.
+    // placeholder: encoge a un tamaño intermedio (no al piso) y entra.
+    await engine.renderPage(
+      createRenderPageInput({
+        documentId: docId,
+        pageIndex: 0,
+        kind: "anonymized",
+        mode: "preview",
+        replacements: [
+          makeReplacement({
+            groupId: "g-redact",
+            occurrenceId: "occ-redact",
+            mode: ReplacementMode.Redact,
+            replacementValue: "",
+            bbox: { x: 0, y: 0, width: 30, height: 10 },
+          }),
+          makeReplacement({
+            groupId: "g-mask",
+            occurrenceId: "occ-mask",
+            mode: ReplacementMode.Mask,
+            replacementValue: "XX.XXX.XXX.XX.XXXXXXXXXXXX",
+            bbox: { x: 40, y: 0, width: 45, height: 14 },
+          }),
+          makeReplacement({
+            groupId: "g-synth",
+            occurrenceId: "occ-synth",
+            mode: ReplacementMode.Synthetic,
+            replacementValue: "39.123.456",
+            bbox: { x: 90, y: 0, width: 100, height: 14 },
+          }),
+          makeReplacement({
+            groupId: "g-place",
+            occurrenceId: "occ-place",
+            mode: ReplacementMode.Placeholder,
+            replacementValue: "[PERSONA 01]",
+            bbox: { x: 200, y: 0, width: 65, height: 14 },
+          }),
+        ],
+      }),
+      ctx,
+    );
+
+    const [canvas] = getCreatedCanvases();
+
+    // redact: sin fillText, fill opaco sin cambios (ADR-058 §1: inmune).
+    const redactRect = canvas!.calls.find((c) => c.op === "fillRect" && c.fillStyle === "#000000");
+    expect(redactRect?.args).toEqual([0, 0, 30, 10]);
+
+    const fillTextCalls = canvas!.calls.filter((c) => c.op === "fillText");
+    expect(fillTextCalls).toHaveLength(3); // redact no dibuja texto
+
+    const textCases: ReadonlyArray<{ readonly text: string; readonly bboxWidth: number }> = [
+      { text: "XX.XXX.XXX.XX.XXXXXXXXXXXX", bboxWidth: 45 },
+      { text: "39.123.456", bboxWidth: 100 },
+      { text: "[PERSONA 01]", bboxWidth: 65 },
+    ];
+    for (const { text, bboxWidth } of textCases) {
+      const call = fillTextCalls.find((c) => c.args[0] === text);
+      expect(call).toBeDefined();
+      // `maxWidth` (ADR-058 §1: red de seguridad final) va siempre, entre o no.
+      expect(call!.args[3]).toBe(bboxWidth);
+      // Lo que de verdad se dibuja (post-clamp) nunca se derrama.
+      expect(call!.drawnWidth).toBeLessThanOrEqual(bboxWidth);
+    }
+
+    // mask (IBAN-like): el loop llega al piso sin bajar más, no entra ni ahí.
+    const maskCall = fillTextCalls.find((c) => c.args[0] === "XX.XXX.XXX.XX.XXXXXXXXXXXX");
+    expect(maskCall!.font).toBe("8px sans-serif");
+
+    // synthetic: entra directo al tamaño inicial (sin encoger).
+    const synthCall = fillTextCalls.find((c) => c.args[0] === "39.123.456");
+    expect(synthCall!.font).toBe("10px sans-serif");
+
+    // placeholder: encoge a un tamaño intermedio real (no al piso) — demuestra
+    // que el mecanismo se activa de verdad, no solo cuando hace falta el piso.
+    const placeholderCall = fillTextCalls.find((c) => c.args[0] === "[PERSONA 01]");
+    expect(placeholderCall!.font).toBe("9px monospace, sans-serif");
+  });
+
   it("conflict marker on original kind", async () => {
     const docId = "doc-conflict";
     vi.mocked(getDocument).mockReturnValue(
