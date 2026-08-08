@@ -25,11 +25,15 @@
  *
  * **Sin cablear todavía**: esta función no se invoca desde
  * `renderMediatedPreview` ni desde los call sites de `buildPageReplacements`
- * en `orchestrator.ts`. `RenderPageInput` (`render-engine`) aún no tiene el
- * campo `lineWords` — solo `RenderPagePayload` (`@anonly/shared`) lo tiene
- * desde el PR 2 de este hito — y agregárselo es un cambio a `render-engine`,
- * un módulo que este PR no toca (R-1). El cableado real es del PR 5
- * (Hito 10.5, `docs/roadmap/MVP.md` §4), que depende de este PR 4.
+ * ni desde `makeRenderPageProvider.renderFull` en `orchestrator.ts`.
+ * `RenderPageInput` (`render-engine`) aún no tiene el campo `lineWords` —
+ * solo `RenderPagePayload` (`@anonly/shared`) lo tiene desde el PR 2 de este
+ * hito —, y ese campo es alcance del PR 5 (`render-engine` ya lo declara en
+ * su propio spec, `Render_Engine.md` §6, y reenviarlo a `RenderPagePayload`
+ * en `render.engine.ts` es indispensable para su propio kernel — no es una
+ * dependencia que este PR le imponga). El cableado de los cuatro puntos de
+ * enganche (incluido `renderFull`, `Orchestrator.md` v1.7.1 ítem 22b) es el
+ * PR 4b (Hito 10.5, `docs/roadmap/MVP.md` §4), posterior al PR 5.
  */
 
 import {
