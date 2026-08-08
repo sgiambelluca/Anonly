@@ -34,6 +34,7 @@
 import {
   AnnotationKind,
   CancelledError,
+  DEGRADED_FONT_RATIO,
   InvalidInputError,
   ReplacementMode,
   type Annotation,
@@ -60,6 +61,13 @@ import { RenderFailedError, RenderPageFailedError, RenderTimeoutError } from "..
 // `AnnotationKind` — ADR-031 §3).
 const HIGHLIGHT_COLOR = "#2563eb";
 const CONFLICT_COLOR = "#dc2626";
+// ADR-058 §7: color de trazo propio para el aviso de degradación — ámbar, a
+// propósito distinto del azul de highlight (agrupación) y el rojo de
+// conflict (desacuerdo de detección): Degraded señala otra cosa (legibilidad
+// del reemplazo pintado), no conviene que se confunda visualmente con esas
+// dos. Decisión de estilo sin impacto de contrato (`Annotation` no expone
+// color, ADR-031 §3).
+const DEGRADED_COLOR = "#f59e0b";
 const REDACT_FILL_COLOR = "#000000";
 const REPLACEMENT_BG_COLOR = "#ffffff";
 const REPLACEMENT_TEXT_COLOR = "#000000";
@@ -634,15 +642,32 @@ function buildReplacementFont(size: number, family: string): string {
  * forma parte del `index.ts` público del paquete, mismo patrón que el resto
  * de las funciones exportadas de este archivo (ADR-043 §2).
  */
-export function fitReplacementFont(
+/** Resultado de `fitReplacementFontSized`: el font string final más los dos tamaños que ADR-058 §7 necesita para el umbral de degradación. */
+export interface FittedReplacementFont {
+  readonly font: string;
+  readonly naturalSizePx: number;
+  readonly finalSizePx: number;
+}
+
+/**
+ * Núcleo real del shrink-to-fit, exponiendo el tamaño NATURAL (con el que
+ * arrancó, `replacementFontSize(boxHeight)`) y el FINAL (el que terminó
+ * usando tras encoger o no). ADR-058 §7 necesita los dos para el umbral de
+ * degradación (`finalSizePx / naturalSizePx < DEGRADED_FONT_RATIO`) — una
+ * razón, no un tamaño absoluto (Contracts.md §6). `fitReplacementFont` (abajo)
+ * sigue devolviendo solo el string de fuente sobre el mismo cálculo: ningún
+ * call site ni test de PR1 cambia.
+ */
+export function fitReplacementFontSized(
   measureWidth: (font: string, text: string) => number,
   text: string,
   mode: ReplacementMode,
   boxHeight: number,
   availableWidth: number,
-): string {
+): FittedReplacementFont {
   const family = replacementFontFamily(mode);
-  let size = replacementFontSize(boxHeight);
+  const naturalSizePx = replacementFontSize(boxHeight);
+  let size = naturalSizePx;
   let font = buildReplacementFont(size, family);
 
   while (measureWidth(font, text) > availableWidth && size > REPLACEMENT_MIN_FONT_PX) {
@@ -650,7 +675,17 @@ export function fitReplacementFont(
     font = buildReplacementFont(size, family);
   }
 
-  return font;
+  return { font, naturalSizePx, finalSizePx: size };
+}
+
+export function fitReplacementFont(
+  measureWidth: (font: string, text: string) => number,
+  text: string,
+  mode: ReplacementMode,
+  boxHeight: number,
+  availableWidth: number,
+): string {
+  return fitReplacementFontSized(measureWidth, text, mode, boxHeight, availableWidth).font;
 }
 
 function toPageFailure(
@@ -756,6 +791,14 @@ async function renderPageOntoContext(
   }
 }
 
+/**
+ * Pinta los reemplazos y devuelve las anotaciones `Degraded` (ADR-058 §7) que
+ * detectó al hacerlo: una por cada reemplazo cuyo shrink-to-fit (§1) lo dejó
+ * por debajo de `DEGRADED_FONT_RATIO`. Sintetizadas acá mismo (no en
+ * `kernelRenderPage`) porque es este loop el único lugar que tiene, a la vez,
+ * el `Replacement` original y el resultado del encogido — separarlo exigiría
+ * repetir la misma iteración o transportar el resultado por otro lado.
+ */
 function paintReplacements(
   context: OffscreenCanvasRenderingContext2D,
   replacements: ReadonlyArray<Replacement>,
@@ -764,11 +807,12 @@ function paintReplacements(
   pageWidthPx: number,
   abortSignal: AbortSignal,
   documentId: string,
-): void {
+): ReadonlyArray<Annotation> {
   const measureWidth = (font: string, text: string): number => {
     context.font = font;
     return context.measureText(text).width;
   };
+  const degraded: Annotation[] = [];
 
   for (const replacement of replacements) {
     if (abortSignal.aborted) throw new CancelledError(documentId);
@@ -824,20 +868,39 @@ function paintReplacements(
     context.fillStyle = REPLACEMENT_TEXT_COLOR;
     context.textAlign = "center";
     context.textBaseline = "middle";
-    context.font = fitReplacementFont(
+    const fitted = fitReplacementFontSized(
       measureWidth,
       replacement.replacementValue,
       replacement.mode,
       bbox.height,
       bbox.width,
     );
+    context.font = fitted.font;
     context.fillText(
       replacement.replacementValue,
       bbox.x + bbox.width / 2,
       bbox.y + bbox.height / 2,
       bbox.width,
     );
+
+    // ADR-058 §7/caso 28: la razón, no el tamaño en sí. `fitted.naturalSizePx`
+    // y `fitted.finalSizePx` salen los dos de este mismo `bbox` YA escalado
+    // (scaleBbox más arriba) — preview y full miden el reemplazo en su propio
+    // espacio de píxeles pero calculan la razón sobre magnitudes que escalan
+    // igual, así que el cociente es invariante sin ningún ajuste adicional
+    // (verificado por el test de invariancia de escala en unit.test.ts).
+    if (fitted.finalSizePx / fitted.naturalSizePx < DEGRADED_FONT_RATIO) {
+      degraded.push({
+        id: replacement.occurrenceId,
+        groupId: replacement.groupId,
+        pageIndex: replacement.pageIndex,
+        bbox: replacement.bbox,
+        kind: AnnotationKind.Degraded,
+      });
+    }
   }
+
+  return degraded;
 }
 
 function paintAnnotations(
@@ -849,16 +912,24 @@ function paintAnnotations(
 ): void {
   for (const annotation of annotations) {
     if (abortSignal.aborted) throw new CancelledError(documentId);
-    // §2/§13 casos 7-8: en kind="original" solo highlight y conflict aplican.
+    // §2/§13 casos 7-8/28: en kind="original" pinta highlight y conflict; en
+    // kind="anonymized" (ADR-058 §7) `kernelRenderPage` reusa esta misma
+    // función solo para las `Degraded` que detectó `paintReplacements` — un
+    // AnnotationKind sin dibujo definido acá simplemente se ignora.
     if (
       annotation.kind !== AnnotationKind.Highlight &&
-      annotation.kind !== AnnotationKind.Conflict
+      annotation.kind !== AnnotationKind.Conflict &&
+      annotation.kind !== AnnotationKind.Degraded
     ) {
       continue;
     }
     const bbox = scaleBbox(annotation.bbox, scale);
     context.strokeStyle =
-      annotation.kind === AnnotationKind.Conflict ? CONFLICT_COLOR : HIGHLIGHT_COLOR;
+      annotation.kind === AnnotationKind.Conflict
+        ? CONFLICT_COLOR
+        : annotation.kind === AnnotationKind.Degraded
+          ? DEGRADED_COLOR
+          : HIGHLIGHT_COLOR;
     context.lineWidth = ANNOTATION_LINE_WIDTH;
     context.strokeRect(bbox.x, bbox.y, bbox.width, bbox.height);
   }
@@ -1042,7 +1113,7 @@ export async function kernelRenderPage(
     // entra a tamaño natural) y nunca un error — se resuelve a `[]`, que hace
     // que `tryRepaintLine` falle la condición (a) para cada reemplazo y el
     // kernel caiga al shrink-to-fit de PR1 sin tocar `getImageData` ni una vez.
-    paintReplacements(
+    const degraded = paintReplacements(
       context2d,
       replacements,
       payload.lineWords ?? [],
@@ -1051,6 +1122,16 @@ export async function kernelRenderPage(
       opts.abortSignal,
       documentId,
     );
+    // ADR-058 §7: reusa `paintAnnotations` en vez de un camino de dibujo
+    // aparte — ya sabe pintar recuadros por `AnnotationKind` (§4 arriba, para
+    // Highlight/Conflict), y las `Degraded` no necesitan nada distinto. Es lo
+    // que rompe la exclusividad "anonymized pinta reemplazos, original pinta
+    // anotaciones" del spec previo a este PR: el camino anonymized ahora
+    // puede terminar invocando las dos funciones, nunca ninguna otra
+    // combinación.
+    if (degraded.length > 0) {
+      paintAnnotations(context2d, degraded, scale, opts.abortSignal, documentId);
+    }
   } else {
     paintAnnotations(context2d, annotations, scale, opts.abortSignal, documentId);
   }

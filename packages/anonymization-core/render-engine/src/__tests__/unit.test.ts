@@ -31,6 +31,7 @@ import {
   mockGetDocumentResult,
   readProtectedPdfFixtureBuffer,
   resetCreatedCanvases,
+  type DrawCall,
   type ResolvedRenderPool,
 } from "./fixtures/test-helpers.js";
 
@@ -931,6 +932,149 @@ describe("RenderEngine — unit tests", () => {
       const originalGap = viveWord!.bbox.x - garciaWord!.bbox.x;
       const newGap = (viveCall!.args[1] as number) - (garciaCall!.args[1] as number);
       expect(newGap).toBeCloseTo(originalGap, 6);
+    });
+  });
+
+  // ─── ADR-058 §7 (Hito 10.5, PR 6): aviso de degradación ───
+  describe("aviso de degradación (ADR-058 §7)", () => {
+    // Dos reemplazos con el mismo bbox.height (mismo tamaño natural, 28px:
+    // `replacementFontSize(40) = round(40*0.7)`), sin `lineWords` (caen
+    // directo al shrink-to-fit de PR1, nunca al repintado de línea). Uno se
+    // encoge apenas por encima del umbral (17/28 ≈ 0.607 ≥ 0.6) y el otro
+    // bien por debajo (10/28 ≈ 0.357 < 0.6) — la única variable entre los dos
+    // es el ancho disponible.
+    it("Degraded annotation emitted only below DEGRADED_FONT_RATIO, not on every fallback", async () => {
+      const docId = "doc-degraded-threshold";
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+      );
+      await engine.init(ctx);
+      await engine.loadDocument(docId, createValidBuffer());
+
+      await engine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+          replacements: [
+            makeReplacement({
+              groupId: "g-mild",
+              occurrenceId: "o-mild",
+              mode: ReplacementMode.Mask,
+              replacementValue: "AAAAA",
+              bbox: { x: 0, y: 0, width: 52, height: 40 },
+            }),
+            makeReplacement({
+              groupId: "g-severe",
+              occurrenceId: "o-severe",
+              mode: ReplacementMode.Mask,
+              replacementValue: "AAAAA",
+              bbox: { x: 100, y: 0, width: 31, height: 40 },
+            }),
+          ],
+        }),
+        ctx,
+      );
+
+      const [canvas] = getCreatedCanvases();
+      // Los dos cayeron al shrink-to-fit (ninguno entraba a tamaño natural);
+      // solo el severo cruzó el umbral, así que "cae al fallback" no alcanza
+      // por sí solo para emitir el aviso.
+      const degradedStrokes = canvas!.calls.filter(
+        (c) => c.op === "strokeRect" && c.strokeStyle === "#f59e0b",
+      );
+      expect(degradedStrokes).toHaveLength(1);
+      expect(degradedStrokes[0]!.args).toEqual([100, 0, 31, 40]);
+    });
+
+    it("same replacement yields the same degraded verdict in preview and full", async () => {
+      const docId = "doc-degraded-scale-invariant";
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+      );
+      await engine.init(ctx);
+      await engine.loadDocument(docId, createValidBuffer());
+
+      const degradingReplacement = makeReplacement({
+        groupId: "g-scale-degraded",
+        occurrenceId: "o-scale-degraded",
+        mode: ReplacementMode.Mask,
+        replacementValue: "AAAAA",
+        bbox: { x: 0, y: 0, width: 31, height: 40 },
+      });
+      const mildReplacement = makeReplacement({
+        groupId: "g-scale-mild",
+        occurrenceId: "o-scale-mild",
+        mode: ReplacementMode.Mask,
+        replacementValue: "AAAAA",
+        bbox: { x: 0, y: 0, width: 52, height: 40 },
+      });
+
+      const isDegraded = (calls: ReadonlyArray<DrawCall>): boolean =>
+        calls.some((c) => c.op === "strokeRect" && c.strokeStyle === "#f59e0b");
+
+      resetCreatedCanvases();
+      await engine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+          replacements: [degradingReplacement],
+        }),
+        ctx,
+      );
+      const [previewDegradingCanvas] = getCreatedCanvases();
+
+      resetCreatedCanvases();
+      await engine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "full",
+          replacements: [degradingReplacement],
+        }),
+        ctx,
+      );
+      const [fullDegradingCanvas] = getCreatedCanvases();
+
+      resetCreatedCanvases();
+      await engine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+          replacements: [mildReplacement],
+        }),
+        ctx,
+      );
+      const [previewMildCanvas] = getCreatedCanvases();
+
+      resetCreatedCanvases();
+      await engine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "full",
+          replacements: [mildReplacement],
+        }),
+        ctx,
+      );
+      const [fullMildCanvas] = getCreatedCanvases();
+
+      // El mismo reemplazo (bbox SIN escalar idéntico) da el mismo veredicto
+      // en preview (previewScale=1) y en full (fullScale=2.08, Contracts.md
+      // §6) — `kernelRenderPage` mide tamaño natural y efectivo en el mismo
+      // espacio ESCALADO (`scaleBbox`), así que la razón no depende de la
+      // escala aunque los píxeles absolutos sí.
+      expect(isDegraded(previewDegradingCanvas!.calls)).toBe(true);
+      expect(isDegraded(fullDegradingCanvas!.calls)).toBe(true);
+      expect(isDegraded(previewMildCanvas!.calls)).toBe(false);
+      expect(isDegraded(fullMildCanvas!.calls)).toBe(false);
     });
   });
 });
