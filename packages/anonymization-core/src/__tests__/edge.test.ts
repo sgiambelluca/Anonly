@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { exportBlobKey, previewBlobKey } from "../blob-tracker.js";
 import { LruCache } from "../cache.js";
+import { selectLineWords } from "../line-words.js";
 import { PipelineOrchestrator } from "../orchestrator.js";
 import { WorkerPool } from "../worker-pool.js";
 
@@ -30,6 +31,8 @@ import {
   createPdfEngineOutput,
   createRealBus,
   createRenderPageOutput,
+  createReplacement,
+  createWord,
   wireHappyPathSpies,
 } from "./fixtures/test-helpers.js";
 
@@ -1763,5 +1766,21 @@ describe("WorkerPool — transporte postMessage, casos límite (Hito 10, ADR-036
     await expect(dispatchPromise).rejects.toThrow(CancelledError);
     expect(worker.postMessage).toHaveBeenLastCalledWith({ type: "DISPOSE" });
     expect(worker.terminate).toHaveBeenCalled();
+  });
+});
+
+// ─── selectLineWords — caso borde de origen (ADR-058 §5) ───
+describe("selectLineWords — origen de las palabras (ADR-058 §5)", () => {
+  it('OCR words (source: "ocr") are selected like PDF words', () => {
+    const replacement = createReplacement({
+      bbox: { x: 0, y: 0, width: 20, height: 12 },
+      replacementValue: "[PRS-01]",
+    });
+    const pdfWord = createWord({ source: "pdf", bbox: { x: 25, y: 0, width: 20, height: 12 } });
+    const ocrWord = createWord({ source: "ocr", bbox: { x: 50, y: 0, width: 20, height: 12 } });
+
+    const result = selectLineWords([pdfWord, ocrWord], [replacement]);
+
+    expect(result).toEqual([pdfWord, ocrWord]);
   });
 });
