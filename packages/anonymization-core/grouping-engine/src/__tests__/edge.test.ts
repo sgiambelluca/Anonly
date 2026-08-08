@@ -1209,4 +1209,268 @@ describe("GroupingEngine — edge cases", () => {
     engine.dropOccurrences("doc-without-session", { source: DetectionSource.Regex });
     expect(ctx.logger.warn).toHaveBeenCalled();
   });
+
+  // Caso 28 (§13, ADR-057 §4): si ni el nivel 2 entra, el grupo queda en
+  // nivel 2 sin error ni warning — el shrink-to-fit del render (ADR-058 §1)
+  // es quien resuelve ese caso, no Grouping.
+  it("group where not even level 2 fits stays at level 2 without error", () => {
+    expect(() => {
+      ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: makeOccurrence({
+          entityType: EntityType.Person,
+          value: "Juan Perez",
+          normalizedValue: "juan perez",
+          bbox: makeBBox(0, 0, 1, 1),
+        }),
+      });
+    }).not.toThrow();
+
+    const [group] = engine.getSnapshot("doc-1").groups;
+    expect(group?.replacementValue).toBe("[PRS-01]");
+    expect(ctx.logger.warn).not.toHaveBeenCalled();
+  });
+
+  // Caso 29 (§13, ADR-057 §2): DNI/CUIT/IBAN tienen nivel 0 y 1 idénticos;
+  // la selección no falla por esa igualdad (se salta sola al no entrar) y el
+  // fallback a nivel 2 sigue distinguiéndose por el separador colapsado.
+  it("degenerate levels (DNI/CUIT/IBAN) produce expected tokens", () => {
+    const cases: ReadonlyArray<readonly [EntityType, string]> = [
+      [EntityType.DNI, "DNI"],
+      [EntityType.CUIT, "CUIT"],
+      [EntityType.IBAN, "IBAN"],
+    ];
+
+    let seq = 0;
+    for (const [type, label] of cases) {
+      seq += 1;
+      const wideDoc = `degenerate-wide-${seq}`;
+      engine.startSession(wideDoc);
+      ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+        documentId: wideDoc,
+        occurrence: makeOccurrence({
+          entityType: type,
+          value: `w-${seq}`,
+          normalizedValue: `w-${seq}`,
+          bbox: makeBBox(0, 0, 1000, 20),
+        }),
+      });
+      expect(engine.getSnapshot(wideDoc).groups[0]?.replacementValue).toBe(`[${label} 01]`);
+
+      const narrowDoc = `degenerate-narrow-${seq}`;
+      engine.startSession(narrowDoc);
+      ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+        documentId: narrowDoc,
+        occurrence: makeOccurrence({
+          entityType: type,
+          value: `n-${seq}`,
+          normalizedValue: `n-${seq}`,
+          bbox: makeBBox(0, 0, 1, 1),
+        }),
+      });
+      // Ninguno de los tres niveles entra (misma longitud para los tres):
+      // cae al fallback de nivel 2, que igual se distingue por el guion.
+      expect(engine.getSnapshot(narrowDoc).groups[0]?.replacementValue).toBe(`[${label}-01]`);
+    }
+  });
+
+  // Caso 30 (§13, ADR-057 §7): un replacementValue escrito a mano no lo toca
+  // la escalera, ni en el momento de la edición ni en un finishSession
+  // posterior — misma precedencia que ADR-028 le da a las ediciones frente a
+  // la renumeración. Único grupo de su tipo: su índice no cambia en la
+  // renumeración, así que ni siquiera se intenta recalcular.
+  it("hand-edited replacementValue survives finishSession and level selection", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: "Juan Perez",
+        normalizedValue: "juan perez",
+        bbox: makeBBox(0, 0, 150, 20),
+      }),
+    });
+    const [group] = engine.getSnapshot("doc-1").groups;
+    expect(group?.replacementValue).toBe("[PERSONA 01]");
+
+    const updated = await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group!.id,
+      patch: { replacementValue: "[CUSTOM TEXT]" },
+    });
+    expect(updated.replacementValue).toBe("[CUSTOM TEXT]");
+
+    // Member nuevo, MUY angosto, que degradaría un placeholder
+    // auto-generado hasta el fallback de nivel 2 — pero agregar una
+    // ocurrencia a un grupo existente nunca recalcula replacementValue
+    // (spec §13 caso 17), así que ni siquiera llega a competir con la
+    // edición manual.
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: "Juan Perez",
+        normalizedValue: "juan perez",
+        bbox: makeBBox(0, 200, 1, 1),
+      }),
+    });
+
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.REGEX_FINISHED, {
+      documentId: "doc-1",
+      occurrenceCount: 2,
+      durationMs: 1,
+    });
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.NER_FINISHED, {
+      documentId: "doc-1",
+      occurrenceCount: 0,
+      durationMs: 1,
+    });
+
+    const final = engine.getSnapshot("doc-1").groups[0];
+    expect(final?.members).toHaveLength(2);
+    // Único grupo de su tipo: su indexInType no cambia al renumerar, así que
+    // finishSession ni siquiera intenta recomputar el placeholder.
+    expect(final?.indexInType).toBe(1);
+    expect(final?.replacementValue).toBe("[CUSTOM TEXT]");
+  });
+
+  // ADR-057 §6: mask/synthetic/redact no participan de la escalera — un
+  // bbox tan angosto que degradaría un placeholder hasta el fallback de
+  // nivel 2 no cambia el valor de ninguno de los tres modos.
+  it("mask/synthetic/redact values unchanged by the abbreviation ladder", async () => {
+    const tinyBbox = makeBBox(0, 0, 1, 1);
+
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: "Juan Perez",
+        normalizedValue: "juan perez",
+        bbox: tinyBbox,
+      }),
+    });
+    const maskGroup = engine.getSnapshot("doc-1").groups[0]!;
+    const maskUpdated = await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: maskGroup.id,
+      patch: { replacementMode: ReplacementMode.Mask },
+    });
+    expect(maskUpdated.replacementValue).toBe(MASK_FORMAT_BY_TYPE[EntityType.Person]);
+
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: "Ana Diaz",
+        normalizedValue: "ana diaz",
+        bbox: tinyBbox,
+      }),
+    });
+    const synthGroup = engine
+      .getSnapshot("doc-1")
+      .groups.find((g) => g.canonicalValue === "Ana Diaz")!;
+    const synthUpdated = await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: synthGroup.id,
+      patch: { replacementMode: ReplacementMode.Synthetic },
+    });
+    const seed = engine["sessions"].get("doc-1")!.seed as string;
+    expect(synthUpdated.replacementValue).toBe(
+      synthesize(EntityType.Person, synthGroup.indexInType, seed),
+    );
+
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: "Beto Ruiz",
+        normalizedValue: "beto ruiz",
+        bbox: tinyBbox,
+      }),
+    });
+    const redactGroup = engine
+      .getSnapshot("doc-1")
+      .groups.find((g) => g.canonicalValue === "Beto Ruiz")!;
+    const redactUpdated = await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: redactGroup.id,
+      patch: { replacementMode: ReplacementMode.Redact },
+    });
+    expect(redactUpdated.replacementValue).toBe("");
+  });
+
+  // Caso 31 (§13, ADR-057 §7): tras reopenSession + finishSession, un member
+  // nuevo más angosto puede bajar el nivel del grupo (y cambiar su token)
+  // respecto de lo que el usuario ya vio — aceptado por el mismo criterio
+  // que el corrimiento de indexInType (caso 26).
+  it("reopenSession + finishSession with a narrower member changes the level", () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: "Juan Perez",
+        normalizedValue: "juan perez",
+        pageIndex: 1,
+        bbox: makeBBox(10, 50, 150, 20),
+      }),
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.REGEX_FINISHED, {
+      documentId: "doc-1",
+      occurrenceCount: 1,
+      durationMs: 1,
+    });
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.NER_FINISHED, {
+      documentId: "doc-1",
+      occurrenceCount: 0,
+      durationMs: 1,
+    });
+
+    const groupA = engine.getSnapshot("doc-1").groups[0];
+    expect(groupA?.indexInType).toBe(1);
+    expect(groupA?.replacementValue).toBe("[PERSONA 01]");
+
+    // Segunda pasada: un grupo nuevo ("Maria Lopez"), documentalmente
+    // ANTERIOR (pageIndex 0), desplaza a "Juan Perez" de índice 1 a 2; y una
+    // ocurrencia adicional de "Juan Perez", angosta, se suma como member.
+    engine.reopenSession("doc-1", { expectRegex: true, expectNer: false });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: "Maria Lopez",
+        normalizedValue: "maria lopez",
+        pageIndex: 0,
+        bbox: makeBBox(10, 50, 150, 20),
+      }),
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: "Juan Perez",
+        normalizedValue: "juan perez",
+        pageIndex: 1,
+        bbox: makeBBox(10, 80, 90, 20),
+      }),
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.REGEX_FINISHED, {
+      documentId: "doc-1",
+      occurrenceCount: 3,
+      durationMs: 1,
+    });
+
+    const groups = engine.getSnapshot("doc-1").groups;
+    const finalA = groups.find((g) => g.canonicalValue === "Juan Perez");
+    const finalM = groups.find((g) => g.canonicalValue === "Maria Lopez");
+    // "Maria Lopez" (page 0) pasa a ser la primera del documento; "Juan
+    // Perez" (page 1) baja a índice 2 — el mismo corrimiento que el caso 26
+    // acepta para indexInType.
+    expect(finalM?.indexInType).toBe(1);
+    expect(finalA?.indexInType).toBe(2);
+    expect(finalA?.members).toHaveLength(2);
+    // El member angosto (90) sumado en la segunda pasada baja el nivel de
+    // TODO el grupo: lo que el usuario vio como "[PERSONA 01]" pasa a
+    // "[PERS 02]" (índice Y nivel cambiaron a la vez).
+    expect(finalA?.replacementValue).toBe("[PERS 02]");
+    expect(finalM?.replacementValue).toBe("[PERSONA 01]");
+  });
 });
