@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("pdfjs-dist", () => ({ getDocument: vi.fn() }));
 
 import { RenderEngine } from "../render.engine.js";
+import { calibrateLineFont } from "../worker/kernel.js";
 
 import {
   createEngineContext,
@@ -25,6 +26,7 @@ import {
   getCreatedCanvases,
   installOffscreenCanvasStub,
   makeAnnotation,
+  makeLineRepaintScenario,
   makeReplacement,
   mockGetDocumentResult,
   readProtectedPdfFixtureBuffer,
@@ -722,6 +724,213 @@ describe("RenderEngine — unit tests", () => {
       expect(pooledEngine["documents"].has("doc-unload-garbage")).toBe(false);
 
       await pooledEngine.dispose();
+    });
+  });
+
+  // ─── ADR-058 §2-§6 (Hito 10.5, PR 5): repintado de línea por calibración ───
+  describe("repintado de línea por calibración (ADR-058 §2-§6)", () => {
+    it("line repaint does not trigger when the token fits (current path preserved)", async () => {
+      // Reemplazo con una caja ANCHA (el token entra a tamaño natural) pero
+      // con `lineWords` que, si el repintado se evaluara, cumplirían las
+      // cinco condiciones de activación (mismas vecinas que un escenario
+      // exitoso, ver `makeLineRepaintScenario`). El punto del test: aunque
+      // las condiciones estarían disponibles, el repintado NUNCA se evalúa
+      // porque el token entra — "si el token entra, no se repinta nada"
+      // (ADR-058 §2). El camino dibujado debe ser bit a bit el de antes de
+      // este PR: rectángulo blanco fijo, texto CENTRADO al tamaño natural,
+      // sin ninguna de las vecinas de `lineWords` dibujada.
+      const docId = "doc-repaint-fits";
+      const scenario = makeLineRepaintScenario({
+        replacement: { bbox: { x: 20, y: 10, width: 300, height: 14 } },
+      });
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument({
+            pageCount: 1,
+            pageFactory: () =>
+              createMockPage({ width: scenario.pageWidth, height: scenario.pageHeight }),
+          }),
+        ),
+      );
+      await engine.init(ctx);
+      await engine.loadDocument(docId, createValidBuffer());
+
+      await engine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+          replacements: [scenario.replacement],
+          lineWords: scenario.lineWords,
+        }),
+        ctx,
+      );
+
+      const [canvas] = getCreatedCanvases();
+      const fillTextCalls = canvas!.calls.filter((c) => c.op === "fillText");
+      // Un solo fillText (el token, centrado) — ninguna vecina se dibuja.
+      expect(fillTextCalls).toHaveLength(1);
+      expect(fillTextCalls[0]!.args[0]).toBe(scenario.replacement.replacementValue);
+      expect(fillTextCalls[0]!.args).toEqual([
+        scenario.replacement.replacementValue,
+        scenario.replacement.bbox.x + scenario.replacement.bbox.width / 2,
+        scenario.replacement.bbox.y + scenario.replacement.bbox.height / 2,
+        scenario.replacement.bbox.width,
+      ]);
+      // Fondo/texto de los colores FIJOS de siempre — no los muestreados
+      // (que solo entran en juego cuando el repintado sí se ejecuta).
+      const fillRectCalls = canvas!.calls.filter((c) => c.op === "fillRect");
+      expect(fillRectCalls).toHaveLength(1);
+      expect(fillRectCalls[0]!.fillStyle).toBe("#ffffff");
+      expect(fillTextCalls[0]!.fillStyle).toBe("#000000");
+      // Ninguna llamada a getImageData más allá de la captura final del
+      // raster: el muestreo de color de ADR-058 §4 nunca se ejecutó.
+      expect(canvas!.calls.filter((c) => c.op === "getImageData")).toHaveLength(1);
+    });
+
+    it("token that does not fit with lineWords absent falls back without error", async () => {
+      // Mismo espíritu que los tests de "shrink-to-fit" de ADR-058 §1 (PR1),
+      // pero nombrado explícitamente por el spec (Render_Engine.md §14) para
+      // documentar el contrato de ADR-058 §5: `lineWords` ausente nunca es un
+      // error, el kernel cae al camino existente sin lanzar ni loguear nada
+      // raro. Se verifica además que el muestreo de color de ADR-058 §4
+      // jamás se dispara (cero `getImageData` extra: `tryRepaintLine` falla
+      // la condición (a) antes de tocar el canvas).
+      const docId = "doc-repaint-no-linewords";
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+      );
+      await engine.init(ctx);
+      await engine.loadDocument(docId, createValidBuffer());
+
+      await expect(
+        engine.renderPage(
+          createRenderPageInput({
+            documentId: docId,
+            pageIndex: 0,
+            kind: "anonymized",
+            mode: "preview",
+            replacements: [
+              makeReplacement({
+                mode: ReplacementMode.Placeholder,
+                replacementValue: "[PERSONA MUY LARGA 01]",
+                bbox: { x: 5, y: 5, width: 18, height: 14 },
+              }),
+            ],
+            // `lineWords` deliberadamente ausente.
+          }),
+          ctx,
+        ),
+      ).resolves.toBeDefined();
+
+      const [canvas] = getCreatedCanvases();
+      const fillTextCalls = canvas!.calls.filter((c) => c.op === "fillText");
+      expect(fillTextCalls).toHaveLength(1);
+      // Camino existente de PR1: `maxWidth` = bbox.width, nunca se derrama.
+      expect(fillTextCalls[0]!.args[3]).toBe(18);
+      expect(fillTextCalls[0]!.drawnWidth).toBeLessThanOrEqual(18);
+      // Un único getImageData (la captura final del raster) — el muestreo de
+      // color de ADR-058 §4 nunca se ejecutó.
+      expect(canvas!.calls.filter((c) => c.op === "getImageData")).toHaveLength(1);
+    });
+
+    it("calibration picks the lowest-error candidate over a known set of widths", () => {
+      // Test puro sobre `calibrateLineFont` (exportada de `worker/kernel.js`
+      // solo para test directo, mismo criterio que `fitReplacementFont` —
+      // ADR-058 §3): NO pasa por `OffscreenCanvas` ni por `RenderEngine`. La
+      // medición inyectada da un ancho DISTINTO por cada combinación de
+      // familia/peso/estilo (a diferencia del stub de canvas compartido, que
+      // ignora la familia) para probar que la búsqueda de verdad compara los
+      // 12 candidatos y no solo devuelve el primero.
+      const familyRatio = (font: string): number => {
+        if (font.includes("monospace")) return 0.62;
+        if (font.includes("sans-serif")) return 0.55;
+        return 0.5; // serif
+      };
+      const measureByFont = (font: string, text: string): number => {
+        const sizeMatch = /(\d+(?:\.\d+)?)px/.exec(font);
+        const size = sizeMatch ? Number(sizeMatch[1]) : 0;
+        let ratio = familyRatio(font);
+        if (font.includes("bold ")) ratio += 0.05;
+        if (font.startsWith("italic ")) ratio += 0.02;
+        return text.length * size * ratio;
+      };
+
+      // Candidato objetivo: monospace/bold/normal → "bold 10px monospace",
+      // ratio 0.67 — no colisiona con ningún otro de los 12 (ver el detalle
+      // completo del cálculo en el reporte final del PR).
+      const targetFont = "bold 10px monospace";
+      const samples = ["Garcia", "vive", "en"].map((text) => ({
+        text,
+        actualWidth: measureByFont(targetFont, text),
+      }));
+
+      const result = calibrateLineFont(measureByFont, samples, 10);
+
+      expect(result.font).toBe(targetFont);
+      expect(result.errorRatio).toBe(0);
+    });
+
+    it("shift is uniform: relative distances between repainted words are preserved", async () => {
+      const docId = "doc-repaint-uniform-shift";
+      const scenario = makeLineRepaintScenario();
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument({
+            pageCount: 1,
+            pageFactory: () =>
+              createMockPage({ width: scenario.pageWidth, height: scenario.pageHeight }),
+          }),
+        ),
+      );
+      await engine.init(ctx);
+      await engine.loadDocument(docId, createValidBuffer());
+
+      await engine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+          replacements: [scenario.replacement],
+          lineWords: scenario.lineWords,
+        }),
+        ctx,
+      );
+
+      const [canvas] = getCreatedCanvases();
+      const fillTextCalls = canvas!.calls.filter((c) => c.op === "fillText");
+      // Token + dos vecinas = 3 fillText (el repintado sí se activó).
+      expect(fillTextCalls).toHaveLength(3);
+
+      const tokenCall = fillTextCalls.find(
+        (c) => c.args[0] === scenario.replacement.replacementValue,
+      );
+      const garciaCall = fillTextCalls.find((c) => c.args[0] === "Garcia");
+      const viveCall = fillTextCalls.find((c) => c.args[0] === "vive");
+      expect(tokenCall).toBeDefined();
+      expect(garciaCall).toBeDefined();
+      expect(viveCall).toBeDefined();
+
+      const [garciaWord, viveWord] = scenario.lineWords;
+
+      // El token se dibuja en bbox.x exactamente — no lleva delta, es el ancla
+      // (ADR-058 §2 paso 2: "dibujar el token en bbox.x").
+      expect(tokenCall!.args[1]).toBe(scenario.replacement.bbox.x);
+
+      // El delta uniforme se observa en el desplazamiento de CUALQUIER vecina
+      // respecto de su x original — acá se deriva de "Garcia" y se verifica
+      // que "vive" se desplazó exactamente lo mismo (paso 3: "desplazada por
+      // el delta", el mismo para todas).
+      const delta = (garciaCall!.args[1] as number) - garciaWord!.bbox.x;
+      expect((viveCall!.args[1] as number) - viveWord!.bbox.x).toBeCloseTo(delta, 6);
+
+      // Las distancias RELATIVAS entre las vecinas se preservan (reposicionamiento,
+      // no re-maquetado — ADR-058 §2, Contexto §6).
+      const originalGap = viveWord!.bbox.x - garciaWord!.bbox.x;
+      const newGap = (viveCall!.args[1] as number) - (garciaCall!.args[1] as number);
+      expect(newGap).toBeCloseTo(originalGap, 6);
     });
   });
 });
