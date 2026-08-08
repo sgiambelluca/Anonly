@@ -240,6 +240,15 @@ export interface RenderPagePayload {
   readonly annotations?: ReadonlyArray<Annotation>;
   readonly scale?: number;
   readonly imageFormat?: "png" | "jpeg";
+  // ADR-058 §5: palabras que comparten línea con algún reemplazo de esta página,
+  // seleccionadas host-side por una función pura del Orchestrator desde Page.words
+  // (precedente de reparto: fuseOcrPage, ADR-041). El kernel las usa para calibrar
+  // la tipografía y reposicionar la línea al repintarla.
+  // Se adjuntan SOLO cuando algún token podría no entrar (estimado con
+  // estimateTokenWidth, ADR-057 §5, con margen conservador). Ausente es el caso
+  // normal y nunca es un error: sin ellas el kernel cae al shrink-to-fit de
+  // ADR-058 §1. Incluye palabras de OCR (source: "ocr") igual que las de PDF.
+  readonly lineWords?: ReadonlyArray<Word>;
 }
 
 // ADR-047 §3: forma completa (reemplaza la anterior, inejecutable sin
@@ -265,6 +274,17 @@ export interface ExportPagePayload {
 export interface ExportSavePayload {
   readonly documentId: string;
   readonly metadata: ExportMetadata;
+  // ADR-059 §6: página de leyenda YA RASTERIZADA (la produce render-engine vía
+  // RenderPageProvider.renderLegend, mediado por el Orchestrator). El assembler la
+  // embebe con embedPng/embedJpg + addPage + drawImage, igual que una página del
+  // documento — el export sigue siendo 100% imagen, sin excepciones.
+  // Ausente cuando ExportOptions.includeMarkerLegend === false, o cuando no quedó
+  // ninguna fila tras el filtro de §2 (en ese caso no se agrega página).
+  // Viaja en `save` y no en `append-page` porque se aplica una sola vez al final,
+  // igual que la metadata (ADR-047 §3), y no tiene pageIndex del que ser idempotente.
+  readonly legendImage?: EncodedPageImage;
+  readonly legendPageWidthPt?: number;
+  readonly legendPageHeightPt?: number;
 }
 
 // ─── Payloads del transporte real de RenderWorker (Hito 10, ADR-036 §4 /
@@ -313,6 +333,41 @@ export interface RasterizePagePayload {
   readonly scale: number;
 }
 
+// Página de leyenda del export (ADR-059 §5). Viaja bajo jobType "render-page",
+// sin WorkerJobType nuevo, y es el QUINTO caso de la discriminación por forma del
+// entry-point (ADR-043 §4) — se reconoce por `"rows" in payload`.
+// Es el único payload de render-page SIN documentId: no corresponde a ninguna
+// página de ningún PDF, es un dibujo puro sobre un OffscreenCanvas en blanco.
+// Sin pageProxy, sin pdfjs, sin cache LRU, sin supersede, sin eventos — mismo
+// perfil que RasterizePagePayload (ADR-034 §1).
+export interface RenderLegendPayload {
+  readonly rows: ReadonlyArray<MarkerLegendRow>;
+  readonly pageWidthPt: number;
+  readonly pageHeightPt: number;
+  readonly imageFormat?: "png" | "jpeg";
+}
+
+// ADR-059 §3: la entrada de la leyenda NO tiene ningún campo capaz de transportar
+// contenido del documento — no hay canonicalValue, no hay originalValue, no hay
+// Document. Filtrar un valor original a la leyenda no requiere disciplina del
+// implementador: requiere cambiar este tipo. Mismo mecanismo que
+// `includeOriginalMetadata: false` de ADR-009 (garantía por tipos, no por convención).
+export interface MarkerLegendEntry {
+  readonly type: EntityType;
+  readonly prefixes: ReadonlyArray<string>; // p. ej. ["PERSONA", "PERS", "PRS"]
+  readonly markerCount: number;
+}
+
+// ADR-059 §5: lo que efectivamente cruza a render-engine. Strings YA COMPUESTOS:
+// el kernel dibuja texto y no ve EntityType ni EntityGroup, así que no gana ninguna
+// dependencia semántica sobre el dominio de entidades. La proyección
+// MarkerLegendEntry -> MarkerLegendRow vive host-side (buildMarkerLegend).
+export interface MarkerLegendRow {
+  readonly prefixes: string; // "PERSONA, PERS, PRS"
+  readonly typeName: string; // "Persona" (label de nivel 0 de ADR-057 §2, en título)
+  readonly countLabel: string; // "7 marcadores"
+}
+
 // Salida del kernel del NerWorker (COMPLETED { spans }, ADR-046 §1): spans de
 // entidad ya agregados desde los tokens BIO, con offsets relativos al texto
 // del batch. Sin bbox, sin wordSpan y sin id: el mapeo a Occurrence lo hace
@@ -342,6 +397,10 @@ export interface ExportOptions {
   readonly includeOriginalMetadata: false;
   readonly title?: string;
   readonly filename: string;
+  // ADR-059 §1: página final con la referencia `prefijo → tipo` de los marcadores
+  // que ADR-057 pudo abreviar. Default false: sin el flag, el export no cambia en
+  // nada. Con el flag, el PDF tiene document.pageCount + 1 páginas.
+  readonly includeMarkerLegend: boolean; // default false
 }
 
 export interface ExportMetadata {
