@@ -373,11 +373,11 @@ const MARKER_LEGEND_TYPE_NAME: Readonly<Record<EntityType, string>> = {
   [EntityType.Phone]: "Teléfono",
   [EntityType.Email]: "Email",
   [EntityType.IBAN]: "IBAN",
-  [EntityType.CreditCard]: "Tarjeta de crédito",
+  [EntityType.CreditCard]: "Tarjeta",
   [EntityType.Date]: "Fecha",
   [EntityType.License]: "Matrícula",
   [EntityType.Plate]: "Patente",
-  [EntityType.Custom]: "Personalizado",
+  [EntityType.Custom]: "Custom",
 };
 
 // ADR-057 formatea el placeholder como "[<LABEL> <NN>]" (nivel 0/1) o
