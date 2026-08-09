@@ -134,7 +134,7 @@ export interface Word {
 **Invariantes**
 - `confidence ∈ [0,1]`.
 - `pageIndex` coincide con la página contenedora.
-- `bbox` está en coordenadas de página (puntos PDF, origen esquina superior-izquierda).
+- `bbox` está en coordenadas de página (puntos PDF, origen esquina superior-izquierda). **Vale igual para `source: "ocr"`**: Tesseract devuelve píxeles del raster, y es `ocr-engine` quien los convierte a puntos antes de emitirlos (`OCR_Engine.md` §10, ADR-064). Ningún consumidor debe compensar por el DPI.
 
 ---
 
