@@ -260,7 +260,17 @@ Convención decimal, sin renumerar Hardening ni Release — la misma que el repo
 | 6 | Umbral y emisión de `AnnotationKind.Degraded` (ADR-058 §7) | `render-engine` | 5 |
 | 7 | `renderLegendPage` + `RenderLegendPayload` en el entry-point (ADR-059 §5) | `render-engine` | 2 |
 | 8 | Proyección, `buildMarkerLegend`, `RenderPageProvider.renderLegend` + su mediación, embebido en `savePdf` (ADR-059 §5-§6) | `export-engine` + `packages/anonymization-core/src` (**atómico**, excepción a R-1 justificada en ADR-059 §7) | 2, 7 |
-| 9 | Checkbox de leyenda + marca de degradación en el árbol | `apps/react-client` | 2 |
+| 9 | Checkbox de leyenda en el diálogo de export. **Sin la marca de degradación** — ver ADR-062 y las tres filas de abajo | `apps/react-client` | 2 |
+
+**La marca de degradación en el árbol sale del hito (ADR-062).** El veredicto que necesita ya se calcula, con el `groupId` puesto, y se descarta dentro del kernel: ni `KernelRenderResult` ni `RenderPageOutput` lo llevan. Es un problema de transporte, y resolverlo cruza `Contracts.md` → ADR primero (R-2/R-19). Se descartó explícitamente estimarlo en el cliente con `estimateTokenWidth`: sería una tercera fuente de verdad, junto al preview y al export, capaz de discrepar de los dos —justo lo que el umbral por razón de ADR-058 §7 existe para evitar— y sus falsos positivos mandan al usuario a arreglar grupos que se renderizan bien. Mientras tanto la señal no desaparece: el PR 6 ya pinta el recuadro `Degraded` sobre el canvas del preview; lo que falta es la afordancia accionable del árbol.
+
+| # | PR (posterior al hito, ADR-062 §7) | Módulo | Depende de |
+|---|---|---|---|
+| A | `PreviewUpdated.degraded?` (ADR-062 §1-§2) | `shared` | — |
+| B | `KernelRenderResult.degraded`, `InternalCacheEntry.degraded`, emisión desde `emitPreviewUpdated` **también en cache hit** (ADR-062 §4) | `render-engine` | A |
+| C | Mapa por página con reemplazo (no acumulación), filtro por `kind`, agregación por grupo y marca en el árbol con sus tres salidas (ADR-062 §3, §5) | `apps/react-client` | B |
+
+El campo va **opcional a propósito** (ADR-062 §2) para que esas tres caigan en commits de un módulo cada una con los gates verdes — la misma trampa de ordenamiento que produjo `RenderPageInput.lineWords` en este hito.
 
 Los PRs 1 y 2 no dependen de nada y pueden correr en paralelo. **El 4b va después del 5, no antes**: es un cableado de `packages/anonymization-core/src` cuyo literal `RenderPageInput` no compila hasta que `render-engine` declara `lineWords`, y meter esa línea en el commit del 4b mezclaría dos módulos (R-1). El orden 4 → 5 → 4b resuelve la cadena sin ninguna excepción; el gate manual del PR 5 se corre **al final, con el 4b puesto**, porque hasta entonces no llega ni un `lineWords` al motor y el repintado no se puede ver ni en el preview ni en el export. **El ADR y todas las actualizaciones de spec/doc se escriben antes de los PRs de implementación**, mismo criterio y misma excepción explícita a R-21 que ADR-056 §7: los implementadores arrancan con la documentación al día.
 
