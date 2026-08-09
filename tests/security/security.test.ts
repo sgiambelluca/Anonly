@@ -147,6 +147,17 @@ function createRealRenderPageProvider(): RenderPageProvider {
         heightPx: 1,
       });
     },
+    // ADR-059 §5: misma imagen mínima conocida — el objetivo de este archivo
+    // es probar que ningún valor original sobrevive en el ARTEFACTO final,
+    // no la rasterización de la leyenda (responsabilidad de render-engine).
+    renderLegend(_rows, _abortSignal): Promise<EncodedPageImage> {
+      return Promise.resolve({
+        bytes: base64ToArrayBuffer(MINIMAL_PNG_BASE64),
+        format: "png",
+        widthPx: 1,
+        heightPx: 1,
+      });
+    },
   };
 }
 
@@ -235,6 +246,7 @@ describe("export-engine — security", () => {
       dpi: 150,
       includeOriginalMetadata: false,
       filename: "anonimizado.pdf",
+      includeMarkerLegend: false,
     };
 
     const input: ExportEngineInput = {
@@ -292,6 +304,73 @@ describe("export-engine — security", () => {
       // efecto colateral de normalizedEntries() al dibujar la imagen). Ninguno
       // de los dos casos permite extraer texto: sin una entrada de fuente
       // real, no hay operador Tj/TJ válido posible.
+      expect(fontDict === undefined || fontDict.keys().length === 0).toBe(true);
+    }
+  });
+});
+
+// ADR-059 (Hito 10.5, PR 8) — mismo criterio y mismo dataset que arriba,
+// corridos específicamente sobre el camino CON leyenda activa
+// (`includeMarkerLegend: true`). `buildSensitiveGroups()` ya son `enabled` +
+// `placeholder` (DNI y Person), así que producen dos filas de leyenda.
+describe("export-engine — security (leyenda de marcadores, ADR-059)", () => {
+  let legendExportBuffer: ArrayBuffer;
+  let legendReloaded: PDFDocument;
+
+  beforeAll(async () => {
+    const engine = new ExportEngine();
+    const ctx = createEngineContext();
+    await engine.init(ctx);
+
+    const options: ExportOptions = {
+      imageFormat: "png",
+      jpegQuality: 0.85,
+      dpi: 150,
+      includeOriginalMetadata: false,
+      filename: "anonimizado.pdf",
+      includeMarkerLegend: true,
+    };
+
+    const input: ExportEngineInput = {
+      documentId: "doc-security-legend",
+      document: buildSensitiveDocument(),
+      groups: buildSensitiveGroups(),
+      rules: [],
+      options,
+      renderPageProvider: createRealRenderPageProvider(),
+    };
+
+    const result = await engine.export(input, ctx);
+    legendExportBuffer = result.buffer;
+    legendReloaded = await PDFDocument.load(legendExportBuffer, { updateMetadata: false });
+  });
+
+  it("has document.pageCount + 1 pages (ADR-059 §6)", () => {
+    expect(legendReloaded.getPageCount()).toBe(buildSensitiveDocument().pageCount + 1);
+  });
+
+  it("export buffer with legend contains no canonicalValue nor originalValue", async () => {
+    // Mismo criterio que "no original text recoverable in export": reserializa
+    // sin useObjectStreams para exponer el texto plano de cualquier string
+    // embebida, esta vez sobre el buffer que incluye la página de leyenda.
+    const uncompressed = await legendReloaded.save({ useObjectStreams: false });
+    const asText = Buffer.from(uncompressed).toString("latin1");
+
+    expect(asText).not.toContain(SENSITIVE_NAME);
+    expect(asText).not.toContain(SENSITIVE_DNI);
+    expect(asText).not.toContain(ORIGINAL_TITLE);
+  });
+
+  it("no page of the export contains text objects", () => {
+    // ADR-059 §4: la leyenda se rasteriza como cualquier otra página -- "el
+    // export es 100% imagen" deja de ser una convención y pasa a ser esta
+    // aserción de CI, incluida la página de leyenda.
+    const pages = legendReloaded.getPages();
+    expect(pages.length).toBeGreaterThan(0);
+    for (const page of pages) {
+      const resources = page.node.Resources();
+      const fontEntry = resources?.lookup(PDFName.of("Font"));
+      const fontDict = fontEntry instanceof PDFDict ? fontEntry : undefined;
       expect(fontDict === undefined || fontDict.keys().length === 0).toBe(true);
     }
   });

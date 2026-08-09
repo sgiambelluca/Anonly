@@ -3,8 +3,10 @@ import {
   EngineError,
   EngineErrorCode,
   EngineEvents,
+  EntityType,
   EventChannel,
   InvalidInputError,
+  ReplacementMode,
   type EngineContext,
   type Replacement,
 } from "@anonly/shared";
@@ -13,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("pdf-lib", () => ({ PDFDocument: { create: vi.fn() } }));
 
-import { ExportEngine } from "../export.engine.js";
+import { buildMarkerLegend, buildMarkerLegendEntries, ExportEngine } from "../export.engine.js";
 import {
   ExportFailedError,
   ExportNoEnabledGroupsError,
@@ -156,9 +158,8 @@ describe("ExportEngine — unit", () => {
       ctx,
     );
 
-    const renderFullMock = provider.renderFull as unknown as ReturnType<typeof vi.fn>;
-    const page0Call = renderFullMock.mock.calls.find((call) => call[0] === 0);
-    const page1Call = renderFullMock.mock.calls.find((call) => call[0] === 1);
+    const page0Call = provider.renderFull.mock.calls.find((call) => call[0] === 0);
+    const page1Call = provider.renderFull.mock.calls.find((call) => call[0] === 1);
     const page0Replacements = page0Call?.[1] as ReadonlyArray<Replacement>;
     const page1Replacements = page1Call?.[1] as ReadonlyArray<Replacement>;
 
@@ -532,6 +533,185 @@ describe("ExportEngine — unit", () => {
 
       await pooledEngine.dispose();
     });
+  });
+
+  // ─── ADR-059 (Hito 10.5, PR 8) — leyenda de marcadores ───
+
+  describe("Leyenda de marcadores (ADR-059)", () => {
+    it("legend groups by type and lists the distinct prefixes used, including mixed levels", () => {
+      // "[PERSONA 01]" (nivel 0) y "[PRS-02]" (nivel 2, ADR-057 §4): mismo
+      // EntityType, dos niveles distintos -- la fila tiene que listar los dos
+      // prefijos, no solo el primero.
+      const groupLevel0 = createEntityGroup({
+        id: "group-person-1",
+        type: EntityType.Person,
+        replacementValue: "[PERSONA 01]",
+        members: [
+          {
+            occurrenceId: "occ-1",
+            pageIndex: 0,
+            bbox: { x: 0, y: 0, width: 10, height: 10 },
+            source: DetectionSource.NER,
+          },
+          {
+            occurrenceId: "occ-2",
+            pageIndex: 1,
+            bbox: { x: 0, y: 0, width: 10, height: 10 },
+            source: DetectionSource.NER,
+          },
+        ],
+      });
+      const groupLevel2 = createEntityGroup({
+        id: "group-person-2",
+        type: EntityType.Person,
+        replacementValue: "[PRS-02]",
+        members: [
+          {
+            occurrenceId: "occ-3",
+            pageIndex: 0,
+            bbox: { x: 0, y: 0, width: 10, height: 10 },
+            source: DetectionSource.NER,
+          },
+        ],
+      });
+
+      const entries = buildMarkerLegendEntries([groupLevel0, groupLevel2]);
+      // markerCount = miembros (3), no grupos (2).
+      expect(entries).toEqual([
+        { type: EntityType.Person, prefixes: ["PERSONA", "PRS"], markerCount: 3 },
+      ]);
+
+      const rows = buildMarkerLegend(entries);
+      expect(rows).toEqual([
+        { prefixes: "PERSONA, PRS", typeName: "Persona", countLabel: "3 marcadores" },
+      ]);
+    });
+
+    it("mask/synthetic/redact groups and disabled groups produce no legend rows", () => {
+      const maskGroup = createEntityGroup({ id: "g-mask", replacementMode: ReplacementMode.Mask });
+      const syntheticGroup = createEntityGroup({
+        id: "g-synth",
+        replacementMode: ReplacementMode.Synthetic,
+      });
+      const redactGroup = createEntityGroup({
+        id: "g-redact",
+        replacementMode: ReplacementMode.Redact,
+      });
+      const disabledPlaceholder = createEntityGroup({ id: "g-disabled", enabled: false });
+
+      const entries = buildMarkerLegendEntries([
+        maskGroup,
+        syntheticGroup,
+        redactGroup,
+        disabledPlaceholder,
+      ]);
+
+      expect(entries).toEqual([]);
+    });
+
+    it("rows reaching renderLegend are composed strings, never EntityType or EntityGroup", async () => {
+      vi.mocked(PDFDocument.create).mockResolvedValue(asPdfDocument(createMockPdfLibDocument()));
+      await engine.init(ctx);
+      const provider = createMockRenderPageProvider();
+
+      await engine.export(
+        createExportEngineInput({
+          groups: [createEntityGroup()],
+          options: createExportOptions({ includeMarkerLegend: true }),
+          renderPageProvider: provider,
+        }),
+        ctx,
+      );
+
+      expect(provider.renderLegend).toHaveBeenCalledTimes(1);
+      const [rows] = provider.renderLegend.mock.calls[0] as [
+        ReadonlyArray<Record<string, unknown>>,
+        AbortSignal,
+      ];
+      expect(rows).toHaveLength(1);
+      for (const row of rows) {
+        // Ninguna clave de EntityGroup/EntityType (id, type, canonicalValue,
+        // members...) -- solo las tres de MarkerLegendRow, y todas string.
+        expect(Object.keys(row).sort()).toEqual(["countLabel", "prefixes", "typeName"]);
+        for (const value of Object.values(row)) {
+          expect(typeof value).toBe("string");
+        }
+      }
+    });
+
+    it("embeds the legend page with embedJpg when the legend image format is jpeg", async () => {
+      const mockDoc = createMockPdfLibDocument();
+      vi.mocked(PDFDocument.create).mockResolvedValue(asPdfDocument(mockDoc));
+      await engine.init(ctx);
+      const provider = createMockRenderPageProvider({
+        legendImage: {
+          bytes: new Uint8Array([9, 9, 9, 9]).buffer,
+          format: "jpeg",
+          widthPx: 50,
+          heightPx: 50,
+        },
+      });
+
+      await engine.export(
+        createExportEngineInput({
+          groups: [createEntityGroup()],
+          options: createExportOptions({ includeMarkerLegend: true }),
+          renderPageProvider: provider,
+        }),
+        ctx,
+      );
+
+      // 1 embedJpg de la página del documento (default "jpeg" en
+      // createExportOptions) + 1 más de la leyenda = 2.
+      expect(mockDoc["embedJpg"]).toHaveBeenCalledTimes(2);
+      expect(mockDoc["embedPng"]).not.toHaveBeenCalled();
+    });
+
+    it("does not duplicate the legend page when save() is retried after a mid-save failure", async () => {
+      const mockDoc = createMockPdfLibDocument({ saveFailTimes: 1 });
+      vi.mocked(PDFDocument.create).mockResolvedValue(asPdfDocument(mockDoc));
+      await engine.init(ctx);
+
+      const result = await engine.export(
+        createExportEngineInput({
+          document: createDocumentWithPageCount(1),
+          groups: [createEntityGroup()],
+          options: createExportOptions({ includeMarkerLegend: true }),
+        }),
+        ctx,
+      );
+
+      expect(result.buffer.byteLength).toBeGreaterThan(0);
+      expect(mockDoc["save"]).toHaveBeenCalledTimes(2);
+      // 1 página del documento + 1 leyenda = 2, incluso con un save()
+      // reintentado (guard de `state.appendedPages.size` en
+      // assembler.ts#savePdf -- sin él, este número sería 3).
+      expect(mockDoc["addPage"]).toHaveBeenCalledTimes(2);
+    });
+
+    it("renderLegend exceeding the export-page timeout fails the export", async () => {
+      vi.mocked(PDFDocument.create).mockResolvedValue(asPdfDocument(createMockPdfLibDocument()));
+      const shortTimeoutCtx = createEngineContext({
+        config: {
+          ...ctx.config,
+          workerPool: {
+            ...ctx.config.workerPool,
+            timeouts: { ...ctx.config.workerPool.timeouts, "export-page": 20 },
+          },
+        },
+      });
+      await engine.init(shortTimeoutCtx);
+
+      const provider = createMockRenderPageProvider();
+      provider.renderLegend.mockImplementation(() => new Promise(() => undefined));
+
+      const input = createExportEngineInput({
+        groups: [createEntityGroup()],
+        options: createExportOptions({ includeMarkerLegend: true }),
+        renderPageProvider: provider,
+      });
+      await expect(engine.export(input, shortTimeoutCtx)).rejects.toThrow(ExportFailedError);
+    }, 10_000);
   });
 });
 

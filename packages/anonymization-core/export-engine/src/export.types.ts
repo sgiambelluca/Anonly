@@ -30,6 +30,7 @@ import type {
   EncodedPageImage,
   EntityGroup,
   ExportOptions,
+  MarkerLegendRow,
   Replacement,
   Rule,
 } from "@anonly/shared";
@@ -40,6 +41,15 @@ export interface RenderPageProvider {
   renderFull(
     pageIndex: number,
     replacements: ReadonlyArray<Replacement>,
+    abortSignal: AbortSignal,
+  ): Promise<EncodedPageImage>;
+  // ADR-059 §5: mismo puerto, método nuevo — el kernel de Render dibuja
+  // strings ya compuestos (MarkerLegendRow), nunca EntityType ni EntityGroup.
+  // Implementado por el Orchestrator (único autorizado a hablarle a Export y
+  // Render, P-1); solo se invoca con ExportOptions.includeMarkerLegend activo
+  // y al menos una fila.
+  renderLegend(
+    rows: ReadonlyArray<MarkerLegendRow>,
     abortSignal: AbortSignal,
   ): Promise<EncodedPageImage>;
 }

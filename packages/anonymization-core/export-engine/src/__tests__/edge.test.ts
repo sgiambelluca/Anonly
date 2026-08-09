@@ -1,8 +1,12 @@
 import {
+  DetectionSource,
   EngineDisposedError,
   EngineErrorCode,
   EngineEvents,
+  EntityType,
+  EventChannel,
   InvalidInputError,
+  ReplacementMode,
   type EngineContext,
 } from "@anonly/shared";
 import { PDFDocument } from "pdf-lib";
@@ -16,11 +20,13 @@ import { ExportFailedError } from "../export.errors.js";
 import {
   asPdfDocument,
   createDocument,
+  createDocumentWithPageCount,
   createEngineContext,
   createEntityGroup,
   createExportEngineInput,
   createExportOptions,
   createMockPdfLibDocument,
+  createMockRenderPageProvider,
   createResolvedExportPool,
 } from "./fixtures/test-helpers.js";
 
@@ -197,6 +203,111 @@ describe("ExportEngine — edge cases", () => {
 
         await pooledEngine.dispose();
       }
+    });
+  });
+
+  // ─── ADR-059 (Hito 10.5, PR 8) — leyenda de marcadores ───
+
+  describe("Leyenda de marcadores (ADR-059)", () => {
+    it("legend active with no placeholder groups adds no page, does not call renderLegend, and warns", async () => {
+      const mockDoc = createMockPdfLibDocument();
+      vi.mocked(PDFDocument.create).mockResolvedValue(asPdfDocument(mockDoc));
+      await engine.init(ctx);
+      const provider = createMockRenderPageProvider();
+      const warnSpy = vi.spyOn(ctx.logger, "warn");
+
+      await engine.export(
+        createExportEngineInput({
+          document: createDocumentWithPageCount(2),
+          groups: [createEntityGroup({ replacementMode: ReplacementMode.Mask })],
+          options: createExportOptions({ includeMarkerLegend: true }),
+          renderPageProvider: provider,
+        }),
+        ctx,
+      );
+
+      expect(provider.renderLegend).not.toHaveBeenCalled();
+      // Nunca una página en blanco: exactamente pageCount, sin la extra.
+      expect(mockDoc["addPage"]).toHaveBeenCalledTimes(2);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("leyenda"),
+        expect.objectContaining({ documentId: expect.any(String) }),
+      );
+    });
+
+    it("all 13 entity types still fit in a single legend page", async () => {
+      const mockDoc = createMockPdfLibDocument();
+      vi.mocked(PDFDocument.create).mockResolvedValue(asPdfDocument(mockDoc));
+      await engine.init(ctx);
+      const provider = createMockRenderPageProvider();
+
+      const allTypes = Object.values(EntityType);
+      const groups = allTypes.map((type, index) =>
+        createEntityGroup({
+          id: `group-${type}`,
+          type,
+          replacementValue: `[${type} 01]`,
+          members: [
+            {
+              occurrenceId: `occ-${type}`,
+              pageIndex: 0,
+              bbox: { x: 0, y: index * 10, width: 10, height: 10 },
+              source: DetectionSource.Regex,
+            },
+          ],
+        }),
+      );
+
+      await engine.export(
+        createExportEngineInput({
+          groups,
+          options: createExportOptions({ includeMarkerLegend: true }),
+          renderPageProvider: provider,
+        }),
+        ctx,
+      );
+
+      expect(provider.renderLegend).toHaveBeenCalledTimes(1);
+      const [rows] = provider.renderLegend.mock.calls[0] as [ReadonlyArray<unknown>, AbortSignal];
+      expect(rows).toHaveLength(13);
+      // Caso 24: la leyenda es SIEMPRE una sola página, sin importar cuántos
+      // tipos distintos aparezcan -- 1 página del documento + 1 de leyenda.
+      expect(mockDoc["addPage"]).toHaveBeenCalledTimes(2);
+    });
+
+    it("renderLegend failure retries and then fails the export; never a half-assembled PDF", async () => {
+      const mockDoc = createMockPdfLibDocument();
+      vi.mocked(PDFDocument.create).mockResolvedValue(asPdfDocument(mockDoc));
+      await engine.init(ctx);
+      const provider = createMockRenderPageProvider({
+        legendError: new Error("renderLegend explotó"),
+      });
+      const emitSpy = vi.spyOn(ctx.bus, "emit");
+
+      await expect(
+        engine.export(
+          createExportEngineInput({
+            groups: [createEntityGroup()],
+            options: createExportOptions({ includeMarkerLegend: true }),
+            renderPageProvider: provider,
+          }),
+          ctx,
+        ),
+      ).rejects.toThrow(ExportFailedError);
+
+      // Intento inicial + 1 retry (MAX_RETRIES=1) -- mismo patrón que exportPage.
+      expect(provider.renderLegend).toHaveBeenCalledTimes(2);
+      // Nunca llega a save(): el PDF nunca queda a medio ensamblar ni se
+      // emite EXPORT_FINISHED sobre un documento incompleto (caso 25).
+      expect(mockDoc["save"]).not.toHaveBeenCalled();
+      expect(emitSpy).toHaveBeenCalledWith(
+        EventChannel.Export,
+        EngineEvents.EXPORT_FAILED,
+        expect.anything(),
+      );
+      expect(emitSpy.mock.calls.some(([, event]) => event === EngineEvents.EXPORT_FINISHED)).toBe(
+        false,
+      );
     });
   });
 });

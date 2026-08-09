@@ -54,7 +54,14 @@ describe("ExportEngine — cancellation", () => {
       if (pageIndex === 0) return page0Promise;
       return Promise.resolve(SAMPLE_IMAGE);
     });
-    const provider: RenderPageProvider = { renderFull };
+    // includeMarkerLegend es false por defecto (createExportOptions): renderLegend
+    // nunca debería invocarse en este test — el reject explícito lo demuestra.
+    const provider: RenderPageProvider = {
+      renderFull,
+      renderLegend: vi.fn(() =>
+        Promise.reject(new Error("renderLegend no debería invocarse en este test")),
+      ),
+    };
 
     const abortController = new AbortController();
     const cancelCtx: EngineContext = createEngineContext({ abortSignal: abortController.signal });
@@ -120,7 +127,12 @@ describe("ExportEngine — cancellation", () => {
       engine.export(
         createExportEngineInput({
           document: createDocumentWithPageCount(5),
-          renderPageProvider: { renderFull },
+          renderPageProvider: {
+            renderFull,
+            renderLegend: vi.fn(() =>
+              Promise.reject(new Error("renderLegend no debería invocarse en este test")),
+            ),
+          },
         }),
         cancelCtx,
       ),
