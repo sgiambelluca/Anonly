@@ -235,6 +235,196 @@ describe("PdfEngine — unit tests", () => {
     });
   });
 
+  // ADR-063: geometría del bbox derivada de la matriz completa [a,b,c,d,e,f],
+  // no solo de la traslación. Casos 18-21 de PDF_Engine.md §13.
+  describe("Rotated text bbox geometry (ADR-063)", () => {
+    it("rotated 90 TextItem yields a swapped bbox", async () => {
+      // Mismos números que ADR-063, Contexto §2 (sello de firma vertical
+      // medido sobre una pericia real): matriz [0,16,-16,0,46,400], 19
+      // caracteres sin espacios (un solo token). Geometría real esperada:
+      // x=30, y=269, width=16 (=item.height), height=173 (=item.width).
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () => ({
+            getViewport: vi.fn(() => ({ width: 596, height: 842 })),
+            getTextContent: vi.fn(() =>
+              Promise.resolve({
+                items: [
+                  {
+                    str: "S".repeat(19),
+                    transform: [0, 16, -16, 0, 46, 400],
+                    width: 173,
+                    height: 16,
+                  },
+                ],
+              }),
+            ),
+          })),
+        ),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-rot-90"), ctx);
+      const bbox = output.document.pages[0]!.words[0]!.bbox;
+
+      expect(bbox).toEqual({ x: 30, y: 269, width: 16, height: 173 });
+    });
+
+    it("rotated 180 and 270 TextItems yield the correct envelope", async () => {
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(2, (i) => {
+            if (i === 0) {
+              // 180°: dir=(-1,0), up=(0,-1). El texto sigue "horizontal" en
+              // extensión (sin swap de width/height), origen en la esquina
+              // opuesta.
+              return {
+                getViewport: vi.fn(() => ({ width: 595, height: 800 })),
+                getTextContent: vi.fn(() =>
+                  Promise.resolve({
+                    items: [
+                      { str: "Rot180", transform: [-1, 0, 0, -1, 100, 500], width: 50, height: 20 },
+                    ],
+                  }),
+                ),
+              };
+            }
+            // 270°: dir=(0,-1), up=(1,0). Swap de width/height, igual que 90°.
+            return {
+              getViewport: vi.fn(() => ({ width: 595, height: 800 })),
+              getTextContent: vi.fn(() =>
+                Promise.resolve({
+                  items: [
+                    { str: "Rot270", transform: [0, -1, 1, 0, 100, 200], width: 50, height: 20 },
+                  ],
+                }),
+              ),
+            };
+          }),
+        ),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-rot-180-270"), ctx);
+
+      const bbox180 = output.document.pages[0]!.words[0]!.bbox;
+      expect(bbox180).toEqual({ x: 50, y: 300, width: 50, height: 20 });
+
+      const bbox270 = output.document.pages[1]!.words[0]!.bbox;
+      expect(bbox270).toEqual({ x: 100, y: 600, width: 20, height: 50 });
+    });
+
+    it("horizontal TextItem bbox is unchanged by the matrix-aware formula", async () => {
+      // Caso 21: garantía de no regresión. Escala != 1 (a=d=3) para probar
+      // que dir/up se normalizan y el resultado depende solo de item.width /
+      // item.height, igual que la fórmula anterior a ADR-063 (x=e,
+      // y=pageHeight-f-height, width=item.width, height=item.height).
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () => ({
+            getViewport: vi.fn(() => ({ width: 595, height: 842 })),
+            getTextContent: vi.fn(() =>
+              Promise.resolve({
+                items: [
+                  { str: "Horizontal", transform: [3, 0, 0, 3, 50, 800], width: 60, height: 12 },
+                ],
+              }),
+            ),
+          })),
+        ),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-rot-0"), ctx);
+      const bbox = output.document.pages[0]!.words[0]!.bbox;
+
+      expect(bbox).toEqual({ x: 50, y: 30, width: 60, height: 12 });
+    });
+
+    it("prorated tokens of a rotated run advance along the writing axis", async () => {
+      // Run a 90° con dos tokens ("AA", "BB"; charWidth = 100/5 = 20 exacto).
+      // ADR-063 §3: el desplazamiento por token corre sobre dir, no sobre x.
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () => ({
+            getViewport: vi.fn(() => ({ width: 595, height: 800 })),
+            getTextContent: vi.fn(() =>
+              Promise.resolve({
+                items: [
+                  { str: "AA BB", transform: [0, 16, -16, 0, 100, 200], width: 100, height: 16 },
+                ],
+              }),
+            ),
+          })),
+        ),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-rot-token-advance"), ctx);
+      const words = output.document.pages[0]!.words;
+
+      const wordAA = words.find((w) => w.text === "AA");
+      const wordBB = words.find((w) => w.text === "BB");
+      expect(wordAA).toBeDefined();
+      expect(wordBB).toBeDefined();
+
+      // x constante entre tokens del mismo run (el avance corre sobre dir=(0,1)).
+      expect(wordAA!.bbox.x).toBe(wordBB!.bbox.x);
+      // y decreciente token a token: "AA" antecede a "BB" en el orden de
+      // escritura del run, y avanzar en ese orden hace decrecer y (coords
+      // arriba-izquierda).
+      expect(wordAA!.bbox.y).toBeGreaterThan(wordBB!.bbox.y);
+    });
+
+    it("arbitrary rotation yields an envelope containing all four corners", async () => {
+      // 45°: ni exacto (0/90/180/270) ni degenerado. La envolvente debe
+      // contener los cuatro vértices del paralelogramo (ADR-063 §2, caso 19).
+      const theta = Math.PI / 4;
+      const a = Math.cos(theta);
+      const b = Math.sin(theta);
+      const c = -Math.sin(theta);
+      const d = Math.cos(theta);
+      const e = 200;
+      const f = 200;
+      const width = 100;
+      const height = 20;
+      const pageHeight = 800;
+
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () => ({
+            getViewport: vi.fn(() => ({ width: 595, height: pageHeight })),
+            getTextContent: vi.fn(() =>
+              Promise.resolve({
+                items: [{ str: "Diagonal45", transform: [a, b, c, d, e, f], width, height }],
+              }),
+            ),
+          })),
+        ),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-rot-45"), ctx);
+      const bbox = output.document.pages[0]!.words[0]!.bbox;
+
+      const corners = [
+        { x: e, y: f },
+        { x: e + a * width, y: f + b * width },
+        { x: e + c * height, y: f + d * height },
+        { x: e + a * width + c * height, y: f + b * width + d * height },
+      ];
+
+      const EPSILON = 1e-9;
+      for (const corner of corners) {
+        const topLeftY = pageHeight - corner.y;
+        expect(corner.x).toBeGreaterThanOrEqual(bbox.x - EPSILON);
+        expect(corner.x).toBeLessThanOrEqual(bbox.x + bbox.width + EPSILON);
+        expect(topLeftY).toBeGreaterThanOrEqual(bbox.y - EPSILON);
+        expect(topLeftY).toBeLessThanOrEqual(bbox.y + bbox.height + EPSILON);
+      }
+    });
+  });
+
   describe("Timeout handling (ADR-020 §5)", () => {
     it("throws PdfTimeoutError with documentId when page parse exceeds timeout", async () => {
       vi.useFakeTimers();

@@ -377,6 +377,55 @@ describe("PdfEngine — edge case tests", () => {
     });
   });
 
+  // Caso 20 (§13, ADR-063): matriz degenerada (a=b=0, o c=d=0) no divide por
+  // cero — el versor correspondiente cae al comportamiento horizontal.
+  describe("Caso 20: matriz de transform degenerada (ADR-063)", () => {
+    it("degenerate transform matrix does not divide by zero", async () => {
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () => ({
+            getViewport: vi.fn(() => ({ width: 595, height: 500 })),
+            getTextContent: vi.fn(() =>
+              Promise.resolve({
+                items: [
+                  // a=b=0 (dir degenerado) -> dir cae a (1,0); c=0,d=1 válido.
+                  { str: "Deg1", transform: [0, 0, 0, 1, 100, 100], width: 50, height: 10 },
+                  // c=d=0 (up degenerado) -> up cae a (0,1); a=1,b=0 válido.
+                  { str: "Deg2", transform: [1, 0, 0, 0, 200, 200], width: 40, height: 8 },
+                ],
+              }),
+            ),
+          })),
+        ),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-degenerate-matrix"), ctx);
+      const words = output.document.pages[0]!.words;
+
+      const wordDeg1 = words.find((w) => w.text === "Deg1");
+      const wordDeg2 = words.find((w) => w.text === "Deg2");
+      expect(wordDeg1).toBeDefined();
+      expect(wordDeg2).toBeDefined();
+
+      for (const value of [
+        wordDeg1!.bbox.x,
+        wordDeg1!.bbox.y,
+        wordDeg1!.bbox.width,
+        wordDeg1!.bbox.height,
+        wordDeg2!.bbox.x,
+        wordDeg2!.bbox.y,
+        wordDeg2!.bbox.width,
+        wordDeg2!.bbox.height,
+      ]) {
+        expect(Number.isNaN(value)).toBe(false);
+      }
+
+      expect(wordDeg1!.bbox).toEqual({ x: 100, y: 390, width: 50, height: 10 });
+      expect(wordDeg2!.bbox).toEqual({ x: 200, y: 292, width: 40, height: 8 });
+    });
+  });
+
   // Caso 13 (§13): process llamado tras dispose.
   describe("Caso 13: process llamado tras dispose", () => {
     it("process after dispose throws", async () => {

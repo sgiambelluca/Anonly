@@ -152,13 +152,65 @@ async function parsePageTextWithTimeout(
   }
 }
 
+interface Vector2 {
+  readonly x: number;
+  readonly y: number;
+}
+
+/*
+ * ADR-063 §1: versores de avance (dir) y ascenso (up) desde la parte lineal
+ * [a, b, c, d] de la matriz de PDF.js. Degenerado (magnitud 0, §13 caso 20):
+ * cae al comportamiento horizontal en vez de dividir por cero.
+ */
+function unitVectorOrDefault(x: number, y: number, fallback: Vector2): Vector2 {
+  const magnitude = Math.hypot(x, y);
+  if (magnitude === 0) return fallback;
+  return { x: x / magnitude, y: y / magnitude };
+}
+
+/*
+ * ADR-063 §2: el bbox de un run/token es la envolvente axis-aligned del
+ * paralelogramo origin -> +dir·width -> +up·height, convertida a origen
+ * arriba-izquierda (y = pageHeight - yMax). Con dir=(1,0)/up=(0,1) (0°) se
+ * reduce carácter por carácter a la fórmula anterior a ADR-063 (§13 caso 21):
+ * no hay regresión para texto horizontal.
+ */
+function boundingBoxFromParallelogram(
+  origin: Vector2,
+  dir: Vector2,
+  up: Vector2,
+  width: number,
+  height: number,
+  pageHeight: number,
+): BoundingBox {
+  const corners: readonly Vector2[] = [
+    origin,
+    { x: origin.x + dir.x * width, y: origin.y + dir.y * width },
+    { x: origin.x + up.x * height, y: origin.y + up.y * height },
+    {
+      x: origin.x + dir.x * width + up.x * height,
+      y: origin.y + dir.y * width + up.y * height,
+    },
+  ];
+
+  const xs = corners.map((p) => p.x);
+  const ys = corners.map((p) => p.y);
+  const xMin = Math.min(...xs);
+  const xMax = Math.max(...xs);
+  const yMin = Math.min(...ys);
+  const yMax = Math.max(...ys);
+
+  return { x: xMin, y: pageHeight - yMax, width: xMax - xMin, height: yMax - yMin };
+}
+
 /*
  * ADR-020 §1: PDF.js devuelve un TextItem por run (frecuentemente línea/frase
  * entera), no por palabra. Se divide str por whitespace en Words individuales,
- * prorrateando x/width linealmente por longitud de caracteres (aproximación:
- * asume ancho de carácter constante dentro del run). y/height se conservan.
- * Con un solo token, se conserva el bbox del item completo (comportamiento
- * previo) y solo se aplica normalización NFC (ADR-020 §2).
+ * prorrateando el avance linealmente por longitud de caracteres (aproximación:
+ * asume ancho de carácter constante dentro del run). Con un solo token, se
+ * conserva el bbox del item completo (comportamiento previo) y solo se aplica
+ * normalización NFC (ADR-020 §2). ADR-063 §3: el prorrateo corre sobre el eje
+ * de avance (dir), no sobre x — para dir=(1,0) las dos expresiones coinciden.
  */
 function convertTextItemsToWords(
   textContent: TextContentLike,
@@ -171,17 +223,31 @@ function convertTextItemsToWords(
     if (!item.str || item.str.trim().length === 0 || !item.transform) continue;
 
     const str = item.str;
-    const x = item.transform[4] ?? 0;
-    const baselineY = item.transform[5] ?? 0;
+    const originX = item.transform[4] ?? 0;
+    const originY = item.transform[5] ?? 0;
     const width = item.width ?? 0;
     const height = item.height ?? 12;
-    const y = pageHeight - baselineY - height;
+    const dir = unitVectorOrDefault(item.transform[0] ?? 0, item.transform[1] ?? 0, {
+      x: 1,
+      y: 0,
+    });
+    const up = unitVectorOrDefault(item.transform[2] ?? 0, item.transform[3] ?? 0, {
+      x: 0,
+      y: 1,
+    });
 
     const tokens = [...str.matchAll(/\S+/g)];
 
     if (tokens.length <= 1) {
       const text = (tokens[0]?.[0] ?? str).normalize("NFC");
-      const bbox: BoundingBox = { x, y, width, height };
+      const bbox = boundingBoxFromParallelogram(
+        { x: originX, y: originY },
+        dir,
+        up,
+        width,
+        height,
+        pageHeight,
+      );
       words.push({ text, bbox, pageIndex, confidence: 1.0, source: "pdf" });
       continue;
     }
@@ -191,12 +257,19 @@ function convertTextItemsToWords(
       const tokenText = token[0];
       if (tokenText === undefined) continue;
       const offset = token.index ?? 0;
-      const bbox: BoundingBox = {
-        x: x + charWidth * offset,
-        y,
-        width: charWidth * tokenText.length,
-        height,
+      const advance = charWidth * offset;
+      const tokenOrigin: Vector2 = {
+        x: originX + dir.x * advance,
+        y: originY + dir.y * advance,
       };
+      const bbox = boundingBoxFromParallelogram(
+        tokenOrigin,
+        dir,
+        up,
+        charWidth * tokenText.length,
+        height,
+        pageHeight,
+      );
       words.push({
         text: tokenText.normalize("NFC"),
         bbox,
