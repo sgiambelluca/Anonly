@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-mvp | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,adr/ADR-011-Grouping-First.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md | audiencia=humanos+IA | fase=10-cierre (Hitos 1–10 cerrados y mergeados a main; pendientes puntuales diferidos a Hito 11 anotados por hito; antes de arrancar el Hito 11 queda la revisión integral de Hito10_Observaciones_Revision.md y los ADR-053/054/055 de los hallazgos del cierre — ver el bloque CERRADO al final del Hito 10. §4 gana los Hitos **10.5** —legibilidad del reemplazo, ADR-057/058/059— y **10.6** —reemplazo por género, ADR-060—, y **10.7** —agregado manual de entidades, ADR-061—, insertados con la convención decimal del repo sin renumerar Hardening ni Release) -->
+<!-- CONTEXT: scope=roadmap-mvp | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,adr/ADR-011-Grouping-First.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md | audiencia=humanos+IA | fase=10-cierre (Hitos 1–10 cerrados y mergeados a main; pendientes puntuales diferidos a Hito 11 anotados por hito; antes de arrancar el Hito 11 queda la revisión integral de Hito10_Observaciones_Revision.md y los ADR-053/054/055 de los hallazgos del cierre — ver el bloque CERRADO al final del Hito 10. §4 gana los Hitos **10.5** —legibilidad del reemplazo, ADR-057/058/059— y **10.6** —reemplazo por género, ADR-060—, y **10.7** —agregado manual de entidades, ADR-061—, y **10.8** —texto rotado y páginas con texto nativo parcial, ADR-063 + ADR pendiente del paso 2—, insertados con la convención decimal del repo sin renumerar Hardening ni Release) -->
 
 # Anonly — Roadmap MVP
 
@@ -324,6 +324,27 @@ Los PRs 4, 5 y 6 son independientes entre sí una vez mergeado el 3. **El punto 
 **Cierra de paso un hueco preexistente**: el cliente no tiene dimensiones reales de página (`PageCanvas` las estima en `pageLayout.ts`, con un comentario reconociéndolo). El hit-test las necesita, así que `getPageSize` corrige esa aproximación.
 
 **Dos cosas asumidas conscientemente**: la búsqueda es exacta —insensible a mayúsculas y acentos, pero "J. Pérez" no encuentra "José Pérez"—, anotada como trabajo futuro en `Future_Ideas.md`; y cada agregado dispara `finishSession`, así que los índices de los grupos ya vistos pueden correrse (ADR-028 se conserva intacto, decisión explícita).
+
+### Hito 10.8 — Texto rotado y páginas con texto nativo parcial
+
+No sale de `Cambios para hacer.txt`: sale de **probar la herramienta sobre una pericia judicial real**. Sobre ese documento, una página se anonimizaba mal de dos formas independientes, y las dos son bugs con respuesta correcta conocida — no decisiones de producto.
+
+**Paso 1 — el bbox del texto rotado** (ADR-063). `convertTextItemsToWords` usa solo la traslación de la matriz de PDF.js e ignora `[a, b, c, d]`, que es donde vive la rotación. Un sello de firma vertical (matriz `[0, 16, -16, 0]`) producía una caja de 173×16 pt horizontal donde el texto real ocupa 16×173 pt vertical: cajas que **no se solapan**, y la errónea invadía la imagen de la firma. Se resuelve derivando la geometría de la matriz completa y tomando la envolvente axis-aligned del paralelogramo del run. Para 0° la fórmula nueva es idéntica a la anterior, así que el texto horizontal no puede regresionar. No toca `BoundingBox` ni el orden de lectura. El texto rotado no es exótico: sellos, marcas de agua y folios laterales de expedientes se dibujan a 90° y aparecen en **todas** las páginas.
+
+**Paso 2 — OCR de páginas con texto nativo parcial** (ADR pendiente). `requiresOCR = words.length === 0`: basta **una** palabra nativa para que la página nunca vaya a OCR. En la pericia, la firma digital aportaba esa palabra, y por eso el 55% de la página —una imagen con el fiscal responsable adentro— no se escaneó nunca. El dato salió sin anonimizar. El diseño está calibrado contra seis arquetipos de página (medición previa al ADR): una compuerta por presencia de image XObjects vía `getOperatorList()` —**3,7 ms/página**, 0,7 s en 200 páginas contra 160 s de presupuesto— y una segunda por **mayor rectángulo vacío inscrito dentro de cada imagen, normalizado por el área de esa imagen**. Esa normalización es lo que separa un escaneo ya buscable (11-20%, el hueco es una franja de margen) de una imagen con texto oculto (102% en el caso real): dos métricas más simples —área de imagen sin texto, y mayor región contigua— se probaron primero y **fallan** sobre el escaneo con capa OCR, que es el falso positivo que haría 10x más lento cualquier expediente escaneado. El recorte que devuelve la métrica es, literalmente, lo que se manda a OCR: se OCR-ea la región, no la página, y por construcción no hay solapamiento con texto nativo, así que la fusión es concatenación y no necesita dedupe.
+
+| # | PR | Módulo | Depende de |
+|---|---|---|---|
+| 1 | ADR-063 + `PDF_Engine.md` (docs) | — | — |
+| 2 | Geometría del bbox desde la matriz completa | `pdf-engine` | 1 |
+| 3 | ADR de la compuerta + `Contracts.md`, `Render_Engine.md`, `PDF_Engine.md`, `OCR_Engine.md`, `Orchestrator.md` (docs) | — | — |
+| 4 | Región en `rasterizePage` | `render-engine` | 3 |
+| 5 | Compuertas 1 y 2, `fuseOcrPage` concatenando | `pdf-engine` | 3, 4 |
+| 6 | Cableado del stage de OCR por región | `packages/anonymization-core/src` | 5 |
+
+Los pasos 1 y 2 son independientes entre sí: el orden 1→2 es por tamaño y aislamiento, no por dependencia técnica (se verificó que el bbox erróneo **no** corrompe la métrica de la compuerta 2 en el documento medido: 55,5% contra 55,1%).
+
+**Dos cosas que este hito deja anotadas y no resuelve**, las dos por decisión explícita del humano: el **riesgo latente de solapamiento** (ADR-063 §6) — un bbox correcto sobre un sello que pisa el cuerpo del texto tapa lo que hay debajo, medido en 10-14 fragmentos por página, hoy inactivo porque nada dentro de ese sello se detecta; y la **discrepancia de rotación a nivel de página** (ADR-063 §7) — `Render_Engine.md` §13 caso 15 promete una garantía que el motor no da, sin ningún dato para calibrarla porque las páginas medidas tienen `rotate = 0`.
 
 ### Hito 11 — Hardening
 - Performance gates (todas las métricas de `00_Project_Vision.md` §7).
