@@ -14,6 +14,7 @@ export interface ExportFormState {
   readonly dpi: number;
   /** Cadena vacía = sin título (campo opcional de `ExportOptions`). */
   readonly title: string;
+  readonly includeMarkerLegend: boolean;
 }
 
 export interface ExportValidationResult {
@@ -63,6 +64,7 @@ export function buildExportOptions(form: ExportFormState): ExportOptions | null 
     dpi: form.dpi,
     includeOriginalMetadata: false,
     filename: form.filename.trim(),
+    includeMarkerLegend: form.includeMarkerLegend,
     ...(trimmedTitle !== "" ? { title: trimmedTitle } : {}),
   };
 }
