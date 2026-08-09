@@ -41,7 +41,9 @@ import {
   type BoundingBox,
   type EncodedPageImage,
   type LoadDocumentPayload,
+  type MarkerLegendRow,
   type RasterizePagePayload,
+  type RenderLegendPayload,
   type RenderPagePayload,
   type Replacement,
   type UnloadDocumentPayload,
@@ -1214,6 +1216,116 @@ export async function kernelRasterizePage(
   if (opts.abortSignal.aborted) throw new CancelledError(documentId);
 
   return context2d.getImageData(0, 0, viewport.width, viewport.height);
+}
+
+// ─── ADR-059 §5 (Hito 10.5, PR 7) — página de leyenda del export ───
+//
+// `createCanvas`/`get2dContext`/`encodeImageData`/`toPageFailure` (arriba)
+// están tipados para pedir `documentId`/`pageIndex` porque el resto del
+// kernel sí los tiene. `renderLegendPage` no tiene ninguno de los dos — no
+// corresponde a ninguna página de ningún PDF (spec §13 caso 29) — así que se
+// les pasa un rótulo sintético fijo, usado únicamente en mensajes de
+// diagnóstico (nunca contenido del documento, Code_Standards.md §9). Reusar
+// estos tres helpers tal cual, en vez de duplicarlos sin `documentId`/
+// `pageIndex`, es lo que mantiene a esta operación con el mismo
+// comportamiento de errores (OffscreenCanvas no disponible, `convertToBlob`
+// falla) que el resto del kernel.
+const LEGEND_DOCUMENT_LABEL = "(legend)";
+const LEGEND_PAGE_LABEL = -1;
+
+// Layout (ADR-059 §5, Render_Engine.md §6/§13 caso 29): tabla de hasta 13
+// filas (cota de `EntityType`, ADR-059 §2) a `y` incremental con columnas a
+// `x` fijas — sin salto de línea, sin paginación. El espaciado/tipografía
+// exactos no están en el spec ("decisión de estilo visual, sin spec
+// pixel-perfect"): título en negrita, tres columnas fijas en el mismo orden
+// que el ejemplo de ADR-059 §2 (prefixes, tipo, conteo), fuente sans-serif
+// genérica — igual criterio que `replacementFontFamily` (el kernel corre con
+// `disableFontFace: true`, ADR-053: solo hay familias genéricas disponibles).
+const LEGEND_MARGIN_PT = 40;
+const LEGEND_TITLE_FONT = "bold 16px sans-serif";
+const LEGEND_ROW_FONT = "12px sans-serif";
+const LEGEND_TITLE_TO_TABLE_GAP_PT = 30;
+const LEGEND_ROW_HEIGHT_PT = 20;
+const LEGEND_TEXT_COLOR = "#000000";
+const LEGEND_BACKGROUND_COLOR = "#ffffff";
+const LEGEND_TITLE_TEXT = "Anonimizado con Anonly — Referencia de marcadores";
+const LEGEND_COLUMN_OFFSETS_PT: Readonly<{
+  readonly prefixes: number;
+  readonly typeName: number;
+  readonly countLabel: number;
+}> = { prefixes: 0, typeName: 220, countLabel: 420 };
+
+function paintLegendTable(
+  context: OffscreenCanvasRenderingContext2D,
+  rows: ReadonlyArray<MarkerLegendRow>,
+  pageWidthPt: number,
+  pageHeightPt: number,
+): void {
+  context.fillStyle = LEGEND_BACKGROUND_COLOR;
+  context.fillRect(0, 0, pageWidthPt, pageHeightPt);
+
+  context.textAlign = "left";
+  context.textBaseline = "top";
+  context.fillStyle = LEGEND_TEXT_COLOR;
+
+  context.font = LEGEND_TITLE_FONT;
+  context.fillText(LEGEND_TITLE_TEXT, LEGEND_MARGIN_PT, LEGEND_MARGIN_PT);
+
+  context.font = LEGEND_ROW_FONT;
+  let y = LEGEND_MARGIN_PT + LEGEND_TITLE_TO_TABLE_GAP_PT;
+  for (const row of rows) {
+    context.fillText(row.prefixes, LEGEND_MARGIN_PT + LEGEND_COLUMN_OFFSETS_PT.prefixes, y);
+    context.fillText(row.typeName, LEGEND_MARGIN_PT + LEGEND_COLUMN_OFFSETS_PT.typeName, y);
+    context.fillText(row.countLabel, LEGEND_MARGIN_PT + LEGEND_COLUMN_OFFSETS_PT.countLabel, y);
+    y += LEGEND_ROW_HEIGHT_PT;
+  }
+}
+
+export interface KernelRenderLegendOptions {
+  readonly jpegQuality: number;
+  readonly onWarn?: KernelWarnLogger;
+}
+
+/**
+ * `renderLegendPage` (ADR-059 §5): dibujo puro sobre un `OffscreenCanvas` en
+ * blanco del tamaño pedido — sin `pageProxy`, sin pdfjs, y por eso sin
+ * `AbortSignal`/timeout en sus opciones (a diferencia de
+ * `kernelRenderPage`/`kernelRasterizePage`): no hay ningún await largo
+ * comparable a `pageProxy.render()` que cancelar a mitad de camino, es una
+ * operación de dibujo síncrona seguida de un único `convertToBlob`
+ * (`encodeImageData`, ya usado por el resto del kernel).
+ */
+export async function kernelRenderLegendPage(
+  payload: RenderLegendPayload,
+  opts: KernelRenderLegendOptions,
+): Promise<EncodedPageImage> {
+  const { rows, pageWidthPt, pageHeightPt } = payload;
+  // Default "png" (no está en el spec, que no expone `imageFormat` en la
+  // firma pública §6): es texto sobre fondo blanco, sin degradado ni foto —
+  // el caso exacto para el que PNG sin pérdida es la elección barata, mismo
+  // criterio que el default de "preview" en `kernelRenderPage`.
+  const imageFormat = payload.imageFormat ?? "png";
+
+  const canvas = createCanvas(
+    LEGEND_DOCUMENT_LABEL,
+    LEGEND_PAGE_LABEL,
+    pageWidthPt,
+    pageHeightPt,
+    opts.onWarn,
+  );
+  const context = get2dContext(canvas, LEGEND_DOCUMENT_LABEL, LEGEND_PAGE_LABEL);
+
+  paintLegendTable(context, rows, pageWidthPt, pageHeightPt);
+
+  const imageData = context.getImageData(0, 0, pageWidthPt, pageHeightPt);
+  return encodeImageData(
+    imageData,
+    imageFormat,
+    opts.jpegQuality,
+    LEGEND_DOCUMENT_LABEL,
+    LEGEND_PAGE_LABEL,
+    opts.onWarn,
+  );
 }
 
 /**
