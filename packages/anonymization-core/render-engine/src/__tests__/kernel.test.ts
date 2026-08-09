@@ -26,9 +26,11 @@ vi.mock("pdfjs-dist", () => ({ getDocument: vi.fn() }));
 import {
   fitReplacementFont,
   kernelLoadDocument,
+  kernelRenderLegendPage,
   kernelRenderPage,
   RenderKernelCMapReaderFactory,
   RenderKernelStandardFontDataFactory,
+  type KernelRenderLegendOptions,
   type KernelRenderOptions,
 } from "../worker/kernel.js";
 
@@ -37,10 +39,13 @@ import {
   createMockPage,
   createMockPdfDocument,
   createValidBuffer,
+  getConvertToBlobCalls,
   getCreatedCanvases,
   installOffscreenCanvasStub,
+  makeMarkerLegendRow,
   makeReplacement,
   mockGetDocumentResult,
+  resetConvertToBlobCalls,
   resetCreatedCanvases,
 } from "./fixtures/test-helpers.js";
 
@@ -340,5 +345,108 @@ describe("paintReplacements — no-regresión vía kernelRenderPage (ADR-058 §1
     // Fórmula de `fontForMode` previa a ADR-058: Math.max(8, round(14*0.7)) = 10px.
     expect(fillTextCalls[0]!.font).toBe("10px monospace, sans-serif");
     expect(fillTextCalls[0]!.args).toEqual(["[DNI 01]", 10 + 100 / 2, 20 + 14 / 2, 100]);
+  });
+});
+
+// ─── ADR-059 §5 (Hito 10.5, PR 7): kernelRenderLegendPage en aislamiento ───
+describe("kernelRenderLegendPage — página de leyenda del export (ADR-059 §5)", () => {
+  const legendOpts: KernelRenderLegendOptions = { jpegQuality: 0.85 };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    installOffscreenCanvasStub();
+    resetCreatedCanvases();
+    resetConvertToBlobCalls();
+  });
+
+  it("no toca pdfjs-dist en absoluto — no requiere documento cargado", async () => {
+    await kernelRenderLegendPage(
+      { rows: [makeMarkerLegendRow()], pageWidthPt: 300, pageHeightPt: 200 },
+      legendOpts,
+    );
+
+    expect(getDocument).not.toHaveBeenCalled();
+  });
+
+  it("defaults to png when imageFormat is absent from the payload", async () => {
+    await kernelRenderLegendPage(
+      { rows: [makeMarkerLegendRow()], pageWidthPt: 300, pageHeightPt: 200 },
+      legendOpts,
+    );
+
+    const [call] = getConvertToBlobCalls();
+    expect(call?.type).toBe("image/png");
+  });
+
+  it("respects an explicit imageFormat and the effective jpegQuality", async () => {
+    const encoded = await kernelRenderLegendPage(
+      {
+        rows: [makeMarkerLegendRow()],
+        pageWidthPt: 300,
+        pageHeightPt: 200,
+        imageFormat: "jpeg",
+      },
+      { jpegQuality: 0.42 },
+    );
+
+    expect(encoded.format).toBe("jpeg");
+    const [call] = getConvertToBlobCalls();
+    expect(call?.type).toBe("image/jpeg");
+    expect(call?.quality).toBe(0.42);
+  });
+
+  it("draws the table at incremental y with fixed x columns, and the encoded dimensions match the requested page size", async () => {
+    const rows = [
+      makeMarkerLegendRow({ prefixes: "DNI", typeName: "DNI", countLabel: "3 marcadores" }),
+      makeMarkerLegendRow({
+        prefixes: "MATR, MAT",
+        typeName: "Matrícula",
+        countLabel: "1 marcador",
+      }),
+    ];
+
+    const encoded = await kernelRenderLegendPage(
+      { rows, pageWidthPt: 500, pageHeightPt: 400 },
+      legendOpts,
+    );
+
+    expect(encoded.widthPx).toBe(500);
+    expect(encoded.heightPx).toBe(400);
+
+    const [canvas] = getCreatedCanvases();
+    const fillTextCalls = canvas!.calls.filter((c) => c.op === "fillText");
+    // 1 título + 3 columnas × 2 filas.
+    expect(fillTextCalls).toHaveLength(1 + 2 * 3);
+
+    const [titleCall, ...rowCalls] = fillTextCalls;
+    expect(titleCall!.args[0]).toContain("Anonly");
+
+    const [row0Prefixes, row0TypeName, row0Count, row1Prefixes, row1TypeName, row1Count] = rowCalls;
+    // Misma y dentro de cada fila; y estrictamente mayor en la fila siguiente.
+    expect(row0Prefixes!.args[2]).toBe(row0TypeName!.args[2]);
+    expect(row0TypeName!.args[2]).toBe(row0Count!.args[2]);
+    expect(row1Prefixes!.args[2]).toBeGreaterThan(row0Prefixes!.args[2] as number);
+    // x fijas y crecientes entre columnas, e IGUALES entre las dos filas.
+    expect(row0Prefixes!.args[1]).toBe(row1Prefixes!.args[1]);
+    expect(row0TypeName!.args[1]).toBe(row1TypeName!.args[1]);
+    expect(row0Count!.args[1]).toBe(row1Count!.args[1]);
+    expect(row0Prefixes!.args[1] as number).toBeLessThan(row0TypeName!.args[1] as number);
+    expect(row0TypeName!.args[1] as number).toBeLessThan(row0Count!.args[1] as number);
+
+    expect(row0Prefixes!.args[0]).toBe("DNI");
+    expect(row1Prefixes!.args[0]).toBe("MATR, MAT");
+  });
+
+  it("throws RenderPageFailedError (not the page-scoped constructor) when OffscreenCanvas is unavailable", async () => {
+    Reflect.deleteProperty(globalThis, "OffscreenCanvas");
+
+    await expect(
+      kernelRenderLegendPage(
+        { rows: [makeMarkerLegendRow()], pageWidthPt: 300, pageHeightPt: 200 },
+        legendOpts,
+      ),
+    ).rejects.toThrow("OffscreenCanvas no disponible en este entorno.");
+
+    installOffscreenCanvasStub();
   });
 });

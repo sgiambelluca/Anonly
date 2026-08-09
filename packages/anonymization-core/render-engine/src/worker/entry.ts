@@ -26,13 +26,17 @@
  * - `AbortSignal` por job: un `AbortController` por `jobId`/`signalId`
  *   (`WorkerPool.dispatchRemote` usa `signalId === jobId`), abortado al
  *   recibir `CANCEL` — mismo mecanismo que `PdfWorker`.
- * - Discriminación por forma del payload de "render-page" (ADR-043 §4), en
- *   este orden EXACTO: `"buffer" in payload` -> load-document
- *   (`LoadDocumentPayload`); `"kind" in payload` -> render
- *   (`RenderPagePayload`); `"pageIndex" in payload` -> rasterize
- *   (`RasterizePagePayload`); si no -> unload-document
- *   (`UnloadDocumentPayload`, el único de los 4 sin ninguno de esos 3
- *   campos). Los controles (load/unload) viajan como `RUN` con
+ * - Discriminación por forma del payload de "render-page" (ADR-043 §4,
+ *   ampliado a un quinto caso por ADR-059 §5; orden documentado también en
+ *   `05_Worker_Architecture.md` §7.4), en este orden EXACTO: `"buffer" in
+ *   payload` -> load-document (`LoadDocumentPayload`); `"rows" in payload`
+ *   -> legend (`RenderLegendPayload`, ADR-059 §5 — sin `documentId`, así que
+ *   no puede colisionar con ninguno de los otros cuatro; va temprano, antes
+ *   de "kind"/"pageIndex", pero podría ir en cualquier posición relativa a
+ *   esos dos); `"kind" in payload` -> render (`RenderPagePayload`);
+ *   `"pageIndex" in payload` -> rasterize (`RasterizePagePayload`); si no ->
+ *   unload-document (`UnloadDocumentPayload`, el único de los 5 sin ninguno
+ *   de esos 4 campos). Los controles (load/unload) viajan como `RUN` con
  *   `jobType: "render-page"` directo a cada worker, sin cola (`WorkerInbound`
  *   no cambia, ADR-043 §4).
  */
@@ -42,6 +46,7 @@ import {
   InvalidInputError,
   type LoadDocumentPayload,
   type RasterizePagePayload,
+  type RenderLegendPayload,
   type RenderPagePayload,
   type UnloadDocumentPayload,
   type WorkerCapabilities,
@@ -55,6 +60,7 @@ import {
   kernelDisposeAll,
   kernelLoadDocument,
   kernelRasterizePage,
+  kernelRenderLegendPage,
   kernelRenderPage,
   kernelUnloadDocument,
 } from "./kernel.js";
@@ -110,6 +116,12 @@ function isLoadDocumentPayload(payload: unknown): payload is LoadDocumentPayload
   return typeof payload === "object" && payload !== null && "buffer" in payload;
 }
 
+// ADR-059 §5: quinto caso, agregado sin tocar los otros cuatro checks — el
+// único payload de "render-page" SIN documentId, por eso no puede colisionar.
+function isRenderLegendPayload(payload: unknown): payload is RenderLegendPayload {
+  return typeof payload === "object" && payload !== null && "rows" in payload;
+}
+
 function isRenderPagePayload(payload: unknown): payload is RenderPagePayload {
   return typeof payload === "object" && payload !== null && "kind" in payload;
 }
@@ -119,11 +131,16 @@ function isRasterizePagePayload(payload: unknown): payload is RasterizePagePaylo
 }
 
 async function dispatchKernel(payload: unknown, abortSignal: AbortSignal): Promise<unknown> {
-  // Orden fijado por ADR-043 §4 — no reordenar: "buffer" -> load; "kind" ->
-  // render; "pageIndex" -> rasterize; si no -> unload (único de los 4 sin
-  // ninguno de esos 3 campos).
+  // Orden fijado por ADR-043 §4 + ADR-059 §5 (05_Worker_Architecture.md
+  // §7.4) — no reordenar "buffer" -> load / "kind" -> render / "pageIndex"
+  // -> rasterize entre sí; "rows" -> legend puede ir en cualquier posición
+  // relativa a esos tres (no colisiona con ninguno); si no -> unload (único
+  // de los 5 sin ninguno de esos 4 campos).
   if (isLoadDocumentPayload(payload)) {
     return kernelLoadDocument(payload);
+  }
+  if (isRenderLegendPayload(payload)) {
+    return kernelRenderLegendPage(payload, { jpegQuality: renderJpegQuality });
   }
   if (isRenderPagePayload(payload)) {
     return kernelRenderPage(payload, {

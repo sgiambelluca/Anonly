@@ -2,12 +2,31 @@
  * @anonly/render-engine — `RenderEngine` (implementa `IEngine`).
  *
  * Fuente de verdad: docs/core/Render_Engine.md (v1.8.0, ADR-030, ADR-031,
- * ADR-034, ADR-037, ADR-043, ADR-044, ADR-050, ADR-053, ADR-056). ADR-055 NO
- * está en esa lista: es un PR preventivo de endurecimiento (D2 de la serie
- * D1..D4 de `roadmap/MVP.md`, ADR-055 §9 fila "3-5") que no cambia ningún
- * contrato público ni comportamiento
+ * ADR-034, ADR-037, ADR-043, ADR-044, ADR-050, ADR-053, ADR-056, ADR-059).
+ * ADR-055 NO está en esa lista: es un PR preventivo de endurecimiento (D2 de
+ * la serie D1..D4 de `roadmap/MVP.md`, ADR-055 §9 fila "3-5") que no cambia
+ * ningún contrato público ni comportamiento
  * documentado en el spec — solo angosta el puerto interno de este archivo
  * (nota más abajo), así que Render_Engine.md no se toca (R-21).
+ *
+ * ADR-059 (2026-08-06 — `renderLegendPage`, la página de leyenda del
+ * export): método público nuevo, sin `documentId` en su firma —es la ÚNICA
+ * excepción del motor a la precondición de `loadDocument` que rige todo el
+ * resto (§13 caso 29)—, que construye un `RenderLegendPayload` y despacha
+ * por el mismo `this.pool.dispatch(...)` que `rasterizePage` (nota 7 de
+ * abajo): mismo mecanismo, sin cache LRU, sin supersede y sin eventos (mismo
+ * perfil que `rasterizePage`, ADR-034 §1). El resultado se decodifica con
+ * `decodeRenderLegendResult` (reusa el guard `isEncodedPageImage` ya
+ * definido para `decodeKernelRenderResult`) — mismo criterio ADR-055 que el
+ * resto de esta lista, aunque la operación es nueva y no formaba parte del
+ * alcance original de ADR-055 §2. Sin `documentId`/`pageIndex` reales para
+ * los mensajes de error, se reusa el mismo rótulo sintético que
+ * `worker/kernel.ts#kernelRenderLegendPage` usa para sus propios helpers
+ * internos (`"(legend)"`/`-1`) — nunca contenido del documento
+ * (Code_Standards.md §9). Prioridad de despacho 1000, igual que el resto del
+ * camino de export (`05_Worker_Architecture.md` §6.2: "aplica al camino
+ * completo del export"), porque solo se invoca desde
+ * `RenderPageProvider.renderLegend` durante un export.
  *
  * ADR-055 (2026-07-31 — el resultado que cruza un Worker se decodifica con
  * un guard, nunca con un cast): `RenderJobPool` angosta `dispatch` Y
@@ -214,7 +233,9 @@ import {
   type EngineContext,
   type IEngine,
   type LoadDocumentPayload,
+  type MarkerLegendRow,
   type RasterizePagePayload,
+  type RenderLegendPayload,
   type RenderPagePayload as RenderPagePayloadWire,
   type RenderRequested,
   type Replacement,
@@ -228,6 +249,7 @@ import {
   kernelDisposeAll,
   kernelLoadDocument,
   kernelRasterizePage,
+  kernelRenderLegendPage,
   kernelRenderPage,
   kernelUnloadDocument,
   type KernelRenderResult,
@@ -445,6 +467,36 @@ function decodeLoadDocumentResult(
     documentId,
     "RenderJobPool.broadcast() resolvió load-document con una forma no reconocida: " +
       "se esperaba { pageCount: number } (worker/kernel.ts#kernelLoadDocument) — " +
+      "misma forma en el camino remoto y en el in-process (ADR-055 §2). Devolver un " +
+      `default en silencio está prohibido (ADR-055 §3). Forma recibida: ${describeDispatchResultShape(dispatchResult)}.`,
+  );
+}
+
+// ADR-059 §5: mismo rótulo sintético que usa `worker/kernel.ts#kernelRenderLegendPage`
+// para sus propios errores internos — `renderLegendPage` no tiene `documentId`
+// ni `pageIndex` reales (no corresponde a ninguna página de ningún PDF).
+const LEGEND_DOCUMENT_LABEL = "(legend)";
+const LEGEND_PAGE_LABEL = -1;
+
+/**
+ * Decodifica el resultado de `pool.dispatch` en `renderLegendPage` (ADR-059
+ * §5): única forma legítima, `EncodedPageImage` pelado
+ * (`worker/kernel.ts#kernelRenderLegendPage`) — reusa el guard
+ * `isEncodedPageImage` ya definido para `decodeKernelRenderResult`, mismo
+ * razonamiento de paridad remoto/in-process. `RenderPageFailedError`
+ * (retryable): mismo criterio que el resto de los decoders de esta lista —
+ * Export trata un fallo de leyenda como un fallo de página (retry, y si
+ * persiste `EXPORT_FAILED` — Render_Engine.md §6, `Export_Engine.md` §13
+ * caso 25) y discrimina por `code`, nunca por los detalles del mensaje
+ * (Code_Standards.md §7).
+ */
+function decodeRenderLegendResult(dispatchResult: unknown): EncodedPageImage {
+  if (isEncodedPageImage(dispatchResult)) return dispatchResult;
+  throw new RenderPageFailedError(
+    LEGEND_DOCUMENT_LABEL,
+    LEGEND_PAGE_LABEL,
+    "RenderJobPool.dispatch() resolvió renderLegendPage con una forma no reconocida: " +
+      "se esperaba EncodedPageImage pelado (worker/kernel.ts#kernelRenderLegendPage) — " +
       "misma forma en el camino remoto y en el in-process (ADR-055 §2). Devolver un " +
       `default en silencio está prohibido (ADR-055 §3). Forma recibida: ${describeDispatchResultShape(dispatchResult)}.`,
   );
@@ -980,6 +1032,63 @@ export class RenderEngine implements IEngine {
     // ADR-055 §2: idem renderPageInternal — decodeRasterizeResult antes de
     // devolver el ImageData al caller (nunca un cast a ciegas).
     return decodeRasterizeResult(dispatchResult, documentId, pageIndex);
+  }
+
+  /**
+   * Página de leyenda del export (ADR-059 §5): dibujo puro sobre un
+   * `OffscreenCanvas` en blanco del tamaño pedido, sin `pageProxy`, sin
+   * pdfjs, sin cache LRU, sin supersede y sin eventos — mismo perfil que
+   * `rasterizePage` (ADR-034 §1). Es la ÚNICA excepción de este motor a la
+   * precondición de `loadDocument` que rige todo el resto (§13 casos 16/22):
+   * no hay `documentId` en su firma ni en `RenderLegendPayload` porque no
+   * corresponde a ninguna página de ningún PDF.
+   */
+  async renderLegendPage(
+    rows: ReadonlyArray<MarkerLegendRow>,
+    pageWidthPt: number,
+    pageHeightPt: number,
+    ctx: EngineContext,
+  ): Promise<EncodedPageImage> {
+    this.assertNotDisposed();
+    this.assertInitialized();
+
+    if (rows == null) {
+      throw new InvalidInputError("rows es null o undefined en renderLegendPage.", {
+        engineId: EngineId.Render,
+      });
+    }
+
+    if (!(pageWidthPt > 0) || !(pageHeightPt > 0)) {
+      throw new InvalidInputError(
+        `pageWidthPt/pageHeightPt deben ser mayores a 0. Recibido: ${pageWidthPt}x${pageHeightPt}.`,
+        { pageWidthPt, pageHeightPt },
+      );
+    }
+
+    if (ctx.abortSignal.aborted) {
+      throw new CancelledError();
+    }
+
+    const payload: RenderLegendPayload = { rows, pageWidthPt, pageHeightPt };
+
+    // Prioridad 1000 (05_Worker_Architecture.md §6.2: "aplica al camino
+    // completo del export"): renderLegendPage solo se invoca desde
+    // RenderPageProvider.renderLegend durante un export (ADR-059 §5), mismo
+    // nivel que los render-page en mode "full" de ese mismo camino.
+    const dispatchResult = await this.pool.dispatch({
+      run: () =>
+        kernelRenderLegendPage(payload, {
+          jpegQuality: ctx.config.render.jpegQuality,
+          onWarn: (message, meta) => ctx.logger.warn(message, meta),
+        }),
+      signal: ctx.abortSignal,
+      priority: 1000,
+      payload,
+      maxRetriesOverride: 0,
+    });
+    // ADR-055 §2: decodeRenderLegendResult antes de devolver el
+    // EncodedPageImage al caller (nunca un cast a ciegas).
+    return decodeRenderLegendResult(dispatchResult);
   }
 
   /**

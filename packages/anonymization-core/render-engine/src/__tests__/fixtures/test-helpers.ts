@@ -21,6 +21,7 @@ import {
   type ICache,
   type IEventBus,
   type ILogger,
+  type MarkerLegendRow,
   type Replacement,
   type Unsubscribe,
   type Word,
@@ -551,6 +552,29 @@ export function createRenderPageInput(overrides?: Partial<RenderPageInput>): Ren
     mode: "preview",
     ...overrides,
   };
+}
+
+// ─── ADR-059 §5 (Hito 10.5, PR 7): renderLegendPage ───
+
+/** Fila de leyenda mínima — strings ya compuestos, mismo criterio que ADR-059 §5. */
+export function makeMarkerLegendRow(overrides?: Partial<MarkerLegendRow>): MarkerLegendRow {
+  return {
+    prefixes: "PERSONA, PERS, PRS",
+    typeName: "Persona",
+    countLabel: "7 marcadores",
+    ...overrides,
+  };
+}
+
+/** `count` filas de leyenda distintas entre sí (útil para el test de las 13 filas). */
+export function makeMarkerLegendRows(count: number): ReadonlyArray<MarkerLegendRow> {
+  return Array.from({ length: count }, (_, i) =>
+    makeMarkerLegendRow({
+      prefixes: `PRE${i}`,
+      typeName: `Tipo ${i}`,
+      countLabel: `${i + 1} marcadores`,
+    }),
+  );
 }
 
 // ─── ADR-058 §2-§6 (Hito 10.5, PR 5): repintado de línea por calibración ───
