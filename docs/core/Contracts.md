@@ -656,7 +656,26 @@ export interface ConflictResolved { readonly documentId: string; readonly confli
 export interface GroupingFinished { readonly documentId: string; readonly groupCount: number; readonly conflictCount: number; readonly durationMs: number; }
 
 // Render
-export interface PreviewUpdated { readonly documentId: string; readonly pageIndex: number; readonly kind: "original" | "anonymized"; readonly canvasBlobUrl: string; }
+export interface PreviewUpdated {
+  readonly documentId: string;
+  readonly pageIndex: number;
+  readonly kind: "original" | "anonymized";
+  readonly canvasBlobUrl: string;
+  // ADR-062 §1: las anotaciones `Degraded` (ADR-058 §7) que el kernel detectó
+  // en ESTE render de ESTA página. Es el único camino por el que el veredicto
+  // de legibilidad sale de `render-engine`.
+  //
+  // ADR-062 §2 — **ausente ≡ vacío**: las dos formas significan "esta página,
+  // ahora mismo, no tiene ningún reemplazo degradado". El consumidor lee
+  // `degraded ?? []` y no las distingue nunca. La ausencia NO significa "no
+  // sé": interpretarla así deja marcas viejas encendidas.
+  //
+  // ADR-062 §3 — el consumidor **reemplaza** el veredicto de esa página (no
+  // acumula) y **descarta los eventos con `kind: "original"`**, que emiten el
+  // array vacío por construcción y borrarían el veredicto del panel
+  // anonimizado de la misma página.
+  readonly degraded?: ReadonlyArray<Annotation>;
+}
 export interface PreviewPageFailed { readonly documentId: string; readonly pageIndex: number; readonly error: SerializedEngineError; }
 export interface RenderRequested {
   readonly documentId: string;
