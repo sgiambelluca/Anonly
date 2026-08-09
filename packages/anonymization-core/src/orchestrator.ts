@@ -984,6 +984,31 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
         }
         return output.encoded;
       },
+      // ADR-059 §5: mediación de la leyenda -- Export no puede importar
+      // render-engine (P-1), así que este componente (que ya importa ambos)
+      // delega a RenderEngine.renderLegendPage. Dimensiones: el spec no fija
+      // un tamaño de página propio para la leyenda (no es una página del
+      // documento) -- se usa document.pages[0] como default razonable, el
+      // mismo criterio que export.engine.ts usa del otro lado del puerto para
+      // armar legendPageWidthPt/legendPageHeightPt de ExportSavePayload.
+      renderLegend: async (rows, abortSignal) => {
+        const legendCtx: EngineContext = { ...ctx, abortSignal };
+        const firstPage = this.documents.get(documentId)?.pages[0];
+        if (firstPage === undefined) {
+          // No debería pasar: export.engine.ts ya valida document.pages[0]
+          // antes de invocar renderLegend (Export_Engine.md §15 ítem 26).
+          throw new InvalidInputError(
+            `document.pages[0] no disponible para renderLegend (documentId=${documentId}).`,
+            { documentId },
+          );
+        }
+        return this.engines.render.renderLegendPage(
+          rows,
+          firstPage.width,
+          firstPage.height,
+          legendCtx,
+        );
+      },
     };
   }
 

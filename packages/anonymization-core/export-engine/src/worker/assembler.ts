@@ -43,6 +43,7 @@
  */
 import {
   CancelledError,
+  type EncodedPageImage,
   type ExportMetadata,
   type ExportPagePayload,
   type ExportSavePayload,
@@ -173,6 +174,46 @@ export async function appendPage(
   return { documentId, pdfDoc, appendedPages };
 }
 
+/**
+ * Embebe la página de leyenda dentro de `savePdf` (ADR-059 §6): mismas
+ * cuatro llamadas de pdf-lib que `appendPage` (embed + `addPage` +
+ * `drawImage`), pero SIN pasar por ella -- la leyenda no tiene `pageIndex`
+ * del que ser idempotente (no es una página del documento, caso 18/21).
+ * Revierte cualquier página agregada a mitad de ESTE intento antes de
+ * relanzar, mismo criterio que `appendPage`.
+ */
+async function embedLegendPage(
+  pdfDoc: PDFDocument,
+  legendImage: EncodedPageImage,
+  pageWidthPt: number,
+  pageHeightPt: number,
+  abortSignal: AbortSignal,
+  documentId: string,
+): Promise<void> {
+  const pageCountBeforeAttempt = pdfDoc.getPageCount();
+  try {
+    const embeddedImage: PDFImage = await raceAbort(
+      legendImage.format === "jpeg"
+        ? pdfDoc.embedJpg(legendImage.bytes)
+        : pdfDoc.embedPng(legendImage.bytes),
+      abortSignal,
+      documentId,
+    );
+
+    if (abortSignal.aborted) throw new CancelledError(documentId);
+
+    const pdfPage = pdfDoc.addPage([pageWidthPt, pageHeightPt]);
+    pdfPage.drawImage(embeddedImage, { x: 0, y: 0, width: pageWidthPt, height: pageHeightPt });
+  } catch (err: unknown) {
+    while (pdfDoc.getPageCount() > pageCountBeforeAttempt) {
+      pdfDoc.removePage(pdfDoc.getPageCount() - 1);
+    }
+    if (err instanceof CancelledError) throw err;
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new ExportFailedError(documentId, reason);
+  }
+}
+
 function applyMetadata(pdfDoc: PDFDocument, metadata: ExportMetadata): void {
   pdfDoc.setProducer(metadata.producer);
   pdfDoc.setCreator(metadata.creator);
@@ -193,7 +234,7 @@ export async function savePdf(
   payload: ExportSavePayload,
   opts: AssemblerRunOptions,
 ): Promise<SavePdfResult> {
-  const { documentId, metadata } = payload;
+  const { documentId, metadata, legendImage, legendPageWidthPt, legendPageHeightPt } = payload;
 
   if (opts.abortSignal.aborted) throw new CancelledError(documentId);
 
@@ -205,6 +246,30 @@ export async function savePdf(
   }
 
   const pdfDoc = state.pdfDoc;
+
+  // ADR-059 §6: la leyenda se embebe acá, antes de la metadata. Un reintento
+  // de ESTE save (saveWithRetry, host) reusa el mismo pdfDoc ya mutado si un
+  // intento previo llegó a embeber la leyenda y recién falló en
+  // pdfDoc.save() -- sin este guard, ese reintento la embebería dos veces.
+  // `state.appendedPages.size` es el conteo de páginas "reales" del
+  // documento (únicas, por pageIndex): más páginas que eso en el pdfDoc solo
+  // puede ser la leyenda de un intento anterior.
+  if (
+    legendImage !== undefined &&
+    legendPageWidthPt !== undefined &&
+    legendPageHeightPt !== undefined &&
+    pdfDoc.getPageCount() === state.appendedPages.size
+  ) {
+    await embedLegendPage(
+      pdfDoc,
+      legendImage,
+      legendPageWidthPt,
+      legendPageHeightPt,
+      opts.abortSignal,
+      documentId,
+    );
+  }
+
   applyMetadata(pdfDoc, metadata);
 
   try {

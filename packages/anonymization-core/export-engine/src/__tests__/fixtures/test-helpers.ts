@@ -24,6 +24,7 @@ import {
   type ICache,
   type IEventBus,
   type ILogger,
+  type MarkerLegendRow,
   type Page,
   type Replacement,
   type Unsubscribe,
@@ -262,11 +263,25 @@ export interface MockRenderPageProviderOptions {
   readonly error?: Error;
   readonly neverResolves?: boolean;
   readonly perPageImage?: (pageIndex: number) => EncodedPageImage;
+  // ─── ADR-059 §5/§8 — renderLegend ───
+  readonly legendImage?: EncodedPageImage;
+  readonly legendError?: Error;
 }
+
+/**
+ * Intersección con los dos `vi.fn()` concretos (no solo `RenderPageProvider`):
+ * permite a los callers hacer `expect(provider.renderLegend).toHaveBeenCalled()`
+ * directo, sin el cast `as unknown as ReturnType<typeof vi.fn>` que necesitaría
+ * un acceso tipado solo por la interfaz.
+ */
+export type MockRenderPageProvider = RenderPageProvider & {
+  readonly renderFull: ReturnType<typeof vi.fn>;
+  readonly renderLegend: ReturnType<typeof vi.fn>;
+};
 
 export function createMockRenderPageProvider(
   options?: MockRenderPageProviderOptions,
-): RenderPageProvider {
+): MockRenderPageProvider {
   const renderFull = vi.fn(
     (pageIndex: number, _replacements: ReadonlyArray<Replacement>, _abortSignal: AbortSignal) => {
       if (options?.neverResolves === true) {
@@ -286,7 +301,22 @@ export function createMockRenderPageProvider(
       });
     },
   );
-  return { renderFull };
+  const renderLegend = vi.fn(
+    (_rows: ReadonlyArray<MarkerLegendRow>, _abortSignal: AbortSignal) => {
+      if (options?.legendError) {
+        return Promise.reject(options.legendError);
+      }
+      return Promise.resolve<EncodedPageImage>(
+        options?.legendImage ?? {
+          bytes: new Uint8Array([9, 9, 9, 9]).buffer,
+          format: "png",
+          widthPx: 50,
+          heightPx: 50,
+        },
+      );
+    },
+  );
+  return { renderFull, renderLegend };
 }
 
 // ─── EngineContext / config mocks (mismo patrón que render-engine) ───
@@ -457,6 +487,7 @@ export function createExportOptions(overrides?: Partial<ExportOptions>): ExportO
     dpi: 150,
     includeOriginalMetadata: false,
     filename: "anonimizado.pdf",
+    includeMarkerLegend: false,
     ...overrides,
   };
 }
