@@ -16,8 +16,11 @@ import {
   asPdfDocument,
   createDocumentWithPageCount,
   createEngineContext,
+  createEntityGroup,
   createExportEngineInput,
+  createExportOptions,
   createMockPdfLibDocument,
+  createMockRenderPageProvider,
   createTrackingExportPool,
 } from "./fixtures/test-helpers.js";
 
@@ -223,5 +226,47 @@ describe("ExportEngine — contract tests", () => {
     expect(result.buffer.byteLength).toBeGreaterThan(0);
 
     await pooledEngine.dispose();
+  });
+
+  // ─── ADR-059 (Hito 10.5, PR 8) — leyenda de marcadores ───
+
+  it("includeMarkerLegend: false yields exactly pageCount pages and never calls renderLegend", async () => {
+    const mockDoc = createMockPdfLibDocument();
+    vi.mocked(PDFDocument.create).mockResolvedValue(asPdfDocument(mockDoc));
+    await engine.init(ctx);
+    const provider = createMockRenderPageProvider();
+
+    await engine.export(
+      createExportEngineInput({
+        document: createDocumentWithPageCount(3),
+        options: createExportOptions({ includeMarkerLegend: false }),
+        renderPageProvider: provider,
+      }),
+      ctx,
+    );
+
+    // No-regresión de todos los exports existentes (default apagado, ADR-059 §1).
+    expect(mockDoc["addPage"]).toHaveBeenCalledTimes(3);
+    expect(provider.renderLegend).not.toHaveBeenCalled();
+  });
+
+  it("includeMarkerLegend: true yields pageCount + 1 pages", async () => {
+    const mockDoc = createMockPdfLibDocument();
+    vi.mocked(PDFDocument.create).mockResolvedValue(asPdfDocument(mockDoc));
+    await engine.init(ctx);
+    const provider = createMockRenderPageProvider();
+
+    await engine.export(
+      createExportEngineInput({
+        document: createDocumentWithPageCount(3),
+        groups: [createEntityGroup()], // DNI, placeholder, enabled -> produce una fila de leyenda.
+        options: createExportOptions({ includeMarkerLegend: true }),
+        renderPageProvider: provider,
+      }),
+      ctx,
+    );
+
+    expect(mockDoc["addPage"]).toHaveBeenCalledTimes(4);
+    expect(provider.renderLegend).toHaveBeenCalledTimes(1);
   });
 });

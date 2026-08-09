@@ -127,14 +127,18 @@ import {
   EngineEvents,
   EngineId,
   EngineNotInitializedError,
+  EntityType,
   EventChannel,
   InvalidInputError,
+  ReplacementMode,
   type EngineContext,
   type EntityGroup,
   type ExportMetadata,
   type ExportPagePayload,
   type ExportSavePayload,
   type IEngine,
+  type MarkerLegendEntry,
+  type MarkerLegendRow,
   type Replacement,
 } from "@anonly/shared";
 
@@ -347,6 +351,127 @@ export function buildPageReplacements(
   return replacements;
 }
 
+// ─── Leyenda de marcadores (ADR-059, Hito 10.5 PR 8) ───
+
+// ADR-059 §2: nombre humano de cada EntityType para MarkerLegendRow.typeName,
+// Título singular. NO es la "cuarta tabla" que ADR-059 §2 prohíbe -- esa
+// prohibición es sobre el CONTENIDO (no inventar nombres nuevos, usar los
+// mismos 13 de siempre), no sobre el mecanismo de código: la tabla de nivel 0
+// de ADR-057 §2 vive privada en grouping-engine/src/labels.ts (no exportada
+// desde su index.ts) y un motor no puede importar a otro (P-1/P-2). Mismo
+// precedente que apps/react-client/src/components/entities/entityTypeLabels.ts
+// (su propia variante plural, para su propio contexto de UI). Los 4 valores
+// de Person/DNI/License/Plate son los ejemplos literales de ADR-059 §2; los 9
+// restantes son presentacionales de bajo riesgo, mismo criterio que
+// labels.ts usó para sus 9 no ejemplificados por ADR-012.
+const MARKER_LEGEND_TYPE_NAME: Readonly<Record<EntityType, string>> = {
+  [EntityType.Person]: "Persona",
+  [EntityType.Organization]: "Organización",
+  [EntityType.Address]: "Dirección",
+  [EntityType.DNI]: "DNI",
+  [EntityType.CUIT]: "CUIT",
+  [EntityType.Phone]: "Teléfono",
+  [EntityType.Email]: "Email",
+  [EntityType.IBAN]: "IBAN",
+  [EntityType.CreditCard]: "Tarjeta de crédito",
+  [EntityType.Date]: "Fecha",
+  [EntityType.License]: "Matrícula",
+  [EntityType.Plate]: "Patente",
+  [EntityType.Custom]: "Personalizado",
+};
+
+// ADR-057 formatea el placeholder como "[<LABEL> <NN>]" (nivel 0/1) o
+// "[<CORTO>-<NN>]" (nivel 2, grouping-engine/src/labels.ts#tokenForLevel).
+// La leyenda no puede importar esa tabla (P-2): el prefijo se recupera
+// parseando el propio `replacementValue`, que ya viene abreviado por el
+// grupo. Un valor que no matchea el formato esperado se descarta (no rompe
+// el export completo por una fila de leyenda).
+const PLACEHOLDER_PREFIX_PATTERN = /^\[(.+)[\s-]\d+\]$/;
+
+function extractPlaceholderPrefix(replacementValue: string): string | undefined {
+  return PLACEHOLDER_PREFIX_PATTERN.exec(replacementValue)?.[1];
+}
+
+/**
+ * Proyección `EntityGroup[] → MarkerLegendEntry[]` (ADR-059 §3, checklist
+ * ítem 26), en el mismo lugar donde ya se proyectan los grupos para el
+ * export (`buildPageReplacements`, arriba): agrupa por `type` los grupos
+ * `enabled` en modo `placeholder`, juntando los prefijos DISTINTOS de
+ * `replacementValue` (ADR-057 elige el nivel por grupo; dos grupos del mismo
+ * tipo pueden quedar en niveles distintos) y sumando `members.length`
+ * (marcadores = ocurrencias, no grupos). Único punto de este motor que ve un
+ * `EntityGroup` para la leyenda -- de acá en más solo viaja tipo/prefijos/
+ * conteo (`MarkerLegendEntry`), y después solo strings (`buildMarkerLegend`).
+ */
+export function buildMarkerLegendEntries(
+  groups: ReadonlyArray<EntityGroup>,
+): ReadonlyArray<MarkerLegendEntry> {
+  const prefixesByType = new Map<EntityType, Set<string>>();
+  const countByType = new Map<EntityType, number>();
+
+  for (const group of groups) {
+    if (!group.enabled || group.replacementMode !== ReplacementMode.Placeholder) continue;
+    const prefix = extractPlaceholderPrefix(group.replacementValue);
+    if (prefix === undefined) continue;
+    const prefixes = prefixesByType.get(group.type) ?? new Set<string>();
+    prefixes.add(prefix);
+    prefixesByType.set(group.type, prefixes);
+    countByType.set(group.type, (countByType.get(group.type) ?? 0) + group.members.length);
+  }
+
+  // Orden de EntityType (ADR-059 §2 lista Persona, DNI, Matrícula, Patente --
+  // el mismo orden de declaración del enum, no el de aparición en `groups`).
+  const entries: MarkerLegendEntry[] = [];
+  for (const type of Object.values(EntityType)) {
+    const prefixes = prefixesByType.get(type);
+    if (prefixes === undefined) continue;
+    entries.push({ type, prefixes: [...prefixes], markerCount: countByType.get(type) ?? 0 });
+  }
+  return entries;
+}
+
+/**
+ * ADR-059 §3: `MarkerLegendEntry[]` -> filas de strings ya compuestos, lo
+ * único que cruza a Render (`RenderPageProvider.renderLegend`). Función
+ * pura; exportada desde index.ts (mismo criterio que `buildPageReplacements`).
+ */
+export function buildMarkerLegend(
+  entries: ReadonlyArray<MarkerLegendEntry>,
+): ReadonlyArray<MarkerLegendRow> {
+  return entries.map((entry) => ({
+    prefixes: entry.prefixes.join(", "),
+    typeName: MARKER_LEGEND_TYPE_NAME[entry.type],
+    countLabel: `${entry.markerCount} marcador${entry.markerCount === 1 ? "" : "es"}`,
+  }));
+}
+
+interface LegendPayloadFields {
+  readonly legendImage: EncodedPageImage;
+  readonly legendPageWidthPt: number;
+  readonly legendPageHeightPt: number;
+}
+
+async function renderLegendWithTimeout(
+  provider: RenderPageProvider,
+  rows: ReadonlyArray<MarkerLegendRow>,
+  abortSignal: AbortSignal,
+  documentId: string,
+  timeoutMs: number,
+): Promise<EncodedPageImage> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new ExportFailedError(documentId, `Timeout esperando renderLegend (${timeoutMs}ms).`));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([provider.renderLegend(rows, abortSignal), timeoutPromise]);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
+}
+
 async function renderPageWithTimeout(
   provider: RenderPageProvider,
   pageIndex: number,
@@ -460,7 +585,12 @@ export class ExportEngine implements IEngine {
         : {}),
     };
 
-    const buffer = await this.saveWithRetry(input.documentId, ctx, metadata, timeoutMs);
+    // ADR-059 §6/§8 (caso 25): la leyenda se pide ANTES de saveWithRetry --
+    // si renderLegend agota reintentos, el export falla acá, nunca con un
+    // save a medio camino ni un EXPORT_FINISHED sobre un PDF incompleto.
+    const legend = await this.buildLegendPayload(input, ctx, timeoutMs);
+
+    const buffer = await this.saveWithRetry(input.documentId, ctx, metadata, timeoutMs, legend);
 
     const durationMs = Date.now() - startedAt;
     // ADR-047 §6: el blob URL se crea siempre en host, nunca en el worker
@@ -608,13 +738,104 @@ export class ExportEngine implements IEngine {
     this.assemblerState = await appendPage(this.assemblerState, payload, { abortSignal });
   }
 
+  /**
+   * ADR-059 §2/§3/§6, checklist ítems 26-29: `undefined` cuando el flag está
+   * apagado o cuando, tras filtrar por tipo/modo, no queda ninguna fila
+   * (caso 23 — warn, sin página, `renderLegend` nunca se invoca).
+   */
+  private async buildLegendPayload(
+    input: ExportEngineInput,
+    ctx: EngineContext,
+    timeoutMs: number,
+  ): Promise<LegendPayloadFields | undefined> {
+    if (!input.options.includeMarkerLegend) return undefined;
+
+    const entries = buildMarkerLegendEntries(input.groups);
+    if (entries.length === 0) {
+      ctx.logger.warn(
+        "includeMarkerLegend activo pero ningún grupo placeholder habilitado; no se agrega la página de leyenda.",
+        { documentId: input.documentId },
+      );
+      return undefined;
+    }
+
+    // document.pages[0] ya está garantizado por validateInput (pageCount > 0);
+    // este guard cubre solo la inconsistencia de datos "pageCount > 0 pero
+    // pages vacío", no una entrada de usuario.
+    const firstPage = input.document.pages[0];
+    if (firstPage === undefined) {
+      throw new InvalidInputError(
+        `document.pages[0] no existe pese a pageCount=${input.document.pageCount}.`,
+        { documentId: input.documentId },
+      );
+    }
+
+    const rows = buildMarkerLegend(entries);
+    const legendImage = await this.renderLegendWithRetry(input, ctx, rows, timeoutMs);
+
+    return {
+      legendImage,
+      legendPageWidthPt: firstPage.width,
+      legendPageHeightPt: firstPage.height,
+    };
+  }
+
+  /**
+   * Mismo patrón de retry que `exportPage` (spec §14: "renderLegend failure
+   * retries and then fails the export"). Sin `pageIndex`: la leyenda no es
+   * una página del documento.
+   */
+  private async renderLegendWithRetry(
+    input: ExportEngineInput,
+    ctx: EngineContext,
+    rows: ReadonlyArray<MarkerLegendRow>,
+    timeoutMs: number,
+  ): Promise<EncodedPageImage> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      if (ctx.abortSignal.aborted) {
+        throw new CancelledError(input.documentId);
+      }
+      try {
+        return await renderLegendWithTimeout(
+          input.renderPageProvider,
+          rows,
+          ctx.abortSignal,
+          input.documentId,
+          timeoutMs,
+        );
+      } catch (err: unknown) {
+        if (err instanceof CancelledError) throw err;
+        lastError = normalizeExportError(err, input.documentId, timeoutMs);
+      }
+    }
+
+    const failure = this.toExportFailure(input.documentId, undefined, lastError);
+    ctx.bus.emit(EventChannel.Export, EngineEvents.EXPORT_FAILED, {
+      documentId: input.documentId,
+      error: failure.serialize(),
+    });
+    throw failure;
+  }
+
   private async saveWithRetry(
     documentId: string,
     ctx: EngineContext,
     metadata: ExportMetadata,
     timeoutMs: number,
+    legend: LegendPayloadFields | undefined,
   ): Promise<ArrayBuffer> {
-    const payload: ExportSavePayload = { documentId, metadata };
+    const payload: ExportSavePayload = {
+      documentId,
+      metadata,
+      ...(legend !== undefined
+        ? {
+            legendImage: legend.legendImage,
+            legendPageWidthPt: legend.legendPageWidthPt,
+            legendPageHeightPt: legend.legendPageHeightPt,
+          }
+        : {}),
+    };
     let lastError: unknown;
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       if (ctx.abortSignal.aborted) {

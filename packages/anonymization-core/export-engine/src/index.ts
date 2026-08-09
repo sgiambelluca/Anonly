@@ -1,4 +1,4 @@
-export { ExportEngine, buildPageReplacements } from "./export.engine.js";
+export { ExportEngine, buildMarkerLegend, buildPageReplacements } from "./export.engine.js";
 export type { ExportConfig, ExportMetadata, ExportOptions } from "@anonly/shared";
 export type {
   EncodedPageImage,

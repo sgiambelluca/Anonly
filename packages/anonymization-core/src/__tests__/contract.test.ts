@@ -1,4 +1,5 @@
 import { ExportEngine } from "@anonly/export-engine";
+import type { RenderPageProvider } from "@anonly/export-engine";
 import { GroupingEngine } from "@anonly/grouping-engine";
 import { NerEngine } from "@anonly/ner-engine";
 import { OcrEngine } from "@anonly/ocr-engine";
@@ -663,6 +664,59 @@ describe("Orchestrator — contract tests", () => {
     const fullInput = fullCall![0] as { readonly lineWords: ReadonlyArray<unknown> | undefined };
     expect(fullInput.lineWords).toEqual(previewInput.lineWords);
     expect(fullInput.lineWords).toEqual([neighborWord]);
+  });
+
+  // ─── Mediación de la leyenda de marcadores (ADR-059 §5) ───
+
+  it("renderLegend delegates to RenderEngine.renderLegendPage and returns its EncodedPageImage", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const document = createDocument({ pages: [createPage({ index: 0, width: 595, height: 842 })] });
+    wireHappyPathSpies(engines, bus, { pdfOutput: createPdfEngineOutput({ document }) });
+
+    const legendImage = {
+      bytes: new Uint8Array([1, 2, 3]).buffer,
+      format: "png" as const,
+      widthPx: 595,
+      heightPx: 842,
+    };
+    vi.spyOn(engines.render, "renderLegendPage").mockResolvedValue(legendImage);
+
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+
+    const options = {
+      imageFormat: "jpeg" as const,
+      jpegQuality: 0.85,
+      dpi: 150,
+      includeOriginalMetadata: false as const,
+      includeMarkerLegend: true,
+      filename: "out.pdf",
+    };
+    bus.emit(EventChannel.UI, EngineEvents.EXPORT_REQUESTED, { documentId: "doc-1", options });
+
+    await vi.waitFor(() => {
+      expect(engines.export.export).toHaveBeenCalled();
+    });
+    const exportCall = (engines.export.export as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
+      renderPageProvider: RenderPageProvider;
+    };
+
+    const rows = [{ prefixes: "DNI", typeName: "DNI", countLabel: "1 marcador" }];
+    const result = await exportCall.renderPageProvider.renderLegend(
+      rows,
+      new AbortController().signal,
+    );
+
+    expect(engines.render.renderLegendPage).toHaveBeenCalledWith(rows, 595, 842, expect.anything());
+    expect(result).toEqual(legendImage);
   });
 
   it("group events during detection accumulate without rendering", async () => {
