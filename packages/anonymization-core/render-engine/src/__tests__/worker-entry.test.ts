@@ -10,9 +10,13 @@
  * paquete y que `pdf-engine/src/__tests__/worker-entry.test.ts`).
  *
  * Foco principal (checklist §15 item 22, ADR-043 §4): la discriminación por
- * FORMA de los 4 payloads posibles bajo `jobType: "render-page"`, en el orden
+ * FORMA de los payloads posibles bajo `jobType: "render-page"`, en el orden
  * exacto `"buffer" in payload` -> load; `"kind" in payload` -> render;
- * `"pageIndex" in payload` -> rasterize; si no -> unload.
+ * `"pageIndex" in payload` -> rasterize; si no -> unload. Un quinto payload
+ * (`RenderLegendPayload`, `"rows" in payload` -> legend, ADR-059 §5) se sumó
+ * al entry-point sin colisionar con estos 4 — su test de discriminación vive
+ * en `unit.test.ts` (nombre y archivo exactos de `Render_Engine.md` §14, no
+ * acá), no se duplica en este archivo.
  */
 import {
   EngineErrorCode,

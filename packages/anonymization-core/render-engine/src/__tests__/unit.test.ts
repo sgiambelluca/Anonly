@@ -4,11 +4,24 @@ import {
   EventChannel,
   ReplacementMode,
   type EngineContext,
+  type LoadDocumentPayload,
+  type RasterizePagePayload,
+  type RenderLegendPayload,
+  type RenderPagePayload,
+  type UnloadDocumentPayload,
+  type WorkerInbound,
+  type WorkerOutbound,
 } from "@anonly/shared";
 import { getDocument } from "pdfjs-dist";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("pdfjs-dist", () => ({ getDocument: vi.fn() }));
+// `GlobalWorkerOptions` (además de `getDocument`): el describe de ADR-059 §5
+// más abajo importa dinámicamente `../worker/entry.js`, que lo toca en su
+// side-effect de módulo (`GlobalWorkerOptions.workerSrc = pdfWorkerUrl`,
+// mismo mock que `worker-entry.test.ts`). El resto de este archivo solo usa
+// `getDocument`, así que agregarlo acá no cambia ningún test existente.
+vi.mock("pdfjs-dist", () => ({ getDocument: vi.fn(), GlobalWorkerOptions: { workerSrc: "" } }));
+vi.mock("pdfjs-dist/build/pdf.worker.min.mjs?url", () => ({ default: "mock-render-worker-url" }));
 
 import { RenderEngine } from "../render.engine.js";
 import { calibrateLineFont } from "../worker/kernel.js";
@@ -27,6 +40,8 @@ import {
   installOffscreenCanvasStub,
   makeAnnotation,
   makeLineRepaintScenario,
+  makeMarkerLegendRow,
+  makeMarkerLegendRows,
   makeReplacement,
   mockGetDocumentResult,
   readProtectedPdfFixtureBuffer,
@@ -1075,6 +1090,246 @@ describe("RenderEngine — unit tests", () => {
       expect(isDegraded(fullDegradingCanvas!.calls)).toBe(true);
       expect(isDegraded(previewMildCanvas!.calls)).toBe(false);
       expect(isDegraded(fullMildCanvas!.calls)).toBe(false);
+    });
+  });
+
+  // ─── ADR-059 §5 (Hito 10.5, PR 7): página de leyenda del export ───
+  describe("renderLegendPage — layout (ADR-059 §5)", () => {
+    function fillTextArgs(calls: ReadonlyArray<DrawCall>): ReadonlyArray<[string, number, number]> {
+      return calls
+        .filter((c) => c.op === "fillText")
+        .map((c) => c.args as [string, number, number]);
+    }
+
+    it("13 rows fit in one legend page, drawn at incremental y with fixed columns", async () => {
+      const rows = makeMarkerLegendRows(13);
+      await engine.init(ctx);
+
+      const encoded = await engine.renderLegendPage(rows, 595, 842, ctx);
+
+      expect(encoded.widthPx).toBe(595);
+      expect(encoded.heightPx).toBe(842);
+
+      const [canvas] = getCreatedCanvases();
+      const textCalls = fillTextArgs(canvas!.calls);
+      // 1 título + 3 columnas por fila (prefixes/typeName/countLabel) × 13 filas.
+      expect(textCalls).toHaveLength(1 + 13 * 3);
+
+      // Cada fila: misma y para las tres columnas, y a x FIJAS y crecientes.
+      const rowCalls = textCalls.slice(1); // descarta el título
+      for (let i = 0; i < 13; i++) {
+        const [prefixesCall, typeNameCall, countLabelCall] = rowCalls.slice(i * 3, i * 3 + 3) as [
+          [string, number, number],
+          [string, number, number],
+          [string, number, number],
+        ];
+        expect(prefixesCall[2]).toBe(typeNameCall[2]); // misma y dentro de la fila
+        expect(typeNameCall[2]).toBe(countLabelCall[2]);
+        expect(prefixesCall[1]).toBeLessThan(typeNameCall[1]); // x fijas y crecientes
+        expect(typeNameCall[1]).toBeLessThan(countLabelCall[1]);
+        expect(prefixesCall[0]).toBe(rows[i]!.prefixes);
+        expect(typeNameCall[0]).toBe(rows[i]!.typeName);
+        expect(countLabelCall[0]).toBe(rows[i]!.countLabel);
+      }
+
+      // y estrictamente incremental entre filas consecutivas, y todo el
+      // contenido entra dentro de la página pedida (sin paginación).
+      const rowYs = rowCalls.filter((_, idx) => idx % 3 === 0).map((c) => c[2]);
+      for (let i = 1; i < rowYs.length; i++) {
+        expect(rowYs[i]!).toBeGreaterThan(rowYs[i - 1]!);
+      }
+      expect(rowYs[rowYs.length - 1]!).toBeLessThan(842);
+    });
+
+    it("a single row still draws the title plus its three columns", async () => {
+      await engine.init(ctx);
+      const row = makeMarkerLegendRow({
+        prefixes: "DNI",
+        typeName: "DNI",
+        countLabel: "3 marcadores",
+      });
+
+      await engine.renderLegendPage([row], 400, 300, ctx);
+
+      const [canvas] = getCreatedCanvases();
+      const textCalls = fillTextArgs(canvas!.calls);
+      expect(textCalls).toHaveLength(4); // título + 3 columnas
+      expect(textCalls.slice(1).map((c) => c[0])).toEqual(["DNI", "DNI", "3 marcadores"]);
+    });
+
+    it("an empty rows array still draws the title, without throwing", async () => {
+      await engine.init(ctx);
+
+      const encoded = await engine.renderLegendPage([], 400, 300, ctx);
+
+      expect(encoded.widthPx).toBe(400);
+      const [canvas] = getCreatedCanvases();
+      expect(fillTextArgs(canvas!.calls)).toHaveLength(1); // solo el título
+    });
+  });
+
+  // ─── ADR-059 §5 + ADR-043 §4 (Hito 10.5, PR 7): quinto caso de
+  // discriminación por forma en el entry-point del RenderWorker. Nombre y
+  // archivo EXACTOS de Render_Engine.md §14: `unit.test.ts` (no
+  // `worker-entry.test.ts`, donde viven los otros cuatro casos — ADR-059 §8
+  // asigna este puntualmente acá). Reproduce el mínimo de la mensajería
+  // WorkerInbound/WorkerOutbound de worker-entry.test.ts (self fake +
+  // pdfjs-dist mockeado, ya preparado en el mock de cabecera de este
+  // archivo) para poder ejercitar `dispatchKernel` (privado, no exportado)
+  // de punta a punta contra un `worker/entry.js` fresco.
+  describe("worker entry-point — discriminación de RenderLegendPayload (ADR-059 §5, ADR-043 §4)", () => {
+    interface FakeWorkerSelf {
+      readonly postMessage: ReturnType<typeof vi.fn>;
+      readonly addEventListener: ReturnType<typeof vi.fn>;
+      emitMessage(message: WorkerInbound): void;
+    }
+
+    function createFakeSelf(): FakeWorkerSelf {
+      let listener: ((ev: { readonly data: WorkerInbound }) => void) | undefined;
+      const addEventListener = vi.fn((type: string, handler: (ev: unknown) => void) => {
+        if (type === "message") {
+          listener = handler as (ev: { readonly data: WorkerInbound }) => void;
+        }
+      });
+      return {
+        postMessage: vi.fn(),
+        addEventListener,
+        emitMessage(message: WorkerInbound): void {
+          listener?.({ data: message });
+        },
+      };
+    }
+
+    function outboundOfType<T extends WorkerOutbound["type"]>(
+      fakeSelf: FakeWorkerSelf,
+      type: T,
+    ): Extract<WorkerOutbound, { type: T }> | undefined {
+      const call = fakeSelf.postMessage.mock.calls.find(
+        (c) => (c[0] as WorkerOutbound).type === type,
+      );
+      return call?.[0] as Extract<WorkerOutbound, { type: T }> | undefined;
+    }
+
+    let fakeSelf: FakeWorkerSelf;
+
+    beforeEach(async () => {
+      vi.resetModules();
+      fakeSelf = createFakeSelf();
+      vi.stubGlobal("self", fakeSelf);
+      await import("../worker/entry.js");
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it("worker entry-point discriminates RenderLegendPayload without colliding with the other four render-page shapes", async () => {
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument({
+            pageCount: 1,
+            pageFactory: () => createMockPage({ width: 50, height: 60 }),
+          }),
+        ),
+      );
+
+      // 1) "buffer" -> load.
+      fakeSelf.emitMessage({
+        type: "RUN",
+        jobId: "job-load",
+        signalId: "job-load",
+        jobType: "render-page",
+        payload: {
+          documentId: "doc-legend-order",
+          buffer: new Uint8Array([1]).buffer,
+        } satisfies LoadDocumentPayload,
+      });
+      await vi.waitFor(() => expect(outboundOfType(fakeSelf, "COMPLETED")).toBeDefined());
+      expect(outboundOfType(fakeSelf, "COMPLETED")?.result).toEqual({ pageCount: 1 });
+      fakeSelf.postMessage.mockClear();
+
+      // 2) "rows" -> legend (ADR-059 §5, quinto caso) — SIN documentId, con
+      // un documento vigente ya cargado (paso 1): prueba que no se confunde
+      // con ninguno de los otros cuatro payloads a pesar de haber estado del
+      // kernel de por medio.
+      const legendPayload: RenderLegendPayload = {
+        rows: [{ prefixes: "DNI", typeName: "DNI", countLabel: "3 marcadores" }],
+        pageWidthPt: 200,
+        pageHeightPt: 100,
+      };
+      fakeSelf.emitMessage({
+        type: "RUN",
+        jobId: "job-legend",
+        signalId: "job-legend",
+        jobType: "render-page",
+        payload: legendPayload,
+      });
+      await vi.waitFor(() => expect(outboundOfType(fakeSelf, "COMPLETED")).toBeDefined());
+      const legendResult = outboundOfType(fakeSelf, "COMPLETED")?.result as {
+        readonly bytes: ArrayBuffer;
+        readonly format: string;
+        readonly widthPx: number;
+        readonly heightPx: number;
+      };
+      expect(legendResult.widthPx).toBe(200);
+      expect(legendResult.heightPx).toBe(100);
+      expect(legendResult.format).toBe("png");
+      expect("pageCount" in legendResult).toBe(false); // no se confundió con load
+      expect("imageData" in legendResult).toBe(false); // no se confundió con render/rasterize
+      fakeSelf.postMessage.mockClear();
+
+      // 3) "kind" -> render, sobre el MISMO documento cargado en 1) — prueba
+      // que agregar el chequeo de "rows" (posición 2 en el orden) no rompió
+      // el caso de render normal.
+      const renderPayload: RenderPagePayload = {
+        documentId: "doc-legend-order",
+        pageIndex: 0,
+        kind: "original",
+        mode: "preview",
+      };
+      fakeSelf.emitMessage({
+        type: "RUN",
+        jobId: "job-render",
+        signalId: "job-render",
+        jobType: "render-page",
+        payload: renderPayload,
+      });
+      await vi.waitFor(() => expect(outboundOfType(fakeSelf, "COMPLETED")).toBeDefined());
+      const renderResult = outboundOfType(fakeSelf, "COMPLETED")?.result as {
+        readonly imageData: ImageData;
+      };
+      expect(renderResult.imageData.width).toBe(50);
+      fakeSelf.postMessage.mockClear();
+
+      // 4) "pageIndex" (sin "buffer"/"rows"/"kind") -> rasterize.
+      const rasterizePayload: RasterizePagePayload = {
+        documentId: "doc-legend-order",
+        pageIndex: 0,
+        scale: 1,
+      };
+      fakeSelf.emitMessage({
+        type: "RUN",
+        jobId: "job-rasterize",
+        signalId: "job-rasterize",
+        jobType: "render-page",
+        payload: rasterizePayload,
+      });
+      await vi.waitFor(() => expect(outboundOfType(fakeSelf, "COMPLETED")).toBeDefined());
+      const rasterizeResult = outboundOfType(fakeSelf, "COMPLETED")?.result as ImageData;
+      expect(rasterizeResult.width).toBe(50);
+      fakeSelf.postMessage.mockClear();
+
+      // 5) sin ninguno de los 4 campos -> unload (fallback, único de los 5
+      // sin "rows"/"buffer"/"kind"/"pageIndex").
+      fakeSelf.emitMessage({
+        type: "RUN",
+        jobId: "job-unload",
+        signalId: "job-unload",
+        jobType: "render-page",
+        payload: { documentId: "doc-legend-order" } satisfies UnloadDocumentPayload,
+      });
+      await vi.waitFor(() => expect(outboundOfType(fakeSelf, "COMPLETED")).toBeDefined());
+      expect(outboundOfType(fakeSelf, "COMPLETED")?.result).toBeUndefined();
     });
   });
 });
