@@ -258,7 +258,17 @@ export class OcrEngine implements IEngine {
       throw new InvalidInputError("Input es null o undefined.", { engineId: EngineId.Ocr });
     }
 
-    const { documentId, pageIndex, imageData, languages } = input;
+    const { documentId, pageIndex, imageData, languages, dpi } = input;
+
+    // ADR-064 §4: `dpi` es el divisor de la conversión px→pt del kernel
+    // (OCR_Engine.md §10). Antes del ADR el valor no se leía y un 0 era
+    // inocuo; ahora es una división por cero.
+    if (!Number.isFinite(dpi) || dpi <= 0) {
+      throw new InvalidInputError(
+        `dpi inválido en la página ${pageIndex}: ${dpi}. Debe ser finito y mayor a 0.`,
+        { documentId, pageIndex, dpi },
+      );
+    }
 
     if (imageData.width <= 0 || imageData.height <= 0) {
       throw new InvalidInputError(
