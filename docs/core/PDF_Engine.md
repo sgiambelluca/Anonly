@@ -1,13 +1,15 @@
-<!-- CONTEXT: scope=pdf-engine | dependencias=core/Contracts.md,architecture/03_Data_Model.md,architecture/04_Event_System.md,architecture/05_Worker_Architecture.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-020-PdfEngine-Word-Granularity-Hardening.md,adr/ADR-041-FuseOcrPage-Funcion-Pura-Sin-Estado-Retenido.md,adr/ADR-049-Errores-Cruzando-Worker-Discriminacion-Por-Code.md,adr/ADR-053-Pdfjs-Dentro-De-Un-Worker-Fuentes-Y-Cmaps.md,adr/ADR-055-Decodificacion-Del-Resultado-Que-Cruza-Un-Worker.md | audiencia=IA-implementador | fase=10 (Hito 2 cerrado, hardening ADR-020; fuseOcrPage función pura y motor sin estado por documento vía ADR-041 — PR12 del Hito 10; `PdfPasswordRequiredError.retryable = false` vía ADR-049 §4 — PR 17.1; CMaps y standard fonts en getDocument vía ADR-053 §5 — cierre de fase 10; `decodePdfEngineOutput` vía ADR-055 §10 — D3.1; pendientes: items §15 diferidos a Hito 11) -->
+<!-- CONTEXT: scope=pdf-engine | dependencias=core/Contracts.md,architecture/03_Data_Model.md,architecture/04_Event_System.md,architecture/05_Worker_Architecture.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-020-PdfEngine-Word-Granularity-Hardening.md,adr/ADR-041-FuseOcrPage-Funcion-Pura-Sin-Estado-Retenido.md,adr/ADR-049-Errores-Cruzando-Worker-Discriminacion-Por-Code.md,adr/ADR-053-Pdfjs-Dentro-De-Un-Worker-Fuentes-Y-Cmaps.md,adr/ADR-055-Decodificacion-Del-Resultado-Que-Cruza-Un-Worker.md,adr/ADR-063-Bbox-De-Texto-Rotado.md | audiencia=IA-implementador | fase=10.8 (Hito 2 cerrado, hardening ADR-020; fuseOcrPage función pura y motor sin estado por documento vía ADR-041 — PR12 del Hito 10; `PdfPasswordRequiredError.retryable = false` vía ADR-049 §4 — PR 17.1; CMaps y standard fonts en getDocument vía ADR-053 §5 — cierre de fase 10; `decodePdfEngineOutput` vía ADR-055 §10 — D3.1; bbox derivado de la matriz completa vía ADR-063 — Hito 10.8 paso 1; pendientes: items §15 diferidos a Hito 11) -->
 
 # PDF Engine — Spec de Motor
 
 > Extrae texto y posiciones de cada página del PDF. Marca las páginas sin texto para que OCR las procese. Descarta metadata sensible.
 
 **EngineId**: `pdf` (valor del enum `EngineId`)
-**Versión del spec**: 1.4.0
-**Última actualización**: 2026-08-05
+**Versión del spec**: 1.5.0
+**Última actualización**: 2026-08-09
 **Estado de implementación**: Hito 2 cerrado (PRs #6, #7); hardening post-review vía ADR-020 (word-splitting, NFC, política de eventos, guard de `fuseOcrPage`, `parsePage` puro); migración a `PdfPool` cerrada en Hito 9 (ADR-035). Pendiente: PdfWorker real (PR12, Hito 10 — incluye la extracción de `fuseOcrPage` a función pura, ADR-041) y tests stress/cancel/perf en Hito 11.
+
+> **Nota (ADR-063, 2026-08-09)**: la geometría de `Word` deja de derivarse solo de la traslación de la matriz (`transform[4]`/`[5]`) y pasa a usar la **matriz completa**. De `[a, b, c, d]` salen los versores de avance y de ascenso; el `BoundingBox` es la envolvente axis-aligned del paralelogramo del run, y el prorrateo por token de ADR-020 §1 se desplaza sobre el eje de avance en vez de sobre `x`. Motivo: un sello de firma vertical (matriz `[0, 16, -16, 0]`) producía una caja de 173×16 pt horizontal donde el texto real ocupa 16×173 pt vertical — cajas que no se solapan. **Para 0° la definición nueva se reduce exactamente a la anterior**, así que el texto horizontal no cambia de bbox y los snapshots no se regeneran. `BoundingBox` **no** cambia (sigue sin campo de rotación) y el orden de lectura `y`→`x` se conserva. Ver §12, §13 casos 18-21, §14.
 
 > **Nota (ADR-055 §10, 2026-08-05)**: el paquete gana un segundo export puro, `decodePdfEngineOutput(value: unknown): PdfEngineOutput` (§6), y su error dedicado (§11). Motivo: `pdf-engine` es el único motor sin puerto interno de despacho —el `PdfWorker` corre el motor real completo (ADR-036 §3), no un kernel— así que el consumidor de su `COMPLETED.result` es el façade. El decoder lo escribe y exporta **este** motor, que es el que conoce el contrato de su worker (ADR-055 §8); el façade lo invoca host-side sobre un `dispatch<unknown>`, misma forma que `fuseOcrPage` (ADR-041). El motor, el worker y `PdfEngineOutput` **no cambian**: `process()` sigue devolviendo el tipo concreto y nadie lo decodifica en el camino in-process del propio motor.
 
@@ -218,7 +220,9 @@ PdfEngineOutput {
 - Streaming: `PAGE_PARSED` se emite por página, no al final. La UI puede mostrar páginas a medida que se parsean.
 - Tamaño de lote recomendado: 1 página por job (granularidad de cancelación óptima). El pool despacha en paralelo respetando `pdfPoolSize` (aplica desde Hito 9; en Hito 2 el procesamiento es secuencial por página con checkpoint).
 - El `PDFDocumentProxy` se destruye al finalizar cada `process()` (ADR-020 §8; reemplaza el hint de reuse por `documentId` que documentaba esta sección — obsoleto en el modelo inline, nunca implementado, y descartado por riesgo de leak sin beneficio).
-- Los `TextItem` que devuelve PDF.js se dividen por whitespace en `Word`s individuales, con `x`/`width` prorrateados linealmente por longitud de caracteres respecto del `TextItem` original; `y`/`height` se conservan (ADR-020 §1).
+- Los `TextItem` que devuelve PDF.js se dividen por whitespace en `Word`s individuales, con el avance prorrateado linealmente por longitud de caracteres respecto del `TextItem` original (ADR-020 §1). El desplazamiento de cada token corre sobre el **eje de avance** del run, no sobre `x` (ADR-063 §3): para texto horizontal las dos formulaciones son idénticas.
+- **Geometría del bbox (ADR-063 §1-§2)**: se deriva de la matriz completa `[a, b, c, d, e, f]` de PDF.js, no solo de la traslación. `dir = (a, b)/|(a, b)|` es el versor de avance y `up = (c, d)/|(c, d)|` el de ascenso; `item.width` es el avance total del run y `item.height` el cuerpo, **medidos sobre esos ejes**. El `BoundingBox` es la envolvente axis-aligned del paralelogramo `(e, f) → +dir·width → +up·height`, convertida a origen arriba-izquierda con `y = pageHeight - yMax`. Es **exacta** para 0°/90°/180°/270° y **conservadora** (cubre de más) para ángulos arbitrarios. Para 0° se reduce carácter por carácter a la fórmula previa: el texto horizontal no cambia de bbox.
+- El texto rotado no es un caso exótico: los sellos de firma digital, marcas de agua y folios laterales de expedientes judiciales se dibujan a 90° sobre el margen, y aparecen en **todas** las páginas del documento (ADR-063, Contexto §3).
 - `Word.text` y, por lo tanto, `Page.text`, se normalizan a NFC (invariante `03_Data_Model.md` §4; ADR-020 §2).
 - **Preparación para Hito 9 (normativa)**: `parsePage(pdfDoc, documentId, pageIndex, timeoutMs): Promise<Page>` es una función pura a nivel de módulo, sin supuestos host/worker (Hito 9 la envuelve en un job del worker sin modificarla). La emisión de eventos (`PAGE_PARSED`, `DOCUMENT_PARSED`) queda en el engine (host), no en el worker. No buildar lógica de `Transferable.consume()` en Hito 2.
 
@@ -243,6 +247,10 @@ PdfEngineOutput {
 15. **`fuseOcrPage` con `pageIndex` fuera de rango**: lanza `InvalidInputError` con `details: { pageIndex }` (ADR-041).
 16. **`decodePdfEngineOutput` sobre un `PdfEngineOutput` válido** (la forma que postea `worker/entry.ts` y la que devuelve `process()` in-process — son la **misma**, este motor no envuelve el resultado en ningún sobre): lo devuelve tal cual, sin copiarlo ni normalizarlo.
 17. **`decodePdfEngineOutput` sobre cualquier otra forma** (`null`, `undefined`, un string, `[]`, `{}`, un objeto al que le falta un campo o le sobra con el tipo equivocado, o un `{ output: {...} }` que envuelva el resultado): lanza `InvalidInputError` con `details.receivedShape`. La verificación es superficial por diseño (§6): valida los cuatro campos de `PdfEngineOutput` y que `document` tenga `id: string` y `pages: Array`, pero **no** recorre `words`/`bbox` — un `document.pages` con elementos corruptos adentro pasa el decoder. Es deliberado: el modo de falla que ADR-055 cierra es el sobre de forma distinta, no la corrupción campo a campo, y un walk profundo correría por cada import sobre documentos de miles de páginas (§12).
+18. **`TextItem` rotado 90°/180°/270°** (matriz del tipo `[0, s, -s, 0, e, f]`): el bbox tiene `width` y `height` intercambiados respecto de `item.width`/`item.height`, con el origen en la envolvente del paralelogramo (ADR-063 §2). Los tokens de un run multi-palabra se desplazan sobre el eje de avance, no sobre `x` (ADR-063 §3).
+19. **`TextItem` con rotación arbitraria** (p. ej. 45°, marca de agua diagonal): el bbox es la envolvente axis-aligned de los cuatro vértices — cubre **más** área que los glifos. Deliberado: para censura, cubrir de más nunca deja un dato expuesto (ADR-063 §2).
+20. **`TextItem` con matriz degenerada** (`a = b = 0`, o `c = d = 0`): no se divide por cero; el versor correspondiente cae al comportamiento horizontal (`dir = (1, 0)` / `up = (0, 1)`).
+21. **`TextItem` horizontal** (matriz `[s, 0, 0, s, e, f]`): el bbox es **idéntico** al que producía la fórmula previa a ADR-063. Es la garantía de no regresión del cambio, no un caso nuevo de comportamiento (ADR-063 §2).
 
 ---
 
@@ -290,6 +298,12 @@ PdfEngineOutput {
 | `decodePdfEngineOutput throws on missing or mistyped fields` | `edge.test.ts` | edge | 10 | caso 17: falta `document`/`pageCount`/`textlessPages`/`sourceKind`, `sourceKind` fuera del union, `pages` no-array, `document.id` no-string |
 | `decodePdfEngineOutput throws on an enveloped result` | `edge.test.ts` | edge | 10 | caso 17: `{ output: <válido> }` — la regresión concreta de ADR-055 (Contexto §1) trasladada a PDF |
 | `decodePdfEngineOutput error details carry shape, never content` | `edge.test.ts` | edge | 10 | `Code_Standards.md` §9: `receivedShape` lista claves y tipos, nunca texto del documento |
+| `rotated 90 TextItem yields a swapped bbox` | `unit.test.ts` | unit | 10.8 | caso 18 (ADR-063 §2): matriz `[0, s, -s, 0, e, f]` → `width = item.height`, `height = item.width`, origen en la envolvente |
+| `rotated 180 and 270 TextItems yield the correct envelope` | `unit.test.ts` | unit | 10.8 | caso 18 (ADR-063 §2) |
+| `horizontal TextItem bbox is unchanged by the matrix-aware formula` | `unit.test.ts` | unit | 10.8 | caso 21 (ADR-063 §2): garantía de no regresión — el test que se pone rojo si el cambio tocó texto horizontal |
+| `prorated tokens of a rotated run advance along the writing axis` | `unit.test.ts` | unit | 10.8 | caso 18 (ADR-063 §3): en un run a 90°, `x` constante y `y` decreciente token a token |
+| `arbitrary rotation yields an envelope containing all four corners` | `unit.test.ts` | unit | 10.8 | caso 19 (ADR-063 §2): 45°, envolvente conservadora |
+| `degenerate transform matrix does not divide by zero` | `edge.test.ts` | edge | 10.8 | caso 20 |
 | `1000 pages document completes within memory budget` | `stress.test.ts` (en `tests/stress/`) | stress | 11 | caso 2; pendiente, requiere `huge-1000p.pdf` (LFS) |
 | `cancel aborts within 200ms` | `cancel.test.ts` (en `tests/cancel/`) | cancel | 11 | SLA; pendiente, requiere `PdfPool` + `AbortRegistry` (Hito 9) |
 
@@ -325,6 +339,7 @@ PdfEngineOutput {
 - [x] 19. Hardening post-review (ADR-020): word-splitting, NFC, política de eventos, guard de `fuseOcrPage`, `releaseDocument`, `parsePage` puro.
 - [ ] 20. (Hito 10, PR12 — ADR-041) Extraer `fuseOcrPage` a función pura exportada (§6: sin `Map` interno, sin asserts de instancia, síncrona; conserva guard ADR-020 §6, validación de `pageIndex` y NFC); eliminar `releaseDocument` y el estado por documento del engine; adaptar los tests de fusión (casos 14–15 de §13, filas de §14) y `tests/integration/ocr-pdf-fusion.test.ts`.
 - [ ] 21. (Hito 10, PR 17.1 — ADR-049 §4) `PdfPasswordRequiredError`: segundo argumento del `super(...)`, `true` → `false` (§11). Fila nueva en §14. Debe mergearse **antes** del PR 17.2 del façade, que retira el override `isRetryable` que hoy lo compensa.
+- [ ] 22. (Hito 10.8, paso 1 — ADR-063) `convertTextItemsToWords`: derivar la geometría de la matriz completa (§12). Versores de avance/ascenso desde `[a, b, c, d]`, bbox como envolvente axis-aligned del paralelogramo, prorrateo del token sobre el eje de avance. **No** tocar `BoundingBox` (sin campo de rotación, ADR-063 §5), **no** tocar el orden de lectura (ADR-063 §4) y **no** regenerar el snapshot de `snapshot.test.ts`: si cambia, el cambio rompió texto horizontal. Casos 18-21 de §13 y seis filas nuevas en §14.
 
 ---
 
@@ -339,3 +354,4 @@ PdfEngineOutput {
 - `adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md` (`fuseOcrPage`, PDF Engine no se suscribe al bus)
 - `adr/ADR-020-PdfEngine-Word-Granularity-Hardening.md` (word-splitting, NFC, política de eventos, guard `fuseOcrPage`, `releaseDocument`, `parsePage` puro)
 - `adr/ADR-041-FuseOcrPage-Funcion-Pura-Sin-Estado-Retenido.md` (`fuseOcrPage` función pura host-side, motor sin estado por documento, `releaseDocument` eliminado)
+- `adr/ADR-063-Bbox-De-Texto-Rotado.md` (geometría del bbox desde la matriz completa; riesgo latente de solapamiento en §6; discrepancia abierta de rotación de página en §7)
