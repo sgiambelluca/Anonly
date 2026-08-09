@@ -123,6 +123,15 @@ describe("OcrEngine — edge case tests", () => {
       });
       await expect(engine.processPage(input, ctx)).rejects.toThrow(InvalidInputError);
     });
+
+    // §13 caso 8 (ADR-064 §4): `dpi` es el divisor de la conversión px→pt.
+    it("throws InvalidInputError on non-positive or non-finite dpi", async () => {
+      await engine.init(ctx);
+      for (const dpi of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+        const input = createValidOcrPageInput(`doc-dpi-${String(dpi)}`, 0, { dpi });
+        await expect(engine.processPage(input, ctx)).rejects.toThrow(InvalidInputError);
+      }
+    });
   });
 
   // Caso 5 (§13): idioma no cargado en el modelo.

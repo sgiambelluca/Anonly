@@ -145,7 +145,73 @@ describe("OcrEngine — unit tests", () => {
       await engine.init(ctx);
       const output = await engine.processPage(createValidOcrPageInput("doc-bbox", 0), ctx);
 
+      // ADR-064 §1: la salida va en PUNTOS. A 300 DPI el factor es 72/300 = 0.24.
+      expect(output.words[0]!.bbox).toEqual({ x: 2.4, y: 4.8, width: 9.6, height: 6 });
+    });
+  });
+
+  describe("Point conversion (ADR-064)", () => {
+    it("word bboxes are converted from raster pixels to page points", async () => {
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(
+          mockRecognizeData([
+            { text: "Cuadro", confidence: 90, bbox: { x0: 0, y0: 0, x1: 417, y1: 417 } },
+          ]),
+        ),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.processPage(
+        createValidOcrPageInput("doc-pt", 0, { dpi: 300 }),
+        ctx,
+      );
+
+      const bbox = output.words[0]!.bbox;
+      expect(bbox.x).toBeCloseTo(0, 5);
+      expect(bbox.y).toBeCloseTo(0, 5);
+      expect(bbox.width).toBeCloseTo(100.08, 5);
+      expect(bbox.height).toBeCloseTo(100.08, 5);
+    });
+
+    it("dpi 72 makes the conversion an identity", async () => {
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(
+          mockRecognizeData([
+            { text: "Igual", confidence: 90, bbox: { x0: 10, y0: 20, x1: 50, y1: 45 } },
+          ]),
+        ),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.processPage(
+        createValidOcrPageInput("doc-72", 0, { dpi: 72 }),
+        ctx,
+      );
+
       expect(output.words[0]!.bbox).toEqual({ x: 10, y: 20, width: 40, height: 25 });
+    });
+
+    it("reading order is unchanged by the point conversion", async () => {
+      // ADR-064 §2: 3px de separación en y. Ordenando en píxeles (tolerancia
+      // 1px) son líneas distintas → gana "Arriba". Si la conversión corriera
+      // ANTES del sort, 3px serían 0.72pt: caerían dentro de la tolerancia y
+      // se ordenarían por x, devolviendo ["Abajo", "Arriba"].
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(
+          mockRecognizeData([
+            { text: "Abajo", confidence: 90, bbox: { x0: 10, y0: 13, x1: 60, y1: 33 } },
+            { text: "Arriba", confidence: 90, bbox: { x0: 200, y0: 10, x1: 250, y1: 30 } },
+          ]),
+        ),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.processPage(
+        createValidOcrPageInput("doc-order", 0, { dpi: 300 }),
+        ctx,
+      );
+
+      expect(output.words.map((w) => w.text)).toEqual(["Arriba", "Abajo"]);
     });
   });
 

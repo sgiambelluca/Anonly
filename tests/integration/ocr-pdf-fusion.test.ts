@@ -15,7 +15,7 @@
  * correspondiente — prueba de caja negra de que la fusión realmente ocurrió.
  */
 import { createCore, type IAnonymizationCore } from "@anonly/anonymization-core";
-import { EngineEvents, EventChannel, PipelineStage } from "@anonly/shared";
+import { EngineEvents, EventChannel, PipelineStage, type EntityFound } from "@anonly/shared";
 import { getDocument } from "pdfjs-dist";
 import { createWorker } from "tesseract.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -92,6 +92,8 @@ describe("integration — OCR_PAGE_FINISHED -> Orchestrator -> PdfEngine.fuseOcr
     core.bus.on(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, ocrPageFinishedSpy);
     const groupCreatedSpy = vi.fn();
     core.bus.on(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_CREATED, groupCreatedSpy);
+    const entityFoundSpy = vi.fn();
+    core.bus.on(EventChannel.Regex, EngineEvents.ENTITY_FOUND, entityFoundSpy);
 
     await core.orchestrator.importDocument({
       documentId: "doc-ocr-fusion",
@@ -106,6 +108,23 @@ describe("integration — OCR_PAGE_FINISHED -> Orchestrator -> PdfEngine.fuseOcr
         group: expect.objectContaining({ canonicalValue: "34.567.891" }),
       }),
     );
+
+    // ADR-064: la ocurrencia detectada sobre el texto fusionado tiene que quedar
+    // en PUNTOS de página, no en píxeles del raster. El bbox mockeado es
+    // (10,10)-(100,30) px y el default de OCR es 300 DPI, así que el factor es
+    // 72/300 = 0.24. Regex arma el bbox de la ocurrencia como unión de los
+    // Word.bbox que la cubren, y acá la cubre una sola palabra. Antes de
+    // ADR-064 este test pasaba con cualquier espacio de coordenadas: no
+    // verificaba ninguno.
+    expect(entityFoundSpy).toHaveBeenCalled();
+    const found = entityFoundSpy.mock.calls
+      .map(([payload]) => payload as EntityFound)
+      .find((p) => p.occurrence.value === "34.567.891");
+    expect(found).toBeDefined();
+    expect(found!.occurrence.bbox.x).toBeCloseTo(2.4, 5);
+    expect(found!.occurrence.bbox.y).toBeCloseTo(2.4, 5);
+    expect(found!.occurrence.bbox.width).toBeCloseTo(21.6, 5);
+    expect(found!.occurrence.bbox.height).toBeCloseTo(4.8, 5);
 
     // El pipeline sigue hasta Ready con el texto fusionado (Regex/Grouping corren sobre él).
     expect(core.orchestrator.getState("doc-ocr-fusion").stage).toBe(PipelineStage.Ready);

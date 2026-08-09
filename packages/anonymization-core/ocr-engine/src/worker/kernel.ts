@@ -28,7 +28,7 @@
  * instancia — cubre `reanalyze` con `ocr.languages` (ADR-038 §5.3) sin
  * mensaje de control nuevo.
  */
-import { CancelledError, type OcrPagePayload, type Word } from "@anonly/shared";
+import { CancelledError, type BoundingBox, type OcrPagePayload, type Word } from "@anonly/shared";
 import { createWorker } from "tesseract.js";
 
 import { OcrModelMissingError, OcrPageFailedError, OcrTimeoutError } from "../ocr.errors.js";
@@ -273,7 +273,33 @@ function extractPageConfidence(data: unknown): number {
   return 0;
 }
 
-function toWords(data: unknown, pageIndex: number): Word[] {
+const POINTS_PER_INCH = 72;
+
+/*
+ * ADR-064 §1: Tesseract devuelve píxeles de la imagen recibida, y esa imagen
+ * viene rasterizada a `dpi` (el Orchestrator usa scale = dpi/72). El contrato
+ * de 03_Data_Model.md §137 exige puntos de página. Escalado puro, sin
+ * corrimiento de origen: el raster sale de getViewport({ scale }), que ya usa
+ * esquina superior-izquierda con y hacia abajo — la misma convención.
+ */
+function toPagePoints(bbox: BoundingBox, dpi: number): BoundingBox {
+  const factor = POINTS_PER_INCH / dpi;
+  return {
+    x: bbox.x * factor,
+    y: bbox.y * factor,
+    width: bbox.width * factor,
+    height: bbox.height * factor,
+  };
+}
+
+/*
+ * ADR-064 §2: el orden se calcula en PÍXELES y la conversión va después. Si se
+ * convirtiera antes, la tolerancia de 1px de sortWordsByReadingOrder pasaría a
+ * valer 1 punto (≈ 4,17 px a 300 DPI) y el agrupado por línea cambiaría de
+ * comportamiento como efecto colateral de un cambio de unidades. El map
+ * preserva el orden, así que el array queda idéntico al de antes del ADR.
+ */
+function toWords(data: unknown, pageIndex: number, dpi: number): Word[] {
   const tesseractWords = extractTesseractWords(data);
   const words: Word[] = tesseractWords.map((w) => ({
     text: w.text.normalize("NFC"),
@@ -287,7 +313,7 @@ function toWords(data: unknown, pageIndex: number): Word[] {
     confidence: clampConfidence(w.confidence / 100),
     source: "ocr" as const,
   }));
-  return sortWordsByReadingOrder(words);
+  return sortWordsByReadingOrder(words).map((w) => ({ ...w, bbox: toPagePoints(w.bbox, dpi) }));
 }
 
 async function recognizeWithTimeout(
@@ -362,7 +388,7 @@ export async function kernelRecognize(
   payload: OcrPagePayload,
   opts: KernelRecognizeOptions,
 ): Promise<KernelOcrResult> {
-  const { documentId, pageIndex, imageData, languages } = payload;
+  const { documentId, pageIndex, imageData, languages, dpi } = payload;
 
   if (opts.abortSignal.aborted) throw new CancelledError(documentId);
 
@@ -377,7 +403,7 @@ export async function kernelRecognize(
     opts.timeoutMs,
     opts.abortSignal,
   );
-  const words = toWords(data, pageIndex);
+  const words = toWords(data, pageIndex, dpi);
   const confidence = clampConfidence(extractPageConfidence(data) / 100);
   return { words, confidence };
 }
