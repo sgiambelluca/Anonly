@@ -90,6 +90,7 @@ describe("actions", () => {
       dpi: 150,
       includeOriginalMetadata: false,
       filename: "out.pdf",
+      includeMarkerLegend: false,
     });
     actions.cancel();
     actions.closeDocument();
@@ -233,6 +234,7 @@ describe("actions", () => {
         dpi: 300,
         includeOriginalMetadata: false as const,
         filename: "out.pdf",
+        includeMarkerLegend: false,
       };
       actions.requestExport(options);
       expect(emit).toHaveBeenCalledWith(EventChannel.UI, EngineEvents.EXPORT_REQUESTED, {

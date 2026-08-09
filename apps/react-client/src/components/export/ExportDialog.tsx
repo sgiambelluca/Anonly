@@ -2,8 +2,10 @@
  * `ExportDialog` (`ui/Components.md` §7.1, `ui/UX_Guidelines.md` §8.2).
  *
  * Form: nombre de archivo, formato de imagen (png/jpeg), calidad JPEG (solo
- * si jpeg), DPI (150/300), título opcional. Resumen: cantidad de páginas +
- * grupos habilitados/total (`exportPreflight.ts`).
+ * si jpeg), DPI (150/300), título opcional, checkbox de referencia de
+ * marcadores (ADR-059 §1, apagado por default). Resumen: cantidad de páginas
+ * (+1 con el checkbox activo, `UX_Guidelines.md` §8.2) + grupos
+ * habilitados/total (`exportPreflight.ts`).
  *
  * Sin "tamaño estimado" (el mockup de `UX_Guidelines.md` §8.2 muestra
  * "~1.2 MB"): no hay fórmula documentada para estimarlo en función de
@@ -36,6 +38,7 @@ import { actions } from "../../core-adapter/actions.js";
 import { useDocumentStore } from "../../store/document.store.js";
 import { useEntitiesStore } from "../../store/entities.store.js";
 import { Button } from "../common/Button.js";
+import { Checkbox } from "../common/Checkbox.js";
 import { ConfirmDialog } from "../common/ConfirmDialog.js";
 import { Dialog } from "../common/Dialog.js";
 import { Select, type SelectOption } from "../common/Select.js";
@@ -77,6 +80,7 @@ export function ExportDialog({ open, onClose }: ExportDialogProps) {
   const [jpegQuality, setJpegQuality] = useState(DEFAULT_JPEG_QUALITY);
   const [dpi, setDpi] = useState(DEFAULT_DPI);
   const [title, setTitle] = useState("");
+  const [includeMarkerLegend, setIncludeMarkerLegend] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [preflightOpen, setPreflightOpen] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -91,13 +95,21 @@ export function ExportDialog({ open, onClose }: ExportDialogProps) {
     setJpegQuality(DEFAULT_JPEG_QUALITY);
     setDpi(DEFAULT_DPI);
     setTitle("");
+    setIncludeMarkerLegend(false);
     setSubmitted(false);
     setPreflightOpen(false);
     setFormError(null);
   }, [open]);
 
   const counts = countGroups(groupsByType);
-  const form: ExportFormState = { filename, imageFormat, jpegQuality, dpi, title };
+  const form: ExportFormState = {
+    filename,
+    imageFormat,
+    jpegQuality,
+    dpi,
+    title,
+    includeMarkerLegend,
+  };
   const validation = validateExportForm(form);
 
   function startExport(): void {
@@ -192,8 +204,23 @@ export function ExportDialog({ open, onClose }: ExportDialogProps) {
               />
             </FormRow>
 
+            <Checkbox
+              id="export-include-marker-legend"
+              checked={includeMarkerLegend}
+              onCheckedChange={setIncludeMarkerLegend}
+              label={
+                <span className="flex flex-col gap-0.5">
+                  <span>Incluir referencia de marcadores</span>
+                  <span className="text-xs text-text-secondary">
+                    Agrega una página final que explica qué significa cada marcador (PRS = Persona,
+                    MAT = Matrícula…). Solo los tipos: nunca los datos originales.
+                  </span>
+                </span>
+              }
+            />
+
             <div className="rounded-md bg-bg-secondary p-3 text-xs text-text-secondary">
-              <p>{pageCount} páginas</p>
+              <p>{includeMarkerLegend ? pageCount + 1 : pageCount} páginas</p>
               <p>
                 {counts.enabled} grupos anonimizados (de {counts.total} detectados)
               </p>

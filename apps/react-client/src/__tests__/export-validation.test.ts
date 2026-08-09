@@ -13,6 +13,7 @@ function makeForm(overrides: Partial<ExportFormState> = {}): ExportFormState {
     jpegQuality: 0.85,
     dpi: 150,
     title: "",
+    includeMarkerLegend: false,
     ...overrides,
   };
 }
@@ -62,7 +63,13 @@ describe("buildExportOptions", () => {
       dpi: 150,
       includeOriginalMetadata: false,
       filename: "anonimizado.pdf",
+      includeMarkerLegend: false,
     });
+  });
+
+  it("copies includeMarkerLegend when true", () => {
+    const options = buildExportOptions(makeForm({ includeMarkerLegend: true }));
+    expect(options?.includeMarkerLegend).toBe(true);
   });
 
   it("trims filename and omits an empty title", () => {
