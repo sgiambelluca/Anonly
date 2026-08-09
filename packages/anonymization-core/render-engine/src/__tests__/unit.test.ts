@@ -1003,7 +1003,13 @@ describe("RenderEngine — unit tests", () => {
       expect(degradedStrokes[0]!.args).toEqual([100, 0, 31, 40]);
     });
 
-    it("same replacement yields the same degraded verdict in preview and full", async () => {
+    it("same replacement yields the same degraded verdict across scales", async () => {
+      // La invariancia a la escala (ADR-058 §7) es una propiedad del CÓMPUTO
+      // de la razón, no del modo — por eso se ejercita con dos renders en
+      // `mode: "preview"` a escalas distintas (1 y 2.08, la de `fullScale`),
+      // en vez de comparar `preview` contra `full`: desde el fix de
+      // preview-only, `full` nunca pinta el recuadro, y eso probaría otra
+      // cosa (el gate de modo, cubierto en el test siguiente).
       const docId = "doc-degraded-scale-invariant";
       vi.mocked(getDocument).mockReturnValue(
         mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
@@ -1036,24 +1042,12 @@ describe("RenderEngine — unit tests", () => {
           pageIndex: 0,
           kind: "anonymized",
           mode: "preview",
+          scale: 1,
           replacements: [degradingReplacement],
         }),
         ctx,
       );
-      const [previewDegradingCanvas] = getCreatedCanvases();
-
-      resetCreatedCanvases();
-      await engine.renderPage(
-        createRenderPageInput({
-          documentId: docId,
-          pageIndex: 0,
-          kind: "anonymized",
-          mode: "full",
-          replacements: [degradingReplacement],
-        }),
-        ctx,
-      );
-      const [fullDegradingCanvas] = getCreatedCanvases();
+      const [scale1DegradingCanvas] = getCreatedCanvases();
 
       resetCreatedCanvases();
       await engine.renderPage(
@@ -1062,11 +1056,12 @@ describe("RenderEngine — unit tests", () => {
           pageIndex: 0,
           kind: "anonymized",
           mode: "preview",
-          replacements: [mildReplacement],
+          scale: 2.08,
+          replacements: [degradingReplacement],
         }),
         ctx,
       );
-      const [previewMildCanvas] = getCreatedCanvases();
+      const [scale208DegradingCanvas] = getCreatedCanvases();
 
       resetCreatedCanvases();
       await engine.renderPage(
@@ -1074,22 +1069,76 @@ describe("RenderEngine — unit tests", () => {
           documentId: docId,
           pageIndex: 0,
           kind: "anonymized",
-          mode: "full",
+          mode: "preview",
+          scale: 1,
           replacements: [mildReplacement],
         }),
         ctx,
       );
-      const [fullMildCanvas] = getCreatedCanvases();
+      const [scale1MildCanvas] = getCreatedCanvases();
 
-      // El mismo reemplazo (bbox SIN escalar idéntico) da el mismo veredicto
-      // en preview (previewScale=1) y en full (fullScale=2.08, Contracts.md
-      // §6) — `kernelRenderPage` mide tamaño natural y efectivo en el mismo
-      // espacio ESCALADO (`scaleBbox`), así que la razón no depende de la
-      // escala aunque los píxeles absolutos sí.
-      expect(isDegraded(previewDegradingCanvas!.calls)).toBe(true);
-      expect(isDegraded(fullDegradingCanvas!.calls)).toBe(true);
-      expect(isDegraded(previewMildCanvas!.calls)).toBe(false);
-      expect(isDegraded(fullMildCanvas!.calls)).toBe(false);
+      resetCreatedCanvases();
+      await engine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+          scale: 2.08,
+          replacements: [mildReplacement],
+        }),
+        ctx,
+      );
+      const [scale208MildCanvas] = getCreatedCanvases();
+
+      // El mismo reemplazo (bbox SIN escalar idéntico) da el mismo veredicto a
+      // escala 1 y a escala 2.08 (la de `fullScale`, Contracts.md §6) —
+      // `kernelRenderPage` mide tamaño natural y efectivo en el mismo espacio
+      // ESCALADO (`scaleBbox`), así que la razón no depende de la escala
+      // aunque los píxeles absolutos sí.
+      expect(isDegraded(scale1DegradingCanvas!.calls)).toBe(true);
+      expect(isDegraded(scale208DegradingCanvas!.calls)).toBe(true);
+      expect(isDegraded(scale1MildCanvas!.calls)).toBe(false);
+      expect(isDegraded(scale208MildCanvas!.calls)).toBe(false);
+    });
+
+    it("Degraded annotation is never painted in mode: full, regardless of severity", async () => {
+      // ADR-058 §7 amendment (preview-only): el export es el archivo que un
+      // tercero recibe, y hoy no hay ninguna afordancia (ADR-062 dejó la
+      // marca del árbol fuera del hito) que le dé sentido a un recuadro de
+      // aviso ahí. El veredicto se sigue calculando igual (test anterior);
+      // lo que cambia es que `full` nunca lo pinta.
+      const docId = "doc-degraded-full-suppressed";
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+      );
+      await engine.init(ctx);
+      await engine.loadDocument(docId, createValidBuffer());
+
+      await engine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "full",
+          replacements: [
+            makeReplacement({
+              groupId: "g-full-severe",
+              occurrenceId: "o-full-severe",
+              mode: ReplacementMode.Mask,
+              replacementValue: "AAAAA",
+              bbox: { x: 100, y: 0, width: 31, height: 40 },
+            }),
+          ],
+        }),
+        ctx,
+      );
+
+      const [canvas] = getCreatedCanvases();
+      const degradedStrokes = canvas!.calls.filter(
+        (c) => c.op === "strokeRect" && c.strokeStyle === "#f59e0b",
+      );
+      expect(degradedStrokes).toHaveLength(0);
     });
   });
 

@@ -1124,14 +1124,16 @@ export async function kernelRenderPage(
       opts.abortSignal,
       documentId,
     );
-    // ADR-058 §7: reusa `paintAnnotations` en vez de un camino de dibujo
-    // aparte — ya sabe pintar recuadros por `AnnotationKind` (§4 arriba, para
-    // Highlight/Conflict), y las `Degraded` no necesitan nada distinto. Es lo
-    // que rompe la exclusividad "anonymized pinta reemplazos, original pinta
-    // anotaciones" del spec previo a este PR: el camino anonymized ahora
-    // puede terminar invocando las dos funciones, nunca ninguna otra
-    // combinación.
-    if (degraded.length > 0) {
+    // ADR-058 §7 + nota posterior (ver ADR-058 "Docs actualizados", entrada de
+    // repintado preview-only): la anotación Degraded se pinta reutilizando
+    // `paintAnnotations`, pero SOLO en `mode: "preview"`. El export es el
+    // archivo que un tercero recibe; un recuadro de aviso ahí no tiene ninguna
+    // afordancia que lo explique (ADR-062 dejó la marca accionable del árbol
+    // fuera de este hito) y queda como ruido visual permanente en el
+    // documento final. El veredicto en sí (`degraded`) se sigue calculando
+    // igual en los dos modos — es invariante a la escala por diseño (§7) — solo
+    // cambia si se pinta.
+    if (mode === "preview" && degraded.length > 0) {
       paintAnnotations(context2d, degraded, scale, opts.abortSignal, documentId);
     }
   } else {
