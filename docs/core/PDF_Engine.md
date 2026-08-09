@@ -104,6 +104,10 @@ export class PdfEngine implements IEngine {
 // desaparece con el Map interno (ADR-020 §7 superseded: sin retención no hay nada
 // que evictar). Lanza InvalidInputError si pageIndex no existe o si la página
 // tiene requiresOCR === false (guard ADR-020 §6).
+// ADR-064: las `words` entrantes deben venir en PUNTOS DE PÁGINA, igual que
+// las nativas (03_Data_Model.md §137). Esta función no reescala nada — no
+// conoce el DPI del raster ni tiene por qué; la conversión px→pt es
+// responsabilidad de `ocr-engine` (OCR_Engine.md §10).
 export function fuseOcrPage(
   document: Document,
   pageIndex: number,

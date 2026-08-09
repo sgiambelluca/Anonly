@@ -1,12 +1,14 @@
-<!-- CONTEXT: scope=ocr-engine | dependencias=core/Contracts.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-018-First-Party-Assets.md,adr/ADR-021-Engines-Inline-Hasta-Hito9.md,adr/ADR-041-FuseOcrPage-Funcion-Pura-Sin-Estado-Retenido.md,adr/ADR-045-OcrEngine-Pool-Propia-Kernel-Puro.md | audiencia=IA-implementador | fase=10 (§2/§6/§12/§15 actualizados en fase 10: clase host-side dueña de su pool + kernel de reconocimiento en el worker, ADR-045) -->
+<!-- CONTEXT: scope=ocr-engine | dependencias=core/Contracts.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-018-First-Party-Assets.md,adr/ADR-021-Engines-Inline-Hasta-Hito9.md,adr/ADR-041-FuseOcrPage-Funcion-Pura-Sin-Estado-Retenido.md,adr/ADR-045-OcrEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-064-Palabras-De-OCR-En-Puntos.md | audiencia=IA-implementador | fase=10.8 (§2/§6/§12/§15 actualizados en fase 10: clase host-side dueña de su pool + kernel de reconocimiento en el worker, ADR-045; §9/§10/§11/§13/§14 en fase 10.8: las palabras salen en puntos de página, no en píxeles del raster, ADR-064) -->
 
 # OCR Engine — Spec de Motor
 
 > Ejecuta OCR sobre las páginas sin texto del PDF. Solo corre si `PdfEngineOutput.textlessPages.length > 0`. Devuelve `Word[]` con `BoundingBox` y `confidence` que el PDF Engine fusiona.
 
 **EngineId**: `ocr`
-**Versión del spec**: 1.2.2
-**Última actualización**: 2026-07-30
+**Versión del spec**: 1.3.0
+**Última actualización**: 2026-08-09
+
+> **Nota (v1.3.0, ADR-064, 2026-08-09 — las palabras salían en píxeles del raster, no en puntos de página)**: `toWords` armaba el `bbox` con los `x0/y0/x1/y1` crudos de Tesseract, que son **píxeles de la imagen recibida**, mientras `03_Data_Model.md` §137 exige puntos PDF. Como el Orchestrator rasteriza con `scale = ocr.dpi / 72` (**4,1667** con el default de 300 DPI) y no existía ninguna conversión inversa en todo el Core, las palabras entraban a `Page.words` ~4,17× de tamaño y desplazadas — y `render-engine` las **volvía a escalar** al pintar, asumiéndolas puntos. Resultado: en toda página escaneada el rectángulo de censura caía fuera de lugar, dejando el dato sensible a la vista. El kernel pasa a convertir con `pt = px · 72 / dpi` (§10), **después** de ordenar, para que la tolerancia de misma-línea siga siendo de 1px y el orden quede bit-idéntico (ADR-064 §2). `dpi` deja de ser informativo y pasa a ser precondición: debe ser el DPI con el que se rasterizó `imageData` (§9). Sin cambios de firma pública ni de `Contracts.md`.
 
 > **Nota (v1.2.2, 2026-07-30 — las rutas de tesseract se absolutizan contra `self.location.origin`; sin ADR)**: la errata de v1.2.1 (abajo) es correcta pero **solo arregla el fallback in-process**, no el camino real de producción (OcrWorker, wireado incondicionalmente desde PR14/ADR-045). Dentro de un Worker, `tesseract.js@6` no absolutiza `langPath`/`corePath`/`workerPath` —su `resolvePaths` solo lo hace si el entorno es `'browser'`, y en un Worker es `'webworker'`— y con `workerBlobURL: true` (default) el worker interno que crea tiene `self.location = blob:<origen>/<uuid>`. Un path root-relative **no resuelve contra una base `blob:`** (`new URL("/wasm/…", "blob:…")` lanza `Invalid URL`), sea archivo o directorio. Regla: **el kernel absolutiza las tres rutas contra `self.location.origin` antes de pasarlas a `createWorker`**, con fallback a la ruta root-relative si `self.location` no existe (entorno de test en node). Sigue siendo first-party (mismo origen, ADR-018): lo que cambia es la forma de la URL, no el destino. Si tras absolutizar apareciera todavía una resolución root-relative interna de tesseract (`getCore.js` — no verificado, hoy la ejecución no llega tan lejos), la palanca de reserva documentada es `workerBlobURL: false`, que elimina la base `blob:` por completo. Fix: PR 17.6, item §15.22.
 
@@ -146,8 +148,11 @@ OcrPageInput {
 **Restricciones**:
 - `imageData.width > 0 && imageData.height > 0`. Si no, lanza `InvalidInputError`.
 - `pageIndex >= 0`.
+- `dpi` debe ser finito y `> 0`. Si no, lanza `InvalidInputError` (ADR-064 §4): es el divisor de la conversión a puntos de §10.
 - `languages` debe contener al menos un idioma cargado en el modelo del worker.
 - `imageData` se transfiere (zero-copy). El host pierde acceso tras `processPage`.
+
+**Precondición de `dpi` (ADR-064 §3)**: `dpi` **debe ser el DPI con el que se rasterizó `imageData`**. No es un dato informativo: es el divisor con el que §10 convierte las coordenadas de Tesseract a puntos de página, así que un valor que no corresponda produce geometría mal escalada en silencio. El caller es responsable de que las dos cosas se muevan juntas — hoy el Orchestrator las deriva del mismo `ctx.config.ocr.dpi` (`scale = dpi/72` para rasterizar, `dpi` para este input; `Orchestrator.md` §2). El motor **no** lo verifica: no conoce el tamaño en puntos de la página, así que no tiene contra qué comparar.
 
 ---
 
@@ -166,6 +171,8 @@ OcrPageOutput {
 - `words[i].source === "ocr"`.
 - `words[i].pageIndex === input.pageIndex`.
 - `words[i].confidence ∈ [0,1]`.
+- **`words[i].bbox` está en puntos de página**, no en píxeles del raster (ADR-064 §1). Tesseract devuelve píxeles de la `imageData` recibida; el kernel los convierte con `pt = px · 72 / dpi` sobre `x`, `y`, `width` y `height`. Es un escalado puro, sin corrimiento de origen: el raster de `rasterizePage` sale de `getViewport({ scale })`, cuya esquina superior-izquierda con `y` hacia abajo es **la misma convención** que exige `03_Data_Model.md` §137. Con esto, `Word.bbox` tiene un único espacio de coordenadas sea `source` `"pdf"` u `"ocr"`.
+- El orden de lectura se calcula **antes** de convertir, con la tolerancia de misma-línea de 1px intacta (ADR-064 §2). El array resultante queda en el mismo orden que produciría sin la conversión: un escalado positivo uniforme no altera el orden, y la tolerancia sigue significando un píxel y no un punto.
 - Las `Word[]` también se depositan en `ctx.cache` con clave `ocr-words:<documentId>:<pageIndex>`; el Orchestrator las lee al recibir `OCR_PAGE_FINISHED` y aplica la función pura `fuseOcrPage` de `pdf-engine` sobre su `Document` retenido (ADR-014, ADR-041). La integración con `fuseOcrPage` se testea con llamada directa, sin bus.
 
 ---
@@ -179,7 +186,7 @@ OcrPageOutput {
 | `OCR_MODEL_MISSING` | `OcrModelMissingError` | no se pudo cargar/descargar el modelo Tesseract | no | abortar OCR; el usuario debe reintentar o desactivar OCR |
 | `ENGINE_NOT_INITIALIZED` | `EngineNotInitializedError` | `processPage` antes de `init` | no | bug del caller |
 | `ENGINE_DISPOSED` | `EngineDisposedError` | `processPage` tras `dispose` | no | bug del caller |
-| `INVALID_INPUT` | `InvalidInputError` | input null/undefined o `imageData` vacío | no | bug del caller |
+| `INVALID_INPUT` | `InvalidInputError` | input null/undefined, `imageData` vacío, o `dpi` no finito o `≤ 0` (ADR-064 §4) | no | bug del caller |
 
 `retryable`: `OCR_TIMEOUT = true`, resto `false`.
 
@@ -207,6 +214,8 @@ OcrPageOutput {
 4. **`imageData` ya transferido**: lanza `InvalidInputError`. (Hito 9; inline no hay transferencia zero-copy — ADR-021 §1, precedente ADR-020 §9.)
 5. **Idioma no cargado en el modelo**: lanza `OcrModelMissingError`.
 6. **Timeout por página**: reintentar 2 veces. Si persiste, `OCR_PAGE_FAILED` y se continúa con las demás páginas.
+7. **`dpi = 72`**: la conversión de §10 es la identidad (factor `72/72 = 1`). Caso degenerado útil como fijación de la fórmula, no un modo de uso recomendado (§12: 300 DPI para OCR preciso).
+8. **`dpi` no finito o `≤ 0`**: lanza `InvalidInputError` antes de rasterizar nada (ADR-064 §4). Antes del ADR-064 era inocuo porque el valor no se leía; ahora es una división por cero.
 7. **Worker crashea (OOM)**: el pool reemplaza el worker, reintenta el job si `retryable`.
 8. **Cancelación a mitad de página**: aborta en < 200 ms, libera memoria temporal, responde `CANCELLED`.
 9. **100 páginas escaneadas**: se procesan en paralelo (pool size 2). Memoria pico ~600 MB (2 workers × 300 MB). El host vigila memory budget y serializa si `deviceMemory < 4` GB.
@@ -232,6 +241,10 @@ OcrPageOutput {
 | `throws on already-transferred imageData` | `edge.test.ts` | edge | caso 4 |
 | `throws on unknown language` | `edge.test.ts` | edge | caso 5 |
 | `retries on timeout up to maxRetries` | `edge.test.ts` | edge | caso 6 |
+| `word bboxes are converted from raster pixels to page points` | `unit.test.ts` | unit | ADR-064 §1: bbox `(0,0)-(417,417)` px con `dpi = 300` → `{ x: 0, y: 0, width: 100.08, height: 100.08 }` pt |
+| `dpi 72 makes the conversion an identity` | `unit.test.ts` | unit | caso 7 (ADR-064 §1): fija la fórmula en el factor 1 |
+| `reading order is unchanged by the point conversion` | `unit.test.ts` | unit | ADR-064 §2: mismo orden que sin convertir, incluida la tolerancia de misma-línea de 1px |
+| `throws InvalidInputError on non-positive or non-finite dpi` | `edge.test.ts` | edge | caso 8 (ADR-064 §4): `0`, `-1`, `NaN`, `Infinity` |
 | `replaces crashed worker and retries` | `stress.test.ts` (en `tests/stress/`) | stress | caso 7 |
 | `cancel within 200ms` | `cancel.test.ts` | cancel | caso 8 |
 | `100 pages complete within memory budget` | `stress.test.ts` | stress | caso 9 |
@@ -273,6 +286,7 @@ OcrPageOutput {
 - [ ] 20. (Hito 10, PR14 — ADR-045) Puerto interno `OcrJobPool` + constructor `new OcrEngine(pool?)` (espejo de `RenderJobPool`/ADR-043 §2); `processPage` despacha con `maxRetriesOverride: 0` y normaliza timeouts a `OcrTimeoutError`; wiring en `create-core.ts` (`new OcrEngine(ocrPool)`).
 - [ ] 21. (Hito 10, PR14 — ADR-045) Subpath export `"./worker"` + wiring en la app; E2E: pipeline con PDF escaneado real vía OcrWorker (fixture diferida de PR12, ADR-041), `OCR_PAGE_FINISHED` incremental observable.
 - [ ] 22. (Hito 10, PR 17.6 — erratas v1.2.1 y v1.2.2, sin ADR) Dos partes, las dos necesarias: (a) `TESSERACT_WORKER_PATH` → `"/wasm/tesseract/worker.min.js"` (archivo, no directorio; arregla el fallback in-process); (b) absolutizar las **tres** rutas contra `self.location.origin` antes de `createWorker`, con fallback a la ruta root-relative si `self.location` no existe (node/tests) — sin esto el camino real (OcrWorker) sigue roto, porque los paths terminan resolviéndose contra una base `blob:`. Palanca de reserva si aparece una resolución interna root-relative de tesseract: `workerBlobURL: false` (documentar el motivo si se usa). Verificar en browser real, no solo en unit tests: el mock de tesseract no ejercita la resolución de URLs. Test: el Escenario 2 E2E (PDF escaneado) debe producir entidades > 0 — hoy pasa a "Listo" con 0 y **en verde**, así que el spec tiene que afirmar el resultado del OCR, no solo el stage.
+- [ ] 23. (Hito 10.8, paso 0 — ADR-064) `toWords` recibe el `dpi` del payload y convierte cada `bbox` a puntos con `pt = px · 72 / dpi`, **después** de `sortWordsByReadingOrder` (la tolerancia de misma-línea sigue siendo de 1px, ADR-064 §2). Guard de `dpi` finito y `> 0` → `InvalidInputError` (§9, §11). Actualizar el fixture de `tests/integration/ocr-pdf-fusion.test.ts`, que hoy usa valores que pasan en cualquier espacio de coordenadas. Casos 7-8 de §13 y cuatro filas nuevas en §14.
 
 ---
 
