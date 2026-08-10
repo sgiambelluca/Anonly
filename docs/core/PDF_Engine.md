@@ -149,11 +149,15 @@ export function fuseOcrRegion(
 // tipado. La escribe este motor (es el que conoce el contrato de su worker,
 // ADR-055 §8) y la invoca el façade, que es el único consumidor de ese resultado
 // remoto — pdf-engine no tiene puerto interno de despacho que angostar.
-// Verificación superficial y deliberada (§13 caso 17): los cuatro campos de
-// PdfEngineOutput, más que `document` tenga `id: string` y `pages: Array`. NO
-// recorre words/bboxes: correría por cada import sobre documentos de miles de
-// páginas, y una corrupción parcial de ese nivel no es el modo de falla que
-// ADR-055 cierra (un sobre con forma distinta lo es).
+// Verificación superficial y deliberada (§13 caso 17): los CINCO campos de
+// PdfEngineOutput —incluido `ocrRegions` (ADR-065 §4)—, más que `document`
+// tenga `id: string` y `pages: Array`. NO recorre words/bboxes de las páginas:
+// correría por cada import sobre documentos de miles de páginas, y una
+// corrupción parcial de ese nivel no es el modo de falla que ADR-055 cierra
+// (un sobre con forma distinta lo es). `ocrRegions` SÍ se recorre elemento a
+// elemento, igual que `textlessPages`: tiene a lo sumo una entrada por página
+// (ADR-065 §2), o sea la misma clase de costo — la línea que traza ADR-055 es
+// contra los datos no acotados por página, no contra los arrays en general.
 // Ante cualquier otra forma LANZA InvalidInputError con details.receivedShape
 // (§11). Devolver un default en silencio está prohibido (ADR-055 §3).
 export function decodePdfEngineOutput(value: unknown): PdfEngineOutput;
@@ -288,7 +292,7 @@ PdfEngineOutput {
 14. **`fuseOcrPage` sobre página con texto nativo** (`requiresOCR === false`): lanza `InvalidInputError`; la fusión OCR solo aplica a páginas textless (ADR-020 §6; función pura desde ADR-041 — el caso "documento no encontrado" desapareció, el caller provee el `Document`).
 15. **`fuseOcrPage` con `pageIndex` fuera de rango**: lanza `InvalidInputError` con `details: { pageIndex }` (ADR-041).
 16. **`decodePdfEngineOutput` sobre un `PdfEngineOutput` válido** (la forma que postea `worker/entry.ts` y la que devuelve `process()` in-process — son la **misma**, este motor no envuelve el resultado en ningún sobre): lo devuelve tal cual, sin copiarlo ni normalizarlo.
-17. **`decodePdfEngineOutput` sobre cualquier otra forma** (`null`, `undefined`, un string, `[]`, `{}`, un objeto al que le falta un campo o le sobra con el tipo equivocado, o un `{ output: {...} }` que envuelva el resultado): lanza `InvalidInputError` con `details.receivedShape`. La verificación es superficial por diseño (§6): valida los cuatro campos de `PdfEngineOutput` y que `document` tenga `id: string` y `pages: Array`, pero **no** recorre `words`/`bbox` — un `document.pages` con elementos corruptos adentro pasa el decoder. Es deliberado: el modo de falla que ADR-055 cierra es el sobre de forma distinta, no la corrupción campo a campo, y un walk profundo correría por cada import sobre documentos de miles de páginas (§12).
+17. **`decodePdfEngineOutput` sobre cualquier otra forma** (`null`, `undefined`, un string, `[]`, `{}`, un objeto al que le falta un campo o le sobra con el tipo equivocado, o un `{ output: {...} }` que envuelva el resultado): lanza `InvalidInputError` con `details.receivedShape`. La verificación es superficial por diseño (§6): valida los **cinco** campos de `PdfEngineOutput` —incluido `ocrRegions`, recorrido elemento a elemento (`pageIndex: number` y un `bbox` de cuatro números), igual que `textlessPages` y por el mismo motivo: está acotado a una entrada por página (ADR-065 §2)— y que `document` tenga `id: string` y `pages: Array`, pero **no** recorre `words`/`bbox` de las páginas — un `document.pages` con elementos corruptos adentro pasa el decoder. Es deliberado: el modo de falla que ADR-055 cierra es el sobre de forma distinta, no la corrupción campo a campo, y un walk profundo correría por cada import sobre documentos de miles de páginas (§12).
 18. **`TextItem` rotado 90°/180°/270°** (matriz del tipo `[0, s, -s, 0, e, f]`): el bbox tiene `width` y `height` intercambiados respecto de `item.width`/`item.height`, con el origen en la envolvente del paralelogramo (ADR-063 §2). Los tokens de un run multi-palabra se desplazan sobre el eje de avance, no sobre `x` (ADR-063 §3).
 19. **`TextItem` con rotación arbitraria** (p. ej. 45°, marca de agua diagonal): el bbox es la envolvente axis-aligned de los cuatro vértices — cubre **más** área que los glifos. Deliberado: para censura, cubrir de más nunca deja un dato expuesto (ADR-063 §2).
 20. **`TextItem` con matriz degenerada** (`a = b = 0`, o `c = d = 0`): no se divide por cero; el versor correspondiente cae al comportamiento horizontal (`dir = (1, 0)` / `up = (0, 1)`).
@@ -360,6 +364,7 @@ PdfEngineOutput {
 | `ocrRegions and textlessPages are disjoint` | `contract.test.ts` | contract | 10.8 | invariante de ADR-065 §4 |
 | `fuseOcrRegion translates words by the region origin and concatenates` | `unit.test.ts` | unit | 10.8 | ADR-065 §6: suma `region.x`/`region.y`, conserva las nativas, reordena |
 | `fuseOcrRegion on a textless page throws InvalidInputError` | `unit.test.ts` | unit | 10.8 | caso 27 (ADR-065 §6): guard invertido |
+| `decodePdfEngineOutput throws on a malformed ocrRegions` | `edge.test.ts` | edge | 10.8 | caso 17 (ADR-065 §4): falta el campo, no es array, un elemento sin `pageIndex: number`, o con `bbox` incompleto/no-numérico |
 | `1000 pages document completes within memory budget` | `stress.test.ts` (en `tests/stress/`) | stress | 11 | caso 2; pendiente, requiere `huge-1000p.pdf` (LFS) |
 | `cancel aborts within 200ms` | `cancel.test.ts` (en `tests/cancel/`) | cancel | 11 | SLA; pendiente, requiere `PdfPool` + `AbortRegistry` (Hito 9) |
 

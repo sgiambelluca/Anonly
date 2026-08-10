@@ -95,7 +95,7 @@ export interface OcrRegion {
 }
 ```
 
-`PdfEngineOutput` gana `readonly ocrRegions: ReadonlyArray<OcrRegion>`. Invariante: **ningún `pageIndex` de `ocrRegions` está en `textlessPages`**. Son los dos caminos de OCR y no se pisan — una página sin texto nativo va entera (camino de siempre, intacto), una página con texto nativo va por región.
+`PdfEngineOutput` gana `readonly ocrRegions: ReadonlyArray<OcrRegion>`. Como campo nuevo del tipo que cruza el boundary del `PdfWorker`, **entra también en `decodePdfEngineOutput`** (ADR-055 §10): el guard pasa a validar cinco campos y no cuatro, recorriendo `ocrRegions` elemento a elemento igual que `textlessPages` — está acotado a una entrada por página (§2), o sea la misma clase de costo que el ADR-055 ya acepta; lo que ese ADR excluye son los datos no acotados por página (`words`/`bbox` de las páginas), no los arrays en general. Invariante: **ningún `pageIndex` de `ocrRegions` está en `textlessPages`**. Son los dos caminos de OCR y no se pisan — una página sin texto nativo va entera (camino de siempre, intacto), una página con texto nativo va por región.
 
 ### 5. `rasterizePage` gana una región opcional
 
