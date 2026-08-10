@@ -134,7 +134,29 @@ Una página con región OCR-eada tiene `requiresOCR === false` y sí pasó por O
 
 Es un cambio de invariante documentado, no un efecto colateral: ningún consumidor lee `ocrCompleted` para decidir nada hoy (solo `06_Pipeline.md` lo menciona para el caso de fallo).
 
-### 8. Lo que **no** cambia
+### 8. `reanalyze` tiene que reprocesar las regiones, y no puede derivarlas del `Document`
+
+`runReanalyzeOcr` decide qué re-escanear con:
+
+```ts
+const ocrPages = document.pages.filter((page) => page.requiresOCR).map((page) => page.index);
+if (ocrPages.length === 0) return;
+```
+
+Una página con región tiene `requiresOCR === false`, así que **queda afuera de las dos líneas**: nunca se re-OCR-ea, y si el OCR de ese documento fue solo por región, `ocrPages` es vacío y el `reanalyze` entero se vuelve un **no-op silencioso** — el usuario cambia `ocr.languages`, la app dice "listo", y la región conserva el texto del idioma viejo. Es la misma falla que ADR-061 §5 documenta para los literales manuales: una re-detección que descarta trabajo previo sin avisar.
+
+Se decide:
+
+- El Orchestrator **retiene `ocrRegions` por documento**. No es opcional ni una optimización: a diferencia de `textlessPages` —que se recomputa en cualquier momento desde `page.requiresOCR`— las regiones **no viven en el modelo de datos**, así que si no se retienen se pierden en cuanto termina la extracción.
+- Ese estado retenido **se descarta en `closeDocument`/`dispose`** junto al resto del estado por documento, con el mismo criterio que `retainedInputs`, `effectiveConfigByDocument` y los demás mapas.
+- `runReanalyzeOcr` opera sobre **la unión** de `ocrPages` (derivadas de `requiresOCR`) y los `pageIndex` de las regiones retenidas. La guarda de salida temprana pasa a mirar esa unión, no solo `ocrPages`.
+- `dropOccurrences` recibe esa misma unión. Sobre una página con región eso **también descarta las ocurrencias de su texto nativo**, y es correcto: Regex re-corre sobre el documento completo y NER sobre `rerunPages`, así que se vuelven a detectar. Queda escrito porque no es obvio y porque el efecto es visible (una ocurrencia editada a mano sobre texto nativo de esa página se pierde igual que en cualquier otra página re-OCR-eada).
+
+### 9. Un fallo de OCR sobre una región no deja la página sin texto
+
+`06_Pipeline.md` dice que una página cuyo OCR falla "queda con `requiresOCR = true` y `ocrCompleted = false`". Para una **región** eso es falso en la primera mitad: la página conserva su texto nativo y su `requiresOCR` sigue en `false`; lo único que se pierde es el contenido de esa región, y la página queda con `ocrCompleted = false`. El pipeline continúa con warning, igual que hoy.
+
+### 10. Lo que **no** cambia
 
 - **`requiresOCR`** (§7) y **`textlessPages`**: misma semántica, mismo cálculo.
 - **`sourceKind`**: sigue siendo `text`/`scanned`/`mixed` derivado de `textlessPages`. Una página con texto nativo y una imagen con texto oculto **tiene** texto nativo; llamar `mixed` al documento por eso cambiaría el significado del campo y rippling a la UI, sin que nadie lo necesite.
@@ -183,6 +205,9 @@ Es un cambio de invariante documentado, no un efecto colateral: ningún consumid
 - Test edge (`render-engine`): `region` que excede los límites de la página se clampea; `region` de área cero → `InvalidInputError`.
 - Test unit (`pdf-engine`): `fuseOcrRegion` traslada por `region.x`/`region.y`, concatena con las nativas y reordena; sobre página con `requiresOCR === true` lanza `InvalidInputError`.
 - Test de integración: documento con una página de texto nativo + imagen con texto oculto → la entidad de la imagen llega a Grouping con bbox en coordenadas de página.
+- Test contract (façade): `reanalyze` con `ocr.languages` sobre un documento **sin páginas `requiresOCR` pero con `ocrRegions`** re-escanea la región — hoy sería un no-op silencioso (§8). Es el test que fija la regresión más peligrosa de este ADR.
+- Test unit (façade): el estado retenido de `ocrRegions` se borra en `closeDocument` (§8).
+- Test unit (façade): un `OCR_PAGE_FAILED` sobre una región deja la página con su texto nativo intacto y `requiresOCR === false` (§9).
 - Cobertura ≥ 85% líneas en los paquetes tocados.
 - `pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract` verdes.
 

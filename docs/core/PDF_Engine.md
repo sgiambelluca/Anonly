@@ -222,7 +222,7 @@ PdfEngineOutput {
 - `document.pages[i].index === i` para todo `i`.
 - `document.pages[i].words` está ordenado por `bbox.y` asc, luego `bbox.x` asc.
 - `textlessPages` está ordenado asc.
-- `sourceKind === "scanned"` si todas las páginas son `requiresOCR`, `"text"` si ninguna, `"mixed"` si hay mix. **No lo afectan las `ocrRegions`** (ADR-065 §8): una página con texto nativo y una imagen con texto oculto *tiene* texto nativo, y `sourceKind` describe de dónde sale el texto de las páginas, no cuánto OCR se va a correr.
+- `sourceKind === "scanned"` si todas las páginas son `requiresOCR`, `"text"` si ninguna, `"mixed"` si hay mix. **No lo afectan las `ocrRegions`** (ADR-065 §10): una página con texto nativo y una imagen con texto oculto *tiene* texto nativo, y `sourceKind` describe de dónde sale el texto de las páginas, no cuánto OCR se va a correr.
 - `ocrRegions` está ordenado asc por `pageIndex`, tiene como máximo una entrada por página (ADR-065 §2) y **ningún `pageIndex` suyo aparece en `textlessPages`** (ADR-065 §4). Cada `bbox` está contenido en el rectángulo de la imagen que lo originó.
 
 ---
@@ -396,7 +396,7 @@ PdfEngineOutput {
 - [ ] 20. (Hito 10, PR12 — ADR-041) Extraer `fuseOcrPage` a función pura exportada (§6: sin `Map` interno, sin asserts de instancia, síncrona; conserva guard ADR-020 §6, validación de `pageIndex` y NFC); eliminar `releaseDocument` y el estado por documento del engine; adaptar los tests de fusión (casos 14–15 de §13, filas de §14) y `tests/integration/ocr-pdf-fusion.test.ts`.
 - [ ] 21. (Hito 10, PR 17.1 — ADR-049 §4) `PdfPasswordRequiredError`: segundo argumento del `super(...)`, `true` → `false` (§11). Fila nueva en §14. Debe mergearse **antes** del PR 17.2 del façade, que retira el override `isRetryable` que hoy lo compensa.
 - [x] 22. (Hito 10.8, paso 1 — ADR-063) `convertTextItemsToWords`: derivar la geometría de la matriz completa (§12). Versores de avance/ascenso desde `[a, b, c, d]`, bbox como envolvente axis-aligned del paralelogramo, prorrateo del token sobre el eje de avance. **No** tocar `BoundingBox` (sin campo de rotación, ADR-063 §5), **no** tocar el orden de lectura (ADR-063 §4) y **no** regenerar el snapshot de `snapshot.test.ts`: si cambia, el cambio rompió texto horizontal. Casos 18-21 de §13 y seis filas nuevas en §14.
-- [x] 23. (Hito 10.8, paso 2 — ADR-065) Compuertas 1 y 2 en `parsePage` (§12) produciendo `PdfEngineOutput.ocrRegions` (§6, §10), y `fuseOcrRegion` como export puro nuevo (§6). **No** tocar `requiresOCR`, `textlessPages` ni `sourceKind` (ADR-065 §8). El `OcrRegion` de `@anonly/shared` es precondición (`Contracts.md` §5). Casos 22-27 de §13 y ocho filas nuevas en §14.
+- [x] 23. (Hito 10.8, paso 2 — ADR-065) Compuertas 1 y 2 en `parsePage` (§12) produciendo `PdfEngineOutput.ocrRegions` (§6, §10), y `fuseOcrRegion` como export puro nuevo (§6). **No** tocar `requiresOCR`, `textlessPages` ni `sourceKind` (ADR-065 §10). El `OcrRegion` de `@anonly/shared` es precondición (`Contracts.md` §5). Casos 22-27 de §13 y ocho filas nuevas en §14.
 
 ---
 
