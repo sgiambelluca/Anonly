@@ -21,7 +21,7 @@ import { buildPageReplacements } from "@anonly/export-engine";
 import type { ExportEngineInput, RenderPageProvider } from "@anonly/export-engine";
 import type { NerPageInput } from "@anonly/ner-engine";
 import type { OcrPageInput } from "@anonly/ocr-engine";
-import { decodePdfEngineOutput, fuseOcrPage } from "@anonly/pdf-engine";
+import { decodePdfEngineOutput, fuseOcrPage, fuseOcrRegion } from "@anonly/pdf-engine";
 import type { PdfEngineOutput } from "@anonly/pdf-engine";
 import { RenderFailedError } from "@anonly/render-engine";
 import type { RenderPageInput } from "@anonly/render-engine";
@@ -56,6 +56,7 @@ import {
   type NerPageFinished,
   type OcrPageFailed,
   type OcrPageFinished,
+  type OcrRegion,
   type PageParsed,
   type PdfInvalid,
   type PdfParsePayload,
@@ -198,6 +199,14 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
 
   private readonly documents = new Map<string, Document>();
   private readonly retainedInputs = new Map<string, ImportDocumentInput>();
+  // ADR-065 §8: las regiones de OCR (páginas CON texto nativo, una imagen sin
+  // explicar) no viven en el modelo de datos — a diferencia de textlessPages,
+  // que se recomputa en cualquier momento desde page.requiresOCR — así que se
+  // pierden apenas termina la extracción si este componente no las retiene.
+  // Se setean una única vez en runPipelineFrom (pdfOutput.ocrRegions) y nunca
+  // se recomputan; reanalyze las lee para la unión de páginas a re-escanear
+  // (§13 caso 20).
+  private readonly ocrRegionsByDocument = new Map<string, ReadonlyArray<OcrRegion>>();
   private readonly renderLoadedDocuments = new Set<string>();
   private readonly exportQueues = new Map<string, ExportOptions[]>();
   private readonly exportInProgress = new Set<string>();
@@ -474,7 +483,14 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     await this.engines.grouping.finishSession(documentId);
   }
 
-  /** Caso 20 (+ combinado): `ocr.languages` sobre páginas `requiresOCR`. */
+  /**
+   * Caso 20 (+ combinado): `ocr.languages` sobre la **unión** de páginas
+   * `requiresOCR` y regiones retenidas (ADR-065 §8). Una página con región
+   * tiene `requiresOCR === false`, así que quedaría afuera del filtro por
+   * `requiresOCR` solo — y si el OCR del documento fue **solo** por región,
+   * la guarda de salida temprana volvería el `reanalyze` entero un no-op
+   * silencioso (el test que fija la regresión más peligrosa del ADR).
+   */
   private async runReanalyzeOcrFlow(
     documentId: string,
     ctx: EngineContext,
@@ -487,10 +503,21 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       });
     }
 
-    const ocrPages = document.pages.filter((page) => page.requiresOCR).map((page) => page.index);
-    if (ocrPages.length === 0) {
-      // Sin páginas OCR: los idiomas de OCR no afectan texto nativo, nada
-      // que re-detectar (la config efectiva ya quedó actualizada arriba).
+    const requiresOcrPages = document.pages
+      .filter((page) => page.requiresOCR)
+      .map((page) => page.index);
+    const retainedRegions = this.ocrRegionsByDocument.get(documentId) ?? [];
+    // ADR-065 §4: los dos conjuntos son disjuntos por contrato — la unión
+    // los combina sin necesidad de dedupe.
+    const affectedPages = new Set<number>([
+      ...requiresOcrPages,
+      ...retainedRegions.map((region) => region.pageIndex),
+    ]);
+
+    if (affectedPages.size === 0) {
+      // Sin páginas OCR ni regiones: los idiomas de OCR no afectan texto
+      // nativo, nada que re-detectar (la config efectiva ya quedó
+      // actualizada arriba).
       return;
     }
 
@@ -499,9 +526,16 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       expectRegex: true,
       expectNer: effectiveConfig.ner.enabled,
     });
-    this.engines.grouping.dropOccurrences(documentId, { pageIndices: ocrPages });
+    // ADR-065 §8: sobre una página con región esto también descarta las
+    // ocurrencias de su texto nativo — correcto, porque Regex re-corre sobre
+    // el documento completo y NER sobre las páginas re-OCR, así que se
+    // vuelven a detectar (visible: una edición manual sobre esa página se
+    // pierde igual que en cualquier página re-OCR-eada).
+    this.engines.grouping.dropOccurrences(documentId, {
+      pageIndices: [...affectedPages].sort((a, b) => a - b),
+    });
 
-    await this.runOcrStage(documentId, ocrPages, ctx);
+    await this.runOcrStage(documentId, requiresOcrPages, retainedRegions, ctx);
 
     this.setStage(documentId, PipelineStage.Detecting);
     const updatedDocument = this.documents.get(documentId);
@@ -517,9 +551,8 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
 
     if (!effectiveConfig.ner.enabled) return; // handleRegexFinished ya invoca finishSession (ner off).
 
-    const rerunPages = new Set(ocrPages);
     const nerInputs: NerPageInput[] = updatedDocument.pages
-      .filter((page) => rerunPages.has(page.index))
+      .filter((page) => affectedPages.has(page.index))
       .map((page) => ({ documentId, pageIndex: page.index, text: page.text, words: page.words }));
 
     this.progressByDocument.set(documentId, { total: nerInputs.length, current: 0 });
@@ -547,6 +580,10 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     this.renderLoadedDocuments.delete(documentId);
     this.documents.delete(documentId);
     this.retainedInputs.delete(documentId);
+    // ADR-065 §8: las regiones retenidas se descartan junto al resto del
+    // estado por documento — no viven en el modelo de datos, así que no hay
+    // otra copia de la que recuperarlas.
+    this.ocrRegionsByDocument.delete(documentId);
     this.exportQueues.delete(documentId);
     this.exportInProgress.delete(documentId);
     this.progressByDocument.delete(documentId);
@@ -582,6 +619,7 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     this.state.clear();
     this.documents.clear();
     this.retainedInputs.clear();
+    this.ocrRegionsByDocument.clear();
     this.renderLoadedDocuments.clear();
     this.exportQueues.clear();
     this.exportInProgress.clear();
@@ -676,11 +714,18 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     }
 
     this.documents.set(documentId, pdfOutput.document);
+    // ADR-065 §8: retenido por documento — ver el mapa arriba.
+    this.ocrRegionsByDocument.set(documentId, pdfOutput.ocrRegions);
 
-    if (pdfOutput.textlessPages.length > 0) {
+    // ADR-065 §4/§13 caso 1: los dos conjuntos son disjuntos por contrato,
+    // así que la etapa OCR corre si CUALQUIERA de los dos tiene contenido —
+    // un documento con texto nativo en todas las páginas pero una imagen sin
+    // explicar (ocrRegions no vacío, textlessPages vacío) ya no salta la
+    // etapa, que es exactamente el documento que motivó el ADR.
+    if (pdfOutput.textlessPages.length > 0 || pdfOutput.ocrRegions.length > 0) {
       this.setStage(documentId, PipelineStage.OCRing);
       try {
-        await this.runOcrStage(documentId, pdfOutput.textlessPages, ctx);
+        await this.runOcrStage(documentId, pdfOutput.textlessPages, pdfOutput.ocrRegions, ctx);
       } catch (err: unknown) {
         if (this.handleCancellationIfAny(documentId, err)) return;
         this.failPipeline(documentId, err);
@@ -769,12 +814,18 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
   private async runOcrStage(
     documentId: string,
     textlessPages: ReadonlyArray<number>,
+    ocrRegions: ReadonlyArray<OcrRegion>,
     ctx: EngineContext,
   ): Promise<void> {
-    // Progreso granular OCR (spec Orchestrator.md §8): total fijo para toda
-    // la etapa (textlessPages.length de DOCUMENT_PARSED); current arranca en
-    // 0 y lo incrementa handleOcrPageFinished por cada OCR_PAGE_FINISHED.
-    this.progressByDocument.set(documentId, { total: textlessPages.length, current: 0 });
+    // Progreso granular OCR (spec Orchestrator.md §8, ADR-065 §2): total fijo
+    // para toda la etapa (textlessPages.length + ocrRegions.length, ambos
+    // conjuntos disjuntos); current arranca en 0 y lo incrementa
+    // handleOcrPageFinished por cada OCR_PAGE_FINISHED, sea de página entera
+    // o de región.
+    this.progressByDocument.set(documentId, {
+      total: textlessPages.length + ocrRegions.length,
+      current: 0,
+    });
 
     // ADR-034 §1: adelanta loadDocument a la etapa 2 (bytes retenidos de la
     // 0). v1.2.1 (bug #6, caso 23): copia — el buffer retenido nunca sale del
@@ -797,6 +848,29 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       ocrInputs.push({
         documentId,
         pageIndex,
+        imageData,
+        dpi: ctx.config.ocr.dpi,
+        languages: ctx.config.ocr.languages,
+      });
+    }
+
+    // ADR-065 §3/§5: se OCR-ea la región, no la página — `rasterizePage`
+    // recibe `region.bbox` y devuelve solo el recorte (en puntos de página,
+    // el motor la multiplica por `scale` internamente). El `OcrPageInput` es
+    // el de siempre: el OCR Engine no sabe ni necesita saber que su
+    // `imageData` es un recorte en vez de una página completa.
+    for (const region of ocrRegions) {
+      if (ctx.abortSignal.aborted) throw new CancelledError(documentId);
+      const imageData = await this.engines.render.rasterizePage(
+        documentId,
+        region.pageIndex,
+        scale,
+        ctx,
+        region.bbox,
+      );
+      ocrInputs.push({
+        documentId,
+        pageIndex: region.pageIndex,
         imageData,
         dpi: ctx.config.ocr.dpi,
         languages: ctx.config.ocr.languages,
@@ -1155,17 +1229,33 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       return;
     }
 
-    // ADR-041 §3: fuseOcrPage es una función pura y síncrona, host-side — lee
-    // (this.documents), fusiona e inmediatamente guarda la copia canónica,
-    // todo dentro del mismo turno de evento (IEventBus.emit es síncrono en
-    // línea, 04_Event_System.md §13). Elimina de raíz la carrera lost-update
-    // entre dos OCR_PAGE_FINISHED cercanos que existía cuando la fusión
-    // cruzaba el worker de forma asíncrona.
+    // ADR-041 §3: fuseOcrPage/fuseOcrRegion son funciones puras y síncronas,
+    // host-side — leen (this.documents), fusionan e inmediatamente guardan la
+    // copia canónica, todo dentro del mismo turno de evento (IEventBus.emit
+    // es síncrono en línea, 04_Event_System.md §13). Elimina de raíz la
+    // carrera lost-update entre dos OCR_PAGE_FINISHED cercanos que existía
+    // cuando la fusión cruzaba el worker de forma asíncrona.
+    //
+    // ADR-065 §2/§8: los dos conjuntos (textlessPages/ocrRegions) son
+    // disjuntos por contrato de PdfEngineOutput, así que esta página entró
+    // por exactamente uno de los dos caminos — se decide cuál fusión
+    // corresponde buscando el pageIndex en las regiones retenidas de este
+    // documento. El Orchestrator no compensa un PdfEngineOutput que violara
+    // la invariante (Orchestrator.md §13 caso 29): si un bug de pdf-engine
+    // solapara los conjuntos, la fusión equivocada falla ruidosamente por los
+    // guards espejo de fuseOcrPage/fuseOcrRegion (ADR-020 §6/ADR-065 §6).
+    const region = this.ocrRegionsByDocument
+      .get(payload.documentId)
+      ?.find((candidate) => candidate.pageIndex === payload.pageIndex);
+
     try {
-      const updatedDocument = fuseOcrPage(document, payload.pageIndex, words);
+      const updatedDocument =
+        region !== undefined
+          ? fuseOcrRegion(document, payload.pageIndex, region.bbox, words)
+          : fuseOcrPage(document, payload.pageIndex, words);
       this.documents.set(payload.documentId, updatedDocument);
     } catch (err: unknown) {
-      this.logger.warn("fuseOcrPage falló para una página OCR.", {
+      this.logger.warn("fuseOcrPage/fuseOcrRegion falló para una página OCR.", {
         documentId: payload.documentId,
         pageIndex: payload.pageIndex,
         reason: err instanceof Error ? err.message : String(err),
@@ -1174,6 +1264,15 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
   }
 
   private handleOcrPageFailed(payload: OcrPageFailed): void {
+    // Caso 5 / ADR-065 §9: sin OCR_PAGE_FINISHED no hay fusión — ni
+    // fuseOcrPage ni fuseOcrRegion corren, así que el Document retenido
+    // queda exactamente como salió de pdf-engine. Para una página textless
+    // eso es requiresOCR=true/ocrCompleted=false (semántica de siempre). Para
+    // una región, la página YA tenía requiresOCR===false y su texto nativo
+    // intacto desde la extracción — un fallo de región no lo toca: solo se
+    // pierde el contenido de esa región, con ocrCompleted que nunca pasó a
+    // true. No hace falta lógica adicional acá; el comentario documenta por
+    // qué no la hay.
     this.logger.warn("Página OCR falló tras reintentos; se continúa sin su texto (caso 5).", {
       documentId: payload.documentId,
       pageIndex: payload.pageIndex,

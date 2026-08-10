@@ -157,6 +157,38 @@ describe("Orchestrator — unit tests", () => {
     expect(orchestrator["retainedInputs"].has("doc-1")).toBe(false);
   });
 
+  // ─── ADR-065 §8: las regiones retenidas se descartan en closeDocument ───
+
+  it("retained ocrRegions state is cleared on closeDocument (ADR-065 §8)", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const region = { pageIndex: 0, bbox: { x: 100, y: 50, width: 200, height: 300 } };
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({
+        pages: [createPage({ index: 0, requiresOCR: false })],
+      }),
+      textlessPages: [],
+      ocrRegions: [region],
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+
+    // Precondición del test: sin esto, la aserción de abajo pasaría vacía.
+    expect(orchestrator["ocrRegionsByDocument"].get("doc-1")).toEqual([region]);
+
+    await orchestrator.closeDocument("doc-1");
+
+    expect(orchestrator["ocrRegionsByDocument"].has("doc-1")).toBe(false);
+  });
+
   // ─── Mediación grupos→Render del preview (ADR-044, §13 caso 27) ───
 
   it("burst of ENTITY_GROUP_UPDATED coalesces into one render per page", async () => {
@@ -490,6 +522,11 @@ describe("Orchestrator — unit tests", () => {
         },
         pageCount: 1,
         textlessPages: [],
+        // ADR-065 §4: campo requerido de PdfEngineOutput desde este ADR — un
+        // PdfWorker real siempre lo incluye (vacío es el caso normal, sin
+        // imágenes con texto oculto). El literal simula el postMessage real,
+        // así que tiene que reflejar el contrato completo.
+        ocrRegions: [],
         sourceKind: "text",
       },
     });
@@ -1689,6 +1726,64 @@ describe("PIPELINE_PROGRESS (Orchestrator.md §8, ADR-034 §4)", () => {
     expect(ocrEvents.every((e) => e.total === 2)).toBe(true);
     expect(ocrEvents.every((e) => e.current <= e.total)).toBe(true);
     expect(ocrEvents.every((e) => e.documentId === "doc-1")).toBe(true);
+  });
+
+  // ─── ADR-065 §2: total = textlessPages.length + ocrRegions.length ───
+
+  it("OCR: total counts textlessPages.length + ocrRegions.length (ADR-065 §2)", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const region = { pageIndex: 1, bbox: { x: 100, y: 50, width: 200, height: 300 } };
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({
+        pageCount: 2,
+        pages: [
+          createPage({ index: 0, requiresOCR: true }),
+          createPage({ index: 1, requiresOCR: false }),
+        ],
+      }),
+      textlessPages: [0],
+      ocrRegions: [region],
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+    vi.spyOn(engines.ocr, "processPages").mockImplementation(async (inputs) => {
+      const outputs = [];
+      for (const input of inputs) {
+        bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
+          documentId: input.documentId,
+          pageIndex: input.pageIndex,
+          wordCount: 0,
+          confidence: 0.9,
+        });
+        outputs.push({
+          documentId: input.documentId,
+          pageIndex: input.pageIndex,
+          words: [],
+          confidence: 0.9,
+          durationMs: 1,
+        });
+      }
+      return outputs;
+    });
+
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    const progressEvents: CapturedProgress[] = [];
+    bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_PROGRESS, (p) => progressEvents.push(p));
+
+    await orchestrator.importDocument(createImportInput());
+
+    const ocrEvents = progressEvents.filter((e) => e.stage === PipelineStage.OCRing);
+    // Una página textless (0) + una región (1) => total 2, sin importar que
+    // pertenezcan a conjuntos distintos y disjuntos (ADR-065 §4).
+    expect(ocrEvents.map((e) => e.current)).toEqual([1, 2]);
+    expect(ocrEvents.every((e) => e.total === 2)).toBe(true);
   });
 
   // ─── Detección con NER activo: total = pageCount, current por NER_PAGE_FINISHED ───

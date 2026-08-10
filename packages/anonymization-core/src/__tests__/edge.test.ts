@@ -9,6 +9,7 @@ import {
   EventChannel,
   InvalidInputError,
   PipelineStage,
+  type Document,
 } from "@anonly/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -336,6 +337,9 @@ describe("Orchestrator — edge cases", () => {
       },
       pageCount: 1,
       textlessPages: [0],
+      // ADR-065 §4: campo requerido de PdfEngineOutput; vacío es el caso
+      // normal (la página en cuestión va por textlessPages, no por región).
+      ocrRegions: [],
       sourceKind: "scanned" as const,
     };
     (engines.pdf.process as ReturnType<typeof vi.fn>).mockResolvedValueOnce(pdfOutput);
@@ -346,6 +350,78 @@ describe("Orchestrator — edge cases", () => {
     await orchestrator.importDocument(createImportInput());
 
     expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+  });
+
+  // ─── ADR-065 §9: fallo de OCR sobre una región (no una página entera) ───
+
+  it("OCR_PAGE_FAILED over a region leaves the page's native text intact and requiresOCR === false (ADR-065 §9)", async () => {
+    const { bus, engines, orchestrator } = makeOrchestrator();
+    const nativeWord = createWord({
+      text: "confidencial",
+      bbox: { x: 10, y: 10, width: 60, height: 12 },
+    });
+    const region = { pageIndex: 0, bbox: { x: 100, y: 50, width: 200, height: 300 } };
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({
+        pages: [
+          createPage({ index: 0, requiresOCR: false, words: [nativeWord], text: nativeWord.text }),
+        ],
+      }),
+      // La página tiene texto nativo (no está en textlessPages) y trae una
+      // región candidata — camino de ADR-065, no el de página entera.
+      textlessPages: [],
+      ocrRegions: [region],
+    });
+    (engines.pdf.process as ReturnType<typeof vi.fn>).mockResolvedValueOnce(pdfOutput);
+
+    // La región falla tras reintentos: OcrEngine emite OCR_PAGE_FAILED, SIN
+    // ningún OCR_PAGE_FINISHED para esa página — ninguna fusión corre (ni
+    // fuseOcrPage ni fuseOcrRegion). A diferencia del caso 5 de página
+    // entera, acá la página YA tenía requiresOCR===false y texto nativo
+    // desde la extracción; un fallo de región no debe tocar ninguno de los
+    // dos.
+    (engines.ocr.processPages as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      async (
+        inputs: ReadonlyArray<{ readonly documentId: string; readonly pageIndex: number }>,
+      ) => {
+        for (const input of inputs) {
+          bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FAILED, {
+            documentId: input.documentId,
+            pageIndex: input.pageIndex,
+            error: {
+              code: EngineErrorCode.OCR_PAGE_FAILED,
+              engineId: EngineId.Ocr,
+              message: "ocr region failed",
+              retryable: true,
+              details: {},
+            },
+          });
+        }
+        return [];
+      },
+    );
+
+    let regexInputDocument: Document | undefined;
+    vi.spyOn(engines.regex, "process").mockImplementation((input) => {
+      regexInputDocument = input.document;
+      bus.emit(EventChannel.Regex, EngineEvents.REGEX_FINISHED, {
+        documentId: input.document.id,
+        occurrenceCount: 0,
+        durationMs: 1,
+      });
+      return Promise.resolve({ documentId: input.document.id, occurrenceCount: 0, durationMs: 1 });
+    });
+
+    await orchestrator.importDocument(createImportInput());
+
+    // El pipeline continúa con warning, no PIPELINE_FAILED (mismo criterio
+    // que el caso 5 de página entera).
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    const page = regexInputDocument?.pages[0];
+    expect(page?.words).toEqual([nativeWord]);
+    expect(page?.requiresOCR).toBe(false);
+    // Ninguna fusión corrió: ocrCompleted nunca pasó a true para esta página.
+    expect(page?.ocrCompleted).toBe(false);
   });
 
   // ─── Caso 6 (ADR-034 §2): NER desactivado ───
@@ -990,6 +1066,62 @@ describe("Orchestrator — edge cases", () => {
       expect(stageChangedSpy).not.toHaveBeenCalled();
       expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
     });
+
+    // ─── ADR-065 §8: unión requiresOCR ∪ ocrRegions retenidas ───
+
+    it(
+      "case 20 (ADR-065 §8): ocr.languages over a document with no requiresOCR pages " +
+        "but retained ocrRegions re-scans the region instead of no-op-ing silently",
+      async () => {
+        const bus = createRealBus();
+        const engines = createMockEngines();
+        const region = { pageIndex: 0, bbox: { x: 100, y: 50, width: 200, height: 300 } };
+        const pdfOutput = createPdfEngineOutput({
+          document: createDocument({
+            // Ninguna página requiresOCR: si el reanalyze mirara solo ese
+            // filtro (pre-ADR-065), esto sería un no-op silencioso — la
+            // regresión más peligrosa que el ADR cierra.
+            pages: [createPage({ index: 0, requiresOCR: false })],
+          }),
+          textlessPages: [],
+          ocrRegions: [region],
+        });
+        wireHappyPathSpies(engines, bus, { pdfOutput });
+        const orchestrator = new PipelineOrchestrator({
+          bus,
+          logger: createMockLogger(),
+          cache: new LruCache(),
+          config: createEngineConfig(),
+          engines,
+        });
+
+        await orchestrator.importDocument(createImportInput());
+        expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+
+        (engines.render.rasterizePage as ReturnType<typeof vi.fn>).mockClear();
+        (engines.ocr.processPages as ReturnType<typeof vi.fn>).mockClear();
+        (engines.regex.process as ReturnType<typeof vi.fn>).mockClear();
+        (engines.grouping.dropOccurrences as ReturnType<typeof vi.fn>).mockClear();
+
+        await orchestrator.reanalyze("doc-1", { ocr: { languages: ["eng"] } });
+
+        // La región SE re-escanea: rasterizePage recibe el bbox de la
+        // región (recorte, no página completa) y ocr.processPages corre.
+        expect(engines.render.rasterizePage).toHaveBeenCalledWith(
+          "doc-1",
+          0,
+          expect.any(Number),
+          expect.anything(),
+          region.bbox,
+        );
+        expect(engines.ocr.processPages).toHaveBeenCalled();
+        expect(engines.grouping.dropOccurrences).toHaveBeenCalledWith("doc-1", {
+          pageIndices: [0],
+        });
+        expect(engines.regex.process).toHaveBeenCalled();
+        expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+      },
+    );
 
     // ─── Caso 21: precondiciones y validación de patch ───
 

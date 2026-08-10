@@ -195,6 +195,45 @@ describe("Orchestrator — contract tests", () => {
     expect(engines.render.rasterizePage).not.toHaveBeenCalled();
   });
 
+  // ─── Caso 1 (ADR-065 §4): ocrRegions por sí solo NO deja que la etapa se salte ───
+
+  it("no textless pages but ocrRegions still runs the OCR stage (ADR-065 §4/§13 case 1)", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const region = { pageIndex: 0, bbox: { x: 100, y: 50, width: 200, height: 300 } };
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({
+        pages: [createPage({ index: 0, requiresOCR: false })],
+      }),
+      // El documento que motivó el ADR: texto nativo en todas las páginas
+      // (textlessPages vacío) pero una imagen que ningún texto explica.
+      textlessPages: [],
+      ocrRegions: [region],
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+
+    // ADR-065 §5: rasterizePage recibe el bbox de la región como quinto
+    // argumento — es el recorte, no la página completa, lo que se manda a OCR.
+    expect(engines.render.rasterizePage).toHaveBeenCalledWith(
+      "doc-1",
+      0,
+      expect.any(Number),
+      expect.anything(),
+      region.bbox,
+    );
+    expect(engines.ocr.processPages).toHaveBeenCalled();
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+  });
+
   // ─── Mediación OCR→PDF (ADR-014) ───
 
   it("OCR_PAGE_FINISHED triggers fuseOcrPage with cached words", async () => {
@@ -264,6 +303,100 @@ describe("Orchestrator — contract tests", () => {
 
     expect(regexInputDocument?.pages[0]?.words).toEqual(words);
     expect(regexInputDocument?.pages[0]?.ocrCompleted).toBe(true);
+  });
+
+  // ─── Enrutamiento de las dos formas de OCR (ADR-065) ───
+
+  it("OCR_PAGE_FINISHED for a retained region triggers fuseOcrRegion (translated, concatenated with native words)", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const cache = new LruCache();
+    const nativeWord = createWord({
+      text: "visible",
+      bbox: { x: 10, y: 10, width: 40, height: 12 },
+    });
+    const region = { pageIndex: 0, bbox: { x: 100, y: 50, width: 200, height: 300 } };
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({
+        pages: [
+          createPage({ index: 0, requiresOCR: false, words: [nativeWord], text: nativeWord.text }),
+        ],
+      }),
+      // ADR-065 §4: la página tiene texto nativo (no está en textlessPages) y
+      // trae una región candidata — el camino que este ADR agrega.
+      textlessPages: [],
+      ocrRegions: [region],
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+
+    // Palabra de OCR en puntos RELATIVOS al recorte (ADR-064 + ADR-065 §6):
+    // fuseOcrRegion tiene que sumarle region.x/region.y.
+    const ocrWord = createWord({
+      text: "oculto",
+      bbox: { x: 5, y: 5, width: 30, height: 12 },
+      source: "ocr",
+      confidence: 0.85,
+    });
+    vi.spyOn(engines.ocr, "processPages").mockImplementation(async (inputs) => {
+      cache.set(`ocr-words:${inputs[0]?.documentId}:${inputs[0]?.pageIndex}`, [ocrWord]);
+      bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
+        documentId: inputs[0]?.documentId ?? "",
+        pageIndex: inputs[0]?.pageIndex ?? 0,
+        wordCount: 1,
+        confidence: 0.85,
+      });
+      return inputs.map((i) => ({
+        documentId: i.documentId,
+        pageIndex: i.pageIndex,
+        words: [ocrWord],
+        confidence: 0.85,
+        durationMs: 1,
+      }));
+    });
+
+    // ADR-041/ADR-065: ni fuseOcrPage ni fuseOcrRegion son métodos espiables
+    // (funciones puras host-side) — se verifica el efecto observable, mismo
+    // patrón que el test de fuseOcrPage de arriba.
+    let regexInputDocument: Document | undefined;
+    vi.spyOn(engines.regex, "process").mockImplementation((input) => {
+      regexInputDocument = input.document;
+      bus.emit(EventChannel.Regex, EngineEvents.REGEX_FINISHED, {
+        documentId: input.document.id,
+        occurrenceCount: 0,
+        durationMs: 1,
+      });
+      return Promise.resolve({
+        documentId: input.document.id,
+        occurrenceCount: 0,
+        durationMs: 1,
+      });
+    });
+
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache,
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+
+    const fusedPage = regexInputDocument?.pages[0];
+    // Concatena (§3/§6): la nativa se conserva, la de OCR se suma traducida.
+    expect(fusedPage?.words).toContainEqual(nativeWord);
+    expect(fusedPage?.words).toContainEqual(
+      expect.objectContaining({
+        text: "oculto",
+        bbox: { x: 105, y: 55, width: 30, height: 12 },
+        source: "ocr",
+      }),
+    );
+    expect(fusedPage?.words).toHaveLength(2);
+    // Guard invertido (§6): la página sigue con requiresOCR=false — a
+    // diferencia de fuseOcrPage, fuseOcrRegion nunca lo toca.
+    expect(fusedPage?.requiresOCR).toBe(false);
+    expect(fusedPage?.ocrCompleted).toBe(true);
   });
 
   // ─── Invariantes de la matriz (04_Event_System.md §11, ADR-034 §4) ───
