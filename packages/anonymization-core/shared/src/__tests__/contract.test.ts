@@ -54,6 +54,7 @@ import type {
   MarkerLegendEntry,
   MarkerLegendRow,
   Occurrence,
+  OcrRegion,
   Page,
   PageParsed,
   RenderLegendPayload,
@@ -416,6 +417,16 @@ describe("@anonly/shared — Contracts", () => {
       };
       void mutate;
       expect(bbox.width).toBe(100);
+    });
+
+    it("OcrRegion tiene pageIndex y bbox readonly (compile-time, ADR-065 §4)", () => {
+      const region: OcrRegion = { pageIndex: 0, bbox: { x: 0, y: 0, width: 100, height: 50 } };
+      const mutate = (): void => {
+        // @ts-expect-error — pageIndex es readonly (ADR-008); assert de compile-time
+        region.pageIndex = 1;
+      };
+      void mutate;
+      expect(region.pageIndex).toBe(0);
     });
   });
 

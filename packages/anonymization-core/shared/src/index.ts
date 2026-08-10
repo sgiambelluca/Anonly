@@ -40,6 +40,7 @@ export type {
   WordSpan,
   Word,
   Page,
+  OcrRegion,
   DocumentMetadata,
   Document,
   DocumentSourceKind,
