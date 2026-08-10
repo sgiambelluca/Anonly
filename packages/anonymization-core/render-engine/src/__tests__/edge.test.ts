@@ -762,6 +762,49 @@ describe("RenderEngine — edge cases", () => {
     await expect(engine.rasterizePage(docId, 5, 2, ctx)).rejects.toThrow(InvalidInputError);
   });
 
+  // ─── ADR-065 §5 (Hito 10.8, PR6): rasterizePage con región ───
+
+  it("rasterizePage clamps a region that exceeds the page", async () => {
+    const docId = "doc-rasterize-region-clamped";
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(
+        createMockPdfDocument({
+          pageCount: 1,
+          pageFactory: () => createMockPage({ width: 100, height: 100 }),
+        }),
+      ),
+    );
+    await engine.init(ctx);
+    await engine.loadDocument(docId, createValidBuffer());
+
+    // Página 100x100pt, scale 1: [80,80]-[130,130] excede el borde
+    // derecho/inferior y se clampea a [80,80]-[100,100] -> 20x20.
+    const region = { x: 80, y: 80, width: 50, height: 50 };
+    const imageData = await engine.rasterizePage(docId, 0, 1, ctx, region);
+
+    expect(imageData.width).toBe(20);
+    expect(imageData.height).toBe(20);
+  });
+
+  it("rasterizePage throws InvalidInputError on an empty region", async () => {
+    const docId = "doc-rasterize-region-empty";
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(
+        createMockPdfDocument({
+          pageCount: 1,
+          pageFactory: () => createMockPage({ width: 100, height: 100 }),
+        }),
+      ),
+    );
+    await engine.init(ctx);
+    await engine.loadDocument(docId, createValidBuffer());
+
+    // region enteramente fuera de la página (100x100pt, scale 1): tras el
+    // clampeo el área queda cero o negativa (Render_Engine.md §13 caso 30).
+    const region = { x: 200, y: 200, width: 10, height: 10 };
+    await expect(engine.rasterizePage(docId, 0, 1, ctx, region)).rejects.toThrow(InvalidInputError);
+  });
+
   // ─── ADR-059 §5: renderLegendPage validaciones y perfil sin efectos ───
 
   it("renderLegendPage throws EngineNotInitializedError before init()", async () => {

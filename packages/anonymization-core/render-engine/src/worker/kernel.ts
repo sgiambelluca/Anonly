@@ -1167,12 +1167,69 @@ export interface KernelRasterizeOptions {
   readonly onWarn?: KernelWarnLogger;
 }
 
-/** Rasterización pura sin reemplazos ni highlights (ADR-034 §1). */
+/**
+ * `RasterizePagePayload` (`@anonly/shared`) + `region` opcional (ADR-065 §5).
+ * El campo NO se agrega al tipo canónico de `@anonly/shared` en este PR: ese
+ * paquete es su propio módulo (R-1, `ai/AI_Development_Guide.md`) y el
+ * checklist de `Render_Engine.md` §15 ítem 26 scopea este cambio a
+ * `render-engine/`. Este motor controla las dos puntas del payload (host en
+ * `render.engine.ts`, kernel acá), así que `region` sigue viajando "dentro
+ * del payload existente de rasterizePage, sin WorkerJobType nuevo" (ADR-065
+ * §5) sin tocar `shared/`. Al ser opcional, cualquier `RasterizePagePayload`
+ * sin `region` sigue siendo un valor válido de este tipo — el flujo OCR de
+ * páginas textless, que nunca la pasa, no cambia.
+ */
+export interface RasterizePagePayloadWithRegion extends RasterizePagePayload {
+  readonly region?: BoundingBox;
+}
+
+/**
+ * ADR-065 §5 / `Render_Engine.md` §13 caso 30 — clampea `region` (puntos de
+ * página) a los límites de la página ya convertidos a píxeles por `scale`.
+ * Redondea cada BORDE (no cada dimensión) para que el recorte quede alineado
+ * a píxel entero sin el sesgo de redondear ancho y alto por separado. Lanza
+ * `InvalidInputError` si el área resultante es cero o negativa — mismo
+ * patrón que el guard existente de `scale <= 0`.
+ */
+function clampRegionToViewportPx(
+  region: BoundingBox,
+  scale: number,
+  viewportWidthPx: number,
+  viewportHeightPx: number,
+  documentId: string,
+  pageIndex: number,
+): { readonly x: number; readonly y: number; readonly width: number; readonly height: number } {
+  const left = Math.round(Math.max(0, region.x * scale));
+  const top = Math.round(Math.max(0, region.y * scale));
+  const right = Math.round(Math.min(viewportWidthPx, (region.x + region.width) * scale));
+  const bottom = Math.round(Math.min(viewportHeightPx, (region.y + region.height) * scale));
+  const width = right - left;
+  const height = bottom - top;
+
+  if (!(width > 0) || !(height > 0)) {
+    throw new InvalidInputError(
+      "region clampeada a los límites de la página quedó con área cero o negativa (ADR-065 §5).",
+      { documentId, pageIndex, region, scale, viewportWidthPx, viewportHeightPx },
+    );
+  }
+
+  return { x: left, y: top, width, height };
+}
+
+/**
+ * Rasterización pura sin reemplazos ni highlights (ADR-034 §1). `region`
+ * opcional (ADR-065 §5): ausente reproduce el comportamiento previo bit a
+ * bit (rama `else` sin tocar); presente, el kernel clampea a los límites de
+ * la página ANTES de rasterizar (evita pagar el costo de
+ * `renderPageOntoContext` sobre una región inválida) y devuelve únicamente el
+ * recorte — es el `ImageData` que cruza el boundary del worker, nunca la
+ * página entera.
+ */
 export async function kernelRasterizePage(
-  payload: RasterizePagePayload,
+  payload: RasterizePagePayloadWithRegion,
   opts: KernelRasterizeOptions,
 ): Promise<ImageData> {
-  const { documentId, pageIndex, scale } = payload;
+  const { documentId, pageIndex, scale, region } = payload;
   const pdfDocument = documents.get(documentId);
   if (pdfDocument === undefined) {
     throw new InvalidInputError(
@@ -1199,6 +1256,18 @@ export async function kernelRasterizePage(
   if (opts.abortSignal.aborted) throw new CancelledError(documentId);
 
   const viewport = pageProxy.getViewport({ scale });
+  const cropRect =
+    region !== undefined
+      ? clampRegionToViewportPx(
+          region,
+          scale,
+          viewport.width,
+          viewport.height,
+          documentId,
+          pageIndex,
+        )
+      : undefined;
+
   const canvas = createCanvas(documentId, pageIndex, viewport.width, viewport.height, opts.onWarn);
   const context2d = get2dContext(canvas, documentId, pageIndex);
 
@@ -1217,7 +1286,9 @@ export async function kernelRasterizePage(
 
   if (opts.abortSignal.aborted) throw new CancelledError(documentId);
 
-  return context2d.getImageData(0, 0, viewport.width, viewport.height);
+  return cropRect !== undefined
+    ? context2d.getImageData(cropRect.x, cropRect.y, cropRect.width, cropRect.height)
+    : context2d.getImageData(0, 0, viewport.width, viewport.height);
 }
 
 // ─── ADR-059 §5 (Hito 10.5, PR 7) — página de leyenda del export ───
