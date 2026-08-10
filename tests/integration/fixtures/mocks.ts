@@ -53,6 +53,12 @@ export function createMockPdfPage(textItems: ReadonlyArray<MockTextItem>): Recor
         })),
       }),
     ),
+    // ADR-065 §1 (compuerta 1): `parsePage` llama `getOperatorList()` en toda
+    // página para detectar image XObjects. Sin esto, el mock lo deja
+    // `undefined` y el parseo muere en `PdfCorruptedError`, tumbando el
+    // pipeline entero. Lista vacía ⇒ página sin imágenes ⇒ sin `ocrRegions`,
+    // que es lo que estos fixtures representan.
+    getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
     render: vi.fn(() => ({ promise: Promise.resolve() })),
   };
 }
