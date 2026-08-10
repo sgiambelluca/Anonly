@@ -12,7 +12,7 @@
  * declara en su propio módulo; este archivo solo unifica los builders.
  */
 import type { pipeline } from "@huggingface/transformers";
-import type { getDocument } from "pdfjs-dist";
+import { OPS, type getDocument } from "pdfjs-dist";
 import type { createWorker } from "tesseract.js";
 import { vi, type Mock } from "vitest";
 
@@ -35,12 +35,54 @@ export interface MockTextItem {
 }
 
 /**
- * Página combinada para pdfjs-dist: sirve tanto al uso de `PdfEngine`
- * (`getTextContent` + `getViewport({ scale: 1 })`) como al de `RenderEngine`
- * (`getViewport({ scale })` + `render({ canvasContext, viewport })`).
- * `textItems` vacío ⇒ página sin texto (`requiresOCR: true`).
+ * Rectángulo de una imagen colocada en la página, en **espacio de usuario PDF**
+ * (origen abajo-izquierda), que es como viaja en la CTM del operator list.
  */
-export function createMockPdfPage(textItems: ReadonlyArray<MockTextItem>): Record<string, unknown> {
+export interface MockImageRect {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/**
+ * Operator list mínima: `save cm paintImageXObject restore` por imagen
+ * (ADR-065 §1, compuerta 1). Usa el `OPS` REAL de pdfjs-dist —los tests que
+ * importan este módulo mockean `getDocument` con `importOriginal`, así que
+ * `OPS` es el verdadero—: el motor bajo prueba lee esos mismos valores, y un
+ * `OPS` inventado acá daría falsos positivos o negativos. Espejo del
+ * `buildMockOperatorList` de `pdf-engine/src/__tests__/fixtures/`.
+ */
+function buildOperatorList(images: ReadonlyArray<MockImageRect>): {
+  readonly fnArray: number[];
+  readonly argsArray: unknown[];
+} {
+  const fnArray: number[] = [];
+  const argsArray: unknown[] = [];
+  for (const image of images) {
+    fnArray.push(OPS.save);
+    argsArray.push([]);
+    fnArray.push(OPS.transform);
+    argsArray.push([image.width, 0, 0, image.height, image.x, image.y]);
+    fnArray.push(OPS.paintImageXObject);
+    argsArray.push(["img", image.width, image.height]);
+    fnArray.push(OPS.restore);
+    argsArray.push([]);
+  }
+  return { fnArray, argsArray };
+}
+
+/**
+ * Página combinada para pdfjs-dist: sirve tanto al uso de `PdfEngine`
+ * (`getTextContent` + `getViewport({ scale: 1 })` + `getOperatorList()`) como
+ * al de `RenderEngine` (`getViewport({ scale })` + `render(...)`).
+ * `textItems` vacío ⇒ página sin texto (`requiresOCR: true`).
+ * `images` vacío ⇒ página sin imágenes ⇒ sin `ocrRegions` (ADR-065 §1).
+ */
+export function createMockPdfPage(
+  textItems: ReadonlyArray<MockTextItem>,
+  images: ReadonlyArray<MockImageRect> = [],
+): Record<string, unknown> {
   return {
     getViewport: vi.fn(({ scale }: { scale: number }) => ({ width: 595 * scale, height: 842 * scale })),
     getTextContent: vi.fn(() =>
@@ -56,9 +98,8 @@ export function createMockPdfPage(textItems: ReadonlyArray<MockTextItem>): Recor
     // ADR-065 §1 (compuerta 1): `parsePage` llama `getOperatorList()` en toda
     // página para detectar image XObjects. Sin esto, el mock lo deja
     // `undefined` y el parseo muere en `PdfCorruptedError`, tumbando el
-    // pipeline entero. Lista vacía ⇒ página sin imágenes ⇒ sin `ocrRegions`,
-    // que es lo que estos fixtures representan.
-    getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
+    // pipeline entero.
+    getOperatorList: vi.fn(() => Promise.resolve(buildOperatorList(images))),
     render: vi.fn(() => ({ promise: Promise.resolve() })),
   };
 }
