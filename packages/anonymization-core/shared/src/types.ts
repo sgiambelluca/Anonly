@@ -54,6 +54,24 @@ export interface Page {
   readonly dpi?: number;
 }
 
+/**
+ * Región de una página que `pdf-engine` marca para OCR **aunque la página
+ * tenga texto nativo** (ADR-065 §4): una imagen cuyo interior ningún texto
+ * explica. Semántica completa en `03_Data_Model.md` §4.1.
+ *
+ * `bbox` va en puntos de página, origen arriba-izquierda — el mismo espacio
+ * que cualquier otro `BoundingBox`.
+ *
+ * Invariante: ningún `pageIndex` de `PdfEngineOutput.ocrRegions` aparece en
+ * `PdfEngineOutput.textlessPages`. Son los dos caminos de OCR y son disjuntos:
+ * la página sin texto nativo va entera, la página con texto nativo va por
+ * región.
+ */
+export interface OcrRegion {
+  readonly pageIndex: number;
+  readonly bbox: BoundingBox;
+}
+
 export interface DocumentMetadata {
   readonly title?: string;
   readonly producer?: string;
