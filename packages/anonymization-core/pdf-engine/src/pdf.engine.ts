@@ -935,6 +935,25 @@ function describeDispatchResultShape(value: unknown): string {
  * la duda que ADR-055 cierra es si el valor viene del `PdfEngine` o de otra
  * cosa, no si `PdfEngine` construyó mal sus propias páginas.
  */
+/*
+ * ADR-065 §4: `ocrRegions` se recorre elemento a elemento, igual que
+ * `textlessPages` y por el mismo motivo — está acotado a una entrada por
+ * página (ADR-065 §2), o sea la misma clase de costo. Lo que ADR-055 excluye
+ * del walk son los datos NO acotados por página (`words`/`bbox` de las
+ * páginas), no los arrays en general.
+ */
+function isOcrRegion(value: unknown): boolean {
+  if (!isRecord(value) || typeof value.pageIndex !== "number") return false;
+  const { bbox } = value;
+  return (
+    isRecord(bbox) &&
+    typeof bbox.x === "number" &&
+    typeof bbox.y === "number" &&
+    typeof bbox.width === "number" &&
+    typeof bbox.height === "number"
+  );
+}
+
 function isPdfEngineOutput(value: unknown): value is PdfEngineOutput {
   return (
     isRecord(value) &&
@@ -944,6 +963,8 @@ function isPdfEngineOutput(value: unknown): value is PdfEngineOutput {
     typeof value.pageCount === "number" &&
     Array.isArray(value.textlessPages) &&
     value.textlessPages.every((p): boolean => typeof p === "number") &&
+    Array.isArray(value.ocrRegions) &&
+    value.ocrRegions.every((r): boolean => isOcrRegion(r)) &&
     typeof value.sourceKind === "string" &&
     PDF_SOURCE_KINDS.has(value.sourceKind)
   );
@@ -972,7 +993,7 @@ export function decodePdfEngineOutput(value: unknown): PdfEngineOutput {
 
   throw new InvalidInputError(
     "El resultado del despacho de pdf-parse no tiene la forma de PdfEngineOutput: " +
-      "se esperaba { document: { id, pages }, pageCount, textlessPages, sourceKind } " +
+      "se esperaba { document: { id, pages }, pageCount, textlessPages, ocrRegions, sourceKind } " +
       "(la misma forma en el camino remoto y en el in-process — este motor no envuelve " +
       "su resultado, PDF_Engine.md §13 caso 16). Devolver un default en silencio está " +
       "prohibido (ADR-055 §3).",
