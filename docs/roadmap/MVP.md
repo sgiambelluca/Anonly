@@ -335,16 +335,23 @@ No sale de `Cambios para hacer.txt`: sale de **probar la herramienta sobre una p
 
 **Paso 2 — OCR de páginas con texto nativo parcial** (ADR-065; requiere el paso 0 mergeado). `requiresOCR = words.length === 0`: basta **una** palabra nativa para que la página nunca vaya a OCR. En la pericia, la firma digital aportaba esa palabra, y por eso el 55% de la página —una imagen con el fiscal responsable adentro— no se escaneó nunca. El dato salió sin anonimizar. El diseño está calibrado contra seis arquetipos de página (medición previa al ADR): una compuerta por presencia de image XObjects vía `getOperatorList()` —**3,7 ms/página**, 0,7 s en 200 páginas contra 160 s de presupuesto— y una segunda por **mayor rectángulo vacío inscrito dentro de cada imagen, normalizado por el área de esa imagen**. Esa normalización es lo que separa un escaneo ya buscable (11-20%, el hueco es una franja de margen) de una imagen con texto oculto (102% en el caso real): dos métricas más simples —área de imagen sin texto, y mayor región contigua— se probaron primero y **fallan** sobre el escaneo con capa OCR, que es el falso positivo que haría 10x más lento cualquier expediente escaneado. El recorte que devuelve la métrica es, literalmente, lo que se manda a OCR: se OCR-ea la región, no la página, y por construcción no hay solapamiento con texto nativo, así que la fusión es concatenación y no necesita dedupe.
 
-| # | PR | Módulo | Depende de |
+| # | PR | Módulo | Estado |
 |---|---|---|---|
-| 1 | ADR-063 + `PDF_Engine.md` (docs) | — | — |
-| 2 | Geometría del bbox desde la matriz completa | `pdf-engine` | 1 |
-| 3 | ADR-064 + `OCR_Engine.md`, `Orchestrator.md`, `PDF_Engine.md` (docs) | — | — |
-| 4 | Conversión px→pt en el kernel de OCR | `ocr-engine` | 3 |
-| 5 | ADR-065 (compuerta) + `Contracts.md`, `Render_Engine.md`, `PDF_Engine.md`, `OCR_Engine.md`, `Orchestrator.md` (docs) | — | 3 |
-| 6 | Región en `rasterizePage` | `render-engine` | 5 |
-| 7 | Compuertas 1 y 2, `fuseOcrPage` concatenando | `pdf-engine` | 5, 6 |
-| 8 | Cableado del stage de OCR por región | `packages/anonymization-core/src` | 7 |
+| 1 | ADR-063 + `PDF_Engine.md` (docs) | — | ✅ |
+| 2 | Geometría del bbox desde la matriz completa | `pdf-engine` | ✅ |
+| 3 | ADR-064 + `OCR_Engine.md`, `Orchestrator.md`, `PDF_Engine.md` (docs) | — | ✅ |
+| 4 | Conversión px→pt en el kernel de OCR | `ocr-engine` | ✅ |
+| 5 | ADR-065 + `Contracts.md`, `Render_Engine.md`, `PDF_Engine.md`, `OCR_Engine.md`, `Orchestrator.md`, `03_Data_Model.md` (docs) | — | ✅ |
+| 5b | `OcrRegion` | `shared` | ✅ |
+| 6 | Región en `rasterizePage` | `render-engine` | ✅ |
+| 6b | `RasterizePagePayload.region` + docs del protocolo, y limpieza del tipo local | `shared`, `render-engine` | ✅ |
+| 7 | Compuertas 1 y 2, `fuseOcrRegion`, decoder | `pdf-engine` | ✅ |
+| 7b | Fixtures del façade y de integración adaptados a `ocrRegions` y al `OPS` real | `tests/`, façade | ✅ |
+| 8 | Cableado del stage de OCR por región | `packages/anonymization-core/src` | ✅ |
+| 9 | **Test de integración de punta a punta** (ADR-065, Validación) | `tests/integration` | ⬜ |
+| 10 | **Verificación manual sobre la pericia real** | — | ⬜ |
+
+Las filas `b` no estaban en el plan original: salieron de ambigüedades que los implementadores detectaron y reportaron en vez de decidir en silencio (`AI_Development_Guide.md` §5). Las dos últimas son lo que falta para cerrar el hito.
 
 Los pasos 1 y 2 son independientes entre sí: el orden 1→2 es por tamaño y aislamiento, no por dependencia técnica (se verificó que el bbox erróneo **no** corrompe la métrica de la compuerta 2 en el documento medido: 55,5% contra 55,1%). El paso 0, en cambio, **sí** bloquea al 2: no se puede especificar la traducción de coordenadas de un recorte cuando la de la página entera está rota.
 
