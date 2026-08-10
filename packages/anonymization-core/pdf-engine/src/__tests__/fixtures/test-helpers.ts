@@ -13,7 +13,7 @@ import type {
   ILogger,
   Unsubscribe,
 } from "@anonly/shared";
-import type { getDocument } from "pdfjs-dist";
+import { OPS, type getDocument } from "pdfjs-dist";
 import { vi } from "vitest";
 
 import type { PdfEngineInput } from "../../pdf.types.js";
@@ -179,17 +179,59 @@ export type MockTextItem = {
   readonly height: number;
 };
 
+/**
+ * Rectángulo de imagen en puntos de página (mismo espacio que
+ * `item.transform`: origen abajo-izquierda, y-up — ver ADR-065 §1).
+ */
+export type MockImageRect = {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+};
+
+/**
+ * Operator list mínima que simula `save cm paintImageXObject restore` por
+ * cada imagen (ADR-065 §1, compuerta 1). Usa el `OPS` REAL de pdfjs-dist
+ * (preservado por los `vi.mock("pdfjs-dist", ...)` de cada test file vía
+ * `importOriginal`): el motor bajo prueba lee esos mismos valores, así que el
+ * mock no puede inventar los suyos sin arriesgar un falso positivo/negativo.
+ */
+export function buildMockOperatorList(images: ReadonlyArray<MockImageRect>): {
+  readonly fnArray: number[];
+  readonly argsArray: unknown[];
+} {
+  const fnArray: number[] = [];
+  const argsArray: unknown[] = [];
+
+  for (const image of images) {
+    fnArray.push(OPS.save);
+    argsArray.push([]);
+    fnArray.push(OPS.transform);
+    argsArray.push([image.width, 0, 0, image.height, image.x, image.y]);
+    fnArray.push(OPS.paintImageXObject);
+    argsArray.push(["img", image.width, image.height]);
+    fnArray.push(OPS.restore);
+    argsArray.push([]);
+  }
+
+  return { fnArray, argsArray };
+}
+
 export function createMockPage(
   pageIndex: number,
   textItems?: ReadonlyArray<MockTextItem>,
+  images?: ReadonlyArray<MockImageRect>,
+  pageSize?: { readonly width: number; readonly height: number },
 ): Record<string, unknown> {
   const items = textItems ?? [
     { str: `Page${pageIndex}Word1`, x: 50, y: 800, width: 50, height: 12 },
     { str: `Page${pageIndex}Word2`, x: 110, y: 800, width: 50, height: 12 },
   ];
+  const size = pageSize ?? { width: 595, height: 842 };
 
   return {
-    getViewport: vi.fn(() => ({ width: 595, height: 842 })),
+    getViewport: vi.fn(() => ({ width: size.width, height: size.height })),
     getTextContent: vi.fn(() =>
       Promise.resolve({
         items: items.map((item) => ({
@@ -200,6 +242,9 @@ export function createMockPage(
         })),
       }),
     ),
+    // ADR-065 §1 (compuerta 1): default sin imágenes — preserva el
+    // comportamiento de todos los tests que no pasan `images` explícitamente.
+    getOperatorList: vi.fn(() => Promise.resolve(buildMockOperatorList(images ?? []))),
   };
 }
 

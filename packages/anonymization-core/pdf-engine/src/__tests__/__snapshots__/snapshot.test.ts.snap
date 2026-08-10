@@ -108,6 +108,7 @@ exports[`PdfEngine — snapshot > DocumentModel snapshot stable (3-page determin
     ],
     "sourceKind": "mixed",
   },
+  "ocrRegions": [],
   "pageCount": 3,
   "sourceKind": "mixed",
   "textlessPages": [

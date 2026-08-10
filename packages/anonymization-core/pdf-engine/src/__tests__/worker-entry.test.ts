@@ -18,14 +18,18 @@ import {
   type WorkerOutbound,
 } from "@anonly/shared";
 import { getDocument } from "pdfjs-dist";
+import type * as PdfjsDist from "pdfjs-dist";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type * as PdfWorkerEntryModule from "../worker/entry.js";
 
-vi.mock("pdfjs-dist", () => ({
-  getDocument: vi.fn(),
-  GlobalWorkerOptions: { workerSrc: "" },
-}));
+// ADR-065 §1 (compuerta 1): PdfEngine lee `OPS` real (save, restore,
+// transform, paintImageXObject, ...); `importOriginal` lo preserva mientras
+// `getDocument`/`GlobalWorkerOptions` quedan mockeados como antes.
+vi.mock("pdfjs-dist", async (importOriginal) => {
+  const actual = await importOriginal<typeof PdfjsDist>();
+  return { ...actual, getDocument: vi.fn(), GlobalWorkerOptions: { workerSrc: "" } };
+});
 vi.mock("pdfjs-dist/build/pdf.worker.min.mjs?url", () => ({ default: "mock-pdf-worker-url" }));
 
 import { createMockPdfDocument, mockGetDocumentResult } from "./fixtures/test-helpers.js";
