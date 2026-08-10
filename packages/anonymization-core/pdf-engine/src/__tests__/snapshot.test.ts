@@ -1,8 +1,15 @@
 import { type EngineContext } from "@anonly/shared";
 import { getDocument } from "pdfjs-dist";
+import type * as PdfjsDist from "pdfjs-dist";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-vi.mock("pdfjs-dist", () => ({ getDocument: vi.fn() }));
+// ADR-065 §1 (compuerta 1): el motor bajo prueba lee `OPS` real (save,
+// restore, transform, paintImageXObject, ...); `importOriginal` lo preserva
+// mientras solo `getDocument` queda mockeado.
+vi.mock("pdfjs-dist", async (importOriginal) => {
+  const actual = await importOriginal<typeof PdfjsDist>();
+  return { ...actual, getDocument: vi.fn() };
+});
 
 import { PdfEngine } from "../pdf.engine.js";
 import type { PdfEngineInput } from "../pdf.types.js";
@@ -34,6 +41,7 @@ function createSnapshotPdfDocument(): Record<string, unknown> {
               ],
             }),
           ),
+          getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
         },
         {
           getViewport: vi.fn(() => ({ width: 612, height: 792 })),
@@ -46,6 +54,7 @@ function createSnapshotPdfDocument(): Record<string, unknown> {
               ],
             }),
           ),
+          getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
         },
         {
           getViewport: vi.fn(() => ({ width: 595, height: 842 })),

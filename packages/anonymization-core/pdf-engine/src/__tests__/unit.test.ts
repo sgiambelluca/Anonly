@@ -1,8 +1,21 @@
-import { InvalidInputError, type EngineContext, type Word } from "@anonly/shared";
+import {
+  InvalidInputError,
+  type Document,
+  type EngineContext,
+  type Page,
+  type Word,
+} from "@anonly/shared";
 import { getDocument } from "pdfjs-dist";
+import type * as PdfjsDist from "pdfjs-dist";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-vi.mock("pdfjs-dist", () => ({ getDocument: vi.fn() }));
+// ADR-065 §1 (compuerta 1): el motor bajo prueba lee `OPS` real (save,
+// restore, transform, paintImageXObject, ...); `importOriginal` lo preserva
+// mientras solo `getDocument` queda mockeado.
+vi.mock("pdfjs-dist", async (importOriginal) => {
+  const actual = await importOriginal<typeof PdfjsDist>();
+  return { ...actual, getDocument: vi.fn() };
+});
 
 import {
   PdfEngine,
@@ -10,6 +23,7 @@ import {
   PdfEngineStandardFontDataFactory,
   decodePdfEngineOutput,
   fuseOcrPage,
+  fuseOcrRegion,
 } from "../pdf.engine.js";
 import { PdfTimeoutError } from "../pdf.errors.js";
 
@@ -259,6 +273,7 @@ describe("PdfEngine — unit tests", () => {
                 ],
               }),
             ),
+            getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
           })),
         ),
       );
@@ -287,6 +302,7 @@ describe("PdfEngine — unit tests", () => {
                     ],
                   }),
                 ),
+                getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
               };
             }
             // 270°: dir=(0,-1), up=(1,0). Swap de width/height, igual que 90°.
@@ -299,6 +315,7 @@ describe("PdfEngine — unit tests", () => {
                   ],
                 }),
               ),
+              getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
             };
           }),
         ),
@@ -330,6 +347,7 @@ describe("PdfEngine — unit tests", () => {
                 ],
               }),
             ),
+            getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
           })),
         ),
       );
@@ -355,6 +373,7 @@ describe("PdfEngine — unit tests", () => {
                 ],
               }),
             ),
+            getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
           })),
         ),
       );
@@ -399,6 +418,7 @@ describe("PdfEngine — unit tests", () => {
                 items: [{ str: "Diagonal45", transform: [a, b, c, d, e, f], width, height }],
               }),
             ),
+            getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
           })),
         ),
       );
@@ -716,6 +736,293 @@ describe("PdfEngine — unit tests", () => {
       expect(decoded.sourceKind).toBe("mixed");
       expect(decoded.textlessPages).toEqual([1]);
       expect(decoded.document.pages).toHaveLength(2);
+    });
+  });
+
+  // ADR-065 §1-§2: compuertas de OCR por región dentro de parsePage. Casos
+  // 22-26 de PDF_Engine.md §13.
+  describe("OCR region gates (ADR-065 §1-§2)", () => {
+    it("page without image XObjects yields no ocr regions", async () => {
+      // createMockPdfDocument(1) usa createMockPage sin `images`: operator
+      // list vacía por default — la compuerta 1 termina ahí (caso 22).
+      vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(createMockPdfDocument(1)));
+
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-no-images"), ctx);
+
+      expect(output.ocrRegions).toEqual([]);
+    });
+
+    it("image smaller than 1 percent of the page is discarded", async () => {
+      // Mismos números que ADR-065, Contexto §3 (logo 37×37 en A4, 0,27%).
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () =>
+            createMockPage(0, undefined, [{ x: 10, y: 10, width: 37, height: 37 }]),
+          ),
+        ),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-small-logo"), ctx);
+
+      expect(output.ocrRegions).toEqual([]);
+    });
+
+    it("full-page image covered by native text yields no region", async () => {
+      // Página sintética 200×200 con una imagen a página completa y ~17
+      // líneas de texto nativo espaciadas 12pt (cuerpo 10pt): la dilatación
+      // vertical (0,8× = 8pt por lado) cierra el interlineado de 2pt, así
+      // que la grilla queda ocupada de punta a punta — el falso positivo
+      // caro que ADR-065 (Contexto §2-3) existe para rechazar (caso 24).
+      const lines = Array.from({ length: 17 }, (_, i) => ({
+        str: `Line${i}`,
+        x: 0,
+        y: 5 + i * 12,
+        width: 200,
+        height: 10,
+      }));
+
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () =>
+            createMockPage(0, lines, [{ x: 0, y: 0, width: 200, height: 200 }], {
+              width: 200,
+              height: 200,
+            }),
+          ),
+        ),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-full-coverage"), ctx);
+
+      expect(output.ocrRegions).toEqual([]);
+    });
+
+    it("large image with no native text yields a clamped region", async () => {
+      // Imagen grande (400×600pt en página 595×842) sin ninguna palabra
+      // nativa encima; la única palabra de la página queda lejos, arriba a
+      // la derecha (caso 25).
+      const imageRectPdfSpace = { x: 50, y: 50, width: 400, height: 600 };
+      // Equivalente en coordenadas de página (origen arriba-izquierda):
+      // yMax = 50+600 = 650 -> bbox.y = 842-650 = 192.
+      const expectedImageBBox = { x: 50, y: 192, width: 400, height: 600 };
+
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () =>
+            createMockPage(
+              0,
+              [{ str: "Header", x: 500, y: 800, width: 50, height: 12 }],
+              [imageRectPdfSpace],
+            ),
+          ),
+        ),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-large-empty-image"), ctx);
+
+      expect(output.ocrRegions).toHaveLength(1);
+      const region = output.ocrRegions[0]!;
+      expect(region.pageIndex).toBe(0);
+
+      // Contenido en el rect de la imagen (PDF_Engine.md §10).
+      const EPSILON = 1e-9;
+      expect(region.bbox.x).toBeGreaterThanOrEqual(expectedImageBBox.x - EPSILON);
+      expect(region.bbox.y).toBeGreaterThanOrEqual(expectedImageBBox.y - EPSILON);
+      expect(region.bbox.x + region.bbox.width).toBeLessThanOrEqual(
+        expectedImageBBox.x + expectedImageBBox.width + EPSILON,
+      );
+      expect(region.bbox.y + region.bbox.height).toBeLessThanOrEqual(
+        expectedImageBBox.y + expectedImageBBox.height + EPSILON,
+      );
+
+      const regionArea = region.bbox.width * region.bbox.height;
+      const imageArea = expectedImageBBox.width * expectedImageBBox.height;
+      expect(regionArea / imageArea).toBeGreaterThanOrEqual(0.4);
+      expect(region.bbox.width).toBeGreaterThanOrEqual(100);
+      expect(region.bbox.height).toBeGreaterThanOrEqual(100);
+    });
+
+    it("page with two candidate images yields only the largest", async () => {
+      // Dos imágenes candidatas, ninguna con texto nativo encima (la única
+      // palabra queda lejos de las dos): se emite solo la de mayor
+      // rectángulo vacío (ADR-065 §2, caso 26). Imagen A: 250×600 = 150.000
+      // pt². Imagen B: 150×150 = 22.500 pt² — su área máxima posible nunca
+      // alcanza la de A, así que sirve para probar que se descartó.
+      const imageA = { x: 20, y: 20, width: 250, height: 600 }; // PDF space
+      const imageB = { x: 320, y: 20, width: 150, height: 150 }; // PDF space
+      // Imagen A en coordenadas de página: yMax=620 -> bbox.y=842-620=222.
+      const imageABBox = { x: 20, y: 222, width: 250, height: 600 };
+
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () =>
+            createMockPage(
+              0,
+              [{ str: "Header", x: 50, y: 800, width: 50, height: 12 }],
+              [imageA, imageB],
+            ),
+          ),
+        ),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-two-candidates"), ctx);
+
+      expect(output.ocrRegions).toHaveLength(1);
+      const region = output.ocrRegions[0]!;
+      expect(region.pageIndex).toBe(0);
+
+      const EPSILON = 1e-9;
+      expect(region.bbox.x).toBeGreaterThanOrEqual(imageABBox.x - EPSILON);
+      expect(region.bbox.y).toBeGreaterThanOrEqual(imageABBox.y - EPSILON);
+      expect(region.bbox.x + region.bbox.width).toBeLessThanOrEqual(
+        imageABBox.x + imageABBox.width + EPSILON,
+      );
+      expect(region.bbox.y + region.bbox.height).toBeLessThanOrEqual(
+        imageABBox.y + imageABBox.height + EPSILON,
+      );
+
+      // El área máxima posible de B (22.500) nunca produce esto.
+      const regionArea = region.bbox.width * region.bbox.height;
+      expect(regionArea).toBeGreaterThan(imageB.width * imageB.height);
+    });
+
+    // Complementario a los 8 tests nombrados en PDF_Engine.md §14: cubre el
+    // catch de detectOcrRegion agregado en parsePage (mismo criterio que el
+    // resto de errores de página -> PdfCorruptedError).
+    it("wraps a getOperatorList failure into PdfCorruptedError", async () => {
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () => {
+            const page = createMockPage(0);
+            page.getOperatorList = vi.fn(() => Promise.reject(new Error("operator list roto")));
+            return page;
+          }),
+        ),
+      );
+
+      await engine.init(ctx);
+      await expect(
+        engine.process(createValidInput("doc-operator-list-fails"), ctx),
+      ).rejects.toThrow("PDF corrupto");
+    });
+  });
+
+  // ADR-065 §6: fuseOcrRegion, espejo invertido de fuseOcrPage. Casos 27 de
+  // PDF_Engine.md §13.
+  describe("fuseOcrRegion (ADR-065 §6)", () => {
+    it("fuseOcrRegion translates words by the region origin and concatenates", () => {
+      const nativeWord: Word = {
+        text: "Native",
+        bbox: { x: 10, y: 10, width: 40, height: 12 },
+        pageIndex: 0,
+        confidence: 1,
+        source: "pdf",
+      };
+      const page: Page = {
+        index: 0,
+        width: 595,
+        height: 842,
+        words: [nativeWord],
+        text: "Native",
+        requiresOCR: false,
+        ocrCompleted: false,
+      };
+      const document: Document = {
+        id: "doc-fuse-region",
+        name: "",
+        pageCount: 1,
+        pages: [page],
+        metadata: { pdfVersion: "1.7", encrypted: false, hasForms: false },
+        sourceKind: "text",
+        importedAt: 0,
+      };
+
+      // ADR-064: las words de OCR llegan en puntos relativos al recorte.
+      const region = { x: 100, y: 200, width: 300, height: 150 };
+      const ocrWords: Word[] = [
+        {
+          text: "Oculto",
+          bbox: { x: 5, y: 5, width: 60, height: 12 },
+          pageIndex: 0,
+          confidence: 0.9,
+          source: "ocr",
+        },
+      ];
+
+      const updated = fuseOcrRegion(document, 0, region, ocrWords);
+      const updatedPage = updated.pages[0]!;
+
+      expect(updatedPage.ocrCompleted).toBe(true);
+      // ADR-065 §7: requiresOCR no cambia de significado, se mantiene en false.
+      expect(updatedPage.requiresOCR).toBe(false);
+      expect(updatedPage.words).toHaveLength(2);
+
+      const translated = updatedPage.words.find((w) => w.text === "Oculto");
+      expect(translated).toBeDefined();
+      expect(translated!.bbox).toEqual({ x: 105, y: 205, width: 60, height: 12 });
+      expect(translated!.source).toBe("ocr");
+
+      // Se conserva la nativa (concatena, no reemplaza — ADR-065 §6.3).
+      expect(updatedPage.words.some((w) => w.text === "Native")).toBe(true);
+      expect(updatedPage.text).toContain("Native");
+      expect(updatedPage.text).toContain("Oculto");
+    });
+
+    it("fuseOcrRegion on a textless page throws InvalidInputError", () => {
+      const page: Page = {
+        index: 0,
+        width: 595,
+        height: 842,
+        words: [],
+        text: "",
+        requiresOCR: true,
+        ocrCompleted: false,
+      };
+      const document: Document = {
+        id: "doc-fuse-region-guard",
+        name: "",
+        pageCount: 1,
+        pages: [page],
+        metadata: { pdfVersion: "1.7", encrypted: false, hasForms: false },
+        sourceKind: "scanned",
+        importedAt: 0,
+      };
+
+      expect(() => fuseOcrRegion(document, 0, { x: 0, y: 0, width: 10, height: 10 }, [])).toThrow(
+        InvalidInputError,
+      );
+    });
+
+    // Complementario: mismo criterio que "fuseOcrPage on unknown pageIndex
+    // throws InvalidInputError" (ADR-041, caso 15), aplicado al espejo.
+    it("fuseOcrRegion on unknown pageIndex throws InvalidInputError", () => {
+      const page: Page = {
+        index: 0,
+        width: 595,
+        height: 842,
+        words: [],
+        text: "",
+        requiresOCR: false,
+        ocrCompleted: false,
+      };
+      const document: Document = {
+        id: "doc-fuse-region-range",
+        name: "",
+        pageCount: 1,
+        pages: [page],
+        metadata: { pdfVersion: "1.7", encrypted: false, hasForms: false },
+        sourceKind: "text",
+        importedAt: 0,
+      };
+
+      expect(() => fuseOcrRegion(document, 99, { x: 0, y: 0, width: 10, height: 10 }, [])).toThrow(
+        InvalidInputError,
+      );
     });
   });
 

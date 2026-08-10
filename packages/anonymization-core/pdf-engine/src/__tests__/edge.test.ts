@@ -7,9 +7,16 @@ import {
   type EngineContext,
 } from "@anonly/shared";
 import { getDocument } from "pdfjs-dist";
+import type * as PdfjsDist from "pdfjs-dist";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-vi.mock("pdfjs-dist", () => ({ getDocument: vi.fn() }));
+// ADR-065 §1 (compuerta 1): el motor bajo prueba lee `OPS` real (save,
+// restore, transform, paintImageXObject, ...); `importOriginal` lo preserva
+// mientras solo `getDocument` queda mockeado.
+vi.mock("pdfjs-dist", async (importOriginal) => {
+  const actual = await importOriginal<typeof PdfjsDist>();
+  return { ...actual, getDocument: vi.fn() };
+});
 
 import { PdfEngine, decodePdfEngineOutput } from "../pdf.engine.js";
 import { PdfCorruptedError, PdfInvalidError, PdfPasswordRequiredError } from "../pdf.errors.js";
@@ -174,6 +181,7 @@ describe("PdfEngine — edge case tests", () => {
                   items: [{ str: "Safe", transform: [1, 0, 0, 1, 50, 800], width: 30, height: 12 }],
                 }),
               ),
+              getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
             }),
           ),
           getMetadata: vi.fn(() =>
@@ -364,6 +372,7 @@ describe("PdfEngine — edge case tests", () => {
                       ],
                     }),
                   ),
+                  getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
                 };
           }),
         ),
@@ -395,6 +404,7 @@ describe("PdfEngine — edge case tests", () => {
                 ],
               }),
             ),
+            getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
           })),
         ),
       );

@@ -11,11 +11,12 @@ import {
   type DocumentMetadata,
   type EngineContext,
   type IEngine,
+  type OcrRegion,
   type Page,
   type PdfEngineConfig,
   type Word,
 } from "@anonly/shared";
-import { getDocument, type PDFDocumentProxy, type PDFPageProxy } from "pdfjs-dist";
+import { getDocument, OPS, type PDFDocumentProxy, type PDFPageProxy } from "pdfjs-dist";
 
 import {
   PdfCorruptedError,
@@ -293,6 +294,396 @@ function sortWordsByReadingOrder(words: ReadonlyArray<Word>): Word[] {
   return sorted;
 }
 
+// ─── Compuertas de OCR por región (ADR-065 §1, PDF_Engine.md §12) ───
+
+const OCR_REGION_MIN_IMAGE_AREA_RATIO = 0.01; // filtro por rectángulo, nunca sobre el agregado
+const OCR_REGION_GRID_SIZE = 64;
+const OCR_REGION_WORD_DILATION_HORIZONTAL = 0.5; // × altura del glifo, por lado
+const OCR_REGION_WORD_DILATION_VERTICAL = 0.8; // × altura del glifo, por lado
+const OCR_REGION_MIN_EMPTY_AREA_RATIO = 0.4; // del área de la imagen, no de la página
+const OCR_REGION_MIN_SIDE_PT = 100;
+
+type Matrix2D = readonly [number, number, number, number, number, number];
+const IDENTITY_MATRIX_2D: Matrix2D = [1, 0, 0, 1, 0, 0];
+
+/*
+ * Composición de matrices PDF [a,b,c,d,e,f] (misma convención que
+ * `Util.transform` de pdfjs-dist): aplicar el resultado a un punto equivale a
+ * aplicar `inner` y después `outer`. Usada para mantener la CTM vigente
+ * mientras se recorre el operator list simulando save/restore/transform.
+ */
+function composeMatrix(outer: Matrix2D, inner: Matrix2D): Matrix2D {
+  return [
+    outer[0] * inner[0] + outer[2] * inner[1],
+    outer[1] * inner[0] + outer[3] * inner[1],
+    outer[0] * inner[2] + outer[2] * inner[3],
+    outer[1] * inner[2] + outer[3] * inner[3],
+    outer[0] * inner[4] + outer[2] * inner[5] + outer[4],
+    outer[1] * inner[4] + outer[3] * inner[5] + outer[5],
+  ];
+}
+
+function applyMatrix(m: Matrix2D, x: number, y: number): Vector2 {
+  return { x: m[0] * x + m[2] * y + m[4], y: m[1] * x + m[3] * y + m[5] };
+}
+
+/*
+ * ADR-065 §1: "aplicándola [la CTM] al cuadrado unidad sale el rectángulo de
+ * esa imagen en puntos de página". Envolvente axis-aligned de los cuatro
+ * vértices, convertida a origen arriba-izquierda (mismo patrón que
+ * `boundingBoxFromParallelogram`, ADR-063 §2).
+ */
+function imageRectFromCTM(ctm: Matrix2D, pageHeight: number): BoundingBox {
+  const corners: readonly Vector2[] = [
+    applyMatrix(ctm, 0, 0),
+    applyMatrix(ctm, 1, 0),
+    applyMatrix(ctm, 0, 1),
+    applyMatrix(ctm, 1, 1),
+  ];
+  const xs = corners.map((p) => p.x);
+  const ys = corners.map((p) => p.y);
+  const xMin = Math.min(...xs);
+  const xMax = Math.max(...xs);
+  const yMin = Math.min(...ys);
+  const yMax = Math.max(...ys);
+  return { x: xMin, y: pageHeight - yMax, width: xMax - xMin, height: yMax - yMin };
+}
+
+/*
+ * Forma mínima de `PDFOperatorList` (pdfjs-dist tipa `argsArray` como
+ * `Array<any>` — este tipo local evita propagar `any`, mismo criterio que
+ * `TextContentLike` arriba).
+ */
+type OperatorListLike = {
+  readonly fnArray: ReadonlyArray<number>;
+  readonly argsArray: ReadonlyArray<unknown>;
+};
+
+/*
+ * ADR-065 §1: ops de pintado de imagen. `OPS.paintJpegXObject`, nombrado en
+ * PDF_Engine.md §12/ADR-065 §1, NO existe en `pdfjs-dist@4.10.38` (la misma
+ * versión que cita el ADR): no está en el namespace `OPS` exportado
+ * (`types/src/shared/util.d.ts`) ni se emite nunca en el operator-list
+ * builder (`build/pdf.worker.mjs`) — cada rama de imagen usa
+ * `paintImageXObject`/`paintImageMaskXObject`/`paintInlineImageXObject`,
+ * nunca un cuarto op; el valor histórico 82 está salteado en la numeración
+ * actual (entre `endAnnotation`=81 y `paintImageMaskXObject`=83). Las
+ * imágenes JPEG comparten `paintImageXObject` con el resto. Documentado acá
+ * para quien audite contra el spec, que sí lo nombra — ver informe del PR.
+ */
+const IMAGE_PAINT_OPS: ReadonlySet<number> = new Set([
+  OPS.paintImageXObject,
+  OPS.paintImageMaskXObject,
+  OPS.paintInlineImageXObject,
+]);
+
+function isNumberArray(value: unknown): value is ReadonlyArray<number> {
+  return Array.isArray(value) && value.every((v) => typeof v === "number");
+}
+
+/*
+ * Compuerta 1 (ADR-065 §1): recorre el operator list simulando
+ * save/restore/transform para componer la CTM vigente en cada op de pintado
+ * de imagen, y devuelve el rectángulo de esa imagen (cuadrado unidad
+ * transformado) en puntos de página.
+ */
+function collectImageRects(
+  operatorList: OperatorListLike,
+  pageHeight: number,
+): ReadonlyArray<BoundingBox> {
+  const rects: BoundingBox[] = [];
+  const stack: Matrix2D[] = [];
+  let current: Matrix2D = IDENTITY_MATRIX_2D;
+
+  const { fnArray, argsArray } = operatorList;
+  for (let i = 0; i < fnArray.length; i++) {
+    const fn = fnArray[i];
+    if (fn === OPS.save) {
+      stack.push(current);
+    } else if (fn === OPS.restore) {
+      current = stack.pop() ?? IDENTITY_MATRIX_2D;
+    } else if (fn === OPS.transform) {
+      const args = argsArray[i];
+      if (isNumberArray(args) && args.length >= 6) {
+        const m: Matrix2D = [
+          args[0] ?? 1,
+          args[1] ?? 0,
+          args[2] ?? 0,
+          args[3] ?? 1,
+          args[4] ?? 0,
+          args[5] ?? 0,
+        ];
+        current = composeMatrix(current, m);
+      }
+    } else if (fn !== undefined && IMAGE_PAINT_OPS.has(fn)) {
+      rects.push(imageRectFromCTM(current, pageHeight));
+    }
+  }
+
+  return rects;
+}
+
+// Filtro por rectángulo (ADR-065 §1): descarta imágenes < 1% del área de
+// página, evaluado por rectángulo individual — nunca sobre el agregado.
+function isLargeEnoughImage(rect: BoundingBox, pageWidth: number, pageHeight: number): boolean {
+  const pageArea = pageWidth * pageHeight;
+  if (pageArea <= 0) return false;
+  const rectArea = Math.max(0, rect.width) * Math.max(0, rect.height);
+  return rectArea / pageArea >= OCR_REGION_MIN_IMAGE_AREA_RATIO;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+/*
+ * Dilatación de un bbox nativo (ADR-065 §1): 0,5× el cuerpo del glifo
+ * (bbox.height) por lado en horizontal, 0,8× por lado en vertical — evita que
+ * el interlineado cuente como hueco.
+ */
+function dilatedWordBBox(bbox: BoundingBox): BoundingBox {
+  const dx = bbox.height * OCR_REGION_WORD_DILATION_HORIZONTAL;
+  const dy = bbox.height * OCR_REGION_WORD_DILATION_VERTICAL;
+  return {
+    x: bbox.x - dx,
+    y: bbox.y - dy,
+    width: bbox.width + 2 * dx,
+    height: bbox.height + 2 * dy,
+  };
+}
+
+interface CellRect {
+  readonly rowStart: number;
+  readonly rowEnd: number; // inclusive
+  readonly colStart: number;
+  readonly colEnd: number; // inclusive
+}
+
+// Grilla de 64×64 celdas de LA PÁGINA (ADR-065 §1): true = celda cubierta por
+// el bbox dilatado de alguna palabra nativa.
+function buildOccupancyGrid(
+  words: ReadonlyArray<Word>,
+  pageWidth: number,
+  pageHeight: number,
+): boolean[][] {
+  const grid: boolean[][] = Array.from({ length: OCR_REGION_GRID_SIZE }, () =>
+    new Array<boolean>(OCR_REGION_GRID_SIZE).fill(false),
+  );
+  if (pageWidth <= 0 || pageHeight <= 0) return grid;
+
+  const cellWidth = pageWidth / OCR_REGION_GRID_SIZE;
+  const cellHeight = pageHeight / OCR_REGION_GRID_SIZE;
+
+  for (const word of words) {
+    const dilated = dilatedWordBBox(word.bbox);
+    const range = cellRangeOf(dilated, cellWidth, cellHeight);
+
+    for (let row = range.rowStart; row <= range.rowEnd; row++) {
+      const gridRow = grid[row];
+      if (gridRow === undefined) continue;
+      for (let col = range.colStart; col <= range.colEnd; col++) {
+        gridRow[col] = true;
+      }
+    }
+  }
+
+  return grid;
+}
+
+function cellRangeOf(rect: BoundingBox, cellWidth: number, cellHeight: number): CellRect {
+  const colStart = clamp(Math.floor(rect.x / cellWidth), 0, OCR_REGION_GRID_SIZE - 1);
+  const colEnd = clamp(
+    Math.ceil((rect.x + rect.width) / cellWidth) - 1,
+    0,
+    OCR_REGION_GRID_SIZE - 1,
+  );
+  const rowStart = clamp(Math.floor(rect.y / cellHeight), 0, OCR_REGION_GRID_SIZE - 1);
+  const rowEnd = clamp(
+    Math.ceil((rect.y + rect.height) / cellHeight) - 1,
+    0,
+    OCR_REGION_GRID_SIZE - 1,
+  );
+  return { rowStart, rowEnd, colStart, colEnd };
+}
+
+function imageCellRange(image: BoundingBox, pageWidth: number, pageHeight: number): CellRect {
+  return cellRangeOf(image, pageWidth / OCR_REGION_GRID_SIZE, pageHeight / OCR_REGION_GRID_SIZE);
+}
+
+function cellRectToBoundingBox(rect: CellRect, pageWidth: number, pageHeight: number): BoundingBox {
+  const cellWidth = pageWidth / OCR_REGION_GRID_SIZE;
+  const cellHeight = pageHeight / OCR_REGION_GRID_SIZE;
+  return {
+    x: rect.colStart * cellWidth,
+    y: rect.rowStart * cellHeight,
+    width: (rect.colEnd - rect.colStart + 1) * cellWidth,
+    height: (rect.rowEnd - rect.rowStart + 1) * cellHeight,
+  };
+}
+
+// El rectángulo se clampea al rect de la imagen antes de emitirse (ADR-065
+// §1): la cuantización de la grilla lo hace desbordar.
+function clampRectToImage(rect: BoundingBox, image: BoundingBox): BoundingBox {
+  const x = Math.max(rect.x, image.x);
+  const y = Math.max(rect.y, image.y);
+  const right = Math.min(rect.x + rect.width, image.x + image.width);
+  const bottom = Math.min(rect.y + rect.height, image.y + image.height);
+  return { x, y, width: Math.max(0, right - x), height: Math.max(0, bottom - y) };
+}
+
+interface HistogramRect {
+  readonly area: number;
+  readonly left: number; // índice inclusive
+  readonly right: number; // índice inclusive
+  readonly height: number;
+}
+
+// Mayor rectángulo en un histograma (pila monótona), O(n) por fila — la mitad
+// del algoritmo de "mayor rectángulo vacío en matriz binaria" (ADR-065 §1).
+function largestRectInHistogram(heights: ReadonlyArray<number>): HistogramRect | undefined {
+  const stack: number[] = [];
+  let best: HistogramRect | undefined;
+
+  for (let i = 0; i <= heights.length; i++) {
+    const currentHeight = i < heights.length ? (heights[i] ?? 0) : 0;
+    while (stack.length > 0) {
+      const topIndex = stack[stack.length - 1];
+      if (topIndex === undefined) break;
+      const topHeight = heights[topIndex] ?? 0;
+      if (currentHeight >= topHeight) break;
+      stack.pop();
+      const leftNeighbor = stack.length === 0 ? undefined : stack[stack.length - 1];
+      const left = leftNeighbor === undefined ? 0 : leftNeighbor + 1;
+      const area = topHeight * (i - left);
+      if (topHeight > 0 && (best === undefined || area > best.area)) {
+        best = { area, left, right: i - 1, height: topHeight };
+      }
+    }
+    stack.push(i);
+  }
+
+  return best;
+}
+
+interface CellRectResult extends CellRect {
+  readonly areaCells: number;
+}
+
+/*
+ * Mayor rectángulo axis-aligned de celdas NO ocupadas, restringido al rango
+ * de celdas de una imagen (ADR-065 §1: "dentro de cada imagen se busca el
+ * mayor rectángulo vacío axis-aligned"). `undefined` si no hay ninguna celda
+ * vacía en ese rango.
+ */
+function largestEmptyCellRect(
+  grid: ReadonlyArray<ReadonlyArray<boolean>>,
+  range: CellRect,
+): CellRectResult | undefined {
+  const width = range.colEnd - range.colStart + 1;
+  if (width <= 0 || range.rowEnd - range.rowStart + 1 <= 0) return undefined;
+
+  const heights = new Array<number>(width).fill(0);
+  let best: CellRectResult | undefined;
+
+  for (let row = range.rowStart; row <= range.rowEnd; row++) {
+    const gridRow = grid[row];
+    for (let col = 0; col < width; col++) {
+      const occupied = gridRow?.[range.colStart + col] ?? true;
+      heights[col] = occupied ? 0 : (heights[col] ?? 0) + 1;
+    }
+
+    const rowBest = largestRectInHistogram(heights);
+    if (rowBest !== undefined && (best === undefined || rowBest.area > best.areaCells)) {
+      best = {
+        rowStart: row - rowBest.height + 1,
+        rowEnd: row,
+        colStart: range.colStart + rowBest.left,
+        colEnd: range.colStart + rowBest.right,
+        areaCells: rowBest.area,
+      };
+    }
+  }
+
+  return best;
+}
+
+interface OcrRegionCandidate {
+  readonly bbox: BoundingBox; // clampeado al rect de la imagen
+  readonly emptyAreaPt2: number; // área del bbox clampeado, en pt² — para comparar candidatas
+}
+
+/*
+ * Compuerta 2 para UNA imagen candidata (ADR-065 §1): mayor rectángulo vacío
+ * inscrito, normalizado por el área de esa imagen. Candidata válida si su
+ * área es ≥40% del área de la imagen y sus dos lados miden ≥100pt.
+ */
+function evaluateImageCandidate(
+  imageRect: BoundingBox,
+  grid: ReadonlyArray<ReadonlyArray<boolean>>,
+  pageWidth: number,
+  pageHeight: number,
+): OcrRegionCandidate | undefined {
+  const imageArea = imageRect.width * imageRect.height;
+  if (imageArea <= 0) return undefined;
+
+  const cellRange = imageCellRange(imageRect, pageWidth, pageHeight);
+  const emptyCellRect = largestEmptyCellRect(grid, cellRange);
+  if (emptyCellRect === undefined) return undefined;
+
+  const rawBbox = cellRectToBoundingBox(emptyCellRect, pageWidth, pageHeight);
+  const clampedBbox = clampRectToImage(rawBbox, imageRect);
+  const clampedArea = clampedBbox.width * clampedBbox.height;
+
+  const passesArea = clampedArea / imageArea >= OCR_REGION_MIN_EMPTY_AREA_RATIO;
+  const passesSides =
+    clampedBbox.width >= OCR_REGION_MIN_SIDE_PT && clampedBbox.height >= OCR_REGION_MIN_SIDE_PT;
+  if (!passesArea || !passesSides) return undefined;
+
+  return { bbox: clampedBbox, emptyAreaPt2: clampedArea };
+}
+
+/*
+ * Compuertas 1+2 completas para una página (ADR-065 §1-§2). Devuelve
+ * `undefined` si no hay ninguna región candidata; si hay más de una, solo la
+ * de mayor rectángulo vacío (ADR-065 §2, caso 26).
+ */
+async function detectOcrRegion(
+  pageProxy: PDFPageProxy,
+  pageWidth: number,
+  pageHeight: number,
+  nativeWords: ReadonlyArray<Word>,
+): Promise<BoundingBox | undefined> {
+  // Cast de frontera contra pdfjs-dist (Code_Standards.md §2/§10, mismo
+  // criterio que `TextContentLike` arriba): `PDFOperatorList.argsArray` tipa
+  // `Array<any>`; narrowing a la forma local evita propagar `any`.
+  const operatorList = (await pageProxy.getOperatorList()) as OperatorListLike;
+
+  const imageRects = collectImageRects(operatorList, pageHeight).filter((rect) =>
+    isLargeEnoughImage(rect, pageWidth, pageHeight),
+  );
+  if (imageRects.length === 0) return undefined; // Compuerta 1: sin imágenes candidatas, compuerta 2 no corre.
+
+  const grid = buildOccupancyGrid(nativeWords, pageWidth, pageHeight);
+
+  let best: OcrRegionCandidate | undefined;
+  for (const imageRect of imageRects) {
+    const candidate = evaluateImageCandidate(imageRect, grid, pageWidth, pageHeight);
+    if (
+      candidate !== undefined &&
+      (best === undefined || candidate.emptyAreaPt2 > best.emptyAreaPt2)
+    ) {
+      best = candidate;
+    }
+  }
+
+  return best?.bbox;
+}
+
+interface ParsePageResult {
+  readonly page: Page;
+  readonly ocrRegionBbox?: BoundingBox;
+}
+
 /*
  * ADR-020 §10: parsePage() puro — obtiene la página, viewport y texto (con
  * timeout), convierte a Words y arma la Page. Lanza PdfCorruptedError /
@@ -303,7 +694,7 @@ async function parsePage(
   documentId: string,
   pageIndex: number,
   timeoutMs: number,
-): Promise<Page> {
+): Promise<ParsePageResult> {
   const pageNum = pageIndex + 1;
 
   let pageProxy: PDFPageProxy;
@@ -343,7 +734,25 @@ async function parsePage(
     requiresOCR,
     ocrCompleted: false,
   };
-  return page;
+
+  // ADR-065 §1/§4: las compuertas de OCR por región solo corren para páginas
+  // que SÍ tienen texto nativo. Una página textless va entera por
+  // fuseOcrPage; correr las compuertas ahí violaría trivialmente el
+  // invariante de disjunción con textlessPages (grilla de palabras vacía =
+  // "toda la imagen es hueco", falso positivo garantizado).
+  if (requiresOCR) {
+    return { page };
+  }
+
+  let ocrRegionBbox: BoundingBox | undefined;
+  try {
+    ocrRegionBbox = await detectOcrRegion(pageProxy, pageWidth, pageHeight, sortedWords);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new PdfCorruptedError(documentId, message, pageIndex);
+  }
+
+  return ocrRegionBbox !== undefined ? { page, ocrRegionBbox } : { page };
 }
 
 // EngineError.details es Readonly<Record<string, unknown>>; `reason` es un
@@ -400,6 +809,78 @@ export function fuseOcrPage(
   const updatedPage: Page = {
     ...existingPage,
     words: sortedWords,
+    text: mergedText,
+    ocrCompleted: true,
+  };
+
+  const updatedPages = document.pages.map((p) => (p.index === pageIndex ? updatedPage : p));
+
+  return {
+    ...document,
+    pages: updatedPages,
+  };
+}
+
+/*
+ * ADR-065 §6: espejo INVERTIDO de fuseOcrPage, para el camino de OCR por
+ * región. Mismo perfil (pura, síncrona, host-side, el caller provee y
+ * persiste el Document). Tres diferencias deliberadas frente a fuseOcrPage:
+ *   1. Guard invertido: exige requiresOCR === false. Una página textless va
+ *      por fuseOcrPage; invocar ésta es un bug de wiring (§13 caso 27).
+ *   2. Traslada: las `words` llegan en puntos relativos al RECORTE (ADR-064
+ *      convierte px->pt, el origen sigue siendo el del recorte) — se les suma
+ *      region.x/region.y para llevarlas a coordenadas de página.
+ *   3. Concatena en vez de reemplazar: la región es, por construcción de la
+ *      compuerta 2 (§12), área sin una sola palabra nativa encima — seguro
+ *      sin dedupe (ADR-065 §3).
+ * Marca ocrCompleted = true dejando requiresOCR intacto en false (ADR-065 §7:
+ * el invariante de 03_Data_Model.md §4 se relaja para admitir este caso).
+ */
+export function fuseOcrRegion(
+  document: Document,
+  pageIndex: number,
+  region: BoundingBox,
+  words: ReadonlyArray<Word>,
+): Document {
+  const existingPage = document.pages[pageIndex];
+  if (pageIndex < 0 || pageIndex >= document.pageCount || existingPage === undefined) {
+    throw new InvalidInputError(
+      `pageIndex ${pageIndex} fuera de rango para documento con ${document.pageCount} páginas.`,
+      { pageIndex },
+    );
+  }
+
+  // ADR-065 §6: guard invertido — fuseOcrRegion solo aplica a páginas CON
+  // texto nativo. Una página textless (requiresOCR=true) va por fuseOcrPage.
+  if (existingPage.requiresOCR !== false) {
+    throw new InvalidInputError(
+      `La página ${pageIndex} del documento ${document.id} requiere OCR de página completa ` +
+        "(requiresOCR=true); fuseOcrRegion solo aplica a páginas con texto nativo.",
+      { documentId: document.id, pageIndex },
+    );
+  }
+
+  const translatedWords: Word[] = words.map((w) => ({
+    text: w.text.normalize("NFC"),
+    bbox: {
+      x: w.bbox.x + region.x,
+      y: w.bbox.y + region.y,
+      width: w.bbox.width,
+      height: w.bbox.height,
+    },
+    pageIndex,
+    confidence: w.confidence,
+    source: "ocr" as const,
+  }));
+
+  // ADR-065 §3: concatena — las nativas se conservan, las de OCR se suman,
+  // se reordena por orden de lectura y se recalcula Page.text.
+  const mergedWords = sortWordsByReadingOrder([...existingPage.words, ...translatedWords]);
+  const mergedText = mergedWords.map((w) => w.text).join(" ");
+
+  const updatedPage: Page = {
+    ...existingPage,
+    words: mergedWords,
     text: mergedText,
     ocrCompleted: true,
   };
@@ -632,6 +1113,7 @@ export class PdfEngine implements IEngine {
 
     const pages: Page[] = [];
     const textlessPages: number[] = [];
+    const ocrRegions: OcrRegion[] = [];
     const timeoutMs =
       operationCtx.config.workerPool.timeouts["pdf-parse"] ?? DEFAULT_TIMEOUT_MS_PER_PAGE;
 
@@ -641,9 +1123,9 @@ export class PdfEngine implements IEngine {
         throw new CancelledError(documentId);
       }
 
-      let page: Page;
+      let parsed: ParsePageResult;
       try {
-        page = await parsePage(pdfDocument, documentId, pageIndex, timeoutMs);
+        parsed = await parsePage(pdfDocument, documentId, pageIndex, timeoutMs);
       } catch (err: unknown) {
         void pdfDocument.destroy();
         // ADR-020 §3: todo error fatal de parseo emite su evento antes de lanzar.
@@ -658,10 +1140,16 @@ export class PdfEngine implements IEngine {
         throw err;
       }
 
+      const { page, ocrRegionBbox } = parsed;
+
       if (page.requiresOCR) {
         textlessPages.push(page.index);
       }
       pages.push(page);
+
+      if (ocrRegionBbox !== undefined) {
+        ocrRegions.push({ pageIndex: page.index, bbox: ocrRegionBbox });
+      }
 
       operationCtx.bus.emit(EventChannel.Pdf, EngineEvents.PAGE_PARSED, {
         documentId,
@@ -672,6 +1160,7 @@ export class PdfEngine implements IEngine {
     }
 
     textlessPages.sort((a, b) => a - b);
+    ocrRegions.sort((a, b) => a.pageIndex - b.pageIndex);
     const sourceKind = this.determineSourceKind(textlessPages, pageCount);
 
     const metadata = await this.extractMetadata(pdfDocument);
@@ -705,6 +1194,7 @@ export class PdfEngine implements IEngine {
       pageCount,
       textlessPages,
       sourceKind,
+      ocrRegions,
     };
 
     return output;

@@ -10,14 +10,22 @@ import {
   type Word,
 } from "@anonly/shared";
 import { getDocument } from "pdfjs-dist";
+import type * as PdfjsDist from "pdfjs-dist";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-vi.mock("pdfjs-dist", () => ({ getDocument: vi.fn() }));
+// ADR-065 §1 (compuerta 1): el motor bajo prueba lee `OPS` real (save,
+// restore, transform, paintImageXObject, ...); `importOriginal` lo preserva
+// mientras solo `getDocument` queda mockeado.
+vi.mock("pdfjs-dist", async (importOriginal) => {
+  const actual = await importOriginal<typeof PdfjsDist>();
+  return { ...actual, getDocument: vi.fn() };
+});
 
 import { PdfEngine, fuseOcrPage } from "../pdf.engine.js";
 
 import {
   createEngineContext,
+  createMockPage,
   createMockPdfDocument,
   createValidInput,
   mockGetDocumentResult,
@@ -213,6 +221,45 @@ describe("PdfEngine — contract tests", () => {
 
     expect(engine["initialized"]).toBe(false);
     expect(engine["disposed"]).toBe(true);
+  });
+
+  // ADR-065 §4: invariante de PdfEngineOutput — los dos caminos de OCR
+  // (página entera vs. región) nunca comparten pageIndex.
+  it("ocrRegions and textlessPages are disjoint", async () => {
+    const imageRectPdfSpace = { x: 50, y: 50, width: 400, height: 600 };
+
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(
+        createMockPdfDocument(2, (i: number) => {
+          if (i === 0) {
+            // Página 0: textless — va por fuseOcrPage (página entera).
+            return {
+              getViewport: vi.fn(() => ({ width: 595, height: 842 })),
+              getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
+            };
+          }
+          // Página 1: texto nativo + imagen grande sin texto encima — candidata a región.
+          return createMockPage(
+            i,
+            [{ str: "Header", x: 500, y: 800, width: 50, height: 12 }],
+            [imageRectPdfSpace],
+          );
+        }),
+      ),
+    );
+
+    await engine.init(ctx);
+    const input = createValidInput("doc-disjoint-invariant");
+    const output = await engine.process(input, ctx);
+
+    expect(output.textlessPages).toEqual([0]);
+    expect(output.ocrRegions.map((r) => r.pageIndex)).toEqual([1]);
+
+    const textlessSet = new Set(output.textlessPages);
+    const intersection = output.ocrRegions
+      .map((r) => r.pageIndex)
+      .filter((pageIndex) => textlessSet.has(pageIndex));
+    expect(intersection).toEqual([]);
   });
 
   it("engine never subscribes to the bus (ADR-014)", async () => {
