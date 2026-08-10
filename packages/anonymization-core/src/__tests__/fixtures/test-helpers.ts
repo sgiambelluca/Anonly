@@ -151,6 +151,10 @@ export function createPdfEngineOutput(overrides?: Partial<PdfEngineOutput>): Pdf
     document,
     pageCount: document.pageCount,
     textlessPages: [],
+    // ADR-065 §4: campo requerido de PdfEngineOutput. Vacío es el caso normal
+    // (ningún documento de fixture tiene imágenes con texto oculto); los tests
+    // que ejercitan el camino de región lo pasan por `overrides`.
+    ocrRegions: [],
     sourceKind: document.sourceKind,
     ...overrides,
   };

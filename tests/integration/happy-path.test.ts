@@ -10,13 +10,21 @@ import { createCore, type IAnonymizationCore } from "@anonly/anonymization-core"
 import { EngineEvents, EventChannel, PipelineStage } from "@anonly/shared";
 import { pipeline } from "@huggingface/transformers";
 import { getDocument } from "pdfjs-dist";
+import type * as PdfjsDist from "pdfjs-dist";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Vitest hoistea vi.mock() por encima de todos los imports (incluido
 // @anonly/anonymization-core más arriba): el orden textual acá es solo
 // legibilidad (mismo criterio que pdf-engine/render-engine/ner-engine), no
 // afecta qué versión (real o mockeada) de estas libs recibe createCore().
-vi.mock("pdfjs-dist", () => ({ getDocument: vi.fn() }));
+// ADR-065 §1 (compuerta 1): `pdf-engine` lee el `OPS` real de pdfjs-dist a
+// nivel de módulo para reconocer los ops de pintado de imagen. Un mock que
+// solo exponga `getDocument` lo deja sin `OPS` y el motor revienta al
+// importarse; `importOriginal` preserva el resto del módulo.
+vi.mock("pdfjs-dist", async (importOriginal) => {
+  const actual = await importOriginal<typeof PdfjsDist>();
+  return { ...actual, getDocument: vi.fn() };
+});
 vi.mock("@huggingface/transformers", () => ({
   pipeline: vi.fn(),
   env: { allowRemoteModels: true, localModelPath: "/models/", backends: { onnx: { wasm: {} } } },
