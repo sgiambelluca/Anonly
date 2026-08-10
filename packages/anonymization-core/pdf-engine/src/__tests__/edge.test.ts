@@ -599,6 +599,32 @@ describe("PdfEngine — edge case tests", () => {
       }
     });
 
+    it("decodePdfEngineOutput throws on a malformed ocrRegions", () => {
+      // ADR-065 §4: `ocrRegions` es el quinto campo de PdfEngineOutput y entra
+      // al guard como cualquier otro. Se recorre elemento a elemento (está
+      // acotado a una entrada por página, ADR-065 §2), a diferencia de
+      // `words`/`bbox` de las páginas, que ADR-055 deja fuera del walk.
+      const broken: ReadonlyArray<unknown> = [
+        { ...validOutput, ocrRegions: undefined }, // falta el campo
+        { ...validOutput, ocrRegions: {} }, // no es array
+        { ...validOutput, ocrRegions: [{ bbox: { x: 0, y: 0, width: 1, height: 1 } }] }, // sin pageIndex
+        {
+          ...validOutput,
+          ocrRegions: [{ pageIndex: "0", bbox: { x: 0, y: 0, width: 1, height: 1 } }],
+        },
+        { ...validOutput, ocrRegions: [{ pageIndex: 0 }] }, // sin bbox
+        { ...validOutput, ocrRegions: [{ pageIndex: 0, bbox: { x: 0, y: 0, width: 1 } }] }, // bbox incompleto
+        {
+          ...validOutput,
+          ocrRegions: [{ pageIndex: 0, bbox: { x: "0", y: 0, width: 1, height: 1 } }],
+        },
+      ];
+
+      for (const value of broken) {
+        expect(() => decodePdfEngineOutput(value)).toThrow(InvalidInputError);
+      }
+    });
+
     it("decodePdfEngineOutput throws on an enveloped result", () => {
       // La regresión concreta de ADR-055 (Contexto §1) trasladada a PDF: un
       // resultado por lo demás perfecto, envuelto. Antes de este decoder,
