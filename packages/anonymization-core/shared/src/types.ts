@@ -349,6 +349,14 @@ export interface RasterizePagePayload {
   readonly documentId: string;
   readonly pageIndex: number;
   readonly scale: number;
+  // ADR-065 §5: recorte a rasterizar, en PUNTOS de página (mismo espacio que
+  // cualquier BoundingBox). Ausente = página entera, que es el flujo de OCR de
+  // páginas textless y no cambia. Va acá y no en un tipo local de
+  // render-engine, mismo criterio que `lineWords` en RenderPagePayload
+  // (ADR-058 §5): la forma que cruza el postMessage se declara en un solo
+  // lugar, porque `05_Worker_Architecture.md` §7.4 documenta el wire shape de
+  // `RUN(render-page)` enumerando sus campos.
+  readonly region?: BoundingBox;
 }
 
 // Página de leyenda del export (ADR-059 §5). Viaja bajo jobType "render-page",
