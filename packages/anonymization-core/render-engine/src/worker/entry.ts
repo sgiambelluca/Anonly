@@ -45,6 +45,7 @@ import {
   EngineError,
   InvalidInputError,
   type LoadDocumentPayload,
+  type RasterizePagePayload,
   type RenderLegendPayload,
   type RenderPagePayload,
   type UnloadDocumentPayload,
@@ -62,7 +63,6 @@ import {
   kernelRenderLegendPage,
   kernelRenderPage,
   kernelUnloadDocument,
-  type RasterizePagePayloadWithRegion,
 } from "./kernel.js";
 
 /**
@@ -126,11 +126,10 @@ function isRenderPagePayload(payload: unknown): payload is RenderPagePayload {
   return typeof payload === "object" && payload !== null && "kind" in payload;
 }
 
-// ADR-065 §5: `region` (opcional) viaja dentro de esta misma forma —
-// `RasterizePagePayloadWithRegion` extiende la `RasterizePagePayload` de
-// `@anonly/shared` con un campo opcional, así que la discriminación por
-// forma no cambia (sigue siendo "pageIndex" in payload).
-function isRasterizePagePayload(payload: unknown): payload is RasterizePagePayloadWithRegion {
+// ADR-065 §5: `region` (opcional) viaja dentro de esta misma forma, como un
+// campo más de `RasterizePagePayload` (`@anonly/shared`), así que la
+// discriminación por forma no cambia (sigue siendo "pageIndex" in payload).
+function isRasterizePagePayload(payload: unknown): payload is RasterizePagePayload {
   return typeof payload === "object" && payload !== null && "pageIndex" in payload;
 }
 
