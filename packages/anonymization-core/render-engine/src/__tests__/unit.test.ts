@@ -501,6 +501,58 @@ describe("RenderEngine — unit tests", () => {
     expect(getPageSpy.mock.calls.length).toBe(callsBefore + 1);
   });
 
+  // ─── ADR-065 §5 (Hito 10.8, PR6): rasterizePage con región ───
+
+  it("rasterizePage with a region returns only the cropped ImageData", async () => {
+    const docId = "doc-rasterize-region";
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(
+        createMockPdfDocument({
+          pageCount: 1,
+          pageFactory: () => createMockPage({ width: 200, height: 300 }),
+        }),
+      ),
+    );
+    await engine.init(ctx);
+    await engine.loadDocument(docId, createValidBuffer());
+
+    const region = { x: 20, y: 30, width: 50, height: 40 };
+    const imageData = await engine.rasterizePage(docId, 0, 2, ctx, region);
+
+    // tamaño = region × scale (Render_Engine.md §13 caso 30).
+    expect(imageData.width).toBe(100); // 50 * scale(2)
+    expect(imageData.height).toBe(80); // 40 * scale(2)
+
+    const [canvas] = getCreatedCanvases();
+    const getImageDataCall = canvas?.calls.find((call) => call.op === "getImageData");
+    expect(getImageDataCall?.args).toEqual([40, 60, 100, 80]); // region.x/y/width/height * scale
+  });
+
+  it("rasterizePage without a region is unchanged", async () => {
+    const docId = "doc-rasterize-no-region";
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(
+        createMockPdfDocument({
+          pageCount: 1,
+          pageFactory: () => createMockPage({ width: 200, height: 300 }),
+        }),
+      ),
+    );
+    await engine.init(ctx);
+    await engine.loadDocument(docId, createValidBuffer());
+
+    // Garantía de no regresión (ADR-065 §5): sin `region`, el flujo OCR de
+    // páginas textless que ya usa `rasterizePage` no se toca.
+    const imageData = await engine.rasterizePage(docId, 0, 2, ctx);
+
+    expect(imageData.width).toBe(400); // 200 * scale(2), página entera
+    expect(imageData.height).toBe(600);
+
+    const [canvas] = getCreatedCanvases();
+    const getImageDataCall = canvas?.calls.find((call) => call.op === "getImageData");
+    expect(getImageDataCall?.args).toEqual([0, 0, 400, 600]); // sin recorte
+  });
+
   // ─── ADR-050 §2 + ADR-043 §5 (Hito 10, PR17.4): re-priming con password ───
 
   it("re-primed worker reloads a password-protected document", async () => {

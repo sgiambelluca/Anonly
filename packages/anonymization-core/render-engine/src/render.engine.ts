@@ -1,13 +1,28 @@
 /**
  * @anonly/render-engine — `RenderEngine` (implementa `IEngine`).
  *
- * Fuente de verdad: docs/core/Render_Engine.md (v1.8.0, ADR-030, ADR-031,
- * ADR-034, ADR-037, ADR-043, ADR-044, ADR-050, ADR-053, ADR-056, ADR-059).
+ * Fuente de verdad: docs/core/Render_Engine.md (v1.12.0, ADR-030, ADR-031,
+ * ADR-034, ADR-037, ADR-043, ADR-044, ADR-050, ADR-053, ADR-056, ADR-059,
+ * ADR-065).
  * ADR-055 NO está en esa lista: es un PR preventivo de endurecimiento (D2 de
  * la serie D1..D4 de `roadmap/MVP.md`, ADR-055 §9 fila "3-5") que no cambia
  * ningún contrato público ni comportamiento
  * documentado en el spec — solo angosta el puerto interno de este archivo
  * (nota más abajo), así que Render_Engine.md no se toca (R-21).
+ *
+ * ADR-065 (2026-08-09 — `rasterizePage` acepta un recorte, Hito 10.8 PR6):
+ * quinto parámetro opcional `region?: BoundingBox` (§6/§13 caso 30). El motor
+ * no la valida acá (no tiene las dimensiones de página en puntos, solo el
+ * kernel las conoce vía `pageProxy.getViewport()`): la reenvía tal cual en el
+ * payload existente de `rasterizePage`, sin `WorkerJobType` nuevo. El campo
+ * viaja como `RasterizePagePayloadWithRegion` (`./worker/kernel.js`), no como
+ * un campo nuevo de `RasterizePagePayload` de `@anonly/shared` — ese paquete
+ * es su propio módulo (R-1) y el checklist de `Render_Engine.md` §15 ítem 26
+ * scopea este cambio a `render-engine/`; el motor controla las dos puntas de
+ * ese payload (host acá, kernel en `./worker/kernel.js`), así que extenderlo
+ * localmente no rompe nada y evita tocar `shared/` en este PR. Sin `region`,
+ * comportamiento previo a ADR-065 bit a bit — no participa de cache/eventos/
+ * supersede, mismo perfil que el resto de `rasterizePage` (ADR-034 §1).
  *
  * ADR-059 (2026-08-06 — `renderLegendPage`, la página de leyenda del
  * export): método público nuevo, sin `documentId` en su firma —es la ÚNICA
@@ -229,12 +244,12 @@ import {
   MAX_RENDER_SCALE,
   PREVIEW_CACHE_MAX_BYTES,
   type Annotation,
+  type BoundingBox,
   type EncodedPageImage,
   type EngineContext,
   type IEngine,
   type LoadDocumentPayload,
   type MarkerLegendRow,
-  type RasterizePagePayload,
   type RenderLegendPayload,
   type RenderPagePayload as RenderPagePayloadWire,
   type RenderRequested,
@@ -253,6 +268,7 @@ import {
   kernelRenderPage,
   kernelUnloadDocument,
   type KernelRenderResult,
+  type RasterizePagePayloadWithRegion,
 } from "./worker/kernel.js";
 
 const DEFAULT_TIMEOUT_MS = 10_000; // render-page preview (05_Worker_Architecture.md §4); full=30s idem si config lo define.
@@ -975,12 +991,21 @@ export class RenderEngine implements IEngine {
    * highlights (ADR-034 §1): alimenta el OCR desde el Orchestrator, que no
    * puede importar pdfjs. No emite eventos (ni `PREVIEW_UPDATED`) ni toca el
    * cache LRU de previews.
+   *
+   * `region` opcional (ADR-065 §5): recorte en PUNTOS de página. Este método
+   * no la valida/clampea — no tiene las dimensiones de página en puntos
+   * (`RetainedDocument` solo guarda `{ buffer, pageCount, password? }`); eso
+   * solo lo sabe el kernel, vía `pageProxy.getViewport()`
+   * (`./worker/kernel.js#kernelRasterizePage`), que es donde se clampea y se
+   * lanza `InvalidInputError` si el área clampeada es cero o negativa.
+   * Ausente: comportamiento previo a ADR-065, bit a bit.
    */
   async rasterizePage(
     documentId: string,
     pageIndex: number,
     scale: number,
     ctx: EngineContext,
+    region?: BoundingBox,
   ): Promise<ImageData> {
     this.assertNotDisposed();
     this.assertInitialized();
@@ -1013,7 +1038,14 @@ export class RenderEngine implements IEngine {
     }
 
     const timeoutMs = ctx.config.workerPool.timeouts["render-page"] ?? DEFAULT_TIMEOUT_MS;
-    const payload: RasterizePagePayload = { documentId, pageIndex, scale };
+    // ADR-065 §5: conditional spread (exactOptionalPropertyTypes,
+    // Code_Standards.md §2), mismo patrón que `password` en loadDocument.
+    const payload: RasterizePagePayloadWithRegion = {
+      documentId,
+      pageIndex,
+      scale,
+      ...(region !== undefined ? { region } : {}),
+    };
 
     // Prioridad 90 (05_Worker_Architecture.md §6.2: espejo de ocr-page
     // visible, a la que esta rasterización alimenta — ADR-036 §4).
