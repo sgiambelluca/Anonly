@@ -74,7 +74,7 @@ Notas: el archivo se lee como `ArrayBuffer` en el main thread y se mantiene en m
 **Sale**: `Word[]` por página con `confidence` y `source: "ocr"`. El PDF Engine fusiona esas palabras en `Page.words` (vía `OCR_PAGE_FINISHED`).
 **Eventos emitidos**: `OCR_STARTED`, `OCR_PAGE_FINISHED`, `OCR_FINISHED`, `OCR_PAGE_FAILED`.
 **Errores**:
-- `OCR_PAGE_FAILED` → reintentable hasta `maxRetries = 2`. Si agota, esa página queda con `requiresOCR = true` y `ocrCompleted = false`; las detecciones posteriores se saltan sus ocurrencias (warning al usuario).
+- `OCR_PAGE_FAILED` → reintentable hasta `maxRetries = 2`. Si agota, esa página queda con `requiresOCR = true` y `ocrCompleted = false`; las detecciones posteriores se saltan sus ocurrencias (warning al usuario). **Excepción: si el job que falló era una región** (ADR-065 §9), la página **conserva su texto nativo** y su `requiresOCR` sigue en `false` — solo se pierde el contenido de esa región, y queda con `ocrCompleted = false`.
 - Timeout por página → reintento (2) → `OCR_PAGE_FAILED`.
 **Cancelación**: entre líneas reconocidas (Tesseract expone progreso), SLA < 200 ms.
 **Métricas**: `pagesProcessed`, `avgConfidence`, `durationMs` por página y total.
