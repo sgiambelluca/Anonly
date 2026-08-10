@@ -114,8 +114,24 @@ export interface Page {
 **Invariantes**
 - `words` está ordenado por `bbox.y` asc, luego `bbox.x` asc (orden de lectura).
 - Si `requiresOCR === false`, entonces `words.length > 0` o la página es genuinamente vacía.
-- `ocrCompleted === true` implica `requiresOCR === true`.
+- `ocrCompleted === true` implica que la página **pasó por OCR**, entera o por región (ADR-065 §7). Hasta ADR-065 implicaba `requiresOCR === true`, porque solo existía el camino de página entera; con el OCR por región una página con texto nativo (`requiresOCR === false`) también puede haber pasado por OCR. `requiresOCR` conserva su significado exacto —"`pdf-engine` no extrajo texto nativo de esta página"— y no debe leerse como "esta página no vio OCR".
 - `text` es la concatenación de `words.map(w => w.text).join(" ")` con normalización NFC.
+
+### 4.1 `OcrRegion`
+
+```ts
+export interface OcrRegion {
+  readonly pageIndex: number;
+  readonly bbox: BoundingBox;                // puntos de página, origen arriba-izquierda
+}
+```
+
+Región de una página **con texto nativo** que aun así hay que escanear: una imagen cuyo interior ningún texto explica (ADR-065). La produce `pdf-engine` en `PdfEngineOutput.ocrRegions` y la consume el Orchestrator, que rasteriza solo ese recorte, lo manda a OCR y fusiona con `fuseOcrRegion`.
+
+**Invariantes**
+- `bbox` está contenido en el rectángulo de la imagen que la originó, y por lo tanto dentro de la página.
+- Ningún `pageIndex` de `ocrRegions` aparece en `textlessPages`: una página sin texto nativo va a OCR entera y nunca por región (ADR-065 §4).
+- Como máximo **una** región por `pageIndex` (ADR-065 §2).
 
 ---
 
