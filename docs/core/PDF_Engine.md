@@ -5,8 +5,10 @@
 > Extrae texto y posiciones de cada página del PDF. Marca las páginas sin texto para que OCR las procese. Descarta metadata sensible.
 
 **EngineId**: `pdf` (valor del enum `EngineId`)
-**Versión del spec**: 1.5.0
+**Versión del spec**: 1.6.0
 **Última actualización**: 2026-08-09
+
+> **Nota (v1.6.0, ADR-065, 2026-08-09 — OCR de páginas con texto nativo parcial)**: `requiresOCR = words.length === 0` dejaba fuera de OCR a cualquier página con **una sola** palabra nativa. En un documento real, un sello de firma digital aportaba esa palabra y una imagen del 55% de la página —con el nombre de una persona adentro— nunca se escaneó: el dato se exportó sin anonimizar. El motor gana **dos compuertas** en `parsePage` (§12) que producen `PdfEngineOutput.ocrRegions`: la primera descarta con `getOperatorList()` toda página sin image XObjects (**3,7 ms**, el único costo que paga un documento de puro texto); la segunda mide el **mayor rectángulo vacío inscrito en cada imagen, normalizado por el área de esa imagen**, que es lo que separa un escaneo ya buscable (11-20%) de una imagen con texto oculto (102%). Se OCR-ea **la región, no la página**, y por construcción esa región no tiene texto nativo encima, así que la fusión (`fuseOcrRegion`, §6) concatena sin dedupe. `requiresOCR`, `textlessPages` y `sourceKind` **no cambian de semántica**. Ver §6, §10, §12, §13 casos 22-26, §14, §15 ítem 24.
 **Estado de implementación**: Hito 2 cerrado (PRs #6, #7); hardening post-review vía ADR-020 (word-splitting, NFC, política de eventos, guard de `fuseOcrPage`, `parsePage` puro); migración a `PdfPool` cerrada en Hito 9 (ADR-035). Pendiente: PdfWorker real (PR12, Hito 10 — incluye la extracción de `fuseOcrPage` a función pura, ADR-041) y tests stress/cancel/perf en Hito 11.
 
 > **Nota (ADR-063, 2026-08-09)**: la geometría de `Word` deja de derivarse solo de la traslación de la matriz (`transform[4]`/`[5]`) y pasa a usar la **matriz completa**. De `[a, b, c, d]` salen los versores de avance y de ascenso; el `BoundingBox` es la envolvente axis-aligned del paralelogramo del run, y el prorrateo por token de ADR-020 §1 se desplaza sobre el eje de avance en vez de sobre `x`. Motivo: un sello de firma vertical (matriz `[0, 16, -16, 0]`) producía una caja de 173×16 pt horizontal donde el texto real ocupa 16×173 pt vertical — cajas que no se solapan. **Para 0° la definición nueva se reduce exactamente a la anterior**, así que el texto horizontal no cambia de bbox y los snapshots no se regeneran. `BoundingBox` **no** cambia (sigue sin campo de rotación) y el orden de lectura `y`→`x` se conserva. Ver §12, §13 casos 18-21, §14.
@@ -87,8 +89,13 @@ export interface PdfEngineInput {
 export interface PdfEngineOutput {
   readonly document: Document;
   readonly pageCount: number;
-  readonly textlessPages: ReadonlyArray<number>; // índices que requieren OCR
+  readonly textlessPages: ReadonlyArray<number>; // índices que requieren OCR de página entera
   readonly sourceKind: "text" | "scanned" | "mixed";
+  // ADR-065 §4: regiones a OCR-ear en páginas que SÍ tienen texto nativo (una
+  // imagen cuyo interior ningún texto explica). Disjunto de textlessPages:
+  // ningún pageIndex aparece en los dos. Como máximo una región por página
+  // (ADR-065 §2). Vacío es el caso normal.
+  readonly ocrRegions: ReadonlyArray<OcrRegion>;
 }
 
 export class PdfEngine implements IEngine {
@@ -111,6 +118,29 @@ export class PdfEngine implements IEngine {
 export function fuseOcrPage(
   document: Document,
   pageIndex: number,
+  words: ReadonlyArray<Word>,
+): Document;
+
+// ADR-065 §6: espejo INVERTIDO de fuseOcrPage, para el otro camino de OCR.
+// Mismo perfil (pura, síncrona, host-side, el caller provee y persiste el
+// Document), tres diferencias deliberadas:
+//   1. Guard invertido: exige requiresOCR === false. Una página textless va
+//      por fuseOcrPage; invocar la equivocada es un bug de wiring y lanza
+//      InvalidInputError (mismo criterio que ADR-020 §6, al revés).
+//   2. TRASLADA: las words llegan en puntos relativos al RECORTE (ADR-064
+//      convierte px->pt, pero el origen sigue siendo el del recorte). Se les
+//      suma region.x/region.y para llevarlas a coordenadas de página. Es el
+//      único lugar que conoce esa traslación — por eso recibe `region`.
+//   3. CONCATENA en vez de reemplazar: las palabras nativas se conservan, las
+//      de OCR se suman, y se reordena por orden de lectura recalculando
+//      Page.text. Seguro sin dedupe: la región es, por construcción de la
+//      compuerta 2 (§12), área sin una sola palabra nativa encima.
+// Marca ocrCompleted = true dejando requiresOCR intacto en false (ADR-065 §7:
+// el invariante de 03_Data_Model.md §4 se relajó para admitir este caso).
+export function fuseOcrRegion(
+  document: Document,
+  pageIndex: number,
+  region: BoundingBox,
   words: ReadonlyArray<Word>,
 ): Document;
 
@@ -192,7 +222,8 @@ PdfEngineOutput {
 - `document.pages[i].index === i` para todo `i`.
 - `document.pages[i].words` está ordenado por `bbox.y` asc, luego `bbox.x` asc.
 - `textlessPages` está ordenado asc.
-- `sourceKind === "scanned"` si todas las páginas son `requiresOCR`, `"text"` si ninguna, `"mixed"` si hay mix.
+- `sourceKind === "scanned"` si todas las páginas son `requiresOCR`, `"text"` si ninguna, `"mixed"` si hay mix. **No lo afectan las `ocrRegions`** (ADR-065 §8): una página con texto nativo y una imagen con texto oculto *tiene* texto nativo, y `sourceKind` describe de dónde sale el texto de las páginas, no cuánto OCR se va a correr.
+- `ocrRegions` está ordenado asc por `pageIndex`, tiene como máximo una entrada por página (ADR-065 §2) y **ningún `pageIndex` suyo aparece en `textlessPages`** (ADR-065 §4). Cada `bbox` está contenido en el rectángulo de la imagen que lo originó.
 
 ---
 
@@ -228,6 +259,13 @@ PdfEngineOutput {
 - **Geometría del bbox (ADR-063 §1-§2)**: se deriva de la matriz completa `[a, b, c, d, e, f]` de PDF.js, no solo de la traslación. `dir = (a, b)/|(a, b)|` es el versor de avance y `up = (c, d)/|(c, d)|` el de ascenso; `item.width` es el avance total del run y `item.height` el cuerpo, **medidos sobre esos ejes**. El `BoundingBox` es la envolvente axis-aligned del paralelogramo `(e, f) → +dir·width → +up·height`, convertida a origen arriba-izquierda con `y = pageHeight - yMax`. Es **exacta** para 0°/90°/180°/270° y **conservadora** (cubre de más) para ángulos arbitrarios. Para 0° se reduce carácter por carácter a la fórmula previa: el texto horizontal no cambia de bbox.
 - El texto rotado no es un caso exótico: los sellos de firma digital, marcas de agua y folios laterales de expedientes judiciales se dibujan a 90° sobre el margen, y aparecen en **todas** las páginas del documento (ADR-063, Contexto §3).
 - `Word.text` y, por lo tanto, `Page.text`, se normalizan a NFC (invariante `03_Data_Model.md` §4; ADR-020 §2).
+- **Compuertas de OCR por región (ADR-065 §1)**, dentro de `parsePage`, después de construir las `Word`:
+  - **Compuerta 1 — ¿hay imágenes?** De `page.getOperatorList()` se toman los ops `paintImageXObject`, `paintJpegXObject`, `paintImageMaskXObject` y `paintInlineImageXObject`; simulando `save`/`restore`/`transform` se compone la CTM vigente en cada uno, y aplicándola al cuadrado unidad sale el rectángulo de esa imagen en puntos de página. Una página sin ninguno de esos ops **termina acá**, sin rasterizar ni cargar Tesseract. Costo medido: **3,7 ms de media** en páginas sin imágenes (`pdfjs-dist` 4.10.38) → ~0,7 s en 200 páginas, contra los 160 s del presupuesto de `07_Performance_Strategy.md` §1.
+  - **Filtro por rectángulo**: se descarta toda imagen de área **< 1% de la página**, aplicado **por rectángulo y nunca sobre el agregado**, para que varios logos chicos no sumen hasta cruzar el umbral.
+  - **Compuerta 2 — ¿esa imagen tiene texto encima?** Sobre una grilla de 64×64 celdas se marcan las celdas de la imagen y las de los `bbox` de las palabras nativas **dilatados** 0,5× del cuerpo del glifo en horizontal y 0,8× en vertical (la dilatación evita que el interlineado cuente como hueco). Dentro de cada imagen se busca el **mayor rectángulo vacío axis-aligned** (histograma + pila, O(GRID²)). Es región candidata si su área es **≥ 40% del área de esa imagen** y sus **dos lados miden ≥ 100 pt**.
+  - El rectángulo se **clampea al rect de la imagen** antes de emitirse: la cuantización de la grilla lo hace desbordar (102-103% en la calibración).
+  - Si una página tiene más de una candidata se emite **solo la mayor** (ADR-065 §2).
+  - La métrica está normalizada **por el área de la imagen, no de la página**: es lo que separa un escaneo con capa OCR previa (11-20%) de una imagen con texto oculto (102%). Dos métricas más simples —área de imagen sin texto, y mayor región contigua— se probaron primero y **fallan** sobre el escaneo ya buscable (ADR-065, Contexto §2).
 - **Preparación para Hito 9 (normativa)**: `parsePage(pdfDoc, documentId, pageIndex, timeoutMs): Promise<Page>` es una función pura a nivel de módulo, sin supuestos host/worker (Hito 9 la envuelve en un job del worker sin modificarla). La emisión de eventos (`PAGE_PARSED`, `DOCUMENT_PARSED`) queda en el engine (host), no en el worker. No buildar lógica de `Transferable.consume()` en Hito 2.
 
 ---
@@ -255,6 +293,12 @@ PdfEngineOutput {
 19. **`TextItem` con rotación arbitraria** (p. ej. 45°, marca de agua diagonal): el bbox es la envolvente axis-aligned de los cuatro vértices — cubre **más** área que los glifos. Deliberado: para censura, cubrir de más nunca deja un dato expuesto (ADR-063 §2).
 20. **`TextItem` con matriz degenerada** (`a = b = 0`, o `c = d = 0`): no se divide por cero; el versor correspondiente cae al comportamiento horizontal (`dir = (1, 0)` / `up = (0, 1)`).
 21. **`TextItem` horizontal** (matriz `[s, 0, 0, s, e, f]`): el bbox es **idéntico** al que producía la fórmula previa a ADR-063. Es la garantía de no regresión del cambio, no un caso nuevo de comportamiento (ADR-063 §2).
+22. **Página sin ningún image XObject**: `ocrRegions` no gana entradas y la compuerta 2 no corre. Es el caso de toda página born-digital y el que mantiene el costo del OCR por región en 3,7 ms (ADR-065 §1).
+23. **Página con un logo o membrete chico** (< 1% del área de página): descartado por el filtro de tamaño antes de medir nada. El logo de 37×37 pt de la calibración da 0,27%.
+24. **Página escaneada con capa OCR previa** (imagen a página completa + texto nativo distribuido encima): **no** produce región. Es el falso positivo caro —dispararlo metería un OCR de página entera en cada página de un expediente escaneado— y la calibración lo deja en 11% (márgenes normales) y 20% (márgenes anchos), contra un umbral de 40% (ADR-065, Contexto §3).
+25. **Página con texto nativo y una imagen grande sin texto encima**: produce una región, clampeada al rect de la imagen. Es el caso que motivó ADR-065: 102% de la imagen en el documento real.
+26. **Página con dos imágenes candidatas**: se emite **solo la de mayor rectángulo vacío** (ADR-065 §2). La segunda queda sin escanear — fuga conocida y aceptada, no una regresión: antes de ADR-065 no se escaneaba ninguna.
+27. **`fuseOcrRegion` sobre página con `requiresOCR === true`**: lanza `InvalidInputError`. Esa página va por `fuseOcrPage` (página entera); invocar la función equivocada es un bug de wiring (ADR-065 §6, espejo del caso 14).
 
 ---
 
@@ -308,6 +352,14 @@ PdfEngineOutput {
 | `prorated tokens of a rotated run advance along the writing axis` | `unit.test.ts` | unit | 10.8 | caso 18 (ADR-063 §3): en un run a 90°, `x` constante y `y` decreciente token a token |
 | `arbitrary rotation yields an envelope containing all four corners` | `unit.test.ts` | unit | 10.8 | caso 19 (ADR-063 §2): 45°, envolvente conservadora |
 | `degenerate transform matrix does not divide by zero` | `edge.test.ts` | edge | 10.8 | caso 20 |
+| `page without image XObjects yields no ocr regions` | `unit.test.ts` | unit | 10.8 | caso 22 (ADR-065 §1): la compuerta 2 no corre |
+| `image smaller than 1 percent of the page is discarded` | `unit.test.ts` | unit | 10.8 | caso 23 (ADR-065 §1): filtro por rectángulo, no sobre el agregado |
+| `full-page image covered by native text yields no region` | `unit.test.ts` | unit | 10.8 | caso 24 (ADR-065, Contexto §3): el falso positivo caro |
+| `large image with no native text yields a clamped region` | `unit.test.ts` | unit | 10.8 | caso 25 (ADR-065 §1): región contenida en el rect de la imagen |
+| `page with two candidate images yields only the largest` | `unit.test.ts` | unit | 10.8 | caso 26 (ADR-065 §2) |
+| `ocrRegions and textlessPages are disjoint` | `contract.test.ts` | contract | 10.8 | invariante de ADR-065 §4 |
+| `fuseOcrRegion translates words by the region origin and concatenates` | `unit.test.ts` | unit | 10.8 | ADR-065 §6: suma `region.x`/`region.y`, conserva las nativas, reordena |
+| `fuseOcrRegion on a textless page throws InvalidInputError` | `unit.test.ts` | unit | 10.8 | caso 27 (ADR-065 §6): guard invertido |
 | `1000 pages document completes within memory budget` | `stress.test.ts` (en `tests/stress/`) | stress | 11 | caso 2; pendiente, requiere `huge-1000p.pdf` (LFS) |
 | `cancel aborts within 200ms` | `cancel.test.ts` (en `tests/cancel/`) | cancel | 11 | SLA; pendiente, requiere `PdfPool` + `AbortRegistry` (Hito 9) |
 
@@ -344,6 +396,7 @@ PdfEngineOutput {
 - [ ] 20. (Hito 10, PR12 — ADR-041) Extraer `fuseOcrPage` a función pura exportada (§6: sin `Map` interno, sin asserts de instancia, síncrona; conserva guard ADR-020 §6, validación de `pageIndex` y NFC); eliminar `releaseDocument` y el estado por documento del engine; adaptar los tests de fusión (casos 14–15 de §13, filas de §14) y `tests/integration/ocr-pdf-fusion.test.ts`.
 - [ ] 21. (Hito 10, PR 17.1 — ADR-049 §4) `PdfPasswordRequiredError`: segundo argumento del `super(...)`, `true` → `false` (§11). Fila nueva en §14. Debe mergearse **antes** del PR 17.2 del façade, que retira el override `isRetryable` que hoy lo compensa.
 - [x] 22. (Hito 10.8, paso 1 — ADR-063) `convertTextItemsToWords`: derivar la geometría de la matriz completa (§12). Versores de avance/ascenso desde `[a, b, c, d]`, bbox como envolvente axis-aligned del paralelogramo, prorrateo del token sobre el eje de avance. **No** tocar `BoundingBox` (sin campo de rotación, ADR-063 §5), **no** tocar el orden de lectura (ADR-063 §4) y **no** regenerar el snapshot de `snapshot.test.ts`: si cambia, el cambio rompió texto horizontal. Casos 18-21 de §13 y seis filas nuevas en §14.
+- [ ] 23. (Hito 10.8, paso 2 — ADR-065) Compuertas 1 y 2 en `parsePage` (§12) produciendo `PdfEngineOutput.ocrRegions` (§6, §10), y `fuseOcrRegion` como export puro nuevo (§6). **No** tocar `requiresOCR`, `textlessPages` ni `sourceKind` (ADR-065 §8). El `OcrRegion` de `@anonly/shared` es precondición (`Contracts.md` §5). Casos 22-27 de §13 y ocho filas nuevas en §14.
 
 ---
 
@@ -359,3 +412,5 @@ PdfEngineOutput {
 - `adr/ADR-020-PdfEngine-Word-Granularity-Hardening.md` (word-splitting, NFC, política de eventos, guard `fuseOcrPage`, `releaseDocument`, `parsePage` puro)
 - `adr/ADR-041-FuseOcrPage-Funcion-Pura-Sin-Estado-Retenido.md` (`fuseOcrPage` función pura host-side, motor sin estado por documento, `releaseDocument` eliminado)
 - `adr/ADR-063-Bbox-De-Texto-Rotado.md` (geometría del bbox desde la matriz completa; riesgo latente de solapamiento en §6; discrepancia abierta de rotación de página en §7)
+- `adr/ADR-064-Palabras-De-OCR-En-Puntos.md` (precondición de espacio de coordenadas de las `words` que entran a `fuseOcrPage`/`fuseOcrRegion`)
+- `adr/ADR-065-OCR-Por-Region.md` (compuertas de OCR por región, `ocrRegions`, `fuseOcrRegion`)

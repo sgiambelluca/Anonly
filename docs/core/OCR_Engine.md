@@ -5,8 +5,10 @@
 > Ejecuta OCR sobre las páginas sin texto del PDF. Solo corre si `PdfEngineOutput.textlessPages.length > 0`. Devuelve `Word[]` con `BoundingBox` y `confidence` que el PDF Engine fusiona.
 
 **EngineId**: `ocr`
-**Versión del spec**: 1.3.0
+**Versión del spec**: 1.3.1
 **Última actualización**: 2026-08-09
+
+> **Nota (v1.3.1, ADR-065 §3, 2026-08-09 — `imageData` puede ser un recorte)**: el OCR por región manda a este motor el raster de **una parte** de la página. La interfaz **no cambia** (§6 intacto) y el motor sigue sin saber qué es una región: recibe una imagen y la reconoce. Lo único que se documenta es qué significan sus coordenadas de salida — puntos **relativos a la imagen recibida** (§9, §10) —, porque la traslación a coordenadas de página la hace `fuseOcrRegion` en `pdf-engine`, que es quien sabe de qué recorte vino.
 
 > **Nota (v1.3.0, ADR-064, 2026-08-09 — las palabras salían en píxeles del raster, no en puntos de página)**: `toWords` armaba el `bbox` con los `x0/y0/x1/y1` crudos de Tesseract, que son **píxeles de la imagen recibida**, mientras `03_Data_Model.md` §137 exige puntos PDF. Como el Orchestrator rasteriza con `scale = ocr.dpi / 72` (**4,1667** con el default de 300 DPI) y no existía ninguna conversión inversa en todo el Core, las palabras entraban a `Page.words` ~4,17× de tamaño y desplazadas — y `render-engine` las **volvía a escalar** al pintar, asumiéndolas puntos. Resultado: en toda página escaneada el rectángulo de censura caía fuera de lugar, dejando el dato sensible a la vista. El kernel pasa a convertir con `pt = px · 72 / dpi` (§10), **después** de ordenar, para que la tolerancia de misma-línea siga siendo de 1px y el orden quede bit-idéntico (ADR-064 §2). `dpi` deja de ser informativo y pasa a ser precondición: debe ser el DPI con el que se rasterizó `imageData` (§9). Sin cambios de firma pública ni de `Contracts.md`.
 
@@ -152,6 +154,8 @@ OcrPageInput {
 - `languages` debe contener al menos un idioma cargado en el modelo del worker.
 - `imageData` se transfiere (zero-copy). El host pierde acceso tras `processPage`.
 
+**`imageData` puede ser un recorte de la página (ADR-065 §3)**: desde el OCR por región, el caller puede pasar el raster de **una parte** de la página en vez de la página entera (`rasterizePage` con `region`, `Render_Engine.md` §6). Para este motor no cambia nada —recibe una imagen y la reconoce— pero sí cambia qué significan las coordenadas que devuelve: las `words` de §10 salen en puntos **relativos a la imagen recibida**, o sea al recorte. Llevarlas a coordenadas de página es responsabilidad del caller, que es el único que sabe de qué región vino (`fuseOcrRegion` de `pdf-engine`, `PDF_Engine.md` §6). Este motor **no** conoce el concepto de región y no debe ganarlo.
+
 **Precondición de `dpi` (ADR-064 §3)**: `dpi` **debe ser el DPI con el que se rasterizó `imageData`**. No es un dato informativo: es el divisor con el que §10 convierte las coordenadas de Tesseract a puntos de página, así que un valor que no corresponda produce geometría mal escalada en silencio. El caller es responsable de que las dos cosas se muevan juntas — hoy el Orchestrator las deriva del mismo `ctx.config.ocr.dpi` (`scale = dpi/72` para rasterizar, `dpi` para este input; `Orchestrator.md` §2). El motor **no** lo verifica: no conoce el tamaño en puntos de la página, así que no tiene contra qué comparar.
 
 ---
@@ -171,7 +175,7 @@ OcrPageOutput {
 - `words[i].source === "ocr"`.
 - `words[i].pageIndex === input.pageIndex`.
 - `words[i].confidence ∈ [0,1]`.
-- **`words[i].bbox` está en puntos de página**, no en píxeles del raster (ADR-064 §1). Tesseract devuelve píxeles de la `imageData` recibida; el kernel los convierte con `pt = px · 72 / dpi` sobre `x`, `y`, `width` y `height`. Es un escalado puro, sin corrimiento de origen: el raster de `rasterizePage` sale de `getViewport({ scale })`, cuya esquina superior-izquierda con `y` hacia abajo es **la misma convención** que exige `03_Data_Model.md` §137. Con esto, `Word.bbox` tiene un único espacio de coordenadas sea `source` `"pdf"` u `"ocr"`.
+- **`words[i].bbox` está en puntos**, no en píxeles del raster (ADR-064 §1) — de página cuando `imageData` es la página entera, y **relativos al recorte** cuando es una región (§9, ADR-065 §3). Tesseract devuelve píxeles de la `imageData` recibida; el kernel los convierte con `pt = px · 72 / dpi` sobre `x`, `y`, `width` y `height`. Es un escalado puro, sin corrimiento de origen: el raster de `rasterizePage` sale de `getViewport({ scale })`, cuya esquina superior-izquierda con `y` hacia abajo es **la misma convención** que exige `03_Data_Model.md` §137. Con esto, `Word.bbox` tiene un único espacio de coordenadas sea `source` `"pdf"` u `"ocr"`.
 - El orden de lectura se calcula **antes** de convertir, con la tolerancia de misma-línea de 1px intacta (ADR-064 §2). El array resultante queda en el mismo orden que produciría sin la conversión: un escalado positivo uniforme no altera el orden, y la tolerancia sigue significando un píxel y no un punto.
 - Las `Word[]` también se depositan en `ctx.cache` con clave `ocr-words:<documentId>:<pageIndex>`; el Orchestrator las lee al recibir `OCR_PAGE_FINISHED` y aplica la función pura `fuseOcrPage` de `pdf-engine` sobre su `Document` retenido (ADR-014, ADR-041). La integración con `fuseOcrPage` se testea con llamada directa, sin bus.
 

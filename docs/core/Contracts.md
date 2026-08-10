@@ -412,7 +412,27 @@ Cada motor define sus subclases concretas en su `<engine>.errors.ts`. Toda subcl
 
 ## 5. Modelos de datos (replica de `03_Data_Model.md`)
 
-Los tipos completos están en `03_Data_Model.md`. Aquí solo los enums referenciados en contratos.
+Los tipos completos están en `03_Data_Model.md`. Aquí solo los enums referenciados en contratos, más los tipos públicos que §10 regla 1 obliga a declarar acá primero.
+
+```ts
+/**
+ * Región de una página que `pdf-engine` marca para OCR **aunque la página
+ * tenga texto nativo** (ADR-065 §4): una imagen cuyo interior ningún texto
+ * explica. Semántica completa en `03_Data_Model.md` §4.1.
+ *
+ * `bbox` va en puntos de página, origen arriba-izquierda — el mismo espacio
+ * que cualquier otro `BoundingBox` (`03_Data_Model.md` §137).
+ *
+ * Invariante: ningún `pageIndex` de `PdfEngineOutput.ocrRegions` aparece en
+ * `PdfEngineOutput.textlessPages`. Son los dos caminos de OCR y son disjuntos:
+ * la página sin texto nativo va entera, la página con texto nativo va por
+ * región.
+ */
+export interface OcrRegion {
+  readonly pageIndex: number;
+  readonly bbox: BoundingBox;
+}
+```
 
 ```ts
 export enum EntityType {
