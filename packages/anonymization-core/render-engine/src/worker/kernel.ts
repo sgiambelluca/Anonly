@@ -1168,22 +1168,6 @@ export interface KernelRasterizeOptions {
 }
 
 /**
- * `RasterizePagePayload` (`@anonly/shared`) + `region` opcional (ADR-065 §5).
- * El campo NO se agrega al tipo canónico de `@anonly/shared` en este PR: ese
- * paquete es su propio módulo (R-1, `ai/AI_Development_Guide.md`) y el
- * checklist de `Render_Engine.md` §15 ítem 26 scopea este cambio a
- * `render-engine/`. Este motor controla las dos puntas del payload (host en
- * `render.engine.ts`, kernel acá), así que `region` sigue viajando "dentro
- * del payload existente de rasterizePage, sin WorkerJobType nuevo" (ADR-065
- * §5) sin tocar `shared/`. Al ser opcional, cualquier `RasterizePagePayload`
- * sin `region` sigue siendo un valor válido de este tipo — el flujo OCR de
- * páginas textless, que nunca la pasa, no cambia.
- */
-export interface RasterizePagePayloadWithRegion extends RasterizePagePayload {
-  readonly region?: BoundingBox;
-}
-
-/**
  * ADR-065 §5 / `Render_Engine.md` §13 caso 30 — clampea `region` (puntos de
  * página) a los límites de la página ya convertidos a píxeles por `scale`.
  * Redondea cada BORDE (no cada dimensión) para que el recorte quede alineado
@@ -1226,7 +1210,7 @@ function clampRegionToViewportPx(
  * página entera.
  */
 export async function kernelRasterizePage(
-  payload: RasterizePagePayloadWithRegion,
+  payload: RasterizePagePayload,
   opts: KernelRasterizeOptions,
 ): Promise<ImageData> {
   const { documentId, pageIndex, scale, region } = payload;

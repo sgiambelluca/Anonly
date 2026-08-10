@@ -15,12 +15,10 @@
  * no la valida acá (no tiene las dimensiones de página en puntos, solo el
  * kernel las conoce vía `pageProxy.getViewport()`): la reenvía tal cual en el
  * payload existente de `rasterizePage`, sin `WorkerJobType` nuevo. El campo
- * viaja como `RasterizePagePayloadWithRegion` (`./worker/kernel.js`), no como
- * un campo nuevo de `RasterizePagePayload` de `@anonly/shared` — ese paquete
- * es su propio módulo (R-1) y el checklist de `Render_Engine.md` §15 ítem 26
- * scopea este cambio a `render-engine/`; el motor controla las dos puntas de
- * ese payload (host acá, kernel en `./worker/kernel.js`), así que extenderlo
- * localmente no rompe nada y evita tocar `shared/` en este PR. Sin `region`,
+ * es `RasterizePagePayload.region` de `@anonly/shared` (`03_Data_Model.md`
+ * §18, `05_Worker_Architecture.md` §7.4): la forma que cruza el `postMessage`
+ * se declara en un solo lugar, mismo criterio que `lineWords` en
+ * `RenderPagePayload` (ADR-058 §5). Sin `region`,
  * comportamiento previo a ADR-065 bit a bit — no participa de cache/eventos/
  * supersede, mismo perfil que el resto de `rasterizePage` (ADR-034 §1).
  *
@@ -250,6 +248,7 @@ import {
   type IEngine,
   type LoadDocumentPayload,
   type MarkerLegendRow,
+  type RasterizePagePayload,
   type RenderLegendPayload,
   type RenderPagePayload as RenderPagePayloadWire,
   type RenderRequested,
@@ -268,7 +267,6 @@ import {
   kernelRenderPage,
   kernelUnloadDocument,
   type KernelRenderResult,
-  type RasterizePagePayloadWithRegion,
 } from "./worker/kernel.js";
 
 const DEFAULT_TIMEOUT_MS = 10_000; // render-page preview (05_Worker_Architecture.md §4); full=30s idem si config lo define.
@@ -1040,7 +1038,7 @@ export class RenderEngine implements IEngine {
     const timeoutMs = ctx.config.workerPool.timeouts["render-page"] ?? DEFAULT_TIMEOUT_MS;
     // ADR-065 §5: conditional spread (exactOptionalPropertyTypes,
     // Code_Standards.md §2), mismo patrón que `password` en loadDocument.
-    const payload: RasterizePagePayloadWithRegion = {
+    const payload: RasterizePagePayload = {
       documentId,
       pageIndex,
       scale,
