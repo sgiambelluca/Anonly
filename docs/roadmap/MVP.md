@@ -348,7 +348,7 @@ No sale de `Cambios para hacer.txt`: sale de **probar la herramienta sobre una p
 | 7 | Compuertas 1 y 2, `fuseOcrRegion`, decoder | `pdf-engine` | ✅ |
 | 7b | Fixtures del façade y de integración adaptados a `ocrRegions` y al `OPS` real | `tests/`, façade | ✅ |
 | 8 | Cableado del stage de OCR por región | `packages/anonymization-core/src` | ✅ |
-| 9 | **Test de integración de punta a punta** (ADR-065, Validación) | `tests/integration` | ⬜ |
+| 9 | Test de integración de punta a punta (ADR-065, Validación) | `tests/integration` | ✅ |
 | 10 | **Verificación manual sobre la pericia real** | — | ⬜ |
 
 Las filas `b` no estaban en el plan original: salieron de ambigüedades que los implementadores detectaron y reportaron en vez de decidir en silencio (`AI_Development_Guide.md` §5). Las dos últimas son lo que falta para cerrar el hito.
