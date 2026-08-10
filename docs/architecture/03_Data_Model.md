@@ -624,6 +624,7 @@ export interface RasterizePagePayload {
   readonly documentId: string;
   readonly pageIndex: number;
   readonly scale: number;
+  readonly region?: BoundingBox;              // ADR-065 §5; ausente = página entera
 }
 
 // Página de leyenda del export (ADR-059 §5). Viaja bajo jobType "render-page",
