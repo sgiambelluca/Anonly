@@ -2,7 +2,7 @@
 
 # ADR-063 — El bbox de un `Word` sale de la matriz completa, no de su traslación
 
-- **Estado**: Accepted
+- **Estado**: Accepted (**§5 superseded por ADR-066 §6**, 2026-08-10: `BoundingBox` **sí** gana campo de rotación. El argumento de §5 —"el defecto es de cobertura, no de legibilidad"— se apoyaba en que el único texto rotado del documento era una marca de agua que el humano decidió no tapar; al aparecer una firma digital vertical con el nombre del firmante y la fecha, un reemplazo ilegible dejó de ser tolerable. §2, §3 y §4 quedan intactos)
 - **Fecha**: 2026-08-09
 - **Decidido por**: El humano, tras probar la herramienta sobre una pericia judicial real y encontrar que el reemplazo de una firma vertical se pintaba desplazado, atravesando la página. Pidió medir antes de escribir el ADR.
 - **Relacionado con**: ADR-020 §1 (el prorrateo de `x`/`width` por token que este ADR generaliza), ADR-013 §6 (`parsePage` puro, donde vive el cambio), ADR-058 (el repintado de línea, que consume estos bbox)
@@ -75,7 +75,9 @@ El split por whitespace de ADR-020 §1 se conserva íntegro, incluida la aproxim
 
 Es una decisión deliberada, no un olvido. Un orden consciente de columnas —que agrupe el texto vertical aparte del horizontal antes de concatenar `Page.text`— mejoraría la entrada de NER en páginas con sellos laterales, pero cambia un invariante compartido con `ocr-engine` y con el modelo de datos, o sea que arrastra a dos motores más y contradice R-1. Queda como trabajo separado. Corregir el bbox no lo empeora: hoy el sello ya cae en una posición arbitraria del orden (por su `y` errónea) y después caerá en otra igualmente arbitraria (por su `y` correcta); en ningún caso el texto vertical se concatenaba bien.
 
-### 5. `BoundingBox` no gana campo de rotación
+### 5. `BoundingBox` no gana campo de rotación — **SUPERSEDED por ADR-066 §6**
+
+> **Superseded (2026-08-10, ADR-066 §6)**: la decisión de abajo se revierte. Su premisa era que el reemplazo ilegible sobre texto rotado era tolerable porque el único texto rotado del corpus medido era una marca de agua que no había que tapar. La prueba sobre el documento real encontró una **firma digital vertical con el nombre de quien firma y la fecha** —datos que sí hay que tapar— y sobre una franja de 16×173 pt el token se encoge hasta el piso de 8 px y se recorta igual. `BoundingBox` gana `rotation?: 0|90|180|270`, ausente ≡ 0. El resto de este ADR (§1-§4, §6, §7) **no cambia**.
 
 El contrato de `Contracts.md` no se toca (§4 del Contexto). El pintado rotado del token de reemplazo dentro de una caja alta y angosta queda **fuera de alcance**: es un problema de legibilidad —el reemplazo entra pero se lee mal—, no de cobertura, y ADR-058 §1 ya garantiza por shrink-to-fit que nada se derrame fuera del rectángulo. Cuando se aborde, necesita su propio ADR y toca `shared` + `render-engine` + `export-engine`.
 

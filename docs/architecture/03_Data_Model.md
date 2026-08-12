@@ -150,6 +150,7 @@ export interface Word {
 **Invariantes**
 - `confidence ∈ [0,1]`.
 - `pageIndex` coincide con la página contenedora.
+- `bbox.rotation` (ADR-066 §6) indica en qué dirección corre el texto que ocupa la caja: `0 | 90 | 180 | 270`, **ausente ≡ 0**. No cambia la geometría —el rectángulo sigue siendo axis-aligned y sigue siendo exacto para esos cuatro ángulos (ADR-063 §2)—; le dice al que dibuja adentro cómo orientar el texto. Para ángulos arbitrarios el campo queda ausente y el pintado es horizontal (ADR-066 §8).
 - `bbox` está en coordenadas de página (puntos PDF, origen esquina superior-izquierda). **Vale igual para `source: "ocr"`**: Tesseract devuelve píxeles del raster, y es `ocr-engine` quien los convierte a puntos antes de emitirlos (`OCR_Engine.md` §10, ADR-064). Ningún consumidor debe compensar por el DPI.
 
 ---
@@ -162,6 +163,7 @@ export interface BoundingBox {
   readonly y: number;
   readonly width: number;
   readonly height: number;
+  readonly rotation?: 0 | 90 | 180 | 270;    // ADR-066 §6; ausente ≡ 0
 }
 ```
 
