@@ -59,6 +59,7 @@ function createSnapshotPdfDocument(): Record<string, unknown> {
         {
           getViewport: vi.fn(() => ({ width: 595, height: 842 })),
           getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
+          getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
         },
       ];
       return Promise.resolve(pages[pageNum - 1]);

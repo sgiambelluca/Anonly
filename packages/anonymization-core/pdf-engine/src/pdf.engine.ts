@@ -11,6 +11,7 @@ import {
   type DocumentMetadata,
   type EngineContext,
   type IEngine,
+  type ILogger,
   type OcrRegion,
   type Page,
   type PdfEngineConfig,
@@ -170,6 +171,28 @@ function unitVectorOrDefault(x: number, y: number, fallback: Vector2): Vector2 {
 }
 
 /*
+ * ADR-066 §6/§8: `rotation` sale del mismo versor de avance (`dir`) que la
+ * envolvente ya calcula — no es un cálculo nuevo, es exponer uno que hoy se
+ * descarta. Se puebla SOLO para 90/180/270: en 0° queda AUSENTE a propósito
+ * (ausente ≡ 0, Contracts.md §5) — así ningún bbox horizontal existente
+ * cambia de forma y el snapshot de `snapshot.test.ts` no se mueve (ADR-066
+ * Validación: "rotation ausente en texto horizontal"). Fuera de los tres
+ * ángulos rectos no nulos (con una tolerancia chica para ruido de punto
+ * flotante) también queda ausente — es la envolvente conservadora de
+ * ADR-063 §2, no la caja real, así que no hay ángulo confiable que reportar.
+ */
+const RIGHT_ANGLE_TOLERANCE_DEG = 1e-6;
+const POPULATED_ROTATIONS: readonly (90 | 180 | 270)[] = [90, 180, 270];
+
+function deriveRotation(dir: Vector2): 90 | 180 | 270 | undefined {
+  const angleDeg = ((Math.atan2(dir.y, dir.x) * 180) / Math.PI + 360) % 360;
+  for (const candidate of POPULATED_ROTATIONS) {
+    if (Math.abs(angleDeg - candidate) < RIGHT_ANGLE_TOLERANCE_DEG) return candidate;
+  }
+  return undefined;
+}
+
+/*
  * ADR-063 §2: el bbox de un run/token es la envolvente axis-aligned del
  * paralelogramo origin -> +dir·width -> +up·height, convertida a origen
  * arriba-izquierda (y = pageHeight - yMax). Con dir=(1,0)/up=(0,1) (0°) se
@@ -201,7 +224,14 @@ function boundingBoxFromParallelogram(
   const yMin = Math.min(...ys);
   const yMax = Math.max(...ys);
 
-  return { x: xMin, y: pageHeight - yMax, width: xMax - xMin, height: yMax - yMin };
+  const rotation = deriveRotation(dir);
+  return {
+    x: xMin,
+    y: pageHeight - yMax,
+    width: xMax - xMin,
+    height: yMax - yMin,
+    ...(rotation !== undefined ? { rotation } : {}),
+  };
 }
 
 /*
@@ -381,46 +411,286 @@ function isNumberArray(value: unknown): value is ReadonlyArray<number> {
   return Array.isArray(value) && value.every((v) => typeof v === "number");
 }
 
+function toMatrix2D(args: ReadonlyArray<number>): Matrix2D {
+  return [args[0] ?? 1, args[1] ?? 0, args[2] ?? 0, args[3] ?? 1, args[4] ?? 0, args[5] ?? 0];
+}
+
 /*
- * Compuerta 1 (ADR-065 §1): recorre el operator list simulando
- * save/restore/transform para componer la CTM vigente en cada op de pintado
- * de imagen, y devuelve el rectángulo de esa imagen (cuadrado unidad
- * transformado) en puntos de página.
+ * ADR-066 §2/§5: rastrea la CTM vigente mientras se recorre el operator list,
+ * con DOS pilas independientes — la trampa 2 de ADR-066, Contexto §3. Fuera
+ * de una anotación, `current` es la CTM de página de siempre (compuerta 1,
+ * ADR-065 §1, sin cambios de comportamiento). Dentro de
+ * beginAnnotation/endAnnotation, `current` es
+ * `beginAnnotation.transform × CTM_de_página` compuesta con los
+ * transform/save/restore internos de la anotación: esa pila NUNCA toca la de
+ * página, porque las dos anidaciones no están balanceadas entre sí (una
+ * anotación puede tener más `restore` que `save`, o viceversa, sin que eso
+ * desincronice el resto de la página).
  */
-function collectImageRects(
-  operatorList: OperatorListLike,
+class CtmTracker {
+  private pageCurrent: Matrix2D = IDENTITY_MATRIX_2D;
+  private readonly pageStack: Matrix2D[] = [];
+
+  private insideAnnotationFlag = false;
+  private annotationCurrent: Matrix2D = IDENTITY_MATRIX_2D;
+  private readonly annotationStack: Matrix2D[] = [];
+
+  get current(): Matrix2D {
+    return this.insideAnnotationFlag ? this.annotationCurrent : this.pageCurrent;
+  }
+
+  get isInsideAnnotation(): boolean {
+    return this.insideAnnotationFlag;
+  }
+
+  save(): void {
+    if (this.insideAnnotationFlag) {
+      this.annotationStack.push(this.annotationCurrent);
+    } else {
+      this.pageStack.push(this.pageCurrent);
+    }
+  }
+
+  restore(): void {
+    if (this.insideAnnotationFlag) {
+      this.annotationCurrent = this.annotationStack.pop() ?? IDENTITY_MATRIX_2D;
+    } else {
+      this.pageCurrent = this.pageStack.pop() ?? IDENTITY_MATRIX_2D;
+    }
+  }
+
+  transform(m: Matrix2D): void {
+    if (this.insideAnnotationFlag) {
+      this.annotationCurrent = composeMatrix(this.annotationCurrent, m);
+    } else {
+      this.pageCurrent = composeMatrix(this.pageCurrent, m);
+    }
+  }
+
+  // ADR-066 §2: beginAnnotation.transform × CTM (CTM = la de página vigente
+  // en este punto del recorrido lineal). El resultado queda seedeado en la
+  // pila de anotación, que arranca vacía e independiente.
+  beginAnnotation(transform: Matrix2D): void {
+    this.insideAnnotationFlag = true;
+    this.annotationCurrent = composeMatrix(this.pageCurrent, transform);
+    this.annotationStack.length = 0;
+  }
+
+  endAnnotation(): void {
+    this.insideAnnotationFlag = false;
+    this.annotationCurrent = IDENTITY_MATRIX_2D;
+    this.annotationStack.length = 0;
+  }
+}
+
+// ADR-066 §2, Contexto §3: forma de los argumentos de `beginAnnotation`
+// ([id, rect, transform, matrix, isUsingOwnCanvas]) — solo se usan los tres
+// primeros; `matrix` (Matrix de la appearance stream) y `isUsingOwnCanvas` no
+// participan de la cadena de composición que este ADR fija.
+interface BeginAnnotationArgs {
+  readonly id: string;
+  readonly rect: readonly [number, number, number, number];
+  readonly transform: Matrix2D;
+}
+
+function parseBeginAnnotationArgs(args: unknown): BeginAnnotationArgs | undefined {
+  if (!Array.isArray(args) || args.length < 3) return undefined;
+  const [id, rect, transform] = args as ReadonlyArray<unknown>;
+  if (typeof id !== "string") return undefined;
+  if (!isNumberArray(rect) || rect.length < 4) return undefined;
+  if (!isNumberArray(transform) || transform.length < 6) return undefined;
+  return {
+    id,
+    rect: [rect[0] ?? 0, rect[1] ?? 0, rect[2] ?? 0, rect[3] ?? 0],
+    transform: toMatrix2D(transform),
+  };
+}
+
+// El `rect` de beginAnnotation viaja en el mismo espacio que `item.transform`
+// (origen abajo-izquierda, y-up); se convierte a origen arriba-izquierda con
+// el mismo patrón que el resto del módulo (ADR-066 §3, el oráculo).
+function annotationRectToBoundingBox(
+  rect: readonly [number, number, number, number],
   pageHeight: number,
-): ReadonlyArray<BoundingBox> {
-  const rects: BoundingBox[] = [];
-  const stack: Matrix2D[] = [];
-  let current: Matrix2D = IDENTITY_MATRIX_2D;
+): BoundingBox {
+  const [x0, y0, x1, y1] = rect;
+  const xMin = Math.min(x0, x1);
+  const xMax = Math.max(x0, x1);
+  const yMin = Math.min(y0, y1);
+  const yMax = Math.max(y0, y1);
+  return { x: xMin, y: pageHeight - yMax, width: xMax - xMin, height: yMax - yMin };
+}
+
+const GEOMETRY_EPSILON = 1e-6;
+
+function isBoundingBoxWithin(inner: BoundingBox, outer: BoundingBox): boolean {
+  return (
+    inner.x >= outer.x - GEOMETRY_EPSILON &&
+    inner.y >= outer.y - GEOMETRY_EPSILON &&
+    inner.x + inner.width <= outer.x + outer.width + GEOMETRY_EPSILON &&
+    inner.y + inner.height <= outer.y + outer.height + GEOMETRY_EPSILON
+  );
+}
+
+interface AnnotationTextRun {
+  readonly str: string;
+  readonly transform: Matrix2D;
+  readonly width: number;
+  readonly height: number;
+}
+
+/*
+ * ADR-066 §1, Contexto §2: reconstruye un run de `showText`/`showSpacedText`
+ * dentro de una anotación. `args[0]` es el array de glifos que pdf.js ya
+ * resolvió (cada uno con `.unicode`/`.width`; los números sueltos son
+ * ajustes de kerning de un TJ y se ignoran — no aportan texto y su aporte al
+ * avance es marginal frente a la aproximación de ancho uniforme que ADR-020
+ * §1 ya acepta para el resto del módulo).
+ *
+ * `width`/`height` no vienen dados (a diferencia de `getTextContent()`, este
+ * operator list no trae `item.width`/`item.height`): se derivan igual que el
+ * resto de la geometría del módulo, de la matriz compuesta. `height` es la
+ * magnitud del versor de ascenso (el mismo "cuerpo" que ADR-066, Contexto §3
+ * verifica a mano: cuerpo 8 para `[0,8,-8,0,...]`). `width` suma el `.width`
+ * de cada glifo —unidades de glifo, 1/1000 em, la convención universal de PDF
+ * fuera de fuentes Type3 (PDF 32000-1 §9.2.4)— escalado por la magnitud del
+ * versor de avance, que ya incluye cualquier escala de `Tm`/CTM acumulada.
+ */
+function buildAnnotationTextRun(
+  args: unknown,
+  textMatrix: Matrix2D,
+  ctm: Matrix2D,
+): AnnotationTextRun | undefined {
+  if (!Array.isArray(args) || args.length === 0) return undefined;
+  const glyphs: unknown = args[0];
+  if (!Array.isArray(glyphs)) return undefined;
+
+  let str = "";
+  let totalGlyphWidth = 0;
+  for (const glyph of glyphs as ReadonlyArray<unknown>) {
+    if (typeof glyph === "number") continue; // ajuste de kerning (TJ), ver comentario arriba
+    if (!isRecord(glyph)) continue;
+    if (typeof glyph.unicode === "string") str += glyph.unicode;
+    if (typeof glyph.width === "number") totalGlyphWidth += glyph.width;
+  }
+  if (str.trim().length === 0) return undefined;
+
+  const composed = composeMatrix(ctm, textMatrix);
+  const dirMagnitude = Math.hypot(composed[0], composed[1]);
+  const upMagnitude = Math.hypot(composed[2], composed[3]);
+
+  return {
+    str,
+    transform: composed,
+    width: (totalGlyphWidth / 1000) * dirMagnitude,
+    height: upMagnitude,
+  };
+}
+
+interface AnnotationsAndImages {
+  readonly imageRects: ReadonlyArray<BoundingBox>;
+  readonly annotationWords: ReadonlyArray<Word>;
+}
+
+/*
+ * Pasada única sobre el operator list que ya pide la compuerta 1 (ADR-065
+ * §1): compone la CTM con la pila dual de CtmTracker y produce, a la vez,
+ * (a) el texto de las anotaciones (ADR-066 §1-§4) y (c) los rectángulos de
+ * imagen de la compuerta 1, corregidos para aplicar el `transform` de
+ * `beginAnnotation` cuando la imagen está dentro de una anotación (ADR-066
+ * §5). No hay una segunda llamada a `getOperatorList()` ni una pila
+ * compartida entre página y anotación (ADR-066 §2).
+ */
+function walkOperatorListForAnnotationsAndImages(
+  operatorList: OperatorListLike,
+  pageIndex: number,
+  pageHeight: number,
+  documentId: string,
+  logger: ILogger,
+): AnnotationsAndImages {
+  const ctm = new CtmTracker();
+  const imageRects: BoundingBox[] = [];
+  const annotationWords: Word[] = [];
+
+  let currentTextMatrix: Matrix2D = IDENTITY_MATRIX_2D;
+  let currentAnnotationRect: BoundingBox | undefined;
+  let currentAnnotationId = "";
 
   const { fnArray, argsArray } = operatorList;
   for (let i = 0; i < fnArray.length; i++) {
     const fn = fnArray[i];
+    const args = argsArray[i];
+
     if (fn === OPS.save) {
-      stack.push(current);
+      ctm.save();
     } else if (fn === OPS.restore) {
-      current = stack.pop() ?? IDENTITY_MATRIX_2D;
+      ctm.restore();
     } else if (fn === OPS.transform) {
-      const args = argsArray[i];
       if (isNumberArray(args) && args.length >= 6) {
-        const m: Matrix2D = [
-          args[0] ?? 1,
-          args[1] ?? 0,
-          args[2] ?? 0,
-          args[3] ?? 1,
-          args[4] ?? 0,
-          args[5] ?? 0,
-        ];
-        current = composeMatrix(current, m);
+        ctm.transform(toMatrix2D(args));
+      }
+    } else if (fn === OPS.beginAnnotation) {
+      const parsed = parseBeginAnnotationArgs(args);
+      if (parsed !== undefined) {
+        ctm.beginAnnotation(parsed.transform);
+        currentAnnotationRect = annotationRectToBoundingBox(parsed.rect, pageHeight);
+        currentAnnotationId = parsed.id;
+      } else {
+        // Forma inesperada de beginAnnotation: se preserva la separación de
+        // pilas (trampa 2) igual, pero sin rect no hay oráculo contra el que
+        // validar (ADR-066 §3), así que no se extrae texto de esta anotación.
+        ctm.beginAnnotation(IDENTITY_MATRIX_2D);
+        currentAnnotationRect = undefined;
+        currentAnnotationId = "";
+      }
+      currentTextMatrix = IDENTITY_MATRIX_2D;
+    } else if (fn === OPS.endAnnotation) {
+      ctm.endAnnotation();
+      currentAnnotationRect = undefined;
+      currentAnnotationId = "";
+      currentTextMatrix = IDENTITY_MATRIX_2D;
+    } else if (fn === OPS.beginText) {
+      currentTextMatrix = IDENTITY_MATRIX_2D;
+    } else if (fn === OPS.setTextMatrix) {
+      if (isNumberArray(args) && args.length >= 6) {
+        currentTextMatrix = toMatrix2D(args);
+      }
+    } else if (ctm.isInsideAnnotation && (fn === OPS.showText || fn === OPS.showSpacedText)) {
+      const run = buildAnnotationTextRun(args, currentTextMatrix, ctm.current);
+      if (run !== undefined) {
+        const words = convertTextItemsToWords(
+          {
+            items: [
+              { str: run.str, transform: run.transform, width: run.width, height: run.height },
+            ],
+          },
+          pageIndex,
+          pageHeight,
+        );
+        for (const word of words) {
+          if (currentAnnotationRect === undefined) continue;
+          if (isBoundingBoxWithin(word.bbox, currentAnnotationRect)) {
+            annotationWords.push(word);
+          } else {
+            // ADR-066 §3: si la composición falló, la posición no es
+            // confiable — se descarta en vez de recortar al rect.
+            logger.warn("Word de anotación fuera del rect: se descarta (ADR-066 §3).", {
+              documentId,
+              pageIndex,
+              annotationId: currentAnnotationId,
+            });
+          }
+        }
       }
     } else if (fn !== undefined && IMAGE_PAINT_OPS.has(fn)) {
-      rects.push(imageRectFromCTM(current, pageHeight));
+      // ADR-066 §5: `ctm.current` ya aplica beginAnnotation.transform cuando
+      // la imagen está dentro de una anotación — corrige el defecto latente
+      // de ADR-065, Contexto §4.
+      imageRects.push(imageRectFromCTM(ctm.current, pageHeight));
     }
   }
 
-  return rects;
+  return { imageRects, annotationWords };
 }
 
 // Filtro por rectángulo (ADR-065 §1): descarta imágenes < 1% del área de
@@ -643,30 +913,27 @@ function evaluateImageCandidate(
 }
 
 /*
- * Compuertas 1+2 completas para una página (ADR-065 §1-§2). Devuelve
- * `undefined` si no hay ninguna región candidata; si hay más de una, solo la
- * de mayor rectángulo vacío (ADR-065 §2, caso 26).
+ * Compuertas 1+2 completas para una página (ADR-065 §1-§2), a partir de los
+ * `imageRects` que `walkOperatorListForAnnotationsAndImages` ya recolectó
+ * (mismo operator list, sin una segunda llamada a `getOperatorList()`).
+ * Devuelve `undefined` si no hay ninguna región candidata; si hay más de una,
+ * solo la de mayor rectángulo vacío (ADR-065 §2, caso 26).
  */
-async function detectOcrRegion(
-  pageProxy: PDFPageProxy,
+function detectOcrRegionFromImageRects(
+  imageRects: ReadonlyArray<BoundingBox>,
   pageWidth: number,
   pageHeight: number,
   nativeWords: ReadonlyArray<Word>,
-): Promise<BoundingBox | undefined> {
-  // Cast de frontera contra pdfjs-dist (Code_Standards.md §2/§10, mismo
-  // criterio que `TextContentLike` arriba): `PDFOperatorList.argsArray` tipa
-  // `Array<any>`; narrowing a la forma local evita propagar `any`.
-  const operatorList = (await pageProxy.getOperatorList()) as OperatorListLike;
-
-  const imageRects = collectImageRects(operatorList, pageHeight).filter((rect) =>
+): BoundingBox | undefined {
+  const largeEnoughRects = imageRects.filter((rect) =>
     isLargeEnoughImage(rect, pageWidth, pageHeight),
   );
-  if (imageRects.length === 0) return undefined; // Compuerta 1: sin imágenes candidatas, compuerta 2 no corre.
+  if (largeEnoughRects.length === 0) return undefined; // Compuerta 1: sin imágenes candidatas, compuerta 2 no corre.
 
   const grid = buildOccupancyGrid(nativeWords, pageWidth, pageHeight);
 
   let best: OcrRegionCandidate | undefined;
-  for (const imageRect of imageRects) {
+  for (const imageRect of largeEnoughRects) {
     const candidate = evaluateImageCandidate(imageRect, grid, pageWidth, pageHeight);
     if (
       candidate !== undefined &&
@@ -688,12 +955,18 @@ interface ParsePageResult {
  * ADR-020 §10: parsePage() puro — obtiene la página, viewport y texto (con
  * timeout), convierte a Words y arma la Page. Lanza PdfCorruptedError /
  * PdfTimeoutError con el documentId correcto (ADR-020 §5). No emite eventos.
+ *
+ * ADR-066 §1: el mismo `getOperatorList()` que ya pedía la compuerta 1
+ * (ADR-065 §1) se adelanta a ANTES de decidir `requiresOCR`, porque el texto
+ * de una anotación puede ser la única fuente de texto de la página — no hay
+ * una segunda llamada, solo un reordenamiento de la que ya existía.
  */
 async function parsePage(
   pdfDocument: PDFDocumentProxy,
   documentId: string,
   pageIndex: number,
   timeoutMs: number,
+  logger: ILogger,
 ): Promise<ParsePageResult> {
   const pageNum = pageIndex + 1;
 
@@ -709,10 +982,15 @@ async function parsePage(
   const pageWidth = viewport.width;
   const pageHeight = viewport.height;
 
-  let words: Word[];
+  let contentWords: Word[];
+  let operatorList: OperatorListLike;
   try {
     const textContent = await parsePageTextWithTimeout(pageProxy, documentId, pageIndex, timeoutMs);
-    words = convertTextItemsToWords(textContent, pageIndex, pageHeight);
+    contentWords = convertTextItemsToWords(textContent, pageIndex, pageHeight);
+    // Cast de frontera contra pdfjs-dist (Code_Standards.md §2/§10, mismo
+    // criterio que `TextContentLike` arriba): `PDFOperatorList.argsArray`
+    // tipa `Array<any>`; narrowing a la forma local evita propagar `any`.
+    operatorList = (await pageProxy.getOperatorList()) as OperatorListLike;
   } catch (err: unknown) {
     if (err instanceof PdfTimeoutError) {
       throw err;
@@ -721,7 +999,18 @@ async function parsePage(
     throw new PdfCorruptedError(documentId, message, pageIndex);
   }
 
-  const sortedWords = sortWordsByReadingOrder(words);
+  const { imageRects, annotationWords } = walkOperatorListForAnnotationsAndImages(
+    operatorList,
+    pageIndex,
+    pageHeight,
+    documentId,
+    logger,
+  );
+
+  // ADR-066 §1: el texto de anotaciones se suma al del content stream — las
+  // dos fuentes son disjuntas por construcción (getTextContent() no lee
+  // appearance streams).
+  const sortedWords = sortWordsByReadingOrder([...contentWords, ...annotationWords]);
   const text = sortedWords.map((w) => w.text).join(" ");
   const requiresOCR = sortedWords.length === 0;
 
@@ -736,21 +1025,21 @@ async function parsePage(
   };
 
   // ADR-065 §1/§4: las compuertas de OCR por región solo corren para páginas
-  // que SÍ tienen texto nativo. Una página textless va entera por
-  // fuseOcrPage; correr las compuertas ahí violaría trivialmente el
-  // invariante de disjunción con textlessPages (grilla de palabras vacía =
-  // "toda la imagen es hueco", falso positivo garantizado).
+  // que SÍ tienen texto nativo (ahora incluyendo el de anotaciones). Una
+  // página textless va entera por fuseOcrPage; correr las compuertas ahí
+  // violaría trivialmente el invariante de disjunción con textlessPages
+  // (grilla de palabras vacía = "toda la imagen es hueco", falso positivo
+  // garantizado).
   if (requiresOCR) {
     return { page };
   }
 
-  let ocrRegionBbox: BoundingBox | undefined;
-  try {
-    ocrRegionBbox = await detectOcrRegion(pageProxy, pageWidth, pageHeight, sortedWords);
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    throw new PdfCorruptedError(documentId, message, pageIndex);
-  }
+  const ocrRegionBbox = detectOcrRegionFromImageRects(
+    imageRects,
+    pageWidth,
+    pageHeight,
+    sortedWords,
+  );
 
   return ocrRegionBbox !== undefined ? { page, ocrRegionBbox } : { page };
 }
@@ -1146,7 +1435,13 @@ export class PdfEngine implements IEngine {
 
       let parsed: ParsePageResult;
       try {
-        parsed = await parsePage(pdfDocument, documentId, pageIndex, timeoutMs);
+        parsed = await parsePage(
+          pdfDocument,
+          documentId,
+          pageIndex,
+          timeoutMs,
+          operationCtx.logger,
+        );
       } catch (err: unknown) {
         void pdfDocument.destroy();
         // ADR-020 §3: todo error fatal de parseo emite su evento antes de lanzar.

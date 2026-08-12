@@ -5,7 +5,7 @@ import {
   type Page,
   type Word,
 } from "@anonly/shared";
-import { getDocument } from "pdfjs-dist";
+import { getDocument, OPS } from "pdfjs-dist";
 import type * as PdfjsDist from "pdfjs-dist";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
@@ -34,6 +34,7 @@ import {
   createMockPdfDocument,
   createValidInput,
   mockGetDocumentResult,
+  type MockAnnotationSpec,
 } from "./fixtures/test-helpers.js";
 
 describe("PdfEngine — unit tests", () => {
@@ -109,6 +110,7 @@ describe("PdfEngine — unit tests", () => {
           createMockPdfDocument(1, () => ({
             getViewport: vi.fn(() => ({ width: 595, height: 842 })),
             getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
+            getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
           })),
         ),
       );
@@ -145,6 +147,7 @@ describe("PdfEngine — unit tests", () => {
               ? {
                   getViewport: vi.fn(() => ({ width: 595, height: 842 })),
                   getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
+                  getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
                 }
               : createMockPage(i);
           }),
@@ -282,7 +285,8 @@ describe("PdfEngine — unit tests", () => {
       const output = await engine.process(createValidInput("doc-rot-90"), ctx);
       const bbox = output.document.pages[0]!.words[0]!.bbox;
 
-      expect(bbox).toEqual({ x: 30, y: 269, width: 16, height: 173 });
+      // ADR-066 §6/§8: 90° puebla `rotation`.
+      expect(bbox).toEqual({ x: 30, y: 269, width: 16, height: 173, rotation: 90 });
     });
 
     it("rotated 180 and 270 TextItems yield the correct envelope", async () => {
@@ -324,11 +328,12 @@ describe("PdfEngine — unit tests", () => {
       await engine.init(ctx);
       const output = await engine.process(createValidInput("doc-rot-180-270"), ctx);
 
+      // ADR-066 §6/§8: 180°/270° también pueblan `rotation`.
       const bbox180 = output.document.pages[0]!.words[0]!.bbox;
-      expect(bbox180).toEqual({ x: 50, y: 300, width: 50, height: 20 });
+      expect(bbox180).toEqual({ x: 50, y: 300, width: 50, height: 20, rotation: 180 });
 
       const bbox270 = output.document.pages[1]!.words[0]!.bbox;
-      expect(bbox270).toEqual({ x: 100, y: 600, width: 20, height: 50 });
+      expect(bbox270).toEqual({ x: 100, y: 600, width: 20, height: 50, rotation: 270 });
     });
 
     it("horizontal TextItem bbox is unchanged by the matrix-aware formula", async () => {
@@ -445,6 +450,316 @@ describe("PdfEngine — unit tests", () => {
     });
   });
 
+  // ADR-066 §6/§8: `rotation` sale del mismo versor que ya calcula la
+  // envolvente. Se puebla para 90/180/270 (ya probado arriba, describe
+  // "Rotated text bbox geometry") y queda AUSENTE en 0° y en cualquier
+  // ángulo que no sea recto.
+  describe("Rotation field on BoundingBox (ADR-066 §6/§8)", () => {
+    it("bbox rotation is populated only for right angles", async () => {
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () => ({
+            getViewport: vi.fn(() => ({ width: 595, height: 842 })),
+            getTextContent: vi.fn(() =>
+              Promise.resolve({
+                items: [
+                  { str: "Horiz", transform: [1, 0, 0, 1, 50, 800], width: 40, height: 12 },
+                  { str: "Rot90", transform: [0, 1, -1, 0, 100, 400], width: 40, height: 12 },
+                  {
+                    str: "Diag45",
+                    transform: [Math.SQRT1_2, Math.SQRT1_2, -Math.SQRT1_2, Math.SQRT1_2, 200, 200],
+                    width: 40,
+                    height: 12,
+                  },
+                ],
+              }),
+            ),
+            getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
+          })),
+        ),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-rotation-field"), ctx);
+      const words = output.document.pages[0]!.words;
+
+      const horiz = words.find((w) => w.text === "Horiz");
+      const rot90 = words.find((w) => w.text === "Rot90");
+      const diag45 = words.find((w) => w.text === "Diag45");
+
+      expect(horiz?.bbox.rotation).toBeUndefined();
+      expect(rot90?.bbox.rotation).toBe(90);
+      expect(diag45?.bbox.rotation).toBeUndefined();
+    });
+  });
+
+  // ADR-066 §1-§5: texto de anotaciones. Casos 28-33 de PDF_Engine.md §13.
+  // Los números de transform/rect/textMatrix del primer bloque son EXACTAMENTE
+  // los medidos y verificados a mano en ADR-066, Contexto §3 (composición
+  // textMatrix × transformInterno × beginAnnotation.transform × CTM =
+  // [0,8,-8,0,17.34,60] — origen (17.34,60), 90°, cuerpo 8). El `rect` real
+  // medido es [10,60,60,560]; acá se ensancha SOLO en x0 (10 -> 0) porque
+  // "cuerpo 8" extiende la caja 8pt hacia la izquierda del origen (x=17.34-8
+  // =9.34, fuera del rect real por 0.66pt): la fuente real del documento
+  // medido tiene métricas de glifo que no tenemos (el ADR no las publica), así
+  // que los anchos de glifo de este fixture son elegidos para el test, no
+  // medidos — el ensanche evita depender de esa precisión sub-punto sin tocar
+  // el eje (Y) que sí prueba la trampa 1. El y0 real (60) se conserva intacto.
+  describe("Annotation text (ADR-066 §1-§5)", () => {
+    const MEASURED_ANNOTATION_TRANSFORM: MockAnnotationSpec["transform"] = [1, 0, 0, 1, 10, 60];
+    const MEASURED_INNER_TRANSFORM: readonly [number, number, number, number, number, number] = [
+      0, 1, -1, 0, 50, 0,
+    ];
+    const MEASURED_TEXT_MATRIX: readonly [number, number, number, number, number, number] = [
+      8, 0, 0, 8, 0, 42.66,
+    ];
+    // Ensanchado en x0 (ver comentario del describe); y0/y1 son los medidos.
+    const WIDENED_RECT: MockAnnotationSpec["rect"] = [0, 60, 60, 560];
+
+    it("annotation text runs become words inside the annotation rect", async () => {
+      const annotationSpec: MockAnnotationSpec = {
+        id: "15R",
+        rect: WIDENED_RECT,
+        transform: MEASURED_ANNOTATION_TRANSFORM,
+        innerOps: [
+          { kind: "save" },
+          { kind: "transform", matrix: MEASURED_INNER_TRANSFORM },
+          {
+            kind: "textRun",
+            textMatrix: MEASURED_TEXT_MATRIX,
+            glyphs: [
+              { unicode: "A", width: 500 },
+              { unicode: "B", width: 500 },
+            ],
+          },
+          { kind: "restore" },
+        ],
+      };
+
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () =>
+            createMockPage(0, [], [], { width: 595, height: 842 }, [annotationSpec]),
+          ),
+        ),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-annotation-text"), ctx);
+      const words = output.document.pages[0]!.words;
+
+      expect(words).toHaveLength(1);
+      const word = words[0]!;
+      expect(word.text).toBe("AB");
+      expect(word.source).toBe("pdf");
+      // 90°: dir=(0,1) sale de [0,8,-8,0,...] — el mismo versor que ADR-066,
+      // Contexto §3 verifica a mano.
+      expect(word.bbox.rotation).toBe(90);
+      // width/height del bbox: envolvente del paralelogramo con
+      // dir/up de magnitud 8 (cuerpo 8) — width=8 (2 glifos de 500/1000em
+      // cada uno, escalados por 8), height=8 (cuerpo).
+      expect(word.bbox.width).toBe(8);
+      expect(word.bbox.height).toBe(8);
+      // Origen compuesto (17.34, 60) — el bbox lo desplaza 8pt hacia -x
+      // (versor de ascenso) y lo convierte a arriba-izquierda.
+      expect(word.bbox.x).toBeCloseTo(17.34 - 8, 6);
+      expect(word.bbox.y).toBeCloseTo(842 - 68, 6);
+    });
+
+    it("ignoring the beginAnnotation transform pushes words out of the rect", async () => {
+      // Fija el error de composición que ya ocurrió dos veces al medir
+      // (ADR-066, Contexto §3): ignorar beginAnnotation.transform manda el
+      // origen a (7.34, 0) en vez de (17.34, 60) — el eje Y salta del borde
+      // superior del rect (60) al borde INFERIOR de la página (0), muy por
+      // debajo de cualquier rect razonable. Este test prueba que, con el
+      // transform aplicado, el word SÍ entra al rect (no se descarta) — la
+      // prueba negativa de que la composición no cayó en esa trampa.
+      const annotationSpec: MockAnnotationSpec = {
+        id: "16R",
+        rect: WIDENED_RECT,
+        transform: MEASURED_ANNOTATION_TRANSFORM,
+        innerOps: [
+          { kind: "save" },
+          { kind: "transform", matrix: MEASURED_INNER_TRANSFORM },
+          {
+            kind: "textRun",
+            textMatrix: MEASURED_TEXT_MATRIX,
+            glyphs: [{ unicode: "X", width: 300 }],
+          },
+          { kind: "restore" },
+        ],
+      };
+
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () =>
+            createMockPage(0, [], [], { width: 595, height: 842 }, [annotationSpec]),
+          ),
+        ),
+      );
+
+      await engine.init(ctx);
+      const warnSpy = vi.spyOn(ctx.logger, "warn");
+      const output = await engine.process(createValidInput("doc-annotation-transform-trap"), ctx);
+      const words = output.document.pages[0]!.words;
+
+      expect(words.some((w) => w.text === "X")).toBe(true);
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it("annotation stack is independent from the save/restore stack", async () => {
+      // ADR-066 §2, Contexto §3 (trampa 2): un `restore` de más DENTRO de la
+      // anotación no puede consumir el `save` que la página hizo ANTES de
+      // entrar. Se arma a mano (no con buildMockOperatorList: necesita ops de
+      // página intercaladas con dos anotaciones, algo que el DSL de
+      // anotaciones no representa) una secuencia con:
+      //   1. Página: transform ×2, luego transform ×3 (CTM = ×6).
+      //   2. Anotación #1: SOLO un `restore` desbalanceado (sin `save` propio).
+      //      Con una pila compartida, ese restore consumiría el `save` de
+      //      página del paso 1.
+      //   3. Página: `restore` — con pila separada, recupera CTM=×2 (el save
+      //      de página); con pila compartida, ya no tendría qué desapilar y
+      //      caería a identidad.
+      //   4. Anotación #2: un run de texto que revela cuál CTM heredó — con
+      //      la pila separada da width=1/height=2 (semilla ×2); con una
+      //      compartida daría width=0,5/height=1 (semilla identidad).
+      const fnArray: number[] = [];
+      const argsArray: unknown[] = [];
+
+      fnArray.push(OPS.transform);
+      argsArray.push([2, 0, 0, 2, 0, 0]);
+      fnArray.push(OPS.save);
+      argsArray.push([]);
+      fnArray.push(OPS.transform);
+      argsArray.push([3, 0, 0, 3, 0, 0]);
+
+      fnArray.push(OPS.beginAnnotation);
+      argsArray.push(["1R", [0, 0, 1000, 1000], [1, 0, 0, 1, 0, 0], [1, 0, 0, 1, 0, 0], false]);
+      fnArray.push(OPS.restore);
+      argsArray.push([]);
+      fnArray.push(OPS.endAnnotation);
+      argsArray.push([]);
+
+      fnArray.push(OPS.restore);
+      argsArray.push([]);
+
+      fnArray.push(OPS.beginAnnotation);
+      argsArray.push(["2R", [0, 0, 1000, 1000], [1, 0, 0, 1, 0, 0], [1, 0, 0, 1, 0, 0], false]);
+      fnArray.push(OPS.setTextMatrix);
+      argsArray.push([1, 0, 0, 1, 0, 0]);
+      fnArray.push(OPS.showText);
+      argsArray.push([[{ unicode: "Z", width: 500 }]]);
+      fnArray.push(OPS.endAnnotation);
+      argsArray.push([]);
+
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () => ({
+            getViewport: vi.fn(() => ({ width: 800, height: 800 })),
+            getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
+            getOperatorList: vi.fn(() => Promise.resolve({ fnArray, argsArray })),
+          })),
+        ),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-annotation-stack"), ctx);
+      const words = output.document.pages[0]!.words;
+
+      expect(words).toHaveLength(1);
+      const word = words[0]!;
+      expect(word.text).toBe("Z");
+      expect(word.bbox).toEqual({ x: 0, y: 798, width: 1, height: 2 });
+    });
+
+    it("image inside an annotation is placed with the annotation transform", async () => {
+      const annotationSpec: MockAnnotationSpec = {
+        id: "33R",
+        rect: [0, 0, 200, 300],
+        transform: MEASURED_ANNOTATION_TRANSFORM,
+        innerOps: [{ kind: "transform", matrix: [150, 0, 0, 150, 0, 0] }, { kind: "image" }],
+      };
+
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () =>
+            createMockPage(
+              0,
+              [{ str: "Header", x: 500, y: 800, width: 50, height: 12 }],
+              [],
+              { width: 595, height: 842 },
+              [annotationSpec],
+            ),
+          ),
+        ),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-annotation-image"), ctx);
+
+      expect(output.ocrRegions).toHaveLength(1);
+      const region = output.ocrRegions[0]!;
+      expect(region.pageIndex).toBe(0);
+
+      // ADR-066 §5: el rect de imagen usa la CTM compuesta con
+      // beginAnnotation.transform ([150,0,0,150,0,0] dentro de la anotación,
+      // posicionada en (10,60) por el transform de la anotación, 842-60-150
+      // =632 en coords arriba-izquierda) — sin el fix, el walker de la
+      // compuerta 1 la ubicaría en (0,0) de la página (CTM de página sola,
+      // sin la traslación de la anotación).
+      const expectedImageBBox = { x: 10, y: 632, width: 150, height: 150 };
+      const EPSILON = 1e-9;
+      expect(region.bbox.x).toBeGreaterThanOrEqual(expectedImageBBox.x - EPSILON);
+      expect(region.bbox.y).toBeGreaterThanOrEqual(expectedImageBBox.y - EPSILON);
+      expect(region.bbox.x + region.bbox.width).toBeLessThanOrEqual(
+        expectedImageBBox.x + expectedImageBBox.width + EPSILON,
+      );
+      expect(region.bbox.y + region.bbox.height).toBeLessThanOrEqual(
+        expectedImageBBox.y + expectedImageBBox.height + EPSILON,
+      );
+      const regionArea = region.bbox.width * region.bbox.height;
+      expect(regionArea).toBeGreaterThan(100 * 100);
+    });
+
+    // Complementario a los siete tests nombrados en PDF_Engine.md §14: un
+    // `beginAnnotation` con args de forma inesperada (p. ej. sin `rect`) no
+    // debe romper el resto del recorrido — se preserva la separación de
+    // pilas (trampa 2) igual, pero sin rect no hay oráculo, así que la
+    // anotación no aporta words. También ejercita el reset por `beginText`.
+    it("beginAnnotation with malformed args is skipped without crashing", async () => {
+      const fnArray: number[] = [];
+      const argsArray: unknown[] = [];
+
+      // Forma inválida: falta el `rect` (segundo argumento).
+      fnArray.push(OPS.beginAnnotation);
+      argsArray.push(["40R", [1, 0, 0, 1, 0, 0]]);
+      fnArray.push(OPS.beginText);
+      argsArray.push([]);
+      fnArray.push(OPS.setTextMatrix);
+      argsArray.push([1, 0, 0, 1, 0, 0]);
+      fnArray.push(OPS.showText);
+      argsArray.push([[{ unicode: "Y", width: 500 }]]);
+      fnArray.push(OPS.endAnnotation);
+      argsArray.push([]);
+
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () => ({
+            getViewport: vi.fn(() => ({ width: 595, height: 842 })),
+            getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
+            getOperatorList: vi.fn(() => Promise.resolve({ fnArray, argsArray })),
+          })),
+        ),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-malformed-annotation"), ctx);
+
+      expect(output.document.pages[0]!.words).toHaveLength(0);
+      expect(output.document.pages[0]!.requiresOCR).toBe(true);
+    });
+  });
+
   describe("Timeout handling (ADR-020 §5)", () => {
     it("throws PdfTimeoutError with documentId when page parse exceeds timeout", async () => {
       vi.useFakeTimers();
@@ -488,6 +803,7 @@ describe("PdfEngine — unit tests", () => {
           createMockPdfDocument(1, () => ({
             getViewport: vi.fn(() => ({ width: 595, height: 842 })),
             getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
+            getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
           })),
         ),
       );
@@ -531,6 +847,7 @@ describe("PdfEngine — unit tests", () => {
           createMockPdfDocument(1, () => ({
             getViewport: vi.fn(() => ({ width: 595, height: 842 })),
             getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
+            getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
           })),
         ),
       );
