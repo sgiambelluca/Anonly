@@ -794,12 +794,39 @@ async function renderPageOntoContext(
 }
 
 /**
+ * ADR-066 §7 — ángulo de `context.rotate()` para `bbox.rotation: 90 | 270`.
+ * `rotation` sale de `atan2(dir.y, dir.x)` sobre la matriz de PDF.js en
+ * espacio de usuario (Y hacia arriba, CCW positivo —
+ * `pdf-engine/src/pdf.engine.ts#deriveRotation`, ADR-063 §1). El canvas
+ * dibuja en espacio página (Y hacia abajo, origen arriba-izquierda — el mismo
+ * que `bbox.x`/`bbox.y`), donde `context.rotate()` es horario para ángulos
+ * positivos. La conversión entre los dos espacios invierte la componente Y de
+ * cualquier vector (la misma reflexión que ya aplica `pageHeight - yMax` al
+ * bbox, `pdf.engine.ts`), lo que invierte el sentido de giro observado:
+ * `rotation: 90` (el texto avanza hacia +Y en espacio PDF) resulta en un
+ * avance hacia arriba en el canvas, `context.rotate(-π/2)`; `rotation: 270`
+ * es el espejo, `+π/2`.
+ */
+const CANVAS_ROTATION_RADIANS: Readonly<Record<90 | 270, number>> = {
+  90: -Math.PI / 2,
+  270: Math.PI / 2,
+};
+
+/**
  * Pinta los reemplazos y devuelve las anotaciones `Degraded` (ADR-058 §7) que
  * detectó al hacerlo: una por cada reemplazo cuyo shrink-to-fit (§1) lo dejó
  * por debajo de `DEGRADED_FONT_RATIO`. Sintetizadas acá mismo (no en
  * `kernelRenderPage`) porque es este loop el único lugar que tiene, a la vez,
  * el `Replacement` original y el resultado del encogido — separarlo exigiría
  * repetir la misma iteración o transportar el resultado por otro lado.
+ *
+ * ADR-066 §7: cuando `bbox.rotation` es `90`/`270`, el eje que hace de "ancho
+ * disponible" para el shrink-to-fit y el token se intercambian —mide contra
+ * el lado largo (`bbox.height` en una franja vertical), el tamaño de fuente
+ * sale del lado corto— y el token se dibuja rotado, centrado en la caja.
+ * `180` cae al camino sin intercambiar ejes (la caja es la misma que en 0°,
+ * rotarlo lo dejaría cabeza abajo). Sin `rotation`, ningún byte de este loop
+ * cambia respecto de antes de ADR-066 (no-regresión).
  */
 function paintReplacements(
   context: OffscreenCanvasRenderingContext2D,
@@ -827,21 +854,37 @@ function paintReplacements(
       continue;
     }
 
+    // ADR-066 §7: `90`/`270` intercambian qué eje escalado es "tamaño de
+    // fuente" y cuál es "largo disponible" — `180`/ausente usan bbox.height/
+    // bbox.width tal cual (no-regresión). `sidewaysRotation` (en vez de un
+    // booleano) es lo que deja a TS angostar el tipo de `rotation` a `90|270`
+    // dentro del branch de dibujo rotado, sin `as`.
+    const rotation = replacement.bbox.rotation;
+    const sidewaysRotation: 90 | 270 | undefined =
+      rotation === 90 || rotation === 270 ? rotation : undefined;
+    const fontSizeAxisPx = sidewaysRotation !== undefined ? bbox.width : bbox.height;
+    const availableLengthPx = sidewaysRotation !== undefined ? bbox.height : bbox.width;
+
     // ADR-058 §2: punto de decisión. Si el token entra a su tamaño NATURAL
-    // (sin ningún encogido) en bbox.width, camino actual sin cambios — ni un
-    // byte distinto de antes de este PR (no-regresión, "line repaint does
-    // not trigger when the token fits"). Si no entra, se intenta el
-    // repintado de línea (§2-§4, condiciones de §6); si `tryRepaintLine`
-    // devuelve `false` (alguna condición no se cumple, o `lineWords` vino
-    // ausente/sin vecinas útiles), se cae al shrink-to-fit ya existente de
-    // PR1 — sin error, sin warning (spec §9: "ausentes nunca es un error").
+    // (sin ningún encogido) en el largo disponible, camino actual sin
+    // cambios — ni un byte distinto de antes de este PR (no-regresión, "line
+    // repaint does not trigger when the token fits"). Si no entra, se
+    // intenta el repintado de línea (§2-§4, condiciones de §6); si
+    // `tryRepaintLine` devuelve `false` (alguna condición no se cumple, o
+    // `lineWords` vino ausente/sin vecinas útiles), se cae al shrink-to-fit
+    // ya existente de PR1 — sin error, sin warning (spec §9: "ausentes nunca
+    // es un error"). El repintado de línea queda **fuera de alcance para
+    // texto rotado** (ADR-066 §7, caso 27 de Render_Engine.md §13 no
+    // cambia): `sidewaysRotation !== undefined` salta directo al
+    // shrink-to-fit, nunca llama a `tryRepaintLine`.
     const naturalFont = buildReplacementFont(
-      replacementFontSize(bbox.height),
+      replacementFontSize(fontSizeAxisPx),
       replacementFontFamily(replacement.mode),
     );
-    const fitsNaturally = measureWidth(naturalFont, replacement.replacementValue) <= bbox.width;
+    const fitsNaturally =
+      measureWidth(naturalFont, replacement.replacementValue) <= availableLengthPx;
 
-    if (!fitsNaturally) {
+    if (!fitsNaturally && sidewaysRotation === undefined) {
       // Guard defensivo (ver doc de `planLineRepaint`): el resto de los
       // reemplazos de esta página nunca se pisan por el repintado de este.
       const otherReplacements = replacements.filter((other) => other !== replacement);
@@ -859,8 +902,8 @@ function paintReplacements(
     }
 
     // §13 casos 4/5/6 (mask/placeholder/synthetic): fondo + texto centrado,
-    // encogido para entrar en bbox.width (ADR-058 §1: shrink-to-fit, piso
-    // REPLACEMENT_MIN_FONT_PX). `maxWidth` en `fillText` es la red de
+    // encogido para entrar en el largo disponible (ADR-058 §1: shrink-to-fit,
+    // piso REPLACEMENT_MIN_FONT_PX). `maxWidth` en `fillText` es la red de
     // seguridad final para cuando ni el piso alcanza (caso 25 del spec). Es
     // el mismo bloque de siempre: cuando `fitsNaturally` es `true`,
     // `fitReplacementFont` no itera ni una vez y produce el mismo resultado
@@ -874,16 +917,30 @@ function paintReplacements(
       measureWidth,
       replacement.replacementValue,
       replacement.mode,
-      bbox.height,
-      bbox.width,
+      fontSizeAxisPx,
+      availableLengthPx,
     );
     context.font = fitted.font;
-    context.fillText(
-      replacement.replacementValue,
-      bbox.x + bbox.width / 2,
-      bbox.y + bbox.height / 2,
-      bbox.width,
-    );
+
+    if (sidewaysRotation !== undefined) {
+      // ADR-066 §7 (a): rota alrededor del centro de la caja y dibuja
+      // centrado en (0,0) — el token queda dentro del rectángulo porque
+      // `fitted`/`maxWidth` ya midieron contra `availableLengthPx` (el eje
+      // largo, ahora el eje local tras la rotación); misma garantía de
+      // ADR-058 §1 (caso 25), con los ejes intercambiados.
+      context.save();
+      context.translate(bbox.x + bbox.width / 2, bbox.y + bbox.height / 2);
+      context.rotate(CANVAS_ROTATION_RADIANS[sidewaysRotation]);
+      context.fillText(replacement.replacementValue, 0, 0, availableLengthPx);
+      context.restore();
+    } else {
+      context.fillText(
+        replacement.replacementValue,
+        bbox.x + bbox.width / 2,
+        bbox.y + bbox.height / 2,
+        bbox.width,
+      );
+    }
 
     // ADR-058 §7/caso 28: la razón, no el tamaño en sí. `fitted.naturalSizePx`
     // y `fitted.finalSizePx` salen los dos de este mismo `bbox` YA escalado
