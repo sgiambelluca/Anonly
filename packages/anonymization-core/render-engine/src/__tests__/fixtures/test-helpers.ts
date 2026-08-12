@@ -140,7 +140,21 @@ export function createMockPdfDocument(options?: MockPdfDocumentOptions): Record<
 // ─── Stub de OffscreenCanvas / contexto 2D (registra qué se dibujó) ───
 
 export interface DrawCall {
-  readonly op: "fillRect" | "strokeRect" | "fillText" | "drawImage" | "getImageData" | "putImageData";
+  readonly op:
+    | "fillRect"
+    | "strokeRect"
+    | "fillText"
+    | "drawImage"
+    | "getImageData"
+    | "putImageData"
+    // ADR-066 §7: el pintado rotado usa las cuatro — registradas como
+    // DrawCall igual que el resto, para que los tests puedan verificar la
+    // secuencia (`save` → `translate` → `rotate` → `fillText` → `restore`)
+    // sin necesitar una implementación de matrices de transformación real.
+    | "save"
+    | "restore"
+    | "translate"
+    | "rotate";
   readonly args: ReadonlyArray<unknown>;
   readonly fillStyle?: string;
   readonly strokeStyle?: string;
@@ -239,6 +253,29 @@ class StubCanvasRenderingContext2D {
 
   putImageData(imageData: ImageData, x: number, y: number): void {
     this.calls.push({ op: "putImageData", args: [imageData, x, y] });
+  }
+
+  // ADR-066 §7: no aplican una matriz de transformación real (el stub no
+  // modela el estado gráfico del canvas) — solo registran que se llamaron,
+  // con qué argumentos y en qué orden relativo al resto de `calls`. Alcanza
+  // para los tests: `paintReplacements` siempre dibuja en coordenadas locales
+  // (0, 0) tras `translate`/`rotate`, así que los tests verifican esas
+  // coordenadas locales y la presencia/ausencia de estas llamadas, no una
+  // posición final ya transformada.
+  save(): void {
+    this.calls.push({ op: "save", args: [] });
+  }
+
+  restore(): void {
+    this.calls.push({ op: "restore", args: [] });
+  }
+
+  translate(x: number, y: number): void {
+    this.calls.push({ op: "translate", args: [x, y] });
+  }
+
+  rotate(angle: number): void {
+    this.calls.push({ op: "rotate", args: [angle] });
   }
 }
 

@@ -1194,6 +1194,264 @@ describe("RenderEngine — unit tests", () => {
     });
   });
 
+  // ─── ADR-066 §7 (Hito 10.8, paso 3): reemplazo sobre bbox rotado ───
+  describe("reemplazo sobre bbox rotado (ADR-066 §7)", () => {
+    it("replacement over a rotated bbox is drawn rotated", async () => {
+      const docId = "doc-rotated-90";
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument({
+            pageCount: 1,
+            pageFactory: () => createMockPage({ width: 600, height: 850 }),
+          }),
+        ),
+      );
+      await engine.init(ctx);
+      await engine.loadDocument(docId, createValidBuffer());
+
+      // Mismas medidas que la firma de ADR-066 §7/Contexto §5 (franja 16×173).
+      await engine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+          replacements: [
+            makeReplacement({
+              mode: ReplacementMode.Mask,
+              replacementValue: "XX/XX/XXXX",
+              bbox: { x: 30, y: 269, width: 16, height: 173, rotation: 90 },
+            }),
+          ],
+        }),
+        ctx,
+      );
+
+      const [canvas] = getCreatedCanvases();
+      const ops = canvas!.calls.map((c) => c.op);
+      const saveIdx = ops.indexOf("save");
+      const translateIdx = ops.indexOf("translate");
+      const rotateIdx = ops.indexOf("rotate");
+      const fillTextIdx = ops.indexOf("fillText");
+      const restoreIdx = ops.indexOf("restore");
+      expect(saveIdx).toBeGreaterThanOrEqual(0);
+      expect(saveIdx).toBeLessThan(translateIdx);
+      expect(translateIdx).toBeLessThan(rotateIdx);
+      expect(rotateIdx).toBeLessThan(fillTextIdx);
+      expect(fillTextIdx).toBeLessThan(restoreIdx);
+
+      expect(canvas!.calls[translateIdx]!.args).toEqual([30 + 16 / 2, 269 + 173 / 2]);
+      expect(canvas!.calls[rotateIdx]!.args).toEqual([-Math.PI / 2]);
+      // Dibuja centrado en (0,0), local al frame ya rotado — no en las
+      // coordenadas de página del bbox.
+      expect(canvas!.calls[fillTextIdx]!.args).toEqual(["XX/XX/XXXX", 0, 0, 173]);
+    });
+
+    it("shrink-to-fit measures against the long axis when rotated", async () => {
+      const docId = "doc-rotated-long-axis";
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument({
+            pageCount: 1,
+            pageFactory: () => createMockPage({ width: 600, height: 850 }),
+          }),
+        ),
+      );
+      await engine.init(ctx);
+      await engine.loadDocument(docId, createValidBuffer());
+
+      // 20 caracteres: a bbox.width=16 (tamaño natural 11px, `replacementFontSize(16)`)
+      // el ancho medido es 20*11*0.6=132 — entra en bbox.height=173 (el eje
+      // largo) pero NUNCA entraría en bbox.width=16 (el eje corto), ni al
+      // piso de 8px (20*8*0.6=96 > 16). Que el tamaño final quede en el
+      // NATURAL de 11px (sin ningún encogido) es la prueba de que el eje
+      // usado fue height, no width.
+      const text = "X".repeat(20);
+      await engine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+          replacements: [
+            makeReplacement({
+              mode: ReplacementMode.Mask,
+              replacementValue: text,
+              bbox: { x: 30, y: 269, width: 16, height: 173, rotation: 90 },
+            }),
+          ],
+        }),
+        ctx,
+      );
+
+      const [canvas] = getCreatedCanvases();
+      const fillTextCall = canvas!.calls.find((c) => c.op === "fillText")!;
+      expect(fillTextCall.font).toBe("11px sans-serif");
+      expect(fillTextCall.args).toEqual([text, 0, 0, 173]);
+      expect(fillTextCall.drawnWidth).toBeLessThanOrEqual(173);
+    });
+
+    it("replacement without rotation is drawn exactly as before", async () => {
+      const docId = "doc-no-rotation-baseline";
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument({
+            pageCount: 1,
+            pageFactory: () => createMockPage({ width: 300, height: 200 }),
+          }),
+        ),
+      );
+      await engine.init(ctx);
+      await engine.loadDocument(docId, createValidBuffer());
+
+      await engine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+          replacements: [
+            makeReplacement({
+              mode: ReplacementMode.Placeholder,
+              replacementValue: "[DNI 01]",
+              bbox: { x: 10, y: 20, width: 100, height: 14 }, // rotation ausente
+            }),
+          ],
+        }),
+        ctx,
+      );
+
+      const [canvas] = getCreatedCanvases();
+      // El branch rotado de ADR-066 §7 nunca se toca sin `rotation`: si
+      // alguien lo activara por error para el camino horizontal, este
+      // assert (no solo "no explota") lo detecta.
+      expect(
+        canvas!.calls.some(
+          (c) => c.op === "save" || c.op === "translate" || c.op === "rotate" || c.op === "restore",
+        ),
+      ).toBe(false);
+
+      const fillTextCalls = canvas!.calls.filter((c) => c.op === "fillText");
+      expect(fillTextCalls).toHaveLength(1);
+      expect(fillTextCalls[0]!.font).toBe("10px monospace, sans-serif");
+      expect(fillTextCalls[0]!.args).toEqual(["[DNI 01]", 10 + 100 / 2, 20 + 14 / 2, 100]);
+    });
+
+    it("rotated replacement never draws outside its bbox", async () => {
+      const docId = "doc-rotated-property";
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument({
+            pageCount: 1,
+            pageFactory: () => createMockPage({ width: 2000, height: 2000 }),
+          }),
+        ),
+      );
+      await engine.init(ctx);
+      await engine.loadDocument(docId, createValidBuffer());
+
+      const rotations = [90, 270] as const;
+      const modes = [ReplacementMode.Mask, ReplacementMode.Synthetic, ReplacementMode.Placeholder];
+      const tokenLengths = [1, 2, 8, 32, 64];
+      const shortAxisPx = [1, 4, 16, 40]; // bbox.width (el eje corto, rotado)
+      const longAxisPx = [3, 60, 173, 400]; // bbox.height (el eje largo, disponible)
+
+      let combinationsChecked = 0;
+      for (const rotation of rotations) {
+        for (const mode of modes) {
+          for (const length of tokenLengths) {
+            for (const width of shortAxisPx) {
+              for (const height of longAxisPx) {
+                resetCreatedCanvases();
+                const text = "X".repeat(length);
+                const comboId = `${rotation}-${String(mode)}-${length}-${width}-${height}`;
+
+                await engine.renderPage(
+                  createRenderPageInput({
+                    documentId: docId,
+                    pageIndex: 0,
+                    kind: "anonymized",
+                    mode: "preview",
+                    replacements: [
+                      makeReplacement({
+                        groupId: `g-${comboId}`,
+                        occurrenceId: `o-${comboId}`,
+                        mode,
+                        replacementValue: text,
+                        bbox: { x: 0, y: 0, width, height, rotation },
+                      }),
+                    ],
+                  }),
+                  ctx,
+                );
+
+                const [canvas] = getCreatedCanvases();
+                const fillTextCall = canvas!.calls.find((c) => c.op === "fillText");
+                expect(fillTextCall).toBeDefined();
+                // Caso 25 + caso 31: nada se dibuja fuera del rectángulo —
+                // acá el eje que importa es el largo (bbox.height), el eje
+                // rotado sobre el que mide el shrink-to-fit.
+                expect(fillTextCall!.drawnWidth).toBeLessThanOrEqual(height);
+                expect(fillTextCall!.args[3]).toBe(height);
+                combinationsChecked += 1;
+              }
+            }
+          }
+        }
+      }
+
+      // Guard contra un refactor que vacíe los arrays de arriba y deje esta
+      // aserción pasando en verde sin haber comprobado ninguna combinación.
+      expect(combinationsChecked).toBeGreaterThan(200);
+    });
+
+    it("rotation 180 is not rotated", async () => {
+      const docId = "doc-rotation-180";
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument({
+            pageCount: 1,
+            pageFactory: () => createMockPage({ width: 300, height: 300 }),
+          }),
+        ),
+      );
+      await engine.init(ctx);
+      await engine.loadDocument(docId, createValidBuffer());
+
+      await engine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+          replacements: [
+            makeReplacement({
+              mode: ReplacementMode.Placeholder,
+              replacementValue: "[DNI 01]",
+              bbox: { x: 10, y: 20, width: 100, height: 14, rotation: 180 },
+            }),
+          ],
+        }),
+        ctx,
+      );
+
+      const [canvas] = getCreatedCanvases();
+      expect(
+        canvas!.calls.some(
+          (c) => c.op === "save" || c.op === "translate" || c.op === "rotate" || c.op === "restore",
+        ),
+      ).toBe(false);
+
+      // 180 cae al camino sin intercambiar ejes: misma caja que en 0°,
+      // medida contra bbox.width — no bbox.height, el eje que se usaría si
+      // 180 rotara igual que 90/270.
+      const fillTextCalls = canvas!.calls.filter((c) => c.op === "fillText");
+      expect(fillTextCalls).toHaveLength(1);
+      expect(fillTextCalls[0]!.font).toBe("10px monospace, sans-serif");
+      expect(fillTextCalls[0]!.args).toEqual(["[DNI 01]", 10 + 100 / 2, 20 + 14 / 2, 100]);
+    });
+  });
+
   // ─── ADR-059 §5 (Hito 10.5, PR 7): página de leyenda del export ───
   describe("renderLegendPage — layout (ADR-059 §5)", () => {
     function fillTextArgs(calls: ReadonlyArray<DrawCall>): ReadonlyArray<[string, number, number]> {
