@@ -28,6 +28,23 @@ export interface BoundingBox {
   readonly y: number;
   readonly width: number;
   readonly height: number;
+  /**
+   * ADR-066 §6 (supersede ADR-063 §5): dirección en la que corre el texto que
+   * ocupa esta caja. **Ausente ≡ 0**, así que todo `BoundingBox` previo sigue
+   * siendo válido y se pinta igual que antes.
+   *
+   * NO cambia la geometría: el rectángulo sigue siendo axis-aligned y sigue
+   * siendo exacto para los cuatro ángulos rectos (ADR-063 §2). Solo le dice a
+   * quien dibuja adentro cómo orientar el texto — `render-engine` rota el
+   * contexto en 90/270 (ADR-066 §7). Para ángulos arbitrarios el campo queda
+   * ausente: ahí el rectángulo es la envolvente conservadora de ADR-063 §2, no
+   * la caja real del texto (ADR-066 §8).
+   *
+   * Va acá y no en `Word` porque es lo que viaja por la cadena
+   * `Word → Occurrence → Replacement` sin tocar tres tipos: `mapSpanToWords`
+   * une bboxes y el campo viaja con ellos.
+   */
+  readonly rotation?: 0 | 90 | 180 | 270;
 }
 
 export interface WordSpan {
