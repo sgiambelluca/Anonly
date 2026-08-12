@@ -439,16 +439,21 @@ describe("PdfEngine — edge case tests", () => {
     });
   });
 
-  // Caso 31 (§13, ADR-066 §3): el `rect` de `beginAnnotation` es el oráculo
-  // de validación. Un word que cae fuera se descarta con `warn`, no se
+  // Caso 31 (§13, ADR-066 §3, Corrección 2026-08-10): el `rect` de
+  // `beginAnnotation` es el oráculo, y la prueba es de SOLAPAMIENTO (≥50%
+  // del área del word), no de contención estricta — un word cuyo
+  // solapamiento cae por debajo del umbral se descarta con `warn`, no se
   // recorta.
   describe("Caso 31: word de anotación fuera del rect (ADR-066 §3)", () => {
     it("words outside the annotation rect are dropped with a warning", async () => {
       const annotationSpec: MockAnnotationSpec = {
         id: "20R",
         // Lejos de la geometría real del run (que cae cerca de x=17, y=60-68
-        // en espacio PDF crudo) — garantiza el rechazo sin depender de
-        // métricas de glifo finas.
+        // en espacio PDF crudo): solapamiento 0%, muy por debajo del umbral
+        // de 50% — garantiza el rechazo sin depender de métricas de glifo
+        // finas. Reproduce en espíritu el modo de falla de composición
+        // medido en ADR-066, Contexto §3 (`x = -679`, también 0% de
+        // solapamiento).
         rect: [200, 200, 250, 250],
         transform: [1, 0, 0, 1, 10, 60],
         innerOps: [
@@ -484,6 +489,52 @@ describe("PdfEngine — edge case tests", () => {
         }),
       );
     });
+
+    // ADR-066 §3, Corrección 2026-08-10: la primera redacción exigía
+    // contención total y eso descartaba el texto real — el versor de
+    // ascenso (cuerpo 8) extiende la caja del glifo 8pt hacia -x desde el
+    // origen (17.34,60), y el `rect` real medido `[10,60,60,560]` empieza en
+    // x=10: el word se sale 0,66pt (x=9.34) pero solapa ~91,8% de su área,
+    // muy por encima del umbral de 50%. Es el test que se pone rojo si
+    // alguien vuelve a la contención estricta.
+    it("a word overhanging the rect by a fraction of a point is kept", async () => {
+      const annotationSpec: MockAnnotationSpec = {
+        id: "17R",
+        rect: [10, 60, 60, 560], // el rect real medido (ADR-066, Contexto §3)
+        transform: [1, 0, 0, 1, 10, 60],
+        innerOps: [
+          { kind: "save" },
+          { kind: "transform", matrix: [0, 1, -1, 0, 50, 0] },
+          {
+            kind: "textRun",
+            textMatrix: [8, 0, 0, 8, 0, 42.66],
+            glyphs: [{ unicode: "W", width: 500 }],
+          },
+          { kind: "restore" },
+        ],
+      };
+
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () =>
+            createMockPage(0, [], [], { width: 595, height: 842 }, [annotationSpec]),
+          ),
+        ),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-annotation-overhang"), ctx);
+      const words = output.document.pages[0]!.words;
+
+      expect(words).toHaveLength(1);
+      const word = words[0]!;
+      expect(word.text).toBe("W");
+      // El desborde es genuino (x=9.34 < rect.x=10, 0.66pt) — no es un falso
+      // positivo del fixture, es la trampa tipográfica que ADR-066 §3
+      // documenta, y el word se retiene igual.
+      expect(word.bbox.x).toBeLessThan(10);
+      expect(ctx.logger.warn).not.toHaveBeenCalled();
+    });
   });
 
   // Caso 32 (§13, ADR-066 §4): una anotación Hidden/NoView no produce words.
@@ -500,7 +551,7 @@ describe("PdfEngine — edge case tests", () => {
       // verifica que solo la visible aporta palabras.
       const visibleAnnotation: MockAnnotationSpec = {
         id: "30R",
-        rect: [0, 60, 60, 560],
+        rect: [10, 60, 60, 560], // el rect real medido (ADR-066, Contexto §3)
         transform: [1, 0, 0, 1, 10, 60],
         innerOps: [
           { kind: "transform", matrix: [0, 1, -1, 0, 50, 0] },

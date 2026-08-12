@@ -521,15 +521,36 @@ function annotationRectToBoundingBox(
   return { x: xMin, y: pageHeight - yMax, width: xMax - xMin, height: yMax - yMin };
 }
 
-const GEOMETRY_EPSILON = 1e-6;
+/*
+ * ADR-066 §3 (Corrección 2026-08-10): el oráculo es de SOLAPAMIENTO, no de
+ * contención estricta. El versor de ascenso extiende la caja del glifo más
+ * allá de la línea de base, y el `rect` de una anotación está ajustado a la
+ * tinta visible — un word legítimo puede salirse una fracción de punto (0,66
+ * pt medido sobre la firma real, que con contención estricta se descartaba
+ * entera). El umbral (intersección ≥ 50% del área del word) separa ese caso
+ * (91,8% de solapamiento) de los dos modos de falla de composición medidos
+ * en Contexto §3 (0% con `x = -679`, fuera de la página; solapamiento
+ * marginal con `y = 0`, borde inferior) — casi dos órdenes de margen para
+ * los dos lados.
+ */
+const ANNOTATION_RECT_OVERLAP_RATIO = 0.5;
 
-function isBoundingBoxWithin(inner: BoundingBox, outer: BoundingBox): boolean {
-  return (
-    inner.x >= outer.x - GEOMETRY_EPSILON &&
-    inner.y >= outer.y - GEOMETRY_EPSILON &&
-    inner.x + inner.width <= outer.x + outer.width + GEOMETRY_EPSILON &&
-    inner.y + inner.height <= outer.y + outer.height + GEOMETRY_EPSILON
+function overlapRatioWithRect(word: BoundingBox, rect: BoundingBox): number {
+  const overlapWidth = Math.max(
+    0,
+    Math.min(word.x + word.width, rect.x + rect.width) - Math.max(word.x, rect.x),
   );
+  const overlapHeight = Math.max(
+    0,
+    Math.min(word.y + word.height, rect.y + rect.height) - Math.max(word.y, rect.y),
+  );
+  const wordArea = word.width * word.height;
+  if (wordArea <= 0) return 0;
+  return (overlapWidth * overlapHeight) / wordArea;
+}
+
+function overlapsAnnotationRectEnough(word: BoundingBox, rect: BoundingBox): boolean {
+  return overlapRatioWithRect(word, rect) >= ANNOTATION_RECT_OVERLAP_RATIO;
 }
 
 interface AnnotationTextRun {
@@ -669,7 +690,7 @@ function walkOperatorListForAnnotationsAndImages(
         );
         for (const word of words) {
           if (currentAnnotationRect === undefined) continue;
-          if (isBoundingBoxWithin(word.bbox, currentAnnotationRect)) {
+          if (overlapsAnnotationRectEnough(word.bbox, currentAnnotationRect)) {
             annotationWords.push(word);
           } else {
             // ADR-066 §3: si la composición falló, la posición no es
