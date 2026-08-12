@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-mvp | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,adr/ADR-011-Grouping-First.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md | audiencia=humanos+IA | fase=10-cierre (Hitos 1–10 cerrados y mergeados a main; pendientes puntuales diferidos a Hito 11 anotados por hito; antes de arrancar el Hito 11 queda la revisión integral de Hito10_Observaciones_Revision.md y los ADR-053/054/055 de los hallazgos del cierre — ver el bloque CERRADO al final del Hito 10. §4 gana los Hitos **10.5** —legibilidad del reemplazo, ADR-057/058/059— y **10.6** —reemplazo por género, ADR-060—, y **10.7** —agregado manual de entidades, ADR-061—, y **10.8** —texto rotado y páginas con texto nativo parcial, ADR-063 + ADR-064 + ADR-065—, insertados con la convención decimal del repo sin renumerar Hardening ni Release) -->
+<!-- CONTEXT: scope=roadmap-mvp | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,adr/ADR-011-Grouping-First.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md | audiencia=humanos+IA | fase=10-cierre (Hitos 1–10 cerrados y mergeados a main; pendientes puntuales diferidos a Hito 11 anotados por hito; antes de arrancar el Hito 11 queda la revisión integral de Hito10_Observaciones_Revision.md y los ADR-053/054/055 de los hallazgos del cierre — ver el bloque CERRADO al final del Hito 10. §4 gana los Hitos **10.5** —legibilidad del reemplazo, ADR-057/058/059— y **10.6** —reemplazo por género, ADR-060—, y **10.7** —agregado manual de entidades, ADR-061—, y **10.8** —texto rotado y páginas con texto nativo parcial, ADR-063 + ADR-064 + ADR-065 + ADR-066—, insertados con la convención decimal del repo sin renumerar Hardening ni Release) -->
 
 # Anonly — Roadmap MVP
 
@@ -349,9 +349,17 @@ No sale de `Cambios para hacer.txt`: sale de **probar la herramienta sobre una p
 | 7b | Fixtures del façade y de integración adaptados a `ocrRegions` y al `OPS` real | `tests/`, façade | ✅ |
 | 8 | Cableado del stage de OCR por región | `packages/anonymization-core/src` | ✅ |
 | 9 | Test de integración de punta a punta (ADR-065, Validación) | `tests/integration` | ✅ |
-| 10 | **Verificación manual sobre la pericia real** | — | ⬜ |
+| 10 | Verificación manual sobre la pericia real | — | ✅ |
+| 11 | ADR-066 + `Contracts.md`, `PDF_Engine.md`, `Render_Engine.md`, `03_Data_Model.md` (docs) | — | ✅ |
+| 12 | `BoundingBox.rotation` | `shared` | ⬜ |
+| 13 | Texto de anotaciones + `rotation` + fix del walker | `pdf-engine` | ⬜ |
+| 14 | Reemplazo rotado en `paintReplacements` | `render-engine` | ⬜ |
 
-Las filas `b` no estaban en el plan original: salieron de ambigüedades que los implementadores detectaron y reportaron en vez de decidir en silencio (`AI_Development_Guide.md` §5). Las dos últimas son lo que falta para cerrar el hito.
+Las filas `b` no estaban en el plan original: salieron de ambigüedades que los implementadores detectaron y reportaron en vez de decidir en silencio (`AI_Development_Guide.md` §5).
+
+**Paso 3 — el texto de las anotaciones** (ADR-066, filas 11-14). La verificación manual sobre la pericia real (fila 10) encontró que la **firma digital** —texto seleccionable, vertical, con el nombre de quien firma y la fecha— no se detectaba: `getTextContent()` lee solo el content stream y ese texto vive en el *appearance stream* de una anotación. Pero `render-engine` **sí lo dibuja**, así que salía en claro en el PDF anonimizado. Se lee nativo del mismo operator list que ya pide la compuerta 1 —**sin OCR**, es texto exacto— y el reemplazo pasa a pintarse rotado, lo que **supersede ADR-063 §5**: la premisa de esa decisión era que el único texto rotado era una marca de agua que no había que tapar.
+
+**Fuera del hito, salidos de la misma prueba manual** y con ADR pendiente: el matching difuso de Grouping fusiona entidades numéricas distintas que difieren en un carácter (dos CUIT, dos fechas — `1 - 1/11 = 0.909` contra un umbral de 0.88), el bbox de una entidad partida en dos líneas tapa las dos líneas enteras, y las fechas en texto ("7 de julio de 2026") no tienen patrón.
 
 Los pasos 1 y 2 son independientes entre sí: el orden 1→2 es por tamaño y aislamiento, no por dependencia técnica (se verificó que el bbox erróneo **no** corrompe la métrica de la compuerta 2 en el documento medido: 55,5% contra 55,1%). El paso 0, en cambio, **sí** bloquea al 2: no se puede especificar la traducción de coordenadas de un recorte cuando la de la página entera está rota.
 

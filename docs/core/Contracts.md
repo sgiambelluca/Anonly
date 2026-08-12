@@ -416,6 +416,24 @@ Los tipos completos están en `03_Data_Model.md`. Aquí solo los enums referenci
 
 ```ts
 /**
+ * ADR-066 §6 (supersede ADR-063 §5): orientación del texto que ocupa la caja.
+ * Ausente ≡ 0, así que todo `BoundingBox` previo sigue siendo válido y se
+ * pinta igual. NO cambia la geometría — el rectángulo sigue siendo
+ * axis-aligned y exacto para los cuatro ángulos rectos (ADR-063 §2); le dice
+ * a quien dibuja adentro en qué dirección corre el texto. Va acá y no en
+ * `Word` porque es lo que viaja por la cadena `Word → Occurrence →
+ * Replacement` sin tocar tres tipos. Semántica completa en
+ * `03_Data_Model.md` §5.
+ */
+export interface BoundingBox {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+  readonly rotation?: 0 | 90 | 180 | 270;
+}
+
+/**
  * Región de una página que `pdf-engine` marca para OCR **aunque la página
  * tenga texto nativo** (ADR-065 §4): una imagen cuyo interior ningún texto
  * explica. Semántica completa en `03_Data_Model.md` §4.1.
