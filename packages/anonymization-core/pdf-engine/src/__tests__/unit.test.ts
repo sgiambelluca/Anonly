@@ -497,14 +497,12 @@ describe("PdfEngine — unit tests", () => {
   // Los números de transform/rect/textMatrix del primer bloque son EXACTAMENTE
   // los medidos y verificados a mano en ADR-066, Contexto §3 (composición
   // textMatrix × transformInterno × beginAnnotation.transform × CTM =
-  // [0,8,-8,0,17.34,60] — origen (17.34,60), 90°, cuerpo 8). El `rect` real
-  // medido es [10,60,60,560]; acá se ensancha SOLO en x0 (10 -> 0) porque
-  // "cuerpo 8" extiende la caja 8pt hacia la izquierda del origen (x=17.34-8
-  // =9.34, fuera del rect real por 0.66pt): la fuente real del documento
-  // medido tiene métricas de glifo que no tenemos (el ADR no las publica), así
-  // que los anchos de glifo de este fixture son elegidos para el test, no
-  // medidos — el ensanche evita depender de esa precisión sub-punto sin tocar
-  // el eje (Y) que sí prueba la trampa 1. El y0 real (60) se conserva intacto.
+  // [0,8,-8,0,17.34,60] — origen (17.34,60), 90°, cuerpo 8) y el `rect` real
+  // medido `[10,60,60,560]`. El versor de ascenso (cuerpo 8) extiende la caja
+  // del glifo 8pt hacia -x desde el origen (x=17.34-8=9.34), 0.66pt afuera del
+  // `rect` — el oráculo es de SOLAPAMIENTO (≥50% del área del word), no de
+  // contención estricta (ADR-066 §3, Corrección 2026-08-10): estos dos tests
+  // solapan ~91.75%, muy por encima del umbral.
   describe("Annotation text (ADR-066 §1-§5)", () => {
     const MEASURED_ANNOTATION_TRANSFORM: MockAnnotationSpec["transform"] = [1, 0, 0, 1, 10, 60];
     const MEASURED_INNER_TRANSFORM: readonly [number, number, number, number, number, number] = [
@@ -513,13 +511,13 @@ describe("PdfEngine — unit tests", () => {
     const MEASURED_TEXT_MATRIX: readonly [number, number, number, number, number, number] = [
       8, 0, 0, 8, 0, 42.66,
     ];
-    // Ensanchado en x0 (ver comentario del describe); y0/y1 son los medidos.
-    const WIDENED_RECT: MockAnnotationSpec["rect"] = [0, 60, 60, 560];
+    // El rect real medido (ADR-066, Contexto §3).
+    const MEASURED_RECT: MockAnnotationSpec["rect"] = [10, 60, 60, 560];
 
     it("annotation text runs become words inside the annotation rect", async () => {
       const annotationSpec: MockAnnotationSpec = {
         id: "15R",
-        rect: WIDENED_RECT,
+        rect: MEASURED_RECT,
         transform: MEASURED_ANNOTATION_TRANSFORM,
         innerOps: [
           { kind: "save" },
@@ -576,7 +574,7 @@ describe("PdfEngine — unit tests", () => {
       // prueba negativa de que la composición no cayó en esa trampa.
       const annotationSpec: MockAnnotationSpec = {
         id: "16R",
-        rect: WIDENED_RECT,
+        rect: MEASURED_RECT,
         transform: MEASURED_ANNOTATION_TRANSFORM,
         innerOps: [
           { kind: "save" },
