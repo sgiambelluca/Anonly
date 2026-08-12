@@ -24,10 +24,12 @@ import type { PdfEngineInput } from "../pdf.types.js";
 
 import {
   createEngineContext,
+  createMockPage,
   createMockPdfDocument,
   createValidInput,
   mockGetDocumentFailure,
   mockGetDocumentResult,
+  type MockAnnotationSpec,
 } from "./fixtures/test-helpers.js";
 
 describe("PdfEngine — edge case tests", () => {
@@ -362,6 +364,7 @@ describe("PdfEngine — edge case tests", () => {
               ? {
                   getViewport: vi.fn(() => ({ width: 595, height: 842 })),
                   getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
+                  getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
                 }
               : {
                   getViewport: vi.fn(() => ({ width: 595, height: 842 })),
@@ -436,6 +439,96 @@ describe("PdfEngine — edge case tests", () => {
     });
   });
 
+  // Caso 31 (§13, ADR-066 §3): el `rect` de `beginAnnotation` es el oráculo
+  // de validación. Un word que cae fuera se descarta con `warn`, no se
+  // recorta.
+  describe("Caso 31: word de anotación fuera del rect (ADR-066 §3)", () => {
+    it("words outside the annotation rect are dropped with a warning", async () => {
+      const annotationSpec: MockAnnotationSpec = {
+        id: "20R",
+        // Lejos de la geometría real del run (que cae cerca de x=17, y=60-68
+        // en espacio PDF crudo) — garantiza el rechazo sin depender de
+        // métricas de glifo finas.
+        rect: [200, 200, 250, 250],
+        transform: [1, 0, 0, 1, 10, 60],
+        innerOps: [
+          { kind: "save" },
+          { kind: "transform", matrix: [0, 1, -1, 0, 50, 0] },
+          {
+            kind: "textRun",
+            textMatrix: [8, 0, 0, 8, 0, 42.66],
+            glyphs: [{ unicode: "X", width: 500 }],
+          },
+          { kind: "restore" },
+        ],
+      };
+
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () =>
+            createMockPage(0, [], [], { width: 595, height: 842 }, [annotationSpec]),
+          ),
+        ),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-annotation-outside-rect"), ctx);
+
+      expect(output.document.pages[0]!.words.some((w) => w.text === "X")).toBe(false);
+      expect(ctx.logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining("fuera del rect"),
+        expect.objectContaining({
+          documentId: "doc-annotation-outside-rect",
+          pageIndex: 0,
+          annotationId: "20R",
+        }),
+      );
+    });
+  });
+
+  // Caso 32 (§13, ADR-066 §4): una anotación Hidden/NoView no produce words.
+  describe("Caso 32: anotación Hidden no produce words (ADR-066 §4)", () => {
+    it("hidden annotations produce no words", async () => {
+      // Verificado contra pdfjs-dist@4.10.38 (Page.getOperatorList,
+      // build/pdf.worker.mjs, el filtro `annotation.mustBeViewed(...)` antes
+      // de invocar `annotation.getOperatorList()`): una anotación Hidden o
+      // NoView NUNCA llega a emitir `beginAnnotation` — pdf.js la excluye
+      // aguas arriba. El motor no recibe (ni podría leer: el op no trae el
+      // flag) ops de una anotación oculta, así que hereda el filtro gratis.
+      // Se simula construyendo un operator list SIN beginAnnotation para la
+      // oculta (lo que pdf.js realmente produce) junto a una visible, y se
+      // verifica que solo la visible aporta palabras.
+      const visibleAnnotation: MockAnnotationSpec = {
+        id: "30R",
+        rect: [0, 60, 60, 560],
+        transform: [1, 0, 0, 1, 10, 60],
+        innerOps: [
+          { kind: "transform", matrix: [0, 1, -1, 0, 50, 0] },
+          {
+            kind: "textRun",
+            textMatrix: [8, 0, 0, 8, 0, 42.66],
+            glyphs: [{ unicode: "V", width: 500 }],
+          },
+        ],
+      };
+
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () =>
+            createMockPage(0, [], [], { width: 595, height: 842 }, [visibleAnnotation]),
+          ),
+        ),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-hidden-annotation"), ctx);
+      const words = output.document.pages[0]!.words;
+
+      expect(words).toHaveLength(1);
+      expect(words[0]!.text).toBe("V");
+    });
+  });
+
   // Caso 13 (§13): process llamado tras dispose.
   describe("Caso 13: process llamado tras dispose", () => {
     it("process after dispose throws", async () => {
@@ -466,6 +559,7 @@ describe("PdfEngine — edge case tests", () => {
       const mockPage = {
         getViewport: vi.fn(() => ({ width: 595, height: 842 })),
         getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
+        getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
       };
 
       vi.mocked(getDocument).mockReturnValue(

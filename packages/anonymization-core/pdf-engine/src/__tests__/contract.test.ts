@@ -236,6 +236,7 @@ describe("PdfEngine — contract tests", () => {
             return {
               getViewport: vi.fn(() => ({ width: 595, height: 842 })),
               getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
+              getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
             };
           }
           // Página 1: texto nativo + imagen grande sin texto encima — candidata a región.

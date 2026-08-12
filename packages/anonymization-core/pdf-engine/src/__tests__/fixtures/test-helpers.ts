@@ -190,14 +190,61 @@ export type MockImageRect = {
   readonly height: number;
 };
 
+export type Matrix6 = readonly [number, number, number, number, number, number];
+
 /**
- * Operator list mínima que simula `save cm paintImageXObject restore` por
- * cada imagen (ADR-065 §1, compuerta 1). Usa el `OPS` REAL de pdfjs-dist
- * (preservado por los `vi.mock("pdfjs-dist", ...)` de cada test file vía
- * `importOriginal`): el motor bajo prueba lee esos mismos valores, así que el
- * mock no puede inventar los suyos sin arriesgar un falso positivo/negativo.
+ * Glifo mínimo que imita la forma que `pdfjs-dist` deja en `argsArray` de un
+ * op `showText` ya resuelto (`Glyph.unicode`/`Glyph.width`, ver
+ * `pdf.engine.ts`, `buildAnnotationTextRun`): `width` en unidades de glifo
+ * (1/1000 em, la convención de PDF fuera de Type3).
  */
-export function buildMockOperatorList(images: ReadonlyArray<MockImageRect>): {
+export interface MockGlyph {
+  readonly unicode: string;
+  readonly width: number;
+}
+
+/**
+ * Ops internos de una anotación, en el orden en que se emiten (ADR-066 §1-
+ * §2). Permite construir escenarios con `save`/`restore` desbalanceados
+ * (trampa 2), texto (`textRun`, trampa 1) e imágenes (§5, caso 33) — todo
+ * dentro de la MISMA pila local que `beginAnnotation` arranca.
+ */
+export type MockAnnotationInnerOp =
+  | { readonly kind: "save" }
+  | { readonly kind: "restore" }
+  | { readonly kind: "transform"; readonly matrix: Matrix6 }
+  | { readonly kind: "beginText" }
+  | {
+      readonly kind: "textRun";
+      readonly textMatrix: Matrix6;
+      readonly glyphs: ReadonlyArray<MockGlyph>;
+    }
+  | { readonly kind: "image" };
+
+export interface MockAnnotationSpec {
+  readonly id: string;
+  // [x0, y0, x1, y1] — mismo espacio que `item.transform` (origen
+  // abajo-izquierda, y-up), igual que el `rect` real de `beginAnnotation`.
+  readonly rect: readonly [number, number, number, number];
+  readonly transform: Matrix6;
+  readonly innerOps: ReadonlyArray<MockAnnotationInnerOp>;
+}
+
+const MOCK_ANNOTATION_APPEARANCE_MATRIX: Matrix6 = [1, 0, 0, 1, 0, 0];
+
+/**
+ * Operator list que simula `save cm paintImageXObject restore` por cada
+ * imagen de página (ADR-065 §1, compuerta 1) y, opcionalmente,
+ * `beginAnnotation ... endAnnotation` por cada anotación (ADR-066 §1-§5).
+ * Usa el `OPS` REAL de pdfjs-dist (preservado por los
+ * `vi.mock("pdfjs-dist", ...)` de cada test file vía `importOriginal`): el
+ * motor bajo prueba lee esos mismos valores, así que el mock no puede
+ * inventar los suyos sin arriesgar un falso positivo/negativo.
+ */
+export function buildMockOperatorList(
+  images: ReadonlyArray<MockImageRect>,
+  annotations: ReadonlyArray<MockAnnotationSpec> = [],
+): {
   readonly fnArray: number[];
   readonly argsArray: unknown[];
 } {
@@ -215,6 +262,44 @@ export function buildMockOperatorList(images: ReadonlyArray<MockImageRect>): {
     argsArray.push([]);
   }
 
+  for (const annotation of annotations) {
+    fnArray.push(OPS.beginAnnotation);
+    argsArray.push([
+      annotation.id,
+      annotation.rect,
+      annotation.transform,
+      MOCK_ANNOTATION_APPEARANCE_MATRIX,
+      false,
+    ]);
+
+    for (const op of annotation.innerOps) {
+      if (op.kind === "save") {
+        fnArray.push(OPS.save);
+        argsArray.push([]);
+      } else if (op.kind === "restore") {
+        fnArray.push(OPS.restore);
+        argsArray.push([]);
+      } else if (op.kind === "transform") {
+        fnArray.push(OPS.transform);
+        argsArray.push(op.matrix);
+      } else if (op.kind === "beginText") {
+        fnArray.push(OPS.beginText);
+        argsArray.push([]);
+      } else if (op.kind === "textRun") {
+        fnArray.push(OPS.setTextMatrix);
+        argsArray.push(op.textMatrix);
+        fnArray.push(OPS.showText);
+        argsArray.push([op.glyphs]);
+      } else {
+        fnArray.push(OPS.paintImageXObject);
+        argsArray.push(["img", 1, 1]);
+      }
+    }
+
+    fnArray.push(OPS.endAnnotation);
+    argsArray.push([]);
+  }
+
   return { fnArray, argsArray };
 }
 
@@ -223,6 +308,7 @@ export function createMockPage(
   textItems?: ReadonlyArray<MockTextItem>,
   images?: ReadonlyArray<MockImageRect>,
   pageSize?: { readonly width: number; readonly height: number },
+  annotations?: ReadonlyArray<MockAnnotationSpec>,
 ): Record<string, unknown> {
   const items = textItems ?? [
     { str: `Page${pageIndex}Word1`, x: 50, y: 800, width: 50, height: 12 },
@@ -244,7 +330,10 @@ export function createMockPage(
     ),
     // ADR-065 §1 (compuerta 1): default sin imágenes — preserva el
     // comportamiento de todos los tests que no pasan `images` explícitamente.
-    getOperatorList: vi.fn(() => Promise.resolve(buildMockOperatorList(images ?? []))),
+    // ADR-066 §1: default sin anotaciones, mismo criterio.
+    getOperatorList: vi.fn(() =>
+      Promise.resolve(buildMockOperatorList(images ?? [], annotations ?? [])),
+    ),
   };
 }
 
@@ -286,6 +375,11 @@ export function createMockPdfDocument(
       pages.push({
         getViewport: vi.fn(() => ({ width: 595, height: 842 })),
         getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
+        // ADR-066 §1: parsePage llama getOperatorList() en TODA página (el
+        // texto de anotaciones puede ser la única fuente de texto), no solo
+        // en las que ya tienen texto nativo — a diferencia de antes de
+        // ADR-066, una página textless también necesita este mock.
+        getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
       });
     } else {
       pages.push(createMockPage(i));
