@@ -81,7 +81,13 @@ Los `Word` resultantes llevan `source: "pdf"` —es texto nativo, no OCR— y se
 
 ### 3. El `rect` de la anotación es el oráculo de validación
 
-Todo `Word` extraído de una anotación **debe** caer dentro del `rect` que `beginAnnotation` declara en su segundo argumento. Es un invariante verificable y barato, y es la red que convierte un error de composición en un fallo detectable en vez de en cajas negras en el lugar equivocado.
+Todo `Word` extraído de una anotación se valida contra el `rect` que `beginAnnotation` declara en su segundo argumento. Es un invariante verificable y barato, y es la red que convierte un error de composición en un fallo detectable en vez de en cajas negras en el lugar equivocado.
+
+**La prueba es de solapamiento, no de contención estricta**: la intersección entre el bbox del word y el `rect` debe ser **≥ 50% del área del word**.
+
+> **Corrección (2026-08-10, hallazgo al implementar el PR 13)**: la primera redacción exigía contención total, y **eso descarta el texto real**. Verificado ejecutando la aritmética sobre el run medido: con la matriz compuesta `[0,8,-8,0,17.34,60]`, el versor de ascenso apunta a `-x`, así que la caja del glifo va de `x = 9.34` a `x = 17.34` mientras el `rect` empieza en `x = 10`. **Se sale 0,66 pt**, y con contención estricta los cinco runs de la firma se descartan: la feature no hace nada sobre el documento que la motivó. La causa es tipográfica y no un error de composición — el `rect` de una anotación está ajustado a la tinta visible, y la caja del glifo se extiende desde la línea de base por el ascenso.
+>
+> El solapamiento separa limpio los dos casos, que es lo que el guard existe para distinguir: el word real solapa **91,8%**, mientras que los dos modos de falla de composición medidos en Contexto §3 dan 0% (`x = -679`, fuera de la página) o un solapamiento marginal (`y = 0`, borde inferior). Un umbral de 50% deja casi dos órdenes de margen.
 
 Un word fuera del rect se **descarta con un `warn`**, no se corrige ni se recorta: si la composición está mal, la posición no es confiable y taparla en el lugar equivocado es peor que no taparla — el usuario ve el dato y puede agregarlo a mano (Hito 10.7), mientras que una caja negra mal puesta destruye contenido y esconde el problema.
 
