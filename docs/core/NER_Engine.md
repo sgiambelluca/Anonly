@@ -270,6 +270,9 @@ Verificación del propio test: revirtiendo el decoder, el primero de los tres ti
 | `occurrence.entityType ∈ {Person, Organization, Address, Date}` | `contract.test.ts` | contract | invariante |
 | `confidence ∈ [0,1]` | `unit.test.ts` | unit | rango |
 | `bbox mapped correctly to words` | `unit.test.ts` | unit | mapping |
+| `propagates rotation when every word of the entity agrees on the angle` | `unit.test.ts` | unit | ADR-066 §6: `mapSpanToWords` arma un bbox nuevo y el campo se caía en silencio |
+| `omits rotation when the words of the entity disagree on the angle` | `unit.test.ts` | unit | ADR-066 §6: la envolvente de dos avances no tiene ángulo que la describa |
+| `leaves rotation absent for horizontal text` | `unit.test.ts` | unit | ADR-066 §6: no regresión (ausente ≡ 0) |
 | `empty text returns empty occurrences` | `edge.test.ts` | edge | caso 1 |
 | `text without entities returns empty` | `edge.test.ts` | edge | caso 2 |
 | `multi-word name produces single occurrence` | `edge.test.ts` | edge | caso 3 |

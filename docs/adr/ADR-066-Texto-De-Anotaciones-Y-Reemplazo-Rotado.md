@@ -77,6 +77,19 @@ Los `Word` resultantes llevan `source: "pdf"` —es texto nativo, no OCR— y se
 
 `textMatrix × transformInterno × beginAnnotation.transform × CTM` (Contexto §3). El `transform` de `beginAnnotation` **debe** aplicarse; ignorarlo manda todo el texto al origen de la página.
 
+> **Corrección (2026-08-13, hallazgo al probar el documento ORIGINAL de 5 páginas)**: la cadena de arriba solo puebla `textMatrix` desde `setTextMatrix`, y **eso cubre una sola de las dos formas** en que un appearance stream expresa lo mismo. El PDF medido para escribir este ADR era un extracto **aplanado** por un re-export, que trae el cuerpo del glifo metido en la escala de `Tm`. El original usa el idioma normal de PDF:
+>
+> ```
+> aplanado:  setTextMatrix [8,0,0,8,0,42.66]  +  setFont [f, 1]
+> original:  setFont [f, 8]                   +  moveText [0, 42.66]     ← sin ningún Tm
+> ```
+>
+> Con solo `Tm`, el original sale con **cuerpo 1 en vez de 8**, avances 8 veces cortos y los cinco runs **apilados en el mismo origen**: medido, los 26 words de la firma en `x = 59,0` con 1 pt de ancho, contra los `x = 9,3…48,4` con cuerpo 8 que son los correctos. O sea cajas negras minúsculas en el lugar equivocado — la feature no hace nada sobre el documento real, con los tests en verde.
+>
+> La regla completa es la de PDF 32000-1 §9.4.4: `Trm = [Tfs·Th, 0, 0, Tfs, 0, Ts] × Tm × CTM`. Se implementa así: `Tm` se mantiene desde `setTextMatrix` **y** desde los operadores de posicionamiento (`Td`, `TD`, `T*`, con su interlineado `TL`), y el cuerpo (`Tfs`, de `Tf`) y el escalado horizontal (`Th`, de `Tz`) entran como factores sobre las magnitudes. `Tfs`/`Th` son estado gráfico: `save`/`restore` los preservan. Las **dos** formas quedan cubiertas por la misma fórmula, y el extracto aplanado sigue dando exactamente el mismo bbox que antes.
+>
+> Lección de método, la misma que ya dejó anotada el Hito 10.8: el documento sobre el que se mide tiene que ser el original, no una copia re-exportada. El aplanado escondió la mitad del contrato.
+
 `beginAnnotation` guarda el CTM vigente en una pila **separada** de la de `save`/`restore`, y `endAnnotation` la restaura. Compartir una sola pila desincroniza las dos anidaciones (Contexto §3) — es el error que ya se cometió midiendo, y por eso queda escrito acá y no descubierto de nuevo en implementación.
 
 ### 3. El `rect` de la anotación es el oráculo de validación
@@ -172,6 +185,8 @@ El texto de las anotaciones entra al mismo `sortWordsByReadingOrder` que el rest
 ## Validación
 
 - Test unit (`pdf-engine`): una anotación con `beginAnnotation.transform = [1,0,0,1,10,60]` y `setTextMatrix`/`transform` como los medidos produce un `Word` con origen (17,34, 60) y `rotation: 90`.
+- Test unit: **el mismo run expresado con `Tf` + `Td` (sin `Tm`) da el mismo bbox que la forma aplanada** (§2, corrección) — es la forma que usa el documento original.
+- Test unit: dos runs posicionados con `Td` caen en **orígenes distintos** (§2, corrección): sin `Td` se apilaban todos en el mismo punto.
 - Test unit: **ignorar** el `transform` de `beginAnnotation` produce words fuera del `rect` — el test que fija el error de Contexto §3.
 - Test unit: la pila de `beginAnnotation` es independiente de la de `save`/`restore`; una anotación con `save`/`restore` desbalanceados no corrompe el CTM del resto de la página.
 - Test unit: un word que cae fuera del `rect` se descarta con `warn` y no entra en `Page.words` (§3).
