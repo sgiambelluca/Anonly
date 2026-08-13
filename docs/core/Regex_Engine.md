@@ -1,13 +1,15 @@
-<!-- CONTEXT: scope=regex-engine | dependencias=core/Contracts.md,architecture/06_Pipeline.md,adr/ADR-021-Engines-Inline-Hasta-Hito9.md,adr/ADR-022-Regex-Phone-AR-Word-Boundaries.md | audiencia=IA-implementador | fase=3 (items §15 1-18 implementados; tests cancel/perf de §14 diferidos a Hito 11; §6/§14/§15 en fase 10.7: findLiteral para el agregado manual de entidades, ADR-061) -->
+<!-- CONTEXT: scope=regex-engine | dependencias=core/Contracts.md,architecture/06_Pipeline.md,adr/ADR-021-Engines-Inline-Hasta-Hito9.md,adr/ADR-022-Regex-Phone-AR-Word-Boundaries.md,adr/ADR-066-Texto-De-Anotaciones-Y-Reemplazo-Rotado.md | audiencia=IA-implementador | fase=3 (items §15 1-18 implementados; tests cancel/perf de §14 diferidos a Hito 11; §6/§14/§15 en fase 10.7: findLiteral para el agregado manual de entidades, ADR-061; §10/§14/§15 en fase 10.8: propagación de bbox.rotation, ADR-066 §6) -->
 
 # Regex Engine — Spec de Motor
 
 > Detecta patrones determinísticos (DNI, CUIT, teléfono, email, IBAN, tarjeta, fecha, matrícula, patente) en el texto de cada página. Emite `Occurrence[]` con `source: "regex"` y `confidence: 1.0`. Es determinista: mismo input → mismo output.
 
 **EngineId**: `regex`
-**Versión del spec**: 1.1.0
-**Última actualización**: 2026-08-06
-**Estado de implementación**: Hito 4, checklist §15 (items 1-18) implementado. Pendiente: `cancel.test.ts`/`perf.test.ts` de §14 en Hito 11 (ver nota al final de §15); `findLiteral` en Hito 10.7.
+**Versión del spec**: 1.2.0
+**Última actualización**: 2026-08-13
+**Estado de implementación**: Hito 4, checklist §15 (items 1-18) implementado; item 19 (propagación de `bbox.rotation`) en Hito 10.8. Pendiente: `cancel.test.ts`/`perf.test.ts` de §14 en Hito 11 (ver nota al final de §15); `findLiteral` en Hito 10.7.
+
+> **Nota (v1.2.0, ADR-066 §6, 2026-08-13 — `bbox.rotation` viaja en la `Occurrence`)**: `BoundingBox` ganó el campo opcional `rotation` (`Contracts.md` §5), y ADR-066 §6 lo justificó diciendo que viajaría solo por la cadena `Word → Occurrence → Replacement` porque *"`mapSpanToWords` une bboxes y el campo viaja con ellos"*. **No viajaba**: la unión construye un `BoundingBox` **nuevo** a partir de min/max escalares, así que el campo se caía en silencio — el `Word` salía con `rotation: 90` y la `Occurrence` sin el campo, y el pintado rotado de ADR-066 §7 nunca se activaba. Se propaga explícitamente, y **solo si todas las palabras del match coinciden en el ángulo**: si discrepan, la envolvente de dos direcciones de avance no tiene un ángulo que la describa y el campo queda ausente (≡ 0), que es el comportamiento previo. Ver §10, §14 y §15 item 19. El mismo defecto y el mismo criterio aplican a la copia adaptada de esta función en `NER_Engine.md`.
 
 > **Nota (v1.1.0, ADR-061, 2026-08-06 — `findLiteral`: agregado manual de entidades)**: este motor gana un método **dedicado** para buscar un valor literal que el usuario escribió o señaló, y emitir sus ocurrencias con `source: DetectionSource.Manual`. Cubre el agujero de que una entidad no detectada no tenía ninguna vía de corrección — y el recall del NER es métrica **informativa** en MVP (`roadmap/MVP.md` §5), o sea que el roadmap ya asume que se escapan. Vive acá, y no en un motor nuevo ni host-side, porque es exactamente la responsabilidad de este motor (encontrar cadenas en un documento y emitir `Occurrence`) y porque `mapSpanToWords` —el bbox unión de un rango de texto, la parte difícil— ya está implementado y testeado acá. **No usa `addPattern`**: ese registro es para patrones que participan de todas las corridas siguientes, y un valor puntual del usuario no debe re-evaluarse contra cada documento futuro; la durabilidad la resuelve el Orchestrator (ADR-061 §5). Búsqueda **exacta**, insensible a mayúsculas y acentos: `"J. Pérez"` **no** matchea `"José Pérez"` — limitación conocida y asertada por un test, con la búsqueda difusa anotada en `roadmap/Future_Ideas.md` §5.1b. Al NER, en cambio, **no se le puede pedir que busque un valor**: es un clasificador de tokens, no un buscador (ADR-061, Contexto §5). Ver §6, §13 y §14.
 
@@ -176,7 +178,7 @@ Las `Occurrence` individuales no se retornan; se emiten vía `ENTITY_FOUND`. Cad
   id: string;                  // UUID v4
   value: string;               // texto matcheado, sin normalizar de presentación
   normalizedValue: string;     // para agrupar (sin puntuación redundante, lowercase)
-  bbox: BoundingBox;           // mapeado desde el span en Page.words
+  bbox: BoundingBox;           // mapeado desde el span en Page.words (ver invariante de rotation abajo)
   pageIndex: number;
   source: DetectionSource.Regex;
   confidence: 1.0;
@@ -185,6 +187,10 @@ Las `Occurrence` individuales no se retornan; se emiten vía `ENTITY_FOUND`. Cad
   wordSpan?: WordSpan;         // referencia a Page.words[startIndex, endIndexExclusive)
 }
 ```
+
+**Invariante de `bbox.rotation` (ADR-066 §6)**: el bbox de la ocurrencia es la **unión** de los bboxes de las `Word` del match, y esa unión construye un `BoundingBox` nuevo. `rotation` se propaga explícitamente y **solo si todas las palabras del match coinciden en el ángulo** — en la práctica lo comparten, porque son tokens del mismo run. Si discrepan, el campo queda **ausente** (≡ 0, `Contracts.md` §5): la envolvente de dos direcciones de avance no tiene un ángulo que la describa, y el reemplazo se pinta horizontal. Para texto horizontal el campo sigue ausente, exactamente como antes del ADR.
+
+Sin esta propagación el campo se cae en silencio y el pintado rotado de ADR-066 §7 nunca se activa — es el defecto que el Hito 10.8 encontró en prueba manual, con todos los tests unitarios en verde.
 
 ---
 
@@ -260,6 +266,10 @@ Regex es determinista: si la regex compila, no hay errores de runtime. Errores d
 | **`findLiteral does NOT match "J. Pérez" for "José Pérez"`** | `unit.test.ts` | unit | ADR-061 §2 — asertar la **limitación** deliberada: protege contra implementarla por accidente y contra romperla en silencio (`Future_Ideas.md` §5.1b) |
 | `findLiteral with a value absent from the document returns 0 and emits nothing` | `edge.test.ts` | edge | ADR-061 §6 |
 | `findLiteral works over OCR-sourced words` | `edge.test.ts` | edge | ADR-061 §1 |
+| `propagates rotation from the matched words to the occurrence bbox` | `unit.test.ts` | unit | ADR-066 §6: `mapSpanToWords` arma un bbox nuevo y el campo se caía en silencio |
+| `propagates rotation when every word of a multi-word match agrees` | `unit.test.ts` | unit | ADR-066 §6: unión de varias palabras del mismo run |
+| `omits rotation when the words of a match disagree on the angle` | `unit.test.ts` | unit | ADR-066 §6: la envolvente de dos avances no tiene ángulo que la describa |
+| `leaves rotation absent for horizontal text` | `unit.test.ts` | unit | ADR-066 §6: no regresión (ausente ≡ 0) |
 | `snapshot of occurrences for text-10p.pdf stable` | `snapshot.test.ts` | snapshot | fixture |
 
 Fixtures: `tests/fixtures/text-10p.pdf` (con DNIs, CUITs, emails, teléfonos conocidos).
@@ -287,6 +297,7 @@ Fixtures: `tests/fixtures/text-10p.pdf` (con DNIs, CUITs, emails, teléfonos con
 - [ ] 16. Ejecutar `pnpm lint && pnpm typecheck && pnpm test` verde.
 - [ ] 17. Verificar `index.ts` exporta solo `RegexEngine`, tipos, `DEFAULT_PATTERNS_AR`, errores.
 - [ ] 18. Verificar imports sin dependencias prohibidas.
+- [x] 19. (Hito 10.8 — ADR-066 §6) `mapSpanToWords`: propagar `bbox.rotation` a la `Occurrence`, solo si **todas** las palabras del match coinciden en el ángulo; si discrepan, el campo queda ausente (§10). **No** tocar la geometría de la unión (`x`/`y`/`width`/`height`) ni el `wordSpan`. Cuatro filas nuevas en §14.
 
 > **Estado Hito 4**: items 1–18 implementados, incluyendo el comportamiento funcional de cancelación
 > cooperativa (chequeo de `abortSignal` entre páginas) y de timeout por patrón custom (1000 ms).
