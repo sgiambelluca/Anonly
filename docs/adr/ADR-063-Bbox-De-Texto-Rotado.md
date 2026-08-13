@@ -2,7 +2,7 @@
 
 # ADR-063 — El bbox de un `Word` sale de la matriz completa, no de su traslación
 
-- **Estado**: Accepted (**§5 superseded por ADR-066 §6**, 2026-08-10: `BoundingBox` **sí** gana campo de rotación. El argumento de §5 —"el defecto es de cobertura, no de legibilidad"— se apoyaba en que el único texto rotado del documento era una marca de agua que el humano decidió no tapar; al aparecer una firma digital vertical con el nombre del firmante y la fecha, un reemplazo ilegible dejó de ser tolerable. §2, §3 y §4 quedan intactos)
+- **Estado**: Accepted (**§5 superseded por ADR-066 §6**, 2026-08-10: `BoundingBox` **sí** gana campo de rotación. El argumento de §5 —"el defecto es de cobertura, no de legibilidad"— se apoyaba en que el único texto rotado del documento era una marca de agua que el humano decidió no tapar; al aparecer una firma digital vertical con el nombre del firmante y la fecha, un reemplazo ilegible dejó de ser tolerable. **§4 superseded por ADR-067**, 2026-08-13: el orden de lectura **sí** cambia para texto rotado, y con `BoundingBox.rotation` ya en el modelo el cambio no arrastra a `ocr-engine`. §2 y §3 quedan intactos)
 - **Fecha**: 2026-08-09
 - **Decidido por**: El humano, tras probar la herramienta sobre una pericia judicial real y encontrar que el reemplazo de una firma vertical se pintaba desplazado, atravesando la página. Pidió medir antes de escribir el ADR.
 - **Relacionado con**: ADR-020 §1 (el prorrateo de `x`/`width` por token que este ADR generaliza), ADR-013 §6 (`parsePage` puro, donde vive el cambio), ADR-058 (el repintado de línea, que consume estos bbox)
@@ -69,7 +69,9 @@ Para ángulos arbitrarios (una marca de agua diagonal, p. ej.) la envolvente es 
 
 El split por whitespace de ADR-020 §1 se conserva íntegro, incluida la aproximación de ancho de carácter constante dentro del run. Lo único que cambia es el eje: el desplazamiento de cada token deja de ser `x + charWidth · offset` y pasa a ser `p0 + dir · (charWidth · offset)`. Para 0° las dos expresiones son idénticas.
 
-### 4. El orden de lectura no cambia
+### 4. El orden de lectura no cambia — **SUPERSEDED por ADR-067**
+
+> **Superseded (2026-08-13, ADR-067)**: el orden de lectura **sí** cambia, para texto rotado. Los dos argumentos de esta sección cayeron: (a) *"arrastra a `ocr-engine`"* — `ocr-engine` nunca puebla `bbox.rotation`, así que un orden que se ramifica por ese campo no lo alcanza; (b) *"en ningún caso el texto vertical se concatenaba bien"* — cierto para una marca de agua de dos tokens, falso para un run de cinco palabras que contiene el nombre de quien firma, que sale disperso y sin grupo de Persona. La señal que faltaba —`BoundingBox.rotation`— la agregó ADR-066 §6, posterior a este ADR. Ver ADR-067, Contexto §3. El texto original queda abajo.
 
 `words` sigue ordenado por `bbox.y` asc y luego `bbox.x` asc. El invariante de `03_Data_Model.md` §115 y de `OCR_Engine.md` queda **intacto**.
 

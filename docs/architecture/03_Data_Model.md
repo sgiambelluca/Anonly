@@ -112,7 +112,7 @@ export interface Page {
 ```
 
 **Invariantes**
-- `words` está ordenado por `bbox.y` asc, luego `bbox.x` asc (orden de lectura).
+- `words` está ordenado por `bbox.y` asc, luego `bbox.x` asc (orden de lectura). **ADR-067**: los words con `bbox.rotation` 90/180/270 se agrupan en *runs* —misma coordenada transversal (tolerancia 1) y contiguos sobre el eje de avance (hueco ≤ 2 cuerpos)—, cada run se ordena en su dirección de avance, y los runs se emiten **enteros y contiguos, en una pasada aparte después de todo el texto horizontal** (nunca intercalados: intercalarlos parte una línea horizontal al medio, porque el comparador con tolerancia no es transitivo). Para `rotation` ausente o `0` el orden es literalmente el de la primera oración, en **cualquier** página tenga o no texto rotado.
 - Si `requiresOCR === false`, entonces `words.length > 0` o la página es genuinamente vacía.
 - `ocrCompleted === true` implica que la página **pasó por OCR**, entera o por región (ADR-065 §7). Hasta ADR-065 implicaba `requiresOCR === true`, porque solo existía el camino de página entera; con el OCR por región una página con texto nativo (`requiresOCR === false`) también puede haber pasado por OCR. `requiresOCR` conserva su significado exacto —"`pdf-engine` no extrajo texto nativo de esta página"— y no debe leerse como "esta página no vio OCR".
 - `text` es la concatenación de `words.map(w => w.text).join(" ")` con normalización NFC.
