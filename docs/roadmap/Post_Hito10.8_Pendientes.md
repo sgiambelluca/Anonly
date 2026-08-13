@@ -71,6 +71,14 @@ Requiere orden consciente de columnas, que cambia un invariante compartido con `
 
 ---
 
+## 4bis. Los patrones numéricos matchean partes del número de expediente
+
+Verificado sobre la pericia real: `PP-13-00-000000-24/00` produce una ocurrencia **`[PHONE] "00-000000"`**. Los patrones de `default-ar.ts` no tienen forma de distinguir un tramo de número de causa de un teléfono.
+
+Es un falso positivo benigno en cuanto a fuga (tapa de más, no de menos), pero ensucia la lista de entidades y probablemente explique el "aparecen tres fechas" que reportó el humano. Conviene revisarlo junto con el punto 4, que toca la misma tabla y ya requiere ADR.
+
+---
+
 ## 5. Recall de NER sobre nombres
 
 No se detecta "VARGAS Diego Ramos" (apellido primero, mayúsculas) ni se unifica con "Dr. Diego Ramos Vargas" de otra página.
