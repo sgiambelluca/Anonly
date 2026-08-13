@@ -34,7 +34,10 @@ import {
   createMockPdfDocument,
   createValidInput,
   mockGetDocumentResult,
+  rotatedTextItem,
+  type MockAnnotationInnerOp,
   type MockAnnotationSpec,
+  type MockTextItem,
 } from "./fixtures/test-helpers.js";
 
 describe("PdfEngine — unit tests", () => {
@@ -100,6 +103,280 @@ describe("PdfEngine — unit tests", () => {
       expect(words[0]!.text).toBe("AWord");
       expect(words[1]!.text).toBe("BWord");
       expect(words[2]!.text).toBe("ZWord");
+    });
+  });
+
+  // ADR-067: el orden se ramifica por `bbox.rotation`. Los runs se describen
+  // por su bbox (columna + avance), que es el espacio en el que razona el ADR.
+  describe("Word sorting — runs rotados (ADR-067, §13 casos 34-38)", () => {
+    const pageTextOf = async (
+      documentId: string,
+      items: ReadonlyArray<MockTextItem>,
+    ): Promise<string> => {
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument(1, () => createMockPage(0, items))),
+      );
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput(documentId), ctx);
+      return output.document.pages[0]!.text;
+    };
+
+    /* Un run a 90° avanza hacia arriba en pantalla: la primera palabra es la
+     * de mayor `bbox.y`. Ordenar por `y` asc lo invierte — el defecto. */
+    const runAt90 = (
+      column: number,
+      em: number,
+      bottomY: number,
+      tokens: ReadonlyArray<{ readonly str: string; readonly advance: number }>,
+    ): MockTextItem[] => {
+      let y = bottomY;
+      return tokens.map(({ str, advance }) => {
+        const item = rotatedTextItem(str, {
+          bboxX: column,
+          bboxY: y - advance,
+          em,
+          advance,
+          rotation: 90,
+        });
+        y -= advance + em * 0.5; // hueco de medio cuerpo: un espacio real
+        return item;
+      });
+    };
+
+    it("reading order is unchanged for a page without rotated text", async () => {
+      // Caso 34: la garantía de no regresión que también fija el snapshot.
+      const text = await pageTextOf("doc-067-horizontal", [
+        { str: "Bottom", x: 10, y: 600, width: 40, height: 12 },
+        { str: "Top", x: 10, y: 800, width: 30, height: 12 },
+        { str: "TopRight", x: 200, y: 800, width: 50, height: 12 },
+      ]);
+      expect(text).toBe("Top TopRight Bottom");
+    });
+
+    it("a 90° run comes out in advance order, not reversed", async () => {
+      const text = await pageTextOf(
+        "doc-067-advance",
+        runAt90(100, 8, 700, [
+          { str: "Date:", advance: 19 },
+          { str: "07/07/2026", advance: 38 },
+          { str: "12:30:18", advance: 30 },
+        ]),
+      );
+      expect(text).toBe("Date: 07/07/2026 12:30:18");
+    });
+
+    it("parallel rotated runs stay contiguous in Page.text", async () => {
+      // Caso 35: la firma real — cinco columnas paralelas solapadas en `y`.
+      // Antes de ADR-067 salían intercaladas y cada una invertida.
+      const text = await pageTextOf("doc-067-firma", [
+        ...runAt90(100, 8, 700, [
+          { str: "Albarracin,", advance: 39 },
+          { str: "Rocio", advance: 18 },
+          { str: "de", advance: 7 },
+          { str: "los", advance: 11 },
+          { str: "Milagros", advance: 28 },
+        ]),
+        ...runAt90(110, 8, 700, [
+          { str: "Date:", advance: 19 },
+          { str: "07/07/2026", advance: 38 },
+        ]),
+      ]);
+      expect(text).toContain("Albarracin, Rocio de los Milagros");
+      expect(text).toContain("Date: 07/07/2026");
+    });
+
+    it("two runs in the same column split on the advance gap", async () => {
+      // Caso 36: la marca de agua arriba y la firma abajo comparten columna.
+      // Con la tolerancia transversal sola quedarían fusionadas.
+      const text = await pageTextOf("doc-067-gap", [
+        ...runAt90(100, 8, 780, [
+          { str: "Date:", advance: 19 },
+          { str: "07/07/2026", advance: 38 },
+        ]),
+        ...runAt90(100, 8, 300, [
+          { str: "CCS", advance: 27 },
+          { str: "E13000013835753", advance: 137 },
+        ]),
+      ]);
+      expect(text).toBe("CCS E13000013835753 Date: 07/07/2026");
+    });
+
+    it("rotation 270 orders by y asc and 180 by x desc", async () => {
+      const text270 = await pageTextOf("doc-067-270", [
+        rotatedTextItem("primero", { bboxX: 100, bboxY: 100, em: 8, advance: 30, rotation: 270 }),
+        rotatedTextItem("segundo", { bboxX: 100, bboxY: 134, em: 8, advance: 30, rotation: 270 }),
+      ]);
+      expect(text270).toBe("primero segundo");
+
+      const text180 = await pageTextOf("doc-067-180", [
+        rotatedTextItem("primero", { bboxX: 200, bboxY: 100, em: 8, advance: 30, rotation: 180 }),
+        rotatedTextItem("segundo", { bboxX: 166, bboxY: 100, em: 8, advance: 30, rotation: 180 }),
+      ]);
+      expect(text180).toBe("primero segundo");
+    });
+
+    it("a rotated run never splits a horizontal line", async () => {
+      // Regresión medida sobre la pericia de 5 páginas (ADR-067 §4,
+      // corrección): la marca de agua del margen se encajaba entre "La" y
+      // "Plata" porque su ancla caía dentro de la tolerancia de una de las
+      // dos y fuera de la de la otra (el comparador tiene tolerancia 1, o sea
+      // que no es transitivo). `mapSpanToWords` une el rango de índices
+      // completo, así que el bbox de "La Plata" arrancaba en el margen
+      // izquierdo: 240 pt corrido.
+      const text = await pageTextOf("doc-067-no-parte-linea", [
+        { str: "Departamento", x: 140, y: 442, width: 60, height: 8 },
+        { str: "Judicial", x: 205, y: 442, width: 40, height: 8 },
+        { str: "La", x: 250, y: 442, width: 12, height: 8 },
+        { str: "Plata", x: 265, y: 441.2, width: 25, height: 8 },
+        ...runAt90(10, 8, 441.5, [
+          { str: "CCS", advance: 27 },
+          { str: "E13000013835753", advance: 137 },
+        ]),
+      ]);
+      expect(text).toContain("Departamento Judicial La Plata");
+      expect(text).toBe("Departamento Judicial La Plata CCS E13000013835753");
+    });
+
+    it("horizontal order is identical with and without rotated text", async () => {
+      // La garantía de no regresión de ADR-067 §4: el texto horizontal se
+      // ordena en su propia pasada, sin que ningún ancla de run participe.
+      const horizontales: MockTextItem[] = [
+        { str: "Departamento", x: 140, y: 442, width: 60, height: 8 },
+        { str: "Judicial", x: 205, y: 442, width: 40, height: 8 },
+        { str: "La", x: 250, y: 442, width: 12, height: 8 },
+        { str: "Plata", x: 265, y: 441.2, width: 25, height: 8 },
+        { str: "otra", x: 140, y: 400, width: 20, height: 8 },
+        { str: "linea", x: 165, y: 399.4, width: 22, height: 8 },
+      ];
+      const sinRun = await pageTextOf("doc-067-sin-run", horizontales);
+      const conRun = await pageTextOf("doc-067-con-run", [
+        ...horizontales,
+        ...runAt90(10, 8, 441.5, [
+          { str: "CCS", advance: 27 },
+          { str: "E13000013835753", advance: 137 },
+        ]),
+      ]);
+
+      expect(conRun.startsWith(sinRun)).toBe(true);
+      expect(conRun).toBe(`${sinRun} CCS E13000013835753`);
+    });
+
+    it("emits the runs after all horizontal text, ordered among themselves", async () => {
+      // §4 (corrección): los runs van en una pasada aparte, después del texto
+      // horizontal, y entre sí se ordenan por el bbox de su primera palabra en
+      // orden de lectura (la de más abajo en un run a 90°).
+      const text = await pageTextOf("doc-067-anclaje", [
+        { str: "encabezado", x: 10, y: 800, width: 60, height: 12 },
+        ...runAt90(200, 8, 700, [{ str: "segundo", advance: 26 }]),
+        { str: "pie", x: 10, y: 40, width: 20, height: 12 },
+        ...runAt90(100, 8, 300, [{ str: "primero", advance: 26 }]),
+      ]);
+      expect(text).toBe("encabezado pie primero segundo");
+    });
+
+    it("fuseOcrRegion preserves native rotated runs", async () => {
+      // §6: el orden se recalcula al fusionar; los runs nativos sobreviven y
+      // las words de OCR (sin `rotation`) entran por la rama horizontal.
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () =>
+            createMockPage(
+              0,
+              runAt90(100, 8, 700, [
+                { str: "Albarracin,", advance: 39 },
+                { str: "Rocio", advance: 18 },
+              ]),
+            ),
+          ),
+        ),
+      );
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-067-fusion"), ctx);
+
+      const fused = fuseOcrRegion(output.document, 0, { x: 300, y: 300, width: 100, height: 50 }, [
+        {
+          text: "escaneado",
+          bbox: { x: 5, y: 5, width: 40, height: 10 },
+          pageIndex: 0,
+          confidence: 0.9,
+          source: "ocr",
+        },
+      ]);
+
+      expect(fused.pages[0]!.text).toContain("Albarracin, Rocio");
+      expect(fused.pages[0]!.text).toContain("escaneado");
+    });
+  });
+
+  // ADR-068: `getTextContent()` aplica el word spacing a los espacios que
+  // después descarta del `str`, y el renderer no. Para un run con espacios
+  // iniciales y `Tw ≠ 0` el origen reportado queda a la izquierda del glifo
+  // real (medido sobre la pericia: 58,3 pt).
+  describe("Corrección del origen por word spacing (ADR-068, §13 caso 41)", () => {
+    // Tfs=10, dos espacios de 500/1000 em => 5 pt cada uno sin Tw.
+    // Con Tw=-2: 5-2 = 3 pt cada uno. Origen del run en x=100.
+    //   renderer  -> 100 + 2*5 = 110
+    //   getTextContent -> 100 + 2*3 = 106
+    const runConWordSpacing = (wordSpacing: number): MockAnnotationInnerOp[] => [
+      { kind: "save" },
+      { kind: "beginText" },
+      { kind: "setFont", size: 10 },
+      { kind: "setTextMatrix", matrix: [1, 0, 0, 1, 100, 700] },
+      { kind: "setWordSpacing", value: wordSpacing },
+      {
+        kind: "showText",
+        glyphs: [
+          { unicode: " ", width: 500 },
+          { unicode: " ", width: 500 },
+          { unicode: "A", width: 500 },
+          { unicode: "B", width: 500 },
+        ],
+      },
+      { kind: "restore" },
+    ];
+
+    const runWithItemAt = async (
+      documentId: string,
+      itemX: number,
+      wordSpacing: number,
+    ): Promise<Word> => {
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () =>
+            createMockPage(
+              0,
+              [{ str: "AB", x: itemX, y: 700, width: 10, height: 10 }],
+              [],
+              { width: 595, height: 842 },
+              [],
+              runConWordSpacing(wordSpacing),
+            ),
+          ),
+        ),
+      );
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput(documentId), ctx);
+      return output.document.pages[0]!.words[0]!;
+    };
+
+    it("moves the word to the origin the renderer draws, not the reported one", async () => {
+      const word = await runWithItemAt("doc-068-corrige", 106, -2);
+      expect(word.text).toBe("AB");
+      expect(word.bbox.x).toBeCloseTo(110, 6);
+    });
+
+    it("leaves the origin untouched when there is no word spacing", async () => {
+      // No-regresión: sin `Tw` no hay corrección que construir, así que el
+      // item conserva exactamente el origen que reportó `getTextContent`.
+      const word = await runWithItemAt("doc-068-sin-tw", 106, 0);
+      expect(word.bbox.x).toBeCloseTo(106, 6);
+    });
+
+    it("leaves an item untouched when its origin matches no correction", async () => {
+      // El guard que hace la corrección segura: si la reproducción del origen
+      // equivocado no coincide con el item, el item no se toca.
+      const word = await runWithItemAt("doc-068-sin-match", 300, -2);
+      expect(word.bbox.x).toBeCloseTo(300, 6);
     });
   });
 
@@ -562,6 +839,100 @@ describe("PdfEngine — unit tests", () => {
       // (versor de ascenso) y lo convierte a arriba-izquierda.
       expect(word.bbox.x).toBeCloseTo(17.34 - 8, 6);
       expect(word.bbox.y).toBeCloseTo(842 - 68, 6);
+    });
+
+    // ADR-066 §2 (corrección 2026-08-13): el MISMO documento, sin aplanar,
+    // pone el cuerpo en `Tf` y la posición en `Td`, sin ningún `Tm`. Los dos
+    // tests de acá abajo son el mismo run expresado en las dos formas, y
+    // tienen que dar el mismo bbox — con la versión previa, la forma real
+    // salía con cuerpo 1 y todos los runs apilados en el mismo origen.
+    it("a run positioned with Tf + Td yields the same bbox as the flattened Tm form", async () => {
+      const annotationSpec: MockAnnotationSpec = {
+        id: "72R",
+        rect: MEASURED_RECT,
+        transform: MEASURED_ANNOTATION_TRANSFORM,
+        innerOps: [
+          { kind: "save" },
+          { kind: "transform", matrix: MEASURED_INNER_TRANSFORM },
+          { kind: "beginText" },
+          { kind: "setFont", size: 8 }, // Tfs = 8 (en la forma aplanada iba en Tm)
+          { kind: "moveText", tx: 0, ty: 42.66 }, // Td (en la aplanada iba en Tm)
+          {
+            kind: "showText",
+            glyphs: [
+              { unicode: "A", width: 500 },
+              { unicode: "B", width: 500 },
+            ],
+          },
+          { kind: "restore" },
+        ],
+      };
+
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () =>
+            createMockPage(0, [], [], { width: 595, height: 842 }, [annotationSpec]),
+          ),
+        ),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-annotation-tf-td"), ctx);
+      const words = output.document.pages[0]!.words;
+
+      expect(words).toHaveLength(1);
+      const word = words[0]!;
+      expect(word.text).toBe("AB");
+      expect(word.bbox.rotation).toBe(90);
+      expect(word.bbox.width).toBeCloseTo(8, 6);
+      expect(word.bbox.height).toBeCloseTo(8, 6);
+      expect(word.bbox.x).toBeCloseTo(17.34 - 8, 6);
+      expect(word.bbox.y).toBeCloseTo(842 - 68, 6);
+    });
+
+    it("two runs positioned with Td land at different origins", async () => {
+      // El síntoma concreto: sin `Td`, los cinco runs de la firma se apilaban
+      // en el mismo origen (medido: los 26 words en x = 59.0, ancho 1).
+      const annotationSpec: MockAnnotationSpec = {
+        id: "72R",
+        rect: MEASURED_RECT,
+        transform: MEASURED_ANNOTATION_TRANSFORM,
+        innerOps: [
+          { kind: "save" },
+          { kind: "transform", matrix: MEASURED_INNER_TRANSFORM },
+          { kind: "beginText" },
+          { kind: "setFont", size: 8 },
+          { kind: "moveText", tx: 0, ty: 42.66 },
+          { kind: "showText", glyphs: [{ unicode: "A", width: 500 }] },
+          { kind: "restore" },
+          { kind: "save" },
+          { kind: "transform", matrix: MEASURED_INNER_TRANSFORM },
+          { kind: "beginText" },
+          { kind: "setFont", size: 8 },
+          { kind: "moveText", tx: 0, ty: 32.9 },
+          { kind: "showText", glyphs: [{ unicode: "B", width: 500 }] },
+          { kind: "restore" },
+        ],
+      };
+
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () =>
+            createMockPage(0, [], [], { width: 595, height: 842 }, [annotationSpec]),
+          ),
+        ),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-annotation-dos-td"), ctx);
+      const words = output.document.pages[0]!.words;
+
+      expect(words).toHaveLength(2);
+      const xs = words.map((w) => w.bbox.x);
+      expect(new Set(xs).size).toBe(2);
+      // 42.66 - 32.9 = 9.76 pt de separación entre columnas, sobre el eje x
+      // porque el run corre a 90°.
+      expect(Math.abs((xs[0] as number) - (xs[1] as number))).toBeCloseTo(9.76, 6);
     });
 
     it("ignoring the beginAnnotation transform pushes words out of the rect", async () => {
