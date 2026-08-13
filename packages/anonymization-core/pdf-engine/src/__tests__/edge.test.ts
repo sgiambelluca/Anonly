@@ -18,7 +18,7 @@ vi.mock("pdfjs-dist", async (importOriginal) => {
   return { ...actual, getDocument: vi.fn() };
 });
 
-import { PdfEngine, decodePdfEngineOutput } from "../pdf.engine.js";
+import { PdfEngine, decodePdfEngineOutput, fuseOcrRegion } from "../pdf.engine.js";
 import { PdfCorruptedError, PdfInvalidError, PdfPasswordRequiredError } from "../pdf.errors.js";
 import type { PdfEngineInput } from "../pdf.types.js";
 
@@ -29,7 +29,9 @@ import {
   createValidInput,
   mockGetDocumentFailure,
   mockGetDocumentResult,
+  rotatedTextItem,
   type MockAnnotationSpec,
+  type MockTextItem,
 } from "./fixtures/test-helpers.js";
 
 describe("PdfEngine — edge case tests", () => {
@@ -796,6 +798,64 @@ describe("PdfEngine — edge case tests", () => {
       expect(serialized).not.toContain(secret);
       expect(serialized).not.toContain("Juan");
       expect(details).toMatchObject({ receivedShape: "object(keys=[output])" });
+    });
+  });
+
+  describe("Orden de lectura con rotación — bordes (ADR-067, §13 casos 37-38)", () => {
+    const pageTextOf = async (
+      documentId: string,
+      items: ReadonlyArray<MockTextItem>,
+    ): Promise<string> => {
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument(1, () => createMockPage(0, items))),
+      );
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput(documentId), ctx);
+      return output.document.pages[0]!.text;
+    };
+
+    it("single-word rotated run", async () => {
+      // Caso 37: un run de un elemento es un run válido, y como cualquier run
+      // sale después del texto horizontal (ADR-067 §4) — nunca en el medio de
+      // una línea.
+      const text = await pageTextOf("doc-067-single", [
+        { str: "arriba", x: 10, y: 800, width: 40, height: 12 },
+        rotatedTextItem("sello", { bboxX: 300, bboxY: 400, em: 8, advance: 20, rotation: 90 }),
+        { str: "abajo", x: 10, y: 40, width: 40, height: 12 },
+      ]);
+      expect(text).toBe("arriba abajo sello");
+    });
+
+    it("explicit rotation 0 sorts with the horizontal branch", async () => {
+      // Caso 38: `Contracts.md` §5, ausente ≡ 0. `pdf-engine` no puebla el
+      // campo en 0° (ADR-066 §8), así que el `0` explícito llega desde otra
+      // fuente; el orden tiene que tratarlo igual que a un bbox sin campo.
+      const words = [
+        { text: "b", bbox: { x: 10, y: 200, width: 5, height: 10, rotation: 0 as const } },
+        { text: "a", bbox: { x: 10, y: 100, width: 5, height: 10 } },
+        { text: "c", bbox: { x: 10, y: 300, width: 5, height: 10, rotation: 0 as const } },
+      ].map((w) => ({ ...w, pageIndex: 0, confidence: 1, source: "pdf" as const }));
+
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () =>
+            createMockPage(0, [{ str: "seed", x: 10, y: 800, width: 20, height: 12 }]),
+          ),
+        ),
+      );
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-067-rot0"), ctx);
+      const page = output.document.pages[0]!;
+
+      // `fuseOcrRegion` es la vía pública que reordena un `Word[]` armado a
+      // mano (ADR-065 §3): sirve para ejercitar el orden sin inventar un PDF.
+      const fused = fuseOcrRegion(
+        { ...output.document, pages: [{ ...page, words: [], text: "" }] },
+        0,
+        { x: 0, y: 0, width: 595, height: 842 },
+        words,
+      );
+      expect(fused.pages[0]!.text).toBe("a b c");
     });
   });
 });

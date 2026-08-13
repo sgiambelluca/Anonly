@@ -177,7 +177,58 @@ export type MockTextItem = {
   readonly y: number;
   readonly width: number;
   readonly height: number;
+  /**
+   * Parte lineal `[a, b, c, d]` de la matriz (ADR-063 §1). Ausente = texto
+   * horizontal, o sea la identidad, que es lo que asumían todos los mocks
+   * previos a ADR-067. Solo importa la DIRECCIÓN de los versores: el tamaño
+   * lo dan `width` (avance) y `height` (cuerpo).
+   */
+  readonly linear?: readonly [number, number, number, number];
 };
+
+/**
+ * Construye un `MockTextItem` rotado **describiéndolo por el bbox que debe
+ * producir** (origen arriba-izquierda, el espacio de `Word.bbox`), en vez de
+ * por la línea de base en espacio PDF. Los tests de ADR-067 razonan sobre
+ * columnas y huecos, que son propiedades del bbox: obligarlos a despejar la
+ * traslación a mano escondería lo que están fijando.
+ *
+ * `em` es el cuerpo del glifo (extensión transversal del bbox) y `advance` el
+ * largo del texto. La inversión de cada ángulo sale de
+ * `boundingBoxFromParallelogram` (ADR-063 §2).
+ */
+export function rotatedTextItem(
+  str: string,
+  spec: {
+    readonly bboxX: number;
+    readonly bboxY: number;
+    readonly em: number;
+    readonly advance: number;
+    readonly rotation: 90 | 180 | 270;
+    readonly pageHeight?: number;
+  },
+): MockTextItem {
+  const pageHeight = spec.pageHeight ?? 842;
+  const base = { str, width: spec.advance, height: spec.em };
+
+  if (spec.rotation === 90) {
+    return {
+      ...base,
+      linear: [0, 1, -1, 0],
+      x: spec.bboxX + spec.em,
+      y: pageHeight - spec.bboxY - spec.advance,
+    };
+  }
+  if (spec.rotation === 270) {
+    return { ...base, linear: [0, -1, 1, 0], x: spec.bboxX, y: pageHeight - spec.bboxY };
+  }
+  return {
+    ...base,
+    linear: [-1, 0, 0, -1],
+    x: spec.bboxX + spec.advance,
+    y: pageHeight - spec.bboxY,
+  };
+}
 
 /**
  * Rectángulo de imagen en puntos de página (mismo espacio que
@@ -219,6 +270,15 @@ export type MockAnnotationInnerOp =
       readonly textMatrix: Matrix6;
       readonly glyphs: ReadonlyArray<MockGlyph>;
     }
+  // ADR-066 §2 (corrección): el idioma normal de PDF pone el cuerpo en `Tf` y
+  // la posición en `Td`, sin ningún `Tm`. Estos tres ops permiten escribir esa
+  // forma tal cual la emite el documento real, en vez de la aplanada.
+  | { readonly kind: "setFont"; readonly size: number }
+  | { readonly kind: "moveText"; readonly tx: number; readonly ty: number }
+  | { readonly kind: "showText"; readonly glyphs: ReadonlyArray<MockGlyph> }
+  // ADR-068: word spacing, el que desplaza el origen que reporta `getTextContent`.
+  | { readonly kind: "setWordSpacing"; readonly value: number }
+  | { readonly kind: "setTextMatrix"; readonly matrix: Matrix6 }
   | { readonly kind: "image" };
 
 export interface MockAnnotationSpec {
@@ -244,12 +304,34 @@ const MOCK_ANNOTATION_APPEARANCE_MATRIX: Matrix6 = [1, 0, 0, 1, 0, 0];
 export function buildMockOperatorList(
   images: ReadonlyArray<MockImageRect>,
   annotations: ReadonlyArray<MockAnnotationSpec> = [],
+  // ADR-068: ops de texto de PÁGINA (fuera de toda anotación). El motor no
+  // extrae texto de acá —eso es `getTextContent()`—, solo la corrección de
+  // origen; por eso van sueltos y no dentro de un `MockAnnotationSpec`.
+  pageTextOps: ReadonlyArray<MockAnnotationInnerOp> = [],
 ): {
   readonly fnArray: number[];
   readonly argsArray: unknown[];
 } {
   const fnArray: number[] = [];
   const argsArray: unknown[] = [];
+
+  const emit = (op: MockAnnotationInnerOp): void => {
+    if (op.kind === "save") { fnArray.push(OPS.save); argsArray.push([]); }
+    else if (op.kind === "restore") { fnArray.push(OPS.restore); argsArray.push([]); }
+    else if (op.kind === "transform") { fnArray.push(OPS.transform); argsArray.push(op.matrix); }
+    else if (op.kind === "beginText") { fnArray.push(OPS.beginText); argsArray.push([]); }
+    else if (op.kind === "setFont") { fnArray.push(OPS.setFont); argsArray.push(["g_d0_f4", op.size]); }
+    else if (op.kind === "moveText") { fnArray.push(OPS.moveText); argsArray.push([op.tx, op.ty]); }
+    else if (op.kind === "showText") { fnArray.push(OPS.showText); argsArray.push([op.glyphs]); }
+    else if (op.kind === "setWordSpacing") { fnArray.push(OPS.setWordSpacing); argsArray.push([op.value]); }
+    else if (op.kind === "setTextMatrix") { fnArray.push(OPS.setTextMatrix); argsArray.push(op.matrix); }
+    else if (op.kind === "textRun") {
+      fnArray.push(OPS.setTextMatrix); argsArray.push(op.textMatrix);
+      fnArray.push(OPS.showText); argsArray.push([op.glyphs]);
+    } else { fnArray.push(OPS.paintImageXObject); argsArray.push(["img", 1, 1]); }
+  };
+
+  for (const op of pageTextOps) emit(op);
 
   for (const image of images) {
     fnArray.push(OPS.save);
@@ -290,6 +372,21 @@ export function buildMockOperatorList(
         argsArray.push(op.textMatrix);
         fnArray.push(OPS.showText);
         argsArray.push([op.glyphs]);
+      } else if (op.kind === "setFont") {
+        fnArray.push(OPS.setFont);
+        argsArray.push(["g_d0_f4", op.size]);
+      } else if (op.kind === "moveText") {
+        fnArray.push(OPS.moveText);
+        argsArray.push([op.tx, op.ty]);
+      } else if (op.kind === "showText") {
+        fnArray.push(OPS.showText);
+        argsArray.push([op.glyphs]);
+      } else if (op.kind === "setWordSpacing") {
+        fnArray.push(OPS.setWordSpacing);
+        argsArray.push([op.value]);
+      } else if (op.kind === "setTextMatrix") {
+        fnArray.push(OPS.setTextMatrix);
+        argsArray.push(op.matrix);
       } else {
         fnArray.push(OPS.paintImageXObject);
         argsArray.push(["img", 1, 1]);
@@ -309,6 +406,7 @@ export function createMockPage(
   images?: ReadonlyArray<MockImageRect>,
   pageSize?: { readonly width: number; readonly height: number },
   annotations?: ReadonlyArray<MockAnnotationSpec>,
+  pageTextOps?: ReadonlyArray<MockAnnotationInnerOp>,
 ): Record<string, unknown> {
   const items = textItems ?? [
     { str: `Page${pageIndex}Word1`, x: 50, y: 800, width: 50, height: 12 },
@@ -322,7 +420,7 @@ export function createMockPage(
       Promise.resolve({
         items: items.map((item) => ({
           str: item.str,
-          transform: [1, 0, 0, 1, item.x, item.y],
+          transform: [...(item.linear ?? [1, 0, 0, 1]), item.x, item.y],
           width: item.width,
           height: item.height,
         })),
@@ -332,7 +430,7 @@ export function createMockPage(
     // comportamiento de todos los tests que no pasan `images` explícitamente.
     // ADR-066 §1: default sin anotaciones, mismo criterio.
     getOperatorList: vi.fn(() =>
-      Promise.resolve(buildMockOperatorList(images ?? [], annotations ?? [])),
+      Promise.resolve(buildMockOperatorList(images ?? [], annotations ?? [], pageTextOps ?? [])),
     ),
   };
 }

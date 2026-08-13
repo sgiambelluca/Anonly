@@ -247,6 +247,7 @@ function convertTextItemsToWords(
   textContent: TextContentLike,
   pageIndex: number,
   pageHeight: number,
+  originCorrections: ReadonlyArray<TextOriginCorrection> = [],
 ): Word[] {
   const words: Word[] = [];
 
@@ -254,8 +255,18 @@ function convertTextItemsToWords(
     if (!item.str || item.str.trim().length === 0 || !item.transform) continue;
 
     const str = item.str;
-    const originX = item.transform[4] ?? 0;
-    const originY = item.transform[5] ?? 0;
+    const reportedX = item.transform[4] ?? 0;
+    const reportedY = item.transform[5] ?? 0;
+    // ADR-068: si el origen reportado coincide con uno que se sabe desplazado
+    // por el word spacing, se usa el que dibuja el renderer. Sin coincidencia
+    // —el caso de todo documento sin `Tw`— el item queda intacto.
+    const correction = originCorrections.find(
+      (c) =>
+        Math.abs(c.from.x - reportedX) <= ORIGIN_CORRECTION_EPSILON &&
+        Math.abs(c.from.y - reportedY) <= ORIGIN_CORRECTION_EPSILON,
+    );
+    const originX = correction?.to.x ?? reportedX;
+    const originY = correction?.to.y ?? reportedY;
     const width = item.width ?? 0;
     const height = item.height ?? 12;
     const dir = unitVectorOrDefault(item.transform[0] ?? 0, item.transform[1] ?? 0, {
@@ -314,14 +325,179 @@ function convertTextItemsToWords(
   return words;
 }
 
+/*
+ * ADR-067 §1: tolerancia de "misma línea" del orden de lectura, y —espejada
+ * sobre el eje transversal— de "misma columna" para un run rotado.
+ */
+const SAME_LINE_TOLERANCE = 1;
+
+/*
+ * ADR-067 §2: hueco máximo, en cuerpos del glifo, entre dos palabras
+ * consecutivas de un mismo run rotado. Medido sobre la firma de la pericia:
+ * los huecos reales de un espacio van de 0,44 a 0,58 cuerpos, y el que separa
+ * la marca de agua del run `Date:` —que comparten columna por 1,1 pt— es de
+ * 30. Dos órdenes de margen para los dos lados.
+ */
+const ROTATED_RUN_GAP_IN_EMS = 2;
+
+type Rotation = NonNullable<BoundingBox["rotation"]>;
+
+/** Comparador histórico (`y` asc con tolerancia, luego `x` asc), intacto. */
+function compareByReadingOrder(a: BoundingBox, b: BoundingBox): number {
+  const dy = a.y - b.y;
+  if (Math.abs(dy) > SAME_LINE_TOLERANCE) return dy;
+  return a.x - b.x;
+}
+
+/*
+ * ADR-067 §2: eje perpendicular al avance — el que identifica la columna de un
+ * run. Para 90/270 el texto corre sobre `y`, así que la columna es `x`; para
+ * 180 corre sobre `x` y la "columna" es la línea `y`.
+ */
+function crossAxisOf(bbox: BoundingBox, rotation: Rotation): number {
+  return rotation === 180 ? bbox.y : bbox.x;
+}
+
+/** Cuerpo del glifo: la extensión del bbox sobre el eje transversal. */
+function emSizeOf(bbox: BoundingBox, rotation: Rotation): number {
+  return rotation === 180 ? bbox.height : bbox.width;
+}
+
+/*
+ * Coordenadas del bbox sobre el eje de avance, en el sentido en que se lee:
+ * un run a 90° avanza hacia arriba en pantalla (`y` decreciente), así que
+ * "empieza" en el borde inferior y "termina" en el superior.
+ */
+function advanceStartOf(bbox: BoundingBox, rotation: Rotation): number {
+  if (rotation === 90) return bbox.y + bbox.height;
+  if (rotation === 270) return bbox.y;
+  return bbox.x + bbox.width;
+}
+
+function advanceEndOf(bbox: BoundingBox, rotation: Rotation): number {
+  if (rotation === 90) return bbox.y;
+  if (rotation === 270) return bbox.y + bbox.height;
+  return bbox.x;
+}
+
+/** ADR-067 §3: orden dentro de un run, en su dirección de avance. */
+function compareAlongAdvance(a: BoundingBox, b: BoundingBox, rotation: Rotation): number {
+  if (rotation === 90) return b.y - a.y;
+  if (rotation === 270) return a.y - b.y;
+  return b.x - a.x;
+}
+
+/*
+ * ADR-067 §2: parte una columna ya ordenada por avance allí donde el hueco
+ * entre dos palabras consecutivas supera `ROTATED_RUN_GAP_IN_EMS` cuerpos.
+ * Es el criterio que separa dos runs independientes que comparten columna —
+ * sin él el resultado dependería de la tolerancia transversal, o sea de 0,1 pt
+ * sobre el documento medido.
+ */
+function splitColumnOnAdvanceGap(column: ReadonlyArray<Word>, rotation: Rotation): Word[][] {
+  const runs: Word[][] = [];
+  let current: Word[] = [];
+
+  for (const word of column) {
+    const previous = current[current.length - 1];
+    if (previous !== undefined) {
+      const gap = Math.abs(
+        advanceStartOf(word.bbox, rotation) - advanceEndOf(previous.bbox, rotation),
+      );
+      if (gap > ROTATED_RUN_GAP_IN_EMS * emSizeOf(previous.bbox, rotation)) {
+        runs.push(current);
+        current = [];
+      }
+    }
+    current.push(word);
+  }
+
+  if (current.length > 0) runs.push(current);
+  return runs;
+}
+
+/*
+ * ADR-067 §2: agrupa los words rotados en runs. Primero por ángulo (dos
+ * rotaciones distintas nunca son el mismo run), después por columna
+ * —coordenada transversal con la misma tolerancia que usa la rama
+ * horizontal— y por último por contigüidad sobre el eje de avance.
+ */
+function buildRotatedRuns(words: ReadonlyArray<Word>): Word[][] {
+  const byRotation = new Map<Rotation, Word[]>();
+  for (const word of words) {
+    const rotation = word.bbox.rotation;
+    if (rotation === undefined || rotation === 0) continue;
+    const bucket = byRotation.get(rotation);
+    if (bucket === undefined) byRotation.set(rotation, [word]);
+    else bucket.push(word);
+  }
+
+  const runs: Word[][] = [];
+  for (const [rotation, bucket] of byRotation) {
+    const byColumn = [...bucket].sort(
+      (a, b) => crossAxisOf(a.bbox, rotation) - crossAxisOf(b.bbox, rotation),
+    );
+
+    let column: Word[] = [];
+    let previousCross: number | undefined;
+    const flushColumn = (): void => {
+      if (column.length === 0) return;
+      column.sort((a, b) => compareAlongAdvance(a.bbox, b.bbox, rotation));
+      runs.push(...splitColumnOnAdvanceGap(column, rotation));
+      column = [];
+    };
+
+    for (const word of byColumn) {
+      const cross = crossAxisOf(word.bbox, rotation);
+      if (previousCross !== undefined && Math.abs(cross - previousCross) > SAME_LINE_TOLERANCE) {
+        flushColumn();
+      }
+      column.push(word);
+      previousCross = cross;
+    }
+    flushColumn();
+  }
+
+  return runs;
+}
+
+/*
+ * ADR-067: el orden se ramifica por `bbox.rotation`. Sin rotación (ausente o
+ * `0`, `Contracts.md` §5) es exactamente el orden histórico. Con rotación, los
+ * words se agrupan en runs (§2) y se ordenan en su dirección de avance (§3).
+ *
+ * ADR-067 §4 (corrección 2026-08-13): los runs se emiten DESPUÉS de todo el
+ * texto horizontal, en dos pasadas separadas — nunca intercalados. La primera
+ * redacción los ubicaba por el ancla, dentro del mismo `sort` que las palabras
+ * horizontales, y eso podía **partir una línea horizontal al medio**: el
+ * comparador tiene tolerancia de 1 y por lo tanto no es transitivo, así que un
+ * ancla que cae dentro de la tolerancia de una palabra de la línea pero fuera
+ * de la de otra se encaja entre las dos. `mapSpanToWords` une todo el rango de
+ * índices de un match, con lo que el bbox de una entidad partida se tragaba el
+ * run entero — verificado: una ocurrencia en `x = 250` salía en `x = 10`, 240
+ * pt corrida hacia el margen izquierdo.
+ *
+ * Separar las pasadas hace que el orden relativo del texto horizontal sea
+ * IDÉNTICO al previo a ADR-067 en cualquier página, tenga o no texto rotado
+ * —ningún ancla ajena participa de su `sort`—, que es una garantía de no
+ * regresión más fuerte que la que daba la versión anterior. De paso elimina el
+ * mismo riesgo que ya existía ANTES del ADR, cuando cada word rotado se
+ * ordenaba suelto entre las líneas horizontales.
+ */
 function sortWordsByReadingOrder(words: ReadonlyArray<Word>): Word[] {
-  const sorted = [...words];
-  sorted.sort((a, b) => {
-    const dy = a.bbox.y - b.bbox.y;
-    if (Math.abs(dy) > 1) return dy;
-    return a.bbox.x - b.bbox.x;
-  });
-  return sorted;
+  const horizontal = words.filter(
+    (word) => word.bbox.rotation === undefined || word.bbox.rotation === 0,
+  );
+  horizontal.sort((a, b) => compareByReadingOrder(a.bbox, b.bbox));
+
+  if (horizontal.length === words.length) return horizontal;
+
+  // Los runs se ordenan entre sí por el bbox de su primera palabra en orden de
+  // lectura (la de más abajo en un run a 90°), con el mismo comparador.
+  const runs = buildRotatedRuns(words);
+  runs.sort((a, b) => compareByReadingOrder((a[0] as Word).bbox, (b[0] as Word).bbox));
+
+  return [...horizontal, ...runs.flat()];
 }
 
 // ─── Compuertas de OCR por región (ADR-065 §1, PDF_Engine.md §12) ───
@@ -561,6 +737,189 @@ interface AnnotationTextRun {
 }
 
 /*
+ * ADR-066 §2 (corrección 2026-08-13): estado de texto de una anotación.
+ *
+ * La primera redacción componía `textMatrix × transformInterno ×
+ * beginAnnotation.transform × CTM` y solo poblaba `textMatrix` desde
+ * `setTextMatrix` (Tm). Eso alcanza para un appearance stream **aplanado**,
+ * donde el cuerpo del glifo va metido en la escala de `Tm`; no alcanza para el
+ * idioma normal de PDF, que pone el cuerpo en `Tf` y la posición en `Td`.
+ *
+ * El mismo documento en sus dos versiones lo muestra:
+ *
+ *   aplanado:  setTextMatrix [8,0,0,8,0,42.66] + setFont [f, 1]
+ *   original:  setFont [f, 8]                  + moveText [0, 42.66]
+ *
+ * Con solo `Tm`, el original sale con cuerpo 1 en vez de 8, avances 8 veces
+ * cortos y los cinco runs apilados en el mismo origen — cajas de 1 pt de ancho
+ * en el lugar equivocado.
+ *
+ * La regla de PDF 32000-1 §9.4.4 es
+ * `Trm = [Tfs·Th, 0, 0, Tfs, 0, Ts] × Tm × CTM`, y es la que se implementa:
+ * `Tm` sigue viniendo de `setTextMatrix`/`moveText`/`nextLine`, y el cuerpo
+ * (`Tfs`) y el escalado horizontal (`Th`) se aplican como factores. Las dos
+ * formas quedan cubiertas por la misma fórmula.
+ */
+class TextState {
+  private matrix: Matrix2D = IDENTITY_MATRIX_2D;
+  private lineMatrix: Matrix2D = IDENTITY_MATRIX_2D;
+  fontSize = 1; // Tfs
+  horizontalScale = 1; // Th (Tz/100)
+  charSpacing = 0; // Tc
+  wordSpacing = 0; // Tw
+  private leading = 0; // TL
+
+  get textMatrix(): Matrix2D {
+    return this.matrix;
+  }
+
+  /** BT: Tm y Tlm vuelven a la identidad. El cuerpo NO se resetea (Tf sobrevive a BT/ET). */
+  beginText(): void {
+    this.matrix = IDENTITY_MATRIX_2D;
+    this.lineMatrix = IDENTITY_MATRIX_2D;
+  }
+
+  /** Tm: fija las dos matrices. */
+  setMatrix(m: Matrix2D): void {
+    this.matrix = m;
+    this.lineMatrix = m;
+  }
+
+  /** Td: Tlm = translate(tx, ty) × Tlm; Tm = Tlm. */
+  moveText(tx: number, ty: number): void {
+    this.lineMatrix = composeMatrix(this.lineMatrix, [1, 0, 0, 1, tx, ty]);
+    this.matrix = this.lineMatrix;
+  }
+
+  /** TD: como Td, y además fija el interlineado en -ty. */
+  moveTextSetLeading(tx: number, ty: number): void {
+    this.leading = -ty;
+    this.moveText(tx, ty);
+  }
+
+  setLeading(value: number): void {
+    this.leading = value;
+  }
+
+  /** T*: Td(0, -TL). */
+  nextLine(): void {
+    this.moveText(0, -this.leading);
+  }
+
+  /** Estado que `save`/`restore` preservan (el resto es por bloque BT/ET). */
+  snapshotGraphicsState(): TextGraphicsState {
+    return {
+      fontSize: this.fontSize,
+      horizontalScale: this.horizontalScale,
+      charSpacing: this.charSpacing,
+      wordSpacing: this.wordSpacing,
+    };
+  }
+
+  restoreGraphicsState(s: TextGraphicsState): void {
+    this.fontSize = s.fontSize;
+    this.horizontalScale = s.horizontalScale;
+    this.charSpacing = s.charSpacing;
+    this.wordSpacing = s.wordSpacing;
+  }
+}
+
+interface TextGraphicsState {
+  readonly fontSize: number;
+  readonly horizontalScale: number;
+  readonly charSpacing: number;
+  readonly wordSpacing: number;
+}
+
+/*
+ * ADR-068: corrección del origen que reporta `getTextContent`.
+ *
+ * `getTextContent()` aplica el word spacing (`Tw`) a los espacios que después
+ * DESCARTA del `str`, y el renderer no lo aplica: para un run con espacios
+ * iniciales y `Tw ≠ 0`, el `transform` del item queda a la izquierda de donde
+ * el glifo se dibuja de verdad. Medido sobre la pericia: 90 espacios con
+ * `Tw = -0,505618` desplazan el origen 58,3 pt — el reemplazo cae fuera del
+ * texto.
+ *
+ * La corrección se expresa como un par de puntos: `from` es el origen que
+ * `getTextContent` va a reportar (se reproduce exacto: 190,20 contra 190,20
+ * medido) y `to` el que dibuja el renderer (248,93 contra 248,5 de tinta
+ * real). `convertTextItemsToWords` solo corrige un item cuando su origen
+ * coincide con un `from` — si la reproducción no acierta, el item queda
+ * intacto y el comportamiento es el de siempre.
+ */
+interface TextOriginCorrection {
+  readonly from: Vector2;
+  readonly to: Vector2;
+}
+
+/** Tolerancia del match contra el origen reportado por `getTextContent`. */
+const ORIGIN_CORRECTION_EPSILON = 0.05;
+
+function isWhitespaceGlyph(glyph: unknown): boolean {
+  if (!isRecord(glyph)) return false;
+  return typeof glyph.unicode === "string" && glyph.unicode.trim().length === 0;
+}
+
+/*
+ * ADR-068: avance, en espacio de texto, de los glifos que preceden al primer
+ * glifo visible de un run. Devuelve los dos totales —con y sin aplicar `Tw`—
+ * porque la diferencia entre ambos ES el error de `getTextContent`.
+ */
+function leadingAdvance(
+  glyphs: ReadonlyArray<unknown>,
+  text: TextState,
+): { readonly withWordSpacing: number; readonly withoutWordSpacing: number } {
+  let withWordSpacing = 0;
+  let withoutWordSpacing = 0;
+
+  for (const glyph of glyphs) {
+    if (typeof glyph === "number") {
+      // Ajuste de kerning de un TJ: desplaza igual en los dos escenarios.
+      const kerning = (-glyph / 1000) * text.fontSize * text.horizontalScale;
+      withWordSpacing += kerning;
+      withoutWordSpacing += kerning;
+      continue;
+    }
+    if (!isWhitespaceGlyph(glyph)) break; // primer glifo visible: se corta
+    const width = isRecord(glyph) && typeof glyph.width === "number" ? glyph.width : 0;
+    const base = ((width / 1000) * text.fontSize + text.charSpacing) * text.horizontalScale;
+    withoutWordSpacing += base;
+    withWordSpacing += base + text.wordSpacing * text.horizontalScale;
+  }
+
+  return { withWordSpacing, withoutWordSpacing };
+}
+
+/*
+ * ADR-068: par `from`/`to` para un run de página, o `undefined` si no hay nada
+ * que corregir (sin `Tw`, sin espacios iniciales, o diferencia despreciable).
+ */
+function buildOriginCorrection(
+  args: unknown,
+  text: TextState,
+  ctm: Matrix2D,
+): TextOriginCorrection | undefined {
+  if (text.wordSpacing === 0) return undefined;
+  if (!Array.isArray(args) || args.length === 0) return undefined;
+  const glyphs: unknown = args[0];
+  if (!Array.isArray(glyphs)) return undefined;
+
+  const advance = leadingAdvance(glyphs as ReadonlyArray<unknown>, text);
+  const delta = advance.withoutWordSpacing - advance.withWordSpacing;
+  if (Math.abs(delta) < ORIGIN_CORRECTION_EPSILON) return undefined;
+
+  const composed = composeMatrix(ctm, text.textMatrix);
+  const origin: Vector2 = { x: composed[4], y: composed[5] };
+  const displace = (amount: number): Vector2 => ({
+    x: origin.x + composed[0] * amount,
+    y: origin.y + composed[1] * amount,
+  });
+
+  return { from: displace(advance.withWordSpacing), to: displace(advance.withoutWordSpacing) };
+}
+
+/*
  * ADR-066 §1, Contexto §2: reconstruye un run de `showText`/`showSpacedText`
  * dentro de una anotación. `args[0]` es el array de glifos que pdf.js ya
  * resolvió (cada uno con `.unicode`/`.width`; los números sueltos son
@@ -579,7 +938,7 @@ interface AnnotationTextRun {
  */
 function buildAnnotationTextRun(
   args: unknown,
-  textMatrix: Matrix2D,
+  text: TextState,
   ctm: Matrix2D,
 ): AnnotationTextRun | undefined {
   if (!Array.isArray(args) || args.length === 0) return undefined;
@@ -596,9 +955,14 @@ function buildAnnotationTextRun(
   }
   if (str.trim().length === 0) return undefined;
 
-  const composed = composeMatrix(ctm, textMatrix);
-  const dirMagnitude = Math.hypot(composed[0], composed[1]);
-  const upMagnitude = Math.hypot(composed[2], composed[3]);
+  // ADR-066 §2 (corrección): Trm = [Tfs·Th, 0, 0, Tfs, 0, Ts] × Tm × CTM. El
+  // cuerpo y el escalado horizontal entran como factores sobre las magnitudes
+  // de `Tm × CTM`, así que cubren tanto el appearance stream aplanado (cuerpo
+  // en la escala de Tm, Tfs = 1) como el idioma normal (Tfs = cuerpo, Tm de
+  // Td). Ver el doc de `TextState`.
+  const composed = composeMatrix(ctm, text.textMatrix);
+  const dirMagnitude = Math.hypot(composed[0], composed[1]) * text.fontSize * text.horizontalScale;
+  const upMagnitude = Math.hypot(composed[2], composed[3]) * text.fontSize;
 
   return {
     str,
@@ -611,6 +975,9 @@ function buildAnnotationTextRun(
 interface AnnotationsAndImages {
   readonly imageRects: ReadonlyArray<BoundingBox>;
   readonly annotationWords: ReadonlyArray<Word>;
+  // ADR-068: origen real de los runs de PÁGINA cuyo `transform` de
+  // `getTextContent` viene desplazado por el word spacing.
+  readonly originCorrections: ReadonlyArray<TextOriginCorrection>;
 }
 
 /*
@@ -632,8 +999,13 @@ function walkOperatorListForAnnotationsAndImages(
   const ctm = new CtmTracker();
   const imageRects: BoundingBox[] = [];
   const annotationWords: Word[] = [];
+  const originCorrections: TextOriginCorrection[] = [];
 
-  let currentTextMatrix: Matrix2D = IDENTITY_MATRIX_2D;
+  const text = new TextState();
+  // El cuerpo y el escalado horizontal son estado gráfico: `save`/`restore` los
+  // preservan (ADR-066 §2, corrección). El appearance stream real envuelve cada
+  // run en su propio `save`/`restore`.
+  const textStateStack: ReturnType<TextState["snapshotGraphicsState"]>[] = [];
   let currentAnnotationRect: BoundingBox | undefined;
   let currentAnnotationId = "";
 
@@ -644,8 +1016,11 @@ function walkOperatorListForAnnotationsAndImages(
 
     if (fn === OPS.save) {
       ctm.save();
+      textStateStack.push(text.snapshotGraphicsState());
     } else if (fn === OPS.restore) {
       ctm.restore();
+      const restored = textStateStack.pop();
+      if (restored !== undefined) text.restoreGraphicsState(restored);
     } else if (fn === OPS.transform) {
       if (isNumberArray(args) && args.length >= 6) {
         ctm.transform(toMatrix2D(args));
@@ -664,20 +1039,47 @@ function walkOperatorListForAnnotationsAndImages(
         currentAnnotationRect = undefined;
         currentAnnotationId = "";
       }
-      currentTextMatrix = IDENTITY_MATRIX_2D;
+      text.beginText();
+      text.fontSize = 1;
+      text.horizontalScale = 1;
+      textStateStack.length = 0;
     } else if (fn === OPS.endAnnotation) {
       ctm.endAnnotation();
       currentAnnotationRect = undefined;
       currentAnnotationId = "";
-      currentTextMatrix = IDENTITY_MATRIX_2D;
+      text.beginText();
+      textStateStack.length = 0;
     } else if (fn === OPS.beginText) {
-      currentTextMatrix = IDENTITY_MATRIX_2D;
+      text.beginText();
     } else if (fn === OPS.setTextMatrix) {
       if (isNumberArray(args) && args.length >= 6) {
-        currentTextMatrix = toMatrix2D(args);
+        text.setMatrix(toMatrix2D(args));
       }
+    } else if (fn === OPS.setFont) {
+      // args = [nombre, tamaño]; el tamaño es Tfs (ADR-066 §2, corrección).
+      const size = Array.isArray(args) ? (args as ReadonlyArray<unknown>)[1] : undefined;
+      if (typeof size === "number" && Number.isFinite(size)) text.fontSize = size;
+    } else if (fn === OPS.setHScale) {
+      const scale = Array.isArray(args) ? (args as ReadonlyArray<unknown>)[0] : undefined;
+      if (typeof scale === "number" && Number.isFinite(scale)) text.horizontalScale = scale / 100;
+    } else if (fn === OPS.setCharSpacing) {
+      const value = Array.isArray(args) ? (args as ReadonlyArray<unknown>)[0] : undefined;
+      if (typeof value === "number" && Number.isFinite(value)) text.charSpacing = value;
+    } else if (fn === OPS.setWordSpacing) {
+      const value = Array.isArray(args) ? (args as ReadonlyArray<unknown>)[0] : undefined;
+      if (typeof value === "number" && Number.isFinite(value)) text.wordSpacing = value;
+    } else if (fn === OPS.moveText) {
+      if (isNumberArray(args) && args.length >= 2) text.moveText(args[0] ?? 0, args[1] ?? 0);
+    } else if (fn === OPS.setLeadingMoveText) {
+      if (isNumberArray(args) && args.length >= 2)
+        text.moveTextSetLeading(args[0] ?? 0, args[1] ?? 0);
+    } else if (fn === OPS.setLeading) {
+      const leading = Array.isArray(args) ? (args as ReadonlyArray<unknown>)[0] : undefined;
+      if (typeof leading === "number" && Number.isFinite(leading)) text.setLeading(leading);
+    } else if (fn === OPS.nextLine) {
+      text.nextLine();
     } else if (ctm.isInsideAnnotation && (fn === OPS.showText || fn === OPS.showSpacedText)) {
-      const run = buildAnnotationTextRun(args, currentTextMatrix, ctm.current);
+      const run = buildAnnotationTextRun(args, text, ctm.current);
       if (run !== undefined) {
         const words = convertTextItemsToWords(
           {
@@ -703,6 +1105,11 @@ function walkOperatorListForAnnotationsAndImages(
           }
         }
       }
+    } else if (!ctm.isInsideAnnotation && (fn === OPS.showText || fn === OPS.showSpacedText)) {
+      // ADR-068: el texto de página lo extrae `getTextContent()`; de este
+      // recorrido solo sale la corrección del origen (ver `buildOriginCorrection`).
+      const correction = buildOriginCorrection(args, text, ctm.current);
+      if (correction !== undefined) originCorrections.push(correction);
     } else if (fn !== undefined && IMAGE_PAINT_OPS.has(fn)) {
       // ADR-066 §5: `ctm.current` ya aplica beginAnnotation.transform cuando
       // la imagen está dentro de una anotación — corrige el defecto latente
@@ -711,7 +1118,7 @@ function walkOperatorListForAnnotationsAndImages(
     }
   }
 
-  return { imageRects, annotationWords };
+  return { imageRects, annotationWords, originCorrections };
 }
 
 // Filtro por rectángulo (ADR-065 §1): descarta imágenes < 1% del área de
@@ -1003,11 +1410,10 @@ async function parsePage(
   const pageWidth = viewport.width;
   const pageHeight = viewport.height;
 
-  let contentWords: Word[];
+  let textContent: TextContentLike;
   let operatorList: OperatorListLike;
   try {
-    const textContent = await parsePageTextWithTimeout(pageProxy, documentId, pageIndex, timeoutMs);
-    contentWords = convertTextItemsToWords(textContent, pageIndex, pageHeight);
+    textContent = await parsePageTextWithTimeout(pageProxy, documentId, pageIndex, timeoutMs);
     // Cast de frontera contra pdfjs-dist (Code_Standards.md §2/§10, mismo
     // criterio que `TextContentLike` arriba): `PDFOperatorList.argsArray`
     // tipa `Array<any>`; narrowing a la forma local evita propagar `any`.
@@ -1020,12 +1426,22 @@ async function parsePage(
     throw new PdfCorruptedError(documentId, message, pageIndex);
   }
 
-  const { imageRects, annotationWords } = walkOperatorListForAnnotationsAndImages(
-    operatorList,
+  // ADR-068: el recorrido del operator list precede a la conversión de items
+  // porque produce la corrección de origen que ésta consume.
+  const { imageRects, annotationWords, originCorrections } =
+    walkOperatorListForAnnotationsAndImages(
+      operatorList,
+      pageIndex,
+      pageHeight,
+      documentId,
+      logger,
+    );
+
+  const contentWords = convertTextItemsToWords(
+    textContent,
     pageIndex,
     pageHeight,
-    documentId,
-    logger,
+    originCorrections,
   );
 
   // ADR-066 §1: el texto de anotaciones se suma al del content stream — las
