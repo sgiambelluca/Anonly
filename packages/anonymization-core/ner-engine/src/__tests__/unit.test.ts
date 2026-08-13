@@ -102,6 +102,62 @@ describe("NerEngine — unit tests", () => {
     expect(occurrence?.wordSpan).toEqual({ startIndex: 0, endIndexExclusive: 2 });
   });
 
+  // ADR-066 §6: la unión de bboxes arma un bbox NUEVO; sin propagación
+  // explícita `rotation` se cae en silencio y el pintado rotado de §7 nunca se
+  // activa. Es el camino que recorre el nombre de un firmante vertical desde
+  // que ADR-067 lo dejó contiguo en `Page.text`.
+  it("propagates rotation when every word of the entity agrees on the angle", async () => {
+    asPipelineMock(pipeline).mockResolvedValue(
+      mockTokenClassificationPipeline(() =>
+        Promise.resolve([
+          nerToken("B-PER", "Albarracin,", 0.9, 0),
+          nerToken("I-PER", "Rocio", 0.9, 1),
+        ]),
+      ),
+    );
+    await engine.init(ctx);
+    const base = makeNerPageInput("doc-rot", 0, ["Albarracin,", "Rocio", "firmo"]);
+    const input = {
+      ...base,
+      words: base.words.map((w) => ({ ...w, bbox: { ...w.bbox, rotation: 90 as const } })),
+    };
+    const output = await engine.processPage(input, ctx);
+
+    expect(output.occurrences[0]?.bbox.rotation).toBe(90);
+  });
+
+  it("omits rotation when the words of the entity disagree on the angle", async () => {
+    asPipelineMock(pipeline).mockResolvedValue(
+      mockTokenClassificationPipeline(() =>
+        Promise.resolve([nerToken("B-PER", "Juan", 0.9, 0), nerToken("I-PER", "Pérez", 0.9, 1)]),
+      ),
+    );
+    await engine.init(ctx);
+    const base = makeNerPageInput("doc-rot-mixta", 0, ["Juan", "Pérez", "vive"]);
+    const input = {
+      ...base,
+      words: base.words.map((w, i) =>
+        i === 0 ? { ...w, bbox: { ...w.bbox, rotation: 90 as const } } : w,
+      ),
+    };
+    const output = await engine.processPage(input, ctx);
+
+    expect(output.occurrences[0]?.bbox.rotation).toBeUndefined();
+  });
+
+  it("leaves rotation absent for horizontal text", async () => {
+    asPipelineMock(pipeline).mockResolvedValue(
+      mockTokenClassificationPipeline(() => Promise.resolve([nerToken("B-PER", "Juan", 0.9, 0)])),
+    );
+    await engine.init(ctx);
+    const output = await engine.processPage(
+      makeNerPageInput("doc-rot-ausente", 0, ["Juan", "Pérez"]),
+      ctx,
+    );
+
+    expect(output.occurrences[0]?.bbox.rotation).toBeUndefined();
+  });
+
   it("normalizedValue is lowercase and strips redundant punctuation", async () => {
     asPipelineMock(pipeline).mockResolvedValue(
       mockTokenClassificationPipeline(() => Promise.resolve([nerToken("B-ORG", "ACME,", 0.9, 0)])),

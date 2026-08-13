@@ -114,6 +114,19 @@ function mapSpanToWords(
   let maxX = -Infinity;
   let maxY = -Infinity;
 
+  // ADR-066 §6: `rotation` viaja por la cadena `Word → Occurrence →
+  // Replacement` dentro del bbox, pero la unión de arriba construye un bbox
+  // NUEVO a partir de escalares — sin esto el campo se cae en silencio y el
+  // pintado rotado de §7 nunca se activa. Se propaga solo si TODAS las
+  // palabras del span coinciden en el ángulo (en la práctica comparten uno:
+  // desde ADR-067 los tokens de un run rotado llegan contiguos y en orden, que
+  // es justamente lo que hace que NER pueda reconocer una entidad ahí). Si
+  // discrepan, la envolvente de dos direcciones de avance no tiene un ángulo
+  // que la describa y queda ausente (≡ 0). Mismo criterio que el
+  // `mapSpanToWords` de regex-engine, del que esta función es adaptación.
+  let rotation: BoundingBox["rotation"];
+  let rotationAgrees = true;
+
   for (let i = firstWordIndex; i <= lastWordIndex; i++) {
     const word = words[i];
     if (!word) continue;
@@ -121,10 +134,22 @@ function mapSpanToWords(
     minY = Math.min(minY, word.bbox.y);
     maxX = Math.max(maxX, word.bbox.x + word.bbox.width);
     maxY = Math.max(maxY, word.bbox.y + word.bbox.height);
+
+    if (i === firstWordIndex) rotation = word.bbox.rotation;
+    else if (word.bbox.rotation !== rotation) rotationAgrees = false;
   }
 
+  const bbox: BoundingBox = {
+    x: minX,
+    y: minY,
+    width: maxX - minX,
+    height: maxY - minY,
+    // exactOptionalPropertyTypes: spread condicional, nunca `rotation: undefined`.
+    ...(rotationAgrees && rotation !== undefined ? { rotation } : {}),
+  };
+
   return {
-    bbox: { x: minX, y: minY, width: maxX - minX, height: maxY - minY },
+    bbox,
     wordSpan: { startIndex: firstWordIndex, endIndexExclusive: lastWordIndex + 1 },
   };
 }
