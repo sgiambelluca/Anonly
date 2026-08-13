@@ -53,12 +53,68 @@ export interface MockImageRect {
  * `OPS` inventado acá daría falsos positivos o negativos. Espejo del
  * `buildMockOperatorList` de `pdf-engine/src/__tests__/fixtures/`.
  */
-function buildOperatorList(images: ReadonlyArray<MockImageRect>): {
+/**
+ * Run de texto de una anotación (ADR-066 §1). Se emite con el idioma **normal**
+ * de PDF —`setFont` para el cuerpo y `moveText` para la posición, sin ningún
+ * `setTextMatrix`— porque es el que usa el documento real; el appearance stream
+ * aplanado (cuerpo metido en la escala de `Tm`) es el que produce un re-export
+ * y el que escondió la mitad del contrato hasta ADR-066 §2 (corrección).
+ */
+export interface MockAnnotationRun {
+  /** Desplazamiento sobre el eje de avance, el `Td` del run. */
+  readonly offset: number;
+  readonly text: string;
+  /** Ancho de cada glifo en 1/1000 em (uniforme, alcanza para el prorrateo). */
+  readonly glyphWidth?: number;
+}
+
+export interface MockSignatureAnnotation {
+  readonly id: string;
+  /** `[x0, y0, x1, y1]` en espacio PDF (origen abajo-izquierda). */
+  readonly rect: readonly [number, number, number, number];
+  /** Tercer argumento de `beginAnnotation`: ubica la anotación en la página. */
+  readonly transform: readonly [number, number, number, number, number, number];
+  /** Transform interno; `[0,1,-1,0,50,0]` es el giro a 90° de la firma medida. */
+  readonly innerTransform: readonly [number, number, number, number, number, number];
+  readonly fontSize: number;
+  readonly runs: ReadonlyArray<MockAnnotationRun>;
+}
+
+function buildOperatorList(
+  images: ReadonlyArray<MockImageRect>,
+  annotations: ReadonlyArray<MockSignatureAnnotation> = [],
+): {
   readonly fnArray: number[];
   readonly argsArray: unknown[];
 } {
   const fnArray: number[] = [];
   const argsArray: unknown[] = [];
+
+  for (const annotation of annotations) {
+    fnArray.push(OPS.beginAnnotation);
+    argsArray.push([annotation.id, annotation.rect, annotation.transform, [1, 0, 0, 1, 0, 0], false]);
+    for (const run of annotation.runs) {
+      fnArray.push(OPS.save);
+      argsArray.push([]);
+      fnArray.push(OPS.transform);
+      argsArray.push(annotation.innerTransform);
+      fnArray.push(OPS.beginText);
+      argsArray.push([]);
+      fnArray.push(OPS.setFont);
+      argsArray.push(["g_d0_f4", annotation.fontSize]);
+      fnArray.push(OPS.moveText);
+      argsArray.push([0, run.offset]);
+      fnArray.push(OPS.showText);
+      argsArray.push([
+        [...run.text].map((ch) => ({ unicode: ch, width: run.glyphWidth ?? 500 })),
+      ]);
+      fnArray.push(OPS.restore);
+      argsArray.push([]);
+    }
+    fnArray.push(OPS.endAnnotation);
+    argsArray.push([]);
+  }
+
   for (const image of images) {
     fnArray.push(OPS.save);
     argsArray.push([]);
@@ -82,6 +138,7 @@ function buildOperatorList(images: ReadonlyArray<MockImageRect>): {
 export function createMockPdfPage(
   textItems: ReadonlyArray<MockTextItem>,
   images: ReadonlyArray<MockImageRect> = [],
+  annotations: ReadonlyArray<MockSignatureAnnotation> = [],
 ): Record<string, unknown> {
   return {
     getViewport: vi.fn(({ scale }: { scale: number }) => ({ width: 595 * scale, height: 842 * scale })),
@@ -99,7 +156,7 @@ export function createMockPdfPage(
     // página para detectar image XObjects. Sin esto, el mock lo deja
     // `undefined` y el parseo muere en `PdfCorruptedError`, tumbando el
     // pipeline entero.
-    getOperatorList: vi.fn(() => Promise.resolve(buildOperatorList(images))),
+    getOperatorList: vi.fn(() => Promise.resolve(buildOperatorList(images, annotations))),
     render: vi.fn(() => ({ promise: Promise.resolve() })),
   };
 }
