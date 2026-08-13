@@ -495,6 +495,9 @@ function sortWordsByReadingOrder(words: ReadonlyArray<Word>): Word[] {
   // Los runs se ordenan entre sí por el bbox de su primera palabra en orden de
   // lectura (la de más abajo en un run a 90°), con el mismo comparador.
   const runs = buildRotatedRuns(words);
+  // `as Word` es narrowing seguro (Code_Standards.md §2): `splitColumnOnAdvanceGap`
+  // solo empuja arrays con al menos un elemento —nunca `push` de un `current`
+  // vacío—, así que `[0]` de un run siempre existe.
   runs.sort((a, b) => compareByReadingOrder((a[0] as Word).bbox, (b[0] as Word).bbox));
 
   return [...horizontal, ...runs.flat()];
@@ -1588,11 +1591,15 @@ export function fuseOcrRegion(
 
   const translatedWords: Word[] = words.map((w) => ({
     text: w.text.normalize("NFC"),
+    // El spread preserva cualquier campo del bbox que esta traslación no
+    // toque. Hoy solo puede ser `rotation`, y `ocr-engine` nunca lo puebla
+    // (`OCR_Engine.md` §10), así que es inerte — pero reconstruir el bbox
+    // campo a campo es exactamente la forma de caída silenciosa que ADR-066 §6
+    // costó dos sesiones detectar en `mapSpanToWords`. No se repite.
     bbox: {
+      ...w.bbox,
       x: w.bbox.x + region.x,
       y: w.bbox.y + region.y,
-      width: w.bbox.width,
-      height: w.bbox.height,
     },
     pageIndex,
     confidence: w.confidence,
