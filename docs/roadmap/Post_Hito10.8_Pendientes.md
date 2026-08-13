@@ -5,6 +5,8 @@
 > Hallazgos de la prueba manual sobre la pericia real que **no** son del Hito 10.8 y que el humano decidió explícitamente diferir. Ninguno es regresión del hito: son gaps preexistentes que recién se ven ahora que el OCR y la lectura de anotaciones llegan hasta ahí.
 >
 > Orden sugerido por daño real, no por costo.
+>
+> **Estado (2026-08-13)**: el §3 quedó **cerrado dentro del hito** por ADR-067 — se conserva tachado, con el porqué. El resto sigue vigente, y el §2 quedó **medido** sobre la pericia de 5 páginas en la segunda prueba manual.
 
 ---
 
@@ -51,15 +53,24 @@ Con palabras en dos líneas, esa unión es un rectángulo que abarca de la izqui
 
 Es la misma clase de falla que ADR-063 —censura que cubre lo que no debe— por otra causa.
 
+**Medido (2026-08-13, segunda prueba manual sobre la pericia de 5 páginas)**. Página 2, entidad `Pablo Román Fortes` detectada por NER: `Pablo` cierra una línea (`x = 524,4`) y `Román Fortes,` abre la siguiente (`x = 14,0`). La unión da **557,2 × 18,2 pt** — prácticamente el ancho útil de la página, dos líneas de alto. En el panel anonimizado es una barra negra que atraviesa el documento.
+
+Confirma que **tapa de más, nunca de menos**: no hay fuga, pero destruye contenido no sensible. Aplica igual al `mapSpanToWords` de `ner-engine`, que es la copia adaptada del de `regex-engine`.
+
 ---
 
-## 3. Orden de lectura para texto vertical
+## 3. ~~Orden de lectura para texto vertical~~ — **CERRADO en el Hito 10.8 (ADR-067)**
 
-Ver `Hito10.8_Handoff.md` §4, hipótesis (2). El hueco que **ADR-063 §4** difirió: `sortWordsByReadingOrder` ordena por `y` asc, lo que **invierte** un run de texto a 90° y lo intercala con los demás. Un nombre multi-palabra dentro de una firma vertical queda irreconocible para NER.
+> **Resuelto, no diferido.** Este ítem se escribió cuando el orden de lectura parecía requerir tocar tres motores. **ADR-067** lo cerró dentro del propio Hito 10.8, con alcance de **un** motor. Se conserva la entrada para que quien venga no vuelva a plantearlo como pendiente.
 
-Requiere orden consciente de columnas, que cambia un invariante compartido con `ocr-engine` y `03_Data_Model.md` → dos motores más, **ADR propio**.
+El diagnóstico original era correcto: `sortWordsByReadingOrder` ordenaba por `y` asc, lo que **invierte** un run de texto a 90° y lo intercala con los demás; un nombre multi-palabra dentro de una firma vertical quedaba irreconocible para NER (`Albarracin, Rocio de los Milagros` llegaba como `… Milagros … los … de … Rocio … Albarracin,`).
 
-**Nota**: puede ser causa parcial del síntoma abierto del hito. Descartar primero el build viejo.
+Lo que estaba mal era el **costo estimado**. El argumento de ADR-063 §4 —"cambia un invariante compartido con `ocr-engine`"— dejó de valer por dos hechos que no existían cuando se escribió:
+
+1. `BoundingBox` ya tiene `rotation` (ADR-066 §6), o sea que hay una señal en el dato para distinguir un word vertical sin re-derivarlo de la matriz.
+2. **`ocr-engine` nunca puebla `rotation`**: Tesseract no reporta orientación por palabra y el kernel no la infiere. Un orden que se ramifica por ese campo no lo alcanza — cero cambios en ese motor.
+
+Ver `adr/ADR-067-Orden-De-Lectura-Por-Runs-Rotados.md` y `MVP.md` §4, Hito 10.8 paso 4.
 
 ---
 

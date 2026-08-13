@@ -184,7 +184,7 @@ Cada `Occurrence`:
 - `source: DetectionSource.NER`
 - `entityType ∈ {Person, Organization, Address, Date}` (mapeo de los labels `PER`/`ORG`/`LOC`/`DATE` del modelo, ADR-023 §2)
 - `confidence ∈ [0,1]` (score del modelo)
-- `bbox` mapeado desde las `Word` que cubren el span detectado
+- `bbox` mapeado desde las `Word` que cubren el span detectado. **Invariante de `bbox.rotation` (ADR-066 §6)**: la unión de bboxes construye un `BoundingBox` **nuevo**, así que `rotation` se propaga explícitamente y **solo si todas las palabras del span coinciden en el ángulo**; si discrepan queda **ausente** (≡ 0, `Contracts.md` §5). Sin esa propagación el campo se cae en silencio y el pintado rotado de ADR-066 §7 nunca se activa. Mismo defecto y mismo criterio que en `Regex_Engine.md` §10, del que esta función es adaptación (P-2 prohíbe importarla).
 - `normalizedValue` lowercase, sin puntuación redundante
 - `wordSpan: WordSpan` referenciando las `Word` que componen la entidad
 
@@ -332,6 +332,7 @@ Fixtures: `tests/fixtures/text-10p.pdf` con nombres/organizaciones/direcciones/f
 - [ ] 22. Reescribir `ner.engine.ts` como clase host-side: puerto interno `NerJobPool` + `IMMEDIATE_POOL` + `constructor(pool?)`; despacho por batch con `maxRetriesOverride: 0` y `priority: 80`; normalización por `code` de `NER_TIMEOUT`/`NER_MODEL_MISSING` en el borde del puerto; traducción de `onProgress` a `NER_MODEL_LOADING`/`NER_MODEL_READY` (dedup por instancia) y a `logger.warn` para `model-load-retry`; flag `modelWarm` para `isModelReady()`/`NerStarted.modelLoading`; `dispose()` invoca `kernelDispose()` directo (no por el puerto).
 - [ ] 23. Costuras ajenas sancionadas por ADR-046 §4/§7: `DispatchParams.onProgress` en `worker-pool.ts` (enrutar `PROGRESS` por `jobId` al job pendiente en vez de descartarlo); `create-core.ts` construye el `NerPool` (sin `onWorkerCreated`) e inyecta `new NerEngine(nerPool)` y lo dispone; `orchestrator.ts` deja de envolver `processPages` en `pools.getPool("ner").dispatch(...)` en `runDetectionStage` **y** en `runReanalyzeNerOnFlow`; wiring de la factory `ner` en la app (`apps/react-client`).
 - [ ] 24. Tests nuevos de §14 (kernel, entry-point, contract del despacho, dedup de `NER_MODEL_READY`, normalización por `code`) + glob de cobertura de `worker/**` del paquete en `vitest.config.ts`. Gates completos verdes.
+- [x] 25. (Hito 10.8 — ADR-066 §6) `mapSpanToWords`: propagar `bbox.rotation` a la `Occurrence`, solo si **todas** las palabras del span coinciden en el ángulo; si discrepan, ausente (§10). **No** tocar la geometría de la unión. Tres filas nuevas en §14. Espejo del item 19 de `Regex_Engine.md`.
 
 ---
 

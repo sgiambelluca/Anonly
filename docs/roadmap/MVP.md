@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-mvp | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,adr/ADR-011-Grouping-First.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md | audiencia=humanos+IA | fase=10-cierre (Hitos 1–10 cerrados y mergeados a main; pendientes puntuales diferidos a Hito 11 anotados por hito; antes de arrancar el Hito 11 queda la revisión integral de Hito10_Observaciones_Revision.md y los ADR-053/054/055 de los hallazgos del cierre — ver el bloque CERRADO al final del Hito 10. §4 gana los Hitos **10.5** —legibilidad del reemplazo, ADR-057/058/059— y **10.6** —reemplazo por género, ADR-060—, y **10.7** —agregado manual de entidades, ADR-061—, y **10.8** —texto rotado y páginas con texto nativo parcial, ADR-063 + ADR-064 + ADR-065 + ADR-066—, insertados con la convención decimal del repo sin renumerar Hardening ni Release) -->
+<!-- CONTEXT: scope=roadmap-mvp | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,adr/ADR-011-Grouping-First.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md | audiencia=humanos+IA | fase=10-cierre (Hitos 1–10 cerrados y mergeados a main; pendientes puntuales diferidos a Hito 11 anotados por hito; antes de arrancar el Hito 11 queda la revisión integral de Hito10_Observaciones_Revision.md y los ADR-053/054/055 de los hallazgos del cierre — ver el bloque CERRADO al final del Hito 10. §4 gana los Hitos **10.5** —legibilidad del reemplazo, ADR-057/058/059— y **10.6** —reemplazo por género, ADR-060—, y **10.7** —agregado manual de entidades, ADR-061—, y **10.8** —texto rotado y páginas con texto nativo parcial, ADR-063 + ADR-064 + ADR-065 + ADR-066 + ADR-067 + ADR-068—, insertados con la convención decimal del repo sin renumerar Hardening ni Release) -->
 
 # Anonly — Roadmap MVP
 
@@ -351,13 +351,29 @@ No sale de `Cambios para hacer.txt`: sale de **probar la herramienta sobre una p
 | 9 | Test de integración de punta a punta (ADR-065, Validación) | `tests/integration` | ✅ |
 | 10 | Verificación manual sobre la pericia real | — | ✅ |
 | 11 | ADR-066 + `Contracts.md`, `PDF_Engine.md`, `Render_Engine.md`, `03_Data_Model.md` (docs) | — | ✅ |
-| 12 | `BoundingBox.rotation` | `shared` | ⬜ |
-| 13 | Texto de anotaciones + `rotation` + fix del walker | `pdf-engine` | ⬜ |
-| 14 | Reemplazo rotado en `paintReplacements` | `render-engine` | ⬜ |
+| 12 | `BoundingBox.rotation` | `shared` | ✅ |
+| 13 | Texto de anotaciones + `rotation` + fix del walker | `pdf-engine` | ✅ |
+| 14 | Reemplazo rotado en `paintReplacements` | `render-engine` | ✅ |
+| 15 | Verificación manual nº2: el reemplazo no tapaba, y el nombre del firmante no se detectaba | — | ✅ |
+| 16 | ADR-067 + ADR-068 + corrección de ADR-066 §2, `PDF_Engine.md`, `Regex_Engine.md`, `NER_Engine.md`, `OCR_Engine.md`, `03_Data_Model.md` (docs) | — | ✅ |
+| 17 | Orden de lectura por runs rotados (ADR-067), composición `Tf`/`Td` del texto de anotaciones (ADR-066 §2) y corrección del origen por word spacing (ADR-068) | `pdf-engine` | ✅ |
+| 18 | Propagación de `bbox.rotation` en `mapSpanToWords` | `regex-engine` | ✅ |
+| 19 | Propagación de `bbox.rotation` en `mapSpanToWords` | `ner-engine` | ✅ |
+| 20 | Test de integración de la anotación de firma (ADR-066, Validación) | `tests/integration` | ✅ |
 
-Las filas `b` no estaban en el plan original: salieron de ambigüedades que los implementadores detectaron y reportaron en vez de decidir en silencio (`AI_Development_Guide.md` §5).
+Las filas `b` no estaban en el plan original: salieron de ambigüedades que los implementadores detectaron y reportaron en vez de decidir en silencio (`AI_Development_Guide.md` §5). Las filas 15-20 tampoco: salieron de la **segunda** verificación manual, que encontró tres defectos que los tests unitarios no podían ver — ver el paso 4.
 
 **Paso 3 — el texto de las anotaciones** (ADR-066, filas 11-14). La verificación manual sobre la pericia real (fila 10) encontró que la **firma digital** —texto seleccionable, vertical, con el nombre de quien firma y la fecha— no se detectaba: `getTextContent()` lee solo el content stream y ese texto vive en el *appearance stream* de una anotación. Pero `render-engine` **sí lo dibuja**, así que salía en claro en el PDF anonimizado. Se lee nativo del mismo operator list que ya pide la compuerta 1 —**sin OCR**, es texto exacto— y el reemplazo pasa a pintarse rotado, lo que **supersede ADR-063 §5**: la premisa de esa decisión era que el único texto rotado era una marca de agua que no había que tapar.
+
+**Paso 4 — lo que encontró la segunda prueba manual** (ADR-067, ADR-068 y la corrección de ADR-066 §2; filas 15-20). Con el paso 3 mergeado, la firma se detectaba pero el reemplazo seguía sin tapar y el **nombre del firmante no producía grupo de Persona**. Tres defectos independientes, ninguno visible desde un test unitario:
+
+1. **`rotation` se caía en `mapSpanToWords`** (filas 18-19). ADR-066 §6 justificó poner el campo en `BoundingBox` diciendo que "viaja solo" por la cadena `Word → Occurrence → Replacement`. No viajaba: la unión de bboxes construye un `BoundingBox` **nuevo** a partir de escalares. El pintado rotado de ADR-066 §7 nunca se activaba.
+2. **El orden de lectura destruía el nombre** (ADR-067, fila 17). Ordenar por `bbox.y` asc invierte cada run vertical y los intercala entre sí: `Albarracin, Rocio de los Milagros` llegaba a NER como `… Milagros … los … de … Rocio … Albarracin,`. **Supersede ADR-063 §4**, cuyo argumento ("arrastra a `ocr-engine`") dejó de valer: `ocr-engine` nunca puebla `rotation`, así que un orden que se ramifica por ese campo no lo alcanza. La primera redacción de §4 ubicaba el run **intercalado** entre el texto horizontal y eso **partía una línea al medio** —el comparador con tolerancia no es transitivo—, con lo que el bbox de la entidad partida se tragaba el run: una ocurrencia en `x = 250` salía en `x = 10`. Se corrigió emitiendo los runs en una pasada aparte.
+3. **La composición del texto de anotaciones cubría una sola forma** (ADR-066 §2, corrección, fila 17). El PDF sobre el que se midió el ADR era un extracto **aplanado** por un re-export, que trae el cuerpo del glifo en la escala de `Tm`. El original usa el idioma normal (`Tf` para el cuerpo, `Td` para la posición, sin ningún `Tm`) y salía con cuerpo 1 en vez de 8 y los cinco runs apilados en el mismo origen.
+
+Y un cuarto, de `pdf.js` y no del motor (ADR-068, fila 17): `getTextContent()` aplica el word spacing a los espacios que después **descarta** del `str`, y el renderer no — el origen reportado quedaba 58,3 pt a la izquierda del glifo real. Se corrige contra el operator list, y solo cuando el motor reproduce al centésimo el número equivocado.
+
+**Lección de método**: medir sobre el documento **original**, nunca sobre una copia re-exportada — el aplanado escondió la mitad del contrato de ADR-066 §2. Y la fila 20 existe porque el defecto 1 llegó a prueba manual con todos los tests unitarios en verde: nada cubría la cadena de punta a punta.
 
 **Fuera del hito, salidos de la misma prueba manual** y con ADR pendiente: el matching difuso de Grouping fusiona entidades numéricas distintas que difieren en un carácter (dos CUIT, dos fechas — `1 - 1/11 = 0.909` contra un umbral de 0.88), el bbox de una entidad partida en dos líneas tapa las dos líneas enteras, y las fechas en texto ("7 de julio de 2026") no tienen patrón.
 

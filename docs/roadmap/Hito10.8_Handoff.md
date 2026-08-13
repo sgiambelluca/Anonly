@@ -4,6 +4,26 @@
 
 > Documento de traspaso para retomar el hito en una sesión nueva. Escrito 2026-08-10, con el hito **code-complete y todos los gates en verde**, pero con un síntoma reportado en prueba manual que **no** está resuelto.
 
+> ## ⚠️ CERRADO — 2026-08-13
+>
+> **El síntoma que originó este documento está resuelto y verificado sobre la pericia original de 5 páginas.** Lo que sigue debajo es el diagnóstico **de la sesión del 10/08** y se conserva como registro; **dos de sus hipótesis resultaron falsas**. No trabajar a partir de §4 sin leer esto primero.
+>
+> **Lo que resultó ser.** Cuatro defectos, no uno:
+>
+> 1. **`rotation` se caía en `mapSpanToWords`** — la única hipótesis del documento original que era correcta. Arreglada en `regex-engine` y en `ner-engine`.
+> 2. **El orden de lectura destruía el nombre** (hipótesis (2), confirmada) — cerrada por **ADR-067**, con alcance de un motor, no tres: el argumento de ADR-063 §4 ("arrastra a `ocr-engine`") dejó de valer porque `ocr-engine` nunca puebla `rotation`.
+> 3. **La composición del texto de anotaciones cubría una sola forma** — corrección de **ADR-066 §2**. El PDF sobre el que se midió el ADR era un extracto **aplanado** por un re-export; el original usa `Tf`/`Td` y salía con cuerpo 1 en vez de 8, con los cinco runs apilados en el mismo origen. **Este es el defecto que el documento original no vio**, y la razón de que "no tapa" persistiera.
+> 4. **`getTextContent()` reporta el origen corrido** cuando hay word spacing — **ADR-068**. Es de `pdf.js`, no del motor.
+>
+> **Las dos hipótesis falsas de §4**, para que nadie las vuelva a perseguir:
+>
+> - **"Queda una segunda causa sin identificar" entre la ocurrencia y la caja negra: NO EXISTE.** Medido sobre el extracto de una página con los 9 grupos en `redact`: 12 bloques para 12 ocurrencias, los 12 sobre tinta, 86-100 % negros; y en el PDF exportado, los 12 al **100 %** con cero texto extraíble y cero anotaciones. `buildPageReplacements` devuelve lo correcto y el kernel lo pinta. **No hace falta instrumentarlo.**
+> - **"La fecha se detecta pero no se tapa"**: la fecha **sí** se tapaba. Lo que quedaba a la vista era el **nombre**, que no se detectaba (defecto 2). Leído de reojo sobre un bloque de firma casi entero sin tapar, parecía que el reemplazo no hacía nada.
+>
+> **Lección de método**: medir sobre el documento **original**, nunca sobre una copia re-exportada. El extracto aplanado escondió la mitad del contrato de ADR-066 §2 y mandó el diagnóstico por el camino equivocado durante dos sesiones.
+>
+> Estado actual y desglose de PRs: `MVP.md` §4, Hito 10.8, pasos 3 y 4. Pendientes que **siguen** abiertos: `Post_Hito10.8_Pendientes.md` (su §3 también quedó cerrado por ADR-067).
+
 ## 1. De dónde salió el hito
 
 Prueba real de la herramienta sobre una pericia judicial (5 páginas, expediente PP-13-00-027653-24/00). Una página se anonimizaba mal de dos formas independientes, y la investigación destapó tres defectos más. Los cinco se arreglaron en este hito; el sexto es el que sigue abierto.
@@ -15,7 +35,9 @@ Prueba real de la herramienta sobre una pericia judicial (5 páginas, expediente
 | **ADR-063** | El bbox de texto rotado salía con las dimensiones intercambiadas: una franja de 173×16 pt horizontal donde el texto ocupa 16×173 vertical. Se deriva de la matriz completa. | ✅ implementado |
 | **ADR-064** | Las palabras de OCR entraban en **píxeles** del raster donde el modelo exige puntos (factor 4,17× a 300 DPI). En toda página escaneada la censura caía fuera de lugar. | ✅ implementado |
 | **ADR-065** | `requiresOCR = words.length === 0`: una sola palabra nativa dejaba la página fuera de OCR. El 55% de la página 1 —una imagen con datos de una persona— nunca se escaneaba. Compuertas + OCR **por región**. | ✅ implementado |
-| **ADR-066** | El texto de las anotaciones (firma digital) era invisible: `getTextContent()` no lee appearance streams. Se extrae nativo, sin OCR. Y el reemplazo sobre bbox rotado se pinta rotado. | ✅ implementado |
+| **ADR-066** | El texto de las anotaciones (firma digital) era invisible: `getTextContent()` no lee appearance streams. Se extrae nativo, sin OCR. Y el reemplazo sobre bbox rotado se pinta rotado. | ✅ implementado (**§2 corregido el 13/08**: la composición cubría solo el appearance stream aplanado) |
+| **ADR-067** | El orden de lectura invertía e intercalaba los runs verticales, y el nombre del firmante no llegaba a NER. Agrupa en runs y los emite después del texto horizontal. Supersede ADR-063 §4. | ✅ implementado (13/08) |
+| **ADR-068** | `getTextContent()` aplica el word spacing a espacios que descarta, y el renderer no: el origen del run salía 58,3 pt corrido. Se corrige contra el operator list. | ✅ implementado (13/08) |
 
 **Gates al cierre**: `pnpm lint` limpio, `pnpm typecheck` OK, **1165 tests** en 81 archivos, **242 contract**. Rama `feat/hito10.8-texto-rotado-ocr-parcial`, **24 commits sin pushear**.
 
