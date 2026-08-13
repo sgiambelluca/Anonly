@@ -1,4 +1,11 @@
-import { EngineEvents, EntityType, type EngineContext, type EntityFound } from "@anonly/shared";
+import {
+  EngineEvents,
+  EntityType,
+  type EngineContext,
+  type EntityFound,
+  type Page,
+  type Word,
+} from "@anonly/shared";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { DEFAULT_PATTERNS_AR } from "../patterns/default-ar.js";
@@ -20,6 +27,46 @@ async function firstOccurrence(
   const busEmitSpy = vi.spyOn(ctx.bus, "emit");
   const document = makeSinglePageDocument(`doc-${Math.random()}`, tokens);
   await engine.process({ document }, ctx);
+  const call = busEmitSpy.mock.calls.find(([, event]) => event === EngineEvents.ENTITY_FOUND);
+  return (call?.[2] as EntityFound | undefined)?.occurrence;
+}
+
+/*
+ * Variante de `firstOccurrence` para texto rotado (ADR-066 §6): los helpers
+ * compartidos arman words horizontales, y acá hace falta fijar `rotation` por
+ * palabra. Las cajas son verticales (alto por texto, ancho por cuerpo), como
+ * las que produce `pdf-engine` para un run a 90°.
+ */
+async function firstOccurrenceOfRotatedPage(
+  engine: RegexEngine,
+  ctx: EngineContext,
+  tokens: ReadonlyArray<{ readonly text: string; readonly rotation?: 90 | 180 | 270 }>,
+): Promise<EntityFound["occurrence"] | undefined> {
+  let y = 100;
+  const words: Word[] = tokens.map(({ text, rotation }) => {
+    const height = Math.max(text.length * 6, 1);
+    const word: Word = {
+      text,
+      bbox: { x: 30, y, width: 8, height, ...(rotation !== undefined ? { rotation } : {}) },
+      pageIndex: 0,
+      confidence: 1.0,
+      source: "pdf",
+    };
+    y += height + 10;
+    return word;
+  });
+  const page: Page = {
+    index: 0,
+    width: 595,
+    height: 842,
+    words,
+    text: words.map((w) => w.text).join(" "),
+    requiresOCR: false,
+    ocrCompleted: false,
+  };
+
+  const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+  await engine.process({ document: makeDocument(`doc-${Math.random()}`, [page]) }, ctx);
   const call = busEmitSpy.mock.calls.find(([, event]) => event === EngineEvents.ENTITY_FOUND);
   return (call?.[2] as EntityFound | undefined)?.occurrence;
 }
@@ -275,6 +322,45 @@ describe("RegexEngine — unit tests", () => {
     it("maps a single-word match to a single-word wordSpan", async () => {
       const occurrence = await firstOccurrence(engine, ctx, ["antes", "34.567.891", "despues"]);
       expect(occurrence?.wordSpan).toEqual({ startIndex: 1, endIndexExclusive: 2 });
+    });
+
+    // ADR-066 §6: la unión de bboxes arma un bbox NUEVO; sin propagación
+    // explícita `rotation` se cae en silencio y el pintado rotado de §7 nunca
+    // se activa (verificado sobre la firma digital de la pericia real: el Word
+    // salía con rotation 90 y la Occurrence sin rotation).
+    it("propagates rotation from the matched words to the occurrence bbox", async () => {
+      const occurrence = await firstOccurrenceOfRotatedPage(engine, ctx, [
+        { text: "Date:", rotation: 90 },
+        { text: "07/07/2026", rotation: 90 },
+      ]);
+      expect(occurrence?.value).toBe("07/07/2026");
+      expect(occurrence?.bbox.rotation).toBe(90);
+    });
+
+    it("propagates rotation when every word of a multi-word match agrees", async () => {
+      const occurrence = await firstOccurrenceOfRotatedPage(engine, ctx, [
+        { text: "AB", rotation: 270 },
+        { text: "123", rotation: 270 },
+        { text: "CD", rotation: 270 },
+      ]);
+      expect(occurrence?.wordSpan).toEqual({ startIndex: 0, endIndexExclusive: 3 });
+      expect(occurrence?.bbox.rotation).toBe(270);
+    });
+
+    it("omits rotation when the words of a match disagree on the angle", async () => {
+      const occurrence = await firstOccurrenceOfRotatedPage(engine, ctx, [
+        { text: "AB", rotation: 90 },
+        { text: "123" },
+        { text: "CD", rotation: 90 },
+      ]);
+      expect(occurrence?.wordSpan).toEqual({ startIndex: 0, endIndexExclusive: 3 });
+      expect(occurrence?.bbox.rotation).toBeUndefined();
+    });
+
+    // No-regresión: texto horizontal sigue sin el campo (ausente ≡ 0).
+    it("leaves rotation absent for horizontal text", async () => {
+      const occurrence = await firstOccurrence(engine, ctx, ["antes", "34.567.891", "despues"]);
+      expect(occurrence?.bbox.rotation).toBeUndefined();
     });
   });
 
