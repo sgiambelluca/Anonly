@@ -44,9 +44,36 @@ rotadas: "E13000013835753"@90° | "CCS"@90° | "Público"@90° | "Ministerio"@90
 
 O sea: **la extracción de anotaciones y el poblado de `rotation` andan**. El problema está aguas abajo del motor, o en el build.
 
-### Hipótesis, en orden de costo de descarte
+### Actualización tras la segunda prueba manual — LO MÁS IMPORTANTE
 
-**(1) Build viejo en la app.** Es lo primero a descartar y lo más barato. El `pdf-engine` corre dentro de un Web Worker real (ADR-036), y el bundle del worker es lo que Vite más fácilmente sirve cacheado. **Rebuild + hard reload antes de cualquier otra cosa.** Si el síntoma desaparece, no hay bug.
+El humano **rebuildeó y volvió a probar**. Resultados nuevos, que descartan la hipótesis (1) y precisan el resto:
+
+- **La detección FUNCIONA.** La fecha de la firma aparece en la lista de entidades de la UI.
+- **El reemplazo `redact` NO la tapa.** El texto de la firma se ve igual en el panel anonimizado.
+
+Diagnóstico ejecutando `PdfEngine` + `RegexEngine` reales sobre el PDF real:
+
+```
+ocurrencias en pág 1: 2
+  [PHONE] "00-027653"   bbox=(140.8,112.6) 71.6×8.2   rotation=—
+  [DATE]  "07/07/2026"  bbox=(28.9,721.6)   8.0×37.9   rotation=—
+```
+
+**Bug verificado nº1 — `rotation` se pierde al construir la `Occurrence`.** El `Word` tenía `rotation: 90` (verificado arriba); la `Occurrence` sale con `rotation` **ausente**. La causa es `mapSpanToWords` (`regex-engine/src/regex.engine.ts`, ~línea 185): **construye un `BoundingBox` nuevo** a partir de min/max escalares en vez de propagar el original, así que el campo se cae en silencio.
+
+Esto **falsifica la premisa de ADR-066 §6**, que justificaba poner `rotation` en `BoundingBox` diciendo: *"es lo que viaja por la cadena `Word → Occurrence → Replacement` sin tocar tres tipos: `mapSpanToWords` une bboxes y el campo viaja con ellos"*. **No viaja.** Consecuencia: el pintado rotado de ADR-066 §7 **nunca se activa**, porque `bbox.rotation` siempre llega `undefined` al render.
+
+Arreglo: propagar `rotation` en `mapSpanToWords` (decidir qué hacer si las palabras del match tienen rotaciones distintas — en la práctica comparten una) y revisar el camino equivalente de `ner-engine`. Es `regex-engine`, un módulo.
+
+**Lo que ESTE bug no explica.** `redact` ignora la rotación: rellena el rectángulo y nada más. Y el bbox de la ocurrencia es **geométricamente correcto** —(28.9, 721.6) 8×37.9 es la franja vertical donde está la fecha, dentro del rect de la anotación—. Además el orden de dibujo es el correcto: `kernelRenderPage` hace `pageProxy.render()` primero y `paintReplacements()` después, así que la caja va **encima**. Y `buildPageReplacements` (`export-engine`) solo filtra grupos con `enabled === false`.
+
+O sea que **queda una segunda causa sin identificar** entre "la ocurrencia existe con el bbox correcto" y "la caja negra no aparece". Próximo paso concreto: instrumentar qué devuelve `buildPageReplacements(0, snapshot.groups)` con el grupo en `redact` — si el `Replacement` está ahí con ese bbox, el problema es del kernel; si no está, es del snapshot de Grouping o del estado `enabled` del grupo.
+
+**Hallazgo lateral que explica "aparecen tres fechas".** El número de expediente `PP-13-00-027653-24/00` produce un falso positivo `[PHONE] "00-027653"`. Los patrones numéricos de `default-ar.ts` están matcheando partes del número de causa. No es del hito; sumar a los pendientes.
+
+### Hipótesis restantes
+
+**(1) ~~Build viejo en la app.~~ DESCARTADA** — el humano rebuildeó y el síntoma persiste.
 
 **(2) El orden de lectura destruye el nombre.** Este sí es un defecto real y explica **el nombre, pero no la fecha**. Mirá el orden en que salen las palabras rotadas arriba: los cinco runs de la firma están **intercalados entre sí y cada uno invertido**. "Albarracin, Rocio de los Milagros" aparece disperso como `… Milagros … los … de … Rocio … Albarracin,` con palabras de otros runs en el medio.
 
