@@ -2074,10 +2074,8 @@ describe("GroupingEngine — edge cases", () => {
     expect(merged.id).toBe(target.id);
     expect(merged.replacementValue).toBe(targetSynthetic.replacementValue);
 
-    // División: el grupo nuevo nace con el modo default (`placeholder`, no
-    // hereda el del padre — comportamiento previo a este ADR). Puesto en
-    // `synthetic`, su valor sale de SU propio `id`, que es lo correcto: es
-    // otra entidad.
+    // División: el grupo nuevo hereda el modo (§13 caso 6) y su valor sale de
+    // SU propio `id`, que es lo correcto — es otra entidad.
     const { merged: survivor, created } = await engine.applyGroupSplit({
       documentId: "doc-1",
       groupId: target.id,
@@ -2085,16 +2083,94 @@ describe("GroupingEngine — edge cases", () => {
     });
     expect(survivor.replacementValue).toBe(targetSynthetic.replacementValue);
 
-    const createdSynthetic = await setSynthetic(created.id);
     const seed = engine["sessions"].get("doc-1")!.seed as string;
-    expect(createdSynthetic.replacementValue).toBe(
+    expect(created.replacementMode).toBe(ReplacementMode.Synthetic);
+    expect(created.replacementValue).toBe(
       synthesize({
         type: EntityType.Person,
         groupId: created.id,
         seed,
-        indexInType: createdSynthetic.indexInType,
+        indexInType: created.indexInType,
       }),
     );
+  });
+
+  // Caso 6 (§13): el vacío de spec cerrado el 2026-08-14. Antes, un modo
+  // puesto a mano se perdía al dividir —el grupo nuevo caía a `placeholder`—
+  // y las dos mitades de lo que el usuario trataba como una cosa quedaban en
+  // modos distintos. Las reglas sí se heredaban, y por eso el test de ADR-029
+  // usa una regla de tipo: esquivaba justo este caso.
+  it("split inherits the parent's replacementMode, including a manually set one", async () => {
+    const occA = makeOccurrence({ value: "11111111", normalizedValue: "11111111" });
+    const occB = makeOccurrence({ value: "1111111", normalizedValue: "11111111" });
+    for (const occurrence of [occA, occB]) {
+      ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence,
+      });
+    }
+    const [group] = engine.getSnapshot("doc-1").groups;
+    expect(group?.members).toHaveLength(2);
+
+    // Modo a mano sobre ESE grupo, sin reglas de por medio: es el camino que
+    // antes se perdía.
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group!.id,
+      patch: { replacementMode: ReplacementMode.Synthetic },
+    });
+
+    const { merged, created } = await engine.applyGroupSplit({
+      documentId: "doc-1",
+      groupId: group!.id,
+      occurrenceIds: [occB.id],
+    });
+
+    expect(merged.replacementMode).toBe(ReplacementMode.Synthetic);
+    expect(created.replacementMode).toBe(ReplacementMode.Synthetic);
+    // El valor NO se copia: se computa de cero desde el `id` del grupo nuevo.
+    const seed = engine["sessions"].get("doc-1")!.seed as string;
+    expect(created.replacementValue).toBe(
+      synthesize({
+        type: EntityType.DNI,
+        groupId: created.id,
+        seed,
+        indexInType: created.indexInType,
+      }),
+    );
+  });
+
+  it("a rule still wins over the mode inherited by a split", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "11111111", normalizedValue: "11111111" }),
+    });
+    const occB = makeOccurrence({ value: "1111111", normalizedValue: "11111111" });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: occB,
+    });
+    const [group] = engine.getSnapshot("doc-1").groups;
+
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group!.id,
+      patch: { replacementMode: ReplacementMode.Synthetic },
+    });
+    await engine.applyRuleCreated({
+      documentId: "doc-1",
+      rule: makeRule("type", ReplacementMode.Redact, { entityType: EntityType.DNI }),
+    });
+
+    const { created } = await engine.applyGroupSplit({
+      documentId: "doc-1",
+      groupId: group!.id,
+      occurrenceIds: [occB.id],
+    });
+
+    // La herencia es el PISO, no un bypass: `resolveMode` corre igual y la
+    // regla de tipo gana, con la precedencia de siempre.
+    expect(created.replacementMode).toBe(ReplacementMode.Redact);
   });
 
   // ─── Caso 39 (§13, ADR-071 §5/§6): género en modo `synthetic` ───
