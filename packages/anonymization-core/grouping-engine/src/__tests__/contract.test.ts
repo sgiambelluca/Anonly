@@ -673,6 +673,10 @@ describe("GroupingEngine — contract tests", () => {
   // único campo por grupo (no hay forma estructural de que dos members
   // "vean" valores distintos), y ese único valor refleja el PEOR CASO de
   // TODOS los members — no el del primero, ni el de la mayoría.
+  //
+  // "Andrea"/"Andrea Diaz" (ambos `A`/ambiguo en el registro, ADR-069 §1):
+  // este test prueba la escalera de abreviaturas, no la inferencia de
+  // género — un nombre determinado desviaría la aserción hacia MUJER/HOMBRE.
   it("all members of a group share the same replacementValue", async () => {
     await engine.init(ctx);
     engine.startSession("doc-1");
@@ -684,8 +688,8 @@ describe("GroupingEngine — contract tests", () => {
         documentId: "doc-1",
         occurrence: makeOccurrence({
           entityType: EntityType.Person,
-          value: "Juan Perez",
-          normalizedValue: "juan perez",
+          value: "Andrea Perez",
+          normalizedValue: "andrea perez",
           bbox: makeBBox(0, y, 150, 20),
         }),
       });
@@ -694,15 +698,15 @@ describe("GroupingEngine — contract tests", () => {
       documentId: "doc-1",
       occurrence: makeOccurrence({
         entityType: EntityType.Person,
-        value: "Ana Diaz",
-        normalizedValue: "ana diaz",
+        value: "Andrea Diaz",
+        normalizedValue: "andrea diaz",
         bbox: makeBBox(0, 0, 90, 20),
       }),
     });
 
     const groups = engine.getSnapshot("doc-1").groups;
-    const wideGroup = groups.find((g) => g.canonicalValue === "Juan Perez");
-    const narrowGroup = groups.find((g) => g.canonicalValue === "Ana Diaz");
+    const wideGroup = groups.find((g) => g.canonicalValue === "Andrea Perez");
+    const narrowGroup = groups.find((g) => g.canonicalValue === "Andrea Diaz");
     expect(wideGroup?.replacementValue).toBe("[PERSONA 01]");
 
     const merged = await engine.applyGroupMerge({
