@@ -587,6 +587,59 @@ describe("ExportEngine — unit", () => {
       ]);
     });
 
+    it("gender prefixes fall under the Person row without touching buildMarkerLegend", () => {
+      // No-regresión (ADR-060 §8, Export_Engine.md §14 caso 22): las cuatro
+      // filas nuevas de la escalera de labels que ADR-060 §3 agrega para
+      // Person femenino/masculino no abren una fila propia en la leyenda --
+      // se agrupan por EntityType igual que PERSONA/PERS/PRS, sin que este
+      // motor necesite saber que existe un `personGender`.
+      const genderedGroups = [
+        createEntityGroup({
+          id: "g-person-default",
+          type: EntityType.Person,
+          replacementValue: "[PERSONA 05]",
+        }),
+        createEntityGroup({
+          id: "g-person-mujer",
+          type: EntityType.Person,
+          replacementValue: "[MUJER 01]",
+        }),
+        createEntityGroup({
+          id: "g-person-hombre",
+          type: EntityType.Person,
+          replacementValue: "[HOMBRE 02]",
+        }),
+        createEntityGroup({
+          id: "g-person-muj",
+          type: EntityType.Person,
+          replacementValue: "[MUJ-03]",
+        }),
+        createEntityGroup({
+          id: "g-person-hom",
+          type: EntityType.Person,
+          replacementValue: "[HOM-04]",
+        }),
+      ];
+
+      const entries = buildMarkerLegendEntries(genderedGroups);
+      expect(entries).toEqual([
+        {
+          type: EntityType.Person,
+          prefixes: ["PERSONA", "MUJER", "HOMBRE", "MUJ", "HOM"],
+          markerCount: 5,
+        },
+      ]);
+
+      const rows = buildMarkerLegend(entries);
+      expect(rows).toEqual([
+        {
+          prefixes: "PERSONA, MUJER, HOMBRE, MUJ, HOM",
+          typeName: "Persona",
+          countLabel: "5 marcadores",
+        },
+      ]);
+    });
+
     it("mask/synthetic/redact groups and disabled groups produce no legend rows", () => {
       const maskGroup = createEntityGroup({ id: "g-mask", replacementMode: ReplacementMode.Mask });
       const syntheticGroup = createEntityGroup({
