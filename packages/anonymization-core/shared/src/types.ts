@@ -13,6 +13,7 @@ import type {
   ConflictReason,
   DetectionSource,
   EntityType,
+  PersonGender,
   PipelineStage,
   ReplacementMode,
   RuleScope,
@@ -141,6 +142,8 @@ export interface EntityGroup {
   readonly indexInType: number;
   readonly enabled: boolean;
   readonly aliases: ReadonlyArray<string>;
+  /** Solo para type === Person. Ausente = sin determinar (ADR-060 §4). */
+  readonly personGender?: PersonGender;
   readonly createdAt: number;
   readonly updatedAt: number;
 }

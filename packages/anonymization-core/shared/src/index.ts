@@ -32,7 +32,7 @@ export {
   PipelineStage,
   EngineErrorCode,
 } from "./enums.js";
-export type { RuleScope, WorkerJobType } from "./enums.js";
+export type { PersonGender, RuleScope, WorkerJobType } from "./enums.js";
 
 // Modelos de datos (03_Data_Model.md)
 export type {
