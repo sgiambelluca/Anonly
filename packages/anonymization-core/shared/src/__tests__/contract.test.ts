@@ -32,6 +32,7 @@ import {
   REPLACEMENT_FONT_HEIGHT_RATIO,
   ReplacementMode,
   synthesize,
+  wordsInRect,
 } from "../index.js";
 import { isTransferable } from "../index.js";
 import type {
@@ -51,6 +52,7 @@ import type {
   IEngine,
   IEventBus,
   ILogger,
+  ManualEntityRequest,
   MarkerLegendEntry,
   MarkerLegendRow,
   Occurrence,
@@ -62,6 +64,7 @@ import type {
   RenderLegendPayload,
   RenderPagePayload,
   RenderRequested,
+  TextMatch,
   Word,
   WorkerFactory,
   WorkerLike,
@@ -1013,6 +1016,152 @@ describe("@anonly/shared — Contracts", () => {
       };
       expect(encoded.format).toBe("jpeg");
       expect(encoded.bytes.byteLength).toBe(3);
+    });
+  });
+
+  describe("wordsInRect (ADR-061 §4)", () => {
+    const wordHola: Word = {
+      text: "Hola",
+      bbox: { x: 0, y: 0, width: 40, height: 10 },
+      pageIndex: 0,
+      confidence: 1,
+      source: "pdf",
+    };
+    const wordMundo: Word = {
+      text: "Mundo",
+      bbox: { x: 50, y: 0, width: 40, height: 10 },
+      pageIndex: 0,
+      confidence: 1,
+      source: "pdf",
+    };
+    const wordOtraLinea: Word = {
+      text: "Otra",
+      bbox: { x: 0, y: 20, width: 40, height: 10 },
+      pageIndex: 0,
+      confidence: 1,
+      source: "pdf",
+    };
+    const words: ReadonlyArray<Word> = [wordHola, wordMundo, wordOtraLinea];
+
+    describe("Unit", () => {
+      it("es pura: mismo input produce el mismo resultado y no muta `words`", () => {
+        const rect: BoundingBox = { x: 0, y: 0, width: 40, height: 10 };
+        const a = wordsInRect(words, rect);
+        const b = wordsInRect(words, rect);
+        expect(a).toEqual(b);
+        expect(words).toHaveLength(3);
+        expect(words[0]).toBe(wordHola);
+        expect(words[1]).toBe(wordMundo);
+        expect(words[2]).toBe(wordOtraLinea);
+      });
+
+      it("devuelve las palabras cuyo bbox intersecta la región, y ninguna otra", () => {
+        // Cubre "Hola" y "Mundo" (misma línea), no "Otra" (línea distinta).
+        const rect: BoundingBox = { x: 0, y: 0, width: 100, height: 10 };
+        const result = wordsInRect(words, rect);
+        expect(result).toEqual([wordHola, wordMundo]);
+        // Son las mismas referencias, no copias: filtrado puro, sin clonar.
+        expect(result[0]).toBe(wordHola);
+        expect(result[1]).toBe(wordMundo);
+      });
+
+      it("preserva el orden original de `words`", () => {
+        const rect: BoundingBox = { x: 0, y: 0, width: 200, height: 40 }; // cubre las tres
+        expect(wordsInRect(words, rect)).toEqual([wordHola, wordMundo, wordOtraLinea]);
+      });
+
+      it("un rect que no toca ninguna palabra devuelve []", () => {
+        const rect: BoundingBox = { x: 500, y: 500, width: 10, height: 10 };
+        expect(wordsInRect(words, rect)).toEqual([]);
+      });
+
+      it("ignora el `rotation` del bbox: no cambia la geometría (ADR-066 §6)", () => {
+        const rotatedWord: Word = { ...wordHola, bbox: { ...wordHola.bbox, rotation: 90 } };
+        const rect: BoundingBox = { x: 0, y: 0, width: 40, height: 10, rotation: 180 };
+        expect(wordsInRect([rotatedWord], rect)).toEqual([rotatedWord]);
+      });
+    });
+
+    describe("Edge", () => {
+      it("región vacía (width=0) no matchea nada, incluso cayendo dentro de una palabra", () => {
+        const rect: BoundingBox = { x: 10, y: 5, width: 0, height: 0 };
+        expect(wordsInRect(words, rect)).toEqual([]);
+      });
+
+      it("región vacía (height=0) no matchea nada", () => {
+        const rect: BoundingBox = { x: 10, y: 5, width: 10, height: 0 };
+        expect(wordsInRect(words, rect)).toEqual([]);
+      });
+
+      it("región fuera de la página no matchea nada", () => {
+        const rect: BoundingBox = { x: 1000, y: 1000, width: 50, height: 50 };
+        expect(wordsInRect(words, rect)).toEqual([]);
+      });
+
+      it("región que corta una palabra por la mitad la incluye igual", () => {
+        // Mitad izquierda de "Hola" (bbox completo: x 0..40).
+        const rect: BoundingBox = { x: 0, y: 0, width: 20, height: 10 };
+        expect(wordsInRect(words, rect)).toEqual([wordHola]);
+      });
+
+      it("región que solo toca el borde, sin área compartida, no matchea", () => {
+        // Arranca exactamente donde termina "Hola" (x=40): sin solapamiento real.
+        const rect: BoundingBox = { x: 40, y: 0, width: 10, height: 10 };
+        expect(wordsInRect(words, rect)).toEqual([]);
+      });
+
+      it("lista de palabras vacía siempre devuelve []", () => {
+        const rect: BoundingBox = { x: 0, y: 0, width: 1000, height: 1000 };
+        expect(wordsInRect([], rect)).toEqual([]);
+      });
+    });
+  });
+
+  describe("ManualEntityRequest (ADR-061 §3/§6)", () => {
+    it("tipa value y entityType", () => {
+      const req: ManualEntityRequest = { value: "José Pérez", entityType: EntityType.Person };
+      expect(req.value).toBe("José Pérez");
+      expect(req.entityType).toBe(EntityType.Person);
+    });
+
+    it("es readonly (compile-time, ADR-008)", () => {
+      const req: ManualEntityRequest = { value: "x", entityType: EntityType.DNI };
+      const mutate = (): void => {
+        // @ts-expect-error — value es readonly (ADR-008); assert de compile-time
+        req.value = "y";
+      };
+      void mutate;
+      expect(req.value).toBe("x");
+    });
+  });
+
+  describe("TextMatch (ADR-061 §8)", () => {
+    it("tipa pageIndex/bbox/text/wordSpan", () => {
+      const match: TextMatch = {
+        pageIndex: 2,
+        bbox: { x: 10, y: 20, width: 30, height: 12 },
+        text: "José Pérez",
+        wordSpan: { startIndex: 4, endIndexExclusive: 6 },
+      };
+      expect(match.pageIndex).toBe(2);
+      expect(match.text).toBe("José Pérez");
+      expect(match.wordSpan.startIndex).toBe(4);
+      expect(match.wordSpan.endIndexExclusive).toBe(6);
+    });
+
+    it("es readonly (compile-time, ADR-008)", () => {
+      const match: TextMatch = {
+        pageIndex: 0,
+        bbox: { x: 0, y: 0, width: 10, height: 10 },
+        text: "x",
+        wordSpan: { startIndex: 0, endIndexExclusive: 1 },
+      };
+      const mutate = (): void => {
+        // @ts-expect-error — pageIndex es readonly (ADR-008); assert de compile-time
+        match.pageIndex = 1;
+      };
+      void mutate;
+      expect(match.pageIndex).toBe(0);
     });
   });
 

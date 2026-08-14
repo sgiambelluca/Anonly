@@ -188,6 +188,21 @@ export interface Replacement {
   readonly mode: ReplacementMode;
 }
 
+// Entrada de IPipelineOrchestrator.addManualEntity (ADR-061 §3/§6).
+export interface ManualEntityRequest {
+  readonly value: string;
+  readonly entityType: EntityType;
+}
+
+// Salida de IPipelineOrchestrator.findText — misma búsqueda literal que
+// ManualEntityRequest, con otra salida (ADR-061 §8).
+export interface TextMatch {
+  readonly pageIndex: number;
+  readonly bbox: BoundingBox;
+  readonly text: string;
+  readonly wordSpan: WordSpan;
+}
+
 export interface RuleTarget {
   readonly kind: RuleScope;
   readonly groupId?: string;
