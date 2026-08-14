@@ -148,6 +148,36 @@ export interface EntityGroup {
   readonly updatedAt: number;
 }
 
+/**
+ * Entrada de `synthesize()` (Contracts.md §5, ADR-072 §2). Objeto y no
+ * posicionales porque `groupId` y `seed` son dos `string` adyacentes: como
+ * posicionales, intercambiarlos compila sin error y el resultado se imprime
+ * en un documento.
+ */
+export interface SyntheticRequest {
+  readonly type: EntityType;
+  /**
+   * ADR-072 §1: la SEMILLA del sorteo es la identidad del grupo
+   * (`EntityGroup.id`), no su número. `indexInType` es un ordinal que la
+   * renumeración canónica mueve (ADR-028), y sembrar sobre él hacía que el
+   * valor sintético de un grupo cambiara por operaciones ajenas a ese grupo.
+   */
+  readonly groupId: string;
+  /** Aleatorio por sesión, lo genera el Grouping Engine (ADR-012 §SAN, ADR-019 §5). */
+  readonly seed: string;
+  /**
+   * ADR-072 §3: solo lo leen los tipos cuyo valor INTERPOLA el número del
+   * grupo (`Custom` → `custom-3`). Los tipos que sortean no lo miran.
+   */
+  readonly indexInType: number;
+  /**
+   * ADR-071 §5: solo se consulta sobre `type === Person`. Filtra el pool de
+   * nombres de pila; NO entra a la semilla, así que ausente produce el mismo
+   * valor que produciría sin el campo.
+   */
+  readonly personGender?: PersonGender;
+}
+
 export interface Replacement {
   readonly groupId: string;
   readonly occurrenceId: string;
