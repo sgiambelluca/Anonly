@@ -217,6 +217,8 @@ Van sobre la misma branch del Hito 10.6, **antes de mergear**: la branch está a
 - `core/Grouping_Engine.md` → v1.5.0: nota de cabecera, §"`replacementValue` por modo" (fila `synthetic`), §13 (caso nuevo: género en modo sintético y el recálculo de §6), §14 (tests de §8), §15 (checklist).
 - `ui/Components.md` — §3.3 (baja de la marca del listado de estados), §3.4b reescrito entero (`PersonGenderToggle`: visibilidad por tipo **y** modo, ciclo, símbolos, ARIA), §8.3 (`Select` sin `open`/`onOpenChange`), §12 (tabla de mapeo).
 - `ui/UX_Guidelines.md` — §3.3 (la marca de género sin determinar pasa a ser el estado neutro del control), §5.4 (qué se ve por modo).
+- `ui/React_Client.md` — cabecera CONTEXT: nombraba `PersonGenderSelect` como destinatario de `updateGroup.patch.personGender`. El contrato de §2.3 **no cambia**; solo el nombre del consumidor.
+- `architecture/08_Security_Model.md` §9.1 — **no estaba previsto y hay que tocarlo**: todo el análisis de divulgación de género está escrito sobre `placeholder`, y §5 de acá suma un segundo modo. La conclusión es más benigna (el sintético ya imprimía un género al azar), pero con una salvedad que hay que decir: en `synthetic` el neutro no evita divulgar género, porque no hay nombre de pila neutro al cual caer.
 - `roadmap/MVP.md` §4 — bloque del Hito 10.6: los PRs 13/14a/14b/14c y el estado de la branch (compartido con ADR-072).
 
 ## Validación

@@ -62,7 +62,7 @@ Ejecutar el flujo de export al ser invocado por el Orchestrator (que escucha `EX
 - `pdf-lib` (ADR-001, ADR-009)
 - Tipos de `core/Contracts.md`: `IEngine`, `EngineContext`, `Document`, `Page`, `EntityGroup`, `Replacement`, `ExportOptions`, `ExportMetadata`, `ExportConfig`, `Rule`
 - `architecture/04_Event_System.md`: `EXPORT_STARTED`, `EXPORT_PROGRESS`, `EXPORT_FINISHED`, `EXPORT_FAILED` (solo emisión; Export no consume eventos — ADR-032 §2)
-- Sintetizadores: `shared/synthesizer.ts` para valores sintéticos deterministas por seed.
+- ~~Sintetizadores: `shared/synthesizer.ts` para valores sintéticos deterministas por seed.~~ **Retirado por ADR-072 §2**: este motor nunca lo usó y no debe usarlo. El valor sintético llega ya resuelto en `Replacement.replacementValue`; recomputarlo acá sería una segunda fuente de verdad capaz de discrepar del preview. Ver §"Sintetizadores (referencia)".
 
 ---
 
@@ -401,19 +401,15 @@ ExportEngine.export(input)
 
 ## Sintetizadores (referencia)
 
-Los sintetizadores para `mode = "synthetic"` viven en `shared/synthesizer.ts` y son consumidos por Grouping (para `replacementValue`) y por Export/Render (consistencia visual). Ver `adr/ADR-012-Replacement-Modes.md` para la tabla de formatos por tipo.
+Los sintetizadores para `mode = "synthetic"` viven en `shared/synthesizer.ts`. Ver `adr/ADR-012-Replacement-Modes.md` para la tabla de formatos por tipo, y `core/Contracts.md` §5-§6 para el tipo y la firma, que desde ADR-072 §2 están **declarados en el contrato**.
 
-El sintetizador es determinista por `(seed, type, indexInType)`:
+> **Corregido por ADR-072 §2 (2026-08-14), en tres puntos.** Esta sección decía que el sintetizador es "consumido por Grouping y por Export/Render (consistencia visual)"; **su único caller es Grouping** (`computeReplacementValue`), y este motor nunca lo llamó. Export recibe el `replacementValue` ya resuelto en `Replacement`, que es justamente lo que garantiza la consistencia visual — llamar al sintetizador desde acá sería una segunda fuente de verdad capaz de discrepar del preview. Además la firma cambió (objeto en vez de posicionales) y **la semilla dejó de ser `indexInType`**.
 
 ```ts
-export function synthesize(
-  type: EntityType,
-  indexInType: number,
-  seed: string
-): string;
+export function synthesize(req: SyntheticRequest): string;
 ```
 
-Mismo `(seed, type, index)` → mismo valor sintético. Seed default: aleatorio por sesión, configurable por documento.
+Determinismo, con precisión: mismo `(type, groupId, seed)` → mismo valor, y **cambiar `indexInType` no cambia nada** en los tipos que sortean (ADR-072 §1). El seed es aleatorio por sesión y **no es configurable** — ADR-019 §5 lo decidió así para decorrelacionar sesiones, así que reproducir un export entre sesiones no es posible ni deseado (ADR-012 §SAN, `roadmap/Future_Ideas.md` §3.4).
 
 ---
 

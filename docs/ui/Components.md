@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=componentes-ui | dependencias=ui/React_Client.md,ui/UX_Guidelines.md,ADR-001-Framework.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-054-Scroll-Independiente-Por-Panel.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-069-Lexico-De-Genero-Fuente-Unica-Y-Canal-Del-Usuario.md | audiencia=IA-implementador-ui | fase=4 (reconciliado en fase 10 por ADR-036: PasswordDialog/SettingsDialog/ConfirmDialog agregados §2.6–2.7/§8.9, zoom §5.2, mapeo §12; §2.6/§5.2/§5.5/§12 reescritos por ADR-037 —zoom con re-render real— y ADR-038 —SettingsDialog dispara reanalyze, no recreación del core—; §2.1/§2.5/§13.9 ajustados 2026-07-22 por el bug #7 del Escenario 1 E2E: gate de visibilidad por stage vs. vida del diálogo hijo abierto; §5.2/§5.4 en fase 11 por ADR-056 —requestRender con kind por panel, canvas que no se borra—; §3.3/§3.4/§7.1/§12 en fase 10.5 por ADR-058 —marca de reemplazo degradado— y ADR-059 —checkbox de leyenda—; §3.3 por ADR-062 —el canal `PREVIEW_UPDATED.degraded` del que sale esa marca, y las tres reglas de su consumo; el checkbox de leyenda entra en el Hito 10.5 y la marca queda para después—; §3.3/§3.4b/§12 en fase 10.6 por ADR-060 —PersonGenderSelect y marca de género sin determinar— y ADR-069 —§3.4b actualizado: el patch usa `PersonGenderChoice`, "sin determinar" viaja como `"neutral"` explícito—; §3.4c/§5.4b/§5.4c/§12 en fase 10.7 por ADR-061 —agregado manual, hit-test de selección y buscador—; §1/§2.6 en fase 10.6 por ADR-070 —sección "Acerca de" con la atribución CC-BY dentro del SettingsDialog, y `thirdPartyCredits.ts` como módulo de datos—) -->
+<!-- CONTEXT: scope=componentes-ui | dependencias=ui/React_Client.md,ui/UX_Guidelines.md,ADR-001-Framework.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-054-Scroll-Independiente-Por-Panel.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-069-Lexico-De-Genero-Fuente-Unica-Y-Canal-Del-Usuario.md,adr/ADR-071-El-Genero-Se-Muestra-Solo-Donde-Se-Usa.md | audiencia=IA-implementador-ui | fase=4 (reconciliado en fase 10 por ADR-036: PasswordDialog/SettingsDialog/ConfirmDialog agregados §2.6–2.7/§8.9, zoom §5.2, mapeo §12; §2.6/§5.2/§5.5/§12 reescritos por ADR-037 —zoom con re-render real— y ADR-038 —SettingsDialog dispara reanalyze, no recreación del core—; §2.1/§2.5/§13.9 ajustados 2026-07-22 por el bug #7 del Escenario 1 E2E: gate de visibilidad por stage vs. vida del diálogo hijo abierto; §5.2/§5.4 en fase 11 por ADR-056 —requestRender con kind por panel, canvas que no se borra—; §3.3/§3.4/§7.1/§12 en fase 10.5 por ADR-058 —marca de reemplazo degradado— y ADR-059 —checkbox de leyenda—; §3.3 por ADR-062 —el canal `PREVIEW_UPDATED.degraded` del que sale esa marca, y las tres reglas de su consumo; el checkbox de leyenda entra en el Hito 10.5 y la marca queda para después—; §3.3/§3.4b/§12 en fase 10.6 por ADR-060 —PersonGenderSelect y marca de género sin determinar— y ADR-069 —§3.4b actualizado: el patch usa `PersonGenderChoice`, "sin determinar" viaja como `"neutral"` explícito—; §3.3/§3.4b/§8.3/§12 reescritos en fase 10.6 por ADR-071 —`PersonGenderSelect` pasa a ser `PersonGenderToggle`: visible solo en `placeholder`/`synthetic`, botón cíclico de tres estados con SVG propios, la marca de "sin determinar" fusionada con el estado neutro, y `Select` sin apertura controlada—; §3.4c/§5.4b/§5.4c/§12 en fase 10.7 por ADR-061 —agregado manual, hit-test de selección y buscador—; §1/§2.6 en fase 10.6 por ADR-070 —sección "Acerca de" con la atribución CC-BY dentro del SettingsDialog, y `thirdPartyCredits.ts` como módulo de datos—) -->
 
 # Anonly — Catálogo de Componentes
 
@@ -176,7 +176,7 @@ apps/react-client/src/components/
     - **`degraded` ausente ≡ `[]`** (§2): se lee `payload.degraded ?? []` y no se distinguen nunca.
 
     La marca del árbol es la **agregación derivada** de ese mapa: el conjunto de `groupId` con al menos una ocurrencia degradada. No se persiste ni vuelve al Core. La cobertura es completa desde `Ready` sin renderizar nada de más, porque el seed de ADR-044 ya siembra todas las páginas con reemplazos (ADR-062, Contexto §3), y vale igual para el PDF exportado por la invariancia de escala del umbral (ADR-062 §6).
-  - **género sin determinar** (ADR-060 §5): solo sobre grupos `Person` en modo `placeholder` sin `personGender` resuelto. Abre el selector de §3.4b. Es una **afordancia de UI sobre información faltante**, distinta de la marca de degradación: el grupo se renderiza perfecto, lo que falta es un dato — por eso **no** usa `AnnotationKind.Degraded` ni se pinta en el canvas.
+  - **género sin determinar** (ADR-060 §5, **fusionado con el control por ADR-071 §4**): ya **no** es un badge propio. Es el **estado neutro del `PersonGenderToggle` de §3.4b**, con trazo atenuado, y por lo tanto aparece exactamente donde aparece el control: grupos `Person` en modo `placeholder` o `synthetic`. Sigue siendo una **afordancia de UI sobre información faltante**, distinta de la marca de degradación —el grupo se renderiza perfecto, lo que falta es un dato—, así que **no** usa `AnnotationKind.Degraded` ni se pinta en el canvas. Lo que se retira es la duplicación: antes había un badge `?` **más** el selector, los dos sobre el mismo campo.
 - **Eventos**:
   - Checkbox → `actions.updateGroup(group.id, { enabled: value })`.
   - Click canonicalValue → popover con aliases y "Editar valor canónico".
@@ -191,14 +191,30 @@ apps/react-client/src/components/
 - **Implementación**: Radix `Select` con iconos por modo y preview del valor resultante.
 - **Nota (ADR-057)**: el preview es `group.replacementValue`, ya resuelto por el Grouping Engine — así que **muestra el token abreviado sin ningún cambio en este componente**. Un grupo apretado va a previsualizar `[PRS-01]` y no `[PERSONA 01]`, y eso es correcto: es exactamente lo que va a salir en el documento.
 
-### 3.4b `PersonGenderSelect` (ADR-060 §6, wire actualizado por ADR-069 §4)
+### 3.4b `PersonGenderToggle` (ADR-060 §6, forma y visibilidad por ADR-071 §1-§3, wire por ADR-069 §4)
+
+> **Reemplaza a `PersonGenderSelect`**, que era un `Select` montado en **toda** fila `Person` sin mirar el modo. Con eso, un documento con veinte personas mostraba veinte campos que la mayoría de los usuarios no toca nunca, compitiendo con el control que sí se usa en cada grupo. ADR-071 §1-§4.
 
 - **Props**: `groupId`, `currentGender: PersonGender | undefined` — el valor **almacenado** en el grupo (`EntityGroup.personGender` no cambió de forma, ADR-069 §4).
-- **Visibilidad**: **solo** sobre grupos con `type === EntityType.Person`. En cualquier otro tipo no se renderiza.
-- **Opciones**: femenino / masculino / sin determinar (tres estados del **control**).
-- **Acción**: `actions.updateGroup(groupId, { personGender: choice })`, donde `choice: PersonGenderChoice` (`"f" | "m" | "neutral"`, `Contracts.md` §8). La opción "sin determinar" emite el valor explícito `"neutral"` — **no** ausencia de clave — que es lo que permite distinguir "el usuario eligió volver a neutral" de "no se tocó este campo" (ADR-069 §4). El motor traduce `"neutral"` a borrar `EntityGroup.personGender`.
-- **Implementación**: Radix `Select`, con preview del token resultante igual que §3.4 (`[MUJER 03]` / `[HOMBRE 03]` / `[PERSONA 03]`).
-- **Por qué es por grupo y no un ajuste global**: el género es un atributo sensible que el token neutro ocultaba (`08_Security_Model.md` §9.1). Se divulga de a una persona por vez, con el usuario mirando. No hay —ni debe haber— una casilla que lo active sobre todo el documento.
+- **Visibilidad**: `type === EntityType.Person` **y** `replacementMode ∈ { placeholder, synthetic }` — los dos únicos modos cuyo valor depende de `personGender`. En `mask` y `redact` el control sería una palanca sin nada del otro lado. La condición vive en `isPersonGenderToggleVisible(group)` (`personGenderVisibility.ts`), función pura, y **reemplaza a las dos anteriores** (`isPersonGenderSelectVisible` + `isPersonGenderUndeterminedMarkVisible`).
+  - Leer `group.replacementMode` es correcto: el motor le escribe encima el resultado de `resolveMode()` en cada mutación, así que ese campo **siempre lleva el modo efectivo**, ya resuelto contra las reglas de grupo/tipo/globales. La UI no replica la escalera de prioridades y no puede desincronizarse de ella.
+- **Forma**: un `<button>` del ancho de un icono que muestra el estado actual y **cicla** al siguiente con un click: `neutral → f → m → neutral`. El neutro es el estado de reposo de un grupo sin resolver, y ♀ antes que ♂ es el orden en que se conocen los símbolos.
+- **Símbolos**: SVG **first-party**, los tres sobre la misma grilla de 16×16 para que el botón no salte al ciclar — `lucide-react@0.451.0` no tiene `Venus`/`Mars`, y el glifo Unicode del neutro (`U+26B2`) tiene cobertura de fuente irregular.
+
+  | Estado | Símbolo | Forma |
+  |---|---|---|
+  | `f` | ♀ | círculo con cruz abajo |
+  | `m` | ♂ | círculo con flecha arriba-derecha |
+  | `neutral` | ⚲ | **el mismo círculo, sin apéndice** |
+
+  **El neutro no es un símbolo de identidad de género, y eso no es negociable**: significa *sin determinar* —falta el dato, o el nombre no lo determina—, no una tercera categoría de persona. Nada de ⚧ ni equivalentes. ADR-060 §9 ya lo fijó para el valor `A` del registro ("es una propiedad del **nombre**, no un atributo de quien lo lleva") y ADR-060 §"Alternativas" rechazó por escrito agregar categorías.
+- **El estado neutro ES la marca de "género sin determinar"** (ADR-071 §4, supersede ADR-060 §5): trazo atenuado frente a los estados resueltos. No hay badge separado — la marca es el control, así que el "acceso directo a corregirlo" que pedía ADR-060 §5 es el propio click.
+- **El estado mostrado sale de `group.personGender`**, venga de una inferencia o del usuario: un grupo con género inferido aparece con su símbolo sin ninguna interacción previa. El control no tiene estado propio.
+- **Acción**: `actions.updateGroup(groupId, { personGender: choice })`, donde `choice: PersonGenderChoice` (`"f" | "m" | "neutral"`, `Contracts.md` §8). "Sin determinar" emite el valor explícito `"neutral"` — **no** ausencia de clave — que es lo que permite distinguir "el usuario eligió volver a neutral" de "no se tocó este campo" (ADR-069 §4). El motor traduce `"neutral"` a borrar `EntityGroup.personGender`. **El wire no cambió con ADR-071.**
+- **El ciclo es una función pura**, `nextPersonGenderChoice(current)` en `personGenderOptions.ts`: `apps/react-client` corre sus tests en Node sin jsdom, así que es la única forma de testearlo sin renderizar (mismo criterio que `personGenderVisibility.ts` y `entityTree.ts`).
+- **ARIA** (`UX_Guidelines.md` §9): `aria-label` que nombra el estado actual **y** el siguiente (`"Género: femenino. Cambiar a masculino."`), `Tooltip` con el estado actual al hover, foco visible, contraste AA 3:1 en los dos tratamientos (resuelto y atenuado). Es un `<button>` nativo: Enter y Espacio funcionan sin código.
+- **Efecto sobre el token**: el preview se actualiza en el acto igual que al cambiar de modo, y ahora **en los dos modos** — `[MUJER 03]` / `[HOMBRE 03]` / `[PERSONA 03]` en `placeholder`, y un nombre sintético del género elegido en `synthetic` (ADR-071 §5).
+- **Por qué es por grupo y no un ajuste global**: el género es un atributo sensible que el token neutro ocultaba (`08_Security_Model.md` §9.1). Se divulga de a una persona por vez, con el usuario mirando. No hay —ni debe haber— una casilla que lo active sobre todo el documento. **Esto es lo único de ADR-060 §6 que ADR-071 no toca, y es su decisión de fondo.**
 
 ### 3.4c `AddEntityButton` + `AddEntityDialog` (ADR-061 §3, ruta A)
 
@@ -395,6 +411,7 @@ apps/react-client/src/components/
 
 - Wrapper sobre Radix `Select` con estilos Tailwind.
 - Props: `value`, `onChange`, `options`.
+- **Sin apertura controlada** (ADR-071 §4). El PR 12 le agregó `open`/`onOpenChange` para un solo caso: que el badge de "género sin determinar" pudiera abrir el desplegable de un componente **hermano**. Al fusionarse la marca con el control (§3.4b), ese caso desaparece y las props se retiran — un componente compartido no lleva superficie que usa un consumidor y que ya no existe.
 
 ### 8.4 `Checkbox`
 
@@ -493,7 +510,7 @@ Modo oscuro: en v1.0. MVP es solo claro.
 | `ExportButton` | `pipeline.stage`, `document` | `actions.requestExport` (via dialog) | `EXPORT_REQUESTED` |
 | `EntityGroupItem` (checkbox) | `entities.groupsByType` | `actions.updateGroup` | `GROUP_UPDATE_REQUESTED` |
 | `ReplacementModeSelect` | `entities.groupsByType` | `actions.updateGroup` | `GROUP_UPDATE_REQUESTED` |
-| `PersonGenderSelect` (ADR-060 §6) | `entities.groupsByType` | `actions.updateGroup({ personGender })` | `GROUP_UPDATE_REQUESTED` |
+| `PersonGenderToggle` (ADR-060 §6, ADR-071 §1-§4) | `entities.groupsByType` | `actions.updateGroup({ personGender })` | `GROUP_UPDATE_REQUESTED` |
 | `AddEntityDialog` (ADR-061 §3) | `document` | `actions.addManualEntity` → `orchestrator.addManualEntity` | `ENTITY_FOUND` (`source: Manual`) + `ENTITY_GROUP_CREATED` |
 | `WordSelectionOverlay` (ADR-061 §4) | `document`, `viewer` | `actions.getPageWords` / `actions.addManualEntity` | ídem (los accesores no son eventos del bus) |
 | `DocumentSearchBox` (ADR-061 §8) | `document` | `actions.findText` | (ninguno; consulta síncrona al Orchestrator) |
