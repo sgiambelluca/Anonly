@@ -255,7 +255,7 @@ export type PersonGender = "f" | "m";
 | `indexInType` | Entero 1-based, secuencial y estable por tipo dentro de la sesión. Se renderiza con padding a 2 dígitos. **No se abrevia nunca** (ADR-057 §1) y **no se segmenta por género** (ADR-060 §7): los grupos `Person` comparten una sola secuencia. |
 | `enabled` | Si `false`, las ocurrencias del grupo se dejan intactas en el render. |
 | `aliases` | Variantes de valor unificadas (ej. `"J. Pérez"` y `"Juan Pérez"` en el mismo grupo). |
-| `personGender` | Solo `type === Person` (ADR-060 §2). `"f"`/`"m"` cambian el label resuelto del `placeholder` (`MUJER`/`HOMBRE` en vez de `PERSONA`); ausente = sin determinar → label neutro y marca en el árbol de entidades. Inferido de un léxico first-party o puesto por el usuario, que gana siempre. |
+| `personGender` | Solo `type === Person` (ADR-060 §2). `"f"`/`"m"` cambian el label resuelto del `placeholder` (`MUJER`/`HOMBRE` en vez de `PERSONA`); ausente = sin determinar → label neutro y marca en el árbol de entidades. Inferido de un léxico first-party (ADR-069 §6: al asignar/cambiar `canonicalValue` y en `finishSession`) o puesto por el usuario, que gana siempre. **La ausencia tiene dos orígenes que el dato público no distingue** —nunca se infirió, o el usuario eligió `"neutral"` (ADR-069 §4)— y el motor los separa con bookkeeping interno (`personGenderUserSet`, `Grouping_Engine.md` §13 caso 34) para que una re-inferencia no pise la elección. Ese flag **no** es parte de `EntityGroup` ni de ningún evento. |
 | `createdAt`, `updatedAt` | Epoch ms. Para UX y merge de ediciones. |
 
 **Invariantes**

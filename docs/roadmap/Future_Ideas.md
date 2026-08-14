@@ -43,6 +43,16 @@ Detectar y redactar:
 - Firmas manuscritas.
 - Huellas dactilares.
 
+### 1.5 Cobertura anglosajona del léxico de género
+
+**Limitación conocida del Hito 10.6 (ADR-069 §1), anotada al decidirla, no descubierta después.**
+
+El léxico se construye con **una sola fuente**: el registro civil porteño ("Nombres Permitidos", CC-BY-2.5-AR), 9.788 nombres, 30 KB gz. Los nombres ausentes de ese registro caen a "sin determinar" y el usuario los marca a mano con el selector — la red de seguridad de ADR-060 §5.
+
+La segunda fuente que ADR-060 §9 había previsto ([Gender by Name — UCI](https://archive.ics.uci.edu/dataset/591/gender+by+name), CC BY 4.0) se retiró al medirla: de 24 nombres extranjeros probados, el registro porteño ya resolvía 21 y UCI agregaba tres (Piotr, Kwame, Katarzyna); la mitad de sus 133.899 entradas las llevan menos de 20 personas en todo el corpus; y sus 130 entradas que no son nombres —letras sueltas, iniciales, títulos— hacían que `"J. Pérez"` resolviera masculino, violando ADR-060 §4. Tiene sentido: el registro de nombres permitidos de un país de inmigración ya es internacional.
+
+**Si se retoma, la variante correcta está medida**: UCI filtrada a nombres con **1.000 apariciones o más**, más el saneamiento de ADR-069 §3 → **17.156 entradas, 230 KB crudo / 50 KB gz**, +6.413 nombres determinados sobre el registro. Los umbrales más finos (≥100 → 115 KB gz; ≥20 → 183 KB gz) se descartaron: multiplican el peso para cubrir grafías cada vez más raras que el usuario resuelve con un clic, y a partir de ~150 KB gz habría que volver a sacar el léxico del bundle y reconstruir la maquinaria de carga que ADR-069 §2 eliminó. Volver a agregar UCI implica además reponer su atribución CC BY 4.0 en el producto (ADR-060 §11).
+
 ---
 
 ## 2. Plataformas y distribución
