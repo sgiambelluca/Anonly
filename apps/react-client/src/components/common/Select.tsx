@@ -20,6 +20,14 @@ export interface SelectProps<T extends string> {
   readonly options: ReadonlyArray<SelectOption<T>>;
   readonly "aria-label"?: string;
   readonly disabled?: boolean;
+  // Apertura controlada, opcional. Sin esto Radix la maneja internamente
+  // (comportamiento sin cambios para los consumidores existentes). La usa
+  // `PersonGenderSelect` para que la marca de "género sin determinar"
+  // (`ui/Components.md` §3.3, un elemento hermano fuera de este componente)
+  // pueda abrir el desplegable con su propio click (ADR-060 §5: "Click abre
+  // el selector").
+  readonly open?: boolean;
+  readonly onOpenChange?: (open: boolean) => void;
 }
 
 export function Select<T extends string>({
@@ -27,6 +35,8 @@ export function Select<T extends string>({
   onChange,
   options,
   disabled = false,
+  open,
+  onOpenChange,
   ...rest
 }: SelectProps<T>) {
   const ariaLabel = rest["aria-label"];
@@ -37,8 +47,21 @@ export function Select<T extends string>({
     onChange(next as T);
   }
 
+  // `exactOptionalPropertyTypes`: Radix tipa `open`/`onOpenChange` como
+  // `boolean`/función sin `| undefined`, así que no se puede pasar la
+  // ausencia de estas props opcionales como `undefined` explícito.
+  const controlledOpenProps = {
+    ...(open !== undefined ? { open } : {}),
+    ...(onOpenChange !== undefined ? { onOpenChange } : {}),
+  };
+
   return (
-    <RadixSelect.Root value={value} onValueChange={handleValueChange} disabled={disabled}>
+    <RadixSelect.Root
+      value={value}
+      onValueChange={handleValueChange}
+      disabled={disabled}
+      {...controlledOpenProps}
+    >
       <RadixSelect.Trigger
         aria-label={ariaLabel}
         className="inline-flex items-center justify-between gap-2 rounded-md border border-border bg-bg-primary px-3 py-1.5 text-sm text-text-primary disabled:opacity-50"
