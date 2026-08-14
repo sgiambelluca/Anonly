@@ -58,6 +58,7 @@ import type {
   Page,
   PageParsed,
   PersonGender,
+  PersonGenderChoice,
   RenderLegendPayload,
   RenderPagePayload,
   RenderRequested,
@@ -478,6 +479,66 @@ describe("@anonly/shared — Contracts", () => {
       };
       void mutate;
       expect(group.aliases).toEqual(["Juan Pérez"]);
+    });
+
+    it("no amplía su forma a PersonGenderChoice: 'neutral' no es un valor almacenable (ADR-069 §4)", () => {
+      const group = (): EntityGroup => ({
+        ...baseGroup,
+        // @ts-expect-error — EntityGroup.personGender sigue siendo PersonGender ("f" | "m" | ausente); "neutral" no se almacena, es solo el valor de tránsito del patch (ADR-069 §4)
+        personGender: "neutral",
+      });
+      void group;
+    });
+  });
+
+  describe("PersonGenderChoice (ADR-069 §4)", () => {
+    it("admite exactamente 'f' | 'm' | 'neutral'", () => {
+      const values: ReadonlyArray<PersonGenderChoice> = ["f", "m", "neutral"];
+      expect(values).toEqual(["f", "m", "neutral"]);
+
+      const assertNoFourthValue = (): void => {
+        // @ts-expect-error — PersonGenderChoice no admite un cuarto valor arbitrario; assert de compile-time
+        const invalid: PersonGenderChoice = "other";
+        void invalid;
+      };
+      void assertNoFourthValue;
+    });
+
+    it("GroupUpdateRequested.patch.personGender acepta los tres valores del selector y sigue readonly (ADR-069 §4)", () => {
+      const female: GroupUpdateRequested = {
+        documentId: "d1",
+        groupId: "g1",
+        patch: { personGender: "f" },
+      };
+      const male: GroupUpdateRequested = {
+        documentId: "d1",
+        groupId: "g1",
+        patch: { personGender: "m" },
+      };
+      const neutral: GroupUpdateRequested = {
+        documentId: "d1",
+        groupId: "g1",
+        patch: { personGender: "neutral" },
+      };
+      expect(female.patch.personGender).toBe("f");
+      expect(male.patch.personGender).toBe("m");
+      expect(neutral.patch.personGender).toBe("neutral");
+
+      const mutate = (): void => {
+        // @ts-expect-error — patch.personGender es readonly (ADR-008); assert de compile-time
+        female.patch.personGender = "m";
+      };
+      void mutate;
+    });
+
+    it("GroupUpdateRequested.patch sigue aceptando los otros campos junto con personGender", () => {
+      const payload: GroupUpdateRequested = {
+        documentId: "d1",
+        groupId: "g1",
+        patch: { replacementMode: ReplacementMode.Mask, personGender: "neutral" },
+      };
+      expect(payload.patch.replacementMode).toBe(ReplacementMode.Mask);
+      expect(payload.patch.personGender).toBe("neutral");
     });
   });
 
