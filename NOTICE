@@ -7,10 +7,9 @@ nivel de repositorio (ADR-060 §11).
 
 IMPORTANTE: este NOTICE es un piso, no el cumplimiento completo de la
 licencia. ADR-060 §11 exige además un aviso de atribución VISIBLE EN EL
-PRODUCTO (créditos / "Acerca de" en la interfaz), pendiente hasta que ese
-componente de UI exista en apps/react-client — PR 12 del Hito 10.6 (ver
-docs/adr/ADR-060-Reemplazo-Por-Genero.md §11 y
-docs/adr/ADR-069-Lexico-De-Genero-Fuente-Unica-Y-Canal-Del-Usuario.md §12).
+PRODUCTO (créditos / "Acerca de" en la interfaz), entregado como la sección
+"Acerca de" al pie del diálogo de Configuración de apps/react-client
+(PR 12b del Hito 10.6, ADR-070).
 
 ---
 
