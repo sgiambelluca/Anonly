@@ -48,6 +48,7 @@ import { Select, type SelectOption } from "../common/Select.js";
 import { computeReanalyzeRenderRequest } from "../viewer/reanalyzeRenderRequest.js";
 
 import { diffReanalyzeChange, planReanalyzePatches } from "./reanalyzePlan.js";
+import { THIRD_PARTY_CREDITS } from "./thirdPartyCredits.js";
 
 const LANGUAGE_OPTIONS: ReadonlyArray<SelectOption<Language>> = [
   { value: "es", label: "Español" },
@@ -234,6 +235,8 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
           </FormRow>
         </div>
 
+        <AboutSection />
+
         <div className="mt-5 flex justify-end gap-2">
           <Button variant="secondary" onClick={onClose}>
             Cancelar
@@ -270,5 +273,44 @@ function FormRow({ label, children }: { label: string; children: ReactNode }) {
       <span className="text-xs font-medium text-text-secondary">{label}</span>
       {children}
     </div>
+  );
+}
+
+// Bloque estático (ADR-070 §1): lee `THIRD_PARTY_CREDITS`, un módulo de
+// datos puro, nunca `settings.store`. No participa de `diffReanalyzeChange`
+// ni de `handleSave`/`handleConfirmReanalyze` — "Cancelar" y "Guardar" no lo
+// tocan porque no hay nada de él que aplicar o descartar.
+function AboutSection() {
+  return (
+    <>
+      <div className="my-4 border-t border-border" />
+      <section aria-label="Acerca de" className="flex flex-col gap-3">
+        <h3 className="text-xs font-medium text-text-secondary">Acerca de</h3>
+        {THIRD_PARTY_CREDITS.map((credit) => (
+          <p key={credit.id} className="text-xs text-text-secondary">
+            <a
+              href={credit.sourceUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-accent underline"
+            >
+              {credit.title}
+            </a>
+            {" — "}
+            {credit.holder}. Licencia{" "}
+            <a
+              href={credit.licenseUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-accent underline"
+            >
+              {credit.license}
+            </a>
+            {". "}
+            {credit.changes} {credit.usedFor}
+          </p>
+        ))}
+      </section>
+    </>
   );
 }
