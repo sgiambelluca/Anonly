@@ -53,6 +53,14 @@ La segunda fuente que ADR-060 §9 había previsto ([Gender by Name — UCI](http
 
 **Si se retoma, la variante correcta está medida**: UCI filtrada a nombres con **1.000 apariciones o más**, más el saneamiento de ADR-069 §3 → **17.156 entradas, 230 KB crudo / 50 KB gz**, +6.413 nombres determinados sobre el registro. Los umbrales más finos (≥100 → 115 KB gz; ≥20 → 183 KB gz) se descartaron: multiplican el peso para cubrir grafías cada vez más raras que el usuario resuelve con un clic, y a partir de ~150 KB gz habría que volver a sacar el léxico del bundle y reconstruir la maquinaria de carga que ADR-069 §2 eliminó. Volver a agregar UCI implica además reponer su atribución CC BY 4.0 en el producto (ADR-060 §11).
 
+### 1.6 Créditos de las licencias de código del stack
+
+**Deuda conocida, anotada al construir la superficie de créditos (ADR-070, Contexto §4), no descubierta después.**
+
+ADR-070 resolvió la atribución de **datos** de terceros —hoy una sola entrada, el léxico de género— con la sección "Acerca de" del `SettingsDialog` y `thirdPartyCredits.ts` como módulo de datos. Lo que **no** cubrió: las licencias del código que la app ya distribuye. `pdf.js`, Tesseract y `onnxruntime-web` son Apache-2.0, que exige propagar el `NOTICE` del proyecto original; Radix y el resto del stack, MIT, que exige conservar el aviso de copyright.
+
+Es un trabajo de auditoría propio —enumerar el árbol de dependencias que efectivamente viaja al bundle, no el `devDependencies` entero— y no lo introdujo el Hito 10.6, así que no era su alcance. Cuando se haga, **la superficie ya existe**: son filas nuevas en `THIRD_PARTY_CREDITS` (ADR-070 §2), sin componente nuevo ni decisión de UI que tomar. Candidato natural al hito de Hardening, antes del release.
+
 ---
 
 ## 2. Plataformas y distribución
