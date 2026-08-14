@@ -15,7 +15,13 @@
  * sobre namespaces importados con import type.
  */
 
-import type { EngineEvents, PipelineStage, ReplacementMode, WorkerJobType } from "./enums.js";
+import type {
+  EngineEvents,
+  PersonGenderChoice,
+  PipelineStage,
+  ReplacementMode,
+  WorkerJobType,
+} from "./enums.js";
 import type { SerializedEngineError } from "./errors.js";
 import type {
   Conflict,
@@ -278,9 +284,12 @@ export interface WorkerPoolSaturated {
 export interface GroupUpdateRequested {
   readonly documentId: string;
   readonly groupId: string;
+  // ADR-069 §4: personGender no sale de un Pick de EntityGroup porque su tercer
+  // estado ("neutral") no existe como valor almacenado — borra el campo. Sobre
+  // un grupo de type distinto de Person se ignora con warn.
   readonly patch: Partial<
     Pick<EntityGroup, "replacementMode" | "replacementValue" | "enabled" | "canonicalValue">
-  >;
+  > & { readonly personGender?: PersonGenderChoice };
 }
 export interface GroupMergeRequested {
   readonly documentId: string;
