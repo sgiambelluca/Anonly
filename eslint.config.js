@@ -10,6 +10,12 @@ export default tseslint.config(
       "dist/**",
       "build/**",
       "coverage/**",
+      // "coverage/**" solo ancla a la raíz (semántica de .gitignore: un "/"
+      // no final vuelve el patrón relativo al directorio del config). Los
+      // reportes de `pnpm test:coverage` se generan por paquete
+      // (packages/**/coverage/), y sin este segundo patrón ESLint intenta
+      // lintear el JS del reporter HTML de v8 y falla con parsing errors.
+      "**/coverage/**",
       "**/*.d.ts",
       ".changeset/**",
       "playwright-report/**",
