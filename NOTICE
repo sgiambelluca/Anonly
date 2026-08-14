@@ -15,10 +15,13 @@ PRODUCTO (créditos / "Acerca de" en la interfaz), entregado como la sección
 
 ## Léxico de género por nombre de pila
 
-Usado para inferir `EntityGroup.personGender` en el modo de reemplazo
-`placeholder` sobre entidades de tipo `Person` (ver
-docs/adr/ADR-060-Reemplazo-Por-Genero.md y
-docs/adr/ADR-069-Lexico-De-Genero-Fuente-Unica-Y-Canal-Del-Usuario.md). El
+Usado para inferir `EntityGroup.personGender` sobre entidades de tipo
+`Person`, en los dos modos de reemplazo que consumen ese dato: `placeholder`
+—que resuelve su token a `[MUJER nn]`/`[HOMBRE nn]`— y `synthetic` —que
+filtra por género el pool de nombres de pila del que sortea el nombre falso—
+(ver docs/adr/ADR-060-Reemplazo-Por-Genero.md,
+docs/adr/ADR-069-Lexico-De-Genero-Fuente-Unica-Y-Canal-Del-Usuario.md y
+docs/adr/ADR-071-El-Genero-Se-Muestra-Solo-Donde-Se-Usa.md §5). El
 artefacto vive dentro del bundle, como módulo TypeScript generado, en
 `packages/anonymization-core/grouping-engine/src/gender-lexicon.generated.ts`;
 su procedencia completa (URL, licencia, fecha de descarga, hash) está en

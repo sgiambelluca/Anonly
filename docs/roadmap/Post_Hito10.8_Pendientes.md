@@ -142,6 +142,8 @@ Sus argumentos tienen otra forma, así que soportarlas es un cálculo de rectán
 
 **Qué pasa.** El usuario edita el `replacementValue` de un grupo (escribe `[P1]` en vez de `[PERSONA 03]`). Si ese grupo cambia de `indexInType` en la renumeración canónica de un `finishSession` posterior, su texto se reemplaza por el token calculado. Sin aviso y sin forma de recuperarlo.
 
+**Hay más de un camino, y el segundo se encontró después.** Este ítem se escribió sobre `renumberGroupsCanonically`, pero **`inferGendersOnFinish` hace lo mismo**: recalcula sin preguntar quién escribió el valor. Repro (revisión de la branch del Hito 10.6, 2026-08-14): grupo `Person` con `canonicalValue` "Andrea Ruiz" (sin determinar) → el usuario edita `replacementValue` a mano a `[P1]` → llegan dos ocurrencias "Julia Ruiz" con el mismo `normalizedValue` y el `canonicalValue` evoluciona **por frecuencia de alias**, que no es ninguno de los tres disparadores de inferencia inmediata → `finishSession` infiere `f` y pisa `[P1]` con `[MUJER 01]`. La dirección de arreglo de abajo ya lo cubre —el flag lo consultan **todos** los puntos de recálculo—, pero el diagnóstico tiene que nombrar los dos caminos o el que lo implemente va a tapar solo uno.
+
 **Causa, verificada.** `renumberGroupsCanonically` (`grouping-engine/src/grouping.engine.ts`) tiene dos guardas anidadas y ninguna pregunta quién escribió el valor:
 
 ```ts
