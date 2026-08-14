@@ -107,6 +107,12 @@ Procesar PDFs abiertos en VS Code sin salir del editor.
 - **k-anonimidad probada**: para `synthetic`, garantizar que cada valor sintético es indistinguible de K otros valores posibles.
 - **Hash de auditoría**: hash del documento anonimizado + lista de grupos anonimizados, firmable para auditoría externa.
 
+### 3.4 Exports sintéticos reproducibles
+
+Hoy **no se puede** reproducir un export en modo `synthetic`, y no es un olvido: el seed es un `crypto.randomUUID()` por sesión sin forma de fijarlo, porque ADR-019 §5 lo decidió así para evitar correlación entre sesiones del mismo documento (ADR-012 §SAN). ADR-072 §5 lo dejó anotado al cambiar la semilla del sintetizador de `indexInType` a `EntityGroup.id`.
+
+Si alguna vez hace falta —reproducir una entrega concreta para una auditoría, por ejemplo— hacen falta **dos** cosas, no una: un seed configurable **y** identidades de grupo deterministas, porque los `id` también son UUID de runtime. Y hay que decidir explícitamente qué se hace con la garantía SAN que se estaría relajando: un seed conocido convierte la síntesis en reproducible para quien lo tenga. Es un ADR propio, con `08_Security_Model.md` §9 en la mesa.
+
 ---
 
 ## 4. Colaboración
@@ -154,6 +160,14 @@ Tras exportar, cargar el PDF resultante de vuelta y verificar que ningún valor 
 ### 5.4 Internacionalización de placeholders
 
 `[DNI 01]` en español, `[ID 01]` en inglés, `[IDN 01]` en portugués. Configurable.
+
+### 5.5 Qué debería ser el valor sintético de `EntityType.Custom`
+
+`synthesize` devuelve hoy `custom-3` para el tipo `Custom`: no sortea nada, interpola el `indexInType`. No es un "valor sintético válido y plausible", que es como ADR-012 define el modo — es un string de relleno.
+
+De ahí sale una inconsistencia menor que ADR-072 §3 dejó **deliberadamente sin arreglar**: como la semilla del sintetizador dejó de depender del índice pero esta rama sigue interpolándolo, un grupo `Custom` en modo `synthetic` que se renumera conserva `custom-3` mientras su placeholder diría `[CUSTOM 04]`. Es exactamente el comportamiento previo a ADR-072, ni mejor ni peor.
+
+Arreglar el índice sin contestar la pregunta de fondo sería pulir un valor que probablemente haya que cambiar entero, y la pregunta de fondo —qué dato falso plausible corresponde a un tipo de entidad que define el usuario— es de producto: depende de si `Custom` llega a tener formato declarado (ver §4.3, patrones regex compartidos).
 
 ---
 

@@ -509,6 +509,28 @@ export type PersonGender = "f" | "m";
 // aparte que la elección la hizo el humano (Grouping_Engine.md §13 caso 34).
 export type PersonGenderChoice = PersonGender | "neutral";
 
+// ADR-072 §2: entrada de synthesize() (§6). Se declara acá porque un motor
+// consume su forma y §10 regla 1 lo exige; hasta ADR-072 la función se
+// exportaba desde `shared` sin estar en el contrato.
+export interface SyntheticRequest {
+  readonly type: EntityType;
+  // ADR-072 §1: la SEMILLA del sorteo es la identidad del grupo
+  // (EntityGroup.id), no su número. indexInType es un ordinal que la
+  // renumeración canónica mueve (ADR-028), y sembrar sobre él hacía que el
+  // valor sintético de un grupo cambiara por operaciones ajenas a ese grupo.
+  readonly groupId: string;
+  // Aleatorio por sesión, lo genera el Grouping Engine (ADR-012 §SAN,
+  // ADR-019 §5). Nunca se expone en el PDF resultante.
+  readonly seed: string;
+  // ADR-072 §3: solo lo usan los tipos cuyo valor INTERPOLA el número del
+  // grupo (Custom → "custom-3"). Los tipos que sortean no lo miran.
+  readonly indexInType: number;
+  // ADR-071 §5: solo se consulta sobre type === Person. Filtra el pool de
+  // nombres de pila; NO entra a la semilla, así que ausente ≡ el mismo valor
+  // que sin el campo.
+  readonly personGender?: PersonGender;
+}
+
 export enum ConflictReason {
   Overlap = "overlap",
   Disagree = "disagree",
@@ -630,6 +652,12 @@ export interface ExportConfig {
 > **`estimateTokenWidth(charCount, boxHeight)`** (ADR-057 §5) — función pura y determinista de `@anonly/shared`, derivada de las dos primeras constantes. La usan **dos** motores: `grouping-engine` para elegir el nivel de abreviatura del `placeholder` y `render-engine` como punto de partida de su medición real con `measureText`. Vive en `shared` precisamente porque dos motores no pueden importarse entre sí (P-1) pero los dos pueden importar `shared`. **No se duplica en ninguno de los dos.**
 >
 > **`DEGRADED_FONT_RATIO` es una razón, no un tamaño en píxeles, y eso es deliberado** (ADR-058 §7): el preview y el export renderizan a escalas distintas, así que un piso absoluto haría que discreparan sobre si hay que avisar por el mismo reemplazo. La razón es invariante a la escala. El piso de 8px de `fontForMode` se conserva, pero es un piso de dibujo, no un criterio de aviso.
+>
+> **`synthesize(req: SyntheticRequest): string`** (ADR-072 §2, `SyntheticRequest` en §5) — función pura y determinista de `@anonly/shared` que produce el `replacementValue` del modo `synthetic`. Su único caller de producción es `grouping-engine` (`computeReplacementValue`); **`export-engine` no la usa**, pese a lo que decía `Grouping_Engine.md` §"`replacementValue` por modo" antes de ADR-072.
+>
+> **Determinismo, con precisión** (ADR-072 §1 y §5): mismo `(type, groupId, seed)` ⇒ mismo valor, **y cambiar `indexInType` no cambia nada** en los tipos que sortean. Eso es lo que hace que renumerar (ADR-028), agregar una entidad a mano (ADR-061) o fusionar no muevan un valor sintético ya emitido. Lo que **no** garantiza es reproducir un export entre sesiones: el `seed` es un `crypto.randomUUID()` por sesión y no hay forma de fijarlo, por decisión de ADR-019 §5 — la política es decorrelacionar sesiones, no reproducirlas.
+>
+> **La semilla nunca deriva del valor real** (ADR-072 §6). Sembrar con el `canonicalValue` daría determinismo entre corridas y convertiría al sintetizador en un oráculo de confirmación real→falso para quien tenga el seed. `groupId` es un UUID sin relación con el contenido.
 
 ---
 
