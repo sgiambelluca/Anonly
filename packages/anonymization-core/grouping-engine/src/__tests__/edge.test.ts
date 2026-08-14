@@ -23,11 +23,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { GroupingEngine } from "../grouping.engine.js";
 import { GroupingGroupNotFoundError, GroupingInvalidPatchError } from "../grouping.errors.js";
-import { MASK_FORMAT_BY_TYPE } from "../labels.js";
+import { buildPlaceholderValue, MASK_FORMAT_BY_TYPE } from "../labels.js";
 
 import {
   createEngineContext,
   makeBBox,
+  makeEntityGroup,
   makeOccurrence,
   makeRule,
 } from "./fixtures/test-helpers.js";
@@ -1213,14 +1214,17 @@ describe("GroupingEngine — edge cases", () => {
   // Caso 28 (§13, ADR-057 §4): si ni el nivel 2 entra, el grupo queda en
   // nivel 2 sin error ni warning — el shrink-to-fit del render (ADR-058 §1)
   // es quien resuelve ese caso, no Grouping.
+  //
+  // "Andrea" (`A`/ambiguo en el registro, ADR-069 §1) a propósito: este test
+  // prueba la escalera, no la inferencia de género.
   it("group where not even level 2 fits stays at level 2 without error", () => {
     expect(() => {
       ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
         documentId: "doc-1",
         occurrence: makeOccurrence({
           entityType: EntityType.Person,
-          value: "Juan Perez",
-          normalizedValue: "juan perez",
+          value: "Andrea Perez",
+          normalizedValue: "andrea perez",
           bbox: makeBBox(0, 0, 1, 1),
         }),
       });
@@ -1279,13 +1283,16 @@ describe("GroupingEngine — edge cases", () => {
   // posterior — misma precedencia que ADR-028 le da a las ediciones frente a
   // la renumeración. Único grupo de su tipo: su índice no cambia en la
   // renumeración, así que ni siquiera se intenta recalcular.
+  //
+  // "Andrea" (`A`/ambiguo en el registro, ADR-069 §1) a propósito: este test
+  // prueba la escalera, no la inferencia de género.
   it("hand-edited replacementValue survives finishSession and level selection", async () => {
     ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
       documentId: "doc-1",
       occurrence: makeOccurrence({
         entityType: EntityType.Person,
-        value: "Juan Perez",
-        normalizedValue: "juan perez",
+        value: "Andrea Perez",
+        normalizedValue: "andrea perez",
         bbox: makeBBox(0, 0, 150, 20),
       }),
     });
@@ -1308,8 +1315,8 @@ describe("GroupingEngine — edge cases", () => {
       documentId: "doc-1",
       occurrence: makeOccurrence({
         entityType: EntityType.Person,
-        value: "Juan Perez",
-        normalizedValue: "juan perez",
+        value: "Andrea Perez",
+        normalizedValue: "andrea perez",
         bbox: makeBBox(0, 200, 1, 1),
       }),
     });
@@ -1402,13 +1409,17 @@ describe("GroupingEngine — edge cases", () => {
   // nuevo más angosto puede bajar el nivel del grupo (y cambiar su token)
   // respecto de lo que el usuario ya vio — aceptado por el mismo criterio
   // que el corrimiento de indexInType (caso 26).
+  //
+  // "Andrea"/"Maria" (ambos `A`/ambiguo en el registro, ADR-069 §1) a
+  // propósito: este test prueba la escalera y la renumeración, no la
+  // inferencia de género.
   it("reopenSession + finishSession with a narrower member changes the level", () => {
     ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
       documentId: "doc-1",
       occurrence: makeOccurrence({
         entityType: EntityType.Person,
-        value: "Juan Perez",
-        normalizedValue: "juan perez",
+        value: "Andrea Perez",
+        normalizedValue: "andrea perez",
         pageIndex: 1,
         bbox: makeBBox(10, 50, 150, 20),
       }),
@@ -1429,8 +1440,9 @@ describe("GroupingEngine — edge cases", () => {
     expect(groupA?.replacementValue).toBe("[PERSONA 01]");
 
     // Segunda pasada: un grupo nuevo ("Maria Lopez"), documentalmente
-    // ANTERIOR (pageIndex 0), desplaza a "Juan Perez" de índice 1 a 2; y una
-    // ocurrencia adicional de "Juan Perez", angosta, se suma como member.
+    // ANTERIOR (pageIndex 0), desplaza a "Andrea Perez" de índice 1 a 2; y
+    // una ocurrencia adicional de "Andrea Perez", angosta, se suma como
+    // member.
     engine.reopenSession("doc-1", { expectRegex: true, expectNer: false });
     ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
       documentId: "doc-1",
@@ -1446,8 +1458,8 @@ describe("GroupingEngine — edge cases", () => {
       documentId: "doc-1",
       occurrence: makeOccurrence({
         entityType: EntityType.Person,
-        value: "Juan Perez",
-        normalizedValue: "juan perez",
+        value: "Andrea Perez",
+        normalizedValue: "andrea perez",
         pageIndex: 1,
         bbox: makeBBox(10, 80, 90, 20),
       }),
@@ -1459,9 +1471,9 @@ describe("GroupingEngine — edge cases", () => {
     });
 
     const groups = engine.getSnapshot("doc-1").groups;
-    const finalA = groups.find((g) => g.canonicalValue === "Juan Perez");
+    const finalA = groups.find((g) => g.canonicalValue === "Andrea Perez");
     const finalM = groups.find((g) => g.canonicalValue === "Maria Lopez");
-    // "Maria Lopez" (page 0) pasa a ser la primera del documento; "Juan
+    // "Maria Lopez" (page 0) pasa a ser la primera del documento; "Andrea
     // Perez" (page 1) baja a índice 2 — el mismo corrimiento que el caso 26
     // acepta para indexInType.
     expect(finalM?.indexInType).toBe(1);
@@ -1472,5 +1484,398 @@ describe("GroupingEngine — edge cases", () => {
     // "[PERS 02]" (índice Y nivel cambiaron a la vez).
     expect(finalA?.replacementValue).toBe("[PERS 02]");
     expect(finalM?.replacementValue).toBe("[PERSONA 01]");
+  });
+
+  // ─── ADR-060/ADR-069 (Hito 10.6): variantes de género del placeholder,
+  // disparo de la inferencia y elección del humano ───
+
+  // Caso 34 (§13, ADR-060 §4, ADR-069 §4/§5): un `personGender` puesto por
+  // el usuario gana sobre cualquier inferencia y sobrevive a `finishSession`,
+  // a `reopenSession`, a una re-inferencia posterior (disparada por editar
+  // `canonicalValue`, caso 37) y a una fusión — el grupo que sobrevive
+  // conserva su propia elección, no la del grupo que se elimina.
+  it("user-set personGender survives finishSession, reopenSession, re-inference and merge", async () => {
+    const wideBox = makeBBox(0, 500, 200, 20);
+
+    // "Juan Perez" infiere "m" automáticamente al crear el grupo (ADR-069
+    // §6a, punto "al crearlo").
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: "Juan Perez",
+        normalizedValue: "juan perez",
+        bbox: wideBox,
+      }),
+    });
+    const [created] = engine.getSnapshot("doc-1").groups;
+    expect(created?.personGender).toBe("m");
+
+    // El humano lo corrige a "f": gana sobre la inferencia y marca la
+    // elección como suya.
+    const overridden = await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: created!.id,
+      patch: { personGender: "f" },
+    });
+    expect(overridden.personGender).toBe("f");
+    expect(overridden.replacementValue).toBe("[MUJER 01]");
+
+    // Sobrevive a una re-inferencia disparada por editar canonicalValue a
+    // mano (caso 37, trigger (a)): inferGenderIfDue es no-op sobre un grupo
+    // con personGenderUserSet, aunque el nombre nuevo también resolvería.
+    const afterCanonicalEdit = await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: created!.id,
+      patch: { canonicalValue: "Juan Perez (actualizado)" },
+    });
+    expect(afterCanonicalEdit.personGender).toBe("f");
+    expect(afterCanonicalEdit.replacementValue).toBe("[MUJER 01]");
+
+    // Sobrevive a finishSession (caso 37, trigger (b) — la red de
+    // convergencia nunca pisa una elección del humano).
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.REGEX_FINISHED, {
+      documentId: "doc-1",
+      occurrenceCount: 1,
+      durationMs: 1,
+    });
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.NER_FINISHED, {
+      documentId: "doc-1",
+      occurrenceCount: 0,
+      durationMs: 1,
+    });
+    expect(engine.getSnapshot("doc-1").groups[0]?.personGender).toBe("f");
+
+    // Sobrevive a reopenSession (ADR-038 §2: no toca session.groups).
+    engine.reopenSession("doc-1", { expectRegex: true, expectNer: false });
+    expect(engine.getSnapshot("doc-1").groups[0]?.personGender).toBe("f");
+
+    // Sobrevive a una fusión: "target" (el grupo con la elección) la
+    // conserva — no se copia del "source", que se elimina (ADR-069 §5).
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: "Andrea Gomez",
+        normalizedValue: "andrea gomez",
+        bbox: makeBBox(0, 520, 200, 20),
+      }),
+    });
+    const source = engine
+      .getSnapshot("doc-1")
+      .groups.find((g) => g.canonicalValue === "Andrea Gomez")!;
+    const merged = await engine.applyGroupMerge({
+      documentId: "doc-1",
+      sourceGroupId: source.id,
+      targetGroupId: created!.id,
+    });
+    expect(merged.personGender).toBe("f");
+    expect(merged.replacementValue).toBe("[MUJER 01]");
+  });
+
+  // Caso 34 (§13, ADR-069 §4/§5): "neutral" ES una elección — borra
+  // `personGender` (el grupo vuelve al token neutro) pero queda marcado
+  // `personGenderUserSet`. Sin ese flag, esta segunda pasada de
+  // `finishSession` volvería a inferir "m" del mismo `canonicalValue` y
+  // pisaría la elección en silencio — el escenario que ADR-069 §5 describe
+  // como el que rompería la promesa de "el override del usuario es
+  // permanente" (ADR-060 §4).
+  it('user-set "neutral" is not overwritten by a later inference', async () => {
+    const wideBox = makeBBox(0, 600, 200, 20);
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: "Juan Perez",
+        normalizedValue: "juan perez",
+        bbox: wideBox,
+      }),
+    });
+    const [created] = engine.getSnapshot("doc-1").groups;
+    expect(created?.personGender).toBe("m");
+    expect(created?.replacementValue).toBe("[HOMBRE 01]");
+
+    const neutral = await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: created!.id,
+      patch: { personGender: "neutral" },
+    });
+    expect(neutral.personGender).toBeUndefined();
+    expect(neutral.replacementValue).toBe("[PERSONA 01]");
+
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.REGEX_FINISHED, {
+      documentId: "doc-1",
+      occurrenceCount: 1,
+      durationMs: 1,
+    });
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.NER_FINISHED, {
+      documentId: "doc-1",
+      occurrenceCount: 0,
+      durationMs: 1,
+    });
+
+    const final = engine.getSnapshot("doc-1").groups[0];
+    expect(final?.personGender).toBeUndefined();
+    expect(final?.replacementValue).toBe("[PERSONA 01]");
+  });
+
+  // Caso 37 (§13, ADR-069 §6): los dos puntos de disparo de la inferencia, y
+  // nunca sobre una elección del humano.
+  //   (a) Edición manual de canonicalValue: corre EN EL ACTO.
+  //   (b) finishSession: red de convergencia sobre lo que NO pasó por (a) —
+  //       acá, un canonicalValue que evolucionó por frecuencia de alias
+  //       (addOccurrenceToGroup NO es ninguno de los tres triggers de (a)).
+  //   Un grupo con elección del humano ignora ambos, aunque su
+  //   canonicalValue evolucione exactamente igual que el grupo sin elección.
+  it("inference runs on canonicalValue change and at finishSession, never over a user choice", async () => {
+    const box = (y: number): ReturnType<typeof makeBBox> => makeBBox(0, y, 200, 20);
+
+    // (a) Grupo A: nace sin determinar ("andrea" es `A`) y la edición manual
+    // de canonicalValue infiere "m" SIN esperar finishSession.
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: "Andrea Gomez",
+        normalizedValue: "andrea gomez",
+        bbox: box(1000),
+      }),
+    });
+    const [groupA] = engine.getSnapshot("doc-1").groups;
+    expect(groupA?.personGender).toBeUndefined();
+
+    const editedA = await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: groupA!.id,
+      patch: { canonicalValue: "Juan Gomez" },
+    });
+    expect(editedA.personGender).toBe("m");
+    expect(editedA.replacementValue).toBe("[HOMBRE 01]");
+
+    // Grupo B: su canonicalValue evoluciona por FRECUENCIA de alias (dos
+    // ocurrencias de "Juan Ruiz" con el mismo normalizedValue que "Andrea
+    // Ruiz", forzadas a agruparse) — un camino que NO es ninguno de los tres
+    // triggers de (a), así que el género queda atrasado hasta finishSession.
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: "Andrea Ruiz",
+        normalizedValue: "andrea ruiz",
+        bbox: box(1010),
+      }),
+    });
+    const groupB = engine
+      .getSnapshot("doc-1")
+      .groups.find((g) => g.canonicalValue === "Andrea Ruiz")!;
+    expect(groupB.personGender).toBeUndefined();
+
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: "Juan Ruiz",
+        normalizedValue: "andrea ruiz",
+        bbox: box(1020),
+      }),
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: "Juan Ruiz",
+        normalizedValue: "andrea ruiz",
+        bbox: box(1030),
+      }),
+    });
+    const midB = engine.getSnapshot("doc-1").groups.find((g) => g.id === groupB.id)!;
+    // canonicalValue ya cambió por frecuencia (2 "Juan Ruiz" > 1 "Andrea
+    // Ruiz"), pero sumar una ocurrencia nunca dispara la inferencia.
+    expect(midB.canonicalValue).toBe("Juan Ruiz");
+    expect(midB.personGender).toBeUndefined();
+    expect(midB.replacementValue).toBe("[PERSONA 02]");
+
+    // Grupo C: misma evolución que B, pero con "neutral" elegido ANTES —
+    // nunca se pisa, ni en el acto ni en finishSession.
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: "Andrea Diaz",
+        normalizedValue: "andrea diaz",
+        bbox: box(1040),
+      }),
+    });
+    const groupC = engine
+      .getSnapshot("doc-1")
+      .groups.find((g) => g.canonicalValue === "Andrea Diaz")!;
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: groupC.id,
+      patch: { personGender: "neutral" },
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: "Juan Diaz",
+        normalizedValue: "andrea diaz",
+        bbox: box(1050),
+      }),
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: "Juan Diaz",
+        normalizedValue: "andrea diaz",
+        bbox: box(1060),
+      }),
+    });
+    const midC = engine.getSnapshot("doc-1").groups.find((g) => g.id === groupC.id)!;
+    expect(midC.canonicalValue).toBe("Juan Diaz"); // evolucionó igual que B
+
+    // (b) finishSession: red de convergencia — B converge a "m"; A conserva
+    // lo que ya tenía (idempotente); C, con elección del humano, ignora que
+    // su canonicalValue ahora resolvería "m".
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.REGEX_FINISHED, {
+      documentId: "doc-1",
+      occurrenceCount: 6,
+      durationMs: 1,
+    });
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.NER_FINISHED, {
+      documentId: "doc-1",
+      occurrenceCount: 0,
+      durationMs: 1,
+    });
+
+    const groups = engine.getSnapshot("doc-1").groups;
+    const finalA = groups.find((g) => g.id === groupA!.id)!;
+    const finalB = groups.find((g) => g.id === groupB.id)!;
+    const finalC = groups.find((g) => g.id === groupC.id)!;
+    expect(finalA.personGender).toBe("m");
+    expect(finalA.replacementValue).toBe("[HOMBRE 01]");
+    expect(finalB.personGender).toBe("m");
+    expect(finalB.replacementValue).toBe("[HOMBRE 02]");
+    expect(finalC.personGender).toBeUndefined();
+    expect(finalC.replacementValue).toBe("[PERSONA 03]");
+  });
+
+  // Caso 34 (§13, ADR-069 §4, checklist 15g): a diferencia del test de
+  // labels.ts de abajo (que fuerza `personGender` directo en un
+  // `EntityGroup` sintético), este ejercita el camino real por el que un
+  // patch entra al motor — `applyGroupUpdate` ignora `patch.personGender`
+  // sobre un grupo que no es `Person`, con `ctx.logger.warn` y sin tocar
+  // `replacementValue`.
+  it("applyGroupUpdate ignores patch.personGender on a non-Person group, with a warn", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.DNI,
+        value: "34.567.891",
+        normalizedValue: "34567891",
+      }),
+    });
+    const [group] = engine.getSnapshot("doc-1").groups;
+    const replacementValueBefore = group?.replacementValue;
+
+    const updated = await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group!.id,
+      patch: { personGender: "f" },
+    });
+
+    expect(updated.personGender).toBeUndefined();
+    expect(updated.replacementValue).toBe(replacementValueBefore);
+    expect(ctx.logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining("personGender"),
+      expect.objectContaining({ groupId: group!.id }),
+    );
+  });
+
+  // Caso 34 (§13, ADR-060 §2): sobre un grupo de type distinto de Person,
+  // personGender se ignora y no altera replacementValue. EntityGroup lo
+  // permite estructuralmente (el campo es válido en cualquier grupo); el
+  // invariante de "solo Person" lo garantiza el resto del pipeline
+  // (03_Data_Model.md §9), no resolveLabelSet — que simplemente nunca lo
+  // lee fuera de Person.
+  it("personGender on a non-Person group does not alter replacementValue", () => {
+    const neutral = makeEntityGroup({ type: EntityType.DNI, indexInType: 1 });
+    // `personGender` es un campo válido en cualquier `EntityGroup` a nivel
+    // de tipos (el invariante "solo sobre Person" es semántico, de
+    // 03_Data_Model.md §9, no está codificado en el tipo). Se fuerza acá a
+    // propósito sobre un DNI para probar que resolveLabelSet lo ignora
+    // igual, sin depender de que el resto del pipeline respete el
+    // invariante para no romper el token.
+    const withGender = makeEntityGroup({ type: EntityType.DNI, indexInType: 1, personGender: "f" });
+
+    expect(buildPlaceholderValue(neutral)).toBe("[DNI 01]");
+    expect(buildPlaceholderValue(withGender)).toBe("[DNI 01]");
+  });
+
+  // Caso 35 (§13, ADR-060 §7): los grupos Person comparten una sola
+  // secuencia de indexInType sin importar el género — [MUJER 03] y
+  // [HOMBRE 04] son la tercera y cuarta persona del documento, no la
+  // primera de cada género. La secuencia en sí la garantiza nextIndex()/
+  // renumberGroupsCanonically() (sin cambios en este PR); acá se confirma
+  // que la capa de labels no reinterpreta ni renumera el índice que recibe.
+  it("gendered groups keep the single Person indexInType sequence", () => {
+    const femaleGroup = makeEntityGroup({ personGender: "f", indexInType: 3 });
+    const maleGroup = makeEntityGroup({ personGender: "m", indexInType: 4 });
+
+    expect(buildPlaceholderValue(femaleGroup)).toBe("[MUJER 03]");
+    expect(buildPlaceholderValue(maleGroup)).toBe("[HOMBRE 04]");
+  });
+
+  // ADR-060 §3: las variantes de género usan la MISMA escalera de tres
+  // niveles que el resto de los tipos (ADR-057 §4) — ninguna rama nueva de
+  // selección de nivel. MUJER tiene nivel 0/1 degenerados (idénticos, igual
+  // que DNI/CUIT/IBAN en el caso 29): un bbox que no entra ni en "[MUJER
+  // 03]" ni en "[MUJER 03]" (misma longitud) cae directo a nivel 2 ("[MUJ-
+  // 03]"), sin rama especial ni error.
+  it("gendered labels use the same ladder, no extra branches", () => {
+    const wideFemale = makeEntityGroup({
+      personGender: "f",
+      indexInType: 3,
+      members: [
+        {
+          occurrenceId: "occ-wide-f",
+          pageIndex: 0,
+          bbox: makeBBox(0, 0, 200, 20),
+          source: DetectionSource.Regex,
+        },
+      ],
+    });
+    expect(buildPlaceholderValue(wideFemale)).toBe("[MUJER 03]");
+
+    const narrowFemale = makeEntityGroup({
+      personGender: "f",
+      indexInType: 3,
+      members: [
+        {
+          occurrenceId: "occ-narrow-f",
+          pageIndex: 0,
+          bbox: makeBBox(0, 0, 40, 20),
+          source: DetectionSource.Regex,
+        },
+      ],
+    });
+    // Ni "[MUJER 03]" (nivel 0) ni "[MUJER 03]" (nivel 1, idéntico) entran
+    // en un bbox de 40 de ancho: cae a nivel 2, "[MUJ-03]".
+    expect(buildPlaceholderValue(narrowFemale)).toBe("[MUJ-03]");
+
+    const wideMale = makeEntityGroup({
+      personGender: "m",
+      indexInType: 4,
+      members: [
+        {
+          occurrenceId: "occ-wide-m",
+          pageIndex: 0,
+          bbox: makeBBox(0, 0, 200, 20),
+          source: DetectionSource.Regex,
+        },
+      ],
+    });
+    expect(buildPlaceholderValue(wideMale)).toBe("[HOMBRE 04]");
   });
 });

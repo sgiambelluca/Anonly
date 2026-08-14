@@ -18,13 +18,14 @@ import { createEventBus } from "@anonly/event-system";
 import {
   DetectionSource,
   EntityType,
+  ReplacementMode,
   type BoundingBox,
   type EngineConfig,
   type EngineContext,
+  type EntityGroup,
   type ICache,
   type ILogger,
   type Occurrence,
-  type ReplacementMode,
   type Rule,
   type RuleScope,
 } from "@anonly/shared";
@@ -138,6 +139,41 @@ export function makeOccurrence(overrides?: Partial<Occurrence>): Occurrence {
     source: DetectionSource.Regex,
     confidence: 1.0,
     entityType: EntityType.DNI,
+    ...overrides,
+  };
+}
+
+let groupSeq = 0;
+
+/**
+ * Construye un `EntityGroup` válido directamente (sin pasar por el motor),
+ * para probar funciones puras de `labels.ts`/`gender.ts` (`resolveLabelSet`,
+ * `buildPlaceholderValue`, `inferPersonGender`) que solo necesitan la forma
+ * pública del grupo — no un `InternalGroup` de sesión real. Precedente:
+ * `makeOccurrence`/`makeRule` en este mismo archivo.
+ */
+export function makeEntityGroup(overrides?: Partial<EntityGroup>): EntityGroup {
+  groupSeq += 1;
+  const now = Date.now();
+  return {
+    id: `group-${groupSeq}`,
+    type: EntityType.Person,
+    canonicalValue: "Julia Gomez",
+    members: [
+      {
+        occurrenceId: `occ-group-${groupSeq}`,
+        pageIndex: 0,
+        bbox: makeBBox(0, 0, 200, 20),
+        source: DetectionSource.Regex,
+      },
+    ],
+    replacementMode: ReplacementMode.Placeholder,
+    replacementValue: "",
+    indexInType: 1,
+    enabled: true,
+    aliases: ["Julia Gomez"],
+    createdAt: now,
+    updatedAt: now,
     ...overrides,
   };
 }

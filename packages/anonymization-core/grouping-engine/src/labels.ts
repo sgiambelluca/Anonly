@@ -20,24 +20,32 @@
  *
  * La resolución del label pasa de ser por TIPO a ser por GRUPO
  * (`resolveLabelSet`, ADR-057 §3): es una indirección deliberada, no un
- * acceso directo a la tabla — ADR-060 (Hito 10.6, fuera de alcance de este
- * PR) la necesita para poder considerar `group.personGender` sin reescribir
- * la escalera. `LADDER_LABELS` es privada del módulo: ningún otro código
- * debe leerla directo (grep de control de ADR-057).
+ * acceso directo a la tabla — ADR-060 (Hito 10.6) la usa para considerar
+ * `group.personGender` sin reescribir la escalera. `LADDER_LABELS` es
+ * privada del módulo: ningún otro código debe leerla directo (grep de
+ * control de ADR-057).
+ *
+ * ADR-060 §3 (Hito 10.6): sobre un grupo `Person` con `personGender`
+ * resuelto, `resolveLabelSet` devuelve las filas `MUJER`/`HOMBRE` de la
+ * tabla de abajo en vez de `LADDER_LABELS[Person]`. Sobre cualquier otro
+ * `type`, o sobre `Person` sin `personGender` (sin determinar), el
+ * comportamiento es exactamente el de antes de este ADR — cero ramas
+ * nuevas fuera de este único punto de decisión.
  */
 
 import {
   estimateTokenWidth,
   EntityType,
   type EntityGroup,
+  type PersonGender,
   type OccurrenceRef,
 } from "@anonly/shared";
 
 /**
- * Los tres labels de un `EntityType` (más, desde ADR-060, de una variante de
- * género — fuera de alcance de este PR) que alimentan la escalera de
- * abreviaturas. Tipo interno de `grouping-engine`: no cruza el boundary del
- * motor y no está en `Contracts.md` (ADR-057 §3).
+ * Los tres labels de un `EntityType` (más, desde ADR-060, las dos variantes
+ * de género de `Person`) que alimentan la escalera de abreviaturas. Tipo
+ * interno de `grouping-engine`: no cruza el boundary del motor y no está en
+ * `Contracts.md` (ADR-057 §3).
  */
 export interface PlaceholderLabelSet {
   readonly level0: string;
@@ -70,6 +78,18 @@ const LADDER_LABELS: Readonly<Record<EntityType, PlaceholderLabelSet>> = {
   [EntityType.Custom]: { level0: "CUSTOM", level1: "CUST", level2: "CST" },
 };
 
+/**
+ * Variantes de género de `Person` (ADR-060 §3): mismo formato de tres
+ * niveles que `LADDER_LABELS`, con `MUJER` repetido en nivel 0/1 (5
+ * caracteres, acortarlo no compra nada legible — igual que DNI/CUIT/IBAN en
+ * `LADDER_LABELS`; `selectAbbreviationLevel` los saltea solos, sin rama
+ * especial).
+ */
+const GENDERED_PERSON_LABELS: Readonly<Record<PersonGender, PlaceholderLabelSet>> = {
+  f: { level0: "MUJER", level1: "MUJER", level2: "MUJ" },
+  m: { level0: "HOMBRE", level1: "HOMB", level2: "HOM" },
+};
+
 export const MASK_FORMAT_BY_TYPE: Readonly<Record<EntityType, string>> = {
   [EntityType.DNI]: "XX.XXX.XXX",
   [EntityType.CUIT]: "XX-XXXXXXXX-X",
@@ -94,13 +114,18 @@ export function pad2(n: number): string {
 }
 
 /**
- * Resuelve el conjunto de labels de un grupo (ADR-057 §3). Hoy es un lookup
- * puro por `group.type`; es el único punto de acceso a `LADDER_LABELS`
- * (grep de control de ADR-057) y el punto de entrada que ADR-060 (Hito 10.6,
- * fuera de alcance) extenderá para considerar `group.personGender` sin
- * reescribir la escalera.
+ * Resuelve el conjunto de labels de un grupo (ADR-057 §3, ADR-060 §3). Único
+ * punto de acceso a `LADDER_LABELS`/`GENDERED_PERSON_LABELS` (grep de
+ * control de ADR-057). `personGender` solo se considera sobre `type ===
+ * Person`; sobre cualquier otro tipo, o sobre `Person` sin género resuelto
+ * (sin determinar, ADR-060 §5), el resultado es el lookup por tipo de
+ * siempre — `EntityGroup.personGender` fuera de `Person` se ignora por
+ * invariante (`03_Data_Model.md` §9), y acá simplemente nunca se lee.
  */
 export function resolveLabelSet(group: EntityGroup): PlaceholderLabelSet {
+  if (group.type === EntityType.Person && group.personGender !== undefined) {
+    return GENDERED_PERSON_LABELS[group.personGender];
+  }
   return LADDER_LABELS[group.type];
 }
 

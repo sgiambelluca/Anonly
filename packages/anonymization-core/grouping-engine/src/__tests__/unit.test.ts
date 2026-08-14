@@ -7,10 +7,19 @@ import {
 } from "@anonly/shared";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 
+import { GENDER_LEXICON } from "../gender-lexicon.generated.js";
+import type { GenderLexicon } from "../gender.js";
+import { inferPersonGender } from "../gender.js";
 import { GroupingEngine } from "../grouping.engine.js";
+import { buildPlaceholderValue } from "../labels.js";
 import { levenshtein, levenshteinNormalized } from "../levenshtein.js";
 
-import { createEngineContext, makeBBox, makeOccurrence } from "./fixtures/test-helpers.js";
+import {
+  createEngineContext,
+  makeBBox,
+  makeEntityGroup,
+  makeOccurrence,
+} from "./fixtures/test-helpers.js";
 
 describe("GroupingEngine — unit tests", () => {
   let engine: GroupingEngine;
@@ -144,6 +153,12 @@ describe("GroupingEngine — unit tests", () => {
   // ADR-057 §4 — no-regresión: un grupo cuyos bboxes son todos holgados
   // conserva exactamente el formato pre-ADR-057 (nivel 0, `TYPE_LABEL_ES` de
   // siempre). "El comportamiento previo a este ADR no cambia" (spec §14).
+  //
+  // Nombre "Andrea" (sin apellido determinante, ADR-069 §1: `A` en el
+  // registro de Buenos Aires) a propósito: este test prueba la escalera de
+  // abreviaturas, no la inferencia de género (ADR-069 §7 — un nombre
+  // determinado desviaría la aserción hacia MUJER/HOMBRE sin que sea lo que
+  // el test verifica).
   it("group with only wide bboxes stays at level 0 (no behaviour change)", () => {
     // Dos apariciones DISTINTAS (bbox.y difiere) del mismo valor: mismo
     // grupo, dos members — bbox idéntico colisionaría con el dedup por
@@ -153,8 +168,8 @@ describe("GroupingEngine — unit tests", () => {
         documentId: "doc-1",
         occurrence: makeOccurrence({
           entityType: EntityType.Person,
-          value: "Juan Perez",
-          normalizedValue: "juan perez",
+          value: "Andrea Perez",
+          normalizedValue: "andrea perez",
           bbox: makeBBox(0, y, 150, 20),
         }),
       });
@@ -169,13 +184,17 @@ describe("GroupingEngine — unit tests", () => {
   // disparador existente que YA recalcula replacementValue sin condiciones)
   // un member angosto baja el nivel de TODO el grupo, incluidos los members
   // holgados que ya tenía.
+  //
+  // "Andrea"/"Andrea Diaz" (ambos `A`/ambiguo en el registro, ADR-069 §1):
+  // mismo motivo que el test anterior, desacoplar la escalera de la
+  // inferencia de género.
   it("one narrow member lowers the level for the whole group", async () => {
     ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
       documentId: "doc-1",
       occurrence: makeOccurrence({
         entityType: EntityType.Person,
-        value: "Juan Perez",
-        normalizedValue: "juan perez",
+        value: "Andrea Perez",
+        normalizedValue: "andrea perez",
         bbox: makeBBox(0, 0, 200, 20),
       }),
     });
@@ -183,15 +202,15 @@ describe("GroupingEngine — unit tests", () => {
       documentId: "doc-1",
       occurrence: makeOccurrence({
         entityType: EntityType.Person,
-        value: "Ana Diaz",
-        normalizedValue: "ana diaz",
+        value: "Andrea Diaz",
+        normalizedValue: "andrea diaz",
         bbox: makeBBox(0, 0, 70, 20),
       }),
     });
 
     const groups = engine.getSnapshot("doc-1").groups;
-    const wideGroup = groups.find((g) => g.canonicalValue === "Juan Perez");
-    const narrowGroup = groups.find((g) => g.canonicalValue === "Ana Diaz");
+    const wideGroup = groups.find((g) => g.canonicalValue === "Andrea Perez");
+    const narrowGroup = groups.find((g) => g.canonicalValue === "Andrea Diaz");
     expect(wideGroup?.replacementValue).toBe("[PERSONA 01]");
 
     const merged = await engine.applyGroupMerge({
@@ -204,6 +223,125 @@ describe("GroupingEngine — unit tests", () => {
     // grupo combinado cae directo a nivel 2 aunque su otro member (200) por
     // sí solo entraba cómodo en nivel 0.
     expect(merged.replacementValue).toBe("[PRS-01]");
+  });
+});
+
+/**
+ * `inferPersonGender` (ADR-060 §4) es una función pura: no depende de una
+ * sesión del motor, solo de `canonicalValue` + un léxico ya fusionado. Se
+ * prueba igual que `levenshtein`/`levenshteinNormalized` abajo, sobre
+ * fixtures de léxico sintéticas (no el artefacto real generado por
+ * `scripts/build-gender-lexicon.ts` — la fusión de fuentes CC-BY se prueba
+ * aparte en `tests/scripts/build-gender-lexicon.test.ts`, ADR-060 §13).
+ */
+describe("inferPersonGender (ADR-060 §4)", () => {
+  // Caso 32 (§13): nombre inequívocamente femenino/masculino.
+  it("unambiguously feminine/masculine name infers personGender", () => {
+    const lexicon: GenderLexicon = new Map([
+      ["julia", "f"],
+      ["juan", "m"],
+    ]);
+    expect(inferPersonGender("Julia Gomez", lexicon)).toBe("f");
+    expect(inferPersonGender("Juan Perez", lexicon)).toBe("m");
+  });
+
+  // Caso 33 (§13): protege el ORDEN de los pasos de §4 — se busca primero la
+  // secuencia completa de nombres de pila ("maria jose", compuesto real de
+  // Buenos Aires Data) y recién si eso falla el primer token solo ("jose").
+  // Comparten los mismos dos tokens en distinto orden.
+  it('"José María" → m and "María José" → f', () => {
+    const lexicon: GenderLexicon = new Map([
+      ["jose", "m"],
+      ["maria jose", "f"],
+    ]);
+    expect(inferPersonGender("José María Gómez", lexicon)).toBe("m");
+    expect(inferPersonGender("María José Gómez", lexicon)).toBe("f");
+  });
+
+  // Caso 32 (§13, ADR-060 §4/§5/§9): cuatro caminos distintos que
+  // convergen en "sin determinar" — ausencia, marca de ambiguo (unisex en
+  // Buenos Aires o bajo el umbral de UCI, indistinguibles para esta función
+  // pura una vez fusionados), y unas iniciales que nunca están en un léxico
+  // de nombres. Nunca se elige un género dudoso.
+  it(
+    'name absent from lexicon, unisex name ("A"), below-threshold name and initials → ' +
+      "undetermined + neutral token",
+    () => {
+      const lexicon: GenderLexicon = new Map([["andrea", "ambiguous"]]);
+
+      expect(inferPersonGender("Nombre Desconocido Apellido", lexicon)).toBeUndefined();
+      expect(inferPersonGender("Andrea", lexicon)).toBeUndefined();
+      expect(inferPersonGender("J. Pérez", lexicon)).toBeUndefined();
+
+      // Token neutro: un grupo sin personGender resuelto sigue usando
+      // PERSONA/PERS/PRS, exactamente como antes de ADR-060.
+      const group = makeEntityGroup({ canonicalValue: "Andrea Fernandez", indexInType: 3 });
+      expect(buildPlaceholderValue(group)).toBe("[PERSONA 03]");
+    },
+  );
+
+  it("empty canonicalValue (no tokens) has nothing to look up → undetermined", () => {
+    const lexicon: GenderLexicon = new Map([["julia", "f"]]);
+    expect(inferPersonGender("   ", lexicon)).toBeUndefined();
+  });
+
+  // ADR-069 §7, regla permanente: las tablas sintéticas de arriba prueban el
+  // ORDEN de los pasos de §4 (son el fixture del algoritmo). Todo enunciado
+  // sobre qué contesta el léxico exige un test contra el ARTEFACTO
+  // COMMITEADO — es la distinción que el PR 11 no hacía: sus tests pasaban
+  // en verde con léxicos de dos entradas inventados a mano mientras
+  // `inferPersonGender("J. Pérez", <artefacto real>)` devolvía `"m"` contra
+  // la tabla real (ADR-069, Contexto §2/§3).
+  describe("inferPersonGender against the REAL artifact (GENDER_LEXICON, ADR-069 §7)", () => {
+    // Caso 32 (§13, ADR-069 §3/§7): el defecto que el PR 11 no vio — las 130
+    // entradas basura de UCI (iniciales, letras sueltas) hacían que
+    // "J. Pérez" resolviera "m" contra el artefacto real de entonces. La
+    // fuente única de ADR-069 §1 ya no tiene esas entradas (el build las
+    // descarta), y el guard de runtime de gender.ts (ADR-069 §3) es la
+    // segunda barrera, independiente del contenido del artefacto.
+    it('initials are never looked up: "J. Pérez" and "J.M. Pérez" against the REAL table', () => {
+      expect(inferPersonGender("J. Pérez", GENDER_LEXICON)).toBeUndefined();
+      expect(inferPersonGender("J.M. Pérez", GENDER_LEXICON)).toBeUndefined();
+    });
+
+    // Caso 32 (§13, ADR-069 §1/§7): errata de ADR-060 corregida por ADR-069
+    // §8 — "Andrea" NO resuelve "f": el registro de Buenos Aires la declara
+    // `A` (unisex), sin determinar. "Joan" es el ejemplo verdadero de que el
+    // registro local manda sobre datos anglosajones (Joan Manuel Serrat,
+    // `M` acá, mayoritariamente femenino allá).
+    it('"Andrea" is undetermined and "Joan" is m, against the REAL table', () => {
+      expect(inferPersonGender("Andrea", GENDER_LEXICON)).toBeUndefined();
+      expect(inferPersonGender("Joan Fernandez", GENDER_LEXICON)).toBe("m");
+    });
+
+    // Caso 33 (§13, ADR-069 §7): mismo par que protege el orden de los pasos
+    // de §4 arriba, pero contra la tabla real en vez de un fixture de dos
+    // entradas — "maria jose" está en el registro como secuencia de pila
+    // compuesta (f) y gana sobre el primer token solo ("jose" -> m).
+    it('"José María"/"María José" resolve against the REAL table', () => {
+      expect(inferPersonGender("José María Gómez", GENDER_LEXICON)).toBe("m");
+      expect(inferPersonGender("María José Gómez", GENDER_LEXICON)).toBe("f");
+    });
+
+    // Defensa en profundidad (ADR-069 §3): el guard de runtime de gender.ts
+    // es deliberadamente redundante con el filtro del build. Se prueba acá
+    // con un léxico sintético "envenenado" que SÍ tiene una entrada
+    // determinada para una clave de iniciales — algo que el artefacto real
+    // nunca produce, pero que probaría que "J. Pérez" resuelve "m" si algún
+    // día se regenera con otro criterio o se sirve un artefacto viejo. El
+    // guard hace que ese escenario sea imposible independientemente del
+    // contenido de la tabla.
+    it('the runtime guard blocks "j"/"j."/"j.m." even if a poisoned lexicon has a determined entry', () => {
+      const poisoned: GenderLexicon = new Map([
+        ["j", "m"],
+        ["j.", "m"],
+        ["j.m.", "m"],
+        ["pérez", "m"],
+      ]);
+      expect(inferPersonGender("J Pérez", poisoned)).toBeUndefined();
+      expect(inferPersonGender("J. Pérez", poisoned)).toBeUndefined();
+      expect(inferPersonGender("J.M. Pérez", poisoned)).toBeUndefined();
+    });
   });
 });
 

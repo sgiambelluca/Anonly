@@ -120,6 +120,37 @@
  *    índice en una renumeración, ADR-028 ya lo recomputa desde antes de este
  *    PR (comportamiento pre-existente, fuera de alcance de ADR-057 §7, que
  *    solo promete la misma precedencia que ADR-028 ya tenía).
+ *
+ * Notas agregadas en el Hito 10.6, PR 11c (ADR-069 §5-§7, spec v1.4.0 —
+ * inferencia disparada, elección del humano recordada):
+ *
+ * 13. `inferGenderIfDue` (función de módulo, no método: no lee `this`) se
+ *    invoca en los TRES puntos que ADR-069 §6(a) enumera de forma literal —
+ *    `createGroup`, `applyGroupMerge` (sobre `target`, el grupo que
+ *    sobrevive) y `applyGroupUpdate` cuando `patch.canonicalValue !==
+ *    undefined` — más el `created` de `doApplyGroupSplit` (también una
+ *    creación de `InternalGroup`, mismo trigger que `createGroup`). **A
+ *    propósito NO** se invoca en los recálculos automáticos de
+ *    `canonicalValue` que no son ninguno de esos tres (el de
+ *    `addOccurrenceToGroup` cuando llega una nueva `Occurrence`, el del
+ *    grupo REMANENTE — no el `created` — en `doApplyGroupSplit`, ni el de
+ *    `dropOccurrences`): el spec enumera "creación, fusión, y edición manual
+ *    de patch.canonicalValue" como una lista cerrada, y la red de
+ *    convergencia de `finishSession` (nota siguiente) cubre cualquier
+ *    `canonicalValue` que haya evolucionado por fuera de esos tres puntos
+ *    durante la sesión — evita, además, recalcular en cada `ENTITY_FOUND`.
+ * 14. `finishSession` llama `inferGendersOnFinish` ANTES de
+ *    `renumberGroupsCanonically` (ADR-069 §6(b)): sobre todos los grupos
+ *    `Person` sin `personGenderUserSet`, para que un género recién resuelto
+ *    entre a la misma pasada que ya recalcula `replacementValue` de los
+ *    placeholders afectados (mismo "no parpadeo" que ADR-028 le da a
+ *    `indexInType`, caso 37).
+ * 15. `personGenderUserSet` no tiene guard explícito en `closeSession`: vive
+ *    dentro de `InternalGroup`, y `closeSession` ya borra la sesión entera
+ *    (`sessions.delete`), así que se limpia solo. `reopenSession` no toca
+ *    `session.groups` en absoluto, así que la elección del humano sobrevive
+ *    sin código adicional — igual que el resto de las ediciones de grupo
+ *    (nota de cabecera del spec, ADR-038 §2).
  */
 
 import {
@@ -130,6 +161,7 @@ import {
   EngineEvents,
   EngineId,
   EngineNotInitializedError,
+  EntityType,
   EventChannel,
   InvalidInputError,
   ReplacementMode,
@@ -142,7 +174,6 @@ import {
   type EngineContext,
   type EntityFound,
   type EntityGroup,
-  type EntityType,
   type GroupMergeRequested,
   type GroupSplitRequested,
   type GroupUpdateRequested,
@@ -150,6 +181,7 @@ import {
   type NerFinished,
   type Occurrence,
   type OccurrenceRef,
+  type PersonGender,
   type RegexFinished,
   type Rule,
   type RuleCreated,
@@ -158,6 +190,8 @@ import {
   type Unsubscribe,
 } from "@anonly/shared";
 
+import { GENDER_LEXICON } from "./gender-lexicon.generated.js";
+import { inferPersonGender } from "./gender.js";
 import { GroupingGroupNotFoundError, GroupingInvalidPatchError } from "./grouping.errors.js";
 import type {
   DropOccurrencesFilter,
@@ -174,6 +208,7 @@ const PATCH_ALLOWED_KEYS: ReadonlySet<string> = new Set([
   "replacementValue",
   "enabled",
   "canonicalValue",
+  "personGender",
 ]);
 
 /** Info de "quién detectó primero" un alias — para poblar `ConflictCandidate`. */
@@ -198,12 +233,21 @@ interface InternalGroup {
   indexInType: number;
   enabled: boolean;
   aliases: string[];
+  /** Solo relevante para type === Person; ausente = sin determinar (ADR-060 §2). */
+  personGender?: PersonGender;
   createdAt: number;
   updatedAt: number;
   // Bookkeeping interno (nunca expuesto):
   readonly normalizedValues: Set<string>;
   readonly aliasFrequency: Map<string, number>;
   readonly aliasFirstSeen: Map<string, AliasSourceInfo>;
+  /**
+   * ADR-069 §5: la elección del humano (incluido "neutral", que borra
+   * `personGender` sin dejar rastro público) tiene que distinguirse de "todavía
+   * no se infirió" para que ninguna inferencia posterior la pise. Nunca sale de
+   * este motor — mismo criterio que `normalizedValues`/`aliasFrequency`.
+   */
+  personGenderUserSet: boolean;
 }
 
 /** Copia liviana de los campos de `Occurrence` necesarios para matching/conflictos, indexada por sesión. */
@@ -246,6 +290,9 @@ function toPublicGroup(group: InternalGroup): EntityGroup {
     indexInType: group.indexInType,
     enabled: group.enabled,
     aliases: [...group.aliases],
+    // exactOptionalPropertyTypes: no asignar `undefined` explícito (mismo
+    // patrón que maskFormat en recordOccurrence).
+    ...(group.personGender !== undefined ? { personGender: group.personGender } : {}),
     createdAt: group.createdAt,
     updatedAt: group.updatedAt,
   };
@@ -427,6 +474,40 @@ function computeReplacementValue(group: EntityGroup, seed: string, maskFormat: s
   }
 }
 
+/**
+ * `InternalGroup.personGender` es opcional SIN `| undefined` explícito
+ * (mismo criterio que `EntityGroup.personGender` — `exactOptionalPropertyTypes`
+ * exige que "ausente" y "presente con valor `undefined`" no se mezclen, así
+ * que `group.personGender = undefined` no compila). `delete` es la única vía
+ * válida para volver a "ausente" sobre una propiedad opcional.
+ */
+function setPersonGender(group: InternalGroup, value: PersonGender | undefined): void {
+  if (value === undefined) {
+    delete group.personGender;
+  } else {
+    group.personGender = value;
+  }
+}
+
+/**
+ * ADR-069 §6: dispara la inferencia de género sobre `group.canonicalValue`
+ * en los dos puntos que el spec enumera (creación/fusión/edición manual de
+ * `canonicalValue`, y la pasada de `finishSession`) — nunca sobre un tipo
+ * distinto de `Person` ni sobre un grupo con elección del humano
+ * (`personGenderUserSet`). Idempotente: misma tabla + mismo `canonicalValue`
+ * ⇒ mismo resultado, así que llamarla de más (p. ej. en cada fusión, cambie
+ * o no el `canonicalValue`) no tiene efecto observable extra. Devuelve
+ * `true` solo si `personGender` cambió, para que el caller sume la clave a
+ * su `changed` y decida si hace falta recalcular `replacementValue`.
+ */
+function inferGenderIfDue(group: InternalGroup): boolean {
+  if (group.type !== EntityType.Person || group.personGenderUserSet) return false;
+  const inferred = inferPersonGender(group.canonicalValue, GENDER_LEXICON);
+  if (inferred === group.personGender) return false;
+  setPersonGender(group, inferred);
+  return true;
+}
+
 export class GroupingEngine implements IEngine {
   readonly id = EngineId.Grouping;
 
@@ -566,6 +647,11 @@ export class GroupingEngine implements IEngine {
     if (session.finished) return Promise.resolve();
     session.finished = true;
 
+    // ADR-069 §6(b): red de convergencia — corre ANTES de la renumeración
+    // canónica para que un género recién resuelto entre en la misma pasada
+    // que ya recalcula índices y placeholders (spec §13 caso 37, mismo
+    // criterio que el "no parpadeo" de ADR-028).
+    this.inferGendersOnFinish(session);
     this.renumberGroupsCanonically(session);
 
     const durationMs = Date.now() - session.startedAt;
@@ -731,6 +817,42 @@ export class GroupingEngine implements IEngine {
   }
 
   /**
+   * ADR-069 §6(b): sobre todos los grupos `Person` sin elección del humano,
+   * re-corre la inferencia una última vez. Es la red que garantiza
+   * convergencia pase lo que pase durante la sesión (fusiones, ediciones,
+   * ocurrencias que llegan fuera de orden) — al cerrar, todo grupo `Person`
+   * tiene el género que le corresponde según el `canonicalValue` final.
+   * `inferGenderIfDue` ya filtra `type`/`personGenderUserSet`; recorrer TODOS
+   * los grupos de la sesión (no solo los `Person`) es más simple que filtrar
+   * dos veces y el chequeo interno es barato.
+   */
+  private inferGendersOnFinish(session: Session): void {
+    for (const group of session.groups.values()) {
+      if (!inferGenderIfDue(group)) continue;
+
+      const beforeReplacement = {
+        replacementMode: group.replacementMode,
+        replacementValue: group.replacementValue,
+      };
+      if (group.replacementMode === ReplacementMode.Placeholder) {
+        group.replacementValue = computeReplacementValue(
+          group,
+          session.seed,
+          this.resolveMaskFormat(session, group),
+        );
+      }
+      group.updatedAt = Date.now();
+
+      const changed: (keyof EntityGroup)[] = [
+        "personGender",
+        ...this.emitReplacementChangeIfNeeded(session, group, beforeReplacement),
+        "updatedAt",
+      ];
+      this.emitGroupUpdated(session, group, changed);
+    }
+  }
+
+  /**
    * Renumeración canónica de `indexInType` (ADR-028, una sola vez, antes de
    * `GROUPING_FINISHED`): reemplaza los índices provisionales asignados por
    * orden de llegada de `ENTITY_FOUND` (no-determinístico entre corridas —
@@ -827,7 +949,8 @@ export class GroupingEngine implements IEngine {
       const { session, group } = this.requireGroup(req.documentId, req.groupId);
       this.validatePatch(req.patch);
 
-      const { replacementMode, replacementValue, enabled, canonicalValue } = req.patch;
+      const { replacementMode, replacementValue, enabled, canonicalValue, personGender } =
+        req.patch;
       const changed = new Set<keyof EntityGroup>();
       const beforeReplacement = {
         replacementMode: group.replacementMode,
@@ -837,6 +960,34 @@ export class GroupingEngine implements IEngine {
       if (canonicalValue !== undefined) {
         group.canonicalValue = canonicalValue;
         changed.add("canonicalValue");
+      }
+
+      // ADR-069 §4: "f"/"m" escriben el campo, "neutral" lo borra, y los tres
+      // marcan la elección como del humano. Sobre un grupo que no es Person
+      // se ignora con warn y no toca replacementValue (ADR-060 §2).
+      if (personGender !== undefined) {
+        if (group.type !== EntityType.Person) {
+          this.ctx?.logger.warn(
+            "patch.personGender sobre un grupo que no es Person; se ignora (ADR-069 §4).",
+            { documentId: req.documentId, groupId: group.id, type: group.type },
+          );
+        } else {
+          const nextGender: PersonGender | undefined =
+            personGender === "neutral" ? undefined : personGender;
+          if (nextGender !== group.personGender) {
+            setPersonGender(group, nextGender);
+            changed.add("personGender");
+          }
+          group.personGenderUserSet = true;
+        }
+      }
+
+      // ADR-069 §6(a): edición manual de canonicalValue re-infiere género en
+      // un Person sin elección del humano. Si el patch.personGender de arriba
+      // vino en la misma request, ya marcó personGenderUserSet=true y
+      // inferGenderIfDue queda en no-op — la elección explícita siempre gana.
+      if (canonicalValue !== undefined && inferGenderIfDue(group)) {
+        changed.add("personGender");
       }
 
       if (enabled !== undefined) {
@@ -861,6 +1012,19 @@ export class GroupingEngine implements IEngine {
 
       if (replacementValue !== undefined) {
         group.replacementValue = replacementValue;
+      } else if (
+        replacementMode === undefined &&
+        changed.has("personGender") &&
+        group.replacementMode === ReplacementMode.Placeholder
+      ) {
+        // El género cambió (explícito o inferido por el trigger de arriba) y
+        // ninguna otra rama recalculó replacementValue todavía: el label de
+        // la escalera (labels.ts, resolveLabelSet) depende de personGender.
+        group.replacementValue = computeReplacementValue(
+          group,
+          session.seed,
+          this.resolveMaskFormat(session, group),
+        );
       }
 
       for (const key of this.emitReplacementChangeIfNeeded(session, group, beforeReplacement)) {
@@ -931,6 +1095,13 @@ export class GroupingEngine implements IEngine {
         this.recomputeCanonicalValue(session, target);
       }
 
+      // ADR-069 §6(a): "al fusionar" — trigger propio, no condicionado a que
+      // canonicalValue haya cambiado de verdad. `target` es el grupo que
+      // sobrevive (su identidad no cambia con el merge): su personGender y
+      // personGenderUserSet ya vienen de él solo — no se copian del `source`
+      // que se elimina abajo (ADR-069 §5, "hereda... del grupo que sobrevive").
+      const genderChanged = inferGenderIfDue(target);
+
       const beforeReplacement = {
         replacementMode: target.replacementMode,
         replacementValue: target.replacementValue,
@@ -939,7 +1110,8 @@ export class GroupingEngine implements IEngine {
       // synthetic) depende de la membresía fusionada — se recalcula siempre
       // tras un merge, no solo cuando cambia el índice. target.members ya
       // incluye los de `source` (arriba): la escalera de ADR-057 ve el peor
-      // caso del grupo fusionado completo.
+      // caso del grupo fusionado completo, ya con el personGender resuelto
+      // arriba si cambió.
       target.replacementValue = computeReplacementValue(
         target,
         session.seed,
@@ -951,6 +1123,7 @@ export class GroupingEngine implements IEngine {
 
       const changed: (keyof EntityGroup)[] = ["members", "aliases", "updatedAt", "indexInType"];
       if (target.canonicalValue !== beforeCanonical) changed.push("canonicalValue");
+      if (genderChanged) changed.push("personGender");
       changed.push(...this.emitReplacementChangeIfNeeded(session, target, beforeReplacement));
 
       this.emitGroupUpdated(session, target, changed);
@@ -1012,12 +1185,16 @@ export class GroupingEngine implements IEngine {
       aliases: [],
       createdAt: now,
       updatedAt: now,
+      personGenderUserSet: false,
       normalizedValues: new Set(),
       aliasFrequency: new Map(),
       aliasFirstSeen: new Map(),
     };
     this.rebuildAliasBookkeeping(created, movedRecords);
     if (created.aliases.length > 0) this.recomputeCanonicalValue(session, created);
+    // ADR-069 §6(a): "al crearlo" — un split crea un InternalGroup nuevo, sin
+    // elección del humano todavía, igual que createGroup.
+    inferGenderIfDue(created);
     const createdMode = resolveMode(created, session.rules);
     created.replacementMode = createdMode;
     // ADR-057: created.members ya es movedMembers (arriba) — la escalera ve
@@ -1449,6 +1626,7 @@ export class GroupingEngine implements IEngine {
       aliases: [occurrence.value],
       createdAt: now,
       updatedAt: now,
+      personGenderUserSet: false,
       normalizedValues: new Set([occurrence.normalizedValue]),
       aliasFrequency: new Map([[occurrence.value, 1]]),
       aliasFirstSeen: new Map([
@@ -1462,6 +1640,9 @@ export class GroupingEngine implements IEngine {
         ],
       ]),
     };
+    // ADR-069 §6(a): "al crearlo" — antes de resolver el modo/valor, para que
+    // un placeholder recién creado ya nazca con el label de género correcto.
+    inferGenderIfDue(group);
     group.replacementMode = resolveMode(group, session.rules);
     // ADR-057: group.members ya es [toOccurrenceRef(occurrence)] (única
     // ocurrencia del grupo recién creado) — la escalera arranca desde ahí.
