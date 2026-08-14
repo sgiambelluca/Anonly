@@ -20,6 +20,7 @@
     "build:clean": "pnpm -r exec rm -rf dist && pnpm build",
     "fixtures:generate": "tsx tests/fixtures/generate.ts",
     "assets:mirror": "tsx scripts/mirror-assets.ts",
+    "lexicon:build": "tsx scripts/build-gender-lexicon.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:contract": "vitest run contract.test.ts",

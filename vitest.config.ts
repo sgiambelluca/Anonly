@@ -173,6 +173,12 @@ export default defineConfig({
         "packages/**/src/index.ts",
         "packages/**/*.d.ts",
         "packages/anonymization-core/src/index.ts",
+        // Módulo generado (ADR-069 §2, `scripts/build-gender-lexicon.ts`):
+        // una tabla de datos de 9.788 entradas sin lógica propia. Nadie lo
+        // importa todavía (lo hace el PR 11c) — sin excluirlo, sus ~9.800
+        // líneas nunca ejecutadas hunden el threshold de grouping-engine
+        // aunque el resto del motor esté cubierto.
+        "packages/anonymization-core/grouping-engine/src/gender-lexicon.generated.ts",
       ],
       // Gate de cobertura por paquete implementado (ai/Code_Standards.md §10: ≥ 85%
       // líneas por motor). branches/functions en 80 como piso de seguridad (el gate
