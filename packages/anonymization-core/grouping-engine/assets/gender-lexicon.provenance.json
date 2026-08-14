@@ -1,0 +1,21 @@
+{
+  "generatedAt": "2026-08-14T06:22:08.481Z",
+  "generator": "scripts/build-gender-lexicon.ts",
+  "source": {
+    "id": "buenos-aires-nombres-permitidos",
+    "datasetPage": "https://data.buenosaires.gob.ar/dataset/nombres",
+    "url": "https://cdn.buenosaires.gob.ar/datosabiertos/datasets/ministerio-de-gobierno/nombres/nombres-permitidos.csv",
+    "license": "CC-BY-2.5-AR",
+    "retrievedAt": "2026-08-14T06:22:08.481Z"
+  },
+  "artifact": {
+    "modulePath": "packages/anonymization-core/grouping-engine/src/gender-lexicon.generated.ts",
+    "sha256": "b09f0d4201669b4810b68e7100c9777cfa2b04e7e64d4f50c1bf4cbc4d92cbf0",
+    "entryCount": 9788,
+    "counts": {
+      "f": 4335,
+      "m": 4972,
+      "ambiguous": 481
+    }
+  }
+}
