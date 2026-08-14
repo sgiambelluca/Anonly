@@ -57,7 +57,7 @@ export interface ThirdPartyCredit {
   readonly title: string;
   /** Titular de los derechos, como pide CC-BY. */
   readonly holder: string;
-  /** Nombre legible de la licencia, p. ej. "CC BY 2.5 AR". */
+  /** Nombre legible de la licencia, p. ej. "CC-BY-2.5-AR". */
   readonly license: string;
   readonly licenseUrl: string;
   readonly sourceUrl: string;
@@ -78,7 +78,7 @@ La entrada del léxico dice, literalmente:
 |---|---|
 | `title` | `Nombres — recurso "Nombres Permitidos"` |
 | `holder` | `Gobierno de la Ciudad de Buenos Aires — Buenos Aires Data` |
-| `license` | `CC BY 2.5 AR` |
+| `license` | `CC-BY-2.5-AR` |
 | `licenseUrl` | `https://creativecommons.org/licenses/by/2.5/ar/` |
 | `sourceUrl` | `https://data.buenosaires.gob.ar/dataset/nombres` |
 | `changes` | `Datos modificados: se conservan solo el nombre y el sexo declarado, normalizados; se descartan origen y significado.` |
