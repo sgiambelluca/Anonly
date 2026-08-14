@@ -500,6 +500,15 @@ export enum AnnotationKind {
 // determinar; no es una tercera categoría (03_Data_Model.md §9).
 export type PersonGender = "f" | "m";
 
+// ADR-069 §4: lo que el usuario elige en el selector de tres estados. El
+// tercer estado viaja como VALOR ("neutral"), no como ausencia de la clave:
+// los otros campos de GroupUpdateRequested.patch siempre vienen con valor y se
+// resuelven con `!== undefined`, así que sin este token el usuario no podría
+// deshacer su elección. Al aplicarlo, "neutral" BORRA EntityGroup.personGender
+// —el almacenamiento sigue siendo "f" | "m" | ausente— y el motor recuerda
+// aparte que la elección la hizo el humano (Grouping_Engine.md §13 caso 34).
+export type PersonGenderChoice = PersonGender | "neutral";
+
 export enum ConflictReason {
   Overlap = "overlap",
   Disagree = "disagree",
@@ -750,7 +759,11 @@ export interface WorkerPoolSaturated { readonly type: WorkerJobType; readonly qu
 export interface GroupUpdateRequested {
   readonly documentId: string;
   readonly groupId: string;
-  readonly patch: Partial<Pick<EntityGroup, "replacementMode" | "replacementValue" | "enabled" | "canonicalValue">>;
+  // ADR-069 §4: personGender no sale de un Pick de EntityGroup porque su tercer
+  // estado ("neutral") no existe como valor almacenado — borra el campo. Sobre
+  // un grupo de type distinto de Person se ignora con warn.
+  readonly patch: Partial<Pick<EntityGroup, "replacementMode" | "replacementValue" | "enabled" | "canonicalValue">>
+    & { readonly personGender?: PersonGenderChoice };
 }
 export interface GroupMergeRequested { readonly documentId: string; readonly sourceGroupId: string; readonly targetGroupId: string; }
 export interface GroupSplitRequested { readonly documentId: string; readonly groupId: string; readonly occurrenceIds: ReadonlyArray<string>; }

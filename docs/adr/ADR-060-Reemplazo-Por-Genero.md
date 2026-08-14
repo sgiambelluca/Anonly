@@ -10,6 +10,10 @@
 
 > Convención de citas: `ADR-060 §N` refiere a **Decisión §N**; el contexto se cita como `ADR-060, Contexto §N`.
 
+> **Nota (ADR-069, 2026-08-14) — §9 y §10 están superseded, y hay una errata de datos.** Al implementar el PR 11 aparecieron dos ambigüedades (el canal por el que el usuario fija `personGender` nunca llegó al tipo del evento; nada declaraba cómo entra el léxico al motor ni quién dispara la inferencia) y, al verificar el artefacto generado contra las fuentes, un defecto de producto: las iniciales resolvían género. `ADR-069` los resuelve y cambia dos decisiones de acá — **la fuente pasa a ser única (solo Buenos Aires, §9 superseded)** y **el léxico viaja dentro del bundle como módulo generado (§10 superseded)**. §1-§8, §11 y §12 siguen vigentes tal cual.
+>
+> **Además, los ejemplos con nombres propios de Contexto §4 y §9 no estaban verificados contra el CSV y son falsos**: `ANDREA` es `A` (no `F`), `CRUZ` y `RENE` son `M`, `GUADALUPE` es `F`, y `MARIA` es `A`. Están corregidos abajo en su lugar. El ejemplo verdadero de discrepancia con datos anglosajones es **`JOAN`**. Ver `ADR-069` §8.
+
 ## Contexto
 
 ### 1. La anonimización rompe las referencias del texto, no solo los nombres
@@ -36,7 +40,9 @@ Esto **no es un bloqueante**: es un trade-off legítimo, el usuario lo elige a c
 
 ### 4. La inferencia va a equivocarse, y en español bastante
 
-"Andrea" es femenino en español y masculino en italiano. "Cruz", "Guadalupe", "Trinidad", "Rosario" y "René" son ambiguos. "José María" es masculino y "María José" femenino, y comparten los mismos dos tokens. Iniciales ("J. Pérez") y nombres de otras lenguas no tienen respuesta.
+Hay nombres que no determinan género y nombres que lo determinan al revés según la lengua. "José María" es masculino y "María José" femenino, y comparten los mismos dos tokens. Iniciales ("J. Pérez") y nombres de otras lenguas no tienen respuesta.
+
+> **Corregido (ADR-069 §8, 2026-08-14)**: la versión original de este párrafo daba como ambiguos a "Cruz", "Guadalupe", "Trinidad", "Rosario" y "René", y a "Andrea" como femenino en español. Escrito de memoria, sin abrir la fuente. Verificado contra el CSV del registro: **ambiguos (`A`) son `ANDREA`, `MARIA`, `TRINIDAD` y `ROSARIO`**; `CRUZ` y `RENE` son `M` y `GUADALUPE` es `F`. El argumento del párrafo no cambia —hay nombres que el registro declara que no determinan género, y ese es el hecho del que depende §4—, pero los ejemplos sí.
 
 Un error acá no queda en un log: **se imprime en el documento final** y va a manos de un tercero. El costo asimétrico de equivocarse decide §4.
 
@@ -122,6 +128,8 @@ Que la leyenda deje ver que hubo distinción de género no agrega divulgación: 
 
 ### 9. Las dos fuentes del léxico
 
+> **SUPERSEDED por `ADR-069` §1 (2026-08-14).** La fuente pasa a ser **una sola**: Buenos Aires Data. UCI sale del alcance, y con ella la regla de fusión de cuatro filas, el umbral de probabilidad y la columna `Count`. Motivos medidos: de 24 nombres extranjeros probados, Buenos Aires ya resolvía 21 y UCI agregaba tres; la mitad de las 133.899 entradas de UCI las llevan menos de 20 personas; y sus 130 entradas que no son nombres (letras sueltas, iniciales, títulos) hacían que `J. Pérez` resolviera masculino, violando §4. Lo que sobrevive de esta sección es su fundamento: **`A` → sin determinar** y **el registro local es autoritativo**. La variante con UCI recortada a ≥1.000 apariciones queda anotada como opción futura en `roadmap/Future_Ideas.md`. Se conserva el texto original abajo porque es el razonamiento del que ADR-069 §1 parte.
+
 | Fuente | Licencia | Rol | Qué aporta |
 |---|---|---|---|
 | [**Nombres — Buenos Aires Data**](https://data.buenosaires.gob.ar/dataset/nombres), recurso "Nombres Permitidos" | **CC-BY-2.5-AR** | **Base** | Nombres de uso local con **género** declarado por el registro. Es la fuente correcta para el caso de uso: nombres que efectivamente aparecen en documentos argentinos. Se actualiza trimestralmente. |
@@ -138,13 +146,19 @@ Que la leyenda deje ver que hubo distinción de género no agrega divulgación: 
 | 3 | Ausente de Buenos Aires, presente en UCI **por encima** del umbral de probabilidad | ese género |
 | 4 | Ausente de Buenos Aires y presente en UCI **por debajo** del umbral, o ausente de las dos | sin determinar (§4 paso 3) |
 
-**Buenos Aires es autoritativo y no se contrasta contra UCI**, ni siquiera cuando discrepan. Es el registro civil del país cuyos documentos anonimiza esta herramienta, y una discrepancia con datos anglosajones **no es evidencia de ambigüedad local**: es evidencia de que el nombre se usa distinto en otro idioma, que es justamente lo que no importa acá. El caso que lo muestra es "Andrea" — `F` en Buenos Aires, casi seguro `M` en UCI por datos de EE.UU./Reino Unido. En un documento argentino la respuesta correcta es `F`, y una regla de "discrepancia → ambiguo" la habría tirado a la basura junto con una de las inferencias más seguras que hay.
+**Buenos Aires es autoritativo y no se contrasta contra UCI**, ni siquiera cuando discrepan. Es el registro civil del país cuyos documentos anonimiza esta herramienta, y una discrepancia con datos anglosajones **no es evidencia de ambigüedad local**: es evidencia de que el nombre se usa distinto en otro idioma, que es justamente lo que no importa acá. El caso que lo muestra es **"Joan"** — `M` en el registro porteño (Joan Manuel Serrat) y femenino con 495.559 registros en los datos anglosajones. En un documento argentino la respuesta correcta es `M`, y una regla de "discrepancia → ambiguo" la habría tirado a la basura junto con una de las inferencias más seguras que hay. Hay 129 discrepancias de esa forma; "Jean" es la segunda.
+
+> **Corregido (ADR-069 §8, 2026-08-14)**: el ejemplo original de este párrafo era "Andrea — `F` en Buenos Aires, casi seguro `M` en UCI". Verificado contra las dos fuentes: **`ANDREA` es `A` en el registro** (no `F`) y es mayoritariamente femenino en los datos anglosajones, así que no ilustraba nada. La decisión que el párrafo defiende no cambia; el ejemplo pasó a ser "Joan", que sí es una discrepancia real y medida.
 
 Esto reduce el rol de UCI a lo que hace bien y solo eso: **cubrir nombres extranjeros ausentes de Buenos Aires**, con su probabilidad como criterio de confianza (regla 3 vs 4). Para nombres locales, la fuente base se basta sola.
 
 > **Sobre el valor `A`**: se mapea a **sin determinar**, no a una tercera categoría de persona. Es una propiedad del **nombre** —el registro declara que puede darse a cualquiera—, no un atributo de quien lo lleva. No genera token propio ni fila nueva en la tabla de §3: el grupo usa `PERSONA`/`PERS`/`PRS` y se marca en el árbol (§5). Inventarle un token divulgaría algo falso sobre la persona y no tendría pronombre al que anclar, que es la razón por la que §"Alternativas" ya rechazó agregar categorías.
 
 ### 10. Cómo viaja el léxico, y por qué esto no rompe el "100% local"
+
+> **SUPERSEDED por `ADR-069` §2 (2026-08-14)** en todo lo que describe **transporte**. Con una fuente sola el artefacto pasa de 1,9 MB a **129 KB (30 KB gz)**, y a esa escala nada de esta sección se justifica: el léxico viaja **dentro del bundle**, como módulo TypeScript generado que el motor importa. Sin carga a demanda, sin Cache Storage, sin URL configurable, sin copia a `public/` y sin ruta de fallo por descarga. El párrafo sobre PWA y app de escritorio pierde objeto: un módulo del bundle ya está en el precache y dentro del instalador.
+>
+> **Sobrevive todo lo que no era transporte**: los CSV originales no entran al repo, el artefacto derivado sí, el script de build es determinista y commiteado, y del build no sobrevive nada más que `nombre → f | m | ambiguo`. Y la conclusión de fondo también: ningún dato del usuario sale del navegador, ni antes ni ahora.
 
 **Lo que se commitea es un artefacto derivado, no los CSV.** Un script de build —hermano de `scripts/mirror-assets.ts`— baja las dos fuentes, normaliza (NFC, minúsculas, sin diacríticos), aplica la regla de fusión de §9 y emite una tabla `nombre → f | m | ambiguo`. **Nada más**: origen, significado, conteos por año y probabilidades se descartan en el build y nunca llegan al producto. Es lo que hace que el artefacto sea chico frente a los CSV originales.
 
@@ -181,6 +195,16 @@ Es de las cosas que se pasan por alto y son incumplimiento liso y llano. Va como
 
 La numeración continúa la del Hito 10.5 (`roadmap/MVP.md` §4). El Hito 10.6 **no arranca antes de que el PR 3 de ADR-057 esté mergeado**: sin la indirección de §3 este ADR no tiene dónde apoyarse.
 
+> **Actualizado por `ADR-069` (2026-08-14).** El PR 11 se parte en tres, porque el campo del patch es un cambio de contrato en `shared` y no puede ir en el mismo PR que el motor (R-1):
+>
+> | # | PR | Módulo | Depende de |
+> |---|---|---|---|
+> | 11a | `personGender` en `GroupUpdateRequested.patch` + `PersonGenderChoice` (ADR-069 §4) | `shared` | PR 10 |
+> | 11b | Fuente única, artefacto en el bundle y saneamiento (ADR-069 §1-§3) | `scripts/` + `grouping-engine` | — |
+> | 11c | Inferencia disparada, elección del humano recordada, tests contra la tabla real (ADR-069 §5-§7) | `grouping-engine` | 11a, 11b |
+>
+> El PR 12 (`apps/react-client`) depende de 11a, y arrastra la **atribución visible en el producto** de §11, que sigue pendiente.
+
 ### 13. Tests
 
 `shared` (PR 10):
@@ -194,17 +218,24 @@ La numeración continúa la del Hito 10.5 (`roadmap/MVP.md` §4). El Hito 10.6 *
 - Unit: nombre inequívocamente femenino → `f`; masculino → `m`.
 - Unit: "José María" → `m` y "María José" → `f` — el test que protege el orden de los pasos de §4.
 - Unit: nombre ausente del léxico → sin determinar, token neutro (§5).
-- Unit: nombre marcado como ambiguo ("Andrea", "Cruz") → sin determinar, **nunca** una elección (§4).
+- Unit: nombre marcado como ambiguo (`A` en el registro) → sin determinar, **nunca** una elección (§4).
 - Unit: iniciales ("J. Pérez") → sin determinar.
 
-Fusión de las dos fuentes (PR 11, sobre el script de build de §10 — son los tests que garantizan que la ambigüedad se **detecta** en vez de resolverse a la fuerza):
+> **Reescrito por `ADR-069` §7 y §8 (2026-08-14).** Dos cambios sobre la lista de arriba y la de abajo: (a) los ejemplos con nombre propio pasan a ser los verificados contra el CSV —`ANDREA` es ambiguo, no `f`; el par que ilustra la discrepancia con datos anglosajones es `JOAN`—; y (b) **todo enunciado sobre qué contesta el léxico exige un test contra el artefacto commiteado**, no solo contra tablas sintéticas. Las tablas sintéticas siguen valiendo para probar el orden de los pasos de §4, donde son el fixture del algoritmo. La lista original de esta sección se cubría entera con léxicos inventados a mano, y por eso el PR 11 estuvo en verde mientras `J. Pérez` resolvía masculino contra la tabla real.
 
-- Unit: **"Andrea" resuelve `f`** — Buenos Aires dice `F`, UCI dice `M`, y Buenos Aires es autoritativo (§9 regla 1). Es el test que protege la decisión de no cruzar fuentes para nombres locales: si alguien reintroduce una regla de "discrepancia → ambiguo", este test se cae.
-- Unit: un nombre con `A` en Buenos Aires → **sin determinar**, y no se consulta UCI aunque UCI tenga una respuesta con alta probabilidad (§9 regla 2).
-- Unit: un nombre ausente de Buenos Aires y presente en UCI **por encima** del umbral toma el de UCI; **por debajo** → sin determinar (§9 reglas 3 y 4).
-- Unit: `A` **no** produce un token propio: el grupo usa el label neutro y queda marcado en el árbol (§9, §5).
+Construcción del artefacto (PR 11, sobre el script de build — son los tests que garantizan que la ambigüedad se **detecta** en vez de resolverse a la fuerza):
+
+- Unit: un nombre con `A` en el registro → **sin determinar** (§9, lo único que sobrevive de esa sección).
+- Unit: `A` **no** produce un token propio: el grupo usa el label neutro y queda marcado en el árbol (§5).
+- Unit: el build descarta las claves con punto o dígito del registro, y **preserva los nombres compuestos** (`maria de la o`, ADR-069 §3).
 - Unit: el artefacto se regenera determinísticamente — misma entrada, mismo hash (§11).
-- Unit: el artefacto contiene **solo** `nombre → f | m | ambiguo`; ningún conteo, probabilidad, origen ni significado sobrevive al build (§10).
+- Unit: el artefacto contiene **solo** `nombre → f | m | ambiguo`; ningún origen ni significado sobrevive al build (§10).
+
+Contra la tabla real commiteada (PR 11, ADR-069 §7 — los que faltaban):
+
+- Unit: `J. Pérez` → **sin determinar**. El que encuentra el defecto de ADR-069 Contexto §2.
+- Unit: `Andrea` → sin determinar (`A` en el registro); `Joan` → `m`.
+- Unit: `María José` → `f` y `José María` → `m` contra la tabla real, no contra un fixture.
 - Edge: un `personGender` puesto por el usuario sobrevive a `finishSession` y a una re-inferencia posterior (§4).
 - Edge: `[MUJER 03]` y `[HOMBRE 04]` conservan la secuencia única de `Person` (§7).
 - Edge: la escalera baja de nivel sobre un grupo con género igual que sobre uno neutro (§3, sin ramas nuevas).
@@ -251,14 +282,14 @@ Fusión de las dos fuentes (PR 11, sobre el script de build de §10 — son los 
 - `ui/Components.md` y `ui/UX_Guidelines.md` — el selector por grupo y la marca de "sin determinar".
 - `roadmap/MVP.md` §4 — bloque del Hito 10.6.
 - `README.md` y créditos de la app — atribución CC-BY de las dos fuentes (§11).
-- **Enmienda pendiente a este mismo ADR**: revisión/fecha de descarga y hash del artefacto generado, más el resultado de la verificación de §9 (§10, §11).
+- ~~**Enmienda pendiente a este mismo ADR**: revisión/fecha de descarga y hash del artefacto generado, más el resultado de la verificación de §9 (§10, §11).~~ **Resuelta por `ADR-069` (2026-08-14)**, que además supersede §9 y §10 y corrige los ejemplos de Contexto §4 y §9. Procedencia y hash viven en `gender-lexicon.provenance.json`.
 
 ## Validación
 
 - ~~Punto abierto: si el CSV de Buenos Aires marca los unisex.~~ **Resuelto (2026-08-06)**: usa `F`/`M`/`A`, y la `A` marca los que no determinan género. La regla de fusión de §9 quedó escrita sobre ese hecho, no sobre una suposición.
 - Los tests de §13 verdes, en particular los de ambigüedad (§4): son los que garantizan que nunca se imprime una inferencia dudosa.
 - Verificación de no-regresión: un documento sin ningún `personGender` asignado produce exactamente los mismos `replacementValue` que antes de este ADR.
-- Medición del impacto del léxico contra el gate de bundle de `roadmap/MVP.md` §5, reportada en el PR (§10).
+- ~~Medición del impacto del léxico contra el gate de bundle de `roadmap/MVP.md` §5, reportada en el PR (§10).~~ **Hecha (ADR-069 §2)**: con la fuente única el léxico son **129 KB crudo / 30 KB gz**, 3,75% del gate de 800 KB gz, dentro del bundle inicial.
 - **Atribución CC-BY visible en el producto** y procedencia completa (URL, licencia, revisión, hash) en el repo (§11). Es obligación de licencia, no opcional.
 - Verificación de que el artefacto se regenera determinísticamente con el script commiteado y produce el mismo hash (§11).
 - Gates: `pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract`.
