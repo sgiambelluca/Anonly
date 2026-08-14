@@ -120,6 +120,25 @@ describe("actions", () => {
       });
     });
 
+    // ADR-060 §6 / ADR-069 §4: lo que `PersonGenderSelect` emite por cada uno
+    // de sus tres estados. "neutral" viaja como valor explícito, nunca como
+    // ausencia de la clave (ver el comentario en `actions.ts` junto al patch).
+    it.each([
+      ["f", { personGender: "f" }],
+      ["m", { personGender: "m" }],
+      ["neutral", { personGender: "neutral" }],
+    ] as const)(
+      "updateGroup with personGender %s emits GROUP_UPDATE_REQUESTED with the patch",
+      (choice, expectedPatch) => {
+        actions.updateGroup("group-1", { personGender: choice });
+        expect(emit).toHaveBeenCalledWith(EventChannel.UI, EngineEvents.GROUP_UPDATE_REQUESTED, {
+          documentId: "doc-1",
+          groupId: "group-1",
+          patch: expectedPatch,
+        });
+      },
+    );
+
     it("mergeGroups emits GROUP_MERGE_REQUESTED", () => {
       actions.mergeGroups("source-1", "target-1");
       expect(emit).toHaveBeenCalledWith(EventChannel.UI, EngineEvents.GROUP_MERGE_REQUESTED, {

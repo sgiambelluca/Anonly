@@ -18,6 +18,7 @@ import {
   EventChannel,
   type EntityGroup,
   type ExportOptions,
+  type PersonGenderChoice,
   type ReanalyzeConfigPatch,
   type ReplacementMode,
   type Rule,
@@ -47,9 +48,12 @@ export const actions = {
 
   updateGroup(
     groupId: string,
+    // `personGender` no sale del `Pick` de `EntityGroup`: su tercer estado
+    // ("neutral") no existe como valor almacenado, borra el campo en vez de
+    // reflejarlo (ADR-069 §4, `Contracts.md` §8 `GroupUpdateRequested.patch`).
     patch: Partial<
       Pick<EntityGroup, "replacementMode" | "replacementValue" | "enabled" | "canonicalValue">
-    >,
+    > & { readonly personGender?: PersonGenderChoice },
   ): void {
     const documentId = activeDocumentId();
     if (documentId === null) return;
