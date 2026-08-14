@@ -102,6 +102,8 @@ El paso 1 antes que el 2 es lo que resuelve "José María" vs "María José" sin
 
 ### 5. Sin determinar → token neutro, **y se marca en el árbol**
 
+> **La marca separada está SUPERSEDED por `ADR-071` §4 (2026-08-14).** El PR 12 implementó esta sección al pie de la letra y el resultado fue **dos** controles permanentes en la misma fila: el badge `?` y el selector de §6, los dos apuntando al mismo campo. ADR-071 fusiona la marca con el control — **el estado neutro del propio botón es la marca**, con tratamiento atenuado—, así que las dos cosas que esta sección pide se siguen cumpliendo con un elemento en vez de dos: el grupo queda señalado en el árbol, y el acceso a corregirlo es el click sobre esa misma marca. **Sobrevive sin cambios todo el resto**: el token neutro, y que esto **no** use `AnnotationKind.Degraded` ni se pinte en el canvas (el párrafo de abajo sigue vigente palabra por palabra).
+
 El grupo usa `PERSONA`/`PERS`/`PRS` como hoy y se señala en el panel de Entidades como "género sin determinar", con acceso directo al selector de §6.
 
 > **Precisión sobre qué se reutiliza.** En planificación se habló de "reutilizar la maquinaria de aviso del paso 4" (ADR-058 §7). Se reutiliza la **afordancia de la UI** —la marca en el árbol de entidades y su acceso a la acción correctiva—, **no** `AnnotationKind.Degraded`: esa anotación se pinta sobre el canvas y significa "este reemplazo quedó ilegible", que es un problema de render. Un grupo sin género determinado se renderiza perfecto; lo que falta es información, no píxeles. Mezclarlas haría que el visor marcara con el mismo recuadro dos cosas que el usuario resuelve de formas distintas.
@@ -109,6 +111,8 @@ El grupo usa `PERSONA`/`PERS`/`PRS` como hoy y se señala en el panel de Entidad
 Nunca se imprime una inferencia dudosa: el peor caso de este ADR es el comportamiento actual.
 
 ### 6. Selector por grupo en el panel de Entidades
+
+> **SUPERSEDED en su forma y su visibilidad por `ADR-071` §1-§3 (2026-08-14); intacto en todo lo demás.** Lo que esta sección nunca dijo es **cuándo** el control es relevante, y "sobre grupos `Person`" se implementó como "siempre, en toda fila `Person`, con el peso visual de un campo". ADR-071 lo ata a los modos que consumen el dato —`placeholder` y `synthetic`, los únicos cuyo valor depende de `personGender`— y reemplaza el desplegable por un botón cíclico de tres estados con símbolos ♀/♂ y un neutro que **no** es un símbolo de identidad de género (el círculo sin apéndice), coherente con lo que §9 dice del valor `A` y con lo que §"Alternativas" rechaza sobre agregar categorías. **Sobreviven sin cambios los tres estados, el canal (`GROUP_UPDATE_REQUESTED`, con la forma que fijó ADR-069 §4), la actualización inmediata del token, y el párrafo de abajo sobre por qué es por grupo y no un ajuste global** — que es la decisión de fondo de esta sección.
 
 Sobre grupos `Person`, un control de tres estados (femenino / masculino / sin determinar) que escribe `personGender` vía `GROUP_UPDATE_REQUESTED`, como cualquier otra edición de grupo. El preview del token se actualiza en el acto, igual que al cambiar de modo.
 
@@ -252,6 +256,8 @@ Contra la tabla real commiteada (PR 11, ADR-069 §7 — los que faltaban):
 - Unit: el selector no aparece sobre grupos de tipo distinto de `Person`.
 - Unit: la marca de "sin determinar" aparece solo sobre grupos `Person` en modo `placeholder` sin género resuelto.
 
+> **Reescritos por `ADR-071` §8 (2026-08-14), junto con §5 y §6.** El primero sigue valiendo tal cual (el canal no cambió). El segundo se **amplía**: la visibilidad ya no depende solo del tipo sino del tipo **y** del modo, así que el test pasa a ser la matriz de los 13 tipos × los 4 modos. El tercero **se retira**: no hay marca separada que testear — su lugar lo toma un test de que el estado mostrado sale de `group.personGender`, o sea que un grupo con género inferido aparece con su símbolo sin interacción previa. Se suman los tests del ciclo del control y los del sintético por género. La lista vigente está en ADR-071 §8.
+
 ## Alternativas consideradas
 
 | Alternativa | Por qué se rechaza |
@@ -273,6 +279,8 @@ Contra la tabla real commiteada (PR 11, ADR-069 §7 — los que faltaban):
 **Negativas**: es la primera función del producto que **agrega** un atributo sensible al documento anonimizado y reduce el conjunto de candidatos de reidentificación (Contexto §3) — riesgo asumido, opt-in por grupo, y documentado en `08_Security_Model.md` §9.1; incorpora datos de terceros al repo bajo CC-BY, lo que obliga a mantener atribución visible en el producto y provenance auditable (§11); el léxico agrega peso a cargar, acotado por la carga a demanda pero medible; y la cobertura va a ser desigual — nombres de otras lenguas caerán a "sin determinar" con más frecuencia que los locales, lo que se ve como más trabajo manual en documentos con nombres extranjeros.
 
 **Neutras**: los otros doce `EntityType` no se enteran; `ReplacementMode` no cambia; `indexInType` y ADR-028 no se tocan (§7); `mask`, `synthetic` y `redact` no participan; y ADR-057 §1/§4/§5 quedan idénticos.
+
+> **Corrección (`ADR-071` §5, 2026-08-14)**: "`mask`, `synthetic` y `redact` no participan" **deja de valer para `synthetic`**. Era cierto para este ADR, que solo cambiaba el label del `placeholder`, y dejó de serlo cuando se vio que el modo `synthetic` ya imprimía un género —al azar, y a veces el contrario al del nombre original—. Respetar `personGender` ahí corrige un dato falso en vez de agregar divulgación, así que el análisis de Contexto §3 **no** se aplica a ese modo con la misma fuerza. `mask` y `redact` siguen sin participar y no pueden participar.
 
 ## Docs actualizados por este ADR
 

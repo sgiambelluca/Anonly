@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=ux | dependencias=00_Project_Vision.md,ui/React_Client.md,ADR-011-Grouping-First.md,ADR-012-Replacement-Modes.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md | audiencia=IA-implementador-ui+humanos | fase=4 (§3.1 aclarado en fase 10, ADR-036 §9; §3.3/§5.4 en fase 10.5 por ADR-057 —tokens abreviados— y ADR-058 —el reemplazo no se derrama, marca de degradado—, §8.2 por ADR-059 —checkbox de referencia de marcadores—; §3.3/§5.4 en fase 10.6 por ADR-060 —género—; §5.4b en fase 10.7 por ADR-061 —agregado manual de entidades—) -->
+<!-- CONTEXT: scope=ux | dependencias=00_Project_Vision.md,ui/React_Client.md,ADR-011-Grouping-First.md,ADR-012-Replacement-Modes.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md | audiencia=IA-implementador-ui+humanos | fase=4 (§3.1 aclarado en fase 10, ADR-036 §9; §3.3/§5.4 en fase 10.5 por ADR-057 —tokens abreviados— y ADR-058 —el reemplazo no se derrama, marca de degradado—, §8.2 por ADR-059 —checkbox de referencia de marcadores—; §3.3/§5.4 en fase 10.6 por ADR-060 —género— y por ADR-071/ADR-072 —el control de género pasa a ser un botón de tres estados visible solo en `placeholder`/`synthetic`, con la marca de "sin determinar" fusionada adentro, y el sintético respeta el género y deja de cambiar solo—; §5.4b en fase 10.7 por ADR-061 —agregado manual de entidades—) -->
 
 # Anonly — UX Guidelines
 
@@ -90,7 +90,11 @@
 - **Grupo con conflicto**: icono ⚠ al lado del nombre. Click abre el conflicto.
 - **Grupo editado manualmente**: punto azul al lado del nombre (indica que el `replacementMode` difiere del default de las reglas).
 - **Grupo con reemplazo degradado** (ADR-058 §7): marca al lado del nombre cuando alguna de sus ocurrencias quedó por debajo del umbral de legibilidad — el token no entraba, no se pudo repintar la línea y hubo que encogerlo. Click ofrece las tres salidas: editar el texto de reemplazo a mano, pasar el grupo a `redact` (que nunca tiene problema de espacio) o deshabilitarlo. **La marca existe para que el usuario sepa dónde mirar**: sin ella, el token quedó chico en la página 7 y solo se descubre haciendo zoom página por página. Por eso mismo tiene umbral y no aparece en cada fallback — una señal que aparece siempre no es una señal.
-- **Grupo `Person` con género sin determinar** (ADR-060 §5): marca discreta cuando el modo es `placeholder` y no hay `personGender` resuelto. Click abre el selector. **No comparte tratamiento visual con la marca de degradación**: aquélla dice "esto se ve mal", ésta dice "falta un dato y el documento se entendería mejor con él". El grupo se renderiza perfecto.
+- **Grupo `Person` y su género** (ADR-060 §5-§6, rediseñado por ADR-071 §1-§4): un **botón chico de tres estados** —♀ / ♂ / círculo sin apéndice— que aparece **solo cuando el modo es `placeholder` o `synthetic`**, que son los únicos en los que el género cambia lo que se imprime. En `mask` y `redact` no aparece: sería una palanca sin nada del otro lado.
+  - Muestra desde el arranque el género que el sistema infirió, sin que el usuario haga nada. Un click cicla al siguiente estado.
+  - **El estado neutro es la marca de "género sin determinar"**, atenuado. No hay un segundo icono al lado: la marca y el control son la misma cosa, y por eso "click abre el selector" pasa a ser simplemente "click cambia el valor". **No comparte tratamiento visual con la marca de degradación**: aquélla dice "esto se ve mal", ésta dice "falta un dato y el documento se entendería mejor con él". El grupo se renderiza perfecto.
+  - **El neutro no es un símbolo de identidad de género.** Significa "sin determinar" —falta el dato, o el nombre no lo determina—, que es una propiedad del nombre y no de la persona (ADR-060 §9).
+  - **Por qué un botón y no un campo**: en un expediente con veinte personas, veinte selectores permanentes compiten por atención con el control que sí se usa en cada grupo, que es el modo de reemplazo. El género se toca en pocos grupos y solo cuando la inferencia falla.
 
 ---
 
@@ -153,7 +157,7 @@ Scope: Por grupo
 - Muestra el resultado con reemplazos aplicados visualmente.
 - `placeholder`: texto `[DNI 01]` sobre bbox — o su forma abreviada (`[PERS 01]`, `[PRS-01]`) cuando el dato original era corto (ADR-057). Para personas con género asignado, `[MUJER 01]` / `[HOMBRE 01]` (ADR-060).
 - `mask`: texto `XX.XXX.XXX` sobre bbox.
-- `synthetic`: texto sintético (`39.123.456`).
+- `synthetic`: texto sintético (`39.123.456`). Para personas con género asignado, el nombre falso **es del mismo género** (ADR-071 §5): "María Gómez" ya no puede salir "Carlos Sánchez". Sin género resuelto se sortea del pool completo, que es el comportamiento de siempre — no hay nombre de pila neutro en español al cual caer. Y el nombre falso de un grupo **no cambia nunca** una vez asignado: ni al renumerarse los índices, ni al agregarse otra entidad, ni al tocarse una regla (ADR-072 §1).
 - `redact`: bloque negro sólido sobre bbox.
 - Hover sobre un reemplazo: tooltip con valor original y modo aplicado.
 - **Ningún texto de reemplazo se sale de su espacio** (ADR-058 §1). Cuando no entra, pasan dos cosas en orden: si la línea lo permite, se **repinta** —el texto que sigue se corre a la derecha y el resultado se lee como una línea normal—; si no, el token se **encoge** hasta entrar. Este segundo caso es el que puede quedar chico, y es el que enciende la marca de §3.3 en el árbol.

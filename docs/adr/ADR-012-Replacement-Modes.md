@@ -74,13 +74,19 @@ export enum ReplacementMode {
 
 Síntesis **determinista por seed** (seed default: aleatorio por sesión, configurable). Para cada tipo, se genera un valor **plausible y válido** según las reglas del tipo (checksum de CUIT válido, formato de DNI válido, email plausible, etc.). La determinidad garantiza reproducibilidad de un export concreto.
 
+> **Precisado por `ADR-072` (2026-08-14), en dos puntos.**
+>
+> **(1) "Configurable" nunca se implementó, y no por olvido.** `ADR-019` §5 quitó el default fijo justamente para que el seed fuera aleatorio por sesión, y hoy es un `crypto.randomUUID()` por `startSession` sin ningún campo en `GroupingConfig` que permita fijarlo. O sea que **"la determinidad garantiza reproducibilidad de un export concreto" no describe al producto**: el mismo documento abierto dos veces ya da valores distintos, que es lo que la política SAN de este mismo ADR quiere. La determinidad que sí existe, y que importa, es **dentro de una sesión**.
+>
+> **(2) La semilla del sorteo es la identidad del grupo, no su número** (ADR-072 §1). Era `indexInType`, un ordinal que la renumeración canónica de ADR-028 mueve, así que el valor sintético de un grupo podía cambiar por operaciones ajenas a ese grupo. Pasa a ser `EntityGroup.id`. `indexInType` sobrevive solo para los tipos cuyo valor lo **interpola** (`Custom` → `custom-3`).
+
 | Tipo | Ejemplo `synthetic` |
 |---|---|
 | DNI | `39.123.456` |
 | CUIT | `30-12345678-9` (con dígito verificador válido) |
 | Phone | `+54 11 1234-5678` |
 | Email | `user84231@example.org` |
-| Person | `Carlos Sánchez` (de un pool de nombres faker) |
+| Person | `Carlos Sánchez` (de un pool de nombres faker; **filtrado por `EntityGroup.personGender` cuando está resuelto** — ADR-071 §5) |
 | Organization | `Empresa S.A.` (pool) |
 | Address | `Calle Falsa 123` (pool) |
 
@@ -131,6 +137,10 @@ Ejemplos: `[DNI 01]`, `[PERSONA 03]`, `[DIRECCION 02]`, `[CUIT 01]`.
 
 - `placeholder` con `indexInType` único por grupo garantiza que dos datos distintos del mismo tipo no se confundan.
 - `synthetic` con seed aleatorio por sesión evita correlación entre sesiones; con seed fijo, permite reproducibilidad solo para quien conozca el seed.
+
+  > **Precisado por `ADR-072` §5-§6 (2026-08-14)**. La rama "con seed fijo" **no existe** en el producto y no es un pendiente: `ADR-019` §5 la cerró a propósito, y hoy no hay forma de fijar el seed. Lo que este ADR llama "evita correlación entre sesiones" es, por lo tanto, incondicional.
+  >
+  > Y hay una segunda propiedad SAN que no estaba escrita acá y que ADR-072 §6 fija explícitamente: **la semilla del sintetizador nunca deriva del valor real**. Sembrar con el `canonicalValue` —la alternativa que da determinismo entre corridas— convertiría al sintetizador en un **oráculo de confirmación**: con el seed en mano se podría computar el valor sintético de un nombre sospechado y buscarlo en el documento anonimizado para verificar la hipótesis. La semilla es `EntityGroup.id`, un UUID sin relación con el contenido, así que el valor sintético no lleva **ninguna** información sobre el original.
 - `mask` preserva formato pero no valor; el receptor puede inferir "aquí había un DNI" pero no cuál.
 - `redact` no revela ni tipo ni valor; el receptor no sabe qué tipo de dato era. Útil para legal estricto.
 
