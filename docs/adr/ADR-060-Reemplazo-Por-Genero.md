@@ -185,6 +185,8 @@ Las dos fuentes son **CC-BY**. Permiten uso comercial y obras derivadas, pero **
 
 Es de las cosas que se pasan por alto y son incumplimiento liso y llano. Va como ítem propio del checklist, no como nota.
 
+> **Aterrizado por `ADR-070` (2026-08-14)**. Esta sección fija el **qué** con precisión y no dice nada del **dónde**: "créditos / 'Acerca de'" nombra dos superficies y ninguna existía en `ui/Components.md`, que es la razón por la que el PR 12 se implementó sin la atribución. ADR-070 elige la superficie —sección "Acerca de" al pie del `SettingsDialog`, con `thirdPartyCredits.ts` como módulo de datos— y la entrega el PR 12b. Los otros dos ítems de esta lista (procedencia y script determinista) ya están cumplidos: ver `gender-lexicon.provenance.json` y `scripts/build-gender-lexicon.ts`.
+
 ### 12. Alcance: tres PRs
 
 | # | PR | Módulo | Depende de |
