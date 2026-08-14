@@ -1198,7 +1198,14 @@ export class GroupingEngine implements IEngine {
       type: group.type,
       canonicalValue: "",
       members: movedMembers,
-      replacementMode: ReplacementMode.Placeholder,
+      // §13 caso 6: hereda el modo del grupo original, incluido uno puesto a
+      // mano. `resolveMode` corre igual más abajo, así que una regla de
+      // grupo/tipo/global sigue ganando sobre lo heredado con la precedencia
+      // de siempre — lo único que cambia es el piso: antes era `placeholder`
+      // fijo, y un `synthetic` elegido a mano se perdía al dividir. La
+      // fusión ya preservaba el modo del sobreviviente; esto deja las dos
+      // operaciones con el mismo criterio.
+      replacementMode: group.replacementMode,
       replacementValue: "",
       indexInType: newIndex,
       enabled: true,
