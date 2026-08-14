@@ -740,45 +740,143 @@ describe("@anonly/shared — Contracts", () => {
   });
 
   describe("synthesize", () => {
-    it("es determinista: mismo (type, index, seed) → mismo valor", () => {
-      const a = synthesize(EntityType.DNI, 1, "seed-x");
-      const b = synthesize(EntityType.DNI, 1, "seed-x");
-      expect(a).toBe(b);
+    // Los tipos que SORTEAN, o sea todos menos Custom y el fallback, que
+    // interpolan indexInType en vez de sortear (ADR-072 §3).
+    const DRAWN_TYPES = [
+      EntityType.DNI,
+      EntityType.CUIT,
+      EntityType.Phone,
+      EntityType.Email,
+      EntityType.IBAN,
+      EntityType.CreditCard,
+      EntityType.Date,
+      EntityType.Person,
+      EntityType.Organization,
+      EntityType.Address,
+      EntityType.License,
+      EntityType.Plate,
+    ] as const;
+
+    const FEMALE_NAMES = ["María", "Ana", "Laura", "Sofía", "Elena", "Patricia", "Claudia"];
+    const MALE_NAMES = [
+      "Carlos",
+      "Juan",
+      "José",
+      "Pedro",
+      "Diego",
+      "Andrés",
+      "Fernando",
+      "Ricardo",
+    ];
+
+    it("es determinista: mismo (type, groupId, seed) → mismo valor", () => {
+      const req = { type: EntityType.DNI, groupId: "g-1", seed: "seed-x", indexInType: 1 };
+      expect(synthesize(req)).toBe(synthesize(req));
     });
 
     it("diferentes seeds generan (casi siempre) diferentes valores", () => {
-      const a = synthesize(EntityType.DNI, 1, "seed-a");
-      const b = synthesize(EntityType.DNI, 1, "seed-b");
+      const a = synthesize({
+        type: EntityType.DNI,
+        groupId: "g-1",
+        seed: "seed-a",
+        indexInType: 1,
+      });
+      const b = synthesize({
+        type: EntityType.DNI,
+        groupId: "g-1",
+        seed: "seed-b",
+        indexInType: 1,
+      });
       // No garantiza 100% colisión cero por espacio finito, pero para tests alcanzamos !=.
       expect(a).not.toBe(b);
     });
 
+    it("diferentes groupId generan (casi siempre) diferentes valores", () => {
+      const a = synthesize({
+        type: EntityType.DNI,
+        groupId: "g-1",
+        seed: "seed-x",
+        indexInType: 1,
+      });
+      const b = synthesize({
+        type: EntityType.DNI,
+        groupId: "g-2",
+        seed: "seed-x",
+        indexInType: 1,
+      });
+      expect(a).not.toBe(b);
+    });
+
+    // ADR-072 §1, el test que define ese ADR: la semilla es la IDENTIDAD del
+    // grupo, no su número. Sin esto, renumerar (ADR-028) o agregar una entidad
+    // a mano (ADR-061) cambiaba el nombre falso de una persona que nadie tocó.
+    it("cambiar indexInType con el mismo groupId NO cambia el valor (ADR-072 §1)", () => {
+      for (const type of DRAWN_TYPES) {
+        const base = { type, groupId: "g-estable", seed: "seed-072" };
+        const conIndice3 = synthesize({ ...base, indexInType: 3 });
+        const conIndice4 = synthesize({ ...base, indexInType: 4 });
+        expect(conIndice4, `${type} cambió al renumerarse`).toBe(conIndice3);
+      }
+    });
+
+    // ADR-072 §3: la contracara declarada. Custom interpola el número.
+    it("Custom SÍ sigue el indexInType (ADR-072 §3)", () => {
+      const base = { type: EntityType.Custom, groupId: "g-1", seed: "seed-x" };
+      expect(synthesize({ ...base, indexInType: 3 })).toBe("custom-3");
+      expect(synthesize({ ...base, indexInType: 4 })).toBe("custom-4");
+    });
+
     it("DNI sintético tiene formato XX.XXX.XXX y no arranca en 0", () => {
-      const v = synthesize(EntityType.DNI, 1, "seed-dni");
+      const v = synthesize({
+        type: EntityType.DNI,
+        groupId: "g-1",
+        seed: "seed-dni",
+        indexInType: 1,
+      });
       expect(v).toMatch(/^\d{2}\.\d{3}\.\d{3}$/);
       expect(v.startsWith("0")).toBe(false);
     });
 
     it("CUIT sintético pasa el validador AFIP de dominio", () => {
-      const v = synthesize(EntityType.CUIT, 1, "seed-cuit");
+      const v = synthesize({
+        type: EntityType.CUIT,
+        groupId: "g-1",
+        seed: "seed-cuit",
+        indexInType: 1,
+      });
       expect(v).toMatch(/^\d{2}-\d{8}-\d$/);
       expect(isValidCuit(v)).toBe(true);
     });
 
-    it("CUITs de 200 índices distintos son todos válidos (nunca dv 10)", () => {
+    it("CUITs de 200 groupId distintos son todos válidos (nunca dv 10)", () => {
       for (let i = 1; i <= 200; i++) {
-        const v = synthesize(EntityType.CUIT, i, "seed-masivo");
-        expect(isValidCuit(v), `CUIT inválido en índice ${i}: ${v}`).toBe(true);
+        const v = synthesize({
+          type: EntityType.CUIT,
+          groupId: `g-${i}`,
+          seed: "seed-masivo",
+          indexInType: i,
+        });
+        expect(isValidCuit(v), `CUIT inválido en groupId g-${i}: ${v}`).toBe(true);
       }
     });
 
     it("License sintético respeta el formato XX-XXXX-XX (ADR-012)", () => {
-      const v = synthesize(EntityType.License, 1, "seed-lic");
+      const v = synthesize({
+        type: EntityType.License,
+        groupId: "g-1",
+        seed: "seed-lic",
+        indexInType: 1,
+      });
       expect(v).toMatch(/^\d{2}-\d{4}-\d{2}$/);
     });
 
     it("CreditCard sintético pasa Luhn", () => {
-      const v = synthesize(EntityType.CreditCard, 1, "seed-cc");
+      const v = synthesize({
+        type: EntityType.CreditCard,
+        groupId: "g-1",
+        seed: "seed-cc",
+        indexInType: 1,
+      });
       const digits = v
         .replace(/\s/g, "")
         .split("")
@@ -798,14 +896,88 @@ describe("@anonly/shared — Contracts", () => {
     });
 
     it("Email sintético tiene formato válido", () => {
-      const v = synthesize(EntityType.Email, 1, "seed-email");
+      const v = synthesize({
+        type: EntityType.Email,
+        groupId: "g-1",
+        seed: "seed-email",
+        indexInType: 1,
+      });
       expect(v).toMatch(/^[^@\s]+@[^@\s]+\.[^@\s]+$/);
     });
 
     it("Person sintético es Nombre + Apellido", () => {
-      const v = synthesize(EntityType.Person, 1, "seed-person");
+      const v = synthesize({
+        type: EntityType.Person,
+        groupId: "g-1",
+        seed: "seed-person",
+        indexInType: 1,
+      });
       // Soporta acentos (Fernández, María, etc.)
       expect(v).toMatch(/^[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+ [A-ZÁÉÍÓÚÑ][a-záéíóúñ]+$/u);
+    });
+
+    // ADR-071 §5. Se barren 40 groupId para cubrir los dos pools enteros: de
+    // paso, esto falla si alguno quedara vacío (`pick` lanza).
+    it("personGender filtra el pool de nombres de pila (ADR-071 §5)", () => {
+      for (let i = 0; i < 40; i++) {
+        const base = { type: EntityType.Person, groupId: `g-${i}`, seed: "seed-genero" };
+
+        const femenino = synthesize({ ...base, indexInType: 1, personGender: "f" });
+        expect(FEMALE_NAMES, `femenino inesperado: ${femenino}`).toContain(
+          femenino.split(" ")[0] ?? "",
+        );
+
+        const masculino = synthesize({ ...base, indexInType: 1, personGender: "m" });
+        expect(MALE_NAMES, `masculino inesperado: ${masculino}`).toContain(
+          masculino.split(" ")[0] ?? "",
+        );
+      }
+    });
+
+    // ADR-071 §5, no-regresión anclada a ADR-072. El enunciado del ADR era
+    // "personGender ausente ≡ el mismo valor que sin el campo", que con
+    // `exactOptionalPropertyTypes: true` no se puede ni escribir —pasar
+    // `personGender: undefined` no compila— y sería una tautología. La
+    // propiedad que sí hay que proteger es ésta: **sin género se sortea del
+    // pool COMPLETO**, o sea que el caso neutro no quedó filtrado por
+    // accidente y se comporta como antes de ADR-071.
+    it("sin personGender se sortea del pool completo, no de uno filtrado (ADR-071 §5)", () => {
+      const nombres = new Set<string>();
+      for (let i = 0; i < 40; i++) {
+        const v = synthesize({
+          type: EntityType.Person,
+          groupId: `g-${i}`,
+          seed: "seed-sin-genero",
+          indexInType: 1,
+        });
+        nombres.add(v.split(" ")[0] ?? "");
+      }
+      expect([...nombres].some((n) => FEMALE_NAMES.includes(n))).toBe(true);
+      expect([...nombres].some((n) => MALE_NAMES.includes(n))).toBe(true);
+    });
+
+    it("es determinista con personGender: mismo input → mismo valor", () => {
+      const req = {
+        type: EntityType.Person,
+        groupId: "g-1",
+        seed: "seed-x",
+        indexInType: 1,
+        personGender: "f",
+      } as const;
+      expect(synthesize(req)).toBe(synthesize(req));
+    });
+
+    // El género NO entra a la semilla (ADR-071 §5): solo elige de qué array
+    // sortea `pick`. Sobre un tipo que no mira el campo, no puede cambiar nada.
+    it("personGender no altera tipos distintos de Person", () => {
+      const base = {
+        type: EntityType.DNI,
+        groupId: "g-1",
+        seed: "seed-x",
+        indexInType: 1,
+      } as const;
+      expect(synthesize({ ...base, personGender: "f" })).toBe(synthesize(base));
+      expect(synthesize({ ...base, personGender: "m" })).toBe(synthesize(base));
     });
   });
 

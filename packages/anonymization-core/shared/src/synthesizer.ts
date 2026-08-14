@@ -1,30 +1,38 @@
 /**
  * @anonly/shared — Sintetizadores deterministas para modo `synthetic`.
  *
- * Fuente de verdad: docs/adr/ADR-012-Replacement-Modes.md y docs/core/Grouping_Engine.md §"Algoritmos clave".
+ * Fuente de verdad: docs/adr/ADR-012-Replacement-Modes.md, docs/core/Contracts.md §5-§6
+ * y docs/core/Grouping_Engine.md §"Algoritmos clave".
  *
  * Contrato:
- * - Determinista por (type, indexInType, seed): mismo input → mismo output.
+ * - Determinista por (type, groupId, seed): mismo input → mismo output.
+ * - **Cambiar `indexInType` no cambia el valor** en los tipos que sortean
+ *   (ADR-072 §1). La semilla es la IDENTIDAD del grupo, no su número: el
+ *   número lo mueve la renumeración canónica de ADR-028, y sembrar sobre él
+ *   hacía que el nombre falso de una persona cambiara por una operación
+ *   ajena a esa persona.
  * - El valor sintético debe ser plausible y válido según el formato del tipo
  *   (checksum de CUIT, Luhn de tarjeta, formato de DNI, etc.).
  * - El seed es obligatorio: lo provee el caller. El seed aleatorio por sesión
- *   es responsabilidad del Grouping Engine (ADR-012 §SAN, ADR-019).
+ *   es responsabilidad del Grouping Engine (ADR-012 §SAN, ADR-019 §5).
  * - Nunca exponer el seed en el PDF resultante.
+ * - La semilla **nunca deriva del valor real** (ADR-072 §6): sembrar con el
+ *   `canonicalValue` convertiría esto en un oráculo de confirmación
+ *   real→falso para quien tenga el seed.
  */
 
-import { EntityType } from "./enums.js";
+import { EntityType, type PersonGender } from "./enums.js";
+import type { SyntheticRequest } from "./types.js";
 
 /**
  * Genera un valor sintético determinista para una entidad.
  *
- * @param type Tipo de entidad.
- * @param indexInType Índice secuencial del grupo dentro de su tipo (1-based).
- * @param seed Seed determinista (string), obligatorio. La política del seed
- *   (aleatorio por sesión) es del caller — ver ADR-012 §SAN y ADR-019.
+ * @param req Ver `SyntheticRequest` en `types.ts` / `Contracts.md` §5.
  * @returns Valor sintético plausible para el tipo.
  */
-export function synthesize(type: EntityType, indexInType: number, seed: string): string {
-  const rng = createSeededRng(seed, type, indexInType);
+export function synthesize(req: SyntheticRequest): string {
+  const { type, groupId, seed, indexInType, personGender } = req;
+  const rng = createSeededRng(seed, type, groupId);
   switch (type) {
     case EntityType.DNI:
       return synthesizeDni(rng);
@@ -33,7 +41,7 @@ export function synthesize(type: EntityType, indexInType: number, seed: string):
     case EntityType.Phone:
       return synthesizePhone(rng);
     case EntityType.Email:
-      return synthesizeEmail(rng, indexInType);
+      return synthesizeEmail(rng);
     case EntityType.IBAN:
       return synthesizeIban(rng);
     case EntityType.CreditCard:
@@ -41,7 +49,7 @@ export function synthesize(type: EntityType, indexInType: number, seed: string):
     case EntityType.Date:
       return synthesizeDate(rng);
     case EntityType.Person:
-      return synthesizePerson(rng);
+      return synthesizePerson(rng, personGender);
     case EntityType.Organization:
       return synthesizeOrganization(rng);
     case EntityType.Address:
@@ -50,6 +58,10 @@ export function synthesize(type: EntityType, indexInType: number, seed: string):
       return synthesizeLicense(rng);
     case EntityType.Plate:
       return synthesizePlate(rng);
+    // ADR-072 §3: las dos únicas ramas que INTERPOLAN el número del grupo en
+    // vez de sortear. Para ellas seguir el índice es lo correcto —son tokens
+    // numerados, no identidades—, con la contracara de que una renumeración
+    // las deja desactualizadas (roadmap/Future_Ideas.md §5.5).
     case EntityType.Custom:
       return `custom-${indexInType}`;
     default:
@@ -60,11 +72,11 @@ export function synthesize(type: EntityType, indexInType: number, seed: string):
 // ─── Implementación interna ───
 
 /**
- * PRNG determinista (mulberry32) seedado por (seed, type, indexInType).
+ * PRNG determinista (mulberry32) seedado por (seed, type, groupId).
  * No es criptográficamente seguro, pero alcanza para síntesis determinista.
  */
-function createSeededRng(seed: string, type: EntityType, indexInType: number): () => number {
-  const fullSeed = hashStringToInt(`${seed}|${type}|${indexInType}`);
+function createSeededRng(seed: string, type: EntityType, groupId: string): () => number {
+  const fullSeed = hashStringToInt(`${seed}|${type}|${groupId}`);
   let state = fullSeed >>> 0;
   return function rng(): number {
     state = (state + 0x6d2b79f5) >>> 0;
@@ -150,7 +162,7 @@ function synthesizePhone(rng: () => number): string {
   return `+54 ${area} ${part1}-${part2}`;
 }
 
-function synthesizeEmail(rng: () => number, _indexInType: number): string {
+function synthesizeEmail(rng: () => number): string {
   const user = `user${randomDigits(rng, 5)}`;
   const domain = pick(rng, ["example.org", "example.com", "test.net", "anon.ar"]);
   return `${user}@${domain}`;
@@ -197,23 +209,41 @@ function synthesizeDate(rng: () => number): string {
   return `${day.toString().padStart(2, "0")}/${month.toString().padStart(2, "0")}/${year}`;
 }
 
-const PERSON_FIRST_NAMES = [
-  "Carlos",
-  "María",
-  "Juan",
-  "Ana",
-  "José",
-  "Laura",
-  "Pedro",
-  "Sofía",
-  "Diego",
-  "Elena",
-  "Andrés",
-  "Patricia",
-  "Fernando",
-  "Claudia",
-  "Ricardo",
-] as const;
+/**
+ * ADR-071 §5: el pool lleva el género por entrada. **El orden es el que la
+ * tabla tenía antes de llevar género**, y eso importa: con `personGender`
+ * ausente se sortea sobre este array completo, así que el resultado es
+ * idéntico al que daría sin el campo. El género no entra a la semilla —
+ * solo elige de qué array sortea `pick`.
+ */
+interface FirstName {
+  readonly name: string;
+  readonly gender: PersonGender;
+}
+
+const PERSON_FIRST_NAMES: ReadonlyArray<FirstName> = [
+  { name: "Carlos", gender: "m" },
+  { name: "María", gender: "f" },
+  { name: "Juan", gender: "m" },
+  { name: "Ana", gender: "f" },
+  { name: "José", gender: "m" },
+  { name: "Laura", gender: "f" },
+  { name: "Pedro", gender: "m" },
+  { name: "Sofía", gender: "f" },
+  { name: "Diego", gender: "m" },
+  { name: "Elena", gender: "f" },
+  { name: "Andrés", gender: "m" },
+  { name: "Patricia", gender: "f" },
+  { name: "Fernando", gender: "m" },
+  { name: "Claudia", gender: "f" },
+  { name: "Ricardo", gender: "m" },
+];
+
+/** Precomputado: `pick` no debe pagar un `filter` por llamada. */
+const FIRST_NAMES_BY_GENDER: Readonly<Record<PersonGender, ReadonlyArray<FirstName>>> = {
+  f: PERSON_FIRST_NAMES.filter((entry) => entry.gender === "f"),
+  m: PERSON_FIRST_NAMES.filter((entry) => entry.gender === "m"),
+};
 
 const PERSON_LAST_NAMES = [
   "Sánchez",
@@ -232,8 +262,16 @@ const PERSON_LAST_NAMES = [
   "Medina",
 ] as const;
 
-function synthesizePerson(rng: () => number): string {
-  return `${pick(rng, PERSON_FIRST_NAMES)} ${pick(rng, PERSON_LAST_NAMES)}`;
+/**
+ * Sin género resuelto se sortea del pool completo: no hay nombre de pila
+ * neutro en español al cual caer, y este modo fabrica datos falsos por
+ * definición (ADR-012). El piso es exactamente el comportamiento previo a
+ * ADR-071 — que ya imprimía un género, solo que al azar.
+ */
+function synthesizePerson(rng: () => number, personGender: PersonGender | undefined): string {
+  const pool =
+    personGender === undefined ? PERSON_FIRST_NAMES : FIRST_NAMES_BY_GENDER[personGender];
+  return `${pick(rng, pool).name} ${pick(rng, PERSON_LAST_NAMES)}`;
 }
 
 const ORG_NAMES = [

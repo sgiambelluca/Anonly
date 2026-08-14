@@ -166,7 +166,9 @@ Van sobre la misma branch del Hito 10.6, **antes de mergear**: la branch está a
 
 - Contract: `SyntheticRequest.personGender` es opcional; los dos géneros tienen al menos un nombre en la tabla (un edit futuro que vacíe un pool haría explotar `pick` en runtime).
 - Unit: `personGender: "f"` → nombre de pila femenino; `"m"` → masculino, contra la tabla real.
-- Unit de **no-regresión**: con el mismo `(type, groupId, seed)`, pasar `personGender` ausente da **el mismo valor que sin el campo**. Es el que protege §5 — anclado a ADR-072, no al estado previo al hito.
+- Unit de **no-regresión**: **sin género se sortea del pool completo**, no de uno filtrado — o sea que el caso neutro no quedó recortado por accidente y se comporta como antes de este ADR. Es el que protege §5, anclado a ADR-072 y no al estado previo al hito.
+
+  > **Corregido al implementar el PR 14a (2026-08-14)**. El enunciado original era "pasar `personGender` ausente da el mismo valor que sin el campo", y con el `exactOptionalPropertyTypes: true` del repo **no se puede ni escribir**: pasar `personGender: undefined` explícito no compila, porque ausente y presente-con-`undefined` son estados distintos por diseño. Los dos lados de esa igualdad son literalmente la misma llamada, así que el test era una tautología. La propiedad que hay que proteger es la de arriba.
 - Unit: determinismo — mismo `(type, groupId, seed, personGender)` ⇒ mismo valor.
 - Unit: el género **no** entra a la semilla — cambiar `personGender` sobre un tipo distinto de `Person` no cambia nada.
 
