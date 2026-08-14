@@ -57,6 +57,7 @@ import type {
   OcrRegion,
   Page,
   PageParsed,
+  PersonGender,
   RenderLegendPayload,
   RenderPagePayload,
   RenderRequested,
@@ -427,6 +428,56 @@ describe("@anonly/shared — Contracts", () => {
       };
       void mutate;
       expect(region.pageIndex).toBe(0);
+    });
+  });
+
+  describe("EntityGroup.personGender (ADR-060 §2)", () => {
+    const baseGroup: EntityGroup = {
+      id: "g1",
+      type: EntityType.Person,
+      canonicalValue: "Juan Pérez",
+      members: [],
+      replacementMode: ReplacementMode.Placeholder,
+      replacementValue: "[PERSONA 01]",
+      indexInType: 1,
+      enabled: true,
+      aliases: ["Juan Pérez"],
+      createdAt: 0,
+      updatedAt: 0,
+    };
+
+    it("es opcional: un EntityGroup sin personGender sigue siendo válido (sin determinar)", () => {
+      const group: EntityGroup = baseGroup;
+      expect(group.personGender).toBeUndefined();
+    });
+
+    it("acepta los dos valores del léxico: 'f' y 'm'", () => {
+      const female: EntityGroup = { ...baseGroup, personGender: "f" };
+      const male: EntityGroup = { ...baseGroup, personGender: "m" };
+      expect(female.personGender).toBe("f");
+      expect(male.personGender).toBe("m");
+      const values: ReadonlyArray<PersonGender> = ["f", "m"];
+      expect(values).toEqual(["f", "m"]);
+    });
+
+    it("es readonly (compile-time, ADR-008)", () => {
+      const group: EntityGroup = { ...baseGroup, personGender: "f" };
+      const mutate = (): void => {
+        // @ts-expect-error — personGender es readonly (ADR-008); assert de compile-time
+        group.personGender = "m";
+      };
+      void mutate;
+      expect(group.personGender).toBe("f");
+    });
+
+    it("EntityGroup con personGender sigue cumpliendo la inmutabilidad general de ADR-008 (aliases sigue siendo ReadonlyArray)", () => {
+      const group: EntityGroup = { ...baseGroup, personGender: "f" };
+      const mutate = (): void => {
+        // @ts-expect-error — ReadonlyArray<string> no expone push (ADR-008)
+        group.aliases.push("Juancito");
+      };
+      void mutate;
+      expect(group.aliases).toEqual(["Juan Pérez"]);
     });
   });
 
