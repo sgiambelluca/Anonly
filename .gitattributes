@@ -1,2 +1,8 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Artefactos generados por un script commiteado: GitHub los pliega en el diff
+# del PR y los excluye de las estadísticas de lenguaje y de la búsqueda de
+# código. Es solo presentación — el archivo se commitea igual y se importa
+# igual (ADR-069 §2, §Alternativas).
+packages/anonymization-core/grouping-engine/src/gender-lexicon.generated.ts linguist-generated=true
