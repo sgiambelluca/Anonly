@@ -464,7 +464,19 @@ function computeReplacementValue(group: EntityGroup, seed: string, maskFormat: s
     case ReplacementMode.Mask:
       return maskFormat;
     case ReplacementMode.Synthetic:
-      return synthesize(group.type, group.indexInType, seed);
+      // ADR-072 §1-§2: la semilla del sorteo es la identidad del grupo
+      // (`group.id`), no su `indexInType`. ADR-071 §5: `personGender`
+      // filtra el pool de nombres de pila y NO entra a la semilla; se omite
+      // por completo cuando está ausente (exactOptionalPropertyTypes no
+      // permite `personGender: undefined` explícito, mismo patrón que la
+      // línea 295 de este archivo).
+      return synthesize({
+        type: group.type,
+        groupId: group.id,
+        seed,
+        indexInType: group.indexInType,
+        ...(group.personGender !== undefined ? { personGender: group.personGender } : {}),
+      });
     case ReplacementMode.Placeholder:
       return buildPlaceholderValue(group);
     case ReplacementMode.Redact:
@@ -834,7 +846,12 @@ export class GroupingEngine implements IEngine {
         replacementMode: group.replacementMode,
         replacementValue: group.replacementValue,
       };
-      if (group.replacementMode === ReplacementMode.Placeholder) {
+      if (
+        group.replacementMode === ReplacementMode.Placeholder ||
+        group.replacementMode === ReplacementMode.Synthetic
+      ) {
+        // ADR-071 §6: un género INFERIDO en finishSession repinta el token
+        // también en modo synthetic, no solo en placeholder.
         group.replacementValue = computeReplacementValue(
           group,
           session.seed,
@@ -1015,11 +1032,14 @@ export class GroupingEngine implements IEngine {
       } else if (
         replacementMode === undefined &&
         changed.has("personGender") &&
-        group.replacementMode === ReplacementMode.Placeholder
+        (group.replacementMode === ReplacementMode.Placeholder ||
+          group.replacementMode === ReplacementMode.Synthetic)
       ) {
         // El género cambió (explícito o inferido por el trigger de arriba) y
         // ninguna otra rama recalculó replacementValue todavía: el label de
-        // la escalera (labels.ts, resolveLabelSet) depende de personGender.
+        // la escalera (labels.ts, resolveLabelSet) depende de personGender,
+        // y desde ADR-071 §5/§6 el sintetizador también filtra por género —
+        // atado antes solo a placeholder (ADR-071 §6).
         group.replacementValue = computeReplacementValue(
           group,
           session.seed,
