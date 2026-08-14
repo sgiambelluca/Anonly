@@ -296,9 +296,9 @@ Punto 6 de `Cambios para hacer.txt`. Independiente del 10.5 salvo por el requisi
 | 12 | `PersonGenderSelect` por grupo + marca en el árbol | `apps/react-client` | 11a | implementado, sin mergear |
 | 12b | Sección "Acerca de" con la **atribución visible** (ADR-070) | `apps/react-client` | 12 | implementado, sin mergear |
 | 13 | ADR-071 + ADR-072 y su propagación a los specs | `docs/` | 12b | **hecho** (13 docs; sin código) |
-| 14a | `SyntheticRequest`: `groupId` como semilla (ADR-072 §1-§3) **y** `personGender` (ADR-071 §5) | `shared` | 13 | **es por acá que se sigue** |
-| 14b | El motor pasa `group.id` y `group.personGender`; libera las dos guardas de recálculo atadas a `placeholder` (ADR-071 §6) | `grouping-engine` | 14a | planificado |
-| 14c | `PersonGenderToggle` y visibilidad por modo (ADR-071 §1-§4) | `apps/react-client` | 14b | planificado |
+| 14a | `SyntheticRequest`: `groupId` como semilla (ADR-072 §1-§3) **y** `personGender` (ADR-071 §5) | `shared` | 13 | implementado, sin mergear |
+| 14b | El motor pasa `group.id` y `group.personGender`; libera las dos guardas de recálculo atadas a `placeholder` (ADR-071 §6) | `grouping-engine` | 14a | implementado, sin mergear |
+| 14c | `PersonGenderToggle` y visibilidad por modo (ADR-071 §1-§4) | `apps/react-client` | 14b | implementado, sin mergear |
 
 **El orden de 14a → 14b → 14c no es negociable**: la UI va última para que ningún estado que el control muestre sea mentira en el momento en que se muestra. El PR 13 va primero por R-2/R-19 (ADR y docs antes que código).
 
@@ -311,6 +311,8 @@ Punto 6 de `Cambios para hacer.txt`. Independiente del 10.5 salvo por el requisi
 > **ADR-072** sale de un defecto que apareció al planificar lo anterior: el valor sintético estaba sembrado sobre `indexInType`, un ordinal que la renumeración canónica mueve, así que el nombre falso de una persona podía cambiar por una operación ajena a esa persona. La semilla pasa a ser `EntityGroup.id`. Va **antes** que ADR-071 porque le cambia el ancla de no-regresión.
 >
 > La branch **vuelve a revisión completa** con estos cambios. El defecto vecino que quedó deliberadamente afuera —una edición manual de `replacementValue` se pierde si el grupo se renumera, contra lo que ADR-057 §7 promete en negrita— está en `Post_Hito10.8_Pendientes.md` §10.
+>
+> **Rediseño implementado (2026-08-14)**: los PRs 13 a 14c están commiteados en la branch. Gates verdes en el repo completo (`pnpm lint`, `pnpm typecheck`, `pnpm test` con 1311 tests). **Falta la revisión completa de la branch**, que es lo que este rediseño obliga a rehacer. Dos hallazgos del camino que quedaron en el código y conviene mirar en esa revisión: `applyGroupSplit` crea el grupo nuevo con el modo default y no hereda el del padre (preexistente, no se tocó), y el test de visibilidad del PR 12 barría los 13 tipos en **un solo modo**, así que daba verde describiendo el defecto de UX que ADR-071 corrige.
 >
 > **PR 13 cerrado (2026-08-14)**: la propagación tocó 13 docs. Dos no estaban previstos por ninguno de los dos ADR y aparecieron al barrer el árbol: `Export_Engine.md`, que declaraba la firma vieja de `synthesize` y afirmaba consumirla —no lo hace, y es la contracara del "delegado a `shared` o `export-engine`" que `Grouping_Engine.md` arrastraba—, y `08_Security_Model.md` §9.1, cuyo análisis de divulgación de género está escrito entero sobre `placeholder` y ahora tiene un segundo modo del que hablar.
 
