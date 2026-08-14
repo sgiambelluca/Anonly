@@ -1,0 +1,53 @@
+Anonly — Atribución de datos de terceros
+=========================================
+
+Este proyecto incorpora datos de terceros bajo licencias Creative Commons
+Attribution, que exigen crédito. Este archivo documenta esa atribución a
+nivel de repositorio (ADR-060 §11).
+
+IMPORTANTE: este NOTICE es un piso, no el cumplimiento completo de la
+licencia. ADR-060 §11 exige además un aviso de atribución VISIBLE EN EL
+PRODUCTO (créditos / "Acerca de" en la interfaz), pendiente hasta que ese
+componente de UI exista en apps/react-client — PR 12 del Hito 10.6 (ver
+docs/adr/ADR-060-Reemplazo-Por-Genero.md §11 y
+docs/adr/ADR-069-Lexico-De-Genero-Fuente-Unica-Y-Canal-Del-Usuario.md §12).
+
+---
+
+## Léxico de género por nombre de pila
+
+Usado para inferir `EntityGroup.personGender` en el modo de reemplazo
+`placeholder` sobre entidades de tipo `Person` (ver
+docs/adr/ADR-060-Reemplazo-Por-Genero.md y
+docs/adr/ADR-069-Lexico-De-Genero-Fuente-Unica-Y-Canal-Del-Usuario.md). El
+artefacto vive dentro del bundle, como módulo TypeScript generado, en
+`packages/anonymization-core/grouping-engine/src/gender-lexicon.generated.ts`;
+su procedencia completa (URL, licencia, fecha de descarga, hash) está en
+`packages/anonymization-core/grouping-engine/assets/gender-lexicon.provenance.json`.
+El script que lo genera, determinista y commiteado, es
+`scripts/build-gender-lexicon.ts` (`pnpm lexicon:build`).
+
+### Fuente — Nombres (Buenos Aires Data)
+
+- Dataset: "Nombres" — recurso "Nombres Permitidos"
+- Origen: Gobierno de la Ciudad de Buenos Aires, Dirección General Registro
+  del Estado Civil y Capacidad de las Personas
+- URL del dataset: https://data.buenosaires.gob.ar/dataset/nombres
+- URL del recurso descargado:
+  https://cdn.buenosaires.gob.ar/datosabiertos/datasets/ministerio-de-gobierno/nombres/nombres-permitidos.csv
+- Licencia: CC-BY-2.5-AR (Creative Commons Attribution 2.5 Argentina) —
+  https://creativecommons.org/licenses/by/2.5/ar/
+- Cambios realizados: se conservan únicamente las columnas NOMBRE y SEXO;
+  se descartan ORIGEN y SIGNIFICADO. Los nombres se normalizan (NFC,
+  minúsculas, sin diacríticos) y SEXO se mapea directamente a un único
+  valor `f | m | ambiguous` por nombre (ADR-069 §1: sin fusión con ninguna
+  otra fuente). Se descartan además las claves con un token que contiene
+  un punto o un dígito — 8 abreviaturas del propio registro (ADR-069 §3).
+  Ningún conteo, dato personal ni texto original de este recurso sobrevive
+  al build.
+
+---
+
+Procedencia completa, con fecha de descarga y hash sha256 del artefacto
+generado en la corrida más reciente:
+`packages/anonymization-core/grouping-engine/assets/gender-lexicon.provenance.json`.
