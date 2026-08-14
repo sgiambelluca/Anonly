@@ -228,11 +228,11 @@ describe("GroupingEngine — unit tests", () => {
 
 /**
  * `inferPersonGender` (ADR-060 §4) es una función pura: no depende de una
- * sesión del motor, solo de `canonicalValue` + un léxico ya fusionado. Se
- * prueba igual que `levenshtein`/`levenshteinNormalized` abajo, sobre
- * fixtures de léxico sintéticas (no el artefacto real generado por
- * `scripts/build-gender-lexicon.ts` — la fusión de fuentes CC-BY se prueba
- * aparte en `tests/scripts/build-gender-lexicon.test.ts`, ADR-060 §13).
+ * sesión del motor, solo de `canonicalValue` + un léxico (Map). Se prueba
+ * igual que `levenshtein`/`levenshteinNormalized` abajo, con fixtures
+ * sintéticas que protegen el ORDEN de los pasos del algoritmo (ADR-069 §7a).
+ * El artefacto real commiteado (`GENDER_LEXICON`) se prueba aparte, más
+ * abajo.
  */
 describe("inferPersonGender (ADR-060 §4)", () => {
   // Caso 32 (§13): nombre inequívocamente femenino/masculino.
@@ -258,14 +258,12 @@ describe("inferPersonGender (ADR-060 §4)", () => {
     expect(inferPersonGender("María José Gómez", lexicon)).toBe("f");
   });
 
-  // Caso 32 (§13, ADR-060 §4/§5/§9): cuatro caminos distintos que
-  // convergen en "sin determinar" — ausencia, marca de ambiguo (unisex en
-  // Buenos Aires o bajo el umbral de UCI, indistinguibles para esta función
-  // pura una vez fusionados), y unas iniciales que nunca están en un léxico
-  // de nombres. Nunca se elige un género dudoso.
+  // Caso 32 (§13, ADR-060 §4/§5, ADR-069 §1): tres caminos distintos que
+  // convergen en "sin determinar" — ausencia del léxico, marca de ambiguo
+  // ("A", unisex en el registro de Buenos Aires) y unas iniciales que nunca
+  // están en un léxico de nombres. Nunca se elige un género dudoso.
   it(
-    'name absent from lexicon, unisex name ("A"), below-threshold name and initials → ' +
-      "undetermined + neutral token",
+    'name absent from lexicon, unisex name ("A") and initials → ' + "undetermined + neutral token",
     () => {
       const lexicon: GenderLexicon = new Map([["andrea", "ambiguous"]]);
 
