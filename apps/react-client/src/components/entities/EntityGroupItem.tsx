@@ -5,7 +5,8 @@
  * `ReplacementModeSelect` + acceso a fusionar/dividir (`GroupContextMenu`,
  * alcance reducido — ver esa nota ahí). Estados: habilitado/deshabilitado
  * (opacidad), con conflicto (`ConflictBadge` si hay un `Conflict` no resuelto
- * para este grupo).
+ * para este grupo), y sobre grupos `Person` el selector de género + su marca
+ * de "sin determinar" (ADR-060 §5/§6, Hito 10.6 PR 12).
  *
  * Fuera de alcance de este PR (ver reporte): popover de aliases + edición
  * inline de `canonicalValue` (`ui/Components.md` §3.3 "Click canonicalValue →
@@ -28,6 +29,12 @@ import { ConflictBadge } from "../conflicts/ConflictBadge.js";
 
 import { GroupContextMenu } from "./GroupContextMenu.js";
 import { MergeDialog } from "./MergeDialog.js";
+import { PersonGenderSelect } from "./PersonGenderSelect.js";
+import { PersonGenderUndeterminedBadge } from "./PersonGenderUndeterminedBadge.js";
+import {
+  isPersonGenderSelectVisible,
+  isPersonGenderUndeterminedMarkVisible,
+} from "./personGenderVisibility.js";
 import { ReplacementModeSelect } from "./ReplacementModeSelect.js";
 import { SplitDialog } from "./SplitDialog.js";
 
@@ -41,6 +48,10 @@ function EntityGroupItemImpl({ group }: EntityGroupItemProps) {
   );
   const [mergeOpen, setMergeOpen] = useState(false);
   const [splitOpen, setSplitOpen] = useState(false);
+  // Levantado acá (y no dentro de `PersonGenderSelect`) porque
+  // `PersonGenderUndeterminedBadge` es un hermano, no un padre/hijo: es la
+  // única forma de que el click de uno abra el desplegable del otro.
+  const [genderSelectOpen, setGenderSelectOpen] = useState(false);
 
   return (
     <div
@@ -61,6 +72,17 @@ function EntityGroupItemImpl({ group }: EntityGroupItemProps) {
       </span>
       <span className="text-xs text-text-secondary">({group.members.length})</span>
       {conflict !== undefined ? <ConflictBadge conflictId={conflict.id} /> : null}
+      {isPersonGenderUndeterminedMarkVisible(group) ? (
+        <PersonGenderUndeterminedBadge onOpenSelect={() => setGenderSelectOpen(true)} />
+      ) : null}
+      {isPersonGenderSelectVisible(group.type) ? (
+        <PersonGenderSelect
+          groupId={group.id}
+          currentGender={group.personGender}
+          open={genderSelectOpen}
+          onOpenChange={setGenderSelectOpen}
+        />
+      ) : null}
       <ReplacementModeSelect groupId={group.id} currentMode={group.replacementMode} />
       <GroupContextMenu onMerge={() => setMergeOpen(true)} onSplit={() => setSplitOpen(true)} />
       <MergeDialog sourceGroupId={group.id} open={mergeOpen} onClose={() => setMergeOpen(false)} />
