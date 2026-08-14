@@ -145,6 +145,10 @@ export enum AnnotationKind {
   Degraded = "degraded",
 }
 
+// ADR-060 §2: solo aplicable a EntityGroup de type === Person. Ausente = sin
+// determinar; no es una tercera categoría (03_Data_Model.md §9).
+export type PersonGender = "f" | "m";
+
 export enum ConflictReason {
   Overlap = "overlap",
   Disagree = "disagree",
