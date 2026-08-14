@@ -292,7 +292,7 @@ Contra la tabla real commiteada (PR 11, ADR-069 §7 — los que faltaban):
 - Los tests de §13 verdes, en particular los de ambigüedad (§4): son los que garantizan que nunca se imprime una inferencia dudosa.
 - Verificación de no-regresión: un documento sin ningún `personGender` asignado produce exactamente los mismos `replacementValue` que antes de este ADR.
 - ~~Medición del impacto del léxico contra el gate de bundle de `roadmap/MVP.md` §5, reportada en el PR (§10).~~ **Hecha (ADR-069 §2)**: con la fuente única el léxico son **129 KB crudo / 30 KB gz**, 3,75% del gate de 800 KB gz, dentro del bundle inicial.
-- **Atribución CC-BY visible en el producto** y procedencia completa (URL, licencia, revisión, hash) en el repo (§11). Es obligación de licencia, no opcional.
+- ~~Atribución CC-BY visible en el producto y procedencia completa (URL, licencia, revisión, hash) en el repo (§11). Es obligación de licencia, no opcional.~~ **Hecho (PR 12b, ADR-070)**: sección "Acerca de" al pie del `SettingsDialog`; procedencia y hash en `gender-lexicon.provenance.json`.
 - Verificación de que el artefacto se regenera determinísticamente con el script commiteado y produce el mismo hash (§11).
 - Gates: `pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract`.
 

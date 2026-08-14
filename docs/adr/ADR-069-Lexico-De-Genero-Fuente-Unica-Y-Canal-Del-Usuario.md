@@ -207,7 +207,7 @@ Se corrigen, sin cambiar ninguna decisión de fondo:
 - Un `personGender` elegido por el humano —incluido `"neutral"`— sobrevive a `finishSession`, a `reopenSession`, a una re-inferencia y a una fusión (§5, §13 caso 34).
 - No-regresión: un documento donde ningún grupo resuelve género produce exactamente los mismos `replacementValue` que antes de ADR-060.
 - El artefacto se regenera determinísticamente con el script commiteado y produce el mismo hash (ADR-060 §11, vigente).
-- Atribución CC-BY-2.5-AR visible en el producto y procedencia completa en el repo (ADR-060 §11, vigente — **sigue pendiente**, ver `MVP.md` §4).
+- ~~Atribución CC-BY-2.5-AR visible en el producto y procedencia completa en el repo (ADR-060 §11, vigente).~~ **Hecho (PR 12b, ADR-070)**.
 - Gates: `pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract`.
 
 ## Referencias
