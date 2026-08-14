@@ -369,7 +369,9 @@ describe("GroupingEngine — edge cases", () => {
     expect(updated.replacementMode).toBe(ReplacementMode.Synthetic);
     expect(updated.replacementValue).not.toBe(previousValue);
     const seed = engine["sessions"].get("doc-1")!.seed as string;
-    expect(updated.replacementValue).toBe(synthesize(EntityType.DNI, 1, seed));
+    expect(updated.replacementValue).toBe(
+      synthesize({ type: EntityType.DNI, groupId: group!.id, seed, indexInType: 1 }),
+    );
 
     const replacementChangedCall = busEmitSpy.mock.calls.find(
       ([channel, event]) =>
@@ -1382,7 +1384,13 @@ describe("GroupingEngine — edge cases", () => {
     });
     const seed = engine["sessions"].get("doc-1")!.seed as string;
     expect(synthUpdated.replacementValue).toBe(
-      synthesize(EntityType.Person, synthGroup.indexInType, seed),
+      synthesize({
+        type: EntityType.Person,
+        groupId: synthGroup.id,
+        seed,
+        indexInType: synthGroup.indexInType,
+        ...(synthGroup.personGender !== undefined ? { personGender: synthGroup.personGender } : {}),
+      }),
     );
 
     ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
@@ -1877,5 +1885,387 @@ describe("GroupingEngine — edge cases", () => {
       ],
     });
     expect(buildPlaceholderValue(wideMale)).toBe("[HOMBRE 04]");
+  });
+
+  // ─── Caso 38 (§13, ADR-072 §1): el valor sintético identifica al grupo ───
+
+  /** Pone un grupo en `synthetic` sin pasar por reglas. */
+  async function setSynthetic(groupId: string): Promise<EntityGroup> {
+    return engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId,
+      patch: { replacementMode: ReplacementMode.Synthetic },
+    });
+  }
+
+  function finish(occurrenceCount: number): void {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.REGEX_FINISHED, {
+      documentId: "doc-1",
+      occurrenceCount,
+      durationMs: 1,
+    });
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.NER_FINISHED, {
+      documentId: "doc-1",
+      occurrenceCount: 0,
+      durationMs: 1,
+    });
+  }
+
+  /**
+   * Dos grupos DNI cuyo ORDEN DE LLEGADA es el inverso de su orden
+   * documental: la renumeración canónica de `finishSession` (ADR-028) los da
+   * vuelta. Es el escenario donde el bug de ADR-072 se manifestaba.
+   */
+  async function twoSyntheticGroupsInReverseOrder(): Promise<{
+    late: EntityGroup;
+    early: EntityGroup;
+  }> {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        value: "11111111",
+        normalizedValue: "11111111",
+        bbox: makeBBox(0, 900, 60, 12),
+      }),
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        value: "22222222",
+        normalizedValue: "22222222",
+        bbox: makeBBox(0, 100, 60, 12),
+      }),
+    });
+    const groups = engine.getSnapshot("doc-1").groups;
+    const late = groups.find((g) => g.canonicalValue === "11111111")!;
+    const early = groups.find((g) => g.canonicalValue === "22222222")!;
+    return { late: await setSynthetic(late.id), early: await setSynthetic(early.id) };
+  }
+
+  it("synthetic value survives canonical renumbering at finishSession", async () => {
+    const { late, early } = await twoSyntheticGroupsInReverseOrder();
+    expect(late.indexInType).toBe(1);
+    expect(early.indexInType).toBe(2);
+
+    finish(2);
+
+    const after = engine.getSnapshot("doc-1").groups;
+    const lateAfter = after.find((g) => g.id === late.id)!;
+    const earlyAfter = after.find((g) => g.id === early.id)!;
+
+    // Los índices SÍ se dan vuelta: sin eso el test no probaría nada.
+    expect(lateAfter.indexInType).toBe(2);
+    expect(earlyAfter.indexInType).toBe(1);
+
+    // Y los valores sintéticos NO se mueven. Con la semilla vieja
+    // (indexInType) el grupo habría quedado con el valor de su índice
+    // anterior, y cualquier recálculo posterior lo habría cambiado solo.
+    expect(lateAfter.replacementValue).toBe(late.replacementValue);
+    expect(earlyAfter.replacementValue).toBe(early.replacementValue);
+  });
+
+  it("a rule change that triggers recomputeAllGroupModes does not move synthetic values", async () => {
+    const { late } = await twoSyntheticGroupsInReverseOrder();
+    finish(2);
+
+    const original = engine.getSnapshot("doc-1").groups.find((g) => g.id === late.id)!;
+    expect(original.indexInType).toBe(2); // ya renumerado
+
+    // Regla global a `mask` (prioridad alta): recomputeAllGroupModes cambia
+    // el modo de todos y recalcula.
+    await engine.applyRuleCreated({
+      documentId: "doc-1",
+      rule: makeRule("global", ReplacementMode.Mask, { priority: 10 }),
+    });
+    expect(engine.getSnapshot("doc-1").groups.find((g) => g.id === late.id)!.replacementMode).toBe(
+      ReplacementMode.Mask,
+    );
+
+    // Y de vuelta a `synthetic`, ahora con el índice ya corrido. El valor
+    // tiene que ser EL MISMO que antes de todo el ida y vuelta: es la
+    // propiedad fuerte de ADR-072 §1 — el valor guardado no está solo
+    // "sin refrescar", es el correcto para este grupo.
+    await engine.applyRuleCreated({
+      documentId: "doc-1",
+      rule: makeRule("global", ReplacementMode.Synthetic, { priority: 20 }),
+    });
+    const back = engine.getSnapshot("doc-1").groups.find((g) => g.id === late.id)!;
+    expect(back.replacementMode).toBe(ReplacementMode.Synthetic);
+    expect(back.replacementValue).toBe(original.replacementValue);
+  });
+
+  it("adding a manual entity that shifts indexInType leaves synthetic values untouched", async () => {
+    const { late, early } = await twoSyntheticGroupsInReverseOrder();
+    finish(2);
+
+    const before = engine.getSnapshot("doc-1").groups;
+    const lateBefore = before.find((g) => g.id === late.id)!;
+    const earlyBefore = before.find((g) => g.id === early.id)!;
+
+    // ADR-061: una entidad agregada a mano que aparece ANTES en el documento
+    // corre los índices de todos los grupos posteriores.
+    engine.reopenSession("doc-1", { expectRegex: true, expectNer: false });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        value: "33333333",
+        normalizedValue: "33333333",
+        source: DetectionSource.Manual,
+        bbox: makeBBox(0, 10, 60, 12),
+      }),
+    });
+    finish(3);
+
+    const after = engine.getSnapshot("doc-1").groups;
+    const lateAfter = after.find((g) => g.id === late.id)!;
+    const earlyAfter = after.find((g) => g.id === early.id)!;
+
+    expect(earlyAfter.indexInType).toBe(lateBefore.indexInType); // 2: se corrió
+    expect(lateAfter.indexInType).toBe(3);
+    expect(lateAfter.replacementValue).toBe(lateBefore.replacementValue);
+    expect(earlyAfter.replacementValue).toBe(earlyBefore.replacementValue);
+  });
+
+  it("merge keeps the survivor's synthetic value; split gives the new group its own", async () => {
+    const occA = makeOccurrence({
+      entityType: EntityType.Person,
+      value: "Katarzyna Nowak",
+      normalizedValue: "katarzyna nowak",
+      bbox: makeBBox(0, 100, 200, 20),
+    });
+    const occB = makeOccurrence({
+      entityType: EntityType.Person,
+      value: "K. Nowak",
+      normalizedValue: "katarzyna nowak",
+      bbox: makeBBox(0, 200, 200, 20),
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: occA,
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: occB,
+    });
+    // Segundo grupo, para fusionar dentro del primero.
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: "Ingrid Muller",
+        normalizedValue: "ingrid muller",
+        bbox: makeBBox(0, 300, 200, 20),
+      }),
+    });
+
+    const groups = engine.getSnapshot("doc-1").groups;
+    const target = groups.find((g) => g.canonicalValue === "Katarzyna Nowak")!;
+    const source = groups.find((g) => g.canonicalValue === "Ingrid Muller")!;
+    const targetSynthetic = await setSynthetic(target.id);
+    await setSynthetic(source.id);
+
+    // Fusión: el sobreviviente conserva su `id`, así que conserva su nombre
+    // falso — aunque su `indexInType` pueda bajar (ADR-060 §13 caso 5).
+    const merged = await engine.applyGroupMerge({
+      documentId: "doc-1",
+      sourceGroupId: source.id,
+      targetGroupId: target.id,
+    });
+    expect(merged.id).toBe(target.id);
+    expect(merged.replacementValue).toBe(targetSynthetic.replacementValue);
+
+    // División: el grupo nuevo nace con el modo default (`placeholder`, no
+    // hereda el del padre — comportamiento previo a este ADR). Puesto en
+    // `synthetic`, su valor sale de SU propio `id`, que es lo correcto: es
+    // otra entidad.
+    const { merged: survivor, created } = await engine.applyGroupSplit({
+      documentId: "doc-1",
+      groupId: target.id,
+      occurrenceIds: [occB.id],
+    });
+    expect(survivor.replacementValue).toBe(targetSynthetic.replacementValue);
+
+    const createdSynthetic = await setSynthetic(created.id);
+    const seed = engine["sessions"].get("doc-1")!.seed as string;
+    expect(createdSynthetic.replacementValue).toBe(
+      synthesize({
+        type: EntityType.Person,
+        groupId: created.id,
+        seed,
+        indexInType: createdSynthetic.indexInType,
+      }),
+    );
+  });
+
+  // ─── Caso 39 (§13, ADR-071 §5/§6): género en modo `synthetic` ───
+
+  const FEMALE_FIRST_NAMES = ["María", "Ana", "Laura", "Sofía", "Elena", "Patricia", "Claudia"];
+  const MALE_FIRST_NAMES = [
+    "Carlos",
+    "Juan",
+    "José",
+    "Pedro",
+    "Diego",
+    "Andrés",
+    "Fernando",
+    "Ricardo",
+  ];
+
+  it("changing personGender in synthetic mode recomputes replacementValue and emits", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        // Ausente del registro (verificado contra la tabla real): nace sin
+        // género, así que el cambio de abajo es el primero que ocurre.
+        value: "Katarzyna Nowak",
+        normalizedValue: "katarzyna nowak",
+        bbox: makeBBox(0, 100, 200, 20),
+      }),
+    });
+    const [created] = engine.getSnapshot("doc-1").groups;
+    expect(created?.personGender).toBeUndefined();
+    const synthetic = await setSynthetic(created!.id);
+
+    // `group.id` es un `crypto.randomUUID()`, así que el nombre sorteado
+    // cambia en cada corrida y NO se puede afirmar "el valor cambió" contra
+    // un sorteo cualquiera: el pool sin filtrar y el filtrado pueden caer en
+    // el mismo nombre por azar (~1 de cada 15 corridas), y el test sería
+    // flaky. Se elige a propósito el género OPUESTO al que salió sorteado:
+    // los dos pools son disjuntos, así que el cambio está garantizado.
+    const beforeFirstName = synthetic.replacementValue.split(" ")[0] ?? "";
+    const targetGender = FEMALE_FIRST_NAMES.includes(beforeFirstName) ? "m" : "f";
+    const expectedPool = targetGender === "f" ? FEMALE_FIRST_NAMES : MALE_FIRST_NAMES;
+
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+    const gendered = await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: created!.id,
+      patch: { personGender: targetGender },
+    });
+
+    // Sin abrir la guarda de `placeholder` en applyGroupUpdate (ADR-071 §6),
+    // personGender se guardaría y el token no cambiaría: la feature entera
+    // quedaría sin efecto observable, con todos los gates en verde.
+    expect(gendered.personGender).toBe(targetGender);
+    expect(gendered.replacementValue).not.toBe(synthetic.replacementValue);
+    expect(expectedPool).toContain(gendered.replacementValue.split(" ")[0]);
+
+    // Y el valor es exactamente el que da el sintetizador con ese género:
+    // la semilla no cambió, solo el pool del que se sortea (ADR-071 §5).
+    const seed = engine["sessions"].get("doc-1")!.seed as string;
+    expect(gendered.replacementValue).toBe(
+      synthesize({
+        type: EntityType.Person,
+        groupId: created!.id,
+        seed,
+        indexInType: gendered.indexInType,
+        personGender: targetGender,
+      }),
+    );
+
+    const emitted = busEmitSpy.mock.calls.filter(([channel]) => channel === EventChannel.Grouping);
+    expect(emitted.map(([, event]) => event)).toEqual(
+      expect.arrayContaining([
+        EngineEvents.ENTITY_GROUP_UPDATED,
+        EngineEvents.GROUP_REPLACEMENT_CHANGED,
+      ]),
+    );
+  });
+
+  it("gender inferred at finishSession repaints the token in synthetic mode", async () => {
+    // Mismo camino que el caso 37 grupo B: el canonicalValue evoluciona por
+    // FRECUENCIA de alias, que no es ninguno de los triggers de inferencia
+    // inmediata, así que el género queda atrasado hasta finishSession.
+    const box = (y: number): ReturnType<typeof makeBBox> => makeBBox(0, y, 200, 20);
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: "Andrea Ruiz",
+        normalizedValue: "andrea ruiz",
+        bbox: box(100),
+      }),
+    });
+    const [group] = engine.getSnapshot("doc-1").groups;
+    expect(group?.personGender).toBeUndefined();
+    const beforeGender = await setSynthetic(group!.id);
+
+    for (const y of [110, 120]) {
+      ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: makeOccurrence({
+          entityType: EntityType.Person,
+          value: "Julia Ruiz",
+          normalizedValue: "andrea ruiz",
+          bbox: box(y),
+        }),
+      });
+    }
+    const mid = engine.getSnapshot("doc-1").groups[0]!;
+    expect(mid.canonicalValue).toBe("Julia Ruiz");
+    expect(mid.personGender).toBeUndefined();
+    expect(mid.replacementValue).toBe(beforeGender.replacementValue);
+
+    finish(3);
+
+    // La red de convergencia infiere "f" ("julia" es `f` en el registro,
+    // verificado contra la tabla real) y, con la guarda de
+    // `inferGendersOnFinish` abierta a synthetic, repinta.
+    //
+    // Acá el género lo fija el léxico, así que no se puede elegir el opuesto
+    // como en el test de arriba: se afirma el valor EXACTO en vez de "cambió",
+    // que sería flaky por la misma razón (el `id` es un UUID por corrida y
+    // los dos sorteos pueden coincidir). Que el repintado ocurre de verdad lo
+    // prueba de forma determinista el test anterior.
+    const final = engine.getSnapshot("doc-1").groups[0]!;
+    const seed = engine["sessions"].get("doc-1")!.seed as string;
+    expect(final.personGender).toBe("f");
+    expect(FEMALE_FIRST_NAMES).toContain(final.replacementValue.split(" ")[0]);
+    expect(final.replacementValue).toBe(
+      synthesize({
+        type: EntityType.Person,
+        groupId: final.id,
+        seed,
+        indexInType: final.indexInType,
+        personGender: "f",
+      }),
+    );
+    // El valor sin género seguía siendo el del pool completo antes de cerrar.
+    expect(beforeGender.replacementValue).toBe(
+      synthesize({
+        type: EntityType.Person,
+        groupId: final.id,
+        seed,
+        indexInType: beforeGender.indexInType,
+      }),
+    );
+  });
+
+  it("Person group without personGender in synthetic mode is unchanged", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: "Katarzyna Nowak",
+        normalizedValue: "katarzyna nowak",
+        bbox: makeBBox(0, 100, 200, 20),
+      }),
+    });
+    const [group] = engine.getSnapshot("doc-1").groups;
+    expect(group?.personGender).toBeUndefined();
+    const synthetic = await setSynthetic(group!.id);
+    const seed = engine["sessions"].get("doc-1")!.seed as string;
+
+    // No-regresión: sin género resuelto, el valor es exactamente el que da el
+    // sintetizador sin el campo (ADR-071 §5).
+    expect(synthetic.replacementValue).toBe(
+      synthesize({
+        type: EntityType.Person,
+        groupId: group!.id,
+        seed,
+        indexInType: group!.indexInType,
+      }),
+    );
   });
 });

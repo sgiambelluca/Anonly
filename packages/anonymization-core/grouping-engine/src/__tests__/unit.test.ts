@@ -224,6 +224,36 @@ describe("GroupingEngine — unit tests", () => {
     // sí solo entraba cómodo en nivel 0.
     expect(merged.replacementValue).toBe("[PRS-01]");
   });
+
+  // Caso 39 (§13, ADR-071 §5). "julia" es `f` en el registro — verificado
+  // contra la tabla real, que es lo que ADR-069 §7 exige para cualquier
+  // enunciado sobre qué contesta el léxico.
+  it("Person group with personGender resolved gets a matching synthetic first name", async () => {
+    const FEMALE_FIRST_NAMES = ["María", "Ana", "Laura", "Sofía", "Elena", "Patricia", "Claudia"];
+
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: "Julia Gomez",
+        normalizedValue: "julia gomez",
+        bbox: makeBBox(0, 100, 200, 20),
+      }),
+    });
+    const [group] = engine.getSnapshot("doc-1").groups;
+    expect(group?.personGender).toBe("f");
+
+    const synthetic = await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group!.id,
+      patch: { replacementMode: ReplacementMode.Synthetic },
+    });
+
+    // El nombre falso es femenino: antes de ADR-071, "Julia Gomez" podía
+    // salir "Carlos Sánchez" — el modo ya imprimía un género, solo que al
+    // azar y a veces el contrario al del original.
+    expect(FEMALE_FIRST_NAMES).toContain(synthetic.replacementValue.split(" ")[0]);
+  });
 });
 
 /**
