@@ -19,6 +19,9 @@ export {
 // Estimación de ancho de token de la escalera de abreviaturas (ADR-057 §5)
 export { estimateTokenWidth } from "./estimate-token-width.js";
 
+// Hit-test geométrico palabras↔región (ADR-061 §4)
+export { wordsInRect } from "./words-in-rect.js";
+
 // Enums
 export {
   EngineId,
@@ -49,6 +52,8 @@ export type {
   EntityGroup,
   SyntheticRequest,
   Replacement,
+  ManualEntityRequest,
+  TextMatch,
   RuleTarget,
   Rule,
   Annotation,
