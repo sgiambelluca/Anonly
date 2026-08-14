@@ -47,6 +47,7 @@ export type {
   Occurrence,
   OccurrenceRef,
   EntityGroup,
+  SyntheticRequest,
   Replacement,
   RuleTarget,
   Rule,
@@ -190,5 +191,5 @@ export type {
 export { makeTransferable, isTransferable } from "./transferable.js";
 export type { Transferable } from "./transferable.js";
 
-// Sintetizador (ADR-012-Replacement-Modes.md)
+// Sintetizador (ADR-012-Replacement-Modes.md, Contracts.md §5-§6, ADR-072 §2)
 export { synthesize } from "./synthesizer.js";
