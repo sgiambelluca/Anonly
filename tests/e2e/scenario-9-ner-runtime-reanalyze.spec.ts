@@ -110,6 +110,20 @@ test("activar NER en runtime reanaliza preservando ediciones previas", async ({ 
   await page.getByRole("button", { name: "Configuración" }).click();
   const settingsDialog = page.getByRole("dialog", { name: "Configuración" });
   await expect(settingsDialog).toBeVisible();
+
+  // Atribución CC-BY visible en el producto (ADR-070 §5, ADR-060 §11): el
+  // crédito del léxico de género y el enlace a su licencia se ven dentro del
+  // diálogo que ya está abierto para este escenario.
+  const aboutSection = settingsDialog.getByRole("region", { name: "Acerca de" });
+  await expect(aboutSection).toBeVisible();
+  await expect(aboutSection.getByRole("link", { name: /Nombres Permitidos/ })).toBeVisible();
+  const licenseLink = aboutSection.getByRole("link", { name: "CC-BY-2.5-AR" });
+  await expect(licenseLink).toBeVisible();
+  await expect(licenseLink).toHaveAttribute(
+    "href",
+    "https://creativecommons.org/licenses/by/2.5/ar/",
+  );
+
   await settingsDialog
     .getByRole("checkbox", { name: "Detección con NER (nombres, organizaciones)" })
     .click();
