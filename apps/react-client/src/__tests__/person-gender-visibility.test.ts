@@ -1,10 +1,12 @@
-import { EntityType, ReplacementMode, type EntityGroup } from "@anonly/anonymization-core";
+import {
+  EntityType,
+  ReplacementMode,
+  type EntityGroup,
+  type PersonGender,
+} from "@anonly/anonymization-core";
 import { describe, expect, it } from "vitest";
 
-import {
-  isPersonGenderSelectVisible,
-  isPersonGenderUndeterminedMarkVisible,
-} from "../components/entities/personGenderVisibility.js";
+import { isPersonGenderToggleVisible } from "../components/entities/personGenderVisibility.js";
 
 function makeGroup(overrides: Partial<EntityGroup> = {}): EntityGroup {
   return {
@@ -23,56 +25,50 @@ function makeGroup(overrides: Partial<EntityGroup> = {}): EntityGroup {
   };
 }
 
-// `ui/Components.md` §3.4b: "Visibilidad: solo sobre grupos con
-// type === EntityType.Person. En cualquier otro tipo no se renderiza."
-describe("isPersonGenderSelectVisible", () => {
-  it.each([
-    [EntityType.Person, true],
-    [EntityType.Organization, false],
-    [EntityType.Address, false],
-    [EntityType.DNI, false],
-    [EntityType.CUIT, false],
-    [EntityType.Phone, false],
-    [EntityType.Email, false],
-    [EntityType.IBAN, false],
-    [EntityType.CreditCard, false],
-    [EntityType.Date, false],
-    [EntityType.License, false],
-    [EntityType.Plate, false],
-    [EntityType.Custom, false],
-  ] as const)("type %s → %s", (type, expected) => {
-    expect(isPersonGenderSelectVisible(type)).toBe(expected);
-  });
-});
+// `ui/Components.md` §3.4b (ADR-071 §1): "type === EntityType.Person Y
+// replacementMode ∈ { placeholder, synthetic }". La matriz completa —13 tipos
+// × 4 modos— porque la condición tiene dos ejes y el test viejo solo cubría
+// uno: miraba el tipo y daba `true` en los cuatro modos, que es exactamente
+// el defecto de UX que ADR-071 corrige.
+describe("isPersonGenderToggleVisible", () => {
+  const ALL_TYPES = Object.values(EntityType);
+  const ALL_MODES = Object.values(ReplacementMode);
 
-// ADR-060 §5: "Sin determinar → token neutro, y se marca en el árbol."
-// Componentes.md §3.3: "solo sobre grupos Person en modo placeholder sin
-// personGender resuelto."
-describe("isPersonGenderUndeterminedMarkVisible", () => {
-  it("Person, placeholder, sin género resuelto → true", () => {
-    expect(isPersonGenderUndeterminedMarkVisible(makeGroup())).toBe(true);
+  it("cubre los 13 tipos y los 4 modos", () => {
+    expect(ALL_TYPES).toHaveLength(13);
+    expect(ALL_MODES).toHaveLength(4);
   });
 
-  it("Person, placeholder, género femenino resuelto → false", () => {
-    expect(isPersonGenderUndeterminedMarkVisible(makeGroup({ personGender: "f" }))).toBe(false);
-  });
-
-  it("Person, placeholder, género masculino resuelto → false", () => {
-    expect(isPersonGenderUndeterminedMarkVisible(makeGroup({ personGender: "m" }))).toBe(false);
-  });
-
-  it.each([ReplacementMode.Mask, ReplacementMode.Synthetic, ReplacementMode.Redact] as const)(
-    "Person, modo %s (no placeholder), sin género → false",
-    (mode) => {
-      expect(isPersonGenderUndeterminedMarkVisible(makeGroup({ replacementMode: mode }))).toBe(
-        false,
+  it.each(ALL_TYPES.flatMap((type) => ALL_MODES.map((mode) => [type, mode] as const)))(
+    "type %s + mode %s",
+    (type, mode) => {
+      const expected =
+        type === EntityType.Person &&
+        (mode === ReplacementMode.Placeholder || mode === ReplacementMode.Synthetic);
+      expect(isPersonGenderToggleVisible(makeGroup({ type, replacementMode: mode }))).toBe(
+        expected,
       );
     },
   );
 
-  it("tipo distinto de Person, placeholder, sin género → false", () => {
-    expect(
-      isPersonGenderUndeterminedMarkVisible(makeGroup({ type: EntityType.Organization })),
-    ).toBe(false);
-  });
+  // El control aparece igual con género resuelto o sin resolver: su estado
+  // neutro ES la marca de "sin determinar" (ADR-071 §4), así que la
+  // visibilidad no puede depender de `personGender` — si dependiera, la marca
+  // desaparecería justo al no haber dato que marcar.
+  it.each([undefined, "f", "m"] as const)(
+    "visible sobre Person/placeholder con personGender %s",
+    (personGender: PersonGender | undefined) => {
+      const group = makeGroup(personGender === undefined ? {} : { personGender });
+      expect(isPersonGenderToggleVisible(group)).toBe(true);
+    },
+  );
+
+  it.each([ReplacementMode.Mask, ReplacementMode.Redact] as const)(
+    "oculto sobre Person en modo %s aunque tenga género resuelto",
+    (replacementMode) => {
+      expect(isPersonGenderToggleVisible(makeGroup({ replacementMode, personGender: "f" }))).toBe(
+        false,
+      );
+    },
+  );
 });

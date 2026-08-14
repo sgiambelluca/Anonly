@@ -120,9 +120,11 @@ describe("actions", () => {
       });
     });
 
-    // ADR-060 §6 / ADR-069 §4: lo que `PersonGenderSelect` emite por cada uno
+    // ADR-060 §6 / ADR-069 §4: lo que `PersonGenderToggle` emite por cada uno
     // de sus tres estados. "neutral" viaja como valor explícito, nunca como
     // ausencia de la clave (ver el comentario en `actions.ts` junto al patch).
+    // ADR-071 cambió la forma del control, **no** el wire: este test es la
+    // no-regresión de eso.
     it.each([
       ["f", { personGender: "f" }],
       ["m", { personGender: "m" }],
