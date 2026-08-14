@@ -2,11 +2,13 @@
 
 # Pendientes acordados para después del Hito 10.8
 
-> Hallazgos de la prueba manual sobre la pericia real que **no** son del Hito 10.8 y que el humano decidió explícitamente diferir. Ninguno es regresión del hito: son gaps preexistentes que recién se ven ahora que el OCR y la lectura de anotaciones llegan hasta ahí.
+> Gaps preexistentes que el humano decidió explícitamente diferir porque **no pertenecen al hito donde aparecieron**. Los §1-§9 salieron de la prueba manual sobre la pericia real durante el Hito 10.8; del §10 en adelante entran hallazgos de otros orígenes, con su procedencia indicada en la entrada. Ninguno es regresión de ningún hito.
 >
-> Orden sugerido por daño real, no por costo.
+> Orden **no** significativo a partir del §10: los §1-§9 están ordenados por daño real, y las entradas nuevas se agregan al final para no romper las referencias cruzadas por número que ya existen en otros docs. La severidad de cada una está declarada en su propio texto.
 >
 > **Estado (2026-08-13)**: el §3 quedó **cerrado dentro del hito** por ADR-067 — se conserva tachado, con el porqué. El resto sigue vigente, y el §2 quedó **medido** sobre la pericia de 5 páginas en la segunda prueba manual.
+>
+> **Estado (2026-08-14)**: entra el §10, de la planificación del Hito 10.6 (ADR-072).
 
 ---
 
@@ -129,3 +131,35 @@ Sin datos para calibrar: las cinco páginas medidas tienen `rotate = 0`. Requier
 Registrado en la errata de **ADR-065 §1**. La compuerta 1 maneja `paintImageXObject`, `paintImageMaskXObject` y `paintInlineImageXObject`, y **no** las variantes agrupadas/repetidas del optimizador de pdf.js (`paintImageXObjectRepeat`, `paintImageMaskXObjectGroup`, `paintImageMaskXObjectRepeat`, `paintInlineImageXObjectGroup`, `paintSolidColorImageMask`).
 
 Sus argumentos tienen otra forma, así que soportarlas es un cálculo de rectángulo por variante. El modo de falla es un **falso negativo idéntico al comportamiento previo a ADR-065**: cobertura incompleta, no regresión. Cerrar solo si un documento real lo dispara.
+
+---
+
+## 10. Una edición manual de `replacementValue` se pierde si el grupo se renumera — **el spec promete lo contrario**
+
+> **Procedencia**: planificación del Hito 10.6 (ADR-072, 2026-08-14). Apareció al analizar por qué `renumberGroupsCanonically` no recalcula el valor en modo `synthetic`. **No es del Hito 10.6** —no tiene nada que ver con el género ni con el sintetizador— y se difiere por eso, no por costo.
+>
+> **Severidad**: alta. No es cobertura incompleta ni un falso positivo benigno: destruye en silencio un dato que el usuario escribió a mano.
+
+**Qué pasa.** El usuario edita el `replacementValue` de un grupo (escribe `[P1]` en vez de `[PERSONA 03]`). Si ese grupo cambia de `indexInType` en la renumeración canónica de un `finishSession` posterior, su texto se reemplaza por el token calculado. Sin aviso y sin forma de recuperarlo.
+
+**Causa, verificada.** `renumberGroupsCanonically` (`grouping-engine/src/grouping.engine.ts`) tiene dos guardas anidadas y ninguna pregunta quién escribió el valor:
+
+```ts
+if (newIndex === group.indexInType) return;              // ADR-028
+…
+if (group.replacementMode === ReplacementMode.Placeholder) {
+  group.replacementValue = computeReplacementValue(…);   // pisa la edición manual
+}
+```
+
+La cabecera del propio motor (nota 12) ya lo dice: *"No hay tracking de 'este valor fue editado a mano' más allá de ese guard heredado"*. O sea que la edición sobrevive **por accidente**, solo cuando el índice no se mueve.
+
+**Por qué es un incumplimiento y no una limitación.** ADR-057 §7 lo promete en negrita —*"**La edición manual gana siempre.** … la escalera no lo toca — ni en ese momento ni en un `finishSession` posterior"*— y `Grouping_Engine.md` §13 caso 30 lo repite. El código no lo cumple. **Hay que cerrar la brecha en una dirección o en la otra**: implementar la promesa, o corregir los dos docs para que digan lo que el motor hace.
+
+**El test que lo cubre no puede verlo.** `ADR-057 §Tests` pide "un `replacementValue` editado a mano sobrevive a `finishSession`", y ese test pasa porque en su escenario el índice **no** cambia — la guarda de afuera corta antes de llegar a la de adentro. Es la misma forma de agujero que ADR-069 Contexto §3 documentó para el léxico: verde sin ejercitar la condición que dispara el defecto.
+
+**Por qué importa más de lo que parece.** Editar el `replacementValue` a mano es la salida que ADR-058 §4 y ADR-062 le ofrecen al usuario cuando se enciende la marca de reemplazo degradado. El remedio documentado para un token roto se deshace solo. Y el **Hito 10.7** lo agrava: ADR-061 renumera cada vez que se agrega una entidad a mano, así que la condición pasa de rara a rutinaria.
+
+**Dirección de arreglo.** `InternalGroup` gana un `replacementValueUserSet: boolean` — bookkeeping interno nunca expuesto, exactamente el patrón que ADR-069 §5 ya usa con `personGenderUserSet` y por el mismo motivo. Se enciende en `applyGroupUpdate` con `patch.replacementValue` presente y lo consultan **todos** los puntos de recálculo.
+
+**Por qué necesita ADR propio.** El alcance no es la guarda: son los seis o siete sitios que recalculan `replacementValue`, o sea la precedencia completa del campo. Y obliga a contestar lo que ni ADR-057 §7 ni ADR-028 contestan: ¿la edición manual sobrevive también a un cambio de modo? ¿A un re-análisis que le suma members al grupo? ¿A una fusión? Hasta que eso esté decidido, no hay implementación posible sin improvisar.
