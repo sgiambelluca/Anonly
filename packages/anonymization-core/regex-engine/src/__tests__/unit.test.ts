@@ -599,4 +599,55 @@ describe("RegexEngine — unit tests", () => {
       expect(output.occurrenceCount).toBe(1);
     });
   });
+
+  describe("searchText (ADR-061 §8 errata)", () => {
+    // Caso 21 (§13): comparten `collectPageTextMatches` — un solo matcher,
+    // dos envoltorios. Si alguien las separa después, este test diverge.
+    it("searchText and findLiteral find the same matches", async () => {
+      const document = makeSinglePageDocument("doc-search-vs-find-literal", [
+        "El",
+        "contrato",
+        "lo",
+        "firma",
+        "María",
+        "Fernanda",
+        "López",
+        "en",
+        "Córdoba",
+      ]);
+
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      await engine.findLiteral(
+        { document, value: "María Fernanda López", entityType: EntityType.Person },
+        ctx,
+      );
+      const occurrence = (
+        busEmitSpy.mock.calls.find(([, event]) => event === EngineEvents.ENTITY_FOUND)?.[2] as
+          | EntityFound
+          | undefined
+      )?.occurrence;
+
+      const matches = engine.searchText({ document, query: "María Fernanda López" });
+
+      expect(matches).toHaveLength(1);
+      expect(matches[0]?.pageIndex).toBe(occurrence?.pageIndex);
+      expect(matches[0]?.bbox).toEqual(occurrence?.bbox);
+      expect(matches[0]?.wordSpan).toEqual(occurrence?.wordSpan);
+    });
+
+    // Caso 23 (§13): página ascendente y, dentro de cada página, orden de
+    // lectura de Page.words — el orden sobre el que la lupa navega
+    // "siguiente/anterior".
+    it("searchText returns matches in document order", async () => {
+      const document = makeDocument("doc-search-order", [
+        makePage(0, ["Cliente:", "Ana", "Ana"]),
+        makePage(1, ["Otra", "Ana", "más"]),
+      ]);
+
+      const matches = engine.searchText({ document, query: "Ana" });
+
+      expect(matches.map((m) => m.pageIndex)).toEqual([0, 0, 1]);
+      expect(matches.map((m) => m.wordSpan.startIndex)).toEqual([1, 2, 1]);
+    });
+  });
 });

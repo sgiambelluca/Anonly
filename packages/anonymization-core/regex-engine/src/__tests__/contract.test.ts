@@ -268,4 +268,38 @@ describe("RegexEngine — contract tests", () => {
       ).rejects.toThrow(EngineDisposedError);
     });
   });
+
+  describe("searchText (ADR-061 §8 errata)", () => {
+    it("searchText emits no events at all", async () => {
+      await engine.init(ctx);
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      const document = makeSinglePageDocument("doc-search-text-no-events", [
+        "Contacto:",
+        "Ana",
+        "Gómez",
+      ]);
+
+      const matches = engine.searchText({ document, query: "Ana Gómez" });
+
+      // Con coincidencias de verdad: si esto emitiera ENTITY_FOUND, tipear
+      // en la lupa crearía y fusionaría grupos en la sesión en vivo.
+      expect(matches).toHaveLength(1);
+      expect(busEmitSpy).not.toHaveBeenCalled();
+    });
+
+    it("searchText does not touch the pattern registry or any engine state", async () => {
+      await engine.init(ctx);
+      const document = makeSinglePageDocument("doc-search-text-no-state", ["María", "López"]);
+      const activePatternsBefore = engine["activePatterns"];
+
+      const first = engine.searchText({ document, query: "María López" });
+      const second = engine.searchText({ document, query: "María López" });
+
+      expect(second).toEqual(first);
+      // Misma referencia: recompileActivePatterns() (que reasigna un array
+      // nuevo) nunca se llamó — searchText no toca el registro de patrones.
+      expect(engine["activePatterns"]).toBe(activePatternsBefore);
+      expect(engine["customPatterns"]).toEqual([]);
+    });
+  });
 });
