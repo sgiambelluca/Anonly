@@ -311,6 +311,9 @@ function toOccurrenceRef(occurrence: Occurrence): OccurrenceRef {
     pageIndex: occurrence.pageIndex,
     bbox: occurrence.bbox,
     source: occurrence.source,
+    // ADR-074 §1/§2: copiado tal cual, nunca `fragments: undefined` explícito
+    // (exactOptionalPropertyTypes) — mismo patrón que personGender arriba.
+    ...(occurrence.fragments !== undefined ? { fragments: occurrence.fragments } : {}),
   };
 }
 
