@@ -351,6 +351,53 @@ describe("GroupingEngine — unit tests", () => {
     expect(merged.replacementValue).toBe("[PRS-01]");
   });
 
+  // Caso 43 (§13, ADR-074 §1). toOccurrenceRef propaga fragments tal cual, y
+  // es público (OccurrenceRef, no bookkeeping interno como
+  // replacementValueUserSet): tiene que sobrevivir hasta getSnapshot.
+  it("fragments survive from Occurrence to OccurrenceRef and reach getSnapshot", () => {
+    const fragments = [makeBBox(0, 0, 200, 20), makeBBox(0, 30, 70, 20)];
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: "Pablo Roman Fortes",
+        normalizedValue: "pablo roman fortes",
+        bbox: makeBBox(0, 0, 200, 50),
+        fragments,
+      }),
+    });
+
+    const { groups } = engine.getSnapshot("doc-1");
+    expect(groups[0]?.members).toHaveLength(1);
+    expect(groups[0]?.members[0]?.fragments).toEqual(fragments);
+  });
+
+  // Caso 43 (§13, ADR-074 §7) — sin esto la escalera mide contra la
+  // envolvente (557 pt en el caso real) y nunca baja de nivel. Una sola
+  // ocurrencia, bbox ancho (200, entraría cómodo en nivel 0), pero uno de
+  // sus DOS fragmentos es angosto (70, el mismo umbral que el test de
+  // arriba): el peor caso tiene que salir de fragments, no de bbox.
+  it("a narrow fragment hidden by a wide envelope lowers the abbreviation level", () => {
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      // "Andrea" es undeterminado en el léxico (ADR-069 §7): sin esto, la
+      // inferencia de género movería el label de PERSONA a MUJER/HOMBRE y el
+      // test dejaría de aislar lo que quiere probar.
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: "Andrea Fortes",
+        normalizedValue: "andrea fortes",
+        bbox: makeBBox(0, 0, 200, 50),
+        fragments: [makeBBox(0, 0, 200, 20), makeBBox(0, 30, 70, 20)],
+      }),
+    });
+
+    const { groups } = engine.getSnapshot("doc-1");
+    // Mismo nivel que "one narrow member..." arriba con el mismo ancho
+    // angosto (70): la escalera no puede estar midiendo la envolvente de 200.
+    expect(groups[0]?.replacementValue).toBe("[PRS-01]");
+  });
+
   // Caso 39 (§13, ADR-071 §5). "julia" es `f` en el registro — verificado
   // contra la tabla real, que es lo que ADR-069 §7 exige para cualquier
   // enunciado sobre qué contesta el léxico.
