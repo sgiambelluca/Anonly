@@ -327,15 +327,15 @@ apps/react-client/src/components/
 
 - **Solo sobre el panel `original`.** En el `anonymized` el texto visible puede ser un reemplazo, y señalarlo no significaría nada.
 - **Interacción**: click sobre una palabra, o arrastre de un recuadro sobre varias. Al soltar, aparece "Agregar entidad como…" con el selector de `EntityType`.
-- **Cómo resuelve qué se señaló**: **hit-test contra `Page.words`, no selección de texto**. El overlay traduce coordenadas de pantalla a coordenadas de página y aplica `wordsInRect(words, rect)` (función pura de `@anonly/shared`). Los datos salen de `actions.getPageWords(documentId, pageIndex)`.
+- **Cómo resuelve qué se señaló**: **hit-test contra `Page.words`, no selección de texto**. El overlay traduce coordenadas de pantalla a coordenadas de página y aplica `wordsInRect(words, rect)` (función pura de `@anonly/shared`). Los datos salen de `actions.getPageWords(pageIndex)` — el adaptador (`actions.ts`) resuelve el documento activo por su cuenta, mismo criterio que el resto de `actions.*` (§3.4c).
 - **Por qué no una capa de texto de pdf.js**: en un PDF escaneado **no hay texto** — es una foto —, y es justo donde más falta hace corregir a mano. Las palabras de OCR tienen bbox igual que las de PDF, así que el hit-test no distingue el origen y no hay una rama por tipo de documento. Además evita meter pdf.js en el cliente y una copia del texto original en el DOM (ADR-061 §4).
 - **Coordenadas**: usa `getPageSize` para el mapeo, **no** la estimación de `pageLayout.ts`. Con zoom, el factor de escala del visor entra en la misma transformación.
-- **Acción**: `actions.addManualEntity(documentId, { value, entityType })` con el texto de las palabras señaladas.
+- **Acción**: `actions.addManualEntity({ value, entityType })` con el texto de las palabras señaladas.
 
 ### 5.4c `DocumentSearchBox` (ADR-061 §8)
 
 - **Ubicación**: junto al encabezado "PDF ORIGINAL", con icono de lupa (punto 4 de `Cambios para hacer.txt`).
-- **Acción**: `actions.findText(documentId, query)` → `TextMatch[]` con bbox por coincidencia. Consulta **sincrónica** y de solo lectura: buscar no crea grupos ni modifica la sesión (errata de ADR-061 §8).
+- **Acción**: `actions.findText(query)` → `TextMatch[]` con bbox por coincidencia (el adaptador resuelve el documento activo por su cuenta, igual que `getPageWords`/`getPageSize`). Consulta **sincrónica** y de solo lectura: buscar no crea grupos ni modifica la sesión (errata de ADR-061 §8).
 - **El debounce es de este componente**: `findText` es sincrónica y recorre todas las palabras del documento en el main thread, así que una llamada por tecla se nota en documentos largos. El Core no amortigua —es una función de consulta, sin estado ni cache (`Regex_Engine.md` §12)—, así que la caja de búsqueda debe hacerlo, mismo criterio que el re-render del zoom (§5.5). Los resultados vienen en orden documental, así que "anterior/siguiente" navega el array tal cual, sin re-ordenar.
 - **Render**: contador de resultados, navegación anterior/siguiente con scroll a la página, y resaltado del match activo sobre el canvas (reusa el mismo overlay de §5.4b).
 - **Tercera vía de agregado**: cada resultado ofrece "agregar como entidad", que abre el selector de tipo y llama a `addManualEntity`. Sale gratis: es la misma búsqueda literal que alimenta el agregado manual (ADR-061 §8). **Agrega todas las apariciones del valor, no solo el resultado clickeado** — `addManualEntity` recorre el documento entero, que es el comportamiento correcto para una entidad manual; el copy debe decirlo para que no se lea como que anonimiza solo esa coincidencia.
