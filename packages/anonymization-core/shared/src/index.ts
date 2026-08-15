@@ -22,6 +22,12 @@ export { estimateTokenWidth } from "./estimate-token-width.js";
 // Hit-test geométrico palabras↔región (ADR-061 §4)
 export { wordsInRect } from "./words-in-rect.js";
 
+// Predicado de "misma línea" — ADR-061 §2 errata
+export { sharesVerticalBand } from "./shares-vertical-band.js";
+
+// Normalización de comparación de texto libre — ADR-061 §2 errata
+export { normalizeForComparison } from "./normalize-for-comparison.js";
+
 // Enums
 export {
   EngineId,
