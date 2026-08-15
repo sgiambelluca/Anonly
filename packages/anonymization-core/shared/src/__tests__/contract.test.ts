@@ -58,6 +58,7 @@ import type {
   MarkerLegendEntry,
   MarkerLegendRow,
   Occurrence,
+  OccurrenceRef,
   OcrRegion,
   Page,
   PageParsed,
@@ -66,6 +67,7 @@ import type {
   RenderLegendPayload,
   RenderPagePayload,
   RenderRequested,
+  Replacement,
   TextMatch,
   Word,
   WorkerFactory,
@@ -1007,6 +1009,62 @@ describe("@anonly/shared — Contracts", () => {
       };
       expect(occurrence.entityType).toBe(EntityType.Person);
       expect(word.source).toBe("pdf");
+    });
+
+    // ADR-074 §1: los tres tipos aceptan `fragments` ausente (compila sin el
+    // campo, mismo patrón que `rotation`/`maskFormat` — `exactOptionalPropertyTypes`
+    // impide escribir `fragments: undefined` explícito, así que la prueba de
+    // "ausente" es no incluir la key, no asignarle undefined) y presente.
+    it("Occurrence, OccurrenceRef y Replacement aceptan fragments ausente y presente (ADR-074 §1)", () => {
+      const bboxA: BoundingBox = { x: 500, y: 100, width: 40, height: 12 };
+      const bboxB: BoundingBox = { x: 10, y: 118, width: 90, height: 12 };
+      const envelope: BoundingBox = { x: 10, y: 100, width: 530, height: 30 };
+
+      const occurrenceWithoutFragments: Occurrence = {
+        id: "o1",
+        value: "Juan Pérez",
+        normalizedValue: "juan perez",
+        bbox: envelope,
+        pageIndex: 0,
+        source: DetectionSource.NER,
+        confidence: 0.93,
+        entityType: EntityType.Person,
+      };
+      expect(occurrenceWithoutFragments.fragments).toBeUndefined();
+
+      const occurrenceWithFragments: Occurrence = {
+        ...occurrenceWithoutFragments,
+        fragments: [bboxA, bboxB],
+      };
+      expect(occurrenceWithFragments.fragments).toEqual([bboxA, bboxB]);
+
+      const refWithoutFragments: OccurrenceRef = {
+        occurrenceId: "o1",
+        pageIndex: 0,
+        bbox: envelope,
+        source: DetectionSource.NER,
+      };
+      expect(refWithoutFragments.fragments).toBeUndefined();
+
+      const refWithFragments: OccurrenceRef = { ...refWithoutFragments, fragments: [bboxA, bboxB] };
+      expect(refWithFragments.fragments).toEqual([bboxA, bboxB]);
+
+      const replacementWithoutFragments: Replacement = {
+        groupId: "g1",
+        occurrenceId: "o1",
+        pageIndex: 0,
+        bbox: envelope,
+        originalValue: "Juan Pérez",
+        replacementValue: "[PERSONA 01]",
+        mode: ReplacementMode.Placeholder,
+      };
+      expect(replacementWithoutFragments.fragments).toBeUndefined();
+
+      const replacementWithFragments: Replacement = {
+        ...replacementWithoutFragments,
+        fragments: [bboxA, bboxB],
+      };
+      expect(replacementWithFragments.fragments).toEqual([bboxA, bboxB]);
     });
 
     it("EncodedPageImage tipa bytes/format/dimensiones (ADR-034 §3)", () => {

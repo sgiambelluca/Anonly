@@ -123,6 +123,21 @@ export interface Occurrence {
   /** Formato de máscara del patrón que matcheó (Regex lo copia de `RegexPattern.maskFormat`; ausente en NER). ADR-029. */
   readonly maskFormat?: string;
   readonly wordSpan?: WordSpan;
+  /**
+   * ADR-074 §1: descomposición de `bbox` en un rectángulo por línea, para
+   * una entidad cuyas `Word` caen en más de un renglón (un nombre partido al
+   * final de una línea). `bbox` sigue siendo la envolvente y conserva todos
+   * sus usos actuales — orden documental, conflictos, hit-test — sin
+   * excepción. **Ausente ≡ `[bbox]`**, misma convención que `rotation`
+   * (ADR-066 §6): el caso de una sola línea (la inmensa mayoría) no lleva el
+   * campo. Cuando está presente, `fragments.length ≥ 2` siempre — un array
+   * de un elemento sería la envolvente escrita dos veces. Invariantes:
+   * `bbox` es la unión exacta de `fragments`, ninguno se solapa
+   * verticalmente, y `union(fragments) ⊆ bbox` (la superficie tapada solo
+   * puede achicarse). No se emite sobre texto rotado (`bbox.rotation`
+   * presente/discrepante): ver `Regex_Engine.md`/`NER_Engine.md` §10.
+   */
+  readonly fragments?: ReadonlyArray<BoundingBox>;
 }
 
 export interface OccurrenceRef {
@@ -130,6 +145,8 @@ export interface OccurrenceRef {
   readonly pageIndex: number;
   readonly bbox: BoundingBox;
   readonly source: DetectionSource;
+  /** ADR-074 §1/§2: copiado tal cual de `Occurrence.fragments` por `toOccurrenceRef`. Misma semántica: ausente ≡ `[bbox]`. */
+  readonly fragments?: ReadonlyArray<BoundingBox>;
 }
 
 export interface EntityGroup {
@@ -186,6 +203,8 @@ export interface Replacement {
   readonly originalValue: string;
   readonly replacementValue: string;
   readonly mode: ReplacementMode;
+  /** ADR-074 §1/§4: copiado de `Occurrence.fragments` por `buildPageReplacements`. `render-engine` pinta por `fragments ?? [bbox]`, nunca la envolvente sola. */
+  readonly fragments?: ReadonlyArray<BoundingBox>;
 }
 
 // Entrada de IPipelineOrchestrator.addManualEntity (ADR-061 §3/§6).
