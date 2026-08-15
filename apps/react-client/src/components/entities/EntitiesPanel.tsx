@@ -16,11 +16,12 @@
  */
 
 import type { EntityType } from "@anonly/anonymization-core";
-import { SearchIcon } from "lucide-react";
+import { PlusIcon, SearchIcon } from "lucide-react";
 import { useState } from "react";
 
 import { useEntitiesStore } from "../../store/entities.store.js";
 
+import { AddEntityDialog } from "./AddEntityDialog.js";
 import { filterGroups, visibleTypeEntries } from "./entityTree.js";
 import { EntityTypeGroup } from "./EntityTypeGroup.js";
 
@@ -28,6 +29,7 @@ export function EntitiesPanel() {
   const groupsByType = useEntitiesStore((state) => state.groupsByType);
   const [query, setQuery] = useState("");
   const [collapsedTypes, setCollapsedTypes] = useState<ReadonlySet<EntityType>>(new Set());
+  const [addEntityOpen, setAddEntityOpen] = useState(false);
 
   const entries = visibleTypeEntries(groupsByType);
   const filteredEntries = entries
@@ -59,7 +61,16 @@ export function EntitiesPanel() {
           <h2 className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
             Entidades
           </h2>
-          <div className="flex items-center gap-1.5 text-xs">
+          <div className="flex items-center gap-2 text-xs">
+            <button
+              type="button"
+              onClick={() => setAddEntityOpen(true)}
+              className="flex items-center gap-1 font-medium text-accent hover:underline"
+            >
+              <PlusIcon className="h-3.5 w-3.5" aria-hidden />
+              Agregar entidad
+            </button>
+            <span className="text-text-secondary">·</span>
             <button type="button" onClick={expandAll} className="text-accent hover:underline">
               Expandir todo
             </button>
@@ -101,6 +112,7 @@ export function EntitiesPanel() {
           ))
         )}
       </div>
+      <AddEntityDialog open={addEntityOpen} onClose={() => setAddEntityOpen(false)} />
     </div>
   );
 }

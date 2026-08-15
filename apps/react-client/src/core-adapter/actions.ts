@@ -18,6 +18,7 @@ import {
   EventChannel,
   type EntityGroup,
   type ExportOptions,
+  type ManualEntityRequest,
   type PersonGenderChoice,
   type ReanalyzeConfigPatch,
   type ReplacementMode,
@@ -163,6 +164,15 @@ export const actions = {
     const documentId = activeDocumentId();
     if (documentId === null) return;
     await getCore().orchestrator.reanalyze(documentId, patch);
+  },
+
+  // ADR-061 §6: agrega a mano una entidad que el detector no encontró. Las
+  // tres vías de entrada (diálogo, hit-test sobre el original, buscador)
+  // convergen acá.
+  async addManualEntity(request: ManualEntityRequest): Promise<void> {
+    const documentId = activeDocumentId();
+    if (documentId === null) return;
+    await getCore().orchestrator.addManualEntity(documentId, request);
   },
 
   // PDF_PASSWORD_REQUIRED → PasswordDialog → esta acción. La UI NUNCA llama a
