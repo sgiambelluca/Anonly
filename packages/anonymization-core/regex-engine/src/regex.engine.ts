@@ -7,6 +7,8 @@ import {
   EngineNotInitializedError,
   EventChannel,
   InvalidInputError,
+  normalizeForComparison,
+  sharesVerticalBand,
   type BoundingBox,
   type EngineContext,
   type EntityType,
@@ -20,7 +22,12 @@ import {
 
 import { DEFAULT_PATTERNS_AR } from "./patterns/default-ar.js";
 import { RegexInvalidPatternError } from "./regex.errors.js";
-import type { RegexEngineInput, RegexEngineOutput, RegexPattern } from "./regex.types.js";
+import type {
+  FindLiteralInput,
+  RegexEngineInput,
+  RegexEngineOutput,
+  RegexPattern,
+} from "./regex.types.js";
 
 /* Regex_Engine.md §12: timeout de 1000ms por página por patrón custom. Solo
  * aplica a patrones custom (los default están fijados por el spec y son
@@ -248,6 +255,136 @@ function buildOccurrence(match: RawMatch, page: Page): Occurrence {
   return wordMapping ? { ...base, wordSpan: wordMapping.wordSpan } : base;
 }
 
+// ─── findLiteral (ADR-061 §1/§2): búsqueda de un valor literal escrito o ───
+// señalado por el usuario. No es una corrida de detección: no usa
+// RegexPattern ni el registro de patrones, y no emite REGEX_FINISHED.
+// La normalización (NFC + minúsculas + sin diacríticos) y el criterio de
+// "misma línea" son `normalizeForComparison`/`sharesVerticalBand` de
+// `@anonly/shared` (Contracts.md §6) — no se reimplementan acá (ADR-061 §2
+// errata).
+
+/*
+ * Normaliza primero, tokeniza después: el colapso de espacios repetidos de
+ * `normalizeForComparison` sale gratis (§13 caso 17), sin código extra acá.
+ * Un valor vacío o solo espacios normaliza a "", cuyo único "token" del split
+ * lo descarta el filter → cero tokens, findLiteral responde
+ * occurrenceCount: 0 sin recorrer el documento (ADR-061 §6).
+ */
+function tokenizeLiteralValue(value: string): string[] {
+  return normalizeForComparison(value)
+    .split(" ")
+    .filter((token) => token.length > 0);
+}
+
+interface WordOffset {
+  readonly start: number;
+  readonly end: number;
+}
+
+/*
+ * Offset de cada Word dentro de Page.text, con la misma acumulación que usa
+ * mapSpanToWords puertas adentro (`words.map(w => w.text).join(" ")`, +1 por
+ * el separador). Se recalcula acá porque el barrido de más abajo encuentra
+ * rangos de ÍNDICE de palabra y mapSpanToWords espera un rango de OFFSET de
+ * texto — la dirección inversa de lo que esa función ya resuelve.
+ */
+function computeWordOffsets(words: ReadonlyArray<Word>): WordOffset[] {
+  const offsets: WordOffset[] = [];
+  let offset = 0;
+  for (const word of words) {
+    const start = offset;
+    const end = start + word.text.length;
+    offsets.push({ start, end });
+    offset = end + 1;
+  }
+  return offsets;
+}
+
+interface WordWindowMatch {
+  readonly startWordIndex: number;
+  readonly endWordIndexExclusive: number;
+}
+
+/*
+ * Barrido por ventana deslizante de `queryTokens.length` palabras
+ * consecutivas de `words` (mismo orden de lectura que Page.text). Devuelve
+ * los rangos donde el texto normalizado de cada palabra coincide, en orden,
+ * con `queryTokens` Y cada par consecutivo de la ventana comparte banda
+ * vertical (`sharesVerticalBand`, `@anonly/shared`) — contiguas en
+ * `Page.words` no alcanza: sin este chequeo, la última palabra de una línea
+ * y la primera de la siguiente se leerían como una sola línea (§13 caso 16).
+ * Avanza `queryTokens.length` posiciones tras un match (no reporta
+ * solapados) y 1 posición si no matcheó.
+ */
+function slideWordWindowMatches(
+  words: ReadonlyArray<Word>,
+  queryTokens: ReadonlyArray<string>,
+): WordWindowMatch[] {
+  const matches: WordWindowMatch[] = [];
+  if (queryTokens.length === 0 || words.length < queryTokens.length) return matches;
+
+  let i = 0;
+  while (i <= words.length - queryTokens.length) {
+    let matched = true;
+    for (let j = 0; j < queryTokens.length; j++) {
+      const word = words[i + j];
+      const token = queryTokens[j];
+      if (!word || token === undefined || normalizeForComparison(word.text) !== token) {
+        matched = false;
+        break;
+      }
+      if (j > 0) {
+        const previousWord = words[i + j - 1];
+        if (!previousWord || !sharesVerticalBand(previousWord.bbox, word.bbox)) {
+          matched = false;
+          break;
+        }
+      }
+    }
+    if (matched) {
+      matches.push({ startWordIndex: i, endWordIndexExclusive: i + queryTokens.length });
+      i += queryTokens.length;
+    } else {
+      i += 1;
+    }
+  }
+  return matches;
+}
+
+/*
+ * Construye la Occurrence manual de un match. A diferencia de
+ * buildOccurrence (patrones): sin maskFormat (no hay RegexPattern que lo
+ * provea) y con normalizedValue calculado con el criterio genérico de arriba
+ * en vez de un normalizer por tipo.
+ */
+function buildManualOccurrence(
+  words: ReadonlyArray<Word>,
+  startWordIndex: number,
+  endWordIndexExclusive: number,
+  wordMapping: WordMapping,
+  page: Page,
+  entityType: EntityType,
+): Occurrence {
+  const rawValue = words
+    .slice(startWordIndex, endWordIndexExclusive)
+    .map((w) => w.text)
+    .join(" ");
+  const base = {
+    id: crypto.randomUUID(),
+    value: rawValue,
+    normalizedValue: normalizeForComparison(rawValue),
+    bbox: wordMapping.bbox,
+    pageIndex: page.index,
+    source: DetectionSource.Manual,
+    confidence: 1.0,
+    entityType,
+  };
+  // exactOptionalPropertyTypes: wordSpan siempre está definido acá (viene de
+  // un match real), pero se arma con spread para ser consistente con
+  // buildOccurrence (nunca `wordSpan: undefined` explícito).
+  return { ...base, wordSpan: wordMapping.wordSpan };
+}
+
 export class RegexEngine implements IEngine {
   readonly id = EngineId.Regex;
 
@@ -344,6 +481,84 @@ export class RegexEngine implements IEngine {
 
       ctx.logger.info(`Regex Engine terminó documento ${document.id}`, {
         documentId: document.id,
+        occurrenceCount,
+        durationMs,
+      });
+
+      return Promise.resolve({ documentId: document.id, occurrenceCount, durationMs });
+    } catch (err: unknown) {
+      return Promise.reject(err instanceof Error ? err : new Error(String(err)));
+    }
+  }
+
+  /*
+   * ADR-061 §1/§6: búsqueda de un valor literal, no una corrida de
+   * detección. No es `async` por la misma razón que `process` (todo el
+   * trabajo es cómputo síncrono; ver el comentario sobre `process` más
+   * arriba). Guardas (`assertNotDisposed`/`assertInitialized`) y manejo de
+   * `AbortSignal` idénticos a `process`, pero **nunca** emite
+   * `REGEX_FINISHED` ni llama a `recompileActivePatterns`/toca
+   * `this.customPatterns` — ese registro es solo para patrones que
+   * participan de corridas futuras (§1).
+   */
+  findLiteral(input: FindLiteralInput, ctx: EngineContext): Promise<RegexEngineOutput> {
+    try {
+      this.assertNotDisposed();
+      this.assertInitialized();
+
+      if (input == null) {
+        throw new InvalidInputError("Input es null o undefined.", { engineId: EngineId.Regex });
+      }
+
+      const { document, value, entityType } = input;
+      const startedAt = Date.now();
+      const queryTokens = tokenizeLiteralValue(value);
+
+      let occurrenceCount = 0;
+
+      if (queryTokens.length > 0) {
+        for (const page of document.pages) {
+          if (ctx.abortSignal.aborted) {
+            throw new CancelledError(document.id);
+          }
+
+          const wordMatches = slideWordWindowMatches(page.words, queryTokens);
+          if (wordMatches.length === 0) continue;
+
+          const offsets = computeWordOffsets(page.words);
+          for (const { startWordIndex, endWordIndexExclusive } of wordMatches) {
+            const startOffset = offsets[startWordIndex];
+            const endOffset = offsets[endWordIndexExclusive - 1];
+            if (!startOffset || !endOffset) continue;
+
+            const wordMapping = mapSpanToWords(page.words, startOffset.start, endOffset.end);
+            if (!wordMapping) continue;
+
+            const occurrence = buildManualOccurrence(
+              page.words,
+              startWordIndex,
+              endWordIndexExclusive,
+              wordMapping,
+              page,
+              entityType,
+            );
+            ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+              documentId: document.id,
+              occurrence,
+            });
+            occurrenceCount++;
+          }
+        }
+      }
+
+      const durationMs = Date.now() - startedAt;
+
+      // Sin log del `value` buscado: puede ser el dato sensible mismo que el
+      // usuario está tratando de anonimizar (Contracts.md §3.3: "nunca
+      // loguear contenido del documento").
+      ctx.logger.info(`Regex Engine (findLiteral) terminó documento ${document.id}`, {
+        documentId: document.id,
+        entityType,
         occurrenceCount,
         durationMs,
       });

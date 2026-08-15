@@ -201,4 +201,71 @@ describe("RegexEngine — contract tests", () => {
     expect(onSpy).not.toHaveBeenCalled();
     expect(onceSpy).not.toHaveBeenCalled();
   });
+
+  describe("findLiteral (ADR-061 §1)", () => {
+    it('findLiteral emits ENTITY_FOUND with source "manual" and correct bbox', async () => {
+      await engine.init(ctx);
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      const document = makeSinglePageDocument("doc-find-literal", ["Contacto:", "Ana", "Gómez"]);
+      const output = await engine.findLiteral(
+        { document, value: "Ana Gómez", entityType: EntityType.Person },
+        ctx,
+      );
+
+      expect(output.occurrenceCount).toBe(1);
+      const entityFoundCalls = busEmitSpy.mock.calls.filter(
+        ([, event]) => event === EngineEvents.ENTITY_FOUND,
+      );
+      expect(entityFoundCalls).toHaveLength(1);
+      expect(entityFoundCalls[0]?.[0]).toBe(EventChannel.Regex);
+
+      const occurrence = (entityFoundCalls[0]?.[2] as EntityFound).occurrence;
+      expect(occurrence.source).toBe(DetectionSource.Manual);
+      expect(occurrence.confidence).toBe(1.0);
+      expect(occurrence.entityType).toBe(EntityType.Person);
+      expect(occurrence.value).toBe("Ana Gómez");
+      // Bbox unión de "Ana" (x=74) y "Gómez" (x=102, width=30) — ver
+      // makePage en test-helpers.ts para la aritmética de posiciones.
+      expect(occurrence.bbox).toEqual({ x: 74, y: 100, width: 58, height: 12 });
+      expect(occurrence.wordSpan).toEqual({ startIndex: 1, endIndexExclusive: 3 });
+    });
+
+    it("findLiteral emits no REGEX_FINISHED and does not touch the pattern registry", async () => {
+      await engine.init(ctx);
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      const document = makeSinglePageDocument("doc-find-literal-no-finish", ["María", "López"]);
+      const activePatternsBefore = engine["activePatterns"];
+
+      await engine.findLiteral(
+        { document, value: "María López", entityType: EntityType.Person },
+        ctx,
+      );
+
+      const finishedCalls = busEmitSpy.mock.calls.filter(
+        ([, event]) => event === EngineEvents.REGEX_FINISHED,
+      );
+      expect(finishedCalls).toHaveLength(0);
+      // Misma referencia: recompileActivePatterns() (que reasigna un array
+      // nuevo) nunca se llamó. addPattern/removePattern son la única vía de
+      // mutar el registro (§1: findLiteral no la usa).
+      expect(engine["activePatterns"]).toBe(activePatternsBefore);
+      expect(engine["customPatterns"]).toEqual([]);
+    });
+
+    it("findLiteral before init() throws EngineNotInitializedError", async () => {
+      const document = makeSinglePageDocument("doc-find-literal-no-init", ["Ana"]);
+      await expect(
+        engine.findLiteral({ document, value: "Ana", entityType: EntityType.Person }, ctx),
+      ).rejects.toThrow(EngineNotInitializedError);
+    });
+
+    it("findLiteral after dispose() throws EngineDisposedError", async () => {
+      await engine.init(ctx);
+      await engine.dispose();
+      const document = makeSinglePageDocument("doc-find-literal-disposed", ["Ana"]);
+      await expect(
+        engine.findLiteral({ document, value: "Ana", entityType: EntityType.Person }, ctx),
+      ).rejects.toThrow(EngineDisposedError);
+    });
+  });
 });
