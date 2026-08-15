@@ -212,7 +212,7 @@ describe("RegexEngine — contract tests", () => {
   // introducir una fuga. `bbox is the exact envelope of fragments, which
   // never overlap` en Regex_Engine.md §14.
   describe("fragments (ADR-074 §1)", () => {
-    it("bbox is the exact envelope of fragments, which never overlap, and union(fragments) ⊆ bbox", async () => {
+    it("bbox is the exact envelope of fragments, which never overlap", async () => {
       await engine.init(ctx);
       const busEmitSpy = vi.spyOn(ctx.bus, "emit");
       // phone-landline-ar partido en dos líneas: "0221" y "4567890".

@@ -202,6 +202,59 @@ describe("NerEngine — contract tests", () => {
     }
   });
 
+  // ADR-074 §1: los tres invariantes que garantizan que fragmentar no puede
+  // introducir una fuga. `bbox is the exact envelope of fragments, which
+  // never overlap` en NER_Engine.md §14.
+  describe("fragments (ADR-074 §1)", () => {
+    it("bbox is the exact envelope of fragments, which never overlap", async () => {
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockTokenClassificationPipeline(() =>
+          Promise.resolve([
+            nerToken("B-PER", "Albarracin,", 0.9, 0),
+            nerToken("I-PER", "Rocio", 0.9, 1),
+          ]),
+        ),
+      );
+      await engine.init(ctx);
+      const base = makeNerPageInput("doc-fragments-invariant", 0, ["Albarracin,", "Rocio"]);
+      const input = {
+        ...base,
+        words: base.words.map((w, i) => (i === 1 ? { ...w, bbox: { ...w.bbox, y: 130 } } : w)),
+      };
+      const output = await engine.processPage(input, ctx);
+
+      const fragments = output.occurrences[0]?.fragments ?? [];
+      const bbox = output.occurrences[0]?.bbox;
+      expect(fragments).toHaveLength(2);
+      expect(bbox).toBeDefined();
+
+      // bbox es la envolvente exacta de fragments.
+      const minX = Math.min(...fragments.map((f) => f.x));
+      const minY = Math.min(...fragments.map((f) => f.y));
+      const maxX = Math.max(...fragments.map((f) => f.x + f.width));
+      const maxY = Math.max(...fragments.map((f) => f.y + f.height));
+      expect(bbox).toEqual({ x: minX, y: minY, width: maxX - minX, height: maxY - minY });
+
+      // Los fragmentos no se solapan verticalmente.
+      for (let i = 0; i < fragments.length; i++) {
+        for (let j = i + 1; j < fragments.length; j++) {
+          const a = fragments[i]!;
+          const b = fragments[j]!;
+          const overlaps = a.y < b.y + b.height && b.y < a.y + a.height;
+          expect(overlaps).toBe(false);
+        }
+      }
+
+      // union(fragments) ⊆ bbox: ningún fragmento se sale de la envolvente.
+      for (const fragment of fragments) {
+        expect(fragment.x).toBeGreaterThanOrEqual(bbox!.x);
+        expect(fragment.y).toBeGreaterThanOrEqual(bbox!.y);
+        expect(fragment.x + fragment.width).toBeLessThanOrEqual(bbox!.x + bbox!.width);
+        expect(fragment.y + fragment.height).toBeLessThanOrEqual(bbox!.y + bbox!.height);
+      }
+    });
+  });
+
   it("isModelReady() reflects model load state", async () => {
     asPipelineMock(pipeline).mockResolvedValue(
       mockTokenClassificationPipeline(() => Promise.resolve([])),

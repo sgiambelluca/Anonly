@@ -158,6 +158,128 @@ describe("NerEngine — unit tests", () => {
     expect(output.occurrences[0]?.bbox.rotation).toBeUndefined();
   });
 
+  // Caso 26 (§13, ADR-074 §2/§3). Espejo exacto de los tests de regex-engine
+  // (P-2 prohíbe compartir código entre motores).
+  describe("fragments (footprint multi-línea)", () => {
+    // El test que define el ADR de este lado, y el motor donde se midió
+    // (NER_Engine.md §10): "Pablo" cierra un renglón, "Román Fortes," abre
+    // el siguiente. Envolvente medida sobre la pericia real: 557,2 × 18,2 pt.
+    // Emite UNA Occurrence con fragments.length === 2, y bbox sigue siendo
+    // la envolvente de los dos.
+    it("an entity split across two lines emits one occurrence with two fragments", async () => {
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockTokenClassificationPipeline(() =>
+          Promise.resolve([
+            nerToken("B-PER", "Pablo", 0.9, 0),
+            nerToken("I-PER", "Román", 0.9, 1),
+            nerToken("I-PER", "Fortes,", 0.9, 2),
+          ]),
+        ),
+      );
+      await engine.init(ctx);
+      const base = makeNerPageInput("doc-two-lines", 0, ["Pablo", "Román", "Fortes,", "firmo"]);
+      const input = {
+        ...base,
+        words: base.words.map((w, i) => (i >= 1 ? { ...w, bbox: { ...w.bbox, y: 130 } } : w)),
+      };
+      const output = await engine.processPage(input, ctx);
+
+      const wordPablo = input.words[0]!;
+      const wordRoman = input.words[1]!;
+      const wordFortes = input.words[2]!;
+      expect(output.occurrences[0]?.fragments).toEqual([
+        wordPablo.bbox,
+        {
+          x: wordRoman.bbox.x,
+          y: wordRoman.bbox.y,
+          width: wordFortes.bbox.x + wordFortes.bbox.width - wordRoman.bbox.x,
+          height: 12,
+        },
+      ]);
+      expect(output.occurrences[0]?.bbox).toEqual({
+        x: Math.min(wordPablo.bbox.x, wordRoman.bbox.x),
+        y: Math.min(wordPablo.bbox.y, wordRoman.bbox.y),
+        width:
+          Math.max(
+            wordPablo.bbox.x + wordPablo.bbox.width,
+            wordFortes.bbox.x + wordFortes.bbox.width,
+          ) - Math.min(wordPablo.bbox.x, wordRoman.bbox.x),
+        height: wordRoman.bbox.y + 12 - wordPablo.bbox.y,
+      });
+    });
+
+    // No-regresión: el caso normal (una sola línea) no cambia ni un byte.
+    it("a single-line entity carries no fragments and its bbox is unchanged", async () => {
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockTokenClassificationPipeline(() =>
+          Promise.resolve([nerToken("B-PER", "Juan", 0.9, 0), nerToken("I-PER", "Pérez", 0.9, 1)]),
+        ),
+      );
+      await engine.init(ctx);
+      const input = makeNerPageInput("doc-single-line", 0, ["Juan", "Pérez", "vive"]);
+      const output = await engine.processPage(input, ctx);
+
+      expect(output.occurrences[0]?.fragments).toBeUndefined();
+      const wordJuan = input.words[0]!;
+      const wordPerez = input.words[1]!;
+      expect(output.occurrences[0]?.bbox).toEqual({
+        x: wordJuan.bbox.x,
+        y: wordJuan.bbox.y,
+        width: wordPerez.bbox.x + wordPerez.bbox.width - wordJuan.bbox.x,
+        height: 12,
+      });
+    });
+
+    it("three lines produce three fragments in reading order", async () => {
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockTokenClassificationPipeline(() =>
+          Promise.resolve([
+            nerToken("B-PER", "Albarracin,", 0.9, 0),
+            nerToken("I-PER", "Rocio", 0.9, 1),
+            nerToken("I-PER", "Milagros", 0.9, 2),
+          ]),
+        ),
+      );
+      await engine.init(ctx);
+      const base = makeNerPageInput("doc-three-lines", 0, ["Albarracin,", "Rocio", "Milagros"]);
+      const input = {
+        ...base,
+        words: base.words.map((w, i) => ({ ...w, bbox: { ...w.bbox, y: 100 + i * 30 } })),
+      };
+      const output = await engine.processPage(input, ctx);
+
+      expect(output.occurrences[0]?.fragments).toHaveLength(3);
+      expect(output.occurrences[0]?.fragments?.map((f) => f.y)).toEqual([100, 130, 160]);
+    });
+
+    // Interacción con ADR-066 §6: el texto rotado no se fragmenta aunque sus
+    // palabras estén apiladas en y distintos (la geometría normal de un run
+    // vertical), y conserva la rotation que ya propagaba antes de este ADR.
+    it("a rotated entity carries no fragments and keeps its rotation", async () => {
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockTokenClassificationPipeline(() =>
+          Promise.resolve([
+            nerToken("B-PER", "Albarracin,", 0.9, 0),
+            nerToken("I-PER", "Rocio", 0.9, 1),
+          ]),
+        ),
+      );
+      await engine.init(ctx);
+      const base = makeNerPageInput("doc-rotated-two-lines", 0, ["Albarracin,", "Rocio", "firmo"]);
+      const input = {
+        ...base,
+        words: base.words.map((w, i) => ({
+          ...w,
+          bbox: { ...w.bbox, y: 100 + i * 30, rotation: 90 as const },
+        })),
+      };
+      const output = await engine.processPage(input, ctx);
+
+      expect(output.occurrences[0]?.fragments).toBeUndefined();
+      expect(output.occurrences[0]?.bbox.rotation).toBe(90);
+    });
+  });
+
   it("normalizedValue is lowercase and strips redundant punctuation", async () => {
     asPipelineMock(pipeline).mockResolvedValue(
       mockTokenClassificationPipeline(() => Promise.resolve([nerToken("B-ORG", "ACME,", 0.9, 0)])),
