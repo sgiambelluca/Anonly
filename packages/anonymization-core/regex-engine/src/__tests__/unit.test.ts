@@ -598,6 +598,47 @@ describe("RegexEngine — unit tests", () => {
       const { output } = await firstManualOccurrence(["ana", "ana", "ana"], "ana ana");
       expect(output.occurrenceCount).toBe(1);
     });
+
+    // ADR-061 §2, segunda errata (2026-08-15, hallazgo post-aprobación):
+    // `Page.words` separa por whitespace (ADR-020 §1), así que un nombre
+    // pegado a puntuación sin espacio ("Gorrister,") queda como un solo Word
+    // con la coma adentro. Sin recortar el borde, una búsqueda de "Gorrister"
+    // no encontraba estas ocurrencias — el gap que hacía que la lupa contara
+    // menos apariciones que el pipeline de detección completo.
+    it("findLiteral matches a word with trailing punctuation glued on (no space)", async () => {
+      const { output, occurrence } = await firstManualOccurrence(
+        ["El", "cuerpo", "de", "Gorrister,", "colgaba"],
+        "Gorrister",
+      );
+      expect(output.occurrenceCount).toBe(1);
+      expect(occurrence?.value).toBe("Gorrister,");
+    });
+
+    it("findLiteral matches a word with leading punctuation glued on (inverted exclamation)", async () => {
+      const { output } = await firstManualOccurrence(
+        ["¡Gorrister!", "gritó", "Ellen"],
+        "Gorrister",
+      );
+      expect(output.occurrenceCount).toBe(1);
+    });
+
+    // Consistencia: el texto de un match con puntuación pegada ("Gorrister,")
+    // tiene que poder volver a buscarse tal cual — es literalmente lo que
+    // "Agregar como…" hace con `match.text` (`ui/Components.md` §5.4c). Sin
+    // recortar también el token de búsqueda, buscar "Gorrister," no
+    // encontraba ni a la palabra de la que salió.
+    it("findLiteral finds a word by its own punctuated text (round-trip via searchText)", async () => {
+      const { output } = await firstManualOccurrence(["Gorrister,", "dijo", "algo"], "Gorrister,");
+      expect(output.occurrenceCount).toBe(1);
+    });
+
+    // Guarda contra sobre-recortar: el recorte es solo de BORDE. La
+    // puntuación interna de un nombre no debe tocarse ni asumirse
+    // equivalente a su ausencia.
+    it("findLiteral does NOT treat internal punctuation as optional", async () => {
+      const { output } = await firstManualOccurrence(["O'Brien", "firmó."], "OBrien");
+      expect(output.occurrenceCount).toBe(0);
+    });
   });
 
   describe("searchText (ADR-061 §8 errata)", () => {

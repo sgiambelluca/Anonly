@@ -265,6 +265,25 @@ function buildOccurrence(match: RawMatch, page: Page): Occurrence {
 // (Contracts.md §6) — no se reimplementan acá (ADR-061 §2 errata).
 
 /*
+ * `Word` sale de partir el texto por whitespace (ADR-020 §1, pdf-engine y
+ * ocr-engine por igual), así que un nombre pegado a puntuación sin espacio
+ * ("Gorrister,") vive en un solo `Word.text = "Gorrister,"`.
+ * `normalizeForComparison` no la saca (solo mayúsculas/diacríticos/espacios),
+ * así que sin este recorte esas ocurrencias nunca matcheaban una búsqueda de
+ * "Gorrister" limpio (ADR-061 §2, segunda errata). Se recorta solo el
+ * **borde**: la puntuación interna ("O'Brien") no se toca. Se aplica a los
+ * dos lados de la comparación (acá y en `slideWordWindowMatches`), no solo a
+ * `Word` — si no, un resultado con puntuación pegada (p. ej. "Gorrister," en
+ * un `TextMatch.text`) no se podría volver a encontrar por su propio texto
+ * vía "Agregar como…" (`ui/Components.md` §5.4c).
+ */
+const EDGE_PUNCTUATION_RE = /^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu;
+
+function stripEdgePunctuation(value: string): string {
+  return value.replace(EDGE_PUNCTUATION_RE, "");
+}
+
+/*
  * Normaliza primero, tokeniza después: el colapso de espacios repetidos de
  * `normalizeForComparison` sale gratis (§13 caso 17), sin código extra acá.
  * Un valor vacío o solo espacios normaliza a "", cuyo único "token" del split
@@ -274,6 +293,7 @@ function buildOccurrence(match: RawMatch, page: Page): Occurrence {
 function tokenizeLiteralValue(value: string): string[] {
   return normalizeForComparison(value)
     .split(" ")
+    .map(stripEdgePunctuation)
     .filter((token) => token.length > 0);
 }
 
@@ -330,7 +350,11 @@ function slideWordWindowMatches(
     for (let j = 0; j < queryTokens.length; j++) {
       const word = words[i + j];
       const token = queryTokens[j];
-      if (!word || token === undefined || normalizeForComparison(word.text) !== token) {
+      if (
+        !word ||
+        token === undefined ||
+        stripEdgePunctuation(normalizeForComparison(word.text)) !== token
+      ) {
         matched = false;
         break;
       }
