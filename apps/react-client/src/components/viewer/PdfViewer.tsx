@@ -202,6 +202,7 @@ export function PdfViewer({ kind, scrollSync }: PdfViewerProps) {
           pageCount={pageCount}
           visibleRange={visibleRange}
           pageSize={pageHeight}
+          pageWidth={pageWidth}
           onVisibleRangeChange={handleVisibleRangeChange}
           onCurrentPageIndexChange={handleCurrentPageIndexChange}
           scrollSync={scrollSync}
