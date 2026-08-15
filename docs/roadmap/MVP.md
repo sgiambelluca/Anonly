@@ -342,18 +342,30 @@ Punto 1 de `Cambios para hacer.txt`. **Independiente de los Hitos 10.5 y 10.6**:
 |---|---|---|---|---|
 | 1 | `wordsInRect`, `TextMatch`, `ManualEntityRequest` y tipos de los accesores | `shared` | — | ✅ |
 | 1b | Docs de la errata de ADR-061 §2 (ver abajo) | — | — | ✅ |
-| 1c | `sharesVerticalBand` y `normalizeForComparison` | `shared` | 1b | |
-| 2 | `findLiteral` + matcheo de secuencias de palabras normalizado, consumiendo las dos primitivas de `shared` | `regex-engine` | 1, 1c | |
-| 3 | `addManualEntity`, `findText`, `getPageWords`, `getPageSize`; retención y re-aplicación de literales manuales. De paso, `line-words.ts` consume `sharesVerticalBand` | `packages/anonymization-core/src` | 1, 1c, 2 | |
-| 4 | Botón + diálogo "Agregar entidad" sobre el árbol | `apps/react-client` | 3 | |
+| 1c | `sharesVerticalBand` y `normalizeForComparison` | `shared` | 1b | ✅ |
+| 2 | `findLiteral` + matcheo de secuencias de palabras normalizado, consumiendo las dos primitivas de `shared` | `regex-engine` | 1, 1c | ✅ |
+| 3 | `addManualEntity`, `getPageWords`, `getPageSize`; retención y re-aplicación de literales manuales. De paso, `line-words.ts` consume `sharesVerticalBand`. Sin `findText` — ver abajo | `packages/anonymization-core/src` | 1, 1c, 2 | ✅ |
+| 3b | Docs de la errata de ADR-061 §8 (ver abajo) | — | — | ✅ |
+| 3c | `searchText` de solo lectura; `findLiteral` reconstruido encima de la misma primitiva | `regex-engine` | 3b | |
+| 3d | `findText` entra a `IPipelineOrchestrator` sobre `searchText` | `packages/anonymization-core/src` | 3c | |
+| 4 | Botón + diálogo "Agregar entidad" sobre el árbol | `apps/react-client` | 3 | ⚠️ parcial |
+| 4b | Docs de la errata de ADR-061 §6 (ver abajo) | — | — | ✅ |
+| 4c | `addManualEntity` devuelve `ManualEntityResult` en vez de `void` | `packages/anonymization-core/src` | 4b | |
+| 4d | Cierra el 4: el diálogo informa "no se encontró" | `apps/react-client` | 4c | |
 | 5 | Hit-test sobre el canvas del `original` + "Agregar entidad como…" | `apps/react-client` | 3 | |
-| 6 | Lupa de búsqueda con navegación y resaltado (punto 4 de `Cambios para hacer.txt`) | `apps/react-client` | 3 | |
+| 6 | Lupa de búsqueda con navegación y resaltado (punto 4 de `Cambios para hacer.txt`) | `apps/react-client` | 3d | |
 | 7 | De-dup: el kernel consume `sharesVerticalBand` y borra su copia | `render-engine` | 1c | diferible |
 | 8 | De-dup: `gender.ts` consume `normalizeForComparison` y borra `normalizeForLexicon` | `grouping-engine` | 1c | diferible |
 
-Los PRs 4, 5 y 6 son independientes entre sí una vez mergeado el 3. **El punto 4 sale de la misma primitiva que el punto 1** — es la misma búsqueda literal con otra UI encima —, por eso van juntos: separarlos significaría escribir dos veces el mismo matcheo.
+De los tres PRs de UI que este hito planeaba paralelos, **solo el 5 quedó libre** con el PR 3: el 4 mergeó parcial y lo cierra el 4d, y el 6 espera al 3d — cada uno por una entrada del Core que el ADR había dado por existente. **El 4d no es opcional**: sin él la UI se ve completa pero un valor mal escrito no informa nada, y el usuario cree que agregó algo que no existe. Las dos cadenas son independientes entre sí. **El punto 4 sale de la misma primitiva que el punto 1** — es la misma búsqueda literal con otra UI encima —, por eso van juntos: separarlos significaría escribir dos veces el mismo matcheo.
 
 **Los PRs 1b, 1c, 7 y 8 salen de una errata**, no del plan original (ADR-061 §2, errata del 2026-08-14, hallazgo del implementador del PR 2). El ADR pedía reusar "la misma agrupación por banda vertical" de ADR-058 §5 como una primitiva compartida; esa primitiva vivía en el **façade**, que ningún motor puede importar (P-2), y **ya estaba duplicada** en el kernel de `render-engine`. Se promueven a `@anonly/shared` las dos piezas que `findLiteral` necesitaba y no podía alcanzar —el criterio de "misma línea" y la normalización NFC—, con el mismo razonamiento que `estimateTokenWidth` (`Contracts.md` §6). El 1b y el 1c **bloquean el 2**; el 7 y el 8 son de-dup puro sin cambio de comportamiento y pueden caer después del hito. La errata destapó además un test que faltaba: un valor cuyas palabras cruzan de un renglón al siguiente no debe matchear, y ninguno de los siete tests que el ADR pedía lo ejercitaba.
+
+**Los PRs 3b, 3c y 3d salen de una segunda errata** (ADR-061 §8, 2026-08-14, hallazgo del implementador del PR 3). El ADR decía que la lupa era la misma búsqueda literal que "en vez de emitir `ENTITY_FOUND`, devuelve los matches"; el motor **no tenía esa segunda forma** — `findLiteral` solo expone su resultado emitiendo sobre el bus, y exige un `entityType` que una búsqueda de texto no tiene. Cablear `findText` sobre él habría hecho que **tipear en la lupa cree y fusione grupos en la sesión en vivo**: el documento anonimizándose solo mientras el usuario busca. `regex-engine` gana `searchText`, de solo lectura y sincrónica, y `findLiteral` se reconstruye encima de la misma función de matcheo, así que las dos entradas no pueden divergir. El PR 3 mergeó sin `findText` y con la ausencia documentada en `types.ts`, que es lo correcto: bloquea **solo** el PR 6.
+
+**Los PRs 4b y 4c salen de una tercera errata** (ADR-061 §6, 2026-08-14, hallazgo del implementador del PR 4). El ADR y `Components.md` pedían que el diálogo informara "no se encontró ese texto en el documento", y §10 lo lista como test obligatorio del PR 4 — pero `addManualEntity` devolvía `Promise<void>` y el `occurrenceCount` moría adentro del Orchestrator: ningún retorno, evento ni estado le decía al diálogo si se había agregado algo. Pasa a devolver `ManualEntityResult`. Es **aditivo** —quien ignora el retorno sigue compilando—, así que el PR 3 no necesita migración, y el tipo vive en el façade junto a `ImportDocumentInput`, sin PR de `shared`.
+
+**Las tres erratas del hito tienen la misma forma**, y vale anotarlo para los hitos que vienen: el ADR describía un Core que en tres puntos no existía —una primitiva compartida inalcanzable, una salida de solo lectura que nunca se especificó, y un canal de retorno ausente—, y las tres aparecieron recién al implementar la capa que las consumía. Ninguna era un error de implementación; las tres se detectaron porque el implementador frenó en vez de improvisar.
 
 **Cierra de paso un hueco preexistente**: el cliente no tiene dimensiones reales de página (`PageCanvas` las estima en `pageLayout.ts`, con un comentario reconociéndolo). El hit-test las necesita, así que `getPageSize` corrige esa aproximación.
 
