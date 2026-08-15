@@ -12,6 +12,16 @@
 
 import type { Document, EntityType } from "@anonly/shared";
 
+/**
+ * ADR-061 §1: búsqueda de un valor literal que el usuario escribió o señaló
+ * en el visor — no un patrón que participe de futuras corridas de `process`.
+ */
+export interface FindLiteralInput {
+  readonly document: Document;
+  readonly value: string;
+  readonly entityType: EntityType;
+}
+
 export interface RegexPattern {
   readonly id: string; // "dni-ar", "cuit-ar", etc.
   readonly entityType: EntityType;

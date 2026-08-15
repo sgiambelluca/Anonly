@@ -16,7 +16,9 @@ import {
   makeDocument,
   makeEmptyPage,
   makePage,
+  makePageFromWords,
   makeSinglePageDocument,
+  makeWord,
 } from "./fixtures/test-helpers.js";
 
 async function firstOccurrence(
@@ -513,6 +515,88 @@ describe("RegexEngine — unit tests", () => {
         expect.stringContaining("es inválido y se descarta"),
         expect.objectContaining({ patternId: "throws-on-real-text" }),
       );
+    });
+  });
+
+  describe("findLiteral (ADR-061 §2)", () => {
+    async function firstManualOccurrence(
+      tokens: ReadonlyArray<string>,
+      value: string,
+    ): Promise<{
+      readonly output: { occurrenceCount: number };
+      readonly occurrence: EntityFound["occurrence"] | undefined;
+    }> {
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      const document = makeSinglePageDocument(`doc-${Math.random()}`, tokens);
+      const output = await engine.findLiteral(
+        { document, value, entityType: EntityType.Person },
+        ctx,
+      );
+      const call = busEmitSpy.mock.calls.find(([, event]) => event === EngineEvents.ENTITY_FOUND);
+      return { output, occurrence: (call?.[2] as EntityFound | undefined)?.occurrence };
+    }
+
+    it("findLiteral matches case- and accent-insensitively", async () => {
+      const { output, occurrence } = await firstManualOccurrence(
+        ["Contacto:", "José", "Pérez"],
+        "JOSE PEREZ",
+      );
+      expect(output.occurrenceCount).toBe(1);
+      expect(occurrence?.value).toBe("José Pérez");
+      expect(occurrence?.source).toBe("manual");
+    });
+
+    // ADR-058 §5 / ADR-061 §2: "matcheo sobre secuencias de Word contiguas de
+    // la misma línea". makePage (test-helpers.ts) pone todas las palabras en
+    // la misma banda vertical (y=100 fijo), que es exactamente el caso que
+    // este test ejercita: un valor de varias palabras, todas en una línea.
+    //
+    // El rechazo de palabras en líneas DISTINTAS (sharesVerticalBand) tiene
+    // su propio test más abajo: "findLiteral does NOT match a value whose
+    // words fall on different lines".
+    it("findLiteral matches a multi-word value over contiguous words of the same line", async () => {
+      const { output, occurrence } = await firstManualOccurrence(
+        ["El", "contrato", "lo", "firma", "María", "Fernanda", "López", "en", "Córdoba."],
+        "María Fernanda López",
+      );
+      expect(output.occurrenceCount).toBe(1);
+      expect(occurrence?.value).toBe("María Fernanda López");
+      expect(occurrence?.wordSpan).toEqual({ startIndex: 4, endIndexExclusive: 7 });
+    });
+
+    // ADR-061 §2: limitación deliberada, no un bug. Protege contra
+    // implementarla por accidente (búsqueda difusa) y contra romperla en
+    // silencio — la búsqueda difusa de variantes queda anotada en
+    // roadmap/Future_Ideas.md §5.1b.
+    it('findLiteral does NOT match "J. Pérez" for "José Pérez"', async () => {
+      const { output } = await firstManualOccurrence(["José", "Pérez", "firmó."], "J. Pérez");
+      expect(output.occurrenceCount).toBe(0);
+    });
+
+    // ADR-061 §2 errata, caso 16 (§13): las palabras son contiguas en
+    // Page.words pero caen en bandas Y disjuntas — sin el chequeo de
+    // sharesVerticalBand esto daría un falso positivo (§13 caso 16).
+    it("findLiteral does NOT match a value whose words fall on different lines", async () => {
+      const words = [
+        makeWord("José", 10, 0, 100), // banda Y [100, 112)
+        makeWord("Pérez", 70, 0, 130), // banda Y [130, 142) — disjunta de la anterior
+      ];
+      const document = makeDocument("doc-different-lines", [makePageFromWords(0, words)]);
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      const output = await engine.findLiteral(
+        { document, value: "José Pérez", entityType: EntityType.Person },
+        ctx,
+      );
+
+      expect(output.occurrenceCount).toBe(0);
+      expect(busEmitSpy).not.toHaveBeenCalled();
+    });
+
+    // Caso 18 (§13): tras un match el barrido avanza el largo completo de la
+    // secuencia — los solapamientos no se reportan.
+    it("findLiteral does not report overlapping matches", async () => {
+      const { output } = await firstManualOccurrence(["ana", "ana", "ana"], "ana ana");
+      expect(output.occurrenceCount).toBe(1);
     });
   });
 });

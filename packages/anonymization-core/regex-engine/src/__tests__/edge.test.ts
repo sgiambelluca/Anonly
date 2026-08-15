@@ -16,7 +16,9 @@ import {
   createEngineContext,
   makeDocument,
   makeEmptyPage,
+  makeOcrWord,
   makePage,
+  makePageFromWords,
   makeSinglePageDocument,
 } from "./fixtures/test-helpers.js";
 
@@ -217,11 +219,28 @@ describe("RegexEngine — edge case tests", () => {
     });
   });
 
+  // Caso 19 (§13): findLiteral llamado tras dispose — mismo tratamiento que
+  // process (caso 12).
+  describe("Caso 19: findLiteral llamado tras dispose", () => {
+    it("findLiteral throws EngineDisposedError after dispose", async () => {
+      await engine.dispose();
+      const document = makeSinglePageDocument("doc-find-literal-after-dispose", ["Ana"]);
+      await expect(
+        engine.findLiteral({ document, value: "Ana", entityType: EntityType.Person }, ctx),
+      ).rejects.toThrow(EngineDisposedError);
+    });
+  });
+
   // No numerado en §13 (regla de §11: input null/undefined → InvalidInputError).
   describe("Null/undefined input", () => {
     it("throws InvalidInputError for null input", async () => {
       // @ts-expect-error — assert de runtime: §11 exige rechazar input null con InvalidInputError.
       await expect(engine.process(null, ctx)).rejects.toThrow(InvalidInputError);
+    });
+
+    it("findLiteral throws InvalidInputError for null input", async () => {
+      // @ts-expect-error — assert de runtime: mismo criterio que process() (§11).
+      await expect(engine.findLiteral(null, ctx)).rejects.toThrow(InvalidInputError);
     });
 
     it("throws InvalidInputError for undefined input", async () => {
@@ -290,6 +309,78 @@ describe("RegexEngine — edge case tests", () => {
       const document = makeSinglePageDocument("doc-custom-checksum-fail", ["TICKET-12345"]);
       const output = await engine.process({ document }, ctx);
       expect(output.occurrenceCount).toBe(0);
+    });
+  });
+
+  // ADR-061 §6: valor ausente del documento → occurrenceCount: 0, sin
+  // eventos, sin error. No es un fallo del Core que el usuario haya
+  // escrito algo que no está.
+  describe("findLiteral — valor ausente (ADR-061 §6)", () => {
+    it("findLiteral with a value absent from the document returns 0 and emits nothing", async () => {
+      const document = makeSinglePageDocument("doc-absent-value", [
+        "Texto",
+        "sin",
+        "coincidencias.",
+      ]);
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      const output = await engine.findLiteral(
+        { document, value: "Roberto Sánchez", entityType: EntityType.Person },
+        ctx,
+      );
+
+      expect(output.occurrenceCount).toBe(0);
+      expect(busEmitSpy).not.toHaveBeenCalled();
+    });
+
+    it("findLiteral with an empty or whitespace-only value returns 0 without error", async () => {
+      const document = makeSinglePageDocument("doc-empty-value", ["Cualquier", "cosa"]);
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      const output = await engine.findLiteral(
+        { document, value: "   ", entityType: EntityType.Person },
+        ctx,
+      );
+
+      expect(output.occurrenceCount).toBe(0);
+      expect(busEmitSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  // ADR-061 §1: findLiteral opera sobre Page.words, que no distingue el
+  // origen de la palabra — funciona igual sobre palabras de OCR.
+  describe("findLiteral — palabras de OCR (ADR-061 §1)", () => {
+    it("findLiteral works over OCR-sourced words", async () => {
+      const words = [makeOcrWord("Lucía", 10, 0), makeOcrWord("Ibarra", 70, 0)];
+      const document = makeDocument("doc-ocr-literal", [makePageFromWords(0, words)]);
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      const output = await engine.findLiteral(
+        { document, value: "LUCIA IBARRA", entityType: EntityType.Person },
+        ctx,
+      );
+
+      expect(output.occurrenceCount).toBe(1);
+      const call = busEmitSpy.mock.calls.find(([, event]) => event === EngineEvents.ENTITY_FOUND);
+      const occurrence = (call?.[2] as EntityFound).occurrence;
+      expect(occurrence.source).toBe("manual");
+      expect(occurrence.value).toBe("Lucía Ibarra");
+    });
+  });
+
+  // No numerado en §14 (guarda de cancelación cooperativa entre páginas,
+  // mismo criterio que process()/caso 11).
+  describe("findLiteral — cancelación", () => {
+    it("findLiteral throws CancelledError when aborted before the first page", async () => {
+      const abortController = new AbortController();
+      const ctxWithAbort = createEngineContext({ abortSignal: abortController.signal });
+      abortController.abort();
+
+      await engine.init(ctxWithAbort);
+      const document = makeSinglePageDocument("doc-find-literal-cancelled", ["Ana", "Gómez"]);
+      await expect(
+        engine.findLiteral(
+          { document, value: "Ana Gómez", entityType: EntityType.Person },
+          ctxWithAbort,
+        ),
+      ).rejects.toThrow(CancelledError);
     });
   });
 });
