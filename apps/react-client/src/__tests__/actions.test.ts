@@ -19,6 +19,9 @@ const importDocument = vi.fn().mockResolvedValue(undefined);
 const retryWithPassword = vi.fn().mockResolvedValue(undefined);
 const reanalyze = vi.fn().mockResolvedValue(undefined);
 const addManualEntity = vi.fn();
+const getPageWords = vi.fn();
+const getPageSize = vi.fn();
+const findText = vi.fn();
 
 vi.mock("../core-adapter/index.js", () => ({
   getCore: () => ({
@@ -28,6 +31,9 @@ vi.mock("../core-adapter/index.js", () => ({
       retryWithPassword,
       reanalyze,
       addManualEntity,
+      getPageWords,
+      getPageSize,
+      findText,
       cancel: vi.fn(),
       closeDocument: vi.fn(),
       getState: vi.fn(),
@@ -59,11 +65,17 @@ describe("actions", () => {
     retryWithPassword.mockClear();
     reanalyze.mockClear();
     addManualEntity.mockClear();
+    getPageWords.mockClear();
+    getPageSize.mockClear();
+    findText.mockClear();
     // vitest.config.ts tiene mockReset: true — resetea la implementación de
     // todos los mocks antes de cada test, así que hay que reaplicar el
     // resolved value acá (a diferencia de los demás mocks de este archivo,
     // que devuelven `undefined` y son indistinguibles del reset default).
     addManualEntity.mockResolvedValue({ occurrenceCount: 1 });
+    getPageWords.mockReturnValue([]);
+    getPageSize.mockReturnValue({ width: 612, height: 792 });
+    findText.mockReturnValue([]);
     useDocumentStore.getState().reset();
     useEntitiesStore.getState().reset();
     useRulesStore.getState().reset();
@@ -105,6 +117,15 @@ describe("actions", () => {
     actions.closeDocument();
 
     expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("getPageWords/getPageSize/findText return their empty defaults when none is open", () => {
+    expect(actions.getPageWords(0)).toEqual([]);
+    expect(actions.getPageSize(0)).toBeNull();
+    expect(actions.findText("test")).toEqual([]);
+    expect(getPageWords).not.toHaveBeenCalled();
+    expect(getPageSize).not.toHaveBeenCalled();
+    expect(findText).not.toHaveBeenCalled();
   });
 
   it("actions requiring an active document no-op when none is open (async orchestrator calls)", async () => {
@@ -270,6 +291,26 @@ describe("actions", () => {
       const result = await actions.addManualEntity(request);
       expect(addManualEntity).toHaveBeenCalledWith("doc-1", request);
       expect(result).toEqual({ occurrenceCount: 1 });
+    });
+
+    it("getPageWords forwards the pageIndex and returns the orchestrator's words", () => {
+      const words = [{ text: "hola", bbox: { x: 0, y: 0, width: 10, height: 10 } }];
+      getPageWords.mockReturnValue(words);
+      expect(actions.getPageWords(3)).toBe(words);
+      expect(getPageWords).toHaveBeenCalledWith("doc-1", 3);
+    });
+
+    it("getPageSize forwards the pageIndex and returns the orchestrator's size", () => {
+      getPageSize.mockReturnValue({ width: 100, height: 200 });
+      expect(actions.getPageSize(3)).toEqual({ width: 100, height: 200 });
+      expect(getPageSize).toHaveBeenCalledWith("doc-1", 3);
+    });
+
+    it("findText forwards the query and returns the orchestrator's matches", () => {
+      const matches = [{ pageIndex: 0, bbox: { x: 0, y: 0, width: 1, height: 1 }, text: "ana" }];
+      findText.mockReturnValue(matches);
+      expect(actions.findText("ana")).toBe(matches);
+      expect(findText).toHaveBeenCalledWith("doc-1", "ana");
     });
 
     it("requestExport emits EXPORT_REQUESTED with the options", () => {
