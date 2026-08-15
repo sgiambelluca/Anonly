@@ -1,13 +1,15 @@
-<!-- CONTEXT: scope=regex-engine | dependencias=core/Contracts.md,architecture/06_Pipeline.md,adr/ADR-021-Engines-Inline-Hasta-Hito9.md,adr/ADR-022-Regex-Phone-AR-Word-Boundaries.md,adr/ADR-066-Texto-De-Anotaciones-Y-Reemplazo-Rotado.md | audiencia=IA-implementador | fase=3 (items §15 1-18 implementados; tests cancel/perf de §14 diferidos a Hito 11; §6/§14/§15 en fase 10.7: findLiteral para el agregado manual de entidades, ADR-061; §10/§14/§15 en fase 10.8: propagación de bbox.rotation, ADR-066 §6) -->
+<!-- CONTEXT: scope=regex-engine | dependencias=core/Contracts.md,architecture/06_Pipeline.md,adr/ADR-021-Engines-Inline-Hasta-Hito9.md,adr/ADR-022-Regex-Phone-AR-Word-Boundaries.md,adr/ADR-066-Texto-De-Anotaciones-Y-Reemplazo-Rotado.md | audiencia=IA-implementador | fase=3 (items §15 1-18 implementados; tests cancel/perf de §14 diferidos a Hito 11; §4/§6/§13/§14/§15 en fase 10.7: findLiteral para el agregado manual de entidades, ADR-061, con sus dos primitivas importadas de shared y no reimplementadas —errata de ADR-061 §2—; §10/§14/§15 en fase 10.8: propagación de bbox.rotation, ADR-066 §6) -->
 
 # Regex Engine — Spec de Motor
 
 > Detecta patrones determinísticos (DNI, CUIT, teléfono, email, IBAN, tarjeta, fecha, matrícula, patente) en el texto de cada página. Emite `Occurrence[]` con `source: "regex"` y `confidence: 1.0`. Es determinista: mismo input → mismo output.
 
 **EngineId**: `regex`
-**Versión del spec**: 1.2.0
-**Última actualización**: 2026-08-13
-**Estado de implementación**: Hito 4, checklist §15 (items 1-18) implementado; item 19 (propagación de `bbox.rotation`) en Hito 10.8. Pendiente: `cancel.test.ts`/`perf.test.ts` de §14 en Hito 11 (ver nota al final de §15); `findLiteral` en Hito 10.7.
+**Versión del spec**: 1.3.0
+**Última actualización**: 2026-08-14
+**Estado de implementación**: Hito 4, checklist §15 (items 1-18) implementado; item 19 (propagación de `bbox.rotation`) en Hito 10.8. Pendiente: `cancel.test.ts`/`perf.test.ts` de §14 en Hito 11 (ver nota al final de §15); `findLiteral` (item 10b) en Hito 10.7, **bloqueado por el PR 1c de `shared`** que declara `sharesVerticalBand` y `normalizeForComparison`.
+
+> **Nota (v1.3.0, ADR-061 §2 errata, 2026-08-14 — las dos primitivas de `findLiteral` salen de `shared`, no se reimplementan acá)**: ADR-061 §2 pedía que el matcheo multi-palabra usara "la misma agrupación por banda vertical que ADR-058 §5", como **una** primitiva compartida. No era alcanzable: vivía en el façade (`src/line-words.ts`), que ningún motor puede importar (P-2), y **ya estaba duplicada** en `render-engine/src/worker/kernel.ts`. Lo mismo con la normalización NFC, cuya única implementación estaba en `grouping-engine`. Las dos se promueven a `@anonly/shared` —`sharesVerticalBand` y `normalizeForComparison`, `Contracts.md` §6— con el mismo razonamiento que `estimateTokenWidth`: es el único lugar desde el que los tres consumidores llegan sin importarse entre sí. Para este motor el efecto es directo: **las importa** (§4, §6) y el chequeo de banda vertical deja de ser opcional — sin él, un valor que cruza de un renglón al siguiente da un falso positivo y se anonimiza texto que no es la entidad. Ver §13 casos 14-19 y las filas nuevas de §14; el test del corte de línea es el que faltaba y el que protege el fix.
 
 > **Nota (v1.2.0, ADR-066 §6, 2026-08-13 — `bbox.rotation` viaja en la `Occurrence`)**: `BoundingBox` ganó el campo opcional `rotation` (`Contracts.md` §5), y ADR-066 §6 lo justificó diciendo que viajaría solo por la cadena `Word → Occurrence → Replacement` porque *"`mapSpanToWords` une bboxes y el campo viaja con ellos"*. **No viajaba**: la unión construye un `BoundingBox` **nuevo** a partir de min/max escalares, así que el campo se caía en silencio — el `Word` salía con `rotation: 90` y la `Occurrence` sin el campo, y el pintado rotado de ADR-066 §7 nunca se activaba. Se propaga explícitamente, y **solo si todas las palabras del match coinciden en el ángulo**: si discrepan, la envolvente de dos direcciones de avance no tiene un ángulo que la describa y el campo queda ausente (≡ 0), que es el comportamiento previo. Ver §10, §14 y §15 item 19. El mismo defecto y el mismo criterio aplican a la copia adaptada de esta función en `NER_Engine.md`.
 
@@ -48,7 +50,7 @@ Recorrer el `Document` (con texto ya fusionado PDF+OCR) y emitir `Occurrence[]` 
 
 ## 4. Dependencias permitidas
 
-- `@anonly/shared`
+- `@anonly/shared` — incluidas sus dos funciones puras `sharesVerticalBand` y `normalizeForComparison` (`Contracts.md` §6), que `findLiteral` **consume, no reimplementa**: las dos son compartidas con otros motores y con el façade, y `shared` es el único lugar desde el que los tres las alcanzan (errata de ADR-061 §2).
 - Tipos de `core/Contracts.md`: `IEngine`, `EngineContext`, `Document`, `Page`, `Word`, `Occurrence`, `EntityType`, `DetectionSource`, `BoundingBox`
 - `architecture/04_Event_System.md`: `ENTITY_FOUND`, `REGEX_FINISHED`
 
@@ -116,8 +118,8 @@ Semántica de `findLiteral` (ADR-061 §1/§2):
 
 - Busca el `value` en el documento y emite una `Occurrence` por coincidencia, con `source: DetectionSource.Manual`, `confidence: 1.0` y el bbox resuelto por `mapSpanToWords` — el mismo camino que usa `process`.
 - **No emite `REGEX_FINISHED`** y **no toca el registro de patrones**: no es una corrida de detección, es una consulta puntual. `addPattern` sigue siendo para patrones que participan de todas las corridas.
-- **Matcheo exacto, normalizado**: NFC + minúsculas + sin diacríticos, mismo criterio que el `normalizedValue` de `Occurrence`. `"JOSE PEREZ"` encuentra `"José Pérez"`.
-- **Valores multi-palabra** matchean sobre `Word` contiguas de la misma línea (agrupación por banda vertical, la misma primitiva que ADR-058 §5 introduce para el repintado — no dos implementaciones).
+- **Matcheo exacto, normalizado**: NFC + minúsculas + sin diacríticos, mismo criterio que el `normalizedValue` de `Occurrence`. `"JOSE PEREZ"` encuentra `"José Pérez"`. La normalización es **`normalizeForComparison` de `@anonly/shared`** (`Contracts.md` §6), no una función local: los `normalizer` de `RegexPattern` (`stripDots`, `stripDashes`) asumen un dato estructurado y acá el valor es texto libre. Se normaliza **antes** de tokenizar por espacios, así que el colapso de espacios repetidos sale gratis (§13 caso 17).
+- **Valores multi-palabra** matchean sobre `Word` contiguas de la misma línea. "Misma línea" es **`sharesVerticalBand` de `@anonly/shared`** (`Contracts.md` §6): cada par consecutivo de la ventana candidata tiene que compartir banda vertical, no alcanza con ser contiguas en `Page.words`. Es la misma definición que usan `render-engine` y el façade — una sola, no tres (errata de ADR-061 §2). Sin ese chequeo, un valor que cruza de un renglón al siguiente da un falso positivo (§13 caso 16).
 - **`"J. Pérez"` no matchea `"José Pérez"`.** Limitación deliberada, con test explícito (§14) para que no se implemente por accidente ni se rompa en silencio. La búsqueda difusa de variantes está anotada en `roadmap/Future_Ideas.md` §5.1b.
 - Valor ausente del documento → `occurrenceCount: 0`, **sin eventos y sin error**: no es un fallo del Core que el usuario haya escrito algo que no está.
 - Funciona igual sobre páginas cuyas palabras vienen de OCR (`Word.source === "ocr"`): opera sobre `Page.words`, que no distingue el origen.
@@ -236,6 +238,15 @@ Regex es determinista: si la regex compila, no hay errores de runtime. Errores d
 12. **`process` tras `dispose`**: lanza `EngineDisposedError`.
 13. **100 patrones custom activos**: el costo escala lineal con #patrones; 100 patrones × 50 páginas = 5000 ejecuciones de regex. Mitigado: compilar todas las regex al `init`, reutilizar instancias `RegExp` compiladas.
 
+Casos de `findLiteral` (ADR-061 §1/§2 y su errata):
+
+14. **Valor vacío o de solo espacios**: `normalizeForComparison` lo deja en `""`, no hay tokens que buscar → `occurrenceCount = 0` sin recorrer el documento, sin eventos y **sin error**. Que el usuario mande un valor vacío es un caso de UI, no un fallo del Core.
+15. **Valor ausente del documento** (o escrito con un typo): `occurrenceCount = 0`, sin eventos, sin error (ADR-061 §6).
+16. **El valor cruza de una línea a la siguiente**: la última palabra de una línea y la primera de la siguiente son contiguas en `Page.words` pero **no comparten banda vertical**, así que **no matchean** — la secuencia tiene que ser contigua *y* de la misma línea. Es el caso que la errata de ADR-061 §2 destapó: sin el chequeo de banda, "José Pérez" matchearía un "…José" al final de un renglón seguido de un "Pérez…" al principio del siguiente, y se anonimizaría texto que no es la entidad. **Residuo aceptado**: dos *columnas* de la misma línea visual sí comparten banda, así que ese falso positivo queda abierto (errata de ADR-061 §2, punto 7).
+17. **Espacios repetidos o de más en el valor** (`"José   Pérez "`): la normalización colapsa y recorta antes de tokenizar, así que matchea igual. La tokenización es por espacios sobre el valor ya normalizado, no sobre el crudo.
+18. **Coincidencias solapadas**: buscar `"ana ana"` sobre `"ana ana ana"` emite **una** ocurrencia, no dos. Tras un match el barrido avanza el largo completo de la secuencia; los solapamientos no se reportan. Buscar `"ana"` sobre lo mismo sí emite tres — son matches disjuntos.
+19. **`findLiteral` tras `dispose`**: lanza `EngineDisposedError`, igual que `process` (caso 12). Sin `init` previo, `EngineNotInitializedError`.
+
 ---
 
 ## 14. Casos de prueba
@@ -263,8 +274,12 @@ Regex es determinista: si la regex compila, no hay errores de runtime. Errores d
 | `findLiteral emits no REGEX_FINISHED and does not touch the pattern registry` | `contract.test.ts` | contract | ADR-061 §1 — no es una corrida de detección |
 | `findLiteral matches case- and accent-insensitively` | `unit.test.ts` | unit | ADR-061 §2 |
 | `findLiteral matches a multi-word value over contiguous words of the same line` | `unit.test.ts` | unit | ADR-061 §2 |
+| **`findLiteral does NOT match a value whose words fall on different lines`** | `unit.test.ts` | unit | ADR-061 §2 errata, caso 16 — el chequeo de `sharesVerticalBand`. Las palabras tienen que ser contiguas **y** compartir banda vertical; sin este test la banda se pierde en silencio y vuelve el falso positivo del corte de renglón |
 | **`findLiteral does NOT match "J. Pérez" for "José Pérez"`** | `unit.test.ts` | unit | ADR-061 §2 — asertar la **limitación** deliberada: protege contra implementarla por accidente y contra romperla en silencio (`Future_Ideas.md` §5.1b) |
-| `findLiteral with a value absent from the document returns 0 and emits nothing` | `edge.test.ts` | edge | ADR-061 §6 |
+| `findLiteral with a value absent from the document returns 0 and emits nothing` | `edge.test.ts` | edge | ADR-061 §6 — caso 15 |
+| `findLiteral with an empty or whitespace-only value returns 0 without error` | `edge.test.ts` | edge | ADR-061 §6 — caso 14 |
+| `findLiteral does not report overlapping matches` | `unit.test.ts` | unit | caso 18: `"ana ana"` sobre `"ana ana ana"` emite una, no dos |
+| `findLiteral throws EngineDisposedError after dispose` | `edge.test.ts` | edge | caso 19 — mismo tratamiento que `process` (caso 12) |
 | `findLiteral works over OCR-sourced words` | `edge.test.ts` | edge | ADR-061 §1 |
 | `propagates rotation from the matched words to the occurrence bbox` | `unit.test.ts` | unit | ADR-066 §6: `mapSpanToWords` arma un bbox nuevo y el campo se caía en silencio |
 | `propagates rotation when every word of a multi-word match agrees` | `unit.test.ts` | unit | ADR-066 §6: unión de varias palabras del mismo run |
@@ -288,7 +303,7 @@ Fixtures: `tests/fixtures/text-10p.pdf` (con DNIs, CUITs, emails, teléfonos con
 - [ ] 8. Implementar priorización de match más largo en overlap (caso 10).
 - [ ] 9. Implementar timeout por patrón custom (1000 ms).
 - [ ] 10. Implementar `addPattern`/`removePattern` (recompila la lista activa).
-- [ ] 10b. (Hito 10.7, PR 2 — ADR-061 §1/§2) Implementar `findLiteral`: normalización NFC + minúsculas + sin diacríticos, matcheo sobre secuencias de `Word` contiguas de la misma línea, `Occurrence` con `source: Manual` y bbox por `mapSpanToWords`. **Sin emitir `REGEX_FINISHED` y sin tocar el registro de patrones.** Valor ausente → `occurrenceCount: 0` sin eventos ni error. El test de que `"J. Pérez"` **no** matchea `"José Pérez"` es parte del entregable, no un extra.
+- [ ] 10b. (Hito 10.7, PR 2 — ADR-061 §1/§2 y su errata) Implementar `findLiteral`: matcheo sobre secuencias de `Word` contiguas **y de la misma línea**, `Occurrence` con `source: Manual` y bbox por `mapSpanToWords`. **Sin emitir `REGEX_FINISHED` y sin tocar el registro de patrones.** Valor ausente o vacío → `occurrenceCount: 0` sin eventos ni error. Las dos primitivas —`sharesVerticalBand` y `normalizeForComparison`— se **importan de `@anonly/shared`** (§4, `Contracts.md` §6); reimplementarlas acá es exactamente lo que la errata de ADR-061 §2 vino a impedir, y el PR de `shared` que las declara (Hito 10.7 PR 1c) es precondición de éste. Dos tests son parte del entregable, no un extra: que `"J. Pérez"` **no** matchea `"José Pérez"`, y que un valor cuyas palabras caen en **líneas distintas** tampoco (§13 caso 16). Los casos 14-19 de §13 y sus filas de §14 entran completos en este PR.
 - [ ] 11. Implementar `dispose` (limpia lista de patrones, sin recursos externos que liberar).
 - [ ] 12. Escribir `contract.test.ts` con todos los tests contractuales.
 - [ ] 13. Escribir `unit.test.ts` con cobertura ≥ 85%.
