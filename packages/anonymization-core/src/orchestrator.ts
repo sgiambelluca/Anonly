@@ -53,10 +53,12 @@ import {
   type ICache,
   type IEventBus,
   type ILogger,
+  type ManualEntityRequest,
   type NerPageFinished,
   type OcrPageFailed,
   type OcrPageFinished,
   type OcrRegion,
+  type Page,
   type PageParsed,
   type PdfInvalid,
   type PdfParsePayload,
@@ -219,6 +221,14 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
   // de `cancel()`, la cancelación de un reanalyze (vuelve a Ready, caso 22)
   // de la cancelación de un importDocument (va a Cancelled, caso 8).
   private readonly reanalyzeInFlight = new Set<string>();
+  // ADR-061 §5: literales agregados a mano por documento, durables — se
+  // re-aplican tras cualquier re-detección que pueda haber descartado sus
+  // ocurrencias (reapplyManualLiterals, invocado desde runReanalyzeOcrFlow).
+  // Sin esto, un reanalyze de OCR borra en silencio las entidades que el
+  // usuario agregó a mano sobre las páginas re-OCR-eadas (el modo de falla
+  // que ADR-061 existe para cerrar). Se descarta en closeDocument/dispose,
+  // mismo patrón que el resto del estado por documento.
+  private readonly manualLiteralsByDocument = new Map<string, ManualEntityRequest[]>();
   // ─── Mediación grupos→Render del preview (ADR-044) ───
   // Por documento: groupId → páginas conocidas (members actuales de la última
   // vez que se vio el grupo). Necesario para ENTITY_GROUP_REMOVED (el payload
@@ -390,6 +400,94 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     }
   }
 
+  /**
+   * ADR-061 §6: agrega a mano una entidad que el detector no encontró.
+   * `reopenSession` -> `regex.findLiteral` (emite `ENTITY_FOUND` con
+   * `source: Manual`, camino de siempre) -> `finishSession` (ADR-028,
+   * renumeración canónica). El dedup por identidad de ADR-038 §3 es lo que
+   * hace segura la repetición — no hay nada que escribir acá para eso.
+   * Precondición de stage idéntica a la de `getState`/`reanalyze` en su
+   * forma (documento inexistente o stage fuera del conjunto permitido ->
+   * `InvalidInputError`), pero el conjunto es `{Ready, Failed}` — literal de
+   * `Contracts.md` §3.5, más angosto que el `{Ready, Done, Failed}` de
+   * `reanalyze` (ADR-040 no amendó esta precondición). Mismo motivo que ahí:
+   * esto además autorrechaza una segunda llamada concurrente (a
+   * `addManualEntity` o a `reanalyze`) sobre el mismo documento, porque el
+   * `setStage(Grouping)` de abajo saca el stage de `Ready` mientras esta
+   * corre — transitorio, como el de `runReanalyzeNerOffFlow` (caso 19).
+   */
+  async addManualEntity(documentId: string, request: ManualEntityRequest): Promise<void> {
+    this.assertNotDisposed();
+
+    const state = this.state.get(documentId);
+    if (
+      state === undefined ||
+      !(state.stage === PipelineStage.Ready || state.stage === PipelineStage.Failed)
+    ) {
+      throw new InvalidInputError(
+        `addManualEntity requiere stage Ready o Failed para ${documentId} (actual: ${state?.stage ?? "inexistente"}).`,
+        { documentId, stage: state?.stage },
+      );
+    }
+
+    const document = this.documents.get(documentId);
+    if (document === undefined) {
+      throw new InvalidInputError(`Documento ${documentId} no disponible para addManualEntity.`, {
+        documentId,
+      });
+    }
+
+    // Retenido ANTES de buscar: la durabilidad (ADR-061 §5) no depende de
+    // que la búsqueda encuentre algo hoy — un reanalyze posterior puede
+    // hacer aparecer el valor en una página recién re-OCR-eada.
+    const literals = this.manualLiteralsByDocument.get(documentId) ?? [];
+    literals.push(request);
+    this.manualLiteralsByDocument.set(documentId, literals);
+
+    const controller = this.abortRegistry.get(documentId) ?? this.abortRegistry.create(documentId);
+    const ctx = this.ctxFor(controller.signal, documentId);
+
+    this.setStage(documentId, PipelineStage.Grouping);
+    this.engines.grouping.reopenSession(documentId, { expectRegex: false, expectNer: false });
+    await this.engines.regex.findLiteral(
+      { document, value: request.value, entityType: request.entityType },
+      ctx,
+    );
+    await this.engines.grouping.finishSession(documentId);
+  }
+
+  /**
+   * ADR-061 §4: por página y a demanda — no vuelca el `Document` entero al
+   * store del cliente (Contexto §4 del ADR: hoy el cliente no tiene ni
+   * palabras ni dimensiones reales de página).
+   */
+  getPageWords(documentId: string, pageIndex: number): ReadonlyArray<Word> {
+    return this.getPageOrThrow(documentId, pageIndex).words;
+  }
+
+  getPageSize(
+    documentId: string,
+    pageIndex: number,
+  ): { readonly width: number; readonly height: number } {
+    const page = this.getPageOrThrow(documentId, pageIndex);
+    return { width: page.width, height: page.height };
+  }
+
+  private getPageOrThrow(documentId: string, pageIndex: number): Page {
+    const document = this.documents.get(documentId);
+    if (document === undefined) {
+      throw new InvalidInputError(`Documento ${documentId} no disponible.`, { documentId });
+    }
+    const page = document.pages[pageIndex];
+    if (page === undefined) {
+      throw new InvalidInputError(`Página ${pageIndex} fuera de rango para ${documentId}.`, {
+        documentId,
+        pageIndex,
+      });
+    }
+    return page;
+  }
+
   cancel(documentId: string, jobId?: string): Promise<void> {
     void jobId; // MVP: cancelación total del documento (07_Performance_Strategy.md §9).
     if (!this.state.has(documentId)) return Promise.resolve(); // idempotente
@@ -549,7 +647,16 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     // descarta los duplicados de las páginas intactas.
     await this.engines.regex.process({ document: updatedDocument }, ctx);
 
-    if (!effectiveConfig.ner.enabled) return; // handleRegexFinished ya invoca finishSession (ner off).
+    if (!effectiveConfig.ner.enabled) {
+      // handleRegexFinished ya invocó finishSession (ner off) de forma
+      // síncrona dentro del await de arriba (nota de sincronía de cabecera):
+      // la sesión ya volvió a cerrarse acá. ADR-061 §5: reabrir para
+      // re-aplicar los literales manuales retenidos sobre las páginas que
+      // `dropOccurrences` acaba de descartar — sin esto el dato agregado a
+      // mano desaparece del árbol en silencio.
+      await this.reapplyManualLiterals(documentId, ctx);
+      return;
+    }
 
     const nerInputs: NerPageInput[] = updatedDocument.pages
       .filter((page) => affectedPages.has(page.index))
@@ -562,7 +669,47 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     // acepta ser envuelto en un `pool.dispatch` externo sin duplicar su
     // propio retry interno — problema 2 del Contexto de ADR-046).
     await this.engines.ner.processPages(nerInputs, ctx);
-    // Auto-finish vía GroupingEngine (regex + ner, ambos *_FINISHED).
+    // Auto-finish vía GroupingEngine (regex + ner, ambos *_FINISHED) ya
+    // cerró la sesión para cuando este await resuelve (misma nota de
+    // sincronía). ADR-061 §5: mismo motivo que la rama de arriba.
+    await this.reapplyManualLiterals(documentId, ctx);
+  }
+
+  /**
+   * ADR-061 §5: re-aplica los literales manuales retenidos del documento.
+   * Único punto de enganche real: `runReanalyzeOcrFlow` es el único flujo de
+   * `reanalyze` cuyo `dropOccurrences` filtra por `pageIndices` (borra
+   * ocurrencias de CUALQUIER `source`, incluida `Manual`) — el de
+   * `runReanalyzeNerOffFlow` filtra por `source: DetectionSource.NER` y
+   * nunca puede tocar una ocurrencia manual (`matchesDropFilter`,
+   * `grouping-engine`), así que no necesita este re-enganche.
+   *
+   * Corre DESPUÉS de que la sesión ya volvió a cerrarse por la propia
+   * cascada de re-detección (Regex/NER auto-finalizan la sesión de Grouping,
+   * nota de sincronía de cabecera): reabre de nuevo, re-busca cada literal
+   * retenido sobre el `Document` ya actualizado por el re-OCR/re-fusión, y
+   * vuelve a cerrar. El dedup por identidad de ADR-038 §3 descarta en
+   * silencio los literales que ya sobrevivieron en páginas no afectadas —
+   * re-buscar sobre el documento completo (no solo las páginas afectadas) es
+   * inocuo, mismo razonamiento que ya vale para la re-pasada de Regex de
+   * arriba. No-op si no hay literales retenidos (evita un ciclo
+   * reopen/finish vacío) o si el documento ya no está disponible.
+   */
+  private async reapplyManualLiterals(documentId: string, ctx: EngineContext): Promise<void> {
+    const literals = this.manualLiteralsByDocument.get(documentId);
+    if (literals === undefined || literals.length === 0) return;
+
+    const document = this.documents.get(documentId);
+    if (document === undefined) return;
+
+    this.engines.grouping.reopenSession(documentId, { expectRegex: false, expectNer: false });
+    for (const literal of literals) {
+      await this.engines.regex.findLiteral(
+        { document, value: literal.value, entityType: literal.entityType },
+        ctx,
+      );
+    }
+    await this.engines.grouping.finishSession(documentId);
   }
 
   async closeDocument(documentId: string): Promise<void> {
@@ -589,6 +736,8 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     this.progressByDocument.delete(documentId);
     this.effectiveConfigByDocument.delete(documentId);
     this.reanalyzeInFlight.delete(documentId);
+    // ADR-061 §5: mismo patrón que el resto del estado por documento.
+    this.manualLiteralsByDocument.delete(documentId);
     this.groupPagesByDocument.delete(documentId);
     this.dirtyPagesByDocument.delete(documentId);
     this.flushScheduledDocuments.delete(documentId);
@@ -626,6 +775,7 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     this.progressByDocument.clear();
     this.effectiveConfigByDocument.clear();
     this.reanalyzeInFlight.clear();
+    this.manualLiteralsByDocument.clear();
     this.groupPagesByDocument.clear();
     this.dirtyPagesByDocument.clear();
     this.flushScheduledDocuments.clear();

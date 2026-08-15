@@ -1793,6 +1793,23 @@ describe("Orchestrator — edge cases", () => {
       });
     }).not.toThrow();
   });
+
+  // ─── getPageWords/getPageSize (ADR-061 §4) ───
+
+  it("getPageWords/getPageSize on unknown documentId or pageIndex throw InvalidInputError", async () => {
+    const { orchestrator } = makeOrchestrator();
+    await orchestrator.importDocument(createImportInput());
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+
+    expect(() => orchestrator.getPageWords("doc-unknown", 0)).toThrow(InvalidInputError);
+    expect(() => orchestrator.getPageSize("doc-unknown", 0)).toThrow(InvalidInputError);
+    expect(() => orchestrator.getPageWords("doc-1", 99)).toThrow(InvalidInputError);
+    expect(() => orchestrator.getPageSize("doc-1", 99)).toThrow(InvalidInputError);
+
+    // Camino feliz: el guard no rompe el acceso a una página válida.
+    expect(orchestrator.getPageWords("doc-1", 0)).toEqual([]);
+    expect(orchestrator.getPageSize("doc-1", 0)).toEqual({ width: 595, height: 842 });
+  });
 });
 
 describe("WorkerPool — transporte postMessage, casos límite (Hito 10, ADR-036 §2/§3)", () => {

@@ -35,7 +35,7 @@
 import {
   estimateTokenWidth,
   ReplacementMode,
-  type BoundingBox,
+  sharesVerticalBand,
   type Replacement,
   type Word,
 } from "@anonly/shared";
@@ -64,15 +64,6 @@ function mightOverflow(replacement: Replacement): boolean {
 }
 
 /**
- * Dos bboxes "comparten banda vertical" cuando sus extensiones en Y se
- * solapan — el criterio geométrico estándar de overlap de intervalos, sin
- * umbral de proporción: cualquier solapamiento cuenta como misma línea.
- */
-function sharesVerticalBand(a: BoundingBox, b: BoundingBox): boolean {
-  return a.y < b.y + b.height && b.y < a.y + a.height;
-}
-
-/**
  * `word` está a la derecha de `replacement` cuando arranca en o después del
  * borde **derecho** del bbox del reemplazo — no del borde izquierdo.
  *
@@ -83,6 +74,12 @@ function sharesVerticalBand(a: BoundingBox, b: BoundingBox): boolean {
  * línea. Comparar contra el borde derecho selecciona únicamente las palabras
  * que quedan **después** de lo que el reemplazo ya cubre — las mismas que
  * ADR-058 §2 paso 3 describe como "cada palabra siguiente de la línea".
+ *
+ * `sharesVerticalBand` es la de `@anonly/shared` (ADR-061 §2, errata): este
+ * archivo tenía su propia copia porque no había un lugar común desde el que
+ * los tres consumidores (este façade, `render-engine` y `regex-engine`)
+ * pudieran importarla sin que dos motores se importen entre sí (P-1). El
+ * criterio no cambió — de-dup puro (`Contracts.md` §6).
  */
 function isLineNeighbor(word: Word, replacement: Replacement): boolean {
   if (!sharesVerticalBand(word.bbox, replacement.bbox)) return false;
