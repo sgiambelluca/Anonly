@@ -55,6 +55,54 @@ interface RawMatch {
 interface WordMapping {
   readonly bbox: BoundingBox;
   readonly wordSpan: WordSpan;
+  readonly fragments?: ReadonlyArray<BoundingBox>;
+}
+
+/*
+ * ADR-074 §2: parte `words[firstWordIndex..lastWordIndex]` en corridas de la
+ * misma línea (`sharesVerticalBand`, comparando contra la última palabra de
+ * la corrida actual — que, al recorrer en orden, es siempre la palabra
+ * anterior). Una sola corrida ⇒ caso normal, sin fragments. Devuelve los
+ * rectángulos ordenados por (y asc, x asc), como pide la Decisión.
+ */
+function fragmentWordsByLine(
+  words: ReadonlyArray<Word>,
+  firstWordIndex: number,
+  lastWordIndex: number,
+): ReadonlyArray<BoundingBox> | undefined {
+  const runs: Word[][] = [];
+  let currentRun: Word[] = [];
+
+  for (let i = firstWordIndex; i <= lastWordIndex; i++) {
+    const word = words[i];
+    if (!word) continue;
+    const lastOfRun = currentRun[currentRun.length - 1];
+    if (lastOfRun && !sharesVerticalBand(lastOfRun.bbox, word.bbox)) {
+      runs.push(currentRun);
+      currentRun = [];
+    }
+    currentRun.push(word);
+  }
+  if (currentRun.length > 0) runs.push(currentRun);
+
+  if (runs.length <= 1) return undefined;
+
+  const fragments = runs.map((run): BoundingBox => {
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const word of run) {
+      minX = Math.min(minX, word.bbox.x);
+      minY = Math.min(minY, word.bbox.y);
+      maxX = Math.max(maxX, word.bbox.x + word.bbox.width);
+      maxY = Math.max(maxY, word.bbox.y + word.bbox.height);
+    }
+    return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+  });
+
+  fragments.sort((a, b) => (a.y !== b.y ? a.y - b.y : a.x - b.x));
+  return fragments;
 }
 
 function withGlobalFlag(pattern: RegExp): RegExp {
@@ -229,9 +277,26 @@ function mapSpanToWords(
     ...(rotationAgrees && rotation !== undefined ? { rotation } : {}),
   };
 
+  // ADR-074 §3: el texto rotado no se fragmenta. Si alguna Word del match
+  // declara `rotation` distinta de ausente/0, la envolvente ya es ajustada
+  // (el run vertical está apilado en una columna) y partir por banda vertical
+  // haría lo contrario de lo que hace falta.
+  const hasRotatedWord = (() => {
+    for (let i = firstWordIndex; i <= lastWordIndex; i++) {
+      const r = words[i]?.bbox.rotation;
+      if (r !== undefined && r !== 0) return true;
+    }
+    return false;
+  })();
+  const fragments = hasRotatedWord
+    ? undefined
+    : fragmentWordsByLine(words, firstWordIndex, lastWordIndex);
+
   return {
     bbox,
     wordSpan: { startIndex: firstWordIndex, endIndexExclusive: lastWordIndex + 1 },
+    // exactOptionalPropertyTypes: spread condicional, nunca `fragments: undefined`.
+    ...(fragments ? { fragments } : {}),
   };
 }
 
@@ -252,9 +317,12 @@ function buildOccurrence(match: RawMatch, page: Page): Occurrence {
     // el mismo condicional que wordSpan (cuyo valor sí puede estar ausente).
     maskFormat: match.maskFormat,
   };
-  // exactOptionalPropertyTypes: wordSpan solo se incluye si se pudo mapear
-  // (nunca se asigna explícitamente `undefined`).
-  return wordMapping ? { ...base, wordSpan: wordMapping.wordSpan } : base;
+  // exactOptionalPropertyTypes: wordSpan y fragments solo se incluyen si
+  // existen (nunca se asigna explícitamente `undefined`).
+  const withWordSpan = wordMapping ? { ...base, wordSpan: wordMapping.wordSpan } : base;
+  return wordMapping?.fragments
+    ? { ...withWordSpan, fragments: wordMapping.fragments }
+    : withWordSpan;
 }
 
 // ─── Matcheo de texto literal (ADR-061 §1/§2, errata §8) ───────────────────

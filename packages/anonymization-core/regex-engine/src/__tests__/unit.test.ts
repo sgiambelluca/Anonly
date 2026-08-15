@@ -366,6 +366,68 @@ describe("RegexEngine — unit tests", () => {
     });
   });
 
+  // Caso 26 (§13, ADR-074 §2/§3).
+  describe("fragments (footprint multi-línea)", () => {
+    // El test que define el ADR de este lado: un teléfono partido entre dos
+    // renglones ("0221" cierra una línea, "4567890" abre la siguiente,
+    // phone-landline-ar) emite UNA Occurrence con fragments.length === 2, un
+    // rectángulo por línea, y bbox sigue siendo la envolvente de los dos.
+    it("a match whose words fall on two lines emits one occurrence with two fragments", async () => {
+      const words = [makeWord("0221", 10, 0, 100), makeWord("4567890", 10, 0, 130)];
+      const page = makePageFromWords(0, words);
+      const document = makeDocument("doc-two-lines", [page]);
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      await engine.process({ document }, ctx);
+      const call = busEmitSpy.mock.calls.find(([, event]) => event === EngineEvents.ENTITY_FOUND);
+      const occurrence = (call?.[2] as EntityFound | undefined)?.occurrence;
+
+      expect(occurrence?.entityType).toBe(EntityType.Phone);
+      expect(occurrence?.fragments).toEqual([
+        { x: 10, y: 100, width: 24, height: 12 },
+        { x: 10, y: 130, width: 42, height: 12 },
+      ]);
+      expect(occurrence?.bbox).toEqual({ x: 10, y: 100, width: 42, height: 42 });
+    });
+
+    // No-regresión: el caso normal (una sola línea) no cambia ni un byte.
+    it("a single-line match carries no fragments and its bbox is unchanged", async () => {
+      const occurrence = await firstOccurrence(engine, ctx, ["AB", "123", "CD"]);
+      expect(occurrence?.fragments).toBeUndefined();
+      expect(occurrence?.bbox).toEqual({ x: 10, y: 100, width: 62, height: 12 });
+    });
+
+    it("three lines produce three fragments in reading order", async () => {
+      // phone-mobile-ar tiene dos puntos de separador opcional: "11" + "4567" + "8900".
+      const words = [
+        makeWord("11", 10, 0, 100),
+        makeWord("4567", 10, 0, 130),
+        makeWord("8900", 10, 0, 160),
+      ];
+      const page = makePageFromWords(0, words);
+      const document = makeDocument("doc-three-lines", [page]);
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      await engine.process({ document }, ctx);
+      const call = busEmitSpy.mock.calls.find(([, event]) => event === EngineEvents.ENTITY_FOUND);
+      const occurrence = (call?.[2] as EntityFound | undefined)?.occurrence;
+
+      expect(occurrence?.fragments).toHaveLength(3);
+      expect(occurrence?.fragments?.map((f) => f.y)).toEqual([100, 130, 160]);
+    });
+
+    // Interacción con ADR-066 §6: el texto rotado no se fragmenta aunque sus
+    // palabras estén "apiladas" en y distintos (es la geometría normal de un
+    // run vertical), y conserva la rotation que ya propagaba antes de este ADR.
+    it("a rotated match carries no fragments and keeps its rotation", async () => {
+      const occurrence = await firstOccurrenceOfRotatedPage(engine, ctx, [
+        { text: "AB", rotation: 270 },
+        { text: "123", rotation: 270 },
+        { text: "CD", rotation: 270 },
+      ]);
+      expect(occurrence?.fragments).toBeUndefined();
+      expect(occurrence?.bbox.rotation).toBe(270);
+    });
+  });
+
   describe("Overlap resolution (caso 10 generalizado, no específico a DNI/CUIT)", () => {
     it("keeps the longest of two overlapping custom patterns", async () => {
       // "short-digits" (sin \b) matchea "12" y "34" como dos ocurrencias
