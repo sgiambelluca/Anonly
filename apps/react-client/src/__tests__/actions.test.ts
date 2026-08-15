@@ -18,7 +18,7 @@ const emit = vi.fn();
 const importDocument = vi.fn().mockResolvedValue(undefined);
 const retryWithPassword = vi.fn().mockResolvedValue(undefined);
 const reanalyze = vi.fn().mockResolvedValue(undefined);
-const addManualEntity = vi.fn().mockResolvedValue(undefined);
+const addManualEntity = vi.fn();
 
 vi.mock("../core-adapter/index.js", () => ({
   getCore: () => ({
@@ -59,6 +59,11 @@ describe("actions", () => {
     retryWithPassword.mockClear();
     reanalyze.mockClear();
     addManualEntity.mockClear();
+    // vitest.config.ts tiene mockReset: true — resetea la implementación de
+    // todos los mocks antes de cada test, así que hay que reaplicar el
+    // resolved value acá (a diferencia de los demás mocks de este archivo,
+    // que devuelven `undefined` y son indistinguibles del reset default).
+    addManualEntity.mockResolvedValue({ occurrenceCount: 1 });
     useDocumentStore.getState().reset();
     useEntitiesStore.getState().reset();
     useRulesStore.getState().reset();
@@ -105,11 +110,17 @@ describe("actions", () => {
   it("actions requiring an active document no-op when none is open (async orchestrator calls)", async () => {
     await actions.reanalyze({ ner: { enabled: false } });
     await actions.retryWithPassword("secret");
-    await actions.addManualEntity({ value: "José Pérez", entityType: EntityType.Person });
+    const result = await actions.addManualEntity({
+      value: "José Pérez",
+      entityType: EntityType.Person,
+    });
 
     expect(reanalyze).not.toHaveBeenCalled();
     expect(retryWithPassword).not.toHaveBeenCalled();
     expect(addManualEntity).not.toHaveBeenCalled();
+    // ADR-061 §6 errata: `null` es el único valor que significa "no hay
+    // documento activo" — nunca se colapsa con `{ occurrenceCount: 0 }`.
+    expect(result).toBeNull();
   });
 
   describe("with an active document", () => {
@@ -254,10 +265,11 @@ describe("actions", () => {
       expect(retryWithPassword).toHaveBeenCalledWith("doc-1", "secret");
     });
 
-    it("addManualEntity forwards the request to orchestrator.addManualEntity", async () => {
+    it("addManualEntity forwards the request and returns the orchestrator's result", async () => {
       const request = { value: "José Pérez", entityType: EntityType.Person };
-      await actions.addManualEntity(request);
+      const result = await actions.addManualEntity(request);
       expect(addManualEntity).toHaveBeenCalledWith("doc-1", request);
+      expect(result).toEqual({ occurrenceCount: 1 });
     });
 
     it("requestExport emits EXPORT_REQUESTED with the options", () => {

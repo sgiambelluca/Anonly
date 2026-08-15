@@ -1,18 +1,15 @@
 /**
- * `AddEntityDialog` (`ui/Components.md` §3.4c, ADR-061 §3 ruta A).
+ * `AddEntityDialog` (`ui/Components.md` §3.4c, ADR-061 §3 ruta A, §6 errata).
  *
  * Selector de `EntityType` + valor + confirmar → `actions.addManualEntity`.
  * Mismo patrón que `RuleCreatorDialog`/`SettingsDialog`: `open`/`onClose`
  * levantado al llamador (acá `EntitiesPanel`), formulario re-sincronizado al
- * abrir, confirmar es `async` y cierra recién cuando la acción resuelve.
+ * abrir, confirmar es `async`.
  *
- * **Sin feedback de "no se encontró"** (Components.md §3.4c lo pide): el
- * diálogo cierra siempre al confirmar. `addManualEntity` devuelve
- * `Promise<void>` — no hay forma de que el llamador sepa si `findLiteral`
- * encontró 0 ocurrencias o creó/fusionó un grupo. Es una ambigüedad de
- * contrato reportada (requiere que `IPipelineOrchestrator.addManualEntity`
- * devuelva `occurrenceCount`, cambio de `Contracts.md` fuera de alcance de
- * este PR), no una omisión.
+ * Lee `occurrenceCount` del resultado: `0` no cierra el diálogo y muestra
+ * "no se encontró" para que el usuario corrija el typo; `> 0` cierra. `null`
+ * (sin documento activo, `actions.ts`) no puede pasar con el diálogo abierto
+ * y se trata como no-op, nunca como "no se encontró".
  */
 
 import { EntityType, type ManualEntityRequest } from "@anonly/anonymization-core";
@@ -24,6 +21,7 @@ import { Dialog } from "../common/Dialog.js";
 import { Select, type SelectOption } from "../common/Select.js";
 
 import { ENTITY_TYPE_LABEL } from "./entityTypeLabels.js";
+import { manualEntityFeedback } from "./manualEntityFeedback.js";
 
 // Orden fijo de ui/Components.md §3.1 (mismo criterio que entities.store.ts
 // y RuleFormFields.tsx).
@@ -52,6 +50,7 @@ export function AddEntityDialog({ open, onClose }: AddEntityDialogProps) {
   const [entityType, setEntityType] = useState<EntityType>(EntityType.Person);
   const [value, setValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [notFound, setNotFound] = useState(false);
 
   // Re-sincroniza el formulario cada vez que se abre (mismo criterio que
   // MergeDialog/RuleCreatorDialog/SettingsDialog).
@@ -60,6 +59,7 @@ export function AddEntityDialog({ open, onClose }: AddEntityDialogProps) {
     setEntityType(EntityType.Person);
     setValue("");
     setSubmitting(false);
+    setNotFound(false);
   }, [open]);
 
   const trimmedValue = value.trim();
@@ -67,9 +67,21 @@ export function AddEntityDialog({ open, onClose }: AddEntityDialogProps) {
   async function handleConfirm(): Promise<void> {
     if (trimmedValue.length === 0) return;
     setSubmitting(true);
+    setNotFound(false);
     const request: ManualEntityRequest = { value: trimmedValue, entityType };
-    await actions.addManualEntity(request);
-    onClose();
+    const result = await actions.addManualEntity(request);
+    switch (manualEntityFeedback(result)) {
+      case "added":
+        onClose();
+        return;
+      case "not-found":
+        setSubmitting(false);
+        setNotFound(true);
+        return;
+      case "no-op":
+        setSubmitting(false);
+        return;
+    }
   }
 
   return (
@@ -101,6 +113,11 @@ export function AddEntityDialog({ open, onClose }: AddEntityDialogProps) {
             className="rounded-md border border-border px-3 py-1.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-50"
           />
         </label>
+        {notFound ? (
+          <p role="alert" className="text-xs text-error">
+            No se encontró ese texto en el documento.
+          </p>
+        ) : null}
       </div>
       <div className="mt-4 flex justify-end gap-2">
         <Button variant="secondary" onClick={onClose} disabled={submitting}>
