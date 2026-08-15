@@ -1,13 +1,15 @@
-<!-- CONTEXT: scope=regex-engine | dependencias=core/Contracts.md,architecture/06_Pipeline.md,adr/ADR-021-Engines-Inline-Hasta-Hito9.md,adr/ADR-022-Regex-Phone-AR-Word-Boundaries.md,adr/ADR-066-Texto-De-Anotaciones-Y-Reemplazo-Rotado.md | audiencia=IA-implementador | fase=3 (items §15 1-18 implementados; tests cancel/perf de §14 diferidos a Hito 11; §4/§6/§13/§14/§15 en fase 10.7: findLiteral para el agregado manual de entidades, ADR-061, con sus dos primitivas importadas de shared y no reimplementadas —errata de ADR-061 §2—; §10/§14/§15 en fase 10.8: propagación de bbox.rotation, ADR-066 §6) -->
+<!-- CONTEXT: scope=regex-engine | dependencias=core/Contracts.md,architecture/06_Pipeline.md,adr/ADR-021-Engines-Inline-Hasta-Hito9.md,adr/ADR-022-Regex-Phone-AR-Word-Boundaries.md,adr/ADR-066-Texto-De-Anotaciones-Y-Reemplazo-Rotado.md | audiencia=IA-implementador | fase=3 (items §15 1-18 implementados; tests cancel/perf de §14 diferidos a Hito 11; §4/§6/§13/§14/§15 en fase 10.7: findLiteral para el agregado manual de entidades, ADR-061, con sus dos primitivas importadas de shared y no reimplementadas —errata de ADR-061 §2—, y searchText de solo lectura como primitiva de findLiteral y de la lupa —errata de ADR-061 §8—; §10/§14/§15 en fase 10.8: propagación de bbox.rotation, ADR-066 §6) -->
 
 # Regex Engine — Spec de Motor
 
 > Detecta patrones determinísticos (DNI, CUIT, teléfono, email, IBAN, tarjeta, fecha, matrícula, patente) en el texto de cada página. Emite `Occurrence[]` con `source: "regex"` y `confidence: 1.0`. Es determinista: mismo input → mismo output.
 
 **EngineId**: `regex`
-**Versión del spec**: 1.3.0
+**Versión del spec**: 1.4.0
 **Última actualización**: 2026-08-14
-**Estado de implementación**: Hito 4, checklist §15 (items 1-18) implementado; item 19 (propagación de `bbox.rotation`) en Hito 10.8. Pendiente: `cancel.test.ts`/`perf.test.ts` de §14 en Hito 11 (ver nota al final de §15); `findLiteral` (item 10b) en Hito 10.7, **bloqueado por el PR 1c de `shared`** que declara `sharesVerticalBand` y `normalizeForComparison`.
+**Estado de implementación**: Hito 4, checklist §15 (items 1-18) implementado; item 19 (propagación de `bbox.rotation`) en Hito 10.8. `findLiteral` (item 10b) implementado en el PR 2 del Hito 10.7. Pendiente: `cancel.test.ts`/`perf.test.ts` de §14 en Hito 11 (ver nota al final de §15); `searchText` (item 10c) en el PR 3c del Hito 10.7, que **desbloquea el PR 6** (la lupa).
+
+> **Nota (v1.4.0, ADR-061 §8 errata, 2026-08-14 — `searchText`: la misma búsqueda, de solo lectura)**: ADR-061 §8 prometía que la lupa del visor era "la misma búsqueda literal, en vez de emitir `ENTITY_FOUND` devuelve los matches". El motor no tenía esa segunda forma: `findLiteral` **solo** expone su resultado emitiendo sobre `ctx.bus`, y exige un `entityType` que una búsqueda de texto no tiene. Cablear `findText` sobre él habría hecho que **tipear en la lupa cree y fusione grupos en la sesión en vivo** — el documento anonimizándose solo mientras el usuario busca. Se agrega `searchText(input): ReadonlyArray<TextMatch>`: **sincrónica** (para que `IPipelineOrchestrator.findText` pueda cumplir su firma sin `Promise`), **sin `EngineContext`** (no emite, no cancela, no loguea la query) y de solo lectura. Y `findLiteral` **se reconstruye encima de la misma función de matcheo por página**, sin cambiar su firma ni su comportamiento: recién con eso la frase de §8 describe el código y no dos matchers que pueden divergir. Ver §6, §7, §12, §13 casos 20-24, §14 y §15 ítem 10c.
 
 > **Nota (v1.3.0, ADR-061 §2 errata, 2026-08-14 — las dos primitivas de `findLiteral` salen de `shared`, no se reimplementan acá)**: ADR-061 §2 pedía que el matcheo multi-palabra usara "la misma agrupación por banda vertical que ADR-058 §5", como **una** primitiva compartida. No era alcanzable: vivía en el façade (`src/line-words.ts`), que ningún motor puede importar (P-2), y **ya estaba duplicada** en `render-engine/src/worker/kernel.ts`. Lo mismo con la normalización NFC, cuya única implementación estaba en `grouping-engine`. Las dos se promueven a `@anonly/shared` —`sharesVerticalBand` y `normalizeForComparison`, `Contracts.md` §6— con el mismo razonamiento que `estimateTokenWidth`: es el único lugar desde el que los tres consumidores llegan sin importarse entre sí. Para este motor el efecto es directo: **las importa** (§4, §6) y el chequeo de banda vertical deja de ser opcional — sin él, un valor que cruza de un renglón al siguiente da un falso positivo y se anonimiza texto que no es la entidad. Ver §13 casos 14-19 y las filas nuevas de §14; el test del corte de línea es el que faltaba y el que protege el fix.
 
@@ -51,7 +53,7 @@ Recorrer el `Document` (con texto ya fusionado PDF+OCR) y emitir `Occurrence[]` 
 ## 4. Dependencias permitidas
 
 - `@anonly/shared` — incluidas sus dos funciones puras `sharesVerticalBand` y `normalizeForComparison` (`Contracts.md` §6), que `findLiteral` **consume, no reimplementa**: las dos son compartidas con otros motores y con el façade, y `shared` es el único lugar desde el que los tres las alcanzan (errata de ADR-061 §2).
-- Tipos de `core/Contracts.md`: `IEngine`, `EngineContext`, `Document`, `Page`, `Word`, `Occurrence`, `EntityType`, `DetectionSource`, `BoundingBox`
+- Tipos de `core/Contracts.md`: `IEngine`, `EngineContext`, `Document`, `Page`, `Word`, `Occurrence`, `EntityType`, `DetectionSource`, `BoundingBox`, `TextMatch` (salida de `searchText`, ADR-061 §8)
 - `architecture/04_Event_System.md`: `ENTITY_FOUND`, `REGEX_FINISHED`
 
 No requiere dependencias externas: usa `RegExp` nativo de JS.
@@ -103,6 +105,7 @@ export class RegexEngine implements IEngine {
   addPattern(pattern: RegexPattern): void;       // runtime, para UI
   removePattern(patternId: string): void;
   findLiteral(input: FindLiteralInput, ctx: EngineContext): Promise<RegexEngineOutput>;  // ADR-061 §1
+  searchText(input: RegexSearchInput): ReadonlyArray<TextMatch>;                         // ADR-061 §8 errata
   dispose(): Promise<void>;
 }
 
@@ -111,6 +114,13 @@ export interface FindLiteralInput {
   readonly document: Document;
   readonly value: string;
   readonly entityType: EntityType;
+}
+
+// ADR-061 §8 (errata): la misma búsqueda, de solo lectura. Sin entityType
+// —no se está clasificando nada— y sin EngineContext (ver semántica abajo).
+export interface RegexSearchInput {
+  readonly document: Document;
+  readonly query: string;
 }
 ```
 
@@ -123,6 +133,15 @@ Semántica de `findLiteral` (ADR-061 §1/§2):
 - **`"J. Pérez"` no matchea `"José Pérez"`.** Limitación deliberada, con test explícito (§14) para que no se implemente por accidente ni se rompa en silencio. La búsqueda difusa de variantes está anotada en `roadmap/Future_Ideas.md` §5.1b.
 - Valor ausente del documento → `occurrenceCount: 0`, **sin eventos y sin error**: no es un fallo del Core que el usuario haya escrito algo que no está.
 - Funciona igual sobre páginas cuyas palabras vienen de OCR (`Word.source === "ocr"`): opera sobre `Page.words`, que no distingue el origen.
+
+Semántica de `searchText` (ADR-061 §8 y su errata):
+
+- **Es la primitiva, y `findLiteral` se construye encima.** El matcheo —normalización, tokenización, ventana deslizante, banda vertical— vive en **una** función interna **por página**, que las dos entradas recorren. `searchText` devuelve sus `TextMatch`; `findLiteral` los mapea a `Occurrence` (agregando `entityType`, `source: Manual` y `confidence: 1.0`) y los emite. Que encuentren lo mismo no es una coincidencia a mantener a mano: es el mismo código, y hay un test que lo aserta (§14).
+- **De solo lectura, y esto es lo importante**: **no emite ningún evento**, no toca el registro de patrones y no muta ningún estado del motor. Emitir `ENTITY_FOUND` desde una búsqueda haría que tipear en la lupa cree y fusione grupos en la sesión en vivo — el modo de falla que la errata de ADR-061 §8 documenta.
+- **Sincrónica**, porque el matcheo es cómputo sincrónico sobre el `Document` en memoria (§12) y porque `IPipelineOrchestrator.findText` está declarado sin `Promise` (`Contracts.md` §3.5). `findLiteral` conserva su `Promise<RegexEngineOutput>`: es contrato público ya mergeado.
+- **Sin `EngineContext`**: `bus` es justamente lo que no debe tocar; `abortSignal` no significa nada en una llamada sincrónica; y **no loguea** — la query es texto que el usuario busca en un documento sensible, mismo criterio que el `value` de `findLiteral` (`Contracts.md` §3.3). Las guardas de ciclo de vida sí se conservan, y lanzan **sincrónicamente** (§13 caso 24).
+- **Orden documental**: página ascendente y, dentro de cada página, orden de lectura de `Page.words`. La lupa navega "siguiente/anterior" sobre ese orden sin re-ordenar nada.
+- Query vacía o de solo espacios → **array vacío**, sin error (mismo criterio que §13 caso 14).
 
 Patrones default exportados desde `index.ts`:
 
@@ -140,6 +159,8 @@ export const DEFAULT_PATTERNS_AR: ReadonlyArray<RegexPattern>;
 | `REGEX_FINISHED` | al finalizar todas las páginas | `RegexFinished` | async | sí |
 
 Canal: `EventChannel.Regex`.
+
+`findLiteral` emite **solo** `ENTITY_FOUND` (con `source: "manual"`), nunca `REGEX_FINISHED`: no es una corrida de detección (§6). `searchText` **no emite nada** — es la propiedad que hace que la lupa no mute la sesión, y tiene test de contrato propio (§14).
 
 ---
 
@@ -219,6 +240,7 @@ Regex es determinista: si la regex compila, no hay errores de runtime. Errores d
 - Sin transferencia de buffers (trabaja sobre `Document` en memoria).
 - Procesa página por página; entre páginas chequea `abortSignal` para cancelación.
 - Para patrones custom complejos (catastrophic backtracking), se envuelve en `try/catch` con timeout de 1000 ms por página por patrón. Si timeout, se descarta el patrón custom con warning.
+- **`searchText` es la única entrada que se invoca de forma interactiva** (ADR-061 §8: la lupa, mientras el usuario tipea). Su costo es O(páginas × palabras) por llamada y es sincrónica, así que **bloquea el main thread** mientras corre — sobre un documento largo, una llamada por tecla se nota. El motor **no** hace debounce ni cachea: es una función de consulta y no retiene nada entre llamadas. Amortiguar la frecuencia es responsabilidad de quien la llama, y para la lupa eso es la UI (`ui/Components.md`, `DocumentSearchBox`). Si la medición sobre documentos reales mostrara que no alcanza, la respuesta es un índice, y eso pide su propio ADR.
 
 ---
 
@@ -246,6 +268,14 @@ Casos de `findLiteral` (ADR-061 §1/§2 y su errata):
 17. **Espacios repetidos o de más en el valor** (`"José   Pérez "`): la normalización colapsa y recorta antes de tokenizar, así que matchea igual. La tokenización es por espacios sobre el valor ya normalizado, no sobre el crudo.
 18. **Coincidencias solapadas**: buscar `"ana ana"` sobre `"ana ana ana"` emite **una** ocurrencia, no dos. Tras un match el barrido avanza el largo completo de la secuencia; los solapamientos no se reportan. Buscar `"ana"` sobre lo mismo sí emite tres — son matches disjuntos.
 19. **`findLiteral` tras `dispose`**: lanza `EngineDisposedError`, igual que `process` (caso 12). Sin `init` previo, `EngineNotInitializedError`.
+
+Casos de `searchText` (ADR-061 §8 y su errata):
+
+20. **La búsqueda no muta nada**: `searchText` no emite ningún evento, ni siquiera cuando encuentra coincidencias. Es el caso que protege contra la regresión de la errata de ADR-061 §8 — si emitiera `ENTITY_FOUND`, tipear en la lupa crearía y fusionaría grupos en la sesión en vivo y el documento se anonimizaría solo. Tiene test de contrato con bus espía (§14).
+21. **`searchText` y `findLiteral` no pueden divergir**: sobre el mismo documento y el mismo texto encuentran las mismas coincidencias, con los mismos `pageIndex`, `bbox` y `wordSpan`. No es una invariante a sostener a mano — comparten la función de matcheo por página; el test de §14 es lo que impide que alguien las separe después.
+22. **Query vacía o de solo espacios**: array vacío, sin recorrer el documento y sin error (mismo criterio que el caso 14).
+23. **Orden de los resultados**: página ascendente, y dentro de la página el orden de lectura de `Page.words`. Es el orden sobre el que la lupa navega "siguiente/anterior"; si no fuera estable, la navegación saltaría.
+24. **`searchText` tras `dispose`**: lanza `EngineDisposedError` **sincrónicamente**, no como promesa rechazada — es una función sincrónica (§6). Sin `init` previo, `EngineNotInitializedError`, igual.
 
 ---
 
@@ -281,6 +311,12 @@ Casos de `findLiteral` (ADR-061 §1/§2 y su errata):
 | `findLiteral does not report overlapping matches` | `unit.test.ts` | unit | caso 18: `"ana ana"` sobre `"ana ana ana"` emite una, no dos |
 | `findLiteral throws EngineDisposedError after dispose` | `edge.test.ts` | edge | caso 19 — mismo tratamiento que `process` (caso 12) |
 | `findLiteral works over OCR-sourced words` | `edge.test.ts` | edge | ADR-061 §1 |
+| **`searchText emits no events at all`** | `contract.test.ts` | contract | ADR-061 §8 errata, caso 20 — bus espía, cero emisiones sobre una query **con** coincidencias. Si este test se cae, buscar texto anonimiza el documento |
+| `searchText does not touch the pattern registry or any engine state` | `contract.test.ts` | contract | caso 20 — dos llamadas con el mismo input dan el mismo resultado |
+| **`searchText and findLiteral find the same matches`** | `unit.test.ts` | unit | ADR-061 §8 errata, caso 21 — mismos `pageIndex`/`bbox`/`wordSpan`. Es el test de que hay **un solo matcher**; sin él las dos entradas pueden divergir en silencio |
+| `searchText returns matches in document order` | `unit.test.ts` | unit | caso 23 |
+| `searchText with an empty or whitespace-only query returns an empty array` | `edge.test.ts` | edge | caso 22 |
+| `searchText throws EngineDisposedError synchronously after dispose` | `edge.test.ts` | edge | caso 24 — sincrónico, no promesa rechazada |
 | `propagates rotation from the matched words to the occurrence bbox` | `unit.test.ts` | unit | ADR-066 §6: `mapSpanToWords` arma un bbox nuevo y el campo se caía en silencio |
 | `propagates rotation when every word of a multi-word match agrees` | `unit.test.ts` | unit | ADR-066 §6: unión de varias palabras del mismo run |
 | `omits rotation when the words of a match disagree on the angle` | `unit.test.ts` | unit | ADR-066 §6: la envolvente de dos avances no tiene ángulo que la describa |
@@ -304,6 +340,7 @@ Fixtures: `tests/fixtures/text-10p.pdf` (con DNIs, CUITs, emails, teléfonos con
 - [ ] 9. Implementar timeout por patrón custom (1000 ms).
 - [ ] 10. Implementar `addPattern`/`removePattern` (recompila la lista activa).
 - [ ] 10b. (Hito 10.7, PR 2 — ADR-061 §1/§2 y su errata) Implementar `findLiteral`: matcheo sobre secuencias de `Word` contiguas **y de la misma línea**, `Occurrence` con `source: Manual` y bbox por `mapSpanToWords`. **Sin emitir `REGEX_FINISHED` y sin tocar el registro de patrones.** Valor ausente o vacío → `occurrenceCount: 0` sin eventos ni error. Las dos primitivas —`sharesVerticalBand` y `normalizeForComparison`— se **importan de `@anonly/shared`** (§4, `Contracts.md` §6); reimplementarlas acá es exactamente lo que la errata de ADR-061 §2 vino a impedir, y el PR de `shared` que las declara (Hito 10.7 PR 1c) es precondición de éste. Dos tests son parte del entregable, no un extra: que `"J. Pérez"` **no** matchea `"José Pérez"`, y que un valor cuyas palabras caen en **líneas distintas** tampoco (§13 caso 16). Los casos 14-19 de §13 y sus filas de §14 entran completos en este PR.
+- [ ] 10c. (Hito 10.7, PR 3c — ADR-061 §8 errata) Extraer el matcheo de `findLiteral` a una función interna **por página** (`collectPageTextMatches(page, queryTokens): TextMatch[]`) y construir las **dos** entradas encima: `searchText(input)` la recorre y devuelve; `findLiteral(input, ctx)` la recorre, mapea cada `TextMatch` a `Occurrence` y emite. **Por página y no por documento a propósito**: `findLiteral` conserva así su chequeo de `abortSignal` entre páginas, que un núcleo por documento habría borrado en silencio. `searchText` es **sincrónica, sin `EngineContext`, sin emitir y sin loguear la query** (§6, §12). `findLiteral` **no cambia de firma** —`Promise<RegexEngineOutput>`, contrato ya mergeado (R-2)— ni de comportamiento observable: los tests de §14 que ya existen son la no regresión. Exportar `RegexSearchInput` desde `index.ts`. Casos 20-24 de §13 y seis filas de §14.
 - [ ] 11. Implementar `dispose` (limpia lista de patrones, sin recursos externos que liberar).
 - [ ] 12. Escribir `contract.test.ts` con todos los tests contractuales.
 - [ ] 13. Escribir `unit.test.ts` con cobertura ≥ 85%.

@@ -134,6 +134,15 @@ addManualEntity(documentId, { value, entityType })
 
 **Cero ocurrencias encontradas** (el usuario escribió un valor que no está en el documento, o con un typo): no se crea grupo, y la UI lo informa. No es un error del Core: `findLiteral` devuelve `occurrenceCount: 0` y ya.
 
+> **Errata (2026-08-14, hallazgo del implementador del PR 4)**: "la UI lo informa" no era implementable. `addManualEntity` devolvía `Promise<void>`, y el `occurrenceCount` de `findLiteral` moría adentro del Orchestrator: ni retorno, ni evento, ni estado en el store le decían al diálogo si se agregó algo o no. El test que §10 pide para el PR 4 —"valor sin coincidencias → mensaje al usuario"— no se podía escribir. La decisión de §6 no cambia (cero no es un error); faltaba el canal.
+>
+> 1. **`addManualEntity` devuelve `Promise<ManualEntityResult>`**, con `ManualEntityResult = { readonly occurrenceCount: number }` (`Contracts.md` §3.5). Es lo único que el caller no puede deducir solo: si un grupo se creó o se fusionó lo ve por los eventos de siempre, pero "no había nada que agregar" no emite absolutamente nada, y esa ausencia es indistinguible de un evento todavía no llegado.
+> 2. **Es un cambio aditivo, no una ruptura.** `await orchestrator.addManualEntity(...)` sin usar el resultado sigue compilando igual, así que el PR 3 ya mergeado y sus tests no necesitan migración. Por eso no hace falta un ADR nuevo ni una ventana de deprecación: es ensanchar el retorno, no cambiarlo.
+> 3. **Qué cuenta exactamente `occurrenceCount`**: las apariciones del valor **en el documento**, tal como las emitió `findLiteral` — **antes** del dedup de Grouping. No es "cuántos grupos se crearon" ni "cuántas ocurrencias se sumaron". Un valor que el detector ya había encontrado devuelve N > 0 aunque todas se fusionen y el árbol no cambie: es correcto, porque para el usuario la entidad **quedó cubierta**. La única lectura que la UI debe hacer es `0` vs `> 0`; leerlo como "se agregaron N" haría que el copy mienta en el caso de fusión.
+> 4. **Cero no lanza.** Sigue sin ser un error del Core: el usuario escribiendo algo que no está es un resultado, no un fallo. Lanzar obligaría a la UI a usar `try/catch` para un camino esperado y confundiría este caso con `InvalidInputError` (documento inexistente, stage inválido), que sí son errores.
+> 5. **El tipo vive en el façade, no en `shared`.** Ningún motor lo produce ni lo consume: es el retorno de un método de `IPipelineOrchestrator`. Mismo lugar y mismo criterio que `ImportDocumentInput` —declarado en `Contracts.md` §3.5 y en `packages/anonymization-core/src/types.ts`, sin presencia en `shared`—, a diferencia de `ManualEntityRequest` y `TextMatch`, que sí son del modelo de datos y viajan a los motores. Consecuencia práctica: **no hace falta un PR de `shared`**.
+> 6. **El literal se retiene aunque encuentre cero, y eso queda decidido acá.** El PR 3 lo implementó así con buen criterio y conviene que esté en el spec y no solo en un comentario: la durabilidad de §5 no depende de que la búsqueda encuentre algo *hoy*. El caso que lo justifica es justamente el que motiva un `reanalyze` — el usuario cambia el idioma de OCR **porque** el texto no se estaba leyendo bien, y el valor aparece recién en la página re-OCR-eada. El costo aceptado es que un typo queda retenido hasta `closeDocument`, re-aplicándose sin encontrar nada. Es barato y acotado por documento; la alternativa —descartar lo que hoy da cero— rompería el caso que hace útil la retención.
+
 ### 7. La renumeración de ADR-028 no se toca
 
 Agregar una entidad dispara `finishSession`, que re-corre la renumeración canónica: los índices reflejan siempre el orden de aparición documental, así que agregar una persona de la página 2 puede correr los números de todas las posteriores.
@@ -150,6 +159,16 @@ findText(documentId: string, query: string): ReadonlyArray<TextMatch>;
 
 Se implementa en el mismo paso. Separarlo significaría escribir dos veces el mismo matcheo, y desde la búsqueda es natural ofrecer "agregar este resultado como entidad" — que es la tercera ruta de entrada, gratis.
 
+> **Errata (2026-08-14, hallazgo del implementador del PR 3)**: "en vez de emitir `ENTITY_FOUND`, devuelve los matches" describía un motor que no existía. `findLiteral` —el único método que hace este matcheo— **no tiene esa segunda forma**: expone su resultado únicamente emitiendo sobre `ctx.bus`, y exige un `entityType` que una búsqueda de texto no tiene. La decisión de §8 no cambia (un solo matcher, dos salidas); lo que faltaba era la salida de solo-lectura.
+>
+> 1. **Por qué no se podía cablear igual.** Llamar a `findLiteral` desde `findText` sobre el bus real haría que **buscar texto mute la sesión**: cada coincidencia entra a Grouping como `ENTITY_FOUND` y crea o fusiona grupos. Un usuario tipeando en la lupa anonimizaría el documento sin pedirlo. No es un problema de estilo — es el peor modo de falla posible en esta herramienta, y por eso el PR 3 dejó `findText` fuera de `IPipelineOrchestrator` en vez de improvisar.
+> 2. **La resolución: `regex-engine` gana `searchText(input): ReadonlyArray<TextMatch>`**, de solo lectura — sin `entityType`, sin `ctx`, sin tocar el bus ni el registro de patrones, sin mutar nada. Es la primitiva; `findLiteral` pasa a **construirse encima de ella** (mapea cada `TextMatch` a `Occurrence` y emite). Recién con eso "es la misma búsqueda literal con otra UI encima" describe el código: un matcher, dos envoltorios.
+> 3. **`TextMatch` ya alcanza para las dos salidas.** `{ pageIndex, bbox, text, wordSpan }` cubre todo lo que `Occurrence` toma del match; lo que falta lo pone `findLiteral` y no depende del matcheo — el `id` que genera, `source: Manual` y `confidence: 1.0` que son constantes del agregado manual, el `entityType` que viene del usuario, y el `normalizedValue` que sale de `text`. Por eso la primitiva devuelve `TextMatch` y no un tipo intermedio nuevo: el que **agrega** información es `findLiteral`, no al revés.
+> 4. **Sincrónica, y eso importa.** `Contracts.md` §3.5 declara `findText(documentId, query): ReadonlyArray<TextMatch>` **sin `Promise`**, y el matcheo es cómputo sincrónico sobre el `Document` en memoria —`findLiteral` ya lo documenta así—. `searchText` es sincrónica para que ese contrato se pueda cumplir tal como está escrito. `findLiteral` **conserva su `Promise<RegexEngineOutput>`**: es contrato público ya mergeado y R-2 no admite romperlo por prolijidad.
+> 5. **Sin `ctx`, con guardas.** No lleva `EngineContext` porque no tiene qué hacer con sus tres piezas: `bus` es justamente lo que no debe tocar, `abortSignal` no significa nada en una llamada sincrónica, y **no debe loguear**: la query es texto que el usuario está buscando en un documento sensible, mismo criterio que ADR-061 §1 aplica al `value` de `findLiteral` (`Contracts.md` §3.3). Sí conserva las guardas de ciclo de vida (`dispose`/`init`), que lanzan **sincrónicamente**, a diferencia de `findLiteral` que rechaza la promesa.
+> 6. **La cancelación por página se queda donde estaba.** La primitiva compartida es **por página** (`collectPageTextMatches`), no por documento: cada llamador arma su propio recorrido. `findLiteral` conserva su chequeo de `abortSignal` entre páginas; `searchText` no lo necesita. Extraer un núcleo por documento habría borrado ese chequeo en silencio.
+> 7. **La tercera vía de agregado no estrena API.** "Agregar este resultado como entidad" es `addManualEntity(documentId, { value: match.text, entityType })` — el camino de §6, sin nada nuevo. Y **agrega todas las apariciones del valor, no solo la que el usuario clickeó**, porque `findLiteral` vuelve a recorrer el documento entero: es el comportamiento correcto (una entidad manual se anonimiza en todo el documento) y conviene que la UI lo diga.
+
 ### 9. Alcance: seis PRs
 
 | # | PR | Módulo | Depende de |
@@ -158,16 +177,32 @@ Se implementa en el mismo paso. Separarlo significaría escribir dos veces el mi
 | 1b | **Docs de la errata de §2**: esta errata, `Contracts.md` §6, `Regex_Engine.md` §6/§13/§14/§15, y los ítems de checklist de los tres consumidores que migran | — (docs) | — |
 | 1c | `sharesVerticalBand` y `normalizeForComparison` (errata de §2, puntos 2 y 4) | `shared` | 1b |
 | 2 | `findLiteral` + matcheo de secuencias de palabras normalizado (§1, §2), consumiendo las dos primitivas de `shared` | `regex-engine` | 1, 1c |
-| 3 | `addManualEntity`, `findText`, `getPageWords`, `getPageSize`; retención de literales manuales y su re-aplicación (§4, §5, §6, §8). De paso, `line-words.ts` consume `sharesVerticalBand` de `shared` — mismo módulo, no rompe R-1 | `packages/anonymization-core/src` | 1, 1c, 2 |
-| 4 | Botón + diálogo "Agregar entidad" sobre el árbol (ruta A, §3) | `apps/react-client` | 3 |
+| 3 | `addManualEntity`, `getPageWords`, `getPageSize`; retención de literales manuales y su re-aplicación (§4, §5, §6). De paso, `line-words.ts` consume `sharesVerticalBand` de `shared` — mismo módulo, no rompe R-1. **`findText` no entró**: ver la errata de §8 | `packages/anonymization-core/src` | 1, 1c, 2 |
+| 3b | **Docs de la errata de §8**: esta errata, `Regex_Engine.md` §6/§12/§13/§14/§15 y el ítem 24c del Orchestrator | — (docs) | — |
+| 3c | `searchText` de solo lectura, y `findLiteral` reconstruido encima de la misma primitiva por página (errata de §8) | `regex-engine` | 3b |
+| 3d | `findText` entra a `IPipelineOrchestrator` sobre `searchText`; se borra la nota de ausencia de `types.ts` | `packages/anonymization-core/src` | 3c |
+| 4 | Botón + diálogo "Agregar entidad" sobre el árbol (ruta A, §3). **Mergeó parcial**: sin el feedback de "no se encontró", que no era implementable — ver la errata de §6 | `apps/react-client` | 3 |
+| 4b | **Docs de la errata de §6**: esta errata, `Contracts.md` §3.5 (`ManualEntityResult`), el ítem 24d del Orchestrator y `Components.md` §3.4c | — (docs) | — |
+| 4c | `addManualEntity` devuelve `ManualEntityResult` (errata de §6) | `packages/anonymization-core/src` | 4b |
+| 4d | Cierra el PR 4: el diálogo lee `occurrenceCount` e informa "no se encontró", con el test que §10 pide | `apps/react-client` | 4c |
 | 5 | Hit-test sobre el canvas del `original` + "Agregar entidad como…" (ruta B, §3, §4) | `apps/react-client` | 3 |
-| 6 | Lupa de búsqueda con navegación y resaltado (§8) | `apps/react-client` | 3 |
+| 6 | Lupa de búsqueda con navegación y resaltado (§8) | `apps/react-client` | 3d |
 | 7 | De-dup: el kernel consume `sharesVerticalBand` de `shared` y borra su copia local (errata de §2, punto 5) | `render-engine` | 1c |
 | 8 | De-dup: `gender.ts` consume `normalizeForComparison` de `shared` y borra `normalizeForLexicon` (errata de §2, punto 5) | `grouping-engine` | 1c |
 
-Los PRs 4, 5 y 6 son independientes entre sí y pueden correr en paralelo una vez mergeado el 3.
+Los PRs 4, 5 y 6 dejaron de ser los tres paralelos que este ADR planeaba: cada uno destapó una entrada del Core que faltaba, y cada una se resolvió en la errata de su sección.
+
+- **El 5 sí es libre** una vez mergeado el 3: el hit-test sobre el `original` ya tiene todo lo que necesita (`getPageWords`/`getPageSize`).
+- **El 4 mergeó parcial y lo cierra el 4d** (errata de §6): el botón y el diálogo están, pero sin el retorno de `addManualEntity` no podían informar "no se encontró", que es un test obligatorio de §10. Hasta que el 4d caiga, **el hito no está cerrado aunque la UI se vea completa**: un valor mal escrito no dice nada y el usuario se queda creyendo que agregó algo.
+- **El 6 espera al 3d** (errata de §8): la lupa necesita `findText`, que necesita `searchText`.
+
+El 4c y el 3d son independientes entre sí, así que las dos cadenas pueden correr en paralelo.
 
 **El 1b y el 1c son precondición del 2**, y salen de la errata de §2: sin ellos `regex-engine` no tiene de dónde importar la primitiva de línea sin duplicarla. El 1b va primero por R-2/R-19 (contrato antes que código) y porque `Contracts.md` §10 regla 1 exige declarar todo tipo o función pública ahí antes que en `shared/src/`.
+
+**El 4b y el 4c salen de la errata de §6**, y son la única vía al PR 4. El 4b va primero por R-2/R-19: cambiar el retorno de `addManualEntity` es contrato de `IPipelineOrchestrator`, y no se toca desde un PR de UI. El 4c **no** necesita un PR de `shared`: `ManualEntityResult` vive en el façade (punto 5 de la errata).
+
+**El 3b, 3c y 3d salen de la errata de §8** y son la única vía al PR 6. El 3b va primero por R-2/R-19: `searchText` es entrada pública nueva de `regex-engine`, y el spec del motor no se edita desde un PR de implementación (R-21). El 3c y el 3d van separados porque son módulos distintos (R-1).
 
 **El 7 y el 8 son diferibles y no bloquean el hito**: son de-dup puro, cada uno de un motor distinto (R-1 los obliga a ir separados), sin cambio de comportamiento y cubiertos por los tests que ya existen. Si se difieren, el estado queda como dice el punto 5 de la errata — una canónica más dos copias legacy identificadas — y hay que dejarlo anotado, no darlo por unificado.
 
@@ -196,6 +231,15 @@ Los PRs 4, 5 y 6 son independientes entre sí y pueden correr en paralelo una ve
 - Edge: valor ausente del documento → `occurrenceCount: 0`, sin eventos, sin error (§6).
 - Edge: funciona sobre páginas cuyas palabras vienen de OCR (`source: "ocr"`).
 
+`regex-engine` (PR 3c, errata de §8):
+
+- Contract: `searchText` **no emite ningún evento** — con un bus espía, cero emisiones para una query que sí tiene coincidencias. Es el test del modo de falla que la errata evita: si `searchText` emitiera, buscar texto anonimizaría el documento.
+- Contract: `searchText` no toca el registro de patrones ni ningún estado del motor; llamarla dos veces con el mismo input da el mismo resultado (es pura salvo por las guardas).
+- Unit: `searchText` y `findLiteral` encuentran **exactamente las mismas coincidencias** sobre el mismo documento y valor — mismos `pageIndex`, `bbox` y `wordSpan`. Es lo que aserta que hay **un solo matcher** y no dos que pueden divergir (§8).
+- Unit: los `TextMatch` vienen en orden documental (página ascendente, y dentro de la página en orden de lectura).
+- Edge: query vacía o de solo espacios → array vacío, sin error.
+- Edge: `searchText` tras `dispose` lanza **sincrónicamente** `EngineDisposedError` (no devuelve una promesa rechazada, a diferencia de `findLiteral`).
+
 `packages/anonymization-core/src` (PR 3):
 
 - Contract: `addManualEntity` produce un grupo nuevo visible en el snapshot de Grouping.
@@ -205,12 +249,24 @@ Los PRs 4, 5 y 6 son independientes entre sí y pueden correr en paralelo una ve
 - Unit: `getPageWords`/`getPageSize` sobre `documentId` o `pageIndex` inexistente → `InvalidInputError`.
 - Unit: la lista de literales se descarta en `closeDocument`.
 
+`packages/anonymization-core/src` (PR 4c, errata de §6):
+
+- Contract: `addManualEntity` con un valor **ausente** del documento devuelve `occurrenceCount: 0`, **sin lanzar** y sin crear grupo. Es el test que hace implementable el mensaje "no se encontró".
+- Contract: con un valor **presente N veces** devuelve `occurrenceCount: N`, contando las apariciones en el documento — también cuando todas se fusionan por dedup en un grupo existente y el árbol no cambia (punto 3 de la errata).
+- Unit: el literal se retiene **también** cuando devolvió `0`, y un `reanalyze` posterior que lo hace aparecer lo encuentra (punto 6 de la errata). Es el test de la decisión de retener antes de buscar.
+
+`packages/anonymization-core/src` (PR 3d, errata de §8):
+
+- Contract: **`findText` no altera el snapshot de Grouping** — se toma el snapshot, se buscan varias queries con coincidencias, se vuelve a tomar y es idéntico. Es el test de que buscar no anonimiza; sin él, la regresión que la errata de §8 describe vuelve sin que nada la note.
+- Unit: `findText` devuelve los mismos matches que `regex.searchText` sobre el documento retenido, incluidas páginas con palabras de OCR.
+- Unit: `findText` sobre un `documentId` inexistente → `InvalidInputError`, igual que `getPageWords`/`getPageSize`.
+
 `apps/react-client` (PRs 4-6):
 
 - Unit: el diálogo emite `addManualEntity` con el tipo y valor elegidos.
 - Unit: el hit-test solo se ofrece sobre el panel `original` (§3).
 - Unit: la traducción de coordenadas de pantalla a coordenadas de página usa `getPageSize` y no la estimación de `pageLayout.ts`.
-- Unit: valor sin coincidencias → mensaje al usuario, sin grupo nuevo.
+- Unit: valor sin coincidencias → mensaje al usuario, sin grupo nuevo. Se apoya en el `occurrenceCount: 0` del retorno (errata de §6); el diálogo lee `0` vs `> 0` y nada más.
 
 ## Alternativas consideradas
 
@@ -224,6 +280,12 @@ Los PRs 4, 5 y 6 son independientes entre sí y pueden correr en paralelo una ve
 | **Búsqueda difusa desde la primera vuelta** | Trae falsos positivos que alguien tiene que revisar, sobre una función cuyo propósito es que el usuario corrija con precisión. Decisión del humano: exacto primero, medir, después decidir (§2). |
 | **Congelar los `indexInType` ya asignados al agregar** | Haría que el orden de los marcadores dependa del orden en que el usuario fue agregando entidades — la arbitrariedad que ADR-028 eliminó (§7). |
 | **Volcar el `Document` completo al store del cliente** | Palabras de un documento de 50 páginas por un caso de uso puntual. Los accesores por página a demanda dan lo mismo sin duplicar el modelo en el cliente (§4). |
+| **`findLiteral` con un flag `emit: false`** (errata de §8) | Un parámetro que apaga el efecto principal del método deja una firma que miente: el nombre dice "encontrá y reportá" y la mitad de las llamadas no reportan. Y arrastra el `entityType` obligatorio a un caller que no tiene ninguno, obligando a inventar un valor de relleno que después viaja adentro de `Occurrence`. La separación en dos entradas —una que devuelve, otra que emite— cuesta lo mismo y no miente. |
+| **Capturar los `ENTITY_FOUND` con un bus efímero** (errata de §8) | "Llamar a `findLiteral` con un bus descartable y leer lo emitido" evita el efecto sobre Grouping, pero convierte una consulta en una corrida de motor con un bus falso: hay que construir un `EngineContext` completo por búsqueda, y el resultado depende de que ningún otro suscriptor esté enganchado a ese bus. Ningún doc especifica esa maniobra, y sería el único lugar del Core donde un valor de retorno se obtiene escuchándose a sí mismo. |
+| **Lanzar cuando no hay coincidencias** (errata de §6) | Convierte un resultado esperado en una excepción: la UI necesitaría `try/catch` para el camino normal de "escribiste algo que no está", y ese error quedaría mezclado con los `InvalidInputError` de documento inexistente o stage inválido, que sí son fallos. §6 ya había decidido que cero no es un error; esto lo contradecía. |
+| **Un evento `MANUAL_ENTITY_ADDED` en vez de un retorno** (errata de §6) | El único interesado es quien llamó. Un evento obliga al diálogo a suscribirse, correlacionar por `documentId` y decidir cuánto esperar antes de asumir que no llegó — porque el caso de cero coincidencias es precisamente el que **no** produce ningún otro evento. Un retorno no tiene ni correlación ni timeout. Los eventos del Core son para difundir cambios de estado a varios oyentes; éste es el resultado de una llamada. |
+| **Que la UI lo infiera del árbol de grupos** (errata de §6) | "Si no apareció un grupo nuevo, no se encontró" es falso por el dedup de ADR-038 §3 —un valor ya detectado se fusiona sin crear nada— y además es una carrera contra la llegada de los eventos de Grouping. Daría "no se encontró" sobre entidades que sí están cubiertas. |
+| **Implementar `findText` host-side sobre `Page.words`** (errata de §8) | Es la misma alternativa que la fila de arriba sobre el matcheo host-side, y se rechaza por lo mismo, agravado: además de reimplementar la normalización y el criterio de línea, produciría **dos matchers que pueden divergir** — la lupa encontraría cosas que el agregado manual no, sobre la misma query. La promesa de §8 es exactamente que sea un solo matcher. |
 | **No retener los literales manuales** | Modo de falla silencioso: un `reanalyze` posterior borra las ocurrencias manuales de las páginas afectadas y el dato se exporta sin anonimizar, sin ningún aviso (§5). |
 
 ## Consecuencias
@@ -236,18 +298,19 @@ Los PRs 4, 5 y 6 son independientes entre sí y pueden correr en paralelo una ve
 
 ## Docs actualizados por este ADR
 
-- `core/Regex_Engine.md` → v1.1.0: `findLiteral` (§6), casos límite y tests. → v1.3.0 por la errata de §2: de dónde salen las dos primitivas, caso límite 27 y su test.
-- `core/Orchestrator.md` → v1.7.0: `addManualEntity`, `findText`, `getPageWords`, `getPageSize`, retención de literales manuales. Ítems 24 y 24b del checklist: las cuatro entradas nuevas, y `line-words.ts` consumiendo `sharesVerticalBand` de `shared` (errata de §2).
-- `core/Contracts.md` §3.5 (`IPipelineOrchestrator`), §6 — y `architecture/03_Data_Model.md` (`TextMatch`, `ManualEntityRequest`). §6 gana además `sharesVerticalBand` y `normalizeForComparison` por la errata de §2.
+- `core/Regex_Engine.md` → v1.1.0: `findLiteral` (§6), casos límite y tests. → v1.3.0 por la errata de §2: de dónde salen las dos primitivas, caso límite 16 y su test. → v1.4.0 por la errata de §8: `searchText` (§6, §7), su costo interactivo (§12), casos 20-24 y el ítem 10c.
+- `core/Orchestrator.md` → v1.7.0: `addManualEntity`, `findText`, `getPageWords`, `getPageSize`, retención de literales manuales. Ítems 24, 24b y 24c del checklist: las tres entradas del PR 3, `line-words.ts` consumiendo `sharesVerticalBand` (errata de §2), y `findText` sobre `searchText` en el PR 3d (errata de §8).
+- `core/Contracts.md` §3.5 (`IPipelineOrchestrator`), §6 — y `architecture/03_Data_Model.md` (`TextMatch`, `ManualEntityRequest`). §6 gana además `sharesVerticalBand` y `normalizeForComparison` por la errata de §2; §3.5 gana `ManualEntityResult` y el retorno de `addManualEntity` por la errata de §6.
 - `core/Grouping_Engine.md` §13 — el caso de ocurrencia manual que se fusiona con un grupo existente. Ítem 15l: `gender.ts` consume `normalizeForComparison` (errata de §2, PR 8).
 - `core/Render_Engine.md` — ítem 28: el kernel consume `sharesVerticalBand` de `shared` (errata de §2, PR 7).
-- `ui/Components.md` y `ui/UX_Guidelines.md` — botón y diálogo de agregado, interacción de selección sobre el `original`, lupa de búsqueda.
+- `ui/Components.md` y `ui/UX_Guidelines.md` — botón y diálogo de agregado, interacción de selección sobre el `original`, lupa de búsqueda. §5.4c gana el debounce de la caja de búsqueda y el copy de que agregar desde un resultado alcanza a todas las apariciones (errata de §8); §3.4c, cómo el diálogo lee `occurrenceCount` y qué significa el número (errata de §6).
 - `roadmap/MVP.md` §4 — bloque del Hito 10.7; §6 — riesgo de la búsqueda exacta.
 - `roadmap/Future_Ideas.md` — la búsqueda difusa de variantes como trabajo futuro (§2).
 
 ## Validación
 
 - Los tests de §10 verdes, en particular los tres que protegen decisiones que se rompen fácil: **`"J. Pérez"` no matchea `"José Pérez"`** (§2), **un valor cuyas palabras cruzan de una línea a la siguiente no matchea** (errata de §2) y **los literales manuales sobreviven a un `reanalyze`** (§5).
+- El test de que **buscar no anonimiza**: `searchText` no emite nada, y `findText` deja el snapshot de Grouping idéntico (errata de §8, §10). Es el par que protege contra la regresión más cara de este ADR — un usuario tipeando en la lupa no puede modificar el documento.
 - Grep de control de la errata de §2, sobre `packages/`: `function sharesVerticalBand` y `u0300` —la huella de la normalización, que es lo que hay que grepear porque la copia existente se llama distinto (`normalizeForLexicon`)— aparecen **una sola vez cada uno**, en `shared/src/`. Con los PRs 7 y 8 pendientes hay **exactamente una copia extra de cada uno** —`render-engine/src/worker/kernel.ts` y `grouping-engine/src/gender.ts`—, y ninguna otra.
 - Verificación manual E2E: importar un PDF con un nombre que el NER no detecta, agregarlo por cada una de las tres vías (diálogo, selección sobre el original, resultado de búsqueda), y confirmar que aparece anonimizado en el preview y en el export.
 - Repetir sobre un PDF **escaneado**: es donde el hit-test justifica su elección frente a la capa de texto.
