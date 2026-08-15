@@ -36,6 +36,7 @@ import {
   createRealBus,
   createReplacement,
   createWord,
+  makeOrchestratorWithRealDetection,
   wireHappyPathSpies,
 } from "./fixtures/test-helpers.js";
 
@@ -2277,5 +2278,72 @@ describe("selectLineWords — selección host-side de las palabras de línea (AD
     const neighbor = createWord({ bbox: { x: 10, y: 0, width: 20, height: 12 } });
 
     expect(selectLineWords([neighbor], [replacement])).toBeUndefined();
+  });
+
+  // ─── findText (ADR-061 §8 errata, §10 bloque "PR 3d") ───
+
+  it("findText returns the same matches as regex.searchText over the retained document, including OCR pages", async () => {
+    const document = createDocument({
+      pageCount: 2,
+      pages: [
+        createPage({
+          index: 0,
+          text: "Jose Perez",
+          words: [
+            createWord({ text: "Jose", bbox: { x: 0, y: 0, width: 30, height: 12 } }),
+            createWord({ text: "Perez", bbox: { x: 35, y: 0, width: 35, height: 12 } }),
+          ],
+        }),
+        createPage({
+          index: 1,
+          text: "Ana Gomez",
+          words: [
+            createWord({
+              text: "Ana",
+              bbox: { x: 0, y: 0, width: 25, height: 12 },
+              pageIndex: 1,
+              source: "ocr",
+            }),
+            createWord({
+              text: "Gomez",
+              bbox: { x: 30, y: 0, width: 40, height: 12 },
+              pageIndex: 1,
+              source: "ocr",
+            }),
+          ],
+        }),
+      ],
+    });
+    const { orchestrator, engines } = await makeOrchestratorWithRealDetection(
+      createPdfEngineOutput({ document }),
+    );
+
+    await orchestrator.importDocument(createImportInput());
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+
+    for (const query of ["Jose Perez", "Ana Gomez"]) {
+      expect(orchestrator.findText("doc-1", query)).toEqual(
+        engines.regex.searchText({ document, query }),
+      );
+    }
+  });
+
+  it("findText on an unknown documentId throws InvalidInputError, same as getPageWords/getPageSize", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    wireHappyPathSpies(engines, bus);
+
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+
+    expect(() => orchestrator.findText("doc-unknown", "cualquier cosa")).toThrow(InvalidInputError);
   });
 });
