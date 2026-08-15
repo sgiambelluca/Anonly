@@ -18,28 +18,10 @@ import { useEffect, useState } from "react";
 import { actions } from "../../core-adapter/actions.js";
 import { Button } from "../common/Button.js";
 import { Dialog } from "../common/Dialog.js";
-import { Select, type SelectOption } from "../common/Select.js";
+import { Select } from "../common/Select.js";
 
-import { ENTITY_TYPE_LABEL } from "./entityTypeLabels.js";
+import { ENTITY_TYPE_OPTIONS } from "./entityTypeLabels.js";
 import { manualEntityFeedback } from "./manualEntityFeedback.js";
-
-// Orden fijo de ui/Components.md §3.1 (mismo criterio que entities.store.ts
-// y RuleFormFields.tsx).
-const ENTITY_TYPE_OPTIONS: ReadonlyArray<SelectOption<EntityType>> = [
-  EntityType.Person,
-  EntityType.Organization,
-  EntityType.Address,
-  EntityType.DNI,
-  EntityType.CUIT,
-  EntityType.Phone,
-  EntityType.Email,
-  EntityType.IBAN,
-  EntityType.CreditCard,
-  EntityType.Date,
-  EntityType.License,
-  EntityType.Plate,
-  EntityType.Custom,
-].map((type) => ({ value: type, label: ENTITY_TYPE_LABEL[type] }));
 
 export interface AddEntityDialogProps {
   readonly open: boolean;
