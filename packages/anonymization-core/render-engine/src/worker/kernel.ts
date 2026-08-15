@@ -37,6 +37,7 @@ import {
   DEGRADED_FONT_RATIO,
   InvalidInputError,
   ReplacementMode,
+  sharesVerticalBand,
   type Annotation,
   type BoundingBox,
   type EncodedPageImage,
@@ -235,11 +236,6 @@ export function calibrateLineFont(
       errorRatio: Number.POSITIVE_INFINITY,
     }
   );
-}
-
-/** Dos bboxes comparten banda vertical cuando sus extensiones en Y se solapan (mismo criterio que `isLineNeighbor` del façade, ADR-058 §5 — duplicado acá porque el kernel no puede importar `packages/anonymization-core/src`, P-2). */
-function sharesVerticalBand(a: BoundingBox, b: BoundingBox): boolean {
-  return a.y < b.y + b.height && b.y < a.y + a.height;
 }
 
 /** Overlap 2D genérico (X e Y), no solo banda vertical. */
