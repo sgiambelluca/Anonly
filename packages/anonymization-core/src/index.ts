@@ -22,6 +22,7 @@ export type {
   IAnonymizationCore,
   ImportDocumentInput,
   IPipelineOrchestrator,
+  ManualEntityResult,
 } from "./types.js";
 
 // Composition root (Hito 9).

@@ -1662,6 +1662,60 @@ describe("Orchestrator — unit tests", () => {
     );
   });
 
+  // ADR-061 §6 errata, punto 6: la durabilidad de §5 no depende de que la
+  // búsqueda encuentre algo HOY. El literal se retiene aunque devuelva 0, y
+  // un reanalyze posterior (p. ej. cambio de idioma de OCR) lo re-busca
+  // igual -- es el caso que justifica retener antes de buscar.
+  it("manual literal is retained even when findLiteral found zero occurrences, and a later reanalyze searches for it again", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({
+        pageCount: 1,
+        pages: [createPage({ index: 0, requiresOCR: true })],
+      }),
+      textlessPages: [0],
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+
+    // wireHappyPathSpies deja findLiteral resolviendo occurrenceCount: 0 por
+    // defecto -- el valor todavía no está en el documento (p. ej. el OCR con
+    // el idioma actual no lo leyó).
+    const result = await orchestrator.addManualEntity("doc-1", {
+      value: "Jose Perez",
+      entityType: EntityType.Person,
+    });
+    expect(result).toEqual({ occurrenceCount: 0 });
+
+    (engines.regex.findLiteral as ReturnType<typeof vi.fn>).mockClear();
+    // Simula que el idioma de OCR nuevo sí lee el nombre.
+    (engines.regex.findLiteral as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      documentId: "doc-1",
+      occurrenceCount: 1,
+      durationMs: 1,
+    });
+
+    await orchestrator.reanalyze("doc-1", { ocr: { languages: ["eng"] } });
+
+    // El literal retenido con 0 ocurrencias se re-busca igual tras el
+    // reanalyze -- sin esto, un valor que apareció recién en la página
+    // re-OCR-eada quedaría sin cobertura para siempre.
+    expect(engines.regex.findLiteral).toHaveBeenCalledWith(
+      expect.objectContaining({ value: "Jose Perez", entityType: EntityType.Person }),
+      expect.anything(),
+    );
+  });
+
   it("manual literal list is discarded on closeDocument", async () => {
     const bus = createRealBus();
     const engines = createMockEngines();

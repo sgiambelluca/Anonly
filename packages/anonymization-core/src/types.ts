@@ -46,6 +46,14 @@ export interface ImportDocumentInput {
   readonly password?: string;
 }
 
+// ADR-061 §6 (errata): lo único que el caller no puede deducir por su
+// cuenta. Objeto y no `number` pelado para poder crecer sin romper firmas.
+// Vive acá y no en `shared` porque ningún motor lo produce ni lo consume: es
+// el retorno de un método de `IPipelineOrchestrator` (errata de §6, punto 5).
+export interface ManualEntityResult {
+  readonly occurrenceCount: number; // apariciones del valor en el documento; 0 = no está
+}
+
 export interface IPipelineOrchestrator {
   /** Dispara etapas 0..7 (hasta Ready). Resuelve en Ready, Failed o Cancelled. */
   importDocument(input: ImportDocumentInput): Promise<void>;
@@ -61,10 +69,12 @@ export interface IPipelineOrchestrator {
    * ADR-061 §6: agrega a mano una entidad que el detector no encontró.
    * Orquesta reopenSession -> regex.findLiteral -> ENTITY_FOUND (source: Manual)
    * -> finishSession. Idempotente por el dedup de identidad de ADR-038 §3.
-   * Valor ausente del documento -> no crea grupo, sin error.
+   * Valor ausente del documento -> no crea grupo, sin error: devuelve
+   * occurrenceCount 0. Es el único modo en que el caller lo distingue de un
+   * agregado exitoso (ADR-061 §6 errata) -- 0 NO lanza.
    * Precondición: stage in {Ready, Failed} (si no, InvalidInputError).
    */
-  addManualEntity(documentId: string, request: ManualEntityRequest): Promise<void>;
+  addManualEntity(documentId: string, request: ManualEntityRequest): Promise<ManualEntityResult>;
   /**
    * ADR-061 §8 (errata): misma búsqueda literal de `addManualEntity`, salida
    * de solo lectura para el buscador del visor. Delega en
