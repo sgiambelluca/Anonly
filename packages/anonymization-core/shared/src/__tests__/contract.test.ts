@@ -28,9 +28,11 @@ import {
   InvalidInputError,
   makeTransferable,
   MAX_RENDER_SCALE,
+  normalizeForComparison,
   PREVIEW_CACHE_MAX_BYTES,
   REPLACEMENT_FONT_HEIGHT_RATIO,
   ReplacementMode,
+  sharesVerticalBand,
   synthesize,
   wordsInRect,
 } from "../index.js";
@@ -1114,6 +1116,43 @@ describe("@anonly/shared — Contracts", () => {
         const rect: BoundingBox = { x: 0, y: 0, width: 1000, height: 1000 };
         expect(wordsInRect([], rect)).toEqual([]);
       });
+    });
+  });
+
+  describe("sharesVerticalBand (ADR-061 §2 errata)", () => {
+    it("es simétrica y da true ante cualquier solapamiento en Y, sin umbral de proporción", () => {
+      // Solapamiento mínimo: 1 unidad de Y en común.
+      const a: BoundingBox = { x: 0, y: 0, width: 10, height: 10 };
+      const bMinimal: BoundingBox = { x: 0, y: 9, width: 10, height: 10 };
+      expect(sharesVerticalBand(a, bMinimal)).toBe(true);
+      expect(sharesVerticalBand(bMinimal, a)).toBe(true);
+
+      // Solapamiento total: mismo rango de Y.
+      const bTotal: BoundingBox = { x: 50, y: 0, width: 10, height: 10 };
+      expect(sharesVerticalBand(a, bTotal)).toBe(true);
+      expect(sharesVerticalBand(bTotal, a)).toBe(true);
+    });
+
+    it("bandas que apenas se tocan por el borde exacto dan false (solapamiento estricto, no adyacencia)", () => {
+      const a: BoundingBox = { x: 0, y: 0, width: 10, height: 10 };
+      // b arranca exactamente donde termina a (a.y + a.height === b.y).
+      const b: BoundingBox = { x: 0, y: 10, width: 10, height: 10 };
+      expect(sharesVerticalBand(a, b)).toBe(false);
+      expect(sharesVerticalBand(b, a)).toBe(false);
+    });
+  });
+
+  describe("normalizeForComparison (ADR-061 §2 errata)", () => {
+    it("colapsa mayúsculas, diacríticos y espacios repetidos", () => {
+      expect(normalizeForComparison("  José   PÉREZ ")).toBe(normalizeForComparison("jose perez"));
+      expect(normalizeForComparison("  José   PÉREZ ")).toBe("jose perez");
+    });
+
+    it("string vacío y string de solo espacios dan '', sin lanzar", () => {
+      expect(() => normalizeForComparison("")).not.toThrow();
+      expect(normalizeForComparison("")).toBe("");
+      expect(() => normalizeForComparison("   ")).not.toThrow();
+      expect(normalizeForComparison("   ")).toBe("");
     });
   });
 

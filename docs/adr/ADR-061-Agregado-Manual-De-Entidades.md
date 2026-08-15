@@ -69,6 +69,16 @@ Normalización NFC + minúsculas + sin diacríticos, sobre el mismo criterio que
 
 El valor puede abarcar **varias palabras**, así que el matcheo es sobre secuencias de `Word` contiguas de la misma línea — la misma agrupación por banda vertical que ADR-058 §5 introduce para el repintado. Es una primitiva compartida, no dos implementaciones.
 
+> **Errata (2026-08-14, hallazgo del implementador del PR 2)**: el párrafo de arriba daba por sentado que esa primitiva era alcanzable desde `regex-engine`. **No lo era, y además ya estaba duplicada.** Se corrige acá; la decisión de fondo —una sola definición de "misma línea" en todo el producto— no cambia, cambia dónde vive.
+>
+> 1. **El diagnóstico.** `sharesVerticalBand` vivía dentro de `selectLineWords` en `packages/anonymization-core/src/line-words.ts`, o sea en el **façade**, que ningún motor puede importar (P-2; `eslint.config.js` lo bloquea con el grupo `@anonly/anonymization-core`, mensaje "dependencia circular"). Y ya existía una **segunda** copia en `render-engine/src/worker/kernel.ts`, con un comentario que admitía la duplicación por esa misma razón. `regex-engine` habría sido la tercera.
+> 2. **La resolución: `sharesVerticalBand(a, b)` se promueve a `@anonly/shared`** (`Contracts.md` §6). Es exactamente la regla que ese archivo ya enuncia para `estimateTokenWidth` — dos motores no pueden importarse entre sí, pero los dos pueden importar `shared`, así que la función vive ahí y **no se duplica en ninguno**. Es la única ubicación desde la que la frase "no dos implementaciones" es cumplible: ni el façade ni un motor son alcanzables desde los tres consumidores a la vez.
+> 3. **`selectLineWords` no se mueve.** Lo que se promueve es el **átomo** —el criterio geométrico de banda vertical, cualquier solapamiento en Y sin umbral de proporción—, no su envoltorio. `selectLineWords` opera sobre `Replacement[]` y selecciona vecinas **a la derecha** para el repintado: es una forma propia del façade y no es reusable desde una búsqueda literal. Lo que no puede divergir es la **definición** de misma línea, no el wrapper.
+> 4. **Mismo tratamiento para la normalización** de este §2. `normalizeForComparison(value)` (NFC + minúsculas + sin diacríticos + `trim` + colapso de espacios) también se promueve a `@anonly/shared`. La única implementación existente era `normalizeForLexicon` de `grouping-engine/src/gender.ts` (ADR-060 §4) — otro motor, igual de inalcanzable. Se promueve el cuerpo **verbatim**, así que `gender.ts` la consume sin wrapper y sin cambio de comportamiento, y `regex-engine` no nace con una copia.
+> 5. **Los consumidores migran en cuatro PRs**, uno por módulo porque R-1 no admite juntarlos (ver la tabla de §9): `regex-engine` (PR 2, el bloqueante — es el que no puede avanzar sin esto), el façade (PR 3, que ya toca ese módulo), y `render-engine` + `grouping-engine` (PRs 7 y 8), que son **de-dup puro, sin cambio de comportamiento**, cubiertos por los tests que ya existen y por eso diferibles. Mientras esos dos últimos no caigan, el estado es **una canónica en `shared` más una copia legacy de cada primitiva, identificadas** — documentado, no accidental. El grep de control está en Validación.
+> 6. **Un hueco de tests que esto destapa.** La implementación sin banda vertical pasa los siete tests que §10 pedía: ninguno ejercitaba el corte de línea. Se agrega el test que faltaba (§10 y `Regex_Engine.md` §14): un valor cuyas palabras caen en líneas distintas **no** matchea. Sin él, el fix de arriba se puede romper en silencio.
+> 7. **Residuo aceptado.** Banda vertical sola no distingue dos **columnas** en la misma línea visual: si el orden de lectura de `pdf-engine` (ADR-067) dejara adyacentes la última palabra de una columna y la primera de la otra, y su texto normalizado coincidiera con lo buscado, habría un falso positivo. Es mucho más raro que el corte de línea y cerrarlo pide geometría de layout que ningún consumidor tiene hoy. Se acepta, en la misma línea que el resto de §2.
+
 > **Limitación conocida y aceptada, anotada como trabajo futuro** (`roadmap/Future_Ideas.md`): las variantes del mismo dato no se encuentran. Si el documento dice "José Pérez" en la página 1 y "J. Pérez" en la 7, el usuario tiene que agregar las dos. Grouping **sí** las va a fusionar en un grupo una vez agregadas (su matching fuzzy por Levenshtein ya hace eso); lo que no ocurre es que la búsqueda las encuentre sola. Se decidió arrancar exacto y medir en uso real cuántas apariciones se escapan antes de invertir en búsqueda difusa, que trae falsos positivos que alguien tiene que revisar.
 
 ### 3. Dos rutas de entrada, un solo camino interno
@@ -145,13 +155,21 @@ Se implementa en el mismo paso. Separarlo significaría escribir dos veces el mi
 | # | PR | Módulo | Depende de |
 |---|---|---|---|
 | 1 | `wordsInRect`, `TextMatch`, `ManualEntityRequest`; tipos de los accesores | `shared` | — |
-| 2 | `findLiteral` + matcheo de secuencias de palabras normalizado (§1, §2) | `regex-engine` | 1 |
-| 3 | `addManualEntity`, `findText`, `getPageWords`, `getPageSize`; retención de literales manuales y su re-aplicación (§4, §5, §6, §8) | `packages/anonymization-core/src` | 1, 2 |
+| 1b | **Docs de la errata de §2**: esta errata, `Contracts.md` §6, `Regex_Engine.md` §6/§13/§14/§15, y los ítems de checklist de los tres consumidores que migran | — (docs) | — |
+| 1c | `sharesVerticalBand` y `normalizeForComparison` (errata de §2, puntos 2 y 4) | `shared` | 1b |
+| 2 | `findLiteral` + matcheo de secuencias de palabras normalizado (§1, §2), consumiendo las dos primitivas de `shared` | `regex-engine` | 1, 1c |
+| 3 | `addManualEntity`, `findText`, `getPageWords`, `getPageSize`; retención de literales manuales y su re-aplicación (§4, §5, §6, §8). De paso, `line-words.ts` consume `sharesVerticalBand` de `shared` — mismo módulo, no rompe R-1 | `packages/anonymization-core/src` | 1, 1c, 2 |
 | 4 | Botón + diálogo "Agregar entidad" sobre el árbol (ruta A, §3) | `apps/react-client` | 3 |
 | 5 | Hit-test sobre el canvas del `original` + "Agregar entidad como…" (ruta B, §3, §4) | `apps/react-client` | 3 |
 | 6 | Lupa de búsqueda con navegación y resaltado (§8) | `apps/react-client` | 3 |
+| 7 | De-dup: el kernel consume `sharesVerticalBand` de `shared` y borra su copia local (errata de §2, punto 5) | `render-engine` | 1c |
+| 8 | De-dup: `gender.ts` consume `normalizeForComparison` de `shared` y borra `normalizeForLexicon` (errata de §2, punto 5) | `grouping-engine` | 1c |
 
 Los PRs 4, 5 y 6 son independientes entre sí y pueden correr en paralelo una vez mergeado el 3.
+
+**El 1b y el 1c son precondición del 2**, y salen de la errata de §2: sin ellos `regex-engine` no tiene de dónde importar la primitiva de línea sin duplicarla. El 1b va primero por R-2/R-19 (contrato antes que código) y porque `Contracts.md` §10 regla 1 exige declarar todo tipo o función pública ahí antes que en `shared/src/`.
+
+**El 7 y el 8 son diferibles y no bloquean el hito**: son de-dup puro, cada uno de un motor distinto (R-1 los obliga a ir separados), sin cambio de comportamiento y cubiertos por los tests que ya existen. Si se difieren, el estado queda como dice el punto 5 de la errata — una canónica más dos copias legacy identificadas — y hay que dejarlo anotado, no darlo por unificado.
 
 ### 10. Tests
 
@@ -160,12 +178,20 @@ Los PRs 4, 5 y 6 son independientes entre sí y pueden correr en paralelo una ve
 - Unit: `wordsInRect` es pura; devuelve las palabras cuyo bbox intersecta la región, y ninguna otra.
 - Edge: región vacía, región fuera de página, región que corta una palabra por la mitad (se incluye).
 
+`shared` (PR 1c, errata de §2):
+
+- Unit: `sharesVerticalBand` es simétrica y da `true` ante **cualquier** solapamiento en Y, sin umbral de proporción — un solapamiento mínimo cuenta igual que uno total.
+- Edge: bandas que apenas se tocan por el borde (`a.y + a.height === b.y`) dan `false` — el criterio es solapamiento **estricto**, no adyacencia.
+- Unit: `normalizeForComparison` colapsa mayúsculas, diacríticos y espacios repetidos; `"  José   PÉREZ "` y `"jose perez"` dan lo mismo.
+- Edge: string vacío y string de solo espacios dan `""`, sin lanzar.
+
 `regex-engine` (PR 2):
 
 - Contract: `findLiteral` emite `ENTITY_FOUND` con `source: DetectionSource.Manual` y bbox correcto por ocurrencia.
 - Contract: **no emite `REGEX_FINISHED`** ni altera el registro de patrones — no es una corrida de detección (§1).
 - Unit: matchea insensible a mayúsculas y acentos ("JOSE PEREZ" encuentra "José Pérez").
 - Unit: valor multi-palabra matchea sobre `Word` contiguas de la misma línea (§2).
+- Unit: **un valor multi-palabra cuyas palabras caen en líneas distintas NO matchea** — el test que la errata de §2 (punto 6) agrega. Sin él, la banda vertical se puede perder en silencio y el falso positivo vuelve.
 - Unit: **"J. Pérez" NO matchea "José Pérez"** — es la limitación de §2, asertada explícitamente para que no se implemente por accidente ni se rompa en silencio.
 - Edge: valor ausente del documento → `occurrenceCount: 0`, sin eventos, sin error (§6).
 - Edge: funciona sobre páginas cuyas palabras vienen de OCR (`source: "ocr"`).
@@ -210,17 +236,19 @@ Los PRs 4, 5 y 6 son independientes entre sí y pueden correr en paralelo una ve
 
 ## Docs actualizados por este ADR
 
-- `core/Regex_Engine.md` → v1.1.0: `findLiteral` (§6), casos límite y tests.
-- `core/Orchestrator.md` → v1.7.0: `addManualEntity`, `findText`, `getPageWords`, `getPageSize`, retención de literales manuales.
-- `core/Contracts.md` §3.5 (`IPipelineOrchestrator`), §6 — y `architecture/03_Data_Model.md` (`TextMatch`, `ManualEntityRequest`).
-- `core/Grouping_Engine.md` §13 — el caso de ocurrencia manual que se fusiona con un grupo existente.
+- `core/Regex_Engine.md` → v1.1.0: `findLiteral` (§6), casos límite y tests. → v1.3.0 por la errata de §2: de dónde salen las dos primitivas, caso límite 27 y su test.
+- `core/Orchestrator.md` → v1.7.0: `addManualEntity`, `findText`, `getPageWords`, `getPageSize`, retención de literales manuales. Ítems 24 y 24b del checklist: las cuatro entradas nuevas, y `line-words.ts` consumiendo `sharesVerticalBand` de `shared` (errata de §2).
+- `core/Contracts.md` §3.5 (`IPipelineOrchestrator`), §6 — y `architecture/03_Data_Model.md` (`TextMatch`, `ManualEntityRequest`). §6 gana además `sharesVerticalBand` y `normalizeForComparison` por la errata de §2.
+- `core/Grouping_Engine.md` §13 — el caso de ocurrencia manual que se fusiona con un grupo existente. Ítem 15l: `gender.ts` consume `normalizeForComparison` (errata de §2, PR 8).
+- `core/Render_Engine.md` — ítem 28: el kernel consume `sharesVerticalBand` de `shared` (errata de §2, PR 7).
 - `ui/Components.md` y `ui/UX_Guidelines.md` — botón y diálogo de agregado, interacción de selección sobre el `original`, lupa de búsqueda.
 - `roadmap/MVP.md` §4 — bloque del Hito 10.7; §6 — riesgo de la búsqueda exacta.
 - `roadmap/Future_Ideas.md` — la búsqueda difusa de variantes como trabajo futuro (§2).
 
 ## Validación
 
-- Los tests de §10 verdes, en particular los dos que protegen decisiones que se rompen fácil: **`"J. Pérez"` no matchea `"José Pérez"`** (§2) y **los literales manuales sobreviven a un `reanalyze`** (§5).
+- Los tests de §10 verdes, en particular los tres que protegen decisiones que se rompen fácil: **`"J. Pérez"` no matchea `"José Pérez"`** (§2), **un valor cuyas palabras cruzan de una línea a la siguiente no matchea** (errata de §2) y **los literales manuales sobreviven a un `reanalyze`** (§5).
+- Grep de control de la errata de §2, sobre `packages/`: `function sharesVerticalBand` y `u0300` —la huella de la normalización, que es lo que hay que grepear porque la copia existente se llama distinto (`normalizeForLexicon`)— aparecen **una sola vez cada uno**, en `shared/src/`. Con los PRs 7 y 8 pendientes hay **exactamente una copia extra de cada uno** —`render-engine/src/worker/kernel.ts` y `grouping-engine/src/gender.ts`—, y ninguna otra.
 - Verificación manual E2E: importar un PDF con un nombre que el NER no detecta, agregarlo por cada una de las tres vías (diálogo, selección sobre el original, resultado de búsqueda), y confirmar que aparece anonimizado en el preview y en el export.
 - Repetir sobre un PDF **escaneado**: es donde el hit-test justifica su elección frente a la capa de texto.
 - Grep de control: `pdfjs-dist` no aparece en `apps/react-client` (§4).

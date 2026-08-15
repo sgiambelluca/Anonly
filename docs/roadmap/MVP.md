@@ -328,7 +328,7 @@ Punto 6 de `Cambios para hacer.txt`. Independiente del 10.5 salvo por el requisi
 
 ### Hito 10.7 — Agregado manual de entidades
 
-Punto 1 de `Cambios para hacer.txt`. **Independiente de los Hitos 10.5 y 10.6**: no comparte contratos ni módulos críticos con ellos y puede correr en paralelo. La única primitiva compartida es la agrupación de palabras por línea, que ADR-058 §5 introduce y este hito reusa.
+Punto 1 de `Cambios para hacer.txt`. **Independiente de los Hitos 10.5 y 10.6**: no comparte contratos ni módulos críticos con ellos y puede correr en paralelo. La única primitiva compartida es la agrupación de palabras por línea, que ADR-058 §5 introduce y este hito reusa — y que este hito además **muda a `@anonly/shared`**, porque desde donde estaba no la alcanzaba ningún motor (errata de ADR-061 §2, ver debajo de la tabla).
 
 **El problema**: si el detector no encuentra una entidad, **no hay ninguna forma de agregarla**. El usuario puede fusionar, dividir, deshabilitar y editar grupos existentes; no puede crear uno. Y no es un caso raro: el recall del NER es una métrica **informativa** en MVP (§5, pasa a gate recién en v1.0), o sea que el propio roadmap asume que se escapan entidades y hoy no hay red de contención. Lo que se escapa se exporta sin anonimizar.
 
@@ -338,16 +338,22 @@ Punto 1 de `Cambios para hacer.txt`. **Independiente de los Hitos 10.5 y 10.6**:
 
 **Lo que hace esto barato**: la mitad ya existe. `mapSpanToWords` (el bbox unión de un rango de texto), `DetectionSource.Manual`, `RegexEngine.addPattern` documentado como *"runtime, para UI"*, y toda la maquinaria de `reopenSession`/`dropOccurrences`/dedup de ADR-038. El código nuevo es sobre todo cableado y UI.
 
-| # | PR | Módulo | Depende de |
-|---|---|---|---|
-| 1 | `wordsInRect`, `TextMatch`, `ManualEntityRequest` y tipos de los accesores | `shared` | — |
-| 2 | `findLiteral` + matcheo de secuencias de palabras normalizado | `regex-engine` | 1 |
-| 3 | `addManualEntity`, `findText`, `getPageWords`, `getPageSize`; retención y re-aplicación de literales manuales | `packages/anonymization-core/src` | 1, 2 |
-| 4 | Botón + diálogo "Agregar entidad" sobre el árbol | `apps/react-client` | 3 |
-| 5 | Hit-test sobre el canvas del `original` + "Agregar entidad como…" | `apps/react-client` | 3 |
-| 6 | Lupa de búsqueda con navegación y resaltado (punto 4 de `Cambios para hacer.txt`) | `apps/react-client` | 3 |
+| # | PR | Módulo | Depende de | Estado |
+|---|---|---|---|---|
+| 1 | `wordsInRect`, `TextMatch`, `ManualEntityRequest` y tipos de los accesores | `shared` | — | ✅ |
+| 1b | Docs de la errata de ADR-061 §2 (ver abajo) | — | — | ✅ |
+| 1c | `sharesVerticalBand` y `normalizeForComparison` | `shared` | 1b | |
+| 2 | `findLiteral` + matcheo de secuencias de palabras normalizado, consumiendo las dos primitivas de `shared` | `regex-engine` | 1, 1c | |
+| 3 | `addManualEntity`, `findText`, `getPageWords`, `getPageSize`; retención y re-aplicación de literales manuales. De paso, `line-words.ts` consume `sharesVerticalBand` | `packages/anonymization-core/src` | 1, 1c, 2 | |
+| 4 | Botón + diálogo "Agregar entidad" sobre el árbol | `apps/react-client` | 3 | |
+| 5 | Hit-test sobre el canvas del `original` + "Agregar entidad como…" | `apps/react-client` | 3 | |
+| 6 | Lupa de búsqueda con navegación y resaltado (punto 4 de `Cambios para hacer.txt`) | `apps/react-client` | 3 | |
+| 7 | De-dup: el kernel consume `sharesVerticalBand` y borra su copia | `render-engine` | 1c | diferible |
+| 8 | De-dup: `gender.ts` consume `normalizeForComparison` y borra `normalizeForLexicon` | `grouping-engine` | 1c | diferible |
 
 Los PRs 4, 5 y 6 son independientes entre sí una vez mergeado el 3. **El punto 4 sale de la misma primitiva que el punto 1** — es la misma búsqueda literal con otra UI encima —, por eso van juntos: separarlos significaría escribir dos veces el mismo matcheo.
+
+**Los PRs 1b, 1c, 7 y 8 salen de una errata**, no del plan original (ADR-061 §2, errata del 2026-08-14, hallazgo del implementador del PR 2). El ADR pedía reusar "la misma agrupación por banda vertical" de ADR-058 §5 como una primitiva compartida; esa primitiva vivía en el **façade**, que ningún motor puede importar (P-2), y **ya estaba duplicada** en el kernel de `render-engine`. Se promueven a `@anonly/shared` las dos piezas que `findLiteral` necesitaba y no podía alcanzar —el criterio de "misma línea" y la normalización NFC—, con el mismo razonamiento que `estimateTokenWidth` (`Contracts.md` §6). El 1b y el 1c **bloquean el 2**; el 7 y el 8 son de-dup puro sin cambio de comportamiento y pueden caer después del hito. La errata destapó además un test que faltaba: un valor cuyas palabras cruzan de un renglón al siguiente no debe matchear, y ninguno de los siete tests que el ADR pedía lo ejercitaba.
 
 **Cierra de paso un hueco preexistente**: el cliente no tiene dimensiones reales de página (`PageCanvas` las estima en `pageLayout.ts`, con un comentario reconociéndolo). El hit-test las necesita, así que `getPageSize` corrige esa aproximación.
 
