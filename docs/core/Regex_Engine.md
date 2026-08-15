@@ -1,13 +1,15 @@
-<!-- CONTEXT: scope=regex-engine | dependencias=core/Contracts.md,architecture/06_Pipeline.md,adr/ADR-021-Engines-Inline-Hasta-Hito9.md,adr/ADR-022-Regex-Phone-AR-Word-Boundaries.md,adr/ADR-066-Texto-De-Anotaciones-Y-Reemplazo-Rotado.md | audiencia=IA-implementador | fase=3 (items §15 1-18 implementados; tests cancel/perf de §14 diferidos a Hito 11; §4/§6/§13/§14/§15 en fase 10.7: findLiteral para el agregado manual de entidades, ADR-061, con sus dos primitivas importadas de shared y no reimplementadas —errata de ADR-061 §2—, y searchText de solo lectura como primitiva de findLiteral y de la lupa —errata de ADR-061 §8—; §6/§13/§14/§15 en fase 10.7 post-aprobación: stripEdgePunctuation, segunda errata de ADR-061 §2; §10/§14/§15 en fase 10.8: propagación de bbox.rotation, ADR-066 §6) -->
+<!-- CONTEXT: scope=regex-engine | dependencias=core/Contracts.md,architecture/06_Pipeline.md,adr/ADR-021-Engines-Inline-Hasta-Hito9.md,adr/ADR-022-Regex-Phone-AR-Word-Boundaries.md,adr/ADR-066-Texto-De-Anotaciones-Y-Reemplazo-Rotado.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-075-Fechas-En-Texto-Y-Tramos-De-Identificadores.md | audiencia=IA-implementador | fase=3 (§2/§6/§10/§13/§14/§15 y la tabla de patrones en fase 10.9: `fragments` por línea en `mapSpanToWords` —ADR-074 §2—, patrón `date-textual-ar` y guarda de corrida alfanumérica —ADR-075 §1/§2—; items §15 1-18 implementados; tests cancel/perf de §14 diferidos a Hito 11; §4/§6/§13/§14/§15 en fase 10.7: findLiteral para el agregado manual de entidades, ADR-061, con sus dos primitivas importadas de shared y no reimplementadas —errata de ADR-061 §2—, y searchText de solo lectura como primitiva de findLiteral y de la lupa —errata de ADR-061 §8—; §6/§13/§14/§15 en fase 10.7 post-aprobación: stripEdgePunctuation, segunda errata de ADR-061 §2; §10/§14/§15 en fase 10.8: propagación de bbox.rotation, ADR-066 §6) -->
 
 # Regex Engine — Spec de Motor
 
 > Detecta patrones determinísticos (DNI, CUIT, teléfono, email, IBAN, tarjeta, fecha, matrícula, patente) en el texto de cada página. Emite `Occurrence[]` con `source: "regex"` y `confidence: 1.0`. Es determinista: mismo input → mismo output.
 
 **EngineId**: `regex`
-**Versión del spec**: 1.5.0
+**Versión del spec**: 1.6.0
 **Última actualización**: 2026-08-15
-**Estado de implementación**: Hito 4, checklist §15 (items 1-18) implementado; item 19 (propagación de `bbox.rotation`) en Hito 10.8. `findLiteral` (item 10b) y `searchText` (item 10c) implementados en los PRs 2 y 3c del Hito 10.7 respectivamente; `stripEdgePunctuation` (item 10d) corrige un gap de matcheo hallado post-aprobación del hito. Pendiente: `cancel.test.ts`/`perf.test.ts` de §14 en Hito 11 (ver nota al final de §15).
+**Estado de implementación**: Hito 4, checklist §15 (items 1-18) implementado; item 19 (propagación de `bbox.rotation`) en Hito 10.8; items 20 y 21 (fragmentos por línea y los dos cambios de la tabla de patrones) en Hito 10.9. `findLiteral` (item 10b) y `searchText` (item 10c) implementados en los PRs 2 y 3c del Hito 10.7 respectivamente; `stripEdgePunctuation` (item 10d) corrige un gap de matcheo hallado post-aprobación del hito. Pendiente: `cancel.test.ts`/`perf.test.ts` de §14 en Hito 11 (ver nota al final de §15).
+
+> **Nota (v1.6.0, ADR-074 + ADR-075, 2026-08-15 — el footprint por línea, y dos cambios en la tabla de patrones)**: tres cosas, ninguna de ellas de contrato público. **(1) `mapSpanToWords` emite `fragments`** (ADR-074 §2): un match cuyas palabras caen en líneas distintas producía **un** bbox envolvente —557,2 × 18,2 pt sobre la pericia real, casi el ancho útil de la página— y la censura destruía las dos líneas enteras. El span se parte en corridas de la misma línea con `sharesVerticalBand` de `@anonly/shared` (la misma primitiva que ya usa `findLiteral`, no una cuarta copia) y se emite un rectángulo por corrida; `bbox` sigue siendo la envolvente, sin cambios. Con una sola corrida el campo **queda ausente** y el resultado es idéntico al previo, byte a byte. El texto rotado no se fragmenta (§3 del ADR: un run a 90° avanza hacia abajo y su envolvente ya es apretada). **(2) Patrón `date-textual-ar`** (ADR-075 §1): `"Quilmes, 07 de julio de 2026"` no se detectaba —`date-ar` es solo numérico— y salía en claro en el export; el normalizador lo lleva a `DD/MM/YYYY`, o sea al mismo `normalizedValue` que la fecha numérica equivalente, así que agrupan por el pase **exacto**. **(3) Guarda de corrida** (ADR-075 §2): un match **sin letras** cuya corrida —extendida a través de `-`, `/` y `.`— **sí** tiene letras se descarta; es lo que hace que `PP-13-00-027653-24/00` deje de producir `[PHONE] "00-027653"`. Ver §2, §6, §10, §13 casos 26-28, §14 y §15 items 20-21.
 
 > **Nota (v1.5.0, ADR-061 §2 segunda errata, 2026-08-15 — puntuación pegada a `Word` por el whitespace-split)**: en uso real, la lupa contaba menos apariciones de un nombre que el pipeline de detección completo (20 contra 28, sobre el mismo documento) — no por la limitación deliberada de "J. Pérez" (§2), sino porque `Page.words` separa por whitespace (ADR-020 §1): un nombre pegado a puntuación sin espacio (`"Gorrister,"`, `"¡Gorrister!"`) queda en un solo `Word` con la puntuación adentro, y `normalizeForComparison` no la saca — el NER, que opera sobre el texto corrido y no sobre `Word`, no tiene este problema. Se agrega `stripEdgePunctuation` (local a `regex-engine`, no promovida a `@anonly/shared`: es un recorte de tokenización propio de este matcheo, no una definición de línea/normalización que otro motor necesite — ver Validación), aplicada a los dos lados de la comparación en `slideWordWindowMatches`/`tokenizeLiteralValue`. Recorta solo el **borde**; la puntuación interna (`"O'Brien"`) queda intacta, y `"J. Pérez"` sigue sin matchear `"José Pérez"` — no es búsqueda difusa. Ver §6 (matcheo exacto), §13 caso 25, §14 y §15 ítem 10d.
 
@@ -32,7 +34,8 @@ Recorrer el `Document` (con texto ya fusionado PDF+OCR) y emitir `Occurrence[]` 
 ## 2. Responsabilidades
 
 - Cargar los patrones default de tipos argentinos (DNI, CUIT/CUIL, teléfono, email, IBAN, tarjeta, fecha, matrícula, patente).
-- Aplicar cada patrón a `Page.text` y mapear matches a `Occurrence` con `bbox`, `pageIndex`, `entityType`.
+- Aplicar cada patrón a `Page.text` y mapear matches a `Occurrence` con `bbox`, `pageIndex`, `entityType`, y —cuando el match cruza un salto de línea— la descomposición por línea en `fragments` (ADR-074 §2).
+- Descartar el match que es un **tramo de un identificador alfanumérico más largo**: sin letras en el match y con letras en su corrida (ADR-075 §2, ver §6).
 - Soportar patrones custom del usuario (con validación: regex válida + `entityType` válido).
 - Validar con checksum cuando aplique (CUIT con dígito verificador, tarjeta con Luhn).
 - Emitir `ENTITY_FOUND` por ocurrencia (evento **interno**, solo escuchado por Grouping Engine).
@@ -146,6 +149,18 @@ Semántica de `searchText` (ADR-061 §8 y su errata):
 - **Orden documental**: página ascendente y, dentro de cada página, orden de lectura de `Page.words`. La lupa navega "siguiente/anterior" sobre ese orden sin re-ordenar nada.
 - Query vacía o de solo espacios → **array vacío**, sin error (mismo criterio que §13 caso 14).
 
+Semántica de la **guarda de corrida** (ADR-075 §2), que se aplica a todo match de `process`, venga de un patrón default o de uno custom:
+
+> **Corrida** de un match: su extensión máxima hacia los dos lados a través de caracteres alfanuméricos y de los tres separadores **internos de número** `-`, `/` y `.`. Formalmente, el substring maximal alrededor del match que matchea `[\p{L}\p{N}]+(?:[-./][\p{L}\p{N}]+)*`.
+>
+> **Guarda**: si el texto del match **no contiene ninguna letra** y su corrida **sí contiene alguna**, el match se descarta — no se emite `ENTITY_FOUND`.
+
+- **"El match no contiene letras" es la condición de aplicabilidad**, y hace que la guarda alcance sola a los seis tipos puramente numéricos (DNI, CUIT, los dos Phone, CreditCard, Date) sin ninguna tabla por tipo. `License`, `Plate`, `IBAN` y `Email` llevan letras **en el match**, así que la guarda no los mira nunca: para ellos la mezcla de letras y dígitos es el formato.
+- **Los separadores son exactamente `-`, `/` y `.`**. Los que quedan afuera importan más que los que quedan adentro: con `:` afuera, `"Tel:4567-8900"` corta la corrida en el `:` y el teléfono se emite; con `,` afuera, `"4567-8900,4567-8901"` emite los dos.
+- **Se compara la corrida entera, no el carácter vecino**: lo que delata a `"00-027653"` como tramo de otra cosa está tres saltos a la izquierda (`PP`).
+- **No reemplaza la prioridad de match más largo** del caso 10 (DNI dentro de un CUIT): ese span no tiene letras en su corrida, así que pasa la guarda y lo sigue descartando el mecanismo de siempre. Son dos filtros para dos problemas distintos.
+- **Residuo aceptado y asertado por un test** (ADR-075 §5): un número pegado a una palabra por un punto y sin espacio (`"Tel.4567-8900"`) queda dentro de una corrida con letras y **no se emite**. De las cuatro formas de escribirlo, es la única que falla; la red de contención es el agregado manual de ADR-061.
+
 Patrones default exportados desde `index.ts`:
 
 ```ts
@@ -204,7 +219,8 @@ Las `Occurrence` individuales no se retornan; se emiten vía `ENTITY_FOUND`. Cad
   id: string;                  // UUID v4
   value: string;               // texto matcheado, sin normalizar de presentación
   normalizedValue: string;     // para agrupar (sin puntuación redundante, lowercase)
-  bbox: BoundingBox;           // mapeado desde el span en Page.words (ver invariante de rotation abajo)
+  bbox: BoundingBox;           // mapeado desde el span en Page.words (ver invariantes abajo)
+  fragments?: BoundingBox[];   // un rectángulo por línea, si el match cruza un renglón (ADR-074)
   pageIndex: number;
   source: DetectionSource.Regex;
   confidence: 1.0;
@@ -213,6 +229,12 @@ Las `Occurrence` individuales no se retornan; se emiten vía `ENTITY_FOUND`. Cad
   wordSpan?: WordSpan;         // referencia a Page.words[startIndex, endIndexExclusive)
 }
 ```
+
+**Invariante de `fragments` (ADR-074 §1-§3)**: `mapSpanToWords` parte las `Word` del match en corridas de la misma línea —`sharesVerticalBand` de `@anonly/shared`, comparando contra la **última** palabra de la corrida en curso, igual que `slideWordWindowMatches`— y emite un rectángulo por corrida, en orden de lectura. Con **una sola** corrida el campo queda **ausente** (≡ `[bbox]`) y la ocurrencia es idéntica a la de antes del ADR: ése es el caso normal. `bbox` no cambia: sigue siendo la envolvente de todo el match, y sigue siendo lo que usan el orden documental de ADR-028 y la detección de solapamiento. `wordSpan` tampoco cambia — sigue cubriendo el rango completo.
+
+**El texto rotado no se fragmenta**: si alguna `Word` del match declara `bbox.rotation` distinta de ausente/`0`, no se emite `fragments`. Un run a 90° avanza hacia abajo, así que cada palabra cae en una banda vertical distinta y fragmentarlo daría un rectángulo por palabra; además su envolvente ya es apretada y el defecto que ADR-074 corrige no existe ahí.
+
+Sin esta propagación el campo se cae en silencio y la censura sigue tapando las dos líneas enteras — es el mismo modo de falla que ADR-066 §6 documentó para `rotation`, en la misma función.
 
 **Invariante de `bbox.rotation` (ADR-066 §6)**: el bbox de la ocurrencia es la **unión** de los bboxes de las `Word` del match, y esa unión construye un `BoundingBox` nuevo. `rotation` se propaga explícitamente y **solo si todas las palabras del match coinciden en el ángulo** — en la práctica lo comparten, porque son tokens del mismo run. Si discrepan, el campo queda **ausente** (≡ 0, `Contracts.md` §5): la envolvente de dos direcciones de avance no tiene un ángulo que la describa, y el reemplazo se pinta horizontal. Para texto horizontal el campo sigue ausente, exactamente como antes del ADR.
 
@@ -281,6 +303,12 @@ Casos de `searchText` (ADR-061 §8 y su errata):
 23. **Orden de los resultados**: página ascendente, y dentro de la página el orden de lectura de `Page.words`. Es el orden sobre el que la lupa navega "siguiente/anterior"; si no fuera estable, la navegación saltaría.
 24. **`searchText` tras `dispose`**: lanza `EngineDisposedError` **sincrónicamente**, no como promesa rechazada — es una función sincrónica (§6). Sin `init` previo, `EngineNotInitializedError`, igual.
 
+Casos de fragmentos y de la tabla de patrones (ADR-074, ADR-075):
+
+26. **Un match que cruza un salto de línea** (ADR-074 §2): un teléfono partido entre dos renglones emite **una** `Occurrence` con `fragments.length === 2` —un rectángulo por línea, en orden de lectura— y `bbox` como envolvente de los dos. Un match de una sola línea, de una o de varias palabras, **no lleva el campo** y su `bbox` es idéntico al de antes del ADR: es la no-regresión del caso normal. Un match rotado tampoco lo lleva (§10). **`findLiteral` nunca produce fragmentos**: exige banda vertical compartida entre palabras consecutivas (caso 16), así que sus matches son de una línea por construcción — y por eso `TextMatch` no gana el campo.
+27. **Fecha escrita en texto** (ADR-075 §1): `"Quilmes, 07 de julio de 2026"` emite una `Occurrence` de `Date` con `normalizedValue === "07/07/2026"` — el **mismo** que produce `"7/7/2026"`, así que Grouping las unifica por el pase exacto, sin depender del difuso (que ADR-073 §2 le retira a `Date`). Matchean también `"1º de julio de 2026"`, `"1° …"`, `"… del 2026"`, `"setiembre"` y la línea entera en mayúsculas. **No** matchean, deliberadamente, `"julio de 2026"` (sin día: identifica poco y aparece en frases que no son fechas) ni `"7 de julio de 26"` (año de dos dígitos). `"45 de julio de 2026"` matchea el patrón y lo descarta `validateDateRange`, igual que en el patrón numérico.
+28. **Un tramo de un número de expediente no es un teléfono** (ADR-075 §2): sobre `"PP-13-00-027653-24/00"` no se emite ninguna ocurrencia — el match `"00-027653"` no tiene letras y su corrida sí (`PP`). Los casos que **sí** siguen emitiendo, y que son la mitad que protege contra la fuga: `"Tel: 0221-4567890."` (puntuación de oración alrededor), `"Tel:4567-8900"` (la corrida corta en el `:`), `"4567-8900,4567-8901"` (dos ocurrencias, la coma no extiende) y `"34.567.891/2024"` (corrida sin letras ⇒ la guarda no aplica). El único que se pierde es `"Tel.4567-8900"` (§6, residuo aceptado).
+
 ---
 
 ## 14. Casos de prueba
@@ -329,6 +357,23 @@ Casos de `searchText` (ADR-061 §8 y su errata):
 | `propagates rotation when every word of a multi-word match agrees` | `unit.test.ts` | unit | ADR-066 §6: unión de varias palabras del mismo run |
 | `omits rotation when the words of a match disagree on the angle` | `unit.test.ts` | unit | ADR-066 §6: la envolvente de dos avances no tiene ángulo que la describa |
 | `leaves rotation absent for horizontal text` | `unit.test.ts` | unit | ADR-066 §6: no regresión (ausente ≡ 0) |
+| **`a match whose words fall on two lines emits one occurrence with two fragments`** | `unit.test.ts` | unit | caso 26 (ADR-074 §2) — **el test que define el ADR** de este lado: `fragments.length === 2`, un rectángulo por línea, y `bbox` sigue siendo la envolvente de los dos |
+| `a single-line match carries no fragments and its bbox is unchanged` | `unit.test.ts` | unit | caso 26 — **no-regresión**: el caso normal no cambia ni un byte |
+| `three lines produce three fragments in reading order` | `unit.test.ts` | unit | caso 26 (ADR-074 §2) |
+| `a rotated match carries no fragments and keeps its rotation` | `unit.test.ts` | unit | caso 26 (ADR-074 §3) — la interacción con ADR-066 §6 |
+| `bbox is the exact envelope of fragments, which never overlap` | `contract.test.ts` | contract | ADR-074 §1 — junto con `union(fragments) ⊆ bbox`, es lo que aserta que fragmentar **no puede** filtrar nada |
+| **`"Quilmes, 07 de julio de 2026" is detected as a Date`** | `unit.test.ts` | unit | caso 27 (ADR-075 §1) — la línea literal de la pericia |
+| `textual and numeric dates produce the same normalizedValue` | `unit.test.ts` | unit | caso 27 — la propiedad que las agrupa |
+| `ordinal day, "del", "setiembre" and uppercase all match` | `unit.test.ts` | unit | caso 27 (ADR-075 §1) |
+| **`"julio de 2026" and "7 de julio de 26" do NOT match`** | `edge.test.ts` | edge | caso 27 — asertar las **limitaciones** deliberadas, mismo criterio que el `"J. Pérez"` de ADR-061 §2 |
+| `"45 de julio de 2026" is discarded by validateDateRange` | `edge.test.ts` | edge | caso 27 |
+| **`"PP-13-00-027653-24/00" emits no Phone occurrence`** | `unit.test.ts` | unit | caso 28 (ADR-075 §2) — la cadena literal de la pericia |
+| **`phone, DNI, CUIT, card and date with sentence punctuation still emit`** | `unit.test.ts` | unit | caso 28 — **no-regresión**, y es la mitad que protege contra convertir la guarda en una fuga |
+| `"Tel:4567-8900" and "4567-8900,4567-8901" still emit` | `unit.test.ts` | unit | caso 28 — los separadores que **no** extienden la corrida |
+| `"34.567.891/2024" still emits the DNI` | `unit.test.ts` | unit | caso 28 — corrida sin letras ⇒ la guarda no aplica |
+| `License and Plate are never touched by the run guard` | `unit.test.ts` | unit | caso 28 — el match tiene letras |
+| `a custom pattern is subject to the run guard too` | `edge.test.ts` | edge | ADR-075 §4 |
+| `"Tel.4567-8900" does not emit (accepted residue)` | `edge.test.ts` | edge | caso 28 (ADR-075 §5) — la limitación documentada en un test, para que sea conocida y no una sorpresa |
 | `snapshot of occurrences for text-10p.pdf stable` | `snapshot.test.ts` | snapshot | fixture |
 
 Fixtures: `tests/fixtures/text-10p.pdf` (con DNIs, CUITs, emails, teléfonos conocidos).
@@ -359,6 +404,8 @@ Fixtures: `tests/fixtures/text-10p.pdf` (con DNIs, CUITs, emails, teléfonos con
 - [ ] 17. Verificar `index.ts` exporta solo `RegexEngine`, tipos, `DEFAULT_PATTERNS_AR`, errores.
 - [ ] 18. Verificar imports sin dependencias prohibidas.
 - [x] 19. (Hito 10.8 — ADR-066 §6) `mapSpanToWords`: propagar `bbox.rotation` a la `Occurrence`, solo si **todas** las palabras del match coinciden en el ángulo; si discrepan, el campo queda ausente (§10). **No** tocar la geometría de la unión (`x`/`y`/`width`/`height`) ni el `wordSpan`. Cuatro filas nuevas en §14.
+- [ ] 20. (Hito 10.9, PR 5 — ADR-074 §2/§3) `mapSpanToWords`: partir las `Word` del match en corridas de la misma línea con `sharesVerticalBand` de `@anonly/shared` (§4, `Contracts.md` §6 — **importada, no reimplementada**, mismo criterio que la errata de ADR-061 §2) y emitir un rectángulo por corrida en `Occurrence.fragments`. Con una sola corrida, **no emitir el campo**. Con `rotation` presente en alguna palabra, tampoco. **No** tocar `bbox` (sigue siendo la envolvente), ni `wordSpan`, ni la propagación de `rotation` del item 19. El PR de `shared` que declara el campo (Hito 10.9 PR 4) es precondición. Caso 26 de §13, cinco filas de §14.
+- [ ] 21. (Hito 10.9, PR 13 — ADR-075 §1/§2) Dos cambios en la tabla de patrones, en el mismo PR porque son el mismo archivo: **(a)** `date-textual-ar` con su `normalizeTextualDate` (→ `DD/MM/YYYY`, el mismo `normalizedValue` que la fecha numérica) y `checksum: validateDateRange`; **(b)** la guarda de corrida de §6, aplicada a todo match de `process` incluidos los custom, calculada sobre `Page.text` alrededor del span. **No** tocar los `\b` de ADR-022, los checksums, ni la prioridad de match más largo del caso 10. Casos 27-28 de §13, once filas de §14.
 
 > **Estado Hito 4**: items 1–18 implementados, incluyendo el comportamiento funcional de cancelación
 > cooperativa (chequeo de `abortSignal` entre páginas) y de timeout por patrón custom (1000 ms).
@@ -383,16 +430,29 @@ Los patrones exactos viven en `patterns/default-ar.ts` y son parte del contrato 
 | IBAN | `\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b` | ISO 13616 check | uppercase, strip spaces |
 | CreditCard | `\b(?:\d[ -]*?){13,19}\b` | Luhn | strip non-digit |
 | Date (AR) | `\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b` | validación rango (día 1-31, mes 1-12) | normaliza a "DD/MM/YYYY" |
+| Date (AR, en texto) | `\b(\d{1,2})\s*[°º]?\s+de\s+(enero\|febrero\|marzo\|abril\|mayo\|junio\|julio\|agosto\|septiembre\|setiembre\|octubre\|noviembre\|diciembre)\s+del?\s+(\d{4})\b` con flags `gi` | misma validación de rango | normaliza a "DD/MM/YYYY" — **el mismo `normalizedValue` que la fila anterior**, que es lo que las agrupa |
 | License (AR) | `\b[A-Z]{1,3}-?\d{4,8}-?\d?\b` (matrícula profesional) | – | uppercase, strip dashes |
 | Plate (AR vieja) | `\b[A-Z]{3}\s?\d{3}\b` | – | uppercase, strip spaces |
 | Plate (AR Mercosur) | `\b[A-Z]{2}\s?\d{3}\s?[A-Z]{2}\b` | – | uppercase, strip spaces |
 
 La implementación debe respetar estos patrones y checksums. Cualquier cambio requiere ADR nuevo.
 
+**Los doce patrones pasan además por la guarda de corrida de §6** (ADR-075 §2): un match sin letras
+cuya corrida alfanumérica sí las tiene no se emite. La guarda no está en ningún `pattern` de la
+tabla porque no es una propiedad de los patrones sino del **contexto** del match, y por eso alcanza
+también a los patrones custom del usuario.
+
 > El patrón "Phone (AR mobile)" fue corregido en la versión 1.0.1 del spec agregando límites de
 > palabra (`\b`) en ambos extremos, consistente con los otros 10 patrones de la tabla. Ver
 > `adr/ADR-022-Regex-Phone-AR-Word-Boundaries.md` para el detalle del problema (rompía el caso
 > límite 3, §13) y la decisión.
+
+> El patrón "Date (AR, en texto)" entró en la versión 1.6.0 del spec: la forma escrita es cómo se
+> fecha un escrito judicial argentino —encabezado y pie de firma— y no la cubría ningún patrón, así
+> que la fecha del documento se exportaba en claro. Ver
+> `adr/ADR-075-Fechas-En-Texto-Y-Tramos-De-Identificadores.md` §1 para las decisiones finas (día
+> obligatorio, año de cuatro dígitos, `setiembre`, ordinal, `del`) y por qué el normalizador es la
+> mitad importante del patrón.
 
 ---
 

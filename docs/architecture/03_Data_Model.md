@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=modelo-de-datos | dependencias=01_Technical_Architecture_Document.md,core/Contracts.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-043-RenderEngine-Reparto-Host-Worker-Kernel.md,adr/ADR-046-NerEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-064-Palabras-De-OCR-En-Puntos.md,adr/ADR-065-OCR-Por-Region.md,adr/ADR-066-Texto-De-Anotaciones-Y-Reemplazo-Rotado.md,adr/ADR-067-Orden-De-Lectura-Por-Runs-Rotados.md | audiencia=IA+humanos | fase=1 (§18 actualizado en fase 10: OcrPagePayload.imageData→ImageData y payloads de transporte LoadDocument/RasterizePage/ExportSave, ADR-036 §4; UnloadDocumentPayload, ADR-043 §4; NerPagePayload por batch + NerKernelSpan/NerKernelProgress, ADR-046; fase 10.5/10.6: §9 EntityGroup.personGender + PersonGender —ADR-060 §2—, §11 escalera de abreviaturas del placeholder —ADR-057 §1—, §18 RenderPagePayload.lineWords —ADR-058 §5—, ExportSavePayload.legendImage + MarkerLegendEntry/MarkerLegendRow + RenderLegendPayload —ADR-059 §3/§5/§6—, §19 ExportOptions.includeMarkerLegend —ADR-059 §1—; fase 10.8: §4 invariante de orden de lectura por runs rotados —ADR-067— y `ocrCompleted` relajado a `requiresOCR === false` con región —ADR-065 §7—, §4.1 `OcrRegion` nueva —ADR-065 §4—, §5 `Word.bbox.rotation` y aclaración de puntos de página para `source: "ocr"` —ADR-066 §6, ADR-064—, §6 `BoundingBox.rotation` —ADR-066 §6—, §18 `RasterizePagePayload.region` —ADR-065 §5—; fase 10.6: §9 `EntityGroup.personGender` —ADR-060 §2—, reescrita por ADR-069 §4/§6 —quién lo escribe, qué significa la ausencia, y que la elección del humano se recuerda aparte en `personGenderUserSet`, interno—) -->
+<!-- CONTEXT: scope=modelo-de-datos | dependencias=01_Technical_Architecture_Document.md,core/Contracts.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-043-RenderEngine-Reparto-Host-Worker-Kernel.md,adr/ADR-046-NerEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-064-Palabras-De-OCR-En-Puntos.md,adr/ADR-065-OCR-Por-Region.md,adr/ADR-066-Texto-De-Anotaciones-Y-Reemplazo-Rotado.md,adr/ADR-067-Orden-De-Lectura-Por-Runs-Rotados.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md | audiencia=IA+humanos | fase=1 (fase 10.9: §7/§8/§12 `fragments` —la descomposición por línea de una ocurrencia que cruza un salto de renglón, ADR-074 §1—; §18 actualizado en fase 10: OcrPagePayload.imageData→ImageData y payloads de transporte LoadDocument/RasterizePage/ExportSave, ADR-036 §4; UnloadDocumentPayload, ADR-043 §4; NerPagePayload por batch + NerKernelSpan/NerKernelProgress, ADR-046; fase 10.5/10.6: §9 EntityGroup.personGender + PersonGender —ADR-060 §2—, §11 escalera de abreviaturas del placeholder —ADR-057 §1—, §18 RenderPagePayload.lineWords —ADR-058 §5—, ExportSavePayload.legendImage + MarkerLegendEntry/MarkerLegendRow + RenderLegendPayload —ADR-059 §3/§5/§6—, §19 ExportOptions.includeMarkerLegend —ADR-059 §1—; fase 10.8: §4 invariante de orden de lectura por runs rotados —ADR-067— y `ocrCompleted` relajado a `requiresOCR === false` con región —ADR-065 §7—, §4.1 `OcrRegion` nueva —ADR-065 §4—, §5 `Word.bbox.rotation` y aclaración de puntos de página para `source: "ocr"` —ADR-066 §6, ADR-064—, §6 `BoundingBox.rotation` —ADR-066 §6—, §18 `RasterizePagePayload.region` —ADR-065 §5—; fase 10.6: §9 `EntityGroup.personGender` —ADR-060 §2—, reescrita por ADR-069 §4/§6 —quién lo escribe, qué significa la ausencia, y que la elección del humano se recuerda aparte en `personGenderUserSet`, interno—) -->
 
 # Anonly — Modelo de Datos (TAD bloque 5)
 
@@ -183,6 +183,7 @@ export interface Occurrence {
   readonly value: string;                    // texto detectado, sin normalizar de presentación
   readonly normalizedValue: string;          // para agrupar (sin espacios/puntuación redundantes)
   readonly bbox: BoundingBox;
+  readonly fragments?: ReadonlyArray<BoundingBox>;  // ADR-074 §1; ausente ≡ [bbox]
   readonly pageIndex: number;
   readonly source: DetectionSource;
   readonly confidence: number;
@@ -202,6 +203,16 @@ export interface WordSpan {
 - `confidence ∈ [0,1]`. Regex = `1.0`. NER = score del modelo. OCR-derived = `min(ocrConf, nerConf)`.
 - `entityType` debe estar dentro de los tipos que el `source` puede emitir (ver `core/Regex_Engine.md` y `core/NER_Engine.md`).
 
+**`bbox` y `fragments`** (ADR-074 §1). Una entidad puede cruzar un salto de línea: `"Pablo Román Fortes"` con `Pablo` al final de un renglón y `Román Fortes` al principio del siguiente. La unión de esas palabras es la **envolvente**, un rectángulo que abarca las dos líneas enteras — correcto como región, destructivo como censura (medido: 557,2 × 18,2 pt, casi el ancho útil de la página).
+
+- `bbox` es **la envolvente** y conserva todos sus usos: orden de primera aparición documental (ADR-028), detección de solapamiento entre ocurrencias, hit-test, miniatura de la UI.
+- `fragments`, cuando está presente, es **dónde está realmente la entidad**: un rectángulo por línea, en orden de lectura (`y` asc, `x` asc). **Todo lo que pinte** usa `fragments ?? [bbox]`, nunca la envolvente sola.
+- **Ausente ≡ `[bbox]`**, misma convención que `BoundingBox.rotation` (§6): el caso de una sola línea —la enorme mayoría— no lleva el campo y se comporta exactamente como antes de ADR-074.
+- `fragments.length ≥ 2` siempre que esté presente. Un array de un elemento sería la envolvente escrita dos veces.
+- `bbox` es la envolvente exacta de `fragments` (min/max sobre los cuatro bordes, sin tolerancia), los fragmentos no se solapan verticalmente, y `union(fragments) ⊆ bbox` — o sea que la superficie tapada solo puede achicarse respecto de la envolvente, nunca crecer: es lo que garantiza que la fragmentación **no puede introducir una fuga**.
+- **El texto rotado no se fragmenta** (ADR-074 §3): con `bbox.rotation` distinta de ausente/`0`, el campo no se emite. Un run a 90° avanza hacia abajo, así que su envolvente ya es apretada y partirlo por banda vertical daría un fragmento por palabra.
+- Quien lo puebla es `mapSpanToWords`, en `regex-engine` y en `ner-engine`, agrupando las `Word` del match con `sharesVerticalBand` (`core/Contracts.md` §6). `findLiteral` (ADR-061) **nunca** produce el campo: exige banda vertical compartida entre palabras consecutivas, así que sus matches son de una línea por construcción.
+
 ---
 
 ## 8. `OccurrenceRef`
@@ -213,9 +224,13 @@ export interface OccurrenceRef {
   readonly occurrenceId: string;
   readonly pageIndex: number;
   readonly bbox: BoundingBox;                // duplicado a propósito: la UI lo necesita sin resolver
+  readonly fragments?: ReadonlyArray<BoundingBox>;  // ADR-074 §1; ausente ≡ [bbox]
   readonly source: DetectionSource;
 }
 ```
+
+**Invariantes**
+- `fragments` se copia tal cual de la `Occurrence` (`toOccurrenceRef`, `grouping-engine`), con la semántica de §7: envolvente en `bbox`, descomposición por línea en `fragments`, ausente ≡ `[bbox]`. Es un salto de la cadena `Word → Occurrence → Replacement` y **se propaga explícitamente**: nada viaja solo por una copia de campos (ADR-066 §6, el precedente donde `rotation` se caía en silencio).
 
 ---
 
@@ -333,6 +348,7 @@ export interface Replacement {
   readonly occurrenceId: string;
   readonly pageIndex: number;
   readonly bbox: BoundingBox;
+  readonly fragments?: ReadonlyArray<BoundingBox>;  // ADR-074 §1; ausente ≡ [bbox]
   readonly originalValue: string;
   readonly replacementValue: string;
   readonly mode: ReplacementMode;
@@ -343,7 +359,8 @@ export interface Replacement {
 - `groupId` referencia un `EntityGroup` existente y `enabled === true`.
 - `occurrenceId` referencia una `Occurrence` que pertenece a ese grupo.
 - `replacementValue` es idéntico para todas las `Replacement` del mismo `groupId` (porque el reemplazo es a nivel grupo).
-- Para `mode === "redact"`, `replacementValue === ""` y el render pinta el bbox de negro.
+- Para `mode === "redact"`, `replacementValue === ""` y el render pinta de negro **cada fragmento**, no la envolvente.
+- `fragments` se copia del `OccurrenceRef` (`buildPageReplacements`, `export-engine`). **Es el último salto de la cadena y el que importa**: quien pinta usa `fragments ?? [bbox]`. Un reemplazo con N fragmentos tapa los N y dibuja el `replacementValue` **una sola vez**, en el fragmento más ancho (ADR-074 §4/§5); los demás se tapan sin texto. La envolvente nunca se pinta.
 
 ---
 

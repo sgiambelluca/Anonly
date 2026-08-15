@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-future | dependencias=roadmap/Version_2.0.md,00_Project_Vision.md | audiencia=humanos | fase=5 -->
+<!-- CONTEXT: scope=roadmap-future | dependencias=roadmap/Version_2.0.md,00_Project_Vision.md | audiencia=humanos | fase=5 (§5.6-§5.9 en fase 10.9: los residuos anotados por ADR-076 §5, ADR-075 §1/§4 y ADR-074 §3) -->
 
 # Anonly — Future Ideas
 
@@ -168,6 +168,28 @@ Tras exportar, cargar el PDF resultante de vuelta y verificar que ningún valor 
 De ahí sale una inconsistencia menor que ADR-072 §3 dejó **deliberadamente sin arreglar**: como la semilla del sintetizador dejó de depender del índice pero esta rama sigue interpolándolo, un grupo `Custom` en modo `synthetic` que se renumera conserva `custom-3` mientras su placeholder diría `[CUSTOM 04]`. Es exactamente el comportamiento previo a ADR-072, ni mejor ni peor.
 
 Arreglar el índice sin contestar la pregunta de fondo sería pulir un valor que probablemente haya que cambiar entero, y la pregunta de fondo —qué dato falso plausible corresponde a un tipo de entidad que define el usuario— es de producto: depende de si `Custom` llega a tener formato declarado (ver §4.3, patrones regex compartidos).
+
+### 5.6 Restaurar el valor de reemplazo automático con un control propio
+
+ADR-076 hace que un `replacementValue` escrito a mano sobreviva a todos los recálculos automáticos, y deja la vuelta atrás en cambiar el modo de reemplazo y volver (§5 de ese ADR). Funciona con los controles que ya están en la fila, pero no es evidente: nadie descubre solo que el camino para "volvé a calcularlo vos" es tocar otro campo.
+
+Un botón explícito de "restaurar automático", visible solo cuando el grupo tiene un valor escrito a mano, lo haría descubrible. Se difirió porque hoy sería un control permanente más en la fila más común del árbol —la misma objeción que el humano le hizo al selector de género en el Hito 10.6 (ADR-071)— y porque el canal para pedirlo (`GroupUpdateRequested.patch`) sería un cambio de contrato. **Es una afordancia de UI: no toca el Core.**
+
+### 5.7 Fechas en texto sin día, y meses en números romanos
+
+ADR-075 §1 exige el día en el patrón de fecha textual: `"julio de 2026"` no se detecta. Es deliberado — un mes y un año solos identifican mucho menos y aparecen en frases que no son fechas (*"el balance de julio de 2026"*), así que detectarlos taparía texto corriente. Si algún día se quiere cubrir, la decisión de fondo es qué hacer con esos falsos positivos, no cómo escribir la regex.
+
+En la misma familia: algunos sellos y carátulas judiciales escriben el mes en **números romanos** (`07/VII/2026`). No se midió en ningún documento real todavía; queda anotado para cuando aparezca uno.
+
+### 5.8 Opt-out de la guarda de corrida por patrón custom
+
+La guarda de ADR-075 §2 se aplica también a los patrones custom del usuario, a propósito: es una propiedad del texto y no del patrón. Si alguna vez un patrón custom real necesita matchear un tramo numérico dentro de un identificador alfanumérico, la forma es un flag de opt-out en `RegexPattern` — que es contrato público (`Regex_Engine.md` §6), o sea un cambio de contrato con su propio ADR. No se hizo por adelantado porque no hay ningún caso que lo pida.
+
+### 5.9 Un run de texto vertical que se derrama a una segunda columna
+
+ADR-074 §3 no fragmenta el texto rotado: en un run a 90° las palabras avanzan hacia abajo, así que la envolvente ya es apretada y partirla por banda vertical daría un fragmento por palabra. El residuo es un run vertical que **se derrame a una segunda columna**, donde la envolvente volvería a tapar de más — el equivalente exacto del defecto que ADR-074 corrige para el texto horizontal.
+
+No apareció en ninguna de las cinco páginas medidas. Cerrarlo requiere un criterio de banda **horizontal** para los runs rotados, que es una función distinta de `sharesVerticalBand` y no una parametrización de ella.
 
 ---
 

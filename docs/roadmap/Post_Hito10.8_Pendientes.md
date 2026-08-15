@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-pendientes | dependencias=roadmap/MVP.md,roadmap/Hito10.8_Handoff.md,adr/ADR-011-Grouping-First.md,adr/ADR-061-Agregado-Manual-De-Entidades.md,adr/ADR-063-Bbox-De-Texto-Rotado.md | audiencia=humanos+IA | fase=post-10.8 -->
+<!-- CONTEXT: scope=roadmap-pendientes | dependencias=roadmap/MVP.md,roadmap/Hito10.8_Handoff.md,adr/ADR-011-Grouping-First.md,adr/ADR-061-Agregado-Manual-De-Entidades.md,adr/ADR-063-Bbox-De-Texto-Rotado.md,adr/ADR-073-Difuso-Solo-Para-Tipos-De-Texto-Libre.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-075-Fechas-En-Texto-Y-Tramos-De-Identificadores.md,adr/ADR-076-La-Edicion-Manual-Del-Valor-De-Reemplazo-Gana.md | audiencia=humanos+IA | fase=post-10.8 (§1, §2, §4, §4bis y §10 adoptados como Hito 10.9 el 2026-08-15, cada uno con su ADR; el diagnóstico original se conserva porque es la medición sobre el documento real) -->
 
 # Pendientes acordados para después del Hito 10.8
 
@@ -9,10 +9,12 @@
 > **Estado (2026-08-13)**: el §3 quedó **cerrado dentro del hito** por ADR-067 — se conserva tachado, con el porqué. El resto sigue vigente, y el §2 quedó **medido** sobre la pericia de 5 páginas en la segunda prueba manual.
 >
 > **Estado (2026-08-14)**: entra el §10, de la planificación del Hito 10.6 (ADR-072).
+>
+> **Estado (2026-08-15) — cinco entradas dejan de ser pendientes**: el humano tomó los **§1, §2, §4, §4bis y §10** como **Hito 10.9** (`MVP.md` §4). Cada una tiene ahora su ADR y su propagación a specs: §1 → **ADR-073**, §2 → **ADR-074**, §4 y §4bis → **ADR-075** (juntos, porque tocan la misma tabla de patrones y el propio §4bis lo pedía), §10 → **ADR-076**. Se conservan acá, con el diagnóstico original intacto y una nota al pie de cada una: son la medición sobre el documento real, y el ADR se escribió contra ellas. Siguen **abiertos** el §5 (recall de NER, que no es un bug), el §6 (marca de agua, sin construir por decisión), el §7 (solapamiento, ADR-063 §6), el §8 (rotación de página, sin datos para calibrar) y el §9 (variantes de ops de imagen).
 
 ---
 
-## 1. Matching difuso fusiona entidades numéricas distintas — **el más grave**
+## 1. Matching difuso fusiona entidades numéricas distintas — **el más grave** · *adoptado: ADR-073, Hito 10.9 PR 2*
 
 **Qué pasa.** Dos fechas distintas (`1/7/2026` y `7/7/2026`) salen como un solo grupo, `Fecha 01`.
 
@@ -38,7 +40,7 @@ Dos CUIT distintos que difieran en un dígito se fusionan en un grupo: el docume
 
 ---
 
-## 2. Una entidad partida en dos líneas tapa las dos líneas enteras
+## 2. Una entidad partida en dos líneas tapa las dos líneas enteras · *adoptado: ADR-074, Hito 10.9 PRs 3-11*
 
 **Qué pasa.** Con "Pablo Roman" al final de una línea y "Fortes" al inicio de la siguiente, la censura tapa **ambas líneas completas**, destruyendo texto ajeno.
 
@@ -76,7 +78,7 @@ Ver `adr/ADR-067-Orden-De-Lectura-Por-Runs-Rotados.md` y `MVP.md` §4, Hito 10.8
 
 ---
 
-## 4. Fechas escritas en texto
+## 4. Fechas escritas en texto · *adoptado: ADR-075 §1, Hito 10.9 PR 13*
 
 `"Quilmes, 07 de julio de 2026"` está en el content stream de la página 1 y **no se detecta**: `date-ar` es `/\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b/`, solo numéricas.
 
@@ -84,7 +86,7 @@ Ver `adr/ADR-067-Orden-De-Lectura-Por-Runs-Rotados.md` y `MVP.md` §4, Hito 10.8
 
 ---
 
-## 4bis. Los patrones numéricos matchean partes del número de expediente
+## 4bis. Los patrones numéricos matchean partes del número de expediente · *adoptado: ADR-075 §2, Hito 10.9 PR 13*
 
 Verificado sobre la pericia real: `PP-13-00-027653-24/00` produce una ocurrencia **`[PHONE] "00-027653"`**. Los patrones de `default-ar.ts` no tienen forma de distinguir un tramo de número de causa de un teléfono.
 
@@ -134,7 +136,7 @@ Sus argumentos tienen otra forma, así que soportarlas es un cálculo de rectán
 
 ---
 
-## 10. Una edición manual de `replacementValue` se pierde si el grupo se renumera — **el spec promete lo contrario**
+## 10. Una edición manual de `replacementValue` se pierde si el grupo se renumera — **el spec promete lo contrario** · *adoptado: ADR-076, Hito 10.9 PR 15*
 
 > **Procedencia**: planificación del Hito 10.6 (ADR-072, 2026-08-14). Apareció al analizar por qué `renumberGroupsCanonically` no recalcula el valor en modo `synthetic`. **No es del Hito 10.6** —no tiene nada que ver con el género ni con el sintetizador— y se difiere por eso, no por costo.
 >

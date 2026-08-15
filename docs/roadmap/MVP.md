@@ -436,11 +436,51 @@ Y un cuarto, de `pdf.js` y no del motor (ADR-068, fila 17): `getTextContent()` a
 
 **Lección de método**: medir sobre el documento **original**, nunca sobre una copia re-exportada — el aplanado escondió la mitad del contrato de ADR-066 §2. Y la fila 20 existe porque el defecto 1 llegó a prueba manual con todos los tests unitarios en verde: nada cubría la cadena de punta a punta.
 
-**Fuera del hito, salidos de la misma prueba manual** y con ADR pendiente: el matching difuso de Grouping fusiona entidades numéricas distintas que difieren en un carácter (dos CUIT, dos fechas — `1 - 1/11 = 0.909` contra un umbral de 0.88), el bbox de una entidad partida en dos líneas tapa las dos líneas enteras, y las fechas en texto ("7 de julio de 2026") no tienen patrón.
+**Fuera del hito, salidos de la misma prueba manual**: el matching difuso de Grouping fusiona entidades numéricas distintas que difieren en un carácter (dos CUIT, dos fechas — `1 - 1/11 = 0.909` contra un umbral de 0.88), el bbox de una entidad partida en dos líneas tapa las dos líneas enteras, y las fechas en texto ("7 de julio de 2026") no tienen patrón. Los tres, más el falso positivo del número de expediente, quedaron anotados en `roadmap/Post_Hito10.8_Pendientes.md` y **son el Hito 10.9** (ADR-073, ADR-074 y ADR-075).
 
 Los pasos 1 y 2 son independientes entre sí: el orden 1→2 es por tamaño y aislamiento, no por dependencia técnica (se verificó que el bbox erróneo **no** corrompe la métrica de la compuerta 2 en el documento medido: 55,5% contra 55,1%). El paso 0, en cambio, **sí** bloquea al 2: no se puede especificar la traducción de coordenadas de un recorte cuando la de la página entera está rota.
 
 **Dos cosas que este hito deja anotadas y no resuelve**, las dos por decisión explícita del humano: el **riesgo latente de solapamiento** (ADR-063 §6) — un bbox correcto sobre un sello que pisa el cuerpo del texto tapa lo que hay debajo, medido en 10-14 fragmentos por página, hoy inactivo porque nada dentro de ese sello se detecta; y la **discrepancia de rotación a nivel de página** (ADR-063 §7) — `Render_Engine.md` §13 caso 15 promete una garantía que el motor no da, sin ningún dato para calibrarla porque las páginas medidas tienen `rotate = 0`.
+
+### Hito 10.9 — Lo que la pericia real dejó pendiente
+
+No sale de `Cambios para hacer.txt` ni de un hito anterior: son los puntos **1, 2, 4, 4bis y 10** de `roadmap/Post_Hito10.8_Pendientes.md`, que el humano decidió tomar juntos. Los cuatro primeros salieron de probar la herramienta sobre la **pericia judicial real** durante el Hito 10.8 y se difirieron porque no pertenecían a ese hito; el quinto apareció al planificar ADR-072 y se difirió por lo mismo. Ninguno es regresión de ningún hito, y ninguno cambia un contrato público del Core — el único cambio de forma es un campo opcional en tres tipos de datos.
+
+**Los cinco defectos, por lo que hacen y no por lo que son**:
+
+1. **Dos entidades distintas salen como una** (ADR-073). El pase difuso de Grouping compara largos, no tipos: sobre un `normalizedValue` de 9 caracteres o más, un carácter de diferencia ya supera el umbral de 0.88. Dos CUIT (`1 - 1/11 = 0.909`), dos fechas (`0.900`), dos tarjetas, dos IBAN y dos emails caían en un grupo — y un grupo tiene **un** `replacementValue`, así que el documento anonimizado afirma que dos empresas son la misma. En una pericia eso distorsiona la evidencia. El DNI se salvaba por 0,005. El pase difuso pasa a correr solo para `Person`, `Organization` y `Address`, que es donde un carácter puede ser ruido de OCR en vez de dato.
+2. **Una entidad partida en dos líneas tapa las dos líneas enteras** (ADR-074). `mapSpanToWords` calcula **un** bbox como unión de las palabras del match; con las palabras en renglones distintos esa unión es la envolvente. Medido: `Pablo Román Fortes` produce **557,2 × 18,2 pt**, casi el ancho útil de la página. No hay fuga —tapa de más, nunca de menos— pero destruye texto ajeno, y un documento que borra párrafos deja de servir para lo que se lo anonimiza. `Occurrence`/`OccurrenceRef`/`Replacement` ganan `fragments`: un rectángulo por línea, con `bbox` intacto como envolvente.
+3. **La fecha del documento se exporta en claro** (ADR-075). `"Quilmes, 07 de julio de 2026"` —la forma normal de fechar un escrito judicial— no la cubría ningún patrón: `date-ar` es solo numérico y NER no emite `Date`. Es la única **fuga** de las cinco.
+4. **Un tramo del número de expediente se detecta como teléfono** (ADR-075). `PP-13-00-027653-24/00` produce `[PHONE] "00-027653"`: cada guion es un `\b` válido y los patrones no tienen cómo distinguir un tramo de un número de causa. Falso positivo benigno, pero llena el árbol de entidades que no existen y entrena al usuario a ignorarlo.
+5. **Una edición manual del texto de reemplazo se pierde sola** (ADR-076). ADR-057 §7 promete en negrita que la edición manual gana siempre; el motor la conservaba **por accidente**, mientras el `indexInType` del grupo no se moviera. Y hay un segundo camino, encontrado después: `inferGendersOnFinish` la pisa igual. Es el remedio que ADR-058 §4 y ADR-062 ofrecen para un reemplazo degradado, deshaciéndose solo — y ADR-061 (agregar una entidad a mano renumera) lo vuelve rutinario.
+
+**Lo que ata a los cinco**: los tres primeros son sobre *qué se detecta y dónde está*; los dos últimos, sobre *qué se le muestra al usuario y qué se le respeta*. Y hay dos vínculos reales entre ellos que ordenan el trabajo: el patrón de fecha textual del ADR-075 agrupa con la fecha numérica **por el pase exacto**, que es justo el que ADR-073 deja como único para `Date`; y ADR-074 §6 hace que la marca de degradado se encienda en casos donde hoy está apagada, o sea que manda más usuarios al remedio que ADR-076 vuelve confiable.
+
+| # | PR | Módulo | Depende de | Estado |
+|---|---|---|---|---|
+| 1 | ADR-073 + `Grouping_Engine.md` (docs) | — | — | **hecho** |
+| 2 | `FUZZY_MATCHING_TYPES` y la guarda en `findMatchingGroup` | `grouping-engine` | 1 | |
+| 3 | ADR-074 + `03_Data_Model.md`, `Contracts.md`, `Regex_Engine.md`, `NER_Engine.md`, `Grouping_Engine.md`, `Render_Engine.md`, `Export_Engine.md`, `Orchestrator.md` (docs) | — | — | **hecho** |
+| 4 | `fragments` en `Occurrence`, `OccurrenceRef` y `Replacement` | `shared` | 3 | |
+| 5 | `mapSpanToWords` fragmenta por banda vertical | `regex-engine` | 4 | |
+| 6 | `mapSpanToWords` fragmenta por banda vertical | `ner-engine` | 4 | |
+| 7 | `toOccurrenceRef` propaga; la escalera de ADR-057 mide por fragmento | `grouping-engine` | 4, 2 | |
+| 8 | `buildPageReplacements` propaga | `export-engine` | 4 | |
+| 9 | Unidades de pintado, token en el fragmento más ancho, degradación por fragmento | `render-engine` | 4 | |
+| 10 | `selectLineWords` por fragmento | `packages/anonymization-core/src` | 4 | |
+| 11 | Test de integración de punta a punta de la entidad multi-línea | `tests/integration` | 5-10 | |
+| 12 | ADR-075 + `Regex_Engine.md` (docs) | — | — | **hecho** |
+| 13 | `date-textual-ar` y la guarda de corrida | `regex-engine` | 12, 5 | |
+| 14 | ADR-076 + `Grouping_Engine.md`, `UX_Guidelines.md`, enmienda de ADR-057 §7 (docs) | — | — | **hecho** |
+| 15 | `replacementValueUserSet` y los once puntos de recálculo | `grouping-engine` | 14, 7 | |
+
+Los tres PRs de `grouping-engine` (2, 7, 15) van **en ese orden** y no en paralelo: tocan funciones distintas del mismo archivo, así que el conflicto es de rebase y no de diseño, pero rebasear tres veces el mismo archivo en desorden no lo hace más rápido. Los PRs 5 y 6 son el mismo cambio en dos motores y **se escriben una vez y se adaptan** — `mapSpanToWords` de `ner-engine` es una copia adaptada de la de `regex-engine` (P-2 impide compartirla). El 13 va después del 5 porque los dos tocan `regex-engine`.
+
+**El PR 11 no es un extra.** Los seis PRs de propagación de `fragments` (4 a 10) tienen el modo de falla que ADR-066 §6 ya produjo en este repo: con el campo declarado y poblado pero sin nadie que lo pinte, el comportamiento sigue siendo el de hoy y **todos los gates quedan verdes**. El test de integración de punta a punta —de la detección al canvas, asertando que se pintan dos rectángulos y que ninguno cubre el ancho de la página— es lo único que detecta que la cadena se cortó en alguno de los seis saltos.
+
+**Lo que este hito no toca**, y conviene tenerlo dicho: `apps/react-client` no aparece en la tabla. Los dos lugares donde la app lee un bbox de ocurrencia son el resaltado de la lupa (que es un `TextMatch`, y la búsqueda literal no puede producir un match multi-línea) y la miniatura del `SplitDialog`, cuyo trabajo es **ubicar** la ocurrencia — para eso la envolvente es exactamente el dato correcto.
+
+**Verificación manual sobre la pericia real** (fila propia del cierre, como en el Hito 10.8): la barra negra de la página 2 desaparece, la fecha del encabezado aparece en el árbol, los teléfonos derivados del expediente desaparecen, las fechas dejan de colapsar en `Fecha 01`, y un texto de reemplazo escrito a mano sobrevive a agregar una entidad después. Es donde se confirma si el *"aparecen tres fechas"* que reportó el humano era la fusión difusa, el falso positivo, o los dos.
 
 ### Hito 11 — Hardening
 - Performance gates (todas las métricas de `00_Project_Vision.md` §7).
@@ -502,4 +542,5 @@ Si alguna métrica **gate** no se cumple, el MVP **no** se libera. Las métricas
 - `roadmap/Version_1.0.md` (qué sigue)
 - `adr/ADR-001-Framework.md` a `ADR-012-Replacement-Modes.md`
 - `adr/ADR-057` (escalera de abreviaturas) — `adr/ADR-058` (repintado de línea) — `adr/ADR-059` (leyenda de marcadores) — `adr/ADR-060` (reemplazo por género) — `adr/ADR-061` (agregado manual de entidades): los cinco de los Hitos 10.5 a 10.7
+- `adr/ADR-073` (difuso solo para texto libre) — `adr/ADR-074` (entidad partida en varias líneas) — `adr/ADR-075` (fechas en texto y tramos de identificadores) — `adr/ADR-076` (la edición manual del valor de reemplazo gana): los cuatro del Hito 10.9, salidos de `roadmap/Post_Hito10.8_Pendientes.md`
 - `ai/AI_Development_Guide.md` (cómo se implementa)
