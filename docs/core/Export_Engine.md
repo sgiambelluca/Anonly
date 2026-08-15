@@ -345,7 +345,7 @@ Fixtures: `tests/fixtures/text-10p.pdf`, `text-50p.pdf`, `huge-1000p.pdf`.
 - [ ] 13. Escribir `edge.test.ts` con todos los casos límite.
 - [ ] 14. Escribir `security.test.ts` con `no-recuperability` y `metadata-strip`.
 - [ ] 15. Ejecutar `pnpm lint && pnpm typecheck && pnpm test` verde.
-- [ ] 16b. (Hito 10.9, PR 8 — ADR-074 §1) `buildPageReplacements` copia `fragments` del `OccurrenceRef` al `Replacement`; sin el campo en el member, sin el campo en el reemplazo. Dos tests unitarios (con y sin), que son la red contra el modo de falla de ADR-066 §6. El PR de `shared` que declara el campo (Hito 10.9 PR 4) es precondición. Nada más de este motor se toca.
+- [x] 16b. (Hito 10.9, PR 8 — ADR-074 §1) `buildPageReplacements` copia `fragments` del `OccurrenceRef` al `Replacement`; sin el campo en el member, sin el campo en el reemplazo. Dos tests unitarios (con y sin), que son la red contra el modo de falla de ADR-066 §6. El PR de `shared` que declara el campo (Hito 10.9 PR 4) es precondición. Nada más de este motor se toca.
 - [ ] 16. Verificar `index.ts` exporta solo `ExportEngine`, tipos, errores — y, desde ADR-044 §4, la función pura `buildPageReplacements` (grupos → `Replacement[]` por página): la importa el façade para computar los reemplazos del preview mediado con la **misma** semántica que el export (única excepción sancionada; ningún otro helper interno se exporta).
 - [ ] 17. Verificar imports sin dependencias prohibidas (`grep -r 'react\|pdfjs\|tesseract\|onnx\|transformers' src/`).
 - [ ] 18. Verificar `no-network-from-core`.
