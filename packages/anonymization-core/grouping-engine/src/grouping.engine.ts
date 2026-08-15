@@ -203,6 +203,13 @@ import { levenshteinNormalized } from "./levenshtein.js";
 
 const DEFAULT_SIMILARITY_THRESHOLD = 0.88;
 
+/** ADR-073 §1: los tres tipos cuyo valor es texto libre. */
+const FUZZY_MATCHING_TYPES: ReadonlySet<EntityType> = new Set([
+  EntityType.Person,
+  EntityType.Organization,
+  EntityType.Address,
+]);
+
 const PATCH_ALLOWED_KEYS: ReadonlySet<string> = new Set([
   "replacementMode",
   "replacementValue",
@@ -1628,6 +1635,7 @@ export class GroupingEngine implements IEngine {
     for (const group of candidates) {
       if (group.normalizedValues.has(occurrence.normalizedValue)) return group;
     }
+    if (!FUZZY_MATCHING_TYPES.has(occurrence.entityType)) return null;
     for (const group of candidates) {
       for (const normalizedAlias of group.normalizedValues) {
         if (levenshteinNormalized(occurrence.normalizedValue, normalizedAlias) >= threshold) {
