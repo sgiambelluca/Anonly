@@ -16,6 +16,7 @@ import {
   type ILogger,
   type Occurrence,
   type Page,
+  type TextMatch,
   type Word,
   type WordSpan,
 } from "@anonly/shared";
@@ -27,6 +28,7 @@ import type {
   RegexEngineInput,
   RegexEngineOutput,
   RegexPattern,
+  RegexSearchInput,
 } from "./regex.types.js";
 
 /* Regex_Engine.md §12: timeout de 1000ms por página por patrón custom. Solo
@@ -255,20 +257,19 @@ function buildOccurrence(match: RawMatch, page: Page): Occurrence {
   return wordMapping ? { ...base, wordSpan: wordMapping.wordSpan } : base;
 }
 
-// ─── findLiteral (ADR-061 §1/§2): búsqueda de un valor literal escrito o ───
-// señalado por el usuario. No es una corrida de detección: no usa
-// RegexPattern ni el registro de patrones, y no emite REGEX_FINISHED.
-// La normalización (NFC + minúsculas + sin diacríticos) y el criterio de
-// "misma línea" son `normalizeForComparison`/`sharesVerticalBand` de
-// `@anonly/shared` (Contracts.md §6) — no se reimplementan acá (ADR-061 §2
-// errata).
+// ─── Matcheo de texto literal (ADR-061 §1/§2, errata §8) ───────────────────
+// Primitiva compartida por `searchText` y `findLiteral`: no es una corrida de
+// detección, no usa `RegexPattern` ni el registro de patrones. La
+// normalización (NFC + minúsculas + sin diacríticos) y el criterio de "misma
+// línea" son `normalizeForComparison`/`sharesVerticalBand` de `@anonly/shared`
+// (Contracts.md §6) — no se reimplementan acá (ADR-061 §2 errata).
 
 /*
  * Normaliza primero, tokeniza después: el colapso de espacios repetidos de
  * `normalizeForComparison` sale gratis (§13 caso 17), sin código extra acá.
  * Un valor vacío o solo espacios normaliza a "", cuyo único "token" del split
- * lo descarta el filter → cero tokens, findLiteral responde
- * occurrenceCount: 0 sin recorrer el documento (ADR-061 §6).
+ * lo descarta el filter → cero tokens, sin recorrer el documento (ADR-061
+ * §6/§8).
  */
 function tokenizeLiteralValue(value: string): string[] {
   return normalizeForComparison(value)
@@ -352,37 +353,60 @@ function slideWordWindowMatches(
 }
 
 /*
- * Construye la Occurrence manual de un match. A diferencia de
- * buildOccurrence (patrones): sin maskFormat (no hay RegexPattern que lo
- * provea) y con normalizedValue calculado con el criterio genérico de arriba
- * en vez de un normalizer por tipo.
+ * La primitiva por página (checklist §15 item 10c). `searchText` y
+ * `findLiteral` arman su propio recorrido de páginas alrededor de esta
+ * función: así `findLiteral` conserva su chequeo de `abortSignal` **entre**
+ * páginas — un núcleo por documento lo borraría en silencio (ADR-061 §8
+ * errata, punto 6).
  */
-function buildManualOccurrence(
-  words: ReadonlyArray<Word>,
-  startWordIndex: number,
-  endWordIndexExclusive: number,
-  wordMapping: WordMapping,
-  page: Page,
-  entityType: EntityType,
-): Occurrence {
-  const rawValue = words
-    .slice(startWordIndex, endWordIndexExclusive)
-    .map((w) => w.text)
-    .join(" ");
-  const base = {
+function collectPageTextMatches(page: Page, queryTokens: ReadonlyArray<string>): TextMatch[] {
+  const wordMatches = slideWordWindowMatches(page.words, queryTokens);
+  if (wordMatches.length === 0) return [];
+
+  const offsets = computeWordOffsets(page.words);
+  const matches: TextMatch[] = [];
+
+  for (const { startWordIndex, endWordIndexExclusive } of wordMatches) {
+    const startOffset = offsets[startWordIndex];
+    const endOffset = offsets[endWordIndexExclusive - 1];
+    if (!startOffset || !endOffset) continue;
+
+    const wordMapping = mapSpanToWords(page.words, startOffset.start, endOffset.end);
+    if (!wordMapping) continue;
+
+    const text = page.words
+      .slice(startWordIndex, endWordIndexExclusive)
+      .map((w) => w.text)
+      .join(" ");
+
+    matches.push({
+      pageIndex: page.index,
+      bbox: wordMapping.bbox,
+      text,
+      wordSpan: wordMapping.wordSpan,
+    });
+  }
+
+  return matches;
+}
+
+/*
+ * Agrega a un TextMatch lo que el matcheo no trae: `id`, `source: Manual`,
+ * `confidence: 1.0`, el `entityType` del input y `normalizedValue` derivado
+ * de `match.text` (ADR-061 §8 errata, punto 3).
+ */
+function buildManualOccurrence(match: TextMatch, entityType: EntityType): Occurrence {
+  return {
     id: crypto.randomUUID(),
-    value: rawValue,
-    normalizedValue: normalizeForComparison(rawValue),
-    bbox: wordMapping.bbox,
-    pageIndex: page.index,
+    value: match.text,
+    normalizedValue: normalizeForComparison(match.text),
+    bbox: match.bbox,
+    pageIndex: match.pageIndex,
     source: DetectionSource.Manual,
     confidence: 1.0,
     entityType,
+    wordSpan: match.wordSpan,
   };
-  // exactOptionalPropertyTypes: wordSpan siempre está definido acá (viene de
-  // un match real), pero se arma con spread para ser consistente con
-  // buildOccurrence (nunca `wordSpan: undefined` explícito).
-  return { ...base, wordSpan: wordMapping.wordSpan };
 }
 
 export class RegexEngine implements IEngine {
@@ -522,26 +546,8 @@ export class RegexEngine implements IEngine {
             throw new CancelledError(document.id);
           }
 
-          const wordMatches = slideWordWindowMatches(page.words, queryTokens);
-          if (wordMatches.length === 0) continue;
-
-          const offsets = computeWordOffsets(page.words);
-          for (const { startWordIndex, endWordIndexExclusive } of wordMatches) {
-            const startOffset = offsets[startWordIndex];
-            const endOffset = offsets[endWordIndexExclusive - 1];
-            if (!startOffset || !endOffset) continue;
-
-            const wordMapping = mapSpanToWords(page.words, startOffset.start, endOffset.end);
-            if (!wordMapping) continue;
-
-            const occurrence = buildManualOccurrence(
-              page.words,
-              startWordIndex,
-              endWordIndexExclusive,
-              wordMapping,
-              page,
-              entityType,
-            );
+          for (const match of collectPageTextMatches(page, queryTokens)) {
+            const occurrence = buildManualOccurrence(match, entityType);
             ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
               documentId: document.id,
               occurrence,
@@ -567,6 +573,35 @@ export class RegexEngine implements IEngine {
     } catch (err: unknown) {
       return Promise.reject(err instanceof Error ? err : new Error(String(err)));
     }
+  }
+
+  /*
+   * ADR-061 §8 errata: la primitiva de solo lectura detrás de la lupa del
+   * visor. Sincrónica (Contracts.md §3.5: `IPipelineOrchestrator.findText`
+   * está declarado sin `Promise`) y sin `EngineContext` — no emite, no
+   * cancela (una llamada sincrónica no tiene nada que cancelar), no loguea
+   * la `query` (mismo criterio que el `value` de `findLiteral`, Contracts.md
+   * §3.3: es texto que el usuario busca en un documento sensible). Las
+   * guardas de ciclo de vida sí se conservan y, al no estar en un
+   * try/Promise.reject, lanzan sincrónicamente.
+   */
+  searchText(input: RegexSearchInput): ReadonlyArray<TextMatch> {
+    this.assertNotDisposed();
+    this.assertInitialized();
+
+    if (input == null) {
+      throw new InvalidInputError("Input es null o undefined.", { engineId: EngineId.Regex });
+    }
+
+    const { document, query } = input;
+    const queryTokens = tokenizeLiteralValue(query);
+    if (queryTokens.length === 0) return [];
+
+    const matches: TextMatch[] = [];
+    for (const page of document.pages) {
+      matches.push(...collectPageTextMatches(page, queryTokens));
+    }
+    return matches;
   }
 
   /*

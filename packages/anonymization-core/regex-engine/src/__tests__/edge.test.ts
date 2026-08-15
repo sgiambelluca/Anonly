@@ -243,6 +243,11 @@ describe("RegexEngine — edge case tests", () => {
       await expect(engine.findLiteral(null, ctx)).rejects.toThrow(InvalidInputError);
     });
 
+    it("searchText throws InvalidInputError synchronously for null input", () => {
+      // @ts-expect-error — assert de runtime: mismo criterio que process()/findLiteral (§11).
+      expect(() => engine.searchText(null)).toThrow(InvalidInputError);
+    });
+
     it("throws InvalidInputError for undefined input", async () => {
       // @ts-expect-error — assert de runtime: §11 exige rechazar input undefined con InvalidInputError.
       await expect(engine.process(undefined, ctx)).rejects.toThrow(InvalidInputError);
@@ -381,6 +386,25 @@ describe("RegexEngine — edge case tests", () => {
           ctxWithAbort,
         ),
       ).rejects.toThrow(CancelledError);
+    });
+  });
+
+  // Caso 22 (§13): mismo criterio que el caso 14 de findLiteral.
+  describe("searchText — query vacía (ADR-061 §8 errata)", () => {
+    it("searchText with an empty or whitespace-only query returns an empty array", async () => {
+      const document = makeSinglePageDocument("doc-search-text-empty-query", ["Cualquier", "cosa"]);
+      expect(engine.searchText({ document, query: "   " })).toEqual([]);
+      expect(engine.searchText({ document, query: "" })).toEqual([]);
+    });
+  });
+
+  // Caso 24 (§13): sincrónico, no promesa rechazada — a diferencia de
+  // findLiteral (caso 19).
+  describe("searchText — tras dispose (ADR-061 §8 errata)", () => {
+    it("searchText throws EngineDisposedError synchronously after dispose", async () => {
+      await engine.dispose();
+      const document = makeSinglePageDocument("doc-search-text-after-dispose", ["Ana"]);
+      expect(() => engine.searchText({ document, query: "Ana" })).toThrow(EngineDisposedError);
     });
   });
 });

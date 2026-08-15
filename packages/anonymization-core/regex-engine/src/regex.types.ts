@@ -22,6 +22,17 @@ export interface FindLiteralInput {
   readonly entityType: EntityType;
 }
 
+/**
+ * ADR-061 §8 (errata): la misma búsqueda que `FindLiteralInput`, de solo
+ * lectura. Sin `entityType` (no se clasifica nada) y consumida por
+ * `searchText`, que no recibe `EngineContext` (no emite, no cancela, no
+ * loguea la query — ver `regex.engine.ts`).
+ */
+export interface RegexSearchInput {
+  readonly document: Document;
+  readonly query: string;
+}
+
 export interface RegexPattern {
   readonly id: string; // "dni-ar", "cuit-ar", etc.
   readonly entityType: EntityType;
