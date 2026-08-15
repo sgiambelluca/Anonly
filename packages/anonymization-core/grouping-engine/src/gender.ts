@@ -18,41 +18,20 @@
  * en un documento que va a manos de un tercero.
  */
 
-import type { PersonGender } from "@anonly/shared";
+import { normalizeForComparison, type PersonGender } from "@anonly/shared";
 
 /**
  * Valor por nombre en el léxico (ADR-069 §1): determinado (`"f"`/`"m"`) o
  * `"ambiguous"` — nombre marcado `A` (unisex) en el registro de Buenos
- * Aires. Las claves están pre-normalizadas (ver `normalizeForLexicon`):
- * quien construye un `GenderLexicon` es responsable de normalizar antes de
- * insertar.
+ * Aires. Las claves están pre-normalizadas (ver `normalizeForComparison` de
+ * `@anonly/shared`): quien construye un `GenderLexicon` es responsable de
+ * normalizar antes de insertar.
  */
 export type GenderLexiconLabel = "f" | "m" | "ambiguous";
 export type GenderLexicon = ReadonlyMap<string, GenderLexiconLabel>;
 
 /** Léxico vacío: toda inferencia resuelve "sin determinar" (peor caso = comportamiento pre-ADR-060). */
 export const EMPTY_GENDER_LEXICON: GenderLexicon = new Map();
-
-/**
- * Normalización exacta de ADR-060 §4: NFC, minúsculas, sin diacríticos. Se
- * aplica tanto al construir las claves del léxico (build script) como al
- * `canonicalValue` que se busca en runtime — ambos lados deben coincidir.
- */
-// Rango Unicode "Combining Diacritical Marks" (U+0300–U+036F) en forma de
-// escape explícito (no literal): un carácter combinante pegado en el código
-// fuente es indistinguible a simple vista de texto normal y frágil frente a
-// cualquier re-normalización del archivo por el editor/herramientas.
-const COMBINING_DIACRITICS_RE = /[\u0300-\u036f]/g;
-
-export function normalizeForLexicon(value: string): string {
-  return value
-    .normalize("NFC")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(COMBINING_DIACRITICS_RE, "")
-    .trim()
-    .replace(/\s+/g, " ");
-}
 
 /**
  * ADR-069 §3, defensa en profundidad: una clave de búsqueda de UN SOLO
@@ -84,7 +63,7 @@ export function inferPersonGender(
   canonicalValue: string,
   lexicon: GenderLexicon,
 ): PersonGender | undefined {
-  const tokens = normalizeForLexicon(canonicalValue)
+  const tokens = normalizeForComparison(canonicalValue)
     .split(" ")
     .filter((token) => token.length > 0);
   const first = tokens[0];
