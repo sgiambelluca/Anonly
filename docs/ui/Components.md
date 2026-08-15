@@ -220,9 +220,10 @@ apps/react-client/src/components/
 
 - **Ubicación**: sobre el árbol de entidades, encima de las coincidencias ya encontradas.
 - **Render del diálogo**: selector de `EntityType` + campo de texto para el valor + confirmar.
-- **Acción**: `actions.addManualEntity(documentId, { value, entityType })`.
-- **Sin coincidencias**: si el valor no está en el documento, **no se crea grupo** y el diálogo lo informa ("no se encontró ese texto en el documento"). No es un error: `findLiteral` devuelve 0 y ya (ADR-061 §6).
-- **Valor ya detectado**: se fusiona en el grupo existente en vez de duplicar — lo resuelve el dedup por identidad de ADR-038 §3, sin nada que implementar acá.
+- **Acción**: `actions.addManualEntity({ value, entityType })` → `ManualEntityResult` con `occurrenceCount` (errata de ADR-061 §6). El adaptador devuelve `ManualEntityResult | null`: `null` **solo** cuando no hay documento activo —un estado en el que el diálogo no puede estar abierto— y el diálogo lo trata como "no hacer nada", **nunca** como "no se encontró".
+- **Sin coincidencias**: `occurrenceCount === 0` → **no se creó grupo** y el diálogo lo informa ("no se encontró ese texto en el documento"), sin cerrarse, para que el usuario corrija un typo y reintente. **No es un error y no llega por excepción**: es el valor de retorno (ADR-061 §6 y su errata). Un `try/catch` acá sería para los `InvalidInputError` reales (documento inexistente, stage inválido), que son otra cosa.
+- **Con coincidencias**: `occurrenceCount > 0` → se cierra e informa éxito. El número son **apariciones del valor en el documento**, antes del dedup; no es "cuántos grupos se crearon" ni "cuántas ocurrencias se sumaron". Si el copy muestra el número, tiene que decir "se encontraron N apariciones" — decir "se agregaron N" mentiría en el caso de fusión.
+- **Valor ya detectado**: se fusiona en el grupo existente en vez de duplicar — lo resuelve el dedup por identidad de ADR-038 §3, sin nada que implementar acá. Devuelve `occurrenceCount > 0` aunque el árbol no cambie, y eso es lo correcto: para el usuario la entidad quedó cubierta.
 - **Advertencia de alcance en el copy**: la búsqueda es **exacta** (insensible a mayúsculas y acentos). Si el documento nombra a la persona de dos formas —"José Pérez" y "J. Pérez"— hay que agregar las dos. Decirlo en el diálogo evita el reporte de "no encontró todas". Limitación de ADR-061 §2, anotada en `Future_Ideas.md` §5.1b.
 
 ### 3.5 `GroupContextMenu`
@@ -334,9 +335,10 @@ apps/react-client/src/components/
 ### 5.4c `DocumentSearchBox` (ADR-061 §8)
 
 - **Ubicación**: junto al encabezado "PDF ORIGINAL", con icono de lupa (punto 4 de `Cambios para hacer.txt`).
-- **Acción**: `actions.findText(documentId, query)` → `TextMatch[]` con bbox por coincidencia.
+- **Acción**: `actions.findText(documentId, query)` → `TextMatch[]` con bbox por coincidencia. Consulta **sincrónica** y de solo lectura: buscar no crea grupos ni modifica la sesión (errata de ADR-061 §8).
+- **El debounce es de este componente**: `findText` es sincrónica y recorre todas las palabras del documento en el main thread, así que una llamada por tecla se nota en documentos largos. El Core no amortigua —es una función de consulta, sin estado ni cache (`Regex_Engine.md` §12)—, así que la caja de búsqueda debe hacerlo, mismo criterio que el re-render del zoom (§5.5). Los resultados vienen en orden documental, así que "anterior/siguiente" navega el array tal cual, sin re-ordenar.
 - **Render**: contador de resultados, navegación anterior/siguiente con scroll a la página, y resaltado del match activo sobre el canvas (reusa el mismo overlay de §5.4b).
-- **Tercera vía de agregado**: cada resultado ofrece "agregar como entidad", que abre el selector de tipo y llama a `addManualEntity`. Sale gratis: es la misma búsqueda literal que alimenta el agregado manual (ADR-061 §8).
+- **Tercera vía de agregado**: cada resultado ofrece "agregar como entidad", que abre el selector de tipo y llama a `addManualEntity`. Sale gratis: es la misma búsqueda literal que alimenta el agregado manual (ADR-061 §8). **Agrega todas las apariciones del valor, no solo el resultado clickeado** — `addManualEntity` recorre el documento entero, que es el comportamiento correcto para una entidad manual; el copy debe decirlo para que no se lea como que anonimiza solo esa coincidencia.
 
 ### 5.5 `ZoomControls`
 
