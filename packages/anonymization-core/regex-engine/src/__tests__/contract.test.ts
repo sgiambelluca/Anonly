@@ -15,7 +15,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { RegexEngine } from "../regex.engine.js";
 
-import { createEngineContext, makeSinglePageDocument } from "./fixtures/test-helpers.js";
+import {
+  createEngineContext,
+  makeDocument,
+  makePageFromWords,
+  makeSinglePageDocument,
+  makeWord,
+} from "./fixtures/test-helpers.js";
 
 describe("RegexEngine — contract tests", () => {
   let engine: RegexEngine;
@@ -200,6 +206,53 @@ describe("RegexEngine — contract tests", () => {
 
     expect(onSpy).not.toHaveBeenCalled();
     expect(onceSpy).not.toHaveBeenCalled();
+  });
+
+  // ADR-074 §1: los tres invariantes que garantizan que fragmentar no puede
+  // introducir una fuga. `bbox is the exact envelope of fragments, which
+  // never overlap` en Regex_Engine.md §14.
+  describe("fragments (ADR-074 §1)", () => {
+    it("bbox is the exact envelope of fragments, which never overlap, and union(fragments) ⊆ bbox", async () => {
+      await engine.init(ctx);
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      // phone-landline-ar partido en dos líneas: "0221" y "4567890".
+      const words = [makeWord("0221", 10, 0, 100), makeWord("4567890", 10, 0, 130)];
+      const page = makePageFromWords(0, words);
+      const document = makeDocument("doc-fragments-invariant", [page]);
+      await engine.process({ document }, ctx);
+
+      const call = busEmitSpy.mock.calls.find(([, event]) => event === EngineEvents.ENTITY_FOUND);
+      const occurrence = (call?.[2] as EntityFound | undefined)?.occurrence;
+      expect(occurrence?.fragments).toHaveLength(2);
+      const fragments = occurrence?.fragments ?? [];
+      const bbox = occurrence?.bbox;
+      expect(bbox).toBeDefined();
+
+      // bbox es la envolvente exacta de fragments.
+      const minX = Math.min(...fragments.map((f) => f.x));
+      const minY = Math.min(...fragments.map((f) => f.y));
+      const maxX = Math.max(...fragments.map((f) => f.x + f.width));
+      const maxY = Math.max(...fragments.map((f) => f.y + f.height));
+      expect(bbox).toEqual({ x: minX, y: minY, width: maxX - minX, height: maxY - minY });
+
+      // Los fragmentos no se solapan verticalmente.
+      for (let i = 0; i < fragments.length; i++) {
+        for (let j = i + 1; j < fragments.length; j++) {
+          const a = fragments[i]!;
+          const b = fragments[j]!;
+          const overlaps = a.y < b.y + b.height && b.y < a.y + a.height;
+          expect(overlaps).toBe(false);
+        }
+      }
+
+      // union(fragments) ⊆ bbox: ningún fragmento se sale de la envolvente.
+      for (const fragment of fragments) {
+        expect(fragment.x).toBeGreaterThanOrEqual(bbox!.x);
+        expect(fragment.y).toBeGreaterThanOrEqual(bbox!.y);
+        expect(fragment.x + fragment.width).toBeLessThanOrEqual(bbox!.x + bbox!.width);
+        expect(fragment.y + fragment.height).toBeLessThanOrEqual(bbox!.y + bbox!.height);
+      }
+    });
   });
 
   describe("findLiteral (ADR-061 §1)", () => {
