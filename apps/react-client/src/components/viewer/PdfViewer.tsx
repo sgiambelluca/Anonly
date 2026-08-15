@@ -230,7 +230,20 @@ export function PdfViewer({ kind, scrollSync }: PdfViewerProps) {
               // `PageCanvas`/`WordSelectionOverlay` (`h-full w-full` de ESTE
               // wrapper) y `pointerSelectionToPageRect`/`pageRectToScreenRect`
               // ya asumían.
-              <div className="relative" style={{ width: pageWidth, height: pageHeight }}>
+              //
+              // `shrink-0` es necesario y no cosmético: `PagePhantom` es un
+              // contenedor flex, y un hijo con `width` fija pero sin
+              // `flex-shrink: 0` sigue con el `flex-shrink: 1` por defecto —
+              // si `pageWidth` (crece con `zoom`) supera el ancho real del
+              // panel (constante, no depende del zoom), el motor de flexbox
+              // encoge el wrapper para que entre, y el tamaño renderizado
+              // vuelve a divergir de `pageWidth` exactamente como antes de
+              // este fix (confirmado con el mismo harness aislado: sin
+              // `shrink-0`, un wrapper de 509px en un panel de 500px
+              // renderiza a 500px real). Con `shrink-0` el wrapper mantiene
+              // su tamaño real aunque desborde — el contenedor scrollea
+              // horizontal en vez de mentir sobre su tamaño.
+              <div className="relative shrink-0" style={{ width: pageWidth, height: pageHeight }}>
                 <PageCanvas
                   pageIndex={pageIndex}
                   kind={kind}
