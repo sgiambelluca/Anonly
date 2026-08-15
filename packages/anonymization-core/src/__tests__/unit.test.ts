@@ -7,6 +7,7 @@ import {
   EngineErrorCode,
   EngineEvents,
   EngineId,
+  EntityType,
   EventChannel,
   InvalidInputError,
   PipelineStage,
@@ -1612,6 +1613,92 @@ describe("Orchestrator — unit tests", () => {
 
       manager.disposeAll();
     });
+  });
+
+  // ─── Literales manuales retenidos (ADR-061 §5) ───
+
+  it("manual literals are re-applied after a reanalyze that drops their pages", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({
+        pageCount: 1,
+        pages: [createPage({ index: 0, requiresOCR: true })],
+      }),
+      textlessPages: [0],
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+
+    await orchestrator.addManualEntity("doc-1", {
+      value: "Jose Perez",
+      entityType: EntityType.Person,
+    });
+
+    (engines.regex.findLiteral as ReturnType<typeof vi.fn>).mockClear();
+    (engines.grouping.dropOccurrences as ReturnType<typeof vi.fn>).mockClear();
+
+    await orchestrator.reanalyze("doc-1", { ocr: { languages: ["eng"] } });
+
+    // La página 0 (requiresOCR) se descarta entera -- incluidas las
+    // ocurrencias manuales, ADR-065 §8 -- pero el literal retenido se
+    // re-busca sobre el documento actualizado: sin esto el dato agregado a
+    // mano desaparecería del árbol en silencio (el modo de falla que
+    // ADR-061 §5 existe para cerrar).
+    expect(engines.grouping.dropOccurrences).toHaveBeenCalledWith("doc-1", { pageIndices: [0] });
+    expect(engines.regex.findLiteral).toHaveBeenCalledWith(
+      expect.objectContaining({ value: "Jose Perez", entityType: EntityType.Person }),
+      expect.anything(),
+    );
+  });
+
+  it("manual literal list is discarded on closeDocument", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({
+        pageCount: 1,
+        pages: [createPage({ index: 0, requiresOCR: true })],
+      }),
+      textlessPages: [0],
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+    await orchestrator.addManualEntity("doc-1", {
+      value: "Jose Perez",
+      entityType: EntityType.Person,
+    });
+
+    await orchestrator.closeDocument("doc-1");
+
+    // Reabre el mismo documentId desde cero: si la lista no se hubiera
+    // descartado, un reanalyze de OCR volvería a re-buscar el literal viejo
+    // sobre un documento que nunca lo tuvo.
+    await orchestrator.importDocument(createImportInput());
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+
+    (engines.regex.findLiteral as ReturnType<typeof vi.fn>).mockClear();
+
+    await orchestrator.reanalyze("doc-1", { ocr: { languages: ["eng"] } });
+
+    expect(engines.regex.findLiteral).not.toHaveBeenCalled();
   });
 });
 

@@ -4,11 +4,13 @@ import { GroupingEngine } from "@anonly/grouping-engine";
 import { NerEngine } from "@anonly/ner-engine";
 import { OcrEngine } from "@anonly/ocr-engine";
 import { PdfEngine } from "@anonly/pdf-engine";
+import type { PdfEngineOutput } from "@anonly/pdf-engine";
 import { RegexEngine } from "@anonly/regex-engine";
 import { RenderEngine } from "@anonly/render-engine";
 import {
   DetectionSource,
   EngineEvents,
+  EntityType,
   EventChannel,
   PipelineStage,
   type Document,
@@ -24,15 +26,85 @@ import {
   createDocument,
   createEngineConfig,
   createEntityGroup,
+  createImageData,
   createImportInput,
   createMockEngines,
   createMockLogger,
   createPage,
   createPdfEngineOutput,
   createRealBus,
+  createRenderPageOutput,
   createWord,
   wireHappyPathSpies,
 } from "./fixtures/test-helpers.js";
+
+/**
+ * Setup para los tests de `addManualEntity` (ADR-061 §6, §10): a diferencia
+ * de `wireHappyPathSpies` (mockea los 7 motores con respuestas canned), acá
+ * `regex` y `grouping` quedan como instancias **reales**, inicializadas
+ * sobre el mismo bus que el Orchestrator — sin eso no hay forma de verificar
+ * "produce un grupo nuevo visible en el snapshot" ni el dedup por identidad
+ * de ADR-038 §3: un `getSnapshot` mockeado no puede reproducir merge/dedup
+ * real sin reimplementarlo en el mock. Los otros cinco motores (pdf, ocr,
+ * ner, render, export) siguen mockeados: no aportan nada a estos tests y
+ * `ner`/`ocr` reales exigen fronteras de librerías pesadas (tesseract,
+ * onnxruntime) fuera de alcance acá. NER queda desactivado para simplificar
+ * la cascada de auto-finish de la sesión de Grouping (ADR-034 §2).
+ */
+async function makeOrchestratorWithRealDetection(pdfOutput?: PdfEngineOutput): Promise<{
+  readonly bus: ReturnType<typeof createRealBus>;
+  readonly engines: ReturnType<typeof createMockEngines>;
+  readonly orchestrator: PipelineOrchestrator;
+}> {
+  const bus = createRealBus();
+  const logger = createMockLogger();
+  const cache = new LruCache();
+  const config = createEngineConfig({
+    ner: {
+      modelId: "x",
+      quantization: "q8",
+      confidenceThreshold: 0.7,
+      batchSize: 1,
+      enabled: false,
+    },
+  });
+  const engines = createMockEngines();
+  const output = pdfOutput ?? createPdfEngineOutput();
+
+  vi.spyOn(engines.pdf, "process").mockResolvedValue(output);
+  vi.spyOn(engines.pdf, "dispose").mockResolvedValue(undefined);
+  vi.spyOn(engines.ocr, "processPages").mockResolvedValue([]);
+  vi.spyOn(engines.ocr, "dispose").mockResolvedValue(undefined);
+  vi.spyOn(engines.ner, "processPages").mockResolvedValue([]);
+  vi.spyOn(engines.ner, "dispose").mockResolvedValue(undefined);
+  vi.spyOn(engines.render, "loadDocument").mockResolvedValue(undefined);
+  vi.spyOn(engines.render, "unloadDocument").mockResolvedValue(undefined);
+  vi.spyOn(engines.render, "rasterizePage").mockResolvedValue(createImageData());
+  vi.spyOn(engines.render, "renderPage").mockImplementation((input) =>
+    Promise.resolve(
+      createRenderPageOutput({
+        documentId: input.documentId,
+        pageIndex: input.pageIndex,
+        kind: input.kind,
+      }),
+    ),
+  );
+  vi.spyOn(engines.render, "dispose").mockResolvedValue(undefined);
+  vi.spyOn(engines.export, "dispose").mockResolvedValue(undefined);
+
+  const ctx: EngineContext = {
+    bus,
+    logger,
+    cache,
+    abortSignal: new AbortController().signal,
+    config,
+  };
+  await engines.regex.init(ctx);
+  await engines.grouping.init(ctx);
+
+  const orchestrator = new PipelineOrchestrator({ bus, logger, cache, config, engines });
+  return { bus, engines, orchestrator };
+}
 
 describe("Orchestrator — contract tests", () => {
   afterEach(() => {
@@ -939,5 +1011,121 @@ describe("Orchestrator — contract tests", () => {
     expect(() =>
       bus.emit(EventChannel.Pipeline, EngineEvents.CANCEL_REQUESTED, { documentId: "doc-x" }),
     ).not.toThrow();
+  });
+
+  // ─── addManualEntity (ADR-061 §6, §10) ───
+
+  it("addManualEntity produces a new group visible in the grouping snapshot", async () => {
+    const document = createDocument({
+      pageCount: 1,
+      pages: [
+        createPage({
+          index: 0,
+          text: "Jose Perez",
+          words: [
+            createWord({ text: "Jose", bbox: { x: 0, y: 0, width: 30, height: 12 } }),
+            createWord({ text: "Perez", bbox: { x: 35, y: 0, width: 35, height: 12 } }),
+          ],
+        }),
+      ],
+    });
+    const { engines, orchestrator } = await makeOrchestratorWithRealDetection(
+      createPdfEngineOutput({ document }),
+    );
+
+    await orchestrator.importDocument(createImportInput());
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    expect(engines.grouping.getSnapshot("doc-1").groups).toHaveLength(0);
+
+    await orchestrator.addManualEntity("doc-1", {
+      value: "Jose Perez",
+      entityType: EntityType.Person,
+    });
+
+    const snapshot = engines.grouping.getSnapshot("doc-1");
+    expect(snapshot.groups).toHaveLength(1);
+    expect(snapshot.groups[0]).toMatchObject({ type: EntityType.Person });
+    expect(snapshot.groups[0]?.members).toHaveLength(1);
+  });
+
+  it("adding an already-detected value merges instead of duplicating", async () => {
+    const document = createDocument({
+      pageCount: 1,
+      pages: [
+        createPage({
+          index: 0,
+          text: "Contacto test@example.com fin",
+          words: [
+            createWord({ text: "Contacto", bbox: { x: 0, y: 0, width: 50, height: 12 } }),
+            createWord({
+              text: "test@example.com",
+              bbox: { x: 55, y: 0, width: 100, height: 12 },
+            }),
+            createWord({ text: "fin", bbox: { x: 160, y: 0, width: 20, height: 12 } }),
+          ],
+        }),
+      ],
+    });
+    const { engines, orchestrator } = await makeOrchestratorWithRealDetection(
+      createPdfEngineOutput({ document }),
+    );
+
+    // La detección automática (regex real) ya encuentra el email — es "un
+    // valor ya detectado" antes de que el usuario lo agregue a mano.
+    await orchestrator.importDocument(createImportInput());
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    const before = engines.grouping.getSnapshot("doc-1");
+    expect(before.groups).toHaveLength(1);
+    expect(before.groups[0]?.members).toHaveLength(1);
+
+    await orchestrator.addManualEntity("doc-1", {
+      value: "test@example.com",
+      entityType: EntityType.Email,
+    });
+
+    // El dedup por identidad de ADR-038 §3 descarta la ocurrencia manual
+    // (misma entityType/pageIndex/bbox/normalizedValue que la ya
+    // registrada): ni grupo nuevo ni member nuevo, se fusiona en silencio.
+    const after = engines.grouping.getSnapshot("doc-1");
+    expect(after.groups).toHaveLength(1);
+    expect(after.groups[0]?.id).toBe(before.groups[0]?.id);
+    expect(after.groups[0]?.members).toHaveLength(1);
+  });
+
+  it("adding the same value twice is idempotent", async () => {
+    const document = createDocument({
+      pageCount: 1,
+      pages: [
+        createPage({
+          index: 0,
+          text: "Jose Perez",
+          words: [
+            createWord({ text: "Jose", bbox: { x: 0, y: 0, width: 30, height: 12 } }),
+            createWord({ text: "Perez", bbox: { x: 35, y: 0, width: 35, height: 12 } }),
+          ],
+        }),
+      ],
+    });
+    const { engines, orchestrator } = await makeOrchestratorWithRealDetection(
+      createPdfEngineOutput({ document }),
+    );
+
+    await orchestrator.importDocument(createImportInput());
+
+    await orchestrator.addManualEntity("doc-1", {
+      value: "Jose Perez",
+      entityType: EntityType.Person,
+    });
+    const firstGroupId = engines.grouping.getSnapshot("doc-1").groups[0]?.id;
+
+    await orchestrator.addManualEntity("doc-1", {
+      value: "Jose Perez",
+      entityType: EntityType.Person,
+    });
+
+    const snapshot = engines.grouping.getSnapshot("doc-1");
+    expect(snapshot.groups).toHaveLength(1);
+    expect(snapshot.groups[0]?.id).toBe(firstGroupId);
+    expect(snapshot.groups[0]?.members).toHaveLength(1);
   });
 });

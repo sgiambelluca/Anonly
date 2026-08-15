@@ -13,7 +13,13 @@ import type { OcrEngine } from "@anonly/ocr-engine";
 import type { PdfEngine } from "@anonly/pdf-engine";
 import type { RegexEngine } from "@anonly/regex-engine";
 import type { RenderEngine } from "@anonly/render-engine";
-import type { IEventBus, PipelineState, ReanalyzeConfigPatch } from "@anonly/shared";
+import type {
+  IEventBus,
+  ManualEntityRequest,
+  PipelineState,
+  ReanalyzeConfigPatch,
+  Word,
+} from "@anonly/shared";
 
 export interface AnonymizationCoreEngines {
   readonly pdf: PdfEngine;
@@ -50,6 +56,30 @@ export interface IPipelineOrchestrator {
    * Precondición: `stage ∈ {Ready, Failed}` (si no, `InvalidInputError`).
    */
   reanalyze(documentId: string, patch: ReanalyzeConfigPatch): Promise<void>;
+  /**
+   * ADR-061 §6: agrega a mano una entidad que el detector no encontró.
+   * Orquesta reopenSession -> regex.findLiteral -> ENTITY_FOUND (source: Manual)
+   * -> finishSession. Idempotente por el dedup de identidad de ADR-038 §3.
+   * Valor ausente del documento -> no crea grupo, sin error.
+   * Precondición: stage in {Ready, Failed} (si no, InvalidInputError).
+   */
+  addManualEntity(documentId: string, request: ManualEntityRequest): Promise<void>;
+  // NOTA (ADR-061 §8, Contracts.md §3.5): `findText(documentId, query):
+  // ReadonlyArray<TextMatch>` queda deliberadamente fuera de esta interfaz
+  // en este PR. Es una ambigüedad reportada, no una omisión — ver el reporte
+  // final del PR: `RegexEngine.findLiteral` (el único método del motor que
+  // hace este matcheo) requiere un `entityType` que `findText` no tiene, y
+  // solo expone su resultado emitiendo `ENTITY_FOUND` sobre `ctx.bus` — un
+  // bus real haría que una simple búsqueda mute la sesión de Grouping en
+  // vivo (crea/fusiona grupos por buscar texto). No hay forma de construir
+  // `TextMatch[]` sin reimplementar el matcheo de `regex-engine` o
+  // recurrir a una captura por evento no especificada en ningún doc.
+  /** ADR-061 §4: habilitan el hit-test de selección sobre el canvas del original. */
+  getPageWords(documentId: string, pageIndex: number): ReadonlyArray<Word>;
+  getPageSize(
+    documentId: string,
+    pageIndex: number,
+  ): { readonly width: number; readonly height: number };
   cancel(documentId: string, jobId?: string): Promise<void>;
   closeDocument(documentId: string): Promise<void>;
   getState(documentId: string): PipelineState;

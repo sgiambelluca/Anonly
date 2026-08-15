@@ -264,6 +264,14 @@ export function wireHappyPathSpies(
     });
     return Promise.resolve({ documentId: input.document.id, occurrenceCount: 0, durationMs: 1 });
   });
+  // ADR-061 §6: no-op por defecto (mismo criterio que reopenSession/
+  // dropOccurrences más abajo) — no emite ENTITY_FOUND ni REGEX_FINISHED
+  // (findLiteral real tampoco emite REGEX_FINISHED, ver Regex_Engine.md).
+  // Los tests de `addManualEntity`/reaplicación de literales sobreescriben o
+  // solo verifican los argumentos de la llamada.
+  vi.spyOn(engines.regex, "findLiteral").mockImplementation((input) =>
+    Promise.resolve({ documentId: input.document.id, occurrenceCount: 0, durationMs: 1 }),
+  );
   vi.spyOn(engines.regex, "dispose").mockResolvedValue(undefined);
 
   vi.spyOn(engines.ner, "processPages").mockImplementation(async (inputs) => {
