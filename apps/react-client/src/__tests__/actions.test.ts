@@ -1,6 +1,7 @@
 import {
   ConflictReason,
   EngineEvents,
+  EntityType,
   EventChannel,
   ReplacementMode,
   type Rule,
@@ -17,6 +18,7 @@ const emit = vi.fn();
 const importDocument = vi.fn().mockResolvedValue(undefined);
 const retryWithPassword = vi.fn().mockResolvedValue(undefined);
 const reanalyze = vi.fn().mockResolvedValue(undefined);
+const addManualEntity = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("../core-adapter/index.js", () => ({
   getCore: () => ({
@@ -25,6 +27,7 @@ vi.mock("../core-adapter/index.js", () => ({
       importDocument,
       retryWithPassword,
       reanalyze,
+      addManualEntity,
       cancel: vi.fn(),
       closeDocument: vi.fn(),
       getState: vi.fn(),
@@ -55,6 +58,7 @@ describe("actions", () => {
     importDocument.mockClear();
     retryWithPassword.mockClear();
     reanalyze.mockClear();
+    addManualEntity.mockClear();
     useDocumentStore.getState().reset();
     useEntitiesStore.getState().reset();
     useRulesStore.getState().reset();
@@ -101,9 +105,11 @@ describe("actions", () => {
   it("actions requiring an active document no-op when none is open (async orchestrator calls)", async () => {
     await actions.reanalyze({ ner: { enabled: false } });
     await actions.retryWithPassword("secret");
+    await actions.addManualEntity({ value: "José Pérez", entityType: EntityType.Person });
 
     expect(reanalyze).not.toHaveBeenCalled();
     expect(retryWithPassword).not.toHaveBeenCalled();
+    expect(addManualEntity).not.toHaveBeenCalled();
   });
 
   describe("with an active document", () => {
@@ -246,6 +252,12 @@ describe("actions", () => {
     it("retryWithPassword forwards the password to orchestrator.retryWithPassword", async () => {
       await actions.retryWithPassword("secret");
       expect(retryWithPassword).toHaveBeenCalledWith("doc-1", "secret");
+    });
+
+    it("addManualEntity forwards the request to orchestrator.addManualEntity", async () => {
+      const request = { value: "José Pérez", entityType: EntityType.Person };
+      await actions.addManualEntity(request);
+      expect(addManualEntity).toHaveBeenCalledWith("doc-1", request);
     });
 
     it("requestExport emits EXPORT_REQUESTED with the options", () => {
