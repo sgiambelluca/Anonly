@@ -1059,6 +1059,116 @@ describe("Orchestrator — contract tests", () => {
     expect(snapshot.groups[0]?.members).toHaveLength(1);
   });
 
+  // ─── addManualEntity return value (ADR-061 §6 errata, §10 bloque "PR 4c") ───
+
+  it("addManualEntity with a value absent from the document returns occurrenceCount 0, does not throw, and creates no group", async () => {
+    const document = createDocument({
+      pageCount: 1,
+      pages: [
+        createPage({
+          index: 0,
+          text: "Sin nada relevante",
+          words: [
+            createWord({ text: "Sin", bbox: { x: 0, y: 0, width: 20, height: 12 } }),
+            createWord({ text: "nada", bbox: { x: 25, y: 0, width: 30, height: 12 } }),
+            createWord({ text: "relevante", bbox: { x: 60, y: 0, width: 50, height: 12 } }),
+          ],
+        }),
+      ],
+    });
+    const { engines, orchestrator } = await makeOrchestratorWithRealDetection(
+      createPdfEngineOutput({ document }),
+    );
+
+    await orchestrator.importDocument(createImportInput());
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+
+    const result = await orchestrator.addManualEntity("doc-1", {
+      value: "Jose Perez",
+      entityType: EntityType.Person,
+    });
+
+    expect(result).toEqual({ occurrenceCount: 0 });
+    expect(engines.grouping.getSnapshot("doc-1").groups).toHaveLength(0);
+  });
+
+  it("addManualEntity with a value present N times returns occurrenceCount N, including when every occurrence merges by dedup and the group tree does not change", async () => {
+    const document = createDocument({
+      pageCount: 3,
+      pages: [
+        createPage({
+          index: 0,
+          text: "Jose Perez",
+          words: [
+            createWord({ text: "Jose", bbox: { x: 0, y: 0, width: 30, height: 12 } }),
+            createWord({ text: "Perez", bbox: { x: 35, y: 0, width: 35, height: 12 } }),
+          ],
+        }),
+        createPage({
+          index: 1,
+          text: "Jose Perez",
+          words: [
+            createWord({
+              text: "Jose",
+              bbox: { x: 0, y: 0, width: 30, height: 12 },
+              pageIndex: 1,
+            }),
+            createWord({
+              text: "Perez",
+              bbox: { x: 35, y: 0, width: 35, height: 12 },
+              pageIndex: 1,
+            }),
+          ],
+        }),
+        createPage({
+          index: 2,
+          text: "Jose Perez",
+          words: [
+            createWord({
+              text: "Jose",
+              bbox: { x: 0, y: 0, width: 30, height: 12 },
+              pageIndex: 2,
+            }),
+            createWord({
+              text: "Perez",
+              bbox: { x: 35, y: 0, width: 35, height: 12 },
+              pageIndex: 2,
+            }),
+          ],
+        }),
+      ],
+    });
+    const { engines, orchestrator } = await makeOrchestratorWithRealDetection(
+      createPdfEngineOutput({ document }),
+    );
+
+    await orchestrator.importDocument(createImportInput());
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+
+    const first = await orchestrator.addManualEntity("doc-1", {
+      value: "Jose Perez",
+      entityType: EntityType.Person,
+    });
+    expect(first).toEqual({ occurrenceCount: 3 });
+
+    const before = engines.grouping.getSnapshot("doc-1");
+    expect(before.groups).toHaveLength(1);
+    expect(before.groups[0]?.members).toHaveLength(3);
+
+    // Repetir el mismo agregado: findLiteral vuelve a encontrar las 3
+    // apariciones (occurrenceCount 3), pero el dedup por identidad de
+    // ADR-038 §3 las descarta todas -- el árbol de grupos no cambia. El
+    // número sigue siendo 3, no "grupos nuevos" (ADR-061 §6 errata, punto 3).
+    const second = await orchestrator.addManualEntity("doc-1", {
+      value: "Jose Perez",
+      entityType: EntityType.Person,
+    });
+    expect(second).toEqual({ occurrenceCount: 3 });
+
+    const after = engines.grouping.getSnapshot("doc-1");
+    expect(after).toEqual(before);
+  });
+
   // ─── findText (ADR-061 §8 errata, §10 bloque "PR 3d") ───
 
   it("findText does not alter the grouping snapshot", async () => {

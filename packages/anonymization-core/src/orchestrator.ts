@@ -93,6 +93,7 @@ import type {
   AnonymizationCoreEngines,
   ImportDocumentInput,
   IPipelineOrchestrator,
+  ManualEntityResult,
 } from "./types.js";
 import { WorkerPoolManager, type ManagedPoolKey } from "./worker-pool.js";
 
@@ -417,7 +418,10 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
    * `setStage(Grouping)` de abajo saca el stage de `Ready` mientras esta
    * corre — transitorio, como el de `runReanalyzeNerOffFlow` (caso 19).
    */
-  async addManualEntity(documentId: string, request: ManualEntityRequest): Promise<void> {
+  async addManualEntity(
+    documentId: string,
+    request: ManualEntityRequest,
+  ): Promise<ManualEntityResult> {
     this.assertNotDisposed();
 
     const state = this.state.get(documentId);
@@ -450,11 +454,16 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
 
     this.setStage(documentId, PipelineStage.Grouping);
     this.engines.grouping.reopenSession(documentId, { expectRegex: false, expectNer: false });
-    await this.engines.regex.findLiteral(
+    // occurrenceCount es el de findLiteral tal cual -- apariciones ANTES del
+    // dedup de Grouping (ADR-061 §6 errata, punto 3). No se recalcula contra
+    // el árbol de grupos: un valor ya cubierto que se fusiona entero sigue
+    // devolviendo N > 0, nunca "grupos nuevos".
+    const result = await this.engines.regex.findLiteral(
       { document, value: request.value, entityType: request.entityType },
       ctx,
     );
     await this.engines.grouping.finishSession(documentId);
+    return { occurrenceCount: result.occurrenceCount };
   }
 
   /**
