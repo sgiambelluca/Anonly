@@ -4,7 +4,6 @@ import { GroupingEngine } from "@anonly/grouping-engine";
 import { NerEngine } from "@anonly/ner-engine";
 import { OcrEngine } from "@anonly/ocr-engine";
 import { PdfEngine } from "@anonly/pdf-engine";
-import type { PdfEngineOutput } from "@anonly/pdf-engine";
 import { RegexEngine } from "@anonly/regex-engine";
 import { RenderEngine } from "@anonly/render-engine";
 import {
@@ -26,85 +25,16 @@ import {
   createDocument,
   createEngineConfig,
   createEntityGroup,
-  createImageData,
   createImportInput,
   createMockEngines,
   createMockLogger,
   createPage,
   createPdfEngineOutput,
   createRealBus,
-  createRenderPageOutput,
   createWord,
+  makeOrchestratorWithRealDetection,
   wireHappyPathSpies,
 } from "./fixtures/test-helpers.js";
-
-/**
- * Setup para los tests de `addManualEntity` (ADR-061 §6, §10): a diferencia
- * de `wireHappyPathSpies` (mockea los 7 motores con respuestas canned), acá
- * `regex` y `grouping` quedan como instancias **reales**, inicializadas
- * sobre el mismo bus que el Orchestrator — sin eso no hay forma de verificar
- * "produce un grupo nuevo visible en el snapshot" ni el dedup por identidad
- * de ADR-038 §3: un `getSnapshot` mockeado no puede reproducir merge/dedup
- * real sin reimplementarlo en el mock. Los otros cinco motores (pdf, ocr,
- * ner, render, export) siguen mockeados: no aportan nada a estos tests y
- * `ner`/`ocr` reales exigen fronteras de librerías pesadas (tesseract,
- * onnxruntime) fuera de alcance acá. NER queda desactivado para simplificar
- * la cascada de auto-finish de la sesión de Grouping (ADR-034 §2).
- */
-async function makeOrchestratorWithRealDetection(pdfOutput?: PdfEngineOutput): Promise<{
-  readonly bus: ReturnType<typeof createRealBus>;
-  readonly engines: ReturnType<typeof createMockEngines>;
-  readonly orchestrator: PipelineOrchestrator;
-}> {
-  const bus = createRealBus();
-  const logger = createMockLogger();
-  const cache = new LruCache();
-  const config = createEngineConfig({
-    ner: {
-      modelId: "x",
-      quantization: "q8",
-      confidenceThreshold: 0.7,
-      batchSize: 1,
-      enabled: false,
-    },
-  });
-  const engines = createMockEngines();
-  const output = pdfOutput ?? createPdfEngineOutput();
-
-  vi.spyOn(engines.pdf, "process").mockResolvedValue(output);
-  vi.spyOn(engines.pdf, "dispose").mockResolvedValue(undefined);
-  vi.spyOn(engines.ocr, "processPages").mockResolvedValue([]);
-  vi.spyOn(engines.ocr, "dispose").mockResolvedValue(undefined);
-  vi.spyOn(engines.ner, "processPages").mockResolvedValue([]);
-  vi.spyOn(engines.ner, "dispose").mockResolvedValue(undefined);
-  vi.spyOn(engines.render, "loadDocument").mockResolvedValue(undefined);
-  vi.spyOn(engines.render, "unloadDocument").mockResolvedValue(undefined);
-  vi.spyOn(engines.render, "rasterizePage").mockResolvedValue(createImageData());
-  vi.spyOn(engines.render, "renderPage").mockImplementation((input) =>
-    Promise.resolve(
-      createRenderPageOutput({
-        documentId: input.documentId,
-        pageIndex: input.pageIndex,
-        kind: input.kind,
-      }),
-    ),
-  );
-  vi.spyOn(engines.render, "dispose").mockResolvedValue(undefined);
-  vi.spyOn(engines.export, "dispose").mockResolvedValue(undefined);
-
-  const ctx: EngineContext = {
-    bus,
-    logger,
-    cache,
-    abortSignal: new AbortController().signal,
-    config,
-  };
-  await engines.regex.init(ctx);
-  await engines.grouping.init(ctx);
-
-  const orchestrator = new PipelineOrchestrator({ bus, logger, cache, config, engines });
-  return { bus, engines, orchestrator };
-}
 
 describe("Orchestrator — contract tests", () => {
   afterEach(() => {
@@ -1127,5 +1057,44 @@ describe("Orchestrator — contract tests", () => {
     expect(snapshot.groups).toHaveLength(1);
     expect(snapshot.groups[0]?.id).toBe(firstGroupId);
     expect(snapshot.groups[0]?.members).toHaveLength(1);
+  });
+
+  // ─── findText (ADR-061 §8 errata, §10 bloque "PR 3d") ───
+
+  it("findText does not alter the grouping snapshot", async () => {
+    const document = createDocument({
+      pageCount: 1,
+      pages: [
+        createPage({
+          index: 0,
+          text: "Jose Perez contacto test@example.com",
+          words: [
+            createWord({ text: "Jose", bbox: { x: 0, y: 0, width: 30, height: 12 } }),
+            createWord({ text: "Perez", bbox: { x: 35, y: 0, width: 35, height: 12 } }),
+            createWord({ text: "contacto", bbox: { x: 75, y: 0, width: 60, height: 12 } }),
+            createWord({
+              text: "test@example.com",
+              bbox: { x: 140, y: 0, width: 100, height: 12 },
+            }),
+          ],
+        }),
+      ],
+    });
+    const { engines, orchestrator } = await makeOrchestratorWithRealDetection(
+      createPdfEngineOutput({ document }),
+    );
+
+    await orchestrator.importDocument(createImportInput());
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+
+    const before = engines.grouping.getSnapshot("doc-1");
+
+    // Varias queries, todas con coincidencias — buscar no debe crear ni
+    // fusionar grupos, a diferencia de addManualEntity con el mismo valor.
+    expect(orchestrator.findText("doc-1", "Jose Perez")).not.toHaveLength(0);
+    expect(orchestrator.findText("doc-1", "test@example.com")).not.toHaveLength(0);
+    expect(orchestrator.findText("doc-1", "Jose Perez")).not.toHaveLength(0);
+
+    expect(engines.grouping.getSnapshot("doc-1")).toEqual(before);
   });
 });

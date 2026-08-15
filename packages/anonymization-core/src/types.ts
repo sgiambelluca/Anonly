@@ -18,6 +18,7 @@ import type {
   ManualEntityRequest,
   PipelineState,
   ReanalyzeConfigPatch,
+  TextMatch,
   Word,
 } from "@anonly/shared";
 
@@ -64,16 +65,13 @@ export interface IPipelineOrchestrator {
    * Precondición: stage in {Ready, Failed} (si no, InvalidInputError).
    */
   addManualEntity(documentId: string, request: ManualEntityRequest): Promise<void>;
-  // NOTA (ADR-061 §8, Contracts.md §3.5): `findText(documentId, query):
-  // ReadonlyArray<TextMatch>` queda deliberadamente fuera de esta interfaz
-  // en este PR. Es una ambigüedad reportada, no una omisión — ver el reporte
-  // final del PR: `RegexEngine.findLiteral` (el único método del motor que
-  // hace este matcheo) requiere un `entityType` que `findText` no tiene, y
-  // solo expone su resultado emitiendo `ENTITY_FOUND` sobre `ctx.bus` — un
-  // bus real haría que una simple búsqueda mute la sesión de Grouping en
-  // vivo (crea/fusiona grupos por buscar texto). No hay forma de construir
-  // `TextMatch[]` sin reimplementar el matcheo de `regex-engine` o
-  // recurrir a una captura por evento no especificada en ningún doc.
+  /**
+   * ADR-061 §8 (errata): misma búsqueda literal de `addManualEntity`, salida
+   * de solo lectura para el buscador del visor. Delega en
+   * `RegexEngine.searchText` — sincrónico, sin tocar la sesión de Grouping ni
+   * emitir nada: buscar no es agregar.
+   */
+  findText(documentId: string, query: string): ReadonlyArray<TextMatch>;
   /** ADR-061 §4: habilitan el hit-test de selección sobre el canvas del original. */
   getPageWords(documentId: string, pageIndex: number): ReadonlyArray<Word>;
   getPageSize(

@@ -35,6 +35,7 @@ import {
   type Document,
   type DocumentMetadata,
   type EngineConfig,
+  type EngineContext,
   type EntityGroup,
   type IEventBus,
   type ILogger,
@@ -47,7 +48,9 @@ import {
 } from "@anonly/shared";
 import { vi } from "vitest";
 
+import { LruCache } from "../../cache.js";
 import { mergeEngineConfig } from "../../config.js";
+import { PipelineOrchestrator } from "../../orchestrator.js";
 import type { AnonymizationCoreEngines, ImportDocumentInput } from "../../types.js";
 
 export function createMockLogger(): ILogger {
@@ -342,6 +345,75 @@ export function wireHappyPathSpies(
     });
   });
   vi.spyOn(engines.export, "dispose").mockResolvedValue(undefined);
+}
+
+/**
+ * Setup para tests que necesitan matcheo real (ADR-061 §6/§8, §10): a
+ * diferencia de `wireHappyPathSpies` (mockea los 7 motores con respuestas
+ * canned), acá `regex` y `grouping` quedan como instancias **reales**,
+ * inicializadas sobre el mismo bus que el Orchestrator — sin eso no hay
+ * forma de verificar "produce un grupo nuevo visible en el snapshot", el
+ * dedup por identidad de ADR-038 §3, ni que `findText` encuentre lo mismo
+ * que `regex.searchText`: un mock canned no puede reproducir ese matcheo sin
+ * reimplementarlo. Los otros cinco motores (pdf, ocr, ner, render, export)
+ * siguen mockeados: no aportan nada a estos tests y `ner`/`ocr` reales
+ * exigen fronteras de librerías pesadas (tesseract, onnxruntime) fuera de
+ * alcance acá. NER queda desactivado para simplificar la cascada de
+ * auto-finish de la sesión de Grouping (ADR-034 §2).
+ */
+export async function makeOrchestratorWithRealDetection(pdfOutput?: PdfEngineOutput): Promise<{
+  readonly bus: EventBus;
+  readonly engines: AnonymizationCoreEngines;
+  readonly orchestrator: PipelineOrchestrator;
+}> {
+  const bus = createRealBus();
+  const logger = createMockLogger();
+  const cache = new LruCache();
+  const config = createEngineConfig({
+    ner: {
+      modelId: "x",
+      quantization: "q8",
+      confidenceThreshold: 0.7,
+      batchSize: 1,
+      enabled: false,
+    },
+  });
+  const engines = createMockEngines();
+  const output = pdfOutput ?? createPdfEngineOutput();
+
+  vi.spyOn(engines.pdf, "process").mockResolvedValue(output);
+  vi.spyOn(engines.pdf, "dispose").mockResolvedValue(undefined);
+  vi.spyOn(engines.ocr, "processPages").mockResolvedValue([]);
+  vi.spyOn(engines.ocr, "dispose").mockResolvedValue(undefined);
+  vi.spyOn(engines.ner, "processPages").mockResolvedValue([]);
+  vi.spyOn(engines.ner, "dispose").mockResolvedValue(undefined);
+  vi.spyOn(engines.render, "loadDocument").mockResolvedValue(undefined);
+  vi.spyOn(engines.render, "unloadDocument").mockResolvedValue(undefined);
+  vi.spyOn(engines.render, "rasterizePage").mockResolvedValue(createImageData());
+  vi.spyOn(engines.render, "renderPage").mockImplementation((input) =>
+    Promise.resolve(
+      createRenderPageOutput({
+        documentId: input.documentId,
+        pageIndex: input.pageIndex,
+        kind: input.kind,
+      }),
+    ),
+  );
+  vi.spyOn(engines.render, "dispose").mockResolvedValue(undefined);
+  vi.spyOn(engines.export, "dispose").mockResolvedValue(undefined);
+
+  const ctx: EngineContext = {
+    bus,
+    logger,
+    cache,
+    abortSignal: new AbortController().signal,
+    config,
+  };
+  await engines.regex.init(ctx);
+  await engines.grouping.init(ctx);
+
+  const orchestrator = new PipelineOrchestrator({ bus, logger, cache, config, engines });
+  return { bus, engines, orchestrator };
 }
 
 export interface Deferred<T> {

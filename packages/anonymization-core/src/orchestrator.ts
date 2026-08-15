@@ -70,6 +70,7 @@ import {
   type RegexFinished,
   type RenderFailed as RenderFailedPayload,
   type Replacement,
+  type TextMatch,
   type Unsubscribe,
   type WorkerFactory,
   type Word,
@@ -454,6 +455,21 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       ctx,
     );
     await this.engines.grouping.finishSession(documentId);
+  }
+
+  /**
+   * ADR-061 §8 (errata): misma búsqueda literal de `addManualEntity`, salida
+   * de solo lectura sobre `regex.searchText` (sincrónico). No pasa por
+   * `reopenSession`/`finishSession` ni emite nada: buscar no es agregar.
+   */
+  findText(documentId: string, query: string): ReadonlyArray<TextMatch> {
+    const document = this.documents.get(documentId);
+    if (document === undefined) {
+      throw new InvalidInputError(`Documento ${documentId} no disponible para findText.`, {
+        documentId,
+      });
+    }
+    return this.engines.regex.searchText({ document, query });
   }
 
   /**
