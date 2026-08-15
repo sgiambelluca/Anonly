@@ -215,7 +215,22 @@ export function PdfViewer({ kind, scrollSync }: PdfViewerProps) {
             const activeMatchBbox =
               activeMatch && activeMatch.pageIndex === pageIndex ? activeMatch.bbox : undefined;
             return (
-              <div className="relative h-full w-full">
+              // Ancho/alto explícitos en vez de `w-full h-full`: `PagePhantom`
+              // (`PageVirtualizer.tsx`) es `absolute inset-x-0` — su ancho es
+              // el del panel entero, no `pageWidth`. Con `w-full` este wrapper
+              // heredaba ese ancho y estiraba `PageCanvas`/`WordSelectionOverlay`
+              // al ancho del panel, mientras `wordSelectionRect.ts` seguía
+              // asumiendo `displayWidth = pageWidth` (`ui/Components.md`
+              // §5.4b): la selección sobre el original traducía coordenadas de
+              // pantalla a página con una escala equivocada (bug encontrado en
+              // verificación manual post-aprobación del Hito 10.7, ADR-061).
+              // Con tamaño fijo, `PagePhantom` centra este wrapper (ya tenía
+              // `flex items-center justify-center`, sin uso hasta ahora) en
+              // exactamente `pageWidth × pageHeight` — el tamaño que
+              // `PageCanvas`/`WordSelectionOverlay` (`h-full w-full` de ESTE
+              // wrapper) y `pointerSelectionToPageRect`/`pageRectToScreenRect`
+              // ya asumían.
+              <div className="relative" style={{ width: pageWidth, height: pageHeight }}>
                 <PageCanvas
                   pageIndex={pageIndex}
                   kind={kind}
