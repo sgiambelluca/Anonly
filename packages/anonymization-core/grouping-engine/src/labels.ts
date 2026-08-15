@@ -137,13 +137,23 @@ function tokenForLevel(labels: PlaceholderLabelSet, level: 0 | 1 | 2, indexInTyp
   return `[${labels.level2}-${nn}]`;
 }
 
-/** ¿El token estimado entra en TODOS los bbox de `members`? (ADR-057 §4, peor caso). */
+/**
+ * ¿El token estimado entra en TODOS los bbox de `members`? (ADR-057 §4, peor
+ * caso). ADR-074 §7: por member se evalúa cada uno de sus `fragments ??
+ * [bbox]` — la escalera mide contra el footprint real de una entidad
+ * multi-línea, no contra la envolvente que lo escondía. No es el fragmento
+ * más ancho (ADR-074 §5, el que va a llevar el token): el nivel es uno solo
+ * para todo el grupo, así que medir de menos es cómo se llega a un token que
+ * no entra en ningún fragmento.
+ */
 function fitsAllMembers(
   token: string,
-  members: ReadonlyArray<Pick<OccurrenceRef, "bbox">>,
+  members: ReadonlyArray<Pick<OccurrenceRef, "bbox" | "fragments">>,
 ): boolean {
-  return members.every(
-    (member) => estimateTokenWidth(token.length, member.bbox.height) <= member.bbox.width,
+  return members.every((member) =>
+    (member.fragments ?? [member.bbox]).every(
+      (box) => estimateTokenWidth(token.length, box.height) <= box.width,
+    ),
   );
 }
 
@@ -158,7 +168,7 @@ function fitsAllMembers(
 function selectAbbreviationLevel(
   labels: PlaceholderLabelSet,
   indexInType: number,
-  members: ReadonlyArray<Pick<OccurrenceRef, "bbox">>,
+  members: ReadonlyArray<Pick<OccurrenceRef, "bbox" | "fragments">>,
 ): 0 | 1 | 2 {
   for (const level of [0, 1, 2] as const) {
     if (fitsAllMembers(tokenForLevel(labels, level, indexInType), members)) return level;
