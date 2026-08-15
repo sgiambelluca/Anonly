@@ -120,6 +120,21 @@ export function makeWord(text: string, x: number, pageIndex: number, y = 100): W
 }
 
 /**
+ * Variante de `makeWord` con `source: "ocr"` (ADR-061 §1: `findLiteral`
+ * opera sobre `Page.words` sin distinguir origen — ver
+ * "findLiteral works over OCR-sourced words" en edge.test.ts).
+ */
+export function makeOcrWord(text: string, x: number, pageIndex: number, y = 100): Word {
+  return {
+    text,
+    bbox: { x, y, width: Math.max(text.length * 6, 1), height: 12 },
+    pageIndex,
+    confidence: 0.9,
+    source: "ocr",
+  };
+}
+
+/**
  * Construye una `Page` a partir de una lista de tokens (cada uno, un
  * `Word`). `text` se arma exactamente como especifica 03_Data_Model.md §4:
  * `words.map(w => w.text).join(" ")` — el mismo criterio que usa
@@ -138,6 +153,23 @@ export function makePage(pageIndex: number, tokens: ReadonlyArray<string>): Page
     height: 842,
     words,
     text: tokens.map((t) => t).join(" "),
+    requiresOCR: false,
+    ocrCompleted: false,
+  };
+}
+
+/**
+ * Construye una `Page` a partir de una lista de `Word` ya armados (en vez de
+ * tokens vía `makeWord`) — para tests que necesitan controlar `source`
+ * (`makeOcrWord`) u otros campos del `Word` directamente.
+ */
+export function makePageFromWords(pageIndex: number, words: ReadonlyArray<Word>): Page {
+  return {
+    index: pageIndex,
+    width: 595,
+    height: 842,
+    words,
+    text: words.map((w) => w.text).join(" "),
     requiresOCR: false,
     ocrCompleted: false,
   };
