@@ -170,6 +170,69 @@ describe("ExportEngine — unit", () => {
     expect(page1Replacements[0]?.groupId).toBe("group-enabled-p1");
   });
 
+  // ADR-074 §1/§4: buildPageReplacements es el último salto de la cadena
+  // Word → Occurrence → OccurrenceRef → Replacement — se propaga
+  // explícitamente, por el precedente de ADR-066 §6 (un campo que "viaja
+  // solo" se cayó en silencio una vez con todos los gates en verde).
+  it("propagates fragments from the member to the Replacement when present", async () => {
+    vi.mocked(PDFDocument.create).mockResolvedValue(asPdfDocument(createMockPdfLibDocument()));
+    await engine.init(ctx);
+    const provider = createMockRenderPageProvider();
+    const fragments = [
+      { x: 0, y: 0, width: 200, height: 12 },
+      { x: 0, y: 20, width: 70, height: 12 },
+    ];
+    const groupWithFragments = createEntityGroup({
+      id: "group-fragments",
+      enabled: true,
+      members: [
+        {
+          occurrenceId: "occ-fragments",
+          pageIndex: 0,
+          bbox: { x: 0, y: 0, width: 200, height: 32 },
+          source: DetectionSource.NER,
+          fragments,
+        },
+      ],
+    });
+
+    await engine.export(
+      createExportEngineInput({ groups: [groupWithFragments], renderPageProvider: provider }),
+      ctx,
+    );
+
+    const page0Call = provider.renderFull.mock.calls.find((call) => call[0] === 0);
+    const replacements = page0Call?.[1] as ReadonlyArray<Replacement>;
+    expect(replacements[0]?.fragments).toEqual(fragments);
+  });
+
+  it("a member without fragments produces a Replacement without the field", async () => {
+    vi.mocked(PDFDocument.create).mockResolvedValue(asPdfDocument(createMockPdfLibDocument()));
+    await engine.init(ctx);
+    const provider = createMockRenderPageProvider();
+    const groupWithoutFragments = createEntityGroup({
+      id: "group-no-fragments",
+      enabled: true,
+      members: [
+        {
+          occurrenceId: "occ-no-fragments",
+          pageIndex: 0,
+          bbox: { x: 0, y: 0, width: 200, height: 12 },
+          source: DetectionSource.Regex,
+        },
+      ],
+    });
+
+    await engine.export(
+      createExportEngineInput({ groups: [groupWithoutFragments], renderPageProvider: provider }),
+      ctx,
+    );
+
+    const page0Call = provider.renderFull.mock.calls.find((call) => call[0] === 0);
+    const replacements = page0Call?.[1] as ReadonlyArray<Replacement>;
+    expect(replacements[0]?.fragments).toBeUndefined();
+  });
+
   // ─── Selección de embedJpg/embedPng por formato ───
 
   it("uses embedPng when EncodedPageImage.format is png", async () => {

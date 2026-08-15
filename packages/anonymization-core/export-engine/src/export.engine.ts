@@ -345,6 +345,10 @@ export function buildPageReplacements(
         originalValue: group.canonicalValue,
         replacementValue: group.replacementValue,
         mode: group.replacementMode,
+        // ADR-074 §1/§4: copiado tal cual del member, nunca `fragments:
+        // undefined` explícito (exactOptionalPropertyTypes). render-engine
+        // pinta por fragments ?? [bbox], nunca la envolvente sola.
+        ...(member.fragments !== undefined ? { fragments: member.fragments } : {}),
       });
     }
   }
