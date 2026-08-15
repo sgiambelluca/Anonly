@@ -60,6 +60,12 @@ export interface PageVirtualizerProps {
   readonly renderItem: (pageIndex: number) => ReactNode;
   readonly visibleRange: VisibleRange;
   readonly pageSize: number;
+  /**
+   * Ancho de página en CSS px (`PdfViewer.pageWidth`, `pageLayout.ts`), para
+   * que el contenedor con scroll crezca cuando el zoom hace que la página
+   * sea más ancha que el panel — ver el comentario de `width` más abajo.
+   */
+  readonly pageWidth: number;
   readonly onVisibleRangeChange: (range: VisibleRange) => void;
   /** Página actual derivada de la geometría de scroll de este panel (ADR-054 §5). Se reporta solo cuando cambia. */
   readonly onCurrentPageIndexChange: (pageIndex: number) => void;
@@ -85,6 +91,7 @@ export function PageVirtualizer({
   renderItem,
   visibleRange,
   pageSize,
+  pageWidth,
   onVisibleRangeChange,
   onCurrentPageIndexChange,
   scrollSync,
@@ -241,8 +248,30 @@ export function PageVirtualizer({
   );
 
   return (
-    <div ref={containerRef} className="relative h-full w-full overflow-y-auto">
-      <div className="relative" style={{ height: pageCount * pageSize }}>
+    <div ref={containerRef} className="relative h-full w-full overflow-auto">
+      {/*
+       * `width: max(pageWidth, 100%)` en vez de dejarlo en el 100% implícito
+       * de un bloque: a zoom alto `pageWidth` supera el ancho del panel, y
+       * `PagePhantom` (`inset-x-0`, más abajo) toma el ancho de ESTE div, no
+       * el del panel. Sin esto, `PagePhantom` se queda angosto (el del
+       * panel) y centra un `renderItem` más ancho vía flex — desborda por
+       * igual a los dos lados, pero un navegador en LTR solo cuenta el
+       * desborde hacia la **derecha** como `scrollWidth`: el borde
+       * izquierdo de la página (texto rotado pegado al margen, p. ej.)
+       * queda a `scrollLeft` negativo, inalcanzable (`scrollLeft` no baja de
+       * 0). Con este div creciendo primero, `PagePhantom` hereda el ancho
+       * correcto y el `renderItem` de `PdfViewer` (mismo ancho, `shrink-0`)
+       * queda pegado al borde izquierdo sin desbordar para ningún lado —
+       * todo el contenido cae en `scrollLeft ∈ [0, scrollWidth]`, alcanzable
+       * scrolleando a la derecha. Cuando `pageWidth ≤` el panel, `max(...)`
+       * da el 100% de siempre y `PagePhantom` centra el `renderItem` más
+       * angosto — comportamiento sin cambios en ese caso (confirmado con un
+       * harness aislado, mismo criterio que `wordSelectionRect.ts`).
+       */}
+      <div
+        className="relative"
+        style={{ height: pageCount * pageSize, width: `max(${pageWidth}px, 100%)` }}
+      >
         {pageIndices.map((pageIndex) => (
           <PagePhantom
             key={pageIndex}
