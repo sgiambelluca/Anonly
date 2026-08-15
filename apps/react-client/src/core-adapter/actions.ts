@@ -19,6 +19,7 @@ import {
   type EntityGroup,
   type ExportOptions,
   type ManualEntityRequest,
+  type ManualEntityResult,
   type PersonGenderChoice,
   type ReanalyzeConfigPatch,
   type ReplacementMode,
@@ -168,11 +169,14 @@ export const actions = {
 
   // ADR-061 §6: agrega a mano una entidad que el detector no encontró. Las
   // tres vías de entrada (diálogo, hit-test sobre el original, buscador)
-  // convergen acá.
-  async addManualEntity(request: ManualEntityRequest): Promise<void> {
+  // convergen acá. `null` es solo "no hay documento activo" — un estado en
+  // el que el llamador no puede estar abierto — y nunca "no se encontró"
+  // (ADR-061 §6 errata, Components.md §3.4c): el caller no debe colapsar los
+  // dos casos.
+  async addManualEntity(request: ManualEntityRequest): Promise<ManualEntityResult | null> {
     const documentId = activeDocumentId();
-    if (documentId === null) return;
-    await getCore().orchestrator.addManualEntity(documentId, request);
+    if (documentId === null) return null;
+    return getCore().orchestrator.addManualEntity(documentId, request);
   },
 
   // PDF_PASSWORD_REQUIRED → PasswordDialog → esta acción. La UI NUNCA llama a
