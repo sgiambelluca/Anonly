@@ -118,6 +118,99 @@ describe("GroupingEngine — edge cases", () => {
     expect(groups).toHaveLength(2);
   });
 
+  // ADR-073 §1 — Custom queda fuera de FUZZY_MATCHING_TYPES: un carácter de
+  // diferencia sobre un valor de patrón custom no agrupa, aunque supere el
+  // umbral (el motor no tiene base para decidir si es typo o dato distinto).
+  it("Custom does not fuzzy-group", () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Custom,
+        value: "EXP-2026-000123",
+        normalizedValue: "exp-2026-000123",
+      }),
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Custom,
+        value: "EXP-2026-000124",
+        normalizedValue: "exp-2026-000124",
+      }),
+    });
+
+    const { groups } = engine.getSnapshot("doc-1");
+    expect(groups).toHaveLength(2);
+  });
+
+  // ADR-073 §7 — la protección del DNI deja de depender de estar a 0.005 del
+  // umbral (Contexto §2): sigue sin fusionar aunque el host baje
+  // similarityThreshold a 0.80, porque DNI ya no corre el pase difuso.
+  it("DNI does not fuzzy-group even with similarityThreshold at 0.80", async () => {
+    await engine.dispose();
+    ctx = createEngineContext({
+      config: { ...ctx.config, grouping: { similarityThreshold: 0.8, minAliasFrequency: 1 } },
+    });
+    engine = new GroupingEngine();
+    await engine.init(ctx);
+    engine.startSession("doc-1");
+
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.DNI,
+        value: "34567891",
+        normalizedValue: "34567891",
+      }),
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.DNI,
+        value: "34567892",
+        normalizedValue: "34567892",
+      }),
+    });
+
+    const { groups } = engine.getSnapshot("doc-1");
+    expect(groups).toHaveLength(2);
+  });
+
+  // ADR-073 §4 — la asimetría deliberada: dos CUIT que dejan de fusionarse
+  // automáticamente se pueden fusionar a mano, con el resultado de siempre.
+  it("two groups that no longer auto-merge can still be merged by hand", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.CUIT,
+        value: "20-12345678-9",
+        normalizedValue: "20123456789",
+      }),
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.CUIT,
+        value: "20-12345678-1",
+        normalizedValue: "20123456781",
+      }),
+    });
+
+    const before = engine.getSnapshot("doc-1").groups;
+    expect(before.filter((g) => g.type === EntityType.CUIT)).toHaveLength(2);
+    const [first, second] = before;
+
+    const merged = await engine.applyGroupMerge({
+      documentId: "doc-1",
+      sourceGroupId: second!.id,
+      targetGroupId: first!.id,
+    });
+
+    expect(merged.members).toHaveLength(2);
+    const { groups: after } = engine.getSnapshot("doc-1");
+    expect(after.filter((g) => g.type === EntityType.CUIT)).toHaveLength(1);
+  });
+
   // Caso 5/16 (§13)
   it("manual merge preserves lower indexInType", async () => {
     for (const value of ["11111111", "22222222", "33333333"]) {

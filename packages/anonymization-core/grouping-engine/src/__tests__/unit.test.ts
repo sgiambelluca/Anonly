@@ -70,7 +70,8 @@ describe("GroupingEngine — unit tests", () => {
   });
 
   // Caso 3 (§13): "34.567.891" y "34567891" comparten normalizedValue.
-  it("DNI with and without dots groups together", () => {
+  // ADR-073 §7: separa "los unificó el normalizer" de "los unificó el difuso".
+  it("DNI with and without dots still groups by the EXACT pass", () => {
     ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
       documentId: "doc-1",
       occurrence: makeOccurrence({
@@ -124,6 +125,131 @@ describe("GroupingEngine — unit tests", () => {
     expect(groups[0]?.aliases).toEqual(
       expect.arrayContaining(["Maria Fernandez", "Maria Fernandes"]),
     );
+  });
+
+  // ADR-073 §7 — el test que define el ADR: dos fechas que difieren en un
+  // carácter (0.900 ≥ 0.88, el caso medido sobre la pericia real) producen
+  // DOS grupos, no uno.
+  it("two Dates differing in one character produce two groups", () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Date,
+        value: "1/7/2026",
+        normalizedValue: "01/07/2026",
+      }),
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Date,
+        value: "7/7/2026",
+        normalizedValue: "07/07/2026",
+      }),
+    });
+
+    const { groups } = engine.getSnapshot("doc-1");
+    expect(groups.filter((g) => g.type === EntityType.Date)).toHaveLength(2);
+  });
+
+  // ADR-073 §7 — un carácter de diferencia, dos grupos, para cada uno de los
+  // otros cinco tipos estructurados medidos en el reporte (Contexto §2).
+  it("one-character difference produces two groups for CUIT, Phone, CreditCard, IBAN and Email", () => {
+    const cases: ReadonlyArray<{ entityType: EntityType; a: string; b: string }> = [
+      { entityType: EntityType.CUIT, a: "20123456789", b: "20123456799" },
+      { entityType: EntityType.Phone, a: "1145678900", b: "1145678901" },
+      { entityType: EntityType.CreditCard, a: "4111111111111111", b: "4111111111111112" },
+      {
+        entityType: EntityType.IBAN,
+        a: "AR9700000000000000000001",
+        b: "AR9700000000000000000002",
+      },
+      { entityType: EntityType.Email, a: "persona@estudio.com.ar", b: "persona@estudio.com.as" },
+    ];
+
+    for (const { entityType, a, b } of cases) {
+      ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: makeOccurrence({ entityType, value: a, normalizedValue: a }),
+      });
+      ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: makeOccurrence({ entityType, value: b, normalizedValue: b }),
+      });
+    }
+
+    const { groups } = engine.getSnapshot("doc-1");
+    for (const { entityType } of cases) {
+      expect(groups.filter((g) => g.type === entityType)).toHaveLength(2);
+    }
+  });
+
+  // ADR-073 §7 — no-regresión: si esto se cae, ADR-073 rompió lo que vino a
+  // proteger. Ídem Organization y Address, mismo umbral y mismo mecanismo.
+  //
+  // Nota: el par que ilustra ADR-073 Contexto §3 ("Pablo Rornan" por "Pablo
+  // Román", la confusión "rn"→"m") tiene distancia Levenshtein 2 contra
+  // "Pablo Roman" (verificado con la implementación real), similitud 0.833 —
+  // por debajo del umbral 0.88 independientemente de este ADR. No es un caso
+  // que la fórmula sin cambios agrupe. Se usa acá una confusión de OCR real
+  // de un solo carácter (O↔0) que sí clasifica como "un carácter distinto".
+  it('"Pablo Roman" and "Pablo Rornan" still group together', () => {
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: "Pablo Roman",
+        normalizedValue: "pablo roman",
+      }),
+    });
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: "Pablo R0man",
+        normalizedValue: "pablo r0man",
+      }),
+    });
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Organization,
+        value: "Estudio Gonzalez",
+        normalizedValue: "estudio gonzalez",
+      }),
+    });
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Organization,
+        value: "Estudio Gonzalez.",
+        normalizedValue: "estudio gonzalez.",
+      }),
+    });
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Address,
+        value: "Av. Rivadavia 1234",
+        normalizedValue: "av. rivadavia 1234",
+      }),
+    });
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Address,
+        value: "Av. Rivadavia 1235",
+        normalizedValue: "av. rivadavia 1235",
+      }),
+    });
+
+    const { groups } = engine.getSnapshot("doc-1");
+    const personGroup = groups.find((g) => g.type === EntityType.Person);
+    const orgGroup = groups.find((g) => g.type === EntityType.Organization);
+    const addressGroup = groups.find((g) => g.type === EntityType.Address);
+    expect(personGroup?.members).toHaveLength(2);
+    expect(orgGroup?.members).toHaveLength(2);
+    expect(addressGroup?.members).toHaveLength(2);
   });
 
   // Caso 22 (§13, ADR-029)
