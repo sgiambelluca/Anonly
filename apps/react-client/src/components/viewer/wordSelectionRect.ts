@@ -11,12 +11,13 @@ import type { BoundingBox } from "@anonly/anonymization-core";
 import type { ViewerKind } from "../../store/viewer.store.js";
 
 /**
- * El hit-test solo se ofrece sobre el `original` (ADR-061 §3): en el
- * `anonymized` lo visible puede ser un reemplazo, y señalarlo no
- * significaría nada. Extraída para poder testearla sin renderizar
+ * El agregado manual —hit-test (§3/§4) y `DocumentSearchBox` (§8, "junto al
+ * encabezado 'PDF ORIGINAL'")— solo se ofrece sobre el `original`: en el
+ * `anonymized` lo visible puede ser un reemplazo, y señalarlo o buscar en
+ * él no significaría nada. Extraída para poder testearla sin renderizar
  * `PdfViewer` (sin jsdom).
  */
-export function shouldShowWordSelectionOverlay(kind: ViewerKind): boolean {
+export function isOriginalPanel(kind: ViewerKind): boolean {
   return kind === "original";
 }
 
@@ -66,5 +67,33 @@ export function pointerSelectionToPageRect(input: PointerSelectionInput): Boundi
     y: y * scaleY,
     width: width * scaleX,
     height: height * scaleY,
+  };
+}
+
+export interface ScreenRect {
+  readonly left: number;
+  readonly top: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/**
+ * Inversa de `pointerSelectionToPageRect`: un `BoundingBox` en coordenadas
+ * de página (p. ej. el match activo de `DocumentSearchBox`,
+ * `ui/Components.md` §5.4c) a un rect en pantalla, para dibujar el
+ * resaltado sobre el mismo overlay del hit-test (§5.4b).
+ */
+export function pageRectToScreenRect(
+  rect: BoundingBox,
+  displaySize: { readonly displayWidth: number; readonly displayHeight: number },
+  pageSize: { readonly pageWidth: number; readonly pageHeight: number },
+): ScreenRect {
+  const scaleX = displaySize.displayWidth / pageSize.pageWidth;
+  const scaleY = displaySize.displayHeight / pageSize.pageHeight;
+  return {
+    left: rect.x * scaleX,
+    top: rect.y * scaleY,
+    width: rect.width * scaleX,
+    height: rect.height * scaleY,
   };
 }

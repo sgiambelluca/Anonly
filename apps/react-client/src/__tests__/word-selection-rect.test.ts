@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isOriginalPanel,
+  pageRectToScreenRect,
   pointerSelectionToPageRect,
-  shouldShowWordSelectionOverlay,
 } from "../components/viewer/wordSelectionRect.js";
 
 const BASE = { displayWidth: 400, displayHeight: 800, pageWidth: 200, pageHeight: 400 };
@@ -58,9 +59,22 @@ describe("pointerSelectionToPageRect", () => {
   });
 });
 
-describe("shouldShowWordSelectionOverlay", () => {
-  it("offers the hit-test only on the original panel (ADR-061 §3)", () => {
-    expect(shouldShowWordSelectionOverlay("original")).toBe(true);
-    expect(shouldShowWordSelectionOverlay("anonymized")).toBe(false);
+describe("isOriginalPanel", () => {
+  it("gates the hit-test and DocumentSearchBox to the original panel only (ADR-061 §3/§8)", () => {
+    expect(isOriginalPanel("original")).toBe(true);
+    expect(isOriginalPanel("anonymized")).toBe(false);
+  });
+});
+
+describe("pageRectToScreenRect", () => {
+  it("is the inverse of pointerSelectionToPageRect's scaling (same 2x fixture)", () => {
+    const displaySize = { displayWidth: 400, displayHeight: 800 };
+    const pageSize = { pageWidth: 200, pageHeight: 400 };
+    const screenRect = pageRectToScreenRect(
+      { x: 5, y: 10, width: 20, height: 20 },
+      displaySize,
+      pageSize,
+    );
+    expect(screenRect).toEqual({ left: 10, top: 20, width: 40, height: 40 });
   });
 });

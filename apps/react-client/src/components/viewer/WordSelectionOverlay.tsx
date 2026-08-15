@@ -11,9 +11,13 @@
  * `addManualEntity`. Sin capa de texto de pdf.js (ADR-061 Contexto §3): el
  * hit-test no distingue el origen de la palabra, así que funciona igual en
  * PDFs digitales y escaneados.
+ *
+ * También pinta el resaltado del match activo de `DocumentSearchBox`
+ * (`ui/Components.md` §5.4c: "reusa el mismo overlay de §5.4b") vía
+ * `activeMatchBbox` — mismo mecanismo, sentido inverso (`pageRectToScreenRect`).
  */
 
-import { EntityType, wordsInRect, type Word } from "@anonly/anonymization-core";
+import { EntityType, wordsInRect, type BoundingBox, type Word } from "@anonly/anonymization-core";
 import { useEffect, useState, type PointerEvent } from "react";
 
 import { actions } from "../../core-adapter/actions.js";
@@ -21,13 +25,15 @@ import { Button } from "../common/Button.js";
 import { Select } from "../common/Select.js";
 import { ENTITY_TYPE_OPTIONS } from "../entities/entityTypeLabels.js";
 
-import { pointerSelectionToPageRect } from "./wordSelectionRect.js";
+import { pageRectToScreenRect, pointerSelectionToPageRect } from "./wordSelectionRect.js";
 
 export interface WordSelectionOverlayProps {
   readonly pageIndex: number;
   /** Tamaño en pantalla (CSS px) del `PageCanvas` que esta capa cubre. */
   readonly displayWidth: number;
   readonly displayHeight: number;
+  /** Bbox de página del match activo de la lupa, si hay uno en esta página. */
+  readonly activeMatchBbox?: BoundingBox;
 }
 
 interface Point {
@@ -44,6 +50,7 @@ export function WordSelectionOverlay({
   pageIndex,
   displayWidth,
   displayHeight,
+  activeMatchBbox,
 }: WordSelectionOverlayProps) {
   const [dragStart, setDragStart] = useState<Point | null>(null);
   const [dragCurrent, setDragCurrent] = useState<Point | null>(null);
@@ -130,6 +137,22 @@ export function WordSelectionOverlay({
         }
       : null;
 
+  // Match activo de DocumentSearchBox (§5.4c), si hay uno en esta página.
+  const pageSizeForHighlight = activeMatchBbox ? actions.getPageSize(pageIndex) : null;
+  const highlightRect =
+    activeMatchBbox && pageSizeForHighlight
+      ? // Spread en un literal fresco: CSSProperties exige índice de firma
+        // para variables de "`--radix-...`" y un valor de un tipo con nombre
+        // (no un literal) no lo satisface, aunque estructuralmente calce.
+        {
+          ...pageRectToScreenRect(
+            activeMatchBbox,
+            { displayWidth, displayHeight },
+            { pageWidth: pageSizeForHighlight.width, pageHeight: pageSizeForHighlight.height },
+          ),
+        }
+      : null;
+
   return (
     <div
       className="absolute inset-0 cursor-crosshair select-none"
@@ -137,6 +160,12 @@ export function WordSelectionOverlay({
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
     >
+      {highlightRect ? (
+        <div
+          className="pointer-events-none absolute border-2 border-amber-500 bg-amber-400/30"
+          style={highlightRect}
+        />
+      ) : null}
       {selectionRect ? (
         <div
           className="pointer-events-none absolute border border-accent bg-accent/20"

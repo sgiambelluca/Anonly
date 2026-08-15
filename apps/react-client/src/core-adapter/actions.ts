@@ -24,6 +24,7 @@ import {
   type ReanalyzeConfigPatch,
   type ReplacementMode,
   type Rule,
+  type TextMatch,
   type Word,
 } from "@anonly/anonymization-core";
 
@@ -194,6 +195,14 @@ export const actions = {
     const documentId = activeDocumentId();
     if (documentId === null) return null;
     return getCore().orchestrator.getPageSize(documentId, pageIndex);
+  },
+
+  // ADR-061 §8: misma búsqueda literal, de solo lectura, para el buscador
+  // del visor (DocumentSearchBox). Sincrónica igual que el orchestrator.
+  findText(query: string): ReadonlyArray<TextMatch> {
+    const documentId = activeDocumentId();
+    if (documentId === null) return [];
+    return getCore().orchestrator.findText(documentId, query);
   },
 
   // PDF_PASSWORD_REQUIRED → PasswordDialog → esta acción. La UI NUNCA llama a

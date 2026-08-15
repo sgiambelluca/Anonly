@@ -65,6 +65,16 @@ export interface PageVirtualizerProps {
   readonly onCurrentPageIndexChange: (pageIndex: number) => void;
   /** Sincronización opcional de scroll a nivel de píxel entre los dos paneles (ADR-054 §3), creada una sola vez por `SideBySideViewer` y compartida entre sus dos `PdfViewer`. */
   readonly scrollSync: ScrollSyncController;
+  /**
+   * Salto explícito a una página, pedido por el usuario (`DocumentSearchBox`,
+   * `ui/Components.md` §5.4c — "navegación anterior/siguiente con scroll a
+   * la página"). Distinto del "seguidor" que ADR-054 §6 retiró: ahí un panel
+   * copiaba el scroll del otro automáticamente; acá es el propio panel el
+   * que salta por pedido directo del usuario, no por otro panel. `nonce`
+   * fuerza el scroll aunque `pageIndex` no haya cambiado (dos coincidencias
+   * seguidas en la misma página).
+   */
+  readonly scrollRequest?: { readonly pageIndex: number; readonly nonce: number } | null;
 }
 
 const PAGE_INDEX_ATTR = "pageIndex";
@@ -78,6 +88,7 @@ export function PageVirtualizer({
   onVisibleRangeChange,
   onCurrentPageIndexChange,
   scrollSync,
+  scrollRequest,
 }: PageVirtualizerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [observer, setObserver] = useState<IntersectionObserver | null>(null);
@@ -147,6 +158,23 @@ export function PageVirtualizer({
     resizeObserver.observe(container);
     return () => resizeObserver.disconnect();
   }, [scrollSync, kind]);
+
+  // Salto explícito a una página (DocumentSearchBox, ui/Components.md §5.4c).
+  // Sin scroll-behavior: smooth acá tampoco (mismo motivo que el resto del
+  // componente, ADR-054 §7): no hace falta animarlo y rompería la exactitud
+  // del valor que `scrollSync` necesita si la sincronización está prendida.
+  useEffect(() => {
+    if (!scrollRequest) return;
+    const container = containerRef.current;
+    if (!container) return;
+    container.scrollTop = scrollRequest.pageIndex * pageSize;
+    // Deps acotadas a propósito a `nonce`: no a `pageSize` (evitar re-saltar
+    // en cada cambio de zoom) ni a `scrollRequest.pageIndex` solo (el `nonce`
+    // es lo que fuerza el salto cuando dos matches caen en la misma página);
+    // `pageSize` se lee fresco igual porque el cuerpo del efecto se recrea en
+    // cada render. Mismo criterio que el resto del componente: no hay
+    // `eslint-plugin-react-hooks` en este repo que exija la lista exhaustiva.
+  }, [scrollRequest?.nonce]);
 
   useEffect(() => {
     const container = containerRef.current;

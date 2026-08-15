@@ -45,13 +45,15 @@
  * directamente, solo lo reenvía junto con `kind`.
  */
 
-import { useEffect, useMemo, useRef } from "react";
+import type { TextMatch } from "@anonly/anonymization-core";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { actions } from "../../core-adapter/actions.js";
 import { useDocumentStore } from "../../store/document.store.js";
 import { usePipelineStore } from "../../store/pipeline.store.js";
 import { useViewerStore, type ViewerKind } from "../../store/viewer.store.js";
 
+import { DocumentSearchBox } from "./DocumentSearchBox.js";
 import { PageCanvas } from "./PageCanvas.js";
 import { computePageHeight, computePageWidth } from "./pageLayout.js";
 import { PageVirtualizer } from "./PageVirtualizer.js";
@@ -59,7 +61,7 @@ import { shouldTriggerReadyRender } from "./readyRenderTrigger.js";
 import type { ScrollSyncController } from "./scrollSyncController.js";
 import { computeMountRange, rangeToPageIndices, type VisibleRange } from "./visibleRange.js";
 import { WordSelectionOverlay } from "./WordSelectionOverlay.js";
-import { shouldShowWordSelectionOverlay } from "./wordSelectionRect.js";
+import { isOriginalPanel } from "./wordSelectionRect.js";
 import { computeZoomRenderScale } from "./zoomRenderScale.js";
 import { createZoomRenderScheduler } from "./zoomRenderScheduler.js";
 
@@ -167,12 +169,32 @@ export function PdfViewer({ kind, scrollSync }: PdfViewerProps) {
     useViewerStore.getState().setPage(kind, pageIndex);
   }
 
+  // DocumentSearchBox (ui/Components.md §5.4c, ADR-061 §8): estado local del
+  // match activo de la lupa. Solo tiene sentido en `original` — el buscador
+  // no se monta en `anonymized` — pero vive acá (no en `viewer.store`) porque
+  // es efímero y de un solo panel, sin nada que otro componente necesite leer.
+  const [activeMatch, setActiveMatch] = useState<TextMatch | null>(null);
+  const scrollNonceRef = useRef(0);
+
+  function handleActiveMatchChange(match: TextMatch | null): void {
+    setActiveMatch(match);
+    if (match) scrollNonceRef.current += 1;
+  }
+
+  const scrollRequest =
+    activeMatch === null
+      ? null
+      : { pageIndex: activeMatch.pageIndex, nonce: scrollNonceRef.current };
+
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-      <div className="flex h-9 shrink-0 items-center border-b border-border bg-bg-secondary px-3">
+      <div className="flex h-9 shrink-0 items-center justify-between gap-2 border-b border-border bg-bg-secondary px-3">
         <h2 className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
           {KIND_LABEL[kind]}
         </h2>
+        {isOriginalPanel(kind) ? (
+          <DocumentSearchBox onActiveMatchChange={handleActiveMatchChange} />
+        ) : null}
       </div>
       <div className="flex-1 overflow-hidden" aria-label={KIND_LABEL[kind]}>
         <PageVirtualizer
@@ -183,12 +205,15 @@ export function PdfViewer({ kind, scrollSync }: PdfViewerProps) {
           onVisibleRangeChange={handleVisibleRangeChange}
           onCurrentPageIndexChange={handleCurrentPageIndexChange}
           scrollSync={scrollSync}
+          scrollRequest={scrollRequest}
           renderItem={(pageIndex) => {
             // `exactOptionalPropertyTypes` (Code_Standards.md §2) distingue
             // "prop ausente" de "prop presente con valor undefined": no se
             // puede pasar `blobUrl={maybeUndefined}` directo a un `blobUrl?:
             // string`. `previewByPage.get(pageIndex)` puede dar `string | undefined`.
             const blobUrl = previewByPage.get(pageIndex);
+            const activeMatchBbox =
+              activeMatch && activeMatch.pageIndex === pageIndex ? activeMatch.bbox : undefined;
             return (
               <div className="relative h-full w-full">
                 <PageCanvas
@@ -198,11 +223,12 @@ export function PdfViewer({ kind, scrollSync }: PdfViewerProps) {
                   width={pageWidth}
                   height={pageHeight}
                 />
-                {shouldShowWordSelectionOverlay(kind) ? (
+                {isOriginalPanel(kind) ? (
                   <WordSelectionOverlay
                     pageIndex={pageIndex}
                     displayWidth={pageWidth}
                     displayHeight={pageHeight}
+                    {...(activeMatchBbox !== undefined ? { activeMatchBbox } : {})}
                   />
                 ) : null}
               </div>
