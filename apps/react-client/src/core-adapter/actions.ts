@@ -24,6 +24,7 @@ import {
   type ReanalyzeConfigPatch,
   type ReplacementMode,
   type Rule,
+  type Word,
 } from "@anonly/anonymization-core";
 
 import { useDocumentStore } from "../store/document.store.js";
@@ -177,6 +178,22 @@ export const actions = {
     const documentId = activeDocumentId();
     if (documentId === null) return null;
     return getCore().orchestrator.addManualEntity(documentId, request);
+  },
+
+  // ADR-061 §4: habilitan el hit-test de selección sobre el canvas del
+  // `original` (WordSelectionOverlay) — sincrónicas, igual que el
+  // orchestrator. Sin documento activo, `getPageWords` no tiene nada que
+  // señalar (`[]`) y `getPageSize` no tiene con qué escalar (`null`).
+  getPageWords(pageIndex: number): ReadonlyArray<Word> {
+    const documentId = activeDocumentId();
+    if (documentId === null) return [];
+    return getCore().orchestrator.getPageWords(documentId, pageIndex);
+  },
+
+  getPageSize(pageIndex: number): { readonly width: number; readonly height: number } | null {
+    const documentId = activeDocumentId();
+    if (documentId === null) return null;
+    return getCore().orchestrator.getPageSize(documentId, pageIndex);
   },
 
   // PDF_PASSWORD_REQUIRED → PasswordDialog → esta acción. La UI NUNCA llama a

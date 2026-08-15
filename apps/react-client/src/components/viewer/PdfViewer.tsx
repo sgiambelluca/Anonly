@@ -58,6 +58,8 @@ import { PageVirtualizer } from "./PageVirtualizer.js";
 import { shouldTriggerReadyRender } from "./readyRenderTrigger.js";
 import type { ScrollSyncController } from "./scrollSyncController.js";
 import { computeMountRange, rangeToPageIndices, type VisibleRange } from "./visibleRange.js";
+import { WordSelectionOverlay } from "./WordSelectionOverlay.js";
+import { shouldShowWordSelectionOverlay } from "./wordSelectionRect.js";
 import { computeZoomRenderScale } from "./zoomRenderScale.js";
 import { createZoomRenderScheduler } from "./zoomRenderScheduler.js";
 
@@ -188,13 +190,22 @@ export function PdfViewer({ kind, scrollSync }: PdfViewerProps) {
             // string`. `previewByPage.get(pageIndex)` puede dar `string | undefined`.
             const blobUrl = previewByPage.get(pageIndex);
             return (
-              <PageCanvas
-                pageIndex={pageIndex}
-                kind={kind}
-                {...(blobUrl !== undefined ? { blobUrl } : {})}
-                width={pageWidth}
-                height={pageHeight}
-              />
+              <div className="relative h-full w-full">
+                <PageCanvas
+                  pageIndex={pageIndex}
+                  kind={kind}
+                  {...(blobUrl !== undefined ? { blobUrl } : {})}
+                  width={pageWidth}
+                  height={pageHeight}
+                />
+                {shouldShowWordSelectionOverlay(kind) ? (
+                  <WordSelectionOverlay
+                    pageIndex={pageIndex}
+                    displayWidth={pageWidth}
+                    displayHeight={pageHeight}
+                  />
+                ) : null}
+              </div>
             );
           }}
         />
