@@ -2334,6 +2334,62 @@ describe("selectLineWords — selección host-side de las palabras de línea (AD
     expect(selectLineWords([neighbor], [replacement])).toBeUndefined();
   });
 
+  // ─── ADR-074 §8 (Hito 10.9, PR 10): por fragmento, no por la envolvente ───
+
+  it("selectLineWords with single-rect replacements returns exactly what it returned before", () => {
+    const bbox = { x: 50, y: 100, width: 20, height: 12 };
+    const neighbor = createWord({ bbox: { x: 70, y: 100, width: 30, height: 12 } });
+    const withoutFragments = createReplacement({ bbox, replacementValue: "[PRS-01]" });
+    const withRedundantFragment = createReplacement({
+      bbox,
+      replacementValue: "[PRS-01]",
+      fragments: [bbox],
+    });
+
+    expect(selectLineWords([neighbor], [withRedundantFragment])).toEqual(
+      selectLineWords([neighbor], [withoutFragments]),
+    );
+  });
+
+  it("selectLineWords picks the neighbours of the fragment's line, not the envelope's", () => {
+    // Entidad partida en dos líneas: fragmento angosto al final del primer
+    // renglón, fragmento más ancho al principio del segundo (mismo patrón
+    // que el caso real de ADR-074, Contexto §1). La envolvente que las
+    // contiene a las dos (514 pt) es tan ancha que el token de 22
+    // caracteres jamás la desborda — es exactamente el bug que ADR-074 §8
+    // describe: "el ancho de 557 pt hace que nada parezca desbordar".
+    const fragmentLine1 = { x: 500, y: 100, width: 24, height: 12 };
+    const fragmentLine2 = { x: 10, y: 114, width: 90, height: 12 };
+    const envelope = { x: 10, y: 100, width: 514, height: 26 };
+    const replacement = createReplacement({
+      bbox: envelope,
+      replacementValue: "[PERSONA MUY LARGA 01]", // 22 caracteres
+      fragments: [fragmentLine1, fragmentLine2],
+    });
+
+    const neighborLine1 = createWord({
+      text: "vecina1",
+      bbox: { x: 530, y: 100, width: 20, height: 12 }, // a la derecha de fragmentLine1
+    });
+    const neighborLine2 = createWord({
+      text: "vecina2",
+      bbox: { x: 105, y: 114, width: 20, height: 12 }, // a la derecha de fragmentLine2
+    });
+    // En el hueco vertical ENTRE las dos líneas (no comparte banda con
+    // ningún fragmento) pero SÍ con la envolvente, que cubre las dos bandas
+    // de punta a punta. Solo aparecería en el resultado si el criterio
+    // siguiera comparando contra `replacement.bbox` en vez de contra cada
+    // fragmento — la diferencia observable entre los dos caminos.
+    const gapDistractor = createWord({
+      text: "hueco",
+      bbox: { x: 600, y: 113, width: 20, height: 0.5 },
+    });
+
+    const result = selectLineWords([gapDistractor, neighborLine1, neighborLine2], [replacement]);
+
+    expect(result).toEqual([neighborLine1, neighborLine2]);
+  });
+
   // ─── findText (ADR-061 §8 errata, §10 bloque "PR 3d") ───
 
   it("findText returns the same matches as regex.searchText over the retained document, including OCR pages", async () => {
