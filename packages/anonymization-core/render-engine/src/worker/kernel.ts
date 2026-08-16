@@ -809,6 +809,46 @@ const CANVAS_ROTATION_RADIANS: Readonly<Record<90 | 270, number>> = {
 };
 
 /**
+ * ADR-074 §4/§5 — expande un `Replacement` con `fragments` en N **unidades de
+ * pintado**, cada una un `Replacement` de un solo rectángulo (`bbox` =
+ * fragmento, sin `fragments`): el bucle de `paintReplacements` no se entera
+ * de que existe la fragmentación, recibe exactamente lo que siempre asumió.
+ *
+ * Una unidad **primaria** —el fragmento más ancho, empate → el primero en
+ * orden de lectura (ADR-074 §5; los fragmentos ya vienen ordenados así,
+ * `mapSpanToWords`)— conserva `replacementValue` y pasa por el camino
+ * completo de siempre. Las N-1 restantes son de **solo tapado**:
+ * `replacementValue: ""`, la señal que `paintReplacements` usa para tapar el
+ * fondo y cortar ahí mismo — sin `fillText`, sin fitting, sin veredicto de
+ * degradación (no puede degradar lo que no dibuja). En `redact`, el bucle ya
+ * ignora `replacementValue` (fill negro sin texto, primera rama de
+ * `paintReplacements`), así que las N unidades se comportan igual sin
+ * ninguna distinción primaria/secundaria.
+ *
+ * Sin `fragments` (el caso normal, ~99% de las ocurrencias): una sola unidad,
+ * el `Replacement` original sin tocar — no-regresión bit a bit.
+ */
+function expandReplacementToUnits(replacement: Replacement): ReadonlyArray<Replacement> {
+  const { fragments, ...withoutFragments } = replacement;
+  if (fragments === undefined) return [replacement];
+
+  let widestIndex = 0;
+  for (let i = 1; i < fragments.length; i++) {
+    const current = fragments[i];
+    const widest = fragments[widestIndex];
+    if (current !== undefined && widest !== undefined && current.width > widest.width) {
+      widestIndex = i;
+    }
+  }
+
+  return fragments.map((fragment, i) => ({
+    ...withoutFragments,
+    bbox: fragment,
+    ...(i === widestIndex ? {} : { replacementValue: "" }),
+  }));
+}
+
+/**
  * Pinta los reemplazos y devuelve las anotaciones `Degraded` (ADR-058 §7) que
  * detectó al hacerlo: una por cada reemplazo cuyo shrink-to-fit (§1) lo dejó
  * por debajo de `DEGRADED_FONT_RATIO`. Sintetizadas acá mismo (no en
@@ -838,8 +878,13 @@ function paintReplacements(
     return context.measureText(text).width;
   };
   const degraded: Annotation[] = [];
+  // ADR-074 §4: unidades de pintado, no `Replacement[]` — cada fragmento de
+  // cada reemplazo es un rectángulo independiente para el resto del bucle,
+  // INCLUIDO `otherReplacements` más abajo (caso 33: los fragmentos vecinos,
+  // propios o ajenos, se ven como reemplazos independientes).
+  const units = replacements.flatMap(expandReplacementToUnits);
 
-  for (const replacement of replacements) {
+  for (const replacement of units) {
     if (abortSignal.aborted) throw new CancelledError(documentId);
     const bbox = scaleBbox(replacement.bbox, scale);
 
@@ -881,9 +926,11 @@ function paintReplacements(
       measureWidth(naturalFont, replacement.replacementValue) <= availableLengthPx;
 
     if (!fitsNaturally && sidewaysRotation === undefined) {
-      // Guard defensivo (ver doc de `planLineRepaint`): el resto de los
-      // reemplazos de esta página nunca se pisan por el repintado de este.
-      const otherReplacements = replacements.filter((other) => other !== replacement);
+      // Guard defensivo (ver doc de `planLineRepaint`): el resto de las
+      // unidades de esta página nunca se pisan por el repintado de esta —
+      // incluidos los fragmentos hermanos de este mismo Replacement (ADR-074
+      // §4, caso 33), que ya vienen aparte en `units`.
+      const otherReplacements = units.filter((other) => other !== replacement);
       const repainted = tryRepaintLine(
         context,
         measureWidth,
@@ -906,6 +953,14 @@ function paintReplacements(
     // de antes de ADR-058 §2-§6 (no-regresión bit a bit).
     context.fillStyle = REPLACEMENT_BG_COLOR;
     context.fillRect(bbox.x, bbox.y, bbox.width, bbox.height);
+
+    // ADR-074 §4: unidad de "solo tapado" — un fragmento que no es el
+    // primario (`expandReplacementToUnits` le vacía `replacementValue`). El
+    // fondo ya se tapó arriba; sin texto que dibujar, tampoco hay fitting ni
+    // veredicto de degradación que evaluar (no puede degradar lo que no
+    // dibuja), así que corta acá y nunca llega a `fillText`.
+    if (replacement.replacementValue === "") continue;
+
     context.fillStyle = REPLACEMENT_TEXT_COLOR;
     context.textAlign = "center";
     context.textBaseline = "middle";

@@ -1452,6 +1452,255 @@ describe("RenderEngine — unit tests", () => {
     });
   });
 
+  // ─── ADR-074 §4-§6 (Hito 10.9, PR 9): unidades de pintado por fragmento ───
+  describe("fragments — unidades de pintado (ADR-074 §4-§6)", () => {
+    // Caso 32 — el test que define el ADR de este lado: el texto va en el
+    // fragmento MÁS ANCHO, y los dos se tapan.
+    it("a replacement with two fragments paints two boxes and one fillText", async () => {
+      const docId = "doc-fragments-two-boxes";
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+      );
+      await engine.init(ctx);
+      await engine.loadDocument(docId, createValidBuffer());
+
+      await engine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+          replacements: [
+            makeReplacement({
+              mode: ReplacementMode.Placeholder,
+              replacementValue: "[PERSONA 01]",
+              bbox: { x: 10, y: 20, width: 100, height: 34 },
+              fragments: [
+                { x: 10, y: 20, width: 100, height: 14 },
+                { x: 10, y: 40, width: 50, height: 14 },
+              ],
+            }),
+          ],
+        }),
+        ctx,
+      );
+
+      const [canvas] = getCreatedCanvases();
+      const fillRectCalls = canvas!.calls.filter((c) => c.op === "fillRect");
+      expect(fillRectCalls).toHaveLength(2);
+      expect(fillRectCalls[0]!.args).toEqual([10, 20, 100, 14]);
+      expect(fillRectCalls[1]!.args).toEqual([10, 40, 50, 14]);
+
+      // Un solo fillText, con el token — en el fragmento más ancho (el
+      // primero, 100 > 50), nunca en la envolvente ni en el angosto.
+      const fillTextCalls = canvas!.calls.filter((c) => c.op === "fillText");
+      expect(fillTextCalls).toHaveLength(1);
+      expect(fillTextCalls[0]!.args[0]).toBe("[PERSONA 01]");
+      expect(fillTextCalls[0]!.args[1]).toBe(10 + 100 / 2);
+      expect(fillTextCalls[0]!.args[2]).toBe(20 + 14 / 2);
+    });
+
+    // No-regresión bit a bit: el caso normal (sin fragments) no pasa por la
+    // expansión — un Replacement, una unidad, mismos calls que antes del ADR.
+    it("a replacement without fragments produces the exact same canvas calls as before", async () => {
+      const docId = "doc-fragments-no-regression";
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+      );
+      await engine.init(ctx);
+      await engine.loadDocument(docId, createValidBuffer());
+
+      await engine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+          replacements: [
+            makeReplacement({
+              mode: ReplacementMode.Placeholder,
+              replacementValue: "[DNI 01]",
+              bbox: { x: 10, y: 20, width: 100, height: 14 }, // fragments ausente
+            }),
+          ],
+        }),
+        ctx,
+      );
+
+      const [canvas] = getCreatedCanvases();
+      const fillRectCalls = canvas!.calls.filter((c) => c.op === "fillRect");
+      expect(fillRectCalls).toHaveLength(1);
+      expect(fillRectCalls[0]!.args).toEqual([10, 20, 100, 14]);
+
+      const fillTextCalls = canvas!.calls.filter((c) => c.op === "fillText");
+      expect(fillTextCalls).toHaveLength(1);
+      expect(fillTextCalls[0]!.args).toEqual(["[DNI 01]", 10 + 100 / 2, 20 + 14 / 2, 100]);
+    });
+
+    it("redact with N fragments paints N black boxes and no text", async () => {
+      const docId = "doc-fragments-redact";
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+      );
+      await engine.init(ctx);
+      await engine.loadDocument(docId, createValidBuffer());
+
+      await engine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+          replacements: [
+            makeReplacement({
+              mode: ReplacementMode.Redact,
+              replacementValue: "no importa en redact",
+              bbox: { x: 10, y: 20, width: 100, height: 60 },
+              fragments: [
+                { x: 10, y: 20, width: 100, height: 14 },
+                { x: 10, y: 40, width: 50, height: 14 },
+                { x: 10, y: 60, width: 30, height: 14 },
+              ],
+            }),
+          ],
+        }),
+        ctx,
+      );
+
+      const [canvas] = getCreatedCanvases();
+      const fillRectCalls = canvas!.calls.filter((c) => c.op === "fillRect");
+      expect(fillRectCalls).toHaveLength(3);
+      for (const call of fillRectCalls) {
+        expect(call.fillStyle).toBe("#000000");
+      }
+      expect(canvas!.calls.some((c) => c.op === "fillText")).toBe(false);
+    });
+
+    // Caso 33 — el veredicto de degradación (ADR-058 §7) se computa contra el
+    // fragmento donde se dibuja el token, no contra la envolvente.
+    it("the degradation verdict is computed against the chosen fragment, not the envelope", async () => {
+      const docId = "doc-degraded-fragment";
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+      );
+      await engine.init(ctx);
+      await engine.loadDocument(docId, createValidBuffer());
+
+      await engine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+          replacements: [
+            makeReplacement({
+              groupId: "g-multiline",
+              occurrenceId: "o-multiline",
+              mode: ReplacementMode.Mask,
+              replacementValue: "AAAAA",
+              // Envolvente ancha (como el caso real de 557 pt): a tamaño
+              // natural (28px sobre height=40) el token entra sobrado
+              // (84 ≤ 300) — si el veredicto midiera contra ESTO, no
+              // degradaría nunca.
+              bbox: { x: 100, y: 0, width: 300, height: 40 },
+              fragments: [
+                // El fragmento más ancho de los dos (primario, lleva el
+                // token): mismos números que el caso "severo" ya probado en
+                // "Degraded annotation emitted only below DEGRADED_FONT_RATIO"
+                // arriba (31×40 → finalSizePx=10, naturalSizePx=28, razón
+                // ≈ 0.357 < 0.6).
+                { x: 100, y: 0, width: 31, height: 40 },
+                { x: 150, y: 60, width: 10, height: 40 },
+              ],
+            }),
+          ],
+        }),
+        ctx,
+      );
+
+      const [canvas] = getCreatedCanvases();
+      const degradedStrokes = canvas!.calls.filter(
+        (c) => c.op === "strokeRect" && c.strokeStyle === "#f59e0b",
+      );
+      expect(degradedStrokes).toHaveLength(1);
+    });
+
+    // Caso 33 + caso 26: el filtro de vecinas del repintado de línea ve a los
+    // fragmentos (propios de OTRO reemplazo) como reemplazos independientes,
+    // no la envolvente de ese otro reemplazo.
+    it("line repaint sees sibling fragments as independent replacements", async () => {
+      const docId = "doc-repaint-sibling-fragment-boundary";
+      const scenario = makeLineRepaintScenario({ pageHeight: 150 });
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument({
+            pageCount: 1,
+            pageFactory: () =>
+              createMockPage({ width: scenario.pageWidth, height: scenario.pageHeight }),
+          }),
+        ),
+      );
+      await engine.init(ctx);
+      await engine.loadDocument(docId, createValidBuffer());
+
+      // replacement.bbox = {x:20,y:10,width:18,height:14} (bbox.x+width=38).
+      // "Garcia" empieza en x=42, "vive" en x=82 (ver makeLineRepaintScenario).
+      //
+      // El fragmento EN LÍNEA de `sibling` (x=40, misma banda vertical que
+      // `scenario.replacement`) cae justo antes de "Garcia": es un límite
+      // duro más estricto que cualquiera de las dos vecinas, así que NINGUNA
+      // pasa el filtro de (a) y el repintado de línea falla por completo
+      // (cae al shrink-to-fit, centrado, sin vecinas redibujadas).
+      //
+      // El otro fragmento de `sibling` está fuera de línea (x=5, y=100) y a
+      // propósito tiene un x MENOR que el fragmento en línea: si el código
+      // usara la ENVOLVENTE de `sibling` en vez de sus fragmentos como
+      // unidades independientes, esa envolvente tendría x=5 — que ni
+      // siquiera pasa el filtro de "a la derecha" (5 < 38) — y el
+      // repintado NO tendría límite alguno, exactamente el camino feliz que
+      // ya prueba "shift is uniform" arriba (3 fillText). La diferencia
+      // observable entre los dos caminos es exactamente el assert de abajo.
+      const sibling = makeReplacement({
+        groupId: "g-sibling",
+        occurrenceId: "o-sibling",
+        mode: ReplacementMode.Mask,
+        replacementValue: "X",
+        bbox: { x: 5, y: 10, width: 45, height: 104 },
+        fragments: [
+          { x: 40, y: 10, width: 1, height: 14 },
+          { x: 5, y: 100, width: 50, height: 14 },
+        ],
+      });
+
+      await engine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+          replacements: [scenario.replacement, sibling],
+          lineWords: scenario.lineWords,
+        }),
+        ctx,
+      );
+
+      const [canvas] = getCreatedCanvases();
+      const fillTextCalls = canvas!.calls.filter((c) => c.op === "fillText");
+      expect(fillTextCalls.some((c) => c.args[0] === "Garcia")).toBe(false);
+      expect(fillTextCalls.some((c) => c.args[0] === "vive")).toBe(false);
+
+      const tokenCall = fillTextCalls.find(
+        (c) => c.args[0] === scenario.replacement.replacementValue,
+      );
+      expect(tokenCall).toBeDefined();
+      // Centrado (shrink-to-fit), no anclado a bbox.x (repintado de línea):
+      // la prueba de que cayó al fallback, no de que repintó con menos vecinas.
+      expect(tokenCall!.args[1]).toBe(
+        scenario.replacement.bbox.x + scenario.replacement.bbox.width / 2,
+      );
+    });
+  });
+
   // ─── ADR-059 §5 (Hito 10.5, PR 7): página de leyenda del export ───
   describe("renderLegendPage — layout (ADR-059 §5)", () => {
     function fillTextArgs(calls: ReadonlyArray<DrawCall>): ReadonlyArray<[string, number, number]> {

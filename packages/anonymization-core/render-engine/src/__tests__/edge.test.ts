@@ -1742,4 +1742,48 @@ describe("RenderEngine — edge cases", () => {
       }
     });
   });
+
+  // Caso 33 (ADR-074 §4): las unidades de solo tapado no dibujan texto, así
+  // que no pueden degradar — sigue habiendo como mucho una `Degraded` por
+  // `occurrenceId`, sin importar cuántos fragmentos tenga el reemplazo.
+  it("at most one Degraded annotation per occurrenceId, however many fragments", async () => {
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+    );
+    await engine.init(ctx);
+    await engine.loadDocument("doc-degraded-many-fragments", createValidBuffer());
+
+    await engine.renderPage(
+      createRenderPageInput({
+        documentId: "doc-degraded-many-fragments",
+        pageIndex: 0,
+        kind: "anonymized",
+        mode: "preview",
+        replacements: [
+          makeReplacement({
+            groupId: "g-multiline",
+            occurrenceId: "o-multiline",
+            mode: ReplacementMode.Mask,
+            replacementValue: "AAAAA",
+            bbox: { x: 100, y: 0, width: 300, height: 40 },
+            fragments: [
+              // Primario (el más ancho): mismos números que el caso "severo"
+              // de unit.test.ts (31×40 → finalSizePx=10, naturalSizePx=28,
+              // razón ≈ 0.357 < 0.6, degrada).
+              { x: 100, y: 0, width: 31, height: 40 },
+              { x: 150, y: 60, width: 10, height: 40 },
+              { x: 170, y: 120, width: 5, height: 40 },
+            ],
+          }),
+        ],
+      }),
+      ctx,
+    );
+
+    const [canvas] = getCreatedCanvases();
+    const degradedStrokes = canvas!.calls.filter(
+      (c) => c.op === "strokeRect" && c.strokeStyle === "#f59e0b",
+    );
+    expect(degradedStrokes).toHaveLength(1);
+  });
 });
