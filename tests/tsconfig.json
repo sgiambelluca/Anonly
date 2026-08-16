@@ -16,6 +16,7 @@
       "@anonly/regex-engine": ["../packages/anonymization-core/regex-engine/src/index.ts"],
       "@anonly/ner-engine": ["../packages/anonymization-core/ner-engine/src/index.ts"],
       "@anonly/grouping-engine": ["../packages/anonymization-core/grouping-engine/src/index.ts"],
+      "@anonly/render-engine": ["../packages/anonymization-core/render-engine/src/index.ts"],
       "@anonly/anonymization-core": ["../packages/anonymization-core/src/index.ts"]
     }
   },
