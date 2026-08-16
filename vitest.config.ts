@@ -142,6 +142,15 @@ export default defineConfig({
         find: "@anonly/grouping-engine",
         replacement: resolve(rootDir, "packages/anonymization-core/grouping-engine/src/index.ts"),
       },
+      // tests/integration/multi-line-fragments.test.ts (Hito 10.9, ADR-074
+      // §Validación) importa RenderEngine para llegar "de la detección al
+      // canvas". RegExp anclado (no string): ver nota de cabecera —
+      // render-engine tiene el mismo subpath "./worker" (ADR-043) que
+      // export-engine y ner-engine.
+      {
+        find: /^@anonly\/render-engine$/,
+        replacement: resolve(rootDir, "packages/anonymization-core/render-engine/src/index.ts"),
+      },
     ],
   },
   test: {

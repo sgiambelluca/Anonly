@@ -173,6 +173,19 @@ export function createMockPdfDocument(pages: ReadonlyArray<Record<string, unknow
 
 // ─── OffscreenCanvas (RenderEngine.rasterizePage + OcrEngine.toTesseractImage) ───
 
+/**
+ * Un `fillRect`/`fillText` registrado (ADR-074, Hito 10.9 PR 11): el resto de
+ * los tests de integración no lee `calls`, así que grabar acá no les cambia
+ * nada — es lo mínimo que necesita el test de punta a punta para verificar
+ * "se pintan dos rectángulos" sin duplicar el stub más rico de
+ * `render-engine/src/__tests__/fixtures/test-helpers.ts` (que este archivo no
+ * puede importar, ver la nota de arriba).
+ */
+export interface RecordedDrawCall {
+  readonly op: "fillRect" | "fillText";
+  readonly args: ReadonlyArray<unknown>;
+}
+
 class StubCanvasContext2D {
   fillStyle = "#000000";
   strokeStyle = "#000000";
@@ -180,31 +193,55 @@ class StubCanvasContext2D {
   font = "10px sans-serif";
   textAlign = "start";
   textBaseline = "alphabetic";
-  fillRect(): void {}
+  readonly calls: RecordedDrawCall[] = [];
+  fillRect(x: number, y: number, w: number, h: number): void {
+    this.calls.push({ op: "fillRect", args: [x, y, w, h] });
+  }
   strokeRect(): void {}
-  fillText(): void {}
+  fillText(text: string, x: number, y: number, maxWidth?: number): void {
+    this.calls.push({ op: "fillText", args: maxWidth === undefined ? [text, x, y] : [text, x, y, maxWidth] });
+  }
+  // `paintReplacements` (render-engine) llama `measureText` para el
+  // shrink-to-fit (ADR-058 §1) antes de cada `fillText`. Fórmula arbitraria y
+  // determinista, mismo criterio que `measureStubTextWidth` de
+  // `render-engine/src/__tests__/fixtures/test-helpers.ts`: alcanza con que
+  // crezca con el tamaño de fuente y el largo del texto.
+  measureText(text: string): { readonly width: number } {
+    const sizeMatch = /^([\d.]+)px/.exec(this.font);
+    const size = sizeMatch ? Number(sizeMatch[1]) : 0;
+    return { width: text.length * size * 0.6 };
+  }
   drawImage(): void {}
   putImageData(): void {}
   getImageData(x: number, y: number, w: number, h: number): ImageData {
     return { data: new Uint8ClampedArray(Math.max(w, 0) * Math.max(h, 0) * 4), width: w, height: h, colorSpace: "srgb" };
-  }
-  convertToBlob(): never {
-    throw new Error("no usado en estos tests de integración");
   }
 }
 
 class StubOffscreenCanvas {
   width: number;
   height: number;
-  private readonly context = new StubCanvasContext2D();
+  readonly context = new StubCanvasContext2D();
   constructor(width: number, height: number) {
     this.width = width;
     this.height = height;
+    createdCanvases.push(this);
   }
   getContext(id: string): StubCanvasContext2D | null {
     return id === "2d" ? this.context : null;
   }
+  // ADR-034 §3: `kernelRenderPage` codifica siempre, en los dos modos
+  // (`preview` y `full`) — ver el comentario de `worker/kernel.ts` junto a
+  // `encodeImageData`. `multi-line-fragments.test.ts` (ADR-074, Hito 10.9 PR
+  // 11) es el primer test de integración que de verdad llama `renderPage`,
+  // así que necesita un blob real y no solo el `throw` de antes.
+  convertToBlob(options?: { readonly type?: string }): Promise<Blob> {
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+    return Promise.resolve(new Blob([bytes], { type: options?.type ?? "image/png" }));
+  }
 }
+
+let createdCanvases: StubOffscreenCanvas[] = [];
 
 export function installOffscreenCanvasStub(): void {
   if (typeof globalThis.OffscreenCanvas !== "undefined") return;
@@ -213,6 +250,15 @@ export function installOffscreenCanvasStub(): void {
     writable: true,
     configurable: true,
   });
+}
+
+/** Los `calls` grabados de cada `OffscreenCanvas` creado, en orden de creación. */
+export function getCreatedCanvasCalls(): ReadonlyArray<ReadonlyArray<RecordedDrawCall>> {
+  return createdCanvases.map((c) => c.context.calls);
+}
+
+export function resetCreatedCanvases(): void {
+  createdCanvases = [];
 }
 
 // ─── tesseract.js (OcrEngine) ───

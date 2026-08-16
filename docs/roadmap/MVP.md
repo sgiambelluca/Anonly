@@ -459,16 +459,16 @@ No sale de `Cambios para hacer.txt` ni de un hito anterior: son los puntos **1, 
 | # | PR | Módulo | Depende de | Estado |
 |---|---|---|---|---|
 | 1 | ADR-073 + `Grouping_Engine.md` (docs) | — | — | **hecho** |
-| 2 | `FUZZY_MATCHING_TYPES` y la guarda en `findMatchingGroup` | `grouping-engine` | 1 | |
+| 2 | `FUZZY_MATCHING_TYPES` y la guarda en `findMatchingGroup` | `grouping-engine` | 1 | **hecho** |
 | 3 | ADR-074 + `03_Data_Model.md`, `Contracts.md`, `Regex_Engine.md`, `NER_Engine.md`, `Grouping_Engine.md`, `Render_Engine.md`, `Export_Engine.md`, `Orchestrator.md` (docs) | — | — | **hecho** |
-| 4 | `fragments` en `Occurrence`, `OccurrenceRef` y `Replacement` | `shared` | 3 | |
-| 5 | `mapSpanToWords` fragmenta por banda vertical | `regex-engine` | 4 | |
-| 6 | `mapSpanToWords` fragmenta por banda vertical | `ner-engine` | 4 | |
-| 7 | `toOccurrenceRef` propaga; la escalera de ADR-057 mide por fragmento | `grouping-engine` | 4, 2 | |
-| 8 | `buildPageReplacements` propaga | `export-engine` | 4 | |
-| 9 | Unidades de pintado, token en el fragmento más ancho, degradación por fragmento | `render-engine` | 4 | |
-| 10 | `selectLineWords` por fragmento | `packages/anonymization-core/src` | 4 | |
-| 11 | Test de integración de punta a punta de la entidad multi-línea | `tests/integration` | 5-10 | |
+| 4 | `fragments` en `Occurrence`, `OccurrenceRef` y `Replacement` | `shared` | 3 | **hecho** |
+| 5 | `mapSpanToWords` fragmenta por banda vertical | `regex-engine` | 4 | **hecho** |
+| 6 | `mapSpanToWords` fragmenta por banda vertical | `ner-engine` | 4 | **hecho** |
+| 7 | `toOccurrenceRef` propaga; la escalera de ADR-057 mide por fragmento | `grouping-engine` | 4, 2 | **hecho** |
+| 8 | `buildPageReplacements` propaga | `export-engine` | 4 | **hecho** |
+| 9 | Unidades de pintado, token en el fragmento más ancho, degradación por fragmento | `render-engine` | 4 | **hecho** |
+| 10 | `selectLineWords` por fragmento | `packages/anonymization-core/src` | 4 | **hecho** |
+| 11 | Test de integración de punta a punta de la entidad multi-línea | `tests/integration` | 5-10 | **hecho** |
 | 12 | ADR-075 + `Regex_Engine.md` (docs) | — | — | **hecho** |
 | 13 | `date-textual-ar` y la guarda de corrida | `regex-engine` | 12, 5 | |
 | 14 | ADR-076 + `Grouping_Engine.md`, `UX_Guidelines.md`, enmienda de ADR-057 §7 (docs) | — | — | **hecho** |
