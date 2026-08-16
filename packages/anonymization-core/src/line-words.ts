@@ -36,12 +36,17 @@ import {
   estimateTokenWidth,
   ReplacementMode,
   sharesVerticalBand,
+  type BoundingBox,
   type Replacement,
   type Word,
 } from "@anonly/shared";
 
 /**
- * `true` si `replacement` podría no entrar en su propio bbox.
+ * `true` si `replacement` podría no entrar en `fragmentBbox` — un elemento de
+ * `replacement.fragments ?? [replacement.bbox]` (ADR-074 §8): sin `fragments`
+ * es el bbox de siempre; con ellos, cada rectángulo de línea se evalúa por
+ * separado, porque es contra ESO que el kernel mide (ADR-074 §5-§6), no
+ * contra la envolvente.
  *
  * `redact` nunca dibuja texto — fill opaco y `continue`, sin `fillText`
  * (`render-engine/src/worker/kernel.ts`, `paintReplacements`) — así que
@@ -50,29 +55,29 @@ import {
  * longitud de `replacementValue`.
  *
  * Para los tres modos con texto, el criterio usa `>=` (no `>`) contra
- * `bbox.width`: en el borde exacto se considera que "podría no entrar" — es
- * el margen conservador que ADR-058 §5 pide explícitamente ("ante la duda,
- * se adjuntan"; adjuntar de más solo cuesta payload).
+ * `fragmentBbox.width`: en el borde exacto se considera que "podría no
+ * entrar" — es el margen conservador que ADR-058 §5 pide explícitamente
+ * ("ante la duda, se adjuntan"; adjuntar de más solo cuesta payload).
  */
-function mightOverflow(replacement: Replacement): boolean {
+function mightOverflow(replacement: Replacement, fragmentBbox: BoundingBox): boolean {
   if (replacement.mode === ReplacementMode.Redact) return false;
   const estimatedWidth = estimateTokenWidth(
     replacement.replacementValue.length,
-    replacement.bbox.height,
+    fragmentBbox.height,
   );
-  return estimatedWidth >= replacement.bbox.width;
+  return estimatedWidth >= fragmentBbox.width;
 }
 
 /**
- * `word` está a la derecha de `replacement` cuando arranca en o después del
- * borde **derecho** del bbox del reemplazo — no del borde izquierdo.
+ * `word` está a la derecha de `fragmentBbox` cuando arranca en o después de
+ * su borde **derecho** — no del borde izquierdo.
  *
- * La razón: el bbox de un reemplazo que cubre una ocurrencia de varias
+ * La razón: el bbox de un fragmento que cubre una ocurrencia de varias
  * palabras (p. ej. "Juan Pérez") ya abarca esas palabras internas. Comparar
  * contra el borde izquierdo incluiría por error la segunda palabra de la
  * propia ocurrencia reemplazada como si fuera una "vecina siguiente" de la
  * línea. Comparar contra el borde derecho selecciona únicamente las palabras
- * que quedan **después** de lo que el reemplazo ya cubre — las mismas que
+ * que quedan **después** de lo que el fragmento ya cubre — las mismas que
  * ADR-058 §2 paso 3 describe como "cada palabra siguiente de la línea".
  *
  * `sharesVerticalBand` es la de `@anonly/shared` (ADR-061 §2, errata): este
@@ -81,9 +86,9 @@ function mightOverflow(replacement: Replacement): boolean {
  * pudieran importarla sin que dos motores se importen entre sí (P-1). El
  * criterio no cambió — de-dup puro (`Contracts.md` §6).
  */
-function isLineNeighbor(word: Word, replacement: Replacement): boolean {
-  if (!sharesVerticalBand(word.bbox, replacement.bbox)) return false;
-  return word.bbox.x >= replacement.bbox.x + replacement.bbox.width;
+function isLineNeighbor(word: Word, fragmentBbox: BoundingBox): boolean {
+  if (!sharesVerticalBand(word.bbox, fragmentBbox)) return false;
+  return word.bbox.x >= fragmentBbox.x + fragmentBbox.width;
 }
 
 /**
@@ -92,12 +97,19 @@ function isLineNeighbor(word: Word, replacement: Replacement): boolean {
  * bbox (ADR-058 §5). Pura y sin estado retenido entre llamadas: misma
  * entrada, misma salida.
  *
- * Devuelve `undefined` cuando **ningún** reemplazo de la página podría no
+ * ADR-074 §8: los dos criterios se evalúan **por fragmento**
+ * (`replacement.fragments ?? [replacement.bbox]`) — con un solo rectángulo
+ * es exactamente el mismo array de un elemento que antes, byte a byte. Con
+ * varios, cada fragmento es la línea que de verdad importa: la envolvente de
+ * una entidad partida nunca "desborda" (es demasiado ancha) y deja fuera a
+ * las vecinas reales de cada renglón (ver Contexto §8 del ADR).
+ *
+ * Devuelve `undefined` cuando **ningún** fragmento de la página podría no
  * entrar — el caso normal y más común (`RenderPagePayload.lineWords` queda
- * ausente del payload, nunca un array vacío). Si al menos un reemplazo
- * podría no entrar, siempre devuelve un array (incluso vacío si esa línea no
- * tiene ninguna palabra a la derecha): la presencia del campo está regida
- * por el riesgo de derrame, no por si hay vecinas — el kernel decide caer al
+ * ausente del payload, nunca un array vacío). Si al menos uno podría no
+ * entrar, siempre devuelve un array (incluso vacío si esa línea no tiene
+ * ninguna palabra a la derecha): la presencia del campo está regida por el
+ * riesgo de derrame, no por si hay vecinas — el kernel decide caer al
  * shrink-to-fit de ADR-058 §1 cuando no encuentra vecinas utilizables
  * (ADR-058 §6, condición 1).
  */
@@ -105,10 +117,14 @@ export function selectLineWords(
   pageWords: ReadonlyArray<Word>,
   replacements: ReadonlyArray<Replacement>,
 ): ReadonlyArray<Word> | undefined {
-  const overflowing = replacements.filter(mightOverflow);
-  if (overflowing.length === 0) return undefined;
+  const overflowingFragments = replacements.flatMap((replacement) =>
+    (replacement.fragments ?? [replacement.bbox]).filter((fragment) =>
+      mightOverflow(replacement, fragment),
+    ),
+  );
+  if (overflowingFragments.length === 0) return undefined;
 
   return pageWords.filter((word) =>
-    overflowing.some((replacement) => isLineNeighbor(word, replacement)),
+    overflowingFragments.some((fragment) => isLineNeighbor(word, fragment)),
   );
 }
