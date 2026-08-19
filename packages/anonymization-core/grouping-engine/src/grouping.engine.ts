@@ -812,14 +812,15 @@ export class GroupingEngine implements IEngine {
         replacementMode: group.replacementMode,
         replacementValue: group.replacementValue,
       };
-      // ADR-029: el mask depende de los members remanentes; se recalcula
-      // siempre (mismo criterio que applyGroupMerge/doApplyGroupSplit) y
-      // emitReplacementChangeIfNeeded decide si de verdad cambió. group.members
-      // ya refleja remainingMembers (arriba): la escalera de ADR-057 usa el
-      // conjunto correcto. ADR-076 §4 fila 9: perder ocurrencias no es una
-      // decisión sobre el valor — un replacementValue editado a mano se
-      // respeta igual (mask sigue recalculándose siempre: no depende del
-      // flag, `maskFormat` no es un valor que el usuario edite a mano).
+      // ADR-029: el mask depende de los members remanentes, así que sin
+      // edición manual se recalcula siempre (mismo criterio que
+      // applyGroupMerge/doApplyGroupSplit) y emitReplacementChangeIfNeeded
+      // decide si de verdad cambió. group.members ya refleja remainingMembers
+      // (arriba): la escalera de ADR-057 usa el conjunto correcto. ADR-076
+      // §4 fila 9: perder ocurrencias no es una decisión sobre el valor — un
+      // replacementValue editado a mano se respeta igual, en los cuatro
+      // modos (incluido mask: la guarda envuelve la llamada entera, sin
+      // excepción por modo — ADR-076 §3).
       if (!group.replacementValueUserSet) {
         group.replacementValue = computeReplacementValue(
           group,
