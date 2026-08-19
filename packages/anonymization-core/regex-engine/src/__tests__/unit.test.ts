@@ -542,6 +542,21 @@ describe("RegexEngine — unit tests", () => {
       expect(phoneOccurrences).toHaveLength(0);
     });
 
+    // Regresión (hallazgo post-mergeo, escenario 8 de E2E, `text-10p.pdf`):
+    // `phone-mobile-ar` tiene un `[\s-]?` opcional ANTES de su `\b`, así que
+    // sobre "CUIT 20-12345678-9" el match crudo trae el espacio adentro
+    // (`" 20-12345678"`, `startIndex` apunta al espacio, no al "2"). Sin
+    // recortar ese espacio antes de medir la corrida, `computeRunBounds` mide
+    // adyacencia contra el carácter ANTERIOR al espacio — la "T" de "CUIT" —
+    // y la corrida se extendía por error hasta "CUIT", con letras: la guarda
+    // descartaba un teléfono real. Nunca lo cubrió un test unitario porque
+    // ninguno de los otros cinco tipos bajo la guarda tiene un separador
+    // opcional ANTES de su `\b` — es específico de `phone-mobile-ar`.
+    it("a phone-mobile-ar match preceded by a word and a space still emits (leading separator inside the match)", async () => {
+      const occurrence = await firstOccurrence(engine, ctx, ["CUIT", "20-12345678-9"]);
+      expect(occurrence?.entityType).toBe(EntityType.Phone);
+    });
+
     it("phone, DNI, CUIT, card and date with sentence punctuation still emit", async () => {
       const cases: ReadonlyArray<{
         readonly tokens: ReadonlyArray<string>;

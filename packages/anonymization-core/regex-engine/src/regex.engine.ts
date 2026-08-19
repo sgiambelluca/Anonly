@@ -169,10 +169,28 @@ function computeRunBounds(
  * esos matches siempre llevan letras — sin ninguna lista de tipos en el
  * código. Se aplica también a patrones custom (§4): es una propiedad del
  * texto, no del patrón que lo encontró.
+ *
+ * Se recorta el espacio de borde del propio match antes de medir (hallazgo
+ * post-mergeo, Hito 10.9, escenario 8 de E2E): `phone-mobile-ar` tiene un
+ * `[\s-]?` opcional ANTES de su `\b`, así que sobre "CUIT 20-12345678-9" el
+ * match crudo es `" 20-12345678"`, con el espacio adentro. Sin este recorte,
+ * `computeRunBounds` mide adyacencia contra `text[match.startIndex - 1]` —
+ * que ahí es la "T" de "CUIT", el carácter que está ANTES del espacio, no
+ * después — y la corrida se extiende por error hasta "CUIT", con letras, y
+ * la guarda descarta un teléfono real. Un espacio nunca es un separador
+ * válido de corrida (§2): recortarlo no cambia qué corridas con guion/punto/
+ * barra se detectan, solo evita que un espacio *adentro* del match crudo se
+ * lea como si no existiera.
  */
 function passesRunGuard(text: string, match: RawMatch): boolean {
   if (HAS_LETTER_RE.test(match.rawValue)) return true;
-  const { start, end } = computeRunBounds(text, match.startIndex, match.endIndexExclusive);
+  const trimmedLeft = match.rawValue.length - match.rawValue.trimStart().length;
+  const trimmedRight = match.rawValue.length - match.rawValue.trimEnd().length;
+  const { start, end } = computeRunBounds(
+    text,
+    match.startIndex + trimmedLeft,
+    match.endIndexExclusive - trimmedRight,
+  );
   return !HAS_LETTER_RE.test(text.slice(start, end));
 }
 
