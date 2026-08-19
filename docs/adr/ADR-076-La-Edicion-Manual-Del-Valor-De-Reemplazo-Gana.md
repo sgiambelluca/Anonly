@@ -42,10 +42,12 @@ El pendiente §10 se escribió sobre `renumberGroupsCanonically`. Al revisar la 
 
 1. Grupo `Person` con `canonicalValue` `"Andrea Ruiz"` — sin género determinado (el registro la declara `A`, ADR-069 §1).
 2. El usuario edita el `replacementValue` a mano a `[P1]`.
-3. Llegan dos ocurrencias `"Julia Ruiz"` con el mismo `normalizedValue`: el `canonicalValue` evoluciona **por frecuencia de alias**, que no es ninguno de los tres disparadores de inferencia inmediata de ADR-069 §6(a).
-4. `finishSession` corre `inferGendersOnFinish`, infiere `f` y pisa `[P1]` con `[MUJER 01]`.
+3. Llegan dos ocurrencias `"Andres Ruiz"` (mismo `normalizedValue` entre sí, y fuzzy-matchea contra `"Andrea Ruiz"` — un carácter de diferencia, similitud 0.909 ≥ 0.88): el `canonicalValue` evoluciona **por frecuencia de alias**, que no es ninguno de los tres disparadores de inferencia inmediata de ADR-069 §6(a).
+4. `finishSession` corre `inferGendersOnFinish`, infiere `m` y pisa `[P1]` con `[HOMBRE 01]`.
 
 Importa para el diseño: cualquier arreglo que se ate a **un** punto de recálculo tapa la mitad del defecto. Y desde ADR-071 §6 ese segundo camino recalcula también en modo `synthetic`, así que el agujero es más ancho que cuando se escribió el pendiente.
+
+> **Corrección (2026-08-18, hallazgo de la revisión del Hito 10.9)**: el repro original usaba `"Julia Ruiz"` como segundo alias. Verificado contra la implementación real: `levenshteinNormalized("andrea ruiz", "julia ruiz")` da **0.545**, muy por debajo del umbral 0.88 — ese par nunca comparte grupo, así que el repro tal como estaba escrito era irreproducible (y la frase "con el mismo `normalizedValue`" que describía el punto 3, referida a `"Andrea Ruiz"`, era además autocontradictoria con la propia definición de `normalizedValue`). El código y los tests siempre usaron `"Andres Ruiz"` (distancia 1, similitud 0.909, la que sí cruza el umbral y sí fuzzy-matchea contra `"Andrea Ruiz"`); esta sección quedó desactualizada respecto de esa corrección hasta ahora. La propiedad que el repro necesita —un alias con género determinable que se vuelve más frecuente que el original ambiguo— se conserva igual.
 
 ### 4. Por qué importa más de lo que parece
 
@@ -150,7 +152,7 @@ Va **después** de ADR-073 en el mismo módulo (Hito 10.9, PR 2), para que los d
 Tests del PR 15:
 
 - **Edge — el test que define este ADR**: un `replacementValue` editado a mano sobrevive a un `finishSession` **en el que el `indexInType` del grupo sí cambia**. Es el test de ADR-057 §Tests corregido: hoy pasa sin ejercitar la condición (Contexto §6), y el arreglo del escenario es parte del entregable.
-- **Edge — el segundo camino**: la repro literal de Contexto §3 — `"Andrea Ruiz"` con valor manual `[P1]`, dos `"Julia Ruiz"` que mueven el `canonicalValue` por frecuencia, `finishSession` infiere `f` y el valor **sigue siendo** `[P1]`. Sin este test, el arreglo tapa la mitad del defecto.
+- **Edge — el segundo camino**: la repro literal de Contexto §3 — `"Andrea Ruiz"` con valor manual `[P1]`, dos `"Andres Ruiz"` que mueven el `canonicalValue` por frecuencia, `finishSession` infiere `m` y el valor **sigue siendo** `[P1]`. Sin este test, el arreglo tapa la mitad del defecto.
 - **Edge**: lo mismo en modo `synthetic` (ADR-071 §6 abrió ese camino), para que el arreglo no quede atado a `placeholder`.
 - **Edge**: el valor manual sobrevive a una fusión (el sobreviviente lo conserva) y a una división (el remanente lo conserva; el grupo nuevo nace con valor calculado).
 - **Edge**: el valor manual sobrevive a `dropOccurrences` y a `reopenSession` + `finishSession`.

@@ -94,6 +94,8 @@ fragmentar(words[first..last]):
 
 La comparación es **contra la última palabra de la corrida**, no contra la primera: la banda se arrastra con el renglón, igual que en `slideWordWindowMatches` de `findLiteral`. Y el `wordSpan` no cambia: sigue siendo el rango completo `[first, last+1)`.
 
+> **Enmienda (2026-08-18, hallazgo de la revisión del Hito 10.9)**: el invariante 2 de §1 (*"los fragmentos no se solapan verticalmente"*) no queda garantizado por construcción con este algoritmo. `sharesVerticalBand` compara cada palabra nueva contra la **última** palabra de la corrida actual, pero el fragmento que se emite es la **unión** de bboxes de **todas** las palabras de esa corrida. Si una palabra intermedia de la corrida es anormalmente alta (una inicial mayúscula grande, un glifo con acento cargado), la unión puede extenderse en `y` más allá de lo que la comparación palabra-a-palabra dejaría suponer, y solapar verticalmente con el fragmento de la corrida siguiente. Los invariantes 1 y 3 (`bbox` = envolvente exacta de `fragments`, `union(fragments) ⊆ bbox`) sí salen por construcción de la unión de bboxes y no dependen de este razonamiento — así que **no hay riesgo de fuga**: el peor caso posible es pintar dos veces la misma franja de la página, nunca dejar algo sin tapar. Es un hueco del algoritmo tal como está descrito acá, no de `regex-engine`/`ner-engine`, que lo implementan al pie de la letra. Sin caso real medido que lo dispare; queda anotado para si aparece.
+
 ### 3. El texto rotado no se fragmenta
 
 Si alguna `Word` del match declara `bbox.rotation` distinta de ausente/`0`, **no se emite `fragments`**: el match queda con su envolvente, exactamente como hoy.
