@@ -720,4 +720,33 @@ describe("GroupingEngine — contract tests", () => {
     expect(merged.members).toHaveLength(3);
     expect(merged.replacementValue).toBe("[PERS 01]");
   });
+
+  // ADR-076 §1: bookkeeping interno, nunca expuesto — mismo criterio y mismo
+  // test que `personGenderUserSet` (ADR-069 §5).
+  it("replacementValueUserSet never appears in snapshots or event payloads", async () => {
+    await engine.init(ctx);
+    engine.startSession("doc-1");
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "11111111", normalizedValue: "11111111" }),
+    });
+    const [group] = engine.getSnapshot("doc-1").groups;
+    expect(group).not.toHaveProperty("replacementValueUserSet");
+
+    const updated = await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group!.id,
+      patch: { replacementValue: "[P1]" },
+    });
+    expect(updated).not.toHaveProperty("replacementValueUserSet");
+    expect(engine.getSnapshot("doc-1").groups[0]).not.toHaveProperty("replacementValueUserSet");
+
+    for (const [, , payload] of busEmitSpy.mock.calls) {
+      if (payload !== null && typeof payload === "object" && "group" in payload) {
+        expect(payload.group).not.toHaveProperty("replacementValueUserSet");
+      }
+    }
+  });
 });
