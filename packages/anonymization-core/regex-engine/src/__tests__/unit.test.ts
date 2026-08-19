@@ -90,13 +90,14 @@ describe("RegexEngine — unit tests", () => {
   });
 
   describe("DEFAULT_PATTERNS_AR — contrato de datos", () => {
-    it("contiene exactamente los 11 patrones default de Regex_Engine.md", () => {
+    it("contiene exactamente los 12 patrones default de Regex_Engine.md (ADR-075 §1)", () => {
       const ids = DEFAULT_PATTERNS_AR.map((p) => p.id).sort();
       expect(ids).toEqual(
         [
           "credit-card",
           "cuit-ar",
           "date-ar",
+          "date-textual-ar",
           "dni-ar",
           "email",
           "iban",
@@ -119,6 +120,7 @@ describe("RegexEngine — unit tests", () => {
       expect(byId.get("iban")).toBe("XX00 XXXX XXXX XXXX XXXX");
       expect(byId.get("credit-card")).toBe("XXXX XXXX XXXX XXXX");
       expect(byId.get("date-ar")).toBe("XX/XX/XXXX");
+      expect(byId.get("date-textual-ar")).toBe("XX/XX/XXXX");
       expect(byId.get("license-ar")).toBe("XX-XXXX-XX");
       // ADR-029 §2: plate-vieja-ar ("ABC 123") y plate-mercosur-ar ("AB 123 CD")
       // llevan cada una su propio maskFormat fiel a su forma real.
@@ -238,6 +240,69 @@ describe("RegexEngine — unit tests", () => {
       const document = makeSinglePageDocument("doc-date-invalid", ["35/13/2020"]);
       const output = await engine.process({ document }, ctx);
       expect(output.occurrenceCount).toBe(0);
+    });
+  });
+
+  describe("Fechas escritas en texto (ADR-075 §1)", () => {
+    it('"Quilmes, 07 de julio de 2026" is detected as a Date', async () => {
+      const occurrence = await firstOccurrence(engine, ctx, [
+        "Quilmes,",
+        "07",
+        "de",
+        "julio",
+        "de",
+        "2026",
+      ]);
+      expect(occurrence?.entityType).toBe(EntityType.Date);
+      expect(occurrence?.normalizedValue).toBe("07/07/2026");
+    });
+
+    it("textual and numeric dates produce the same normalizedValue", async () => {
+      const textual = await firstOccurrence(engine, ctx, ["07", "de", "julio", "de", "2026"]);
+      const numeric = await firstOccurrence(engine, ctx, ["7/7/2026"]);
+      expect(textual?.normalizedValue).toBe(numeric?.normalizedValue);
+    });
+
+    it('ordinal day, "del", "setiembre" and uppercase all match', async () => {
+      const ordinalDegree = await firstOccurrence(engine, ctx, ["1º", "de", "julio", "de", "2026"]);
+      expect(ordinalDegree?.normalizedValue).toBe("01/07/2026");
+
+      const ordinalMasculine = await firstOccurrence(engine, ctx, [
+        "1°",
+        "de",
+        "julio",
+        "de",
+        "2026",
+      ]);
+      expect(ordinalMasculine?.normalizedValue).toBe("01/07/2026");
+
+      const noOrdinal = await firstOccurrence(engine, ctx, ["1", "de", "julio", "de", "2026"]);
+      expect(noOrdinal?.normalizedValue).toBe("01/07/2026");
+
+      const del = await firstOccurrence(engine, ctx, ["7", "de", "julio", "del", "2026"]);
+      expect(del?.normalizedValue).toBe("07/07/2026");
+
+      const setiembre = await firstOccurrence(engine, ctx, ["7", "de", "setiembre", "de", "2026"]);
+      expect(setiembre?.normalizedValue).toBe("07/09/2026");
+      const septiembre = await firstOccurrence(engine, ctx, [
+        "7",
+        "de",
+        "septiembre",
+        "de",
+        "2026",
+      ]);
+      expect(septiembre?.normalizedValue).toBe("07/09/2026");
+
+      const uppercase = await firstOccurrence(engine, ctx, [
+        "QUILMES,",
+        "07",
+        "DE",
+        "JULIO",
+        "DE",
+        "2026",
+      ]);
+      expect(uppercase?.entityType).toBe(EntityType.Date);
+      expect(uppercase?.normalizedValue).toBe("07/07/2026");
     });
   });
 
@@ -461,6 +526,79 @@ describe("RegexEngine — unit tests", () => {
       const occurrence = (calls[0]?.[2] as EntityFound).occurrence;
       expect(occurrence.value).toBe("1234");
       expect(occurrence.entityType).toBe(EntityType.Custom);
+    });
+  });
+
+  describe("Guarda de corrida (ADR-075 §2, §4)", () => {
+    it('"PP-13-00-027653-24/00" emits no Phone occurrence', async () => {
+      const document = makeSinglePageDocument("doc-guard-expediente", ["PP-13-00-027653-24/00"]);
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      await engine.process({ document }, ctx);
+
+      const phoneOccurrences = busEmitSpy.mock.calls
+        .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
+        .map(([, , payload]) => (payload as EntityFound).occurrence)
+        .filter((o) => o.entityType === EntityType.Phone);
+      expect(phoneOccurrences).toHaveLength(0);
+    });
+
+    it("phone, DNI, CUIT, card and date with sentence punctuation still emit", async () => {
+      const cases: ReadonlyArray<{
+        readonly tokens: ReadonlyArray<string>;
+        readonly type: EntityType;
+      }> = [
+        { tokens: ["Tel:", "0221-4567890."], type: EntityType.Phone },
+        { tokens: ["DNI:", "34.567.891."], type: EntityType.DNI },
+        { tokens: ["CUIT:", "20-34567891-4."], type: EntityType.CUIT },
+        { tokens: ["Tarjeta:", "4111111111111111."], type: EntityType.CreditCard },
+        { tokens: ["Fecha:", "07/07/2026."], type: EntityType.Date },
+      ];
+
+      for (const { tokens, type } of cases) {
+        const occurrence = await firstOccurrence(engine, ctx, tokens);
+        expect(occurrence?.entityType, `tipo esperado: ${type}, tokens: ${tokens.join(" ")}`).toBe(
+          type,
+        );
+      }
+    });
+
+    // Regex_Engine.md §14 nombra esta fila '"Tel:4567-8900" and
+    // "4567-8900,4567-8901" still emit' — "4567-8900" es el ejemplo informal
+    // de ADR-075 §5 y no matchea NINGÚN patrón de teléfono real: landline
+    // exige "0" inicial, mobile exige 10 dígitos en grupos 2-4-4 (8 dígitos
+    // no alcanza). Verificado contra el regex real (node -e), no es un
+    // fixture válido — con ese número el test pasaría igual con la guarda
+    // rota, porque nunca hay match que descartar. Se sustituye por el número
+    // de línea telefónica que el propio ADR usa en Contexto §1/§2
+    // ("0221-4567890"), que sí matchea `phone-landline-ar` y de verdad
+    // ejercita la guarda. Erratum a corregir en el spec en un PR de docs.
+    it('"Tel:0221-4567890" and "0221-4567890,0221-4567891" still emit', async () => {
+      const colonNoSpace = await firstOccurrence(engine, ctx, ["Tel:0221-4567890"]);
+      expect(colonNoSpace?.entityType).toBe(EntityType.Phone);
+
+      const document = makeSinglePageDocument("doc-guard-comma", ["0221-4567890,0221-4567891"]);
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      const output = await engine.process({ document }, ctx);
+      expect(output.occurrenceCount).toBe(2);
+      const phoneOccurrences = busEmitSpy.mock.calls
+        .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
+        .map(([, , payload]) => (payload as EntityFound).occurrence)
+        .filter((o) => o.entityType === EntityType.Phone);
+      expect(phoneOccurrences).toHaveLength(2);
+    });
+
+    it('"34.567.891/2024" still emits the DNI', async () => {
+      const occurrence = await firstOccurrence(engine, ctx, ["34.567.891/2024"]);
+      expect(occurrence?.entityType).toBe(EntityType.DNI);
+      expect(occurrence?.normalizedValue).toBe("34567891");
+    });
+
+    it("License and Plate are never touched by the run guard", async () => {
+      const license = await firstOccurrence(engine, ctx, ["MP-12345"]);
+      expect(license?.entityType).toBe(EntityType.License);
+
+      const plate = await firstOccurrence(engine, ctx, ["AB123CD"]);
+      expect(plate?.entityType).toBe(EntityType.Plate);
     });
   });
 

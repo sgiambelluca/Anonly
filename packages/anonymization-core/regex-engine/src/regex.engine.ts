@@ -109,6 +109,73 @@ function withGlobalFlag(pattern: RegExp): RegExp {
   return pattern.global ? pattern : new RegExp(pattern.source, `${pattern.flags}g`);
 }
 
+const RUN_ALNUM_RE = /[\p{L}\p{N}]/u;
+const RUN_SEPARATOR_RE = /[-./]/;
+const HAS_LETTER_RE = /\p{L}/u;
+
+function isRunChar(ch: string | undefined): boolean {
+  return ch !== undefined && RUN_ALNUM_RE.test(ch);
+}
+
+/*
+ * ADR-075 §2: extiende [startIndex, endIndexExclusive) hacia los dos lados,
+ * a través de [\p{L}\p{N}] y de los tres separadores internos de número -, /
+ * y . — un separador solo extiende la corrida si el carácter que sigue del
+ * lado hacia el que se expande es alfanumérico (si no, es un borde de
+ * puntuación de oración, no una continuación del identificador). Nunca mira
+ * dentro de [startIndex, endIndexExclusive): un match con espacios internos
+ * (phone-mobile-ar, "11 4567 8900") sigue expandiéndose solo desde sus bordes.
+ */
+function computeRunBounds(
+  text: string,
+  startIndex: number,
+  endIndexExclusive: number,
+): { readonly start: number; readonly end: number } {
+  let start = startIndex;
+  for (;;) {
+    if (isRunChar(text[start - 1])) {
+      start -= 1;
+      continue;
+    }
+    if (RUN_SEPARATOR_RE.test(text[start - 1] ?? "") && isRunChar(text[start - 2])) {
+      start -= 1;
+      continue;
+    }
+    break;
+  }
+
+  let end = endIndexExclusive;
+  for (;;) {
+    if (isRunChar(text[end])) {
+      end += 1;
+      continue;
+    }
+    if (RUN_SEPARATOR_RE.test(text[end] ?? "") && isRunChar(text[end + 1])) {
+      end += 1;
+      continue;
+    }
+    break;
+  }
+
+  return { start, end };
+}
+
+/*
+ * ADR-075 §2/§4: `true` si el match hay que conservarlo. Se descarta cuando
+ * el match no tiene ninguna letra pero su corrida sí — es un tramo de un
+ * identificador más largo (número de expediente, folio, etc.), no la entidad
+ * que su tipo declara. La condición de aplicabilidad ("el match no tiene
+ * letras") hace que la guarda se ignore sola en License/Plate/IBAN/Email —
+ * esos matches siempre llevan letras — sin ninguna lista de tipos en el
+ * código. Se aplica también a patrones custom (§4): es una propiedad del
+ * texto, no del patrón que lo encontró.
+ */
+function passesRunGuard(text: string, match: RawMatch): boolean {
+  if (HAS_LETTER_RE.test(match.rawValue)) return true;
+  const { start, end } = computeRunBounds(text, match.startIndex, match.endIndexExclusive);
+  return !HAS_LETTER_RE.test(text.slice(start, end));
+}
+
 /*
  * Recorre `text` con `pattern` y devuelve todos los matches crudos, ya con
  * normalizedValue y el resultado del checksum (si el patrón define uno). El
@@ -574,7 +641,11 @@ export class RegexEngine implements IEngine {
         }
 
         // Casos 4-5 (§13): checksum inválido (CUIT, Luhn) descarta el match.
-        const validMatches = rawMatches.filter((m) => m.checksumPassed);
+        // ADR-075 §2/§4: un match sin letras dentro de una corrida con letras
+        // es un tramo de un identificador más largo, no la entidad de su tipo.
+        const validMatches = rawMatches.filter(
+          (m) => m.checksumPassed && passesRunGuard(page.text, m),
+        );
         // Caso 10 (§13): overlap → gana el match más largo en el mismo span.
         const resolvedMatches = resolveOverlaps(validMatches);
 
