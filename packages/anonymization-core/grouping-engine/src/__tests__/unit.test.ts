@@ -193,7 +193,7 @@ describe("GroupingEngine — unit tests", () => {
   // por debajo del umbral 0.88 independientemente de este ADR. No es un caso
   // que la fórmula sin cambios agrupe. Se usa acá una confusión de OCR real
   // de un solo carácter (O↔0) que sí clasifica como "un carácter distinto".
-  it('"Pablo Roman" and "Pablo Rornan" still group together', () => {
+  it('"Pablo Roman" and "Pablo R0man" still group together', () => {
     ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
       documentId: "doc-1",
       occurrence: makeOccurrence({
