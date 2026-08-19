@@ -138,6 +138,44 @@ function validateDateRange(normalizedValue: string): boolean {
   return day >= 1 && day <= 31 && month >= 1 && month <= 12;
 }
 
+/** ADR-075 §1: mapeo mes en texto → número. `setiembre` es tan correcto como `septiembre` en español rioplatense. */
+const TEXTUAL_MONTH_NUMBERS: Readonly<Record<string, string>> = {
+  enero: "01",
+  febrero: "02",
+  marzo: "03",
+  abril: "04",
+  mayo: "05",
+  junio: "06",
+  julio: "07",
+  agosto: "08",
+  septiembre: "09",
+  setiembre: "09",
+  octubre: "10",
+  noviembre: "11",
+  diciembre: "12",
+};
+
+/**
+ * Re-extrae día/mes/año del valor crudo (el normalizer recibe `rawValue`, sin
+ * los grupos de captura del match original) y produce "DD/MM/YYYY" —
+ * exactamente el formato de `normalizeDate`, a propósito (ADR-075 §1): así
+ * "07 de julio de 2026" y "7/7/2026" comparten `normalizedValue` y agrupan
+ * por el pase exacto, sin depender del pase difuso.
+ */
+function normalizeTextualDate(value: string): string {
+  const match =
+    /(\d{1,2})\s*[°º]?\s+de\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\s+del?\s+(\d{4})/i.exec(
+      value,
+    );
+  const rawDay = match?.[1];
+  const monthName = match?.[2]?.toLowerCase();
+  const year = match?.[3];
+  if (rawDay === undefined || monthName === undefined || year === undefined) return value;
+  const month = TEXTUAL_MONTH_NUMBERS[monthName];
+  if (month === undefined) return value;
+  return `${rawDay.padStart(2, "0")}/${month}/${year}`;
+}
+
 // ─── Patrones default AR (Regex_Engine.md, tabla "Patrones default") ───
 
 export const DEFAULT_PATTERNS_AR: ReadonlyArray<RegexPattern> = [
@@ -206,6 +244,15 @@ export const DEFAULT_PATTERNS_AR: ReadonlyArray<RegexPattern> = [
     pattern: /\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b/g,
     checksum: validateDateRange,
     normalizer: normalizeDate,
+    maskFormat: "XX/XX/XXXX",
+  },
+  {
+    id: "date-textual-ar",
+    entityType: EntityType.Date,
+    pattern:
+      /\b(\d{1,2})\s*[°º]?\s+de\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\s+del?\s+(\d{4})\b/gi,
+    checksum: validateDateRange,
+    normalizer: normalizeTextualDate,
     maskFormat: "XX/XX/XXXX",
   },
   {

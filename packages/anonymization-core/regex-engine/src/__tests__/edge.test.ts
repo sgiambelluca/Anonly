@@ -407,4 +407,70 @@ describe("RegexEngine — edge case tests", () => {
       expect(() => engine.searchText({ document, query: "Ana" })).toThrow(EngineDisposedError);
     });
   });
+
+  // Caso 27 (§13, ADR-075 §1): las dos limitaciones deliberadas del patrón
+  // de fecha textual — asertadas para que no se implementen por accidente
+  // ni se rompan en silencio (mismo criterio que "J. Pérez" de ADR-061 §2).
+  describe("Caso 27: fecha textual — límites deliberados", () => {
+    it('"julio de 2026" and "7 de julio de 26" do NOT match', async () => {
+      const withoutDay = makeSinglePageDocument("doc-textual-date-no-day", ["julio", "de", "2026"]);
+      expect((await engine.process({ document: withoutDay }, ctx)).occurrenceCount).toBe(0);
+
+      const twoDigitYear = makeSinglePageDocument("doc-textual-date-2-digit-year", [
+        "7",
+        "de",
+        "julio",
+        "de",
+        "26",
+      ]);
+      expect((await engine.process({ document: twoDigitYear }, ctx)).occurrenceCount).toBe(0);
+    });
+
+    it('"45 de julio de 2026" is discarded by validateDateRange', async () => {
+      const document = makeSinglePageDocument("doc-textual-date-invalid", [
+        "45",
+        "de",
+        "julio",
+        "de",
+        "2026",
+      ]);
+      expect((await engine.process({ document }, ctx)).occurrenceCount).toBe(0);
+    });
+  });
+
+  // Caso 28 (§13, ADR-075 §2/§4/§5): la guarda de corrida también alcanza a
+  // los patrones custom, y el residuo aceptado queda asertado como tal.
+  describe("Caso 28: guarda de corrida — patrón custom y residuo aceptado", () => {
+    it("a custom pattern is subject to the run guard too", async () => {
+      engine.addPattern({
+        id: "custom-numeric",
+        entityType: EntityType.Custom,
+        pattern: /\d{2,}/g,
+        normalizer: (v: string) => v,
+        maskFormat: "XX",
+      });
+
+      const document = makeSinglePageDocument("doc-guard-custom", ["EXP-12345"]);
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      await engine.process({ document }, ctx);
+
+      const customOccurrences = busEmitSpy.mock.calls
+        .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
+        .map(([, , payload]) => (payload as EntityFound).occurrence)
+        .filter((o) => o.entityType === EntityType.Custom);
+      expect(customOccurrences).toHaveLength(0);
+    });
+
+    // Ver la nota de unit.test.ts junto al test de guarda equivalente:
+    // "Tel.4567-8900" (ADR-075 §5, texto literal) no matchea ningún patrón
+    // de teléfono real por sí solo — nunca hay match que descartar, así que
+    // esa forma exacta no ejercita la guarda. Se usa acá el número de
+    // Contexto §1/§2 del mismo ADR ("0221-4567890"), que sí matchea
+    // `phone-landline-ar` y donde el "." pegado de verdad hace que la guarda
+    // lo descarte.
+    it('"Tel.0221-4567890" does not emit (accepted residue)', async () => {
+      const document = makeSinglePageDocument("doc-guard-residual", ["Tel.0221-4567890"]);
+      expect((await engine.process({ document }, ctx)).occurrenceCount).toBe(0);
+    });
+  });
 });

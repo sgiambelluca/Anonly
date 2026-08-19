@@ -470,7 +470,7 @@ No sale de `Cambios para hacer.txt` ni de un hito anterior: son los puntos **1, 
 | 10 | `selectLineWords` por fragmento | `packages/anonymization-core/src` | 4 | **hecho** |
 | 11 | Test de integración de punta a punta de la entidad multi-línea | `tests/integration` | 5-10 | **hecho** |
 | 12 | ADR-075 + `Regex_Engine.md` (docs) | — | — | **hecho** |
-| 13 | `date-textual-ar` y la guarda de corrida | `regex-engine` | 12, 5 | |
+| 13 | `date-textual-ar` y la guarda de corrida | `regex-engine` | 12, 5 | **hecho** |
 | 14 | ADR-076 + `Grouping_Engine.md`, `UX_Guidelines.md`, enmienda de ADR-057 §7 (docs) | — | — | **hecho** |
 | 15 | `replacementValueUserSet` y los once puntos de recálculo | `grouping-engine` | 14, 7 | |
 
