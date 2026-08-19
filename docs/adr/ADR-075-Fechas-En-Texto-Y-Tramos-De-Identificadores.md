@@ -105,7 +105,7 @@ PP-13-00-027653-24/00
 Las tres piezas de la definición están elegidas y cada una hace falta:
 
 - **"El match no contiene letras"** es la condición de aplicabilidad, y hace que la guarda se aplique sola a los tipos correctos sin ninguna tabla por tipo. `License` (`MP-12345`), `Plate` (`AB 123 CD`), `IBAN` (`AR97…`) y `Email` llevan letras **en el match**, así que la guarda no los mira nunca — que es lo correcto, porque para esos tipos la mezcla de letras y dígitos es el formato. Los que quedan bajo la guarda son exactamente los seis puramente numéricos: DNI, CUIT, Phone (×2), CreditCard y Date. **No hay una lista de tipos en el código**: sale de la forma del match.
-- **Los separadores son `-`, `/` y `.` y ninguno más.** Son los tres que aparecen adentro de un número escrito (`34.567.891`, `20-12345678-9`, `07/07/2026`), así que son los únicos por los que una corrida puede legítimamente continuar. Los que quedan afuera importan más que los que quedan adentro: con `:` afuera, `"Tel:4567-8900"` corta la corrida en el `:` y el teléfono **se emite**; con `,` afuera, una lista `"4567-8900,4567-8901"` emite los dos.
+- **Los separadores son `-`, `/` y `.` y ninguno más.** Son los tres que aparecen adentro de un número escrito (`34.567.891`, `20-12345678-9`, `07/07/2026`), así que son los únicos por los que una corrida puede legítimamente continuar. Los que quedan afuera importan más que los que quedan adentro: con `:` afuera, `"Tel:0221-4567890"` corta la corrida en el `:` y el teléfono **se emite**; con `,` afuera, una lista `"0221-4567890,0221-4567891"` emite los dos.
 - **Se compara la corrida, no el vecino inmediato.** `"00-027653"` tiene un guion a cada lado con dígitos del otro lado; lo que lo delata como tramo de otra cosa está tres saltos a la izquierda (`PP`). Una guarda de un carácter de vecindad no lo ve.
 
 ### 3. La guarda no reemplaza nada de lo que ya existe
@@ -125,11 +125,13 @@ Lo alternativo sería un flag de opt-out en `RegexPattern`, que es contrato púb
 Existe uno y hay que decirlo: **un número pegado a una palabra por un punto, sin espacio**.
 
 ```text
-"Tel.4567-8900"   → corrida "Tel.4567-8900" → tiene letras → el teléfono se descarta
-"Tel: 4567-8900"  → corrida "4567-8900"     → sin letras   → se emite
-"Tel:4567-8900"   → corrida "4567-8900"     → sin letras   → se emite
-"Tel. 4567-8900"  → corrida "4567-8900"     → sin letras   → se emite
+"Tel.0221-4567890"   → corrida "Tel.0221-4567890" → tiene letras → el teléfono se descarta
+"Tel: 0221-4567890"  → corrida "0221-4567890"     → sin letras   → se emite
+"Tel:0221-4567890"   → corrida "0221-4567890"     → sin letras   → se emite
+"Tel. 0221-4567890"  → corrida "0221-4567890"     → sin letras   → se emite
 ```
+
+> **Corrección (2026-08-18, hallazgo de la revisión del Hito 10.9)**: esta sección y §2 citaban originalmente `"4567-8900"`/`"4567-8901"`. Verificado contra los patrones reales de `default-ar.ts`: esa cadena no matchea **ningún** patrón de teléfono — `phone-landline-ar` exige un `0` inicial y `phone-mobile-ar` exige 10 dígitos en grupos 2-4-4 (8 dígitos no alcanza). O sea que un test contra ese número nunca tiene un match que la guarda pueda descartar, y pasaría igual aunque la guarda estuviera rota. El código y los tests siempre usaron el número de línea telefónica de Contexto §1/§2 de este mismo ADR (`"0221-4567890"`, que sí matchea `phone-landline-ar`); esta sección quedó desactualizada respecto de esa corrección hasta ahora.
 
 O sea: **solo** falla la forma sin espacio y con punto. De las cuatro formas de escribir eso, tres pasan. Y la red de contención de todo falso negativo está construida y mergeada desde el Hito 10.7: el usuario selecciona el número sobre el visor o lo escribe, y `findLiteral` lo agrega (ADR-061).
 
@@ -161,13 +163,13 @@ De la guarda (§2):
 
 - Unit — **el test que define esta mitad**: `"PP-13-00-027653-24/00"` **no** produce ninguna ocurrencia de `Phone`. Es la cadena literal de la pericia.
 - Unit — **no-regresión, y es la mitad que protege contra la fuga**: un teléfono, un DNI, un CUIT, una tarjeta y una fecha, cada uno solo en su línea y cada uno con puntuación de oración alrededor (`"Tel: 0221-4567890."`), se siguen emitiendo igual que antes de este ADR.
-- Unit: `"Tel:4567-8900"` (dos puntos, sin espacio) se emite — la corrida corta en el `:` (§2).
-- Unit: `"4567-8900,4567-8901"` emite **dos** teléfonos — la coma no extiende la corrida (§2).
+- Unit: `"Tel:0221-4567890"` (dos puntos, sin espacio) se emite — la corrida corta en el `:` (§2).
+- Unit: `"0221-4567890,0221-4567891"` emite **dos** teléfonos — la coma no extiende la corrida (§2).
 - Unit: `"34.567.891/2024"` **sí** emite el DNI — la corrida no tiene letras, así que la guarda no aplica. Es el test que aserta que la guarda no se convirtió en un falso negativo (§5).
 - Unit: un `License` (`"MP-12345"`) y un `Plate` no los toca la guarda, porque el match tiene letras (§2).
 - Edge: el caso 10 (`DNI` dentro de `CUIT`) sigue emitiendo **solo** el CUIT, por el mecanismo de siempre (§3).
 - Edge: un patrón custom sin letras dentro de una corrida con letras también se descarta (§4).
-- Edge — el residuo aceptado, asertado como tal: `"Tel.4567-8900"` **no** emite (§5). Documenta la limitación en el test, como el `"J. Pérez"` de ADR-061.
+- Edge — el residuo aceptado, asertado como tal: `"Tel.0221-4567890"` **no** emite (§5). Documenta la limitación en el test, como el `"J. Pérez"` de ADR-061.
 
 ## Alternativas consideradas
 
@@ -185,7 +187,7 @@ De la guarda (§2):
 
 **Positivas**: la fecha del encabezado y del pie de firma —la forma normal de fechar un escrito judicial— deja de exportarse en claro, que es la mitad grave; agrupa sola con la fecha numérica equivalente porque comparten `normalizedValue`, sin pase difuso de por medio; el árbol de entidades de un expediente deja de llenarse de teléfonos que no existen; la guarda se aplica sola a los seis tipos correctos sin ninguna tabla por tipo, así que no hay una lista que mantener sincronizada; y ninguno de los dos cambios toca un contrato público.
 
-**Negativas**: `DEFAULT_PATTERNS_AR` pasa de 11 a 12 patrones, con el costo lineal por página que `Regex_Engine.md` §12 ya describe (despreciable frente al pipeline); la guarda agrega un cálculo de corrida por match candidato, sobre el `Page.text` que ya está en memoria; y queda el falso negativo acotado de `"Tel.4567-8900"` (§5), asertado por un test para que sea una limitación conocida y no una sorpresa.
+**Negativas**: `DEFAULT_PATTERNS_AR` pasa de 11 a 12 patrones, con el costo lineal por página que `Regex_Engine.md` §12 ya describe (despreciable frente al pipeline); la guarda agrega un cálculo de corrida por match candidato, sobre el `Page.text` que ya está en memoria; y queda el falso negativo acotado de `"Tel.0221-4567890"` (§5), asertado por un test para que sea una limitación conocida y no una sorpresa.
 
 **Neutras**: `Contracts.md` no se toca (no hay tipo, evento ni error code nuevo); `RegexPattern`, `EntityType` y los `maskFormat` no cambian de forma; el caso 10, los checksums y los `\b` de ADR-022 quedan intactos (§3); `findLiteral` y `searchText` no pasan por el registro de patrones ni por la guarda, así que la búsqueda literal y la lupa no se enteran; y `grouping-engine` no cambia — recibe las mismas `Occurrence` de siempre, unas cuantas más y unas cuantas menos.
 

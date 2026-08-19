@@ -156,10 +156,10 @@ Semántica de la **guarda de corrida** (ADR-075 §2), que se aplica a todo match
 > **Guarda**: si el texto del match **no contiene ninguna letra** y su corrida **sí contiene alguna**, el match se descarta — no se emite `ENTITY_FOUND`.
 
 - **"El match no contiene letras" es la condición de aplicabilidad**, y hace que la guarda alcance sola a los seis tipos puramente numéricos (DNI, CUIT, los dos Phone, CreditCard, Date) sin ninguna tabla por tipo. `License`, `Plate`, `IBAN` y `Email` llevan letras **en el match**, así que la guarda no los mira nunca: para ellos la mezcla de letras y dígitos es el formato.
-- **Los separadores son exactamente `-`, `/` y `.`**. Los que quedan afuera importan más que los que quedan adentro: con `:` afuera, `"Tel:4567-8900"` corta la corrida en el `:` y el teléfono se emite; con `,` afuera, `"4567-8900,4567-8901"` emite los dos.
+- **Los separadores son exactamente `-`, `/` y `.`**. Los que quedan afuera importan más que los que quedan adentro: con `:` afuera, `"Tel:0221-4567890"` corta la corrida en el `:` y el teléfono se emite; con `,` afuera, `"0221-4567890,0221-4567891"` emite los dos.
 - **Se compara la corrida entera, no el carácter vecino**: lo que delata a `"00-027653"` como tramo de otra cosa está tres saltos a la izquierda (`PP`).
 - **No reemplaza la prioridad de match más largo** del caso 10 (DNI dentro de un CUIT): ese span no tiene letras en su corrida, así que pasa la guarda y lo sigue descartando el mecanismo de siempre. Son dos filtros para dos problemas distintos.
-- **Residuo aceptado y asertado por un test** (ADR-075 §5): un número pegado a una palabra por un punto y sin espacio (`"Tel.4567-8900"`) queda dentro de una corrida con letras y **no se emite**. De las cuatro formas de escribirlo, es la única que falla; la red de contención es el agregado manual de ADR-061.
+- **Residuo aceptado y asertado por un test** (ADR-075 §5): un número pegado a una palabra por un punto y sin espacio (`"Tel.0221-4567890"`) queda dentro de una corrida con letras y **no se emite**. De las cuatro formas de escribirlo, es la única que falla; la red de contención es el agregado manual de ADR-061.
 
 Patrones default exportados desde `index.ts`:
 
@@ -307,7 +307,7 @@ Casos de fragmentos y de la tabla de patrones (ADR-074, ADR-075):
 
 26. **Un match que cruza un salto de línea** (ADR-074 §2): un teléfono partido entre dos renglones emite **una** `Occurrence` con `fragments.length === 2` —un rectángulo por línea, en orden de lectura— y `bbox` como envolvente de los dos. Un match de una sola línea, de una o de varias palabras, **no lleva el campo** y su `bbox` es idéntico al de antes del ADR: es la no-regresión del caso normal. Un match rotado tampoco lo lleva (§10). **`findLiteral` nunca produce fragmentos**: exige banda vertical compartida entre palabras consecutivas (caso 16), así que sus matches son de una línea por construcción — y por eso `TextMatch` no gana el campo.
 27. **Fecha escrita en texto** (ADR-075 §1): `"Quilmes, 07 de julio de 2026"` emite una `Occurrence` de `Date` con `normalizedValue === "07/07/2026"` — el **mismo** que produce `"7/7/2026"`, así que Grouping las unifica por el pase exacto, sin depender del difuso (que ADR-073 §2 le retira a `Date`). Matchean también `"1º de julio de 2026"`, `"1° …"`, `"… del 2026"`, `"setiembre"` y la línea entera en mayúsculas. **No** matchean, deliberadamente, `"julio de 2026"` (sin día: identifica poco y aparece en frases que no son fechas) ni `"7 de julio de 26"` (año de dos dígitos). `"45 de julio de 2026"` matchea el patrón y lo descarta `validateDateRange`, igual que en el patrón numérico.
-28. **Un tramo de un número de expediente no es un teléfono** (ADR-075 §2): sobre `"PP-13-00-027653-24/00"` no se emite ninguna ocurrencia — el match `"00-027653"` no tiene letras y su corrida sí (`PP`). Los casos que **sí** siguen emitiendo, y que son la mitad que protege contra la fuga: `"Tel: 0221-4567890."` (puntuación de oración alrededor), `"Tel:4567-8900"` (la corrida corta en el `:`), `"4567-8900,4567-8901"` (dos ocurrencias, la coma no extiende) y `"34.567.891/2024"` (corrida sin letras ⇒ la guarda no aplica). El único que se pierde es `"Tel.4567-8900"` (§6, residuo aceptado).
+28. **Un tramo de un número de expediente no es un teléfono** (ADR-075 §2): sobre `"PP-13-00-027653-24/00"` no se emite ninguna ocurrencia — el match `"00-027653"` no tiene letras y su corrida sí (`PP`). Los casos que **sí** siguen emitiendo, y que son la mitad que protege contra la fuga: `"Tel: 0221-4567890."` (puntuación de oración alrededor), `"Tel:0221-4567890"` (la corrida corta en el `:`), `"0221-4567890,0221-4567891"` (dos ocurrencias, la coma no extiende) y `"34.567.891/2024"` (corrida sin letras ⇒ la guarda no aplica). El único que se pierde es `"Tel.0221-4567890"` (§6, residuo aceptado). **Corrección (2026-08-18, hallazgo de la revisión del Hito 10.9)**: este caso y las dos filas de §14 citaban `"4567-8900"`/`"4567-8901"`, que no matchean ningún patrón de teléfono real (verificado); ver la nota de ADR-075, Decisión §5.
 
 ---
 
@@ -369,11 +369,11 @@ Casos de fragmentos y de la tabla de patrones (ADR-074, ADR-075):
 | `"45 de julio de 2026" is discarded by validateDateRange` | `edge.test.ts` | edge | caso 27 |
 | **`"PP-13-00-027653-24/00" emits no Phone occurrence`** | `unit.test.ts` | unit | caso 28 (ADR-075 §2) — la cadena literal de la pericia |
 | **`phone, DNI, CUIT, card and date with sentence punctuation still emit`** | `unit.test.ts` | unit | caso 28 — **no-regresión**, y es la mitad que protege contra convertir la guarda en una fuga |
-| `"Tel:4567-8900" and "4567-8900,4567-8901" still emit` | `unit.test.ts` | unit | caso 28 — los separadores que **no** extienden la corrida |
+| `"Tel:0221-4567890" and "0221-4567890,0221-4567891" still emit` | `unit.test.ts` | unit | caso 28 — los separadores que **no** extienden la corrida |
 | `"34.567.891/2024" still emits the DNI` | `unit.test.ts` | unit | caso 28 — corrida sin letras ⇒ la guarda no aplica |
 | `License and Plate are never touched by the run guard` | `unit.test.ts` | unit | caso 28 — el match tiene letras |
 | `a custom pattern is subject to the run guard too` | `edge.test.ts` | edge | ADR-075 §4 |
-| `"Tel.4567-8900" does not emit (accepted residue)` | `edge.test.ts` | edge | caso 28 (ADR-075 §5) — la limitación documentada en un test, para que sea conocida y no una sorpresa |
+| `"Tel.0221-4567890" does not emit (accepted residue)` | `edge.test.ts` | edge | caso 28 (ADR-075 §5) — la limitación documentada en un test, para que sea conocida y no una sorpresa |
 | `snapshot of occurrences for text-10p.pdf stable` | `snapshot.test.ts` | snapshot | fixture |
 
 Fixtures: `tests/fixtures/text-10p.pdf` (con DNIs, CUITs, emails, teléfonos conocidos).
