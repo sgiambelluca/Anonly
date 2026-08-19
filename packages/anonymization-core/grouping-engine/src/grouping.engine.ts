@@ -255,6 +255,15 @@ interface InternalGroup {
    * este motor — mismo criterio que `normalizedValues`/`aliasFrequency`.
    */
   personGenderUserSet: boolean;
+  /**
+   * ADR-076 §1: el `replacementValue` lo escribió el usuario. Ningún
+   * recálculo automático lo pisa (§3) — el corte es si el `replacementMode`
+   * efectivo cambió, no si el disparador fue "automático" o "manual". Mismo
+   * patrón que `personGenderUserSet` y por el mismo motivo: sin este flag, un
+   * valor escrito a mano es indistinguible de uno calculado. Nunca sale de
+   * este motor.
+   */
+  replacementValueUserSet: boolean;
 }
 
 /** Copia liviana de los campos de `Occurrence` necesarios para matching/conflictos, indexada por sesión. */
@@ -807,12 +816,17 @@ export class GroupingEngine implements IEngine {
       // siempre (mismo criterio que applyGroupMerge/doApplyGroupSplit) y
       // emitReplacementChangeIfNeeded decide si de verdad cambió. group.members
       // ya refleja remainingMembers (arriba): la escalera de ADR-057 usa el
-      // conjunto correcto.
-      group.replacementValue = computeReplacementValue(
-        group,
-        session.seed,
-        this.resolveMaskFormat(session, group),
-      );
+      // conjunto correcto. ADR-076 §4 fila 9: perder ocurrencias no es una
+      // decisión sobre el valor — un replacementValue editado a mano se
+      // respeta igual (mask sigue recalculándose siempre: no depende del
+      // flag, `maskFormat` no es un valor que el usuario edite a mano).
+      if (!group.replacementValueUserSet) {
+        group.replacementValue = computeReplacementValue(
+          group,
+          session.seed,
+          this.resolveMaskFormat(session, group),
+        );
+      }
       group.updatedAt = Date.now();
 
       const changed: (keyof EntityGroup)[] = ["members", "aliases", "updatedAt"];
@@ -857,8 +871,9 @@ export class GroupingEngine implements IEngine {
         replacementValue: group.replacementValue,
       };
       if (
-        group.replacementMode === ReplacementMode.Placeholder ||
-        group.replacementMode === ReplacementMode.Synthetic
+        (group.replacementMode === ReplacementMode.Placeholder ||
+          group.replacementMode === ReplacementMode.Synthetic) &&
+        !group.replacementValueUserSet // ADR-076 §4 fila 3
       ) {
         // ADR-071 §6: un género INFERIDO en finishSession repinta el token
         // también en modo synthetic, no solo en placeholder.
@@ -908,7 +923,15 @@ export class GroupingEngine implements IEngine {
           replacementValue: group.replacementValue,
         };
         group.indexInType = newIndex;
-        if (group.replacementMode === ReplacementMode.Placeholder) {
+        // ADR-076 §4 fila 2 (el defecto que reporta este ADR): renumerar no
+        // es una decisión sobre el valor. Antes de este ADR, la guarda de
+        // arriba (`newIndex === group.indexInType`) era el único mecanismo
+        // que hacía sobrevivir una edición manual, y solo por accidente —
+        // acá se hace explícito.
+        if (
+          group.replacementMode === ReplacementMode.Placeholder &&
+          !group.replacementValueUserSet
+        ) {
           // ADR-057: la escalera usa group.members (sin cambios acá) contra
           // el indexInType YA actualizado arriba.
           group.replacementValue = computeReplacementValue(
@@ -1028,20 +1051,32 @@ export class GroupingEngine implements IEngine {
         if (replacementValue === undefined) {
           // ADR-057 §7: solo se llega acá cuando el patch NO trae
           // replacementValue explícito — la edición manual del usuario nunca
-          // pasa por la escalera.
+          // pasa por la escalera. ADR-076 §3/§4 fila 4: el usuario tocó el
+          // selector de modo — el valor atado al modo anterior ya no aplica,
+          // así que esto recalcula y apaga el flag sin importar su estado
+          // previo (es también la vía de vuelta al valor automático, §5).
           group.replacementValue = computeReplacementValue(
             group,
             session.seed,
             this.resolveMaskFormat(session, group),
           );
+          group.replacementValueUserSet = false;
         }
       }
 
       if (replacementValue !== undefined) {
+        // ADR-076 §2: el único canal por el que el usuario escribe un valor.
+        // "" cuenta como edición (es lo que corresponde para redact) — no
+        // hay chequeo de longitud. Si el patch también trae replacementMode,
+        // la rama de arriba ya corrió y no tocó replacementValue (guardada
+        // por `replacementValue === undefined`): la que gana es la que el
+        // usuario escribió (§2, segunda precisión).
         group.replacementValue = replacementValue;
+        group.replacementValueUserSet = true;
       } else if (
         replacementMode === undefined &&
         changed.has("personGender") &&
+        !group.replacementValueUserSet && // ADR-076 §4 fila 5
         (group.replacementMode === ReplacementMode.Placeholder ||
           group.replacementMode === ReplacementMode.Synthetic)
       ) {
@@ -1141,12 +1176,17 @@ export class GroupingEngine implements IEngine {
       // tras un merge, no solo cuando cambia el índice. target.members ya
       // incluye los de `source` (arriba): la escalera de ADR-057 ve el peor
       // caso del grupo fusionado completo, ya con el personGender resuelto
-      // arriba si cambió.
-      target.replacementValue = computeReplacementValue(
-        target,
-        session.seed,
-        this.resolveMaskFormat(session, target),
-      );
+      // arriba si cambió. ADR-076 §4 fila 6: el grupo sobreviviente conserva
+      // su identidad —id, modo, personGenderUserSet (ADR-069 §5)— y también
+      // su replacementValueUserSet; `source` se elimina sin que su propio
+      // flag importe.
+      if (!target.replacementValueUserSet) {
+        target.replacementValue = computeReplacementValue(
+          target,
+          session.seed,
+          this.resolveMaskFormat(session, target),
+        );
+      }
       target.updatedAt = Date.now();
 
       session.groups.delete(sourceGroupId);
@@ -1223,6 +1263,9 @@ export class GroupingEngine implements IEngine {
       createdAt: now,
       updatedAt: now,
       personGenderUserSet: false,
+      // ADR-076 §4 fila 1/7: un grupo recién creado no tiene edición que
+      // preservar.
+      replacementValueUserSet: false,
       normalizedValues: new Set(),
       aliasFrequency: new Map(),
       aliasFirstSeen: new Map(),
@@ -1265,12 +1308,16 @@ export class GroupingEngine implements IEngine {
     // Se usa `remainingRecords` directo (no session.recordedOccurrences): la
     // reasignación de groupId a `created.id` para los movidos pasa recién
     // abajo. group.members ya es remainingMembers (arriba): la escalera de
-    // ADR-057 ve el grupo original ya reducido.
-    group.replacementValue = computeReplacementValue(
-      group,
-      session.seed,
-      resolveMaskFormatFromRecords(remainingRecords, group.type),
-    );
+    // ADR-057 ve el grupo original ya reducido. ADR-076 §4 fila 8: `group`
+    // es el mismo grupo de antes, con menos members — su valor manual, si
+    // tiene uno, se respeta igual que el de `dropOccurrences` (fila 9).
+    if (!group.replacementValueUserSet) {
+      group.replacementValue = computeReplacementValue(
+        group,
+        session.seed,
+        resolveMaskFormatFromRecords(remainingRecords, group.type),
+      );
+    }
     group.updatedAt = now;
 
     for (const rec of session.recordedOccurrences) {
@@ -1390,11 +1437,15 @@ export class GroupingEngine implements IEngine {
         };
         group.replacementMode = req.mode;
         group.replacementMode = resolveMode(group, session.rules);
+        // ADR-076 §4 fila 10: fija group.replacementMode a lo que pidió el
+        // usuario — misma familia que la rama de modo de applyGroupUpdate
+        // (fila 4), recalcula y apaga el flag sin importar su estado previo.
         group.replacementValue = computeReplacementValue(
           group,
           session.seed,
           this.resolveMaskFormat(session, group),
         );
+        group.replacementValueUserSet = false;
         group.updatedAt = Date.now();
 
         const changed: (keyof EntityGroup)[] = [
@@ -1665,6 +1716,9 @@ export class GroupingEngine implements IEngine {
       createdAt: now,
       updatedAt: now,
       personGenderUserSet: false,
+      // ADR-076 §4 fila 1/7: un grupo recién creado no tiene edición que
+      // preservar.
+      replacementValueUserSet: false,
       normalizedValues: new Set([occurrence.normalizedValue]),
       aliasFrequency: new Map([[occurrence.value, 1]]),
       aliasFirstSeen: new Map([
@@ -1820,6 +1874,12 @@ export class GroupingEngine implements IEngine {
         replacementMode: group.replacementMode,
         replacementValue: group.replacementValue,
       };
+      // ADR-076 §4 fila 11: ya corre solo cuando el modo EFECTIVO cambió —
+      // exactamente la condición de §3 ("el corte es si el modo cambió"),
+      // así que no hace falta mirar el flag para decidir si entra; solo
+      // apagarlo una vez adentro. Es el único caso donde un valor manual se
+      // pierde sin que el usuario haya tocado ese grupo (§6) — correcto por
+      // §3, documentado porque puede sorprender.
       const effectiveMode = resolveMode(group, session.rules);
       if (effectiveMode === beforeReplacement.replacementMode) continue;
 
@@ -1829,6 +1889,7 @@ export class GroupingEngine implements IEngine {
         session.seed,
         this.resolveMaskFormat(session, group),
       );
+      group.replacementValueUserSet = false;
       group.updatedAt = Date.now();
 
       const changed: (keyof EntityGroup)[] = [
