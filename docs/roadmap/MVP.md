@@ -472,7 +472,7 @@ No sale de `Cambios para hacer.txt` ni de un hito anterior: son los puntos **1, 
 | 12 | ADR-075 + `Regex_Engine.md` (docs) | — | — | **hecho** |
 | 13 | `date-textual-ar` y la guarda de corrida | `regex-engine` | 12, 5 | **hecho** |
 | 14 | ADR-076 + `Grouping_Engine.md`, `UX_Guidelines.md`, enmienda de ADR-057 §7 (docs) | — | — | **hecho** |
-| 15 | `replacementValueUserSet` y los once puntos de recálculo | `grouping-engine` | 14, 7 | |
+| 15 | `replacementValueUserSet` y los once puntos de recálculo | `grouping-engine` | 14, 7 | **hecho** |
 
 Los tres PRs de `grouping-engine` (2, 7, 15) van **en ese orden** y no en paralelo: tocan funciones distintas del mismo archivo, así que el conflicto es de rebase y no de diseño, pero rebasear tres veces el mismo archivo en desorden no lo hace más rápido. Los PRs 5 y 6 son el mismo cambio en dos motores y **se escriben una vez y se adaptan** — `mapSpanToWords` de `ner-engine` es una copia adaptada de la de `regex-engine` (P-2 impide compartirla). El 13 va después del 5 porque los dos tocan `regex-engine`.
 

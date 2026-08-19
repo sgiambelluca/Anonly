@@ -1381,14 +1381,23 @@ describe("GroupingEngine — edge cases", () => {
   //
   // "Andrea" (`A`/ambiguo en el registro, ADR-069 §1) a propósito: este test
   // prueba la escalera, no la inferencia de género.
-  it("hand-edited replacementValue survives finishSession and level selection", async () => {
+  // ADR-076 §Contexto 6 / Decisión §4 fila 2: corrección del test que
+  // ADR-057 §Tests pedía. La versión anterior tenía un solo grupo Person, así
+  // que su indexInType nunca cambiaba al renumerar — la guarda de ADR-028
+  // (`newIndex === group.indexInType`) cortaba antes de llegar a la rama que
+  // recalcula, y el test pasaba sin ejercitar la condición que dispara el
+  // defecto real. Acá se agrega un segundo grupo Person que documentalmente
+  // aparece ANTES (bbox.y menor), así que `renumberGroupsCanonically` sí
+  // mueve el índice del grupo editado — de 1 a 2 — y es ahí donde antes de
+  // ADR-076 se perdía la edición manual.
+  it("hand-edited replacementValue survives a finishSession that DOES change indexInType", async () => {
     ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
       documentId: "doc-1",
       occurrence: makeOccurrence({
         entityType: EntityType.Person,
         value: "Andrea Perez",
         normalizedValue: "andrea perez",
-        bbox: makeBBox(0, 0, 150, 20),
+        bbox: makeBBox(0, 100, 150, 20),
       }),
     });
     const [group] = engine.getSnapshot("doc-1").groups;
@@ -1416,9 +1425,98 @@ describe("GroupingEngine — edge cases", () => {
       }),
     });
 
+    // Segundo grupo Person, sin editar, que aparece ANTES en el documento
+    // (bbox.y = 0 < 100 del grupo editado): mueve el indexInType del grupo
+    // editado de 1 a 2 al renumerar.
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: "Bruno Diaz",
+        normalizedValue: "bruno diaz",
+        bbox: makeBBox(0, 0, 150, 20),
+      }),
+    });
+
     ctx.bus.emit(EventChannel.Regex, EngineEvents.REGEX_FINISHED, {
       documentId: "doc-1",
-      occurrenceCount: 2,
+      occurrenceCount: 3,
+      durationMs: 1,
+    });
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.NER_FINISHED, {
+      documentId: "doc-1",
+      occurrenceCount: 0,
+      durationMs: 1,
+    });
+
+    const groups = engine.getSnapshot("doc-1").groups;
+    const edited = groups.find((g) => g.id === group!.id);
+    const other = groups.find((g) => g.id !== group!.id);
+    expect(edited?.members).toHaveLength(2);
+    // El índice SÍ se movió — es la condición que el test anterior no
+    // ejercitaba.
+    expect(edited?.indexInType).toBe(2);
+    // Y el valor editado a mano sobrevive de todos modos (ADR-076 §3): el
+    // corte es si el modo cambió, no si el índice se movió.
+    expect(edited?.replacementValue).toBe("[CUSTOM TEXT]");
+    // El grupo no editado sí se recalcula con su índice canónico nuevo.
+    // "Bruno" resuelve masculino por el léxico de género (ADR-060/ADR-069).
+    expect(other?.indexInType).toBe(1);
+    expect(other?.replacementValue).toBe("[HOMBRE 01]");
+  });
+
+  // ─── ADR-076: la edición manual de replacementValue gana siempre ───
+
+  // Contexto §3, el segundo camino: `inferGendersOnFinish` pisaba el valor
+  // manual sin pasar por `renumberGroupsCanonically`. "Andrea" es ambiguo en
+  // el léxico (ADR-069 §1); "Andres" es "m" y fuzzy-matchea contra "Andrea"
+  // (`levenshteinNormalized("andrea ruiz","andres ruiz") ≈ 0.909 ≥ 0.88`,
+  // verificado). El repro real de ADR-076 usa "Julia Ruiz" como segundo
+  // alias — no fuzzy-matchea "Andrea Ruiz" bajo el umbral por defecto (la
+  // diferencia de nombre es de varios caracteres), así que no uniría el
+  // mismo grupo; "Andres Ruiz" preserva la propiedad que el repro necesita
+  // (alias con género determinable, más frecuente que el original) de forma
+  // verificable contra el motor real.
+  it("hand-edited replacementValue survives gender inference at finishSession", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: "Andrea Ruiz",
+        normalizedValue: "andrea ruiz",
+        bbox: makeBBox(0, 0, 150, 20),
+      }),
+    });
+    const [group] = engine.getSnapshot("doc-1").groups;
+    expect(group?.personGender).toBeUndefined();
+
+    const updated = await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group!.id,
+      patch: { replacementValue: "[P1]" },
+    });
+    expect(updated.replacementValue).toBe("[P1]");
+
+    // Dos "Andres Ruiz": la primera empata en frecuencia con "Andrea Ruiz"
+    // (canonicalValue no se mueve, primer-insertado gana el empate); la
+    // segunda la supera y canonicalValue pasa a "Andres Ruiz" — sin pasar
+    // por ninguno de los tres disparadores inmediatos de ADR-069 §6(a).
+    for (let i = 0; i < 2; i++) {
+      ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: makeOccurrence({
+          entityType: EntityType.Person,
+          value: "Andres Ruiz",
+          normalizedValue: "andres ruiz",
+          bbox: makeBBox(0, 40 + i * 20, 150, 20),
+        }),
+      });
+    }
+    expect(engine.getSnapshot("doc-1").groups[0]?.canonicalValue).toBe("Andres Ruiz");
+
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.REGEX_FINISHED, {
+      documentId: "doc-1",
+      occurrenceCount: 3,
       durationMs: 1,
     });
     ctx.bus.emit(EventChannel.Ner, EngineEvents.NER_FINISHED, {
@@ -1428,11 +1526,369 @@ describe("GroupingEngine — edge cases", () => {
     });
 
     const final = engine.getSnapshot("doc-1").groups[0];
-    expect(final?.members).toHaveLength(2);
-    // Único grupo de su tipo: su indexInType no cambia al renumerar, así que
-    // finishSession ni siquiera intenta recomputar el placeholder.
-    expect(final?.indexInType).toBe(1);
-    expect(final?.replacementValue).toBe("[CUSTOM TEXT]");
+    // La inferencia SÍ corrió (prueba de que el escenario dispara lo que
+    // dice disparar) — lo que no corrió es el pisado del valor.
+    expect(final?.personGender).toBe("m");
+    expect(final?.replacementValue).toBe("[P1]");
+  });
+
+  // Mismo repro, en modo synthetic: ADR-071 §6 hizo que un género inferido en
+  // finishSession repinte también synthetic, no solo placeholder — así que
+  // el flag tiene que protegerlo ahí también.
+  it("hand-edited replacementValue survives inference in synthetic mode too", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: "Andrea Ruiz",
+        normalizedValue: "andrea ruiz",
+        bbox: makeBBox(0, 0, 150, 20),
+      }),
+    });
+    const [group] = engine.getSnapshot("doc-1").groups;
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group!.id,
+      patch: { replacementMode: ReplacementMode.Synthetic },
+    });
+    const updated = await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group!.id,
+      patch: { replacementValue: "[P1]" },
+    });
+    expect(updated.replacementValue).toBe("[P1]");
+
+    for (let i = 0; i < 2; i++) {
+      ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: makeOccurrence({
+          entityType: EntityType.Person,
+          value: "Andres Ruiz",
+          normalizedValue: "andres ruiz",
+          bbox: makeBBox(0, 40 + i * 20, 150, 20),
+        }),
+      });
+    }
+
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.REGEX_FINISHED, {
+      documentId: "doc-1",
+      occurrenceCount: 3,
+      durationMs: 1,
+    });
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.NER_FINISHED, {
+      documentId: "doc-1",
+      occurrenceCount: 0,
+      durationMs: 1,
+    });
+
+    const final = engine.getSnapshot("doc-1").groups[0];
+    expect(final?.personGender).toBe("m");
+    expect(final?.replacementMode).toBe(ReplacementMode.Synthetic);
+    expect(final?.replacementValue).toBe("[P1]");
+  });
+
+  // Fusión y división: el sobreviviente/remanente conserva su identidad
+  // (mismo criterio que ADR-069 §5 con personGenderUserSet, ADR-072 §1 con
+  // el id) — el grupo nuevo de una división no tiene edición que preservar.
+  // dropOccurrences (fila 9) y reopenSession + finishSession (que no tocan
+  // session.groups en absoluto, nota 15 de cabecera) van en el mismo test:
+  // ADR-076 §8 los agrupa en una sola fila de §14.
+  it("hand-edited replacementValue survives merge, split, dropOccurrences and reopenSession", async () => {
+    const occA = makeOccurrence({
+      entityType: EntityType.Person,
+      value: "Katarzyna Nowak",
+      normalizedValue: "katarzyna nowak",
+      bbox: makeBBox(0, 0, 200, 20),
+    });
+    const occB = makeOccurrence({
+      entityType: EntityType.Person,
+      value: "Katarzyna Nowakk",
+      normalizedValue: "katarzyna nowakk",
+      bbox: makeBBox(0, 20, 200, 20),
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: occA,
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: occB,
+    });
+    const [target] = engine.getSnapshot("doc-1").groups;
+    expect(target?.members).toHaveLength(2);
+
+    const editedTarget = await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: target!.id,
+      patch: { replacementValue: "[P1]" },
+    });
+    expect(editedTarget.replacementValue).toBe("[P1]");
+
+    // Fusión: otro grupo se elimina DENTRO del target editado — el valor
+    // manual del sobreviviente no se toca (fila 6).
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: "Ingrid Muller",
+        normalizedValue: "ingrid muller",
+        bbox: makeBBox(0, 300, 200, 20),
+      }),
+    });
+    const source = engine
+      .getSnapshot("doc-1")
+      .groups.find((g) => g.canonicalValue === "Ingrid Muller")!;
+    const merged = await engine.applyGroupMerge({
+      documentId: "doc-1",
+      sourceGroupId: source.id,
+      targetGroupId: target!.id,
+    });
+    expect(merged.id).toBe(target!.id);
+    expect(merged.replacementValue).toBe("[P1]");
+    expect(merged.members).toHaveLength(3);
+
+    // División: el remanente (mismo id) conserva el valor manual (fila 8);
+    // el grupo nuevo nace calculado (fila 7) — es otra entidad.
+    const { merged: remnant, created } = await engine.applyGroupSplit({
+      documentId: "doc-1",
+      groupId: target!.id,
+      occurrenceIds: [occB.id],
+    });
+    expect(remnant.id).toBe(target!.id);
+    expect(remnant.replacementValue).toBe("[P1]");
+    expect(created.replacementValue).not.toBe("[P1]");
+    // nextIndex ya entregó 1 (target) y 2 (source, fusionado y eliminado);
+    // el grupo nuevo de la división recibe el siguiente, 3 — el número en sí
+    // no es el punto del test, sino que sea un placeholder recién calculado.
+    expect(created.replacementValue).toBe("[PERSONA 03]");
+
+    // dropOccurrences: un grupo DISTINTO (DNI, no Person) también editado a
+    // mano, para no interferir con el escenario de fusión/división de arriba.
+    const occKept = makeOccurrence({
+      entityType: EntityType.DNI,
+      value: "11111111",
+      normalizedValue: "11111111",
+      pageIndex: 0,
+    });
+    const occDropped = makeOccurrence({
+      entityType: EntityType.DNI,
+      value: "11111111",
+      normalizedValue: "11111111",
+      pageIndex: 1,
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: occKept,
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: occDropped,
+    });
+    const dniGroup = engine.getSnapshot("doc-1").groups.find((g) => g.type === EntityType.DNI);
+    expect(dniGroup?.members).toHaveLength(2);
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: dniGroup!.id,
+      patch: { replacementValue: "[P1]" },
+    });
+
+    // Re-OCR de la página 1 (ADR-038 §5.3): el grupo sobrevive con un solo
+    // member, y su mask/placeholder dependería de ese member remanente si no
+    // fuera por el valor manual.
+    engine.dropOccurrences("doc-1", { pageIndices: [1] });
+    const afterDrop = engine.getSnapshot("doc-1").groups.find((g) => g.id === dniGroup!.id);
+    expect(afterDrop?.members).toHaveLength(1);
+    expect(afterDrop?.replacementValue).toBe("[P1]");
+
+    engine.reopenSession("doc-1", { expectRegex: true, expectNer: false });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.REGEX_FINISHED, {
+      documentId: "doc-1",
+      occurrenceCount: 1,
+      durationMs: 1,
+    });
+    const afterReopen = engine.getSnapshot("doc-1").groups.find((g) => g.id === dniGroup!.id);
+    expect(afterReopen?.replacementValue).toBe("[P1]");
+  });
+
+  // Fila 4: la vía de vuelta al valor automático (§5) — cambiar de modo
+  // reemplaza el valor manual y apaga el flag; volver al modo original da el
+  // valor CALCULADO, no el manual que había antes.
+  it("an explicit replacementMode change replaces the hand-edited value and clears the flag", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "11111111", normalizedValue: "11111111" }),
+    });
+    const [group] = engine.getSnapshot("doc-1").groups;
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group!.id,
+      patch: { replacementValue: "[P1]" },
+    });
+
+    const asMask = await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group!.id,
+      patch: { replacementMode: ReplacementMode.Mask },
+    });
+    expect(asMask.replacementValue).toBe(MASK_FORMAT_BY_TYPE[EntityType.DNI]);
+    expect(asMask.replacementValue).not.toBe("[P1]");
+
+    const backToPlaceholder = await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group!.id,
+      patch: { replacementMode: ReplacementMode.Placeholder },
+    });
+    // El valor automático, no el "[P1]" que hubo antes de tocar el modo.
+    expect(backToPlaceholder.replacementValue).toBe("[DNI 01]");
+  });
+
+  // Fila 11: una regla que cambia el modo EFECTIVO del grupo pisa el valor
+  // manual sin que el usuario haya tocado ese grupo — correcto por §3, y es
+  // el único caso listado así en Contexto §6/Decisión §6. Una regla que no
+  // cambia el modo efectivo no lo toca en absoluto.
+  it("a rule that changes the effective mode replaces it; one that does not, leaves it", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "11111111", normalizedValue: "11111111" }),
+    });
+    const [group] = engine.getSnapshot("doc-1").groups;
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group!.id,
+      patch: { replacementValue: "[P1]" },
+    });
+
+    // Regla que NO cambia el modo efectivo (ya está en placeholder, el
+    // default): recomputeAllGroupModes ni siquiera entra al bloque de
+    // recálculo (`effectiveMode === before`).
+    await engine.applyRuleCreated({
+      documentId: "doc-1",
+      rule: makeRule("global", ReplacementMode.Placeholder, { priority: 5 }),
+    });
+    expect(engine.getSnapshot("doc-1").groups[0]?.replacementValue).toBe("[P1]");
+
+    // Regla que SÍ cambia el modo efectivo a mask: pisa el valor manual.
+    await engine.applyRuleCreated({
+      documentId: "doc-1",
+      rule: makeRule("global", ReplacementMode.Mask, { priority: 10 }),
+    });
+    const afterRule = engine.getSnapshot("doc-1").groups[0];
+    expect(afterRule?.replacementMode).toBe(ReplacementMode.Mask);
+    expect(afterRule?.replacementValue).toBe(MASK_FORMAT_BY_TYPE[EntityType.DNI]);
+    expect(afterRule?.replacementValue).not.toBe("[P1]");
+  });
+
+  // Fila 10: resolver un conflicto fija replacementMode a lo que pidió el
+  // usuario — misma familia que un cambio de modo explícito (fila 4).
+  it("applyConflictResolve replaces the hand-edited value", async () => {
+    const existing = makeOccurrence({
+      entityType: EntityType.CreditCard,
+      source: DetectionSource.Regex,
+      confidence: 0.9,
+      bbox: makeBBox(0, 0, 100, 20),
+      value: "4111111111111111",
+      normalizedValue: "4111111111111111",
+    });
+    const incoming = makeOccurrence({
+      entityType: EntityType.IBAN,
+      source: DetectionSource.Regex,
+      confidence: 0.5,
+      bbox: makeBBox(0, 0, 100, 20),
+      value: "ES1234",
+      normalizedValue: "es1234",
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: existing,
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: incoming,
+    });
+    const [group] = engine.getSnapshot("doc-1").groups;
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group!.id,
+      patch: { replacementValue: "[P1]" },
+    });
+
+    const [conflict] = engine.getSnapshot("doc-1").conflicts;
+    const resolved = await engine.applyConflictResolve({
+      documentId: "doc-1",
+      conflictId: conflict!.id,
+      mode: ReplacementMode.Redact,
+    });
+    expect(resolved.resolvedMode).toBe(ReplacementMode.Redact);
+    const after = engine.getSnapshot("doc-1").groups.find((g) => g.id === group!.id);
+    expect(after?.replacementMode).toBe(ReplacementMode.Redact);
+    expect(after?.replacementValue).toBe("");
+    expect(after?.replacementValue).not.toBe("[P1]");
+  });
+
+  // §2, segunda precisión: un patch con las dos claves deja el valor del
+  // usuario Y el flag encendido — probado indirectamente (el flag no se
+  // expone) haciendo que un evento posterior que respetaría el flag
+  // preserve el valor.
+  it("a patch with both replacementMode and replacementValue keeps the user's value", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "11111111", normalizedValue: "11111111" }),
+    });
+    const [group] = engine.getSnapshot("doc-1").groups;
+
+    const updated = await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group!.id,
+      patch: { replacementMode: ReplacementMode.Mask, replacementValue: "[P1]" },
+    });
+    expect(updated.replacementMode).toBe(ReplacementMode.Mask);
+    expect(updated.replacementValue).toBe("[P1]");
+
+    // El flag quedó en true (no solo el valor por casualidad): dropOccurrences
+    // recalcularía el mask si no lo respetara — mismo mecanismo que la fila 9.
+    const occSameGroup = makeOccurrence({
+      value: "11111111",
+      normalizedValue: "11111111",
+      pageIndex: 1,
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: occSameGroup,
+    });
+    engine.dropOccurrences("doc-1", { pageIndices: [1] });
+    expect(engine.getSnapshot("doc-1").groups[0]?.replacementValue).toBe("[P1]");
+  });
+
+  // §2, primera precisión: "" es una elección (lo que corresponde a redact),
+  // no una ausencia — cuenta como edición manual igual que cualquier otro
+  // valor.
+  it("an empty-string replacementValue counts as a manual edit", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "11111111", normalizedValue: "11111111" }),
+    });
+    const [group] = engine.getSnapshot("doc-1").groups;
+    const updated = await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group!.id,
+      patch: { replacementValue: "" },
+    });
+    expect(updated.replacementValue).toBe("");
+
+    // Mismo mecanismo de verificación que el test anterior: si "" no hubiera
+    // marcado el flag, dropOccurrences recalcularía el placeholder por
+    // encima de la cadena vacía.
+    const occSameGroup = makeOccurrence({
+      value: "11111111",
+      normalizedValue: "11111111",
+      pageIndex: 1,
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: occSameGroup,
+    });
+    engine.dropOccurrences("doc-1", { pageIndices: [1] });
+    expect(engine.getSnapshot("doc-1").groups[0]?.replacementValue).toBe("");
   });
 
   // ADR-057 §6: mask/synthetic/redact no participan de la escalera — un
