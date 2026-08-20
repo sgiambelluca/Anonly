@@ -74,8 +74,8 @@ import { WorkerPool } from "./worker-pool.js";
  * "export" solo como identificador interno; `WorkerPoolManager` sigue
  * gestionando únicamente los cuatro pools "de verdad" vía `ManagedPoolKey` —
  * ver `worker-pool.ts`). `maxQueue` usa el literal `EXPORT_QUEUE_LIMIT`
- * (comentario junto a su construcción, más abajo): ADR-047 §2 lo nombra pero
- * no fija un valor.
+ * (comentario junto a su construcción, más abajo): el valor es 8, hoy fijado
+ * por ADR-047 §2.
  */
 export async function createCore(
   config?: EngineConfigOverrides,
@@ -102,6 +102,11 @@ export async function createCore(
     maxRetries: mergedConfig.workerPool.maxRetries["render-page"],
     baseRetryDelayMs: mergedConfig.workerPool.baseRetryDelayMs,
     maxRetryDelayMs: mergedConfig.workerPool.maxRetryDelayMs,
+    // ADR-080: los cuatro pools que construye este archivo salieron de
+    // `WorkerPoolManager` (ADR-043/045/046/047) y con eso perdieron el
+    // idle-dispose de `05_Worker_Architecture.md` §8 — retenían sus workers
+    // (incluidos los ~178 MB del modelo NER) hasta cerrar la pestaña.
+    idleDisposeMs: mergedConfig.workerPool.idleDisposeMs,
     bus,
     logger,
     ...(runtime?.workers?.render !== undefined ? { workerFactory: runtime.workers.render } : {}),
@@ -118,6 +123,11 @@ export async function createCore(
     maxRetries: mergedConfig.workerPool.maxRetries["ocr-page"],
     baseRetryDelayMs: mergedConfig.workerPool.baseRetryDelayMs,
     maxRetryDelayMs: mergedConfig.workerPool.maxRetryDelayMs,
+    // ADR-080: los cuatro pools que construye este archivo salieron de
+    // `WorkerPoolManager` (ADR-043/045/046/047) y con eso perdieron el
+    // idle-dispose de `05_Worker_Architecture.md` §8 — retenían sus workers
+    // (incluidos los ~178 MB del modelo NER) hasta cerrar la pestaña.
+    idleDisposeMs: mergedConfig.workerPool.idleDisposeMs,
     bus,
     logger,
     ...(runtime?.workers?.ocr !== undefined ? { workerFactory: runtime.workers.ocr } : {}),
@@ -133,6 +143,11 @@ export async function createCore(
     maxRetries: mergedConfig.workerPool.maxRetries["ner-page"],
     baseRetryDelayMs: mergedConfig.workerPool.baseRetryDelayMs,
     maxRetryDelayMs: mergedConfig.workerPool.maxRetryDelayMs,
+    // ADR-080: los cuatro pools que construye este archivo salieron de
+    // `WorkerPoolManager` (ADR-043/045/046/047) y con eso perdieron el
+    // idle-dispose de `05_Worker_Architecture.md` §8 — retenían sus workers
+    // (incluidos los ~178 MB del modelo NER) hasta cerrar la pestaña.
+    idleDisposeMs: mergedConfig.workerPool.idleDisposeMs,
     bus,
     logger,
     ...(runtime?.workers?.ner !== undefined ? { workerFactory: runtime.workers.ner } : {}),
@@ -142,11 +157,13 @@ export async function createCore(
   // con `size: 1` (espejo de `ocrPool`/`nerPool`; sin onWorkerCreated, sin
   // estado por documento que re-primear — el ensamblador retiene su propio
   // `PDFDocument` del otro lado de la frontera, `export-engine/src/worker/entry.ts`).
-  // `EXPORT_QUEUE_LIMIT`: sin fuente documentada de valor (ADR-047 §2 lo
-  // nombra pero no lo define; no es una clave nueva de `WorkerPoolConfig`,
-  // ADR-036 §1 se conserva). Se usa el mismo default que `ocr`/`ner`
+  // `EXPORT_QUEUE_LIMIT`: 8, el mismo default que `ocr`/`ner`
   // (`MAX_QUEUE_PER_POOL`, Contracts.md §6) por ser el pool de tamaño
-  // comparable (1-2); reportado como asunción a confirmar en el reporte del PR.
+  // comparable (1-2). NO es una clave nueva de `WorkerPoolConfig` — ADR-036
+  // §1 se conserva, el façade lo pasa como literal. La asunción quedó
+  // confirmada: ADR-047 §2 escribía el nombre de la constante como si
+  // remitiera a una fuente publicada que no existe, y su errata fija el
+  // literal 8. Es funcionalmente inerte con `size: 1` y despacho secuencial.
   const EXPORT_QUEUE_LIMIT = 8;
   const exportPool = new WorkerPool({
     poolKey: "export",
@@ -156,6 +173,11 @@ export async function createCore(
     maxRetries: mergedConfig.workerPool.maxRetries["export-page"],
     baseRetryDelayMs: mergedConfig.workerPool.baseRetryDelayMs,
     maxRetryDelayMs: mergedConfig.workerPool.maxRetryDelayMs,
+    // ADR-080: los cuatro pools que construye este archivo salieron de
+    // `WorkerPoolManager` (ADR-043/045/046/047) y con eso perdieron el
+    // idle-dispose de `05_Worker_Architecture.md` §8 — retenían sus workers
+    // (incluidos los ~178 MB del modelo NER) hasta cerrar la pestaña.
+    idleDisposeMs: mergedConfig.workerPool.idleDisposeMs,
     bus,
     logger,
     ...(runtime?.workers?.export !== undefined ? { workerFactory: runtime.workers.export } : {}),

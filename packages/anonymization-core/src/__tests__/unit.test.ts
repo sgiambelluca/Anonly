@@ -888,6 +888,47 @@ describe("Orchestrator — unit tests", () => {
       expect(onProgress).not.toHaveBeenCalled();
     });
 
+    it("un PROGRESS con un jobId ajeno no llega al onProgress del job pendiente", async () => {
+      // El caso realmente discriminante de la correlación: con `nerPoolSize: 2`
+      // hay dos jobs en vuelo a la vez, y una correlación rota traduciría el
+      // progreso de carga de modelo de un worker como progreso del otro. Los
+      // otros dos tests de este bloque no lo cubren: uno usa el jobId correcto
+      // y el otro un job ya resuelto (ausente del mapa, así que cualquier
+      // implementación lo descarta).
+      const worker = createFakeWorker();
+      const pool = new WorkerPool({
+        poolKey: "ner",
+        jobType: "ner-page",
+        size: 1,
+        maxQueue: 10,
+        maxRetries: 0,
+        baseRetryDelayMs: 1,
+        maxRetryDelayMs: 1,
+        bus,
+        logger: createMockLogger(),
+        workerFactory: () => worker,
+      });
+
+      const onProgress = vi.fn();
+      const dispatchPromise = pool.dispatch({
+        run: vi.fn(),
+        payload: {},
+        signal: new AbortController().signal,
+        onProgress,
+      });
+      await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalled());
+      const jobId = (worker.postMessage.mock.calls[0]?.[0] as { readonly jobId: string }).jobId;
+
+      expect(() =>
+        worker.emitMessage({ type: "PROGRESS", jobId: `${jobId}-ajeno`, progress: 0.5 }),
+      ).not.toThrow();
+      expect(onProgress).not.toHaveBeenCalled();
+
+      // Y el job pendiente sigue vivo: el PROGRESS ajeno no lo tocó.
+      worker.emitMessage({ type: "COMPLETED", jobId, result: "done" });
+      await expect(dispatchPromise).resolves.toBe("done");
+    });
+
     it("con workerFactory pero sin payload, sigue siendo in-process (fallback, sin romper el Hito 9)", async () => {
       const worker = createFakeWorker();
       const pool = new WorkerPool({
@@ -1056,7 +1097,7 @@ describe("Orchestrator — unit tests", () => {
       );
     });
 
-    it("un worker que crashea (evento error) rechaza con InvalidInputError, NO reintenta, y se recrea perezosamente en el próximo dispatch", async () => {
+    it("un worker que crashea (evento error) rechaza con WORKER_CRASHED retryable y el job se reintenta contra el worker de reemplazo", async () => {
       const workerA = createFakeWorker();
       const workerB = createFakeWorker();
       const factory = vi.fn().mockReturnValueOnce(workerA).mockReturnValueOnce(workerB);
@@ -1065,9 +1106,6 @@ describe("Orchestrator — unit tests", () => {
         jobType: "render-page",
         size: 1,
         maxQueue: 10,
-        // maxRetries > 0 a propósito: el test prueba que un crash de
-        // transporte NO dispara reintento aunque el pool sí reintentaría
-        // otros errores retryable (ver handleWorkerTransportError).
         maxRetries: 2,
         baseRetryDelayMs: 1,
         maxRetryDelayMs: 1,
@@ -1076,45 +1114,240 @@ describe("Orchestrator — unit tests", () => {
         workerFactory: factory,
       });
 
-      const firstDispatch = pool
-        .dispatch({ run: vi.fn(), payload: {}, signal: new AbortController().signal })
-        .catch((err: unknown) => err);
+      const dispatched = pool.dispatch({
+        run: vi.fn(),
+        payload: {},
+        signal: new AbortController().signal,
+      });
       await vi.waitFor(() => expect(workerA.postMessage).toHaveBeenCalled());
 
       workerA.emitError();
-      const firstResult = await firstDispatch;
 
-      // InvalidInputError (Code_Standards.md §7), no un Error genérico: no
-      // hay un EngineErrorCode dedicado a "crash de transporte" (I-4) —
-      // mismo criterio que toSerializedError. retryable: false de fábrica
-      // (InvalidInputError, shared/src/errors.ts).
-      expect(firstResult).toBeInstanceOf(EngineError);
-      expect((firstResult as InstanceType<typeof EngineError>).code).toBe(
-        EngineErrorCode.INVALID_INPUT,
+      // ADR-077: el slot se libera y el reintento construye un worker nuevo.
+      // Hasta ese ADR el rechazo era `InvalidInputError` (retryable: false) y
+      // el job se perdía acá, en silencio, contra lo que `05` §9 especifica.
+      await vi.waitFor(() => expect(workerB.postMessage).toHaveBeenCalled());
+      expect(factory).toHaveBeenCalledTimes(2);
+
+      const retryJobId = (workerB.postMessage.mock.calls[0]?.[0] as { readonly jobId: string })
+        .jobId;
+      workerB.emitMessage({ type: "COMPLETED", jobId: retryJobId, result: "ok" });
+      await expect(dispatched).resolves.toBe("ok");
+    });
+
+    it("un crash de worker con maxRetriesOverride 0 no reintenta, pero el error llega clasificado como WORKER_CRASHED", async () => {
+      // El caso de ocr/ner/export (ADR-045/046/047): el pool no reintenta, el
+      // loop del motor sí — y para poder decidirlo necesita el `code`, que es
+      // lo que este test fija. Con `INVALID_INPUT` esos loops abandonaban.
+      const worker = createFakeWorker();
+      const pool = new WorkerPool({
+        poolKey: "ner",
+        jobType: "ner-page",
+        size: 1,
+        maxQueue: 10,
+        maxRetries: 2,
+        baseRetryDelayMs: 1,
+        maxRetryDelayMs: 1,
+        bus,
+        logger: createMockLogger(),
+        workerFactory: () => worker,
+      });
+
+      const dispatched = pool
+        .dispatch({
+          run: vi.fn(),
+          payload: {},
+          signal: new AbortController().signal,
+          maxRetriesOverride: 0,
+        })
+        .catch((err: unknown) => err);
+      await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalled());
+
+      worker.emitError();
+      const result = await dispatched;
+
+      expect(result).toBeInstanceOf(EngineError);
+      expect((result as InstanceType<typeof EngineError>).code).toBe(
+        EngineErrorCode.WORKER_CRASHED,
       );
-      expect((firstResult as InstanceType<typeof EngineError>).retryable).toBe(false);
+      expect((result as InstanceType<typeof EngineError>).retryable).toBe(true);
+      expect(worker.postMessage).toHaveBeenCalledTimes(1);
+    });
 
-      // Sin reintento: un solo postMessage("RUN") a workerA pese a
-      // maxRetries=2 — diferimiento deliberado (ver handleWorkerTransportError):
-      // sin worker real corriendo todavía (solo fakes), no hay contra qué
-      // validar un reintento genuino (re-priming de INIT/load-document,
-      // PR12+).
-      expect(workerA.postMessage).toHaveBeenCalledTimes(1);
+    it("un crash de worker no afecta a los jobs pendientes de otro slot", async () => {
+      const workerA = createFakeWorker();
+      const workerB = createFakeWorker();
+      const factory = vi.fn().mockReturnValueOnce(workerA).mockReturnValueOnce(workerB);
+      const pool = new WorkerPool({
+        poolKey: "render",
+        jobType: "render-page",
+        size: 2,
+        maxQueue: 10,
+        maxRetries: 0,
+        baseRetryDelayMs: 1,
+        maxRetryDelayMs: 1,
+        bus,
+        logger: createMockLogger(),
+        workerFactory: factory,
+      });
 
-      // Slot liberado + worker descartado: el siguiente dispatch remoto pide
-      // una instancia nueva a la factory (workerB), no reutiliza workerA.
-      const secondDispatch = pool.dispatch({
+      const first = pool
+        .dispatch({ run: vi.fn(), payload: {}, signal: new AbortController().signal })
+        .catch((err: unknown) => err);
+      await vi.waitFor(() => expect(workerA.postMessage).toHaveBeenCalled());
+      const second = pool.dispatch({
         run: vi.fn(),
         payload: {},
         signal: new AbortController().signal,
       });
       await vi.waitFor(() => expect(workerB.postMessage).toHaveBeenCalled());
-      expect(factory).toHaveBeenCalledTimes(2);
+
+      workerA.emitError();
+      expect((await first) as InstanceType<typeof EngineError>).toBeInstanceOf(EngineError);
 
       const secondJobId = (workerB.postMessage.mock.calls[0]?.[0] as { readonly jobId: string })
         .jobId;
       workerB.emitMessage({ type: "COMPLETED", jobId: secondJobId, result: "ok" });
-      await expect(secondDispatch).resolves.toBe("ok");
+      await expect(second).resolves.toBe("ok");
+    });
+
+    // ─── Transferencia real (ADR-079) ───
+
+    it("dispatch con transferList la pasa a postMessage; sin ella, postMessage va sin transfer", async () => {
+      const worker = createFakeWorker();
+      const pool = new WorkerPool({
+        poolKey: "ocr",
+        jobType: "ocr-page",
+        size: 1,
+        maxQueue: 10,
+        maxRetries: 0,
+        baseRetryDelayMs: 1,
+        maxRetryDelayMs: 1,
+        bus,
+        logger: createMockLogger(),
+        workerFactory: () => worker,
+      });
+
+      const buffer = new ArrayBuffer(8);
+      const withTransfer = pool.dispatch({
+        run: vi.fn(),
+        payload: { buffer },
+        signal: new AbortController().signal,
+        transferList: [buffer],
+      });
+      await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalled());
+      expect(worker.postMessage.mock.calls[0]?.[1]).toEqual([buffer]);
+
+      const firstJobId = (worker.postMessage.mock.calls[0]?.[0] as { readonly jobId: string })
+        .jobId;
+      worker.emitMessage({ type: "COMPLETED", jobId: firstJobId, result: "ok" });
+      await expect(withTransfer).resolves.toBe("ok");
+
+      const withoutTransfer = pool.dispatch({
+        run: vi.fn(),
+        payload: {},
+        signal: new AbortController().signal,
+      });
+      await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalledTimes(2));
+      // Sin transfer list el `postMessage` va con UN solo argumento: pasar
+      // `undefined` explícito cambiaría el overload elegido en un worker real.
+      expect(worker.postMessage.mock.calls[1]).toHaveLength(1);
+
+      const secondJobId = (worker.postMessage.mock.calls[1]?.[0] as { readonly jobId: string })
+        .jobId;
+      worker.emitMessage({ type: "COMPLETED", jobId: secondJobId, result: "ok" });
+      await expect(withoutTransfer).resolves.toBe("ok");
+    });
+
+    // ─── Idle-dispose (ADR-080) ───
+
+    it("libera los workers tras idleDisposeMs sin trabajo, y sigue usable después", async () => {
+      vi.useFakeTimers();
+      try {
+        const workerA = createFakeWorker();
+        const workerB = createFakeWorker();
+        const factory = vi.fn().mockReturnValueOnce(workerA).mockReturnValueOnce(workerB);
+        const pool = new WorkerPool({
+          poolKey: "ner",
+          jobType: "ner-page",
+          size: 1,
+          maxQueue: 10,
+          maxRetries: 0,
+          baseRetryDelayMs: 1,
+          maxRetryDelayMs: 1,
+          bus,
+          logger: createMockLogger(),
+          workerFactory: factory,
+          idleDisposeMs: 60_000,
+        });
+
+        const dispatched = pool.dispatch({
+          run: vi.fn(),
+          payload: {},
+          signal: new AbortController().signal,
+        });
+        await vi.waitFor(() => expect(workerA.postMessage).toHaveBeenCalled());
+
+        // Con el job en vuelo, el temporizador no puede vencer.
+        vi.advanceTimersByTime(120_000);
+        expect(workerA.terminate).not.toHaveBeenCalled();
+
+        const jobId = (workerA.postMessage.mock.calls[0]?.[0] as { readonly jobId: string }).jobId;
+        workerA.emitMessage({ type: "COMPLETED", jobId, result: "ok" });
+        await expect(dispatched).resolves.toBe("ok");
+
+        vi.advanceTimersByTime(60_000);
+        expect(workerA.terminate).toHaveBeenCalledTimes(1);
+
+        // `releaseIdleWorkers` NO es `dispose()`: el pool sigue vivo y el
+        // próximo dispatch reconstruye el worker (ADR-080 §3).
+        const afterIdle = pool.dispatch({
+          run: vi.fn(),
+          payload: {},
+          signal: new AbortController().signal,
+        });
+        await vi.waitFor(() => expect(workerB.postMessage).toHaveBeenCalled());
+        const nextJobId = (workerB.postMessage.mock.calls[0]?.[0] as { readonly jobId: string })
+          .jobId;
+        workerB.emitMessage({ type: "COMPLETED", jobId: nextJobId, result: "ok" });
+        await expect(afterIdle).resolves.toBe("ok");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("sin idleDisposeMs no arma ningún temporizador", async () => {
+      vi.useFakeTimers();
+      try {
+        const worker = createFakeWorker();
+        const pool = new WorkerPool({
+          poolKey: "ner",
+          jobType: "ner-page",
+          size: 1,
+          maxQueue: 10,
+          maxRetries: 0,
+          baseRetryDelayMs: 1,
+          maxRetryDelayMs: 1,
+          bus,
+          logger: createMockLogger(),
+          workerFactory: () => worker,
+        });
+
+        const dispatched = pool.dispatch({
+          run: vi.fn(),
+          payload: {},
+          signal: new AbortController().signal,
+        });
+        await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalled());
+        const jobId = (worker.postMessage.mock.calls[0]?.[0] as { readonly jobId: string }).jobId;
+        worker.emitMessage({ type: "COMPLETED", jobId, result: "ok" });
+        await expect(dispatched).resolves.toBe("ok");
+
+        vi.advanceTimersByTime(600_000);
+        expect(worker.terminate).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     // ─── broadcast() + onWorkerCreated (ADR-043 §4/§5, PR13) ───
@@ -1544,10 +1777,11 @@ describe("Orchestrator — unit tests", () => {
   });
 
   describe("WorkerPoolManager", () => {
-    it("disposes an idle pool after idleDisposeMs", async () => {
+    it("delega el idle-dispose en el pool en vez de tener su propio temporizador", async () => {
       vi.useFakeTimers();
       try {
         const bus = createRealBus();
+        const worker = createFakeWorker();
         const manager = new WorkerPoolManager({
           bus,
           logger: createMockLogger(),
@@ -1557,22 +1791,79 @@ describe("Orchestrator — unit tests", () => {
           baseRetryDelayMs: 1,
           maxRetryDelayMs: 1,
           idleDisposeMs: 1000,
+          workerFactories: { pdf: () => worker },
         });
 
-        const pool1 = manager.getPool("render");
-        const disposeSpy = vi.spyOn(pool1, "dispose");
+        const pool = manager.getPool("pdf");
+        // Misma instancia siempre: el manager ya no destruye ni reemplaza el
+        // pool (ADR-080 §3).
+        expect(manager.getPool("pdf")).toBe(pool);
 
+        const dispatched = pool.dispatch({
+          run: vi.fn(),
+          payload: {},
+          signal: new AbortController().signal,
+        });
+        await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalled());
+
+        // El temporizador del manager rearmaba en cada `getPool` — "tiempo
+        // desde el último acceso", la definición que ADR-080 Contexto §4
+        // declara equivocada — y liberaba SIN chequear si había trabajo. Con
+        // un job en vuelo, eso mataba el worker a mitad del job y la promesa
+        // quedaba colgada para siempre (`releaseIdleWorkers` no rechaza los
+        // pendientes, a diferencia de `dispose`).
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(worker.terminate).not.toHaveBeenCalled();
+
+        const jobId = (worker.postMessage.mock.calls[0]?.[0] as { readonly jobId: string }).jobId;
+        worker.emitMessage({ type: "COMPLETED", jobId, result: "ok" });
+        await expect(dispatched).resolves.toBe("ok");
+
+        // Ya ocioso: ahora sí libera, por el temporizador del propio pool.
         await vi.advanceTimersByTimeAsync(1000);
-        expect(disposeSpy).toHaveBeenCalled();
-
-        // Creación perezosa: una nueva llamada crea una instancia nueva.
-        const pool2 = manager.getPool("render");
-        expect(pool2).not.toBe(pool1);
+        expect(worker.terminate).toHaveBeenCalledTimes(1);
 
         manager.disposeAll();
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    it("releaseIdleWorkers es no-op si el pool NO está ocioso", async () => {
+      const bus = createRealBus();
+      const worker = createFakeWorker();
+      const pool = new WorkerPool({
+        poolKey: "pdf",
+        jobType: "pdf-parse",
+        size: 1,
+        maxQueue: 10,
+        maxRetries: 0,
+        baseRetryDelayMs: 1,
+        maxRetryDelayMs: 1,
+        bus,
+        logger: createMockLogger(),
+        workerFactory: () => worker,
+      });
+
+      const dispatched = pool.dispatch({
+        run: vi.fn(),
+        payload: {},
+        signal: new AbortController().signal,
+      });
+      await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalled());
+
+      // Llamada directa con un job en vuelo: no debe matar el worker. Si lo
+      // matara, la promesa quedaría colgada (terminate() no dispara `error`,
+      // así que nadie rechaza los pendientes).
+      pool.releaseIdleWorkers();
+      expect(worker.terminate).not.toHaveBeenCalled();
+
+      const jobId = (worker.postMessage.mock.calls[0]?.[0] as { readonly jobId: string }).jobId;
+      worker.emitMessage({ type: "COMPLETED", jobId, result: "ok" });
+      await expect(dispatched).resolves.toBe("ok");
+
+      pool.releaseIdleWorkers();
+      expect(worker.terminate).toHaveBeenCalledTimes(1);
     });
 
     it("workerFactories (ADR-036 §2) se pasa por pool: solo el pool con factory despacha remoto", async () => {

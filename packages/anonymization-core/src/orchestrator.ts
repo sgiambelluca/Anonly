@@ -128,6 +128,20 @@ function validateReanalyzePatch(patch: ReanalyzeConfigPatch): void {
       });
     }
   }
+  // ADR-081: `ner` + `ocr` en el mismo patch se rechaza. La regla 4 de
+  // ADR-038 §5 prometía "la unión de las reglas anteriores" y eso nunca se
+  // implementó: con ambos campos se entra SOLO por `runReanalyzeOcrFlow`,
+  // que por diseño toca únicamente las páginas re-OCR. Apagar NER dejaba sus
+  // ocurrencias vivas en el resto del documento; encenderlo solo lo corría
+  // sobre las páginas escaneadas. Los dos fallaban en silencio, con el
+  // pipeline llegando a `Ready`. La equivalencia se obtiene componiendo dos
+  // llamadas —y el orden importa: al revés, el flujo de NER correría sobre
+  // un texto que el OCR posterior invalida.
+  if (patch.ner !== undefined && patch.ocr !== undefined) {
+    throw new InvalidInputError(
+      "ReanalyzeConfigPatch con 'ner' y 'ocr' a la vez no está soportado: enviá un patch por campo, OCR primero (ADR-081).",
+    );
+  }
   if (patch.ner !== undefined && typeof patch.ner.enabled !== "boolean") {
     throw new InvalidInputError("patch.ner.enabled debe ser boolean.");
   }
