@@ -786,12 +786,58 @@ describe("GroupingEngine — edge cases", () => {
     ).rejects.toThrow(GroupingGroupNotFoundError);
   });
 
+  // ADR-083 §4: resolver SIN `entityType` aplica el default (mayor confidence,
+  // empate a Regex) — la rama que el `ConflictDialog` ejercita al confirmar sin
+  // elegir, y que no tenía ningún test: los tres call sites existentes pasan
+  // siempre el tipo explícito.
+  it("applyConflictResolve sin entityType aplica el default de mayor confidence", async () => {
+    const existing = makeOccurrence({
+      entityType: EntityType.CreditCard,
+      source: DetectionSource.NER,
+      // Por ENCIMA de `ner.confidenceThreshold`: con 0.6 la ocurrencia caía
+      // en el camino de baja confianza (§13 caso 9) y nunca se registraba,
+      // así que no había conflicto que resolver.
+      confidence: 0.95,
+      bbox: makeBBox(0, 0, 100, 20),
+      value: "4111111111111111",
+      normalizedValue: "4111111111111111",
+    });
+    const incoming = makeOccurrence({
+      entityType: EntityType.IBAN,
+      source: DetectionSource.Regex,
+      confidence: 1,
+      bbox: makeBBox(0, 0, 100, 20),
+      value: "ES1234",
+      normalizedValue: "es1234",
+    });
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: existing,
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: incoming,
+    });
+
+    const [conflict] = engine.getSnapshot("doc-1").conflicts;
+    const resolved = await engine.applyConflictResolve({
+      documentId: "doc-1",
+      conflictId: conflict!.id,
+    });
+
+    // Gana el candidato de mayor confidence: el de Regex (1.0) sobre el de
+    // NER (0.6). Es el mismo que la resolución automática ya había aplicado,
+    // así que confirmar no cambia el tipo del grupo.
+    expect(resolved.resolvedType).toBe(EntityType.IBAN);
+    expect(resolved.resolved).toBe(true);
+  });
+
   it("applyConflictResolve throws GroupingGroupNotFoundError on missing conflictId", async () => {
     await expect(
       engine.applyConflictResolve({
         documentId: "doc-1",
         conflictId: "does-not-exist",
-        mode: ReplacementMode.Mask,
+        entityType: EntityType.Person,
       }),
     ).rejects.toThrow(GroupingGroupNotFoundError);
   });
@@ -1264,7 +1310,7 @@ describe("GroupingEngine — edge cases", () => {
     // es la señal de staleness que dropOccurrences usa; lo es el grupo
     // eliminado.
     expect(conflict?.resolved).toBe(true);
-    const resolvedModeBefore = conflict?.resolvedMode;
+    const resolvedTypeBefore = conflict?.resolvedType;
     expect(engine.getSnapshot("doc-1").groups).toHaveLength(1);
 
     const busEmitSpy = vi.spyOn(ctx.bus, "emit");
@@ -1282,9 +1328,9 @@ describe("GroupingEngine — edge cases", () => {
     );
     expect(resolvedCall).toBeDefined();
     expect((resolvedCall?.[2] as ConflictResolved)?.conflictId).toBe(conflict!.id);
-    // Modo efectivo del grupo CreditCard antes de eliminarlo (placeholder,
-    // sin cambios entre la creación del conflicto y la eliminación).
-    expect((resolvedCall?.[2] as ConflictResolved)?.mode).toBe(resolvedModeBefore);
+    // Tipo del grupo CreditCard antes de eliminarlo (ADR-083 §3: un conflicto
+    // resuelto registra el TIPO con el que quedó clasificado el grupo).
+    expect((resolvedCall?.[2] as ConflictResolved)?.entityType).toBe(resolvedTypeBefore);
 
     const after = engine.getSnapshot("doc-1").conflicts.find((c) => c.id === conflict!.id);
     expect(after?.resolved).toBe(true);
@@ -1780,7 +1826,14 @@ describe("GroupingEngine — edge cases", () => {
 
   // Fila 10: resolver un conflicto fija replacementMode a lo que pidió el
   // usuario — misma familia que un cambio de modo explícito (fila 4).
-  it("applyConflictResolve replaces the hand-edited value", async () => {
+  // ADR-083 §2 CAMBIA lo que este test verificaba. Con `applyConflictResolve`
+  // eligiendo el modo de reemplazo, la fila 10 de ADR-076 §4 decía que la
+  // resolución pisaba el valor escrito a mano. Ahora la resolución elige el
+  // TIPO, así que el valor manual solo se recalcula si el tipo nuevo cambia el
+  // modo EFECTIVO — o sea, por la fila 4, sin regla propia. Acá el grupo no
+  // tiene reglas de scope `type`, así que el modo no cambia y la edición
+  // sobrevive, que es lo que ADR-076 §3 promete en general.
+  it("applyConflictResolve preserves the hand-edited value when the effective mode does not change", async () => {
     const existing = makeOccurrence({
       entityType: EntityType.CreditCard,
       source: DetectionSource.Regex,
@@ -1816,13 +1869,17 @@ describe("GroupingEngine — edge cases", () => {
     const resolved = await engine.applyConflictResolve({
       documentId: "doc-1",
       conflictId: conflict!.id,
-      mode: ReplacementMode.Redact,
+      entityType: EntityType.IBAN,
     });
-    expect(resolved.resolvedMode).toBe(ReplacementMode.Redact);
+    expect(resolved.resolvedType).toBe(EntityType.IBAN);
+
     const after = engine.getSnapshot("doc-1").groups.find((g) => g.id === group!.id);
-    expect(after?.replacementMode).toBe(ReplacementMode.Redact);
-    expect(after?.replacementValue).toBe("");
-    expect(after?.replacementValue).not.toBe("[P1]");
+    // El grupo se reclasificó...
+    expect(after?.type).toBe(EntityType.IBAN);
+    // ...y el valor escrito a mano sobrevivió (ADR-076 §3 + ADR-082 §4): el
+    // modo efectivo no cambió, porque no hay regla de scope `type` para IBAN.
+    expect(after?.replacementValue).toBe("[P1]");
+    expect(after?.replacementValueUserSet).toBe(true);
   });
 
   // §2, segunda precisión: un patch con las dos claves deja el valor del

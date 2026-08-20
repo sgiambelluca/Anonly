@@ -5,7 +5,7 @@ import {
   ReplacementMode,
   type EngineContext,
 } from "@anonly/shared";
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 import { GENDER_LEXICON } from "../gender-lexicon.generated.js";
 import type { GenderLexicon } from "../gender.js";
@@ -437,6 +437,366 @@ describe("GroupingEngine — unit tests", () => {
  * El artefacto real commiteado (`GENDER_LEXICON`) se prueba aparte, más
  * abajo.
  */
+describe("GroupingEngine — cambio de tipo del grupo (ADR-082)", () => {
+  let engine: GroupingEngine;
+  let ctx: EngineContext;
+
+  beforeEach(async () => {
+    engine = new GroupingEngine();
+    ctx = createEngineContext();
+    await engine.init(ctx);
+    engine.startSession("doc-1");
+  });
+
+  afterEach(async () => {
+    if (!engine["disposed"]) {
+      await engine.dispose();
+    }
+  });
+
+  function seedGroup(entityType: EntityType, value: string) {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value, normalizedValue: value, entityType }),
+    });
+    const [group] = engine.getSnapshot("doc-1").groups;
+    return group!;
+  }
+
+  it("cambia el tipo, toma índice del tipo nuevo y recalcula el token", async () => {
+    // Dos grupos Organization primero, para que la secuencia de ese tipo ya
+    // vaya por 2: así el índice del reclasificado solo puede salir de la
+    // secuencia NUEVA (3) y no de conservar la vieja (1). Sin este seed, la
+    // aserción pasaba igual con el recálculo de índice removido.
+    seedGroup(EntityType.Organization, "Empresa Uno S.A.");
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        value: "Empresa Dos S.A.",
+        normalizedValue: "empresa dos s.a.",
+        entityType: EntityType.Organization,
+      }),
+    });
+
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        value: "Fiscalía de Quilmes",
+        normalizedValue: "fiscalia de quilmes",
+        entityType: EntityType.Address,
+      }),
+    });
+    const group = engine.getSnapshot("doc-1").groups.find((g) => g.type === EntityType.Address)!;
+    expect(group.indexInType).toBe(1);
+
+    const updated = await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group.id,
+      patch: { type: EntityType.Organization },
+    });
+
+    expect(updated.type).toBe(EntityType.Organization);
+    // Índice de la secuencia del tipo DESTINO, no el que traía.
+    expect(updated.indexInType).toBe(3);
+    // El label del token sigue al tipo (ADR-057 + ADR-082 §2 paso 3).
+    expect(updated.replacementValue).not.toBe(group.replacementValue);
+    // El nivel de abreviatura lo elige la escalera de ADR-057 según el ancho
+    // del bbox, así que se afirma la familia del label, no el literal.
+    expect(updated.replacementValue).toMatch(/ORG/);
+  });
+
+  it("un patch con el tipo vigente es no-op: no emite ENTITY_GROUP_UPDATED", async () => {
+    const group = seedGroup(EntityType.DNI, "34567891");
+    const emitSpy = vi.spyOn(ctx.bus, "emit");
+
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group.id,
+      patch: { type: EntityType.DNI },
+    });
+
+    const updates = emitSpy.mock.calls.filter(
+      ([, event]) => event === EngineEvents.ENTITY_GROUP_UPDATED,
+    );
+    expect(updates).toHaveLength(0);
+  });
+
+  it("salir de Person borra personGender; volver a Person lo re-infiere", async () => {
+    // "Julia Ruiz" y NO "Andrea Ruiz": el léxico declara `Andrea` **ambiguo**
+    // (`A`, ADR-069 §1), así que su `personGender` es `undefined` SIEMPRE — y
+    // con ese nombre las dos aserciones de este test pasaban vacuamente,
+    // incluso borrando la rama que dicen probar.
+    const group = seedGroup(EntityType.Person, "Julia Ruiz");
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group.id,
+      patch: { canonicalValue: "Julia Ruiz" },
+    });
+
+    // Precondición explícita: sin esto, las dos aserciones de abajo pasan
+    // vacuamente si la inferencia dejara de resolver "Andrea Ruiz".
+    const before = engine.getSnapshot("doc-1").groups.find((g) => g.id === group.id);
+    expect(before?.personGender).toBe("f");
+
+    const asOrg = await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group.id,
+      patch: { type: EntityType.Organization },
+    });
+    expect(asOrg.personGender).toBeUndefined();
+
+    const backToPerson = await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group.id,
+      patch: { type: EntityType.Person },
+    });
+    // La mitad "lo re-infiere" del título: es lo que el test NO verificaba,
+    // así que borrar la rama `inferGenderIfDue` de `changeGroupType` lo dejaba
+    // en verde.
+    expect(backToPerson.type).toBe(EntityType.Person);
+    expect(backToPerson.personGender).toBe("f");
+  });
+
+  // ADR-082 §5: `personGender` tiene que llegar en `changes`, o la UI no se
+  // entera de que el campo se borró al reclasificar.
+  it("un cambio de tipo que borra personGender lo reporta en changes", async () => {
+    const group = seedGroup(EntityType.Person, "Julia Ruiz");
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group.id,
+      patch: { canonicalValue: "Julia Ruiz" },
+    });
+
+    const emitSpy = vi.spyOn(ctx.bus, "emit");
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group.id,
+      patch: { type: EntityType.Organization },
+    });
+
+    const updated = emitSpy.mock.calls.find(
+      ([, event]) => event === EngineEvents.ENTITY_GROUP_UPDATED,
+    );
+    const changes = (updated?.[2] as { readonly changes: ReadonlyArray<string> }).changes;
+    expect(changes).toContain("type");
+    expect(changes).toContain("indexInType");
+    expect(changes).toContain("personGender");
+  });
+
+  // ADR-078 §1: la fila que `Grouping_Engine.md` §14 lista y que no existía.
+  it("a group starts with replacementValueUserSet false and turns true after a manual replacementValue edit", async () => {
+    const group = seedGroup(EntityType.Person, "Andrea Ruiz");
+    expect(group.replacementValueUserSet).toBe(false);
+
+    const edited = await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group.id,
+      patch: { replacementValue: "[P1]" },
+    });
+    expect(edited.replacementValueUserSet).toBe(true);
+    expect(edited.replacementValue).toBe("[P1]");
+  });
+
+  it("una edición manual del replacementValue sobrevive al cambio de tipo (ADR-082 §4)", async () => {
+    const group = seedGroup(EntityType.Address, "Fiscalía de Quilmes");
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group.id,
+      patch: { replacementValue: "[FQ]" },
+    });
+
+    const updated = await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group.id,
+      patch: { type: EntityType.Organization },
+    });
+
+    expect(updated.type).toBe(EntityType.Organization);
+    expect(updated.replacementValue).toBe("[FQ]");
+    expect(updated.replacementValueUserSet).toBe(true);
+  });
+
+  // ADR-082 §3 — la parte no obvia, y la que este test fijó al escribirse:
+  // los registros de sesión conservan el tipo del DETECTOR. Si siguieran al
+  // grupo reclasificado, el dedup por identidad (que corre ANTES que la
+  // detección de conflictos) dejaría de reconocer la ocurrencia re-emitida en
+  // un reanalyze, y esta caería en `findOverlapConflict` contra su propio
+  // grupo → conflicto espurio del grupo consigo mismo.
+  // ─── ADR-085: memoria de reclasificación por documento ───
+
+  async function reclassify(
+    from: EntityType,
+    to: EntityType,
+    value = "Fiscalía de Quilmes",
+    normalizedValue = "fiscalia de quilmes",
+  ) {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value, normalizedValue, entityType: from, pageIndex: 0 }),
+    });
+    const [group] = engine.getSnapshot("doc-1").groups;
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group!.id,
+      patch: { type: to },
+    });
+    return group!;
+  }
+
+  // Escenario B de ADR-082 (Consecuencias): una ocurrencia NUEVA del mismo
+  // valor creaba un grupo paralelo del tipo del detector, y el mismo texto
+  // salía del export con dos tokens distintos.
+  it("una ocurrencia nueva del mismo valor cae en el grupo reclasificado, sin crear uno paralelo", async () => {
+    await reclassify(EntityType.Address, EntityType.Organization);
+
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        value: "Fiscalía de Quilmes",
+        normalizedValue: "fiscalia de quilmes",
+        entityType: EntityType.Address,
+        pageIndex: 7,
+        bbox: makeBBox(10, 10, 80, 12),
+      }),
+    });
+
+    const snapshot = engine.getSnapshot("doc-1");
+    expect(snapshot.groups).toHaveLength(1);
+    expect(snapshot.groups[0]?.type).toBe(EntityType.Organization);
+    expect(snapshot.groups[0]?.members).toHaveLength(2);
+  });
+
+  // Escenario C: `dropOccurrences({ source: NER })` —lo que corre al APAGAR
+  // NER— borra el grupo corregido, y la re-detección lo recreaba con el tipo
+  // del detector. Es lo único que `absorbedTypes` no puede cubrir: se fue con
+  // el grupo.
+  it("un grupo recreado tras borrarse nace con el tipo corregido", async () => {
+    await reclassify(EntityType.Address, EntityType.Organization);
+
+    engine.dropOccurrences("doc-1", { pageIndices: [0] });
+    expect(engine.getSnapshot("doc-1").groups).toHaveLength(0);
+
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        value: "Fiscalía de Quilmes",
+        normalizedValue: "fiscalia de quilmes",
+        entityType: EntityType.Address,
+        pageIndex: 0,
+      }),
+    });
+
+    const snapshot = engine.getSnapshot("doc-1");
+    expect(snapshot.groups).toHaveLength(1);
+    expect(snapshot.groups[0]?.type).toBe(EntityType.Organization);
+  });
+
+  // ADR-085 §3: el guard difuso va sobre el tipo que emite el DETECTOR.
+  it("el difuso hereda la corrección en un tipo de texto libre", async () => {
+    await reclassify(EntityType.Address, EntityType.Organization);
+    engine.dropOccurrences("doc-1", { pageIndices: [0] });
+
+    // Distancia 1 sobre 19 caracteres: 0.947, por encima del umbral 0.88.
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        value: "Fiscalia de Quilmez",
+        normalizedValue: "fiscalia de quilmez",
+        entityType: EntityType.Address,
+        pageIndex: 0,
+      }),
+    });
+
+    expect(engine.getSnapshot("doc-1").groups[0]?.type).toBe(EntityType.Organization);
+  });
+
+  it("el difuso NO hereda la corrección en un tipo estructurado (ADR-073)", async () => {
+    // Un falso positivo de teléfono corregido a Custom.
+    //
+    // Los valores tienen 10 dígitos normalizados A PROPÓSITO: a distancia 1
+    // dan 0.900, por ENCIMA del umbral 0.88, así que el difuso sí los
+    // fusionaría si corriera. Con 8 dígitos darían 0.875 y el test pasaría
+    // por casualidad, sin ejercitar el guard — que es como estaba escrito
+    // antes de verificarlo falseando la implementación. Es la misma tabla de
+    // `Post_Hito10.8_Pendientes.md` §1: el DNI se salva por 0,005 y el
+    // teléfono no.
+    await reclassify(EntityType.Phone, EntityType.Custom, "20-12345678", "2012345678");
+    engine.dropOccurrences("doc-1", { pageIndices: [0] });
+
+    // Otro teléfono a distancia 1: NO debe heredar — es otra entidad.
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        value: "20-12345679",
+        normalizedValue: "2012345679",
+        entityType: EntityType.Phone,
+        pageIndex: 0,
+      }),
+    });
+
+    expect(engine.getSnapshot("doc-1").groups[0]?.type).toBe(EntityType.Phone);
+  });
+
+  it("ni absorbedTypes ni typeCorrections salen en el snapshot", async () => {
+    await reclassify(EntityType.Address, EntityType.Organization);
+    const [group] = engine.getSnapshot("doc-1").groups;
+    expect(group).not.toHaveProperty("absorbedTypes");
+    expect(group).not.toHaveProperty("typeCorrections");
+  });
+
+  it("re-emitir la misma ocurrencia tras un cambio de tipo no duplica ni crea conflicto", async () => {
+    const occurrence = makeOccurrence({
+      value: "Fiscalía de Quilmes",
+      normalizedValue: "fiscalia de quilmes",
+      entityType: EntityType.Address,
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence,
+    });
+    const [group] = engine.getSnapshot("doc-1").groups;
+
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group!.id,
+      patch: { type: EntityType.Organization },
+    });
+
+    // Misma ocurrencia, con el entityType con el que la detectó el motor.
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence,
+    });
+
+    const snapshot = engine.getSnapshot("doc-1");
+    expect(snapshot.groups).toHaveLength(1);
+    expect(snapshot.groups[0]?.members).toHaveLength(1);
+    expect(snapshot.conflicts).toHaveLength(0);
+  });
+
+  it("tras un cambio de tipo, finishSession renumera sin colisiones de (type, indexInType)", async () => {
+    for (const value of ["11111111", "22222222", "33333333"]) {
+      ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: makeOccurrence({ value, normalizedValue: value, entityType: EntityType.DNI }),
+      });
+    }
+    const [first] = engine.getSnapshot("doc-1").groups;
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: first!.id,
+      patch: { type: EntityType.CUIT },
+    });
+
+    await engine.finishSession("doc-1");
+
+    const keys = engine
+      .getSnapshot("doc-1")
+      .groups.map((g) => `${g.type}#${String(g.indexInType)}`);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+});
+
 describe("inferPersonGender (ADR-060 §4)", () => {
   // Caso 32 (§13): nombre inequívocamente femenino/masculino.
   it("unambiguously feminine/masculine name infers personGender", () => {
