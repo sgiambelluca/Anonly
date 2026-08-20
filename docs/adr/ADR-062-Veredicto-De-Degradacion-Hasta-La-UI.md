@@ -183,3 +183,11 @@ El orden es forzoso y el campo opcional de §2 es lo que lo hace posible sin nin
 - `core/Contracts.md` §5 (`AnnotationKind`), §8 (`PreviewUpdated`) — `core/Render_Engine.md` §7, §10, §13 caso 28 — `core/Orchestrator.md` §2 (seed del preview mediado) — `ui/Components.md` §3.4
 - `adr/ADR-044` §3 (seed y flush best-effort) — `adr/ADR-058` §1, §2-§6, §7 — `adr/ADR-060` §5 (la otra marca del árbol)
 - Código: `packages/anonymization-core/render-engine/src/worker/kernel.ts` (`paintReplacements`, `kernelRenderPage`, `KernelRenderResult`) — `packages/anonymization-core/render-engine/src/render.engine.ts` (`InternalCacheEntry`, `emitPreviewUpdated`) — `packages/anonymization-core/src/orchestrator.ts` (`seedAnonymizedPreview`) — `packages/anonymization-core/shared/src/events.ts` (`PreviewUpdated`) — `apps/react-client/src/core-adapter/bus-bridge.ts`
+
+---
+
+> **Errata (2026-08-20, ADR-086)**: la sección que justifica **no** emitir el veredicto por el camino del export se apoya en que *"por la invariancia de escala de ADR-058 §7 … el veredicto del preview **es** el del export"*. Esa premisa **no se cumplía**: `REPLACEMENT_MIN_FONT_PX` es una constante absoluta y `boxHeight` escala, así que cuando el bucle de ajuste terminaba por el piso el cociente derivaba con el zoom — la misma ocurrencia daba sana a escala 1 y degradada a escala 2.
+>
+> **La decisión de este ADR no cambia**: el veredicto sigue saliendo solo por el preview, y duplicarlo por el export seguiría dando lo mismo y abriendo la puerta a que difirieran por un bug. Lo que cambia es que la premisa recién se vuelve verdadera con ADR-086 §2 aplicado, que consigue invariancia **exacta** (verificada a seis decimales sobre seis escalas). Hasta entonces la conclusión era correcta por accidente.
+>
+> El transporte que este ADR especifica —el campo opcional, el veredicto guardado en la entrada de cache, las tres reglas de consumo, la marca del árbol— **no se toca**: está implementado, tiene tests y funciona. Lo que ADR-086 arregla es la señal que le entra.
