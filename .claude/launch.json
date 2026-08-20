@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "react-client",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@anonly/react-client", "dev"],
+      "port": 5173
+    }
+  ]
+}
