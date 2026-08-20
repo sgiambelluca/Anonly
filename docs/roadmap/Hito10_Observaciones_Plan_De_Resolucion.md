@@ -286,7 +286,7 @@ Trece observaciones no se pueden resolver sin decidir antes algo que ningún doc
 
 | # | Observación | Qué hace falta |
 |---|---|---|
-| **N** | **`viewer.store.sideBySide`** (`React_Client.md` §3.5, default `true`) | Declarado, sin setter y sin consumidor desde PR7. **ADR-054 §7 decidió no reutilizarlo** para el control de sincronización (que usa un campo propio), pero no decidió qué hacer con él. Quedan dos salidas: cablearlo a algo, o **eliminarlo del store y del spec**. Es una línea de código en cada lado; lo que falta es que alguien elija. No es ADR (no hay contrato de motor en juego), es una decisión de producto de una línea — por eso está acá y no en §6.1. |
+| **N** | **`viewer.store.sideBySide`** (`React_Client.md` §3.5, default `true`) | **RESUELTO (2026-08-20): eliminado del store y del spec.** Declarado, sin setter y sin consumidor desde PR7. ADR-054 §7 había descartado la única reutilización propuesta —el control de sincronización de scroll, que usó un campo propio— y no apareció un segundo candidato: el toggle mobile/desktop de `SideBySideViewer` es una media query CSS pura. Un campo que tres documentos anotan como "ambigüedad abierta" y ningún código lee es deuda, no opción. Se eliminó de `viewer.store.ts` y de `React_Client.md` §3.5; la nota de `SideBySideViewer.tsx` pasó de "ambigüedad detectada" a explicar por qué el campo ya no existe. |
 
 ---
 

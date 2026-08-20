@@ -102,6 +102,33 @@ La confidence tampoco se muestra: es la que ordena las opciones (la de mayor con
 - **La ocurrencia perdedora sigue descartándose.** Elegir el otro tipo **reclasifica el grupo que sobrevivió**, no resucita la ocurrencia que se tiró. Es la diferencia entre "esta entidad es de tal clase" (lo que el usuario quiere decir) y "quiero el span que detectó el otro motor" (que exigiría retener datos descartados, ver Alternativas).
 - Los cuatro `ConflictReason` siguen igual.
 
+### 8. Limitación conocida: el flujo de radios **no es alcanzable hoy** (2026-08-20)
+
+Verificado en la app real después de implementar este ADR. La decisión de §1-§6 es correcta y el motor la cumple, pero **el usuario no puede llegar al diálogo para el caso que este ADR resuelve**.
+
+**Por qué.** Los conflictos nacen así:
+
+| Razón | Nace | ¿Muestra el ⚠? |
+|---|---|---|
+| `Overlap` | `resolved: true` | no |
+| `Disagree` | `resolved: true` | no |
+| `LowConfidence` | `resolved: true` | no |
+| `AmbiguousCanonical` | `resolved: false` | **sí** |
+
+Los tres primeros nacen resueltos **a propósito**: `conflictWinnerIsNew` ya eligió y la ocurrencia perdedora se descartó, así que el `Conflict` es el registro de una decisión tomada, no una pregunta abierta. Y `EntityGroupItem` filtra `!resolved` — el ⚠ significa "esto necesita tu atención", que es coherente.
+
+El problema es que **el caso que motivó este ADR es un `Disagree`** ("Fiscalía de Quilmes": ¿Organización o Dirección?), y nace resuelto. El único que sí muestra badge, `AmbiguousCanonical`, construye todos sus candidatos con `entityType: group.type`, así que `candidateTypes` devuelve **un solo tipo** y §5 lo manda a la rama de "Descartar".
+
+**Qué sí funciona hoy**: la rama de "Descartar" (verificada en vivo), y —lo que cubre el valor práctico— **"Cambiar categoría"** de ADR-082 §6, que deja corregir el tipo de cualquier grupo con o sin conflicto.
+
+**Las tres salidas, si alguna vez hace falta**:
+
+1. **Mostrar también los resueltos**, con otro peso visual (gris "revisable" vs. naranja "pendiente"). Es lo más barato — un cambio de filtro en `EntityGroupItem` — pero puede llenar el árbol de íconos que en la enorme mayoría de los casos no requieren nada.
+2. **Que `Overlap`/`Disagree` nazcan `resolved: false`.** Más limpio semánticamente, pero `dropOccurrences` usa `resolved` en su lógica de conflictos stale y hay un comentario explícito (`grouping.engine.ts`) que dice que "ya resuelto" no sirve como marca de "ya procesado" **precisamente porque** nacen resueltos. Cambio de comportamiento del motor, con ADR propio.
+3. **Una superficie propia** ("revisar clasificaciones"), separada del ⚠. Compite con "Cambiar categoría".
+
+**Por qué se deja como está** (decisión del humano, 2026-08-20): **se midieron 0 conflictos** de `Overlap`/`Disagree` en un documento de prueba de 4 páginas con NER y Regex sobre texto realista. Hubo que **fabricar** un `AmbiguousCanonical` a propósito para que apareciera un solo ⚠. La razón es estructural: `findOverlapConflict` exige que dos detecciones de tipo distinto se solapen >50% en el mismo bbox, y los patrones de Regex están diseñados con `\b` para no pisarse entre sí. La puerta que falta da a una habitación que casi no se usa. Si en un documento real aparecen `Disagree`, la opción 1 se paga sola.
+
 ## Alternativas descartadas
 
 | Alternativa | Por qué no |
