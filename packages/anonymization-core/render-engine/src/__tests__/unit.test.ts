@@ -41,6 +41,7 @@ import {
   makeAnnotation,
   makeLineRepaintScenario,
   makeMarkerLegendRow,
+  measureStubTextWidth,
   makeMarkerLegendRows,
   makeReplacement,
   mockGetDocumentResult,
@@ -1703,6 +1704,7 @@ describe("RenderEngine — unit tests", () => {
 
   // ─── ADR-059 §5 (Hito 10.5, PR 7): página de leyenda del export ───
   describe("renderLegendPage — layout (ADR-059 §5)", () => {
+    const LEGEND_TITLE_FOR_TEST = "Anonimizado con Anonly — Referencia de marcadores";
     function fillTextArgs(calls: ReadonlyArray<DrawCall>): ReadonlyArray<[string, number, number]> {
       return calls
         .filter((c) => c.op === "fillText")
@@ -1749,6 +1751,71 @@ describe("RenderEngine — unit tests", () => {
       expect(rowYs[rowYs.length - 1]!).toBeLessThan(842);
     });
 
+    // El bug de la imagen que reportó el humano (2026-08-19): la celda de
+    // prefijos crece con la escalera de ADR-057 por las variantes de género de
+    // ADR-060, y escrita en una sola línea SE SUPERPONE con la columna del
+    // nombre del tipo. La referencia queda ilegible justo donde tiene que
+    // explicar qué significa cada marcador.
+    it("una celda de prefijos larga se corta en varias líneas y no invade la columna siguiente", async () => {
+      await engine.init(ctx);
+      const row = makeMarkerLegendRow({
+        // Medido en un export real: 6 prefijos de Person (3 niveles de la
+        // escalera × las variantes de género).
+        prefixes: "HOMB, PRS, MUJ, HOMBRE, HOM, MUJER",
+        typeName: "Persona",
+        countLabel: "7 marcadores",
+      });
+
+      await engine.renderLegendPage([row], 595, 842, ctx);
+
+      const [canvas] = getCreatedCanvases();
+      const textCalls = fillTextArgs(canvas!.calls);
+      const rowCalls = textCalls.slice(1); // descarta el título
+
+      const prefixLines = rowCalls.filter(([, x]) => x === 40);
+      expect(prefixLines.length).toBeGreaterThan(1); // se cortó
+
+      // Ninguna línea de la celda de prefijos supera el ancho disponible
+      // hasta la columna siguiente — que es exactamente lo que fallaba.
+      const [, typeNameX] = rowCalls.find(([text]) => text === "Persona")!;
+      const availableWidth = typeNameX - 40;
+      for (const [line] of prefixLines) {
+        expect(measureStubTextWidth(line, "12px sans-serif")).toBeLessThan(availableWidth);
+      }
+
+      // Y el texto no se pierde: la unión de las líneas reconstruye el original.
+      expect(prefixLines.map(([line]) => line).join(" ")).toBe(row.prefixes);
+    });
+
+    it("una fila que se parte en varias líneas empuja a la siguiente hacia abajo", async () => {
+      await engine.init(ctx);
+      const rows = [
+        makeMarkerLegendRow({
+          prefixes: "HOMB, PRS, MUJ, HOMBRE, HOM, MUJER",
+          typeName: "Persona",
+          countLabel: "7 marcadores",
+        }),
+        makeMarkerLegendRow({
+          prefixes: "DNI",
+          typeName: "DNI",
+          countLabel: "3 marcadores",
+        }),
+      ];
+
+      await engine.renderLegendPage(rows, 595, 842, ctx);
+
+      const [canvas] = getCreatedCanvases();
+      const rowCalls = fillTextArgs(canvas!.calls).slice(1);
+      const prefixLines = rowCalls.filter(([, x]) => x === 40);
+      const personaLines = prefixLines.filter(([text]) => text !== "DNI");
+      const [dniLine] = prefixLines.filter(([text]) => text === "DNI");
+
+      // La fila de DNI arranca DEBAJO de la última línea de la fila anterior:
+      // el alto de fila sigue al contenido, no es fijo.
+      const lastPersonaY = Math.max(...personaLines.map(([, , y]) => y));
+      expect(dniLine![2]).toBeGreaterThan(lastPersonaY);
+    });
+
     it("a single row still draws the title plus its three columns", async () => {
       await engine.init(ctx);
       const row = makeMarkerLegendRow({
@@ -1757,7 +1824,7 @@ describe("RenderEngine — unit tests", () => {
         countLabel: "3 marcadores",
       });
 
-      await engine.renderLegendPage([row], 400, 300, ctx);
+      await engine.renderLegendPage([row], 595, 842, ctx);
 
       const [canvas] = getCreatedCanvases();
       const textCalls = fillTextArgs(canvas!.calls);
@@ -1765,12 +1832,43 @@ describe("RenderEngine — unit tests", () => {
       expect(textCalls.slice(1).map((c) => c[0])).toEqual(["DNI", "DNI", "3 marcadores"]);
     });
 
+    // Este test usaba una página de 400 pt y afirmaba 4 `fillText`, y pasaba
+    // — pero con los offsets de columna ABSOLUTOS (0/220/420 pt, tuneados
+    // para A4) la tercera columna se dibujaba en x = 40 + 420 = 460 sobre una
+    // página de 400 pt de ancho: **enteramente fuera de la página**. El
+    // conteo de llamadas no lo veía. Las columnas pasaron a ser fracciones
+    // del ancho útil, y lo que se afirma es lo que importa.
+    it("en una página angosta ningún texto se dibuja fuera de la página", async () => {
+      await engine.init(ctx);
+      const row = makeMarkerLegendRow({
+        prefixes: "DNI",
+        typeName: "DNI",
+        countLabel: "3 marcadores",
+      });
+
+      const narrowWidth = 400;
+      await engine.renderLegendPage([row], narrowWidth, 300, ctx);
+
+      const [canvas] = getCreatedCanvases();
+      for (const [text, x, y] of fillTextArgs(canvas!.calls)) {
+        expect(x).toBeGreaterThanOrEqual(0);
+        expect(x).toBeLessThan(narrowWidth);
+        expect(y).toBeLessThan(300);
+        // Y además entra: el borde derecho del texto tampoco se sale.
+        const font = text === LEGEND_TITLE_FOR_TEST ? "16px sans-serif" : "12px sans-serif";
+        expect(x + measureStubTextWidth(text, font)).toBeLessThanOrEqual(narrowWidth);
+      }
+    });
+
     it("an empty rows array still draws the title, without throwing", async () => {
       await engine.init(ctx);
 
-      const encoded = await engine.renderLegendPage([], 400, 300, ctx);
+      // A4: el título entra en una línea. En una página más angosta se
+      // envuelve (ver el test de página angosta), así que fijar el conteo de
+      // líneas del título solo tiene sentido con un ancho donde entra.
+      const encoded = await engine.renderLegendPage([], 595, 300, ctx);
 
-      expect(encoded.widthPx).toBe(400);
+      expect(encoded.widthPx).toBe(595);
       const [canvas] = getCreatedCanvases();
       expect(fillTextArgs(canvas!.calls)).toHaveLength(1); // solo el título
     });

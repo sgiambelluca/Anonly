@@ -182,8 +182,18 @@ export interface DrawCall {
 // medido crezca con el tamaño de fuente y con la longitud del texto.
 const STUB_GLYPH_ADVANCE_RATIO = 0.6;
 
+/**
+ * Tamaño en px de un font shorthand de canvas.
+ *
+ * El prefijo de peso es opcional a propósito: `kernel.ts` construye tanto
+ * `"12px sans-serif"` como `"bold 16px sans-serif"` (el título de la leyenda,
+ * y los candidatos `bold` de la calibración de ADR-058). Con la versión
+ * anterior —regex anclada al inicio, sin contemplar el peso— cualquier fuente
+ * bold medía **0**, así que en los tests "siempre entraba" y el shrink-to-fit
+ * nunca se ejercitaba sobre ese camino. Corregido 2026-08-19.
+ */
 function parseStubFontSizePx(font: string): number {
-  const match = /^([\d.]+)px/.exec(font);
+  const match = /(?:^|\s)([\d.]+)px(?:\s|$)/.exec(font);
   return match ? Number(match[1]) : 0;
 }
 
