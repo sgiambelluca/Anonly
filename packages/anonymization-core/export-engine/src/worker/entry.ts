@@ -61,8 +61,16 @@ const WORKER_ID = `export-worker-${Math.random().toString(36).slice(2)}`;
 /** El `PDFDocument` en construcción de este worker (ADR-047 §4). Un documento a la vez. */
 let state: AssemblerState = EMPTY_ASSEMBLER_STATE;
 
-function post(message: WorkerOutbound): void {
-  self.postMessage(message);
+function post(message: WorkerOutbound, transfer?: ReadonlyArray<Transferable>): void {
+  // Forma `StructuredSerializeOptions` y no la posicional `(message, [])`:
+  // con `lib: ["DOM", "WebWorker"]` (tsconfig.base) el overload posicional de
+  // `Window` gana y no acepta una transfer list. La copia mutable es porque
+  // `StructuredSerializeOptions.transfer` es `Transferable[]`, no readonly.
+  if (transfer !== undefined && transfer.length > 0) {
+    self.postMessage(message, { transfer: [...transfer] });
+  } else {
+    self.postMessage(message);
+  }
 }
 
 /** Un `AbortController` por job en curso, indexado por `signalId` (`=== jobId`, ver `worker-pool.ts#dispatchRemote`). */
@@ -108,7 +116,11 @@ async function handleRun(message: Extract<WorkerInbound, { type: "RUN" }>): Prom
       state = nextState;
       // ADR-042: COMPLETED.result es unknown a nivel de transporte — el
       // host-bridge (export.engine.ts) lo afina a ArrayBuffer.
-      post({ type: "COMPLETED", jobId, result: buffer });
+      //
+      // ADR-079 §1: se transfiere. `savePdf` ya devolvió el estado limpio
+      // (`discardState`), así que este worker no vuelve a mirar el buffer —
+      // la condición exacta que hace segura la transferencia.
+      post({ type: "COMPLETED", jobId, result: buffer }, [buffer]);
     }
   } catch (err: unknown) {
     if (err instanceof CancelledError) {
