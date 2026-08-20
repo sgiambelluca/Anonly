@@ -39,6 +39,7 @@ import {
 } from "../index.js";
 import { isTransferable } from "../index.js";
 import type {
+  Annotation,
   BoundingBox,
   CoreRuntimeOptions,
   Document,
@@ -46,11 +47,11 @@ import type {
   EngineConfig,
   EngineContext,
   EntityGroup,
+  EntityGroupCreated,
   ExportOptions,
   ExportRequested,
   ExportSavePayload,
   GroupUpdateRequested,
-  EntityGroupCreated,
   ICache,
   IEngine,
   IEventBus,
@@ -65,6 +66,7 @@ import type {
   PageParsed,
   PersonGender,
   PersonGenderChoice,
+  PreviewUpdated,
   RenderLegendPayload,
   RenderPagePayload,
   RenderRequested,
@@ -1610,6 +1612,78 @@ describe("@anonly/shared — Contracts", () => {
         },
       };
       expect(_check).toBeDefined();
+    });
+  });
+
+  describe("PreviewUpdated.degraded (ADR-062 §1-§2)", () => {
+    const anotacion: Annotation = {
+      id: "occ-1",
+      groupId: "g-1",
+      pageIndex: 3,
+      bbox: { x: 10, y: 20, width: 40, height: 12 },
+      kind: AnnotationKind.Degraded,
+    };
+
+    // ADR-062 §2: el campo es opcional A PROPÓSITO, y no por descuido. Es lo
+    // que permite que `shared` mergee antes que `render-engine` sin romperle
+    // la compilación, o sea el split por módulo que R-1 exige.
+    it("es opcional: un payload sin degraded sigue siendo válido", () => {
+      const payload: PreviewUpdated = {
+        documentId: "d1",
+        pageIndex: 0,
+        kind: "anonymized",
+        canvasBlobUrl: "blob:x",
+      };
+      expect(payload.degraded).toBeUndefined();
+    });
+
+    it("acepta el campo poblado, y el elemento es un Annotation", () => {
+      const payload: PreviewUpdated = {
+        documentId: "d1",
+        pageIndex: 3,
+        kind: "anonymized",
+        canvasBlobUrl: "blob:x",
+        degraded: [anotacion],
+      };
+      expect(payload.degraded).toHaveLength(1);
+      expect(payload.degraded?.[0]?.kind).toBe(AnnotationKind.Degraded);
+      expect(payload.degraded?.[0]?.groupId).toBe("g-1");
+    });
+
+    // "Ausente ≡ vacío" (ADR-062 §2) es una regla del CONSUMIDOR, y lo que la
+    // hace escribible es que las dos formas sean tipables. Si el vacío no
+    // tipara, el emisor tendría que omitir el campo y `?? []` dejaría de ser
+    // equivalente a leer el array.
+    it("el array vacío es una forma válida, distinta de la ausencia solo en la forma", () => {
+      const vacio: PreviewUpdated = {
+        documentId: "d1",
+        pageIndex: 0,
+        kind: "anonymized",
+        canvasBlobUrl: "blob:x",
+        degraded: [],
+      };
+      const ausente: PreviewUpdated = {
+        documentId: "d1",
+        pageIndex: 0,
+        kind: "anonymized",
+        canvasBlobUrl: "blob:x",
+      };
+      expect(vacio.degraded ?? []).toEqual(ausente.degraded ?? []);
+    });
+
+    it("es de solo lectura: ni el array ni sus elementos se mutan (R-11)", () => {
+      const payload: PreviewUpdated = {
+        documentId: "d1",
+        pageIndex: 0,
+        kind: "anonymized",
+        canvasBlobUrl: "blob:x",
+        degraded: [anotacion],
+      };
+      // @ts-expect-error ADR-062 §1: `degraded` es ReadonlyArray, no admite push.
+      payload.degraded?.push(anotacion);
+      // @ts-expect-error R-11: todo dato público es readonly.
+      payload.degraded = [];
+      expect(payload.degraded).toBeDefined();
     });
   });
 });
