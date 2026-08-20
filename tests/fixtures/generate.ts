@@ -29,12 +29,22 @@ import { fileURLToPath } from "node:url";
 
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 
-const PAGE_WIDTH = 595;
-const PAGE_HEIGHT = 842;
-const MARGIN_X = 50;
-const MARGIN_Y = 750;
-const FONT_SIZE = 12;
-const LINE_HEIGHT = 18;
+/*
+ * Layout de `text-10p.pdf`. Exportado porque `tests/e2e/support/fixtures.ts`
+ * arma variantes del mismo documento en memoria y tiene que renderizar
+ * idénticas las páginas que no toca: hasta acá replicaba estos seis valores
+ * y `wrapText`, de modo que un cambio de layout podía desincronizar las
+ * variantes sin que nada fallara. El borde de import entre los dos módulos
+ * ya existía (ese archivo importa `TEXT_10P_PAGES` de acá).
+ */
+export const PAGE_WIDTH = 595;
+export const PAGE_HEIGHT = 842;
+export const MARGIN_X = 50;
+export const MARGIN_Y = 750;
+export const FONT_SIZE = 12;
+export const LINE_HEIGHT = 18;
+/** Corte de línea de `text-10p.pdf`, en caracteres. */
+export const WRAP_CHARS = 95;
 
 const FIXTURE_DIR = resolve(dirname(fileURLToPath(import.meta.url)));
 
@@ -73,7 +83,7 @@ export async function generateText10p(): Promise<Uint8Array> {
   for (const text of TEXT_10P_PAGES) {
     const page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
     // Wrap manual por línea (sin word-wrap automático de pdf-lib).
-    const lines = wrapText(text, 95);
+    const lines = wrapText(text, WRAP_CHARS);
     let y = MARGIN_Y;
     for (const line of lines) {
       page.drawText(line, {
@@ -115,8 +125,10 @@ export async function generateCorrupt(): Promise<Uint8Array> {
 /**
  * Wrap manual: corta el texto en líneas de ~95 chars respetando espacios.
  * Suficiente para fixtures deterministas; no es un word-wrap real.
+ *
+ * Exportado por el mismo motivo que las constantes de layout de arriba.
  */
-function wrapText(text: string, maxCharsPerLine: number): ReadonlyArray<string> {
+export function wrapText(text: string, maxCharsPerLine: number): ReadonlyArray<string> {
   const words = text.split(" ");
   const lines: string[] = [];
   let current = "";

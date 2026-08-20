@@ -28,16 +28,25 @@ Para que los tests de Regex y NER sean deterministas, `text-10p.pdf` debe conten
 - **Página 2**: "Carlos López, DNI 42.998.103, IBAN ES00 1234 5678 9012 3456 7890, tarjeta 4532 1234 5678 9901."
 - **Páginas 3-9**: texto neutro sin entidades (para test de "no false positives").
 
-Las entidades esperadas (test de snapshot de Grouping):
-- 3 Personas (Juan Pérez, María Gómez, Carlos López)
-- 3 DNIs (34.567.891, 18.445.212, 42.998.103)
-- 2 Direcciones (Belgrano 1234, Rivadavia 455)
-- 1 Organización (Empresa S.A.)
-- 1 CUIT (20-12345678-9)
-- 1 Teléfono (+54 11 1234-5678)
-- 1 Email (juan.perez@example.com)
-- 1 IBAN (ES00...)
-- 1 Tarjeta (4532...)
+### Entidades del texto, y cuáles detecta el pipeline de verdad
+
+> **Corregido 2026-08-18.** Esta lista describía lo que el texto *contiene*, no lo que el motor *produce*, y se usó como si fuera lo segundo. Las diferencias no son bugs sueltos: tres de ellas son propiedades deliberadas del fixture o del pipeline. Insumo directo del dataset de referencia del Hito 11 (`MVP.md` §5).
+
+| Entidad en el texto | ¿La detecta el pipeline? | Nota |
+|---|---|---|
+| 3 Personas (Juan Pérez, María Gómez, Carlos López) | solo con **NER activado** | Con NER off no aparece ninguna. Además, "Juan Pérez" está confirmado como **no reconocido** por el modelo cuantizado en esta oración (queda pegado a una lista de otras entidades) — por eso `scenario-5` usa el fixture `text-10p-person.pdf`, con oraciones de nombre limpias. |
+| 3 DNIs (34.567.891, 18.445.212, 42.998.103) | **sí**, Regex | Los tres. Es la aserción sobre la que se apoyan los escenarios E2E. |
+| 2 Direcciones (Belgrano 1234, Rivadavia 455) | solo con **NER activado** | |
+| 1 Organización (Empresa S.A.) | solo con **NER activado** | |
+| 1 CUIT (20-12345678-9) | **no** | Checksum AFIP: el dígito verificador correcto es **6**, no 9 → el motor lo descarta, bien. |
+| 1 Teléfono (+54 11 1234-5678) | **no verificado — probablemente no** | El wrap a 95 caracteres de `generate.ts` corta la página 0 justo adentro del teléfono: la línea 1 termina en `+54 11` y la línea 2 empieza en `1234-5678,`. Es un caso de **entidad partida en varias líneas** (ADR-074), implementado en el Hito 10.9; falta una corrida de Playwright que confirme si ya se detecta. Lo que sí matchea `phone-mobile-ar` en esa página son los **diez primeros dígitos del CUIT rechazado** (`20-12345678`), un falso positivo — ver `scenario-8-ner-disabled.spec.ts`. |
+| 1 Email (juan.perez@example.com) | **sí**, Regex | |
+| 1 IBAN (ES00 1234 5678 9012 3456 7890) | **no** | Checksum IBAN mod-97: da 44, no 1 → descartado. |
+| 1 Tarjeta (4532 1234 5678 9901) | **no** | Luhn: no cierra → descartada. |
+
+Los tests de snapshot de Grouping que usan este fixture afirman sobre el conjunto de arriba, no sobre la lista de "entidades del texto".
+
+**Consecuencia que conviene tener presente**: los **tres** identificadores con checksum del fixture (CUIT, IBAN, tarjeta) tienen dígitos verificadores inválidos, verificado por cálculo. O sea que `text-10p.pdf` ejercita el camino de **rechazo** por checksum de los tres tipos y **ninguno** de los caminos de aceptación. Si el dataset de referencia del Hito 11 necesita el camino positivo, hay que agregar valores con checksum válido — cambiar los de este fixture rompería los tests que hoy dependen del rechazo.
 
 ## Cómo conseguir los fixtures
 
