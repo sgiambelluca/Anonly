@@ -352,7 +352,6 @@ interface ViewerSlice {
   readonly currentPageIndex: Readonly<Record<ViewerKind, number>>;
   readonly visibleRange: Readonly<Record<ViewerKind, { start: number; end: number }>>;
   readonly zoom: number;          // 0.5..3 — sigue siendo global (los dos paneles comparten escala)
-  readonly sideBySide: boolean;   // default true — declarado, hoy sin setter ni consumidor (ambigüedad abierta; ADR-054 §7 decide NO reutilizarlo)
   // ADR-084 §1: la consulta del DocumentSearchBox. Sube al store para que
   // "Ver ocurrencias" (Components.md §3.5) pueda escribirla desde el panel de
   // entidades. NO es por panel: el buscador existe una sola vez, sobre el

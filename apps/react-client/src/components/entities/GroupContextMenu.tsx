@@ -16,8 +16,18 @@
  *
  * Sin `@radix-ui/react-dropdown-menu` en el proyecto (no está en
  * `package.json`, agregarlo requeriría ADR — `ai/Code_Standards.md` P-9): este
- * menú es un disclosure accesible hecho a mano (trigger + `role="menu"`,
+ * menú es un disclosure accesible hecho a mano (trigger + panel de botones,
  * cierre por click-fuera/Escape/selección), sin dependencias nuevas.
+ *
+ * **A propósito NO usa `role="menu"`/`role="menuitem"`.** Ese rol es un
+ * contrato con el lector de pantalla: promete navegación por flechas,
+ * Home/End y foco gestionado (un solo tab stop), y nada de eso está
+ * implementado acá — los items se recorren con Tab. Un rol prometido y no
+ * cumplido deja al usuario de teclado apretando flechas contra un panel que no
+ * responde, que es peor que no anunciar nada: sin el rol son botones dentro de
+ * un grupo etiquetado, y se comportan exactamente como el lector espera. Si
+ * algún día entra `@radix-ui/react-dropdown-menu` (requiere ADR, P-9), trae el
+ * rol y el manejo de foco juntos, que es la única forma correcta de tenerlos.
  */
 
 import { MoreHorizontalIcon } from "lucide-react";
@@ -84,7 +94,7 @@ export function GroupContextMenu({
       <button
         type="button"
         aria-label="Más acciones"
-        aria-haspopup="menu"
+        aria-haspopup="true"
         aria-expanded={open}
         onClick={() => setOpen((prev) => !prev)}
         className="rounded-md p-1 text-text-secondary hover:bg-bg-tertiary"
@@ -93,13 +103,12 @@ export function GroupContextMenu({
       </button>
       {open ? (
         <div
-          role="menu"
+          role="group"
           aria-label="Acciones del grupo"
           className="absolute right-0 z-50 mt-1 w-40 rounded-md border border-border bg-bg-primary py-1 shadow-md"
         >
           <button
             type="button"
-            role="menuitem"
             onClick={() => {
               setOpen(false);
               onMerge();
@@ -110,7 +119,6 @@ export function GroupContextMenu({
           </button>
           <button
             type="button"
-            role="menuitem"
             onClick={() => {
               setOpen(false);
               onSplit();
@@ -121,7 +129,6 @@ export function GroupContextMenu({
           </button>
           <button
             type="button"
-            role="menuitem"
             onClick={() => {
               setOpen(false);
               onViewOccurrences();
@@ -133,7 +140,6 @@ export function GroupContextMenu({
           {onEditReplacement !== undefined ? (
             <button
               type="button"
-              role="menuitem"
               onClick={() => {
                 setOpen(false);
                 onEditReplacement();
@@ -145,7 +151,6 @@ export function GroupContextMenu({
           ) : null}
           <button
             type="button"
-            role="menuitem"
             onClick={() => {
               setOpen(false);
               onChangeType();
@@ -157,7 +162,6 @@ export function GroupContextMenu({
           {onRestoreComputedValue !== undefined ? (
             <button
               type="button"
-              role="menuitem"
               onClick={() => {
                 setOpen(false);
                 onRestoreComputedValue();
