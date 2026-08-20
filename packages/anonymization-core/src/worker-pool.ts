@@ -37,7 +37,7 @@ import {
   EngineErrorCode,
   EngineEvents,
   EventChannel,
-  InvalidInputError,
+  WorkerCrashedError,
   type EventPayloadMap,
   type IEventBus,
   type ILogger,
@@ -146,6 +146,22 @@ export interface WorkerPoolOptions {
    * pools (pdf/ocr/ner) no tienen estado por documento que re-primear.
    */
   readonly onWorkerCreated?: () => Promise<void>;
+  /**
+   * Liberación por inactividad (ADR-080, `05_Worker_Architecture.md` §8.1).
+   * Tras este tiempo sin trabajo, el pool termina sus `WorkerLike` vivos y
+   * **sigue usable**: el próximo `dispatch` reconstruye el worker por el
+   * camino perezoso de `workerForSlot` (y lo re-primea con
+   * `onWorkerCreated`, si lo hay).
+   *
+   * Ausente o `0` desactiva el mecanismo — lo que usan los tests, que no
+   * pueden depender de temporizadores reales. El valor de producción sale
+   * de `WorkerPoolConfig.idleDisposeMs` (default 60 s, `Contracts.md` §6),
+   * que hasta ADR-080 solo consumía `WorkerPoolManager` — o sea que los
+   * cuatro pools que `create-core.ts` construye desde ADR-043/045/046/047
+   * retenían sus workers (incluidos los ~178 MB del modelo NER) hasta
+   * cerrar la pestaña.
+   */
+  readonly idleDisposeMs?: number;
 }
 
 export interface DispatchParams<TResult> {
@@ -166,13 +182,16 @@ export interface DispatchParams<TResult> {
    */
   readonly payload?: unknown;
   /**
-   * Override del criterio de reintento (por defecto, `err.retryable`). Caso
-   * de uso real: `05_Worker_Architecture.md` §5 documenta `PDF_PASSWORD_REQUIRED`
-   * como no-retryable, pero `PdfPasswordRequiredError` (pdf-engine, fuera del
-   * alcance de este PR) lo marca `retryable: true` — inconsistencia real
-   * detectada en este hito (ver reporte final); el dispatch de `pdf-parse`
-   * pasa un override acá en vez de reintentar en vano contra la misma
-   * contraseña faltante.
+   * Override del criterio de reintento (por defecto, `err.retryable`).
+   *
+   * **Sin call sites hoy.** El único que existió fue el dispatch de
+   * `pdf-parse`, que lo usaba para compensar que `PdfPasswordRequiredError`
+   * se construía con `retryable: true` pese a que
+   * `05_Worker_Architecture.md` §5 documenta `PDF_PASSWORD_REQUIRED` como
+   * no-retryable. **ADR-049 cerró las dos mitades**: el PR 17.1 puso el
+   * `retryable` en `false` en el propio error (`pdf.errors.ts`) y el PR 17.2
+   * retiró el override de acá. El campo se conserva como seam genérico del
+   * pool; el caso que lo motivaba ya no existe.
    */
   readonly isRetryable?: (err: unknown) => boolean;
   /**
@@ -186,6 +205,21 @@ export interface DispatchParams<TResult> {
    * observable idéntico).
    */
   readonly onProgress?: (progress: number, partial?: Serializable) => void;
+  /**
+   * Transferencia real de los `ArrayBuffer` de `payload` (ADR-079 §2). El
+   * pool **no la deduce**: solo el motor dueño sabe si vuelve a mirar el
+   * buffer después de despachar, y transferir uno que el emisor reusa lo
+   * deja detachado (`byteLength === 0`) — es exactamente el bug #6 del PR10.
+   *
+   * Hoy el único caller es `ocr-engine` con su `imageData` (~8 MB por página
+   * A4 a 300 dpi), que el host rasteriza para ese job y suelta. El buffer
+   * del PDF de `load-document` **nunca** se transfiere, y por eso
+   * `broadcast()` no acepta este campo: ahí el mismo buffer va a N workers,
+   * y el primer transfer dejaría a los N-1 restantes con 0 bytes.
+   *
+   * Ignorado en el camino in-process (no hay `postMessage` que lo use).
+   */
+  readonly transferList?: ReadonlyArray<globalThis.Transferable>;
 }
 
 interface QueueEntry {
@@ -262,6 +296,9 @@ export class WorkerPool {
    * broadcast anidado que dispara `onWorkerCreated` desde `workerForSlot`).
    */
   private readonly inFlightBroadcasts = new Set<Promise<unknown>>();
+
+  /** Temporizador de `releaseIdleWorkers` (ADR-080). `null` = no armado. */
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: WorkerPoolOptions) {
     this.options = options;
@@ -377,6 +414,10 @@ export class WorkerPool {
       return await all;
     } finally {
       this.inFlightBroadcasts.delete(all);
+      // Un broadcast no pasa por `pump()`, así que sin esto un pool cuya
+      // última actividad fue un control (`load-document`/`unload-document`)
+      // nunca armaría su temporizador de idle (ADR-080 §2).
+      this.refreshIdleTimer();
     }
   }
 
@@ -418,6 +459,10 @@ export class WorkerPool {
   dispose(): void {
     this.disposed = true;
     this.queue.length = 0;
+    if (this.idleTimer !== null) {
+      clearTimeout(this.idleTimer);
+      this.idleTimer = null;
+    }
 
     // Jobs remotos en curso: se tratan igual que los de cola (dispose() es un
     // flujo normal, 05_Worker_Architecture.md §8), no un error de programación.
@@ -455,6 +500,68 @@ export class WorkerPool {
         this.pump();
       });
     }
+    this.refreshIdleTimer();
+  }
+
+  /**
+   * Ocioso = las **cuatro** condiciones a la vez (ADR-080 §1). Las dos
+   * últimas no son redundantes: un job remoto puede estar en vuelo sin
+   * contar en `active` según el camino, y un `broadcast` de re-priming no
+   * pasa por la cola ni por `pump()` (ver `assignRemoteSlot`), así que no
+   * aparece en ninguna de las dos primeras. Sin ellas, la liberación podría
+   * caer sobre un re-priming en curso.
+   */
+  private get isIdle(): boolean {
+    return (
+      this.active === 0 &&
+      this.queue.length === 0 &&
+      this.pendingRemoteJobs.size === 0 &&
+      this.inFlightBroadcasts.size === 0
+    );
+  }
+
+  /**
+   * Rearma el temporizador **al quedar ocioso**, no al acceder al pool: un
+   * job de diez minutos no debe disparar la liberación a los sesenta
+   * segundos. Con trabajo pendiente, lo cancela.
+   */
+  private refreshIdleTimer(): void {
+    const idleMs = this.options.idleDisposeMs ?? 0;
+    if (idleMs <= 0 || this.disposed) return;
+
+    if (this.idleTimer !== null) {
+      clearTimeout(this.idleTimer);
+      this.idleTimer = null;
+    }
+    if (!this.isIdle) return;
+
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = null;
+      if (this.isIdle && !this.disposed) this.releaseIdleWorkers();
+    }, idleMs);
+  }
+
+  /**
+   * Libera los workers por inactividad (ADR-080 §3). **No es `dispose()`**:
+   * el pool sigue usable y el próximo `dispatch` reconstruye el worker.
+   * `dispose()` es terminal (marca `disposed` y rechaza todo lo que venga).
+   *
+   * Público para que `WorkerPoolManager` lo use en lugar de destruir el pool
+   * entero, y para que los tests puedan forzarlo sin esperar un temporizador.
+   */
+  releaseIdleWorkers(): void {
+    // Guarda propia y no solo la del temporizador: este método es público, y
+    // matar workers con jobs en vuelo los deja colgados PARA SIEMPRE —
+    // `terminate()` no dispara el evento `error`, así que
+    // `handleWorkerTransportError` nunca corre y nadie rechaza sus promesas.
+    // A diferencia de `dispose()`, que sí las rechaza con `CancelledError`.
+    if (!this.isIdle) return;
+    for (const worker of this.remoteWorkers.values()) {
+      const disposeMessage: WorkerInbound = { type: "DISPOSE" };
+      worker.postMessage(disposeMessage);
+      worker.terminate();
+    }
+    this.remoteWorkers.clear();
   }
 
   private async runWithRetry<TResult>(
@@ -527,7 +634,13 @@ export class WorkerPool {
    */
   private executeJob<TResult>(jobId: string, params: DispatchParams<TResult>): Promise<TResult> {
     if (this.options.workerFactory !== undefined && params.payload !== undefined) {
-      return this.dispatchRemote<TResult>(jobId, params.payload, params.signal, params.onProgress);
+      return this.dispatchRemote<TResult>(
+        jobId,
+        params.payload,
+        params.signal,
+        params.onProgress,
+        params.transferList,
+      );
     }
     return params.run();
   }
@@ -545,6 +658,7 @@ export class WorkerPool {
     payload: unknown,
     signal: AbortSignal,
     onProgress?: (progress: number, partial?: Serializable) => void,
+    transferList?: ReadonlyArray<globalThis.Transferable>,
   ): Promise<TResult> {
     const slot = this.assignRemoteSlot();
 
@@ -594,7 +708,12 @@ export class WorkerPool {
             jobType: this.options.jobType,
             payload,
           };
-          worker.postMessage(runMessage);
+          // ADR-079 §2: sin transfer list, `postMessage` clona — un memcpy
+          // completo del payload. Solo se transfiere lo que el emisor no
+          // vuelve a mirar, y esa decisión la toma el motor (ver
+          // `DispatchParams.transferList`), nunca el pool.
+          if (transferList !== undefined) worker.postMessage(runMessage, transferList);
+          else worker.postMessage(runMessage);
         })
         .catch((err: unknown) => {
           this.pendingRemoteJobs.delete(jobId);
@@ -763,13 +882,24 @@ export class WorkerPool {
    * abierta para cuando exista un consumidor real del reintento (PR12+), no
    * resuelta en silencio acá.
    */
+  /**
+   * Crash de transporte (`05_Worker_Architecture.md` §9). El slot se libera
+   * primero, así que el reintento que dispara el rechazo de abajo encuentra
+   * el slot vacío y `workerForSlot` construye un worker nuevo (re-primeado
+   * por `onWorkerCreated` antes de aceptar su primer job, ADR-043 §5).
+   *
+   * `WorkerCrashedError` es `retryable: true` (ADR-077): hasta ese ADR acá se
+   * rechazaba con `InvalidInputError` —no-retryable, porque no existía un
+   * código para "crash de transporte"— y el job en vuelo se perdía en
+   * silencio, contra lo que §9 especifica desde el Hito 9.
+   */
   private handleWorkerTransportError(slot: number, _ev: unknown): void {
     this.remoteWorkers.delete(slot);
     for (const [jobId, pending] of this.pendingRemoteJobs) {
       if (pending.slotIndex !== slot) continue;
       this.pendingRemoteJobs.delete(jobId);
       pending.reject(
-        new InvalidInputError(
+        new WorkerCrashedError(
           `WorkerPool(${this.options.poolKey}): worker (slot ${slot}) emitió un error de transporte.`,
           { poolKey: this.options.poolKey, slot, jobId },
         ),
@@ -808,14 +938,12 @@ const JOB_TYPE_BY_POOL: Readonly<Record<ManagedPoolKey, WorkerJobType>> = {
 export class WorkerPoolManager {
   private readonly options: WorkerPoolManagerOptions;
   private readonly pools = new Map<ManagedPoolKey, WorkerPool>();
-  private readonly idleTimers = new Map<ManagedPoolKey, ReturnType<typeof setTimeout>>();
 
   constructor(options: WorkerPoolManagerOptions) {
     this.options = options;
   }
 
   getPool(key: ManagedPoolKey): WorkerPool {
-    this.touch(key);
     const existing = this.pools.get(key);
     if (existing !== undefined) return existing;
 
@@ -831,27 +959,20 @@ export class WorkerPoolManager {
       maxRetryDelayMs: this.options.maxRetryDelayMs,
       bus: this.options.bus,
       logger: this.options.logger,
+      // ADR-080 §1: el temporizador vive en el POOL, que es el único que sabe
+      // si de verdad está ocioso. El manager tenía el suyo propio, rearmado en
+      // cada `getPool` — la definición que el propio ADR-080 Contexto §4
+      // declara equivocada ("tiempo desde el último acceso", no "tiempo sin
+      // trabajo"). Con dos temporizadores conviviendo, el del manager podía
+      // liberar los workers de un `pdf-parse` largo a mitad del job.
+      idleDisposeMs: this.options.idleDisposeMs,
       ...(workerFactory !== undefined ? { workerFactory } : {}),
     });
     this.pools.set(key, pool);
     return pool;
   }
 
-  /** Reinicia el temporizador de disposición-por-inactividad de `key`. */
-  private touch(key: ManagedPoolKey): void {
-    const existingTimer = this.idleTimers.get(key);
-    if (existingTimer !== undefined) clearTimeout(existingTimer);
-    const timer = setTimeout(() => {
-      this.pools.get(key)?.dispose();
-      this.pools.delete(key);
-      this.idleTimers.delete(key);
-    }, this.options.idleDisposeMs);
-    this.idleTimers.set(key, timer);
-  }
-
   disposeAll(): void {
-    for (const timer of this.idleTimers.values()) clearTimeout(timer);
-    this.idleTimers.clear();
     for (const pool of this.pools.values()) pool.dispose();
     this.pools.clear();
   }
