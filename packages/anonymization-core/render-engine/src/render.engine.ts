@@ -371,7 +371,17 @@ function isEncodedPageImage(value: unknown): value is EncodedPageImage {
 }
 
 function isKernelRenderResult(value: unknown): value is KernelRenderResult {
-  return isRecord(value) && isImageData(value.imageData) && isEncodedPageImage(value.encoded);
+  return (
+    isRecord(value) &&
+    isImageData(value.imageData) &&
+    isEncodedPageImage(value.encoded) &&
+    // ADR-062 §1: `degraded` es obligatorio en el resultado del kernel (array
+    // vacío cuando no hay ninguna). Se valida acá y no se tolera ausente:
+    // aceptarlo sería devolver un default en silencio, que ADR-055 §3
+    // prohíbe — y el default silencioso de un veredicto de legibilidad es
+    // "no hay nada degradado", que es justamente la mentira peligrosa.
+    Array.isArray(value.degraded)
+  );
 }
 
 /**
@@ -412,7 +422,7 @@ function decodeKernelRenderResult(
     documentId,
     pageIndex,
     "RenderJobPool.dispatch() resolvió con una forma no reconocida: se esperaba " +
-      "{ imageData: ImageData, encoded: EncodedPageImage } (KernelRenderResult, " +
+      "{ imageData: ImageData, encoded: EncodedPageImage, degraded: Annotation[] } (KernelRenderResult, " +
       "worker/kernel.ts#kernelRenderPage) — misma forma en el camino remoto y en " +
       "el in-process (ADR-055 §2). Devolver un default en silencio está prohibido " +
       `(ADR-055 §3). Forma recibida: ${describeDispatchResultShape(dispatchResult)}.`,
@@ -598,6 +608,16 @@ interface InternalCacheEntry {
   readonly imageData: ImageData;
   readonly encoded: EncodedPageImage;
   readonly durationMs: number;
+  /**
+   * ADR-062 §1/§2: el veredicto de legibilidad de ESTE render, guardado en la
+   * entrada porque `emitPreviewUpdated` lee de acá — también en los **aciertos
+   * de cache**, que re-emiten `PREVIEW_UPDATED` sin volver a invocar el
+   * kernel. Sin guardarlo, un acierto emitiría el array vacío y **borraría la
+   * marca** que el render anterior había levantado; es exactamente el modo de
+   * falla que ADR-062 §2 describe al decir que "ausente ≡ vacío" y que la
+   * ausencia nunca significa "no sé".
+   */
+  readonly degraded: ReadonlyArray<Annotation>;
 }
 
 // ADR-037 §3: tamaño estimado de una entrada de cache para el límite por bytes
@@ -972,6 +992,7 @@ export class RenderEngine implements IEngine {
       imageData: kernelResult.imageData,
       encoded: kernelResult.encoded,
       durationMs,
+      degraded: kernelResult.degraded,
     };
 
     this.setCacheEntry(cacheKey, entry);
@@ -1396,11 +1417,16 @@ export class RenderEngine implements IEngine {
   private emitPreviewUpdated(ctx: EngineContext, entry: InternalCacheEntry): Promise<void> {
     const blob = new Blob([entry.encoded.bytes], { type: `image/${entry.encoded.format}` });
     const canvasBlobUrl = URL.createObjectURL(blob);
+    // ADR-062 §1: el veredicto sale acá, y sale de la ENTRADA (no de una
+    // variable del render) — así un acierto de cache, que re-emite este evento
+    // sin invocar al kernel, re-emite el mismo veredicto en vez de un array
+    // vacío que borraría la marca (§2).
     ctx.bus.emit(EventChannel.Render, EngineEvents.PREVIEW_UPDATED, {
       documentId: entry.documentId,
       pageIndex: entry.pageIndex,
       kind: entry.kind,
       canvasBlobUrl,
+      degraded: entry.degraded,
     });
     return Promise.resolve();
   }

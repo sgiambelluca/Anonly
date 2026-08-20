@@ -632,6 +632,11 @@ describe("RenderEngine — unit tests", () => {
       const pool = createResolvedRenderDispatchPool({
         imageData: remoteImageData,
         encoded: remoteEncoded,
+        // ADR-062 §1: parte de la forma del `KernelRenderResult`. El guard lo
+        // exige y NO tolera ausente — un veredicto de legibilidad ausente que
+        // se leyera como "no hay nada degradado" es la mentira peligrosa que
+        // ADR-055 §3 prohíbe devolver en silencio.
+        degraded: [],
       });
       const pooledEngine = new RenderEngine(pool);
       await pooledEngine.init(ctx);
@@ -673,6 +678,7 @@ describe("RenderEngine — unit tests", () => {
       const pool = createResolvedRenderDispatchPool({
         imageData: inProcessImageData,
         encoded: inProcessEncoded,
+        degraded: [],
       });
       const pooledEngine = new RenderEngine(pool);
       await pooledEngine.init(ctx);
