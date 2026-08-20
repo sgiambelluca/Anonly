@@ -242,7 +242,9 @@ apps/react-client/src/components/
   - "Editar valor canónico" → input inline.
   - "Eliminar grupo" → `ConfirmDialog` → `actions.updateGroup(groupId, { enabled: false })` (no se elimina, se deshabilita; en MVP no se elimina completamente).
 
-> **Accesibilidad**: el menú es un disclosure hecho a mano (trigger + `role="menu"`, cierre por click-fuera/Escape/selección), sin `@radix-ui/react-dropdown-menu` — agregar esa dependencia requiere ADR (P-9/R-12). Consecuencia conocida: no hay navegación por flechas ni focus trap.
+> **Accesibilidad**: el menú es un disclosure hecho a mano (trigger con `aria-expanded` + panel `role="group"` con botones, cierre por click-fuera/Escape/selección), sin `@radix-ui/react-dropdown-menu` — agregar esa dependencia requiere ADR (P-9/R-12). Los items se recorren con **Tab**, no con flechas.
+>
+> **No usa `role="menu"`/`role="menuitem"` ni `aria-haspopup`**, y es deliberado (2026-08-20). Ese rol es un contrato con el lector de pantalla: promete navegación por flechas, Home/End y foco gestionado con un solo tab stop, y nada de eso está implementado. Anunciarlo igual deja al usuario de teclado apretando flechas contra un panel que no responde — peor que no anunciar nada, porque sin el rol son botones en un grupo etiquetado y se comportan como el lector espera. `aria-haspopup="true"` sale por lo mismo: en WAI-ARIA 1.1+ es **sinónimo de `menu`**, así que reintroducía la promesa por la puerta de atrás. Si algún día entra Radix, trae el rol **y** el manejo de foco juntos, que es la única forma correcta de tener el primero.
 
 ### 3.8 `ChangeTypeDialog` (ADR-082 §6)
 
