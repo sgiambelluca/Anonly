@@ -38,7 +38,6 @@ export interface ViewerSlice {
   readonly currentPageIndex: Readonly<Record<ViewerKind, number>>;
   readonly visibleRange: Readonly<Record<ViewerKind, VisibleRange>>;
   readonly zoom: number; // 0.5..3 — global: los dos paneles comparten escala
-  readonly sideBySide: boolean; // default true — declarado, sin setter ni consumidor (ambigüedad abierta, ADR-054 §7: no reutilizado para el control de sincronización)
   readonly previewByPage: Readonly<Record<ViewerKind, ReadonlyMap<number, string>>>;
   /**
    * ADR-084 §1: la consulta del `DocumentSearchBox`. Sube al store —en vez de
@@ -68,13 +67,12 @@ function clampZoom(zoom: number): number {
 
 type ViewerData = Pick<
   ViewerSlice,
-  "currentPageIndex" | "zoom" | "sideBySide" | "previewByPage" | "visibleRange" | "searchQuery"
+  "currentPageIndex" | "zoom" | "previewByPage" | "visibleRange" | "searchQuery"
 >;
 
 const initialState: ViewerData = {
   currentPageIndex: { original: 0, anonymized: 0 },
   zoom: 1,
-  sideBySide: true,
   previewByPage: { original: new Map(), anonymized: new Map() },
   searchQuery: "",
   visibleRange: {

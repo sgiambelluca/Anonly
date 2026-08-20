@@ -27,12 +27,12 @@
  * `ResizeObserver` de `PageVirtualizer` sobre la transición de alto 0 a
  * alto > 0, sin código acá.
  *
- * Nota de ambigüedad detectada (ver reporte del PR): `viewer.store.sideBySide`
- * (`React_Client.md` §3.5) no tiene setter ni un componente que lo consuma en
- * `Components.md`/`React_Client.md` — el toggle mobile/desktop de esta
- * sección es puramente una media query CSS, no está condicionado por ese
- * campo del store. ADR-054 §7 decide explícitamente no reutilizarlo para el
- * control de sincronización de scroll. Este componente no lo lee.
+ * El toggle mobile/desktop de esta sección es una media query CSS pura, no un
+ * campo del store. Hubo un `viewer.store.sideBySide` declarado en
+ * `React_Client.md` §3.5 que nadie escribía ni leía; ADR-054 §7 descartó
+ * reutilizarlo para el control de sincronización y quedó sin un segundo
+ * candidato de uso, así que se eliminó del store y del spec en vez de
+ * seguir arrastrándolo como ambigüedad abierta.
  */
 
 import { useEffect, useRef, useState } from "react";
