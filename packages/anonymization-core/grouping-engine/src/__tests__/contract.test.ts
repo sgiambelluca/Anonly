@@ -393,10 +393,11 @@ describe("GroupingEngine — contract tests", () => {
     });
     const [conflict] = engine.getSnapshot("doc-1").conflicts;
 
+    // ADR-083 §1: el usuario elige el TIPO, no el modo de reemplazo.
     ctx.bus.emit(EventChannel.UI, EngineEvents.CONFLICT_RESOLVE_REQUESTED, {
       documentId: "doc-1",
       conflictId: conflict!.id,
-      mode: ReplacementMode.Mask,
+      entityType: EntityType.IBAN,
     });
     await Promise.resolve();
 
@@ -404,8 +405,9 @@ describe("GroupingEngine — contract tests", () => {
       .getSnapshot("doc-1")
       .conflicts.find((c) => c.id === conflict!.id) as Conflict;
     expect(resolved.resolved).toBe(true);
-    expect(resolved.resolvedMode).toBe(ReplacementMode.Mask);
-    expect(engine.getSnapshot("doc-1").groups[0]?.replacementMode).toBe(ReplacementMode.Mask);
+    expect(resolved.resolvedType).toBe(EntityType.IBAN);
+    // Y la elección reclasifica el grupo por la vía de ADR-082 §2.
+    expect(engine.getSnapshot("doc-1").groups[0]?.type).toBe(EntityType.IBAN);
   });
 
   // ADR-028: indexInType es provisional (orden de llegada) durante la sesión
@@ -721,9 +723,50 @@ describe("GroupingEngine — contract tests", () => {
     expect(merged.replacementValue).toBe("[PERS 01]");
   });
 
-  // ADR-076 §1: bookkeeping interno, nunca expuesto — mismo criterio y mismo
-  // test que `personGenderUserSet` (ADR-069 §5).
-  it("replacementValueUserSet never appears in snapshots or event payloads", async () => {
+  // ADR-078 §1 — INVIERTE el test de ADR-076 §1, que afirmaba que este flag
+  // nunca salía. El criterio real de ADR-069 §5 no era "los flags *UserSet no
+  // salen" sino "sale el valor, no la procedencia", y acá el valor NO delata
+  // su procedencia: `[P1]` a mano y `[P1]` calculado son idénticos. Ver el
+  // test siguiente para el flag que sí se queda adentro.
+  it("replacementValueUserSet is exposed in snapshots and event payloads", async () => {
+    await engine.init(ctx);
+    engine.startSession("doc-1");
+
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "11111111", normalizedValue: "11111111" }),
+    });
+    const [group] = engine.getSnapshot("doc-1").groups;
+    expect(group?.replacementValueUserSet).toBe(false);
+
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+    const updated = await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group!.id,
+      patch: { replacementValue: "[P1]" },
+    });
+    expect(updated.replacementValueUserSet).toBe(true);
+    expect(engine.getSnapshot("doc-1").groups[0]?.replacementValueUserSet).toBe(true);
+
+    // Y viaja en el evento, sin campo nuevo en el payload: `ENTITY_GROUP_UPDATED`
+    // ya transporta el grupo entero (ADR-078 §5).
+    // Mismo recorrido que el test de `personGenderUserSet` de abajo: se
+    // itera el union de payloads y se filtra por forma, sin type predicate
+    // (el union de `EventPayloadMap` no es asignable a una forma puntual).
+    let payloadsWithGroup = 0;
+    for (const [, , payload] of busEmitSpy.mock.calls) {
+      if (payload !== null && typeof payload === "object" && "group" in payload) {
+        payloadsWithGroup += 1;
+        expect(payload.group).toHaveProperty("replacementValueUserSet", true);
+      }
+    }
+    expect(payloadsWithGroup).toBeGreaterThan(0);
+  });
+
+  // ADR-069 §5, ratificado por ADR-078 §2: este flag SÍ se queda adentro,
+  // porque su valor asociado delata la procedencia por sí mismo (quien eligió
+  // "femenino" lee `[MUJER 01]`).
+  it("personGenderUserSet never appears in snapshots or event payloads", async () => {
     await engine.init(ctx);
     engine.startSession("doc-1");
     const busEmitSpy = vi.spyOn(ctx.bus, "emit");
@@ -733,20 +776,51 @@ describe("GroupingEngine — contract tests", () => {
       occurrence: makeOccurrence({ value: "11111111", normalizedValue: "11111111" }),
     });
     const [group] = engine.getSnapshot("doc-1").groups;
-    expect(group).not.toHaveProperty("replacementValueUserSet");
+    expect(group).not.toHaveProperty("personGenderUserSet");
 
     const updated = await engine.applyGroupUpdate({
       documentId: "doc-1",
       groupId: group!.id,
       patch: { replacementValue: "[P1]" },
     });
-    expect(updated).not.toHaveProperty("replacementValueUserSet");
-    expect(engine.getSnapshot("doc-1").groups[0]).not.toHaveProperty("replacementValueUserSet");
+    expect(updated).not.toHaveProperty("personGenderUserSet");
+    expect(engine.getSnapshot("doc-1").groups[0]).not.toHaveProperty("personGenderUserSet");
 
     for (const [, , payload] of busEmitSpy.mock.calls) {
       if (payload !== null && typeof payload === "object" && "group" in payload) {
-        expect(payload.group).not.toHaveProperty("replacementValueUserSet");
+        expect(payload.group).not.toHaveProperty("personGenderUserSet");
       }
     }
+  });
+
+  // ADR-078 §3: "restaurar valor calculado" no necesita API nueva — re-aplicar
+  // el MISMO modo recalcula y apaga el flag. Es lo que despacha el
+  // `GroupContextMenu`.
+  it("re-applying the same replacementMode clears replacementValueUserSet and restores the computed value", async () => {
+    await engine.init(ctx);
+    engine.startSession("doc-1");
+
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "11111111", normalizedValue: "11111111" }),
+    });
+    const [group] = engine.getSnapshot("doc-1").groups;
+    const computed = group!.replacementValue;
+
+    const edited = await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group!.id,
+      patch: { replacementValue: "[P1]" },
+    });
+    expect(edited.replacementValue).toBe("[P1]");
+    expect(edited.replacementValueUserSet).toBe(true);
+
+    const restored = await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group!.id,
+      patch: { replacementMode: edited.replacementMode },
+    });
+    expect(restored.replacementValueUserSet).toBe(false);
+    expect(restored.replacementValue).toBe(computed);
   });
 });

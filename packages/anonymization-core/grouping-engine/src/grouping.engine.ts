@@ -211,6 +211,7 @@ const FUZZY_MATCHING_TYPES: ReadonlySet<EntityType> = new Set([
 ]);
 
 const PATCH_ALLOWED_KEYS: ReadonlySet<string> = new Set([
+  "type", // ADR-082 §1
   "replacementMode",
   "replacementValue",
   "enabled",
@@ -256,6 +257,18 @@ interface InternalGroup {
    */
   personGenderUserSet: boolean;
   /**
+   * ADR-085 §1(a): los tipos de detector que este grupo acepta. Arranca con el
+   * tipo de la ocurrencia que lo creó y gana el tipo nuevo en cada
+   * reclasificación, de modo que una ocurrencia futura que el detector siga
+   * emitiendo con el tipo viejo **caiga igual en el grupo corregido** en vez
+   * de crear uno paralelo (escenario B de ADR-082, Consecuencias).
+   *
+   * Bookkeeping interno, nunca expuesto — mismo criterio que
+   * `normalizedValues`/`aliasFrequency`. No guarda ningún valor del documento:
+   * solo tipos.
+   */
+  readonly absorbedTypes: Set<EntityType>;
+  /**
    * ADR-076 §1: el `replacementValue` lo escribió el usuario. Ningún
    * recálculo automático lo pisa (§3) — el corte es si el `replacementMode`
    * efectivo cambió, no si el disparador fue "automático" o "manual". Mismo
@@ -269,6 +282,11 @@ interface InternalGroup {
 /** Copia liviana de los campos de `Occurrence` necesarios para matching/conflictos, indexada por sesión. */
 interface SessionOccurrenceRecord {
   readonly occurrenceId: string;
+  /**
+   * El tipo que produjo el DETECTOR, no el del grupo (ADR-082 §3). Una
+   * reclasificación del usuario no lo toca: este campo se compara contra lo
+   * que el detector vuelve a emitir en un `reanalyze`.
+   */
   readonly entityType: EntityType;
   readonly source: DetectionSource;
   readonly confidence: number;
@@ -281,6 +299,21 @@ interface SessionOccurrenceRecord {
   groupId: string;
 }
 
+/**
+ * Una corrección de tipo del usuario (ADR-085). Guarda además el tipo que el
+ * DETECTOR le había dado al valor: sin eso, el pase difuso del lookup corre
+ * sobre todas las claves del mapa sin importar de qué tipo eran, y una
+ * corrección registrada sobre un valor estructurado (un teléfono, un CUIT)
+ * queda expuesta al difuso de un `Person`/`Organization`/`Address` entrante.
+ * Hoy no es alcanzable con datos plausibles —un nombre no se parece a una
+ * cadena de dígitos— pero el razonamiento de ADR-085 §3 asume que el guard es
+ * simétrico, y sin este campo no lo era.
+ */
+interface TypeCorrection {
+  readonly correctedType: EntityType;
+  readonly detectorType: EntityType;
+}
+
 interface Session {
   readonly documentId: string;
   readonly groups: Map<string, InternalGroup>;
@@ -288,6 +321,23 @@ interface Session {
   rules: Rule[];
   readonly conflicts: Map<string, Conflict>;
   readonly recordedOccurrences: SessionOccurrenceRecord[];
+  /**
+   * ADR-085 §1(b): `normalizedValue` → tipo con el que el usuario corrigió ese
+   * valor. Se consulta **solo en `createGroup`** (único call site, alcanzable
+   * solo cuando `findMatchingGroup` no encontró nada), o sea una vez por grupo
+   * creado y no por ocurrencia.
+   *
+   * Es lo único que cubre el escenario C de ADR-082: si un `reanalyze` borra
+   * el grupo corregido —`dropOccurrences({ source: NER })` lo hace al apagar
+   * NER—, `absorbedTypes` se va con él y esto es lo que hace que el grupo
+   * recreado nazca con el tipo corregido.
+   *
+   * RAM y por documento: muere con la sesión (`closeSession`) y sobrevive a
+   * `reopenSession`, igual que los grupos y las ediciones del usuario. **No se
+   * persiste** (`08_Security_Model.md` §10.2: nunca contenido del documento
+   * fuera de RAM).
+   */
+  readonly typeCorrections: Map<string, TypeCorrection>;
   readonly seed: string;
   readonly startedAt: number;
   regexFinished: boolean;
@@ -309,6 +359,12 @@ function toPublicGroup(group: InternalGroup): EntityGroup {
     // exactOptionalPropertyTypes: no asignar `undefined` explícito (mismo
     // patrón que maskFormat en recordOccurrence).
     ...(group.personGender !== undefined ? { personGender: group.personGender } : {}),
+    // ADR-078 §1: el flag sale del motor porque su valor asociado NO delata
+    // su procedencia — `[P1]` escrito a mano y `[P1]` calculado son
+    // idénticos, así que sin esto la UI no puede pintar el indicador de
+    // `UX_Guidelines.md` §3.3 ni ofrecer "restaurar valor calculado".
+    // `personGenderUserSet` sigue interno por la razón inversa (ADR-078 §2).
+    replacementValueUserSet: group.replacementValueUserSet,
     createdAt: group.createdAt,
     updatedAt: group.updatedAt,
   };
@@ -531,6 +587,31 @@ function setPersonGender(group: InternalGroup, value: PersonGender | undefined):
  * `true` solo si `personGender` cambió, para que el caller sume la clave a
  * su `changed` y decida si hace falta recalcular `replacementValue`.
  */
+/**
+ * Default de ADR-083 §4: el candidato de mayor `confidence`, con empate a
+ * favor de `Regex`. Es la misma regla que `conflictWinnerIsNew` ya aplica al
+ * crear el conflicto — y como `regex-engine` emite siempre `confidence: 1.0`,
+ * coincide con la resolución automática. O sea: resolver sin elegir confirma
+ * lo que el motor decidió, y no cambia ningún dato.
+ */
+function defaultCandidateType(conflict: Conflict): EntityType | undefined {
+  let best: ConflictCandidate | undefined;
+  for (const candidate of conflict.candidates) {
+    if (best === undefined || candidate.confidence > best.confidence) {
+      best = candidate;
+      continue;
+    }
+    if (
+      candidate.confidence === best.confidence &&
+      candidate.source === DetectionSource.Regex &&
+      best.source !== DetectionSource.Regex
+    ) {
+      best = candidate;
+    }
+  }
+  return best?.entityType;
+}
+
 function inferGenderIfDue(group: InternalGroup): boolean {
   if (group.type !== EntityType.Person || group.personGenderUserSet) return false;
   const inferred = inferPersonGender(group.canonicalValue, GENDER_LEXICON);
@@ -644,6 +725,7 @@ export class GroupingEngine implements IEngine {
       rules: [],
       conflicts: new Map(),
       recordedOccurrences: [],
+      typeCorrections: new Map(),
       seed: crypto.randomUUID(),
       startedAt: Date.now(),
       regexFinished: false,
@@ -762,12 +844,14 @@ export class GroupingEngine implements IEngine {
     session.recordedOccurrences.splice(0, session.recordedOccurrences.length, ...keptRecords);
 
     const affectedGroupIds = new Set(toDrop.map((rec) => rec.groupId));
-    // "modo efectivo del grupo antes de eliminarlo" (ADR-038 §2): capturado
-    // ANTES de mutar/eliminar, para los conflictos que queden huérfanos.
-    const modeBeforeRemoval = new Map<string, ReplacementMode>();
+    // Tipo del grupo antes de eliminarlo: capturado ANTES de mutar/eliminar,
+    // para los conflictos que queden huérfanos. Desde ADR-083 §3 lo que
+    // registra un conflicto resuelto es el TIPO con el que quedó clasificado
+    // el grupo, no el modo de reemplazo.
+    const typeBeforeRemoval = new Map<string, EntityType>();
     for (const groupId of affectedGroupIds) {
       const group = session.groups.get(groupId);
-      if (group) modeBeforeRemoval.set(groupId, group.replacementMode);
+      if (group) typeBeforeRemoval.set(groupId, group.type);
     }
 
     // Grupos efectivamente eliminados EN ESTA llamada (no re-derivado de
@@ -839,16 +923,24 @@ export class GroupingEngine implements IEngine {
     // Nota 10 del header: un conflicto queda "stale" cuando su groupId fue
     // eliminado EN ESTA llamada (no "resolved", ver comentario arriba: los
     // conflictos overlap/disagree/low_confidence ya nacen resueltos). No hay
-    // evento CONFLICT_REMOVED (ADR-038 §2): se re-emite CONFLICT_RESOLVED con
-    // el modo efectivo previo, sobrescribiendo el resolvedMode anterior.
+    // evento CONFLICT_REMOVED (ADR-038 §2): se re-emite CONFLICT_RESOLVED,
+    // sobrescribiendo el `resolvedType` anterior.
+    //
+    // Solo se barren los conflictos cuyo GRUPO desapareció. Un conflicto cuyo
+    // grupo sobrevive pero cuyos candidatos describían una ocurrencia borrada
+    // NO es detectable —`ConflictCandidate` no tiene `occurrenceId` ni
+    // `bbox`— y queda stale: ruido de UI inofensivo, sin corrupción ni fuga.
+    // Errata de spec 2026-08-19 (`Grouping_Engine.md` §13 caso 25).
     for (const [conflictId, conflict] of session.conflicts) {
       if (!removedGroupIds.has(conflict.groupId)) continue;
-      const mode = modeBeforeRemoval.get(conflict.groupId) ?? ReplacementMode.Placeholder;
-      session.conflicts.set(conflictId, { ...conflict, resolved: true, resolvedMode: mode });
+      const entityType =
+        typeBeforeRemoval.get(conflict.groupId) ?? conflict.candidates[0]?.entityType;
+      if (entityType === undefined) continue;
+      session.conflicts.set(conflictId, { ...conflict, resolved: true, resolvedType: entityType });
       this.ctx?.bus.emit(EventChannel.Grouping, EngineEvents.CONFLICT_RESOLVED, {
         documentId,
         conflictId,
-        mode,
+        entityType,
       });
     }
   }
@@ -1000,13 +1092,21 @@ export class GroupingEngine implements IEngine {
       const { session, group } = this.requireGroup(req.documentId, req.groupId);
       this.validatePatch(req.patch);
 
-      const { replacementMode, replacementValue, enabled, canonicalValue, personGender } =
+      const { type, replacementMode, replacementValue, enabled, canonicalValue, personGender } =
         req.patch;
       const changed = new Set<keyof EntityGroup>();
       const beforeReplacement = {
         replacementMode: group.replacementMode,
         replacementValue: group.replacementValue,
       };
+
+      // ADR-082 §2: va PRIMERO — el tipo gobierna el label del token, qué
+      // regla de scope `type` aplica y si `personGender` tiene sentido, así
+      // que las ramas de abajo tienen que ver el tipo nuevo. Un `type` igual
+      // al vigente es no-op (no entra en `changed`).
+      if (type !== undefined && type !== group.type) {
+        for (const key of this.changeGroupType(session, group, type)) changed.add(key);
+      }
 
       if (canonicalValue !== undefined) {
         group.canonicalValue = canonicalValue;
@@ -1147,6 +1247,9 @@ export class GroupingEngine implements IEngine {
         }
       }
       for (const nv of source.normalizedValues) target.normalizedValues.add(nv);
+      // ADR-085 §7: pasaron a ser un solo grupo, así que el sobreviviente
+      // acepta los tipos que aceptaba cualquiera de los dos.
+      for (const t of source.absorbedTypes) target.absorbedTypes.add(t);
       target.members.push(...source.members);
 
       // Reasignar ANTES de recalcular canonicalValue/replacementValue: ambos
@@ -1267,6 +1370,9 @@ export class GroupingEngine implements IEngine {
       // ADR-076 §4 fila 1/7: un grupo recién creado no tiene edición que
       // preservar.
       replacementValueUserSet: false,
+      // ADR-085 §7: copia, no la misma referencia — es la misma
+      // clasificación partida en dos, pero cada mitad evoluciona sola.
+      absorbedTypes: new Set(group.absorbedTypes),
       normalizedValues: new Set(),
       aliasFrequency: new Map(),
       aliasFirstSeen: new Map(),
@@ -1427,29 +1533,38 @@ export class GroupingEngine implements IEngine {
         throw new GroupingGroupNotFoundError(req.documentId, req.conflictId, { kind: "conflict" });
       }
 
-      const resolved: Conflict = { ...conflict, resolved: true, resolvedMode: req.mode };
+      // ADR-083 §1/§4: el usuario elige el TIPO. Ausente = el default, que es
+      // el candidato de mayor confidence (empate a favor de Regex). Como
+      // `regex-engine` emite siempre `confidence: 1.0`, ese default coincide
+      // con la resolución automática que el motor ya tomó al crear el
+      // conflicto — o sea que resolver sin elegir es confirmar, y no cambia
+      // ningún dato.
+      const chosenType = req.entityType ?? defaultCandidateType(conflict);
+      if (chosenType === undefined) {
+        // Conflicto sin candidatos: no debería existir (siempre se construye
+        // con al menos dos), pero un `resolvedType` inventado sería peor que
+        // rechazar.
+        throw new GroupingInvalidPatchError("El conflicto no tiene candidatos con tipo.", {
+          documentId: req.documentId,
+          conflictId: req.conflictId,
+        });
+      }
+      const resolved: Conflict = { ...conflict, resolved: true, resolvedType: chosenType };
       session.conflicts.set(conflict.id, resolved);
 
       const group = session.groups.get(conflict.groupId);
-      if (group) {
+      if (group && chosenType !== group.type) {
+        // ADR-083 §2: aplicar = reclasificar por la MISMA vía que
+        // `updateGroup({ type })` (ADR-082 §2), no un camino paralelo.
         const beforeReplacement = {
           replacementMode: group.replacementMode,
           replacementValue: group.replacementValue,
         };
-        group.replacementMode = req.mode;
-        group.replacementMode = resolveMode(group, session.rules);
-        // ADR-076 §4 fila 10: fija group.replacementMode a lo que pidió el
-        // usuario — misma familia que la rama de modo de applyGroupUpdate
-        // (fila 4), recalcula y apaga el flag sin importar su estado previo.
-        group.replacementValue = computeReplacementValue(
-          group,
-          session.seed,
-          this.resolveMaskFormat(session, group),
-        );
-        group.replacementValueUserSet = false;
+        const typeChanges = this.changeGroupType(session, group, chosenType);
         group.updatedAt = Date.now();
 
         const changed: (keyof EntityGroup)[] = [
+          ...typeChanges,
           ...this.emitReplacementChangeIfNeeded(session, group, beforeReplacement),
           "updatedAt",
         ];
@@ -1459,7 +1574,7 @@ export class GroupingEngine implements IEngine {
       this.ctx?.bus.emit(EventChannel.Grouping, EngineEvents.CONFLICT_RESOLVED, {
         documentId: req.documentId,
         conflictId: conflict.id,
-        mode: req.mode,
+        entityType: chosenType,
       });
 
       return Promise.resolve(resolved);
@@ -1588,7 +1703,7 @@ export class GroupingEngine implements IEngine {
       ConflictReason.LowConfidence,
       [groupPrimaryCandidate(candidateGroup), occurrenceAsCandidate(occurrence)],
       true,
-      candidateGroup.replacementMode,
+      candidateGroup.type,
     );
     this.emitConflictDetected(session, conflict);
   }
@@ -1662,7 +1777,7 @@ export class GroupingEngine implements IEngine {
       reason,
       [existingCandidate, occurrenceAsCandidate(occurrence)],
       true,
-      group?.replacementMode,
+      group?.type,
     );
     this.emitConflictDetected(session, conflict);
   }
@@ -1685,7 +1800,17 @@ export class GroupingEngine implements IEngine {
     const threshold = this.ctx?.config.grouping.similarityThreshold ?? DEFAULT_SIMILARITY_THRESHOLD;
     const candidates: InternalGroup[] = [];
     for (const group of session.groups.values()) {
-      if (group.type === occurrence.entityType) candidates.push(group);
+      // ADR-085 §1(a): un grupo reclasificado sigue aceptando el tipo con el
+      // que el detector lo emite — que no aprende y va a seguir diciendo el
+      // original en cada `reanalyze`. Sin esto, la ocurrencia nueva del mismo
+      // valor crea un grupo paralelo y el mismo texto sale del export con dos
+      // tokens distintos (escenario B de ADR-082, Consecuencias).
+      //
+      // El `||` cortocircuita: el `Set.has` solo corre para los grupos cuyo
+      // tipo no matcheó. Medido en 0,19 ms sobre 5000 ocurrencias × 50 grupos.
+      if (group.type === occurrence.entityType || group.absorbedTypes.has(occurrence.entityType)) {
+        candidates.push(group);
+      }
     }
     for (const group of candidates) {
       if (group.normalizedValues.has(occurrence.normalizedValue)) return group;
@@ -1701,12 +1826,49 @@ export class GroupingEngine implements IEngine {
     return null;
   }
 
+  /**
+   * Memoria de reclasificación (ADR-085 §3): exacto por `normalizedValue`, y
+   * si falla, un pase difuso **solo** para los tipos de texto libre.
+   *
+   * El guard va sobre `occurrence.entityType` —lo que emite el detector— y no
+   * sobre el tipo destino de la corrección: el riesgo que ADR-073 identificó
+   * (dos CUIT que difieren en un dígito dan 0.909 sobre un umbral de 0.88)
+   * vive en el VALOR que se compara, y ese valor es el que el detector
+   * clasificó. Mismo criterio, misma constante y mismo umbral que el pase
+   * difuso de `findMatchingGroup`.
+   */
+  private correctedTypeFor(session: Session, occurrence: Occurrence): EntityType | undefined {
+    if (session.typeCorrections.size === 0) return undefined;
+
+    const exact = session.typeCorrections.get(occurrence.normalizedValue);
+    if (exact !== undefined) return exact.correctedType;
+
+    if (!FUZZY_MATCHING_TYPES.has(occurrence.entityType)) return undefined;
+    const threshold = this.ctx?.config.grouping.similarityThreshold ?? DEFAULT_SIMILARITY_THRESHOLD;
+    for (const [normalizedValue, correction] of session.typeCorrections) {
+      // El guard es SIMÉTRICO: además del tipo entrante, el tipo con el que el
+      // detector había clasificado el valor corregido tiene que tolerar el
+      // difuso. Una corrección sobre un teléfono no se hereda por parecido a
+      // un nombre — es la misma razón de ADR-073, aplicada a los dos lados de
+      // la comparación.
+      if (!FUZZY_MATCHING_TYPES.has(correction.detectorType)) continue;
+      if (levenshteinNormalized(occurrence.normalizedValue, normalizedValue) >= threshold) {
+        return correction.correctedType;
+      }
+    }
+    return undefined;
+  }
+
   private createGroup(session: Session, occurrence: Occurrence): InternalGroup {
     const now = Date.now();
-    const indexInType = this.nextIndex(session, occurrence.entityType);
+    // ADR-085 §1(b)/§2: único punto donde se consulta la memoria de
+    // reclasificación. Se llega acá solo si `findMatchingGroup` no encontró
+    // nada, o sea una vez por grupo creado — no por ocurrencia.
+    const effectiveType = this.correctedTypeFor(session, occurrence) ?? occurrence.entityType;
+    const indexInType = this.nextIndex(session, effectiveType);
     const group: InternalGroup = {
       id: crypto.randomUUID(),
-      type: occurrence.entityType,
+      type: effectiveType,
       canonicalValue: occurrence.value,
       members: [toOccurrenceRef(occurrence)],
       replacementMode: ReplacementMode.Placeholder,
@@ -1720,6 +1882,10 @@ export class GroupingEngine implements IEngine {
       // ADR-076 §4 fila 1/7: un grupo recién creado no tiene edición que
       // preservar.
       replacementValueUserSet: false,
+      // ADR-085 §2: se siembra con LOS DOS tipos, así las ocurrencias 2..N del
+      // mismo valor las resuelve `absorbedTypes` y el mapa no se vuelve a
+      // tocar para ese valor en todo el documento.
+      absorbedTypes: new Set([occurrence.entityType, effectiveType]),
       normalizedValues: new Set([occurrence.normalizedValue]),
       aliasFrequency: new Map([[occurrence.value, 1]]),
       aliasFirstSeen: new Map([
@@ -1786,6 +1952,94 @@ export class GroupingEngine implements IEngine {
 
     group.updatedAt = Date.now();
     return [...changed];
+  }
+
+  /**
+   * Reclasificación de un grupo (ADR-082 §2). El orden importa: índice → modo
+   * efectivo → **género** → valor. El género va ANTES que el valor, a
+   * diferencia de lo que decía la primera redacción de ADR-082 §2: al entrar a
+   * `Person`, el label del placeholder depende del género recién inferido
+   * (`[MUJER 01]` vs `[PERSONA 01]`, ADR-060 §3), así que calcular el valor
+   * primero lo dejaría con el género viejo. Los `recordedOccurrences` **no**
+   * se tocan (§3).
+   *
+   * No fusiona con un grupo existente del tipo destino aunque compartan
+   * `normalizedValue` (ADR-082 §7): fusionar es `GROUP_MERGE_REQUESTED`, y
+   * hacerlo acá borraría un grupo sin que el usuario lo pida.
+   */
+  private changeGroupType(
+    session: Session,
+    group: InternalGroup,
+    nextType: EntityType,
+  ): ReadonlyArray<keyof EntityGroup> {
+    const previousMode = group.replacementMode;
+    const previousType = group.type;
+    const previousGender = group.personGender;
+    group.type = nextType;
+
+    // ADR-085 §1(a)/§4: el grupo pasa a aceptar los dos tipos, así una
+    // ocurrencia futura que el detector emita con el original cae acá.
+    group.absorbedTypes.add(previousType);
+    group.absorbedTypes.add(nextType);
+
+    // ADR-085 §1(b)/§5: se registran TODOS los `normalizedValues` del grupo,
+    // no solo el canónico — el grupo ES sus alias. Gana la última elección: un
+    // `set` sobre una clave existente la sobrescribe, sin historial.
+    for (const normalizedValue of group.normalizedValues) {
+      session.typeCorrections.set(normalizedValue, {
+        correctedType: nextType,
+        detectorType: previousType,
+      });
+    }
+
+    // Índice nuevo en la secuencia del tipo destino. El índice viejo queda
+    // como hueco a propósito: compactarlo acá duplicaría
+    // `renumberGroupsCanonically` (ADR-028) con otro criterio, y esa es la
+    // que corre en el próximo `finishSession`.
+    group.indexInType = this.nextIndex(session, nextType);
+
+    // El tipo destino puede tener otra regla de scope `type`.
+    group.replacementMode = resolveMode(group, session.rules);
+
+    // ADR-082 §2 paso 4: el género solo existe para Person.
+    if (nextType !== EntityType.Person) {
+      setPersonGender(group, undefined);
+      group.personGenderUserSet = false;
+    } else {
+      inferGenderIfDue(group);
+    }
+
+    // ADR-076 §3, ratificado por ADR-082 §4: una edición manual del valor
+    // sobrevive al cambio de tipo. La salvedad sale sola — si el tipo nuevo
+    // cambió el modo EFECTIVO, es la regla de ADR-076 §4 fila 4 y el valor se
+    // recalcula apagando el flag, sin excepción nueva.
+    const effectiveModeChanged = group.replacementMode !== previousMode;
+    if (!group.replacementValueUserSet || effectiveModeChanged) {
+      group.replacementValue = computeReplacementValue(
+        group,
+        session.seed,
+        this.resolveMaskFormat(session, group),
+      );
+      if (effectiveModeChanged) group.replacementValueUserSet = false;
+    }
+
+    // ADR-082 §3: `SessionOccurrenceRecord.entityType` **NO** sigue al grupo.
+    // Es la huella de lo que el DETECTOR produjo, y se compara contra lo que
+    // el detector vuelve a emitir en un `reanalyze` — que no sabe nada de la
+    // corrección del usuario. Si el registro siguiera al tipo nuevo, el dedup
+    // por identidad (`isDuplicateIdentity`, que corre ANTES que la detección
+    // de conflictos) dejaría de reconocer la ocurrencia re-emitida, y esta
+    // caería en `findOverlapConflict` contra su propio grupo, generando un
+    // conflicto espurio del grupo consigo mismo.
+
+    // ADR-082 §5: los campos que de verdad cambiaron, para que el caller los
+    // ponga en `ENTITY_GROUP_UPDATED.changes`. `personGender` es el que se
+    // escapaba: `changeGroupType` lo borra al salir de Person y lo re-infiere
+    // al entrar, y ningún caller lo reportaba — la UI nunca se enteraba.
+    const changed: (keyof EntityGroup)[] = ["type", "indexInType"];
+    if (group.replacementMode !== previousMode) changed.push("replacementMode");
+    if (group.personGender !== previousGender) changed.push("personGender");
+    return changed;
   }
 
   private nextIndex(session: Session, type: EntityType): number {
@@ -1924,11 +2178,13 @@ export class GroupingEngine implements IEngine {
     reason: ConflictReason,
     candidates: ReadonlyArray<ConflictCandidate>,
     resolved: boolean,
-    resolvedMode: ReplacementMode | undefined,
+    // ADR-083 §3: un conflicto resuelto registra el TIPO con el que quedó
+    // clasificado el grupo, no el modo de reemplazo.
+    resolvedType: EntityType | undefined,
   ): Conflict {
     const conflict: Conflict =
-      resolved && resolvedMode !== undefined
-        ? { id: crypto.randomUUID(), groupId, reason, candidates, resolved, resolvedMode }
+      resolved && resolvedType !== undefined
+        ? { id: crypto.randomUUID(), groupId, reason, candidates, resolved, resolvedType }
         : { id: crypto.randomUUID(), groupId, reason, candidates, resolved: false };
     session.conflicts.set(conflict.id, conflict);
     return conflict;

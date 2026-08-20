@@ -172,6 +172,7 @@ export function makeEntityGroup(overrides?: Partial<EntityGroup>): EntityGroup {
     indexInType: 1,
     enabled: true,
     aliases: ["Julia Gomez"],
+    replacementValueUserSet: false,
     createdAt: now,
     updatedAt: now,
     ...overrides,
