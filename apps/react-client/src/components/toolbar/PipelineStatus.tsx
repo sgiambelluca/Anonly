@@ -24,10 +24,18 @@
  * inequívoco: el mensaje de error + "Cerrar documento" (`actions.closeDocument`)
  * siempre, y "Desactivar NER y reanalizar" (`actions.reanalyze({ ner: {
  * enabled: false } })`) cuando `error.code === "NER_MODEL_MISSING"`.
+ *
+ * "Desactivar NER y reanalizar" **también escribe `settings.store.nerEnabled`**
+ * (tras el éxito del `reanalyze`): es la mitad que faltaba de esa recuperación
+ * desde el PR6 del Hito 10. Sin ella el toggle de `SettingsDialog` quedaba
+ * desincronizado y, desde PR16.5 —que deriva el `EngineConfig` del bootstrap
+ * de `settings.store`—, la próxima carga de la pestaña reabría el Core con
+ * NER activado.
  */
 
 import { actions } from "../../core-adapter/actions.js";
 import { usePipelineStore } from "../../store/pipeline.store.js";
+import { useSettingsStore } from "../../store/settings.store.js";
 import { Banner } from "../common/Banner.js";
 import { Button } from "../common/Button.js";
 
@@ -56,7 +64,30 @@ export function PipelineStatus() {
                 variant="secondary"
                 size="sm"
                 onClick={() => {
-                  void actions.reanalyze({ ner: { enabled: false } });
+                  void actions
+                    .reanalyze({ ner: { enabled: false } })
+                    .then(() => {
+                      // El store se sincroniza con lo que el usuario acaba de
+                      // decidir, y solo si el reanalyze salió bien (mismo
+                      // criterio de orden que `SettingsDialog`). Sin esto el
+                      // toggle de Settings seguía mostrando NER activado, y
+                      // —desde PR16.5, que cablea `settings.store` →
+                      // `EngineConfig` en el bootstrap— al recargar la pestaña
+                      // el Core volvía a arrancar con NER activado, o sea de
+                      // vuelta al mismo `NER_MODEL_MISSING` del que el usuario
+                      // acababa de salir. `React_Client.md` §3.7/§8.
+                      useSettingsStore.setState({ nerEnabled: false });
+                      useSettingsStore.getState().persist();
+                    })
+                    .catch(() => {
+                      // `actions.reanalyze` propaga el rechazo del Orchestrator
+                      // (p. ej. el `InvalidInputError` que ADR-081 agregó). Sin
+                      // este catch terminal sería un unhandled rejection y el
+                      // store quedaría sin sincronizar en silencio. El banner de
+                      // error ya está en pantalla: no hay UI nueva que mostrar,
+                      // lo que importa es no dejar la promesa suelta ni escribir
+                      // el store como si el reanalyze hubiera funcionado.
+                    });
                 }}
               >
                 Desactivar NER y reanalizar

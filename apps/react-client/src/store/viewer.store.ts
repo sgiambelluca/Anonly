@@ -40,7 +40,19 @@ export interface ViewerSlice {
   readonly zoom: number; // 0.5..3 — global: los dos paneles comparten escala
   readonly sideBySide: boolean; // default true — declarado, sin setter ni consumidor (ambigüedad abierta, ADR-054 §7: no reutilizado para el control de sincronización)
   readonly previewByPage: Readonly<Record<ViewerKind, ReadonlyMap<number, string>>>;
+  /**
+   * ADR-084 §1: la consulta del `DocumentSearchBox`. Sube al store —en vez de
+   * quedar en el `useState` del propio buscador— para que "Ver ocurrencias"
+   * del panel de entidades pueda escribirla desde el otro extremo del árbol.
+   *
+   * **No es por panel** (a diferencia de `currentPageIndex`/`visibleRange`
+   * desde ADR-054 §1): el buscador existe una sola vez, sobre el `original`.
+   * El resto del estado del buscador (matches, `activeIndex`, el tipo del
+   * "Agregar como…") sigue siendo local: es trabajo interno suyo.
+   */
+  readonly searchQuery: string;
   setPage(kind: ViewerKind, index: number): void;
+  setSearchQuery(query: string): void;
   setZoom(z: number): void;
   setPreview(pageIndex: number, kind: ViewerKind, blobUrl: string): void;
   setVisibleRange(kind: ViewerKind, start: number, end: number): void;
@@ -56,7 +68,7 @@ function clampZoom(zoom: number): number {
 
 type ViewerData = Pick<
   ViewerSlice,
-  "currentPageIndex" | "zoom" | "sideBySide" | "previewByPage" | "visibleRange"
+  "currentPageIndex" | "zoom" | "sideBySide" | "previewByPage" | "visibleRange" | "searchQuery"
 >;
 
 const initialState: ViewerData = {
@@ -64,6 +76,7 @@ const initialState: ViewerData = {
   zoom: 1,
   sideBySide: true,
   previewByPage: { original: new Map(), anonymized: new Map() },
+  searchQuery: "",
   visibleRange: {
     original: { start: 0, end: 0 },
     anonymized: { start: 0, end: 0 },
@@ -72,6 +85,9 @@ const initialState: ViewerData = {
 
 export const useViewerStore = create<ViewerSlice>((set) => ({
   ...initialState,
+  setSearchQuery(query) {
+    set({ searchQuery: query });
+  },
   setPage(kind, index) {
     set((state) => ({ currentPageIndex: { ...state.currentPageIndex, [kind]: index } }));
   },

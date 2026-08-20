@@ -1,35 +1,34 @@
 /**
- * `conflictResolution.ts` — cómputo puro del candidato "sugerido" que
- * `ConflictDialog` muestra como texto informativo (`ui/UX_Guidelines.md` §6:
- * "Resolución sugerida: Regex (mayor confidence + determinístico)").
+ * `conflictResolution.ts` — cómputo puro de lo que `ConflictDialog` necesita
+ * decidir (ADR-083): qué **tipos de entidad** ofrecer, y cuál viene
+ * preseleccionado.
  *
- * Replica, **solo para mostrar en la UI** (no para decidir nada: la resolución
- * real ya la aplicó el Grouping Engine de forma automática antes de que el
- * usuario abra este diálogo — `architecture/06_Pipeline.md` §9), la política
- * de resolución default documentada en `06_Pipeline.md` §9:
- * - `overlap`: gana el de mayor `confidence`; empate → `source === regex`.
- * - `disagree`: gana `regex`.
- * - `low_confidence` / `ambiguous_canonical`: el primer candidato (arbitrario,
- *   así documentado en `06_Pipeline.md` §9 y §13 caso 10).
+ * Hasta ADR-083 este módulo calculaba un "candidato sugerido" que el diálogo
+ * mostraba como texto informativo, mientras la acción real elegía un
+ * `ReplacementMode` — o sea que lo que se sugería y lo que se aplicaba no
+ * tenían nada que ver entre sí. Ahora el diálogo elige el tipo, y esto es lo
+ * que lo alimenta.
  *
- * Nota de ambigüedad (ver reporte del PR): `ui/UX_Guidelines.md` §6 muestra
- * botones "[Usar Regex] [Usar NER]" que emitirían `CONFLICT_RESOLVE_REQUESTED`
- * "con el modo elegido", pero el payload real de ese evento
- * (`core/Contracts.md` líneas 646/705, `architecture/04_Event_System.md` §10
- * línea 144) es `{ documentId, conflictId, mode: ReplacementMode }` —
- * `ReplacementMode` no tiene valores "regex"/"ner" (solo
- * mask/synthetic/placeholder/redact), y no existe ningún otro campo en
- * `ConflictResolveRequested` para expresar "qué candidato/fuente gana". Este
- * módulo y `ConflictDialog` solo implementan el flujo "Personalizado" (elegir
- * un `ReplacementMode` real y confirmar), que sí es consistente con el
- * contrato; los botones de atajo por fuente no se implementan pendiente de
- * aclaración.
+ * El default replica la política del motor (`06_Pipeline.md` §9, ADR-083 §4):
+ * gana el de mayor `confidence`, empate a favor de `regex`. Como
+ * `regex-engine` emite siempre `confidence: 1.0`, eso coincide con la
+ * resolución automática que el motor ya aplicó — el diálogo confirma o
+ * contradice, nunca muestra un default distinto del que está vigente.
  */
 
-import { ConflictReason, DetectionSource } from "@anonly/anonymization-core";
-import type { Conflict, ConflictCandidate } from "@anonly/anonymization-core";
+import { DetectionSource } from "@anonly/anonymization-core";
+import type { Conflict, ConflictCandidate, EntityType } from "@anonly/anonymization-core";
 
-export function suggestedCandidate(conflict: Conflict): ConflictCandidate {
+/**
+ * El candidato que gana por default (ADR-083 §4). Espejo de
+ * `defaultCandidateType` del motor: mayor `confidence`, empate a `regex`.
+ *
+ * A diferencia de la versión anterior, **no se ramifica por `ConflictReason`**:
+ * la regla de `disagree` ("gana regex siempre") y la de `overlap` ("mayor
+ * confidence, empate a regex") son la misma cosa dado que regex vale 1.0, y
+ * tener dos ramas invitaba a que se desincronizaran del motor.
+ */
+export function defaultCandidate(conflict: Conflict): ConflictCandidate {
   const [first, ...rest] = conflict.candidates;
   if (first === undefined) {
     // Invariante de 03_Data_Model.md §15: "candidates.length >= 2". Si esto
@@ -37,22 +36,38 @@ export function suggestedCandidate(conflict: Conflict): ConflictCandidate {
     throw new Error("Conflict.candidates no puede estar vacío (03_Data_Model.md §15).");
   }
 
-  if (conflict.reason === ConflictReason.Overlap) {
-    return rest.reduce((best, candidate) => {
-      if (candidate.confidence > best.confidence) return candidate;
-      if (candidate.confidence === best.confidence && candidate.source === DetectionSource.Regex) {
-        return candidate;
-      }
-      return best;
-    }, first);
-  }
+  return rest.reduce((best, candidate) => {
+    if (candidate.confidence > best.confidence) return candidate;
+    if (candidate.confidence === best.confidence && candidate.source === DetectionSource.Regex) {
+      return candidate;
+    }
+    return best;
+  }, first);
+}
 
-  if (conflict.reason === ConflictReason.Disagree) {
-    return (
-      conflict.candidates.find((candidate) => candidate.source === DetectionSource.Regex) ?? first
-    );
-  }
+/**
+ * Los tipos distintos entre los candidatos, ordenados por `confidence`
+ * descendente (ADR-083 §5): el primero es el default y el que el diálogo
+ * preselecciona.
+ *
+ * Devuelve **un solo** elemento cuando todos los candidatos comparten tipo —
+ * posible en `low_confidence` y `ambiguous_canonical`, cuyos conflictos no son
+ * sobre la clasificación. Ahí el diálogo no ofrece elección y solo permite
+ * descartar el aviso.
+ */
+export function candidateTypes(conflict: Conflict): ReadonlyArray<EntityType> {
+  const ordered = [...conflict.candidates].sort((a, b) => {
+    if (b.confidence !== a.confidence) return b.confidence - a.confidence;
+    if (a.source === b.source) return 0;
+    return a.source === DetectionSource.Regex ? -1 : 1;
+  });
 
-  // low_confidence / ambiguous_canonical: arbitrario, el primero (06_Pipeline.md §9/§13 caso 10).
-  return first;
+  const seen = new Set<EntityType>();
+  const types: EntityType[] = [];
+  for (const candidate of ordered) {
+    if (seen.has(candidate.entityType)) continue;
+    seen.add(candidate.entityType);
+    types.push(candidate.entityType);
+  }
+  return types;
 }

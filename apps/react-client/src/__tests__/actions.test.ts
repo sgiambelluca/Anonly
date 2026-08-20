@@ -103,7 +103,7 @@ describe("actions", () => {
     actions.createRule(makeRule());
     actions.updateRule("rule-1", { enabled: false });
     actions.deleteRule("rule-1");
-    actions.resolveConflict("conflict-1", ReplacementMode.Mask);
+    actions.resolveConflict("conflict-1", EntityType.Organization);
     actions.requestRender([0, 1], "original");
     actions.requestExport({
       imageFormat: "png",
@@ -236,12 +236,22 @@ describe("actions", () => {
       expect(useRulesStore.getState().rules).toEqual([]);
     });
 
-    it("resolveConflict emits CONFLICT_RESOLVE_REQUESTED", () => {
-      actions.resolveConflict("conflict-1", ReplacementMode.Redact);
+    it("resolveConflict emits CONFLICT_RESOLVE_REQUESTED con el tipo elegido", () => {
+      actions.resolveConflict("conflict-1", EntityType.Organization);
       expect(emit).toHaveBeenCalledWith(EventChannel.UI, EngineEvents.CONFLICT_RESOLVE_REQUESTED, {
         documentId: "doc-1",
         conflictId: "conflict-1",
-        mode: ReplacementMode.Redact,
+        entityType: EntityType.Organization,
+      });
+    });
+
+    // ADR-083 §4: sin tipo elegido, el campo NO viaja — el motor aplica su
+    // default (mayor confidence), que coincide con la clasificación vigente.
+    it("resolveConflict sin tipo omite entityType del payload", () => {
+      actions.resolveConflict("conflict-1");
+      expect(emit).toHaveBeenCalledWith(EventChannel.UI, EngineEvents.CONFLICT_RESOLVE_REQUESTED, {
+        documentId: "doc-1",
+        conflictId: "conflict-1",
       });
     });
 

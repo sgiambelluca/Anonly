@@ -22,6 +22,7 @@ import { ChevronDownIcon, ChevronUpIcon, SearchIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { actions } from "../../core-adapter/actions.js";
+import { useViewerStore } from "../../store/viewer.store.js";
 import { Button } from "../common/Button.js";
 import { Select } from "../common/Select.js";
 import { ENTITY_TYPE_OPTIONS } from "../entities/entityTypeLabels.js";
@@ -34,35 +35,61 @@ export interface DocumentSearchBoxProps {
 }
 
 export function DocumentSearchBox({ onActiveMatchChange }: DocumentSearchBoxProps) {
-  const [query, setQuery] = useState("");
+  // ADR-084 §1: la consulta vive en `viewer.store` para que "Ver ocurrencias"
+  // del panel de entidades pueda escribirla. El resto del estado de este
+  // componente (matches, activeIndex, tipo del "Agregar como…") sigue local:
+  // es trabajo interno suyo, que nadie más necesita.
+  const query = useViewerStore((state) => state.searchQuery);
   const [matches, setMatches] = useState<ReadonlyArray<TextMatch>>([]);
   const [activeIndex, setActiveIndex] = useState(0);
   const [addingIndex, setAddingIndex] = useState<number | null>(null);
   const [entityType, setEntityType] = useState<EntityType>(EntityType.Person);
   const debouncerRef = useRef(createSearchDebouncer());
 
+  // `PdfViewer` declara `handleActiveMatchChange` en el cuerpo del componente,
+  // o sea una referencia nueva por render. En el array de dependencias del
+  // efecto de abajo re-dispararía la búsqueda en cada render, así que se lee
+  // por ref.
+  const onActiveMatchChangeRef = useRef(onActiveMatchChange);
+  useEffect(() => {
+    onActiveMatchChangeRef.current = onActiveMatchChange;
+  });
+
+  // La búsqueda se dispara desde la CONSULTA, no desde el `onChange` del
+  // input. Es lo que hace que "Ver ocurrencias" (ADR-084 §2) funcione: escribe
+  // `viewer.store.searchQuery` desde el panel de entidades, y el input nunca
+  // emite un `change`. Con la búsqueda colgada del `onChange`, el texto
+  // aparecía en la caja y no pasaba nada hasta que el usuario tipeaba una
+  // letra.
   useEffect(() => {
     const debouncer = debouncerRef.current;
-    return () => debouncer.cancel();
-  }, []);
-
-  function runSearch(nextQuery: string): void {
-    if (nextQuery.trim().length === 0) {
+    if (query.trim().length === 0) {
+      debouncer.cancel();
       setMatches([]);
       setActiveIndex(0);
-      onActiveMatchChange(null);
+      onActiveMatchChangeRef.current(null);
       return;
     }
-    const found = actions.findText(nextQuery);
-    setMatches(found);
-    setActiveIndex(0);
-    onActiveMatchChange(found[0] ?? null);
-  }
+    debouncer.schedule(() => {
+      const found = actions.findText(query);
+      setMatches(found);
+      setActiveIndex(0);
+      onActiveMatchChangeRef.current(found[0] ?? null);
+    });
+    return () => {
+      debouncer.cancel();
+    };
+  }, [query]);
 
   function handleQueryChange(next: string): void {
-    setQuery(next);
+    // `getState()` dentro del handler y NO un selector que devuelva el setter:
+    // un selector que construye su valor (p. ej. envolver el método en una
+    // arrow) devuelve una referencia nueva en cada llamada, y como zustand
+    // compara el snapshot con `Object.is`, `useSyncExternalStore` interpreta
+    // que el store cambió en cada render -> loop infinito -> React tira y la
+    // UI queda en blanco. Mismo idioma que `ZoomControls`/`PdfViewer`.
+    useViewerStore.getState().setSearchQuery(next);
     setAddingIndex(null);
-    debouncerRef.current.schedule(() => runSearch(next));
   }
 
   function goTo(index: number): void {

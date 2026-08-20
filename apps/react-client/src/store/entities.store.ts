@@ -25,7 +25,8 @@ export interface EntitiesSlice {
   removeGroup(groupId: string): void;
   updateReplacement(groupId: string, mode: ReplacementMode, value: string): void;
   addConflict(conflict: Conflict): void;
-  resolveConflict(conflictId: string): void;
+  /** `resolvedType` (ADR-083 §3): el tipo con el que quedó clasificado el grupo. */
+  resolveConflict(conflictId: string, resolvedType?: EntityType): void;
   reset(): void;
 }
 
@@ -80,12 +81,27 @@ export const useEntitiesStore = create<EntitiesSlice>((set) => ({
   },
   updateGroup(group) {
     set((state) => {
-      const type = findGroupType(state.groupsByType, group.id) ?? group.type;
-      const bucket = state.groupsByType.get(type) ?? [];
+      // ADR-082: el grupo puede haber CAMBIADO de tipo, así que el bucket
+      // donde está hoy y el bucket al que pertenece pueden ser distintos.
+      // Reemplazarlo solo en el bucket viejo lo dejaba dentro de la categoría
+      // equivocada del árbol para siempre, aunque el motor ya lo hubiera
+      // reclasificado bien.
+      const previousType = findGroupType(state.groupsByType, group.id);
       const next = new Map(state.groupsByType);
+
+      if (previousType !== undefined && previousType !== group.type) {
+        next.set(
+          previousType,
+          (state.groupsByType.get(previousType) ?? []).filter((g) => g.id !== group.id),
+        );
+      }
+
+      const targetBucket = next.get(group.type) ?? [];
       next.set(
-        type,
-        bucket.map((existing) => (existing.id === group.id ? group : existing)),
+        group.type,
+        targetBucket.some((g) => g.id === group.id)
+          ? targetBucket.map((existing) => (existing.id === group.id ? group : existing))
+          : [...targetBucket, group],
       );
       return { groupsByType: next };
     });
@@ -123,10 +139,19 @@ export const useEntitiesStore = create<EntitiesSlice>((set) => ({
   addConflict(conflict) {
     set((state) => ({ conflicts: [...state.conflicts, conflict] }));
   },
-  resolveConflict(conflictId) {
+  resolveConflict(conflictId, resolvedType) {
     set((state) => ({
       conflicts: state.conflicts.map((conflict) =>
-        conflict.id === conflictId ? { ...conflict, resolved: true } : conflict,
+        conflict.id === conflictId
+          ? {
+              ...conflict,
+              resolved: true,
+              // ADR-083 §3: el tipo con el que quedó clasificado el grupo. Sin
+              // esto, el diálogo muestra el `resolvedType` que traía el
+              // `CONFLICT_DETECTED` original — el tipo VIEJO.
+              ...(resolvedType !== undefined ? { resolvedType } : {}),
+            }
+          : conflict,
       ),
     }));
   },
