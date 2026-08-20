@@ -167,3 +167,123 @@ La cabecera del propio motor (nota 12) ya lo dice: *"No hay tracking de 'este va
 **Dirección de arreglo.** `InternalGroup` gana un `replacementValueUserSet: boolean` — bookkeeping interno nunca expuesto, exactamente el patrón que ADR-069 §5 ya usa con `personGenderUserSet` y por el mismo motivo. Se enciende en `applyGroupUpdate` con `patch.replacementValue` presente y lo consultan **todos** los puntos de recálculo.
 
 **Por qué necesita ADR propio.** El alcance no es la guarda: son los seis o siete sitios que recalculan `replacementValue`, o sea la precedencia completa del campo. Y obliga a contestar lo que ni ADR-057 §7 ni ADR-028 contestan: ¿la edición manual sobrevive también a un cambio de modo? ¿A un re-análisis que le suma members al grupo? ¿A una fusión? Hasta que eso esté decidido, no hay implementación posible sin improvisar.
+
+---
+
+## 11. Tres de los cuatro `ConflictReason` no llegan a la UI
+
+> **Procedencia**: cierre de las observaciones del Hito 10 (2026-08-20), al implementar ADR-083. **Severidad: baja**, y medida — ver abajo.
+>
+> **Decisión del humano (2026-08-20): se deja como está, anotado.**
+
+`Overlap`, `Disagree` y `LowConfidence` nacen `resolved: true` (el motor ya eligió ganador y descartó al perdedor); `EntityGroupItem` solo muestra el ⚠ para los **no** resueltos. Así que el único conflicto visible es `AmbiguousCanonical`, cuyos candidatos comparten el tipo del grupo — y por lo tanto no ofrece los radios de ADR-083 §5, solo "Descartar".
+
+Consecuencia: **el flujo de elección de tipo de ADR-083 no tiene puerta de entrada**, aunque el motor lo implementa bien.
+
+**Por qué es baja**: se midieron **0** conflictos de `Overlap`/`Disagree` en un documento de 4 páginas con NER y Regex sobre texto realista; hubo que fabricar un `AmbiguousCanonical` para ver un solo ⚠. Y "Cambiar categoría" (ADR-082 §6) ya cubre el valor práctico: corregir el tipo de cualquier grupo, con o sin conflicto.
+
+El análisis completo y las tres salidas posibles están en **ADR-083 §8**. Revisitar si un documento real produce `Disagree`.
+
+---
+
+## 12. Sin evento de confirmación/rechazo de reglas
+
+> **Procedencia**: observación del PR9 del Hito 10, ratificada en el barrido de 2026-08-19 (§6.1 punto E del plan).
+>
+> **Decisión del humano (2026-08-20): no se desarrolla ahora.** Anotado.
+
+`core-adapter/actions.ts` muta `rules.store` directamente **además** de emitir el evento al bus, porque los tres `RULE_*` son estrictamente UI→Grouping y no hay evento de vuelta. Si Grouping alguna vez rechazara una regla, el store divergiría del Core en silencio: no hay nada con qué reconciliar.
+
+**Hoy es teórico**: Grouping **nunca rechaza una regla**. El riesgo se activa el día que valide algo — un patrón inválido escrito por el usuario, una colisión de prioridad.
+
+**Cuándo hacerlo**: no ahora, y no como ADR aislado. Lo correcto es que **el PR que agregue la primera validación de reglas traiga el evento de vuelta con él**; escribirlo antes es diseñar contra un requisito que no existe. Requiere ADR por ser un evento nuevo en `04_Event_System.md` §6/§10.
+
+---
+
+## 13. Tres observaciones del Hito 10 que siguen necesitando ADR
+
+> **Procedencia**: barrido de `Hito10_Observaciones_Revision.md` (2026-08-19), §6 del plan. De las trece que necesitaban ADR, el humano tomó nueve; el §12 de arriba es la décima. Estas tres quedan.
+
+1. **Retener las ocurrencias perdedoras de un conflicto.** Hoy `if (!newWins) return;` las descarta sin registrarlas. Para que "usar la otra detección" signifique quedarse con **su span** —y no solo con su tipo, que es lo que ADR-083 ya hace— Grouping tendría que retener datos que hoy tira, y existir una operación de reasignación que no existe. Caro, y sin demanda: más aún dado el §11 de arriba.
+
+2. **`OccurrenceRef.value`.** La mitad útil de "ver ocurrencias" la resolvió ADR-084 reusando el buscador. Lo que falta es el texto literal **por ocurrencia**, que arrastra la decisión de privacidad de `08_Security_Model.md` §7 (prohíbe loguear `Occurrence.value`). `EntityGroup.aliases` ya cubre "qué variantes de texto hay en este grupo".
+
+3. **pdf.js degrada a "fake worker" dentro de todo Web Worker.** `PDFWorker._initialize` referencia `window`, que no existe en un Worker, así que el parser corre en el mismo hilo que rasteriza. **Solo cuesta rendimiento.** El único workaround conocido es un monkey-patch de `window` sobre una librería de terceros. **Antes de gastar el ADR, chequear si pdf.js 5.x lo arregló upstream** — sería gratis.
+
+---
+
+## 14. Cerrado el 2026-08-20: la marca de reemplazo degradado (ADR-062)
+
+> **Procedencia**: era el último pendiente que quedaba de ADR-058/ADR-062 y el complemento natural del aviso de longitud que ADR-076 metió en `EditReplacementDialog`.
+
+**Qué estaba pasando.** ADR-062 estaba **completamente especificado** —`Contracts.md` §`PreviewUpdated`, `Components.md` §3.3 con sus tres reglas de consumo, `UX_Guidelines.md` §3.3— y **nada de eso existía en el código**. El kernel de Render calculaba el veredicto (`fitted.finalSizePx / fitted.naturalSizePx < DEGRADED_FONT_RATIO`), lo usaba para pintar un recuadro de aviso **solo en modo `preview`**, y después lo tiraba. El comentario del kernel lo decía en voz alta: "ADR-062 dejó la marca accionable del árbol fuera de este hito".
+
+El resultado práctico: el reemplazo se encogía **en silencio**. El usuario escribía un texto largo, Render lo achicaba hasta que entrara, y se enteraba abriendo el PDF exportado y haciendo zoom página por página — que es exactamente lo que `UX_Guidelines.md` §3.3 describe como el motivo de existir de la marca.
+
+**Qué se implementó, de punta a punta.**
+
+1. `KernelRenderResult.degraded` — el kernel devuelve el veredicto en vez de descartarlo.
+2. `InternalCacheEntry.degraded` en `render.engine.ts`. **Esta es la parte que se rompe sola si alguien la "simplifica"**: `emitPreviewUpdated` corre también en los **cache hits**, así que sin guardar el veredicto en la entrada del cache, cada hit emitiría `[]` y borraría la marca. Es literalmente la advertencia de ADR-062 §2.
+3. `PreviewUpdated.degraded?: ReadonlyArray<Annotation>` (ya estaba en `Contracts.md`; ahora está en `events.ts`).
+4. `degraded.store.ts` — la conversión de "veredicto por página" a "marca por grupo", con las tres reglas de ADR-062 §2/§3 y un test por cada una, los tres **falsificados** contra la implementación ingenua correspondiente.
+5. `DegradedBadge.tsx` + `degradedMessage.ts` en el árbol de entidades, con las tres salidas de `Components.md` §3.3 (acortar el texto, pasar a `redact`, deshabilitar).
+6. `closeDocument` resetea el store: el veredicto es del documento abierto.
+
+**La decisión de redacción, que es la mitad del valor.** El pedido explícito fue que el aviso "de después" lo entienda alguien que **no sabe qué es un token**. Así que el texto no dice token, ni placeholder, ni bbox, ni degradado, ni umbral: dice *"En la página 3, el texto que reemplaza a «Juan Pérez» no entraba en el espacio disponible y hubo que achicarlo. Puede quedar difícil de leer en el documento final."*, más una línea que aclara que **el dato sigue oculto** —esto es legibilidad, no privacidad—, que es la duda que la palabra "degradado" provoca y no contesta. Las páginas se cuentan desde 1. `describePages` vive en un `.ts` aparte justamente para poder testear eso (`environment: node`, sin tests de render), y uno de sus tests afirma que el texto no filtra jerga.
+
+Con esto, las dos mitades del aviso están: `EditReplacementDialog` avisa **antes** ("puede no entrar", estimado sin `measureText`), y esta marca avisa **después**, con la medición real de Render.
+
+## 15. Cerrado el 2026-08-20: `role="menu"` sin la navegación que promete
+
+`GroupContextMenu` es un disclosure hecho a mano (no hay `@radix-ui/react-dropdown-menu` en el proyecto; agregarlo requiere ADR, P-9) y anunciaba `role="menu"` + `role="menuitem"`. Ese rol es un **contrato con el lector de pantalla**: promete navegación por flechas, Home/End y foco gestionado con un solo tab stop. Nada de eso está implementado — los items se recorren con Tab.
+
+Un rol prometido y no cumplido es peor que no anunciar nada: deja al usuario de teclado apretando flechas contra un panel que no responde. Ahora es `role="group"` con `aria-label`, y los items son botones: se comportan exactamente como el lector anuncia. Si algún día entra Radix, trae el rol **y** el manejo de foco juntos, que es la única forma correcta de tener el primero.
+
+---
+
+## 16. NECESITA ADR — el detector de degradación casi nunca se dispara en texto corriente
+
+> **Procedencia**: verificación en navegador de la marca del §14, el 2026-08-20. La marca funciona; lo que falla es **la señal que consume**. Encontrado midiendo, no leyendo.
+
+**Qué se verificó.** Con la marca ya cableada, se instrumentó `PREVIEW_UPDATED` en el navegador con un documento real de 4 páginas. El campo `degraded` **llega bien** en cada evento (`kind: "anonymized"` y también `"original"`, que confirma para qué existe la guarda de ADR-062 §3). Después se editó a mano el reemplazo de un grupo a un texto de 68 caracteres sobre una ocurrencia de ~18. El panel anonimizado lo dibujó como una **mancha ilegible**, el aviso "de antes" del `EditReplacementDialog` avisó correctamente… y `degraded` llegó **vacío**. La marca no se encendió, y tenía razón en no encenderse: el veredicto que le llega dice que no hay nada degradado.
+
+**Por qué.** El criterio de `Contracts.md` §6 es `finalSizePx / naturalSizePx < DEGRADED_FONT_RATIO` (0.6), y los dos términos salen de `fitReplacementFontSized`:
+
+```
+naturalSizePx = max(REPLACEMENT_MIN_FONT_PX, round(boxHeight * 0.7))   // piso = 8px
+finalSizePx   = ese valor, bajando de a 1px MIENTRAS size > REPLACEMENT_MIN_FONT_PX
+```
+
+Los dos términos chocan contra **el mismo piso de 8px**. Cuando la caja es chica, `naturalSizePx` ya nace clavado en 8 y el bucle no puede bajar ni un píxel: `finalSizePx === naturalSizePx`, **ratio 1.00 por construcción**, sin importar cuán largo sea el texto. Medido sobre `fitReplacementFontSized` con el mismo texto de 68 caracteres:
+
+| `boxHeight` (px ya escalados) | natural | final | ratio | ¿degradado? |
+|---|---|---|---|---|
+| 10 | 8 | 8 | 1.00 | no |
+| 12 | 8 | 8 | 1.00 | no |
+| 14 | 10 | 8 | 0.80 | no |
+| 16 | 11 | 8 | 0.73 | no |
+| 20 | 14 | 8 | 0.57 | **sí** |
+| 24 | 17 | 8 | 0.47 | **sí** |
+
+El umbral solo es alcanzable con `boxHeight ≳ 20px`, o sea **texto de título**. Una línea de cuerpo de documento —10 a 14px— es estructuralmente incapaz de dar un veredicto de degradado. Y sin embargo se ve ilegible: el encogido que la arruina no es el de la fuente, es el **squeeze horizontal de `fillText(..., maxWidth)`**, que es la red de seguridad de ADR-058 §1 para que el token no se derrame… y que **el cociente no observa en absoluto**. El detector mide la única de las dos compresiones que en cuerpo de texto no ocurre.
+
+**El corolario más incómodo: la invariancia de escala documentada es falsa cerca del piso.** El comentario del kernel (`kernel.ts`, en el `if` del veredicto) y ADR-062 §6 afirman que el cociente es invariante a la escala, y de ahí sale la conclusión de que lo que se ve en el preview vale para el PDF exportado. Pero el piso de 8px es una **constante absoluta que no escala**, mientras que `boxHeight` sí. Misma página, mismo texto, misma caja de 12px:
+
+| escala de render | natural | final | ratio | ¿degradado? |
+|---|---|---|---|---|
+| 1 | 8 | 8 | 1.00 | no |
+| 1.5 | 13 | 8 | 0.62 | no |
+| 2 | 17 | 8 | 0.47 | **sí** |
+| 3 | 25 | 8 | 0.32 | **sí** |
+
+O sea: la misma ocurrencia se declara sana o degradada **según a qué zoom se la mire**. El test de invariancia de `unit.test.ts` pasa porque usa cajas grandes, lejos del piso — es exactamente el régimen donde la invariancia sí vale, y el único que se probó.
+
+**Por qué necesita ADR y no un parche.** El criterio está en `Contracts.md` §6 y `DEGRADED_FONT_RATIO` es público: cambiarlo es cambiar un contrato (R-2/R-19). Además hay que **elegir** entre opciones que no son equivalentes:
+
+1. **Medir el squeeze horizontal**, no el vertical: comparar `measureWidth(font, texto)` contra el ancho disponible y degradar cuando el texto haya que comprimirlo por debajo de una fracción. Es lo que de verdad arruina la legibilidad, y no tiene piso absoluto contra el que chocar.
+2. **Quitarle el piso a `naturalSizePx`** (que el piso aplique solo a `finalSizePx`). Una línea, arregla la tabla 1 — pero **no** arregla la invariancia de escala, porque el piso sigue estando en el denominador de hecho.
+3. **Escalar `REPLACEMENT_MIN_FONT_PX` con la escala de render.** Arregla la invariancia, pero toca cómo se dibuja el reemplazo, no solo cómo se lo juzga — es el cambio de mayor alcance.
+
+La 1 y la 3 son complementarias y probablemente sean las dos que hacen falta. Ninguna se decide desde un PR de implementación.
+
+**Mientras tanto, qué hay.** La marca del §14 está completa y correcta de punta a punta: cuando el veredicto dice que hay degradación, se muestra, se explica en castellano llano y ofrece las tres salidas. Se enciende hoy en títulos y en previews a escala ≥ 2. Lo que no cubre es el caso más común, y **el aviso "de antes" del `EditReplacementDialog` sí lo cubre** —`estimateReplacementFit` mide anchos, que es justamente lo que al detector le falta—, así que el usuario que edita a mano no queda a ciegas. El que llega a un reemplazo largo por la escalera automática de ADR-057, sí.
