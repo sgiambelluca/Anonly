@@ -116,6 +116,15 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribes {
 
   unsubs.push(bus.on(EventChannel.Render, EngineEvents.PREVIEW_UPDATED, (p) => {
     stores.viewer.setPreview(p.pageIndex, p.kind, p.canvasBlobUrl);
+    // ADR-062 §3: SOLO el panel anonimizado trae veredicto. El original se
+    // renderiza sin reemplazos, así que emite el array vacío por construcción
+    // y borraría lo que el anonimizado había levantado.
+    // ADR-062 §2 — ausente ≡ vacío: `?? []`, nunca un early-return. Tratar la
+    // ausencia como "no sé" deja marcas viejas encendidas después de que el
+    // usuario ya arregló el reemplazo.
+    if (p.kind === "anonymized") {
+      useDegradedStore.getState().setPageVerdict(p.pageIndex, p.degraded ?? []);
+    }
   }));
 
   unsubs.push(bus.on(EventChannel.Ner, EngineEvents.NER_MODEL_LOADING, (p) => {
@@ -392,6 +401,33 @@ interface SettingsSlice {
 ```
 
 No todo lo de este slice alimenta `EngineConfig`: `language`, `defaultReplacementMode` y `scrollSyncEnabled` son preferencias de la app que `settingsToEngineConfig` no mapea (§3.7). `scrollSyncEnabled` vive acá —y no en `viewer.store`— porque es una preferencia de flujo de trabajo, no de documento: se recuerda entre sesiones, como el idioma (ADR-054 §2).
+
+### 3.6b `degraded.store.ts` (ADR-062 §3)
+
+> Numerado `3.6b` y no `3.7` a propósito: `§3.7` (el mapeo settings → `EngineConfig`) está citado por nombre desde `Components.md` y desde cuatro ADRs ya aceptados —ADR-036, ADR-038, ADR-048, ADR-081—, y correrlo dejaría veinte punteros muertos o obligaría a reescribir ADRs que no se reescriben. Es la misma convención de inserción que `Components.md` §3.4b/§5.4b y que PR16.5.
+
+```ts
+interface DegradedSlice {
+  /** `pageIndex` → los `groupId` con algún reemplazo ilegible en esa página. */
+  readonly byPage: ReadonlyMap<number, ReadonlySet<string>>;
+  setPageVerdict(pageIndex: number, annotations: ReadonlyArray<Annotation>): void;
+  reset(): void;
+}
+```
+
+El veredicto de legibilidad llega **por página** (`PREVIEW_UPDATED.degraded`) y el árbol de entidades lo necesita **por grupo**. Este slice hace esa conversión y nada más; `selectGroupIsDegraded(state, groupId): boolean` y `selectDegradedPages(state, groupId): ReadonlyArray<number>` son sus dos lecturas.
+
+Es un slice aparte y no un campo de `viewer.store` porque su ciclo de vida es otro: `viewer` guarda lo que el usuario está mirando, esto guarda un juicio del motor sobre lo que se va a exportar. `closeDocument` lo resetea — el veredicto es del documento abierto, y `08_Security_Model.md` §10.2 no lo dejaría persistir de todos modos.
+
+**Tres reglas de ADR-062 §2/§3, las tres con test propio y las tres fáciles de romper**:
+
+1. **Se reemplaza el veredicto de la página, no se acumula.** Cada evento trae el veredicto completo de esa página en ese render. Acumular deja encendida una marca que el usuario ya arregló, y le saca la única forma de saber si su corrección funcionó.
+2. **Ausente ≡ vacío.** Las dos formas significan "esta página, ahora mismo, no tiene ningún reemplazo degradado". La ausencia nunca significa "no sé".
+3. **Los eventos con `kind: "original"` se descartan** en el puente, antes de llegar acá.
+
+Se guarda por página, y no como un `Set` plano de `groupId`, porque sin la clave de página no habría forma de reemplazar el veredicto de una sola sin perder el de las demás (regla 1).
+
+> **Estabilidad de referencias**: `selectDegradedPages` construye un array nuevo por llamada, así que **no se usa directo dentro de `useDegradedStore(...)`** — zustand compara el snapshot con `Object.is` y eso deja la UI en un loop de render (es el bug que dejó la pantalla en blanco al cablear "Ver ocurrencias"). `DegradedBadge` subscribe a un string derivado y lo re-expande del lado del componente.
 
 ### 3.7 Mapeo settings → `EngineConfig` (ADR-036 §5, reescrito por ADR-038 §7)
 

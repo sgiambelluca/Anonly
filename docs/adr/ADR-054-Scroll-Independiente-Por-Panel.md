@@ -161,3 +161,7 @@ Un solo PR, `apps/react-client` (visor + `viewer.store` + `settings.store` + `Se
 - `ui/React_Client.md` §3.5, §7 — `ui/Components.md` §5.1, §5.3, §5.5 — `architecture/07_Performance_Strategy.md` §3.1
 - `adr/ADR-036` §7 — `adr/ADR-037` §3-§5
 - Código: `apps/react-client/src/components/viewer/` (`SideBySideViewer.tsx`, `PdfViewer.tsx`, `PageVirtualizer.tsx`, `scrollSync.ts`, `visibleRange.ts`, `pageLayout.ts`) — `apps/react-client/src/store/viewer.store.ts` — `apps/react-client/src/store/settings.store.ts` — `apps/react-client/src/components/toolbar/SettingsDialog.tsx:159` — `apps/react-client/src/App.tsx:113-117` — `tests/e2e/viewer-scroll-jump.spec.ts`
+
+---
+
+> **Errata (2026-08-20, Hito 10.10 PR 18)**: las menciones de `viewer.store.sideBySide` de §7 y de la tabla de alternativas describen un campo que **ya no existe**. Este ADR descartó reutilizarlo para el control de sincronización y lo dejó anotado como "la misma ambigüedad abierta que era"; nunca apareció un segundo candidato de uso, así que el campo se eliminó del store y de `React_Client.md` §3.5. La **decisión** de este ADR no cambia —el control de sincronización sigue usando un campo propio, que es exactamente el punto de §7—; lo que caduca es la premisa de que el campo descartado seguía existiendo. La referencia a `SideBySideViewer.tsx:20` tampoco aplica: esa nota ahora explica por qué el campo se fue.
