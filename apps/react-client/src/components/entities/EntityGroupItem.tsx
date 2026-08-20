@@ -30,6 +30,7 @@ import { Checkbox } from "../common/Checkbox.js";
 import { ConflictBadge } from "../conflicts/ConflictBadge.js";
 
 import { ChangeTypeDialog } from "./ChangeTypeDialog.js";
+import { DegradedBadge } from "./DegradedBadge.js";
 import { EditReplacementDialog } from "./EditReplacementDialog.js";
 import { GroupContextMenu } from "./GroupContextMenu.js";
 import { MergeDialog } from "./MergeDialog.js";
@@ -78,6 +79,13 @@ function EntityGroupItemImpl({ group }: EntityGroupItemProps) {
         />
       ) : null}
       {conflict !== undefined ? <ConflictBadge conflictId={conflict.id} /> : null}
+      {/*
+        ADR-062: el aviso de "el reemplazo no entró y se encogió". Se monta
+        siempre y el propio badge decide si hay algo que mostrar (no renderiza
+        nada sin veredicto), porque el dato vive por página en `degraded.store`
+        y no en el `EntityGroup`.
+      */}
+      <DegradedBadge group={group} onEditReplacement={() => setEditReplacementOpen(true)} />
       {isPersonGenderToggleVisible(group) ? (
         <PersonGenderToggle groupId={group.id} currentGender={group.personGender} />
       ) : null}

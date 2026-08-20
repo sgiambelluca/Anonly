@@ -1,4 +1,5 @@
 import {
+  AnnotationKind,
   ConflictReason,
   createEventBus,
   DetectionSource,
@@ -8,6 +9,7 @@ import {
   EventChannel,
   PipelineStage,
   ReplacementMode,
+  type Annotation,
   type Conflict,
   type EntityGroup,
   type ILogger,
@@ -16,6 +18,7 @@ import {
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { subscribe, subscribePasswordRequired, type Stores } from "../core-adapter/bus-bridge.js";
+import { selectGroupIsDegraded, useDegradedStore } from "../store/degraded.store.js";
 import { useDocumentStore } from "../store/document.store.js";
 import { useEntitiesStore } from "../store/entities.store.js";
 import { usePipelineStore } from "../store/pipeline.store.js";
@@ -377,6 +380,96 @@ describe("bus-bridge", () => {
     expect(useViewerStore.getState().previewByPage.anonymized).toBe(anonymizedMapBefore);
 
     unsubscribe();
+  });
+
+  // ADR-062: el veredicto de "el reemplazo no entró y se encogió" viaja
+  // adentro de PREVIEW_UPDATED. Estos tres tests fijan las tres reglas del
+  // §2/§3 que son fáciles de romper sin que se note en pantalla.
+  describe("PREVIEW_UPDATED.degraded (ADR-062)", () => {
+    function degradedAnnotation(groupId: string, pageIndex: number): Annotation {
+      return {
+        id: `ann-${groupId}`,
+        groupId,
+        pageIndex,
+        bbox: { x: 0, y: 0, width: 40, height: 12 },
+        kind: AnnotationKind.Degraded,
+      };
+    }
+
+    beforeEach(() => {
+      useDegradedStore.getState().reset();
+    });
+
+    it("el veredicto del panel anonimizado llega al store", () => {
+      const bus = createEventBus({ logger: createTestLogger() });
+      const unsubscribe = subscribe(bus, stores);
+
+      bus.emit(EventChannel.Render, EngineEvents.PREVIEW_UPDATED, {
+        documentId: "doc-1",
+        pageIndex: 2,
+        kind: "anonymized",
+        canvasBlobUrl: "blob:anon-2",
+        degraded: [degradedAnnotation("g1", 2)],
+      });
+
+      expect(selectGroupIsDegraded(useDegradedStore.getState(), "g1")).toBe(true);
+
+      unsubscribe();
+    });
+
+    // ADR-062 §3. El panel original se renderiza SIN reemplazos, así que su
+    // `degraded` es vacío por construcción. Si el puente no lo descartara,
+    // hacer scroll por el panel izquierdo apagaría las marcas que el panel
+    // derecho acaba de encender — un bug que en pantalla parece
+    // "las advertencias parpadean solas".
+    it("el panel original NO borra el veredicto del anonimizado", () => {
+      const bus = createEventBus({ logger: createTestLogger() });
+      const unsubscribe = subscribe(bus, stores);
+
+      bus.emit(EventChannel.Render, EngineEvents.PREVIEW_UPDATED, {
+        documentId: "doc-1",
+        pageIndex: 2,
+        kind: "anonymized",
+        canvasBlobUrl: "blob:anon-2",
+        degraded: [degradedAnnotation("g1", 2)],
+      });
+      bus.emit(EventChannel.Render, EngineEvents.PREVIEW_UPDATED, {
+        documentId: "doc-1",
+        pageIndex: 2,
+        kind: "original",
+        canvasBlobUrl: "blob:original-2",
+      });
+
+      expect(selectGroupIsDegraded(useDegradedStore.getState(), "g1")).toBe(true);
+
+      unsubscribe();
+    });
+
+    // ADR-062 §2: ausente ≡ vacío. Un re-render limpio (el usuario acortó el
+    // texto) llega sin la clave, y eso significa "ya no hay problema" — no
+    // "no sé, dejá la marca como estaba".
+    it("un re-render sin `degraded` apaga la marca", () => {
+      const bus = createEventBus({ logger: createTestLogger() });
+      const unsubscribe = subscribe(bus, stores);
+
+      bus.emit(EventChannel.Render, EngineEvents.PREVIEW_UPDATED, {
+        documentId: "doc-1",
+        pageIndex: 2,
+        kind: "anonymized",
+        canvasBlobUrl: "blob:anon-2",
+        degraded: [degradedAnnotation("g1", 2)],
+      });
+      bus.emit(EventChannel.Render, EngineEvents.PREVIEW_UPDATED, {
+        documentId: "doc-1",
+        pageIndex: 2,
+        kind: "anonymized",
+        canvasBlobUrl: "blob:anon-2b",
+      });
+
+      expect(selectGroupIsDegraded(useDegradedStore.getState(), "g1")).toBe(false);
+
+      unsubscribe();
+    });
   });
 
   it("EXPORT_PROGRESS/EXPORT_FINISHED/EXPORT_FAILED update pipeline store", () => {

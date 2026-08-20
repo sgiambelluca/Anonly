@@ -31,6 +31,7 @@ import {
   type Unsubscribe,
 } from "@anonly/anonymization-core";
 
+import { useDegradedStore } from "../store/degraded.store.js";
 import type { useDocumentStore } from "../store/document.store.js";
 import type { useEntitiesStore } from "../store/entities.store.js";
 import type { usePipelineStore } from "../store/pipeline.store.js";
@@ -178,6 +179,17 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribe {
   unsubs.push(
     bus.on(EventChannel.Render, EngineEvents.PREVIEW_UPDATED, (payload) => {
       stores.viewer.getState().setPreview(payload.pageIndex, payload.kind, payload.canvasBlobUrl);
+
+      // ADR-062 §3: **solo** el panel anonimizado trae veredicto. El original
+      // se renderiza sin reemplazos, así que emite el array vacío por
+      // construcción y borraría lo que el anonimizado había levantado.
+      //
+      // ADR-062 §2 — ausente ≡ vacío: `?? []` y no un early-return. Tratar la
+      // ausencia como "no sé" (y no actualizar) deja marcas viejas encendidas
+      // después de que el usuario arregló el reemplazo.
+      if (payload.kind === "anonymized") {
+        useDegradedStore.getState().setPageVerdict(payload.pageIndex, payload.degraded ?? []);
+      }
     }),
   );
 

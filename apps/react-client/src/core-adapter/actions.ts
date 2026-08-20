@@ -28,6 +28,7 @@ import {
   type Word,
 } from "@anonly/anonymization-core";
 
+import { useDegradedStore } from "../store/degraded.store.js";
 import { useDocumentStore } from "../store/document.store.js";
 import { useEntitiesStore } from "../store/entities.store.js";
 import { usePipelineStore } from "../store/pipeline.store.js";
@@ -245,5 +246,10 @@ export const actions = {
     useRulesStore.getState().reset();
     useViewerStore.getState().reset();
     usePipelineStore.getState().reset();
+    // El veredicto de reemplazo ilegible es del documento que se está
+    // cerrando: sin este reset, el próximo documento abre con marcas de
+    // advertencia sobre `groupId` que ya no existen (08_Security_Model.md
+    // §10.2 tampoco lo dejaría persistir más allá de la sesión).
+    useDegradedStore.getState().reset();
   },
 };
