@@ -139,6 +139,31 @@ La tabla original de §9 metía a `pdf-engine` en la fila "mismo patrón, uno po
 
 **Qué NO cambia**: §1, §2 (mecanismo para los cuatro motores con puerto), §3 (un decoder nunca devuelve un default), §8. ADR-036 §3 queda intacto y **no** se reabre: esta enmienda no propone partir `pdf-engine` en host + kernel. Esa sería una reestructuración mucho mayor, sin ningún problema que la justifique, y fuera del espíritu de una serie preventiva.
 
+### 11. Enmienda (2026-08-19) — cómo se señaliza un fallo de decodificación hacia arriba
+
+§3 manda **lanzar** ante una forma inesperada, y ahí terminaba. Lo que no dice es cómo distingue el motor, aguas arriba, un error *de decodificación* de un error *de dominio de la misma clase* — y esa distinción resultó necesaria en el primer adoptante.
+
+**El problema, tal como apareció en `ner-engine`.** El decoder lanza `InvalidInputError` (§3: "si no hay una específica"). Pero `processPage` tiene **dos guards preexistentes** que también lanzan `InvalidInputError` genuino —`input == null` y `pageIndex < 0`—, documentados en `NER_Engine.md` §9 como restricción de runtime, y cuyo tratamiento correcto es el warn-por-página, **no** abortar el batch. Un `catch (err) { if (err instanceof InvalidInputError) abort(); }` trata los tres igual y rompe un comportamiento especificado. Y discriminar con `instanceof <SubclaseConcreta>` está **prohibido** por ADR-049 / `Code_Standards.md` §7.
+
+**La solución que se implementó, y que esta enmienda sanciona**: una clase de envoltura **local al archivo del motor**, que envuelve el error de decodificación y se desenvuelve en el `catch` que corresponde:
+
+```ts
+class NerDispatchDecodeFailure extends Error {
+  readonly decodeError: NerDispatchEnvelopeError;
+  constructor(decodeError: NerDispatchEnvelopeError) { … }
+}
+```
+
+**Las cuatro condiciones que la hacen segura**, y que cualquier motor que copie el patrón tiene que cumplir:
+
+1. **Local al archivo**, no exportada. Se construye y se captura en el mismo módulo.
+2. **Nunca escapa a la API pública**: el `catch` que la reconoce la desenvuelve (`throw err.decodeError`) antes de que el error salga del motor. Lo que ve el consumidor es siempre un `EngineError`, así que `Code_Standards.md` §7 se cumple donde aplica (funciones públicas).
+3. **El error de dominio va en un campo propio, no en `cause`**: `Error` ya tipa `cause` de forma nativa y con otra semántica; reusarlo hace ambiguo si el campo lo puso el motor o el runtime.
+4. **Solo para desambiguar**, nunca para transportar información nueva.
+
+**Por qué se sanciona en vez de dejarse como comentario**: §7 deja `ocr`/`render`/`export` como serie de endurecimiento pendiente. Los tres van a encontrar exactamente el mismo problema —todos tienen guards de dominio que lanzan la misma clase que su decoder—, y sin esto escrito cada uno lo va a resolver distinto. `render-engine`, que ya adoptó §2 (`decodeRenderLegendResult`), lo resolvió **sin** el patrón: no le hizo falta, porque su decoder corre en un punto donde no compite con ningún guard de dominio. Esa es la regla de aplicación: **el patrón se usa solo si el decoder comparte `catch` con un guard de dominio que lanza la misma clase**; si no, el `throw` pelado de §3 alcanza.
+
+
 ## Alternativas consideradas
 
 | Alternativa | Por qué se rechaza |
