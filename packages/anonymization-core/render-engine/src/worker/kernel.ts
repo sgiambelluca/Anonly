@@ -1149,6 +1149,19 @@ export interface KernelRenderOptions {
 
 export interface KernelRenderResult {
   readonly imageData: ImageData;
+  /**
+   * ADR-062 §1: las anotaciones `Degraded` de ESTE render. El kernel ya las
+   * calculaba para decidir si pintar el recuadro de aviso en el preview; lo
+   * que faltaba era **devolverlas**, que es el único camino por el que el
+   * veredicto sale de este motor.
+   *
+   * Siempre presente (array vacío si no hay ninguna) y siempre calculado, en
+   * los dos modos: el cociente `finalSize/naturalSize` es invariante a la
+   * escala por diseño (ADR-058 §7), así que preview y export coinciden
+   * siempre sobre si hay que avisar. Vacío también para `kind: "original"`,
+   * que no pinta reemplazos.
+   */
+  readonly degraded: ReadonlyArray<Annotation>;
   // Siempre presente (a diferencia de `RenderPageOutput.encoded`, público y
   // opcional según `mode` — Render_Engine.md §10): el host decide si lo
   // expone según `mode === "full"`, y reusa este mismo valor para el blob de
@@ -1218,6 +1231,7 @@ export async function kernelRenderPage(
 
   if (opts.abortSignal.aborted) throw new CancelledError(documentId);
 
+  let degradedVerdict: ReadonlyArray<Annotation> = [];
   if (kind === "anonymized") {
     // ADR-058 §5: `lineWords` ausente es el caso normal (página donde todo
     // entra a tamaño natural) y nunca un error — se resuelve a `[]`, que hace
@@ -1244,6 +1258,7 @@ export async function kernelRenderPage(
     if (mode === "preview" && degraded.length > 0) {
       paintAnnotations(context2d, degraded, scale, opts.abortSignal, documentId);
     }
+    degradedVerdict = degraded;
   } else {
     paintAnnotations(context2d, annotations, scale, opts.abortSignal, documentId);
   }
@@ -1266,7 +1281,7 @@ export async function kernelRenderPage(
     opts.onWarn,
   );
 
-  return { imageData, encoded };
+  return { imageData, encoded, degraded: degradedVerdict };
 }
 
 export interface KernelRasterizeOptions {
