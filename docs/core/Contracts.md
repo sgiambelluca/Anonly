@@ -367,6 +367,10 @@ export enum EngineErrorCode {
   ENGINE_DISPOSED = "ENGINE_DISPOSED",
   INVALID_INPUT = "INVALID_INPUT",
   CANCELLED = "CANCELLED",
+  // ADR-077: crash de transporte de un Worker. `engineId: "core"` (es del
+  // transporte, no del dominio) y `retryable: true` (el worker de reemplazo
+  // arranca limpio, y el `RenderPool` además lo re-primea antes del primer job).
+  WORKER_CRASHED = "WORKER_CRASHED",
 }
 
 export abstract class EngineError extends Error {
@@ -758,7 +762,7 @@ export interface EntityGroupRemoved { readonly documentId: string; readonly grou
 export interface GroupReplacementChanged { readonly documentId: string; readonly groupId: string; readonly mode: ReplacementMode; readonly value: string; }
 export interface GroupToggled { readonly documentId: string; readonly groupId: string; readonly enabled: boolean; }
 export interface ConflictDetected { readonly documentId: string; readonly conflict: Conflict; }
-export interface ConflictResolved { readonly documentId: string; readonly conflictId: string; readonly mode: ReplacementMode; }
+export interface ConflictResolved { readonly documentId: string; readonly conflictId: string; readonly entityType: EntityType; } // ADR-083 §3 (antes: mode)
 export interface GroupingFinished { readonly documentId: string; readonly groupCount: number; readonly conflictCount: number; readonly durationMs: number; }
 
 // Render
@@ -821,7 +825,8 @@ export interface GroupUpdateRequested {
   // ADR-069 §4: personGender no sale de un Pick de EntityGroup porque su tercer
   // estado ("neutral") no existe como valor almacenado — borra el campo. Sobre
   // un grupo de type distinto de Person se ignora con warn.
-  readonly patch: Partial<Pick<EntityGroup, "replacementMode" | "replacementValue" | "enabled" | "canonicalValue">>
+  // ADR-082 §1: `type` corrige una clasificación equivocada del detector.
+  readonly patch: Partial<Pick<EntityGroup, "type" | "replacementMode" | "replacementValue" | "enabled" | "canonicalValue">>
     & { readonly personGender?: PersonGenderChoice };
 }
 export interface GroupMergeRequested { readonly documentId: string; readonly sourceGroupId: string; readonly targetGroupId: string; }
@@ -829,7 +834,7 @@ export interface GroupSplitRequested { readonly documentId: string; readonly gro
 export interface RuleCreated { readonly documentId: string; readonly rule: Rule; }
 export interface RuleUpdated { readonly documentId: string; readonly ruleId: string; readonly patch: Partial<Rule>; }
 export interface RuleDeleted { readonly documentId: string; readonly ruleId: string; }
-export interface ConflictResolveRequested { readonly documentId: string; readonly conflictId: string; readonly mode: ReplacementMode; }
+export interface ConflictResolveRequested { readonly documentId: string; readonly conflictId: string; readonly entityType?: EntityType; } // ADR-083 §1: el usuario elige el TIPO; ausente = default (mayor confidence)
 export interface DocumentClosed { readonly documentId: string; }
 
 // Type map: EngineEvents → payload type. Reemplaza al namespace EventPayloads;
