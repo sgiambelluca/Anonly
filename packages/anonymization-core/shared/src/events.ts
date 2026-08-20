@@ -17,6 +17,7 @@
 
 import type {
   EngineEvents,
+  EntityType,
   PersonGenderChoice,
   PipelineStage,
   ReplacementMode,
@@ -179,7 +180,8 @@ export interface ConflictDetected {
 export interface ConflictResolved {
   readonly documentId: string;
   readonly conflictId: string;
-  readonly mode: ReplacementMode;
+  /** ADR-083 §3: el tipo con el que quedó clasificado el grupo. Antes: `mode: ReplacementMode`. */
+  readonly entityType: EntityType;
 }
 export interface GroupingFinished {
   readonly documentId: string;
@@ -287,8 +289,17 @@ export interface GroupUpdateRequested {
   // ADR-069 §4: personGender no sale de un Pick de EntityGroup porque su tercer
   // estado ("neutral") no existe como valor almacenado — borra el campo. Sobre
   // un grupo de type distinto de Person se ignora con warn.
+  //
+  // ADR-082 §1: `type` corrige una clasificación equivocada del detector. No es
+  // una etiqueta suelta — arrastra `indexInType` (secuencia por tipo, ADR-028),
+  // el label del token (ADR-057), qué regla de scope `type` aplica, el
+  // `personGender` (solo existe para Person) y el `entityType` de los registros
+  // de sesión del grupo. Ver ADR-082 §2/§3.
   readonly patch: Partial<
-    Pick<EntityGroup, "replacementMode" | "replacementValue" | "enabled" | "canonicalValue">
+    Pick<
+      EntityGroup,
+      "type" | "replacementMode" | "replacementValue" | "enabled" | "canonicalValue"
+    >
   > & { readonly personGender?: PersonGenderChoice };
 }
 export interface GroupMergeRequested {
@@ -317,7 +328,19 @@ export interface RuleDeleted {
 export interface ConflictResolveRequested {
   readonly documentId: string;
   readonly conflictId: string;
-  readonly mode: ReplacementMode;
+  /**
+   * ADR-083 §1: el tipo que el usuario eligió entre los de
+   * `conflict.candidates`. Reemplaza al `mode: ReplacementMode` anterior — un
+   * conflicto es un desacuerdo sobre **qué es** la entidad, no sobre cómo
+   * reemplazarla (para eso está el `ReplacementModeSelect` de la fila).
+   *
+   * Ausente = aceptar el default, que es el candidato de mayor `confidence`
+   * (empate a favor de Regex). Como `regex-engine` emite siempre
+   * `confidence: 1.0`, ese default coincide con la resolución automática que
+   * el motor ya tomó al crear el conflicto: resolver sin elegir es confirmar,
+   * y no cambia ningún dato.
+   */
+  readonly entityType?: EntityType;
 }
 export interface DocumentClosed {
   readonly documentId: string;

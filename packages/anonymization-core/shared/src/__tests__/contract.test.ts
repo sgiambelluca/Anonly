@@ -26,6 +26,7 @@ import {
   estimateTokenWidth,
   EventChannel,
   InvalidInputError,
+  WorkerCrashedError,
   makeTransferable,
   MAX_RENDER_SCALE,
   normalizeForComparison,
@@ -289,11 +290,12 @@ describe("@anonly/shared — Contracts", () => {
         "EXPORT_FAILED",
         "EXPORT_NO_ENABLED_GROUPS",
         "EXPORT_TIMEOUT",
-        // Generic (4)
+        // Generic (5)
         "ENGINE_NOT_INITIALIZED",
         "ENGINE_DISPOSED",
         "INVALID_INPUT",
         "CANCELLED",
+        "WORKER_CRASHED", // ADR-077
       ];
       // Igualdad exacta de conjuntos: un código agregado o borrado sin pasar
       // por Contracts.md §4 rompe este test (R-19).
@@ -330,6 +332,17 @@ describe("@anonly/shared — Contracts", () => {
       expect(err.code).toBe(EngineErrorCode.INVALID_INPUT);
       expect(err.retryable).toBe(false);
       expect(err.details).toEqual({ field: "buffer" });
+    });
+
+    it("WorkerCrashedError tiene code WORKER_CRASHED y es retryable", () => {
+      // ADR-077: `retryable: true` es la única razón de ser de la clase — el
+      // worker de reemplazo arranca limpio, así que reintentar el mismo
+      // payload es exactamente el caso de uso del backoff del pool.
+      const err = new WorkerCrashedError("crash", { poolKey: "render", slot: 0 });
+      expect(err.code).toBe(EngineErrorCode.WORKER_CRASHED);
+      expect(err.engineId).toBe("core");
+      expect(err.retryable).toBe(true);
+      expect(err.details).toEqual({ poolKey: "render", slot: 0 });
     });
 
     it("CancelledError tiene code CANCELLED", () => {
@@ -376,6 +389,7 @@ describe("@anonly/shared — Contracts", () => {
         indexInType: 1,
         enabled: true,
         aliases: ["34.567.891", "34567891"],
+        replacementValueUserSet: false,
         createdAt: 0,
         updatedAt: 0,
       };
@@ -450,6 +464,7 @@ describe("@anonly/shared — Contracts", () => {
       indexInType: 1,
       enabled: true,
       aliases: ["Juan Pérez"],
+      replacementValueUserSet: false,
       createdAt: 0,
       updatedAt: 0,
     };
@@ -571,6 +586,7 @@ describe("@anonly/shared — Contracts", () => {
         indexInType: 1,
         enabled: true,
         aliases: ["Juan"],
+        replacementValueUserSet: false,
         createdAt: 0,
         updatedAt: 0,
       };

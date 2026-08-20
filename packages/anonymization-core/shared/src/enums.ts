@@ -224,4 +224,11 @@ export enum EngineErrorCode {
   ENGINE_DISPOSED = "ENGINE_DISPOSED",
   INVALID_INPUT = "INVALID_INPUT",
   CANCELLED = "CANCELLED",
+  /**
+   * ADR-077: crash de transporte de un Worker. Es del transporte, no del
+   * dominio, así que su `engineId` es "core" y sirve para los cinco pools.
+   * Retryable: el worker de reemplazo arranca limpio y el `RenderPool` lo
+   * re-primea antes del primer job (ADR-043 §5).
+   */
+  WORKER_CRASHED = "WORKER_CRASHED",
 }

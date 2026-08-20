@@ -125,6 +125,7 @@ export {
   EngineNotInitializedError,
   EngineDisposedError,
   InvalidInputError,
+  WorkerCrashedError,
   CancelledError,
 } from "./errors.js";
 export type { SerializedEngineError } from "./errors.js";

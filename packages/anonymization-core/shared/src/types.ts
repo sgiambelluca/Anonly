@@ -161,6 +161,21 @@ export interface EntityGroup {
   readonly aliases: ReadonlyArray<string>;
   /** Solo para type === Person. Ausente = sin determinar (ADR-060 §4). */
   readonly personGender?: PersonGender;
+  /**
+   * ADR-078 §1: `true` si el `replacementValue` de arriba lo escribió el
+   * usuario, y por lo tanto ADR-076 §3 lo protege de todo recálculo
+   * automático. NO opcional — no hay "sin determinar".
+   *
+   * De solo lectura: no entra en `GroupUpdatePatch`. Para volver al valor
+   * calculado se re-aplica el mismo `replacementMode` (ADR-078 §3), que ya
+   * recalcula y apaga el flag.
+   *
+   * Sale del motor porque su valor asociado **no delata su procedencia**:
+   * `[P1]` escrito a mano y `[P1]` calculado son idénticos. Por eso
+   * `personGenderUserSet` sigue siendo interno — ahí el valor sí delata
+   * (quien eligió "femenino" lee `[MUJER 01]`). Regla en ADR-078 §2.
+   */
+  readonly replacementValueUserSet: boolean;
   readonly createdAt: number;
   readonly updatedAt: number;
 }
@@ -260,7 +275,13 @@ export interface Conflict {
   readonly reason: ConflictReason;
   readonly candidates: ReadonlyArray<ConflictCandidate>;
   readonly resolved: boolean;
-  readonly resolvedMode?: ReplacementMode;
+  /**
+   * ADR-083 §3: el tipo con el que el usuario resolvió el conflicto. Antes
+   * era `resolvedMode?: ReplacementMode`, que registraba una elección que no
+   * tenía nada que ver con el desacuerdo (el conflicto es sobre QUÉ es la
+   * entidad; el modo de reemplazo se elige en la fila del grupo).
+   */
+  readonly resolvedType?: EntityType;
 }
 
 export interface PipelineError {
