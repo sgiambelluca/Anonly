@@ -74,14 +74,13 @@ const TESSERACT_WORKER_PATH = "/wasm/tesseract/worker.min.js";
  * Fix: absolutizar acá, nosotros, las tres rutas contra `self.location.origin`
  * ANTES de pasarlas a `createWorker` — sigue siendo first-party (mismo
  * origen, ADR-018; lo único que cambia es la FORMA de la URL, no el
- * destino). `self` no existe en el entorno de test de este paquete
- * (`environment: "node"` de vitest, sin `self` global salvo que un test lo
- * stubee explícitamente para `worker/entry.ts` — ver
- * `__tests__/worker-entry.test.ts`) ni en el fallback in-process invocado
- * fuera de un Worker (`ocr.engine.ts` sin pool real): en esos casos no hay
- * `self`/`self.location` y esta función es un no-op (retorna el path
- * root-relative tal cual, que además sigue siendo válido para esos dos
- * casos, ver arriba).
+ * destino). El **único** caso en que esta función es no-op es el entorno Node
+ * de los tests (`environment: "node"` de vitest, sin `self` global salvo que
+ * un test lo stubee explícitamente para `worker/entry.ts` — ver
+ * `__tests__/worker-entry.test.ts`), donde el path root-relative se devuelve
+ * tal cual y sigue siendo válido. En el browser absolutiza **siempre**,
+ * también en el fallback in-process fuera de un Worker (`ocr.engine.ts` sin
+ * pool real): ahí `self === window`, que sí tiene `location`.
  *
  * Palanca de reserva, NO usada acá (documentada para no reintentarla a
  * ciegas si aparece un problema nuevo): `createWorker(..., { workerBlobURL:
