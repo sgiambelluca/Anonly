@@ -79,7 +79,21 @@ test("Escenario 3: cargar PDF protegido → UI pide password → reintenta → s
 
   // Núcleo de la regresión (ADR-049): nunca debe aparecer el banner
   // genérico de pipeline fallido (`PipelineStatus` → "Cerrar documento").
-  await expect(page.getByRole("button", { name: "Cerrar documento" })).toHaveCount(0);
+  //
+  // El locator se acota al banner y no a la página entera: desde ADR-051 el
+  // Toolbar tiene su propio "Cerrar documento" (`CloseDocumentButton`,
+  // visible con `stage ∈ {Ready, Done, Failed, Cancelled}`), así que un
+  // `page.getByRole("button", ...)` suelto ya no significa "hay banner de
+  // error" — significa "hay algún botón con ese nombre". Hoy los tres
+  // checkpoints son mid-pipeline y el botón del Toolbar está oculto, pero la
+  // aserción decía algo distinto de lo que quería decir. Mismo patrón que
+  // `scenario-6-corrupt-pdf.spec.ts`. El filtro es por contenido y no solo
+  // por `role="alert"` porque el propio `PasswordDialog` usa ese rol para su
+  // mensaje de "Contraseña incorrecta.".
+  const pipelineErrorBanner = page
+    .getByRole("alert")
+    .filter({ has: page.getByRole("button", { name: "Cerrar documento" }) });
+  await expect(pipelineErrorBanner).toHaveCount(0);
 
   const passwordInput = passwordDialog.locator("#pdf-password");
   const continueButton = passwordDialog.getByRole("button", { name: "Continuar" });
@@ -93,14 +107,14 @@ test("Escenario 3: cargar PDF protegido → UI pide password → reintenta → s
     passwordDialog.getByRole("alert").filter({ hasText: "Contraseña incorrecta." }),
   ).toBeVisible();
   await expect(passwordDialog).toBeVisible();
-  await expect(page.getByRole("button", { name: "Cerrar documento" })).toHaveCount(0);
+  await expect(pipelineErrorBanner).toHaveCount(0);
 
   // Contraseña correcta: el diálogo se cierra y el pipeline avanza.
   await passwordInput.fill("test1234");
   await continueButton.click();
 
   await expect(passwordDialog).not.toBeVisible({ timeout: 30_000 });
-  await expect(page.getByRole("button", { name: "Cerrar documento" })).toHaveCount(0);
+  await expect(pipelineErrorBanner).toHaveCount(0);
 
   // El pipeline llegó más allá de Extracting: el grupo del DNI (Regex,
   // página 0) aparece sin depender de que NER termine.

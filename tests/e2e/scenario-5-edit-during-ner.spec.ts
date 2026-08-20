@@ -8,7 +8,8 @@
  * escenario edita **durante la primera pasada** de detección: NER está
  * activado por default (`config.ts#buildDefaultEngineConfig`, mismo criterio
  * que `scenario-1-import-edit-export.spec.ts`) y corre concurrentemente con
- * Regex sobre `text-10p.pdf`. El grupo del DNI de la página 0 ("34.567.891")
+ * Regex sobre `text-10p-person.pdf` (`textTenPagesWithPersonFile`, ver el
+ * último párrafo — no `text-10p.pdf`). El grupo del DNI de la página 0 ("34.567.891")
  * lo detecta Regex y puede aparecer antes de que NER (y por lo tanto el
  * pipeline completo) llegue a `Ready` — la edición se hace apenas ese grupo
  * existe, tan pronto como sea posible, sin asumir una ventana de tiempo
@@ -40,9 +41,11 @@
  * de esa aserción sobre el Escenario 9 (el otro candidato, que también
  * corre NER real pero vía `reanalyze`): corre el camino de una sola pasada
  * (NER activado por default, el mismo que reportó el bug en producción,
- * `ADR-055` Contexto §1) y es el más barato de los dos en tiempo de corrida
- * (240 s vs. 480 s), lo que importa para poder revalidar la estabilidad de
- * una aserción que depende de un modelo real. La aserción final usa un
+ * `ADR-055` Contexto §1) y es el más barato de los dos, lo que importa para
+ * poder revalidar la estabilidad de una aserción que depende de un modelo
+ * real. (El presupuesto de `test.setTimeout` de este escenario es la mitad
+ * del Escenario 9 — 240 s contra 480 s. Son presupuestos, no mediciones: los
+ * runtimes reales están en el orden de ~14 s cada uno.) La aserción final usa un
  * fixture propio (`textTenPagesWithPersonFile`, `support/fixtures.ts`) con
  * dos oraciones de nombre "limpias" (sin otras entidades alrededor) en vez
  * de reutilizar "Juan Pérez", justamente porque esa oración ya está probada
