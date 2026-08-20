@@ -241,7 +241,15 @@ Un rol prometido y no cumplido es peor que no anunciar nada: deja al usuario de 
 
 ---
 
-## 16. NECESITA ADR — el detector de degradación casi nunca se dispara en texto corriente
+## 16. ~~NECESITA ADR~~ **DECIDIDO (ADR-086)** — el detector de degradación casi nunca se dispara en texto corriente
+
+> **Cerrado el 2026-08-20 por `adr/ADR-086-El-Detector-De-Degradacion-Mide-El-Ancho.md`.** El humano eligió las opciones **1 y 3** de las tres que este punto dejaba abiertas: medir la compresión horizontal, y que el piso de dibujo escale con el render. La 2 (quitarle el piso a `naturalSizePx`) no queda descartada sino **absorbida**: bajo el criterio nuevo la referencia no se dibuja nunca, así que el piso ahí no tiene razón de existir.
+>
+> Lo que el ADR agregó y este punto no tenía: el producto de las dos compresiones **se simplifica exactamente** a `anchoDisponible / anchoNatural` (el tamaño final se cancela), así que no son dos mediciones sino una; la invariancia resultante es **exacta**, verificada a seis decimales sobre seis escalas; y `DEGRADED_FONT_RATIO` **baja a 0,5**, porque con 0,6 el criterio nuevo marcaría placeholders normales en cajas apretadas (`[PERSONA 01]` da 0,579) — sobre-marcar erosiona la única señal que el usuario tiene.
+>
+> Lo que sigue abajo es el diagnóstico original, conservado como registro de cómo se encontró.
+
+### Diagnóstico original
 
 > **Procedencia**: verificación en navegador de la marca del §14, el 2026-08-20. La marca funciona; lo que falla es **la señal que consume**. Encontrado midiendo, no leyendo.
 
