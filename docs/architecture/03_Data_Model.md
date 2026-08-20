@@ -250,6 +250,12 @@ export interface EntityGroup {
   // ADR-060 §2: solo para type === Person. Ausente = sin determinar (no es una
   // tercera categoría: es la falta de información). Se ignora en los demás tipos.
   readonly personGender?: PersonGender;
+  // ADR-078 §1: `true` si el `replacementValue` de arriba lo escribió el
+  // usuario (y por lo tanto ADR-076 §3 lo protege de todo recálculo
+  // automático). NO opcional: no hay estado "sin determinar". De solo
+  // lectura — no entra en `GroupUpdatePatch`; para volver al valor calculado
+  // se re-aplica el mismo `replacementMode` (ADR-078 §3).
+  readonly replacementValueUserSet: boolean;
   readonly createdAt: number;
   readonly updatedAt: number;
 }
@@ -270,6 +276,7 @@ export type PersonGender = "f" | "m";
 | `indexInType` | Entero 1-based, secuencial y estable por tipo dentro de la sesión. Se renderiza con padding a 2 dígitos. **No se abrevia nunca** (ADR-057 §1) y **no se segmenta por género** (ADR-060 §7): los grupos `Person` comparten una sola secuencia. |
 | `enabled` | Si `false`, las ocurrencias del grupo se dejan intactas en el render. |
 | `aliases` | Variantes de valor unificadas (ej. `"J. Pérez"` y `"Juan Pérez"` en el mismo grupo). |
+| `replacementValueUserSet` | `true` si el `replacementValue` lo escribió el usuario. Es lo que hace visible en la UI (`ui/UX_Guidelines.md` §3.3) una edición manual que, de otro modo, es indistinguible de un valor calculado — el caso que **no** aplica a `personGender`, cuyo valor sí delata su procedencia, y por eso `personGenderUserSet` sigue siendo interno (ADR-078 §2). |
 | `personGender` | Solo `type === Person` (ADR-060 §2). `"f"`/`"m"` cambian el label resuelto del `placeholder` (`MUJER`/`HOMBRE` en vez de `PERSONA`); ausente = sin determinar → label neutro y marca en el árbol de entidades. Inferido de un léxico first-party (ADR-069 §6: al asignar/cambiar `canonicalValue` y en `finishSession`) o puesto por el usuario, que gana siempre. **La ausencia tiene dos orígenes que el dato público no distingue** —nunca se infirió, o el usuario eligió `"neutral"` (ADR-069 §4)— y el motor los separa con bookkeeping interno (`personGenderUserSet`, `Grouping_Engine.md` §13 caso 34) para que una re-inferencia no pise la elección. Ese flag **no** es parte de `EntityGroup` ni de ningún evento. |
 | `createdAt`, `updatedAt` | Epoch ms. Para UX y merge de ediciones. |
 
@@ -438,7 +445,7 @@ export interface Conflict {
   readonly reason: ConflictReason;
   readonly candidates: ReadonlyArray<ConflictCandidate>;
   readonly resolved: boolean;
-  readonly resolvedMode?: ReplacementMode;
+  readonly resolvedType?: EntityType;   // ADR-083 §3: el tipo con el que quedó clasificado el grupo (antes: resolvedMode)
 }
 
 export enum ConflictReason {
@@ -458,7 +465,7 @@ export interface ConflictCandidate {
 
 **Invariantes**
 - `candidates.length ≥ 2`.
-- Si `resolved === true`, `resolvedMode` es obligatorio.
+- Si `resolved === true`, `resolvedType` es obligatorio (ADR-083 §3).
 - Un conflicto bloquea el export hasta ser resuelto o ignorado explícitamente.
 
 ---

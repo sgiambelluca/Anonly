@@ -70,7 +70,7 @@ Notas: el archivo se lee como `ArrayBuffer` en el main thread y se mantiene en m
 
 ## 4. Etapa 2 — OCR (OCR Engine)
 
-**Entra**: para cada `pageIndex ∈ textlessPages`, el Orchestrator obtiene el `ImageData` vía `RenderEngine.rasterizePage(documentId, pageIndex, scale, ctx)` con `scale = ctx.config.ocr.dpi / 72` (ADR-034 §1; corre en el `RenderPool`, sin emitir eventos de preview) y dispatcha `OcrPool.dispatch({ type: "ocr-page", payload: { documentId, pageIndex, imageData, dpi, languages } })`. `imageData` se transfiere. Precondición: el Orchestrator adelanta `RenderEngine.loadDocument(documentId, buffer)` a esta etapa con los bytes retenidos de la etapa 0 (ADR-030, ADR-034 §1).
+**Entra**: para cada `pageIndex ∈ textlessPages`, el Orchestrator obtiene el `ImageData` vía `RenderEngine.rasterizePage(documentId, pageIndex, scale, ctx)` con `scale = ctx.config.ocr.dpi / 72` (ADR-034 §1; corre en el `RenderPool`, sin emitir eventos de preview) y dispatcha `OcrPool.dispatch({ type: "ocr-page", payload: { documentId, pageIndex, imageData, dpi, languages } })`. `imageData` se transfiere. Precondición: el Orchestrator adelanta `RenderEngine.loadDocument(documentId, buffer, password?)` a esta etapa con los bytes retenidos de la etapa 0 (ADR-030, ADR-034 §1; el tercer argumento opcional lo agregó ADR-050 para los documentos encriptados).
 **Sale**: `Word[]` por página con `confidence` y `source: "ocr"`. El PDF Engine fusiona esas palabras en `Page.words` (vía `OCR_PAGE_FINISHED`).
 **Eventos emitidos**: `OCR_STARTED`, `OCR_PAGE_FINISHED`, `OCR_FINISHED`, `OCR_PAGE_FAILED`.
 **Errores**:
@@ -193,7 +193,7 @@ El usuario puede overridear cualquiera desde la UI, emitiendo `CONFLICT_RESOLVE_
 
 ## 10. Etapa 8 — Vista previa parcial (Render Engine)
 
-**Entra**: `Document` + `EntityGroup[]` + `Annotation[]` + PDF fuente: antes del primer render, el Orchestrator carga los bytes retenidos en la etapa 0 vía `RenderEngine.loadDocument(documentId, buffer)` (una sola vez por documento; ADR-030). Si el documento tenía páginas sin texto, `loadDocument` ya ocurrió en la etapa 2 (rasterización para OCR, ADR-034 §1) y **no** se repite.
+**Entra**: `Document` + `EntityGroup[]` + `Annotation[]` + PDF fuente: antes del primer render, el Orchestrator carga los bytes retenidos en la etapa 0 vía `RenderEngine.loadDocument(documentId, buffer, password?)` (una sola vez por documento; ADR-030, tercer argumento por ADR-050). Si el documento tenía páginas sin texto, `loadDocument` ya ocurrió en la etapa 2 (rasterización para OCR, ADR-034 §1) y **no** se repite.
 **Sale**: `canvasBlobUrl` por página visible en la UI (original + anonimizado).
 **Eventos emitidos**: `PREVIEW_UPDATED` (por página), `PREVIEW_PAGE_FAILED`.
 **Errores**: `PREVIEW_PAGE_FAILED` → reintento (1) → se muestra placeholder en la UI.

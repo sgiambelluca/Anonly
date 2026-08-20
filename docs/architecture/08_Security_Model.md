@@ -171,7 +171,16 @@ Nunca se copian campos del original. El test de no-recuperabilidad valida esto.
 
 ### 6.3 Test
 
-- Grep automatizado en CI: `grep -r "password" packages/ | grep -v "PDF_PASSWORD_REQUIRED\|errors.ts"` debe no encontrar usos sospechosos **fuera de esta lista enumerada** (ADR-050 §3): `pdf-engine` (`pdf.types.ts`, `pdf.engine.ts`, `worker/entry.ts`), `render-engine` (`render.engine.ts`, `worker/kernel.ts`, `worker/entry.ts`), `shared/src/types.ts` (`LoadDocumentPayload`) y `src/orchestrator.ts` (`retainedInputs`, `retryWithPassword`). Cualquier aparición fuera de la lista es un hallazgo.
+- Grep en CI (**hoy documentado, no automatizado** — ver la nota de abajo): `grep -rn "password\|Password" packages/ --include='*.ts'`, descartando los identificadores que **nombran** el secreto sin transportarlo (`PDF_PASSWORD_REQUIRED`, `PdfPasswordRequired`, `PdfPasswordRequiredError`), debe no encontrar usos **fuera de esta lista enumerada** (ADR-050 §3, corregida 2026-08-18):
+  - `pdf-engine`: `pdf.types.ts`, `pdf.engine.ts`, `worker/entry.ts`.
+  - `render-engine`: `render.engine.ts` (`RetainedDocument.password`, host-side), `worker/kernel.ts` (lo pasa a `getDocument`, no lo retiene), `worker/entry.ts`.
+  - `shared/src/types.ts`: `LoadDocumentPayload.password`.
+  - `src/orchestrator.ts`: `retainedInputs`, `retryWithPassword`.
+  - **`src/types.ts`**: `ImportDocumentInput.password` y la firma de `retryWithPassword` en `IPipelineOrchestrator`. *(Hueco de la lista original: es el tipo público por el que el password entra al Core, así que no puede faltar en la enumeración — sin él, el primer grep real da un hallazgo falso.)*
+
+  **Nota sobre el filtro**: la versión original (`grep -v "PDF_PASSWORD_REQUIRED\|errors.ts"`) no cubría los identificadores PascalCase (`PdfPasswordRequiredError`, `PdfPasswordRequired`), que aparecen en `pdf-engine/src/index.ts`, `pdf.errors.ts`, `shared/src/events.ts`, `shared/src/index.ts` y en un comentario de `src/worker-pool.ts`. Son el **nombre** del error, no el secreto; el filtro tiene que descartarlos por nombre, no por archivo.
+
+  **Estado**: este grep **no existe todavía como script ni como gate de `07_Performance_Strategy.md` §11.4** — se verifica a mano. Automatizarlo no requiere ADR, pero sí aceptar un gate nuevo que puede poner CI en rojo por un falso positivo de grep; queda propuesto, sin implementar.
 - Test de logger: spy sobre `ctx.logger` y verificar que ningún argumento contenga el password de `protected.pdf`.
 
 ---
@@ -261,6 +270,8 @@ Para evitar reidentificación por patrones:
 
 - `localStorage`: solo settings del usuario (idioma, modo default, performance preset). Nunca documentos ni datos sensibles.
 - `IndexedDB`: solo modelos y wasm cacheados. Nunca documentos.
+
+> **Memoria de reclasificación (ADR-085)**: cuando el usuario corrige el tipo de una entidad, el motor lo recuerda para que la corrección se propague a las ocurrencias que aparezcan después. Esa memoria incluye el **valor** corregido (`normalizedValue`), o sea contenido del documento — y por eso vive **solo en RAM, en la sesión de Grouping, por documento**, y se borra en `DOCUMENT_CLOSED`. **No** va a `localStorage` ni a `IndexedDB`: una lista de correcciones es un índice destilado de las entidades de la pericia (nombres de personas, organizaciones, direcciones), lo más sensible que se podría persistir. El costo aceptado es que reabrir el documento obliga a re-corregir (ADR-085, Consecuencias).
 
 ---
 

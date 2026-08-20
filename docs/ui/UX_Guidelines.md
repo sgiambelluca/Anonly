@@ -88,7 +88,8 @@
 - **Grupo habilitado**: checkbox marcado, texto normal.
 - **Grupo deshabilitado**: checkbox desmarcado, texto atenuado.
 - **Grupo con conflicto**: icono ⚠ al lado del nombre. Click abre el conflicto.
-- **Grupo editado manualmente**: punto azul al lado del nombre (indica que el `replacementMode` difiere del default de las reglas).
+- **Grupo con el valor de reemplazo editado a mano** (ADR-078): punto azul al lado del nombre cuando `EntityGroup.replacementValueUserSet === true`, con `title` "Valor de reemplazo editado manualmente". El menú contextual del grupo ofrece **"Restaurar valor calculado"** solo en ese estado. Existe porque un `replacementValue` escrito a mano es **indistinguible** de uno calculado —`[P1]` es `[P1]`—, y desde ADR-076 sobrevive a todo recálculo automático: sin el punto, el usuario no puede revisar ni deshacer lo que editó antes de exportar. Es además el remedio que ADR-058 §4 y ADR-062 le ofrecen ante un reemplazo degradado, así que se usa de rutina.
+- **Grupo con el `replacementMode` distinto del default de las reglas**: **no implementado**, y no lo estará sin un dato nuevo. Calcularlo exige `resolveMode(group, rules)`, que es la resolución de reglas de Grouping: la UI tendría que reimplementarla, que es fuera de su rol (`React_Client.md` U-3). Nota: esta señal era el paréntesis del estado "Grupo editado manualmente" en la redacción anterior, que **conflacionaba** dos cosas distintas — la de arriba (el valor lo escribió el usuario) y esta (el modo difiere del default). ADR-078 §Contexto 1 las separa. Esta es además la menos urgente de las dos: el modo ya se ve, en el `Select` de la propia fila.
 - **Grupo con reemplazo degradado** (ADR-058 §7): marca al lado del nombre cuando alguna de sus ocurrencias quedó por debajo del umbral de legibilidad — el token no entraba, no se pudo repintar la línea y hubo que encogerlo. Click ofrece las tres salidas: editar el texto de reemplazo a mano, pasar el grupo a `redact` (que nunca tiene problema de espacio) o deshabilitarlo. **La marca existe para que el usuario sepa dónde mirar**: sin ella, el token quedó chico en la página 7 y solo se descubre haciendo zoom página por página. Por eso mismo tiene umbral y no aparece en cada fallback — una señal que aparece siempre no es una señal.
 
   > **La marca se va a encender más seguido desde ADR-074 §6**, y es correcto: hasta entonces, una entidad partida en dos líneas medía su encogido contra una envolvente del ancho de la página, así que el token "entraba" siempre y el aviso **nunca** se prendía justo en el caso peor. Ahora se mide contra el rectángulo donde el token se dibuja de verdad.
@@ -197,21 +198,25 @@ Hay **tres vías**, y todas terminan en lo mismo — cambia de dónde sale el va
 Cuando el usuario click en un conflicto (desde el árbol o desde un highlight):
 
 ```
-Conflicto #c-123
+Revisar entidad
 ─────────────────────────────────────────
-Tipo: Overlap (bbox compartido)
-Página: 3
-Candidatos:
-  • Regex: DNI (confidence 1.0)  → "34.567.891"
-  • NER: Person (confidence 0.65) → "34.567.891"
+"Fiscalía de Quilmes"
+Dos detecciones se superponen
 
-Resolución sugerida: Regex (mayor confidence + determinístico)
+¿Con qué se identifica?
+  (•) Organización
+  ( ) Dirección
 
-[Usar Regex] [Usar NER] [Personalizado ▾]
+                        [Cerrar] [Aplicar]
 ```
 
-- "Usar Regex" / "Usar NER" / "Personalizado" emite `CONFLICT_RESOLVE_REQUESTED` con el modo elegido.
-- "Personalizado" permite elegir un `ReplacementMode` para el grupo resultante.
+- **El usuario elige el tipo de entidad, no el modo de reemplazo** (ADR-083 §1). Un conflicto es un desacuerdo sobre *qué es* la entidad; el modo de reemplazo se elige en el `ReplacementModeSelect` de la fila del grupo (`Components.md` §3.4).
+- **No se nombra a Regex ni a NER** (ADR-083 §6), ni se muestran números de confidence: son detalles de implementación del pipeline. La confidence **ordena** las opciones —la mayor va primera y preseleccionada— pero no se imprime.
+- Las opciones son los tipos **distintos** entre los candidatos del conflicto, no el catálogo completo. Corregir libremente la categoría de cualquier grupo es "Cambiar categoría" (`Components.md` §3.5), disponible con o sin conflicto.
+- **Aplicar** emite `CONFLICT_RESOLVE_REQUESTED { conflictId, entityType? }`, que reclasifica el grupo y marca el conflicto resuelto. **Sin elección explícita** gana el candidato de mayor confidence — que coincide con la resolución automática ya vigente, así que confirmar no cambia datos.
+- Si todos los candidatos comparten tipo (`low_confidence`/`ambiguous_canonical`, que no son conflictos de clasificación), no hay radios y el botón dice **"Descartar"**.
+
+> **Redacción anterior (retirada por ADR-083)**: el mockup ofrecía `[Usar Regex] [Usar NER] [Personalizado ▾]` y decía que emitía el evento "con el modo elegido". Eran dos cosas incompatibles —`ReplacementMode` no tiene valores "regex"/"ner"— y lo que se implementó (elegir un `ReplacementMode`) **no resolvía el desacuerdo**: `applyConflictResolve` no tocaba el `entityType`, así que el usuario aplicaba y la discrepancia quedaba igual.
 
 ---
 

@@ -261,6 +261,8 @@ OcrPageOutput {
 | `cache set happens before OCR_PAGE_FINISHED on host` | `contract.test.ts` | contract | ADR-045 §1/§4 (orden garantizado; mata la carrera EVENT/COMPLETED) |
 | `dispatch timeout normalized to OcrTimeoutError and retried by engine loop` | `edge.test.ts` | edge | ADR-045 §2 |
 | `events identical with and without pool` | `contract.test.ts` | contract | ADR-045 §5 (fallback ADR-035) |
+| `configures tesseract.js first-party paths with workerPath pointing to the file, not the directory, unresolved when self.location is absent (ADR-018 §2 errata)` | `worker-entry.test.ts` | unit | PR 17.6 parte (a), §15 item 22: `TESSERACT_WORKER_PATH` apunta al archivo (`worker.min.js`), no al directorio |
+| `absolutizes tesseract.js first-party paths against self.location.origin when running inside a real worker (ADR-018 §2 precisión)` | `worker-entry.test.ts` | unit | PR 17.6 parte (b), §15 item 22: sin absolutizar, los paths root-relative no resuelven contra la base `blob:` del worker interno de tesseract |
 
 **Fixtures y mocks (ADR-021 §5)**: los tests **unit / contract / edge** (Hito 3) mockean la frontera `tesseract.js` — deterministas, sin wasm ni descargas; el cast de frontera va en un helper único de `__tests__/fixtures/` (Code_Standards §10, precedente `mockGetDocumentResult` del pdf-engine). Los tests **stress / cancel / integration** son Hito 11 y usan `tests/fixtures/scanned-10p.pdf` (rasterizado a `ImageData` por el host), imagen blanca e imagen con texto pequeño.
 

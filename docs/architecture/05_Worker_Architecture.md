@@ -72,6 +72,17 @@ El mecanismo que lo impone: **cada motor angosta su propio puerto interno de des
 
 **Excepción de ubicación — `pdf-engine` (ADR-055 §10)**: los cuatro puertos de arriba existen porque sus motores se partieron en mitad host + kernel (§7.2-§7.5; ADR-043/045/046/047). `pdf-engine` conserva el modelo original de ADR-036 §3 —el entry-point corre el **motor real** completo (§7.1)— así que no tiene puerto interno ni host-bridge propio: el consumidor de su `COMPLETED.result` es el **façade** (`orchestrator.ts`, stage de extracción). El invariante aplica igual y el decoder sigue siendo del motor (`decodePdfEngineOutput`, exportado por `pdf-engine`, `core/PDF_Engine.md` §6); lo único distinto es que lo **invoca** el façade, host-side — misma forma que `fuseOcrPage` (ADR-041). Angostar ahí significa `dispatch<unknown>` en el call site, no un puerto nuevo.
 
+**Qué se transfiere y qué se clona (ADR-079)**: `postMessage` **clona** por defecto, y hasta ADR-079 ningún entry-point ni `dispatchRemote` pasaba transfer list — o sea que todo lo que cruzaba era un `memcpy` completo, pese a que este doc y ADR-047 decían "transferido". La regla es transferir solo lo que el emisor no vuelve a mirar:
+
+| Payload | Dirección | ¿Transfer? | Por qué |
+|---|---|---|---|
+| `EncodedPageImage` (preview, export, rasterizado) | worker → host | **sí** | El kernel lo postea y no guarda referencia. Es el caso más frecuente: uno por página por render. |
+| `ArrayBuffer` del PDF final (`save`) | worker → host | **sí** | El assembler llama `discardState()` justo después. |
+| `OcrPagePayload.imageData` (~8 MB por página A4 a 300 dpi) | host → worker | **sí** | El host lo rasteriza para ese job y lo suelta. |
+| `LoadDocumentPayload.buffer` (el PDF entero) | host → worker | **NO, nunca** | Es el buffer retenido del Orchestrator, y viaja por `broadcast` al mismo tiempo a N workers: el primer transfer lo detacharía y los N-1 restantes recibirían 0 bytes. Transferirlo reintroduce el bug #6 del PR10. |
+
+Regla de fondo: **worker → host siempre es seguro** (el worker descarta o muere después de postear); **host → worker se justifica caso por caso**. Por eso `broadcast()` no acepta transfer list — es la garantía estructural de que nadie puede transferir un `load-document` por error.
+
 El canal de errores tiene su equivalente ya resuelto: la identidad de clase tampoco sobrevive al `postMessage`, y se discrimina por `code` (ADR-049).
 
 ```ts
@@ -298,7 +309,23 @@ Ningún pool se crea al cargar la app. Se crea bajo demanda:
 - `RenderPool` se crea cuando hay al menos una página lista para preview.
 - El **ExportWorker** (worker único de `export-engine`, sin pool — ADR-036 §1; la redacción anterior "`ExportPool`, alias de RenderPool con workers de tipo export" era errata: mezclaba tipos de worker contra §1.1) se crea al primer `EXPORT_REQUESTED`.
 
-Cada pool puede destruirse tras `DOCUMENT_CLOSED` + `idle` por > 60 s para liberar memoria.
+### 8.1 Liberación por inactividad (ADR-080)
+
+Cada pool libera **sus workers** tras `idleDisposeMs` de inactividad (`WorkerPoolConfig`, default 60 s). El temporizador vive en el propio `WorkerPool` —no en `WorkerPoolManager`, que solo administra el pool de `pdf` desde ADR-043/045/046/047—, porque es el único que puede evaluar la condición.
+
+**Ocioso** son las cuatro condiciones a la vez:
+
+```
+active === 0  &&  queue.length === 0  &&  pendingRemoteJobs.size === 0  &&  inFlightBroadcasts.size === 0
+```
+
+Las dos últimas no son redundantes: un job remoto puede estar en vuelo sin contar en `active` según el camino, y un `broadcast` de re-priming (§7.4, ADR-043 §5) **no pasa por la cola ni por `pump()`**, así que no aparece en ninguna de las dos primeras. Sin ellas, un idle-dispose podría caer sobre un re-priming en curso.
+
+El temporizador se **rearma al quedar ocioso** (no al acceder al pool) y se **cancela al entrar un job**: un job de diez minutos no dispara la liberación a los sesenta segundos.
+
+**`releaseIdleWorkers()` no es `dispose()`**: termina los `WorkerLike` vivos y limpia `remoteWorkers`, pero el pool **sigue usable** — el próximo `dispatch` reconstruye el worker por el camino perezoso de arriba y, si el pool tiene `onWorkerCreated`, lo re-primea antes del primer job. `dispose()` sigue siendo terminal. `idleDisposeMs: 0` desactiva el mecanismo (lo usan los tests, que no pueden depender de temporizadores reales).
+
+> La redacción anterior era *"cada pool puede destruirse tras `DOCUMENT_CLOSED` + idle > 60 s"*. El `DOCUMENT_CLOSED` se retira a propósito: el pool es infraestructura y **no escucha el bus**. La condición de arriba es más general y lo cubre — cerrar un documento deja de generar jobs, así que el pool cae en ocioso solo. Y cubre además el caso que la redacción vieja dejaba afuera: un documento abierto y quieto veinte minutos.
 
 ---
 
@@ -306,7 +333,7 @@ Cada pool puede destruirse tras `DOCUMENT_CLOSED` + `idle` por > 60 s para liber
 
 | Situación | Acción |
 |---|---|
-| Worker crashea (uncaught error) | Pool lo marca como dead, lo reemplaza, reintenta el job si `retryable`. |
+| Worker crashea (uncaught error) | Pool lo marca como dead, lo reemplaza, y **rechaza sus jobs en vuelo con `WorkerCrashedError`** (`WORKER_CRASHED`, `retryable: true`, ADR-077) — o sea que se reintentan: en el pool si no hay `maxRetriesOverride: 0`, y en el loop del motor dueño si lo hay (ocr/ner/export, ADR-045/046/047). Hasta ADR-077 el rechazo era un `InvalidInputError` no-retryable y el job **se perdía en silencio**, contra lo que esta fila decía. |
 | Worker no responde a `READY` en 10 s | Pool lo descarta y crea otro. |
 | `postMessage` lanza (transfer ya consumido) | Error de programación; lanza en dev, loguea en prod. |
 | Worker emite `FAILED` no retryable | Pool emite `WORKER_JOB_FAILED`, Orchestrator emite evento funcional de fallo. |
