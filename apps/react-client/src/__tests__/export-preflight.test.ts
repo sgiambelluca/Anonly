@@ -17,6 +17,7 @@ function makeGroup(overrides: Partial<EntityGroup> = {}): EntityGroup {
     indexInType: 1,
     enabled: true,
     aliases: ["Juan Pérez"],
+    replacementValueUserSet: false,
     createdAt: 0,
     updatedAt: 0,
     ...overrides,

@@ -20,14 +20,17 @@
  * larga").
  */
 
-import type { EntityGroup } from "@anonly/anonymization-core";
+import { ReplacementMode, type EntityGroup } from "@anonly/anonymization-core";
 import { memo, useState } from "react";
 
 import { actions } from "../../core-adapter/actions.js";
 import { useEntitiesStore } from "../../store/entities.store.js";
+import { useViewerStore } from "../../store/viewer.store.js";
 import { Checkbox } from "../common/Checkbox.js";
 import { ConflictBadge } from "../conflicts/ConflictBadge.js";
 
+import { ChangeTypeDialog } from "./ChangeTypeDialog.js";
+import { EditReplacementDialog } from "./EditReplacementDialog.js";
 import { GroupContextMenu } from "./GroupContextMenu.js";
 import { MergeDialog } from "./MergeDialog.js";
 import { PersonGenderToggle } from "./PersonGenderToggle.js";
@@ -45,6 +48,8 @@ function EntityGroupItemImpl({ group }: EntityGroupItemProps) {
   );
   const [mergeOpen, setMergeOpen] = useState(false);
   const [splitOpen, setSplitOpen] = useState(false);
+  const [changeTypeOpen, setChangeTypeOpen] = useState(false);
+  const [editReplacementOpen, setEditReplacementOpen] = useState(false);
 
   return (
     <div
@@ -64,14 +69,68 @@ function EntityGroupItemImpl({ group }: EntityGroupItemProps) {
         {group.canonicalValue}
       </span>
       <span className="text-xs text-text-secondary">({group.members.length})</span>
+      {group.replacementValueUserSet ? (
+        <span
+          role="img"
+          aria-label="Valor de reemplazo editado manualmente"
+          title="Valor de reemplazo editado manualmente"
+          className="h-2 w-2 shrink-0 rounded-full bg-accent"
+        />
+      ) : null}
       {conflict !== undefined ? <ConflictBadge conflictId={conflict.id} /> : null}
       {isPersonGenderToggleVisible(group) ? (
         <PersonGenderToggle groupId={group.id} currentGender={group.personGender} />
       ) : null}
-      <ReplacementModeSelect groupId={group.id} currentMode={group.replacementMode} />
-      <GroupContextMenu onMerge={() => setMergeOpen(true)} onSplit={() => setSplitOpen(true)} />
+      <ReplacementModeSelect
+        groupId={group.id}
+        currentMode={group.replacementMode}
+        customValue={group.replacementValueUserSet}
+      />
+      <GroupContextMenu
+        onMerge={() => setMergeOpen(true)}
+        onSplit={() => setSplitOpen(true)}
+        {...(group.replacementMode === ReplacementMode.Redact
+          ? {}
+          : { onEditReplacement: () => setEditReplacementOpen(true) })}
+        // ADR-084 §2: escribir la consulta es TODO lo que hace falta — el
+        // `DocumentSearchBox` reacciona por el camino que ya tiene (busca,
+        // cuenta, y deja anterior/siguiente listos para recorrer el
+        // documento). No se construye una segunda UI de navegación.
+        onViewOccurrences={() => {
+          // `getState()` y NO un selector: un selector que construye su valor
+          // devuelve una referencia nueva por llamada, y zustand compara el
+          // snapshot con `Object.is` -> `useSyncExternalStore` ve un cambio en
+          // cada render -> loop infinito -> UI en blanco. Mismo idioma que
+          // `ZoomControls`/`PdfViewer`/`DocumentSearchBox`.
+          useViewerStore.getState().setSearchQuery(group.canonicalValue);
+        }}
+        onChangeType={() => setChangeTypeOpen(true)}
+        {...(group.replacementValueUserSet
+          ? {
+              // ADR-078 §3: "restaurar" no necesita API nueva — re-aplicar el
+              // MISMO `replacementMode` recalcula el valor y apaga el flag
+              // (rama de modo de `applyGroupUpdate`, ADR-076 §4 fila 4). El
+              // flag es de solo lectura: no entra en `GroupUpdatePatch`.
+              onRestoreComputedValue: () => {
+                actions.updateGroup(group.id, { replacementMode: group.replacementMode });
+              },
+            }
+          : {})}
+      />
       <MergeDialog sourceGroupId={group.id} open={mergeOpen} onClose={() => setMergeOpen(false)} />
       <SplitDialog groupId={group.id} open={splitOpen} onClose={() => setSplitOpen(false)} />
+      <EditReplacementDialog
+        group={group}
+        open={editReplacementOpen}
+        onClose={() => setEditReplacementOpen(false)}
+      />
+      <ChangeTypeDialog
+        groupId={group.id}
+        currentType={group.type}
+        canonicalValue={group.canonicalValue}
+        open={changeTypeOpen}
+        onClose={() => setChangeTypeOpen(false)}
+      />
     </div>
   );
 }

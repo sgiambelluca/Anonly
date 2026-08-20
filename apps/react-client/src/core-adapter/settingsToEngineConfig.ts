@@ -60,10 +60,17 @@ const HIGH_POOL_SIZES: WorkerPoolSizes = {
 type WorkerPoolOverride = { readonly workerPool: WorkerPoolSizes } | Record<string, never>;
 
 /**
- * `auto` devuelve `{}` (sin la clave `workerPool`) a propósito: distinto de
- * `{ workerPool: undefined }`, que sí pisaría los defaults en el merge de
- * `buildDefaultEngineConfig`. El `switch` sin `default` sobre un union de 3
- * valores hace que `noImplicitReturns` (tsconfig.base.json) marque error si
+ * `auto` devuelve `{}` (sin la clave `workerPool`) a propósito: el override
+ * tiene que **no existir**, no existir con valor `undefined`. Al nivel del
+ * runtime las dos formas son equivalentes —`mergeEngineConfig` hace spread
+ * (`{ ...base.workerPool, ...overrides.workerPool }`) y difundir `undefined`
+ * es un no-op—, así que la razón no es evitar que se pisen los defaults: es
+ * que el tipo diga la verdad. Bajo `exactOptionalPropertyTypes`, declarar
+ * `workerPool: undefined` afirma un override que no existe, y obliga a todo
+ * consumidor del tipo a contemplar un caso que nunca se produce.
+ *
+ * El `switch` sin `default` sobre un union de 3 valores hace que
+ * `noImplicitReturns` (tsconfig.base.json) marque error si
  * `PerformancePreset` gana un cuarto valor sin actualizar acá.
  */
 function workerPoolOverride(preset: SettingsSlice["performancePreset"]): WorkerPoolOverride {

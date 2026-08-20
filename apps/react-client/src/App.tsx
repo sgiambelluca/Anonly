@@ -6,11 +6,11 @@
  *
  * Este PR (Hito 10, PR8 "Panel de Entidades") reemplaza el placeholder de
  * estado vacío de la sección "Entidades" por `EntitiesPanel` cuando
- * `entities.store.groupsByType` tiene contenido (`hasAnyGroup`); si no hay
- * grupos (sin documento, o documento sin entidades detectadas todavía), se
- * conserva el placeholder de estado vacío existente (alcance de este PR: solo
- * ese toggle binario, sin distinguir "sin documento" de "documento sin
- * entidades" — ver reporte del PR).
+ * `entities.store.groupsByType` tiene contenido (`hasAnyGroup`). Si no hay
+ * grupos, el estado vacío distingue los dos casos que `UX_Guidelines.md` §11
+ * separa en filas distintas: "sin documento" (fila 1) y "documento cargado,
+ * sin entidades" (fila 2), con `document.store.id` como criterio — el mismo
+ * que usa `RightPanel` para elegir entre Hero y visores.
  *
  * El panel de Reglas (Hito 10 PR9) monta `RulesPanel` sin condicional (a
  * diferencia de `EntitiesPanel`): `RulesPanel` maneja su propio estado vacío
@@ -74,6 +74,16 @@ export function App() {
 
 function LeftPanel() {
   const hasGroups = useEntitiesStore((state) => hasAnyGroup(state.groupsByType));
+  // `UX_Guidelines.md` §11 tiene DOS filas distintas para "no hay grupos":
+  // "app recién abierta, sin documento" y "documento cargado, sin entidades".
+  // Hasta acá el panel usaba un único estado vacío para las dos, así que un
+  // documento sin entidades detectadas decía "Sin documento" — falso, y deja
+  // al usuario sin la pista que la fila 2 le da (revisar los patrones).
+  // El criterio es `document.store.id`, el mismo que `RightPanel` ya usa para
+  // elegir entre Hero y visores: dos paneles, una sola definición de
+  // "documento cargado". `pipeline.store.stage` distinguiría además
+  // "cargando", pero ningún spec define un tercer texto para eso.
+  const hasDocument = useDocumentStore((state) => state.id !== null);
 
   return (
     <aside className="flex w-1/3 min-w-[280px] max-w-[480px] flex-col border-r border-border bg-bg-primary">
@@ -83,11 +93,19 @@ function LeftPanel() {
         ) : (
           <>
             <PanelHeader title="Entidades" />
-            <EmptyState
-              icon={<FileTextIcon className="h-8 w-8" aria-hidden />}
-              title="Sin documento"
-              description="Cargá un PDF para empezar a detectar entidades."
-            />
+            {hasDocument ? (
+              <EmptyState
+                icon={<FileTextIcon className="h-8 w-8" aria-hidden />}
+                title="No se detectaron entidades"
+                description="Revisá los patrones en Configuración."
+              />
+            ) : (
+              <EmptyState
+                icon={<FileTextIcon className="h-8 w-8" aria-hidden />}
+                title="Sin documento"
+                description="Cargá un PDF para empezar a detectar entidades."
+              />
+            )}
           </>
         )}
       </section>
