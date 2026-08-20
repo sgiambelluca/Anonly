@@ -103,8 +103,33 @@ function applyConfig(config: unknown): void {
   }
 }
 
-function post(message: WorkerOutbound): void {
-  self.postMessage(message);
+function post(message: WorkerOutbound, transfer?: ReadonlyArray<Transferable>): void {
+  // Forma `StructuredSerializeOptions` y no la posicional `(message, [])`:
+  // con `lib: ["DOM", "WebWorker"]` (tsconfig.base) el overload posicional de
+  // `Window` gana y no acepta una transfer list. La copia mutable es porque
+  // `StructuredSerializeOptions.transfer` es `Transferable[]`, no readonly.
+  if (transfer !== undefined && transfer.length > 0) {
+    self.postMessage(message, { transfer: [...transfer] });
+  } else {
+    self.postMessage(message);
+  }
+}
+
+/**
+ * ADR-079 §1, dirección worker → host: el kernel produce el bitmap y lo
+ * postea sin guardar referencia, así que transferirlo es seguro por
+ * construcción — y es el caso más frecuente de la app (uno por página por
+ * render, o sea también en cada scroll y cada cambio de zoom). Sin transfer
+ * list, `postMessage` clona: un memcpy completo de 100 KB a 2 MB cada vez.
+ *
+ * Devuelve `[]` si el resultado no es un `EncodedPageImage` (p. ej. el
+ * `load-document`/`unload-document`, que resuelven `undefined`): transferir
+ * de más lanzaría, así que se mira la forma, no el tipo declarado.
+ */
+function transferablesOf(result: unknown): ReadonlyArray<Transferable> {
+  if (typeof result !== "object" || result === null) return [];
+  const bytes = (result as { readonly bytes?: unknown }).bytes;
+  return bytes instanceof ArrayBuffer ? [bytes] : [];
 }
 
 /** Un `AbortController` por job en curso, indexado por `signalId` (`=== jobId`, ver `worker-pool.ts#dispatchRemote`). */
@@ -180,7 +205,7 @@ async function handleRun(message: Extract<WorkerInbound, { type: "RUN" }>): Prom
     // ADR-042: COMPLETED.result es unknown a nivel de transporte — compila
     // directo, sin cast (el host-bridge consumidor, acá `render.engine.ts`,
     // afina el tipo concreto según la operación que despachó).
-    post({ type: "COMPLETED", jobId, result });
+    post({ type: "COMPLETED", jobId, result }, transferablesOf(result));
   } catch (err: unknown) {
     if (err instanceof CancelledError) {
       post({ type: "CANCELLED", jobId, signalId });

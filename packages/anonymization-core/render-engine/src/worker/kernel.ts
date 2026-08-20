@@ -1400,25 +1400,84 @@ const LEGEND_PAGE_LABEL = -1;
 
 // Layout (ADR-059 §5, Render_Engine.md §6/§13 caso 29): tabla de hasta 13
 // filas (cota de `EntityType`, ADR-059 §2) a `y` incremental con columnas a
-// `x` fijas — sin salto de línea, sin paginación. El espaciado/tipografía
-// exactos no están en el spec ("decisión de estilo visual, sin spec
-// pixel-perfect"): título en negrita, tres columnas fijas en el mismo orden
-// que el ejemplo de ADR-059 §2 (prefixes, tipo, conteo), fuente sans-serif
-// genérica — igual criterio que `replacementFontFamily` (el kernel corre con
-// `disableFontFace: true`, ADR-053: solo hay familias genéricas disponibles).
+// `x` fijas, **con salto de línea dentro de cada celda** y sin paginación. El
+// espaciado/tipografía exactos no están en el spec ("decisión de estilo
+// visual, sin spec pixel-perfect"): título en negrita, tres columnas fijas en
+// el mismo orden que el ejemplo de ADR-059 §2 (prefixes, tipo, conteo),
+// fuente sans-serif genérica — igual criterio que `replacementFontFamily` (el
+// kernel corre con `disableFontFace: true`, ADR-053: solo hay familias
+// genéricas disponibles).
+//
+// El salto de línea NO es cosmético (corregido 2026-08-19): la celda de
+// prefijos crece con la escalera de abreviaturas (ADR-057, 3 niveles) por las
+// variantes de género (ADR-060), así que un tipo `Person` puede acumular hasta
+// 9 prefijos distintos — `"HOMB, PRS, MUJ, HOMBRE, HOM, MUJER"` medido en un
+// export real. Escrito en una sola línea, ese texto **se superpone con la
+// columna del nombre del tipo** y la referencia queda ilegible justo donde
+// tiene que explicar qué significa cada marcador.
 const LEGEND_MARGIN_PT = 40;
 const LEGEND_TITLE_FONT = "bold 16px sans-serif";
 const LEGEND_ROW_FONT = "12px sans-serif";
 const LEGEND_TITLE_TO_TABLE_GAP_PT = 30;
+/** Alto de línea del título, si se envuelve en una página angosta. */
+const LEGEND_TITLE_LINE_HEIGHT_PT = 20;
 const LEGEND_ROW_HEIGHT_PT = 20;
 const LEGEND_TEXT_COLOR = "#000000";
 const LEGEND_BACKGROUND_COLOR = "#ffffff";
 const LEGEND_TITLE_TEXT = "Anonimizado con Anonly — Referencia de marcadores";
-const LEGEND_COLUMN_OFFSETS_PT: Readonly<{
+/**
+ * Offsets de columna como **fracción del ancho útil**, no en puntos
+ * absolutos. La leyenda se dibuja sobre una página del tamaño del documento
+ * (`legendPageWidthPt` = ancho de la primera página), así que constantes
+ * absolutas tuneadas para A4 (0/220/420 pt) ponían la tercera columna
+ * **fuera de la página** en cualquier documento más angosto que ~520 pt.
+ *
+ * Los valores conservan el layout de A4: con 595 pt de ancho (útil 515) dan
+ * 0 / 221 / 417 pt, a un punto de los offsets absolutos anteriores.
+ */
+const LEGEND_COLUMN_FRACTIONS: Readonly<{
   readonly prefixes: number;
   readonly typeName: number;
   readonly countLabel: number;
-}> = { prefixes: 0, typeName: 220, countLabel: 420 };
+}> = { prefixes: 0, typeName: 0.43, countLabel: 0.81 };
+/** Aire entre el final de una celda y el principio de la siguiente columna. */
+const LEGEND_COLUMN_GUTTER_PT = 12;
+/** Alto de cada línea DENTRO de una celda con varias líneas. */
+const LEGEND_LINE_HEIGHT_PT = 15;
+
+/**
+ * Corte greedy por palabras contra el ancho disponible de la celda, midiendo
+ * con `measureText` (el mismo mecanismo con el que `paintReplacements` decide
+ * si un token entra en su línea, ADR-058 §1).
+ *
+ * Una palabra más ancha que la celda entera se deja sola en su línea y se
+ * desborda: partirla por caracteres haría ilegible un prefijo, que es
+ * justamente lo que la leyenda tiene que poder leerse. No ocurre con los
+ * datos reales — el prefijo más largo es `"ORGANIZACION,"`, muy por debajo de
+ * los 208 pt de la primera columna.
+ */
+function wrapCellText(
+  context: OffscreenCanvasRenderingContext2D,
+  text: string,
+  maxWidthPt: number,
+): ReadonlyArray<string> {
+  const words = text.split(" ").filter((word) => word.length > 0);
+  if (words.length === 0) return [""];
+
+  const lines: string[] = [];
+  let current = "";
+  for (const word of words) {
+    const candidate = current.length === 0 ? word : `${current} ${word}`;
+    if (current.length > 0 && context.measureText(candidate).width > maxWidthPt) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current.length > 0) lines.push(current);
+  return lines;
+}
 
 function paintLegendTable(
   context: OffscreenCanvasRenderingContext2D,
@@ -1433,16 +1492,75 @@ function paintLegendTable(
   context.textBaseline = "top";
   context.fillStyle = LEGEND_TEXT_COLOR;
 
+  const usableWidthPt = Math.max(0, pageWidthPt - LEGEND_MARGIN_PT * 2);
+
+  // El título también se envuelve: son 48 caracteres a 16 px, así que en un
+  // documento más angosto que ~520 pt se salía de la página por la derecha.
   context.font = LEGEND_TITLE_FONT;
-  context.fillText(LEGEND_TITLE_TEXT, LEGEND_MARGIN_PT, LEGEND_MARGIN_PT);
+  const titleLines = wrapCellText(context, LEGEND_TITLE_TEXT, usableWidthPt);
+  let titleY = LEGEND_MARGIN_PT;
+  for (const line of titleLines) {
+    context.fillText(line, LEGEND_MARGIN_PT, titleY);
+    titleY += LEGEND_TITLE_LINE_HEIGHT_PT;
+  }
 
   context.font = LEGEND_ROW_FONT;
-  let y = LEGEND_MARGIN_PT + LEGEND_TITLE_TO_TABLE_GAP_PT;
+
+  // Ancho de cada celda: hasta donde empieza la columna siguiente, menos el
+  // gutter. La última llega hasta el margen derecho de la página.
+  const offsets = {
+    prefixes: usableWidthPt * LEGEND_COLUMN_FRACTIONS.prefixes,
+    typeName: usableWidthPt * LEGEND_COLUMN_FRACTIONS.typeName,
+    countLabel: usableWidthPt * LEGEND_COLUMN_FRACTIONS.countLabel,
+  };
+  const columnWidths = {
+    prefixes: offsets.typeName - offsets.prefixes,
+    typeName: offsets.countLabel - offsets.typeName,
+    countLabel: usableWidthPt - offsets.countLabel,
+  };
+
+  const bottomLimitPt = pageHeightPt - LEGEND_MARGIN_PT;
+  // La tabla arranca bajo la ÚLTIMA línea del título, no bajo la primera.
+  let y = titleY - LEGEND_TITLE_LINE_HEIGHT_PT + LEGEND_TITLE_TO_TABLE_GAP_PT;
+
   for (const row of rows) {
-    context.fillText(row.prefixes, LEGEND_MARGIN_PT + LEGEND_COLUMN_OFFSETS_PT.prefixes, y);
-    context.fillText(row.typeName, LEGEND_MARGIN_PT + LEGEND_COLUMN_OFFSETS_PT.typeName, y);
-    context.fillText(row.countLabel, LEGEND_MARGIN_PT + LEGEND_COLUMN_OFFSETS_PT.countLabel, y);
-    y += LEGEND_ROW_HEIGHT_PT;
+    const cells = [
+      { text: row.prefixes, offset: offsets.prefixes, width: columnWidths.prefixes },
+      { text: row.typeName, offset: offsets.typeName, width: columnWidths.typeName },
+      {
+        text: row.countLabel,
+        offset: offsets.countLabel,
+        width: columnWidths.countLabel,
+        // Última columna: no se le descuenta gutter — no hay columna
+        // siguiente con la que chocar, el margen derecho ya es el aire.
+        isLast: true,
+      },
+    ].map((cell) => ({
+      ...cell,
+      lines: wrapCellText(
+        context,
+        cell.text,
+        Math.max(0, cell.width - ("isLast" in cell ? 0 : LEGEND_COLUMN_GUTTER_PT)),
+      ),
+    }));
+
+    const rowLines = Math.max(...cells.map((cell) => cell.lines.length));
+    const rowHeightPt = Math.max(LEGEND_ROW_HEIGHT_PT, rowLines * LEGEND_LINE_HEIGHT_PT);
+
+    // Sin paginación (ADR-059 §5): si la tabla no entra, se corta acá en vez
+    // de dibujar fuera de la página. Con 13 tipos (cota de ADR-059 §2) y los
+    // prefijos reales no se alcanza; queda como guarda, no como camino
+    // esperado.
+    if (y + rowHeightPt > bottomLimitPt) break;
+
+    for (const cell of cells) {
+      let lineY = y;
+      for (const line of cell.lines) {
+        context.fillText(line, LEGEND_MARGIN_PT + cell.offset, lineY);
+        lineY += LEGEND_LINE_HEIGHT_PT;
+      }
+    }
+    y += rowHeightPt;
   }
 }
 
