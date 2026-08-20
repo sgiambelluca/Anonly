@@ -17,9 +17,15 @@
 /** "la página 3" / "las páginas 3 y 7" / "las páginas 3, 7 y 12". 1-based. */
 export function describePages(pageIndices: ReadonlyArray<number>): string {
   const numbers = pageIndices.map((index) => index + 1);
-  if (numbers.length === 0) return "";
-  if (numbers.length === 1) return `la página ${String(numbers[0])}`;
-  const last = numbers[numbers.length - 1];
+  const [first] = numbers;
+  if (first === undefined) return "";
+  // Desestructurar y comparar contra `undefined` en vez de indexar: con
+  // `noUncheckedIndexedAccess`, `numbers[0]` es `number | undefined` y
+  // `String()` se lo traga sin chistar — imprimiría "la página undefined".
+  // Las guardas de longitud lo hacían inalcanzable, pero los tipos no lo
+  // decían, y este texto lo lee un usuario.
+  if (numbers.length === 1) return `la página ${String(first)}`;
+  const last = numbers[numbers.length - 1] ?? first;
   const rest = numbers.slice(0, -1).map(String).join(", ");
   return `las páginas ${rest} y ${String(last)}`;
 }

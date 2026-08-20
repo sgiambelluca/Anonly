@@ -28,6 +28,14 @@
  * un grupo etiquetado, y se comportan exactamente como el lector espera. Si
  * algún día entra `@radix-ui/react-dropdown-menu` (requiere ADR, P-9), trae el
  * rol y el manejo de foco juntos, que es la única forma correcta de tenerlos.
+ *
+ * Tampoco lleva `aria-haspopup`. En WAI-ARIA 1.1+ el valor `true` está
+ * definido como sinónimo de `menu`, así que dejarlo puesto anunciaba
+ * exactamente el menú que se acaba de retirar — el lector de pantalla seguía
+ * diciendo "botón, menú emergente" y el usuario de teclado seguía apretando
+ * flechas. Encima el popup es `role="group"`, que no es ninguno de los
+ * valores válidos de `aria-haspopup`. Un disclosure se anuncia con
+ * `aria-expanded` y nada más.
  */
 
 import { MoreHorizontalIcon } from "lucide-react";
@@ -94,7 +102,6 @@ export function GroupContextMenu({
       <button
         type="button"
         aria-label="Más acciones"
-        aria-haspopup="true"
         aria-expanded={open}
         onClick={() => setOpen((prev) => !prev)}
         className="rounded-md p-1 text-text-secondary hover:bg-bg-tertiary"
