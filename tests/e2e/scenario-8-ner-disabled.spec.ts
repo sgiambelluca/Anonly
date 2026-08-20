@@ -17,7 +17,7 @@
  * `page.goto`, para que el bootstrap lo lea en su primer `initCore()`.
  *
  * `text-10p.pdf` (`tests/fixtures/README.md`) trae entidades de ambos
- * detectores: DNI/teléfono/email (Regex, páginas 0-2) y Personas/Organización
+ * detectores: DNI y email (Regex, páginas 0-2) y Personas/Organización
  * (NER, páginas 0-1). Con NER desactivado, solo las primeras deben aparecer.
  *
  * No se usa el CUIT del fixture ("20-12345678-9") como entidad Regex de
@@ -31,17 +31,23 @@
  * a este PR — no se toca `generate.ts` ni `regex-engine` (fuera de alcance,
  * motor cerrado del Hito 4).
  *
- * Tampoco se usa el teléfono real de la página 0 ("+54 11 1234-5678") como
- * entidad de control: confirmado empíricamente (`getByRole` no lo encuentra,
- * dos corridas) que en este fixture el único `Teléfono` que sobrevive es
- * "20-12345678" — un match de `phone-mobile-ar` (`\d{2}[\s-]?\d{4}[\s-]?\d{4}`,
- * sin checksum) sobre los primeros 10 dígitos del CUIT rechazado ("20-12345678-9"
- * menos el dígito verificador final). No se investigó más a fondo el porqué
- * exacto de que el teléfono real no sobreviva junto a este (posible
- * interacción de `regex.engine.ts` entre patrones sobre spans cercanos,
- * motor cerrado del Hito 4, fuera de alcance) — se usa acá el valor
- * confirmado por observación directa, no el que la lectura ingenua del texto
- * sugeriría.
+ * **No se afirma ningún teléfono.** Este test afirmaba "20-12345678" como
+ * entidad `Teléfono` de control, y eso fijaba un falso positivo como
+ * comportamiento esperado: ese valor son los diez primeros dígitos del CUIT
+ * rechazado del párrafo anterior, capturados por `phone-mobile-ar`
+ * (`\d{2}[\s-]?\d{4}[\s-]?\d{4}`, sin checksum). El teléfono real de la
+ * página 0 ("+54 11 1234-5678") no aparecía, y el comentario que lo
+ * justificaba especulaba con una interacción entre patrones cercanos en
+ * `resolveOverlaps`. La causa es otra y está más arriba: **el wrap a 95
+ * caracteres de `tests/fixtures/generate.ts` corta la página 0 justo adentro
+ * del teléfono** — la línea 1 termina en "+54 11" y la línea 2 empieza en
+ * "1234-5678,". Es un caso de entidad partida en varias líneas, o sea el
+ * territorio de ADR-074 (Hito 10.9), no de `regex.engine.ts`.
+ *
+ * Si una corrida contra el árbol posterior a ADR-074 confirma que el
+ * teléfono real ya se detecta, la aserción vuelve **apuntando a él**, que es
+ * la que este test siempre quiso tener. Mientras tanto, DNI + Email cubren
+ * el punto del escenario sin pinear un defecto.
  */
 
 import { expect, test } from "@playwright/test";
@@ -70,8 +76,9 @@ test("Escenario 8: cargar PDF sin NER activado → solo Regex detecta", async ({
 
   // Entidades de Regex: presentes.
   await expect(page.getByRole("treeitem", { name: "34.567.891" })).toBeVisible(); // DNI
-  await expect(page.getByRole("treeitem", { name: "20-12345678" })).toBeVisible(); // Teléfono
   await expect(page.getByRole("treeitem", { name: "juan.perez@example.com" })).toBeVisible(); // Email
+  // Ningún teléfono se afirma acá — ver el docblock. DNI + Email ya prueban
+  // lo que el escenario pide: con NER off, Regex sigue detectando.
 
   // Entidades exclusivas de NER (Personas/Organización, `tests/fixtures/README.md`): ausentes.
   await expect(page.getByRole("treeitem", { name: "Juan Pérez" })).toHaveCount(0);

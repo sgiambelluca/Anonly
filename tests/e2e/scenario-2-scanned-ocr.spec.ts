@@ -28,7 +28,9 @@
  *    (confirmado en browser real: `new URL("/wasm/…", "blob:http://origen/uuid")`
  *    lanza `Invalid URL`, archivo o directorio da igual). El kernel ahora
  *    absolutiza las tres rutas contra `self.location.origin` antes de
- *    `createWorker` (no-op fuera de un Worker: fallback in-process/tests).
+ *    `createWorker` (no-op solo en el entorno Node de los tests, que no
+ *    tiene `self`; en el browser absolutiza siempre, también en el fallback
+ *    in-process, donde `self === window`).
  *
  * Las dos partes tienen su regresión unitaria en
  * `ocr-engine/src/__tests__/worker-entry.test.ts` (mocks de `tesseract.js`) —

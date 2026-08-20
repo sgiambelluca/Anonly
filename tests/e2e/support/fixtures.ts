@@ -16,7 +16,19 @@ import { fileURLToPath } from "node:url";
 
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 
-import { generateCorrupt, generateText10p, TEXT_10P_PAGES } from "../../fixtures/generate.js";
+import {
+  FONT_SIZE,
+  generateCorrupt,
+  generateText10p,
+  LINE_HEIGHT,
+  MARGIN_X,
+  MARGIN_Y,
+  PAGE_HEIGHT,
+  PAGE_WIDTH,
+  TEXT_10P_PAGES,
+  wrapText,
+  WRAP_CHARS,
+} from "../../fixtures/generate.js";
 
 export interface E2eFilePayload {
   readonly name: string;
@@ -78,43 +90,6 @@ export async function manyNeutralPagesFile(pageCount: number): Promise<E2eFilePa
   };
 }
 
-// Constantes de layout replicadas de `tests/fixtures/generate.ts` (no
-// exportadas desde ahí) para que las páginas sin tocar de
-// `textTenPagesWithPersonFile` se rendericen idénticas a `generateText10p()`.
-const TEXT10P_PAGE_WIDTH = 595;
-const TEXT10P_PAGE_HEIGHT = 842;
-const TEXT10P_MARGIN_X = 50;
-const TEXT10P_MARGIN_Y = 750;
-const TEXT10P_FONT_SIZE = 12;
-const TEXT10P_LINE_HEIGHT = 18;
-
-/**
- * Wrap manual copiado de `tests/fixtures/generate.ts#wrapText` — no está
- * exportada desde ahí (detalle interno del generador commiteado) y este
- * archivo no toca `tests/fixtures/` (alcance de ADR-055 §6: solo
- * `tests/e2e/`). Mismo comportamiento: corta en líneas de ~95 chars
- * respetando espacios.
- */
-function wrapText(text: string, maxCharsPerLine: number): ReadonlyArray<string> {
-  const words = text.split(" ");
-  const lines: string[] = [];
-  let current = "";
-  for (const word of words) {
-    if (current.length === 0) {
-      current = word;
-    } else if (current.length + 1 + word.length <= maxCharsPerLine) {
-      current += " " + word;
-    } else {
-      lines.push(current);
-      current = word;
-    }
-  }
-  if (current.length > 0) {
-    lines.push(current);
-  }
-  return lines;
-}
-
 // Dos páginas neutras de `TEXT_10P_PAGES` (índices 3 y 4 — "Página 4"/"Página
 // 5 sin datos sensibles…") se reemplazan por una oración limpia con un
 // nombre de persona inequívoco cada una. Dos candidatos, no uno, para no
@@ -154,18 +129,18 @@ export async function textTenPagesWithPersonFile(): Promise<E2eFilePayload> {
   });
 
   for (const text of pages) {
-    const page = doc.addPage([TEXT10P_PAGE_WIDTH, TEXT10P_PAGE_HEIGHT]);
-    const lines = wrapText(text, 95);
-    let y = TEXT10P_MARGIN_Y;
+    const page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+    const lines = wrapText(text, WRAP_CHARS);
+    let y = MARGIN_Y;
     for (const line of lines) {
       page.drawText(line, {
-        x: TEXT10P_MARGIN_X,
+        x: MARGIN_X,
         y,
-        size: TEXT10P_FONT_SIZE,
+        size: FONT_SIZE,
         font,
         color: rgb(0, 0, 0),
       });
-      y -= TEXT10P_LINE_HEIGHT;
+      y -= LINE_HEIGHT;
     }
   }
 
