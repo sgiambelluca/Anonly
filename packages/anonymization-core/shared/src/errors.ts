@@ -52,7 +52,17 @@ export abstract class EngineError extends Error {
 
   static deserialize(serialized: SerializedEngineError): EngineError {
     // Reconstruye un error genérico tipado a partir de su forma serializada.
-    // Los motores específicos pueden override para devolver su subclase concreta.
+    // Devuelve SIEMPRE un `DeserializedEngineError`: la subclase concreta no
+    // sobrevive al `postMessage`, y ADR-049 decidió que así se queda. Un
+    // registry `code -> constructor` invertiría capas (`shared` no puede
+    // conocer las clases de los motores, P-1/P-2) y además sería lossy: los
+    // constructores toman argumentos de dominio, así que reconstruir
+    // descartaría el `message`/`details` que de verdad viajaron.
+    // Corolario, normativo en `Code_Standards.md` §7: quien recibe un error
+    // que cruzó un Worker discrimina por `err.code`, NUNCA por
+    // `instanceof <SubclaseConcreta>` — ese `instanceof` da `false` en
+    // producción y `true` en los tests que no serializan, que es exactamente
+    // cómo el bug de ADR-049 pasó todos los gates.
     return new DeserializedEngineError(serialized);
   }
 }
@@ -98,6 +108,28 @@ export class InvalidInputError extends EngineError {
 
   constructor(message: string, details?: Record<string, unknown>) {
     super(message, false, details);
+  }
+}
+
+/**
+ * Crash de transporte de un Worker (ADR-077). Lo construye `WorkerPool` en
+ * host —nunca cruza un `postMessage`—, así que no tiene el problema de
+ * identidad de clase de ADR-049.
+ *
+ * `retryable: true` es su única razón de ser: el worker que murió se
+ * reemplaza por uno limpio (y el `RenderPool` lo re-primea antes del primer
+ * job, ADR-043 §5), así que reintentar el mismo payload es exactamente el
+ * caso de uso del backoff del pool. Hasta ADR-077 este rechazo era un
+ * `InvalidInputError` no-retryable, y el job en vuelo se perdía en silencio:
+ * páginas en blanco en el visor, o páginas sin entidades NER indistinguibles
+ * de "no había nada que detectar" (el `warn` va al logger nulo, P-4).
+ */
+export class WorkerCrashedError extends EngineError {
+  readonly code = EngineErrorCode.WORKER_CRASHED;
+  readonly engineId = "core" as const;
+
+  constructor(message: string, details?: Record<string, unknown>) {
+    super(message, true, details);
   }
 }
 
