@@ -594,7 +594,7 @@ describe("Orchestrator — edge cases", () => {
     expect(buffer.byteLength).toBeGreaterThan(0);
   });
 
-  it("loadDocument failure during export emits PIPELINE_FAILED, no hang (caso 24)", async () => {
+  it("export preparation failure emits PIPELINE_FAILED, no hang (caso 24)", async () => {
     const { bus, engines, orchestrator } = makeOrchestrator();
     await orchestrator.importDocument(createImportInput());
 
@@ -1228,6 +1228,45 @@ describe("Orchestrator — edge cases", () => {
       await vi.waitFor(() =>
         expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Failed),
       );
+    });
+
+    it("reanalyze with both ner and ocr in one patch is rejected without side effects", async () => {
+      const { bus, engines, orchestrator } = makeOrchestrator();
+      await orchestrator.importDocument(createImportInput());
+      await vi.waitFor(() =>
+        expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready),
+      );
+
+      const emitSpy = vi.fn();
+      bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_PROGRESS, emitSpy);
+      bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_FAILED, emitSpy);
+      const reopenSpy = engines.grouping.reopenSession as ReturnType<typeof vi.fn>;
+      reopenSpy.mockClear();
+
+      // ADR-081: la regla 4 de ADR-038 §5 prometía "la unión de las reglas
+      // anteriores" y nunca se implementó — con ambos campos se entraba solo
+      // por `runReanalyzeOcrFlow`, que toca únicamente las páginas re-OCR.
+      // Apagar NER dejaba sus ocurrencias vivas en el resto del documento;
+      // encenderlo solo lo corría sobre las páginas escaneadas. Los dos
+      // fallaban en silencio, con el pipeline llegando a `Ready`.
+      await expect(
+        orchestrator.reanalyze("doc-1", {
+          ner: { enabled: false },
+          ocr: { languages: ["eng"] },
+        }),
+      ).rejects.toThrow(InvalidInputError);
+
+      // El rechazo es previo a cualquier efecto: sin evento, sin cambio de
+      // stage, y sin reabrir la sesión de Grouping.
+      expect(emitSpy).not.toHaveBeenCalled();
+      expect(reopenSpy).not.toHaveBeenCalled();
+      expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+
+      // Y cada campo por separado sigue funcionando: lo que se rechaza es la
+      // combinación, no los flujos.
+      await expect(
+        orchestrator.reanalyze("doc-1", { ner: { enabled: false } }),
+      ).resolves.toBeUndefined();
     });
 
     // ─── Caso 22: cancelación durante un reanalyze ───
