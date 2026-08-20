@@ -264,11 +264,13 @@ Convención decimal, sin renumerar Hardening ni Release — la misma que el repo
 
 **La marca de degradación en el árbol sale del hito (ADR-062).** El veredicto que necesita ya se calcula, con el `groupId` puesto, y se descarta dentro del kernel: ni `KernelRenderResult` ni `RenderPageOutput` lo llevan. Es un problema de transporte, y resolverlo cruza `Contracts.md` → ADR primero (R-2/R-19). Se descartó explícitamente estimarlo en el cliente con `estimateTokenWidth`: sería una tercera fuente de verdad, junto al preview y al export, capaz de discrepar de los dos —justo lo que el umbral por razón de ADR-058 §7 existe para evitar— y sus falsos positivos mandan al usuario a arreglar grupos que se renderizan bien. Mientras tanto la señal no desaparece: el PR 6 ya pinta el recuadro `Degraded` sobre el canvas del preview; lo que falta es la afordancia accionable del árbol.
 
-| # | PR (posterior al hito, ADR-062 §7) | Módulo | Depende de |
-|---|---|---|---|
-| A | `PreviewUpdated.degraded?` (ADR-062 §1-§2) | `shared` | — |
-| B | `KernelRenderResult.degraded`, `InternalCacheEntry.degraded`, emisión desde `emitPreviewUpdated` **también en cache hit** (ADR-062 §4) | `render-engine` | A |
-| C | Mapa por página con reemplazo (no acumulación), filtro por `kind`, agregación por grupo y marca en el árbol con sus tres salidas (ADR-062 §3, §5) | `apps/react-client` | B |
+| # | PR (posterior al hito, ADR-062 §7) | Módulo | Depende de | Estado |
+|---|---|---|---|---|
+| A | `PreviewUpdated.degraded?` (ADR-062 §1-§2) | `shared` | — | **hecho** (2026-08-20, Hito 10.10 PR 17) |
+| B | `KernelRenderResult.degraded`, `InternalCacheEntry.degraded`, emisión desde `emitPreviewUpdated` **también en cache hit** (ADR-062 §4) | `render-engine` | A | **hecho** |
+| C | Mapa por página con reemplazo (no acumulación), filtro por `kind`, agregación por grupo y marca en el árbol con sus tres salidas (ADR-062 §3, §5) | `apps/react-client` | B | **hecho** |
+
+> **Al verificar la marca en el browser se encontró que la señal que consume casi nunca se enciende**: el criterio de degradación de ADR-058 §7 es ciego en cajas de cuerpo de texto (los dos términos del cociente chocan contra el piso de 8px, ratio 1.00 por construcción) y no observa el squeeze horizontal de `fillText(..., maxWidth)`, que es el que arruina la legibilidad. La invariancia de escala de ADR-062 §6 resulta falsa cerca de ese piso. Medición, tablas y opciones en `roadmap/Post_Hito10.8_Pendientes.md` §16 — **necesita ADR**, es cambio de `Contracts.md` §6.
 
 El campo va **opcional a propósito** (ADR-062 §2) para que esas tres caigan en commits de un módulo cada una con los gates verdes — la misma trampa de ordenamiento que produjo `RenderPageInput.lineWords` en este hito.
 
@@ -508,22 +510,27 @@ De las ~70: **~30 ya estaban cerradas** por hitos posteriores (ADR-053/054/056, 
 | 14 | ADR-085: `absorbedTypes` + `typeCorrections` | `grouping-engine` | 11 | **hecho** |
 | 15 | ADR-082/083/084/078: `ChangeTypeDialog`, `ConflictDialog` reescrito, "Ver ocurrencias", punto azul, "Restaurar valor calculado", `EditReplacementDialog` | `apps/react-client` | 11, 13, 14 | **hecho** |
 | 16 | Leyenda del export: wrap por celda, columnas como fracción del ancho, título envuelto (sin ADR — ADR-059 §5 deja el estilo visual fuera de spec) | `render-engine` | — | **hecho** |
+| 17 | ADR-062 A/B/C: la marca de reemplazo ilegible, de punta a punta — `PreviewUpdated.degraded`, el veredicto guardado en la entrada de cache, `degraded.store`, `DegradedBadge` | `shared` + `render-engine` + `apps/react-client` (tres commits, uno por módulo) | 15 | **hecho** |
+| 18 | `role="menu"` retirado de `GroupContextMenu` (prometía navegación por flechas que no existe) y `viewer.store.sideBySide` eliminado del store y del spec | `apps/react-client` | — | **hecho** |
 
 **Los nueve ADRs**: `ADR-077` (código de error para crash de worker), `ADR-078` (la edición manual visible en la UI), `ADR-079` (transferencia real por dirección y payload), `ADR-080` (idle-dispose en el pool, no en el manager), `ADR-081` (el patch combinado se rechaza), `ADR-082` (el usuario corrige el tipo de entidad), `ADR-083` (el panel de conflicto elige tipo, no modo), `ADR-084` ("Ver ocurrencias" empuja el valor al buscador), `ADR-085` (memoria de reclasificación por documento). Más la **enmienda §11 de ADR-055** (sanciona el patrón `NerDispatchDecodeFailure` antes de que los otros cuatro motores lo copien).
 
-**Cuatro defectos que ningún gate detectó**, y que valen como registro de dónde este repo tiene ceguera:
+**Cinco defectos que ningún gate detectó**, y que valen como registro de dónde este repo tiene ceguera. Los cinco salieron de **abrir la app y mirarla**, ninguno de una suite:
 
 1. **Dos selectores de zustand que construían una función nueva por llamada** dejaban la UI **en blanco** al cargar un documento (loop infinito de `useSyncExternalStore`). Los 1471 tests pasaban: no hay tests de render de componentes (`environment: node`).
 2. **`entities.store.updateGroup` resolvía el bucket por dónde el grupo *estaba***, no por su tipo nuevo — así que un grupo reclasificado se veía en la categoría vieja para siempre. El motor lo hacía bien; la UI mentía.
 3. **La búsqueda del visor colgaba del `onChange` del input**, y un `<input>` no emite `change` cuando el valor llega de afuera: "Ver ocurrencias" escribía la consulta y no buscaba nada hasta tipear una letra.
 4. **ADR-079 mataba el reintento de OCR**: el `payload` se construye una vez y se re-despacha en cada intento, así que el primer transfer dejaba el `ArrayBuffer` detachado y el segundo lanzaba `DataCloneError`. Lo encontró el revisor; la transferencia de OCR se revirtió.
+5. **El detector de degradación de ADR-058 §7 es ciego en texto corriente**: mide el encogido de la fuente, que en una caja chica no puede ocurrir (piso de 8px en los dos términos del cociente), y no mide el squeeze horizontal, que es el que efectivamente arruina la legibilidad. La marca que lo consume está bien; la señal que le llega no. Detalle y medición en el punto abierto de más abajo.
 
 **Lo que este hito dejó abierto, a propósito**:
 
 - **Cuatro de las trece que necesitan ADR** siguen sin decidir: retener las ocurrencias perdedoras de un conflicto, `OccurrenceRef.value`, el evento de rechazo de reglas, y el monkey-patch de `window` para el "fake worker" de pdf.js.
 - **Tres de los cuatro `ConflictReason` no llegan a la UI**: `Overlap`, `Disagree` y `LowConfidence` nacen `resolved: true`, y el badge solo muestra los no resueltos. O sea que el flujo de radios de ADR-083 **es inalcanzable hoy** — el único conflicto visible es `AmbiguousCanonical`, cuyos candidatos comparten tipo. Decisión de diseño pendiente.
-- **La marca de reemplazo degradado** (ADR-058 §7 / ADR-062) sigue sin existir en la UI. Es lo que cerraría el círculo del `EditReplacementDialog`: el hint de ancho avisa *antes* de escribir, pero si igual no entra, nada lo dice después.
-- **`pnpm test:e2e` no se corrió** (requiere `pnpm assets:mirror`, 219 MB). La UI está verificada a mano en el browser.
+- ~~**La marca de reemplazo degradado** (ADR-058 §7 / ADR-062) sigue sin existir en la UI.~~ **CERRADA (2026-08-20, PR 17)** — las tres filas A/B/C de la tabla de ADR-062 del Hito 10.5 están implementadas y el círculo del `EditReplacementDialog` quedó cerrado: el hint de ancho avisa *antes*, la marca avisa *después* con la medición real de Render, en castellano sin jerga (no dice token, placeholder, bbox ni umbral) y con una línea que aclara que **el dato sigue oculto** — la duda que la palabra "degradado" provoca y no contesta.
+
+  **Pero verificarla en el browser destapó un quinto defecto que ningún gate detectó**, y es el más incómodo de los cinco: `PREVIEW_UPDATED.degraded` llegó **vacío** sobre un reemplazo que el panel dibujaba como una mancha ilegible. El criterio de `Contracts.md` §6 compara `finalSizePx` contra `naturalSizePx` y **los dos chocan contra el mismo piso de `REPLACEMENT_MIN_FONT_PX` (8px)**: en una caja de cuerpo de texto (10-14px) `naturalSizePx` nace clavado en el piso, el bucle no puede bajar ni un píxel, y el cociente da **1.00 por construcción** sin importar cuán largo sea el token. El umbral solo es alcanzable con cajas de ~20px o más — texto de título. Lo que arruina la legibilidad es el squeeze horizontal de `fillText(..., maxWidth)`, que el cociente **no observa**. Corolario: la invariancia de escala que afirman ADR-062 §6 y el comentario del kernel **es falsa cerca del piso** (el piso es absoluto, `boxHeight` escala), así que la misma ocurrencia se declara sana a escala 1 y degradada a escala 2; el test de invariancia pasa porque usa cajas grandes, justo el régimen donde sí vale. Las dos tablas de medición y las tres opciones de arreglo están en `roadmap/Post_Hito10.8_Pendientes.md` §16. **Necesita ADR** (`DEGRADED_FONT_RATIO` es público y el criterio está en `Contracts.md` §6, R-2/R-19): pasa a ser el quinto punto abierto de este hito.
+- ~~**`pnpm test:e2e` no se corrió**~~ **CORRIDO: 15/15 en 1.0m**, con `pnpm assets:mirror` verificando los 13 assets contra `assets.lock.json`. Además de eso, la UI está verificada a mano en el browser, que es como se encontraron los cinco defectos de arriba.
 
 ### Hito 11 — Hardening
 - Performance gates (todas las métricas de `00_Project_Vision.md` §7).
