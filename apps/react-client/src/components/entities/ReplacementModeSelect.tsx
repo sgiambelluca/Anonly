@@ -21,14 +21,35 @@ import { REPLACEMENT_MODE_OPTIONS } from "./replacementModeOptions.js";
 export interface ReplacementModeSelectProps {
   readonly groupId: string;
   readonly currentMode: ReplacementMode;
+  /**
+   * ADR-078 §1. Cuando el valor lo escribió el usuario, la etiqueta del modo
+   * vigente pasa a "Personalizado".
+   *
+   * **No es un `ReplacementMode` nuevo**: el modo sigue siendo el que está
+   * (normalmente `placeholder`), y por eso las reglas y la leyenda del export
+   * —que filtran por modo— siguen funcionando sin cambios. Lo único que cambia
+   * es cómo se lee la fila: decir "Placeholder" cuando el token es `[PERITO]`
+   * hace que el selector describa algo que no se parece a lo que se ve.
+   */
+  readonly customValue?: boolean;
 }
 
-export function ReplacementModeSelect({ groupId, currentMode }: ReplacementModeSelectProps) {
+export function ReplacementModeSelect({
+  groupId,
+  currentMode,
+  customValue = false,
+}: ReplacementModeSelectProps) {
+  const options = customValue
+    ? REPLACEMENT_MODE_OPTIONS.map((option) =>
+        option.value === currentMode ? { ...option, label: "Personalizado" } : option,
+      )
+    : REPLACEMENT_MODE_OPTIONS;
+
   return (
     <Select
       value={currentMode}
       onChange={(mode) => actions.updateGroup(groupId, { replacementMode: mode })}
-      options={REPLACEMENT_MODE_OPTIONS}
+      options={options}
       aria-label="Modo de reemplazo"
     />
   );

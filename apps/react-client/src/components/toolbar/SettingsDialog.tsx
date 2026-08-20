@@ -19,11 +19,12 @@
  *   de los rangos visibles de los dos paneles (`visibleRange` es por panel
  *   desde ADR-054 §1: con scroll independiente son dos regiones distintas,
  *   no una — `unionVisibleRange`, `React_Client.md` §3.7 último párrafo). Sin
- *   documento abierto, se persisten sin diálogo ni `reanalyze` (solo afectan
- *   al próximo `createCore`, que hoy ocurre una sola vez por carga de la
- *   app — `core-adapter/index.ts` no deriva `EngineConfig` de
- *   `settings.store` todavía, gap heredado de PR5, fuera de alcance de este
- *   PR).
+ *   documento abierto, se persisten sin diálogo ni `reanalyze`: afectan al
+ *   próximo `createCore`, que ocurre una sola vez por carga de la app. Eso
+ *   **sí tiene efecto** desde PR16.5 — `App.tsx` hace `settings.load()` →
+ *   `deriveEngineConfigOverrides` → `initCore(overrides)`
+ *   (`core-adapter/settingsToEngineConfig.ts`). Hasta ese PR no lo tenía, y
+ *   este docstring describía ese gap como si siguiera abierto.
  *
  * El guardado es atómico: si se necesita confirmación y el usuario cancela,
  * NINGÚN campo se aplica (ni siquiera `language`/`performancePreset`) — el
@@ -147,12 +148,19 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     setSaving(true);
     setSaveError(null);
     try {
-      applyToStore(next);
       for (const patch of patches) {
         // Secuencial a propósito (no Promise.all): mitigación de la
         // limitación conocida de un patch combinado, ver reanalyzePlan.ts.
         await actions.reanalyze(patch);
       }
+      // El store se escribe DESPUÉS de que los patches resolvieron, no antes.
+      // Con `applyToStore` arriba del loop, un rechazo del primer patch (ocr)
+      // dejaba el store persistido con AMBOS cambios y el segundo (ner) sin
+      // enviar: el reintento del usuario recalculaba `diffReanalyzeChange`
+      // contra el store ya mutado, daba diff vacío, y "Guardar" cerraba el
+      // diálogo sin reanalizar nada. Desde PR16.5 ese store mentiroso además
+      // se convierte en la config real del próximo `createCore`.
+      applyToStore(next);
       // Unión de los dos rangos por panel (ADR-054 §1) con `kind:
       // "anonymized"` fijo (ADR-056 §3): el `original` se renderiza sin
       // `replacements` y —hasta que exista el highlight de entidades— sin

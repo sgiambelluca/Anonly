@@ -17,12 +17,12 @@ import {
   EngineEvents,
   EventChannel,
   type EntityGroup,
+  type EntityType,
   type ExportOptions,
   type ManualEntityRequest,
   type ManualEntityResult,
   type PersonGenderChoice,
   type ReanalyzeConfigPatch,
-  type ReplacementMode,
   type Rule,
   type TextMatch,
   type Word,
@@ -56,7 +56,10 @@ export const actions = {
     // ("neutral") no existe como valor almacenado, borra el campo en vez de
     // reflejarlo (ADR-069 §4, `Contracts.md` §8 `GroupUpdateRequested.patch`).
     patch: Partial<
-      Pick<EntityGroup, "replacementMode" | "replacementValue" | "enabled" | "canonicalValue">
+      Pick<
+        EntityGroup,
+        "type" | "replacementMode" | "replacementValue" | "enabled" | "canonicalValue"
+      >
     > & { readonly personGender?: PersonGenderChoice },
   ): void {
     const documentId = activeDocumentId();
@@ -109,13 +112,19 @@ export const actions = {
     useRulesStore.getState().addRule(rule);
   },
 
-  resolveConflict(conflictId: string, mode: ReplacementMode): void {
+  /**
+   * ADR-083 §1: el usuario elige el **tipo de entidad**, no el modo de
+   * reemplazo. `entityType` ausente = aceptar el default del motor (el
+   * candidato de mayor confidence), que coincide con la clasificación ya
+   * vigente — o sea que confirmar no cambia datos.
+   */
+  resolveConflict(conflictId: string, entityType?: EntityType): void {
     const documentId = activeDocumentId();
     if (documentId === null) return;
     getCore().bus.emit(EventChannel.UI, EngineEvents.CONFLICT_RESOLVE_REQUESTED, {
       documentId,
       conflictId,
-      mode,
+      ...(entityType !== undefined ? { entityType } : {}),
     });
   },
 

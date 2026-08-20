@@ -159,7 +159,12 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribe {
 
   unsubs.push(
     bus.on(EventChannel.Grouping, EngineEvents.CONFLICT_RESOLVED, (payload) => {
-      stores.entities.getState().resolveConflict(payload.conflictId);
+      // ADR-083 §3: el tipo elegido viaja en el evento y hay que guardarlo —
+      // sin esto `ConflictDialog` sigue mostrando el `resolvedType` que traía
+      // el `CONFLICT_DETECTED` original, o sea el tipo VIEJO después de que el
+      // usuario eligió otro. Mismo patrón que el bug de `updateGroup`: el
+      // store fue el único lugar donde el contrato no se migró.
+      stores.entities.getState().resolveConflict(payload.conflictId, payload.entityType);
     }),
   );
 

@@ -52,6 +52,7 @@ function makeGroup(overrides: Partial<EntityGroup> = {}): EntityGroup {
     indexInType: 1,
     enabled: true,
     aliases: ["Juan Pérez"],
+    replacementValueUserSet: false,
     createdAt: 0,
     updatedAt: 0,
     ...overrides,
@@ -332,7 +333,7 @@ describe("bus-bridge", () => {
     bus.emit(EventChannel.Grouping, EngineEvents.CONFLICT_RESOLVED, {
       documentId: "doc-1",
       conflictId: conflict.id,
-      mode: ReplacementMode.Mask,
+      entityType: EntityType.Organization,
     });
     expect(useEntitiesStore.getState().conflicts[0]?.resolved).toBe(true);
 
