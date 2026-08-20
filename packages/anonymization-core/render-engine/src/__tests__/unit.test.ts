@@ -3,6 +3,7 @@ import {
   EngineEvents,
   EventChannel,
   ReplacementMode,
+  type Annotation,
   type EngineContext,
   type LoadDocumentPayload,
   type RasterizePagePayload,
@@ -1198,6 +1199,188 @@ describe("RenderEngine — unit tests", () => {
         (c) => c.op === "strokeRect" && c.strokeStyle === "#f59e0b",
       );
       expect(degradedStrokes).toHaveLength(0);
+    });
+  });
+
+  // ─── ADR-062: el veredicto sale del kernel y viaja en PREVIEW_UPDATED ───
+  //
+  // Los cuatro tests que `Render_Engine.md` §14 exige por nombre. Los de
+  // arriba prueban que el veredicto se CALCULA y se pinta; éstos prueban que
+  // SALE — que es lo que hasta ADR-062 no pasaba: el kernel lo computaba y lo
+  // tiraba.
+  describe("PREVIEW_UPDATED.degraded (ADR-062)", () => {
+    function previewPayloads(
+      emitSpy: ReturnType<typeof vi.spyOn>,
+    ): ReadonlyArray<{ readonly kind: string; readonly degraded?: ReadonlyArray<Annotation> }> {
+      return emitSpy.mock.calls
+        .filter((call) => call[1] === EngineEvents.PREVIEW_UPDATED)
+        .map((call) => call[2] as { kind: string; degraded?: ReadonlyArray<Annotation> });
+    }
+
+    // El mismo par mild/severe del umbral, pero mirando el EVENTO en vez del
+    // canvas: solo el severo entra al array, y entra con la identidad puesta
+    // (`groupId` + `occurrenceId`), que es lo que la UI necesita para saber
+    // QUÉ grupo marcar — sin eso el veredicto sería un booleano de página.
+    it("PREVIEW_UPDATED carries the Degraded annotations of that render, with groupId and occurrenceId", async () => {
+      const docId = "doc-degraded-event";
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+      );
+      await engine.init(ctx);
+      await engine.loadDocument(docId, createValidBuffer());
+      const emitSpy = vi.spyOn(ctx.bus, "emit");
+
+      await engine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+          replacements: [
+            makeReplacement({
+              groupId: "g-mild",
+              occurrenceId: "o-mild",
+              mode: ReplacementMode.Mask,
+              replacementValue: "AAAAA",
+              bbox: { x: 0, y: 0, width: 52, height: 40 },
+            }),
+            makeReplacement({
+              groupId: "g-severe",
+              occurrenceId: "o-severe",
+              mode: ReplacementMode.Mask,
+              replacementValue: "AAAAA",
+              bbox: { x: 100, y: 0, width: 31, height: 40 },
+            }),
+          ],
+        }),
+        ctx,
+      );
+
+      const [payload] = previewPayloads(emitSpy);
+      expect(payload!.degraded).toHaveLength(1);
+      // El `occurrenceId` del nombre del test viaja en `Annotation.id`:
+      // `Annotation` (Contracts.md §5) no tiene un campo `occurrenceId`, y el
+      // kernel pone ahí el de la ocurrencia (`id: replacement.occurrenceId`).
+      // La identidad que la UI necesita está completa igual.
+      expect(payload!.degraded![0]).toMatchObject({
+        groupId: "g-severe",
+        id: "o-severe",
+        kind: AnnotationKind.Degraded,
+      });
+    });
+
+    // ADR-062 §2: ni ausente por accidente ni poblado. La UI lee
+    // `degraded ?? []` y no distingue las dos formas, pero el emisor tiene que
+    // ser consistente igual — si un render limpio omitiera el campo, la
+    // ausencia dejaría de significar "no hay problema" y pasaría a significar
+    // "depende de quién emitió".
+    it("a render without degradation emits an empty degraded array", async () => {
+      const docId = "doc-degraded-none";
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+      );
+      await engine.init(ctx);
+      await engine.loadDocument(docId, createValidBuffer());
+      const emitSpy = vi.spyOn(ctx.bus, "emit");
+
+      await engine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+          replacements: [
+            makeReplacement({
+              groupId: "g-holgado",
+              occurrenceId: "o-holgado",
+              mode: ReplacementMode.Mask,
+              replacementValue: "A",
+              bbox: { x: 0, y: 0, width: 300, height: 40 },
+            }),
+          ],
+        }),
+        ctx,
+      );
+
+      const [payload] = previewPayloads(emitSpy);
+      expect(payload!.degraded).toEqual([]);
+    });
+
+    // **El test del modo de falla** (ADR-062 §4/§8). `emitPreviewUpdated` corre
+    // también en el cache HIT, así que si el veredicto no viviera en la entrada
+    // del cache el hit emitiría vacío: la marca de la UI se apagaría sola al
+    // volver a una página ya vista y reaparecería al invalidar el cache, sin
+    // ninguna causa visible para el usuario. Si algún otro test de ADR-062
+    // falla, éste tiene que seguir valiendo.
+    it("a cache hit emits the same degraded as the miss that populated it", async () => {
+      const docId = "doc-degraded-cache-hit";
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+      );
+      await engine.init(ctx);
+      await engine.loadDocument(docId, createValidBuffer());
+      const emitSpy = vi.spyOn(ctx.bus, "emit");
+
+      const input = createRenderPageInput({
+        documentId: docId,
+        pageIndex: 0,
+        kind: "anonymized",
+        mode: "preview",
+        replacements: [
+          makeReplacement({
+            groupId: "g-severe",
+            occurrenceId: "o-severe",
+            mode: ReplacementMode.Mask,
+            replacementValue: "AAAAA",
+            bbox: { x: 100, y: 0, width: 31, height: 40 },
+          }),
+        ],
+      });
+
+      await engine.renderPage(input, ctx);
+      await engine.renderPage(input, ctx);
+
+      const payloads = previewPayloads(emitSpy);
+      expect(payloads).toHaveLength(2);
+      // El segundo es el hit: mismo veredicto, no vacío.
+      expect(payloads[1]!.degraded).toEqual(payloads[0]!.degraded);
+      expect(payloads[1]!.degraded).toHaveLength(1);
+    });
+
+    // ADR-062 §3: el panel original se renderiza SIN reemplazos, así que su
+    // veredicto es vacío por construcción. Que lo sea de verdad es lo que le
+    // permite al puente de la UI descartarlo sin perder información.
+    it('a render with kind "original" emits an empty degraded array', async () => {
+      const docId = "doc-degraded-original";
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+      );
+      await engine.init(ctx);
+      await engine.loadDocument(docId, createValidBuffer());
+      const emitSpy = vi.spyOn(ctx.bus, "emit");
+
+      await engine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "original",
+          mode: "preview",
+          replacements: [
+            makeReplacement({
+              groupId: "g-severe",
+              occurrenceId: "o-severe",
+              mode: ReplacementMode.Mask,
+              replacementValue: "AAAAA",
+              bbox: { x: 100, y: 0, width: 31, height: 40 },
+            }),
+          ],
+        }),
+        ctx,
+      );
+
+      const [payload] = previewPayloads(emitSpy);
+      expect(payload!.kind).toBe("original");
+      expect(payload!.degraded).toEqual([]);
     });
   });
 
