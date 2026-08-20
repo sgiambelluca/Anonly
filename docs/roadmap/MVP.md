@@ -482,6 +482,49 @@ Los tres PRs de `grouping-engine` (2, 7, 15) van **en ese orden** y no en parale
 
 **Verificación manual sobre la pericia real** (fila propia del cierre, como en el Hito 10.8): la barra negra de la página 2 desaparece, la fecha del encabezado aparece en el árbol, los teléfonos derivados del expediente desaparecen, las fechas dejan de colapsar en `Fecha 01`, y un texto de reemplazo escrito a mano sobrevive a agregar una entidad después. Es donde se confirma si el *"aparecen tres fechas"* que reportó el humano era la fusión difusa, el falso positivo, o los dos.
 
+### Hito 10.10 — Cierre de las observaciones del Hito 10, y lo que destaparon
+
+No sale de un hito anterior ni de una prueba manual: sale de **barrer `roadmap/Hito10_Observaciones_Revision.md`**, las ~70 observaciones no bloqueantes que el revisor y el implementador fueron dejando durante todo el Hito 10. El barrido completo, con cada una verificada contra el árbol de hoy, está en `roadmap/Hito10_Observaciones_Plan_De_Resolucion.md`.
+
+De las ~70: **~30 ya estaban cerradas** por hitos posteriores (ADR-053/054/056, PR16.5, PR17), **~8 no ameritaban arreglo**, **25 se arreglaron sin ADR**, y **13 necesitaban decisión del humano**. De esas trece, el humano tomó **nueve**; las otras cuatro siguen abiertas (ver el final de esta sección).
+
+**Lo que el barrido destapó, y no estaba en ninguna observación**: tres de los nueve ADRs no cierran una observación sino un defecto encontrado **al implementarla**. El caso más claro es ADR-085: ADR-082 le dio al usuario la capacidad de corregir el tipo de un grupo, y medir esa corrección contra el motor mostró que **no se propagaba** — una ocurrencia nueva del mismo valor creaba un grupo paralelo, y apagar NER borraba la corrección entera.
+
+| # | PR | Módulo | Depende de | Estado |
+|---|---|---|---|---|
+| 1 | Los 25 arreglos sin ADR (3 bugs de UI, 4 de tests/fixtures, 6 comentarios falsos, 12 correcciones de spec) + `tests/e2e/README.md` | varios | — | **hecho** |
+| 2 | ADR-077: `WORKER_CRASHED` + `WorkerCrashedError` retryable | `shared` | — | **hecho** |
+| 3 | ADR-077: `handleWorkerTransportError` lo usa | `packages/anonymization-core/src` | 2 | **hecho** |
+| 4 | ADR-078: `EntityGroup.replacementValueUserSet` | `shared` | — | **hecho** |
+| 5 | ADR-078: `toPublicGroup` lo proyecta | `grouping-engine` | 4 | **hecho** |
+| 6 | ADR-079: `DispatchParams.transferList` | `packages/anonymization-core/src` | — | **hecho** |
+| 7 | ADR-079: transfer worker→host en `post()` | `render-engine`, `export-engine` | 6 | **hecho** |
+| 8 | ADR-080: idle-dispose en el `WorkerPool` | `packages/anonymization-core/src` | — | **hecho** |
+| 9 | ADR-081: el patch combinado de `reanalyze` se rechaza | `packages/anonymization-core/src` | — | **hecho** |
+| 10 | ADR-082: `patch.type` | `shared` | — | **hecho** |
+| 11 | ADR-082: `changeGroupType` y sus cinco recálculos | `grouping-engine` | 10 | **hecho** |
+| 12 | ADR-083: `ConflictResolveRequested.entityType`, `Conflict.resolvedType` | `shared` | 10 | **hecho** |
+| 13 | ADR-083: `applyConflictResolve` reclasifica | `grouping-engine` | 11, 12 | **hecho** |
+| 14 | ADR-085: `absorbedTypes` + `typeCorrections` | `grouping-engine` | 11 | **hecho** |
+| 15 | ADR-082/083/084/078: `ChangeTypeDialog`, `ConflictDialog` reescrito, "Ver ocurrencias", punto azul, "Restaurar valor calculado", `EditReplacementDialog` | `apps/react-client` | 11, 13, 14 | **hecho** |
+| 16 | Leyenda del export: wrap por celda, columnas como fracción del ancho, título envuelto (sin ADR — ADR-059 §5 deja el estilo visual fuera de spec) | `render-engine` | — | **hecho** |
+
+**Los nueve ADRs**: `ADR-077` (código de error para crash de worker), `ADR-078` (la edición manual visible en la UI), `ADR-079` (transferencia real por dirección y payload), `ADR-080` (idle-dispose en el pool, no en el manager), `ADR-081` (el patch combinado se rechaza), `ADR-082` (el usuario corrige el tipo de entidad), `ADR-083` (el panel de conflicto elige tipo, no modo), `ADR-084` ("Ver ocurrencias" empuja el valor al buscador), `ADR-085` (memoria de reclasificación por documento). Más la **enmienda §11 de ADR-055** (sanciona el patrón `NerDispatchDecodeFailure` antes de que los otros cuatro motores lo copien).
+
+**Cuatro defectos que ningún gate detectó**, y que valen como registro de dónde este repo tiene ceguera:
+
+1. **Dos selectores de zustand que construían una función nueva por llamada** dejaban la UI **en blanco** al cargar un documento (loop infinito de `useSyncExternalStore`). Los 1471 tests pasaban: no hay tests de render de componentes (`environment: node`).
+2. **`entities.store.updateGroup` resolvía el bucket por dónde el grupo *estaba***, no por su tipo nuevo — así que un grupo reclasificado se veía en la categoría vieja para siempre. El motor lo hacía bien; la UI mentía.
+3. **La búsqueda del visor colgaba del `onChange` del input**, y un `<input>` no emite `change` cuando el valor llega de afuera: "Ver ocurrencias" escribía la consulta y no buscaba nada hasta tipear una letra.
+4. **ADR-079 mataba el reintento de OCR**: el `payload` se construye una vez y se re-despacha en cada intento, así que el primer transfer dejaba el `ArrayBuffer` detachado y el segundo lanzaba `DataCloneError`. Lo encontró el revisor; la transferencia de OCR se revirtió.
+
+**Lo que este hito dejó abierto, a propósito**:
+
+- **Cuatro de las trece que necesitan ADR** siguen sin decidir: retener las ocurrencias perdedoras de un conflicto, `OccurrenceRef.value`, el evento de rechazo de reglas, y el monkey-patch de `window` para el "fake worker" de pdf.js.
+- **Tres de los cuatro `ConflictReason` no llegan a la UI**: `Overlap`, `Disagree` y `LowConfidence` nacen `resolved: true`, y el badge solo muestra los no resueltos. O sea que el flujo de radios de ADR-083 **es inalcanzable hoy** — el único conflicto visible es `AmbiguousCanonical`, cuyos candidatos comparten tipo. Decisión de diseño pendiente.
+- **La marca de reemplazo degradado** (ADR-058 §7 / ADR-062) sigue sin existir en la UI. Es lo que cerraría el círculo del `EditReplacementDialog`: el hint de ancho avisa *antes* de escribir, pero si igual no entra, nada lo dice después.
+- **`pnpm test:e2e` no se corrió** (requiere `pnpm assets:mirror`, 219 MB). La UI está verificada a mano en el browser.
+
 ### Hito 11 — Hardening
 - Performance gates (todas las métricas de `00_Project_Vision.md` §7).
 - Leak tests, cancel tests.

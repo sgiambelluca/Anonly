@@ -6,6 +6,18 @@
 >
 > Convención: cada entrada cita el PR donde se originó, el archivo/sección relevante, y si tiene una tarea de seguimiento asociada (tasklist de la sesión) o no.
 
+> ## Barrido completo — 2026-08-18
+>
+> Las observaciones de este documento se barrieron una por una contra el árbol de hoy (post-Hito 10.9). El resultado está en **[`Hito10_Observaciones_Plan_De_Resolucion.md`](Hito10_Observaciones_Plan_De_Resolucion.md)**, que dice de cada una si sigue abierta, si amerita arreglo y cómo — con la verificación de código al lado, no la cita del texto original.
+>
+> - ~30 quedaron **cerradas** por hitos posteriores (ADR-053, ADR-054, ADR-056, PR16.5, PR17) o por el propio Hito 10.
+> - **25 se arreglaron** en ese pase: 3 bugs de comportamiento en `apps/react-client`, 4 de tests/fixtures, 6 comentarios de código que afirmaban cosas falsas, y 12 correcciones de spec/ADR.
+> - **13 quedan sin tocar porque necesitan ADR** — están en §6 de ese documento, con el motivo de cada una.
+> - ~8 no ameritan arreglo (decisiones ya tomadas a propósito).
+>
+> Las entradas de abajo se conservan **sin editar**: son el registro de lo que se observó cuando se observó.
+
+
 ---
 
 ## PR1 — Scaffold `apps/react-client`
