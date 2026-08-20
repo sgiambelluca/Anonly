@@ -83,6 +83,8 @@ interface OcrDispatchParams {
   readonly priority?: number;
   readonly payload?: unknown;
   readonly maxRetriesOverride?: number;
+  /** ADR-079 §2: buffers de `payload` que el pool transfiere en vez de clonar. */
+  readonly transferList?: ReadonlyArray<Transferable>;
 }
 
 interface OcrJobPool {
@@ -324,6 +326,20 @@ export class OcrEngine implements IEngine {
           priority: DISPATCH_PRIORITY,
           payload,
           maxRetriesOverride: 0,
+          // SIN `transferList`, a propósito (ADR-079 §1, fila corregida).
+          //
+          // El `imageData` de una página A4 a 300 dpi son ~8 MB y transferirlo
+          // parecía seguro: el host lo rasteriza para ESTE job y lo suelta.
+          // Pero el emisor no es solo el host — **es este loop**. `payload` se
+          // construye una vez arriba y se re-despacha en cada intento, así que
+          // el primer transfer deja el `ArrayBuffer` detachado (`byteLength`
+          // 0) y el segundo lanza `DataCloneError: Cannot transfer object of
+          // unsupported type`. O sea que transferir acá MATA el reintento —
+          // justo el que `normalizeTimeout` existe para habilitar.
+          //
+          // Copiar el buffer para conservar una fuente de reintento costaría
+          // exactamente lo que el transfer ahorra, así que no hay nada que
+          // ganar: se clona, como antes.
         });
         // ADR-055 §2: `dispatchResult` es `unknown` — decodeKernelOcrResult es
         // el único paso permitido antes de desestructurar `words`/`confidence`
