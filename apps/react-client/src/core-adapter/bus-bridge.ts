@@ -187,7 +187,13 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribe {
       // ADR-062 §2 — ausente ≡ vacío: `?? []` y no un early-return. Tratar la
       // ausencia como "no sé" (y no actualizar) deja marcas viejas encendidas
       // después de que el usuario arregló el reemplazo.
-      if (payload.kind === "anonymized") {
+      //
+      // ADR-062 §3 dice "por documento", y el store guarda solo por página: la
+      // guarda que lo hace cierto es ésta. El Orchestrator documenta que un
+      // PREVIEW_UPDATED puede llegar tarde, después de cerrar el documento;
+      // sin el filtro, ese evento rezagado sembraría el veredicto de un
+      // documento muerto sobre el que se acaba de abrir.
+      if (payload.kind === "anonymized" && payload.documentId === stores.document.getState().id) {
         useDegradedStore.getState().setPageVerdict(payload.pageIndex, payload.degraded ?? []);
       }
     }),
