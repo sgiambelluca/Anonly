@@ -73,10 +73,13 @@ apps/react-client/src/components/
 - **Estados**:
   - `stage === Idle`: solo botón "Importar PDF".
   - `stage ∈ {Importing, Extracting, OCRing, Detecting, Grouping}`: `PipelineStatus` + `CancelButton`.
-  - `stage ∈ {Ready, Done}`: `PipelineStatus` + `ExportButton` + `CloseDocumentButton` (+ `CancelButton` si hay jobs remanentes). (`Done` no tenía fila — gap cerrado al resolver el bug #7 del Escenario 1 E2E: tras un export el documento sigue abierto y re-exportable. `CloseDocumentButton` agregado por ADR-051.)
+  - `stage ∈ {Ready, Done}`: `PipelineStatus` + `ExportButton` + `CloseDocumentButton` + `CancelButton` (§2.4). (`Done` no tenía fila — gap cerrado al resolver el bug #7 del Escenario 1 E2E: tras un export el documento sigue abierto y re-exportable. `CloseDocumentButton` agregado por ADR-051.)
   - `stage === Rendering/Exporting`: `PipelineStatus` + `CancelButton`.
   - `stage === Failed`: banner de error + "Reintentar" o "Cerrar" (el "Cerrar" del banner, sin confirmación) + `CloseDocumentButton`.
   - `stage === Cancelled`: `PipelineStatus` + `CloseDocumentButton`.
+
+  > **Reconciliación con §2.4 (2026-08-18)**: la fila `{Ready, Done}` decía "(+ `CancelButton` si hay jobs remanentes)", un matiz que §2.4 —la regla canónica del propio componente— nunca tuvo. No existe ningún campo en `pipeline.store` que represente "jobs remanentes", ni ninguno planificado, así que el matiz era inimplementable y quedó sin implementar desde el PR6 del Hito 10 (`CancelButton.tsx` sigue la regla de §2.4: visible cuando `stage ∉ {Idle, Done, Failed, Cancelled}`). Se elimina el matiz en vez de inventar el campo: **§2.4 manda**, y en `Ready` el botón se muestra como en cualquier otro stage no terminal.
+
 - **Acciones**: ninguna directa; delega en hijos.
 
 ### 2.2 `ImportButton`
@@ -232,9 +235,20 @@ apps/react-client/src/components/
 - **Opciones**:
   - "Fusionar con…" → `MergeDialog`.
   - "Dividir…" → `SplitDialog`.
-  - "Ver ocurrencias" → popover con lista `members` (pageIndex + bbox + value).
+  - **"Ver ocurrencias"** (ADR-084 §2) → escribe `group.canonicalValue` en `viewer.store.searchQuery`. El `DocumentSearchBox` (§5.4c) reacciona solo: busca, cuenta y deja anterior/siguiente listos para recorrer el documento resaltando cada aparición. **No se construye un popover propio**: el buscador ya scrollea, resalta y navega — el popover de la redacción anterior (que además pedía un `value` por ocurrencia que `OccurrenceRef` no tiene) habría sido una segunda UI de navegación, peor que la que existe.
+    - **El contador del buscador puede no coincidir con el `(N)` del grupo**, y está bien (ADR-084 §3): `findText` busca el literal, `members` son las ocurrencias agrupadas. Un grupo con aliases tiene members que la búsqueda del canónico no encuentra; y la búsqueda puede encontrar apariciones que el detector no agrupó — que es justamente el recall que ADR-061 cubre, con el "Agregar como…" de cada resultado a mano.
+  - **"Cambiar categoría"** (ADR-082 §6) → `ChangeTypeDialog` (§3.8): `Select` con todos los `EntityType`, preseleccionado en el actual → `actions.updateGroup(groupId, { type })`. Sin `ConfirmDialog`: es reversible volviendo a elegir el tipo anterior.
+  - **"Restaurar valor calculado"** (ADR-078 §4) → **solo** si `group.replacementValueUserSet`; despacha `actions.updateGroup(groupId, { replacementMode: <el mismo modo> })`, que recalcula el valor y apaga el flag sin API nueva.
   - "Editar valor canónico" → input inline.
   - "Eliminar grupo" → `ConfirmDialog` → `actions.updateGroup(groupId, { enabled: false })` (no se elimina, se deshabilita; en MVP no se elimina completamente).
+
+> **Accesibilidad**: el menú es un disclosure hecho a mano (trigger + `role="menu"`, cierre por click-fuera/Escape/selección), sin `@radix-ui/react-dropdown-menu` — agregar esa dependencia requiere ADR (P-9/R-12). Consecuencia conocida: no hay navegación por flechas ni focus trap.
+
+### 3.8 `ChangeTypeDialog` (ADR-082 §6)
+
+- **Props**: `groupId`, `currentType`, `canonicalValue`.
+- **Acción**: `actions.updateGroup(groupId, { type })`. Un tipo igual al vigente es no-op (el motor no emite nada, ADR-082 §1) y el diálogo además se ahorra el viaje.
+- **Por qué existe**: el tipo no es una etiqueta suelta — gobierna el token del documento anonimizado, su numeración por tipo, qué regla de scope `type` aplica y de qué pool sortea el sintetizador. Un tipo equivocado produce un documento que **afirma algo falso** sobre el dato que ocultó.
 
 ### 3.6 `MergeDialog`
 
@@ -336,6 +350,7 @@ apps/react-client/src/components/
 ### 5.4c `DocumentSearchBox` (ADR-061 §8)
 
 - **Ubicación**: junto al encabezado "PDF ORIGINAL", con icono de lupa (punto 4 de `Cambios para hacer.txt`).
+- **La consulta vive en `viewer.store.searchQuery`** (ADR-084 §1), no en el estado local del componente: "Ver ocurrencias" del panel de entidades (§3.5) la escribe desde el otro extremo del árbol. **No es por panel** —a diferencia de `currentPageIndex`/`visibleRange` desde ADR-054 §1— porque el buscador existe una sola vez, sobre el `original`. El resto de su estado (matches, `activeIndex`, el tipo del "Agregar como…") **sigue siendo local**: es trabajo interno suyo.
 - **Acción**: `actions.findText(query)` → `TextMatch[]` con bbox por coincidencia (el adaptador resuelve el documento activo por su cuenta, igual que `getPageWords`/`getPageSize`). Consulta **sincrónica** y de solo lectura: buscar no crea grupos ni modifica la sesión (errata de ADR-061 §8).
 - **El debounce es de este componente**: `findText` es sincrónica y recorre todas las palabras del documento en el main thread, así que una llamada por tecla se nota en documentos largos. El Core no amortigua —es una función de consulta, sin estado ni cache (`Regex_Engine.md` §12)—, así que la caja de búsqueda debe hacerlo, mismo criterio que el re-render del zoom (§5.5). Los resultados vienen en orden documental, así que "anterior/siguiente" navega el array tal cual, sin re-ordenar.
 - **Render**: contador de resultados, navegación anterior/siguiente con scroll a la página, y resaltado del match activo sobre el canvas (reusa el mismo overlay de §5.4b).
@@ -368,8 +383,10 @@ apps/react-client/src/components/
 
 - **Props**: `conflictId`.
 - **Stores**: `entities.conflicts`.
-- **Render**: ver `UX_Guidelines.md` §6. Muestra razón, candidatos, resolución sugerida.
-- **Acción**: `actions.resolveConflict(conflictId, mode)`.
+- **Render** (ADR-083 §6): el valor en disputa + los **tipos de entidad** candidatos como radios, con el de mayor `confidence` preseleccionado. **No nombra a Regex ni a NER** ni muestra números de confidence: son detalles de implementación del pipeline, y la pregunta útil es una sola — ¿esto es una organización o una dirección?
+- **Acción**: `actions.resolveConflict(conflictId, entityType?)`. Aplicar **reclasifica el grupo** por la vía de ADR-082 §2 y marca el conflicto resuelto. Sin tipo elegido, el motor aplica su default (mayor confidence), que coincide con la clasificación ya vigente: confirmar no cambia datos.
+- **Cuando no hay elección**: si todos los candidatos comparten tipo (`low_confidence`/`ambiguous_canonical`, que no son conflictos de clasificación), el diálogo no ofrece radios y el botón dice "Descartar".
+- **Qué cambió y por qué** (ADR-083): hasta este ADR el diálogo pedía un `ReplacementMode`, que **no resolvía el desacuerdo** — `applyConflictResolve` no tocaba el `entityType`, así que el usuario aplicaba y la discrepancia quedaba igual. El modo de reemplazo se sigue eligiendo donde siempre: el `ReplacementModeSelect` de la fila del grupo (§3.4).
 
 ---
 

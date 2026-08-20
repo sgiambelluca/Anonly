@@ -28,10 +28,11 @@
 ```
 apps/react-client/src/
 ├── core-adapter/
-│   ├── index.ts              // inicializa el Core, expone la API
-│   ├── bus-bridge.ts         // subscribe al bus, muta Zustand
-│   ├── actions.ts            // acciones de UI → eventos del bus
-│   └── snapshots.ts          // lee snapshots del Grouping Engine
+│   ├── index.ts                     // inicializa el Core, expone la API
+│   ├── bus-bridge.ts                // subscribe al bus, muta Zustand
+│   ├── actions.ts                   // acciones de UI → eventos del bus
+│   ├── settingsToEngineConfig.ts    // settings.store → EngineConfigOverrides (PR16.5)
+│   └── snapshots.ts                 // lee snapshots del Grouping Engine
 ├── store/
 │   ├── document.store.ts
 │   ├── entities.store.ts
@@ -352,6 +353,12 @@ interface ViewerSlice {
   readonly visibleRange: Readonly<Record<ViewerKind, { start: number; end: number }>>;
   readonly zoom: number;          // 0.5..3 — sigue siendo global (los dos paneles comparten escala)
   readonly sideBySide: boolean;   // default true — declarado, hoy sin setter ni consumidor (ambigüedad abierta; ADR-054 §7 decide NO reutilizarlo)
+  // ADR-084 §1: la consulta del DocumentSearchBox. Sube al store para que
+  // "Ver ocurrencias" (Components.md §3.5) pueda escribirla desde el panel de
+  // entidades. NO es por panel: el buscador existe una sola vez, sobre el
+  // `original`. El resto del estado del buscador sigue local.
+  readonly searchQuery: string;
+  setSearchQuery(query: string): void;
   // Por panel, no un Map compartido: si "original" y "anonymized" comparten
   // el mismo Map, cualquier PREVIEW_UPDATED de un panel cambia la referencia
   // que el otro panel también lee, y ese PdfViewer se re-renderiza entero
