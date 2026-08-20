@@ -29,7 +29,7 @@ El worker es un **ensamblador con estado de un documento a la vez**, no un kerne
 
 ### 2. Transporte: se reusa `WorkerPool` con `size: 1`; ADR-036 §1 queda matizado, no revertido
 
-El façade construye en `create-core.ts` un `WorkerPool({ poolKey: "export", jobType: "export-page", size: 1, maxQueue: EXPORT_QUEUE_LIMIT, ... })` — espejo literal de `ocrPool`/`renderPool` — y lo inyecta: `new ExportEngine(pool?)`, con el mismo puerto interno `ExportJobPool` + `IMMEDIATE_POOL` de los otros dos y `maxRetriesOverride: 0`.
+El façade construye en `create-core.ts` un `WorkerPool({ poolKey: "export", jobType: "export-page", size: 1, maxQueue: 8, ... })` — espejo literal de `ocrPool`/`renderPool` — y lo inyecta: `new ExportEngine(pool?)`, con el mismo puerto interno `ExportJobPool` + `IMMEDIATE_POOL` de los otros dos y `maxRetriesOverride: 0`. *(Errata: la redacción original escribía `maxQueue: EXPORT_QUEUE_LIMIT`, un nombre de constante que sugería una fuente publicada inexistente — `MAX_QUEUE_PER_POOL` de `Contracts.md` §6 solo lista `{pdf, ocr, ner, render}`, consistente con el párrafo siguiente de esta misma sección. El valor es el literal `8`, el mismo que ocr/ner, y es funcionalmente inerte con `size: 1` y despacho secuencial.)*
 
 **Qué de ADR-036 §1 sigue en pie** (todo lo que motivaba su rechazo del "quinto pool"): **no** hay quinta clave en `WorkerPoolConfig.maxQueuePerPool` ni en `WorkerPoolConfig.*PoolSize` — el façade pasa `size`/`maxQueue` como literales, igual que ya hace para render y ocr —, **no** hay cola prioritaria multi-worker (tamaño 1, cola trivial), y el worker sigue siendo del lado host de `export-engine`. **Qué cambia**: `PoolKey` gana la etiqueta `"export"` (tipo **interno** de `worker-pool.ts`; su único uso observable es el string `` `${poolKey}-pool` `` del `workerId` en la telemetría `WORKER_JOB_*`), y `WorkerPoolManager` conserva su unión de cuatro mediante un alias propio (`ManagedPoolKey = Exclude<PoolKey, "export">`) — el manager sigue indexando records de cuatro claves sin cambio. Reusar la clase como transporte es exactamente lo contrario del churn que ADR-036 §1 quería evitar: cero código de mensajería nuevo, y el fallback in-process (ADR-035) sale gratis.
 
@@ -63,6 +63,18 @@ export interface ExportSavePayload {
 - `CANCEL` descarta el `PDFDocument` parcial y responde `CANCELLED` (§13 caso 13, sin cambios de contrato). `DISPOSE` libera el documento y el estado.
 - Tras un `save` exitoso el worker limpia su estado (el próximo export arranca de cero aunque sea el mismo `documentId` — §13 caso 14, exports encolados del mismo documento).
 
+> **Riesgo aceptado (2026-08-19): `save` NO es idempotente, a diferencia de `append-page`.**
+>
+> **La ventana**: el host despacha `save` con el timeout de 30 s de §5; el worker lo completa **después** de vencido y llama `discardState()`; el host reintenta y choca contra un assembler vacío → `ExportFailedError`.
+>
+> **Por qué se acepta y no se cierra**, en orden de peso:
+>
+> 1. **Falla ruidosamente, no en silencio.** Es la diferencia exacta con el modo de falla que la idempotencia de `append-page` sí cierra: ahí un reintento producía un **PDF con páginas duplicadas y sin ningún error visible**; acá el usuario ve `EXPORT_FAILED` en el `ExportDialog` y reintenta, y el segundo intento funciona. No hay pérdida de datos ni documento mal anonimizado — que es la clase de daño que este proyecto tiene que evitar.
+> 2. **La ventana es teórica.** 30 s de presupuesto contra un `save` real de 500-2000 ms: hace falta una máquina 15-60× más lenta que la medida.
+> 3. **El fix cuesta memoria permanente.** La simetría natural es que el worker retenga el último `ArrayBuffer` serializado por `documentId` hasta el próximo `append-page` — o sea **un PDF exportado entero vivo en el worker, indefinidamente**. En una pericia grande eso es memoria real, retenida para cubrir un caso que nadie observó. Y contradice la política de este mismo §4 ("tras un `save` exitoso el worker limpia su estado"), así que sería una enmienda, no un detalle de implementación.
+>
+> **Cuándo revisitarlo**: si aparece un `EXPORT_FAILED` reproducible en el reintento de un `save`, o si el timeout de `export-page` se baja de 30 s (lo que ensancharía la ventana proporcionalmente). Mientras tanto, la asimetría con `append-page` es deliberada y está justificada por el modo de falla, no por olvido.
+
 ### 5. Retry, timeout y errores: host-side, como hoy
 
 Los dos loops de retry existentes se quedan en el motor (render por página y `save`), con `maxRetriesOverride: 0` en cada despacho. `workerPool.timeouts["export-page"]` (30 s, `05` §4) lo aplica el host envolviendo el despacho — el pool no tiene timeout propio. Un `EXPORT_TIMEOUT`/`EXPORT_FAILED` que cruzó el worker llega deserializado (instancia genérica con el `code` correcto); el motor lo re-instancia por `code` antes de decidir si reintenta, exactamente como ADR-045 §2 (`normalizeTimeout`) y ADR-046 §2. Sin esto, la política de reintentos cambiaría según haya worker real o fallback.
@@ -88,6 +100,8 @@ La interfaz pública de `Export_Engine.md` §6 salvo el constructor; el flujo de
 | **Mandar todas las páginas juntas en un solo job** | Obliga a retener las N imágenes codificadas en memoria del host antes de ensamblar (1000 páginas × ~200 KB ≈ 200 MB, contra el presupuesto de `07` §5); mata el `EXPORT_PROGRESS` por página y el descarte incremental que el diseño de streaming (§12) ya tenía. |
 | **Export inline en host también en el Hito 10** | `save()` de pdf-lib son 500–2000 ms de main thread (§12) contra el principio A-9; contradice `05` §7.5, `06` §14, ADR-035 §2 y ADR-036 §1. |
 | **Dejar `metadata` en `ExportPagePayload`** | Se transmite N veces algo que se aplica una; y obliga al worker a decidir "¿la aplico en la primera página o en la última?" — ambigüedad gratuita en el mensaje equivocado. |
+
+> **Enmienda de ADR-079 (2026-08-19)** sobre la prosa de "transferido": hasta ADR-079, ni este worker ni ninguno de los otros cuatro pasaban transfer list a `postMessage`, así que todo lo que cruzaba era **structured clone**. ADR-079 §1 lo hace real en la dirección worker → host, que cubre el `ArrayBuffer` del PDF final del `save` (el assembler llama `discardState()` inmediatamente después, así que transferirlo es seguro por construcción). La dirección host → worker de este motor (la imagen de página del `append-page`) queda **sin** transferir, igual que antes.
 
 ## Consecuencias
 

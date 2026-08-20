@@ -85,7 +85,9 @@ Es exactamente la forma de agujero que ADR-069 Contexto §3 documentó para el l
 replacementValueUserSet: boolean;
 ```
 
-No viaja en `EntityGroup`, no viaja en ningún evento, no entra a `Contracts.md` ni a `03_Data_Model.md` §9. Se limpia con la sesión en `closeSession`, que borra la sesión entera, y sobrevive a `reopenSession`, que no toca `session.groups` — las dos cosas sin código adicional, igual que el flag de género.
+No viaja en `EntityGroup`, no viaja en ningún evento, no entra a `Contracts.md` ni a `03_Data_Model.md` §9.
+
+> **Enmendado por ADR-078 §1 (2026-08-19)**: `replacementValueUserSet` **sí se expone** en `EntityGroup`, de solo lectura. El criterio no era "los flags `*UserSet` no salen" sino **"sale el valor, no la procedencia"** — y para el `replacementValue` el valor no delata su procedencia (`[P1]` a mano y `[P1]` calculado son idénticos), a diferencia del género, cuyo valor sí la delata (quien eligió "femenino" lee `[MUJER 01]`). Por eso `personGenderUserSet` se queda adentro y este sale. La semántica de este ADR —cuándo se enciende, cuándo se apaga, qué protege— **no cambia**; lo único que cambia es que la UI puede verlo. Ver ADR-078 §2 para la regla general. Se limpia con la sesión en `closeSession`, que borra la sesión entera, y sobrevive a `reopenSession`, que no toca `session.groups` — las dos cosas sin código adicional, igual que el flag de género.
 
 ### 2. Se enciende con `patch.replacementValue`, y con nada más
 
@@ -119,7 +121,7 @@ El alcance de este ADR no es una guarda: es la **precedencia completa del campo*
 | 7 | `doApplyGroupSplit`, grupo `created` | nace con el flag en `false` | es otra entidad, con `id` propio y valor propio (§13 caso 6) |
 | 8 | `doApplyGroupSplit`, grupo remanente | **respeta el flag** | es el mismo grupo de antes, con menos members |
 | 9 | `dropOccurrences` (ADR-038) | **respeta el flag** | perder ocurrencias no es una decisión sobre el valor |
-| 10 | `applyConflictResolve` | recalcula y **apaga el flag** | fija `group.replacementMode = req.mode`: es una elección de modo del usuario, misma familia que el #4 |
+| 10 | `applyConflictResolve` | ~~recalcula y **apaga el flag**~~ → **respeta el flag** (ADR-083) | ~~fija `group.replacementMode = req.mode`: es una elección de modo del usuario, misma familia que el #4~~. **Enmendado por ADR-083 §2 (2026-08-19)**: resolver un conflicto ya no elige un `ReplacementMode` —elige el **tipo de entidad**—, así que dejó de ser "una elección de modo del usuario" y esta fila deja de tener regla propia. Pasa a comportarse como cualquier cambio de tipo (ADR-082 §4): el valor manual sobrevive, **salvo** que el tipo elegido active una regla que cambie el modo **efectivo**, y ahí aplica la fila 4 sin excepción nueva. |
 | 11 | `recomputeAllGroupModes` (reglas) | recalcula y **apaga el flag** | ya tiene `if (effectiveMode === before) continue;`: **solo corre cuando el modo efectivo cambió**, que es exactamente la condición de §3. No necesita mirar el flag — la guarda que hace falta ya está escrita ahí, y conviene dejar dicho por qué no se agrega una segunda |
 
 El #11 es el que vuelve implementable a §3: la condición "el modo efectivo cambió" ya existe en el único punto donde una regla puede mover el modo, así que no hay que inventar detección de cambios en ningún lado.
@@ -158,7 +160,7 @@ Tests del PR 15:
 - **Edge**: el valor manual sobrevive a `dropOccurrences` y a `reopenSession` + `finishSession`.
 - **Edge**: un cambio explícito de `replacementMode` **sí** lo reemplaza y apaga el flag — y volver al modo original vuelve a dar el valor calculado, no el manual (§5, la vía de vuelta).
 - **Edge**: una regla de tipo que cambia el modo efectivo del grupo **sí** lo reemplaza (#11); una regla que no cambia el modo efectivo **no** lo toca.
-- **Edge**: `applyConflictResolve` lo reemplaza (#10).
+- **Edge**: `applyConflictResolve` lo **conserva** desde ADR-083 §2 (#10) — lo reemplaza solo si el tipo elegido cambia el modo efectivo.
 - **Edge**: un patch con `replacementMode` y `replacementValue` juntos deja el valor del usuario y el flag en `true` (§2).
 - **Edge**: `patch.replacementValue = ""` cuenta como edición manual (§2).
 - **Contract**: el flag no aparece en `getSnapshot`, ni en `EntityGroup`, ni en ningún payload de evento — mismo test que ADR-069 §5 tiene para `personGenderUserSet`.
