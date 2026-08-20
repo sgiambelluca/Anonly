@@ -137,6 +137,8 @@ Sobre un grupo de `type` distinto de `Person`, `patch.personGender` se **ignora 
 
 `InternalGroup` gana un `personGenderUserSet: boolean` — **bookkeeping interno, nunca expuesto** en `EntityGroup` ni en ningún evento, mismo criterio que `normalizedValues`/`aliasFrequency`/`aliasFirstSeen`.
 
+> **Precisión de ADR-078 §2 (2026-08-19)**: esto sigue vigente **para este flag**, pero la razón no es "los flags `*UserSet` nunca salen". La regla, escrita a partir de acá: un flag `*UserSet` sale del motor **solo si su valor asociado no delata por sí mismo quién lo escribió**. `personGender` sí delata —el humano que eligió "femenino" lee `[MUJER 01]`— así que este flag se queda adentro; `replacementValue` no delata, así que `replacementValueUserSet` sí se expone (ADR-078 §1).
+
 Sin él, la promesa de ADR-060 §4 ("el override del usuario gana siempre y es permanente") es falsa en el caso que más importa: un usuario que elige **"neutral"** deja el campo vacío, que es indistinguible de "todavía no se infirió", y la próxima inferencia se lo pisa. `Grouping_Engine.md` §13 caso 34 pide explícitamente que sobreviva a `finishSession`, a `reopenSession` y a una re-inferencia posterior.
 
 Ciclo de vida: se enciende en `applyGroupUpdate` con `patch.personGender` presente; sobrevive `finishSession` y `reopenSession` (que no tocan los grupos); se limpia con la sesión en `closeSession`. En una **fusión** (`applyGroupMerge`), el grupo resultante hereda el `personGender` y el flag del grupo que sobrevive (el de menor `indexInType`, ADR-060 §13 caso 5): una elección del humano no se pierde por fusionar.
