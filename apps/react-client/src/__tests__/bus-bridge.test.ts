@@ -398,6 +398,10 @@ describe("bus-bridge", () => {
 
     beforeEach(() => {
       useDegradedStore.getState().reset();
+      // El puente descarta los eventos de OTRO documento (ADR-062 §3, "por
+      // documento"): sin un documento activo que coincida, no hay veredicto
+      // que sembrar. Es la precondición del filtro, no un detalle del setup.
+      useDocumentStore.setState({ id: "doc-1" });
     });
 
     it("el veredicto del panel anonimizado llega al store", () => {
@@ -441,6 +445,27 @@ describe("bus-bridge", () => {
       });
 
       expect(selectGroupIsDegraded(useDegradedStore.getState(), "g1")).toBe(true);
+
+      unsubscribe();
+    });
+
+    // ADR-062 §3 dice "por documento". El Orchestrator documenta que un
+    // PREVIEW_UPDATED puede llegar tarde: si un evento rezagado del documento
+    // anterior pasara el filtro, sembraría marcas de un documento muerto sobre
+    // el recién abierto — advertencias sobre grupos que el usuario no tiene.
+    it("un evento de OTRO documento no siembra el veredicto", () => {
+      const bus = createEventBus({ logger: createTestLogger() });
+      const unsubscribe = subscribe(bus, stores);
+
+      bus.emit(EventChannel.Render, EngineEvents.PREVIEW_UPDATED, {
+        documentId: "doc-viejo",
+        pageIndex: 2,
+        kind: "anonymized",
+        canvasBlobUrl: "blob:anon-2",
+        degraded: [degradedAnnotation("g1", 2)],
+      });
+
+      expect(selectGroupIsDegraded(useDegradedStore.getState(), "g1")).toBe(false);
 
       unsubscribe();
     });
