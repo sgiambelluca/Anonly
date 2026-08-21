@@ -351,9 +351,16 @@ Valores fijos, retirados del formulario:
 | `jpegQuality` | **`0.92`** | Punto visualmente indistinguible de 1.00 en texto. Ver abajo. |
 | `dpi` | `150` | Default de `ExportConfig`. |
 | `title` (metadata) | `""` | Nadie lo llenó nunca en las pruebas; `includeOriginalMetadata: false` ya protege lo que importa. |
-| `filename` | `anonimizado.pdf` | El navegador ya deja renombrar al guardar. |
+| ~~`filename`~~ | — | **Revertido tras la prueba manual.** Ver la nota de abajo. |
 
 **Sobre `jpegQuality = 0.92` y no `1.00`**: se consideró 1.00 buscando "lo más cercano al original". No lo consigue — el original ya se perdió al rasterizar a 150 DPI, y de 0.92 a 1.00 solo crece el archivo (×3–4 sobre q 0.85, Contexto §5). **La palanca de fidelidad real es el DPI**, y es la única de las cinco que valdría exponer si aparece el pedido.
+
+> **El nombre de archivo vuelve al formulario** (corrección de este mismo §5, 2026-08-21). Se lo
+> había fijado junto con los cuatro técnicos, con el argumento de que "el navegador ya deja
+> renombrar al guardar": **es falso** en la configuración por defecto de Chrome, que descarga
+> directo sin diálogo. Y no era de la misma clase que los otros: el criterio del recorte es "se
+> pregunta lo que altera el documento", y el nombre **identifica el resultado** — no ajusta su
+> codificación. Sin validación: vacío cae al default y la extensión `.pdf` se completa sola.
 
 **El checkbox de referencia de marcadores se conserva arriba** y es el único control del diálogo, porque **cambia el documento**: suma una página (ADR-059 §6). Esa es la línea — se pregunta lo que altera el resultado, no lo que ajusta su codificación.
 
