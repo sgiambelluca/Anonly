@@ -189,13 +189,14 @@ Queda como **errata** en ADR-062 y en el comentario de `kernel.ts`, no como camb
 - Tests de `render-engine`: los de ADR-058 §7 re-derivados contra el criterio nuevo, más uno que **falsifique el modo de falla real** — un reemplazo largo sobre una caja de cuerpo de texto (`boxHeight` 12, escala 1) que hoy da veredicto vacío y debe pasar a marcar.
 - Test de invariancia: el actual se reescribe para ejercitar **el fondo del bucle**, que es el régimen que nunca tocó. Debe pasar a escalas 0,5 / 1 / 2 / 4 con el veredicto idéntico.
 - Test de no-regresión de falsos positivos: `[PERSONA 01]` y `[ORGANIZACION 01]` en cajas apretadas **no** se marcan.
+- Dos tests sobre `fitsNaturally` a `fullScale`, en sus dos direcciones (`fitsNaturally mide contra el tamaño de dibujo: …`), que fijan la tercera categoría de §2. El negativo es además el único test del repo que falsifica la bicondicional de ADR-058 §2 —"si el token entra, no se repinta nada"— a cualquier escala, y para eso su `originalValue` tiene que medir exactamente lo que su caja declara: sin esa consistencia la calibración rechaza el plan por la condición (e) y el test queda inerte.
 - Contract test de `shared`: `DEGRADED_FONT_RATIO` vale 0,5 y su docstring dice qué razón mide.
 - **El gate manual de §4**, que es el único que puede juzgar el umbral.
 
 ## Docs actualizados
 
 - `core/Contracts.md` §6 — `DEGRADED_FONT_RATIO`: valor nuevo y semántica nueva.
-- `core/Render_Engine.md` §13 caso 28 y §14 — el criterio y sus tests.
+- `core/Render_Engine.md` §2, §13 casos 25 y 28, §14 y §15 — el criterio, el piso escalado y sus once tests.
 - `adr/ADR-058` — errata en §7: el veredicto pasa a medir el ancho. El resto del ADR (shrink-to-fit, repintado de línea, leyenda) queda intacto.
 - `adr/ADR-062` — errata en §"renderFull": la invariancia que se invoca no se cumplía; se cumple recién con este ADR.
 - `roadmap/Post_Hito10.8_Pendientes.md` §16 — pasa de "necesita ADR" a "decidido acá".
