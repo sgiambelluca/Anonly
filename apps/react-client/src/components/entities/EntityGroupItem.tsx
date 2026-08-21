@@ -66,10 +66,23 @@ function EntityGroupItemImpl({ group }: EntityGroupItemProps) {
         onCheckedChange={(checked) => actions.updateGroup(group.id, { enabled: checked })}
         aria-label={`Habilitar ${group.canonicalValue}`}
       />
-      <span className="flex-1 truncate text-sm text-text-primary" title={group.canonicalValue}>
+      {/*
+        `flex-[2]` contra el `flex-1` del selector de modo (ADR-087, Contexto
+        §1 hallazgo 2): con el nombre en `flex-1 truncate` y el selector en
+        `shrink-0`, **el nombre absorbía todo el encogido** — a 900 px de
+        ventana las filas decían "Juan …" y "Carlo…" mientras el dropdown
+        conservaba su ancho entero. Es la jerarquía exactamente al revés: el
+        nombre es el dato con el que el usuario decide, el modo es el control
+        que en la mayoría de las filas ni toca. Ahora los dos encogen, y el
+        nombre se queda con el doble.
+      */}
+      <span
+        className="min-w-0 flex-[2] truncate text-sm text-text-primary"
+        title={group.canonicalValue}
+      >
         {group.canonicalValue}
       </span>
-      <span className="text-xs text-text-secondary">({group.members.length})</span>
+      <span className="shrink-0 text-xs text-text-secondary">({group.members.length})</span>
       {group.replacementValueUserSet ? (
         <span
           role="img"

@@ -26,7 +26,7 @@ describe("getPipelineStageLabel", () => {
         modelLoading: { modelId: "x", progress: 0.45 },
       }),
     );
-    expect(label).toBe("Cargando modelo NER… 45%");
+    expect(label).toBe("Preparando el detector de nombres… 45%");
   });
 
   it("prioritizes exportProgress over the stage text", () => {
@@ -40,33 +40,33 @@ describe("getPipelineStageLabel", () => {
     const label = getPipelineStageLabel(
       makeSnapshot({ stage: PipelineStage.Extracting, current: 3, total: 10 }),
     );
-    expect(label).toBe("Extrayendo página 3 de 10…");
+    expect(label).toBe("Leyendo el texto: página 3 de 10…");
   });
 
   it("falls back to a generic Extracting text when total is 0", () => {
     const label = getPipelineStageLabel(makeSnapshot({ stage: PipelineStage.Extracting }));
-    expect(label).toBe("Extrayendo documento…");
+    expect(label).toBe("Leyendo el texto…");
   });
 
   it("shows OCR page counts with percentage", () => {
     const label = getPipelineStageLabel(
       makeSnapshot({ stage: PipelineStage.OCRing, current: 5, total: 10, progress: 0.65 }),
     );
-    expect(label).toBe("OCR página 5 de 10… 65%");
+    expect(label).toBe("Reconociendo texto: página 5 de 10…");
   });
 
   it("shows Detecting page counts without percentage", () => {
     const label = getPipelineStageLabel(
       makeSnapshot({ stage: PipelineStage.Detecting, current: 4, total: 10 }),
     );
-    expect(label).toBe("Analizando página 4 de 10…");
+    expect(label).toBe("Buscando datos sensibles: página 4 de 10…");
   });
 
   it.each([
-    [PipelineStage.Importing, "Importando documento…"],
-    [PipelineStage.Grouping, "Agrupando entidades…"],
+    [PipelineStage.Importing, "Abriendo el documento…"],
+    [PipelineStage.Grouping, "Agrupando lo encontrado…"],
     [PipelineStage.Ready, "Listo"],
-    [PipelineStage.Rendering, "Renderizando vista previa…"],
+    [PipelineStage.Rendering, "Preparando la vista previa…"],
     [PipelineStage.Done, "Exportado"],
     [PipelineStage.Cancelled, "Cancelado"],
     [PipelineStage.Failed, "Error"],

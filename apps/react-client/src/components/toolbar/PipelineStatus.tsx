@@ -33,6 +33,8 @@
  * NER activado.
  */
 
+import { PipelineStage } from "@anonly/anonymization-core";
+
 import { actions } from "../../core-adapter/actions.js";
 import { usePipelineStore } from "../../store/pipeline.store.js";
 import { useSettingsStore } from "../../store/settings.store.js";
@@ -41,6 +43,13 @@ import { Button } from "../common/Button.js";
 
 import { getPipelineErrorPresentation } from "./pipelineErrorPresentation.js";
 import { getPipelineStageLabel } from "./pipelineStageLabel.js";
+
+/** Stages en los que el pipeline ya no reporta progreso (ADR-087 §7.1). */
+const TERMINAL_STAGES: ReadonlySet<PipelineStage> = new Set([
+  PipelineStage.Ready,
+  PipelineStage.Done,
+  PipelineStage.Cancelled,
+]);
 
 export function PipelineStatus() {
   const stage = usePipelineStore((state) => state.stage);
@@ -113,16 +122,27 @@ export function PipelineStatus() {
     exportProgress,
   });
   const percent = Math.round(Math.min(1, Math.max(0, progress)) * 100);
+  // ADR-087, Contexto §1 hallazgo 4: hasta acá la barra se renderizaba en todo
+  // stage no-`Idle`, así que en `Ready` quedaba en `width: 0%` con el texto
+  // "Listo" al lado — el elemento más grande de la toolbar mostrando "0 %"
+  // mientras el texto decía "terminado". Una barra sin progreso que reportar
+  // no se dibuja.
+  const showProgressBar = !TERMINAL_STAGES.has(stage);
 
   return (
-    <div className="flex min-w-[220px] flex-col gap-1" role="status" aria-live="polite">
-      <span className="text-xs font-medium text-text-primary">{label}</span>
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-bg-tertiary">
-        <div
-          className="h-full rounded-full bg-accent transition-[width]"
-          style={{ width: `${percent}%` }}
-        />
-      </div>
+    // Sin `min-w` fijo (ADR-087 §7.1): los 220 px anteriores truncaban el
+    // texto por debajo de ~1100 px de ventana y a 900 px la barra quedaba
+    // tapada por el botón "Exportar".
+    <div className="flex min-w-0 flex-col gap-1" role="status" aria-live="polite">
+      <span className="truncate text-sm font-medium text-text-primary">{label}</span>
+      {showProgressBar ? (
+        <div className="h-1.5 w-full overflow-hidden rounded-full bg-bg-tertiary">
+          <div
+            className="h-full rounded-full bg-accent transition-[width]"
+            style={{ width: `${percent}%` }}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

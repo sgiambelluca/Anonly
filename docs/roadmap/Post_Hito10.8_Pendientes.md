@@ -10,6 +10,8 @@
 >
 > **Estado (2026-08-14)**: entra el §10, de la planificación del Hito 10.6 (ADR-072).
 >
+> **Estado (2026-08-21, segunda tanda)**: entra el **§19**, y es **la única regresión de todo el documento**: ADR-087 §2 retiró `SideBySideViewer`, que cargaba la única conducta responsive de la app, sin escribir el reemplazo. Necesita una decisión de producto (qué ancho mínimo se soporta), no de implementación.
+>
 > **Estado (2026-08-21)**: entran el **§17** (tokens de reemplazo pisándose en el preview) y el **§18** (ruido de detección sin distinguir de los aciertos), los dos de la prueba manual del rediseño de UX (**ADR-087**). Ninguno es regresión de ese rediseño: el §17 se vuelve más visible porque el visor pasó a ocupar todo el ancho, y el §18 está anotado en ADR-087 "Fuera del alcance" §7 — acá va con el detalle medido.
 >
 > **Estado (2026-08-15) — cinco entradas dejan de ser pendientes**: el humano tomó los **§1, §2, §4, §4bis y §10** como **Hito 10.9** (`MVP.md` §4). Cada una tiene ahora su ADR y su propagación a specs: §1 → **ADR-073**, §2 → **ADR-074**, §4 y §4bis → **ADR-075** (juntos, porque tocan la misma tabla de patrones y el propio §4bis lo pedía), §10 → **ADR-076**. Se conservan acá, con el diagnóstico original intacto y una nota al pie de cada una: son la medición sobre el documento real, y el ADR se escribió contra ellas. Siguen **abiertos** el §5 (recall de NER, que no es un bug), el §6 (marca de agua, sin construir por decisión), el §7 (solapamiento, ADR-063 §6), el §8 (rotación de página, sin datos para calibrar) y el §9 (variantes de ops de imagen).
@@ -351,3 +353,23 @@ Las dos tienen checkbox marcado, cuentan para el total de "N datos encontrados",
 3. **No tocar la UI y subir los umbrales de los patrones** — resuelve el falso positivo del teléfono pero no el error de NER, y arriesga recall.
 
 La 1 y la 2 no son excluyentes. Lo que hay que decidir primero es **de dónde sale el umbral**, porque hoy `EntityGroup` no expone confidence: es de `Occurrence`, y un grupo tiene varias.
+
+---
+
+## 19. El layout no tiene estrategia responsive — **regresión introducida por ADR-087 §2**
+
+**Procedencia**: prueba manual del rediseño, 2026-08-21. **A diferencia del §17 y el §18, esto sí es una regresión**, y se anota como tal.
+
+**Qué se rompió.** `SideBySideViewer` cargaba la **única** conducta responsive de la app: por debajo de `lg` (1024 px) alternaba los dos visores con tabs (`Components.md` §5.1, "Mobile (< 1024 px): tabs en lugar de lado a lado"). ADR-087 §2 lo retira —correctamente, porque con un solo visor no hay dos paneles que alternar— pero **no lo reemplaza por nada**: el layout de ②b es ahora una barra lateral de ancho fijo (`min-w-[340px]`) más el visor, sin ningún breakpoint.
+
+**Medido a 375 px**: la barra lateral ocupa 340 de los 375 px, el visor queda reducido a una tira de ~35 px, y la toolbar se desborda con scroll horizontal. A 900 px funciona, pero apretado: los nombres de personas con control de género se truncan ("María Gó…").
+
+**Lo que ya se corrigió** en el mismo PR, porque era solapamiento y no una decisión de diseño: el bloque del logo no encogía y los botones se le montaban encima. Ahora encoge y la bajada se oculta por debajo de `sm`.
+
+**Lo que NO se decidió, y necesita decisión del humano**: qué hace el layout por debajo de `lg`. Tres opciones, no excluyentes:
+
+1. **Tabs "Entidades | Documento"**, que es el equivalente directo de lo que hacía `SideBySideViewer`: una sola región visible a la vez, con el toggle Original/Anonimizado adentro de la de documento.
+2. **Barra lateral como cajón** (off-canvas) sobre el visor, con un botón para abrirla. Conserva el visor siempre visible, que es lo que se está revisando.
+3. **Declarar un ancho mínimo soportado** y mostrar un aviso por debajo. Es una herramienta de trabajo de escritorio —anonimizar una pericia de 200 páginas en un teléfono no es un caso de uso— y fingir que funciona es peor que decir que no.
+
+La 3 es defendible y la más barata, pero **es una decisión de producto**, no de implementación: implica declarar en qué anchos la herramienta se sostiene. Hasta que se decida, el rediseño **asume escritorio** y el spec (`UX_Guidelines.md` §2) no dice nada sobre el tema — que es en sí parte del gap: la sección que retiró el layout de cuatro paneles retiró también su párrafo de mobile sin escribir el reemplazo.
