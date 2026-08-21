@@ -828,8 +828,9 @@ describe("RenderEngine — unit tests", () => {
      * `makeLineRepaintScenario` no sirve para eso: sus anchos salen de una
      * fuente de 10 px, la de una caja de 14 pt a escala 1.
      */
+    const FULL_SCALE = 2.08;
     const anchoAFullScale = (text: string): number =>
-      measureStubTextWidth(text, "12px sans-serif") / 2.08;
+      measureStubTextWidth(text, "12px sans-serif") / FULL_SCALE;
 
     it("line repaint does not trigger when the token fits (current path preserved)", async () => {
       // Reemplazo con una caja ANCHA (el token entra a tamaño natural) pero
@@ -993,7 +994,7 @@ describe("RenderEngine — unit tests", () => {
     // escalar 21,60, y las dos entran. Solo la primera repinta.
     it("fitsNaturally mide contra el tamaño de dibujo: a fullScale un token que no entra repinta", async () => {
       const docId = "doc-fitsnaturally-positivo";
-      const scale = 2.08;
+      const scale = FULL_SCALE;
 
       const juanWidth = anchoAFullScale("Juan");
       const garciaWidth = anchoAFullScale("Garcia");
@@ -1047,7 +1048,7 @@ describe("RenderEngine — unit tests", () => {
 
     it("fitsNaturally mide contra el tamaño de dibujo: a fullScale un token que entra no repinta", async () => {
       const docId = "doc-fitsnaturally-negativo";
-      const scale = 2.08;
+      const scale = FULL_SCALE;
 
       // Caja holgada: el token entra incluso al tamaño de dibujo (16,64px), así
       // que ADR-058 §2 manda no tocar nada — un solo `fillText`, centrado.
@@ -1055,8 +1056,11 @@ describe("RenderEngine — unit tests", () => {
       // El `originalValue` mide EXACTAMENTE lo que la caja declara (16
       // caracteres a 12px = 115,2px = el ancho escalado), y eso no es cosmético:
       // la primera versión de este test usaba "Juan" sobre una caja cuatro veces
-      // más ancha, así que la calibración veía un errorRatio de 0,75 y rechazaba
-      // el plan por la condición (e) ANTES de que `fitsNaturally` importara. El
+      // más ancha, así que la calibración veía un errorRatio de 0,545 y
+      // rechazaba el plan por la condición (e) ANTES de que `fitsNaturally`
+      // importara. (0,545 es el AGREGADO sobre todas las muestras —86,4/158,4—,
+      // que es lo que `candidateErrorRatio` compara contra el umbral; el 0,75
+      // es el error de la muestra "Juan" sola y no gobierna nada.) El
       // test afirmaba "no repinta" y en realidad verificaba "la calibración no
       // converge sobre una caja inconsistente": borrar la condición de
       // activación entera lo dejaba en verde.
@@ -1129,7 +1133,7 @@ describe("RenderEngine — unit tests", () => {
     // con 38,7% cuando el piso lo infla.
     it("line repaint still activates at fullScale on a body-text box", async () => {
       const docId = "doc-repaint-fullscale";
-      const scale = 2.08; // `RenderConfig.fullScale` — la escala del PDF exportado.
+      const scale = FULL_SCALE;
       const boxHeight = 8;
 
       const anaWidth = anchoAFullScale("Ana");
