@@ -12,6 +12,7 @@ import {
   type UnloadDocumentPayload,
   type WorkerInbound,
   type WorkerOutbound,
+  type Word,
 } from "@anonly/shared";
 import { getDocument } from "pdfjs-dist";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -948,6 +949,83 @@ describe("RenderEngine — unit tests", () => {
       expect(result.errorRatio).toBe(0);
     });
 
+    // REGRESIÓN de ADR-086: el piso de fuente escalado se había filtrado al
+    // tamaño con el que `calibrateLineFont` mide sus 12 candidatos. En una caja
+    // de cuerpo de texto (por debajo de ~11,4 pt) a `fullScale` el piso muerde y
+    // ese tamaño quedaba 42,9% por encima del real (16,64 px contra 11,65), lo
+    // que empuja el `errorRatio` mínimo alcanzable por encima de
+    // LINE_CALIBRATION_ERROR_THRESHOLD (0,15) POR CONSTRUCCIÓN: el repintado se
+    // apagaba solo, sin error y sin log, en el PDF que el usuario entrega.
+    //
+    // Ninguno de los otros tests de este describe lo veía: todos corren a la
+    // escala default (`previewScale: 1`), donde `8 × 1 = 8` y el piso escalado
+    // es idéntico al absoluto. Es el modo de falla que `Render_Engine.md` §15
+    // ítem 8c ya describía — "cae al shrink-to-fit sin error y el gate pasa
+    // mirando solo el preview".
+    //
+    // La geometría va explícita y no por `makeLineRepaintScenario`: ese helper
+    // construye sus anchos para una fuente de 10 px (caja de 14 pt a escala 1),
+    // y acá hacen falta consistentes con 12 px —`round(0.7 × 8 × 2.08)`— para
+    // que la calibración cierre con error 0 cuando el tamaño es el correcto y
+    // con 38,7% cuando el piso lo infla.
+    it("line repaint still activates at fullScale on a body-text box", async () => {
+      const docId = "doc-repaint-fullscale";
+      const scale = 2.08; // la escala de `mode: "full"` (config.ts), o sea el export.
+      const boxHeight = 8;
+      const anchoConsistente = (text: string): number =>
+        measureStubTextWidth(text, "12px sans-serif") / scale;
+
+      const anaWidth = anchoConsistente("Ana");
+      const garciaWidth = anchoConsistente("Garcia");
+      const viveWidth = anchoConsistente("vive");
+      const garciaX = 20 + anaWidth + 4;
+      const viveX = garciaX + garciaWidth + 4;
+
+      const word = (text: string, x: number, width: number): Word => ({
+        text,
+        bbox: { x, y: 10, width, height: boxHeight },
+        pageIndex: 0,
+        confidence: 1,
+        source: "pdf",
+      });
+
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument({
+            pageCount: 1,
+            pageFactory: () => createMockPage({ width: 150, height: 200 }),
+          }),
+        ),
+      );
+      await engine.init(ctx);
+      await engine.loadDocument(docId, createValidBuffer());
+
+      await engine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+          scale,
+          replacements: [
+            makeReplacement({
+              mode: ReplacementMode.Placeholder,
+              originalValue: "Ana",
+              replacementValue: "[PERSONA MUY LARGA 01]",
+              bbox: { x: 20, y: 10, width: anaWidth, height: boxHeight },
+            }),
+          ],
+          lineWords: [word("Garcia", garciaX, garciaWidth), word("vive", viveX, viveWidth)],
+        }),
+        ctx,
+      );
+
+      const [canvas] = getCreatedCanvases();
+      const fillTextCalls = canvas!.calls.filter((c) => c.op === "fillText");
+      // Token + las dos vecinas redibujadas: el repintado se activó.
+      expect(fillTextCalls).toHaveLength(3);
+    });
+
     it("shift is uniform: relative distances between repainted words are preserved", async () => {
       const docId = "doc-repaint-uniform-shift";
       const scenario = makeLineRepaintScenario();
@@ -1012,12 +1090,18 @@ describe("RenderEngine — unit tests", () => {
 
   // ─── ADR-058 §7 (Hito 10.5, PR 6): aviso de degradación ───
   describe("aviso de degradación (ADR-058 §7)", () => {
-    // Dos reemplazos con el mismo bbox.height (mismo tamaño natural, 28px:
-    // `replacementFontSize(40) = round(40*0.7)`), sin `lineWords` (caen
-    // directo al shrink-to-fit de PR1, nunca al repintado de línea). Uno se
-    // encoge apenas por encima del umbral (17/28 ≈ 0.607 ≥ 0.6) y el otro
-    // bien por debajo (10/28 ≈ 0.357 < 0.6) — la única variable entre los dos
-    // es el ancho disponible.
+    // Dos reemplazos con el mismo bbox.height (misma referencia, 28px:
+    // `naturalReferenceSize(40) = 40 × 0.7`), sin `lineWords` (caen directo al
+    // shrink-to-fit de PR1, nunca al repintado de línea). La única variable
+    // entre los dos es el ancho disponible.
+    //
+    // **Cocientes re-derivados para el criterio de ADR-086** (razón de anchos,
+    // umbral 0.5), porque los viejos describían la magnitud que ya no gobierna
+    // la aserción: ancho natural = 5 chars × 28px × 0.6 = 84px, así que el
+    // mild da 52/84 ≈ 0.619 (no marca) y el severo 31/84 ≈ 0.369 (marca). Los
+    // veredictos coinciden con los del criterio viejo —17/28 ≈ 0.607 y
+    // 10/28 ≈ 0.357 contra 0.6— pero por aritmética, no por diseño: el margen
+    // del mild pasó de 0.007 a 0.119.
     it("Degraded annotation emitted only below DEGRADED_FONT_RATIO, not on every fallback", async () => {
       const docId = "doc-degraded-threshold";
       vi.mocked(getDocument).mockReturnValue(
@@ -1276,6 +1360,15 @@ describe("RenderEngine — unit tests", () => {
               replacementValue: "[PERSONA 01]",
               bbox: { x: 0, y: 0, width: 35, height: 12 },
             }),
+            makeReplacement({
+              groupId: "g-organizacion",
+              occurrenceId: "o-organizacion",
+              mode: ReplacementMode.Placeholder,
+              // El segundo caso que ADR-086 "Validación" pide por nombre: 17
+              // caracteres sobre 50px da 0.584, otra vez entre 0.5 y 0.6.
+              replacementValue: "[ORGANIZACION 01]",
+              bbox: { x: 100, y: 0, width: 50, height: 12 },
+            }),
           ],
         }),
         ctx,
@@ -1285,6 +1378,49 @@ describe("RenderEngine — unit tests", () => {
         (call) => call[1] === EngineEvents.PREVIEW_UPDATED,
       )?.[2] as { degraded?: ReadonlyArray<Annotation> };
       expect(payload.degraded).toEqual([]);
+    });
+
+    // ADR-086 §2(b) sobre el CALL SITE, no sobre la función. El test puro de
+    // `kernel.test.ts` le pasa el piso por parámetro, así que verifica que
+    // `fitReplacementFontSized` lo respete — pero no que `paintReplacements` se
+    // lo pase escalado, que es lo que §2(b) decide. Sin este test, borrar el
+    // `* scale` del call site no rompe nada.
+    it("el piso de dibujo llega escalado al fitting: a escala 2 no se dibuja a 8px", async () => {
+      const docId = "doc-adr086-piso-call-site";
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+      );
+      await engine.init(ctx);
+      await engine.loadDocument(docId, createValidBuffer());
+
+      await engine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+          scale: 2,
+          replacements: [
+            makeReplacement({
+              groupId: "g-piso",
+              occurrenceId: "o-piso",
+              mode: ReplacementMode.Mask,
+              // Largo suficiente para que el bucle llegue hasta el piso.
+              replacementValue: "A".repeat(40),
+              bbox: { x: 0, y: 0, width: 40, height: 12 },
+            }),
+          ],
+        }),
+        ctx,
+      );
+
+      const [canvas] = getCreatedCanvases();
+      const fillTextCall = canvas!.calls.find((c) => c.op === "fillText");
+      expect(fillTextCall).toBeDefined();
+      const sizePx = Number(/^([\d.]+)px/.exec(fillTextCall!.font ?? "")?.[1] ?? 0);
+      // Piso escalado = 8 × 2. Con el piso absoluto esto daría 8: la mitad del
+      // tamaño en pantalla para la misma decisión visual.
+      expect(sizePx).toBeGreaterThanOrEqual(16);
     });
 
     // ADR-086 §2: invariancia EXACTA, incluyendo el fondo del bucle — que es

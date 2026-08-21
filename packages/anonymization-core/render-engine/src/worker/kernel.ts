@@ -359,7 +359,17 @@ function planLineRepaint(
   // (e) — calibración inversa sobre el conjunto de la línea: la propia
   // palabra reemplazada (ancho real conocido: su propio bbox) más las
   // vecinas de `lineWords`.
-  const size = replacementFontSize(scaledBbox.height, REPLACEMENT_MIN_FONT_PX * scale);
+  // El piso va SIN escalar acá, a propósito: ADR-086 §2(b) escala el piso del
+  // bucle de dibujo y no decidió nada sobre la calibración, que es de ADR-058
+  // §6(e). `sizePx` es el tamaño fijo contra el que se miden los 12 candidatos,
+  // así que tiene que aproximar el tamaño REAL de la línea en la página; con el
+  // piso escalado, una caja de 8 pt a `fullScale` daba 16,64 px contra 11,65 px
+  // reales —42,9% de error contra 3,0% de esta fórmula— y eso empuja el
+  // `errorRatio` mínimo alcanzable por encima de LINE_CALIBRATION_ERROR_THRESHOLD
+  // (0,15) por construcción: el repintado de línea se apagaba solo en el PDF
+  // exportado, sin error y sin log. Mejorar esta estimación es posible pero es
+  // otro cambio, con su propia justificación y su propio gate visual.
+  const size = replacementFontSize(scaledBbox.height, REPLACEMENT_MIN_FONT_PX);
   const samples: ReadonlyArray<CalibrationSample> = [
     { text: replacement.originalValue, actualWidth: scaledBbox.width },
     ...neighbors.map((word) => ({ text: word.text, actualWidth: word.bbox.width * scale })),
@@ -689,22 +699,39 @@ export interface FittedReplacementFont {
    * (final/natural) × (anchoDisp / (final × k)) = anchoDisp / (natural × k)
    * ```
    *
-   * Con `measureText` real la cancelación es aproximada en vez de exacta (las
-   * métricas no son perfectamente lineales en el tamaño, por hinting); la
-   * formulación por anchos es la primaria y la del producto solo explica de
-   * dónde sale.
+   * Con `measureText` real la cancelación es aproximada en vez de exacta, por
+   * dos motivos: las métricas no son perfectamente lineales en el tamaño (por
+   * hinting, y `naturalWidth` se mide a un tamaño FRACCIONARIO, que es donde
+   * esa cuantización es peor), y el aplastado horizontal no es una propiedad
+   * de la fuente sino una **elección del navegador** — el spec de HTML le
+   * permite satisfacer `maxWidth` comprimiendo los glifos o sustituyendo por
+   * una variante condensada. La formulación por anchos es la primaria y la del
+   * producto solo explica de dónde sale; y las dos cosas suben la apuesta del
+   * gate visual de ADR-086 §4, no la bajan.
+   *
+   * El `Math.min(1, …)` acota el caso en que el texto entra con holgura: ahí
+   * la compresión horizontal real es 1 y el producto verdadero sería
+   * `final/natural`, algo menor que este cociente. La discrepancia está acotada
+   * por un escalón de fuente (el bucle baja de a 1 px) y va en la dirección
+   * conservadora que ADR-086 §3 declara: ante la duda, no se marca.
    */
   readonly widthRatio: number;
 }
 
 /**
- * Núcleo real del shrink-to-fit, exponiendo el tamaño NATURAL (con el que
- * arrancó, `replacementFontSize(boxHeight)`) y el FINAL (el que terminó
- * usando tras encoger o no). ADR-058 §7 necesita los dos para el umbral de
- * degradación (`finalSizePx / naturalSizePx < DEGRADED_FONT_RATIO`) — una
- * razón, no un tamaño absoluto (Contracts.md §6). `fitReplacementFont` (abajo)
- * sigue devolviendo solo el string de fuente sobre el mismo cálculo: ningún
- * call site ni test de PR1 cambia.
+ * Núcleo real del shrink-to-fit. Devuelve el font con el que se dibuja, el
+ * tamaño de REFERENCIA (`naturalReferenceSize(boxHeight)`, que nunca se
+ * dibuja), el FINAL (tras encoger o no) y el **veredicto de legibilidad**.
+ *
+ * Desde ADR-086 el veredicto es `widthRatio` —la razón de anchos— y no el
+ * cociente de tamaños que pedía ADR-058 §7: aquél medía el encogido vertical
+ * de la fuente, que en una caja de cuerpo de texto no puede ocurrir porque los
+ * dos términos chocaban contra el mismo piso. Sigue siendo una razón y no un
+ * tamaño absoluto (Contracts.md §6), que es el principio que no cambió.
+ *
+ * `minFontPx` acota el bucle y es parámetro porque escala con el render
+ * (ADR-086 §2b). `fitReplacementFont` (abajo) sigue devolviendo solo el string
+ * de fuente sobre el mismo cálculo: ningún call site ni test de PR1 cambia.
  */
 export function fitReplacementFontSized(
   measureWidth: (font: string, text: string) => number,
@@ -977,8 +1004,15 @@ function paintReplacements(
     // texto rotado** (ADR-066 §7, caso 27 de Render_Engine.md §13 no
     // cambia): `sidewaysRotation !== undefined` salta directo al
     // shrink-to-fit, nunca llama a `tryRepaintLine`.
+    // `naturalReferenceSize` y no `replacementFontSize`: esta fuente **nunca se
+    // dibuja**, existe solo para preguntar "¿el token entra a su tamaño
+    // natural?". Es exactamente el caso que ADR-086 §2(a) describe, y usar acá
+    // el tamaño de dibujo —con piso y redondeo— hacía que la referencia
+    // mintiera hacia abajo (una caja de 12 pt declaraba 8 px cuando pedía 8,4),
+    // así que el token se medía más angosto de lo que es y `fitsNaturally` daba
+    // `true` de más: el repintado de línea de ADR-058 §2 se sub-activaba.
     const naturalFont = buildReplacementFont(
-      replacementFontSize(fontSizeAxisPx, REPLACEMENT_MIN_FONT_PX * scale),
+      naturalReferenceSize(fontSizeAxisPx),
       replacementFontFamily(replacement.mode),
     );
     const fitsNaturally =
@@ -1054,12 +1088,20 @@ function paintReplacements(
       );
     }
 
-    // ADR-058 §7/caso 28: la razón, no el tamaño en sí. `fitted.naturalSizePx`
-    // y `fitted.finalSizePx` salen los dos de este mismo `bbox` YA escalado
-    // (scaleBbox más arriba) — preview y full miden el reemplazo en su propio
-    // espacio de píxeles pero calculan la razón sobre magnitudes que escalan
-    // igual, así que el cociente es invariante sin ningún ajuste adicional
-    // (verificado por el test de invariancia de escala en unit.test.ts).
+    // ADR-086 §1 (reemplaza el criterio de ADR-058 §7/caso 28): la razón, y
+    // ahora la de ANCHOS. `widthRatio` compara el ancho disponible contra el
+    // que el texto tendría a su tamaño de referencia, así que mide la
+    // compresión total —el encogido de fuente y el aplastado horizontal de
+    // `fillText(..., maxWidth)` juntos—, no solo la primera.
+    //
+    // **Errata de ADR-062, que este comentario arrastraba**: decía que el
+    // cociente era invariante "sin ningún ajuste adicional". No lo era: el piso
+    // de fuente mínima es absoluto y `boxHeight` escala, así que cuando el
+    // bucle terminaba por el piso el cociente derivaba con el zoom. La
+    // invariancia es exacta recién con ADR-086 §2 —referencia sin piso ni
+    // redondeo, piso de dibujo escalado—, y el ajuste adicional existe: está
+    // tres líneas más abajo, en el `REPLACEMENT_MIN_FONT_PX * scale` que se le
+    // pasa al fitting.
     if (fitted.widthRatio < DEGRADED_FONT_RATIO) {
       degraded.push({
         id: replacement.occurrenceId,
