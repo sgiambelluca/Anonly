@@ -104,7 +104,9 @@ Consecuencias que este ADR acepta explícitamente:
 
 - **Se retira el principio UX-3** ("lado a lado obligatorio"). La comparación pasa de yuxtaposición a **alternancia**: el usuario conmuta entre las dos vistas conservando página y scroll. A cambio, el documento recibe todo el ancho, que es lo que un documento necesita para leerse.
 - **Se retira `ScrollSyncToggle`** y todo el `scrollSyncController` (ADR-054 §3). Con un solo panel no hay nada que sincronizar. `settings.scrollSyncEnabled` se retira de `settings.store`.
-- **`viewer.store.visibleRange`/`currentPageIndex` dejan de ser por `kind`** (ADR-054 §1): hay un solo panel. `RENDER_REQUESTED.kind` (ADR-056) **se conserva sin cambios** — sigue siendo requerido y sigue diciendo qué lado renderizar; lo que cambia es que ahora lo determina la posición del toggle, no qué panel se scrolleó.
+- **`viewer.store.visibleRange`/`currentPageIndex` dejan de ser por `kind`** (ADR-054 §1): hay un solo panel. Aparece `viewer.store.mode` (la posición del toggle). `RENDER_REQUESTED.kind` (ADR-056) **se conserva sin cambios** — sigue siendo requerido y sigue diciendo qué lado renderizar; lo que cambia es que ahora lo determina la posición del toggle, no qué panel se scrolleó.
+- **`viewer.store.previewByPage` sigue siendo por `kind`**: las dos vistas tienen imágenes distintas de la misma página, y conmutar el toggle tiene que poder pintar la cacheada sin esperar un render nuevo.
+- **Queda sin callers `unionVisibleRange`** (`visibleRange.ts`): existía solo para unir los rangos de los dos paneles en el pedido de render posterior a un `reanalyze` (ADR-056 §3). Se retira con sus tests en vez de dejarse como código muerto con cobertura.
 
 > **Lo que ADR-054 y ADR-056 resolvían sigue resuelto.** Aquellos ADRs existen porque dos paneles independientes pedían renders que se pisaban entre sí. Con un solo panel el problema no se resuelve: **deja de existir**. Ninguna de sus garantías se viola; sus mecanismos quedan sin caso de uso.
 

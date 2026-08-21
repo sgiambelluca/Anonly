@@ -18,31 +18,19 @@
  *   `scale = previewScale × zoom` (`zoomRenderScale.ts`).
  * - Los tres emisores (render inicial al observar `Ready`, cambio de rango
  *   montado, re-render debounced de zoom) pasan **siempre** el `kind` de este
- *   `PdfViewer` — nunca se deriva de `settings.scrollSyncEnabled` (ADR-056
- *   §2: sería una segunda fuente de verdad sobre quién necesita píxeles,
- *   capaz de desincronizarse del scroll real). Con la sincronización apagada
- *   eso da el comportamiento lazy pedido (solo se refresca el panel que el
- *   usuario mueve) sin ninguna rama condicional que lo implemente.
+ *   `PdfViewer`, que desde ADR-087 §2 es `viewer.store.mode` — la posición del
+ *   `ViewerModeToggle`. Sigue habiendo **una sola** fuente de verdad sobre qué
+ *   lado necesita píxeles, que es lo que ADR-056 §2 protege.
  *
- * `SideBySideViewer` monta dos `PdfViewer` (uno por `kind`), cada uno con su
- * propio `visibleRange`/`currentPageIndex` en `viewer.store` (ADR-054 §1: por
- * panel, no globales) — scrollean, montan y piden renders de forma
- * independiente. `zoom` sigue siendo global (los dos paneles comparten
- * escala): un cambio de zoom dispara el re-render debounced en los dos
- * `PdfViewer` a la vez, y con `pageIndices`/`scale` coincidentes si los
- * rangos montados de los dos paneles coinciden. Antes de ADR-056 (sin `kind`
- * en el payload) esos dos pedidos podían ser literalmente idénticos, y el
- * Render Engine igual reconstruía los dos lados por cada uno —trabajo
- * duplicado que el cache LRU por escala y el supersede por página (ADR-037
- * §3/§4) absorbían sin violar el orden por-página
- * (`07_Performance_Strategy.md` §3.1). Con `kind` requerido los dos eventos
- * ya nunca son idénticos —difieren siempre en `kind`— y el motor renderiza
- * solo el lado pedido por cada uno: no hay redundancia que absorber, cada
- * pedido es exactamente el trabajo que su panel necesita.
+ * Desde ADR-087 §2 hay **un solo** `PdfViewer`, y `kind` sale de
+ * `viewer.store.mode`. `RENDER_REQUESTED.kind` sigue requerido y con la misma
+ * semántica de ADR-056: el motor renderiza únicamente el lado pedido, que
+ * ahora es siempre el que el usuario está mirando. Conmutar el toggle cambia
+ * `mode` → cambia `kind` → se pide el render del otro lado; si esa página ya
+ * está en `previewByPage[kind]`, se pinta desde ahí sin esperar.
  *
- * `scrollSync` (creado una sola vez por `SideBySideViewer`, ADR-054 §3) se
- * pasa tal cual a `PageVirtualizer`: este componente no lo consume
- * directamente, solo lo reenvía junto con `kind`.
+ * Retirado con el lado a lado: la prop `scrollSync` y todo el controller de
+ * sincronización (ADR-054 §3). Con un panel no hay dos scrolls que alinear.
  */
 
 import type { TextMatch } from "@anonly/anonymization-core";
@@ -58,34 +46,28 @@ import { PageCanvas } from "./PageCanvas.js";
 import { computePageHeight, computePageWidth } from "./pageLayout.js";
 import { PageVirtualizer } from "./PageVirtualizer.js";
 import { shouldTriggerReadyRender } from "./readyRenderTrigger.js";
-import type { ScrollSyncController } from "./scrollSyncController.js";
 import { computeMountRange, rangeToPageIndices, type VisibleRange } from "./visibleRange.js";
 import { WordSelectionOverlay } from "./WordSelectionOverlay.js";
 import { isOriginalPanel } from "./wordSelectionRect.js";
 import { computeZoomRenderScale } from "./zoomRenderScale.js";
 import { createZoomRenderScheduler } from "./zoomRenderScheduler.js";
 
-export interface PdfViewerProps {
-  readonly kind: ViewerKind;
-  /** Controller de sincronización opcional de scroll (ADR-054 §3), instanciado una sola vez por `SideBySideViewer` y compartido entre sus dos `PdfViewer`. */
-  readonly scrollSync: ScrollSyncController;
-}
-
-const KIND_LABEL: Readonly<Record<PdfViewerProps["kind"], string>> = {
-  original: "PDF original",
-  anonymized: "PDF anonimizado",
+const KIND_LABEL: Readonly<Record<ViewerKind, string>> = {
+  original: "Documento original",
+  anonymized: "Documento anonimizado",
 };
 
-export function PdfViewer({ kind, scrollSync }: PdfViewerProps) {
+export function PdfViewer() {
+  // `kind` sale del toggle (ADR-087 §2), no de una prop: hay un solo visor.
+  const kind = useViewerStore((state) => state.mode);
   const documentId = useDocumentStore((state) => state.id);
   const pageCount = useDocumentStore((state) => state.pageCount);
   const pipelineStage = usePipelineStore((state) => state.stage);
   const zoom = useViewerStore((state) => state.zoom);
-  // Por panel desde ADR-054 §1: este PdfViewer solo lee/escribe SU propia
-  // entrada de `visibleRange`/`currentPageIndex`, nunca la del otro `kind`.
-  const visibleRange = useViewerStore((state) => state.visibleRange[kind]);
-  // Por panel: leer solo la entrada de este `kind` evita que este PdfViewer
-  // se re-renderice cuando llega un preview del otro panel (viewer.store.ts).
+  const visibleRange = useViewerStore((state) => state.visibleRange);
+  // `previewByPage` sigue siendo por `kind` (viewer.store.ts): las dos vistas
+  // tienen imágenes distintas de la misma página, y conmutar el toggle pinta
+  // la cacheada sin esperar un render nuevo.
   const previewByPage = useViewerStore((state) => state.previewByPage[kind]);
 
   const pageHeight = computePageHeight(zoom);
@@ -160,13 +142,14 @@ export function PdfViewer({ kind, scrollSync }: PdfViewerProps) {
   }, [zoom]);
 
   function handleVisibleRangeChange(range: VisibleRange): void {
-    useViewerStore.getState().setVisibleRange(kind, range.start, range.end);
+    useViewerStore.getState().setVisibleRange(range.start, range.end);
   }
 
-  // Página actual derivada por geometría de scroll (ADR-054 §5), reportada
-  // por `PageVirtualizer` — ya no por el mínimo del `IntersectionObserver`.
+  // Página actual derivada por geometría de scroll (ADR-054 §5, sigue
+  // vigente), reportada por `PageVirtualizer` — no por el mínimo del
+  // `IntersectionObserver`.
   function handleCurrentPageIndexChange(pageIndex: number): void {
-    useViewerStore.getState().setPage(kind, pageIndex);
+    useViewerStore.getState().setPage(pageIndex);
   }
 
   // DocumentSearchBox (ui/Components.md §5.4c, ADR-061 §8): estado local del
@@ -188,24 +171,25 @@ export function PdfViewer({ kind, scrollSync }: PdfViewerProps) {
 
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-      <div className="flex h-9 shrink-0 items-center justify-between gap-2 border-b border-border bg-bg-secondary px-3">
-        <h2 className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
-          {KIND_LABEL[kind]}
-        </h2>
-        {isOriginalPanel(kind) ? (
+      {/*
+        El rótulo del lado lo dice ahora el `ViewerModeToggle` (ADR-087 §2), así
+        que esta barra solo existe cuando hay buscador — o sea, en `original`.
+        Repetir "Documento original" al lado del toggle que ya dice "Original"
+        sería decir lo mismo dos veces en la misma línea.
+      */}
+      {isOriginalPanel(kind) ? (
+        <div className="flex h-9 shrink-0 items-center justify-end gap-2 border-b border-border bg-bg-secondary px-3">
           <DocumentSearchBox onActiveMatchChange={handleActiveMatchChange} />
-        ) : null}
-      </div>
+        </div>
+      ) : null}
       <div className="flex-1 overflow-hidden" aria-label={KIND_LABEL[kind]}>
         <PageVirtualizer
-          kind={kind}
           pageCount={pageCount}
           visibleRange={visibleRange}
           pageSize={pageHeight}
           pageWidth={pageWidth}
           onVisibleRangeChange={handleVisibleRangeChange}
           onCurrentPageIndexChange={handleCurrentPageIndexChange}
-          scrollSync={scrollSync}
           scrollRequest={scrollRequest}
           renderItem={(pageIndex) => {
             // `exactOptionalPropertyTypes` (Code_Standards.md §2) distingue

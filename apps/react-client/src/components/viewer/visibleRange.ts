@@ -67,23 +67,3 @@ export function rangeToPageIndices(range: VisibleRange): ReadonlyArray<number> {
   }
   return indices;
 }
-
-/**
- * Une dos rangos visibles en la menor cantidad de rangos contiguos que los
- * cubre: un solo rango fusionado si se solapan o son adyacentes (sin brecha
- * entre ellos), o los dos por separado si hay una brecha. Con `visibleRange`
- * por panel (ADR-054 §1), `SettingsDialog` ya no puede re-pedir previews
- * sobre un único rango global: usa esta unión para cubrir las dos regiones
- * que el usuario está viendo (`React_Client.md` §3.7, último párrafo) **sin**
- * incluir las páginas intermedias que ningún panel mira — forzar los dos
- * rangos a un único `{min start, max end}` pediría renders de esas páginas
- * intermedias cuando los paneles están scrolleados a regiones lejanas del
- * documento.
- */
-export function unionVisibleRange(a: VisibleRange, b: VisibleRange): ReadonlyArray<VisibleRange> {
-  const [first, second] = a.start <= b.start ? [a, b] : [b, a];
-  if (second.start <= first.end + 1) {
-    return [{ start: first.start, end: Math.max(first.end, second.end) }];
-  }
-  return [first, second];
-}

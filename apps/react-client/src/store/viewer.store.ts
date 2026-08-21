@@ -1,32 +1,30 @@
 /**
- * `viewer.store.ts` — estado del visor (página actual por panel, zoom,
- * previews) (Zustand).
+ * `viewer.store.ts` — estado del visor (página actual, zoom, previews)
+ * (Zustand).
  *
  * Fuente de verdad: docs/ui/React_Client.md §3.5.
  *
- * ADR-054 §1: `currentPageIndex` y `visibleRange` dejan de ser globales y
- * pasan a existir **por panel** (`ViewerKind`). Los dos `PdfViewer` scrollean
- * independiente, así que cada uno tiene su propia página actual y su propio
- * rango visible — nada los sincroniza a través de este store. La
- * sincronización opcional de scroll (ADR-054 §3) vive fuera de Zustand, en
- * `components/viewer/scrollSyncController.ts`: acá solo llega
- * `currentPageIndex`, que cambia una vez por página, nunca el `scrollTop`
- * crudo (eso re-renderizaría los dos paneles en cada cuadro de scroll).
+ * ADR-087 §2: hay **un solo visor** con un toggle `Original | Anonimizado`,
+ * así que `currentPageIndex` y `visibleRange` vuelven a ser escalares. El
+ * reparto por `ViewerKind` que introdujo ADR-054 §1 existía porque los dos
+ * paneles del lado a lado scrolleaban independiente; sin lado a lado no hay
+ * dos rangos que llevar. Se retira con ellos toda la sincronización de scroll
+ * (ADR-054 §3): `scrollSyncController.ts` y `settings.scrollSyncEnabled`.
  *
- * `previewByPage` también es por panel, por el mismo motivo: un Map único
- * compartido entre los dos `kind` hace que cualquier `PREVIEW_UPDATED` de
- * un panel cambie la referencia que el otro panel también lee, y ese otro
- * `PdfViewer` (con paneles independientes desde ADR-054, cada uno scrollea
- * y pide renders por su cuenta) se re-renderiza entero sin necesidad —
- * `PageCanvas` está memoizado así que no repinta nada, pero la
- * reconciliación de todas sus páginas es trabajo real desperdiciado en
- * documentos largos. Un Map por `kind` hace que actualizar "original" no
- * toque la referencia de "anonymized".
+ * **`previewByPage` sigue siendo por `kind`**, y ahí no cambia nada: las dos
+ * vistas tienen imágenes distintas para la misma página, y conmutar el toggle
+ * tiene que poder pintar la que ya está cacheada sin esperar un render nuevo.
+ *
+ * `mode` es la posición del toggle, y es lo que determina el `kind` de
+ * `RENDER_REQUESTED` (ADR-056 sigue vigente: se renderiza un solo lado, el que
+ * se está mirando). `"anonymized"` es inalcanzable mientras el pipeline no
+ * llegue a `Ready` — ese gate lo aplica `ViewerModeToggle`, no el store: acá
+ * no vive el `stage`.
  */
 
 import { create } from "zustand";
 
-/** `"original" | "anonymized"` — un panel del visor lado a lado (ADR-054 §1). */
+/** `"original" | "anonymized"` — qué muestra el visor (ADR-087 §2). */
 export type ViewerKind = "original" | "anonymized";
 
 export interface VisibleRange {
@@ -35,26 +33,27 @@ export interface VisibleRange {
 }
 
 export interface ViewerSlice {
-  readonly currentPageIndex: Readonly<Record<ViewerKind, number>>;
-  readonly visibleRange: Readonly<Record<ViewerKind, VisibleRange>>;
-  readonly zoom: number; // 0.5..3 — global: los dos paneles comparten escala
+  readonly currentPageIndex: number;
+  readonly visibleRange: VisibleRange;
+  readonly zoom: number; // 0.5..3
+  /** Posición del toggle Original/Anonimizado (ADR-087 §2). */
+  readonly mode: ViewerKind;
   readonly previewByPage: Readonly<Record<ViewerKind, ReadonlyMap<number, string>>>;
   /**
    * ADR-084 §1: la consulta del `DocumentSearchBox`. Sube al store —en vez de
    * quedar en el `useState` del propio buscador— para que "Ver ocurrencias"
    * del panel de entidades pueda escribirla desde el otro extremo del árbol.
    *
-   * **No es por panel** (a diferencia de `currentPageIndex`/`visibleRange`
-   * desde ADR-054 §1): el buscador existe una sola vez, sobre el `original`.
    * El resto del estado del buscador (matches, `activeIndex`, el tipo del
    * "Agregar como…") sigue siendo local: es trabajo interno suyo.
    */
   readonly searchQuery: string;
-  setPage(kind: ViewerKind, index: number): void;
+  setPage(index: number): void;
   setSearchQuery(query: string): void;
   setZoom(z: number): void;
+  setMode(mode: ViewerKind): void;
   setPreview(pageIndex: number, kind: ViewerKind, blobUrl: string): void;
-  setVisibleRange(kind: ViewerKind, start: number, end: number): void;
+  setVisibleRange(start: number, end: number): void;
   reset(): void;
 }
 
@@ -67,18 +66,18 @@ function clampZoom(zoom: number): number {
 
 type ViewerData = Pick<
   ViewerSlice,
-  "currentPageIndex" | "zoom" | "previewByPage" | "visibleRange" | "searchQuery"
+  "currentPageIndex" | "zoom" | "mode" | "previewByPage" | "visibleRange" | "searchQuery"
 >;
 
 const initialState: ViewerData = {
-  currentPageIndex: { original: 0, anonymized: 0 },
+  currentPageIndex: 0,
   zoom: 1,
+  // `original` de arranque: es la única vista disponible hasta `Ready`
+  // (UX-3b), así que cualquier otro default sería inalcanzable.
+  mode: "original",
   previewByPage: { original: new Map(), anonymized: new Map() },
   searchQuery: "",
-  visibleRange: {
-    original: { start: 0, end: 0 },
-    anonymized: { start: 0, end: 0 },
-  },
+  visibleRange: { start: 0, end: 0 },
 };
 
 export const useViewerStore = create<ViewerSlice>((set) => ({
@@ -86,11 +85,14 @@ export const useViewerStore = create<ViewerSlice>((set) => ({
   setSearchQuery(query) {
     set({ searchQuery: query });
   },
-  setPage(kind, index) {
-    set((state) => ({ currentPageIndex: { ...state.currentPageIndex, [kind]: index } }));
+  setPage(index) {
+    set({ currentPageIndex: index });
   },
   setZoom(z) {
     set({ zoom: clampZoom(z) });
+  },
+  setMode(mode) {
+    set({ mode });
   },
   setPreview(pageIndex, kind, blobUrl) {
     set((state) => {
@@ -99,8 +101,8 @@ export const useViewerStore = create<ViewerSlice>((set) => ({
       return { previewByPage: { ...state.previewByPage, [kind]: next } };
     });
   },
-  setVisibleRange(kind, start, end) {
-    set((state) => ({ visibleRange: { ...state.visibleRange, [kind]: { start, end } } }));
+  setVisibleRange(start, end) {
+    set({ visibleRange: { start, end } });
   },
   reset() {
     set(initialState);

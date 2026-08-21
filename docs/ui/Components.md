@@ -443,9 +443,10 @@ existen. Lo que se retira es la superficie de UI, no el modelo.
 
 ### 5.2 `PdfViewer`
 
-- **Props**: `kind: "original" | "anonymized"`.
-- **Stores**: `viewer`, `entities` (para highlights en `original`), `document`.
-- **Comportamiento**: usa `PageVirtualizer` para renderizar solo visibles. Escucha `PREVIEW_UPDATED` via `viewer.previewByPage[kind]` (por panel, `React_Client.md` §3.5 — evita re-renderizar este `PdfViewer` cuando el preview que cambió es del otro panel) y pasa el `blobUrl` al `PageCanvas` correspondiente.
+- **Props**: **ninguno** (ADR-087 §2). El `kind` sale de `viewer.store.mode` — hay un solo `PdfViewer` y lo que muestra lo decide el `ViewerModeToggle` (§5.1).
+- **Stores**: `viewer`, `entities` (para highlights en `original`), `document`, `pipeline`.
+- **Comportamiento**: usa `PageVirtualizer` para renderizar solo visibles. Escucha `PREVIEW_UPDATED` via `viewer.previewByPage[kind]` (sigue siendo **por `kind`**, `React_Client.md` §3.5: las dos vistas tienen imágenes distintas de la misma página, y conmutar el toggle pinta la cacheada sin esperar un render nuevo) y pasa el `blobUrl` al `PageCanvas` correspondiente.
+- **La barra con el buscador solo se monta en `original`**: el rótulo del lado lo dice el toggle, así que repetir "Documento original" al lado de un toggle que ya dice "Original" sería decir lo mismo dos veces en la misma línea.
 - **Eventos** (reconciliados por ADR-036 §5, reescrito por ADR-037, `kind` agregado por ADR-056 §1/§2):
   - Cambio de `visibleRange` → `actions.requestRender(pageIndices, kind)` — **con el `kind` de este panel**: el motor renderiza solo ese lado. Antes se emitía sin `kind` y Render producía original y anonimizado, lo que con scroll independiente (ADR-054) hacía que scrollear este panel refrescara el otro.
   - Cambio de `zoom` → escala **CSS/canvas** del bitmap ya renderizado de inmediato (feedback durante el gesto) y, tras 150 ms sin nuevos ticks, `actions.requestRender(visibleRange, kind, "preview", previewScale × zoom)` para un **re-render real** (ADR-037 §1/§5, supersede ADR-036 §6). El `PREVIEW_UPDATED` resultante reemplaza el bitmap CSS transitorio por el nítido.
@@ -454,8 +455,8 @@ existen. Lo que se retira es la superficie de UI, no el modelo.
 
 ### 5.3 `PageVirtualizer`
 
-- **Props**: `kind`, `pageCount`, `renderItem: (index) => ReactNode`, `visibleRange`, `pageSize`, `pageWidth`, `onVisibleRangeChange`, `onCurrentPageIndexChange`. **Sin `scrollToPageIndex`** (ADR-054 §6) y **sin `scrollSync`** (ADR-087 §2): con un solo panel no hay seguidor ni sincronización que instanciar.
-  - `kind`: la vista activa del toggle (§5.1); se usa para derivar/reportar la página actual y para el `RENDER_REQUESTED`.
+- **Props**: `pageCount`, `renderItem: (index) => ReactNode`, `visibleRange`, `pageSize`, `pageWidth`, `onVisibleRangeChange`, `onCurrentPageIndexChange`, `scrollRequest?`. **Sin `scrollToPageIndex`** (ADR-054 §6) y **sin `scrollSync` ni `kind`** (ADR-087 §2): con un solo panel no hay seguidor ni sincronización que instanciar, y `kind` solo servía para identificarse ante el controller.
+  - Se retira con `scrollSync` el `ResizeObserver` que detectaba el panel volviéndose visible (alto 0 → alto > 0) para realinearlo: sin panel oculto no hay transición que observar.
   - `pageWidth` (post-Hito 10.7, hallazgo post-`APPROVED` 2026-08-15): el ancho de página en CSS px, mismo `pageWidth` que `PdfViewer` ya calcula. El contenedor con scroll lo usa como `width: max(pageWidth, 100%)` — no el 100% implícito de un bloque — para que a zoom alto, cuando `pageWidth` supera el ancho del panel, el contenedor **crezca** en vez de dejar que `PagePhantom` (`inset-x-0`) centre por flex un `renderItem` más ancho que él: ese centrado desborda por igual a los dos lados, pero un navegador en LTR solo cuenta el desborde a la **derecha** como `scrollWidth` — el borde izquierdo de la página queda a `scrollLeft` negativo, inalcanzable. Con el contenedor ya del ancho correcto, todo el desborde cae a la derecha y se alcanza scrolleando.
   - `onVisibleRangeChange`: reporta al rango que detecta el `IntersectionObserver` (rango de **montaje** únicamente, ADR-054 §5) — cierra el loop de "usa `IntersectionObserver` para detectar visibilidad" hacia el estado controlado por `PdfViewer`.
   - `onCurrentPageIndexChange(pageIndex)`: página actual derivada por geometría de scroll (ADR-054 §5), reportada solo cuando cambia.

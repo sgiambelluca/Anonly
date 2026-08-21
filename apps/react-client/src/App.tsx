@@ -30,8 +30,8 @@ import { LoadScreen } from "./components/screens/LoadScreen.js";
 import { ScanScreen } from "./components/screens/ScanScreen.js";
 import { useAppPhase } from "./components/screens/useAppPhase.js";
 import { Toolbar } from "./components/toolbar/Toolbar.js";
-import { ScrollSyncToggle } from "./components/viewer/ScrollSyncToggle.js";
-import { SideBySideViewer } from "./components/viewer/SideBySideViewer.js";
+import { PdfViewer } from "./components/viewer/PdfViewer.js";
+import { ViewerModeToggle } from "./components/viewer/ViewerModeToggle.js";
 import { ZoomControls } from "./components/viewer/ZoomControls.js";
 import { initCore } from "./core-adapter/index.js";
 import { deriveEngineConfigOverrides } from "./core-adapter/settingsToEngineConfig.js";
@@ -120,11 +120,19 @@ function LeftPanel() {
 function RightPanel() {
   return (
     <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="flex h-10 shrink-0 items-center justify-end gap-2 border-b border-border bg-bg-primary px-3">
-        <ScrollSyncToggle />
-        <ZoomControls />
+      {/*
+        El toggle va centrado y el zoom a la derecha (ADR-087 §2): el toggle
+        rotula qué se está mirando, así que compite mal contra el borde junto
+        a controles secundarios.
+      */}
+      <div className="grid h-11 shrink-0 grid-cols-[1fr_auto_1fr] items-center border-b border-border bg-bg-primary px-3">
+        <div />
+        <ViewerModeToggle />
+        <div className="flex justify-end">
+          <ZoomControls />
+        </div>
       </div>
-      <SideBySideViewer />
+      <PdfViewer />
     </main>
   );
 }

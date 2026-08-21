@@ -29,25 +29,21 @@
  *   (`currentPageIndex.ts`) y la reporta vía `onCurrentPageIndexChange`, sin
  *   necesidad de rAF: es aritmética barata y el resultado se dedupe (solo se
  *   reporta si la página cambió), así que no escribe el store en cada tick.
- * - El mismo evento `scroll` notifica a `scrollSync` (`scrollSyncController.ts`,
- *   ADR-054 §3): si la sincronización opcional está prendida, empuja
- *   `scrollTop` al otro panel a nivel de píxel — imperativo, fuera de
- *   React/Zustand.
- * - Un `ResizeObserver` sobre el contenedor detecta la transición de alto 0 a
- *   alto > 0 (panel que se vuelve visible: cambio de tab, o la ventana que
- *   ensancha a `≥ lg`, ADR-054 §4 caso 2) y llama `scrollSync.notifyVisible`.
  *
- * Ningún contenedor con scroll lleva `scroll-behavior: smooth` (ADR-054 §7):
- * animaría la asignación de `scrollTop` y rompería la exactitud de la que
- * depende la idempotencia de `scrollSyncController.ts`.
+ * **ADR-087 §2** retira las props `scrollSync` y `kind`, y todo lo que colgaba
+ * de la primera (el `register`, el `notifyScroll`, y el `ResizeObserver` que
+ * detectaba el panel volviéndose visible para realinearlo): con **un solo**
+ * visor no hay dos scrolls que sincronizar ni un panel oculto que realinear, y
+ * `kind` solo servía para identificarse ante el controller.
+ *
+ * Ningún contenedor con scroll lleva `scroll-behavior: smooth`: animaría la
+ * asignación de `scrollTop` y pelearía con el salto explícito a una página del
+ * buscador, que necesita el valor exacto.
  */
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-import type { ViewerKind } from "../../store/viewer.store.js";
-
 import { computeCurrentPageIndexFromScroll } from "./currentPageIndex.js";
-import type { ScrollSyncController } from "./scrollSyncController.js";
 import {
   computeMountRange,
   computeVisibleRangeFromIndices,
@@ -55,7 +51,6 @@ import {
 } from "./visibleRange.js";
 
 export interface PageVirtualizerProps {
-  readonly kind: ViewerKind;
   readonly pageCount: number;
   readonly renderItem: (pageIndex: number) => ReactNode;
   readonly visibleRange: VisibleRange;
@@ -69,8 +64,6 @@ export interface PageVirtualizerProps {
   readonly onVisibleRangeChange: (range: VisibleRange) => void;
   /** Página actual derivada de la geometría de scroll de este panel (ADR-054 §5). Se reporta solo cuando cambia. */
   readonly onCurrentPageIndexChange: (pageIndex: number) => void;
-  /** Sincronización opcional de scroll a nivel de píxel entre los dos paneles (ADR-054 §3), creada una sola vez por `SideBySideViewer` y compartida entre sus dos `PdfViewer`. */
-  readonly scrollSync: ScrollSyncController;
   /**
    * Salto explícito a una página, pedido por el usuario (`DocumentSearchBox`,
    * `ui/Components.md` §5.4c — "navegación anterior/siguiente con scroll a
@@ -86,7 +79,6 @@ export interface PageVirtualizerProps {
 const PAGE_INDEX_ATTR = "pageIndex";
 
 export function PageVirtualizer({
-  kind,
   pageCount,
   renderItem,
   visibleRange,
@@ -94,7 +86,6 @@ export function PageVirtualizer({
   pageWidth,
   onVisibleRangeChange,
   onCurrentPageIndexChange,
-  scrollSync,
   scrollRequest,
 }: PageVirtualizerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -104,17 +95,8 @@ export function PageVirtualizer({
   const lastReportedRef = useRef<VisibleRange | undefined>(undefined);
   const lastReportedPageIndexRef = useRef<number | undefined>(undefined);
 
-  // Registro en el controller de sincronización (ADR-054 §3): un solo
-  // register por montaje del contenedor real.
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-    return scrollSync.register(kind, container);
-  }, [scrollSync, kind]);
-
   // Listener nativo de scroll: deriva la página actual por geometría
-  // (ADR-054 §5) y notifica al controller de sincronización (ADR-054 §3).
-  // Deliberadamente sin rAF: es aritmética barata sobre un solo número, y el
+  // (ADR-054 §5). Deliberadamente sin rAF: es aritmética barata sobre un solo número, y el
   // reporte a React ya está dedupeado por `lastReportedPageIndexRef` (solo
   // escribe el store si la página cambió, no en cada tick de scroll) — el rAF
   // del IntersectionObserver de abajo resuelve un problema distinto (coalescer
@@ -125,8 +107,6 @@ export function PageVirtualizer({
 
     function handleScroll(): void {
       if (!container) return;
-      scrollSync.notifyScroll(kind);
-
       const pageIndex = computeCurrentPageIndexFromScroll({
         scrollTop: container.scrollTop,
         clientHeight: container.clientHeight,
@@ -144,32 +124,11 @@ export function PageVirtualizer({
     // criterio que `onVisibleRangeChange` más abajo: es un callback estable en
     // la práctica y no hay `eslint-plugin-react-hooks` en este repo que lo
     // exija.
-  }, [scrollSync, kind, pageSize, pageCount]);
-
-  // ResizeObserver: detecta que este panel pasó de alto 0 (oculto, modo tabs)
-  // a alto > 0 (visible) para realinearlo una vez si la sincronización está
-  // prendida (ADR-054 §4, caso 2). `previousHeight` empieza `undefined` a
-  // propósito: la primera medición (montaje) no es una transición real, así
-  // que no dispara una realineación contra un panel que todavía no scrolleó.
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-    let previousHeight: number | undefined;
-    const resizeObserver = new ResizeObserver(() => {
-      const height = container.clientHeight;
-      if (previousHeight !== undefined && previousHeight <= 0 && height > 0) {
-        scrollSync.notifyVisible(kind);
-      }
-      previousHeight = height;
-    });
-    resizeObserver.observe(container);
-    return () => resizeObserver.disconnect();
-  }, [scrollSync, kind]);
+  }, [pageSize, pageCount]);
 
   // Salto explícito a una página (DocumentSearchBox, ui/Components.md §5.4c).
-  // Sin scroll-behavior: smooth acá tampoco (mismo motivo que el resto del
-  // componente, ADR-054 §7): no hace falta animarlo y rompería la exactitud
-  // del valor que `scrollSync` necesita si la sincronización está prendida.
+  // Sin `scroll-behavior: smooth`: no hace falta animarlo y la animación
+  // pelearía con la asignación exacta de `scrollTop`.
   useEffect(() => {
     if (!scrollRequest) return;
     const container = containerRef.current;
