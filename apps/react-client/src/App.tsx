@@ -102,7 +102,10 @@ function LeftPanel() {
   // corriendo en segundo plano después del pase temprano (§7.2), donde el
   // árbol vacío es transitorio y el estado real lo dice la toolbar.
   return (
-    <aside className="flex w-1/3 min-w-[280px] max-w-[480px] flex-col border-r border-border bg-bg-primary">
+    // `min-w` subido de 280 a 340 px (ADR-087, Contexto §1 hallazgo 2): a 280
+    // no entraban a la vez el nombre de la entidad y su modo de reemplazo, y
+    // el que se cortaba era el nombre — el dato con el que el usuario decide.
+    <aside className="flex w-1/3 min-w-[340px] max-w-[480px] flex-col border-r border-border bg-bg-primary">
       {hasGroups ? (
         <EntitiesPanel />
       ) : (
