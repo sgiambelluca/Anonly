@@ -24,6 +24,7 @@ import { FileTextIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect } from "react";
 
+import { ToastHost } from "./components/common/ToastHost.js";
 import { EntitiesPanel } from "./components/entities/EntitiesPanel.js";
 import { hasAnyGroup } from "./components/entities/entityTree.js";
 import { LoadScreen } from "./components/screens/LoadScreen.js";
@@ -86,6 +87,7 @@ export function App() {
         <LeftPanel />
         <RightPanel />
       </div>
+      <ToastHost />
     </div>
   );
 }

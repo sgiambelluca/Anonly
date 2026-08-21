@@ -277,16 +277,28 @@ llega al contraste mínimo.
 `ReplacementMode` **no cambia** (ADR-012 sigue vigente). Cambian las etiquetas, que pasan a nombrar
 **lo que se ve en el papel** y a traer un ejemplo:
 
-| `ReplacementMode` | Etiqueta | Ejemplo mostrado en la opción |
+| `ReplacementMode` | Etiqueta (menú) | Forma corta (disparador) |
 |---|---|---|
-| `Placeholder` | **Etiquetar** | `Juan Pérez → [PERSONA 01]` |
-| `Mask` | **Ocultar parcialmente** | `34.567.891 → XX.XXX.XXX` |
-| `Synthetic` | **Reemplazar por dato falso** | `Juan Pérez → Diego Ramírez` |
-| `Redact` | **Tapar con negro** | `Juan Pérez → ███████` |
+| `Placeholder` | **Etiquetar** | Etiquetar |
+| `Mask` | **Ocultar parcialmente** | Ocultar parcial |
+| `Synthetic` | **Reemplazar por dato falso** | Dato falso |
+| `Redact` | **Tapar con negro** | Tapar con negro |
+
+La tercera columna es la **forma corta del disparador**: el selector de la fila mide 11 rem y
+"Ocultar parcialmente" se cortaba en "Ocultar parcialme…". El **menú** —donde el usuario lee qué
+hace cada modo— y el **nombre accesible** usan siempre la forma larga.
 
 **El ejemplo se construye con el grupo real de esa fila**, no con un valor genérico: la pregunta
-que el usuario tiene es qué le va a pasar *a su dato*. En el selector de nivel tipo el ejemplo usa
-el primer grupo del tipo; en el de nivel documento se omite.
+que el usuario tiene es qué le va a pasar *a su dato*. En el selector de nivel tipo usa el primer
+grupo del tipo; en el de nivel documento es genérico.
+
+> **Solo el modo vigente muestra un valor exacto** (`replacementValue`, ya resuelto por Grouping).
+> Los otros tres se describen de forma esquemática y **no se inventan**: el token de `placeholder`
+> sale de la escalera de ADR-057 y del género de ADR-060, el formato de `mask` de
+> `MASK_FORMAT_BY_TYPE` —que vive en un motor, y la UI no puede importar motores (P-1)—, y el de
+> `synthetic` del sintetizador de ADR-072 §1. Un ejemplo *casi* correcto es peor que uno
+> declaradamente esquemático: la primera implementación mostraba `[PERSONA 01]` para **todos** los
+> tipos, así que un DNI previsualizaba como si fuera una persona.
 
 ---
 
