@@ -711,8 +711,13 @@ describe("@anonly/shared — Contracts", () => {
       expect(AVG_GLYPH_ADVANCE_RATIO).toBe(0.6);
     });
 
-    it("DEGRADED_FONT_RATIO es 0.6 (Contracts.md §6)", () => {
-      expect(DEGRADED_FONT_RATIO).toBe(0.6);
+    // ADR-086 §3: bajó de 0.6 a 0.5 cuando el criterio pasó a medir el ancho.
+    // No es un ajuste fino del mismo número: el 0.6 medía el encogido vertical
+    // de la fuente y el 0.5 mide cuánto se aplastó el texto a lo ancho. Con el
+    // valor viejo, el criterio nuevo marcaría `[PERSONA 01]` en una caja
+    // apretada (0.579) — un placeholder que se lee perfecto.
+    it("DEGRADED_FONT_RATIO es 0.5 (Contracts.md §6, ADR-086 §3)", () => {
+      expect(DEGRADED_FONT_RATIO).toBe(0.5);
     });
   });
 
