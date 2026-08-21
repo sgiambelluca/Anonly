@@ -327,50 +327,60 @@ describe("RenderEngine — unit tests", () => {
     const tokenLengths = [1, 2, 4, 8, 16, 32, 64];
     const boxWidths = [1, 4, 10, 25, 60, 150, 400];
     const boxHeights = [3, 6, 10, 16, 24, 40];
+    // ADR-086 §2(b) hizo que el piso de dibujo dependa de la escala, así que la
+    // garantía dura de ADR-058 §1 —"nunca se dibuja fuera del ancho
+    // disponible"— pasa a tener una dimensión más. Sin esto, la garantía nunca
+    // se ejercitaba a `fullScale`, que es la escala del PDF exportado y donde
+    // el piso vale 2,08 veces más.
+    const scales = [1, 2.08];
 
     let combinationsChecked = 0;
     for (const mode of modes) {
       for (const length of tokenLengths) {
         for (const width of boxWidths) {
           for (const height of boxHeights) {
-            resetCreatedCanvases();
-            const text = "X".repeat(length);
-            // `hashPageContent` (render.engine.ts) solo hashea
-            // `groupId|occurrenceId|mode|replacementValue` — NO el `bbox`.
-            // Sin un id único por combinación, dos combos con el mismo
-            // (mode, length) pero distinto width/height colisionarían en el
-            // cache LRU y el segundo saltaría el render (canvas vacío).
-            const comboId = `${String(mode)}-${length}-${width}-${height}`;
+            for (const scale of scales) {
+              resetCreatedCanvases();
+              const text = "X".repeat(length);
+              // `hashPageContent` (render.engine.ts) solo hashea
+              // `groupId|occurrenceId|mode|replacementValue` — NO el `bbox`.
+              // Sin un id único por combinación, dos combos con el mismo
+              // (mode, length) pero distinto width/height colisionarían en el
+              // cache LRU y el segundo saltaría el render (canvas vacío).
+              const comboId = `${String(mode)}-${length}-${width}-${height}-${String(scale)}`;
 
-            await engine.renderPage(
-              createRenderPageInput({
-                documentId: docId,
-                pageIndex: 0,
-                kind: "anonymized",
-                mode: "preview",
-                replacements: [
-                  makeReplacement({
-                    groupId: `g-${comboId}`,
-                    occurrenceId: `o-${comboId}`,
-                    mode,
-                    replacementValue: text,
-                    bbox: { x: 0, y: 0, width, height },
-                  }),
-                ],
-              }),
-              ctx,
-            );
+              await engine.renderPage(
+                createRenderPageInput({
+                  documentId: docId,
+                  pageIndex: 0,
+                  kind: "anonymized",
+                  mode: "preview",
+                  scale,
+                  replacements: [
+                    makeReplacement({
+                      groupId: `g-${comboId}`,
+                      occurrenceId: `o-${comboId}`,
+                      mode,
+                      replacementValue: text,
+                      bbox: { x: 0, y: 0, width, height },
+                    }),
+                  ],
+                }),
+                ctx,
+              );
 
-            const [canvas] = getCreatedCanvases();
-            const fillTextCall = canvas!.calls.find((c) => c.op === "fillText");
-            expect(fillTextCall).toBeDefined();
-            // La garantía completa: el ancho REALMENTE dibujado nunca excede
-            // el disponible, sin excepción para el piso de 8px.
-            expect(fillTextCall!.drawnWidth).toBeLessThanOrEqual(width);
-            // Y la red de seguridad viajó con el valor correcto (si esto
-            // fallara, `drawnWidth` de arriba dejaría de ser una garantía real).
-            expect(fillTextCall!.args[3]).toBe(width);
-            combinationsChecked += 1;
+              const [canvas] = getCreatedCanvases();
+              const fillTextCall = canvas!.calls.find((c) => c.op === "fillText");
+              expect(fillTextCall).toBeDefined();
+              // La garantía completa: el ancho REALMENTE dibujado nunca excede
+              // el disponible, sin excepción para el piso de fuente mínima.
+              const availablePx = width * scale;
+              expect(fillTextCall!.drawnWidth).toBeLessThanOrEqual(availablePx);
+              // Y la red de seguridad viajó con el valor correcto (si esto
+              // fallara, `drawnWidth` de arriba dejaría de ser una garantía real).
+              expect(fillTextCall!.args[3]).toBe(availablePx);
+              combinationsChecked += 1;
+            }
           }
         }
       }
@@ -378,8 +388,9 @@ describe("RenderEngine — unit tests", () => {
 
     // Guard contra un refactor que vacíe los arrays de arriba y deje esta
     // aserción pasando en verde sin haber comprobado ninguna combinación.
-    expect(combinationsChecked).toBeGreaterThan(500);
-  });
+    // Duplicado desde ADR-086: la escala es la quinta dimensión.
+    expect(combinationsChecked).toBeGreaterThan(1000);
+  }, 30_000);
 
   // ─── Consumo de eventos del bus (checklist §15 item 14) ───
   // El bus mockeado (createEngineContext) no dispara handlers; se usa el bus
@@ -949,6 +960,134 @@ describe("RenderEngine — unit tests", () => {
       expect(result.errorRatio).toBe(0);
     });
 
+    // `fitsNaturally` mide contra el tamaño de DIBUJO, no contra la referencia
+    // de ADR-086 §2(a). Los dos tests de acá abajo fijan ese sitio en sus dos
+    // direcciones, y existen porque cambiarlo NO rompía ningún test: se probó
+    // usar la referencia pura, quedó verde, y separaba dos cosas que hasta
+    // ADR-086 eran la misma expresión.
+    //
+    // Por qué importa: si la condición mide con una fuente y el bucle arranca
+    // con otra, `fitsNaturally === true` deja de implicar "se dibuja sin
+    // aplastar". Con una caja de 8 pt a `fullScale` la referencia da 11,65 px y
+    // el dibujo arranca en 16,64, así que un token podía declararse "entra a su
+    // tamaño natural", saltear el repintado, dibujarse a 16,64 y ser aplastado
+    // por `maxWidth` igual — y encima reportar `widthRatio === 1`.
+    //
+    // La geometría está elegida para discriminar las TRES variantes sobre el
+    // mismo ancho disponible (28,8 px): con el tamaño de dibujo el token mide
+    // 29,95 y no entra; con la referencia pura mide 20,97 y con el piso sin
+    // escalar 21,60, y las dos entran. Solo la primera repinta.
+    it("fitsNaturally mide contra el tamaño de dibujo: a fullScale un token que no entra repinta", async () => {
+      const docId = "doc-fitsnaturally-positivo";
+      const scale = 2.08;
+      const anchoConsistente = (text: string): number =>
+        measureStubTextWidth(text, "12px sans-serif") / scale;
+
+      const juanWidth = anchoConsistente("Juan");
+      const garciaWidth = anchoConsistente("Garcia");
+      const viveWidth = anchoConsistente("vive");
+      const garciaX = 20 + juanWidth + 4;
+      const viveX = garciaX + garciaWidth + 4;
+
+      const word = (text: string, x: number, width: number): Word => ({
+        text,
+        bbox: { x, y: 10, width, height: 8 },
+        pageIndex: 0,
+        confidence: 1,
+        source: "pdf",
+      });
+
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument({
+            pageCount: 1,
+            pageFactory: () => createMockPage({ width: 150, height: 200 }),
+          }),
+        ),
+      );
+      await engine.init(ctx);
+      await engine.loadDocument(docId, createValidBuffer());
+
+      await engine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+          scale,
+          replacements: [
+            makeReplacement({
+              mode: ReplacementMode.Placeholder,
+              originalValue: "Juan",
+              replacementValue: "[X]",
+              bbox: { x: 20, y: 10, width: juanWidth, height: 8 },
+            }),
+          ],
+          lineWords: [word("Garcia", garciaX, garciaWidth), word("vive", viveX, viveWidth)],
+        }),
+        ctx,
+      );
+
+      const [canvas] = getCreatedCanvases();
+      // Token + las dos vecinas: el repintado se activó.
+      expect(canvas!.calls.filter((c) => c.op === "fillText")).toHaveLength(3);
+    });
+
+    it("fitsNaturally mide contra el tamaño de dibujo: a fullScale un token que entra no repinta", async () => {
+      const docId = "doc-fitsnaturally-negativo";
+      const scale = 2.08;
+      const anchoConsistente = (text: string): number =>
+        measureStubTextWidth(text, "12px sans-serif") / scale;
+
+      // Caja holgada: el token entra incluso al tamaño de dibujo (16,64px), así
+      // que ADR-058 §2 manda no tocar nada — un solo `fillText`, centrado.
+      const holgado = anchoConsistente("Juan") * 4;
+      const garciaWidth = anchoConsistente("Garcia");
+      const garciaX = 20 + holgado + 4;
+
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument({
+            pageCount: 1,
+            pageFactory: () => createMockPage({ width: 200, height: 200 }),
+          }),
+        ),
+      );
+      await engine.init(ctx);
+      await engine.loadDocument(docId, createValidBuffer());
+
+      await engine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+          scale,
+          replacements: [
+            makeReplacement({
+              mode: ReplacementMode.Placeholder,
+              originalValue: "Juan",
+              replacementValue: "[X]",
+              bbox: { x: 20, y: 10, width: holgado, height: 8 },
+            }),
+          ],
+          lineWords: [
+            {
+              text: "Garcia",
+              bbox: { x: garciaX, y: 10, width: garciaWidth, height: 8 },
+              pageIndex: 0,
+              confidence: 1,
+              source: "pdf",
+            },
+          ],
+        }),
+        ctx,
+      );
+
+      const [canvas] = getCreatedCanvases();
+      expect(canvas!.calls.filter((c) => c.op === "fillText")).toHaveLength(1);
+    });
+
     // REGRESIÓN de ADR-086: el piso de fuente escalado se había filtrado al
     // tamaño con el que `calibrateLineFont` mide sus 12 candidatos. En una caja
     // de cuerpo de texto (por debajo de ~11,4 pt) a `fullScale` el piso muerde y
@@ -970,7 +1109,7 @@ describe("RenderEngine — unit tests", () => {
     // con 38,7% cuando el piso lo infla.
     it("line repaint still activates at fullScale on a body-text box", async () => {
       const docId = "doc-repaint-fullscale";
-      const scale = 2.08; // la escala de `mode: "full"` (config.ts), o sea el export.
+      const scale = 2.08; // `RenderConfig.fullScale` — la escala del PDF exportado.
       const boxHeight = 8;
       const anchoConsistente = (text: string): number =>
         measureStubTextWidth(text, "12px sans-serif") / scale;
