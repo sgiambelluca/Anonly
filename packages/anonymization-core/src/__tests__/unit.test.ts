@@ -126,6 +126,39 @@ describe("Orchestrator — unit tests", () => {
     revokeSpy.mockRestore();
   });
 
+  it("EXPORT_FINISHED emits PIPELINE_STAGE_CHANGED with Done, not just internal state", async () => {
+    // Regresión: `handleExportFinished` hacía `state.update({ stage: Done })`
+    // sin emitir. El estado interno quedaba bien y la UI nunca se enteraba, así
+    // que para ella el stage seguía en `Exporting` tras un export exitoso — con
+    // "Exportar" oculto (gate `{Ready, Done}`) y el blobUrl inalcanzable.
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    wireHappyPathSpies(engines, bus);
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+
+    const stages: PipelineStage[] = [];
+    bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_STAGE_CHANGED, (payload) => {
+      stages.push(payload.stage);
+    });
+
+    bus.emit(EventChannel.Export, EngineEvents.EXPORT_FINISHED, {
+      documentId: "doc-1",
+      blobUrl: "blob:export-1",
+      sizeBytes: 1,
+      durationMs: 1,
+    });
+
+    expect(stages).toContain(PipelineStage.Done);
+  });
+
   // ─── ADR-050 §2 / §4 (`08_Security_Model.md` §6.2): borrado del password ───
 
   it("closeDocument leaves no password behind", async () => {

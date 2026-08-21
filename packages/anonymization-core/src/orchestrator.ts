@@ -1778,7 +1778,16 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       return;
     }
     this.blobTracker.set(exportBlobKey(payload.documentId), payload.blobUrl);
-    this.state.update(payload.documentId, { stage: PipelineStage.Done });
+    // `setStage` y no `state.update`: la transición a `Done` que pide el spec
+    // (`Orchestrator.md` §8, fila `EXPORT_FINISHED`) tiene que **emitirse**,
+    // no solo guardarse. Con `state.update` el estado interno pasaba a `Done`
+    // y `PIPELINE_STAGE_CHANGED` nunca salía, así que para la UI el stage
+    // quedaba en `Exporting` **para siempre** tras un export exitoso: el
+    // botón "Exportar" desaparecía (su gate es `{Ready, Done}`), "Cancelar"
+    // seguía visible, y el `blobUrl` recién generado quedaba inalcanzable —
+    // el documento inutilizable justo después de terminar bien. Todas las
+    // demás transiciones de este archivo ya usaban `setStage`.
+    this.setStage(payload.documentId, PipelineStage.Done);
   }
 
   private handleExportFailed(payload: ExportFailed): void {
