@@ -99,7 +99,7 @@ export function PipelineStatus() {
                     });
                 }}
               >
-                Desactivar NER y reanalizar
+                Seguir sin detectar nombres
               </Button>
             ) : null}
             <Button variant="danger" size="sm" onClick={() => actions.closeDocument()}>

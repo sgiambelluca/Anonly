@@ -29,15 +29,22 @@ import {
 
 export interface PipelineErrorPresentation {
   readonly message: string;
-  /** `true` solo para `NER_MODEL_MISSING`: ofrece "Desactivar NER y reanalizar" (React_Client.md §8, §3.7). */
+  /** `true` solo para `NER_MODEL_MISSING`: ofrece "Seguir sin detectar nombres" (React_Client.md §8, §3.7). */
   readonly offerDisableNerReanalyze: boolean;
 }
 
+/**
+ * Mensajes en lenguaje del usuario (ADR-087 §4): no nombran "NER" ni explican
+ * cómo se distribuyen los modelos. **Cada uno dice qué pasó y qué se puede
+ * hacer** — un mensaje de error sin salida es un cartel, no una ayuda
+ * (`UX_Guidelines.md` §9 "error-recovery"). La salida de
+ * `NER_MODEL_MISSING` es el botón que ofrece `offerDisableNerReanalyze`.
+ */
 const MESSAGE_BY_CODE: Readonly<Partial<Record<EngineErrorCode, string>>> = {
-  [EngineErrorCode.PDF_INVALID]: "El archivo no es un PDF válido.",
+  [EngineErrorCode.PDF_INVALID]: "El archivo no es un PDF válido. Probá con otro documento.",
   [EngineErrorCode.NER_MODEL_MISSING]:
-    "El modelo NER no pudo cargarse. Los modelos son first-party: no hay descarga manual.",
-  [EngineErrorCode.EXPORT_FAILED]: "No se pudo exportar. Reintente.",
+    "No se pudo cargar el detector de nombres. Podés seguir sin él: se van a detectar los datos con formato conocido (DNI, CUIT, emails, teléfonos), pero no los nombres ni las organizaciones.",
+  [EngineErrorCode.EXPORT_FAILED]: "No se pudo exportar el documento. Probá de nuevo.",
 };
 
 /**

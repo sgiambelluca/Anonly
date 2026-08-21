@@ -34,7 +34,7 @@ describe("getPipelineErrorPresentation", () => {
       makeError({ code: EngineErrorCode.PDF_INVALID }),
     );
     expect(presentation).toEqual({
-      message: "El archivo no es un PDF válido.",
+      message: "El archivo no es un PDF válido. Probá con otro documento.",
       offerDisableNerReanalyze: false,
     });
   });
@@ -45,7 +45,10 @@ describe("getPipelineErrorPresentation", () => {
       makeError({ code: EngineErrorCode.NER_MODEL_MISSING }),
     );
     expect(presentation?.offerDisableNerReanalyze).toBe(true);
-    expect(presentation?.message).toMatch(/modelo NER/);
+    // ADR-087 §4: el mensaje describe el efecto, no la etapa del pipeline.
+    // Se afirma que **no** dice "NER" para que no vuelva a colarse.
+    expect(presentation?.message).toMatch(/detector de nombres/);
+    expect(presentation?.message).not.toMatch(/NER/);
   });
 
   it("maps EXPORT_FAILED to its specific message", () => {
@@ -54,7 +57,7 @@ describe("getPipelineErrorPresentation", () => {
       makeError({ code: EngineErrorCode.EXPORT_FAILED }),
     );
     expect(presentation).toEqual({
-      message: "No se pudo exportar. Reintente.",
+      message: "No se pudo exportar el documento. Probá de nuevo.",
       offerDisableNerReanalyze: false,
     });
   });

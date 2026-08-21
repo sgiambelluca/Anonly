@@ -65,8 +65,11 @@ const PERFORMANCE_PRESET_OPTIONS: ReadonlyArray<SelectOption<PerformancePreset>>
 // default de settings.store.ts): ampliar esta lista requiere actualizar esos
 // docs primero (R-19).
 const OCR_LANGUAGE_OPTIONS = [
-  { code: "spa", label: "Español (spa)" },
-  { code: "eng", label: "English (eng)" },
+  // Sin los códigos ISO entre paréntesis (ADR-087 §4): "spa" y "eng" son cómo
+  // se le pide el modelo al motor de reconocimiento de texto, no algo que el
+  // usuario tenga que elegir sabiendo.
+  { code: "spa", label: "Español" },
+  { code: "eng", label: "Inglés" },
 ] as const;
 
 function toggleLanguage(
@@ -202,22 +205,27 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
               aria-label="Preset de rendimiento"
             />
             {documentId !== null ? (
-              <p className="mt-1 text-xs text-text-secondary">
-                Se aplicará al próximo documento (no afecta al documento abierto).
+              <p className="mt-1 text-sm text-text-secondary">
+                Se aplica al próximo documento; no afecta al que está abierto.
               </p>
             ) : null}
           </FormRow>
 
-          <FormRow label="Detección">
+          <FormRow label="Qué se detecta">
+            {/*
+              El texto describe el efecto, no la etapa: apagarlo no "desactiva
+              NER", deja de detectar nombres. Lo segundo es lo que el usuario
+              va a notar en el árbol (ADR-087 §4).
+            */}
             <Checkbox
               id="settings-ner-enabled"
               checked={nerEnabled}
               onCheckedChange={setNerEnabled}
-              label="Detección con NER (nombres, organizaciones)"
+              label="Detectar nombres de personas y organizaciones"
             />
           </FormRow>
 
-          <FormRow label="Idiomas de OCR">
+          <FormRow label="Idiomas del documento">
             <div className="flex flex-col gap-1.5">
               {OCR_LANGUAGE_OPTIONS.map((option) => (
                 <Checkbox
@@ -233,7 +241,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
             </div>
             {ocrLanguagesEmpty ? (
               <p role="alert" className="mt-1 text-xs text-error">
-                Elegí al menos un idioma de OCR.
+                Elegí al menos un idioma.
               </p>
             ) : null}
           </FormRow>

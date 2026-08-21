@@ -119,7 +119,14 @@ apps/react-client/src/components/
 - **Acción**: abre `ExportDialog`.
 - **Atajo**: `Cmd/Ctrl+E` (activo solo cuando el botón es visible).
 
-### 2.6 `SettingsButton` + `SettingsDialog` (ADR-036 §7)
+### 2.6 `SettingsButton` + `SettingsDialog` (ADR-036 §7, vocabulario por ADR-087 §4)
+
+> **Los campos no nombran el pipeline.** "Detección con NER (nombres, organizaciones)" pasa a
+> "Detectar nombres de personas y organizaciones"; "Idiomas de OCR" a "Idiomas del documento"; y las
+> opciones pierden los códigos ISO ("Español (spa)" → "Español"), que son cómo se le pide el modelo
+> al motor, no algo que el usuario tenga que elegir sabiendo. El texto describe **el efecto**:
+> apagar el toggle no "desactiva NER", deja de detectar nombres — que es lo que se va a notar en el
+> árbol.
 
 - **Trigger**: icono de engranaje en el Toolbar (siempre visible; `UX_Guidelines.md` §2).
 - **Stores**: `settings`, `document` (para saber si hay documento abierto).
