@@ -554,6 +554,10 @@ hay nada que sincronizar: se retira junto con `SideBySideViewer` y `scrollSyncCo
 - **Stores**: `document`, `entities`.
 - **Render**: ver `UX_Guidelines.md` §8.2. **Un solo control**: el checkbox "Agregar una página con
   la referencia de marcadores" (ADR-059 §1, default **apagado**), más el resumen y los botones.
+- **Sin validación de formulario** (ADR-087 §5): sin campos editables no hay nada que validar.
+  `validateExportForm` y el `formError` que mostraba sus mensajes se retiran con los campos. Los
+  rangos de `core/Export_Engine.md` §9 se conservan como constantes y hay tests que afirman que los
+  valores fijos caen adentro — es lo que reemplaza a la validación en runtime.
 - **Pre-flight**: si `enabledGroups = 0`, `ConfirmDialog` anidado.
 - **Acción**: `actions.requestExport(options)`, con los valores fijos de abajo + `includeMarkerLegend`.
 
