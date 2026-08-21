@@ -1004,15 +1004,25 @@ function paintReplacements(
     // texto rotado** (ADR-066 §7, caso 27 de Render_Engine.md §13 no
     // cambia): `sidewaysRotation !== undefined` salta directo al
     // shrink-to-fit, nunca llama a `tryRepaintLine`.
-    // `naturalReferenceSize` y no `replacementFontSize`: esta fuente **nunca se
-    // dibuja**, existe solo para preguntar "¿el token entra a su tamaño
-    // natural?". Es exactamente el caso que ADR-086 §2(a) describe, y usar acá
-    // el tamaño de dibujo —con piso y redondeo— hacía que la referencia
-    // mintiera hacia abajo (una caja de 12 pt declaraba 8 px cuando pedía 8,4),
-    // así que el token se medía más angosto de lo que es y `fitsNaturally` daba
-    // `true` de más: el repintado de línea de ADR-058 §2 se sub-activaba.
+    // **Acá va el tamaño de DIBUJO, no la referencia de ADR-086 §2(a)**, y es
+    // deliberado — se intentó al revés y estaba mal.
+    //
+    // `fitsNaturally` es la condición de activación del repintado de ADR-058
+    // §2, no un veredicto: pregunta "¿hace falta repintar la línea, o el token
+    // se dibuja sin problema?". Para que esa respuesta signifique algo tiene
+    // que medir contra **el tamaño con el que efectivamente se va a dibujar**,
+    // que es donde arranca el bucle de abajo. Hasta ADR-086 las dos eran la
+    // misma expresión y por eso `fitsNaturally === true` implicaba "se dibuja
+    // sin aplastar".
+    //
+    // Usar la referencia pura acá las separa: con una caja de 8 pt a
+    // `fullScale` la referencia da 11,65 px y el dibujo arranca en 16,64 —el
+    // piso escalado—, así que un token podía declararse "entra a su tamaño
+    // natural", saltear el repintado, dibujarse a 16,64 y ser aplastado por
+    // `maxWidth` igual. La referencia de §2(a) es para MEDIR el veredicto
+    // (`widthRatio`, adentro de `fitReplacementFontSized`) y solo para eso.
     const naturalFont = buildReplacementFont(
-      naturalReferenceSize(fontSizeAxisPx),
+      replacementFontSize(fontSizeAxisPx, REPLACEMENT_MIN_FONT_PX * scale),
       replacementFontFamily(replacement.mode),
     );
     const fitsNaturally =
@@ -1098,10 +1108,12 @@ function paintReplacements(
     // cociente era invariante "sin ningún ajuste adicional". No lo era: el piso
     // de fuente mínima es absoluto y `boxHeight` escala, así que cuando el
     // bucle terminaba por el piso el cociente derivaba con el zoom. La
-    // invariancia es exacta recién con ADR-086 §2 —referencia sin piso ni
-    // redondeo, piso de dibujo escalado—, y el ajuste adicional existe: está
-    // tres líneas más abajo, en el `REPLACEMENT_MIN_FONT_PX * scale` que se le
-    // pasa al fitting.
+    // invariancia es exacta recién con ADR-086 §2(a): la referencia va sin piso
+    // y sin redondeo, así que es exactamente proporcional a la caja.
+    //
+    // El piso escalado de §2(b) **no** interviene en el veredicto —`widthRatio`
+    // no lo lee en ninguna rama—: eso es del tamaño que se dibuja, no del que
+    // se mide.
     if (fitted.widthRatio < DEGRADED_FONT_RATIO) {
       degraded.push({
         id: replacement.occurrenceId,
