@@ -71,6 +71,7 @@ apps/react-client/src/components/
 - **Stores**: `pipeline`, `document`, `settings`.
 - **Estados**:
   - `stage === Idle`: **el `Toolbar` no se monta** — ese estado es el momento ① (`LoadScreen`, §2.9), pantalla completa (ADR-087 §1).
+  - **Durante el momento ②a el `Toolbar` tampoco se monta** (`ScanScreen`, §2.10): esa pantalla trae su propio estado y su propio `Cancelar`. Las filas de abajo describen el `Toolbar` del momento ②b, que es donde existe.
   - `stage ∈ {Importing, Extracting, OCRing, Detecting, Grouping}`: `PipelineStatus` + `CancelButton`.
   - `stage ∈ {Ready, Done}`: `PipelineStatus` + `ExportButton`. **Sin `CancelButton`** (ADR-087 §7: `Ready` pasa a `HIDDEN_STAGES`). `CloseDocumentButton` pasa al menú de settings (§2.8). (`Done` no tenía fila — gap cerrado al resolver el bug #7 del Escenario 1 E2E: tras un export el documento sigue abierto y re-exportable.)
   - `stage === Rendering/Exporting`: `PipelineStatus` + `CancelButton`.
@@ -159,8 +160,12 @@ apps/react-client/src/components/
 
 - **Stores**: `pipeline` (stage y progreso), `entities` (el contador y los grupos que van
   apareciendo), `document` (nombre y `pageCount`).
-- **Render**: nombre del archivo, estado en lenguaje llano, progreso `current`/`total` real de la
-  etapa vigente, **las entidades apareciendo en vivo** y `Cancelar`. Ver `UX_Guidelines.md` §7.3.
+- **Se monta sin `Toolbar`** (`App.tsx`), igual que `LoadScreen`: trae estado, progreso y
+  `Cancelar` propios. Montar la toolbar arriba dejaba **dos barras de progreso del mismo pipeline y
+  dos botones "Cancelar"** en pantalla al mismo tiempo — verificado en el browser. El logo de
+  continuidad entre ① y ② lo pone esta pantalla.
+- **Render**: logo, nombre del archivo, estado en lenguaje llano, progreso `current`/`total` real de
+  la etapa vigente, **las entidades apareciendo en vivo** y `Cancelar`. Ver `UX_Guidelines.md` §7.3.
 - **Sin skeleton del documento**: no promete un layout que todavía no existe.
 - **Salida** (`UX_Guidelines.md` §7.2): pasa a ②b con la primera de — `Detecting` ≥
   `SCAN_ADVANCE_PAGE_RATIO` (0.20) de las páginas, o `SCAN_ADVANCE_MAX_MS` (6000 ms) desde el
