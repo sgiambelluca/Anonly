@@ -483,10 +483,23 @@ Estados:
 
 **La regla.** Se pasa de ②a a ②b cuando se cumple **la primera** de:
 
-- `Detecting` procesó **≥ 20 %** de las páginas, o
+- `Detecting` procesó **≥ 20 %** de las páginas —con `document.store.pageCount`
+  como denominador, y solo con `modelLoading === null`—, o
 - pasaron **6 s** desde `IMPORT_REQUESTED`;
 
 y **nunca antes de 1,2 s** desde `IMPORT_REQUESTED`.
+
+> **El denominador es `pageCount` y no `pipeline.store.total`, y la razón es un
+> bug medido.** `total` se reasigna por etapa, y durante la descarga del modelo
+> NER el store reporta `current/total = 1/1` **con el stage ya en `Detecting`**:
+> una razón de 1.0 que satisfacía el umbral al instante y soltaba al usuario
+> apenas terminaba el OCR — justo lo que esta pantalla existe para no hacer.
+> `pageCount` viene de `DOCUMENT_PARSED` y significa siempre lo mismo.
+>
+> La guarda de `modelLoading` es la mitad semántica del mismo problema:
+> mientras el modelo se descarga **no se está detectando nada**, así que "se
+> analizó el 20 %" no puede ser cierto. **El techo sí sigue aplicando** durante
+> la descarga: es exactamente el caso que el techo global acota.
 
 | Constante | Valor | Rol |
 |---|---|---|
@@ -503,7 +516,10 @@ honesto de §7.1.
 
 - Nombre del archivo y cantidad de páginas.
 - Estado en lenguaje llano (los mismos textos de §7.1).
-- Progreso `current`/`total` real de la etapa vigente, con porcentaje.
+- Progreso `current`/`total` real de la etapa vigente, con porcentaje. **Con el modelo
+  descargándose, la barra muestra el progreso de la descarga y el contador por página se oculta**:
+  ahí `current`/`total` no describen páginas (es el mismo 1/1 de arriba), y mostrarlos daba una
+  barra al 100 % sin haber procesado ninguna.
 - **Las entidades apareciendo en vivo**, con su contador subiendo. Es el elemento que sostiene la
   paciencia del usuario, así que es el que tiene que estar visible — no un spinner.
 - `Cancelar`.
