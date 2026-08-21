@@ -63,3 +63,26 @@ Convenciones que la suite ya sostiene y conviene no romper:
 - **Acotar los locators a su contenedor.** `getByRole("button", { name: "Cerrar documento" })` sin scope ya no identifica el banner de error: desde ADR-051 el Toolbar tiene un botón con el mismo nombre accesible. `scenario-6-corrupt-pdf.spec.ts` tiene la forma correcta (localizar el banner y buscar adentro).
 - **Afirmar el resultado, no el stage.** El Escenario 2 pasó en verde durante semanas con el OCR completamente roto porque afirmaba que el pipeline llegaba a "Listo" en vez de afirmar que había entidades.
 - **`test.setTimeout(N)` es un presupuesto, no una medición.** Si un comentario cita números, que diga cuál de las dos cosas son.
+
+## Los roles ARIA de la UI son API de esta suite
+
+Estos escenarios localizan por rol accesible (`getByRole`), no por clase ni por
+`data-testid`. Es deliberado —un test que se rompe cuando la accesibilidad se
+rompe es una red gratis— pero tiene una consecuencia que hay que tener presente:
+
+**`pnpm test` no corre esta suite.** El subset pre-PR de `CLAUDE.md` (`lint`,
+`typecheck`, `test`, `test:contract`) puede quedar entero en verde con la UI
+rota para el usuario de lector de pantalla y para estos tests a la vez.
+
+Ya pasó: retirar `role="menuitem"` de `GroupContextMenu` —un cambio correcto,
+porque el rol prometía navegación por flechas que no existe— dejó los cuatro
+gates verdes y rompió tres escenarios en CI, cada uno con 150 s de timeout y dos
+reintentos.
+
+Así que: **si tocás un `role`, un `aria-label` o el texto visible de un control,
+corré `pnpm test:e2e` en el mismo cambio.** Los locators afectados están
+concentrados y son fáciles de encontrar:
+
+```bash
+grep -rn "getByRole" tests/e2e/
+```

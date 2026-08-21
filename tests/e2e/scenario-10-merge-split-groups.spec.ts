@@ -60,7 +60,10 @@ test("fusionar y dividir grupos actualiza índices y reemplazos", async ({ page 
   // propia identidad y conserva su canonicalValue (único alias en el
   // desempate de frecuencia/longitud/orden de inserción).
   await dni2.getByRole("button", { name: "Más acciones" }).click();
-  await dni2.getByRole("menuitem", { name: "Fusionar con…" }).click();
+  await dni2
+    .getByRole("group", { name: "Acciones del grupo" })
+    .getByRole("button", { name: "Fusionar con…" })
+    .click();
   const mergeDialog = page.getByRole("dialog", { name: "Fusionar grupo" });
   await expect(mergeDialog).toBeVisible();
   await mergeDialog.getByRole("combobox", { name: "Grupo destino" }).click();
@@ -80,7 +83,10 @@ test("fusionar y dividir grupos actualiza índices y reemplazos", async ({ page 
   // Dividir: separar de vuelta la ocurrencia que vino de dni2 (página 2,
   // Regex — `SplitDialog.tsx`: "Página N — <fuente>").
   await dni1.getByRole("button", { name: "Más acciones" }).click();
-  await dni1.getByRole("menuitem", { name: "Dividir…" }).click();
+  await dni1
+    .getByRole("group", { name: "Acciones del grupo" })
+    .getByRole("button", { name: "Dividir…" })
+    .click();
   const splitDialog = page.getByRole("dialog", { name: "Dividir grupo" });
   await expect(splitDialog).toBeVisible();
   await splitDialog.getByRole("checkbox", { name: /Página 2 — Regex/ }).click();

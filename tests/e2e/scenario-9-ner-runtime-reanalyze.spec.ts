@@ -77,7 +77,10 @@ test("activar NER en runtime reanaliza preservando ediciones previas", async ({ 
   // Edición 2: fusionar 42.998.103 (origen) dentro de 18.445.212 (destino) —
   // merge manual.
   await dni3.getByRole("button", { name: "Más acciones" }).click();
-  await dni3.getByRole("menuitem", { name: "Fusionar con…" }).click();
+  await dni3
+    .getByRole("group", { name: "Acciones del grupo" })
+    .getByRole("button", { name: "Fusionar con…" })
+    .click();
   const mergeDialog = page.getByRole("dialog", { name: "Fusionar grupo" });
   await expect(mergeDialog).toBeVisible();
   await mergeDialog.getByRole("combobox", { name: "Grupo destino" }).click();
