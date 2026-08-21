@@ -15,10 +15,9 @@
  *   `ConfirmDialog` ("¿Reanalizar el documento con la nueva configuración? Tus
  *   ediciones se conservan.") → al confirmar, `actions.reanalyze` (mitigación
  *   de doble llamada secuencial si ambos cambiaron, ver `reanalyzePlan.ts`) →
- *   `actions.requestRender(...)` para refrescar previews, sobre la **unión**
- *   de los rangos visibles de los dos paneles (`visibleRange` es por panel
- *   desde ADR-054 §1: con scroll independiente son dos regiones distintas,
- *   no una — `unionVisibleRange`, `React_Client.md` §3.7 último párrafo). Sin
+ *   `actions.requestRender(...)` para refrescar previews, sobre el rango
+ *   visible del visor — uno solo desde ADR-087 §2; hasta entonces era la
+ *   unión de los rangos de los dos paneles del lado a lado. Sin
  *   documento abierto, se persisten sin diálogo ni `reanalyze`: afectan al
  *   próximo `createCore`, que ocurre una sola vez por carga de la app. Eso
  *   **sí tiene efecto** desde PR16.5 — `App.tsx` hace `settings.load()` →
@@ -161,18 +160,15 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
       // diálogo sin reanalizar nada. Desde PR16.5 ese store mentiroso además
       // se convierte en la config real del próximo `createCore`.
       applyToStore(next);
-      // Unión de los dos rangos por panel (ADR-054 §1) con `kind:
-      // "anonymized"` fijo (ADR-056 §3): el `original` se renderiza sin
+      // `kind: "anonymized"` fijo (ADR-056 §3): el `original` se renderiza sin
       // `replacements` y —hasta que exista el highlight de entidades— sin
       // `annotations`, así que un reanalyze no puede cambiar un solo píxel de
-      // ese lado. Refrescarlo sería trabajo garantizado-inútil. Composición
-      // extraída a `computeReanalyzeRenderRequest` (misma razón que
-      // `canvasDimensions.ts`: testeable sin jsdom).
+      // ese lado. Refrescarlo sería trabajo garantizado-inútil. Un solo rango
+      // desde ADR-087 §2 (hay un solo visor). Composición extraída a
+      // `computeReanalyzeRenderRequest` (misma razón que `canvasDimensions.ts`:
+      // testeable sin jsdom).
       const { visibleRange } = useViewerStore.getState();
-      const { pageIndices, kind } = computeReanalyzeRenderRequest(
-        visibleRange.original,
-        visibleRange.anonymized,
-      );
+      const { pageIndices, kind } = computeReanalyzeRenderRequest(visibleRange);
       actions.requestRender(pageIndices, kind);
       setConfirmOpen(false);
       onClose();

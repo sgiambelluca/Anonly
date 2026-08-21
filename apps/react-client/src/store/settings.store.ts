@@ -13,11 +13,11 @@
  *   este PR bootea sin Core (no hay `core-adapter` todavía, ver
  *   docs/roadmap/MVP.md, Hito 10, orden de PRs); `ocr.languages` coincide con
  *   docs/roadmap/MVP.md §2.1 ("Tesseract.js con modelo spa+eng").
- * - `scrollSyncEnabled`: `false` (ADR-054 §2) — preferencia de flujo de
- *   trabajo, no de documento: vive acá (no en `viewer.store`) porque se
- *   recuerda entre sesiones, como `language`. No alimenta `EngineConfig`
- *   (`settingsToEngineConfig.ts` no la mapea, igual que `language`/
- *   `defaultReplacementMode`).
+ *
+ * `scrollSyncEnabled` se retiró en ADR-087 §2 junto con el lado a lado: con un
+ * solo visor no hay dos scrolls que sincronizar. Una clave vieja que haya
+ * quedado en `localStorage` se ignora sola, sin migración: `load()` copia
+ * únicamente las claves que conoce.
  *
  * Solo settings van a `localStorage`, nunca documentos
  * (docs/architecture/08_Security_Model.md §10.2).
@@ -40,7 +40,6 @@ export interface SettingsSlice {
   readonly defaultReplacementMode: ReplacementMode;
   readonly nerEnabled: boolean;
   readonly ocrLanguages: ReadonlyArray<string>;
-  readonly scrollSyncEnabled: boolean; // default false — ADR-054 §2
   persist(): void;
   load(): void;
 }
@@ -49,12 +48,7 @@ const STORAGE_KEY = "anonly:settings";
 
 type SettingsData = Pick<
   SettingsSlice,
-  | "language"
-  | "performancePreset"
-  | "defaultReplacementMode"
-  | "nerEnabled"
-  | "ocrLanguages"
-  | "scrollSyncEnabled"
+  "language" | "performancePreset" | "defaultReplacementMode" | "nerEnabled" | "ocrLanguages"
 >;
 
 const DEFAULT_SETTINGS: SettingsData = {
@@ -63,7 +57,6 @@ const DEFAULT_SETTINGS: SettingsData = {
   defaultReplacementMode: ReplacementMode.Placeholder,
   nerEnabled: true,
   ocrLanguages: ["spa", "eng"],
-  scrollSyncEnabled: false,
 };
 
 type PersistedSettings = Partial<SettingsData>;
@@ -82,7 +75,6 @@ export const useSettingsStore = create<SettingsSlice>((set, get) => ({
       defaultReplacementMode: state.defaultReplacementMode,
       nerEnabled: state.nerEnabled,
       ocrLanguages: state.ocrLanguages,
-      scrollSyncEnabled: state.scrollSyncEnabled,
     };
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(toStore));
@@ -121,9 +113,6 @@ export const useSettingsStore = create<SettingsSlice>((set, get) => ({
         : {}),
       ...(parsed.nerEnabled !== undefined ? { nerEnabled: parsed.nerEnabled } : {}),
       ...(parsed.ocrLanguages !== undefined ? { ocrLanguages: parsed.ocrLanguages } : {}),
-      ...(parsed.scrollSyncEnabled !== undefined
-        ? { scrollSyncEnabled: parsed.scrollSyncEnabled }
-        : {}),
     });
   },
 }));
