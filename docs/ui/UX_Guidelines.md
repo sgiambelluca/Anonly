@@ -279,7 +279,17 @@ es reversible y no toca el documento, solo los ajustes; el rojo queda para error
 irreversibles. Usa `--color-warning-strong` (`Components.md` §10), **no** `--color-warning`, que no
 llega al contraste mínimo.
 
-### 3.5 Cómo se nombran los modos
+### 3.5 Cómo se nombran los modos, y el resto del vocabulario
+
+**Regla general** (ADR-087 §4): la interfaz nombra **el efecto**, no la etapa del pipeline ni el
+mecanismo. "NER", "OCR", "DPI", "scope", "prioridad", "bbox" y "detectores" no aparecen en ningún
+texto visible. Alcanza a los modos (abajo), al estado del pipeline (§7.1), a los mensajes de error
+(§7.5), a las etiquetas de conflicto (§6) y a Configuración.
+
+> **`DetectionSource` colapsa a dos etiquetas y no cuatro**: "Detectado automáticamente" y
+> "Agregado por vos". Al usuario le cambia algo saber si una ocurrencia la agregó él; que la haya
+> encontrado un patrón, un modelo de nombres o el reconocimiento de texto no cambia ninguna decisión
+> suya, y las tres son la misma respuesta a "¿de dónde salió esto?".
 
 `ReplacementMode` **no cambia** (ADR-012 sigue vigente). Cambian las etiquetas, que pasan a nombrar
 **lo que se ve en el papel** y a traer un ejemplo:
