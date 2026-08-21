@@ -48,9 +48,35 @@ export const REPLACEMENT_FONT_HEIGHT_RATIO = 0.7;
 export const AVG_GLYPH_ADVANCE_RATIO = 0.6;
 
 /**
- * Umbral del aviso de degradación (`AnnotationKind.Degraded`): se marca
- * cuando `tamañoEfectivo / tamañoNatural` cae por debajo de este valor. Es
- * una razón, no un tamaño en píxeles — invariante a la escala de render, así
- * que preview y export coinciden siempre sobre si hay que avisar (ADR-058 §7).
+ * Umbral del aviso de degradación (`AnnotationKind.Degraded`): se marca cuando
+ *
+ * ```
+ * anchoDisponible / anchoNatural < DEGRADED_FONT_RATIO
+ * ```
+ *
+ * donde `anchoNatural` es lo que el texto de reemplazo mediría a su tamaño de
+ * referencia (`boxHeight × REPLACEMENT_FONT_HEIGHT_RATIO`). O sea: **cuánto más
+ * angosto que su ancho natural quedó**.
+ *
+ * Sigue siendo una razón y no un tamaño en píxeles, que es el principio de
+ * ADR-058 §7. Lo que cambió con **ADR-086** es qué razón: antes comparaba
+ * `tamañoEfectivo / tamañoNatural`, o sea el encogido VERTICAL de la fuente, y
+ * eso es exactamente la compresión que en una caja de cuerpo de texto no puede
+ * ocurrir — los dos términos chocaban contra el piso de fuente mínima y el
+ * cociente daba 1,00 por construcción. Lo que arruina la legibilidad es el
+ * aplastado HORIZONTAL de `fillText(..., maxWidth)`, y es lo que ahora se mide.
+ * (Las dos compresiones no son independientes: su producto se simplifica
+ * exactamente a esta razón, porque el tamaño final se cancela.)
+ *
+ * **El valor bajó de 0,6 a 0,5 en el mismo cambio, y no es cosmético**: el 0,6
+ * viejo medía otra magnitud. Aplicado a la razón de anchos marcaría
+ * placeholders normales en cajas apretadas —`[PERSONA 01]` da 0,579— que se
+ * renderizan perfectamente bien. Sobre-marcar erosiona la única señal que el
+ * usuario tiene: una señal que aparece de más deja de ser señal (ADR-058 §7,
+ * ADR-062 "Alternativas"). Ante la duda, no se marca.
+ *
+ * Invariante a la escala de render, ahora sí de forma **exacta** (ADR-086 §2):
+ * el tamaño de referencia no tiene piso ni redondeo, y el piso de dibujo escala
+ * con el render. Por eso el veredicto del preview vale para el PDF exportado.
  */
-export const DEGRADED_FONT_RATIO = 0.6;
+export const DEGRADED_FONT_RATIO = 0.5;
