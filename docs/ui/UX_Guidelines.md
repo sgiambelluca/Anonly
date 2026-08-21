@@ -84,6 +84,13 @@ propios, así que una toolbar arriba dejaría dos barras de progreso del mismo p
 
 **Ya no hay panel de Reglas** (§4). **Ya no hay dos visores** (§5.1).
 
+> **Sin estrategia responsive, y es un gap conocido.** El layout de 4 paneles que esta sección
+> reemplaza tenía un párrafo de mobile (tabs por debajo de 1024 px, que implementaba
+> `SideBySideViewer`); al retirarlo, ADR-087 §2 **no escribió el reemplazo**. Medido: a 375 px la
+> barra lateral se come el ancho y el visor queda en una tira. Hasta que se decida qué ancho mínimo
+> se soporta, **este layout asume escritorio**. Opciones y medición en
+> `roadmap/Post_Hito10.8_Pendientes.md` §19.
+
 ---
 
 ## 3. Árbol de entidades

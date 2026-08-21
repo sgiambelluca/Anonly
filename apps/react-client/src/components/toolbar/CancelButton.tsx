@@ -19,8 +19,21 @@ import { usePipelineStore } from "../../store/pipeline.store.js";
 import { Button } from "../common/Button.js";
 import { ConfirmDialog } from "../common/ConfirmDialog.js";
 
+/**
+ * ADR-087 §7 agrega `Ready`. Ahí el pipeline **ya terminó**: no hay nada que
+ * cancelar, y el botón aparecía con peso de secundario junto al CTA primario
+ * mientras su `ConfirmDialog` advertía que "los cambios no guardados se
+ * perderán" — una amenaza imposible.
+ *
+ * El caso que sí existe —trabajo del pipeline corriendo— sigue cubierto por la
+ * regla general: durante el escaneo en segundo plano posterior al pase
+ * temprano (`UX_Guidelines.md` §7.2) el `stage` sigue siendo
+ * `Detecting`/`OCRing`, así que el botón se muestra. Es justamente cuando de
+ * verdad sirve.
+ */
 const HIDDEN_STAGES: ReadonlySet<PipelineStage> = new Set([
   PipelineStage.Idle,
+  PipelineStage.Ready,
   PipelineStage.Done,
   PipelineStage.Failed,
   PipelineStage.Cancelled,

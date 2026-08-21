@@ -86,6 +86,11 @@ export function ReplacementModeSelect({ group }: ReplacementModeSelectProps) {
       }}
       onSelect={handleSelect}
       align="right"
+      // `min-w` y no solo `flex-1`: repartir proporcionalmente dejaba el
+      // selector en 48 px —"Etiquetar" cortado y el caret sin lugar—. Con un
+      // piso, el nombre se queda con todo el resto y el modo sigue legible;
+      // por debajo de eso encoge el nombre, que al menos tiene `title`.
+      className="min-w-[6.5rem] flex-1"
     >
       {({ open, toggle }) => (
         <button
@@ -100,7 +105,7 @@ export function ReplacementModeSelect({ group }: ReplacementModeSelectProps) {
           // marca con un punto y con peso de texto, no con un borde — un borde
           // fino acá se confundía con el chip del tipo, que es exactamente el
           // error de alcance que estos tratamientos existen para evitar.
-          className={`flex max-w-[11rem] items-center gap-1 rounded px-2 py-1 text-sm hover:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+          className={`flex min-w-0 flex-1 items-center gap-1 rounded px-2 py-1 text-sm hover:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
             ownDecision ? "font-medium text-text-primary" : "text-text-secondary"
           }`}
         >

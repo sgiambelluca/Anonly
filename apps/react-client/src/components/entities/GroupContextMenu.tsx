@@ -98,7 +98,10 @@ export function GroupContextMenu({
   }, [open]);
 
   return (
-    <div ref={containerRef} className="relative">
+    // `shrink-0`: la fila reparte su ancho entre el nombre y el selector de
+    // modo (`EntityGroupItem`), y sin esto el menú también entraba al reparto
+    // y su icono quedaba aplastado contra el caret del selector.
+    <div ref={containerRef} className="relative shrink-0">
       <button
         type="button"
         aria-label="Más acciones"

@@ -446,7 +446,8 @@ Se detectaron en la misma auditoría y **no** se deciden acá — necesitan su p
 5. **Drag & drop**: el dropzone del Hero es decorativo. §1 de este ADR lo declara funcional; la implementación es trabajo de PR.
 6. **Sin deshacer general**: §3.3 cubre los dos barridos y el único caso de fila que destruye algo irrecuperable. Todo lo demás (habilitar/deshabilitar grupos, fusionar, dividir, reclasificar, agregar entidades a mano) sigue sin undo.
 7. **Ruido de detección**: falsos positivos ("20-12345678" como teléfono) y errores de NER ("DNI" como Organización) se muestran con el mismo peso que los aciertos. Detalle medido y direcciones posibles en `roadmap/Post_Hito10.8_Pendientes.md` §18.
-8. **Los tokens de reemplazo se pisan entre sí en el preview anonimizado**: no es regresión de este ADR, pero §2 lo vuelve mucho más visible al darle todo el ancho al visor. `roadmap/Post_Hito10.8_Pendientes.md` §17.
+8. **Sin estrategia responsive** — y es la **única regresión** de este ADR. `SideBySideViewer` cargaba la única conducta responsive de la app (tabs por debajo de `lg`); §2 lo retira sin reemplazo, y a 375 px la barra lateral se come el ancho. Necesita una decisión de producto sobre el ancho mínimo soportado: `roadmap/Post_Hito10.8_Pendientes.md` §19.
+9. **Los tokens de reemplazo se pisan entre sí en el preview anonimizado**: no es regresión de este ADR, pero §2 lo vuelve mucho más visible al darle todo el ancho al visor. `roadmap/Post_Hito10.8_Pendientes.md` §17.
 
 ---
 

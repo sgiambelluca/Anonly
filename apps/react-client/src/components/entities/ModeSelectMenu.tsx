@@ -36,6 +36,8 @@ export interface ModeSelectMenuProps {
   /** El disparador, que cada nivel estiliza a su manera (§3.1). */
   readonly children: (props: { readonly open: boolean; readonly toggle: () => void }) => ReactNode;
   readonly align?: "left" | "right";
+  /** Clases del contenedor, para que el nivel decida si puede encoger. */
+  readonly className?: string;
 }
 
 export function ModeSelectMenu({
@@ -44,6 +46,7 @@ export function ModeSelectMenu({
   onSelect,
   children,
   align = "left",
+  className = "",
 }: ModeSelectMenuProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -68,7 +71,7 @@ export function ModeSelectMenu({
   }, [open]);
 
   return (
-    <div ref={containerRef} className="relative">
+    <div ref={containerRef} className={`relative ${className}`}>
       {children({ open, toggle: () => setOpen((prev) => !prev) })}
       {open ? (
         <div
