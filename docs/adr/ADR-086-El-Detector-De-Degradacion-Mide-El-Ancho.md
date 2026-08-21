@@ -110,6 +110,10 @@ Dos cambios en `fitReplacementFontSized`, y son la misma idea vista de los dos l
 
 **(b) `REPLACEMENT_MIN_FONT_PX` se multiplica por la escala de render** al acotar el bucle. Es un límite de legibilidad en píxeles de pantalla, y por lo tanto una cantidad que escala igual que todo lo demás que el kernel dibuja. Sin esto, un preview a escala 2 dibuja hasta 8 px donde el mismo render a escala 1 dibuja hasta 8 px "grandes" — dos umbrales distintos para la misma decisión visual.
 
+**Qué sitios alcanza cada mitad, porque no era obvio y la primera implementación lo erró.** (a) rige **todo lo que sea una referencia**, no solo el término del cociente: también el `naturalFont` con el que `paintReplacements` decide `fitsNaturally` (la condición de entrada al repintado de línea de ADR-058 §2), que tampoco se dibuja nunca. Usar ahí el tamaño de dibujo hacía que la referencia mintiera hacia abajo —una caja de 12 pt declaraba 8 px cuando pedía 8,4— y el token se midiera más angosto de lo que es, así que `fitsNaturally` daba `true` de más y el repintado se **sub-activaba**.
+
+(b) rige **el bucle de dibujo, y solo el bucle**. En particular **no** alcanza al `sizePx` con el que `calibrateLineFont` mide sus 12 candidatos (ADR-058 §6(e)), que conserva el piso sin escalar: ese tamaño tiene que aproximar el tamaño **real** de la línea en la página, y un piso escalado lo infla —16,64 px contra 11,65 reales en una caja de 8 pt a `fullScale`, 42,9% de error contra 3,0%— hasta empujar el `errorRatio` mínimo alcanzable por encima de `LINE_CALIBRATION_ERROR_THRESHOLD` (0,15) **por construcción**. O sea: el repintado de línea se apagaría solo en el PDF exportado, sin error y sin log, justo sobre el caso que ADR-058 existe para arreglar. Mejorar esa estimación es posible y probablemente valga la pena, pero es otro cambio: tiene su propia justificación y su propio gate visual.
+
 Juntos dan **invariancia exacta**, no aproximada. Medido sobre la formulación propuesta, mismo texto y misma caja a seis escalas:
 
 | escala | veredicto | tamaño dibujado |
@@ -147,6 +151,10 @@ Con 0,6 se marcan **placeholders normales en cajas apretadas** — tokens que ho
 Las tablas de §3 usan el modelo lineal de ancho (`estimateTokenWidth`), no `measureText`. Sirven para elegir el orden de magnitud; no para afirmar que 0,5 es el número correcto con métricas reales de fuente.
 
 **Gate de este ADR**, mismo criterio que ADR-058 §11: verificación manual en browser sobre los cuatro documentos de siempre, comprobando las dos direcciones —que ningún placeholder que se lee bien quede marcado, y que todo reemplazo que no se lee quede marcado—. Si con métricas reales algún placeholder normal cae por debajo de 0,5, se baja el umbral antes de mergear, no después.
+
+**Cobertura real del gate (2026-08-20): 1 de los 4 documentos.** Se corrió el **documento 1** (texto con nombres cortos en párrafos), en las tres direcciones: con los placeholders automáticos no se enciende ninguna marca; con un reemplazo de 56 caracteres escrito a mano se enciende, con el recuadro sobre el canvas y el diálogo; y al acortar el texto la marca se apaga sola. Faltan el **2** (escaneado, ruta OCR), el **3** (tablas y justificado) y el **4** (sello). Los tres exigen documentos que el repo no tiene: `tests/fixtures/` solo commitea `protected.pdf` y su generador produce texto plano, vacío y corrupto — un escaneado real no se fabrica con `pdf-lib`.
+
+Qué compensa y qué no. El riesgo que el documento 3 cubriría —que el piso escalado se filtre a la calibración y apague el repintado de línea— **apareció y está cerrado con un test automatizado a `fullScale`** (`line repaint still activates at fullScale on a body-text box`), que además es más fuerte que el gate visual para ese defecto: el gate corre el preview a escala 1, donde el piso escalado y el absoluto coinciden y el problema es invisible. Lo que **no** está cubierto sigue siendo la calibración del umbral contra familias tipográficas distintas de las del documento 1, que es exactamente para lo que §4 existe. Precedente de no dejarlo implícito: el gate del Hito 10.5 quedó registrado como 3/4 documentos sin probar (`roadmap/MVP.md`).
 
 ### 5. El veredicto sigue saliendo solo por el preview
 
