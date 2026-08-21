@@ -56,7 +56,9 @@ Pantalla completa. Sin panel de entidades ni de reglas montados.
 
 ### 2.2 ②a Escanear
 
-Pantalla de progreso. Ver §7.2 para el umbral de salida y §7.3 para qué se muestra.
+Pantalla de progreso **a pantalla completa, sin toolbar**: trae logo, estado, progreso y "Cancelar"
+propios, así que una toolbar arriba dejaría dos barras de progreso del mismo pipeline y dos botones
+"Cancelar" a la vez. Ver §7.2 para el umbral de salida y §7.3 para qué se muestra.
 
 ### 2.3 ②b Revisar — la superficie de trabajo
 
@@ -435,6 +437,9 @@ Dos detecciones se superponen
 ## 7. Pipeline y progreso
 
 ### 7.1 Estado en la toolbar (②b)
+
+> Durante ②a el estado no lo muestra la toolbar sino la propia pantalla de escaneo (§2.2/§7.3).
+> Esta sección describe la toolbar del panel de trabajo.
 
 ```
 [● Listo]                                        [Exportar]
