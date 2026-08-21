@@ -38,7 +38,7 @@ Las soluciones existentes presentan una o más de estas limitaciones:
 - **Redacción visual manual**: tapan con cajas negras pero el texto sigue embebido en el PDF y puede recuperarse.
 - **Herramientas de escritorio pesadas**: costo, instalación, mantenimiento, sin trazabilidad.
 - **Sin agrupación**: anonimizan cada aparición por separado, generando inconsistencias (un mismo DNI aparece como tres valores distintos).
-- **Sin vista previa lado a lado**: el usuario no puede comparar el original y el resultado antes de exportar.
+- **Sin vista previa del resultado**: el usuario no puede comparar el original y el resultado antes de exportar.
 
 Anonly resuelve todo esto en una sola herramienta web, local y con agrupación por defecto.
 
@@ -79,7 +79,7 @@ No es público objetivo: anonimización en volumen masivo (millones de documento
   - **NER local** (persona, organización, dirección) vía Transformers.js + ONNX Runtime Web.
 - **Agrupación obligatoria** de ocurrencias por valor canónico y tipo.
 - 4 modos de reemplazo por grupo: `mask` (censura con formato), `synthetic` (valor sintético válido), `placeholder` (`[DNI 01]`), `redact` (bloque negro).
-- Vista previa lado a lado: **original vs. anonimizado**.
+- Vista previa del resultado: **original vs. anonimizado**, alternando en un mismo visor (§8).
 - Panel de entidades agrupadas por tipo, con checkbox y contador de ocurrencias.
 - Panel de reglas a nivel grupo / tipo / global.
 - Exportación a **PDF nuevo** reconstruido (no redacción in-place).
@@ -118,26 +118,42 @@ Las métricas son contractuales y se validan en `architecture/07_Performance_Str
 
 ## 8. Layout de producto
 
+> **Reescrito por ADR-087 §1 (post-Hito 10.9).** La versión anterior dibujaba cuatro paneles
+> simultáneos —Entidades + Reglas a la izquierda, PDF original + anonimizado a la derecha—. Se
+> retira: la UI trataba "cargar", "revisar" y "exportar" como el mismo momento, así que todo
+> competía por la misma pantalla y nada podía priorizarse. El detalle y la evidencia están en
+> `ADR-087` y en `ui/UX_Guidelines.md` §2.
+
+El producto tiene **tres momentos**, y solo el del medio es una pantalla de trabajo:
+
+```
+① Cargar  ──────►  ②a Escanear  ──────►  ②b Revisar  ──────►  ③ Exportar
+  pantalla           pantalla de           la aplicación         diálogo
+  completa           progreso              propiamente dicha     confirmatorio
+```
+
+En **②b**, la barra lateral muestra el árbol de **entidades** y nada más; el área de documento
+muestra **un solo visor** con un toggle `Original | Anonimizado`.
+
 ```
 ┌──────────────────────────────────────────────────────────┐
-│  Toolbar (acciones globales, estado del pipeline, export) │
+│  Toolbar (estado del pipeline, exportar, settings)        │
 ├──────────────────┬───────────────────────────────────────┤
-│  Entidades       │            PDF original               │
-│  ▶ Personas (3)  │   (con highlight de grupos activos)   │
-│    ☑ Juan (14)   │                                       │
-│    ☑ María (6)   │                                       │
-│  ▶ DNI (3)       │                                       │
-│    ☑ 34.567.891  ├───────────────────────────────────────┤
-│  ▶ Direcciones   │          PDF anonimizado              │
-│    ☑ Belgrano    │   (vista previa lado a lado)          │
-├──────────────────┤                                       │
-│  Reglas          │                                       │
-│  (por grupo /    │                                       │
-│   tipo / global) │                                       │
+│  Todo el doc  ▾  │   ( Original | Anonimizado )    ⊖ ⊕   │
+├──────────────────┼───────────────────────────────────────┤
+│  ▾ Personas (3)▾ │                                       │
+│    ☑ Juan (14)   │            UN SOLO VISOR              │
+│    ☑ María (6)   │            (todo el ancho)            │
+│  ▾ DNI (3)    ▾  │                                       │
+│    ☑ 34.567.891  │                                       │
 └──────────────────┴───────────────────────────────────────┘
 ```
 
-El panel de Entidades lista **grupos**, nunca ocurrencias individuales. Cada grupo muestra su valor canónico, el contador de ocurrencias, un checkbox de habilitación y un selector de modo de reemplazo. El detalle de `UX_Guidelines.md` y `ui/Components.md` define el resto.
+El panel de Entidades lista **grupos**, nunca ocurrencias individuales. Cada grupo muestra su valor
+canónico, el contador de ocurrencias, un checkbox de habilitación y un selector de modo de
+reemplazo. El **modo de reemplazo se elige en tres niveles** —documento, tipo y grupo—, que es la
+precedencia `group > type > global` que el Grouping Engine ya implementa; por eso no hay un panel
+de reglas aparte. El detalle de `UX_Guidelines.md` y `ui/Components.md` define el resto.
 
 ---
 
