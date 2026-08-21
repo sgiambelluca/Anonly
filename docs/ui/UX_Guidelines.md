@@ -1,8 +1,8 @@
-<!-- CONTEXT: scope=ux | dependencias=00_Project_Vision.md,ui/React_Client.md,ADR-011-Grouping-First.md,ADR-012-Replacement-Modes.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md | audiencia=IA-implementador-ui+humanos | fase=4 (§3.1 aclarado en fase 10, ADR-036 §9; §3.3/§5.4 en fase 10.5 por ADR-057 —tokens abreviados— y ADR-058 —el reemplazo no se derrama, marca de degradado—, §8.2 por ADR-059 —checkbox de referencia de marcadores—; §3.3/§5.4 en fase 10.6 por ADR-060 —género— y por ADR-071/ADR-072 —el control de género pasa a ser un botón de tres estados visible solo en `placeholder`/`synthetic`, con la marca de "sin determinar" fusionada adentro, y el sintético respeta el género y deja de cambiar solo—; §5.4b en fase 10.7 por ADR-061 —agregado manual de entidades—; §5.4 en fase 10.9 por ADR-076 —un texto de reemplazo escrito a mano se conserva, qué lo reemplaza y cómo se vuelve al automático— y ADR-074 §6 —la marca de degradado se enciende más seguido porque ahora mide contra el rectángulo real—) -->
+<!-- CONTEXT: scope=ux | dependencias=00_Project_Vision.md,ui/React_Client.md,ADR-011-Grouping-First.md,ADR-012-Replacement-Modes.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md | audiencia=IA-implementador-ui+humanos | fase=4 (§3.1 aclarado en fase 10, ADR-036 §9; §3.3/§5.4 en fase 10.5 por ADR-057 —tokens abreviados— y ADR-058 —el reemplazo no se derrama, marca de degradado—, §8.2 por ADR-059 —checkbox de referencia de marcadores—; §3.3/§5.4 en fase 10.6 por ADR-060 —género— y por ADR-071/ADR-072 —el control de género pasa a ser un botón de tres estados visible solo en `placeholder`/`synthetic`, con la marca de "sin determinar" fusionada adentro, y el sintético respeta el género y deja de cambiar solo—; §5.4b en fase 10.7 por ADR-061 —agregado manual de entidades—; §5.4 en fase 10.9 por ADR-076 —un texto de reemplazo escrito a mano se conserva, qué lo reemplaza y cómo se vuelve al automático— y ADR-074 §6 —la marca de degradado se enciende más seguido porque ahora mide contra el rectángulo real—; §1/§2/§3/§4/§5/§7/§8/§11 reescritos en el rediseño post-10.9 por **ADR-087** —tres momentos en vez de cuatro paneles: un solo visor con toggle, el modo de reemplazo en tres niveles del árbol, el panel de Reglas retirado, el export sin controles técnicos, y la pantalla de escaneo con piso y techo—) -->
 
 # Anonly — UX Guidelines
 
-> Patrones de UX para anonimización. Carga incremental, vista previa lado a lado, edición de grupos, conflictos, reglas, cancelación, accesibilidad. Orienta a diseñadores e IAs que implementan la UI.
+> Patrones de UX para anonimización. Flujo en tres momentos, carga incremental, visor único con toggle Original/Anonimizado, edición de grupos, conflictos, cancelación, accesibilidad. Orienta a diseñadores e IAs que implementan la UI.
 
 ---
 
@@ -12,58 +12,92 @@
 |---|---|
 | UX-1 | **Transparencia radical**: el usuario siempre sabe qué está pasando (progreso, errores, qué se detectó, qué se reemplazará). |
 | UX-2 | **Agrupación por defecto**: el árbol muestra grupos, nunca ocurrencias. El conteo de ocurrencias es visible pero secundario. |
-| UX-3 | **Lado a lado obligatorio**: el usuario ve original y anonimizado simultáneamente para validar antes de exportar. |
+| UX-3 | **Validación antes de exportar** (reescrito por ADR-087 §2): el usuario puede ver el resultado anonimizado y contrastarlo con el original antes de exportar, **alternando** entre las dos vistas en un solo visor. La versión anterior de este principio decía "lado a lado obligatorio" y exigía los dos paneles simultáneos; ADR-087 §2 lo retira: el documento necesita todo el ancho para leerse, y el trabajo real es revisar qué se detectó, no comparar píxeles de la misma línea. |
+| UX-3b | **Nunca mostrar un "anonimizado" que no lo es** (ADR-087 §2): la vista anonimizada **no está disponible hasta `stage === Ready`**. Antes de eso los `replacements` no existen y el render sale idéntico al original (`core/Render_Engine.md` §13 caso 1); mostrarlo bajo ese rótulo entrena al usuario a confiar en una garantía que el sistema todavía no da. |
 | UX-4 | **Edición no destructiva**: cualquier cambio es reversible hasta el export. |
-| UX-5 | **Cancelación siempre disponible**: botón "Cancelar" visible durante todo el pipeline. |
+| UX-5 | **Cancelación disponible mientras hay algo que cancelar** (precisado por ADR-087 §7): "Cancelar" visible durante todo el trabajo del pipeline, **incluido el escaneo en segundo plano** de §7.2 — y **no** en `Ready`, donde no hay nada que cancelar y su diálogo advertía una pérdida de datos imposible. |
 | UX-6 | **Progreso incremental**: las entidades aparecen a medida que se detectan, no al final. |
 | UX-7 | **Defaults seguros**: `placeholder` por defecto (más informativo), `enabled = true` por defecto. |
-| UX-8 | **Sin sorpresas en el export**: pre-flight check muestra cuántos grupos se anonimizarán, cuántas páginas, tamaño estimado. |
+| UX-8 | **Sin sorpresas en el export**: pre-flight check muestra cuántos grupos se anonimizarán y cuántas páginas. (El "tamaño estimado" que pedía la redacción anterior nunca se implementó: no hay fórmula documentada para estimarlo — `core/Export_Engine.md` §12 solo da un rango para una combinación fija.) |
 | UX-9 | **Accesibilidad desde el inicio**: teclado, ARIA, contraste, focus visible. |
 
 ---
 
-## 2. Layout 4 paneles
+## 2. Los tres momentos (ADR-087 §1)
+
+> **Reemplaza al layout de 4 paneles.** La versión anterior de esta sección describía cuatro
+> regiones simultáneas con divisores arrastrables y reparto 60/40. ADR-087 §1 la retira: la UI
+> trataba "cargar", "revisar" y "exportar" como el mismo momento, así que todo competía por la
+> misma pantalla y nada podía priorizarse. El §2.1 de resizing se retira entero — nunca se
+> implementó, y el reparto real (50/50 fijo) le daba media región crítica a un panel vacío.
+
+```
+① Cargar  ──────►  ②a Escanear  ──────►  ②b Revisar  ──────►  ③ Exportar
+  pantalla           pantalla de           la aplicación         diálogo
+  completa           progreso              propiamente dicha     confirmatorio
+```
+
+**Solo ②b es una pantalla de trabajo.** ① y ②a son de paso; ③ es un diálogo. La separación no
+existe para linealizar el trabajo —el usuario se queda en ②b, scrollea, edita y vuelve atrás—
+sino para que los otros tres momentos dejen de robarle espacio.
+
+### 2.1 ① Cargar
+
+Pantalla completa. Sin panel de entidades ni de reglas montados.
+
+- Logo y una frase de qué hace la herramienta.
+- **Zona de carga funcional**: drop de archivo **y** botón. Los dos operativos.
+- Tres features breves (100 % local / detección automática / export no recuperable).
+
+> La versión anterior mostraba esta pantalla como "Hero" **dentro** del panel derecho, con el
+> árbol de entidades vacío a la izquierda ocupando un tercio del ancho. Además su dropzone no
+> aceptaba drops y su botón estaba deshabilitado: la afordancia visualmente dominante de la
+> primera pantalla era decorativa (ADR-087 Contexto §1, hallazgo 5).
+
+### 2.2 ②a Escanear
+
+Pantalla de progreso. Ver §7.2 para el umbral de salida y §7.3 para qué se muestra.
+
+### 2.3 ②b Revisar — la superficie de trabajo
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│  Toolbar (arriba)                                         │
+│  Toolbar: logo · estado · [Exportar] · ⚙                 │
 ├──────────────────┬───────────────────────────────────────┤
-│  Entidades       │            PDF original               │
-│  (izq-sup)       │            (der-sup)                  │
-├──────────────────┼───────────────────────────────────────┤
-│  Reglas          │            PDF anonimizado            │
-│  (izq-inf)       │            (der-inf)                  │
+│  Todo el doc ▾   │  ( Original | Anonimizado )   ⊖ 100% ⊕│
+│ ─────────────────┼───────────────────────────────────────┤
+│  ▾ DNI (12)  ▾   │                                       │
+│    ☑ 34.567.891  │        UN SOLO VISOR                  │
+│    ☑ 18.445.212  │        (todo el ancho)                │
+│  ▾ Personas (3)▾ │                                       │
+│    ☑ Juan Pérez  │                                       │
 └──────────────────┴───────────────────────────────────────┘
 ```
 
-- **Toolbar**: logo, estado del pipeline (stage + progress bar), botón "Importar PDF", botón "Cancelar", botón "Exportar", settings.
-- **Entidades**: árbol expandible por tipo, con grupos y checkboxes.
-- **Reglas**: lista de reglas por scope (group/type/global) + creador de reglas.
-- **PDF original**: visor virtualizado, scroll vertical, con highlight de grupos habilitados.
-- **PDF anonimizado**: visor virtualizado, sincronizado verticalmente con el original, mostrando el resultado con reemplazos aplicados.
+- **Toolbar**: logo, estado del pipeline, "Exportar", settings. "Cancelar" **solo mientras el
+  pipeline trabaja** (§7.4). "Cerrar documento" pasa al menú de settings.
+- **Barra lateral**: el árbol de entidades **y nada más**. La franja "Todo el documento" de §3.4
+  vive arriba del árbol, fuera de él.
+- **Área de documento**: un solo `PdfViewer` con el toggle Original / Anonimizado (§5.1).
 
-### 2.1 Resizing
-
-- El usuario puede redimensionar el panel izquierdo (Entidades + Reglas) vs el derecho (visores). Default 30/70.
-- Dentro del panel izquierdo, Entidades y Reglas se reparten 60/40 vertical, con divisor draggable.
-- En mobile/tablet (< 1024 px), el layout colapsa a tabs: "Entidades | Reglas | Original | Anonimizado".
+**Ya no hay panel de Reglas** (§4). **Ya no hay dos visores** (§5.1).
 
 ---
 
 ## 3. Árbol de entidades
 
 ```
-▶ Personas (3)              [▾]
-    ☑ Juan Pérez (14)        [placeholder ▾]  [⋯]
-    ☑ María Gómez (6)        [placeholder ▾]  [⋯]
-    ☑ Carlos López (2)       [placeholder ▾]  [⋯]
-▶ DNI (3)                   [▾]
-    ☑ 34.567.891             [placeholder ▾]  [⋯]
-    ☑ 18.445.212             [placeholder ▾]  [⋯]
-    ☑ 42.998.103             [placeholder ▾]  [⋯]
-▶ Direcciones (2)           [▾]
-    ☑ Belgrano 1234          [placeholder ▾]  [⋯]
-    ☑ Rivadavia 455          [placeholder ▾]  [⋯]
+┌────────────────────────────────────────────────────────────────┐
+│  Todo el documento          [ Etiquetar                    ▾ ] │  ← §3.4 nivel documento
+└────────────────────────────────────────────────────────────────┘
+  ▾ ☑ Personas (3)             ( Etiquetar                   ▾ )   ← §3.4 nivel tipo
+      ☑ Juan Pérez (14)   ♂      Etiquetar                         ← heredado, sin control
+      ☑ María Gómez (6)   ○      Etiquetar
+      ☑ Carlos López (2)  ♂      Tapar con negro             ▾     ← §3.4 nivel fila
+  ▾ ☑ DNI (3)                  ( Varios                      ▾ )   ← §3.4b estado mixto
+      ☑ 34.567.891               Ocultar parcialmente
+      ☑ 18.445.212               Ocultar parcialmente
+      ☑ 42.998.103               Tapar con negro             ▾
 ```
 
 ### 3.1 Elementos del árbol
@@ -73,8 +107,9 @@
   - Checkbox: habilita/deshabilita el grupo. La UI emite `GROUP_UPDATE_REQUESTED` con `patch.enabled` (canal `ui`); `GROUP_TOGGLED` es el evento que **Grouping** emite como respuesta (`04_Event_System.md` §6/§10 — aclaración ADR-036 §9).
   - `<canonicalValue>`: el valor representativo del grupo. Click abre un popover con aliases, ocurrencias por página y opción de editar `canonicalValue`.
   - `(<n ocurrencias>)`: badge con `members.length`. No es editable.
-  - `[modo ▾]`: selector de `ReplacementMode` (mask/synthetic/placeholder/redact). Cambio emite `GROUP_UPDATE_REQUESTED` con `patch.replacementMode`.
+  - `[modo ▾]`: selector de `ReplacementMode`, con las etiquetas de §3.5. Cambio emite `GROUP_UPDATE_REQUESTED` con `patch.replacementMode`. **Presentación ghost** (ADR-087 §3.1): sin borde ni fondo hasta el hover, mostrando en gris el modo heredado del tipo. Gana borde **solo** cuando la fila fue puesta a mano — ahí el borde *es* la señal de excepción.
   - `[⋯]`: menú contextual con: Fusionar con…, Dividir, Ver ocurrencias, Editar valor canónico, Eliminar grupo.
+  - **El token de reemplazo (`[PERSONA 01]`) no se muestra hasta `stage === Ready`** (ADR-087 §6.1): durante el escaneo cada entidad nueva renumera los índices, y el token sería el único lugar donde esa renumeración quedaría visible.
 
 ### 3.2 Interacciones
 
@@ -104,61 +139,232 @@
 
 ---
 
-## 4. Panel de reglas
+### 3.4 El modo de reemplazo se elige en tres niveles (ADR-087 §3)
+
+`core/Grouping_Engine.md` §13 caso 14 fija la precedencia: **gana la más específica,
+`group > type > global`**; `priority` solo desempata dentro del mismo scope. La UI expone esos
+tres niveles **en el árbol**, en vez de esconderlos en un panel aparte:
+
+| Nivel | Dónde | Qué escribe | Tratamiento visual (ADR-087 §3.1) |
+|---|---|---|---|
+| **Documento** | Franja propia, arriba del árbol y **fuera** de él | `Rule` de scope `global` | Borde sólido + label explícito; **acento ámbar condicional** (§3.4d) |
+| **Tipo** | Cabecera del tipo | `Rule` de scope `type` | Chip relleno, acento del color de categoría |
+| **Fila** | La fila del grupo | `Rule` de scope **`group`** (§3.4a) | Ghost; gana borde cuando tiene decisión propia |
+
+**Los tres tratamientos tienen que ser distinguibles de un vistazo**, porque el error a evitar es
+cambiar el documento entero creyendo que se cambiaba una fila. El criterio es que **el peso visual
+mapee al radio de impacto**: cuantas más filas altera un control, más deliberado tiene que verse
+accionarlo. Los tres comparten familia (tipografía, ícono de caret, alturas escalonadas) y difieren
+solo en relleno, borde y ubicación — distinguibles, no disruptivos.
+
+**Fuera de la UI**: `priority`. Con tres niveles visibles y precedencia por construcción, no hay
+nada que decidir. El vocabulario "regla", "scope" y "prioridad" tampoco aparece: por debajo se
+escriben las mismas `Rule` de siempre.
+
+### 3.4a La fila escribe una regla de grupo, no `group.replacementMode`
+
+**El selector de la fila, tal como está implementado, es inerte apenas existe una regla de tipo.**
+Está en `grouping.engine.ts:1150-1151`, dos líneas consecutivas:
+
+```js
+group.replacementMode = replacementMode;                    // lo que el usuario eligió
+group.replacementMode = resolveMode(group, session.rules);  // y una línea después se lo pisa
+```
+
+`resolveMode` chequea **primero** las reglas y **último** `group.replacementMode`, así que
+`GROUP_UPDATE_REQUESTED` con `patch.replacementMode` solo tiene efecto cuando no hay ninguna regla
+aplicable. Hoy casi no se nota porque el panel de Reglas no se usa; con §3.4 volviendo rutinaria la
+regla de tipo, el usuario tocaría el dropdown de una fila y no pasaría nada.
+
+**Por eso el selector de la fila crea una `Rule` de scope `group`.** Así la fila gana sobre el
+tipo, que es la precedencia que el Core ya define.
+
+### 3.4b Gana el último que tocaste
+
+**El modelo es temporal, no estructural**: aplicar en un nivel **barre los de abajo**.
+
+1. **Fila** → crea/actualiza una `Rule` de scope `group`.
+2. **Tipo** → **borra las reglas de grupo de ese tipo** y crea/actualiza la de tipo.
+3. **Documento** → **borra las reglas de tipo y las de grupo** y crea/actualiza la global.
+
+| Orden | Resultado |
+|---|---|
+| toco la fila #3, después la cabecera del tipo | La cabecera **barre** todo, incluida la #3 |
+| toco la cabecera del tipo, después la fila #3 | La #3 queda distinta |
+
+Sin esta regla, la #3 del primer caso sobreviviría al barrido —su regla de grupo le gana a la de
+tipo— y el usuario no podría uniformar un tipo sin repasar fila por fila.
+
+### 3.4c Estado mixto: "Varios"
+
+Cuando las filas de un tipo **no comparten modo**, su cabecera muestra `Varios ▾` — no puede
+mostrar un modo concreto sin mentir sobre las filas que no lo tienen. El menú es el normal: con
+§3.4b regla 2, **cualquier** opción elegida ahí uniforma el tipo.
+
+> **Por qué "Varios" y no "Personalizado"**: "Personalizado" **ya está tomado**. ADR-078 §1 lo usa
+> como etiqueta del selector de la fila cuando el usuario editó a mano el `replacementValue`.
+> Reusarlo acá pondría dos significados en la misma palabra, en la misma columna, a dos filas de
+> distancia. Además "Personalizado" describe un *origen* (alguien lo tocó) y lo que la cabecera
+> tiene que comunicar es un *estado* (hay más de un valor).
+
+Una fila "tiene decisión propia" ⟺ **existe una `Rule` de scope `group` para ese grupo**. Es un
+lookup en `rules.store`: no hace falta ningún dato nuevo en `EntityGroup` ni reimplementar
+`resolveMode` en la UI.
+
+### 3.4d La fricción escala con lo que hay en juego
+
+**Ningún nivel pide confirmación cuando no hay nada que romper.** Aplicar "Todo el documento →
+Etiquetar" sobre un documento recién abierto no destruye nada — es la primera acción razonable que
+alguien hace. Un control permanentemente en alarma estaría gritando el 90 % de las veces en que la
+acción es inofensiva, y ya sabemos qué pasa con eso (§3.3: *"una señal que aparece siempre no es
+una señal"*).
+
+| Nivel | Confirmación | Toast con "Deshacer" (5 s) |
+|---|---|---|
+| **Fila** | nunca | **solo si el grupo tenía el valor escrito a mano** |
+| **Tipo** | solo si ese tipo tiene filas con decisión propia | siempre |
+| **Documento** | solo si hay alguna decisión de tipo o de fila | siempre |
+
+**La fila normalmente no lleva toast** porque es la acción más frecuente de la app y es
+**autoevidente y autorreversible**: el valor nuevo se ve en el mismo control con el que se vuelve
+atrás. Un toast por cada una es ruido que arrastra la credibilidad de los otros dos.
+
+**La excepción**: cambiar el modo de un grupo con el valor escrito a mano **destruye ese texto sin
+vuelta** — el motor recalcula `replacementValue` y apaga `replacementValueUserSet`, y lo que el
+usuario tipeó no queda guardado en ningún lado. La vía de §3.3 ("cambiar el modo y volver al
+anterior") devuelve el valor **automático**, no lo escrito. Es el único caso del nivel fila donde
+se pierde algo de verdad.
+
+**El diálogo nombra lo que va a romper**:
 
 ```
-Reglas                                       [+ Nueva regla]
-─────────────────────────────────────────────────────────
-Scope: Global
-  • Modo default: placeholder                [✎] [🗑]
-  • DNI → mask                               [✎] [🗑]
+¿Cambiar el modo de todo el documento?
 
-Scope: Por tipo
-  • CUIT → synthetic                         [✎] [🗑]
+Vas a reemplazar los ajustes de 5 categorías
+y 12 entidades que modificaste a mano.
 
-Scope: Por grupo
-  • Juan Pérez → redact                      [✎] [🗑]
+                    [Cancelar]  [Cambiar todo]
 ```
 
-### 4.1 Creador de reglas (modal)
+**El undo lleva snapshot**: deshacer un barrido tiene que **restaurar las reglas que borró**, no
+solo quitar la que creó.
 
-- **Scope**: radio (Global / Por tipo / Por grupo).
-- **Si "Por tipo"**: select de `EntityType`.
-- **Si "Por grupo"**: select de grupo (autocomplete por `canonicalValue`).
-- **Modo**: select (mask/synthetic/placeholder/redact).
-- **Prioridad**: input numérico 0–1000 (default 100).
-- **Preview**: muestra un ejemplo del efecto de la regla sobre un grupo afectado.
-- **Crear**: emite `RULE_CREATED`.
+**La franja de documento se enciende cuando tiene algo que destruir**:
 
-### 4.2 Resolución visible
+```
+sin ajustes previos:
+┌────────────────────────────────────────────────────────┐
+│   Todo el documento    [ Etiquetar              ▾ ]    │
+└────────────────────────────────────────────────────────┘
 
-- Al lado de cada grupo, un tooltip "Modo aplicado por: Regla global 'DNI → mask'" explica de dónde viene el modo efectivo. Hace el sistema comprensible.
+con ajustes propios:
+┌────────────────────────────────────────────────────────┐
+│ ▌ Todo el documento    [ Etiquetar              ▾ ]    │
+│   ⚠ 5 categorías y 12 entidades con ajustes propios    │
+└────────────────────────────────────────────────────────┘
+```
+
+El color aparece cuando significa algo, y el resumen entera del riesgo **antes** de abrir el menú.
+**No se señala solo con color** (ícono + texto además del acento). **Ámbar y no rojo**: la acción
+es reversible y no toca el documento, solo los ajustes; el rojo queda para errores y confirmaciones
+irreversibles. Usa `--color-warning-strong` (`Components.md` §10), **no** `--color-warning`, que no
+llega al contraste mínimo.
+
+### 3.5 Cómo se nombran los modos
+
+`ReplacementMode` **no cambia** (ADR-012 sigue vigente). Cambian las etiquetas, que pasan a nombrar
+**lo que se ve en el papel** y a traer un ejemplo:
+
+| `ReplacementMode` | Etiqueta | Ejemplo mostrado en la opción |
+|---|---|---|
+| `Placeholder` | **Etiquetar** | `Juan Pérez → [PERSONA 01]` |
+| `Mask` | **Ocultar parcialmente** | `34.567.891 → XX.XXX.XXX` |
+| `Synthetic` | **Reemplazar por dato falso** | `Juan Pérez → Diego Ramírez` |
+| `Redact` | **Tapar con negro** | `Juan Pérez → ███████` |
+
+**El ejemplo se construye con el grupo real de esa fila**, no con un valor genérico: la pregunta
+que el usuario tiene es qué le va a pasar *a su dato*. En el selector de nivel tipo el ejemplo usa
+el primer grupo del tipo; en el de nivel documento se omite.
 
 ---
 
-## 5. Visores PDF (lado a lado)
+## 4. Reglas — retirado como panel (ADR-087 §3)
+
+> **Esta sección describía un panel que ya no existe.** El panel de Reglas listaba reglas por
+> scope (Global / Por tipo / Por grupo) con un modal creador, y ocupaba **la mitad de la barra
+> lateral** — medido: `sectionHeights: [423, 422]`. Con cero reglas, que es el caso normal, 422 px
+> de la región crítica mostraban la frase "Aún no hay reglas" mientras el árbol de entidades
+> quedaba cortado a la mitad.
+
+**Su función completa vive ahora en §3.4**: el modo de reemplazo elegido en los tres niveles del
+árbol (documento / tipo / fila), que es exactamente la precedencia `group > type > global` que el
+Core ya implementa.
+
+Qué se gana con el cambio, además del espacio:
+
+- **Más descubrible, no menos.** Poner los 12 DNI en "Ocultar parcialmente" pasa de *"saber que
+  existe un panel de reglas → abrir un modal → elegir scope → elegir tipo → elegir modo"* a un
+  click en la cabecera que el usuario ya está mirando.
+- **El vocabulario desaparece.** "Regla", "scope" y "prioridad" no aparecen en la interfaz. Por
+  debajo se escriben las mismas `Rule` de siempre: es UI nueva sobre un contrato intacto.
+- **Se elimina un camino duplicado.** El scope `group` hacía lo mismo que el selector de la fila.
+
+**Lo que se pierde y se acepta**: no hay una lista de "reglas activas" que se pueda leer de corrido.
+El estado `Varios` de §3.4b cubre la necesidad real —saber que hay filas fuera del molde— sin una
+segunda superficie.
+
+### 4.1 Resolución visible
+
+Sigue vigente en su intención, con otra forma: en vez de un tooltip que explique *"Modo aplicado
+por: Regla global 'DNI → mask'"*, la fila **muestra en gris el modo heredado** y el nivel del que
+viene está a la vista, una línea más arriba, en la cabecera del tipo. La procedencia se lee en el
+layout en vez de explicarse en un tooltip.
+
+---
+
+## 5. Visor PDF (uno solo, con toggle)
 
 ### 5.1 Layout
 
-- Dos columnas: original (izquierda) y anonimizado (derecha).
-- Scroll vertical sincronizado: mover uno mueve el otro.
-- Cada página se renderiza en un `<canvas>` reciclado por el `PageVirtualizer`.
-- Phantom de cada página (dimensiones + placeholder gris) siempre presente para scroll height correcto.
-- Zoom: botones +/- y atajos `Cmd/Ctrl + +`, `Cmd/Ctrl + -`, `Cmd/Ctrl + 0` (reset).
+> **Reemplaza al lado a lado.** La versión anterior especificaba dos columnas con scroll
+> sincronizado. ADR-087 §2 lo retira: el documento recibe todo el ancho, y la comparación pasa de
+> yuxtaposición a **alternancia**.
 
-### 5.2 Highlight en el lado original
+- **Un solo `PdfViewer`**, ocupando todo el ancho del área de documento.
+- **Toggle de dos posiciones**: `( Original | Anonimizado )`, arriba del visor.
+- Al conmutar se **conserva la página y la posición de scroll**. Esa continuidad es lo que hace
+  que la alternancia funcione como comparación.
+- Cada página se renderiza en un `<canvas>` reciclado por el `PageVirtualizer` (sin cambios).
+- Phantom de cada página (dimensiones + placeholder gris) siempre presente para scroll height
+  correcto (sin cambios).
+- Zoom: botones +/- y atajos `Cmd/Ctrl + +`, `Cmd/Ctrl + -`, `Cmd/Ctrl + 0` (sin cambios).
+
+**El toggle "Anonimizado" está deshabilitado hasta `stage === Ready`** (UX-3b), con el texto
+*"Disponible cuando termine el análisis"*. Antes de `Ready` los `replacements` no existen y el
+render anonimizado sale **idéntico al original** (`core/Render_Engine.md` §13 caso 1): mostrarlo
+bajo ese rótulo es la peor clase de defecto posible en una herramienta de privacidad.
+
+**Retirado junto con el lado a lado**: la sincronización de scroll entre paneles y su control
+(`ScrollSyncToggle`, ADR-054 §2). Con un solo panel no hay nada que sincronizar.
+
+> **ADR-054 y ADR-056 no quedan invalidados.** Existían porque dos paneles independientes pedían
+> renders que se pisaban entre sí; con un solo panel ese problema **deja de existir** en vez de
+> resolverse. `RENDER_REQUESTED.kind` (ADR-056) se conserva requerido y sin cambios — lo que
+> cambia es que ahora lo determina la posición del toggle, no qué panel se scrolleó.
+
+### 5.2 Highlight en la vista Original
 
 - Cada ocurrencia de un grupo habilitado tiene un borde color sobre el bbox.
 - Color por tipo: Personas=verde, DNI=azul, Direcciones=naranja, etc. (paleta accesible, ver §9).
 - Hover sobre un highlight: tooltip con tipo, valor canónico, modo de reemplazo, conteo de ocurrencias del grupo.
 - Click en un highlight: selecciona el grupo correspondiente en el árbol (scroll into view + resaltado).
 
-### 5.3 Conflicto en el lado original
+### 5.3 Conflicto en la vista Original
 
 - Bordes adicionales en rojo o icono ⚠ sobre bbox en conflicto.
 - Click abre el panel de conflicto (ver §6).
 
-### 5.4 Lado anonimizado
+### 5.4 Vista Anonimizada
 
 - Muestra el resultado con reemplazos aplicados visualmente.
 - `placeholder`: texto `[DNI 01]` sobre bbox — o su forma abreviada (`[PERS 01]`, `[PRS-01]`) cuando el dato original era corto (ADR-057). Para personas con género asignado, `[MUJER 01]` / `[HOMBRE 01]` (ADR-060).
@@ -177,7 +383,7 @@ Hay **tres vías**, y todas terminan en lo mismo — cambia de dónde sale el va
 2. **Señalar en el PDF original**: clickeás una palabra o arrastrás un recuadro sobre el panel izquierdo; aparece "Agregar entidad como…" con el selector de tipo.
 3. **Desde el buscador**: cada resultado de la lupa ofrece agregarlo como entidad.
 
-**Solo se puede señalar sobre el panel original.** En el anonimizado lo que se ve puede ser un reemplazo, y señalarlo no tendría sentido.
+**Solo se puede señalar con el toggle en Original.** En la vista anonimizada lo que se ve puede ser un reemplazo, y señalarlo no tendría sentido: la herramienta de señalar queda deshabilitada ahí.
 
 **La selección no es selección de texto**, aunque se sienta parecida: el visor resuelve qué palabras caen bajo el cursor o el recuadro. Es lo que hace que funcione igual en un PDF escaneado, donde no hay texto que seleccionar y es justamente donde más se necesita corregir lo que el OCR se comió.
 
@@ -185,11 +391,17 @@ Hay **tres vías**, y todas terminan en lo mismo — cambia de dónde sale el va
 
 **Efecto sobre los números**: agregar una entidad recalcula el orden de los marcadores, así que los índices de los grupos ya visibles pueden correrse — `[PERSONA 03]` puede pasar a `[PERSONA 04]`. Es coherente con que los números siempre reflejen el orden de aparición en el documento. Al agregar varias seguidas conviene que la UI no llame la atención sobre cada renumeración.
 
-### 5.5 Sincronización
+### 5.5 Continuidad al conmutar (reemplaza a "Sincronización")
 
-- Scroll vertical: si el usuario mueve uno, el otro se mueve.
-- Cambio de página: si el usuario salta a la página N en uno, el otro salta también.
-- Zoom: compartido.
+> La versión anterior de esta sección describía la sincronización entre los dos paneles (scroll,
+> página y zoom). Con un solo visor (§5.1) no hay dos cosas que sincronizar; lo que queda es
+> **continuidad al conmutar el toggle**.
+
+- **Página y scroll**: se conservan exactamente. Conmutar no mueve el documento.
+- **Zoom**: se conserva.
+- La conmutación es la operación que reemplaza a la comparación simultánea, así que **cualquier
+  salto de posición la rompe**: si al volver a Original el documento aparece en otro lado, el
+  usuario perdió la referencia que estaba comparando.
 
 ---
 
@@ -222,33 +434,92 @@ Dos detecciones se superponen
 
 ## 7. Pipeline y progreso
 
-### 7.1 Toolbar de pipeline
+### 7.1 Estado en la toolbar (②b)
 
 ```
-[● Listo]                    [Cancelar]  [Exportar]
+[● Listo]                                        [Exportar]
+[⟳ Analizando…  47 de 200 páginas]   [Cancelar]  [Exportar]
 ```
 
 Estados:
-- `● Listo` (verde): pipeline en `Ready`, listo para editar/exportar.
-- `● Procesando` (azul, animado): con texto "Extrayendo página 3 de 10…".
-- `● OCR` (azul): "OCR página 5 de 10… 65%".
-- `● NER` (azul): "Cargando modelo NER… 45%" o "Analizando página 4 de 10…".
+- `● Listo` (verde): pipeline en `Ready`, listo para editar/exportar. **Sin barra de progreso.**
+- `⟳ Analizando…` (azul, animado): con `current`/`total` reales de la etapa vigente.
+- `⟳ Reconociendo texto…` (azul): OCR, con `current`/`total`.
+- `⟳ Preparando el detector de nombres…` (azul): carga del modelo NER, con su propio progreso de
+  descarga (0..1). **Solo la primera vez** — conviene decirlo, porque es tiempo muerto sin
+  entidades apareciendo.
 - `● Cancelando` (amarillo): tras `CANCEL_REQUESTED`.
-- `● Error` (rojo): con tooltip del error.
-- `● Exportando` (azul): "Exportando página 7 de 10…".
+- `● Error` (rojo): con el mensaje y las salidas de §7.5.
+- `⟳ Exportando página 7 de 10…` (azul).
 
-### 7.2 Progreso granular
+> **La barra de progreso no se muestra en `Ready`.** Hasta ADR-087, `PipelineStatus` renderizaba
+> la barra en todos los estados no-`Idle`, así que al llegar a `Ready` quedaba en `width: 0%` con
+> el texto "Listo" al lado — el elemento más grande de la toolbar mostrando "0 %" mientras el
+> texto decía "terminado" (ADR-087 Contexto §1, hallazgo 4). Una barra sin progreso que reportar
+> no se dibuja.
 
-- Para OCR/NER/Export, mostrar `current/total` + porcentaje.
-- Para carga de modelo NER, mostrar progreso de descarga (0..1).
-- Si `deviceMemory < 4` y se serializa OCR/NER, indicar "Modo memoria reducida activado".
+> **El ancho del estado no puede ser fijo.** El `min-w-[220px]` anterior truncaba el texto a
+> < 1100 px y a 900 px la barra quedaba tapada por el botón "Exportar".
 
-### 7.3 Cancelación
+### 7.2 La pantalla de escaneo (②a) y cuándo suelta (ADR-087 §6)
 
-- Botón "Cancelar" visible siempre que `stage ∉ {Idle, Done, Failed, Cancelled}`.
-- Click → modal de confirmación "¿Cancelar el procesamiento? Los cambios no guardados se perderán." → `CANCEL_REQUESTED`.
-- Tras cancelación, el documento queda cargado en el último estado estable (páginas ya procesadas disponibles, pero el pipeline no continúa).
-- El usuario puede "Reanudar" (vía re-importar en MVP; pausa/reanudación parcial es v1.0).
+**Por qué existe.** Dos razones, y la segunda es la fuerte:
+
+1. Acota el tiempo de espera sin nada que hacer y da **prueba de vida** — las entidades apareciendo
+   distinguen "está trabajando" de "se colgó", cosa que una barra sola no logra.
+2. **Protege al usuario de editar sobre datos que todavía se mueven.** Las entidades entran
+   incrementalmente (UX-6) y cada una **renumera los marcadores** de todo el documento (§5.4b):
+   `[PERSONA 03]` puede pasar a `[PERSONA 04]` bajo el cursor.
+
+**Dónde se mide el umbral.** El tracker de progreso del Orchestrator **se reasigna por etapa**
+(`orchestrator.ts:267`: *"OCR, luego Detecting con NER activo"*). El umbral se mide sobre
+**`Detecting`**, que es la etapa larga y la que produce la mayoría de las entidades — no sobre
+"% del documento", que promedia etapas de duración incomparable.
+
+**La regla.** Se pasa de ②a a ②b cuando se cumple **la primera** de:
+
+- `Detecting` procesó **≥ 20 %** de las páginas, o
+- pasaron **6 s** desde `IMPORT_REQUESTED`;
+
+y **nunca antes de 1,2 s** desde `IMPORT_REQUESTED`.
+
+| Constante | Valor | Rol |
+|---|---|---|
+| `SCAN_ADVANCE_PAGE_RATIO` | `0.20` | Umbral de páginas analizadas en `Detecting`. |
+| `SCAN_ADVANCE_MAX_MS` | `6000` | Techo. Un escaneado de 200 páginas no atrapa a nadie. |
+| `SCAN_ADVANCE_MIN_MS` | `1200` | Piso. Un PDF de texto de 6 páginas no hace parpadear la pantalla. |
+
+**Piso y techo son globales** (desde el import), no relativos a `Detecting`: la descarga del modelo
+NER es tiempo muerto sin entidades, y un techo medido desde `Detecting` dejaría al usuario mirando
+"preparando" sin cota. Con el techo global ese caso entra a ②b con el árbol vacío y el estado
+honesto de §7.1.
+
+### 7.3 Qué muestra la pantalla de escaneo
+
+- Nombre del archivo y cantidad de páginas.
+- Estado en lenguaje llano (los mismos textos de §7.1).
+- Progreso `current`/`total` real de la etapa vigente, con porcentaje.
+- **Las entidades apareciendo en vivo**, con su contador subiendo. Es el elemento que sostiene la
+  paciencia del usuario, así que es el que tiene que estar visible — no un spinner.
+- `Cancelar`.
+
+**Sin skeleton del documento**: la pantalla de escaneo no promete un layout que todavía no existe.
+
+### 7.4 Cancelación
+
+- "Cancelar" visible siempre que `stage ∉ {Idle, Ready, Done, Failed, Cancelled}`.
+  **`Ready` entra a la lista de ocultos** (ADR-087 §7): ahí el pipeline ya terminó, no hay nada que
+  cancelar, y el botón aparecía con peso de secundario junto al CTA primario mientras su diálogo
+  advertía que *"los cambios no guardados se perderán"* — una amenaza imposible.
+- Sigue visible **durante el escaneo en segundo plano** de §7.2, que es cuando de verdad sirve.
+- Click → modal de confirmación → `CANCEL_REQUESTED`.
+- Tras cancelar, el documento queda en el último estado estable.
+
+### 7.5 Error
+
+Banner con el mensaje y las salidas disponibles ("Cerrar documento" siempre; "Desactivar NER y
+reanalizar" cuando `error.code === "NER_MODEL_MISSING"`). Sin cambios respecto de la implementación
+vigente.
 
 ---
 
@@ -256,44 +527,59 @@ Estados:
 
 ### 8.1 Botón "Exportar"
 
-- Visible siempre que `stage = Ready`.
-- Click → modal de export (ver §8.2).
+- Visible cuando `stage ∈ {Ready, Done}`.
+- Click → diálogo de export (§8.2).
 
-### 8.2 Modal de export
+### 8.2 Diálogo de export (ADR-087 §5)
 
 ```
-Exportar PDF anonimizado
+Exportar documento anonimizado
 ─────────────────────────────────────────
-Nombre: anonimizado.pdf              [✎]
-Formato de imagen: ( ) PNG  (•) JPEG
-Calidad JPEG: ─────●────── 0.85
-DPI: ( ) 150 (estándar)  ( ) 300 (alta calidad)
-Título (metadata): _______________
+  12 de 12 entidades serán anonimizadas
+  10 páginas
 
-[ ] Incluir referencia de marcadores
-    Agrega una página final que explica qué significa cada
-    marcador (PRS = Persona, MAT = Matrícula…). Solo los
-    tipos: nunca los datos originales.
+  [ ] Agregar una página con la referencia de marcadores
+      Explica qué significa cada marcador (PRS = Persona,
+      MAT = Matrícula…). Solo los tipos: nunca los datos
+      originales.
 
-Resumen:
-  • 10 páginas
-  • 23 grupos anonimizados (de 25 detectados)
-  • 2 grupos deshabilitados
-  • Tamaño estimado: ~1.2 MB
-
-[Exportar] [Cancelar]
+                          [Cancelar]  [Exportar]
 ```
 
-**Sobre el checkbox de referencia** (ADR-059): apagado por default. El copy tiene que decir las dos cosas que el usuario necesita para decidir — que **suma una página** al documento, y que lista **tipos y no valores originales**. Lo segundo no es una aclaración legal: es lo primero que un usuario asume que hace la opción, y no lo hace ni puede hacerlo. Con el resumen de arriba, el conteo de páginas mostrado pasa a ser `páginas + 1` cuando está activo.
+**Un solo control.** El criterio: **se pregunta lo que altera el documento, no lo que ajusta su
+codificación.** El checkbox de referencia de marcadores sobrevive porque **suma una página**
+(ADR-059 §6); los cinco campos técnicos no cambian qué dice el documento, solo cómo pesa.
+
+Valores fijos, retirados del formulario:
+
+| Campo | Valor fijo | Por qué |
+|---|---|---|
+| `imageFormat` | `"jpeg"` | Menor tamaño a fidelidad equivalente en documentos de texto (`core/Export_Engine.md` §13 caso 6). |
+| `jpegQuality` | **`0.92`** | Visualmente indistinguible de `1.00` en texto; ver abajo. |
+| `dpi` | `150` | Default de `ExportConfig`. |
+| `title` (metadata) | `""` | `includeOriginalMetadata: false` ya protege lo que importa. |
+| `filename` | `anonimizado.pdf` | El navegador ya deja renombrar al guardar. |
+
+> **Por qué `0.92` y no `1.00`.** Se consideró `1.00` buscando "lo más cercano al original". No lo
+> consigue: **el original ya se perdió al rasterizar a 150 DPI** — el export es 100 % imagen
+> (`core/Export_Engine.md` §11, con test de CI). El JPEG solo decide cuánto de *esa imagen* se
+> conserva, y de `0.92` a `1.00` el ojo no distingue nada en texto mientras el archivo crece ×3–4
+> sobre q 0.85 (§12: ~100–300 KB/página a q 0.85 → un expediente de 100 páginas pasa de ~20 MB a
+> ~80–120 MB). **La palanca de fidelidad real es el DPI**, y es la única de las cinco que valdría
+> exponer bajo un `▸ Opciones avanzadas` si aparece el pedido.
+
+**El resumen** muestra grupos habilitados / total y cantidad de páginas (`páginas + 1` con el
+checkbox activo). Sin "tamaño estimado": no hay fórmula documentada para calcularlo.
 
 ### 8.3 Progreso de export
 
-- Tras click "Exportar": `EXPORT_STARTED` → barra de progreso con `EXPORT_PROGRESS`.
-- Al finalizar: `EXPORT_FINISHED` → botón "Descargar" + "Exportar otro".
+- Tras "Exportar": `EXPORT_STARTED` → barra de progreso con `EXPORT_PROGRESS`.
+- Al finalizar: `EXPORT_FINISHED` → "Descargar" + "Exportar otro".
 
 ### 8.4 Pre-flight check
 
-Si `enabledGroups = 0`: modal de confirmación "No hay grupos habilitados. El export será idéntico al original. ¿Continuar?".
+Si `enabledGroups = 0`: confirmación *"No hay grupos habilitados. El export será idéntico al
+original. ¿Continuar?"*.
 
 ---
 
@@ -310,11 +596,24 @@ Si `enabledGroups = 0`: modal de confirmación "No hay grupos habilitados. El ex
 | Screen reader | el árbol anuncia tipo + count + estado; el visor anuncia "Página N de M, X grupos destacados". |
 | Color blind safe | highlight de tipos también diferenciado por patrón (sólido/punteado) además de color. |
 
+> **Deuda medida contra esta tabla** (auditoría de ADR-087, "Fuera del alcance" §1-§4). Estos
+> requisitos están escritos acá desde la fase 4 y **no se cumplen** en la implementación
+> vigente. Se listan para que la brecha sea explícita y no se lea esta tabla como estado real:
+>
+> - **Contraste**: el accent `#3b82f6` con texto blanco da **3.68:1**, bajo el 4.5:1 de esta
+>   tabla. Afecta a todos los botones primarios y a los links `text-accent`.
+> - **Tamaño de texto**: 12 px es el tamaño **más frecuente** de la interfaz (headers de panel,
+>   links de acción, contadores, labels de formulario), contra el mínimo de 14 px de acá.
+> - **Reducción de movimiento**: `prefers-reduced-motion` no aparece en el repo.
+> - **Navegación por teclado**: los atajos de flechas / `Space` / `Enter` sobre el árbol y el
+>   `Cmd/Ctrl+F` de la tabla de abajo no están implementados.
+
 Atajos de teclado:
 
 | Atajo | Acción |
 |---|---|
 | `Cmd/Ctrl+O` | importar PDF |
+| `Cmd/Ctrl+D` | conmutar Original / Anonimizado |
 | `Cmd/Ctrl+F` | buscar en entidades |
 | `Cmd/Ctrl+E` | exportar |
 | `Cmd/Ctrl+.` | cancelar pipeline |
@@ -328,9 +627,9 @@ Atajos de teclado:
 
 ## 10. Performance percibida
 
-- **First paint** (< 1.5 s desde import): mostrar la página 1 del lado original apenas PDF Engine la parsea. No esperar al pipeline completo.
+- **First paint** (< 1.5 s desde import): mostrar la página 1 apenas PDF Engine la parsea. No esperar al pipeline completo.
 - **Entidades apareciendo en vivo**: el árbol se va llenando a medida que `ENTITY_GROUP_CREATED` llega. El usuario percibe progreso.
-- **Preview incremental**: cada página del lado anonimizado aparece cuando se renderiza, no todas juntas.
+- **Preview incremental**: con el toggle en Anonimizado (disponible desde `Ready`, §5.1), cada página aparece cuando se renderiza, no todas juntas.
 - **Delta render**: al editar un grupo, solo las páginas afectadas se re-renderizan. El cambio se ve en < 150 ms.
 - **Skeletons**: mientras una página se renderiza, mostrar skeleton gris con dimensión correcta (no spinner).
 
@@ -340,17 +639,21 @@ Atajos de teclado:
 
 | Estado | UI |
 |---|---|
-| App recién abierta, sin documento | Hero con "Arrastra un PDF aquí o [Examinar]" + features destacadas. |
-| Documento cargado, sin entidades | Mensaje: "No se detectaron entidades. Revisa los patrones en Settings." |
-| Sin grupos habilitados | Banner: "No hay grupos habilitados. El export será idéntico al original." |
-| Sin reglas | Placeholder en el panel de reglas: "Aún no hay reglas. Crea una con [+ Nueva regla]." |
-| NER desactivado | Banner en el árbol: "NER desactivado. Solo se detectarán patrones Regex. [Activar NER]" |
+| App recién abierta, sin documento | **No es un estado vacío: es el momento ① de §2.1**, pantalla completa. El panel de entidades no está montado, así que no tiene estado vacío que mostrar. |
+| Escaneando, todavía sin entidades | En ②a (§7.3): el progreso real de la etapa, con el contador de entidades en 0. En ②b tras el pase temprano (§7.2): árbol vacío + el estado de la toolbar diciendo qué está pasando. **Nunca "Sin documento"**: hay documento. |
+| Documento cargado, escaneo terminado, sin entidades | "No se detectaron entidades." + la salida concreta: agregar una a mano (§5.4b) o revisar la detección en Configuración. |
+| Sin grupos habilitados | Confirmación al exportar (§8.4). |
+| NER desactivado | Aviso en el árbol: "La detección de nombres está desactivada. Solo se detectan patrones (DNI, CUIT, emails…). [Activar]" — **sin nombrar "NER"**. |
+
+> **"Sin reglas" se retira**: no hay panel de reglas (§4). El nivel documento y el nivel tipo de
+> §3.4 son controles siempre presentes con un valor vigente, así que no tienen estado vacío.
 
 ---
 
 ## 12. Referencias
 
-- `00_Project_Vision.md` §8 (layout)
+- `adr/ADR-087-La-Herramienta-Tiene-Tres-Momentos-No-Cuatro-Paneles.md` — reescribe §1, §2, §3, §4, §5, §7, §8 y §11
+- `00_Project_Vision.md` §8 (layout — describe el layout de 4 paneles retirado por ADR-087 §1)
 - `ui/React_Client.md` (UI Contract)
 - `ui/Components.md` (catálogo)
 - `ADR-011-Grouping-First.md`
