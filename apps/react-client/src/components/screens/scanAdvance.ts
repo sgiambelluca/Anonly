@@ -17,6 +17,22 @@
  * etapa real, y `Detecting` es además la etapa larga y la que produce la
  * mayoría de las entidades.
  *
+ * **Por qué el denominador es `pageCount` y NO el `total` del store**: porque
+ * `total` tampoco es confiable *dentro* de `Detecting`. Medido en el browser,
+ * durante la descarga del modelo NER el store reporta `current/total = 1/1`
+ * con el stage ya en `Detecting` — una razón de 1.0 que satisfacía el umbral
+ * al instante y soltaba al usuario apenas terminaba el OCR, que es justo lo
+ * que esta pantalla existe para no hacer. `document.store.pageCount` viene de
+ * `DOCUMENT_PARSED`, significa siempre lo mismo y no se reasigna por etapa.
+ *
+ * **Y por qué además se exige `modelLoading === null`**: mientras el modelo se
+ * descarga no se está detectando nada, así que "se analizó el 20 % de las
+ * páginas" no puede ser cierto por construcción. Es la mitad semántica del
+ * mismo bug: sin esta guarda, cualquier `current` residual de la etapa
+ * anterior puede colarse como progreso de detección. El **techo sigue
+ * aplicando** durante la descarga — es exactamente el caso que el techo
+ * global existe para acotar.
+ *
  * **Por qué el piso y el techo son globales (desde el import) y no relativos a
  * `Detecting`**: la descarga del modelo NER (`modelLoading`, solo la primera
  * vez) es tiempo muerto anterior a `Detecting`, sin entidades apareciendo. Un
@@ -51,8 +67,13 @@ export interface ScanAdvanceParams {
   readonly stage: PipelineStage;
   /** Páginas ya procesadas por la etapa vigente (`pipeline.store.current`). */
   readonly current: number;
-  /** Total de páginas de la etapa vigente (`pipeline.store.total`). */
-  readonly total: number;
+  /**
+   * Páginas del documento (`document.store.pageCount`). **No** el `total` de
+   * `pipeline.store`: ver el encabezado del módulo.
+   */
+  readonly pageCount: number;
+  /** `pipeline.store.modelLoading`: no-null ⇒ el modelo NER se está bajando. */
+  readonly modelLoadingInProgress: boolean;
   /** Milisegundos transcurridos desde el import. */
   readonly elapsedMs: number;
 }
@@ -66,7 +87,7 @@ export interface ScanAdvanceParams {
  * que el pipeline ya haya terminado.
  */
 export function shouldAdvanceFromScan(params: ScanAdvanceParams): boolean {
-  const { stage, current, total, elapsedMs } = params;
+  const { stage, current, pageCount, modelLoadingInProgress, elapsedMs } = params;
 
   // El pipeline terminó: no hay nada más que mostrar acá, y retener al usuario
   // frente a un `Failed` para cumplir el piso sería retenerlo sobre un error.
@@ -75,18 +96,19 @@ export function shouldAdvanceFromScan(params: ScanAdvanceParams): boolean {
   if (elapsedMs < SCAN_ADVANCE_MIN_MS) return false;
   if (elapsedMs >= SCAN_ADVANCE_MAX_MS) return true;
 
-  return hasDetectedEnoughPages(stage, current, total);
+  if (modelLoadingInProgress) return false;
+  return hasDetectedEnoughPages(stage, current, pageCount);
 }
 
 /**
  * El umbral de páginas, aislado porque es la mitad de la regla que depende del
- * stage. `total <= 0` es el arranque de la etapa (el Orchestrator todavía no
- * publicó el total): sin denominador no hay fracción que comparar, y devolver
- * `true` soltaría en el peor momento posible — con cero entidades y sin haber
- * mostrado progreso.
+ * stage. `pageCount <= 0` es el documento todavía sin parsear
+ * (`DOCUMENT_PARSED` no llegó): sin denominador no hay fracción que comparar,
+ * y devolver `true` soltaría en el peor momento posible — con cero entidades y
+ * sin haber mostrado progreso.
  */
-function hasDetectedEnoughPages(stage: PipelineStage, current: number, total: number): boolean {
+function hasDetectedEnoughPages(stage: PipelineStage, current: number, pageCount: number): boolean {
   if (stage !== PipelineStage.Detecting) return false;
-  if (total <= 0) return false;
-  return current / total >= SCAN_ADVANCE_PAGE_RATIO;
+  if (pageCount <= 0) return false;
+  return current / pageCount >= SCAN_ADVANCE_PAGE_RATIO;
 }

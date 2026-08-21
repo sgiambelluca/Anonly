@@ -356,10 +356,23 @@ Valores fijos, retirados del formulario:
 
 **La regla.** Se pasa de ②a a ②b cuando se cumple **la primera** de:
 
-- `Detecting` procesó **≥ 20 %** de las páginas, o
+- `Detecting` procesó **≥ 20 %** de las páginas —denominador
+  `document.store.pageCount`, y solo con `modelLoading === null`—, o
 - pasaron **6 s** desde `IMPORT_REQUESTED`,
 
 y **nunca antes de 1,2 s** desde `IMPORT_REQUESTED`.
+
+> **Corrección de la primera implementación (medida en el browser).** La regla
+> decía "20 % de las páginas" usando `pipeline.store.total` como denominador.
+> Ese contador **se reasigna por etapa**, y durante la descarga del modelo NER
+> vale `current/total = 1/1` **con el stage ya en `Detecting`**: razón 1.0,
+> umbral satisfecho al instante, y el usuario soltado apenas terminaba el OCR —
+> exactamente lo que esta pantalla existe para no hacer. Se corrige con dos
+> cambios: el denominador pasa a `document.store.pageCount` (viene de
+> `DOCUMENT_PARSED`, significa siempre lo mismo), y el camino del umbral exige
+> `modelLoading === null`, porque mientras el modelo se descarga no se está
+> detectando nada. **El techo sigue aplicando durante la descarga**: es el caso
+> que el techo global acota.
 
 | Constante | Valor | Rol |
 |---|---|---|

@@ -168,8 +168,13 @@ apps/react-client/src/components/
   la etapa vigente, **las entidades apareciendo en vivo** y `Cancelar`. Ver `UX_Guidelines.md` §7.3.
 - **Sin skeleton del documento**: no promete un layout que todavía no existe.
 - **Salida** (`UX_Guidelines.md` §7.2): pasa a ②b con la primera de — `Detecting` ≥
-  `SCAN_ADVANCE_PAGE_RATIO` (0.20) de las páginas, o `SCAN_ADVANCE_MAX_MS` (6000 ms) desde el
-  import — y **nunca** antes de `SCAN_ADVANCE_MIN_MS` (1200 ms).
+  `SCAN_ADVANCE_PAGE_RATIO` (0.20) de `document.store.pageCount`, con `modelLoading === null`, o
+  `SCAN_ADVANCE_MAX_MS` (6000 ms) desde el import — y **nunca** antes de `SCAN_ADVANCE_MIN_MS`
+  (1200 ms).
+
+  > **El denominador es `pageCount`, no `pipeline.store.total`**: `total` se reasigna por etapa, y
+  > durante la descarga del modelo NER vale 1 con el stage ya en `Detecting` — razón 1.0, umbral
+  > satisfecho al instante, usuario soltado apenas termina el OCR. Medido en el browser.
 
   > Piso y techo son **globales** desde el import, no relativos a `Detecting`: la descarga del
   > modelo NER es tiempo muerto sin entidades, y un techo medido desde `Detecting` dejaría al

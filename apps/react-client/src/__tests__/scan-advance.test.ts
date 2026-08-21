@@ -12,7 +12,8 @@ import {
 const scanning = {
   stage: PipelineStage.Detecting,
   current: 0,
-  total: 100,
+  pageCount: 100,
+  modelLoadingInProgress: false,
   elapsedMs: SCAN_ADVANCE_MIN_MS,
 } as const;
 
@@ -53,9 +54,9 @@ describe("shouldAdvanceFromScan", () => {
     it("suelta en el techo incluso en una etapa previa a Detecting (descarga del modelo NER)", () => {
       expect(
         shouldAdvanceFromScan({
+          ...scanning,
           stage: PipelineStage.OCRing,
           current: 3,
-          total: 100,
           elapsedMs: SCAN_ADVANCE_MAX_MS,
         }),
       ).toBe(true);
@@ -97,9 +98,9 @@ describe("shouldAdvanceFromScan", () => {
     });
 
     it("no suelta con total 0: sin denominador no hay fracción, y soltaría con cero entidades", () => {
-      expect(shouldAdvanceFromScan({ ...scanning, current: 0, total: 0, elapsedMs: 3000 })).toBe(
-        false,
-      );
+      expect(
+        shouldAdvanceFromScan({ ...scanning, current: 0, pageCount: 0, elapsedMs: 3000 }),
+      ).toBe(false);
     });
   });
 
@@ -116,26 +117,62 @@ describe("shouldAdvanceFromScan", () => {
     });
   });
 
+  describe("descarga del modelo NER (regresión: soltaba apenas terminaba el OCR)", () => {
+    it("no suelta mientras el modelo se está descargando, aunque el stage ya sea Detecting", () => {
+      // Medido en el browser: durante la descarga, `pipeline.store` reporta
+      // current/total = 1/1 con el stage ya en Detecting. Con `total` como
+      // denominador eso daba razón 1.0 y soltaba al instante.
+      expect(
+        shouldAdvanceFromScan({
+          ...scanning,
+          current: 1,
+          modelLoadingInProgress: true,
+          elapsedMs: 1786,
+        }),
+      ).toBe(false);
+    });
+
+    it("el techo sigue aplicando durante la descarga: es el caso que el techo acota", () => {
+      expect(
+        shouldAdvanceFromScan({
+          ...scanning,
+          current: 1,
+          modelLoadingInProgress: true,
+          elapsedMs: SCAN_ADVANCE_MAX_MS,
+        }),
+      ).toBe(true);
+    });
+
+    it("el denominador es pageCount, no un contador por etapa: 1 de 10 páginas es 10 %, no 100 %", () => {
+      expect(
+        shouldAdvanceFromScan({ ...scanning, current: 1, pageCount: 10, elapsedMs: 1786 }),
+      ).toBe(false);
+      expect(
+        shouldAdvanceFromScan({ ...scanning, current: 2, pageCount: 10, elapsedMs: 1786 }),
+      ).toBe(true);
+    });
+  });
+
   describe("documento chico contra documento grande", () => {
     it("un PDF de texto de 6 páginas espera el piso y no parpadea", () => {
       // Las 6 páginas analizadas a los 400 ms: el umbral de páginas está
       // cumplido de sobra, pero el piso manda.
-      expect(shouldAdvanceFromScan({ ...scanning, current: 6, total: 6, elapsedMs: 400 })).toBe(
+      expect(shouldAdvanceFromScan({ ...scanning, current: 6, pageCount: 6, elapsedMs: 400 })).toBe(
         false,
       );
-      expect(shouldAdvanceFromScan({ ...scanning, current: 6, total: 6, elapsedMs: 1300 })).toBe(
-        true,
-      );
+      expect(
+        shouldAdvanceFromScan({ ...scanning, current: 6, pageCount: 6, elapsedMs: 1300 }),
+      ).toBe(true);
     });
 
     it("un escaneado de 200 páginas sale por el techo, no por el umbral", () => {
       // A los 6 s solo se analizaron 8 de 200 (4 %), muy lejos del 20 %.
-      expect(shouldAdvanceFromScan({ ...scanning, current: 8, total: 200, elapsedMs: 5999 })).toBe(
-        false,
-      );
-      expect(shouldAdvanceFromScan({ ...scanning, current: 8, total: 200, elapsedMs: 6000 })).toBe(
-        true,
-      );
+      expect(
+        shouldAdvanceFromScan({ ...scanning, current: 8, pageCount: 200, elapsedMs: 5999 }),
+      ).toBe(false);
+      expect(
+        shouldAdvanceFromScan({ ...scanning, current: 8, pageCount: 200, elapsedMs: 6000 }),
+      ).toBe(true);
     });
   });
 });

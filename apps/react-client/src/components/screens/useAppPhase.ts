@@ -29,9 +29,10 @@ const SCAN_TICK_MS = 200;
 
 export function useAppPhase(): AppPhase {
   const documentId = useDocumentStore((state) => state.id);
+  const pageCount = useDocumentStore((state) => state.pageCount);
   const stage = usePipelineStore((state) => state.stage);
   const current = usePipelineStore((state) => state.current);
-  const total = usePipelineStore((state) => state.total);
+  const modelLoadingInProgress = usePipelineStore((state) => state.modelLoading !== null);
 
   const [advancedForDocumentId, setAdvancedForDocumentId] = useState<string | null>(null);
   // `startedAt` por documento: importar un segundo PDF tiene que volver a
@@ -51,7 +52,7 @@ export function useAppPhase(): AppPhase {
       const startedAt = startedAtRef.current;
       if (startedAt === null || documentId === null) return;
       const elapsedMs = Date.now() - startedAt.at;
-      if (shouldAdvanceFromScan({ stage, current, total, elapsedMs })) {
+      if (shouldAdvanceFromScan({ stage, current, pageCount, modelLoadingInProgress, elapsedMs })) {
         setAdvancedForDocumentId(documentId);
       }
     }
@@ -59,7 +60,7 @@ export function useAppPhase(): AppPhase {
     check();
     const timer = window.setInterval(check, SCAN_TICK_MS);
     return () => window.clearInterval(timer);
-  }, [phase, documentId, stage, current, total]);
+  }, [phase, documentId, stage, current, pageCount, modelLoadingInProgress]);
 
   return phase;
 }
