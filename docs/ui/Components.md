@@ -245,6 +245,8 @@ apps/react-client/src/components/
 > **Accesibilidad**: el menú es un disclosure hecho a mano (trigger con `aria-expanded` + panel `role="group"` con botones, cierre por click-fuera/Escape/selección), sin `@radix-ui/react-dropdown-menu` — agregar esa dependencia requiere ADR (P-9/R-12). Los items se recorren con **Tab**, no con flechas.
 >
 > **No usa `role="menu"`/`role="menuitem"` ni `aria-haspopup`**, y es deliberado (2026-08-20). Ese rol es un contrato con el lector de pantalla: promete navegación por flechas, Home/End y foco gestionado con un solo tab stop, y nada de eso está implementado. Anunciarlo igual deja al usuario de teclado apretando flechas contra un panel que no responde — peor que no anunciar nada, porque sin el rol son botones en un grupo etiquetado y se comportan como el lector espera. `aria-haspopup="true"` sale por lo mismo: en WAI-ARIA 1.1+ es **sinónimo de `menu`**, así que reintroducía la promesa por la puerta de atrás. Si algún día entra Radix, trae el rol **y** el manejo de foco juntos, que es la única forma correcta de tener el primero.
+>
+> **Los roles de este menú son API de test.** Tres escenarios E2E localizan sus items por rol (`scenario-9`, `scenario-10`), y `pnpm test` **no** corre la suite E2E — así que cambiar un rol acá pasa los cuatro gates del subset pre-PR y rompe en CI. Pasó al retirar `role="menuitem"`. Quien toque estos roles corre `pnpm test:e2e` en el mismo cambio (requiere `pnpm assets:mirror` previo, ver `tests/e2e/README.md`).
 
 ### 3.8 `ChangeTypeDialog` (ADR-082 §6)
 
