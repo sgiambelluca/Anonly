@@ -36,6 +36,7 @@ import {
   CancelledError,
   DEGRADED_FONT_RATIO,
   InvalidInputError,
+  REPLACEMENT_FONT_HEIGHT_RATIO,
   ReplacementMode,
   sharesVerticalBand,
   type Annotation,
@@ -358,7 +359,7 @@ function planLineRepaint(
   // (e) — calibración inversa sobre el conjunto de la línea: la propia
   // palabra reemplazada (ancho real conocido: su propio bbox) más las
   // vecinas de `lineWords`.
-  const size = replacementFontSize(scaledBbox.height);
+  const size = replacementFontSize(scaledBbox.height, REPLACEMENT_MIN_FONT_PX * scale);
   const samples: ReadonlyArray<CalibrationSample> = [
     { text: replacement.originalValue, actualWidth: scaledBbox.width },
     ...neighbors.map((word) => ({ text: word.text, actualWidth: word.bbox.width * scale })),
@@ -607,8 +608,36 @@ function scaleBbox(bbox: BoundingBox, scale: number): BoundingBox {
   };
 }
 
-function replacementFontSize(boxHeight: number): number {
-  return Math.max(REPLACEMENT_MIN_FONT_PX, Math.round(boxHeight * 0.7));
+/**
+ * El tamaño con el que se ARRANCA a dibujar: entero (los tamaños de fuente se
+ * eligen en píxeles enteros) y acotado por abajo, porque por debajo de cierto
+ * tamaño el texto ya no es texto.
+ *
+ * `minFontPx` es parámetro y no la constante directa por ADR-086 §2(b): el
+ * piso es un límite de legibilidad **en píxeles de pantalla**, así que escala
+ * igual que todo lo demás que el kernel dibuja. Un preview a escala 2 que
+ * frenara en los mismos 8 px que uno a escala 1 estaría aplicando dos umbrales
+ * visuales distintos a la misma decisión.
+ */
+function replacementFontSize(boxHeight: number, minFontPx: number): number {
+  return Math.max(minFontPx, Math.round(boxHeight * REPLACEMENT_FONT_HEIGHT_RATIO));
+}
+
+/**
+ * El tamaño de REFERENCIA: el que la caja pediría si el ancho no fuera
+ * problema. **Nunca se dibuja** — solo se mide contra él.
+ *
+ * Por eso no lleva piso ni redondeo (ADR-086 §2(a)), a diferencia de
+ * `replacementFontSize`. El piso existe para no dibujar texto ilegible, y acá
+ * no se dibuja nada; tenerlo era lo que hacía que la referencia mintiera
+ * ("lo natural acá son 8 px" cuando la caja pedía 8,4) y, como el piso es
+ * absoluto y `boxHeight` escala, lo que rompía la invariancia de escala que
+ * ADR-058 §7 daba por sentada. Sin piso y sin `Math.round`, la referencia es
+ * exactamente proporcional a la caja y el veredicto sale idéntico a cualquier
+ * escala.
+ */
+function naturalReferenceSize(boxHeight: number): number {
+  return boxHeight * REPLACEMENT_FONT_HEIGHT_RATIO;
 }
 
 function replacementFontFamily(mode: ReplacementMode): string {
@@ -640,11 +669,32 @@ function buildReplacementFont(size: number, family: string): string {
  * forma parte del `index.ts` público del paquete, mismo patrón que el resto
  * de las funciones exportadas de este archivo (ADR-043 §2).
  */
-/** Resultado de `fitReplacementFontSized`: el font string final más los dos tamaños que ADR-058 §7 necesita para el umbral de degradación. */
+/** Resultado de `fitReplacementFontSized`: el font string con el que se dibuja, los dos tamaños, y el veredicto de legibilidad de ADR-086. */
 export interface FittedReplacementFont {
   readonly font: string;
+  /** Referencia, nunca dibujada: `boxHeight × REPLACEMENT_FONT_HEIGHT_RATIO`, exacto (ADR-086 §2a). */
   readonly naturalSizePx: number;
+  /** El que se dibuja: entero y acotado por el piso escalado. */
   readonly finalSizePx: number;
+  /**
+   * ADR-086 §1 — `anchoDisponible / anchoNatural`, acotado a 1. **Es el
+   * veredicto**: se compara contra `DEGRADED_FONT_RATIO`.
+   *
+   * Mide la compresión TOTAL, no una tercera cosa además del encogido de
+   * fuente. El producto de las dos compresiones —vertical (`final/natural`) y
+   * horizontal (el aplastado de `fillText(..., maxWidth)`)— se simplifica a
+   * esto, porque el tamaño final se cancela:
+   *
+   * ```
+   * (final/natural) × (anchoDisp / (final × k)) = anchoDisp / (natural × k)
+   * ```
+   *
+   * Con `measureText` real la cancelación es aproximada en vez de exacta (las
+   * métricas no son perfectamente lineales en el tamaño, por hinting); la
+   * formulación por anchos es la primaria y la del producto solo explica de
+   * dónde sale.
+   */
+  readonly widthRatio: number;
 }
 
 /**
@@ -662,18 +712,27 @@ export function fitReplacementFontSized(
   mode: ReplacementMode,
   boxHeight: number,
   availableWidth: number,
+  minFontPx: number = REPLACEMENT_MIN_FONT_PX,
 ): FittedReplacementFont {
   const family = replacementFontFamily(mode);
-  const naturalSizePx = replacementFontSize(boxHeight);
-  let size = naturalSizePx;
+
+  // El veredicto se calcula sobre la REFERENCIA y es independiente de dónde
+  // termine el bucle: cuánto más angosto que su ancho natural quedó el texto
+  // (ADR-086 §1). Un ancho natural de 0 —texto vacío— no puede degradar nada,
+  // y además haría una división por cero.
+  const naturalSizePx = naturalReferenceSize(boxHeight);
+  const naturalWidth = measureWidth(buildReplacementFont(naturalSizePx, family), text);
+  const widthRatio = naturalWidth > 0 ? Math.min(1, availableWidth / naturalWidth) : 1;
+
+  let size = replacementFontSize(boxHeight, minFontPx);
   let font = buildReplacementFont(size, family);
 
-  while (measureWidth(font, text) > availableWidth && size > REPLACEMENT_MIN_FONT_PX) {
+  while (measureWidth(font, text) > availableWidth && size > minFontPx) {
     size -= 1;
     font = buildReplacementFont(size, family);
   }
 
-  return { font, naturalSizePx, finalSizePx: size };
+  return { font, naturalSizePx, finalSizePx: size, widthRatio };
 }
 
 export function fitReplacementFont(
@@ -919,7 +978,7 @@ function paintReplacements(
     // cambia): `sidewaysRotation !== undefined` salta directo al
     // shrink-to-fit, nunca llama a `tryRepaintLine`.
     const naturalFont = buildReplacementFont(
-      replacementFontSize(fontSizeAxisPx),
+      replacementFontSize(fontSizeAxisPx, REPLACEMENT_MIN_FONT_PX * scale),
       replacementFontFamily(replacement.mode),
     );
     const fitsNaturally =
@@ -970,6 +1029,8 @@ function paintReplacements(
       replacement.mode,
       fontSizeAxisPx,
       availableLengthPx,
+      // ADR-086 §2(b): el piso de dibujo escala con el render.
+      REPLACEMENT_MIN_FONT_PX * scale,
     );
     context.font = fitted.font;
 
@@ -999,7 +1060,7 @@ function paintReplacements(
     // espacio de píxeles pero calculan la razón sobre magnitudes que escalan
     // igual, así que el cociente es invariante sin ningún ajuste adicional
     // (verificado por el test de invariancia de escala en unit.test.ts).
-    if (fitted.finalSizePx / fitted.naturalSizePx < DEGRADED_FONT_RATIO) {
+    if (fitted.widthRatio < DEGRADED_FONT_RATIO) {
       degraded.push({
         id: replacement.occurrenceId,
         groupId: replacement.groupId,

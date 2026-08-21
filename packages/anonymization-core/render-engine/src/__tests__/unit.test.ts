@@ -1202,6 +1202,143 @@ describe("RenderEngine — unit tests", () => {
     });
   });
 
+  // ─── ADR-086: el criterio pasa a medir el ancho, no la altura ───
+  describe("criterio de degradación por razón de anchos (ADR-086)", () => {
+    // **El test del defecto que motivó ADR-086.** Caja de cuerpo de texto
+    // (12px de alto, escala 1) con un token largo: el panel lo dibuja como una
+    // mancha ilegible y el criterio VIEJO daba veredicto vacío, porque
+    // `naturalSizePx` y `finalSizePx` chocaban los dos contra el piso de 8px y
+    // el cociente valía 1,00 por construcción. Si alguien revierte ADR-086,
+    // este test es el que cae.
+    it("un token largo en una caja de cuerpo de texto SÍ degrada", async () => {
+      const docId = "doc-adr086-cuerpo";
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+      );
+      await engine.init(ctx);
+      await engine.loadDocument(docId, createValidBuffer());
+      const emitSpy = vi.spyOn(ctx.bus, "emit");
+
+      await engine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+          replacements: [
+            makeReplacement({
+              groupId: "g-cuerpo",
+              occurrenceId: "o-cuerpo",
+              mode: ReplacementMode.Mask,
+              // 40 caracteres sobre 40px de ancho útil: el texto tiene que
+              // quedar al ~19% de su ancho natural para entrar.
+              replacementValue: "A".repeat(40),
+              bbox: { x: 0, y: 0, width: 40, height: 12 },
+            }),
+          ],
+        }),
+        ctx,
+      );
+
+      const payload = emitSpy.mock.calls.find(
+        (call) => call[1] === EngineEvents.PREVIEW_UPDATED,
+      )?.[2] as { degraded?: ReadonlyArray<Annotation> };
+      expect(payload.degraded).toHaveLength(1);
+      expect(payload.degraded![0]?.groupId).toBe("g-cuerpo");
+    });
+
+    // ADR-086 §3: la otra dirección, que es la que protege la señal. Un
+    // placeholder normal apretado se lee perfecto y NO debe marcarse — con el
+    // umbral viejo de 0,6 aplicado al criterio nuevo, sí se marcaría.
+    it("un placeholder normal en una caja apretada NO degrada", async () => {
+      const docId = "doc-adr086-falso-positivo";
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+      );
+      await engine.init(ctx);
+      await engine.loadDocument(docId, createValidBuffer());
+      const emitSpy = vi.spyOn(ctx.bus, "emit");
+
+      await engine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+          replacements: [
+            makeReplacement({
+              groupId: "g-persona",
+              occurrenceId: "o-persona",
+              mode: ReplacementMode.Placeholder,
+              // 12 caracteres, referencia 8.4px -> ancho natural 60.5px sobre
+              // 35px disponibles = 0.578. Pasa 0.5 y no llega a 0.6: es
+              // exactamente el caso que el umbral nuevo protege.
+              replacementValue: "[PERSONA 01]",
+              bbox: { x: 0, y: 0, width: 35, height: 12 },
+            }),
+          ],
+        }),
+        ctx,
+      );
+
+      const payload = emitSpy.mock.calls.find(
+        (call) => call[1] === EngineEvents.PREVIEW_UPDATED,
+      )?.[2] as { degraded?: ReadonlyArray<Annotation> };
+      expect(payload.degraded).toEqual([]);
+    });
+
+    // ADR-086 §2: invariancia EXACTA, incluyendo el fondo del bucle — que es
+    // el régimen que el test de invariancia de ADR-058 §7 nunca tocó, porque
+    // usa cajas de 40px. Acá la caja es de 12px y el piso muerde en todas las
+    // escalas: es donde la propiedad se rompía.
+    it("el veredicto es idéntico a toda escala, también cuando el bucle toca el piso", async () => {
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+      );
+      await engine.init(ctx);
+
+      const veredictos: boolean[] = [];
+      for (const scale of [0.5, 1, 2, 4]) {
+        const docId = `doc-adr086-escala-${String(scale)}`;
+        vi.mocked(getDocument).mockReturnValue(
+          mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+        );
+        await engine.loadDocument(docId, createValidBuffer());
+        const emitSpy = vi.spyOn(ctx.bus, "emit");
+
+        await engine.renderPage(
+          createRenderPageInput({
+            documentId: docId,
+            pageIndex: 0,
+            kind: "anonymized",
+            mode: "preview",
+            scale,
+            replacements: [
+              makeReplacement({
+                groupId: "g-escala",
+                occurrenceId: "o-escala",
+                mode: ReplacementMode.Mask,
+                replacementValue: "A".repeat(40),
+                bbox: { x: 0, y: 0, width: 40, height: 12 },
+              }),
+            ],
+          }),
+          ctx,
+        );
+
+        const payload = emitSpy.mock.calls.find(
+          (call) => call[1] === EngineEvents.PREVIEW_UPDATED,
+        )?.[2] as { degraded?: ReadonlyArray<Annotation> };
+        veredictos.push((payload.degraded ?? []).length > 0);
+        emitSpy.mockRestore();
+      }
+
+      // Las cuatro escalas coinciden. Con el criterio viejo, esta misma caja
+      // daba `false` a escala 1 y `true` a escala 2.
+      expect(veredictos).toEqual([true, true, true, true]);
+    });
+  });
+
   // ─── ADR-062: el veredicto sale del kernel y viaja en PREVIEW_UPDATED ───
   //
   // Los cuatro tests que `Render_Engine.md` §14 exige por nombre. Los de
