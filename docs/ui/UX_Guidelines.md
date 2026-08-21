@@ -588,6 +588,9 @@ Exportar documento anonimizado
   12 de 12 entidades serán anonimizadas
   10 páginas
 
+  Nombre del archivo
+  [ pericia-quilmes                        ]
+
   [ ] Agregar una página con la referencia de marcadores
       Explica qué significa cada marcador (PRS = Persona,
       MAT = Matrícula…). Solo los tipos: nunca los datos
@@ -596,9 +599,19 @@ Exportar documento anonimizado
                           [Cancelar]  [Exportar]
 ```
 
-**Un solo control.** El criterio: **se pregunta lo que altera el documento, no lo que ajusta su
+**Dos controles.** El criterio: **se pregunta lo que altera el documento, no lo que ajusta su
 codificación.** El checkbox de referencia de marcadores sobrevive porque **suma una página**
-(ADR-059 §6); los cinco campos técnicos no cambian qué dice el documento, solo cómo pesa.
+(ADR-059 §6); el nombre de archivo porque **identifica el resultado** y es una decisión del usuario.
+Los cuatro campos técnicos no cambian qué dice el documento, solo cuánto pesa.
+
+> **El nombre volvió al formulario** tras la prueba manual. La primera versión de esta sección lo
+> fijaba junto con los técnicos, argumentando que "el navegador ya deja renombrar al guardar" — es
+> **falso** en la configuración por defecto de Chrome, que descarga directo sin diálogo. Y no era de
+> la misma clase que los otros: no ajusta la codificación.
+>
+> **Sin validación**: un nombre vacío cae al default y la extensión `.pdf` se completa sola. El
+> campo arranca poblado, así que vaciarlo es "no me importa el nombre", no un error que merezca
+> frenar el export.
 
 Valores fijos, retirados del formulario:
 
@@ -608,7 +621,6 @@ Valores fijos, retirados del formulario:
 | `jpegQuality` | **`0.92`** | Visualmente indistinguible de `1.00` en texto; ver abajo. |
 | `dpi` | `150` | Default de `ExportConfig`. |
 | `title` (metadata) | `""` | `includeOriginalMetadata: false` ya protege lo que importa. |
-| `filename` | `anonimizado.pdf` | El navegador ya deja renombrar al guardar. |
 
 > **Por qué `0.92` y no `1.00`.** Se consideró `1.00` buscando "lo más cercano al original". No lo
 > consigue: **el original ya se perdió al rasterizar a 150 DPI** — el export es 100 % imagen
@@ -627,6 +639,10 @@ dato existe de verdad.
 
 - Tras "Exportar": `EXPORT_STARTED` → barra de progreso con `EXPORT_PROGRESS`.
 - Al finalizar: `EXPORT_FINISHED` → "Descargar" + "Exportar otro".
+- **Cerrar el diálogo no pierde el resultado**: mientras haya un `exportResult` vigente, reabrirlo
+  muestra el resultado (con su "Descargar" y el nombre que se usó), no un formulario en blanco.
+  Antes el `blobUrl` seguía existiendo en `pipeline.store` y la UI no tenía **ningún** camino de
+  vuelta a él: la única salida era volver a exportar.
 
 ### 8.4 Pre-flight check
 

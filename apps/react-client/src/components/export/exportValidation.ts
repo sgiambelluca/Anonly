@@ -3,8 +3,9 @@
  * `ExportOptions` (ADR-087 §5, `ui/UX_Guidelines.md` §8.2).
  *
  * **El formulario ya no tiene campos técnicos**, así que tampoco tiene qué
- * validar: `imageFormat`, `jpegQuality`, `dpi`, `title` y `filename` son
- * constantes de este módulo. El criterio del recorte (ADR-087 §5): se
+ * validar: `imageFormat`, `jpegQuality`, `dpi` y `title` son constantes de
+ * este módulo. El **nombre de archivo sí sigue siendo del usuario** — ver
+ * `ExportFormState.filename`. El criterio del recorte (ADR-087 §5): se
  * pregunta lo que **altera el documento**, no lo que ajusta su codificación.
  * Lo único que queda en el diálogo es el checkbox de la referencia de
  * marcadores, que **suma una página** (ADR-059 §6).
@@ -42,9 +43,37 @@ export const EXPORT_DPI = 150;
 
 export const DEFAULT_EXPORT_FILENAME = "anonimizado.pdf";
 
+const PDF_EXTENSION = ".pdf";
+
 export interface ExportFormState {
-  /** Lo único que el usuario decide (ADR-087 §5). */
+  /**
+   * Nombre con el que se descarga. **Vuelve al formulario** tras la primera
+   * versión de ADR-087 §5, que lo había fijado junto con los campos técnicos.
+   *
+   * No era lo mismo que los otros cinco: el criterio del recorte es "se
+   * pregunta lo que altera el documento", y el nombre de archivo **sí** es
+   * decisión del usuario — no ajusta la codificación, identifica el resultado.
+   * Y el argumento de que "el navegador ya deja renombrar al guardar" es
+   * falso en la configuración por defecto de Chrome, que descarga directo sin
+   * diálogo.
+   */
+  readonly filename: string;
   readonly includeMarkerLegend: boolean;
+}
+
+/**
+ * Un nombre vacío cae al default en vez de rechazarse: el campo arranca
+ * poblado, así que vaciarlo es "no me importa el nombre", no un error que
+ * merezca frenar el export con un mensaje.
+ *
+ * La extensión se agrega si falta. Escribir "pericia" y recibir un archivo sin
+ * extensión que el sistema no sabe abrir es peor que corregirlo en silencio, y
+ * el export siempre es un PDF: no hay ambigüedad sobre cuál poner.
+ */
+export function normalizeExportFilename(filename: string): string {
+  const trimmed = filename.trim();
+  if (trimmed === "") return DEFAULT_EXPORT_FILENAME;
+  return trimmed.toLowerCase().endsWith(PDF_EXTENSION) ? trimmed : `${trimmed}${PDF_EXTENSION}`;
 }
 
 export function buildExportOptions(form: ExportFormState): ExportOptions {
@@ -56,7 +85,7 @@ export function buildExportOptions(form: ExportFormState): ExportOptions {
     // (`Export_Engine.md` §9). Por eso el campo "Título" del formulario
     // anterior tampoco se echa de menos — lo que protegía ya estaba protegido.
     includeOriginalMetadata: false,
-    filename: DEFAULT_EXPORT_FILENAME,
+    filename: normalizeExportFilename(form.filename),
     includeMarkerLegend: form.includeMarkerLegend,
   };
 }
