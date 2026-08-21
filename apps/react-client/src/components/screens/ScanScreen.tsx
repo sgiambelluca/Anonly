@@ -87,13 +87,19 @@ export function ScanScreen() {
   // procesado ninguna página. Con el modelo cargando, lo que de verdad avanza
   // es la descarga, así que la barra muestra eso y el contador por página se
   // oculta — no hay páginas que contar todavía.
+  // En `Detecting` el denominador es `pageCount` y no `total`, por el mismo
+  // motivo que en `scanAdvance.ts`: ese contador se reasigna por etapa y
+  // durante el arranque de la detección vale 1, así que la pantalla decía
+  // "1 de 1" con diez páginas por analizar. `pageCount` viene de
+  // `DOCUMENT_PARSED` y significa siempre lo mismo.
+  const denominator = stage === PipelineStage.Detecting ? pageCount : total;
   const percent =
     modelLoading !== null
       ? Math.round(modelLoading.progress * 100)
-      : total > 0
-        ? Math.round((current / total) * 100)
+      : denominator > 0
+        ? Math.round((Math.min(current, denominator) / denominator) * 100)
         : 0;
-  const showPageCounter = modelLoading === null && total > 0;
+  const showPageCounter = modelLoading === null && denominator > 0;
 
   return (
     <div className="flex h-full flex-col items-center justify-center gap-8 overflow-y-auto p-8">
@@ -118,7 +124,7 @@ export function ScanScreen() {
             </span>
             {showPageCounter ? (
               <span className="shrink-0 text-sm tabular-nums text-text-secondary">
-                {current} de {total}
+                {Math.min(current, denominator)} de {denominator}
               </span>
             ) : null}
           </div>
