@@ -559,10 +559,15 @@ hay nada que sincronizar: se retira junto con `SideBySideViewer` y `scrollSyncCo
 ### 7.1 `ExportDialog` (simplificado por ADR-087 §5)
 
 - **Stores**: `document`, `entities`.
-- **Render**: ver `UX_Guidelines.md` §8.2. **Un solo control**: el checkbox "Agregar una página con
-  la referencia de marcadores" (ADR-059 §1, default **apagado**), más el resumen y los botones.
-- **Sin validación de formulario** (ADR-087 §5): sin campos editables no hay nada que validar.
-  `validateExportForm` y el `formError` que mostraba sus mensajes se retiran con los campos. Los
+- **Render**: ver `UX_Guidelines.md` §8.2. **Dos controles**: el nombre del archivo (default
+  `anonimizado.pdf`) y el checkbox "Agregar una página con la referencia de marcadores" (ADR-059 §1,
+  default **apagado**), más el resumen y los botones.
+- **Reabrir con un resultado vigente muestra el resultado**, no el formulario, y **conserva el
+  nombre con el que se exportó** — es el que usa el ancla "Descargar". Resetear a ciegas era pérdida
+  de datos: el `blobUrl` seguía en `pipeline.store` y la UI no tenía camino de vuelta a él.
+- **Sin validación de formulario** (ADR-087 §5): el nombre vacío cae al default y la extensión se
+  completa sola (`normalizeExportFilename`), así que no hay estado inválido que reportar.
+  `validateExportForm` y el `formError` que mostraba sus mensajes se retiran con los campos técnicos. Los
   rangos de `core/Export_Engine.md` §9 se conservan como constantes y hay tests que afirman que los
   valores fijos caen adentro — es lo que reemplaza a la validación en runtime.
 - **Pre-flight**: si `enabledGroups = 0`, `ConfirmDialog` anidado.
@@ -576,7 +581,6 @@ hay nada que sincronizar: se retira junto con `SideBySideViewer` y `scrollSyncCo
 | `jpegQuality` | `0.92` | Visualmente indistinguible de `1.00` en texto. |
 | `dpi` | `150` | Default de `ExportConfig`. |
 | `title` | `""` | `includeOriginalMetadata: false` ya protege lo que importa. |
-| `filename` | `"anonimizado.pdf"` | El navegador deja renombrar al guardar. |
 
 > **El criterio del recorte**: se pregunta lo que **altera el documento**, no lo que ajusta su
 > codificación. Por eso sobrevive el checkbox de la leyenda —suma una página (ADR-059 §6)— y no los

@@ -10,6 +10,8 @@
 >
 > **Estado (2026-08-14)**: entra el §10, de la planificación del Hito 10.6 (ADR-072).
 >
+> **Estado (2026-08-21, tercera tanda)**: entra el **§20**, **ya cerrado**: el documento quedaba inutilizable tras exportar bien, por una transición de stage que se guardaba pero no se emitía. Es un defecto del Core anterior al rediseño; se anota por el rastro de cómo apareció.
+>
 > **Estado (2026-08-21, segunda tanda)**: entra el **§19**, y es **la única regresión de todo el documento**: ADR-087 §2 retiró `SideBySideViewer`, que cargaba la única conducta responsive de la app, sin escribir el reemplazo. Necesita una decisión de producto (qué ancho mínimo se soporta), no de implementación.
 >
 > **Estado (2026-08-21)**: entran el **§17** (tokens de reemplazo pisándose en el preview) y el **§18** (ruido de detección sin distinguir de los aciertos), los dos de la prueba manual del rediseño de UX (**ADR-087**). Ninguno es regresión de ese rediseño: el §17 se vuelve más visible porque el visor pasó a ocupar todo el ancho, y el §18 está anotado en ADR-087 "Fuera del alcance" §7 — acá va con el detalle medido.
@@ -373,3 +375,19 @@ La 1 y la 2 no son excluyentes. Lo que hay que decidir primero es **de dónde sa
 3. **Declarar un ancho mínimo soportado** y mostrar un aviso por debajo. Es una herramienta de trabajo de escritorio —anonimizar una pericia de 200 páginas en un teléfono no es un caso de uso— y fingir que funciona es peor que decir que no.
 
 La 3 es defendible y la más barata, pero **es una decisión de producto**, no de implementación: implica declarar en qué anchos la herramienta se sostiene. Hasta que se decida, el rediseño **asume escritorio** y el spec (`UX_Guidelines.md` §2) no dice nada sobre el tema — que es en sí parte del gap: la sección que retiró el layout de cuatro paneles retiró también su párrafo de mobile sin escribir el reemplazo.
+
+---
+
+## 20. Cerrado el 2026-08-21: el documento quedaba inutilizable tras exportar bien
+
+**Procedencia**: prueba manual del rediseño. **Se cierra en el mismo día**; se anota porque el defecto vivía en el Core desde antes del rediseño y conviene que quede el rastro de cómo se encontró.
+
+**Síntoma**: tras un export exitoso, "Exportar" desaparecía de la toolbar, "Cancelar" quedaba visible, el estado decía "Exportando…" para siempre, y el archivo recién generado **no se podía descargar**. La única salida era cerrar el documento y perder la sesión de edición.
+
+**Causa**: `handleExportFinished` (`orchestrator.ts`) hacía `this.state.update(documentId, { stage: Done })` en vez de `this.setStage(...)`. El estado interno pasaba a `Done` correctamente, pero **`PIPELINE_STAGE_CHANGED` nunca se emitía**, así que la UI seguía creyendo que el stage era `Exporting`. Todas las demás transiciones del archivo ya usaban `setStage`.
+
+`Orchestrator.md` §8 (fila `EXPORT_FINISHED`) ya decía "stage → `Done`": el spec estaba bien y el código no lo cumplía. Corregido sin cambio de contrato, con un test que afirma la **emisión** y no el estado interno.
+
+**Por qué no se había visto antes**: el gate de `ExportButton` es `{Ready, Done}` desde ADR-040, y `CancelButton` ocultaba `Ready` recién desde ADR-087 §7. Con el layout anterior el síntoma era menos visible —quedaban más caminos abiertos en la toolbar— y ningún test cubría la emisión del stage post-export: el único test de `EXPORT_FINISHED` afirmaba sobre el revoke del blob al cerrar.
+
+**Defecto de UI encontrado en el mismo camino, también corregido**: cerrar el diálogo de export tras terminar reseteaba `submitted`, así que reabrirlo mostraba un formulario en blanco. El `blobUrl` seguía vivo en `pipeline.store` y **la UI no tenía ningún camino de vuelta a él**. Ahora reabrir con un resultado vigente muestra el resultado, con el nombre que se usó.
