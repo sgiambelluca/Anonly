@@ -817,6 +817,20 @@ describe("RenderEngine — unit tests", () => {
 
   // ─── ADR-058 §2-§6 (Hito 10.5, PR 5): repintado de línea por calibración ───
   describe("repintado de línea por calibración (ADR-058 §2-§6)", () => {
+    /**
+     * Ancho de página (en puntos) que una palabra ocupa si la línea está
+     * compuesta a 12 px — `round(0.7 × 8 × 2.08)`, el tamaño con el que la
+     * calibración mide sus candidatos para una caja de 8 pt a `fullScale`.
+     *
+     * Los tests a escala 2,08 construyen sus bboxes con esto para que la
+     * calibración cierre con `errorRatio` 0 y la condición (e) no rechace el
+     * plan antes de que lo que se está probando llegue a importar.
+     * `makeLineRepaintScenario` no sirve para eso: sus anchos salen de una
+     * fuente de 10 px, la de una caja de 14 pt a escala 1.
+     */
+    const anchoAFullScale = (text: string): number =>
+      measureStubTextWidth(text, "12px sans-serif") / 2.08;
+
     it("line repaint does not trigger when the token fits (current path preserved)", async () => {
       // Reemplazo con una caja ANCHA (el token entra a tamaño natural) pero
       // con `lineWords` que, si el repintado se evaluara, cumplirían las
@@ -980,12 +994,10 @@ describe("RenderEngine — unit tests", () => {
     it("fitsNaturally mide contra el tamaño de dibujo: a fullScale un token que no entra repinta", async () => {
       const docId = "doc-fitsnaturally-positivo";
       const scale = 2.08;
-      const anchoConsistente = (text: string): number =>
-        measureStubTextWidth(text, "12px sans-serif") / scale;
 
-      const juanWidth = anchoConsistente("Juan");
-      const garciaWidth = anchoConsistente("Garcia");
-      const viveWidth = anchoConsistente("vive");
+      const juanWidth = anchoAFullScale("Juan");
+      const garciaWidth = anchoAFullScale("Garcia");
+      const viveWidth = anchoAFullScale("vive");
       const garciaX = 20 + juanWidth + 4;
       const viveX = garciaX + garciaWidth + 4;
 
@@ -1036,13 +1048,21 @@ describe("RenderEngine — unit tests", () => {
     it("fitsNaturally mide contra el tamaño de dibujo: a fullScale un token que entra no repinta", async () => {
       const docId = "doc-fitsnaturally-negativo";
       const scale = 2.08;
-      const anchoConsistente = (text: string): number =>
-        measureStubTextWidth(text, "12px sans-serif") / scale;
 
       // Caja holgada: el token entra incluso al tamaño de dibujo (16,64px), así
       // que ADR-058 §2 manda no tocar nada — un solo `fillText`, centrado.
-      const holgado = anchoConsistente("Juan") * 4;
-      const garciaWidth = anchoConsistente("Garcia");
+      //
+      // El `originalValue` mide EXACTAMENTE lo que la caja declara (16
+      // caracteres a 12px = 115,2px = el ancho escalado), y eso no es cosmético:
+      // la primera versión de este test usaba "Juan" sobre una caja cuatro veces
+      // más ancha, así que la calibración veía un errorRatio de 0,75 y rechazaba
+      // el plan por la condición (e) ANTES de que `fitsNaturally` importara. El
+      // test afirmaba "no repinta" y en realidad verificaba "la calibración no
+      // converge sobre una caja inconsistente": borrar la condición de
+      // activación entera lo dejaba en verde.
+      const original = "Juan Carlos Diaz";
+      const holgado = anchoAFullScale(original);
+      const garciaWidth = anchoAFullScale("Garcia");
       const garciaX = 20 + holgado + 4;
 
       vi.mocked(getDocument).mockReturnValue(
@@ -1066,7 +1086,7 @@ describe("RenderEngine — unit tests", () => {
           replacements: [
             makeReplacement({
               mode: ReplacementMode.Placeholder,
-              originalValue: "Juan",
+              originalValue: original,
               replacementValue: "[X]",
               bbox: { x: 20, y: 10, width: holgado, height: 8 },
             }),
@@ -1111,12 +1131,10 @@ describe("RenderEngine — unit tests", () => {
       const docId = "doc-repaint-fullscale";
       const scale = 2.08; // `RenderConfig.fullScale` — la escala del PDF exportado.
       const boxHeight = 8;
-      const anchoConsistente = (text: string): number =>
-        measureStubTextWidth(text, "12px sans-serif") / scale;
 
-      const anaWidth = anchoConsistente("Ana");
-      const garciaWidth = anchoConsistente("Garcia");
-      const viveWidth = anchoConsistente("vive");
+      const anaWidth = anchoAFullScale("Ana");
+      const garciaWidth = anchoAFullScale("Garcia");
+      const viveWidth = anchoAFullScale("vive");
       const garciaX = 20 + anaWidth + 4;
       const viveX = garciaX + garciaWidth + 4;
 
