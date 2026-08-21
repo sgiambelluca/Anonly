@@ -25,6 +25,7 @@ vi.mock("pdfjs-dist", () => ({ getDocument: vi.fn() }));
 
 import {
   fitReplacementFont,
+  fitReplacementFontSized,
   kernelLoadDocument,
   kernelRenderLegendPage,
   kernelRenderPage,
@@ -451,5 +452,96 @@ describe("kernelRenderLegendPage — página de leyenda del export (ADR-059 §5)
     ).rejects.toThrow("OffscreenCanvas no disponible en este entorno.");
 
     installOffscreenCanvasStub();
+  });
+});
+
+describe("veredicto de degradación por razón de anchos (ADR-086, tests puros)", () => {
+  const TOKEN = "A".repeat(40);
+
+  // ADR-086 §2 promete invariancia **exacta**, no aproximada, y lo respalda con
+  // una tabla a seis decimales. Este es el test que la fija.
+  //
+  // Va acá, puro, y no sobre el evento: `PREVIEW_UPDATED.degraded` solo lleva
+  // las anotaciones, así que desde el motor lo único observable es un booleano
+  // —y un booleano no distingue "invariante" de "varía pero siempre cruza el
+  // umbral". Revertir §2(a) (devolverle piso y redondeo a la referencia) hace
+  // variar el cociente un factor 2 entre escala 0,5 y 1 dejando el booleano
+  // intacto en las cuatro escalas; contra `toBeCloseTo` no sobrevive.
+  it("widthRatio es idéntico a toda escala, también cuando el piso muerde", () => {
+    const boxHeight = 12;
+    const boxWidth = 40;
+    const ratios = [0.5, 1, 2, 4].map(
+      (scale) =>
+        fitReplacementFontSized(
+          pureStubMeasure,
+          TOKEN,
+          ReplacementMode.Mask,
+          boxHeight * scale,
+          boxWidth * scale,
+          8 * scale,
+        ).widthRatio,
+    );
+
+    for (const ratio of ratios) {
+      expect(ratio).toBeCloseTo(ratios[0]!, 6);
+    }
+    // Y no es invariante por ser trivial: el cociente es un valor de verdad.
+    expect(ratios[0]!).toBeGreaterThan(0);
+    expect(ratios[0]!).toBeLessThan(1);
+  });
+
+  // ADR-086 §2(b) no tiene efecto sobre el veredicto —`widthRatio` no lee el
+  // piso—, así que su único observable es el tamaño DIBUJADO. Sin este test, no
+  // escalar el piso pasa desapercibido por completo.
+  it("el piso de dibujo escala: a escala 2 el bucle frena en 16px, no en 8", () => {
+    const apretado = fitReplacementFontSized(
+      pureStubMeasure,
+      TOKEN,
+      ReplacementMode.Mask,
+      12 * 2,
+      40 * 2,
+      8 * 2,
+    );
+    expect(apretado.finalSizePx).toBeGreaterThanOrEqual(16);
+
+    // El mismo caso sin escalar el piso frena en 8: es la mitad del tamaño en
+    // pantalla para la misma decisión visual.
+    const pisoAbsoluto = fitReplacementFontSized(
+      pureStubMeasure,
+      TOKEN,
+      ReplacementMode.Mask,
+      12 * 2,
+      40 * 2,
+      8,
+    );
+    expect(pisoAbsoluto.finalSizePx).toBe(8);
+  });
+
+  // ADR-086 §2(a): la referencia es exactamente proporcional a la caja. Si
+  // alguien le devuelve el piso o el `Math.round`, esto cae.
+  it("naturalSizePx no tiene piso ni redondeo", () => {
+    const chico = fitReplacementFontSized(pureStubMeasure, "A", ReplacementMode.Mask, 5, 1000);
+    // 5 × 0.7 = 3.5, no 8 y no 4.
+    expect(chico.naturalSizePx).toBeCloseTo(3.5, 10);
+
+    const fraccionario = fitReplacementFontSized(
+      pureStubMeasure,
+      "A",
+      ReplacementMode.Mask,
+      12,
+      1000,
+    );
+    expect(fraccionario.naturalSizePx).toBeCloseTo(8.4, 10);
+  });
+
+  it("un texto que entra holgado no degrada, y el vacío tampoco", () => {
+    expect(
+      fitReplacementFontSized(pureStubMeasure, "AB", ReplacementMode.Mask, 12, 1000).widthRatio,
+    ).toBe(1);
+    // Ancho natural 0: no puede degradar lo que no ocupa espacio, y además
+    // sería una división por cero.
+    expect(
+      fitReplacementFontSized(pureStubMeasure, "", ReplacementMode.Mask, 12, 40).widthRatio,
+    ).toBe(1);
   });
 });
