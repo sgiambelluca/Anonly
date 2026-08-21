@@ -18,6 +18,11 @@ export default {
         accent: "#3b82f6",
         success: "#10b981",
         warning: "#f59e0b",
+        // ADR-087 §3.1: `warning` da 2.15:1 contra bg-primary y falla incluso
+        // el 3:1 de elementos no textuales (WCAG 1.4.11), así que no puede
+        // llevar un borde, un icono ni un texto que signifiquen algo.
+        // #b45309 da 5.03:1 y sirve para los tres.
+        "warning-strong": "#b45309",
         error: "#ef4444",
         // Highlight por tipo de entidad (ui/Components.md §9)
         hl: {

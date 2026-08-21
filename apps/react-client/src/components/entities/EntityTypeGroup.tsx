@@ -2,7 +2,8 @@
  * `EntityTypeGroup` (`ui/Components.md` §3.2).
  *
  * Cabecera expandible con checkbox cascade (`cascadeCheckboxState`,
- * `entityTree.ts`) + lista de `EntityGroupItem`. Click en la cabecera (o su
+ * `entityTree.ts`) + `TypeModeSelect` (nivel tipo de ADR-087 §3) + lista de
+ * `EntityGroupItem`. Click en la cabecera (o su
  * chevron) expande/colapsa; el estado de expansión lo controla `EntitiesPanel`
  * (para poder implementar "Colapsar todo"/"Expandir todo").
  */
@@ -16,6 +17,7 @@ import { Checkbox } from "../common/Checkbox.js";
 import { EntityGroupItem } from "./EntityGroupItem.js";
 import { cascadeCheckboxState } from "./entityTree.js";
 import { ENTITY_TYPE_LABEL } from "./entityTypeLabels.js";
+import { TypeModeSelect } from "./TypeModeSelect.js";
 
 export interface EntityTypeGroupProps {
   readonly type: EntityType;
@@ -67,6 +69,8 @@ export function EntityTypeGroup({
         >
           {ENTITY_TYPE_LABEL[type]} ({groups.length})
         </button>
+        {/* Nivel tipo de los tres de `UX_Guidelines.md` §3.4 (ADR-087 §3). */}
+        <TypeModeSelect type={type} groups={groups} />
       </div>
       {expanded ? (
         <div role="group">

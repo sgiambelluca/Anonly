@@ -212,7 +212,15 @@ Requisito explícito del humano: *"si son todos iguales, capaz que termino cambi
 |---|---|---|
 | Documento | Borde sólido + label explícito, en **franja propia fuera del árbol**. **Acento ámbar condicional**, ver §3.3a | El de mayor alcance. No está entre las filas, así que no puede confundirse con una. |
 | Tipo | **Chip relleno** sobre la cabecera del tipo, con el color de categoría como acento | Se lee como parte del encabezado, no de las filas que agrupa. |
-| Fila | **Ghost**: texto gris con caret, sin borde ni fondo hasta el hover | El de menor alcance. Gana borde cuando **existe una `Rule` de scope `group`** para ese grupo — o sea, cuando la fila tiene decisión propia y no va a seguir a la cabecera (§3.1a/§3.1b). Ahí el borde *es* la señal. |
+| Fila | **Ghost**: texto gris con caret, **sin relleno**, hasta el hover | El de menor alcance. Con decisión propia —cuando **existe una `Rule` de scope `group`** para ese grupo (§3.1a/§3.1b)— gana un punto y peso de texto. |
+
+> **Lo que separa los tres es el relleno, no el borde** (corregido tras
+> verificar en el browser). Una primera implementación distinguía el chip de
+> tipo y la fila con decisión propia con el mismo `ring-1`: eran
+> indistinguibles, que es exactamente el error de alcance que estos
+> tratamientos existen para evitar. Quedan tres rellenos: **blanco con borde**
+> (documento), **gris con barra de acento de la categoría** (tipo),
+> **transparente** (fila).
 
 #### 3.2 Estado mixto: la cabecera dice "Varios"
 
@@ -308,14 +316,16 @@ no textuales (WCAG 1.4.11): no puede llevar un borde, un icono ni un texto que s
 
 | `ReplacementMode` | Etiqueta anterior | Etiqueta nueva | Ejemplo en la opción |
 |---|---|---|---|
-| `Placeholder` | Placeholder | **Etiquetar** | `Juan Pérez → [PERSONA 01]` |
-| `Mask` | Máscara | **Ocultar parcialmente** | `34.567.891 → XX.XXX.XXX` |
-| `Synthetic` | Sintético | **Reemplazar por dato falso** | `Juan Pérez → Diego Ramírez` |
-| `Redact` | Redactar | **Tapar con negro** | `Juan Pérez → ███████` |
+| `Placeholder` | Placeholder | **Etiquetar** | Etiquetar |
+| `Mask` | Máscara | **Ocultar parcialmente** | Ocultar parcial |
+| `Synthetic` | Sintético | **Reemplazar por dato falso** | Dato falso |
+| `Redact` | Redactar | **Tapar con negro** | Tapar con negro |
+
+La última columna es la **forma corta del disparador**: el selector de la fila mide 11 rem y "Ocultar parcialmente" se cortaba. El menú y el nombre accesible usan la forma larga.
 
 **El ejemplo se construye con el grupo real de esa fila**, no con un valor genérico: el usuario ve qué le va a pasar *a su dato*, que es la pregunta que tiene.
 
-En los selectores de nivel tipo y documento —donde no hay un grupo único— el ejemplo usa el primer grupo del tipo, o se omite en el nivel documento.
+> **Pero solo el modo vigente puede mostrar un valor exacto**, y esto se descubrió implementándolo. `EntityGroup.replacementValue` ya viene resuelto por Grouping; los otros tres modos **no se pueden calcular en la UI**: el token de `placeholder` sale de la escalera de ADR-057 y del género de ADR-060, el formato de `mask` de `MASK_FORMAT_BY_TYPE` —que vive en `grouping-engine`, y la UI **no puede importar motores** (P-1)—, y el de `synthetic` del sintetizador sembrado con el `id` (ADR-072 §1). Los otros tres se describen de forma **esquemática**. Un ejemplo *casi* correcto es peor que uno declaradamente esquemático: la primera implementación mostraba `[PERSONA 01]` para **todos** los tipos, así que un DNI previsualizaba como si fuera una persona.
 
 ### 5. El export no pregunta nada que el usuario no necesite decidir
 

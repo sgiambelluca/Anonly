@@ -22,6 +22,7 @@ import { useState } from "react";
 import { useEntitiesStore } from "../../store/entities.store.js";
 
 import { AddEntityDialog } from "./AddEntityDialog.js";
+import { DocumentModeSelect } from "./DocumentModeSelect.js";
 import { filterGroups, visibleTypeEntries } from "./entityTree.js";
 import { EntityTypeGroup } from "./EntityTypeGroup.js";
 
@@ -95,6 +96,12 @@ export function EntitiesPanel() {
           />
         </div>
       </div>
+      {/*
+        Nivel documento (ADR-087 §3.9): fuera del árbol y arriba de él. Estar
+        entre las filas es exactamente lo que el tratamiento visual tiene que
+        evitar — es el control de mayor alcance de los tres.
+      */}
+      <DocumentModeSelect />
       <div role="tree" aria-label="Entidades detectadas" className="flex-1 overflow-y-auto">
         {noSearchResults ? (
           <p className="p-4 text-center text-xs text-text-secondary">

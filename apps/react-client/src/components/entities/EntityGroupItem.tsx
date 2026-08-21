@@ -89,11 +89,7 @@ function EntityGroupItemImpl({ group }: EntityGroupItemProps) {
       {isPersonGenderToggleVisible(group) ? (
         <PersonGenderToggle groupId={group.id} currentGender={group.personGender} />
       ) : null}
-      <ReplacementModeSelect
-        groupId={group.id}
-        currentMode={group.replacementMode}
-        customValue={group.replacementValueUserSet}
-      />
+      <ReplacementModeSelect group={group} />
       <GroupContextMenu
         onMerge={() => setMergeOpen(true)}
         onSplit={() => setSplitOpen(true)}
