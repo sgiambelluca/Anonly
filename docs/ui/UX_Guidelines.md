@@ -601,8 +601,10 @@ Valores fijos, retirados del formulario:
 > ~80–120 MB). **La palanca de fidelidad real es el DPI**, y es la única de las cinco que valdría
 > exponer bajo un `▸ Opciones avanzadas` si aparece el pedido.
 
-**El resumen** muestra grupos habilitados / total y cantidad de páginas (`páginas + 1` con el
-checkbox activo). Sin "tamaño estimado": no hay fórmula documentada para calcularlo.
+**El resumen** muestra entidades habilitadas / total y cantidad de páginas (`páginas + 1` con el
+checkbox activo). Sin "tamaño estimado": no hay fórmula documentada para calcularlo — el tamaño
+real se informa **al terminar**, en el resultado ("Exportación completa (239 KB)"), que es cuando el
+dato existe de verdad.
 
 ### 8.3 Progreso de export
 
