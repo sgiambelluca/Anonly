@@ -1,65 +1,27 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  EXPORT_DPI,
+  EXPORT_IMAGE_FORMAT,
+  EXPORT_JPEG_QUALITY,
+  MAX_EXPORT_DPI,
+  MAX_JPEG_QUALITY,
+  MIN_EXPORT_DPI,
+  MIN_JPEG_QUALITY,
   buildExportOptions,
-  validateExportForm,
-  type ExportFormState,
 } from "../components/export/exportValidation.js";
 
-function makeForm(overrides: Partial<ExportFormState> = {}): ExportFormState {
-  return {
-    filename: "anonimizado.pdf",
-    imageFormat: "jpeg",
-    jpegQuality: 0.85,
-    dpi: 150,
-    title: "",
-    includeMarkerLegend: false,
-    ...overrides,
-  };
-}
-
-describe("validateExportForm", () => {
-  it("is valid for the default form", () => {
-    expect(validateExportForm(makeForm())).toEqual({ valid: true });
-  });
-
-  it("is invalid when filename is empty", () => {
-    const result = validateExportForm(makeForm({ filename: "   " }));
-    expect(result.valid).toBe(false);
-    expect(result.reason).toMatch(/nombre/);
-  });
-
-  it("is invalid when dpi is 0 or negative", () => {
-    expect(validateExportForm(makeForm({ dpi: 0 })).valid).toBe(false);
-    expect(validateExportForm(makeForm({ dpi: -150 })).valid).toBe(false);
-  });
-
-  it("is invalid when dpi exceeds 600", () => {
-    expect(validateExportForm(makeForm({ dpi: 601 })).valid).toBe(false);
-  });
-
-  it("is invalid when jpegQuality is out of [0.5, 1] for jpeg format", () => {
-    expect(validateExportForm(makeForm({ imageFormat: "jpeg", jpegQuality: 0.4 })).valid).toBe(
-      false,
-    );
-    expect(validateExportForm(makeForm({ imageFormat: "jpeg", jpegQuality: 1.5 })).valid).toBe(
-      false,
-    );
-  });
-
-  it("ignores jpegQuality bounds when format is png", () => {
-    expect(validateExportForm(makeForm({ imageFormat: "png", jpegQuality: 0 }))).toEqual({
-      valid: true,
-    });
-  });
-});
+// ADR-087 §5: el formulario ya no tiene campos técnicos, así que no hay nada
+// que validar — `validateExportForm` se retira con ellos. Lo que sí importa
+// afirmar es que los valores fijos que quedan **caen dentro** de las
+// restricciones de `core/Export_Engine.md` §9, porque ahora nadie los revisa
+// en runtime.
 
 describe("buildExportOptions", () => {
-  it("builds options with includeOriginalMetadata forced to false", () => {
-    const options = buildExportOptions(makeForm());
-    expect(options).toEqual({
+  it("arma las opciones con los valores fijos de ADR-087 §5", () => {
+    expect(buildExportOptions({ includeMarkerLegend: false })).toEqual({
       imageFormat: "jpeg",
-      jpegQuality: 0.85,
+      jpegQuality: 0.92,
       dpi: 150,
       includeOriginalMetadata: false,
       filename: "anonimizado.pdf",
@@ -67,23 +29,34 @@ describe("buildExportOptions", () => {
     });
   });
 
-  it("copies includeMarkerLegend when true", () => {
-    const options = buildExportOptions(makeForm({ includeMarkerLegend: true }));
-    expect(options?.includeMarkerLegend).toBe(true);
+  it("propaga el único control que queda", () => {
+    expect(buildExportOptions({ includeMarkerLegend: true }).includeMarkerLegend).toBe(true);
   });
 
-  it("trims filename and omits an empty title", () => {
-    const options = buildExportOptions(makeForm({ filename: "  out.pdf  ", title: "   " }));
-    expect(options?.filename).toBe("out.pdf");
-    expect(options).not.toHaveProperty("title");
+  it("nunca arrastra metadata del original, sea cual sea el input", () => {
+    for (const includeMarkerLegend of [true, false]) {
+      expect(buildExportOptions({ includeMarkerLegend }).includeOriginalMetadata).toBe(false);
+    }
+  });
+});
+
+describe("los valores fijos respetan el contrato del motor", () => {
+  it("el DPI cae dentro del rango de Export_Engine.md §9", () => {
+    expect(EXPORT_DPI).toBeGreaterThanOrEqual(MIN_EXPORT_DPI);
+    expect(EXPORT_DPI).toBeLessThanOrEqual(MAX_EXPORT_DPI);
   });
 
-  it("includes a trimmed title when provided", () => {
-    const options = buildExportOptions(makeForm({ title: "  Informe  " }));
-    expect(options?.title).toBe("Informe");
+  it("la calidad JPEG cae dentro del rango de Export_Engine.md §9", () => {
+    expect(EXPORT_JPEG_QUALITY).toBeGreaterThanOrEqual(MIN_JPEG_QUALITY);
+    expect(EXPORT_JPEG_QUALITY).toBeLessThanOrEqual(MAX_JPEG_QUALITY);
   });
 
-  it("returns null when the form is invalid", () => {
-    expect(buildExportOptions(makeForm({ filename: "" }))).toBeNull();
+  it("la calidad es 0.92 y no 1.00: a 1.00 el archivo crece ×3-4 sin diferencia visible", () => {
+    expect(EXPORT_JPEG_QUALITY).toBe(0.92);
+    expect(EXPORT_JPEG_QUALITY).toBeLessThan(MAX_JPEG_QUALITY);
+  });
+
+  it("el rango de calidad solo aplica al formato jpeg, que es el que se usa", () => {
+    expect(EXPORT_IMAGE_FORMAT).toBe("jpeg");
   });
 });

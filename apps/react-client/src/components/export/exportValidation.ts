@@ -1,70 +1,62 @@
 /**
- * `exportValidation.ts` — validación pura + construcción de `ExportOptions`
- * para `ExportDialog` (`ui/UX_Guidelines.md` §8.2, `core/Export_Engine.md`
- * §9 "Restricciones": `dpi > 0 y ≤ 600`, `jpegQuality ∈ [0.5, 1]` si
- * `imageFormat === "jpeg"`, `includeOriginalMetadata` siempre `false`).
+ * `exportValidation.ts` — los valores fijos del export y la construcción de
+ * `ExportOptions` (ADR-087 §5, `ui/UX_Guidelines.md` §8.2).
+ *
+ * **El formulario ya no tiene campos técnicos**, así que tampoco tiene qué
+ * validar: `imageFormat`, `jpegQuality`, `dpi`, `title` y `filename` son
+ * constantes de este módulo. El criterio del recorte (ADR-087 §5): se
+ * pregunta lo que **altera el documento**, no lo que ajusta su codificación.
+ * Lo único que queda en el diálogo es el checkbox de la referencia de
+ * marcadores, que **suma una página** (ADR-059 §6).
+ *
+ * Se conservan las constantes de rango de `core/Export_Engine.md` §9 aunque
+ * ningún camino de la UI pueda violarlas ahora: son el contrato del motor, y
+ * documentan que los valores fijos de abajo caen adentro.
  */
 
 import type { ExportOptions } from "@anonly/anonymization-core";
-
-export interface ExportFormState {
-  readonly filename: string;
-  readonly imageFormat: "png" | "jpeg";
-  readonly jpegQuality: number;
-  readonly dpi: number;
-  /** Cadena vacía = sin título (campo opcional de `ExportOptions`). */
-  readonly title: string;
-  readonly includeMarkerLegend: boolean;
-}
-
-export interface ExportValidationResult {
-  readonly valid: boolean;
-  readonly reason?: string;
-}
 
 export const MIN_EXPORT_DPI = 1;
 export const MAX_EXPORT_DPI = 600;
 export const MIN_JPEG_QUALITY = 0.5;
 export const MAX_JPEG_QUALITY = 1;
 
-export function validateExportForm(form: ExportFormState): ExportValidationResult {
-  if (form.filename.trim() === "") {
-    return { valid: false, reason: "El nombre de archivo es obligatorio." };
-  }
-  if (!Number.isFinite(form.dpi) || form.dpi < MIN_EXPORT_DPI || form.dpi > MAX_EXPORT_DPI) {
-    return {
-      valid: false,
-      reason: `El DPI debe estar entre ${MIN_EXPORT_DPI} y ${MAX_EXPORT_DPI}.`,
-    };
-  }
-  if (
-    form.imageFormat === "jpeg" &&
-    (!Number.isFinite(form.jpegQuality) ||
-      form.jpegQuality < MIN_JPEG_QUALITY ||
-      form.jpegQuality > MAX_JPEG_QUALITY)
-  ) {
-    return {
-      valid: false,
-      reason: `La calidad JPEG debe estar entre ${MIN_JPEG_QUALITY} y ${MAX_JPEG_QUALITY}.`,
-    };
-  }
-  return { valid: true };
-}
+/**
+ * Menor tamaño a fidelidad equivalente en documentos de texto
+ * (`Export_Engine.md` §13 caso 6).
+ */
+export const EXPORT_IMAGE_FORMAT = "jpeg" as const;
 
 /**
- * `null` si `form` no pasa `validateExportForm` — el llamador debe validar
- * antes de construir las opciones definitivas para `actions.requestExport`.
+ * **`0.92` y no `1.00`**, y no es una concesión: a `1.00` el archivo crece
+ * ×3–4 sobre q 0.85 (`Export_Engine.md` §12: ~100–300 KB/página a 0.85), lo
+ * que lleva un expediente de 100 páginas de ~20 MB a ~80–120 MB **sin ninguna
+ * diferencia visible en texto**. Y no compra fidelidad: el original ya se
+ * perdió al rasterizar — el export es 100 % imagen (`Export_Engine.md` §11,
+ * con test de CI). La palanca de fidelidad real es el DPI.
  */
-export function buildExportOptions(form: ExportFormState): ExportOptions | null {
-  if (!validateExportForm(form).valid) return null;
-  const trimmedTitle = form.title.trim();
+export const EXPORT_JPEG_QUALITY = 0.92;
+
+/** Default de `ExportConfig`. */
+export const EXPORT_DPI = 150;
+
+export const DEFAULT_EXPORT_FILENAME = "anonimizado.pdf";
+
+export interface ExportFormState {
+  /** Lo único que el usuario decide (ADR-087 §5). */
+  readonly includeMarkerLegend: boolean;
+}
+
+export function buildExportOptions(form: ExportFormState): ExportOptions {
   return {
-    imageFormat: form.imageFormat,
-    jpegQuality: form.jpegQuality,
-    dpi: form.dpi,
+    imageFormat: EXPORT_IMAGE_FORMAT,
+    jpegQuality: EXPORT_JPEG_QUALITY,
+    dpi: EXPORT_DPI,
+    // Nunca `true`: el export no arrastra metadata del original
+    // (`Export_Engine.md` §9). Por eso el campo "Título" del formulario
+    // anterior tampoco se echa de menos — lo que protegía ya estaba protegido.
     includeOriginalMetadata: false,
-    filename: form.filename.trim(),
+    filename: DEFAULT_EXPORT_FILENAME,
     includeMarkerLegend: form.includeMarkerLegend,
-    ...(trimmedTitle !== "" ? { title: trimmedTitle } : {}),
   };
 }
