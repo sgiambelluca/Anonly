@@ -80,7 +80,20 @@ export function ScanScreen() {
     .slice(-RECENT_LIMIT)
     .reverse();
 
-  const percent = total > 0 ? Math.round((current / total) * 100) : 0;
+  // Durante la descarga del modelo, `current`/`total` del pipeline **no
+  // describen páginas**: se los midió en 1/1 con el stage ya en `Detecting`
+  // (el mismo dato que engañaba al umbral, ver `scanAdvance.ts`). Mostrarlos
+  // ahí daba un "1 de 1" y una barra al 100 % mientras en realidad no se había
+  // procesado ninguna página. Con el modelo cargando, lo que de verdad avanza
+  // es la descarga, así que la barra muestra eso y el contador por página se
+  // oculta — no hay páginas que contar todavía.
+  const percent =
+    modelLoading !== null
+      ? Math.round(modelLoading.progress * 100)
+      : total > 0
+        ? Math.round((current / total) * 100)
+        : 0;
+  const showPageCounter = modelLoading === null && total > 0;
 
   return (
     <div className="flex h-full flex-col items-center justify-center gap-8 overflow-y-auto p-8">
@@ -103,7 +116,7 @@ export function ScanScreen() {
             <span className="text-sm text-text-primary">
               {scanStatusLabel(stage, modelLoading)}
             </span>
-            {total > 0 ? (
+            {showPageCounter ? (
               <span className="shrink-0 text-sm tabular-nums text-text-secondary">
                 {current} de {total}
               </span>
