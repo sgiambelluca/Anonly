@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-pendientes | dependencias=roadmap/MVP.md,roadmap/Hito10.8_Handoff.md,adr/ADR-011-Grouping-First.md,adr/ADR-061-Agregado-Manual-De-Entidades.md,adr/ADR-063-Bbox-De-Texto-Rotado.md,adr/ADR-073-Difuso-Solo-Para-Tipos-De-Texto-Libre.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-075-Fechas-En-Texto-Y-Tramos-De-Identificadores.md,adr/ADR-076-La-Edicion-Manual-Del-Valor-De-Reemplazo-Gana.md | audiencia=humanos+IA | fase=post-10.8 (§1, §2, §4, §4bis y §10 adoptados como Hito 10.9 el 2026-08-15, cada uno con su ADR; el diagnóstico original se conserva porque es la medición sobre el documento real) -->
+<!-- CONTEXT: scope=roadmap-pendientes | dependencias=roadmap/MVP.md,roadmap/Hito10.8_Handoff.md,adr/ADR-011-Grouping-First.md,adr/ADR-061-Agregado-Manual-De-Entidades.md,adr/ADR-063-Bbox-De-Texto-Rotado.md,adr/ADR-073-Difuso-Solo-Para-Tipos-De-Texto-Libre.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-075-Fechas-En-Texto-Y-Tramos-De-Identificadores.md,adr/ADR-076-La-Edicion-Manual-Del-Valor-De-Reemplazo-Gana.md,adr/ADR-087-La-Herramienta-Tiene-Tres-Momentos-No-Cuatro-Paneles.md | audiencia=humanos+IA | fase=post-10.8 (§1, §2, §4, §4bis y §10 adoptados como Hito 10.9 el 2026-08-15, cada uno con su ADR; el diagnóstico original se conserva porque es la medición sobre el documento real) -->
 
 # Pendientes acordados para después del Hito 10.8
 
@@ -9,6 +9,8 @@
 > **Estado (2026-08-13)**: el §3 quedó **cerrado dentro del hito** por ADR-067 — se conserva tachado, con el porqué. El resto sigue vigente, y el §2 quedó **medido** sobre la pericia de 5 páginas en la segunda prueba manual.
 >
 > **Estado (2026-08-14)**: entra el §10, de la planificación del Hito 10.6 (ADR-072).
+>
+> **Estado (2026-08-21)**: entran el **§17** (tokens de reemplazo pisándose en el preview) y el **§18** (ruido de detección sin distinguir de los aciertos), los dos de la prueba manual del rediseño de UX (**ADR-087**). Ninguno es regresión de ese rediseño: el §17 se vuelve más visible porque el visor pasó a ocupar todo el ancho, y el §18 está anotado en ADR-087 "Fuera del alcance" §7 — acá va con el detalle medido.
 >
 > **Estado (2026-08-15) — cinco entradas dejan de ser pendientes**: el humano tomó los **§1, §2, §4, §4bis y §10** como **Hito 10.9** (`MVP.md` §4). Cada una tiene ahora su ADR y su propagación a specs: §1 → **ADR-073**, §2 → **ADR-074**, §4 y §4bis → **ADR-075** (juntos, porque tocan la misma tabla de patrones y el propio §4bis lo pedía), §10 → **ADR-076**. Se conservan acá, con el diagnóstico original intacto y una nota al pie de cada una: son la medición sobre el documento real, y el ADR se escribió contra ellas. Siguen **abiertos** el §5 (recall de NER, que no es un bug), el §6 (marca de agua, sin construir por decisión), el §7 (solapamiento, ADR-063 §6), el §8 (rotación de página, sin datos para calibrar) y el §9 (variantes de ops de imagen).
 
@@ -295,3 +297,57 @@ O sea: la misma ocurrencia se declara sana o degradada **según a qué zoom se l
 La 1 y la 3 son complementarias y probablemente sean las dos que hacen falta. Ninguna se decide desde un PR de implementación.
 
 **Mientras tanto, qué hay.** La marca del §14 está completa y correcta de punta a punta: cuando el veredicto dice que hay degradación, se muestra, se explica en castellano llano y ofrece las tres salidas. Se enciende hoy en títulos y en previews a escala ≥ 2. Lo que no cubre es el caso más común, y **el aviso "de antes" del `EditReplacementDialog` sí lo cubre** —`estimateReplacementFit` mide anchos, que es justamente lo que al detector le falta—, así que el usuario que edita a mano no queda a ciegas. El que llega a un reemplazo largo por la escalera automática de ADR-057, sí.
+
+---
+
+## 17. Los tokens de reemplazo se pisan entre sí en el preview anonimizado — **más visible desde ADR-087**
+
+**Procedencia**: prueba manual del rediseño de UX (ADR-087), 2026-08-21, sobre `text-10p.pdf`.
+
+**Qué se ve.** El panel anonimizado dibuja los tokens superpuestos, con tamaños dispares y huecos, sobre la primera línea de la página 0 del fixture:
+
+```
+[HOMBRE 01] ; vive en [HOMBRE 01] 1234, DNI : [DNI 01]   CUIT  [TELEFONO 01] , teléfono +
+1234-5678, email ju.    [EMAIL 01],
+```
+
+Hay al menos tres síntomas distintos ahí, y conviene no confundirlos:
+
+1. **`[HOMBRE 01]` aparece dos veces**, la segunda donde iba `Belgrano` (una `Address`). O el bbox de una ocurrencia está mal atribuido, o dos `Replacement` distintos comparten rectángulo de pintado.
+2. **Los tokens se solapan con el texto que queda**: `[DNI 01]` encima de `1234`, `[TELEFONO 01]` donde iba el CUIT.
+3. **Tamaños inconsistentes** entre tokens de la misma línea, que es el shrink-to-fit de ADR-058 §1 actuando de a uno.
+
+**Por qué no es simplemente el §16.** El §16 es sobre el **veredicto** (cuándo se enciende la marca de degradado). Esto es sobre el **dibujo**: los tokens no solo quedan chicos, quedan en el lugar equivocado. Puede tener que ver con el repintado de línea de ADR-058 §1 —que es conservador por diseño y sobre esta línea probablemente no se activa— o con la atribución de bboxes de ADR-074 (entidad partida en varias líneas: el wrap a 95 caracteres de `generate.ts` corta la página 0 justo adentro del teléfono, `tests/fixtures/README.md` lo documenta).
+
+**Por qué sube de prioridad ahora.** No es una regresión de ADR-087 — el comportamiento es el mismo de antes. Pero hasta el rediseño el preview anonimizado vivía en media pantalla, compartida con el original; desde ADR-087 §2 ocupa **todo el ancho** y es la única cosa que el usuario mira cuando conmuta el toggle. Lo que antes era un detalle borroso ahora es lo primero que se ve, y un usuario que no distingue "fallback documentado" de "bug" va a concluir que la herramienta rompió su documento.
+
+**Qué haría falta.** Reproducirlo con un caso mínimo (una línea, dos entidades adyacentes) y decidir si el defecto está en la atribución de bbox, en el repintado, o en los dos. Es trabajo de `render-engine` y necesita medición antes que decisión.
+
+---
+
+## 18. El ruido de detección se muestra con el mismo peso visual que los aciertos
+
+**Procedencia**: auditoría de UI contra las heurísticas de Nielsen (ADR-087, "Fuera del alcance" §7), 2026-08-21. Se anota acá con el detalle medido.
+
+**Qué pasa.** Sobre `text-10p.pdf`, el árbol muestra estas dos filas junto a las correctas, indistinguibles de ellas:
+
+| Fila | Qué es en realidad |
+|---|---|
+| `Teléfonos (1) → 20-12345678` | Falso positivo: son los diez primeros dígitos del **CUIT rechazado** por checksum, matcheando `phone-mobile-ar`. Ya documentado en `tests/fixtures/README.md` y en `scenario-8-ner-disabled.spec.ts`. |
+| `Organizaciones (2) → DNI` | Error de NER: clasificó la **sigla "DNI"** como organización. |
+
+Las dos tienen checkbox marcado, cuentan para el total de "N datos encontrados", y se exportarían anonimizadas si el usuario no las revisa una por una.
+
+**Por qué importa.** El árbol es la superficie donde el usuario decide qué se anonimiza. Si el ruido y los aciertos se ven igual, la única forma de encontrar el ruido es leer las N filas — que es exactamente el trabajo que la herramienta existe para ahorrar. En un expediente con cientos de entidades, nadie lo hace.
+
+**El dato existe y no se muestra.** `Occurrence.confidence` viaja hasta el conflicto (`ADR-083 §6` decidió **no imprimirlo** ahí, y con razón: en un conflicto la confidence ordena las opciones pero no es lenguaje del usuario). Eso no resuelve el caso de arriba, donde **no hay conflicto**: hay una detección única, con confidence baja, presentada como cualquier otra.
+
+**Qué NO hacer**, porque ya está decidido: mostrar un número de confidence en la fila. ADR-083 §6 lo descartó como vocabulario de implementación, y ese criterio sigue valiendo.
+
+**Direcciones posibles**, ninguna elegida — necesita ADR:
+
+1. **Agrupar el ruido aparte**: una sección "Revisar" al final del árbol con las detecciones por debajo de un umbral, colapsada por defecto y **deshabilitadas por default** (invierte UX-7 solo para ese conjunto).
+2. **Marca por fila**, del mismo tipo que la de degradado (§14): discreta, con umbral, y con la salida a mano (deshabilitar o cambiar categoría, que ya existen).
+3. **No tocar la UI y subir los umbrales de los patrones** — resuelve el falso positivo del teléfono pero no el error de NER, y arriesga recall.
+
+La 1 y la 2 no son excluyentes. Lo que hay que decidir primero es **de dónde sale el umbral**, porque hoy `EntityGroup` no expone confidence: es de `Occurrence`, y un grupo tiene varias.
