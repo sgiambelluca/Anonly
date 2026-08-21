@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=componentes-ui | dependencias=ui/React_Client.md,ui/UX_Guidelines.md,ADR-001-Framework.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-054-Scroll-Independiente-Por-Panel.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-069-Lexico-De-Genero-Fuente-Unica-Y-Canal-Del-Usuario.md,adr/ADR-071-El-Genero-Se-Muestra-Solo-Donde-Se-Usa.md | audiencia=IA-implementador-ui | fase=4 (reconciliado en fase 10 por ADR-036: PasswordDialog/SettingsDialog/ConfirmDialog agregados §2.6–2.7/§8.9, zoom §5.2, mapeo §12; §2.6/§5.2/§5.5/§12 reescritos por ADR-037 —zoom con re-render real— y ADR-038 —SettingsDialog dispara reanalyze, no recreación del core—; §2.1/§2.5/§13.9 ajustados 2026-07-22 por el bug #7 del Escenario 1 E2E: gate de visibilidad por stage vs. vida del diálogo hijo abierto; §5.2/§5.4 en fase 11 por ADR-056 —requestRender con kind por panel, canvas que no se borra—; §3.3/§3.4/§7.1/§12 en fase 10.5 por ADR-058 —marca de reemplazo degradado— y ADR-059 —checkbox de leyenda—; §3.3 por ADR-062 —el canal `PREVIEW_UPDATED.degraded` del que sale esa marca, y las tres reglas de su consumo; el checkbox de leyenda entra en el Hito 10.5 y la marca queda para después—; §3.3/§3.4b/§12 en fase 10.6 por ADR-060 —PersonGenderSelect y marca de género sin determinar— y ADR-069 —§3.4b actualizado: el patch usa `PersonGenderChoice`, "sin determinar" viaja como `"neutral"` explícito—; §3.3/§3.4b/§8.3/§12 reescritos en fase 10.6 por ADR-071 —`PersonGenderSelect` pasa a ser `PersonGenderToggle`: visible solo en `placeholder`/`synthetic`, botón cíclico de tres estados con SVG propios, la marca de "sin determinar" fusionada con el estado neutro, y `Select` sin apertura controlada—; §3.4c/§5.4b/§5.4c/§12 en fase 10.7 por ADR-061 —agregado manual, hit-test de selección y buscador—; §1/§2.6 en fase 10.6 por ADR-070 —sección "Acerca de" con la atribución CC-BY dentro del SettingsDialog, y `thirdPartyCredits.ts` como módulo de datos—; post-Hito 10.10: §3.3 por ADR-086 —la marca de degradado se enciende cuando el texto queda más angosto que `DEGRADED_FONT_RATIO` de su ancho natural, criterio y valor nuevos—) -->
+<!-- CONTEXT: scope=componentes-ui | dependencias=ui/React_Client.md,ui/UX_Guidelines.md,ADR-001-Framework.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-054-Scroll-Independiente-Por-Panel.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-069-Lexico-De-Genero-Fuente-Unica-Y-Canal-Del-Usuario.md,adr/ADR-071-El-Genero-Se-Muestra-Solo-Donde-Se-Usa.md | audiencia=IA-implementador-ui | fase=4 (reconciliado en fase 10 por ADR-036: PasswordDialog/SettingsDialog/ConfirmDialog agregados §2.6–2.7/§8.9, zoom §5.2, mapeo §12; §2.6/§5.2/§5.5/§12 reescritos por ADR-037 —zoom con re-render real— y ADR-038 —SettingsDialog dispara reanalyze, no recreación del core—; §2.1/§2.5/§13.9 ajustados 2026-07-22 por el bug #7 del Escenario 1 E2E: gate de visibilidad por stage vs. vida del diálogo hijo abierto; §5.2/§5.4 en fase 11 por ADR-056 —requestRender con kind por panel, canvas que no se borra—; §3.3/§3.4/§7.1/§12 en fase 10.5 por ADR-058 —marca de reemplazo degradado— y ADR-059 —checkbox de leyenda—; §3.3 por ADR-062 —el canal `PREVIEW_UPDATED.degraded` del que sale esa marca, y las tres reglas de su consumo; el checkbox de leyenda entra en el Hito 10.5 y la marca queda para después—; §3.3/§3.4b/§12 en fase 10.6 por ADR-060 —PersonGenderSelect y marca de género sin determinar— y ADR-069 —§3.4b actualizado: el patch usa `PersonGenderChoice`, "sin determinar" viaja como `"neutral"` explícito—; §3.3/§3.4b/§8.3/§12 reescritos en fase 10.6 por ADR-071 —`PersonGenderSelect` pasa a ser `PersonGenderToggle`: visible solo en `placeholder`/`synthetic`, botón cíclico de tres estados con SVG propios, la marca de "sin determinar" fusionada con el estado neutro, y `Select` sin apertura controlada—; §3.4c/§5.4b/§5.4c/§12 en fase 10.7 por ADR-061 —agregado manual, hit-test de selección y buscador—; §1/§2.6 en fase 10.6 por ADR-070 —sección "Acerca de" con la atribución CC-BY dentro del SettingsDialog, y `thirdPartyCredits.ts` como módulo de datos—; post-Hito 10.10: §3.3 por ADR-086 —la marca de degradado se enciende cuando el texto queda más angosto que `DEGRADED_FONT_RATIO` de su ancho natural, criterio y valor nuevos—); §1/§2/§3/§4/§5/§7 reescritos en el rediseño post-10.9 por **ADR-087** —tres momentos en vez de cuatro paneles: `SideBySideViewer`/`ScrollSyncToggle` y los cuatro componentes de `rules/` se retiran, aparecen `LoadScreen`/`ScanScreen`/`ViewerModeToggle`/`DocumentModeSelect`/`TypeModeSelect`, y `ExportDialog` queda con un solo control— -->
 
 # Anonly — Catálogo de Componentes
 
@@ -25,24 +25,23 @@ apps/react-client/src/components/
 │   └── CloseDocumentButton.tsx  // ADR-051
 ├── entities/
 │   ├── EntitiesPanel.tsx
+│   ├── DocumentModeSelect.tsx     // ADR-087 §3, nivel documento (Rule scope "global")
+│   ├── TypeModeSelect.tsx         // ADR-087 §3, nivel tipo (Rule scope "type")
 │   ├── EntityTypeGroup.tsx
 │   ├── EntityGroupItem.tsx
-│   ├── ReplacementModeSelect.tsx
+│   ├── ReplacementModeSelect.tsx  // nivel fila, sin cambios funcionales
 │   ├── GroupContextMenu.tsx
 │   ├── MergeDialog.tsx
 │   └── SplitDialog.tsx
-├── rules/
-│   ├── RulesPanel.tsx
-│   ├── RuleItem.tsx
-│   ├── RuleCreatorDialog.tsx
-│   └── RuleEditorDialog.tsx
+├── screens/                       // ADR-087 §1
+│   ├── LoadScreen.tsx             // momento ①
+│   └── ScanScreen.tsx             // momento ②a
 ├── viewer/
 │   ├── PdfViewer.tsx
 │   ├── PageVirtualizer.tsx
 │   ├── PageCanvas.tsx
-│   ├── SideBySideViewer.tsx
-│   ├── ZoomControls.tsx
-│   └── ScrollSyncToggle.tsx   # ADR-054 §2
+│   ├── ViewerModeToggle.tsx       // ADR-087 §2 (reemplaza a SideBySideViewer)
+│   └── ZoomControls.tsx
 ├── conflicts/
 │   ├── ConflictBadge.tsx
 │   └── ConflictDialog.tsx
@@ -71,20 +70,22 @@ apps/react-client/src/components/
 - **Props**: ninguno (lee `pipeline.store`).
 - **Stores**: `pipeline`, `document`, `settings`.
 - **Estados**:
-  - `stage === Idle`: solo botón "Importar PDF".
+  - `stage === Idle`: **el `Toolbar` no se monta** — ese estado es el momento ① (`LoadScreen`, §2.9), pantalla completa (ADR-087 §1).
   - `stage ∈ {Importing, Extracting, OCRing, Detecting, Grouping}`: `PipelineStatus` + `CancelButton`.
-  - `stage ∈ {Ready, Done}`: `PipelineStatus` + `ExportButton` + `CloseDocumentButton` + `CancelButton` (§2.4). (`Done` no tenía fila — gap cerrado al resolver el bug #7 del Escenario 1 E2E: tras un export el documento sigue abierto y re-exportable. `CloseDocumentButton` agregado por ADR-051.)
+  - `stage ∈ {Ready, Done}`: `PipelineStatus` + `ExportButton`. **Sin `CancelButton`** (ADR-087 §7: `Ready` pasa a `HIDDEN_STAGES`). `CloseDocumentButton` pasa al menú de settings (§2.8). (`Done` no tenía fila — gap cerrado al resolver el bug #7 del Escenario 1 E2E: tras un export el documento sigue abierto y re-exportable.)
   - `stage === Rendering/Exporting`: `PipelineStatus` + `CancelButton`.
   - `stage === Failed`: banner de error + "Reintentar" o "Cerrar" (el "Cerrar" del banner, sin confirmación) + `CloseDocumentButton`.
   - `stage === Cancelled`: `PipelineStatus` + `CloseDocumentButton`.
 
-  > **Reconciliación con §2.4 (2026-08-18)**: la fila `{Ready, Done}` decía "(+ `CancelButton` si hay jobs remanentes)", un matiz que §2.4 —la regla canónica del propio componente— nunca tuvo. No existe ningún campo en `pipeline.store` que represente "jobs remanentes", ni ninguno planificado, así que el matiz era inimplementable y quedó sin implementar desde el PR6 del Hito 10 (`CancelButton.tsx` sigue la regla de §2.4: visible cuando `stage ∉ {Idle, Done, Failed, Cancelled}`). Se elimina el matiz en vez de inventar el campo: **§2.4 manda**, y en `Ready` el botón se muestra como en cualquier otro stage no terminal.
+  > **Reconciliación con §2.4 (2026-08-18, revisada por ADR-087 §7)**: la fila `{Ready, Done}` decía "(+ `CancelButton` si hay jobs remanentes)", un matiz inimplementable —no existe ningún campo de "jobs remanentes" en `pipeline.store`— que se resolvió mostrando el botón en `Ready` como en cualquier stage no terminal. **ADR-087 §7 corrige esa resolución en el otro sentido**: en `Ready` el pipeline ya terminó, no hay nada que cancelar, y el botón aparecía con peso de secundario junto al CTA primario mientras su `ConfirmDialog` advertía que *"los cambios no guardados se perderán"* — una amenaza imposible. `Ready` se agrega a `HIDDEN_STAGES` (§2.4). El caso real que el matiz de 2026-08-18 intentaba cubrir —trabajo del pipeline todavía corriendo— **sí existe ahora** y tiene su propio stage: el escaneo en segundo plano de `UX_Guidelines.md` §7.2, donde `stage` sigue siendo `Detecting`/`OCRing` y el botón se muestra por la regla general.
 
 - **Acciones**: ninguna directa; delega en hijos.
 
 ### 2.2 `ImportButton`
 
-- **Comportamiento**: `<input type="file" accept="application/pdf">` oculto + label estilizado. Drag&drop en todo el App.
+- **Comportamiento**: `<input type="file" accept="application/pdf">` oculto + label estilizado. **Drag & drop funcional** sobre la zona de carga de `LoadScreen` (§2.9).
+
+  > **No estaba implementado.** No hay ningún handler de drag & drop en el repo, y el botón del dropzone estaba `disabled` (`App.tsx:162`): la afordancia visualmente dominante de la primera pantalla era decorativa, y el único camino real era el botón chico de la esquina (ADR-087 Contexto §1, hallazgo 5). Con `LoadScreen` a pantalla completa, esa zona **es** el camino principal y tiene que funcionar.
 - **Acción**: `actions.importDocument(file)`.
 - **Atajo**: `Cmd/Ctrl+O`.
 
@@ -93,13 +94,15 @@ apps/react-client/src/components/
 - **Estados**: muestra icono + texto según `stage` (ver `UX_Guidelines.md` §7.1).
 - **Props**: ninguno (lee `pipeline.store`).
 - **Sub-estados**:
-  - `modelLoading != null`: "Cargando modelo NER… 45%".
+  - `modelLoading != null`: **"Preparando el detector de nombres… 45 %"** — sin nombrar "NER", y aclarando que es solo la primera vez (`UX_Guidelines.md` §7.1).
   - `exportProgress != null`: "Exportando página 7 de 10…".
   - En otros casos: texto descriptivo + barra de progreso.
+- **`Ready` no dibuja barra** (ADR-087, Contexto §1 hallazgo 4): hasta acá la barra se renderizaba en todos los stages no-`Idle`, así que en `Ready` quedaba en `width: 0%` con el texto "Listo" al lado — el elemento más grande de la toolbar mostrando "0 %" mientras el texto decía "terminado". Una barra sin progreso que reportar no se dibuja.
+- **Ancho no fijo**: el `min-w-[220px]` anterior truncaba el texto a < 1100 px y a 900 px la barra quedaba tapada por el botón "Exportar".
 
 ### 2.4 `CancelButton`
 
-- **Visible**: cuando `stage ∉ {Idle, Done, Failed, Cancelled}`.
+- **Visible**: cuando `stage ∉ {Idle, **Ready**, Done, Failed, Cancelled}` (ADR-087 §7 agrega `Ready`). Sigue visible durante el **escaneo en segundo plano** posterior al pase temprano (`UX_Guidelines.md` §7.2), que es cuando de verdad sirve.
 - **Acción**: abre `ConfirmDialog` → `actions.cancel()`.
 - **Atajo**: `Cmd/Ctrl+.`.
 
@@ -133,13 +136,43 @@ apps/react-client/src/components/
 
 ### 2.8 `CloseDocumentButton` (ADR-051)
 
+- **Ubicación** (ADR-087 §1): **dentro del menú de settings**, no como botón suelto de la `Toolbar`. En `Ready` la toolbar tenía cuatro controles —"Exportar", "Cancelar", "Cerrar documento", ⚙— con los dos destructivos flanqueando el CTA primario. "Cerrar documento" es infrecuente y destructivo: no compite por la barra.
 - **Visible**: hay documento activo y `stage ∈ {Ready, Done, Failed, Cancelled}` — o sea, con el pipeline detenido. Durante una corrida el control es `CancelButton` (§2.4), no este: cerrar a mitad de pipeline es "cancelar + liberar" (`Orchestrator.md` §13 caso 11) y dos botones para lo mismo solo multiplican caminos.
 - **Acción**: abre `ConfirmDialog` ("¿Cerrar el documento? Se perderán las ediciones y reglas de esta sesión.") → `actions.closeDocument()`.
 - **Vida del diálogo**: aplica la regla 9 de §13 (`if (!visible && !open) return null`) — un `PIPELINE_STAGE_CHANGED` por debajo no puede desmontar el `ConfirmDialog` abierto.
 - **Atajo**: ninguno en MVP (`Cmd/Ctrl+W` lo captura el navegador).
 - **ARIA**: `aria-label="Cerrar documento"`.
-- **Por qué existe** (ADR-051): sin este control, un documento que llega a `Ready` solo se puede cerrar recargando la pestaña, y como `validateImportInput` exige cerrar antes de importar otro (`Orchestrator.md` §13 caso 12), tampoco se podía abrir un segundo PDF. Bloqueaba además el Escenario 7 E2E y el gate `test:leak` de Hito 11.
+- **Por qué existe** (ADR-051): sin este control, un documento que llega a `Ready` solo se puede cerrar recargando la pestaña, y como `validateImportInput` exige cerrar antes de importar otro (`Orchestrator.md` §13 caso 12), tampoco se podía abrir un segundo PDF. **Ese sigue siendo el único camino para abrir otro PDF** — `ImportButton` solo se monta en `Idle` (§2.1), así que "cerrar" es el paso obligatorio antes de importar. ADR-087 no lo resuelve; queda anotado como deuda de UX. Bloqueaba además el Escenario 7 E2E y el gate `test:leak` de Hito 11.
 - **No confundir con** el "Cerrar documento" del banner de error de `PipelineStatus` (§2.3): ese cierra **sin** confirmación, porque en `Failed` no hay ediciones que perder. Los dos conviven a propósito.
+
+---
+
+### 2.9 `LoadScreen` (ADR-087 §1, momento ①)
+
+- **Stores**: ninguno (se monta cuando `document.store.id === null`).
+- **Render**: pantalla completa. Logo, una frase de qué hace la herramienta, la **zona de carga
+  funcional** (drop + botón, los dos operativos) y tres features breves.
+- **No monta** el árbol de entidades ni ninguna barra lateral: no hay nada que mostrar todavía.
+- **Acción**: `actions.importDocument(file)`, por drop o por el botón.
+
+### 2.10 `ScanScreen` (ADR-087 §1/§6, momento ②a)
+
+- **Stores**: `pipeline` (stage y progreso), `entities` (el contador y los grupos que van
+  apareciendo), `document` (nombre y `pageCount`).
+- **Render**: nombre del archivo, estado en lenguaje llano, progreso `current`/`total` real de la
+  etapa vigente, **las entidades apareciendo en vivo** y `Cancelar`. Ver `UX_Guidelines.md` §7.3.
+- **Sin skeleton del documento**: no promete un layout que todavía no existe.
+- **Salida** (`UX_Guidelines.md` §7.2): pasa a ②b con la primera de — `Detecting` ≥
+  `SCAN_ADVANCE_PAGE_RATIO` (0.20) de las páginas, o `SCAN_ADVANCE_MAX_MS` (6000 ms) desde el
+  import — y **nunca** antes de `SCAN_ADVANCE_MIN_MS` (1200 ms).
+
+  > Piso y techo son **globales** desde el import, no relativos a `Detecting`: la descarga del
+  > modelo NER es tiempo muerto sin entidades, y un techo medido desde `Detecting` dejaría al
+  > usuario sin cota. El umbral de páginas sí se mide sobre `Detecting`, que es la etapa larga y la
+  > que produce la mayoría de las entidades (`orchestrator.ts:267`).
+
+- **Tras el pase, el escaneo sigue** en segundo plano, con el estado visible en `PipelineStatus`
+  (§2.3) y `CancelButton` (§2.4) activos.
 
 ---
 
@@ -189,9 +222,22 @@ apps/react-client/src/components/
 ### 3.4 `ReplacementModeSelect`
 
 - **Props**: `groupId`, `currentMode`.
-- **Opciones**: `placeholder` (default), `mask`, `synthetic`, `redact`.
-- **Acción**: `actions.updateGroup(groupId, { replacementMode: newMode })`.
-- **Implementación**: Radix `Select` con iconos por modo y preview del valor resultante.
+- **Opciones**: `placeholder` (default), `mask`, `synthetic`, `redact` — con las **etiquetas de
+  `UX_Guidelines.md` §3.5** (ADR-087 §4): "Etiquetar", "Ocultar parcialmente", "Reemplazar por dato
+  falso", "Tapar con negro". El enum **no cambia** (ADR-012 intacto); cambian solo las etiquetas de
+  `replacementModeOptions.ts`.
+- **Cada opción trae un ejemplo construido con el grupo real de esa fila** (`Juan Pérez →
+  [PERSONA 01]`), no un valor genérico: la pregunta del usuario es qué le pasa *a su dato*.
+- **Acción**: crea/actualiza una **`Rule` de scope `group`** para ese grupo (ADR-087 §3.1a). **Esto cambia** respecto de la implementación vigente, que emitía `GROUP_UPDATE_REQUESTED` con `patch.replacementMode`.
+
+  > **Por qué cambia**: `resolveMode` chequea las reglas **antes** que `group.replacementMode`, y `grouping.engine.ts:1150-1151` lo hace literal — asigna lo que el usuario eligió y una línea después lo pisa con el resultado de `resolveMode`. Con una regla de tipo vigente, el selector de la fila **es inerte**. Hoy casi no se nota porque el panel de Reglas no se usa; con §3.9/§3.10 creando reglas de rutina, pasaría a ser el comportamiento normal.
+
+- **Undo** (§3.11): toast **solo si `group.replacementValueUserSet === true`** — cambiar el modo destruye el texto escrito a mano sin vuelta (`grouping.engine.ts:1151-1160`). En el resto de los casos no lleva toast: es la acción más frecuente de la app y es autoevidente y autorreversible con el mismo control.
+- **Implementación**: Radix `Select`, presentación **ghost** (ADR-087 §3.1): sin borde ni fondo
+  hasta el hover, mostrando en gris el modo vigente. **Gana borde** cuando existe una `Rule` de
+  scope `group` para ese grupo — o sea, cuando la fila tiene decisión propia y no va a seguir a la
+  cabecera del tipo. Ese lookup en `rules.store` es todo lo que hace falta: sin flag nuevo en
+  `EntityGroup` y sin reimplementar `resolveMode` en la UI.
 - **Nota (ADR-057)**: el preview es `group.replacementValue`, ya resuelto por el Grouping Engine — así que **muestra el token abreviado sin ningún cambio en este componente**. Un grupo apretado va a previsualizar `[PRS-01]` y no `[PERSONA 01]`, y eso es correcto: es exactamente lo que va a salir en el documento.
 
 ### 3.4b `PersonGenderToggle` (ADR-060 §6, forma y visibilidad por ADR-071 §1-§3, wire por ADR-069 §4)
@@ -270,44 +316,120 @@ apps/react-client/src/components/
 
 ---
 
-## 4. Componentes de Reglas
+### 3.9 `DocumentModeSelect` (ADR-087 §3, nivel documento)
 
-### 4.1 `RulesPanel`
+- **Stores**: `rules` (la `Rule` de scope `global` vigente, y el conteo de reglas de `type`/`group`
+  para el estado de precaución).
+- **Ubicación**: franja propia **arriba del árbol y fuera** de él, no como fila del árbol.
+- **Render**: label "Todo el documento" + `Select` con las opciones de §3.4.
+- **Tratamiento visual** (ADR-087 §3.1): **borde sólido + label explícito**. Es el control de mayor
+  alcance, así que es el que más deliberado tiene que verse accionar. Estar fuera del árbol es
+  parte del tratamiento: no puede confundirse con una fila.
+- **Estado de precaución** (ADR-087 §3.3a): **neutro por defecto**; con alguna `Rule` de scope
+  `type` o `group` vigente, gana **acento ámbar + resumen** (`⚠ 5 categorías y 12 entidades con
+  ajustes propios`). El color aparece cuando significa algo, y el resumen entera del riesgo antes
+  de abrir el menú. **Nunca señala solo con color**: ícono + texto además del acento.
+  - Usa **`--color-warning-strong`** (§10), **no** `--color-warning`, que no llega al contraste
+    mínimo de elementos no textuales.
+  - **Ámbar y no rojo**: la acción es reversible y no toca el documento, solo los ajustes.
+- **Acción** (ADR-087 §3.1b regla 3): **borra las `Rule` de scope `type` y `group`** y
+  crea/actualiza la de scope `global`. Barre absolutamente todo — es lo que "todo el documento"
+  significa.
+- **Confirmación**: solo si existe alguna `Rule` de scope `type` o `group`; el diálogo **nombra lo
+  que va a romper**, con los conteos. Sin ajustes previos aplica directo.
+- **Undo** (§3.11): toast de 5 s, **con snapshot** de las reglas borradas.
 
-- **Stores**: `rules`.
-- **Render**: tres secciones (Global / Por tipo / Por grupo) + botón "+ Nueva regla".
-- **Estado vacío**: placeholder "Aún no hay reglas…" (ver `UX_Guidelines.md` §11).
+### 3.10 `TypeModeSelect` (ADR-087 §3, nivel tipo)
 
-### 4.2 `RuleItem`
+- **Props**: `type`, `groups` (los del tipo, para computar el estado mixto).
+- **Stores**: `rules` (la `Rule` de scope `type` vigente para ese `EntityType`, y las de scope
+  `group` de sus grupos).
+- **Ubicación**: en la cabecera de `EntityTypeGroup` (§3.2).
+- **Tratamiento visual** (ADR-087 §3.1): **chip relleno**, con el color de categoría del tipo (§9)
+  como acento. Se lee como parte del encabezado, no de las filas que agrupa.
+- **Estado mixto**: cuando los grupos del tipo **no comparten** `replacementMode`, muestra
+  `Varios ▾`. El menú es el normal — con la acción de abajo, cualquier opción uniforma el tipo, así
+  que **no hay un ítem especial de "aplicar a todos"**. `Varios` es un estado de display puro.
 
-- **Props**: `rule: Rule`.
-- **Render**: descripción legible ("DNI → mask", "Juan Pérez → redact") + botones `[✎]` `[🗑]`.
-- **Acciones**:
-  - `[✎]` → `RuleEditorDialog`.
-  - `[🗑]` → `ConfirmDialog` → `actions.deleteRule(rule.id)` (vía `RULE_DELETED`).
+  > **"Varios" y no "Personalizado"**: `ReplacementModeSelect` (§3.4) **ya usa "Personalizado"**
+  > para otra cosa — el `replacementValue` editado a mano (ADR-078 §1). Reusarlo acá pondría dos
+  > significados en la misma palabra, en la misma columna, a dos filas de distancia. Además
+  > "Personalizado" describe un *origen* y lo que la cabecera comunica es un *estado*.
 
-### 4.3 `RuleCreatorDialog`
+- **Acción** (ADR-087 §3.1b regla 2): **borra las `Rule` de scope `group` de los grupos de ese
+  tipo** y crea/actualiza la de scope `type`.
+- **Confirmación**: solo si algún grupo del tipo tiene `Rule` de scope `group`.
+- **Undo** (§3.11): toast de 5 s, **con snapshot** de las reglas borradas.
 
-- **Comportamiento**: ver `UX_Guidelines.md` §4.1.
-- **Acción**: `actions.createRule(rule)` → `RULE_CREATED`.
+### 3.11 Undo de los cambios de modo (ADR-087 §3.3)
 
-### 4.4 `RuleEditorDialog`
+**La fricción escala con lo que hay en juego.** Ningún nivel confirma cuando no hay nada que romper:
 
-- **Props**: `ruleId`.
-- **Acción**: `actions.updateRule(ruleId, patch)` → `RULE_UPDATED`.
+| Nivel | Confirmación | Toast "Deshacer" (5 s) |
+|---|---|---|
+| `ReplacementModeSelect` (§3.4) | nunca | solo si `replacementValueUserSet === true` |
+| `TypeModeSelect` (§3.10) | solo si el tipo tiene reglas de grupo | siempre |
+| `DocumentModeSelect` (§3.9) | solo si hay reglas de tipo o de grupo | siempre |
+
+- **El toast lleva snapshot, no un id**: deshacer un barrido tiene que **recrear las `Rule` que
+  borró** (§3.9/§3.10), no solo eliminar la que creó. Sigue sin necesitar infraestructura de undo
+  general — es guardar la lista y recrearla — pero el `Toast` (§8.6) carga esa lista.
+- **Toast y no `ConfirmDialog` como mecanismo principal**: una confirmación por cada cambio de modo
+  se vuelve ruido que se aprende a saltear. La confirmación queda para los dos barridos, y solo
+  cuando barren algo.
+- **Por qué la fila normalmente no lleva toast**: es la acción más frecuente de la app, y es
+  autoevidente y autorreversible con el mismo control. Un toast por cada una arrastra consigo la
+  credibilidad de los toasts de los otros dos niveles.
+
+---
+
+## 4. Componentes de Reglas — **retirados** (ADR-087 §3)
+
+`RulesPanel`, `RuleItem`, `RuleCreatorDialog` y `RuleEditorDialog` **se retiran del catálogo y del
+layout**. El panel ocupaba la mitad de la barra lateral (`sectionHeights: [423, 422]`) y con cero
+reglas —el caso normal— mostraba la frase "Aún no hay reglas" en 422 px de la región crítica.
+
+Su función completa la cubren dos componentes nuevos en `entities/` (§3.9, §3.10) más el selector
+de fila que ya existía (§3.4), ahora escribiendo la regla de scope `group`:
+
+| Retirado | Lo reemplaza |
+|---|---|
+| `RulesPanel` (sección "Global") | `DocumentModeSelect` (§3.9) |
+| `RulesPanel` (sección "Por tipo") | `TypeModeSelect` (§3.10) |
+| `RulesPanel` (sección "Por grupo") | `ReplacementModeSelect` (§3.4), que **pasa a escribir esa misma regla** (§3.1a de ADR-087) |
+| `RuleCreatorDialog` / `RuleEditorDialog` | — (no hay modal: el control *es* el selector) |
+| `RuleItem` | — (no hay lista de reglas; el estado mixto se lee en la cabecera, §3.10) |
+
+**`rules.store` se conserva** (`React_Client.md` §3.3), y pasa a usarse **más** que antes: los tres
+selectores del árbol crean, editan y borran `Rule` por las mismas acciones de siempre, y el estado
+visual de cada nivel (borde de fila, `Varios`, acento de precaución) se **deriva** de qué reglas
+existen. Lo que se retira es la superficie de UI, no el modelo.
 
 ---
 
 ## 5. Componentes del Visor
 
-### 5.1 `SideBySideViewer`
+### 5.1 `ViewerModeToggle` (ADR-087 §2, reemplaza a `SideBySideViewer`)
 
-- **Stores**: `viewer`, `document`, `settings` (para `scrollSyncEnabled`).
-- **Render**: dos `PdfViewer` lado a lado (original + anonymized), con **scroll independiente por panel** (ADR-054 §1, reemplaza "con scroll sincronizado"). Cada uno monta su propio rango y pide sus propios renders; mover uno no mueve al otro.
-- **Props**: ninguno (todo via store).
-- **Mobile** (< 1024 px): tabs en lugar de lado a lado. **Sin cambios por ADR-054**: es requisito explícito conservar este modo tal cual.
-- **Sincronización opcional** (ADR-054 §3/§4): con `settings.scrollSyncEnabled` en `true`, mover un panel arrastra al otro **a nivel de píxel** (`scrollTop` contra `scrollTop`; la geometría de los dos paneles es idéntica). Nunca por índice de página. La convergencia sale de la idempotencia —el seguidor, ya en el valor exacto, no propaga nada— así que **no** se implementa con bandera + temporizador. Casos límite, resueltos por comparación de valor: un panel que no puede alcanzar la posición (recorte del navegador) no propaga la suya; un panel oculto (alto cero, modo tabs) se saltea y se realinea al volverse visible.
-- El control que prende esa sincronización **no vive acá**: está en la barra del visor, junto a `ZoomControls` (§5.6).
+- **Stores**: `viewer` (modo activo), `pipeline` (para el gate de `Ready`).
+- **Render**: toggle de dos posiciones `( Original | Anonimizado )` sobre un **único** `PdfViewer`.
+- **Props**: ninguno (todo vía store).
+- **Gate duro**: la posición "Anonimizado" está **deshabilitada mientras `stage !== Ready`**, con
+  el texto *"Disponible cuando termine el análisis"*. Antes de `Ready` los `replacements` no
+  existen y el render anonimizado es **idéntico al original** (`core/Render_Engine.md` §13 caso 1);
+  mostrarlo bajo ese rótulo es el defecto de seguridad que ADR-087 Contexto §3 documenta.
+- **Continuidad**: conmutar **no** mueve página, scroll ni zoom (`UX_Guidelines.md` §5.5). Un salto
+  de posición rompe la comparación por alternancia, que es lo que reemplaza al lado a lado.
+- **Atajo**: `Cmd/Ctrl+D`.
+
+> **Retirados junto con el lado a lado**: `SideBySideViewer`, `ScrollSyncToggle` (§5.6) y
+> `scrollSyncController`. Con un solo panel no hay dos scrolls que sincronizar. `settings.
+> scrollSyncEnabled` se retira de `settings.store`; `viewer.visibleRange`/`currentPageIndex` dejan
+> de ser por `kind`.
+>
+> **ADR-054 y ADR-056 no quedan invalidados**: existían porque dos paneles independientes pedían
+> renders que se pisaban. Con un panel el problema **deja de existir** en vez de resolverse.
+> `RENDER_REQUESTED.kind` sigue requerido y sin cambios — ahora lo determina el toggle.
 
 ### 5.2 `PdfViewer`
 
@@ -318,16 +440,15 @@ apps/react-client/src/components/
   - Cambio de `visibleRange` → `actions.requestRender(pageIndices, kind)` — **con el `kind` de este panel**: el motor renderiza solo ese lado. Antes se emitía sin `kind` y Render producía original y anonimizado, lo que con scroll independiente (ADR-054) hacía que scrollear este panel refrescara el otro.
   - Cambio de `zoom` → escala **CSS/canvas** del bitmap ya renderizado de inmediato (feedback durante el gesto) y, tras 150 ms sin nuevos ticks, `actions.requestRender(visibleRange, kind, "preview", previewScale × zoom)` para un **re-render real** (ADR-037 §1/§5, supersede ADR-036 §6). El `PREVIEW_UPDATED` resultante reemplaza el bitmap CSS transitorio por el nítido.
   - Primer render al observar `Ready` (`readyRenderTrigger.ts`) → también con el `kind` de este panel.
-  - **El `kind` sale siempre de la prop de este componente, nunca de `settings.scrollSyncEnabled`** (ADR-056 §2). Con la sincronización apagada el comportamiento lazy —solo se refresca el panel que se está moviendo— sale gratis de que cada panel hable por sí mismo; con ella prendida los dos paneles se mueven y los dos emiten. No hay condicional que escribir.
+  - **El `kind` sale de la posición del `ViewerModeToggle`** (§5.1, ADR-087 §2), nunca inferido de otra cosa. `RENDER_REQUESTED.kind` sigue requerido y con la misma semántica de ADR-056 §2: se renderiza exactamente el lado que se está mirando. Antes de ADR-087 el `kind` era una prop fija por panel y la regla era "nunca derivarlo de `settings.scrollSyncEnabled`"; con un solo panel esa fuente de verdad alternativa ya no existe.
 
 ### 5.3 `PageVirtualizer`
 
-- **Props**: `kind`, `pageCount`, `renderItem: (index) => ReactNode`, `visibleRange`, `pageSize`, `pageWidth`, `onVisibleRangeChange`, `onCurrentPageIndexChange`, `scrollSync`. **Sin `scrollToPageIndex`** (ADR-054 §6): esa prop y el efecto de sincronización que la consumía se retiran junto con `scrollSync.ts`/`computeScrollSyncTarget` — con scroll independiente no existe el concepto de seguidor, y con la sincronización prendida la mecánica es la de §5.1, que no pasa por props.
-  - `kind`: identifica el panel para registrarse en `scrollSync` y para derivar/reportar su propia página actual.
+- **Props**: `kind`, `pageCount`, `renderItem: (index) => ReactNode`, `visibleRange`, `pageSize`, `pageWidth`, `onVisibleRangeChange`, `onCurrentPageIndexChange`. **Sin `scrollToPageIndex`** (ADR-054 §6) y **sin `scrollSync`** (ADR-087 §2): con un solo panel no hay seguidor ni sincronización que instanciar.
+  - `kind`: la vista activa del toggle (§5.1); se usa para derivar/reportar la página actual y para el `RENDER_REQUESTED`.
   - `pageWidth` (post-Hito 10.7, hallazgo post-`APPROVED` 2026-08-15): el ancho de página en CSS px, mismo `pageWidth` que `PdfViewer` ya calcula. El contenedor con scroll lo usa como `width: max(pageWidth, 100%)` — no el 100% implícito de un bloque — para que a zoom alto, cuando `pageWidth` supera el ancho del panel, el contenedor **crezca** en vez de dejar que `PagePhantom` (`inset-x-0`) centre por flex un `renderItem` más ancho que él: ese centrado desborda por igual a los dos lados, pero un navegador en LTR solo cuenta el desborde a la **derecha** como `scrollWidth` — el borde izquierdo de la página queda a `scrollLeft` negativo, inalcanzable. Con el contenedor ya del ancho correcto, todo el desborde cae a la derecha y se alcanza scrolleando.
   - `onVisibleRangeChange`: reporta al rango que detecta el `IntersectionObserver` (rango de **montaje** únicamente, ADR-054 §5) — cierra el loop de "usa `IntersectionObserver` para detectar visibilidad" hacia el estado controlado por `PdfViewer`.
   - `onCurrentPageIndexChange(pageIndex)`: página actual derivada por geometría de scroll (ADR-054 §5), reportada solo cuando cambia.
-  - `scrollSync`: controller de sincronización opcional de scroll (ADR-054 §3), instanciado una sola vez por `SideBySideViewer` y compartido entre sus dos `PdfViewer`/`PageVirtualizer`.
 - **Comportamiento**: mantiene un pool de `<canvas>` reutilizables. Calcula scroll height total con `pageCount × pageSize`. Solo renderiza items en `visibleRange` + 1 antes + 1 después. El contenedor con scroll es `overflow-auto` en los dos ejes (antes solo `overflow-y-auto`; el eje horizontal lo necesita `pageWidth` arriba).
 - **Performance**: usa `IntersectionObserver` para detectar visibilidad y `requestAnimationFrame` para scroll suave.
 - **Alcance del `IntersectionObserver` (ADR-054 §5)**: decide **únicamente el rango de montaje**. Reducir el conjunto de índices que reporta a `min..max` es correcto para eso —un conjunto transitoriamente no contiguo monta una página de más, que es inofensivo— pero **no** sirve para derivar la página actual: ahí un índice viejo colapsaba el rango a `start: 0`. La página actual se calcula de la geometría del scroll (`React_Client.md` §3.5).
@@ -366,13 +487,10 @@ apps/react-client/src/components/
 - **Atajos**: `Cmd/Ctrl++`, `Cmd/Ctrl+-`, `Cmd/Ctrl+0`.
 - **Acción**: `viewer.setZoom(newZoom)` (aplica el escalado CSS inmediato vía `PdfViewer` §5.2); el re-render real se dispara con debounce, no en cada click/atajo individual (`ZOOM_RERENDER_DEBOUNCE_MS = 150 ms`, ADR-037 §5).
 
-### 5.6 `ScrollSyncToggle` (ADR-054 §2)
+### 5.6 `ScrollSyncToggle` — **retirado** (ADR-087 §2)
 
-- **Ubicación**: la barra del visor, junto a `ZoomControls`. Es un control **del visor**, hermano del zoom — no del `Toolbar` (acciones sobre el documento: exportar, cancelar, cerrar) ni del `SettingsDialog` (configuración de procesamiento: NER, idiomas de OCR, preset).
-- **Store**: `settings.scrollSyncEnabled` (persistido en `localStorage`; default `false`).
-- **Visibilidad**: solo en anchos `≥ lg` (`hidden lg:flex`), la misma media query con la que `SideBySideViewer` alterna a tabs. Por debajo hay un solo panel visible y sincronizar dos paneles que no se ven a la vez no significa nada.
-- **Al ocultarse no se apaga**: la preferencia se conserva intacta; al volver a ancho `≥ lg` el control reaparece con el valor que tenía y los paneles se realinean. Resetearla al redimensionar pisaría una elección que el usuario no tocó.
-- **Efecto**: ver `SideBySideViewer` §5.1 (sincronización a nivel de píxel, idempotente, sin temporizadores).
+Control de la sincronización de scroll entre los dos paneles del lado a lado. Sin lado a lado no
+hay nada que sincronizar: se retira junto con `SideBySideViewer` y `scrollSyncController`.
 
 ---
 
@@ -396,13 +514,40 @@ apps/react-client/src/components/
 
 ## 7. Componentes de Export
 
-### 7.1 `ExportDialog`
+### 7.1 `ExportDialog` (simplificado por ADR-087 §5)
 
-- **Stores**: `document`, `entities`, `settings`.
-- **Render**: ver `UX_Guidelines.md` §8.2. Form con nombre, formato, calidad, DPI, título y **checkbox "Incluir referencia de marcadores"** (ADR-059 §1, default **apagado**).
-- **Pre-flight**: si `enabledGroups = 0`, modal de confirmación anidado.
-- **Acción**: `actions.requestExport(options)` con `includeMarkerLegend`.
-- **Sobre el checkbox de leyenda** (ADR-059): agrega una página final con la referencia `prefijo → tipo` — `MAT` y `PAT` no se leen solos, y son matrícula y patente. El copy tiene que dejar claras las dos cosas que el usuario necesita saber para decidir: que **suma una página** al documento, y que lista **tipos, nunca los valores originales**. Lo segundo importa: es lo primero que un usuario asume que hace, y no lo hace ni puede hacerlo.
+- **Stores**: `document`, `entities`.
+- **Render**: ver `UX_Guidelines.md` §8.2. **Un solo control**: el checkbox "Agregar una página con
+  la referencia de marcadores" (ADR-059 §1, default **apagado**), más el resumen y los botones.
+- **Pre-flight**: si `enabledGroups = 0`, `ConfirmDialog` anidado.
+- **Acción**: `actions.requestExport(options)`, con los valores fijos de abajo + `includeMarkerLegend`.
+
+**Campos retirados del formulario y sus valores fijos** (ADR-087 §5):
+
+| Campo | Valor | Por qué se fija |
+|---|---|---|
+| `imageFormat` | `"jpeg"` | Menor tamaño a fidelidad equivalente en texto (`core/Export_Engine.md` §13 caso 6). |
+| `jpegQuality` | `0.92` | Visualmente indistinguible de `1.00` en texto. |
+| `dpi` | `150` | Default de `ExportConfig`. |
+| `title` | `""` | `includeOriginalMetadata: false` ya protege lo que importa. |
+| `filename` | `"anonimizado.pdf"` | El navegador deja renombrar al guardar. |
+
+> **El criterio del recorte**: se pregunta lo que **altera el documento**, no lo que ajusta su
+> codificación. Por eso sobrevive el checkbox de la leyenda —suma una página (ADR-059 §6)— y no los
+> cinco campos técnicos.
+>
+> **Por qué `0.92` y no `1.00`.** Se consideró `1.00` buscando "lo más cercano al original", y no lo
+> consigue: el original ya se perdió al rasterizar a 150 DPI —el export es 100 % imagen
+> (`core/Export_Engine.md` §11, con test de CI)—. De `0.92` a `1.00` el ojo no distingue nada en
+> texto mientras el archivo crece ×3–4 sobre q 0.85 (§12), llevando un expediente de 100 páginas de
+> ~20 MB a ~80–120 MB. **La palanca de fidelidad real es el DPI**, y es la única de las cinco que
+> valdría exponer bajo un `▸ Opciones avanzadas` si aparece el pedido.
+
+- **Sobre el checkbox de leyenda** (ADR-059): agrega una página final con la referencia
+  `prefijo → tipo` — `MAT` y `PAT` no se leen solos, y son matrícula y patente. El copy tiene que
+  dejar claras las dos cosas que el usuario necesita para decidir: que **suma una página** al
+  documento, y que lista **tipos, nunca los valores originales**. Lo segundo importa: es lo primero
+  que un usuario asume que hace, y no lo hace ni puede hacerlo.
 
 ### 7.2 `ExportProgress`
 
@@ -427,7 +572,7 @@ apps/react-client/src/components/
 
 ### 8.2b `ConfirmDialog` (ADR-036 §7)
 
-- Confirmación genérica sobre `Dialog`; ya era referenciado por `CancelButton` (§2.4), `GroupContextMenu` (§3.5) y `RuleItem` (§4.2) sin estar en el catálogo.
+- Confirmación genérica sobre `Dialog`; referenciado por `CancelButton` (§2.4) y `GroupContextMenu` (§3.5). (También lo usaba `RuleItem`, retirado por ADR-087 §3.)
 - Props: `open`, `title`, `message`, `confirmLabel`, `cancelLabel`, `variant?: "danger"`, `onConfirm`, `onCancel`.
 - Usos MVP: cancelar pipeline (`UX_Guidelines.md` §7.3), deshabilitar grupo, borrar regla, reanalizar por cambio de settings (§2.6).
 
@@ -501,7 +646,8 @@ El patrón de borde (sólido/punteado/doble) permite distinguir tipos incluso pa
 --color-text-secondary: #6b7280;
 --color-accent: #3b82f6;       /* azul primario */
 --color-success: #10b981;
---color-warning: #f59e0b;
+--color-warning: #f59e0b;        /* solo relleno decorativo — ver nota */
+--color-warning-strong: #b45309; /* ADR-087 §3.1: bordes, iconos y texto de precaución */
 --color-error: #ef4444;
 --radius-sm: 4px;
 --radius-md: 8px;
@@ -509,6 +655,17 @@ El patrón de borde (sólido/punteado/doble) permite distinguir tipos incluso pa
 --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
 --shadow-md: 0 4px 6px rgba(0,0,0,0.1);
 ```
+
+> **`--color-warning-strong` es nuevo (ADR-087 §3.1) y no es un capricho de paleta.** El
+> `--color-warning` de siempre da **2.15:1** contra `--color-bg-primary`, que falla incluso el 3:1
+> de elementos **no textuales** (WCAG 1.4.11), así que no puede llevar un borde, un icono ni un
+> texto que signifiquen algo. `#b45309` da **5.03:1**: sirve para las tres cosas. `--color-warning`
+> queda para rellenos donde el color no carga información.
+
+> **Deuda vigente de contraste** (ADR-087, "Fuera del alcance" §1): `--color-accent` con texto
+> blanco da **3.68:1**, bajo el 4.5:1 que `UX_Guidelines.md` §9 promete. Afecta a todo botón
+> primario y a los links `text-accent`. **No se corrige en ADR-087**; queda anotado para que no se
+> lea esta tabla como una paleta verificada.
 
 Modo oscuro: en v1.0. MVP es solo claro.
 
@@ -540,9 +697,16 @@ Modo oscuro: en v1.0. MVP es solo claro.
 | `DocumentSearchBox` (ADR-061 §8) | `document` | `actions.findText` | (ninguno; consulta síncrona al Orchestrator) |
 | `MergeDialog` | `entities.groupsByType` | `actions.mergeGroups` | `GROUP_MERGE_REQUESTED` |
 | `SplitDialog` | `entities.groupsByType` | `actions.splitGroup` | `GROUP_SPLIT_REQUESTED` |
-| `RuleCreatorDialog` | `entities`, `rules` | `actions.createRule` | `RULE_CREATED` |
-| `RuleEditorDialog` | `rules` | `actions.updateRule` | `RULE_UPDATED` |
-| `RuleItem` (delete) | `rules` | `actions.deleteRule` | `RULE_DELETED` |
+| `ReplacementModeSelect` (§3.4) | `rules` | `actions.createRule` / `actions.updateRule` (scope `group`) | `RULE_CREATED` / `RULE_UPDATED` |
+| `DocumentModeSelect` (§3.9) | `rules` | `actions.deleteRule` ×N + `createRule`/`updateRule` (scope `global`) | `RULE_DELETED` ×N + `RULE_CREATED`/`RULE_UPDATED` |
+| `TypeModeSelect` (§3.10) | `rules`, `entities` | `actions.deleteRule` ×N + `createRule`/`updateRule` (scope `type`) | `RULE_DELETED` ×N + `RULE_CREATED`/`RULE_UPDATED` |
+| Undo del toast (§3.11) | `rules` | `actions.deleteRule` + `actions.createRule` ×N (restaura el snapshot) | `RULE_DELETED` / `RULE_CREATED` |
+
+> `RuleCreatorDialog`, `RuleEditorDialog` y `RuleItem` se retiran (ADR-087 §3). Las acciones y los
+> eventos del Core **no cambian**: los mismos `RULE_*` los emiten ahora los tres selectores del
+> árbol. **`ReplacementModeSelect` deja de emitir `GROUP_UPDATE_REQUESTED` con
+> `patch.replacementMode`** (ADR-087 §3.1a) — el resto del patch (`enabled`, `canonicalValue`,
+> `personGender`, `replacementValue`) sigue igual.
 | `ConflictDialog` | `entities.conflicts` | `actions.resolveConflict` | `CONFLICT_RESOLVE_REQUESTED` |
 | `PdfViewer` | `viewer`, `document` | (via `actions.requestRender`) | `RENDER_REQUESTED` |
 | `PageCanvas` (click highlight) | `entities` | selecciona grupo en store local | (ninguno, solo local) |
@@ -574,3 +738,4 @@ Modo oscuro: en v1.0. MVP es solo claro.
 - `03_Data_Model.md` (tipos consumidos)
 - `adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md` (zoom real, §5.2/§5.5)
 - `adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md` (`SettingsDialog` → `reanalyze`, §2.6/§12)
+- `adr/ADR-087-La-Herramienta-Tiene-Tres-Momentos-No-Cuatro-Paneles.md` (rediseño: §1, §2, §3, §4, §5, §7)
