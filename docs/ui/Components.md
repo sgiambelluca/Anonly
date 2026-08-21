@@ -27,6 +27,10 @@ apps/react-client/src/components/
 │   ├── EntitiesPanel.tsx
 │   ├── DocumentModeSelect.tsx     // ADR-087 §3, nivel documento (Rule scope "global")
 │   ├── TypeModeSelect.tsx         // ADR-087 §3, nivel tipo (Rule scope "type")
+│   ├── ModeSelectMenu.tsx         // ADR-087 §3, el menú que comparten los tres
+│   ├── modeLevels.ts              // ADR-087 §3, lectura + planes de barrido
+│   ├── applyMode.ts               // ADR-087 §3, ejecuta un plan y arma su undo
+│   ├── entityTypeColors.ts        // acento de categoría del chip de tipo
 │   ├── EntityTypeGroup.tsx
 │   ├── EntityGroupItem.tsx
 │   ├── ReplacementModeSelect.tsx  // nivel fila, sin cambios funcionales
@@ -55,7 +59,8 @@ apps/react-client/src/components/
 │   ├── Select.tsx           // wrapper sobre Radix Select
 │   ├── Checkbox.tsx
 │   ├── Tooltip.tsx
-│   ├── Toast.tsx
+│   ├── toast.ts             // ADR-087 §3.3: emisor imperativo, fuera de Zustand
+│   ├── ToastHost.tsx
 │   ├── Banner.tsx
 │   └── Skeleton.tsx
 └── App.tsx
@@ -236,18 +241,30 @@ apps/react-client/src/components/
   `UX_Guidelines.md` §3.5** (ADR-087 §4): "Etiquetar", "Ocultar parcialmente", "Reemplazar por dato
   falso", "Tapar con negro". El enum **no cambia** (ADR-012 intacto); cambian solo las etiquetas de
   `replacementModeOptions.ts`.
-- **Cada opción trae un ejemplo construido con el grupo real de esa fila** (`Juan Pérez →
-  [PERSONA 01]`), no un valor genérico: la pregunta del usuario es qué le pasa *a su dato*.
+- **Cada opción trae un ejemplo construido con el grupo real de esa fila**, no un valor genérico: la
+  pregunta del usuario es qué le pasa *a su dato*.
+
+  > **El único valor exacto que la UI puede mostrar es el del modo vigente** (`replacementValue`, ya
+  > resuelto por Grouping). Los otros tres se describen de forma esquemática y **no se inventan**: el
+  > token de `placeholder` sale de la escalera de ADR-057 y del género de ADR-060, el formato de
+  > `mask` de `MASK_FORMAT_BY_TYPE` —que vive en `grouping-engine`, un motor que la UI no puede
+  > importar (P-1)—, y el de `synthetic` del sintetizador sembrado con el `id` (ADR-072 §1).
+  > Reimplementarlos violaría `React_Client.md` U-3, y un ejemplo *casi* correcto es peor que uno
+  > declaradamente esquemático: la primera versión mostraba `[PERSONA 01]` para **todos** los tipos,
+  > así que un DNI previsualizaba como si fuera una persona.
 - **Acción**: crea/actualiza una **`Rule` de scope `group`** para ese grupo (ADR-087 §3.1a). **Esto cambia** respecto de la implementación vigente, que emitía `GROUP_UPDATE_REQUESTED` con `patch.replacementMode`.
 
   > **Por qué cambia**: `resolveMode` chequea las reglas **antes** que `group.replacementMode`, y `grouping.engine.ts:1150-1151` lo hace literal — asigna lo que el usuario eligió y una línea después lo pisa con el resultado de `resolveMode`. Con una regla de tipo vigente, el selector de la fila **es inerte**. Hoy casi no se nota porque el panel de Reglas no se usa; con §3.9/§3.10 creando reglas de rutina, pasaría a ser el comportamiento normal.
 
 - **Undo** (§3.11): toast **solo si `group.replacementValueUserSet === true`** — cambiar el modo destruye el texto escrito a mano sin vuelta (`grouping.engine.ts:1151-1160`). En el resto de los casos no lleva toast: es la acción más frecuente de la app y es autoevidente y autorreversible con el mismo control.
 - **Implementación**: Radix `Select`, presentación **ghost** (ADR-087 §3.1): sin borde ni fondo
-  hasta el hover, mostrando en gris el modo vigente. **Gana borde** cuando existe una `Rule` de
-  scope `group` para ese grupo — o sea, cuando la fila tiene decisión propia y no va a seguir a la
-  cabecera del tipo. Ese lookup en `rules.store` es todo lo que hace falta: sin flag nuevo en
-  `EntityGroup` y sin reimplementar `resolveMode` en la UI.
+  hasta el hover, mostrando en gris el modo vigente. Cuando existe una `Rule` de scope `group` para
+  ese grupo —o sea, cuando la fila tiene decisión propia y no va a seguir a la cabecera del tipo—
+  gana **un punto y peso de texto**, no un borde (ver la nota de §3.10). Ese lookup en `rules.store`
+  es todo lo que hace falta: sin flag nuevo en `EntityGroup` y sin reimplementar `resolveMode`.
+- **Etiqueta corta en el disparador, larga en el menú y en el nombre accesible**: el disparador de
+  la fila mide 11 rem y "Ocultar parcialmente" se cortaba en "Ocultar parcialme…". El menú —donde
+  el usuario lee qué hace cada modo— muestra siempre la forma larga.
 - **Nota (ADR-057)**: el preview es `group.replacementValue`, ya resuelto por el Grouping Engine — así que **muestra el token abreviado sin ningún cambio en este componente**. Un grupo apretado va a previsualizar `[PRS-01]` y no `[PERSONA 01]`, y eso es correcto: es exactamente lo que va a salir en el documento.
 
 ### 3.4b `PersonGenderToggle` (ADR-060 §6, forma y visibilidad por ADR-071 §1-§3, wire por ADR-069 §4)
@@ -355,8 +372,15 @@ apps/react-client/src/components/
 - **Stores**: `rules` (la `Rule` de scope `type` vigente para ese `EntityType`, y las de scope
   `group` de sus grupos).
 - **Ubicación**: en la cabecera de `EntityTypeGroup` (§3.2).
-- **Tratamiento visual** (ADR-087 §3.1): **chip relleno**, con el color de categoría del tipo (§9)
-  como acento. Se lee como parte del encabezado, no de las filas que agrupa.
+- **Tratamiento visual** (ADR-087 §3.1): **chip con relleno gris** (`bg-tertiary`) y una barra de
+  acento a la izquierda con el color de categoría del tipo (§9). Se lee como parte del encabezado,
+  no de las filas que agrupa.
+
+  > **Lo que separa los tres niveles es el relleno, no el borde.** Una primera implementación usó
+  > `ring-1 ring-border` acá y también en la fila con decisión propia: verificado en el browser, los
+  > dos eran indistinguibles — exactamente la confusión de alcance que estos tratamientos existen
+  > para evitar. Quedan tres rellenos distintos: **blanco con borde** (documento), **gris**
+  > (tipo), **transparente** (fila).
 - **Estado mixto**: cuando los grupos del tipo **no comparten** `replacementMode`, muestra
   `Varios ▾`. El menú es el normal — con la acción de abajo, cualquier opción uniforma el tipo, así
   que **no hay un ítem especial de "aplicar a todos"**. `Varios` es un estado de display puro.
