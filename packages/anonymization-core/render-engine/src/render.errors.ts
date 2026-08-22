@@ -64,3 +64,40 @@ export class RenderFailedError extends EngineError {
     super(`Render fallido: ${reason}`, false, { documentId, reason });
   }
 }
+
+/**
+ * Discrimina un `EngineError` de este motor por `code`, no por
+ * `instanceof <SubclaseConcreta>`.
+ *
+ * **Por qué existe** (ADR-049 §3, `ai/Code_Standards.md` §7). Los renders
+ * corren en un `RenderWorker`, y un error lanzado adentro vuelve al host por
+ * `postMessage`, que no transporta prototipos: `EngineError.deserialize()`
+ * reconstruye siempre un `DeserializedEngineError` genérico
+ * (`Contracts.md` §4). El `instanceof RenderPageFailedError` del host daba
+ * `false` para **todo** fallo de render real, con dos consecuencias medidas
+ * (`Post_Hito10.8_Pendientes.md` §21): el reintento de §11 nunca corría, y el
+ * batch se abortaba por la rama "no recuperable" sin emitir
+ * `PREVIEW_PAGE_FAILED` — así que la UI no se enteraba de nada y el visor
+ * quedaba gris para siempre (el `warn` del catch va a un logger nulo).
+ *
+ * Lo único que sobrevive al boundary — y por lo tanto lo único seguro para
+ * discriminar — es `code`.
+ */
+export function isRenderErrorCode<C extends EngineErrorCode>(
+  err: unknown,
+  code: C,
+): err is EngineError & { readonly code: C } {
+  return err instanceof EngineError && err.code === code;
+}
+
+/**
+ * `true` para los dos errores que §11 declara recuperables por página
+ * (`RENDER_PAGE_FAILED`, `RENDER_TIMEOUT`), venga el error del host o
+ * deserializado de un worker.
+ */
+export function isRetryablePageError(err: unknown): err is EngineError {
+  return (
+    isRenderErrorCode(err, EngineErrorCode.RENDER_PAGE_FAILED) ||
+    isRenderErrorCode(err, EngineErrorCode.RENDER_TIMEOUT)
+  );
+}
