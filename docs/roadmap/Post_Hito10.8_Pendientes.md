@@ -10,6 +10,8 @@
 >
 > **Estado (2026-08-14)**: entra el §10, de la planificación del Hito 10.6 (ADR-072).
 >
+> **Estado (2026-08-21, cuarta tanda)**: entra el **§21**. Su causa raíz está **cerrada** (a pdf.js le faltaba una `CanvasFactory` en el Worker), pero deja **dos cosas abiertas y anotadas ahí**: no hay ningún fixture con imágenes/transparencias —por eso 57 tests en verde convivían con un visor gris para cualquier PDF real— y un fallo de render **no llega a la UI de ninguna forma**, porque el `warn` del motor va a un logger nulo.
+>
 > **Estado (2026-08-21, tercera tanda)**: entra el **§20**, **ya cerrado**: el documento quedaba inutilizable tras exportar bien, por una transición de stage que se guardaba pero no se emitía. Es un defecto del Core anterior al rediseño; se anota por el rastro de cómo apareció.
 >
 > **Estado (2026-08-21, segunda tanda)**: entra el **§19**, y es **la única regresión de todo el documento**: ADR-087 §2 retiró `SideBySideViewer`, que cargaba la única conducta responsive de la app, sin escribir el reemplazo. Necesita una decisión de producto (qué ancho mínimo se soporta), no de implementación.
@@ -391,3 +393,31 @@ La 3 es defendible y la más barata, pero **es una decisión de producto**, no d
 **Por qué no se había visto antes**: el gate de `ExportButton` es `{Ready, Done}` desde ADR-040, y `CancelButton` ocultaba `Ready` recién desde ADR-087 §7. Con el layout anterior el síntoma era menos visible —quedaban más caminos abiertos en la toolbar— y ningún test cubría la emisión del stage post-export: el único test de `EXPORT_FINISHED` afirmaba sobre el revoke del blob al cerrar.
 
 **Defecto de UI encontrado en el mismo camino, también corregido**: cerrar el diálogo de export tras terminar reseteaba `submitted`, así que reabrirlo mostraba un formulario en blanco. El `blobUrl` seguía vivo en `pipeline.store` y **la UI no tenía ningún camino de vuelta a él**. Ahora reabrir con un resultado vigente muestra el resultado, con el nombre que se usó.
+
+---
+
+## 21. Cerrado el 2026-08-21: el visor quedaba gris con cualquier PDF real
+
+**Procedencia**: prueba manual sobre un expediente propio de 50 páginas (2,3 MB), reportada como "el preview del normal ni anonimizado se muestra, pero cuando lo descargo lo veo bien". **Cerrado el mismo día**; se anota por el rastro, porque el defecto vivía desde ADR-053 y **ningún test podía verlo**.
+
+### Causa raíz
+
+`getDocument()` del kernel de render recibía `CMapReaderFactory` y `StandardFontDataFactory` propias —ADR-053 §2 las agregó exactamente por esta clase de problema— pero **no `CanvasFactory`**. pdf.js cae entonces a su `DOMCanvasFactory`, que hace `document.createElement("canvas")`, y dentro de un Worker `document` no existe.
+
+pdf.js pide canvas auxiliares cuando la página los necesita: **grupos de transparencia, soft masks, patrones de mosaico y fuentes Type3**. Una página que solo dibuja texto y vectores nunca los pide.
+
+### Por qué ningún test lo agarró, y qué hacer al respecto
+
+**Todos los fixtures del repo son texto plano generado con `pdf-lib`** (`tests/fixtures/generate.ts`). Ninguno tiene una imagen, una transparencia ni un patrón, así que ninguno ejercita el camino que falla. El motor tenía 57 tests de unidad pasando mientras cualquier PDF salido de un convertidor real fallaba en **todas** sus páginas.
+
+**Esto sigue abierto y es la parte que importa del §21**: no alcanza con haber arreglado la factory. Falta un fixture con al menos una imagen y una transparencia —el `scanned-10p.pdf` que `tests/fixtures/README.md` lista como pendiente cubriría parte— y un test de render sobre él. Sin eso, la próxima trampa de la misma familia vuelve a pasar sin que nadie se entere.
+
+### Segundo defecto, del mismo camino: el fallo era invisible
+
+`handleRenderRequested` atrapa el rechazo y solo hace `ctx.logger.warn(...)`. El façade inyecta `createNullLogger()` (`create-core.ts`), así que **el warn no va a ningún lado**: ni consola, ni evento, ni nada que la UI pueda observar. Desde afuera, un render que falla y un render que nunca se pidió son indistinguibles — un rectángulo gris para siempre.
+
+Diagnosticarlo requirió espiar `renderPagesInternal` desde la consola. **Eso no es aceptable como única vía**, y queda abierto: hace falta que un fallo de render llegue a la UI de alguna forma (evento, o al menos un logger que en desarrollo escriba a consola).
+
+### Tercer defecto, en la UI: nadie reintentaba
+
+`readyRenderTrigger.ts` re-pedía una sola vez al observar `Ready`. Alcanzaba mientras el visor solo se miraba después del análisis; con el pase temprano de ADR-087 §6 el usuario entra a los 6 s con el pipeline todavía en `OCRing`, sus pedidos se descartan por documento-no-cargado, y `Ready` puede estar a minutos. Corregido con `previewRetry.ts` (reintento autolimitado, con techo).
