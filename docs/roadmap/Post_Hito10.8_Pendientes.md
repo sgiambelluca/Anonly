@@ -511,3 +511,5 @@ El gate preguntaba si las líneas repintadas se distinguen de las que no se toca
 La tercera fila del gate —documento **escaneado**, ruta OCR— quedó a medias: se ejercitó sobre el propio exportado (que es 100 % imagen, así que entra por OCR) y eso produjo 23d, pero no se completó un ciclo entero de importar-anonimizar-exportar-mirar sobre un escaneado con entidades conocidas. Queda pendiente.
 
 **Ninguno de estos hallazgos se arregló en el mismo paso**: son de motores distintos (grouping/regex para la detección, render/export para la cobertura) y varios piden decisión antes que código. El gate estaba para producir esta lista.
+
+**Continúa en [`Calidad_De_Deteccion_Informe.md`](./Calidad_De_Deteccion_Informe.md)**, que junta estos hallazgos con dos reportes de campo sobre documentos reales —una tabla escaneada rotada que el OCR lee horizontal, y texto chico que no reconoce— y propone un orden de trabajo. Es el punto de entrada para la sesión que tome la calidad de detección.
