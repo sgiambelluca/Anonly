@@ -7,7 +7,7 @@
 Este informe junta dos cosas que llegaron por caminos distintos y apuntan al mismo lado:
 
 1. El **gate manual de ADR-058 §11 / ADR-086 §4**, que se corrió por primera vez sobre documentos con sello y con tablas y **no pasó**. Detalle completo en [`Post_Hito10.8_Pendientes.md` §23](./Post_Hito10.8_Pendientes.md).
-2. Dos **reportes de campo del humano**, probando la herramienta sobre documentos reales: una tabla escaneada dada vuelta, y texto chico en una pericia real.
+2. Tres **reportes de campo del humano**, probando la herramienta sobre documentos reales: una tabla escaneada dada vuelta, texto chico en una pericia real, y el buscador del visor que no encuentra ocurrencias que están a la vista.
 
 **La conclusión que los une**: los defectos que importan ya no están en el repintado ni en el layout. Están en **qué se detecta y qué no**, y la consecuencia es que el PDF exportado sigue conteniendo datos personales legibles. Es la promesa central del producto.
 
@@ -46,7 +46,7 @@ Corrido sobre el **PDF exportado**, no sobre el preview (el preview dibuja anota
 
 ## Parte 2 — Reportes de campo
 
-Los dos son del humano probando documentos reales. **No los reproduje yo**: lo que sigue es la observación tal como la contó, más el estado del código que la explicaría. Tratar el mecanismo como hipótesis hasta reproducirlo.
+Los tres son del humano probando documentos reales. **No reproduje los dos primeros**: para 2.1 y 2.2, lo que sigue es la observación tal como la contó más el estado del código que la explicaría, y el mecanismo hay que tratarlo como hipótesis hasta reproducirlo. **2.3 sí está reproducido**, contra las funciones reales del motor, y su tabla es medición.
 
 ### 2.1 Tabla escaneada dada vuelta → OCR la lee horizontal y "detecta números"
 
@@ -86,6 +86,35 @@ Vale además revisar `Render_Engine.md` §13 caso 15, que según ADR-063 §7 pro
 
 **Dirección más prometedora que el número global**: DPI **adaptativo** por página (derivado de la resolución real de la imagen embebida y del tamaño de página), y/o un **segundo pase** solo sobre las regiones donde el primero devolvió confianza baja. Las dos piden medición antes que código.
 
+### 2.3 El buscador del visor no encuentra ocurrencias que están a la vista
+
+**Observado**: "Ver ocurrencias" muchas veces no trae nada, y en general si el texto del documento no está escrito **idéntico** a la consulta no lo toma — **especialmente si hay una coma de por medio**.
+
+**Lo primero, para no mandar a nadie a buscar donde ya está arreglado**: el defecto de cableado que el Hito 10.10 encontró —la búsqueda colgaba del `onChange` del input, y un `<input>` no emite `change` cuando el valor llega de afuera, así que "Ver ocurrencias" escribía la consulta y no buscaba— **está corregido**. `DocumentSearchBox.tsx:64` dispara la búsqueda desde la **consulta**, no desde el evento del input. Lo que falla es la **comparación**, no el disparo.
+
+**El mecanismo**, en `regex-engine/src/regex.engine.ts#slideWordWindowMatches`: la consulta se parte en tokens y cada token tiene que ser **igual a un `Word` entero** del documento, después de normalizar (NFC, minúsculas, sin diacríticos) y de recortar la puntuación **de los bordes**. No hay comparación por substring, ni tolerancia de orden, ni recorte de puntuación **interna**.
+
+Probado directamente contra esas mismas funciones (`normalizeForComparison` + el recorte de bordes del motor):
+
+| Consulta | El documento tiene | Resultado | Por qué |
+|---|---|---|---|
+| `Juan Pérez` | `Juan` · `Pérez,` | **encuentra** | la coma está en el borde y se recorta — es lo que arregló ADR-061 §2 |
+| `Belgrano` | `(Belgrano)` | **encuentra** | ídem, paréntesis de borde |
+| `Empresa S.A.` | `Empresa` · `S.A.,` | **encuentra** | ídem |
+| `Juan Pérez` | `Pérez,Juan` | **falla** | sin espacio tras la coma es **un solo `Word`**; la clave queda `perez,juan` y la coma es **interna**, así que el recorte de bordes no la toca |
+| `Juan Pérez` | `Juan` · `Pérez,Juan` | **falla** | ídem, aunque la primera palabra sí coincida |
+| `Juan Pérez` | `Pérez,` · `Juan` | **falla** | la ventana exige **el mismo orden**; el documento lo tiene invertido |
+| `20-12345678` | `20-12345678-9` | **falla** | comparación de **palabra completa**: un prefijo no matchea |
+
+**Por qué esto se siente como "a veces"**: los casos que andan y los que fallan se parecen mucho a simple vista. Una coma **con** espacio detrás anda; **sin** espacio, no. Y el usuario no tiene forma de ver dónde el extractor puso los límites de palabra.
+
+**Los dos últimos casos no son hipotéticos, salen del propio repo**:
+
+- El grupo del CUIT del documento de sello quedó con `canonicalValue` **` 20-12345678`** —con espacio adelante y sin el dígito verificador— mientras el documento dice `20-12345678-9`. "Ver ocurrencias" sobre ese grupo **no puede encontrarse a sí mismo**.
+- El orden invertido es el mismo problema que el hallazgo **C** del gate: `Pérez, Juan` de una carátula judicial.
+
+**Consecuencia que va más allá del buscador**: `searchText` comparte primitiva con `findLiteral`, que es lo que usa "Agregar como…" (`ui/Components.md` §5.4c). Si una ocurrencia no se puede encontrar por su propio texto, tampoco se la puede agregar a mano — o sea que **el remedio manual falla exactamente en los casos donde la detección automática ya falló**. Vale verificar hasta dónde llega ese acoplamiento antes de tocar nada.
+
 ---
 
 ## Parte 3 — Qué haría una sesión limpia, y en qué orden
@@ -114,7 +143,11 @@ Hay un efecto colateral que conviene medir: OSD cuesta tiempo por página. Si se
 
 Es de `render-engine`/`export-engine`, no de detección, pero es barato y visible: el bbox del reemplazo empieza unos puntos a la derecha del primer glifo. Sospecha inmediata: un redondeo o un `x` de inicio tomado del segundo glifo del run.
 
-### Quinto: la costura (F, G, H) y el DPI adaptativo (2.2)
+### Quinto: la comparación del buscador (2.3)
+
+Es el hallazgo con mejor relación valor/costo de la lista y no necesita ADR si no cambia ninguna firma: los tres modos de falla están aislados en una sola función (`slideWordWindowMatches`) y son falsificables con tests puros — la sonda de la tabla de 2.3 es literalmente eso. **Ojo con el orden**: aflojar la comparación sube el recall del buscador y también el riesgo de resaltar de más, y la misma primitiva la usa "Agregar como…". Conviene decidir explícitamente cuánto se afloja (¿substring? ¿puntuación interna? ¿orden libre?) en vez de que salga de cómo quedó el código.
+
+### Sexto: la costura (F, G, H) y el DPI adaptativo (2.2)
 
 F es de detección y probablemente se cae solo si se arregla cómo se agrupan runs de una misma línea. G y H son de repintado. El DPI adaptativo pide medición primero.
 
