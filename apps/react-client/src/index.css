@@ -32,3 +32,118 @@
     @apply anonly-button bg-error text-white hover:bg-red-700;
   }
 }
+
+/*
+ * Animaciones (ADR-087 §4 de estilo; `UX_Guidelines.md` §9 "Reducción de
+ * movimiento").
+ *
+ * **Todo lo de acá está detrás de `prefers-reduced-motion: no-preference`**, y
+ * no al revés. Escribir las animaciones sueltas y después "apagarlas" en un
+ * bloque de `reduce` deja que cualquier regla nueva se olvide de la excepción;
+ * declararlas solo dentro del `no-preference` hace que el default sea el
+ * estado quieto. §9 pide respetar la preferencia desde 2026 y hasta acá el
+ * repo no la tenía en ningún lado.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  /* La barra de censura del logo tapa el renglón que hay debajo. */
+  @keyframes anonly-logo-redact {
+    from {
+      transform: scaleX(0);
+    }
+    to {
+      transform: scaleX(1);
+    }
+  }
+  .anonly-logo-bar {
+    transform-origin: 10px center;
+    animation: anonly-logo-redact 520ms cubic-bezier(0.22, 1, 0.36, 1) 260ms both;
+  }
+
+  /* Entrada de la landing: cada bloque entra apenas después del anterior. */
+  @keyframes anonly-rise {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  .anonly-rise {
+    animation: anonly-rise 460ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .anonly-rise-1 {
+    animation-delay: 60ms;
+  }
+  .anonly-rise-2 {
+    animation-delay: 160ms;
+  }
+  .anonly-rise-3 {
+    animation-delay: 260ms;
+  }
+
+  /* Pantalla de escaneo: la lupa recorre el documento de arriba abajo. */
+  @keyframes anonly-scan-lens {
+    0% {
+      transform: translateY(-2px);
+    }
+    50% {
+      transform: translateY(30px);
+    }
+    100% {
+      transform: translateY(-2px);
+    }
+  }
+  .anonly-scan-lens {
+    animation: anonly-scan-lens 3.2s ease-in-out infinite;
+  }
+
+  /*
+   * El documento se corre hacia arriba y se difumina en los bordes: simula
+   * pasar de página sin tener que dibujar páginas distintas.
+   */
+  @keyframes anonly-scan-scroll {
+    from {
+      transform: translateY(0);
+    }
+    to {
+      transform: translateY(-14px);
+    }
+  }
+  .anonly-scan-scroll {
+    animation: anonly-scan-scroll 3.2s ease-in-out infinite alternate;
+  }
+
+  /* Cada renglón se enciende cuando la lupa pasa por encima. */
+  @keyframes anonly-scan-hit {
+    0%,
+    100% {
+      opacity: 0;
+    }
+    12%,
+    26% {
+      opacity: 1;
+    }
+  }
+  .anonly-scan-hit {
+    animation: anonly-scan-hit 3.2s ease-in-out infinite;
+  }
+
+  /* Las palabras de tipos de entidad se arman y se deshacen. */
+  @keyframes anonly-word-cycle {
+    0%,
+    100% {
+      opacity: 0;
+      filter: blur(4px);
+    }
+    12%,
+    80% {
+      opacity: 1;
+      filter: blur(0);
+    }
+  }
+  .anonly-word-cycle {
+    animation: anonly-word-cycle 2.4s ease-in-out both;
+  }
+}

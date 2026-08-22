@@ -2,42 +2,41 @@
  * `ScanScreen` — momento ②a (`ui/Components.md` §2.10, `UX_Guidelines.md`
  * §7.3, ADR-087 §6).
  *
- * Muestra el progreso real de la etapa vigente y **las entidades apareciendo
- * en vivo**. Lo segundo no es adorno: es lo que distingue "está trabajando" de
- * "se colgó", y una barra sola no lo logra. Por eso la lista ocupa el lugar
- * central y no un spinner.
+ * Muestra el archivo que se está revisando, la animación de `ScanAnimation` y
+ * el progreso real de la etapa vigente.
  *
- * **Sin skeleton del documento**: esta pantalla no promete un layout que
- * todavía no existe.
+ * **Sin la lista de entidades encontradas.** La primera versión las mostraba
+ * apareciendo en vivo acá; se retira porque **se ven mejor donde importan**,
+ * que es el árbol del panel de trabajo: ahí llegan con su tipo, su contador y
+ * sus controles, y el usuario ya puede actuar sobre ellas. Repetirlas antes,
+ * en una lista de la que no se puede hacer nada y que dura tres segundos,
+ * gastaba la primera impresión del dato en un lugar donde no sirve.
+ *
+ * Lo que sostiene la paciencia pasa a ser el movimiento: la lupa recorriendo
+ * el documento y la frase rotando los tipos de dato dicen "está buscando, y
+ * busca esto" sin prometer una lista que no se puede tocar.
  *
  * **Se monta sin `Toolbar`** (`App.tsx`): trae estado, progreso y "Cancelar"
  * propios, así que la toolbar arriba dejaba dos barras de progreso del mismo
- * pipeline y dos botones "Cancelar" al mismo tiempo. El logo de continuidad
- * entre ① y ② lo pone esta pantalla.
+ * pipeline y dos botones "Cancelar" al mismo tiempo.
  *
  * Cuándo suelta: `scanAdvance.ts` (piso, techo y umbral sobre `Detecting`).
  * El latch que evita volver acá tras un `reanalyze` vive en `appPhase.ts`.
  */
 
 import { PipelineStage } from "@anonly/anonymization-core";
-import { FileTextIcon, ShieldCheckIcon } from "lucide-react";
+import { useEffect, useState } from "react";
 
 import { useDocumentStore } from "../../store/document.store.js";
-import { useEntitiesStore } from "../../store/entities.store.js";
 import { usePipelineStore } from "../../store/pipeline.store.js";
-import { visibleTypeEntries } from "../entities/entityTree.js";
-import { ENTITY_TYPE_LABEL } from "../entities/entityTypeLabels.js";
 import { CancelButton } from "../toolbar/CancelButton.js";
 
-/** Cuántas entidades recientes se listan. Suficiente para ver movimiento. */
-const RECENT_LIMIT = 6;
+import { ScanAnimation } from "./ScanAnimation.js";
+import { SCAN_PHRASE_INTERVAL_MS, scanPhraseTermAt } from "./scanPhrase.js";
 
 /**
  * Texto de estado en lenguaje llano (`UX_Guidelines.md` §7.1). **No nombra
- * "NER" ni "OCR"**: son etapas del pipeline, no vocabulario del usuario. El
- * `pipelineStageLabel.ts` de la toolbar sigue existiendo para su propio uso;
- * acá el registro es distinto porque esta pantalla la mira alguien que recién
- * abrió un documento.
+ * "NER" ni "OCR"**: son etapas del pipeline, no vocabulario del usuario.
  */
 function scanStatusLabel(
   stage: PipelineStage,
@@ -69,29 +68,19 @@ export function ScanScreen() {
   const current = usePipelineStore((state) => state.current);
   const total = usePipelineStore((state) => state.total);
   const modelLoading = usePipelineStore((state) => state.modelLoading);
-  const groupsByType = useEntitiesStore((state) => state.groupsByType);
 
-  const entries = visibleTypeEntries(groupsByType);
-  const groupCount = entries.reduce((sum, [, groups]) => sum + groups.length, 0);
-  // Las últimas que llegaron, que es donde está el movimiento. `visibleTypeEntries`
-  // ya viene en el orden fijo de tipos, así que invertir el aplanado alcanza.
-  const recent = entries
-    .flatMap(([type, groups]) => groups.map((group) => ({ type, group })))
-    .slice(-RECENT_LIMIT)
-    .reverse();
+  const [phraseTick, setPhraseTick] = useState(0);
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setPhraseTick((tick) => tick + 1);
+    }, SCAN_PHRASE_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, []);
 
-  // Durante la descarga del modelo, `current`/`total` del pipeline **no
-  // describen páginas**: se los midió en 1/1 con el stage ya en `Detecting`
-  // (el mismo dato que engañaba al umbral, ver `scanAdvance.ts`). Mostrarlos
-  // ahí daba un "1 de 1" y una barra al 100 % mientras en realidad no se había
-  // procesado ninguna página. Con el modelo cargando, lo que de verdad avanza
-  // es la descarga, así que la barra muestra eso y el contador por página se
-  // oculta — no hay páginas que contar todavía.
   // En `Detecting` el denominador es `pageCount` y no `total`, por el mismo
   // motivo que en `scanAdvance.ts`: ese contador se reasigna por etapa y
   // durante el arranque de la detección vale 1, así que la pantalla decía
-  // "1 de 1" con diez páginas por analizar. `pageCount` viene de
-  // `DOCUMENT_PARSED` y significa siempre lo mismo.
+  // "1 de 1" con diez páginas por analizar.
   const denominator = stage === PipelineStage.Detecting ? pageCount : total;
   const percent =
     modelLoading !== null
@@ -103,13 +92,14 @@ export function ScanScreen() {
 
   return (
     <div className="flex h-full flex-col items-center justify-center gap-8 overflow-y-auto p-8">
-      <div className="flex w-full max-w-md flex-col gap-6">
-        <div className="flex flex-col items-center gap-3 text-center">
-          <ShieldCheckIcon className="h-8 w-8 text-accent" aria-hidden />
-        </div>
+      <div className="flex w-full max-w-md flex-col items-center gap-7">
+        <ScanAnimation />
 
-        <div className="flex flex-col gap-1 text-center">
-          <p className="truncate text-base font-medium text-text-primary" title={name ?? undefined}>
+        <div className="flex w-full flex-col items-center gap-1 text-center">
+          <p
+            className="max-w-full truncate text-base font-medium text-text-primary"
+            title={name ?? undefined}
+          >
             {name ?? "Documento"}
           </p>
           {pageCount > 0 ? (
@@ -117,9 +107,30 @@ export function ScanScreen() {
           ) : null}
         </div>
 
-        <div className="flex flex-col gap-2" role="status" aria-live="polite">
+        {/*
+          La frase rotando los tipos de dato. `key` con el tick para que React
+          remonte el span y la animación de fundido vuelva a correr: sin eso el
+          navegador considera que ya terminó y el término siguiente aparecería
+          de golpe.
+
+          `aria-hidden` sobre el término y una frase fija en el nombre
+          accesible: un lector de pantalla anunciando una palabra nueva cada
+          2,4 s sería ruido, y lo que hay que comunicar —"está buscando datos
+          sensibles"— ya lo dice el `role="status"` de abajo.
+        */}
+        <p
+          className="text-center text-base text-text-secondary"
+          aria-label="Buscando datos sensibles en el documento"
+        >
+          Buscando{" "}
+          <span key={phraseTick} className="anonly-word-cycle font-medium text-accent" aria-hidden>
+            {scanPhraseTermAt(phraseTick)}
+          </span>
+        </p>
+
+        <div className="flex w-full flex-col gap-2" role="status" aria-live="polite">
           <div className="flex items-baseline justify-between gap-3">
-            <span className="text-sm text-text-primary">
+            <span className="truncate text-sm text-text-primary">
               {scanStatusLabel(stage, modelLoading)}
             </span>
             {showPageCounter ? (
@@ -136,26 +147,7 @@ export function ScanScreen() {
           </div>
         </div>
 
-        <div className="flex min-h-[11rem] flex-col gap-2 rounded-lg border border-border bg-bg-primary p-4">
-          <p className="text-sm font-medium text-text-primary">
-            {groupCount === 0
-              ? "Todavía no encontré datos sensibles"
-              : `${groupCount} ${groupCount === 1 ? "dato encontrado" : "datos encontrados"}`}
-          </p>
-          <ul className="flex flex-col gap-1">
-            {recent.map(({ type, group }) => (
-              <li key={group.id} className="flex items-center gap-2 text-sm">
-                <FileTextIcon className="h-3.5 w-3.5 shrink-0 text-text-secondary" aria-hidden />
-                <span className="truncate text-text-primary">{group.canonicalValue}</span>
-                <span className="shrink-0 text-text-secondary">{ENTITY_TYPE_LABEL[type]}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        <div className="flex justify-center">
-          <CancelButton />
-        </div>
+        <CancelButton />
       </div>
     </div>
   );

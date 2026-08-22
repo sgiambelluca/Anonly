@@ -26,9 +26,9 @@
  */
 
 import { PipelineStage } from "@anonly/anonymization-core";
-import { ShieldIcon } from "lucide-react";
 
 import { usePipelineStore } from "../../store/pipeline.store.js";
+import { Logo } from "../common/Logo.js";
 
 import { CancelButton } from "./CancelButton.js";
 import { CloseDocumentButton } from "./CloseDocumentButton.js";
@@ -50,7 +50,7 @@ export function Toolbar() {
         antes que el nombre — es contexto, no identidad.
       */}
       <div className="flex min-w-0 shrink items-center gap-3">
-        <ShieldIcon className="h-6 w-6 shrink-0 text-accent" aria-hidden />
+        <Logo size={26} className="shrink-0" />
         <div className="flex min-w-0 flex-col">
           <span className="truncate text-sm font-semibold">Anonly</span>
           <span className="hidden truncate text-xs text-text-secondary sm:block">
