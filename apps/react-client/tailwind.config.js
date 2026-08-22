@@ -15,7 +15,12 @@ export default {
           primary: "#111827",
           secondary: "#6b7280",
         },
-        accent: "#3b82f6",
+        // El accent era `#3b82f6`: 3.68:1 con texto blanco, bajo el 4.5:1 que
+        // `UX_Guidelines.md` §9 promete, y afectaba a TODO botón primario y a
+        // los links `text-accent` (ADR-087, "Fuera del alcance" §1). `#2563eb`
+        // da 5.17:1 y sirve para las dos cosas: relleno con texto blanco
+        // encima, y texto sobre `bg-primary`.
+        accent: "#2563eb",
         success: "#10b981",
         warning: "#f59e0b",
         // ADR-087 §3.1: `warning` da 2.15:1 contra bg-primary y falla incluso

@@ -75,10 +75,10 @@ export function DegradedBadge({ group, onEditReplacement }: DegradedBadgeProps) 
             espacio disponible y hubo que achicarlo. Puede quedar difícil de leer en el documento
             final.
           </p>
-          <p className="text-xs text-text-secondary">
+          <p className="text-sm text-text-secondary">
             El dato sigue oculto: esto es un problema de legibilidad, no de privacidad.
           </p>
-          <p className="text-xs font-medium text-text-secondary">Podés:</p>
+          <p className="text-sm font-medium text-text-secondary">Podés:</p>
           <div className="flex flex-col gap-2">
             <Button
               variant="secondary"

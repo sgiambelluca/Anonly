@@ -30,7 +30,7 @@ export function Banner({ variant, children, actions }: BannerProps) {
   return (
     <div
       role={variant === "error" ? "alert" : "status"}
-      className={`flex flex-wrap items-center gap-3 rounded-md border px-3 py-1.5 text-xs ${VARIANT_STYLES[variant]}`}
+      className={`flex flex-wrap items-center gap-3 rounded-md border px-3 py-1.5 text-sm ${VARIANT_STYLES[variant]}`}
     >
       {VARIANT_ICON[variant]}
       <span className="flex-1">{children}</span>

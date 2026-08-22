@@ -53,7 +53,7 @@ export function Toolbar() {
         <Logo size={26} className="shrink-0" />
         <div className="flex min-w-0 flex-col">
           <span className="truncate text-sm font-semibold">Anonly</span>
-          <span className="hidden truncate text-xs text-text-secondary sm:block">
+          <span className="hidden truncate text-sm text-text-secondary sm:block">
             Anonimización documental local
           </span>
         </div>

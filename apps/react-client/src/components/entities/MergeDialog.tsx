@@ -84,7 +84,7 @@ export function MergeDialog({ sourceGroupId, open, onClose }: MergeDialogProps) 
           índice.
         </p>
         {targetOptions.length === 0 || targetGroupId === null ? (
-          <p role="alert" className="text-xs text-error">
+          <p role="alert" className="text-sm text-error">
             No hay otros grupos de tipo {ENTITY_TYPE_LABEL[sourceGroup.type]} para fusionar.
           </p>
         ) : (

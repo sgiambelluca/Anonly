@@ -89,7 +89,7 @@ export function SplitDialog({ groupId, open, onClose }: SplitDialogProps) {
                 checked={selected.has(member.occurrenceId)}
                 onCheckedChange={(checked) => toggleMember(member.occurrenceId, checked)}
                 label={
-                  <span className="flex items-center gap-2 text-xs text-text-secondary">
+                  <span className="flex items-center gap-2 text-sm text-text-secondary">
                     <BboxMiniature bbox={member.bbox} />
                     Página {member.pageIndex + 1} — {DETECTION_SOURCE_LABEL[member.source]}
                   </span>
@@ -99,7 +99,7 @@ export function SplitDialog({ groupId, open, onClose }: SplitDialogProps) {
           ))}
         </ul>
         {!validation.valid ? (
-          <p role="alert" className="text-xs text-error">
+          <p role="alert" className="text-sm text-error">
             {validation.reason}
           </p>
         ) : null}

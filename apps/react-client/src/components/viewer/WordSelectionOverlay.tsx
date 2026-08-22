@@ -176,7 +176,7 @@ export function WordSelectionOverlay({
         <div
           role="dialog"
           aria-label="Agregar entidad"
-          className="absolute z-10 flex w-48 flex-col gap-2 rounded-md border border-border bg-bg-primary p-2 text-xs shadow-md"
+          className="absolute z-10 flex w-48 flex-col gap-2 rounded-md border border-border bg-bg-primary p-2 text-sm shadow-md"
           style={{ left: pending.anchor.x, top: pending.anchor.y }}
           // El popover vive dentro del div que arma la selección (onPointerDown
           // más abajo, `handlePointerDown`): sin esto, cualquier click adentro

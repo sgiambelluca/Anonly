@@ -117,7 +117,7 @@ export function PasswordDialog() {
           }}
           className="flex flex-col gap-3"
         >
-          <label htmlFor="pdf-password" className="text-xs font-medium text-text-secondary">
+          <label htmlFor="pdf-password" className="text-sm font-medium text-text-secondary">
             Contraseña
           </label>
           <input
@@ -129,7 +129,7 @@ export function PasswordDialog() {
             className="rounded-md border border-border px-3 py-1.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent"
           />
           {wrongPassword ? (
-            <p role="alert" className="text-xs text-error">
+            <p role="alert" className="text-sm text-error">
               Contraseña incorrecta.
             </p>
           ) : null}

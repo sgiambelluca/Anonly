@@ -42,7 +42,7 @@ export function ConfirmDialog({
     <Dialog open={open} onClose={onCancel} title={title}>
       <p className="mb-4 text-sm text-text-secondary">{message}</p>
       {errorMessage ? (
-        <p role="alert" className="mb-4 text-xs text-error">
+        <p role="alert" className="mb-4 text-sm text-error">
           {errorMessage}
         </p>
       ) : null}

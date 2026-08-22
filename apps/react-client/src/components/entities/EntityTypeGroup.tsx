@@ -17,6 +17,7 @@ import { Checkbox } from "../common/Checkbox.js";
 import { EntityGroupItem } from "./EntityGroupItem.js";
 import { cascadeCheckboxState } from "./entityTree.js";
 import { ENTITY_TYPE_LABEL } from "./entityTypeLabels.js";
+import { groupNodeId } from "./treeNavigation.js";
 import { TypeModeSelect } from "./TypeModeSelect.js";
 
 export interface EntityTypeGroupProps {
@@ -24,6 +25,10 @@ export interface EntityTypeGroupProps {
   readonly groups: ReadonlyArray<EntityGroup>;
   readonly expanded: boolean;
   readonly onToggleExpanded: () => void;
+  /** Roving tabindex del árbol — ver la cabecera de `EntitiesPanel`. */
+  readonly nodeId: string;
+  readonly activeNodeId: string | null;
+  readonly onNodeFocus: (nodeId: string) => void;
 }
 
 export function EntityTypeGroup({
@@ -31,6 +36,9 @@ export function EntityTypeGroup({
   groups,
   expanded,
   onToggleExpanded,
+  nodeId,
+  activeNodeId,
+  onNodeFocus,
 }: EntityTypeGroupProps) {
   const cascadeState = cascadeCheckboxState(groups);
 
@@ -41,7 +49,23 @@ export function EntityTypeGroup({
   }
 
   return (
-    <div role="treeitem" aria-expanded={expanded}>
+    <div
+      role="treeitem"
+      aria-expanded={expanded}
+      aria-label={`${ENTITY_TYPE_LABEL[type]}, ${groups.length} grupos`}
+      data-tree-node-id={nodeId}
+      tabIndex={activeNodeId === nodeId ? 0 : -1}
+      // Un click también mueve el nodo activo: si no, el foco por teclado
+      // seguiría donde estaba y la flecha siguiente saltaría a otro lado.
+      // `event.target === event.currentTarget`: el `onFocus` de React es
+      // `focusin` y BURBUJEA, así que sin esta guarda enfocar una fila
+      // disparaba también el `onFocus` de su tipo padre y el nodo activo
+      // terminaba siendo la cabecera, no la fila.
+      onFocus={(event) => {
+        if (event.target === event.currentTarget) onNodeFocus(nodeId);
+      }}
+      className="focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
+    >
       <div className="flex items-center gap-2 border-b border-border bg-bg-secondary px-2 py-1.5">
         <button
           type="button"
@@ -75,7 +99,13 @@ export function EntityTypeGroup({
       {expanded ? (
         <div role="group">
           {groups.map((group) => (
-            <EntityGroupItem key={group.id} group={group} />
+            <EntityGroupItem
+              key={group.id}
+              group={group}
+              nodeId={groupNodeId(group.id)}
+              activeNodeId={activeNodeId}
+              onNodeFocus={onNodeFocus}
+            />
           ))}
         </div>
       ) : null}

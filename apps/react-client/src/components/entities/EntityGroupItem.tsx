@@ -41,9 +41,13 @@ import { SplitDialog } from "./SplitDialog.js";
 
 export interface EntityGroupItemProps {
   readonly group: EntityGroup;
+  /** Roving tabindex del árbol — ver la cabecera de `EntitiesPanel`. */
+  readonly nodeId: string;
+  readonly activeNodeId: string | null;
+  readonly onNodeFocus: (nodeId: string) => void;
 }
 
-function EntityGroupItemImpl({ group }: EntityGroupItemProps) {
+function EntityGroupItemImpl({ group, nodeId, activeNodeId, onNodeFocus }: EntityGroupItemProps) {
   const conflict = useEntitiesStore((state) =>
     state.conflicts.find((candidate) => candidate.groupId === group.id && !candidate.resolved),
   );
@@ -59,7 +63,16 @@ function EntityGroupItemImpl({ group }: EntityGroupItemProps) {
       aria-label={`${group.canonicalValue}, ${group.members.length} ocurrencias, ${
         group.enabled ? "habilitado" : "deshabilitado"
       }`}
-      className={`flex items-center gap-2 py-1 pl-8 pr-2 ${group.enabled ? "" : "opacity-50"}`}
+      data-tree-node-id={nodeId}
+      tabIndex={activeNodeId === nodeId ? 0 : -1}
+      // `event.target === event.currentTarget`: el `onFocus` de React es
+      // `focusin` y BURBUJEA, así que sin esta guarda enfocar una fila
+      // disparaba también el `onFocus` de su tipo padre y el nodo activo
+      // terminaba siendo la cabecera, no la fila.
+      onFocus={(event) => {
+        if (event.target === event.currentTarget) onNodeFocus(nodeId);
+      }}
+      className={`flex items-center gap-2 py-1 pl-8 pr-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent ${group.enabled ? "" : "opacity-50"}`}
     >
       <Checkbox
         checked={group.enabled}
@@ -82,7 +95,7 @@ function EntityGroupItemImpl({ group }: EntityGroupItemProps) {
       >
         {group.canonicalValue}
       </span>
-      <span className="shrink-0 text-xs text-text-secondary">({group.members.length})</span>
+      <span className="shrink-0 text-sm text-text-secondary">({group.members.length})</span>
       {group.replacementValueUserSet ? (
         <span
           role="img"

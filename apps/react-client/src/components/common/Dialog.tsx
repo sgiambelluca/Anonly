@@ -53,7 +53,7 @@ export function Dialog({
             )}
           </div>
           {description ? (
-            <RadixDialog.Description className="mb-3 text-xs text-text-secondary">
+            <RadixDialog.Description className="mb-3 text-sm text-text-secondary">
               {description}
             </RadixDialog.Description>
           ) : null}

@@ -86,11 +86,11 @@ export function ConflictDialog({ conflictId, open, onClose }: ConflictDialogProp
         <p className="text-text-primary">
           <span className="font-medium">&quot;{value}&quot;</span>
         </p>
-        <p className="text-xs text-text-secondary">{CONFLICT_REASON_LABEL[conflict.reason]}</p>
+        <p className="text-sm text-text-secondary">{CONFLICT_REASON_LABEL[conflict.reason]}</p>
 
         {hasChoice ? (
           <fieldset className="flex flex-col gap-1.5">
-            <legend className="mb-1 text-xs font-medium text-text-secondary">
+            <legend className="mb-1 text-sm font-medium text-text-secondary">
               ¿Con qué se identifica?
             </legend>
             {types.map((type) => (
@@ -107,13 +107,13 @@ export function ConflictDialog({ conflictId, open, onClose }: ConflictDialogProp
             ))}
           </fieldset>
         ) : (
-          <p className="text-xs text-text-secondary">
+          <p className="text-sm text-text-secondary">
             No hay dos clasificaciones en disputa: este aviso solo se puede descartar.
           </p>
         )}
 
         {conflict.resolved ? (
-          <p className="text-xs text-success">
+          <p className="text-sm text-success">
             Ya revisado
             {conflict.resolvedType ? ` (${ENTITY_TYPE_LABEL[conflict.resolvedType]})` : ""}.
           </p>
