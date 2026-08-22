@@ -100,6 +100,80 @@ export async function generateText10p(): Promise<Uint8Array> {
   return doc.save();
 }
 
+/**
+ * PNG mínimo **con canal alfa**, en bytes literales.
+ *
+ * El alfa es el punto: `pdf-lib` lo embebe como un **SMask**, y el SMask es
+ * uno de los caminos por los que pdf.js pide un canvas auxiliar a su
+ * `CanvasFactory`. Ese es exactamente el camino que ningún fixture del repo
+ * ejercitaba, y por el que un defecto real —pdf.js tocando `document` dentro
+ * de un Worker— convivió con 57 tests de unidad en verde mientras cualquier
+ * PDF con imágenes fallaba entero (`roadmap/Post_Hito10.8_Pendientes.md` §21).
+ *
+ * Literal y no generado: son 8×8 px, y una dependencia nueva para dibujarlo
+ * necesitaría ADR (R-12) por un fixture de 100 bytes.
+ */
+const ALPHA_PNG_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAPUlEQVR42mNkYPhfz0AEYBxVSF" +
+  "+FjIwMDP+JUcjIyMjwn0iFjIyMDP+JVMjIyMjwn0iFjIyMDP+JVAgAtxwT8g8JYckAAAAASUVO" +
+  "RK5CYII=";
+
+/**
+ * Fixture con **imagen con transparencia** — el camino que ningún otro
+ * fixture toca (ver `ALPHA_PNG_BASE64`).
+ *
+ * Tres páginas, cada una ejercitando algo distinto del mismo camino:
+ *
+ * 1. La imagen con alfa sola (SMask).
+ * 2. La imagen con alfa **más** texto encima, que es la forma en que aparece
+ *    en un documento real (un logo o un sello sobre el que sigue habiendo
+ *    contenido).
+ * 3. Rectángulos con `opacity` superpuestos, que es el otro camino que pide
+ *    canvas auxiliares.
+ *
+ * El texto de la página 2 lleva una entidad detectable a propósito: sirve
+ * para que el fixture valga también como caso de detección sobre una página
+ * con imagen, no solo de render.
+ */
+export async function generateImageAlpha(): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const png = await doc.embedPng(Buffer.from(ALPHA_PNG_BASE64, "base64"));
+
+  const imageOnly = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+  imageOnly.drawImage(png, { x: 200, y: 500, width: 180, height: 180 });
+
+  const imageAndText = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+  imageAndText.drawImage(png, { x: 60, y: 600, width: 120, height: 120 });
+  imageAndText.drawText("Juan Perez, DNI 34.567.891, sobre una pagina con imagen.", {
+    x: MARGIN_X,
+    y: MARGIN_Y,
+    size: FONT_SIZE,
+    font,
+    color: rgb(0, 0, 0),
+  });
+
+  const translucent = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+  translucent.drawRectangle({
+    x: 120,
+    y: 400,
+    width: 240,
+    height: 200,
+    color: rgb(0.2, 0.4, 0.9),
+    opacity: 0.5,
+  });
+  translucent.drawRectangle({
+    x: 220,
+    y: 300,
+    width: 240,
+    height: 200,
+    color: rgb(0.9, 0.3, 0.2),
+    opacity: 0.5,
+  });
+
+  return doc.save();
+}
+
 export async function generateEmpty(): Promise<Uint8Array> {
   // "empty.pdf" = PDF con 1 página sin contenido (sin texto dibujado, sin
   // /Contents). pdf-lib no permite generar PDFs con 0 páginas (doc.save()
@@ -157,6 +231,9 @@ async function main(): Promise<void> {
   const empty = await generateEmpty();
   await writeFile(resolve(FIXTURE_DIR, "empty.pdf"), empty);
 
+  const imageAlpha = await generateImageAlpha();
+  await writeFile(resolve(FIXTURE_DIR, "image-alpha-3p.pdf"), imageAlpha);
+
   const corrupt = await generateCorrupt();
   await writeFile(resolve(FIXTURE_DIR, "corrupt.pdf"), corrupt);
 
@@ -164,6 +241,7 @@ async function main(): Promise<void> {
   process.stdout.write(
     `Fixtures generados en ${FIXTURE_DIR}:\n` +
       `  - text-10p.pdf (${text10p.byteLength} bytes, 10 páginas)\n` +
+      `  - image-alpha-3p.pdf (${imageAlpha.byteLength} bytes, 3 páginas con imagen alfa y transparencias)\n` +
       `  - empty.pdf (${empty.byteLength} bytes, 1 página sin contenido)\n` +
       `  - corrupt.pdf (${corrupt.byteLength} bytes, header %PDF- + cuerpo no-PDF)\n` +
       `\n` +
