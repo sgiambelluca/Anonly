@@ -26,6 +26,7 @@ import {
   estimateTokenWidth,
   EventChannel,
   InvalidInputError,
+  isEngineErrorCode,
   WorkerCrashedError,
   makeTransferable,
   MAX_RENDER_SCALE,
@@ -372,6 +373,33 @@ describe("@anonly/shared — Contracts", () => {
       expect(reconstructed.code).toBe(EngineErrorCode.INVALID_INPUT);
       expect(reconstructed.message).toBe("test");
       expect(reconstructed.retryable).toBe(false);
+    });
+
+    describe("isEngineErrorCode (ADR-049 §3)", () => {
+      it("discrimina un error que YA cruzó el boundary, que es su única razón de ser", () => {
+        // El caso que importa: `deserialize` devuelve siempre un
+        // `DeserializedEngineError`, así que `instanceof InvalidInputError`
+        // da `false` acá — y ese `false` es el bug que este helper existe
+        // para evitar. Los tests que inyectan la subclase concreta no lo ven.
+        const reconstructed = EngineError.deserialize(new InvalidInputError("test").serialize());
+
+        expect(reconstructed instanceof InvalidInputError).toBe(false);
+        expect(isEngineErrorCode(reconstructed, EngineErrorCode.INVALID_INPUT)).toBe(true);
+      });
+
+      it("distingue por code, no por ser un EngineError cualquiera", () => {
+        const err = new InvalidInputError("test");
+        expect(isEngineErrorCode(err, EngineErrorCode.INVALID_INPUT)).toBe(true);
+        expect(isEngineErrorCode(err, EngineErrorCode.RENDER_FAILED)).toBe(false);
+      });
+
+      it("un Error que no es del Core nunca matchea", () => {
+        expect(isEngineErrorCode(new Error("suelto"), EngineErrorCode.INVALID_INPUT)).toBe(false);
+        expect(isEngineErrorCode(null, EngineErrorCode.INVALID_INPUT)).toBe(false);
+        expect(
+          isEngineErrorCode({ code: EngineErrorCode.INVALID_INPUT }, EngineErrorCode.INVALID_INPUT),
+        ).toBe(false);
+      });
     });
   });
 

@@ -52,7 +52,9 @@ Verificado sobre todo `packages/`:
 
 Conclusión del barrido: hoy hay **exactamente dos** `instanceof` de subclase concreta rotos, los dos sobre `PdfPasswordRequiredError`, los dos en `orchestrator.ts`.
 
-> **Errata (2026-08-22): esa conclusión era falsa, y el barrido tenía un punto ciego.** Había un tercero, en `render-engine`: `renderPagesInternal` discriminaba con `err instanceof RenderPageFailedError || err instanceof RenderTimeoutError`. El barrido lo pasó por alto porque miró los motores por su **normalización de errores** (`normalizeNerError`, `normalizeExportError`, el chequeo por `code` de `ocr-engine`) y `render-engine` normaliza bien en `toPageFailure`; lo que no miró es que además **discrimina** en su bucle de reintentos, y ahí sí lo hacía por clase.
+> **Errata (2026-08-22): esa conclusión era falsa, y el punto ciego está en la línea de arriba.** Había un tercer `instanceof` roto, en `render-engine`: `renderPagesInternal` discriminaba con `err instanceof RenderPageFailedError || err instanceof RenderTimeoutError`, y `toPageFailure` con el mismo par (ahí el fallo era benigno — re-envolvía el error en vez de tomar la rama equivocada).
+>
+> El motivo es más simple y más feo que un matiz de análisis: el ítem anterior dice "**los tres** motores con pool propia" y enumera ner, export y ocr. **Son cinco** — `pdf-engine` y `render-engine` también corren sobre pool propia (`core/Render_Engine.md` §12 lo dice en su primera línea). El barrido nunca miró estos dos, así que no fue que evaluara `render-engine` y se equivocara: no entró en la enumeración. La conclusión "exactamente dos" heredó ese hueco.
 >
 > El costo fue exactamente el que este ADR predice en §6: el `instanceof` daba `false` para **todo** fallo de render de producción, así que el reintento de `core/Render_Engine.md` §11 nunca corría y el batch se abortaba por la rama "no recuperable" sin emitir `PREVIEW_PAGE_FAILED` — la UI no se enteraba de nada y el visor quedaba gris para siempre. Se corrigió por `code`, con un test que inyecta el error **deserializado** (§6) y que se verificó fallando contra el código viejo. Rastro medido en `roadmap/Post_Hito10.8_Pendientes.md` §21.
 
