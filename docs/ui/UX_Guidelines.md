@@ -734,7 +734,7 @@ original. ¿Continuar?"*.
 | Requisito | Implementación |
 |---|---|
 | Navegación por teclado | focus visible, tab order lógico, atajos para expandir/colapsar (arrows), seleccionar (space), abrir menú (Enter). |
-| ARIA | `role="tree"` en el árbol de entidades, `role="treeitem"` por grupo, `aria-expanded` por tipo, `aria-checked` por checkbox, `aria-label` en iconos. |
+| ARIA | `role="tree"` en el árbol de entidades (**con un desvío conocido**, ver abajo), `role="treeitem"` por grupo, `aria-expanded` por tipo, `aria-checked` por checkbox, `aria-label` en iconos. |
 | Contraste | WCAG AA mínimo (4.5:1 texto, 3:1 UI components). Paleta verificada. |
 | Tamaño de texto | mínimo 14 px base, 16 px en texto de entidades. Zoom del browser respeta. |
 | Focus visible | outline 2 px en accent color, nunca `outline: none` sin alternativa. |
@@ -757,11 +757,24 @@ original. ¿Continuar?"*.
 >   (marca, landing, pantalla de escaneo) se declaran **dentro** de un `@media (prefers-reduced-motion:
 >   no-preference)`, no sueltas con una excepción aparte: así el default es el estado quieto y una
 >   regla nueva no puede olvidarse de la excepción.
-> - **Navegación por teclado**: **cerrado**. El árbol implementa el patrón WAI-ARIA de tree con
->   roving tabindex (`treeNavigation.ts` decide qué hace cada tecla; `EntitiesPanel` ejecuta), y
->   `Cmd/Ctrl+F` enfoca el buscador de entidades. Antes el panel declaraba `role="tree"` y
->   entregaba una lista muerta — el mismo defecto que `Post_Hito10.8_Pendientes.md` §15 cerró
->   para `role="menu"`.
+> - **Navegación por teclado**: **cerrado, con un desvío conocido y anotado**. El árbol implementa
+>   flechas verticales, `ArrowRight`/`ArrowLeft` con la semántica del patrón (abrir → primer hijo;
+>   cerrar → padre), `Home`/`End`, `Space` y `Enter` (`treeNavigation.ts` decide qué hace cada
+>   tecla; `EntitiesPanel` ejecuta), y `Cmd/Ctrl+F` enfoca el buscador de entidades. Antes el panel
+>   declaraba `role="tree"` y no respondía a **ninguna** tecla.
+>
+>   **Lo que NO cumple**: el patrón WAI-ARIA de tree pide **un solo tab stop** para todo el árbol, y
+>   acá hay ~5 por fila visible — el `treeitem` más su checkbox, su selector de modo, su toggle de
+>   género y su menú, que son botones con tab stop propio. El rol correcto para filas con controles
+>   es **`role="treegrid"`**, donde las flechas navegan filas *y* celdas y por eso nada queda
+>   inalcanzable; migrar es un cambio grande y queda fuera del alcance de ADR-087. Mientras tanto el
+>   `role="tree"` es **aspiracional en esa parte**, y eso está en tensión reconocida con el
+>   precedente de `role="menu"` (`Components.md` §3.4). La diferencia que justifica no retirarlo —y
+>   no es una diferencia cómoda— es de grado: aquel rol prometía navegación por flechas, `Home`/`End`
+>   y foco gestionado, y no implementaba **nada**; éste implementa todo salvo el tab stop único, y
+>   retirarlo perdería además la estructura (nivel, expandido, tamaño del conjunto) que el lector de
+>   pantalla sí aprovecha. El desvío queda anotado como pendiente en
+>   `roadmap/Post_Hito10.8_Pendientes.md` §22, con `treegrid` como destino.
 
 Atajos de teclado:
 

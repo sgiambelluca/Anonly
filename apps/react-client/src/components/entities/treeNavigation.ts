@@ -11,6 +11,12 @@
  * implementarlo es peor que no ponerlo, porque el usuario que navega por
  * teclado confía en el anuncio.
  *
+ * **El contrato queda cumplido salvo en una parte**, y conviene saberlo antes
+ * de citar este módulo como prueba de que el rol está saldado: el patrón pide
+ * además **un solo tab stop** para todo el árbol, y las filas tienen controles
+ * con tab stop propio. El desvío, y por qué el destino es `role="treegrid"`,
+ * están en `roadmap/Post_Hito10.8_Pendientes.md` §22.
+ *
  * Módulo puro: los tests de `apps/react-client` corren en Node sin jsdom, así
  * que toda la decisión de "qué hace esta tecla" vive acá y el componente solo
  * ejecuta el comando que devuelve.

@@ -57,8 +57,6 @@ export function EntityTypeGroup({
       aria-label={`${ENTITY_TYPE_LABEL[type]}, ${groups.length} grupos`}
       data-tree-node-id={nodeId}
       tabIndex={activeNodeId === nodeId ? 0 : -1}
-      // Un click también mueve el nodo activo: si no, el foco por teclado
-      // seguiría donde estaba y la flecha siguiente saltaría a otro lado.
       className="focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
     >
       <div className="flex items-center gap-2 border-b border-border bg-bg-secondary px-2 py-1.5">
