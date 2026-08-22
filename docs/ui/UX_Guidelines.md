@@ -552,11 +552,27 @@ honesto de §7.1.
   *direcciones*…"), con cada término armándose y deshaciéndose por fundido. Dice **qué** busca, que
   es la mitad que la animación no cuenta.
 - Estado en lenguaje llano (los mismos textos de §7.1).
-- Progreso `current`/`total` real de la etapa vigente. **Con el modelo descargándose, la barra
-  muestra el progreso de la descarga y el contador por página se oculta**: ahí `current`/`total` no
-  describen páginas (es el mismo 1/1 de arriba), y mostrarlos daba una barra al 100 % sin haber
-  procesado ninguna.
+- Progreso, con tres formas según el momento:
+
+  | Momento | Barra | Contador `X de Y` |
+  |---|---|---|
+  | Abrir / leer el texto / reconocer imágenes / agrupar | **indeterminada** | no |
+  | Descarga del modelo de nombres | determinada, con su propio % | no |
+  | **Escaneo del documento** (`Detecting`) | determinada, páginas sobre `pageCount` | **sí** |
+
 - `Cancelar`.
+
+> **El contador cuenta el escaneo del documento, y nada más.** Una versión anterior lo hacía correr
+> también en las etapas de preparación, y el resultado era que llegaba a **"10 de 10" antes de haber
+> detectado nada** y después volvía a "1 de 10" al arrancar la detección: dos recorridos completos
+> del mismo número para dos cosas distintas, y el primero diciendo "terminé" sobre un trabajo que el
+> usuario ni siquiera considera el trabajo. Las etapas de preparación pasan a barra **indeterminada**
+> — hay movimiento, no hay número —, que es lo honesto: están trabajando, pero su progreso no es el
+> progreso que esta pantalla promete.
+>
+> **Desvío aceptado**: en un PDF escaneado grande, el reconocimiento de texto puede ser largo y su
+> avance por página deja de verse acá. Se sigue viendo en la toolbar del panel de trabajo una vez que
+> la pantalla suelta (§7.2), que es donde el usuario está mirando para entonces.
 
 > **Sin la lista de entidades encontradas.** Una versión anterior de esta sección las mostraba
 > apareciendo en vivo acá. Se retira: **se ven mejor donde importan**, que es el árbol de ②b, donde

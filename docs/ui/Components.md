@@ -41,7 +41,8 @@ apps/react-client/src/components/
 │   ├── LoadScreen.tsx             // momento ①
 │   ├── ScanScreen.tsx             // momento ②a
 │   ├── ScanAnimation.tsx          // el documento con la lupa, de ②a
-│   └── scanPhrase.ts              // términos que rota la frase de ②a
+│   ├── scanPhrase.ts              // términos que rota la frase de ②a
+│   └── scanProgress.ts            // qué progreso muestra ②a en cada momento
 ├── viewer/
 │   ├── PdfViewer.tsx
 │   ├── PageVirtualizer.tsx

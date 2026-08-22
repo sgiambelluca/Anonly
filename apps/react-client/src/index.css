@@ -130,6 +130,19 @@
     animation: anonly-scan-hit 3.2s ease-in-out infinite;
   }
 
+  /* Barra indeterminada: una franja que recorre el riel de punta a punta. */
+  @keyframes anonly-scan-indeterminate {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(300%);
+    }
+  }
+  .anonly-scan-indeterminate {
+    animation: anonly-scan-indeterminate 1.4s ease-in-out infinite;
+  }
+
   /* Las palabras de tipos de entidad se arman y se deshacen. */
   @keyframes anonly-word-cycle {
     0%,
