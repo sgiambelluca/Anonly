@@ -543,17 +543,31 @@ honesto de §7.1.
 
 ### 7.3 Qué muestra la pantalla de escaneo
 
+- **La animación del documento**: una página con renglones, una lupa que la recorre de arriba abajo
+  encendiendo los renglones a su paso, y la página desplazándose y difuminándose contra los bordes
+  para simular que se pasan páginas. Es lo que sostiene la paciencia: dice "está recorriendo todo el
+  documento" sin pedirle al usuario que lea nada.
 - Nombre del archivo y cantidad de páginas.
+- **Una frase que rota los tipos de dato** que se están buscando ("Buscando *nombres* → *DNI* →
+  *direcciones*…"), con cada término armándose y deshaciéndose por fundido. Dice **qué** busca, que
+  es la mitad que la animación no cuenta.
 - Estado en lenguaje llano (los mismos textos de §7.1).
-- Progreso `current`/`total` real de la etapa vigente, con porcentaje. **Con el modelo
-  descargándose, la barra muestra el progreso de la descarga y el contador por página se oculta**:
-  ahí `current`/`total` no describen páginas (es el mismo 1/1 de arriba), y mostrarlos daba una
-  barra al 100 % sin haber procesado ninguna.
-- **Las entidades apareciendo en vivo**, con su contador subiendo. Es el elemento que sostiene la
-  paciencia del usuario, así que es el que tiene que estar visible — no un spinner.
+- Progreso `current`/`total` real de la etapa vigente. **Con el modelo descargándose, la barra
+  muestra el progreso de la descarga y el contador por página se oculta**: ahí `current`/`total` no
+  describen páginas (es el mismo 1/1 de arriba), y mostrarlos daba una barra al 100 % sin haber
+  procesado ninguna.
 - `Cancelar`.
 
+> **Sin la lista de entidades encontradas.** Una versión anterior de esta sección las mostraba
+> apareciendo en vivo acá. Se retira: **se ven mejor donde importan**, que es el árbol de ②b, donde
+> llegan con su tipo, su contador y sus controles y el usuario puede actuar sobre ellas. Repetirlas
+> antes, en una lista que dura tres segundos y de la que no se puede hacer nada, gasta la primera
+> impresión del dato en un lugar donde no sirve.
+
 **Sin skeleton del documento**: la pantalla de escaneo no promete un layout que todavía no existe.
+
+**Todo el movimiento respeta `prefers-reduced-motion`** (§9): con movimiento reducido queda un
+documento quieto con la lupa apoyada y la frase sin fundido, que siguen diciendo lo mismo.
 
 ### 7.4 Cancelación
 
@@ -639,6 +653,14 @@ dato existe de verdad.
 
 - Tras "Exportar": `EXPORT_STARTED` → barra de progreso con `EXPORT_PROGRESS`.
 - Al finalizar: `EXPORT_FINISHED` → "Descargar" + "Exportar otro".
+- **Tras apretar "Descargar"**, el panel confirma —"Se descargó *nombre*"— y ofrece las salidas:
+  "Descargar de nuevo", "Abrir otro documento" (cierra el documento y vuelve a ①) y "Listo".
+
+  > **No afirma que la descarga terminó bien**, y es deliberado: el navegador no da ninguna señal de
+  > éxito ni de fallo para un `<a download>`. El panel dice lo que sí es cierto —el archivo se
+  > generó y se mandó a descargar— y deja el reintento a la vista en vez de esconderlo detrás de un
+  > fallo que no se puede detectar. En una herramienta cuyo resultado **es** el archivo, afirmar un
+  > éxito que no se verificó es la mentira más cara posible.
 - **Cerrar el diálogo no pierde el resultado**: mientras haya un `exportResult` vigente, reabrirlo
   muestra el resultado (con su "Descargar" y el nombre que se usó), no un formulario en blanco.
   Antes el `blobUrl` seguía existiendo en `pipeline.store` y la UI no tenía **ningún** camino de
@@ -672,7 +694,10 @@ original. ¿Continuar?"*.
 >   tabla. Afecta a todos los botones primarios y a los links `text-accent`.
 > - **Tamaño de texto**: 12 px es el tamaño **más frecuente** de la interfaz (headers de panel,
 >   links de acción, contadores, labels de formulario), contra el mínimo de 14 px de acá.
-> - **Reducción de movimiento**: `prefers-reduced-motion` no aparece en el repo.
+> - **Reducción de movimiento**: **cubierto desde el rediseño de estilo**. Todas las animaciones
+>   (marca, landing, pantalla de escaneo) se declaran **dentro** de un `@media (prefers-reduced-motion:
+>   no-preference)`, no sueltas con una excepción aparte: así el default es el estado quieto y una
+>   regla nueva no puede olvidarse de la excepción.
 > - **Navegación por teclado**: los atajos de flechas / `Space` / `Enter` sobre el árbol y el
 >   `Cmd/Ctrl+F` de la tabla de abajo no están implementados.
 

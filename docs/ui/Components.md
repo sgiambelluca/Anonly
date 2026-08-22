@@ -39,7 +39,9 @@ apps/react-client/src/components/
 │   └── SplitDialog.tsx
 ├── screens/                       // ADR-087 §1
 │   ├── LoadScreen.tsx             // momento ①
-│   └── ScanScreen.tsx             // momento ②a
+│   ├── ScanScreen.tsx             // momento ②a
+│   ├── ScanAnimation.tsx          // el documento con la lupa, de ②a
+│   └── scanPhrase.ts              // términos que rota la frase de ②a
 ├── viewer/
 │   ├── PdfViewer.tsx
 │   ├── PageVirtualizer.tsx
@@ -58,6 +60,7 @@ apps/react-client/src/components/
 │   ├── ConfirmDialog.tsx    // confirmación genérica (ADR-036 §7)
 │   ├── Select.tsx           // wrapper sobre Radix Select
 │   ├── Checkbox.tsx
+│   ├── Logo.tsx             // marca: documento con barra de censura
 │   ├── Tooltip.tsx
 │   ├── toast.ts             // ADR-087 §3.3: emisor imperativo, fuera de Zustand
 │   ├── ToastHost.tsx
@@ -176,8 +179,16 @@ apps/react-client/src/components/
   `Cancelar` propios. Montar la toolbar arriba dejaba **dos barras de progreso del mismo pipeline y
   dos botones "Cancelar"** en pantalla al mismo tiempo — verificado en el browser. El logo de
   continuidad entre ① y ② lo pone esta pantalla.
-- **Render**: logo, nombre del archivo, estado en lenguaje llano, progreso `current`/`total` real de
-  la etapa vigente, **las entidades apareciendo en vivo** y `Cancelar`. Ver `UX_Guidelines.md` §7.3.
+- **Render**: `ScanAnimation`, nombre del archivo, la frase que rota tipos de dato, estado en
+  lenguaje llano, progreso `current`/`total` real de la etapa vigente y `Cancelar`. Ver
+  `UX_Guidelines.md` §7.3.
+
+  > **Sin la lista de entidades encontradas**, que la primera versión mostraba apareciendo en vivo
+  > acá. Se retira porque **se ven mejor donde importan**: en el árbol del panel de trabajo llegan
+  > con su tipo, su contador y sus controles, y el usuario puede actuar sobre ellas. Repetirlas
+  > antes, en una lista que dura tres segundos y de la que no se puede hacer nada, gastaba la
+  > primera impresión del dato en un lugar donde no sirve. Lo que sostiene la paciencia pasa a ser
+  > el movimiento.
 - **Sin skeleton del documento**: no promete un layout que todavía no existe.
 - **Salida** (`UX_Guidelines.md` §7.2): pasa a ②b con la primera de — `Detecting` ≥
   `SCAN_ADVANCE_PAGE_RATIO` (0.20) de `document.store.pageCount`, con `modelLoading === null`, o
@@ -593,11 +604,37 @@ hay nada que sincronizar: se retira junto con `SideBySideViewer` y `scrollSyncCo
 > ~20 MB a ~80–120 MB. **La palanca de fidelidad real es el DPI**, y es la única de las cinco que
 > valdría exponer bajo un `▸ Opciones avanzadas` si aparece el pedido.
 
+- **Tras apretar "Descargar"**, el panel confirma y ofrece las salidas: "Descargar de nuevo", "Abrir
+  otro documento" (`actions.closeDocument`, que devuelve a ①) y "Listo".
+
+  > **La confirmación no afirma que la descarga terminó bien**, y no es una omisión. El navegador
+  > **no da ninguna señal** de éxito ni de fallo para un `<a download>`: no hay evento ni promesa.
+  > El panel dice lo que sí es cierto —el archivo se generó y se mandó a descargar— y deja el
+  > reintento a la vista en vez de esconderlo detrás de un fallo indetectable. Afirmar "descargado
+  > con éxito" sería inventar un dato, y en una herramienta cuyo resultado **es** el archivo, esa es
+  > la mentira que más caro sale.
+
 - **Sobre el checkbox de leyenda** (ADR-059): agrega una página final con la referencia
   `prefijo → tipo` — `MAT` y `PAT` no se leen solos, y son matrícula y patente. El copy tiene que
   dejar claras las dos cosas que el usuario necesita para decidir: que **suma una página** al
   documento, y que lista **tipos, nunca los valores originales**. Lo segundo importa: es lo primero
   que un usuario asume que hace, y no lo hace ni puede hacerlo.
+
+### 8.9 `Logo`
+
+- **Concepto**: un documento con una línea de texto reemplazada por una barra sólida. Es lo que hace
+  la app, y la barra sobre texto es el símbolo universal de "censurado".
+- **Se descartó** la alternativa "incógnito de Chrome + icono de PDF": el sombrero con anteojos es
+  una marca muy identificada con Chrome —usarla se lee como derivada— y su significado es "sin
+  historial de navegación", que no es la promesa de Anonly.
+- **`animated`**: la barra tapa el renglón que hay debajo, **una sola vez al montar**. La marca hace
+  lo que la app hace. En loop convertiría la identidad en un banner.
+- **El favicon (`public/favicon.svg`) no es una copia del componente**: tiene su propio ajuste
+  óptico (trazo más grueso, renglones más gordos, barra más grande). A 16 px lo único que tiene que
+  sobrevivir es "página con una barra cruzándola", y el detalle fino compite con eso. Colores
+  literales y no tokens: se sirve suelto, sin la hoja de estilos.
+
+---
 
 ### 7.2 `ExportProgress`
 

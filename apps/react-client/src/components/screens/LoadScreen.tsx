@@ -20,6 +20,7 @@ import { LockIcon, ScanSearchIcon, ShieldCheckIcon, UploadIcon } from "lucide-re
 import { useRef, useState, type DragEvent, type ReactNode } from "react";
 
 import { actions } from "../../core-adapter/actions.js";
+import { Logo } from "../common/Logo.js";
 
 const PDF_MIME = "application/pdf";
 
@@ -74,8 +75,13 @@ export function LoadScreen() {
 
   return (
     <div className="flex h-full flex-col items-center justify-center gap-10 overflow-y-auto p-8">
-      <div className="flex max-w-lg flex-col items-center gap-3 text-center">
-        <ShieldCheckIcon className="h-10 w-10 text-accent" aria-hidden />
+      <div className="anonly-rise anonly-rise-1 flex max-w-lg flex-col items-center gap-4 text-center">
+        {/*
+          El logo se dibuja censurando su propio renglón (`animated`): la marca
+          hace lo que la app hace. Una sola vez al montar — no en loop, que
+          convertiría la identidad en un banner.
+        */}
+        <Logo size={56} animated />
         <h1 className="text-2xl font-semibold text-text-primary">
           Anonimizá PDFs sin que salgan de tu computadora
         </h1>
@@ -89,11 +95,14 @@ export function LoadScreen() {
         onDrop={onDrop}
         onDragOver={onDragOver}
         onDragLeave={() => setDragging(false)}
-        className={`flex w-full max-w-md flex-col items-center gap-3 rounded-lg border-2 border-dashed p-10 transition-colors ${
+        className={`anonly-rise anonly-rise-2 flex w-full max-w-md flex-col items-center gap-3 rounded-lg border-2 border-dashed p-10 transition-colors ${
           dragging ? "border-accent bg-bg-tertiary" : "border-border bg-bg-secondary"
         }`}
       >
-        <UploadIcon className="h-8 w-8 text-text-secondary" aria-hidden />
+        <UploadIcon
+          className={`h-8 w-8 transition-transform ${dragging ? "-translate-y-0.5 text-accent" : "text-text-secondary"}`}
+          aria-hidden
+        />
         <p className="text-base font-medium text-text-primary">
           {busy ? "Abriendo el documento…" : "Arrastrá un PDF acá"}
         </p>
@@ -126,7 +135,7 @@ export function LoadScreen() {
         ) : null}
       </div>
 
-      <dl className="grid w-full max-w-2xl grid-cols-1 gap-6 sm:grid-cols-3">
+      <dl className="anonly-rise anonly-rise-3 grid w-full max-w-2xl grid-cols-1 gap-6 sm:grid-cols-3">
         <Feature
           icon={<ShieldCheckIcon className="h-5 w-5" aria-hidden />}
           title="Todo local"
