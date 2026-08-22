@@ -417,11 +417,29 @@ pdf.js pide canvas auxiliares cuando la página los necesita: **grupos de transp
 
 **Conclusión**: el hueco no se cierra con un fixture sintético. Necesita un PDF real —el `scanned-10p.pdf` que el README lista como pendiente por requerir tools externos es el candidato— y un test de render en browser (Playwright) sobre él, porque el kernel no se puede ejercitar en Node: no hay `OffscreenCanvas` ni DOM.
 
-### Segundo defecto, del mismo camino: el fallo era invisible
+### Segundo defecto, del mismo camino: el fallo era invisible — **cerrado el 2026-08-21**
 
-`handleRenderRequested` atrapa el rechazo y solo hace `ctx.logger.warn(...)`. El façade inyecta `createNullLogger()` (`create-core.ts`), así que **el warn no va a ningún lado**: ni consola, ni evento, ni nada que la UI pueda observar. Desde afuera, un render que falla y un render que nunca se pidió son indistinguibles — un rectángulo gris para siempre.
+El diagnóstico inicial dijo que el problema era el `warn` a un logger nulo. Eso era el síntoma. Al ir a arreglarlo se midió la causa, y era peor: **el motor nunca llegaba a emitir `PREVIEW_PAGE_FAILED`**.
 
-Diagnosticarlo requirió espiar `renderPagesInternal` desde la consola. **Eso no es aceptable como única vía**, y queda abierto: hace falta que un fallo de render llegue a la UI de alguna forma (evento, o al menos un logger que en desarrollo escriba a consola).
+`renderPagesInternal` decidía si un fallo era recuperable con `err instanceof RenderPageFailedError`. Los renders corren en un `RenderWorker`, y un error que vuelve por `postMessage` pierde el prototipo: `EngineError.deserialize()` reconstruye siempre un `DeserializedEngineError` genérico. Medido en el navegador, con el fallo real reproducido:
+
+```
+{ ctor: "DeserializedEngineError", code: "RENDER_PAGE_FAILED",
+  msg: "Fallo al renderizar la página 0: Cannot read properties of undefined (reading 'createElement')" }
+```
+
+O sea: `instanceof` daba `false` para **todo** fallo de render de producción. Consecuencias, las dos contra el spec:
+
+1. El reintento de `Render_Engine.md` §11 ("reintentar 1 vez") **nunca corría**.
+2. El error caía a la rama "no recuperable → abortar batch" y se iba por el `throw`, así que **`PREVIEW_PAGE_FAILED` no se emitía nunca** (§13 caso 12). El único rastro era el `warn` al logger nulo.
+
+Es exactamente el bug de ADR-049 §5, en otro motor. El comentario de `shared/src/errors.ts` ya lo había anticipado palabra por palabra: ese `instanceof` "da `false` en producción y `true` en los tests que no serializan, que es exactamente cómo el bug de ADR-049 pasó todos los gates". Y volvió a pasar por lo mismo: los tests del motor hacían fallar el render con la subclase concreta, que es justo la forma que **no** ocurre cuando hay workers de verdad.
+
+**Corregido**: discriminación por `code` (`isRenderErrorCode` / `isRetryablePageError` en `render.errors.ts`), más `createDeserializedRejectingRenderPool` en los helpers de test — el primer helper del motor que hace fallar un render con la forma deserializada real. El test de regresión afirma los dos intentos y el `PREVIEW_PAGE_FAILED`, y se verificó que falla contra el código viejo.
+
+**Del lado de la UI**, el evento ahora tiene destino: `bus-bridge.ts` lo suscribe, `viewer.store.ts` guarda `failedPages`, `PageCanvas` dibuja un aviso en la página afectada ("No se pudo mostrar esta página — el documento no cambió") y `previewRetry.ts` deja de reintentar esa página. Verificado end-to-end quitando la `CanvasFactory` a propósito y cargando el PDF de 50 páginas del reporte: el aviso aparece; con la factory puesta, no aparece y la página se ve.
+
+**Queda una nota, no un pendiente**: el `warn` de `handleRenderRequested` sigue yendo a un logger nulo. Ya no es la única vía —el evento cubre lo que el usuario tiene que ver—, pero un logger que en desarrollo escriba a consola seguiría ahorrando el paso de instrumentar el código para diagnosticar.
 
 ### Tercer defecto, en la UI: nadie reintentaba
 
