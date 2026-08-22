@@ -28,13 +28,14 @@ import type { EntityGroup, EntityType } from "@anonly/anonymization-core";
 import { PlusIcon, SearchIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { actions } from "../../core-adapter/actions.js";
 import { useEntitiesStore } from "../../store/entities.store.js";
 
 import { AddEntityDialog } from "./AddEntityDialog.js";
+import { applyEnabled } from "./applyEdits.js";
 import { DocumentModeSelect } from "./DocumentModeSelect.js";
 import { filterGroups, visibleTypeEntries } from "./entityTree.js";
 import { EntityTypeGroup } from "./EntityTypeGroup.js";
+import { ENTITY_TYPE_LABEL } from "./entityTypeLabels.js";
 import { groupNodeId, resolveTreeKey, typeNodeId, type TreeNode } from "./treeNavigation.js";
 
 export function EntitiesPanel() {
@@ -167,17 +168,29 @@ export function EntitiesPanel() {
         return;
       }
       case "toggleEnabled": {
+        // Mismo camino que los checkboxes del árbol, incluido el "Deshacer":
+        // `Space` sobre una cabecera apaga decenas de grupos sin siquiera un
+        // diálogo de por medio, así que es el caso que MÁS lo necesita.
         const group = groupById(command.nodeId);
         if (group !== undefined) {
-          actions.updateGroup(group.id, { enabled: !group.enabled });
+          applyEnabled({
+            groups: [group],
+            next: !group.enabled,
+            label: group.canonicalValue,
+            isType: false,
+          });
           return;
         }
         // Cabecera de tipo: mismo criterio que su checkbox cascade — si hay
         // alguno habilitado, apaga todos; si no, prende todos.
         const entry = typeEntryById(command.nodeId);
         if (entry === undefined) return;
-        const next = !entry[1].some((group) => group.enabled);
-        for (const group of entry[1]) actions.updateGroup(group.id, { enabled: next });
+        applyEnabled({
+          groups: entry[1],
+          next: !entry[1].some((group) => group.enabled),
+          label: ENTITY_TYPE_LABEL[entry[0]],
+          isType: true,
+        });
         return;
       }
       case "openMenu": {

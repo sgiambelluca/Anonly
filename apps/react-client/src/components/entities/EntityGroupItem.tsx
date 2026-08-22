@@ -29,6 +29,7 @@ import { useViewerStore } from "../../store/viewer.store.js";
 import { Checkbox } from "../common/Checkbox.js";
 import { ConflictBadge } from "../conflicts/ConflictBadge.js";
 
+import { applyEnabled } from "./applyEdits.js";
 import { ChangeTypeDialog } from "./ChangeTypeDialog.js";
 import { DegradedBadge } from "./DegradedBadge.js";
 import { EditReplacementDialog } from "./EditReplacementDialog.js";
@@ -76,7 +77,14 @@ function EntityGroupItemImpl({ group, nodeId, activeNodeId, onNodeFocus }: Entit
     >
       <Checkbox
         checked={group.enabled}
-        onCheckedChange={(checked) => actions.updateGroup(group.id, { enabled: checked })}
+        onCheckedChange={(checked) =>
+          applyEnabled({
+            groups: [group],
+            next: checked,
+            label: group.canonicalValue,
+            isType: false,
+          })
+        }
         aria-label={`Habilitar ${group.canonicalValue}`}
       />
       {/*

@@ -11,9 +11,9 @@
 import type { EntityGroup, EntityType } from "@anonly/anonymization-core";
 import { ChevronDownIcon, ChevronRightIcon } from "lucide-react";
 
-import { actions } from "../../core-adapter/actions.js";
 import { Checkbox } from "../common/Checkbox.js";
 
+import { applyEnabled } from "./applyEdits.js";
 import { EntityGroupItem } from "./EntityGroupItem.js";
 import { cascadeCheckboxState } from "./entityTree.js";
 import { ENTITY_TYPE_LABEL } from "./entityTypeLabels.js";
@@ -43,9 +43,12 @@ export function EntityTypeGroup({
   const cascadeState = cascadeCheckboxState(groups);
 
   function handleCascadeChange(checked: boolean): void {
-    for (const group of groups) {
-      actions.updateGroup(group.id, { enabled: checked });
-    }
+    applyEnabled({
+      groups,
+      next: checked,
+      label: ENTITY_TYPE_LABEL[type],
+      isType: true,
+    });
   }
 
   return (
