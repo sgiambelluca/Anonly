@@ -16,8 +16,24 @@
  * como pide §7.2 — "ancla a blobUrl", no un botón con `onClick`) + botón
  * "Exportar otro" (`onExportAnother`, estado local de `ExportDialog` — no hay
  * acción de store para "limpiar" el resultado, ver `exportPhase.ts`).
+ *
+ * **Tras apretar "Descargar" el panel confirma y ofrece las dos salidas**
+ * (pedido del humano): descargar de nuevo, o abrir otro documento.
+ *
+ * > **Por qué la confirmación no afirma que la descarga terminó bien.** El
+ * > navegador **no da ninguna señal** de éxito ni de fallo para un
+ * > `<a download>`: no hay evento, no hay promesa, no hay forma de saberlo
+ * > desde la página. Así que el panel dice lo que sí es cierto —que el archivo
+ * > se generó y se mandó a descargar— y deja el reintento a la vista en vez de
+ * > esconderlo detrás de un fallo que no se puede detectar. Afirmar
+ * > "descargado con éxito" sería inventar un dato, y en una herramienta cuyo
+ * > resultado es el archivo, esa es exactamente la mentira que más caro sale.
  */
 
+import { CheckCircle2Icon } from "lucide-react";
+import { useState } from "react";
+
+import { actions } from "../../core-adapter/actions.js";
 import { usePipelineStore } from "../../store/pipeline.store.js";
 import { Banner } from "../common/Banner.js";
 import { Button } from "../common/Button.js";
@@ -41,9 +57,48 @@ export function ExportProgress({ filename, onExportAnother, onClose }: ExportPro
   const result = usePipelineStore((state) => state.exportResult);
   const error = usePipelineStore((state) => state.error);
 
+  // `downloaded` es local y efímero: solo decide qué cara del panel se
+  // muestra. No sube a `pipeline.store` porque nadie más lo lee, y porque
+  // "apreté descargar" no es estado del pipeline.
+  const [downloaded, setDownloaded] = useState(false);
+
   const phase = resolveExportPhase(true, result, error !== null);
 
   if (phase === "done" && result !== null) {
+    if (downloaded) {
+      return (
+        <div className="flex flex-col gap-4">
+          <div className="flex items-start gap-3">
+            <CheckCircle2Icon className="mt-0.5 h-5 w-5 shrink-0 text-success" aria-hidden />
+            <div className="flex min-w-0 flex-col gap-1">
+              <p className="text-sm font-medium text-text-primary">
+                Se descargó <span className="break-all">{filename}</span>
+              </p>
+              <p className="text-sm text-text-secondary">
+                Si no aparece en tus descargas, probá de nuevo.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button variant="ghost" onClick={() => actions.closeDocument()}>
+              Abrir otro documento
+            </Button>
+            <a
+              href={result.blobUrl}
+              download={filename}
+              className="anonly-button-secondary"
+              onClick={() => setDownloaded(true)}
+            >
+              Descargar de nuevo
+            </a>
+            <Button variant="primary" onClick={onClose}>
+              Listo
+            </Button>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="flex flex-col gap-3">
         <p className="text-sm text-text-primary">
@@ -53,7 +108,12 @@ export function ExportProgress({ filename, onExportAnother, onClose }: ExportPro
           <Button variant="secondary" onClick={onExportAnother}>
             Exportar otro
           </Button>
-          <a href={result.blobUrl} download={filename} className="anonly-button-primary">
+          <a
+            href={result.blobUrl}
+            download={filename}
+            className="anonly-button-primary"
+            onClick={() => setDownloaded(true)}
+          >
             Descargar
           </a>
         </div>
