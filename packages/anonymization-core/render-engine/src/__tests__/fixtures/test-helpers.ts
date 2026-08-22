@@ -70,6 +70,7 @@ export interface CapturedGetDocumentOptions {
   readonly standardFontDataUrl?: string;
   readonly CMapReaderFactory?: unknown;
   readonly StandardFontDataFactory?: unknown;
+  readonly CanvasFactory?: unknown;
 }
 
 /**
