@@ -569,7 +569,7 @@ Tabla reconciliada por ADR-036 §5 (la versión previa refería un evento inexis
 | `PIPELINE_FAILED` con `error.code === "NER_MODEL_MISSING"` | modal: el modelo NER no pudo cargarse (assets first-party, ADR-018 — no hay "descarga manual"); ofrecer "Desactivar NER y reanalizar" (flujo §3.7) o "Reintentar" |
 | `OCR_PAGE_FAILED` (evento) | toast: "No se pudo procesar la página X con OCR. Las demás continúan." |
 | (fallo de página NER) | **sin señal en MVP**: no existe evento `NER_PAGE_FAILED` (`04_Event_System.md` §5); el motor descarta las ocurrencias NER de esa página con `logger.warn` y continúa (`NER_Engine.md` §7). Si v1.0 quiere el toast, el evento se crea vía ADR (R-19) |
-| `PREVIEW_PAGE_FAILED` (evento) | placeholder gris en la página afectada |
+| `PREVIEW_PAGE_FAILED` (evento) | aviso **en la página afectada** (`PageCanvas`): "No se pudo mostrar esta página" + "El documento no cambió: es la vista previa la que falló". Se guarda en `viewer.failedPages` (sin `kind`: el payload no lo trae) y esa página **deja de reintentarse** (`previewRetry.ts`). Un placeholder gris a secas no servía: es idéntico al de una página que todavía no renderizó |
 | `EXPORT_FAILED` (evento) | toast: "No se pudo exportar. Reintente." |
 | `enabledGroups === 0` (pre-flight **local** del `ExportDialog`, calculado del store — no es un evento; el motor solo loguea warn, ADR-032 §3) | modal de confirmación: "No hay grupos habilitados. El export será idéntico al original. ¿Continuar?" |
 
