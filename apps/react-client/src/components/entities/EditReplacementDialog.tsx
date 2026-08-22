@@ -21,10 +21,10 @@
 import type { EntityGroup } from "@anonly/anonymization-core";
 import { useEffect, useState } from "react";
 
-import { actions } from "../../core-adapter/actions.js";
 import { Button } from "../common/Button.js";
 import { Dialog } from "../common/Dialog.js";
 
+import { applyReplacementValue } from "./applyEdits.js";
 import { estimateReplacementFit, type ReplacementFit } from "./replacementFit.js";
 
 export interface EditReplacementDialogProps {
@@ -48,7 +48,7 @@ export function EditReplacementDialog({ group, open, onClose }: EditReplacementD
   }, [open, group.replacementValue]);
 
   function handleApply(): void {
-    actions.updateGroup(group.id, { replacementValue: value });
+    applyReplacementValue({ group, value });
     onClose();
   }
 

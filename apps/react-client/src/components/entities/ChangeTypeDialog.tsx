@@ -18,11 +18,11 @@
 import type { EntityType } from "@anonly/anonymization-core";
 import { useEffect, useState } from "react";
 
-import { actions } from "../../core-adapter/actions.js";
 import { Button } from "../common/Button.js";
 import { Dialog } from "../common/Dialog.js";
 import { Select } from "../common/Select.js";
 
+import { applyTypeChange } from "./applyEdits.js";
 import { ENTITY_TYPE_OPTIONS } from "./entityTypeLabels.js";
 
 export interface ChangeTypeDialogProps {
@@ -50,7 +50,12 @@ export function ChangeTypeDialog({
     // Un `type` igual al vigente es no-op en el motor (ADR-082 §1), así que
     // no hace falta guardarlo acá — pero se evita el viaje igual.
     if (nextType !== currentType) {
-      actions.updateGroup(groupId, { type: nextType });
+      applyTypeChange({
+        groupId,
+        groupLabel: canonicalValue,
+        previousType: currentType,
+        nextType,
+      });
     }
     onClose();
   }
