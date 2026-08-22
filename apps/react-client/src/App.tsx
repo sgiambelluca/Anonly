@@ -27,17 +27,20 @@
  * pedir nada. Lo encontró el Escenario 3 de E2E.
  */
 
-import { FileTextIcon } from "lucide-react";
+import { FileTextIcon, PanelLeftIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 import { ToastHost } from "./components/common/ToastHost.js";
 import { EntitiesPanel } from "./components/entities/EntitiesPanel.js";
 import { hasAnyGroup } from "./components/entities/entityTree.js";
 import type { AppPhase } from "./components/screens/appPhase.js";
+import { EntitiesDrawer } from "./components/screens/EntitiesDrawer.js";
 import { LoadScreen } from "./components/screens/LoadScreen.js";
 import { ScanScreen } from "./components/screens/ScanScreen.js";
+import { TooNarrowScreen } from "./components/screens/TooNarrowScreen.js";
 import { useAppPhase } from "./components/screens/useAppPhase.js";
+import { useLayoutMode } from "./components/screens/useLayoutMode.js";
 import { PasswordDialog } from "./components/toolbar/PasswordDialog.js";
 import { Toolbar } from "./components/toolbar/Toolbar.js";
 import { PdfViewer } from "./components/viewer/PdfViewer.js";
@@ -103,6 +106,61 @@ function renderPhase(phase: AppPhase): ReactNode {
     );
   }
 
+  return <WorkLayout />;
+}
+
+/**
+ * Panel de trabajo, en las tres formas que decide `layoutMode.ts` (§19 de
+ * `roadmap/Post_Hito10.8_Pendientes.md` explica qué se rompió y por qué son
+ * tres y no dos).
+ *
+ * El cajón se cierra solo al pasar a `wide`: si no, quedaría un overlay
+ * abierto sobre un layout que ya tiene la barra al lado, con la lista dos
+ * veces en pantalla.
+ */
+function WorkLayout() {
+  const layout = useLayoutMode();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  useEffect(() => {
+    if (layout !== "drawer") setDrawerOpen(false);
+  }, [layout]);
+
+  if (layout === "too-narrow") {
+    return (
+      <div className="h-screen overflow-hidden">
+        <TooNarrowScreen />
+      </div>
+    );
+  }
+
+  if (layout === "drawer") {
+    return (
+      <div className="flex h-screen flex-col overflow-hidden">
+        <Toolbar />
+        {/* `relative`: es el marco de referencia del cajón y su fondo. */}
+        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div className="flex items-center border-b border-border px-3 py-1.5">
+            <button
+              type="button"
+              aria-expanded={drawerOpen}
+              onClick={() => setDrawerOpen(true)}
+              className="flex items-center gap-2 rounded-md px-2 py-1 text-sm font-medium text-text-primary hover:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            >
+              <PanelLeftIcon className="h-4 w-4 text-text-secondary" aria-hidden />
+              Entidades
+            </button>
+          </div>
+          <RightPanel />
+          <EntitiesDrawer open={drawerOpen} onOpenChange={setDrawerOpen}>
+            <SidebarContent />
+          </EntitiesDrawer>
+        </div>
+        <ToastHost />
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-screen flex-col overflow-hidden">
       <Toolbar />
@@ -116,6 +174,23 @@ function renderPhase(phase: AppPhase): ReactNode {
 }
 
 function LeftPanel() {
+  return (
+    // `min-w` subido de 280 a 340 px (ADR-087, Contexto §1 hallazgo 2): a 280
+    // no entraban a la vez el nombre de la entidad y su modo de reemplazo, y
+    // el que se cortaba era el nombre — el dato con el que el usuario decide.
+    // Ese mismo mínimo es lo que rompía el layout por debajo de 1024 px, y por
+    // eso ahí el ancho lo resuelve el cajón en vez de esta columna.
+    <aside className="flex w-1/3 min-w-[340px] max-w-[480px] flex-col border-r border-border bg-bg-primary">
+      <SidebarContent />
+    </aside>
+  );
+}
+
+/**
+ * Contenido de la barra lateral, compartido por la columna (`wide`) y el
+ * cajón (`drawer`) — el mismo árbol, en dos envases.
+ */
+function SidebarContent() {
   const hasGroups = useEntitiesStore((state) => hasAnyGroup(state.groupsByType));
 
   // El caso "sin documento" de `UX_Guidelines.md` §11 ya no llega acá: sin
@@ -124,24 +199,16 @@ function LeftPanel() {
   // análisis no encontró nada — más la ventana en que el escaneo sigue
   // corriendo en segundo plano después del pase temprano (§7.2), donde el
   // árbol vacío es transitorio y el estado real lo dice la toolbar.
+  if (hasGroups) return <EntitiesPanel />;
   return (
-    // `min-w` subido de 280 a 340 px (ADR-087, Contexto §1 hallazgo 2): a 280
-    // no entraban a la vez el nombre de la entidad y su modo de reemplazo, y
-    // el que se cortaba era el nombre — el dato con el que el usuario decide.
-    <aside className="flex w-1/3 min-w-[340px] max-w-[480px] flex-col border-r border-border bg-bg-primary">
-      {hasGroups ? (
-        <EntitiesPanel />
-      ) : (
-        <>
-          <PanelHeader title="Entidades" />
-          <EmptyState
-            icon={<FileTextIcon className="h-8 w-8" aria-hidden />}
-            title="Todavía no hay datos detectados"
-            description="Si el análisis ya terminó, podés agregar los que falten a mano."
-          />
-        </>
-      )}
-    </aside>
+    <>
+      <PanelHeader title="Entidades" />
+      <EmptyState
+        icon={<FileTextIcon className="h-8 w-8" aria-hidden />}
+        title="Todavía no hay datos detectados"
+        description="Si el análisis ya terminó, podés agregar los que falten a mano."
+      />
+    </>
   );
 }
 
