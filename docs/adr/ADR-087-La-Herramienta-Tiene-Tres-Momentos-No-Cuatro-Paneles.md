@@ -448,7 +448,7 @@ Se detectaron en la misma auditoría y **no** se deciden acá — necesitan su p
 
 1. **Contraste del CTA primario**: `#3b82f6` con texto blanco da **3.68:1**, bajo el 4.5:1 que `UX_Guidelines.md` §9 promete. Afecta a todos los botones primarios y a los links `text-accent`.
 2. **Escala tipográfica**: la interfaz usa 12 px como tamaño más frecuente; §9 exige 14 px mínimo.
-3. **`prefers-reduced-motion`**: exigido por §9, ausente del repo.
+3. **`prefers-reduced-motion`**: **cerrado**. Las animaciones que entraron con el rediseño de estilo se declaran dentro de un `@media (prefers-reduced-motion: no-preference)`, de modo que el estado quieto es el default.
 4. **Atajos declarados y no implementados**: `Cmd/Ctrl+F`, flechas, `Space`, `Enter` (§9).
 5. **Drag & drop**: el dropzone del Hero es decorativo. §1 de este ADR lo declara funcional; la implementación es trabajo de PR.
 6. **Sin deshacer general**: §3.3 cubre los dos barridos y el único caso de fila que destruye algo irrecuperable. Todo lo demás (habilitar/deshabilitar grupos, fusionar, dividir, reclasificar, agregar entidades a mano) sigue sin undo.

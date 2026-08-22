@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!--
+    Logo de Anonly: un documento con una línea de texto reemplazada por una
+    barra de censura. Concepto y porqué en `src/components/common/Logo.tsx`.
+
+    **Ajuste óptico propio, no una copia del componente.** A 16 px el trazo de
+    1.75 del logo de pantalla queda en un pelo y las dos líneas finas de texto
+    se vuelven ruido. Acá el trazo sube a 2.5, las líneas engordan y la barra
+    crece: lo que tiene que sobrevivir al tamaño chico es "página con una barra
+    cruzándola", y todo lo demás compite con eso.
+
+    Colores literales y no tokens: un favicon se sirve suelto, sin la hoja de
+    estilos de la app.
+  -->
+  <path d="M8 2.5h10.5L26 10v19.5a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2v-25a2 2 0 0 1 2-2Z" fill="#ffffff" stroke="#111827" stroke-width="2.5" stroke-linejoin="round"/>
+  <path d="M18.5 3V8a2 2 0 0 0 2 2h5" fill="none" stroke="#111827" stroke-width="2.5" stroke-linejoin="round"/>
+  <rect x="10.5" y="13.5" width="8" height="2.2" rx="1.1" fill="#6b7280"/>
+  <rect x="10.5" y="24" width="6" height="2.2" rx="1.1" fill="#6b7280"/>
+  <rect x="10.5" y="18" width="11" height="5" rx="1.2" fill="#3b82f6"/>
+</svg>
