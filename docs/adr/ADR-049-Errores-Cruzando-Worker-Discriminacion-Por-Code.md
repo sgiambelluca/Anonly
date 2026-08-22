@@ -52,6 +52,10 @@ Verificado sobre todo `packages/`:
 
 Conclusión del barrido: hoy hay **exactamente dos** `instanceof` de subclase concreta rotos, los dos sobre `PdfPasswordRequiredError`, los dos en `orchestrator.ts`.
 
+> **Errata (2026-08-22): esa conclusión era falsa, y el barrido tenía un punto ciego.** Había un tercero, en `render-engine`: `renderPagesInternal` discriminaba con `err instanceof RenderPageFailedError || err instanceof RenderTimeoutError`. El barrido lo pasó por alto porque miró los motores por su **normalización de errores** (`normalizeNerError`, `normalizeExportError`, el chequeo por `code` de `ocr-engine`) y `render-engine` normaliza bien en `toPageFailure`; lo que no miró es que además **discrimina** en su bucle de reintentos, y ahí sí lo hacía por clase.
+>
+> El costo fue exactamente el que este ADR predice en §6: el `instanceof` daba `false` para **todo** fallo de render de producción, así que el reintento de `core/Render_Engine.md` §11 nunca corría y el batch se abortaba por la rama "no recuperable" sin emitir `PREVIEW_PAGE_FAILED` — la UI no se enteraba de nada y el visor quedaba gris para siempre. Se corrigió por `code`, con un test que inyecta el error **deserializado** (§6) y que se verificó fallando contra el código viejo. Rastro medido en `roadmap/Post_Hito10.8_Pendientes.md` §21.
+
 ## Decisión
 
 ### 1. Regla general: por `code`, no por clase
@@ -80,6 +84,8 @@ export function isEngineErrorCode<C extends EngineErrorCode>(
 ```
 
 En el façade y no en `shared/`, por dos razones: hoy tiene un único consumidor (el Orchestrator), y ponerlo en `shared` obligaría a que el PR toque dos paquetes (R-1/R-5). Si aparece un segundo consumidor fuera del façade, promoverlo a `shared` es un movimiento mecánico y sin cambio de contrato.
+
+> **Actualización (2026-08-22): apareció el segundo consumidor y el helper se promovió.** `render-engine` lo necesita para el `instanceof` roto que documenta la errata de Contexto §4, y un motor no puede importar el façade (P-1), así que la única alternativa a promoverlo era duplicarlo. Vive en `packages/anonymization-core/shared/src/errors.ts` y se exporta desde `@anonly/shared`; el façade y `render-engine` lo importan de ahí. Sin cambio de contrato, tal como decía esta sección.
 
 ### 4. `PdfPasswordRequiredError.retryable` pasa a `false` — se cierra el pendiente de ADR-035 §3
 
