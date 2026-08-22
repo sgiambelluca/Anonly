@@ -31,6 +31,11 @@
  *
  * Retirado con el lado a lado: la prop `scrollSync` y todo el controller de
  * sincronización (ADR-054 §3). Con un panel no hay dos scrolls que alinear.
+ *
+ * **Reintento de preview** (`previewRetry.ts`): mientras las páginas montadas
+ * no tengan imagen, se re-pide. El Render Engine descarta en silencio los
+ * pedidos de un documento que todavía no cargó, y con el pase temprano de
+ * ADR-087 §6 ese descarte dejaba el visor gris durante todo el escaneo.
  */
 
 import type { TextMatch } from "@anonly/anonymization-core";
@@ -45,6 +50,7 @@ import { DocumentSearchBox } from "./DocumentSearchBox.js";
 import { PageCanvas } from "./PageCanvas.js";
 import { computePageHeight, computePageWidth } from "./pageLayout.js";
 import { PageVirtualizer } from "./PageVirtualizer.js";
+import { PREVIEW_RETRY_INTERVAL_MS, pagesMissingPreview } from "./previewRetry.js";
 import { shouldTriggerReadyRender } from "./readyRenderTrigger.js";
 import { computeMountRange, rangeToPageIndices, type VisibleRange } from "./visibleRange.js";
 import { WordSelectionOverlay } from "./WordSelectionOverlay.js";
@@ -110,6 +116,39 @@ export function PdfViewer() {
     triggeredReadyRenderForRef.current = documentId;
     actions.requestRender(indices, kind, "preview", computeZoomRenderScale(zoom));
   }, [documentId, pipelineStage, mountRange.start, mountRange.end]);
+
+  // Reintento mientras las páginas montadas sigan sin imagen
+  // (`previewRetry.ts`). El re-pedido único de arriba dejó de alcanzar con el
+  // pase temprano de ADR-087 §6: el visor se monta con el pipeline todavía
+  // escaneando, sus pedidos se descartan porque el documento de render no
+  // cargó, y `Ready` puede estar a minutos. Es autolimitado — apenas llegan
+  // las imágenes, `pagesMissingPreview` devuelve vacío y el intervalo se
+  // limpia.
+  const retryAttemptsRef = useRef(0);
+  useEffect(() => {
+    // Cada conjunto montado nuevo estrena su cuota de intentos: al scrollear a
+    // páginas que nunca se pidieron, el techo del conjunto anterior no tiene
+    // por qué penalizarlas.
+    retryAttemptsRef.current = 0;
+  }, [mountRange.start, mountRange.end, documentId, kind]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const missing = pagesMissingPreview({
+        documentId,
+        mountedPageIndices: mountedPageIndicesRef.current,
+        previewByPage,
+        attempts: retryAttemptsRef.current,
+      });
+      if (missing.length === 0) {
+        window.clearInterval(timer);
+        return;
+      }
+      retryAttemptsRef.current += 1;
+      actions.requestRender(missing, kind, "preview", computeZoomRenderScale(zoom));
+    }, PREVIEW_RETRY_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [documentId, kind, previewByPage, mountRange.start, mountRange.end]);
 
   // Cambio de visibleRange (scroll) → render inmediato, con la escala vigente.
   useEffect(() => {
