@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import { createEventBus } from "@anonly/event-system";
 import {
   AnnotationKind,
+  EngineError,
   ReplacementMode,
   type Annotation,
   type EngineConfig,
@@ -23,6 +24,7 @@ import {
   type ILogger,
   type MarkerLegendRow,
   type Replacement,
+  type SerializedEngineError,
   type Unsubscribe,
   type Word,
 } from "@anonly/shared";
@@ -783,5 +785,35 @@ export function createResolvedRenderBroadcastPool(
     dispatch: (params: { readonly run: () => Promise<unknown> }): Promise<unknown> =>
       params.run(),
     broadcast: (): Promise<ReadonlyArray<unknown>> => Promise.resolve(resolvedValues),
+  };
+}
+
+/**
+ * Rechaza `dispatch()` con un error **ya deserializado**, que es la forma en
+ * que un fallo del worker llega de verdad al host (`shared/src/errors.ts`:
+ * `deserialize` devuelve siempre un `DeserializedEngineError`). Los demás
+ * helpers hacen fallar el render con la subclase concreta —lo que solo pasa
+ * en tests in-process—, así que ninguno podía detectar el bug de
+ * discriminación por `instanceof` que este helper existe para cubrir.
+ *
+ * Cuenta los intentos para poder afirmar que el reintento de §11 corre.
+ */
+export function createDeserializedRejectingRenderPool(serialized: SerializedEngineError): {
+  readonly pool: ResolvedRenderPool;
+  readonly attempts: () => number;
+} {
+  let attempts = 0;
+  return {
+    pool: {
+      dispatch: (): Promise<unknown> => {
+        attempts += 1;
+        return Promise.reject(EngineError.deserialize(serialized));
+      },
+      broadcast: async (
+        _payload: unknown,
+        run: () => Promise<unknown>,
+      ): Promise<ReadonlyArray<unknown>> => [await run()],
+    },
+    attempts: () => attempts,
   };
 }
