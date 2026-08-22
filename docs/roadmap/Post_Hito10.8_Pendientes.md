@@ -476,3 +476,38 @@ Migrar a `treegrid` es un cambio grande (navegación bidimensional, `aria-colcou
 Se mantiene por una diferencia de grado, y conviene decirla en voz alta porque es incómoda: aquel rol prometía navegación por flechas, `Home`/`End` y foco gestionado y **no implementaba ninguna de las tres**; éste implementa todo salvo el tab stop único, y retirarlo perdería además la estructura que el lector de pantalla sí aprovecha (nivel, expandido, tamaño del conjunto). **Si esa diferencia de grado se considera insuficiente, la salida es retirar `role="tree"`, no seguir prometiéndolo** — y sería coherente con el precedente.
 
 **Estado**: abierto. Destino: `treegrid`.
+
+---
+
+## 23. El gate manual de ADR-058 §11 / ADR-086 §4 se corrió, y **no pasa**
+
+**Procedencia**: gate manual corrido el 2026-08-22 sobre dos de los tres documentos que faltaban, con fixtures fabricados para eso (`tests/fixtures/generate.ts`: `qa-tables-justified.pdf`, `qa-stamp.pdf`). Se juzgó **sobre el PDF exportado**, no sobre el preview, como exige ADR-058 §11 — el preview dibuja anotaciones que el export no lleva, y mirarlo ahí habría dado un falso positivo.
+
+**Los fixtures son sintéticos y eso acota la lectura**: reproducen el régimen (justificado real con espaciado irregular, celdas apretadas, texto rotado a 90°/270°, marca de agua traslúcida) pero no la suciedad de un expediente real (kerning por par, fuentes subseteadas, sellos rasterizados). Sirven para decidir que **hay defectos**; no sirven para declarar que no hay otros.
+
+### Lo que falla, y es más grave que la costura que el gate iba a mirar
+
+El gate preguntaba si las líneas repintadas se distinguen de las que no se tocaron. La respuesta es que sí, pero el hallazgo importante es otro: **el PDF exportado sigue conteniendo datos personales legibles**.
+
+| # | Hallazgo | Documento | Gravedad |
+|---|---|---|---|
+| 23a | El **folio lateral a 270°** ("Folio 214 — Juan Pérez") no se detecta y sale **en claro** en el exportado | sello | **fuga** |
+| 23b | El **sello a 90°** reemplaza el DNI pero deja "PERITO CARLOS LOPEZ" **en claro**: mayúsculas sin tilde no agrupan con "Carlos López" del cuerpo | sello | **fuga** |
+| 23c | La **carátula** "Pérez, Juan c/ Empresa S.A." no se detecta — orden invertido `Apellido, Nombre`, que es la forma canónica de una carátula judicial | sello | **fuga** |
+| 23d | **OCR sobre el propio PDF exportado recupera "Pérez" y "Juan"** — la fuga no es solo visible a ojo, es legible por máquina | sello | **fuga** |
+| 23e | El reemplazo deja **fragmentos del original visibles** antes del token ("Ju"…, "B"…, "3"…): la caja no cubre el primer glifo | sello | alta |
+| 23f | El **texto justificado fragmenta entidades**: "Empresa S.A." se detecta además como "Em" y "presa S.A", dos grupos espurios | tablas | media |
+| 23g | Los tokens se dibujan **más chicos y levantados** respecto de la línea: se distinguen a simple vista, que es exactamente lo que el gate pedía que no pasara | tablas | media (es el criterio del gate) |
+| 23h | La coma queda **huérfana** tras el token ("[DNI 01] ,") y el token de la fila "Contacto" **desborda el borde de la celda** | tablas | baja |
+
+### Lectura
+
+- **23a/23b/23c/23d son de detección, no de repintado**, y son las que impiden cerrar el hito: la herramienta promete que el dato no sale, y sale. ADR-063 arregló el **bbox** del texto rotado —por eso el DNI del sello sí se reemplaza, con sus dos ocurrencias agrupadas— pero eso no alcanza para que el **nombre** del mismo sello se detecte.
+- **23e es de cobertura del reemplazo** y vale por sí sola: dejar el primer carácter del original es sistemático, no un caso de borde.
+- **23f/23g/23h son lo que el gate iba a mirar**, y confirman que la costura se ve.
+
+### Qué NO se corrió
+
+La tercera fila del gate —documento **escaneado**, ruta OCR— quedó a medias: se ejercitó sobre el propio exportado (que es 100 % imagen, así que entra por OCR) y eso produjo 23d, pero no se completó un ciclo entero de importar-anonimizar-exportar-mirar sobre un escaneado con entidades conocidas. Queda pendiente.
+
+**Ninguno de estos hallazgos se arregló en el mismo paso**: son de motores distintos (grouping/regex para la detección, render/export para la cobertura) y varios piden decisión antes que código. El gate estaba para producir esta lista.

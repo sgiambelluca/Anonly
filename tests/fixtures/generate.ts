@@ -27,7 +27,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { PDFDocument, StandardFonts, degrees, rgb } from "pdf-lib";
 
 /*
  * Layout de `text-10p.pdf`. Exportado porque `tests/e2e/support/fixtures.ts`
@@ -174,6 +174,230 @@ export async function generateImageAlpha(): Promise<Uint8Array> {
   return doc.save();
 }
 
+/**
+ * `qa-tables-justified.pdf` — documento de QA manual para el gate de
+ * ADR-058 §11 / ADR-086 §4, fila "tablas y texto justificado".
+ *
+ * **Qué tiene que ejercitar y por qué esa fila existe**: el repintado de línea
+ * de ADR-058 corre las palabras vecinas para tapar el hueco que deja un
+ * reemplazo más corto que el original. Las dos formas donde eso se nota son
+ * las cajas **apretadas** —una celda de tabla, donde no hay espacio en blanco
+ * al que correrse— y el **texto justificado**, donde los espacios entre
+ * palabras no son uniformes y una costura mal calculada se ve enseguida contra
+ * el borde derecho, que está alineado.
+ *
+ * La justificación se computa acá a mano (`drawJustifiedLine`): pdf-lib no
+ * justifica, pero sí mide (`font.widthOfTextAtSize`), así que repartir el
+ * sobrante entre los huecos es aritmética. Es exactamente lo que hace un
+ * procesador de texto y produce el mismo régimen de espaciado irregular.
+ *
+ * **Lo que este fixture NO reproduce**, y conviene saberlo antes de leer el
+ * resultado del gate: un PDF de procesador de texto real trae `TJ` con
+ * kerning por par de glifos, fuentes embebidas subseteadas y, a veces, cada
+ * palabra como su propio run. Acá cada línea es un `drawText` por tramo con
+ * Helvetica estándar. El gate sobre este documento dice si la costura se ve en
+ * régimen justificado y en celdas apretadas; **no** sustituye correr el gate
+ * sobre un expediente real el día que haya uno.
+ */
+export async function generateTablesJustified(): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+  const contentWidth = PAGE_WIDTH - MARGIN_X * 2;
+
+  page.drawText("Informe pericial — anexo de partes intervinientes", {
+    x: MARGIN_X,
+    y: MARGIN_Y,
+    size: 14,
+    font: bold,
+    color: rgb(0, 0, 0),
+  });
+
+  // Párrafo justificado. La última línea NO se justifica (regla tipográfica
+  // estándar): estirarla dejaría un renglón con huecos absurdos y no es lo que
+  // el gate tiene que mirar.
+  const paragraph =
+    "Se deja constancia de que Juan Pérez, DNI 34.567.891, con domicilio en Belgrano 1234, " +
+    "y María Gómez, DNI 18.445.212, con domicilio en Rivadavia 455, comparecieron ante esta " +
+    "pericia y ratificaron el contenido del acta. Se consigna asimismo el CUIT 20-12345678-9 " +
+    "de la firma Empresa S.A. a los efectos que pudieren corresponder.";
+  const lines = wrapText(paragraph, 78);
+  let y = MARGIN_Y - 34;
+  for (const [index, line] of lines.entries()) {
+    const isLast = index === lines.length - 1;
+    drawJustifiedLine(page, line, {
+      font,
+      size: FONT_SIZE,
+      x: MARGIN_X,
+      y,
+      width: contentWidth,
+      justify: !isLast,
+    });
+    y -= LINE_HEIGHT;
+  }
+
+  // Tabla: celdas angostas a propósito. La columna del dato es de 150 pt, así
+  // que un `[PERSONA 01]` ya llena la celda y el repintado no tiene margen —
+  // que es el caso que esta fila del gate existe para mirar.
+  const rows: ReadonlyArray<readonly [string, string]> = [
+    ["Actor", "Juan Pérez"],
+    ["Documento", "34.567.891"],
+    ["Demandada", "Empresa S.A."],
+    ["CUIT", "20-12345678-9"],
+    ["Perito", "Carlos López"],
+    ["Documento", "42.998.103"],
+    ["Contacto", "juan.perez@example.com"],
+  ];
+  const colX = [MARGIN_X, MARGIN_X + 140];
+  const colWidth = [140, 150];
+  const rowHeight = 22;
+  y -= 24;
+  const tableTop = y;
+
+  page.drawText("Detalle", { x: MARGIN_X, y: y + 6, size: FONT_SIZE, font: bold });
+  y -= rowHeight;
+
+  for (const [label, value] of rows) {
+    page.drawText(label, { x: colX[0] ?? 0, y: y + 6, size: FONT_SIZE, font });
+    page.drawText(value, { x: colX[1] ?? 0, y: y + 6, size: FONT_SIZE, font });
+    page.drawLine({
+      start: { x: MARGIN_X, y },
+      end: { x: MARGIN_X + colWidth[0]! + colWidth[1]!, y },
+      thickness: 0.5,
+      color: rgb(0.7, 0.7, 0.7),
+    });
+    y -= rowHeight;
+  }
+
+  // Verticales de la grilla: hacen visible el borde de celda, que es contra
+  // lo que se juzga si una palabra corrida se salió de su columna.
+  for (const x of [MARGIN_X, MARGIN_X + colWidth[0]!, MARGIN_X + colWidth[0]! + colWidth[1]!]) {
+    page.drawLine({
+      start: { x, y: tableTop },
+      end: { x, y: y + rowHeight },
+      thickness: 0.5,
+      color: rgb(0.7, 0.7, 0.7),
+    });
+  }
+
+  return doc.save();
+}
+
+/**
+ * Dibuja una línea repartiendo el sobrante entre los espacios (justificado
+ * real). Con `justify: false` la dibuja tal cual, alineada a la izquierda.
+ */
+function drawJustifiedLine(
+  page: ReturnType<PDFDocument["addPage"]>,
+  line: string,
+  opts: {
+    readonly font: Awaited<ReturnType<PDFDocument["embedFont"]>>;
+    readonly size: number;
+    readonly x: number;
+    readonly y: number;
+    readonly width: number;
+    readonly justify: boolean;
+  },
+): void {
+  const { font, size, x, y, width, justify } = opts;
+  const words = line.split(" ").filter((w) => w !== "");
+  if (words.length === 0) return;
+  if (!justify || words.length === 1) {
+    page.drawText(line, { x, y, size, font, color: rgb(0, 0, 0) });
+    return;
+  }
+  const wordsWidth = words.reduce((sum, w) => sum + font.widthOfTextAtSize(w, size), 0);
+  const gap = (width - wordsWidth) / (words.length - 1);
+  let cursor = x;
+  for (const word of words) {
+    page.drawText(word, { x: cursor, y, size, font, color: rgb(0, 0, 0) });
+    cursor += font.widthOfTextAtSize(word, size) + gap;
+  }
+}
+
+/**
+ * `qa-stamp.pdf` — documento de QA manual para el gate de ADR-058 §11 /
+ * ADR-086 §4, fila "sello o marca de agua".
+ *
+ * **Por qué esta fila estuvo bloqueada hasta ahora**: el sello es texto
+ * **rotado a 90°**, y hasta ADR-063 el bbox de un run rotado se calculaba solo
+ * con la traslación de la matriz, produciendo una caja horizontal donde el
+ * texto real es vertical. Correr el gate antes de ese fix habría reproducido
+ * un bug ya diagnosticado en vez de decir algo sobre la calidad del
+ * repintado. Con ADR-063 implementado, este documento vuelve a ser
+ * informativo.
+ *
+ * Trae las tres formas que aparecen en un expediente real y que el motor trata
+ * distinto: **sello vertical** a 90° en el margen (con un dato adentro, para
+ * que la detección lo alcance), **marca de agua** diagonal traslúcida sobre el
+ * cuerpo, y **folio lateral** a 270°. El cuerpo lleva entidades propias, así
+ * que el gate puede comparar una línea repintada bajo la marca de agua contra
+ * una que no la tiene.
+ *
+ * **Lo que NO reproduce**: un sello escaneado es una imagen, no texto — este
+ * es texto rotado, que es el caso que ADR-063 arregló y el que el motor puede
+ * detectar. Un sello rasterizado no aporta texto y por definición no se
+ * anonimiza; el riesgo de solapamiento que ADR-063 §6 dejó anotado (un bbox
+ * correcto que tapa lo que hay debajo) sí se puede mirar acá.
+ */
+export async function generateStamp(): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+
+  const body = [
+    "Expediente caratulado: Pérez, Juan c/ Empresa S.A. s/ daños y perjuicios.",
+    "El actor, Juan Pérez, DNI 34.567.891, con domicilio en Belgrano 1234, promueve",
+    "demanda contra Empresa S.A., CUIT 20-12345678-9, con sede en Rivadavia 455.",
+    "Se designa perito a Carlos López, DNI 42.998.103, quien acepta el cargo.",
+    "Notifíquese al correo juan.perez@example.com y al teléfono +54 11 1234-5678.",
+  ];
+  let y = MARGIN_Y;
+  for (const line of body) {
+    page.drawText(line, { x: MARGIN_X, y, size: FONT_SIZE, font, color: rgb(0, 0, 0) });
+    y -= LINE_HEIGHT;
+  }
+
+  // Marca de agua diagonal traslúcida SOBRE el cuerpo: es la que puede tapar
+  // texto si un bbox se calcula de más (ADR-063 §6).
+  page.drawText("COPIA FIEL", {
+    x: 120,
+    y: 380,
+    size: 48,
+    font: bold,
+    color: rgb(0.6, 0.6, 0.6),
+    opacity: 0.25,
+    rotate: degrees(35),
+  });
+
+  // Sello vertical en el margen derecho, a 90°, CON un dato adentro: sin un
+  // dato detectable el sello no participa del repintado y la fila del gate no
+  // mira nada.
+  page.drawText("JUZGADO CIVIL 12 — PERITO CARLOS LOPEZ — DNI 42.998.103", {
+    x: PAGE_WIDTH - 40,
+    y: 120,
+    size: 11,
+    font: bold,
+    color: rgb(0.15, 0.25, 0.6),
+    rotate: degrees(90),
+  });
+
+  // Folio lateral a 270°, el otro sentido de rotación: la fórmula de ADR-063
+  // §1 tiene que dar la envolvente correcta en los dos.
+  page.drawText("Folio 214 — Juan Pérez", {
+    x: 30,
+    y: 700,
+    size: 10,
+    font,
+    color: rgb(0.4, 0.4, 0.4),
+    rotate: degrees(270),
+  });
+
+  return doc.save();
+}
+
 export async function generateEmpty(): Promise<Uint8Array> {
   // "empty.pdf" = PDF con 1 página sin contenido (sin texto dibujado, sin
   // /Contents). pdf-lib no permite generar PDFs con 0 páginas (doc.save()
@@ -236,6 +460,16 @@ async function main(): Promise<void> {
 
   const corrupt = await generateCorrupt();
   await writeFile(resolve(FIXTURE_DIR, "corrupt.pdf"), corrupt);
+
+  // Documentos del gate manual de ADR-058 §11 / ADR-086 §4. No los consume
+  // ninguna suite: existen para poder correr a mano un gate que ninguna suite
+  // headless puede juzgar ("las líneas repintadas no se distinguen de las que
+  // no se tocaron a tamaño de lectura").
+  const tablesJustified = await generateTablesJustified();
+  await writeFile(resolve(FIXTURE_DIR, "qa-tables-justified.pdf"), tablesJustified);
+
+  const stamp = await generateStamp();
+  await writeFile(resolve(FIXTURE_DIR, "qa-stamp.pdf"), stamp);
 
   // Reporte por stdout (no console.error, no es un motor del Core).
   process.stdout.write(

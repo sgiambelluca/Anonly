@@ -209,6 +209,29 @@ tests/fixtures/reference/
 
 El dataset debe existir **antes de cerrar el Hito 4**.
 
+## Documentos de QA manual (no los consume ninguna suite)
+
+`qa-tables-justified.pdf` y `qa-stamp.pdf` existen para el **gate manual** de `adr/ADR-058` §11 y
+`adr/ADR-086` §4, que exige mirar cuatro documentos en un browser real **sobre el PDF exportado** y
+juzgar si las líneas repintadas se distinguen de las que no se tocaron. Ninguna suite headless puede
+juzgar eso, así que ningún test los importa: se cargan a mano.
+
+| Fixture | Qué ejercita |
+|---|---|
+| `qa-tables-justified.pdf` | texto **justificado real** (espaciado irregular entre palabras, calculado con `font.widthOfTextAtSize`) y **celdas de tabla angostas**, donde el repintado no tiene espacio en blanco al que correrse |
+| `qa-stamp.pdf` | **sello vertical a 90°** con un dato adentro, **folio a 270°** y **marca de agua diagonal traslúcida** sobre el cuerpo — los tres casos de texto rotado que ADR-063 tuvo que arreglar, más el riesgo de solapamiento que su §6 dejó anotado |
+
+**Son sintéticos, y eso acota qué se puede concluir de ellos.** Reproducen el régimen, no la suciedad
+de un expediente real: un PDF de procesador de texto trae kerning por par de glifos y fuentes
+subseteadas, y un sello escaneado es una imagen y no texto. Sirven para decidir que **hay** defectos
+—de hecho encontraron ocho, cuatro de ellos fugas de dato, ver `roadmap/Post_Hito10.8_Pendientes.md`
+§23— pero **no** para declarar que no hay otros. El día que haya un expediente real, el gate se
+vuelve a correr sobre él.
+
+La tercera fila del gate, el documento **escaneado**, sigue sin fixture propio: `pdf-lib` no rasteriza
+y el repo no tiene rasterizador en Node. El E2E lo resuelve generándolo dentro del browser
+(`tests/e2e/support/scannedPdf.ts`), que es el camino a reusar cuando se complete esa fila.
+
 ## Reglas
 
 - **NUNCA** commitear PDFs con datos personales reales. Los fixtures son sintéticos o públicos.
