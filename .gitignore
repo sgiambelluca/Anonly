@@ -66,6 +66,13 @@ apps/react-client/src/assets/onnxruntime/
 # criterio que public/wasm/ y public/models/ de arriba.
 apps/react-client/public/pdfjs/
 
+# Skills de Claude Code instaladas localmente (`.claude/skills/`): 172
+# archivos / ~71k líneas de herramienta de terceros que no son código del
+# proyecto y ensuciaban todo `git status` y todo diff de branch. Los agentes
+# (`.claude/agents/`) y `launch.json` SÍ se commitean: esos los escribimos
+# nosotros y `CLAUDE.md` los referencia.
+.claude/skills/
+
 # Changesets temporales
 .changeset/*.md
 !.changeset/config.json

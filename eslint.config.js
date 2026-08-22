@@ -21,6 +21,11 @@ export default tseslint.config(
       "playwright-report/**",
       "test-results/**",
       "**/dist/**",
+      // Skills de Claude Code instaladas localmente: sus scripts `.cjs` no
+      // están en ningún tsconfig, así que el type-aware linting los rechaza
+      // con "was not found by the project service" y rompía `pnpm lint`
+      // entero. No son código del proyecto (ver `.gitignore`).
+      ".claude/skills/**",
       // Assets vendor mirroreados por scripts/mirror-assets.ts (ADR-018):
       // bundles de terceros descargados tal cual, no código propio.
       "apps/react-client/public/wasm/**",
