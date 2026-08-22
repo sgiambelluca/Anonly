@@ -170,11 +170,21 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribe {
   );
 
   // ─── Render (canal `render`) ───
-  // PREVIEW_PAGE_FAILED no necesita wiring propio: al no llegar nunca un
-  // PREVIEW_UPDATED para esa página, `viewer.previewByPage` no tiene entrada
-  // y `PageCanvas` ya dibuja el skeleton gris por defecto cuando `!blobUrl`
-  // (Components.md §5.4) — exactamente el comportamiento pedido por
-  // React_Client.md §8 sin mutar el store.
+
+  // PREVIEW_PAGE_FAILED **sí** necesita wiring, y la nota anterior decía lo
+  // contrario: "al no llegar nunca un PREVIEW_UPDATED, `PageCanvas` ya dibuja
+  // el skeleton gris". Es cierto para el dibujo y falso para el usuario —
+  // dejaba un fallo permanente y una página que todavía no renderizó en el
+  // MISMO estado, un rectángulo gris indistinguible. Con el fallo real que
+  // motivó esto (`Post_Hito10.8_Pendientes.md` §21) el visor entero quedaba
+  // gris sin una sola señal de que algo había fallado, ni en pantalla ni en
+  // consola (el `warn` del motor va a un logger nulo).
+  unsubs.push(
+    bus.on(EventChannel.Render, EngineEvents.PREVIEW_PAGE_FAILED, (payload) => {
+      // Sin `kind`: `PreviewPageFailed` no lo trae (ver `viewer.store.ts`).
+      stores.viewer.getState().setPageFailed(payload.pageIndex);
+    }),
+  );
 
   unsubs.push(
     bus.on(EventChannel.Render, EngineEvents.PREVIEW_UPDATED, (payload) => {

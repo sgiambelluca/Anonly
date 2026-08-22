@@ -75,6 +75,7 @@ export function PdfViewer() {
   // tienen imágenes distintas de la misma página, y conmutar el toggle pinta
   // la cacheada sin esperar un render nuevo.
   const previewByPage = useViewerStore((state) => state.previewByPage[kind]);
+  const failedPages = useViewerStore((state) => state.failedPages);
 
   const pageHeight = computePageHeight(zoom);
   const pageWidth = computePageWidth(pageHeight);
@@ -138,6 +139,7 @@ export function PdfViewer() {
         documentId,
         mountedPageIndices: mountedPageIndicesRef.current,
         previewByPage,
+        failedPages,
         attempts: retryAttemptsRef.current,
       });
       if (missing.length === 0) {
@@ -148,7 +150,7 @@ export function PdfViewer() {
       actions.requestRender(missing, kind, "preview", computeZoomRenderScale(zoom));
     }, PREVIEW_RETRY_INTERVAL_MS);
     return () => window.clearInterval(timer);
-  }, [documentId, kind, previewByPage, mountRange.start, mountRange.end]);
+  }, [documentId, kind, previewByPage, failedPages, mountRange.start, mountRange.end]);
 
   // Cambio de visibleRange (scroll) → render inmediato, con la escala vigente.
   useEffect(() => {
@@ -274,6 +276,7 @@ export function PdfViewer() {
                   {...(blobUrl !== undefined ? { blobUrl } : {})}
                   width={pageWidth}
                   height={pageHeight}
+                  failed={failedPages.has(pageIndex)}
                 />
                 {isOriginalPanel(kind) ? (
                   <WordSelectionOverlay

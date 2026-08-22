@@ -46,6 +46,14 @@ export interface PreviewRetryParams {
   readonly mountedPageIndices: ReadonlyArray<number>;
   /** `viewer.previewByPage[kind]` — las imágenes que ya llegaron. */
   readonly previewByPage: ReadonlyMap<number, string>;
+  /**
+   * `viewer.failedPages` — páginas cuyo render falló de verdad
+   * (`PREVIEW_PAGE_FAILED`). **No se reintentan**: el motor ya agotó sus
+   * propios reintentos antes de emitir ese evento, así que volver a pedirlas
+   * es trabajo garantizado-inútil, y encima taparía el aviso de fallo con un
+   * skeleton cada vez.
+   */
+  readonly failedPages: ReadonlySet<number>;
   readonly attempts: number;
 }
 
@@ -54,8 +62,10 @@ export interface PreviewRetryParams {
  * reintentar.
  */
 export function pagesMissingPreview(params: PreviewRetryParams): ReadonlyArray<number> {
-  const { documentId, mountedPageIndices, previewByPage, attempts } = params;
+  const { documentId, mountedPageIndices, previewByPage, failedPages, attempts } = params;
   if (documentId === null) return [];
   if (attempts >= PREVIEW_RETRY_MAX_ATTEMPTS) return [];
-  return mountedPageIndices.filter((pageIndex) => !previewByPage.has(pageIndex));
+  return mountedPageIndices.filter(
+    (pageIndex) => !previewByPage.has(pageIndex) && !failedPages.has(pageIndex),
+  );
 }

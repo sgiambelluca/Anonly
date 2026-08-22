@@ -9,6 +9,7 @@ const base = {
   documentId: "doc-1",
   mountedPageIndices: [0, 1, 2],
   previewByPage: new Map<number, string>(),
+  failedPages: new Set<number>(),
   attempts: 0,
 } as const;
 
@@ -63,5 +64,27 @@ describe("pagesMissingPreview", () => {
         [],
       );
     });
+  });
+});
+
+describe("páginas que fallaron de verdad", () => {
+  it("no se reintentan: el motor ya agotó sus propios reintentos antes de avisar", () => {
+    expect(pagesMissingPreview({ ...base, failedPages: new Set([1]) })).toEqual([0, 2]);
+  });
+
+  it("con todas falladas no queda nada que pedir, y el intervalo se corta", () => {
+    expect(pagesMissingPreview({ ...base, failedPages: new Set([0, 1, 2]) })).toEqual([]);
+  });
+
+  it("una página con imagen no se pide aunque también figure como fallada", () => {
+    // El orden de los eventos no está garantizado; el resultado no debe
+    // depender de cuál llegó último.
+    expect(
+      pagesMissingPreview({
+        ...base,
+        previewByPage: new Map([[1, "blob:b"]]),
+        failedPages: new Set([1]),
+      }),
+    ).toEqual([0, 2]);
   });
 });

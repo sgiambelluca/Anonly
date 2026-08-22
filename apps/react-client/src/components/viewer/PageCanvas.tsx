@@ -6,6 +6,16 @@
  * Entidades (PR8/PR9, fuera de alcance de este PR) — se agregan cuando ese
  * panel exista.
  *
+ * **Estado de fallo** (`failed`): cuando `PREVIEW_PAGE_FAILED` marcó la
+ * página, se dibuja un aviso encima del canvas en vez del skeleton pelado.
+ * Sin eso, "falló para siempre" y "todavía no llegó" son el mismo gris — que
+ * es exactamente cómo un defecto real del render pudo dejar el visor entero
+ * en blanco sin una sola señal (`Post_Hito10.8_Pendientes.md` §21).
+ *
+ * El copy dice **que el documento no cambió**: el usuario está mirando una
+ * herramienta de anonimización, y un error sobre el documento se lee como
+ * "algo le pasó a mi archivo" si nadie aclara lo contrario.
+ *
  * `width`/`height` no están en la lista de props del catálogo, pero son
  * necesarias para poder dibujar "con dimensión correcta" (spec) incluso antes
  * de tener una imagen real: las computa `PdfViewer`/`PageVirtualizer` a partir
@@ -13,6 +23,7 @@
  * Core al cliente, ver esa nota en `pageLayout.ts`).
  */
 
+import { ImageOffIcon } from "lucide-react";
 import { memo, useEffect, useRef } from "react";
 
 import { shouldReassignCanvasDimensions } from "./canvasDimensions.js";
@@ -23,12 +34,18 @@ export interface PageCanvasProps {
   readonly blobUrl?: string;
   readonly width: number;
   readonly height: number;
+  /**
+   * El render de esta página **falló** (`viewer.failedPages`). Distinto de
+   * "todavía no llegó": sin esta distinción los dos casos son el mismo
+   * rectángulo gris, y el usuario no tiene forma de saber si esperar.
+   */
+  readonly failed?: boolean;
 }
 
 /** Gris de skeleton (`--color-border` / `bg-tertiary`, `ui/Components.md` §10). */
 const SKELETON_FILL = "#e5e7eb";
 
-function PageCanvasImpl({ pageIndex, kind, blobUrl, width, height }: PageCanvasProps) {
+function PageCanvasImpl({ pageIndex, kind, blobUrl, width, height, failed }: PageCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -81,13 +98,30 @@ function PageCanvasImpl({ pageIndex, kind, blobUrl, width, height }: PageCanvasP
     };
   }, [blobUrl, width, height]);
 
+  const label = `Página ${pageIndex + 1}, ${kind === "original" ? "original" : "anonimizado"}`;
+
+  // El aviso va **encima** del canvas y no en vez de él: el canvas conserva la
+  // dimensión de la página, así que el scroll no salta cuando una página del
+  // medio falla.
   return (
-    <canvas
-      ref={canvasRef}
-      role="img"
-      aria-label={`Página ${pageIndex + 1}, ${kind === "original" ? "original" : "anonimizado"}`}
-      className="block h-full w-full"
-    />
+    <div className="relative h-full w-full">
+      <canvas
+        ref={canvasRef}
+        role="img"
+        aria-label={failed === true ? `${label} — no se pudo mostrar` : label}
+        className="block h-full w-full"
+      />
+      {failed === true && blobUrl === undefined ? (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-4 text-center">
+          <ImageOffIcon className="h-6 w-6 text-text-secondary" aria-hidden />
+          <p className="text-sm font-medium text-text-primary">No se pudo mostrar esta página</p>
+          <p className="max-w-xs text-sm text-text-secondary">
+            El documento no cambió: es la vista previa la que falló. Podés seguir revisando y
+            exportar igual.
+          </p>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

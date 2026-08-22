@@ -40,6 +40,25 @@ export interface ViewerSlice {
   readonly mode: ViewerKind;
   readonly previewByPage: Readonly<Record<ViewerKind, ReadonlyMap<number, string>>>;
   /**
+   * Páginas cuyo render **falló** (`PREVIEW_PAGE_FAILED`).
+   *
+   * Existe porque sin esto un fallo permanente y una página que todavía no
+   * renderizó son **el mismo estado**: sin entrada en `previewByPage`, y por
+   * lo tanto el mismo rectángulo gris. El bridge tenía escrito que
+   * `PREVIEW_PAGE_FAILED` "no necesita wiring propio" justamente por eso — y
+   * era cierto para el dibujo, pero dejaba a la UI sin poder distinguir
+   * "esperá" de "esto no va a llegar" (`Post_Hito10.8_Pendientes.md` §21).
+   *
+   * **Sin `kind`, y no por decisión de acá**: `PreviewPageFailed`
+   * (`Contracts.md` §8) trae `documentId`, `pageIndex` y `error`, pero **no**
+   * de qué panel era el render que falló. Atribuirlo a uno sería inventar un
+   * dato; marcar la página entera es lo único que el payload sostiene. La
+   * consecuencia real es acotada —un fallo del anonimizado marca también el
+   * original— y el desvío correcto sería agregar `kind` al evento, que es
+   * cambio de contrato y pide ADR.
+   */
+  readonly failedPages: ReadonlySet<number>;
+  /**
    * ADR-084 §1: la consulta del `DocumentSearchBox`. Sube al store —en vez de
    * quedar en el `useState` del propio buscador— para que "Ver ocurrencias"
    * del panel de entidades pueda escribirla desde el otro extremo del árbol.
@@ -53,6 +72,7 @@ export interface ViewerSlice {
   setZoom(z: number): void;
   setMode(mode: ViewerKind): void;
   setPreview(pageIndex: number, kind: ViewerKind, blobUrl: string): void;
+  setPageFailed(pageIndex: number): void;
   setVisibleRange(start: number, end: number): void;
   reset(): void;
 }
@@ -66,7 +86,13 @@ function clampZoom(zoom: number): number {
 
 type ViewerData = Pick<
   ViewerSlice,
-  "currentPageIndex" | "zoom" | "mode" | "previewByPage" | "visibleRange" | "searchQuery"
+  | "currentPageIndex"
+  | "zoom"
+  | "mode"
+  | "previewByPage"
+  | "failedPages"
+  | "visibleRange"
+  | "searchQuery"
 >;
 
 const initialState: ViewerData = {
@@ -76,6 +102,7 @@ const initialState: ViewerData = {
   // (UX-3b), así que cualquier otro default sería inalcanzable.
   mode: "original",
   previewByPage: { original: new Map(), anonymized: new Map() },
+  failedPages: new Set(),
   searchQuery: "",
   visibleRange: { start: 0, end: 0 },
 };
@@ -98,7 +125,23 @@ export const useViewerStore = create<ViewerSlice>((set) => ({
     set((state) => {
       const next = new Map(state.previewByPage[kind]);
       next.set(pageIndex, blobUrl);
-      return { previewByPage: { ...state.previewByPage, [kind]: next } };
+      // Una página que ahora sí renderizó deja de estar fallada: un reintento
+      // que prospera tiene que poder limpiar la marca, o el error quedaría
+      // pegado sobre una imagen correcta.
+      if (!state.failedPages.has(pageIndex)) {
+        return { previewByPage: { ...state.previewByPage, [kind]: next } };
+      }
+      const failed = new Set(state.failedPages);
+      failed.delete(pageIndex);
+      return { previewByPage: { ...state.previewByPage, [kind]: next }, failedPages: failed };
+    });
+  },
+  setPageFailed(pageIndex) {
+    set((state) => {
+      if (state.failedPages.has(pageIndex)) return {};
+      const next = new Set(state.failedPages);
+      next.add(pageIndex);
+      return { failedPages: next };
     });
   },
   setVisibleRange(start, end) {
