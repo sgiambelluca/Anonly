@@ -69,12 +69,17 @@ test("editar un grupo mientras NER sigue corriendo no pierde la edición", async
   await page.locator('input[type="file"]').setInputFiles(file);
 
   // Prueba temprana de que NER está en carrera: `NER_MODEL_LOADING` es un
-  // estado transitorio (`pipeline.store.modelLoading`, prioridad más alta en
-  // `pipelineStageLabel.ts`) que desaparece en cuanto `NER_MODEL_READY`
-  // llega — se verifica ACÁ, antes de que el resto del flujo tenga chance de
-  // dejarlo atrás.
+  // estado transitorio (`pipeline.store.modelLoading`, la de prioridad más
+  // alta) que desaparece en cuanto `NER_MODEL_READY` llega — se verifica ACÁ,
+  // antes de que el resto del flujo tenga chance de dejarlo atrás.
+  //
+  // ADR-087 §7.1: decía "Cargando modelo NER…" y ahora dice "Preparando el
+  // detector de nombres… N%" (`ScanScreen.tsx#scanStatusLabel`). "NER" es el
+  // nombre de un motor, no algo que el usuario tenga por qué conocer. El
+  // `role="status"` que resuelve acá es el de `ScanScreen`, que es la única
+  // pantalla montada en esta fase.
   const status = page.getByRole("status");
-  await expect(status).toHaveText(/Cargando modelo NER…/, { timeout: 30_000 });
+  await expect(status).toContainText(/Preparando el detector de nombres…/, { timeout: 30_000 });
 
   // El grupo del DNI (Regex) aparece incrementalmente, antes de Ready.
   const dniGroup = page.getByRole("treeitem", { name: "34.567.891" });

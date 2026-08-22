@@ -8,10 +8,24 @@
  * scrollear rápido "original" hacía parpadear "anonimizado", que el usuario
  * no había tocado).
  *
- * Complementa al escenario de `adr/ADR-054-Scroll-Independiente-Por-Panel.md`
- * §8 (`viewer-scroll-jump.spec.ts`): ese cubre que el `scrollTop` de un panel
- * no mueve al otro; este cubre el pipeline de RENDER que dispara ese
- * scroll — que el panel no tocado tampoco vuelve a pedir/recibir píxeles.
+ * **Reescrito por ADR-087 §2: ya no hay dos paneles.** El escenario nació
+ * cuando el visor mostraba `original` y `anonymized` lado a lado, y afirmaba
+ * que scrollear uno no hacía parpadear al otro. Con el visor único hay un solo
+ * kind montado por vez, así que la garantía cambia de forma: lo que se afirma
+ * ahora es que **mientras se mira `original`, no se pinta un solo bitmap de
+ * `anonymized`** — ni por un pedido de más, ni por una suscripción que quedó
+ * viva del otro modo.
+ *
+ * Es una garantía **más débil** que la original, y conviene decirlo: antes el
+ * otro panel estaba montado y podía verse parpadear; ahora no está montado, así
+ * que buena parte de la afirmación la sostiene el propio diseño. Se conserva
+ * igual por dos razones: sigue siendo el único test que mira el pipeline de
+ * render real disparado por scroll (no el `scrollTop`), y la mitad de
+ * evidencia positiva —que scrollear SÍ produce renders de `original`— es la
+ * que evita que quede vacuamente verde el día que algo deje de renderizar.
+ *
+ * El `scrollTop` en sí lo cubre `viewer-scroll-jump.spec.ts`, también
+ * reescrito para el visor único.
  *
  * `PdfViewer`/`PageCanvas` no exponen ningún evento del bus al DOM
  * directamente (mismo problema que el Escenario 11, `scenario-11-zoom.spec.ts`),
@@ -104,12 +118,9 @@ async function waitForDrawQuiescence(
   );
 }
 
-test("scrollear el panel original con la sincronización apagada no dispara ningún render de anonymized", async ({
+test("scrollear el visor en modo original no dispara ningún render de anonymized", async ({
   page,
 }) => {
-  // Ventana ancha (≥ lg = 1024px, Tailwind): los dos paneles visibles a la
-  // vez (Contexto §1 del ADR), mismo criterio que
-  // `viewer-scroll-jump.spec.ts` (describe "viewport ancho ... ADR-054 §8").
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto("/", { waitUntil: "networkidle" });
   await recordCanvasDraws(page);
@@ -120,30 +131,24 @@ test("scrollear el panel original con la sincronización apagada no dispara ning
   const firstPageOriginal = page.getByRole("img", { name: "Página 1, original" });
   await expect(firstPageOriginal).toBeVisible({ timeout: 30_000 });
 
-  const originalContainer = page.locator('[aria-label="PDF original"] > div').first();
-  const anonymizedContainer = page.locator('[aria-label="PDF anonimizado"] > div').first();
+  const originalContainer = page.locator('[aria-label="Documento original"] > div').first();
   await originalContainer.waitFor({ state: "visible" });
-  await anonymizedContainer.waitFor({ state: "visible" });
 
-  // Sincronización apagada por default (ADR-054 §2) — no se toca el toggle.
+  // El visor arranca en `original` (`viewer.store.ts`) — no se toca el toggle.
 
-  // Espera a que el render inicial de LOS DOS paneles arranque: al montar,
-  // cada `PdfViewer` pide su propio preview de entrada (ADR-056 §2, tres
-  // emisores por panel) — es trabajo legítimo, no el bug de este escenario.
-  // Página 1 en los dos paneles es solo la señal de arranque, no de
-  // asentamiento completo (ver `waitForDrawQuiescence` debajo).
+  // Espera a que el render inicial arranque: al montar, `PdfViewer` pide su
+  // preview de entrada (ADR-056 §2) — es trabajo legítimo, no el bug de este
+  // escenario. La página 1 es solo la señal de arranque, no de asentamiento
+  // completo (ver `waitForDrawQuiescence` debajo).
   await page.waitForFunction(
     () => {
       const draws = (globalThis as unknown as { __draws?: string[] }).__draws ?? [];
-      return (
-        draws.some((label) => label === "Página 1, original") &&
-        draws.some((label) => label === "Página 1, anonimizado")
-      );
+      return draws.some((label) => label === "Página 1, original");
     },
     { polling: 100, timeout: 30_000 },
   );
 
-  // El rango montado es visible ± 1: además de la página 1, cada panel sigue
+  // El rango montado es visible ± 1: además de la página 1, el visor sigue
   // recibiendo renders de las páginas 2/3 un instante más. Esperar quietud
   // real (no solo "llegó la página 1") antes de limpiar el registro evita
   // que esos renders legítimos, tardíos, aterricen después de `clearDraws` y
@@ -151,7 +156,7 @@ test("scrollear el panel original con la sincronización apagada no dispara ning
   await waitForDrawQuiescence(page, SETTLE_QUIET_MS, 15_000);
 
   const box = await originalContainer.boundingBox();
-  if (!box) throw new Error('No se pudo ubicar el contenedor de "original".');
+  if (!box) throw new Error("No se pudo ubicar el contenedor del visor.");
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
 
   // Limpia el registro justo antes de scrollear: de acá en más, cualquier
@@ -159,10 +164,10 @@ test("scrollear el panel original con la sincronización apagada no dispara ning
   // tocado recargándose).
   await clearDraws(page);
 
-  // Scroll rápido y sostenido del panel "original" (mismo patrón que
-  // `viewer-scroll-jump.spec.ts`): cruza varios bordes de página, cada
-  // cambio de rango montado dispara su propio RENDER_REQUESTED con
-  // `kind: "original"` (ADR-056 §1/§2) — nunca el del otro panel.
+  // Scroll rápido y sostenido (mismo patrón que `viewer-scroll-jump.spec.ts`):
+  // cruza varios bordes de página, y cada cambio de rango montado dispara su
+  // propio RENDER_REQUESTED con `kind: "original"` (ADR-056 §1/§2) — nunca el
+  // del kind que no se está mirando.
   const WHEEL_TICKS = 20;
   const WHEEL_DELTA_Y = 350; // 20 * 350 = 7000px: cruza varios bordes de página (800px c/u).
   for (let tick = 0; tick < WHEEL_TICKS; tick += 1) {
@@ -179,19 +184,19 @@ test("scrollear el panel original con la sincronización apagada no dispara ning
   const originalDraws = labels.filter((label) => label.includes("original"));
   const anonymizedDraws = labels.filter((label) => label.includes("anonimizado"));
 
-  // Evidencia positiva primero: el scroll de "original" sí tiene que haber
-  // ejercitado el pipeline de render real de ese panel. Si esto diera 0, el
-  // test de abajo sería vacuamente verde y no probaría nada.
+  // Evidencia positiva primero, y es la mitad que más trabaja desde el visor
+  // único: el scroll SÍ tiene que haber ejercitado el pipeline de render real.
+  // Si esto diera 0, la afirmación de abajo sería vacuamente verde.
   expect(
     originalDraws.length,
-    'el scroll de "original" debería haber disparado al menos un render real de ese panel',
+    "el scroll debería haber disparado al menos un render real del kind visible",
   ).toBeGreaterThan(0);
 
-  // La prueba directa del escenario (ADR-056 §1/§8): el panel "anonimizado",
-  // que el usuario no tocó, no recibió ningún PREVIEW_UPDATED — cero draws
-  // de bitmaps nuevos en sus canvases mientras "original" scrolleaba.
+  // ADR-056 §1/§8: mirando `original`, no se pinta un solo bitmap de
+  // `anonymized` — ni por un pedido de más, ni por una suscripción viva del
+  // otro modo.
   expect(
     anonymizedDraws,
-    `"anonimizado" no debería haber recibido ningún render tras scrollear "original" (draws: ${anonymizedDraws.join(", ")})`,
+    `no debería haberse renderizado "anonimizado" mientras se mira "original" (draws: ${anonymizedDraws.join(", ")})`,
   ).toHaveLength(0);
 });
