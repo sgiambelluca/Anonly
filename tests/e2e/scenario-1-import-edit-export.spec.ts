@@ -50,13 +50,24 @@ test("cargar PDF con texto, ver grupos, editar modo, exportar y descargar", asyn
   const exportButton = page.getByRole("button", { name: "Exportar" });
   await expect(exportButton).toBeVisible({ timeout: 150_000 });
 
-  // "editar modo de un grupo": el `Select` de reemplazo del grupo del DNI, de
-  // "Placeholder" (default) a "Máscara".
-  const replacementModeSelect = dniGroup.getByRole("combobox", { name: "Modo de reemplazo" });
-  await expect(replacementModeSelect).toHaveText("Placeholder");
+  // "editar modo de un grupo": el selector de reemplazo del grupo del DNI, del
+  // default a "Ocultar parcialmente".
+  //
+  // ADR-087 §4 renombró los modos a lo que HACEN ("Placeholder" → "Etiquetar",
+  // "Máscara" → "Ocultar parcialmente") y §3 reemplazó el `Select` nativo por
+  // un disparador + menú propio, sin `role="combobox"`/`role="option"`: el
+  // estado vigente se lee del nombre accesible del disparador, que lleva la
+  // forma larga (el texto visible es la corta, `REPLACEMENT_MODE_SHORT_LABEL`).
+  const replacementModeSelect = dniGroup.getByRole("button", {
+    name: /^Modo de reemplazo de /,
+  });
+  await expect(replacementModeSelect).toHaveAccessibleName(/Etiquetar/);
   await replacementModeSelect.click();
-  await page.getByRole("option", { name: "Máscara" }).click();
-  await expect(replacementModeSelect).toHaveText("Máscara");
+  await page
+    .getByRole("group", { name: "Modo de reemplazo" })
+    .getByRole("button", { name: /^Ocultar parcialmente/ })
+    .click();
+  await expect(replacementModeSelect).toHaveAccessibleName(/Ocultar parcialmente/);
 
   // "exportar": abre `ExportDialog` y confirma con los valores default del
   // form (nombre "anonimizado.pdf", JPEG 150 DPI) — válidos sin tocar nada
@@ -64,7 +75,7 @@ test("cargar PDF con texto, ver grupos, editar modo, exportar y descargar", asyn
   // default, `grouping.engine.ts`) no aparece el pre-flight de "sin grupos
   // habilitados".
   await exportButton.click();
-  const exportDialog = page.getByRole("dialog", { name: "Exportar PDF anonimizado" });
+  const exportDialog = page.getByRole("dialog", { name: "Exportar documento anonimizado" });
   await expect(exportDialog).toBeVisible();
   await exportDialog.getByRole("button", { name: "Exportar" }).click();
 

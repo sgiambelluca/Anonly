@@ -20,23 +20,35 @@
  * "siete bugs reales" que solo aparecieron con Playwright en PR10,
  * `Hito10_Observaciones_Revision.md`).
  *
- * **Extendido por `adr/ADR-054-Scroll-Independiente-Por-Panel.md` §8**: el
- * diagnóstico final del bug (tres defectos que se componían: el `min(Set)` de
- * arriba, la falta de un dueño del scroll, y una sincronización por índice de
- * página) llevó a eliminar la sincronización obligatoria entre los dos
- * paneles (`scrollSync.ts`/`computeScrollSyncTarget`, borrados). Con scroll
- * independiente por defecto, el test original de "salto grande" ya no puede
- * seguir asumiendo que el panel "anonimizado" se mueve junto con "original"
- * (esa era justamente la mitad del mecanismo que se retiró) — se ajusta acá
- * para verificar la independencia en vez de una propagación que ya no existe.
- * Los tests nuevos cubren el caso que el spec original no cubría: los DOS
- * paneles visibles a la vez (viewport ≥ 1024px), con la sincronización
- * opcional apagada (default) y prendida.
+ * ---
+ *
+ * **Reescrito por ADR-087 §2: ya no hay dos paneles.** La versión anterior
+ * cubría, además del salto, la relación ENTRE los dos paneles del
+ * `SideBySideViewer` (independencia con la sincronización apagada, alineación
+ * a nivel de píxel con la sincronización prendida — ADR-054 §8). Ese visor se
+ * retiró: ahora hay **un solo visor con un toggle** Original/Anonimizado, así
+ * que no hay un segundo panel que pueda moverse solo ni desalinearse, y el
+ * `ScrollSyncToggle` que esos tests manejaban ya no existe.
+ *
+ * Qué se conserva y qué lo reemplaza:
+ *
+ * - El **síntoma original** (salto grande → rango montado real) sigue igual de
+ *   vigente: es del virtualizador, no del reparto en paneles. Se mantiene.
+ * - El **cruce de bordes de página con la rueda** (scrollTop nunca decrece,
+ *   no se vuelve a la página 1) también es del virtualizador. Se mantiene, sin
+ *   el `describe` de "viewport ancho" que existía solo para tener los dos
+ *   paneles a la vista.
+ * - La **alineación entre paneles** no tiene equivalente directo, pero sí
+ *   tiene un sucesor con el mismo propósito: que al mirar el mismo documento
+ *   de dos maneras no se pierda el lugar donde uno estaba. En el visor único
+ *   eso es **conmutar Original ↔ Anonimizado sin perder la posición de
+ *   scroll**, y es cobertura nueva de ADR-087 §2.
  */
 
 import { expect, test, type Page } from "@playwright/test";
 
 import { manyNeutralPagesFile } from "./support/fixtures.js";
+import { installSettingsOverride } from "./support/settingsOverride.js";
 
 const PAGE_COUNT = 60;
 
@@ -50,6 +62,11 @@ function pageNumberFromAriaLabel(label: string | null): number | undefined {
   return Number(match[1]);
 }
 
+/**
+ * Páginas montadas con contenido real. `kindLabel` es el `aria-label` del
+ * contenedor del visor (`PdfViewer.tsx#KIND_LABEL`), que cambia con el modo
+ * porque el visor es uno solo y muestra un kind por vez.
+ */
 async function mountedPageNumbers(page: Page, kindLabel: string): Promise<number[]> {
   const labels = await page
     .locator(`[aria-label="${kindLabel}"] [role="img"]`)
@@ -58,6 +75,10 @@ async function mountedPageNumbers(page: Page, kindLabel: string): Promise<number
     .map((label) => pageNumberFromAriaLabel(label))
     .filter((n): n is number => n !== undefined);
   return numbers.sort((a, b) => a - b);
+}
+
+function viewerContainer(page: Page, kindLabel = "Documento original") {
+  return page.locator(`[aria-label="${kindLabel}"] > div`).first();
 }
 
 async function importManyPagesDocument(page: Page): Promise<void> {
@@ -74,14 +95,12 @@ test("un salto grande de scroll deja el visor en la posición real, no en la pá
 }) => {
   await importManyPagesDocument(page);
 
-  const originalContainer = page.locator('[aria-label="PDF original"] > div').first();
-  await originalContainer.waitFor({ state: "visible" });
+  const container = viewerContainer(page);
+  await container.waitFor({ state: "visible" });
 
-  // Salto grande de golpe en "original": equivalente a un usuario arrastrando
-  // la scrollbar hasta el final, o varios wheel events rápidos que el
-  // navegador coalesce. Con scroll independiente (ADR-054 §1), "anonimizado"
-  // NO recibe ningún salto — no hay scroll-sync por defecto.
-  await originalContainer.evaluate((el) => {
+  // Salto grande de golpe: equivalente a un usuario arrastrando la scrollbar
+  // hasta el final, o varios wheel events rápidos que el navegador coalesce.
+  await container.evaluate((el) => {
     el.scrollTop = el.scrollHeight - el.clientHeight;
   });
 
@@ -90,160 +109,105 @@ test("un salto grande de scroll deja el visor en la posición real, no en la pá
   // frames + un margen chico alcanza para que el rango se estabilice.
   await page.waitForTimeout(500);
 
-  const originalPages = await mountedPageNumbers(page, "PDF original");
-  const anonymizedPages = await mountedPageNumbers(page, "PDF anonimizado");
+  const mounted = await mountedPageNumbers(page, "Documento original");
 
-  // Síntoma del bug original: el rango montado de "original" quedaba anclado
-  // (parcial o totalmente) en la página 1 en vez de reflejar el salto al
-  // final del documento.
+  // Síntoma del bug original: el rango montado quedaba anclado (parcial o
+  // totalmente) en la página 1 en vez de reflejar el salto al final.
+  expect(mounted.length, `páginas montadas: ${mounted.join(", ")}`).toBeGreaterThan(0);
   expect(
-    originalPages.length,
-    `páginas montadas (original): ${originalPages.join(", ")}`,
-  ).toBeGreaterThan(0);
-  expect(
-    Math.min(...originalPages),
-    `rango montado (original) tras el salto: [${originalPages.join(", ")}] — no debería incluir la página 1`,
+    Math.min(...mounted),
+    `rango montado tras el salto: [${mounted.join(", ")}] — no debería incluir la página 1`,
   ).toBeGreaterThan(PAGE_COUNT - 10);
-
-  // Independencia (ADR-054 §1): "anonimizado" no fue tocado, así que se queda
-  // exactamente donde montó al abrir el documento — cerca de la página 1.
-  expect(
-    anonymizedPages.length,
-    `páginas montadas (anonimizado): ${anonymizedPages.join(", ")}`,
-  ).toBeGreaterThan(0);
-  expect(
-    Math.min(...anonymizedPages),
-    `"anonimizado" no debería haberse movido: [${anonymizedPages.join(", ")}]`,
-  ).toBeLessThanOrEqual(3);
 });
 
-test.describe("viewport ancho (≥ 1024px, dos paneles visibles) — ADR-054 §8", () => {
-  test.beforeEach(async ({ page }) => {
-    await page.setViewportSize({ width: 1280, height: 900 });
+test("cruzar varios bordes de página con la rueda no decrece scrollTop ni vuelve a la página 1", async ({
+  page,
+}) => {
+  await importManyPagesDocument(page);
+
+  const container = viewerContainer(page);
+  await container.waitFor({ state: "visible" });
+
+  const box = await container.boundingBox();
+  if (!box) throw new Error("No se pudo ubicar el contenedor del visor.");
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+
+  let previousScrollTop = 0;
+  const WHEEL_TICKS = 20;
+  const WHEEL_DELTA_Y = 350; // 20 * 350 = 7000px: varias veces el alto de página (800px), cruza sobradamente 3-4 bordes.
+
+  for (let tick = 0; tick < WHEEL_TICKS; tick += 1) {
+    await page.mouse.wheel(0, WHEEL_DELTA_Y);
+    await page.waitForTimeout(30);
+
+    const currentScrollTop = await container.evaluate((el) => el.scrollTop);
+    expect(
+      currentScrollTop,
+      `scrollTop decreció en el tick ${tick}: ${previousScrollTop} → ${currentScrollTop}`,
+    ).toBeGreaterThanOrEqual(previousScrollTop);
+    previousScrollTop = currentScrollTop;
+  }
+
+  await page.waitForTimeout(300);
+
+  const mounted = await mountedPageNumbers(page, "Documento original");
+  expect(
+    Math.min(...mounted),
+    `el visor no debería haber vuelto a la página 1: [${mounted.join(", ")}]`,
+  ).toBeGreaterThan(3);
+});
+
+/**
+ * Sucesor de los dos tests de sincronización entre paneles (ADR-054 §8), que
+ * se fueron con el `SideBySideViewer`. El propósito que sí sobrevive: mirar el
+ * mismo documento de dos maneras sin perder el lugar donde uno estaba.
+ *
+ * Corre con **NER apagado** (`nerEnabled: false`) porque necesita llegar a
+ * `Ready` —el toggle está deshabilitado hasta entonces (`ViewerModeToggle.tsx`,
+ * `isAnonymizedAvailable`)— y el análisis NER de 60 páginas no aporta nada a
+ * lo que este test mira. Es el mismo recurso que usa `scenario-8`.
+ */
+test("conmutar Original ↔ Anonimizado conserva la posición de scroll", async ({ page }) => {
+  await installSettingsOverride(page, { nerEnabled: false });
+  await importManyPagesDocument(page);
+
+  const original = viewerContainer(page, "Documento original");
+  await original.waitFor({ state: "visible" });
+
+  const anonymizedTab = page.getByRole("tab", { name: "Anonimizado" });
+  await expect(anonymizedTab).toBeEnabled({ timeout: 60_000 });
+
+  // Una posición cualquiera que no sea el principio ni el final: si el toggle
+  // reseteara el scroll, el destino natural sería 0, y arrancar en 0 no lo
+  // distinguiría de "conservó la posición".
+  await original.evaluate((el) => {
+    el.scrollTop = Math.round((el.scrollHeight - el.clientHeight) / 3);
   });
+  await page.waitForTimeout(400);
+  const scrollBefore = await original.evaluate((el) => el.scrollTop);
+  expect(scrollBefore, "el scroll de partida no debería ser 0").toBeGreaterThan(0);
 
-  test("sincronización apagada (default): cruzar varios bordes de página con la rueda no decrece scrollTop, ningún panel vuelve a la página 1, y el panel no tocado no se mueve", async ({
-    page,
-  }) => {
-    await importManyPagesDocument(page);
+  await anonymizedTab.click();
 
-    const originalContainer = page.locator('[aria-label="PDF original"] > div').first();
-    const anonymizedContainer = page.locator('[aria-label="PDF anonimizado"] > div').first();
-    await originalContainer.waitFor({ state: "visible" });
-    await anonymizedContainer.waitFor({ state: "visible" });
+  const anonymized = viewerContainer(page, "Documento anonimizado");
+  await anonymized.waitFor({ state: "visible" });
+  await page.waitForTimeout(400);
 
-    const anonymizedScrollTopBefore = await anonymizedContainer.evaluate((el) => el.scrollTop);
-    expect(anonymizedScrollTopBefore).toBe(0);
+  const scrollAfter = await anonymized.evaluate((el) => el.scrollTop);
+  expect(
+    Math.abs(scrollAfter - scrollBefore),
+    `conmutar a "Anonimizado" movió el visor: ${scrollBefore} → ${scrollAfter}`,
+  ).toBeLessThanOrEqual(1);
 
-    const box = await originalContainer.boundingBox();
-    if (!box) throw new Error('No se pudo ubicar el contenedor de "original".');
-    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  // Y de vuelta: la ida podría conservarse por accidente si el contenedor no
+  // se remonta, pero la vuelta pasa por el mismo camino y vale afirmarla.
+  await page.getByRole("tab", { name: "Original" }).click();
+  await original.waitFor({ state: "visible" });
+  await page.waitForTimeout(400);
 
-    let previousScrollTop = 0;
-    const WHEEL_TICKS = 20;
-    const WHEEL_DELTA_Y = 350; // 20 * 350 = 7000px: varias veces el alto de página (800px), cruza sobradamente 3-4 bordes.
-
-    for (let tick = 0; tick < WHEEL_TICKS; tick += 1) {
-      await page.mouse.wheel(0, WHEEL_DELTA_Y);
-      await page.waitForTimeout(30);
-
-      const currentScrollTop = await originalContainer.evaluate((el) => el.scrollTop);
-      expect(
-        currentScrollTop,
-        `scrollTop de "original" decreció en el tick ${tick}: ${previousScrollTop} → ${currentScrollTop}`,
-      ).toBeGreaterThanOrEqual(previousScrollTop);
-      previousScrollTop = currentScrollTop;
-    }
-
-    await page.waitForTimeout(300);
-
-    const originalPages = await mountedPageNumbers(page, "PDF original");
-    expect(
-      Math.min(...originalPages),
-      `"original" no debería haber vuelto a la página 1: [${originalPages.join(", ")}]`,
-    ).toBeGreaterThan(3);
-
-    // Con la sincronización apagada (default), "anonimizado" no fue tocado
-    // por el mouse: debe seguir exactamente donde estaba (ADR-054 §1/§8,
-    // "con sync apagada, mover un panel no mueve al otro").
-    const anonymizedScrollTopAfter = await anonymizedContainer.evaluate((el) => el.scrollTop);
-    expect(anonymizedScrollTopAfter).toBe(anonymizedScrollTopBefore);
-    const anonymizedPages = await mountedPageNumbers(page, "PDF anonimizado");
-    expect(
-      Math.min(...anonymizedPages),
-      `"anonimizado" no debería haberse movido: [${anonymizedPages.join(", ")}]`,
-    ).toBeLessThanOrEqual(3);
-  });
-
-  test("sincronización prendida: cruzar varios bordes de página con la rueda no decrece scrollTop en ningún panel, ninguno vuelve a la página 1, y quedan alineados a nivel de píxel", async ({
-    page,
-  }) => {
-    await importManyPagesDocument(page);
-
-    // Prende la sincronización desde el control del visor (ADR-054 §2,
-    // `ScrollSyncToggle`), visible en este viewport ancho.
-    await page.getByRole("button", { name: "Sincronizar scroll de los paneles" }).click();
-    await expect(
-      page.getByRole("button", { name: "Desincronizar scroll de los paneles" }),
-    ).toBeVisible();
-
-    const originalContainer = page.locator('[aria-label="PDF original"] > div').first();
-    const anonymizedContainer = page.locator('[aria-label="PDF anonimizado"] > div').first();
-    await originalContainer.waitFor({ state: "visible" });
-    await anonymizedContainer.waitFor({ state: "visible" });
-
-    const box = await originalContainer.boundingBox();
-    if (!box) throw new Error('No se pudo ubicar el contenedor de "original".');
-    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-
-    let previousOriginal = 0;
-    let previousAnonymized = 0;
-    const WHEEL_TICKS = 20;
-    const WHEEL_DELTA_Y = 350;
-
-    for (let tick = 0; tick < WHEEL_TICKS; tick += 1) {
-      await page.mouse.wheel(0, WHEEL_DELTA_Y);
-      // La sincronización es imperativa e idempotente, sin temporizador
-      // (ADR-054 §3): un margen chico alcanza para que el eco del panel
-      // empujado se asiente antes de leer.
-      await page.waitForTimeout(30);
-
-      const currentOriginal = await originalContainer.evaluate((el) => el.scrollTop);
-      const currentAnonymized = await anonymizedContainer.evaluate((el) => el.scrollTop);
-
-      expect(
-        currentOriginal,
-        `scrollTop de "original" decreció en el tick ${tick}`,
-      ).toBeGreaterThanOrEqual(previousOriginal);
-      expect(
-        currentAnonymized,
-        `scrollTop de "anonimizado" decreció en el tick ${tick}`,
-      ).toBeGreaterThanOrEqual(previousAnonymized);
-
-      previousOriginal = currentOriginal;
-      previousAnonymized = currentAnonymized;
-    }
-
-    await page.waitForTimeout(300);
-
-    const originalPages = await mountedPageNumbers(page, "PDF original");
-    const anonymizedPages = await mountedPageNumbers(page, "PDF anonimizado");
-    expect(
-      Math.min(...originalPages),
-      `"original" no debería haber vuelto a la página 1: [${originalPages.join(", ")}]`,
-    ).toBeGreaterThan(3);
-    expect(
-      Math.min(...anonymizedPages),
-      `"anonimizado" no debería haber vuelto a la página 1: [${anonymizedPages.join(", ")}]`,
-    ).toBeGreaterThan(3);
-
-    // Alineados a nivel de píxel (ADR-054 §3), no solo "en el mismo rango de
-    // páginas": la sincronización sincroniza scrollTop contra scrollTop.
-    const finalOriginal = await originalContainer.evaluate((el) => el.scrollTop);
-    const finalAnonymized = await anonymizedContainer.evaluate((el) => el.scrollTop);
-    expect(
-      Math.abs(finalOriginal - finalAnonymized),
-      `paneles desalineados: original=${finalOriginal}, anonimizado=${finalAnonymized}`,
-    ).toBeLessThanOrEqual(1);
-  });
+  const scrollBack = await original.evaluate((el) => el.scrollTop);
+  expect(
+    Math.abs(scrollBack - scrollBefore),
+    `volver a "Original" movió el visor: ${scrollBefore} → ${scrollBack}`,
+  ).toBeLessThanOrEqual(1);
 });

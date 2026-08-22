@@ -78,10 +78,17 @@ test("fusionar y dividir grupos actualiza índices y reemplazos", async ({ page 
 
   // El reemplazo se recalcula sobre los members fusionados (ADR-029) pero el
   // modo sigue siendo el default (nadie lo tocó todavía).
-  await expect(dni1.getByRole("combobox", { name: "Modo de reemplazo" })).toHaveText("Placeholder");
+  // ADR-087 §3/§4: el modo vive en el nombre accesible del disparador, con la
+  // etiqueta nueva ("Placeholder" → "Etiquetar").
+  await expect(dni1.getByRole("button", { name: /^Modo de reemplazo de / })).toHaveAccessibleName(
+    /Etiquetar/,
+  );
 
-  // Dividir: separar de vuelta la ocurrencia que vino de dni2 (página 2,
-  // Regex — `SplitDialog.tsx`: "Página N — <fuente>").
+  // Dividir: separar de vuelta la ocurrencia que vino de dni2 (página 2 —
+  // `SplitDialog.tsx`: "Página N — <fuente>"). ADR-087 pasó las fuentes a
+  // lenguaje del usuario: Regex/NER/OCR se muestran todas como "Detectado
+  // automáticamente" (`conflictLabels.ts`), así que la ocurrencia se
+  // identifica por su página, que es lo que este escenario necesita.
   await dni1.getByRole("button", { name: "Más acciones" }).click();
   await dni1
     .getByRole("group", { name: "Acciones del grupo" })
@@ -89,7 +96,7 @@ test("fusionar y dividir grupos actualiza índices y reemplazos", async ({ page 
     .click();
   const splitDialog = page.getByRole("dialog", { name: "Dividir grupo" });
   await expect(splitDialog).toBeVisible();
-  await splitDialog.getByRole("checkbox", { name: /Página 2 — Regex/ }).click();
+  await splitDialog.getByRole("checkbox", { name: /Página 2 — Detectado automáticamente/ }).click();
   await splitDialog.getByRole("button", { name: "Dividir" }).click();
   await expect(splitDialog).toHaveCount(0);
 

@@ -42,9 +42,11 @@ test("cargar PDF corrupto muestra un error tipado y mensaje claro", async ({ pag
   ).toHaveCount(0);
 
   // "Cerrar documento" vuelve al estado Idle: el banner desaparece y
-  // `ImportButton` ("Importar PDF") reaparece en el Toolbar
+  // El afordance de importar reaparece: sin documento, la app vuelve a la
+  // pantalla de carga de ADR-087 §1 ("Elegir archivo"). Antes era el
+  // `ImportButton` de la toolbar, retirado con el rediseño.
   // (`actions.closeDocument`, `pipeline.store.reset()`).
   await closeButton.click();
   await expect(errorBanner).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Importar PDF" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Elegir archivo" })).toBeVisible();
 });

@@ -15,9 +15,16 @@
  * - `work` → `Toolbar` + el panel de trabajo (árbol de entidades + visores).
  *
  * El panel de Reglas se retiró del layout (ADR-087 §3): su función vive ahora
- * en los tres niveles de modo del propio árbol. Mientras esos selectores no
- * estén implementados (etapa 3 del rediseño), la barra lateral es solo el
- * árbol — que ya es lo que ADR-087 §1 especifica para `work`.
+ * en los tres niveles de modo del propio árbol.
+ *
+ * **`PasswordDialog` se monta acá, fuera de las tres fases**, y no adentro de
+ * `Toolbar` como antes. Vivía ahí apoyado en que la toolbar estaba siempre en
+ * pantalla —su propio comentario decía "se monta siempre acá, no depende de
+ * `stage`"—, y este ADR rompió esa premisa al sacar la toolbar de `load` y de
+ * `scan`. `PDF_PASSWORD_REQUIRED` llega durante `Extracting`, o sea **dentro
+ * de la fase `scan`**: con el diálogo montado en la toolbar, un PDF protegido
+ * dejaba de poder abrirse y la pantalla de escaneo giraba para siempre sin
+ * pedir nada. Lo encontró el Escenario 3 de E2E.
  */
 
 import { FileTextIcon } from "lucide-react";
@@ -27,9 +34,11 @@ import { useEffect } from "react";
 import { ToastHost } from "./components/common/ToastHost.js";
 import { EntitiesPanel } from "./components/entities/EntitiesPanel.js";
 import { hasAnyGroup } from "./components/entities/entityTree.js";
+import type { AppPhase } from "./components/screens/appPhase.js";
 import { LoadScreen } from "./components/screens/LoadScreen.js";
 import { ScanScreen } from "./components/screens/ScanScreen.js";
 import { useAppPhase } from "./components/screens/useAppPhase.js";
+import { PasswordDialog } from "./components/toolbar/PasswordDialog.js";
 import { Toolbar } from "./components/toolbar/Toolbar.js";
 import { PdfViewer } from "./components/viewer/PdfViewer.js";
 import { ViewerModeToggle } from "./components/viewer/ViewerModeToggle.js";
@@ -60,6 +69,20 @@ export function App() {
 
   const phase = useAppPhase();
 
+  return (
+    <>
+      {renderPhase(phase)}
+      {/*
+        Fuera del `switch` de fases a propósito — ver la cabecera. Se abre sola
+        con `PDF_PASSWORD_REQUIRED`, que llega durante `Extracting`, y esa
+        etapa cae en la fase `scan`.
+      */}
+      <PasswordDialog />
+    </>
+  );
+}
+
+function renderPhase(phase: AppPhase): ReactNode {
   if (phase === "load") {
     return (
       <div className="h-screen overflow-hidden">

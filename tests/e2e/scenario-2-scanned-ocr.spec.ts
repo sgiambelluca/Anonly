@@ -74,10 +74,21 @@ test("Escenario 2: cargar PDF escaneado → ver progreso OCR → ver grupos → 
   const scannedFile = await rasterizeToScannedPdf(page, sourceBytes);
   await page.locator('input[type="file"]').setInputFiles(scannedFile);
 
-  // "ver progreso OCR": el texto de `PipelineStatus` (`pipelineStageLabel.ts`)
-  // durante el stage `OCRing` tiene la forma exacta "OCR página N de M… X%".
+  // "ver progreso OCR": el texto de estado durante `OCRing`.
+  //
+  // ADR-087 §7.1 sacó el vocabulario del pipeline de la pantalla: decía "OCR
+  // página N de M… X%" y ahora dice "Reconociendo texto de las imágenes…"
+  // (`ScanScreen.tsx#scanStatusLabel`), sin contador — el contador por página
+  // quedó reservado a `Detecting`, que es el único recorrido que el usuario
+  // considera "el escaneo" (`scanProgress.ts`). "OCR" era una etapa del
+  // pipeline, no una palabra del usuario.
+  //
+  // El `role="status"` que resuelve acá es el de `ScanScreen`: durante esta
+  // fase la `Toolbar` (con su `PipelineStatus`) no se monta (ADR-087 §1).
   const pipelineStatus = page.getByRole("status");
-  await expect(pipelineStatus).toContainText(/OCR página \d+ de \d+…/, { timeout: 60_000 });
+  await expect(pipelineStatus).toContainText(/Reconociendo texto de las imágenes…/, {
+    timeout: 60_000,
+  });
 
   // El pipeline llega a Ready: `ExportButton` decide su propia visibilidad
   // por `stage ∈ {Ready, Done}` (`ui/Components.md` §2.5) — con NER
@@ -108,7 +119,7 @@ test("Escenario 2: cargar PDF escaneado → ver progreso OCR → ver grupos → 
   // "exportar": mismo flujo que `scenario-1-import-edit-export.spec.ts`
   // (valores default del form, sin tocar nada).
   await exportButton.click();
-  const exportDialog = page.getByRole("dialog", { name: "Exportar PDF anonimizado" });
+  const exportDialog = page.getByRole("dialog", { name: "Exportar documento anonimizado" });
   await expect(exportDialog).toBeVisible();
   await exportDialog.getByRole("button", { name: "Exportar" }).click();
 
