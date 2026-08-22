@@ -36,13 +36,14 @@
  * revocación (`Orchestrator.closeDocument` → `BlobUrlTracker.revokeByPrefix`)
  * corren en el hilo principal, nunca dentro de un Worker.
  *
- * "sin documento activo" / "sin preview" se verifican por DOM: `ImportButton`
- * ("Importar PDF") solo se monta en `stage === Idle`
- * (`Toolbar.tsx`/`document.store` vacío tras `actions.closeDocument`), y
+ * "sin documento activo" / "sin preview" se verifican por DOM: sin documento,
+ * la app está en la **pantalla de carga** de ADR-087 §1 y muestra su botón
+ * "Elegir archivo" (antes era el `ImportButton` de la toolbar, "Importar PDF",
+ * que se retiró con el rediseño), y
  * `PdfViewer` (con sus `PageCanvas`, `role="img"`) solo se monta con
  * `document.store.id !== null` (`App.tsx#RightPanel`).
  *
- * "tras cerrar, `ImportButton` permite importar otro PDF sin recargar la
+ * "tras cerrar, la pantalla de carga permite importar otro PDF sin recargar la
  * pestaña" no es una aserción aparte: el propio loop lo ejercita 9 veces
  * (ciclos 2 a 10 reimportan después del cierre del ciclo anterior, sobre la
  * misma pestaña) — si `Orchestrator#validateImportInput` siguiera rechazando
@@ -69,7 +70,7 @@ test("Escenario 7: abrir y cerrar 10 documentos consecutivos, estado limpio por 
 
   const file = await manyNeutralPagesFile(3);
 
-  const importButton = page.getByRole("button", { name: "Importar PDF" });
+  const importButton = page.getByRole("button", { name: "Elegir archivo" });
   const closeButton = page.getByRole("button", { name: "Cerrar documento" });
   const confirmDialog = page.getByRole("dialog", { name: "Cerrar documento" });
   const originalPreview = page.getByRole("img", { name: "Página 1, original" });
@@ -77,7 +78,7 @@ test("Escenario 7: abrir y cerrar 10 documentos consecutivos, estado limpio por 
   for (let cycle = 1; cycle <= CYCLES; cycle += 1) {
     await expect(
       importButton,
-      `ciclo ${cycle}: "Importar PDF" visible antes de importar (Idle, sin documento activo)`,
+      `ciclo ${cycle}: "Elegir archivo" visible antes de importar (Idle, sin documento activo)`,
     ).toBeVisible();
 
     await page.locator('input[type="file"]').setInputFiles(file);
@@ -112,7 +113,7 @@ test("Escenario 7: abrir y cerrar 10 documentos consecutivos, estado limpio por 
     await expect(confirmDialog, `ciclo ${cycle}: ConfirmDialog cerrado`).toHaveCount(0);
     await expect(
       importButton,
-      `ciclo ${cycle}: "Importar PDF" reaparece (Idle de nuevo, sin recargar la pestaña)`,
+      `ciclo ${cycle}: "Elegir archivo" reaparece (Idle de nuevo, sin recargar la pestaña)`,
     ).toBeVisible();
     await expect(originalPreview, `ciclo ${cycle}: preview desmontado`).toHaveCount(0);
     await expect(closeButton, `ciclo ${cycle}: CloseDocumentButton desmontado`).toHaveCount(0);

@@ -9,15 +9,16 @@
  * flujo 1, §7): arranca con `nerEnabled: false` (mismo mecanismo que
  * `scenario-8-ner-disabled.spec.ts`, PR16.5) para llegar a `Ready` rápido
  * solo con Regex; el usuario edita tres cosas sobre grupos de tipo DNI
- * (deshabilita uno, fusiona otros dos, crea una regla "por tipo" que cambia
- * el modo de reemplazo); recién ahí activa "Detección con NER" en
+ * (deshabilita uno, fusiona otros dos, y toma una decisión "por tipo" que
+ * cambia el modo de reemplazo — desde la cabecera de la categoría en el árbol,
+ * que es donde ADR-087 §3 puso ese nivel al retirar el panel de Reglas); recién ahí activa "Detección con NER" en
  * `SettingsDialog` con el documento abierto → `ConfirmDialog` → `reanalyze`
  * (`stage → Detecting`, `reopenSession({ expectNer: true })`, NER corre sobre
  * el `Document` retenido, Regex NO se re-corre — ADR-038 §5 flujo 1) → de
  * vuelta a `Ready`. La aserción central: las tres ediciones sobreviven la
  * segunda pasada, y además NER se descargó y corrió de verdad (prueba de que
  * el reanalyze no es un no-op) — verificado por la señal de carga del modelo
- * (`NER_MODEL_LOADING` → "Cargando modelo NER…", `pipelineStageLabel.ts`), no
+ * (`NER_MODEL_LOADING` → "Preparando el detector de nombres…", `pipelineStageLabel.ts`), no
  * por una entidad puntual: confirmado empíricamente que el modelo cuantizado
  * no reconoce "Juan Pérez" como Persona en este fixture sintético — cuestión
  * de precisión del modelo (dataset de referencia, Hito 11), no de integración
@@ -90,24 +91,32 @@ test("activar NER en runtime reanaliza preservando ediciones previas", async ({ 
   await expect(dni3).toHaveCount(0);
   await expect(dni2).toContainText("(2)");
 
-  // Edición 3: regla "por tipo" DNI → Máscara — debe seguir aplicando tras
-  // el reanalyze.
-  await page.getByRole("button", { name: "Nueva regla" }).click();
-  const ruleDialog = page.getByRole("dialog", { name: "Nueva regla" });
-  await expect(ruleDialog).toBeVisible();
-  await ruleDialog.getByRole("combobox", { name: "Alcance de la regla" }).click();
-  await page.getByRole("option", { name: "Por tipo" }).click();
-  await ruleDialog.getByRole("combobox", { name: "Tipo de entidad" }).click();
-  await page.getByRole("option", { name: "DNI" }).click();
-  await ruleDialog.getByRole("combobox", { name: "Modo de reemplazo" }).click();
-  await page.getByRole("option", { name: "Máscara" }).click();
-  await ruleDialog.getByRole("button", { name: "Crear" }).click();
-  await expect(ruleDialog).toHaveCount(0);
+  // Edición 3: decisión "por tipo" sobre DNI — debe seguir aplicando tras el
+  // reanalyze.
+  //
+  // ADR-087 §3 retiró el panel de Reglas y su diálogo "Nueva regla": el nivel
+  // "tipo" pasó a la cabecera de la categoría en el propio árbol. Lo que se
+  // escribe abajo es lo MISMO —una `Rule` de scope `type` (§3.1a)—, así que
+  // este escenario sigue cubriendo lo que decía cubrir: que una decisión de
+  // alcance tipo sobrevive al reanalyze. Cambia por dónde la toma el usuario.
+  //
+  // Sin diálogo de confirmación: §3.3 solo lo pide cuando ese tipo tiene filas
+  // con decisión propia, y acá ninguna la tiene todavía (las ediciones 1 y 2
+  // fueron deshabilitar y fusionar).
+  const dniTypeMode = page.getByRole("button", { name: /^Modo de reemplazo de DNI:/ });
+  await dniTypeMode.click();
+  await page
+    .getByRole("group", { name: "Modo de reemplazo" })
+    .getByRole("button", { name: /^Ocultar parcialmente/ })
+    .click();
 
-  // La regla ya afecta a los grupos DNI existentes (recomputo de
-  // `replacementMode`, comentario junto a `createRule` en `actions.ts`).
-  await expect(dni1.getByRole("combobox", { name: "Modo de reemplazo" })).toHaveText("Máscara");
-  await expect(dni2.getByRole("combobox", { name: "Modo de reemplazo" })).toHaveText("Máscara");
+  // Ya afecta a los grupos DNI existentes (recomputo de `replacementMode`).
+  await expect(dni1.getByRole("button", { name: /^Modo de reemplazo de / })).toHaveAccessibleName(
+    /Ocultar parcialmente/,
+  );
+  await expect(dni2.getByRole("button", { name: /^Modo de reemplazo de / })).toHaveAccessibleName(
+    /Ocultar parcialmente/,
+  );
 
   // Activar NER en runtime, con el documento abierto.
   await page.getByRole("button", { name: "Configuración" }).click();
@@ -127,8 +136,11 @@ test("activar NER en runtime reanaliza preservando ediciones previas", async ({ 
     "https://creativecommons.org/licenses/by/2.5/ar/",
   );
 
+  // ADR-087 §7.1: la opción dejó de nombrar el motor ("Detección con NER
+  // (nombres, organizaciones)") y dice qué hace ("Detectar nombres de
+  // personas y organizaciones", `SettingsDialog.tsx`).
   await settingsDialog
-    .getByRole("checkbox", { name: "Detección con NER (nombres, organizaciones)" })
+    .getByRole("checkbox", { name: "Detectar nombres de personas y organizaciones" })
     .click();
   await settingsDialog.getByRole("button", { name: "Guardar" }).click();
 
@@ -139,8 +151,14 @@ test("activar NER en runtime reanaliza preservando ediciones previas", async ({ 
   // Prueba de que el reanalyze no es un no-op: el modelo NER (recién
   // habilitado) se descarga y carga de verdad — señal transitoria, hay que
   // atraparla antes de esperar el cierre del diálogo de confirmación.
-  const status = page.getByRole("status");
-  await expect(status).toHaveText(/Cargando modelo NER…/, { timeout: 60_000 });
+  // ADR-087 §7.1: "Cargando modelo NER…" pasó a "Preparando el detector de
+  // nombres… N%" (`pipelineStageLabel.ts`). Se localiza por texto y no por
+  // `role="status"` porque en la fase `work` hay más de un `role="status"` en
+  // pantalla (el de la toolbar y el del host de toasts), y un locator ambiguo
+  // falla por strict mode en vez de por lo que el test quiere afirmar.
+  await expect(page.getByText(/Preparando el detector de nombres…/)).toBeVisible({
+    timeout: 60_000,
+  });
 
   // El reanálisis pasa por Detecting (NER real) y vuelve a Ready: el diálogo
   // de confirmación se cierra solo al terminar (`SettingsDialog.tsx`,
@@ -150,8 +168,12 @@ test("activar NER en runtime reanaliza preservando ediciones previas", async ({ 
 
   // Las tres ediciones sobrevivieron la segunda pasada.
   await expect(dni1).toHaveAttribute("aria-checked", "false");
-  await expect(dni1.getByRole("combobox", { name: "Modo de reemplazo" })).toHaveText("Máscara");
+  await expect(dni1.getByRole("button", { name: /^Modo de reemplazo de / })).toHaveAccessibleName(
+    /Ocultar parcialmente/,
+  );
   await expect(dni2).toContainText("(2)");
-  await expect(dni2.getByRole("combobox", { name: "Modo de reemplazo" })).toHaveText("Máscara");
+  await expect(dni2.getByRole("button", { name: /^Modo de reemplazo de / })).toHaveAccessibleName(
+    /Ocultar parcialmente/,
+  );
   await expect(dni3).toHaveCount(0);
 });

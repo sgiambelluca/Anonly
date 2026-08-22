@@ -9,7 +9,10 @@
  *   no corresponde, ver `CancelButton.tsx`).
  * - `SettingsButton` siempre visible (`ui/UX_Guidelines.md` §2).
  *
- * `PasswordDialog` se monta siempre acá (no depende de `stage`): se abre sola
+ * `PasswordDialog` YA NO se monta acá: se mudó a `App` (ADR-087). Vivía acá
+ * apoyado en que la toolbar estaba siempre en pantalla, y eso dejó de ser
+ * cierto cuando `load` y `scan` pasaron a montarse sin toolbar — un PDF
+ * protegido dejaba de poder abrirse. La nota vieja decía: se abre sola
  * al recibir `PDF_PASSWORD_REQUIRED` vía su propia suscripción directa al bus.
  *
  * `ExportButton` (Hito 10 PR9) se monta igual que `CancelButton`: sin
@@ -34,7 +37,6 @@ import { CancelButton } from "./CancelButton.js";
 import { CloseDocumentButton } from "./CloseDocumentButton.js";
 import { ExportButton } from "./ExportButton.js";
 import { ImportButton } from "./ImportButton.js";
-import { PasswordDialog } from "./PasswordDialog.js";
 import { PipelineStatus } from "./PipelineStatus.js";
 import { SettingsButton } from "./SettingsButton.js";
 
@@ -83,7 +85,6 @@ export function Toolbar() {
           <SettingsButton />
         </div>
       </div>
-      <PasswordDialog />
     </header>
   );
 }
