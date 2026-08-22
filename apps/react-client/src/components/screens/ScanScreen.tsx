@@ -20,6 +20,10 @@
  * propios, así que la toolbar arriba dejaba dos barras de progreso del mismo
  * pipeline y dos botones "Cancelar" al mismo tiempo.
  *
+ * **El contador por página solo corre en `Detecting`** (`scanProgress.ts`):
+ * cuenta el escaneo del documento y nada más. Las etapas de preparación
+ * muestran una barra indeterminada.
+ *
  * Cuándo suelta: `scanAdvance.ts` (piso, techo y umbral sobre `Detecting`).
  * El latch que evita volver acá tras un `reanalyze` vive en `appPhase.ts`.
  */
@@ -33,6 +37,7 @@ import { CancelButton } from "../toolbar/CancelButton.js";
 
 import { ScanAnimation } from "./ScanAnimation.js";
 import { SCAN_PHRASE_INTERVAL_MS, scanPhraseTermAt } from "./scanPhrase.js";
+import { resolveScanProgress } from "./scanProgress.js";
 
 /**
  * Texto de estado en lenguaje llano (`UX_Guidelines.md` §7.1). **No nombra
@@ -66,7 +71,6 @@ export function ScanScreen() {
   const pageCount = useDocumentStore((state) => state.pageCount);
   const stage = usePipelineStore((state) => state.stage);
   const current = usePipelineStore((state) => state.current);
-  const total = usePipelineStore((state) => state.total);
   const modelLoading = usePipelineStore((state) => state.modelLoading);
 
   const [phraseTick, setPhraseTick] = useState(0);
@@ -77,18 +81,12 @@ export function ScanScreen() {
     return () => window.clearInterval(timer);
   }, []);
 
-  // En `Detecting` el denominador es `pageCount` y no `total`, por el mismo
-  // motivo que en `scanAdvance.ts`: ese contador se reasigna por etapa y
-  // durante el arranque de la detección vale 1, así que la pantalla decía
-  // "1 de 1" con diez páginas por analizar.
-  const denominator = stage === PipelineStage.Detecting ? pageCount : total;
-  const percent =
-    modelLoading !== null
-      ? Math.round(modelLoading.progress * 100)
-      : denominator > 0
-        ? Math.round((Math.min(current, denominator) / denominator) * 100)
-        : 0;
-  const showPageCounter = modelLoading === null && denominator > 0;
+  const progress = resolveScanProgress({
+    stage,
+    current,
+    pageCount,
+    modelLoadingProgress: modelLoading?.progress ?? null,
+  });
 
   return (
     <div className="flex h-full flex-col items-center justify-center gap-8 overflow-y-auto p-8">
@@ -133,17 +131,24 @@ export function ScanScreen() {
             <span className="truncate text-sm text-text-primary">
               {scanStatusLabel(stage, modelLoading)}
             </span>
-            {showPageCounter ? (
+            {progress.kind === "determinate" && progress.counter !== null ? (
               <span className="shrink-0 text-sm tabular-nums text-text-secondary">
-                {Math.min(current, denominator)} de {denominator}
+                {progress.counter.current} de {progress.counter.total}
               </span>
             ) : null}
           </div>
           <div className="h-1.5 w-full overflow-hidden rounded-full bg-bg-tertiary">
-            <div
-              className="h-full rounded-full bg-accent transition-[width]"
-              style={{ width: `${percent}%` }}
-            />
+            {progress.kind === "determinate" ? (
+              <div
+                className="h-full rounded-full bg-accent transition-[width]"
+                style={{ width: `${progress.percent}%` }}
+              />
+            ) : (
+              // Indeterminado: una franja que recorre la barra. Dice "está
+              // trabajando" sin afirmar cuánto falta, que es lo único honesto
+              // en las etapas de preparación.
+              <div className="anonly-scan-indeterminate h-full w-1/3 rounded-full bg-accent" />
+            )}
           </div>
         </div>
 
