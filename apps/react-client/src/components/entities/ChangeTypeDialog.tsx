@@ -18,11 +18,11 @@
 import type { EntityType } from "@anonly/anonymization-core";
 import { useEffect, useState } from "react";
 
+import { actions } from "../../core-adapter/actions.js";
 import { Button } from "../common/Button.js";
 import { Dialog } from "../common/Dialog.js";
 import { Select } from "../common/Select.js";
 
-import { applyTypeChange } from "./applyEdits.js";
 import { ENTITY_TYPE_OPTIONS } from "./entityTypeLabels.js";
 
 export interface ChangeTypeDialogProps {
@@ -50,12 +50,21 @@ export function ChangeTypeDialog({
     // Un `type` igual al vigente es no-op en el motor (ADR-082 §1), así que
     // no hace falta guardarlo acá — pero se evita el viaje igual.
     if (nextType !== currentType) {
-      applyTypeChange({
-        groupId,
-        groupLabel: canonicalValue,
-        previousType: currentType,
-        nextType,
-      });
+      // **Sin "Deshacer", a propósito.** Reclasificar no es reversible desde
+      // la UI: `changeGroupType` (`grouping-engine`) renumera con
+      // `nextIndex`, que es monótono, así que volver al tipo anterior devuelve
+      // el grupo con OTRO número de token —`[PERSONA 03]` vuelve como
+      // `[PERSONA 09]`— y con él cambia el `replacementValue` de
+      // `placeholder`/`synthetic`. Además re-escribe `typeCorrections`
+      // (ADR-085 §1b), deja `absorbedTypes` con los dos tipos para siempre, y
+      // si el grupo era Persona destruye una elección explícita de género y la
+      // reemplaza en silencio por una inferida (ADR-082 §2 paso 4).
+      //
+      // Es exactamente el criterio con el que `undoableEdits.ts` descarta el
+      // undo de fusionar y dividir: un "Deshacer" que devuelve algo parecido y
+      // no lo mismo miente, y eso es peor que no ofrecerlo. El diálogo ya es
+      // la fricción de esta acción.
+      actions.updateGroup(groupId, { type: nextType });
     }
     onClose();
   }

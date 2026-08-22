@@ -268,7 +268,6 @@ demás ediciones del árbol que lo cumplen también llevan toast con "Deshacer":
 |---|---|
 | Habilitar/deshabilitar una fila | decide si ese dato se anonimiza o queda a la vista; se hace de a muchas y en cadena |
 | Habilitar/deshabilitar un tipo (cascada, o `Space` sobre la cabecera) | un click apaga decenas de grupos, y por teclado ni siquiera hay un diálogo de por medio |
-| Reclasificar un grupo | cambia el marcador con el que sale en el export |
 | Editar el valor de reemplazo a mano | pisa el valor anterior, escrito o calculado |
 
 El undo de la cascada **restituye grupo por grupo su valor anterior**, no un valor global: la
@@ -280,7 +279,9 @@ Cuando el valor de reemplazo anterior era el **calculado** por el Core, el undo 
 re-aplica el modo vigente, que es lo que lo recalcula. Reescribirlo lo dejaría marcado como
 escrito a mano (ADR-078), y el punto de la fila mentiría desde ahí en adelante.
 
-**Tres acciones siguen sin deshacer, y no por olvido**:
+**Cuatro acciones siguen sin deshacer, y no por olvido.** Las cuatro comparten la misma razón de
+fondo: el Core no tiene una inversa exacta, y un "Deshacer" que devuelve algo parecido y no lo
+mismo miente.
 
 - **Agregar una entidad a mano** necesitaría borrar el grupo, y no existe pedido de borrado en
   `core/Contracts.md`: `ENTITY_GROUP_REMOVED` lo emite el Grouping Engine por su cuenta (fusión,
@@ -288,8 +289,14 @@ escrito a mano (ADR-078), y el punto de la fila mentiría desde ahí en adelante
 - **Fusionar** y **dividir** se invertirían con la operación contraria, pero eso no restituye el
   estado anterior: el grupo que reaparece es uno nuevo, con otro `id` y otro `indexInType`
   (`core/Grouping_Engine.md` §13 caso 5). El usuario recuperaría las ocurrencias separadas con
-  otro número de token. Un "Deshacer" que devuelve algo parecido y no lo mismo miente, y eso es
-  peor que no ofrecerlo.
+  otro número de token.
+- **Reclasificar** parece el caso trivial —volver al tipo anterior— y es el que más engaña.
+  `changeGroupType` renumera con `nextIndex`, que es monótono, así que el grupo vuelve con otro
+  número de token y con él cambia el `replacementValue` de `placeholder`/`synthetic`; re-escribe
+  `typeCorrections` (ADR-085 §1b) en vez de borrar la entrada que antes no existía; deja
+  `absorbedTypes` con los dos tipos para siempre; y al salir de `Person` apaga
+  `personGenderUserSet`, así que el "undo" reemplazaría **en silencio** una elección explícita de
+  género por una inferida. Su fricción es el diálogo, no un toast.
 
 **La franja de documento se enciende cuando tiene algo que destruir**:
 
