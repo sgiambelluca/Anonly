@@ -66,7 +66,7 @@ export function EditReplacementDialog({ group, open, onClose }: EditReplacementD
         <div className="flex flex-col gap-1.5">
           <label
             htmlFor={`replacement-${group.id}`}
-            className="text-xs font-medium text-text-secondary"
+            className="text-sm font-medium text-text-secondary"
           >
             Texto de reemplazo
           </label>
@@ -78,7 +78,7 @@ export function EditReplacementDialog({ group, open, onClose }: EditReplacementD
             className="rounded-md border border-border bg-bg-primary px-2 py-1.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent"
           />
           {fitMessage !== null ? (
-            <p className="text-xs text-warning" role="status">
+            <p className="text-sm text-warning" role="status">
               {fitMessage}
             </p>
           ) : null}
@@ -90,7 +90,7 @@ export function EditReplacementDialog({ group, open, onClose }: EditReplacementD
           la fila, o una regla que empiece a aplicar) está lejos de este
           diálogo.
         */}
-        <p className="text-xs text-text-secondary">
+        <p className="text-sm text-text-secondary">
           Si después cambiás el modo de reemplazo de este grupo, el texto vuelve al calculado.
         </p>
       </div>

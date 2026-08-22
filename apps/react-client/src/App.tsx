@@ -145,7 +145,7 @@ function RightPanel() {
 function PanelHeader({ title }: { title: string }) {
   return (
     <div className="flex h-9 items-center border-b border-border bg-bg-secondary px-3">
-      <h2 className="text-xs font-semibold uppercase tracking-wide text-text-secondary">{title}</h2>
+      <h2 className="text-sm font-semibold uppercase tracking-wide text-text-secondary">{title}</h2>
     </div>
   );
 }
@@ -163,7 +163,7 @@ function EmptyState({
     <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
       <div className="text-text-secondary opacity-40">{icon}</div>
       <p className="text-sm font-medium text-text-primary">{title}</p>
-      <p className="text-xs text-text-secondary">{description}</p>
+      <p className="text-sm text-text-secondary">{description}</p>
     </div>
   );
 }

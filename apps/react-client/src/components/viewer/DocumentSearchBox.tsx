@@ -120,12 +120,12 @@ export function DocumentSearchBox({ onActiveMatchChange }: DocumentSearchBoxProp
           onChange={(event) => handleQueryChange(event.target.value)}
           placeholder="Buscar en el documento…"
           aria-label="Buscar en el documento"
-          className="w-56 rounded-md border border-border bg-bg-primary py-1 pl-7 pr-2 text-xs text-text-primary focus:outline-none focus:ring-2 focus:ring-accent"
+          className="w-56 rounded-md border border-border bg-bg-primary py-1 pl-7 pr-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent"
         />
       </div>
       {showResults ? (
         <div className="absolute right-0 top-full z-20 mt-1 w-72 rounded-md border border-border bg-bg-primary shadow-md">
-          <div className="flex items-center justify-between gap-2 border-b border-border px-2 py-1.5 text-xs text-text-secondary">
+          <div className="flex items-center justify-between gap-2 border-b border-border px-2 py-1.5 text-sm text-text-secondary">
             {matches.length === 0 ? (
               <span>Sin resultados</span>
             ) : (
@@ -164,7 +164,7 @@ export function DocumentSearchBox({ onActiveMatchChange }: DocumentSearchBoxProp
                   <button
                     type="button"
                     onClick={() => goTo(index)}
-                    className={`flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left text-xs hover:bg-bg-tertiary ${
+                    className={`flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left text-sm hover:bg-bg-tertiary ${
                       index === activeIndex ? "bg-bg-tertiary" : ""
                     }`}
                   >
@@ -191,7 +191,7 @@ export function DocumentSearchBox({ onActiveMatchChange }: DocumentSearchBoxProp
                           setEntityType(EntityType.Person);
                           setAddingIndex(index);
                         }}
-                        className="text-xs text-accent hover:underline"
+                        className="text-sm text-accent hover:underline"
                       >
                         Agregar como…
                       </button>

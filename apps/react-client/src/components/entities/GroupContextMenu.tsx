@@ -106,6 +106,9 @@ export function GroupContextMenu({
         type="button"
         aria-label="Más acciones"
         aria-expanded={open}
+        // Lo busca el `Enter` del árbol (`EntitiesPanel`): abrir el menú desde
+        // el panel exigiría subirle este estado al panel.
+        data-tree-menu-trigger
         onClick={() => setOpen((prev) => !prev)}
         className="rounded-md p-1 text-text-secondary hover:bg-bg-tertiary"
       >

@@ -240,7 +240,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
               ))}
             </div>
             {ocrLanguagesEmpty ? (
-              <p role="alert" className="mt-1 text-xs text-error">
+              <p role="alert" className="mt-1 text-sm text-error">
                 Elegí al menos un idioma.
               </p>
             ) : null}
@@ -282,7 +282,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
 function FormRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex flex-col gap-1.5">
-      <span className="text-xs font-medium text-text-secondary">{label}</span>
+      <span className="text-sm font-medium text-text-secondary">{label}</span>
       {children}
     </div>
   );
@@ -297,9 +297,9 @@ function AboutSection() {
     <>
       <div className="my-4 border-t border-border" />
       <section aria-label="Acerca de" className="flex flex-col gap-3">
-        <h3 className="text-xs font-medium text-text-secondary">Acerca de</h3>
+        <h3 className="text-sm font-medium text-text-secondary">Acerca de</h3>
         {THIRD_PARTY_CREDITS.map((credit) => (
-          <p key={credit.id} className="text-xs text-text-secondary">
+          <p key={credit.id} className="text-sm text-text-secondary">
             <a
               href={credit.sourceUrl}
               target="_blank"
