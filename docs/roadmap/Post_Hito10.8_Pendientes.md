@@ -444,3 +444,27 @@ Es exactamente el bug de ADR-049 §5, en otro motor. El comentario de `shared/sr
 ### Tercer defecto, en la UI: nadie reintentaba
 
 `readyRenderTrigger.ts` re-pedía una sola vez al observar `Ready`. Alcanzaba mientras el visor solo se miraba después del análisis; con el pase temprano de ADR-087 §6 el usuario entra a los 6 s con el pipeline todavía en `OCRing`, sus pedidos se descartan por documento-no-cargado, y `Ready` puede estar a minutos. Corregido con `previewRetry.ts` (reintento autolimitado, con techo).
+
+---
+
+## 22. El árbol de entidades declara `role="tree"` y no tiene un solo tab stop
+
+**Procedencia**: revisión de la branch de ADR-087, 2026-08-22. Se anota como **desvío aceptado a sabiendas**, no como algo que se descubrió después.
+
+El patrón WAI-ARIA de tree pide que todo el árbol sea **un solo tab stop**: `Tab` entra y sale, y las flechas navegan adentro. El árbol de entidades implementa las flechas (verticales, laterales con la semántica correcta, `Home`/`End`, `Space`, `Enter`) pero **no** el tab stop único: cada fila tiene además su checkbox, su selector de modo, su toggle de género y su menú, todos botones con tab stop propio. Son ~5 por fila visible.
+
+### Por qué no se arregló en ADR-087, y por qué el arreglo obvio es el equivocado
+
+El arreglo aparente —poner `tabIndex={-1}` en esos controles— dejaría el selector de modo y el menú **inalcanzables por teclado**, porque hoy no hay ninguna otra tecla que los alcance. Sería peor accesibilidad con el patrón formalmente cumplido.
+
+El arreglo correcto es **`role="treegrid"`**: ahí las flechas navegan filas **y celdas**, así que los controles se alcanzan con flechas en vez de con `Tab` y el árbol conserva su tab stop único. No hay disyuntiva real entre "cumplir el patrón" y "que los controles se alcancen" — esa disyuntiva solo existe si uno se queda en `role="tree"`.
+
+Migrar a `treegrid` es un cambio grande (navegación bidimensional, `aria-colcount`/`aria-colindex`, y cada control pasa a ser una celda) y no es lo que ADR-087 vino a hacer.
+
+### La tensión con el precedente de `role="menu"`
+
+`Components.md` §3.4 retiró `role="menu"` del menú contextual (2026-08-20) con este argumento: *"ese rol es un contrato con el lector de pantalla … y nada de eso está implementado. Anunciarlo igual … es peor que no anunciar nada"*. Aplicado literalmente, `role="tree"` también debería salir.
+
+Se mantiene por una diferencia de grado, y conviene decirla en voz alta porque es incómoda: aquel rol prometía navegación por flechas, `Home`/`End` y foco gestionado y **no implementaba ninguna de las tres**; éste implementa todo salvo el tab stop único, y retirarlo perdería además la estructura que el lector de pantalla sí aprovecha (nivel, expandido, tamaño del conjunto). **Si esa diferencia de grado se considera insuficiente, la salida es retirar `role="tree"`, no seguir prometiéndolo** — y sería coherente con el precedente.
+
+**Estado**: abierto. Destino: `treegrid`.

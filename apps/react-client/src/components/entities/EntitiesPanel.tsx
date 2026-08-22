@@ -24,13 +24,22 @@
  * comentario anterior acá decía "exactamente un `tabIndex=0`, así `Tab` entra
  * y sale del árbol de una", y era falso: cada fila tiene además su checkbox,
  * su selector de modo, su toggle de género y su menú, todos botones con tab
- * stop propio. Son ~5 tab stops por fila visible, y así se queda: el patrón
- * WAI-ARIA de tree de un solo tab stop asume filas sin controles, y volverlas
- * inalcanzables por `Tab` para cumplirlo al pie de la letra sacaría el
- * selector de modo del alcance del teclado — peor accesibilidad, no mejor. Lo
- * que sí aporta el `tabIndex` alternado es que el CONTENEDOR de cada nodo sea
- * un solo tab stop en vez de uno por fila, y que las flechas naveguen desde
- * él.
+ * stop propio. Son ~5 tab stops por fila visible, y así se queda **por alcance,
+ * no porque esté bien**.
+ *
+ * El patrón WAI-ARIA de tree pide un solo tab stop, y el rol correcto para
+ * filas con controles es `role="treegrid"`: ahí las flechas navegan filas *y*
+ * celdas, así que los controles se alcanzan con flechas y el árbol conserva su
+ * tab stop único. O sea que **no hay disyuntiva** entre cumplir el patrón y que
+ * el selector de modo siga alcanzable — solo la hay si uno se queda en
+ * `role="tree"`, que es lo que pasa acá. Migrar es un cambio grande y no es lo
+ * que ADR-087 vino a hacer; el desvío está anotado en
+ * `roadmap/Post_Hito10.8_Pendientes.md` §22, junto con la tensión que deja
+ * contra el precedente de `role="menu"` (`ui/Components.md` §3.4).
+ *
+ * Lo que sí aporta el `tabIndex` alternado, mientras tanto, es que el
+ * CONTENEDOR de cada nodo sea un solo tab stop en vez de uno por fila, y que
+ * las flechas naveguen desde él.
  *
  * De esa convivencia salen las dos reglas de abajo, y las dos arreglan bugs
  * medidos:

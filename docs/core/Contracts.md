@@ -405,6 +405,15 @@ export abstract class EngineError extends Error {
   }
 }
 
+// La implementación canónica de esa discriminación, para no reescribirla en
+// cada consumidor (ADR-049 §3; vive en `@anonly/shared` desde que apareció el
+// segundo consumidor fuera del façade). No publica ningún tipo nuevo: rangea
+// sobre `EngineError` y `EngineErrorCode`, los dos de esta misma sección.
+export function isEngineErrorCode<C extends EngineErrorCode>(
+  err: unknown,
+  code: C,
+): err is EngineError & { readonly code: C };
+
 export interface SerializedEngineError {
   readonly code: EngineErrorCode;
   // "core": error de infraestructura compartida no atribuible a un motor
