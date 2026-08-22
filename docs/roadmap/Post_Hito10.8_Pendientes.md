@@ -360,7 +360,15 @@ La 1 y la 2 no son excluyentes. Lo que hay que decidir primero es **de dónde sa
 
 ---
 
-## 19. El layout no tiene estrategia responsive — **regresión introducida por ADR-087 §2**
+## 19. Cerrado el 2026-08-22: el layout no tenía estrategia responsive — **regresión introducida por ADR-087 §2**
+
+> **Cerrado.** Decisión del humano: **cajón + aviso**. Por debajo de 1024 px la barra lateral pasa a
+> abrirse encima del visor a pedido; por debajo de 640 px, un aviso. La decisión y su porqué viven
+> ahora en `ui/UX_Guidelines.md` §2.1; el umbral y los tres modos, en
+> `components/screens/layoutMode.ts`, con tests. Se descartó la opción 3 de abajo (declarar mínimo
+> y avisar, a secas) porque abandonaba el rango 768–1023 px, que es uso real —una ventana en media
+> pantalla— y que solo estaba roto por el `min-w` que no cedía. Lo que sigue es el registro de lo
+> que se rompió y cómo se decidió.
 
 **Procedencia**: prueba manual del rediseño, 2026-08-21. **A diferencia del §17 y el §18, esto sí es una regresión**, y se anota como tal.
 

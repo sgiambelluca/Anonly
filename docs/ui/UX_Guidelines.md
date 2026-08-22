@@ -84,12 +84,34 @@ propios, así que una toolbar arriba dejaría dos barras de progreso del mismo p
 
 **Ya no hay panel de Reglas** (§4). **Ya no hay dos visores** (§5.1).
 
-> **Sin estrategia responsive, y es un gap conocido.** El layout de 4 paneles que esta sección
-> reemplaza tenía un párrafo de mobile (tabs por debajo de 1024 px, que implementaba
-> `SideBySideViewer`); al retirarlo, ADR-087 §2 **no escribió el reemplazo**. Medido: a 375 px la
-> barra lateral se come el ancho y el visor queda en una tira. Hasta que se decida qué ancho mínimo
-> se soporta, **este layout asume escritorio**. Opciones y medición en
-> `roadmap/Post_Hito10.8_Pendientes.md` §19.
+### 2.1 Anchos: tres formas del momento ③
+
+El layout de 4 paneles que esta sección reemplaza tenía un párrafo de mobile (tabs por debajo de
+1024 px, que implementaba `SideBySideViewer`); al retirarlo, ADR-087 §2 no escribió el reemplazo, y
+eso dejó una regresión medida: a 375 px la barra lateral se comía 339 de 375 px y el visor quedaba
+en **35 px**. El mecanismo era una sola regla (`w-1/3 min-w-[340px]`): por debajo de ~1020 px el
+tercio cae bajo el mínimo, la barra **deja de encoger** y todo lo que falta se lo come al visor.
+
+El reemplazo son tres formas, no dos, porque el problema tampoco era uno solo
+(`components/screens/layoutMode.ts`):
+
+| Ancho | Forma | Por qué |
+|---|---|---|
+| **≥ 1024 px** | barra lateral + visor, como hasta ahora | es el layout para el que se diseñó ADR-087 |
+| **640–1023 px** | visor a todo el ancho, la barra lateral se abre **encima** a pedido (cajón) | una ventana en media pantalla de un laptop; este rango andaba casi bien y lo único que lo arruinaba era ese mínimo que no cede |
+| **< 640 px** | aviso: la ventana es muy angosta | ni con el visor a pantalla completa entra una fila del árbol con su nombre, su contador y su selector de modo |
+
+**Cajón y no tabs**, teniendo los dos el mismo costo: el bucle de trabajo es *mirar una entidad y
+comprobarla en el documento*. Con tabs, cada comprobación es un cambio de contexto completo; con el
+cajón, el documento es lo que queda debajo y vuelve con un `Escape`. El cajón es **modal**
+(`aria-modal`, foco adentro, `Escape` y click en el fondo para cerrar) porque tapa el visor:
+anunciarlo como región no modal mentiría sobre lo que hay debajo.
+
+**El aviso dice que no entra, en vez de acomodar los píxeles hasta que "entre".** Las alternativas
+eran encoger la tipografía —contra el piso de 14 px de §9— o esconder el selector de modo, que es la
+mitad del trabajo. El texto **no** dice "usá una computadora": no se sabe en qué está el usuario, y
+una ventana angosta en un monitor grande es el caso más probable. La app sigue viva atrás — al
+ensanchar se vuelve sola al panel de trabajo, con el documento y las ediciones intactos.
 
 ---
 
