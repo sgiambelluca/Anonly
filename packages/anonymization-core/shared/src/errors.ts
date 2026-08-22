@@ -78,6 +78,33 @@ class DeserializedEngineError extends EngineError {
   }
 }
 
+/**
+ * Type-guard para discriminar un `EngineError` por `code`, no por
+ * `instanceof <SubclaseConcreta>` (ADR-049 §3). La subclase concreta no
+ * sobrevive al boundary de un Worker: `postMessage` no transporta prototipos y
+ * `EngineError.deserialize()` siempre reconstruye un `DeserializedEngineError`
+ * genérico (`Contracts.md` §4). Lo que sí sobrevive — y por lo tanto lo único
+ * seguro para discriminar — es `code`. `instanceof EngineError` sigue siendo
+ * válido (distingue un error tipado del Core de un `Error` cualquiera); lo que
+ * este helper reemplaza es el `instanceof` de la subclase
+ * (`ai/Code_Standards.md` §7).
+ *
+ * **Vive acá y no en el façade** desde que apareció el segundo consumidor.
+ * ADR-049 §3 lo puso en `packages/anonymization-core/src/errors.ts` con un
+ * motivo explícito —"hoy tiene un único consumidor (el Orchestrator), y
+ * ponerlo en `shared` obligaría a que el PR toque dos paquetes (R-1/R-5)"— y
+ * con la salida ya escrita: "si aparece un segundo consumidor fuera del
+ * façade, promoverlo a `shared` es un movimiento mecánico y sin cambio de
+ * contrato". `render-engine` es ese segundo consumidor. Un motor no puede
+ * importar el façade (P-1), así que la alternativa era duplicar el helper.
+ */
+export function isEngineErrorCode<C extends EngineErrorCode>(
+  err: unknown,
+  code: C,
+): err is EngineError & { readonly code: C } {
+  return err instanceof EngineError && err.code === code;
+}
+
 // Errores genéricos compartidos por todos los motores.
 
 export class EngineNotInitializedError extends EngineError {

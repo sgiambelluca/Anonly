@@ -366,6 +366,32 @@ export function resetConvertToBlobCalls(): void {
   convertToBlobCalls = [];
 }
 
+/**
+ * Argumentos con los que se pidió cada `getContext`. Existe porque el stub es
+ * el ÚNICO lugar donde se puede observar si `RenderKernelCanvasFactory` pide el
+ * contexto con `willReadFrequently` — el test que lo afirmaba leía una
+ * propiedad que el stub nunca escribía, así que su cuerpo no corría nunca.
+ */
+let getContextCalls: Array<{
+  readonly contextId: string;
+  readonly options?: CanvasContextOptions;
+}> = [];
+
+export interface CanvasContextOptions {
+  readonly willReadFrequently?: boolean;
+}
+
+export function getGetContextCalls(): ReadonlyArray<{
+  readonly contextId: string;
+  readonly options?: CanvasContextOptions;
+}> {
+  return getContextCalls;
+}
+
+export function resetGetContextCalls(): void {
+  getContextCalls = [];
+}
+
 class StubOffscreenCanvas {
   width: number;
   height: number;
@@ -377,7 +403,11 @@ class StubOffscreenCanvas {
     createdCanvases.push({ width, height, context: this.context });
   }
 
-  getContext(contextId: string): StubCanvasRenderingContext2D | null {
+  getContext(
+    contextId: string,
+    options?: CanvasContextOptions,
+  ): StubCanvasRenderingContext2D | null {
+    getContextCalls.push({ contextId, ...(options !== undefined ? { options } : {}) });
     if (contextId !== "2d" || !stubContextAvailable) return null;
     return this.context;
   }

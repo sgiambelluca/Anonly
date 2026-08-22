@@ -240,6 +240,7 @@ import {
   EngineNotInitializedError,
   EventChannel,
   InvalidInputError,
+  isEngineErrorCode,
   MAX_RENDER_SCALE,
   PREVIEW_CACHE_MAX_BYTES,
   type Annotation,
@@ -259,12 +260,7 @@ import {
   type UnloadDocumentPayload,
 } from "@anonly/shared";
 
-import {
-  isRenderErrorCode,
-  isRetryablePageError,
-  RenderFailedError,
-  RenderPageFailedError,
-} from "./render.errors.js";
+import { isRetryablePageError, RenderFailedError, RenderPageFailedError } from "./render.errors.js";
 import type { RenderPageInput, RenderPageOutput } from "./render.types.js";
 import {
   kernelDisposeAll,
@@ -1213,14 +1209,14 @@ export class RenderEngine implements IEngine {
             break;
           }
           // Discriminación por `code`, nunca por `instanceof` de la subclase:
-          // el error llega deserializado del worker (ver `isRenderErrorCode`
+          // el error llega deserializado del worker (ver `isRetryablePageError`
           // en `render.errors.ts` para el bug que esto arregla).
           if (isRetryablePageError(err)) {
             lastError = err;
             continue; // retryable: reintenta si quedan intentos.
           }
           // RENDER_FAILED / InvalidInputError: no recuperable → aborta el batch (§11).
-          if (isRenderErrorCode(err, EngineErrorCode.RENDER_FAILED)) {
+          if (isEngineErrorCode(err, EngineErrorCode.RENDER_FAILED)) {
             ctx.bus.emit(EventChannel.Render, EngineEvents.RENDER_FAILED, {
               documentId: input.documentId,
               error: err.serialize(),
