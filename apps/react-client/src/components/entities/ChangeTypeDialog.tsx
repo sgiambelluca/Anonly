@@ -63,7 +63,7 @@ export function ChangeTypeDialog({
           a reemplazar con el formato de la categoría que elijas.
         </p>
         <div className="flex flex-col gap-1.5">
-          <span className="text-xs font-medium text-text-secondary">Categoría</span>
+          <span className="text-sm font-medium text-text-secondary">Categoría</span>
           <Select
             value={nextType}
             onChange={setNextType}

@@ -67,7 +67,7 @@ export function ZoomControls() {
       >
         <ZoomOutIcon className="h-4 w-4" aria-hidden />
       </Button>
-      <span className="min-w-[3.5ch] text-center text-xs text-text-secondary" aria-live="polite">
+      <span className="min-w-[3.5ch] text-center text-sm text-text-secondary" aria-live="polite">
         {Math.round(zoom * 100)}%
       </span>
       <Button

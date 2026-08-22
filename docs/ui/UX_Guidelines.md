@@ -702,20 +702,26 @@ original. ¿Continuar?"*.
 | Screen reader | el árbol anuncia tipo + count + estado; el visor anuncia "Página N de M, X grupos destacados". |
 | Color blind safe | highlight de tipos también diferenciado por patrón (sólido/punteado) además de color. |
 
-> **Deuda medida contra esta tabla** (auditoría de ADR-087, "Fuera del alcance" §1-§4). Estos
-> requisitos están escritos acá desde la fase 4 y **no se cumplen** en la implementación
-> vigente. Se listan para que la brecha sea explícita y no se lea esta tabla como estado real:
+> **Estado contra esta tabla** (la deuda medida en la auditoría de ADR-087, "Fuera del alcance"
+> §1-§4, quedó saldada; se deja el rastro porque estos requisitos estuvieron escritos acá sin
+> cumplirse desde la fase 4):
 >
-> - **Contraste**: el accent `#3b82f6` con texto blanco da **3.68:1**, bajo el 4.5:1 de esta
->   tabla. Afecta a todos los botones primarios y a los links `text-accent`.
-> - **Tamaño de texto**: 12 px es el tamaño **más frecuente** de la interfaz (headers de panel,
->   links de acción, contadores, labels de formulario), contra el mínimo de 14 px de acá.
+> - **Contraste**: **cerrado**. El accent era `#3b82f6` (3.68:1 con texto blanco, bajo el 4.5:1
+>   de esta tabla, y afectaba a todo botón primario y a los links `text-accent`). Ahora es
+>   `#2563eb`: **5.17:1**, y sirve tanto de relleno con texto blanco encima como de texto sobre
+>   `bg-primary`. El `hover` sigue siendo un paso más oscuro.
+> - **Tamaño de texto**: **cerrado**. No queda ningún `text-xs` (12 px) en la interfaz; el piso
+>   es 14 px. La barra lateral fue el único lugar que necesitó reacomodarse: sus tres acciones
+>   pasaron a una fila propia debajo del título, porque al lado ya no entraban.
 > - **Reducción de movimiento**: **cubierto desde el rediseño de estilo**. Todas las animaciones
 >   (marca, landing, pantalla de escaneo) se declaran **dentro** de un `@media (prefers-reduced-motion:
 >   no-preference)`, no sueltas con una excepción aparte: así el default es el estado quieto y una
 >   regla nueva no puede olvidarse de la excepción.
-> - **Navegación por teclado**: los atajos de flechas / `Space` / `Enter` sobre el árbol y el
->   `Cmd/Ctrl+F` de la tabla de abajo no están implementados.
+> - **Navegación por teclado**: **cerrado**. El árbol implementa el patrón WAI-ARIA de tree con
+>   roving tabindex (`treeNavigation.ts` decide qué hace cada tecla; `EntitiesPanel` ejecuta), y
+>   `Cmd/Ctrl+F` enfoca el buscador de entidades. Antes el panel declaraba `role="tree"` y
+>   entregaba una lista muerta — el mismo defecto que `Post_Hito10.8_Pendientes.md` §15 cerró
+>   para `role="menu"`.
 
 Atajos de teclado:
 

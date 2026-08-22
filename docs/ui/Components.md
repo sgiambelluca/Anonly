@@ -732,7 +732,7 @@ El patrón de borde (sólido/punteado/doble) permite distinguir tipos incluso pa
 --color-border: #e5e7eb;
 --color-text-primary: #111827;
 --color-text-secondary: #6b7280;
---color-accent: #3b82f6;       /* azul primario */
+--color-accent: #2563eb;       /* azul primario — 5.17:1 con blanco */
 --color-success: #10b981;
 --color-warning: #f59e0b;        /* solo relleno decorativo — ver nota */
 --color-warning-strong: #b45309; /* ADR-087 §3.1: bordes, iconos y texto de precaución */
@@ -750,10 +750,11 @@ El patrón de borde (sólido/punteado/doble) permite distinguir tipos incluso pa
 > texto que signifiquen algo. `#b45309` da **5.03:1**: sirve para las tres cosas. `--color-warning`
 > queda para rellenos donde el color no carga información.
 
-> **Deuda vigente de contraste** (ADR-087, "Fuera del alcance" §1): `--color-accent` con texto
-> blanco da **3.68:1**, bajo el 4.5:1 que `UX_Guidelines.md` §9 promete. Afecta a todo botón
-> primario y a los links `text-accent`. **No se corrige en ADR-087**; queda anotado para que no se
-> lea esta tabla como una paleta verificada.
+> **Contraste del accent — cerrado.** Era `#3b82f6`: **3.68:1** con texto blanco, bajo el 4.5:1
+> que `UX_Guidelines.md` §9 promete, y afectaba a todo botón primario y a los links
+> `text-accent` (ADR-087, "Fuera del alcance" §1). Ahora es `#2563eb`, **5.17:1**, que alcanza
+> para las dos formas en que el token se usa: relleno con texto blanco encima, y texto sobre
+> `bg-primary`.
 
 Modo oscuro: en v1.0. MVP es solo claro.
 

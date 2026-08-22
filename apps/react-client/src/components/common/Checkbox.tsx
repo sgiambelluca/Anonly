@@ -28,7 +28,12 @@ export function Checkbox({
   return (
     <label
       htmlFor={id}
-      className={`flex items-center gap-2 text-sm text-text-primary ${
+      // `items-start` + `mt-0.5` en la caja, no `items-center`: con una
+      // etiqueta de dos líneas el centrado dejaba la caja flotando a media
+      // altura, lejos de la primera línea que es la que nombra la opción. El
+      // desplazamiento de 2 px la deja igual de centrada contra una etiqueta
+      // de una sola línea (20 px de interlineado, 16 px de caja).
+      className={`flex items-start gap-2 text-sm text-text-primary ${
         disabled ? "opacity-50" : "cursor-pointer"
       }`}
     >
@@ -40,7 +45,7 @@ export function Checkbox({
         onCheckedChange={(next) => {
           onCheckedChange(next === true);
         }}
-        className="flex h-4 w-4 items-center justify-center rounded-sm border border-border bg-bg-primary data-[state=checked]:border-accent data-[state=checked]:bg-accent"
+        className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border border-border bg-bg-primary data-[state=checked]:border-accent data-[state=checked]:bg-accent"
       >
         <RadixCheckbox.Indicator className="text-white">
           {checked === "indeterminate" ? (

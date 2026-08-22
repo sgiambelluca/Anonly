@@ -69,13 +69,13 @@ export function AddEntityDialog({ open, onClose }: AddEntityDialogProps) {
   return (
     <Dialog open={open} onClose={onClose} title="Agregar entidad">
       <div className="flex flex-col gap-3 text-sm">
-        <p className="text-xs text-text-secondary">
+        <p className="text-sm text-text-secondary">
           Buscá un valor exacto en el documento para marcarlo como entidad. La búsqueda no distingue
           mayúsculas ni acentos, pero no encuentra variantes: si el documento nombra lo mismo de dos
           formas (&quot;José Pérez&quot; y &quot;J. Pérez&quot;), agregá las dos por separado.
         </p>
         <label className="flex flex-col gap-1">
-          <span className="text-xs font-medium text-text-secondary">Tipo</span>
+          <span className="text-sm font-medium text-text-secondary">Tipo</span>
           <Select
             value={entityType}
             onChange={setEntityType}
@@ -85,7 +85,7 @@ export function AddEntityDialog({ open, onClose }: AddEntityDialogProps) {
           />
         </label>
         <label className="flex flex-col gap-1">
-          <span className="text-xs font-medium text-text-secondary">Valor</span>
+          <span className="text-sm font-medium text-text-secondary">Valor</span>
           <input
             type="text"
             value={value}
@@ -96,7 +96,7 @@ export function AddEntityDialog({ open, onClose }: AddEntityDialogProps) {
           />
         </label>
         {notFound ? (
-          <p role="alert" className="text-xs text-error">
+          <p role="alert" className="text-sm text-error">
             No se encontró ese texto en el documento.
           </p>
         ) : null}
