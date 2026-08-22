@@ -6,12 +6,11 @@
  * lado, acá solo se emiten las acciones y se muestra el toast.
  */
 
-import type { EntityGroup, EntityType } from "@anonly/anonymization-core";
+import type { EntityGroup } from "@anonly/anonymization-core";
 
 import { actions } from "../../core-adapter/actions.js";
 import { showToast } from "../common/toast.js";
 
-import { ENTITY_TYPE_LABEL } from "./entityTypeLabels.js";
 import { enabledToastText, groupsToToggle } from "./undoableEdits.js";
 
 /**
@@ -50,20 +49,6 @@ export function applyEnabled(params: {
       },
     },
   );
-}
-
-/** Reclasificar un grupo a otro tipo (`ChangeTypeDialog`). */
-export function applyTypeChange(params: {
-  readonly groupId: string;
-  readonly groupLabel: string;
-  readonly previousType: EntityType;
-  readonly nextType: EntityType;
-}): void {
-  actions.updateGroup(params.groupId, { type: params.nextType });
-  showToast(`«${params.groupLabel}» ahora es ${ENTITY_TYPE_LABEL[params.nextType]}`, {
-    label: "Deshacer",
-    run: () => actions.updateGroup(params.groupId, { type: params.previousType }),
-  });
 }
 
 /**

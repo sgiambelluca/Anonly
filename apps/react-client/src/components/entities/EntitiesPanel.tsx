@@ -15,13 +15,40 @@
  * incremental, UX-6) arranque expandido por default sin lógica adicional.
  *
  * **Teclado del árbol** (`UX_Guidelines.md` §9): este componente es el dueño
- * del nodo activo (roving tabindex: exactamente un `treeitem` con
- * `tabIndex=0`, el resto `-1`, de modo que `Tab` entra y sale del árbol de una
- * y las flechas navegan adentro). Qué hace cada tecla lo decide
- * `treeNavigation.ts`; acá solo se ejecuta el comando. El foco se aplica por
- * `data-tree-node-id` en vez de con un `ref` por fila: la lista es virtual en
- * la práctica (cientos de filas) y mantener un mapa de refs vivo sería más
- * estado para el mismo resultado.
+ * del nodo activo. Qué hace cada tecla lo decide `treeNavigation.ts`; acá solo
+ * se ejecuta el comando. El foco se aplica por `data-tree-node-id` en vez de
+ * con un `ref` por fila: la lista es virtual en la práctica (cientos de filas)
+ * y mantener un mapa de refs vivo sería más estado para el mismo resultado.
+ *
+ * **El roving tabindex es sobre los `treeitem`, NO sobre toda la fila.** Un
+ * comentario anterior acá decía "exactamente un `tabIndex=0`, así `Tab` entra
+ * y sale del árbol de una", y era falso: cada fila tiene además su checkbox,
+ * su selector de modo, su toggle de género y su menú, todos botones con tab
+ * stop propio. Son ~5 tab stops por fila visible, y así se queda: el patrón
+ * WAI-ARIA de tree de un solo tab stop asume filas sin controles, y volverlas
+ * inalcanzables por `Tab` para cumplirlo al pie de la letra sacaría el
+ * selector de modo del alcance del teclado — peor accesibilidad, no mejor. Lo
+ * que sí aporta el `tabIndex` alternado es que el CONTENEDOR de cada nodo sea
+ * un solo tab stop en vez de uno por fila, y que las flechas naveguen desde
+ * él.
+ *
+ * De esa convivencia salen las dos reglas de abajo, y las dos arreglan bugs
+ * medidos:
+ *
+ * 1. **El foco se escucha en el contenedor del árbol**, no en cada nodo, y el
+ *    nodo se deduce con `closest`. Antes cada nodo tenía su `onFocus`, y como
+ *    el `onFocus` de React es `focusin` y burbujea, enfocar una fila disparaba
+ *    también el de su cabecera de tipo. La guarda
+ *    `event.target === event.currentTarget` tapaba eso pero abría otro
+ *    agujero: tabular hasta el checkbox de una fila ya no actualizaba el nodo
+ *    activo, que quedaba apuntando a otra fila. `closest` resuelve las dos
+ *    cosas — gana el nodo más cercano al foco, esté el foco en el contenedor o
+ *    en un control de adentro.
+ * 2. **El árbol solo atiende teclas cuando el foco está en el `treeitem`
+ *    mismo.** Con el foco en un control de adentro, `Space` burbujeaba hasta
+ *    acá, se comía el `preventDefault` (cancelando la activación nativa del
+ *    botón) y ejecutaba `toggleEnabled` sobre el nodo activo. Ahora esas
+ *    teclas son del control.
  */
 
 import type { EntityGroup, EntityType } from "@anonly/anonymization-core";
@@ -134,6 +161,12 @@ export function EntitiesPanel() {
     element?.focus();
   }, [activeId]);
 
+  function handleTreeFocus(event: React.FocusEvent<HTMLDivElement>): void {
+    const node = event.target.closest<HTMLElement>("[data-tree-node-id]");
+    const nodeId = node?.dataset["treeNodeId"];
+    if (nodeId !== undefined) setActiveId(nodeId);
+  }
+
   function groupById(nodeId: string): EntityGroup | undefined {
     return filteredEntries
       .flatMap(([, groups]) => groups)
@@ -147,10 +180,14 @@ export function EntitiesPanel() {
   }
 
   function handleTreeKeyDown(event: React.KeyboardEvent<HTMLDivElement>): void {
-    // Adentro de un input o de un menú abierto las mismas teclas significan
-    // otra cosa (escribir, elegir opción); el árbol no se las roba.
-    const target = event.target as HTMLElement;
-    if (target.closest("input, textarea, [role='menu'], [role='dialog']") !== null) return;
+    // Regla 2 de la cabecera: el árbol atiende una tecla solo si el foco está
+    // en el contenedor `treeitem`. Con el foco en un checkbox, un dropdown o
+    // un input de adentro, esas teclas son del control — el guard anterior
+    // enumeraba selectores (`input, textarea, [role='menu']…`) y se le
+    // escapaba el `<button role="checkbox">` que renderiza Radix, que es
+    // justo el control donde `Space` importa.
+    const target = event.target;
+    if (!(target instanceof HTMLElement) || !target.hasAttribute("data-tree-node-id")) return;
 
     const command = resolveTreeKey(nodes, activeId, event.key);
     if (command === null) return;
@@ -267,6 +304,11 @@ export function EntitiesPanel() {
         role="tree"
         aria-label="Entidades detectadas"
         onKeyDown={handleTreeKeyDown}
+        // Regla 1 de la cabecera: un solo listener acá, y el nodo sale del
+        // `closest` del elemento enfocado. `onFocus` de React es `focusin`, que
+        // burbuja, así que llega tanto si el foco cayó en el contenedor del
+        // nodo como en un control de adentro.
+        onFocus={handleTreeFocus}
         className="flex-1 overflow-y-auto"
       >
         {noSearchResults ? (
@@ -283,7 +325,6 @@ export function EntitiesPanel() {
               onToggleExpanded={() => toggleType(type)}
               nodeId={typeNodeId(type)}
               activeNodeId={effectiveActiveId}
-              onNodeFocus={setActiveId}
             />
           ))
         )}
