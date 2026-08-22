@@ -582,6 +582,81 @@ export class RenderKernelCMapReaderFactory {
 }
 
 /**
+ * `CanvasFactory` propia para `getDocument()` — **la tercera trampa de la
+ * misma familia** que las dos factories de acá arriba, y la que faltaba.
+ *
+ * pdf.js pide canvas auxiliares a esta factory cuando una página los necesita:
+ * grupos de transparencia, soft masks, patrones de mosaico y fuentes Type3.
+ * Sin pasarla, cae a su `DOMCanvasFactory`, que hace
+ * `document.createElement("canvas")` — y **dentro de un Worker `document` no
+ * existe**. El error que sale de ahí es
+ * `Cannot read properties of undefined (reading 'createElement')`, envuelto en
+ * `RENDER_PAGE_FAILED`.
+ *
+ * **Por qué no se había visto**: una página que solo dibuja texto y vectores
+ * nunca pide un canvas auxiliar, así que los fixtures del repo —todos
+ * generados con `pdf-lib`, texto plano— renderizan bien. Un PDF real que pasó
+ * por un convertidor sí los pide, y ahí **fallan todas sus páginas**: el visor
+ * queda gris de punta a punta. Reproducido con un expediente de 50 páginas.
+ *
+ * Contrato (`pdfjs-dist@4.10.38/build/pdf.mjs` líneas 5969-6009,
+ * `BaseCanvasFactory`): pdf.js instancia la CLASE, `create(w, h)` devuelve
+ * `{ canvas, context }`, `reset` redimensiona y `destroy` libera. Se
+ * implementa su forma en vez de extenderla porque `BaseCanvasFactory` no está
+ * exportada por el paquete — mismo criterio que las otras dos factories.
+ */
+export class RenderKernelCanvasFactory {
+  create(
+    width: number,
+    height: number,
+  ): { canvas: OffscreenCanvas; context: OffscreenCanvasRenderingContext2D } {
+    if (width <= 0 || height <= 0) {
+      throw new Error("Tamaño de canvas inválido.");
+    }
+    // No reusa `createCanvas` del kernel: ese helper pide `documentId` y
+    // `pageIndex` para el contexto del error, y una factory que pdf.js
+    // instancia por documento no los tiene. La guarda de §13 caso 14 se
+    // repite acá, que es más barato que arrastrar dos parámetros muertos.
+    if (typeof OffscreenCanvas === "undefined") {
+      throw new Error("OffscreenCanvas no disponible en este entorno.");
+    }
+    const canvas = new OffscreenCanvas(width, height);
+    // `willReadFrequently`: pdf.js lee de vuelta estos canvas auxiliares para
+    // componer (soft masks sobre todo). Sin el flag, el navegador los sube a
+    // GPU y cada lectura fuerza una bajada.
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (context === null) {
+      throw new Error("No se pudo obtener un contexto 2D del canvas auxiliar.");
+    }
+    return { canvas, context };
+  }
+
+  reset(canvasAndContext: { canvas: OffscreenCanvas | null }, width: number, height: number): void {
+    if (!canvasAndContext.canvas) {
+      throw new Error("Canvas auxiliar no especificado.");
+    }
+    if (width <= 0 || height <= 0) {
+      throw new Error("Tamaño de canvas inválido.");
+    }
+    canvasAndContext.canvas.width = width;
+    canvasAndContext.canvas.height = height;
+  }
+
+  destroy(canvasAndContext: {
+    canvas: OffscreenCanvas | null;
+    context: OffscreenCanvasRenderingContext2D | null;
+  }): void {
+    if (!canvasAndContext.canvas) {
+      throw new Error("Canvas auxiliar no especificado.");
+    }
+    canvasAndContext.canvas.width = 0;
+    canvasAndContext.canvas.height = 0;
+    canvasAndContext.canvas = null;
+    canvasAndContext.context = null;
+  }
+}
+
+/**
  * `StandardFontDataFactory` propia para `getDocument()` (ADR-053 §2, misma
  * trampa 2 que la factory de arriba): reemplaza a `DOMStandardFontDataFactory`
  * de pdf.js, que toca `document.baseURI` en su primer fetch. Contrato
@@ -1235,6 +1310,9 @@ export async function kernelLoadDocument(
       standardFontDataUrl: RENDER_PDFJS_STANDARD_FONT_DATA_URL,
       CMapReaderFactory: RenderKernelCMapReaderFactory,
       StandardFontDataFactory: RenderKernelStandardFontDataFactory,
+      // Sin esto, pdf.js cae a su `DOMCanvasFactory` y toca `document` —
+      // que no existe en un Worker. Ver `RenderKernelCanvasFactory`.
+      CanvasFactory: RenderKernelCanvasFactory,
     });
     pdfDocument = await loadingTask.promise;
   } catch (err: unknown) {
