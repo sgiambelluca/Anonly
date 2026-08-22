@@ -410,7 +410,12 @@ pdf.js pide canvas auxiliares cuando la página los necesita: **grupos de transp
 
 **Todos los fixtures del repo son texto plano generado con `pdf-lib`** (`tests/fixtures/generate.ts`). Ninguno tiene una imagen, una transparencia ni un patrón, así que ninguno ejercita el camino que falla. El motor tenía 57 tests de unidad pasando mientras cualquier PDF salido de un convertidor real fallaba en **todas** sus páginas.
 
-**Esto sigue abierto y es la parte que importa del §21**: no alcanza con haber arreglado la factory. Falta un fixture con al menos una imagen y una transparencia —el `scanned-10p.pdf` que `tests/fixtures/README.md` lista como pendiente cubriría parte— y un test de render sobre él. Sin eso, la próxima trampa de la misma familia vuelve a pasar sin que nadie se entere.
+**Esto sigue abierto y es la parte que importa del §21**, y el intento de cerrarlo dejó un dato:
+
+- Se agregó `image-alpha-3p.pdf` (imagen con `/SMask`, imagen + texto, rectángulos con `opacity`) y **no reproduce el defecto**: con la `CanvasFactory` quitada a propósito, renderiza igual. Un SMask de imagen simple no alcanza. El camino se dispara con **grupos de transparencia**, **patrones de mosaico** o **fuentes Type3**, y `pdf-lib` no produce ninguna de las tres.
+- Lo que sí guarda la omisión concreta es un test de unidad del kernel que afirma que `getDocument()` recibe la factory (verificado: falla si se la saca). Es un guard sobre **ese** olvido, no sobre la familia.
+
+**Conclusión**: el hueco no se cierra con un fixture sintético. Necesita un PDF real —el `scanned-10p.pdf` que el README lista como pendiente por requerir tools externos es el candidato— y un test de render en browser (Playwright) sobre él, porque el kernel no se puede ejercitar en Node: no hay `OffscreenCanvas` ni DOM.
 
 ### Segundo defecto, del mismo camino: el fallo era invisible
 

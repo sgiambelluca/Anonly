@@ -15,9 +15,31 @@ Fixtures (PDFs de prueba) para los tests del Core de Anonly.
 | `scanned-10p.pdf` | ~5 MB | PDF escaneado, requiere OCR | OCR Engine |
 | `corrupt.pdf` | ~1 KB | header %PDF- válido + cuerpo no-PDF determinista | PDF Engine edge |
 | `protected.pdf` | ~100 KB | protegido con password `test1234` | PDF Engine edge |
+| `image-alpha-3p.pdf` | ~2 KB | 3 páginas: imagen con **canal alfa** (SMask), imagen + texto, y rectángulos con `opacity` | Render Engine — el camino de los canvas auxiliares de pdf.js |
 | `empty.pdf` | ~1 KB | 1 página sin contenido (pdf-lib no permite 0 páginas) | PDF Engine edge |
 | `huge-1000p.pdf` | ~10 MB | 1000 páginas, stress extremo | PDF Engine stress (LFS) |
 | `mixed-30p.pdf` | ~3 MB | 15 con texto + 15 escaneadas | PDF Engine + OCR integration |
+
+## Por qué existe `image-alpha-3p.pdf`
+
+**Todos los demás fixtures son texto plano generado con `pdf-lib`.** Ninguno tiene una imagen, una transparencia ni un patrón, así que ninguno ejercitaba el camino por el que pdf.js pide **canvas auxiliares** a su `CanvasFactory` (grupos de transparencia, soft masks, patrones de mosaico, fuentes Type3).
+
+Ese hueco dejó pasar un defecto real: al kernel de render le faltaba pasarle una `CanvasFactory` propia a `getDocument()`, así que pdf.js caía a su `DOMCanvasFactory` y hacía `document.createElement` **dentro de un Worker**, donde `document` no existe. El resultado era que **todas** las páginas de cualquier PDF con imágenes fallaban con `RENDER_PAGE_FAILED` y el visor quedaba gris — mientras el motor tenía 57 tests de unidad en verde. Se descubrió con un expediente real, no con los tests (`roadmap/Post_Hito10.8_Pendientes.md` §21).
+
+### ⚠️ Este fixture NO reproduce ese defecto, y hay que decirlo
+
+**Medido**: con la `CanvasFactory` quitada a propósito, `image-alpha-3p.pdf` **renderiza igual**. Un `/SMask` de imagen simple no alcanza para que pdf.js pida un canvas auxiliar; el camino se dispara con **grupos de transparencia** (Form XObject con `/Group /S /Transparency`), **patrones de mosaico** o **fuentes Type3**, y `pdf-lib` no produce ninguna de las tres.
+
+O sea: este fixture **amplía** la cobertura (es el único con imágenes y con `opacity`, y sirve como caso de detección sobre una página con imagen), pero **el hueco que dejó pasar el defecto sigue abierto**. Cerrarlo necesita un PDF real, del tipo que `scanned-10p.pdf` ya está listado como pendiente por requerir tools externos.
+
+Lo que sí guarda el defecto concreto es un test de unidad del kernel (`render-engine/src/__tests__/kernel.test.ts`) que afirma que `getDocument()` recibe la `CanvasFactory` propia — verificado que falla si alguien la saca. Es un guard sobre **esa** omisión, no sobre la familia entera.
+
+Lo que hace falta que este fixture conserve para seguir sirviendo:
+
+- **El canal alfa del PNG**, que `pdf-lib` embebe como `/SMask`. Si alguien lo reemplaza por un PNG sin alfa, el fixture deja de aportar lo poco que aporta sin que nada falle.
+- **Una entidad detectable en la página con imagen** (`DNI 34.567.891`), para que valga también como caso de detección sobre una página con imagen y no solo de render.
+
+---
 
 ## Contenido conocido de `text-10p.pdf`
 

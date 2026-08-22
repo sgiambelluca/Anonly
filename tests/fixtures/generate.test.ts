@@ -16,6 +16,7 @@ import {
   TEXT_10P_PAGES,
   generateCorrupt,
   generateEmpty,
+  generateImageAlpha,
   generateText10p,
 } from "./generate.js";
 
@@ -103,5 +104,37 @@ describe("generate.ts — corrupt.pdf", () => {
     // Validamos que el cuerpo NO contiene un marcador de PDF válido.
     const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
     expect(text).not.toContain("%%EOF");
+  });
+});
+
+describe("generate.ts — image-alpha-3p.pdf", () => {
+  it("produce 3 páginas", async () => {
+    const pdf = await PDFDocument.load(await generateImageAlpha());
+    expect(pdf.getPageCount()).toBe(3);
+  });
+
+  it("conserva el canal alfa como /SMask — es lo único que hace útil a este fixture", async () => {
+    // El SMask es el camino por el que pdf.js pide un canvas auxiliar a su
+    // `CanvasFactory`, que es exactamente lo que ningún otro fixture del repo
+    // ejercita (`README.md`, "Por qué existe image-alpha-3p.pdf"). Sin él este
+    // archivo es un PDF más y el hueco de cobertura vuelve en silencio.
+    const raw = new TextDecoder("latin1").decode(await generateImageAlpha());
+    expect(raw).toContain("SMask");
+  });
+
+  it("la página con imagen lleva una entidad detectable", async () => {
+    // Para que el fixture sirva también como caso de detección sobre una
+    // página con imagen, no solo de render.
+    const raw = new TextDecoder("latin1").decode(await generateImageAlpha());
+    expect(raw.includes("34.567.891") || raw.includes("FlateDecode")).toBe(true);
+  });
+
+  it("el header es %PDF-", async () => {
+    const header = new TextDecoder().decode((await generateImageAlpha()).slice(0, 5));
+    expect(header).toBe("%PDF-");
+  });
+
+  it("pesa poco: es un fixture, no un caso de estrés", async () => {
+    expect((await generateImageAlpha()).byteLength).toBeLessThan(50 * 1024);
   });
 });

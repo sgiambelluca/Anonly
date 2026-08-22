@@ -29,6 +29,7 @@ import {
   kernelLoadDocument,
   kernelRenderLegendPage,
   kernelRenderPage,
+  RenderKernelCanvasFactory,
   RenderKernelCMapReaderFactory,
   RenderKernelStandardFontDataFactory,
   type KernelRenderLegendOptions,
@@ -43,6 +44,7 @@ import {
   getConvertToBlobCalls,
   getCreatedCanvases,
   installOffscreenCanvasStub,
+  removeOffscreenCanvasStub,
   makeMarkerLegendRow,
   makeReplacement,
   mockGetDocumentResult,
@@ -55,7 +57,7 @@ describe("kernelLoadDocument — opciones de pdf.js dentro del Worker (ADR-053)"
     vi.clearAllMocks();
   });
 
-  it("pasa las cinco opciones de la regla transversal con el valor exacto", async () => {
+  it("pasa las opciones de la regla transversal con el valor exacto", async () => {
     vi.mocked(getDocument).mockReturnValue(
       mockGetDocumentResult(createMockPdfDocument({ pageCount: 2 })),
     );
@@ -90,6 +92,95 @@ describe("kernelLoadDocument — opciones de pdf.js dentro del Worker (ADR-053)"
     // pdfjs-dist, esta comparación por referencia lo detecta.
     expect(options.CMapReaderFactory).toBe(RenderKernelCMapReaderFactory);
     expect(options.StandardFontDataFactory).toBe(RenderKernelStandardFontDataFactory);
+  });
+
+  it("inyecta también la CanvasFactory propia — la tercera de la misma familia", async () => {
+    // Regresión con nombre y apellido: durante todo ADR-053 este archivo
+    // afirmó "las CINCO opciones exactas" y las cinco estaban bien, mientras
+    // faltaba la sexta. pdf.js caía a su `DOMCanvasFactory` para los canvas
+    // auxiliares (grupos de transparencia, soft masks, patrones, Type3) y
+    // hacía `document.createElement` dentro del Worker — donde `document` no
+    // existe. Resultado: TODAS las páginas de cualquier PDF con imágenes
+    // fallaban con `RENDER_PAGE_FAILED`, y el visor quedaba gris. Ningún
+    // fixture del repo tiene una imagen, así que nada lo agarró.
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+    );
+
+    await kernelLoadDocument({ documentId: "doc-canvas", buffer: createValidBuffer() });
+
+    const options = capturedGetDocumentOptions(vi.mocked(getDocument).mock.calls[0]?.[0]);
+    expect(options.CanvasFactory).toBe(RenderKernelCanvasFactory);
+  });
+});
+
+describe("RenderKernelCanvasFactory — canvas auxiliares de pdf.js sin DOM", () => {
+  /*
+   * Este archivo corre en `environment: "node"`, donde `document` no existe:
+   * si la factory lo tocara, estos tests explotarían solos con un
+   * `ReferenceError` en vez de con un assert manual. Es el mismo mecanismo
+   * con el que ADR-053 §7 cubrió las otras dos factories.
+   */
+
+  it("crea un canvas del tamaño pedido y devuelve su contexto 2D", () => {
+    const factory = new RenderKernelCanvasFactory();
+
+    const { canvas, context } = factory.create(120, 80);
+
+    expect(canvas.width).toBe(120);
+    expect(canvas.height).toBe(80);
+    expect(context).not.toBeNull();
+  });
+
+  it("pide el contexto con willReadFrequently: pdf.js relee estos canvas para componer", () => {
+    const factory = new RenderKernelCanvasFactory();
+
+    const { canvas } = factory.create(10, 10);
+
+    // El stub registra los argumentos de `getContext`.
+    const calls = (canvas as unknown as { getContextCalls?: ReadonlyArray<unknown> })
+      .getContextCalls;
+    if (calls !== undefined) {
+      expect(calls[0]).toMatchObject({ willReadFrequently: true });
+    }
+  });
+
+  it("rechaza tamaños inválidos en vez de devolver un canvas degenerado", () => {
+    const factory = new RenderKernelCanvasFactory();
+
+    expect(() => factory.create(0, 10)).toThrow();
+    expect(() => factory.create(10, -1)).toThrow();
+  });
+
+  it("reset redimensiona el canvas existente", () => {
+    const factory = new RenderKernelCanvasFactory();
+    const created = factory.create(10, 10);
+
+    factory.reset(created, 40, 30);
+
+    expect(created.canvas.width).toBe(40);
+    expect(created.canvas.height).toBe(30);
+  });
+
+  it("destroy libera el canvas y su contexto", () => {
+    const factory = new RenderKernelCanvasFactory();
+    const created = factory.create(10, 10);
+
+    const holder: { canvas: unknown; context: unknown } = created;
+    factory.destroy(created);
+
+    expect(holder.canvas).toBeNull();
+    expect(holder.context).toBeNull();
+  });
+
+  it("sin OffscreenCanvas falla con un mensaje que lo dice, no con un TypeError críptico", () => {
+    removeOffscreenCanvasStub();
+    try {
+      const factory = new RenderKernelCanvasFactory();
+      expect(() => factory.create(10, 10)).toThrow(/OffscreenCanvas/);
+    } finally {
+      installOffscreenCanvasStub();
+    }
   });
 
   it("pasa data/password intactos junto con las opciones de fuentes (no las reemplaza)", async () => {
