@@ -6,13 +6,16 @@
  * que destruye texto escrito a mano, por el mismo criterio que se aplica acá:
  * **una acción de un click que cambia muchas filas, o que pisa algo que el
  * usuario escribió, necesita una salida de un click**. Lo que quedó afuera
- * entonces —habilitar/deshabilitar, reclasificar, editar el valor de
- * reemplazo— cumple ese criterio igual: la cascada de un tipo apaga decenas de
- * grupos de una, y `Space` sobre una cabecera hace lo mismo sin siquiera un
- * diálogo de por medio.
+ * entonces —habilitar/deshabilitar y editar el valor de reemplazo— cumple ese
+ * criterio igual: la cascada de un tipo apaga decenas de grupos de una, y
+ * `Space` sobre una cabecera hace lo mismo sin siquiera un diálogo de por
+ * medio.
  *
- * **Qué NO está acá, y por qué.** Fusionar, dividir y agregar una entidad a
- * mano siguen sin deshacer, y no es una omisión de este módulo:
+ * **Qué NO está acá, y por qué.** Fusionar, dividir, reclasificar y agregar
+ * una entidad a mano siguen sin deshacer, y no es una omisión de este módulo.
+ * Las cuatro comparten una misma razón de fondo: **el Core no tiene una
+ * inversa exacta**, y un "Deshacer" que devuelve algo parecido y no lo mismo
+ * miente — es peor que no ofrecerlo.
  *
  * - Deshacer un **agregado manual** necesita borrar el grupo, y no existe
  *   pedido de borrado en `Contracts.md` — `ENTITY_GROUP_REMOVED` lo emite el
@@ -22,10 +25,17 @@
  *   sería fusionar de vuelta, pero ninguna de las dos restituye el estado
  *   anterior: el grupo que reaparece es uno nuevo, con otro `id` y otro
  *   `indexInType` (`Grouping_Engine.md` §13 caso 5 — la fusión conserva el
- *   menor índice y el resultante renumera). El usuario recuperaría las
- *   ocurrencias separadas pero con otro número de token. Un "Deshacer" que
- *   devuelve algo parecido y no lo mismo miente, y eso es peor que no
- *   ofrecerlo.
+ *   menor índice y el resultante renumera).
+ * - Deshacer una **reclasificación** parece trivial —volver al tipo anterior—
+ *   y no lo es. `changeGroupType` renumera con `nextIndex`, que es monótono,
+ *   así que el grupo vuelve con otro número de token; re-escribe
+ *   `typeCorrections` (ADR-085 §1b) en vez de borrar la entrada que no
+ *   existía; deja `absorbedTypes` con los dos tipos para siempre; y al salir
+ *   de `Person` destruye `personGenderUserSet`, de modo que el "undo"
+ *   reemplazaría en silencio una elección explícita del usuario por una
+ *   inferida (ADR-082 §2 paso 4). Este módulo **llegó a ofrecer ese undo** y
+ *   se retiró al medirlo: es el mismo defecto que hace un párrafo se usa para
+ *   descartar fusionar y dividir.
  *
  * Módulo puro: los tests de `apps/react-client` corren en Node sin jsdom.
  */
