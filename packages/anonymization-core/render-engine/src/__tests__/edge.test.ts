@@ -2,6 +2,7 @@ import {
   AnnotationKind,
   CancelledError,
   EngineDisposedError,
+  EngineErrorCode,
   EngineEvents,
   EngineNotInitializedError,
   EventChannel,
@@ -18,6 +19,7 @@ import { RenderEngine } from "../render.engine.js";
 import { RenderFailedError, RenderPageFailedError, RenderTimeoutError } from "../render.errors.js";
 
 import {
+  createDeserializedRejectingRenderPool,
   createEngineContext,
   createEngineContextWithRealBus,
   createMockConfig,
@@ -1339,6 +1341,56 @@ describe("RenderEngine — edge cases", () => {
       );
       // RENDER_FINISHED sigue emitiéndose al final del batch: el documento
       // no se cuelga, aunque ninguna página haya producido una imagen real.
+      expect(
+        busEmitSpy.mock.calls.some(([, event]) => event === EngineEvents.RENDER_FINISHED),
+      ).toBe(true);
+
+      await pooledEngine.dispose();
+    });
+
+    it("un fallo que llega DESERIALIZADO del worker igual reintenta y emite PREVIEW_PAGE_FAILED", async () => {
+      // Regresión de `Post_Hito10.8_Pendientes.md` §21. El host discriminaba
+      // con `instanceof RenderPageFailedError`, y la subclase concreta no
+      // sobrevive al `postMessage`: `EngineError.deserialize` devuelve
+      // siempre un `DeserializedEngineError` (`shared/src/errors.ts`). En
+      // producción ese `instanceof` daba `false` para TODO fallo de render
+      // real, así que no se reintentaba y el batch se abortaba por la rama
+      // "no recuperable" — sin `PREVIEW_PAGE_FAILED`, sin nada en pantalla
+      // (el `warn` va a un logger nulo) y con el visor gris para siempre.
+      // Los demás tests fallaban con la subclase concreta, que es justo el
+      // caso que NO ocurre cuando hay workers de verdad.
+      const serialized = new RenderPageFailedError(
+        "doc-deserialized-failure",
+        0,
+        "Cannot read properties of undefined (reading 'createElement')",
+      ).serialize();
+      const { pool, attempts } = createDeserializedRejectingRenderPool(serialized);
+      const pooledEngine = new RenderEngine(pool);
+      await pooledEngine.init(ctx);
+      await pooledEngine.loadDocument("doc-deserialized-failure", createValidBuffer());
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+
+      const outputs = await pooledEngine.renderPages(
+        [createRenderPageInput({ documentId: "doc-deserialized-failure", pageIndex: 0 })],
+        ctx,
+      );
+
+      expect(outputs).toEqual([]);
+      // §11 "reintentar 1 vez": 2 intentos, no 1. Con el `instanceof` roto
+      // era 1 — el error caía directo a la rama fatal.
+      expect(attempts()).toBe(2);
+
+      const pageFailedCalls = busEmitSpy.mock.calls.filter(
+        ([, event]) => event === EngineEvents.PREVIEW_PAGE_FAILED,
+      );
+      expect(pageFailedCalls.length).toBe(1);
+      // El error viaja tal cual: envolverlo perdería el `details` original.
+      const payload = pageFailedCalls[0]?.[2] as { readonly error: { readonly code: string } };
+      expect(payload.error.code).toBe(EngineErrorCode.RENDER_PAGE_FAILED);
+      // Y NO es un fatal de batch: RENDER_FINISHED se sigue emitiendo.
+      expect(busEmitSpy.mock.calls.some(([, event]) => event === EngineEvents.RENDER_FAILED)).toBe(
+        false,
+      );
       expect(
         busEmitSpy.mock.calls.some(([, event]) => event === EngineEvents.RENDER_FINISHED),
       ).toBe(true);

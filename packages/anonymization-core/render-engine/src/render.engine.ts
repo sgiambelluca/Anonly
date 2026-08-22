@@ -234,6 +234,7 @@
 import {
   CancelledError,
   EngineDisposedError,
+  EngineErrorCode,
   EngineEvents,
   EngineId,
   EngineNotInitializedError,
@@ -245,6 +246,7 @@ import {
   type BoundingBox,
   type EncodedPageImage,
   type EngineContext,
+  type EngineError,
   type IEngine,
   type LoadDocumentPayload,
   type MarkerLegendRow,
@@ -257,7 +259,12 @@ import {
   type UnloadDocumentPayload,
 } from "@anonly/shared";
 
-import { RenderFailedError, RenderPageFailedError, RenderTimeoutError } from "./render.errors.js";
+import {
+  isRenderErrorCode,
+  isRetryablePageError,
+  RenderFailedError,
+  RenderPageFailedError,
+} from "./render.errors.js";
 import type { RenderPageInput, RenderPageOutput } from "./render.types.js";
 import {
   kernelDisposeAll,
@@ -1205,12 +1212,15 @@ export class RenderEngine implements IEngine {
             superseded = true;
             break;
           }
-          if (err instanceof RenderPageFailedError || err instanceof RenderTimeoutError) {
+          // Discriminación por `code`, nunca por `instanceof` de la subclase:
+          // el error llega deserializado del worker (ver `isRenderErrorCode`
+          // en `render.errors.ts` para el bug que esto arregla).
+          if (isRetryablePageError(err)) {
             lastError = err;
             continue; // retryable: reintenta si quedan intentos.
           }
-          // RenderFailedError / InvalidInputError: no recuperable → aborta el batch (§11).
-          if (err instanceof RenderFailedError) {
+          // RENDER_FAILED / InvalidInputError: no recuperable → aborta el batch (§11).
+          if (isRenderErrorCode(err, EngineErrorCode.RENDER_FAILED)) {
             ctx.bus.emit(EventChannel.Render, EngineEvents.RENDER_FAILED, {
               documentId: input.documentId,
               error: err.serialize(),
@@ -1396,12 +1406,11 @@ export class RenderEngine implements IEngine {
 
   // ─── Helpers de host ───
 
-  private toPageFailure(
-    documentId: string,
-    pageIndex: number,
-    err: unknown,
-  ): RenderPageFailedError | RenderTimeoutError {
-    if (err instanceof RenderPageFailedError || err instanceof RenderTimeoutError) return err;
+  private toPageFailure(documentId: string, pageIndex: number, err: unknown): EngineError {
+    // Mismo criterio que el bucle de reintentos: por `code`. Un error que ya
+    // ES un fallo de página se propaga tal cual — envolverlo perdería el
+    // `details` original (`pageIndex`, `reason`) que la UI y los tests leen.
+    if (isRetryablePageError(err)) return err;
     const reason = err instanceof Error ? err.message : String(err);
     return new RenderPageFailedError(documentId, pageIndex, reason);
   }
