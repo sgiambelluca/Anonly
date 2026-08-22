@@ -33,6 +33,7 @@ import {
   EngineEvents,
   EventChannel,
   InvalidInputError,
+  isEngineErrorCode,
   PipelineStage,
   type CancelRequested,
   type CoreRuntimeOptions,
@@ -86,7 +87,7 @@ import {
   previewBlobKey,
   previewPrefixFor,
 } from "./blob-tracker.js";
-import { isEngineErrorCode, OrchestratorDisposedError } from "./errors.js";
+import { OrchestratorDisposedError } from "./errors.js";
 import { selectLineWords } from "./line-words.js";
 import { PipelineStateStore } from "./pipeline-state.js";
 import type {

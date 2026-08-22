@@ -127,6 +127,7 @@ export {
   InvalidInputError,
   WorkerCrashedError,
   CancelledError,
+  isEngineErrorCode,
 } from "./errors.js";
 export type { SerializedEngineError } from "./errors.js";
 

@@ -43,6 +43,7 @@ import {
   createValidBuffer,
   getConvertToBlobCalls,
   getCreatedCanvases,
+  getGetContextCalls,
   installOffscreenCanvasStub,
   removeOffscreenCanvasStub,
   makeMarkerLegendRow,
@@ -50,6 +51,7 @@ import {
   mockGetDocumentResult,
   resetConvertToBlobCalls,
   resetCreatedCanvases,
+  resetGetContextCalls,
 } from "./fixtures/test-helpers.js";
 
 describe("kernelLoadDocument — opciones de pdf.js dentro del Worker (ADR-053)", () => {
@@ -133,16 +135,18 @@ describe("RenderKernelCanvasFactory — canvas auxiliares de pdf.js sin DOM", ()
   });
 
   it("pide el contexto con willReadFrequently: pdf.js relee estos canvas para componer", () => {
+    // Este test afirmaba lo mismo dentro de un `if (calls !== undefined)` sobre
+    // una propiedad que el stub nunca escribía: la condición era siempre falsa
+    // y el cuerpo no corría NUNCA. Ahora el stub registra los argumentos
+    // (`getGetContextCalls`) y la afirmación es incondicional.
+    resetGetContextCalls();
     const factory = new RenderKernelCanvasFactory();
 
-    const { canvas } = factory.create(10, 10);
+    factory.create(10, 10);
 
-    // El stub registra los argumentos de `getContext`.
-    const calls = (canvas as unknown as { getContextCalls?: ReadonlyArray<unknown> })
-      .getContextCalls;
-    if (calls !== undefined) {
-      expect(calls[0]).toMatchObject({ willReadFrequently: true });
-    }
+    const calls = getGetContextCalls();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual({ contextId: "2d", options: { willReadFrequently: true } });
   });
 
   it("rechaza tamaños inválidos en vez de devolver un canvas degenerado", () => {

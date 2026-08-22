@@ -9,6 +9,12 @@
 
 > Convención de citas: `ADR-053 §N` refiere a **Decisión §N**; el contexto se cita como `ADR-053, Contexto §N`.
 
+> **Errata (2026-08-22).** Este ADR enumeró **cinco opciones y dos factories** (CMap y standard fonts) y las declaró solidarias. Faltaba una tercera: la **`CanvasFactory`**. Sin ella pdf.js cae a su `DOMCanvasFactory`, que hace `document.createElement("canvas")`, y dentro de un Worker eso no existe — el mismo tipo de agujero que este ADR fue a tapar, en el único punto que no revisó.
+>
+> No se notó antes porque pdf.js pide canvas auxiliares **solo** cuando la página los necesita: grupos de transparencia, soft masks, patrones de mosaico y fuentes Type3. Ninguna página de texto y vectores los pide, y todos los fixtures del repo son texto plano generado con `pdf-lib`. El motor pasó con 57 tests de unidad en verde mientras cualquier PDF salido de un convertidor real fallaba en **todas** sus páginas.
+>
+> La omisión se cerró midiendo el fallo real en el navegador; el rastro completo está en `roadmap/Post_Hito10.8_Pendientes.md` §21, y `core/Render_Engine.md` §6 ya dice "seis opciones y tres factories". La lección que este ADR ya traía —"aparecen clases nuevas por kernel que existen solo para esquivar una limitación de terceros"— se extiende a la tercera.
+
 ## Contexto
 
 ### 1. El síntoma
@@ -161,7 +167,7 @@ El 1 va primero: sin assets servidos, el 2 y el 3 apuntan a un 404. El 2 y el 3 
 
 ## Docs actualizados por este ADR
 
-- `core/Render_Engine.md`: nota de versión + sección de `kernelLoadDocument` con las cinco opciones y el porqué de las factories propias.
+- `core/Render_Engine.md`: nota de versión + sección de `kernelLoadDocument` con las cinco opciones y el porqué de las factories propias. (Hoy son **seis opciones y tres factories** — ver la errata de arriba.)
 - `core/PDF_Engine.md`: las opciones de §5 en el `getDocument` de extracción, con la nota de que `disableFontFace` no aplica ahí; y el ítem 17 de su checklist §15, para que siga siendo verdad tras las factories propias.
 - `architecture/05_Worker_Architecture.md`: la regla de §1 como invariante de cualquier kernel que hospede pdf.js.
 - `adr/ADR-018`: nota de que un asset que viene de una dependencia npm pinneada se sirve first-party sin pasar por `assets.lock.json`.
