@@ -195,9 +195,28 @@ tests/fixtures/reference/
 
 ### Construcción
 
-- **Generado por script**: extender `generate.ts` con `generateReferenceDataset()`, que produce los PDFs y sus `truth.json` desde la misma fuente (imposible que se desincronicen).
-- **Composición inicial** (mínimo para que las métricas sean significativas): ~20 documentos sintéticos con densidad variada — documentos "densos" (muchas entidades por página), "ralos" (1–2 entidades), "trampa" (textos que parecen entidades pero no lo son: números de expediente, códigos postales, fechas inválidas) y "vacíos" (sin entidades).
-- **Sin datos reales**: nombres, DNIs, CUITs y direcciones se generan con el mismo pool sintético de `shared/synthesizer.ts`.
+- **Generado por script** (implementado): `generate.ts` expone `generateReferenceDataset()`, que produce los PDFs y sus `truth.json` desde la misma fuente en memoria — `buildReferenceDocSpecs()`, exportada también, es la única estructura de la que salen los dos. `ReferencePageBuilder.entity()` es el único punto de entrada para declarar una entidad: empuja el valor al texto de la página (lo que se dibuja) y lo registra como entidad esperada (lo que va al truth) en la misma llamada. No hay un camino para escribir texto sin pasar por ahí. `pnpm fixtures:generate` los produce junto con los demás fixtures, en `tests/fixtures/reference/`.
+- **Composición** (20 documentos, `doc-001`…`doc-020`): 6 "densos" (`doc-001`–`doc-006`, varias entidades por página, cubriendo los doce tipos de `EntityType` salvo `Custom`), 6 "ralos" (`doc-007`–`doc-012`, 1–2 entidades), 5 "trampa" (`doc-013`–`doc-017`, cero entidades) y 3 "vacíos" (`doc-018`–`doc-020`, cero entidades, sin siquiera texto trampa).
+- **Sin datos reales**: nombres, DNIs, CUITs, direcciones, teléfonos, IBAN, tarjeta, fecha, patente se sortean con el mismo pool sintético de `shared/synthesizer.ts` (`synthesize()`, vía el helper `synth()` de `generate.ts`). Excepción documentada en "Hallazgos" más abajo: `License` no sale del pool (su forma no es detectable) y se arma con dígitos del pool pero un prefijo de letras inventado con la misma forma que ya usa `ADR-075` §2 en sus propios tests (`"MP-12345"`); es exactamente lo que permite la regla de esta sección ("o es inventado con la misma forma").
+- **Formato de `manifest.json`** (no estaba especificado más allá de "índice: documento → ground truth"; decisión de esta implementación):
+  ```json
+  {
+    "documents": [
+      { "documentId": "doc-001", "pdf": "doc-001.pdf", "truth": "doc-001.truth.json", "category": "dense", "entityCount": 6 }
+    ]
+  }
+  ```
+  `category` es una de `"dense" | "sparse" | "trap" | "empty"`.
+
+### Hallazgos verificados durante la construcción (2026-08-26)
+
+Se armó un simulador fiel del algoritmo real de `regex-engine/regex.engine.ts` (`rawMatches` de los 13 patrones → filtro `checksumPassed && passesRunGuard` → `resolveOverlaps`) para verificar, contra los patrones y checksums reales de `patterns/default-ar.ts`, que cada entidad `detector: "regex"` del dataset efectivamente matchea y que ningún documento "trampa"/"vacío" produce una ocurrencia inesperada. Encontró tres discrepancias entre `shared/synthesizer.ts` y los patrones reales, que `generate.ts` sortea localmente (sin tocar `synthesizer.ts`, fuera de este alcance) y que valen la pena que alguien revise en `shared`:
+
+- **`License`**: `synthesize()` produce un valor puramente numérico ("XX-XXXX-XX"), pero el patrón `license-ar` exige 1 a 3 letras mayúsculas obligatorias al principio (`\b[A-Z]{1,3}-?\d{4,8}-?\d?\b`). Un valor de `synthesize()` para este tipo **nunca** es detectable — ni por este dataset ni como reemplazo mostrado al usuario en un documento anonimizado, que tampoco tendría esta forma.
+- **`IBAN`**: `synthesize()` separa los grupos con espacios (formato de lectura humana), pero el patrón `iban` (`\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b`) no admite espacios internos — verificado que sobre un IBAN con espacios el patrón no matchea **nada**, ni para aceptar ni para rechazar por checksum. Esto también corrige una imprecisión de esta misma sección del README (ver "Contenido conocido de `text-10p.pdf`" más arriba): el IBAN de ese fixture está documentado como "rechazado por checksum", y en realidad el patrón ni siquiera llega a matchearlo — la razón real es más básica que la documentada.
+- **`Phone` (mobile)**: `synthesize()` sortea el código de área de una lista con entradas de 2 y 3 dígitos (`"11" | "221" | "341" | "351" | "343" | "380"`), pero `phone-mobile-ar` exige exactamente 2 dígitos ahí. Con área de 3 dígitos el patrón no matchea.
+
+Un cuarto hallazgo, sin acción tomada porque **el dataset ya lo captura a propósito**: `doc-016` (trampa, CUIT con checksum inválido) reproduce el falso positivo ya anotado en "Contenido conocido de `text-10p.pdf`" (`scenario-8-ner-disabled.spec.ts`) — cuando un CUIT con forma "XX-XXXXXXXX-X" falla su checksum, el motor real **sí** emite una ocurrencia `Phone` espuria sobre sus primeros 10 dígitos (`"20-12345678"`), porque el filtro de checksum corre **antes** que la resolución de overlaps (`regex.engine.ts` líneas ~736-743) y para cuando el overlap se resuelve el CUIT ya no está para ganarle por ser el match más largo. El `truth.json` de `doc-016` sigue declarando cero entidades (es la verdad semántica: no hay ningún teléfono ahí) — la brecha entre eso y lo que el motor real emite es precisamente el defecto que este documento existe para medir, no un error del dataset.
 
 ### Cuándo se necesita
 
@@ -206,6 +225,10 @@ tests/fixtures/reference/
 | Hito 4 (Regex) | recall/precision Regex — **gate MVP** |
 | Hito 5 (NER) | recall/precision NER — informativa en MVP, gate en v1.0 |
 | Hito 11 (Hardening) | gates de CI (`pnpm test:perf`) |
+
+### Estado actual
+
+Generado por script (`pnpm fixtures:generate` → `generateReferenceDataset()`), validado en memoria por `generate.test.ts` → describe `"generate.ts — dataset de referencia (tests/fixtures/reference/)"`. Falta escribir el **evaluador** (compara la salida real del pipeline contra este ground truth y calcula recall/precisión) — está deliberadamente fuera del alcance de quien construyó el dataset: la regla de matcheo tiene decisiones de diseño abiertas (p. ej. qué tan estricta es la comparación de `value`, cómo tratar `doc-016`) que le corresponden al planificador.
 
 El dataset debe existir **antes de cerrar el Hito 4**.
 
