@@ -192,6 +192,159 @@ describe("RegexEngine — unit tests", () => {
     });
   });
 
+  // ADR-093: la característica telefónica argentina no siempre tiene dos
+  // dígitos — lo invariante es que característica + abonado suman 10.
+  describe("Phone móvil — característica de 2/3/4 dígitos (ADR-093)", () => {
+    // Los cinco ejemplos literales de ADR-093 §1 Contexto: uno detectado ya
+    // antes de este ADR (CABA, característica de 2) y cuatro que "NO
+    // DETECTA" con el patrón viejo — cada uno con y sin el prefijo "+54".
+    const casos: ReadonlyArray<{
+      readonly ciudad: string;
+      readonly sinPrefijo: string;
+      readonly normalizedSinPrefijo: string;
+      readonly normalizedConPrefijo: string;
+    }> = [
+      {
+        ciudad: "CABA (característica de 2)",
+        sinPrefijo: "11 4567-8900",
+        normalizedSinPrefijo: "1145678900",
+        normalizedConPrefijo: "541145678900",
+      },
+      {
+        ciudad: "La Plata (característica de 3)",
+        sinPrefijo: "221 456-7890",
+        normalizedSinPrefijo: "2214567890",
+        normalizedConPrefijo: "542214567890",
+      },
+      {
+        ciudad: "Rosario (característica de 3)",
+        sinPrefijo: "341 456-7890",
+        normalizedSinPrefijo: "3414567890",
+        normalizedConPrefijo: "543414567890",
+      },
+      {
+        ciudad: "Córdoba (característica de 3)",
+        sinPrefijo: "351 456-7890",
+        normalizedSinPrefijo: "3514567890",
+        normalizedConPrefijo: "543514567890",
+      },
+      {
+        ciudad: "Santa Rosa (característica de 4)",
+        sinPrefijo: "2954 12-3456",
+        normalizedSinPrefijo: "2954123456",
+        normalizedConPrefijo: "542954123456",
+      },
+    ];
+
+    it.each(casos)(
+      "$ciudad — sin prefijo de país",
+      async ({ sinPrefijo, normalizedSinPrefijo }) => {
+        const document = makeSinglePageDocument(`doc-caract-${sinPrefijo}`, sinPrefijo.split(" "));
+        const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+        await engine.process({ document }, ctx);
+        const call = busEmitSpy.mock.calls.find(([, event]) => event === EngineEvents.ENTITY_FOUND);
+        const occurrence = (call?.[2] as EntityFound | undefined)?.occurrence;
+        expect(occurrence?.entityType, sinPrefijo).toBe(EntityType.Phone);
+        expect(occurrence?.normalizedValue, sinPrefijo).toBe(normalizedSinPrefijo);
+      },
+    );
+
+    it.each(casos)("$ciudad — con prefijo +54", async ({ sinPrefijo, normalizedConPrefijo }) => {
+      const tokens = [`+54`, ...sinPrefijo.split(" ")];
+      const document = makeSinglePageDocument(`doc-caract-prefijo-${sinPrefijo}`, tokens);
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      await engine.process({ document }, ctx);
+      const call = busEmitSpy.mock.calls.find(([, event]) => event === EngineEvents.ENTITY_FOUND);
+      const occurrence = (call?.[2] as EntityFound | undefined)?.occurrence;
+      expect(occurrence?.entityType, sinPrefijo).toBe(EntityType.Phone);
+      expect(occurrence?.normalizedValue, sinPrefijo).toBe(normalizedConPrefijo);
+    });
+
+    // ADR-093 §1: el `9` opcional del formato de móvil internacional.
+    it('"+54 9 11 4567-8900" matches (formato de móvil internacional)', async () => {
+      const occurrence = await firstOccurrence(engine, ctx, ["+54", "9", "11", "4567-8900"]);
+      expect(occurrence?.entityType).toBe(EntityType.Phone);
+      expect(occurrence?.normalizedValue).toBe("5491145678900");
+    });
+
+    // No-regresión: `phone-landline-ar` no se toca (ADR-093 §3) y sigue
+    // tomando el formato nacional con "0" inicial. La nueva alternancia de
+    // tres ramas de phone-mobile-ar no puede matchear "0221-4567890" (ningún
+    // agrupamiento de 10 dígitos se alinea con los `\b` reales del string,
+    // que solo existen antes de "0221", a los dos lados del guion y al
+    // final) — si esto cambiara, el teléfono se contaría dos veces.
+    it('"0221-4567890" sigue siendo tomado por phone-landline-ar, sin cambios', async () => {
+      const document = makeSinglePageDocument("doc-landline-no-regression", ["0221-4567890"]);
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      const output = await engine.process({ document }, ctx);
+
+      expect(output.occurrenceCount).toBe(1);
+      const phoneOccurrences = busEmitSpy.mock.calls
+        .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
+        .map(([, , payload]) => (payload as EntityFound).occurrence)
+        .filter((o) => o.entityType === EntityType.Phone);
+      expect(phoneOccurrences).toHaveLength(1);
+      expect(phoneOccurrences[0]?.value).toBe("0221-4567890");
+      expect(phoneOccurrences[0]?.normalizedValue).toBe("02214567890");
+    });
+
+    // ADR-093 §2: el falso positivo del CUIT es preexistente (v1.6.1/v1.6.2)
+    // y este ADR no lo toca — mismo valor, mismo mecanismo (checksum del
+    // CUIT falla, y "20-12345678" gana la resolución de overlaps por ser más
+    // largo que el DNI de 8 dígitos embebido). Se afirma acá, con la
+    // alternancia nueva ya en juego, para que quede registrado que el cambio
+    // no lo introdujo ni lo movió.
+    it('"CUIT 20-12345678-9" sigue produciendo el mismo falso positivo, sin cambios (ADR-093 §2)', async () => {
+      const occurrence = await firstOccurrence(engine, ctx, ["CUIT", "20-12345678-9"]);
+      expect(occurrence?.entityType).toBe(EntityType.Phone);
+      expect(occurrence?.value).toBe("20-12345678");
+      expect(occurrence?.normalizedValue).toBe("2012345678");
+    });
+
+    // ADR-093 §1, tabla de medición: las ocho trampas contra las que se midió
+    // el patrón enumerado (7 de ellas no deben emitir Phone; la octava es el
+    // CUIT de arriba, que sí emite y está documentada aparte). Ninguna suma
+    // exactamente 10 dígitos en una corrida contigua de dígitos/separadores
+    // `[\s-]`, que es justo lo que la alternancia de tres ramas exige.
+    describe("las ocho trampas medidas — siete que no deben emitir Phone", () => {
+      const trampas: ReadonlyArray<{ readonly nombre: string; readonly tokens: string[] }> = [
+        {
+          nombre: "expediente (PP-13-00-027653-24/00, ADR-075 §2)",
+          tokens: ["PP-13-00-027653-24/00"],
+        },
+        { nombre: "DNI con puntos", tokens: ["DNI", "34.567.891"] },
+        {
+          nombre: "tarjeta (tres grupos de 4, ADR-093 §1)",
+          tokens: ["4532", "1234", "5678"],
+        },
+        { nombre: "fecha con barras", tokens: ["Fecha", "07/07/2026"] },
+        {
+          nombre: "IBAN (tres grupos de 4, ADR-093 §1)",
+          tokens: ["1234", "5678", "9012"],
+        },
+        {
+          nombre: "paginación, con palabra que corta la corrida",
+          tokens: ["Página", "4567", "de", "8901"],
+        },
+        {
+          nombre: "dos números sueltos adyacentes (ADR-093 §1)",
+          tokens: ["expediente", "1234", "5678"],
+        },
+      ];
+
+      it.each(trampas)("$nombre no emite Phone", async ({ tokens }) => {
+        const document = makeSinglePageDocument(`doc-trampa-${tokens.join("-")}`, tokens);
+        const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+        await engine.process({ document }, ctx);
+        const phoneOccurrences = busEmitSpy.mock.calls
+          .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
+          .map(([, , payload]) => (payload as EntityFound).occurrence)
+          .filter((o) => o.entityType === EntityType.Phone);
+        expect(phoneOccurrences, tokens.join(" ")).toHaveLength(0);
+      });
+    });
+  });
+
   describe("Email", () => {
     it("valid email matches and normalizes to lowercase", async () => {
       const occurrence = await firstOccurrence(engine, ctx, ["Juan.Perez@Example.COM"]);

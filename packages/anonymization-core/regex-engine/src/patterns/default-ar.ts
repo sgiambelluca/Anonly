@@ -240,10 +240,26 @@ export const DEFAULT_PATTERNS_AR: ReadonlyArray<RegexPattern> = [
      * formalizada en Regex_Engine.md v1.0.1 — ver adr/ADR-022 para el detalle
      * del problema (el patrón original, sin `\b`, rompía el caso límite 3 del
      * spec) y la decisión.
+     *
+     * ADR-093 §1: la característica telefónica argentina no siempre tiene dos
+     * dígitos (CABA sí, pero La Plata/Rosario/Córdoba/Paraná tienen 3 y las
+     * localidades chicas 4) — lo invariante es que característica + abonado
+     * suman 10 dígitos. De ahí la alternancia de tres ramas, una por longitud
+     * de característica, en vez de un rango `\d{2,4}` que sería más corto y
+     * más legible. **No simplificar a un rango**: medido contra ocho trampas
+     * (ADR-093 §1, tabla), el rango laxo `\d{2,4}[\s-]?\d{2,4}[\s-]?\d{3,4}`
+     * detecta los mismos 7 teléfonos pero agrega 3 falsos positivos que la
+     * enumeración no tiene — se come tres grupos de una tarjeta
+     * (`"4532 1234 5678"`), tres de un IBAN y dos números sueltos adyacentes
+     * (`"expediente 1234 5678"`). Exigir el total de 10 dígitos exacto, por
+     * rama, es lo que discrimina. El `9` opcional cubre el formato de móvil
+     * internacional (`+54 9 11 …`); el separador opcional se ata al prefijo
+     * de país (`54[\s-]?`, `9[\s-]?`) en vez de quedar suelto antes del `\b`.
      */
     id: "phone-mobile-ar",
     entityType: EntityType.Phone,
-    pattern: /(?:\+?54)?[\s-]?\b\d{2}[\s-]?\d{4}[\s-]?\d{4}\b/g,
+    pattern:
+      /(?:\+?54[\s-]?)?(?:9[\s-]?)?\b(?:\d{2}[\s-]?\d{4}[\s-]?\d{4}|\d{3}[\s-]?\d{3}[\s-]?\d{4}|\d{4}[\s-]?\d{2}[\s-]?\d{4})\b/g,
     normalizer: stripNonDigits,
     maskFormat: "+XX XXX XXX-XXXX",
   },
