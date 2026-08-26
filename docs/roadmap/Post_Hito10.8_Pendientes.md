@@ -512,6 +512,23 @@ La tercera fila del gate —documento **escaneado**, ruta OCR— quedó a medias
 
 **Ninguno de estos hallazgos se arregló en el mismo paso**: son de motores distintos (grouping/regex para la detección, render/export para la cobertura) y varios piden decisión antes que código. El gate estaba para producir esta lista.
 
+### Estado al 2026-08-26
+
+La sesión de calidad de detección cerró seis de los ocho. La columna que importa no es el estado sino **dónde estaba el defecto**: el gate agrupó los hallazgos por dónde se VEN, y tres estaban en otro motor.
+
+| # | estado | dónde estaba de verdad |
+|---|---|---|
+| 23a | **cerrado** — ADR-088 §1 | `ner-engine`. No era detección: dos runs rotados de márgenes opuestos quedaban pegados en `Page.text` y el modelo los leía como una frase |
+| 23b | **cerrado** — ADR-088 §2 | `ner-engine`. El modelo es *cased* y sobre caja alta devuelve cero tokens. No era la normalización de Grouping |
+| 23c | **cerrado** — ADR-092 | `regex-engine`. El modelo ve la carátula pero por debajo del umbral; es un patrón, no un caso de modelo |
+| 23d | **cerrado por consecuencia** | Era el corolario de a/b/c: cerrados esos, el OCR sobre el exportado ya no recupera esos nombres |
+| 23e | **diagnosticado, decisión abierta** — §24 | `pdf-engine`, no `render-engine`. Ancho de glifo promedio sobre fuente proporcional |
+| 23f | **cerrado** — `NER_Engine.md` v1.3.1 | `ner-engine`, no la costura. Un `B-` sobre una continuación de wordpiece partía la entidad |
+| 23g | **mitad cuantificada** — §25 | `render-engine`. El token sale 30 % más chico por una constante; el resto pide el gate visual |
+| 23h | **abierto** — §25 | `render-engine`. Pide el gate visual: ninguna suite headless lo puede juzgar |
+
+**Lo que hizo posible cerrarlos** fue reproducirlos primero: `tests/integration/qa-stamp-detection.test.ts` corre el pipeline con `pdfjs-dist` **sin mockear** —el único test del repo que ve un `Word` rotado de verdad— y replaya la inferencia con los tokens del modelo de producción. Los tres `it.fails` con los que nació están hoy en cero.
+
 **Continúa en [`Calidad_De_Deteccion_Informe.md`](./Calidad_De_Deteccion_Informe.md)**, que junta estos hallazgos con dos reportes de campo sobre documentos reales —una tabla escaneada rotada que el OCR lee horizontal, y texto chico que no reconoce— y propone un orden de trabajo. Es el punto de entrada para la sesión que tome la calidad de detección.
 
 ---

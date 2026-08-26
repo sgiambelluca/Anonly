@@ -166,3 +166,23 @@ F es de detección y probablemente se cae solo si se arregla cómo se agrupan ru
 - Estado del hito y qué falta para cerrarlo: [`MVP.md` §4](./MVP.md)
 - Rotación de texto nativo y lo que dejó abierto: `adr/ADR-063`, §6 (solapamiento) y §7 (rotación de página)
 - Dataset de referencia, especificado y nunca construido: [`tests/fixtures/README.md`](../../tests/fixtures/README.md), sección "Dataset de referencia"
+
+---
+
+## Cierre — qué pasó, y en qué se equivocó este informe (2026-08-26)
+
+Este documento se conserva **como se escribió**, con sus hipótesis intactas, porque en qué se equivocó es parte de lo que hay que aprender. El estado por hallazgo está en [`Post_Hito10.8_Pendientes.md` §23](./Post_Hito10.8_Pendientes.md), §24 y §25.
+
+**Las tres hipótesis que la medición falsificó:**
+
+| lo que este informe supuso | lo que resultó ser |
+|---|---|
+| §23b: "la normalización de Grouping no pliega acentos" | `normalizeForComparison` **sí** los pliega, y aunque no lo hiciera el pase difuso los uniría (0,917 sobre 0,88). El modelo es *cased* y sobre caja alta devuelve **cero** tokens |
+| §23a: "verificar si el texto del folio se extrae" | Se extrae perfecto, y el modelo lo detecta. El defecto estaba en que el folio y el sello quedaban **pegados** en `Page.text` y salían como una sola entidad de media página |
+| §23e: "un redondeo o un `x` tomado del segundo glifo" | Un **ancho de glifo promedio uniforme** sobre una fuente proporcional, en `pdf-engine`. El error llega a 12 pt y se acumula a lo largo del renglón |
+
+**Y dos hallazgos se mudaron de motor**: §23e es de `pdf-engine` y §23f de `ner-engine`, no de `render-engine` como los agrupaba la sección "la costura". El gate manual agrupa por **dónde se ve** el defecto, que no es dónde está.
+
+**Lo que el informe acertó, y valía más que cualquier hipótesis**: el orden de trabajo. "Primero: reproducir, con fixture, antes de tocar nada" fue lo que hizo posible todo lo demás — sin ese test, las tres hipótesis de arriba se habrían implementado como arreglos.
+
+**Lo que el informe no podía anticipar**: que construir el dataset de referencia iba a destapar cinco huecos de detección más —teléfonos de característica de 3 y 4 dígitos, IBAN impreso, patentes con guión y de motovehículo, matrículas profesionales (1 de 11 formas), y el fijo nacional con separador interno— ninguno de los cuales estaba en esta lista. Con la categoría `forms` puesta, el recall real de Regex sobre el dataset es **77 %**, no el 100 % que daba antes de medirlo bien.
