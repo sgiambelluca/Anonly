@@ -209,12 +209,20 @@ tests/fixtures/reference/
 
 El dataset debe existir **antes de cerrar el Hito 4**.
 
-## Documentos de QA manual (no los consume ninguna suite)
+## Documentos de QA manual
 
 `qa-tables-justified.pdf` y `qa-stamp.pdf` existen para el **gate manual** de `adr/ADR-058` §11 y
 `adr/ADR-086` §4, que exige mirar cuatro documentos en un browser real **sobre el PDF exportado** y
 juzgar si las líneas repintadas se distinguen de las que no se tocaron. Ninguna suite headless puede
-juzgar eso, así que ningún test los importa: se cargan a mano.
+juzgar **eso**: el juicio sobre si la costura del repintado se ve sigue siendo a ojo y a mano.
+
+**`qa-stamp.pdf` sí lo consume una suite, desde 2026-08-22**, pero por otra cosa. El gate manual
+encontró en él tres fugas de dato —§23a/§23b/§23c de `roadmap/Post_Hito10.8_Pendientes.md`— y
+`tests/integration/qa-stamp-detection.test.ts` las reproduce con el pipeline real: `pdfjs-dist`
+**sin mockear** (es el único test del repo que ve un `Word` rotado de verdad; todos los demás
+mockean `getDocument`), Regex/NER/Grouping reales, y la inferencia replayeada desde los tokens
+crudos que devolvió el modelo de producción sobre el texto exacto de esa página. Los `it.fails` de
+ese archivo son las tres fugas: pasan mientras el defecto existe y fallan el día que se arregla.
 
 | Fixture | Qué ejercita |
 |---|---|
