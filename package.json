@@ -34,6 +34,7 @@
     "test:cancel": "vitest run tests/cancel",
     "test:security": "vitest run tests/security",
     "test:integration": "vitest run tests/integration",
+    "test:quality": "tsx --tsconfig tests/tsconfig.json tests/quality/main.ts",
     "test:all": "pnpm lint && pnpm typecheck && pnpm test && pnpm test:e2e",
     "changeset": "changeset",
     "version": "changeset version",
