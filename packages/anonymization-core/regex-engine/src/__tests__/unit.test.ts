@@ -90,7 +90,7 @@ describe("RegexEngine — unit tests", () => {
   });
 
   describe("DEFAULT_PATTERNS_AR — contrato de datos", () => {
-    it("contiene exactamente los 13 patrones default de Regex_Engine.md (ADR-092)", () => {
+    it("contiene exactamente los 14 patrones default de Regex_Engine.md (ADR-096)", () => {
       const ids = DEFAULT_PATTERNS_AR.map((p) => p.id).sort();
       expect(ids).toEqual(
         [
@@ -106,6 +106,7 @@ describe("RegexEngine — unit tests", () => {
           "phone-landline-ar",
           "phone-mobile-ar",
           "plate-mercosur-ar",
+          "plate-mercosur-moto-ar",
           "plate-vieja-ar",
         ].sort(),
       );
@@ -123,10 +124,11 @@ describe("RegexEngine — unit tests", () => {
       expect(byId.get("date-ar")).toBe("XX/XX/XXXX");
       expect(byId.get("date-textual-ar")).toBe("XX/XX/XXXX");
       expect(byId.get("license-ar")).toBe("XX-XXXX-XX");
-      // ADR-029 §2: plate-vieja-ar ("ABC 123") y plate-mercosur-ar ("AB 123 CD")
-      // llevan cada una su propio maskFormat fiel a su forma real.
+      // ADR-029 §2 / ADR-096 §2: cada variante de patente lleva su propio
+      // maskFormat, fiel a su forma real — incluida la de motovehículo.
       expect(byId.get("plate-vieja-ar")).toBe("XXX XXX");
       expect(byId.get("plate-mercosur-ar")).toBe("XX XXX XX");
+      expect(byId.get("plate-mercosur-moto-ar")).toBe("X XXX XXX");
     });
   });
 
@@ -345,6 +347,23 @@ describe("RegexEngine — unit tests", () => {
     });
   });
 
+  // ADR-096 §4: el abonado se escribe partido, y el patrón de antes exigía
+  // un solo bloque de dígitos. Apareció solo, en la corrida del evaluador.
+  describe("Phone fijo — separador partido en el abonado (ADR-096 §4)", () => {
+    it('"011 4567-8902" emite Phone', async () => {
+      const occurrence = await firstOccurrence(engine, ctx, ["011", "4567-8902"]);
+      expect(occurrence?.entityType).toBe(EntityType.Phone);
+      expect(occurrence?.normalizedValue).toBe("01145678902");
+    });
+
+    // No-regresión: la forma que ya funcionaba sigue funcionando.
+    it('"0221-4567890" sigue emitiendo Phone (no regresión)', async () => {
+      const occurrence = await firstOccurrence(engine, ctx, ["0221-4567890"]);
+      expect(occurrence?.entityType).toBe(EntityType.Phone);
+      expect(occurrence?.normalizedValue).toBe("02214567890");
+    });
+  });
+
   describe("Email", () => {
     it("valid email matches and normalizes to lowercase", async () => {
       const occurrence = await firstOccurrence(engine, ctx, ["Juan.Perez@Example.COM"]);
@@ -358,6 +377,38 @@ describe("RegexEngine — unit tests", () => {
       const occurrence = await firstOccurrence(engine, ctx, ["ES9121000418450200051332"]);
       expect(occurrence?.entityType).toBe(EntityType.IBAN);
       expect(occurrence?.normalizedValue).toBe("ES9121000418450200051332");
+    });
+
+    // ADR-096 §3: ISO 13616 recomienda imprimir el IBAN en grupos de cuatro
+    // separados por espacios — la forma en que aparece en cualquier
+    // documento — y el patrón de antes no admitía espacios internos, o sea
+    // que detectaba solo la forma que nadie escribe. Ejemplo literal del ADR.
+    it("valid IBAN printed with spaces (ISO 13616 grouping) matches", async () => {
+      const occurrence = await firstOccurrence(engine, ctx, [
+        "ES05",
+        "7068",
+        "9876",
+        "9644",
+        "6251",
+        "9569",
+      ]);
+      expect(occurrence?.entityType).toBe(EntityType.IBAN);
+      expect(occurrence?.normalizedValue).toBe("ES0570689876964462519569");
+    });
+
+    // La red sigue puesta: un IBAN impreso con espacios pero con el dígito
+    // verificador incorrecto sigue sin emitir.
+    it("IBAN printed with spaces but invalid checksum is discarded", async () => {
+      const document = makeSinglePageDocument("doc-iban-spaced-invalid", [
+        "ES05",
+        "7068",
+        "9876",
+        "9644",
+        "6251",
+        "9560",
+      ]);
+      const output = await engine.process({ document }, ctx);
+      expect(output.occurrenceCount).toBe(0);
     });
 
     it("invalid IBAN checksum is discarded", async () => {
@@ -462,9 +513,62 @@ describe("RegexEngine — unit tests", () => {
 
   describe("License", () => {
     it("professional license matches and normalizes", async () => {
+      // ADR-096 §1: la cola de un dígito (`-6`) no es una de las once formas
+      // medidas, pero estaba acá y en el `maskFormat` desde ADR-012. El
+      // patrón la conserva a propósito: sin ella el valor saldría como
+      // "MP-12345" y el "-6" quedaría a la vista.
       const occurrence = await firstOccurrence(engine, ctx, ["MP-12345-6"]);
       expect(occurrence?.entityType).toBe(EntityType.License);
       expect(occurrence?.normalizedValue).toBe("MP123456");
+    });
+
+    // ADR-096 §1, Validación: las 11 formas reales medidas emiten License,
+    // y la alternativa vieja se retira sin perder ninguna.
+    describe("las 11 formas medidas (ADR-096 §1)", () => {
+      const forms: ReadonlyArray<{ readonly nombre: string; readonly tokens: string[] }> = [
+        { nombre: "MN 12345", tokens: ["MN", "12345"] },
+        { nombre: "MP 23456", tokens: ["MP", "23456"] },
+        { nombre: "MN 45.318 (separador de miles)", tokens: ["MN", "45.318"] },
+        { nombre: "MP 9.328 (separador de miles)", tokens: ["MP", "9.328"] },
+        { nombre: "M.P. 34567 (abreviatura con puntos)", tokens: ["M.P.", "34567"] },
+        { nombre: "M.N. 56789 (abreviatura con puntos)", tokens: ["M.N.", "56789"] },
+        { nombre: "MN12345 (sin separador)", tokens: ["MN12345"] },
+        { nombre: "MP-12345 (guión)", tokens: ["MP-12345"] },
+        { nombre: "M.P.-34567 (puntos + guión)", tokens: ["M.P.-34567"] },
+        {
+          nombre: "Matrícula Profesional 40097 (número pelado anclado en la etiqueta)",
+          tokens: ["Matrícula", "Profesional", "40097"],
+        },
+        {
+          nombre: "Matrícula profesional: MP 61852 (etiqueta + prefijo)",
+          tokens: ["Matrícula", "profesional:", "MP", "61852"],
+        },
+      ];
+
+      it.each(forms)("$nombre emite License", async ({ tokens }) => {
+        const document = makeSinglePageDocument(`doc-license-${tokens.join("-")}`, tokens);
+        const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+        await engine.process({ document }, ctx);
+        const licenseOccurrences = busEmitSpy.mock.calls
+          .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
+          .map(([, , payload]) => (payload as EntityFound).occurrence)
+          .filter((o) => o.entityType === EntityType.License);
+        expect(licenseOccurrences, tokens.join(" ")).toHaveLength(1);
+      });
+    });
+
+    // ADR-096 §1: el falso positivo que la alternativa vieja aportaba y que
+    // se retira junto con ella — sin la etiqueta como ancla, "A-12345" de un
+    // número de expediente no es distinguible de una matrícula.
+    it('"Expediente A-12345" does NOT emit License (retired false positive)', async () => {
+      const document = makeSinglePageDocument("doc-expediente-a-12345", ["Expediente", "A-12345"]);
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      await engine.process({ document }, ctx);
+      const licenseOccurrences = busEmitSpy.mock.calls
+        .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
+        .map(([, , payload]) => (payload as EntityFound).occurrence)
+        .filter((o) => o.entityType === EntityType.License);
+      expect(licenseOccurrences).toHaveLength(0);
     });
   });
 
@@ -481,6 +585,39 @@ describe("RegexEngine — unit tests", () => {
       expect(occurrence?.entityType).toBe(EntityType.Plate);
       expect(occurrence?.normalizedValue).toBe("AB123CD");
       expect(occurrence?.maskFormat).toBe("XX XXX XX");
+    });
+
+    it("AR plate motovehículo Mercosur matches and carries its own maskFormat (ADR-096 §2)", async () => {
+      const occurrence = await firstOccurrence(engine, ctx, ["A", "456", "EFG"]);
+      expect(occurrence?.entityType).toBe(EntityType.Plate);
+      expect(occurrence?.normalizedValue).toBe("A456EFG");
+      expect(occurrence?.maskFormat).toBe("X XXX XXX");
+    });
+
+    // ADR-096 §2, Validación: las 8 formas medidas (las tres estructuras,
+    // con los tres separadores), incluidas las dos de motovehículo.
+    describe("las 8 formas medidas (ADR-096 §2)", () => {
+      const forms: ReadonlyArray<{ readonly nombre: string; readonly tokens: string[] }> = [
+        { nombre: "ABC 123 (vieja, espacio)", tokens: ["ABC", "123"] },
+        { nombre: "ABC123 (vieja, sin separador)", tokens: ["ABC123"] },
+        { nombre: "ABC-123 (vieja, guión — transcripción)", tokens: ["ABC-123"] },
+        { nombre: "AB 123 CD (Mercosur auto, espacio)", tokens: ["AB", "123", "CD"] },
+        { nombre: "AB123CD (Mercosur auto, sin separador)", tokens: ["AB123CD"] },
+        { nombre: "AB-123-CD (Mercosur auto, guión)", tokens: ["AB-123-CD"] },
+        { nombre: "A 123 BCD (Mercosur moto, espacio)", tokens: ["A", "123", "BCD"] },
+        { nombre: "A456EFG (Mercosur moto, sin separador)", tokens: ["A456EFG"] },
+      ];
+
+      it.each(forms)("$nombre emite Plate", async ({ tokens }) => {
+        const document = makeSinglePageDocument(`doc-plate-${tokens.join("-")}`, tokens);
+        const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+        await engine.process({ document }, ctx);
+        const plateOccurrences = busEmitSpy.mock.calls
+          .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
+          .map(([, , payload]) => (payload as EntityFound).occurrence)
+          .filter((o) => o.entityType === EntityType.Plate);
+        expect(plateOccurrences, tokens.join(" ")).toHaveLength(1);
+      });
     });
   });
 

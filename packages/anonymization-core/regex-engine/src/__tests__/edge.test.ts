@@ -512,4 +512,38 @@ describe("RegexEngine — edge case tests", () => {
       expect((await engine.process({ document }, ctx)).occurrenceCount).toBe(0);
     });
   });
+
+  // Caso 33 (§13, ADR-096): las trampas duras contra las que se midieron los
+  // cuatro patrones nuevos/reescritos. Ninguna debe emitir License, Plate,
+  // IBAN ni Phone — es la mitad de la medición que protege contra convertir
+  // un patrón más laxo en una fuga sobre referencias legales/administrativas.
+  describe("Caso 33: trampas duras (ADR-096) — ninguna emite License/Plate/IBAN/Phone", () => {
+    const trampas: ReadonlyArray<{ readonly nombre: string; readonly tokens: string[] }> = [
+      { nombre: "Ley 24.240", tokens: ["Ley", "24.240"] },
+      { nombre: "Art. 1234", tokens: ["Art.", "1234"] },
+      { nombre: "CP B1900ABC", tokens: ["CP", "B1900ABC"] },
+      { nombre: "Resolución 45/2024", tokens: ["Resolución", "45/2024"] },
+      { nombre: "Foja 1234", tokens: ["Foja", "1234"] },
+      { nombre: "N° 123456", tokens: ["N°", "123456"] },
+      { nombre: "Decreto 1023/2001", tokens: ["Decreto", "1023/2001"] },
+    ];
+
+    const watchedTypes = new Set([
+      EntityType.License,
+      EntityType.Plate,
+      EntityType.IBAN,
+      EntityType.Phone,
+    ]);
+
+    it.each(trampas)("$nombre no emite License, Plate, IBAN ni Phone", async ({ tokens }) => {
+      const document = makeSinglePageDocument(`doc-trampa-dura-${tokens.join("-")}`, tokens);
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      await engine.process({ document }, ctx);
+      const watchedOccurrences = busEmitSpy.mock.calls
+        .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
+        .map(([, , payload]) => (payload as EntityFound).occurrence)
+        .filter((o) => watchedTypes.has(o.entityType));
+      expect(watchedOccurrences, tokens.join(" ")).toHaveLength(0);
+    });
+  });
 });

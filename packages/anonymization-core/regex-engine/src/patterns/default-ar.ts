@@ -264,9 +264,17 @@ export const DEFAULT_PATTERNS_AR: ReadonlyArray<RegexPattern> = [
     maskFormat: "+XX XXX XXX-XXXX",
   },
   {
+    /*
+     * ADR-096 §4: el abonado se escribe partido (`"011 4567-8902"`), y el
+     * patrón de antes exigía el abonado en un solo bloque de dígitos
+     * (`\d{6,8}`) — un separador más, en el mismo lugar donde
+     * `phone-mobile-ar` ya lo admite (ADR-093). Este caso apareció solo, en
+     * la corrida del evaluador, no en ninguna lista de formas enumerada a
+     * mano.
+     */
     id: "phone-landline-ar",
     entityType: EntityType.Phone,
-    pattern: /\b0\d{1,4}[\s-]?\d{6,8}\b/g,
+    pattern: /\b0\d{1,4}[\s-]?\d{3,4}[\s-]?\d{4}\b/g,
     normalizer: stripNonDigits,
     maskFormat: "+XX XXX XXX-XXXX",
   },
@@ -278,9 +286,20 @@ export const DEFAULT_PATTERNS_AR: ReadonlyArray<RegexPattern> = [
     maskFormat: "xxxx@xxxx.xx",
   },
   {
+    /*
+     * ADR-096 §3: ISO 13616 recomienda imprimir el IBAN en grupos de cuatro
+     * separados por espacios, y así aparece en cualquier documento — el
+     * patrón sin espacios internos detectaba solo la forma que nadie
+     * escribe. `[A-Z]{2}\d{2}` sigue siendo contiguo (es lo que evita que el
+     * patrón se coma texto en mayúsculas seguido de números) y el checksum
+     * mod-97 sigue siendo la red: una secuencia con la forma pero sin el
+     * dígito verificador correcto se descarta igual. `checksum` y
+     * `normalizer` no se tocan (ADR-096 §5) — `normalizeUppercaseNoSpaces`
+     * ya saca los espacios antes de que `computeIbanChecksum` los vea.
+     */
     id: "iban",
     entityType: EntityType.IBAN,
-    pattern: /\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b/g,
+    pattern: /\b[A-Z]{2}\d{2}(?:\s?[A-Z0-9]){10,30}\b/g,
     checksum: computeIbanChecksum,
     normalizer: normalizeUppercaseNoSpaces,
     maskFormat: "XX00 XXXX XXXX XXXX XXXX",
@@ -311,25 +330,85 @@ export const DEFAULT_PATTERNS_AR: ReadonlyArray<RegexPattern> = [
     maskFormat: "XX/XX/XXXX",
   },
   {
+    /*
+     * ADR-096 §1: la alternativa vieja (`[A-Z]{1,3}-?\d{4,8}-?\d?`) admitía
+     * un guión pero nunca un espacio, que es como en la práctica siempre se
+     * escribe una matrícula — medida contra 11 formas reales, acertaba
+     * **una** (`MN12345`, la que nadie escribe), y el separador de miles la
+     * rompía por el otro lado (`45.318` son 5 dígitos con un punto en el
+     * medio, y el patrón pedía de 4 a 8 dígitos seguidos).
+     *
+     * Tres alternativas, en este orden: (1) el número pelado **anclado en la
+     * etiqueta** — sin el `lookbehind` el patrón matchearía cualquier número
+     * de 3-8 dígitos del expediente (fojas, artículos, montos); el
+     * `lookbehind` es contexto que ancla, el match es solo el valor, nunca
+     * la palabra "Matrícula" (mismo criterio de no sobre-captura que
+     * `caratula-ar`, ADR-092); (2) el número CON separador de miles
+     * (`M.N. 45.318`); (3) el número plano (`MN 12345`, `MP-12345`,
+     * `M.P. 34567`...). El prefijo cubre `MN`, `MP`, `M.N.`, `M.P.` y el
+     * separador admite espacio, guión o nada.
+     *
+     * La alternativa vieja SE RETIRA, y es una decisión medida, no un
+     * descuido: conservada junto a las nuevas no aporta ninguna forma que
+     * éstas no cubran, y sí un falso positivo sobre números de expediente
+     * (`"Expediente A-12345"` → `"A-12345"`). Medido (ADR-096 §1): patrón de
+     * hoy, 1/11 formas + 1 falso positivo; nuevo conservando la vieja, 11/11
+     * + el mismo falso positivo; nuevo sin la vieja, 11/11 + 0 falsos
+     * positivos. Flags `gu`: el `lookbehind` de longitud variable requiere
+     * un motor Unicode-aware (V8 lo soporta).
+     *
+     * El `(?:-\d)?` final conserva la cola de un dígito que la alternativa
+     * retirada sí tomaba (`MP-12345-6`). No es una de las once formas
+     * medidas, pero estaba en la suite y en el `maskFormat` (`XX-XXXX-XX`)
+     * desde ADR-012: sin él, ese valor se emitiría como `MP-12345` y el `-6`
+     * quedaría a la vista — cobertura parcial, que es una fuga chica. Medido:
+     * agregarlo da 12 de 12 formas y sigue en 0 falsos positivos, porque el
+     * match ya viene anclado en el prefijo `M[NP]`.
+     */
     id: "license-ar",
     entityType: EntityType.License,
-    pattern: /\b[A-Z]{1,3}-?\d{4,8}-?\d?\b/g,
+    pattern:
+      /(?<=[Mm]atr[íi]cula\s+[Pp]rofesional\s*:?\s*)\d{3,8}\b|\bM\.?[NP]\.?[\s-]*\d{1,3}(?:\.\d{3})+\b|\bM\.?[NP]\.?[\s-]*\d{3,8}(?:-\d)?\b/gu,
     normalizer: normalizeUppercaseNoDashes,
     maskFormat: "XX-XXXX-XX",
   },
   {
+    /*
+     * ADR-096 §2: el separador pasa de `\s?` a `[\s-]?` en las tres
+     * variantes de patente (ésta y las dos de abajo) — el guión no está en
+     * la chapa, está en cómo se TRANSCRIBE (`"ABC-123"`), y este motor lee
+     * transcripciones, no chapas. Medido: 8/8 formas reales, 0 falsos
+     * positivos sobre las trampas duras.
+     */
     id: "plate-vieja-ar",
     entityType: EntityType.Plate,
-    pattern: /\b[A-Z]{3}\s?\d{3}\b/g,
+    pattern: /\b[A-Z]{3}[\s-]?\d{3}\b/g,
     normalizer: normalizeUppercaseNoSpaces,
     maskFormat: "XXX XXX",
   },
   {
+    // ADR-096 §2: mismo cambio de separador que plate-vieja-ar, ver el
+    // comentario ahí.
     id: "plate-mercosur-ar",
     entityType: EntityType.Plate,
-    pattern: /\b[A-Z]{2}\s?\d{3}\s?[A-Z]{2}\b/g,
+    pattern: /\b[A-Z]{2}[\s-]?\d{3}[\s-]?[A-Z]{2}\b/g,
     normalizer: normalizeUppercaseNoSpaces,
     maskFormat: "XX XXX XX",
+  },
+  {
+    /*
+     * ADR-096 §2: motovehículo Mercosur (1 letra + 3 dígitos + 3 letras) —
+     * la tercera estructura de patente, y la que no estaba cubierta en
+     * absoluto: los motovehículos entran al alcance del producto por primera
+     * vez con este patrón. `maskFormat` propio ("X XXX XXX"), fiel a su
+     * forma real — mismo criterio que ADR-029 §2 le dio a las otras dos
+     * variantes de patente.
+     */
+    id: "plate-mercosur-moto-ar",
+    entityType: EntityType.Plate,
+    pattern: /\b[A-Z][\s-]?\d{3}[\s-]?[A-Z]{3}\b/g,
+    normalizer: normalizeUppercaseNoSpaces,
+    maskFormat: "X XXX XXX",
   },
   {
     /*
