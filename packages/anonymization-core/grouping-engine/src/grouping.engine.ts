@@ -158,6 +158,7 @@ import {
   ConflictReason,
   DetectionSource,
   GENDER_LEXICON,
+  normalizeForComparison,
   EngineDisposedError,
   EngineEvents,
   EngineId,
@@ -203,6 +204,18 @@ import { levenshteinNormalized } from "./levenshtein.js";
 
 const DEFAULT_SIMILARITY_THRESHOLD = 0.88;
 
+/*
+ * ADR-094 §2: piso de la banda de sugerencia. Una ocurrencia de NER entre
+ * este valor y el `confidenceThreshold` se sugiere apagada; por debajo se
+ * sigue descartando, porque ahí el modelo no duda — adivina.
+ *
+ * **El número no está medido, y hay que decirlo.** No hay dataset de
+ * referencia con el cual ver cuántas sugerencias produce cada valor; se
+ * calibra en el evaluador de recall/precisión cuando exista. Va como
+ * constante nombrada justamente para que se pueda encontrar y mover.
+ */
+const MIN_SUGGESTION_CONFIDENCE = 0.5;
+
 /** ADR-073 §1: los tres tipos cuyo valor es texto libre. */
 const FUZZY_MATCHING_TYPES: ReadonlySet<EntityType> = new Set([
   EntityType.Person,
@@ -240,6 +253,8 @@ interface InternalGroup {
   replacementValue: string;
   indexInType: number;
   enabled: boolean;
+  /** ADR-094 §4: el detector lo sugirió sin estar seguro. Ver `handleLowConfidence`. */
+  needsReview: boolean;
   aliases: string[];
   /** Solo relevante para type === Person; ausente = sin determinar (ADR-060 §2). */
   personGender?: PersonGender;
@@ -355,6 +370,7 @@ function toPublicGroup(group: InternalGroup): EntityGroup {
     replacementValue: group.replacementValue,
     indexInType: group.indexInType,
     enabled: group.enabled,
+    needsReview: group.needsReview,
     aliases: [...group.aliases],
     // exactOptionalPropertyTypes: no asignar `undefined` explícito (mismo
     // patrón que maskFormat en recordOccurrence).
@@ -1144,6 +1160,16 @@ export class GroupingEngine implements IEngine {
       if (enabled !== undefined) {
         group.enabled = enabled;
         changed.add("enabled");
+        /*
+         * ADR-094 §4: la marca significa "el detector dudó y NADIE decidió
+         * todavía". Tildar o destildar la casilla ES decidir, en los dos
+         * sentidos — el usuario ya la miró. Sin esto la marca quedaría pegada
+         * a un grupo que el usuario ya resolvió.
+         */
+        if (group.needsReview) {
+          group.needsReview = false;
+          changed.add("needsReview");
+        }
       }
 
       if (replacementMode !== undefined) {
@@ -1363,6 +1389,7 @@ export class GroupingEngine implements IEngine {
       replacementValue: "",
       indexInType: newIndex,
       enabled: true,
+      needsReview: false,
       aliases: [],
       createdAt: now,
       updatedAt: now,
@@ -1684,9 +1711,43 @@ export class GroupingEngine implements IEngine {
     this.groupOccurrence(session, occurrence);
   }
 
+  /*
+   * ADR-094 §2: las tres compuertas de la sugerencia. Sin filtro el panel se
+   * llena de ruido y la marca deja de significar algo.
+   *
+   * 1. Solo tipos de texto libre — los mismos tres de ADR-073 §1. Una fecha o
+   *    un teléfono de confianza baja no aporta: esos los cubre Regex con 1.0.
+   * 2. Por encima del piso (arriba): debajo el modelo adivina.
+   * 3. Si es `Person`, que el valor parezca un nombre propio — su primer
+   *    token en el léxico de `@anonly/shared` (ADR-091). Es la misma
+   *    compuerta que ADR-092 usó para la carátula, del otro lado del pipeline.
+   */
+  private isSuggestable(occurrence: Occurrence): boolean {
+    if (!FUZZY_MATCHING_TYPES.has(occurrence.entityType)) return false;
+    if (occurrence.confidence < MIN_SUGGESTION_CONFIDENCE) return false;
+    if (occurrence.entityType !== EntityType.Person) return true;
+    const firstToken = normalizeForComparison(occurrence.value).split(" ")[0];
+    return firstToken !== undefined && GENDER_LEXICON.has(firstToken);
+  }
+
   private handleLowConfidence(session: Session, occurrence: Occurrence): void {
     const candidateGroup = this.findMatchingGroup(session, occurrence);
     if (!candidateGroup) {
+      /*
+       * ADR-094 §1: hasta este ADR, acá había un `warn` y un `return` — y el
+       * logger de producción es nulo, así que la herramienta veía un nombre
+       * propio y lo tiraba sin dejar rastro. Ahora crea el grupo APAGADO y
+       * marcado: no tapa nada hasta que el usuario decida, o sea que esto
+       * cambia qué se le muestra, no qué se anonimiza.
+       */
+      if (this.isSuggestable(occurrence)) {
+        const suggested = this.createGroup(session, occurrence);
+        suggested.enabled = false;
+        suggested.needsReview = true;
+        this.recordOccurrence(session, occurrence, suggested.id);
+        this.emitGroupCreated(session, suggested);
+        return;
+      }
       this.ctx?.logger.warn(
         "Ocurrencia NER de baja confianza descartada sin grupo candidato; no se emite CONFLICT_DETECTED.",
         {
@@ -1785,7 +1846,22 @@ export class GroupingEngine implements IEngine {
   private groupOccurrence(session: Session, occurrence: Occurrence): InternalGroup {
     const match = this.findMatchingGroup(session, occurrence);
     if (match) {
-      const changed = this.addOccurrenceToGroup(session, match, occurrence);
+      const changed = [...this.addOccurrenceToGroup(session, match, occurrence)];
+      /*
+       * ADR-094 §3 — la promoción, y no es un detalle. `findMatchingGroup` no
+       * filtra por `enabled`, así que un grupo sugerido absorbe igual una
+       * ocurrencia posterior del mismo valor. Sin esto se quedaría apagado y
+       * una detección que hoy funciona pasaría a no taparse: el arreglo
+       * introduciría la clase de defecto que viene a cerrar.
+       *
+       * Se llega acá solo con ocurrencias que NO son de baja confianza — el
+       * guard de `low_confidence` corre antes y desvía a `handleLowConfidence`.
+       */
+      if (match.needsReview) {
+        match.enabled = true;
+        match.needsReview = false;
+        changed.push("enabled", "needsReview");
+      }
       this.recordOccurrence(session, occurrence, match.id);
       this.emitGroupUpdated(session, match, changed);
       return match;
@@ -1875,6 +1951,7 @@ export class GroupingEngine implements IEngine {
       replacementValue: "",
       indexInType,
       enabled: true,
+      needsReview: false,
       aliases: [occurrence.value],
       createdAt: now,
       updatedAt: now,

@@ -167,6 +167,7 @@ export function makeEntityGroup(overrides?: Partial<EntityGroup>): EntityGroup {
         source: DetectionSource.Regex,
       },
     ],
+    needsReview: false,
     replacementMode: ReplacementMode.Placeholder,
     replacementValue: "",
     indexInType: 1,

@@ -475,6 +475,7 @@ export function createEntityGroup(overrides?: Partial<EntityGroup>): EntityGroup
     enabled: true,
     aliases: [],
     replacementValueUserSet: false,
+    needsReview: false,
     createdAt: Date.now(),
     updatedAt: Date.now(),
     ...overrides,

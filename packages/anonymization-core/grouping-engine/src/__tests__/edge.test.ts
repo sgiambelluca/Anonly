@@ -880,15 +880,17 @@ describe("GroupingEngine — edge cases", () => {
     expect(merged.canonicalValue).toBe("Override Manual");
   });
 
-  // Caso 9 (§13), variante: sin grupo candidato de ese entityType, no hay
-  // forma de construir un Conflict válido (spec §11 no define un
-  // EngineErrorCode para esto) — se registra por warn en su lugar.
-  it("low_confidence occurrence with no candidate group logs a warning without emitting a conflict", () => {
+  // Caso 9 (§13), variante: sin grupo candidato de ese entityType no hay forma
+  // de construir un Conflict válido (spec §11 no define un EngineErrorCode
+  // para esto). Hasta ADR-094 eso significaba un `warn` y nada más — con el
+  // logger nulo de producción, la herramienta veía un nombre propio y lo
+  // tiraba sin dejar rastro. Ahora lo sugiere APAGADO.
+  it("low_confidence occurrence with no candidate group is suggested, not discarded", () => {
     const busEmitSpy = vi.spyOn(ctx.bus, "emit");
     const lowConfidence = makeOccurrence({
       entityType: EntityType.Person,
       source: DetectionSource.NER,
-      confidence: 0.5,
+      confidence: 0.6,
       value: "Juan Pérez",
       normalizedValue: "juan pérez",
     });
@@ -897,14 +899,134 @@ describe("GroupingEngine — edge cases", () => {
       occurrence: lowConfidence,
     });
 
+    // Sigue sin haber conflicto: no hay grupo contra el cual plantearlo.
     expect(
       busEmitSpy.mock.calls.some(
         ([channel, event]) =>
           channel === EventChannel.Grouping && event === EngineEvents.CONFLICT_DETECTED,
       ),
     ).toBe(false);
-    expect(engine.getSnapshot("doc-1").groups).toHaveLength(0);
-    expect(ctx.logger.warn).toHaveBeenCalled();
+
+    const groups = engine.getSnapshot("doc-1").groups;
+    expect(groups).toHaveLength(1);
+    // Apagado: no tapa nada hasta que el usuario decida (ADR-094 §1).
+    expect(groups[0]?.enabled).toBe(false);
+    expect(groups[0]?.needsReview).toBe(true);
+  });
+
+  // ADR-094 §2: las tres compuertas. Sin ellas el panel se llena de ruido y la
+  // marca deja de significar algo.
+  it("does not suggest below the confidence floor, outside free-text types, or without a known given name", () => {
+    const casos: ReadonlyArray<{
+      readonly occurrence: Parameters<typeof makeOccurrence>[0];
+      readonly por: string;
+    }> = [
+      {
+        por: "debajo del piso: el modelo no duda, adivina",
+        occurrence: {
+          entityType: EntityType.Person,
+          source: DetectionSource.NER,
+          confidence: 0.3,
+          value: "Juan Pérez",
+          normalizedValue: "juan pérez",
+        },
+      },
+      {
+        por: "no es tipo de texto libre (ADR-073 §1): lo cubre Regex con 1.0",
+        occurrence: {
+          entityType: EntityType.Date,
+          source: DetectionSource.NER,
+          confidence: 0.6,
+          value: "07/07/2026",
+          normalizedValue: "07/07/2026",
+        },
+      },
+      {
+        por: "el primer token no es un nombre de pila conocido (ADR-091)",
+        occurrence: {
+          entityType: EntityType.Person,
+          source: DetectionSource.NER,
+          confidence: 0.6,
+          value: "Expediente Caratulado",
+          normalizedValue: "expediente caratulado",
+        },
+      },
+    ];
+
+    for (const { occurrence, por } of casos) {
+      const doc = `doc-gate-${por.slice(0, 8)}`;
+      engine.startSession(doc);
+      ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+        documentId: doc,
+        occurrence: makeOccurrence(occurrence),
+      });
+      expect(engine.getSnapshot(doc).groups, por).toHaveLength(0);
+    }
+  });
+
+  // ADR-094 §4: la marca significa "nadie decidió todavía". Tildar o
+  // destildar la casilla ES decidir, en los dos sentidos.
+  it("clears needsReview once the user toggles the group either way", async () => {
+    for (const decision of [true, false]) {
+      const doc = `doc-decide-${String(decision)}`;
+      engine.startSession(doc);
+      ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+        documentId: doc,
+        occurrence: makeOccurrence({
+          entityType: EntityType.Person,
+          source: DetectionSource.NER,
+          confidence: 0.6,
+          value: "Juan Pérez",
+          normalizedValue: "juan pérez",
+        }),
+      });
+      const groupId = engine.getSnapshot(doc).groups[0]?.id ?? "";
+      expect(engine.getSnapshot(doc).groups[0]?.needsReview, String(decision)).toBe(true);
+
+      const group = await engine.applyGroupUpdate({
+        documentId: doc,
+        groupId,
+        patch: { enabled: decision },
+      });
+      expect(group?.needsReview, String(decision)).toBe(false);
+      expect(group?.enabled, String(decision)).toBe(decision);
+    }
+  });
+
+  // ADR-094 §3 — la parte que, omitida, deja el producto PEOR que antes.
+  // `findMatchingGroup` no filtra por `enabled`, así que un grupo sugerido
+  // absorbe igual una ocurrencia posterior del mismo valor: sin promoción se
+  // quedaría apagado y una detección confiable pasaría a no taparse.
+  it("promotes a suggested group when a confident occurrence joins it", () => {
+    const suggested = makeOccurrence({
+      entityType: EntityType.Person,
+      source: DetectionSource.NER,
+      confidence: 0.6,
+      value: "Juan Pérez",
+      normalizedValue: "juan pérez",
+    });
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: suggested,
+    });
+    expect(engine.getSnapshot("doc-1").groups[0]?.enabled).toBe(false);
+
+    const confident = makeOccurrence({
+      entityType: EntityType.Person,
+      source: DetectionSource.NER,
+      confidence: 0.99,
+      value: "Juan Pérez",
+      normalizedValue: "juan pérez",
+    });
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: confident,
+    });
+
+    const groups = engine.getSnapshot("doc-1").groups;
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.enabled).toBe(true);
+    expect(groups[0]?.needsReview).toBe(false);
   });
 
   // Caso 7 (§13), variante de empate: misma confidence y misma fuente ->

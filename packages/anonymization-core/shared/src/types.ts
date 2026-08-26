@@ -193,6 +193,25 @@ export interface EntityGroup {
    * (quien eligió "femenino" lee `[MUJER 01]`). Regla en ADR-078 §2.
    */
   readonly replacementValueUserSet: boolean;
+  /**
+   * ADR-094 §4 (`Contracts.md` §5) — `true` en un grupo que el detector
+   * **sugirió sin estar seguro**: una ocurrencia de NER por debajo del
+   * `confidenceThreshold` que no encontró grupo candidato, y que hasta
+   * ADR-094 se descartaba en silencio con un `warn` a un logger nulo.
+   *
+   * Nace junto con `enabled: false`, así que el grupo **no tapa nada** hasta
+   * que el usuario lo habilite: esto cambia qué se le muestra, no qué se
+   * anonimiza.
+   *
+   * Booleano y no la `confidence`, a propósito: quien revisa un expediente
+   * necesita saber a qué prestarle atención, no qué tan segura estaba la red.
+   *
+   * Se apaga solo al **promover** (ADR-094 §3): si después entra al grupo una
+   * ocurrencia que no es de baja confianza, pasa a `enabled: true` y
+   * `needsReview: false`. Sin esa regla un grupo sugerido absorbería una
+   * detección confiable posterior y se quedaría apagado.
+   */
+  readonly needsReview: boolean;
   readonly createdAt: number;
   readonly updatedAt: number;
 }

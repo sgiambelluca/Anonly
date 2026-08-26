@@ -420,6 +420,7 @@ describe("@anonly/shared — Contracts", () => {
         enabled: true,
         aliases: ["34.567.891", "34567891"],
         replacementValueUserSet: false,
+        needsReview: false,
         createdAt: 0,
         updatedAt: 0,
       };
@@ -495,6 +496,7 @@ describe("@anonly/shared — Contracts", () => {
       enabled: true,
       aliases: ["Juan Pérez"],
       replacementValueUserSet: false,
+      needsReview: false,
       createdAt: 0,
       updatedAt: 0,
     };
@@ -617,6 +619,7 @@ describe("@anonly/shared — Contracts", () => {
         enabled: true,
         aliases: ["Juan"],
         replacementValueUserSet: false,
+        needsReview: false,
         createdAt: 0,
         updatedAt: 0,
       };
