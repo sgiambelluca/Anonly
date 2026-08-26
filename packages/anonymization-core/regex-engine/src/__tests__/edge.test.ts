@@ -396,6 +396,15 @@ describe("RegexEngine — edge case tests", () => {
       expect(engine.searchText({ document, query: "   " })).toEqual([]);
       expect(engine.searchText({ document, query: "" })).toEqual([]);
     });
+
+    // ADR-089 §1: con la comparación por sub-token, una consulta de solo
+    // puntuación produce cero sub-tokens — el mismo camino corto que la
+    // consulta vacía, sin recorrer el documento.
+    it("searchText with a punctuation-only query returns an empty array", () => {
+      const document = makeSinglePageDocument("doc-search-text-punct-query", ["Cualquier", "cosa"]);
+      expect(engine.searchText({ document, query: ",.-" })).toEqual([]);
+      expect(engine.searchText({ document, query: "«»" })).toEqual([]);
+    });
   });
 
   // Caso 24 (§13): sincrónico, no promesa rechazada — a diferencia de

@@ -557,6 +557,19 @@ describe("RegexEngine — unit tests", () => {
       expect(occurrence?.entityType).toBe(EntityType.Phone);
     });
 
+    // v1.6.2: el `[\s-]?` opcional de `phone-mobile-ar` se traga el espacio
+    // que lo precede, y ese `match[0]` era el `value` de la ocurrencia — o sea
+    // el `canonicalValue` del grupo. Un valor que arranca con espacio no puede
+    // encontrarse a sí mismo desde "Ver ocurrencias" (ADR-084 §2), porque el
+    // matcheo es por palabra entera. `runPattern` lo recorta antes de armar el
+    // RawMatch, y el `wordSpan` tiene que quedar apuntando al primer dígito.
+    it("the emitted value never carries the edge whitespace the pattern swallowed", async () => {
+      const occurrence = await firstOccurrence(engine, ctx, ["CUIT", "20-12345678-9"]);
+      expect(occurrence?.value).toBe("20-12345678");
+      expect(occurrence?.value).toBe(occurrence?.value.trim());
+      expect(occurrence?.wordSpan?.startIndex).toBe(1);
+    });
+
     it("phone, DNI, CUIT, card and date with sentence punctuation still emit", async () => {
       const cases: ReadonlyArray<{
         readonly tokens: ReadonlyArray<string>;
@@ -904,6 +917,82 @@ describe("RegexEngine — unit tests", () => {
 
       expect(matches.map((m) => m.pageIndex)).toEqual([0, 0, 1]);
       expect(matches.map((m) => m.wordSpan.startIndex)).toEqual([1, 2, 1]);
+    });
+  });
+
+  describe("comparación por sub-token (ADR-089)", () => {
+    /** Los `wordSpan.startIndex` de lo que emitió `findLiteral`, en orden. */
+    async function findLiteralSpans(
+      document: ReturnType<typeof makeSinglePageDocument>,
+      value: string,
+    ): Promise<number[]> {
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      await engine.findLiteral({ document, value, entityType: EntityType.Person }, ctx);
+      const spans = busEmitSpy.mock.calls
+        .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
+        .map(([, , payload]) => (payload as EntityFound).occurrence.wordSpan?.startIndex ?? -1);
+      busEmitSpy.mockRestore();
+      return spans;
+    }
+
+    // ADR-089 §1, fila 2 de la tabla: la coma queda ADENTRO de la palabra
+    // porque el PDF no puso espacio, y el recorte de borde de ADR-061 §2 no la
+    // alcanzaba. El usuario no tiene forma de ver dónde el extractor puso el
+    // límite de palabra, así que esto se sentía como "a veces anda".
+    it("finds a name split by internal punctuation", () => {
+      const document = makeSinglePageDocument("doc-interna", ["El", "actor", "Juan", "Pérez,Juan"]);
+
+      const matches = engine.searchText({ document, query: "Juan Pérez" });
+
+      expect(matches).toHaveLength(1);
+      expect(matches[0]?.wordSpan.startIndex).toBe(2);
+      expect(matches[0]?.wordSpan.endIndexExclusive).toBe(4);
+    });
+
+    // ADR-089 §1 fila 3 + §3: sale del propio repo — un grupo puede quedar con
+    // un tramo de un identificador como canonicalValue y no encontrarse a sí
+    // mismo. El bbox cubre la palabra ENTERA: tapar el tramo y dejar el dígito
+    // verificador a la vista no protegería nada.
+    it("finds a prefix of a longer identifier, in both entries, covering the whole word", async () => {
+      const document = makeSinglePageDocument("doc-prefijo", ["CUIT", "20-12345678-9"]);
+
+      const matches = engine.searchText({ document, query: "20-12345678" });
+      expect(matches).toHaveLength(1);
+      expect(matches[0]?.text).toBe("20-12345678-9");
+
+      await expect(findLiteralSpans(document, "20-12345678")).resolves.toEqual([1]);
+    });
+
+    // ADR-089 §1: la limitación, en un test, para que sea conocida y no una
+    // sorpresa. Es el mismo problema que el hallazgo §23c y se arregla en la
+    // detección, no acá.
+    it("does not find a name whose order is inverted in the document", () => {
+      const document = makeSinglePageDocument("doc-invertido", ["Pérez,", "Juan"]);
+
+      expect(engine.searchText({ document, query: "Juan Pérez" })).toEqual([]);
+    });
+
+    // ADR-089 §2: LA asimetría. La lupa solo resalta; "Agregar como…" barre el
+    // documento entero y crea reemplazos reales (`ui/Components.md` §5.4c), así
+    // que un prefijo ahí taparía cada palabra que empiece igual.
+    it("searchText matches a prefix but findLiteral does not", async () => {
+      const document = makeSinglePageDocument("doc-prefijo-asimetrico", ["Ana", "y", "Anabella"]);
+
+      const matches = engine.searchText({ document, query: "Ana" });
+      expect(matches.map((m) => m.text)).toEqual(["Ana", "Anabella"]);
+
+      await expect(findLiteralSpans(document, "Ana")).resolves.toEqual([0]);
+    });
+
+    // ADR-089 §1: los dos lados se parten igual, así que la puntuación interna
+    // de un apellido no cambia nada — es la no regresión de ADR-061 §2.
+    it("still finds a name with internal punctuation by its own text", () => {
+      const document = makeSinglePageDocument("doc-obrien", ["El", "perito", "O'Brien", "firmó"]);
+
+      const matches = engine.searchText({ document, query: "O'Brien" });
+
+      expect(matches).toHaveLength(1);
+      expect(matches[0]?.text).toBe("O'Brien");
     });
   });
 });
