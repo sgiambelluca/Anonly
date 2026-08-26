@@ -607,6 +607,14 @@ export type GenderLexiconLabel = "f" | "m" | "ambiguous";
 export type GenderLexicon = ReadonlyMap<string, GenderLexiconLabel>;
 ```
 
+> **`EntityGroup.needsReview: boolean`** (ADR-094 §4) — campo nuevo sobre un tipo que ya existe, declarado acá primero por §10 regla 1. `true` en un grupo que **el detector sugirió sin estar seguro**: una ocurrencia de NER por debajo del `confidenceThreshold` que no encontró grupo candidato y que hasta ADR-094 se descartaba en silencio. Esos grupos nacen con `enabled: false`, así que **no tapan nada** hasta que el usuario los habilite.
+>
+> **Es un booleano y no la `confidence`, a propósito**: quien revisa un expediente necesita saber a qué prestarle atención, no qué tan segura estaba una red neuronal. Un número invita a leerse como una probabilidad, que no lo es. Misma forma y mismo lugar que `replacementValueUserSet` (ADR-078), el otro booleano que el panel renderiza como marca.
+>
+> Va en el **grupo** y no en la ocurrencia: es el grupo lo que el usuario revisa, y `OccurrenceRef` no lleva `confidence`, así que la UI no podría derivarlo.
+>
+> **Se apaga solo al promover** (ADR-094 §3): si después entra al grupo una ocurrencia que no es de baja confianza, el grupo pasa a `enabled: true` y `needsReview: false`. Sin esa regla un grupo sugerido absorbería una detección confiable posterior y se quedaría apagado — `findMatchingGroup` no filtra por `enabled`.
+
 > **`GENDER_LEXICON`** (ADR-091 §1) — las 9.788 "Nombres Permitidos" de Buenos Aires (CC-BY-2.5-AR) como `GenderLexicon`, en un módulo **generado** por `scripts/build-gender-lexicon.ts` desde una fuente única (ADR-069 §1/§2). Vivía en `grouping-engine` por dónde se necesitó primero, no por diseño; se promueve a `@anonly/shared` porque tiene un segundo consumidor —la compuerta de nombre propio del patrón de carátula en `regex-engine`, que no puede importar otro motor (P-1/P-2)— y porque es un dato de dominio, no de motor. Mismo criterio y mismo precedente que `normalizeForComparison` y `sharesVerticalBand` (ADR-061 §2 errata).
 >
 > **Lo que se comparte es el dato, no la política.** `inferPersonGender` —el orden de pasos de ADR-060 §4, el descarte de la heurística de terminación, la guarda de iniciales de ADR-069 §3— **se queda en `grouping-engine`**: tiene un solo consumidor y es una decisión de producto, no una primitiva.
