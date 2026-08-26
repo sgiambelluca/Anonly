@@ -1,0 +1,41 @@
+{
+  "documentId": "doc-001",
+  "entities": [
+    {
+      "entityType": "PERSON",
+      "value": "Ricardo Castro",
+      "pageIndex": 0,
+      "detector": "ner"
+    },
+    {
+      "entityType": "ADDRESS",
+      "value": "Maipú 1434",
+      "pageIndex": 0,
+      "detector": "ner"
+    },
+    {
+      "entityType": "DNI",
+      "value": "46.578.630",
+      "pageIndex": 0,
+      "detector": "regex"
+    },
+    {
+      "entityType": "CUIT",
+      "value": "20-26139703-0",
+      "pageIndex": 1,
+      "detector": "regex"
+    },
+    {
+      "entityType": "PHONE",
+      "value": "+54 11 7210-3598",
+      "pageIndex": 1,
+      "detector": "regex"
+    },
+    {
+      "entityType": "EMAIL",
+      "value": "user68929@example.org",
+      "pageIndex": 1,
+      "detector": "regex"
+    }
+  ]
+}

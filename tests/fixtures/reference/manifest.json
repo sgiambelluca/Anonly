@@ -1,0 +1,144 @@
+{
+  "documents": [
+    {
+      "documentId": "doc-001",
+      "pdf": "doc-001.pdf",
+      "truth": "doc-001.truth.json",
+      "category": "dense",
+      "entityCount": 6
+    },
+    {
+      "documentId": "doc-002",
+      "pdf": "doc-002.pdf",
+      "truth": "doc-002.truth.json",
+      "category": "dense",
+      "entityCount": 6
+    },
+    {
+      "documentId": "doc-003",
+      "pdf": "doc-003.pdf",
+      "truth": "doc-003.truth.json",
+      "category": "dense",
+      "entityCount": 6
+    },
+    {
+      "documentId": "doc-004",
+      "pdf": "doc-004.pdf",
+      "truth": "doc-004.truth.json",
+      "category": "dense",
+      "entityCount": 6
+    },
+    {
+      "documentId": "doc-005",
+      "pdf": "doc-005.pdf",
+      "truth": "doc-005.truth.json",
+      "category": "dense",
+      "entityCount": 9
+    },
+    {
+      "documentId": "doc-006",
+      "pdf": "doc-006.pdf",
+      "truth": "doc-006.truth.json",
+      "category": "dense",
+      "entityCount": 6
+    },
+    {
+      "documentId": "doc-007",
+      "pdf": "doc-007.pdf",
+      "truth": "doc-007.truth.json",
+      "category": "sparse",
+      "entityCount": 1
+    },
+    {
+      "documentId": "doc-008",
+      "pdf": "doc-008.pdf",
+      "truth": "doc-008.truth.json",
+      "category": "sparse",
+      "entityCount": 1
+    },
+    {
+      "documentId": "doc-009",
+      "pdf": "doc-009.pdf",
+      "truth": "doc-009.truth.json",
+      "category": "sparse",
+      "entityCount": 2
+    },
+    {
+      "documentId": "doc-010",
+      "pdf": "doc-010.pdf",
+      "truth": "doc-010.truth.json",
+      "category": "sparse",
+      "entityCount": 1
+    },
+    {
+      "documentId": "doc-011",
+      "pdf": "doc-011.pdf",
+      "truth": "doc-011.truth.json",
+      "category": "sparse",
+      "entityCount": 2
+    },
+    {
+      "documentId": "doc-012",
+      "pdf": "doc-012.pdf",
+      "truth": "doc-012.truth.json",
+      "category": "sparse",
+      "entityCount": 1
+    },
+    {
+      "documentId": "doc-013",
+      "pdf": "doc-013.pdf",
+      "truth": "doc-013.truth.json",
+      "category": "trap",
+      "entityCount": 0
+    },
+    {
+      "documentId": "doc-014",
+      "pdf": "doc-014.pdf",
+      "truth": "doc-014.truth.json",
+      "category": "trap",
+      "entityCount": 0
+    },
+    {
+      "documentId": "doc-015",
+      "pdf": "doc-015.pdf",
+      "truth": "doc-015.truth.json",
+      "category": "trap",
+      "entityCount": 0
+    },
+    {
+      "documentId": "doc-016",
+      "pdf": "doc-016.pdf",
+      "truth": "doc-016.truth.json",
+      "category": "trap",
+      "entityCount": 0
+    },
+    {
+      "documentId": "doc-017",
+      "pdf": "doc-017.pdf",
+      "truth": "doc-017.truth.json",
+      "category": "trap",
+      "entityCount": 0
+    },
+    {
+      "documentId": "doc-018",
+      "pdf": "doc-018.pdf",
+      "truth": "doc-018.truth.json",
+      "category": "empty",
+      "entityCount": 0
+    },
+    {
+      "documentId": "doc-019",
+      "pdf": "doc-019.pdf",
+      "truth": "doc-019.truth.json",
+      "category": "empty",
+      "entityCount": 0
+    },
+    {
+      "documentId": "doc-020",
+      "pdf": "doc-020.pdf",
+      "truth": "doc-020.truth.json",
+      "category": "empty",
+      "entityCount": 0
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "documentId": "doc-008",
+  "entities": [
+    {
+      "entityType": "PERSON",
+      "value": "Andrés Vega",
+      "pageIndex": 0,
+      "detector": "ner"
+    }
+  ]
+}

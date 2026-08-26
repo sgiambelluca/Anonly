@@ -1,0 +1,11 @@
+{
+  "documentId": "doc-012",
+  "entities": [
+    {
+      "entityType": "PERSON",
+      "value": "Fernández, Elena",
+      "pageIndex": 0,
+      "detector": "regex"
+    }
+  ]
+}

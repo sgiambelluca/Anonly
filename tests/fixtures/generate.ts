@@ -29,6 +29,17 @@ import { fileURLToPath } from "node:url";
 
 import { PDFDocument, StandardFonts, degrees, rgb } from "pdf-lib";
 
+// Import relativo, no "@anonly/shared": este archivo corre por dos caminos —
+// `tsx tests/fixtures/generate.ts` (pnpm fixtures:generate) y, importado,
+// bajo vitest (generate.test.ts). vitest resuelve el bare specifier vía el
+// alias de vitest.config.ts, pero `tsx` en ejecución directa NO: no hay
+// tsconfig con "paths" para "@anonly/shared" alcanzable desde este archivo
+// fuera de vitest (tests/tsconfig.json es solo para `tsc --noEmit`), y
+// verificado que `tsx` no lo resuelve (ERR_MODULE_NOT_FOUND). El import
+// relativo a `shared/src/index.ts` — el único `index.ts` del paquete
+// (Code_Standards.md §5) — funciona en los dos caminos por igual.
+import { EntityType, synthesize } from "../../packages/anonymization-core/shared/src/index.js";
+
 /*
  * Layout de `text-10p.pdf`. Exportado porque `tests/e2e/support/fixtures.ts`
  * arma variantes del mismo documento en memoria y tiene que renderizar
@@ -398,6 +409,731 @@ export async function generateStamp(): Promise<Uint8Array> {
   return doc.save();
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Dataset de referencia (recall / precision) — tests/fixtures/reference/
+//
+// Fuente de verdad: README.md, "Dataset de referencia (recall / precision)".
+//
+// LA INVARIANTE CENTRAL: el PDF y su `truth.json` salen de la MISMA
+// estructura en memoria, en la MISMA pasada. `ReferencePageBuilder.entity()`
+// es el único punto de entrada para declarar una entidad, y hace las dos
+// cosas a la vez — empuja el valor al texto de la página (lo que termina
+// dibujado en el PDF) Y lo registra en la lista de entidades (lo que termina
+// en el truth) — en la misma llamada. No hay un camino para escribir texto
+// en el PDF sin pasar por ahí, y no hay un camino para declarar una entidad
+// sin que su valor exacto termine en el texto. `renderReferenceDoc` lee
+// `page.text` para dibujar y `page.entities` para el truth del mismo objeto
+// `ReferencePageContent`: no son dos fuentes que puedan divergir con el
+// tiempo, son la misma.
+// ─────────────────────────────────────────────────────────────────────────
+
+/** `detector` del formato de truth.json — solo estos dos valores (README). */
+export type ReferenceDetector = "regex" | "ner";
+
+/** Categoría de densidad del documento (README, "Composición inicial"). */
+export type ReferenceCategory = "dense" | "sparse" | "trap" | "empty";
+
+export interface ReferenceTruthEntity {
+  readonly entityType: EntityType;
+  readonly value: string;
+  readonly pageIndex: number;
+  readonly detector: ReferenceDetector;
+}
+
+export interface ReferenceTruth {
+  readonly documentId: string;
+  readonly entities: ReadonlyArray<ReferenceTruthEntity>;
+}
+
+export interface ReferenceDocument {
+  readonly documentId: string;
+  readonly category: ReferenceCategory;
+  readonly pdfBytes: Uint8Array;
+  readonly truth: ReferenceTruth;
+}
+
+export interface ReferenceManifestEntry {
+  readonly documentId: string;
+  readonly pdf: string;
+  readonly truth: string;
+  readonly category: ReferenceCategory;
+  readonly entityCount: number;
+}
+
+export interface ReferenceManifest {
+  readonly documents: ReadonlyArray<ReferenceManifestEntry>;
+}
+
+interface ReferencePageEntity {
+  readonly entityType: EntityType;
+  readonly value: string;
+  readonly detector: ReferenceDetector;
+}
+
+/** Página ya construida: el texto y las entidades vienen del mismo `.build()`. */
+export interface ReferencePageContent {
+  readonly text: string;
+  readonly entities: ReadonlyArray<ReferencePageEntity>;
+}
+
+export interface ReferenceDocSpec {
+  readonly documentId: string;
+  readonly category: ReferenceCategory;
+  readonly pages: ReadonlyArray<ReferencePageContent>;
+}
+
+/**
+ * Junta `parts` en una sola oración, sin espacio antes de puntuación de
+ * cierre (`, . ; : )`) ni después de un paréntesis de apertura. Cosmético
+ * para que el PDF no muestre "Juan Pérez , con domicilio" — no afecta la
+ * invariante (el valor de la entidad sigue siendo exactamente el que se
+ * pasó a `.entity()`).
+ */
+function joinReferenceParts(parts: ReadonlyArray<string>): string {
+  let out = "";
+  for (const part of parts) {
+    if (out.length === 0) {
+      out = part;
+      continue;
+    }
+    const noSpaceBefore = /^[,.;:)]/.test(part);
+    const noSpaceAfter = out.endsWith("(");
+    out += noSpaceBefore || noSpaceAfter ? part : ` ${part}`;
+  }
+  return out;
+}
+
+/**
+ * Único punto de entrada para construir una página del dataset de
+ * referencia. `entity()` es la mitad de la invariante: empuja `value` al
+ * texto Y lo registra como entidad esperada, en la misma llamada.
+ */
+class ReferencePageBuilder {
+  private readonly parts: string[] = [];
+  private readonly entities: ReferencePageEntity[] = [];
+
+  text(value: string): this {
+    this.parts.push(value);
+    return this;
+  }
+
+  entity(value: string, entityType: EntityType, detector: ReferenceDetector): this {
+    this.parts.push(value);
+    this.entities.push({ entityType, value, detector });
+    return this;
+  }
+
+  build(): ReferencePageContent {
+    return { text: joinReferenceParts(this.parts), entities: [...this.entities] };
+  }
+}
+
+function page(build: (builder: ReferencePageBuilder) => void): ReferencePageContent {
+  const builder = new ReferencePageBuilder();
+  build(builder);
+  return builder.build();
+}
+
+/** Semilla fija: el dataset de referencia es reproducible entre corridas. */
+const REFERENCE_DATASET_SEED = "reference-dataset-v1";
+
+/**
+ * Sortea un valor sintético para `type` vía `synthesize()` (shared/synthesizer.ts).
+ * `groupId` incluye el `documentId` y `indexInType` para que cada entidad de
+ * cada documento tenga su propia semilla derivada — dos documentos, o dos
+ * entidades del mismo tipo dentro de uno, nunca colisionan.
+ */
+function synth(documentId: string, type: EntityType, indexInType: number): string {
+  return synthesize({
+    type,
+    groupId: `${documentId}-${type}-${indexInType}`,
+    seed: REFERENCE_DATASET_SEED,
+    indexInType,
+  });
+}
+
+/**
+ * `synth(..., EntityType.Phone, ...)` sortea el código de área de una lista
+ * con entradas de 2 y 3 dígitos (`synthesizer.ts`: "11" | "221" | "341" |
+ * "351" | "343" | "380"). El patrón real `phone-mobile-ar`
+ * (`(?:\+?54)?[\s-]?\b\d{2}[\s-]?\d{4}[\s-]?\d{4}\b`, `default-ar.ts`) exige
+ * EXACTAMENTE 2 dígitos ahí — verificado: con área de 3 dígitos el patrón no
+ * matchea nada. Para que este dataset tenga un "camino positivo" de Phone
+ * que el motor real efectivamente encuentre, se fuerza el área "11" (la
+ * misma que ya usa `text-10p.pdf`) y se reusan los dígitos que sorteó
+ * `synth()` para el resto del número.
+ */
+function syntheticMobilePhone(documentId: string, indexInType: number): string {
+  const raw = synth(documentId, EntityType.Phone, indexInType);
+  const digits = raw.replace(/\D/g, "").slice(-8).padStart(8, "0");
+  return `+54 11 ${digits.slice(0, 4)}-${digits.slice(4, 8)}`;
+}
+
+/**
+ * ISO 13616 / mod-97-10: dígitos verificadores válidos para `bban` bajo
+ * `countryCode`. Mismo algoritmo estándar que `computeIbanChecksum` de
+ * `regex-engine/patterns/default-ar.ts` implementa para VALIDAR — acá se usa
+ * en la dirección inversa, para CONSTRUIR un valor que ya cierre. No importa
+ * nada de `regex-engine` (P-2): es aritmética de un estándar público, cada
+ * lado la implementa por su cuenta, igual que `synthesizer.ts` ya implementa
+ * su propio Luhn y su propio módulo 11 de CUIT sin importar `regex-engine`.
+ */
+function ibanCheckDigits(countryCode: string, bban: string): string {
+  const rearranged = `${bban}${countryCode}00`;
+  let numeric = "";
+  for (const ch of rearranged) {
+    numeric += ch >= "0" && ch <= "9" ? ch : (ch.charCodeAt(0) - 55).toString();
+  }
+  let remainder = 0;
+  for (const digit of numeric) {
+    remainder = (remainder * 10 + Number(digit)) % 97;
+  }
+  const check = 98 - remainder;
+  return check.toString().padStart(2, "0");
+}
+
+/**
+ * `synth(..., EntityType.IBAN, ...)` separa los grupos con espacios (formato
+ * de lectura humana, igual que el IBAN de `text-10p.pdf`). El patrón real
+ * `iban` (`\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b`) NO admite espacios internos —
+ * verificado corriendo el regex exacto contra el valor con espacios: cero
+ * matches, ni para aceptar ni para rechazar por checksum. Es un hallazgo
+ * (ver reporte final): el IBAN de `text-10p.pdf` está documentado como
+ * "rechazado por checksum" y en realidad el patrón no llega a matchearlo.
+ * Para que este dataset tenga un "camino positivo" de IBAN que el motor real
+ * pueda encontrar, se recalcula el dígito verificador (`ibanCheckDigits`)
+ * sobre los mismos dígitos que sorteó `synth()` y se arma SIN espacios.
+ */
+function syntheticValidIban(documentId: string, indexInType: number): string {
+  const raw = synth(documentId, EntityType.IBAN, indexInType).replace(/\s+/g, "");
+  const country = raw.slice(0, 2);
+  const bban = raw.slice(4);
+  const check = ibanCheckDigits(country, bban);
+  return `${country}${check}${bban}`;
+}
+
+/**
+ * `synth(..., EntityType.License, ...)` produce un valor puramente numérico
+ * ("XX-XXXX-XX", comentario propio de `synthesizer.ts`: "máscara de
+ * ADR-012"). El patrón real `license-ar` (`\b[A-Z]{1,3}-?\d{4,8}-?\d?\b`)
+ * exige 1 a 3 LETRAS mayúsculas al principio — obligatorias, no hay forma de
+ * que un valor sin letras matchee. Es el segundo hallazgo de este PR (ver
+ * reporte final). Se arma un valor con la forma real del patrón —mismo
+ * prefijo que el `"MP-12345"` que ADR-075 §2 ya usa como ejemplo de
+ * `License` en sus propios tests— reusando los dígitos que sorteó `synth()`.
+ */
+const LICENSE_PREFIXES: ReadonlyArray<string> = ["MP", "CPN", "MN"];
+
+function syntheticLicense(documentId: string, indexInType: number): string {
+  const digits = synth(documentId, EntityType.License, indexInType).replace(/\D/g, "");
+  const prefix = LICENSE_PREFIXES[indexInType % LICENSE_PREFIXES.length] ?? "MP";
+  return `${prefix}-${digits.slice(0, 5)}`;
+}
+
+/** "Juan Pérez" → { firstName: "Juan", lastName: "Pérez" }. */
+function splitFullName(fullName: string): { readonly firstName: string; readonly lastName: string } {
+  const parts = fullName.split(" ");
+  const firstName = parts[0];
+  const lastName = parts.slice(1).join(" ");
+  if (firstName === undefined || firstName.length === 0 || lastName.length === 0) {
+    throw new Error(`splitFullName: nombre sintético con forma inesperada: "${fullName}"`);
+  }
+  return { firstName, lastName };
+}
+
+/**
+ * Agrega la oración de una entidad de tipo "documental" (detectable por
+ * regex o NER, según el tipo — README, tabla de `text-10p.pdf`) a `builder`.
+ * Cada `case` sortea su valor y lo pasa a `.entity()`: no hay valor que se
+ * dibuje sin pasar también a la lista de entidades esperadas.
+ */
+function appendEntitySentence(
+  builder: ReferencePageBuilder,
+  documentId: string,
+  type: EntityType,
+  seedIndex: number,
+): void {
+  switch (type) {
+    case EntityType.Person: {
+      const name = synth(documentId, type, seedIndex);
+      builder.text("Comparece").entity(name, type, "ner").text("ante esta instancia.");
+      return;
+    }
+    case EntityType.Organization: {
+      const org = synth(documentId, type, seedIndex);
+      builder.text("en representación de").entity(org, type, "ner").text(".");
+      return;
+    }
+    case EntityType.Address: {
+      const address = synth(documentId, type, seedIndex);
+      builder.text("con domicilio en").entity(address, type, "ner").text(".");
+      return;
+    }
+    case EntityType.DNI: {
+      const dni = synth(documentId, type, seedIndex);
+      builder.text("DNI").entity(dni, type, "regex").text(".");
+      return;
+    }
+    case EntityType.CUIT: {
+      const cuit = synth(documentId, type, seedIndex);
+      builder.text("CUIT").entity(cuit, type, "regex").text(".");
+      return;
+    }
+    case EntityType.Phone: {
+      const phone = syntheticMobilePhone(documentId, seedIndex);
+      builder.text("Teléfono de contacto").entity(phone, type, "regex").text(".");
+      return;
+    }
+    case EntityType.Email: {
+      const email = synth(documentId, type, seedIndex);
+      builder.text("correo electrónico").entity(email, type, "regex").text(".");
+      return;
+    }
+    case EntityType.IBAN: {
+      const iban = syntheticValidIban(documentId, seedIndex);
+      builder.text("con cuenta IBAN").entity(iban, type, "regex").text(".");
+      return;
+    }
+    case EntityType.CreditCard: {
+      const card = synth(documentId, type, seedIndex);
+      builder.text("abonado con tarjeta").entity(card, type, "regex").text(".");
+      return;
+    }
+    case EntityType.Date: {
+      const date = synth(documentId, type, seedIndex);
+      builder.text("con fecha").entity(date, type, "regex").text(".");
+      return;
+    }
+    case EntityType.License: {
+      const license = syntheticLicense(documentId, seedIndex);
+      builder.text("matrícula profesional").entity(license, type, "regex").text(".");
+      return;
+    }
+    case EntityType.Plate: {
+      const plate = synth(documentId, type, seedIndex);
+      builder.text("con la patente").entity(plate, type, "regex").text(".");
+      return;
+    }
+    default:
+      throw new Error(
+        `appendEntitySentence: tipo no soportado en el dataset de referencia: ${type as string}`,
+      );
+  }
+}
+
+/**
+ * Agrega la carátula judicial "Apellido, Nombre" (ADR-092): un Person
+ * detectado por REGEX, no por NER. Sortea un nombre completo con
+ * `synth(..., EntityType.Person, ...)` y lo invierte — mismo mecanismo que
+ * `flipCaption` en `default-ar.ts`, pero en la dirección de construir el
+ * texto de entrada en vez de normalizarlo.
+ */
+function appendCaratulaSentence(
+  builder: ReferencePageBuilder,
+  documentId: string,
+  seedIndex: number,
+): void {
+  const { firstName, lastName } = splitFullName(synth(documentId, EntityType.Person, seedIndex));
+  const caratula = `${lastName}, ${firstName}`;
+  builder.text("Expediente caratulado:").entity(caratula, EntityType.Person, "regex").text("c/ Estado s/ actuación.");
+}
+
+/**
+ * Documentos "densos": varias entidades por página, cubriendo los doce tipos
+ * de `EntityType` (menos `Custom`, que no tiene forma detectable) y las dos
+ * variantes de `Person` (NER en orden normal, regex vía la carátula).
+ *
+ * doc-004 y doc-006 repiten el mismo `seedIndex` de Person para la carátula
+ * y para la mención en el cuerpo A PROPÓSITO: es el escenario exacto que
+ * ADR-092 §2 usa como ejemplo ("Pérez, Juan" en el encabezado + "Juan Pérez"
+ * en el cuerpo, agrupados por el mismo `normalizedValue"), y vale la pena
+ * que el dataset de referencia lo cubra.
+ */
+function buildDenseDocs(): ReadonlyArray<ReferenceDocSpec> {
+  return [
+    {
+      documentId: "doc-001",
+      category: "dense",
+      pages: [
+        page((b) => {
+          appendEntitySentence(b, "doc-001", EntityType.Person, 0);
+          appendEntitySentence(b, "doc-001", EntityType.Address, 0);
+          appendEntitySentence(b, "doc-001", EntityType.DNI, 0);
+        }),
+        page((b) => {
+          appendEntitySentence(b, "doc-001", EntityType.CUIT, 0);
+          appendEntitySentence(b, "doc-001", EntityType.Phone, 0);
+          appendEntitySentence(b, "doc-001", EntityType.Email, 0);
+        }),
+      ],
+    },
+    {
+      documentId: "doc-002",
+      category: "dense",
+      pages: [
+        page((b) => {
+          appendEntitySentence(b, "doc-002", EntityType.Organization, 0);
+          appendEntitySentence(b, "doc-002", EntityType.DNI, 0);
+          appendEntitySentence(b, "doc-002", EntityType.IBAN, 0);
+        }),
+        page((b) => {
+          appendEntitySentence(b, "doc-002", EntityType.CreditCard, 0);
+          appendEntitySentence(b, "doc-002", EntityType.Date, 0);
+          appendEntitySentence(b, "doc-002", EntityType.License, 0);
+        }),
+      ],
+    },
+    {
+      documentId: "doc-003",
+      category: "dense",
+      pages: [
+        page((b) => {
+          appendEntitySentence(b, "doc-003", EntityType.Person, 0);
+          appendEntitySentence(b, "doc-003", EntityType.Organization, 0);
+          appendEntitySentence(b, "doc-003", EntityType.Address, 0);
+        }),
+        page((b) => {
+          appendEntitySentence(b, "doc-003", EntityType.Plate, 0);
+          appendEntitySentence(b, "doc-003", EntityType.Phone, 0);
+          appendEntitySentence(b, "doc-003", EntityType.Email, 0);
+        }),
+      ],
+    },
+    {
+      documentId: "doc-004",
+      category: "dense",
+      pages: [
+        page((b) => {
+          appendCaratulaSentence(b, "doc-004", 0);
+          appendEntitySentence(b, "doc-004", EntityType.DNI, 0);
+          appendEntitySentence(b, "doc-004", EntityType.CUIT, 0);
+        }),
+        page((b) => {
+          // Mismo seedIndex 0 que la carátula de arriba: es la misma persona
+          // mencionada dos veces, en dos formas (ADR-092 §2).
+          appendEntitySentence(b, "doc-004", EntityType.Person, 0);
+          appendEntitySentence(b, "doc-004", EntityType.Date, 0);
+          appendEntitySentence(b, "doc-004", EntityType.Organization, 0);
+        }),
+      ],
+    },
+    {
+      documentId: "doc-005",
+      category: "dense",
+      pages: [
+        page((b) => {
+          appendEntitySentence(b, "doc-005", EntityType.DNI, 0);
+          appendEntitySentence(b, "doc-005", EntityType.CUIT, 0);
+          appendEntitySentence(b, "doc-005", EntityType.Phone, 0);
+          appendEntitySentence(b, "doc-005", EntityType.Email, 0);
+        }),
+        page((b) => {
+          appendEntitySentence(b, "doc-005", EntityType.IBAN, 0);
+          appendEntitySentence(b, "doc-005", EntityType.CreditCard, 0);
+          appendEntitySentence(b, "doc-005", EntityType.Date, 0);
+          appendEntitySentence(b, "doc-005", EntityType.License, 0);
+          appendEntitySentence(b, "doc-005", EntityType.Plate, 0);
+        }),
+      ],
+    },
+    {
+      documentId: "doc-006",
+      category: "dense",
+      pages: [
+        page((b) => {
+          appendEntitySentence(b, "doc-006", EntityType.Person, 0);
+          appendCaratulaSentence(b, "doc-006", 0); // misma persona (ADR-092 §2)
+          appendEntitySentence(b, "doc-006", EntityType.Organization, 0);
+        }),
+        page((b) => {
+          appendEntitySentence(b, "doc-006", EntityType.Address, 0);
+          appendEntitySentence(b, "doc-006", EntityType.DNI, 0);
+          appendEntitySentence(b, "doc-006", EntityType.Phone, 0);
+        }),
+      ],
+    },
+  ];
+}
+
+/**
+ * Documentos "ralos": 1-2 entidades en total, sobre texto neutro alrededor.
+ */
+function buildSparseDocs(): ReadonlyArray<ReferenceDocSpec> {
+  return [
+    {
+      documentId: "doc-007",
+      category: "sparse",
+      pages: [
+        page((b) => {
+          b.text("Se adjunta copia del comprobante de identidad.");
+          appendEntitySentence(b, "doc-007", EntityType.DNI, 0);
+          b.text("Sin otras observaciones que agregar al expediente.");
+        }),
+      ],
+    },
+    {
+      documentId: "doc-008",
+      category: "sparse",
+      pages: [
+        page((b) => {
+          b.text("Se deja constancia de la presencia del interesado.");
+          appendEntitySentence(b, "doc-008", EntityType.Person, 0);
+          b.text("El resto del acta continúa sin novedades que consignar.");
+        }),
+      ],
+    },
+    {
+      documentId: "doc-009",
+      category: "sparse",
+      pages: [
+        page((b) => {
+          b.text("Ante cualquier consulta sobre el trámite, escribir a");
+          appendEntitySentence(b, "doc-009", EntityType.Email, 0);
+          b.text("o comunicarse al");
+          appendEntitySentence(b, "doc-009", EntityType.Phone, 0);
+        }),
+      ],
+    },
+    {
+      documentId: "doc-010",
+      category: "sparse",
+      pages: [
+        page((b) => {
+          b.text("El presente escrito se presenta");
+          appendEntitySentence(b, "doc-010", EntityType.Organization, 0);
+          b.text("y no contiene otra referencia identificatoria.");
+        }),
+      ],
+    },
+    {
+      documentId: "doc-011",
+      category: "sparse",
+      pages: [
+        page((b) => {
+          b.text("La notificación se cursó");
+          appendEntitySentence(b, "doc-011", EntityType.Address, 0);
+          b.text("y quedó registrada");
+          appendEntitySentence(b, "doc-011", EntityType.Date, 0);
+        }),
+      ],
+    },
+    {
+      documentId: "doc-012",
+      category: "sparse",
+      pages: [
+        page((b) => {
+          appendCaratulaSentence(b, "doc-012", 0);
+          b.text("El resto del folio no contiene otras menciones identificatorias.");
+        }),
+      ],
+    },
+  ];
+}
+
+/**
+ * Documentos "trampa": cero entidades reales, pero texto que un detector
+ * ingenuo podría confundir con una. Mínimo exigido por el README/tarea:
+ * número de expediente, código postal, fecha fuera de rango, CUIT/IBAN/
+ * tarjeta con dígito verificador inválido, y topónimos con coma (la trampa
+ * del patrón `caratula-ar` de ADR-092).
+ *
+ * Los valores de CUIT/IBAN/tarjeta inválidos son EXACTAMENTE los literales
+ * ya documentados y verificados en `text-10p.pdf`/README ("Contenido
+ * conocido de text-10p.pdf", corregido 2026-08-18): reusarlos evita
+ * recalcular un checksum roto a mano y respetar que "cambiar los de ese
+ * fixture rompería los tests que hoy dependen del rechazo" no aplica acá —
+ * es un valor nuevo, en un documento nuevo, con el mismo texto.
+ */
+function buildTrapDocs(): ReadonlyArray<ReferenceDocSpec> {
+  return [
+    {
+      documentId: "doc-013",
+      category: "trap",
+      pages: [
+        page((b) => {
+          b.text(
+            "En el expediente PP-13-00-027653-24/00 se solicita el traslado de las " +
+              "actuaciones. La audiencia se fijó en la oficina de Mar del Plata, Buenos " +
+              "Aires, a la espera de nueva notificación.",
+          );
+        }),
+      ],
+    },
+    {
+      documentId: "doc-014",
+      category: "trap",
+      pages: [
+        page((b) => {
+          b.text(
+            "La correspondencia debe remitirse al código postal C1425AAB. La delegación " +
+              "de San Miguel, Tucumán, informó que el trámite continúa en su sede local.",
+          );
+        }),
+      ],
+    },
+    {
+      documentId: "doc-015",
+      category: "trap",
+      pages: [
+        page((b) => {
+          b.text(
+            "El escrito quedó fechado el 45 de julio de 2026, error material que consta " +
+              "en el original. Se cita, conforme al Código Civil, Título III, la normativa " +
+              "aplicable al caso.",
+          );
+        }),
+      ],
+    },
+    {
+      documentId: "doc-016",
+      category: "trap",
+      pages: [
+        page((b) => {
+          b.text(
+            "Se consignó el CUIT 20-12345678-9 en un formulario anterior, con un dígito " +
+              "verificador que no cierra. La cuenta bancaria informada, IBAN ES00 1234 " +
+              "5678 9012 3456 7890, tampoco resulta válida.",
+          );
+        }),
+      ],
+    },
+    {
+      documentId: "doc-017",
+      category: "trap",
+      pages: [
+        page((b) => {
+          b.text(
+            "El pago con tarjeta 4532 1234 5678 9901 fue rechazado por el emisor. El " +
+              "expediente conexo IPP-08-00-045210-25/00 quedó radicado en La Plata, " +
+              "Buenos Aires, a la espera de acumulación.",
+          );
+        }),
+      ],
+    },
+  ];
+}
+
+/**
+ * Documentos "vacíos": cero entidades, sin siquiera texto trampa — prosa
+ * neutra, para medir el piso de falsos positivos.
+ */
+function buildEmptyDocs(): ReadonlyArray<ReferenceDocSpec> {
+  return [
+    {
+      documentId: "doc-018",
+      category: "empty",
+      pages: [
+        page((b) => {
+          b.text(
+            "El presente documento no contiene información sensible. Su único propósito " +
+              "es servir de referencia para medir falsos positivos en el pipeline de " +
+              "detección. El texto continúa sin mencionar personas, organismos ni " +
+              "identificadores de ningún tipo.",
+          );
+        }),
+      ],
+    },
+    {
+      documentId: "doc-019",
+      category: "empty",
+      pages: [
+        page((b) => {
+          b.text(
+            "Este anexo describe el procedimiento general de tramitación sin hacer " +
+              "referencia a ningún caso concreto. No se citan partes, domicilios ni " +
+              "datos de contacto de ninguna clase en ningún párrafo de este anexo.",
+          );
+        }),
+      ],
+    },
+    {
+      documentId: "doc-020",
+      category: "empty",
+      pages: [
+        page((b) => {
+          b.text(
+            "Las siguientes páginas quedan reservadas para observaciones futuras. Al " +
+              "momento de esta versión no hay contenido adicional que consignar, y no se " +
+              "incluye ningún dato identificatorio.",
+          );
+        }),
+      ],
+    },
+  ];
+}
+
+/**
+ * Exportada para tests: permite verificar, sin pasar por pdf-lib (async, I/O
+ * en memoria), que cada `page.text` contiene el `value` de cada entidad que
+ * `page.entities` declara — la mitad estática de la invariante de esta
+ * sección.
+ */
+export function buildReferenceDocSpecs(): ReadonlyArray<ReferenceDocSpec> {
+  return [...buildDenseDocs(), ...buildSparseDocs(), ...buildTrapDocs(), ...buildEmptyDocs()];
+}
+
+/**
+ * Dibuja `spec` como PDF y deriva su `truth` — del mismo objeto, en la misma
+ * pasada (ver el comentario de cabecera de esta sección). `page.text` es lo
+ * único que se dibuja; `page.entities` es lo único de lo que sale el truth.
+ */
+async function renderReferenceDoc(
+  spec: ReferenceDocSpec,
+): Promise<{ readonly pdfBytes: Uint8Array; readonly truth: ReferenceTruth }> {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const entities: ReferenceTruthEntity[] = [];
+
+  spec.pages.forEach((pageContent, pageIndex) => {
+    const pdfPage = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+    const lines = wrapText(pageContent.text, WRAP_CHARS);
+    let y = MARGIN_Y;
+    for (const line of lines) {
+      pdfPage.drawText(line, { x: MARGIN_X, y, size: FONT_SIZE, font, color: rgb(0, 0, 0) });
+      y -= LINE_HEIGHT;
+    }
+    for (const entity of pageContent.entities) {
+      entities.push({
+        entityType: entity.entityType,
+        value: entity.value,
+        pageIndex,
+        detector: entity.detector,
+      });
+    }
+  });
+
+  const pdfBytes = await doc.save();
+  return { pdfBytes, truth: { documentId: spec.documentId, entities } };
+}
+
+/**
+ * Genera el dataset de referencia completo: ~20 PDFs sintéticos con su
+ * ground truth, desde `buildReferenceDocSpecs()`. Exportada para
+ * `pnpm fixtures:generate` (vía `main()`) y para `generate.test.ts`.
+ */
+export async function generateReferenceDataset(): Promise<ReadonlyArray<ReferenceDocument>> {
+  const specs = buildReferenceDocSpecs();
+  const documents: ReferenceDocument[] = [];
+  for (const spec of specs) {
+    const { pdfBytes, truth } = await renderReferenceDoc(spec);
+    documents.push({ documentId: spec.documentId, category: spec.category, pdfBytes, truth });
+  }
+  return documents;
+}
+
+/** Índice documento → ground truth (README: "manifest.json"). */
+export function buildReferenceManifest(documents: ReadonlyArray<ReferenceDocument>): ReferenceManifest {
+  return {
+    documents: documents.map((d) => ({
+      documentId: d.documentId,
+      pdf: `${d.documentId}.pdf`,
+      truth: `${d.documentId}.truth.json`,
+      category: d.category,
+      entityCount: d.truth.entities.length,
+    })),
+  };
+}
+
 export async function generateEmpty(): Promise<Uint8Array> {
   // "empty.pdf" = PDF con 1 página sin contenido (sin texto dibujado, sin
   // /Contents). pdf-lib no permite generar PDFs con 0 páginas (doc.save()
@@ -471,6 +1207,25 @@ async function main(): Promise<void> {
   const stamp = await generateStamp();
   await writeFile(resolve(FIXTURE_DIR, "qa-stamp.pdf"), stamp);
 
+  // Dataset de referencia (recall / precision) — README.md, "Dataset de
+  // referencia". ~20 PDFs sintéticos + su ground truth, en tests/fixtures/reference/.
+  const REFERENCE_DIR = resolve(FIXTURE_DIR, "reference");
+  await mkdir(REFERENCE_DIR, { recursive: true });
+  const referenceDocs = await generateReferenceDataset();
+  for (const doc of referenceDocs) {
+    await writeFile(resolve(REFERENCE_DIR, `${doc.documentId}.pdf`), doc.pdfBytes);
+    await writeFile(
+      resolve(REFERENCE_DIR, `${doc.documentId}.truth.json`),
+      `${JSON.stringify(doc.truth, null, 2)}\n`,
+    );
+  }
+  const referenceManifest = buildReferenceManifest(referenceDocs);
+  await writeFile(
+    resolve(REFERENCE_DIR, "manifest.json"),
+    `${JSON.stringify(referenceManifest, null, 2)}\n`,
+  );
+  const referenceEntityCount = referenceDocs.reduce((sum, d) => sum + d.truth.entities.length, 0);
+
   // Reporte por stdout (no console.error, no es un motor del Core).
   process.stdout.write(
     `Fixtures generados en ${FIXTURE_DIR}:\n` +
@@ -478,6 +1233,7 @@ async function main(): Promise<void> {
       `  - image-alpha-3p.pdf (${imageAlpha.byteLength} bytes, 3 páginas con imagen alfa y transparencias)\n` +
       `  - empty.pdf (${empty.byteLength} bytes, 1 página sin contenido)\n` +
       `  - corrupt.pdf (${corrupt.byteLength} bytes, header %PDF- + cuerpo no-PDF)\n` +
+      `  - reference/ (${referenceDocs.length} documentos, ${referenceEntityCount} entidades de ground truth)\n` +
       `\n` +
       `Pendientes (requieren tools externos):\n` +
       `  - protected.pdf: qpdf --encrypt test1234 test1234 256 -- text-10p.pdf protected.pdf\n`,
