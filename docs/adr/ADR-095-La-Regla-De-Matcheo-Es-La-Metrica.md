@@ -79,6 +79,33 @@ Vive en `tests/quality/`, y se parte en dos por una razón que conviene decir:
 
 **Los umbrales del gate no se activan en esta entrega.** El evaluador primero tiene que reportar los números reales; recién con esos números a la vista se decide si el 90 % de `00_Project_Vision.md` §7 es alcanzable hoy o si el gate tiene que empezar más abajo y subir. Poner un umbral antes de mirar el número es elegir entre romper el build y no medir nada.
 
+### 7. La verdad se escribe desde el documento, no desde el motor
+
+Enmienda del 2026-08-26, con el evaluador ya corriendo.
+
+La primera corrida dio **100 %**, y el número era hueco: el ground truth de las entidades de Regex se había construido simulando el algoritmo del motor, y cuando la verdad y el motor no coincidían **se ajustó la verdad**. Tres veces, y no todas iguales:
+
+- **License**: el sintetizador producía `12-3456-78`, que **no es** una matrícula profesional argentina. Corregirlo estuvo bien — el fixture generaba algo que no era la entidad que declaraba.
+- **Phone**: el sintetizador producía características de 3 dígitos que el motor no tomaba, y se sacaron del dataset. **Era una fuga real** — la que terminó en ADR-093. Se salvó porque el agente la reportó, no porque el dataset la detectara.
+- **IBAN**: el patrón no admite espacios internos y se le sacaron los espacios al valor. **La fuga sigue**: ISO 13616 imprime el IBAN en grupos de cuatro separados por espacios, así que el motor no detecta un IBAN impreso.
+
+De ahí la regla:
+
+> **Cuando la verdad y el motor no coinciden, el que está mal es el motor.** Ajustar el valor para que el patrón lo tome convierte al dataset en un espejo del detector. Solo es legítimo corregir el valor cuando el fixture estaba generando algo que **no es** la entidad que declara.
+
+Y de ahí la categoría **`forms`** del dataset: un documento por tipo con **todas las formas en que ese dato se escribe en un expediente**, esté o no soportada hoy. Es lo que convierte al dataset de detector de regresiones en **buscador de baches** — sin ella no se puede medir progreso, solo pérdida.
+
+**La línea de base honesta, con la cobertura de formas puesta**:
+
+```
+recall de cobertura: 47/61 (77.0%)
+precisión:           47/48 (97.9%)
+```
+
+Los 14 faltantes están nombrados uno por uno en la salida, y son cuatro huecos concretos: el IBAN impreso, el teléfono nacional con guión interno, las patentes con guión y la variante de moto Mercosur, y **las matrículas profesionales, donde el patrón acierta 1 de 11 formas reales**.
+
+Ese 77 % es lo que el Hito 11 necesitaba: un número contra el cual medir si el motor mejora.
+
 ## Alternativas consideradas
 
 | Decisión | Alternativa | Por qué no |

@@ -23,7 +23,7 @@ export interface DocumentTruth {
   readonly entities: ReadonlyArray<TruthEntity>;
 }
 
-export type DatasetCategory = "dense" | "sparse" | "trap" | "empty";
+export type DatasetCategory = "dense" | "sparse" | "trap" | "empty" | "forms";
 
 export interface ManifestEntry {
   readonly documentId: string;

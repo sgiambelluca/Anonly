@@ -431,7 +431,7 @@ export async function generateStamp(): Promise<Uint8Array> {
 export type ReferenceDetector = "regex" | "ner";
 
 /** Categoría de densidad del documento (README, "Composición inicial"). */
-export type ReferenceCategory = "dense" | "sparse" | "trap" | "empty";
+export type ReferenceCategory = "dense" | "sparse" | "trap" | "empty" | "forms";
 
 export interface ReferenceTruthEntity {
   readonly entityType: EntityType;
@@ -1068,8 +1068,161 @@ function buildEmptyDocs(): ReadonlyArray<ReferenceDocSpec> {
  * `page.entities` declara — la mitad estática de la invariante de esta
  * sección.
  */
+/* ─── Cobertura de formas (categoría "forms") ─────────────────────────────
+ *
+ * Un documento por tipo de entidad, con **todas las formas en que ese dato
+ * aparece escrito en un expediente**, esté o no soportada hoy por el motor.
+ *
+ * Es la mitad del dataset que lo convierte de detector de regresiones en
+ * buscador de baches. Las otras categorías se construyeron mirando qué
+ * encuentra el motor, y por eso dan 100 %: un dataset así no puede mostrar
+ * progreso, solo pérdida. Estos documentos se construyen al revés — desde
+ * cómo se escribe el dato— y por eso **se espera que bajen el recall**.
+ *
+ * **La regla que los gobierna**: cuando la verdad y el motor no coinciden,
+ * el que está mal es el motor. Ajustar el valor para que el patrón lo tome
+ * convierte al dataset en un espejo del detector, que es exactamente lo que
+ * estos documentos vienen a evitar. Solo es legítimo corregir el valor
+ * cuando el fixture estaba generando algo que **no es** la entidad que
+ * declara — el caso de la matrícula `12-3456-78`, que no es una matrícula.
+ *
+ * **El `value` del truth es el identificador, no la etiqueta que lo
+ * precede.** "Matrícula Profesional 12345" declara `12345`: la palabra
+ * "Matrícula" no es un dato personal y taparla sería el mismo error de
+ * sobre-captura que ADR-092 tuvo que acotar en la carátula.
+ *
+ * Formas verificadas contra los patrones reales el 2026-08-26. Las que hoy
+ * NO se detectan van igual y a propósito.
+ */
+
+/** Teléfonos: la característica argentina va de 2 a 4 dígitos (ADR-093). */
+function formsPhone(): ReferenceDocSpec {
+  return {
+    documentId: "doc-021",
+    category: "forms",
+    pages: [
+      page((b) => {
+        b.text("Teléfonos declarados en el expediente:");
+        b.text("Buenos Aires").entity("+54 11 4567-8900", EntityType.Phone, "regex").text(";");
+        b.text("La Plata").entity("+54 221 456-7890", EntityType.Phone, "regex").text(";");
+        b.text("Rosario").entity("+54 341 456-7890", EntityType.Phone, "regex").text(";");
+        b.text("Santa Rosa").entity("+54 2954 12-3456", EntityType.Phone, "regex").text(";");
+        b.text("móvil").entity("+54 9 11 4567-8901", EntityType.Phone, "regex").text(";");
+        b.text("nacional").entity("011 4567-8902", EntityType.Phone, "regex").text(";");
+        b.text("sin país").entity("11 4567 8903", EntityType.Phone, "regex").text(".");
+      }),
+    ],
+  };
+}
+
+/**
+ * IBAN: ISO 13616 recomienda imprimirlo en grupos de cuatro separados por
+ * espacios, que es como aparece en un documento — y la forma que el patrón
+ * actual NO toma.
+ */
+function formsIban(): ReferenceDocSpec {
+  return {
+    documentId: "doc-022",
+    category: "forms",
+    pages: [
+      page((b) => {
+        b.text("Datos bancarios. Cuenta");
+        b.entity("ES05 7068 9876 9644 6251 9569", EntityType.IBAN, "regex").text(",");
+        b.text("cuenta secundaria");
+        b.entity("ES9121000418450200051332", EntityType.IBAN, "regex").text(".");
+      }),
+    ],
+  };
+}
+
+/**
+ * Patentes: vieja (3+3), Mercosur auto (2+3+2) y Mercosur moto
+ * (1 letra + 3 dígitos + 3 letras), cada una pegada, con espacios y con
+ * guiones — el guión no está en la chapa, está en cómo se transcribe.
+ */
+function formsPlate(): ReferenceDocSpec {
+  return {
+    documentId: "doc-023",
+    category: "forms",
+    pages: [
+      page((b) => {
+        b.text("Vehículos intervinientes. Dominio");
+        b.entity("ABC 123", EntityType.Plate, "regex").text(",");
+        b.entity("ABC-123", EntityType.Plate, "regex").text(",");
+        b.entity("AB 123 CD", EntityType.Plate, "regex").text(",");
+        b.entity("AB-123-CD", EntityType.Plate, "regex").text(".");
+        b.text("Motovehículo dominio");
+        b.entity("A 123 BCD", EntityType.Plate, "regex").text("y");
+        b.entity("A456EFG", EntityType.Plate, "regex").text(".");
+      }),
+    ],
+  };
+}
+
+/**
+ * Matrículas profesionales. `MN` es Matrícula Nacional y `MP` Provincial;
+ * el punto como separador de miles es tipografía argentina normal.
+ *
+ * **Quedan afuera a propósito** dos formas que el humano aportó y que no se
+ * pudieron confirmar contra un documento real: `MPBA 5563` y
+ * `M. Prov. 1601`. Meterlas sin confirmar haría que la métrica diga que el
+ * motor falla en algo que quizá no existe — y el valor de este dataset es
+ * que el número sea confiable. Se agregan el día que aparezca el documento.
+ */
+function formsLicense(): ReferenceDocSpec {
+  return {
+    documentId: "doc-024",
+    category: "forms",
+    pages: [
+      page((b) => {
+        b.text("Profesionales actuantes.");
+        b.text("Perito médico").entity("MN 12345", EntityType.License, "regex").text(";");
+        b.text("perito de parte").entity("MP 23456", EntityType.License, "regex").text(";");
+        b.text("consultor").entity("MN 45.318", EntityType.License, "regex").text(";");
+        b.text("auxiliar").entity("MP 9.328", EntityType.License, "regex").text(";");
+        b.text("traductora").entity("M.P. 34567", EntityType.License, "regex").text(";");
+        b.text("calígrafo").entity("M.N. 56789", EntityType.License, "regex").text(".");
+      }),
+      // El número pelado tras la etiqueta va en su propia página: el `value`
+      // es el identificador y no la etiqueta, así que conviene que ningún
+      // otro valor de la página lo contenga por casualidad.
+      page((b) => {
+        b.text("Matrícula Profesional").entity("40097", EntityType.License, "regex").text(".");
+        b.text("Matrícula profesional:").entity("MP 61852", EntityType.License, "regex").text(".");
+      }),
+    ],
+  };
+}
+
+/** DNI y fechas: con y sin separadores, y la fecha escrita en texto (ADR-075 §1). */
+function formsDniAndDate(): ReferenceDocSpec {
+  return {
+    documentId: "doc-025",
+    category: "forms",
+    pages: [
+      page((b) => {
+        b.text("Documento").entity("34.567.891", EntityType.DNI, "regex").text(",");
+        b.text("documento").entity("18445212", EntityType.DNI, "regex").text(".");
+        b.text("Fecha de la pericia").entity("07/07/2026", EntityType.Date, "regex").text(",");
+        b.text("ratificada el").entity("8-7-2026", EntityType.Date, "regex").text(",");
+        b.text("y notificada el").entity("09 de julio de 2026", EntityType.Date, "regex").text(".");
+      }),
+    ],
+  };
+}
+
+function buildFormCoverageDocs(): ReadonlyArray<ReferenceDocSpec> {
+  return [formsPhone(), formsIban(), formsPlate(), formsLicense(), formsDniAndDate()];
+}
+
 export function buildReferenceDocSpecs(): ReadonlyArray<ReferenceDocSpec> {
-  return [...buildDenseDocs(), ...buildSparseDocs(), ...buildTrapDocs(), ...buildEmptyDocs()];
+  return [
+    ...buildDenseDocs(),
+    ...buildSparseDocs(),
+    ...buildTrapDocs(),
+    ...buildEmptyDocs(),
+    ...buildFormCoverageDocs(),
+  ];
 }
 
 /**

@@ -17,6 +17,12 @@ export interface DocumentEvaluation {
   readonly detectionCount: number;
   readonly falsePositiveCount: number;
   readonly suggestionCount: number;
+  /**
+   * Los valores esperados de Regex que NINGUNA detección cubrió. Es la parte
+   * accionable del reporte: "4 sin cubrir" manda a buscar, "estas cuatro
+   * formas" manda a un patrón concreto.
+   */
+  readonly missedValues: ReadonlyArray<string>;
 }
 
 /**
@@ -50,6 +56,10 @@ export function evaluateDocument(
     isFalsePositive(detection, truth.entities),
   ).length;
 
+  const missedValues = regexTruth
+    .filter((entity) => !isCovered(entity, detections))
+    .map((entity) => `${entity.entityType} ${JSON.stringify(entity.value)}`);
+
   return {
     documentId: truth.documentId,
     regexTruthCount: regexTruth.length,
@@ -59,6 +69,7 @@ export function evaluateDocument(
     detectionCount: detections.length,
     falsePositiveCount,
     suggestionCount,
+    missedValues,
   };
 }
 

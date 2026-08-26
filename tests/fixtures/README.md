@@ -218,6 +218,22 @@ Se armó un simulador fiel del algoritmo real de `regex-engine/regex.engine.ts` 
 
 Un cuarto hallazgo, sin acción tomada porque **el dataset ya lo captura a propósito**: `doc-016` (trampa, CUIT con checksum inválido) reproduce el falso positivo ya anotado en "Contenido conocido de `text-10p.pdf`" (`scenario-8-ner-disabled.spec.ts`) — cuando un CUIT con forma "XX-XXXXXXXX-X" falla su checksum, el motor real **sí** emite una ocurrencia `Phone` espuria sobre sus primeros 10 dígitos (`"20-12345678"`), porque el filtro de checksum corre **antes** que la resolución de overlaps (`regex.engine.ts` líneas ~736-743) y para cuando el overlap se resuelve el CUIT ya no está para ganarle por ser el match más largo. El `truth.json` de `doc-016` sigue declarando cero entidades (es la verdad semántica: no hay ningún teléfono ahí) — la brecha entre eso y lo que el motor real emite es precisamente el defecto que este documento existe para medir, no un error del dataset.
 
+### La regla que mantiene honesto al dataset
+
+> **Cuando la verdad y el motor no coinciden, el que está mal es el motor.**
+
+Ajustar el valor esperado para que el patrón lo tome convierte al dataset en un **espejo del detector**: mide 100 % siempre, detecta regresiones y **no puede mostrar progreso**. Solo es legítimo corregir el valor cuando el fixture estaba generando algo que **no es** la entidad que declara — el caso de una matrícula `12-3456-78`, que no tiene el formato de ninguna matrícula argentina.
+
+Un desacuerdo es un **hallazgo**, no un fixture a corregir. Pasó tres veces al construir este dataset, y una de ellas —los teléfonos con característica de 3 dígitos— era una fuga real que terminó en ADR-093.
+
+### Categoría `forms`: las formas en que un dato se escribe
+
+Un documento por tipo de entidad con **todas las formas en que ese dato aparece en un expediente**, esté o no soportada hoy por el motor. Es la mitad del dataset que busca baches en vez de vigilar regresiones.
+
+Con esta categoría el recall de Regex baja de 100 % a **77 %**, y eso es el objetivo: los 14 faltantes son huecos reales del motor, no ruido del dataset.
+
+**Dos formas quedaron afuera a propósito**, aportadas pero sin confirmar contra un documento real: `MPBA 5563` y `M. Prov. 1601`. Meterlas sin confirmar haría que la métrica diga que el motor falla en algo que quizá no existe. Se agregan el día que aparezca el documento.
+
 ### Cuándo se necesita
 
 | Hito | Uso |

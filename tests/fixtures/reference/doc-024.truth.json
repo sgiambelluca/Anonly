@@ -1,0 +1,53 @@
+{
+  "documentId": "doc-024",
+  "entities": [
+    {
+      "entityType": "LICENSE",
+      "value": "MN 12345",
+      "pageIndex": 0,
+      "detector": "regex"
+    },
+    {
+      "entityType": "LICENSE",
+      "value": "MP 23456",
+      "pageIndex": 0,
+      "detector": "regex"
+    },
+    {
+      "entityType": "LICENSE",
+      "value": "MN 45.318",
+      "pageIndex": 0,
+      "detector": "regex"
+    },
+    {
+      "entityType": "LICENSE",
+      "value": "MP 9.328",
+      "pageIndex": 0,
+      "detector": "regex"
+    },
+    {
+      "entityType": "LICENSE",
+      "value": "M.P. 34567",
+      "pageIndex": 0,
+      "detector": "regex"
+    },
+    {
+      "entityType": "LICENSE",
+      "value": "M.N. 56789",
+      "pageIndex": 0,
+      "detector": "regex"
+    },
+    {
+      "entityType": "LICENSE",
+      "value": "40097",
+      "pageIndex": 1,
+      "detector": "regex"
+    },
+    {
+      "entityType": "LICENSE",
+      "value": "MP 61852",
+      "pageIndex": 1,
+      "detector": "regex"
+    }
+  ]
+}

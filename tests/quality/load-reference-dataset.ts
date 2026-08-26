@@ -31,7 +31,7 @@ import type {
 const REFERENCE_DIR = fileURLToPath(new URL("../fixtures/reference/", import.meta.url));
 
 const ENTITY_TYPE_VALUES = new Set<string>(Object.values(EntityType));
-const CATEGORY_VALUES = new Set<string>(["dense", "sparse", "trap", "empty"]);
+const CATEGORY_VALUES = new Set<string>(["dense", "sparse", "trap", "empty", "forms"]);
 const DETECTOR_VALUES = new Set<string>(["regex", "ner"]);
 
 function fail(filePath: string, reason: string): never {

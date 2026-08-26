@@ -139,6 +139,41 @@
       "truth": "doc-020.truth.json",
       "category": "empty",
       "entityCount": 0
+    },
+    {
+      "documentId": "doc-021",
+      "pdf": "doc-021.pdf",
+      "truth": "doc-021.truth.json",
+      "category": "forms",
+      "entityCount": 7
+    },
+    {
+      "documentId": "doc-022",
+      "pdf": "doc-022.pdf",
+      "truth": "doc-022.truth.json",
+      "category": "forms",
+      "entityCount": 2
+    },
+    {
+      "documentId": "doc-023",
+      "pdf": "doc-023.pdf",
+      "truth": "doc-023.truth.json",
+      "category": "forms",
+      "entityCount": 6
+    },
+    {
+      "documentId": "doc-024",
+      "pdf": "doc-024.pdf",
+      "truth": "doc-024.truth.json",
+      "category": "forms",
+      "entityCount": 8
+    },
+    {
+      "documentId": "doc-025",
+      "pdf": "doc-025.pdf",
+      "truth": "doc-025.truth.json",
+      "category": "forms",
+      "entityCount": 5
     }
   ]
 }

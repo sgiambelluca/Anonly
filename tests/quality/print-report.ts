@@ -29,9 +29,10 @@ function formatOffenders(report: EvaluationReport): ReadonlyArray<string> {
     (doc) => doc.regexCoveredCount < doc.regexTruthCount,
   );
   if (conFaltantes.length > 0) {
-    lines.push("", "Documentos con entidades de Regex sin cubrir:");
+    lines.push("", "Entidades de Regex sin cubrir:");
     for (const doc of conFaltantes) {
-      lines.push(`  ${doc.documentId}: ${doc.regexTruthCount - doc.regexCoveredCount} sin cubrir`);
+      lines.push(`  ${doc.documentId}:`);
+      for (const missed of doc.missedValues) lines.push(`    ${missed}`);
     }
   }
 
