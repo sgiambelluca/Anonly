@@ -72,7 +72,10 @@ No es una pérdida para lo que hoy se necesita: `MVP.md` §5 ya define el recall
 
 ### 6. Es una suite propia, y no corre con `pnpm test`
 
-Vive en `tests/quality/`, con su script (`pnpm test:quality`). No entra en el subset pre-PR: rasterizar y detectar sobre 20 documentos es más lento que el resto de la suite junta, y el gate de calidad no tiene por qué encarecer el bucle de cada cambio.
+Vive en `tests/quality/`, y se parte en dos por una razón que conviene decir:
+
+- **La corrida sobre los 20 documentos es un script** (`pnpm test:quality`, `main.ts`), no un test de vitest. Rasterizar y detectar sobre 20 PDFs es más lento que el resto de la suite junta, y el gate de calidad no tiene por qué encarecer el bucle de cada cambio.
+- **La regla de matcheo sí es un test** (`matching.test.ts`) y **sí corre con `pnpm test`**. Es lo que hay que proteger de una regresión: la regla **es** la métrica, y un cambio silencioso ahí hace que todos los números futuros mientan. Cuesta milisegundos.
 
 **Los umbrales del gate no se activan en esta entrega.** El evaluador primero tiene que reportar los números reales; recién con esos números a la vista se decide si el 90 % de `00_Project_Vision.md` §7 es alcanzable hoy o si el gate tiene que empezar más abajo y subir. Poner un umbral antes de mirar el número es elegir entre romper el build y no medir nada.
 
@@ -100,6 +103,7 @@ Vive en `tests/quality/`, con su script (`pnpm test:quality`). No entra en el su
 - **No mide NER** (§5), que es la mitad que más se movió en esta campaña (ADR-088). Hasta que el modelo pueda correr en la suite, los cambios de NER se siguen validando caso por caso.
 - Los 20 documentos son **sintéticos**. Miden regresiones y comparan alternativas entre sí; no dicen cómo se comporta sobre un expediente real. La advertencia ya está en `tests/fixtures/README.md` y este ADR no la levanta.
 - Un dataset de 47 entidades tiene grano grueso: cada entidad vale más de dos puntos de recall. Sirve para detectar que algo se rompió, no para distinguir 91 % de 93 %.
+- **El recall de Regex da 100 % y eso significa menos de lo que parece.** El ground truth de las entidades de Regex se construyó simulando el algoritmo real del motor para validarlo (ver `tests/fixtures/README.md`, "Hallazgos"), así que el dataset está en parte **ajustado a lo que el motor ya encuentra**. Ese 100 % dice sobre todo que el arnés funciona de punta a punta; su valor real es como **detector de regresiones** —si mañana un patrón se rompe, cae— y no como medida de qué tan bueno es el detector. Medir eso último pide entidades que nadie eligió pensando en el motor.
 - El número que produzca puede ser incómodo. Es el punto.
 
 ## Validación
