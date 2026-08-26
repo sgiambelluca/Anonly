@@ -17,7 +17,9 @@ import {
   createEngineContext,
   createMockConfig,
   createResolvedOcrPool,
+  createImageData,
   createValidOcrPageInput,
+  mockDetectData,
   mockEmptyRecognizeData,
   mockRecognizeData,
   mockTesseractWorker,
@@ -476,8 +478,9 @@ describe("OcrEngine — unit tests", () => {
       );
 
       expect(output).toBeDefined();
+      // ADR-090 §1: `osd` se carga siempre junto a los idiomas de la config.
       expect(vi.mocked(createWorker)).toHaveBeenCalledWith(
-        ["spa", "eng"],
+        ["spa", "eng", "osd"],
         undefined,
         expect.anything(),
       );
@@ -646,6 +649,109 @@ describe("OcrEngine — unit tests", () => {
       expect(output.confidence).toBe(0.42);
 
       await pooledEngine.dispose();
+    });
+  });
+
+  // ─── ADR-090: orientación del escaneo ───
+
+  describe("orientación del escaneo (ADR-090 §2/§3/§4)", () => {
+    /** Una palabra sola, para poder seguir su caja a través de la rotación. */
+    const UNA_PALABRA = [
+      { text: "Perez", confidence: 90, bbox: { x0: 10, y0: 20, x1: 50, y1: 40 } },
+    ];
+
+    /** Raster de 100 × 40, el mismo que arma `createValidOcrPageInput`. */
+    function inputConRaster(documentId: string): ReturnType<typeof createValidOcrPageInput> {
+      return { ...createValidOcrPageInput(documentId, 0), imageData: createImageData(100, 40) };
+    }
+
+    it("tells Tesseract the dpi instead of letting it estimate, and only when it changes", async () => {
+      const setParameters = vi.fn(() => Promise.resolve());
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(UNA_PALABRA), { setParameters }),
+      );
+
+      await engine.init(ctx);
+      await engine.processPage(inputConRaster("doc-dpi-1"), ctx);
+      await engine.processPage(inputConRaster("doc-dpi-2"), ctx);
+
+      // El dpi de `createMockConfig` no cambia entre páginas: una sola llamada.
+      expect(setParameters).toHaveBeenCalledTimes(1);
+      expect(setParameters).toHaveBeenCalledWith({
+        user_defined_dpi: String(ctx.config.ocr.dpi),
+      });
+    });
+
+    it("does not rotate anything when the page is upright (no regression)", async () => {
+      const recognize = vi.fn(() =>
+        Promise.resolve({ jobId: "j", data: mockRecognizeData(UNA_PALABRA) }),
+      );
+      const detect = vi.fn(() => Promise.resolve(mockDetectData(0)));
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(UNA_PALABRA), { recognize, detect }),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.processPage(inputConRaster("doc-derecha"), ctx);
+
+      expect(detect).toHaveBeenCalledTimes(1);
+      // Sin `rotation`: ausente ≡ 0 (`Contracts.md` §5), así que un escaneo
+      // derecho produce exactamente lo de antes del ADR.
+      expect(output.words[0]?.bbox.rotation).toBeUndefined();
+      const factor = 72 / ctx.config.ocr.dpi;
+      expect(output.words[0]?.bbox.x).toBeCloseTo(10 * factor, 6);
+      expect(output.words[0]?.bbox.y).toBeCloseTo(20 * factor, 6);
+    });
+
+    it("recognizes the uprighted raster and brings the boxes back, with rotation", async () => {
+      // El raster original es 100 × 40. Con orientación 90 se endereza a
+      // 40 × 100, así que la caja que reporta Tesseract vive EN ESE espacio y
+      // tiene que caber ahí: (5, 20) de 20 × 40. La inversa la devuelve al
+      // espacio original — x = y₀', y = H − (x₀' + ancho') — con el ancho y el
+      // alto intercambiados.
+      const detect = vi.fn(() => Promise.resolve(mockDetectData(90)));
+      const enderezada = [
+        { text: "Perez", confidence: 90, bbox: { x0: 5, y0: 20, x1: 25, y1: 60 } },
+      ];
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(enderezada), { detect }),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.processPage(inputConRaster("doc-rotada"), ctx);
+
+      const factor = 72 / ctx.config.ocr.dpi;
+      const word = output.words[0];
+      expect(word?.bbox.rotation).toBe(90);
+      expect(word?.bbox.x).toBeCloseTo(20 * factor, 6); // y₀'
+      expect(word?.bbox.y).toBeCloseTo((40 - (5 + 20)) * factor, 6); // H − (x₀' + ancho')
+      expect(word?.bbox.width).toBeCloseTo(40 * factor, 6); // el alto', intercambiado
+      expect(word?.bbox.height).toBeCloseTo(20 * factor, 6); // el ancho', intercambiado
+      // La caja cae DENTRO de la página, que es lo que un mapeo mal hecho
+      // rompe primero.
+      expect(word?.bbox.x).toBeGreaterThanOrEqual(0);
+      expect(word?.bbox.y).toBeGreaterThanOrEqual(0);
+    });
+
+    it("falls back to the pre-ADR path when detect fails, returns null or is unsure", async () => {
+      const casos: ReadonlyArray<ReturnType<typeof vi.fn>> = [
+        vi.fn(() => Promise.reject(new Error("osd no cargó"))),
+        vi.fn(() => Promise.resolve(mockDetectData(null))),
+        vi.fn(() => Promise.resolve(mockDetectData(90, 0.2))), // debajo del piso
+      ];
+
+      for (const detect of casos) {
+        vi.mocked(createWorker).mockResolvedValue(
+          mockTesseractWorker(mockRecognizeData(UNA_PALABRA), { detect }),
+        );
+        const engineLocal = new OcrEngine();
+        await engineLocal.init(ctx);
+        const output = await engineLocal.processPage(inputConRaster("doc-osd-falla"), ctx);
+        await engineLocal.dispose();
+
+        expect(output.words[0]?.bbox.rotation).toBeUndefined();
+        expect(output.words[0]?.bbox.x).toBeCloseTo((10 * 72) / ctx.config.ocr.dpi, 6);
+      }
     });
   });
 });

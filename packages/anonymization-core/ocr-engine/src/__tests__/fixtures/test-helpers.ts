@@ -100,13 +100,41 @@ export function mockTesseractWorker(
   overrides?: {
     readonly recognize?: ReturnType<typeof vi.fn>;
     readonly terminate?: ReturnType<typeof vi.fn>;
+    /** ADR-090 §3: OSD. Sin override, reporta página derecha. */
+    readonly detect?: ReturnType<typeof vi.fn>;
+    /** ADR-090 §2: `user_defined_dpi`. */
+    readonly setParameters?: ReturnType<typeof vi.fn>;
   },
 ): TesseractWorker {
   const recognize =
     overrides?.recognize ??
     vi.fn(() => Promise.resolve({ jobId: "mock-job", data: recognizeData }));
   const terminate = overrides?.terminate ?? vi.fn(() => Promise.resolve());
-  return asTesseractWorker({ recognize, terminate });
+  const detect = overrides?.detect ?? vi.fn(() => Promise.resolve(mockDetectData(0)));
+  const setParameters = overrides?.setParameters ?? vi.fn(() => Promise.resolve());
+  return asTesseractWorker({ recognize, terminate, detect, setParameters });
+}
+
+/**
+ * Forma que devuelve `worker.detect()` (ADR-090 §3). `orientation_degrees` es
+ * la rotación HORARIA que hay que aplicarle al raster para enderezarlo;
+ * `orientation_confidence` en la escala propia de Tesseract, que no es 0-100
+ * — medido, una A4 con texto denso da ~17.
+ */
+export function mockDetectData(
+  orientationDegrees: number | null,
+  orientationConfidence = 17,
+): { readonly jobId: string; readonly data: Record<string, unknown> } {
+  return {
+    jobId: "mock-detect-job",
+    data: {
+      tesseract_script_id: 1,
+      script: "Latin",
+      script_confidence: 20,
+      orientation_degrees: orientationDegrees,
+      orientation_confidence: orientationConfidence,
+    },
+  };
 }
 
 export function createMockBus(): IEventBus {

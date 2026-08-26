@@ -285,7 +285,12 @@ describe("OcrWorker entry-point — kernel puro (ADR-045 §3)", () => {
     });
     await vi.waitFor(() => expect(outboundOfType(fakeSelf, "COMPLETED")).toBeDefined());
     expect(createWorker).toHaveBeenCalledTimes(1);
-    expect(createWorker).toHaveBeenNthCalledWith(1, ["spa", "eng"], undefined, expect.anything());
+    expect(createWorker).toHaveBeenNthCalledWith(
+      1,
+      ["spa", "eng", "osd"],
+      undefined,
+      expect.anything(),
+    );
 
     fakeSelf.postMessage.mockClear();
 
@@ -300,7 +305,7 @@ describe("OcrWorker entry-point — kernel puro (ADR-045 §3)", () => {
     await vi.waitFor(() => expect(outboundOfType(fakeSelf, "COMPLETED")).toBeDefined());
     expect(terminateA).toHaveBeenCalledTimes(1);
     expect(createWorker).toHaveBeenCalledTimes(2);
-    expect(createWorker).toHaveBeenNthCalledWith(2, ["fra"], undefined, expect.anything());
+    expect(createWorker).toHaveBeenNthCalledWith(2, ["fra", "osd"], undefined, expect.anything());
 
     fakeSelf.postMessage.mockClear();
 
@@ -343,12 +348,14 @@ describe("OcrWorker entry-point — kernel puro (ADR-045 §3)", () => {
 
     await vi.waitFor(() => expect(outboundOfType(fakeSelf, "COMPLETED")).toBeDefined());
     expect(createWorker).toHaveBeenCalledWith(
-      ["spa", "eng"],
+      ["spa", "eng", "osd"],
       undefined,
       expect.objectContaining({
         langPath: "/models/tesseract/",
         corePath: "/wasm/tesseract/",
         workerPath: "/wasm/tesseract/worker.min.js",
+        // ADR-090 §1: sin el core completo, `worker.detect()` lanza.
+        legacyCore: true,
       }),
     );
   });
@@ -380,7 +387,7 @@ describe("OcrWorker entry-point — kernel puro (ADR-045 §3)", () => {
 
     await vi.waitFor(() => expect(outboundOfType(fakeSelf, "COMPLETED")).toBeDefined());
     expect(createWorker).toHaveBeenCalledWith(
-      ["spa", "eng"],
+      ["spa", "eng", "osd"],
       undefined,
       expect.objectContaining({
         langPath: "http://localhost:5173/models/tesseract/",

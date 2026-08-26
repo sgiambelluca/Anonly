@@ -103,9 +103,23 @@ function resolveTesseractPath(path: string): string {
   return new URL(path, origin).href;
 }
 
+/** ADR-090 §1: el modelo de orientación, cargado siempre junto a los idiomas. */
+const OSD_LANGUAGE = "osd";
+
+/*
+ * ADR-090 §3: piso de `orientation_confidence` para hacerle caso a OSD. La
+ * escala de Tesseract no es 0-100 y no tiene un máximo definido; medido sobre
+ * una A4 a 300 DPI con texto denso da 17,1 (derecha) y 17,6 (rotada 90°), un
+ * orden de magnitud sobre este piso. Debajo del piso —o si `detect` falla, o
+ * devuelve `null`— no se rota nada y el camino es el de antes del ADR.
+ */
+const MIN_ORIENTATION_CONFIDENCE = 1;
+
 /** Instancia de tesseract cargada, y el set de idiomas con el que se cargó. */
 let worker: TesseractWorker | null = null;
 let loadedLanguages: ReadonlySet<string> = new Set();
+/** ADR-090 §2: último `user_defined_dpi` aplicado a la instancia vigente. */
+let appliedDpi: number | null = null;
 
 function languagesMatch(loaded: ReadonlySet<string>, requested: ReadonlyArray<string>): boolean {
   if (loaded.size !== requested.length) return false;
@@ -133,10 +147,17 @@ async function ensureWorkerLoaded(languages: ReadonlyArray<string>): Promise<voi
 
   let nextWorker: TesseractWorker;
   try {
-    nextWorker = await createWorker([...languages], undefined, {
+    // ADR-090 §1: `osd` va junto a los idiomas de la config y el core es el
+    // COMPLETO (`legacyCore: true`). `worker.detect()` está guardado por
+    // `if (lstmOnlyCore) throw` en tesseract.js: OSD es un modelo legacy, así
+    // que agregar `osd.traineddata` sin cambiar el core no alcanza. El
+    // reconocimiento sigue siendo LSTM; el core completo solo trae además el
+    // código legacy que OSD necesita.
+    nextWorker = await createWorker([...languages, OSD_LANGUAGE], undefined, {
       langPath: resolveTesseractPath(TESSERACT_LANG_PATH),
       corePath: resolveTesseractPath(TESSERACT_CORE_PATH),
       workerPath: resolveTesseractPath(TESSERACT_WORKER_PATH),
+      legacyCore: true,
     });
   } catch (err: unknown) {
     const reason = err instanceof Error ? err.message : String(err);
@@ -144,7 +165,10 @@ async function ensureWorkerLoaded(languages: ReadonlyArray<string>): Promise<voi
   }
 
   worker = nextWorker;
+  // `osd` NO entra acá: `loadedLanguages` es el set que pidió la config, y es
+  // contra ese set que se decide si hay que recrear el worker (ADR-090 §1).
   loadedLanguages = new Set(languages);
+  appliedDpi = null;
 }
 
 /*
@@ -177,6 +201,152 @@ function toTesseractImage(
 function clampConfidence(value: number): number {
   if (Number.isNaN(value)) return 0;
   return Math.max(0, Math.min(1, value));
+}
+
+/*
+ * ADR-090 §2: el raster se arma a `dpi` (el Orchestrator usa `scale = dpi/72`),
+ * así que la resolución se sabe y hasta ahora no se le decía a Tesseract, que
+ * la estimaba de la imagen. Se aplica cuando cambia respecto de la instancia
+ * vigente: el worker vive entre páginas y el dpi viaja por payload.
+ * Best-effort — un `setParameters` que rechaza no debe voltear la página.
+ */
+async function ensureDpiApplied(dpi: number): Promise<void> {
+  if (worker === null || appliedDpi === dpi) return;
+  try {
+    await worker.setParameters({ user_defined_dpi: String(dpi) });
+    appliedDpi = dpi;
+  } catch {
+    // best-effort: seguir reconociendo con la estimación de Tesseract.
+  }
+}
+
+// ─── Orientación del escaneo (ADR-090 §3/§4) ───────────────────────────────
+
+/**
+ * Rotación **horaria** que hay que aplicarle al raster para enderezarlo — la
+ * misma convención con la que `worker.detect()` reporta
+ * `orientation_degrees`, y el mismo valor que después va a `bbox.rotation`
+ * (ADR-090 §4: la correspondencia es la identidad).
+ */
+export type Rotation = 0 | 90 | 180 | 270;
+
+function isRotation(value: unknown): value is Rotation {
+  return value === 0 || value === 90 || value === 180 || value === 270;
+}
+
+/*
+ * Rota `source` en HORARIO por `degrees`, por aritmética de píxeles: no hace
+ * falta un canvas, y así la función es pura y testeable en el entorno `node`
+ * de Vitest (`ImageData` es una interfaz estructural, ver
+ * `__tests__/fixtures/test-helpers.ts`). En 90/270 las dimensiones se
+ * intercambian.
+ *
+ * El destino se recorre en orden y la fuente se lee salteada — no al revés —
+ * para escribir secuencialmente sobre el array de salida, que es el que se
+ * aloca de cero.
+ */
+export function rotateImageData(source: ImageData, degrees: Rotation): ImageData {
+  if (degrees === 0) return source;
+
+  const { width: w, height: h, data } = source;
+  const swap = degrees === 90 || degrees === 270;
+  const outWidth = swap ? h : w;
+  const outHeight = swap ? w : h;
+  const out = new Uint8ClampedArray(outWidth * outHeight * 4);
+
+  for (let y = 0; y < outHeight; y++) {
+    for (let x = 0; x < outWidth; x++) {
+      // Inversa de la rotación horaria: dónde estaba en el original el píxel
+      // que ahora va en (x, y).
+      let sx: number;
+      let sy: number;
+      if (degrees === 90) {
+        sx = y;
+        sy = h - 1 - x;
+      } else if (degrees === 180) {
+        sx = w - 1 - x;
+        sy = h - 1 - y;
+      } else {
+        sx = w - 1 - y;
+        sy = x;
+      }
+      const from = (sy * w + sx) * 4;
+      const to = (y * outWidth + x) * 4;
+      out[to] = data[from] ?? 0;
+      out[to + 1] = data[from + 1] ?? 0;
+      out[to + 2] = data[from + 2] ?? 0;
+      out[to + 3] = data[from + 3] ?? 0;
+    }
+  }
+
+  return { data: out, width: outWidth, height: outHeight, colorSpace: source.colorSpace };
+}
+
+/*
+ * Lleva una caja del espacio ENDEREZADO (donde reconoció Tesseract) de vuelta
+ * al espacio del raster ORIGINAL. `sourceWidth`/`sourceHeight` son los del
+ * raster original; `degrees` es la rotación horaria que se le aplicó.
+ * Es la inversa exacta de `rotateImageData`, con el ancho y el alto de la caja
+ * intercambiados en 90/270.
+ */
+export function unrotateBbox(
+  bbox: BoundingBox,
+  degrees: Rotation,
+  sourceWidth: number,
+  sourceHeight: number,
+): BoundingBox {
+  if (degrees === 0) return bbox;
+  if (degrees === 90) {
+    return {
+      x: bbox.y,
+      y: sourceHeight - (bbox.x + bbox.width),
+      width: bbox.height,
+      height: bbox.width,
+    };
+  }
+  if (degrees === 180) {
+    return {
+      x: sourceWidth - (bbox.x + bbox.width),
+      y: sourceHeight - (bbox.y + bbox.height),
+      width: bbox.width,
+      height: bbox.height,
+    };
+  }
+  return {
+    x: sourceWidth - (bbox.y + bbox.height),
+    y: bbox.x,
+    width: bbox.height,
+    height: bbox.width,
+  };
+}
+
+interface DetectOrientationResult {
+  readonly orientation_degrees?: number | null;
+  readonly orientation_confidence?: number | null;
+}
+
+function readOrientation(data: unknown): Rotation {
+  if (typeof data !== "object" || data === null) return 0;
+  const { orientation_degrees: degrees, orientation_confidence: confidence } =
+    data as DetectOrientationResult;
+  if (typeof confidence !== "number" || confidence < MIN_ORIENTATION_CONFIDENCE) return 0;
+  return isRotation(degrees) ? degrees : 0;
+}
+
+/*
+ * ADR-090 §3, paso 1-2. Cualquier falla de `detect` —que el modelo `osd` no
+ * esté, que `DetectOS` no concluya, que la página tenga muy poco texto— cae a
+ * `0`, que es exactamente el comportamiento previo al ADR. El kernel no tiene
+ * logger (ADR-045 §2), así que la degradación es silenciosa por construcción.
+ */
+async function detectOrientation(image: OffscreenCanvas): Promise<Rotation> {
+  if (worker === null) return 0;
+  try {
+    const { data } = await worker.detect(image);
+    return readOrientation(data);
+  } catch {
+    return 0;
+  }
 }
 
 /*
@@ -298,7 +468,14 @@ function toPagePoints(bbox: BoundingBox, dpi: number): BoundingBox {
  * comportamiento como efecto colateral de un cambio de unidades. El map
  * preserva el orden, así que el array queda idéntico al de antes del ADR.
  */
-function toWords(data: unknown, pageIndex: number, dpi: number): Word[] {
+function toWords(
+  data: unknown,
+  pageIndex: number,
+  dpi: number,
+  orientation: Rotation,
+  sourceWidth: number,
+  sourceHeight: number,
+): Word[] {
   const tesseractWords = extractTesseractWords(data);
   const words: Word[] = tesseractWords.map((w) => ({
     text: w.text.normalize("NFC"),
@@ -312,11 +489,24 @@ function toWords(data: unknown, pageIndex: number, dpi: number): Word[] {
     confidence: clampConfidence(w.confidence / 100),
     source: "ocr" as const,
   }));
-  return sortWordsByReadingOrder(words).map((w) => ({ ...w, bbox: toPagePoints(w.bbox, dpi) }));
+
+  /*
+   * ADR-090 §3: el orden se calcula sobre el espacio ENDEREZADO, que es el
+   * único donde "arriba-abajo, izquierda-derecha" significa el sentido de
+   * lectura; recién después las cajas vuelven al espacio del raster original
+   * y se convierten a puntos. Con `orientation === 0` las dos operaciones son
+   * la identidad y el resultado es idéntico al previo al ADR.
+   */
+  return sortWordsByReadingOrder(words).map((w) => {
+    const bbox = toPagePoints(unrotateBbox(w.bbox, orientation, sourceWidth, sourceHeight), dpi);
+    // ADR-090 §4: `orientation_degrees` y `bbox.rotation` coinciden. Ausente
+    // ≡ 0 (`Contracts.md` §5), así que un escaneo derecho no gana el campo.
+    return { ...w, bbox: orientation === 0 ? bbox : { ...bbox, rotation: orientation } };
+  });
 }
 
 async function recognizeWithTimeout(
-  imageData: ImageData,
+  image: OffscreenCanvas,
   documentId: string,
   pageIndex: number,
   timeoutMs: number,
@@ -351,11 +541,7 @@ async function recognizeWithTimeout(
     // es este Promise.race contra el AbortSignal — la computación WASM en
     // curso no se interrumpe, el caller simplemente deja de esperarla.
     const result = await Promise.race([
-      activeWorker.recognize(
-        toTesseractImage(imageData, documentId, pageIndex),
-        {},
-        { blocks: true },
-      ),
+      activeWorker.recognize(image, {}, { blocks: true }),
       timeoutPromise,
       abortPromise,
     ]);
@@ -392,17 +578,26 @@ export async function kernelRecognize(
   if (opts.abortSignal.aborted) throw new CancelledError(documentId);
 
   await ensureWorkerLoaded(languages);
+  await ensureDpiApplied(dpi);
 
   if (opts.abortSignal.aborted) throw new CancelledError(documentId);
 
+  // ADR-090 §3: detectar antes de reconocer. Con orientación 0 —el 99 % de las
+  // páginas, y también cualquier falla de `detect`— `rotateImageData` devuelve
+  // el mismo objeto y de acá para abajo el camino es el previo al ADR.
+  const orientation = await detectOrientation(toTesseractImage(imageData, documentId, pageIndex));
+
+  if (opts.abortSignal.aborted) throw new CancelledError(documentId);
+
+  const upright = rotateImageData(imageData, orientation);
   const data = await recognizeWithTimeout(
-    imageData,
+    toTesseractImage(upright, documentId, pageIndex),
     documentId,
     pageIndex,
     opts.timeoutMs,
     opts.abortSignal,
   );
-  const words = toWords(data, pageIndex, dpi);
+  const words = toWords(data, pageIndex, dpi, orientation, imageData.width, imageData.height);
   const confidence = clampConfidence(extractPageConfidence(data) / 100);
   return { words, confidence };
 }
@@ -427,4 +622,5 @@ export async function kernelDispose(): Promise<void> {
     }
   }
   loadedLanguages = new Set();
+  appliedDpi = null;
 }
