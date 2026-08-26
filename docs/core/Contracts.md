@@ -599,7 +599,19 @@ export type WorkerJobType =
   | "ner-page"
   | "render-page"
   | "export-page";
+
+// ADR-091 §1: el léxico de nombres de pila deja de ser de un motor.
+// Claves PRE-NORMALIZADAS con `normalizeForComparison` (§6): quien
+// construye un `GenderLexicon` normaliza antes de insertar.
+export type GenderLexiconLabel = "f" | "m" | "ambiguous";
+export type GenderLexicon = ReadonlyMap<string, GenderLexiconLabel>;
 ```
+
+> **`GENDER_LEXICON`** (ADR-091 §1) — las 9.788 "Nombres Permitidos" de Buenos Aires (CC-BY-2.5-AR) como `GenderLexicon`, en un módulo **generado** por `scripts/build-gender-lexicon.ts` desde una fuente única (ADR-069 §1/§2). Vivía en `grouping-engine` por dónde se necesitó primero, no por diseño; se promueve a `@anonly/shared` porque tiene un segundo consumidor —la compuerta de nombre propio del patrón de carátula en `regex-engine`, que no puede importar otro motor (P-1/P-2)— y porque es un dato de dominio, no de motor. Mismo criterio y mismo precedente que `normalizeForComparison` y `sharesVerticalBand` (ADR-061 §2 errata).
+>
+> **Lo que se comparte es el dato, no la política.** `inferPersonGender` —el orden de pasos de ADR-060 §4, el descarte de la heurística de terminación, la guarda de iniciales de ADR-069 §3— **se queda en `grouping-engine`**: tiene un solo consumidor y es una decisión de producto, no una primitiva.
+>
+> **No confundir con `PERSON_FIRST_NAMES` de `shared/src/synthesizer.ts`**, que son 15 nombres curados para **generar** valores de reemplazo. Los dos son listas de nombres y tienen propósitos opuestos —uno reconoce, el otro inventa—: un documento anonimizado que dijera "Abdecalas" sería peor que uno que dice "Carlos". No se fusionan.
 
 ---
 
