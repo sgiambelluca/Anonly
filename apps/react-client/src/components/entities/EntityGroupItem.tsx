@@ -1,12 +1,14 @@
 /**
- * `EntityGroupItem` (`ui/Components.md` §3.3).
+ * `EntityGroupItem` (`ui/Components.md` §3.3, marca de sugerido por §3.4d).
  *
  * Render: checkbox + `canonicalValue` + badge de ocurrencias +
  * `ReplacementModeSelect` + acceso a fusionar/dividir (`GroupContextMenu`,
  * alcance reducido — ver esa nota ahí). Estados: habilitado/deshabilitado
- * (opacidad), con conflicto (`ConflictBadge` si hay un `Conflict` no resuelto
- * para este grupo), y sobre grupos `Person` en modo `placeholder`/`synthetic`
- * el `PersonGenderToggle`, cuyo estado neutro **es** la marca de "género sin
+ * (opacidad — pero no sobre un grupo "sugerido" pendiente de revisión,
+ * `needsReviewRow.ts`, ADR-094 §4), con conflicto (`ConflictBadge` si hay un
+ * `Conflict` no resuelto para este grupo), sugerido (`NeedsReviewBadge`,
+ * ADR-094 §4), y sobre grupos `Person` en modo `placeholder`/`synthetic` el
+ * `PersonGenderToggle`, cuyo estado neutro **es** la marca de "género sin
  * determinar" (ADR-060 §5/§6 rediseñados por ADR-071 §1-§4).
  *
  * Fuera de alcance de este PR (ver reporte): popover de aliases + edición
@@ -35,6 +37,8 @@ import { DegradedBadge } from "./DegradedBadge.js";
 import { EditReplacementDialog } from "./EditReplacementDialog.js";
 import { GroupContextMenu } from "./GroupContextMenu.js";
 import { MergeDialog } from "./MergeDialog.js";
+import { NeedsReviewBadge } from "./NeedsReviewBadge.js";
+import { buildTreeItemAriaLabel, isRowDimmed } from "./needsReviewRow.js";
 import { PersonGenderToggle } from "./PersonGenderToggle.js";
 import { isPersonGenderToggleVisible } from "./personGenderVisibility.js";
 import { ReplacementModeSelect } from "./ReplacementModeSelect.js";
@@ -61,12 +65,10 @@ function EntityGroupItemImpl({ group, nodeId, activeNodeId }: EntityGroupItemPro
     <div
       role="treeitem"
       aria-checked={group.enabled}
-      aria-label={`${group.canonicalValue}, ${group.members.length} ocurrencias, ${
-        group.enabled ? "habilitado" : "deshabilitado"
-      }`}
+      aria-label={buildTreeItemAriaLabel(group)}
       data-tree-node-id={nodeId}
       tabIndex={activeNodeId === nodeId ? 0 : -1}
-      className={`flex items-center gap-2 py-1 pl-8 pr-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent ${group.enabled ? "" : "opacity-50"}`}
+      className={`flex items-center gap-2 py-1 pl-8 pr-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent ${isRowDimmed(group) ? "opacity-50" : ""}`}
     >
       <Checkbox
         checked={group.enabled}
@@ -113,6 +115,13 @@ function EntityGroupItemImpl({ group, nodeId, activeNodeId }: EntityGroupItemPro
         y no en el `EntityGroup`.
       */}
       <DegradedBadge group={group} onEditReplacement={() => setEditReplacementOpen(true)} />
+      {/*
+        ADR-094 §4: la marca del grupo "sugerido" — creado por el detector
+        sin estar seguro, apagado y visible en vez de descartado en
+        silencio. Se monta siempre y el propio badge decide si hay algo que
+        mostrar (no renderiza nada sin `needsReview`).
+      */}
+      <NeedsReviewBadge group={group} />
       {isPersonGenderToggleVisible(group) ? (
         <PersonGenderToggle groupId={group.id} currentGender={group.personGender} />
       ) : null}
