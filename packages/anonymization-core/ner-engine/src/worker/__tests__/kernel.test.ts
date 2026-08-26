@@ -186,6 +186,54 @@ describe("NerKernel — kernelClassify (ADR-046 §1/§4)", () => {
     });
     expect(env.backends.onnx.wasm?.wasmPaths).toBe("/wasm/onnxruntime/");
   });
+  // ─── v1.3.1: un subword no puede empezar una entidad ───
+
+  it("does not let a wordpiece continuation tagged B- split an entity in two", async () => {
+    /*
+     * Los tokens son los que devolvió el modelo de producción sobre
+     * `qa-tables-justified.pdf`, medidos: la SEGUNDA aparición de
+     * "Empresa S.A." sale con `B-ORG` en la continuación `##presa`. Creerle a
+     * ese `B-` parte el span en "Em" y "presa S.A" — los dos grupos espurios
+     * del hallazgo §23f del gate manual.
+     */
+    asPipelineMock(pipeline).mockResolvedValue(
+      mockTokenClassificationPipeline(() =>
+        Promise.resolve([
+          nerToken("B-ORG", "Em", 0.962, 0),
+          nerToken("B-ORG", "##presa", 0.62, 1),
+          nerToken("I-ORG", "S", 0.994, 2),
+          nerToken("I-ORG", ".", 0.98, 3),
+          nerToken("I-ORG", "A", 0.982, 4),
+        ]),
+      ),
+    );
+
+    const spans = await kernelClassify(
+      basePayload({ modelId: "model-wordpiece", text: "Demandada Empresa S.A. CUIT" }),
+      { timeoutMs: 5000, abortSignal: new AbortController().signal },
+    );
+
+    expect(spans).toHaveLength(1);
+    expect(spans[0]?.value).toBe("Empresa S.A");
+    expect(spans[0]?.entityType).toBe(EntityType.Organization);
+  });
+
+  it("still opens a new span on a B- that is not a continuation", async () => {
+    // La no regresión: dos entidades pegadas siguen siendo dos.
+    asPipelineMock(pipeline).mockResolvedValue(
+      mockTokenClassificationPipeline(() =>
+        Promise.resolve([nerToken("B-PER", "Pérez", 0.9, 0), nerToken("B-PER", "Juan", 0.9, 1)]),
+      ),
+    );
+
+    const spans = await kernelClassify(
+      basePayload({ modelId: "model-two-spans", text: "Pérez Juan" }),
+      { timeoutMs: 5000, abortSignal: new AbortController().signal },
+    );
+
+    expect(spans.map((s) => s.value)).toEqual(["Pérez", "Juan"]);
+  });
+
   // ─── ADR-088 §2: caja alta ───
 
   describe("corridas en caja alta (ADR-088 §2, NER_Engine.md §13 caso 20)", () => {

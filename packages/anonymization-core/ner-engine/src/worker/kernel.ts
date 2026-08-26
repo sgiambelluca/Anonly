@@ -100,6 +100,8 @@ interface PositionedToken {
   readonly score: number;
   readonly startIndex: number;
   readonly endIndexExclusive: number;
+  /** `true` si el token es una continuación de wordpiece (venía con "##"). */
+  readonly isContinuation: boolean;
 }
 
 interface OpenSpan {
@@ -267,6 +269,7 @@ function positionTokens(
       score: token.score,
       startIndex: foundAt,
       endIndexExclusive: foundAt + cleaned.length,
+      isContinuation: token.word.startsWith("##"),
     });
     cursor = foundAt + cleaned.length;
   }
@@ -317,9 +320,26 @@ function aggregateTokensToSpans(
   };
 
   for (const token of positioned) {
-    const isBegin = token.entity.startsWith("B-");
+    const taggedAsBegin = token.entity.startsWith("B-");
     const isInside = token.entity.startsWith("I-");
-    const label = isBegin || isInside ? token.entity.slice(2) : null;
+    const label = taggedAsBegin || isInside ? token.entity.slice(2) : null;
+
+    /*
+     * v1.3.1 — **un subword no puede EMPEZAR una entidad.** El modelo etiqueta
+     * a veces una continuación de wordpiece como `B-`: medido sobre
+     * `qa-tables-justified.pdf`, la segunda aparición de "Empresa S.A." sale
+     * `B-ORG "Em"` + `B-ORG "##presa"`, y creerle al segundo `B-` parte el
+     * span en dos grupos espurios — "Em" y "presa S.A", que es el hallazgo
+     * §23f del gate manual.
+     *
+     * Es la corrección que le faltaba a la "equivalencia simplificada de
+     * `aggregation_strategy`" de ADR-046 §1: HuggingFace agrupa los tokens en
+     * PALABRAS antes de decidir la etiqueta, y por eso no cae en esto.
+     *
+     * El `label` se sigue derivando del prefijo crudo — si no, un `B-` de
+     * continuación quedaría sin etiqueta y el token se descartaría entero.
+     */
+    const isBegin = taggedAsBegin && !token.isContinuation;
 
     if (label === null || !(label in LABEL_TO_ENTITY_TYPE)) {
       flush();
