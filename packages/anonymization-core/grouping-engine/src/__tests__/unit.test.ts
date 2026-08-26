@@ -2,13 +2,13 @@ import {
   EngineEvents,
   EntityType,
   EventChannel,
+  GENDER_LEXICON,
   ReplacementMode,
   type EngineContext,
+  type GenderLexicon,
 } from "@anonly/shared";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-import { GENDER_LEXICON } from "../gender-lexicon.generated.js";
-import type { GenderLexicon } from "../gender.js";
 import { inferPersonGender } from "../gender.js";
 import { GroupingEngine } from "../grouping.engine.js";
 import { buildPlaceholderValue } from "../labels.js";

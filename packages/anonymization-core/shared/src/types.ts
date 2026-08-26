@@ -48,6 +48,23 @@ export interface BoundingBox {
   readonly rotation?: 0 | 90 | 180 | 270;
 }
 
+/**
+ * ADR-091 §1 (`Contracts.md` §5) — léxico de nombres de pila. Valor por
+ * nombre: determinado (`"f"`/`"m"`) o `"ambiguous"`, que es el nombre marcado
+ * `A` (unisex) en el registro de Buenos Aires (ADR-069 §1).
+ *
+ * Las claves están **pre-normalizadas** con `normalizeForComparison`: quien
+ * construye un `GenderLexicon` normaliza antes de insertar.
+ *
+ * Vive acá y no en un motor porque tiene dos consumidores que no pueden
+ * importarse entre sí (P-1/P-2): `grouping-engine` lo usa para inferir el
+ * género del reemplazo (ADR-060 §4) y `regex-engine` como compuerta de nombre
+ * propio del patrón de carátula. Lo que se comparte es el **dato**; la
+ * política de cómo interpretarlo (`inferPersonGender`) se queda en Grouping.
+ */
+export type GenderLexiconLabel = "f" | "m" | "ambiguous";
+export type GenderLexicon = ReadonlyMap<string, GenderLexiconLabel>;
+
 export interface WordSpan {
   readonly startIndex: number;
   readonly endIndexExclusive: number;

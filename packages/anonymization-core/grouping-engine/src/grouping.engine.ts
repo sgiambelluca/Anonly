@@ -157,6 +157,7 @@ import {
   CancelledError,
   ConflictReason,
   DetectionSource,
+  GENDER_LEXICON,
   EngineDisposedError,
   EngineEvents,
   EngineId,
@@ -190,7 +191,6 @@ import {
   type Unsubscribe,
 } from "@anonly/shared";
 
-import { GENDER_LEXICON } from "./gender-lexicon.generated.js";
 import { inferPersonGender } from "./gender.js";
 import { GroupingGroupNotFoundError, GroupingInvalidPatchError } from "./grouping.errors.js";
 import type {
