@@ -222,6 +222,11 @@ function mapSpanToWords(
   };
 }
 
+/** `Contracts.md` §5: `rotation` ausente ≡ `0`. */
+function rotationOf(word: Word | undefined): number {
+  return word?.bbox.rotation ?? 0;
+}
+
 /*
  * Partición de `words` en lotes para los checkpoints de cancelación "entre
  * batches de inferencia" (spec §12/§15.6, NerConfig.batchSize). ADR-024 §2
@@ -231,6 +236,16 @@ function mapSpanToWords(
  * batch); esta función sigue siendo host-side porque necesita las `Word[]`
  * de la página, que el kernel nunca ve. Offsets calculados igual que
  * Page.text = words.map(w => w.text).join(" ").
+ *
+ * ADR-088 §1: se corta **además** en cada cambio de `bbox.rotation`. ADR-067
+ * §4 emite los runs rotados al final de `Page.text`, contiguos entre sí — con
+ * lo cual el folio del margen izquierdo y el sello del derecho quedan pegados
+ * y el modelo los lee como una oración. Medido: los dos salían en una sola
+ * `Occurrence` de 525 × 521 pt que Grouping después descartaba por
+ * solapamiento, dejando el folio en claro. `batchSize` sigue siendo el máximo
+ * DENTRO de cada corrida, así que los bordes de corrida solo agregan
+ * checkpoints de cancelación, nunca los sacan, y una página sin texto rotado
+ * produce los mismos chunks que antes del ADR, palabra por palabra.
  */
 function computeWordChunks(
   words: ReadonlyArray<Word>,
@@ -238,17 +253,30 @@ function computeWordChunks(
 ): ReadonlyArray<WordChunk> {
   const chunks: WordChunk[] = [];
   let offset = 0;
-  for (let i = 0; i < words.length; i += batchSize) {
-    const chunkWords = words.slice(i, i + batchSize);
-    const startIndex = offset;
-    for (const word of chunkWords) {
-      offset += word.text.length + 1;
+  let runStart = 0;
+
+  while (runStart < words.length) {
+    const runRotation = rotationOf(words[runStart]);
+    let runEnd = runStart + 1;
+    while (runEnd < words.length && rotationOf(words[runEnd]) === runRotation) {
+      runEnd += 1;
     }
-    // -1: el separador final no pertenece al chunk (pertenece al límite con
-    // el próximo, o no existe si es el último chunk de la página — slice()
-    // clampea automáticamente en ese caso, sin necesidad de un caso especial).
-    chunks.push({ startIndex, endIndexExclusive: offset - 1, words: chunkWords });
+
+    for (let i = runStart; i < runEnd; i += batchSize) {
+      const chunkWords = words.slice(i, Math.min(i + batchSize, runEnd));
+      const startIndex = offset;
+      for (const word of chunkWords) {
+        offset += word.text.length + 1;
+      }
+      // -1: el separador final no pertenece al chunk (pertenece al límite con
+      // el próximo, o no existe si es el último chunk de la página — slice()
+      // clampea automáticamente en ese caso, sin necesidad de un caso especial).
+      chunks.push({ startIndex, endIndexExclusive: offset - 1, words: chunkWords });
+    }
+
+    runStart = runEnd;
   }
+
   return chunks;
 }
 

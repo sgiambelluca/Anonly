@@ -141,6 +141,82 @@ function stripContinuationMarker(word: string): string {
   return word.startsWith("##") ? word.slice(2) : word;
 }
 
+/*
+ * ADR-088 §2 — el modelo default es *cased* y sobre texto todo en mayúsculas
+ * devuelve CERO tokens etiquetados: medido, sobre
+ * "JUZGADO CIVIL 12 — PERITO CARLOS LOPEZ" no reconoce nada, y la misma línea
+ * en Title Case devuelve PER con 0,999. Los sellos, carátulas y membretes de
+ * un expediente están sistemáticamente en caja alta, así que es un punto
+ * ciego, no un caso de borde.
+ *
+ * Una **corrida en caja alta** son ≥2 palabras consecutivas que tienen letras,
+ * no tienen ninguna minúscula y no tienen un punto seguido de letra. Las tres
+ * condiciones están medidas:
+ *
+ * - El mínimo de dos palabras deja "DNI 34.567.891" intacto (el número no
+ *   tiene letras, así que "DNI" queda sola y una palabra no es corrida).
+ * - El guard del punto deja "Empresa S.A., CUIT 20-12345678-9" intacto: sin
+ *   él, "S.A.," y "CUIT" forman corrida, se transforman en "S.a., Cuit" y la
+ *   confianza de la organización del cuerpo cae de 0,995 a 0,792.
+ *
+ * La transformación preserva la longitud carácter a carácter — cualquier
+ * palabra cuyo mapeo de caja la cambie se deja intacta, y el resultado entero
+ * se descarta si aun así la longitud no coincide. De eso depende que los
+ * offsets de los spans valgan sobre el texto original.
+ */
+const HAS_LETTER_RE = /\p{L}/u;
+const DOT_BEFORE_LETTER_RE = /\.\p{L}/u;
+
+function belongsToUppercaseRun(word: string): boolean {
+  return (
+    HAS_LETTER_RE.test(word) &&
+    word === word.toUpperCase() &&
+    word !== word.toLowerCase() &&
+    !DOT_BEFORE_LETTER_RE.test(word)
+  );
+}
+
+function toTitleCase(word: string): string {
+  const firstLetter = HAS_LETTER_RE.exec(word);
+  if (firstLetter === null) return word;
+  const cut = firstLetter.index + firstLetter[0].length;
+  const titled = word.slice(0, cut) + word.slice(cut).toLowerCase();
+  return titled.length === word.length ? titled : word;
+}
+
+function titleCaseUppercaseRuns(text: string): string {
+  const words = text.split(" ");
+  let changed = false;
+  let i = 0;
+
+  while (i < words.length) {
+    if (!belongsToUppercaseRun(words[i] ?? "")) {
+      i += 1;
+      continue;
+    }
+    let runEnd = i + 1;
+    while (runEnd < words.length && belongsToUppercaseRun(words[runEnd] ?? "")) {
+      runEnd += 1;
+    }
+    if (runEnd - i >= 2) {
+      for (let k = i; k < runEnd; k++) {
+        const word = words[k];
+        if (word === undefined) continue;
+        const titled = toTitleCase(word);
+        if (titled !== word) {
+          words[k] = titled;
+          changed = true;
+        }
+      }
+    }
+    i = runEnd;
+  }
+
+  if (!changed) return text;
+  const transformed = words.join(" ");
+  return transformed.length === text.length ? transformed : text;
+}
+
 function normalizeNerValue(value: string): string {
   return value
     .trim()
@@ -206,12 +282,19 @@ function positionTokens(
  * promedio de los scores de los tokens que componen el span. Offsets
  * relativos al texto del batch (`NerKernelSpan`, ADR-046 §1) — el motor
  * host-side suma el offset del chunk dentro de la página.
+ *
+ * ADR-088 §2: los tokens se ubican contra `inferenceText` (el texto que vio
+ * el modelo) y los `value` se cortan de `chunkText` (el texto como está
+ * impreso). Las dos cadenas tienen la misma longitud, así que un offset vale
+ * en las dos; separarlas es lo que hace que el `canonicalValue` del grupo
+ * diga `PERITO CARLOS LOPEZ` y no `Perito Carlos Lopez`.
  */
 function aggregateTokensToSpans(
   tokens: ReadonlyArray<TokenClassificationSingle>,
+  inferenceText: string,
   chunkText: string,
 ): ReadonlyArray<NerKernelSpan> {
-  const positioned = positionTokens(tokens, chunkText);
+  const positioned = positionTokens(tokens, inferenceText);
   const spans: NerKernelSpan[] = [];
   let open: OpenSpan | null = null;
 
@@ -418,15 +501,19 @@ export async function kernelClassify(
 
   if (opts.abortSignal.aborted) throw new CancelledError(documentId);
 
+  // ADR-088 §2: se infiere sobre el texto con las corridas en caja alta
+  // pasadas a Title Case, y los valores se cortan del texto original.
+  const inferenceText = titleCaseUppercaseRuns(text);
+
   const rawTokens = await classifyWithTimeout(
-    text,
+    inferenceText,
     documentId,
     pageIndex,
     opts.timeoutMs,
     opts.abortSignal,
     modelId,
   );
-  return aggregateTokensToSpans(rawTokens, text);
+  return aggregateTokensToSpans(rawTokens, inferenceText, text);
 }
 
 /**
