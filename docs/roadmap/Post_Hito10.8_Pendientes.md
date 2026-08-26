@@ -593,3 +593,36 @@ Mientras no haya uno, **A es la única de las dos que se puede soltar sin poder 
 ### Lo que este hallazgo NO frena
 
 Verificado item por item: no bloquea el grupo apagado de confianza baja (`grouping-engine`, no mira geometría), ni su marca en la UI, ni el hueco de característica de 3 dígitos de `phone-mobile-ar`, ni la costura §23f/§23g/§23h (arriba), ni el evaluador del dataset de referencia **siempre que matchee por valor + página y no por solapamiento de bbox** — que es lo que corresponde para una métrica de detección de texto, y este hallazgo es una razón más para elegirlo así.
+
+---
+
+## 25. §23f resuelto en otro motor; §23g/§23h quedan pendientes del gate visual
+
+**Procedencia**: sesión de calidad de detección del 2026-08-26, al abordar lo que §23 llamó "la costura" — los tres hallazgos que el gate de ADR-058 §11 iba a mirar.
+
+### §23f no era de la costura
+
+El informe atribuía los grupos espurios `"Em"` y `"presa S.A"` al texto justificado. Reproducido con el modelo real sobre `qa-tables-justified.pdf`, la causa es la agregación BIO de `ner-engine`: el modelo etiqueta `B-ORG` sobre `##presa`, una **continuación de wordpiece**, y `aggregateTokensToSpans` le creía. **Cerrado** en la v1.3.1 del spec de NER.
+
+Con eso, **dos de los tres hallazgos que el gate agrupó como "la costura" estaban en otro lado** (§23e en `pdf-engine`, §24; §23f en `ner-engine`). Vale como advertencia de método: el gate agrupa por **dónde se ve** el defecto, no por dónde está.
+
+### §23g: "los tokens se dibujan más chicos", cuantificado
+
+No es un error de calibración: es una constante. `REPLACEMENT_FONT_HEIGHT_RATIO = 0,7` (`Contracts.md` §6, ADR-057 §5) se aplica sobre `bbox.height`, que es el **cuerpo** que reporta pdf.js — no el alto visual del glifo. Medido sobre `qa-tables-justified.pdf`:
+
+| | cuerpo | token dibujado | altura de mayúscula |
+|---|---|---|---|
+| cuerpo de la tabla | 12,00 pt | **8,40 pt** | 10,04 → **7,03 pt** |
+| título | 14,00 pt | 9,80 pt | |
+
+O sea que el token sale **30 % más chico** que el texto que lo rodea, por construcción y no por accidente.
+
+**No se cambia acá, y la razón importa**: subir la razón a 1,0 haría el token del mismo tamaño y **más ancho**, con lo que dejaría de entrar más seguido — y ahí entra el shrink-to-fit y el detector de degradado de ADR-086. Es un intercambio entre "se distingue por el tamaño" y "no entra y se achica igual", y elegirlo pide ver los dos resultados. La constante además la consume `estimateTokenWidth` y el camino de shrink-to-fit, así que tocarla no es local.
+
+### §23g ("levantados") y §23h: hasta acá llega lo headless
+
+Lo que queda —el token levantado respecto de la línea, la coma huérfana tras el token, y el token que desborda el borde de la celda— es **juicio visual sobre el PDF exportado**, que es exactamente lo que ADR-058 §11 define como gate manual y lo que `tests/fixtures/README.md` ya dice que **ninguna suite headless puede juzgar**.
+
+Se intentó acotarlo por cálculo y no alcanzó: `tryRepaintLine` dibuja con `textBaseline: "middle"` centrado en el medio del bbox, mientras el texto original se apoya en su línea de base. La aritmética de dónde queda cada centro depende de la relación entre `bbox.height` y las métricas reales de la fuente embebida, y sale distinta según qué se asuma. **Afirmar un diagnóstico ahí sin mirarlo sería inventar.**
+
+**Lo que hace falta para cerrarlos**: correr el gate de ADR-058 §11 sobre `qa-tables-justified.pdf` exportado, en un browser real, con las correcciones de esta campaña ya aplicadas — varias de las cuales (§23e, §23f) cambian lo que se ve en ese mismo documento.
