@@ -513,3 +513,83 @@ La tercera fila del gate —documento **escaneado**, ruta OCR— quedó a medias
 **Ninguno de estos hallazgos se arregló en el mismo paso**: son de motores distintos (grouping/regex para la detección, render/export para la cobertura) y varios piden decisión antes que código. El gate estaba para producir esta lista.
 
 **Continúa en [`Calidad_De_Deteccion_Informe.md`](./Calidad_De_Deteccion_Informe.md)**, que junta estos hallazgos con dos reportes de campo sobre documentos reales —una tabla escaneada rotada que el OCR lee horizontal, y texto chico que no reconoce— y propone un orden de trabajo. Es el punto de entrada para la sesión que tome la calidad de detección.
+
+---
+
+## 24. §23e diagnosticado: el bbox de una palabra se calcula con un ancho de glifo promedio
+
+**Procedencia**: sesión de calidad de detección del 2026-08-26, al reproducir el hallazgo §23e ("el reemplazo deja fragmentos del original visibles antes del token"). **La decisión de cómo arreglarlo está abierta** y esta sección existe para que las mediciones no se pierdan.
+
+### El diagnóstico: no es `render-engine`, y no es un redondeo
+
+El informe de calidad suponía "un redondeo o un `x` de inicio tomado del segundo glifo del run". Es otra cosa. En `pdf-engine/src/pdf.engine.ts`, `convertTextItemsToWords`:
+
+```ts
+const charWidth = str.length > 0 ? width / str.length : 0;
+const advance = charWidth * offset;
+```
+
+Un **ancho de glifo promedio uniforme**, repartido sobre una fuente proporcional. Cada palabra que no arranca al principio de su `TextItem` queda corrida, y el error **se acumula** a lo largo del item.
+
+Medido sobre la línea 2 del cuerpo de `qa-stamp.pdf`, cuyas coordenadas reales las escribe `tests/fixtures/generate.ts` y por lo tanto se conocen:
+
+| palabra | x real | x del motor | error |
+|---|---|---|---|
+| `El` | 50,00 | 50 | 0,00 |
+| `Juan` | 96,75 | 105 | **+8,25** |
+| `DNI` | 163,28 | 172 | +8,72 |
+| `en` | 326,68 | 339 | **+12,32** |
+| `Belgrano` | 343,36 | 355 | +11,64 |
+
+El borrado del repintado arranca en `bbox.x`. Para `Juan` eso son 8,25 pt a la derecha del primer glifo, y la `J` mide 6,0 pt: quedan la `J` y parte de la `u` a la vista. Es exactamente el `Ju[HOMBRE 01]` que reportó el gate, y los otros dos casos (`B[DIRE 01]`, `DNI 3 [DNI 01]`) son el mismo número.
+
+**El ancho también está mal**, en la otra dirección: `promueve` sale 8,43 pt más angosto que la realidad, o sea que la caja tapa de menos por la derecha.
+
+Verificado que el modelo uniforme reproduce la salida del motor palabra por palabra: es el mecanismo, no una hipótesis.
+
+### Esto supersede una decisión documentada
+
+ADR-020 §1 lo eligió a sabiendas: *"El prorrateo es una aproximación lineal (no tiene en cuenta kerning ni fuentes proporcionales reales); es aceptable para el propósito de bbox de censura, que no requiere precisión tipográfica exacta."* Esa premisa está falsificada por medición: una caja corrida 8 pt no tapa el dato.
+
+### A quién afecta, y a quién no
+
+El daño depende de **cómo el productor escribió el PDF**, porque pdf.js v4 ya no fusiona items: un `TextItem` es una operación de dibujo.
+
+| fixture | items | mediana | items de una palabra | error |
+|---|---|---|---|---|
+| `qa-stamp.pdf` | 8 | 73 chars | 0 de 8 | hasta 12,3 pt |
+| `text-10p.pdf` | 2 | 85 chars | 0 de 2 | grande |
+| `qa-tables-justified.pdf` | 65 | 6 chars | 60 de 65 | **≈ 0** |
+
+Y hay una propiedad que acota más el daño, por aritmética: cuando una entidad **es** un item completo, su envolvente es exacta de los dos lados —la primera palabra arranca en `charWidth · 0` = el origen del item, y la última termina en `charWidth · str.length` = el ancho del item—. Las tres entidades de `qa-tables-justified.pdf` (`Juan Pérez`, `Empresa S.A.`, `Carlos López`) son items propios, así que **§23f/§23g/§23h no dependen de este hallazgo**.
+
+O sea: el prorrateo solo daña palabras que caen **en el medio** de un item multi-palabra.
+
+### Las dos opciones, y por qué la decisión quedó abierta
+
+El motor **ya** extrae los avances reales por glifo (`.unicode`/`.width` del operator list) en la misma pasada por `getOperatorList()`, para la corrección de origen de ADR-068 y para las palabras de anotación de ADR-066. La maquinaria existe; lo que falta es usarla para el reparto.
+
+**Las dos opciones comparten la mitad fácil** —calcular los avances, con los mismos números— y se diferencian en **de dónde sale la cadena de texto**:
+
+**Opción A — avances reales, cadena de `getTextContent()`, empalme por origen.** Se emite una tabla de avances acumulados junto al origen de cada run de página; `convertTextItemsToWords` casa el item con su run (por origen, con la tolerancia que ADR-068 ya usa) y, si casa, usa `avances[índice]`. Si no casa, cae al prorrateo de hoy. Guarda barata contra el error silencioso: si `avances.length !== str.length`, no se casa.
+
+**Opción B — construir las palabras enteras desde el operator list.** Sin empalme, porque hay una sola fuente. Pero obliga a **reimplementar la extracción de texto de pdf.js**: `getTextContent()` sintetiza espacios que no existen como glifo (`str.push(" ")` gobernado por `trackingSpaceMin = fontSize · TRACKING_SPACE_FACTOR`), resuelve `/ActualText` del contenido marcado y normaliza Unicode. El camino de glifos que ya existe en el motor (`buildAnnotationTextRun`) no hace ninguna de las tres y además descarta el kerning — está probado sobre líneas de firma cortas, no sobre el texto de un expediente.
+
+**La asimetría que decide, y no depende de ninguna medición**:
+
+| | si falla |
+|---|---|
+| **A** | ese item queda **exactamente como hoy**. Visible en el diff de snapshots: la caja no se movió. |
+| **B** | el **texto** del documento cambia, y con él lo que detectan Regex, NER y la lupa. Silencioso: nada falla, simplemente deja de encontrarse una entidad. |
+
+**Descartadas**: ensanchar el borrado en `render-engine` (el bbox equivocado lo consumen además el hit-test de ADR-061 §4, el modo `mask`, `sharesVerticalBand`, la detección de solapamiento de Grouping y el export — y el `width` también está mal, así que ensanchar por la izquierda no alcanza); y pedirle runs más cortos a pdf.js (`disableCombineTextItems` **no existe** en pdf.js v4; en `pdfjs-dist@4.10.38` solo queda `disableNormalization`).
+
+### Lo que falta para decidir bien
+
+**Un expediente real.** Los tres fixtures salen de `pdf-lib`, que escribe espacios como glifos reales, sin ligaduras y sin `ActualText`: son amables con las dos opciones. Medir la tasa de empalme de A sobre ellos daría un número alto que no dice nada sobre un documento de verdad. Los documentos que separan palabras **moviendo el cursor** en vez de con un espacio —justificados, kerneados, salidos de un procesador de texto— son justamente los que el repo no tiene.
+
+Mientras no haya uno, **A es la única de las dos que se puede soltar sin poder verificarla**, porque su peor caso es el comportamiento actual. Si aparece ese expediente y se mide que el empalme falla seguido, B queda disponible y con evidencia que la justifique.
+
+### Lo que este hallazgo NO frena
+
+Verificado item por item: no bloquea el grupo apagado de confianza baja (`grouping-engine`, no mira geometría), ni su marca en la UI, ni el hueco de característica de 3 dígitos de `phone-mobile-ar`, ni la costura §23f/§23g/§23h (arriba), ni el evaluador del dataset de referencia **siempre que matchee por valor + página y no por solapamiento de bbox** — que es lo que corresponde para una métrica de detección de texto, y este hallazgo es una razón más para elegirlo así.
