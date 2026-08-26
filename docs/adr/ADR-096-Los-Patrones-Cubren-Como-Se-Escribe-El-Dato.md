@@ -41,7 +41,7 @@ Y el separador de miles la rompe por otro lado: `45.318` son cinco dígitos con 
 ```
 (?<=[Mm]atr[íi]cula\s+[Pp]rofesional\s*:?\s*)\d{3,8}\b
 | \bM\.?[NP]\.?[\s-]*\d{1,3}(?:\.\d{3})+\b
-| \bM\.?[NP]\.?[\s-]*\d{3,8}\b
+| \bM\.?[NP]\.?[\s-]*\d{3,8}(?:-\d)?\b
 ```
 
 Tres alternativas: el número pelado **anclado en la etiqueta**, el número con separador de miles, y el número plano. El prefijo cubre `MN`, `MP`, `M.N.`, `M.P.` y el separador admite espacio, guión o nada.
@@ -57,6 +57,8 @@ Tres alternativas: el número pelado **anclado en la etiqueta**, el número con 
 | **nuevo, sin la vieja** | **11 de 11** | **0** |
 
 La alternativa vieja no aporta **ninguna** forma que las nuevas no cubran —incluidas las de guión, `MP-12345` y `M.P.-34567`— y sí aporta un falso positivo sobre números de expediente, que en un expediente están por todas partes.
+
+**La cola de un dígito se conserva** (`(?:-\d)?`, corrección durante la implementación). `MP-12345-6` no es ninguna de las once formas medidas, pero **estaba en la suite y en el `maskFormat` de ADR-012** (`XX-XXXX-XX`), o sea que alguien alguna vez decidió que esa forma importaba. Sin la cola, ese valor se emitiría como `MP-12345` y el `-6` quedaría a la vista: cobertura parcial, que en esta herramienta es una fuga chica. Medido, agregarla da **12 de 12 formas y sigue en 0 falsos positivos**, porque el match ya viene anclado en el prefijo `M[NP]`. Retirar la alternativa vieja no tiene por qué llevarse puesto lo que sí cubría.
 
 **Lo que se pierde, dicho explícitamente**: formas de matrícula que no se midieron y que la alternativa vieja podría haber tomado por casualidad — un tomo/folio de abogado (`T° 123 F° 45`), un prefijo de colegio profesional. **No se inventan** (ADR-095 §7): entran al dataset el día que aparezcan en un documento, y ahí el número baja y se arregla el patrón.
 

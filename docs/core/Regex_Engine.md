@@ -5,9 +5,11 @@
 > Detecta patrones determinísticos (DNI, CUIT, teléfono, email, IBAN, tarjeta, fecha, matrícula, patente) en el texto de cada página. Emite `Occurrence[]` con `source: "regex"` y `confidence: 1.0`. Es determinista: mismo input → mismo output.
 
 **EngineId**: `regex`
-**Versión del spec**: 1.9.0
+**Versión del spec**: 1.10.0
 **Última actualización**: 2026-08-26
-**Estado de implementación**: Hito 4, checklist §15 (items 1-18) implementado; item 19 (propagación de `bbox.rotation`) en Hito 10.8; items 20 y 21 (fragmentos por línea y los dos cambios de la tabla de patrones) en Hito 10.9. `findLiteral` (item 10b) y `searchText` (item 10c) implementados en los PRs 2 y 3c del Hito 10.7 respectivamente; `stripEdgePunctuation` (item 10d) corrige un gap de matcheo hallado post-aprobación del hito. La corrección de `phone-mobile-ar` (ADR-093) es un cambio de patrón en la misma fila de la tabla, sin ítem nuevo de checklist. Pendiente: `cancel.test.ts`/`perf.test.ts` de §14 en Hito 11 (ver nota al final de §15).
+**Estado de implementación**: Hito 4, checklist §15 (items 1-18) implementado; item 19 (propagación de `bbox.rotation`) en Hito 10.8; items 20 y 21 (fragmentos por línea y los dos cambios de la tabla de patrones) en Hito 10.9. `findLiteral` (item 10b) y `searchText` (item 10c) implementados en los PRs 2 y 3c del Hito 10.7 respectivamente; `stripEdgePunctuation` (item 10d) corrige un gap de matcheo hallado post-aprobación del hito. La corrección de `phone-mobile-ar` (ADR-093) y los cuatro cambios de ADR-096 son cambios de patrón en la tabla (tres reescrituras y una fila nueva), sin ítem nuevo de checklist. Pendiente: `cancel.test.ts`/`perf.test.ts` de §14 en Hito 11 (ver nota al final de §15).
+
+> **Nota (v1.10.0, ADR-096, 2026-08-26 — los patrones cubren cómo se escribe el dato, no su forma canónica)**: la categoría `forms` del dataset de referencia (ADR-095 §7) destapó cuatro huecos con el mismo diagnóstico — un patrón escrito para la forma canónica del dato, no para cómo aparece escrito en un documento — y el recall de Regex cayó de un 100 % hueco a un 77 % honesto. **(1) `license-ar`** se reescribe con tres alternativas (el número pelado anclado en la etiqueta `Matrícula Profesional`, el número con separador de miles, el número plano) **y la alternativa vieja se retira**: sobre 11 formas reales medidas acertaba una (`MN12345`), y conservarla junto a las nuevas no aporta ninguna forma que éstas no cubran, solo un falso positivo sobre números de expediente (`"Expediente A-12345"`). **(2)** las patentes `plate-vieja-ar`/`plate-mercosur-ar` cambian su separador de `\s?` a `[\s-]?` —el guión está en la transcripción, no en la chapa— y se agrega **`plate-mercosur-moto-ar`** (1 letra + 3 dígitos + 3 letras, con su propio `maskFormat`, "X XXX XXX", ADR-029 §2), la tercera estructura de patente y la que no estaba cubierta en absoluto. **(3) `iban`** admite el espacio interno con el que ISO 13616 recomienda imprimirlo (`\b[A-Z]{2}\d{2}(?:\s?[A-Z0-9]){10,30}\b`): el patrón de antes solo detectaba la forma que nadie escribe. `checksum` y `normalizer` no se tocan. **(4) `phone-landline-ar`** admite un separador más, adentro del abonado (`"011 4567-8902"`), el mismo lugar donde `phone-mobile-ar` ya lo admitía desde ADR-093. Los cuatro `normalizer` quedan igual; la guarda de corrida de ADR-075 §2 sigue aplicando sin cambios; `phone-mobile-ar` no se toca. Ver la tabla de patrones, §13 caso 33 y §14.
 
 > **Nota (v1.9.0, ADR-093, 2026-08-26 — la característica telefónica no siempre tiene dos dígitos)**: fila "Phone (AR mobile)" de la tabla de patrones. El patrón exigía característica de **exactamente dos dígitos** (`\d{2}[\s-]?\d{4}[\s-]?\d{4}`), pero el plan de numeración argentino tiene característica de 2 dígitos solo en CABA — La Plata, Rosario, Córdoba y Paraná usan 3, y las localidades chicas usan 4; lo invariante es que característica + abonado suman **10 dígitos**. Medido contra los patrones reales: `"+54 11 4567-8900"` (CABA) detectaba, `"+54 221 456-7890"` (La Plata), `"+54 341 456-7890"` (Rosario), `"+54 351 456-7890"` (Córdoba) y `"+54 2954 12-3456"` (Santa Rosa) **no**. Un celular de cualquier ciudad que no sea CABA salía en claro. El patrón nuevo es una alternancia de tres ramas —una por longitud de característica, todas de 10 dígitos— más el `9` opcional del formato de móvil internacional (`+54 9 11 …`). **No es un rango** (`\d{2,4}[\s-]?\d{2,4}[\s-]?\d{3,4}`): medido contra ocho trampas, el rango detecta los mismos 7 teléfonos pero agrega 3 falsos positivos que la alternancia no tiene —tres grupos de una tarjeta, tres de un IBAN y dos números sueltos adyacentes—, porque exigir el total de 10 dígitos exacto por rama es lo que discrimina un teléfono de un tramo de otro identificador. El separador opcional se ata al prefijo de país (`54[\s-]?`, `9[\s-]?`) en vez de quedar suelto antes del `\b`, lo que además corrige el residuo de la v1.6.2 en el origen: sobre `"CUIT 20-12345678-9"` el match crudo ya no arranca en el espacio que precede al número (antes lo hacía y `runPattern` lo recortaba después). El falso positivo del CUIT sigue produciendo el mismo valor (`"20-12345678"`, checksum de CUIT falla, el teléfono de 11 caracteres gana el overlap sobre el DNI embebido): es preexistente, documentado desde v1.6.1, y este cambio no lo introduce ni lo mueve. `phone-landline-ar`, el `normalizer` y el `maskFormat` no se tocan. Ver la tabla de patrones, §13 caso 32 y §14.
 
@@ -322,6 +324,7 @@ Casos de fragmentos y de la tabla de patrones (ADR-074, ADR-075):
 30. **La comparación literal es por sub-token, y se afloja distinto de cada lado** (ADR-089): `"Juan Pérez"` encuentra `"Juan" · "Pérez,Juan"` (puntuación interna) y `"20-12345678"` encuentra `"20-12345678-9"` (prefijo de identificador) en las **dos** entradas, con `bbox` de la palabra entera. `searchText("Ana")` encuentra además `"Anabella"`; `findLiteral` con `"Ana"` **no** la toca. **No** matchean, deliberadamente: `"Juan Pérez"` contra `"Pérez," · "Juan"` (orden invertido — es §23c, un problema de detección) y `"J. Pérez"` contra `"José Pérez"` (ADR-061 §2: no es búsqueda difusa). `"O'Brien"` se sigue encontrando por su propio texto: los dos lados se parten igual.
 31. **Una carátula judicial es una entidad, un topónimo no** (ADR-092): `"Pérez, Juan"`, `"López, María Fernanda"` y `"Albarracin, Rocio"` emiten `Person` con `confidence: 1.0`; `"San Miguel, Tucumán"`, `"Mar del Plata, Buenos Aires"`, `"La Plata, Buenos Aires"` y `"Código Civil, Título III"` **no** emiten — la compuerta es que el nombre de pila esté en `GENDER_LEXICON`. `"El actor, Juan Pérez"` tampoco emite, y no por la compuerta: ya está en el orden correcto y no es una carátula. **Una palabra de cada lado**: sin la coma como ancla un apellido compuesto no se distingue de un topónimo, y del lado del nombre un cuantificador goloso se traga la palabra capitalizada que siga — medido sobre la firma de la pericia, `"Albarracin, Rocio Date"` cruzaba al run vecino y hacía **desaparecer** el grupo de Fecha por solapamiento (el mecanismo de ADR-088 §1). El costo aceptado es que `"López, María Fernanda"` produce `"López, María"`. **Residuo aceptado**: `"Buenos Aires, Argentina"` **sí** emite, porque "Argentina" es un nombre permitido del registro — el lookbehind que lo evitaría pierde `"el Doctor Pérez, Juan"`, y un falso negativo es una fuga mientras un falso positivo es un destildado (mismo criterio que el residuo de ADR-075 §5).
 32. **La característica telefónica no siempre tiene dos dígitos** (ADR-093): `"11 4567-8900"` (CABA, característica de 2), `"221 456-7890"` (La Plata, 3), `"341 456-7890"` (Rosario, 3), `"351 456-7890"` (Córdoba, 3) y `"2954 12-3456"` (Santa Rosa, 4) emiten `Phone`, con y sin el prefijo `+54`; `"+54 9 11 4567-8900"` también (el `9` del formato de móvil internacional). Antes de este ADR solo detectaba el primero. **No** matchean, deliberadamente, formas cuyo total de dígitos contiguos (separados solo por espacio o guion) no suma exactamente 10 por rama: tres grupos de una tarjeta (`"4532 1234 5678"`), tres de un IBAN (`"1234 5678 9012"`), dos números sueltos adyacentes (`"expediente 1234 5678"`) y el tramo de un expediente (`"PP-13-00-027653-24/00"`, caso 28) siguen sin emitir Phone — es la propiedad que distingue la alternancia enumerada de un rango laxo (ADR-093 §1). `phone-landline-ar` no se toca: `"0221-4567890"` lo sigue tomando ese patrón, no el móvil. El falso positivo preexistente del CUIT (caso 29 y ADR-093 §2) sigue produciendo el mismo valor, `"20-12345678"` — este ADR no lo introduce ni lo mueve.
+33. **Los patrones cubren cómo se escribe el dato, no su forma canónica** (ADR-096): cuatro cambios, un mismo diagnóstico. **Matrícula**: las 11 formas reales medidas —`"MN 12345"`, `"MP 23456"`, `"MN 45.318"`, `"MP 9.328"`, `"M.P. 34567"`, `"M.N. 56789"`, `"MN12345"`, `"MP-12345"`, `"M.P.-34567"`, `"Matrícula Profesional 40097"` (número pelado anclado en la etiqueta) y `"Matrícula profesional: MP 61852"`— emiten `License`; `"Expediente A-12345"` **no** emite — es el falso positivo que se retira junto con la alternativa vieja, y antes de este ADR solo `"MN12345"` matcheaba. **Patente**: las 8 formas medidas —las tres estructuras (vieja 3+3, Mercosur auto 2+3+2, Mercosur moto 1+3+3) con los tres separadores (espacio, guión, ninguno), incluidas `"A 123 BCD"` y `"A456EFG"`— emiten `Plate`; los motovehículos no tenían cobertura antes de este ADR. **IBAN**: `"ES05 7068 9876 9644 6251 9569"` (el formato impreso en grupos de cuatro que recomienda ISO 13616) emite `IBAN`; la misma secuencia con el dígito verificador incorrecto no — la red del checksum mod-97 sigue puesta. Antes de este ADR el patrón no admitía espacios internos y solo detectaba la forma que nadie escribe. **Teléfono fijo**: `"011 4567-8902"` (abonado partido por un espacio) emite `Phone`; `"0221-4567890"` sigue emitiendo (no regresión) — este caso apareció solo, en la corrida del evaluador, no en ninguna lista de formas enumerada a mano. **Las siete trampas duras que no deben emitir ninguno de los cuatro tipos**: `"Ley 24.240"`, `"Art. 1234"`, `"CP B1900ABC"`, `"Resolución 45/2024"`, `"Foja 1234"`, `"N° 123456"` y `"Decreto 1023/2001"` — referencias legales/administrativas que un patrón más laxo podría confundir con una matrícula, una patente, un IBAN o un teléfono.
 
 ---
 
@@ -407,6 +410,15 @@ Casos de fragmentos y de la tabla de patrones (ADR-074, ADR-075):
 | **`"0221-4567890" is still matched by phone-landline-ar, unchanged`** | `unit.test.ts` | unit | caso 32 — no regresión del patrón que ADR-093 §3 no toca |
 | **`"CUIT 20-12345678-9" still produces the same preexisting false positive, unchanged (ADR-093 §2)`** | `unit.test.ts` | unit | caso 32 — mismo valor que antes del ADR, para que quede registrado que este cambio no lo introdujo ni lo movió |
 | **`the eight measured traps — seven that must not emit Phone`** | `unit.test.ts` | unit | caso 32 (ADR-093 §1) — expediente, DNI, tarjeta, fecha, IBAN, paginación y dos números sueltos adyacentes; la octava trampa es el CUIT de la fila anterior |
+| **`the 11 measured license forms emit License`** | `unit.test.ts` | unit | caso 33 (ADR-096 §1) — las 11 formas reales de la Validación del ADR, una por variante de prefijo/separador |
+| **`"Expediente A-12345" does NOT emit License (retired false positive)`** | `unit.test.ts` | unit | caso 33 (ADR-096 §1) — el falso positivo que se retira junto con la alternativa vieja; sin este test vuelve a colarse |
+| **`the 8 measured plate forms emit Plate, including both motorcycle forms`** | `unit.test.ts` | unit | caso 33 (ADR-096 §2) — las tres estructuras con los tres separadores |
+| `AR plate motovehículo Mercosur matches and carries its own maskFormat` | `unit.test.ts` | unit | caso 33 (ADR-096 §2) — `maskFormat` propio ("X XXX XXX"), mismo criterio que ADR-029 §2 |
+| **`valid IBAN printed with spaces (ISO 13616 grouping) matches`** | `unit.test.ts` | unit | caso 33 (ADR-096 §3) — la forma en la que un IBAN aparece en cualquier documento |
+| `IBAN printed with spaces but invalid checksum is discarded` | `unit.test.ts` | unit | caso 33 (ADR-096 §3) — la red del checksum mod-97 sigue puesta con espacios internos |
+| **`"011 4567-8902" emits Phone`** | `unit.test.ts` | unit | caso 33 (ADR-096 §4) — el caso que apareció solo, en la corrida del evaluador |
+| `"0221-4567890" still emits Phone (no regression)` | `unit.test.ts` | unit | caso 33 (ADR-096 §4) — no regresión del separador que ya funcionaba |
+| **`the seven hard traps do not emit License, Plate, IBAN or Phone`** | `edge.test.ts` | edge | caso 33 (ADR-096) — ley, artículo, código postal, resolución, foja, numeral y decreto; la mitad de la medición que protege contra convertir un patrón más laxo en una fuga |
 | `snapshot of occurrences for text-10p.pdf stable` | `snapshot.test.ts` | snapshot | fixture |
 
 Fixtures: `tests/fixtures/text-10p.pdf` (con DNIs, CUITs, emails, teléfonos conocidos).
@@ -458,23 +470,26 @@ Los patrones exactos viven en `patterns/default-ar.ts` y son parte del contrato 
 | DNI (AR) | `\b\d{1,2}\.?\d{3}\.?\d{3}\b` | – | strip dots → "34567891" |
 | CUIT/CUIL (AR) | `\b\d{2}-?\d{8}-?\d\b` | algoritmo módulo 11 | strip dashes → "20123456789" |
 | Phone (AR mobile) | `(?:\+?54[\s-]?)?(?:9[\s-]?)?\b(?:\d{2}[\s-]?\d{4}[\s-]?\d{4}\|\d{3}[\s-]?\d{3}[\s-]?\d{4}\|\d{4}[\s-]?\d{2}[\s-]?\d{4})\b` | – | strip no-digit → "541112345678" |
-| Phone (AR landline) | `\b0\d{1,4}[\s-]?\d{6,8}\b` | – | strip no-digit |
+| Phone (AR landline) | `\b0\d{1,4}[\s-]?\d{3,4}[\s-]?\d{4}\b` | – | strip no-digit |
 | Email | `\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b` | – | lowercase |
-| IBAN | `\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b` | ISO 13616 check | uppercase, strip spaces |
+| IBAN | `\b[A-Z]{2}\d{2}(?:\s?[A-Z0-9]){10,30}\b` | ISO 13616 check | uppercase, strip spaces |
 | CreditCard | `\b(?:\d[ -]*?){13,19}\b` | Luhn | strip non-digit |
 | Date (AR) | `\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b` | validación rango (día 1-31, mes 1-12) | normaliza a "DD/MM/YYYY" |
 | Date (AR, en texto) | `\b(\d{1,2})\s*[°º]?\s+de\s+(enero\|febrero\|marzo\|abril\|mayo\|junio\|julio\|agosto\|septiembre\|setiembre\|octubre\|noviembre\|diciembre)\s+del?\s+(\d{4})\b` con flags `gi` | misma validación de rango | normaliza a "DD/MM/YYYY" — **el mismo `normalizedValue` que la fila anterior**, que es lo que las agrupa |
-| License (AR) | `\b[A-Z]{1,3}-?\d{4,8}-?\d?\b` (matrícula profesional) | – | uppercase, strip dashes |
-| Plate (AR vieja) | `\b[A-Z]{3}\s?\d{3}\b` | – | uppercase, strip spaces |
-| Plate (AR Mercosur) | `\b[A-Z]{2}\s?\d{3}\s?[A-Z]{2}\b` | – | uppercase, strip spaces |
+| License (AR) | `(?<=[Mm]atr[íi]cula\s+[Pp]rofesional\s*:?\s*)\d{3,8}\b\|\bM\.?[NP]\.?[\s-]*\d{1,3}(?:\.\d{3})+\b\|\bM\.?[NP]\.?[\s-]*\d{3,8}(?:-\d)?\b` con flags `gu` (matrícula profesional; tres alternativas — número pelado anclado en la etiqueta, número con separador de miles, número plano) | – | uppercase, strip dashes |
+| Plate (AR vieja) | `\b[A-Z]{3}[\s-]?\d{3}\b` | – | uppercase, strip spaces |
+| Plate (AR Mercosur) | `\b[A-Z]{2}[\s-]?\d{3}[\s-]?[A-Z]{2}\b` | – | uppercase, strip spaces |
+| Plate (AR Mercosur moto) | `\b[A-Z][\s-]?\d{3}[\s-]?[A-Z]{3}\b` | – | uppercase, strip spaces |
 | Persona (carátula AR) | `\b(\p{Lu}\p{Ll}+),\s+(\p{Lu}\p{Ll}+)\b` con flag `u` | **el primer nombre de pila está en `GENDER_LEXICON`** (ADR-091) | **invierte** a `"Nombre(s) Apellido"` + `normalizeForComparison` — es lo que la agrupa con el nombre del cuerpo |
 
 La implementación debe respetar estos patrones y checksums. Cualquier cambio requiere ADR nuevo.
 
-**Los trece patrones pasan además por la guarda de corrida de §6** (ADR-075 §2): un match sin letras
+**Los catorce patrones pasan además por la guarda de corrida de §6** (ADR-075 §2): un match sin letras
 cuya corrida alfanumérica sí las tiene no se emite. La guarda no está en ningún `pattern` de la
 tabla porque no es una propiedad de los patrones sino del **contexto** del match, y por eso alcanza
-también a los patrones custom del usuario.
+también a los patrones custom del usuario. En la práctica solo alcanza a los seis tipos puramente
+numéricos (§6): License, Plate (las tres variantes) e IBAN llevan letras en el match, así que la
+guarda no los mira nunca.
 
 > El patrón "Phone (AR mobile)" fue corregido en la versión 1.0.1 del spec agregando límites de
 > palabra (`\b`) en ambos extremos, consistente con los otros patrones de la tabla. Ver
@@ -494,6 +509,18 @@ también a los patrones custom del usuario.
 > fija dejaba en claro a cualquier celular que no fuera de CABA. Ver
 > `adr/ADR-093-La-Caracteristica-Telefonica-No-Siempre-Tiene-Dos-Digitos.md` §1 para la medición contra
 > ocho trampas que descarta simplificar la alternancia a un rango `\d{2,4}`.
+
+> Cuatro filas de la tabla cambian en la versión 1.10.0 del spec, las cuatro por el mismo diagnóstico:
+> el patrón cubría la forma canónica del dato, no cómo aparece escrito en un documento. "License (AR)"
+> se reescribe con tres alternativas y **la alternativa vieja se retira** —medida contra 11 formas
+> reales acertaba una, y conservada junto a las nuevas no aportaba ninguna forma que éstas no cubran,
+> solo un falso positivo sobre números de expediente. "Plate (AR vieja)" y "Plate (AR Mercosur)" pasan
+> su separador de `\s?` a `[\s-]?` (el guión está en la transcripción, no en la chapa) y se agrega
+> "Plate (AR Mercosur moto)", la tercera estructura de patente, sin cobertura hasta ahora. "IBAN" admite
+> el espacio interno con el que ISO 13616 recomienda imprimirlo. "Phone (AR landline)" admite un
+> separador más adentro del abonado, en el mismo lugar donde "Phone (AR mobile)" ya lo admitía desde la
+> versión 1.9.0. Ver `adr/ADR-096-Los-Patrones-Cubren-Como-Se-Escribe-El-Dato.md` para la medición
+> completa de cada cambio.
 
 ---
 
