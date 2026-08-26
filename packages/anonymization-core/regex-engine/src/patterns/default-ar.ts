@@ -13,7 +13,7 @@
  * plate-vieja-ar: "XXX XXX").
  */
 
-import { EntityType } from "@anonly/shared";
+import { EntityType, GENDER_LEXICON, normalizeForComparison } from "@anonly/shared";
 
 import type { RegexPattern } from "../regex.types.js";
 
@@ -178,6 +178,45 @@ function normalizeTextualDate(value: string): string {
 
 // ─── Patrones default AR (Regex_Engine.md, tabla "Patrones default") ───
 
+// ─── Carátula judicial (ADR-092) ───
+
+/*
+ * ADR-092 §2: `"Pérez, Juan"` normaliza a `"juan perez"` — el MISMO
+ * `normalizedValue` que produciría `"Juan Pérez"` del cuerpo, que es lo que
+ * hace que Grouping los una. Es el mecanismo de ADR-075 §1 (la fecha textual
+ * y la numérica llegando al mismo valor), aplicado al orden invertido.
+ *
+ * Contra una ocurrencia de NER la unión ocurre por el pase DIFUSO, no por el
+ * exacto: `normalizeNerValue` no pliega diacríticos, así que emite
+ * `"juan pérez"` contra este `"juan perez"` — 0,9 sobre un umbral de 0,88.
+ * Es la deuda anotada en ADR-088 §3.
+ */
+function flipCaption(value: string): string {
+  const commaIndex = value.indexOf(",");
+  if (commaIndex === -1) return normalizeForComparison(value);
+  const surname = value.slice(0, commaIndex);
+  const givenNames = value.slice(commaIndex + 1);
+  return normalizeForComparison(`${givenNames} ${surname}`);
+}
+
+/*
+ * ADR-092 §1: la compuerta. `RegexPattern.checksum` es "validación adicional
+ * sobre el normalizedValue", y la de una carátula es que el nombre de pila
+ * sea un nombre de pila — igual que la de un CUIT es que cierre el módulo 11.
+ * Sin ella el patrón matchea `"Buenos Aires, Argentina"`,
+ * `"San Miguel, Tucumán"` y `"Código Civil, Título III"`: medido, 7/10
+ * contra 15/16.
+ *
+ * El valor llega YA invertido por `flipCaption`, así que el nombre de pila es
+ * el PRIMER token. Las claves del léxico están pre-normalizadas con el mismo
+ * criterio que `normalizeForComparison` (ADR-069 §1), así que se consultan
+ * directo.
+ */
+function firstNameIsInLexicon(normalizedValue: string): boolean {
+  const firstToken = normalizedValue.split(" ")[0];
+  return firstToken !== undefined && GENDER_LEXICON.has(firstToken);
+}
+
 export const DEFAULT_PATTERNS_AR: ReadonlyArray<RegexPattern> = [
   {
     id: "dni-ar",
@@ -275,5 +314,38 @@ export const DEFAULT_PATTERNS_AR: ReadonlyArray<RegexPattern> = [
     pattern: /\b[A-Z]{2}\s?\d{3}\s?[A-Z]{2}\b/g,
     normalizer: normalizeUppercaseNoSpaces,
     maskFormat: "XX XXX XX",
+  },
+  {
+    /*
+     * ADR-092 §1 — `"Apellido, Nombre"`, la forma canónica de una carátula
+     * judicial. **Una palabra de cada lado**, y las dos razones son
+     * distintas:
+     *
+     * - El apellido, porque sin la coma como ancla un apellido compuesto no
+     *   se distingue de un topónimo (`"Mar del Plata, Buenos Aires"`).
+     * - El nombre, porque un cuantificador goloso se traga cualquier palabra
+     *   capitalizada que siga. Medido sobre la firma de la pericia
+     *   (`tests/integration/annotation-signature.test.ts`): con `(?:\s+…)*`
+     *   el patrón matchea `"Albarracin, Rocio Date"` sobre el texto
+     *   `"Albarracin, Rocio Date: 07/07/2026"` — la ocurrencia cruza al run
+     *   siguiente, su envolvente se estira sobre los dos, y Grouping descarta
+     *   por solapamiento el grupo de **Fecha**. Es el mismo mecanismo que
+     *   ADR-088 §1 tuvo que cerrar en NER: una entidad que abarca dos runs no
+     *   solo tapa de más, hace **desaparecer** a su vecina.
+     *
+     * El costo es que un segundo nombre de pila (`"López, María Fernanda"`)
+     * queda fuera del match. Se acepta: el apellido y el primer nombre son la
+     * parte identificatoria, y el resto es territorio del NER.
+     *
+     * `maskFormat` es el mismo que `MASK_FORMAT_BY_TYPE[Person]` de
+     * `grouping-engine`: una carátula no tiene una forma de máscara propia,
+     * a diferencia de las dos variantes de patente (ADR-029 §2).
+     */
+    id: "caratula-ar",
+    entityType: EntityType.Person,
+    pattern: /\b(\p{Lu}\p{Ll}+),\s+(\p{Lu}\p{Ll}+)\b/gu,
+    checksum: firstNameIsInLexicon,
+    normalizer: flipCaption,
+    maskFormat: "XXXXX XXXXX",
   },
 ];

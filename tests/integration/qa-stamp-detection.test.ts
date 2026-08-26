@@ -6,8 +6,9 @@
  * **Por qué este archivo existe**: el gate manual encontró que el PDF
  * exportado de este fixture sigue conteniendo nombres legibles, y ninguna
  * suite lo veía. Nació reproduciendo las tres fugas antes de tocar ningún
- * motor; §23a y §23b las cerró ADR-088 y acá quedan como no-regresión, §23c
- * sigue abierta y sigue marcada con `it.fails`.
+ * motor, con un `it.fails` por cada una. **Las tres están cerradas**: §23a y
+ * §23b por ADR-088, §23c por ADR-092. Lo que queda acá es la no-regresión —
+ * cada `it` afirma la garantía que reemplazó a la fuga, no el defecto.
  *
  * **Qué es real acá y qué no**. `pdfjs-dist` va **sin mockear**: el fixture se
  * lee del disco y el `Word[]` con `bbox.rotation` de los runs a 90°/270° lo
@@ -22,8 +23,8 @@
  *
  * **Un `it.fails` es un defecto abierto**: describe lo que el producto promete
  * y hoy no cumple. Pasa mientras el defecto existe y falla el día que se
- * arregla, que es cuando hay que convertirlo en `it` normal — es lo que pasó
- * con §23a y §23b.
+ * arregla, que es cuando hay que convertirlo en `it` normal. Hoy no queda
+ * ninguno; el patrón está acá documentado para el próximo hallazgo.
  *
  * **La cobertura se mide sobre los grupos, no sobre las ocurrencias emitidas**
  * (ver `isWordCovered`): NER emite `ENTITY_FOUND` también para lo que Grouping
@@ -36,7 +37,9 @@ import { resolve } from "node:path";
 import { createCore, type IAnonymizationCore } from "@anonly/anonymization-core";
 import {
   EngineEvents,
+  EntityType,
   EventChannel,
+  normalizeForComparison,
   type EntityFound,
   type EntityGroup,
   type EntityGroupCreated,
@@ -301,23 +304,31 @@ describe("integración — fugas de detección de qa-stamp.pdf (§23a/§23b/§23
 
   // ─── §23c: la carátula ───
 
-  it("estado actual: de la carátula 'Pérez, Juan' no sobrevive ninguna ocurrencia", () => {
+  it("§23c: la carátula 'Pérez, Juan' se detecta como persona (ADR-092)", () => {
     const perezCaratula = wordIndex(run.words, (word) => word.text === "Pérez,");
     const juanCaratula = perezCaratula + 1;
 
     expect(run.words[perezCaratula]?.text).toBe("Pérez,");
     expect(run.words[juanCaratula]?.text).toBe("Juan");
 
-    // El apellido no lo etiqueta el modelo; el nombre sí, pero con 0,5887 —
-    // debajo del `confidenceThreshold` de 0,7, así que Grouping lo manda al
-    // camino de baja confianza y no queda grupo.
-    expect(isWordCovered(run, perezCaratula)).toBe(false);
-    expect(run.groups.some((group) => group.canonicalValue === "Juan")).toBe(false);
+    // El modelo etiqueta los dos tokens pero con 0,5924 y 0,6991 — debajo del
+    // `confidenceThreshold` de 0,7, así que Grouping los manda al camino de
+    // confianza baja y los descarta. Lo que cubre la carátula es el patrón
+    // `caratula-ar`, con `confidence: 1.0` y `source: regex`.
+    expect(isWordCovered(run, perezCaratula)).toBe(true);
+    expect(isWordCovered(run, juanCaratula)).toBe(true);
   });
 
-  it.fails("§23c: la carátula 'Pérez, Juan' se detecta como persona", () => {
-    const perezCaratula = wordIndex(run.words, (word) => word.text === "Pérez,");
-    expect(isWordCovered(run, perezCaratula)).toBe(true);
+  it("§23c: la carátula cae en el MISMO grupo que el nombre del cuerpo", () => {
+    // El `normalizer` invierte a "juan perez" (ADR-092 §2), que es lo que
+    // produce el nombre del cuerpo. Sin eso, el documento anonimizado
+    // nombraría a la misma persona con dos tokens distintos.
+    const grupos = run.groups.filter((group) => group.type === EntityType.Person);
+    const juanPerez = grupos.filter(
+      (group) => normalizeForComparison(group.canonicalValue) === "juan perez",
+    );
+    expect(juanPerez).toHaveLength(1);
+    expect(juanPerez[0]?.members.length).toBeGreaterThan(1);
   });
 
   // ─── §23b: el sello en mayúsculas ───

@@ -90,10 +90,11 @@ describe("RegexEngine — unit tests", () => {
   });
 
   describe("DEFAULT_PATTERNS_AR — contrato de datos", () => {
-    it("contiene exactamente los 12 patrones default de Regex_Engine.md (ADR-075 §1)", () => {
+    it("contiene exactamente los 13 patrones default de Regex_Engine.md (ADR-092)", () => {
       const ids = DEFAULT_PATTERNS_AR.map((p) => p.id).sort();
       expect(ids).toEqual(
         [
+          "caratula-ar",
           "credit-card",
           "cuit-ar",
           "date-ar",
@@ -917,6 +918,102 @@ describe("RegexEngine — unit tests", () => {
 
       expect(matches.map((m) => m.pageIndex)).toEqual([0, 0, 1]);
       expect(matches.map((m) => m.wordSpan.startIndex)).toEqual([1, 2, 1]);
+    });
+  });
+
+  describe("carátula judicial (ADR-092)", () => {
+    /** Los valores emitidos como `Person`, en orden. */
+    async function personas(tokens: ReadonlyArray<string>): Promise<string[]> {
+      const document = makeSinglePageDocument(`doc-caratula-${tokens.join("-")}`, tokens);
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      await engine.process({ document }, ctx);
+      const valores = busEmitSpy.mock.calls
+        .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
+        .map(([, , payload]) => (payload as EntityFound).occurrence)
+        .filter((o) => o.entityType === EntityType.Person)
+        .map((o) => o.value);
+      busEmitSpy.mockRestore();
+      return valores;
+    }
+
+    it("a judicial caption is detected as a person", async () => {
+      await expect(
+        personas(["Expediente", "caratulado:", "Pérez,", "Juan", "c/", "Empresa"]),
+      ).resolves.toEqual(["Pérez, Juan"]);
+      await expect(personas(["Autos:", "Rodríguez,", "Marta", "s/", "sucesión"])).resolves.toEqual([
+        "Rodríguez, Marta",
+      ]);
+      await expect(personas(["Firmado:", "Albarracin,", "Rocio"])).resolves.toEqual([
+        "Albarracin, Rocio",
+      ]);
+    });
+
+    // Una palabra de cada lado (ADR-092 §1). Un segundo nombre de pila queda
+    // fuera del match, y es deliberado: con un cuantificador goloso el patrón
+    // se traga la palabra capitalizada que siga —medido, `"Albarracin, Rocio
+    // Date"` sobre la firma de la pericia— y esa ocurrencia cruza al run
+    // siguiente y hace desaparecer al grupo vecino.
+    it("captures one given name, and leaves a second one to NER", async () => {
+      await expect(
+        personas(["perito", "a", "López,", "María", "Fernanda,", "quien", "acepta"]),
+      ).resolves.toEqual(["López, María"]);
+    });
+
+    // La regresión concreta que fijó el límite de arriba: sin él, la
+    // ocurrencia se estira sobre dos runs y Grouping descarta por
+    // solapamiento la entidad de al lado (mismo mecanismo que ADR-088 §1).
+    it("does not swallow a capitalized word that follows the given name", async () => {
+      await expect(personas(["Albarracin,", "Rocio", "Date:", "07/07/2026"])).resolves.toEqual([
+        "Albarracin, Rocio",
+      ]);
+    });
+
+    // La compuerta del léxico. Sin ella el patrón matchea media Argentina:
+    // medido, 7/10 contra 15/16 (ADR-092, Contexto §2).
+    it("toponyms and legal references are not captions", async () => {
+      const trampas: ReadonlyArray<ReadonlyArray<string>> = [
+        ["oficina", "de", "San", "Miguel,", "Tucumán"],
+        ["domicilio", "en", "Mar", "del", "Plata,", "Buenos", "Aires"],
+        ["Notifíquese", "en", "La", "Plata,", "Buenos", "Aires"],
+        ["conforme", "al", "Código", "Civil,", "Título", "III"],
+        ["sede", "en", "Rivadavia", "455,", "Quilmes,", "Provincia"],
+        // Ya está en el orden correcto: no es una carátula, y no por la
+        // compuerta sino por la forma.
+        ["El", "actor,", "Juan", "Pérez,", "promueve", "demanda"],
+      ];
+      for (const tokens of trampas) {
+        await expect(personas(tokens), tokens.join(" ")).resolves.toEqual([]);
+      }
+    });
+
+    // ADR-092 §2: el `normalizer` invierte, y eso es lo que las une. Sin la
+    // inversión el documento anonimizado nombraría a la misma persona con dos
+    // tokens distintos.
+    it("the caption and the body name end up in the same group", async () => {
+      const document = makeSinglePageDocument("doc-caratula-grupo", [
+        "Caratulado:",
+        "Pérez,",
+        "Juan",
+        "—",
+        "el",
+        "actor",
+        "Juan",
+        "Pérez",
+        "promueve",
+      ]);
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      await engine.process({ document }, ctx);
+      const normalizados = busEmitSpy.mock.calls
+        .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
+        .map(([, , payload]) => (payload as EntityFound).occurrence)
+        .filter((o) => o.entityType === EntityType.Person)
+        .map((o) => o.normalizedValue);
+      busEmitSpy.mockRestore();
+
+      // El patrón solo alcanza la carátula; lo que este test fija es que su
+      // `normalizedValue` sea el del nombre en orden natural, que es la clave
+      // por la que Grouping une el pase exacto.
+      expect(normalizados).toEqual(["juan perez"]);
     });
   });
 

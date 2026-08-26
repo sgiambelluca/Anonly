@@ -417,6 +417,36 @@ describe("RegexEngine — edge case tests", () => {
     });
   });
 
+  // Caso 31 (§13, ADR-092, Contexto §3): el residuo aceptado. "Argentina" ES
+  // un nombre de pila permitido en el registro de Buenos Aires, así que la
+  // compuerta del léxico lo deja pasar. El lookbehind que lo evitaría pierde
+  // "el Doctor Pérez, Juan" — y en una herramienta de privacidad un falso
+  // negativo es una fuga mientras un falso positivo es un destildado. Se
+  // afirma acá para que la limitación sea conocida y no una sorpresa, mismo
+  // criterio que "Tel.0221-4567890" de ADR-075 §5.
+  describe("Caso 31: carátula — residuo aceptado", () => {
+    it('"Buenos Aires, Argentina" still emits (accepted residue)', async () => {
+      const document = makeSinglePageDocument("doc-caratula-residuo", [
+        "con",
+        "domicilio",
+        "en",
+        "Buenos",
+        "Aires,",
+        "Argentina",
+      ]);
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      await engine.process({ document }, ctx);
+      const personas = busEmitSpy.mock.calls
+        .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
+        .map(([, , payload]) => (payload as EntityFound).occurrence)
+        .filter((o) => o.entityType === EntityType.Person)
+        .map((o) => o.value);
+      busEmitSpy.mockRestore();
+
+      expect(personas).toEqual(["Aires, Argentina"]);
+    });
+  });
+
   // Caso 27 (§13, ADR-075 §1): las dos limitaciones deliberadas del patrón
   // de fecha textual — asertadas para que no se implementen por accidente
   // ni se rompan en silencio (mismo criterio que "J. Pérez" de ADR-061 §2).
