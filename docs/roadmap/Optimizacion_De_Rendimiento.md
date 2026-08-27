@@ -97,6 +97,22 @@ Hay que auditar además que `COEP: require-corp` no rompa ninguna carga cross-or
 
 **Plan acordado**: tres cortes de medición — antes de A, después de A y antes de C, después de los dos — y decidir con los números, incluida la opción de revertir C.
 
+#### Resultado: C **se implementó, se midió y se revirtió**
+
+Suma de inferencia de NER sobre los 26 documentos:
+
+| corte | total | contra el anterior |
+|---|---|---|
+| antes de A | 13 564 ms | — |
+| **después de A** | **6 287 ms** | **−53,6 %** |
+| después de A **y** C | 6 386 ms | **+1,6 %** |
+
+C no aporta nada sobre A: lo empeora, dentro del ruido. Y el detalle que lo confirma es dónde empeora — los documentos de **dos páginas**, los únicos donde C podía rendir, son los que más suben (`doc-001` 650 → 896 ms, `doc-024` 126 → 234 ms). Son los hilos que A le dio a ONNX compitiendo con los dos workers de C por los mismos núcleos.
+
+La calidad no se movió en ninguno de los cortes (61/61, 12/17, 84/97), así que **el riesgo de la cadena difusa no llegó a materializarse** — pero eso ya no importa para decidir: sin ganancia, no hay nada que justificar.
+
+**Queda revertido.** Si alguna vez A no se puede activar (ver arriba: depende del hosting), C vuelve a la mesa — y ahí sí habría que resolver primero el orden de `findMatchingGroup`.
+
 #### El riesgo de orden es más chico de lo que parecía, y está acotado
 
 La **numeración** es inmune al orden por diseño: ADR-028 renumera canónicamente por primera aparición documental antes de `GROUPING_FINISHED`, y el comentario de `grouping.engine.ts:1009` dice explícitamente que el orden de llegada de `ENTITY_FOUND` ya es *"no-determinístico entre corridas — motores en paralelo"*.
@@ -197,7 +213,7 @@ Y `test:quality` corre **con NER apagado** (ADR-095 §5), así que hoy no hay fo
 | ~~**2**~~ | ~~**D1**~~ — **hecho**: ADR-099, chunk inicial de 549 a 208 KB gz (−62 %) | foco declarado nº 1, riesgo cero, tres cambios chicos |
 | **3** | **A** (COOP/COEP) — **medido: −53,6 % de inferencia, calidad intacta**; falta decidir el despliegue | la ganancia más grande; medir antes de comprometerse |
 | ~~**4**~~ | ~~**B** (OCR en paralelo)~~ — **hecho**: ADR-101, −22 % a −27 % en documentos de dos páginas | limpio, sin riesgo de calidad |
-| **5** | **C**, remidiendo | tres cortes; revertir si A ya se llevó la ganancia |
+| ~~**5**~~ | ~~**C**~~ — **medido y REVERTIDO**: no aporta nada sobre A | tres cortes; revertir si A ya se llevó la ganancia |
 | — | **D2**, los dos O(n²) | **diferidos**, a rediscutir al cerrar lo anterior |
 
 La duplicación de lógica se apartó a [`Duplicacion_De_Logica.md`](./Duplicacion_De_Logica.md): no hace la herramienta más rápida y es una campaña propia.
