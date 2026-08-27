@@ -649,11 +649,26 @@ O sea que la clave de empalme de ADR-097 §2 —cadena exacta + origen— **no p
 
 "Expuestas" = palabras que **no** son la primera de un item multi-palabra, o sea las únicas que el prorrateo puede correr. Las de una palabra tienen caja exacta por aritmética.
 
-**El veredicto es que ADR-097 es inerte en documentos reales, y el defecto original sigue vivo para la mayoría del texto.** Los items de una sola palabra son mayoría (76-84 % de los items) pero contienen **poco texto**: los multi-palabra agrupan ~10 palabras cada uno, así que entre el 59 % y el 77 % de las palabras del documento quedan en posición expuesta.
+**ADR-097 es inerte en documentos reales**: el empalme no acierta y el prorrateo de ADR-020 §1 gobierna casi todo el texto.
 
-Esto **sube la prioridad de esta sección**: no es un defecto de borde, es el caso común. La tercera salida —tabla de avances continua por página— pasa de "no decidida" a "lo que hay que evaluar".
+### Y cuánto daño hace, medido (también a ciegas)
 
-**Lo que sigue sin medirse**: cuánto de esa exposición se traduce en daño real. Una palabra al principio de su item se corre poco; el error crece hacia el final. Y lo que importa no son todas las palabras sino las que son **entidad**. Medirlo pide mirar el contenido, y estos documentos son reales. Sobre los 28 fixtures del repo da 100 %, pero todos salen de `pdf-lib` (ver "Lo que falta para decidir bien"). ADR-097 §5 instrumenta la cuenta por página, en `debug`, para que el día que aparezca un documento de verdad el número esté ahí sin volver a instrumentar. Ese número es lo único que justificaría pagar la opción B.
+La exposición no es el daño. Comparando, palabra por palabra, la posición real (avances glifo a glifo) contra la que da el prorrateo:
+
+| | fallo (51 pp) | pericia (5 pp) |
+|---|---|---|
+| error mediano | 0,91 pt | 1,52 pt |
+| percentil 90 | 4,10 pt | 4,85 pt |
+| máximo | 14,69 pt | **39,16 pt** |
+| **primer carácter a la vista** | **1,7 %** | **11,4 %** |
+
+> **Corrección a la primera redacción de esta sección.** Decía que el defecto afectaba *"a la mayoría del texto"* y que era *"el caso común"*, leyendo el 59-77 % de exposición como si fuera daño. **No lo es.** Expuesto significa "el prorrateo lo puede correr"; el corrimiento real supera el ancho del primer glifo —o sea, deja el primer carácter a la vista— en el **1,7 % al 11,4 %** de las palabras. El defecto es real y acotado, no generalizado.
+
+Aun así **no es despreciable**: en un documento con cien entidades, entre dos y once quedarían con su primer carácter afuera de la caja. Y los máximos son grandes: 39 pt son más de tres caracteres.
+
+**Lo que esta medición NO cubre**: solo mira el **borde izquierdo**. El ancho de la caja también sale mal (ADR-097, Contexto §1: `promueve` salía 8,43 pt más angosta), así que puede tapar de menos por la derecha sin que este número lo registre. Y un corrimiento menor al primer glifo igual deja una astilla visible.
+
+**Lo que sigue sin medirse**: si las palabras que caen en ese 1,7-11,4 % son **entidades**. Eso pide mirar el contenido; estos documentos son reales y no se abrieron. Sobre los 28 fixtures del repo da 100 %, pero todos salen de `pdf-lib` (ver "Lo que falta para decidir bien"). ADR-097 §5 instrumenta la cuenta por página, en `debug`, para que el día que aparezca un documento de verdad el número esté ahí sin volver a instrumentar. Ese número es lo único que justificaría pagar la opción B.
 
 ### Lo que este hallazgo NO frena
 
