@@ -690,7 +690,20 @@ Que la mediana del error sea de 1,52 pt no consuela: **las que fallan son las qu
 
 **(c) Defecto distinto, y de DETECCIÓN: el número de expediente queda entero a la vista.** Aparece dos veces, en dos formatos (uno tipo `PP-NN-NN-NNNNNN-NN/NN` y otro tipo `I.P.P. N°NN-NNNNN-NN`), **sin tapar en absoluto**. No es geometría: no lo detectó nadie, porque `default-ar.ts` no tiene patrón para número de expediente. En un anonimizador de expedientes judiciales, ese número es un identificador directo del caso — **es el hueco de detección más grave encontrado hasta ahora**, y no estaba en ningún informe.
 
-**Consecuencia**: §24 deja de ser teórico. Y (c) merece entrada propia — ver §26. Sobre los 28 fixtures del repo da 100 %, pero todos salen de `pdf-lib` (ver "Lo que falta para decidir bien"). ADR-097 §5 instrumenta la cuenta por página, en `debug`, para que el día que aparezca un documento de verdad el número esté ahí sin volver a instrumentar. Ese número es lo único que justificaría pagar la opción B.
+**Consecuencia**: §24 deja de ser teórico. Y (c) merece entrada propia — ver §26.
+
+### Cerrado el 2026-08-27 — ADR-102
+
+El defecto (a) y (b) se atacan por la misma vía: el recorrido pasa a emitir un **flujo continuo de glifos por página** y el item se alinea contra él carácter a carácter, en vez de exigir que su cadena sea igual a la de un run. Medido con el motor ya implementado:
+
+| | items alineados | palabras que siguen con prorrateo |
+|---|---|---|
+| fallo judicial (51 pp) | 2,9 % → **100 %** | 8388 (58,6 %) → **0** |
+| pericia (5 pp) | 27,4 % → **89,3 %** | 1222 (77,2 %) → **11 (0,9 %)** |
+
+Los items que no alinean resultaron ser minúsculos: en la pericia son nueve items que suman **once palabras**. La exposición pasa de ser la mayoría del texto a ser residual.
+
+**Falta rehacer el gate visual** con esto aplicado, para confirmar que las cinco fugas de la página medida efectivamente desaparecieron — es lo único que cierra (a) y (b) del todo. El defecto (c), el número de expediente, **no lo toca esta decisión**: sigue abierto en §26. Sobre los 28 fixtures del repo da 100 %, pero todos salen de `pdf-lib` (ver "Lo que falta para decidir bien"). ADR-097 §5 instrumenta la cuenta por página, en `debug`, para que el día que aparezca un documento de verdad el número esté ahí sin volver a instrumentar. Ese número es lo único que justificaría pagar la opción B.
 
 ### Lo que este hallazgo NO frena
 
