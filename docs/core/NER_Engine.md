@@ -330,6 +330,37 @@ Fixtures: `tests/fixtures/text-10p.pdf` con nombres/organizaciones/direcciones/f
 
 ---
 
+## 14.1. Limitaciones medidas del modelo
+
+> Medidas el 2026-08-27 con el **modelo real** (`Xenova/bert-base-multilingual-cased-ner-hrl`, q8) corriendo en Chromium sobre el dataset de referencia, vía `pnpm test:measure` (`tests/measure/`). Son del **modelo**, no del código: no se arreglan con un cambio de motor, y esta sección existe para que no se vuelvan a diagnosticar como un defecto de implementación.
+
+### Direcciones: reconoce ciudades, se pierde domicilios
+
+El concepto de `ADDRESS` del modelo **no es el del dominio**. Sobre `"con domicilio en Rivadavia 4820"` devuelve `B-LOC:Riva I-LOC:##da I-LOC:##via` — la calle **sin el número**.
+
+Medido sobre el dataset de referencia, las direcciones que **no** se cubren son todas de calle + número:
+
+```
+ADDRESS "Maipú 1434"       ADDRESS "Belgrano 5983"
+ADDRESS "Pueyrredón 9741"  ADDRESS "Pueyrredón 2584"
+```
+
+Y en el otro sentido, el modelo emite topónimos que el ground truth no enumera —`"Buenos Aires"`, `"La Plata"`, `"Tucumán"`, `"Mar del Plata"`— que son correctos pero **no son un domicilio**.
+
+Es la misma limitación vista desde los dos lados: el modelo resuelve **lugares**, y lo que el producto necesita tapar es un **domicilio postal**. Un domicilio anonimizado a medias —con el número a la vista— no cumple el propósito de censura.
+
+**Implicancia para el gate de v1.0** (`MVP.md` §5, recall de NER ≥ 85 %): el recall de `ADDRESS` no lo va a alcanzar con este modelo solo. Las salidas plausibles, ninguna decidida: extender el span del modelo hasta el número contiguo con una regla de post-proceso, cubrir el domicilio con un patrón de `regex-engine` (precedente: ADR-092, la carátula que el modelo veía por debajo del umbral y terminó siendo un patrón), o cambiar de modelo. **Ninguna de las tres está evaluada.**
+
+### Ruido de bajo valor semántico
+
+El modelo tipa como `ORGANIZATION` cosas que no lo son: la sigla `"DNI"` suelta, `"Estado"`, `"San Miguel"` (un lugar), y una vez el fragmento `"fono de contacto"` — que **arranca a mitad de palabra**, y ese sí puede ser un defecto de offsets del motor y no del modelo; no está diagnosticado.
+
+También aparece `PERSON "I"`, una sola letra.
+
+Nada de esto lo frena hoy el umbral de sugerencia de ADR-094 (`MIN_SUGGESTION_CONFIDENCE = 0.5`, que el propio ADR marca como **no medido**): en la corrida del dataset, las sugerencias dieron **0**. Ahora hay con qué calibrarlo.
+
+---
+
 ## 15. Checklist de implementación
 
 - [ ] 1. Crear paquete `packages/anonymization-core/ner-engine/`.
