@@ -863,24 +863,47 @@ Medido sobre la pericia real con el harness ciego (solo estructura, sin valores)
 
 **(a) Adyacentes.** Cuatro pares pegados, incluidos dos de 8×8 pt —fragmentos— y dos que combinan `DATE` con `ADDRESS`. Acá **no hay solapamiento que resolver**: son dos detecciones vecinas, y el caso reportado (`Departamento Judicial Quilmes` saliendo como dos tokens) encaja acá. El arreglo no es resolución de conflictos sino decidir si dos detecciones contiguas del mismo tipo se funden.
 
-**(b) Contención, y con un hallazgo nuevo.** Los tres casos involucran a **la misma entidad, de 561 pt de ancho**:
+**(b) Contención: era un artefacto de mi medición, y destapó un defecto real del motor.**
+
+La primera redacción de esta sección decía que había *"una entidad de 561 pt que no es un nombre, es una línea entera"*. **Estaba mal.** Caracterizada a ciegas:
 
 ```
-CONTIENE  PERSON/PERSON        largos  98/561 pt
-CONTIENE  ORGANIZATION/PERSON  largos 106/561 pt
-CONTIENE  PERSON/PERSON        largos 561/70 pt
+ancho  alto  tipo    det   conf  pág  chars  palabras  líneas
+  561    18  PERSON  ner  1.000    1     18         3       2
 ```
 
-561 pt es **media página de ancho**. Una `PERSON` de ese tamaño no es un nombre: es una línea entera tomada como una sola entidad, que se traga a las tres que caen adentro.
+Son **18 caracteres y 3 palabras** — un nombre normal. Lo que la hace de 561 pt es que **cruza un salto de renglón**: `fragments` tiene 2 entradas, y su `bbox` es la **envolvente** de las dos líneas, que abarca el bloque de texto entero. Es exactamente el diseño de ADR-074, funcionando como corresponde.
 
-Y dos de los tres pares son `PERSON/PERSON`, o sea **del mismo tipo** — que es justo lo que `findOverlapConflict` saltea:
+Mi diagnóstico comparaba envolventes. Medido de las dos formas sobre el mismo documento:
+
+```
+usando la ENVOLVENTE:  contiene 3   parcial 0
+usando FRAGMENTS:      contiene 0   parcial 0
+```
+
+**Pero el motor comete el mismo error, y ahí sí cuesta caro.** `findOverlapConflict` compara envolventes:
 
 ```ts
-if (rec.entityType === occurrence.entityType) continue;   // grouping.engine.ts:1795
+if (bboxIntersectionRatio(rec.bbox, occurrence.bbox) > 0.5) {   // grouping.engine.ts:1801
 ```
 
-**Sin decidir**, y son decisiones separadas:
+Cuando `Contracts.md` línea 469 fija la regla al revés: *"Quien PINTA usa `fragments ?? [bbox]`, **nunca la envolvente sola**"*.
 
-1. **La entidad de 561 pt es el problema de fondo** y no está diagnosticada. Puede ser un span de NER que se estiró (mismo mecanismo que ADR-088 §1 cerró para runs rotados) o una detección legítimamente larga. Hay que mirarla antes de tocar la resolución de conflictos: si esa entidad no existiera, dos de los tres casos de contención desaparecen solos.
-2. **El salteo por tipo igual** de `findOverlapConflict`. Levantarlo hace que dos detecciones del mismo tipo compitan, y hay que definir quién gana — hoy el criterio es confianza, que entre dos NER del mismo tipo puede no discriminar.
-3. **La fusión de adyacentes** (a), que es un mecanismo que no existe.
+Y no es teórico. Medido sobre la misma pericia:
+
+```
+conflictos por razón: {"overlap": 3, "ambiguous_canonical": 1}
+ocurrencias emitidas ......... 29
+  en un grupo ACTIVO ......... 22
+  perdidas en el camino ...... 7
+```
+
+**Los 3 conflictos `overlap` son exactamente los 3 artefactos.** Con `fragments` no habría ninguno. Una sola entidad que cruza renglón está generando tres conflictos falsos, y un conflicto falso hace que una entidad real **pierda y desaparezca** — que es el mecanismo que la nota de `caratula-ar` ya describía: *"una entidad que abarca dos runs no solo tapa de más, hace desaparecer a su vecina"*.
+
+ADR-074 introdujo `fragments` justamente para que la envolvente dejara de tapar de más. La detección de conflictos nunca los adoptó.
+
+### Lo que queda por decidir
+
+1. **Causa raíz, con arreglo claro**: que `findOverlapConflict` compare `fragments ?? [bbox]` contra `fragments ?? [bbox]`, como manda el contrato. Cambia qué conflictos se levantan, así que hay que medir el antes y después con `test:quality` y con el harness ciego.
+2. **El salteo por tipo igual** (`if (rec.entityType === occurrence.entityType) continue`) queda **sin evaluar** hasta que (1) esté hecho: con 0 solapamientos reales en este documento, hoy no hay evidencia de que haga falta levantarlo.
+3. **La fusión de adyacentes** (a) sigue siendo un mecanismo que no existe, y es lo que el humano reportó (`Departamento Judicial Quilmes` como dos tokens).
