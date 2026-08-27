@@ -162,6 +162,24 @@ Tres cambios chicos, **un motor cada uno** — encajan con R-1 sin fricción. Ri
 
 ---
 
+## La calidad del OCR, medida por primera vez
+
+`pnpm test:measure` con `MEASURE_SCAN=1` rasteriza cada documento del dataset **dentro de la misma página** —con el helper que ya usa el escenario 2 de `tests/e2e/`— y lo pasa por el pipeline sin capa de texto. El ground truth es el del documento de texto: son el mismo documento, así que **la diferencia entre las dos corridas es la calidad del OCR**.
+
+Se hace en el momento y no con un fixture commiteado porque rasterizar necesita un canvas de browser: un binario escaneado en el repo sería un archivo que CI no sabe regenerar.
+
+| | vía texto | vía OCR |
+|---|---|---|
+| recall de Regex | 61/61 (100 %) | **56/61 (91,8 %)** |
+| recall de NER | 12/17 (70,6 %) | 12/17 (70,6 %) |
+| precisión | 84/97 (86,6 %) | 80/95 (84,2 %) |
+
+Las cinco que se pierden son **emails e IBAN** — cadenas alfanuméricas largas, donde un carácter mal leído rompe el patrón entero. Los nombres sobreviven: NER no se mueve.
+
+**Sigue sin medirse** cuánto de esto es del OCR y cuánto del rasterizado sintético: el escaneo lo produce el mismo browser a partir de un PDF limpio, así que no tiene ruido, torcido ni manchas. Un escaneo real va a ser peor.
+
+---
+
 ## El agujero de fondo: no hay dónde apoyar el "antes y después"
 
 `package.json` define `test:perf`, `test:stress`, `test:leak` y `test:cancel` (líneas 31-34) y **los cuatro directorios no existen**. Ninguna métrica contractual de `07_Performance_Strategy.md` §1 tiene medición automatizada.
@@ -178,7 +196,7 @@ Y `test:quality` corre **con NER apagado** (ADR-095 §5), así que hoy no hay fo
 | ~~**1**~~ | ~~truncamiento silencioso~~ — **hecho**: ADR-098 | el único que ya estaba costando calidad |
 | ~~**2**~~ | ~~**D1**~~ — **hecho**: ADR-099, chunk inicial de 549 a 208 KB gz (−62 %) | foco declarado nº 1, riesgo cero, tres cambios chicos |
 | **3** | **A** (COOP/COEP) — **medido: −53,6 % de inferencia, calidad intacta**; falta decidir el despliegue | la ganancia más grande; medir antes de comprometerse |
-| **4** | **B** (OCR en paralelo) | limpio, sin riesgo de calidad |
+| ~~**4**~~ | ~~**B** (OCR en paralelo)~~ — **hecho**: ADR-101, −22 % a −27 % en documentos de dos páginas | limpio, sin riesgo de calidad |
 | **5** | **C**, remidiendo | tres cortes; revertir si A ya se llevó la ganancia |
 | — | **D2**, los dos O(n²) | **diferidos**, a rediscutir al cerrar lo anterior |
 

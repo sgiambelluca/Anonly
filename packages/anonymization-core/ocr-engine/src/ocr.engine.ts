@@ -456,30 +456,57 @@ export class OcrEngine implements IEngine {
       ...(modelAlreadyLoaded ? {} : { modelLoading: true }),
     });
 
-    const outputs: OcrPageOutput[] = [];
-    for (const input of inputs) {
-      if (ctx.abortSignal.aborted) {
-        throw new CancelledError(documentId);
-      }
-      try {
-        // Secuencial a propósito (checklist §15.7: "Hito 3: secuencial en el
-        // orden recibido, con checkpoint de cancelación entre páginas"; la
-        // priorización por visibilidad y el despacho paralelo al pool son
-        // del Orchestrator, Hito 9).
-        const output = await this.processPage(input, ctx);
-        outputs.push(output);
-      } catch (err: unknown) {
-        if (err instanceof CancelledError || err instanceof OcrModelMissingError) {
-          throw err;
+    /*
+     * ADR-101: hasta `ocrPoolSize` páginas en vuelo a la vez.
+     *
+     * Este loop era secuencial **a propósito**, y el comentario que estaba
+     * acá lo decía: el checklist §15.7 lo fijaba así para el Hito 3 y dejaba
+     * "el despacho paralelo al pool" a cargo del Orchestrator en el Hito 9.
+     * El Hito 9 cerró y el Orchestrator hace una sola llamada a
+     * `processPages`: el traspaso nunca aterrizó, y el pool quedó con dos
+     * lugares y uno usado.
+     *
+     * El límite sale de `ocrPoolSize`, que ya se adapta al equipo
+     * (`config.ts`: 1 en `lowResource`, 2 si no) — o sea que en una máquina
+     * chica esto sigue siendo exactamente el loop de antes.
+     */
+    const concurrency = Math.max(1, Math.min(ctx.config.workerPool.ocrPoolSize, inputs.length));
+    // Por índice, no por orden de llegada: con varias páginas en vuelo
+    // terminan desordenadas, y `outputs` tiene que respetar el orden recibido.
+    const slots: (OcrPageOutput | undefined)[] = new Array<OcrPageOutput | undefined>(
+      inputs.length,
+    );
+    let nextIndex = 0;
+
+    const drainQueue = async (): Promise<void> => {
+      for (;;) {
+        const index = nextIndex;
+        nextIndex += 1;
+        const input = inputs[index];
+        if (input === undefined) return;
+        if (ctx.abortSignal.aborted) {
+          throw new CancelledError(documentId);
         }
-        // OcrPageFailedError: ya emitió OCR_PAGE_FAILED dentro de processPage.
-        // Se continúa con las demás páginas (OCR_Engine.md §13 caso 6).
-        ctx.logger.warn(
-          `OCR de la página ${input.pageIndex} falló; se continúa con las demás páginas.`,
-          { documentId: input.documentId, pageIndex: input.pageIndex },
-        );
+        try {
+          slots[index] = await this.processPage(input, ctx);
+        } catch (err: unknown) {
+          if (err instanceof CancelledError || err instanceof OcrModelMissingError) {
+            throw err;
+          }
+          // OcrPageFailedError: ya emitió OCR_PAGE_FAILED dentro de processPage.
+          // Se continúa con las demás páginas (OCR_Engine.md §13 caso 6).
+          ctx.logger.warn(
+            `OCR de la página ${input.pageIndex} falló; se continúa con las demás páginas.`,
+            { documentId: input.documentId, pageIndex: input.pageIndex },
+          );
+        }
       }
-    }
+    };
+
+    await Promise.all(Array.from({ length: concurrency }, () => drainQueue()));
+    const outputs: OcrPageOutput[] = slots.filter(
+      (output): output is OcrPageOutput => output !== undefined,
+    );
 
     const durationMs = Date.now() - startedAt;
     ctx.bus.emit(EventChannel.Ocr, EngineEvents.OCR_FINISHED, {

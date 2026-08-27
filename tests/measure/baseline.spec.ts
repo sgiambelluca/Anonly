@@ -26,6 +26,7 @@ import { fileURLToPath } from "node:url";
 
 import { expect, test, type Page } from "@playwright/test";
 
+import { rasterizeToScannedPdf } from "../e2e/support/scannedPdf.js";
 import { classifyGroups } from "../quality/classify-groups.js";
 import { aggregateEvaluations, evaluateDocument } from "../quality/evaluate.js";
 import { loadReferenceDataset } from "../quality/load-reference-dataset.js";
@@ -35,6 +36,24 @@ import { TIMED_EVENTS, type BrowserCollector, type MeasuredDocument } from "./co
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = resolve(HERE, "../../.measure");
+
+/**
+ * `MEASURE_SCAN=1` rasteriza cada documento antes de importarlo: el mismo
+ * contenido, sin capa de texto, o sea que el pipeline tiene que llegar a las
+ * entidades **vía OCR**.
+ *
+ * Es la única forma que hay hoy de medir la calidad del OCR. El dataset de
+ * referencia no tiene documentos escaneados —y no los puede tener sin
+ * commitear binarios que CI no sabe regenerar, porque rasterizar necesita un
+ * canvas de browser— así que el escaneo se hace **en el momento**, dentro de
+ * la misma página, con el helper que ya usa el escenario 2 de `tests/e2e/`.
+ *
+ * El ground truth es el del documento de texto: son el mismo documento. La
+ * diferencia entre las dos corridas **es** la calidad del OCR.
+ */
+function scanMode(): boolean {
+  return process.env.MEASURE_SCAN === "1";
+}
 
 /** Documentos a medir; `MEASURE_DOCS=doc-001,doc-016` acota la corrida. */
 function selectedDocumentIds(): ReadonlyArray<string> | undefined {
@@ -75,7 +94,10 @@ test("línea de base sobre el dataset de referencia, con NER encendido", async (
     const { detections, suggestions } = classifyGroups(measured.groups, occurrencesById);
     return evaluateDocument(doc.truth, detections, suggestions.length);
   });
-  console.log(`\n${formatReport(aggregateEvaluations(evaluations), { nerActive: true })}`);
+  console.log(
+    `\n${scanMode() ? "*** MODO ESCANEO: el pipeline llegó a las entidades vía OCR ***\n" : ""}` +
+      `${formatReport(aggregateEvaluations(evaluations), { nerActive: true })}`,
+  );
 
   console.log("\nTiempos por documento (ms):");
   for (const r of results) {
@@ -116,6 +138,18 @@ async function measureOne(
   await page.goto("/", { waitUntil: "networkidle" });
   // El hook de dev de `core-adapter/index.ts`; sin él no hay bus que escuchar.
   await page.waitForFunction(() => "__anonlyCore" in globalThis, undefined, { timeout: 60_000 });
+
+  /*
+   * El rasterizado va ANTES de instalar el recolector: es preparación del
+   * insumo, no parte del pipeline, y cronometrarlo ensuciaría los tiempos.
+   */
+  const file = scanMode()
+    ? await rasterizeToScannedPdf(page, new Uint8Array(pdfBuffer))
+    : {
+        name: `${documentId}.pdf`,
+        mimeType: "application/pdf",
+        buffer: Buffer.from(pdfBuffer),
+      };
 
   // Recolector nuevo por documento: se instala ANTES de soltar el archivo.
   await page.evaluate(
@@ -175,11 +209,7 @@ async function measureOne(
     { timed: TIMED_EVENTS, id: documentId },
   );
 
-  await page.locator('input[type="file"]').setInputFiles({
-    name: `${documentId}.pdf`,
-    mimeType: "application/pdf",
-    buffer: Buffer.from(pdfBuffer),
-  });
+  await page.locator('input[type="file"]').setInputFiles(file);
 
   // `PIPELINE_READY` o `PIPELINE_FAILED`: los dos cierran la medición.
   await page.waitForFunction(
