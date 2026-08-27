@@ -512,9 +512,9 @@ La tercera fila del gate —documento **escaneado**, ruta OCR— quedó a medias
 
 **Ninguno de estos hallazgos se arregló en el mismo paso**: son de motores distintos (grouping/regex para la detección, render/export para la cobertura) y varios piden decisión antes que código. El gate estaba para producir esta lista.
 
-### Estado al 2026-08-26
+### Estado al 2026-08-27
 
-La sesión de calidad de detección cerró seis de los ocho. La columna que importa no es el estado sino **dónde estaba el defecto**: el gate agrupó los hallazgos por dónde se VEN, y tres estaban en otro motor.
+La sesión de calidad de detección cerró **siete** de los ocho. La columna que importa no es el estado sino **dónde estaba el defecto**: el gate agrupó los hallazgos por dónde se VEN, y tres estaban en otro motor.
 
 | # | estado | dónde estaba de verdad |
 |---|---|---|
@@ -522,7 +522,7 @@ La sesión de calidad de detección cerró seis de los ocho. La columna que impo
 | 23b | **cerrado** — ADR-088 §2 | `ner-engine`. El modelo es *cased* y sobre caja alta devuelve cero tokens. No era la normalización de Grouping |
 | 23c | **cerrado** — ADR-092 | `regex-engine`. El modelo ve la carátula pero por debajo del umbral; es un patrón, no un caso de modelo |
 | 23d | **cerrado por consecuencia** | Era el corolario de a/b/c: cerrados esos, el OCR sobre el exportado ya no recupera esos nombres |
-| 23e | **diagnosticado, decisión abierta** — §24 | `pdf-engine`, no `render-engine`. Ancho de glifo promedio sobre fuente proporcional |
+| 23e | **cerrado** — ADR-097, §24 | `pdf-engine`, no `render-engine`. Ancho de glifo promedio sobre fuente proporcional |
 | 23f | **cerrado** — `NER_Engine.md` v1.3.1 | `ner-engine`, no la costura. Un `B-` sobre una continuación de wordpiece partía la entidad |
 | 23g | **mitad cuantificada** — §25 | `render-engine`. El token sale 30 % más chico por una constante; el resto pide el gate visual |
 | 23h | **abierto** — §25 | `render-engine`. Pide el gate visual: ninguna suite headless lo puede juzgar |
@@ -533,9 +533,11 @@ La sesión de calidad de detección cerró seis de los ocho. La columna que impo
 
 ---
 
-## 24. §23e diagnosticado: el bbox de una palabra se calcula con un ancho de glifo promedio
+## 24. Cerrado el 2026-08-27 (ADR-097): §23e era un ancho de glifo promedio
 
-**Procedencia**: sesión de calidad de detección del 2026-08-26, al reproducir el hallazgo §23e ("el reemplazo deja fragmentos del original visibles antes del token"). **La decisión de cómo arreglarlo está abierta** y esta sección existe para que las mediciones no se pierdan.
+**Procedencia**: sesión de calidad de detección del 2026-08-26, al reproducir el hallazgo §23e ("el reemplazo deja fragmentos del original visibles antes del token"). La sección nació con la decisión **abierta**, para que las mediciones no se perdieran; se conserva entera porque el razonamiento que llevó a elegir sigue siendo la justificación.
+
+> **Estado (2026-08-27)**: el humano eligió la **opción A** y está implementada — ADR-097, `PDF_Engine.md` v1.8.0. Lo que sigue vale como registro, con **dos correcciones** que la implementación produjo y que están abajo, en "Lo que la implementación corrigió de este diagnóstico".
 
 ### El diagnóstico: no es `render-engine`, y no es un redondeo
 
@@ -606,6 +608,22 @@ El motor **ya** extrae los avances reales por glifo (`.unicode`/`.width` del ope
 **Un expediente real.** Los tres fixtures salen de `pdf-lib`, que escribe espacios como glifos reales, sin ligaduras y sin `ActualText`: son amables con las dos opciones. Medir la tasa de empalme de A sobre ellos daría un número alto que no dice nada sobre un documento de verdad. Los documentos que separan palabras **moviendo el cursor** en vez de con un espacio —justificados, kerneados, salidos de un procesador de texto— son justamente los que el repo no tiene.
 
 Mientras no haya uno, **A es la única de las dos que se puede soltar sin poder verificarla**, porque su peor caso es el comportamiento actual. Si aparece ese expediente y se mide que el empalme falla seguido, B queda disponible y con evidencia que la justifique.
+
+### Lo que la implementación corrigió de este diagnóstico
+
+**1. La columna "x real" de la tabla de arriba es la aproximada, no el modelo.** Esos valores salieron de `font.widthOfTextAtSize` de **pdf-lib** en `tests/fixtures/generate.ts`. Contra ellos, los avances reales dejan un residuo constante de ~1,44 pt. El residuo es de la columna:
+
+| palabra | AFM de Helvetica, a mano | avances (ADR-097) | pdf-lib |
+|---|---|---|---|
+| `El` | 667 + 222 = 889 → **10,67** | 10,67 | 10,67 |
+| `actor,` | 556+500+278+556+333+278 = 2501 → **30,01** | 30,01 | 29,41 |
+| `Juan` | 500+556+556+556 = 2168 → **26,02** | 26,02 | 25,78 |
+
+`generate.ts` dibuja la línea entera con **un solo `drawText` en x = 50**: `widthOfTextAtSize` nunca toca el archivo, solo *predice*. La tinta la ubica el renderer con las métricas de la fuente, que son las que pdf.js reporta glifo a glifo. **El error corregido es cero, no 1,44 pt**, y así lo verifica `advances-real-pdf.test.ts` contra una tabla AFM escrita a mano.
+
+**2. La guarda buena no es la que proponía esta sección.** Acá se proponía `avances.length !== str.length`. La implementación empalma por **cadena exacta**, que la implica y además cubre el caso que de verdad importa: si pdf.js sintetizó un espacio, resolvió un `/ActualText` o normalizó, las dos fuentes divergen **sin** cambiar de longitud.
+
+**Lo que sigue sin medirse**: la tasa de empalme sobre un expediente real. Sobre los 28 fixtures del repo da 100 %, pero todos salen de `pdf-lib` (ver "Lo que falta para decidir bien"). ADR-097 §5 instrumenta la cuenta por página, en `debug`, para que el día que aparezca un documento de verdad el número esté ahí sin volver a instrumentar. Ese número es lo único que justificaría pagar la opción B.
 
 ### Lo que este hallazgo NO frena
 
