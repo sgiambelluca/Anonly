@@ -623,7 +623,22 @@ Mientras no haya uno, **A es la única de las dos que se puede soltar sin poder 
 
 **2. La guarda buena no es la que proponía esta sección.** Acá se proponía `avances.length !== str.length`. La implementación empalma por **cadena exacta**, que la implica y además cubre el caso que de verdad importa: si pdf.js sintetizó un espacio, resolvió un `/ActualText` o normalizó, las dos fuentes divergen **sin** cambiar de longitud.
 
-**Lo que sigue sin medirse**: la tasa de empalme sobre un expediente real. Sobre los 28 fixtures del repo da 100 %, pero todos salen de `pdf-lib` (ver "Lo que falta para decidir bien"). ADR-097 §5 instrumenta la cuenta por página, en `debug`, para que el día que aparezca un documento de verdad el número esté ahí sin volver a instrumentar. Ese número es lo único que justificaría pagar la opción B.
+**MEDIDO el 2026-08-27, y el resultado es malo**: sobre un PDF **real** (un cuento maquetado con un procesador de texto, 11 páginas, aportado por el humano), el motor real reporta un empalme de **1 sobre 455 = 0,2 %**. Sobre los 28 fixtures del repo daba 100 %.
+
+No es una regresión —el camino de reserva es el comportamiento de siempre, ADR-097 §3, y por eso nada falló— pero significa que **ADR-097 no hace nada en un documento de esta clase**.
+
+La causa, medida: `getTextContent()` **re-segmenta el flujo de texto en fronteras propias**, distintas de las operaciones `showText`. No es 1:1 ni N:1 sino una re-segmentación de muchos a muchos:
+
+```
+item = "1"                            run = " "
+item = "No Tengo Boca. Y Debo Gritar." runs = "1 No Tengo Boca. Y Debo Gritar. "
+```
+
+O sea que la clave de empalme de ADR-097 §2 —cadena exacta + origen— **no puede acertar** en esta clase de documento: no existe ningún run cuya cadena sea la del item.
+
+**Qué abre esto**: la salida no es la opción B (que sigue teniendo su contra intacta), sino una tercera — una tabla de avances **continua por página** en vez de por run, ubicando cada item por su origen dentro de ese flujo y caminando desde ahí. Es más trabajo que A y menos riesgo que B. **No decidido**; hace falta medir cuántos documentos reales se parecen a este antes de pagarla.
+
+**Lo que sigue sin medirse**: cuán representativo es este documento. Es uno solo, y de maquetación literaria, no un expediente. Sobre los 28 fixtures del repo da 100 %, pero todos salen de `pdf-lib` (ver "Lo que falta para decidir bien"). ADR-097 §5 instrumenta la cuenta por página, en `debug`, para que el día que aparezca un documento de verdad el número esté ahí sin volver a instrumentar. Ese número es lo único que justificaría pagar la opción B.
 
 ### Lo que este hallazgo NO frena
 
