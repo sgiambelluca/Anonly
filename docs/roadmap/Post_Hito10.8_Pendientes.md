@@ -791,7 +791,7 @@ La forma del sistema SIMP de la Provincia de Buenos Aires queda confirmada por d
 | 4 | `caratula-ar` inventa personas y fusiona dos reales en una | chico + ADR | **hecho** (ADR-103) |
 | 5 | El aviso `AmbiguousCanonical` no dice nada ni permite actuar | chico-mediano | **hecho** (ADR-106) |
 | 6 | Falta el patrón de número de expediente (§26) | mediano + ADR | |
-| 7 | Tokens anidados: dos detecciones donde hay una frase | diagnóstico primero | **diagnosticado** |
+| 7 | Tokens anidados: dos detecciones donde hay una frase | diagnóstico primero | **causa raíz cerrada** (ADR-107); queda la fusión de adyacentes |
 
 ### 1. La lista está en orden de llegada, no de documento
 
@@ -904,6 +904,14 @@ ADR-074 introdujo `fragments` justamente para que la envolvente dejara de tapar 
 
 ### Lo que queda por decidir
 
-1. **Causa raíz, con arreglo claro**: que `findOverlapConflict` compare `fragments ?? [bbox]` contra `fragments ?? [bbox]`, como manda el contrato. Cambia qué conflictos se levantan, así que hay que medir el antes y después con `test:quality` y con el harness ciego.
+1. ~~**Causa raíz**~~ — **hecha (ADR-107)**: `findOverlapConflict` compara `fragments ?? [bbox]`. Medido sobre la misma pericia:
+
+   | | antes | después |
+   |---|---|---|
+   | conflictos | `{overlap: 3, ambiguous_canonical: 1}` | `{ambiguous_canonical: 1}` |
+   | ocurrencias en grupo activo | 22 de 29 | **24 de 29** |
+   | grupos activos | 17 | **19** |
+
+   Los tres conflictos falsos desaparecieron y **se recuperaron dos entidades reales** que el motor descartaba. `test:quality` sin moverse: 61/61 y 98,4 %.
 2. **El salteo por tipo igual** (`if (rec.entityType === occurrence.entityType) continue`) queda **sin evaluar** hasta que (1) esté hecho: con 0 solapamientos reales en este documento, hoy no hay evidencia de que haga falta levantarlo.
 3. **La fusión de adyacentes** (a) sigue siendo un mecanismo que no existe, y es lo que el humano reportó (`Departamento Judicial Quilmes` como dos tokens).

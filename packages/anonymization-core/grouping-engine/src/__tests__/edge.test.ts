@@ -286,6 +286,96 @@ describe("GroupingEngine — edge cases", () => {
     expect(created.members[0]?.occurrenceId).toBe(occB.id);
   });
 
+  /*
+   * ADR-107: el solapamiento se mide sobre los pedazos REALES.
+   *
+   * Una entidad partida por un salto de renglón (ADR-074 §1) tiene una
+   * envolvente que abarca el bloque de texto entero: arranca donde empieza el
+   * pedazo de la primera línea y termina donde termina el de la segunda.
+   * Medida contra esa envolvente, choca con todas sus vecinas de esas dos
+   * líneas aunque no las toque.
+   *
+   * Medido sobre una pericia real: **3 conflictos falsos** con la envolvente,
+   * **0** con los fragmentos — y un conflicto falso hace que la perdedora no
+   * llegue a formar grupo.
+   */
+  it("no levanta conflicto contra una vecina que solo toca la ENVOLVENTE", () => {
+    // Termina la línea 1 en x=400..560 y sigue en la 2 en x=50..90: la
+    // envolvente va de 50 a 560, toda la franja.
+    const partida = makeOccurrence({
+      entityType: EntityType.Person,
+      source: DetectionSource.NER,
+      confidence: 1,
+      bbox: makeBBox(50, 100, 510, 32),
+      fragments: [makeBBox(400, 100, 160, 12), makeBBox(50, 120, 40, 12)],
+      value: "Juan Pérez García",
+      normalizedValue: "juan perez garcia",
+    });
+    // Cae DENTRO de la envolvente y no toca ningún pedazo real.
+    const vecina = makeOccurrence({
+      entityType: EntityType.Organization,
+      source: DetectionSource.NER,
+      confidence: 0.9,
+      bbox: makeBBox(150, 100, 60, 12),
+      value: "Empresa S.A.",
+      normalizedValue: "empresa sa",
+    });
+
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: partida,
+    });
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: vecina,
+    });
+
+    const conflictos = busEmitSpy.mock.calls.filter(
+      ([channel, event]) =>
+        channel === EventChannel.Grouping && event === EngineEvents.CONFLICT_DETECTED,
+    );
+    expect(conflictos).toHaveLength(0);
+  });
+
+  it("sí levanta conflicto cuando un pedazo real se solapa", () => {
+    // La no-regresión del test de arriba: si la vecina cae SOBRE el pedazo de
+    // la primera línea, el conflicto tiene que seguir saliendo.
+    const partida = makeOccurrence({
+      entityType: EntityType.Person,
+      source: DetectionSource.NER,
+      confidence: 1,
+      bbox: makeBBox(50, 100, 510, 32),
+      fragments: [makeBBox(400, 100, 160, 12), makeBBox(50, 120, 40, 12)],
+      value: "Juan Pérez García",
+      normalizedValue: "juan perez garcia",
+    });
+    const encima = makeOccurrence({
+      entityType: EntityType.Organization,
+      source: DetectionSource.NER,
+      confidence: 0.9,
+      bbox: makeBBox(410, 100, 40, 12),
+      value: "Empresa S.A.",
+      normalizedValue: "empresa sa",
+    });
+
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: partida,
+    });
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: encima,
+    });
+
+    const conflictos = busEmitSpy.mock.calls.filter(
+      ([channel, event]) =>
+        channel === EventChannel.Grouping && event === EngineEvents.CONFLICT_DETECTED,
+    );
+    expect(conflictos).toHaveLength(1);
+  });
+
   // Caso 7 (§13)
   it("overlap conflict detected", () => {
     const existing = makeOccurrence({

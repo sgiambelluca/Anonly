@@ -308,6 +308,14 @@ interface SessionOccurrenceRecord {
   readonly value: string;
   readonly normalizedValue: string;
   readonly bbox: BoundingBox;
+  /**
+   * ADR-107: la descomposición por renglón (ADR-074 §1), para que el
+   * solapamiento se mida sobre los pedazos REALES y no sobre la envolvente.
+   * La envolvente de una entidad partida abarca el bloque de texto entero, y
+   * medida contra ella una sola entidad levantaba tres conflictos falsos.
+   * Ausente ≡ `[bbox]`.
+   */
+  readonly fragments?: ReadonlyArray<BoundingBox>;
   readonly pageIndex: number;
   /** ADR-029: formato de máscara del patrón que matcheó (ausente en NER). */
   readonly maskFormat?: string;
@@ -420,6 +428,34 @@ function groupPrimaryCandidate(group: InternalGroup): ConflictCandidate {
     confidence: info?.confidence ?? 1,
     value: group.canonicalValue,
   };
+}
+
+/**
+ * ADR-107: el mayor ratio entre los pedazos REALES de dos ocurrencias.
+ *
+ * `fragments ?? [bbox]` es la regla del contrato (`Contracts.md`, nota de
+ * `fragments`; ADR-074 §1): la envolvente de una entidad partida por un salto
+ * de renglón abarca el bloque de texto entero, así que medir contra ella hace
+ * que una sola entidad choque con todas sus vecinas de esas dos líneas. Medido
+ * sobre una pericia real: 3 conflictos falsos contra 0.
+ *
+ * Para el caso mayoritario —las dos de una sola línea— es literalmente el
+ * cálculo de antes, porque `fragments` ausente ≡ `[bbox]`.
+ */
+function maxFragmentIntersectionRatio(
+  aBbox: BoundingBox,
+  aFragments: ReadonlyArray<BoundingBox> | undefined,
+  bBbox: BoundingBox,
+  bFragments: ReadonlyArray<BoundingBox> | undefined,
+): number {
+  let best = 0;
+  for (const a of aFragments ?? [aBbox]) {
+    for (const b of bFragments ?? [bBbox]) {
+      const ratio = bboxIntersectionRatio(a, b);
+      if (ratio > best) best = ratio;
+    }
+  }
+  return best;
 }
 
 /**
@@ -1798,7 +1834,13 @@ export class GroupingEngine implements IEngine {
     for (const rec of session.recordedOccurrences) {
       if (rec.pageIndex !== occurrence.pageIndex) continue;
       if (rec.entityType === occurrence.entityType) continue;
-      if (bboxIntersectionRatio(rec.bbox, occurrence.bbox) > 0.5) {
+      const ratio = maxFragmentIntersectionRatio(
+        rec.bbox,
+        rec.fragments,
+        occurrence.bbox,
+        occurrence.fragments,
+      );
+      if (ratio > 0.5) {
         const reason =
           rec.source !== occurrence.source ? ConflictReason.Disagree : ConflictReason.Overlap;
         return { existing: rec, reason };
@@ -2251,6 +2293,9 @@ export class GroupingEngine implements IEngine {
       // exactOptionalPropertyTypes: no asignar `undefined` explícito a un
       // campo opcional — se omite la clave si la Occurrence no trae maskFormat.
       ...(occurrence.maskFormat !== undefined ? { maskFormat: occurrence.maskFormat } : {}),
+      // ADR-107: se propagan explícitamente, mismo criterio que ADR-074 §1 —
+      // nada viaja por una copia de campos.
+      ...(occurrence.fragments !== undefined ? { fragments: occurrence.fragments } : {}),
     });
   }
 
