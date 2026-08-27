@@ -380,11 +380,11 @@ describe("PdfEngine — unit tests", () => {
     });
   });
 
-  // ADR-097: el ancho promedio uniforme de ADR-020 §1 repartido sobre una
-  // fuente proporcional corre cada token que no arranca al principio de su
-  // item, y el error se acumula. El run de acá lo exagera a propósito con la
+  // ADR-020 §1 reparte un ancho promedio uniforme sobre una fuente
+  // proporcional, así que corre cada token que no arranca al principio de su
+  // item y el error se acumula. El run de acá lo exagera a propósito con la
   // misma forma del defecto real: diez glifos angostos seguidos de dos anchos.
-  describe("Avances reales por glifo (ADR-097, §13 casos 42-45)", () => {
+  describe("Flujo de glifos por página (ADR-102, §13 casos 42-46)", () => {
     // Tfs = 10, origen en x = 100. Diez `l` de 200/1000 em (2 pt cada uno),
     // un espacio de 300 (3 pt), `M` y `W` de 1000 (10 pt cada uno).
     //   avance real hasta "MW" -> 10*2 + 3 = 23        => x = 123, ancho 20
@@ -433,7 +433,7 @@ describe("PdfEngine — unit tests", () => {
     };
 
     it("places a mid-item token at its real advance, not the prorated one", async () => {
-      const words = await wordsFor("doc-097-empalma", {
+      const words = await wordsFor("doc-102-alinea", {
         str: RUN_STR,
         x: 100,
         width: RUN_WIDTH,
@@ -444,23 +444,42 @@ describe("PdfEngine — unit tests", () => {
       expect(mw.bbox.width).toBeCloseTo(20, 6);
     });
 
-    it("falls back to the prorated advance when the item string differs", async () => {
-      // pdf.js sintetizó un espacio que no existe como glifo: las dos fuentes
-      // dejan de coincidir y el item queda EXACTAMENTE como antes de ADR-097
-      // (ADR-097 §3 — el peor caso es el statu quo).
-      const words = await wordsFor("doc-097-cadena-distinta", {
+    it("aligns through a space that pdf.js synthesized (§13 caso 46)", async () => {
+      // El productor separó las palabras moviendo el cursor y pdf.js metió un
+      // espacio que NO existe como glifo. La alineación lo saltea del lado de
+      // la cadena y sigue (ADR-102 §2).
+      //
+      // Este test afirmaba lo contrario hasta ADR-102 —que el item caía al
+      // prorrateo— porque el empalme por cadena exacta de ADR-097 §2 no podía
+      // con esto. Es exactamente el caso que hacía fallar al 97 % de los items
+      // de un fallo judicial real.
+      const words = await wordsFor("doc-102-espacio-sintetico", {
         str: "llllllllll  MW",
         x: 100,
         width: RUN_WIDTH,
       });
       const mw = words.find((w) => w.text === "MW")!;
-      const charWidth = RUN_WIDTH / "llllllllll  MW".length;
-      expect(mw.bbox.x).toBeCloseTo(100 + charWidth * 12, 6);
-      expect(mw.bbox.x).not.toBeCloseTo(123, 1);
+      expect(mw.bbox.x).toBeCloseTo(123, 6);
+      expect(mw.bbox.width).toBeCloseTo(20, 6);
     });
 
-    it("falls back when the item origin matches no run", async () => {
-      const words = await wordsFor("doc-097-origen-distinto", {
+    it("falls back when a character has no glyph behind it", async () => {
+      // El caso que SÍ tiene que caer al prorrateo: un carácter que no está en
+      // el flujo (lo que produce `/ActualText` o una normalización agresiva).
+      // No es un espacio, así que no se puede saltear: la alineación corta y
+      // el item queda EXACTAMENTE como antes (ADR-102 §4).
+      const words = await wordsFor("doc-102-sin-glifo", {
+        str: "llllllllllZMW",
+        x: 100,
+        width: RUN_WIDTH,
+      });
+      const mw = words.find((w) => w.text === "llllllllllZMW")!;
+      expect(mw.bbox.x).toBeCloseTo(100, 6);
+      expect(mw.bbox.width).toBeCloseTo(RUN_WIDTH, 6);
+    });
+
+    it("falls back when the item origin is nowhere in the flow", async () => {
+      const words = await wordsFor("doc-102-origen-distinto", {
         str: RUN_STR,
         x: 300,
         width: RUN_WIDTH,
@@ -473,7 +492,7 @@ describe("PdfEngine — unit tests", () => {
       // Un glifo cuyo `.unicode` tiene dos caracteres. Si el avance se
       // repartiera entre los dos, `Z` arrancaría antes de donde está.
       //   "fi"(600) "n"(400) " "(300) "Z"(700) => avances [0,6,6,10,13,20]
-      const words = await wordsFor("doc-097-ligadura", { str: "fin Z", x: 100, width: 20 }, [
+      const words = await wordsFor("doc-102-ligadura", { str: "fin Z", x: 100, width: 20 }, [
         { unicode: "fi", width: 600 },
         { unicode: "n", width: 400 },
         { unicode: " ", width: 300 },
@@ -491,7 +510,7 @@ describe("PdfEngine — unit tests", () => {
     it("leaves a single-word item on the run envelope (§13 caso 44)", async () => {
       // No pasa por el reparto —ni avances ni prorrateo—: era exacto antes de
       // ADR-097 y sigue igual.
-      const words = await wordsFor("doc-097-una-palabra", { str: "MW", x: 100, width: 20 }, [
+      const words = await wordsFor("doc-102-una-palabra", { str: "MW", x: 100, width: 20 }, [
         { unicode: "M", width: 1000 },
         { unicode: "W", width: 1000 },
       ]);
