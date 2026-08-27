@@ -789,7 +789,7 @@ La forma del sistema SIMP de la Provincia de Buenos Aires queda confirmada por d
 | 2 | El menú `...` de una entidad apagada se ve difuminado | chico, UI | **hecho** |
 | 3 | `OccurrenceRef` no lleva el valor: separar es a ciegas | chico + ADR de contrato | **hecho** (ADR-104) |
 | 4 | `caratula-ar` inventa personas y fusiona dos reales en una | chico + ADR | **hecho** (ADR-103) |
-| 5 | El aviso `AmbiguousCanonical` no dice nada ni permite actuar | chico-mediano | |
+| 5 | El aviso `AmbiguousCanonical` no dice nada ni permite actuar | chico-mediano | **hecho** (ADR-106) |
 | 6 | Falta el patrón de número de expediente (§26) | mediano + ADR | |
 | 7 | Tokens anidados: dos detecciones donde hay una frase | diagnóstico primero | |
 
@@ -844,4 +844,6 @@ El panel muestra *"El valor se escribe de varias formas"* y nada más: no dice *
 
 **Y el dato está**: `raiseAmbiguousCanonicalConflict` arma un candidato por cada forma empatada, con su `value`. La UI no lo usa.
 
-**Decidido por el humano**: en vez de apagarlo en fusiones manuales, **volverlo accionable** — que liste las formas empatadas y deje elegir cuál es la canónica. Deja de ser una alarma inútil y pasa a ser la acción que falta; y si lo hace, tampoco molesta en una fusión manual, porque ahí también se quiere decidir cuál se muestra.
+**Decidido por el humano y hecho (ADR-106)**: en vez de apagarlo en fusiones manuales, **volverlo accionable**. El diálogo lista las formas empatadas y deja elegir cuál es la canónica; aplicar emite `updateGroup({ canonicalValue })` + `resolveConflict`.
+
+> El comportamiento anterior **estaba especificado**: `ui/Components.md` §6.2 decía que `ambiguous_canonical` "no ofrece radios y el botón dice Descartar". ADR-083 §6 lo había metido junto a `low_confidence` bajo "no hay elección", y era cierto **sobre el eje del tipo** —todos los candidatos comparten tipo— pero no comparten **valor**. `low_confidence` sí se queda donde está: con un candidato no hay nada entre qué elegir.

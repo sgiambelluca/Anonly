@@ -7,7 +7,11 @@ import {
 } from "@anonly/anonymization-core";
 import { describe, expect, it } from "vitest";
 
-import { candidateTypes, defaultCandidate } from "../components/conflicts/conflictResolution.js";
+import {
+  candidateTypes,
+  defaultCandidate,
+  spellingChoices,
+} from "../components/conflicts/conflictResolution.js";
 
 function makeCandidate(overrides: Partial<ConflictCandidate> = {}): ConflictCandidate {
   return {
@@ -120,5 +124,31 @@ describe("candidateTypes (ADR-083 §5)", () => {
       ],
     });
     expect(candidateTypes(conflict)).toEqual([EntityType.DNI]);
+  });
+});
+
+describe("spellingChoices (ADR-106)", () => {
+  it("devuelve las escrituras empatadas, sin repetir", () => {
+    const conflict = makeConflict({
+      reason: ConflictReason.AmbiguousCanonical,
+      candidates: [
+        makeCandidate({ value: "Empresa S.A." }),
+        makeCandidate({ value: "EMPRESA S.A." }),
+        makeCandidate({ value: "Empresa S.A." }),
+      ],
+    });
+
+    expect(spellingChoices(conflict)).toEqual(["Empresa S.A.", "EMPRESA S.A."]);
+  });
+
+  it("con una sola forma no hay elección que ofrecer", () => {
+    // El caso de `low_confidence`: un candidato, nada entre qué elegir. El
+    // diálogo cae a "Descartar" (ADR-106 §3).
+    const conflict = makeConflict({
+      reason: ConflictReason.LowConfidence,
+      candidates: [makeCandidate({ value: "Juan Pérez" })],
+    });
+
+    expect(spellingChoices(conflict)).toHaveLength(1);
   });
 });
