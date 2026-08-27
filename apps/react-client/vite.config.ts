@@ -6,6 +6,16 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: false,
+    /*
+     * ADR-100: los mismos dos headers que `public/_headers` le pide al
+     * hosting. Van acá para que **dev y producción se comporten igual**: sin
+     * esto, el dev server dejaría la app en un hilo y cualquier medición
+     * local describiría una app distinta de la que se publica.
+     */
+    headers: {
+      "Cross-Origin-Opener-Policy": "same-origin",
+      "Cross-Origin-Embedder-Policy": "require-corp",
+    },
   },
   build: {
     target: "es2022",
