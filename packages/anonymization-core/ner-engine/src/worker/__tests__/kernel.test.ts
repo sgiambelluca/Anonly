@@ -29,6 +29,7 @@ import {
   asPipelineMock,
   mockTokenClassificationPipeline,
   nerToken,
+  type MockTokenizer,
 } from "../../__tests__/fixtures/test-helpers.js";
 import { NerModelMissingError } from "../../ner.errors.js";
 import { kernelClassify, kernelDispose } from "../kernel.js";
@@ -315,6 +316,91 @@ describe("NerKernel — kernelClassify (ADR-046 §1/§4)", () => {
 
       expect(seen).toEqual(["MAİL Restante"]);
       expect(seen[0]).toHaveLength(text.length);
+    });
+  });
+
+  /*
+   * ADR-098: el lote se corta en PALABRAS (host) y el modelo trunca en
+   * TOKENS. Sin partirlo, `truncation: true` descarta la cola sin error ni
+   * log y esa parte de la página no la analiza nadie.
+   *
+   * El tokenizer falso usa una razón fija de 3 tokens por palabra: alcanza
+   * para ejercitar el corte, y la razón real (1,42 a 6,12 según el
+   * contenido) es justamente lo que ADR-098 §2 dice que NO hay que asumir
+   * constante — por eso el corte se busca midiendo, no multiplicando.
+   */
+  describe("Presupuesto de tokens del lote (ADR-098, §13 caso 22)", () => {
+    const TOKENS_POR_PALABRA = 3;
+    const BUDGET = 512 - 4;
+
+    function fakeTokenizer(): MockTokenizer {
+      return {
+        model_max_length: 512,
+        encode: (t: string) =>
+          new Array(t.split(/\s+/).filter(Boolean).length * TOKENS_POR_PALABRA).fill(0),
+      };
+    }
+
+    function captureWithTokenizer(withTokenizer: boolean): { readonly seen: string[] } {
+      const seen: string[] = [];
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockTokenClassificationPipeline(
+          (text: string) => {
+            seen.push(text);
+            return Promise.resolve([]);
+          },
+          () => Promise.resolve(),
+          withTokenizer ? fakeTokenizer() : undefined,
+        ),
+      );
+      return { seen };
+    }
+
+    /** 300 palabras => 900 tokens con la razón de arriba; el techo es 508. */
+    const LONG_TEXT = new Array(300).fill("palabra").join(" ");
+
+    it("parte un lote que no entra en el presupuesto, en límites de palabra", async () => {
+      const { seen } = captureWithTokenizer(true);
+
+      await kernelClassify(basePayload({ modelId: "model-split", text: LONG_TEXT }), {
+        timeoutMs: 5000,
+        abortSignal: new AbortController().signal,
+      });
+
+      expect(seen.length).toBeGreaterThan(1);
+      for (const chunk of seen) {
+        const tokens = chunk.split(/\s+/).filter(Boolean).length * TOKENS_POR_PALABRA;
+        expect(tokens).toBeLessThanOrEqual(BUDGET);
+      }
+      // Los sub-lotes son rebanadas CONTIGUAS: concatenadas sin separador
+      // reconstruyen el texto exacto, sin perder ni repetir una palabra. Es
+      // la garantía que el truncamiento silencioso rompía.
+      expect(seen.join("")).toBe(LONG_TEXT);
+    });
+
+    it("no parte nada cuando el lote entra", async () => {
+      const { seen } = captureWithTokenizer(true);
+      const text = new Array(50).fill("palabra").join(" ");
+
+      await kernelClassify(basePayload({ modelId: "model-fits", text }), {
+        timeoutMs: 5000,
+        abortSignal: new AbortController().signal,
+      });
+
+      expect(seen).toEqual([text]);
+    });
+
+    it("infiere de una sola pasada cuando no hay tokenizer para medir", async () => {
+      // El camino de reserva: sin tokenizer no se puede medir, y no medir no
+      // puede empeorar nada — es el comportamiento previo a ADR-098.
+      const { seen } = captureWithTokenizer(false);
+
+      await kernelClassify(basePayload({ modelId: "model-no-tok", text: LONG_TEXT }), {
+        timeoutMs: 5000,
+        abortSignal: new AbortController().signal,
+      });
+
+      expect(seen).toEqual([LONG_TEXT]);
     });
   });
 });

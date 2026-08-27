@@ -197,12 +197,42 @@ export function nerToken(entity: string, word: string, score = 0.95, index = 0):
  * seguridad real. `ner.engine.ts` solo llama al pipeline con un string único
  * (nunca batched), así que el mock no necesita soportar arrays.
  */
+/**
+ * `tokenizer` es opcional a propósito: el pipeline real lo expone (ADR-098 §1
+ * lo usa para medir el presupuesto de tokens) pero la mayoría de los tests no
+ * lo necesita, y su ausencia ejercita el camino "sin tokenizer no se mide y
+ * se infiere de una sola pasada" — el comportamiento previo a ADR-098.
+ */
+export interface MockTokenizer {
+  readonly model_max_length: number;
+  encode(text: string): ReadonlyArray<number>;
+}
+
+/**
+ * El tokenizer real de Transformers.js es **invocable** (`tokenizer(textos,
+ * opts)`), así que `typeof` da `"function"` y no `"object"`. Un mock que sea
+ * un objeto plano no ejercita eso — y de hecho ya escondió un bug: el guard
+ * del kernel filtraba por `"object"`, descartaba el tokenizer real y el lote
+ * no se partía nunca, con los tests en verde. Se construye callable a
+ * propósito.
+ */
+function asCallableTokenizer(tokenizer: MockTokenizer): MockTokenizer {
+  const callable = (): never => {
+    throw new Error("El mock del tokenizer no implementa la llamada directa.");
+  };
+  return Object.assign(callable, tokenizer) as unknown as MockTokenizer;
+}
+
 export function mockTokenClassificationPipeline(
   classify: (text: string) => Promise<ReadonlyArray<TokenClassificationSingle>>,
   dispose: () => Promise<void> = () => Promise.resolve(),
+  tokenizer?: MockTokenizer,
 ): TokenClassificationPipelineType {
   const callable = (text: string): Promise<ReadonlyArray<TokenClassificationSingle>> => classify(text);
-  const withDispose = Object.assign(callable, { dispose });
+  const withDispose = Object.assign(
+    callable,
+    tokenizer === undefined ? { dispose } : { dispose, tokenizer: asCallableTokenizer(tokenizer) },
+  );
   return withDispose as unknown as TokenClassificationPipelineType;
 }
 

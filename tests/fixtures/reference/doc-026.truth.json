@@ -14,8 +14,8 @@
       "detector": "ner"
     },
     {
-      "entityType": "ADDRESS",
-      "value": "Rivadavia 4820",
+      "entityType": "PERSON",
+      "value": "Damián Sosa",
       "pageIndex": 0,
       "detector": "ner"
     }

@@ -1243,6 +1243,15 @@ const TOKEN_DENSE_CLAUSE =
  * principio como control —tiene que aparecer siempre— y las dos entidades
  * del final quedan pasada esa marca, que es donde el truncamiento las come.
  *
+ * **Las tres son `Person` a propósito.** La primera versión ponía un
+ * domicilio (`Rivadavia 4820`) al final y nunca llegaba a cubrirse ni con el
+ * truncamiento arreglado: verificado con el modelo real, sobre ese texto
+ * devuelve `LOC:Rivadavia` **sin el número**. Es una limitación conocida del
+ * modelo —el dataset ya la registra en otros cuatro documentos— y mezclarla
+ * acá volvía ilegible el antes/después: no se podía saber si una entidad
+ * faltaba por el truncamiento o por eso. Este documento mide **una sola
+ * cosa**.
+ *
  * El documento entero mide menos de 256 palabras a propósito: así es **un
  * solo lote** y el fallo no se puede confundir con un problema de reparto
  * entre lotes.
@@ -1259,9 +1268,9 @@ function tokenBudgetOverflow(): ReferenceDocSpec {
         for (let i = 0; i < 12; i += 1) b.text(TOKEN_DENSE_CLAUSE);
         b.text("Finalmente se cita a")
           .entity("Rosana Ferreyra", EntityType.Person, "ner")
-          .text(", con domicilio en")
-          .entity("Rivadavia 4820", EntityType.Address, "ner")
-          .text(".");
+          .text("y a")
+          .entity("Damián Sosa", EntityType.Person, "ner")
+          .text(", ambos en calidad de testigos.");
       }),
     ],
   };

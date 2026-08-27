@@ -496,6 +496,116 @@ async function classifyWithTimeout(
   }
 }
 
+/*
+ * ADR-098 §1: el presupuesto de tokens del lote, derivado del tokenizer ya
+ * cargado. No se hardcodea 512: sale de `model_max_length` del modelo, así
+ * que cambiar de modelo no deja el número viejo colgado.
+ *
+ * El margen cubre los tokens especiales que el encoder agrega ([CLS]/[SEP] en
+ * BERT). Se resta en vez de medirse porque medirlo pediría una tokenización
+ * de sonda por modelo para ahorrar dos posiciones de 512.
+ */
+const SPECIAL_TOKEN_MARGIN = 4;
+const FALLBACK_TOKEN_BUDGET = 512;
+
+/*
+ * El tokenizer del pipeline, o `undefined` si no hay uno usable.
+ *
+ * `undefined` no es un error: el doble de este pipeline en las suites
+ * unitarias (ADR-021 §5 mockea esta frontera) puede no traerlo, y tampoco lo
+ * traería una versión futura de la librería que lo mueva de lugar. Sin
+ * tokenizer no se puede medir, y **no medir no puede empeorar nada**: se
+ * infiere de una sola pasada, que es el comportamiento previo a ADR-098.
+ */
+interface UsableTokenizer {
+  readonly modelMaxLength: number;
+  encode(text: string): unknown;
+}
+
+function tokenizerOf(active: NerClassifier | null): UsableTokenizer | undefined {
+  if (active === null) return undefined;
+  const raw = (active as { tokenizer?: unknown }).tokenizer;
+  // `typeof` da "function", NO "object": el tokenizer de Transformers.js es
+  // invocable (`tokenizer(textos, opts)`), o sea un objeto-función. Filtrar
+  // por "object" lo descarta entero y el lote no se parte nunca.
+  if ((typeof raw !== "object" && typeof raw !== "function") || raw === null) return undefined;
+  const { encode, model_max_length: maxLength } = raw as {
+    encode?: unknown;
+    model_max_length?: unknown;
+  };
+  if (typeof encode !== "function") return undefined;
+  return {
+    modelMaxLength:
+      typeof maxLength === "number" && Number.isFinite(maxLength)
+        ? maxLength
+        : FALLBACK_TOKEN_BUDGET,
+    encode: (text: string) => (encode as (t: string) => unknown).call(raw, text),
+  };
+}
+
+function tokenBudgetOf(tokenizer: UsableTokenizer): number {
+  return Math.max(1, tokenizer.modelMaxLength - SPECIAL_TOKEN_MARGIN);
+}
+
+/** Longitud en tokens de `text`, o `undefined` si el tokenizer no la da. */
+function tokenLengthOf(tokenizer: UsableTokenizer, text: string): number | undefined {
+  const encoded = tokenizer.encode(text);
+  return Array.isArray(encoded) ? encoded.length : undefined;
+}
+
+/*
+ * ADR-098 §2: los índices donde el lote se puede cortar — el comienzo de cada
+ * palabra. Cortar adentro de una palabra le daría al modelo un fragmento que
+ * no existe en el documento.
+ */
+function wordStartOffsets(text: string): ReadonlyArray<number> {
+  const starts: number[] = [];
+  for (const match of text.matchAll(/\S+/g)) {
+    if (match.index !== undefined) starts.push(match.index);
+  }
+  return starts;
+}
+
+/*
+ * ADR-098 §2: el corte más lejano que todavía entra en el presupuesto,
+ * buscado por bisección **midiendo con el tokenizer**, nunca estimando por
+ * una razón promedio: la razón tokens/palabra va de 1,42 en prosa a 6,12 en
+ * identificadores puros, así que un promedio vuelve a fallar en el mismo
+ * caso que este ADR arregla.
+ *
+ * Devuelve un offset dentro de `text`, siempre mayor que `from`: si ni la
+ * primera palabra entra —una sola palabra que tokenice en más de 508 piezas,
+ * que no se ha visto— se corta igual en la siguiente, para garantizar avance
+ * y que el bucle no gire para siempre.
+ */
+function findSplitOffset(
+  tokenizer: UsableTokenizer,
+  text: string,
+  from: number,
+  starts: ReadonlyArray<number>,
+  budget: number,
+): number {
+  const candidates = starts.filter((offset) => offset > from);
+  if (candidates.length === 0) return text.length;
+
+  let low = 0;
+  let high = candidates.length - 1;
+  let best = -1;
+  while (low <= high) {
+    const mid = (low + high) >> 1;
+    const end = candidates[mid] ?? text.length;
+    const length = tokenLengthOf(tokenizer, text.slice(from, end));
+    if (length !== undefined && length <= budget) {
+      best = mid;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+  // `best === -1`: ni el primer corte entra. Se avanza igual (ver doc).
+  return best === -1 ? (candidates[0] ?? text.length) : (candidates[best] ?? text.length);
+}
+
 export interface KernelClassifyOptions {
   readonly timeoutMs: number;
   readonly abortSignal: AbortSignal;
@@ -523,17 +633,64 @@ export async function kernelClassify(
 
   // ADR-088 §2: se infiere sobre el texto con las corridas en caja alta
   // pasadas a Title Case, y los valores se cortan del texto original.
+  // `titleCaseUppercaseRuns` mapea carácter a carácter, así que
+  // `inferenceText.length === text.length` y un índice de corte vale para los
+  // dos (ADR-098 §3).
   const inferenceText = titleCaseUppercaseRuns(text);
 
-  const rawTokens = await classifyWithTimeout(
-    inferenceText,
-    documentId,
-    pageIndex,
-    opts.timeoutMs,
-    opts.abortSignal,
-    modelId,
-  );
-  return aggregateTokensToSpans(rawTokens, inferenceText, text);
+  /*
+   * ADR-098 §1: el lote se cortó en PALABRAS (`computeWordChunks`, host) pero
+   * el modelo trunca en TOKENS, y `truncation: true` descarta la cola sin
+   * error ni log. Acá —el único lugar del sistema que sabe cuántos tokens
+   * tiene un texto— se mide y, si no entra, se parte.
+   *
+   * El camino común es el de siempre: un solo sub-lote, una sola inferencia.
+   */
+  const tokenizer = tokenizerOf(classifier);
+  const budget = tokenizer === undefined ? 0 : tokenBudgetOf(tokenizer);
+  const starts = wordStartOffsets(inferenceText);
+
+  const spans: NerKernelSpan[] = [];
+  let from = 0;
+  while (from < inferenceText.length) {
+    const remaining =
+      tokenizer === undefined ? undefined : tokenLengthOf(tokenizer, inferenceText.slice(from));
+    const to =
+      tokenizer === undefined || remaining === undefined || remaining <= budget
+        ? inferenceText.length
+        : findSplitOffset(tokenizer, inferenceText, from, starts, budget);
+
+    const rawTokens = await classifyWithTimeout(
+      inferenceText.slice(from, to),
+      documentId,
+      pageIndex,
+      opts.timeoutMs,
+      opts.abortSignal,
+      modelId,
+    );
+    const subSpans = aggregateTokensToSpans(
+      rawTokens,
+      inferenceText.slice(from, to),
+      text.slice(from, to),
+    );
+    // ADR-098 §3: los offsets vuelven a coordenadas del LOTE, que es lo que
+    // el host espera (ADR-046 §1).
+    for (const span of subSpans) {
+      spans.push(
+        from === 0
+          ? span
+          : {
+              ...span,
+              startIndex: span.startIndex + from,
+              endIndexExclusive: span.endIndexExclusive + from,
+            },
+      );
+    }
+
+    from = to;
+  }
+
+  return spans;
 }
 
 /**
