@@ -15,7 +15,7 @@ Regla de trabajo fijada por el humano: **no se cambia nada sin haber medido ante
 
 ---
 
-## Lo primero no es velocidad: se está perdiendo detección en silencio
+## ~~Lo primero no es velocidad: se está perdiendo detección en silencio~~ — **CERRADO** (ADR-098, 2026-08-27)
 
 `batchSize` corta en **256 palabras** (`config.ts:93`) pero el modelo trunca en **512 tokens** (`model_max_length: 512` y `max_position_embeddings: 512`, verificados en el `tokenizer_config.json` / `config.json` del modelo mirroreado). `computeWordChunks` (`ner.engine.ts:250`) cuenta palabras; el kernel **no chequea la longitud en tokens en ningún lado** (grep de `max_length`/`truncation` en `ner-engine/src/worker/kernel.ts`: vacío).
 
@@ -30,6 +30,10 @@ La razón tokens/palabra no es constante. Medido con el **tokenizer real del mod
 Con `truncation: true` y sin `max_length` explícito, Transformers.js **descarta la cola sin error, warning ni log**. En un párrafo legal denso se pierde ~22 % del batch. Regex sigue cubriendo esa zona para sus tipos; **Persona, Organización, Dirección y Fecha que caigan ahí no las ve nadie**.
 
 Es el tipo de documento al que apunta el producto.
+
+> **Cerrado el 2026-08-27 — ADR-098.** El kernel mide con el tokenizer que ya tiene cargado y parte el lote cuando no entra. Medido con el modelo real en Chromium sobre `doc-026`, el fixture que aísla el defecto: **1/3 → 3/3**. Sobre el dataset entero, el recall de NER pasa de **9/14 (64,3 %) a 12/17 (70,6 %)** sin un falso positivo nuevo, y `test:quality` no se movió.
+>
+> Dos cosas que costaron y conviene no repetir. El guard del camino de reserva filtraba por `typeof === "object"`, pero el tokenizer de Transformers.js es **invocable** y `typeof` da `"function"`: descartaba el tokenizer real y el lote no se partía nunca, **con los tests en verde**, porque el mock era un objeto plano — moldeado según la suposición que había que comprobar. Y la primera versión del fixture ponía un domicilio al final que no se cubría ni con el arreglo puesto (el modelo devuelve `LOC:Rivadavia` sin el número), lo que volvía ilegible el antes/después: un fixture de medición tiene que medir **una sola cosa**.
 
 ---
 
@@ -141,8 +145,8 @@ Y `test:quality` corre **con NER apagado** (ADR-095 §5), así que hoy no hay fo
 
 | orden | qué | por qué ahí |
 |---|---|---|
-| **0** | montar la medición que falta (NER medible + línea de base de tiempos) | sin esto, "no bajó la calidad" es una opinión |
-| **1** | truncamiento silencioso | el único que ya está costando calidad |
+| ~~**0**~~ | ~~montar la medición que falta~~ — **hecho**: `pnpm test:measure` (`tests/measure/`), con recall de NER medible por primera vez | sin esto, "no bajó la calidad" es una opinión |
+| ~~**1**~~ | ~~truncamiento silencioso~~ — **hecho**: ADR-098 | el único que ya estaba costando calidad |
 | **2** | **D1** | foco declarado nº 1, riesgo cero, tres cambios chicos |
 | **3** | **A** (COOP/COEP) | la ganancia más grande; medir antes de comprometerse |
 | **4** | **B** (OCR en paralelo) | limpio, sin riesgo de calidad |
