@@ -1211,6 +1211,62 @@ function formsDniAndDate(): ReferenceDocSpec {
   };
 }
 
+/*
+ * Cláusula jurídica deliberadamente densa en tokens y **vacía de entidades**.
+ *
+ * El truncamiento que este documento reproduce solo aparece con una razón
+ * tokens/palabra alta, y lo que la sube son los dígitos. Pero rellenar con
+ * DNI/CUIT/teléfonos metería decenas de entidades de Regex y movería la
+ * precisión del dataset entero por un motivo que no tiene nada que ver con
+ * lo que se quiere medir.
+ *
+ * Medido con el tokenizer real del modelo: 17 palabras → 43 tokens, razón
+ * **2,53** — la misma densidad que un bloque de identificadores puros, y sin
+ * que ningún patrón de `default-ar.ts` matchee nada.
+ */
+const TOKEN_DENSE_CLAUSE =
+  "Considerando lo peticionado corresponde desestimar in limine la excepcion " +
+  "de incompetencia articulada atento la inconstitucionalidad sobreviniente invocada";
+
+/**
+ * `doc-026` — el lote de NER se corta en **palabras** y el modelo trunca en
+ * **tokens**.
+ *
+ * `computeWordChunks` corta cada lote en `batchSize` palabras (256 por
+ * default) pero el modelo trunca en 512 tokens (`model_max_length`), y
+ * `truncation: true` descarta la cola **sin error, warning ni log**. Con
+ * texto denso la cola cae adentro del primer lote y esas entidades no las ve
+ * nadie.
+ *
+ * Las posiciones no son al voleo: medido con el tokenizer real, a razón 2,53
+ * los 512 tokens caen alrededor de la palabra **202**. `Marcelo Duarte` va al
+ * principio como control —tiene que aparecer siempre— y las dos entidades
+ * del final quedan pasada esa marca, que es donde el truncamiento las come.
+ *
+ * El documento entero mide menos de 256 palabras a propósito: así es **un
+ * solo lote** y el fallo no se puede confundir con un problema de reparto
+ * entre lotes.
+ */
+function tokenBudgetOverflow(): ReferenceDocSpec {
+  return {
+    documentId: "doc-026",
+    category: "dense",
+    pages: [
+      page((b) => {
+        b.text("Autos y vistos. Interviene en autos el letrado")
+          .entity("Marcelo Duarte", EntityType.Person, "ner")
+          .text(", conforme surge de la causa.");
+        for (let i = 0; i < 12; i += 1) b.text(TOKEN_DENSE_CLAUSE);
+        b.text("Finalmente se cita a")
+          .entity("Rosana Ferreyra", EntityType.Person, "ner")
+          .text(", con domicilio en")
+          .entity("Rivadavia 4820", EntityType.Address, "ner")
+          .text(".");
+      }),
+    ],
+  };
+}
+
 function buildFormCoverageDocs(): ReadonlyArray<ReferenceDocSpec> {
   return [formsPhone(), formsIban(), formsPlate(), formsLicense(), formsDniAndDate()];
 }
@@ -1222,6 +1278,7 @@ export function buildReferenceDocSpecs(): ReadonlyArray<ReferenceDocSpec> {
     ...buildTrapDocs(),
     ...buildEmptyDocs(),
     ...buildFormCoverageDocs(),
+    tokenBudgetOverflow(),
   ];
 }
 

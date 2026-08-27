@@ -1,0 +1,23 @@
+{
+  "documentId": "doc-026",
+  "entities": [
+    {
+      "entityType": "PERSON",
+      "value": "Marcelo Duarte",
+      "pageIndex": 0,
+      "detector": "ner"
+    },
+    {
+      "entityType": "PERSON",
+      "value": "Rosana Ferreyra",
+      "pageIndex": 0,
+      "detector": "ner"
+    },
+    {
+      "entityType": "ADDRESS",
+      "value": "Rivadavia 4820",
+      "pageIndex": 0,
+      "detector": "ner"
+    }
+  ]
+}
