@@ -52,17 +52,12 @@ import { PDFDocument, type PDFImage } from "pdf-lib";
 
 import { ExportFailedError } from "../export.errors.js";
 
-export interface AssemblerState {
-  readonly documentId: string | null;
-  readonly pdfDoc: PDFDocument | null;
-  readonly appendedPages: ReadonlySet<number>;
-}
+import { EMPTY_ASSEMBLER_STATE, type AssemblerState } from "./assembler-state.js";
 
-export const EMPTY_ASSEMBLER_STATE: AssemblerState = {
-  documentId: null,
-  pdfDoc: null,
-  appendedPages: new Set(),
-};
+// ADR-099: viven en un módulo sin dependencias de runtime para que
+// `ExportEngine` pueda importarlos estático sin arrastrar `pdf-lib`. Se
+// re-exportan acá para no romper a quien ya los importaba de este módulo.
+export { EMPTY_ASSEMBLER_STATE, discardState, type AssemblerState } from "./assembler-state.js";
 
 export interface AssemblerRunOptions {
   readonly abortSignal: AbortSignal;
@@ -286,16 +281,4 @@ export async function savePdf(
     const reason = err instanceof Error ? err.message : String(err);
     throw new ExportFailedError(documentId, reason);
   }
-}
-
-/**
- * `CANCEL`/`DISPOSE` (ADR-047 §4, `05_Worker_Architecture.md` §7.5):
- * descarta el `PDFDocument` parcial. Se aplica incondicionalmente ante
- * cualquier `CANCEL` (no discrimina por `jobId`/`signalId`): el ExportWorker
- * ensambla un documento a la vez (pool de `size: 1`, sin cola prioritaria
- * multi-worker — ADR-047 §2), así que un `CANCEL` siempre corresponde al
- * único export en curso.
- */
-export function discardState(): AssemblerState {
-  return EMPTY_ASSEMBLER_STATE;
 }

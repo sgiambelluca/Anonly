@@ -49,7 +49,32 @@ import {
 
 import { OcrModelMissingError, OcrPageFailedError, OcrTimeoutError } from "./ocr.errors.js";
 import type { OcrPageInput, OcrPageOutput } from "./ocr.types.js";
-import { kernelDispose, kernelRecognize, type KernelOcrResult } from "./worker/kernel.js";
+import type { KernelOcrResult } from "./worker/kernel.js";
+
+/*
+ * ADR-099: el kernel se importa **dinámicamente**.
+ *
+ * `worker/kernel.js` importa `tesseract.js` a nivel de módulo. Con un import
+ * estático acá, esta clase —que el façade instancia siempre, en el arranque—
+ * arrastraba Tesseract entero al chunk inicial de la app, incluso para un
+ * documento sin una sola página escaneada.
+ *
+ * La promesa se cachea, así que el módulo se evalúa una sola vez; y
+ * `dispose()` no lo carga si nunca hizo falta (ver su uso).
+ */
+// El tipo del módulo sale de inferir el `import()`, no de anotarlo:
+// `typeof import(...)` en posición de tipo lo prohíbe
+// `@typescript-eslint/consistent-type-imports`.
+function importOcrKernel() {
+  return import("./worker/kernel.js");
+}
+
+let kernelModule: ReturnType<typeof importOcrKernel> | undefined;
+
+function loadOcrKernel(): ReturnType<typeof importOcrKernel> {
+  kernelModule ??= importOcrKernel();
+  return kernelModule;
+}
 
 const DEFAULT_LANGUAGES: ReadonlyArray<string> = ["spa", "eng"];
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -321,7 +346,11 @@ export class OcrEngine implements IEngine {
         // `maxRetriesOverride: 0` — el pool nunca reintenta un `ocr-page`; el
         // único loop de retry es este.
         const dispatchResult = await this.pool.dispatch({
-          run: () => kernelRecognize(payload, { timeoutMs, abortSignal: ctx.abortSignal }),
+          run: async () =>
+            (await loadOcrKernel()).kernelRecognize(payload, {
+              timeoutMs,
+              abortSignal: ctx.abortSignal,
+            }),
           signal: ctx.abortSignal,
           priority: DISPATCH_PRIORITY,
           payload,
@@ -466,7 +495,9 @@ export class OcrEngine implements IEngine {
     // ADR-045 §2: no pasa por pool.dispatch (dispose no es la operación del
     // puerto) — libera directo el kernel local. La liberación server-side en
     // un OcrWorker real llega por el mensaje genérico DISPOSE del protocolo.
-    await kernelDispose();
+    // Si el kernel nunca se cargó no hay nada que liberar — y cargarlo para
+    // liberarlo anularía el punto de ADR-099.
+    if (kernelModule !== undefined) await (await kernelModule).kernelDispose();
     this.modelWarm = false;
     this.disposed = true;
     this.initialized = false;

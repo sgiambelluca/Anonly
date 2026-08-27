@@ -52,7 +52,28 @@ import {
   NerTimeoutError,
 } from "./ner.errors.js";
 import type { NerPageInput, NerPageOutput } from "./ner.types.js";
-import { kernelClassify, kernelDispose } from "./worker/kernel.js";
+
+/*
+ * ADR-099: el kernel se importa **dinámicamente**.
+ *
+ * `worker/kernel.js` importa `@huggingface/transformers` (y con él
+ * onnxruntime-web) a nivel de módulo. Con un import estático acá, esta clase
+ * —que el façade instancia siempre— arrastraba las dos al chunk inicial de la
+ * app, aunque el usuario nunca abriera un documento.
+ */
+// El tipo del módulo sale de inferir el `import()`, no de anotarlo:
+// `typeof import(...)` en posición de tipo lo prohíbe
+// `@typescript-eslint/consistent-type-imports`.
+function importNerKernel() {
+  return import("./worker/kernel.js");
+}
+
+let kernelModule: ReturnType<typeof importNerKernel> | undefined;
+
+function loadNerKernel(): ReturnType<typeof importNerKernel> {
+  kernelModule ??= importNerKernel();
+  return kernelModule;
+}
 
 // NER_Engine.md §11: "timeout por página (default 20 s)".
 const DEFAULT_TIMEOUT_MS = 20_000;
@@ -725,7 +746,8 @@ export class NerEngine implements IEngine {
     // ADR-046 §2: no pasa por pool.dispatch (dispose no es la operación del
     // puerto) — libera directo el kernel local. La liberación server-side en
     // un NerWorker real llega por el mensaje genérico DISPOSE del protocolo.
-    await kernelDispose();
+    // Si el kernel nunca se cargó no hay nada que liberar (ADR-099).
+    if (kernelModule !== undefined) await (await kernelModule).kernelDispose();
     this.modelWarm = false;
     this.disposed = true;
     this.initialized = false;
@@ -811,7 +833,12 @@ export class NerEngine implements IEngine {
         this.handleKernelProgress(progress, partial, ctx);
 
       const dispatchResult = await this.pool.dispatch({
-        run: () => kernelClassify(payload, { timeoutMs, abortSignal: ctx.abortSignal, onProgress }),
+        run: async () =>
+          (await loadNerKernel()).kernelClassify(payload, {
+            timeoutMs,
+            abortSignal: ctx.abortSignal,
+            onProgress,
+          }),
         signal: ctx.abortSignal,
         priority: DISPATCH_PRIORITY,
         payload,

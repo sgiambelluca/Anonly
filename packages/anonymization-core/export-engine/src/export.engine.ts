@@ -150,12 +150,34 @@ import type {
   RenderPageProvider,
 } from "./export.types.js";
 import {
-  appendPage,
   discardState,
-  savePdf,
-  type AssemblerState,
   EMPTY_ASSEMBLER_STATE,
-} from "./worker/assembler.js";
+  type AssemblerState,
+} from "./worker/assembler-state.js";
+
+/*
+ * ADR-099: el ensamblador se importa **dinámicamente**.
+ *
+ * `worker/assembler.js` importa `pdf-lib` a nivel de módulo. Con un import
+ * estático acá, esta clase —que el façade instancia siempre— arrastraba
+ * pdf-lib entero al chunk inicial de la app, aunque nadie exportara nunca un
+ * documento. El estado (`AssemblerState`/`EMPTY_ASSEMBLER_STATE`) sí se
+ * importa estático: vive en `assembler-state.js`, que no tiene dependencias
+ * de runtime.
+ */
+// El tipo del módulo sale de inferir el `import()`, no de anotarlo:
+// `typeof import(...)` en posición de tipo lo prohíbe
+// `@typescript-eslint/consistent-type-imports`.
+function importAssembler() {
+  return import("./worker/assembler.js");
+}
+
+let assemblerModule: ReturnType<typeof importAssembler> | undefined;
+
+function loadAssembler(): ReturnType<typeof importAssembler> {
+  assemblerModule ??= importAssembler();
+  return assemblerModule;
+}
 
 const DEFAULT_TIMEOUT_MS = 30_000; // spec §11/§12: "default 30 s por página".
 const MAX_RETRIES = 1; // spec §11: "reintentar 1 vez".
@@ -739,6 +761,7 @@ export class ExportEngine implements IEngine {
     payload: ExportPagePayload,
     abortSignal: AbortSignal,
   ): Promise<void> {
+    const { appendPage } = await loadAssembler();
     this.assemblerState = await appendPage(this.assemblerState, payload, { abortSignal });
   }
 
@@ -887,6 +910,7 @@ export class ExportEngine implements IEngine {
     payload: ExportSavePayload,
     abortSignal: AbortSignal,
   ): Promise<ArrayBuffer> {
+    const { savePdf } = await loadAssembler();
     const { buffer, state } = await savePdf(this.assemblerState, payload, { abortSignal });
     this.assemblerState = state;
     return buffer;
