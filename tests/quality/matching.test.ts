@@ -134,7 +134,48 @@ describe("agregación del reporte (ADR-095 §3/§4)", () => {
     ]);
     expect(report.regex.totalTruthEntities).toBe(1);
     expect(report.regex.coverageRecall).toBe(1);
-    expect(report.nerExcludedCount).toBe(1);
+    expect(report.ner.totalTruthEntities).toBe(1);
+  });
+
+  /*
+   * El mismo denominador se lee de dos formas según haya corrido NER o no
+   * (`evaluate.ts`, doc de `nerTruthCount`). Con NER apagado su cobertura es
+   * 0 por construcción — no porque el motor falle— y por eso `print-report`
+   * solo lo publica como recall cuando `nerActive` es true.
+   */
+  it("mide el recall de NER cuando hay detecciones de NER que lo cubren", () => {
+    const report = aggregateEvaluations([
+      evaluateDocument(
+        {
+          documentId: "doc-ner",
+          entities: [
+            truth("Juan Pérez", { detector: "ner" }),
+            truth("Maipú 1434", { detector: "ner", entityType: EntityType.Address }),
+          ],
+        },
+        [detected("Juan Pérez")],
+        0,
+      ),
+    ]);
+    expect(report.ner.totalTruthEntities).toBe(2);
+    expect(report.ner.coveredCount).toBe(1);
+    expect(report.ner.coverageRecall).toBe(0.5);
+  });
+
+  it("nombra las entidades de NER sin cubrir, no solo cuántas son", () => {
+    // Es la parte accionable: "1 sin cubrir" manda a buscar, el valor manda
+    // al caso concreto (mismo criterio que `missedValues` de Regex).
+    const [doc] = aggregateEvaluations([
+      evaluateDocument(
+        {
+          documentId: "doc-ner-faltante",
+          entities: [truth("Maipú 1434", { detector: "ner", entityType: EntityType.Address })],
+        },
+        [],
+        0,
+      ),
+    ]).perDocument;
+    expect(doc!.nerMissedValues).toEqual(['ADDRESS "Maipú 1434"']);
   });
 
   // ADR-095 §4: una sugerencia no tapa nada, así que no puede subir el recall.

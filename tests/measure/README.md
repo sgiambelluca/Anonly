@@ -45,7 +45,9 @@ La clasificación de grupos y la regla de matcheo se reusan de `tests/quality/` 
 
 ## Lo que este número **no** dice todavía
 
-- **El recall sigue siendo el de Regex.** `evaluateDocument` excluye las entidades `detector: "ner"` del recall (ADR-095 §5). Lo que sí cambia con NER encendido es la **precisión**, que ahora cuenta las detecciones de NER. Medir recall de NER pide extender el evaluador — decisión abierta.
+- **El recall de NER ya se mide** (era una decisión abierta; se cerró). `evaluateDocument` calcula la cobertura de las entidades `detector: "ner"` con la misma regla de matcheo, y `formatReport` la publica como recall **solo** si `nerActive` es `true`. Con NER apagado (`tests/quality/`, ADR-095 §5) su cobertura sería 0/N por construcción —no porque el motor falle— así que ahí se sigue imprimiendo como "cuántas quedaron fuera". Es la misma cuenta; lo que cambia es si el detector corrió.
+
+  Primera medición (2026-08-27): **9/14 = 64,3 %**. Las cinco sin cubrir son cuatro domicilios de calle + número (`"Maipú 1434"`, `"Belgrano 5983"`, `"Pueyrredón 9741"`, `"Pueyrredón 2584"`) y una organización. Cruzado con los falsos positivos —`"Buenos Aires"`, `"La Plata"`, `"Tucumán"`— el patrón es que el modelo reconoce **ciudades** y se pierde **domicilios**: su concepto de dirección no es el del dataset.
 - **La precisión con NER encendido mezcla dos cosas.** Una detección de NER que no matchea el ground truth cuenta como falso positivo, pero el dataset se construyó enumerando **formas de escritura de Regex** (ADR-096): su verdad no pretende ser exhaustiva en Personas/Organizaciones. Parte de la caída puede ser verdad faltante y no ruido del motor. Hay que mirarlos uno por uno antes de sacar conclusiones.
 - **Los documentos de referencia son chicos** (2-3 páginas, poco densas). Sirven para comparar, pero no ejercitan el camino caro que motiva A/B/C (5-15 s por página densa). Para eso hace falta sumar un documento denso.
 

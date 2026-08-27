@@ -75,14 +75,7 @@ test("línea de base sobre el dataset de referencia, con NER encendido", async (
     const { detections, suggestions } = classifyGroups(measured.groups, occurrencesById);
     return evaluateDocument(doc.truth, detections, suggestions.length);
   });
-  console.log(
-    `\n${formatReport(
-      aggregateEvaluations(evaluations),
-      "Regex + NER encendidos (browser). El recall sigue siendo el de Regex\n" +
-        '(ADR-095 §5 excluye las entidades detector:"ner"); la PRECISIÓN sí\n' +
-        "incluye ahora las detecciones de NER:",
-    )}`,
-  );
+  console.log(`\n${formatReport(aggregateEvaluations(evaluations), { nerActive: true })}`);
 
   console.log("\nTiempos por documento (ms):");
   for (const r of results) {

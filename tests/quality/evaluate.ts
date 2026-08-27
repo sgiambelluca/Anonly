@@ -13,7 +13,14 @@ export interface DocumentEvaluation {
   readonly regexTruthCount: number;
   readonly regexCoveredCount: number;
   readonly regexTypedCoveredCount: number;
-  readonly nerTruthExcludedCount: number;
+  /**
+   * Entidades `detector: "ner"` del ground truth. Con NER apagado son las que
+   * quedan FUERA del recall (ADR-095 §5); con NER encendido son su
+   * denominador. El número es el mismo; qué significa lo decide quién corrió.
+   */
+  readonly nerTruthCount: number;
+  readonly nerCoveredCount: number;
+  readonly nerTypedCoveredCount: number;
   readonly detectionCount: number;
   readonly falsePositiveCount: number;
   readonly suggestionCount: number;
@@ -23,6 +30,8 @@ export interface DocumentEvaluation {
    * formas" manda a un patrón concreto.
    */
   readonly missedValues: ReadonlyArray<string>;
+  /** Igual que `missedValues`, para las entidades de NER. */
+  readonly nerMissedValues: ReadonlyArray<string>;
 }
 
 /**
@@ -32,8 +41,14 @@ export interface DocumentEvaluation {
  * Las entidades del truth con `detector: "ner"` se excluyen del recall de
  * Regex (ADR-095 §5): con NER apagado ningún detector activo podía
  * encontrarlas, así que contarlas como fallo haría que el número mienta en
- * la dirección de "el motor es peor de lo que es". `nerTruthExcludedCount`
- * es exactamente cuántas quedaron fuera por eso.
+ * la dirección de "el motor es peor de lo que es". `nerTruthCount` es
+ * exactamente cuántas quedaron fuera por eso.
+ *
+ * Con NER encendido (`tests/measure/`, en un browser) esas mismas entidades
+ * SÍ se miden: `nerCoveredCount`/`nerTypedCoveredCount` son su recall. El
+ * cálculo es el mismo en los dos casos —la regla de matcheo no cambia— y lo
+ * único que decide si el número es un recall o un "cuántas quedaron fuera"
+ * es si el detector corrió.
  *
  * La precisión (§3) se mide contra **todas** las entidades esperadas de la
  * página, regex y ner por igual: lo que decide si una detección es falso
@@ -56,7 +71,15 @@ export function evaluateDocument(
     isFalsePositive(detection, truth.entities),
   ).length;
 
+  const nerCoveredCount = nerTruth.filter((entity) => isCovered(entity, detections)).length;
+  const nerTypedCoveredCount = nerTruth.filter((entity) =>
+    isTypedCovered(entity, detections),
+  ).length;
+
   const missedValues = regexTruth
+    .filter((entity) => !isCovered(entity, detections))
+    .map((entity) => `${entity.entityType} ${JSON.stringify(entity.value)}`);
+  const nerMissedValues = nerTruth
     .filter((entity) => !isCovered(entity, detections))
     .map((entity) => `${entity.entityType} ${JSON.stringify(entity.value)}`);
 
@@ -65,11 +88,14 @@ export function evaluateDocument(
     regexTruthCount: regexTruth.length,
     regexCoveredCount,
     regexTypedCoveredCount,
-    nerTruthExcludedCount: nerTruth.length,
+    nerTruthCount: nerTruth.length,
+    nerCoveredCount,
+    nerTypedCoveredCount,
     detectionCount: detections.length,
     falsePositiveCount,
     suggestionCount,
     missedValues,
+    nerMissedValues,
   };
 }
 
@@ -90,8 +116,13 @@ export interface PrecisionReport {
 export interface EvaluationReport {
   readonly documentCount: number;
   readonly regex: DetectorReport;
-  /** ADR-095 §5: entidades `detector: "ner"` del ground truth, fuera del recall de Regex. */
-  readonly nerExcludedCount: number;
+  /**
+   * Las entidades `detector: "ner"` del ground truth. Solo es un RECALL si
+   * NER corrió de verdad (`tests/measure/`); con NER apagado
+   * (`tests/quality/`, ADR-095 §5) `coveredCount` es 0 por construcción y lo
+   * único que informa es `totalTruthEntities`, o sea cuántas quedaron fuera.
+   */
+  readonly ner: DetectorReport;
   readonly precision: PrecisionReport;
   readonly suggestionCount: number;
   readonly perDocument: ReadonlyArray<DocumentEvaluation>;
@@ -112,7 +143,9 @@ interface Totals {
   readonly regexTruthCount: number;
   readonly regexCoveredCount: number;
   readonly regexTypedCoveredCount: number;
-  readonly nerTruthExcludedCount: number;
+  readonly nerTruthCount: number;
+  readonly nerCoveredCount: number;
+  readonly nerTypedCoveredCount: number;
   readonly detectionCount: number;
   readonly falsePositiveCount: number;
   readonly suggestionCount: number;
@@ -122,7 +155,9 @@ const EMPTY_TOTALS: Totals = {
   regexTruthCount: 0,
   regexCoveredCount: 0,
   regexTypedCoveredCount: 0,
-  nerTruthExcludedCount: 0,
+  nerTruthCount: 0,
+  nerCoveredCount: 0,
+  nerTypedCoveredCount: 0,
   detectionCount: 0,
   falsePositiveCount: 0,
   suggestionCount: 0,
@@ -133,7 +168,9 @@ function sumTotals(a: Totals, doc: DocumentEvaluation): Totals {
     regexTruthCount: a.regexTruthCount + doc.regexTruthCount,
     regexCoveredCount: a.regexCoveredCount + doc.regexCoveredCount,
     regexTypedCoveredCount: a.regexTypedCoveredCount + doc.regexTypedCoveredCount,
-    nerTruthExcludedCount: a.nerTruthExcludedCount + doc.nerTruthExcludedCount,
+    nerTruthCount: a.nerTruthCount + doc.nerTruthCount,
+    nerCoveredCount: a.nerCoveredCount + doc.nerCoveredCount,
+    nerTypedCoveredCount: a.nerTypedCoveredCount + doc.nerTypedCoveredCount,
     detectionCount: a.detectionCount + doc.detectionCount,
     falsePositiveCount: a.falsePositiveCount + doc.falsePositiveCount,
     suggestionCount: a.suggestionCount + doc.suggestionCount,
@@ -155,7 +192,13 @@ export function aggregateEvaluations(
       coverageRecall: safeRatio(totals.regexCoveredCount, totals.regexTruthCount),
       typedRecall: safeRatio(totals.regexTypedCoveredCount, totals.regexTruthCount),
     },
-    nerExcludedCount: totals.nerTruthExcludedCount,
+    ner: {
+      totalTruthEntities: totals.nerTruthCount,
+      coveredCount: totals.nerCoveredCount,
+      typedCoveredCount: totals.nerTypedCoveredCount,
+      coverageRecall: safeRatio(totals.nerCoveredCount, totals.nerTruthCount),
+      typedRecall: safeRatio(totals.nerTypedCoveredCount, totals.nerTruthCount),
+    },
     precision: {
       totalDetections: totals.detectionCount,
       falsePositiveCount: totals.falsePositiveCount,
