@@ -1094,6 +1094,7 @@ describe("@anonly/shared — Contracts", () => {
 
       const refWithoutFragments: OccurrenceRef = {
         occurrenceId: "o1",
+        value: "Juan Pérez", // ADR-104: requerido, toda Occurrence lo tiene
         pageIndex: 0,
         bbox: envelope,
         source: DetectionSource.NER,

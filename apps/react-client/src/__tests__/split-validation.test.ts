@@ -12,6 +12,7 @@ import { validateSplit } from "../components/entities/splitValidation.js";
 function makeMember(overrides: Partial<OccurrenceRef> = {}): OccurrenceRef {
   return {
     occurrenceId: "occ-1",
+    value: "valor",
     pageIndex: 0,
     bbox: { x: 0, y: 0, width: 10, height: 5 },
     source: DetectionSource.Regex,

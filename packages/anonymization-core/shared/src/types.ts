@@ -159,6 +159,16 @@ export interface Occurrence {
 
 export interface OccurrenceRef {
   readonly occurrenceId: string;
+  /**
+   * ADR-104: cómo aparece en el documento, **sin normalizar**. Copiado tal
+   * cual de `Occurrence.value`.
+   *
+   * `OccurrenceRef` duplica lo que la UI necesita sin resolver
+   * (`03_Data_Model.md` §8, mismo criterio que `bbox`), y esto lo necesita el
+   * separador: existe para deshacer una fusión, y sin el valor no hay con qué
+   * distinguir a los miembros de un grupo fusionado salvo la página.
+   */
+  readonly value: string;
   readonly pageIndex: number;
   readonly bbox: BoundingBox;
   readonly source: DetectionSource;

@@ -787,7 +787,7 @@ La forma del sistema SIMP de la Provincia de Buenos Aires queda confirmada por d
 |---|---|---|---|
 | 1 | La lista de entidades no está en orden de documento | chico, UI | **hecho** |
 | 2 | El menú `...` de una entidad apagada se ve difuminado | chico, UI | **hecho** |
-| 3 | `OccurrenceRef` no lleva el valor: separar y fusionar son a ciegas | chico + ADR de contrato | |
+| 3 | `OccurrenceRef` no lleva el valor: separar es a ciegas | chico + ADR de contrato | **hecho** (ADR-104) |
 | 4 | `caratula-ar` inventa personas y fusiona dos reales en una | chico + ADR | **hecho** (ADR-103) |
 | 5 | El aviso `AmbiguousCanonical` no dice nada ni permite actuar | chico-mediano | |
 | 6 | Falta el patrón de número de expediente (§26) | mediano + ADR | |
@@ -809,7 +809,9 @@ No es portal por decisión documentada: `@radix-ui/react-dropdown-menu` no está
 
 ### 3. `OccurrenceRef` no lleva el valor
 
-El separador existe para **deshacer una fusión**, y es justo ahí donde no se puede distinguir qué se fusionó: solo muestra `Página N — fuente`. El diálogo de fusión tiene el mismo problema.
+El separador existe para **deshacer una fusión**, y es justo ahí donde no se puede distinguir qué se fusionó: solo muestra `Página N — fuente`.
+
+> `MergeDialog` **no** tiene este problema —lista grupos por su `canonicalValue`, no ocurrencias—; la primera redacción de esta sección lo afirmaba y estaba mal.
 
 **Y no es un pedido nuevo**: el docblock de `GroupContextMenu` dice, textual, que *"Ver ocurrencias" depende de un campo `value` que `OccurrenceRef` no tiene* — una función ya diseñada que se cortó por esto.
 

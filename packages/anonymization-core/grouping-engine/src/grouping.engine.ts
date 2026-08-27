@@ -389,6 +389,8 @@ function toPublicGroup(group: InternalGroup): EntityGroup {
 function toOccurrenceRef(occurrence: Occurrence): OccurrenceRef {
   return {
     occurrenceId: occurrence.id,
+    // ADR-104: tal cual, sin normalizar — es lo que la UI muestra.
+    value: occurrence.value,
     pageIndex: occurrence.pageIndex,
     bbox: occurrence.bbox,
     source: occurrence.source,

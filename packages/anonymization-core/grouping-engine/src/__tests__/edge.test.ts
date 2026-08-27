@@ -2576,6 +2576,7 @@ describe("GroupingEngine — edge cases", () => {
       members: [
         {
           occurrenceId: "occ-wide-f",
+          value: "valor",
           pageIndex: 0,
           bbox: makeBBox(0, 0, 200, 20),
           source: DetectionSource.Regex,
@@ -2590,6 +2591,7 @@ describe("GroupingEngine — edge cases", () => {
       members: [
         {
           occurrenceId: "occ-narrow-f",
+          value: "valor",
           pageIndex: 0,
           bbox: makeBBox(0, 0, 40, 20),
           source: DetectionSource.Regex,
@@ -2606,6 +2608,7 @@ describe("GroupingEngine — edge cases", () => {
       members: [
         {
           occurrenceId: "occ-wide-m",
+          value: "valor",
           pageIndex: 0,
           bbox: makeBBox(0, 0, 200, 20),
           source: DetectionSource.Regex,

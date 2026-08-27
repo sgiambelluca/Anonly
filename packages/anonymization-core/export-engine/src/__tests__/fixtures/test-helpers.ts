@@ -464,6 +464,7 @@ export function createEntityGroup(overrides?: Partial<EntityGroup>): EntityGroup
     members: [
       {
         occurrenceId: "occ-1",
+        value: "valor",
         pageIndex: 0,
         bbox: { x: 10, y: 20, width: 100, height: 14 },
         source: DetectionSource.Regex,

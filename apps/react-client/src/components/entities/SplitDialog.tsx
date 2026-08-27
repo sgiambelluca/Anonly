@@ -91,7 +91,17 @@ export function SplitDialog({ groupId, open, onClose }: SplitDialogProps) {
                 label={
                   <span className="flex items-center gap-2 text-sm text-text-secondary">
                     <BboxMiniature bbox={member.bbox} />
-                    Página {member.pageIndex + 1} — {DETECTION_SOURCE_LABEL[member.source]}
+                    {/*
+                      ADR-104: el valor **tal cual aparece en el documento**.
+                      Sin esto el diálogo era circular — existe para deshacer
+                      una fusión y no mostraba qué se había fusionado: dos
+                      miembros solo se distinguían por la página, y si caían
+                      en la misma, por nada.
+                    */}
+                    <span className="font-medium text-text-primary">{member.value}</span>
+                    <span className="text-text-secondary">
+                      Página {member.pageIndex + 1} — {DETECTION_SOURCE_LABEL[member.source]}
+                    </span>
                   </span>
                 }
               />

@@ -733,6 +733,7 @@ describe("Orchestrator — edge cases", () => {
       members: [
         {
           occurrenceId: "occ-1",
+          value: "valor",
           pageIndex: 0,
           bbox: { x: 0, y: 0, width: 1, height: 1 },
           source: DetectionSource.Regex,
@@ -1316,6 +1317,7 @@ describe("Orchestrator — edge cases", () => {
         members: [
           {
             occurrenceId: "occ-1",
+            value: "valor",
             pageIndex: 0,
             bbox: { x: 0, y: 0, width: 1, height: 1 },
             source: DetectionSource.Regex,
@@ -1423,6 +1425,7 @@ describe("Orchestrator — edge cases", () => {
         members: [
           {
             occurrenceId: "occ-1",
+            value: "valor",
             pageIndex: 0,
             bbox: { x: 0, y: 0, width: 1, height: 1 },
             source: DetectionSource.Regex,
@@ -1562,6 +1565,7 @@ describe("Orchestrator — edge cases", () => {
       members: [
         {
           occurrenceId: "occ-1",
+          value: "valor",
           pageIndex: 0,
           bbox: { x: 0, y: 0, width: 1, height: 1 },
           source: DetectionSource.Regex,
@@ -1663,6 +1667,7 @@ describe("Orchestrator — edge cases", () => {
       members: [
         {
           occurrenceId: "occ-1",
+          value: "valor",
           pageIndex: 0,
           bbox: { x: 0, y: 0, width: 1, height: 1 },
           source: DetectionSource.Regex,
@@ -1711,6 +1716,7 @@ describe("Orchestrator — edge cases", () => {
       members: [
         {
           occurrenceId: "occ-1",
+          value: "valor",
           pageIndex: 0,
           bbox: { x: 0, y: 0, width: 1, height: 1 },
           source: DetectionSource.Regex,
