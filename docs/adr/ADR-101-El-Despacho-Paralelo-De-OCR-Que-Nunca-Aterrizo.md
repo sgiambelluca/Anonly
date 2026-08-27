@@ -60,7 +60,17 @@ Con varias páginas en vuelo terminan desordenadas. Los resultados se depositan 
 
 El total está dominado por los documentos de una página, donde por definición no hay nada que paralelizar.
 
-**No llega al 2× teórico**, y se sabe por qué: el segundo worker paga su creación (~300 ms, ADR-090 Contexto §3) y estas páginas duran ~1,1 s, así que el costo fijo se come buena parte. **En un escaneo real, a 5,3 s por página, ese costo se amortiza mucho mejor — pero eso es una extrapolación, no una medición.** No hay ningún documento escaneado real en el repo.
+No llega al 2× sobre el dataset, y se sabe por qué: el segundo worker paga su creación (~300 ms, ADR-090 Contexto §3) y esas páginas sintéticas duran ~1,1 s, así que el costo fijo se come buena parte.
+
+**Medido después sobre un escaneo REAL** (20 páginas, aportado por el humano; blindado por el harness ciego de `tests/measure/real-docs.spec.ts`, que solo reporta agregados):
+
+| | etapa de OCR | por página |
+|---|---|---|
+| secuencial | 67 879 ms | 3,39 s |
+| **paralelo** | **36 378 ms** | **1,82 s** |
+| | **−46,4 %** | |
+
+El documento entero pasa de **86 166 ms a 53 989 ms (−37,4 %)**: medio minuto menos en un solo expediente. La amortización que la redacción original de este ADR daba como extrapolación **quedó medida**, y es casi el doble de la que se veía en los fixtures.
 
 **La calidad no se movió**: recall de Regex 56/61, recall de NER 12/17, precisión 80/95, 1 sugerencia — idénticos a la corrida previa. Era lo esperado (cada página es un trabajo independiente de Tesseract) y se corrió igual.
 

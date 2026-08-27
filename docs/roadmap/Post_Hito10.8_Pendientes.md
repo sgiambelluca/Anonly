@@ -638,7 +638,22 @@ O sea que la clave de empalme de ADR-097 §2 —cadena exacta + origen— **no p
 
 **Qué abre esto**: la salida no es la opción B (que sigue teniendo su contra intacta), sino una tercera — una tabla de avances **continua por página** en vez de por run, ubicando cada item por su origen dentro de ese flujo y caminando desde ahí. Es más trabajo que A y menos riesgo que B. **No decidido**; hace falta medir cuántos documentos reales se parecen a este antes de pagarla.
 
-**Lo que sigue sin medirse**: cuán representativo es este documento. Es uno solo, y de maquetación literaria, no un expediente. Sobre los 28 fixtures del repo da 100 %, pero todos salen de `pdf-lib` (ver "Lo que falta para decidir bien"). ADR-097 §5 instrumenta la cuenta por página, en `debug`, para que el día que aparezca un documento de verdad el número esté ahí sin volver a instrumentar. Ese número es lo único que justificaría pagar la opción B.
+**Medido sobre expedientes reales el 2026-08-27** (tres documentos aportados por el humano, con el harness ciego: el asistente nunca abrió su contenido, solo leyó agregados):
+
+| documento | páginas | empalme ADR-097 | palabras **expuestas** al defecto |
+|---|---|---|---|
+| cuento literario | 11 | **0,2 %** | — |
+| fallo judicial | 51 | **2,9 %** | **58,6 %** |
+| pericia | 5 | **27,4 %** | **77,2 %** |
+| fixtures del repo (`pdf-lib`) | — | 100 % | — |
+
+"Expuestas" = palabras que **no** son la primera de un item multi-palabra, o sea las únicas que el prorrateo puede correr. Las de una palabra tienen caja exacta por aritmética.
+
+**El veredicto es que ADR-097 es inerte en documentos reales, y el defecto original sigue vivo para la mayoría del texto.** Los items de una sola palabra son mayoría (76-84 % de los items) pero contienen **poco texto**: los multi-palabra agrupan ~10 palabras cada uno, así que entre el 59 % y el 77 % de las palabras del documento quedan en posición expuesta.
+
+Esto **sube la prioridad de esta sección**: no es un defecto de borde, es el caso común. La tercera salida —tabla de avances continua por página— pasa de "no decidida" a "lo que hay que evaluar".
+
+**Lo que sigue sin medirse**: cuánto de esa exposición se traduce en daño real. Una palabra al principio de su item se corre poco; el error crece hacia el final. Y lo que importa no son todas las palabras sino las que son **entidad**. Medirlo pide mirar el contenido, y estos documentos son reales. Sobre los 28 fixtures del repo da 100 %, pero todos salen de `pdf-lib` (ver "Lo que falta para decidir bien"). ADR-097 §5 instrumenta la cuenta por página, en `debug`, para que el día que aparezca un documento de verdad el número esté ahí sin volver a instrumentar. Ese número es lo único que justificaría pagar la opción B.
 
 ### Lo que este hallazgo NO frena
 

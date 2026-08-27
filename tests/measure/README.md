@@ -56,3 +56,17 @@ La clasificación de grupos y la regla de matcheo se reusan de `tests/quality/` 
 Después de importar, la app muestra el visor y el `input[type=file]` deja de existir: no hay dónde soltar el segundo documento. Por eso el harness recarga la página en cada uno.
 
 El costo es que cada documento vuelve a cargar el modelo (~1 s). Se reporta en su propia columna (`modelo`) justamente para poder descontarlo: lo que comparan A/B/C es el tiempo **por página**, no el arranque.
+
+## Documentos reales, sin abrirlos
+
+`real-docs.spec.ts` mide sobre expedientes de verdad **sin que su contenido salga de la máquina ni entre al repo**:
+
+```bash
+MEASURE_FILES="/ruta/a.pdf,/ruta/b.pdf" pnpm test:measure real-docs
+```
+
+**Nunca imprime contenido**: solo conteos, porcentajes y tiempos. Las entidades se reportan **por tipo** (`PERSON:98`), nunca por valor. Los errores se reportan por **clase** y no por mensaje, porque las librerías de PDF a veces incluyen texto del documento en la excepción.
+
+Existe porque hay preguntas que el dataset sintético no puede contestar —todos sus PDF salen de `pdf-lib`, que es amable— y las respuestas cambiaron conclusiones: la tasa de empalme de ADR-097 pasó de 100 % en los fixtures a **0,2-27 %** en documentos reales (`roadmap/Post_Hito10.8_Pendientes.md` §24), y la ganancia de ADR-101 pasó de −25 % a **−46 %** sobre un escaneo de verdad.
+
+Sin `MEASURE_FILES` el test se saltea, así que vive en la suite sin pedir nada.
