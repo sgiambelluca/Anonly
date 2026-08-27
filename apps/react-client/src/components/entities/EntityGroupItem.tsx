@@ -68,7 +68,20 @@ function EntityGroupItemImpl({ group, nodeId, activeNodeId }: EntityGroupItemPro
       aria-label={buildTreeItemAriaLabel(group)}
       data-tree-node-id={nodeId}
       tabIndex={activeNodeId === nodeId ? 0 : -1}
-      className={`flex items-center gap-2 py-1 pl-8 pr-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent ${isRowDimmed(group) ? "opacity-50" : ""}`}
+      /*
+       * El atenuado va en los hijos MENOS el último, que es
+       * `GroupContextMenu`. Puesto en la fila entera —como estaba— el panel
+       * del menú lo heredaba y quedaba ilegible justo cuando más se necesita:
+       * en una entidad apagada, que es donde el usuario va a buscar
+       * "fusionar" o "dividir". `opacity` de CSS alcanza a todos los
+       * descendientes y un hijo no puede recuperarse, así que no hay forma de
+       * excluirlo desde adentro.
+       *
+       * Ese menú no puede usar un portal para escaparse: es un disclosure
+       * hecho a mano porque `@radix-ui/react-dropdown-menu` no está en el
+       * proyecto y agregarlo pediría ADR (P-9). Ver su docblock.
+       */
+      className={`flex items-center gap-2 py-1 pl-8 pr-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent ${isRowDimmed(group) ? "[&>*:not(:last-child)]:opacity-50" : ""}`}
     >
       <Checkbox
         checked={group.enabled}

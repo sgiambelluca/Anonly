@@ -75,6 +75,36 @@ describe("cascadeCheckboxState", () => {
 });
 
 describe("visibleTypeEntries", () => {
+  /*
+   * El store acumula por orden de LLEGADA. Coincidía con el orden del
+   * documento por accidente, porque el pipeline corría en serie; ADR-101
+   * paralelizó OCR y el accidente se terminó (`Post_Hito10.8_Pendientes.md`
+   * §27 punto 1). `indexInType` es la fuente correcta: ADR-028 lo renumera
+   * por primera aparición documental.
+   */
+  it("ordena cada tipo por indexInType, no por orden de llegada", () => {
+    const llegada = [
+      makeGroup({ id: "g-c", indexInType: 3, canonicalValue: "Tercero" }),
+      makeGroup({ id: "g-a", indexInType: 1, canonicalValue: "Primero" }),
+      makeGroup({ id: "g-b", indexInType: 2, canonicalValue: "Segundo" }),
+    ];
+    const [entry] = visibleTypeEntries(new Map([[EntityType.Person, llegada]]));
+
+    expect(entry![1].map((g) => g.indexInType)).toEqual([1, 2, 3]);
+  });
+
+  it("desempata por id para que el orden sea estable mientras el pipeline corre", () => {
+    // Con índices provisionales dos grupos pueden compartir `indexInType`;
+    // sin desempate el orden quedaría a merced del motor de sort.
+    const groups = [
+      makeGroup({ id: "g-z", indexInType: 1 }),
+      makeGroup({ id: "g-a", indexInType: 1 }),
+    ];
+    const [entry] = visibleTypeEntries(new Map([[EntityType.Person, groups]]));
+
+    expect(entry![1].map((g) => g.id)).toEqual(["g-a", "g-z"]);
+  });
+
   it("drops types with no groups and preserves Map insertion order", () => {
     const groupsByType = new Map([
       [EntityType.Person, [makeGroup({ id: "g1" })]],

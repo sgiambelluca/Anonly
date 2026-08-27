@@ -785,8 +785,8 @@ La forma del sistema SIMP de la Provincia de Buenos Aires queda confirmada por d
 
 | # | qué | tamaño | estado |
 |---|---|---|---|
-| 1 | La lista de entidades no está en orden de documento | chico, UI | |
-| 2 | El menú `...` de una entidad apagada se ve difuminado | chico, UI | |
+| 1 | La lista de entidades no está en orden de documento | chico, UI | **hecho** |
+| 2 | El menú `...` de una entidad apagada se ve difuminado | chico, UI | **hecho** |
 | 3 | `OccurrenceRef` no lleva el valor: separar y fusionar son a ciegas | chico + ADR de contrato | |
 | 4 | `caratula-ar` inventa personas y fusiona dos reales en una | chico + ADR | |
 | 5 | El aviso `AmbiguousCanonical` no dice nada ni permite actuar | chico-mediano | |
