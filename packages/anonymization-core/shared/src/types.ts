@@ -128,6 +128,19 @@ export interface Document {
   readonly importedAt: number;
 }
 
+/**
+ * ADR-105: la frase que rodea a una ocurrencia. La UI arma
+ * `…{before}` **{value}** `{after}…` sin aritmética — el valor NO se repite
+ * acá, ya viaja en `Occurrence.value` / `OccurrenceRef.value` (ADR-104).
+ *
+ * Dos cadenas y no una con offsets: la alternativa obliga a cada consumidor a
+ * recortar bien, y un off-by-one ahí parte una palabra en pantalla.
+ */
+export interface OccurrenceContext {
+  readonly before: string;
+  readonly after: string;
+}
+
 export interface Occurrence {
   readonly id: string;
   readonly value: string;
@@ -155,6 +168,13 @@ export interface Occurrence {
    * presente/discrepante): ver `Regex_Engine.md`/`NER_Engine.md` §10.
    */
   readonly fragments?: ReadonlyArray<BoundingBox>;
+  /**
+   * ADR-105: la frase alrededor, para distinguir apariciones del **mismo**
+   * valor. Opcional al revés que `value`: una ocurrencia puede nacer sin
+   * texto alrededor (agregado manual, página de una sola palabra), y forzar
+   * una cadena vacía obligaría a distinguir "no hay" de "está vacío".
+   */
+  readonly context?: OccurrenceContext;
 }
 
 export interface OccurrenceRef {
@@ -174,6 +194,8 @@ export interface OccurrenceRef {
   readonly source: DetectionSource;
   /** ADR-074 §1/§2: copiado tal cual de `Occurrence.fragments` por `toOccurrenceRef`. Misma semántica: ausente ≡ `[bbox]`. */
   readonly fragments?: ReadonlyArray<BoundingBox>;
+  /** ADR-105: copiado tal cual de `Occurrence.context`. */
+  readonly context?: OccurrenceContext;
 }
 
 export interface EntityGroup {

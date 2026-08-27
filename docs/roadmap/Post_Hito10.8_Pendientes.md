@@ -817,7 +817,7 @@ El separador existe para **deshacer una fusión**, y es justo ahí donde no se p
 
 No hay razón documentada para omitirlo: el grupo ya carga `canonicalValue`, que es contenido del documento igual. Es cambio de contrato público → ADR + `Contracts.md` primero.
 
-**Abierto**: si además del valor conviene un poco de contexto alrededor (`…se cita a **Facundo** y a su…`), que desambigua mejor cuando el mismo nombre aparece varias veces.
+**Cerrado con ADR-105**: el valor solo no alcanza cuando el mismo texto se repite —dos personas que se llaman igual, o un topónimo usado como ciudad y como organismo, que es el anidamiento del punto 7—. Ahí lo único distinto es la frase alrededor. `Occurrence`/`OccurrenceRef` ganan `context` (`before`/`after`), armado por los detectores con una primitiva de `shared` para no duplicarla entre dos motores que no pueden importarse.
 
 ### 4. `caratula-ar` busca una coma, no una carátula
 

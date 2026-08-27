@@ -21,6 +21,7 @@
  * `modelWarm`) y a `ctx.logger.warn` para los reintentos de carga.
  */
 import {
+  buildOccurrenceContext,
   CancelledError,
   DetectionSource,
   EngineDisposedError,
@@ -607,7 +608,9 @@ export class NerEngine implements IEngine {
 
       try {
         const spans = await this.runInferenceInBatches(input, batchSize, timeoutMs, ctx);
-        const occurrences = spans.map((span) => this.buildOccurrence(span, words, pageIndex));
+        const occurrences = spans.map((span) =>
+          this.buildOccurrence(span, words, pageIndex, input.text),
+        );
 
         for (const occurrence of occurrences) {
           ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, { documentId, occurrence });
@@ -773,6 +776,7 @@ export class NerEngine implements IEngine {
     span: NerKernelSpan,
     words: ReadonlyArray<Word>,
     pageIndex: number,
+    pageText: string,
   ): Occurrence {
     const wordMapping = mapSpanToWords(words, span.startIndex, span.endIndexExclusive);
     const base = {
@@ -789,9 +793,18 @@ export class NerEngine implements IEngine {
     // existen (nunca se asigna explícitamente `undefined`) — mismo patrón
     // que regex-engine/src/regex.engine.ts (buildOccurrence).
     const withWordSpan = wordMapping ? { ...base, wordSpan: wordMapping.wordSpan } : base;
-    return wordMapping?.fragments
+    const withFragments = wordMapping?.fragments
       ? { ...withWordSpan, fragments: wordMapping.fragments }
       : withWordSpan;
+    /*
+     * ADR-105: los offsets del span ya vienen sumados a `chunk.startIndex`
+     * (`runInferenceInBatches`), o sea que son sobre el texto de la PÁGINA —
+     * el mismo espacio que espera la primitiva. La primitiva vive en `shared`
+     * porque regex-engine necesita exactamente lo mismo y los motores no
+     * pueden importarse entre sí.
+     */
+    const context = buildOccurrenceContext(pageText, span.startIndex, span.endIndexExclusive);
+    return context ? { ...withFragments, context } : withFragments;
   }
 
   /**

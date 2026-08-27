@@ -1,4 +1,5 @@
 import {
+  buildOccurrenceContext,
   CancelledError,
   DetectionSource,
   EngineDisposedError,
@@ -411,12 +412,17 @@ function buildOccurrence(match: RawMatch, page: Page): Occurrence {
     // el mismo condicional que wordSpan (cuyo valor sí puede estar ausente).
     maskFormat: match.maskFormat,
   };
-  // exactOptionalPropertyTypes: wordSpan y fragments solo se incluyen si
-  // existen (nunca se asigna explícitamente `undefined`).
+  // exactOptionalPropertyTypes: wordSpan, fragments y context solo se incluyen
+  // si existen (nunca se asigna explícitamente `undefined`).
   const withWordSpan = wordMapping ? { ...base, wordSpan: wordMapping.wordSpan } : base;
-  return wordMapping?.fragments
+  const withFragments = wordMapping?.fragments
     ? { ...withWordSpan, fragments: wordMapping.fragments }
     : withWordSpan;
+  // ADR-105: la frase alrededor, con los offsets que este motor ya tiene sobre
+  // `page.text`. La primitiva vive en `shared` porque ner-engine necesita
+  // exactamente lo mismo y los motores no pueden importarse entre sí.
+  const context = buildOccurrenceContext(page.text, match.startIndex, match.endIndexExclusive);
+  return context ? { ...withFragments, context } : withFragments;
 }
 
 // ─── Matcheo de texto literal (ADR-061 §1/§2, errata §8) ───────────────────

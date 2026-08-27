@@ -223,6 +223,7 @@ Referencia liviana a una `Occurrence`, usada dentro de un `EntityGroup`. Duplica
 export interface OccurrenceRef {
   readonly occurrenceId: string;
   readonly value: string;                    // ADR-104: cómo aparece en el documento, sin normalizar
+  readonly context?: OccurrenceContext;      // ADR-105: la frase alrededor; ausente = sin contexto
   readonly pageIndex: number;
   readonly bbox: BoundingBox;                // duplicado a propósito: la UI lo necesita sin resolver
   readonly fragments?: ReadonlyArray<BoundingBox>;  // ADR-074 §1; ausente ≡ [bbox]
@@ -231,6 +232,7 @@ export interface OccurrenceRef {
 ```
 
 **Invariantes**
+- `context` se copia tal cual de la `Occurrence` (ADR-105). **Ausente ≠ vacío**: una ocurrencia puede nacer sin texto alrededor (agregado manual, página de una sola palabra), y el opcional permite distinguirlo. La UI arma `…{before}` **{value}** `{after}…`; el valor **no** se repite adentro del contexto.
 - `value` se copia **tal cual** de la `Occurrence`, sin normalizar (ADR-104 §1): lo que el separador y el fusionador tienen que mostrar es cómo aparece en el documento, que es justamente lo que distingue dos miembros de un grupo fusionado. Requerido y no opcional: toda `Occurrence` tiene `value`.
 - `fragments` se copia tal cual de la `Occurrence` (`toOccurrenceRef`, `grouping-engine`), con la semántica de §7: envolvente en `bbox`, descomposición por línea en `fragments`, ausente ≡ `[bbox]`. Es un salto de la cadena `Word → Occurrence → Replacement` y **se propaga explícitamente**: nada viaja solo por una copia de campos (ADR-066 §6, el precedente donde `rotation` se caía en silencio).
 

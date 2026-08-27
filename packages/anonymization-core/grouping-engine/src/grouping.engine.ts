@@ -397,6 +397,9 @@ function toOccurrenceRef(occurrence: Occurrence): OccurrenceRef {
     // ADR-074 §1/§2: copiado tal cual, nunca `fragments: undefined` explícito
     // (exactOptionalPropertyTypes) — mismo patrón que personGender arriba.
     ...(occurrence.fragments !== undefined ? { fragments: occurrence.fragments } : {}),
+    // ADR-105: la frase alrededor, tal cual — es lo que distingue apariciones
+    // del mismo valor en el separador.
+    ...(occurrence.context !== undefined ? { context: occurrence.context } : {}),
   };
 }
 
