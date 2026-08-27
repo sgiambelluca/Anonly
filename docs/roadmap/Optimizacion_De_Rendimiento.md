@@ -39,15 +39,44 @@ Es el tipo de documento al que apunta el producto.
 
 ## Velocidad — ordenado por ganancia sobre riesgo
 
-### A. El WASM corre en un solo hilo
+### A. El WASM corre en un solo hilo — **MEDIDO el 2026-08-27; falta decidir el despliegue**
 
 `crossOriginIsolated` es `false` y no hay `SharedArrayBuffer`, así que `onnxruntime-web` fuerza `numThreads = 1`. El motor nunca toca `numThreads` (`ner-engine/src/worker/kernel.ts`, `configureTransformersEnv`): queda en el default de la librería.
 
 El propio repo ya lo admite — `07_Performance_Strategy.md` línea 232: *"`performance.measureUserAgentSpecificMemory()` exige `crossOriginIsolated` (COOP/COEP), **headers que la app de producción no lleva**"*.
 
-- **Ganancia**: la más grande de todas si se confirma. **NO MEDIDA** — activarla exige mandar `COOP: same-origin` + `COEP: require-corp`.
-- **Riesgo de calidad**: ninguno. No toca tokenización, agregación BIO ni umbral.
-- **Costo**: mediano. No toca ningún paquete de `packages/`; es infraestructura de la app. Hay que auditar que no rompa la carga de recursos cross-origin.
+#### Medido: la inferencia baja a la mitad
+
+Prototipo: `COOP: same-origin` + `COEP: require-corp` en el `server.headers` del dev server, y `pnpm test:measure` sobre los 26 documentos, antes y después. Verificado en la página que el aislamiento quedó activo:
+
+```
+crossOriginIsolated: true | SharedArrayBuffer: function | núcleos: 8
+```
+
+| | inferencia de NER (suma de los 26) |
+|---|---|
+| un hilo | 13 564 ms |
+| con hilos | **6 287 ms** |
+| | **−53,6 %** |
+
+Sobre el documento denso (`doc-026`): **2986 ms → 1085 ms, −63,7 %**. La carga del modelo casi no se mueve (−10,7 %, dentro del ruido entre corridas).
+
+**La calidad no cambió en nada**: recall de Regex 61/61, recall de NER 12/17, precisión 84/97 — idénticos a la corrida previa. Era lo esperado (esto no toca tokenización, agregación BIO ni umbral) pero se corrió igual, no se asumió.
+
+**El prototipo se revirtió**: el cambio de headers no está commiteado, porque la decisión no es del repo (ver abajo).
+
+#### Lo que falta decidir, y por qué no es del repo
+
+La app es un **SPA estático**: no puede mandarse headers a sí misma. Ponerlos en el dev server hace que **dev y producción difieran en algo que se nota** —threading sí / threading no—, así que cualquier medición local dejaría de describir el producto. Las opciones:
+
+1. **Comprometer el hosting** a mandar los dos headers, y recién ahí ponerlos también en dev. Es lo único que hace real la ganancia.
+2. Ponerlos solo en dev. **Desaconsejado**: mide una app que no existe.
+3. No hacer nada y quedarse con un hilo.
+
+Hay que auditar además que `COEP: require-corp` no rompa ninguna carga cross-origin. En dev no rompió nada (el pipeline completo corrió y la calidad no se movió), y la app es 100 % first-party por diseño, pero el hosting real puede traer recursos que el dev server no tiene.
+
+- **Riesgo de calidad**: **ninguno, verificado.** No toca tokenización, agregación BIO ni umbral, y la corrida lo confirma.
+- **Costo**: chico en código (cinco líneas más un ADR); la parte cara es el compromiso de despliegue.
 
 ### B. OCR procesa de a una página aunque el pool tiene dos
 
@@ -147,8 +176,8 @@ Y `test:quality` corre **con NER apagado** (ADR-095 §5), así que hoy no hay fo
 |---|---|---|
 | ~~**0**~~ | ~~montar la medición que falta~~ — **hecho**: `pnpm test:measure` (`tests/measure/`), con recall de NER medible por primera vez | sin esto, "no bajó la calidad" es una opinión |
 | ~~**1**~~ | ~~truncamiento silencioso~~ — **hecho**: ADR-098 | el único que ya estaba costando calidad |
-| **2** | **D1** | foco declarado nº 1, riesgo cero, tres cambios chicos |
-| **3** | **A** (COOP/COEP) | la ganancia más grande; medir antes de comprometerse |
+| ~~**2**~~ | ~~**D1**~~ — **hecho**: ADR-099, chunk inicial de 549 a 208 KB gz (−62 %) | foco declarado nº 1, riesgo cero, tres cambios chicos |
+| **3** | **A** (COOP/COEP) — **medido: −53,6 % de inferencia, calidad intacta**; falta decidir el despliegue | la ganancia más grande; medir antes de comprometerse |
 | **4** | **B** (OCR en paralelo) | limpio, sin riesgo de calidad |
 | **5** | **C**, remidiendo | tres cortes; revertir si A ya se llevó la ganancia |
 | — | **D2**, los dos O(n²) | **diferidos**, a rediscutir al cerrar lo anterior |
