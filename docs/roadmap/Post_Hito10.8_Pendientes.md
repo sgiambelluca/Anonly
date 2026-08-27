@@ -760,6 +760,18 @@ No es un problema de geometría —no hay caja mal puesta— sino de **detecció
 
 **Por qué importa más que un hueco cualquiera**: en un expediente judicial el número de causa **es** el identificador del caso. Anonimizar los nombres y dejar el número es dejar el expediente identificable con una búsqueda.
 
-**Lo que hace falta antes de escribir el patrón**, con el precedente de ADR-096 (los patrones cubren cómo se escribe el dato, no su forma canónica): enumerar las formas reales. Se vieron dos en un solo documento; seguro hay más (por fuero, por provincia, por sistema). El humano es la fuente para eso.
+**Lo que hace falta antes de escribir el patrón**, con el precedente de ADR-096 (los patrones cubren cómo se escribe el dato, no su forma canónica): enumerar las formas reales. Se vieron dos en un solo documento; seguro hay más (por fuero, por provincia, por sistema).
+
+### Formas relevadas hasta ahora
+
+| origen | forma | confianza |
+|---|---|---|
+| documento real (carátula) | `PP-NN-NN-NNNNNN-NN/NN` | **alta** — visto |
+| documento real (cuerpo) | `I.P.P. N°NN-NNNNN-NN` | **alta** — visto |
+| búsqueda web (SIMP / Pcia. Bs. As.) | `IPP PP-NN-NN-NNNNNN-NN/NN`, `IPP Nº PP-NN-NN-NNNNNN-NN/NN` | media — coincide con lo visto, pero **sin verificar con alguien del fuero** |
+
+La forma del sistema SIMP de la Provincia de Buenos Aires queda confirmada por dos vías independientes (el documento y la web). **Lo que sigue sin cubrir**: otros fueros, otras provincias (Córdoba usa SAC, CABA usa EJE) y el fuero federal, cada uno con su nomenclatura.
+
+> **Advertencia sobre la fuente web**: uno de los resultados interpretó "IPP" como *Índice de Prestadores Públicos*, que en este contexto es otra cosa por completo (Investigación Penal Preparatoria). Los datos de arriba se toman como **candidatos a verificar**, no como especificación — mismo criterio que ADR-096, donde las formas que trajo el humano se contrastaron una por una antes de convertirlas en patrón.
 
 **No decidido**: si el número de expediente debe anonimizarse **siempre** o ser opcional. Un fallo publicado suele citarlo a propósito.
