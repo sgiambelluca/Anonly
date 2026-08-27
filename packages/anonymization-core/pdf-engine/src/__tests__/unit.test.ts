@@ -380,6 +380,127 @@ describe("PdfEngine — unit tests", () => {
     });
   });
 
+  // ADR-097: el ancho promedio uniforme de ADR-020 §1 repartido sobre una
+  // fuente proporcional corre cada token que no arranca al principio de su
+  // item, y el error se acumula. El run de acá lo exagera a propósito con la
+  // misma forma del defecto real: diez glifos angostos seguidos de dos anchos.
+  describe("Avances reales por glifo (ADR-097, §13 casos 42-45)", () => {
+    // Tfs = 10, origen en x = 100. Diez `l` de 200/1000 em (2 pt cada uno),
+    // un espacio de 300 (3 pt), `M` y `W` de 1000 (10 pt cada uno).
+    //   avance real hasta "MW" -> 10*2 + 3 = 23        => x = 123, ancho 20
+    //   prorrateo: 43/13 = 3,3077 por char, offset 11  => x = 136,38, ancho 6,6
+    const GLYPHS = [
+      ...Array.from({ length: 10 }, () => ({ unicode: "l", width: 200 })),
+      { unicode: " ", width: 300 },
+      { unicode: "M", width: 1000 },
+      { unicode: "W", width: 1000 },
+    ];
+    const RUN_STR = "llllllllll MW";
+    const RUN_WIDTH = 43;
+
+    const runOps = (glyphs: ReadonlyArray<{ unicode: string; width: number }>) =>
+      [
+        { kind: "save" },
+        { kind: "beginText" },
+        { kind: "setFont", size: 10 },
+        { kind: "setTextMatrix", matrix: [1, 0, 0, 1, 100, 700] },
+        { kind: "showText", glyphs },
+        { kind: "restore" },
+      ] as MockAnnotationInnerOp[];
+
+    const wordsFor = async (
+      documentId: string,
+      item: { str: string; x: number; width: number },
+      glyphs: ReadonlyArray<{ unicode: string; width: number }> = GLYPHS,
+    ): Promise<ReadonlyArray<Word>> => {
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () =>
+            createMockPage(
+              0,
+              [{ str: item.str, x: item.x, y: 700, width: item.width, height: 10 }],
+              [],
+              { width: 595, height: 842 },
+              [],
+              runOps(glyphs),
+            ),
+          ),
+        ),
+      );
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput(documentId), ctx);
+      return output.document.pages[0]!.words;
+    };
+
+    it("places a mid-item token at its real advance, not the prorated one", async () => {
+      const words = await wordsFor("doc-097-empalma", {
+        str: RUN_STR,
+        x: 100,
+        width: RUN_WIDTH,
+      });
+      const mw = words.find((w) => w.text === "MW")!;
+      expect(mw.bbox.x).toBeCloseTo(123, 6);
+      // Y el ancho, que el promedio dejaba corto en la otra dirección.
+      expect(mw.bbox.width).toBeCloseTo(20, 6);
+    });
+
+    it("falls back to the prorated advance when the item string differs", async () => {
+      // pdf.js sintetizó un espacio que no existe como glifo: las dos fuentes
+      // dejan de coincidir y el item queda EXACTAMENTE como antes de ADR-097
+      // (ADR-097 §3 — el peor caso es el statu quo).
+      const words = await wordsFor("doc-097-cadena-distinta", {
+        str: "llllllllll  MW",
+        x: 100,
+        width: RUN_WIDTH,
+      });
+      const mw = words.find((w) => w.text === "MW")!;
+      const charWidth = RUN_WIDTH / "llllllllll  MW".length;
+      expect(mw.bbox.x).toBeCloseTo(100 + charWidth * 12, 6);
+      expect(mw.bbox.x).not.toBeCloseTo(123, 1);
+    });
+
+    it("falls back when the item origin matches no run", async () => {
+      const words = await wordsFor("doc-097-origen-distinto", {
+        str: RUN_STR,
+        x: 300,
+        width: RUN_WIDTH,
+      });
+      const mw = words.find((w) => w.text === "MW")!;
+      expect(mw.bbox.x).toBeCloseTo(300 + (RUN_WIDTH / RUN_STR.length) * 11, 6);
+    });
+
+    it("imputes a ligature's full advance to its first character", async () => {
+      // Un glifo cuyo `.unicode` tiene dos caracteres. Si el avance se
+      // repartiera entre los dos, `Z` arrancaría antes de donde está.
+      //   "fi"(600) "n"(400) " "(300) "Z"(700) => avances [0,6,6,10,13,20]
+      const words = await wordsFor("doc-097-ligadura", { str: "fin Z", x: 100, width: 20 }, [
+        { unicode: "fi", width: 600 },
+        { unicode: "n", width: 400 },
+        { unicode: " ", width: 300 },
+        { unicode: "Z", width: 700 },
+      ]);
+      const z = words.find((w) => w.text === "Z")!;
+      expect(z.bbox.x).toBeCloseTo(113, 6);
+      expect(z.bbox.width).toBeCloseTo(7, 6);
+      // Y el token que contiene la ligadura arranca en el origen del run.
+      const fin = words.find((w) => w.text === "fin")!;
+      expect(fin.bbox.x).toBeCloseTo(100, 6);
+      expect(fin.bbox.width).toBeCloseTo(10, 6);
+    });
+
+    it("leaves a single-word item on the run envelope (§13 caso 44)", async () => {
+      // No pasa por el reparto —ni avances ni prorrateo—: era exacto antes de
+      // ADR-097 y sigue igual.
+      const words = await wordsFor("doc-097-una-palabra", { str: "MW", x: 100, width: 20 }, [
+        { unicode: "M", width: 1000 },
+        { unicode: "W", width: 1000 },
+      ]);
+      expect(words).toHaveLength(1);
+      expect(words[0]!.bbox.x).toBeCloseTo(100, 6);
+      expect(words[0]!.bbox.width).toBeCloseTo(20, 6);
+    });
+  });
+
   describe("Textless pages detection", () => {
     it("marks page with empty text content as requiresOCR=true", async () => {
       vi.mocked(getDocument).mockReturnValue(

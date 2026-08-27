@@ -243,13 +243,31 @@ function boundingBoxFromParallelogram(
  * normalización NFC (ADR-020 §2). ADR-063 §3: el prorrateo corre sobre el eje
  * de avance (dir), no sobre x — para dir=(1,0) las dos expresiones coinciden.
  */
+/*
+ * ADR-097 §5: cuántos items multi-palabra encontraron su run. Solo esos
+ * consultan la tabla, así que solo esos aportan a la pregunta que decide si
+ * alguna vez conviene la opción B de `Post_Hito10.8_Pendientes.md` §24.
+ */
+interface TextRunJoinStats {
+  readonly eligible: number;
+  readonly joined: number;
+}
+
+interface ConvertedTextItems {
+  readonly words: ReadonlyArray<Word>;
+  readonly joinStats: TextRunJoinStats;
+}
+
 function convertTextItemsToWords(
   textContent: TextContentLike,
   pageIndex: number,
   pageHeight: number,
   originCorrections: ReadonlyArray<TextOriginCorrection> = [],
-): Word[] {
+  advanceIndex: TextRunAdvanceIndex = new Map(),
+): ConvertedTextItems {
   const words: Word[] = [];
+  let eligible = 0;
+  let joined = 0;
 
   for (const item of textContent.items) {
     if (!item.str || item.str.trim().length === 0 || !item.transform) continue;
@@ -294,12 +312,20 @@ function convertTextItemsToWords(
       continue;
     }
 
+    // ADR-097 §2/§3: los avances reales del run si el item casa; si no, el
+    // ancho promedio de ADR-020 §1 — el camino de reserva, intacto.
+    eligible++;
+    const run = findRunForItem(advanceIndex, str, reportedX, reportedY);
+    if (run !== undefined) joined++;
     const charWidth = str.length > 0 ? width / str.length : 0;
     for (const token of tokens) {
       const tokenText = token[0];
       if (tokenText === undefined) continue;
       const offset = token.index ?? 0;
-      const advance = charWidth * offset;
+      const end = offset + tokenText.length;
+      const advance = run?.advances[offset] ?? charWidth * offset;
+      const tokenWidth =
+        run !== undefined ? (run.advances[end] ?? advance) - advance : charWidth * tokenText.length;
       const tokenOrigin: Vector2 = {
         x: originX + dir.x * advance,
         y: originY + dir.y * advance,
@@ -308,7 +334,7 @@ function convertTextItemsToWords(
         tokenOrigin,
         dir,
         up,
-        charWidth * tokenText.length,
+        tokenWidth,
         height,
         pageHeight,
       );
@@ -322,7 +348,7 @@ function convertTextItemsToWords(
     }
   }
 
-  return words;
+  return { words, joinStats: { eligible, joined } };
 }
 
 /*
@@ -859,6 +885,111 @@ interface TextOriginCorrection {
 /** Tolerancia del match contra el origen reportado por `getTextContent`. */
 const ORIGIN_CORRECTION_EPSILON = 0.05;
 
+/*
+ * ADR-097 §1: avances reales por glifo de un run de PÁGINA.
+ *
+ * `advances[i]` es el avance desde `origin` hasta el COMIENZO del carácter
+ * `i`, en unidades de página sobre el eje de avance del run;
+ * `advances[str.length]` es el ancho total. De ahí salen las dos cosas que el
+ * ancho promedio de ADR-020 §1 calculaba mal: dónde arranca un token y cuánto
+ * mide.
+ */
+interface TextRunAdvances {
+  readonly origin: Vector2;
+  readonly str: string;
+  readonly advances: ReadonlyArray<number>;
+}
+
+/*
+ * ADR-097 §2: índice por cadena exacta. El empalme NO puede ser posicional —
+ * `getTextContent()` intercala items sintéticos que no salen de ningún
+ * `showText` (marcadores de fin de línea, y espacios entre palabras que el
+ * productor separó moviendo el cursor: 65 runs contra 129 items en
+ * `qa-tables-justified.pdf`). Un `Map` por cadena evita el O(items × runs)
+ * de un `find` lineal en una página densa, y la clave es exacta, así que no
+ * hay problemas de frontera como los tendría cuantizar el origen.
+ */
+type TextRunAdvanceIndex = ReadonlyMap<string, ReadonlyArray<TextRunAdvances>>;
+
+function indexTextRunAdvances(runs: ReadonlyArray<TextRunAdvances>): TextRunAdvanceIndex {
+  const index = new Map<string, TextRunAdvances[]>();
+  for (const run of runs) {
+    const bucket = index.get(run.str);
+    if (bucket === undefined) index.set(run.str, [run]);
+    else bucket.push(run);
+  }
+  return index;
+}
+
+/*
+ * ADR-097 §2: el run de un item, o `undefined` si no casa. Dos condiciones,
+ * y la primera es la que protege contra el error silencioso: si pdf.js
+ * sintetizó un espacio, resolvió un `/ActualText` o normalizó, la cadena no
+ * coincide y no se empalma. Implica `advances.length === str.length + 1`.
+ *
+ * El origen se compara contra el REPORTADO por `getTextContent` (el `from` de
+ * ADR-068), no contra el corregido: el run vive en el sistema de coordenadas
+ * del operator list.
+ */
+function findRunForItem(
+  index: TextRunAdvanceIndex,
+  str: string,
+  reportedX: number,
+  reportedY: number,
+): TextRunAdvances | undefined {
+  const bucket = index.get(str);
+  if (bucket === undefined) return undefined;
+  return bucket.find(
+    (run) =>
+      Math.abs(run.origin.x - reportedX) <= ORIGIN_CORRECTION_EPSILON &&
+      Math.abs(run.origin.y - reportedY) <= ORIGIN_CORRECTION_EPSILON,
+  );
+}
+
+/*
+ * ADR-097 §1: tabla de avances de un run de página, o `undefined` si no hay
+ * texto. Replica la aritmética de `leadingAdvance` (ADR-068) en espacio de
+ * texto y la escala a unidades de página.
+ *
+ * `Tw` queda deliberadamente FUERA (ADR-097 §4): ADR-068 midió que la tinta
+ * cae en la posición sin aplicarlo, y su corrección de origen lleva el run
+ * ahí — incluirlo acá pondría el resto del run en otro sistema.
+ */
+function buildTextRunAdvances(
+  args: unknown,
+  text: TextState,
+  ctm: Matrix2D,
+): TextRunAdvances | undefined {
+  if (!Array.isArray(args) || args.length === 0) return undefined;
+  const glyphs: unknown = args[0];
+  if (!Array.isArray(glyphs)) return undefined;
+
+  const composed = composeMatrix(ctm, text.textMatrix);
+  const scale = Math.hypot(composed[0], composed[1]);
+
+  let str = "";
+  let accumulated = 0;
+  const advances: number[] = [0];
+
+  for (const glyph of glyphs as ReadonlyArray<unknown>) {
+    if (typeof glyph === "number") {
+      // Ajuste de kerning de un TJ: avanza sin aportar carácter.
+      accumulated += (-glyph / 1000) * text.fontSize * text.horizontalScale;
+      continue;
+    }
+    if (!isRecord(glyph) || typeof glyph.unicode !== "string") continue;
+    const width = typeof glyph.width === "number" ? glyph.width : 0;
+    accumulated += ((width / 1000) * text.fontSize + text.charSpacing) * text.horizontalScale;
+    str += glyph.unicode;
+    // Una ligadura aporta su avance completo en el PRIMER carácter; los
+    // siguientes repiten el acumulado, así ningún token arranca adentro.
+    for (let i = 0; i < glyph.unicode.length; i++) advances.push(accumulated * scale);
+  }
+
+  if (str.length === 0) return undefined;
+  return { origin: { x: composed[4], y: composed[5] }, str, advances };
+}
+
 function isWhitespaceGlyph(glyph: unknown): boolean {
   if (!isRecord(glyph)) return false;
   return typeof glyph.unicode === "string" && glyph.unicode.trim().length === 0;
@@ -981,6 +1112,8 @@ interface AnnotationsAndImages {
   // ADR-068: origen real de los runs de PÁGINA cuyo `transform` de
   // `getTextContent` viene desplazado por el word spacing.
   readonly originCorrections: ReadonlyArray<TextOriginCorrection>;
+  // ADR-097 §1: avances reales por glifo de cada run de PÁGINA.
+  readonly textRunAdvances: ReadonlyArray<TextRunAdvances>;
 }
 
 /*
@@ -1003,6 +1136,7 @@ function walkOperatorListForAnnotationsAndImages(
   const imageRects: BoundingBox[] = [];
   const annotationWords: Word[] = [];
   const originCorrections: TextOriginCorrection[] = [];
+  const textRunAdvances: TextRunAdvances[] = [];
 
   const text = new TextState();
   // El cuerpo y el escalado horizontal son estado gráfico: `save`/`restore` los
@@ -1084,7 +1218,10 @@ function walkOperatorListForAnnotationsAndImages(
     } else if (ctm.isInsideAnnotation && (fn === OPS.showText || fn === OPS.showSpacedText)) {
       const run = buildAnnotationTextRun(args, text, ctm.current);
       if (run !== undefined) {
-        const words = convertTextItemsToWords(
+        // ADR-097 §3: el camino de anotaciones NO usa la tabla de avances —
+        // acá la cadena y la geometría salen de la misma fuente, así que no
+        // hay dos fuentes que empalmar.
+        const { words } = convertTextItemsToWords(
           {
             items: [
               { str: run.str, transform: run.transform, width: run.width, height: run.height },
@@ -1110,9 +1247,12 @@ function walkOperatorListForAnnotationsAndImages(
       }
     } else if (!ctm.isInsideAnnotation && (fn === OPS.showText || fn === OPS.showSpacedText)) {
       // ADR-068: el texto de página lo extrae `getTextContent()`; de este
-      // recorrido solo sale la corrección del origen (ver `buildOriginCorrection`).
+      // recorrido salen la corrección del origen (ver `buildOriginCorrection`)
+      // y —ADR-097 §1— los avances reales por glifo del run.
       const correction = buildOriginCorrection(args, text, ctm.current);
       if (correction !== undefined) originCorrections.push(correction);
+      const runAdvances = buildTextRunAdvances(args, text, ctm.current);
+      if (runAdvances !== undefined) textRunAdvances.push(runAdvances);
     } else if (fn !== undefined && IMAGE_PAINT_OPS.has(fn)) {
       // ADR-066 §5: `ctm.current` ya aplica beginAnnotation.transform cuando
       // la imagen está dentro de una anotación — corrige el defecto latente
@@ -1121,7 +1261,7 @@ function walkOperatorListForAnnotationsAndImages(
     }
   }
 
-  return { imageRects, annotationWords, originCorrections };
+  return { imageRects, annotationWords, originCorrections, textRunAdvances };
 }
 
 // Filtro por rectángulo (ADR-065 §1): descarta imágenes < 1% del área de
@@ -1431,7 +1571,7 @@ async function parsePage(
 
   // ADR-068: el recorrido del operator list precede a la conversión de items
   // porque produce la corrección de origen que ésta consume.
-  const { imageRects, annotationWords, originCorrections } =
+  const { imageRects, annotationWords, originCorrections, textRunAdvances } =
     walkOperatorListForAnnotationsAndImages(
       operatorList,
       pageIndex,
@@ -1440,12 +1580,27 @@ async function parsePage(
       logger,
     );
 
-  const contentWords = convertTextItemsToWords(
+  const { words: contentWords, joinStats } = convertTextItemsToWords(
     textContent,
     pageIndex,
     pageHeight,
     originCorrections,
+    indexTextRunAdvances(textRunAdvances),
   );
+
+  // ADR-097 §5: sin esta cuenta, "¿cada cuánto falla el empalme en un
+  // documento real?" —la pregunta que decide si alguna vez conviene la
+  // opción B de `Post_Hito10.8_Pendientes.md` §24— no tiene cómo
+  // contestarse. Es `debug`: un empalme que no ocurre no es un error, es el
+  // camino de reserva funcionando.
+  if (joinStats.eligible > 0) {
+    logger.debug("Empalme de avances por glifo (ADR-097 §5).", {
+      documentId,
+      pageIndex,
+      joined: joinStats.joined,
+      eligible: joinStats.eligible,
+    });
+  }
 
   // ADR-066 §1: el texto de anotaciones se suma al del content stream — las
   // dos fuentes son disjuntas por construcción (getTextContent() no lee
