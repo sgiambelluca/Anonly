@@ -791,7 +791,7 @@ La forma del sistema SIMP de la Provincia de Buenos Aires queda confirmada por d
 | 4 | `caratula-ar` inventa personas y fusiona dos reales en una | chico + ADR | **hecho** (ADR-103) |
 | 5 | El aviso `AmbiguousCanonical` no dice nada ni permite actuar | chico-mediano | **hecho** (ADR-106) |
 | 6 | Falta el patrón de número de expediente (§26) | mediano + ADR | |
-| 7 | Tokens anidados: dos detecciones donde hay una frase | diagnóstico primero | |
+| 7 | Tokens anidados: dos detecciones donde hay una frase | diagnóstico primero | **diagnosticado** |
 
 ### 1. La lista está en orden de llegada, no de documento
 
@@ -847,3 +847,40 @@ El panel muestra *"El valor se escribe de varias formas"* y nada más: no dice *
 **Decidido por el humano y hecho (ADR-106)**: en vez de apagarlo en fusiones manuales, **volverlo accionable**. El diálogo lista las formas empatadas y deja elegir cuál es la canónica; aplicar emite `updateGroup({ canonicalValue })` + `resolveConflict`.
 
 > El comportamiento anterior **estaba especificado**: `ui/Components.md` §6.2 decía que `ambiguous_canonical` "no ofrece radios y el botón dice Descartar". ADR-083 §6 lo había metido junto a `low_confidence` bajo "no hay elección", y era cierto **sobre el eje del tipo** —todos los candidatos comparten tipo— pero no comparten **valor**. `low_confidence` sí se queda donde está: con un candidato no hay nada entre qué elegir.
+
+
+### 7. Tokens anidados — diagnóstico ciego (2026-08-27)
+
+Medido sobre la pericia real con el harness ciego (solo estructura, sin valores). 17 grupos activos:
+
+| relación entre dos detecciones de la misma línea | casos |
+|---|---|
+| una **contiene** a la otra | **3** |
+| se solapan parcialmente | 0 |
+| **adyacentes** (< 12 pt de separación) | **4** |
+
+**Son dos problemas distintos, no uno.**
+
+**(a) Adyacentes.** Cuatro pares pegados, incluidos dos de 8×8 pt —fragmentos— y dos que combinan `DATE` con `ADDRESS`. Acá **no hay solapamiento que resolver**: son dos detecciones vecinas, y el caso reportado (`Departamento Judicial Quilmes` saliendo como dos tokens) encaja acá. El arreglo no es resolución de conflictos sino decidir si dos detecciones contiguas del mismo tipo se funden.
+
+**(b) Contención, y con un hallazgo nuevo.** Los tres casos involucran a **la misma entidad, de 561 pt de ancho**:
+
+```
+CONTIENE  PERSON/PERSON        largos  98/561 pt
+CONTIENE  ORGANIZATION/PERSON  largos 106/561 pt
+CONTIENE  PERSON/PERSON        largos 561/70 pt
+```
+
+561 pt es **media página de ancho**. Una `PERSON` de ese tamaño no es un nombre: es una línea entera tomada como una sola entidad, que se traga a las tres que caen adentro.
+
+Y dos de los tres pares son `PERSON/PERSON`, o sea **del mismo tipo** — que es justo lo que `findOverlapConflict` saltea:
+
+```ts
+if (rec.entityType === occurrence.entityType) continue;   // grouping.engine.ts:1795
+```
+
+**Sin decidir**, y son decisiones separadas:
+
+1. **La entidad de 561 pt es el problema de fondo** y no está diagnosticada. Puede ser un span de NER que se estiró (mismo mecanismo que ADR-088 §1 cerró para runs rotados) o una detección legítimamente larga. Hay que mirarla antes de tocar la resolución de conflictos: si esa entidad no existiera, dos de los tres casos de contención desaparecen solos.
+2. **El salteo por tipo igual** de `findOverlapConflict`. Levantarlo hace que dos detecciones del mismo tipo compitan, y hay que definir quién gana — hoy el criterio es confianza, que entre dos NER del mismo tipo puede no discriminar.
+3. **La fusión de adyacentes** (a), que es un mecanismo que no existe.
