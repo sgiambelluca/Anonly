@@ -1249,13 +1249,21 @@ describe("RegexEngine — unit tests", () => {
       ).resolves.toEqual(["López, María"]);
     });
 
-    // La regresión concreta que fijó el límite de arriba: sin él, la
-    // ocurrencia se estira sobre dos runs y Grouping descarta por
-    // solapamiento la entidad de al lado (mismo mecanismo que ADR-088 §1).
+    /*
+     * La regresión concreta que fijó el límite de arriba: sin él, la
+     * ocurrencia se estira sobre dos runs y Grouping descarta por
+     * solapamiento la entidad de al lado (mismo mecanismo que ADR-088 §1).
+     *
+     * El `"Firmado:"` lo agregó ADR-103, que exige una marca de carátula
+     * adyacente. **La aserción no se tocó**: lo que este test fija —que el
+     * match NO se coma el `"Date:"` que sigue— se verifica igual. Lo único
+     * que cambió es el contexto, y hacia uno **más** fiel: el caso original
+     * salía de la firma de una pericia real, o sea que ahí decía "Firmado".
+     */
     it("does not swallow a capitalized word that follows the given name", async () => {
-      await expect(personas(["Albarracin,", "Rocio", "Date:", "07/07/2026"])).resolves.toEqual([
-        "Albarracin, Rocio",
-      ]);
+      await expect(
+        personas(["Firmado:", "Albarracin,", "Rocio", "Date:", "07/07/2026"]),
+      ).resolves.toEqual(["Albarracin, Rocio"]);
     });
 
     // La compuerta del léxico. Sin ella el patrón matchea media Argentina:

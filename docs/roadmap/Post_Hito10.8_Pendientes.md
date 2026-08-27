@@ -788,7 +788,7 @@ La forma del sistema SIMP de la Provincia de Buenos Aires queda confirmada por d
 | 1 | La lista de entidades no está en orden de documento | chico, UI | **hecho** |
 | 2 | El menú `...` de una entidad apagada se ve difuminado | chico, UI | **hecho** |
 | 3 | `OccurrenceRef` no lleva el valor: separar y fusionar son a ciegas | chico + ADR de contrato | |
-| 4 | `caratula-ar` inventa personas y fusiona dos reales en una | chico + ADR | |
+| 4 | `caratula-ar` inventa personas y fusiona dos reales en una | chico + ADR | **hecho** (ADR-103) |
 | 5 | El aviso `AmbiguousCanonical` no dice nada ni permite actuar | chico-mediano | |
 | 6 | Falta el patrón de número de expediente (§26) | mediano + ADR | |
 | 7 | Tokens anidados: dos detecciones donde hay una frase | diagnóstico primero | |
@@ -828,7 +828,9 @@ El patrón de ADR-092 es `\b(\p{Lu}\p{Ll}+),\s+(\p{Lu}\p{Ll}+)\b`. Esa forma apa
 
 El segundo es el más grave: junta dos personas distintas en una entidad.
 
-**Arreglo: anclar al contexto.** Una carátula no aparece suelta — viene tras `caratulado:`, `Autos:`, `causa`, `Expediente`, o seguida de `c/` o `s/`. Medido sobre ocho casos: los tres legítimos se conservan, los cinco falsos desaparecen.
+**Arreglo (ADR-103): anclar al contexto.** Una carátula no aparece suelta — viene tras `caratulado:`, `Autos:`, `causa`, `Expediente`, `Firmado:`, `perito`, o seguida de `c/` o `s/`. Medido: **12 de 12** casos correctos, seis legítimos y seis falsos.
+
+> La primera versión del anclaje **perdía las firmas** (`Firmado: Albarracin, Rocio`) y la designación de perito (`perito a López, María`), que son contextos de carátula tanto como el encabezado. Lo detectaron los tests de ADR-092, que los tenían codificados — un caso donde el test que falla estaba encodeando un requisito real, no un detalle a ajustar.
 
 No lo debilita: ADR-092 creó este patrón porque **en la carátula NER falla** (orden invertido, confianza bajo el umbral). Anclarlo lo devuelve a su único trabajo; en el cuerpo los nombres los agarra NER.
 

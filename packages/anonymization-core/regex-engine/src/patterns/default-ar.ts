@@ -438,7 +438,38 @@ export const DEFAULT_PATTERNS_AR: ReadonlyArray<RegexPattern> = [
      */
     id: "caratula-ar",
     entityType: EntityType.Person,
-    pattern: /\b(\p{Lu}\p{Ll}+),\s+(\p{Lu}\p{Ll}+)\b/gu,
+    /*
+     * ADR-103: el match exige una MARCA DE CARÁTULA adyacente. Sin ella,
+     * `Palabra, Palabra` es una forma que aparece en prosa normal todo el
+     * tiempo, y producía dos clases de falso positivo que el checksum no
+     * puede filtrar —mira el segundo término, y ahí sí hay un nombre—:
+     *
+     *   adverbio inicial   "Finalmente, Alejandro"
+     *   ENUMERACIÓN        "Abril, Facundo"   <- dos personas REALES,
+     *                                            emitidas como una sola
+     *
+     * La segunda es la grave: no inventa a nadie, **fusiona** a dos que
+     * existen, y anonimizar a una arrastra a la otra sin que se note hasta
+     * leer el PDF exportado — que es como se encontró.
+     *
+     * Dos vías, cualquiera alcanza: la palabra que la introduce ANTES
+     * (`Autos: Pérez, Juan`) o las partículas que separan a las partes
+     * DESPUÉS (`Pérez, Juan c/ Empresa`).
+     *
+     * Las marcas incluyen las de **firma** y **perito**, y no por completitud:
+     * la forma invertida aparece igual en la firma de una pericia
+     * (`Firmado: Albarracin, Rocio`) y al designar un profesional
+     * (`perito a López, María`), que son contextos de carátula tanto como el
+     * encabezado. La primera versión de este anclaje las perdía — lo
+     * detectaron los tests de ADR-092, que las tenían codificadas.
+     *
+     * Esto revisa el juicio de ADR-092, que descartó el lookbehind con la
+     * regla "no cambies un falso positivo por un falso negativo". La regla
+     * vale cuando hay uno de cada lado; un FP que se ve y se apaga cuesta un
+     * clic, uno que fusiona dos personas cuesta una fuga silenciosa.
+     */
+    pattern:
+      /(?<=(?:[Cc]aratulad[oa]s?|[Aa]utos|[Cc]ausa|[Ee]xpediente|[Ff]irmad[oa]|[Ff]irma|[Pp]erito|[Ss]uscriben?)\s*[:,]?\s{0,3}(?:a\s{1,3})?)\b\p{Lu}\p{Ll}+,\s+\p{Lu}\p{Ll}+\b|\b\p{Lu}\p{Ll}+,\s+\p{Lu}\p{Ll}+\b(?=\s+(?:c\/|s\/))/gu,
     checksum: firstNameIsInLexicon,
     normalizer: flipCaption,
     maskFormat: "XXXXX XXXXX",

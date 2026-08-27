@@ -417,15 +417,21 @@ describe("RegexEngine — edge case tests", () => {
     });
   });
 
-  // Caso 31 (§13, ADR-092, Contexto §3): el residuo aceptado. "Argentina" ES
-  // un nombre de pila permitido en el registro de Buenos Aires, así que la
-  // compuerta del léxico lo deja pasar. El lookbehind que lo evitaría pierde
-  // "el Doctor Pérez, Juan" — y en una herramienta de privacidad un falso
-  // negativo es una fuga mientras un falso positivo es un destildado. Se
-  // afirma acá para que la limitación sea conocida y no una sorpresa, mismo
-  // criterio que "Tel.0221-4567890" de ADR-075 §5.
-  describe("Caso 31: carátula — residuo aceptado", () => {
-    it('"Buenos Aires, Argentina" still emits (accepted residue)', async () => {
+  /*
+   * Caso 31 (§13): el residuo que ADR-092, Contexto §3 aceptaba — "Argentina"
+   * ES un nombre de pila permitido en el registro de Buenos Aires, así que la
+   * compuerta del léxico lo dejaba pasar.
+   *
+   * **ADR-103 lo cerró**, y este test se invierte con él. La razón por la que
+   * se aceptaba era que el lookbehind que lo evita pierde "el Doctor Pérez,
+   * Juan", y que un falso negativo pesa más que un falso positivo en una
+   * herramienta de privacidad. Ese juicio se revisó: la clase de falso
+   * positivo resultó mucho más grande (adverbios y enumeraciones) y una de
+   * ellas **fusiona dos personas reales en una sola** — que no es un
+   * destildado, es una fuga silenciosa.
+   */
+  describe("Caso 31: carátula — el residuo cerrado por ADR-103", () => {
+    it('"Buenos Aires, Argentina" ya no emite: no hay marca de carátula cerca', async () => {
       const document = makeSinglePageDocument("doc-caratula-residuo", [
         "con",
         "domicilio",
@@ -443,7 +449,7 @@ describe("RegexEngine — edge case tests", () => {
         .map((o) => o.value);
       busEmitSpy.mockRestore();
 
-      expect(personas).toEqual(["Aires, Argentina"]);
+      expect(personas).toEqual([]);
     });
   });
 
