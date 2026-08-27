@@ -775,3 +775,69 @@ La forma del sistema SIMP de la Provincia de Buenos Aires queda confirmada por d
 > **Advertencia sobre la fuente web**: uno de los resultados interpretó "IPP" como *Índice de Prestadores Públicos*, que en este contexto es otra cosa por completo (Investigación Penal Preparatoria). Los datos de arriba se toman como **candidatos a verificar**, no como especificación — mismo criterio que ADR-096, donde las formas que trajo el humano se contrastaron una por una antes de convertirlas en patrón.
 
 **No decidido**: si el número de expediente debe anonimizarse **siempre** o ser opcional. Un fallo publicado suele citarlo a propósito.
+
+
+---
+
+## 27. Correcciones de detección y UX del gate visual (2026-08-27)
+
+**Procedencia**: el humano exportó la pericia real dos veces —antes y después de ADR-102— y revisó el resultado. La primera corrida confirmó §24 y destapó §26. La segunda, con el corte ya arreglado, destapó seis cosas más. Ninguna la habían visto los cuatro relevamientos automáticos: **todas salieron de usar la herramienta sobre un documento de verdad.**
+
+| # | qué | tamaño | estado |
+|---|---|---|---|
+| 1 | La lista de entidades no está en orden de documento | chico, UI | |
+| 2 | El menú `...` de una entidad apagada se ve difuminado | chico, UI | |
+| 3 | `OccurrenceRef` no lleva el valor: separar y fusionar son a ciegas | chico + ADR de contrato | |
+| 4 | `caratula-ar` inventa personas y fusiona dos reales en una | chico + ADR | |
+| 5 | El aviso `AmbiguousCanonical` no dice nada ni permite actuar | chico-mediano | |
+| 6 | Falta el patrón de número de expediente (§26) | mediano + ADR | |
+| 7 | Tokens anidados: dos detecciones donde hay una frase | diagnóstico primero | |
+
+### 1. La lista está en orden de llegada, no de documento
+
+`entities.store.ts#addGroup` hace `[...bucket, group]` —orden de llegada— y `entityTree.ts` **no ordena en ningún lado**. Antes coincidía con el orden del documento **por accidente**, porque todo se procesaba en serie; ADR-101 (OCR en paralelo) terminó con el accidente.
+
+**Es una regresión introducida por ADR-101**, que se declaró sin riesgo de calidad. Lo era para *qué* se detecta —cada página es un trabajo independiente— pero el orden de los eventos aguas abajo hasta la UI no se revisó.
+
+El dato de abajo está bien: ADR-028 renumera `indexInType` canónicamente por primera aparición documental. Lo único desordenado es la lista. **Arreglo**: ordenar cada tipo por `indexInType`.
+
+### 2. `opacity` en la fila entera arrastra al menú
+
+`EntityGroupItem` pone `opacity-50` en el div de **toda la fila** y `GroupContextMenu` se renderiza adentro. En CSS `opacity` alcanza a todos los descendientes, así que el panel abierto queda ilegible.
+
+No es portal por decisión documentada: `@radix-ui/react-dropdown-menu` no está en el proyecto y agregarlo pediría ADR (P-9). **Arreglo**: mover el `opacity-50` al contenido de la fila, dejando el menú afuera.
+
+### 3. `OccurrenceRef` no lleva el valor
+
+El separador existe para **deshacer una fusión**, y es justo ahí donde no se puede distinguir qué se fusionó: solo muestra `Página N — fuente`. El diálogo de fusión tiene el mismo problema.
+
+**Y no es un pedido nuevo**: el docblock de `GroupContextMenu` dice, textual, que *"Ver ocurrencias" depende de un campo `value` que `OccurrenceRef` no tiene* — una función ya diseñada que se cortó por esto.
+
+No hay razón documentada para omitirlo: el grupo ya carga `canonicalValue`, que es contenido del documento igual. Es cambio de contrato público → ADR + `Contracts.md` primero.
+
+**Abierto**: si además del valor conviene un poco de contexto alrededor (`…se cita a **Facundo** y a su…`), que desambigua mejor cuando el mismo nombre aparece varias veces.
+
+### 4. `caratula-ar` busca una coma, no una carátula
+
+El patrón de ADR-092 es `\b(\p{Lu}\p{Ll}+),\s+(\p{Lu}\p{Ll}+)\b`. Esa forma aparece en prosa normal todo el tiempo, y produce **dos clases** de falso positivo:
+
+| clase | ejemplo | por qué el checksum no ayuda |
+|---|---|---|
+| adverbio inicial | `Finalmente, Alejandro` | el segundo término **es** un nombre real |
+| enumeración | `Abril, Facundo` | **los dos** son nombres reales — y los **fusiona en una sola persona** |
+
+El segundo es el más grave: junta dos personas distintas en una entidad.
+
+**Arreglo: anclar al contexto.** Una carátula no aparece suelta — viene tras `caratulado:`, `Autos:`, `causa`, `Expediente`, o seguida de `c/` o `s/`. Medido sobre ocho casos: los tres legítimos se conservan, los cinco falsos desaparecen.
+
+No lo debilita: ADR-092 creó este patrón porque **en la carátula NER falla** (orden invertido, confianza bajo el umbral). Anclarlo lo devuelve a su único trabajo; en el cuerpo los nombres los agarra NER.
+
+### 5. El aviso de canónico ambiguo no dice nada
+
+`AmbiguousCanonical` salta ante un **empate real** —misma frecuencia y misma longitud—; el motor elige la primera y avisa que adivinó. Fusionar dos formas a mano crea justo ese empate, así que salta siempre.
+
+El panel muestra *"El valor se escribe de varias formas"* y nada más: no dice **cuáles** ni permite hacer nada.
+
+**Y el dato está**: `raiseAmbiguousCanonicalConflict` arma un candidato por cada forma empatada, con su `value`. La UI no lo usa.
+
+**Decidido por el humano**: en vez de apagarlo en fusiones manuales, **volverlo accionable** — que liste las formas empatadas y deje elegir cuál es la canónica. Deja de ser una alarma inútil y pasa a ser la acción que falta; y si lo hace, tampoco molesta en una fusión manual, porque ahí también se quiere decidir cuál se muestra.
