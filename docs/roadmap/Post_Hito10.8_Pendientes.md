@@ -668,7 +668,29 @@ Aun así **no es despreciable**: en un documento con cien entidades, entre dos y
 
 **Lo que esta medición NO cubre**: solo mira el **borde izquierdo**. El ancho de la caja también sale mal (ADR-097, Contexto §1: `promueve` salía 8,43 pt más angosta), así que puede tapar de menos por la derecha sin que este número lo registre. Y un corrimiento menor al primer glifo igual deja una astilla visible.
 
-**Lo que sigue sin medirse**: si las palabras que caen en ese 1,7-11,4 % son **entidades**. Eso pide mirar el contenido; estos documentos son reales y no se abrieron. Sobre los 28 fixtures del repo da 100 %, pero todos salen de `pdf-lib` (ver "Lo que falta para decidir bien"). ADR-097 §5 instrumenta la cuenta por página, en `debug`, para que el día que aparezca un documento de verdad el número esté ahí sin volver a instrumentar. Ese número es lo único que justificaría pagar la opción B.
+### Gate visual sobre el PDF exportado de un expediente real (2026-08-27)
+
+El humano corrió el export sobre la pericia con todas las entidades activas y compartió el resultado anonimizado. **Confirma el defecto, y destapa dos más.**
+
+*(No se transcriben los fragmentos filtrados: son el dato real asomando. Se describen por categoría y cantidad.)*
+
+**(a) La fuga de §24, confirmada — y cae justo sobre los nombres.** En una sola página se cuentan **cinco** casos de caracteres del original a la izquierda del token:
+
+| tipo de entidad | caracteres a la vista |
+|---|---|
+| nombre de profesional | 1 |
+| apellido de profesional | **3** |
+| nombre de profesional | 1 |
+| nombre de institución | 2 |
+| topónimo | 1 |
+
+Que la mediana del error sea de 1,52 pt no consuela: **las que fallan son las que importan**. Una inicial de apellido más el contexto de la frase alcanza para reidentificar.
+
+**(b) La caja también tapa de menos por la DERECHA.** Un token cubre un identificador y deja su cola visible pegada al token. Es el defecto de ancho que ADR-097, Contexto §1 ya había medido (`promueve` salía 8,43 pt más angosta) y que la medición ciega de arriba **no registra**, porque solo mira el borde izquierdo.
+
+**(c) Defecto distinto, y de DETECCIÓN: el número de expediente queda entero a la vista.** Aparece dos veces, en dos formatos (uno tipo `PP-NN-NN-NNNNNN-NN/NN` y otro tipo `I.P.P. N°NN-NNNNN-NN`), **sin tapar en absoluto**. No es geometría: no lo detectó nadie, porque `default-ar.ts` no tiene patrón para número de expediente. En un anonimizador de expedientes judiciales, ese número es un identificador directo del caso — **es el hueco de detección más grave encontrado hasta ahora**, y no estaba en ningún informe.
+
+**Consecuencia**: §24 deja de ser teórico. Y (c) merece entrada propia — ver §26. Sobre los 28 fixtures del repo da 100 %, pero todos salen de `pdf-lib` (ver "Lo que falta para decidir bien"). ADR-097 §5 instrumenta la cuenta por página, en `debug`, para que el día que aparezca un documento de verdad el número esté ahí sin volver a instrumentar. Ese número es lo único que justificaría pagar la opción B.
 
 ### Lo que este hallazgo NO frena
 
@@ -706,3 +728,25 @@ Lo que queda —el token levantado respecto de la línea, la coma huérfana tras
 Se intentó acotarlo por cálculo y no alcanzó: `tryRepaintLine` dibuja con `textBaseline: "middle"` centrado en el medio del bbox, mientras el texto original se apoya en su línea de base. La aritmética de dónde queda cada centro depende de la relación entre `bbox.height` y las métricas reales de la fuente embebida, y sale distinta según qué se asuma. **Afirmar un diagnóstico ahí sin mirarlo sería inventar.**
 
 **Lo que hace falta para cerrarlos**: correr el gate de ADR-058 §11 sobre `qa-tables-justified.pdf` exportado, en un browser real, con las correcciones de esta campaña ya aplicadas — varias de las cuales (§23e, §23f) cambian lo que se ve en ese mismo documento.
+
+
+---
+
+## 26. Falta un patrón para el número de expediente judicial
+
+**Procedencia**: gate visual del 2026-08-27 sobre el PDF exportado de una pericia real (§24).
+
+En el documento anonimizado, el número de expediente aparece **dos veces y entero, sin tapar**, en dos formatos distintos:
+
+```
+PP-NN-NN-NNNNNN-NN/NN          (carátula del sistema)
+I.P.P. N°NN-NNNNN-NN           (citado en el cuerpo)
+```
+
+No es un problema de geometría —no hay caja mal puesta— sino de **detección**: `regex-engine/src/patterns/default-ar.ts` no tiene ningún patrón que los cubra, así que el motor nunca los propone y el usuario no tiene qué activar.
+
+**Por qué importa más que un hueco cualquiera**: en un expediente judicial el número de causa **es** el identificador del caso. Anonimizar los nombres y dejar el número es dejar el expediente identificable con una búsqueda.
+
+**Lo que hace falta antes de escribir el patrón**, con el precedente de ADR-096 (los patrones cubren cómo se escribe el dato, no su forma canónica): enumerar las formas reales. Se vieron dos en un solo documento; seguro hay más (por fuero, por provincia, por sistema). El humano es la fuente para eso.
+
+**No decidido**: si el número de expediente debe anonimizarse **siempre** o ser opcional. Un fallo publicado suele citarlo a propósito.
