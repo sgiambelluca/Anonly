@@ -39,14 +39,24 @@ function formatOffenders(report: EvaluationReport): ReadonlyArray<string> {
   return lines;
 }
 
-export function formatReport(report: EvaluationReport): string {
+/**
+ * `detectorLine` describe qué detectores corrieron. Es un parámetro y no una
+ * constante porque hay dos consumidores con respuestas distintas:
+ * `tests/quality/` corre con NER apagado (ADR-095 §5) y `tests/measure/` lo
+ * corre encendido en un browser. Hardcodear "NER off" hacía que el segundo
+ * informe afirmara lo contrario de lo que había pasado.
+ */
+export function formatReport(
+  report: EvaluationReport,
+  detectorLine = "Regex — único detector activo (NER off, ADR-095 §5):",
+): string {
   const { regex, precision } = report;
   const truePositives = precision.totalDetections - precision.falsePositiveCount;
 
   return [
     `Dataset de referencia (tests/fixtures/reference/) — ${report.documentCount} documentos`,
     "",
-    "Regex — único detector activo (NER off, ADR-095 §5):",
+    detectorLine,
     `  recall de cobertura: ${regex.coveredCount}/${regex.totalTruthEntities} (${pct(regex.coverageRecall)})`,
     `  recall tipado:       ${regex.typedCoveredCount}/${regex.totalTruthEntities} (${pct(regex.typedRecall)})`,
     `  precisión:           ${truePositives}/${precision.totalDetections} (${pct(precision.precision)})`,

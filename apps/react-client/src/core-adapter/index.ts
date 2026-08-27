@@ -128,6 +128,27 @@ let deferredCore = createDeferred<IAnonymizationCore>();
  * `config` de `App.tsx` llega siempre a `createCore()`, sin importar el orden
  * de montaje (PR17.3).
  */
+/**
+ * Expone la instancia del Core en `window` **solo en dev** para el harness de
+ * medición (`tests/measure/`, corre contra el dev server que levanta
+ * Playwright).
+ *
+ * Por qué existe: medir calidad de detección y tiempos por etapa necesita el
+ * `bus` —tipo, valor y página de cada entidad, con marca de tiempo— y eso no
+ * está en el DOM: el árbol de entidades renderiza el valor canónico de cada
+ * grupo pero no su página, así que raspar la UI mediría una renderización, no
+ * una detección. `IAnonymizationCore.bus` ya es público (`types.ts`), o sea
+ * que esto no expone nada que el contrato no exponga.
+ *
+ * `import.meta.env.DEV` es una constante que Vite reemplaza literalmente, así
+ * que en el build de producción el cuerpo entero se elimina por dead-code
+ * elimination: no llega al bundle.
+ */
+function exposeCoreForMeasurement(instance: IAnonymizationCore): void {
+  if (!import.meta.env.DEV) return;
+  (globalThis as { __anonlyCore?: IAnonymizationCore }).__anonlyCore = instance;
+}
+
 export async function initCore(config?: EngineConfigOverrides): Promise<IAnonymizationCore> {
   if (core) return core;
   if (creationStarted) return deferredCore.promise;
@@ -150,6 +171,7 @@ export async function initCore(config?: EngineConfigOverrides): Promise<IAnonymi
     });
     unsubscribeBridge = subscribe(instance.bus, stores);
     core = instance;
+    exposeCoreForMeasurement(instance);
     deferredCore.resolve(instance);
     return instance;
   } catch (error) {

@@ -1,0 +1,56 @@
+<!-- CONTEXT: scope=tests-measure | dependencias=roadmap/Optimizacion_De_Rendimiento.md,adr/ADR-095-La-Regla-De-Matcheo-Es-La-Metrica.md,tests/e2e/README.md | audiencia=humanos+IA | fase=11 -->
+
+# Harness de medición
+
+Mide **tiempo por etapa** y **calidad de detección** sobre el dataset de referencia, corriendo la app real en Chromium. Es el instrumento de "antes y después" del plan de `docs/roadmap/Optimizacion_De_Rendimiento.md`.
+
+**No es un gate**: no afirma umbrales ni falla por un número. Mide, imprime y guarda.
+
+## Por qué corre en un browser y no en Node
+
+Las dos cosas que hay que medir son inseparables del entorno real:
+
+1. **Calidad con NER encendido.** El kernel resuelve el modelo contra `env.localModelPath = "/models/ner/"`, una ruta de servidor: en Node no existe, y por eso `tests/quality/` mide con NER apagado (ADR-095 §5). Acá el dev server la sirve desde `public/`.
+2. **Tiempos representativos.** En Node, Transformers.js usa el backend nativo de onnxruntime; en el browser usa WASM. Medido: **82 ms contra 1590 ms** para las mismas 256 palabras. Un número de Node no describiría el producto.
+
+## Prerequisito
+
+```bash
+pnpm assets:mirror
+```
+
+Igual que `tests/e2e/` — ver su README. Sin el modelo en `apps/react-client/public/models/`, NER no carga.
+
+## Correr
+
+```bash
+pnpm test:measure
+```
+
+Un subconjunto, y con etiqueta para no pisar una medición anterior:
+
+```bash
+MEASURE_DOCS=doc-001,doc-016 MEASURE_LABEL=post-A pnpm test:measure
+```
+
+La salida va a `.measure/<label>.json` (gitignoreado): tiempos crudos, ocurrencias y grupos de cada documento, para poder recalcular sin volver a medir.
+
+## Cómo lee el estado
+
+Por el **bus de eventos**, vía un hook que `core-adapter/index.ts` expone en `globalThis` **solo en dev** (`import.meta.env.DEV`, que Vite elimina del build de producción).
+
+No se raspa el DOM a propósito: el árbol de entidades renderiza el valor canónico de cada grupo pero **no su página**, y la regla de matcheo de ADR-095 §1 necesita `(entityType, value, pageIndex)`. Raspar la UI mediría una renderización, no una detección.
+
+La clasificación de grupos y la regla de matcheo se reusan de `tests/quality/` sin tocarlas, así que la métrica vive en un solo lugar.
+
+## Lo que este número **no** dice todavía
+
+- **El recall sigue siendo el de Regex.** `evaluateDocument` excluye las entidades `detector: "ner"` del recall (ADR-095 §5). Lo que sí cambia con NER encendido es la **precisión**, que ahora cuenta las detecciones de NER. Medir recall de NER pide extender el evaluador — decisión abierta.
+- **La precisión con NER encendido mezcla dos cosas.** Una detección de NER que no matchea el ground truth cuenta como falso positivo, pero el dataset se construyó enumerando **formas de escritura de Regex** (ADR-096): su verdad no pretende ser exhaustiva en Personas/Organizaciones. Parte de la caída puede ser verdad faltante y no ruido del motor. Hay que mirarlos uno por uno antes de sacar conclusiones.
+- **Los documentos de referencia son chicos** (2-3 páginas, poco densas). Sirven para comparar, pero no ejercitan el camino caro que motiva A/B/C (5-15 s por página densa). Para eso hace falta sumar un documento denso.
+
+## Una página por documento
+
+Después de importar, la app muestra el visor y el `input[type=file]` deja de existir: no hay dónde soltar el segundo documento. Por eso el harness recarga la página en cada uno.
+
+El costo es que cada documento vuelve a cargar el modelo (~1 s). Se reporta en su propia columna (`modelo`) justamente para poder descontarlo: lo que comparan A/B/C es el tiempo **por página**, no el arranque.

@@ -28,6 +28,7 @@
     "test:ui": "vitest run --ui",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
+    "test:measure": "playwright test --config=playwright.measure.config.ts",
     "test:perf": "vitest run tests/perf",
     "test:stress": "vitest run tests/stress",
     "test:leak": "vitest run tests/leak",
