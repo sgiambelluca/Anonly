@@ -960,3 +960,36 @@ Contención total entre grupos habilitados del mismo tipo. **Es la evidencia que
 ### Cobertura que el dataset NO tiene
 
 Medido sobre las 78 entidades del ground truth: **1 sola** ocurrencia con `fragments` en los 26 documentos, **0** valores repetidos, **3** con coma. Las clases que fallaron esta campaña —entidad partida, mismo valor dos veces, enumeración con coma— están casi ausentes. Los fixtures que las cubran quedan pendientes, y deben salir de **fallos observados**, no inventados.
+
+
+### Lo que resultaron ser las 3 violaciones de la página 37
+
+Perseguidas hasta el final, a ciegas, y **ninguna de las tres hipótesis previas era la correcta**:
+
+| hipótesis | cómo se falsificó |
+|---|---|
+| anidamiento de entidades (`Quilmes` adentro del juzgado) | **no**: ninguna contiene el texto de la otra |
+| texto rotado | **no**: `rotation` ausente en las 306 ocurrencias del documento |
+| `fragments` faltantes en entidades que cruzan renglón | **no**: 19 de 19 los tienen — ADR-074 funciona |
+
+Lo que son, medido:
+
+```
+ORGANIZATION(7ch)  rect=[x387 w129 y689 h11]
+ORGANIZATION(3ch)  rect=[x387 w129 y689 h11]
+ORGANIZATION(6ch)  rect=[x387 w129 y689 h11]
+```
+
+**Tres valores distintos con el rectángulo idéntico.** Un valor de 3 caracteres no mide 129 pt: las tres entidades caen **adentro de la misma `Word`**, y `mapSpanToWords` mapea con granularidad de palabra, así que las tres heredan su caja completa.
+
+**Consecuencias**:
+
+- Anonimizar cualquiera de las tres **pinta los 129 pt enteros**, tapando texto que no es la entidad.
+- Las tres se pisan entre sí, que es lo que el invariante detectó.
+- Es la misma familia que §24: **geometría a la granularidad equivocada**. ADR-102 arregló la posición de una palabra dentro de su item; esto es la posición de una entidad dentro de su palabra.
+
+**Sin decidir**: por qué esa `Word` mide 129 pt (¿un item sin espacios? ¿una palabra larga real?) y si `mapSpanToWords` debería recortar dentro de la palabra usando los offsets de carácter, que el `wordSpan` no conserva.
+
+**El invariante `checkValueStartsAtWord` habría llamado a esto directamente** — un valor de 3 caracteres mapeado a una palabra de 129 pt casi seguro no arranca donde arranca la palabra. Hoy no corre en browser porque necesita las `Page` y el bus no las lleva (§28). Eso pasa de ser una limitación anotada a ser **lo próximo a destrabar**.
+
+**Y no es el caso reportado por el humano**: `Departamento Judicial Quilmes` es una **adyacencia**, y las adyacencias siguen siendo el fenómeno dominante — 5 en la pericia, 21 en el fallo, contra 3 solapamientos.
