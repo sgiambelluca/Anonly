@@ -21,6 +21,11 @@ import { basename } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
 import { rasterizeToScannedPdf } from "../e2e/support/scannedPdf.js";
+import {
+  checkFragments,
+  checkIndexInType,
+  checkNoOverlapBetweenEnabledGroups,
+} from "../invariants/checks.js";
 
 import { TIMED_EVENTS, type BrowserCollector, type MeasuredDocument } from "./collect.js";
 
@@ -41,6 +46,7 @@ test("documentos reales — solo agregados, nunca contenido", async ({ page }) =
     const buffer = (await readFile(file)).buffer as ArrayBuffer;
     const measured = await measureFile(page, file, buffer);
     report(basename(file), measured);
+    reportInvariants(measured);
   }
   expect(files.length).toBeGreaterThan(0);
 });
@@ -175,4 +181,40 @@ async function measureFile(
       ok: m.isOk(),
     };
   });
+}
+
+/**
+ * Los invariantes que **no necesitan las páginas**, sobre un documento real.
+ *
+ * Es el punto entero de tener invariantes: no piden ground truth, así que
+ * corren sobre un expediente de verdad sin que nadie lea su contenido. Las
+ * violaciones se reportan por tipo, página y medida — nunca por texto.
+ *
+ * `checkValueStartsAtWord` queda afuera **a propósito y no por olvido**:
+ * necesita las `Page`, y los eventos del bus no las llevan (`PAGE_PARSED` trae
+ * `wordCount`, no las `Word`). Ese corre en Node, sobre el dataset
+ * (`tests/invariants/dataset.test.ts`).
+ */
+function reportInvariants(m: MeasuredDocument): void {
+  const snapshot = { pages: [], occurrences: [], groups: m.groups };
+  const violations = [
+    // `checkFragments` mira ocurrencias; acá se le pasan las de los grupos,
+    // que es lo que el bus entrega con `fragments` ya propagados.
+    ...checkFragments({
+      ...snapshot,
+      occurrences: m.occurrences,
+    }),
+    ...checkIndexInType(snapshot),
+    ...checkNoOverlapBetweenEnabledGroups(snapshot),
+  ];
+
+  if (violations.length === 0) {
+    console.log("  invariantes ............. sin violaciones");
+    return;
+  }
+  console.log(`  invariantes ............. ${violations.length} VIOLACIONES`);
+  for (const v of violations.slice(0, 10)) {
+    console.log(`    ${v.invariant}`);
+    console.log(`      ${v.where} — ${v.detail}`);
+  }
 }

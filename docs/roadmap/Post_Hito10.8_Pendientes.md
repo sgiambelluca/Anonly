@@ -913,5 +913,50 @@ ADR-074 introdujo `fragments` justamente para que la envolvente dejara de tapar 
    | grupos activos | 17 | **19** |
 
    Los tres conflictos falsos desaparecieron y **se recuperaron dos entidades reales** que el motor descartaba. `test:quality` sin moverse: 61/61 y 98,4 %.
-2. **El salteo por tipo igual** (`if (rec.entityType === occurrence.entityType) continue`) queda **sin evaluar** hasta que (1) esté hecho: con 0 solapamientos reales en este documento, hoy no hay evidencia de que haga falta levantarlo.
+2. **El salteo por tipo igual** (`if (rec.entityType === occurrence.entityType) continue`). Dicho el 2026-08-27 que quedaba **sin evaluar** porque en la pericia, con fragmentos, no había ningún solapamiento real que lo motivara.
+
+   > **Ya hay evidencia, y la trajeron los invariantes** (§28). En su **primera** corrida sobre un documento real más grande —el fallo de 51 páginas— dieron **3 violaciones** de "dos grupos habilitados no se solapan > 50 %", todas `ORGANIZATION/ORGANIZATION` en la página 37 y con **ratio = 1,00**, o sea contención total. Dos grupos habilitados tapando el mismo lugar, del mismo tipo — exactamente lo que el salteo deja pasar. La pericia no lo mostraba porque es cinco páginas; el fallo sí. **Esto pasa de "sin evidencia" a "medido y pendiente de decidir quién gana entre dos del mismo tipo".**
 3. **La fusión de adyacentes** (a) sigue siendo un mecanismo que no existe, y es lo que el humano reportó (`Departamento Judicial Quilmes` como dos tokens).
+
+
+---
+
+## 28. Invariantes del pipeline (2026-08-27)
+
+**Procedencia**: el humano preguntó si se podían expandir los tests para buscar casos límite. La medición previa mostró que el dataset casi no cubre las clases que fallaron esta sesión — **0 valores repetidos** en 78 entidades, y solo 3 con coma adentro.
+
+### Por qué invariantes y no más fixtures
+
+Un fixture con ground truth mide un caso conocido, pero **alguien tiene que escribir la verdad**, y ahí se cuela la suposición de quien la escribe. Toda esta campaña mostró el mismo patrón: cada vez que medimos contra la realidad, el número sintético era optimista.
+
+Un invariante afirma algo que **el propio contrato del repo ya promete**, no necesita ground truth, y por eso **corre sobre expedientes reales sin que nadie lea su contenido** — que es donde apareció casi todo lo que importó.
+
+### Los cuatro
+
+| invariante | lo promete |
+|---|---|
+| `bbox` es la unión exacta de `fragments`, sin solape vertical, y `length ≥ 2` | ADR-074 §1, textual |
+| `indexInType` es 1..n sin huecos ni repetidos por tipo | ADR-028 |
+| dos grupos **habilitados** no se solapan > 50 % (por fragmentos) | ADR-107 |
+| el `value` arranca donde arranca su primera `Word` | el mapeo span→Word |
+
+El último apunta al `ORGANIZATION "fono de contacto"` de `NER_Engine.md` §14.1 — un valor que arranca a mitad de palabra, anotado ahí como "puede ser de offsets del motor, no diagnosticado".
+
+### Dónde corren
+
+- **`tests/invariants/dataset.test.ts`** — los cuatro, sobre los 26 documentos, con NER apagado. Es un **gate**: una violación es un defecto o una promesa incumplida. Hoy: **0 violaciones** (33 páginas, 62 ocurrencias, 62 grupos).
+- **`tests/measure/real-docs.spec.ts`** — los **tres** que no necesitan páginas, sobre documentos reales, con NER encendido y sin leer contenido. `checkValueStartsAtWord` queda afuera a propósito: necesita las `Page` y el bus no las lleva (`PAGE_PARSED` trae `wordCount`, no las `Word`).
+
+### Lo que encontraron en su primera corrida
+
+```
+Pericia (5 pp) ................. sin violaciones
+Fallo judicial (51 pp) ......... 3 VIOLACIONES
+    ORGANIZATION/ORGANIZATION p37 — ratio=1.00   (×3)
+```
+
+Contención total entre grupos habilitados del mismo tipo. **Es la evidencia que faltaba** para el punto 2 de §27.7, y la encontraron sin ground truth, sin fixture nuevo y sin que nadie abriera el documento.
+
+### Cobertura que el dataset NO tiene
+
+Medido sobre las 78 entidades del ground truth: **1 sola** ocurrencia con `fragments` en los 26 documentos, **0** valores repetidos, **3** con coma. Las clases que fallaron esta campaña —entidad partida, mismo valor dos veces, enumeración con coma— están casi ausentes. Los fixtures que las cubran quedan pendientes, y deben salir de **fallos observados**, no inventados.

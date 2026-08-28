@@ -132,6 +132,16 @@ export default defineConfig({
         find: "@anonly/regex-engine",
         replacement: resolve(rootDir, "packages/anonymization-core/regex-engine/src/index.ts"),
       },
+      // tests/invariants/ corre PdfEngine suelto para obtener las `Page`: los
+      // eventos del bus no las llevan (`PAGE_PARSED` trae `wordCount`, no las
+      // `Word`), y exponer el documento en `IPipelineOrchestrator` sería un
+      // cambio de contrato público por una necesidad de test.
+      // RegExp anclado: `pdf-engine` tiene subpath `./worker`, mismo motivo
+      // que ner-engine y export-engine.
+      {
+        find: /^@anonly\/pdf-engine$/,
+        replacement: resolve(rootDir, "packages/anonymization-core/pdf-engine/src/index.ts"),
+      },
       // RegExp anclado (no string): ver nota de cabecera — evita que
       // `@anonly/ner-engine/worker` (PR15, ADR-046) caiga en este alias.
       {
