@@ -10,7 +10,7 @@
  * `vitest` y este módulo también corre desde el script de `tsx`.
  */
 import { createEventBus } from "@anonly/event-system";
-import type { EngineContext } from "@anonly/shared";
+import type { EngineContext, ICache } from "@anonly/shared";
 
 import { buildDefaultEngineConfig } from "../../packages/anonymization-core/src/config.js";
 
@@ -21,19 +21,44 @@ const silentLogger = {
   error: (): void => {},
 };
 
+/**
+ * `ICache` sin evicción: los invariantes corren un documento por proceso, así
+ * que no hay presupuesto que administrar. `bytes` cuenta solo lo que el caller
+ * declara, igual que `MemoryCache` — una entrada guardada sin `bytes` pesa 0.
+ */
+function createCache(): ICache {
+  const store = new Map<string, { value: unknown; bytes: number }>();
+  return {
+    get<T>(key: string): T | undefined {
+      const entry = store.get(key);
+      return entry === undefined ? undefined : (entry.value as T);
+    },
+    set<T>(key: string, value: T, bytes?: number): void {
+      store.set(key, { value, bytes: bytes ?? 0 });
+    },
+    delete(key: string): void {
+      store.delete(key);
+    },
+    clear(): void {
+      store.clear();
+    },
+    get size(): number {
+      return store.size;
+    },
+    get bytes(): number {
+      let total = 0;
+      for (const entry of store.values()) total += entry.bytes;
+      return total;
+    },
+  };
+}
+
 export function createEngineContext(): EngineContext {
-  const store = new Map<string, unknown>();
   return {
     bus: createEventBus({ logger: silentLogger }),
     logger: silentLogger,
-    cache: {
-      get: (k: string) => store.get(k),
-      set: (k: string, v: unknown) => void store.set(k, v),
-      has: (k: string) => store.has(k),
-      delete: (k: string) => void store.delete(k),
-      clear: () => store.clear(),
-    },
+    cache: createCache(),
     abortSignal: new AbortController().signal,
     config: buildDefaultEngineConfig(),
-  } as unknown as EngineContext;
+  };
 }
