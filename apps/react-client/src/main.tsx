@@ -1,3 +1,7 @@
+// Primero de todo: `pdfjs-dist` 4.x usa `Promise.withResolvers`, que Safari
+// no tiene antes de la 17.4. Ver `polyfills.ts`.
+import "./polyfills.js";
+
 import { GlobalWorkerOptions } from "pdfjs-dist";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { StrictMode } from "react";
