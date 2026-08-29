@@ -346,10 +346,14 @@ interface PipelineSlice {
   readonly exportProgress: { current: number; total: number } | null;
   readonly exportResult: { blobUrl: string; sizeBytes: number } | null;
   readonly error: SerializedEngineError | null;
+  /** Jobs que fallaron sin tumbar el pipeline, por `WorkerJobType`. `{}` es el caso sano. */
+  readonly failedJobs: Readonly<Partial<Record<WorkerJobType, number>>>;
   setState(patch: Partial<PipelineSlice>): void;
   reset(): void;
 }
 ```
+
+> **`failedJobs` (2026-08-28).** Un worker caído hace que el pool rechace su job, pero el pipeline **sigue** y llega a `Ready`: `WORKER_JOB_FAILED` no es `PIPELINE_FAILED`. Sin este campo la UI no tenía forma de distinguir "terminó" de "terminó a medias", y la toolbar mostraba **"Listo"** sobre un documento en el que no se detectó nada — medido sobre una pericia real, con los 11 jobs de `ner-page` caídos por `WORKER_CRASHED`. En una herramienta de privacidad ese modo de falla (silencioso, con cara de éxito) es el peor posible: el usuario exporta creyendo que anonimizó. El bridge lo llena desde el canal `workers` y desde `OCR_PAGE_FAILED`; `components/toolbar/incompleteAnalysisNotice.ts` lo traduce a un aviso, y se reinicia en cada `DOCUMENT_IMPORTED`.
 
 ### 3.5 `viewer.store.ts`
 
@@ -566,8 +570,11 @@ Tabla reconciliada por ADR-036 §5 (la versión previa refería un evento inexis
 | `PDF_PASSWORD_REQUIRED` (evento, canal `pdf`; la UI se suscribe **directo** — ADR-034 §4) | `PasswordDialog`; al submitear, `actions.retryWithPassword(password)` (**nunca** `engines.pdf.process` — Orchestrator.md §6) |
 | `PDF_INVALID` (evento) | toast/mensaje: "El archivo no es un PDF válido" |
 | `PIPELINE_FAILED` (evento) | banner con error tipado + botón "Reintentar" o "Cerrar documento" |
+| `PIPELINE_FAILED` con `error.code === "WORKER_CRASHED"` | mensaje propio en `MESSAGE_BY_CODE` (`pipelineErrorPresentation.ts`): "Se interrumpió uno de los procesos que analizan el documento. Recargá la página y probá de nuevo." Sin esa fila, el `?? error.message` filtraba el string interno del pool a la pantalla ("WorkerPool(render): worker (slot 0) emitió un error de transporte."), contra ADR-087 §4 |
 | `PIPELINE_FAILED` con `error.code === "NER_MODEL_MISSING"` | modal: el modelo NER no pudo cargarse (assets first-party, ADR-018 — no hay "descarga manual"); ofrecer "Desactivar NER y reanalizar" (flujo §3.7) o "Reintentar" |
-| `OCR_PAGE_FAILED` (evento) | toast: "No se pudo procesar la página X con OCR. Las demás continúan." |
+| `OCR_PAGE_FAILED` (evento, canal `ocr`) | suma 1 a `pipeline.failedJobs["ocr-page"]`. **No es un toast por página**: un escaneo cuyo OCR falla entero produciría 20 toasts encadenados diciendo lo mismo. Se agrega al aviso único de fin de análisis (fila de abajo). Hasta 2026-08-28 este evento **no estaba suscrito a ningún store** —gap anotado desde el PR5 del Hito 10— y un escaneo sin texto llegaba a "Listo" sin que nada lo dijera |
+| `WORKER_JOB_FAILED` (evento, canal `workers`) | suma 1 a `pipeline.failedJobs[type]`, atribuyendo por el `type` del `WORKER_JOB_DISPATCHED` del mismo `jobId` (el payload del fallo no lo trae). Un fallo sin despacho previo **no se cuenta**: inventarle un motor sería peor que perderlo |
+| Pipeline en `Ready`/`Done` con `failedJobs` no vacío | banner **warning** (no error: el pipeline sí terminó) con el aviso de `incompleteAnalysisNotice.ts` + botón "Recargar". Distingue lo que compromete la detección (`ner-page`, `ocr-page` → "puede haber datos sensibles sin detectar") de lo cosmético (`render-page` → "la detección no se vio afectada"), porque para esta herramienta no son el mismo problema |
 | (fallo de página NER) | **sin señal en MVP**: no existe evento `NER_PAGE_FAILED` (`04_Event_System.md` §5); el motor descarta las ocurrencias NER de esa página con `logger.warn` y continúa (`NER_Engine.md` §7). Si v1.0 quiere el toast, el evento se crea vía ADR (R-19) |
 | `PREVIEW_PAGE_FAILED` (evento) | aviso **en la página afectada** (`PageCanvas`): "No se pudo mostrar esta página" + "El documento no cambió: es la vista previa la que falló". Se guarda en `viewer.failedPages` (sin `kind`: el payload no lo trae) y esa página **deja de reintentarse** (`previewRetry.ts`). Un placeholder gris a secas no servía: es idéntico al de una página que todavía no renderizó |
 | `EXPORT_FAILED` (evento) | toast: "No se pudo exportar. Reintente." |

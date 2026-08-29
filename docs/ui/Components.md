@@ -109,6 +109,7 @@ apps/react-client/src/components/
   - En otros casos: texto descriptivo + barra de progreso.
 - **`Ready` no dibuja barra** (ADR-087, Contexto §1 hallazgo 4): hasta acá la barra se renderizaba en todos los stages no-`Idle`, así que en `Ready` quedaba en `width: 0%` con el texto "Listo" al lado — el elemento más grande de la toolbar mostrando "0 %" mientras el texto decía "terminado". Una barra sin progreso que reportar no se dibuja.
 - **Ancho no fijo**: el `min-w-[220px]` anterior truncaba el texto a < 1100 px y a 900 px la barra quedaba tapada por el botón "Exportar".
+- **Banner de análisis incompleto** (2026-08-28): en `Ready`/`Done` con `pipeline.failedJobs` no vacío, en vez del texto de estado se dibuja un `Banner` **warning** con "Recargar". Es un tercer estado, distinto de los dos que había: el pipeline **no** falló (no hay `PIPELINE_FAILED`, así que `pipelineErrorPresentation` no aplica) pero tampoco terminó bien. Antes de esto la toolbar decía "Listo" con un motor entero caído — ver `React_Client.md` §3.4 (`failedJobs`) y §8. El texto lo arma `incompleteAnalysisNotice.ts`, que no nombra motores ni códigos (ADR-087 §4).
 
 ### 2.4 `CancelButton`
 
