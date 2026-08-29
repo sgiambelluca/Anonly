@@ -28,6 +28,25 @@ describe("getPipelineErrorPresentation", () => {
     expect(getPipelineErrorPresentation(PipelineStage.Failed, null)).toBeNull();
   });
 
+  it("maps WORKER_CRASHED to a message a person can act on", () => {
+    // La regresión concreta: hasta este cambio no había fila para
+    // WORKER_CRASHED (ADR-077) y el `?? error.message` filtraba el string
+    // interno del pool a la pantalla del usuario.
+    const interno = "WorkerPool(render): worker (slot 0) emitió un error de transporte.";
+    const presentation = getPipelineErrorPresentation(
+      PipelineStage.Failed,
+      makeError({ code: EngineErrorCode.WORKER_CRASHED, message: interno }),
+    );
+
+    expect(presentation?.message).not.toBe(interno);
+    expect(presentation?.message).not.toMatch(/WorkerPool|slot|transporte/);
+    expect(presentation).toEqual({
+      message:
+        "Se interrumpió uno de los procesos que analizan el documento. Recargá la página y probá de nuevo.",
+      offerDisableNerReanalyze: false,
+    });
+  });
+
   it("maps PDF_INVALID to its specific message", () => {
     const presentation = getPipelineErrorPresentation(
       PipelineStage.Failed,

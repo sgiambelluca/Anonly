@@ -45,6 +45,20 @@ const MESSAGE_BY_CODE: Readonly<Partial<Record<EngineErrorCode, string>>> = {
   [EngineErrorCode.NER_MODEL_MISSING]:
     "No se pudo cargar el detector de nombres. Podés seguir sin él: se van a detectar los datos con formato conocido (DNI, CUIT, emails, teléfonos), pero no los nombres ni las organizaciones.",
   [EngineErrorCode.EXPORT_FAILED]: "No se pudo exportar el documento. Probá de nuevo.",
+  /*
+   * Sin esta fila, el `?? error.message` de abajo mostraba el string interno
+   * crudo: "WorkerPool(render): worker (slot 0) emitió un error de
+   * transporte." Un usuario no sabe qué es un WorkerPool ni un slot, y el
+   * mensaje no le dice qué hacer — justo lo que ADR-087 §4 prohíbe.
+   * `WORKER_CRASHED` existe desde ADR-077 y nunca se agregó acá.
+   *
+   * La salida ofrecida es recargar: el pool construye un worker nuevo por
+   * slot caído, así que un crash aislado se recupera solo al reintentar, y
+   * uno sistemático (visto el 2026-08-28: caché HTTP del navegador con una
+   * copia podrida de una dependencia) se arregla recargando sin caché.
+   */
+  [EngineErrorCode.WORKER_CRASHED]:
+    "Se interrumpió uno de los procesos que analizan el documento. Recargá la página y probá de nuevo.",
 };
 
 /**
