@@ -41,6 +41,7 @@ import { useSettingsStore } from "../../store/settings.store.js";
 import { Banner } from "../common/Banner.js";
 import { Button } from "../common/Button.js";
 
+import { getIncompleteAnalysisNotice } from "./incompleteAnalysisNotice.js";
 import { getPipelineErrorPresentation } from "./pipelineErrorPresentation.js";
 import { getPipelineStageLabel } from "./pipelineStageLabel.js";
 
@@ -59,6 +60,7 @@ export function PipelineStatus() {
   const modelLoading = usePipelineStore((state) => state.modelLoading);
   const exportProgress = usePipelineStore((state) => state.exportProgress);
   const error = usePipelineStore((state) => state.error);
+  const failedJobs = usePipelineStore((state) => state.failedJobs);
 
   const errorPresentation = getPipelineErrorPresentation(stage, error);
 
@@ -109,6 +111,28 @@ export function PipelineStatus() {
         }
       >
         {errorPresentation.message}
+      </Banner>
+    );
+  }
+
+  /*
+   * "Terminó, pero incompleto". No es un `PIPELINE_FAILED` —el pipeline llegó
+   * a `Ready` de verdad—, así que no pasa por `errorPresentation`; es un
+   * estado propio que antes de este cambio no se mostraba en ningún lado.
+   * Ver `incompleteAnalysisNotice.ts` para el caso que lo motivó.
+   */
+  const incomplete = getIncompleteAnalysisNotice(stage, failedJobs);
+  if (incomplete) {
+    return (
+      <Banner
+        variant="warning"
+        actions={
+          <Button variant="secondary" size="sm" onClick={() => window.location.reload()}>
+            Recargar
+          </Button>
+        }
+      >
+        {incomplete.message}
       </Banner>
     );
   }
