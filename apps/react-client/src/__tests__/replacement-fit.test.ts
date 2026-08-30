@@ -44,7 +44,7 @@ describe("estimateReplacementFit", () => {
   // veredicto lo da la apretada.
   it("manda la ocurrencia más apretada, no la primera ni la más holgada", () => {
     const holgada = member(400, 12);
-    const apretada = member(40, 12);
+    const apretada = member(30, 12);
     expect(estimateReplacementFit("[PERITO]", [holgada])).toBe("fits");
     expect(estimateReplacementFit("[PERITO]", [holgada, apretada])).toBe("overflows");
   });

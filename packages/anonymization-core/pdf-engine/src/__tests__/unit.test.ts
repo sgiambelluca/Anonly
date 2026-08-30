@@ -37,6 +37,7 @@ import {
   rotatedTextItem,
   type MockAnnotationInnerOp,
   type MockAnnotationSpec,
+  type MockGlyph,
   type MockTextItem,
 } from "./fixtures/test-helpers.js";
 
@@ -398,7 +399,7 @@ describe("PdfEngine — unit tests", () => {
     const RUN_STR = "llllllllll MW";
     const RUN_WIDTH = 43;
 
-    const runOps = (glyphs: ReadonlyArray<{ unicode: string; width: number }>) =>
+    const runOps = (glyphs: ReadonlyArray<MockGlyph>) =>
       [
         { kind: "save" },
         { kind: "beginText" },
@@ -411,7 +412,7 @@ describe("PdfEngine — unit tests", () => {
     const wordsFor = async (
       documentId: string,
       item: { str: string; x: number; width: number },
-      glyphs: ReadonlyArray<{ unicode: string; width: number }> = GLYPHS,
+      glyphs: ReadonlyArray<MockGlyph> = GLYPHS,
     ): Promise<ReadonlyArray<Word>> => {
       vi.mocked(getDocument).mockReturnValue(
         mockGetDocumentResult(
@@ -517,6 +518,314 @@ describe("PdfEngine — unit tests", () => {
       expect(words).toHaveLength(1);
       expect(words[0]!.bbox.x).toBeCloseTo(100, 6);
       expect(words[0]!.bbox.width).toBeCloseTo(20, 6);
+    });
+  });
+
+  // ADR-108: el flujo de glifos omitía `Tw`, así que se corría ~1,2 pt por
+  // espacio, acumulativo dentro del run. Los tests de acá usan la misma forma
+  // del defecto real: tokens separados por espacios, con `Tw` negativo.
+  describe("Word spacing en el avance del flujo (ADR-108, §13 casos 47-48)", () => {
+    // Tfs = 10, origen x = 100. Glifos de 400/1000 em = 4 pt; espacio de
+    // 300/1000 = 3 pt sin `Tw`. Con Tw = -1 cada espacio avanza 2 pt.
+    //   sin Tw: "A"=100, "B"=100+4+3=107, "C"=107+4+3=114
+    //   con Tw: "A"=100, "B"=100+4+2=106, "C"=106+4+2=112
+    //
+    // `isSpace: true` es lo que pdf.js pone en un espacio de fuente simple, y
+    // es lo que decide si lleva `Tw` (ADR-108 §1).
+    const GLYPHS = [
+      { unicode: "A", width: 400 },
+      { unicode: " ", width: 300, isSpace: true },
+      { unicode: "B", width: 400 },
+      { unicode: " ", width: 300, isSpace: true },
+      { unicode: "C", width: 400 },
+    ];
+
+    const wordsWith = async (
+      documentId: string,
+      wordSpacing: number,
+      itemStr = "A B C",
+      glyphs: ReadonlyArray<MockGlyph> = GLYPHS,
+      itemX = 100,
+    ): Promise<ReadonlyArray<Word>> => {
+      const ops: MockAnnotationInnerOp[] = [
+        { kind: "save" },
+        { kind: "beginText" },
+        { kind: "setFont", size: 10 },
+        { kind: "setTextMatrix", matrix: [1, 0, 0, 1, 100, 700] },
+        { kind: "setWordSpacing", value: wordSpacing },
+        { kind: "showText", glyphs },
+        { kind: "restore" },
+      ];
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () =>
+            createMockPage(
+              0,
+              [{ str: itemStr, x: itemX, y: 700, width: 18, height: 10 }],
+              [],
+              { width: 595, height: 842 },
+              [],
+              ops,
+            ),
+          ),
+        ),
+      );
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput(documentId), ctx);
+      return output.document.pages[0]!.words;
+    };
+
+    it("a space glyph advances by Tw on top of its own width", async () => {
+      const words = await wordsWith("doc-108-tw", -1);
+      expect(words.find((w) => w.text === "B")!.bbox.x).toBeCloseTo(106, 6);
+    });
+
+    it("the drift accumulates across spaces, not across glyphs", async () => {
+      // Es el mecanismo del defecto: dos espacios, dos veces el error. Si `Tw`
+      // se aplicara por glifo en vez de por espacio, `C` daría otra cosa.
+      const words = await wordsWith("doc-108-acumula", -1);
+      expect(words.find((w) => w.text === "B")!.bbox.x).toBeCloseTo(106, 6);
+      expect(words.find((w) => w.text === "C")!.bbox.x).toBeCloseTo(112, 6);
+    });
+
+    it("a run with Tw = 0 yields the same bboxes as before ADR-108", async () => {
+      // La garantía de no regresión: sin word spacing el término vale cero y
+      // no cambia una sola coordenada. Es por qué ningún fixture se mueve.
+      const words = await wordsWith("doc-108-sin-tw", 0);
+      expect(words.find((w) => w.text === "B")!.bbox.x).toBeCloseTo(107, 6);
+      expect(words.find((w) => w.text === "C")!.bbox.x).toBeCloseTo(114, 6);
+    });
+
+    it("un espacio de fuente compuesta no lleva Tw", async () => {
+      // §13 caso 51. `isSpace: false` es lo que pdf.js pone en el espacio de
+      // dos bytes de una fuente compuesta, donde PDF 32000-1 §9.3.3 dice que
+      // `Tw` no aplica — y es lo que decide el renderer de pdf.js.
+      //
+      // Dos espacios iniciales compuestos avanzan 3 pt cada uno (no 2), así
+      // que `A` cae en 106. Como `getTextContent` sí les aplica `Tw`, reporta
+      // 104: el empalme lo encuentra por el origen corregido de ADR-068.
+      //
+      // En el documento real son 89 espacios de una línea centrada, y
+      // tratarlos como simples corría la caja 58,3 pt.
+      const words = await wordsWith(
+        "doc-108-compuesta",
+        -1,
+        "A B",
+        [
+          { unicode: " ", width: 300 },
+          { unicode: " ", width: 300 },
+          { unicode: "A", width: 400 },
+          { unicode: " ", width: 300, isSpace: true },
+          { unicode: "B", width: 400 },
+        ],
+        104,
+      );
+      expect(words.find((w) => w.text === "A")!.bbox.x).toBeCloseTo(106, 6);
+      expect(words.find((w) => w.text === "B")!.bbox.x).toBeCloseTo(112, 6);
+    });
+
+    it("un espacio de fuente simple sí lo lleva, en la misma posición", async () => {
+      // El contraste exacto del test de arriba: mismos glifos, misma `Tw`, con
+      // los dos iniciales marcados como simples. Ahí sí avanzan 2 pt y `A` cae
+      // en 104 — que es además lo que reporta `getTextContent`, así que el
+      // empalme lo encuentra por el origen sin corregir.
+      const words = await wordsWith(
+        "doc-108-simple",
+        -1,
+        "A B",
+        [
+          { unicode: " ", width: 300, isSpace: true },
+          { unicode: " ", width: 300, isSpace: true },
+          { unicode: "A", width: 400 },
+          { unicode: " ", width: 300, isSpace: true },
+          { unicode: "B", width: 400 },
+        ],
+        104,
+      );
+      expect(words.find((w) => w.text === "A")!.bbox.x).toBeCloseTo(104, 6);
+      expect(words.find((w) => w.text === "B")!.bbox.x).toBeCloseTo(110, 6);
+    });
+
+    it("aligns an item whose string has fewer spaces than the flow", async () => {
+      // §13 caso 48, el espejo del 46: el productor dibujó dos espacios y
+      // pdf.js reporta uno. Se saltean del lado del FLUJO.
+      //   "A"=100, "B"=100+4+3+3=110 (los dos espacios avanzan)
+      const words = await wordsWith("doc-108-espacio-de-mas", 0, "A B", [
+        { unicode: "A", width: 400 },
+        { unicode: " ", width: 300 },
+        { unicode: " ", width: 300 },
+        { unicode: "B", width: 400 },
+      ]);
+      expect(words.find((w) => w.text === "B")!.bbox.x).toBeCloseTo(110, 6);
+      expect(words.find((w) => w.text === "B")!.bbox.width).toBeCloseTo(4, 6);
+    });
+
+    it("still rejects an item whose visible characters do not match", async () => {
+      // El guard no se debilita: lo tolerante es la cantidad de espacios, no
+      // los caracteres visibles. Sin empalme rige el prorrateo de ADR-020 §1.
+      const words = await wordsWith("doc-108-guard", 0, "A Z", [
+        { unicode: "A", width: 400 },
+        { unicode: " ", width: 300 },
+        { unicode: "B", width: 400 },
+      ]);
+      const z = words.find((w) => w.text === "Z")!;
+      expect(z.bbox.x).toBeCloseTo(100 + (18 / 3) * 2, 6);
+    });
+  });
+
+  // ADR-109: la caja iba de la línea de base hacia arriba por un cuerpo
+  // entero, así que las descendentes quedaban afuera en una de cada tres
+  // palabras.
+  describe("Caja de tinta de una palabra (ADR-109, §13 casos 49-50)", () => {
+    const STYLES = { F1: { ascent: 0.688, descent: -0.218 } };
+
+    const wordFor = async (
+      documentId: string,
+      item: MockTextItem,
+      styles?: Readonly<Record<string, { readonly ascent: number; readonly descent: number }>>,
+    ): Promise<Word> => {
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () =>
+            createMockPage(0, [item], [], { width: 595, height: 842 }, [], [], styles),
+          ),
+        ),
+      );
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput(documentId), ctx);
+      return output.document.pages[0]!.words[0]!;
+    };
+
+    it("the box spans from the font descent to its ascent", async () => {
+      // Cuerpo 10, línea de base en y = 700 (PDF) => 142 arriba-izquierda.
+      //   alto  = (0,688 + 0,218) * 10 = 9,06
+      //   techo = 142 - 6,88 = 135,12
+      const word = await wordFor(
+        "doc-109-tinta",
+        { str: "Juan", x: 100, y: 700, width: 20, height: 10, fontName: "F1" },
+        STYLES,
+      );
+      expect(word.bbox.height).toBeCloseTo(9.06, 6);
+      expect(word.bbox.y).toBeCloseTo(135.12, 6);
+      expect(word.bbox.y + word.bbox.height).toBeCloseTo(144.18, 6);
+    });
+
+    it("keeps the baseline covered below, which is the whole point", async () => {
+      // La línea de base está a 142; la caja tiene que pasarla para tapar la
+      // cola de una `j` o de una coma.
+      const word = await wordFor(
+        "doc-109-descendente",
+        { str: "Juan", x: 100, y: 700, width: 20, height: 10, fontName: "F1" },
+        STYLES,
+      );
+      expect(word.bbox.y + word.bbox.height).toBeGreaterThan(142);
+    });
+
+    it("falls back to the em box when the font metrics are degenerate", async () => {
+      // §13 caso 50: `descent: 0` es lo que declara la fuente del código de
+      // barras de una carátula real. Sin métricas confiables, la caja previa.
+      const word = await wordFor(
+        "doc-109-degenerada",
+        { str: "Juan", x: 100, y: 700, width: 20, height: 10, fontName: "F1" },
+        { F1: { ascent: 0.977, descent: 0 } },
+      );
+      expect(word.bbox.height).toBeCloseTo(10, 6);
+      expect(word.bbox.y).toBeCloseTo(132, 6);
+    });
+
+    it("falls back when the item declares no font at all", async () => {
+      const word = await wordFor("doc-109-sin-fuente", {
+        str: "Juan",
+        x: 100,
+        y: 700,
+        width: 20,
+        height: 10,
+      });
+      expect(word.bbox.height).toBeCloseTo(10, 6);
+      expect(word.bbox.y).toBeCloseTo(132, 6);
+    });
+
+    it("an annotation run keeps the em box", async () => {
+      // El camino de ADR-066 §1 arma su `TextContentLike` a mano y no tiene
+      // `styles` que consultar, así que cae siempre en la reserva.
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () =>
+            createMockPage(
+              0,
+              [],
+              [],
+              { width: 595, height: 842 },
+              [
+                {
+                  id: "annot-109",
+                  rect: [90, 690, 200, 720],
+                  transform: [1, 0, 0, 1, 0, 0],
+                  innerOps: [
+                    { kind: "beginText" },
+                    { kind: "setFont", size: 10 },
+                    { kind: "setTextMatrix", matrix: [1, 0, 0, 1, 100, 700] },
+                    { kind: "showText", glyphs: [{ unicode: "A", width: 1000 }] },
+                  ],
+                },
+              ],
+              [],
+              { F1: { ascent: 0.688, descent: -0.218 } },
+            ),
+          ),
+        ),
+      );
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-109-anotacion"), ctx);
+      const word = output.document.pages[0]!.words[0]!;
+      expect(word.text).toBe("A");
+      expect(word.bbox.height).toBeCloseTo(10, 6);
+    });
+  });
+
+  describe("Orden de lectura por línea de base (ADR-109 §3)", () => {
+    const textsFor = async (
+      documentId: string,
+      items: ReadonlyArray<MockTextItem>,
+      styles?: Readonly<Record<string, { readonly ascent: number; readonly descent: number }>>,
+    ): Promise<ReadonlyArray<string>> => {
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () =>
+            createMockPage(0, items, [], { width: 595, height: 842 }, [], [], styles),
+          ),
+        ),
+      );
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput(documentId), ctx);
+      return output.document.pages[0]!.words.map((w) => w.text);
+    };
+
+    it("keys on the baseline, so two fonts on one line stay in x order", async () => {
+      // Ascensos 0,688 y 0,905 sobre cuerpo 10: los techos difieren 2,17 pt,
+      // por encima de la tolerancia de 1. Con la clave vieja (`bbox.y`) el
+      // comparador partía la línea y devolvía `alto` antes que `bajo`.
+      const texts = await textsFor(
+        "doc-109-orden",
+        [
+          { str: "bajo", x: 100, y: 700, width: 20, height: 10, fontName: "F1" },
+          { str: "alto", x: 140, y: 700, width: 20, height: 10, fontName: "F2" },
+        ],
+        { F1: { ascent: 0.688, descent: -0.218 }, F2: { ascent: 0.905, descent: -0.212 } },
+      );
+      expect(texts).toEqual(["bajo", "alto"]);
+    });
+
+    it("keying on the baseline is a no-op on the em box", async () => {
+      // El paso que se verifica ANTES del cambio de caja: sin métricas, todas
+      // las cajas terminan en la línea de base y el orden es el de siempre,
+      // incluso mezclando cuerpos distintos en el mismo renglón.
+      const texts = await textsFor("doc-109-orden-cuerpo", [
+        { str: "chico", x: 100, y: 700, width: 20, height: 8 },
+        { str: "grande", x: 140, y: 700, width: 20, height: 14 },
+        { str: "abajo", x: 100, y: 660, width: 20, height: 10 },
+      ]);
+      expect(texts).toEqual(["chico", "grande", "abajo"]);
     });
   });
 

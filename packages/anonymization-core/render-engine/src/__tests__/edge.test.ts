@@ -9,6 +9,7 @@ import {
   InvalidInputError,
   ReplacementMode,
   type EngineContext,
+  REPLACEMENT_FONT_HEIGHT_RATIO,
 } from "@anonly/shared";
 import { getDocument } from "pdfjs-dist";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -327,7 +328,11 @@ describe("RenderEngine — edge cases", () => {
             occurrenceId: "occ-place",
             mode: ReplacementMode.Placeholder,
             replacementValue: "[PERSONA 01]",
-            bbox: { x: 200, y: 0, width: 65, height: 14 },
+            // Caja más alta que las otras a propósito: con un cuerpo de 14 el
+            // tamaño inicial es 9 px y el único escalón posible por debajo es
+            // el piso de 8, así que el caso "encoge a un intermedio real" no
+            // se podría ejercitar.
+            bbox: { x: 200, y: 0, width: 82, height: 20 },
           }),
         ],
       }),
@@ -346,7 +351,7 @@ describe("RenderEngine — edge cases", () => {
     const textCases: ReadonlyArray<{ readonly text: string; readonly bboxWidth: number }> = [
       { text: "XX.XXX.XXX.XX.XXXXXXXXXXXX", bboxWidth: 45 },
       { text: "39.123.456", bboxWidth: 100 },
-      { text: "[PERSONA 01]", bboxWidth: 65 },
+      { text: "[PERSONA 01]", bboxWidth: 82 },
     ];
     for (const { text, bboxWidth } of textCases) {
       const call = fillTextCalls.find((c) => c.args[0] === text);
@@ -362,13 +367,17 @@ describe("RenderEngine — edge cases", () => {
     expect(maskCall!.font).toBe("8px sans-serif");
 
     // synthetic: entra directo al tamaño inicial (sin encoger).
+    const initialSize = Math.max(8, Math.round(14 * REPLACEMENT_FONT_HEIGHT_RATIO));
     const synthCall = fillTextCalls.find((c) => c.args[0] === "39.123.456");
-    expect(synthCall!.font).toBe("10px sans-serif");
+    expect(synthCall!.font).toBe(`${String(initialSize)}px sans-serif`);
 
     // placeholder: encoge a un tamaño intermedio real (no al piso) — demuestra
     // que el mecanismo se activa de verdad, no solo cuando hace falta el piso.
     const placeholderCall = fillTextCalls.find((c) => c.args[0] === "[PERSONA 01]");
-    expect(placeholderCall!.font).toBe("9px monospace, sans-serif");
+    const placeholderInitial = Math.max(8, Math.round(20 * REPLACEMENT_FONT_HEIGHT_RATIO));
+    const placeholderSize = Number(/(\d+)px/.exec(placeholderCall!.font ?? "")?.[1] ?? "0");
+    expect(placeholderSize).toBeLessThan(placeholderInitial);
+    expect(placeholderSize).toBeGreaterThan(8);
   });
 
   it("conflict marker on original kind", async () => {

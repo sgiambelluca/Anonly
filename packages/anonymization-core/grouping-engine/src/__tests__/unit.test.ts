@@ -330,7 +330,7 @@ describe("GroupingEngine — unit tests", () => {
         entityType: EntityType.Person,
         value: "Andrea Diaz",
         normalizedValue: "andrea diaz",
-        bbox: makeBBox(0, 0, 70, 20),
+        bbox: makeBBox(0, 0, 65, 20),
       }),
     });
 
@@ -345,7 +345,7 @@ describe("GroupingEngine — unit tests", () => {
       targetGroupId: wideGroup!.id,
     });
 
-    // El member de 70 de ancho no entra ni en nivel 0 ni en nivel 1: el
+    // El member de 65 de ancho no entra ni en nivel 0 ni en nivel 1: el
     // grupo combinado cae directo a nivel 2 aunque su otro member (200) por
     // sí solo entraba cómodo en nivel 0.
     expect(merged.replacementValue).toBe("[PRS-01]");
@@ -388,13 +388,13 @@ describe("GroupingEngine — unit tests", () => {
         value: "Andrea Fortes",
         normalizedValue: "andrea fortes",
         bbox: makeBBox(0, 0, 200, 50),
-        fragments: [makeBBox(0, 0, 200, 20), makeBBox(0, 30, 70, 20)],
+        fragments: [makeBBox(0, 0, 200, 20), makeBBox(0, 30, 65, 20)],
       }),
     });
 
     const { groups } = engine.getSnapshot("doc-1");
     // Mismo nivel que "one narrow member..." arriba con el mismo ancho
-    // angosto (70): la escalera no puede estar midiendo la envolvente de 200.
+    // angosto (65): la escalera no puede estar midiendo la envolvente de 200.
     expect(groups[0]?.replacementValue).toBe("[PRS-01]");
   });
 

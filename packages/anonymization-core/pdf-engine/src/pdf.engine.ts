@@ -121,7 +121,12 @@ type TextContentLike = {
     transform?: readonly number[];
     width?: number;
     height?: number;
+    fontName?: string;
   }>;
+  /* ADR-109 §1: `TextStyle` de pdfjs-dist, indexado por `item.fontName`.
+   * Opcional porque el camino de anotaciones (ADR-066 §1) arma su propio
+   * `TextContentLike` a mano y no tiene de dónde sacarlo. */
+  styles?: Readonly<Record<string, { ascent?: number; descent?: number }>>;
 };
 
 /*
@@ -235,6 +240,64 @@ function boundingBoxFromParallelogram(
 }
 
 /*
+ * ADR-109 §1: cuánto sube y cuánto baja la tinta de una fuente respecto de su
+ * línea de base, en fracciones de cuerpo. `descent` se normaliza a positivo
+ * (pdf.js lo reporta negativo, hacia abajo).
+ */
+interface FontExtents {
+  readonly ascent: number;
+  readonly descent: number;
+}
+
+/*
+ * ADR-109 §2: métricas utilizables, o `undefined` si el productor no las
+ * declara de forma aprovechable. Relevado sobre 10 documentos (4266 items),
+ * `undefined` aplica a 2 — la fuente del código de barras de una carátula.
+ */
+function fontExtentsOf(
+  styles: TextContentLike["styles"],
+  fontName: string | undefined,
+): FontExtents | undefined {
+  if (styles === undefined || fontName === undefined) return undefined;
+  const style = styles[fontName];
+  if (style === undefined) return undefined;
+  const { ascent, descent } = style;
+  if (typeof ascent !== "number" || typeof descent !== "number") return undefined;
+  if (!Number.isFinite(ascent) || !Number.isFinite(descent)) return undefined;
+  if (ascent <= 0 || descent >= 0) return undefined;
+  return { ascent, descent: -descent };
+}
+
+/*
+ * ADR-109 §1: la caja de tinta de un token — el mismo paralelogramo de
+ * ADR-063 §2, pero arrancando un descenso por debajo de la línea de base y
+ * llegando hasta el ascenso en vez de hasta un cuerpo entero.
+ *
+ * Sin métricas cae a la caja previa a ADR-109. Bajar solo el piso, dejando el
+ * techo en un cuerpo, NO es alternativa: medido sobre 752 pares de renglones
+ * consecutivos, fusiona el 75,8 % de los pares de un documento con
+ * interlineado de 1,15 cuerpos, y `sharesVerticalBand` es la definición de
+ * "misma línea" de tres motores.
+ */
+function inkBoxFromParallelogram(
+  origin: Vector2,
+  dir: Vector2,
+  up: Vector2,
+  width: number,
+  height: number,
+  pageHeight: number,
+  extents: FontExtents | undefined,
+): BoundingBox {
+  if (extents === undefined) {
+    return boundingBoxFromParallelogram(origin, dir, up, width, height, pageHeight);
+  }
+  const drop = extents.descent * height;
+  const baseline: Vector2 = { x: origin.x - up.x * drop, y: origin.y - up.y * drop };
+  const inkHeight = (extents.ascent + extents.descent) * height;
+  return boundingBoxFromParallelogram(baseline, dir, up, width, inkHeight, pageHeight);
+}
+
+/*
  * ADR-020 §1: PDF.js devuelve un TextItem por run (frecuentemente línea/frase
  * entera), no por palabra. Se divide str por whitespace en Words individuales,
  * prorrateando el avance linealmente por longitud de caracteres (aproximación:
@@ -312,17 +375,19 @@ function convertTextItemsToWords(
       y: 1,
     });
 
+    const extents = fontExtentsOf(textContent.styles, item.fontName);
     const tokens = [...str.matchAll(/\S+/g)];
 
     if (tokens.length <= 1) {
       const text = (tokens[0]?.[0] ?? str).normalize("NFC");
-      const bbox = boundingBoxFromParallelogram(
+      const bbox = inkBoxFromParallelogram(
         { x: originX, y: originY },
         dir,
         up,
         width,
         height,
         pageHeight,
+        extents,
       );
       words.push({ text, bbox, pageIndex, confidence: 1.0, source: "pdf" });
       continue;
@@ -335,7 +400,19 @@ function convertTextItemsToWords(
      * ADR-020 §1 — el camino de reserva, intacto (ADR-102 §4).
      */
     eligible++;
-    const start = findGlyphAt(glyphs, glyphIndex, reportedX, reportedY);
+    /*
+     * ADR-108 §4: `getTextContent` aplica `Tw` a todo espacio y el flujo solo a
+     * los que lo llevan (§1), así que en un run con espacios iniciales de
+     * fuente compuesta los dos orígenes difieren — 58,3 pt en la línea de la
+     * fecha de la pericia. Ese es exactamente el par que mide ADR-068: el
+     * reportado es `from` y el que dibuja el renderer es `to`. Se busca por el
+     * reportado y, si no cae en ningún glifo, por el corregido.
+     */
+    const reportedStart = findGlyphAt(glyphs, glyphIndex, reportedX, reportedY);
+    const start =
+      reportedStart >= 0 || correction === undefined
+        ? reportedStart
+        : findGlyphAt(glyphs, glyphIndex, originX, originY);
     const mapping = start < 0 ? undefined : alignToGlyphs(glyphs, str, start);
     if (mapping !== undefined) joined++;
     const charWidth = str.length > 0 ? width / str.length : 0;
@@ -354,13 +431,14 @@ function convertTextItemsToWords(
         anchor !== undefined
           ? { x: anchor.x, y: anchor.y }
           : { x: originX + dir.x * advance, y: originY + dir.y * advance };
-      const bbox = boundingBoxFromParallelogram(
+      const bbox = inkBoxFromParallelogram(
         tokenOrigin,
         dir,
         up,
         tokenWidth,
         height,
         pageHeight,
+        extents,
       );
       words.push({
         text: tokenText.normalize("NFC"),
@@ -392,9 +470,25 @@ const ROTATED_RUN_GAP_IN_EMS = 2;
 
 type Rotation = NonNullable<BoundingBox["rotation"]>;
 
-/** Comparador histórico (`y` asc con tolerancia, luego `x` asc), intacto. */
+/** Comparador de los runs rotados (`y` asc con tolerancia, luego `x` asc). */
 function compareByReadingOrder(a: BoundingBox, b: BoundingBox): number {
   const dy = a.y - b.y;
+  if (Math.abs(dy) > SAME_LINE_TOLERANCE) return dy;
+  return a.x - b.x;
+}
+
+/*
+ * ADR-109 §3: el texto horizontal se ordena por línea de base, no por el techo
+ * de la caja. Con la caja de tinta el techo depende del ascenso de cada
+ * fuente: en una pericia conviven ascensos 0,688 y 0,905, que sobre un cuerpo
+ * de 8,09 pt son 1,76 pt de diferencia EN LA MISMA LÍNEA — por encima de la
+ * tolerancia, así que el comparador partiría la línea al medio.
+ *
+ * Sobre la caja previa a ADR-109 `y + height` era exactamente la línea de
+ * base, así que este comparador da el mismo orden que el anterior.
+ */
+function compareByBaseline(a: BoundingBox, b: BoundingBox): number {
+  const dy = a.y + a.height - (b.y + b.height);
   if (Math.abs(dy) > SAME_LINE_TOLERANCE) return dy;
   return a.x - b.x;
 }
@@ -538,7 +632,7 @@ function sortWordsByReadingOrder(words: ReadonlyArray<Word>): Word[] {
   const horizontal = words.filter(
     (word) => word.bbox.rotation === undefined || word.bbox.rotation === 0,
   );
-  horizontal.sort((a, b) => compareByReadingOrder(a.bbox, b.bbox));
+  horizontal.sort((a, b) => compareByBaseline(a.bbox, b.bbox));
 
   if (horizontal.length === words.length) return horizontal;
 
@@ -980,15 +1074,22 @@ function findGlyphAt(
  * índice de glifo de cada carácter (`-1` para los que no tienen glifo), o
  * `undefined` si la alineación no llega hasta el final.
  *
- * Un espacio de la cadena sin glifo detrás es uno que **pdf.js sintetizó**
- * porque el productor separó las palabras moviendo el cursor. Se saltea del
- * lado de la cadena, no del flujo: es el caso mayoritario en documentos
- * reales y el que hacía fallar al empalme por cadena exacta.
+ * Las dos segmentaciones no coinciden en cuántos espacios ven, y la tolerancia
+ * va para los dos lados:
  *
- * ADR-102 §3: esta alineación **es** el guard. Medido, aflojar la tolerancia
- * del origen no aumenta los empalmes — solo hace que el buscador encuentre el
- * glifo equivocado y que esta función lo rechace.
+ * - un espacio de la CADENA sin glifo detrás es uno que pdf.js sintetizó
+ *   porque el productor separó las palabras moviendo el cursor (ADR-102 §2);
+ * - un espacio del FLUJO que la cadena no trae es uno que pdf.js colapsó
+ *   (ADR-108 §2). Se saltea la corrida entera de espacios y se reintenta.
+ *
+ * ADR-102 §3: esta alineación **es** el guard, y sigue siéndolo — todo
+ * carácter visible exige su glifo exacto en orden. Lo único tolerante es la
+ * cantidad de espacios, que es justo donde las segmentaciones difieren.
  */
+function isBlankGlyph(glyph: PageGlyph | undefined): boolean {
+  return glyph !== undefined && glyph.unicode.trim().length === 0;
+}
+
 function alignToGlyphs(
   glyphs: ReadonlyArray<PageGlyph>,
   str: string,
@@ -997,14 +1098,22 @@ function alignToGlyphs(
   const mapping: number[] = [];
   let cursor = from;
   for (const char of str) {
-    const glyph = glyphs[cursor];
-    if (glyph !== undefined && glyph.unicode === char) {
+    if (glyphs[cursor]?.unicode === char) {
       mapping.push(cursor);
       cursor += 1;
       continue;
     }
+
+    let ahead = cursor;
+    while (isBlankGlyph(glyphs[ahead])) ahead += 1;
+    if (ahead > cursor && glyphs[ahead]?.unicode === char) {
+      mapping.push(ahead);
+      cursor = ahead + 1;
+      continue;
+    }
+
     if (char === " ") {
-      mapping.push(-1); // espacio sintetizado por pdf.js: no consume glifo
+      mapping.push(-1);
       continue;
     }
     return undefined;
@@ -1016,9 +1125,13 @@ function alignToGlyphs(
  * ADR-102 §1: agrega al flujo los glifos de un run de página, con su posición
  * absoluta y su avance ya en unidades de página.
  *
- * El avance por glifo es el de ADR-097 §1, conservado y verificado contra las
- * métricas AFM de Helvetica. `Tw` queda deliberadamente fuera (ADR-097 §4):
- * ADR-068 midió que la tinta cae en la posición sin aplicarlo.
+ * El avance por glifo es el de ADR-097 §1, verificado contra las métricas AFM
+ * de Helvetica, MÁS el word spacing de ADR-108 §1. Que `Tw` faltara corría el
+ * flujo ~1,2 pt por espacio, acumulativo dentro del run: sobre el encabezado
+ * de una pericia la séptima palabra caía 9,0 pt a la derecha de su tinta, y
+ * eso afectaba por igual a los items que empalmaban y a los que no. ADR-097 §4
+ * queda superseded; su aritmética (§1), el prorrateo de reserva (§3) y la
+ * instrumentación del empalme (§5) siguen.
  */
 function appendRunGlyphs(into: PageGlyph[], args: unknown, text: TextState, ctm: Matrix2D): void {
   if (!Array.isArray(args) || args.length === 0) return;
@@ -1039,7 +1152,9 @@ function appendRunGlyphs(into: PageGlyph[], args: unknown, text: TextState, ctm:
     }
     if (!isRecord(glyph) || typeof glyph.unicode !== "string") continue;
     const width = typeof glyph.width === "number" ? glyph.width : 0;
-    const step = ((width / 1000) * text.fontSize + text.charSpacing) * text.horizontalScale;
+    const wordSpacing = glyphTakesWordSpacing(glyph) ? text.wordSpacing : 0;
+    const step =
+      ((width / 1000) * text.fontSize + text.charSpacing + wordSpacing) * text.horizontalScale;
     const x = composed[4] + dirX * accumulated * scale;
     const y = composed[5] + dirY * accumulated * scale;
     // Una ligadura aporta su avance completo en el PRIMER carácter; los
@@ -1057,6 +1172,22 @@ function appendRunGlyphs(into: PageGlyph[], args: unknown, text: TextState, ctm:
 function isWhitespaceGlyph(glyph: unknown): boolean {
   if (!isRecord(glyph)) return false;
   return typeof glyph.unicode === "string" && glyph.unicode.trim().length === 0;
+}
+
+/*
+ * ADR-108 §1: a qué glifo le toca el word spacing. PDF 32000-1 §9.3.3 lo
+ * restringe al código de **un byte** 32: en una fuente compuesta el espacio de
+ * dos bytes NO lo lleva. pdf.js ya resuelve eso y lo deja en `glyph.isSpace`,
+ * y su propio renderer decide con esa misma bandera
+ * (`(glyph.isSpace ? wordSpacing : 0) + charSpacing`). Espejarla es lo que
+ * pone al flujo de acuerdo con la tinta, y no es una heurística: es la misma
+ * línea que dibuja.
+ *
+ * Medido sobre la pericia: el run de la fecha tiene 96 espacios y solo 7 con
+ * `isSpace`. Tratarlos a todos por igual corría la caja 58,3 pt.
+ */
+function glyphTakesWordSpacing(glyph: Record<string, unknown>): boolean {
+  return glyph["isSpace"] === true;
 }
 
 /*
@@ -1082,7 +1213,11 @@ function leadingAdvance(
     if (!isWhitespaceGlyph(glyph)) break; // primer glifo visible: se corta
     const width = isRecord(glyph) && typeof glyph.width === "number" ? glyph.width : 0;
     const base = ((width / 1000) * text.fontSize + text.charSpacing) * text.horizontalScale;
-    withoutWordSpacing += base;
+    // `to` tiene que quedar donde el flujo pone el primer glifo visible, así que
+    // usa la misma regla de `Tw` que él (ADR-108 §1); `from` reproduce lo que
+    // reporta `getTextContent`, que lo aplica a todo espacio.
+    const drawn = isRecord(glyph) && glyphTakesWordSpacing(glyph);
+    withoutWordSpacing += base + (drawn ? text.wordSpacing * text.horizontalScale : 0);
     withWordSpacing += base + text.wordSpacing * text.horizontalScale;
   }
 

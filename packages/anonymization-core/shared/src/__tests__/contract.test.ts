@@ -734,8 +734,19 @@ describe("@anonly/shared — Contracts", () => {
   });
 
   describe("Constantes de la escalera de abreviaturas y degradación (ADR-057 §5, ADR-058 §7)", () => {
-    it("REPLACEMENT_FONT_HEIGHT_RATIO es 0.7 (Contracts.md §6)", () => {
-      expect(REPLACEMENT_FONT_HEIGHT_RATIO).toBe(0.7);
+    // ADR-109 §4: bajó de 0.7 a 0.64 cuando `bbox.height` pasó de ser el cuerpo
+    // a ser el alto de tinta (≈1,101 cuerpos), para que el token siga
+    // dibujándose del mismo tamaño.
+    it("REPLACEMENT_FONT_HEIGHT_RATIO es 0.64 (Contracts.md §6)", () => {
+      expect(REPLACEMENT_FONT_HEIGHT_RATIO).toBe(0.64);
+    });
+
+    it("la recalibración de ADR-109 §4 preserva el tamaño dibujado", () => {
+      const cuerpo = 12;
+      const altoDeTinta = cuerpo * 1.101;
+      const antes = cuerpo * 0.7;
+      const despues = altoDeTinta * REPLACEMENT_FONT_HEIGHT_RATIO;
+      expect(Math.abs(despues - antes) / antes).toBeLessThan(0.01);
     });
 
     it("AVG_GLYPH_ADVANCE_RATIO es 0.6 (Contracts.md §6)", () => {
