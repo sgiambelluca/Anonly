@@ -705,6 +705,34 @@ Los items que no alinean resultaron ser minúsculos: en la pericia son nueve ite
 
 **Falta rehacer el gate visual** con esto aplicado, para confirmar que las cinco fugas de la página medida efectivamente desaparecieron — es lo único que cierra (a) y (b) del todo. El defecto (c), el número de expediente, **no lo toca esta decisión**: sigue abierto en §26. Sobre los 28 fixtures del repo da 100 %, pero todos salen de `pdf-lib` (ver "Lo que falta para decidir bien"). ADR-097 §5 instrumenta la cuenta por página, en `debug`, para que el día que aparezca un documento de verdad el número esté ahí sin volver a instrumentar. Ese número es lo único que justificaría pagar la opción B.
 
+### Cerrado el 2026-08-30 — ADR-108 y ADR-109, y el gate visual rehecho
+
+Rehecho el gate que ADR-102 dejó pendiente, con un oráculo nuevo: **la tinta renderizada**. Se rasteriza la página, se arman clusters de tinta por renglón y se mide, palabra por palabra, cuántos puntos quedan **fuera** de su caja. Los oráculos anteriores de esta familia —métricas AFM en ADR-097, tasa de empalme en ADR-102— son internos: miden si el motor es consistente consigo mismo, y **los dos dieron verde mientras el defecto estaba vivo**.
+
+Lo que apareció **no** era el residuo del 10,7 % que ADR-102 dejó abierto:
+
+| | cajas fuera de toda tinta | fuga izq. > 0,5 pt | fuga der. |
+|---|---|---|---|
+| pericia 17653 | **13 → 2** | 965/1560 → **7** | 264 → **7** |
+| pericia 29816 | **38 → 0** | 1591/2647 → **23** | 384 → **25** |
+| cuento (11 pp) | 1 → **0** | 749/6251 → **0** | 1712 → **0** |
+
+> **Y el oráculo tuvo el mismo defecto que buscaba.** Su primera versión **descartaba en silencio** toda palabra cuya caja no tocara ningún cluster de tinta — o sea el peor fallo posible. Con eso, la primera pasada de ADR-108 §1 midió "17 fugas" en la pericia y ocultó que había dejado **seis cajas 58 pt fuera del dato**, sobre una línea con un topónimo y una fecha. Lo encontró el humano mirando el PDF exportado, no la métrica. La columna "cajas fuera de toda tinta" existe por eso, y es la primera que hay que mirar.
+
+**(a) y (b) cerrados por ADR-108.** La causa era que el flujo de glifos no aplicaba el word spacing (`Tw`), decisión explícita de ADR-097 §4 apoyada en ADR-068. Con `Tw` negativo el flujo se corre ~1,2 pt **por espacio, acumulativo dentro del run**: la séptima palabra de un renglón caía 9,0 pt. Afectaba por igual a los items que empalmaban y a los que no, que es por qué la tasa de empalme no lo veía. Los items "sin origen" resultaron ser **consecuencia** del corrimiento y bajaron a cero solos; el empalme quedó en 100 % en cinco de los siete documentos reales medidos.
+
+Y aplicar `Tw` a **todo** espacio destapó lo que ADR-068 ya había medido: en un run centrado con 89 espacios de fuente compuesta, la caja del topónimo y la de la fecha caían 58,3 pt a la izquierda, sobre papel en blanco. La regla correcta —encontrada después de descartar tres alternativas, todas medidas— es que `Tw` lo lleva el glifo con **`isSpace`**, la bandera con la que pdf.js distingue el código de un byte 32 y con la que **su propio renderer** decide. Es la misma línea que dibuja la tinta contra la que medimos.
+
+> Vale como método: las tres alternativas descartadas eran todas "compensar el error" (exceptuar los espacios iniciales del run, desplazar el empalme). Ninguna baja de ~50 fugas; la regla correcta baja a 7. Cuando una compensación no cierra del todo, suele ser que el modelo está mal, no que falte ajustarla.
+
+**Un defecto vertical nuevo, que el horizontal tapaba: ADR-109.** Con las cajas ya bien puestas, el gate mostró que la caja va de la línea de base **hacia arriba**, así que las colas de `g`, `j`, `p`, `q`, `y`, la `Q` y las comas quedan afuera en **una de cada tres palabras** (31,8 % / 29,9 % / 30,1 % en tres documentos). La caja pasa a ser la **caja de tinta**, del descenso al ascenso, con las métricas que `getTextContent()` ya devuelve.
+
+**Lo que queda abierto en esta familia**, en orden de tamaño:
+
+1. **Los 8 items del sello de notificación electrónica de un fallo** (empalme 90,6 %, el único documento que no llega a 100 %). El flujo falla ahí por una causa distinta de `Tw` — el origen que reporta `getTextContent` cae sobre el segundo glifo del run, no el primero. **Uno de esos items contiene un nombre.**
+2. **Las 2 cajas que siguen fuera de toda tinta** en la pericia: los tokens `/` y `D` de la línea de guiones bajos del encabezado (`S ____/____ D`). No son un dato, pero son el resto del mecanismo de ADR-108 §3 y valen como sonda si alguien lo retoma.
+3. **§26 (número de expediente) sigue igual**: no lo toca ninguno de estos dos ADR.
+
 ### Lo que este hallazgo NO frena
 
 Verificado item por item: no bloquea el grupo apagado de confianza baja (`grouping-engine`, no mira geometría), ni su marca en la UI, ni el hueco de característica de 3 dígitos de `phone-mobile-ar`, ni la costura §23f/§23g/§23h (arriba), ni el evaluador del dataset de referencia **siempre que matchee por valor + página y no por solapamiento de bbox** — que es lo que corresponde para una métrica de detección de texto, y este hallazgo es una razón más para elegirlo así.
@@ -731,6 +759,8 @@ No es un error de calibración: es una constante. `REPLACEMENT_FONT_HEIGHT_RATIO
 | título | 14,00 pt | 9,80 pt | |
 
 O sea que el token sale **30 % más chico** que el texto que lo rodea, por construcción y no por accidente.
+
+> **Nota (2026-08-30, ADR-109 §4)**: la constante **cambió de valor**, de 0,7 a 0,64, y eso **no** resuelve este punto. Es una recalibración: `bbox.height` dejó de ser el cuerpo y pasó a ser el alto de tinta (~1,10 cuerpos sobre el corpus), así que 0,70/1,101 mantiene el token exactamente del mismo tamaño que hoy. La pregunta de esta sección —si el token debería medir lo mismo que el texto que lo rodea— sigue abierta y sin tocar, a propósito: mezclarla con el cambio de geometría haría imposible saber cuál de los dos movió qué.
 
 **No se cambia acá, y la razón importa**: subir la razón a 1,0 haría el token del mismo tamaño y **más ancho**, con lo que dejaría de entrar más seguido — y ahí entra el shrink-to-fit y el detector de degradado de ADR-086. Es un intercambio entre "se distingue por el tamaño" y "no entra y se achica igual", y elegirlo pide ver los dos resultados. La constante además la consume `estimateTokenWidth` y el camino de shrink-to-fit, así que tocarla no es local.
 
