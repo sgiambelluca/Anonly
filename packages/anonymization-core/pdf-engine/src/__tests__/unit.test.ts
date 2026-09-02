@@ -175,14 +175,14 @@ describe("PdfEngine — unit tests", () => {
           { str: "Marta", advance: 18 },
           { str: "de", advance: 7 },
           { str: "los", advance: 11 },
-          { str: "Milagros", advance: 28 },
+          { str: "Mercedes", advance: 28 },
         ]),
         ...runAt90(110, 8, 700, [
           { str: "Date:", advance: 19 },
           { str: "07/07/2026", advance: 38 },
         ]),
       ]);
-      expect(text).toContain("Echeverria, Marta de los Milagros");
+      expect(text).toContain("Echeverria, Marta de los Mercedes");
       expect(text).toContain("Date: 07/07/2026");
     });
 
