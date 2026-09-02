@@ -24,7 +24,9 @@ import { actions } from "../../core-adapter/actions.js";
 import { Button } from "../common/Button.js";
 import { Select } from "../common/Select.js";
 import { ENTITY_TYPE_OPTIONS } from "../entities/entityTypeLabels.js";
+import { manualEntityFeedback } from "../entities/manualEntityFeedback.js";
 
+import { dominantLineWords } from "./selectionLine.js";
 import { pageRectToScreenRect, pointerSelectionToPageRect } from "./wordSelectionRect.js";
 
 export interface WordSelectionOverlayProps {
@@ -56,6 +58,7 @@ export function WordSelectionOverlay({
   const [dragCurrent, setDragCurrent] = useState<Point | null>(null);
   const [pending, setPending] = useState<PendingSelection | null>(null);
   const [entityType, setEntityType] = useState<EntityType>(EntityType.Person);
+  const [notFound, setNotFound] = useState(false);
 
   // Cierra el popover con Escape. Sin cierre por "click afuera": el
   // dropdown de `Select` se renderiza por Portal de Radix a `document.body`,
@@ -113,17 +116,30 @@ export function WordSelectionOverlay({
       pageHeight: pageSize.height,
     });
 
-    const words = wordsInRect(actions.getPageWords(pageIndex), rect);
+    const pageWords = actions.getPageWords(pageIndex);
+    // ADR-114 §1: al renglón dominante. El valor se arma con `join(" ")` y la
+    // búsqueda literal exige palabras consecutivas de una misma línea, así que
+    // un arrastre que roza el renglón de arriba produce una cadena que no
+    // existe en el documento — y hasta acá eso no daba ninguna señal.
+    const words = dominantLineWords(pageWords, wordsInRect(pageWords, rect), rect);
     if (words.length === 0) return;
 
     setEntityType(EntityType.Person);
+    setNotFound(false);
     setPending({ anchor: end, words });
   }
 
-  function handleConfirm(): void {
+  async function handleConfirm(): Promise<void> {
     if (!pending) return;
     const value = pending.words.map((word) => word.text).join(" ");
-    void actions.addManualEntity({ value, entityType });
+    // ADR-114 §2: se espera el resultado. La promesa suelta que había acá
+    // hacía que "no se encontró" y "se agregaron 18" se vieran exactamente
+    // igual: el popover se cerraba y no pasaba nada más.
+    const result = await actions.addManualEntity({ value, entityType });
+    if (manualEntityFeedback(result) === "not-found") {
+      setNotFound(true);
+      return;
+    }
     setPending(null);
   }
 
@@ -186,6 +202,11 @@ export function WordSelectionOverlay({
           onPointerDown={(event) => event.stopPropagation()}
         >
           <span className="font-medium text-text-primary">Agregar entidad como…</span>
+          {notFound ? (
+            <span role="status" className="text-xs text-danger">
+              No se encontró ese valor en el documento.
+            </span>
+          ) : null}
           <Select
             value={entityType}
             onChange={setEntityType}
@@ -196,7 +217,7 @@ export function WordSelectionOverlay({
             <Button variant="secondary" size="sm" onClick={() => setPending(null)}>
               Cancelar
             </Button>
-            <Button variant="primary" size="sm" onClick={handleConfirm}>
+            <Button variant="primary" size="sm" onClick={() => void handleConfirm()}>
               Agregar
             </Button>
           </div>
