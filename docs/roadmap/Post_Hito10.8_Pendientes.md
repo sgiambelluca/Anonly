@@ -1023,3 +1023,55 @@ ORGANIZATION(6ch)  rect=[x387 w129 y689 h11]
 **El invariante `checkValueStartsAtWord` habría llamado a esto directamente** — un valor de 3 caracteres mapeado a una palabra de 129 pt casi seguro no arranca donde arranca la palabra. Hoy no corre en browser porque necesita las `Page` y el bus no las lleva (§28). Eso pasa de ser una limitación anotada a ser **lo próximo a destrabar**.
 
 **Y no es el caso reportado por el humano**: `Departamento Judicial Quilmes` es una **adyacencia**, y las adyacencias siguen siendo el fenómeno dominante — 5 en la pericia, 21 en el fallo, contra 3 solapamientos.
+
+---
+
+## 29. El orden de lectura asume una sola columna, y en un escaneo eso rompe el encabezado
+
+**Procedencia**: el humano probó el producto sobre un fallo **escaneado** (con OCR) del Tribunal de Casación Penal, después de cerrar ADR-108/ADR-109. El cuerpo del documento —una sola columna— sale bien; el encabezado sale mal: `[HOMBRE 14]` (el nombre del imputado, que está a la derecha) se pinta sobre el escudo y el `PROVINCIA DE…` de la izquierda, y `[DIRECCION 01]` a veces tapa `PROVINCIA DE BUENOS AIRES`, a veces la mitad, y a veces también `TRIBUNAL DE CASACIÓN PENAL`.
+
+**No es la geometría del bbox ni la conversión px→pt del OCR.** Es el **orden de lectura**: `Page.text` se arma concatenando `Page.words` ya ordenadas, y `mapSpanToWords` traduce un rango de caracteres de ese texto a un rango de índices de palabra. Si el orden intercala palabras de zonas distintas de la página, un span contiguo en el texto mapea a palabras que están lejos entre sí, y la envolvente (o los fragmentos) cubren las dos zonas.
+
+### El encabezado tiene dos columnas cuyos renglones se intercalan
+
+Corriendo el OCR real (Tesseract, 300 DPI, `spa+eng`) sobre la página 1 y aplicando `sortWordsByReadingOrder`:
+
+| columna | palabras | `y` (pt) |
+|---|---|---|
+| izquierda | `PROVINCIA DE BUENOS AIRES` | 105,1 – 107,8 |
+| derecha | `APELLIDO, NOMBRE SEGUNDO S/ RECURSO DE` | 104,9 – 118,6 |
+| izquierda | `TRIBUNAL DE CASACIÓN PENAL` | 119,3 – 121,4 |
+| derecha | `CASACIÓN` | 129,4 |
+| izquierda | `SALA I` | 133,7 |
+
+La línea de la derecha **abarca verticalmente a las dos de la izquierda**. Cualquier orden "por y, después por x" las mezcla; no hay clave escalar que las separe, porque no están separadas en y.
+
+### Y el comparador con tolerancia no es transitivo
+
+Es la misma trampa que ADR-067 §4 documentó para los runs rotados. Con `Array.sort` y un comparador no transitivo el resultado depende de la secuencia interna de comparaciones, así que **cambiar la clave cambia qué palabras rompen, sin arreglar nada**. Medido sobre este encabezado, las tres claves candidatas:
+
+```
+bbox.y (borde superior)        PROVINCIA NOMBRE SEGUMDO DE BUENOS AIRES Y APELLIDO, RECURSO TRIBUNAL DE DE CASACIÓN PENAL …
+bbox.y + height (la de hoy)    PROVINCIA DE AIRES BUENOS Y RECURSO APELLIDO, DE TRIBUNAL DE NOMBRE SEGUMDO CASACIÓN PENAL …
+centro vertical                PROVINCIA DE AIRES BUENOS NOMBRE SEGUMDO Y APELLIDO, RECURSO DE TRIBUNAL DE CASACIÓN PENAL …
+```
+
+Ninguna devuelve `PROVINCIA DE BUENOS AIRES`. Esto **corrige la errata de ADR-109 §3**, que afirmaba sin medir que el borde inferior era más estable para OCR.
+
+### Y las cajas de OCR de ese sello son malas de entrada
+
+Sobre el mismo renglón impreso, Tesseract devuelve alturas que difieren un 60 %:
+
+| palabra | `y` | alto |
+|---|---|---|
+| `APELLIDO,` | 112,1 | 13,9 |
+| `NOMBRE` | 104,9 | **22,1** |
+| `SEGUMDO` | 104,9 | **22,1** |
+
+Más ruido que entra como palabras (`ó`, `IRE`, `ENT`, `5`, `Y`) y `SEGUNDO` leído `SEGUMDO`. Con esa geometría, ningún comparador acierta.
+
+### Lo que haría falta
+
+Dejar de ordenar por una clave escalar con tolerancia y **agrupar en renglones primero** (clustering por banda vertical, con el ancho de la banda derivado de la altura de las palabras), y después **segmentar en columnas** dentro de cada banda por huecos horizontales. Es el mismo movimiento que ADR-067 hizo para los runs rotados —emitirlos en una pasada aparte en vez de intercalarlos— llevado al caso general. Pide ADR: cambia `Page.words` y `Page.text` para **todo** documento, así que hay que medir antes que no mueva el orden de los que hoy están bien.
+
+**No bloquea** nada de ADR-108/ADR-109: el texto nativo de una sola columna sale igual que siempre.

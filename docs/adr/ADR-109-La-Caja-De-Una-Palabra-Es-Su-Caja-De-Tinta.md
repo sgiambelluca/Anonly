@@ -76,7 +76,11 @@ O sea que la respuesta no es "agrandar la caja hacia abajo": es **mover la caja 
 
 `compareByReadingOrder` compara `bbox.y` con tolerancia de 1 pt para decidir "misma línea". Hoy `y = base − cuerpo` para toda fuente, así que dos palabras de la misma línea de base coinciden en `y` **siempre que compartan cuerpo**. Con la caja de tinta pasa a ser `y = base − ascent·cuerpo`, y en la pericia conviven fuentes con ascent 0,688 y 0,905: sobre un cuerpo de 8,09 pt eso son **1,76 pt de diferencia en la misma línea**, por encima de la tolerancia. El comparador partiría la línea al medio — exactamente la clase de regresión que ADR-067 §4 documentó.
 
-El borde **inferior** no tiene ese problema: hoy `y + height` es la línea de base **exacta**, para toda fuente y todo cuerpo, y con la caja de tinta es `base + descent·cuerpo`, donde `descent` varía 0,205–0,218 dentro de un documento (0,1 pt sobre 8 pt de cuerpo). Y para las palabras de **OCR** —que ya son cajas de tinta (ADR-064)— el borde inferior es más estable que el superior, porque el techo de una palabra sin ascendentes está medio cuerpo más abajo que el de una que las tiene.
+El borde **inferior** no tiene ese problema **para el texto nativo**: hoy `y + height` es la línea de base **exacta**, para toda fuente y todo cuerpo, y con la caja de tinta es `base + descent·cuerpo`, donde `descent` varía 0,205–0,218 dentro de un documento (0,1 pt sobre 8 pt de cuerpo).
+
+> **Errata (2026-08-30).** La primera redacción agregaba que para las palabras de **OCR** el borde inferior también era "más estable que el superior". **Eso no estaba medido y es falso.** Sobre un escaneo real, la línea `PROVINCIA DE BUENOS AIRES` sale como `PROVINCIA DE AIRES BUENOS` con el borde inferior, y las tres claves candidatas —superior, inferior y centro— rompen esa misma línea de formas distintas. La caja de OCR es la mancha de tinta que midió Tesseract: ninguno de sus bordes es una línea de base, y sus alturas varían hasta un 60 % entre palabras del mismo renglón impreso (22,1 pt contra 13,9 pt, medido).
+>
+> Lo que la decisión de §3 sí sostiene es lo que motivó el cambio: para el texto **nativo**, `y` pasa a depender del ascenso de cada fuente y `y + height` no. Para OCR el problema es otro y más profundo —el comparador con tolerancia no es transitivo, y encima el encabezado de ese documento tiene dos columnas cuyos renglones se intercalan—, y queda abierto en `roadmap/Post_Hito10.8_Pendientes.md` §29.
 
 ## Decisión
 
