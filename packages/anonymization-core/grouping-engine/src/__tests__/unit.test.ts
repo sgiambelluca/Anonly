@@ -330,7 +330,11 @@ describe("GroupingEngine — unit tests", () => {
         entityType: EntityType.Person,
         value: "Andrea Diaz",
         normalizedValue: "andrea diaz",
-        bbox: makeBBox(0, 0, 65, 20),
+        // ADR-117: en su propio renglon. Lo que este test mide son los ANCHOS
+        // (200 contra 65); apilar dos personas DISTINTAS en el mismo origen es
+        // una geometria que ningun documento produce, y desde ADR-117 la
+        // contenida se descarta.
+        bbox: makeBBox(0, 40, 65, 20),
       }),
     });
 

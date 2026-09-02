@@ -458,6 +458,36 @@ function maxFragmentIntersectionRatio(
   return best;
 }
 
+/** `a` cae entera adentro de `b`, con tolerancia de sub-punto. */
+function bboxContains(outer: BoundingBox, inner: BoundingBox): boolean {
+  const EPSILON = 0.01;
+  return (
+    inner.x >= outer.x - EPSILON &&
+    inner.y >= outer.y - EPSILON &&
+    inner.x + inner.width <= outer.x + outer.width + EPSILON &&
+    inner.y + inner.height <= outer.y + outer.height + EPSILON
+  );
+}
+
+/**
+ * ADR-117: cada pedazo de `inner` cae adentro de **algún** pedazo de `outer`.
+ *
+ * Se mide sobre los fragmentos y no sobre la envolvente por la misma razón que
+ * `maxFragmentIntersectionRatio` (ADR-107): la envolvente de una entidad
+ * partida por un salto de renglón abarca el bloque de texto entero, y contra
+ * ella cualquier vecina de esas dos líneas parecería "contenida".
+ */
+function fragmentsContain(
+  outerBbox: BoundingBox,
+  outerFragments: ReadonlyArray<BoundingBox> | undefined,
+  innerBbox: BoundingBox,
+  innerFragments: ReadonlyArray<BoundingBox> | undefined,
+): boolean {
+  const outer = outerFragments ?? [outerBbox];
+  const inner = innerFragments ?? [innerBbox];
+  return inner.every((piece) => outer.some((container) => bboxContains(container, piece)));
+}
+
 /**
  * Ratio de intersección de bbox relativo al área del rectángulo MÁS CHICO de
  * los dos (spec: "intersección > 50%" no especifica el denominador; se elige
@@ -1731,6 +1761,51 @@ export class GroupingEngine implements IEngine {
       return;
     }
 
+    /*
+     * ADR-117: una ocurrencia contenida ENTERA dentro de otra del mismo tipo
+     * ya registrada no aporta tinta nueva. Va antes que todo lo demás —
+     * incluida la rama de baja confianza— porque no es una decisión sobre
+     * cuál entidad es la buena: es que no hay entidad nueva que decidir.
+     *
+     * El caso que lo motiva: "Agregar como…" tokeniza la consulta en
+     * sub-tokens y barre el documento entero, así que agregar un apellido
+     * suelto lo arranca de adentro de cada nombre completo que el detector ya
+     * había separado bien. Medido sobre un expediente escaneado: 10
+     * ocurrencias nuevas, las 10 dentro de `Bartolomé Arturo Suarez`,
+     * `Mariela Suarez` o `Leonardo Suarez` — o sea, el apellido de tres
+     * personas distintas cayendo en un mismo grupo, que en el PDF exportado
+     * las tapa a las tres con el mismo token.
+     *
+     * Por qué el descarte es seguro: el pipeline automático casi no produce
+     * contenciones (medido, 8 documentos / 763 ocurrencias: **1**, y era
+     * `Person "I"` dentro de `Person "Juez X.Y"`). `aggregateTokensToSpans`
+     * emite spans disjuntos por página y `resolveOverlaps` ya se queda con el
+     * más largo en regex: la contención es un artefacto del barrido literal,
+     * no del detector.
+     *
+     * Y el orden está garantizado, no es suerte: el Orchestrator corre regex
+     * completo, después NER completo, y `addManualEntity` exige `stage: Ready`
+     * —no puede correr mientras el documento se analiza—. Medido: en 11 de 11
+     * contenciones el contenedor llegó primero.
+     *
+     * Límite conocido, deliberado: esto protege cuando el contenedor ya está
+     * registrado. Agregar a mano un valor LARGO sobre una detección corta ya
+     * registrada deja el duplicado, igual que antes de este ADR — no empeora,
+     * pero tampoco lo cierra.
+     */
+    if (this.isContainedInRecorded(session, occurrence)) {
+      this.ctx.logger.debug(
+        "ENTITY_FOUND contenida entera en otra ocurrencia del mismo tipo; se descarta (ADR-117).",
+        {
+          documentId: session.documentId,
+          occurrenceId: occurrence.id,
+          entityType: occurrence.entityType,
+          pageIndex: occurrence.pageIndex,
+        },
+      );
+      return;
+    }
+
     // Caso 9 (§13): low_confidence — solo aplica a ocurrencias NER.
     if (
       occurrence.source === DetectionSource.NER &&
@@ -1808,6 +1883,39 @@ export class GroupingEngine implements IEngine {
       candidateGroup.type,
     );
     this.emitConflictDetected(session, conflict);
+
+    /*
+     * ADR-116: si la clave coincide EXACTO con la del grupo, la ocurrencia
+     * entra igual. `findMatchingGroup` devuelve un grupo por dos vías de
+     * fuerza muy distinta —`normalizedValue` idéntico, o Levenshtein sobre
+     * `similarityThreshold`— y tratarlas igual es lo que hacía que un valor
+     * que el documento YA confirmó se llamara "conflicto" y se tirara.
+     *
+     * Medido sobre 8 documentos: de 54 ocurrencias bajo el umbral, 9 tienen
+     * clave exacta contra un grupo ya abierto y **ninguna** coincide solo por
+     * el pase difuso. Una de esas 9 era el apellido del imputado en la única
+     * página de veinte donde quedaba a la vista, con el sello leído al 96 %:
+     * el modelo le dio 0,612 contra un umbral de 0,7.
+     *
+     * Esta rama NUNCA crea un grupo — para eso hace falta una detección por
+     * encima del umbral (la rama de arriba, ADR-094 §1). Solo agrega
+     * apariciones a un grupo que el documento ya abrió, así que la superficie
+     * de falsos positivos no crece: el grupo equivocado, si lo hubiera, ya
+     * existe y ya tapa en otro lado.
+     *
+     * El conflicto se emite igual y ANTES: el rastro de que el detector dudó
+     * no se pierde por taparlo (ADR-094).
+     *
+     * Deliberadamente **no** se hereda la promoción de ADR-094 §3: si el
+     * grupo estaba apagado por ser una sugerencia, una ocurrencia dudosa más
+     * no alcanza para encenderlo — eso lo decide el usuario o una detección
+     * por encima del umbral.
+     */
+    if (!candidateGroup.normalizedValues.has(occurrence.normalizedValue)) return;
+
+    const changed = [...this.addOccurrenceToGroup(session, candidateGroup, occurrence)];
+    this.recordOccurrence(session, occurrence, candidateGroup.id);
+    this.emitGroupUpdated(session, candidateGroup, changed);
   }
 
   /**
@@ -1825,6 +1933,29 @@ export class GroupingEngine implements IEngine {
         rec.normalizedValue === occurrence.normalizedValue &&
         bboxEquals(rec.bbox, occurrence.bbox),
     );
+  }
+
+  /**
+   * ADR-117: ¿esta ocurrencia cae entera adentro de otra del **mismo tipo** ya
+   * registrada?
+   *
+   * Contención **estricta**: se exige que todos sus pedazos entren en los de
+   * la otra y que las dos no sean el mismo rectángulo. Un solapamiento
+   * PARCIAL no cuenta — ahí sí hay tinta que la otra no cubre, y además no
+   * existe hoy: medido sobre 8 documentos, 0 solapamientos parciales del
+   * mismo tipo.
+   *
+   * El tipo tiene que coincidir. Dos entidades de tipos distintos sobre la
+   * misma tinta son un desacuerdo entre detectores, y eso ya lo resuelve
+   * `findOverlapConflict` con su propia regla (casos 7-8 de §13).
+   */
+  private isContainedInRecorded(session: Session, occurrence: Occurrence): boolean {
+    return session.recordedOccurrences.some((rec) => {
+      if (rec.pageIndex !== occurrence.pageIndex) return false;
+      if (rec.entityType !== occurrence.entityType) return false;
+      if (bboxEquals(rec.bbox, occurrence.bbox)) return false;
+      return fragmentsContain(rec.bbox, rec.fragments, occurrence.bbox, occurrence.fragments);
+    });
   }
 
   private findOverlapConflict(

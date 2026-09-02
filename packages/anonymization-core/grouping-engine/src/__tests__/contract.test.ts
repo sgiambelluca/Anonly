@@ -702,7 +702,9 @@ describe("GroupingEngine — contract tests", () => {
         entityType: EntityType.Person,
         value: "Andrea Diaz",
         normalizedValue: "andrea diaz",
-        bbox: makeBBox(0, 0, 90, 20),
+        // ADR-117: en su propio renglon, no encima de "Andrea Perez". Lo que
+        // este test mide son los ANCHOS (150 contra 90).
+        bbox: makeBBox(0, 80, 90, 20),
       }),
     });
 

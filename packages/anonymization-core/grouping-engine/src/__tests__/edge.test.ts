@@ -462,8 +462,14 @@ describe("GroupingEngine — edge cases", () => {
     expect((createdCall?.[2] as EntityGroupCreated)?.group.type).toBe(EntityType.DNI);
   });
 
-  // Caso 9 (§13)
-  it("low_confidence occurrence discarded", () => {
+  /*
+   * Caso 9 (§13), reescrito por ADR-116. Antes este test fijaba que la
+   * ocurrencia se DESCARTABA. El caso medido que lo cambió: sobre un
+   * expediente escaneado, el apellido del imputado quedaba a la vista en la
+   * única página de veinte donde el modelo le dio 0,612 — con el sello leído
+   * al 96 % y un grupo `suarez` ya abierto por las otras diecinueve.
+   */
+  it("low_confidence occurrence with an EXACT key joins the group, and still emits the conflict", () => {
     const first = makeOccurrence({
       entityType: EntityType.Person,
       source: DetectionSource.NER,
@@ -489,6 +495,7 @@ describe("GroupingEngine — edge cases", () => {
       occurrence: lowConfidence,
     });
 
+    // El rastro de que el detector dudó no se pierde por taparlo (ADR-094).
     const conflictCalls = busEmitSpy.mock.calls.filter(
       ([channel, event]) =>
         channel === EventChannel.Grouping && event === EngineEvents.CONFLICT_DETECTED,
@@ -498,8 +505,244 @@ describe("GroupingEngine — edge cases", () => {
       ConflictReason.LowConfidence,
     );
 
+    // …y la ocurrencia entra igual: es el mismo valor, ya confirmado por el
+    // documento en el mismo grupo.
+    const { groups } = engine.getSnapshot("doc-1");
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.members).toHaveLength(2);
+  });
+
+  /*
+   * ADR-116, la puerta que queda cerrada: `findMatchingGroup` también devuelve
+   * un grupo por Levenshtein ≥ 0,88, y esa vía es mucho más floja que una
+   * clave idéntica. Medido sobre 8 documentos, CERO ocurrencias bajo el umbral
+   * llegaban por ahí — separar las dos no le quita nada a nadie hoy.
+   */
+  it("low_confidence occurrence that matches only FUZZILY is still discarded", () => {
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        source: DetectionSource.NER,
+        confidence: 0.9,
+        value: "Juan Pérez",
+        normalizedValue: "juan pérez",
+      }),
+    });
+
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        source: DetectionSource.NER,
+        confidence: 0.5,
+        value: "Juan Perez",
+        // Levenshtein 0.9 contra "juan pérez": entra al pase difuso, pero la
+        // clave NO es la misma.
+        normalizedValue: "juan perez",
+      }),
+    });
+
+    const conflictCalls = busEmitSpy.mock.calls.filter(
+      ([channel, event]) =>
+        channel === EventChannel.Grouping && event === EngineEvents.CONFLICT_DETECTED,
+    );
+    expect(conflictCalls).toHaveLength(1);
+
+    const { groups } = engine.getSnapshot("doc-1");
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.members).toHaveLength(1);
+  });
+
+  /*
+   * ADR-116: la regla NUNCA enciende un grupo. La promoción de ADR-094 §3 es
+   * para ocurrencias por encima del umbral; una dudosa más no alcanza.
+   */
+  it("a low_confidence occurrence does not switch on a suggested group", () => {
+    // Sin grupo candidato y siendo sugerible: nace apagado (ADR-094 §1).
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        source: DetectionSource.NER,
+        confidence: 0.6,
+        value: "Juan Pérez",
+        normalizedValue: "juan pérez",
+      }),
+    });
+    expect(engine.getSnapshot("doc-1").groups[0]?.enabled).toBe(false);
+
+    // Una SEGUNDA ocurrencia dudosa del mismo valor entra al grupo…
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        source: DetectionSource.NER,
+        confidence: 0.65,
+        value: "Juan Pérez",
+        normalizedValue: "juan pérez",
+        bbox: { x: 10, y: 200, width: 60, height: 12 },
+      }),
+    });
+
     const [group] = engine.getSnapshot("doc-1").groups;
-    expect(group?.members).toHaveLength(1);
+    expect(group?.members).toHaveLength(2);
+    // …pero no lo enciende: eso lo decide el usuario, o una detección sobre
+    // el umbral.
+    expect(group?.enabled).toBe(false);
+    expect(group?.needsReview).toBe(true);
+  });
+
+  /*
+   * ADR-117 — caso 24 (§13). El caso medido: agregar a mano el apellido del
+   * imputado sobre un expediente escaneado sumaba 10 ocurrencias nuevas, las
+   * 10 arrancadas de adentro de `Bartolomé Arturo Suarez`, `Mariela Suarez` o
+   * `Leonardo Suarez` — el apellido de tres personas distintas en un mismo
+   * grupo, que en el PDF exportado las tapa a las tres con el mismo token.
+   */
+  describe("contención del mismo tipo (ADR-117)", () => {
+    /** `Leonardo Suarez`, y el `Suarez` de adentro. */
+    const nombreCompleto = { x: 100, y: 200, width: 120, height: 12 };
+    const apellidoAdentro = { x: 175, y: 200, width: 45, height: 12 };
+
+    function emitir(occurrence: ReturnType<typeof makeOccurrence>): void {
+      ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence,
+      });
+    }
+
+    it("an occurrence fully inside another of the same type is not recorded", () => {
+      emitir(
+        makeOccurrence({
+          entityType: EntityType.Person,
+          source: DetectionSource.NER,
+          confidence: 0.99,
+          value: "Leonardo Suarez",
+          normalizedValue: "leonardo suarez",
+          bbox: nombreCompleto,
+        }),
+      );
+
+      // El apellido suelto que el barrido literal arranca de adentro.
+      ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: makeOccurrence({
+          entityType: EntityType.Person,
+          source: DetectionSource.Manual,
+          confidence: 1.0,
+          value: "Suarez",
+          normalizedValue: "suarez",
+          bbox: apellidoAdentro,
+        }),
+      });
+
+      const { groups } = engine.getSnapshot("doc-1");
+      expect(groups).toHaveLength(1);
+      expect(groups[0]?.canonicalValue).toBe("Leonardo Suarez");
+      expect(groups[0]?.members).toHaveLength(1);
+    });
+
+    it("a PARTIAL overlap of the same type is still recorded", () => {
+      // La contención es estricta: si asoma tinta que la otra no cubre, hay
+      // entidad nueva. Medido: 0 solapamientos parciales del mismo tipo en 8
+      // documentos, así que esto fija el límite, no un caso frecuente.
+      emitir(
+        makeOccurrence({
+          entityType: EntityType.Person,
+          source: DetectionSource.NER,
+          confidence: 0.99,
+          value: "Leonardo Suarez",
+          normalizedValue: "leonardo suarez",
+          bbox: nombreCompleto,
+        }),
+      );
+      emitir(
+        makeOccurrence({
+          entityType: EntityType.Person,
+          source: DetectionSource.NER,
+          confidence: 0.98,
+          value: "Suarez Pérez",
+          normalizedValue: "suarez pérez",
+          // Arranca adentro y termina AFUERA del nombre completo.
+          bbox: { x: 175, y: 200, width: 90, height: 12 },
+        }),
+      );
+
+      expect(engine.getSnapshot("doc-1").groups).toHaveLength(2);
+    });
+
+    it("containment of a DIFFERENT type still goes through the overlap conflict", () => {
+      // Dos tipos sobre la misma tinta son un desacuerdo entre detectores, y
+      // eso lo resuelve la regla de los casos 7-8, no ésta.
+      emitir(
+        makeOccurrence({
+          entityType: EntityType.Person,
+          source: DetectionSource.NER,
+          confidence: 0.99,
+          value: "Leonardo Suarez",
+          normalizedValue: "leonardo suarez",
+          bbox: nombreCompleto,
+        }),
+      );
+
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: makeOccurrence({
+          entityType: EntityType.Organization,
+          source: DetectionSource.Regex,
+          confidence: 1.0,
+          value: "Suarez",
+          normalizedValue: "suarez",
+          bbox: apellidoAdentro,
+        }),
+      });
+
+      const conflictCalls = busEmitSpy.mock.calls.filter(
+        ([channel, event]) =>
+          channel === EventChannel.Grouping && event === EngineEvents.CONFLICT_DETECTED,
+      );
+      expect(conflictCalls).toHaveLength(1);
+    });
+
+    it("does not treat a neighbour inside the ENVELOPE of a multi-line entity as contained", () => {
+      /*
+       * ADR-107, aplicado a la contención: la envolvente de una entidad
+       * partida por un salto de renglón abarca el bloque entero, así que
+       * medir contra ella haría desaparecer a cualquier vecina de esas dos
+       * líneas. Se mide contra los FRAGMENTOS.
+       */
+      emitir(
+        makeOccurrence({
+          entityType: EntityType.Person,
+          source: DetectionSource.NER,
+          confidence: 0.99,
+          value: "María Fernanda\nLópez",
+          normalizedValue: "maría fernanda lópez",
+          bbox: { x: 100, y: 200, width: 200, height: 40 }, // envolvente de las dos líneas
+          fragments: [
+            { x: 240, y: 200, width: 60, height: 12 }, // final del primer renglón
+            { x: 100, y: 228, width: 50, height: 12 }, // principio del segundo
+          ],
+        }),
+      );
+
+      // Cae dentro de la ENVOLVENTE pero no de ningún fragmento.
+      emitir(
+        makeOccurrence({
+          entityType: EntityType.Person,
+          source: DetectionSource.NER,
+          confidence: 0.97,
+          value: "Ana Ruiz",
+          normalizedValue: "ana ruiz",
+          bbox: { x: 110, y: 202, width: 60, height: 12 },
+        }),
+      );
+
+      expect(engine.getSnapshot("doc-1").groups).toHaveLength(2);
+    });
   });
 
   // Caso 10 (§13)
