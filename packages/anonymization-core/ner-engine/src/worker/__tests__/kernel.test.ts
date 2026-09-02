@@ -12,7 +12,12 @@
  * Por el hoisting de Vitest, este archivo declara su propio `vi.mock`
  * (mismo motivo documentado en `../../__tests__/fixtures/test-helpers.ts`).
  */
-import { EntityType, type NerPagePayload, type Serializable } from "@anonly/shared";
+import {
+  EntityType,
+  normalizeEntityValue,
+  type NerPagePayload,
+  type Serializable,
+} from "@anonly/shared";
 import { pipeline } from "@huggingface/transformers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -27,6 +32,7 @@ vi.mock("@huggingface/transformers", () => ({
 
 import {
   asPipelineMock,
+  mockPipelineHonouringIgnoreLabels,
   mockTokenClassificationPipeline,
   nerToken,
   type MockTokenizer,
@@ -70,7 +76,9 @@ describe("NerKernel — kernelClassify (ADR-046 §1/§4)", () => {
       {
         entityType: EntityType.Person,
         value: "Juan Pérez",
-        normalizedValue: "juan pérez",
+        // ADR-118: la clave no lleva diacriticos — es la misma normalizacion
+        // que produce la via manual. El  de arriba si los conserva.
+        normalizedValue: "juan perez",
         confidence: 0.9,
         startIndex: 0,
         endIndexExclusive: 10,
@@ -233,6 +241,282 @@ describe("NerKernel — kernelClassify (ADR-046 §1/§4)", () => {
     );
 
     expect(spans.map((s) => s.value)).toEqual(["Pérez", "Juan"]);
+  });
+
+  // ─── ADR-111: el token sin etiqueta, la continuación y el borde de palabra ───
+
+  describe("ADR-111 §1 — la secuencia completa de tokens (NER_Engine.md §13 caso 23)", () => {
+    it("asks the pipeline for every token, O included", async () => {
+      const seen: Array<ReadonlyArray<string> | undefined> = [];
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockTokenClassificationPipeline((_text, options) => {
+          seen.push(options?.ignore_labels);
+          return Promise.resolve([nerToken("B-PER", "Juan", 0.9, 0)]);
+        }),
+      );
+
+      await kernelClassify(basePayload({ modelId: "model-ignore-labels", text: "Juan" }), {
+        timeoutMs: 5000,
+        abortSignal: new AbortController().signal,
+      });
+
+      expect(seen).toEqual([[]]);
+    });
+
+    it("closes a span on an unlabelled token instead of swallowing the text between two entities", async () => {
+      /*
+       * El doble filtra como filtra la librería, así que este test FALLA si
+       * el kernel deja de pedir `ignore_labels: []`: sin los `O`, el
+       * agregador ve `B-PER "Juan"` seguido de `I-PER "Ana"` y emite un solo
+       * span sobre "Juan vive con Ana".
+       */
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockPipelineHonouringIgnoreLabels([
+          nerToken("B-PER", "Juan", 0.9, 0),
+          nerToken("O", "vive", 0.99, 1),
+          nerToken("O", "con", 0.99, 2),
+          nerToken("I-PER", "Ana", 0.9, 3),
+        ]),
+      );
+
+      const spans = await kernelClassify(
+        basePayload({ modelId: "model-o-tokens", text: "Juan vive con Ana" }),
+        { timeoutMs: 5000, abortSignal: new AbortController().signal },
+      );
+
+      expect(spans.map((s) => s.value)).toEqual(["Juan", "Ana"]);
+    });
+
+    it("positions a short token at its real offset, not at the first match in the chunk", async () => {
+      /*
+       * El caso medido sobre un fallo escaneado, reducido: el `B-PER "D"` de
+       * "D'Amoroso" se ubicaba en la "D" de la primera palabra —cientos de
+       * caracteres antes— porque el cursor de `positionTokens` no tenía
+       * ninguna ancla entre entidad y entidad. Los `O` son esa ancla.
+       */
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockPipelineHonouringIgnoreLabels([
+          nerToken("O", "Dijo", 0.99, 0),
+          nerToken("O", "el", 0.99, 1),
+          nerToken("O", "señor", 0.99, 2),
+          nerToken("B-PER", "D", 0.9, 3),
+          nerToken("I-PER", "'", 0.9, 4),
+          nerToken("I-PER", "Amo", 0.9, 5),
+          nerToken("I-PER", "roso", 0.9, 6),
+        ]),
+      );
+
+      const spans = await kernelClassify(
+        basePayload({ modelId: "model-cursor", text: "Dijo el señor D'Amoroso" }),
+        { timeoutMs: 5000, abortSignal: new AbortController().signal },
+      );
+
+      expect(spans).toHaveLength(1);
+      expect(spans[0]?.value).toBe("D'Amoroso");
+      expect(spans[0]?.startIndex).toBe(14);
+    });
+  });
+
+  describe("ADR-111 §2 — una continuación no abre entidad (NER_Engine.md §13 caso 24)", () => {
+    it("extends the open span when a continuation carries a different label", async () => {
+      /*
+       * Medido sobre el fallo escaneado: `Florencio Varela` salía como
+       * `Address "Floren"` + `Organization "cio Varela"`. Con la regla
+       * completa, la palabra es una y el span también.
+       */
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockTokenClassificationPipeline(() =>
+          Promise.resolve([
+            nerToken("B-LOC", "Floren", 0.78, 0),
+            nerToken("I-ORG", "##cio", 0.73, 1),
+            nerToken("I-LOC", "Varela", 0.9, 2),
+          ]),
+        ),
+      );
+
+      const spans = await kernelClassify(
+        basePayload({ modelId: "model-continuation-label", text: "Florencio Varela" }),
+        { timeoutMs: 5000, abortSignal: new AbortController().signal },
+      );
+
+      expect(spans).toHaveLength(1);
+      expect(spans[0]?.value).toBe("Florencio Varela");
+      expect(spans[0]?.entityType).toBe(EntityType.Address);
+    });
+
+    it("still starts a new span when a NON-continuation changes label", async () => {
+      // La no regresión de §2: dos palabras distintas siguen siendo dos entidades.
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockTokenClassificationPipeline(() =>
+          Promise.resolve([nerToken("B-PER", "Ana", 0.9, 0), nerToken("I-ORG", "Acme", 0.9, 1)]),
+        ),
+      );
+
+      const spans = await kernelClassify(
+        basePayload({ modelId: "model-label-change", text: "Ana Acme" }),
+        { timeoutMs: 5000, abortSignal: new AbortController().signal },
+      );
+
+      expect(spans.map((s) => s.value)).toEqual(["Ana", "Acme"]);
+    });
+  });
+
+  describe("ADR-111 §3 — el borde de un span es un borde de palabra (NER_Engine.md §13 caso 25)", () => {
+    it("extends a span that starts mid-word up to the start of the word", async () => {
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockPipelineHonouringIgnoreLabels([
+          nerToken("O", "Ju", 0.6, 0),
+          nerToken("B-ORG", "##zgado", 0.9, 1),
+          nerToken("I-ORG", "Civil", 0.9, 2),
+        ]),
+      );
+
+      const spans = await kernelClassify(
+        basePayload({ modelId: "model-snap-start", text: "Juzgado Civil de Quilmes" }),
+        { timeoutMs: 5000, abortSignal: new AbortController().signal },
+      );
+
+      expect(spans).toHaveLength(1);
+      expect(spans[0]?.value).toBe("Juzgado Civil");
+      expect(spans[0]?.startIndex).toBe(0);
+    });
+
+    it("merges two spans of the same type that fall inside the same word", async () => {
+      /*
+       * Medido sobre un oficio: `Juzgado` salía `Organization "Ju"` +
+       * `Organization "gado"` porque el modelo etiquetó `O` el subtoken del
+       * medio. Es el modo de falla de v1.3.1 por otra puerta.
+       */
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockPipelineHonouringIgnoreLabels([
+          nerToken("B-ORG", "Ju", 0.6, 0),
+          nerToken("O", "##z", 0.4, 1),
+          nerToken("B-ORG", "##gado", 0.91, 2),
+        ]),
+      );
+
+      const spans = await kernelClassify(
+        basePayload({ modelId: "model-coalesce", text: "Juzgado de Paz" }),
+        { timeoutMs: 5000, abortSignal: new AbortController().signal },
+      );
+
+      expect(spans).toHaveLength(1);
+      expect(spans[0]?.value).toBe("Juzgado");
+      // La confianza es la del trozo más largo, no el promedio: la `z` que el
+      // modelo dudó no arrastra a la palabra entera.
+      expect(spans[0]?.confidence).toBeCloseTo(0.91, 5);
+    });
+
+    it("does not merge two spans of the same type separated by a space", async () => {
+      // La no regresión de la fusión: dos palabras pueden ser dos entidades.
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockTokenClassificationPipeline(() =>
+          Promise.resolve([nerToken("B-PER", "Ana", 0.9, 0), nerToken("B-PER", "Bruno", 0.9, 1)]),
+        ),
+      );
+
+      const spans = await kernelClassify(
+        basePayload({ modelId: "model-no-coalesce", text: "Ana Bruno" }),
+        { timeoutMs: 5000, abortSignal: new AbortController().signal },
+      );
+
+      expect(spans.map((s) => s.value)).toEqual(["Ana", "Bruno"]);
+    });
+
+    it("does not invade the neighbouring span when both fall inside the same word", async () => {
+      /*
+       * Secuencia sintética: dos tokens NO continuación dentro de una misma
+       * palabra. No es lo que produce el modelo, pero es lo único que puede
+       * romper la invariante que §3 promete conservar — spans ordenados y sin
+       * solaparse. Sin el clamp, los dos se extienden a "Perez" y quedan dos
+       * entidades idénticas superpuestas.
+       */
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockTokenClassificationPipeline(() =>
+          Promise.resolve([nerToken("B-PER", "Pe", 0.9, 0), nerToken("B-ORG", "rez", 0.9, 1)]),
+        ),
+      );
+
+      const spans = await kernelClassify(basePayload({ modelId: "model-clamp", text: "Perez" }), {
+        timeoutMs: 5000,
+        abortSignal: new AbortController().signal,
+      });
+
+      expect(spans.map((s) => s.value)).toEqual(["Pe", "rez"]);
+      expect(spans[0]?.endIndexExclusive).toBe(spans[1]?.startIndex);
+    });
+
+    it("leaves a span already aligned to word boundaries untouched", async () => {
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockTokenClassificationPipeline(() =>
+          Promise.resolve([nerToken("B-PER", "Juan", 0.9, 0), nerToken("I-PER", "Pérez", 0.9, 1)]),
+        ),
+      );
+
+      const spans = await kernelClassify(
+        basePayload({ modelId: "model-snap-noop", text: "Juan Pérez trabaja" }),
+        { timeoutMs: 5000, abortSignal: new AbortController().signal },
+      );
+
+      expect(spans).toHaveLength(1);
+      expect(spans[0]?.value).toBe("Juan Pérez");
+      expect(spans[0]?.startIndex).toBe(0);
+      expect(spans[0]?.endIndexExclusive).toBe("Juan Pérez".length);
+    });
+
+    it("recomputes normalizedValue when the span grows", async () => {
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockPipelineHonouringIgnoreLabels([
+          nerToken("O", "Alba", 0.6, 0),
+          nerToken("B-PER", "##verría,", 0.9, 1),
+        ]),
+      );
+
+      const spans = await kernelClassify(
+        basePayload({ modelId: "model-snap-normalized", text: "Echeverría, Marta" }),
+        { timeoutMs: 5000, abortSignal: new AbortController().signal },
+      );
+
+      expect(spans).toHaveLength(1);
+      expect(spans[0]?.value).toBe("Echeverría,");
+      expect(spans[0]?.normalizedValue).toBe("echeverria"); // ADR-118: sin diacriticos
+    });
+  });
+
+  // ─── ADR-118: una sola normalizacion para la clave de agrupado ───
+
+  describe("ADR-118 — la clave sale de normalizeEntityValue (NER_Engine.md §13 caso 26)", () => {
+    it("strips diacritics so the key matches what the manual path produces", () => {
+      /*
+       * El hueco medido:  no sacaba diacriticos y
+       *  (la via manual) si, asi que el mismo nombre
+       * daba dos claves. El pase difuso de grouping no siempre las rescata —
+       *  contra  da 0,600 sobre un umbral de 0,88. Sobre 8
+       * documentos, 23 de 108 ocurrencias con diacriticos se partian.
+       */
+      expect(normalizeEntityValue("Muñíz")).toBe("muniz");
+      expect(normalizeEntityValue("MUÑÍZ,")).toBe("muniz");
+      expect(normalizeEntityValue("muñíz")).toBe("muniz");
+    });
+
+    it("produces a span whose normalizedValue has no diacritics but whose value keeps them", async () => {
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockTokenClassificationPipeline(() =>
+          Promise.resolve([nerToken("B-PER", "Muñíz", 0.9, 0)]),
+        ),
+      );
+
+      const spans = await kernelClassify(
+        basePayload({ modelId: "model-118", text: "Declaró Muñíz ante el tribunal" }),
+        { timeoutMs: 5000, abortSignal: new AbortController().signal },
+      );
+
+      expect(spans).toHaveLength(1);
+      // Lo impreso se conserva: es lo que la UI muestra como canonicalValue.
+      expect(spans[0]?.value).toBe("Muñíz");
+      // La clave de agrupado, no.
+      expect(spans[0]?.normalizedValue).toBe("muniz");
+    });
   });
 
   // ─── ADR-088 §2: caja alta ───

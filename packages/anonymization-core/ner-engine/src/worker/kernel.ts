@@ -35,6 +35,7 @@
 import {
   CancelledError,
   EntityType,
+  normalizeEntityValue,
   type NerPagePayload,
   type NerKernelSpan,
   type NerWasmPaths,
@@ -219,13 +220,25 @@ function titleCaseUppercaseRuns(text: string): string {
   return transformed.length === text.length ? transformed : text;
 }
 
-function normalizeNerValue(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .replace(/^[.,;:!?()"'«»]+|[.,;:!?()"'«»]+$/g, "");
-}
+/*
+ * ADR-118: el `normalizedValue` de una ocurrencia sale de `normalizeEntityValue`
+ * (`@anonly/shared`), **la misma función que usa la vía manual** — no de una
+ * copia local. Este archivo tenía la suya, `normalizeNerValue`, y difería en
+ * dos cosas que costaban grupos partidos:
+ *
+ * - **No sacaba diacríticos.** El mismo nombre encontrado por los dos caminos
+ *   daba dos claves (`muñíz` del NER contra `muniz` de un agregado manual), y
+ *   el pase difuso de grouping no siempre las rescata: `muñíz`/`muniz` da
+ *   **0,600** contra un umbral de 0,88. Medido sobre 8 documentos, de 108
+ *   ocurrencias con diacríticos **23 se partían en dos grupos**.
+ * - **Recortaba los bordes con una lista de signos** (`.,;:!?()"'«»`) que no
+ *   incluía las comillas tipográficas de una carátula. La compartida recorta
+ *   por clase Unicode, así que no hay lista a la que le falte uno (ADR-115 §1).
+ *
+ * Lo que NO cambia: `canonicalValue` y los `aliases` de un grupo salen de
+ * `Occurrence.value` —el texto impreso—, no de esta clave, así que en pantalla
+ * `Muñíz` sigue con su acento.
+ */
 
 /**
  * `wasmPaths` inyectado por config (ADR-039, viaja en el payload desde
@@ -244,6 +257,14 @@ function configureTransformersEnv(wasmPaths: string | NerWasmPaths | undefined):
 
 /*
  * Reconstruye offsets de caracteres para cada token dentro de chunkText.
+ *
+ * ADR-111 §1: el cursor **depende de recibir todos los tokens**, `O`
+ * incluidos. Solo avanza, así que descarta una coincidencia hacia atrás pero
+ * no una hacia adelante: sin los tokens sin etiqueta entre entidad y entidad
+ * no queda ninguna ancla, y un token corto se ubica en la primera aparición
+ * de su texto, que puede estar cientos de caracteres antes de la real.
+ * Medido: el `B-PER "D"` de `D'Amoroso` (offset 868) se ubicaba en la `D` de
+ * `DE SALAI` (offset 92).
  * @huggingface/transformers v4 sigue sin exponer start/end reales para
  * token-classification: solo entrega `word` (el token decodificado, con
  * prefijo "##" para continuaciones de wordpiece en modelos BERT). Se ubica
@@ -291,6 +312,10 @@ function positionTokens(
  * impreso). Las dos cadenas tienen la misma longitud, así que un offset vale
  * en las dos; separarlas es lo que hace que el `canonicalValue` del grupo
  * diga `PERITO CARLOS LOPEZ` y no `Perito Carlos Lopez`.
+ *
+ * ADR-111 §1: esta función —y `positionTokens`— asumen la secuencia COMPLETA
+ * de tokens, incluidos los `O`. Es `classifyWithTimeout` quien la garantiza,
+ * pidiéndole al pipeline `ignore_labels: []`; ver el comentario ahí.
  */
 function aggregateTokensToSpans(
   tokens: ReadonlyArray<TokenClassificationSingle>,
@@ -310,7 +335,7 @@ function aggregateTokensToSpans(
       spans.push({
         entityType,
         value,
-        normalizedValue: normalizeNerValue(value),
+        normalizedValue: normalizeEntityValue(value),
         confidence: Math.max(0, Math.min(1, confidence)),
         startIndex: open.startIndex,
         endIndexExclusive: open.endIndexExclusive,
@@ -346,7 +371,17 @@ function aggregateTokensToSpans(
       continue;
     }
 
-    if (isBegin || open === null || open.label !== label) {
+    /*
+     * ADR-111 §2: la misma regla de v1.3.1, completa. Un subword no empieza
+     * una entidad **ni cambiando de tipo**: si el modelo etiqueta `Floren`
+     * como LOC y `##cio` como ORG, la palabra es una sola y el span también.
+     * Sin esto salen dos entidades cortadas al medio —`"Floren"` y
+     * `"cio Varela"`—, y tapar la primera deja la segunda a la vista.
+     *
+     * Con `open === null` una continuación sí abre: no hay nada que
+     * extender. Ese resto lo cubre el borde de palabra de §3.
+     */
+    if (isBegin || open === null || (open.label !== label && !token.isContinuation)) {
       flush();
       open = {
         label,
@@ -361,7 +396,112 @@ function aggregateTokensToSpans(
   }
   flush();
 
-  return spans;
+  return snapSpansToWordBoundaries(spans, chunkText);
+}
+
+const WORD_CHAR_RE = /[\p{L}\p{N}]/u;
+
+/**
+ * ADR-111 §3 — una entidad tapa palabras enteras.
+ *
+ * Cada span extiende su inicio hacia atrás y su fin hacia adelante mientras el
+ * carácter contiguo sea letra o dígito. Media palabra tapada no protege nada:
+ * `Echeve` tapado deja `rría` a la vista, y en la UI aparece como una entidad
+ * que el usuario no reconoce.
+ *
+ * El vecino manda: el inicio se topa contra el fin del span anterior y el fin
+ * contra el inicio del siguiente. `aggregateTokensToSpans` los emite ordenados
+ * y sin solaparse (un token entra a un solo span, y los tokens vienen
+ * ordenados por `positionTokens`), así que el clamp **conserva** esa
+ * invariante en vez de tener que restaurarla.
+ *
+ * El `value` se recorta de `chunkText` —el texto como está impreso, no el de
+ * inferencia (ADR-088 §2)—, igual que en `flush()`. `normalizedValue` se
+ * recalcula: es función del `value`, y dejarlo sin tocar sería dejar dos
+ * campos que se contradicen.
+ */
+/**
+ * ADR-111 §3 — dos spans del **mismo tipo** dentro de **una misma palabra** son
+ * la misma entidad.
+ *
+ * Pasa cuando el modelo etiqueta `O` un subtoken del medio: `Ju` `##z` `##gado`
+ * con la `z` sin etiquetar cierra el span y abre otro, y quedan `"Ju"` y
+ * `"gado"` — el mismo modo de falla que v1.3.1 cerró para el `B-` sobre
+ * continuación, por otra puerta. Llevar cada uno al borde de palabra por
+ * separado no alcanza: el clamp de más abajo los frena uno contra el otro, que
+ * es lo correcto mientras sean entidades distintas.
+ *
+ * Se fusionan solo si entre los dos **no hay ningún carácter que no sea de
+ * palabra**: un espacio, una coma o un guion significan dos palabras, y dos
+ * palabras pueden ser dos entidades. La confianza del resultado es la del span
+ * más largo, no un promedio: el trozo de una letra que el modelo dudó no tiene
+ * por qué arrastrar hacia abajo la confianza de la palabra entera.
+ */
+function coalesceSpansInsideTheSameWord(
+  spans: ReadonlyArray<NerKernelSpan>,
+  chunkText: string,
+): ReadonlyArray<NerKernelSpan> {
+  const merged: NerKernelSpan[] = [];
+  for (const span of spans) {
+    const previous = merged[merged.length - 1];
+    const between =
+      previous === undefined
+        ? undefined
+        : chunkText.slice(previous.endIndexExclusive, span.startIndex);
+    const sameWord =
+      previous !== undefined &&
+      previous.entityType === span.entityType &&
+      span.startIndex >= previous.endIndexExclusive &&
+      between !== undefined &&
+      [...between].every((ch) => WORD_CHAR_RE.test(ch));
+
+    if (previous === undefined || !sameWord) {
+      merged.push(span);
+      continue;
+    }
+
+    const value = chunkText.slice(previous.startIndex, span.endIndexExclusive);
+    const longest =
+      span.endIndexExclusive - span.startIndex > previous.endIndexExclusive - previous.startIndex
+        ? span
+        : previous;
+    merged[merged.length - 1] = {
+      ...previous,
+      value,
+      normalizedValue: normalizeEntityValue(value),
+      confidence: longest.confidence,
+      endIndexExclusive: span.endIndexExclusive,
+    };
+  }
+  return merged;
+}
+
+function snapSpansToWordBoundaries(
+  spans: ReadonlyArray<NerKernelSpan>,
+  chunkText: string,
+): ReadonlyArray<NerKernelSpan> {
+  const coalesced = coalesceSpansInsideTheSameWord(spans, chunkText);
+  return coalesced.map((span, i) => {
+    const floor = i === 0 ? 0 : (coalesced[i - 1]?.endIndexExclusive ?? 0);
+    const ceiling = coalesced[i + 1]?.startIndex ?? chunkText.length;
+
+    let start = span.startIndex;
+    while (start > floor && WORD_CHAR_RE.test(chunkText[start - 1] ?? "")) start -= 1;
+
+    let end = span.endIndexExclusive;
+    while (end < ceiling && WORD_CHAR_RE.test(chunkText[end] ?? "")) end += 1;
+
+    if (start === span.startIndex && end === span.endIndexExclusive) return span;
+
+    const value = chunkText.slice(start, end);
+    return {
+      ...span,
+      value,
+      normalizedValue: normalizeEntityValue(value),
+      startIndex: start,
+      endIndexExclusive: end,
+    };
+  });
 }
 
 // ─── Estado del kernel (a nivel de módulo, ADR-046 §1) ───
@@ -484,11 +624,32 @@ async function classifyWithTimeout(
   });
 
   try {
-    // Llamada opaca a la librería externa (mockeada en tests, ADR-021 §5):
-    // mismo patrón de Promise.race contra timeout + AbortSignal que
-    // ocr-engine (recognizeWithTimeout) usa para envolver una computación
-    // WASM que no se puede preemptar desde JS sin un Worker real.
-    const result = await Promise.race([activeClassifier(text), timeoutPromise, abortPromise]);
+    /*
+     * Llamada opaca a la librería externa (mockeada en tests, ADR-021 §5):
+     * mismo patrón de Promise.race contra timeout + AbortSignal que
+     * ocr-engine (recognizeWithTimeout) usa para envolver una computación
+     * WASM que no se puede preemptar desde JS sin un Worker real.
+     *
+     * ADR-111 §1 — `ignore_labels: []` NO es una opción de afinado: es la
+     * precondición de los dos consumidores del resultado.
+     * `TokenClassificationPipeline._call` default a `ignore_labels: ['O']` y
+     * descarta todo token sin etiqueta; medido, devuelve 21 tokens para una
+     * página de 1887 caracteres contra 466 pidiéndolos todos. Sin los `O`:
+     * `aggregateTokensToSpans` nunca ejecuta su rama de cierre (`flush()` en
+     * un label no soportado) y `positionTokens` se queda sin anclas entre
+     * entidad y entidad. Con las dos cosas juntas, una `Person` llegó a
+     * abarcar 785 caracteres —tres párrafos— sobre un fallo escaneado.
+     *
+     * `aggregation_strategy` se deja en su default (`"none"`) a propósito: la
+     * agregación nativa de la librería devuelve solo el `word` decodificado,
+     * **sin offsets de carácter** (`// TODO: Add support for start and end`
+     * en `pipelines/token-classification.js`), y sin offsets no hay bbox.
+     */
+    const result = await Promise.race([
+      activeClassifier(text, { ignore_labels: [] }),
+      timeoutPromise,
+      abortPromise,
+    ]);
     return isTokenClassificationOutput(result) ? result : [];
   } finally {
     if (timeoutId !== undefined) clearTimeout(timeoutId);

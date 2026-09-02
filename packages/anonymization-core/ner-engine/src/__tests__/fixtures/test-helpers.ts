@@ -223,17 +223,52 @@ function asCallableTokenizer(tokenizer: MockTokenizer): MockTokenizer {
   return Object.assign(callable, tokenizer) as unknown as MockTokenizer;
 }
 
+/**
+ * Opciones con las que el kernel invoca al pipeline. Solo `ignore_labels`
+ * (ADR-111 §1); `aggregation_strategy` no se pasa nunca.
+ */
+export interface TokenClassificationCallOptions {
+  readonly ignore_labels?: ReadonlyArray<string>;
+}
+
 export function mockTokenClassificationPipeline(
-  classify: (text: string) => Promise<ReadonlyArray<TokenClassificationSingle>>,
+  classify: (
+    text: string,
+    options?: TokenClassificationCallOptions,
+  ) => Promise<ReadonlyArray<TokenClassificationSingle>>,
   dispose: () => Promise<void> = () => Promise.resolve(),
   tokenizer?: MockTokenizer,
 ): TokenClassificationPipelineType {
-  const callable = (text: string): Promise<ReadonlyArray<TokenClassificationSingle>> => classify(text);
+  const callable = (
+    text: string,
+    options?: TokenClassificationCallOptions,
+  ): Promise<ReadonlyArray<TokenClassificationSingle>> => classify(text, options);
   const withDispose = Object.assign(
     callable,
     tokenizer === undefined ? { dispose } : { dispose, tokenizer: asCallableTokenizer(tokenizer) },
   );
   return withDispose as unknown as TokenClassificationPipelineType;
+}
+
+/**
+ * Doble **fiel** del pipeline en lo que a `ignore_labels` respecta:
+ * `TokenClassificationPipeline._call` de @huggingface/transformers v4 default
+ * a `['O']` y **descarta** todo token cuyo label esté en la lista
+ * (`if (ignore_labels.includes(entity)) continue;`).
+ *
+ * `mockTokenClassificationPipeline` a secas devuelve lo que se le pide, así
+ * que un test escrito con él no puede notar si el kernel dejó de pedir todos
+ * los tokens. Este helper sí: se le pasa la secuencia **completa** (con sus
+ * `O`) y filtra como filtraría la librería. Es lo que hace que los tests de
+ * ADR-111 §1 fallen si se le saca el `ignore_labels: []` al kernel.
+ */
+export function mockPipelineHonouringIgnoreLabels(
+  tokens: ReadonlyArray<TokenClassificationSingle>,
+): TokenClassificationPipelineType {
+  return mockTokenClassificationPipeline((_text, options) => {
+    const ignored = options?.ignore_labels ?? ["O"];
+    return Promise.resolve(tokens.filter((t) => !ignored.includes(t.entity)));
+  });
 }
 
 /**
