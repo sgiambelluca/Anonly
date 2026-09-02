@@ -824,7 +824,8 @@ describe("OcrEngine — unit tests", () => {
        * acierta las cuatro con confianza 12-16 y tarda 290 ms en vez de 690 —
        * y eso es lo que hace que arreglar OSD no cueste tiempo.
        */
-      const detect = vi.fn(() => Promise.resolve(mockDetectData(0)));
+      // Declarado CON parametro para poder inspeccionar el raster que recibe.
+      const detect = vi.fn((_image: unknown) => Promise.resolve(mockDetectData(0)));
       vi.mocked(createWorker).mockResolvedValue(
         mockTesseractWorker(mockRecognizeData(UNA_PALABRA), { detect }),
       );
@@ -854,6 +855,170 @@ describe("OcrEngine — unit tests", () => {
       await expect(engine.processPage(inputConRaster("doc-osd-caido"), ctx)).rejects.toThrow(
         OcrModelMissingError,
       );
+    });
+  });
+
+  // ─── ADR-121: las pasadas rotadas sobre las franjas de margen ───
+
+  describe("franjas de margen rotadas (ADR-121)", () => {
+    const CUERPO = [{ text: "cuerpo", confidence: 95, bbox: { x0: 60, y0: 10, x1: 90, y1: 22 } }];
+    const SELLO = [{ text: "PERITO", confidence: 92, bbox: { x0: 2, y0: 2, x1: 30, y1: 14 } }];
+
+    function inputConRaster(documentId: string): ReturnType<typeof createValidOcrPageInput> {
+      return { ...createValidOcrPageInput(documentId, 0), imageData: createImageData(100, 40) };
+    }
+
+    /**
+     * `recognize` que distingue la pasada derecha de las de franja por el
+     * tamaño del raster: el recorte girado nunca mide lo mismo que la página.
+     */
+    function reconocedor(enFranja: typeof SELLO | []): ReturnType<typeof vi.fn> {
+      let primero: string | null = null;
+      return vi.fn((image: unknown) => {
+        const size =
+          typeof image === "object" && image !== null
+            ? String((image as { width?: number }).width) +
+              "x" +
+              String((image as { height?: number }).height)
+            : "?";
+        primero ??= size;
+        const data =
+          size === primero ? mockRecognizeData(CUERPO) : mockRecognizeData([...enFranja]);
+        return Promise.resolve({ jobId: "j", data });
+      });
+    }
+
+    it("recovers rotated text that the upright pass cannot see", async () => {
+      /*
+       * El buscador de líneas de Tesseract busca líneas de base HORIZONTALES,
+       * así que una corrida vertical no es una línea y no la encuentra. Medido
+       * sobre `qa-stamp.pdf`: de 15 palabras rotadas, la pasada derecha
+       * recupera 2; con las franjas, 15.
+       */
+      const recognize = reconocedor(SELLO);
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(CUERPO), { recognize }),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.processPage(inputConRaster("doc-121-sello"), ctx);
+
+      // 1 derecha + 4 pasadas de franja
+      expect(recognize).toHaveBeenCalledTimes(5);
+      const sello = output.words.filter((w) => w.text === "PERITO");
+      expect(sello.length).toBeGreaterThan(0);
+      // Lo rotado se etiqueta como tal: ADR-067 lo emite aparte y ADR-088 §1 le
+      // corta un batch propio, así que no se mezcla con el cuerpo.
+      expect(sello[0]?.bbox.rotation).toBeDefined();
+    });
+
+    it("adds nothing on a page with no rotated text (ADR-121, el caso normal)", async () => {
+      /*
+       * Es el número que decide si esto puede ir siempre encendido: medido
+       * sobre `text-10p.pdf`, las cuatro pasadas producen 4 candidatas y la
+       * regla las filtra TODAS — 16/16 palabras, 0 agregadas. Lo único que
+       * cambia en un documento sin sellos rotados es el reloj.
+       */
+      const recognize = reconocedor([]);
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(CUERPO), { recognize }),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.processPage(inputConRaster("doc-121-sin-rotado"), ctx);
+
+      expect(output.words).toHaveLength(1);
+      expect(output.words[0]?.text).toBe("cuerpo");
+    });
+
+    it("discards a rotated candidate below the confidence floor", async () => {
+      // Las 15 palabras rotadas reales vuelven con 85-96; la basura que
+      // sobrevive al descarte por solapamiento está en 62 y 76. El piso lleva
+      // los sobrantes de 18 a 6.
+      const recognize = reconocedor([
+        { text: "vTZ", confidence: 40, bbox: { x0: 2, y0: 2, x1: 30, y1: 14 } },
+      ]);
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(CUERPO), { recognize }),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.processPage(inputConRaster("doc-121-basura"), ctx);
+
+      expect(output.words.map((w) => w.text)).toEqual(["cuerpo"]);
+    });
+
+    it("discards a rotated candidate that overlaps a word already read upright", async () => {
+      /*
+       * La otra mitad de la regla de fusión, y la que evita duplicar tinta: una
+       * pasada rotada vuelve a leer lo que la derecha ya leyó, y sale distinto.
+       * Sin este descarte quedan 33 sobrantes sobre `qa-stamp.pdf`; con él, 18.
+       *
+       * La geometría está elegida para que las dos cajas se pisen de verdad.
+       * Raster 100 × 40, franja izquierda = x 0..20. Una palabra en la franja
+       * girada 90 en (2, 2)-(30, 14) vuelve, vía `unrotateBbox(b, 90, 20, 40)`,
+       * a (2, 10) de 12 × 28 en el raster derecho — o sea x 2..14, y 10..38.
+       * La palabra derecha de abajo cae justo encima.
+       */
+      const EN_EL_MARGEN = [
+        { text: "margen", confidence: 95, bbox: { x0: 0, y0: 12, x1: 16, y1: 30 } },
+      ];
+      const ROTADA_ENCIMA = [
+        { text: "ruido", confidence: 92, bbox: { x0: 2, y0: 2, x1: 30, y1: 14 } },
+      ];
+      let primero: string | null = null;
+      const recognize = vi.fn((image: unknown) => {
+        const size =
+          typeof image === "object" && image !== null
+            ? String((image as { width?: number }).width) +
+              "x" +
+              String((image as { height?: number }).height)
+            : "?";
+        primero ??= size;
+        const data =
+          size === primero ? mockRecognizeData(EN_EL_MARGEN) : mockRecognizeData(ROTADA_ENCIMA);
+        return Promise.resolve({ jobId: "j", data });
+      });
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(EN_EL_MARGEN), { recognize }),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.processPage(inputConRaster("doc-121-solapa"), ctx);
+
+      /*
+       * Las CUATRO pasadas devuelven la misma candidata, pero solo las dos de
+       * la franja IZQUIERDA caen sobre la palabra derecha —la franja derecha
+       * mapea a x 80+, lejos—. Las dos que pisan se descartan; las otras dos
+       * aportan tinta que nadie habia leido y entran. Sin la regla entran las
+       * cuatro.
+       */
+      const ruido = output.words.filter((w) => w.text === "ruido");
+      expect(ruido).toHaveLength(2);
+      expect(output.words.some((w) => w.text === "margen")).toBe(true);
+    });
+
+    it("does not fail the page when a margin pass throws", async () => {
+      /*
+       * El texto derecho ya está reconocido; perderlo por un extra sería peor
+       * que no tener el extra.
+       */
+      let llamadas = 0;
+      const recognize = vi.fn(() => {
+        llamadas += 1;
+        if (llamadas === 1) {
+          return Promise.resolve({ jobId: "j", data: mockRecognizeData(CUERPO) });
+        }
+        return Promise.reject(new Error("la franja explotó"));
+      });
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(CUERPO), { recognize }),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.processPage(inputConRaster("doc-121-falla"), ctx);
+
+      expect(output.words.map((w) => w.text)).toEqual(["cuerpo"]);
     });
   });
 

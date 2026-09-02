@@ -16,7 +16,7 @@
 import type { BoundingBox } from "@anonly/shared";
 import { describe, it, expect } from "vitest";
 
-import { rotateImageData, unrotateBbox, type Rotation } from "../worker/kernel.js";
+import { cropImageData, rotateImageData, unrotateBbox, type Rotation } from "../worker/kernel.js";
 
 /**
  * Imagen de `width × height` donde cada píxel lleva su índice en el canal R:
@@ -36,6 +36,49 @@ function redChannel(image: ImageData): number[] {
   for (let i = 0; i < image.width * image.height; i++) out.push(image.data[i * 4] ?? -1);
   return out;
 }
+
+describe("OcrKernel — recorte de franjas (ADR-121)", () => {
+  it("crops a strip of full height, keeping the right columns", () => {
+    // 4 x 2 con un valor distinto por columna en el canal R: asi se puede
+    // afirmar QUE columnas quedaron, no solo cuantas.
+    const data = new Uint8ClampedArray(4 * 2 * 4);
+    for (let y = 0; y < 2; y++) {
+      for (let x = 0; x < 4; x++) data[(y * 4 + x) * 4] = x + 1;
+    }
+    const source: ImageData = { data, width: 4, height: 2, colorSpace: "srgb" };
+
+    const cropped = cropImageData(source, 2, 2);
+
+    expect(cropped.width).toBe(2);
+    expect(cropped.height).toBe(2);
+    expect([cropped.data[0], cropped.data[4], cropped.data[8], cropped.data[12]]).toEqual([
+      3, 4, 3, 4,
+    ]);
+  });
+
+  it("does not throw on a raster whose width is not an integer", () => {
+    /*
+     * `viewport.width` de pdf.js es un float. Un `ImageData` de navegador trae
+     * siempre dimensiones enteras, pero nada en el tipo lo garantiza, y con 4,5
+     * de ancho el `set()` de la ultima fila se pasaba del buffer por medio
+     * pixel: `RangeError: offset is out of bounds`. Como el recorte corria
+     * FUERA del guard de la pasada rotada, eso no costaba la franja sino LA
+     * PAGINA ENTERA — reproducido en `tests/integration/ocr-pdf-fusion.test.ts`,
+     * donde el doble de canvas copia el ancho del viewport tal cual.
+     */
+    const source: ImageData = {
+      data: new Uint8ClampedArray(Math.floor(4.5) * 2 * 4),
+      width: 4.5,
+      height: 2,
+      colorSpace: "srgb",
+    };
+
+    const cropped = cropImageData(source, 3, 2);
+
+    expect(Number.isInteger(cropped.width)).toBe(true);
+    expect(cropped.data.length).toBe(cropped.width * cropped.height * 4);
+  });
+});
 
 describe("OcrKernel — geometría de orientación (ADR-090 §3/§4)", () => {
   it("rotating by 0 returns the very same object", () => {

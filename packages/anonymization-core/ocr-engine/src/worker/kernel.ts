@@ -635,6 +635,74 @@ function toWords(
   });
 }
 
+/*
+ * ADR-121: el texto rotado DENTRO de una hoja derecha —un folio, un sello de
+ * firma, un cargo— no lo lee nadie. El buscador de líneas de Tesseract busca
+ * líneas de base horizontales, y una corrida vertical no es una línea. Y OSD no
+ * ayuda: contesta bien, porque la orientación dominante de esa página ES 0.
+ *
+ * Medido sobre `qa-stamp.pdf` rasterizado: de sus 15 palabras rotadas, la
+ * pasada derecha recupera 2.
+ *
+ * La salida es reconocer también el raster girado. Sobre la PÁGINA COMPLETA
+ * cuesta +133 % de tiempo; sobre FRANJAS DE MARGEN recupera exactamente lo
+ * mismo (15/15) por +70 %, porque el cuerpo no entra en el recorte y por lo
+ * tanto no hay nada que Tesseract lea de costado.
+ *
+ * Lo que esta variante NO ve: un sello rotado en el MEDIO de la página. Es una
+ * apuesta sobre dónde vive el dato —folios y sellos van al margen— y no una
+ * garantía.
+ */
+const MARGIN_STRIP_RATIO = 0.2;
+
+/*
+ * ADR-121 §2: piso de confianza para una palabra de las pasadas rotadas.
+ *
+ * Las 15 palabras rotadas reales vuelven con 85-96; la basura que sobrevive al
+ * descarte por solapamiento está en 62 y 76. Barrido: sin piso quedan 18
+ * sobrantes, con 60 quedan 6, con 80 quedan 4 — y con 90 se pierden 2 palabras
+ * reales. Se elige 60 y no 80 a propósito: el fixture es sintético y más limpio
+ * que un escaneo real, así que el margen va del lado de no perder dato.
+ */
+const ROTATED_MIN_CONFIDENCE = 60;
+
+/**
+ * ADR-121 §1: recorta una franja vertical del raster. Aritmética de píxeles,
+ * sin canvas, por la misma razón que `rotateImageData` (ADR-090 §3): la función
+ * queda pura y testeable en el entorno `node` de Vitest.
+ */
+export function cropImageData(source: ImageData, x0: number, width: number): ImageData {
+  /*
+   * Las dimensiones se truncan a entero antes de indexar. El `ImageData` de un
+   * navegador siempre las trae enteras, pero `viewport.width` de pdf.js NO lo
+   * es: basta un doble de test que lo copie tal cual para que el `set()` de la
+   * última fila se pase del buffer por medio píxel y tire "offset is out of
+   * bounds". Acá eso costaba la página entera, no la franja.
+   */
+  const sourceWidth = Math.trunc(source.width);
+  const height = Math.trunc(source.height);
+  const { data } = source;
+  const startX = Math.max(0, Math.min(sourceWidth, Math.round(x0)));
+  const cropWidth = Math.max(0, Math.min(sourceWidth - startX, Math.round(width)));
+  const out = new Uint8ClampedArray(cropWidth * height * 4);
+  for (let y = 0; y < height; y++) {
+    const from = (y * sourceWidth + startX) * 4;
+    out.set(data.subarray(from, from + cropWidth * 4), y * cropWidth * 4);
+  }
+  return { data: out, width: cropWidth, height, colorSpace: source.colorSpace };
+}
+
+/** Fracción del área del rectángulo MÁS CHICO que comparten dos cajas. */
+function intersectionRatio(a: BoundingBox, b: BoundingBox): number {
+  const x1 = Math.max(a.x, b.x);
+  const y1 = Math.max(a.y, b.y);
+  const x2 = Math.min(a.x + a.width, b.x + b.width);
+  const y2 = Math.min(a.y + a.height, b.y + b.height);
+  if (x2 <= x1 || y2 <= y1) return 0;
+  const smaller = Math.min(a.width * a.height, b.width * b.height);
+  return smaller <= 0 ? 0 : ((x2 - x1) * (y2 - y1)) / smaller;
+}
+
 async function recognizeWithTimeout(
   image: OffscreenCanvas,
   documentId: string,
@@ -680,6 +748,119 @@ async function recognizeWithTimeout(
     if (timeoutId !== undefined) clearTimeout(timeoutId);
     if (onAbort !== undefined) abortSignal.removeEventListener("abort", onAbort);
   }
+}
+
+/**
+ * ADR-121: las pasadas rotadas sobre las franjas de margen.
+ *
+ * Cuatro reconocimientos —franja izquierda y derecha, cada una a 90° y a 270°—
+ * y una regla de fusión de dos partes, las dos medidas:
+ *
+ * 1. **Se descarta la candidata que solape una palabra ya encontrada derecha.**
+ *    El umbral no hay que elegirlo: barrido a 0,01 / 0,3 / 0,5 da exactamente
+ *    18 sobrantes en los tres. Una candidata rotada o pisa mucho una palabra
+ *    derecha o no la pisa nada; no hay zona gris.
+ * 2. **Piso de confianza** (`ROTATED_MIN_CONFIDENCE`), que lleva esos 18 a 6.
+ *
+ * Sobre un documento SIN texto rotado la regla filtra todo: medido sobre
+ * `text-10p.pdf`, las cuatro pasadas producen 4 candidatas y entran **0**. Lo
+ * único que cambia ahí es el reloj.
+ *
+ * Un fallo de cualquiera de las cuatro pasadas **no voltea la página**: se
+ * devuelve lo que se haya podido leer. El texto derecho ya está reconocido y
+ * perderlo por un extra sería peor que no tener el extra. La cancelación sí se
+ * respeta, chequeando entre pasadas.
+ */
+async function recognizeRotatedMargins(params: {
+  readonly upright: ImageData;
+  readonly words: ReadonlyArray<Word>;
+  readonly orientation: Rotation;
+  readonly documentId: string;
+  readonly pageIndex: number;
+  readonly dpi: number;
+  readonly opts: KernelRecognizeOptions;
+}): Promise<Word[]> {
+  const { upright, words, orientation, documentId, pageIndex, dpi, opts } = params;
+  const stripWidth = Math.round(upright.width * MARGIN_STRIP_RATIO);
+  if (stripWidth <= 0) return [];
+
+  const strips: ReadonlyArray<{ readonly x0: number }> = [
+    { x0: 0 },
+    { x0: upright.width - stripWidth },
+  ];
+  const rotations: ReadonlyArray<Rotation> = [90, 270];
+  const found: Word[] = [];
+
+  for (const strip of strips) {
+    // El recorte entra al guard igual que el reconocimiento: la pasada rotada
+    // es un extra, y ninguna forma de fallar suya puede costar el texto
+    // derecho que ya está leído.
+    let cropped: ImageData;
+    try {
+      cropped = cropImageData(upright, strip.x0, stripWidth);
+    } catch {
+      continue;
+    }
+
+    for (const rotation of rotations) {
+      if (opts.abortSignal.aborted) throw new CancelledError(documentId);
+      let data: unknown;
+      try {
+        data = await recognizeWithTimeout(
+          toTesseractImage(rotateImageData(cropped, rotation), documentId, pageIndex),
+          documentId,
+          pageIndex,
+          opts.timeoutMs,
+          opts.abortSignal,
+        );
+      } catch (err: unknown) {
+        if (err instanceof CancelledError) throw err;
+        continue;
+      }
+
+      for (const raw of extractTesseractWords(data)) {
+        if (raw.confidence < ROTATED_MIN_CONFIDENCE) continue;
+        const text = raw.text.normalize("NFC");
+        if (text.trim().length === 0) continue;
+
+        // rotado → franja → enderezado → raster original → puntos de página
+        const inStrip = unrotateBbox(
+          {
+            x: raw.bbox.x0,
+            y: raw.bbox.y0,
+            width: raw.bbox.x1 - raw.bbox.x0,
+            height: raw.bbox.y1 - raw.bbox.y0,
+          },
+          rotation,
+          cropped.width,
+          cropped.height,
+        );
+        const inUpright = { ...inStrip, x: inStrip.x + strip.x0 };
+        const bbox = toPagePoints(
+          unrotateBbox(inUpright, orientation, upright.width, upright.height),
+          dpi,
+        );
+
+        if (words.some((word) => intersectionRatio(word.bbox, bbox) > 0)) continue;
+
+        /*
+         * La rotación que el resto del sistema ve es la del raster ORIGINAL:
+         * la de la franja compuesta con la de la hoja (ADR-090 §4 estampa la
+         * de la hoja sobre el texto derecho, y ésta es la misma cuenta un
+         * escalón más adentro).
+         */
+        const composed = ((rotation + orientation) % 360) as Rotation;
+        found.push({
+          text,
+          bbox: composed === 0 ? bbox : { ...bbox, rotation: composed },
+          pageIndex,
+          confidence: clampConfidence(raw.confidence / 100),
+          source: "ocr" as const,
+        });
+      }
+    }
+  }
+  return found;
 }
 
 export interface KernelRecognizeOptions {
@@ -733,7 +914,18 @@ export async function kernelRecognize(
   );
   const words = toWords(data, pageIndex, dpi, orientation, imageData.width, imageData.height);
   const confidence = clampConfidence(extractPageConfidence(data) / 100);
-  return { words, confidence };
+
+  const rotated = await recognizeRotatedMargins({
+    upright,
+    words,
+    orientation,
+    documentId,
+    pageIndex,
+    dpi,
+    opts,
+  });
+
+  return { words: [...words, ...rotated], confidence };
 }
 
 /**

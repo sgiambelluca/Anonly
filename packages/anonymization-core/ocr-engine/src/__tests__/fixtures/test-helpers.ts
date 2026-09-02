@@ -88,6 +88,13 @@ export function mockEmptyRecognizeData(): Record<string, unknown> {
   return { confidence: 0, blocks: [] };
 }
 
+/** ¿El valor que recibió `recognize` tiene dimensiones legibles? */
+function esRaster(value: unknown): value is { readonly width: number; readonly height: number } {
+  if (typeof value !== "object" || value === null) return false;
+  const { width, height } = value as { width?: unknown; height?: unknown };
+  return typeof width === "number" && typeof height === "number";
+}
+
 export function mockTesseractWorker(
   // `unknown` (no Record<string, unknown>) a propósito: algunos tests de
   // resiliencia (ver unit.test.ts "Malformed tesseract.js response
@@ -106,9 +113,28 @@ export function mockTesseractWorker(
     readonly setParameters?: ReturnType<typeof vi.fn>;
   },
 ): TesseractWorker {
+  /*
+   * ADR-121: el doble devuelve los datos configurados para el PRIMER raster que
+   * ve —la pasada derecha— y VACÍO para cualquier raster de otro tamaño.
+   *
+   * Las pasadas de franja reciben un recorte girado, o sea un raster distinto.
+   * Un doble que devolviera lo mismo para todos estaría modelando que el sello
+   * rotado dice exactamente lo mismo que el cuerpo, que no es un documento que
+   * exista; y peor, haría que cada test de conteo de palabras midiera cinco
+   * veces la misma página. Devolver vacío modela el caso MEDIDO: sobre un
+   * documento sin texto rotado las cuatro pasadas de franja aportan 0 palabras.
+   *
+   * Un test que quiera ejercitar el hallazgo rotado pasa su propio `recognize`.
+   */
+  let primerRaster: string | null = null;
   const recognize =
     overrides?.recognize ??
-    vi.fn(() => Promise.resolve({ jobId: "mock-job", data: recognizeData }));
+    vi.fn((image: unknown) => {
+      const size = esRaster(image) ? image.width + "x" + image.height : "?";
+      primerRaster ??= size;
+      const data = size === primerRaster ? recognizeData : mockEmptyRecognizeData();
+      return Promise.resolve({ jobId: "mock-job", data });
+    });
   const terminate = overrides?.terminate ?? vi.fn(() => Promise.resolve());
   const detect = overrides?.detect ?? vi.fn(() => Promise.resolve(mockDetectData(0)));
   const setParameters = overrides?.setParameters ?? vi.fn(() => Promise.resolve());
