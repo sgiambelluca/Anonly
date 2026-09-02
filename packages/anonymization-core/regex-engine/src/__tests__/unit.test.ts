@@ -311,8 +311,8 @@ describe("RegexEngine — unit tests", () => {
     describe("las ocho trampas medidas — siete que no deben emitir Phone", () => {
       const trampas: ReadonlyArray<{ readonly nombre: string; readonly tokens: string[] }> = [
         {
-          nombre: "expediente (PP-13-00-027653-24/00, ADR-075 §2)",
-          tokens: ["PP-13-00-027653-24/00"],
+          nombre: "expediente (PP-13-00-000000-24/00, ADR-075 §2)",
+          tokens: ["PP-13-00-000000-24/00"],
         },
         { nombre: "DNI con puntos", tokens: ["DNI", "34.567.891"] },
         {
@@ -821,8 +821,8 @@ describe("RegexEngine — unit tests", () => {
   });
 
   describe("Guarda de corrida (ADR-075 §2, §4)", () => {
-    it('"PP-13-00-027653-24/00" emits no Phone occurrence', async () => {
-      const document = makeSinglePageDocument("doc-guard-expediente", ["PP-13-00-027653-24/00"]);
+    it('"PP-13-00-000000-24/00" emits no Phone occurrence', async () => {
+      const document = makeSinglePageDocument("doc-guard-expediente", ["PP-13-00-000000-24/00"]);
       const busEmitSpy = vi.spyOn(ctx.bus, "emit");
       await engine.process({ document }, ctx);
 
@@ -1158,6 +1158,44 @@ describe("RegexEngine — unit tests", () => {
       const { output } = await firstManualOccurrence(["O'Brien", "firmó."], "OBrien");
       expect(output.occurrenceCount).toBe(0);
     });
+
+    /*
+     * ADR-115 §1, caso 22 de §13. El recorte de arriba ya hacía que
+     * `findLiteral` ENCONTRARA la palabra con puntuación pegada; lo que le
+     * faltaba era que las ocurrencias que emite **agruparan juntas**.
+     * `normalizedValue` es la clave de `grouping-engine`, y salía de
+     * `normalizeForComparison`, que no recorta bordes: el mismo apellido daba
+     * `suarez,`, `“suarez,` y `suarez.`, tres claves a las que el pase difuso
+     * no llega (0,857 y 0,750 contra un umbral de 0,88). Medido sobre un
+     * expediente escaneado: un solo apellido agregado a mano abría cuatro
+     * grupos.
+     */
+    it("every occurrence of the same word shares normalizedValue, whatever punctuation is glued on", async () => {
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      const document = makeSinglePageDocument("doc-115-normalizado", [
+        "caratulada",
+        "“SUAREZ,",
+        "contra",
+        "SUAREZ",
+        "y",
+        "Suarez.",
+      ]);
+
+      const output = await engine.findLiteral(
+        { document, value: "SUAREZ", entityType: EntityType.Person },
+        ctx,
+      );
+
+      const occurrences = busEmitSpy.mock.calls
+        .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
+        .map(([, , payload]) => (payload as EntityFound).occurrence);
+
+      expect(output.occurrenceCount).toBe(3);
+      // Los `value` conservan lo impreso — es lo que la UI muestra…
+      expect(occurrences.map((o) => o.value)).toEqual(["“SUAREZ,", "SUAREZ", "Suarez."]);
+      // …y las claves de agrupado son UNA sola.
+      expect(new Set(occurrences.map((o) => o.normalizedValue))).toEqual(new Set(["suarez"]));
+    });
   });
 
   describe("searchText (ADR-061 §8 errata)", () => {
@@ -1233,14 +1271,14 @@ describe("RegexEngine — unit tests", () => {
       await expect(personas(["Autos:", "Rodríguez,", "Marta", "s/", "sucesión"])).resolves.toEqual([
         "Rodríguez, Marta",
       ]);
-      await expect(personas(["Firmado:", "Albarracin,", "Rocio"])).resolves.toEqual([
-        "Albarracin, Rocio",
+      await expect(personas(["Firmado:", "Echeverria,", "Marta"])).resolves.toEqual([
+        "Echeverria, Marta",
       ]);
     });
 
     // Una palabra de cada lado (ADR-092 §1). Un segundo nombre de pila queda
     // fuera del match, y es deliberado: con un cuantificador goloso el patrón
-    // se traga la palabra capitalizada que siga —medido, `"Albarracin, Rocio
+    // se traga la palabra capitalizada que siga —medido, `"Echeverria, Marta
     // Date"` sobre la firma de la pericia— y esa ocurrencia cruza al run
     // siguiente y hace desaparecer al grupo vecino.
     it("captures one given name, and leaves a second one to NER", async () => {
@@ -1262,8 +1300,8 @@ describe("RegexEngine — unit tests", () => {
      */
     it("does not swallow a capitalized word that follows the given name", async () => {
       await expect(
-        personas(["Firmado:", "Albarracin,", "Rocio", "Date:", "07/07/2026"]),
-      ).resolves.toEqual(["Albarracin, Rocio"]);
+        personas(["Firmado:", "Echeverria,", "Marta", "Date:", "07/07/2026"]),
+      ).resolves.toEqual(["Echeverria, Marta"]);
     });
 
     // La compuerta del léxico. Sin ella el patrón matchea media Argentina:

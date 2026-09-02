@@ -8,6 +8,7 @@ import {
   EngineNotInitializedError,
   EventChannel,
   InvalidInputError,
+  normalizeEntityValue,
   normalizeForComparison,
   sharesVerticalBand,
   type BoundingBox,
@@ -652,12 +653,21 @@ function collectPageTextMatches(
  * Agrega a un TextMatch lo que el matcheo no trae: `id`, `source: Manual`,
  * `confidence: 1.0`, el `entityType` del input y `normalizedValue` derivado
  * de `match.text` (ADR-061 §8 errata, punto 3).
+ *
+ * ADR-115 §1: `normalizedValue` sale de `normalizeEntityValue`, no de
+ * `normalizeForComparison`. `match.text` son las **palabras enteras** que la
+ * coincidencia tocó (ADR-089 §3), así que arrastra la puntuación que tuvieran
+ * pegada: buscar el apellido de un expediente devuelve `SUAREZ,` en el sello,
+ * `“SUAREZ,` en la carátula y `Suarez.` al final de una oración. Sin el
+ * recorte de bordes esas tres son tres claves distintas, y el pase difuso de
+ * grouping no las junta —0,857 y 0,750 contra un umbral de 0,88—, así que un
+ * solo apellido agregado a mano abría cuatro grupos.
  */
 function buildManualOccurrence(match: TextMatch, entityType: EntityType): Occurrence {
   return {
     id: crypto.randomUUID(),
     value: match.text,
-    normalizedValue: normalizeForComparison(match.text),
+    normalizedValue: normalizeEntityValue(match.text),
     bbox: match.bbox,
     pageIndex: match.pageIndex,
     source: DetectionSource.Manual,

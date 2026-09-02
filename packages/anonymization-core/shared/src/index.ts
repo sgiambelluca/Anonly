@@ -26,7 +26,7 @@ export { wordsInRect } from "./words-in-rect.js";
 export { sharesVerticalBand } from "./shares-vertical-band.js";
 
 // Normalización de comparación de texto libre — ADR-061 §2 errata
-export { normalizeForComparison } from "./normalize-for-comparison.js";
+export { normalizeForComparison, normalizeEntityValue } from "./normalize-for-comparison.js";
 // ADR-105: la primitiva de contexto vive acá porque regex-engine y ner-engine
 // la necesitan igual y no pueden importarse entre sí (P-1/P-2).
 export { buildOccurrenceContext, OCCURRENCE_CONTEXT_CHARS } from "./occurrence-context.js";
