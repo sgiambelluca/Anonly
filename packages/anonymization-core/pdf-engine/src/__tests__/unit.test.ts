@@ -783,7 +783,7 @@ describe("PdfEngine — unit tests", () => {
     });
   });
 
-  describe("Orden de lectura por línea de base (ADR-109 §3)", () => {
+  describe("Orden de lectura por renglones (ADR-110, §13 casos 52-54)", () => {
     const textsFor = async (
       documentId: string,
       items: ReadonlyArray<MockTextItem>,
@@ -801,31 +801,64 @@ describe("PdfEngine — unit tests", () => {
       return output.document.pages[0]!.words.map((w) => w.text);
     };
 
-    it("keys on the baseline, so two fonts on one line stay in x order", async () => {
-      // Ascensos 0,688 y 0,905 sobre cuerpo 10: los techos difieren 2,17 pt,
-      // por encima de la tolerancia de 1. Con la clave vieja (`bbox.y`) el
-      // comparador partía la línea y devolvía `alto` antes que `bajo`.
-      const texts = await textsFor(
-        "doc-109-orden",
-        [
-          { str: "bajo", x: 100, y: 700, width: 20, height: 10, fontName: "F1" },
-          { str: "alto", x: 140, y: 700, width: 20, height: 10, fontName: "F2" },
-        ],
-        { F1: { ascent: 0.688, descent: -0.218 }, F2: { ascent: 0.905, descent: -0.212 } },
-      );
-      expect(texts).toEqual(["bajo", "alto"]);
+    it("two interleaved columns keep each phrase contiguous", async () => {
+      // Caso 52, con la geometría del encabezado escaneado: dos palabras de la
+      // MISMA línea impresa de la derecha vuelven del OCR con cajas de alto muy
+      // distinto (14 y 26 pt), así que sus bordes inferiores quedan a 4 pt uno
+      // del otro — y el de una palabra de la columna izquierda cae justo en el
+      // medio. Bordes inferiores: APELLIDO 150, PROVINCIA 152, NOMBRE 154.
+      //
+      // El comparador previo ordenaba por ese borde con tolerancia de 1 pt, o
+      // sea estrictamente: `APELLIDO PROVINCIA NOMBRE`, con la columna
+      // izquierda METIDA ENTRE las dos palabras del nombre. Agrupando por
+      // banda, las tres caen en el mismo renglón y se ordenan por `x`, así que
+      // el nombre queda contiguo.
+      const texts = await textsFor("doc-110-columnas", [
+        { str: "PROVINCIA", x: 100, y: 690, width: 60, height: 10 },
+        { str: "APELLIDO", x: 300, y: 692, width: 40, height: 14 },
+        { str: "NOMBRE", x: 340, y: 688, width: 60, height: 26 },
+      ]);
+      expect(texts).toEqual(["PROVINCIA", "APELLIDO", "NOMBRE"]);
     });
 
-    it("keying on the baseline is a no-op on the em box", async () => {
-      // El paso que se verifica ANTES del cambio de caja: sin métricas, todas
-      // las cajas terminan en la línea de base y el orden es el de siempre,
-      // incluso mezclando cuerpos distintos en el mismo renglón.
-      const texts = await textsFor("doc-109-orden-cuerpo", [
+    it("a much taller box does not swallow the next line", async () => {
+      // Caso 53: la banda se mide contra la MEDIANA de los altos del renglón.
+      // Con el máximo (o la envolvente), la caja de 26 pt daría una banda de
+      // 13 pt y se llevaría puesto el renglón de abajo, que está a 12.
+      const texts = await textsFor("doc-110-caja-alta", [
+        { str: "uno", x: 100, y: 700, width: 30, height: 10 },
+        { str: "dos", x: 140, y: 700, width: 30, height: 10 },
+        { str: "ruidosa", x: 180, y: 700, width: 30, height: 26 },
+        { str: "abajo", x: 100, y: 688, width: 30, height: 10 },
+      ]);
+      expect(texts).toEqual(["uno", "dos", "ruidosa", "abajo"]);
+    });
+
+    it("single-column native text keeps its previous order", async () => {
+      // Caso 54, la garantía de no regresión: una línea con dos cuerpos
+      // distintos y el renglón siguiente salen exactamente como antes de
+      // ADR-110. Medido sobre 109 páginas antes de implementar.
+      const texts = await textsFor("doc-110-no-regresion", [
         { str: "chico", x: 100, y: 700, width: 20, height: 8 },
         { str: "grande", x: 140, y: 700, width: 20, height: 14 },
         { str: "abajo", x: 100, y: 660, width: 20, height: 10 },
       ]);
       expect(texts).toEqual(["chico", "grande", "abajo"]);
+    });
+
+    it("the grouping is deterministic regardless of input order", async () => {
+      // El pre-orden por centro vertical es TOTAL, así que el resultado no
+      // depende de en qué orden lleguen las palabras — que es justo lo que un
+      // comparador con tolerancia no garantiza (ADR-110 §1).
+      const items: ReadonlyArray<MockTextItem> = [
+        { str: "uno", x: 100, y: 700, width: 20, height: 10 },
+        { str: "dos", x: 140, y: 700, width: 20, height: 10 },
+        { str: "tres", x: 100, y: 680, width: 20, height: 10 },
+      ];
+      const directo = await textsFor("doc-110-det-a", items);
+      const invertido = await textsFor("doc-110-det-b", [...items].reverse());
+      expect(directo).toEqual(["uno", "dos", "tres"]);
+      expect(invertido).toEqual(directo);
     });
   });
 

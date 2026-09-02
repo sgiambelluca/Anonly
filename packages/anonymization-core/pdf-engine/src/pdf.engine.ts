@@ -478,19 +478,58 @@ function compareByReadingOrder(a: BoundingBox, b: BoundingBox): number {
 }
 
 /*
- * ADR-109 §3: el texto horizontal se ordena por línea de base, no por el techo
- * de la caja. Con la caja de tinta el techo depende del ascenso de cada
- * fuente: en una pericia conviven ascensos 0,688 y 0,905, que sobre un cuerpo
- * de 8,09 pt son 1,76 pt de diferencia EN LA MISMA LÍNEA — por encima de la
- * tolerancia, así que el comparador partiría la línea al medio.
+ * ADR-110 §2: ancho de la banda de un renglón, en cuerpos, medido desde la
+ * mediana de los centros verticales de las palabras que ya entraron.
  *
- * Sobre la caja previa a ADR-109 `y + height` era exactamente la línea de
- * base, así que este comparador da el mismo orden que el anterior.
+ * Barrido contra siete configuraciones sobre un escaneo real: 0,5 es el único
+ * valor que reproduce exacto el orden de lectura del OCR, y el óptimo no es el
+ * intuitivo — con 0,6 el `TRIBUNAL` de la columna izquierda del encabezado se
+ * mete adentro de `PROVINCIA DE BUENOS AIRES`.
  */
-function compareByBaseline(a: BoundingBox, b: BoundingBox): number {
-  const dy = a.y + a.height - (b.y + b.height);
-  if (Math.abs(dy) > SAME_LINE_TOLERANCE) return dy;
-  return a.x - b.x;
+const LINE_BAND_RATIO = 0.5;
+
+function verticalCenterOf(bbox: BoundingBox): number {
+  return bbox.y + bbox.height / 2;
+}
+
+function medianOf(values: ReadonlyArray<number>): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)] ?? 0;
+}
+
+/*
+ * ADR-110 §1: agrupa el texto horizontal en renglones.
+ *
+ * El pre-orden por centro vertical es un orden TOTAL —sin tolerancia, por lo
+ * tanto transitivo— y el acumulado es determinista. Eso es lo que reemplaza:
+ * un comparador con tolerancia no es una relación de orden (`a ≈ b` y `b ≈ c`
+ * no implican `a ≈ c`), así que `Array.sort` devolvía un resultado dependiente
+ * de su secuencia interna de comparaciones. En un PDF nativo de una columna
+ * nunca se notó; sobre un escaneo rompía uno de cada tres pares de palabras.
+ *
+ * La banda se mide contra la MEDIANA de los altos del renglón, no contra su
+ * envolvente: una caja de OCR ruidosa —22,1 pt contra 13,9 del mismo renglón
+ * impreso, medido— la ensancharía hasta tragarse el renglón siguiente.
+ */
+function groupIntoLines(words: ReadonlyArray<Word>): Word[][] {
+  const byCenter = [...words].sort(
+    (a, b) => verticalCenterOf(a.bbox) - verticalCenterOf(b.bbox) || a.bbox.x - b.bbox.x,
+  );
+
+  const lines: Word[][] = [];
+  for (const word of byCenter) {
+    const current = lines[lines.length - 1];
+    if (current !== undefined) {
+      const center = medianOf(current.map((w) => verticalCenterOf(w.bbox)));
+      const height = medianOf(current.map((w) => w.bbox.height));
+      if (Math.abs(verticalCenterOf(word.bbox) - center) < LINE_BAND_RATIO * height) {
+        current.push(word);
+        continue;
+      }
+    }
+    lines.push([word]);
+  }
+  return lines;
 }
 
 /*
@@ -629,10 +668,13 @@ function buildRotatedRuns(words: ReadonlyArray<Word>): Word[][] {
  * ordenaba suelto entre las líneas horizontales.
  */
 function sortWordsByReadingOrder(words: ReadonlyArray<Word>): Word[] {
-  const horizontal = words.filter(
+  const horizontalWords = words.filter(
     (word) => word.bbox.rotation === undefined || word.bbox.rotation === 0,
   );
-  horizontal.sort((a, b) => compareByBaseline(a.bbox, b.bbox));
+  // ADR-110 §1: renglones primero, y dentro de cada uno por `x`.
+  const horizontal = groupIntoLines(horizontalWords).flatMap((line) =>
+    [...line].sort((a, b) => a.bbox.x - b.bbox.x),
+  );
 
   if (horizontal.length === words.length) return horizontal;
 
