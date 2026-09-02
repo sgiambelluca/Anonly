@@ -1070,8 +1070,16 @@ Sobre el mismo renglón impreso, Tesseract devuelve alturas que difieren un 60 %
 
 Más ruido que entra como palabras (`ó`, `IRE`, `ENT`, `5`, `Y`) y `SEGUNDO` leído `SEGUMDO`. Con esa geometría, ningún comparador acierta.
 
-### Lo que haría falta
+### Decidido el 2026-08-30 — ADR-110, con la medición hecha ANTES de implementar
 
-Dejar de ordenar por una clave escalar con tolerancia y **agrupar en renglones primero** (clustering por banda vertical, con el ancho de la banda derivado de la altura de las palabras), y después **segmentar en columnas** dentro de cada banda por huecos horizontales. Es el mismo movimiento que ADR-067 hizo para los runs rotados —emitirlos en una pasada aparte en vez de intercalarlos— llevado al caso general. Pide ADR: cambia `Page.words` y `Page.text` para **todo** documento, así que hay que medir antes que no mueva el orden de los que hoy están bien.
+El humano pidió explícitamente medir si el cambio era mejora o regresión antes de tocar el motor. Se prototipó el orden nuevo en el harness y se midió contra dos referencias distintas:
+
+- **Escaneo**: qué fracción de los pares de palabras consecutivos del recorrido `bloque → párrafo → línea` de Tesseract sobrevive en el orden del motor. Hoy: **47,9 %–67,5 %** según la página. Con el cambio: **96,9 %–100 %**.
+- **Texto nativo**: identidad byte a byte del orden. **109 páginas, 30.886 palabras, idéntico en todas**, fixtures del repo incluidos.
+
+Dos cosas que la medición decidió y que no se habrían acertado a ojo:
+
+1. **El parámetro de la banda no es indiferente**: anclarla a la primera palabra arregla el encabezado y rompe el cuerpo; aflojarla de 0,5 a 0,6 hace lo contrario. Solo *mediana del renglón × 0,5* reproduce el orden de Tesseract exacto.
+2. **La segmentación en columnas se descartó**: barrida de 0,8 a 4,0 cuerpos y también desactivada por completo, los resultados son **idénticos**. Con la banda en 0,5 las dos columnas caen en renglones distintos y el corte nunca se dispara. Se dejó afuera en vez de agregar una constante que no hace nada.
 
 **No bloquea** nada de ADR-108/ADR-109: el texto nativo de una sola columna sale igual que siempre.

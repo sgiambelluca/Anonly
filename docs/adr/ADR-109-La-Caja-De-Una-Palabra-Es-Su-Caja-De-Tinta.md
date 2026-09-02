@@ -1,8 +1,8 @@
-<!-- CONTEXT: scope=adr | dependencias=core/Contracts.md,core/PDF_Engine.md,core/Render_Engine.md,architecture/03_Data_Model.md,adr/ADR-057-Escalera-Abreviaturas-Placeholder-Por-Grupo.md,adr/ADR-058-Repintado-De-Linea-Por-Calibracion.md,adr/ADR-061-Agregado-Manual-De-Entidades.md,adr/ADR-063-Bbox-De-Texto-Rotado.md,adr/ADR-064-Palabras-De-OCR-En-Puntos.md,adr/ADR-066-Texto-De-Anotaciones-Y-Reemplazo-Rotado.md,adr/ADR-067-Orden-De-Lectura-Por-Runs-Rotados.md,adr/ADR-086-El-Detector-De-Degradacion-Mide-El-Ancho.md,adr/ADR-108-El-Avance-De-Un-Espacio-Incluye-El-Word-Spacing.md,roadmap/Post_Hito10.8_Pendientes.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=core/Contracts.md,core/PDF_Engine.md,core/Render_Engine.md,architecture/03_Data_Model.md,adr/ADR-057-Escalera-Abreviaturas-Placeholder-Por-Grupo.md,adr/ADR-058-Repintado-De-Linea-Por-Calibracion.md,adr/ADR-061-Agregado-Manual-De-Entidades.md,adr/ADR-063-Bbox-De-Texto-Rotado.md,adr/ADR-064-Palabras-De-OCR-En-Puntos.md,adr/ADR-066-Texto-De-Anotaciones-Y-Reemplazo-Rotado.md,adr/ADR-067-Orden-De-Lectura-Por-Runs-Rotados.md,adr/ADR-086-El-Detector-De-Degradacion-Mide-El-Ancho.md,adr/ADR-108-El-Avance-De-Un-Espacio-Incluye-El-Word-Spacing.md,adr/ADR-110-El-Renglon-Es-Un-Grupo-No-Una-Coordenada.md,roadmap/Post_Hito10.8_Pendientes.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-109 — La caja de una palabra es su caja de tinta
 
-- **Estado**: Accepted
+- **Estado**: Accepted — **§3 superseded por ADR-110** (el comparador que esa sección reajusta desaparece); §1, §2, §4 y §5 vigentes
 - **Fecha**: 2026-08-30
 - **Decidido por**: El humano, tras ver en el gate visual que —ya corregido el corrimiento horizontal de ADR-108— las colas de `g`, `j`, `p`, `q`, `y`, la `Q` y las comas quedan **fuera** de la caja.
 - **Relacionado con**: ADR-063 §2 (la geometría de la que se deriva), ADR-064 (las palabras de OCR, que ya son cajas de tinta), ADR-057 §5 / ADR-086 (la constante que se recalibra), ADR-067 (el orden de lectura), **ADR-108** (que hay que aplicar primero: sin él el defecto horizontal tapa a éste)
@@ -102,6 +102,8 @@ Si el item no tiene `fontName`, si `styles` no lo tiene, o si las métricas son 
 Alcanza a **2 items de 4266** en el corpus relevado, y al camino de anotaciones de ADR-066 §1, que reconstruye sus runs del operator list y no tiene `styles` que consultar. Las anotaciones conservan su geometría; su oráculo de solapamiento contra el `rect` (ADR-066 §3) queda intacto por construcción.
 
 ### 3. El orden de lectura del texto horizontal compara la línea de base
+
+> **Superseded por ADR-110 (2026-08-30).** Esta sección cambia la **clave** de un comparador con tolerancia; ADR-110 elimina el comparador. La razón: un comparador con tolerancia no es transitivo, así que el orden que devolvía dependía de la secuencia interna de `Array.sort` — sobre un escaneo eso rompe uno de cada tres pares de palabras consecutivos, y **cambiar la clave solo cambia qué palabras rompen**. El texto horizontal pasa a agruparse en renglones y `compareByBaseline` desaparece con el mecanismo. Lo que sigue vale como registro de por qué la clave se movió, no como descripción del motor.
 
 `compareByReadingOrder` pasa a comparar `bbox.y + bbox.height` en vez de `bbox.y`, con la misma tolerancia de 1 pt y el mismo desempate por `x`.
 
