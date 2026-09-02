@@ -1765,6 +1765,109 @@ describe("PdfEngine — unit tests", () => {
       expect(updatedDoc.pages[0]!.text).toContain("Hello");
     });
 
+    /*
+     * ADR-120 — una hoja escaneada TORCIDA se lee en el orden horizontal de su
+     * versión enderezada. Los tests entran por `fuseOcrPage`, que es el camino
+     * real por el que las palabras de OCR llegan a `Page.text`.
+     *
+     * El DISCRIMINADOR (`source === "ocr"`) no lleva test propio a
+     * proposito: ya lo fija el caso 36 de ADR-067 —marca de agua y firma
+     * NATIVAS compartiendo columna, que se ve igual en la geometria—, que
+     * falla si se le saca la condicion. Un test nuevo seria una segunda
+     * copia del mismo guard.
+     */
+    describe("hoja escaneada torcida (ADR-120)", () => {
+      /**
+       * Dos renglones de dos palabras cada uno, en el marco ENDEREZADO, y sus
+       * cajas llevadas al raster torcido con la misma fórmula que
+       * `unrotateBbox` de ocr-engine. El orden de lectura correcto es siempre
+       * `uno dos tres cuatro`.
+       */
+      function hojaTorcida(rotation: 90 | 180 | 270): Word[] {
+        const W = 842;
+        const H = 595;
+        const enDerecho = [
+          { text: "uno", x: 50, y: 100 },
+          { text: "dos", x: 100, y: 100 },
+          { text: "tres", x: 50, y: 140 },
+          { text: "cuatro", x: 100, y: 140 },
+        ];
+        return enDerecho.map(({ text, x, y }) => {
+          const u = { x, y, width: 40, height: 12 };
+          const bbox =
+            rotation === 90
+              ? { x: u.y, y: H - (u.x + u.width), width: u.height, height: u.width }
+              : rotation === 180
+                ? {
+                    x: W - (u.x + u.width),
+                    y: H - (u.y + u.height),
+                    width: u.width,
+                    height: u.height,
+                  }
+                : { x: W - (u.y + u.height), y: u.x, width: u.height, height: u.width };
+          return {
+            text,
+            bbox: { ...bbox, rotation },
+            pageIndex: 0,
+            confidence: 0.9,
+            source: "ocr" as const,
+          };
+        });
+      }
+
+      async function documentoVacio(documentId: string) {
+        vi.mocked(getDocument).mockReturnValue(
+          mockGetDocumentResult(
+            createMockPdfDocument(1, () => ({
+              getViewport: vi.fn(() => ({ width: 595, height: 842 })),
+              getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
+              getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
+            })),
+          ),
+        );
+        await engine.init(ctx);
+        return (await engine.process(createValidInput(documentId), ctx)).document;
+      }
+
+      it.each([90, 180, 270] as const)(
+        "reads a sheet scanned at %i in the order of its uprighted version",
+        async (rotation) => {
+          /*
+           * Sin esto las palabras iban por la rama de runs rotados de ADR-067
+           * —pensada para un sello en un margen, sin agrupado por renglón— y el
+           * orden colapsaba: medido sobre una página real de 268 palabras,
+           * 132-152 de 267 pares consecutivos preservados contra 265/267.
+           *
+           * ALCANCE HONESTO DE ESTE TEST: revertido el mecanismo, fallan 180 y
+           * 270; **90 sigue pasando**. No es un descuido — sobre una grilla
+           * idealizada como ésta la rama de runs acierta el caso de 90, porque
+           * cada renglón enderezado cae en una columna limpia y el orden por
+           * avance coincide. Lo que la rompe en un documento real es el ruido de
+           * las cajas de OCR, que no se puede fabricar en un fixture sin
+           * tunearlo hasta que falle. La evidencia del caso de 90 es la
+           * medición sobre la página real (132/267), no este test; acá vale
+           * como no-regresión.
+           */
+          const doc = await documentoVacio("doc-120-" + String(rotation));
+          const fused = fuseOcrPage(doc, 0, hojaTorcida(rotation));
+          expect(fused.pages[0]!.text).toBe("uno dos tres cuatro");
+        },
+      );
+
+      it("leaves the words themselves untouched: only the ORDER changes", async () => {
+        const doc = await documentoVacio("doc-120-geometria");
+        const palabras = hojaTorcida(90);
+        const fused = fuseOcrPage(doc, 0, palabras);
+        const uno = fused.pages[0]!.words.find((w) => w.text === "uno");
+        const original = palabras.find((w) => w.text === "uno");
+        // La caja que viaja al resto del sistema es la del raster torcido, sin
+        // transformar: el marco enderezado existe solo para ordenar.
+        expect(uno!.bbox.x).toBe(original!.bbox.x);
+        expect(uno!.bbox.y).toBe(original!.bbox.y);
+        expect(uno!.bbox.rotation).toBe(90);
+      });
+    });
+
     it("fuseOcrPage returns a new Document reference (immutable)", async () => {
       vi.mocked(getDocument).mockReturnValue(
         mockGetDocumentResult(

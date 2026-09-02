@@ -771,7 +771,93 @@ function buildRotatedRuns(words: ReadonlyArray<Word>): Word[][] {
  * mismo riesgo que ya existía ANTES del ADR, cuando cada word rotado se
  * ordenaba suelto entre las líneas horizontales.
  */
+/**
+ * ADR-120 §1: la rotación de una HOJA ESCANEADA TORCIDA, o `null`.
+ *
+ * Dos condiciones, y las dos hacen falta:
+ *
+ * 1. **Todas** las palabras comparten una misma rotación no nula. Un sello a
+ *    90° en el margen de una hoja derecha no califica: ahí solo unas pocas la
+ *    llevan, y ése sigue siendo el caso de ADR-067.
+ * 2. **Todas** vienen de OCR. Es el discriminador que separa las dos cosas que
+ *    se ven iguales en la geometría: una hoja escaneada de costado —donde
+ *    ADR-090 §4 le estampa la misma rotación a cada palabra de la página— de
+ *    una página NATIVA cuyo único contenido son runs rotados, que es el caso 36
+ *    de ADR-067 (marca de agua y firma compartiendo columna) y tiene que seguir
+ *    yendo por la rama de runs.
+ *
+ * La condición sobre `source` no es un atajo: el único camino que produce una
+ * página entera con una sola rotación es el enderezado de ADR-090, y ése solo
+ * existe para OCR. Un PDF nativo rota runs, no hojas — la hoja la rota su
+ * `/Rotate`, que pdf.js ya aplica al viewport antes de que estas cajas existan.
+ */
+function scannedSheetRotationOf(words: ReadonlyArray<Word>): Rotation | null {
+  const first = words[0];
+  if (first === undefined) return null;
+  const rotation = first.bbox.rotation;
+  if (rotation === undefined || rotation === 0) return null;
+  return words.every((word) => word.bbox.rotation === rotation && word.source === "ocr")
+    ? rotation
+    : null;
+}
+
+/**
+ * ADR-120 §2: las coordenadas de una página uniformemente rotada, llevadas al
+ * marco ENDEREZADO — la inversa de `unrotateBbox` de `ocr-engine`.
+ *
+ * Se descartan las constantes de traslación (el ancho y el alto del raster, que
+ * esta función no conoce y no necesita): `groupIntoLines` compara **diferencias**
+ * de centro, medianas de alto y huecos horizontales, y ordena por `x`. Todo eso
+ * es invariante ante una traslación, así que un origen desplazado —o negativo—
+ * produce exactamente el mismo orden.
+ */
+function toUprightFrame(bbox: BoundingBox, rotation: Rotation): BoundingBox {
+  if (rotation === 90) {
+    return { x: -(bbox.y + bbox.height), y: bbox.x, width: bbox.height, height: bbox.width };
+  }
+  if (rotation === 180) {
+    return {
+      x: -(bbox.x + bbox.width),
+      y: -(bbox.y + bbox.height),
+      width: bbox.width,
+      height: bbox.height,
+    };
+  }
+  return { x: bbox.y, y: -(bbox.x + bbox.width), width: bbox.height, height: bbox.width };
+}
+
 function sortWordsByReadingOrder(words: ReadonlyArray<Word>): Word[] {
+  /*
+   * ADR-120: una hoja entera escaneada torcida se lee en el orden HORIZONTAL de
+   * su versión enderezada.
+   *
+   * Sin esto, `bbox.rotation` mandaba las palabras por la rama de runs rotados
+   * de ADR-067 —pensada para un sello o un folio en un margen, y sin el
+   * agrupado por renglón de ADR-110/113— y el orden colapsaba: medido sobre una
+   * página de 268 palabras rotada 90/180/270, **132-152 de 267** pares
+   * consecutivos preservados, contra **265/267** ordenando en el marco
+   * enderezado. El texto se reconocía bien y llegaba al detector revuelto, que
+   * es el mismo modo de falla que ADR-110 cerró para el texto derecho.
+   *
+   * Se ordenan copias con la caja transformada y se emiten los `Word`
+   * ORIGINALES: la geometría que viaja al resto del sistema no se toca.
+   */
+  const uniform = scannedSheetRotationOf(words);
+  if (uniform !== null) {
+    const enMarcoDerecho = words.map((word) => ({
+      word,
+      proxy: { ...word, bbox: toUprightFrame(word.bbox, uniform) },
+    }));
+    const proxies = enMarcoDerecho.map((entry) => entry.proxy);
+    const ordenados = groupIntoLines(proxies).flatMap((line) =>
+      [...line].sort((a, b) => a.bbox.x - b.bbox.x),
+    );
+    const originalDe = new Map(enMarcoDerecho.map((entry) => [entry.proxy, entry.word]));
+    // `as Word` es narrowing seguro: cada proxy sale del map de arriba, así que
+    // siempre tiene su original.
+    return ordenados.map((proxy) => originalDe.get(proxy) as Word);
+  }
+
   const horizontalWords = words.filter(
     (word) => word.bbox.rotation === undefined || word.bbox.rotation === 0,
   );
