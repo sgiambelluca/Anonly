@@ -75,7 +75,7 @@ Confirma que **tapa de más, nunca de menos**: no hay fuga, pero destruye conten
 
 > **Resuelto, no diferido.** Este ítem se escribió cuando el orden de lectura parecía requerir tocar tres motores. **ADR-067** lo cerró dentro del propio Hito 10.8, con alcance de **un** motor. Se conserva la entrada para que quien venga no vuelva a plantearlo como pendiente.
 
-El diagnóstico original era correcto: `sortWordsByReadingOrder` ordenaba por `y` asc, lo que **invierte** un run de texto a 90° y lo intercala con los demás; un nombre multi-palabra dentro de una firma vertical quedaba irreconocible para NER (`Albarracin, Rocio de los Milagros` llegaba como `… Milagros … los … de … Rocio … Albarracin,`).
+El diagnóstico original era correcto: `sortWordsByReadingOrder` ordenaba por `y` asc, lo que **invierte** un run de texto a 90° y lo intercala con los demás; un nombre multi-palabra dentro de una firma vertical quedaba irreconocible para NER (`Echeverria, Marta de los Mercedes` llegaba como `… Mercedes … los … de … Marta … Echeverria,`).
 
 Lo que estaba mal era el **costo estimado**. El argumento de ADR-063 §4 —"cambia un invariante compartido con `ocr-engine`"— dejó de valer por dos hechos que no existían cuando se escribió:
 
@@ -96,7 +96,7 @@ Ver `adr/ADR-067-Orden-De-Lectura-Por-Runs-Rotados.md` y `MVP.md` §4, Hito 10.8
 
 ## 4bis. Los patrones numéricos matchean partes del número de expediente · *adoptado: ADR-075 §2, Hito 10.9 PR 13*
 
-Verificado sobre la pericia real: `PP-13-00-027653-24/00` produce una ocurrencia **`[PHONE] "00-027653"`**. Los patrones de `default-ar.ts` no tienen forma de distinguir un tramo de número de causa de un teléfono.
+Verificado sobre la pericia real: `PP-13-00-000000-24/00` produce una ocurrencia **`[PHONE] "00-000000"`**. Los patrones de `default-ar.ts` no tienen forma de distinguir un tramo de número de causa de un teléfono.
 
 Es un falso positivo benigno en cuanto a fuga (tapa de más, no de menos), pero ensucia la lista de entidades y probablemente explique el "aparecen tres fechas" que reportó el humano. Conviene revisarlo junto con el punto 4, que toca la misma tabla y ya requiere ADR.
 
@@ -862,7 +862,7 @@ El segundo es el más grave: junta dos personas distintas en una entidad.
 
 **Arreglo (ADR-103): anclar al contexto.** Una carátula no aparece suelta — viene tras `caratulado:`, `Autos:`, `causa`, `Expediente`, `Firmado:`, `perito`, o seguida de `c/` o `s/`. Medido: **12 de 12** casos correctos, seis legítimos y seis falsos.
 
-> La primera versión del anclaje **perdía las firmas** (`Firmado: Albarracin, Rocio`) y la designación de perito (`perito a López, María`), que son contextos de carátula tanto como el encabezado. Lo detectaron los tests de ADR-092, que los tenían codificados — un caso donde el test que falla estaba encodeando un requisito real, no un detalle a ajustar.
+> La primera versión del anclaje **perdía las firmas** (`Firmado: Echeverria, Marta`) y la designación de perito (`perito a López, María`), que son contextos de carátula tanto como el encabezado. Lo detectaron los tests de ADR-092, que los tenían codificados — un caso donde el test que falla estaba encodeando un requisito real, no un detalle a ajustar.
 
 No lo debilita: ADR-092 creó este patrón porque **en la carátula NER falla** (orden invertido, confianza bajo el umbral). Anclarlo lo devuelve a su único trabajo; en el cuerpo los nombres los agarra NER.
 

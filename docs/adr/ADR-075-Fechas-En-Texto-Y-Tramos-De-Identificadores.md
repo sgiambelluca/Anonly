@@ -26,15 +26,15 @@ Es un **falso negativo**: el dato sale del export sin tapar. No es cobertura inc
 
 ### 2. Un tramo del número de expediente se detecta como teléfono
 
-Verificado sobre la pericia real: `PP-13-00-027653-24/00` produce una ocurrencia **`[PHONE] "00-027653"`**. La cuenta, contra `phone-landline-ar` (`/\b0\d{1,4}[\s-]?\d{6,8}\b/g`):
+Verificado sobre la pericia real: `PP-13-00-000000-24/00` produce una ocurrencia **`[PHONE] "00-000000"`**. La cuenta, contra `phone-landline-ar` (`/\b0\d{1,4}[\s-]?\d{6,8}\b/g`):
 
 ```text
-…-00-027653-…
+…-00-000000-…
    ^ \b entre "-" y "0"
    0        → "0"
    \d{1,4}  → "0"
    [\s-]?   → "-"
-   \d{6,8}  → "027653"
+   \d{6,8}  → "000000"
    \b       → entre "3" y "-"          ⇒ match
 ```
 
@@ -97,8 +97,8 @@ Definición, y es la decisión entera:
 Sobre el caso medido:
 
 ```text
-PP-13-00-027653-24/00
-      └────────┘        match "00-027653"  → sin letras
+PP-13-00-000000-24/00
+      └────────┘        match "00-000000"  → sin letras
 └───────────────────┘   corrida completa   → contiene "PP"   ⇒ descartado
 ```
 
@@ -106,7 +106,7 @@ Las tres piezas de la definición están elegidas y cada una hace falta:
 
 - **"El match no contiene letras"** es la condición de aplicabilidad, y hace que la guarda se aplique sola a los tipos correctos sin ninguna tabla por tipo. `License` (`MP-12345`), `Plate` (`AB 123 CD`), `IBAN` (`AR97…`) y `Email` llevan letras **en el match**, así que la guarda no los mira nunca — que es lo correcto, porque para esos tipos la mezcla de letras y dígitos es el formato. Los que quedan bajo la guarda son exactamente los seis puramente numéricos: DNI, CUIT, Phone (×2), CreditCard y Date. **No hay una lista de tipos en el código**: sale de la forma del match.
 - **Los separadores son `-`, `/` y `.` y ninguno más.** Son los tres que aparecen adentro de un número escrito (`34.567.891`, `20-12345678-9`, `07/07/2026`), así que son los únicos por los que una corrida puede legítimamente continuar. Los que quedan afuera importan más que los que quedan adentro: con `:` afuera, `"Tel:0221-4567890"` corta la corrida en el `:` y el teléfono **se emite**; con `,` afuera, una lista `"0221-4567890,0221-4567891"` emite los dos.
-- **Se compara la corrida, no el vecino inmediato.** `"00-027653"` tiene un guion a cada lado con dígitos del otro lado; lo que lo delata como tramo de otra cosa está tres saltos a la izquierda (`PP`). Una guarda de un carácter de vecindad no lo ve.
+- **Se compara la corrida, no el vecino inmediato.** `"00-000000"` tiene un guion a cada lado con dígitos del otro lado; lo que lo delata como tramo de otra cosa está tres saltos a la izquierda (`PP`). Una guarda de un carácter de vecindad no lo ve.
 
 ### 3. La guarda no reemplaza nada de lo que ya existe
 
@@ -161,7 +161,7 @@ Del patrón nuevo (§1):
 
 De la guarda (§2):
 
-- Unit — **el test que define esta mitad**: `"PP-13-00-027653-24/00"` **no** produce ninguna ocurrencia de `Phone`. Es la cadena literal de la pericia.
+- Unit — **el test que define esta mitad**: `"PP-13-00-000000-24/00"` **no** produce ninguna ocurrencia de `Phone`. Es la cadena literal de la pericia.
 - Unit — **no-regresión, y es la mitad que protege contra la fuga**: un teléfono, un DNI, un CUIT, una tarjeta y una fecha, cada uno solo en su línea y cada uno con puntuación de oración alrededor (`"Tel: 0221-4567890."`), se siguen emitiendo igual que antes de este ADR.
 - Unit: `"Tel:0221-4567890"` (dos puntos, sin espacio) se emite — la corrida corta en el `:` (§2).
 - Unit: `"0221-4567890,0221-4567891"` emite **dos** teléfonos — la coma no extiende la corrida (§2).
@@ -200,7 +200,7 @@ De la guarda (§2):
 
 ## Validación
 
-- Los tests de §6, con los dos que definen el ADR corriendo sobre las cadenas literales de la pericia: `"Quilmes, 07 de julio de 2026"` y `"PP-13-00-027653-24/00"`.
+- Los tests de §6, con los dos que definen el ADR corriendo sobre las cadenas literales de la pericia: `"Quilmes, 07 de julio de 2026"` y `"PP-13-00-000000-24/00"`.
 - La no-regresión de los cinco tipos numéricos con puntuación de oración alrededor es **condición de mergeo**: si un teléfono normal deja de emitirse, la guarda se pasó de largo y este ADR produjo la fuga que vino a evitar.
 - Verificación manual sobre la pericia real: la fecha del encabezado aparece en el árbol, y las ocurrencias `[PHONE]` derivadas del número de expediente desaparecen. Con ADR-073 ya mergeado, es también donde se confirma si el reporte de *"aparecen tres fechas"* era la fusión difusa, el falso positivo, o los dos.
 - Las métricas de `roadmap/MVP.md` §5 para Regex (recall ≥ 90%, precision ≥ 98%) se vuelven a medir sobre el dataset de referencia: este ADR mueve las dos, y en direcciones opuestas por diseño.

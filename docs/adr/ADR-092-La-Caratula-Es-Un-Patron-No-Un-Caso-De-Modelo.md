@@ -41,7 +41,7 @@ Y lo que encuentra:
 ```
 [Pérez, Juan]            ← Expediente caratulado: Pérez, Juan c/ Empresa S.A.
 [López, María]           ← perito a López, María Fernanda, quien acepta
-[Albarracin, Rocio]      ← Firmado: Albarracin, Rocio de los Milagros
+[Echeverria, Marta]      ← Firmado: Echeverria, Marta de los Mercedes
 ```
 
 ### 3. El residuo, y por qué se acepta
@@ -70,7 +70,7 @@ maskFormat:  "XXXXX XXXXX"   (el mismo que MASK_FORMAT_BY_TYPE[Person])
 **Una palabra de cada lado**, y las dos razones son distintas:
 
 - **El apellido**, porque sin la coma como ancla un apellido compuesto no se distingue de un topónimo (`"Mar del Plata, Buenos Aires"`).
-- **El nombre**, y esto lo obligó una regresión medida, no una previsión. La primera redacción permitía uno o más (`(?:\s+\p{Lu}\p{Ll}+)*`) para capturar `"López, María Fernanda"`. Un cuantificador goloso se traga **cualquier** palabra capitalizada que siga: sobre la firma de la pericia real (`tests/integration/annotation-signature.test.ts`, cuyo `Page.text` es `"Albarracin, Rocio Date: 07/07/2026"`) el patrón matcheaba `"Albarracin, Rocio Date"`. Esa ocurrencia **cruza al run siguiente**, su envolvente se estira sobre los dos, y Grouping descarta por solapamiento el grupo de **Fecha**. Es exactamente el mecanismo que ADR-088 §1 tuvo que cerrar en NER: una entidad que abarca dos runs no solo tapa de más — hace **desaparecer** a su vecina.
+- **El nombre**, y esto lo obligó una regresión medida, no una previsión. La primera redacción permitía uno o más (`(?:\s+\p{Lu}\p{Ll}+)*`) para capturar `"López, María Fernanda"`. Un cuantificador goloso se traga **cualquier** palabra capitalizada que siga: sobre la firma de la pericia real (`tests/integration/annotation-signature.test.ts`, cuyo `Page.text` es `"Echeverria, Marta Date: 07/07/2026"`) el patrón matcheaba `"Echeverria, Marta Date"`. Esa ocurrencia **cruza al run siguiente**, su envolvente se estira sobre los dos, y Grouping descarta por solapamiento el grupo de **Fecha**. Es exactamente el mecanismo que ADR-088 §1 tuvo que cerrar en NER: una entidad que abarca dos runs no solo tapa de más — hace **desaparecer** a su vecina.
 
 El costo es que un segundo nombre de pila queda fuera del match: `"López, María Fernanda"` produce `"López, María"`. Se acepta. El apellido y el primer nombre son la parte identificatoria, y un nombre suelto es territorio del NER — mientras que el modo de falla que evita puede borrar una entidad entera de otro tipo.
 
@@ -96,7 +96,7 @@ Con una diferencia que conviene decir: contra una ocurrencia de **NER** la unió
 | Un patrón con léxico | Que `ner-engine` fusione dos spans `PER` adyacentes separados por coma | El modelo los ve, así que es tentador. Pero la confianza del span fusionado es el promedio de los dos: 0,646, **debajo del umbral igual**. No arregla nada. |
 | Una palabra de cada lado (§1) | Permitir apellido compuesto (`Palabra Palabra, Nombre`) | Sin la coma como ancla, un apellido compuesto es indistinguible de un topónimo: `"Mar del Plata, Buenos Aires"` pasaría a matchear. |
 | Una palabra de cada lado (§1) | Permitir varios nombres de pila (`Apellido, Nombre Nombre`) | **Era la primera redacción, y una regresión medida la revirtió**: el cuantificador goloso se traga la palabra capitalizada que siga, la ocurrencia cruza al run vecino y Grouping descarta por solapamiento el grupo de al lado. Ver §1. |
-| Una palabra de cada lado (§1) | Varios nombres, pero exigiendo que **todos** estén en el léxico | El regex captura goloso y el `checksum` corre **después**: sobre `"Rocio Date"` rechazaría el match **entero**, perdiendo la carátula en vez de acortarla. El motor no puede hacer backtracking sobre un callback. |
+| Una palabra de cada lado (§1) | Varios nombres, pero exigiendo que **todos** estén en el léxico | El regex captura goloso y el `checksum` corre **después**: sobre `"Marta Date"` rechazaría el match **entero**, perdiendo la carátula en vez de acortarla. El motor no puede hacer backtracking sobre un callback. |
 | Aceptar el residuo (§3) | Lookbehind negativo sobre el apellido | Medido: gana `"Buenos Aires, Argentina"` y pierde `"el Doctor Pérez, Juan"`. Cambia un falso positivo por un falso negativo, y en esta herramienta un falso negativo es una fuga. |
 | Invertir en el `normalizer` (§2) | Dejar `normalizedValue` como `"perez, juan"` | El grupo quedaría separado del `"Juan Pérez"` del cuerpo: mismo nombre, dos tokens en el documento anonimizado. La inversión es lo que los une. |
 
@@ -124,7 +124,7 @@ Con una diferencia que conviene decir: contra una ocurrencia de **NER** la unió
 - Test unit: `"Pérez, Juan"` y `"Juan Pérez"` en el mismo documento terminan en **un solo grupo**.
 - Test unit: `"Buenos Aires, Argentina"` **sí** emite — el residuo aceptado, en un test, para que sea conocido y no una sorpresa (mismo criterio que `"Tel.0221-4567890"` de ADR-075 §5).
 - Test unit: `"López, María Fernanda"` produce `"López, María"` — la limitación de §1, afirmada para que sea deliberada y no una sorpresa.
-- Test unit: `"Albarracin, Rocio Date: 07/07/2026"` produce **solo** `"Albarracin, Rocio"` — la regresión concreta que fijó el límite.
+- Test unit: `"Echeverria, Marta Date: 07/07/2026"` produce **solo** `"Echeverria, Marta"` — la regresión concreta que fijó el límite.
 - Test de integración (`annotation-signature.test.ts`, ya existente): la firma sigue produciendo grupo de Persona **y** de Fecha. Es el test que destapó el problema.
 - Test de integración: el `it.fails` de §23c en `tests/integration/qa-stamp-detection.test.ts` pasa a `it`.
 - Cobertura ≥ 85% líneas en `regex-engine`.

@@ -952,7 +952,7 @@ function buildTrapDocs(): ReadonlyArray<ReferenceDocSpec> {
       pages: [
         page((b) => {
           b.text(
-            "En el expediente PP-13-00-027653-24/00 se solicita el traslado de las " +
+            "En el expediente PP-13-00-000000-24/00 se solicita el traslado de las " +
               "actuaciones. La audiencia se fijó en la oficina de Mar del Plata, Buenos " +
               "Aires, a la espera de nueva notificación.",
           );

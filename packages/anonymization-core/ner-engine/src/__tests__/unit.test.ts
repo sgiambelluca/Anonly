@@ -110,13 +110,13 @@ describe("NerEngine — unit tests", () => {
     asPipelineMock(pipeline).mockResolvedValue(
       mockTokenClassificationPipeline(() =>
         Promise.resolve([
-          nerToken("B-PER", "Albarracin,", 0.9, 0),
-          nerToken("I-PER", "Rocio", 0.9, 1),
+          nerToken("B-PER", "Echeverria,", 0.9, 0),
+          nerToken("I-PER", "Marta", 0.9, 1),
         ]),
       ),
     );
     await engine.init(ctx);
-    const base = makeNerPageInput("doc-rot", 0, ["Albarracin,", "Rocio", "firmo"]);
+    const base = makeNerPageInput("doc-rot", 0, ["Echeverria,", "Marta", "firmo"]);
     const input = {
       ...base,
       words: base.words.map((w) => ({ ...w, bbox: { ...w.bbox, rotation: 90 as const } })),
@@ -354,14 +354,14 @@ describe("NerEngine — unit tests", () => {
       asPipelineMock(pipeline).mockResolvedValue(
         mockTokenClassificationPipeline(() =>
           Promise.resolve([
-            nerToken("B-PER", "Albarracin,", 0.9, 0),
-            nerToken("I-PER", "Rocio", 0.9, 1),
-            nerToken("I-PER", "Milagros", 0.9, 2),
+            nerToken("B-PER", "Echeverria,", 0.9, 0),
+            nerToken("I-PER", "Marta", 0.9, 1),
+            nerToken("I-PER", "Mercedes", 0.9, 2),
           ]),
         ),
       );
       await engine.init(ctx);
-      const base = makeNerPageInput("doc-three-lines", 0, ["Albarracin,", "Rocio", "Milagros"]);
+      const base = makeNerPageInput("doc-three-lines", 0, ["Echeverria,", "Marta", "Mercedes"]);
       const input = {
         ...base,
         words: base.words.map((w, i) => ({ ...w, bbox: { ...w.bbox, y: 100 + i * 30 } })),
@@ -379,13 +379,13 @@ describe("NerEngine — unit tests", () => {
       asPipelineMock(pipeline).mockResolvedValue(
         mockTokenClassificationPipeline(() =>
           Promise.resolve([
-            nerToken("B-PER", "Albarracin,", 0.9, 0),
-            nerToken("I-PER", "Rocio", 0.9, 1),
+            nerToken("B-PER", "Echeverria,", 0.9, 0),
+            nerToken("I-PER", "Marta", 0.9, 1),
           ]),
         ),
       );
       await engine.init(ctx);
-      const base = makeNerPageInput("doc-rotated-two-lines", 0, ["Albarracin,", "Rocio", "firmo"]);
+      const base = makeNerPageInput("doc-rotated-two-lines", 0, ["Echeverria,", "Marta", "firmo"]);
       const input = {
         ...base,
         words: base.words.map((w, i) => ({

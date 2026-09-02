@@ -421,8 +421,8 @@ export const DEFAULT_PATTERNS_AR: ReadonlyArray<RegexPattern> = [
      * - El nombre, porque un cuantificador goloso se traga cualquier palabra
      *   capitalizada que siga. Medido sobre la firma de la pericia
      *   (`tests/integration/annotation-signature.test.ts`): con `(?:\s+…)*`
-     *   el patrón matchea `"Albarracin, Rocio Date"` sobre el texto
-     *   `"Albarracin, Rocio Date: 07/07/2026"` — la ocurrencia cruza al run
+     *   el patrón matchea `"Echeverria, Marta Date"` sobre el texto
+     *   `"Echeverria, Marta Date: 07/07/2026"` — la ocurrencia cruza al run
      *   siguiente, su envolvente se estira sobre los dos, y Grouping descarta
      *   por solapamiento el grupo de **Fecha**. Es el mismo mecanismo que
      *   ADR-088 §1 tuvo que cerrar en NER: una entidad que abarca dos runs no
@@ -458,7 +458,7 @@ export const DEFAULT_PATTERNS_AR: ReadonlyArray<RegexPattern> = [
      *
      * Las marcas incluyen las de **firma** y **perito**, y no por completitud:
      * la forma invertida aparece igual en la firma de una pericia
-     * (`Firmado: Albarracin, Rocio`) y al designar un profesional
+     * (`Firmado: Echeverria, Marta`) y al designar un profesional
      * (`perito a López, María`), que son contextos de carátula tanto como el
      * encabezado. La primera versión de este anclaje las perdía — lo
      * detectaron los tests de ADR-092, que las tenían codificadas.

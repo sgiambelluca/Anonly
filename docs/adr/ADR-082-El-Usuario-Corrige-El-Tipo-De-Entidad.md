@@ -17,7 +17,7 @@
 Verificado sobre la pericia real y sobre `text-10p.pdf`: los dos detectores confunden tipos con regularidad.
 
 - NER etiqueta `"Fiscalía de Quilmes"` como `Address` cuando es una `Organization` (y al revés: `"Belgrano 1234"` puede salir `Organization`).
-- Los patrones numéricos de `default-ar.ts` no distinguen un tramo de número de expediente de un teléfono — `PP-13-00-027653-24/00` produce una ocurrencia `Phone` (documentado en `Post_Hito10.8_Pendientes.md` §4bis).
+- Los patrones numéricos de `default-ar.ts` no distinguen un tramo de número de expediente de un teléfono — `PP-13-00-000000-24/00` produce una ocurrencia `Phone` (documentado en `Post_Hito10.8_Pendientes.md` §4bis).
 - Un `Custom` de una regla del usuario puede solaparse con un tipo nativo.
 
 Hoy el usuario ve el error en el árbol de entidades y **no tiene ninguna acción disponible**. `GroupUpdateRequested.patch` (`shared/src/events.ts:290`) es:

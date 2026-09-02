@@ -75,7 +75,7 @@ Cualquiera de las dos alcanza: `Autos: Pérez, Juan` (marca antes) y `Pérez, Ju
 | caso | hoy | anclado |
 |---|---|---|
 | `Expediente caratulado: Pérez, Juan c/ Empresa` | ✓ | **✓** |
-| `Autos: Albarracin, Rocio s/ lesiones` | ✓ | **✓** |
+| `Autos: Echeverria, Marta s/ lesiones` | ✓ | **✓** |
 | `en la causa Gómez, María c/ Estado` | ✓ | **✓** |
 | `Finalmente, Alejandro relata que` | ✗ falso | **—** |
 | `Asimismo, Carlos manifestó` | ✗ falso | **—** |

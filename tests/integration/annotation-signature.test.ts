@@ -66,7 +66,7 @@ const SIGNATURE: MockSignatureAnnotation = {
   innerTransform: [0, 1, -1, 0, 50, 0],
   fontSize: 8,
   runs: [
-    { offset: 0, text: "Albarracin, Rocio" },
+    { offset: 0, text: "Echeverria, Marta" },
     { offset: 20, text: "Date: 07/07/2026" },
   ],
 };
@@ -118,16 +118,16 @@ describe("integración — anotación de firma: Persona + Fecha con rotation has
     );
 
     // ADR-067: los dos runs salen contiguos y en orden de avance, así que
-    // `Page.text` es "Albarracin, Rocio Date: 07/07/2026". Antes del ADR el
+    // `Page.text` es "Echeverria, Marta Date: 07/07/2026". Antes del ADR el
     // nombre llegaba disperso y NER no producía ninguna entidad.
     asPipelineMock(pipeline).mockResolvedValue(
       mockTokenClassificationPipeline((text) => {
-        const apellido = text.indexOf("Albarracin,");
-        const nombre = text.indexOf("Rocio");
+        const apellido = text.indexOf("Echeverria,");
+        const nombre = text.indexOf("Marta");
         if (apellido < 0 || nombre < 0) return Promise.resolve([]);
         return Promise.resolve([
-          { entity: "B-PER", score: 0.95, index: apellido, word: "Albarracin," },
-          { entity: "I-PER", score: 0.93, index: nombre, word: "Rocio" },
+          { entity: "B-PER", score: 0.95, index: apellido, word: "Echeverria," },
+          { entity: "I-PER", score: 0.93, index: nombre, word: "Marta" },
         ]);
       }),
     );

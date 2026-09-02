@@ -230,7 +230,7 @@ describe("generate.ts — dataset de referencia (tests/fixtures/reference/)", ()
       .join(" | ");
 
     // Número de expediente (ADR-075 §2 los descarta a propósito).
-    expect(trapText).toMatch(/PP-13-00-027653-24\/00|IPP-08-00-045210-25\/00/);
+    expect(trapText).toMatch(/PP-13-00-000000-24\/00|IPP-08-00-045210-25\/00/);
     // Código postal.
     expect(trapText).toContain("C1425AAB");
     // Fecha fuera de rango (ADR-075 §1: "45 de julio de 2026" no valida el rango).
