@@ -171,8 +171,8 @@ describe("PdfEngine — unit tests", () => {
       // Antes de ADR-067 salían intercaladas y cada una invertida.
       const text = await pageTextOf("doc-067-firma", [
         ...runAt90(100, 8, 700, [
-          { str: "Albarracin,", advance: 39 },
-          { str: "Rocio", advance: 18 },
+          { str: "Echeverria,", advance: 39 },
+          { str: "Marta", advance: 18 },
           { str: "de", advance: 7 },
           { str: "los", advance: 11 },
           { str: "Milagros", advance: 28 },
@@ -182,7 +182,7 @@ describe("PdfEngine — unit tests", () => {
           { str: "07/07/2026", advance: 38 },
         ]),
       ]);
-      expect(text).toContain("Albarracin, Rocio de los Milagros");
+      expect(text).toContain("Echeverria, Marta de los Milagros");
       expect(text).toContain("Date: 07/07/2026");
     });
 
@@ -284,8 +284,8 @@ describe("PdfEngine — unit tests", () => {
             createMockPage(
               0,
               runAt90(100, 8, 700, [
-                { str: "Albarracin,", advance: 39 },
-                { str: "Rocio", advance: 18 },
+                { str: "Echeverria,", advance: 39 },
+                { str: "Marta", advance: 18 },
               ]),
             ),
           ),
@@ -304,7 +304,7 @@ describe("PdfEngine — unit tests", () => {
         },
       ]);
 
-      expect(fused.pages[0]!.text).toContain("Albarracin, Rocio");
+      expect(fused.pages[0]!.text).toContain("Echeverria, Marta");
       expect(fused.pages[0]!.text).toContain("escaneado");
     });
   });
@@ -859,6 +859,79 @@ describe("PdfEngine — unit tests", () => {
       const invertido = await textsFor("doc-110-det-b", [...items].reverse());
       expect(directo).toEqual(["uno", "dos", "tres"]);
       expect(invertido).toEqual(directo);
+    });
+
+    describe("columnas del sello (ADR-113, §13 casos 55-57)", () => {
+      /*
+       * La geometría REAL del encabezado de un fallo escaneado, medida sobre
+       * la página 2 con PSM 11 y pasada a coordenadas PDF (`y` desde abajo,
+       * página de 842): dos columnas cuyos renglones se solapan en vertical y
+       * cuyos cuerpos difieren (8,6 pt a la izquierda contra 6,0 a la
+       * derecha), separadas por un hueco horizontal de 113 pt.
+       *
+       * Con la banda sola, el acumulado se lleva `ARTURO RECURSO DE` al
+       * renglón de la izquierda y deja `SUAREZ, BARTOLOME S/` en otro: el
+       * texto que ve el detector dice `PROVINCIA DE BUENOS AIRES ARTURO
+       * RECURSO DE SUAREZ, BARTOLOME S/`, y de ahí sale una `Person` que se
+       * llama "ARTURO RECURSO DE SUAREZ" mientras el apellido real queda sin
+       * tapar.
+       */
+      const SELLO: ReadonlyArray<MockTextItem> = [
+        { str: "PROVINCIA", x: 50.2, y: 732.5, width: 68, height: 8.9 },
+        { str: "DE", x: 122.2, y: 733.2, width: 16, height: 8.2 },
+        { str: "BUENOS", x: 141.8, y: 733.3, width: 48, height: 8.6 },
+        { str: "AIRES", x: 193.7, y: 733.6, width: 36, height: 8.6 },
+        { str: "SUAREZ,", x: 257.0, y: 728.2, width: 38, height: 7.2 },
+        { str: "BARTOLOME", x: 295.2, y: 729.2, width: 44, height: 6.5 },
+        { str: "ARTURO", x: 343.2, y: 729.7, width: 30, height: 6.0 },
+        { str: "S/", x: 373.7, y: 729.7, width: 10, height: 6.0 },
+        { str: "RECURSO", x: 383.8, y: 730.0, width: 40, height: 6.2 },
+        { str: "DE", x: 425.5, y: 730.4, width: 12, height: 5.8 },
+      ];
+
+      it("a column gap keeps the two columns of a stamp apart", async () => {
+        // Caso 55: cada columna sale entera y en su orden, con el nombre del
+        // imputado contiguo — que es lo que `mapSpanToWords` necesita para no
+        // fabricar una entidad que cruza las dos columnas.
+        const texts = await textsFor("doc-113-sello", SELLO);
+        expect(texts).toEqual([
+          "PROVINCIA",
+          "DE",
+          "BUENOS",
+          "AIRES",
+          "SUAREZ,",
+          "BARTOLOME",
+          "ARTURO",
+          "S/",
+          "RECURSO",
+          "DE",
+        ]);
+      });
+
+      it("a line the accumulator split in two is put back together", async () => {
+        /*
+         * Caso 56: cortar por hueco separa las columnas pero no repara la
+         * línea de la derecha, que el acumulado había partido. Los dos trozos
+         * se reconocen por estar PEGADOS en x —`BARTOLOME` termina en 339,2 y
+         * `ARTURO` empieza en 343,2— y no por solaparse: una versión previa
+         * fusionaba por solapamiento y dejaba `SUAREZ, BARTOLOME` afuera.
+         */
+        const texts = await textsFor("doc-113-reunir", SELLO);
+        const derecha = texts.slice(4);
+        expect(derecha.join(" ")).toBe("SUAREZ, BARTOLOME ARTURO S/ RECURSO DE");
+      });
+
+      it("two words separated by a wide gap on the same line stay in reading order", async () => {
+        // Caso 57, la no regresión: un renglón cortado por hueco se emite en
+        // orden de izquierda a derecha igual, porque los trozos conservan la
+        // posición del renglón que los contenía.
+        const texts = await textsFor("doc-113-hueco-simple", [
+          { str: "izquierda", x: 60, y: 700, width: 40, height: 10 },
+          { str: "derecha", x: 400, y: 700, width: 40, height: 10 },
+          { str: "abajo", x: 60, y: 680, width: 40, height: 10 },
+        ]);
+        expect(texts).toEqual(["izquierda", "derecha", "abajo"]);
+      });
     });
   });
 

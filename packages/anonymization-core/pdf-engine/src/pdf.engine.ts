@@ -488,8 +488,28 @@ function compareByReadingOrder(a: BoundingBox, b: BoundingBox): number {
  */
 const LINE_BAND_RATIO = 0.5;
 
+/*
+ * ADR-113 §1: hueco horizontal que separa una COLUMNA, en cuerpos del
+ * renglón. Medido sobre el sello de un fallo escaneado, los huecos entre
+ * palabras de una misma frase van de 2,4 a 13 pt mientras el que separa las
+ * dos columnas del encabezado es de **113,5 pt**, con renglones de ~8 pt de
+ * alto. La decisión queda a un orden de magnitud del umbral, al revés que la
+ * banda vertical, que en ese mismo encabezado se decide por centésimas.
+ *
+ * Barrido sobre las 19 páginas del escaneo: de 2 a 10 cuerpos el sello sale
+ * entero; 2 y 3 son la meseta con el mejor orden de lectura del cuerpo.
+ */
+const COLUMN_GAP_RATIO = 3;
+
 function verticalCenterOf(bbox: BoundingBox): number {
   return bbox.y + bbox.height / 2;
+}
+
+/** Separación horizontal entre dos cajas; `0` si se solapan en `x`. */
+function horizontalGapBetween(a: BoundingBox, b: BoundingBox): number {
+  if (a.x >= b.x + b.width) return a.x - (b.x + b.width);
+  if (b.x >= a.x + a.width) return b.x - (a.x + a.width);
+  return 0;
 }
 
 function medianOf(values: ReadonlyArray<number>): number {
@@ -529,7 +549,91 @@ function groupIntoLines(words: ReadonlyArray<Word>): Word[][] {
     }
     lines.push([word]);
   }
-  return lines;
+  return mergeAdjacentFragments(splitLinesAtColumnGaps(lines));
+}
+
+/*
+ * ADR-113 §1 — un renglón se corta donde hay una columna.
+ *
+ * El acumulado de arriba solo mira el ÚLTIMO renglón abierto y su banda sale
+ * de la mediana de altos de ese renglón. Sobre un encabezado de dos columnas
+ * con cuerpos distintos —el sello de un expediente: `PROVINCIA DE BUENOS
+ * AIRES` en 8,6 pt a la izquierda, la carátula en 6,0 pt a la derecha— la
+ * banda de la columna alta llega a la columna baja y se traga sus primeras
+ * palabras. Medido: la caja que decide queda a 4,08 pt de una banda de 4,32,
+ * y la siguiente a 4,32 exactos, o sea que **quién entra lo decide el
+ * redondeo binario** — de ahí que fallara en unas páginas sí y en otras no.
+ *
+ * El hueco horizontal, en cambio, no es ambiguo. Se corta el renglón donde
+ * supera `COLUMN_GAP_RATIO` cuerpos.
+ */
+function splitLinesAtColumnGaps(lines: ReadonlyArray<ReadonlyArray<Word>>): Word[][] {
+  const pieces: Word[][] = [];
+  for (const line of lines) {
+    const byX = [...line].sort((a, b) => a.bbox.x - b.bbox.x);
+    const height = medianOf(byX.map((w) => w.bbox.height));
+    let piece: Word[] = [];
+    let rightEdge = Number.NEGATIVE_INFINITY;
+    for (const word of byX) {
+      if (piece.length > 0 && word.bbox.x - rightEdge > COLUMN_GAP_RATIO * height) {
+        pieces.push(piece);
+        piece = [];
+      }
+      piece.push(word);
+      rightEdge = Math.max(rightEdge, word.bbox.x + word.bbox.width);
+    }
+    if (piece.length > 0) pieces.push(piece);
+  }
+  return pieces;
+}
+
+/*
+ * ADR-113 §2 — y se vuelve a unir lo que el acumulado partió.
+ *
+ * Cortar por hueco separa las columnas pero no repara el otro lado del mismo
+ * defecto: cuando la banda de la columna izquierda se llevó las primeras
+ * palabras de la derecha, el resto de esa línea impresa quedó en un renglón
+ * aparte. Dos trozos son la misma línea impresa si están **pegados en x** (un
+ * espacio de distancia, no una columna) y comparten banda. Sobre el caso
+ * medido: `SUAREZ, BARTOLOME` termina en 338,5 y `ARTURO S/ RECURSO DE`
+ * empieza en 343,2 — 4,7 pt —, mientras `PROVINCIA DE BUENOS AIRES` termina
+ * 113,5 pt antes y no se une con ninguno de los dos.
+ *
+ * La adyacencia es lo que hace la diferencia: una versión previa fusionaba
+ * por SOLAPAMIENTO en `x` y no arreglaba nada, porque los dos trozos de la
+ * carátula no se solapan — se tocan.
+ *
+ * El trozo se fusiona en el PRIMERO que le calza, así que el renglón unido se
+ * emite en la posición del trozo más temprano en el orden vertical.
+ */
+function mergeAdjacentFragments(pieces: ReadonlyArray<ReadonlyArray<Word>>): Word[][] {
+  const merged: Word[][] = [];
+  for (const piece of pieces) {
+    const center = medianOf(piece.map((w) => verticalCenterOf(w.bbox)));
+    const height = medianOf(piece.map((w) => w.bbox.height));
+    const left = Math.min(...piece.map((w) => w.bbox.x));
+    const right = Math.max(...piece.map((w) => w.bbox.x + w.bbox.width));
+
+    const target = merged.find((candidate) => {
+      const otherCenter = medianOf(candidate.map((w) => verticalCenterOf(w.bbox)));
+      const otherHeight = medianOf(candidate.map((w) => w.bbox.height));
+      const otherLeft = Math.min(...candidate.map((w) => w.bbox.x));
+      const otherRight = Math.max(...candidate.map((w) => w.bbox.x + w.bbox.width));
+      const reference = Math.min(height, otherHeight);
+      const gap = horizontalGapBetween(
+        { x: left, y: 0, width: right - left, height: 0 },
+        { x: otherLeft, y: 0, width: otherRight - otherLeft, height: 0 },
+      );
+      return (
+        gap < COLUMN_GAP_RATIO * reference &&
+        Math.abs(center - otherCenter) < LINE_BAND_RATIO * reference
+      );
+    });
+
+    if (target === undefined) merged.push([...piece]);
+    else target.push(...piece);
+  }
+  return merged;
 }
 
 /*
