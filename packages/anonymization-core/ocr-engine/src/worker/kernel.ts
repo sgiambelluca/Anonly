@@ -29,7 +29,7 @@
  * mensaje de control nuevo.
  */
 import { CancelledError, type BoundingBox, type OcrPagePayload, type Word } from "@anonly/shared";
-import { createWorker } from "tesseract.js";
+import { createWorker, PSM } from "tesseract.js";
 
 import { OcrModelMissingError, OcrPageFailedError, OcrTimeoutError } from "../ocr.errors.js";
 
@@ -115,11 +115,38 @@ const OSD_LANGUAGE = "osd";
  */
 const MIN_ORIENTATION_CONFIDENCE = 1;
 
+/*
+ * ADR-112 §1: modo de segmentación de página, fijo.
+ *
+ * Con el default (`AUTO`) el análisis de layout de Tesseract **fusiona en una
+ * sola caja de línea** dos renglones impresos muy juntos, y devuelve basura
+ * para la mitad izquierda de la fusión. Sobre el sello del encabezado de un
+ * fallo escaneado —`IPP …` justo encima de `APELLIDO, NOMBRE S/ RECURSO DE`—
+ * eso hace que el apellido del imputado se lea `casino,`, `cuerno,`, `sro,`
+ * según la página, y un valor mal leído no lo detecta nadie: el dato queda a
+ * la vista sin dejar rastro. Es también la explicación de las cajas con 60 %
+ * de diferencia de alto que ADR-110 §5 reportó sin explicar — son cajas de
+ * dos renglones.
+ *
+ * `SPARSE_TEXT` no asume estructura de párrafo y encuentra cada renglón por
+ * su cuenta. Medido sobre 19 páginas contra la transcripción a mano del
+ * sello: 57/114 ítems → 109/114, y el apellido pasa de detectarse en 9 de 19
+ * páginas a 19 de 19. Sobre 7 documentos nativos rasterizados (35 páginas,
+ * 11.403 palabras) el recall queda igual (96,29 % → 96,26 %) y la precisión
+ * **sube** (96,02 % → 96,50 %): el modo disperso inventa menos, no más.
+ *
+ * No es un campo de `OcrConfig` a propósito: no es una preferencia del
+ * usuario, es el modo correcto para la familia de documento del producto.
+ */
+const PAGE_SEG_MODE = PSM.SPARSE_TEXT;
+
 /** Instancia de tesseract cargada, y el set de idiomas con el que se cargó. */
 let worker: TesseractWorker | null = null;
 let loadedLanguages: ReadonlySet<string> = new Set();
 /** ADR-090 §2: último `user_defined_dpi` aplicado a la instancia vigente. */
 let appliedDpi: number | null = null;
+/** ADR-112 §1: si la instancia vigente ya tiene aplicado `PAGE_SEG_MODE`. */
+let pageSegModeApplied = false;
 
 function languagesMatch(loaded: ReadonlySet<string>, requested: ReadonlyArray<string>): boolean {
   if (loaded.size !== requested.length) return false;
@@ -169,6 +196,28 @@ async function ensureWorkerLoaded(languages: ReadonlyArray<string>): Promise<voi
   // contra ese set que se decide si hay que recrear el worker (ADR-090 §1).
   loadedLanguages = new Set(languages);
   appliedDpi = null;
+  // ADR-112 §1: la instancia es nueva, así que el modo hay que volver a
+  // aplicarlo — mismo criterio que `appliedDpi`.
+  pageSegModeApplied = false;
+}
+
+/*
+ * ADR-112 §1: aplica el modo de segmentación una vez por instancia de worker.
+ * A diferencia del DPI, el valor no viaja por payload —es una constante— así
+ * que la condición es "esta instancia ya lo tiene", no "cambió".
+ *
+ * Best-effort, mismo criterio que `ensureDpiApplied`: un `setParameters` que
+ * rechaza no debe voltear la página. Sin el modo aplicado se reconoce con el
+ * default de Tesseract, que es exactamente el comportamiento previo al ADR.
+ */
+async function ensurePageSegModeApplied(): Promise<void> {
+  if (worker === null || pageSegModeApplied) return;
+  try {
+    await worker.setParameters({ tessedit_pageseg_mode: PAGE_SEG_MODE });
+    pageSegModeApplied = true;
+  } catch {
+    // best-effort: seguir reconociendo con el modo default.
+  }
 }
 
 /*
@@ -579,6 +628,7 @@ export async function kernelRecognize(
 
   await ensureWorkerLoaded(languages);
   await ensureDpiApplied(dpi);
+  await ensurePageSegModeApplied();
 
   if (opts.abortSignal.aborted) throw new CancelledError(documentId);
 
@@ -623,4 +673,5 @@ export async function kernelDispose(): Promise<void> {
   }
   loadedLanguages = new Set();
   appliedDpi = null;
+  pageSegModeApplied = false;
 }

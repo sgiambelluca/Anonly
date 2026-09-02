@@ -11,7 +11,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Por el hoisting de Vitest, cada archivo de test declara su propio vi.mock
 // (ver comentario en fixtures/test-helpers.ts).
-vi.mock("tesseract.js", () => ({ createWorker: vi.fn() }));
+vi.mock("tesseract.js", () => ({
+  createWorker: vi.fn(),
+  // ADR-112 §1: el kernel lee `PSM.SPARSE_TEXT` a nivel de módulo, así que el
+  // doble tiene que traerlo o la evaluación del import falla. Los valores son
+  // los de `tesseract.js/src/constants/PSM.js`; que sigan siendo esos lo fija
+  // el test `the page segmentation mode is the tesseract.js enum member`.
+  PSM: { AUTO: "3", SPARSE_TEXT: "11" },
+}));
 
 import { OcrEngine } from "../ocr.engine.js";
 

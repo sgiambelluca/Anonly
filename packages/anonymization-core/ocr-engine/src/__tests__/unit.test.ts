@@ -8,7 +8,14 @@ import {
 import { createWorker } from "tesseract.js";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-vi.mock("tesseract.js", () => ({ createWorker: vi.fn() }));
+vi.mock("tesseract.js", () => ({
+  createWorker: vi.fn(),
+  // ADR-112 §1: el kernel lee `PSM.SPARSE_TEXT` a nivel de módulo, así que el
+  // doble tiene que traerlo o la evaluación del import falla. Los valores son
+  // los de `tesseract.js/src/constants/PSM.js`; que sigan siendo esos lo fija
+  // el test `the page segmentation mode is the tesseract.js enum member`.
+  PSM: { AUTO: "3", SPARSE_TEXT: "11" },
+}));
 
 import { OcrEngine } from "../ocr.engine.js";
 import { OcrModelMissingError, OcrPageFailedError } from "../ocr.errors.js";
@@ -666,7 +673,9 @@ describe("OcrEngine — unit tests", () => {
     }
 
     it("tells Tesseract the dpi instead of letting it estimate, and only when it changes", async () => {
-      const setParameters = vi.fn(() => Promise.resolve());
+      // Tipado: sin el parámetro declarado, `mock.calls` es una tupla vacía y
+      // no se puede leer el objeto que se pasó.
+      const setParameters = vi.fn((_params: Record<string, unknown>) => Promise.resolve());
       vi.mocked(createWorker).mockResolvedValue(
         mockTesseractWorker(mockRecognizeData(UNA_PALABRA), { setParameters }),
       );
@@ -676,7 +685,13 @@ describe("OcrEngine — unit tests", () => {
       await engine.processPage(inputConRaster("doc-dpi-2"), ctx);
 
       // El dpi de `createMockConfig` no cambia entre páginas: una sola llamada.
-      expect(setParameters).toHaveBeenCalledTimes(1);
+      // Se filtra por clave porque ADR-112 agregó un `setParameters` propio
+      // para el modo de segmentación; contar las llamadas totales ataría este
+      // test a un parámetro que no es el suyo.
+      const dpiCalls = setParameters.mock.calls.filter(
+        ([params]) => params["user_defined_dpi"] !== undefined,
+      );
+      expect(dpiCalls).toHaveLength(1);
       expect(setParameters).toHaveBeenCalledWith({
         user_defined_dpi: String(ctx.config.ocr.dpi),
       });
@@ -752,6 +767,96 @@ describe("OcrEngine — unit tests", () => {
         expect(output.words[0]?.bbox.rotation).toBeUndefined();
         expect(output.words[0]?.bbox.x).toBeCloseTo((10 * 72) / ctx.config.ocr.dpi, 6);
       }
+    });
+  });
+
+  // ─── ADR-112: modo de segmentación de página ───
+
+  describe("modo de segmentación de página (ADR-112 §1)", () => {
+    const UNA_PALABRA = [
+      { text: "Perez", confidence: 90, bbox: { x0: 10, y0: 20, x1: 50, y1: 40 } },
+    ];
+
+    function inputConRaster(documentId: string): ReturnType<typeof createValidOcrPageInput> {
+      return { ...createValidOcrPageInput(documentId, 0), imageData: createImageData(100, 40) };
+    }
+
+    /** Doble de `setParameters` con el parámetro declarado, para poder leerlo. */
+    function spyParameters(): ReturnType<
+      typeof vi.fn<(params: Record<string, unknown>) => Promise<void>>
+    > {
+      return vi.fn((_params: Record<string, unknown>) => Promise.resolve());
+    }
+
+    /** Las llamadas a `setParameters` que fijan el modo, no las del dpi. */
+    function pageSegCalls(setParameters: ReturnType<typeof spyParameters>): unknown[] {
+      return setParameters.mock.calls
+        .map(([params]) => params["tessedit_pageseg_mode"])
+        .filter((value) => value !== undefined);
+    }
+
+    it("applies sparse-text segmentation once per worker instance", async () => {
+      const setParameters = spyParameters();
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(UNA_PALABRA), { setParameters }),
+      );
+
+      await engine.init(ctx);
+      await engine.processPage(inputConRaster("doc-psm-1"), ctx);
+      await engine.processPage(inputConRaster("doc-psm-2"), ctx);
+
+      // El modo es una constante: se aplica una vez, no una por página.
+      expect(pageSegCalls(setParameters)).toEqual(["11"]);
+    });
+
+    it("re-applies the mode when the worker is recreated for a different language set", async () => {
+      const setParameters = spyParameters();
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(UNA_PALABRA), { setParameters }),
+      );
+
+      await engine.init(ctx);
+      await engine.processPage(inputConRaster("doc-psm-spa"), ctx);
+
+      // ADR-045 §3: otro set de idiomas recrea la instancia, y una instancia
+      // nueva no tiene el modo aplicado.
+      const otroCtx = createEngineContext({
+        config: createMockConfig({ ocr: { languages: ["eng"], dpi: ctx.config.ocr.dpi } }),
+      });
+      const otroEngine = new OcrEngine();
+      await otroEngine.init(otroCtx);
+      await otroEngine.processPage(
+        { ...inputConRaster("doc-psm-eng"), languages: ["eng"] },
+        otroCtx,
+      );
+      await otroEngine.dispose();
+
+      expect(pageSegCalls(setParameters)).toEqual(["11", "11"]);
+    });
+
+    it("a rejecting setParameters does not fail the page", async () => {
+      // Best-effort, mismo criterio que el dpi de ADR-090 §2: sin el modo se
+      // reconoce con el default de Tesseract, que es el camino previo al ADR.
+      const setParameters = vi.fn(() => Promise.reject(new Error("parámetro desconocido")));
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(UNA_PALABRA), { setParameters }),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.processPage(inputConRaster("doc-psm-rechaza"), ctx);
+
+      expect(output.words).toHaveLength(1);
+      expect(output.words[0]?.text).toBe("Perez");
+    });
+
+    it("the mode is the tesseract.js PSM enum member, not a hardcoded number", async () => {
+      // El doble de `tesseract.js` trae su propio `PSM` (ver el `vi.mock` de
+      // arriba). Este test lo contrasta contra el enum REAL de la librería:
+      // si tesseract.js renumera `SPARSE_TEXT`, el doble deja de ser fiel y
+      // esto falla, en vez de que la suite siga verde con el número viejo.
+      const real: unknown = await vi.importActual("tesseract.js");
+      const psm = (real as { PSM?: Record<string, unknown> }).PSM;
+      expect(psm?.["SPARSE_TEXT"]).toBe("11");
     });
   });
 });
