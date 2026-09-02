@@ -29,7 +29,7 @@
  * mensaje de control nuevo.
  */
 import { CancelledError, type BoundingBox, type OcrPagePayload, type Word } from "@anonly/shared";
-import { createWorker, PSM } from "tesseract.js";
+import { createWorker, OEM, PSM } from "tesseract.js";
 
 import { OcrModelMissingError, OcrPageFailedError, OcrTimeoutError } from "../ocr.errors.js";
 
@@ -140,9 +140,31 @@ const MIN_ORIENTATION_CONFIDENCE = 1;
  */
 const PAGE_SEG_MODE = PSM.SPARSE_TEXT;
 
+/*
+ * ADR-119 §2: la detección de orientación corre sobre el raster a MEDIA
+ * escala. No es una optimización oportunista — es lo que hace que arreglar
+ * OSD no cueste tiempo: 290 ms por página contra los 690 a escala completa, y
+ * contra los 506 que hoy se pagan por una detección que no funciona.
+ *
+ * El barrido dice también por qué no bajar más. A 0,35 sigue acertando pero la
+ * confianza cae a 1-2, pegada al piso; a 0,25 **acierta cero veces y sigue
+ * devolviendo 1-2**, o sea por encima del piso. El modo de falla de un OSD mal
+ * alimentado no es "no contesta", es "contesta mal con confianza suficiente",
+ * y contra eso el piso no protege: protege el margen.
+ */
+const OSD_SCALE = 0.5;
+
 /** Instancia de tesseract cargada, y el set de idiomas con el que se cargó. */
 let worker: TesseractWorker | null = null;
 let loadedLanguages: ReadonlySet<string> = new Set();
+/**
+ * ADR-119 §1: worker dedicado a OSD. `detect()` no alcanza con el core legacy
+ * (`legacyCore: true`, que es lo que ADR-090 §1 dedujo): necesita además que
+ * el **OEM** sea legacy. Y el OEM no se puede mezclar — con `oem: 0` los
+ * idiomas de reconocimiento no cargan, porque el `traineddata` pineado es
+ * `tessdata_best`, que es solo LSTM. Un worker detecta o reconoce, no las dos.
+ */
+let osdWorker: TesseractWorker | null = null;
 /** ADR-090 §2: último `user_defined_dpi` aplicado a la instancia vigente. */
 let appliedDpi: number | null = null;
 /** ADR-112 §1: si la instancia vigente ya tiene aplicado `PAGE_SEG_MODE`. */
@@ -174,17 +196,23 @@ async function ensureWorkerLoaded(languages: ReadonlyArray<string>): Promise<voi
 
   let nextWorker: TesseractWorker;
   try {
-    // ADR-090 §1: `osd` va junto a los idiomas de la config y el core es el
-    // COMPLETO (`legacyCore: true`). `worker.detect()` está guardado por
-    // `if (lstmOnlyCore) throw` en tesseract.js: OSD es un modelo legacy, así
-    // que agregar `osd.traineddata` sin cambiar el core no alcanza. El
-    // reconocimiento sigue siendo LSTM; el core completo solo trae además el
-    // código legacy que OSD necesita.
-    nextWorker = await createWorker([...languages, OSD_LANGUAGE], undefined, {
+    /*
+     * ADR-119 §1: este worker es SOLO de reconocimiento. Ya no carga `osd` ni
+     * pide `legacyCore`.
+     *
+     * ADR-090 §1 los ponía acá razonando que `worker.detect()` está guardado
+     * por `if (lstmOnlyCore) throw` en tesseract.js y que por lo tanto hacía
+     * falta el core completo. La premisa es cierta y la conclusión no
+     * alcanzaba: con el core legacy la llamada deja de tirar, pero devuelve
+     * `orientation_degrees: 0, orientation_confidence: 0` **siempre** —
+     * medido sobre dos documentos y cuatro orientaciones cada uno—, y el piso
+     * de confianza lo descarta. Para que conteste hace falta que el OEM sea
+     * legacy, y eso es incompatible con reconocer: ver `ensureOsdWorkerLoaded`.
+     */
+    nextWorker = await createWorker([...languages], undefined, {
       langPath: resolveTesseractPath(TESSERACT_LANG_PATH),
       corePath: resolveTesseractPath(TESSERACT_CORE_PATH),
       workerPath: resolveTesseractPath(TESSERACT_WORKER_PATH),
-      legacyCore: true,
     });
   } catch (err: unknown) {
     const reason = err instanceof Error ? err.message : String(err);
@@ -192,8 +220,6 @@ async function ensureWorkerLoaded(languages: ReadonlyArray<string>): Promise<voi
   }
 
   worker = nextWorker;
-  // `osd` NO entra acá: `loadedLanguages` es el set que pidió la config, y es
-  // contra ese set que se decide si hay que recrear el worker (ADR-090 §1).
   loadedLanguages = new Set(languages);
   appliedDpi = null;
   // ADR-112 §1: la instancia es nueva, así que el modo hay que volver a
@@ -382,16 +408,71 @@ function readOrientation(data: unknown): Rotation {
   return isRotation(degrees) ? degrees : 0;
 }
 
-/*
- * ADR-090 §3, paso 1-2. Cualquier falla de `detect` —que el modelo `osd` no
- * esté, que `DetectOS` no concluya, que la página tenga muy poco texto— cae a
- * `0`, que es exactamente el comportamiento previo al ADR. El kernel no tiene
- * logger (ADR-045 §2), así que la degradación es silenciosa por construcción.
+/**
+ * ADR-119 §1: worker dedicado a la detección de orientación.
+ *
+ * `oem: 0` (legacy) es el punto entero de que exista aparte. Con el OEM por
+ * default —LSTM— `detect()` no tira pero devuelve `0 / 0` siempre; con legacy
+ * contesta las cuatro orientaciones con confianza 13-16. Y el OEM legacy no se
+ * puede usar en el worker de reconocimiento porque `tessdata_best` no trae
+ * componentes legacy para `spa`/`eng`.
+ *
+ * A diferencia del resto de las fallas de este camino, **no crear el worker no
+ * degrada a `0`** (ADR-119 §3): que la detección no esté disponible no es lo
+ * mismo que "todas las páginas están derechas", y esa confusión es
+ * exactamente la que dejó a ADR-090 sin funcionar sin que nadie se enterara.
  */
-async function detectOrientation(image: OffscreenCanvas): Promise<Rotation> {
-  if (worker === null) return 0;
+async function ensureOsdWorkerLoaded(languages: ReadonlyArray<string>): Promise<TesseractWorker> {
+  if (osdWorker !== null) return osdWorker;
   try {
-    const { data } = await worker.detect(image);
+    osdWorker = await createWorker([OSD_LANGUAGE], OEM.TESSERACT_ONLY, {
+      langPath: resolveTesseractPath(TESSERACT_LANG_PATH),
+      corePath: resolveTesseractPath(TESSERACT_CORE_PATH),
+      workerPath: resolveTesseractPath(TESSERACT_WORKER_PATH),
+      legacyCore: true,
+    });
+  } catch (err: unknown) {
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new OcrModelMissingError([...languages, OSD_LANGUAGE], reason);
+  }
+  return osdWorker;
+}
+
+/*
+ * ADR-119 §2: la detección corre sobre una copia a `OSD_SCALE`. OSD solo elige
+ * entre cuatro orientaciones, no lee: a media escala acierta las cuatro con
+ * confianza 12-16 y tarda 290 ms en vez de 690.
+ *
+ * Si el canvas reducido no se puede armar, se detecta sobre el original: es
+ * más lento, no incorrecto.
+ */
+function scaleForOsd(image: OffscreenCanvas): OffscreenCanvas {
+  const width = Math.max(1, Math.round(image.width * OSD_SCALE));
+  const height = Math.max(1, Math.round(image.height * OSD_SCALE));
+  const scaled = new OffscreenCanvas(width, height);
+  const context = scaled.getContext("2d");
+  if (context === null) return image;
+  context.drawImage(image, 0, 0, width, height);
+  return scaled;
+}
+
+/*
+ * ADR-090 §3, paso 1-2. Una falla de `detect` —que `DetectOS` no concluya, que
+ * la página tenga muy poco texto— cae a `0`, que es exactamente el
+ * comportamiento previo al ADR. El kernel no tiene logger (ADR-045 §2), así
+ * que la degradación es silenciosa por construcción.
+ *
+ * ADR-119 §3 le pone un límite a esa degradación: **no** cubre que el worker
+ * de OSD no se pueda crear. Eso sale por `ensureOsdWorkerLoaded` como
+ * `OcrModelMissingError`.
+ */
+async function detectOrientation(
+  image: OffscreenCanvas,
+  languages: ReadonlyArray<string>,
+): Promise<Rotation> {
+  const osd = await ensureOsdWorkerLoaded(languages);
+  try {
+    const { data } = await osd.detect(scaleForOsd(image));
     return readOrientation(data);
   } catch {
     return 0;
@@ -635,7 +716,10 @@ export async function kernelRecognize(
   // ADR-090 §3: detectar antes de reconocer. Con orientación 0 —el 99 % de las
   // páginas, y también cualquier falla de `detect`— `rotateImageData` devuelve
   // el mismo objeto y de acá para abajo el camino es el previo al ADR.
-  const orientation = await detectOrientation(toTesseractImage(imageData, documentId, pageIndex));
+  const orientation = await detectOrientation(
+    toTesseractImage(imageData, documentId, pageIndex),
+    languages,
+  );
 
   if (opts.abortSignal.aborted) throw new CancelledError(documentId);
 
@@ -669,6 +753,18 @@ export async function kernelDispose(): Promise<void> {
       await current.terminate();
     } catch {
       // best-effort: liberar igual el estado interno aunque terminate() falle.
+    }
+  }
+  // ADR-119 §1: son dos instancias de tesseract y hay que liberar las dos. El
+  // `try` es independiente a propósito: que el principal falle al terminar no
+  // puede dejar vivo al de OSD, que son ~99 MB.
+  if (osdWorker !== null) {
+    const currentOsd = osdWorker;
+    osdWorker = null;
+    try {
+      await currentOsd.terminate();
+    } catch {
+      // best-effort, mismo criterio que el worker principal.
     }
   }
   loadedLanguages = new Set();

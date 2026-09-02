@@ -37,6 +37,8 @@ vi.mock("tesseract.js", () => ({
   createWorker: vi.fn(),
   // ADR-112 §1: el kernel de OCR lee `PSM.SPARSE_TEXT` a nivel de módulo.
   PSM: { AUTO: "3", SPARSE_TEXT: "11" },
+  // ADR-119 §1: el kernel lee `OEM.TESSERACT_ONLY` al crear el worker de OSD.
+  OEM: { TESSERACT_ONLY: 0, LSTM_ONLY: 1, TESSERACT_LSTM_COMBINED: 2, DEFAULT: 3 },
 }));
 vi.mock("@huggingface/transformers", () => ({
   pipeline: vi.fn(),

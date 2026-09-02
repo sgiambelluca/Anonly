@@ -5,7 +5,7 @@ import {
   type EngineContext,
   type Word,
 } from "@anonly/shared";
-import { createWorker } from "tesseract.js";
+import { createWorker, OEM } from "tesseract.js";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("tesseract.js", () => ({
@@ -15,6 +15,10 @@ vi.mock("tesseract.js", () => ({
   // los de `tesseract.js/src/constants/PSM.js`; que sigan siendo esos lo fija
   // el test `the page segmentation mode is the tesseract.js enum member`.
   PSM: { AUTO: "3", SPARSE_TEXT: "11" },
+  // ADR-119 §1: idem para `OEM`, que el kernel lee al crear el worker de OSD.
+  // El valor es el de `tesseract.js/src/constants/OEM.js`; que siga siendo ese
+  // lo fija el test `the OSD worker uses the legacy OCR engine mode`.
+  OEM: { TESSERACT_ONLY: 0, LSTM_ONLY: 1, TESSERACT_LSTM_COMBINED: 2, DEFAULT: 3 },
 }));
 
 import { OcrEngine } from "../ocr.engine.js";
@@ -485,9 +489,14 @@ describe("OcrEngine — unit tests", () => {
       );
 
       expect(output).toBeDefined();
-      // ADR-090 §1: `osd` se carga siempre junto a los idiomas de la config.
+      /*
+       * ADR-119 §1: el worker de reconocimiento carga SOLO los idiomas de la
+       * config. `osd` se mudó a su propio worker porque `detect()` necesita el
+       * OEM legacy, y ese OEM no puede convivir con el reconocimiento: el
+       * `traineddata` pineado es `tessdata_best`, sin componentes legacy.
+       */
       expect(vi.mocked(createWorker)).toHaveBeenCalledWith(
-        ["spa", "eng", "osd"],
+        ["spa", "eng"],
         undefined,
         expect.anything(),
       );
@@ -767,6 +776,84 @@ describe("OcrEngine — unit tests", () => {
         expect(output.words[0]?.bbox.rotation).toBeUndefined();
         expect(output.words[0]?.bbox.x).toBeCloseTo((10 * 72) / ctx.config.ocr.dpi, 6);
       }
+    });
+  });
+
+  // ─── ADR-119: la orientación se detecta con el motor que la sabe leer ───
+
+  describe("worker de OSD (ADR-119 §1/§2/§3)", () => {
+    const UNA_PALABRA = [
+      { text: "Perez", confidence: 90, bbox: { x0: 10, y0: 20, x1: 50, y1: 40 } },
+    ];
+    function inputConRaster(documentId: string): ReturnType<typeof createValidOcrPageInput> {
+      return { ...createValidOcrPageInput(documentId, 0), imageData: createImageData(100, 40) };
+    }
+
+    it("the OSD worker uses the legacy OCR engine mode", async () => {
+      /*
+       * ES la línea que estaba mal. Con el OEM por default —LSTM— `detect()`
+       * no tira pero devuelve `0 / 0` SIEMPRE, el piso de confianza lo
+       * descarta y el kernel no rota nunca: medido sobre dos documentos y
+       * cuatro orientaciones cada uno. `legacyCore: true` solo, que es lo que
+       * dedujo ADR-090 §1, no alcanza.
+       */
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(UNA_PALABRA)),
+      );
+
+      await engine.init(ctx);
+      await engine.processPage(inputConRaster("doc-osd-oem"), ctx);
+
+      expect(vi.mocked(createWorker)).toHaveBeenCalledWith(
+        ["osd"],
+        OEM.TESSERACT_ONLY,
+        expect.objectContaining({ legacyCore: true }),
+      );
+      // Y el de reconocimiento NO lleva `osd` ni pide el core legacy: con el
+      // OEM legacy los idiomas no cargarían (`tessdata_best` es solo LSTM).
+      expect(vi.mocked(createWorker)).toHaveBeenCalledWith(
+        ["spa", "eng"],
+        undefined,
+        expect.not.objectContaining({ legacyCore: true }),
+      );
+    });
+
+    it("detects orientation on a half-scale raster (ADR-119 §2)", async () => {
+      /*
+       * OSD solo elige entre cuatro orientaciones, no lee. A media escala
+       * acierta las cuatro con confianza 12-16 y tarda 290 ms en vez de 690 —
+       * y eso es lo que hace que arreglar OSD no cueste tiempo.
+       */
+      const detect = vi.fn(() => Promise.resolve(mockDetectData(0)));
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(UNA_PALABRA), { detect }),
+      );
+
+      await engine.init(ctx);
+      await engine.processPage(inputConRaster("doc-osd-escala"), ctx);
+
+      expect(detect).toHaveBeenCalledTimes(1);
+      const recibido = detect.mock.calls[0]?.[0] as { width: number; height: number };
+      // el raster es 100 × 40
+      expect(recibido.width).toBe(50);
+      expect(recibido.height).toBe(20);
+    });
+
+    it("a failing OSD worker throws instead of pretending every page is upright", async () => {
+      /*
+       * ADR-119 §3: el resto de las fallas de este camino degradan a `0`, y
+       * está bien. Que la detección no esté DISPONIBLE es distinto de "esta
+       * página está derecha", y confundir las dos es exactamente lo que dejó a
+       * ADR-090 sin funcionar sin que nadie se enterara.
+       */
+      vi.mocked(createWorker)
+        .mockResolvedValueOnce(mockTesseractWorker(mockRecognizeData(UNA_PALABRA)))
+        .mockRejectedValueOnce(new Error("osd.traineddata no está"));
+
+      await engine.init(ctx);
+      await expect(engine.processPage(inputConRaster("doc-osd-caido"), ctx)).rejects.toThrow(
+        OcrModelMissingError,
+      );
     });
   });
 

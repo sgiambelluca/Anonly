@@ -275,9 +275,15 @@ class StubOffscreenCanvas {
     this.width = width;
     this.height = height;
   }
-  getContext(): { putImageData: () => void } | null {
+  /*
+   * ADR-119 §2: `drawImage` existe porque `scaleForOsd` reduce el raster antes
+   * de detectar la orientación. Como `putImageData`, no rasteriza: los tests
+   * mockean tesseract.js entero y lo único observable —y lo único que hace
+   * falta observar— son las DIMENSIONES del canvas que recibe `detect`.
+   */
+  getContext(): { putImageData: () => void; drawImage: () => void } | null {
     if (!stubCanvasContextAvailable) return null;
-    return { putImageData: () => undefined };
+    return { putImageData: () => undefined, drawImage: () => undefined };
   }
 }
 
