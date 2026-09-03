@@ -210,13 +210,13 @@ describe("NerEngine — contract tests", () => {
       asPipelineMock(pipeline).mockResolvedValue(
         mockTokenClassificationPipeline(() =>
           Promise.resolve([
-            nerToken("B-PER", "Albarracin,", 0.9, 0),
-            nerToken("I-PER", "Rocio", 0.9, 1),
+            nerToken("B-PER", "Echeverria,", 0.9, 0),
+            nerToken("I-PER", "Marta", 0.9, 1),
           ]),
         ),
       );
       await engine.init(ctx);
-      const base = makeNerPageInput("doc-fragments-invariant", 0, ["Albarracin,", "Rocio"]);
+      const base = makeNerPageInput("doc-fragments-invariant", 0, ["Echeverria,", "Marta"]);
       const input = {
         ...base,
         words: base.words.map((w, i) => (i === 1 ? { ...w, bbox: { ...w.bbox, y: 130 } } : w)),

@@ -95,7 +95,7 @@ Los runs dentro de `beginAnnotation`/`endAnnotation` ya se extraen del operator 
 **Positivas**:
 
 - El reemplazo vuelve a caer sobre el texto en documentos con word spacing. Medido: `La Plata` pasa de `x = 190,2` a `x = 248,9`, contra 248,5 de tinta real.
-- Ningún item que hoy sale bien se mueve: verificado sobre la misma página, `Departamento Judicial Quilmes` (14,0), `Sr. Juez` (14,0) y `CATALINA SMERNOFF` (294,0) quedan idénticos.
+- Ningún item que hoy sale bien se mueve: verificado sobre la misma página, `Departamento Judicial Quilmes` (14,0), `Sr. Juez` (14,0) y `CAROLINA SALGUERO` (294,0) quedan idénticos.
 - Costo nulo: es el mismo operator list que ADR-065 §1 y ADR-066 §1 ya piden.
 - El motor deja de depender de que `getTextContent()` sea consistente con el renderer en el único punto donde se comprobó que no lo es.
 

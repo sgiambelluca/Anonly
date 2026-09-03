@@ -23,9 +23,9 @@ filtra por género el pool de nombres de pila del que sortea el nombre falso—
 docs/adr/ADR-069-Lexico-De-Genero-Fuente-Unica-Y-Canal-Del-Usuario.md y
 docs/adr/ADR-071-El-Genero-Se-Muestra-Solo-Donde-Se-Usa.md §5). El
 artefacto vive dentro del bundle, como módulo TypeScript generado, en
-`packages/anonymization-core/grouping-engine/src/gender-lexicon.generated.ts`;
+`packages/anonymization-core/shared/src/gender-lexicon.generated.ts`;
 su procedencia completa (URL, licencia, fecha de descarga, hash) está en
-`packages/anonymization-core/grouping-engine/assets/gender-lexicon.provenance.json`.
+`packages/anonymization-core/shared/assets/gender-lexicon.provenance.json`.
 El script que lo genera, determinista y commiteado, es
 `scripts/build-gender-lexicon.ts` (`pnpm lexicon:build`).
 
@@ -52,4 +52,4 @@ El script que lo genera, determinista y commiteado, es
 
 Procedencia completa, con fecha de descarga y hash sha256 del artefacto
 generado en la corrida más reciente:
-`packages/anonymization-core/grouping-engine/assets/gender-lexicon.provenance.json`.
+`packages/anonymization-core/shared/assets/gender-lexicon.provenance.json`.

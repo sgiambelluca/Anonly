@@ -1,0 +1,41 @@
+{
+  "documentId": "doc-003",
+  "entities": [
+    {
+      "entityType": "PERSON",
+      "value": "Claudia Medina",
+      "pageIndex": 0,
+      "detector": "ner"
+    },
+    {
+      "entityType": "ORGANIZATION",
+      "value": "Consultora Río",
+      "pageIndex": 0,
+      "detector": "ner"
+    },
+    {
+      "entityType": "ADDRESS",
+      "value": "Belgrano 5983",
+      "pageIndex": 0,
+      "detector": "ner"
+    },
+    {
+      "entityType": "PLATE",
+      "value": "DA 004 DD",
+      "pageIndex": 1,
+      "detector": "regex"
+    },
+    {
+      "entityType": "PHONE",
+      "value": "+54 11 9144-4799",
+      "pageIndex": 1,
+      "detector": "regex"
+    },
+    {
+      "entityType": "EMAIL",
+      "value": "user71926@test.net",
+      "pageIndex": 1,
+      "detector": "regex"
+    }
+  ]
+}

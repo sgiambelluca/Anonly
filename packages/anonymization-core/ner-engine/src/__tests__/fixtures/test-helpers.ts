@@ -197,13 +197,78 @@ export function nerToken(entity: string, word: string, score = 0.95, index = 0):
  * seguridad real. `ner.engine.ts` solo llama al pipeline con un string único
  * (nunca batched), así que el mock no necesita soportar arrays.
  */
+/**
+ * `tokenizer` es opcional a propósito: el pipeline real lo expone (ADR-098 §1
+ * lo usa para medir el presupuesto de tokens) pero la mayoría de los tests no
+ * lo necesita, y su ausencia ejercita el camino "sin tokenizer no se mide y
+ * se infiere de una sola pasada" — el comportamiento previo a ADR-098.
+ */
+export interface MockTokenizer {
+  readonly model_max_length: number;
+  encode(text: string): ReadonlyArray<number>;
+}
+
+/**
+ * El tokenizer real de Transformers.js es **invocable** (`tokenizer(textos,
+ * opts)`), así que `typeof` da `"function"` y no `"object"`. Un mock que sea
+ * un objeto plano no ejercita eso — y de hecho ya escondió un bug: el guard
+ * del kernel filtraba por `"object"`, descartaba el tokenizer real y el lote
+ * no se partía nunca, con los tests en verde. Se construye callable a
+ * propósito.
+ */
+function asCallableTokenizer(tokenizer: MockTokenizer): MockTokenizer {
+  const callable = (): never => {
+    throw new Error("El mock del tokenizer no implementa la llamada directa.");
+  };
+  return Object.assign(callable, tokenizer) as unknown as MockTokenizer;
+}
+
+/**
+ * Opciones con las que el kernel invoca al pipeline. Solo `ignore_labels`
+ * (ADR-111 §1); `aggregation_strategy` no se pasa nunca.
+ */
+export interface TokenClassificationCallOptions {
+  readonly ignore_labels?: ReadonlyArray<string>;
+}
+
 export function mockTokenClassificationPipeline(
-  classify: (text: string) => Promise<ReadonlyArray<TokenClassificationSingle>>,
+  classify: (
+    text: string,
+    options?: TokenClassificationCallOptions,
+  ) => Promise<ReadonlyArray<TokenClassificationSingle>>,
   dispose: () => Promise<void> = () => Promise.resolve(),
+  tokenizer?: MockTokenizer,
 ): TokenClassificationPipelineType {
-  const callable = (text: string): Promise<ReadonlyArray<TokenClassificationSingle>> => classify(text);
-  const withDispose = Object.assign(callable, { dispose });
+  const callable = (
+    text: string,
+    options?: TokenClassificationCallOptions,
+  ): Promise<ReadonlyArray<TokenClassificationSingle>> => classify(text, options);
+  const withDispose = Object.assign(
+    callable,
+    tokenizer === undefined ? { dispose } : { dispose, tokenizer: asCallableTokenizer(tokenizer) },
+  );
   return withDispose as unknown as TokenClassificationPipelineType;
+}
+
+/**
+ * Doble **fiel** del pipeline en lo que a `ignore_labels` respecta:
+ * `TokenClassificationPipeline._call` de @huggingface/transformers v4 default
+ * a `['O']` y **descarta** todo token cuyo label esté en la lista
+ * (`if (ignore_labels.includes(entity)) continue;`).
+ *
+ * `mockTokenClassificationPipeline` a secas devuelve lo que se le pide, así
+ * que un test escrito con él no puede notar si el kernel dejó de pedir todos
+ * los tokens. Este helper sí: se le pasa la secuencia **completa** (con sus
+ * `O`) y filtra como filtraría la librería. Es lo que hace que los tests de
+ * ADR-111 §1 fallen si se le saca el `ignore_labels: []` al kernel.
+ */
+export function mockPipelineHonouringIgnoreLabels(
+  tokens: ReadonlyArray<TokenClassificationSingle>,
+): TokenClassificationPipelineType {
+  return mockTokenClassificationPipeline((_text, options) => {
+    const ignored = options?.ignore_labels ?? ["O"];
+    return Promise.resolve(tokens.filter((t) => !ignored.includes(t.entity)));
+  });
 }
 
 /**

@@ -37,6 +37,7 @@ import {
   rotatedTextItem,
   type MockAnnotationInnerOp,
   type MockAnnotationSpec,
+  type MockGlyph,
   type MockTextItem,
 } from "./fixtures/test-helpers.js";
 
@@ -170,18 +171,18 @@ describe("PdfEngine — unit tests", () => {
       // Antes de ADR-067 salían intercaladas y cada una invertida.
       const text = await pageTextOf("doc-067-firma", [
         ...runAt90(100, 8, 700, [
-          { str: "Albarracin,", advance: 39 },
-          { str: "Rocio", advance: 18 },
+          { str: "Echeverria,", advance: 39 },
+          { str: "Marta", advance: 18 },
           { str: "de", advance: 7 },
           { str: "los", advance: 11 },
-          { str: "Milagros", advance: 28 },
+          { str: "Mercedes", advance: 28 },
         ]),
         ...runAt90(110, 8, 700, [
           { str: "Date:", advance: 19 },
           { str: "07/07/2026", advance: 38 },
         ]),
       ]);
-      expect(text).toContain("Albarracin, Rocio de los Milagros");
+      expect(text).toContain("Echeverria, Marta de los Mercedes");
       expect(text).toContain("Date: 07/07/2026");
     });
 
@@ -283,8 +284,8 @@ describe("PdfEngine — unit tests", () => {
             createMockPage(
               0,
               runAt90(100, 8, 700, [
-                { str: "Albarracin,", advance: 39 },
-                { str: "Rocio", advance: 18 },
+                { str: "Echeverria,", advance: 39 },
+                { str: "Marta", advance: 18 },
               ]),
             ),
           ),
@@ -303,7 +304,7 @@ describe("PdfEngine — unit tests", () => {
         },
       ]);
 
-      expect(fused.pages[0]!.text).toContain("Albarracin, Rocio");
+      expect(fused.pages[0]!.text).toContain("Echeverria, Marta");
       expect(fused.pages[0]!.text).toContain("escaneado");
     });
   });
@@ -377,6 +378,560 @@ describe("PdfEngine — unit tests", () => {
       // equivocado no coincide con el item, el item no se toca.
       const word = await runWithItemAt("doc-068-sin-match", 300, -2);
       expect(word.bbox.x).toBeCloseTo(300, 6);
+    });
+  });
+
+  // ADR-020 §1 reparte un ancho promedio uniforme sobre una fuente
+  // proporcional, así que corre cada token que no arranca al principio de su
+  // item y el error se acumula. El run de acá lo exagera a propósito con la
+  // misma forma del defecto real: diez glifos angostos seguidos de dos anchos.
+  describe("Flujo de glifos por página (ADR-102, §13 casos 42-46)", () => {
+    // Tfs = 10, origen en x = 100. Diez `l` de 200/1000 em (2 pt cada uno),
+    // un espacio de 300 (3 pt), `M` y `W` de 1000 (10 pt cada uno).
+    //   avance real hasta "MW" -> 10*2 + 3 = 23        => x = 123, ancho 20
+    //   prorrateo: 43/13 = 3,3077 por char, offset 11  => x = 136,38, ancho 6,6
+    const GLYPHS = [
+      ...Array.from({ length: 10 }, () => ({ unicode: "l", width: 200 })),
+      { unicode: " ", width: 300 },
+      { unicode: "M", width: 1000 },
+      { unicode: "W", width: 1000 },
+    ];
+    const RUN_STR = "llllllllll MW";
+    const RUN_WIDTH = 43;
+
+    const runOps = (glyphs: ReadonlyArray<MockGlyph>) =>
+      [
+        { kind: "save" },
+        { kind: "beginText" },
+        { kind: "setFont", size: 10 },
+        { kind: "setTextMatrix", matrix: [1, 0, 0, 1, 100, 700] },
+        { kind: "showText", glyphs },
+        { kind: "restore" },
+      ] as MockAnnotationInnerOp[];
+
+    const wordsFor = async (
+      documentId: string,
+      item: { str: string; x: number; width: number },
+      glyphs: ReadonlyArray<MockGlyph> = GLYPHS,
+    ): Promise<ReadonlyArray<Word>> => {
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () =>
+            createMockPage(
+              0,
+              [{ str: item.str, x: item.x, y: 700, width: item.width, height: 10 }],
+              [],
+              { width: 595, height: 842 },
+              [],
+              runOps(glyphs),
+            ),
+          ),
+        ),
+      );
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput(documentId), ctx);
+      return output.document.pages[0]!.words;
+    };
+
+    it("places a mid-item token at its real advance, not the prorated one", async () => {
+      const words = await wordsFor("doc-102-alinea", {
+        str: RUN_STR,
+        x: 100,
+        width: RUN_WIDTH,
+      });
+      const mw = words.find((w) => w.text === "MW")!;
+      expect(mw.bbox.x).toBeCloseTo(123, 6);
+      // Y el ancho, que el promedio dejaba corto en la otra dirección.
+      expect(mw.bbox.width).toBeCloseTo(20, 6);
+    });
+
+    it("aligns through a space that pdf.js synthesized (§13 caso 46)", async () => {
+      // El productor separó las palabras moviendo el cursor y pdf.js metió un
+      // espacio que NO existe como glifo. La alineación lo saltea del lado de
+      // la cadena y sigue (ADR-102 §2).
+      //
+      // Este test afirmaba lo contrario hasta ADR-102 —que el item caía al
+      // prorrateo— porque el empalme por cadena exacta de ADR-097 §2 no podía
+      // con esto. Es exactamente el caso que hacía fallar al 97 % de los items
+      // de un fallo judicial real.
+      const words = await wordsFor("doc-102-espacio-sintetico", {
+        str: "llllllllll  MW",
+        x: 100,
+        width: RUN_WIDTH,
+      });
+      const mw = words.find((w) => w.text === "MW")!;
+      expect(mw.bbox.x).toBeCloseTo(123, 6);
+      expect(mw.bbox.width).toBeCloseTo(20, 6);
+    });
+
+    it("falls back when a character has no glyph behind it", async () => {
+      // El caso que SÍ tiene que caer al prorrateo: un carácter que no está en
+      // el flujo (lo que produce `/ActualText` o una normalización agresiva).
+      // No es un espacio, así que no se puede saltear: la alineación corta y
+      // el item queda EXACTAMENTE como antes (ADR-102 §4).
+      const words = await wordsFor("doc-102-sin-glifo", {
+        str: "llllllllllZMW",
+        x: 100,
+        width: RUN_WIDTH,
+      });
+      const mw = words.find((w) => w.text === "llllllllllZMW")!;
+      expect(mw.bbox.x).toBeCloseTo(100, 6);
+      expect(mw.bbox.width).toBeCloseTo(RUN_WIDTH, 6);
+    });
+
+    it("falls back when the item origin is nowhere in the flow", async () => {
+      const words = await wordsFor("doc-102-origen-distinto", {
+        str: RUN_STR,
+        x: 300,
+        width: RUN_WIDTH,
+      });
+      const mw = words.find((w) => w.text === "MW")!;
+      expect(mw.bbox.x).toBeCloseTo(300 + (RUN_WIDTH / RUN_STR.length) * 11, 6);
+    });
+
+    it("imputes a ligature's full advance to its first character", async () => {
+      // Un glifo cuyo `.unicode` tiene dos caracteres. Si el avance se
+      // repartiera entre los dos, `Z` arrancaría antes de donde está.
+      //   "fi"(600) "n"(400) " "(300) "Z"(700) => avances [0,6,6,10,13,20]
+      const words = await wordsFor("doc-102-ligadura", { str: "fin Z", x: 100, width: 20 }, [
+        { unicode: "fi", width: 600 },
+        { unicode: "n", width: 400 },
+        { unicode: " ", width: 300 },
+        { unicode: "Z", width: 700 },
+      ]);
+      const z = words.find((w) => w.text === "Z")!;
+      expect(z.bbox.x).toBeCloseTo(113, 6);
+      expect(z.bbox.width).toBeCloseTo(7, 6);
+      // Y el token que contiene la ligadura arranca en el origen del run.
+      const fin = words.find((w) => w.text === "fin")!;
+      expect(fin.bbox.x).toBeCloseTo(100, 6);
+      expect(fin.bbox.width).toBeCloseTo(10, 6);
+    });
+
+    it("leaves a single-word item on the run envelope (§13 caso 44)", async () => {
+      // No pasa por el reparto —ni avances ni prorrateo—: era exacto antes de
+      // ADR-097 y sigue igual.
+      const words = await wordsFor("doc-102-una-palabra", { str: "MW", x: 100, width: 20 }, [
+        { unicode: "M", width: 1000 },
+        { unicode: "W", width: 1000 },
+      ]);
+      expect(words).toHaveLength(1);
+      expect(words[0]!.bbox.x).toBeCloseTo(100, 6);
+      expect(words[0]!.bbox.width).toBeCloseTo(20, 6);
+    });
+  });
+
+  // ADR-108: el flujo de glifos omitía `Tw`, así que se corría ~1,2 pt por
+  // espacio, acumulativo dentro del run. Los tests de acá usan la misma forma
+  // del defecto real: tokens separados por espacios, con `Tw` negativo.
+  describe("Word spacing en el avance del flujo (ADR-108, §13 casos 47-48)", () => {
+    // Tfs = 10, origen x = 100. Glifos de 400/1000 em = 4 pt; espacio de
+    // 300/1000 = 3 pt sin `Tw`. Con Tw = -1 cada espacio avanza 2 pt.
+    //   sin Tw: "A"=100, "B"=100+4+3=107, "C"=107+4+3=114
+    //   con Tw: "A"=100, "B"=100+4+2=106, "C"=106+4+2=112
+    //
+    // `isSpace: true` es lo que pdf.js pone en un espacio de fuente simple, y
+    // es lo que decide si lleva `Tw` (ADR-108 §1).
+    const GLYPHS = [
+      { unicode: "A", width: 400 },
+      { unicode: " ", width: 300, isSpace: true },
+      { unicode: "B", width: 400 },
+      { unicode: " ", width: 300, isSpace: true },
+      { unicode: "C", width: 400 },
+    ];
+
+    const wordsWith = async (
+      documentId: string,
+      wordSpacing: number,
+      itemStr = "A B C",
+      glyphs: ReadonlyArray<MockGlyph> = GLYPHS,
+      itemX = 100,
+    ): Promise<ReadonlyArray<Word>> => {
+      const ops: MockAnnotationInnerOp[] = [
+        { kind: "save" },
+        { kind: "beginText" },
+        { kind: "setFont", size: 10 },
+        { kind: "setTextMatrix", matrix: [1, 0, 0, 1, 100, 700] },
+        { kind: "setWordSpacing", value: wordSpacing },
+        { kind: "showText", glyphs },
+        { kind: "restore" },
+      ];
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () =>
+            createMockPage(
+              0,
+              [{ str: itemStr, x: itemX, y: 700, width: 18, height: 10 }],
+              [],
+              { width: 595, height: 842 },
+              [],
+              ops,
+            ),
+          ),
+        ),
+      );
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput(documentId), ctx);
+      return output.document.pages[0]!.words;
+    };
+
+    it("a space glyph advances by Tw on top of its own width", async () => {
+      const words = await wordsWith("doc-108-tw", -1);
+      expect(words.find((w) => w.text === "B")!.bbox.x).toBeCloseTo(106, 6);
+    });
+
+    it("the drift accumulates across spaces, not across glyphs", async () => {
+      // Es el mecanismo del defecto: dos espacios, dos veces el error. Si `Tw`
+      // se aplicara por glifo en vez de por espacio, `C` daría otra cosa.
+      const words = await wordsWith("doc-108-acumula", -1);
+      expect(words.find((w) => w.text === "B")!.bbox.x).toBeCloseTo(106, 6);
+      expect(words.find((w) => w.text === "C")!.bbox.x).toBeCloseTo(112, 6);
+    });
+
+    it("a run with Tw = 0 yields the same bboxes as before ADR-108", async () => {
+      // La garantía de no regresión: sin word spacing el término vale cero y
+      // no cambia una sola coordenada. Es por qué ningún fixture se mueve.
+      const words = await wordsWith("doc-108-sin-tw", 0);
+      expect(words.find((w) => w.text === "B")!.bbox.x).toBeCloseTo(107, 6);
+      expect(words.find((w) => w.text === "C")!.bbox.x).toBeCloseTo(114, 6);
+    });
+
+    it("un espacio de fuente compuesta no lleva Tw", async () => {
+      // §13 caso 51. `isSpace: false` es lo que pdf.js pone en el espacio de
+      // dos bytes de una fuente compuesta, donde PDF 32000-1 §9.3.3 dice que
+      // `Tw` no aplica — y es lo que decide el renderer de pdf.js.
+      //
+      // Dos espacios iniciales compuestos avanzan 3 pt cada uno (no 2), así
+      // que `A` cae en 106. Como `getTextContent` sí les aplica `Tw`, reporta
+      // 104: el empalme lo encuentra por el origen corregido de ADR-068.
+      //
+      // En el documento real son 89 espacios de una línea centrada, y
+      // tratarlos como simples corría la caja 58,3 pt.
+      const words = await wordsWith(
+        "doc-108-compuesta",
+        -1,
+        "A B",
+        [
+          { unicode: " ", width: 300 },
+          { unicode: " ", width: 300 },
+          { unicode: "A", width: 400 },
+          { unicode: " ", width: 300, isSpace: true },
+          { unicode: "B", width: 400 },
+        ],
+        104,
+      );
+      expect(words.find((w) => w.text === "A")!.bbox.x).toBeCloseTo(106, 6);
+      expect(words.find((w) => w.text === "B")!.bbox.x).toBeCloseTo(112, 6);
+    });
+
+    it("un espacio de fuente simple sí lo lleva, en la misma posición", async () => {
+      // El contraste exacto del test de arriba: mismos glifos, misma `Tw`, con
+      // los dos iniciales marcados como simples. Ahí sí avanzan 2 pt y `A` cae
+      // en 104 — que es además lo que reporta `getTextContent`, así que el
+      // empalme lo encuentra por el origen sin corregir.
+      const words = await wordsWith(
+        "doc-108-simple",
+        -1,
+        "A B",
+        [
+          { unicode: " ", width: 300, isSpace: true },
+          { unicode: " ", width: 300, isSpace: true },
+          { unicode: "A", width: 400 },
+          { unicode: " ", width: 300, isSpace: true },
+          { unicode: "B", width: 400 },
+        ],
+        104,
+      );
+      expect(words.find((w) => w.text === "A")!.bbox.x).toBeCloseTo(104, 6);
+      expect(words.find((w) => w.text === "B")!.bbox.x).toBeCloseTo(110, 6);
+    });
+
+    it("aligns an item whose string has fewer spaces than the flow", async () => {
+      // §13 caso 48, el espejo del 46: el productor dibujó dos espacios y
+      // pdf.js reporta uno. Se saltean del lado del FLUJO.
+      //   "A"=100, "B"=100+4+3+3=110 (los dos espacios avanzan)
+      const words = await wordsWith("doc-108-espacio-de-mas", 0, "A B", [
+        { unicode: "A", width: 400 },
+        { unicode: " ", width: 300 },
+        { unicode: " ", width: 300 },
+        { unicode: "B", width: 400 },
+      ]);
+      expect(words.find((w) => w.text === "B")!.bbox.x).toBeCloseTo(110, 6);
+      expect(words.find((w) => w.text === "B")!.bbox.width).toBeCloseTo(4, 6);
+    });
+
+    it("still rejects an item whose visible characters do not match", async () => {
+      // El guard no se debilita: lo tolerante es la cantidad de espacios, no
+      // los caracteres visibles. Sin empalme rige el prorrateo de ADR-020 §1.
+      const words = await wordsWith("doc-108-guard", 0, "A Z", [
+        { unicode: "A", width: 400 },
+        { unicode: " ", width: 300 },
+        { unicode: "B", width: 400 },
+      ]);
+      const z = words.find((w) => w.text === "Z")!;
+      expect(z.bbox.x).toBeCloseTo(100 + (18 / 3) * 2, 6);
+    });
+  });
+
+  // ADR-109: la caja iba de la línea de base hacia arriba por un cuerpo
+  // entero, así que las descendentes quedaban afuera en una de cada tres
+  // palabras.
+  describe("Caja de tinta de una palabra (ADR-109, §13 casos 49-50)", () => {
+    const STYLES = { F1: { ascent: 0.688, descent: -0.218 } };
+
+    const wordFor = async (
+      documentId: string,
+      item: MockTextItem,
+      styles?: Readonly<Record<string, { readonly ascent: number; readonly descent: number }>>,
+    ): Promise<Word> => {
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () =>
+            createMockPage(0, [item], [], { width: 595, height: 842 }, [], [], styles),
+          ),
+        ),
+      );
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput(documentId), ctx);
+      return output.document.pages[0]!.words[0]!;
+    };
+
+    it("the box spans from the font descent to its ascent", async () => {
+      // Cuerpo 10, línea de base en y = 700 (PDF) => 142 arriba-izquierda.
+      //   alto  = (0,688 + 0,218) * 10 = 9,06
+      //   techo = 142 - 6,88 = 135,12
+      const word = await wordFor(
+        "doc-109-tinta",
+        { str: "Juan", x: 100, y: 700, width: 20, height: 10, fontName: "F1" },
+        STYLES,
+      );
+      expect(word.bbox.height).toBeCloseTo(9.06, 6);
+      expect(word.bbox.y).toBeCloseTo(135.12, 6);
+      expect(word.bbox.y + word.bbox.height).toBeCloseTo(144.18, 6);
+    });
+
+    it("keeps the baseline covered below, which is the whole point", async () => {
+      // La línea de base está a 142; la caja tiene que pasarla para tapar la
+      // cola de una `j` o de una coma.
+      const word = await wordFor(
+        "doc-109-descendente",
+        { str: "Juan", x: 100, y: 700, width: 20, height: 10, fontName: "F1" },
+        STYLES,
+      );
+      expect(word.bbox.y + word.bbox.height).toBeGreaterThan(142);
+    });
+
+    it("falls back to the em box when the font metrics are degenerate", async () => {
+      // §13 caso 50: `descent: 0` es lo que declara la fuente del código de
+      // barras de una carátula real. Sin métricas confiables, la caja previa.
+      const word = await wordFor(
+        "doc-109-degenerada",
+        { str: "Juan", x: 100, y: 700, width: 20, height: 10, fontName: "F1" },
+        { F1: { ascent: 0.977, descent: 0 } },
+      );
+      expect(word.bbox.height).toBeCloseTo(10, 6);
+      expect(word.bbox.y).toBeCloseTo(132, 6);
+    });
+
+    it("falls back when the item declares no font at all", async () => {
+      const word = await wordFor("doc-109-sin-fuente", {
+        str: "Juan",
+        x: 100,
+        y: 700,
+        width: 20,
+        height: 10,
+      });
+      expect(word.bbox.height).toBeCloseTo(10, 6);
+      expect(word.bbox.y).toBeCloseTo(132, 6);
+    });
+
+    it("an annotation run keeps the em box", async () => {
+      // El camino de ADR-066 §1 arma su `TextContentLike` a mano y no tiene
+      // `styles` que consultar, así que cae siempre en la reserva.
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () =>
+            createMockPage(
+              0,
+              [],
+              [],
+              { width: 595, height: 842 },
+              [
+                {
+                  id: "annot-109",
+                  rect: [90, 690, 200, 720],
+                  transform: [1, 0, 0, 1, 0, 0],
+                  innerOps: [
+                    { kind: "beginText" },
+                    { kind: "setFont", size: 10 },
+                    { kind: "setTextMatrix", matrix: [1, 0, 0, 1, 100, 700] },
+                    { kind: "showText", glyphs: [{ unicode: "A", width: 1000 }] },
+                  ],
+                },
+              ],
+              [],
+              { F1: { ascent: 0.688, descent: -0.218 } },
+            ),
+          ),
+        ),
+      );
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-109-anotacion"), ctx);
+      const word = output.document.pages[0]!.words[0]!;
+      expect(word.text).toBe("A");
+      expect(word.bbox.height).toBeCloseTo(10, 6);
+    });
+  });
+
+  describe("Orden de lectura por renglones (ADR-110, §13 casos 52-54)", () => {
+    const textsFor = async (
+      documentId: string,
+      items: ReadonlyArray<MockTextItem>,
+      styles?: Readonly<Record<string, { readonly ascent: number; readonly descent: number }>>,
+    ): Promise<ReadonlyArray<string>> => {
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () =>
+            createMockPage(0, items, [], { width: 595, height: 842 }, [], [], styles),
+          ),
+        ),
+      );
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput(documentId), ctx);
+      return output.document.pages[0]!.words.map((w) => w.text);
+    };
+
+    it("two interleaved columns keep each phrase contiguous", async () => {
+      // Caso 52, con la geometría del encabezado escaneado: dos palabras de la
+      // MISMA línea impresa de la derecha vuelven del OCR con cajas de alto muy
+      // distinto (14 y 26 pt), así que sus bordes inferiores quedan a 4 pt uno
+      // del otro — y el de una palabra de la columna izquierda cae justo en el
+      // medio. Bordes inferiores: APELLIDO 150, PROVINCIA 152, NOMBRE 154.
+      //
+      // El comparador previo ordenaba por ese borde con tolerancia de 1 pt, o
+      // sea estrictamente: `APELLIDO PROVINCIA NOMBRE`, con la columna
+      // izquierda METIDA ENTRE las dos palabras del nombre. Agrupando por
+      // banda, las tres caen en el mismo renglón y se ordenan por `x`, así que
+      // el nombre queda contiguo.
+      const texts = await textsFor("doc-110-columnas", [
+        { str: "PROVINCIA", x: 100, y: 690, width: 60, height: 10 },
+        { str: "APELLIDO", x: 300, y: 692, width: 40, height: 14 },
+        { str: "NOMBRE", x: 340, y: 688, width: 60, height: 26 },
+      ]);
+      expect(texts).toEqual(["PROVINCIA", "APELLIDO", "NOMBRE"]);
+    });
+
+    it("a much taller box does not swallow the next line", async () => {
+      // Caso 53: la banda se mide contra la MEDIANA de los altos del renglón.
+      // Con el máximo (o la envolvente), la caja de 26 pt daría una banda de
+      // 13 pt y se llevaría puesto el renglón de abajo, que está a 12.
+      const texts = await textsFor("doc-110-caja-alta", [
+        { str: "uno", x: 100, y: 700, width: 30, height: 10 },
+        { str: "dos", x: 140, y: 700, width: 30, height: 10 },
+        { str: "ruidosa", x: 180, y: 700, width: 30, height: 26 },
+        { str: "abajo", x: 100, y: 688, width: 30, height: 10 },
+      ]);
+      expect(texts).toEqual(["uno", "dos", "ruidosa", "abajo"]);
+    });
+
+    it("single-column native text keeps its previous order", async () => {
+      // Caso 54, la garantía de no regresión: una línea con dos cuerpos
+      // distintos y el renglón siguiente salen exactamente como antes de
+      // ADR-110. Medido sobre 109 páginas antes de implementar.
+      const texts = await textsFor("doc-110-no-regresion", [
+        { str: "chico", x: 100, y: 700, width: 20, height: 8 },
+        { str: "grande", x: 140, y: 700, width: 20, height: 14 },
+        { str: "abajo", x: 100, y: 660, width: 20, height: 10 },
+      ]);
+      expect(texts).toEqual(["chico", "grande", "abajo"]);
+    });
+
+    it("the grouping is deterministic regardless of input order", async () => {
+      // El pre-orden por centro vertical es TOTAL, así que el resultado no
+      // depende de en qué orden lleguen las palabras — que es justo lo que un
+      // comparador con tolerancia no garantiza (ADR-110 §1).
+      const items: ReadonlyArray<MockTextItem> = [
+        { str: "uno", x: 100, y: 700, width: 20, height: 10 },
+        { str: "dos", x: 140, y: 700, width: 20, height: 10 },
+        { str: "tres", x: 100, y: 680, width: 20, height: 10 },
+      ];
+      const directo = await textsFor("doc-110-det-a", items);
+      const invertido = await textsFor("doc-110-det-b", [...items].reverse());
+      expect(directo).toEqual(["uno", "dos", "tres"]);
+      expect(invertido).toEqual(directo);
+    });
+
+    describe("columnas del sello (ADR-113, §13 casos 55-57)", () => {
+      /*
+       * La geometría REAL del encabezado de un fallo escaneado, medida sobre
+       * la página 2 con PSM 11 y pasada a coordenadas PDF (`y` desde abajo,
+       * página de 842): dos columnas cuyos renglones se solapan en vertical y
+       * cuyos cuerpos difieren (8,6 pt a la izquierda contra 6,0 a la
+       * derecha), separadas por un hueco horizontal de 113 pt.
+       *
+       * Con la banda sola, el acumulado se lleva `ARTURO RECURSO DE` al
+       * renglón de la izquierda y deja `SUAREZ, BARTOLOME S/` en otro: el
+       * texto que ve el detector dice `PROVINCIA DE BUENOS AIRES ARTURO
+       * RECURSO DE SUAREZ, BARTOLOME S/`, y de ahí sale una `Person` que se
+       * llama "ARTURO RECURSO DE SUAREZ" mientras el apellido real queda sin
+       * tapar.
+       */
+      const SELLO: ReadonlyArray<MockTextItem> = [
+        { str: "PROVINCIA", x: 50.2, y: 732.5, width: 68, height: 8.9 },
+        { str: "DE", x: 122.2, y: 733.2, width: 16, height: 8.2 },
+        { str: "BUENOS", x: 141.8, y: 733.3, width: 48, height: 8.6 },
+        { str: "AIRES", x: 193.7, y: 733.6, width: 36, height: 8.6 },
+        { str: "SUAREZ,", x: 257.0, y: 728.2, width: 38, height: 7.2 },
+        { str: "BARTOLOME", x: 295.2, y: 729.2, width: 44, height: 6.5 },
+        { str: "ARTURO", x: 343.2, y: 729.7, width: 30, height: 6.0 },
+        { str: "S/", x: 373.7, y: 729.7, width: 10, height: 6.0 },
+        { str: "RECURSO", x: 383.8, y: 730.0, width: 40, height: 6.2 },
+        { str: "DE", x: 425.5, y: 730.4, width: 12, height: 5.8 },
+      ];
+
+      it("a column gap keeps the two columns of a stamp apart", async () => {
+        // Caso 55: cada columna sale entera y en su orden, con el nombre del
+        // imputado contiguo — que es lo que `mapSpanToWords` necesita para no
+        // fabricar una entidad que cruza las dos columnas.
+        const texts = await textsFor("doc-113-sello", SELLO);
+        expect(texts).toEqual([
+          "PROVINCIA",
+          "DE",
+          "BUENOS",
+          "AIRES",
+          "SUAREZ,",
+          "BARTOLOME",
+          "ARTURO",
+          "S/",
+          "RECURSO",
+          "DE",
+        ]);
+      });
+
+      it("a line the accumulator split in two is put back together", async () => {
+        /*
+         * Caso 56: cortar por hueco separa las columnas pero no repara la
+         * línea de la derecha, que el acumulado había partido. Los dos trozos
+         * se reconocen por estar PEGADOS en x —`BARTOLOME` termina en 339,2 y
+         * `ARTURO` empieza en 343,2— y no por solaparse: una versión previa
+         * fusionaba por solapamiento y dejaba `SUAREZ, BARTOLOME` afuera.
+         */
+        const texts = await textsFor("doc-113-reunir", SELLO);
+        const derecha = texts.slice(4);
+        expect(derecha.join(" ")).toBe("SUAREZ, BARTOLOME ARTURO S/ RECURSO DE");
+      });
+
+      it("two words separated by a wide gap on the same line stay in reading order", async () => {
+        // Caso 57, la no regresión: un renglón cortado por hueco se emite en
+        // orden de izquierda a derecha igual, porque los trozos conservan la
+        // posición del renglón que los contenía.
+        const texts = await textsFor("doc-113-hueco-simple", [
+          { str: "izquierda", x: 60, y: 700, width: 40, height: 10 },
+          { str: "derecha", x: 400, y: 700, width: 40, height: 10 },
+          { str: "abajo", x: 60, y: 680, width: 40, height: 10 },
+        ]);
+        expect(texts).toEqual(["izquierda", "derecha", "abajo"]);
+      });
     });
   });
 
@@ -1208,6 +1763,109 @@ describe("PdfEngine — unit tests", () => {
       expect(updatedDoc.pages[0]!.words[0]!.text).toBe("Hello");
       expect(updatedDoc.pages[0]!.words[0]!.source).toBe("ocr");
       expect(updatedDoc.pages[0]!.text).toContain("Hello");
+    });
+
+    /*
+     * ADR-120 — una hoja escaneada TORCIDA se lee en el orden horizontal de su
+     * versión enderezada. Los tests entran por `fuseOcrPage`, que es el camino
+     * real por el que las palabras de OCR llegan a `Page.text`.
+     *
+     * El DISCRIMINADOR (`source === "ocr"`) no lleva test propio a
+     * proposito: ya lo fija el caso 36 de ADR-067 —marca de agua y firma
+     * NATIVAS compartiendo columna, que se ve igual en la geometria—, que
+     * falla si se le saca la condicion. Un test nuevo seria una segunda
+     * copia del mismo guard.
+     */
+    describe("hoja escaneada torcida (ADR-120)", () => {
+      /**
+       * Dos renglones de dos palabras cada uno, en el marco ENDEREZADO, y sus
+       * cajas llevadas al raster torcido con la misma fórmula que
+       * `unrotateBbox` de ocr-engine. El orden de lectura correcto es siempre
+       * `uno dos tres cuatro`.
+       */
+      function hojaTorcida(rotation: 90 | 180 | 270): Word[] {
+        const W = 842;
+        const H = 595;
+        const enDerecho = [
+          { text: "uno", x: 50, y: 100 },
+          { text: "dos", x: 100, y: 100 },
+          { text: "tres", x: 50, y: 140 },
+          { text: "cuatro", x: 100, y: 140 },
+        ];
+        return enDerecho.map(({ text, x, y }) => {
+          const u = { x, y, width: 40, height: 12 };
+          const bbox =
+            rotation === 90
+              ? { x: u.y, y: H - (u.x + u.width), width: u.height, height: u.width }
+              : rotation === 180
+                ? {
+                    x: W - (u.x + u.width),
+                    y: H - (u.y + u.height),
+                    width: u.width,
+                    height: u.height,
+                  }
+                : { x: W - (u.y + u.height), y: u.x, width: u.height, height: u.width };
+          return {
+            text,
+            bbox: { ...bbox, rotation },
+            pageIndex: 0,
+            confidence: 0.9,
+            source: "ocr" as const,
+          };
+        });
+      }
+
+      async function documentoVacio(documentId: string) {
+        vi.mocked(getDocument).mockReturnValue(
+          mockGetDocumentResult(
+            createMockPdfDocument(1, () => ({
+              getViewport: vi.fn(() => ({ width: 595, height: 842 })),
+              getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
+              getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
+            })),
+          ),
+        );
+        await engine.init(ctx);
+        return (await engine.process(createValidInput(documentId), ctx)).document;
+      }
+
+      it.each([90, 180, 270] as const)(
+        "reads a sheet scanned at %i in the order of its uprighted version",
+        async (rotation) => {
+          /*
+           * Sin esto las palabras iban por la rama de runs rotados de ADR-067
+           * —pensada para un sello en un margen, sin agrupado por renglón— y el
+           * orden colapsaba: medido sobre una página real de 268 palabras,
+           * 132-152 de 267 pares consecutivos preservados contra 265/267.
+           *
+           * ALCANCE HONESTO DE ESTE TEST: revertido el mecanismo, fallan 180 y
+           * 270; **90 sigue pasando**. No es un descuido — sobre una grilla
+           * idealizada como ésta la rama de runs acierta el caso de 90, porque
+           * cada renglón enderezado cae en una columna limpia y el orden por
+           * avance coincide. Lo que la rompe en un documento real es el ruido de
+           * las cajas de OCR, que no se puede fabricar en un fixture sin
+           * tunearlo hasta que falle. La evidencia del caso de 90 es la
+           * medición sobre la página real (132/267), no este test; acá vale
+           * como no-regresión.
+           */
+          const doc = await documentoVacio("doc-120-" + String(rotation));
+          const fused = fuseOcrPage(doc, 0, hojaTorcida(rotation));
+          expect(fused.pages[0]!.text).toBe("uno dos tres cuatro");
+        },
+      );
+
+      it("leaves the words themselves untouched: only the ORDER changes", async () => {
+        const doc = await documentoVacio("doc-120-geometria");
+        const palabras = hojaTorcida(90);
+        const fused = fuseOcrPage(doc, 0, palabras);
+        const uno = fused.pages[0]!.words.find((w) => w.text === "uno");
+        const original = palabras.find((w) => w.text === "uno");
+        // La caja que viaja al resto del sistema es la del raster torcido, sin
+        // transformar: el marco enderezado existe solo para ordenar.
+        expect(uno!.bbox.x).toBe(original!.bbox.x);
+        expect(uno!.bbox.y).toBe(original!.bbox.y);
+        expect(uno!.bbox.rotation).toBe(90);
+      });
     });
 
     it("fuseOcrPage returns a new Document reference (immutable)", async () => {

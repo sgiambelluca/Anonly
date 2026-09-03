@@ -10,6 +10,8 @@
 
 > Convención de citas: `ADR-073 §N` refiere a **Decisión §N**; el contexto se cita como `ADR-073, Contexto §N`.
 
+> **Los nombres de este documento son ficticios.** Precedente: ADR-084.
+
 ## Contexto
 
 ### 1. Dos fechas distintas salen como un solo grupo
@@ -51,9 +53,9 @@ Dos hechos de esa tabla importan más que el resto:
 
 ### 3. Qué protege de verdad el pase difuso
 
-El pase difuso existe por el OCR y por la variación de escritura sobre **texto libre**: `"Pablo R0man"` por `"Pablo Roman"` (`O` → `0` es la confusión clásica de Tesseract), `"Estudio Gonzalez"` y `"Estudio González"`, una dirección con y sin `"Nº"`. Ahí un carácter de diferencia es **ruido del canal**, y agrupar es lo correcto: son la misma entidad escrita dos veces.
+El pase difuso existe por el OCR y por la variación de escritura sobre **texto libre**: `"Diego Ram0s"` por `"Diego Ramos"` (`O` → `0` es la confusión clásica de Tesseract), `"Estudio Gonzalez"` y `"Estudio González"`, una dirección con y sin `"Nº"`. Ahí un carácter de diferencia es **ruido del canal**, y agrupar es lo correcto: son la misma entidad escrita dos veces.
 
-> **Corrección (2026-08-18, hallazgo de la revisión del Hito 10.9)**: el ejemplo original de esta sección era `"Pablo Rornan"` por `"Pablo Román"` (confusión `rn`→`m`), citado con similitud 0.909. Verificado contra la implementación real: `levenshteinNormalized("pablo roman", "pablo rornan")` da **0.833**, por debajo del umbral 0.88 — ese par nunca fusionó, ni antes ni después de este ADR. El código y los tests siempre usaron `"Pablo R0man"` (confusión `O`↔`0`, distancia 1, similitud 0.909, la que sí cruza el umbral); esta sección quedó desactualizada respecto de esa corrección hasta ahora.
+> **Corrección (2026-08-18, hallazgo de la revisión del Hito 10.9)**: el ejemplo original de esta sección era `"Diego Rarnos"` por `"Diego Ramos"` (confusión `rn`→`m`), citado con similitud 0.909. Verificado contra la implementación real: `levenshteinNormalized("diego ramos", "diego rarnos")` da **0.833**, por debajo del umbral 0.88 — ese par nunca fusionó, ni antes ni después de este ADR. El código y los tests siempre usaron `"Diego Ram0s"` (confusión `O`↔`0`, distancia 1, similitud 0.909, la que sí cruza el umbral); esta sección quedó desactualizada respecto de esa corrección hasta ahora.
 
 En un identificador estructurado, un carácter de diferencia **es otra entidad**. No hay una lectura intermedia: `20-12345678-9` y `20-12345679-9` son dos contribuyentes, no dos formas de escribir uno. El propio motor ya sabe distinguir las formas legítimas de escribir el mismo identificador —para eso está el `normalizer` de cada patrón, y por eso `34.567.891` y `34567891` caen en el mismo grupo por el pase **exacto** (§13 caso 3), sin necesidad de ningún difuso.
 
@@ -129,7 +131,7 @@ Tests del PR 2 (`grouping-engine`):
 
 - **Unit — el test que define este ADR**: dos `Occurrence` de `EntityType.Date` con `normalizedValue` `01/07/2026` y `07/07/2026` producen **dos** grupos. Es la reproducción literal del caso medido sobre la pericia.
 - **Unit**: lo mismo para `CUIT` (`20123456789` / `20123456799`), `Phone`, `CreditCard`, `IBAN` y `Email` — un carácter de diferencia, dos grupos, en los seis.
-- **Unit — no-regresión del texto libre**: `"Pablo Roman"` y `"Pablo R0man"` (`Person`) siguen cayendo en el mismo grupo, con `aliases` de dos entradas. Mismo test para `Organization` y `Address`.
+- **Unit — no-regresión del texto libre**: `"Diego Ramos"` y `"Diego Ram0s"` (`Person`) siguen cayendo en el mismo grupo, con `aliases` de dos entradas. Mismo test para `Organization` y `Address`.
 - **Unit — no-regresión del pase exacto**: `34.567.891` y `34567891` (`DNI`) siguen en un solo grupo (§13 caso 3). Es el test que separa "el `normalizer` los unificó" de "el difuso los unificó".
 - **Edge**: `Custom` no agrupa por difuso (§1).
 - **Edge**: el DNI, que hoy no se fusiona por 0,005, tampoco se fusiona si el host baja `similarityThreshold` a 0.80 — la protección deja de depender del número.
@@ -139,7 +141,7 @@ Tests del PR 2 (`grouping-engine`):
 
 | Alternativa | Por qué se rechaza |
 |---|---|
-| **Subir el umbral global** (0.95, 0.97) | No resuelve nada y rompe lo que funciona. Con 0.95 el IBAN (0.955) se sigue fusionando y el texto libre deja de agruparse: `"Pablo Roman"` vs `"Pablo R0man"` da 0.909 y quedarían separados, que es el caso para el que el pase difuso existe. Además cambia un número por otro número sin fundamento: la propiedad que hace falta no es "más estricto", es "no aplicable". |
+| **Subir el umbral global** (0.95, 0.97) | No resuelve nada y rompe lo que funciona. Con 0.95 el IBAN (0.955) se sigue fusionando y el texto libre deja de agruparse: `"Diego Ramos"` vs `"Diego Ram0s"` da 0.909 y quedarían separados, que es el caso para el que el pase difuso existe. Además cambia un número por otro número sin fundamento: la propiedad que hace falta no es "más estricto", es "no aplicable". |
 | **Umbral por tipo** | Obliga a inventar trece números sin ningún dato que los respalde, y para los diez tipos estructurados **el número correcto es 1.0**, que es decir "match exacto" con más ceremonia. Suma superficie de configuración (`GroupingConfig` pasaría de dos campos a un mapa por tipo) para expresar peor la misma decisión. |
 | **Distancia absoluta en vez de normalizada** ("≥ 1 edición ⇒ distinto") para los estructurados | Es este ADR escrito de otra forma, pero deja el pase difuso **conectado** a esos tipos con un umbral que alguien puede volver a mover. La guarda por tipo es una condición binaria que no se puede desajustar por accidente. |
 | **Validar la fusión con el `checksum` del patrón** | Solo cuatro tipos tienen `checksum` (CUIT, CreditCard, IBAN, Date por rango). DNI, Phone, License y Plate no tienen ninguno, y son cuatro de los cinco casos del reporte. Además obligaría a `grouping-engine` a conocer los patrones de `regex-engine`, que es exactamente lo que P-1 prohíbe. |
@@ -167,7 +169,7 @@ Tests del PR 2 (`grouping-engine`):
 
 - Los tests de §7, en particular el que define el ADR: `01/07/2026` y `07/07/2026` producen dos grupos.
 - El escenario medido reproducido sobre la pericia real (verificación manual): las fechas del encabezado dejan de colapsar en `Fecha 01` y la lista de entidades muestra la cantidad de fechas que el documento tiene.
-- La no-regresión del texto libre es condición de mergeo, no un extra: si `"Pablo R0man"` deja de agrupar con `"Pablo Roman"`, este ADR rompió lo que vino a proteger.
+- La no-regresión del texto libre es condición de mergeo, no un extra: si `"Diego Ram0s"` deja de agrupar con `"Diego Ramos"`, este ADR rompió lo que vino a proteger.
 - Gates: `pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract`.
 
 ## Referencias

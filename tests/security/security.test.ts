@@ -101,6 +101,7 @@ function buildSensitiveGroups(): ReadonlyArray<EntityGroup> {
       members: [
         {
           occurrenceId: "occ-dni",
+          value: "valor",
           pageIndex: 0,
           bbox: { x: 10, y: 10, width: 80, height: 14 },
           source: DetectionSource.Regex,
@@ -112,6 +113,7 @@ function buildSensitiveGroups(): ReadonlyArray<EntityGroup> {
       enabled: true,
       aliases: [],
       replacementValueUserSet: false,
+      needsReview: false,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     },
@@ -122,6 +124,7 @@ function buildSensitiveGroups(): ReadonlyArray<EntityGroup> {
       members: [
         {
           occurrenceId: "occ-person",
+          value: "valor",
           pageIndex: 0,
           bbox: { x: 10, y: 30, width: 80, height: 14 },
           source: DetectionSource.NER,
@@ -133,6 +136,7 @@ function buildSensitiveGroups(): ReadonlyArray<EntityGroup> {
       enabled: true,
       aliases: [],
       replacementValueUserSet: false,
+      needsReview: false,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     },

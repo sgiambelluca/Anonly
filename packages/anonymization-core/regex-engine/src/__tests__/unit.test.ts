@@ -90,10 +90,11 @@ describe("RegexEngine — unit tests", () => {
   });
 
   describe("DEFAULT_PATTERNS_AR — contrato de datos", () => {
-    it("contiene exactamente los 12 patrones default de Regex_Engine.md (ADR-075 §1)", () => {
+    it("contiene exactamente los 14 patrones default de Regex_Engine.md (ADR-096)", () => {
       const ids = DEFAULT_PATTERNS_AR.map((p) => p.id).sort();
       expect(ids).toEqual(
         [
+          "caratula-ar",
           "credit-card",
           "cuit-ar",
           "date-ar",
@@ -105,6 +106,7 @@ describe("RegexEngine — unit tests", () => {
           "phone-landline-ar",
           "phone-mobile-ar",
           "plate-mercosur-ar",
+          "plate-mercosur-moto-ar",
           "plate-vieja-ar",
         ].sort(),
       );
@@ -122,10 +124,11 @@ describe("RegexEngine — unit tests", () => {
       expect(byId.get("date-ar")).toBe("XX/XX/XXXX");
       expect(byId.get("date-textual-ar")).toBe("XX/XX/XXXX");
       expect(byId.get("license-ar")).toBe("XX-XXXX-XX");
-      // ADR-029 §2: plate-vieja-ar ("ABC 123") y plate-mercosur-ar ("AB 123 CD")
-      // llevan cada una su propio maskFormat fiel a su forma real.
+      // ADR-029 §2 / ADR-096 §2: cada variante de patente lleva su propio
+      // maskFormat, fiel a su forma real — incluida la de motovehículo.
       expect(byId.get("plate-vieja-ar")).toBe("XXX XXX");
       expect(byId.get("plate-mercosur-ar")).toBe("XX XXX XX");
+      expect(byId.get("plate-mercosur-moto-ar")).toBe("X XXX XXX");
     });
   });
 
@@ -191,6 +194,176 @@ describe("RegexEngine — unit tests", () => {
     });
   });
 
+  // ADR-093: la característica telefónica argentina no siempre tiene dos
+  // dígitos — lo invariante es que característica + abonado suman 10.
+  describe("Phone móvil — característica de 2/3/4 dígitos (ADR-093)", () => {
+    // Los cinco ejemplos literales de ADR-093 §1 Contexto: uno detectado ya
+    // antes de este ADR (CABA, característica de 2) y cuatro que "NO
+    // DETECTA" con el patrón viejo — cada uno con y sin el prefijo "+54".
+    const casos: ReadonlyArray<{
+      readonly ciudad: string;
+      readonly sinPrefijo: string;
+      readonly normalizedSinPrefijo: string;
+      readonly normalizedConPrefijo: string;
+    }> = [
+      {
+        ciudad: "CABA (característica de 2)",
+        sinPrefijo: "11 4567-8900",
+        normalizedSinPrefijo: "1145678900",
+        normalizedConPrefijo: "541145678900",
+      },
+      {
+        ciudad: "La Plata (característica de 3)",
+        sinPrefijo: "221 456-7890",
+        normalizedSinPrefijo: "2214567890",
+        normalizedConPrefijo: "542214567890",
+      },
+      {
+        ciudad: "Rosario (característica de 3)",
+        sinPrefijo: "341 456-7890",
+        normalizedSinPrefijo: "3414567890",
+        normalizedConPrefijo: "543414567890",
+      },
+      {
+        ciudad: "Córdoba (característica de 3)",
+        sinPrefijo: "351 456-7890",
+        normalizedSinPrefijo: "3514567890",
+        normalizedConPrefijo: "543514567890",
+      },
+      {
+        ciudad: "Santa Rosa (característica de 4)",
+        sinPrefijo: "2954 12-3456",
+        normalizedSinPrefijo: "2954123456",
+        normalizedConPrefijo: "542954123456",
+      },
+    ];
+
+    it.each(casos)(
+      "$ciudad — sin prefijo de país",
+      async ({ sinPrefijo, normalizedSinPrefijo }) => {
+        const document = makeSinglePageDocument(`doc-caract-${sinPrefijo}`, sinPrefijo.split(" "));
+        const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+        await engine.process({ document }, ctx);
+        const call = busEmitSpy.mock.calls.find(([, event]) => event === EngineEvents.ENTITY_FOUND);
+        const occurrence = (call?.[2] as EntityFound | undefined)?.occurrence;
+        expect(occurrence?.entityType, sinPrefijo).toBe(EntityType.Phone);
+        expect(occurrence?.normalizedValue, sinPrefijo).toBe(normalizedSinPrefijo);
+      },
+    );
+
+    it.each(casos)("$ciudad — con prefijo +54", async ({ sinPrefijo, normalizedConPrefijo }) => {
+      const tokens = [`+54`, ...sinPrefijo.split(" ")];
+      const document = makeSinglePageDocument(`doc-caract-prefijo-${sinPrefijo}`, tokens);
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      await engine.process({ document }, ctx);
+      const call = busEmitSpy.mock.calls.find(([, event]) => event === EngineEvents.ENTITY_FOUND);
+      const occurrence = (call?.[2] as EntityFound | undefined)?.occurrence;
+      expect(occurrence?.entityType, sinPrefijo).toBe(EntityType.Phone);
+      expect(occurrence?.normalizedValue, sinPrefijo).toBe(normalizedConPrefijo);
+    });
+
+    // ADR-093 §1: el `9` opcional del formato de móvil internacional.
+    it('"+54 9 11 4567-8900" matches (formato de móvil internacional)', async () => {
+      const occurrence = await firstOccurrence(engine, ctx, ["+54", "9", "11", "4567-8900"]);
+      expect(occurrence?.entityType).toBe(EntityType.Phone);
+      expect(occurrence?.normalizedValue).toBe("5491145678900");
+    });
+
+    // No-regresión: `phone-landline-ar` no se toca (ADR-093 §3) y sigue
+    // tomando el formato nacional con "0" inicial. La nueva alternancia de
+    // tres ramas de phone-mobile-ar no puede matchear "0221-4567890" (ningún
+    // agrupamiento de 10 dígitos se alinea con los `\b` reales del string,
+    // que solo existen antes de "0221", a los dos lados del guion y al
+    // final) — si esto cambiara, el teléfono se contaría dos veces.
+    it('"0221-4567890" sigue siendo tomado por phone-landline-ar, sin cambios', async () => {
+      const document = makeSinglePageDocument("doc-landline-no-regression", ["0221-4567890"]);
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      const output = await engine.process({ document }, ctx);
+
+      expect(output.occurrenceCount).toBe(1);
+      const phoneOccurrences = busEmitSpy.mock.calls
+        .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
+        .map(([, , payload]) => (payload as EntityFound).occurrence)
+        .filter((o) => o.entityType === EntityType.Phone);
+      expect(phoneOccurrences).toHaveLength(1);
+      expect(phoneOccurrences[0]?.value).toBe("0221-4567890");
+      expect(phoneOccurrences[0]?.normalizedValue).toBe("02214567890");
+    });
+
+    // ADR-093 §2: el falso positivo del CUIT es preexistente (v1.6.1/v1.6.2)
+    // y este ADR no lo toca — mismo valor, mismo mecanismo (checksum del
+    // CUIT falla, y "20-12345678" gana la resolución de overlaps por ser más
+    // largo que el DNI de 8 dígitos embebido). Se afirma acá, con la
+    // alternancia nueva ya en juego, para que quede registrado que el cambio
+    // no lo introdujo ni lo movió.
+    it('"CUIT 20-12345678-9" sigue produciendo el mismo falso positivo, sin cambios (ADR-093 §2)', async () => {
+      const occurrence = await firstOccurrence(engine, ctx, ["CUIT", "20-12345678-9"]);
+      expect(occurrence?.entityType).toBe(EntityType.Phone);
+      expect(occurrence?.value).toBe("20-12345678");
+      expect(occurrence?.normalizedValue).toBe("2012345678");
+    });
+
+    // ADR-093 §1, tabla de medición: las ocho trampas contra las que se midió
+    // el patrón enumerado (7 de ellas no deben emitir Phone; la octava es el
+    // CUIT de arriba, que sí emite y está documentada aparte). Ninguna suma
+    // exactamente 10 dígitos en una corrida contigua de dígitos/separadores
+    // `[\s-]`, que es justo lo que la alternancia de tres ramas exige.
+    describe("las ocho trampas medidas — siete que no deben emitir Phone", () => {
+      const trampas: ReadonlyArray<{ readonly nombre: string; readonly tokens: string[] }> = [
+        {
+          nombre: "expediente (PP-13-00-000000-24/00, ADR-075 §2)",
+          tokens: ["PP-13-00-000000-24/00"],
+        },
+        { nombre: "DNI con puntos", tokens: ["DNI", "34.567.891"] },
+        {
+          nombre: "tarjeta (tres grupos de 4, ADR-093 §1)",
+          tokens: ["4532", "1234", "5678"],
+        },
+        { nombre: "fecha con barras", tokens: ["Fecha", "07/07/2026"] },
+        {
+          nombre: "IBAN (tres grupos de 4, ADR-093 §1)",
+          tokens: ["1234", "5678", "9012"],
+        },
+        {
+          nombre: "paginación, con palabra que corta la corrida",
+          tokens: ["Página", "4567", "de", "8901"],
+        },
+        {
+          nombre: "dos números sueltos adyacentes (ADR-093 §1)",
+          tokens: ["expediente", "1234", "5678"],
+        },
+      ];
+
+      it.each(trampas)("$nombre no emite Phone", async ({ tokens }) => {
+        const document = makeSinglePageDocument(`doc-trampa-${tokens.join("-")}`, tokens);
+        const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+        await engine.process({ document }, ctx);
+        const phoneOccurrences = busEmitSpy.mock.calls
+          .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
+          .map(([, , payload]) => (payload as EntityFound).occurrence)
+          .filter((o) => o.entityType === EntityType.Phone);
+        expect(phoneOccurrences, tokens.join(" ")).toHaveLength(0);
+      });
+    });
+  });
+
+  // ADR-096 §4: el abonado se escribe partido, y el patrón de antes exigía
+  // un solo bloque de dígitos. Apareció solo, en la corrida del evaluador.
+  describe("Phone fijo — separador partido en el abonado (ADR-096 §4)", () => {
+    it('"011 4567-8902" emite Phone', async () => {
+      const occurrence = await firstOccurrence(engine, ctx, ["011", "4567-8902"]);
+      expect(occurrence?.entityType).toBe(EntityType.Phone);
+      expect(occurrence?.normalizedValue).toBe("01145678902");
+    });
+
+    // No-regresión: la forma que ya funcionaba sigue funcionando.
+    it('"0221-4567890" sigue emitiendo Phone (no regresión)', async () => {
+      const occurrence = await firstOccurrence(engine, ctx, ["0221-4567890"]);
+      expect(occurrence?.entityType).toBe(EntityType.Phone);
+      expect(occurrence?.normalizedValue).toBe("02214567890");
+    });
+  });
+
   describe("Email", () => {
     it("valid email matches and normalizes to lowercase", async () => {
       const occurrence = await firstOccurrence(engine, ctx, ["Juan.Perez@Example.COM"]);
@@ -204,6 +377,38 @@ describe("RegexEngine — unit tests", () => {
       const occurrence = await firstOccurrence(engine, ctx, ["ES9121000418450200051332"]);
       expect(occurrence?.entityType).toBe(EntityType.IBAN);
       expect(occurrence?.normalizedValue).toBe("ES9121000418450200051332");
+    });
+
+    // ADR-096 §3: ISO 13616 recomienda imprimir el IBAN en grupos de cuatro
+    // separados por espacios — la forma en que aparece en cualquier
+    // documento — y el patrón de antes no admitía espacios internos, o sea
+    // que detectaba solo la forma que nadie escribe. Ejemplo literal del ADR.
+    it("valid IBAN printed with spaces (ISO 13616 grouping) matches", async () => {
+      const occurrence = await firstOccurrence(engine, ctx, [
+        "ES05",
+        "7068",
+        "9876",
+        "9644",
+        "6251",
+        "9569",
+      ]);
+      expect(occurrence?.entityType).toBe(EntityType.IBAN);
+      expect(occurrence?.normalizedValue).toBe("ES0570689876964462519569");
+    });
+
+    // La red sigue puesta: un IBAN impreso con espacios pero con el dígito
+    // verificador incorrecto sigue sin emitir.
+    it("IBAN printed with spaces but invalid checksum is discarded", async () => {
+      const document = makeSinglePageDocument("doc-iban-spaced-invalid", [
+        "ES05",
+        "7068",
+        "9876",
+        "9644",
+        "6251",
+        "9560",
+      ]);
+      const output = await engine.process({ document }, ctx);
+      expect(output.occurrenceCount).toBe(0);
     });
 
     it("invalid IBAN checksum is discarded", async () => {
@@ -308,9 +513,62 @@ describe("RegexEngine — unit tests", () => {
 
   describe("License", () => {
     it("professional license matches and normalizes", async () => {
+      // ADR-096 §1: la cola de un dígito (`-6`) no es una de las once formas
+      // medidas, pero estaba acá y en el `maskFormat` desde ADR-012. El
+      // patrón la conserva a propósito: sin ella el valor saldría como
+      // "MP-12345" y el "-6" quedaría a la vista.
       const occurrence = await firstOccurrence(engine, ctx, ["MP-12345-6"]);
       expect(occurrence?.entityType).toBe(EntityType.License);
       expect(occurrence?.normalizedValue).toBe("MP123456");
+    });
+
+    // ADR-096 §1, Validación: las 11 formas reales medidas emiten License,
+    // y la alternativa vieja se retira sin perder ninguna.
+    describe("las 11 formas medidas (ADR-096 §1)", () => {
+      const forms: ReadonlyArray<{ readonly nombre: string; readonly tokens: string[] }> = [
+        { nombre: "MN 12345", tokens: ["MN", "12345"] },
+        { nombre: "MP 23456", tokens: ["MP", "23456"] },
+        { nombre: "MN 45.318 (separador de miles)", tokens: ["MN", "45.318"] },
+        { nombre: "MP 9.328 (separador de miles)", tokens: ["MP", "9.328"] },
+        { nombre: "M.P. 34567 (abreviatura con puntos)", tokens: ["M.P.", "34567"] },
+        { nombre: "M.N. 56789 (abreviatura con puntos)", tokens: ["M.N.", "56789"] },
+        { nombre: "MN12345 (sin separador)", tokens: ["MN12345"] },
+        { nombre: "MP-12345 (guión)", tokens: ["MP-12345"] },
+        { nombre: "M.P.-34567 (puntos + guión)", tokens: ["M.P.-34567"] },
+        {
+          nombre: "Matrícula Profesional 40097 (número pelado anclado en la etiqueta)",
+          tokens: ["Matrícula", "Profesional", "40097"],
+        },
+        {
+          nombre: "Matrícula profesional: MP 61852 (etiqueta + prefijo)",
+          tokens: ["Matrícula", "profesional:", "MP", "61852"],
+        },
+      ];
+
+      it.each(forms)("$nombre emite License", async ({ tokens }) => {
+        const document = makeSinglePageDocument(`doc-license-${tokens.join("-")}`, tokens);
+        const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+        await engine.process({ document }, ctx);
+        const licenseOccurrences = busEmitSpy.mock.calls
+          .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
+          .map(([, , payload]) => (payload as EntityFound).occurrence)
+          .filter((o) => o.entityType === EntityType.License);
+        expect(licenseOccurrences, tokens.join(" ")).toHaveLength(1);
+      });
+    });
+
+    // ADR-096 §1: el falso positivo que la alternativa vieja aportaba y que
+    // se retira junto con ella — sin la etiqueta como ancla, "A-12345" de un
+    // número de expediente no es distinguible de una matrícula.
+    it('"Expediente A-12345" does NOT emit License (retired false positive)', async () => {
+      const document = makeSinglePageDocument("doc-expediente-a-12345", ["Expediente", "A-12345"]);
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      await engine.process({ document }, ctx);
+      const licenseOccurrences = busEmitSpy.mock.calls
+        .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
+        .map(([, , payload]) => (payload as EntityFound).occurrence)
+        .filter((o) => o.entityType === EntityType.License);
+      expect(licenseOccurrences).toHaveLength(0);
     });
   });
 
@@ -327,6 +585,39 @@ describe("RegexEngine — unit tests", () => {
       expect(occurrence?.entityType).toBe(EntityType.Plate);
       expect(occurrence?.normalizedValue).toBe("AB123CD");
       expect(occurrence?.maskFormat).toBe("XX XXX XX");
+    });
+
+    it("AR plate motovehículo Mercosur matches and carries its own maskFormat (ADR-096 §2)", async () => {
+      const occurrence = await firstOccurrence(engine, ctx, ["A", "456", "EFG"]);
+      expect(occurrence?.entityType).toBe(EntityType.Plate);
+      expect(occurrence?.normalizedValue).toBe("A456EFG");
+      expect(occurrence?.maskFormat).toBe("X XXX XXX");
+    });
+
+    // ADR-096 §2, Validación: las 8 formas medidas (las tres estructuras,
+    // con los tres separadores), incluidas las dos de motovehículo.
+    describe("las 8 formas medidas (ADR-096 §2)", () => {
+      const forms: ReadonlyArray<{ readonly nombre: string; readonly tokens: string[] }> = [
+        { nombre: "ABC 123 (vieja, espacio)", tokens: ["ABC", "123"] },
+        { nombre: "ABC123 (vieja, sin separador)", tokens: ["ABC123"] },
+        { nombre: "ABC-123 (vieja, guión — transcripción)", tokens: ["ABC-123"] },
+        { nombre: "AB 123 CD (Mercosur auto, espacio)", tokens: ["AB", "123", "CD"] },
+        { nombre: "AB123CD (Mercosur auto, sin separador)", tokens: ["AB123CD"] },
+        { nombre: "AB-123-CD (Mercosur auto, guión)", tokens: ["AB-123-CD"] },
+        { nombre: "A 123 BCD (Mercosur moto, espacio)", tokens: ["A", "123", "BCD"] },
+        { nombre: "A456EFG (Mercosur moto, sin separador)", tokens: ["A456EFG"] },
+      ];
+
+      it.each(forms)("$nombre emite Plate", async ({ tokens }) => {
+        const document = makeSinglePageDocument(`doc-plate-${tokens.join("-")}`, tokens);
+        const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+        await engine.process({ document }, ctx);
+        const plateOccurrences = busEmitSpy.mock.calls
+          .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
+          .map(([, , payload]) => (payload as EntityFound).occurrence)
+          .filter((o) => o.entityType === EntityType.Plate);
+        expect(plateOccurrences, tokens.join(" ")).toHaveLength(1);
+      });
     });
   });
 
@@ -530,8 +821,8 @@ describe("RegexEngine — unit tests", () => {
   });
 
   describe("Guarda de corrida (ADR-075 §2, §4)", () => {
-    it('"PP-13-00-027653-24/00" emits no Phone occurrence', async () => {
-      const document = makeSinglePageDocument("doc-guard-expediente", ["PP-13-00-027653-24/00"]);
+    it('"PP-13-00-000000-24/00" emits no Phone occurrence', async () => {
+      const document = makeSinglePageDocument("doc-guard-expediente", ["PP-13-00-000000-24/00"]);
       const busEmitSpy = vi.spyOn(ctx.bus, "emit");
       await engine.process({ document }, ctx);
 
@@ -555,6 +846,19 @@ describe("RegexEngine — unit tests", () => {
     it("a phone-mobile-ar match preceded by a word and a space still emits (leading separator inside the match)", async () => {
       const occurrence = await firstOccurrence(engine, ctx, ["CUIT", "20-12345678-9"]);
       expect(occurrence?.entityType).toBe(EntityType.Phone);
+    });
+
+    // v1.6.2: el `[\s-]?` opcional de `phone-mobile-ar` se traga el espacio
+    // que lo precede, y ese `match[0]` era el `value` de la ocurrencia — o sea
+    // el `canonicalValue` del grupo. Un valor que arranca con espacio no puede
+    // encontrarse a sí mismo desde "Ver ocurrencias" (ADR-084 §2), porque el
+    // matcheo es por palabra entera. `runPattern` lo recorta antes de armar el
+    // RawMatch, y el `wordSpan` tiene que quedar apuntando al primer dígito.
+    it("the emitted value never carries the edge whitespace the pattern swallowed", async () => {
+      const occurrence = await firstOccurrence(engine, ctx, ["CUIT", "20-12345678-9"]);
+      expect(occurrence?.value).toBe("20-12345678");
+      expect(occurrence?.value).toBe(occurrence?.value.trim());
+      expect(occurrence?.wordSpan?.startIndex).toBe(1);
     });
 
     it("phone, DNI, CUIT, card and date with sentence punctuation still emit", async () => {
@@ -854,6 +1158,44 @@ describe("RegexEngine — unit tests", () => {
       const { output } = await firstManualOccurrence(["O'Brien", "firmó."], "OBrien");
       expect(output.occurrenceCount).toBe(0);
     });
+
+    /*
+     * ADR-115 §1, caso 22 de §13. El recorte de arriba ya hacía que
+     * `findLiteral` ENCONTRARA la palabra con puntuación pegada; lo que le
+     * faltaba era que las ocurrencias que emite **agruparan juntas**.
+     * `normalizedValue` es la clave de `grouping-engine`, y salía de
+     * `normalizeForComparison`, que no recorta bordes: el mismo apellido daba
+     * `suarez,`, `“suarez,` y `suarez.`, tres claves a las que el pase difuso
+     * no llega (0,857 y 0,750 contra un umbral de 0,88). Medido sobre un
+     * expediente escaneado: un solo apellido agregado a mano abría cuatro
+     * grupos.
+     */
+    it("every occurrence of the same word shares normalizedValue, whatever punctuation is glued on", async () => {
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      const document = makeSinglePageDocument("doc-115-normalizado", [
+        "caratulada",
+        "“SUAREZ,",
+        "contra",
+        "SUAREZ",
+        "y",
+        "Suarez.",
+      ]);
+
+      const output = await engine.findLiteral(
+        { document, value: "SUAREZ", entityType: EntityType.Person },
+        ctx,
+      );
+
+      const occurrences = busEmitSpy.mock.calls
+        .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
+        .map(([, , payload]) => (payload as EntityFound).occurrence);
+
+      expect(output.occurrenceCount).toBe(3);
+      // Los `value` conservan lo impreso — es lo que la UI muestra…
+      expect(occurrences.map((o) => o.value)).toEqual(["“SUAREZ,", "SUAREZ", "Suarez."]);
+      // …y las claves de agrupado son UNA sola.
+      expect(new Set(occurrences.map((o) => o.normalizedValue))).toEqual(new Set(["suarez"]));
+    });
   });
 
   describe("searchText (ADR-061 §8 errata)", () => {
@@ -904,6 +1246,258 @@ describe("RegexEngine — unit tests", () => {
 
       expect(matches.map((m) => m.pageIndex)).toEqual([0, 0, 1]);
       expect(matches.map((m) => m.wordSpan.startIndex)).toEqual([1, 2, 1]);
+    });
+  });
+
+  describe("carátula judicial (ADR-092)", () => {
+    /** Los valores emitidos como `Person`, en orden. */
+    async function personas(tokens: ReadonlyArray<string>): Promise<string[]> {
+      const document = makeSinglePageDocument(`doc-caratula-${tokens.join("-")}`, tokens);
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      await engine.process({ document }, ctx);
+      const valores = busEmitSpy.mock.calls
+        .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
+        .map(([, , payload]) => (payload as EntityFound).occurrence)
+        .filter((o) => o.entityType === EntityType.Person)
+        .map((o) => o.value);
+      busEmitSpy.mockRestore();
+      return valores;
+    }
+
+    it("a judicial caption is detected as a person", async () => {
+      await expect(
+        personas(["Expediente", "caratulado:", "Pérez,", "Juan", "c/", "Empresa"]),
+      ).resolves.toEqual(["Pérez, Juan"]);
+      await expect(personas(["Autos:", "Rodríguez,", "Marta", "s/", "sucesión"])).resolves.toEqual([
+        "Rodríguez, Marta",
+      ]);
+      await expect(personas(["Firmado:", "Echeverria,", "Marta"])).resolves.toEqual([
+        "Echeverria, Marta",
+      ]);
+    });
+
+    // Una palabra de cada lado (ADR-092 §1). Un segundo nombre de pila queda
+    // fuera del match, y es deliberado: con un cuantificador goloso el patrón
+    // se traga la palabra capitalizada que siga —medido, `"Echeverria, Marta
+    // Date"` sobre la firma de la pericia— y esa ocurrencia cruza al run
+    // siguiente y hace desaparecer al grupo vecino.
+    it("captures one given name, and leaves a second one to NER", async () => {
+      await expect(
+        personas(["perito", "a", "López,", "María", "Fernanda,", "quien", "acepta"]),
+      ).resolves.toEqual(["López, María"]);
+    });
+
+    /*
+     * La regresión concreta que fijó el límite de arriba: sin él, la
+     * ocurrencia se estira sobre dos runs y Grouping descarta por
+     * solapamiento la entidad de al lado (mismo mecanismo que ADR-088 §1).
+     *
+     * El `"Firmado:"` lo agregó ADR-103, que exige una marca de carátula
+     * adyacente. **La aserción no se tocó**: lo que este test fija —que el
+     * match NO se coma el `"Date:"` que sigue— se verifica igual. Lo único
+     * que cambió es el contexto, y hacia uno **más** fiel: el caso original
+     * salía de la firma de una pericia real, o sea que ahí decía "Firmado".
+     */
+    it("does not swallow a capitalized word that follows the given name", async () => {
+      await expect(
+        personas(["Firmado:", "Echeverria,", "Marta", "Date:", "07/07/2026"]),
+      ).resolves.toEqual(["Echeverria, Marta"]);
+    });
+
+    /*
+     * ADR-122 §1. Una carátula de expediente se escribe en CAJA ALTA, y el
+     * patrón exigía `\p{Lu}\p{Ll}+` de los dos lados: medido sobre un fallo
+     * escaneado de 20 páginas, **0 matches**. El apellido del imputado quedaba
+     * en manos del modelo, sobre el formato más previsible que hay.
+     */
+    it("an all-caps caption from a scanned header is detected", async () => {
+      await expect(
+        personas(["SUAREZ,", "BARTOLOME", "ARTURO", "S/", "RECURSO", "DE", "CASACIÓN"]),
+      ).resolves.toEqual(["SUAREZ, BARTOLOME ARTURO"]);
+    });
+
+    /*
+     * ADR-122 §2. El límite de UN nombre de pila (ADR-092 §1) existía porque
+     * no había nada que frenara al cuantificador. Cuando la carátula termina
+     * en `s/` o `c/` sí lo hay, y ahí el tramo de nombres se puede abrir sin
+     * reabrir aquel agujero: el `s/` es el freno.
+     *
+     * Los dos casos van juntos a propósito — es el MISMO nombre, y lo único
+     * que cambia es si la carátula cierra o no.
+     */
+    it("several given names are captured only when a s/ or c/ closes the caption", async () => {
+      await expect(
+        personas(["Autos:", "López,", "María", "Fernanda", "c/", "Empresa"]),
+      ).resolves.toEqual(["López, María Fernanda"]);
+      // Sin el cierre, la rama anclada por marca sigue tomando UNA sola.
+      await expect(
+        personas(["perito", "a", "López,", "María", "Fernanda,", "quien", "acepta"]),
+      ).resolves.toEqual(["López, María"]);
+    });
+
+    /*
+     * ADR-122 §3. En 2 de las 20 páginas medidas el OCR no lee la `S` de `S/`:
+     * devuelve `8/` y `$/`. Son los dos glifos que Tesseract puso de verdad,
+     * no una lista defensiva — sin ellos el patrón queda en 18/20.
+     */
+    it("tolerates the two glyphs the OCR puts in place of the S", async () => {
+      await expect(personas(["SUAREZ,", "BARTOLOME", "ARTURO", "8/", "RECURSO"])).resolves.toEqual([
+        "SUAREZ, BARTOLOME ARTURO",
+      ]);
+      await expect(personas(["SUAREZ,", "BARTOLOME", "ARTURO", "$/", "RECURSO"])).resolves.toEqual([
+        "SUAREZ, BARTOLOME ARTURO",
+      ]);
+    });
+
+    /*
+     * ADR-122 §2: el valor sigue invirtiéndose con TODOS los nombres de pila,
+     * que es lo que lo hace agrupar con el nombre del cuerpo. Si `flipCaption`
+     * solo diera vuelta el primero, la carátula del sello y el nombre en prosa
+     * quedarían en dos grupos distintos y el export nombraría a la misma
+     * persona con dos tokens.
+     */
+    it("an all-caps caption normalizes to the same key as the body name", async () => {
+      const document = makeSinglePageDocument("doc-caratula-caps-grupo", [
+        "SUAREZ,",
+        "BARTOLOME",
+        "ARTURO",
+        "S/",
+        "RECURSO",
+      ]);
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      await engine.process({ document }, ctx);
+      const normalizados = busEmitSpy.mock.calls
+        .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
+        .map(([, , payload]) => (payload as EntityFound).occurrence)
+        .filter((o) => o.entityType === EntityType.Person)
+        .map((o) => o.normalizedValue);
+      busEmitSpy.mockRestore();
+
+      expect(normalizados).toEqual(["bartolome arturo suarez"]);
+    });
+
+    // La compuerta del léxico. Sin ella el patrón matchea media Argentina:
+    // medido, 7/10 contra 15/16 (ADR-092, Contexto §2).
+    it("toponyms and legal references are not captions", async () => {
+      const trampas: ReadonlyArray<ReadonlyArray<string>> = [
+        ["oficina", "de", "San", "Miguel,", "Tucumán"],
+        ["domicilio", "en", "Mar", "del", "Plata,", "Buenos", "Aires"],
+        ["Notifíquese", "en", "La", "Plata,", "Buenos", "Aires"],
+        ["conforme", "al", "Código", "Civil,", "Título", "III"],
+        ["sede", "en", "Rivadavia", "455,", "Quilmes,", "Provincia"],
+        // Ya está en el orden correcto: no es una carátula, y no por la
+        // compuerta sino por la forma.
+        ["El", "actor,", "Juan", "Pérez,", "promueve", "demanda"],
+      ];
+      for (const tokens of trampas) {
+        await expect(personas(tokens), tokens.join(" ")).resolves.toEqual([]);
+      }
+    });
+
+    // ADR-092 §2: el `normalizer` invierte, y eso es lo que las une. Sin la
+    // inversión el documento anonimizado nombraría a la misma persona con dos
+    // tokens distintos.
+    it("the caption and the body name end up in the same group", async () => {
+      const document = makeSinglePageDocument("doc-caratula-grupo", [
+        "Caratulado:",
+        "Pérez,",
+        "Juan",
+        "—",
+        "el",
+        "actor",
+        "Juan",
+        "Pérez",
+        "promueve",
+      ]);
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      await engine.process({ document }, ctx);
+      const normalizados = busEmitSpy.mock.calls
+        .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
+        .map(([, , payload]) => (payload as EntityFound).occurrence)
+        .filter((o) => o.entityType === EntityType.Person)
+        .map((o) => o.normalizedValue);
+      busEmitSpy.mockRestore();
+
+      // El patrón solo alcanza la carátula; lo que este test fija es que su
+      // `normalizedValue` sea el del nombre en orden natural, que es la clave
+      // por la que Grouping une el pase exacto.
+      expect(normalizados).toEqual(["juan perez"]);
+    });
+  });
+
+  describe("comparación por sub-token (ADR-089)", () => {
+    /** Los `wordSpan.startIndex` de lo que emitió `findLiteral`, en orden. */
+    async function findLiteralSpans(
+      document: ReturnType<typeof makeSinglePageDocument>,
+      value: string,
+    ): Promise<number[]> {
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      await engine.findLiteral({ document, value, entityType: EntityType.Person }, ctx);
+      const spans = busEmitSpy.mock.calls
+        .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
+        .map(([, , payload]) => (payload as EntityFound).occurrence.wordSpan?.startIndex ?? -1);
+      busEmitSpy.mockRestore();
+      return spans;
+    }
+
+    // ADR-089 §1, fila 2 de la tabla: la coma queda ADENTRO de la palabra
+    // porque el PDF no puso espacio, y el recorte de borde de ADR-061 §2 no la
+    // alcanzaba. El usuario no tiene forma de ver dónde el extractor puso el
+    // límite de palabra, así que esto se sentía como "a veces anda".
+    it("finds a name split by internal punctuation", () => {
+      const document = makeSinglePageDocument("doc-interna", ["El", "actor", "Juan", "Pérez,Juan"]);
+
+      const matches = engine.searchText({ document, query: "Juan Pérez" });
+
+      expect(matches).toHaveLength(1);
+      expect(matches[0]?.wordSpan.startIndex).toBe(2);
+      expect(matches[0]?.wordSpan.endIndexExclusive).toBe(4);
+    });
+
+    // ADR-089 §1 fila 3 + §3: sale del propio repo — un grupo puede quedar con
+    // un tramo de un identificador como canonicalValue y no encontrarse a sí
+    // mismo. El bbox cubre la palabra ENTERA: tapar el tramo y dejar el dígito
+    // verificador a la vista no protegería nada.
+    it("finds a prefix of a longer identifier, in both entries, covering the whole word", async () => {
+      const document = makeSinglePageDocument("doc-prefijo", ["CUIT", "20-12345678-9"]);
+
+      const matches = engine.searchText({ document, query: "20-12345678" });
+      expect(matches).toHaveLength(1);
+      expect(matches[0]?.text).toBe("20-12345678-9");
+
+      await expect(findLiteralSpans(document, "20-12345678")).resolves.toEqual([1]);
+    });
+
+    // ADR-089 §1: la limitación, en un test, para que sea conocida y no una
+    // sorpresa. Es el mismo problema que el hallazgo §23c y se arregla en la
+    // detección, no acá.
+    it("does not find a name whose order is inverted in the document", () => {
+      const document = makeSinglePageDocument("doc-invertido", ["Pérez,", "Juan"]);
+
+      expect(engine.searchText({ document, query: "Juan Pérez" })).toEqual([]);
+    });
+
+    // ADR-089 §2: LA asimetría. La lupa solo resalta; "Agregar como…" barre el
+    // documento entero y crea reemplazos reales (`ui/Components.md` §5.4c), así
+    // que un prefijo ahí taparía cada palabra que empiece igual.
+    it("searchText matches a prefix but findLiteral does not", async () => {
+      const document = makeSinglePageDocument("doc-prefijo-asimetrico", ["Ana", "y", "Anabella"]);
+
+      const matches = engine.searchText({ document, query: "Ana" });
+      expect(matches.map((m) => m.text)).toEqual(["Ana", "Anabella"]);
+
+      await expect(findLiteralSpans(document, "Ana")).resolves.toEqual([0]);
+    });
+
+    // ADR-089 §1: los dos lados se parten igual, así que la puntuación interna
+    // de un apellido no cambia nada — es la no regresión de ADR-061 §2.
+    it("still finds a name with internal punctuation by its own text", () => {
+      const document = makeSinglePageDocument("doc-obrien", ["El", "perito", "O'Brien", "firmó"]);
+
+      const matches = engine.searchText({ document, query: "O'Brien" });
+
+      expect(matches).toHaveLength(1);
+      expect(matches[0]?.text).toBe("O'Brien");
     });
   });
 });

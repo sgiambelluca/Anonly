@@ -25,8 +25,19 @@ export { wordsInRect } from "./words-in-rect.js";
 // Predicado de "misma línea" — ADR-061 §2 errata
 export { sharesVerticalBand } from "./shares-vertical-band.js";
 
+// ADR-127: el solapamiento 2D, una sola vez para todo el Core.
+export { rectsOverlap } from "./rects-overlap.js";
+
 // Normalización de comparación de texto libre — ADR-061 §2 errata
-export { normalizeForComparison } from "./normalize-for-comparison.js";
+export { normalizeForComparison, normalizeEntityValue } from "./normalize-for-comparison.js";
+// ADR-105: la primitiva de contexto vive acá porque regex-engine y ner-engine
+// la necesitan igual y no pueden importarse entre sí (P-1/P-2).
+export { buildOccurrenceContext, OCCURRENCE_CONTEXT_CHARS } from "./occurrence-context.js";
+
+// Léxico de nombres de pila — ADR-091 §1. El dato se comparte; la política de
+// cómo interpretarlo (`inferPersonGender`) se queda en `grouping-engine`.
+export { GENDER_LEXICON } from "./gender-lexicon.generated.js";
+export type { GenderLexicon, GenderLexiconLabel } from "./types.js";
 
 // Enums
 export {
@@ -54,6 +65,7 @@ export type {
   Document,
   DocumentSourceKind,
   Occurrence,
+  OccurrenceContext,
   OccurrenceRef,
   EntityGroup,
   SyntheticRequest,

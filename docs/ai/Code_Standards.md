@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=estándares-de-código | dependencias=ninguna | audiencia=IA+humanos | fase=0 -->
+<!-- CONTEXT: scope=estándares-de-código | dependencias=adr/ADR-124-La-Unidad-De-Alcance-Es-El-Commit-No-El-PR.md | audiencia=IA+humanos | fase=0 (P-6 aclara desde ADR-124 que la prohibición de filesystem es sobre el runtime del Core: un test bajo `__tests__` puede leer un fixture) -->
 
 # Anonly — Estándares de Código
 
@@ -226,7 +226,7 @@ En **código de producción**, `as unknown as` tiene una única excepción (ADR-
 ## 11. Commits y PRs
 
 - Commits en formato **Conventional Commits** sin scope: `feat: ...`, `fix: ...`, `docs: ...`, `test: ...`, `refactor: ...`, `chore: ...`.
-- Un PR = un módulo. Nunca tocar dos motores en el mismo PR (ver `ai/AI_Development_Guide.md`).
+- Un **commit** = un módulo. Nunca tocar dos motores en el mismo commit (R-1, ADR-124 §1; ver `ai/AI_Development_Guide.md`). Un PR de implementación sigue siendo de un solo módulo.
 - Título del PR: `<tipo>: <motor> — <cambio>`. Ej: `feat: grouping-engine — soporte de alias manuales`.
 - El PR debe pasar todos los gates ejecutables antes de merge. La tabla canónica de gates vive en `architecture/07_Performance_Strategy.md` §11.4 (única fuente de verdad; no se duplica acá).
 
@@ -241,7 +241,7 @@ En **código de producción**, `as unknown as` tiene una única excepción (ADR-
 | P-3 | **Nunca** `any` ni `@ts-ignore` sin issue asociado. |
 | P-4 | **Nunca** `console.*` en `packages/`. |
 | P-5 | **Nunca** mutar props de entrada en funciones públicas del Core. |
-| P-6 | **Nunca** escribir en el sistema de archivos ni en `localStorage` desde el Core. El Core es puro procesamiento. Aplica a documentos y datos del usuario: cachear assets publicos (modelos OCR/NER) en IndexedDB/Cache Storage via la propia libreria esta permitido (ADR-021 §6). |
+| P-6 | **Nunca** escribir en el sistema de archivos ni en `localStorage` desde el Core. El Core es puro procesamiento. Aplica a documentos y datos del usuario: cachear assets publicos (modelos OCR/NER) en IndexedDB/Cache Storage via la propia libreria esta permitido (ADR-021 §6). La prohibicion es sobre el **runtime del Core**: un test bajo `packages/**/__tests__/` puede **leer** un fixture del disco con `node:fs` —corre en entorno `node`, nunca se empaqueta y no toca datos del usuario—, que es lo que hacen `pdf-engine/src/__tests__/advances-real-pdf.test.ts` y `render-engine/src/__tests__/fixtures/test-helpers.ts`. Escribir sigue prohibido tambien ahi. |
 | P-7 | **Nunca** hacer network requests desde el Core. Aplica a red arbitraria y a datos del usuario: las factories propias de CMap/standard-fonts de `pdf-engine` y `render-engine` que usan `fetch()` pelado contra una constante same-origin (`/pdfjs/cmaps/`, `/pdfjs/standard_fonts/`) para servir assets first-party de `pdfjs-dist` dentro de un Worker sin `document` están permitidas (ADR-053 §2). |
 | P-8 | **Nunca** export default. |
 | P-9 | **Nunca** agregar dependencias externas a un motor sin ADR que lo justifique. |

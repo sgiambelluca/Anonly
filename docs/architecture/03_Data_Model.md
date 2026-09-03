@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=modelo-de-datos | dependencias=01_Technical_Architecture_Document.md,core/Contracts.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-043-RenderEngine-Reparto-Host-Worker-Kernel.md,adr/ADR-046-NerEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-064-Palabras-De-OCR-En-Puntos.md,adr/ADR-065-OCR-Por-Region.md,adr/ADR-066-Texto-De-Anotaciones-Y-Reemplazo-Rotado.md,adr/ADR-067-Orden-De-Lectura-Por-Runs-Rotados.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md | audiencia=IA+humanos | fase=1 (fase 10.9: §7/§8/§12 `fragments` —la descomposición por línea de una ocurrencia que cruza un salto de renglón, ADR-074 §1—; §18 actualizado en fase 10: OcrPagePayload.imageData→ImageData y payloads de transporte LoadDocument/RasterizePage/ExportSave, ADR-036 §4; UnloadDocumentPayload, ADR-043 §4; NerPagePayload por batch + NerKernelSpan/NerKernelProgress, ADR-046; fase 10.5/10.6: §9 EntityGroup.personGender + PersonGender —ADR-060 §2—, §11 escalera de abreviaturas del placeholder —ADR-057 §1—, §18 RenderPagePayload.lineWords —ADR-058 §5—, ExportSavePayload.legendImage + MarkerLegendEntry/MarkerLegendRow + RenderLegendPayload —ADR-059 §3/§5/§6—, §19 ExportOptions.includeMarkerLegend —ADR-059 §1—; fase 10.8: §4 invariante de orden de lectura por runs rotados —ADR-067— y `ocrCompleted` relajado a `requiresOCR === false` con región —ADR-065 §7—, §4.1 `OcrRegion` nueva —ADR-065 §4—, §5 `Word.bbox.rotation` y aclaración de puntos de página para `source: "ocr"` —ADR-066 §6, ADR-064—, §6 `BoundingBox.rotation` —ADR-066 §6—, §18 `RasterizePagePayload.region` —ADR-065 §5—; fase 10.6: §9 `EntityGroup.personGender` —ADR-060 §2—, reescrita por ADR-069 §4/§6 —quién lo escribe, qué significa la ausencia, y que la elección del humano se recuerda aparte en `personGenderUserSet`, interno—) -->
+<!-- CONTEXT: scope=modelo-de-datos | dependencias=01_Technical_Architecture_Document.md,core/Contracts.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-043-RenderEngine-Reparto-Host-Worker-Kernel.md,adr/ADR-046-NerEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-064-Palabras-De-OCR-En-Puntos.md,adr/ADR-065-OCR-Por-Region.md,adr/ADR-066-Texto-De-Anotaciones-Y-Reemplazo-Rotado.md,adr/ADR-067-Orden-De-Lectura-Por-Runs-Rotados.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-109-La-Caja-De-Una-Palabra-Es-Su-Caja-De-Tinta.md,adr/ADR-110-El-Renglon-Es-Un-Grupo-No-Una-Coordenada.md | audiencia=IA+humanos | fase=1 (fase 10.9: §7/§8/§12 `fragments` —la descomposición por línea de una ocurrencia que cruza un salto de renglón, ADR-074 §1—; §18 actualizado en fase 10: OcrPagePayload.imageData→ImageData y payloads de transporte LoadDocument/RasterizePage/ExportSave, ADR-036 §4; UnloadDocumentPayload, ADR-043 §4; NerPagePayload por batch + NerKernelSpan/NerKernelProgress, ADR-046; fase 10.5/10.6: §9 EntityGroup.personGender + PersonGender —ADR-060 §2—, §11 escalera de abreviaturas del placeholder —ADR-057 §1—, §18 RenderPagePayload.lineWords —ADR-058 §5—, ExportSavePayload.legendImage + MarkerLegendEntry/MarkerLegendRow + RenderLegendPayload —ADR-059 §3/§5/§6—, §19 ExportOptions.includeMarkerLegend —ADR-059 §1—; fase 10.8: §4 invariante de orden de lectura por runs rotados —ADR-067— y `ocrCompleted` relajado a `requiresOCR === false` con región —ADR-065 §7—, §4.1 `OcrRegion` nueva —ADR-065 §4—, §5 `Word.bbox.rotation` y aclaración de puntos de página para `source: "ocr"` —ADR-066 §6, ADR-064—, §6 `BoundingBox.rotation` —ADR-066 §6—, §18 `RasterizePagePayload.region` —ADR-065 §5—; fase 10.6: §9 `EntityGroup.personGender` —ADR-060 §2—, reescrita por ADR-069 §4/§6 —quién lo escribe, qué significa la ausencia, y que la elección del humano se recuerda aparte en `personGenderUserSet`, interno—; fase 11: §4 la clave de orden de lectura pasa a la línea de base, §5 `Word.bbox` es la caja de tinta también para `source: "pdf"` y §6 gana el invariante de que `y + height` es la línea de base —ADR-109 §1/§3—; §4 vuelve a cambiar: el orden de lectura deja de tener clave escalar y pasa a agrupar renglones —ADR-110 §1, supersede ADR-109 §3—) -->
 
 # Anonly — Modelo de Datos (TAD bloque 5)
 
@@ -112,7 +112,7 @@ export interface Page {
 ```
 
 **Invariantes**
-- `words` está ordenado por `bbox.y` asc, luego `bbox.x` asc (orden de lectura). **ADR-067**: los words con `bbox.rotation` 90/180/270 se agrupan en *runs* —misma coordenada transversal (tolerancia 1) y contiguos sobre el eje de avance (hueco ≤ 2 cuerpos)—, cada run se ordena en su dirección de avance, y los runs se emiten **enteros y contiguos, en una pasada aparte después de todo el texto horizontal** (nunca intercalados: intercalarlos parte una línea horizontal al medio, porque el comparador con tolerancia no es transitivo). Para `rotation` ausente o `0` el orden es literalmente el de la primera oración, en **cualquier** página tenga o no texto rotado.
+- `words` está **agrupado en renglones** y, dentro de cada renglón, ordenado por `bbox.x` asc (ADR-110 §1). No hay una clave escalar con tolerancia: un word entra al renglón vigente si su centro vertical cae dentro de la banda de ese renglón (mediana de sus centros ± 0,5 × la mediana de sus altos), y si no, abre uno nuevo. Hasta ADR-110 el orden salía de un comparador con tolerancia, que **no es transitivo** — sobre un escaneo eso rompía uno de cada tres pares de palabras consecutivos. **ADR-067**: los words con `bbox.rotation` 90/180/270 se agrupan en *runs* —misma coordenada transversal (tolerancia 1) y contiguos sobre el eje de avance (hueco ≤ 2 cuerpos)—, cada run se ordena en su dirección de avance, y los runs se emiten **enteros y contiguos, en una pasada aparte después de todo el texto horizontal** (nunca intercalados: intercalarlos parte una línea horizontal al medio, porque el comparador con tolerancia no es transitivo). Para `rotation` ausente o `0` el orden es literalmente el de la primera oración, en **cualquier** página tenga o no texto rotado.
 - Si `requiresOCR === false`, entonces `words.length > 0` o la página es genuinamente vacía.
 - `ocrCompleted === true` implica que la página **pasó por OCR**, entera o por región (ADR-065 §7). Hasta ADR-065 implicaba `requiresOCR === true`, porque solo existía el camino de página entera; con el OCR por región una página con texto nativo (`requiresOCR === false`) también puede haber pasado por OCR. `requiresOCR` conserva su significado exacto —"`pdf-engine` no extrajo texto nativo de esta página"— y no debe leerse como "esta página no vio OCR".
 - `text` es la concatenación de `words.map(w => w.text).join(" ")` con normalización NFC.
@@ -152,6 +152,8 @@ export interface Word {
 - `pageIndex` coincide con la página contenedora.
 - `bbox.rotation` (ADR-066 §6) indica en qué dirección corre el texto que ocupa la caja: `0 | 90 | 180 | 270`, **ausente ≡ 0**. No cambia la geometría —el rectángulo sigue siendo axis-aligned y sigue siendo exacto para esos cuatro ángulos (ADR-063 §2)—; le dice al que dibuja adentro cómo orientar el texto. Para ángulos arbitrarios el campo queda ausente y el pintado es horizontal (ADR-066 §8).
 - `bbox` está en coordenadas de página (puntos PDF, origen esquina superior-izquierda). **Vale igual para `source: "ocr"`**: Tesseract devuelve píxeles del raster, y es `ocr-engine` quien los convierte a puntos antes de emitirlos (`OCR_Engine.md` §10, ADR-064). Ningún consumidor debe compensar por el DPI.
+- `bbox` es la **caja de tinta** de la palabra, con las dos fuentes diciendo lo mismo (ADR-109 §1). Para `source: "ocr"` siempre lo fue: Tesseract mide la mancha. Para `source: "pdf"` se construye con las métricas de la fuente que reporta `getTextContent()` — `base − |descent|·cuerpo` … `base + ascent·cuerpo` sobre el eje de ascenso del run—, en vez de ir de la línea de base hacia arriba por un cuerpo entero. Sin métricas utilizables (fuente que declara `ascent ≤ 0` o `descent ≥ 0`, y el camino de anotaciones de ADR-066 §1, que no tiene `styles` que consultar) se conserva la caja previa: `base` … `base + cuerpo`.
+- De ahí sale la garantía que le importa a quien pinta: **tapar `bbox` tapa toda la tinta de la palabra**, descendentes incluidas. Antes de ADR-109 quedaban afuera las colas de `g`, `j`, `p`, `q`, `y`, la `Q` y las comas — una de cada tres palabras, medido.
 
 ---
 
@@ -170,6 +172,7 @@ export interface BoundingBox {
 **Invariantes**
 - `width ≥ 0`, `height ≥ 0`.
 - Coordenadas en sistema de la página (puntos PDF). Para Canvas se convierte con escala `screenDpi / 72`.
+- Para un `Word` de `source: "pdf"`, el rectángulo **cubre la tinta** de la palabra y `y + height` es su línea de base (ADR-109 §1). Para uno de `source: "ocr"` es la mancha que midió Tesseract: cubre la tinta igual, pero **ninguno de sus bordes es una línea de base** (ADR-109 §3, errata). Por eso el orden de lectura de §4 no se apoya en ningún borde, sino en el centro vertical y el agrupado en renglones (ADR-110 §1).
 
 ---
 
@@ -203,7 +206,7 @@ export interface WordSpan {
 - `confidence ∈ [0,1]`. Regex = `1.0`. NER = score del modelo. OCR-derived = `min(ocrConf, nerConf)`.
 - `entityType` debe estar dentro de los tipos que el `source` puede emitir (ver `core/Regex_Engine.md` y `core/NER_Engine.md`).
 
-**`bbox` y `fragments`** (ADR-074 §1). Una entidad puede cruzar un salto de línea: `"Pablo Román Fortes"` con `Pablo` al final de un renglón y `Román Fortes` al principio del siguiente. La unión de esas palabras es la **envolvente**, un rectángulo que abarca las dos líneas enteras — correcto como región, destructivo como censura (medido: 557,2 × 18,2 pt, casi el ancho útil de la página).
+**`bbox` y `fragments`** (ADR-074 §1). Una entidad puede cruzar un salto de línea: `"Diego Ramos Vargas"` con `Diego` al final de un renglón y `Ramos Vargas` al principio del siguiente. La unión de esas palabras es la **envolvente**, un rectángulo que abarca las dos líneas enteras — correcto como región, destructivo como censura (medido: 557,2 × 18,2 pt, casi el ancho útil de la página).
 
 - `bbox` es **la envolvente** y conserva todos sus usos: orden de primera aparición documental (ADR-028), detección de solapamiento entre ocurrencias, hit-test, miniatura de la UI.
 - `fragments`, cuando está presente, es **dónde está realmente la entidad**: un rectángulo por línea, en orden de lectura (`y` asc, `x` asc). **Todo lo que pinte** usa `fragments ?? [bbox]`, nunca la envolvente sola.
@@ -217,11 +220,13 @@ export interface WordSpan {
 
 ## 8. `OccurrenceRef`
 
-Referencia liviana a una `Occurrence`, usada dentro de un `EntityGroup`. No duplica el `value` ni la `bbox` si no es necesario.
+Referencia liviana a una `Occurrence`, usada dentro de un `EntityGroup`. Duplica **lo que la UI necesita sin resolver**, y nada más.
 
 ```ts
 export interface OccurrenceRef {
   readonly occurrenceId: string;
+  readonly value: string;                    // ADR-104: cómo aparece en el documento, sin normalizar
+  readonly context?: OccurrenceContext;      // ADR-105: la frase alrededor; ausente = sin contexto
   readonly pageIndex: number;
   readonly bbox: BoundingBox;                // duplicado a propósito: la UI lo necesita sin resolver
   readonly fragments?: ReadonlyArray<BoundingBox>;  // ADR-074 §1; ausente ≡ [bbox]
@@ -230,6 +235,8 @@ export interface OccurrenceRef {
 ```
 
 **Invariantes**
+- `context` se copia tal cual de la `Occurrence` (ADR-105). **Ausente ≠ vacío**: una ocurrencia puede nacer sin texto alrededor (agregado manual, página de una sola palabra), y el opcional permite distinguirlo. La UI arma `…{before}` **{value}** `{after}…`; el valor **no** se repite adentro del contexto.
+- `value` se copia **tal cual** de la `Occurrence`, sin normalizar (ADR-104 §1): lo que el separador y el fusionador tienen que mostrar es cómo aparece en el documento, que es justamente lo que distingue dos miembros de un grupo fusionado. Requerido y no opcional: toda `Occurrence` tiene `value`.
 - `fragments` se copia tal cual de la `Occurrence` (`toOccurrenceRef`, `grouping-engine`), con la semántica de §7: envolvente en `bbox`, descomposición por línea en `fragments`, ausente ≡ `[bbox]`. Es un salto de la cadena `Word → Occurrence → Replacement` y **se propaga explícitamente**: nada viaja solo por una copia de campos (ADR-066 §6, el precedente donde `rotation` se caía en silencio).
 
 ---

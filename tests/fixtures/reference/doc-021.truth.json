@@ -1,0 +1,47 @@
+{
+  "documentId": "doc-021",
+  "entities": [
+    {
+      "entityType": "PHONE",
+      "value": "+54 11 4567-8900",
+      "pageIndex": 0,
+      "detector": "regex"
+    },
+    {
+      "entityType": "PHONE",
+      "value": "+54 221 456-7890",
+      "pageIndex": 0,
+      "detector": "regex"
+    },
+    {
+      "entityType": "PHONE",
+      "value": "+54 341 456-7890",
+      "pageIndex": 0,
+      "detector": "regex"
+    },
+    {
+      "entityType": "PHONE",
+      "value": "+54 2954 12-3456",
+      "pageIndex": 0,
+      "detector": "regex"
+    },
+    {
+      "entityType": "PHONE",
+      "value": "+54 9 11 4567-8901",
+      "pageIndex": 0,
+      "detector": "regex"
+    },
+    {
+      "entityType": "PHONE",
+      "value": "011 4567-8902",
+      "pageIndex": 0,
+      "detector": "regex"
+    },
+    {
+      "entityType": "PHONE",
+      "value": "11 4567 8903",
+      "pageIndex": 0,
+      "detector": "regex"
+    }
+  ]
+}

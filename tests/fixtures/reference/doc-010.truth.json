@@ -1,0 +1,11 @@
+{
+  "documentId": "doc-010",
+  "entities": [
+    {
+      "entityType": "ORGANIZATION",
+      "value": "Grupo Norte S.R.L.",
+      "pageIndex": 0,
+      "detector": "ner"
+    }
+  ]
+}

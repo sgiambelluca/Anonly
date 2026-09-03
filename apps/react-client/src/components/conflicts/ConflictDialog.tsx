@@ -19,7 +19,7 @@
  * confirmar no cambia datos. Ver `conflictResolution.ts`.
  */
 
-import type { EntityType } from "@anonly/anonymization-core";
+import { ConflictReason, type EntityType } from "@anonly/anonymization-core";
 import { useEffect, useState } from "react";
 
 import { actions } from "../../core-adapter/actions.js";
@@ -29,7 +29,7 @@ import { Dialog } from "../common/Dialog.js";
 import { ENTITY_TYPE_LABEL } from "../entities/entityTypeLabels.js";
 
 import { CONFLICT_REASON_LABEL } from "./conflictLabels.js";
-import { candidateTypes, defaultCandidate } from "./conflictResolution.js";
+import { candidateTypes, defaultCandidate, spellingChoices } from "./conflictResolution.js";
 
 export interface ConflictDialogProps {
   readonly conflictId: string;
@@ -42,6 +42,7 @@ export function ConflictDialog({ conflictId, open, onClose }: ConflictDialogProp
     state.conflicts.find((candidate) => candidate.id === conflictId),
   );
   const [selectedType, setSelectedType] = useState<EntityType | null>(null);
+  const [selectedSpelling, setSelectedSpelling] = useState<string | null>(null);
 
   // El default se recalcula al abrir: es el candidato de mayor confidence, o
   // sea el tipo que el motor ya aplicó (ADR-083 §4).
@@ -56,6 +57,16 @@ export function ConflictDialog({ conflictId, open, onClose }: ConflictDialogProp
       .conflicts.find((candidate) => candidate.id === conflictId);
     if (current === undefined) return;
     setSelectedType(defaultCandidate(current).entityType);
+    // ADR-106: preselecciona la escritura vigente, para que aplicar sin tocar
+    // nada no cambie el valor canónico.
+    setSelectedSpelling(
+      useEntitiesStore
+        .getState()
+        .groupsByType.get(defaultCandidate(current).entityType)
+        ?.find((group) => group.id === current.groupId)?.canonicalValue ??
+        spellingChoices(current)[0] ??
+        null,
+    );
   }, [open, conflictId]);
 
   if (conflict === undefined) {
@@ -68,14 +79,34 @@ export function ConflictDialog({ conflictId, open, onClose }: ConflictDialogProp
 
   const types = candidateTypes(conflict);
   const value = conflict.candidates[0]?.value ?? "";
+  /*
+   * ADR-106: dos conflictos distintos piden preguntas distintas.
+   *
+   * `ambiguous_canonical` es un empate de **escritura**: el motor no pudo
+   * desempatar dos formas del mismo valor —misma frecuencia, misma longitud—
+   * y eligió la primera. Todos sus candidatos comparten tipo, así que sobre el
+   * eje de la clasificación no hay nada que elegir; sobre el eje del VALOR sí,
+   * y es justo lo que el usuario quiere decidir.
+   *
+   * ADR-083 §6 los metía a los dos en la misma bolsa ("no hay elección"), que
+   * era cierto solo para el eje que ese ADR miraba.
+   */
+  const spellings = spellingChoices(conflict);
+  const hasSpellingChoice =
+    conflict.reason === ConflictReason.AmbiguousCanonical && spellings.length > 1;
   // Un solo tipo entre los candidatos ⇒ no hay clasificación en disputa
-  // (`low_confidence`/`ambiguous_canonical`, ADR-083 §5): solo se descarta.
+  // (`low_confidence`, ADR-083 §5): solo se descarta.
   const hasChoice = types.length > 1;
 
   // Arrow function, no `function` declaration: preserva el narrowing de
   // `conflict` (por el `if` de arriba) — ver la nota equivalente en
   // `entities/MergeDialog.tsx`.
   const handleApply = (): void => {
+    if (hasSpellingChoice && selectedSpelling !== null) {
+      // El mecanismo ya existía: `canonicalValue` está en
+      // `GroupUpdateRequested.patch` desde siempre (ADR-106 §2).
+      actions.updateGroup(conflict.groupId, { canonicalValue: selectedSpelling });
+    }
     actions.resolveConflict(conflict.id, selectedType ?? undefined);
     onClose();
   };
@@ -88,7 +119,25 @@ export function ConflictDialog({ conflictId, open, onClose }: ConflictDialogProp
         </p>
         <p className="text-sm text-text-secondary">{CONFLICT_REASON_LABEL[conflict.reason]}</p>
 
-        {hasChoice ? (
+        {hasSpellingChoice ? (
+          <fieldset className="flex flex-col gap-1.5">
+            <legend className="mb-1 text-sm font-medium text-text-secondary">
+              ¿Cuál de estas escrituras usamos?
+            </legend>
+            {spellings.map((spelling) => (
+              <label key={spelling} className="flex items-center gap-2 text-sm text-text-primary">
+                <input
+                  type="radio"
+                  name={`conflict-spelling-${conflict.id}`}
+                  value={spelling}
+                  checked={selectedSpelling === spelling}
+                  onChange={() => setSelectedSpelling(spelling)}
+                />
+                {spelling}
+              </label>
+            ))}
+          </fieldset>
+        ) : hasChoice ? (
           <fieldset className="flex flex-col gap-1.5">
             <legend className="mb-1 text-sm font-medium text-text-secondary">
               ¿Con qué se identifica?
@@ -108,7 +157,7 @@ export function ConflictDialog({ conflictId, open, onClose }: ConflictDialogProp
           </fieldset>
         ) : (
           <p className="text-sm text-text-secondary">
-            No hay dos clasificaciones en disputa: este aviso solo se puede descartar.
+            No hay nada entre qué elegir: este aviso solo se puede descartar.
           </p>
         )}
 

@@ -56,6 +56,7 @@ function makeGroup(overrides: Partial<EntityGroup> = {}): EntityGroup {
     enabled: true,
     aliases: ["Juan Pérez"],
     replacementValueUserSet: false,
+    needsReview: false,
     createdAt: 0,
     updatedAt: 0,
     ...overrides,
@@ -564,6 +565,134 @@ describe("bus-bridge", () => {
 
     expect(usePipelineStore.getState().stage).toBe(PipelineStage.Idle);
     expect(usePipelineStore.getState().groupCount).toBe(0);
+  });
+
+  describe("fallos que NO tumban el pipeline (WORKER_JOB_FAILED / OCR_PAGE_FAILED)", () => {
+    /*
+     * El agujero que cierra este bloque: un worker caído rechaza su job pero
+     * el pipeline sigue hasta `Ready`. Antes de este cableado nada de eso
+     * llegaba a un store, así que la toolbar decía "Listo" sobre un documento
+     * en el que no se detectó nada. `OCR_PAGE_FAILED` no estaba suscrito a
+     * ningún store, y era un gap anotado desde el PR5 del Hito 10.
+     */
+    function crashedError(): SerializedEngineError {
+      return makeSerializedError({
+        code: EngineErrorCode.WORKER_CRASHED,
+        message: "WorkerPool(ner): worker (slot 0) emitió un error de transporte.",
+      });
+    }
+
+    it("un job fallido se cuenta bajo el tipo con el que fue despachado", () => {
+      const bus = createEventBus({ logger: createTestLogger() });
+      const unsubscribe = subscribe(bus, stores);
+
+      bus.emit(EventChannel.Workers, EngineEvents.WORKER_JOB_DISPATCHED, {
+        jobId: "ner-page-3",
+        workerId: "ner-pool",
+        type: "ner-page",
+      });
+      bus.emit(EventChannel.Workers, EngineEvents.WORKER_JOB_FAILED, {
+        jobId: "ner-page-3",
+        error: crashedError(),
+      });
+
+      expect(usePipelineStore.getState().failedJobs).toEqual({ "ner-page": 1 });
+      unsubscribe();
+    });
+
+    it("acumula por tipo: los 11 jobs de NER de la pericia real", () => {
+      const bus = createEventBus({ logger: createTestLogger() });
+      const unsubscribe = subscribe(bus, stores);
+
+      for (let i = 0; i < 11; i++) {
+        bus.emit(EventChannel.Workers, EngineEvents.WORKER_JOB_DISPATCHED, {
+          jobId: `ner-page-${i}`,
+          workerId: "ner-pool",
+          type: "ner-page",
+        });
+        bus.emit(EventChannel.Workers, EngineEvents.WORKER_JOB_FAILED, {
+          jobId: `ner-page-${i}`,
+          error: crashedError(),
+        });
+      }
+
+      expect(usePipelineStore.getState().failedJobs).toEqual({ "ner-page": 11 });
+      unsubscribe();
+    });
+
+    it("un job que completa bien no cuenta como fallo", () => {
+      const bus = createEventBus({ logger: createTestLogger() });
+      const unsubscribe = subscribe(bus, stores);
+
+      bus.emit(EventChannel.Workers, EngineEvents.WORKER_JOB_DISPATCHED, {
+        jobId: "render-page-1",
+        workerId: "render-pool",
+        type: "render-page",
+      });
+      bus.emit(EventChannel.Workers, EngineEvents.WORKER_JOB_COMPLETED, {
+        jobId: "render-page-1",
+        result: null,
+      });
+
+      expect(usePipelineStore.getState().failedJobs).toEqual({});
+      unsubscribe();
+    });
+
+    it("un fallo sin despacho previo no se atribuye a ningún motor", () => {
+      // Inventar una etiqueta sería peor que no contarlo: el aviso al usuario
+      // nombraría un motor que quizá ni corrió.
+      const bus = createEventBus({ logger: createTestLogger() });
+      const unsubscribe = subscribe(bus, stores);
+
+      bus.emit(EventChannel.Workers, EngineEvents.WORKER_JOB_FAILED, {
+        jobId: "huerfano-1",
+        error: crashedError(),
+      });
+
+      expect(usePipelineStore.getState().failedJobs).toEqual({});
+      unsubscribe();
+    });
+
+    it("una página que el OCR no pudo leer también cuenta", () => {
+      const bus = createEventBus({ logger: createTestLogger() });
+      const unsubscribe = subscribe(bus, stores);
+
+      bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FAILED, {
+        documentId: "doc-1",
+        pageIndex: 4,
+        error: makeSerializedError({ code: EngineErrorCode.OCR_PAGE_FAILED }),
+      });
+
+      expect(usePipelineStore.getState().failedJobs).toEqual({ "ocr-page": 1 });
+      unsubscribe();
+    });
+
+    it("un documento nuevo arranca con la cuenta en cero", () => {
+      // Sin esto, el aviso de un análisis viejo sobrevive al siguiente y acusa
+      // a un documento que no tuvo el problema.
+      const bus = createEventBus({ logger: createTestLogger() });
+      const unsubscribe = subscribe(bus, stores);
+
+      bus.emit(EventChannel.Workers, EngineEvents.WORKER_JOB_DISPATCHED, {
+        jobId: "ner-page-1",
+        workerId: "ner-pool",
+        type: "ner-page",
+      });
+      bus.emit(EventChannel.Workers, EngineEvents.WORKER_JOB_FAILED, {
+        jobId: "ner-page-1",
+        error: crashedError(),
+      });
+      expect(usePipelineStore.getState().failedJobs).toEqual({ "ner-page": 1 });
+
+      bus.emit(EventChannel.Pipeline, EngineEvents.DOCUMENT_IMPORTED, {
+        documentId: "doc-2",
+        name: "otro.pdf",
+        sizeBytes: 10,
+      });
+
+      expect(usePipelineStore.getState().failedJobs).toEqual({});
+      unsubscribe();
+    });
   });
 
   describe("subscribePasswordRequired", () => {

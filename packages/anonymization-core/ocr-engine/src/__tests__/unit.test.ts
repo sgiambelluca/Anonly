@@ -5,10 +5,21 @@ import {
   type EngineContext,
   type Word,
 } from "@anonly/shared";
-import { createWorker } from "tesseract.js";
+import { createWorker, OEM } from "tesseract.js";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-vi.mock("tesseract.js", () => ({ createWorker: vi.fn() }));
+vi.mock("tesseract.js", () => ({
+  createWorker: vi.fn(),
+  // ADR-112 §1: el kernel lee `PSM.SPARSE_TEXT` a nivel de módulo, así que el
+  // doble tiene que traerlo o la evaluación del import falla. Los valores son
+  // los de `tesseract.js/src/constants/PSM.js`; que sigan siendo esos lo fija
+  // el test `the page segmentation mode is the tesseract.js enum member`.
+  PSM: { AUTO: "3", SPARSE_TEXT: "11" },
+  // ADR-119 §1: idem para `OEM`, que el kernel lee al crear el worker de OSD.
+  // El valor es el de `tesseract.js/src/constants/OEM.js`; que siga siendo ese
+  // lo fija el test `the OSD worker uses the legacy OCR engine mode`.
+  OEM: { TESSERACT_ONLY: 0, LSTM_ONLY: 1, TESSERACT_LSTM_COMBINED: 2, DEFAULT: 3 },
+}));
 
 import { OcrEngine } from "../ocr.engine.js";
 import { OcrModelMissingError, OcrPageFailedError } from "../ocr.errors.js";
@@ -17,7 +28,9 @@ import {
   createEngineContext,
   createMockConfig,
   createResolvedOcrPool,
+  createImageData,
   createValidOcrPageInput,
+  mockDetectData,
   mockEmptyRecognizeData,
   mockRecognizeData,
   mockTesseractWorker,
@@ -460,6 +473,29 @@ describe("OcrEngine — unit tests", () => {
         setStubCanvasContextAvailable(true);
       }
     });
+
+    /*
+     * `Duplicacion_De_Logica.md` §6: `render-engine` guardaba sus dos
+     * construcciones de `OffscreenCanvas` y este motor no. Sin la guarda, el
+     * constructor tira un `ReferenceError` crudo: la página se pierde sin
+     * llegar como `OCR_PAGE_FAILED`, o sea sin el aviso de análisis incompleto
+     * de ADR-094. El error tipado es lo que hace que se avise.
+     */
+    it("throws OcrPageFailedError, not a raw ReferenceError, when OffscreenCanvas is missing", async () => {
+      vi.mocked(createWorker).mockResolvedValue(mockTesseractWorker(mockEmptyRecognizeData()));
+      await engine.init(ctx);
+
+      const original = globalThis.OffscreenCanvas;
+      // @ts-expect-error -- se borra a propósito para simular el entorno sin la API.
+      delete globalThis.OffscreenCanvas;
+      try {
+        await expect(
+          engine.processPage(createValidOcrPageInput("doc-no-canvas", 0), ctx),
+        ).rejects.toThrow(OcrPageFailedError);
+      } finally {
+        globalThis.OffscreenCanvas = original;
+      }
+    });
   });
 
   describe("Fallback de idiomas por defecto", () => {
@@ -476,6 +512,12 @@ describe("OcrEngine — unit tests", () => {
       );
 
       expect(output).toBeDefined();
+      /*
+       * ADR-119 §1: el worker de reconocimiento carga SOLO los idiomas de la
+       * config. `osd` se mudó a su propio worker porque `detect()` necesita el
+       * OEM legacy, y ese OEM no puede convivir con el reconocimiento: el
+       * `traineddata` pineado es `tessdata_best`, sin componentes legacy.
+       */
       expect(vi.mocked(createWorker)).toHaveBeenCalledWith(
         ["spa", "eng"],
         undefined,
@@ -646,6 +688,450 @@ describe("OcrEngine — unit tests", () => {
       expect(output.confidence).toBe(0.42);
 
       await pooledEngine.dispose();
+    });
+  });
+
+  // ─── ADR-090: orientación del escaneo ───
+
+  describe("orientación del escaneo (ADR-090 §2/§3/§4)", () => {
+    /** Una palabra sola, para poder seguir su caja a través de la rotación. */
+    const UNA_PALABRA = [
+      { text: "Perez", confidence: 90, bbox: { x0: 10, y0: 20, x1: 50, y1: 40 } },
+    ];
+
+    /** Raster de 100 × 40, el mismo que arma `createValidOcrPageInput`. */
+    function inputConRaster(documentId: string): ReturnType<typeof createValidOcrPageInput> {
+      return { ...createValidOcrPageInput(documentId, 0), imageData: createImageData(100, 40) };
+    }
+
+    it("tells Tesseract the dpi instead of letting it estimate, and only when it changes", async () => {
+      // Tipado: sin el parámetro declarado, `mock.calls` es una tupla vacía y
+      // no se puede leer el objeto que se pasó.
+      const setParameters = vi.fn((_params: Record<string, unknown>) => Promise.resolve());
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(UNA_PALABRA), { setParameters }),
+      );
+
+      await engine.init(ctx);
+      await engine.processPage(inputConRaster("doc-dpi-1"), ctx);
+      await engine.processPage(inputConRaster("doc-dpi-2"), ctx);
+
+      // El dpi de `createMockConfig` no cambia entre páginas: una sola llamada.
+      // Se filtra por clave porque ADR-112 agregó un `setParameters` propio
+      // para el modo de segmentación; contar las llamadas totales ataría este
+      // test a un parámetro que no es el suyo.
+      const dpiCalls = setParameters.mock.calls.filter(
+        ([params]) => params["user_defined_dpi"] !== undefined,
+      );
+      expect(dpiCalls).toHaveLength(1);
+      expect(setParameters).toHaveBeenCalledWith({
+        user_defined_dpi: String(ctx.config.ocr.dpi),
+      });
+    });
+
+    it("does not rotate anything when the page is upright (no regression)", async () => {
+      const recognize = vi.fn(() =>
+        Promise.resolve({ jobId: "j", data: mockRecognizeData(UNA_PALABRA) }),
+      );
+      const detect = vi.fn(() => Promise.resolve(mockDetectData(0)));
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(UNA_PALABRA), { recognize, detect }),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.processPage(inputConRaster("doc-derecha"), ctx);
+
+      expect(detect).toHaveBeenCalledTimes(1);
+      // Sin `rotation`: ausente ≡ 0 (`Contracts.md` §5), así que un escaneo
+      // derecho produce exactamente lo de antes del ADR.
+      expect(output.words[0]?.bbox.rotation).toBeUndefined();
+      const factor = 72 / ctx.config.ocr.dpi;
+      expect(output.words[0]?.bbox.x).toBeCloseTo(10 * factor, 6);
+      expect(output.words[0]?.bbox.y).toBeCloseTo(20 * factor, 6);
+    });
+
+    it("recognizes the uprighted raster and brings the boxes back, with rotation", async () => {
+      // El raster original es 100 × 40. Con orientación 90 se endereza a
+      // 40 × 100, así que la caja que reporta Tesseract vive EN ESE espacio y
+      // tiene que caber ahí: (5, 20) de 20 × 40. La inversa la devuelve al
+      // espacio original — x = y₀', y = H − (x₀' + ancho') — con el ancho y el
+      // alto intercambiados.
+      const detect = vi.fn(() => Promise.resolve(mockDetectData(90)));
+      const enderezada = [
+        { text: "Perez", confidence: 90, bbox: { x0: 5, y0: 20, x1: 25, y1: 60 } },
+      ];
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(enderezada), { detect }),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.processPage(inputConRaster("doc-rotada"), ctx);
+
+      const factor = 72 / ctx.config.ocr.dpi;
+      const word = output.words[0];
+      expect(word?.bbox.rotation).toBe(90);
+      expect(word?.bbox.x).toBeCloseTo(20 * factor, 6); // y₀'
+      expect(word?.bbox.y).toBeCloseTo((40 - (5 + 20)) * factor, 6); // H − (x₀' + ancho')
+      expect(word?.bbox.width).toBeCloseTo(40 * factor, 6); // el alto', intercambiado
+      expect(word?.bbox.height).toBeCloseTo(20 * factor, 6); // el ancho', intercambiado
+      // La caja cae DENTRO de la página, que es lo que un mapeo mal hecho
+      // rompe primero.
+      expect(word?.bbox.x).toBeGreaterThanOrEqual(0);
+      expect(word?.bbox.y).toBeGreaterThanOrEqual(0);
+    });
+
+    it("falls back to the pre-ADR path when detect fails, returns null or is unsure", async () => {
+      const casos: ReadonlyArray<ReturnType<typeof vi.fn>> = [
+        vi.fn(() => Promise.reject(new Error("osd no cargó"))),
+        vi.fn(() => Promise.resolve(mockDetectData(null))),
+        vi.fn(() => Promise.resolve(mockDetectData(90, 0.2))), // debajo del piso
+      ];
+
+      for (const detect of casos) {
+        vi.mocked(createWorker).mockResolvedValue(
+          mockTesseractWorker(mockRecognizeData(UNA_PALABRA), { detect }),
+        );
+        const engineLocal = new OcrEngine();
+        await engineLocal.init(ctx);
+        const output = await engineLocal.processPage(inputConRaster("doc-osd-falla"), ctx);
+        await engineLocal.dispose();
+
+        expect(output.words[0]?.bbox.rotation).toBeUndefined();
+        expect(output.words[0]?.bbox.x).toBeCloseTo((10 * 72) / ctx.config.ocr.dpi, 6);
+      }
+    });
+  });
+
+  // ─── ADR-119: la orientación se detecta con el motor que la sabe leer ───
+
+  describe("worker de OSD (ADR-119 §1/§2/§3)", () => {
+    const UNA_PALABRA = [
+      { text: "Perez", confidence: 90, bbox: { x0: 10, y0: 20, x1: 50, y1: 40 } },
+    ];
+    function inputConRaster(documentId: string): ReturnType<typeof createValidOcrPageInput> {
+      return { ...createValidOcrPageInput(documentId, 0), imageData: createImageData(100, 40) };
+    }
+
+    it("the OSD worker uses the legacy OCR engine mode", async () => {
+      /*
+       * ES la línea que estaba mal. Con el OEM por default —LSTM— `detect()`
+       * no tira pero devuelve `0 / 0` SIEMPRE, el piso de confianza lo
+       * descarta y el kernel no rota nunca: medido sobre dos documentos y
+       * cuatro orientaciones cada uno. `legacyCore: true` solo, que es lo que
+       * dedujo ADR-090 §1, no alcanza.
+       */
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(UNA_PALABRA)),
+      );
+
+      await engine.init(ctx);
+      await engine.processPage(inputConRaster("doc-osd-oem"), ctx);
+
+      expect(vi.mocked(createWorker)).toHaveBeenCalledWith(
+        ["osd"],
+        OEM.TESSERACT_ONLY,
+        expect.objectContaining({ legacyCore: true }),
+      );
+      // Y el de reconocimiento NO lleva `osd` ni pide el core legacy: con el
+      // OEM legacy los idiomas no cargarían (`tessdata_best` es solo LSTM).
+      expect(vi.mocked(createWorker)).toHaveBeenCalledWith(
+        ["spa", "eng"],
+        undefined,
+        expect.not.objectContaining({ legacyCore: true }),
+      );
+    });
+
+    it("detects orientation on a half-scale raster (ADR-119 §2)", async () => {
+      /*
+       * OSD solo elige entre cuatro orientaciones, no lee. A media escala
+       * acierta las cuatro con confianza 12-16 y tarda 290 ms en vez de 690 —
+       * y eso es lo que hace que arreglar OSD no cueste tiempo.
+       */
+      // Declarado CON parametro para poder inspeccionar el raster que recibe.
+      const detect = vi.fn((_image: unknown) => Promise.resolve(mockDetectData(0)));
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(UNA_PALABRA), { detect }),
+      );
+
+      await engine.init(ctx);
+      await engine.processPage(inputConRaster("doc-osd-escala"), ctx);
+
+      expect(detect).toHaveBeenCalledTimes(1);
+      const recibido = detect.mock.calls[0]?.[0] as { width: number; height: number };
+      // el raster es 100 × 40
+      expect(recibido.width).toBe(50);
+      expect(recibido.height).toBe(20);
+    });
+
+    it("a failing OSD worker throws instead of pretending every page is upright", async () => {
+      /*
+       * ADR-119 §3: el resto de las fallas de este camino degradan a `0`, y
+       * está bien. Que la detección no esté DISPONIBLE es distinto de "esta
+       * página está derecha", y confundir las dos es exactamente lo que dejó a
+       * ADR-090 sin funcionar sin que nadie se enterara.
+       */
+      vi.mocked(createWorker)
+        .mockResolvedValueOnce(mockTesseractWorker(mockRecognizeData(UNA_PALABRA)))
+        .mockRejectedValueOnce(new Error("osd.traineddata no está"));
+
+      await engine.init(ctx);
+      await expect(engine.processPage(inputConRaster("doc-osd-caido"), ctx)).rejects.toThrow(
+        OcrModelMissingError,
+      );
+    });
+  });
+
+  // ─── ADR-121: las pasadas rotadas sobre las franjas de margen ───
+
+  describe("franjas de margen rotadas (ADR-121)", () => {
+    const CUERPO = [{ text: "cuerpo", confidence: 95, bbox: { x0: 60, y0: 10, x1: 90, y1: 22 } }];
+    const SELLO = [{ text: "PERITO", confidence: 92, bbox: { x0: 2, y0: 2, x1: 30, y1: 14 } }];
+
+    function inputConRaster(documentId: string): ReturnType<typeof createValidOcrPageInput> {
+      return { ...createValidOcrPageInput(documentId, 0), imageData: createImageData(100, 40) };
+    }
+
+    /**
+     * `recognize` que distingue la pasada derecha de las de franja por el
+     * tamaño del raster: el recorte girado nunca mide lo mismo que la página.
+     */
+    function reconocedor(enFranja: typeof SELLO | []): ReturnType<typeof vi.fn> {
+      let primero: string | null = null;
+      return vi.fn((image: unknown) => {
+        const size =
+          typeof image === "object" && image !== null
+            ? String((image as { width?: number }).width) +
+              "x" +
+              String((image as { height?: number }).height)
+            : "?";
+        primero ??= size;
+        const data =
+          size === primero ? mockRecognizeData(CUERPO) : mockRecognizeData([...enFranja]);
+        return Promise.resolve({ jobId: "j", data });
+      });
+    }
+
+    it("recovers rotated text that the upright pass cannot see", async () => {
+      /*
+       * El buscador de líneas de Tesseract busca líneas de base HORIZONTALES,
+       * así que una corrida vertical no es una línea y no la encuentra. Medido
+       * sobre `qa-stamp.pdf`: de 15 palabras rotadas, la pasada derecha
+       * recupera 2; con las franjas, 15.
+       */
+      const recognize = reconocedor(SELLO);
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(CUERPO), { recognize }),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.processPage(inputConRaster("doc-121-sello"), ctx);
+
+      // 1 derecha + 4 pasadas de franja
+      expect(recognize).toHaveBeenCalledTimes(5);
+      const sello = output.words.filter((w) => w.text === "PERITO");
+      expect(sello.length).toBeGreaterThan(0);
+      // Lo rotado se etiqueta como tal: ADR-067 lo emite aparte y ADR-088 §1 le
+      // corta un batch propio, así que no se mezcla con el cuerpo.
+      expect(sello[0]?.bbox.rotation).toBeDefined();
+    });
+
+    it("adds nothing on a page with no rotated text (ADR-121, el caso normal)", async () => {
+      /*
+       * Es el número que decide si esto puede ir siempre encendido: medido
+       * sobre `text-10p.pdf`, las cuatro pasadas producen 4 candidatas y la
+       * regla las filtra TODAS — 16/16 palabras, 0 agregadas. Lo único que
+       * cambia en un documento sin sellos rotados es el reloj.
+       */
+      const recognize = reconocedor([]);
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(CUERPO), { recognize }),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.processPage(inputConRaster("doc-121-sin-rotado"), ctx);
+
+      expect(output.words).toHaveLength(1);
+      expect(output.words[0]?.text).toBe("cuerpo");
+    });
+
+    it("discards a rotated candidate below the confidence floor", async () => {
+      // Las 15 palabras rotadas reales vuelven con 85-96; la basura que
+      // sobrevive al descarte por solapamiento está en 62 y 76. El piso lleva
+      // los sobrantes de 18 a 6.
+      const recognize = reconocedor([
+        { text: "vTZ", confidence: 40, bbox: { x0: 2, y0: 2, x1: 30, y1: 14 } },
+      ]);
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(CUERPO), { recognize }),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.processPage(inputConRaster("doc-121-basura"), ctx);
+
+      expect(output.words.map((w) => w.text)).toEqual(["cuerpo"]);
+    });
+
+    it("discards a rotated candidate that overlaps a word already read upright", async () => {
+      /*
+       * La otra mitad de la regla de fusión, y la que evita duplicar tinta: una
+       * pasada rotada vuelve a leer lo que la derecha ya leyó, y sale distinto.
+       * Sin este descarte quedan 33 sobrantes sobre `qa-stamp.pdf`; con él, 18.
+       *
+       * La geometría está elegida para que las dos cajas se pisen de verdad.
+       * Raster 100 × 40, franja izquierda = x 0..20. Una palabra en la franja
+       * girada 90 en (2, 2)-(30, 14) vuelve, vía `unrotateBbox(b, 90, 20, 40)`,
+       * a (2, 10) de 12 × 28 en el raster derecho — o sea x 2..14, y 10..38.
+       * La palabra derecha de abajo cae justo encima.
+       */
+      const EN_EL_MARGEN = [
+        { text: "margen", confidence: 95, bbox: { x0: 0, y0: 12, x1: 16, y1: 30 } },
+      ];
+      const ROTADA_ENCIMA = [
+        { text: "ruido", confidence: 92, bbox: { x0: 2, y0: 2, x1: 30, y1: 14 } },
+      ];
+      let primero: string | null = null;
+      const recognize = vi.fn((image: unknown) => {
+        const size =
+          typeof image === "object" && image !== null
+            ? String((image as { width?: number }).width) +
+              "x" +
+              String((image as { height?: number }).height)
+            : "?";
+        primero ??= size;
+        const data =
+          size === primero ? mockRecognizeData(EN_EL_MARGEN) : mockRecognizeData(ROTADA_ENCIMA);
+        return Promise.resolve({ jobId: "j", data });
+      });
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(EN_EL_MARGEN), { recognize }),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.processPage(inputConRaster("doc-121-solapa"), ctx);
+
+      /*
+       * Las CUATRO pasadas devuelven la misma candidata, pero solo las dos de
+       * la franja IZQUIERDA caen sobre la palabra derecha —la franja derecha
+       * mapea a x 80+, lejos—. Las dos que pisan se descartan; las otras dos
+       * aportan tinta que nadie habia leido y entran. Sin la regla entran las
+       * cuatro.
+       */
+      const ruido = output.words.filter((w) => w.text === "ruido");
+      expect(ruido).toHaveLength(2);
+      expect(output.words.some((w) => w.text === "margen")).toBe(true);
+    });
+
+    it("does not fail the page when a margin pass throws", async () => {
+      /*
+       * El texto derecho ya está reconocido; perderlo por un extra sería peor
+       * que no tener el extra.
+       */
+      let llamadas = 0;
+      const recognize = vi.fn(() => {
+        llamadas += 1;
+        if (llamadas === 1) {
+          return Promise.resolve({ jobId: "j", data: mockRecognizeData(CUERPO) });
+        }
+        return Promise.reject(new Error("la franja explotó"));
+      });
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(CUERPO), { recognize }),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.processPage(inputConRaster("doc-121-falla"), ctx);
+
+      expect(output.words.map((w) => w.text)).toEqual(["cuerpo"]);
+    });
+  });
+
+  // ─── ADR-112: modo de segmentación de página ───
+
+  describe("modo de segmentación de página (ADR-112 §1)", () => {
+    const UNA_PALABRA = [
+      { text: "Perez", confidence: 90, bbox: { x0: 10, y0: 20, x1: 50, y1: 40 } },
+    ];
+
+    function inputConRaster(documentId: string): ReturnType<typeof createValidOcrPageInput> {
+      return { ...createValidOcrPageInput(documentId, 0), imageData: createImageData(100, 40) };
+    }
+
+    /** Doble de `setParameters` con el parámetro declarado, para poder leerlo. */
+    function spyParameters(): ReturnType<
+      typeof vi.fn<(params: Record<string, unknown>) => Promise<void>>
+    > {
+      return vi.fn((_params: Record<string, unknown>) => Promise.resolve());
+    }
+
+    /** Las llamadas a `setParameters` que fijan el modo, no las del dpi. */
+    function pageSegCalls(setParameters: ReturnType<typeof spyParameters>): unknown[] {
+      return setParameters.mock.calls
+        .map(([params]) => params["tessedit_pageseg_mode"])
+        .filter((value) => value !== undefined);
+    }
+
+    it("applies sparse-text segmentation once per worker instance", async () => {
+      const setParameters = spyParameters();
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(UNA_PALABRA), { setParameters }),
+      );
+
+      await engine.init(ctx);
+      await engine.processPage(inputConRaster("doc-psm-1"), ctx);
+      await engine.processPage(inputConRaster("doc-psm-2"), ctx);
+
+      // El modo es una constante: se aplica una vez, no una por página.
+      expect(pageSegCalls(setParameters)).toEqual(["11"]);
+    });
+
+    it("re-applies the mode when the worker is recreated for a different language set", async () => {
+      const setParameters = spyParameters();
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(UNA_PALABRA), { setParameters }),
+      );
+
+      await engine.init(ctx);
+      await engine.processPage(inputConRaster("doc-psm-spa"), ctx);
+
+      // ADR-045 §3: otro set de idiomas recrea la instancia, y una instancia
+      // nueva no tiene el modo aplicado.
+      const otroCtx = createEngineContext({
+        config: createMockConfig({ ocr: { languages: ["eng"], dpi: ctx.config.ocr.dpi } }),
+      });
+      const otroEngine = new OcrEngine();
+      await otroEngine.init(otroCtx);
+      await otroEngine.processPage(
+        { ...inputConRaster("doc-psm-eng"), languages: ["eng"] },
+        otroCtx,
+      );
+      await otroEngine.dispose();
+
+      expect(pageSegCalls(setParameters)).toEqual(["11", "11"]);
+    });
+
+    it("a rejecting setParameters does not fail the page", async () => {
+      // Best-effort, mismo criterio que el dpi de ADR-090 §2: sin el modo se
+      // reconoce con el default de Tesseract, que es el camino previo al ADR.
+      const setParameters = vi.fn(() => Promise.reject(new Error("parámetro desconocido")));
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(UNA_PALABRA), { setParameters }),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.processPage(inputConRaster("doc-psm-rechaza"), ctx);
+
+      expect(output.words).toHaveLength(1);
+      expect(output.words[0]?.text).toBe("Perez");
+    });
+
+    it("the mode is the tesseract.js PSM enum member, not a hardcoded number", async () => {
+      // El doble de `tesseract.js` trae su propio `PSM` (ver el `vi.mock` de
+      // arriba). Este test lo contrasta contra el enum REAL de la librería:
+      // si tesseract.js renumera `SPARSE_TEXT`, el doble deja de ser fiel y
+      // esto falla, en vez de que la suite siga verde con el número viejo.
+      const real: unknown = await vi.importActual("tesseract.js");
+      const psm = (real as { PSM?: Record<string, unknown> }).PSM;
+      expect(psm?.["SPARSE_TEXT"]).toBe("11");
     });
   });
 });

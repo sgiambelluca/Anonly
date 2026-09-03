@@ -18,17 +18,16 @@
  * en un documento que va a manos de un tercero.
  */
 
-import { normalizeForComparison, type PersonGender } from "@anonly/shared";
+import { normalizeForComparison, type GenderLexicon, type PersonGender } from "@anonly/shared";
 
-/**
- * Valor por nombre en el léxico (ADR-069 §1): determinado (`"f"`/`"m"`) o
- * `"ambiguous"` — nombre marcado `A` (unisex) en el registro de Buenos
- * Aires. Las claves están pre-normalizadas (ver `normalizeForComparison` de
- * `@anonly/shared`): quien construye un `GenderLexicon` es responsable de
- * normalizar antes de insertar.
+/*
+ * ADR-091 §1: `GenderLexicon`/`GenderLexiconLabel` y la tabla `GENDER_LEXICON`
+ * viven en `@anonly/shared` — el dato tiene dos consumidores que no pueden
+ * importarse entre sí. Lo que se queda acá es la POLÍTICA: el orden de pasos
+ * de ADR-060 §4, el descarte de la heurística de terminación y la guarda de
+ * iniciales de ADR-069 §3.
  */
-export type GenderLexiconLabel = "f" | "m" | "ambiguous";
-export type GenderLexicon = ReadonlyMap<string, GenderLexiconLabel>;
+export type { GenderLexicon, GenderLexiconLabel } from "@anonly/shared";
 
 /** Léxico vacío: toda inferencia resuelve "sin determinar" (peor caso = comportamiento pre-ADR-060). */
 export const EMPTY_GENDER_LEXICON: GenderLexicon = new Map();

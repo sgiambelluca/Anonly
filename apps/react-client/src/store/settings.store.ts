@@ -19,6 +19,19 @@
  * quedado en `localStorage` se ignora sola, sin migración: `load()` copia
  * únicamente las claves que conoce.
  *
+ * **`nerEnabled` dejó de ser un setting del usuario** (ADR-126). No tiene
+ * control en `SettingsDialog`, `persist()` **no lo escribe**, y ningún camino
+ * de producto lo apaga: la detección de nombres está siempre activa, y que su
+ * modelo no cargue es un fallo del pipeline (`NER_MODEL_MISSING`), no una
+ * opción de seguir sin ella — un documento anonimizado al que le faltan
+ * justamente los nombres es un resultado equivocado con cara de éxito.
+ *
+ * `load()` **sí** lo sigue leyendo si está presente, y eso es lo único que lo
+ * mantiene vivo: es el canal por el que los escenarios E2E que no necesitan
+ * NER lo apagan antes del arranque (`tests/e2e/support/settingsOverride.ts`),
+ * sin pagar la descarga y la inferencia del modelo en cada spec. Es un canal
+ * de override, no una preferencia: nada en la app escribe esa clave.
+ *
  * Solo settings van a `localStorage`, nunca documentos
  * (docs/architecture/08_Security_Model.md §10.2).
  *
@@ -73,7 +86,6 @@ export const useSettingsStore = create<SettingsSlice>((set, get) => ({
       language: state.language,
       performancePreset: state.performancePreset,
       defaultReplacementMode: state.defaultReplacementMode,
-      nerEnabled: state.nerEnabled,
       ocrLanguages: state.ocrLanguages,
     };
     try {

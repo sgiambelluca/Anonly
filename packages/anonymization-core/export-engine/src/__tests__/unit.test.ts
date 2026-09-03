@@ -118,6 +118,7 @@ describe("ExportEngine — unit", () => {
       members: [
         {
           occurrenceId: "occ-a",
+          value: "valor",
           pageIndex: 0,
           bbox: { x: 1, y: 2, width: 3, height: 4 },
           source: DetectionSource.Regex,
@@ -130,6 +131,7 @@ describe("ExportEngine — unit", () => {
       members: [
         {
           occurrenceId: "occ-b",
+          value: "valor",
           pageIndex: 0,
           bbox: { x: 5, y: 6, width: 7, height: 8 },
           source: DetectionSource.NER,
@@ -142,6 +144,7 @@ describe("ExportEngine — unit", () => {
       members: [
         {
           occurrenceId: "occ-c",
+          value: "valor",
           pageIndex: 1,
           bbox: { x: 9, y: 10, width: 11, height: 12 },
           source: DetectionSource.Regex,
@@ -188,6 +191,7 @@ describe("ExportEngine — unit", () => {
       members: [
         {
           occurrenceId: "occ-fragments",
+          value: "valor",
           pageIndex: 0,
           bbox: { x: 0, y: 0, width: 200, height: 32 },
           source: DetectionSource.NER,
@@ -216,6 +220,7 @@ describe("ExportEngine — unit", () => {
       members: [
         {
           occurrenceId: "occ-no-fragments",
+          value: "valor",
           pageIndex: 0,
           bbox: { x: 0, y: 0, width: 200, height: 12 },
           source: DetectionSource.Regex,
@@ -612,12 +617,14 @@ describe("ExportEngine — unit", () => {
         members: [
           {
             occurrenceId: "occ-1",
+            value: "valor",
             pageIndex: 0,
             bbox: { x: 0, y: 0, width: 10, height: 10 },
             source: DetectionSource.NER,
           },
           {
             occurrenceId: "occ-2",
+            value: "valor",
             pageIndex: 1,
             bbox: { x: 0, y: 0, width: 10, height: 10 },
             source: DetectionSource.NER,
@@ -631,6 +638,7 @@ describe("ExportEngine — unit", () => {
         members: [
           {
             occurrenceId: "occ-3",
+            value: "valor",
             pageIndex: 0,
             bbox: { x: 0, y: 0, width: 10, height: 10 },
             source: DetectionSource.NER,

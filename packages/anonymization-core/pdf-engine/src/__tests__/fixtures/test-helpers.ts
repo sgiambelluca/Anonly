@@ -184,6 +184,13 @@ export type MockTextItem = {
    * lo dan `width` (avance) y `height` (cuerpo).
    */
   readonly linear?: readonly [number, number, number, number];
+  /**
+   * Clave contra `styles` de `getTextContent()` (ADR-109 §1). Ausente = el
+   * item no declara fuente, así que la caja cae a la de cuerpo — el
+   * comportamiento previo a ADR-109, que es lo que asumen todos los mocks
+   * anteriores.
+   */
+  readonly fontName?: string;
 };
 
 /**
@@ -252,6 +259,13 @@ export type Matrix6 = readonly [number, number, number, number, number, number];
 export interface MockGlyph {
   readonly unicode: string;
   readonly width: number;
+  /**
+   * ADR-108 §1: la bandera con la que pdf.js marca al espacio que lleva word
+   * spacing — el código de **un byte** 32 (PDF 32000-1 §9.3.3). En una fuente
+   * compuesta, el espacio de dos bytes llega con `false`. Ausente se comporta
+   * como `false`, que es lo que corresponde para todo glifo que no es espacio.
+   */
+  readonly isSpace?: boolean;
 }
 
 /**
@@ -407,6 +421,7 @@ export function createMockPage(
   pageSize?: { readonly width: number; readonly height: number },
   annotations?: ReadonlyArray<MockAnnotationSpec>,
   pageTextOps?: ReadonlyArray<MockAnnotationInnerOp>,
+  textStyles?: Readonly<Record<string, { readonly ascent: number; readonly descent: number }>>,
 ): Record<string, unknown> {
   const items = textItems ?? [
     { str: `Page${pageIndex}Word1`, x: 50, y: 800, width: 50, height: 12 },
@@ -423,7 +438,9 @@ export function createMockPage(
           transform: [...(item.linear ?? [1, 0, 0, 1]), item.x, item.y],
           width: item.width,
           height: item.height,
+          ...(item.fontName !== undefined ? { fontName: item.fontName } : {}),
         })),
+        ...(textStyles !== undefined ? { styles: textStyles } : {}),
       }),
     ),
     // ADR-065 §1 (compuerta 1): default sin imágenes — preserva el

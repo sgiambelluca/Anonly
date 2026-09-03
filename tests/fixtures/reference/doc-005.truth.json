@@ -1,0 +1,59 @@
+{
+  "documentId": "doc-005",
+  "entities": [
+    {
+      "entityType": "DNI",
+      "value": "77.663.636",
+      "pageIndex": 0,
+      "detector": "regex"
+    },
+    {
+      "entityType": "CUIT",
+      "value": "23-09082125-3",
+      "pageIndex": 0,
+      "detector": "regex"
+    },
+    {
+      "entityType": "PHONE",
+      "value": "+54 11 2637-6255",
+      "pageIndex": 0,
+      "detector": "regex"
+    },
+    {
+      "entityType": "EMAIL",
+      "value": "user91393@example.com",
+      "pageIndex": 0,
+      "detector": "regex"
+    },
+    {
+      "entityType": "IBAN",
+      "value": "FR3814688949288634612306",
+      "pageIndex": 1,
+      "detector": "regex"
+    },
+    {
+      "entityType": "CREDIT_CARD",
+      "value": "5509 5752 0054 0728",
+      "pageIndex": 1,
+      "detector": "regex"
+    },
+    {
+      "entityType": "DATE",
+      "value": "08/11/2016",
+      "pageIndex": 1,
+      "detector": "regex"
+    },
+    {
+      "entityType": "LICENSE",
+      "value": "MP-45398",
+      "pageIndex": 1,
+      "detector": "regex"
+    },
+    {
+      "entityType": "PLATE",
+      "value": "VH 765 FC",
+      "pageIndex": 1,
+      "detector": "regex"
+    }
+  ]
+}

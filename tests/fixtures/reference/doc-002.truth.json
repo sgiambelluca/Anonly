@@ -1,0 +1,41 @@
+{
+  "documentId": "doc-002",
+  "entities": [
+    {
+      "entityType": "ORGANIZATION",
+      "value": "Grupo Norte S.R.L.",
+      "pageIndex": 0,
+      "detector": "ner"
+    },
+    {
+      "entityType": "DNI",
+      "value": "99.548.702",
+      "pageIndex": 0,
+      "detector": "regex"
+    },
+    {
+      "entityType": "IBAN",
+      "value": "ES0570689876964462519569",
+      "pageIndex": 0,
+      "detector": "regex"
+    },
+    {
+      "entityType": "CREDIT_CARD",
+      "value": "5547 5962 5727 9766",
+      "pageIndex": 1,
+      "detector": "regex"
+    },
+    {
+      "entityType": "DATE",
+      "value": "26/04/2011",
+      "pageIndex": 1,
+      "detector": "regex"
+    },
+    {
+      "entityType": "LICENSE",
+      "value": "MP-40097",
+      "pageIndex": 1,
+      "detector": "regex"
+    }
+  ]
+}

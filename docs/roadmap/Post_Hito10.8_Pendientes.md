@@ -44,13 +44,13 @@
 
 Dos CUIT distintos que difieran en un dígito se fusionan en un grupo: el documento anonimizado afirma que dos empresas distintas son la misma. En una pericia judicial eso **distorsiona la evidencia**, no es cosmético. Y el DNI se salva por casualidad, no por diseño.
 
-**Dirección de arreglo.** El pase difuso debe correr **solo para tipos de texto libre** (Persona, Organización, Dirección), donde tolera un OCR imperfecto ("Pablo Rornan"), y **nunca** para los estructurados, donde un carácter distinto significa otra entidad. Cambia semántica documentada de Grouping → **ADR propio**.
+**Dirección de arreglo.** El pase difuso debe correr **solo para tipos de texto libre** (Persona, Organización, Dirección), donde tolera un OCR imperfecto ("Diego Rarnos"), y **nunca** para los estructurados, donde un carácter distinto significa otra entidad. Cambia semántica documentada de Grouping → **ADR propio**.
 
 ---
 
 ## 2. Una entidad partida en dos líneas tapa las dos líneas enteras · *adoptado: ADR-074, Hito 10.9 PRs 3-11*
 
-**Qué pasa.** Con "Pablo Roman" al final de una línea y "Fortes" al inicio de la siguiente, la censura tapa **ambas líneas completas**, destruyendo texto ajeno.
+**Qué pasa.** Con "Diego Ramos" al final de una línea y "Vargas" al inicio de la siguiente, la censura tapa **ambas líneas completas**, destruyendo texto ajeno.
 
 **Causa, verificada.** `mapSpanToWords` (`regex-engine/src/regex.engine.ts`, ~línea 185) calcula un **único** bbox como min/max sobre las palabras del match:
 
@@ -65,7 +65,7 @@ Con palabras en dos líneas, esa unión es un rectángulo que abarca de la izqui
 
 Es la misma clase de falla que ADR-063 —censura que cubre lo que no debe— por otra causa.
 
-**Medido (2026-08-13, segunda prueba manual sobre la pericia de 5 páginas)**. Página 2, entidad `Pablo Román Fortes` detectada por NER: `Pablo` cierra una línea (`x = 524,4`) y `Román Fortes,` abre la siguiente (`x = 14,0`). La unión da **557,2 × 18,2 pt** — prácticamente el ancho útil de la página, dos líneas de alto. En el panel anonimizado es una barra negra que atraviesa el documento.
+**Medido (2026-08-13, segunda prueba manual sobre la pericia de 5 páginas)**. Página 2, entidad `Diego Ramos Vargas` detectada por NER: `Diego` cierra una línea (`x = 524,4`) y `Ramos Vargas,` abre la siguiente (`x = 14,0`). La unión da **557,2 × 18,2 pt** — prácticamente el ancho útil de la página, dos líneas de alto. En el panel anonimizado es una barra negra que atraviesa el documento.
 
 Confirma que **tapa de más, nunca de menos**: no hay fuga, pero destruye contenido no sensible. Aplica igual al `mapSpanToWords` de `ner-engine`, que es la copia adaptada del de `regex-engine`.
 
@@ -75,7 +75,7 @@ Confirma que **tapa de más, nunca de menos**: no hay fuga, pero destruye conten
 
 > **Resuelto, no diferido.** Este ítem se escribió cuando el orden de lectura parecía requerir tocar tres motores. **ADR-067** lo cerró dentro del propio Hito 10.8, con alcance de **un** motor. Se conserva la entrada para que quien venga no vuelva a plantearlo como pendiente.
 
-El diagnóstico original era correcto: `sortWordsByReadingOrder` ordenaba por `y` asc, lo que **invierte** un run de texto a 90° y lo intercala con los demás; un nombre multi-palabra dentro de una firma vertical quedaba irreconocible para NER (`Albarracin, Rocio de los Milagros` llegaba como `… Milagros … los … de … Rocio … Albarracin,`).
+El diagnóstico original era correcto: `sortWordsByReadingOrder` ordenaba por `y` asc, lo que **invierte** un run de texto a 90° y lo intercala con los demás; un nombre multi-palabra dentro de una firma vertical quedaba irreconocible para NER (`Echeverria, Marta de los Mercedes` llegaba como `… Mercedes … los … de … Marta … Echeverria,`).
 
 Lo que estaba mal era el **costo estimado**. El argumento de ADR-063 §4 —"cambia un invariante compartido con `ocr-engine`"— dejó de valer por dos hechos que no existían cuando se escribió:
 
@@ -96,7 +96,7 @@ Ver `adr/ADR-067-Orden-De-Lectura-Por-Runs-Rotados.md` y `MVP.md` §4, Hito 10.8
 
 ## 4bis. Los patrones numéricos matchean partes del número de expediente · *adoptado: ADR-075 §2, Hito 10.9 PR 13*
 
-Verificado sobre la pericia real: `PP-13-00-027653-24/00` produce una ocurrencia **`[PHONE] "00-027653"`**. Los patrones de `default-ar.ts` no tienen forma de distinguir un tramo de número de causa de un teléfono.
+Verificado sobre la pericia real: `PP-13-00-000000-24/00` produce una ocurrencia **`[PHONE] "00-000000"`**. Los patrones de `default-ar.ts` no tienen forma de distinguir un tramo de número de causa de un teléfono.
 
 Es un falso positivo benigno en cuanto a fuga (tapa de más, no de menos), pero ensucia la lista de entidades y probablemente explique el "aparecen tres fechas" que reportó el humano. Conviene revisarlo junto con el punto 4, que toca la misma tabla y ya requiere ADR.
 
@@ -104,7 +104,7 @@ Es un falso positivo benigno en cuanto a fuga (tapa de más, no de menos), pero 
 
 ## 5. Recall de NER sobre nombres
 
-No se detecta "FORTES Pablo Roman" (apellido primero, mayúsculas) ni se unifica con "Dr. Pablo Roman Fortes" de otra página.
+No se detecta "VARGAS Diego Ramos" (apellido primero, mayúsculas) ni se unifica con "Dr. Diego Ramos Vargas" de otra página.
 
 **No es un bug.** `MVP.md` §5 declara el recall del NER como métrica **informativa** hasta v1.0, y el roadmap asume que se escapan entidades. La red de contención está diseñada y **sin implementar**: es el **Hito 10.7** (ADR-061 — agregado manual, selección sobre el visor, buscador).
 
@@ -476,3 +476,630 @@ Migrar a `treegrid` es un cambio grande (navegación bidimensional, `aria-colcou
 Se mantiene por una diferencia de grado, y conviene decirla en voz alta porque es incómoda: aquel rol prometía navegación por flechas, `Home`/`End` y foco gestionado y **no implementaba ninguna de las tres**; éste implementa todo salvo el tab stop único, y retirarlo perdería además la estructura que el lector de pantalla sí aprovecha (nivel, expandido, tamaño del conjunto). **Si esa diferencia de grado se considera insuficiente, la salida es retirar `role="tree"`, no seguir prometiéndolo** — y sería coherente con el precedente.
 
 **Estado**: abierto. Destino: `treegrid`.
+
+---
+
+## 23. El gate manual de ADR-058 §11 / ADR-086 §4 se corrió, y **no pasa**
+
+**Procedencia**: gate manual corrido el 2026-08-22 sobre dos de los tres documentos que faltaban, con fixtures fabricados para eso (`tests/fixtures/generate.ts`: `qa-tables-justified.pdf`, `qa-stamp.pdf`). Se juzgó **sobre el PDF exportado**, no sobre el preview, como exige ADR-058 §11 — el preview dibuja anotaciones que el export no lleva, y mirarlo ahí habría dado un falso positivo.
+
+**Los fixtures son sintéticos y eso acota la lectura**: reproducen el régimen (justificado real con espaciado irregular, celdas apretadas, texto rotado a 90°/270°, marca de agua traslúcida) pero no la suciedad de un expediente real (kerning por par, fuentes subseteadas, sellos rasterizados). Sirven para decidir que **hay defectos**; no sirven para declarar que no hay otros.
+
+### Lo que falla, y es más grave que la costura que el gate iba a mirar
+
+El gate preguntaba si las líneas repintadas se distinguen de las que no se tocaron. La respuesta es que sí, pero el hallazgo importante es otro: **el PDF exportado sigue conteniendo datos personales legibles**.
+
+| # | Hallazgo | Documento | Gravedad |
+|---|---|---|---|
+| 23a | El **folio lateral a 270°** ("Folio 214 — Juan Pérez") no se detecta y sale **en claro** en el exportado | sello | **fuga** |
+| 23b | El **sello a 90°** reemplaza el DNI pero deja "PERITO CARLOS LOPEZ" **en claro**: mayúsculas sin tilde no agrupan con "Carlos López" del cuerpo | sello | **fuga** |
+| 23c | La **carátula** "Pérez, Juan c/ Empresa S.A." no se detecta — orden invertido `Apellido, Nombre`, que es la forma canónica de una carátula judicial | sello | **fuga** |
+| 23d | **OCR sobre el propio PDF exportado recupera "Pérez" y "Juan"** — la fuga no es solo visible a ojo, es legible por máquina | sello | **fuga** |
+| 23e | El reemplazo deja **fragmentos del original visibles** antes del token ("Ju"…, "B"…, "3"…): la caja no cubre el primer glifo | sello | alta |
+| 23f | El **texto justificado fragmenta entidades**: "Empresa S.A." se detecta además como "Em" y "presa S.A", dos grupos espurios | tablas | media |
+| 23g | Los tokens se dibujan **más chicos y levantados** respecto de la línea: se distinguen a simple vista, que es exactamente lo que el gate pedía que no pasara | tablas | media (es el criterio del gate) |
+| 23h | La coma queda **huérfana** tras el token ("[DNI 01] ,") y el token de la fila "Contacto" **desborda el borde de la celda** | tablas | baja |
+
+### Lectura
+
+- **23a/23b/23c/23d son de detección, no de repintado**, y son las que impiden cerrar el hito: la herramienta promete que el dato no sale, y sale. ADR-063 arregló el **bbox** del texto rotado —por eso el DNI del sello sí se reemplaza, con sus dos ocurrencias agrupadas— pero eso no alcanza para que el **nombre** del mismo sello se detecte.
+- **23e es de cobertura del reemplazo** y vale por sí sola: dejar el primer carácter del original es sistemático, no un caso de borde.
+- **23f/23g/23h son lo que el gate iba a mirar**, y confirman que la costura se ve.
+
+### Qué NO se corrió
+
+La tercera fila del gate —documento **escaneado**, ruta OCR— quedó a medias: se ejercitó sobre el propio exportado (que es 100 % imagen, así que entra por OCR) y eso produjo 23d, pero no se completó un ciclo entero de importar-anonimizar-exportar-mirar sobre un escaneado con entidades conocidas. Queda pendiente.
+
+**Ninguno de estos hallazgos se arregló en el mismo paso**: son de motores distintos (grouping/regex para la detección, render/export para la cobertura) y varios piden decisión antes que código. El gate estaba para producir esta lista.
+
+### Estado al 2026-08-27
+
+La sesión de calidad de detección cerró **siete** de los ocho. La columna que importa no es el estado sino **dónde estaba el defecto**: el gate agrupó los hallazgos por dónde se VEN, y tres estaban en otro motor.
+
+| # | estado | dónde estaba de verdad |
+|---|---|---|
+| 23a | **cerrado** — ADR-088 §1 | `ner-engine`. No era detección: dos runs rotados de márgenes opuestos quedaban pegados en `Page.text` y el modelo los leía como una frase |
+| 23b | **cerrado** — ADR-088 §2 | `ner-engine`. El modelo es *cased* y sobre caja alta devuelve cero tokens. No era la normalización de Grouping |
+| 23c | **cerrado** — ADR-092 | `regex-engine`. El modelo ve la carátula pero por debajo del umbral; es un patrón, no un caso de modelo |
+| 23d | **cerrado por consecuencia** | Era el corolario de a/b/c: cerrados esos, el OCR sobre el exportado ya no recupera esos nombres |
+| 23e | **cerrado** — ADR-097, §24 | `pdf-engine`, no `render-engine`. Ancho de glifo promedio sobre fuente proporcional |
+| 23f | **cerrado** — `NER_Engine.md` v1.3.1 | `ner-engine`, no la costura. Un `B-` sobre una continuación de wordpiece partía la entidad |
+| 23g | **mitad cuantificada** — §25 | `render-engine`. El token sale 30 % más chico por una constante; el resto pide el gate visual |
+| 23h | **abierto** — §25 | `render-engine`. Pide el gate visual: ninguna suite headless lo puede juzgar |
+
+**Lo que hizo posible cerrarlos** fue reproducirlos primero: `tests/integration/qa-stamp-detection.test.ts` corre el pipeline con `pdfjs-dist` **sin mockear** —el único test del repo que ve un `Word` rotado de verdad— y replaya la inferencia con los tokens del modelo de producción. Los tres `it.fails` con los que nació están hoy en cero.
+
+**Continúa en [`Calidad_De_Deteccion_Informe.md`](./Calidad_De_Deteccion_Informe.md)**, que junta estos hallazgos con dos reportes de campo sobre documentos reales —una tabla escaneada rotada que el OCR lee horizontal, y texto chico que no reconoce— y propone un orden de trabajo. Es el punto de entrada para la sesión que tome la calidad de detección.
+
+---
+
+## 24. Cerrado el 2026-08-27 (ADR-097): §23e era un ancho de glifo promedio
+
+**Procedencia**: sesión de calidad de detección del 2026-08-26, al reproducir el hallazgo §23e ("el reemplazo deja fragmentos del original visibles antes del token"). La sección nació con la decisión **abierta**, para que las mediciones no se perdieran; se conserva entera porque el razonamiento que llevó a elegir sigue siendo la justificación.
+
+> **Estado (2026-08-27)**: el humano eligió la **opción A** y está implementada — ADR-097, `PDF_Engine.md` v1.8.0. Lo que sigue vale como registro, con **dos correcciones** que la implementación produjo y que están abajo, en "Lo que la implementación corrigió de este diagnóstico".
+
+### El diagnóstico: no es `render-engine`, y no es un redondeo
+
+El informe de calidad suponía "un redondeo o un `x` de inicio tomado del segundo glifo del run". Es otra cosa. En `pdf-engine/src/pdf.engine.ts`, `convertTextItemsToWords`:
+
+```ts
+const charWidth = str.length > 0 ? width / str.length : 0;
+const advance = charWidth * offset;
+```
+
+Un **ancho de glifo promedio uniforme**, repartido sobre una fuente proporcional. Cada palabra que no arranca al principio de su `TextItem` queda corrida, y el error **se acumula** a lo largo del item.
+
+Medido sobre la línea 2 del cuerpo de `qa-stamp.pdf`, cuyas coordenadas reales las escribe `tests/fixtures/generate.ts` y por lo tanto se conocen:
+
+| palabra | x real | x del motor | error |
+|---|---|---|---|
+| `El` | 50,00 | 50 | 0,00 |
+| `Juan` | 96,75 | 105 | **+8,25** |
+| `DNI` | 163,28 | 172 | +8,72 |
+| `en` | 326,68 | 339 | **+12,32** |
+| `Belgrano` | 343,36 | 355 | +11,64 |
+
+El borrado del repintado arranca en `bbox.x`. Para `Juan` eso son 8,25 pt a la derecha del primer glifo, y la `J` mide 6,0 pt: quedan la `J` y parte de la `u` a la vista. Es exactamente el `Ju[HOMBRE 01]` que reportó el gate, y los otros dos casos (`B[DIRE 01]`, `DNI 3 [DNI 01]`) son el mismo número.
+
+**El ancho también está mal**, en la otra dirección: `promueve` sale 8,43 pt más angosto que la realidad, o sea que la caja tapa de menos por la derecha.
+
+Verificado que el modelo uniforme reproduce la salida del motor palabra por palabra: es el mecanismo, no una hipótesis.
+
+### Esto supersede una decisión documentada
+
+ADR-020 §1 lo eligió a sabiendas: *"El prorrateo es una aproximación lineal (no tiene en cuenta kerning ni fuentes proporcionales reales); es aceptable para el propósito de bbox de censura, que no requiere precisión tipográfica exacta."* Esa premisa está falsificada por medición: una caja corrida 8 pt no tapa el dato.
+
+### A quién afecta, y a quién no
+
+El daño depende de **cómo el productor escribió el PDF**, porque pdf.js v4 ya no fusiona items: un `TextItem` es una operación de dibujo.
+
+| fixture | items | mediana | items de una palabra | error |
+|---|---|---|---|---|
+| `qa-stamp.pdf` | 8 | 73 chars | 0 de 8 | hasta 12,3 pt |
+| `text-10p.pdf` | 2 | 85 chars | 0 de 2 | grande |
+| `qa-tables-justified.pdf` | 65 | 6 chars | 60 de 65 | **≈ 0** |
+
+Y hay una propiedad que acota más el daño, por aritmética: cuando una entidad **es** un item completo, su envolvente es exacta de los dos lados —la primera palabra arranca en `charWidth · 0` = el origen del item, y la última termina en `charWidth · str.length` = el ancho del item—. Las tres entidades de `qa-tables-justified.pdf` (`Juan Pérez`, `Empresa S.A.`, `Carlos López`) son items propios, así que **§23f/§23g/§23h no dependen de este hallazgo**.
+
+O sea: el prorrateo solo daña palabras que caen **en el medio** de un item multi-palabra.
+
+### Las dos opciones, y por qué la decisión quedó abierta
+
+El motor **ya** extrae los avances reales por glifo (`.unicode`/`.width` del operator list) en la misma pasada por `getOperatorList()`, para la corrección de origen de ADR-068 y para las palabras de anotación de ADR-066. La maquinaria existe; lo que falta es usarla para el reparto.
+
+**Las dos opciones comparten la mitad fácil** —calcular los avances, con los mismos números— y se diferencian en **de dónde sale la cadena de texto**:
+
+**Opción A — avances reales, cadena de `getTextContent()`, empalme por origen.** Se emite una tabla de avances acumulados junto al origen de cada run de página; `convertTextItemsToWords` casa el item con su run (por origen, con la tolerancia que ADR-068 ya usa) y, si casa, usa `avances[índice]`. Si no casa, cae al prorrateo de hoy. Guarda barata contra el error silencioso: si `avances.length !== str.length`, no se casa.
+
+**Opción B — construir las palabras enteras desde el operator list.** Sin empalme, porque hay una sola fuente. Pero obliga a **reimplementar la extracción de texto de pdf.js**: `getTextContent()` sintetiza espacios que no existen como glifo (`str.push(" ")` gobernado por `trackingSpaceMin = fontSize · TRACKING_SPACE_FACTOR`), resuelve `/ActualText` del contenido marcado y normaliza Unicode. El camino de glifos que ya existe en el motor (`buildAnnotationTextRun`) no hace ninguna de las tres y además descarta el kerning — está probado sobre líneas de firma cortas, no sobre el texto de un expediente.
+
+**La asimetría que decide, y no depende de ninguna medición**:
+
+| | si falla |
+|---|---|
+| **A** | ese item queda **exactamente como hoy**. Visible en el diff de snapshots: la caja no se movió. |
+| **B** | el **texto** del documento cambia, y con él lo que detectan Regex, NER y la lupa. Silencioso: nada falla, simplemente deja de encontrarse una entidad. |
+
+**Descartadas**: ensanchar el borrado en `render-engine` (el bbox equivocado lo consumen además el hit-test de ADR-061 §4, el modo `mask`, `sharesVerticalBand`, la detección de solapamiento de Grouping y el export — y el `width` también está mal, así que ensanchar por la izquierda no alcanza); y pedirle runs más cortos a pdf.js (`disableCombineTextItems` **no existe** en pdf.js v4; en `pdfjs-dist@4.10.38` solo queda `disableNormalization`).
+
+### Lo que falta para decidir bien
+
+**Un expediente real.** Los tres fixtures salen de `pdf-lib`, que escribe espacios como glifos reales, sin ligaduras y sin `ActualText`: son amables con las dos opciones. Medir la tasa de empalme de A sobre ellos daría un número alto que no dice nada sobre un documento de verdad. Los documentos que separan palabras **moviendo el cursor** en vez de con un espacio —justificados, kerneados, salidos de un procesador de texto— son justamente los que el repo no tiene.
+
+Mientras no haya uno, **A es la única de las dos que se puede soltar sin poder verificarla**, porque su peor caso es el comportamiento actual. Si aparece ese expediente y se mide que el empalme falla seguido, B queda disponible y con evidencia que la justifique.
+
+### Lo que la implementación corrigió de este diagnóstico
+
+**1. La columna "x real" de la tabla de arriba es la aproximada, no el modelo.** Esos valores salieron de `font.widthOfTextAtSize` de **pdf-lib** en `tests/fixtures/generate.ts`. Contra ellos, los avances reales dejan un residuo constante de ~1,44 pt. El residuo es de la columna:
+
+| palabra | AFM de Helvetica, a mano | avances (ADR-097) | pdf-lib |
+|---|---|---|---|
+| `El` | 667 + 222 = 889 → **10,67** | 10,67 | 10,67 |
+| `actor,` | 556+500+278+556+333+278 = 2501 → **30,01** | 30,01 | 29,41 |
+| `Juan` | 500+556+556+556 = 2168 → **26,02** | 26,02 | 25,78 |
+
+`generate.ts` dibuja la línea entera con **un solo `drawText` en x = 50**: `widthOfTextAtSize` nunca toca el archivo, solo *predice*. La tinta la ubica el renderer con las métricas de la fuente, que son las que pdf.js reporta glifo a glifo. **El error corregido es cero, no 1,44 pt**, y así lo verifica `advances-real-pdf.test.ts` contra una tabla AFM escrita a mano.
+
+**2. La guarda buena no es la que proponía esta sección.** Acá se proponía `avances.length !== str.length`. La implementación empalma por **cadena exacta**, que la implica y además cubre el caso que de verdad importa: si pdf.js sintetizó un espacio, resolvió un `/ActualText` o normalizó, las dos fuentes divergen **sin** cambiar de longitud.
+
+**MEDIDO el 2026-08-27, y el resultado es malo**: sobre un PDF **real** (un cuento maquetado con un procesador de texto, 11 páginas, aportado por el humano), el motor real reporta un empalme de **1 sobre 455 = 0,2 %**. Sobre los 28 fixtures del repo daba 100 %.
+
+No es una regresión —el camino de reserva es el comportamiento de siempre, ADR-097 §3, y por eso nada falló— pero significa que **ADR-097 no hace nada en un documento de esta clase**.
+
+La causa, medida: `getTextContent()` **re-segmenta el flujo de texto en fronteras propias**, distintas de las operaciones `showText`. No es 1:1 ni N:1 sino una re-segmentación de muchos a muchos:
+
+```
+item = "1"                            run = " "
+item = "No Tengo Boca. Y Debo Gritar." runs = "1 No Tengo Boca. Y Debo Gritar. "
+```
+
+O sea que la clave de empalme de ADR-097 §2 —cadena exacta + origen— **no puede acertar** en esta clase de documento: no existe ningún run cuya cadena sea la del item.
+
+**Qué abre esto**: la salida no es la opción B (que sigue teniendo su contra intacta), sino una tercera — una tabla de avances **continua por página** en vez de por run, ubicando cada item por su origen dentro de ese flujo y caminando desde ahí. Es más trabajo que A y menos riesgo que B. **No decidido**; hace falta medir cuántos documentos reales se parecen a este antes de pagarla.
+
+**Medido sobre expedientes reales el 2026-08-27** (tres documentos aportados por el humano, con el harness ciego: el asistente nunca abrió su contenido, solo leyó agregados):
+
+| documento | páginas | empalme ADR-097 | palabras **expuestas** al defecto |
+|---|---|---|---|
+| cuento literario | 11 | **0,2 %** | — |
+| fallo judicial | 51 | **2,9 %** | **58,6 %** |
+| pericia | 5 | **27,4 %** | **77,2 %** |
+| fixtures del repo (`pdf-lib`) | — | 100 % | — |
+
+"Expuestas" = palabras que **no** son la primera de un item multi-palabra, o sea las únicas que el prorrateo puede correr. Las de una palabra tienen caja exacta por aritmética.
+
+**ADR-097 es inerte en documentos reales**: el empalme no acierta y el prorrateo de ADR-020 §1 gobierna casi todo el texto.
+
+### Y cuánto daño hace, medido (también a ciegas)
+
+La exposición no es el daño. Comparando, palabra por palabra, la posición real (avances glifo a glifo) contra la que da el prorrateo:
+
+| | fallo (51 pp) | pericia (5 pp) |
+|---|---|---|
+| error mediano | 0,91 pt | 1,52 pt |
+| percentil 90 | 4,10 pt | 4,85 pt |
+| máximo | 14,69 pt | **39,16 pt** |
+| **primer carácter a la vista** | **1,7 %** | **11,4 %** |
+
+> **Corrección a la primera redacción de esta sección.** Decía que el defecto afectaba *"a la mayoría del texto"* y que era *"el caso común"*, leyendo el 59-77 % de exposición como si fuera daño. **No lo es.** Expuesto significa "el prorrateo lo puede correr"; el corrimiento real supera el ancho del primer glifo —o sea, deja el primer carácter a la vista— en el **1,7 % al 11,4 %** de las palabras. El defecto es real y acotado, no generalizado.
+
+Aun así **no es despreciable**: en un documento con cien entidades, entre dos y once quedarían con su primer carácter afuera de la caja. Y los máximos son grandes: 39 pt son más de tres caracteres.
+
+**Lo que esta medición NO cubre**: solo mira el **borde izquierdo**. El ancho de la caja también sale mal (ADR-097, Contexto §1: `promueve` salía 8,43 pt más angosta), así que puede tapar de menos por la derecha sin que este número lo registre. Y un corrimiento menor al primer glifo igual deja una astilla visible.
+
+### Gate visual sobre el PDF exportado de un expediente real (2026-08-27)
+
+El humano corrió el export sobre la pericia con todas las entidades activas y compartió el resultado anonimizado. **Confirma el defecto, y destapa dos más.**
+
+*(No se transcriben los fragmentos filtrados: son el dato real asomando. Se describen por categoría y cantidad.)*
+
+**(a) La fuga de §24, confirmada — y cae justo sobre los nombres.** En una sola página se cuentan **cinco** casos de caracteres del original a la izquierda del token:
+
+| tipo de entidad | caracteres a la vista |
+|---|---|
+| nombre de profesional | 1 |
+| apellido de profesional | **3** |
+| nombre de profesional | 1 |
+| nombre de institución | 2 |
+| topónimo | 1 |
+
+Que la mediana del error sea de 1,52 pt no consuela: **las que fallan son las que importan**. Una inicial de apellido más el contexto de la frase alcanza para reidentificar.
+
+**(b) La caja también tapa de menos por la DERECHA.** Un token cubre un identificador y deja su cola visible pegada al token. Es el defecto de ancho que ADR-097, Contexto §1 ya había medido (`promueve` salía 8,43 pt más angosta) y que la medición ciega de arriba **no registra**, porque solo mira el borde izquierdo.
+
+**(c) Defecto distinto, y de DETECCIÓN: el número de expediente queda entero a la vista.** Aparece dos veces, en dos formatos (uno tipo `PP-NN-NN-NNNNNN-NN/NN` y otro tipo `I.P.P. N°NN-NNNNN-NN`), **sin tapar en absoluto**. No es geometría: no lo detectó nadie, porque `default-ar.ts` no tiene patrón para número de expediente. En un anonimizador de expedientes judiciales, ese número es un identificador directo del caso — **es el hueco de detección más grave encontrado hasta ahora**, y no estaba en ningún informe.
+
+**Consecuencia**: §24 deja de ser teórico. Y (c) merece entrada propia — ver §26.
+
+### Cerrado el 2026-08-27 — ADR-102
+
+El defecto (a) y (b) se atacan por la misma vía: el recorrido pasa a emitir un **flujo continuo de glifos por página** y el item se alinea contra él carácter a carácter, en vez de exigir que su cadena sea igual a la de un run. Medido con el motor ya implementado:
+
+| | items alineados | palabras que siguen con prorrateo |
+|---|---|---|
+| fallo judicial (51 pp) | 2,9 % → **100 %** | 8388 (58,6 %) → **0** |
+| pericia (5 pp) | 27,4 % → **89,3 %** | 1222 (77,2 %) → **11 (0,9 %)** |
+
+Los items que no alinean resultaron ser minúsculos: en la pericia son nueve items que suman **once palabras**. La exposición pasa de ser la mayoría del texto a ser residual.
+
+**Falta rehacer el gate visual** con esto aplicado, para confirmar que las cinco fugas de la página medida efectivamente desaparecieron — es lo único que cierra (a) y (b) del todo. El defecto (c), el número de expediente, **no lo toca esta decisión**: sigue abierto en §26. Sobre los 28 fixtures del repo da 100 %, pero todos salen de `pdf-lib` (ver "Lo que falta para decidir bien"). ADR-097 §5 instrumenta la cuenta por página, en `debug`, para que el día que aparezca un documento de verdad el número esté ahí sin volver a instrumentar. Ese número es lo único que justificaría pagar la opción B.
+
+### Cerrado el 2026-08-30 — ADR-108 y ADR-109, y el gate visual rehecho
+
+Rehecho el gate que ADR-102 dejó pendiente, con un oráculo nuevo: **la tinta renderizada**. Se rasteriza la página, se arman clusters de tinta por renglón y se mide, palabra por palabra, cuántos puntos quedan **fuera** de su caja. Los oráculos anteriores de esta familia —métricas AFM en ADR-097, tasa de empalme en ADR-102— son internos: miden si el motor es consistente consigo mismo, y **los dos dieron verde mientras el defecto estaba vivo**.
+
+Lo que apareció **no** era el residuo del 10,7 % que ADR-102 dejó abierto:
+
+| | cajas fuera de toda tinta | fuga izq. > 0,5 pt | fuga der. |
+|---|---|---|---|
+| pericia 17653 | **13 → 2** | 965/1560 → **7** | 264 → **7** |
+| pericia 29816 | **38 → 0** | 1591/2647 → **23** | 384 → **25** |
+| cuento (11 pp) | 1 → **0** | 749/6251 → **0** | 1712 → **0** |
+
+> **Y el oráculo tuvo el mismo defecto que buscaba.** Su primera versión **descartaba en silencio** toda palabra cuya caja no tocara ningún cluster de tinta — o sea el peor fallo posible. Con eso, la primera pasada de ADR-108 §1 midió "17 fugas" en la pericia y ocultó que había dejado **seis cajas 58 pt fuera del dato**, sobre una línea con un topónimo y una fecha. Lo encontró el humano mirando el PDF exportado, no la métrica. La columna "cajas fuera de toda tinta" existe por eso, y es la primera que hay que mirar.
+
+**(a) y (b) cerrados por ADR-108.** La causa era que el flujo de glifos no aplicaba el word spacing (`Tw`), decisión explícita de ADR-097 §4 apoyada en ADR-068. Con `Tw` negativo el flujo se corre ~1,2 pt **por espacio, acumulativo dentro del run**: la séptima palabra de un renglón caía 9,0 pt. Afectaba por igual a los items que empalmaban y a los que no, que es por qué la tasa de empalme no lo veía. Los items "sin origen" resultaron ser **consecuencia** del corrimiento y bajaron a cero solos; el empalme quedó en 100 % en cinco de los siete documentos reales medidos.
+
+Y aplicar `Tw` a **todo** espacio destapó lo que ADR-068 ya había medido: en un run centrado con 89 espacios de fuente compuesta, la caja del topónimo y la de la fecha caían 58,3 pt a la izquierda, sobre papel en blanco. La regla correcta —encontrada después de descartar tres alternativas, todas medidas— es que `Tw` lo lleva el glifo con **`isSpace`**, la bandera con la que pdf.js distingue el código de un byte 32 y con la que **su propio renderer** decide. Es la misma línea que dibuja la tinta contra la que medimos.
+
+> Vale como método: las tres alternativas descartadas eran todas "compensar el error" (exceptuar los espacios iniciales del run, desplazar el empalme). Ninguna baja de ~50 fugas; la regla correcta baja a 7. Cuando una compensación no cierra del todo, suele ser que el modelo está mal, no que falte ajustarla.
+
+**Un defecto vertical nuevo, que el horizontal tapaba: ADR-109.** Con las cajas ya bien puestas, el gate mostró que la caja va de la línea de base **hacia arriba**, así que las colas de `g`, `j`, `p`, `q`, `y`, la `Q` y las comas quedan afuera en **una de cada tres palabras** (31,8 % / 29,9 % / 30,1 % en tres documentos). La caja pasa a ser la **caja de tinta**, del descenso al ascenso, con las métricas que `getTextContent()` ya devuelve.
+
+**Lo que queda abierto en esta familia**, en orden de tamaño:
+
+1. **Los 8 items del sello de notificación electrónica de un fallo** (empalme 90,6 %, el único documento que no llega a 100 %). El flujo falla ahí por una causa distinta de `Tw` — el origen que reporta `getTextContent` cae sobre el segundo glifo del run, no el primero. **Uno de esos items contiene un nombre.**
+2. **Las 2 cajas que siguen fuera de toda tinta** en la pericia: los tokens `/` y `D` de la línea de guiones bajos del encabezado (`S ____/____ D`). No son un dato, pero son el resto del mecanismo de ADR-108 §3 y valen como sonda si alguien lo retoma.
+3. **§26 (número de expediente) sigue igual**: no lo toca ninguno de estos dos ADR.
+
+### Lo que este hallazgo NO frena
+
+Verificado item por item: no bloquea el grupo apagado de confianza baja (`grouping-engine`, no mira geometría), ni su marca en la UI, ni el hueco de característica de 3 dígitos de `phone-mobile-ar`, ni la costura §23f/§23g/§23h (arriba), ni el evaluador del dataset de referencia **siempre que matchee por valor + página y no por solapamiento de bbox** — que es lo que corresponde para una métrica de detección de texto, y este hallazgo es una razón más para elegirlo así.
+
+---
+
+## 25. §23f resuelto en otro motor; §23g/§23h quedan pendientes del gate visual
+
+**Procedencia**: sesión de calidad de detección del 2026-08-26, al abordar lo que §23 llamó "la costura" — los tres hallazgos que el gate de ADR-058 §11 iba a mirar.
+
+### §23f no era de la costura
+
+El informe atribuía los grupos espurios `"Em"` y `"presa S.A"` al texto justificado. Reproducido con el modelo real sobre `qa-tables-justified.pdf`, la causa es la agregación BIO de `ner-engine`: el modelo etiqueta `B-ORG` sobre `##presa`, una **continuación de wordpiece**, y `aggregateTokensToSpans` le creía. **Cerrado** en la v1.3.1 del spec de NER.
+
+Con eso, **dos de los tres hallazgos que el gate agrupó como "la costura" estaban en otro lado** (§23e en `pdf-engine`, §24; §23f en `ner-engine`). Vale como advertencia de método: el gate agrupa por **dónde se ve** el defecto, no por dónde está.
+
+### §23g: "los tokens se dibujan más chicos", cuantificado
+
+No es un error de calibración: es una constante. `REPLACEMENT_FONT_HEIGHT_RATIO = 0,7` (`Contracts.md` §6, ADR-057 §5) se aplica sobre `bbox.height`, que es el **cuerpo** que reporta pdf.js — no el alto visual del glifo. Medido sobre `qa-tables-justified.pdf`:
+
+| | cuerpo | token dibujado | altura de mayúscula |
+|---|---|---|---|
+| cuerpo de la tabla | 12,00 pt | **8,40 pt** | 10,04 → **7,03 pt** |
+| título | 14,00 pt | 9,80 pt | |
+
+O sea que el token sale **30 % más chico** que el texto que lo rodea, por construcción y no por accidente.
+
+> **Nota (2026-08-30, ADR-109 §4)**: la constante **cambió de valor**, de 0,7 a 0,64, y eso **no** resuelve este punto. Es una recalibración: `bbox.height` dejó de ser el cuerpo y pasó a ser el alto de tinta (~1,10 cuerpos sobre el corpus), así que 0,70/1,101 mantiene el token exactamente del mismo tamaño que hoy. La pregunta de esta sección —si el token debería medir lo mismo que el texto que lo rodea— sigue abierta y sin tocar, a propósito: mezclarla con el cambio de geometría haría imposible saber cuál de los dos movió qué.
+
+**No se cambia acá, y la razón importa**: subir la razón a 1,0 haría el token del mismo tamaño y **más ancho**, con lo que dejaría de entrar más seguido — y ahí entra el shrink-to-fit y el detector de degradado de ADR-086. Es un intercambio entre "se distingue por el tamaño" y "no entra y se achica igual", y elegirlo pide ver los dos resultados. La constante además la consume `estimateTokenWidth` y el camino de shrink-to-fit, así que tocarla no es local.
+
+### §23g ("levantados") y §23h: hasta acá llega lo headless
+
+Lo que queda —el token levantado respecto de la línea, la coma huérfana tras el token, y el token que desborda el borde de la celda— es **juicio visual sobre el PDF exportado**, que es exactamente lo que ADR-058 §11 define como gate manual y lo que `tests/fixtures/README.md` ya dice que **ninguna suite headless puede juzgar**.
+
+Se intentó acotarlo por cálculo y no alcanzó: `tryRepaintLine` dibuja con `textBaseline: "middle"` centrado en el medio del bbox, mientras el texto original se apoya en su línea de base. La aritmética de dónde queda cada centro depende de la relación entre `bbox.height` y las métricas reales de la fuente embebida, y sale distinta según qué se asuma. **Afirmar un diagnóstico ahí sin mirarlo sería inventar.**
+
+**Lo que hace falta para cerrarlos**: correr el gate de ADR-058 §11 sobre `qa-tables-justified.pdf` exportado, en un browser real, con las correcciones de esta campaña ya aplicadas — varias de las cuales (§23e, §23f) cambian lo que se ve en ese mismo documento.
+
+
+---
+
+## 26. Falta un patrón para el número de expediente judicial
+
+**Procedencia**: gate visual del 2026-08-27 sobre el PDF exportado de una pericia real (§24).
+
+En el documento anonimizado, el número de expediente aparece **dos veces y entero, sin tapar**, en dos formatos distintos:
+
+```
+PP-NN-NN-NNNNNN-NN/NN          (carátula del sistema)
+I.P.P. N°NN-NNNNN-NN           (citado en el cuerpo)
+```
+
+No es un problema de geometría —no hay caja mal puesta— sino de **detección**: `regex-engine/src/patterns/default-ar.ts` no tiene ningún patrón que los cubra, así que el motor nunca los propone y el usuario no tiene qué activar.
+
+**Por qué importa más que un hueco cualquiera**: en un expediente judicial el número de causa **es** el identificador del caso. Anonimizar los nombres y dejar el número es dejar el expediente identificable con una búsqueda.
+
+**Lo que hace falta antes de escribir el patrón**, con el precedente de ADR-096 (los patrones cubren cómo se escribe el dato, no su forma canónica): enumerar las formas reales. Se vieron dos en un solo documento; seguro hay más (por fuero, por provincia, por sistema).
+
+### Formas relevadas hasta ahora
+
+| origen | forma | confianza |
+|---|---|---|
+| documento real (carátula) | `PP-NN-NN-NNNNNN-NN/NN` | **alta** — visto |
+| documento real (cuerpo) | `I.P.P. N°NN-NNNNN-NN` | **alta** — visto |
+| búsqueda web (SIMP / Pcia. Bs. As.) | `IPP PP-NN-NN-NNNNNN-NN/NN`, `IPP Nº PP-NN-NN-NNNNNN-NN/NN` | media — coincide con lo visto, pero **sin verificar con alguien del fuero** |
+
+La forma del sistema SIMP de la Provincia de Buenos Aires queda confirmada por dos vías independientes (el documento y la web). **Lo que sigue sin cubrir**: otros fueros, otras provincias (Córdoba usa SAC, CABA usa EJE) y el fuero federal, cada uno con su nomenclatura.
+
+> **Advertencia sobre la fuente web**: uno de los resultados interpretó "IPP" como *Índice de Prestadores Públicos*, que en este contexto es otra cosa por completo (Investigación Penal Preparatoria). Los datos de arriba se toman como **candidatos a verificar**, no como especificación — mismo criterio que ADR-096, donde las formas que trajo el humano se contrastaron una por una antes de convertirlas en patrón.
+
+**No decidido**: si el número de expediente debe anonimizarse **siempre** o ser opcional. Un fallo publicado suele citarlo a propósito.
+
+
+---
+
+## 27. Correcciones de detección y UX del gate visual (2026-08-27)
+
+**Procedencia**: el humano exportó la pericia real dos veces —antes y después de ADR-102— y revisó el resultado. La primera corrida confirmó §24 y destapó §26. La segunda, con el corte ya arreglado, destapó seis cosas más. Ninguna la habían visto los cuatro relevamientos automáticos: **todas salieron de usar la herramienta sobre un documento de verdad.**
+
+| # | qué | tamaño | estado |
+|---|---|---|---|
+| 1 | La lista de entidades no está en orden de documento | chico, UI | **hecho** |
+| 2 | El menú `...` de una entidad apagada se ve difuminado | chico, UI | **hecho** |
+| 3 | `OccurrenceRef` no lleva el valor: separar es a ciegas | chico + ADR de contrato | **hecho** (ADR-104) |
+| 4 | `caratula-ar` inventa personas y fusiona dos reales en una | chico + ADR | **hecho** (ADR-103) |
+| 5 | El aviso `AmbiguousCanonical` no dice nada ni permite actuar | chico-mediano | **hecho** (ADR-106) |
+| 6 | Falta el patrón de número de expediente (§26) | mediano + ADR | |
+| 7 | Tokens anidados: dos detecciones donde hay una frase | diagnóstico primero | **causa raíz cerrada** (ADR-107); queda la fusión de adyacentes |
+
+### 1. La lista está en orden de llegada, no de documento
+
+`entities.store.ts#addGroup` hace `[...bucket, group]` —orden de llegada— y `entityTree.ts` **no ordena en ningún lado**. Antes coincidía con el orden del documento **por accidente**, porque todo se procesaba en serie; ADR-101 (OCR en paralelo) terminó con el accidente.
+
+**Es una regresión introducida por ADR-101**, que se declaró sin riesgo de calidad. Lo era para *qué* se detecta —cada página es un trabajo independiente— pero el orden de los eventos aguas abajo hasta la UI no se revisó.
+
+El dato de abajo está bien: ADR-028 renumera `indexInType` canónicamente por primera aparición documental. Lo único desordenado es la lista. **Arreglo**: ordenar cada tipo por `indexInType`.
+
+### 2. `opacity` en la fila entera arrastra al menú
+
+`EntityGroupItem` pone `opacity-50` en el div de **toda la fila** y `GroupContextMenu` se renderiza adentro. En CSS `opacity` alcanza a todos los descendientes, así que el panel abierto queda ilegible.
+
+No es portal por decisión documentada: `@radix-ui/react-dropdown-menu` no está en el proyecto y agregarlo pediría ADR (P-9). **Arreglo**: mover el `opacity-50` al contenido de la fila, dejando el menú afuera.
+
+### 3. `OccurrenceRef` no lleva el valor
+
+El separador existe para **deshacer una fusión**, y es justo ahí donde no se puede distinguir qué se fusionó: solo muestra `Página N — fuente`.
+
+> `MergeDialog` **no** tiene este problema —lista grupos por su `canonicalValue`, no ocurrencias—; la primera redacción de esta sección lo afirmaba y estaba mal.
+
+**Y no es un pedido nuevo**: el docblock de `GroupContextMenu` dice, textual, que *"Ver ocurrencias" depende de un campo `value` que `OccurrenceRef` no tiene* — una función ya diseñada que se cortó por esto.
+
+No hay razón documentada para omitirlo: el grupo ya carga `canonicalValue`, que es contenido del documento igual. Es cambio de contrato público → ADR + `Contracts.md` primero.
+
+**Cerrado con ADR-105**: el valor solo no alcanza cuando el mismo texto se repite —dos personas que se llaman igual, o un topónimo usado como ciudad y como organismo, que es el anidamiento del punto 7—. Ahí lo único distinto es la frase alrededor. `Occurrence`/`OccurrenceRef` ganan `context` (`before`/`after`), armado por los detectores con una primitiva de `shared` para no duplicarla entre dos motores que no pueden importarse.
+
+### 4. `caratula-ar` busca una coma, no una carátula
+
+El patrón de ADR-092 es `\b(\p{Lu}\p{Ll}+),\s+(\p{Lu}\p{Ll}+)\b`. Esa forma aparece en prosa normal todo el tiempo, y produce **dos clases** de falso positivo:
+
+| clase | ejemplo | por qué el checksum no ayuda |
+|---|---|---|
+| adverbio inicial | `Finalmente, Alejandro` | el segundo término **es** un nombre real |
+| enumeración | `Abril, Facundo` | **los dos** son nombres reales — y los **fusiona en una sola persona** |
+
+El segundo es el más grave: junta dos personas distintas en una entidad.
+
+**Arreglo (ADR-103): anclar al contexto.** Una carátula no aparece suelta — viene tras `caratulado:`, `Autos:`, `causa`, `Expediente`, `Firmado:`, `perito`, o seguida de `c/` o `s/`. Medido: **12 de 12** casos correctos, seis legítimos y seis falsos.
+
+> La primera versión del anclaje **perdía las firmas** (`Firmado: Echeverria, Marta`) y la designación de perito (`perito a López, María`), que son contextos de carátula tanto como el encabezado. Lo detectaron los tests de ADR-092, que los tenían codificados — un caso donde el test que falla estaba encodeando un requisito real, no un detalle a ajustar.
+
+No lo debilita: ADR-092 creó este patrón porque **en la carátula NER falla** (orden invertido, confianza bajo el umbral). Anclarlo lo devuelve a su único trabajo; en el cuerpo los nombres los agarra NER.
+
+### 5. El aviso de canónico ambiguo no dice nada
+
+`AmbiguousCanonical` salta ante un **empate real** —misma frecuencia y misma longitud—; el motor elige la primera y avisa que adivinó. Fusionar dos formas a mano crea justo ese empate, así que salta siempre.
+
+El panel muestra *"El valor se escribe de varias formas"* y nada más: no dice **cuáles** ni permite hacer nada.
+
+**Y el dato está**: `raiseAmbiguousCanonicalConflict` arma un candidato por cada forma empatada, con su `value`. La UI no lo usa.
+
+**Decidido por el humano y hecho (ADR-106)**: en vez de apagarlo en fusiones manuales, **volverlo accionable**. El diálogo lista las formas empatadas y deja elegir cuál es la canónica; aplicar emite `updateGroup({ canonicalValue })` + `resolveConflict`.
+
+> El comportamiento anterior **estaba especificado**: `ui/Components.md` §6.2 decía que `ambiguous_canonical` "no ofrece radios y el botón dice Descartar". ADR-083 §6 lo había metido junto a `low_confidence` bajo "no hay elección", y era cierto **sobre el eje del tipo** —todos los candidatos comparten tipo— pero no comparten **valor**. `low_confidence` sí se queda donde está: con un candidato no hay nada entre qué elegir.
+
+
+### 7. Tokens anidados — diagnóstico ciego (2026-08-27)
+
+Medido sobre la pericia real con el harness ciego (solo estructura, sin valores). 17 grupos activos:
+
+| relación entre dos detecciones de la misma línea | casos |
+|---|---|
+| una **contiene** a la otra | **3** |
+| se solapan parcialmente | 0 |
+| **adyacentes** (< 12 pt de separación) | **4** |
+
+**Son dos problemas distintos, no uno.**
+
+**(a) Adyacentes.** Cuatro pares pegados, incluidos dos de 8×8 pt —fragmentos— y dos que combinan `DATE` con `ADDRESS`. Acá **no hay solapamiento que resolver**: son dos detecciones vecinas, y el caso reportado (`Departamento Judicial Quilmes` saliendo como dos tokens) encaja acá. El arreglo no es resolución de conflictos sino decidir si dos detecciones contiguas del mismo tipo se funden.
+
+**(b) Contención: era un artefacto de mi medición, y destapó un defecto real del motor.**
+
+La primera redacción de esta sección decía que había *"una entidad de 561 pt que no es un nombre, es una línea entera"*. **Estaba mal.** Caracterizada a ciegas:
+
+```
+ancho  alto  tipo    det   conf  pág  chars  palabras  líneas
+  561    18  PERSON  ner  1.000    1     18         3       2
+```
+
+Son **18 caracteres y 3 palabras** — un nombre normal. Lo que la hace de 561 pt es que **cruza un salto de renglón**: `fragments` tiene 2 entradas, y su `bbox` es la **envolvente** de las dos líneas, que abarca el bloque de texto entero. Es exactamente el diseño de ADR-074, funcionando como corresponde.
+
+Mi diagnóstico comparaba envolventes. Medido de las dos formas sobre el mismo documento:
+
+```
+usando la ENVOLVENTE:  contiene 3   parcial 0
+usando FRAGMENTS:      contiene 0   parcial 0
+```
+
+**Pero el motor comete el mismo error, y ahí sí cuesta caro.** `findOverlapConflict` compara envolventes:
+
+```ts
+if (bboxIntersectionRatio(rec.bbox, occurrence.bbox) > 0.5) {   // grouping.engine.ts:1801
+```
+
+Cuando `Contracts.md` línea 469 fija la regla al revés: *"Quien PINTA usa `fragments ?? [bbox]`, **nunca la envolvente sola**"*.
+
+Y no es teórico. Medido sobre la misma pericia:
+
+```
+conflictos por razón: {"overlap": 3, "ambiguous_canonical": 1}
+ocurrencias emitidas ......... 29
+  en un grupo ACTIVO ......... 22
+  perdidas en el camino ...... 7
+```
+
+**Los 3 conflictos `overlap` son exactamente los 3 artefactos.** Con `fragments` no habría ninguno. Una sola entidad que cruza renglón está generando tres conflictos falsos, y un conflicto falso hace que una entidad real **pierda y desaparezca** — que es el mecanismo que la nota de `caratula-ar` ya describía: *"una entidad que abarca dos runs no solo tapa de más, hace desaparecer a su vecina"*.
+
+ADR-074 introdujo `fragments` justamente para que la envolvente dejara de tapar de más. La detección de conflictos nunca los adoptó.
+
+### Lo que queda por decidir
+
+1. ~~**Causa raíz**~~ — **hecha (ADR-107)**: `findOverlapConflict` compara `fragments ?? [bbox]`. Medido sobre la misma pericia:
+
+   | | antes | después |
+   |---|---|---|
+   | conflictos | `{overlap: 3, ambiguous_canonical: 1}` | `{ambiguous_canonical: 1}` |
+   | ocurrencias en grupo activo | 22 de 29 | **24 de 29** |
+   | grupos activos | 17 | **19** |
+
+   Los tres conflictos falsos desaparecieron y **se recuperaron dos entidades reales** que el motor descartaba. `test:quality` sin moverse: 61/61 y 98,4 %.
+2. **El salteo por tipo igual** (`if (rec.entityType === occurrence.entityType) continue`). Dicho el 2026-08-27 que quedaba **sin evaluar** porque en la pericia, con fragmentos, no había ningún solapamiento real que lo motivara.
+
+   > **Ya hay evidencia, y la trajeron los invariantes** (§28). En su **primera** corrida sobre un documento real más grande —el fallo de 51 páginas— dieron **3 violaciones** de "dos grupos habilitados no se solapan > 50 %", todas `ORGANIZATION/ORGANIZATION` en la página 37 y con **ratio = 1,00**, o sea contención total. Dos grupos habilitados tapando el mismo lugar, del mismo tipo — exactamente lo que el salteo deja pasar. La pericia no lo mostraba porque es cinco páginas; el fallo sí. **Esto pasa de "sin evidencia" a "medido y pendiente de decidir quién gana entre dos del mismo tipo".**
+3. **La fusión de adyacentes** (a) sigue siendo un mecanismo que no existe, y es lo que el humano reportó (`Departamento Judicial Quilmes` como dos tokens).
+
+
+---
+
+## 28. Invariantes del pipeline (2026-08-27)
+
+**Procedencia**: el humano preguntó si se podían expandir los tests para buscar casos límite. La medición previa mostró que el dataset casi no cubre las clases que fallaron esta sesión — **0 valores repetidos** en 78 entidades, y solo 3 con coma adentro.
+
+### Por qué invariantes y no más fixtures
+
+Un fixture con ground truth mide un caso conocido, pero **alguien tiene que escribir la verdad**, y ahí se cuela la suposición de quien la escribe. Toda esta campaña mostró el mismo patrón: cada vez que medimos contra la realidad, el número sintético era optimista.
+
+Un invariante afirma algo que **el propio contrato del repo ya promete**, no necesita ground truth, y por eso **corre sobre expedientes reales sin que nadie lea su contenido** — que es donde apareció casi todo lo que importó.
+
+### Los cuatro
+
+| invariante | lo promete |
+|---|---|
+| `bbox` es la unión exacta de `fragments`, sin solape vertical, y `length ≥ 2` | ADR-074 §1, textual |
+| `indexInType` es 1..n sin huecos ni repetidos por tipo | ADR-028 |
+| dos grupos **habilitados** no se solapan > 50 % (por fragmentos) | ADR-107 |
+| el `value` arranca donde arranca su primera `Word` | el mapeo span→Word |
+
+El último apunta al `ORGANIZATION "fono de contacto"` de `NER_Engine.md` §14.1 — un valor que arranca a mitad de palabra, anotado ahí como "puede ser de offsets del motor, no diagnosticado".
+
+### Dónde corren
+
+- **`tests/invariants/dataset.test.ts`** — los cuatro, sobre los 26 documentos, con NER apagado. Es un **gate**: una violación es un defecto o una promesa incumplida. Hoy: **0 violaciones** (33 páginas, 62 ocurrencias, 62 grupos).
+- **`tests/measure/real-docs.spec.ts`** — los **tres** que no necesitan páginas, sobre documentos reales, con NER encendido y sin leer contenido. `checkValueStartsAtWord` queda afuera a propósito: necesita las `Page` y el bus no las lleva (`PAGE_PARSED` trae `wordCount`, no las `Word`).
+
+### Lo que encontraron en su primera corrida
+
+```
+Pericia (5 pp) ................. sin violaciones
+Fallo judicial (51 pp) ......... 3 VIOLACIONES
+    ORGANIZATION/ORGANIZATION p37 — ratio=1.00   (×3)
+```
+
+Contención total entre grupos habilitados del mismo tipo. **Es la evidencia que faltaba** para el punto 2 de §27.7, y la encontraron sin ground truth, sin fixture nuevo y sin que nadie abriera el documento.
+
+### Cobertura que el dataset NO tiene
+
+Medido sobre las 78 entidades del ground truth: **1 sola** ocurrencia con `fragments` en los 26 documentos, **0** valores repetidos, **3** con coma. Las clases que fallaron esta campaña —entidad partida, mismo valor dos veces, enumeración con coma— están casi ausentes. Los fixtures que las cubran quedan pendientes, y deben salir de **fallos observados**, no inventados.
+
+
+### Lo que resultaron ser las 3 violaciones de la página 37
+
+Perseguidas hasta el final, a ciegas, y **ninguna de las tres hipótesis previas era la correcta**:
+
+| hipótesis | cómo se falsificó |
+|---|---|
+| anidamiento de entidades (`Quilmes` adentro del juzgado) | **no**: ninguna contiene el texto de la otra |
+| texto rotado | **no**: `rotation` ausente en las 306 ocurrencias del documento |
+| `fragments` faltantes en entidades que cruzan renglón | **no**: 19 de 19 los tienen — ADR-074 funciona |
+
+Lo que son, medido:
+
+```
+ORGANIZATION(7ch)  rect=[x387 w129 y689 h11]
+ORGANIZATION(3ch)  rect=[x387 w129 y689 h11]
+ORGANIZATION(6ch)  rect=[x387 w129 y689 h11]
+```
+
+**Tres valores distintos con el rectángulo idéntico.** Un valor de 3 caracteres no mide 129 pt: las tres entidades caen **adentro de la misma `Word`**, y `mapSpanToWords` mapea con granularidad de palabra, así que las tres heredan su caja completa.
+
+**Consecuencias**:
+
+- Anonimizar cualquiera de las tres **pinta los 129 pt enteros**, tapando texto que no es la entidad.
+- Las tres se pisan entre sí, que es lo que el invariante detectó.
+- Es la misma familia que §24: **geometría a la granularidad equivocada**. ADR-102 arregló la posición de una palabra dentro de su item; esto es la posición de una entidad dentro de su palabra.
+
+**Sin decidir**: por qué esa `Word` mide 129 pt (¿un item sin espacios? ¿una palabra larga real?) y si `mapSpanToWords` debería recortar dentro de la palabra usando los offsets de carácter, que el `wordSpan` no conserva.
+
+**El invariante `checkValueStartsAtWord` habría llamado a esto directamente** — un valor de 3 caracteres mapeado a una palabra de 129 pt casi seguro no arranca donde arranca la palabra. Hoy no corre en browser porque necesita las `Page` y el bus no las lleva (§28). Eso pasa de ser una limitación anotada a ser **lo próximo a destrabar**.
+
+**Y no es el caso reportado por el humano**: `Departamento Judicial Quilmes` es una **adyacencia**, y las adyacencias siguen siendo el fenómeno dominante — 5 en la pericia, 21 en el fallo, contra 3 solapamientos.
+
+---
+
+## 29. El orden de lectura asume una sola columna, y en un escaneo eso rompe el encabezado
+
+**Procedencia**: el humano probó el producto sobre un fallo **escaneado** (con OCR) del Tribunal de Casación Penal, después de cerrar ADR-108/ADR-109. El cuerpo del documento —una sola columna— sale bien; el encabezado sale mal: `[HOMBRE 14]` (el nombre del imputado, que está a la derecha) se pinta sobre el escudo y el `PROVINCIA DE…` de la izquierda, y `[DIRECCION 01]` a veces tapa `PROVINCIA DE BUENOS AIRES`, a veces la mitad, y a veces también `TRIBUNAL DE CASACIÓN PENAL`.
+
+**No es la geometría del bbox ni la conversión px→pt del OCR.** Es el **orden de lectura**: `Page.text` se arma concatenando `Page.words` ya ordenadas, y `mapSpanToWords` traduce un rango de caracteres de ese texto a un rango de índices de palabra. Si el orden intercala palabras de zonas distintas de la página, un span contiguo en el texto mapea a palabras que están lejos entre sí, y la envolvente (o los fragmentos) cubren las dos zonas.
+
+### El encabezado tiene dos columnas cuyos renglones se intercalan
+
+Corriendo el OCR real (Tesseract, 300 DPI, `spa+eng`) sobre la página 1 y aplicando `sortWordsByReadingOrder`:
+
+| columna | palabras | `y` (pt) |
+|---|---|---|
+| izquierda | `PROVINCIA DE BUENOS AIRES` | 105,1 – 107,8 |
+| derecha | `APELLIDO, NOMBRE SEGUNDO S/ RECURSO DE` | 104,9 – 118,6 |
+| izquierda | `TRIBUNAL DE CASACIÓN PENAL` | 119,3 – 121,4 |
+| derecha | `CASACIÓN` | 129,4 |
+| izquierda | `SALA I` | 133,7 |
+
+La línea de la derecha **abarca verticalmente a las dos de la izquierda**. Cualquier orden "por y, después por x" las mezcla; no hay clave escalar que las separe, porque no están separadas en y.
+
+### Y el comparador con tolerancia no es transitivo
+
+Es la misma trampa que ADR-067 §4 documentó para los runs rotados. Con `Array.sort` y un comparador no transitivo el resultado depende de la secuencia interna de comparaciones, así que **cambiar la clave cambia qué palabras rompen, sin arreglar nada**. Medido sobre este encabezado, las tres claves candidatas:
+
+```
+bbox.y (borde superior)        PROVINCIA NOMBRE SEGUMDO DE BUENOS AIRES Y APELLIDO, RECURSO TRIBUNAL DE DE CASACIÓN PENAL …
+bbox.y + height (la de hoy)    PROVINCIA DE AIRES BUENOS Y RECURSO APELLIDO, DE TRIBUNAL DE NOMBRE SEGUMDO CASACIÓN PENAL …
+centro vertical                PROVINCIA DE AIRES BUENOS NOMBRE SEGUMDO Y APELLIDO, RECURSO DE TRIBUNAL DE CASACIÓN PENAL …
+```
+
+Ninguna devuelve `PROVINCIA DE BUENOS AIRES`. Esto **corrige la errata de ADR-109 §3**, que afirmaba sin medir que el borde inferior era más estable para OCR.
+
+### Y las cajas de OCR de ese sello son malas de entrada
+
+Sobre el mismo renglón impreso, Tesseract devuelve alturas que difieren un 60 %:
+
+| palabra | `y` | alto |
+|---|---|---|
+| `APELLIDO,` | 112,1 | 13,9 |
+| `NOMBRE` | 104,9 | **22,1** |
+| `SEGUMDO` | 104,9 | **22,1** |
+
+Más ruido que entra como palabras (`ó`, `IRE`, `ENT`, `5`, `Y`) y `SEGUNDO` leído `SEGUMDO`. Con esa geometría, ningún comparador acierta.
+
+### Decidido el 2026-08-30 — ADR-110, con la medición hecha ANTES de implementar
+
+El humano pidió explícitamente medir si el cambio era mejora o regresión antes de tocar el motor. Se prototipó el orden nuevo en el harness y se midió contra dos referencias distintas:
+
+- **Escaneo**: qué fracción de los pares de palabras consecutivos del recorrido `bloque → párrafo → línea` de Tesseract sobrevive en el orden del motor. Hoy: **47,9 %–67,5 %** según la página. Con el cambio: **96,9 %–100 %**.
+- **Texto nativo**: identidad byte a byte del orden. **109 páginas, 30.886 palabras, idéntico en todas**, fixtures del repo incluidos.
+
+Dos cosas que la medición decidió y que no se habrían acertado a ojo:
+
+1. **El parámetro de la banda no es indiferente**: anclarla a la primera palabra arregla el encabezado y rompe el cuerpo; aflojarla de 0,5 a 0,6 hace lo contrario. Solo *mediana del renglón × 0,5* reproduce el orden de Tesseract exacto.
+2. **La segmentación en columnas se descartó**: barrida de 0,8 a 4,0 cuerpos y también desactivada por completo, los resultados son **idénticos**. Con la banda en 0,5 las dos columnas caen en renglones distintos y el corte nunca se dispara. Se dejó afuera en vez de agregar una constante que no hace nada.
+
+**No bloquea** nada de ADR-108/ADR-109: el texto nativo de una sola columna sale igual que siempre.
+
+---
+
+## 30. `nerEnabled` quedó vivo solo para los tests (2026-09-03)
+
+**Procedencia**: el humano, al retirar el toggle de detección de nombres (ADR-126), preguntó para qué queda vivo el flag si continuar sin nombres no es un resultado aceptable. La respuesta honesta es: **para nada del producto**.
+
+Después de ADR-126 no hay un solo camino de la app que escriba `settings.store.nerEnabled`. No hay control en `SettingsDialog`, `persist()` no lo guarda, y el banner de `NER_MODEL_MISSING` dejó de ofrecer "Seguir sin detectar nombres". Lo único que lo lee es `load()`, y el único que lo escribe es `tests/e2e/support/settingsOverride.ts`.
+
+**Por qué se dejó igual**: seis specs E2E lo usan para arrancar sin bajar ni correr el modelo (~178 MB), y el escenario 8 de `07_Performance_Strategy.md` §11.3 —"cargar PDF sin NER activado → verificar que solo Regex detecta"— **es** ese caso. Sacarlo del todo no compra nada de producto y cuesta ese escenario más seis specs corriendo un modelo que no necesitan.
+
+**Por qué queda anotado igual**: es un setting público de `SettingsSlice` y un campo del mapeo de `React_Client.md` §3.7 que **ningún usuario puede alcanzar**. Esa es la forma exacta de la deuda que este repo ya se cobró dos veces —una detección de orientación que nunca corrió (ADR-119), un OCR que llegaba a "Listo" con cero entidades (errata v1.2.1 de `OCR_Engine.md`)—: código vivo que nadie ejercita por el camino real. Acá el riesgo es menor porque los tests **sí** lo ejercitan, pero la asimetría entre "es un setting" y "no es alcanzable" es real y conviene que esté escrita.
+
+**Salidas posibles, si se retoma**:
+
+1. **Dejarlo como está**, con la documentación que ya tiene (`settings.store.ts` lo declara canal de override, no preferencia). Es lo elegido hoy.
+2. **Moverlo fuera de `SettingsSlice`** a un canal de test explícito, para que el tipo del store deje de declarar una preferencia que no existe. Cuesta tocar `settingsToEngineConfig`, el bootstrap y los seis specs.
+3. **Sacarlo del todo** y aceptar que seis specs corran el modelo. Es lo más limpio conceptualmente y lo más caro en tiempo de suite; también borra el escenario 8.
+
+**No bloquea nada.**

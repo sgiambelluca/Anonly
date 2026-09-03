@@ -77,3 +77,4 @@ apps/react-client/public/pdfjs/
 .changeset/*.md
 !.changeset/config.json
 !.changeset/README.md
+.measure/

@@ -162,11 +162,13 @@ export function makeEntityGroup(overrides?: Partial<EntityGroup>): EntityGroup {
     members: [
       {
         occurrenceId: `occ-group-${groupSeq}`,
+        value: "valor",
         pageIndex: 0,
         bbox: makeBBox(0, 0, 200, 20),
         source: DetectionSource.Regex,
       },
     ],
+    needsReview: false,
     replacementMode: ReplacementMode.Placeholder,
     replacementValue: "",
     indexInType: 1,

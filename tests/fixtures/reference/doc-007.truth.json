@@ -1,0 +1,11 @@
+{
+  "documentId": "doc-007",
+  "entities": [
+    {
+      "entityType": "DNI",
+      "value": "89.107.681",
+      "pageIndex": 0,
+      "detector": "regex"
+    }
+  ]
+}

@@ -11,7 +11,18 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Por el hoisting de Vitest, cada archivo de test declara su propio vi.mock
 // (ver comentario en fixtures/test-helpers.ts).
-vi.mock("tesseract.js", () => ({ createWorker: vi.fn() }));
+vi.mock("tesseract.js", () => ({
+  createWorker: vi.fn(),
+  // ADR-112 §1: el kernel lee `PSM.SPARSE_TEXT` a nivel de módulo, así que el
+  // doble tiene que traerlo o la evaluación del import falla. Los valores son
+  // los de `tesseract.js/src/constants/PSM.js`; que sigan siendo esos lo fija
+  // el test `the page segmentation mode is the tesseract.js enum member`.
+  PSM: { AUTO: "3", SPARSE_TEXT: "11" },
+  // ADR-119 §1: idem para `OEM`, que el kernel lee al crear el worker de OSD.
+  // El valor es el de `tesseract.js/src/constants/OEM.js`; que siga siendo ese
+  // lo fija el test `the OSD worker uses the legacy OCR engine mode`.
+  OEM: { TESSERACT_ONLY: 0, LSTM_ONLY: 1, TESSERACT_LSTM_COMBINED: 2, DEFAULT: 3 },
+}));
 
 import { OcrEngine } from "../ocr.engine.js";
 
@@ -205,7 +216,7 @@ describe("OcrEngine — contract tests", () => {
     expect(onceSpy).not.toHaveBeenCalled();
   });
 
-  it("dispose() terminates the Tesseract worker", async () => {
+  it("dispose() terminates BOTH Tesseract workers (ADR-119 §1)", async () => {
     const terminate = vi.fn(() => Promise.resolve());
     vi.mocked(createWorker).mockResolvedValue(
       mockTesseractWorker(mockEmptyRecognizeData(), { terminate }),
@@ -215,7 +226,9 @@ describe("OcrEngine — contract tests", () => {
     await engine.processPage(createValidOcrPageInput("doc-dispose", 0), ctx);
     await engine.dispose();
 
-    expect(terminate).toHaveBeenCalledTimes(1);
+    // Son dos instancias: la de reconocimiento y la de OSD. Dejar viva la de
+    // OSD son ~99 MB que nadie libera.
+    expect(terminate).toHaveBeenCalledTimes(2);
     expect(engine["disposed"]).toBe(true);
     expect(engine["initialized"]).toBe(false);
   });

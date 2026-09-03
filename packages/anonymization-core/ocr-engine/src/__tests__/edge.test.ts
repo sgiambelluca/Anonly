@@ -10,7 +10,18 @@ import {
 import { createWorker } from "tesseract.js";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-vi.mock("tesseract.js", () => ({ createWorker: vi.fn() }));
+vi.mock("tesseract.js", () => ({
+  createWorker: vi.fn(),
+  // ADR-112 §1: el kernel lee `PSM.SPARSE_TEXT` a nivel de módulo, así que el
+  // doble tiene que traerlo o la evaluación del import falla. Los valores son
+  // los de `tesseract.js/src/constants/PSM.js`; que sigan siendo esos lo fija
+  // el test `the page segmentation mode is the tesseract.js enum member`.
+  PSM: { AUTO: "3", SPARSE_TEXT: "11" },
+  // ADR-119 §1: idem para `OEM`, que el kernel lee al crear el worker de OSD.
+  // El valor es el de `tesseract.js/src/constants/OEM.js`; que siga siendo ese
+  // lo fija el test `the OSD worker uses the legacy OCR engine mode`.
+  OEM: { TESSERACT_ONLY: 0, LSTM_ONLY: 1, TESSERACT_LSTM_COMBINED: 2, DEFAULT: 3 },
+}));
 
 import { OcrEngine } from "../ocr.engine.js";
 import { OcrModelMissingError, OcrPageFailedError, OcrTimeoutError } from "../ocr.errors.js";

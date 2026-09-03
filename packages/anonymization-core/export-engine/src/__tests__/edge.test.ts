@@ -250,6 +250,7 @@ describe("ExportEngine — edge cases", () => {
           members: [
             {
               occurrenceId: `occ-${type}`,
+              value: "valor",
               pageIndex: 0,
               bbox: { x: 0, y: index * 10, width: 10, height: 10 },
               source: DetectionSource.Regex,

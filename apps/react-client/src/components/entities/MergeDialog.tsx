@@ -13,8 +13,16 @@
  * componente `Toast`/`Sonner` implementado todavía (`ui/Components.md` §8.6 lo
  * documenta pero ningún PR anterior lo construyó) y agregarlo no está en el
  * pedido concreto de este PR.
+ *
+ * **Varios destinos a la vez**: `UX_Guidelines.md` §3.2 pide "2+ grupos del
+ * mismo tipo" desde siempre, y el diálogo resolvía uno solo — cuatro grupos de
+ * la misma persona eran tres pasadas por este mismo modal, cada una con su
+ * confirmación. El botón "+" agrega una fila de destino; la fusión sale como
+ * los N-1 `GROUP_MERGE_REQUESTED` que arma `mergePlan` (ahí está por qué es
+ * seguro emitirlos en fila). El Core no cambia.
  */
 
+import { PlusIcon, XIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { actions } from "../../core-adapter/actions.js";
@@ -25,7 +33,12 @@ import { Select } from "../common/Select.js";
 
 import { findGroupById } from "./entityTree.js";
 import { ENTITY_TYPE_LABEL } from "./entityTypeLabels.js";
-import { mergeTargetOptions, validateMerge } from "./mergeValidation.js";
+import {
+  availableTargetOptions,
+  mergePlan,
+  mergeTargetOptions,
+  validateMultiMerge,
+} from "./mergeValidation.js";
 
 export interface MergeDialogProps {
   readonly sourceGroupId: string;
@@ -40,18 +53,43 @@ export function MergeDialog({ sourceGroupId, open, onClose }: MergeDialogProps) 
     ? mergeTargetOptions(sourceGroup, groupsByType.get(sourceGroup.type) ?? [])
     : [];
 
-  const [targetGroupId, setTargetGroupId] = useState<string | null>(targetOptions[0]?.id ?? null);
+  // Una entrada por fila de destino. La primera es la que sobrevive a la
+  // fusión (`mergePlan`), y por eso el orden importa y no se reordena.
+  const [targetGroupIds, setTargetGroupIds] = useState<ReadonlyArray<string>>(() =>
+    targetOptions[0] ? [targetOptions[0].id] : [],
+  );
 
   // Reinicia la selección cada vez que se abre (mismo criterio que
   // `SettingsDialog`: "re-sincroniza el formulario ... cada vez que se abre").
   useEffect(() => {
     if (!open) return;
-    setTargetGroupId(targetOptions[0]?.id ?? null);
+    setTargetGroupIds(targetOptions[0] ? [targetOptions[0].id] : []);
     // Deps acotadas a propósito a `[open, sourceGroupId]` (sin `targetOptions`,
     // que es un array nuevo en cada render): mismo criterio que
     // `viewer/PdfViewer.tsx` — el repo no tiene `eslint-plugin-react-hooks`
     // que exija la lista exhaustiva.
   }, [open, sourceGroupId]);
+
+  /*
+   * Siembra la primera fila si los grupos hermanos aparecen **con el diálogo ya
+   * abierto**.
+   *
+   * Sin esto, abrir "Fusionar con…" sobre el primer `Person` que encuentra NER
+   * —mientras el resto todavía está llegando— deja el modal diciendo "no hay
+   * otros grupos para fusionar" hasta cerrarlo y volver a abrirlo, aunque
+   * atrás el árbol ya muestre tres. Es el efecto de arriba, que solo corre al
+   * abrir: con un análisis en curso esa foto dura poco. Comportamiento
+   * heredado (el diálogo de un solo destino hacía exactamente lo mismo), no
+   * una regresión de la fusión múltiple.
+   *
+   * Solo rellena cuando está vacío: nunca pisa lo que el usuario eligió.
+   */
+  useEffect(() => {
+    if (!open) return;
+    setTargetGroupIds((current) =>
+      current.length > 0 || targetOptions[0] === undefined ? current : [targetOptions[0].id],
+    );
+  }, [open, targetOptions.length]);
 
   if (sourceGroup === undefined) {
     return (
@@ -61,16 +99,33 @@ export function MergeDialog({ sourceGroupId, open, onClose }: MergeDialogProps) 
     );
   }
 
-  const targetGroup = targetOptions.find((group) => group.id === targetGroupId);
-  const validation = validateMerge(sourceGroup, targetGroup);
+  const selectedGroups = targetGroupIds.map((id) => targetOptions.find((group) => group.id === id));
+  const validation = validateMultiMerge(sourceGroup, selectedGroups);
+  const remaining = availableTargetOptions(sourceGroup, targetOptions, targetGroupIds);
+
+  const setRow = (index: number, value: string): void => {
+    setTargetGroupIds((current) => current.map((id, i) => (i === index ? value : id)));
+  };
+
+  const addRow = (): void => {
+    const next = remaining[0];
+    if (next === undefined) return;
+    setTargetGroupIds((current) => [...current, next.id]);
+  };
+
+  const removeRow = (index: number): void => {
+    setTargetGroupIds((current) => current.filter((_, i) => i !== index));
+  };
 
   // Arrow function (no `function` declaration): TypeScript solo preserva el
   // narrowing de `sourceGroup` (por el `if` de arriba) dentro de expresiones de
   // función definidas en el mismo scope, no de declaraciones `function`
   // (hoisting — mismo motivo en `SplitDialog.tsx`/`ConflictDialog.tsx`).
   const handleConfirm = (): void => {
-    if (!validation.valid || targetGroup === undefined) return;
-    actions.mergeGroups(sourceGroup.id, targetGroup.id);
+    if (!validation.valid) return;
+    for (const step of mergePlan(sourceGroup.id, targetGroupIds)) {
+      actions.mergeGroups(step.sourceGroupId, step.targetGroupId);
+    }
     onClose();
   };
 
@@ -79,24 +134,63 @@ export function MergeDialog({ sourceGroupId, open, onClose }: MergeDialogProps) 
       <div className="flex flex-col gap-3 text-sm">
         <p className="text-text-secondary">
           Fusionar{" "}
-          <span className="font-medium text-text-primary">{sourceGroup.canonicalValue}</span> con
-          otro grupo de tipo {ENTITY_TYPE_LABEL[sourceGroup.type]}. El resultante conserva el menor
+          <span className="font-medium text-text-primary">{sourceGroup.canonicalValue}</span> con{" "}
+          {targetGroupIds.length > 1 ? `${String(targetGroupIds.length)} grupos` : "otro grupo"} de
+          tipo {ENTITY_TYPE_LABEL[sourceGroup.type]}. Queda un solo grupo, y conserva el menor
           índice.
         </p>
-        {targetOptions.length === 0 || targetGroupId === null ? (
+        {targetOptions.length === 0 || targetGroupIds.length === 0 ? (
           <p role="alert" className="text-sm text-error">
             No hay otros grupos de tipo {ENTITY_TYPE_LABEL[sourceGroup.type]} para fusionar.
           </p>
         ) : (
-          <Select
-            value={targetGroupId}
-            onChange={setTargetGroupId}
-            options={targetOptions.map((group) => ({
-              value: group.id,
-              label: `${group.canonicalValue} (${group.members.length})`,
-            }))}
-            aria-label="Grupo destino"
-          />
+          <>
+            {targetGroupIds.map((id, index) => (
+              <div key={id} className="flex items-center gap-2">
+                <Select
+                  value={id}
+                  onChange={(value) => setRow(index, value)}
+                  options={availableTargetOptions(
+                    sourceGroup,
+                    targetOptions,
+                    targetGroupIds,
+                    id,
+                  ).map((group) => ({
+                    value: group.id,
+                    label: `${group.canonicalValue} (${group.members.length})`,
+                  }))}
+                  aria-label={`Grupo destino ${index + 1}`}
+                />
+                {/*
+                  La primera fila no se puede quitar: es el grupo que sobrevive
+                  a la fusión, y sin ella no hay nada contra qué fusionar.
+                */}
+                {index > 0 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label={`Quitar grupo destino ${index + 1}`}
+                    onClick={() => removeRow(index)}
+                  >
+                    <XIcon className="h-4 w-4" aria-hidden />
+                  </Button>
+                )}
+              </div>
+            ))}
+            <div>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={remaining.length === 0}
+                onClick={addRow}
+              >
+                <span className="inline-flex items-center gap-1">
+                  <PlusIcon className="h-4 w-4" aria-hidden />
+                  Agregar otro grupo
+                </span>
+              </Button>
+            </div>
+          </>
         )}
       </div>
       <div className="mt-4 flex justify-end gap-2">

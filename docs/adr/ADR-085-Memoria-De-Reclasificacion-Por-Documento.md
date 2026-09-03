@@ -78,7 +78,7 @@ El lookup del mapa es por `normalizedValue` exacto. Si falla **y** el tipo de la
 
 **El guard va sobre el tipo que emite el detector**, no sobre el tipo destino de la corrección. El riesgo que ADR-073 identificó —dos CUIT que difieren en un dígito dan 0.909 ≥ 0.88— vive en el **valor** que se compara, y ese valor es el que el detector clasificó. Es exactamente el criterio de la línea 1762, reusado.
 
-Ejemplo: corregir el falso positivo `Phone "00-027653"` a `Custom` deja una entrada que solo matchea **exacto**, porque la ocurrencia entrante es `Phone`. Corregir `"Fiscalía de Quilmes"` de `Address` a `Organization` deja una entrada que además tolera `"Fiscalia de Quiimes"` de un OCR imperfecto.
+Ejemplo: corregir el falso positivo `Phone "00-000000"` a `Custom` deja una entrada que solo matchea **exacto**, porque la ocurrencia entrante es `Phone`. Corregir `"Fiscalía de Quilmes"` de `Address` a `Organization` deja una entrada que además tolera `"Fiscalia de Quiimes"` de un OCR imperfecto.
 
 ### 4. Qué acciones registran una corrección
 

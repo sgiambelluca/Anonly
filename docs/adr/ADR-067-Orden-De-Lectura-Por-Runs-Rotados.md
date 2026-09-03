@@ -26,11 +26,11 @@ Organizaciones (1) · Direcciones (2) · Teléfonos (1) · Fechas (1)
 La causa está en `Page.text`, que es lo que reciben Regex y NER. Medido sobre la página 1:
 
 ```
-… Milagros SIMP electrónica 12:30:18 - los SIMP de Argentina by Rocio
-07/07/2026 signed Firma Albarracin, Digitally Location: Reason: Date:
+… Mercedes SIMP electrónica 12:30:18 - los SIMP de Argentina by Marta
+07/07/2026 signed Firma Echeverria, Digitally Location: Reason: Date:
 ```
 
-El nombre real es *Albarracin, Rocio de los Milagros*. Sale disperso —`… Milagros … los … de … Rocio … Albarracin,`— con palabras de los otros cuatro runs intercaladas. Ningún NER reconoce una entidad así, y no es un falso negativo del modelo: es una entrada corrupta.
+El nombre real es *Echeverria, Marta de los Mercedes*. Sale disperso —`… Mercedes … los … de … Marta … Echeverria,`— con palabras de los otros cuatro runs intercaladas. Ningún NER reconoce una entidad así, y no es un falso negativo del modelo: es una entrada corrupta.
 
 ### 2. La aritmética que lo produce
 
@@ -40,7 +40,7 @@ Los seis runs rotados de la página, con sus coordenadas medidas:
 
 | `bbox.x` | cuerpo | contenido real |
 |---|---|---|
-| 9,3 | 8 | `Albarracin, Rocio de los Milagros` |
+| 9,3 | 8 | `Echeverria, Marta de los Mercedes` |
 | 19,1 | 8 | `Digitally signed by SIMP - Sistema Informático Ministerio Público` |
 | 28,9 | 8 | `Date: 07/07/2026 12:30:18` |
 | 30,0 | 16 | `CCS E13000013835753` (la marca de agua, otro run) |
@@ -121,7 +121,7 @@ Las dos llaman a la misma función. `fuseOcrRegion` (ADR-065 §3) mezcla nativas
 
 **Positivas**:
 
-- El nombre del firmante pasa a ser una entrada válida para NER: `Albarracin, Rocio de los Milagros` sale contiguo y en orden. Es el dato más sensible de la firma y hoy sale en claro.
+- El nombre del firmante pasa a ser una entrada válida para NER: `Echeverria, Marta de los Mercedes` sale contiguo y en orden. Es el dato más sensible de la firma y hoy sale en claro.
 - Los otros cuatro runs se reconstruyen íntegros, incluida la marca de agua (`CCS E13000013835753`), que hasta ahora se detectaba en 2 de 5 páginas (ADR-066 §9).
 - Cierra el hueco que ADR-063 §4 difirió dos veces, con un alcance de un solo motor.
 - No hay regresión posible sobre texto horizontal: la rama es literalmente la de antes.

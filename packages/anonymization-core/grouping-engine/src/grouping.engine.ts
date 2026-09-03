@@ -157,6 +157,8 @@ import {
   CancelledError,
   ConflictReason,
   DetectionSource,
+  GENDER_LEXICON,
+  normalizeForComparison,
   EngineDisposedError,
   EngineEvents,
   EngineId,
@@ -190,7 +192,6 @@ import {
   type Unsubscribe,
 } from "@anonly/shared";
 
-import { GENDER_LEXICON } from "./gender-lexicon.generated.js";
 import { inferPersonGender } from "./gender.js";
 import { GroupingGroupNotFoundError, GroupingInvalidPatchError } from "./grouping.errors.js";
 import type {
@@ -202,6 +203,18 @@ import { buildPlaceholderValue, MASK_FORMAT_BY_TYPE } from "./labels.js";
 import { levenshteinNormalized } from "./levenshtein.js";
 
 const DEFAULT_SIMILARITY_THRESHOLD = 0.88;
+
+/*
+ * ADR-094 §2: piso de la banda de sugerencia. Una ocurrencia de NER entre
+ * este valor y el `confidenceThreshold` se sugiere apagada; por debajo se
+ * sigue descartando, porque ahí el modelo no duda — adivina.
+ *
+ * **El número no está medido, y hay que decirlo.** No hay dataset de
+ * referencia con el cual ver cuántas sugerencias produce cada valor; se
+ * calibra en el evaluador de recall/precisión cuando exista. Va como
+ * constante nombrada justamente para que se pueda encontrar y mover.
+ */
+const MIN_SUGGESTION_CONFIDENCE = 0.5;
 
 /** ADR-073 §1: los tres tipos cuyo valor es texto libre. */
 const FUZZY_MATCHING_TYPES: ReadonlySet<EntityType> = new Set([
@@ -240,6 +253,8 @@ interface InternalGroup {
   replacementValue: string;
   indexInType: number;
   enabled: boolean;
+  /** ADR-094 §4: el detector lo sugirió sin estar seguro. Ver `handleLowConfidence`. */
+  needsReview: boolean;
   aliases: string[];
   /** Solo relevante para type === Person; ausente = sin determinar (ADR-060 §2). */
   personGender?: PersonGender;
@@ -293,6 +308,14 @@ interface SessionOccurrenceRecord {
   readonly value: string;
   readonly normalizedValue: string;
   readonly bbox: BoundingBox;
+  /**
+   * ADR-107: la descomposición por renglón (ADR-074 §1), para que el
+   * solapamiento se mida sobre los pedazos REALES y no sobre la envolvente.
+   * La envolvente de una entidad partida abarca el bloque de texto entero, y
+   * medida contra ella una sola entidad levantaba tres conflictos falsos.
+   * Ausente ≡ `[bbox]`.
+   */
+  readonly fragments?: ReadonlyArray<BoundingBox>;
   readonly pageIndex: number;
   /** ADR-029: formato de máscara del patrón que matcheó (ausente en NER). */
   readonly maskFormat?: string;
@@ -355,6 +378,7 @@ function toPublicGroup(group: InternalGroup): EntityGroup {
     replacementValue: group.replacementValue,
     indexInType: group.indexInType,
     enabled: group.enabled,
+    needsReview: group.needsReview,
     aliases: [...group.aliases],
     // exactOptionalPropertyTypes: no asignar `undefined` explícito (mismo
     // patrón que maskFormat en recordOccurrence).
@@ -373,12 +397,17 @@ function toPublicGroup(group: InternalGroup): EntityGroup {
 function toOccurrenceRef(occurrence: Occurrence): OccurrenceRef {
   return {
     occurrenceId: occurrence.id,
+    // ADR-104: tal cual, sin normalizar — es lo que la UI muestra.
+    value: occurrence.value,
     pageIndex: occurrence.pageIndex,
     bbox: occurrence.bbox,
     source: occurrence.source,
     // ADR-074 §1/§2: copiado tal cual, nunca `fragments: undefined` explícito
     // (exactOptionalPropertyTypes) — mismo patrón que personGender arriba.
     ...(occurrence.fragments !== undefined ? { fragments: occurrence.fragments } : {}),
+    // ADR-105: la frase alrededor, tal cual — es lo que distingue apariciones
+    // del mismo valor en el separador.
+    ...(occurrence.context !== undefined ? { context: occurrence.context } : {}),
   };
 }
 
@@ -399,6 +428,64 @@ function groupPrimaryCandidate(group: InternalGroup): ConflictCandidate {
     confidence: info?.confidence ?? 1,
     value: group.canonicalValue,
   };
+}
+
+/**
+ * ADR-107: el mayor ratio entre los pedazos REALES de dos ocurrencias.
+ *
+ * `fragments ?? [bbox]` es la regla del contrato (`Contracts.md`, nota de
+ * `fragments`; ADR-074 §1): la envolvente de una entidad partida por un salto
+ * de renglón abarca el bloque de texto entero, así que medir contra ella hace
+ * que una sola entidad choque con todas sus vecinas de esas dos líneas. Medido
+ * sobre una pericia real: 3 conflictos falsos contra 0.
+ *
+ * Para el caso mayoritario —las dos de una sola línea— es literalmente el
+ * cálculo de antes, porque `fragments` ausente ≡ `[bbox]`.
+ */
+function maxFragmentIntersectionRatio(
+  aBbox: BoundingBox,
+  aFragments: ReadonlyArray<BoundingBox> | undefined,
+  bBbox: BoundingBox,
+  bFragments: ReadonlyArray<BoundingBox> | undefined,
+): number {
+  let best = 0;
+  for (const a of aFragments ?? [aBbox]) {
+    for (const b of bFragments ?? [bBbox]) {
+      const ratio = bboxIntersectionRatio(a, b);
+      if (ratio > best) best = ratio;
+    }
+  }
+  return best;
+}
+
+/** `a` cae entera adentro de `b`, con tolerancia de sub-punto. */
+function bboxContains(outer: BoundingBox, inner: BoundingBox): boolean {
+  const EPSILON = 0.01;
+  return (
+    inner.x >= outer.x - EPSILON &&
+    inner.y >= outer.y - EPSILON &&
+    inner.x + inner.width <= outer.x + outer.width + EPSILON &&
+    inner.y + inner.height <= outer.y + outer.height + EPSILON
+  );
+}
+
+/**
+ * ADR-117: cada pedazo de `inner` cae adentro de **algún** pedazo de `outer`.
+ *
+ * Se mide sobre los fragmentos y no sobre la envolvente por la misma razón que
+ * `maxFragmentIntersectionRatio` (ADR-107): la envolvente de una entidad
+ * partida por un salto de renglón abarca el bloque de texto entero, y contra
+ * ella cualquier vecina de esas dos líneas parecería "contenida".
+ */
+function fragmentsContain(
+  outerBbox: BoundingBox,
+  outerFragments: ReadonlyArray<BoundingBox> | undefined,
+  innerBbox: BoundingBox,
+  innerFragments: ReadonlyArray<BoundingBox> | undefined,
+): boolean {
+  const outer = outerFragments ?? [outerBbox];
+  const inner = innerFragments ?? [innerBbox];
+  return inner.every((piece) => outer.some((container) => bboxContains(container, piece)));
 }
 
 /**
@@ -1144,6 +1231,16 @@ export class GroupingEngine implements IEngine {
       if (enabled !== undefined) {
         group.enabled = enabled;
         changed.add("enabled");
+        /*
+         * ADR-094 §4: la marca significa "el detector dudó y NADIE decidió
+         * todavía". Tildar o destildar la casilla ES decidir, en los dos
+         * sentidos — el usuario ya la miró. Sin esto la marca quedaría pegada
+         * a un grupo que el usuario ya resolvió.
+         */
+        if (group.needsReview) {
+          group.needsReview = false;
+          changed.add("needsReview");
+        }
       }
 
       if (replacementMode !== undefined) {
@@ -1363,6 +1460,7 @@ export class GroupingEngine implements IEngine {
       replacementValue: "",
       indexInType: newIndex,
       enabled: true,
+      needsReview: false,
       aliases: [],
       createdAt: now,
       updatedAt: now,
@@ -1663,6 +1761,51 @@ export class GroupingEngine implements IEngine {
       return;
     }
 
+    /*
+     * ADR-117: una ocurrencia contenida ENTERA dentro de otra del mismo tipo
+     * ya registrada no aporta tinta nueva. Va antes que todo lo demás —
+     * incluida la rama de baja confianza— porque no es una decisión sobre
+     * cuál entidad es la buena: es que no hay entidad nueva que decidir.
+     *
+     * El caso que lo motiva: "Agregar como…" tokeniza la consulta en
+     * sub-tokens y barre el documento entero, así que agregar un apellido
+     * suelto lo arranca de adentro de cada nombre completo que el detector ya
+     * había separado bien. Medido sobre un expediente escaneado: 10
+     * ocurrencias nuevas, las 10 dentro de `Bartolomé Arturo Suarez`,
+     * `Mariela Suarez` o `Leonardo Suarez` — o sea, el apellido de tres
+     * personas distintas cayendo en un mismo grupo, que en el PDF exportado
+     * las tapa a las tres con el mismo token.
+     *
+     * Por qué el descarte es seguro: el pipeline automático casi no produce
+     * contenciones (medido, 8 documentos / 763 ocurrencias: **1**, y era
+     * `Person "I"` dentro de `Person "Juez X.Y"`). `aggregateTokensToSpans`
+     * emite spans disjuntos por página y `resolveOverlaps` ya se queda con el
+     * más largo en regex: la contención es un artefacto del barrido literal,
+     * no del detector.
+     *
+     * Y el orden está garantizado, no es suerte: el Orchestrator corre regex
+     * completo, después NER completo, y `addManualEntity` exige `stage: Ready`
+     * —no puede correr mientras el documento se analiza—. Medido: en 11 de 11
+     * contenciones el contenedor llegó primero.
+     *
+     * Límite conocido, deliberado: esto protege cuando el contenedor ya está
+     * registrado. Agregar a mano un valor LARGO sobre una detección corta ya
+     * registrada deja el duplicado, igual que antes de este ADR — no empeora,
+     * pero tampoco lo cierra.
+     */
+    if (this.isContainedInRecorded(session, occurrence)) {
+      this.ctx.logger.debug(
+        "ENTITY_FOUND contenida entera en otra ocurrencia del mismo tipo; se descarta (ADR-117).",
+        {
+          documentId: session.documentId,
+          occurrenceId: occurrence.id,
+          entityType: occurrence.entityType,
+          pageIndex: occurrence.pageIndex,
+        },
+      );
+      return;
+    }
+
     // Caso 9 (§13): low_confidence — solo aplica a ocurrencias NER.
     if (
       occurrence.source === DetectionSource.NER &&
@@ -1684,9 +1827,43 @@ export class GroupingEngine implements IEngine {
     this.groupOccurrence(session, occurrence);
   }
 
+  /*
+   * ADR-094 §2: las tres compuertas de la sugerencia. Sin filtro el panel se
+   * llena de ruido y la marca deja de significar algo.
+   *
+   * 1. Solo tipos de texto libre — los mismos tres de ADR-073 §1. Una fecha o
+   *    un teléfono de confianza baja no aporta: esos los cubre Regex con 1.0.
+   * 2. Por encima del piso (arriba): debajo el modelo adivina.
+   * 3. Si es `Person`, que el valor parezca un nombre propio — su primer
+   *    token en el léxico de `@anonly/shared` (ADR-091). Es la misma
+   *    compuerta que ADR-092 usó para la carátula, del otro lado del pipeline.
+   */
+  private isSuggestable(occurrence: Occurrence): boolean {
+    if (!FUZZY_MATCHING_TYPES.has(occurrence.entityType)) return false;
+    if (occurrence.confidence < MIN_SUGGESTION_CONFIDENCE) return false;
+    if (occurrence.entityType !== EntityType.Person) return true;
+    const firstToken = normalizeForComparison(occurrence.value).split(" ")[0];
+    return firstToken !== undefined && GENDER_LEXICON.has(firstToken);
+  }
+
   private handleLowConfidence(session: Session, occurrence: Occurrence): void {
     const candidateGroup = this.findMatchingGroup(session, occurrence);
     if (!candidateGroup) {
+      /*
+       * ADR-094 §1: hasta este ADR, acá había un `warn` y un `return` — y el
+       * logger de producción es nulo, así que la herramienta veía un nombre
+       * propio y lo tiraba sin dejar rastro. Ahora crea el grupo APAGADO y
+       * marcado: no tapa nada hasta que el usuario decida, o sea que esto
+       * cambia qué se le muestra, no qué se anonimiza.
+       */
+      if (this.isSuggestable(occurrence)) {
+        const suggested = this.createGroup(session, occurrence);
+        suggested.enabled = false;
+        suggested.needsReview = true;
+        this.recordOccurrence(session, occurrence, suggested.id);
+        this.emitGroupCreated(session, suggested);
+        return;
+      }
       this.ctx?.logger.warn(
         "Ocurrencia NER de baja confianza descartada sin grupo candidato; no se emite CONFLICT_DETECTED.",
         {
@@ -1706,6 +1883,39 @@ export class GroupingEngine implements IEngine {
       candidateGroup.type,
     );
     this.emitConflictDetected(session, conflict);
+
+    /*
+     * ADR-116: si la clave coincide EXACTO con la del grupo, la ocurrencia
+     * entra igual. `findMatchingGroup` devuelve un grupo por dos vías de
+     * fuerza muy distinta —`normalizedValue` idéntico, o Levenshtein sobre
+     * `similarityThreshold`— y tratarlas igual es lo que hacía que un valor
+     * que el documento YA confirmó se llamara "conflicto" y se tirara.
+     *
+     * Medido sobre 8 documentos: de 54 ocurrencias bajo el umbral, 9 tienen
+     * clave exacta contra un grupo ya abierto y **ninguna** coincide solo por
+     * el pase difuso. Una de esas 9 era el apellido del imputado en la única
+     * página de veinte donde quedaba a la vista, con el sello leído al 96 %:
+     * el modelo le dio 0,612 contra un umbral de 0,7.
+     *
+     * Esta rama NUNCA crea un grupo — para eso hace falta una detección por
+     * encima del umbral (la rama de arriba, ADR-094 §1). Solo agrega
+     * apariciones a un grupo que el documento ya abrió, así que la superficie
+     * de falsos positivos no crece: el grupo equivocado, si lo hubiera, ya
+     * existe y ya tapa en otro lado.
+     *
+     * El conflicto se emite igual y ANTES: el rastro de que el detector dudó
+     * no se pierde por taparlo (ADR-094).
+     *
+     * Deliberadamente **no** se hereda la promoción de ADR-094 §3: si el
+     * grupo estaba apagado por ser una sugerencia, una ocurrencia dudosa más
+     * no alcanza para encenderlo — eso lo decide el usuario o una detección
+     * por encima del umbral.
+     */
+    if (!candidateGroup.normalizedValues.has(occurrence.normalizedValue)) return;
+
+    const changed = [...this.addOccurrenceToGroup(session, candidateGroup, occurrence)];
+    this.recordOccurrence(session, occurrence, candidateGroup.id);
+    this.emitGroupUpdated(session, candidateGroup, changed);
   }
 
   /**
@@ -1725,6 +1935,29 @@ export class GroupingEngine implements IEngine {
     );
   }
 
+  /**
+   * ADR-117: ¿esta ocurrencia cae entera adentro de otra del **mismo tipo** ya
+   * registrada?
+   *
+   * Contención **estricta**: se exige que todos sus pedazos entren en los de
+   * la otra y que las dos no sean el mismo rectángulo. Un solapamiento
+   * PARCIAL no cuenta — ahí sí hay tinta que la otra no cubre, y además no
+   * existe hoy: medido sobre 8 documentos, 0 solapamientos parciales del
+   * mismo tipo.
+   *
+   * El tipo tiene que coincidir. Dos entidades de tipos distintos sobre la
+   * misma tinta son un desacuerdo entre detectores, y eso ya lo resuelve
+   * `findOverlapConflict` con su propia regla (casos 7-8 de §13).
+   */
+  private isContainedInRecorded(session: Session, occurrence: Occurrence): boolean {
+    return session.recordedOccurrences.some((rec) => {
+      if (rec.pageIndex !== occurrence.pageIndex) return false;
+      if (rec.entityType !== occurrence.entityType) return false;
+      if (bboxEquals(rec.bbox, occurrence.bbox)) return false;
+      return fragmentsContain(rec.bbox, rec.fragments, occurrence.bbox, occurrence.fragments);
+    });
+  }
+
   private findOverlapConflict(
     session: Session,
     occurrence: Occurrence,
@@ -1732,7 +1965,13 @@ export class GroupingEngine implements IEngine {
     for (const rec of session.recordedOccurrences) {
       if (rec.pageIndex !== occurrence.pageIndex) continue;
       if (rec.entityType === occurrence.entityType) continue;
-      if (bboxIntersectionRatio(rec.bbox, occurrence.bbox) > 0.5) {
+      const ratio = maxFragmentIntersectionRatio(
+        rec.bbox,
+        rec.fragments,
+        occurrence.bbox,
+        occurrence.fragments,
+      );
+      if (ratio > 0.5) {
         const reason =
           rec.source !== occurrence.source ? ConflictReason.Disagree : ConflictReason.Overlap;
         return { existing: rec, reason };
@@ -1785,7 +2024,22 @@ export class GroupingEngine implements IEngine {
   private groupOccurrence(session: Session, occurrence: Occurrence): InternalGroup {
     const match = this.findMatchingGroup(session, occurrence);
     if (match) {
-      const changed = this.addOccurrenceToGroup(session, match, occurrence);
+      const changed = [...this.addOccurrenceToGroup(session, match, occurrence)];
+      /*
+       * ADR-094 §3 — la promoción, y no es un detalle. `findMatchingGroup` no
+       * filtra por `enabled`, así que un grupo sugerido absorbe igual una
+       * ocurrencia posterior del mismo valor. Sin esto se quedaría apagado y
+       * una detección que hoy funciona pasaría a no taparse: el arreglo
+       * introduciría la clase de defecto que viene a cerrar.
+       *
+       * Se llega acá solo con ocurrencias que NO son de baja confianza — el
+       * guard de `low_confidence` corre antes y desvía a `handleLowConfidence`.
+       */
+      if (match.needsReview) {
+        match.enabled = true;
+        match.needsReview = false;
+        changed.push("enabled", "needsReview");
+      }
       this.recordOccurrence(session, occurrence, match.id);
       this.emitGroupUpdated(session, match, changed);
       return match;
@@ -1875,6 +2129,7 @@ export class GroupingEngine implements IEngine {
       replacementValue: "",
       indexInType,
       enabled: true,
+      needsReview: false,
       aliases: [occurrence.value],
       createdAt: now,
       updatedAt: now,
@@ -2169,6 +2424,9 @@ export class GroupingEngine implements IEngine {
       // exactOptionalPropertyTypes: no asignar `undefined` explícito a un
       // campo opcional — se omite la clave si la Occurrence no trae maskFormat.
       ...(occurrence.maskFormat !== undefined ? { maskFormat: occurrence.maskFormat } : {}),
+      // ADR-107: se propagan explícitamente, mismo criterio que ADR-074 §1 —
+      // nada viaja por una copia de campos.
+      ...(occurrence.fragments !== undefined ? { fragments: occurrence.fragments } : {}),
     });
   }
 

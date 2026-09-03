@@ -26,7 +26,7 @@
 
 ## 1. De dónde salió el hito
 
-Prueba real de la herramienta sobre una pericia judicial (5 páginas, expediente PP-13-00-027653-24/00). Una página se anonimizaba mal de dos formas independientes, y la investigación destapó tres defectos más. Los cinco se arreglaron en este hito; el sexto es el que sigue abierto.
+Prueba real de la herramienta sobre una pericia judicial (5 páginas, expediente PP-13-00-000000-24/00). Una página se anonimizaba mal de dos formas independientes, y la investigación destapó tres defectos más. Los cinco se arreglaron en este hito; el sexto es el que sigue abierto.
 
 ## 2. Qué se hizo, y está verificado
 
@@ -54,10 +54,10 @@ Lo que el humano confirmó que **sí** funciona tras las pruebas: el texto que e
 ```
 words totales=47 | con rotation=26
 rotadas: "E13000013835753"@90° | "CCS"@90° | "Público"@90° | "Ministerio"@90° |
-"SIMP.Penal.API"@90° | "Informático"@90° | "Sistema"@90° | "Milagros"@90° |
+"SIMP.Penal.API"@90° | "Informático"@90° | "Sistema"@90° | "Mercedes"@90° |
 "SIMP"@90° | "electrónica"@90° | "12:30:18"@90° | "-"@90° | "los"@90° |
-"SIMP"@90° | "de"@90° | "Argentina"@90° | "by"@90° | "Rocio"@90° |
-"07/07/2026"@90° | "signed"@90° | "Firma"@90° | "Albarracin,"@90° |
+"SIMP"@90° | "de"@90° | "Argentina"@90° | "by"@90° | "Marta"@90° |
+"07/07/2026"@90° | "signed"@90° | "Firma"@90° | "Echeverria,"@90° |
 "Digitally"@90° | "Location:"@90° | "Reason:"@90° | "Date:"@90°
 
 ¿aparece el apellido del firmante en page.text?: true
@@ -77,7 +77,7 @@ Diagnóstico ejecutando `PdfEngine` + `RegexEngine` reales sobre el PDF real:
 
 ```
 ocurrencias en pág 1: 2
-  [PHONE] "00-027653"   bbox=(140.8,112.6) 71.6×8.2   rotation=—
+  [PHONE] "00-000000"   bbox=(140.8,112.6) 71.6×8.2   rotation=—
   [DATE]  "07/07/2026"  bbox=(28.9,721.6)   8.0×37.9   rotation=—
 ```
 
@@ -91,13 +91,13 @@ Arreglo: propagar `rotation` en `mapSpanToWords` (decidir qué hacer si las pala
 
 O sea que **queda una segunda causa sin identificar** entre "la ocurrencia existe con el bbox correcto" y "la caja negra no aparece". Próximo paso concreto: instrumentar qué devuelve `buildPageReplacements(0, snapshot.groups)` con el grupo en `redact` — si el `Replacement` está ahí con ese bbox, el problema es del kernel; si no está, es del snapshot de Grouping o del estado `enabled` del grupo.
 
-**Hallazgo lateral que explica "aparecen tres fechas".** El número de expediente `PP-13-00-027653-24/00` produce un falso positivo `[PHONE] "00-027653"`. Los patrones numéricos de `default-ar.ts` están matcheando partes del número de causa. No es del hito; sumar a los pendientes.
+**Hallazgo lateral que explica "aparecen tres fechas".** El número de expediente `PP-13-00-000000-24/00` produce un falso positivo `[PHONE] "00-000000"`. Los patrones numéricos de `default-ar.ts` están matcheando partes del número de causa. No es del hito; sumar a los pendientes.
 
 ### Hipótesis restantes
 
 **(1) ~~Build viejo en la app.~~ DESCARTADA** — el humano rebuildeó y el síntoma persiste.
 
-**(2) El orden de lectura destruye el nombre.** Este sí es un defecto real y explica **el nombre, pero no la fecha**. Mirá el orden en que salen las palabras rotadas arriba: los cinco runs de la firma están **intercalados entre sí y cada uno invertido**. "Albarracin, Rocio de los Milagros" aparece disperso como `… Milagros … los … de … Rocio … Albarracin,` con palabras de otros runs en el medio.
+**(2) El orden de lectura destruye el nombre.** Este sí es un defecto real y explica **el nombre, pero no la fecha**. Mirá el orden en que salen las palabras rotadas arriba: los cinco runs de la firma están **intercalados entre sí y cada uno invertido**. "Echeverria, Marta de los Mercedes" aparece disperso como `… Mercedes … los … de … Marta … Echeverria,` con palabras de otros runs en el medio.
 
 La causa es aritmética y está en `sortWordsByReadingOrder` (`pdf.engine.ts`), que ordena por `bbox.y` asc y luego `bbox.x` asc: para texto a 90° que avanza en `+y` de espacio PDF, el token N+1 tiene **mayor** `y` de usuario, o sea **menor** `y` arriba-izquierda, así que ordenar por `y` ascendente **invierte el run**.
 

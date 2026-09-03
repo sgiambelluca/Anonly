@@ -246,6 +246,7 @@ describe("Orchestrator — unit tests", () => {
       members: [
         {
           occurrenceId: "occ-1",
+          value: "valor",
           pageIndex: 0,
           bbox: { x: 0, y: 0, width: 1, height: 1 },
           source: DetectionSource.Regex,
@@ -306,12 +307,14 @@ describe("Orchestrator — unit tests", () => {
       members: [
         {
           occurrenceId: "occ-1",
+          value: "valor",
           pageIndex: 2,
           bbox: { x: 0, y: 0, width: 1, height: 1 },
           source: DetectionSource.Regex,
         },
         {
           occurrenceId: "occ-2",
+          value: "valor",
           pageIndex: 5,
           bbox: { x: 0, y: 0, width: 1, height: 1 },
           source: DetectionSource.Regex,
@@ -380,6 +383,7 @@ describe("Orchestrator — unit tests", () => {
       members: [
         {
           occurrenceId: "occ-1",
+          value: "valor",
           pageIndex: 0,
           bbox: { x: 0, y: 0, width: 20, height: 12 },
           source: DetectionSource.Regex,
@@ -437,6 +441,7 @@ describe("Orchestrator — unit tests", () => {
       members: [
         {
           occurrenceId: "occ-1",
+          value: "valor",
           pageIndex: 0,
           bbox: { x: 0, y: 0, width: 1, height: 1 },
           source: DetectionSource.Regex,

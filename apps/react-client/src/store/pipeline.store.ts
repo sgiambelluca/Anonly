@@ -11,6 +11,8 @@
 import { PipelineStage, type SerializedEngineError } from "@anonly/anonymization-core";
 import { create } from "zustand";
 
+import type { FailedJobs } from "../components/toolbar/incompleteAnalysisNotice.js";
+
 export interface PipelineSlice {
   readonly stage: PipelineStage;
   readonly progress: number;
@@ -22,6 +24,14 @@ export interface PipelineSlice {
   readonly exportProgress: { current: number; total: number } | null;
   readonly exportResult: { blobUrl: string; sizeBytes: number } | null;
   readonly error: SerializedEngineError | null;
+  /**
+   * Jobs que fallaron sin tumbar el pipeline, por tipo. Un worker caído
+   * rechaza su job pero el pipeline sigue y llega a `Ready`, así que sin esto
+   * la UI no tiene forma de distinguir "terminó" de "terminó a medias" —ver
+   * `components/toolbar/degradationNotice.ts` para el caso real que lo
+   * motivó—. Vacío es el caso sano.
+   */
+  readonly failedJobs: FailedJobs;
   setState(patch: Partial<PipelineSlice>): void;
   reset(): void;
 }
@@ -39,6 +49,7 @@ const initialState: PipelineData = {
   exportProgress: null,
   exportResult: null,
   error: null,
+  failedJobs: {},
 };
 
 export const usePipelineStore = create<PipelineSlice>((set) => ({
