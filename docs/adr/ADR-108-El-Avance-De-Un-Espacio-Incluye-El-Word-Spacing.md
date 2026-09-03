@@ -8,6 +8,8 @@
 - **Relacionado con**: **ADR-097 §4 (superseded)**, **ADR-068 (acotado a lo que midió)**, ADR-102 §2/§3 (el mecanismo de empalme, que no cambia), ADR-020 §1 (el prorrateo, que sigue siendo la reserva)
 - **Parte de**: Hito 11, calidad de detección
 
+> **Los nombres de este documento son ficticios.** Precedente: ADR-084.
+
 ## Contexto
 
 ### 1. El corrimiento no eran nueve items sueltos: era casi cada palabra

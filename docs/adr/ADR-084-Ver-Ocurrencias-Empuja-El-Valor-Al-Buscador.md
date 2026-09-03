@@ -10,6 +10,8 @@
 
 > Convención de citas: `ADR-084 §N` refiere a **Decisión §N**.
 
+> **Los nombres de este documento son ficticios.** Precedente: ADR-084.
+
 ## Contexto
 
 ### 1. "Ver ocurrencias" estaba bloqueado por una razón que solo cubría media función
@@ -67,7 +69,7 @@ Se usa `canonicalValue` y no un alias: es el valor representativo del grupo y el
 
 `findText` busca el **literal** en el texto del documento; `group.members` son las ocurrencias que el pipeline agrupó. Los dos conjuntos pueden diferir:
 
-- Un grupo con aliases (`"Diego Ramos Vargas"` y `"P. R. Vargas"`) tiene members que la búsqueda del canónico **no** encuentra.
+- Un grupo con aliases (`"Diego Ramos Vargas"` y `"D. R. Vargas"`) tiene members que la búsqueda del canónico **no** encuentra.
 - La búsqueda puede encontrar apariciones que el detector **no** agrupó — texto que se le escapó a NER.
 
 Las dos diferencias son **información útil, no un defecto**: la segunda es precisamente el recall que ADR-061 existe para cubrir, y el usuario tiene ahí mismo el "Agregar como…" de cada resultado para arreglarlo.

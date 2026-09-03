@@ -10,6 +10,8 @@
 
 > Convención de citas: `ADR-074 §N` refiere a **Decisión §N**; el contexto se cita como `ADR-074, Contexto §N`.
 
+> **Los nombres de este documento son ficticios.** Precedente: ADR-084.
+
 ## Contexto
 
 ### 1. Una barra negra que atraviesa el documento
