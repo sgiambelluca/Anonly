@@ -1103,3 +1103,23 @@ Después de ADR-126 no hay un solo camino de la app que escriba `settings.store.
 3. **Sacarlo del todo** y aceptar que seis specs corran el modelo. Es lo más limpio conceptualmente y lo más caro en tiempo de suite; también borra el escenario 8.
 
 **No bloquea nada.**
+
+---
+
+## 31. El gate de audit está apoyado en un endpoint que no responde (2026-09-03)
+
+**Procedencia**: al volver bloqueante el job de audit (el `continue-on-error` que la nota prometía retirar en el Hito 11), la primera corrida real tardó **10 minutos** y terminó en rojo — no por una vulnerabilidad, sino porque `pnpm audit` no pudo consultar el registry.
+
+`pnpm audit` (9.12.0) consulta `POST /-/npm/v1/security/audits`, el endpoint **viejo** de npm. Hoy no responde: `ERR_SOCKET_TIMEOUT` en los runners de GitHub, reproducible. El endpoint moderno es `/-/npm/v1/security/advisories/bulk`, y esa versión de pnpm no lo usa.
+
+**Por qué importa más de lo que parece**: un exit 1 de ese comando significa dos cosas opuestas —"encontré una vulnerabilidad" o "no pude preguntar"— y el job las trató igual dos veces seguidas, en las dos direcciones equivocadas. Primero se tragaba las dos: daba verde mientras Dependabot tenía **seis alertas `high` abiertas**. Después bloqueaba las dos: frenó un merge por la red.
+
+**Lo que hay hoy** es un puente, no el destino: bloquea ante un hallazgo y avisa con `::warning::` cuando no pudo consultar, sin reintentos y con timeout corto para que falle en segundos. La asimetría es deliberada —se bloquea sobre lo que se sabe, no sobre lo que se ignora—, pero **mientras el endpoint esté caído este gate no dice nada**.
+
+**Salidas, en orden de preferencia**:
+
+1. **Gatear sobre las alertas de Dependabot** (`GET /repos/{owner}/{repo}/dependabot/alerts` con `security-events: read`). Es la fuente que de hecho encontró las seis `high`, cubre el árbol entero y no depende de ningún endpoint de npm. Falta verificar que el `GITHUB_TOKEN` del workflow tenga ese permiso.
+2. **`actions/dependency-review-action`** en los PRs: nativo de GitHub, sin endpoint de npm. Solo revisa las dependencias que el PR **cambia**, no el árbol completo.
+3. **Subir la versión de pnpm** a una que use el endpoint moderno. Es el cambio de mayor alcance (formato de lockfile, CI, hooks) y el menos verificable sin probarlo.
+
+**No bloquea** ningún merge hoy, y esa es exactamente la razón por la que conviene no dejarlo dormido: un gate que no dice nada no se nota.
