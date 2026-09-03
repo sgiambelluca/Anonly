@@ -33,11 +33,18 @@
  * Con `fuseOcrPage` como función pura sin estado retenido (ADR-041), este
  * worker solo envuelve `process()`: no hay una segunda "puerta" de entrada al
  * motor que rutear (la fusión corre host-side, síncrona, en el Orchestrator).
+ *
+ * **El ciclo de vida del entry-point lo aporta `startWorkerEntry`**
+ * (`@anonly/shared`, ADR-128): el `Map` de `AbortController` por `signalId`, el
+ * guard de `jobType`, el mapeo de errores que cruzan la frontera, la limpieza
+ * y el `READY`. Este worker es el único que difiere **también** el `READY`
+ * eager (`ready`), porque corre el motor real y no puede declararse listo
+ * antes que él; y el único que usa `postWorkerMessage` directo, para el puente
+ * de `EVENT`/`LOG` que se arma una vez y no pertenece a ningún job.
  */
 import {
-  CancelledError,
-  EngineError,
-  InvalidInputError,
+  postWorkerMessage,
+  startWorkerEntry,
   type EngineConfig,
   type EngineContext,
   type ICache,
@@ -47,8 +54,6 @@ import {
   type PdfParsePayload,
   type Serializable,
   type WorkerCapabilities,
-  type WorkerInbound,
-  type WorkerOutbound,
 } from "@anonly/shared";
 import { GlobalWorkerOptions } from "pdfjs-dist";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -73,7 +78,6 @@ import type { PdfEngineInput } from "../pdf.types.js";
 GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 const WORKER_CAPABILITIES: WorkerCapabilities = { maxPageBatchSize: 8 };
-const WORKER_ID = `pdf-worker-${Math.random().toString(36).slice(2)}`;
 
 /**
  * Defaults documentados en `Contracts.md` §6 — únicos dos campos que
@@ -124,10 +128,6 @@ function buildLocalDefaultConfig(): EngineConfig {
   };
 }
 
-function post(message: WorkerOutbound): void {
-  self.postMessage(message);
-}
-
 /**
  * Bus puente (ADR-036 §3): `PdfEngine` nunca se suscribe al bus (ADR-014) —
  * `on`/`once`/`off` son no-ops seguros. `emit`/`emitAsync` serializan el
@@ -142,10 +142,10 @@ export function createBridgeBus(): IEventBus {
     once: () => () => undefined,
     off: () => undefined,
     emit: (channel, event, payload) => {
-      post({ type: "EVENT", channel, event, payload });
+      postWorkerMessage({ type: "EVENT", channel, event, payload });
     },
     emitAsync: (channel, event, payload) => {
-      post({ type: "EVENT", channel, event, payload });
+      postWorkerMessage({ type: "EVENT", channel, event, payload });
       return Promise.resolve();
     },
   };
@@ -165,9 +165,9 @@ function createBridgeLogger(): ILogger {
       // Cast de frontera de transporte (ADR-019/ADR-036 §3): ILogger recibe
       // Record<string, unknown>, WorkerOutbound.LOG.meta es Serializable. Los
       // callers reales de ctx.logger en pdf.engine.ts solo pasan datos planos.
-      post({ type: "LOG", level, message, meta: meta as Serializable });
+      postWorkerMessage({ type: "LOG", level, message, meta: meta as Serializable });
     } else {
-      post({ type: "LOG", level, message });
+      postWorkerMessage({ type: "LOG", level, message });
     }
   };
   return {
@@ -223,37 +223,29 @@ function buildInitContext(): EngineContext {
 
 let engineInitialized: Promise<void> = engine.init(buildInitContext());
 
-/** Un `AbortController` por job en curso, indexado por `signalId` (`=== jobId`, ver `worker-pool.ts#dispatchRemote`). */
-const jobControllers = new Map<string, AbortController>();
+startWorkerEntry({
+  workerId: "pdf",
+  jobType: "pdf-parse",
+  capabilities: WORKER_CAPABILITIES,
 
-function handleInit(config: unknown): void {
-  // Cast de frontera de transporte (ADR-019): `INIT.config` es `unknown` a
-  // este nivel; el entry-point de cada motor lo afina a su propio tipo.
-  engineConfig = config as EngineConfig;
-  engineInitialized = engine.init(buildInitContext());
-  void engineInitialized.then(() => {
-    post({ type: "READY", workerId: WORKER_ID, capabilities: WORKER_CAPABILITIES });
-  });
-}
+  /*
+   * El `READY` eager espera a que el motor esté inicializado: este worker
+   * corre el motor REAL (ADR-036 §3), no un kernel sin init, así que
+   * declararse listo antes sería mentir sobre el handshake.
+   */
+  ready: engineInitialized,
 
-async function handleRun(message: Extract<WorkerInbound, { type: "RUN" }>): Promise<void> {
-  const { jobId, signalId, jobType, payload } = message;
+  applyConfig(config) {
+    // Cast de frontera de transporte (ADR-019): `INIT.config` es `unknown` a
+    // este nivel; el entry-point de cada motor lo afina a su propio tipo.
+    engineConfig = config as EngineConfig;
+    engineInitialized = engine.init(buildInitContext());
+    // Devolverla es lo que hace que el `READY` de este `INIT` espere al motor
+    // (ADR-128): la factory postea recién cuando resuelve.
+    return engineInitialized;
+  },
 
-  if (jobType !== "pdf-parse") {
-    post({
-      type: "FAILED",
-      jobId,
-      error: new InvalidInputError(`PdfWorker no soporta jobType '${jobType}'.`, {
-        jobType,
-      }).serialize(),
-    });
-    return;
-  }
-
-  const controller = new AbortController();
-  jobControllers.set(signalId, controller);
-
-  try {
+  async run(payload, ctx) {
     await engineInitialized;
 
     // Cast de frontera de transporte (ADR-019): `RUN.payload` es `unknown` a
@@ -265,59 +257,20 @@ async function handleRun(message: Extract<WorkerInbound, { type: "RUN" }>): Prom
       buffer: parsePayload.buffer,
       ...(parsePayload.password !== undefined ? { password: parsePayload.password } : {}),
     };
-    const ctx: EngineContext = {
+    const engineCtx: EngineContext = {
       bus: bridgeBus,
       logger: bridgeLogger,
       cache: localCache,
-      abortSignal: controller.signal,
+      abortSignal: ctx.abortSignal,
       config: engineConfig,
     };
 
-    const result = await engine.process(input, ctx);
-    // ADR-042: COMPLETED.result es unknown a nivel de transporte — compila
-    // directo, sin cast (el host-bridge consumidor afina el tipo concreto).
-    post({ type: "COMPLETED", jobId, result });
-  } catch (err: unknown) {
-    if (err instanceof CancelledError) {
-      post({ type: "CANCELLED", jobId, signalId });
-    } else if (err instanceof EngineError) {
-      post({ type: "FAILED", jobId, error: err.serialize() });
-    } else {
-      const message = err instanceof Error ? err.message : String(err);
-      post({ type: "FAILED", jobId, error: new InvalidInputError(message).serialize() });
-    }
-  } finally {
-    jobControllers.delete(signalId);
-  }
-}
+    // ADR-042: COMPLETED.result es unknown a nivel de transporte — el
+    // host-bridge consumidor afina el tipo concreto.
+    return engine.process(input, engineCtx);
+  },
 
-function handleCancel(message: Extract<WorkerInbound, { type: "CANCEL" }>): void {
-  jobControllers.get(message.signalId)?.abort();
-}
-
-async function handleDispose(): Promise<void> {
-  await engine.dispose();
-}
-
-self.addEventListener("message", (ev: MessageEvent<WorkerInbound>) => {
-  const message = ev.data;
-  switch (message.type) {
-    case "INIT":
-      handleInit(message.config);
-      break;
-    case "RUN":
-      void handleRun(message);
-      break;
-    case "CANCEL":
-      handleCancel(message);
-      break;
-    case "DISPOSE":
-      void handleDispose();
-      break;
-  }
-});
-
-// Auto-init eager (ver nota de cabecera: WorkerPool no envía INIT en este PR).
-void engineInitialized.then(() => {
-  post({ type: "READY", workerId: WORKER_ID, capabilities: WORKER_CAPABILITIES });
+  dispose() {
+    void engine.dispose();
+  },
 });
