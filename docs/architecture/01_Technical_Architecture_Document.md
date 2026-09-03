@@ -58,7 +58,9 @@ Profesionales que manejan documentos confidenciales; equipos de datos que necesi
 
 ### Alcance (MVP + v1.0)
 
-PDF (texto + escaneado con OCR), detección por Regex y NER local, agrupación obligatoria, 4 modos de reemplazo, vista previa lado a lado, export a PDF nuevo, procesamiento 100% local en Workers, cancelación en cualquier etapa.
+PDF (texto + escaneado con OCR), detección por Regex y NER local, agrupación obligatoria, 4 modos de reemplazo, vista previa del documento anonimizado, export a PDF nuevo, procesamiento 100% local en Workers, cancelación en cualquier etapa.
+
+> **Precisión (ADR-087 §2)**: esta línea decía "vista previa **lado a lado**". El lado a lado se retiró: hay **un solo visor** que alterna entre `Original` y `Anonimizado`. El documento necesita todo el ancho para leerse, y el trabajo real es revisar qué se detectó, no comparar píxeles de la misma línea.
 
 ### Fuera de alcance (MVP + v1.0)
 
@@ -138,7 +140,7 @@ PDF (ArrayBuffer)
    Grouping Engine ──► EntityGroup[] (agrupación obligatoria)
         │
         ▼
-   UI: vista previa lado a lado + edición de grupos/reglas
+   UI: vista previa (Original ⇄ Anonimizado) + edición de grupos
         │
         ▼
    Render Engine ──► páginas renderizadas con reemplazos aplicados
