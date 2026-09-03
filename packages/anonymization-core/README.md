@@ -27,6 +27,22 @@ API pública del Core de Anonly.
 | [`render-engine/`](./render-engine) | Rasterizado y composición del preview. |
 | [`export-engine/`](./export-engine) | Reconstrucción del PDF final. |
 
+## Dónde corre cada motor
+
+Cinco motores cruzan a un **Web Worker real**; dos se quedan en el main thread a propósito. **Sin factories de worker inyectadas, todos corren in-process con resultado bit-idéntico** (ADR-035) — así corren los tests.
+
+| Motor | Dónde corre | Qué cruza la frontera | Despacho |
+|---|---|---|---|
+| `pdf-engine` | Worker (`pdf`) | **el motor completo** — único sin puerto de pool propio (ADR-036 §3) | páginas **secuenciales**; el despacho lo hace el Orchestrator |
+| `ocr-engine` | Worker (`ocr`) | kernel de reconocimiento | hasta `ocrPoolSize` páginas **en paralelo** (ADR-101) |
+| `ner-engine` | Worker (`ner`) | kernel de inferencia | páginas **secuenciales** a propósito: el modelo se carga una vez y se reutiliza |
+| `render-engine` | Worker (`render`) | kernel de rasterizado | **a demanda**, por página del rango visible, con supersede |
+| `export-engine` | Worker, pool de **tamaño 1** | kernel de ensamblado | una operación por documento |
+| `regex-engine` | **Main thread** | — | < 5 % del pipeline: el transporte costaría más que el cómputo |
+| `grouping-engine` | **Main thread** | — | agregación; es el único que además **consume** eventos de los demás |
+
+Tamaños de pool por defecto: `pdf` y `render` escalan con `hardwareConcurrency`; `ocr` y `ner` son 2. En un equipo chico (`deviceMemory < 4` GB o `hardwareConcurrency < 4`) bajan a 2 y 1 respectivamente.
+
 `src/` es el **único** lugar que importa motores: entre ellos nunca se importan (P-1/P-2, con ESLint bloqueándolo). Se comunican por el `IEventBus` que reciben en su `ctx`.
 
 ## Uso

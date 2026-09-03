@@ -4,6 +4,14 @@ Renderiza páginas del PDF (original o anonimizado) a `ImageData` usando `Offscr
 
 > Reparto host/worker (ADR-043, Hito 10 PR13): la clase queda entera host-side; el kernel de rasterización/composición vive en `./worker/`. Desde ADR-044, el motor deja de escuchar eventos de `Grouping` — el re-render por cambio de grupo lo media el Orchestrator con invocaciones directas de `renderPage` (reemplazos ya resueltos desde el snapshot de Grouping). Mantiene `{ buffer, pageCount }` por documento (ADR-030/ADR-043 §3): el caller (façade/Orchestrator) entrega el PDF fuente vía `loadDocument`.
 
+## Ejecución
+
+Corre en un **Web Worker real** (`RenderWorker`), sobre el pool `render`, cuyo tamaño **escala con `hardwareConcurrency`** (2 en equipos chicos). Lo que cruza es el **kernel de rasterización y composición**; la clase queda host-side con su cache LRU y el mecanismo de supersede.
+
+**A demanda y por página**: el Orchestrator pide el rango visible del visor, no el documento entero, y un pedido nuevo supersede al que quedó viejo para la misma `(documentId, pageIndex, kind)`.
+
+Sin factory de worker inyectada, el mismo kernel corre in-process con resultado bit-idéntico (ADR-035): así corren los tests.
+
 ## Documentación
 
 - **Spec canónico**: [`docs/core/Render_Engine.md`](../../../docs/core/Render_Engine.md) (v1.6.0)

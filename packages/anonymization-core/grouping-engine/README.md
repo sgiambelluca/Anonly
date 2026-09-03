@@ -2,7 +2,11 @@
 
 Agrupa las `Occurrence` emitidas por Regex y NER en `EntityGroup` por tipo y valor canónico (exacto, luego fuzzy Levenshtein). Detecta conflictos (`overlap`, `disagree`, `low_confidence`, `ambiguous_canonical`), resuelve `replacementMode`/`replacementValue` por `Rule[]` (group > type > global > manual > default) y expone los grupos a la UI de forma incremental.
 
-> Hito 6 (`docs/roadmap/MVP.md` §4). Corre en el **main thread** (no en Worker; spec §12). Primer motor del Core que además de emitir eventos **consume** (`ENTITY_FOUND`, `REGEX_FINISHED`/`NER_FINISHED`, y los requests de UI del canal `ui`).
+## Ejecución
+
+Corre en el **main thread**, sin Worker y sin pool (`docs/core/Grouping_Engine.md` §12).
+
+Es el único motor que, además de emitir, **consume** eventos: `ENTITY_FOUND` de los canales `regex` y `ner`, `REGEX_FINISHED`/`NER_FINISHED`, y los requests del usuario en el canal `ui` (`GROUP_UPDATE_REQUESTED`, `GROUP_MERGE_REQUESTED`, `GROUP_SPLIT_REQUESTED`, reglas, resolución de conflictos). Vive donde vive el bus y donde llega la UI, y su trabajo es de agregación —no de cómputo pesado por página—, así que no hay nada que mandar a otro hilo.
 
 ## Documentación
 
