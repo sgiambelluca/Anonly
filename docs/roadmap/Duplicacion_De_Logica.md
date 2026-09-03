@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap | dependencias=ai/AI_Development_Guide.md,ai/Code_Standards.md,core/Contracts.md,adr/ADR-088-*,adr/ADR-092-* | audiencia=humanos+IA | fase=por-planificar -->
+<!-- CONTEXT: scope=roadmap | dependencias=ai/AI_Development_Guide.md,ai/Code_Standards.md,core/Contracts.md,adr/ADR-088-*,adr/ADR-092-*,adr/ADR-127-*,adr/ADR-128-*,adr/ADR-129-* | audiencia=humanos+IA | fase=por-planificar -->
 
 # Duplicación de lógica — misión pendiente
 
@@ -40,7 +40,7 @@ Además choca con R-1/R-5 ("un commit = un módulo" desde ADR-124 §1; antes, "u
 >
 > **Dos hallazgos de la implementación, que el relevamiento no tenía.** Los puntos de variación no eran cinco sino **siete**: el `CANCEL` de `export` descarta además el `PDFDocument` parcial (ADR-047 §4), y el `READY` eager de `pdf` espera a `engine.init()`. Los dos se habrían perdido en silencio en una migración mecánica, y ninguno lo agarraba un test — aparecieron comparando cada archivo contra su original. Es la evidencia más directa de por qué este ítem encabezaba la lista por riesgo.
 >
-> La factory se lleva además **19 tests que no existían para ningún motor**: el mapeo de errores que cruzan la frontera, la cancelación por `signalId` y la limpieza del `Map`. El gate real de la migración fue `pnpm test:e2e` (17/17), que es lo único que ejercita estos archivos.
+> La factory se lleva además **19 tests** del transporte: el mapeo de errores que cruzan la frontera, la cancelación por `signalId` y la limpieza del `Map`. Los gates de la migración fueron los `worker-entry.test.ts` de `pdf`, `ocr` y `render` —11 cada uno, que importan el `entry.ts` real y pasaron sin tocarse— y `pnpm test:e2e` (17/17), que es lo único que ejercita los de `ner` y `export`.
 
 ---
 
@@ -107,7 +107,7 @@ Misma fórmula AABB con los términos reordenados. Lo que lo vuelve elocuente: *
 
 **Costo**: mediano.
 
-> **Cerrado por ADR-129**: `@anonly/test-utils`, paquete de workspace privado y solo `devDependency`. Los siete `test-helpers.ts` de motor pasan de **3067 a 2600 líneas**, y lo que se mudó es lo que era idéntico: `createMockLogger` y `createMockCache` lo eran **byte a byte en los seis**, `createMockBus` en los cinco que lo tenían, y el bloque `workerPool` de `createMockConfig` en las seis versiones.
+> **Cerrado por ADR-129**: `@anonly/test-utils`, paquete de workspace privado y solo `devDependency`. Los siete `test-helpers.ts` de motor pasan de **3067 a 2601 líneas**, y lo que se mudó es lo que era idéntico: `createMockLogger` y `createMockCache` lo eran **byte a byte en los seis**, `createMockBus` en los cinco que lo tenían, y el bloque `workerPool` de `createMockConfig` en las seis versiones.
 >
 > **Dos cosas que la migración enseñó**, las dos por romper tests antes de arreglarlos: (1) los campos **propios** de cada motor en `createMockConfig` —los idiomas de OCR, el `modelId` de NER— son load-bearing, así que cada motor conserva un wrapper delgado sobre el `workerPool` compartido; (2) `createEngineContext` arma su config adentro, así que heredarlo sin pasarle la del motor deja `ctx.config` con los defaults genéricos. Las dos fallas fueron ruidosas —123 tests en rojo—, que es lo contrario del riesgo que este ítem describía.
 >

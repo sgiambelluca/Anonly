@@ -42,7 +42,11 @@ Los dos que transfieren llevan además un comentario sobre `StructuredSerializeO
 
 Es **el punto más sensible del transporte**: el mapeo de errores que cruzan la frontera, la cancelación por `signalId` y la limpieza del `Map`. Un arreglo de cancelación o de serialización de errores aplicado en un motor y olvidado en otro **no lo agarra ningún test**: cada motor tiene su propia suite, con su propio doble, y las cinco pasan.
 
-Y hay una asimetría que lo empeora: los `entry.ts` son de los pocos archivos del repo que **no corren en ninguna suite unitaria** — solo se ejercitan de verdad en los escenarios E2E, que levantan la app con workers reales.
+Y la cobertura de estos archivos es **desigual**, que es el dato que importa para migrarlos: `pdf`, `ocr` y `render` **sí** tienen su `worker-entry.test.ts` —11 tests cada uno, que stubean un `self` falso, importan el `entry.ts` real y lo manejan de punta a punta con `INIT`/`RUN`/`CANCEL`/`DISPOSE`—. `ner` y `export` **no**. Los escenarios E2E los ejercitan a los cinco, pero solo por el camino feliz.
+
+> **Errata (2026-09-03)**: la primera redacción de este párrafo decía que los `entry.ts` *"no corren en ninguna suite unitaria"*. Es falso para tres de los cinco, y lo desmintió la propia migración: esos 33 tests pasaron sin tocarse y son la evidencia más fuerte de que las tres migraciones fueron fieles. Escribirlo mal no era inocuo — desinforma al próximo que migre sobre dónde está parado. Aplica el precedente que ADR-124 se impuso: el párrafo que sostiene el argumento es el que hay que verificar dos veces.
+>
+> **Y el dato corregido dice algo**: `export` es de los dos sin suite, y es justamente donde vivía el punto de variación que casi se pierde (`onCancel`, ADR-047 §4).
 
 ### 4. Lo que **no** es común, y por qué el esqueleto igual existe
 
@@ -50,7 +54,7 @@ Los cinco divergen en **siete** puntos, todos legítimos. El inventario había l
 
 | Punto de variación | Quién lo usa |
 |---|---|
-| Qué campos de `EngineConfig` lee, y si el `READY` es inmediato o diferido | `pdf` difiere el `READY` hasta que `engine.init()` resuelve; los otros cuatro lo postean al aplicar la config |
+| Qué campos de `EngineConfig` lee, y si el `READY` es inmediato o diferido | `pdf` difiere el `READY` hasta que `engine.init()` resuelve. `ocr`, `ner` y `render` lo postean al aplicar la config; `export` no lee ningún campo, así que su `INIT` solo re-publica `READY` |
 | Qué hace el job | los cinco |
 | Qué libera en `DISPOSE` | los cinco |
 | Qué transferir en `COMPLETED` | `render` (el `bytes` del resultado) y `export` (el buffer, que **es** el resultado) |
@@ -108,7 +112,7 @@ R-1: el commit que cambia el contrato (`shared` + `Contracts.md` + la factory) v
 
 - **Un símbolo más en la superficie pública de `@anonly/shared`**, y uno que solo tiene sentido dentro de un Worker. Es el costo que ADR-127 y ADR-061 §2 ya aceptaron por el mismo motivo, con la diferencia de que éste no es una función pura.
 - **`postWorkerMessage` es una válvula**, y las válvulas se usan de más. Su único caller legítimo hoy es el puente de `EVENT`/`LOG` de `pdf`; cualquier otro uso hay que mirarlo con desconfianza.
-- **La migración no la cubre ninguna suite unitaria.** El gate real es E2E, y hay que correrlo completo después de cada motor migrado, no al final.
+- **La migración de `ner` y `export` no la cubre ninguna suite unitaria** (los otros tres sí, ver §3). Para esos dos el gate real es E2E, y hay que correrlo completo, no al final.
 
 **Lo que no toca**: el protocolo `WorkerInbound`/`WorkerOutbound` (`Contracts.md`), `WorkerPool`, `WorkerPoolManager`, el reparto host/worker de cada motor, ni qué corre del otro lado (el motor completo en `pdf`, un kernel en los otros cuatro).
 
