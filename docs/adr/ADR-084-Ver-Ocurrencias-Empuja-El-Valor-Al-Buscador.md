@@ -24,7 +24,7 @@ O sea que la observación bloqueó, durante todo el hito, una función cuyo 90% 
 
 ### 2. Qué le falta al usuario hoy
 
-El árbol dice `Pablo Román Fortes (7)`. Siete ocurrencias, y ninguna forma de saber **dónde**. En una pericia de 200 páginas, verificar que las siete son la misma persona —y no dos personas que el matching difuso fusionó (`Post_Hito10.8_Pendientes.md` §1)— obliga a scrollear el documento entero a ojo.
+El árbol dice `Diego Ramos Vargas (7)`. Siete ocurrencias, y ninguna forma de saber **dónde**. En una pericia de 200 páginas, verificar que las siete son la misma persona —y no dos personas que el matching difuso fusionó (`Post_Hito10.8_Pendientes.md` §1)— obliga a scrollear el documento entero a ojo.
 
 Es justamente la revisión que hay que poder hacer **antes de exportar**, porque un grupo mal fusionado produce un documento que afirma que dos personas distintas son la misma.
 
@@ -67,7 +67,7 @@ Se usa `canonicalValue` y no un alias: es el valor representativo del grupo y el
 
 `findText` busca el **literal** en el texto del documento; `group.members` son las ocurrencias que el pipeline agrupó. Los dos conjuntos pueden diferir:
 
-- Un grupo con aliases (`"Pablo Román Fortes"` y `"P. R. Fortes"`) tiene members que la búsqueda del canónico **no** encuentra.
+- Un grupo con aliases (`"Diego Ramos Vargas"` y `"P. R. Vargas"`) tiene members que la búsqueda del canónico **no** encuentra.
 - La búsqueda puede encontrar apariciones que el detector **no** agrupó — texto que se le escapó a NER.
 
 Las dos diferencias son **información útil, no un defecto**: la segunda es precisamente el recall que ADR-061 existe para cubrir, y el usuario tiene ahí mismo el "Agregar como…" de cada resultado para arreglarlo.

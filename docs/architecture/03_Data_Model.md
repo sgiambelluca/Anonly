@@ -206,7 +206,7 @@ export interface WordSpan {
 - `confidence ∈ [0,1]`. Regex = `1.0`. NER = score del modelo. OCR-derived = `min(ocrConf, nerConf)`.
 - `entityType` debe estar dentro de los tipos que el `source` puede emitir (ver `core/Regex_Engine.md` y `core/NER_Engine.md`).
 
-**`bbox` y `fragments`** (ADR-074 §1). Una entidad puede cruzar un salto de línea: `"Pablo Román Fortes"` con `Pablo` al final de un renglón y `Román Fortes` al principio del siguiente. La unión de esas palabras es la **envolvente**, un rectángulo que abarca las dos líneas enteras — correcto como región, destructivo como censura (medido: 557,2 × 18,2 pt, casi el ancho útil de la página).
+**`bbox` y `fragments`** (ADR-074 §1). Una entidad puede cruzar un salto de línea: `"Diego Ramos Vargas"` con `Diego` al final de un renglón y `Ramos Vargas` al principio del siguiente. La unión de esas palabras es la **envolvente**, un rectángulo que abarca las dos líneas enteras — correcto como región, destructivo como censura (medido: 557,2 × 18,2 pt, casi el ancho útil de la página).
 
 - `bbox` es **la envolvente** y conserva todos sus usos: orden de primera aparición documental (ADR-028), detección de solapamiento entre ocurrencias, hit-test, miniatura de la UI.
 - `fragments`, cuando está presente, es **dónde está realmente la entidad**: un rectángulo por línea, en orden de lectura (`y` asc, `x` asc). **Todo lo que pinte** usa `fragments ?? [bbox]`, nunca la envolvente sola.

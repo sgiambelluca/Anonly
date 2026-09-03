@@ -14,7 +14,7 @@
 
 ### 1. Una barra negra que atraviesa el documento
 
-Medido el 2026-08-13 sobre la pericia de 5 páginas, página 2: NER detecta la entidad `Pablo Román Fortes`. `Pablo` cierra una línea (`x = 524,4`) y `Román Fortes,` abre la siguiente (`x = 14,0`). El bbox que se emite mide **557,2 × 18,2 pt** — prácticamente el ancho útil de la página, dos líneas de alto. En el panel anonimizado es una barra que cruza el documento entero y destruye el texto de las dos líneas, casi todo él ajeno a la entidad.
+Medido el 2026-08-13 sobre la pericia de 5 páginas, página 2: NER detecta la entidad `Diego Ramos Vargas`. `Diego` cierra una línea (`x = 524,4`) y `Ramos Vargas,` abre la siguiente (`x = 14,0`). El bbox que se emite mide **557,2 × 18,2 pt** — prácticamente el ancho útil de la página, dos líneas de alto. En el panel anonimizado es una barra que cruza el documento entero y destruye el texto de las dos líneas, casi todo él ajeno a la entidad.
 
 ### 2. La causa: un `BoundingBox` no puede expresar dos rectángulos
 
@@ -120,7 +120,7 @@ Dos efectos que salen gratis de expandir **antes** del bucle y conviene dejar di
 
 Empate → el primero en orden de lectura.
 
-La alternativa —pintarlo siempre en el primero, donde la entidad empieza— respeta mejor el flujo de lectura, y se descarta por una razón concreta: el primer fragmento es, con frecuencia, el trozo corto que quedó al final del renglón (`Pablo`, en el caso medido: el resto de la entidad está en la línea siguiente). Meter `[PERSONA 03]` ahí lo manda al shrink-to-fit y, con él, a la marca de degradación de ADR-058 §7 — o sea, a encender un aviso de píxeles comprometidos en un caso donde había un rectángulo perfectamente holgado a dos centímetros de distancia.
+La alternativa —pintarlo siempre en el primero, donde la entidad empieza— respeta mejor el flujo de lectura, y se descarta por una razón concreta: el primer fragmento es, con frecuencia, el trozo corto que quedó al final del renglón (`Diego`, en el caso medido: el resto de la entidad está en la línea siguiente). Meter `[PERSONA 03]` ahí lo manda al shrink-to-fit y, con él, a la marca de degradación de ADR-058 §7 — o sea, a encender un aviso de píxeles comprometidos en un caso donde había un rectángulo perfectamente holgado a dos centímetros de distancia.
 
 El costo de elegir el más ancho es de lectura, y es chico: los fragmentos son líneas **consecutivas** de la misma entidad, así que el token aparece a lo sumo un renglón más abajo de donde el lector lo espera, con el hueco tapado inmediatamente arriba. El beneficio es que la escalera de ADR-057 y el shrink-to-fit de ADR-058 miden contra el ancho que de verdad hay.
 
@@ -196,7 +196,7 @@ Tests, por PR:
 | Alternativa | Por qué se rechaza |
 |---|---|
 | **`Occurrence.bbox: ReadonlyArray<BoundingBox>`** (el bbox pasa a ser una lista) | Es el cambio "limpio" y es el peor de todos: rompe **todos** los consumidores de `bbox` a la vez —orden documental de ADR-028, solapamiento de conflictos, hit-test, miniatura, `Annotation`— para un caso que afecta a una de cada varias decenas de ocurrencias, y obliga a que cada uno de esos consumidores decida por su cuenta qué hacer con la lista. La envolvente sigue siendo la respuesta correcta a casi todas esas preguntas; convertirla en `bboxes[0]` la hace desaparecer. |
-| **Emitir una `Occurrence` por línea** (dos ocurrencias en vez de una fragmentada) | Cambia la unidad de detección para arreglar un problema de pintado. Rompe el `value`/`normalizedValue` (cada mitad normaliza sola: `"pablo"` y `"roman fortes"` no agrupan con nada), duplica los `members` del grupo, altera el `indexInType` de ADR-028 y hace que el dedup por identidad de ADR-038 §3 vea dos entidades donde hay una. La entidad **es** una; lo que son varios es su footprint. |
+| **Emitir una `Occurrence` por línea** (dos ocurrencias en vez de una fragmentada) | Cambia la unidad de detección para arreglar un problema de pintado. Rompe el `value`/`normalizedValue` (cada mitad normaliza sola: `"diego"` y `"ramos vargas"` no agrupan con nada), duplica los `members` del grupo, altera el `indexInType` de ADR-028 y hace que el dedup por identidad de ADR-038 §3 vea dos entidades donde hay una. La entidad **es** una; lo que son varios es su footprint. |
 | **Recortar la envolvente al ancho de la primera línea** | Deja de contener la entidad: la parte que quedó en la segunda línea **no se tapa**. Convierte un problema de destrucción de texto en una fuga. Descartado sin más. |
 | **Que el render deduzca las líneas desde `lineWords`** | El render tendría que re-derivar dónde cortó la entidad a partir de las palabras de la página, sin saber cuáles eran las del match — información que el motor que la detectó **sí** tiene y está tirando. Y `lineWords` es opcional (`ADR-058 §5`: se adjunta solo ante riesgo de derrame), así que el arreglo dependería de un campo que la mayoría de las veces no viaja. |
 | **Un tipo nuevo `OccurrenceGeometry { bbox, fragments }`** en vez de un campo suelto | Un tipo más en `Contracts.md`, tres tipos que cambian de forma, y todos los `x.bbox` del repo pasan a `x.geometry.bbox`. Todo eso para agrupar dos campos que ya viajan juntos. El campo opcional al lado del bbox tiene el precedente exacto de `maskFormat` y `rotation`. |
@@ -229,7 +229,7 @@ Tests, por PR:
 
 - Los tests de §10, con dos que son condición de mergeo y no un extra: el que define el ADR (dos líneas → dos fragmentos, envolvente intacta) y la **no-regresión bit a bit** del caso de una línea en `render-engine`.
 - **Test de integración de punta a punta (PR 11)**, y existe por ADR-066 §6: un `Document` fixture con una entidad `Person` partida en dos líneas, de la detección al canvas, asertando que se pintan dos rectángulos y que **ninguno** cubre el ancho de la página. Es lo único que detecta que la cadena se cortó en alguno de los seis saltos.
-- Verificación manual sobre la pericia real, página 2, entidad `Pablo Román Fortes`: las dos líneas dejan de estar tapadas y el token aparece una sola vez.
+- Verificación manual sobre la pericia real, página 2, entidad `Diego Ramos Vargas`: las dos líneas dejan de estar tapadas y el token aparece una sola vez.
 - El invariante `union(fragments) ⊆ bbox` corriendo sobre el fixture completo: es la garantía formal de que la superficie tapada solo se achicó.
 - Gates: `pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract`.
 

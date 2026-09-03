@@ -19,12 +19,12 @@ ADR-102 dejó el empalme de la pericia en 89,3 % y anotó que faltaba rehacer el
 | Quienes | 152,50 | 153,42 | +0,9 |
 | suscriben | 187,92 | 190,02 | +2,1 |
 | Dr. | 228,00 | 231,77 | +3,8 |
-| Eduardo | 242,83 | 247,89 | +5,1 |
-| Eugenio | 279,25 | 285,65 | +6,4 |
-| Camino, | 315,25 | 322,82 | +7,6 |
+| Ernesto | 242,83 | 247,89 | +5,1 |
+| Anselmo | 279,25 | 285,65 | +6,4 |
+| Cabral, | 315,25 | 322,82 | +7,6 |
 | Jefe | 351,83 | 360,88 | +9,0 |
 
-**~1,2 pt por espacio, acumulativo dentro del run y reseteado en el run siguiente.** Y no es del prorrateo: el renglón de abajo **empalma** —el camino bueno de ADR-102— y drifta idéntico (`Perito` +1,2 · `Psiquiatra` +2,4 · `Dra.` +6,4 · `Becerra,` +9,0).
+**~1,2 pt por espacio, acumulativo dentro del run y reseteado en el run siguiente.** Y no es del prorrateo: el renglón de abajo **empalma** —el camino bueno de ADR-102— y drifta idéntico (`Perito` +1,2 · `Psiquiatra` +2,4 · `Dra.` +6,4 · `Beltran,` +9,0).
 
 Con lo cual la exposición real, contando palabras a las que les queda tinta **fuera** de su caja por más de 0,5 pt:
 
@@ -130,7 +130,7 @@ Lo que faltaba era la pregunta correcta: no *dónde* está el espacio en el run,
 | run | espacios | con `isSpace: true` |
 |---|---|---|
 | `La Plata, 1 de julio de 2026` | 96 | **7** |
-| `Quienes suscriben Dr. Eduardo…` | 9 | 7 |
+| `Quienes suscriben Dr. Ernesto…` | 9 | 7 |
 
 Las tres alternativas que se midieron antes de llegar a `isSpace`, todas sobre la pericia:
 

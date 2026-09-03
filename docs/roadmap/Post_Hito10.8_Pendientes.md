@@ -44,13 +44,13 @@
 
 Dos CUIT distintos que difieran en un dígito se fusionan en un grupo: el documento anonimizado afirma que dos empresas distintas son la misma. En una pericia judicial eso **distorsiona la evidencia**, no es cosmético. Y el DNI se salva por casualidad, no por diseño.
 
-**Dirección de arreglo.** El pase difuso debe correr **solo para tipos de texto libre** (Persona, Organización, Dirección), donde tolera un OCR imperfecto ("Pablo Rornan"), y **nunca** para los estructurados, donde un carácter distinto significa otra entidad. Cambia semántica documentada de Grouping → **ADR propio**.
+**Dirección de arreglo.** El pase difuso debe correr **solo para tipos de texto libre** (Persona, Organización, Dirección), donde tolera un OCR imperfecto ("Diego Rarnos"), y **nunca** para los estructurados, donde un carácter distinto significa otra entidad. Cambia semántica documentada de Grouping → **ADR propio**.
 
 ---
 
 ## 2. Una entidad partida en dos líneas tapa las dos líneas enteras · *adoptado: ADR-074, Hito 10.9 PRs 3-11*
 
-**Qué pasa.** Con "Pablo Roman" al final de una línea y "Fortes" al inicio de la siguiente, la censura tapa **ambas líneas completas**, destruyendo texto ajeno.
+**Qué pasa.** Con "Diego Ramos" al final de una línea y "Vargas" al inicio de la siguiente, la censura tapa **ambas líneas completas**, destruyendo texto ajeno.
 
 **Causa, verificada.** `mapSpanToWords` (`regex-engine/src/regex.engine.ts`, ~línea 185) calcula un **único** bbox como min/max sobre las palabras del match:
 
@@ -65,7 +65,7 @@ Con palabras en dos líneas, esa unión es un rectángulo que abarca de la izqui
 
 Es la misma clase de falla que ADR-063 —censura que cubre lo que no debe— por otra causa.
 
-**Medido (2026-08-13, segunda prueba manual sobre la pericia de 5 páginas)**. Página 2, entidad `Pablo Román Fortes` detectada por NER: `Pablo` cierra una línea (`x = 524,4`) y `Román Fortes,` abre la siguiente (`x = 14,0`). La unión da **557,2 × 18,2 pt** — prácticamente el ancho útil de la página, dos líneas de alto. En el panel anonimizado es una barra negra que atraviesa el documento.
+**Medido (2026-08-13, segunda prueba manual sobre la pericia de 5 páginas)**. Página 2, entidad `Diego Ramos Vargas` detectada por NER: `Diego` cierra una línea (`x = 524,4`) y `Ramos Vargas,` abre la siguiente (`x = 14,0`). La unión da **557,2 × 18,2 pt** — prácticamente el ancho útil de la página, dos líneas de alto. En el panel anonimizado es una barra negra que atraviesa el documento.
 
 Confirma que **tapa de más, nunca de menos**: no hay fuga, pero destruye contenido no sensible. Aplica igual al `mapSpanToWords` de `ner-engine`, que es la copia adaptada del de `regex-engine`.
 
@@ -104,7 +104,7 @@ Es un falso positivo benigno en cuanto a fuga (tapa de más, no de menos), pero 
 
 ## 5. Recall de NER sobre nombres
 
-No se detecta "FORTES Pablo Roman" (apellido primero, mayúsculas) ni se unifica con "Dr. Pablo Roman Fortes" de otra página.
+No se detecta "VARGAS Diego Ramos" (apellido primero, mayúsculas) ni se unifica con "Dr. Diego Ramos Vargas" de otra página.
 
 **No es un bug.** `MVP.md` §5 declara el recall del NER como métrica **informativa** hasta v1.0, y el roadmap asume que se escapan entidades. La red de contención está diseñada y **sin implementar**: es el **Hito 10.7** (ADR-061 — agregado manual, selección sobre el visor, buscador).
 
