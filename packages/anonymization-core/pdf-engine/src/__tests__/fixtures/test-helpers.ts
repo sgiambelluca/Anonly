@@ -16,7 +16,6 @@ import type { PdfEngineInput } from "../../pdf.types.js";
  */
 export {
   createEngineContext,
-  createEngineContextWithRealBus,
   createMockBus,
   createMockCache,
   createMockConfig,
