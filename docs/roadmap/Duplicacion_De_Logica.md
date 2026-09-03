@@ -4,7 +4,7 @@
 
 > **Qué es esto**: el inventario de lógica repetida en el repo, levantado el 2026-08-27 durante la campaña de optimización. **No es parte de esa campaña**: no hace la herramienta más rápida, y tocarlo cruza cinco motores más un contrato público. Se aparta acá para retomarlo como misión propia.
 
-**Estado**: relevado y verificado. **§1, §3 y §6 cerrados**; §2, §4 y §5 siguen abiertos, cada uno con el motivo por el que no se cerró.
+**Estado**: relevado y verificado. **§1, §3, §4, §5 y §6 cerrados**. Queda abierto **solo §2**, y no por costo: es el único que cambia *qué se detecta* y sigue sin haber forma de medirlo.
 
 ## Por qué esto no es un refactor mecánico
 
@@ -78,7 +78,7 @@ Misma fórmula AABB con los términos reordenados. Lo que lo vuelve elocuente: *
 
 ---
 
-## 4. `sortWordsByReadingOrder` escrito dos veces
+## 4. ~~`sortWordsByReadingOrder` escrito dos veces~~ — **CERRADO el 2026-09-03: no era duplicación**
 
 - `ocr-engine/src/worker/kernel.ts:358` — el comentario de la línea 353 lo dice con todas las letras: *"Copia local del criterio de orden de lectura"*.
 - `pdf-engine/src/pdf.engine.ts:513` — la versión completa, que además maneja runs rotados (ADR-067).
@@ -87,9 +87,17 @@ Misma fórmula AABB con los términos reordenados. Lo que lo vuelve elocuente: *
 
 **Costo**: mediano — no es copiar la función, es decidir si el criterio de orden es uno solo para todo el Core.
 
+> **Cerrado, y la conclusión es que el ítem estaba mal encuadrado.** Verificado sobre el árbol, en este orden:
+>
+> 1. **La decisión ya estaba tomada y escrita.** `OCR_Engine.md` §10 dice, textual: *"Este orden es interno de este motor y no es el que ve el detector (ADR-110). `fuseOcrPage`/`fuseOcrRegion` re-ordenan las palabras al fusionarlas… Este motor **no cambia**"*. El relevamiento no vio esa línea.
+> 2. **Y el riesgo que el ítem describía no existe.** *"Si mañana OCR emite palabras rotadas, la copia local las ordena mal"* — `fuseOcrPage` (`pdf.engine.ts`) **re-ordena** las palabras del OCR con la versión completa, la que sí entiende `bbox.rotation`. El orden que llega al detector sale siempre de ahí. Riesgo real: **bajo**, no medio.
+> 3. **Ya no son dos copias de lo mismo.** La de `pdf-engine` creció con el agrupado por renglones (ADR-110), el corte por columnas (ADR-113) y la hoja torcida (ADR-120): ~40 líneas. La de `ocr-engine` son ocho que ordenan lo que su kernel devuelve, en el espacio de **píxeles** donde su tolerancia de 1 px significa lo que dice (ADR-064 §2). Unificarlas ataría la tolerancia del kernel a un cambio de otro motor.
+>
+> **Lo que sí estaba mal, y se arregló**: el comentario inline de `OcrPageOutput.words` prometía *"ordenadas por `bbox.y` asc, luego `bbox.x` asc"*, y desde **ADR-121** eso ya no describe el array — las palabras de las franjas de margen rotadas se concatenan **después** del sort, sin re-ordenar. La promesa estaba desactualizada, no el código. Corregida en el spec, y el comentario del kernel pasa a decir que su orden es deliberadamente local en vez de leerse como una copia que quedó suelta.
+
 ---
 
-## 5. Siete copias de `test-helpers.ts`
+## 5. ~~Siete copias de `test-helpers.ts`~~ — **CERRADO el 2026-09-03 (ADR-129)**
 
 `createEngineContext`, `createMockCache`, `createMockConfig` (con los pool sizes y timeouts hardcodeados) repetidos en los siete motores. **2951 líneas** entre los siete archivos.
 
@@ -98,6 +106,12 @@ Misma fórmula AABB con los términos reordenados. Lo que lo vuelve elocuente: *
 **Por qué no es trivial**: `@anonly/shared` declara "sin dependencias externas" y se bundlea a producción — meter `vi.fn()` ahí agregaría `vitest` al bundle. Hace falta un paquete o subpath de test-utils nuevo → ADR de arquitectura.
 
 **Costo**: mediano.
+
+> **Cerrado por ADR-129**: `@anonly/test-utils`, paquete de workspace privado y solo `devDependency`. Los siete `test-helpers.ts` de motor pasan de **3067 a 2600 líneas**, y lo que se mudó es lo que era idéntico: `createMockLogger` y `createMockCache` lo eran **byte a byte en los seis**, `createMockBus` en los cinco que lo tenían, y el bloque `workerPool` de `createMockConfig` en las seis versiones.
+>
+> **Dos cosas que la migración enseñó**, las dos por romper tests antes de arreglarlos: (1) los campos **propios** de cada motor en `createMockConfig` —los idiomas de OCR, el `modelId` de NER— son load-bearing, así que cada motor conserva un wrapper delgado sobre el `workerPool` compartido; (2) `createEngineContext` arma su config adentro, así que heredarlo sin pasarle la del motor deja `ctx.config` con los defaults genéricos. Las dos fallas fueron ruidosas —123 tests en rojo—, que es lo contrario del riesgo que este ítem describía.
+>
+> El gate fue **el conteo**: 1894 tests antes y 1894 después. Un test perdido habría significado un doble que cambió de comportamiento.
 
 ---
 

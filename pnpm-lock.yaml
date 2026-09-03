@@ -234,6 +234,9 @@ importers:
       '@anonly/event-system':
         specifier: workspace:*
         version: link:../event-system
+      '@anonly/test-utils':
+        specifier: workspace:*
+        version: link:../test-utils
       typescript:
         specifier: ^5.6.2
         version: 5.9.3
@@ -250,6 +253,9 @@ importers:
       '@anonly/event-system':
         specifier: workspace:*
         version: link:../event-system
+      '@anonly/test-utils':
+        specifier: workspace:*
+        version: link:../test-utils
       typescript:
         specifier: ^5.6.2
         version: 5.9.3
@@ -266,6 +272,9 @@ importers:
         specifier: ^4.2.0
         version: 4.2.0(@types/node@20.19.43)
     devDependencies:
+      '@anonly/test-utils':
+        specifier: workspace:*
+        version: link:../test-utils
       typescript:
         specifier: ^5.6.2
         version: 5.9.3
@@ -282,6 +291,9 @@ importers:
         specifier: ^6.0.1
         version: 6.0.1
     devDependencies:
+      '@anonly/test-utils':
+        specifier: workspace:*
+        version: link:../test-utils
       typescript:
         specifier: ^5.6.2
         version: 5.9.3
@@ -298,6 +310,9 @@ importers:
         specifier: ^4.0.379
         version: 4.10.38
     devDependencies:
+      '@anonly/test-utils':
+        specifier: workspace:*
+        version: link:../test-utils
       typescript:
         specifier: ^5.6.2
         version: 5.9.3
@@ -333,6 +348,9 @@ importers:
       '@anonly/event-system':
         specifier: workspace:*
         version: link:../event-system
+      '@anonly/test-utils':
+        specifier: workspace:*
+        version: link:../test-utils
       typescript:
         specifier: ^5.6.2
         version: 5.9.3

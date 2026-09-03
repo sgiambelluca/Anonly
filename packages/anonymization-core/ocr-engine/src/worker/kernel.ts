@@ -499,10 +499,19 @@ async function detectOrientation(
 }
 
 /*
- * Copia local del criterio de orden de lectura (OCR_Engine.md §10: "ordenadas
- * por bbox.y asc, luego bbox.x asc"), con tolerancia de 1px para "misma
- * línea" (dos palabras de Tesseract en la misma línea impresa casi nunca
- * comparten el mismo y0 en píxeles exactos).
+ * Orden **interno** de este motor, y no el que ve el detector (OCR_Engine.md
+ * §10, ADR-110): `fuseOcrPage` re-ordena al fusionar, con el criterio de
+ * renglones de `pdf-engine`, que es el autoritativo del Core. Que acá haya un
+ * comparador propio no es una copia que quedó suelta: es deliberado, y el
+ * spec lo fija — su tolerancia de 1px vive en el espacio de PÍXELES, antes de
+ * la conversión a puntos (ADR-064 §2), que es el único donde significa lo que
+ * dice.
+ *
+ * `Duplicacion_De_Logica.md` §4 lo listaba como duplicado de
+ * `sortWordsByReadingOrder` de `pdf-engine`. Ya no lo son: aquélla creció con
+ * el agrupado por renglones (ADR-110), el corte por columnas (ADR-113) y la
+ * hoja torcida (ADR-120); ésta son ocho líneas que ordenan lo que este kernel
+ * devuelve.
  */
 function sortWordsByReadingOrder(words: ReadonlyArray<Word>): Word[] {
   const sorted = [...words];
