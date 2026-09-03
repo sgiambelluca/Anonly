@@ -18,12 +18,18 @@
  *   `actions.requestRender(...)` para refrescar previews, sobre el rango
  *   visible del visor — uno solo desde ADR-087 §2; hasta entonces era la
  *   unión de los rangos de los dos paneles del lado a lado. Sin
- *   documento abierto, se persisten sin diálogo ni `reanalyze`: afectan al
- *   próximo `createCore`, que ocurre una sola vez por carga de la app. Eso
- *   **sí tiene efecto** desde PR16.5 — `App.tsx` hace `settings.load()` →
- *   `deriveEngineConfigOverrides` → `initCore(overrides)`
- *   (`core-adapter/settingsToEngineConfig.ts`). Hasta ese PR no lo tenía, y
- *   este docstring describía ese gap como si siguiera abierto.
+ *   documento abierto, se persisten sin diálogo ni `reanalyze` y **el core se
+ *   recrea con la config nueva** (ADR-125 §2, que implementa lo que ADR-038
+ *   §7 ya había decidido: "sin documento abierto, la UI recrea el core al
+ *   vuelo — nada que perder").
+ *
+ *   Ese último paso es nuevo y hace falta: `App.tsx` hace `settings.load()` →
+ *   `deriveEngineConfigOverrides` → `initCore(overrides)` desde PR16.5, pero
+ *   `initCore` corre **una sola vez por carga de la app**. Sin recrear, un
+ *   cambio hecho antes de cargar el primer PDF se guardaba y el análisis
+ *   corría igual con la config de cuando cargó la página — que es
+ *   exactamente el caso que ADR-125 §1 abre al poner Configuración en la
+ *   pantalla de carga.
  *
  * El guardado es atómico: si se necesita confirmación y el usuario cancela,
  * NINGÚN campo se aplica (ni siquiera `language`/`performancePreset`) — el
@@ -33,6 +39,11 @@
 import { useEffect, useState, type ReactNode } from "react";
 
 import { actions } from "../../core-adapter/actions.js";
+import { recreateCore } from "../../core-adapter/index.js";
+import {
+  deriveEngineConfigOverrides,
+  sameEngineConfigOverrides,
+} from "../../core-adapter/settingsToEngineConfig.js";
 import { useDocumentStore } from "../../store/document.store.js";
 import {
   useSettingsStore,
@@ -125,7 +136,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     useSettingsStore.getState().persist();
   }
 
-  function handleSave(): void {
+  async function handleSave(): Promise<void> {
     const previous = useSettingsStore.getState();
     const next = { language, performancePreset, nerEnabled, ocrLanguages };
     const change = diffReanalyzeChange(previous, next);
@@ -135,6 +146,40 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     if (needsReanalyze) {
       setConfirmOpen(true);
       return;
+    }
+
+    /*
+     * ADR-125 §2: sin documento abierto, un cambio de `EngineConfig` hay que
+     * aplicarlo recreando el core. `initCore` corre una sola vez por carga de
+     * la app y `createCore` congela su config: sin esto, elegir "no detectar
+     * nombres" antes de cargar el PDF se guardaría y el análisis correría con
+     * NER igual.
+     *
+     * Se compara el override DERIVADO: cambiar solo el idioma de la interfaz
+     * no toca el Core y no puede costar recrear cinco workers.
+     *
+     * Va antes de `onClose` a propósito (ADR-125 §3): el modal es lo que
+     * garantiza que nadie suelte un PDF en la ventana sin core, donde
+     * `getCore()` lanzaría.
+     */
+    const nextOverrides = deriveEngineConfigOverrides(next);
+    const needsRecreate =
+      documentId === null &&
+      !sameEngineConfigOverrides(deriveEngineConfigOverrides(previous), nextOverrides);
+
+    if (needsRecreate) {
+      setSaving(true);
+      setSaveError(null);
+      try {
+        await recreateCore(nextOverrides);
+      } catch (error) {
+        setSaveError(
+          error instanceof Error ? error.message : "No se pudo aplicar la configuración.",
+        );
+        return;
+      } finally {
+        setSaving(false);
+      }
     }
 
     applyToStore(next);
@@ -249,11 +294,35 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
 
         <AboutSection />
 
+        {/*
+          Hasta ADR-125 `saveError` solo se renderizaba dentro del
+          `ConfirmDialog`, que es el camino con documento abierto. El camino
+          sin documento no abre ninguna confirmación, así que un fallo al
+          recrear el core no tenía dónde aparecer.
+        */}
+        {saveError !== null && !confirmOpen ? (
+          <p role="alert" className="mt-4 text-sm text-error">
+            {saveError}
+          </p>
+        ) : null}
+
         <div className="mt-5 flex justify-end gap-2">
           <Button variant="secondary" onClick={onClose}>
             Cancelar
           </Button>
-          <Button variant="primary" disabled={ocrLanguagesEmpty} onClick={handleSave}>
+          {/*
+            `loading` (no solo `disabled`): guardar puede recrear el core sin
+            documento abierto (ADR-125 §2) y eso tarda lo que tardan cinco
+            workers.
+          */}
+          <Button
+            variant="primary"
+            disabled={ocrLanguagesEmpty}
+            loading={saving}
+            onClick={() => {
+              void handleSave();
+            }}
+          >
             Guardar
           </Button>
         </div>

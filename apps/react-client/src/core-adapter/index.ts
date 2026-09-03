@@ -209,6 +209,27 @@ export function getCore(): IAnonymizationCore {
  * eventualmente, para un flujo futuro de recreación del core (ADR-038 §7,
  * `performancePreset` sin documento abierto).
  */
+/**
+ * Recrea el Core con un `EngineConfigOverrides` nuevo (ADR-125 §2, que
+ * implementa lo que ADR-038 §7 ya había decidido: "sin documento abierto, la
+ * UI recrea el core al vuelo — nada que perder").
+ *
+ * Existe porque `createCore` congela su `mergedConfig` y lo reparte por `ctx`
+ * a cada motor: no hay forma de reconfigurarlo, y `reanalyze` —la única vía
+ * de cambio en caliente— necesita un `documentId`. Sin esto, un `nerEnabled`
+ * cambiado antes de cargar el primer PDF se guardaría y el análisis correría
+ * igual con la config de cuando cargó la página.
+ *
+ * **El llamador es responsable de que no haya documento abierto.** Entre el
+ * `dispose` y el `init` no hay core, y `getCore()` lanza: `SettingsDialog` lo
+ * llama con su modal todavía arriba, que es lo que hace que no haya dónde
+ * soltar un PDF mientras tanto (ADR-125 §3).
+ */
+export async function recreateCore(config: EngineConfigOverrides): Promise<void> {
+  await disposeCore();
+  await initCore(config);
+}
+
 export async function disposeCore(): Promise<void> {
   if (unsubscribeBridge) {
     unsubscribeBridge();

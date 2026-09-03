@@ -171,6 +171,13 @@ apps/react-client/src/components/
 - **Render**: pantalla completa. Logo, una frase de qué hace la herramienta, la **zona de carga
   funcional** (drop + botón, los dos operativos) y tres features breves.
 - **No monta** el árbol de entidades ni ninguna barra lateral: no hay nada que mostrar todavía.
+- **Monta `SettingsButton`** en la esquina superior derecha (ADR-125 §1). Es lo **único** que
+  vuelve de la `Toolbar` a esta pantalla: el estado del pipeline, el progreso, el export y el
+  cierre de documento siguen sin tener nada que decir sin documento, y esa parte de ADR-087 §1
+  no se toca. Existe porque `SettingsButton` viajaba dentro de la `Toolbar` que ADR-087 sacó de
+  acá —sin mencionarlo ni una vez—, y con eso la única forma de llegar a Configuración pasó a
+  ser cargar un PDF primero, que es lo contrario de lo que hace falta para elegir con qué
+  analizarlo.
 - **Acción**: `actions.importDocument(file)`, por drop o por el botón.
 
 ### 2.10 `ScanScreen` (ADR-087 §1/§6, momento ②a)
