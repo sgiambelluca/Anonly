@@ -2,9 +2,15 @@
 
 Detecta personas, organizaciones, direcciones y fechas mediante un modelo NER local (`Xenova/bert-base-multilingual-cased-ner-hrl`, Transformers.js + ONNX Runtime Web, cuantizado Q8). Emite `Occurrence[]` con `source: "ner"` y `entityType ∈ {Person, Organization, Address, Date}`.
 
-> Hito 5 (`docs/roadmap/MVP.md` §4). Corre **inline** en el host hasta el Hito 9 (ADR-021): sin `NerPool` propio.
+## Ejecución
 
-> Hito 10 PR15 (ADR-046, tercer espejo de ADR-043/render-engine y ADR-045/ocr-engine): la clase `NerEngine` queda **entera host-side** (loop por página, partición en batches, retry/timeout, mapeo de spans a `Occurrence` con bbox, emisión de los seis eventos) y despacha la inferencia por batch contra un puerto interno `NerJobPool` — con `NerPool` real (inyectada por `create-core.ts`), cruza a un `NerWorker` de SO real; sin ella, invoca el mismo kernel in-process (fallback bit-idéntico, ADR-035). El worker (`worker/entry.ts`) corre un **kernel de inferencia sin estado por documento** (`worker/kernel.ts`): `RUN(ner-page)` → `COMPLETED { spans }`, sin bus/cache puente para eventos de dominio — el ciclo de vida del modelo (único caso observable dentro del worker) cruza por `PROGRESS` (`NerKernelProgress`) y el motor lo traduce en host a `NER_MODEL_LOADING`/`NER_MODEL_READY`, deduplicado por instancia.
+Corre en un **Web Worker real** (`NerWorker`), sobre el pool `ner`. Lo que cruza es un **kernel de inferencia sin estado por documento**: la clase `NerEngine` queda host-side (loop por página, partición en batches, retry/timeout, mapeo de spans a `Occurrence` con bbox, emisión de los seis eventos) y despacha la inferencia **por batch** contra su puerto interno `NerJobPool`.
+
+**Las páginas se recorren de forma secuencial, a propósito**: el kernel retiene el modelo por `(modelId, dtype)` y lo reutiliza entre páginas, así que la carga —el costo dominante— se paga una sola vez. `nerPoolSize` es 2 por defecto (1 en equipos chicos), pero el motor no lo usa para poner dos páginas en vuelo.
+
+Sin factory de worker inyectada, el mismo kernel corre in-process con resultado bit-idéntico (ADR-035): así corren los tests.
+
+El protocolo es `RUN(ner-page)` → `COMPLETED { spans }`, **sin bus ni cache puente** para eventos de dominio. La única excepción es el ciclo de vida del modelo —lo único observable desde adentro del worker—: cruza por `PROGRESS` y el motor lo traduce host-side a `NER_MODEL_LOADING`/`NER_MODEL_READY`, deduplicado por instancia (ADR-046).
 
 ## Documentación
 

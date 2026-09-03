@@ -2,7 +2,9 @@
 
 Detecta patrones determinísticos (DNI, CUIT, teléfono, email, IBAN, tarjeta, fecha, matrícula, patente) en el texto de cada página del `Document`. Emite `Occurrence[]` con `source: "regex"` y `confidence: 1.0`. Determinista: mismo input → mismo output.
 
-> Hito 4 (`docs/roadmap/MVP.md` §4). Corre en el **main thread** (no en Worker): es liviano, < 5% del pipeline total (`docs/core/Regex_Engine.md` §12).
+## Ejecución
+
+Corre en el **main thread**, sin Worker y sin pool. Es deliberado y no una deuda: es el motor más barato del pipeline —**< 5 % del total** (`docs/core/Regex_Engine.md` §12)—, y cruzar el texto de cada página por `postMessage` costaría más que lo que ahorraría.
 
 ## Documentación
 

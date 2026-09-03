@@ -2,9 +2,17 @@
 
 Ejecuta OCR con Tesseract.js sobre las páginas sin texto del PDF (`Page.requiresOCR === true`). Devuelve `Word[]` con `BoundingBox` y `confidence`, listas para que el PDF Engine las fusione vía `fuseOcrPage`.
 
-> Hito 3 (`docs/roadmap/MVP.md` §4). Corre **inline** en el host hasta el Hito 9 (ADR-021): sin `OcrPool` propio. tesseract.js crea sus propios workers internos — eso no es el `OcrPool` de `05_Worker_Architecture.md`.
+## Ejecución
 
-> Hito 10 PR14 (ADR-045, espejo de ADR-043/render-engine): la clase `OcrEngine` queda **entera host-side** (loop por página, retry/timeout, depósito en `ctx.cache`, emisión de los cuatro eventos) y despacha el reconocimiento por página contra un puerto interno `OcrJobPool` — con `OcrPool` real (inyectada por `create-core.ts`), cruza a un `OcrWorker` de SO real; sin ella, invoca el mismo kernel in-process (fallback bit-idéntico, ADR-035). El worker (`worker/entry.ts`) corre un **kernel de reconocimiento sin estado por documento** (`worker/kernel.ts`): `RUN(ocr-page)` → `COMPLETED { words, confidence }`, sin bus/cache puente — la carrera EVENT/COMPLETED que motivó este reparto (ver el ADR) deja de existir por construcción.
+Corre en un **Web Worker real** (`OcrWorker`), sobre el pool `ocr`. Lo que cruza la frontera es un **kernel de reconocimiento sin estado por documento**: la clase `OcrEngine` queda host-side (loop por página, retry/timeout, depósito en `ctx.cache`, emisión de los cuatro eventos) y despacha cada página contra su puerto interno `OcrJobPool`.
+
+**Despacho paralelo** desde ADR-101: hasta `ocrPoolSize` páginas en vuelo a la vez —2 por defecto, 1 en equipos chicos—. Hasta ese ADR el loop era estrictamente secuencial y el pool tenía dos lugares con uno usado.
+
+Sin factory de worker inyectada, el mismo kernel corre in-process con resultado bit-idéntico (ADR-035): así corren los tests.
+
+El protocolo del worker es `RUN(ocr-page)` → `COMPLETED { words, confidence }`, **sin bus ni cache puente**: la carrera EVENT/COMPLETED que motivó este reparto (ADR-045) deja de existir por construcción.
+
+> tesseract.js crea además **sus propios workers internos**. Eso no es el `OcrPool` de `05_Worker_Architecture.md`, y no se cuenta como paralelismo del pipeline.
 
 ## Documentación
 
