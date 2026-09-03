@@ -91,8 +91,8 @@ jobs:
       # implementado queda por debajo, este paso falla.
       - run: pnpm test -- --coverage
 
-  audit:
-    name: Security audit
+  build:
+    name: Build
     needs: install
     runs-on: ubuntu-latest
     steps:
@@ -103,38 +103,69 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # Bloqueante desde el Hito 11: la nota que lo prometía venció, y hasta
-      # acá este job tenía `continue-on-error` DOS veces (job y step), así que
-      # daba verde pasara lo que pasara.
+      # Compila los paquetes del Core a `dist/` — el modo en que se PUBLICAN,
+      # con `.d.ts` y sin tests. Ningún otro gate lo ejercita: `dev`, los tests,
+      # el E2E y el build de la app leen el código fuente.
       #
-      # El problema no era solo que no bloqueara. `pnpm audit` consulta un
-      # endpoint del registry, así que puede fallar **por red** sin decir nada
-      # sobre vulnerabilidades — y los dos casos salen con exit 1. Sacar los
-      # `continue-on-error` sin más convertía un timeout en un rojo que no
-      # significa "hay una vulnerabilidad", y un gate que está rojo por el
-      # motivo equivocado se ignora primero y se apaga después.
+      # Estuvo roto desde el Hito 1 (`5eb30d2`, 2026-06-18) y nadie se enteró en
+      # dos meses y medio, justamente porque no estaba acá. Un comando que no
+      # corre en CI no es un gate: es una intención.
+      - run: pnpm build
+
+  audit:
+    name: Security audit
+    needs: install
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Bloquea cuando SABE, avisa cuando no puede saber.
       #
-      # Los dos desenlaces se separan: un fallo de red se reintenta, y si tras
-      # tres intentos el audit no pudo correr, el job falla con un mensaje que
-      # dice **eso** y no otra cosa. Un gate que no pudo ejecutarse no es un
-      # gate verde: significa que no sabemos.
+      # `pnpm audit` consulta `/-/npm/v1/security/audits`, el endpoint viejo de
+      # npm, y hoy **no responde**: falla con `ERR_SOCKET_TIMEOUT` tanto en los
+      # runners de GitHub como fuera de ellos. O sea que un exit 1 de este
+      # comando puede significar dos cosas opuestas —"encontré una
+      # vulnerabilidad" o "no pude preguntar"—, y hasta acá las dos se trataban
+      # igual: primero se tragaban las dos (el job daba verde con seis alertas
+      # `high` abiertas), después bloqueaban las dos (una corrida de 10 minutos
+      # que terminaba en rojo por la red y frenaba un merge).
+      #
+      # Ninguna de las dos es correcta, y la asimetría es la respuesta:
+      #
+      # - **Hallazgo** → falla. Es la razón de ser del gate.
+      # - **No se pudo consultar** → `::warning::` visible y sigue. Un endpoint
+      #   caído de un tercero no es motivo para frenar un merge, y un rojo
+      #   permanente por el motivo equivocado se ignora primero y se apaga
+      #   después.
+      #
+      # Sin reintentos y con timeout corto (`npm_config_fetch_*`): mientras ese
+      # endpoint esté caído, reintentar solo alarga el fallo. La corrida pasa de
+      # ~10 minutos a segundos.
+      #
+      # Esto es un puente, no el destino: el gate tiene que mudarse a una fuente
+      # que funcione — las alertas de Dependabot, que son las que de hecho
+      # encontraron las seis `high`. Anotado en `Post_Hito10.8_Pendientes.md`.
       - name: Audit (severidad alta y crítica)
+        env:
+          npm_config_fetch_retries: "0"
+          npm_config_fetch_timeout: "20000"
         run: |
-          for intento in 1 2 3; do
-            if salida="$(pnpm audit --audit-level=high 2>&1)"; then
-              echo "$salida"
-              exit 0
-            fi
+          if salida="$(pnpm audit --audit-level=high 2>&1)"; then
             echo "$salida"
-            if echo "$salida" | grep -qE 'ERR_SOCKET_TIMEOUT|FetchError|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up'; then
-              echo "::warning::El audit no pudo consultar el registry (intento ${intento}/3)."
-              sleep $((intento * 20))
-              continue
-            fi
-            echo "::error::pnpm audit encontró vulnerabilidades de severidad alta o crítica."
-            exit 1
-          done
-          echo "::error::El audit no pudo ejecutarse tras 3 intentos: no se sabe si hay vulnerabilidades."
+            exit 0
+          fi
+          echo "$salida"
+          if echo "$salida" | grep -qE 'ERR_SOCKET_TIMEOUT|FetchError|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up'; then
+            echo "::warning::El audit no pudo consultar el registry, así que este gate NO dice nada sobre vulnerabilidades. Ver las alertas de Dependabot del repo."
+            exit 0
+          fi
+          echo "::error::pnpm audit encontró vulnerabilidades de severidad alta o crítica."
           exit 1
 
   # Gates que se activan en hitos posteriores.
@@ -315,7 +346,7 @@ jobs:
   # Se activa cuando existe al menos un job opcional corriendo.
   pr-summary:
     name: PR summary
-    needs: [lint, typecheck, test, audit]
+    needs: [lint, typecheck, test, build, audit]
     runs-on: ubuntu-latest
     if: always() && github.event_name == 'pull_request'
     steps:
@@ -328,6 +359,7 @@ jobs:
           echo "| Lint | ${{ needs.lint.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Typecheck | ${{ needs.typecheck.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Tests | ${{ needs.test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build | ${{ needs.build.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Audit | ${{ needs.audit.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "_Mergeá solo si todos dicen \`success\`._" >> $GITHUB_STEP_SUMMARY

@@ -163,6 +163,12 @@ export default tseslint.config(
                 "Los motores usan el IEventBus inyectado por ctx (@anonly/shared); no importan la implementación del bus. Ver ai/Code_Standards.md §12.",
               allowTypeImports: false,
             },
+            {
+              group: ["@anonly/test-utils"],
+              message:
+                "`@anonly/test-utils` son dobles de test: solo se importa desde `__tests__`. Es `private: true` y devDependency, así que un import desde `src/` es una dependencia de desarrollo usada en producción. Ver ADR-129.",
+              allowTypeImports: false,
+            },
           ],
         },
       ],
@@ -213,6 +219,37 @@ export default tseslint.config(
     // Façade del Core (@anonly/anonymization-core): es la composition root (createCore,
     // Orchestrator). Es el ÚNICO lugar del Core autorizado a importar motores.
     files: ["packages/anonymization-core/src/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["react", "react-dom", "react/jsx-runtime"],
+              message: "El Core no puede importar React. Ver ai/Code_Standards.md P-1.",
+            },
+            {
+              group: ["@anonly/test-utils"],
+              message:
+                "`@anonly/test-utils` son dobles de test: solo se importa desde `__tests__`. Es `private: true` y devDependency, así que un import desde `src/` es una dependencia de desarrollo usada en producción. Ver ADR-129.",
+              allowTypeImports: false,
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // Tests del façade. En flat config el último bloque que matchea gana, y el
+    // del façade (arriba) matchea también sus `__tests__`: sin este bloque,
+    // esos tests heredarían la prohibición de `@anonly/test-utils`, y el
+    // façade sería el único del Core cuyos tests no pueden usar los dobles
+    // compartidos (ADR-129).
+    //
+    // Se redeclara completo y no se "quita una regla": `no-restricted-imports`
+    // no se mergea entre bloques. Queda solo React — el façade **sí** puede
+    // importar motores (P-1: es el único que puede) y el bus.
+    files: ["packages/anonymization-core/src/**/__tests__/**/*.{ts,tsx}"],
     rules: {
       "no-restricted-imports": [
         "error",
