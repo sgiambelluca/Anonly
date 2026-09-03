@@ -14,99 +14,26 @@
  * (spyOn no reemplaza la implementación por default) — mismo criterio que
  * regex-engine/ner-engine usan sobre su bus mockeado.
  */
-import { createEventBus } from "@anonly/event-system";
-import {
-  DetectionSource,
-  EntityType,
-  ReplacementMode,
-  type BoundingBox,
-  type EngineConfig,
-  type EngineContext,
-  type EntityGroup,
-  type ICache,
-  type ILogger,
-  type Occurrence,
-  type Rule,
-  type RuleScope,
-} from "@anonly/shared";
-import { vi } from "vitest";
+import { DetectionSource, EntityType, ReplacementMode, type BoundingBox, type EntityGroup, type Occurrence, type Rule, type RuleScope } from "@anonly/shared";
+import type { EngineConfig, EngineContext } from "@anonly/shared";
+import { createEngineContextWithRealBus as sharedCreateEngineContextWithRealBus, createMockConfig as sharedCreateMockConfig } from "@anonly/test-utils";
 
-export function createMockLogger(): ILogger {
-  return {
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  };
-}
+/*
+ * ADR-129: los dobles genéricos viven en `@anonly/test-utils`. Se re-exportan
+ * acá para que cada suite siga importando de un solo lugar.
+ */
+export {
+  createMockCache,
+  createMockLogger,
+} from "@anonly/test-utils";
 
-export function createMockCache(): ICache {
-  return {
-    get: vi.fn(),
-    set: vi.fn(),
-    delete: vi.fn(),
-    clear: vi.fn(),
-    size: 0,
-    bytes: 0,
-  };
-}
-
-export function createMockConfig(overrides?: Partial<EngineConfig>): EngineConfig {
-  return {
-    workerPool: {
-      pdfPoolSize: 2,
-      ocrPoolSize: 1,
-      nerPoolSize: 1,
-      renderPoolSize: 2,
-      maxQueuePerPool: { pdf: 32, ocr: 8, ner: 8, render: 32 },
-      timeouts: {
-        "pdf-parse": 30000,
-        "ocr-page": 60000,
-        "ner-page": 20000,
-        "render-page": 10000,
-        "export-page": 30000,
-      },
-      maxRetries: {
-        "pdf-parse": 1,
-        "ocr-page": 2,
-        "ner-page": 1,
-        "render-page": 1,
-        "export-page": 1,
-      },
-      baseRetryDelayMs: 250,
-      maxRetryDelayMs: 2000,
-      cancelSlaMs: 200,
-      idleDisposeMs: 60000,
-    },
-    pdf: { maxPageCount: 10000 },
-    ner: {
-      modelId: "test-model",
-      quantization: "q8",
-      confidenceThreshold: 0.7,
-      batchSize: 256,
-      enabled: true,
-    },
-    ocr: { languages: ["spa", "eng"], dpi: 300 },
-    grouping: { similarityThreshold: 0.88, minAliasFrequency: 1 },
-    render: { previewScale: 0.5, fullScale: 2, jpegQuality: 80, cachePages: 16 },
-    export: { defaultDpi: 300, defaultImageFormat: "png", defaultJpegQuality: 80 },
-    ...overrides,
-  };
-}
-
-export function createEngineContext(overrides?: Partial<EngineContext>): EngineContext {
-  const abortController = new AbortController();
-  const logger = createMockLogger();
-
-  return {
-    bus: createEventBus({ logger }),
-    logger,
-    cache: createMockCache(),
-    abortSignal: abortController.signal,
-    config: createMockConfig(),
-    ...overrides,
-  };
-}
+/*
+ * `createEngineContext` de este motor arma un bus **real**, no mockeado, y por
+ * eso se aliasa en vez de heredar el genérico: `grouping-engine` es el único
+ * que además de emitir **consume** eventos (`ENTITY_FOUND`, los requests de la
+ * UI), así que sus tests necesitan un bus que de verdad entregue. Heredar el de
+ * bus mockeado los dejaría sin recibir nada, en silencio.
+ */
 
 let occurrenceSeq = 0;
 
@@ -210,4 +137,35 @@ export function makeRule(
     createdAt: now,
     updatedAt: now,
   };
+}
+
+/*
+ * ADR-129: el `workerPool` —idéntico en los seis motores— sale del doble
+ * compartido; acá quedan **solo** los campos que este motor necesita distintos,
+ * con los mismos valores que tenía su copia propia.
+ */
+export function createMockConfig(overrides?: Partial<EngineConfig>): EngineConfig {
+  return sharedCreateMockConfig({
+    ner: {
+      modelId: "test-model",
+      quantization: "q8",
+      confidenceThreshold: 0.7,
+      batchSize: 256,
+      enabled: true,
+    },
+    ocr: { languages: ["spa", "eng"], dpi: 300 },
+    ...overrides,
+  });
+}
+
+/*
+ * El `EngineContext` compartido arma su config internamente, así que hay que
+ * pasarle la de este motor: si no, `ctx.config` sale con los defaults genéricos
+ * y no con los que sus tests necesitan (ADR-129).
+ * Usa el de **bus real**: `grouping-engine` es el único motor que además de
+ * emitir **consume** eventos, así que sus tests necesitan un bus que de
+ * verdad entregue, no uno que registre llamadas.
+ */
+export function createEngineContext(overrides?: Partial<EngineContext>): EngineContext {
+  return sharedCreateEngineContextWithRealBus({ config: createMockConfig(), ...overrides });
 }
