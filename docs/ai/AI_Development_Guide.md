@@ -26,11 +26,11 @@ El proyecto se desarrolla bajo un modelo **planificador + implementador**:
 
 | # | Regla |
 |---|---|
-| R-1 | **Un PR = un módulo.** Nunca modificar más de un motor por PR. |
+| R-1 | **Un commit = un módulo.** Nunca modificar más de un motor en el mismo commit. Un PR de implementación sigue siendo de un solo módulo; una **branch de campaña** —una secuencia de arreglos guiada por medición, donde qué motor toca cada uno es un resultado y no un dato de partida— puede tocar varios, siempre que cada commit toque uno (ADR-124 §1). El commit que cambia un **contrato** es la excepción de la excepción: toca por definición a todos sus consumidores, y se acepta si existe el ADR que lo autoriza (R-2) y el commit no lleva nada más. |
 | R-2 | Nunca romper **contratos públicos** definidos en `core/Contracts.md` o en la sección "Interfaces públicas" de un spec. Cambios de contrato requieren ADR + actualización de todos los specs afectados primero. |
 | R-3 | **Nunca** crear dependencias entre motores. La comunicación es solo por eventos y tipos de `@anonly/shared`. |
 | R-4 | **Nunca** acceder a React ni a ninguna librería de UI desde `packages/`. El Core es agnóstico de framework. |
-| R-5 | Si una tarea menciona dos motores, dividir en dos tareas y dos PRs. |
+| R-5 | Si una tarea menciona dos motores, dividir en dos tareas y **dos commits** (ADR-124 §1). En un PR de implementación eso son además dos PRs. |
 
 ### 2.2 Sobre código
 
@@ -52,16 +52,17 @@ El proyecto se desarrolla bajo un modelo **planificador + implementador**:
 | R-14 | Cada módulo debe tener su `README.md` apuntando al spec, y el spec debe estar actualizado antes del PR. |
 | R-15 | Cada cambio debe respetar las **interfaces existentes**. Si las extiende, documentarlo en el spec. |
 | R-16 | Antes de marcar un PR como listo, ejecutar `pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract`. Verde obligatorio. |
-| R-17 | El mensaje de commit sigue Conventional Commits sin scope. El PR toca un solo módulo. |
+| R-17 | El mensaje de commit sigue Conventional Commits sin scope. **El commit toca un solo módulo** (R-1, ADR-124 §1). |
+| R-22 | La **higiene de datos** —sacar nombres, números de expediente o cualquier dato de un documento real— va en su **propio commit**, nunca adentro de uno funcional (ADR-124 §3). Es lo que más necesita ser trazable, y es lo que un revisor no puede auditar si viaja escondido en un fix. |
 
 ### 2.4 Sobre documentación
 
 | # | Regla |
 |---|---|
 | R-18 | Toda decisión técnica no trivial va en un ADR antes de implementarse. |
-| R-19 | Todo tipo/evento/error code nuevo se agrega primero a `core/Contracts.md` y `architecture/04_Event_System.md`, luego al spec del motor, luego al código. |
+| R-19 | Todo tipo/evento/error code nuevo se agrega primero a `core/Contracts.md` y `architecture/04_Event_System.md`, luego al spec del motor, luego al código. El orden **no se afloja**; lo que cambia con ADR-124 §2 es que se audita por el **contenido** del commit —¿está el ADR?, ¿está el caso en §13 y la fila en §14?— y no por la cantidad de commits. |
 | R-20 | Los `<!-- CONTEXT -->` al inicio de cada `.md` deben mantenerse actualizados. |
-| R-21 | Los specs de motor **nunca** se editan desde un PR de implementación; se editan desde un PR de documentación aparte. |
+| R-21 | Los specs de motor **nunca** se editan desde la mano que implementa: es una regla sobre **quién**, no sobre cuándo (ADR-124 §2). El agente implementador recibe el spec cerrado y no lo toca. Cuando el ADR y el spec los escribe el **planificador** antes de decidir el cambio, pueden viajar en el mismo commit que el código — separarlos sobre una branch de un solo autor no agrega auditoría y abre una ventana donde el spec y el código dicen cosas distintas. |
 
 ---
 
