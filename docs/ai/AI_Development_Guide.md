@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=reglas-de-trabajo-IA | dependencias=ai/Code_Standards.md,ai/Module_Specification_Template.md | audiencia=IA+humanos | fase=0 -->
+<!-- CONTEXT: scope=reglas-de-trabajo-IA | dependencias=ai/Code_Standards.md,ai/Module_Specification_Template.md,adr/ADR-124-La-Unidad-De-Alcance-Es-El-Commit-No-El-PR.md | audiencia=IA+humanos | fase=0 (R-1/R-5/R-17/R-19/R-21 y el gate de Diff scope se miden por commit desde ADR-124; R-22 nueva) -->
 
 # Anonly — Guía de Desarrollo con IA
 
@@ -40,7 +40,7 @@ El proyecto se desarrolla bajo un modelo **planificador + implementador**:
 | R-7 | Todo dato público del Core es **inmutable** (`readonly`, `ReadonlyArray`). |
 | R-8 | Toda función pública de larga duración recibe `AbortSignal` vía `ctx`. |
 | R-9 | **Prohibido** `console.*` en `packages/`. Usar `ctx.logger`. |
-| R-10 | **Prohibido** network y filesystem desde el Core. |
+| R-10 | **Prohibido** network y filesystem desde el **runtime** del Core. Las excepciones acotadas están en `ai/Code_Standards.md` §12 (P-6 y P-7): assets first-party y la **lectura** de fixtures desde un test bajo `packages/**/__tests__/`. |
 | R-11 | Sin `export default`. Solo exports nombrados. |
 | R-12 | Sin dependencias externas nuevas sin ADR. |
 
@@ -103,7 +103,7 @@ Un PR se considera mergeable solo si cumple **todos** los gates.
 
 | Gate | Cómo se valida | Falla si |
 |---|---|---|
-| Diff scope | revisión humana/IA | el PR toca más de un módulo o archivos fuera del módulo |
+| Diff scope | revisión humana/IA | **un commit** toca más de un módulo o archivos fuera del módulo (R-1, ADR-124 §1). Se audita recorriendo commits (`git show --stat`), no el diff acumulado del PR. Un commit de contrato con su ADR, y uno de una branch de campaña declarada, no fallan por esto. |
 | Spec sync | revisión humana/IA | el spec del motor no refleja la implementación |
 | Prohibiciones | grep sobre el diff | presencia de `any`, `console.`, `react` en `packages/` (lista completa: `ai/Code_Standards.md` §12) |
 

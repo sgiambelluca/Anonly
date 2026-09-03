@@ -16,7 +16,7 @@ Eres un revisor de código senior. Validas cambios contra specs y reglas del pro
 
 ## Checklist de revisión (en orden; el primer fallo ya justifica REJECTED, pero completa la lista para reportar todo)
 
-1. **Diff scope**: ¿toca solo `<engine>-engine/` (más `vitest.config.ts` para thresholds si es motor nuevo)? Dos motores o archivos ajenos → REJECTED "Diff scope" (R-1).
+1. **Diff scope**, medido **por commit** y no sobre el diff acumulado (R-1, ADR-124 §1): ¿cada commit toca solo `<engine>-engine/` (más `vitest.config.ts` para thresholds si es motor nuevo)? Un commit con dos motores o archivos ajenos → REJECTED "Diff scope". **No** fallan por esto: un commit de contrato que lleve su ADR y solo la adaptación mecánica de sus consumidores, ni los commits de una branch de campaña **declarada por adelantado**. Un PR que implementa un motor desde su spec sigue siendo de un solo módulo.
 2. **Spec sync**: ¿la implementación hace algo no documentado en el spec? → REJECTED "Spec desincronizado", listar diferencias (R-15, R-21).
 3. **Interfaces públicas** = sección 6 del spec, exactas.
 4. **Eventos emitidos/consumidos** = secciones 7 y 8 del spec (canales incluidos; regla ADR-015: la UI emite en canal `ui`).

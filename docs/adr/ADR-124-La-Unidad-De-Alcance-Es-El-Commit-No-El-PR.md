@@ -40,7 +40,11 @@ Un **commit** toca un módulo. Un PR puede tocar varios, siempre que cada commit
 
 La excepción tiene un alcance nombrado, no es una puerta abierta: vale para una **branch de campaña** —una secuencia de arreglos guiada por medición, donde el motor afectado es un resultado y no un dato de partida—. Un PR que implementa un motor desde su spec sigue siendo un PR de un módulo, y ahí R-1 se lee como siempre.
 
-**El commit que cambia un contrato es la excepción de la excepción**: por definición toca todos los motores que consumen ese tipo. Se acepta explícitamente, con dos condiciones — que exista el ADR que lo autoriza (R-2, que no se toca) y que el commit no lleve nada más que ese cambio.
+**Y la campaña se declara por adelantado**, en el documento de roadmap o en el commit que abre la branch. Sin eso, la etiqueta es una defensa que se elige después de que alguien objeta — que es exactamente como se estrenó esta: el revisor marcó el incumplimiento de R-1 sobre una branch de 99 commits y recién ahí se nombró la excepción. Declararla antes la convierte en un compromiso, y el costo es una línea.
+
+**El commit que cambia un contrato es la excepción de la excepción**: por definición toca todos los motores que consumen ese tipo. Se acepta explícitamente, con dos condiciones — que exista el ADR que lo autoriza (R-2, que no se toca) y que el commit lleve **el cambio de tipo más la adaptación mecánica de sus consumidores, y nada más**: ningún comportamiento nuevo viaja ahí.
+
+La segunda condición decía antes "que el commit no lleve nada más que ese cambio", y así no se podía aplicar: de los cuatro commits de contrato de esta branch, dos arrastran adaptaciones en `apps/react-client` —siete archivos uno, tres el otro— y bajo lectura estricta ninguno calificaba. Una condición que no restringe nada no es una condición.
 
 ### 2. R-21 se aplica al **implementador**, no al planificador
 
@@ -50,7 +54,7 @@ El spec sigue sin poder editarse desde la mano que implementa. Cuando el ADR y e
 
 ### 3. Lo que sigue siendo indivisible
 
-- **Higiene de datos en su propio commit.** Un reemplazo de nombres reales no viaja adentro de un commit funcional. Esta campaña lo violó una vez —el scrub de un apellido entró en un fix de NER sin mención en el mensaje— y el revisor lo marcó con razón: la higiene es lo que más necesita ser trazable.
+- **Higiene de datos en su propio commit.** Un reemplazo de nombres reales no viaja adentro de un commit funcional. Esta campaña lo violó **al menos dos veces**: `46c67cc` metió el scrub de un apellido dentro de un fix de NER, sin mención en el mensaje, y `94c96be` mezcló el scrub principal con dos motores. `542d4d2` fue un tercer arrastre, pero ése sí fue commit propio y cumple. La higiene es lo que más necesita ser trazable, y fue lo que menos lo era.
 - **Un cambio de comportamiento, un commit.** La excepción es sobre *cuántos módulos*, no sobre cuántas ideas.
 
 ## Consecuencias
@@ -63,7 +67,16 @@ El spec sigue sin poder editarse desde la mano que implementa. Cuando el ADR y e
 **En contra**
 
 - **Un PR grande es más difícil de revisar, y eso no lo arregla ningún ADR.** La revisión de esta branch tuvo que declarar qué miró a fondo y qué por encima — de 36 ADR nuevos verificó tres contra el código. Esto documenta la excepción; no la vuelve gratis.
-- **"Branch de campaña" es un criterio que se puede estirar.** No hay forma de medirlo automáticamente, y depende de que quien lo invoque sea honesto sobre por qué su trabajo no entra en un módulo.
-- **Los seis commits multi-motor de esta branch siguen incumpliendo** incluso la regla nueva. Cinco son cambios de contrato y quedan cubiertos por §1; el sexto —el scrub que toca `ner-engine` y `regex-engine`— no, y se deja anotado: arreglarlo requeriría reescribir historia ya publicada, y la decisión fue no hacerlo.
+- **"Branch de campaña" es un criterio que se puede estirar.** No hay forma de medirlo automáticamente. La declaración previa de §1 acota el peor caso —no se puede invocar la excepción *después* de que alguien objete— pero no impide declarar campaña un trabajo que no lo es. Ahí no queda otra cosa que la honestidad de quien lo invoca, y conviene que esté escrito y no supuesto.
+- **De los seis commits multi-motor de esta branch, dos siguen incumpliendo la regla nueva.** Los otros cuatro son cambios de contrato y quedan cubiertos por §1. Los dos que no:
+
+  | commit | motores | por qué no lo cubre §1 |
+  |---|---|---|
+  | `665527c` (ADR-099) | export, ner, ocr | carga diferida del kernel: **ninguna** superficie de contrato — no toca `Contracts.md` ni `shared/` |
+  | `94c96be` | ner, regex | higiene de datos, que además viola la R-22 que este mismo ADR crea |
+
+  Arreglarlos requeriría reescribir historia ya publicada, y la decisión fue no hacerlo.
+
+  **La primera versión de este párrafo decía "cinco" y daba `665527c` por cubierto.** Lo encontró el revisor aplicando el test de este ADR commit por commit. El error caía a favor propio, y en el único párrafo donde el documento rinde cuentas de su propio residuo — que es donde menos se lo puede permitir, porque es el que sostiene la afirmación de honestidad del resto.
 
 **Lo que no toca**: R-2 (contratos), R-3/R-4, P-1..P-10 salvo la aclaración de P-6, ni la cobertura de R-13.

@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=estándares-de-código | dependencias=ninguna | audiencia=IA+humanos | fase=0 -->
+<!-- CONTEXT: scope=estándares-de-código | dependencias=adr/ADR-124-La-Unidad-De-Alcance-Es-El-Commit-No-El-PR.md | audiencia=IA+humanos | fase=0 (P-6 aclara desde ADR-124 que la prohibición de filesystem es sobre el runtime del Core: un test bajo `__tests__` puede leer un fixture) -->
 
 # Anonly — Estándares de Código
 
@@ -226,7 +226,7 @@ En **código de producción**, `as unknown as` tiene una única excepción (ADR-
 ## 11. Commits y PRs
 
 - Commits en formato **Conventional Commits** sin scope: `feat: ...`, `fix: ...`, `docs: ...`, `test: ...`, `refactor: ...`, `chore: ...`.
-- Un PR = un módulo. Nunca tocar dos motores en el mismo PR (ver `ai/AI_Development_Guide.md`).
+- Un **commit** = un módulo. Nunca tocar dos motores en el mismo commit (R-1, ADR-124 §1; ver `ai/AI_Development_Guide.md`). Un PR de implementación sigue siendo de un solo módulo.
 - Título del PR: `<tipo>: <motor> — <cambio>`. Ej: `feat: grouping-engine — soporte de alias manuales`.
 - El PR debe pasar todos los gates ejecutables antes de merge. La tabla canónica de gates vive en `architecture/07_Performance_Strategy.md` §11.4 (única fuente de verdad; no se duplica acá).
 

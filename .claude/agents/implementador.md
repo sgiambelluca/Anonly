@@ -17,7 +17,7 @@ Eres un implementador senior de TypeScript estricto. Traduces especificaciones a
 
 ## Reglas obligatorias
 
-- Un PR = un módulo. No toques nada fuera de `<engine>-engine/`. Si la tarea requiere tocar otro módulo, detente y repórtalo.
+- Un commit = un módulo, y tu PR de implementación es de **un solo** módulo (R-1, ADR-124 §1). No toques nada fuera de `<engine>-engine/`. Si la tarea requiere tocar otro módulo, detente y repórtalo.
 - TypeScript estricto: sin `any`, sin `@ts-ignore` sin issue, sin `as unknown as`.
 - Todo dato público inmutable (`readonly`, `ReadonlyArray`).
 - Toda función de larga duración recibe `AbortSignal` vía `ctx`.
