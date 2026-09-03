@@ -4,7 +4,7 @@
 
 > **Qué es esto**: el inventario de lógica repetida en el repo, levantado el 2026-08-27 durante la campaña de optimización. **No es parte de esa campaña**: no hace la herramienta más rápida, y tocarlo cruza cinco motores más un contrato público. Se aparta acá para retomarlo como misión propia.
 
-**Estado**: relevado y verificado, **sin decidir**. Nada de lo de acá se implementó.
+**Estado**: relevado y verificado. **§3 y §6 cerrados el 2026-09-03**; §1, §2, §4 y §5 siguen abiertos, cada uno con el motivo por el que no se cerró en esa pasada.
 
 ## Por qué esto no es un refactor mecánico
 
@@ -49,9 +49,11 @@ Verificado el 2026-08-27 que **sigue siendo el único** normalizador de texto li
 
 **Riesgo**: alto, y **es el único de esta lista que afecta qué se detecta**. Los demás son mantenibilidad.
 
+> **Sigue abierto al 2026-09-03, por el mismo motivo de siempre.** ADR-092 lo dejó anotado porque *"no hay dataset para medir ese cambio"*, y la campaña posterior agregó uno (`tests/fixtures/reference/`, 26 documentos con ground truth) — pero **no alcanza para éste**: el evaluador corre con **NER apagado** a propósito (ADR-095 §5) y excluye del recall las 17 entidades de tipo `ner`. Medir este cambio pide que el evaluador corra el modelo, que es una decisión propia (tiempo de corrida, determinismo del modelo cuantizado) y no un efecto colateral de tener el dataset. Hasta entonces, tocarlo sería mover cómo se compara **todo** valor de NER sin evidencia que lo pida — exactamente lo que ADR-088 §3 se negó a hacer.
+
 ---
 
-## 3. Overlap 2D escrito dos veces
+## 3. ~~Overlap 2D escrito dos veces~~ — **CERRADO el 2026-09-03 (ADR-127)**
 
 | dónde | guarda de área cero |
 |---|---|
@@ -65,6 +67,8 @@ Misma fórmula AABB con los términos reordenados. Lo que lo vuelve elocuente: *
 **Riesgo**: bajo hoy (los bboxes de palabras no tienen área cero en la práctica), pero es la semilla exacta de la clase de bug que motivó la errata de ADR-061 §2.
 
 **Costo**: chico.
+
+> **Cerrado por ADR-127**: `rectsOverlap` en `@anonly/shared` (`Contracts.md` §6), con la semántica de la copia que estaba bien —estricto, y un rectángulo sin área no se solapa con nada—; `wordsInRect` y el kernel de `render-engine` la usan, y `overlapsBbox` desaparece. Hallazgo de la implementación: `Render_Engine.md` §15 item 28 **ya había decidido no promoverlo**, por "es otra pregunta" (cierto, y el ADR lo sostiene: no reemplaza a `sharesVerticalBand`) y por "tiene un solo consumidor" (falso — `shared` ya tenía la misma AABB en privado). El ADR supersede esa media línea.
 
 ---
 
@@ -91,11 +95,13 @@ Misma fórmula AABB con los términos reordenados. Lo que lo vuelve elocuente: *
 
 ---
 
-## 6. Guarda de `OffscreenCanvas` inconsistente
+## 6. ~~Guarda de `OffscreenCanvas` inconsistente~~ — **CERRADO el 2026-09-03**
 
 `render-engine/src/worker/kernel.ts:620` verifica `typeof OffscreenCanvas === "undefined"` antes de construirlo; `ocr-engine/src/worker/kernel.ts:188` (`toTesseractImage`) lo construye directo. Mismo patrón, protección en uno solo.
 
 **Costo**: chico.
+
+> **Cerrado** (`OCR_Engine.md` §15 item 28, sin ADR: no toca contratos). Lo que cambia no es que falle —el constructor ya fallaba— sino **cómo**: un `ReferenceError` crudo no es `OcrPageFailedError`, así que no llegaba como `OCR_PAGE_FAILED` y la página se perdía sin el aviso de análisis incompleto de ADR-094.
 
 ---
 

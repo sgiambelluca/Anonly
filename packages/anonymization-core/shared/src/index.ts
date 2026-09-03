@@ -25,6 +25,9 @@ export { wordsInRect } from "./words-in-rect.js";
 // Predicado de "misma línea" — ADR-061 §2 errata
 export { sharesVerticalBand } from "./shares-vertical-band.js";
 
+// ADR-127: el solapamiento 2D, una sola vez para todo el Core.
+export { rectsOverlap } from "./rects-overlap.js";
+
 // Normalización de comparación de texto libre — ADR-061 §2 errata
 export { normalizeForComparison, normalizeEntityValue } from "./normalize-for-comparison.js";
 // ADR-105: la primitiva de contexto vive acá porque regex-engine y ner-engine
