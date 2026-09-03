@@ -4,7 +4,7 @@
 
 > **Qué es esto**: el inventario de lógica repetida en el repo, levantado el 2026-08-27 durante la campaña de optimización. **No es parte de esa campaña**: no hace la herramienta más rápida, y tocarlo cruza cinco motores más un contrato público. Se aparta acá para retomarlo como misión propia.
 
-**Estado**: relevado y verificado. **§3 y §6 cerrados el 2026-09-03**; §1, §2, §4 y §5 siguen abiertos, cada uno con el motivo por el que no se cerró en esa pasada.
+**Estado**: relevado y verificado. **§1, §3 y §6 cerrados**; §2, §4 y §5 siguen abiertos, cada uno con el motivo por el que no se cerró.
 
 ## Por qué esto no es un refactor mecánico
 
@@ -16,7 +16,7 @@ Además choca con R-1/R-5 ("un commit = un módulo" desde ADR-124 §1; antes, "u
 
 ---
 
-## 1. El boilerplate del `entry.ts` de worker, repetido en los cinco motores — **y ya divergió**
+## 1. ~~El boilerplate del `entry.ts` de worker, repetido en los cinco motores~~ — **CERRADO el 2026-09-03 (ADR-128)**
 
 `WORKER_ID`, `WORKER_CAPABILITIES`, `applyConfig()`, `post()`, el `Map` de `AbortController` por `signalId`, el `handleRun` que rechaza un `jobType` desconocido y el `addEventListener("message")` con INIT/RUN/CANCEL son el mismo código cinco veces. Los propios archivos lo admiten ("mismo mecanismo que Pdf/Render/OcrWorker").
 
@@ -35,6 +35,12 @@ Además choca con R-1/R-5 ("un commit = un módulo" desde ADR-124 §1; antes, "u
 **Camino legal**: `shared` no puede importar Web Workers, pero sí exportar una factory (`createWorkerEntry(...)`) que cada `entry.ts` invoque. Contrato público nuevo → ADR, más cinco migraciones.
 
 **Costo**: grande.
+
+> **Cerrado por ADR-128**: `startWorkerEntry` en `@anonly/shared` (`Contracts.md` §6) y los cinco motores migrados, un commit cada uno. Las líneas de los cinco `entry.ts` pasan de **1033 a 712**, y la divergencia de `post()` desaparece: la transfer list se declara con `transferablesOf`, que es una decisión del motor sobre su resultado y no una firma distinta del transporte.
+>
+> **Dos hallazgos de la implementación, que el relevamiento no tenía.** Los puntos de variación no eran cinco sino **siete**: el `CANCEL` de `export` descarta además el `PDFDocument` parcial (ADR-047 §4), y el `READY` eager de `pdf` espera a `engine.init()`. Los dos se habrían perdido en silencio en una migración mecánica, y ninguno lo agarraba un test — aparecieron comparando cada archivo contra su original. Es la evidencia más directa de por qué este ítem encabezaba la lista por riesgo.
+>
+> La factory se lleva además **19 tests que no existían para ningún motor**: el mapeo de errores que cruzan la frontera, la cancelación por `signalId` y la limpieza del `Map`. El gate real de la migración fue `pnpm test:e2e` (17/17), que es lo único que ejercita estos archivos.
 
 ---
 
