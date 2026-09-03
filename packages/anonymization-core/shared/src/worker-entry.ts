@@ -46,8 +46,15 @@ export interface WorkerJobContext {
   /** Se aborta cuando el host manda `CANCEL` con el `signalId` de este job. */
   readonly abortSignal: AbortSignal;
   readonly jobId: string;
-  /** Postea `PROGRESS` para este job. Lo usa `ner-engine` desde su kernel. */
-  progress(progress: number, partial?: Serializable): void;
+  /**
+   * Postea `PROGRESS` para este job. Lo usa `ner-engine` desde su kernel.
+   *
+   * Declarada como **propiedad de función** y no como método: un método suelto
+   * dispara `@typescript-eslint/unbound-method` en cada consumidor que lo pase
+   * por referencia (`onProgress: ctx.progress`), que es justamente como se
+   * quiere usar. El cierre que la factory construye no depende de `this`.
+   */
+  readonly progress: (progress: number, partial?: Serializable) => void;
 }
 
 export interface WorkerEntryDefinition {
