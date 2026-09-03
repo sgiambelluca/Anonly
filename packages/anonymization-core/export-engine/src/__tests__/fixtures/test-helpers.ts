@@ -26,7 +26,6 @@ import type { EncodedPageImage, ExportEngineInput, RenderPageProvider } from "..
  * acá para que cada suite siga importando de un solo lugar.
  */
 export {
-  createEngineContextWithRealBus,
   createMockBus,
   createMockCache,
   createMockLogger,
