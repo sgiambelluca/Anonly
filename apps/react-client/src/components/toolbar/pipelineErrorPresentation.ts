@@ -29,21 +29,26 @@ import {
 
 export interface PipelineErrorPresentation {
   readonly message: string;
-  /** `true` solo para `NER_MODEL_MISSING`: ofrece "Seguir sin detectar nombres" (React_Client.md §8, §3.7). */
-  readonly offerDisableNerReanalyze: boolean;
 }
 
 /**
  * Mensajes en lenguaje del usuario (ADR-087 §4): no nombran "NER" ni explican
  * cómo se distribuyen los modelos. **Cada uno dice qué pasó y qué se puede
  * hacer** — un mensaje de error sin salida es un cartel, no una ayuda
- * (`UX_Guidelines.md` §9 "error-recovery"). La salida de
- * `NER_MODEL_MISSING` es el botón que ofrece `offerDisableNerReanalyze`.
+ * (`UX_Guidelines.md` §9 "error-recovery").
+ *
+ * La salida de `NER_MODEL_MISSING` es **reintentar**, no continuar (ADR-126
+ * §2). Hasta acá ofrecía un botón de "Seguir sin detectar nombres" que
+ * reanalizaba con NER apagado, y eso producía lo peor que esta herramienta
+ * puede producir: un PDF que el usuario se lleva como anonimizado, con los
+ * DNI y los emails tapados y **todos los nombres intactos**. Terminar el
+ * análisis sin la categoría más sensible del documento no es una versión
+ * degradada del resultado: es un resultado equivocado con cara de éxito.
  */
 const MESSAGE_BY_CODE: Readonly<Partial<Record<EngineErrorCode, string>>> = {
   [EngineErrorCode.PDF_INVALID]: "El archivo no es un PDF válido. Probá con otro documento.",
   [EngineErrorCode.NER_MODEL_MISSING]:
-    "No se pudo cargar el detector de nombres. Podés seguir sin él: se van a detectar los datos con formato conocido (DNI, CUIT, emails, teléfonos), pero no los nombres ni las organizaciones.",
+    "No se pudo cargar el detector de nombres, así que el documento no se puede analizar completo. Recargá la página y probá de nuevo.",
   [EngineErrorCode.EXPORT_FAILED]: "No se pudo exportar el documento. Probá de nuevo.",
   /*
    * Sin esta fila, el `?? error.message` de abajo mostraba el string interno
@@ -74,6 +79,5 @@ export function getPipelineErrorPresentation(
 
   return {
     message: MESSAGE_BY_CODE[error.code] ?? error.message,
-    offerDisableNerReanalyze: error.code === EngineErrorCode.NER_MODEL_MISSING,
   };
 }

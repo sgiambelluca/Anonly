@@ -126,17 +126,22 @@ apps/react-client/src/components/
 
 ### 2.6 `SettingsButton` + `SettingsDialog` (ADR-036 §7, vocabulario por ADR-087 §4)
 
-> **Los campos no nombran el pipeline.** "Detección con NER (nombres, organizaciones)" pasa a
-> "Detectar nombres de personas y organizaciones"; "Idiomas de OCR" a "Idiomas del documento"; y las
+> **Los campos no nombran el pipeline.** "Idiomas de OCR" pasa a "Idiomas del documento", y las
 > opciones pierden los códigos ISO ("Español (spa)" → "Español"), que son cómo se le pide el modelo
-> al motor, no algo que el usuario tenga que elegir sabiendo. El texto describe **el efecto**:
-> apagar el toggle no "desactiva NER", deja de detectar nombres — que es lo que se va a notar en el
-> árbol.
+> al motor, no algo que el usuario tenga que elegir sabiendo.
+
+> **El toggle de detección de nombres se retiró** (ADR-126). Existía como "Detectar nombres de
+> personas y organizaciones", y sus dos posiciones no eran un gusto: una detecta nombres y la otra
+> no. Apagarlo no cambiaba cómo se ve el documento, cambiaba **cuántos datos personales quedaban a
+> la vista en el PDF exportado**, y en silencio — el árbol sin la categoría "Personas" es
+> indistinguible de un documento que no tiene nombres. La detección de nombres está siempre activa
+> y no tiene control. `nerEnabled` sobrevive **solo** como canal de override de los tests
+> (`React_Client.md` §3.6).
 
 - **Trigger**: icono de engranaje en el Toolbar (siempre visible; `UX_Guidelines.md` §2).
 - **Stores**: `settings`, `document` (para saber si hay documento abierto).
-- **Form** (`MVP.md` §2.3): idioma (`es` default), performance preset (`auto`/`low`/`high`), NER toggle, OCR languages.
-- **Acción**: muta `settings.store` + `settings.persist()`. Si el cambio es `nerEnabled`/`ocrLanguages` y hay documento abierto: `ConfirmDialog` "¿Reanalizar el documento con la nueva configuración? Tus ediciones se conservan." → `actions.reanalyze(patch)` (ADR-038 §7, `React_Client.md` §3.7 — **no** recrea el core). Si es `performancePreset` con documento abierto: se persiste y aplica al próximo documento, sin diálogo de confirmación (ADR-038 §7 Q3).
+- **Form** (`MVP.md` §2.3): idioma (`es` default), performance preset (`auto`/`low`/`high`), idiomas del documento. **Sin toggle de detección de nombres** (ADR-126).
+- **Acción**: muta `settings.store` + `settings.persist()`. Si el cambio es `ocrLanguages` y hay documento abierto: `ConfirmDialog` "¿Reanalizar el documento con la nueva configuración? Tus ediciones se conservan." → `actions.reanalyze(patch)` (ADR-038 §7, `React_Client.md` §3.7 — **no** recrea el core). Si es `performancePreset` con documento abierto: se persiste y aplica al próximo documento, sin diálogo de confirmación (ADR-038 §7 Q3).
 - **ARIA**: `aria-label="Configuración"`.
 - **Sección "Acerca de"** (ADR-070): bloque **estático** al pie del diálogo, separado del formulario por un divisor, con la atribución de datos de terceros. Es obligación de licencia CC-BY (ADR-060 §11), no una cortesía.
   - **Contenido**: una entrada por cada elemento de `THIRD_PARTY_CREDITS` (`toolbar/thirdPartyCredits.ts`, ADR-070 §2), con título de la obra, titular, licencia, indicación de cambios y para qué la usa Anonly. Hoy hay **una**: el léxico de nombres de Buenos Aires Data (CC-BY-2.5-AR).
@@ -813,7 +818,7 @@ Modo oscuro: en v1.0. MVP es solo claro.
 |---|---|---|---|
 | `ImportButton` | – | `actions.importDocument` → `orchestrator.importDocument` | `DOCUMENT_IMPORTED` (lo emite el Orchestrator; la UI nunca invoca `pdf.process` — errata corregida, ADR-036 §7) |
 | `PasswordDialog` | `document` | `actions.retryWithPassword` → `orchestrator.retryWithPassword` | (escucha `PDF_PASSWORD_REQUIRED`, canal `pdf`) |
-| `SettingsDialog` | `settings`, `document` | `settings.persist` (+ `actions.reanalyze` si `nerEnabled`/`ocrLanguages` cambian con documento abierto, `React_Client.md` §3.7, ADR-038 §7) | `orchestrator.reanalyze` (no es un evento del bus) |
+| `SettingsDialog` | `settings`, `document` | `settings.persist` (+ `actions.reanalyze` si `ocrLanguages` cambia con documento abierto, `React_Client.md` §3.7, ADR-038 §7; + recreación del core si cambia el `EngineConfig` **sin** documento abierto, ADR-125 §2) | `orchestrator.reanalyze` (no es un evento del bus) |
 | `CancelButton` | `pipeline.stage` | `actions.cancel` | `CANCEL_REQUESTED` |
 | `CloseDocumentButton` (ADR-051) | `pipeline.stage`, `document` | `actions.closeDocument` (vía `ConfirmDialog`) → `orchestrator.closeDocument` | `DOCUMENT_CLOSED` |
 | `ExportButton` | `pipeline.stage`, `document` | `actions.requestExport` (via dialog) | `EXPORT_REQUESTED` |

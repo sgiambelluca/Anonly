@@ -106,7 +106,12 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
   const [performancePreset, setPerformancePreset] = useState<PerformancePreset>(
     () => useSettingsStore.getState().performancePreset,
   );
-  const [nerEnabled, setNerEnabled] = useState(() => useSettingsStore.getState().nerEnabled);
+  /*
+   * ADR-126 §1: sin control en el formulario. Se lee del store y viaja tal
+   * cual en `next` para no pisarlo al guardar — el único que lo escribe hoy
+   * es el canal de override de los tests (`load()`), y nadie desde la UI.
+   */
+  const nerEnabled = useSettingsStore((state) => state.nerEnabled);
   const [ocrLanguages, setOcrLanguages] = useState<ReadonlyArray<string>>(
     () => useSettingsStore.getState().ocrLanguages,
   );
@@ -121,7 +126,6 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     const current = useSettingsStore.getState();
     setLanguage(current.language);
     setPerformancePreset(current.performancePreset);
-    setNerEnabled(current.nerEnabled);
     setOcrLanguages(current.ocrLanguages);
     setSaveError(null);
   }, [open]);
@@ -254,20 +258,6 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                 Se aplica al próximo documento; no afecta al que está abierto.
               </p>
             ) : null}
-          </FormRow>
-
-          <FormRow label="Qué se detecta">
-            {/*
-              El texto describe el efecto, no la etapa: apagarlo no "desactiva
-              NER", deja de detectar nombres. Lo segundo es lo que el usuario
-              va a notar en el árbol (ADR-087 §4).
-            */}
-            <Checkbox
-              id="settings-ner-enabled"
-              checked={nerEnabled}
-              onCheckedChange={setNerEnabled}
-              label="Detectar nombres de personas y organizaciones"
-            />
           </FormRow>
 
           <FormRow label="Idiomas del documento">

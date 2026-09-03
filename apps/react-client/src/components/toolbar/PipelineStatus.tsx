@@ -15,29 +15,28 @@
  *
  * Ambigüedad reportada (no implementada): `ui/React_Client.md` §8 y
  * `ui/Components.md` §2.1/§7.3 mencionan un botón "Reintentar" para
- * `PIPELINE_FAILED` (genérico y para `NER_MODEL_MISSING`), pero ningún doc
- * (`core/Contracts.md` `IPipelineOrchestrator`, `core/Orchestrator.md`) define
- * un método de "reintentar" genérico: `reanalyze` con el patch sin cambios es
- * no-op (ADR-038 §1) y no hay `orchestrator.retry()`. Implementar "Reintentar"
- * como un nuevo `importDocument` arriesga descartar la sesión de edición que
- * ADR-038 existe justamente para preservar. Este PR implementa solo lo
- * inequívoco: el mensaje de error + "Cerrar documento" (`actions.closeDocument`)
- * siempre, y "Desactivar NER y reanalizar" (`actions.reanalyze({ ner: {
- * enabled: false } })`) cuando `error.code === "NER_MODEL_MISSING"`.
+ * `PIPELINE_FAILED`, pero ningún doc (`core/Contracts.md`
+ * `IPipelineOrchestrator`, `core/Orchestrator.md`) define un método de
+ * "reintentar" genérico: `reanalyze` con el patch sin cambios es no-op
+ * (ADR-038 §1) y no hay `orchestrator.retry()`. Implementar "Reintentar" como
+ * un nuevo `importDocument` arriesga descartar la sesión de edición que
+ * ADR-038 existe justamente para preservar. Se implementa solo lo inequívoco:
+ * el mensaje de error + "Cerrar documento" (`actions.closeDocument`).
  *
- * "Desactivar NER y reanalizar" **también escribe `settings.store.nerEnabled`**
- * (tras el éxito del `reanalyze`): es la mitad que faltaba de esa recuperación
- * desde el PR6 del Hito 10. Sin ella el toggle de `SettingsDialog` quedaba
- * desincronizado y, desde PR16.5 —que deriva el `EngineConfig` del bootstrap
- * de `settings.store`—, la próxima carga de la pestaña reabría el Core con
- * NER activado.
+ * **`NER_MODEL_MISSING` ya no ofrece continuar** (ADR-126 §2). Hasta acá el
+ * banner traía "Seguir sin detectar nombres", que reanalizaba con NER apagado
+ * y escribía `settings.store.nerEnabled`. Lo que producía ese botón es lo peor
+ * que esta herramienta puede producir: un documento que llega a "Listo", se
+ * exporta como anonimizado, y tiene los DNI y los emails tapados con **todos
+ * los nombres intactos**. Que el detector más importante no cargue es un
+ * fallo, y la salida de un fallo es reintentar — el mensaje lo dice
+ * (`pipelineErrorPresentation.ts`).
  */
 
 import { PipelineStage } from "@anonly/anonymization-core";
 
 import { actions } from "../../core-adapter/actions.js";
 import { usePipelineStore } from "../../store/pipeline.store.js";
-import { useSettingsStore } from "../../store/settings.store.js";
 import { Banner } from "../common/Banner.js";
 import { Button } from "../common/Button.js";
 
@@ -70,40 +69,6 @@ export function PipelineStatus() {
         variant="error"
         actions={
           <>
-            {errorPresentation.offerDisableNerReanalyze ? (
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => {
-                  void actions
-                    .reanalyze({ ner: { enabled: false } })
-                    .then(() => {
-                      // El store se sincroniza con lo que el usuario acaba de
-                      // decidir, y solo si el reanalyze salió bien (mismo
-                      // criterio de orden que `SettingsDialog`). Sin esto el
-                      // toggle de Settings seguía mostrando NER activado, y
-                      // —desde PR16.5, que cablea `settings.store` →
-                      // `EngineConfig` en el bootstrap— al recargar la pestaña
-                      // el Core volvía a arrancar con NER activado, o sea de
-                      // vuelta al mismo `NER_MODEL_MISSING` del que el usuario
-                      // acababa de salir. `React_Client.md` §3.7/§8.
-                      useSettingsStore.setState({ nerEnabled: false });
-                      useSettingsStore.getState().persist();
-                    })
-                    .catch(() => {
-                      // `actions.reanalyze` propaga el rechazo del Orchestrator
-                      // (p. ej. el `InvalidInputError` que ADR-081 agregó). Sin
-                      // este catch terminal sería un unhandled rejection y el
-                      // store quedaría sin sincronizar en silencio. El banner de
-                      // error ya está en pantalla: no hay UI nueva que mostrar,
-                      // lo que importa es no dejar la promesa suelta ni escribir
-                      // el store como si el reanalyze hubiera funcionado.
-                    });
-                }}
-              >
-                Seguir sin detectar nombres
-              </Button>
-            ) : null}
             <Button variant="danger" size="sm" onClick={() => actions.closeDocument()}>
               Cerrar documento
             </Button>
