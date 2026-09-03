@@ -107,11 +107,13 @@ Misma fórmula AABB con los términos reordenados. Lo que lo vuelve elocuente: *
 
 **Costo**: mediano.
 
-> **Cerrado por ADR-129**: `@anonly/test-utils`, paquete de workspace privado y solo `devDependency`. Los siete `test-helpers.ts` de motor pasan de **3067 a 2601 líneas**, y lo que se mudó es lo que era idéntico: `createMockLogger` y `createMockCache` lo eran **byte a byte en los seis**, `createMockBus` en los cinco que lo tenían, y el bloque `workerPool` de `createMockConfig` en las seis versiones.
+> **Cerrado por ADR-129**: `@anonly/test-utils`, paquete de workspace privado y solo `devDependency`. Los siete `test-helpers.ts` de motor pasan de **3067 a 2612 líneas**, y lo que se mudó es lo que era idéntico: `createMockLogger` y `createMockCache` lo eran **byte a byte en los seis**, `createMockBus` en los cinco que lo tenían, y el bloque `workerPool` de `createMockConfig` en las seis versiones.
 >
-> **Dos cosas que la migración enseñó**, las dos por romper tests antes de arreglarlos: (1) los campos **propios** de cada motor en `createMockConfig` —los idiomas de OCR, el `modelId` de NER— son load-bearing, así que cada motor conserva un wrapper delgado sobre el `workerPool` compartido; (2) `createEngineContext` arma su config adentro, así que heredarlo sin pasarle la del motor deja `ctx.config` con los defaults genéricos. Las dos fallas fueron ruidosas —123 tests en rojo—, que es lo contrario del riesgo que este ítem describía.
+> **Tres cosas que la migración enseñó**, y la tercera es la que este ítem tiene que rendir. Las dos primeras, por romper tests antes de arreglarlos: (1) los campos **propios** de cada motor en `createMockConfig` —los idiomas de OCR, el `modelId` de NER— son load-bearing, así que cada motor conserva un wrapper delgado sobre el `workerPool` compartido; (2) `createEngineContext` arma su config adentro, así que heredarlo sin pasarle la del motor deja `ctx.config` con los defaults genéricos. Esas dos fueron **ruidosas** —123 tests en rojo—.
 >
-> El gate fue **el conteo**: 1894 tests antes y 1894 después. Un test perdido habría significado un doble que cambió de comportamiento.
+> **(3) La tercera fue silenciosa, y es exactamente el riesgo que este ítem describía.** `createEngineContextWithRealBus` de `render-engine` se re-exportó tal cual del paquete compartido, sin envolverlo con la config del motor: sus 13 call sites pasaron a correr con `render.previewScale` 0.5 en vez de 1, `fullScale` 2 en vez de 2.08, `jpegQuality` 80 en vez de 0.85 y `export` `{300, png, 80}` en vez de `{150, jpeg, 0.85}` — los cuatro campos que ese motor lee. **Cero tests en rojo. 1894 antes, 1894 después.** Lo encontró una revisión, no la suite.
+>
+> Por eso el gate que este ADR se puso —el conteo de tests— **es necesario y no es suficiente**: protege contra *perder* cobertura, no contra *correrla con datos distintos*. Un doble que cambia de valor no borra ningún test. Es la misma clase de falla que el ítem enunciaba —"el que quede con el shape viejo **esconde** un bug detrás de un mock desactualizado en vez de fallar"—, ocurrida durante su propia resolución.
 
 ---
 
