@@ -46,7 +46,7 @@ Y hay una asimetría que lo empeora: los `entry.ts` son de los pocos archivos de
 
 ### 4. Lo que **no** es común, y por qué el esqueleto igual existe
 
-Los cinco divergen en **seis** puntos, todos legítimos. El inventario había listado cinco; el sexto —el `CANCEL` de `export`— apareció migrando, y es exactamente el tipo de detalle que una migración mecánica pierde en silencio:
+Los cinco divergen en **siete** puntos, todos legítimos. El inventario había listado cinco; los dos últimos —el `CANCEL` de `export` y el `READY` eager diferido de `pdf`— aparecieron migrando, y son exactamente el tipo de detalle que una migración mecánica pierde en silencio:
 
 | Punto de variación | Quién lo usa |
 |---|---|
@@ -56,6 +56,7 @@ Los cinco divergen en **seis** puntos, todos legítimos. El inventario había li
 | Qué transferir en `COMPLETED` | `render` (el `bytes` del resultado) y `export` (el buffer, que **es** el resultado) |
 | Mensajes fuera del ciclo RUN | `ner` postea `PROGRESS` desde el kernel; `pdf` postea `EVENT` y `LOG`, porque corre el motor real y ese motor emite y loguea |
 | Trabajo extra al recibir `CANCEL` | `export` descarta ahí su `PDFDocument` parcial (ADR-047 §4) |
+| Si el `READY` **eager** también se difiere | `pdf` lo postea recién cuando `engine.init()` resuelve; los otros cuatro corren un kernel sin init y lo postean de una |
 
 Ninguno de esos cinco toca el mapeo de errores, la cancelación ni la limpieza — que es exactamente lo que hay que dejar de copiar.
 
@@ -80,6 +81,8 @@ startWorkerEntry({
 `ctx` le da al job lo único que necesita del transporte: su `abortSignal`, su `jobId` y un `progress()` para el caso de `ner`.
 
 `onCancel` es el sexto punto: trabajo extra al recibir `CANCEL`, **además** de abortar el signal. Se invoca aunque el `signalId` no corresponda a ningún job en vuelo, que es el comportamiento que `export` ya tenía.
+
+`ready` es el séptimo: una promesa que el `READY` **eager** espera. Es lo que `pdf` necesita para no declararse listo antes de que su motor lo esté.
 
 **`applyConfig` puede devolver una promesa** y el `READY` se postea recién cuando resuelve. Eso absorbe la única divergencia de ciclo de vida real —la de `pdf`, que espera a `engine.init()`— sin un caso especial.
 
@@ -121,5 +124,6 @@ La factory es la que gana los tests que hoy no tiene nadie, porque son los del t
 - `CANCEL` con el `signalId` de un job en vuelo → su `abortSignal` se aborta; con un `signalId` desconocido → no lanza.
 - `CANCEL` invoca `onCancel` **además** de abortar, incluso sin job en vuelo (el descarte del PDF parcial de `export`).
 - `INIT` con `applyConfig` asíncrono → el `READY` se postea **después** de que resuelve.
+- Con `ready`, el `READY` eager espera a que resuelva, y **no** se postea nada antes.
 - `transferablesOf` → lo que devuelve viaja en la transfer list; si devuelve vacío, `postMessage` se llama sin opciones.
 - El `Map` queda vacío después de un job que falla, uno que se cancela y uno que sale bien.

@@ -69,6 +69,14 @@ export interface WorkerEntryDefinition {
    * `pdf-engine` para esperar a su `engine.init()` sin un caso especial.
    */
   readonly applyConfig?: (config: unknown) => void | Promise<void>;
+  /**
+   * Si está, el `READY` **eager** espera a que resuelva.
+   *
+   * Existe por `pdf-engine`, cuyo worker corre el motor real y no puede
+   * decirse listo antes de que `engine.init()` termine. Los otros cuatro
+   * corren un kernel sin init y postean el `READY` de una.
+   */
+  readonly ready?: Promise<void>;
   /** El trabajo. `payload` es `unknown` a nivel de transporte (ADR-019). */
   readonly run: (payload: unknown, ctx: WorkerJobContext) => Promise<unknown>;
   /**
@@ -186,5 +194,9 @@ export function startWorkerEntry(definition: WorkerEntryDefinition): void {
     }
   });
 
-  postReady();
+  if (definition.ready !== undefined) {
+    void definition.ready.then(postReady);
+  } else {
+    postReady();
+  }
 }
