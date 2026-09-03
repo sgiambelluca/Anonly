@@ -8,18 +8,25 @@
  * (Code_Standards.md §10; ADR-021 §5; precedente: mockGetDocumentResult en
  * pdf-engine).
  */
-import type {
-  EngineConfig,
-  EngineContext,
-  ICache,
-  IEventBus,
-  ILogger,
-  Unsubscribe,
-} from "@anonly/shared";
+import type { EngineConfig, EngineContext } from "@anonly/shared";
+import { createEngineContext as sharedCreateEngineContext, createMockConfig as sharedCreateMockConfig } from "@anonly/test-utils";
 import type { createWorker } from "tesseract.js";
 import { vi } from "vitest";
 
+
 import type { OcrPageInput } from "../../ocr.types.js";
+
+
+/*
+ * ADR-129: los dobles genéricos viven en `@anonly/test-utils`. Se re-exportan
+ * acá para que cada suite siga importando de un solo lugar.
+ */
+export {
+  createEngineContextWithRealBus,
+  createMockBus,
+  createMockCache,
+  createMockLogger,
+} from "@anonly/test-utils";
 
 type TesseractWorker = Awaited<ReturnType<typeof createWorker>>;
 
@@ -160,92 +167,6 @@ export function mockDetectData(
       orientation_degrees: orientationDegrees,
       orientation_confidence: orientationConfidence,
     },
-  };
-}
-
-export function createMockBus(): IEventBus {
-  return {
-    on: vi.fn((): Unsubscribe => vi.fn()),
-    once: vi.fn((): Unsubscribe => vi.fn()),
-    off: vi.fn(),
-    emit: vi.fn(),
-    emitAsync: vi.fn(() => Promise.resolve()),
-  };
-}
-
-export function createMockLogger(): ILogger {
-  return {
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  };
-}
-
-export function createMockCache(): ICache {
-  return {
-    get: vi.fn(),
-    set: vi.fn(),
-    delete: vi.fn(),
-    clear: vi.fn(),
-    size: 0,
-    bytes: 0,
-  };
-}
-
-export function createMockConfig(overrides?: Partial<EngineConfig>): EngineConfig {
-  return {
-    workerPool: {
-      pdfPoolSize: 2,
-      ocrPoolSize: 1,
-      nerPoolSize: 1,
-      renderPoolSize: 2,
-      maxQueuePerPool: { pdf: 32, ocr: 8, ner: 8, render: 32 },
-      timeouts: {
-        "pdf-parse": 30000,
-        "ocr-page": 60000,
-        "ner-page": 20000,
-        "render-page": 10000,
-        "export-page": 30000,
-      },
-      maxRetries: {
-        "pdf-parse": 1,
-        "ocr-page": 2,
-        "ner-page": 1,
-        "render-page": 1,
-        "export-page": 1,
-      },
-      baseRetryDelayMs: 250,
-      maxRetryDelayMs: 2000,
-      cancelSlaMs: 200,
-      idleDisposeMs: 60000,
-    },
-    pdf: { maxPageCount: 10000 },
-    ner: {
-      modelId: "test",
-      quantization: "q8",
-      confidenceThreshold: 0.7,
-      batchSize: 1,
-      enabled: false,
-    },
-    ocr: { languages: ["spa", "eng"], dpi: 300 },
-    grouping: { similarityThreshold: 0.88, minAliasFrequency: 1 },
-    render: { previewScale: 0.5, fullScale: 2, jpegQuality: 80, cachePages: 16 },
-    export: { defaultDpi: 300, defaultImageFormat: "png", defaultJpegQuality: 80 },
-    ...overrides,
-  };
-}
-
-export function createEngineContext(overrides?: Partial<EngineContext>): EngineContext {
-  const abortController = new AbortController();
-
-  return {
-    bus: createMockBus(),
-    logger: createMockLogger(),
-    cache: createMockCache(),
-    abortSignal: abortController.signal,
-    config: createMockConfig(),
-    ...overrides,
   };
 }
 
@@ -395,4 +316,25 @@ export function createResolvedOcrPool(resolvedValue: unknown): {
   return {
     dispatch: (): Promise<unknown> => Promise.resolve(resolvedValue),
   };
+}
+
+/*
+ * ADR-129: el `workerPool` —idéntico en los seis motores— sale del doble
+ * compartido; acá quedan **solo** los campos que este motor necesita distintos,
+ * con los mismos valores que tenía su copia propia.
+ */
+export function createMockConfig(overrides?: Partial<EngineConfig>): EngineConfig {
+  return sharedCreateMockConfig({
+    ocr: { languages: ["spa", "eng"], dpi: 300 },
+    ...overrides,
+  });
+}
+
+/*
+ * El `EngineContext` compartido arma su config internamente, así que hay que
+ * pasarle la de este motor: si no, `ctx.config` sale con los defaults genéricos
+ * y no con los que sus tests necesitan (ADR-129).
+ */
+export function createEngineContext(overrides?: Partial<EngineContext>): EngineContext {
+  return sharedCreateEngineContext({ config: createMockConfig(), ...overrides });
 }
