@@ -178,7 +178,7 @@ OcrPageInput {
 OcrPageOutput {
   documentId: string;
   pageIndex: number;
-  words: ReadonlyArray<Word>; // ordenadas por bbox.y asc, luego bbox.x asc
+  words: ReadonlyArray<Word>; // orden interno del motor; ver la nota de abajo
   confidence: number;          // promedio [0,1]
   durationMs: number;
 }
@@ -187,7 +187,9 @@ OcrPageOutput {
 - `words[i].source === "ocr"`.
 - `words[i].pageIndex === input.pageIndex`.
 - `words[i].confidence ∈ [0,1]`.
-- **Este orden es interno de este motor y no es el que ve el detector** (ADR-110). `fuseOcrPage`/`fuseOcrRegion` (`PDF_Engine.md` §6) re-ordenan las palabras al fusionarlas en la página, y desde ADR-110 lo hacen **agrupando en renglones** en vez de por una clave escalar con tolerancia — que sobre un escaneo rompía uno de cada tres pares de palabras consecutivos. Este motor **no cambia**: su orden en píxeles con tolerancia de 1 px queda como lo fijó ADR-064 §2.
+- **Este orden es interno de este motor y no es el que ve el detector** (ADR-110).
+
+  > **Precisión (2026-09-03)**: el comentario inline de `words` decía *"ordenadas por `bbox.y` asc, luego `bbox.x` asc"*, y desde **ADR-121** eso ya no describe el array completo. Las palabras de la pasada derecha sí salen con ese orden; las que vienen de las **franjas de margen rotadas** se concatenan **después** (`[...words, ...rotated]`), sin re-ordenar. No es un defecto: ese orden no es el que ve el detector, así que re-ordenar acá sería trabajo que `fuseOcrPage` deshace. Lo que estaba mal era la promesa, no el código. `fuseOcrPage`/`fuseOcrRegion` (`PDF_Engine.md` §6) re-ordenan las palabras al fusionarlas en la página, y desde ADR-110 lo hacen **agrupando en renglones** en vez de por una clave escalar con tolerancia — que sobre un escaneo rompía uno de cada tres pares de palabras consecutivos. Este motor **no cambia**: su orden en píxeles con tolerancia de 1 px queda como lo fijó ADR-064 §2.
 - **`words[i].bbox` está en puntos**, no en píxeles del raster (ADR-064 §1) — de página cuando `imageData` es la página entera, y **relativos al recorte** cuando es una región (§9, ADR-065 §3). Tesseract devuelve píxeles de la `imageData` recibida; el kernel los convierte con `pt = px · 72 / dpi` sobre `x`, `y`, `width` y `height`. Es un escalado puro, sin corrimiento de origen: el raster de `rasterizePage` sale de `getViewport({ scale })`, cuya esquina superior-izquierda con `y` hacia abajo es **la misma convención** que exige `03_Data_Model.md` §137. Con esto, `Word.bbox` tiene un único espacio de coordenadas sea `source` `"pdf"` u `"ocr"`.
 - El orden de lectura se calcula **antes** de convertir, con la tolerancia de misma-línea de 1px intacta (ADR-064 §2). El array resultante queda en el mismo orden que produciría sin la conversión: un escalado positivo uniforme no altera el orden, y la tolerancia sigue significando un píxel y no un punto.
 - **`bbox.rotation` se puebla desde ADR-090 §4** — hasta la v1.3.1 este motor nunca lo hacía, y §10 lo afirmaba. Ahora lleva el mismo valor que `orientation_degrees` de OSD (ausente ≡ 0, así que un escaneo derecho sigue sin el campo y entra por la rama horizontal de siempre). La correspondencia es la identidad y está verificada contra los runs rotados que produce `pdf-engine`: `270` ⇒ el texto avanza hacia abajo en espacio de página, `90` ⇒ hacia arriba. **Desde ADR-121 hay una segunda fuente**: una palabra que salió de una franja de margen lleva la rotación de su pasada **compuesta** con la orientación de la página, `(pasada + orientación) % 360`, porque la franja se recorta del raster ya enderezado. En una página derecha eso es 90 o 270 directo. Con esto se cumple lo que ADR-067 §5 dejó anotado: el orden por runs rotados de `pdf-engine` y el pintado rotado de ADR-066 §7 **cubren el texto de OCR sin un cambio más**.
