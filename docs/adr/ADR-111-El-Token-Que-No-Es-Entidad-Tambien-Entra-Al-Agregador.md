@@ -81,9 +81,9 @@ y `open.label !== label` **sí** dispara sobre una continuación cuando el model
 |---|---|
 | `Florencio Varela` | `Address "Floren"` + `Organization "cio Varela"` |
 | `Quilmes` | `Address "Qui"` + `Organization "lmes"` |
-| `CARRAL` | `Person "CA"` + `Address "R"` + `Person "RA"` + `Address "L"` |
+| `MOLINA` | `Person "MO"` + `Address "L"` + `Person "IN"` + `Address "A"` |
 | `Echeverría` | `Person "Echeve"` + `Address "rría"` |
-| `MAIDANA Ricardo Ramón` | `Organization "MAID"` + `Person "ANA Ricardo Ramon"` |
+| `ARRIETA Rodolfo Andrés` | `Organization "ARRI"` + `Person "ETA Rodolfo Andres"` |
 
 Son **48 spans mal cortados** sobre los mismos 8 documentos. Cada uno es un dato que se tapa a medias: `Echeve` tapado y `rría` a la vista.
 

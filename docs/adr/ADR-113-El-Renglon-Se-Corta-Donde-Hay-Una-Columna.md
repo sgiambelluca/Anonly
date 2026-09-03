@@ -39,7 +39,7 @@ Y no hay margen que ganar aflojando o apretando: **un escaneo tiene desviación*
 | banda contra `min(medianaAlto, alto del candidato)` | 96,4 % | **99,1 %** | 17/19 |
 | la caja del candidato dentro de la banda ≥ 60 % | 96,7 % | **99,3 %** | 17/19 |
 
-Las dos arreglan el sello y **rompen el cuerpo**, y siempre por lo mismo: parten el renglón en palabras de caja chica. Los pares que rompen son `de conformidad **con** lo establecido`, `dictada **por** el Tribunal`, `advierte **que,** si bien`, y el guion de `CARRAL Daniel Alfredo **-** JUEZ` (alto 1,0 pt). Una palabra sin ascendentes ni descendentes tiene una caja de tinta mucho más baja que la de sus vecinas, y cualquier criterio vertical más fino que la banda actual la expulsa de su propio renglón.
+Las dos arreglan el sello y **rompen el cuerpo**, y siempre por lo mismo: parten el renglón en palabras de caja chica. Los pares que rompen son `de conformidad **con** lo establecido`, `dictada **por** el Tribunal`, `advierte **que,** si bien`, y el guion de `MOLINA Hugo Adrián **-** JUEZ` (alto 1,0 pt). Una palabra sin ascendentes ni descendentes tiene una caja de tinta mucho más baja que la de sus vecinas, y cualquier criterio vertical más fino que la banda actual la expulsa de su propio renglón.
 
 ### 3. El hueco horizontal sí es inequívoco
 
