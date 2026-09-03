@@ -91,6 +91,27 @@ jobs:
       # implementado queda por debajo, este paso falla.
       - run: pnpm test -- --coverage
 
+  build:
+    name: Build
+    needs: install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Compila los paquetes del Core a `dist/` — el modo en que se PUBLICAN,
+      # con `.d.ts` y sin tests. Ningún otro gate lo ejercita: `dev`, los tests,
+      # el E2E y el build de la app leen el código fuente.
+      #
+      # Estuvo roto desde el Hito 1 (`5eb30d2`, 2026-06-18) y nadie se enteró en
+      # dos meses y medio, justamente porque no estaba acá. Un comando que no
+      # corre en CI no es un gate: es una intención.
+      - run: pnpm build
+
   audit:
     name: Security audit
     needs: install
