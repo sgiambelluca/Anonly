@@ -109,7 +109,7 @@ Las tres lecturas que importan: la **proporción** de ruido casi no se mueve (28
 Dos defectos, los dos reproducidos sobre el mismo fallo escaneado y medidos sobre 8 documentos / 115 páginas antes de tocar código:
 
 - **Tres párrafos como una sola persona.** `TokenClassificationPipeline._call` de @huggingface/transformers default a `ignore_labels: ['O']` y el kernel nunca le pasó opciones: trabajaba con **21 de 466 tokens**. Sin los `O`, `aggregateTokensToSpans` no ejecuta nunca su rama de cierre y el cursor de `positionTokens` se queda sin anclas — una `Person` de **785 caracteres**.
-- **Entidades partidas a mitad de palabra**: `Florencio Varela` → `"Floren"` + `"cio Varela"`; `CARRAL` → cuatro entidades.
+- **Entidades partidas a mitad de palabra**: `Florencio Varela` → `"Floren"` + `"cio Varela"`; `BENITEZ` → cuatro entidades.
 
 Resultado: spans de más de 40 caracteres **19 → 3** (los 3 restantes son nombres largos legítimos de organismos), spans cortados a mitad de palabra **48 → 0**, sin costo de tiempo medible. Ver ADR-111 y `NER_Engine.md` §13 casos 23-25.
 
@@ -142,7 +142,9 @@ Dos defectos distintos que salieron del mismo síntoma.
 
 **(a) El número de causa y el IPP no tienen patrón.** `Causa n° NNNNNN` e `IPP NNNN-NNNN-NN` aparecen en el encabezado de las 19 páginas y en el cuerpo, y se detectan **0/19**. Es `Post_Hito10.8_Pendientes.md` §26, que ya lo tenía anotado desde una pericia distinta; este documento **agrega dos formas** a la tabla de formas relevadas: `IPP NNNN-NNNN-NN` y `Causa n°/N° NNNNNN`.
 
-**(b) `caratula-ar` está muerto en caja alta.** El patrón exige `\p{Lu}\p{Ll}+` de los dos lados de la coma y un `s/`/`c/` en **minúscula**. Una carátula de expediente se escribe `SUAREZ, BARTOLOME ARTURO S/ RECURSO DE CASACIÓN`. Medido: **0 matches en las 20 páginas**, incluida la línea del cuerpo `caratulada "SUAREZ, BARTOLOME ARTURO S/ RECURSO DE CASACIÓN"`, donde el ancla `caratulada` está pegada. Hoy lo salva el NER, pero el camino determinista está apagado justo sobre el formato de los sellos y las carátulas.
+**(b) `caratula-ar` estaba muerto en caja alta — CERRADO por ADR-122.** El patrón exigía `\p{Lu}\p{Ll}+` de los dos lados de la coma y un `s/`/`c/` en **minúscula**. Una carátula de expediente se escribe `SUAREZ, BARTOLOME ARTURO S/ RECURSO DE CASACIÓN`. Medido: **0 matches en las 20 páginas**, incluida la línea del cuerpo `caratulada "SUAREZ, BARTOLOME ARTURO S/ RECURSO DE CASACIÓN"`, donde el ancla `caratulada` está pegada. Lo salvaba el NER, pero el camino determinista estaba apagado justo sobre el formato de los sellos y las carátulas.
+
+Eran **tres** bloqueos simultáneos, no uno: la caja, la cantidad de nombres de pila (uno solo) y el separador en alta. ADR-122 abre los tres, pero la caja alta y los nombres de más **solo en la rama que cierra con `s/`/`c/`** — el freno por la derecha es lo que hacía falta para que abrir el cuantificador no reabra el agujero que ADR-092 §1 midió. Resultado: **0/20 → 20/20**, más una carátula real de otro documento que antes se perdía por tener dos nombres, sin un solo falso positivo nuevo y con `test:quality` idéntico. Efecto secundario documentado en el ADR: 35 ocurrencias de NER quedan contenidas en la carátula y ADR-117 no las registra — no se pierde tinta, se reparten distinto los grupos.
 
 ### 3.4 Residuos chicos ya identificados
 
@@ -151,7 +153,9 @@ Dos defectos distintos que salieron del mismo síntoma.
 - **El fixture de `snapshot.test.ts` no declara `styles`**, así que el camino de la caja de tinta de ADR-109 no está cubierto por ninguna snapshot. `PDF_Engine.md` §15 ítem 29.
 - **§25 (§23g)**: el token de reemplazo se dibuja ~30 % más chico que el texto que lo rodea.
 - **El código de barras produce una entidad espuria** en 1 de 19 páginas. Es un falso positivo visible y desactivable de un clic; se deja.
-### 3.5 Un sello rotado dentro de una página derecha no lo lee nadie — abierto, con una salida medida
+### 3.5 Un sello rotado dentro de una página derecha no lo lee nadie — CERRADO por ADR-121
+
+> **Cerrado.** Las pasadas rotadas corren sobre **franjas de margen** (20 % del ancho a cada lado), no sobre la página completa: recuperan las mismas 15/15 palabras por **+70 %** de tiempo en vez de +133 %, y el cuerpo no entra en el recorte, así que las 33 palabras inventadas de la unión cruda desaparecen solas. Sobre una página sin texto rotado el aporte es **0 palabras**, que es el número que permite dejarlo siempre encendido. Lo de abajo es la medición que llevó a esa decisión; se conserva porque la variante de página completa queda medida por si aparece un sello en el **medio** de la hoja, que es lo único que las franjas no ven.
 
 **Por qué OSD no lo resuelve, aunque suene a que debería.** `worker.detect()` (ADR-090) contesta *una* pregunta: **¿está torcida la página?** Devuelve un `orientation_degrees` para la hoja entera, y el kernel rota el raster completo antes de reconocer. Eso arregla un escaneo hecho de costado — todo su texto de una vez.
 

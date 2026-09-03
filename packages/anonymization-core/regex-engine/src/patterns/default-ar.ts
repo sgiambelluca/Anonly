@@ -413,24 +413,26 @@ export const DEFAULT_PATTERNS_AR: ReadonlyArray<RegexPattern> = [
   {
     /*
      * ADR-092 §1 — `"Apellido, Nombre"`, la forma canónica de una carátula
-     * judicial. **Una palabra de cada lado**, y las dos razones son
-     * distintas:
+     * judicial. El apellido es **una palabra**, porque sin la coma como ancla
+     * un apellido compuesto no se distingue de un topónimo (`"Mar del Plata,
+     * Buenos Aires"`); el costo es que de `"Ríos de Paz Alberti, Marta"`
+     * solo entra la última palabra.
      *
-     * - El apellido, porque sin la coma como ancla un apellido compuesto no
-     *   se distingue de un topónimo (`"Mar del Plata, Buenos Aires"`).
-     * - El nombre, porque un cuantificador goloso se traga cualquier palabra
-     *   capitalizada que siga. Medido sobre la firma de la pericia
-     *   (`tests/integration/annotation-signature.test.ts`): con `(?:\s+…)*`
-     *   el patrón matchea `"Echeverria, Marta Date"` sobre el texto
-     *   `"Echeverria, Marta Date: 07/07/2026"` — la ocurrencia cruza al run
-     *   siguiente, su envolvente se estira sobre los dos, y Grouping descarta
-     *   por solapamiento el grupo de **Fecha**. Es el mismo mecanismo que
-     *   ADR-088 §1 tuvo que cerrar en NER: una entidad que abarca dos runs no
-     *   solo tapa de más, hace **desaparecer** a su vecina.
+     * Los NOMBRES DE PILA son varios o uno **según si la carátula cierra**, y
+     * esa distinción es ADR-122 §2. El límite de uno solo existía porque no
+     * había nada que frenara al cuantificador: medido sobre la firma de la
+     * pericia (`tests/integration/annotation-signature.test.ts`), con
+     * `(?:\s+…)*` el patrón matchea `"Echeverria, Marta Date"` sobre
+     * `"Echeverria, Marta Date: 07/07/2026"` — la ocurrencia cruza al run
+     * siguiente, su envolvente se estira sobre los dos, y Grouping descarta
+     * por solapamiento el grupo de **Fecha**. Es el mismo mecanismo que
+     * ADR-088 §1 tuvo que cerrar en NER: una entidad que abarca dos runs no
+     * solo tapa de más, hace **desaparecer** a su vecina.
      *
-     * El costo es que un segundo nombre de pila (`"López, María Fernanda"`)
-     * queda fuera del match. Se acepta: el apellido y el primer nombre son la
-     * parte identificatoria, y el resto es territorio del NER.
+     * Cuando la carátula termina en `s/` o `c/`, en cambio, el freno existe y
+     * es explícito, así que ahí el tramo se abre hasta 3 nombres sin reabrir
+     * aquel agujero. Sin cierre sigue entrando uno solo, y el resto es
+     * territorio del NER.
      *
      * `maskFormat` es el mismo que `MASK_FORMAT_BY_TYPE[Person]` de
      * `grouping-engine`: una carátula no tiene una forma de máscara propia,
@@ -439,6 +441,21 @@ export const DEFAULT_PATTERNS_AR: ReadonlyArray<RegexPattern> = [
     id: "caratula-ar",
     entityType: EntityType.Person,
     /*
+     * El orden de las dos ramas importa (ADR-122 §2): la alternancia de JS es
+     * ordenada y las dos arrancan en el mismo índice, así que si la rama de la
+     * MARCA fuera primero se quedaría con el match corto y truncaría el
+     * nombre. Sobre `"Autos: López, María Fernanda c/ Empresa"` eso da
+     * `"López, María"` en vez de `"López, María Fernanda"`. Va primero la que
+     * tiene cierre.
+     *
+     * ADR-122 §1: los dos lados aceptan CAJA ALTA (`\p{Lu}\p{L}+`, no
+     * `\p{Lu}\p{Ll}+`) y el separador puede venir en alta. Una carátula de
+     * expediente se escribe `APELLIDO, NOMBRE S/ RECURSO DE CASACIÓN`: con la
+     * forma anterior el patrón daba **0 matches en 20 páginas** de un fallo
+     * escaneado, o sea que estaba apagado justo sobre el formato para el que
+     * se escribió. El `8/` y el `$/` son los dos glifos que Tesseract puso de
+     * verdad en lugar de la `S` (ADR-122 §3), no una lista defensiva.
+     *
      * ADR-103: el match exige una MARCA DE CARÁTULA adyacente. Sin ella,
      * `Palabra, Palabra` es una forma que aparece en prosa normal todo el
      * tiempo, y producía dos clases de falso positivo que el checksum no
@@ -454,7 +471,9 @@ export const DEFAULT_PATTERNS_AR: ReadonlyArray<RegexPattern> = [
      *
      * Dos vías, cualquiera alcanza: la palabra que la introduce ANTES
      * (`Autos: Pérez, Juan`) o las partículas que separan a las partes
-     * DESPUÉS (`Pérez, Juan c/ Empresa`).
+     * DESPUÉS (`Pérez, Juan c/ Empresa`). La segunda es la que sostiene todo
+     * lo de ADR-122: la caja alta y los nombres de más entran **solo** por
+     * ahí, que es la vía con un límite del lado derecho.
      *
      * Las marcas incluyen las de **firma** y **perito**, y no por completitud:
      * la forma invertida aparece igual en la firma de una pericia
@@ -469,7 +488,7 @@ export const DEFAULT_PATTERNS_AR: ReadonlyArray<RegexPattern> = [
      * clic, uno que fusiona dos personas cuesta una fuga silenciosa.
      */
     pattern:
-      /(?<=(?:[Cc]aratulad[oa]s?|[Aa]utos|[Cc]ausa|[Ee]xpediente|[Ff]irmad[oa]|[Ff]irma|[Pp]erito|[Ss]uscriben?)\s*[:,]?\s{0,3}(?:a\s{1,3})?)\b\p{Lu}\p{Ll}+,\s+\p{Lu}\p{Ll}+\b|\b\p{Lu}\p{Ll}+,\s+\p{Lu}\p{Ll}+\b(?=\s+(?:c\/|s\/))/gu,
+      /\b\p{Lu}\p{L}+,(?:\s+\p{Lu}\p{L}+){1,3}\b(?=\s+(?:[cs]\/|[CS8$]\/))|(?<=(?:[Cc]aratulad[oa]s?|[Aa]utos|[Cc]ausa|[Ee]xpediente|[Ff]irmad[oa]|[Ff]irma|[Pp]erito|[Ss]uscriben?)\s*[:,]?\s{0,3}(?:a\s{1,3})?)\b\p{Lu}\p{Ll}+,\s+\p{Lu}\p{Ll}+\b/gu,
     checksum: firstNameIsInLexicon,
     normalizer: flipCaption,
     maskFormat: "XXXXX XXXXX",

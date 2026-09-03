@@ -1304,6 +1304,78 @@ describe("RegexEngine — unit tests", () => {
       ).resolves.toEqual(["Echeverria, Marta"]);
     });
 
+    /*
+     * ADR-122 §1. Una carátula de expediente se escribe en CAJA ALTA, y el
+     * patrón exigía `\p{Lu}\p{Ll}+` de los dos lados: medido sobre un fallo
+     * escaneado de 20 páginas, **0 matches**. El apellido del imputado quedaba
+     * en manos del modelo, sobre el formato más previsible que hay.
+     */
+    it("an all-caps caption from a scanned header is detected", async () => {
+      await expect(
+        personas(["SUAREZ,", "BARTOLOME", "ARTURO", "S/", "RECURSO", "DE", "CASACIÓN"]),
+      ).resolves.toEqual(["SUAREZ, BARTOLOME ARTURO"]);
+    });
+
+    /*
+     * ADR-122 §2. El límite de UN nombre de pila (ADR-092 §1) existía porque
+     * no había nada que frenara al cuantificador. Cuando la carátula termina
+     * en `s/` o `c/` sí lo hay, y ahí el tramo de nombres se puede abrir sin
+     * reabrir aquel agujero: el `s/` es el freno.
+     *
+     * Los dos casos van juntos a propósito — es el MISMO nombre, y lo único
+     * que cambia es si la carátula cierra o no.
+     */
+    it("several given names are captured only when a s/ or c/ closes the caption", async () => {
+      await expect(
+        personas(["Autos:", "López,", "María", "Fernanda", "c/", "Empresa"]),
+      ).resolves.toEqual(["López, María Fernanda"]);
+      // Sin el cierre, la rama anclada por marca sigue tomando UNA sola.
+      await expect(
+        personas(["perito", "a", "López,", "María", "Fernanda,", "quien", "acepta"]),
+      ).resolves.toEqual(["López, María"]);
+    });
+
+    /*
+     * ADR-122 §3. En 2 de las 20 páginas medidas el OCR no lee la `S` de `S/`:
+     * devuelve `8/` y `$/`. Son los dos glifos que Tesseract puso de verdad,
+     * no una lista defensiva — sin ellos el patrón queda en 18/20.
+     */
+    it("tolerates the two glyphs the OCR puts in place of the S", async () => {
+      await expect(personas(["SUAREZ,", "BARTOLOME", "ARTURO", "8/", "RECURSO"])).resolves.toEqual([
+        "SUAREZ, BARTOLOME ARTURO",
+      ]);
+      await expect(personas(["SUAREZ,", "BARTOLOME", "ARTURO", "$/", "RECURSO"])).resolves.toEqual([
+        "SUAREZ, BARTOLOME ARTURO",
+      ]);
+    });
+
+    /*
+     * ADR-122 §2: el valor sigue invirtiéndose con TODOS los nombres de pila,
+     * que es lo que lo hace agrupar con el nombre del cuerpo. Si `flipCaption`
+     * solo diera vuelta el primero, la carátula del sello y el nombre en prosa
+     * quedarían en dos grupos distintos y el export nombraría a la misma
+     * persona con dos tokens.
+     */
+    it("an all-caps caption normalizes to the same key as the body name", async () => {
+      const document = makeSinglePageDocument("doc-caratula-caps-grupo", [
+        "SUAREZ,",
+        "BARTOLOME",
+        "ARTURO",
+        "S/",
+        "RECURSO",
+      ]);
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      await engine.process({ document }, ctx);
+      const normalizados = busEmitSpy.mock.calls
+        .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
+        .map(([, , payload]) => (payload as EntityFound).occurrence)
+        .filter((o) => o.entityType === EntityType.Person)
+        .map((o) => o.normalizedValue);
+      busEmitSpy.mockRestore();
+
+      expect(normalizados).toEqual(["bartolome arturo suarez"]);
+    });
+
     // La compuerta del léxico. Sin ella el patrón matchea media Argentina:
     // medido, 7/10 contra 15/16 (ADR-092, Contexto §2).
     it("toponyms and legal references are not captions", async () => {
