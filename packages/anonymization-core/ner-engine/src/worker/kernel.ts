@@ -476,12 +476,68 @@ function coalesceSpansInsideTheSameWord(
   return merged;
 }
 
+/*
+ * ADR-123: la `S` de `S/` no es una inicial.
+ *
+ * Sobre `"SUAREZ, BARTOLOME ARTURO S/ RECURSO DE"` el modelo devuelve
+ * `"BARTOLOME ARTURO S"`: se lleva la primera letra de `S/`, que es la
+ * partícula que separa a las partes de una carátula. No es una interpretación
+ * discutible del nombre, es un token **cortado por la mitad** — y el `/` que
+ * queda del otro lado del borde lo prueba.
+ *
+ * Por eso la condición mira el carácter de AFUERA y no el nombre: la última
+ * letra se descarta solo si (a) pegada al final del span hay una barra, y (b)
+ * esa letra es un token de una sola letra. Una inicial de verdad
+ * (`"Juan P. García"`) va seguida de un punto, no de una barra, y no entra.
+ *
+ * Medido sobre 451 spans de PERSON en 8 documentos: **4** terminan justo antes
+ * de una barra, y los cuatro son este defecto. Ninguno más se toca.
+ *
+ * `snapSpansToWordBoundaries` no lo arregla y no podría: `/` no es
+ * `WORD_CHAR_RE`, así que para esa función `S` ya es una palabra entera. Esto
+ * corre DESPUÉS, para que el ensanche no vuelva a meter la letra.
+ *
+ * Un span que se queda sin letras ni dígitos después del recorte (el modelo
+ * etiquetó la `S` sola) desaparece: no nombra a nadie.
+ */
+function dropSeparatorLetterAtTheEnd(
+  spans: ReadonlyArray<NerKernelSpan>,
+  chunkText: string,
+): ReadonlyArray<NerKernelSpan> {
+  const out: NerKernelSpan[] = [];
+  for (const span of spans) {
+    const end = span.endIndexExclusive;
+    const esBarra = chunkText[end] === "/";
+    const ultima = chunkText[end - 1] ?? "";
+    const anterior = chunkText[end - 2] ?? "";
+    const letraSuelta =
+      /\p{L}/u.test(ultima) && (end - 2 < span.startIndex || /\s/u.test(anterior));
+
+    if (!esBarra || !letraSuelta) {
+      out.push(span);
+      continue;
+    }
+
+    const nuevoFin = end - 1;
+    const value = chunkText.slice(span.startIndex, nuevoFin).trimEnd();
+    if (!WORD_CHAR_RE.test(value)) continue;
+
+    out.push({
+      ...span,
+      value,
+      normalizedValue: normalizeEntityValue(value),
+      endIndexExclusive: span.startIndex + value.length,
+    });
+  }
+  return out;
+}
+
 function snapSpansToWordBoundaries(
   spans: ReadonlyArray<NerKernelSpan>,
   chunkText: string,
 ): ReadonlyArray<NerKernelSpan> {
   const coalesced = coalesceSpansInsideTheSameWord(spans, chunkText);
-  return coalesced.map((span, i) => {
+  const encajados = coalesced.map((span, i) => {
     const floor = i === 0 ? 0 : (coalesced[i - 1]?.endIndexExclusive ?? 0);
     const ceiling = coalesced[i + 1]?.startIndex ?? chunkText.length;
 
@@ -502,6 +558,10 @@ function snapSpansToWordBoundaries(
       endIndexExclusive: end,
     };
   });
+
+  // ADR-123 corre al final, para que el ensanche de arriba no vuelva a meter
+  // la letra del separador.
+  return dropSeparatorLetterAtTheEnd(encajados, chunkText);
 }
 
 // ─── Estado del kernel (a nivel de módulo, ADR-046 §1) ───

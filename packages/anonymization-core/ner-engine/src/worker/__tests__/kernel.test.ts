@@ -485,6 +485,96 @@ describe("NerKernel — kernelClassify (ADR-046 §1/§4)", () => {
 
   // ─── ADR-118: una sola normalizacion para la clave de agrupado ───
 
+  describe("ADR-123 — la S de S/ no es una inicial (NER_Engine.md §13 caso 27)", () => {
+    it("drops a trailing single letter that belongs to a caption separator", async () => {
+      /*
+       * El caso real: sobre el encabezado de un fallo escaneado el modelo
+       * devuelve `"BARTOLOME ARTURO S"` — se lleva la primera letra de `S/`,
+       * que separa a las partes de la carátula. Medido sobre 451 spans de
+       * PERSON en 8 documentos, 4 terminan justo antes de una barra y los
+       * cuatro son este defecto.
+       */
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockTokenClassificationPipeline(() =>
+          Promise.resolve([
+            // En Title Case: el kernel le pasa al modelo la corrida en caja
+            // alta transformada (ADR-088 §2), y ahi es donde se posicionan.
+            nerToken("B-PER", "Bartolome", 0.9, 0),
+            nerToken("I-PER", "Arturo", 0.9, 1),
+            nerToken("I-PER", "S", 0.8, 2),
+          ]),
+        ),
+      );
+
+      const spans = await kernelClassify(
+        basePayload({
+          modelId: "model-separador",
+          text: "SUAREZ, BARTOLOME ARTURO S/ RECURSO DE CASACION",
+        }),
+        { timeoutMs: 5000, abortSignal: new AbortController().signal },
+      );
+
+      expect(spans.map((sp) => sp.value)).toEqual(["BARTOLOME ARTURO"]);
+      // La clave es la que importa: con la `S` adentro el grupo no se une al
+      // del nombre y aparece uno espurio al lado.
+      expect(spans[0]?.normalizedValue).toBe("bartolome arturo");
+    });
+
+    it("keeps a real initial, which is followed by a dot and not by a slash", async () => {
+      /*
+       * La no regresión, y la razón de que la condición mire el carácter de
+       * AFUERA: una inicial de verdad va seguida de un punto. Si la regla
+       * fuera "una letra suelta al final no es parte del nombre", esta se
+       * perdería.
+       */
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockTokenClassificationPipeline(() =>
+          Promise.resolve([nerToken("B-PER", "Juan", 0.9, 0), nerToken("I-PER", "P", 0.9, 1)]),
+        ),
+      );
+
+      const spans = await kernelClassify(
+        basePayload({ modelId: "model-inicial", text: "Juan P. García" }),
+        { timeoutMs: 5000, abortSignal: new AbortController().signal },
+      );
+
+      expect(spans.map((sp) => sp.value)).toEqual(["Juan P"]);
+    });
+
+    it("does not touch a span that ends before a slash without a lone letter", async () => {
+      // La otra mitad de la condición: la barra sola no alcanza. Sin esto, de
+      // `"Quilmes/ La Plata"` saldría `"Quilme"`.
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockTokenClassificationPipeline(() =>
+          Promise.resolve([nerToken("B-PER", "Quilmes", 0.9, 0)]),
+        ),
+      );
+
+      const spans = await kernelClassify(
+        basePayload({ modelId: "model-barra-sola", text: "Quilmes/ La Plata" }),
+        { timeoutMs: 5000, abortSignal: new AbortController().signal },
+      );
+
+      expect(spans.map((sp) => sp.value)).toEqual(["Quilmes"]);
+    });
+
+    it("drops the span entirely when the separator letter was all of it", async () => {
+      // Un span que se queda sin letras no nombra a nadie.
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockTokenClassificationPipeline(() => Promise.resolve([nerToken("B-PER", "S", 0.9, 1)])),
+      );
+
+      const spans = await kernelClassify(
+        // Un apellido que NO empiece con S:  busca el token
+        //  con indexOf y se quedaria con la del apellido.
+        basePayload({ modelId: "model-solo-la-s", text: "RAMIREZ S/ RECURSO" }),
+        { timeoutMs: 5000, abortSignal: new AbortController().signal },
+      );
+
+      expect(spans).toHaveLength(0);
+    });
+  });
+
   describe("ADR-118 — la clave sale de normalizeEntityValue (NER_Engine.md §13 caso 26)", () => {
     it("strips diacritics so the key matches what the manual path produces", () => {
       /*
