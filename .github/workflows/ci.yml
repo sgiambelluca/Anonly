@@ -95,7 +95,6 @@ jobs:
     name: Security audit
     needs: install
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -104,9 +103,39 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm audit --audit-level=high
-        continue-on-error: true
-      # Nota: en Hito 11 se elimina `continue-on-error` y se vuelve bloqueante.
+      # Bloqueante desde el Hito 11: la nota que lo prometía venció, y hasta
+      # acá este job tenía `continue-on-error` DOS veces (job y step), así que
+      # daba verde pasara lo que pasara.
+      #
+      # El problema no era solo que no bloqueara. `pnpm audit` consulta un
+      # endpoint del registry, así que puede fallar **por red** sin decir nada
+      # sobre vulnerabilidades — y los dos casos salen con exit 1. Sacar los
+      # `continue-on-error` sin más convertía un timeout en un rojo que no
+      # significa "hay una vulnerabilidad", y un gate que está rojo por el
+      # motivo equivocado se ignora primero y se apaga después.
+      #
+      # Los dos desenlaces se separan: un fallo de red se reintenta, y si tras
+      # tres intentos el audit no pudo correr, el job falla con un mensaje que
+      # dice **eso** y no otra cosa. Un gate que no pudo ejecutarse no es un
+      # gate verde: significa que no sabemos.
+      - name: Audit (severidad alta y crítica)
+        run: |
+          for intento in 1 2 3; do
+            if salida="$(pnpm audit --audit-level=high 2>&1)"; then
+              echo "$salida"
+              exit 0
+            fi
+            echo "$salida"
+            if echo "$salida" | grep -qE 'ERR_SOCKET_TIMEOUT|FetchError|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up'; then
+              echo "::warning::El audit no pudo consultar el registry (intento ${intento}/3)."
+              sleep $((intento * 20))
+              continue
+            fi
+            echo "::error::pnpm audit encontró vulnerabilidades de severidad alta o crítica."
+            exit 1
+          done
+          echo "::error::El audit no pudo ejecutarse tras 3 intentos: no se sabe si hay vulnerabilidades."
+          exit 1
 
   # Gates que se activan en hitos posteriores.
   # Cada uno corre solo si su directorio de tests existe (hashFiles check).
