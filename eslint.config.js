@@ -172,7 +172,17 @@ export default tseslint.config(
     // Tests de paquetes del Core: pueden importar @anonly/event-system para armar
     // un bus real (tests de integración). El resto de prohibiciones se mantiene.
     // no-restricted-imports no se mergea entre bloques: se redeclara completa.
-    files: ["packages/anonymization-core/**/__tests__/**/*.{ts,tsx}"],
+    //
+    // `test-utils` entra en la misma excepción (ADR-129) y por la misma razón:
+    // **no es un motor**, es el paquete de dobles que las suites del Core
+    // consumen, y su `createEngineContextWithRealBus` existe justamente para
+    // armar ese bus real. Es `private: true` y devDependency, así que no puede
+    // llegar a producción ni por accidente. La prohibición sigue rigiendo para
+    // los siete motores, que es a quienes apunta P-2.
+    files: [
+      "packages/anonymization-core/**/__tests__/**/*.{ts,tsx}",
+      "packages/anonymization-core/test-utils/src/**/*.{ts,tsx}",
+    ],
     rules: {
       "no-restricted-imports": [
         "error",
