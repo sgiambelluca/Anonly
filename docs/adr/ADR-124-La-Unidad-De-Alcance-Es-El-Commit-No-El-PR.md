@@ -44,7 +44,18 @@ La excepción tiene un alcance nombrado, no es una puerta abierta: vale para una
 
 **El commit que cambia un contrato es la excepción de la excepción**: por definición toca todos los motores que consumen ese tipo. Se acepta explícitamente, con dos condiciones — que exista el ADR que lo autoriza (R-2, que no se toca) y que el commit lleve **el cambio de tipo más la adaptación mecánica de sus consumidores, y nada más**: ningún comportamiento nuevo viaja ahí.
 
-La segunda condición decía antes "que el commit no lleve nada más que ese cambio", y así no se podía aplicar: de los cuatro commits de contrato de esta branch, dos arrastran adaptaciones en `apps/react-client` —siete archivos uno, tres el otro— y bajo lectura estricta ninguno calificaba. Una condición que no restringe nada no es una condición.
+La segunda condición decía antes "que el commit no lleve nada más que ese cambio", y así no se podía aplicar. Los cuatro commits de contrato de esta branch, contando **solo fuente** —sin tests ni docs—:
+
+| commit | fuente | de eso, UI |
+|---|---|---|
+| `9c846e7` | 2 | 0 |
+| `7bb2e3a` | 7 | 1 — `SplitDialog.tsx` |
+| `68eb996` | 3 | 1 — `SplitDialog.tsx` |
+| `3fc3882` | 2 | 0 |
+
+Los dos diffs de `SplitDialog.tsx` son **renderizar el campo que el contrato acaba de ganar** —`member.context` en uno, `member.value` en el otro—: ningún control nuevo, ningún estado nuevo. Eso es adaptación mecánica de consumidor, y la redacción vieja no daba forma de decir si contaba o no. Una condición que no se puede decidir no es una condición.
+
+> **Este párrafo estuvo mal dos veces, y las dos en la misma dirección.** La primera versión decía "siete archivos uno, tres el otro… bajo lectura estricta ninguno calificaba". Los siete archivos de `3fc3882` son **todos tests**: ese commit no toca UI y es el más limpio de los cuatro. El dato salió de la revisión, se tomó de buena fe y **no se verificó** antes de escribirlo acá — el mismo modo de falla que §"En contra" documenta para el conteo de los residuales, con los roles invertidos. En un documento cuyo argumento es no maquillar la contabilidad de incumplimientos, el párrafo que la lleva es el que hay que verificar dos veces.
 
 ### 2. R-21 se aplica al **implementador**, no al planificador
 
@@ -76,6 +87,8 @@ El spec sigue sin poder editarse desde la mano que implementa. Cuando el ADR y e
   | `94c96be` | ner, regex | higiene de datos, que además viola la R-22 que este mismo ADR crea |
 
   Arreglarlos requeriría reescribir historia ya publicada, y la decisión fue no hacerlo.
+
+  **`ADR-099` §5 ("Esta decisión autoriza el cambio en los tres motores") se autoconcede una excepción a R-1 para ese commit** —"acá el cambio es el mismo patrón, tres veces, y partirlo dejaría el build a medio migrar"—. Ese reclamo **no se sostiene bajo la regla nueva**: no es un cambio de contrato, y en su momento no había campaña declarada. Queda como lo que es, la autojustificación previa; la contabilidad autoritativa es esta tabla. `ADR-105` usa la misma fórmula para `7bb2e3a`, pero ahí §1 sí lo cubre — es fraseo viejo, no un reclamo pendiente.
 
   **La primera versión de este párrafo decía "cinco" y daba `665527c` por cubierto.** Lo encontró el revisor aplicando el test de este ADR commit por commit. El error caía a favor propio, y en el único párrafo donde el documento rinde cuentas de su propio residuo — que es donde menos se lo puede permitir, porque es el que sostiene la afirmación de honestidad del resto.
 

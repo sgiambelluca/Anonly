@@ -10,7 +10,7 @@
 
 La regla P-1/P-2 del proyecto prohíbe que un motor importe a otro (ESLint lo bloquea). La **única salida legal** para compartir código entre motores es moverlo a `@anonly/shared`, y eso es contrato público: R-2/R-19 exigen ADR primero, docs después, código al final.
 
-Además choca con R-1/R-5 ("un commit = un módulo" desde ADR-124 §1; antes, "un PR"): adoptar una utilidad compartida en cinco motores son cinco PRs, salvo que un ADR autorice explícitamente el cambio multi-motor.
+Además choca con R-1/R-5 ("un commit = un módulo" desde ADR-124 §1; antes, "un PR"): adoptar una utilidad compartida en cinco motores son cinco commits, salvo que un ADR autorice explícitamente el cambio multi-motor.
 
 **Por eso el criterio de orden de esta lista no es cuántas líneas se ahorran, sino el riesgo de que las copias diverjan en silencio.** Dos copias idénticas y estables valen mucho menos que dos que ya se separaron.
 
