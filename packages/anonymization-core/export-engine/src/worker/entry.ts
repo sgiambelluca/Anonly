@@ -36,16 +36,8 @@
  *   devuelve `./assembler.js` (documentId distinto -> parcial nuevo;
  *   `save` exitoso -> vacío otra vez).
  */
-import {
-  CancelledError,
-  EngineError,
-  InvalidInputError,
-  type ExportPagePayload,
-  type ExportSavePayload,
-  type WorkerCapabilities,
-  type WorkerInbound,
-  type WorkerOutbound,
-} from "@anonly/shared";
+
+import { startWorkerEntry, type ExportPagePayload, type ExportSavePayload } from "@anonly/shared";
 
 import {
   appendPage,
@@ -55,26 +47,8 @@ import {
   EMPTY_ASSEMBLER_STATE,
 } from "./assembler.js";
 
-const WORKER_CAPABILITIES: WorkerCapabilities = { maxPageBatchSize: 8 };
-const WORKER_ID = `export-worker-${Math.random().toString(36).slice(2)}`;
-
 /** El `PDFDocument` en construcción de este worker (ADR-047 §4). Un documento a la vez. */
 let state: AssemblerState = EMPTY_ASSEMBLER_STATE;
-
-function post(message: WorkerOutbound, transfer?: ReadonlyArray<Transferable>): void {
-  // Forma `StructuredSerializeOptions` y no la posicional `(message, [])`:
-  // con `lib: ["DOM", "WebWorker"]` (tsconfig.base) el overload posicional de
-  // `Window` gana y no acepta una transfer list. La copia mutable es porque
-  // `StructuredSerializeOptions.transfer` es `Transferable[]`, no readonly.
-  if (transfer !== undefined && transfer.length > 0) {
-    self.postMessage(message, { transfer: [...transfer] });
-  } else {
-    self.postMessage(message);
-  }
-}
-
-/** Un `AbortController` por job en curso, indexado por `signalId` (`=== jobId`, ver `worker-pool.ts#dispatchRemote`). */
-const jobControllers = new Map<string, AbortController>();
 
 // ─── Discriminación por forma del payload de "export-page" (ADR-047 §3) ───
 
@@ -82,89 +56,45 @@ function isExportPagePayload(payload: unknown): payload is ExportPagePayload {
   return typeof payload === "object" && payload !== null && "pageImage" in payload;
 }
 
-async function handleRun(message: Extract<WorkerInbound, { type: "RUN" }>): Promise<void> {
-  const { jobId, signalId, jobType, payload } = message;
+startWorkerEntry({
+  workerId: "export",
+  jobType: "export-page",
+  capabilities: { maxPageBatchSize: 8 },
 
-  if (jobType !== "export-page") {
-    post({
-      type: "FAILED",
-      jobId,
-      error: new InvalidInputError(`ExportWorker no soporta jobType '${jobType}'.`, {
-        jobType,
-      }).serialize(),
-    });
-    return;
-  }
-
-  const controller = new AbortController();
-  jobControllers.set(signalId, controller);
-
-  try {
+  async run(payload, ctx) {
     if (isExportPagePayload(payload)) {
-      state = await appendPage(state, payload, { abortSignal: controller.signal });
+      state = await appendPage(state, payload, { abortSignal: ctx.abortSignal });
       // Sin datos que devolver: el host solo necesita la confirmación de
       // COMPLETED antes de despachar la próxima página (Export_Engine.md §15
       // item 22).
-      post({ type: "COMPLETED", jobId, result: null });
-    } else {
-      // Cast de frontera de transporte (ADR-019): RUN.payload es unknown a
-      // este nivel; único de los dos sin "pageImage" -> ExportSavePayload.
-      const savePayload = payload as ExportSavePayload;
-      const { buffer, state: nextState } = await savePdf(state, savePayload, {
-        abortSignal: controller.signal,
-      });
-      state = nextState;
-      // ADR-042: COMPLETED.result es unknown a nivel de transporte — el
-      // host-bridge (export.engine.ts) lo afina a ArrayBuffer.
-      //
-      // ADR-079 §1: se transfiere. `savePdf` ya devolvió el estado limpio
-      // (`discardState`), así que este worker no vuelve a mirar el buffer —
-      // la condición exacta que hace segura la transferencia.
-      post({ type: "COMPLETED", jobId, result: buffer }, [buffer]);
+      return null;
     }
-  } catch (err: unknown) {
-    if (err instanceof CancelledError) {
-      post({ type: "CANCELLED", jobId, signalId });
-    } else if (err instanceof EngineError) {
-      post({ type: "FAILED", jobId, error: err.serialize() });
-    } else {
-      const message = err instanceof Error ? err.message : String(err);
-      post({ type: "FAILED", jobId, error: new InvalidInputError(message).serialize() });
-    }
-  } finally {
-    jobControllers.delete(signalId);
-  }
-}
+    // Cast de frontera de transporte (ADR-019): RUN.payload es unknown a este
+    // nivel; único de los dos sin "pageImage" -> ExportSavePayload.
+    const { buffer, state: nextState } = await savePdf(state, payload as ExportSavePayload, {
+      abortSignal: ctx.abortSignal,
+    });
+    state = nextState;
+    // ADR-042: COMPLETED.result es unknown a nivel de transporte — el
+    // host-bridge (export.engine.ts) lo afina a ArrayBuffer.
+    return buffer;
+  },
 
-function handleCancel(message: Extract<WorkerInbound, { type: "CANCEL" }>): void {
-  jobControllers.get(message.signalId)?.abort();
-  // ADR-047 §4: CANCEL descarta el PDFDocument parcial incondicionalmente
-  // (ver comentario de `discardState` en assembler.ts).
-  state = discardState();
-}
+  /*
+   * ADR-079 §1: el buffer del `save` se transfiere. `savePdf` ya devolvió el
+   * estado limpio (`discardState`), así que este worker no vuelve a mirarlo —
+   * la condición exacta que hace segura la transferencia. El `append` devuelve
+   * `null` y no transfiere nada.
+   */
+  transferablesOf: (result) => (result instanceof ArrayBuffer ? [result] : []),
 
-function handleDispose(): void {
-  state = discardState();
-}
+  onCancel() {
+    // ADR-047 §4: CANCEL descarta el PDFDocument parcial incondicionalmente
+    // (ver comentario de `discardState` en assembler.ts).
+    state = discardState();
+  },
 
-self.addEventListener("message", (ev: MessageEvent<WorkerInbound>) => {
-  const message = ev.data;
-  switch (message.type) {
-    case "INIT":
-      post({ type: "READY", workerId: WORKER_ID, capabilities: WORKER_CAPABILITIES });
-      break;
-    case "RUN":
-      void handleRun(message);
-      break;
-    case "CANCEL":
-      handleCancel(message);
-      break;
-    case "DISPOSE":
-      handleDispose();
-      break;
-  }
+  dispose() {
+    state = discardState();
+  },
 });
-
-// Auto-init eager (mismo patrón que Pdf/Render/Ocr/NerWorker: WorkerPool no
-// envía INIT en este PR; RUN ya se encola sin esperar READY).
-post({ type: "READY", workerId: WORKER_ID, capabilities: WORKER_CAPABILITIES });
