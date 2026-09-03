@@ -36,6 +36,7 @@
     "@anonly/shared": "workspace:*"
   },
   "devDependencies": {
+    "@anonly/test-utils": "workspace:*",
     "typescript": "^5.6.2",
     "vitest": "^3.2.6"
   }

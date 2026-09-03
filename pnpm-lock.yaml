@@ -311,6 +311,9 @@ importers:
         specifier: workspace:*
         version: link:../shared
     devDependencies:
+      '@anonly/test-utils':
+        specifier: workspace:*
+        version: link:../test-utils
       typescript:
         specifier: ^5.6.2
         version: 5.9.3
