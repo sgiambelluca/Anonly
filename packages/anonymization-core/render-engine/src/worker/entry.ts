@@ -39,19 +39,20 @@
  *   de esos 4 campos). Los controles (load/unload) viajan como `RUN` con
  *   `jobType: "render-page"` directo a cada worker, sin cola (`WorkerInbound`
  *   no cambia, ADR-043 §4).
+ *
+ * **El ciclo de vida del entry-point lo aporta `startWorkerEntry`**
+ * (`@anonly/shared`, ADR-128): el `Map` de `AbortController` por `signalId`, el
+ * guard de `jobType`, el mapeo de errores que cruzan la frontera, la limpieza
+ * y el `READY` eager. La transfer list del bitmap pasa a declararse con
+ * `transferablesOf` en vez de una firma propia de `post()`.
  */
 import {
-  CancelledError,
-  EngineError,
-  InvalidInputError,
+  startWorkerEntry,
   type LoadDocumentPayload,
   type RasterizePagePayload,
   type RenderLegendPayload,
   type RenderPagePayload,
   type UnloadDocumentPayload,
-  type WorkerCapabilities,
-  type WorkerInbound,
-  type WorkerOutbound,
 } from "@anonly/shared";
 import { GlobalWorkerOptions } from "pdfjs-dist";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -76,9 +77,6 @@ import {
  */
 GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
-const WORKER_CAPABILITIES: WorkerCapabilities = { maxPageBatchSize: 8 };
-const WORKER_ID = `render-worker-${Math.random().toString(36).slice(2)}`;
-
 // Defaults de Contracts.md §6 (RenderConfig.jpegQuality,
 // WorkerPoolConfig.timeouts["render-page"]) — únicos dos campos que el
 // kernel necesita de EngineConfig (ver nota de cabecera).
@@ -89,51 +87,6 @@ interface LocalConfigShape {
   readonly render?: { readonly jpegQuality?: number };
   readonly workerPool?: { readonly timeouts?: { readonly "render-page"?: number } };
 }
-
-function applyConfig(config: unknown): void {
-  // Cast de frontera de transporte (ADR-019): INIT.config es unknown a este
-  // nivel; el entry-point de cada motor lo afina a los campos que necesita.
-  const candidate = config as LocalConfigShape | null | undefined;
-  if (candidate?.render?.jpegQuality !== undefined) {
-    renderJpegQuality = candidate.render.jpegQuality;
-  }
-  const renderPageTimeout = candidate?.workerPool?.timeouts?.["render-page"];
-  if (renderPageTimeout !== undefined) {
-    renderPageTimeoutMs = renderPageTimeout;
-  }
-}
-
-function post(message: WorkerOutbound, transfer?: ReadonlyArray<Transferable>): void {
-  // Forma `StructuredSerializeOptions` y no la posicional `(message, [])`:
-  // con `lib: ["DOM", "WebWorker"]` (tsconfig.base) el overload posicional de
-  // `Window` gana y no acepta una transfer list. La copia mutable es porque
-  // `StructuredSerializeOptions.transfer` es `Transferable[]`, no readonly.
-  if (transfer !== undefined && transfer.length > 0) {
-    self.postMessage(message, { transfer: [...transfer] });
-  } else {
-    self.postMessage(message);
-  }
-}
-
-/**
- * ADR-079 §1, dirección worker → host: el kernel produce el bitmap y lo
- * postea sin guardar referencia, así que transferirlo es seguro por
- * construcción — y es el caso más frecuente de la app (uno por página por
- * render, o sea también en cada scroll y cada cambio de zoom). Sin transfer
- * list, `postMessage` clona: un memcpy completo de 100 KB a 2 MB cada vez.
- *
- * Devuelve `[]` si el resultado no es un `EncodedPageImage` (p. ej. el
- * `load-document`/`unload-document`, que resuelven `undefined`): transferir
- * de más lanzaría, así que se mira la forma, no el tipo declarado.
- */
-function transferablesOf(result: unknown): ReadonlyArray<Transferable> {
-  if (typeof result !== "object" || result === null) return [];
-  const bytes = (result as { readonly bytes?: unknown }).bytes;
-  return bytes instanceof ArrayBuffer ? [bytes] : [];
-}
-
-/** Un `AbortController` por job en curso, indexado por `signalId` (`=== jobId`, ver `worker-pool.ts#dispatchRemote`). */
-const jobControllers = new Map<string, AbortController>();
 
 // ─── Discriminación por forma del payload de "render-page" (ADR-043 §4) ───
 
@@ -158,95 +111,70 @@ function isRasterizePagePayload(payload: unknown): payload is RasterizePagePaylo
   return typeof payload === "object" && payload !== null && "pageIndex" in payload;
 }
 
-async function dispatchKernel(payload: unknown, abortSignal: AbortSignal): Promise<unknown> {
-  // Orden fijado por ADR-043 §4 + ADR-059 §5 (05_Worker_Architecture.md
-  // §7.4) — no reordenar "buffer" -> load / "kind" -> render / "pageIndex"
-  // -> rasterize entre sí; "rows" -> legend puede ir en cualquier posición
-  // relativa a esos tres (no colisiona con ninguno); si no -> unload (único
-  // de los 5 sin ninguno de esos 4 campos).
-  if (isLoadDocumentPayload(payload)) {
-    return kernelLoadDocument(payload);
-  }
-  if (isRenderLegendPayload(payload)) {
-    return kernelRenderLegendPage(payload, { jpegQuality: renderJpegQuality });
-  }
-  if (isRenderPagePayload(payload)) {
-    return kernelRenderPage(payload, {
-      jpegQuality: renderJpegQuality,
-      timeoutMs: renderPageTimeoutMs,
-      abortSignal,
-    });
-  }
-  if (isRasterizePagePayload(payload)) {
-    return kernelRasterizePage(payload, { timeoutMs: renderPageTimeoutMs, abortSignal });
-  }
-  return kernelUnloadDocument(payload as UnloadDocumentPayload);
-}
+startWorkerEntry({
+  workerId: "render",
+  jobType: "render-page",
+  capabilities: { maxPageBatchSize: 8 },
 
-async function handleRun(message: Extract<WorkerInbound, { type: "RUN" }>): Promise<void> {
-  const { jobId, signalId, jobType, payload } = message;
-
-  if (jobType !== "render-page") {
-    post({
-      type: "FAILED",
-      jobId,
-      error: new InvalidInputError(`RenderWorker no soporta jobType '${jobType}'.`, {
-        jobType,
-      }).serialize(),
-    });
-    return;
-  }
-
-  const controller = new AbortController();
-  jobControllers.set(signalId, controller);
-
-  try {
-    const result = await dispatchKernel(payload, controller.signal);
-    // ADR-042: COMPLETED.result es unknown a nivel de transporte — compila
-    // directo, sin cast (el host-bridge consumidor, acá `render.engine.ts`,
-    // afina el tipo concreto según la operación que despachó).
-    post({ type: "COMPLETED", jobId, result }, transferablesOf(result));
-  } catch (err: unknown) {
-    if (err instanceof CancelledError) {
-      post({ type: "CANCELLED", jobId, signalId });
-    } else if (err instanceof EngineError) {
-      post({ type: "FAILED", jobId, error: err.serialize() });
-    } else {
-      const message = err instanceof Error ? err.message : String(err);
-      post({ type: "FAILED", jobId, error: new InvalidInputError(message).serialize() });
+  applyConfig(config) {
+    // Cast de frontera de transporte (ADR-019): INIT.config es unknown a este
+    // nivel; el entry-point de cada motor lo afina a los campos que necesita.
+    const candidate = config as LocalConfigShape | null | undefined;
+    if (candidate?.render?.jpegQuality !== undefined) {
+      renderJpegQuality = candidate.render.jpegQuality;
     }
-  } finally {
-    jobControllers.delete(signalId);
-  }
-}
+    const renderPageTimeout = candidate?.workerPool?.timeouts?.["render-page"];
+    if (renderPageTimeout !== undefined) {
+      renderPageTimeoutMs = renderPageTimeout;
+    }
+  },
 
-function handleCancel(message: Extract<WorkerInbound, { type: "CANCEL" }>): void {
-  jobControllers.get(message.signalId)?.abort();
-}
+  run(payload, ctx) {
+    // Orden fijado por ADR-043 §4 + ADR-059 §5 (05_Worker_Architecture.md
+    // §7.4) — no reordenar "buffer" -> load / "kind" -> render / "pageIndex"
+    // -> rasterize entre sí; "rows" -> legend puede ir en cualquier posición
+    // relativa a esos tres (no colisiona con ninguno); si no -> unload (único
+    // de los 5 sin ninguno de esos 4 campos).
+    if (isLoadDocumentPayload(payload)) {
+      return kernelLoadDocument(payload);
+    }
+    if (isRenderLegendPayload(payload)) {
+      return kernelRenderLegendPage(payload, { jpegQuality: renderJpegQuality });
+    }
+    if (isRenderPagePayload(payload)) {
+      return kernelRenderPage(payload, {
+        jpegQuality: renderJpegQuality,
+        timeoutMs: renderPageTimeoutMs,
+        abortSignal: ctx.abortSignal,
+      });
+    }
+    if (isRasterizePagePayload(payload)) {
+      return kernelRasterizePage(payload, {
+        timeoutMs: renderPageTimeoutMs,
+        abortSignal: ctx.abortSignal,
+      });
+    }
+    return kernelUnloadDocument(payload as UnloadDocumentPayload);
+  },
 
-function handleDispose(): void {
-  kernelDisposeAll();
-}
+  /*
+   * ADR-079 §1, dirección worker → host: el kernel produce el bitmap y lo
+   * postea sin guardar referencia, así que transferirlo es seguro por
+   * construcción — y es el caso más frecuente de la app (uno por página por
+   * render, o sea también en cada scroll y cada cambio de zoom). Sin transfer
+   * list, `postMessage` clona: un memcpy completo de 100 KB a 2 MB cada vez.
+   *
+   * Devuelve `[]` si el resultado no es un `EncodedPageImage` (p. ej. el
+   * `load-document`/`unload-document`, que resuelven `undefined`): transferir
+   * de más lanzaría, así que se mira la forma, no el tipo declarado.
+   */
+  transferablesOf(result) {
+    if (typeof result !== "object" || result === null) return [];
+    const bytes = (result as { readonly bytes?: unknown }).bytes;
+    return bytes instanceof ArrayBuffer ? [bytes] : [];
+  },
 
-self.addEventListener("message", (ev: MessageEvent<WorkerInbound>) => {
-  const message = ev.data;
-  switch (message.type) {
-    case "INIT":
-      applyConfig(message.config);
-      post({ type: "READY", workerId: WORKER_ID, capabilities: WORKER_CAPABILITIES });
-      break;
-    case "RUN":
-      void handleRun(message);
-      break;
-    case "CANCEL":
-      handleCancel(message);
-      break;
-    case "DISPOSE":
-      handleDispose();
-      break;
-  }
+  dispose() {
+    kernelDisposeAll();
+  },
 });
-
-// Auto-init eager (ver nota de cabecera: WorkerPool no envía INIT en este
-// PR; RUN ya se encola sin esperar READY, mismo patrón que PdfWorker).
-post({ type: "READY", workerId: WORKER_ID, capabilities: WORKER_CAPABILITIES });
