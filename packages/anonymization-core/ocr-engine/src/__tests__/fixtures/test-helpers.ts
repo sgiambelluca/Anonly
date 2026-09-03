@@ -22,7 +22,6 @@ import type { OcrPageInput } from "../../ocr.types.js";
  * acá para que cada suite siga importando de un solo lugar.
  */
 export {
-  createEngineContextWithRealBus,
   createMockBus,
   createMockCache,
   createMockLogger,
