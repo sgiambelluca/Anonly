@@ -245,6 +245,20 @@ describe("startWorkerEntry", () => {
       expect(seen?.aborted).toBe(true);
     });
 
+    /*
+     * `export-engine` descarta ahí su `PDFDocument` parcial (ADR-047 §4). Sin
+     * este punto de enganche, migrarlo perdería el descarte en silencio: el
+     * export cancelado dejaría el documento a medias y el job siguiente le
+     * apendearía encima.
+     */
+    it("invoca onCancel además de abortar, incluso sin job en vuelo", () => {
+      const onCancel = vi.fn();
+      const h = install({ onCancel });
+
+      h.send({ type: "CANCEL", jobId: "desconocido", signalId: "desconocido" });
+      expect(onCancel).toHaveBeenCalledOnce();
+    });
+
     it("CANCEL con un signalId desconocido no lanza", () => {
       const h = install();
       expect(() => h.send({ type: "CANCEL", jobId: "x", signalId: "x" })).not.toThrow();

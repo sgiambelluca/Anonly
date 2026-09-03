@@ -71,6 +71,16 @@ export interface WorkerEntryDefinition {
   readonly applyConfig?: (config: unknown) => void | Promise<void>;
   /** El trabajo. `payload` es `unknown` a nivel de transporte (ADR-019). */
   readonly run: (payload: unknown, ctx: WorkerJobContext) => Promise<unknown>;
+  /**
+   * Trabajo extra al recibir `CANCEL`, **además** de abortar el signal del job.
+   *
+   * Existe por `export-engine`, que ahí descarta incondicionalmente el
+   * `PDFDocument` parcial (ADR-047 §4): sin esto, un export cancelado dejaría
+   * el documento a medias en memoria y el job siguiente le apendearía encima.
+   * Se invoca aunque el `signalId` no corresponda a ningún job en vuelo, que
+   * es el comportamiento que ese motor ya tenía.
+   */
+  readonly onCancel?: () => void;
   /** Libera lo que el worker retenga. Se invoca en `DISPOSE`. */
   readonly dispose?: () => void;
   /**
@@ -168,6 +178,7 @@ export function startWorkerEntry(definition: WorkerEntryDefinition): void {
         break;
       case "CANCEL":
         jobControllers.get(message.signalId)?.abort();
+        definition.onCancel?.();
         break;
       case "DISPOSE":
         definition.dispose?.();
