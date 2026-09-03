@@ -5,18 +5,23 @@
  * archivo de test debe declarar su propio `vi.mock` en su propio módulo. Este
  * archivo solo unifica los helpers de construcción de mocks (ADR-020, Fase 3).
  */
-import type {
-  EngineConfig,
-  EngineContext,
-  ICache,
-  IEventBus,
-  ILogger,
-  Unsubscribe,
-} from "@anonly/shared";
 import { OPS, type getDocument } from "pdfjs-dist";
 import { vi } from "vitest";
 
 import type { PdfEngineInput } from "../../pdf.types.js";
+
+/*
+ * ADR-129: los dobles genéricos viven en `@anonly/test-utils`. Se re-exportan
+ * acá para que cada suite siga importando de un solo lugar.
+ */
+export {
+  createEngineContext,
+  createEngineContextWithRealBus,
+  createMockBus,
+  createMockCache,
+  createMockConfig,
+  createMockLogger,
+} from "@anonly/test-utils";
 
 /**
  * Cast de frontera contra pdfjs-dist — ÚNICO lugar del paquete donde se
@@ -71,91 +76,6 @@ export interface CapturedGetDocumentOptions {
  */
 export function capturedGetDocumentOptions(arg: unknown): CapturedGetDocumentOptions {
   return arg as unknown as CapturedGetDocumentOptions;
-}
-
-export function createMockBus(): IEventBus {
-  return {
-    on: vi.fn((): Unsubscribe => vi.fn()),
-    once: vi.fn((): Unsubscribe => vi.fn()),
-    off: vi.fn(),
-    emit: vi.fn(),
-    emitAsync: vi.fn(() => Promise.resolve()),
-  };
-}
-
-export function createMockLogger(): ILogger {
-  return {
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  };
-}
-
-export function createMockCache(): ICache {
-  return {
-    get: vi.fn(),
-    set: vi.fn(),
-    delete: vi.fn(),
-    clear: vi.fn(),
-    size: 0,
-    bytes: 0,
-  };
-}
-
-export function createMockConfig(): EngineConfig {
-  return {
-    workerPool: {
-      pdfPoolSize: 2,
-      ocrPoolSize: 1,
-      nerPoolSize: 1,
-      renderPoolSize: 2,
-      maxQueuePerPool: { pdf: 32, ocr: 8, ner: 8, render: 32 },
-      timeouts: {
-        "pdf-parse": 30000,
-        "ocr-page": 60000,
-        "ner-page": 20000,
-        "render-page": 10000,
-        "export-page": 30000,
-      },
-      maxRetries: {
-        "pdf-parse": 1,
-        "ocr-page": 2,
-        "ner-page": 1,
-        "render-page": 1,
-        "export-page": 1,
-      },
-      baseRetryDelayMs: 250,
-      maxRetryDelayMs: 2000,
-      cancelSlaMs: 200,
-      idleDisposeMs: 60000,
-    },
-    pdf: { maxPageCount: 10000 },
-    ner: {
-      modelId: "test",
-      quantization: "q8",
-      confidenceThreshold: 0.7,
-      batchSize: 1,
-      enabled: false,
-    },
-    ocr: { languages: ["spa"], dpi: 300 },
-    grouping: { similarityThreshold: 0.88, minAliasFrequency: 1 },
-    render: { previewScale: 0.5, fullScale: 2, jpegQuality: 80, cachePages: 16 },
-    export: { defaultDpi: 300, defaultImageFormat: "png", defaultJpegQuality: 80 },
-  };
-}
-
-export function createEngineContext(overrides?: Partial<EngineContext>): EngineContext {
-  const abortController = new AbortController();
-
-  return {
-    bus: createMockBus(),
-    logger: createMockLogger(),
-    cache: createMockCache(),
-    abortSignal: abortController.signal,
-    config: createMockConfig(),
-    ...overrides,
-  };
 }
 
 export function createValidInput(documentId: string, password?: string): PdfEngineInput {
