@@ -40,7 +40,11 @@ Tampoco pueden vivir en `tests/`: el `typecheck` de cada motor corre `tsc` sobre
 
 ### 1. Un paquete de workspace, privado y solo de desarrollo
 
-`@anonly/test-utils`, en `packages/anonymization-core/test-utils/`. **Nunca se publica** (`private: true`) y entra en cada motor como `devDependency`, así que no puede terminar en el bundle ni por accidente: un import suyo desde `src/` fuera de `__tests__` es una dependencia de desarrollo usada en producción, y eso lo rompe el build antes que cualquier revisión.
+`@anonly/test-utils`, en `packages/anonymization-core/test-utils/`. **Nunca se publica** (`private: true`) y entra en cada motor como `devDependency`.
+
+> **Errata (2026-09-03)**: esta sección decía que un import suyo desde `src/` fuera de `__tests__` *"lo rompe el build antes que cualquier revisión"*. **Es falso, y no por el build roto.** Medido con el build ya arreglado: `tsc` resuelve `@anonly/test-utils` por `node_modules` —está linkeado por el workspace— y **compila sin una queja**. ESLint tampoco lo frenaba: su único reclamo era `import/order`, o sea el orden del import, no el import. Con el import bien ordenado no lo agarraba nada.
+>
+> La contención no existía: la afirmación describía un gate que nadie había ejercitado. Ahora existe y es **`no-restricted-imports`**, el mismo mecanismo con el que el repo ya prohíbe importar el bus (P-2): `@anonly/test-utils` queda vedado en los dos bloques de producción —los siete motores y el façade— y permitido en `__tests__`. Verificado a mano en los dos, provocando el error. Es un gate mejor que el build, además: `pnpm lint` **sí** está en CI y es bloqueante.
 
 Resuelve por `main`/`types` apuntando al `src/index.ts`, igual que `@anonly/shared`: no necesita build propio porque nadie lo compila a `dist`.
 

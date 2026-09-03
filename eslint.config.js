@@ -163,6 +163,12 @@ export default tseslint.config(
                 "Los motores usan el IEventBus inyectado por ctx (@anonly/shared); no importan la implementación del bus. Ver ai/Code_Standards.md §12.",
               allowTypeImports: false,
             },
+            {
+              group: ["@anonly/test-utils"],
+              message:
+                "`@anonly/test-utils` son dobles de test: solo se importa desde `__tests__`. Es `private: true` y devDependency, así que un import desde `src/` es una dependencia de desarrollo usada en producción. Ver ADR-129.",
+              allowTypeImports: false,
+            },
           ],
         },
       ],
@@ -221,6 +227,12 @@ export default tseslint.config(
             {
               group: ["react", "react-dom", "react/jsx-runtime"],
               message: "El Core no puede importar React. Ver ai/Code_Standards.md P-1.",
+            },
+            {
+              group: ["@anonly/test-utils"],
+              message:
+                "`@anonly/test-utils` son dobles de test: solo se importa desde `__tests__`. Es `private: true` y devDependency, así que un import desde `src/` es una dependencia de desarrollo usada en producción. Ver ADR-129.",
+              allowTypeImports: false,
             },
           ],
         },
