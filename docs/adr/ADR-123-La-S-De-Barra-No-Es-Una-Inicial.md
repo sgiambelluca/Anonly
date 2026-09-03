@@ -50,7 +50,18 @@ Es un hecho de **tokenización**, no una interpretación del nombre: el span cor
 
 Un span que se queda sin letras ni dígitos después del recorte —el modelo etiquetó la `S` sola— se descarta entero: no nombra a nadie.
 
-**Por qué no lo arregla `snapSpansToWordBoundaries`** (ADR-111 §3): esa función **ensancha** hasta el borde de palabra, y `/` no es `WORD_CHAR_RE`, así que para ella la `S` ya es una palabra entera y no hay nada que hacer. Ensanchar tampoco serviría — daría `BARTOLOME ARTURO S/`, que es peor. Hay que recortar, y por eso el paso nuevo corre **después**, para que el ensanche no vuelva a meter la letra.
+**Por qué no lo arregla `snapSpansToWordBoundaries`** (ADR-111 §3): esa función **ensancha** hasta el borde de palabra, y `/` no es `WORD_CHAR_RE`, así que para ella la `S` ya es una palabra entera y no hay nada que hacer. Ensanchar tampoco serviría — daría `BARTOLOME ARTURO S/`, que es peor. Hay que recortar.
+
+**Y el recorte corre DESPUÉS del ensanche, por una razón que la primera versión de este ADR tenía mal.** Decía "para que el ensanche no vuelva a meter la letra", y eso **no puede pasar**: el recorte exige que antes de la letra haya un espacio, así que el borde nuevo cae justo sobre ese espacio, y el ensanche solo avanza sobre caracteres de palabra. Lo detectó una revisión que movió la llamada y no rompió ningún test — la restricción de orden estaba declarada en el spec y no la verificaba nada.
+
+La razón real es la inversa. Una letra suelta pegada a una barra puede ser **dos cosas**:
+
+| impreso | qué es la letra |
+|---|---|
+| `APELLIDO, NOMBRE S/ RECURSO` | la partícula que separa a las partes |
+| `Documento IPS/ 12` | la **cola** de una palabra que el modelo cortó |
+
+Mirando solo el span no se distinguen: en los dos casos hay una letra sola contra una barra. Lo que las separa es **la palabra completa**, y eso lo produce el ensanche: con `IPS` armado, el carácter anterior a la `S` es una `P` y no un espacio, así que el recorte se abstiene. Si corriera antes, vería un span de una sola letra —`end - 2` cae antes del comienzo del span—, concluiría que es el separador y **borraría la entidad entera**.
 
 ## Consecuencias
 
@@ -70,6 +81,7 @@ No se pierde un solo span: los 3 corregidos pasan a ser `bartolome arturo`, y co
 - **La regla se justifica con 4 casos**, todos del mismo documento y todos con la misma letra. Es un patrón de carátulas argentinas (`S/`, `c/`), no una propiedad del español.
 - **No toca los otros bordes sucios que la medición encontró**: `Amalia Bonetti-`, `Solari-`, `Renner-` siguen pegados a un guion. Ahí el nombre **está completo** y el guion queda afuera del span, así que no hay nada que recortar — pero si un día el modelo se come una letra antes de un guion, esta regla no lo cubre.
 - **La causa raíz sigue siendo el modelo**, que etiquetó la `S` como parte de la persona. Esto lo corrige después del hecho.
+- **La primera versión de este ADR justificó el orden con un mecanismo que no existe.** Queda como precedente de por qué una restricción declarada en un spec no vale nada hasta que un test la rompe al revertirla.
 - **La fusión al 0,889 sigue ahí.** Este ADR saca el caso que la usaba, no la fragilidad: cualquier otro par de claves que difiera en un carácter final se sigue uniendo o separando por una milésima. No hay medición que diga que 0,88 esté mal, y por eso no se toca.
 
 **Lo que no toca**: `aggregateTokensToSpans`, el encaje de bordes de ADR-111, la clave de ADR-118, el título de las corridas en caja alta de ADR-088 §2, ni ningún contrato.
@@ -80,3 +92,4 @@ No se pierde un solo span: los 3 corregidos pasan a ser `bartolome arturo`, y co
 - Una inicial de verdad (`Juan P. García`) **se conserva**: es la mitad de la condición que mira la barra.
 - `Quilmes/ La Plata` no pierde la `s`: es la otra mitad, la que exige que la letra sea un token suelto.
 - Un span que era solo la letra desaparece.
+- **El orden importa y hay que fijarlo**: con el recorte corriendo antes del ensanche, `Documento IPS/ 12` pierde la entidad `IPS` entera. Sin este test, mover la llamada no rompe nada — que es exactamente lo que pasó.

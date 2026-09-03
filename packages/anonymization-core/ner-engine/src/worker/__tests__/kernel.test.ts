@@ -558,6 +558,37 @@ describe("NerKernel — kernelClassify (ADR-046 §1/§4)", () => {
       expect(spans.map((sp) => sp.value)).toEqual(["Quilmes"]);
     });
 
+    it("runs after the boundary snap, so a word tail is not mistaken for a separator", async () => {
+      /*
+       * Lo que fija el ORDEN, y es la unica razon por la que importa.
+       *
+       * Una letra suelta al final de un span puede ser dos cosas distintas: la
+       * particula `S/` de una caratula, o la COLA de una palabra que el modelo
+       * corto por la mitad. El recorte no puede distinguirlas mirando el span,
+       * porque en los dos casos ve una letra sola pegada a una barra.
+       *
+       * El encaje de bordes (ADR-111 §3) es lo que resuelve la ambiguedad: con
+       * la palabra completa, `anterior` es la `P` de `IPS` y no un espacio, y
+       * el recorte se abstiene. Si el recorte corriera ANTES, veria un span de
+       * una sola letra —`end - 2` cae antes del comienzo del span— concluiria
+       * que es el separador y **borraria la entidad entera**.
+       *
+       * Texto `"Documento IPS/ 12"`: la `S` esta en el indice 12 y la `/` en el
+       * 13, asi que el span crudo (12..13) toca la barra igual que en el caso
+       * de la caratula.
+       */
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockTokenClassificationPipeline(() => Promise.resolve([nerToken("B-PER", "S", 0.9, 0)])),
+      );
+
+      const spans = await kernelClassify(
+        basePayload({ modelId: "model-cola-de-palabra", text: "Documento IPS/ 12" }),
+        { timeoutMs: 5000, abortSignal: new AbortController().signal },
+      );
+
+      expect(spans.map((sp) => sp.value)).toEqual(["IPS"]);
+    });
+
     it("drops the span entirely when the separator letter was all of it", async () => {
       // Un span que se queda sin letras no nombra a nadie.
       asPipelineMock(pipeline).mockResolvedValue(

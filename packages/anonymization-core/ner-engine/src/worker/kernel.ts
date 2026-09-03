@@ -559,8 +559,17 @@ function snapSpansToWordBoundaries(
     };
   });
 
-  // ADR-123 corre al final, para que el ensanche de arriba no vuelva a meter
-  // la letra del separador.
+  /*
+   * ADR-123 corre al FINAL, y la razon no es la que este comentario decia
+   * antes ("para que el ensanche no vuelva a meter la letra" — eso no puede
+   * pasar: despues del recorte el borde cae sobre un espacio, y el ensanche
+   * solo avanza sobre caracteres de palabra).
+   *
+   * La razon real es la inversa: una letra suelta pegada a una barra puede ser
+   * la particula `S/` o la COLA de una palabra partida (`IPS/`), y el recorte
+   * no las distingue hasta que el encaje completo la palabra. Corriendo antes,
+   * veria un span de una letra y borraria la entidad entera.
+   */
   return dropSeparatorLetterAtTheEnd(encajados, chunkText);
 }
 
