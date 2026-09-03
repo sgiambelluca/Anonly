@@ -260,6 +260,25 @@ function toTesseractImage(
   documentId: string,
   pageIndex: number,
 ): OffscreenCanvas {
+  /*
+   * `Duplicacion_De_Logica.md` §6: `render-engine` protege sus dos
+   * construcciones de `OffscreenCanvas` (`createCanvas`, y la factory que le
+   * pasa a pdf.js) y acá se construía directo. Mismo patrón, protección en un
+   * solo motor.
+   *
+   * Sin la guarda, un entorno sin `OffscreenCanvas` tira un `ReferenceError`
+   * crudo desde el constructor: no es `OcrPageFailedError`, así que no llega
+   * como `OCR_PAGE_FAILED` y la página se pierde sin el aviso de análisis
+   * incompleto que ADR-094 existe para dar. Con ella, falla como falla
+   * cualquier otra página de este motor.
+   */
+  if (typeof OffscreenCanvas === "undefined") {
+    throw new OcrPageFailedError(
+      documentId,
+      pageIndex,
+      "OffscreenCanvas no disponible en este entorno.",
+    );
+  }
   const canvas = new OffscreenCanvas(imageData.width, imageData.height);
   const context = canvas.getContext("2d");
   if (context === null) {

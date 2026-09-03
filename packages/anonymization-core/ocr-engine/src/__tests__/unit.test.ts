@@ -473,6 +473,29 @@ describe("OcrEngine — unit tests", () => {
         setStubCanvasContextAvailable(true);
       }
     });
+
+    /*
+     * `Duplicacion_De_Logica.md` §6: `render-engine` guardaba sus dos
+     * construcciones de `OffscreenCanvas` y este motor no. Sin la guarda, el
+     * constructor tira un `ReferenceError` crudo: la página se pierde sin
+     * llegar como `OCR_PAGE_FAILED`, o sea sin el aviso de análisis incompleto
+     * de ADR-094. El error tipado es lo que hace que se avise.
+     */
+    it("throws OcrPageFailedError, not a raw ReferenceError, when OffscreenCanvas is missing", async () => {
+      vi.mocked(createWorker).mockResolvedValue(mockTesseractWorker(mockEmptyRecognizeData()));
+      await engine.init(ctx);
+
+      const original = globalThis.OffscreenCanvas;
+      // @ts-expect-error -- se borra a propósito para simular el entorno sin la API.
+      delete globalThis.OffscreenCanvas;
+      try {
+        await expect(
+          engine.processPage(createValidOcrPageInput("doc-no-canvas", 0), ctx),
+        ).rejects.toThrow(OcrPageFailedError);
+      } finally {
+        globalThis.OffscreenCanvas = original;
+      }
+    });
   });
 
   describe("Fallback de idiomas por defecto", () => {
