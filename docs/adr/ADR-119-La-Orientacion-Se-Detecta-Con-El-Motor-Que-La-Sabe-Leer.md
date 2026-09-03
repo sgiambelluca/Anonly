@@ -67,6 +67,8 @@ Solo tiene que elegir entre cuatro orientaciones, no leer. Medido sobre las cuat
 
 `ensureOsdWorkerLoaded` crea un worker aparte con `["osd"]`, **`oem = 0`** y `legacyCore: true`. `detectOrientation` lo usa; el worker principal deja de cargar `osd` y deja de pedir `legacyCore`, porque ya no lo necesita.
 
+> **Errata (2026-09-03) — sacarle `legacyCore` al worker principal cambia qué archivo pide**: `lstmOnly = [OEM.DEFAULT, OEM.LSTM_ONLY].includes(oem) && !options.legacyCore` (`tesseract.js@6.0.1/src/createWorker.js:36`), y con `lstmOnly: true` `getCore.js` importa `tesseract-core-simd-lstm.wasm.js` dentro de `corePath` — el archivo que `assets.lock.json` **dejó de mirrorear** cuando ADR-090 §1 reemplazó los pines LSTM-only por los completos. Este ADR no tocó el lock, así que dejó toda página escaneada en `importScripts` 404 → `createWorker` rechaza → `OcrModelMissingError`. El mirror pasa a llevar los **cuatro** cores: `tesseract-core[-simd]-lstm` para el worker de reconocimiento y `tesseract-core[-simd]` para el de OSD. Es la alternativa que ADR-090 descartó por *"duplica lo mirroreado sin ningún caso que lo pida"* — **este ADR es el caso**. En runtime no cambia nada: cada worker sigue bajando un core. Lo detectó el Escenario 2 E2E, el único gate que corre Tesseract de verdad.
+
 ### 2. La detección corre sobre el raster a media escala
 
 `OSD_SCALE = 0,5`. No es una optimización oportunista: es lo que hace que el arreglo **no cueste tiempo**.
@@ -87,6 +89,8 @@ Cualquier fallo sigue cayendo a `0` (ADR-090 §3). Pero **si el worker de OSD no
 Hoy ya se pagan 506 ms por página por una detección que devuelve `0/0` **siempre**. A media escala, una que funciona cuesta 290 ms: **−216 ms por página**.
 
 Costo real: **+99 MB** por el worker de OSD, contra el core legacy que el worker principal deja de cargar.
+
+Costo de mirror (errata de arriba): **+7,9 MB en disco** por los dos cores LSTM-only que vuelven al lock. No lo paga el usuario — el browser baja un core por worker, igual que antes.
 
 **La geometría de ADR-090 era correcta y queda verificada.** OSD devuelve el ángulo de **corrección** (imagen girada 90° → informa 270), que es exactamente la convención que `rotateImageData` documenta. De punta a punta, replicando la secuencia del kernel:
 
@@ -114,3 +118,4 @@ Costo real: **+99 MB** por el worker de OSD, contra el core legacy que el worker
 - Un `detect` que tira sigue cayendo a `0` (la degradación de ADR-090 §3).
 - Un worker de OSD que no se puede crear **lanza** `OcrModelMissingError` en vez de degradar a `0`.
 - `dispose` libera los dos workers, y tolera que cualquiera de los dos falle al terminar.
+- Que un PDF **escaneado real** siga produciendo entidades > 0 de punta a punta (Escenario 2 E2E). Ninguna prueba con `vi.mock("tesseract.js", …)` puede ver un core que falta: el doble no descarga nada.

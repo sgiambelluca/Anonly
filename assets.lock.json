@@ -10,6 +10,22 @@
       "sizeBytes": 111162
     },
     {
+      "id": "tesseract-core-lstm",
+      "url": "https://cdn.jsdelivr.net/npm/tesseract.js-core@6.1.2/tesseract-core-lstm.wasm.js",
+      "revision": "6.1.2",
+      "sha256": "775a35df6f2ae100e02609443e6bd5cafcd07983dd6175454ca4a432a7730687",
+      "destination": "apps/react-client/public/wasm/tesseract/tesseract-core-lstm.wasm.js",
+      "sizeBytes": 3954181
+    },
+    {
+      "id": "tesseract-core-simd-lstm",
+      "url": "https://cdn.jsdelivr.net/npm/tesseract.js-core@6.1.2/tesseract-core-simd-lstm.wasm.js",
+      "revision": "6.1.2",
+      "sha256": "9d7c43fb206dc9f48475228b46bf35f888fa9e6259da2e67d5a75c77049f2dc7",
+      "destination": "apps/react-client/public/wasm/tesseract/tesseract-core-simd-lstm.wasm.js",
+      "sizeBytes": 3954569
+    },
+    {
       "id": "tesseract-core",
       "url": "https://cdn.jsdelivr.net/npm/tesseract.js-core@6.1.2/tesseract-core.wasm.js",
       "revision": "6.1.2",

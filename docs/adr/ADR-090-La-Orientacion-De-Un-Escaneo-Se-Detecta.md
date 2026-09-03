@@ -69,6 +69,8 @@ El reconocimiento es **el mismo** (la diferencia está dentro del ruido de dos c
 
 `createWorker` pasa a recibir `legacyCore: true` y a cargar `osd` junto a los idiomas de la config. `assets.lock.json` **reemplaza** los dos pines de core LSTM-only por los completos (no los suma: con el core completo no hay razón para conservarlos) y **agrega** `tesseract-lang-osd`. ADR-018 sigue rigiendo: nada se sirve desde un CDN de terceros en runtime.
 
+> **Errata (2026-09-03, por ADR-119)**: el *reemplazo* dejó de ser correcto en cuanto ADR-119 §1 partió la detección y el reconocimiento en **dos workers**. El de reconocimiento ya no pide `legacyCore`, y por lo tanto vuelve a pedir `tesseract-core[-simd]-lstm.wasm.js`. El lock lleva ahora los **cuatro** cores; ver la errata de ADR-119 §1.
+
 `loadedLanguages` sigue siendo el set **pedido** por la config; `osd` es un detalle de carga del kernel y no participa de la comparación que decide si hay que recrear el worker.
 
 ### 2. `user_defined_dpi` se le dice a Tesseract, en vez de dejarlo estimar
@@ -121,7 +123,7 @@ Esto es exactamente lo que ADR-067 §5 dejó anticipado: con `rotation` poblado,
 | OSD siempre (§3) | Gatillarlo solo cuando la primera pasada da confianza baja | Las páginas derechas se ahorrarían 0,7 s sobre 5,3 s (13 %), pero las rotadas pagarían la pasada mala **entera** (16,7 s) antes de decidir — justo el caso que se quiere arreglar. Correrlo siempre es más simple, más predecible y más rápido donde importa. |
 | Rotar el `ImageData` (§3) | Pasarle `rotateRadians` a `recognize` | Las cajas vuelven igual en el espacio rotado, así que el mapeo inverso hace falta de todas formas; y rotar por aritmética de píxeles es una función pura, testeable en Node, sin depender de `OffscreenCanvas`. |
 | Calcular el orden en el espacio enderezado (§3) | Ordenar en el espacio original | En el espacio original "arriba-abajo" no es el sentido de lectura, así que la página saldría con las palabras desordenadas — el mismo defecto que ADR-067 arregló para texto nativo. |
-| Reemplazar los pines LSTM-only (§1) | Conservar los cuatro cores y elegir en runtime | Duplica lo mirroreado sin ningún caso que lo pida: el core completo hace todo lo que hace el LSTM-only. |
+| Reemplazar los pines LSTM-only (§1) | Conservar los cuatro cores y elegir en runtime | Duplica lo mirroreado sin ningún caso que lo pida: el core completo hace todo lo que hace el LSTM-only. **Revertido el 2026-09-03**: ADR-119 §1 creó el caso —dos workers que eligen distinto— y la alternativa descartada pasó a ser la única que funciona. |
 
 ## Consecuencias
 
