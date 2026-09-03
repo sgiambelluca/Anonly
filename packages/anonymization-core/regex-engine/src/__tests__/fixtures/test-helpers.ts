@@ -16,7 +16,6 @@ import type { Document, Page, Word } from "@anonly/shared";
  */
 export {
   createEngineContext,
-  createEngineContextWithRealBus,
   createMockBus,
   createMockCache,
   createMockConfig,
