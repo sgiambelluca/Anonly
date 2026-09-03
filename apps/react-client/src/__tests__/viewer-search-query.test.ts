@@ -45,12 +45,12 @@ describe("viewer.store.searchQuery (ADR-084)", () => {
   });
 
   it("setSearchQuery la escribe — es lo único que hace 'Ver ocurrencias'", () => {
-    useViewerStore.getState().setSearchQuery("Pablo Román Fortes");
-    expect(useViewerStore.getState().searchQuery).toBe("Pablo Román Fortes");
+    useViewerStore.getState().setSearchQuery("Diego Ramos Vargas");
+    expect(useViewerStore.getState().searchQuery).toBe("Diego Ramos Vargas");
   });
 
   it("la cadena vacía limpia la búsqueda", () => {
-    useViewerStore.getState().setSearchQuery("Pablo Román Fortes");
+    useViewerStore.getState().setSearchQuery("Diego Ramos Vargas");
     useViewerStore.getState().setSearchQuery("");
     expect(useViewerStore.getState().searchQuery).toBe("");
   });
