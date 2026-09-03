@@ -282,7 +282,7 @@ describe("NerEngine — unit tests", () => {
   // (P-2 prohíbe compartir código entre motores).
   describe("fragments (footprint multi-línea)", () => {
     // El test que define el ADR de este lado, y el motor donde se midió
-    // (NER_Engine.md §10): "Pablo" cierra un renglón, "Román Fortes," abre
+    // (NER_Engine.md §10): "Diego" cierra un renglón, "Ramos Vargas," abre
     // el siguiente. Envolvente medida sobre la pericia real: 557,2 × 18,2 pt.
     // Emite UNA Occurrence con fragments.length === 2, y bbox sigue siendo
     // la envolvente de los dos.
@@ -290,41 +290,41 @@ describe("NerEngine — unit tests", () => {
       asPipelineMock(pipeline).mockResolvedValue(
         mockTokenClassificationPipeline(() =>
           Promise.resolve([
-            nerToken("B-PER", "Pablo", 0.9, 0),
-            nerToken("I-PER", "Román", 0.9, 1),
-            nerToken("I-PER", "Fortes,", 0.9, 2),
+            nerToken("B-PER", "Diego", 0.9, 0),
+            nerToken("I-PER", "Ramos", 0.9, 1),
+            nerToken("I-PER", "Vargas,", 0.9, 2),
           ]),
         ),
       );
       await engine.init(ctx);
-      const base = makeNerPageInput("doc-two-lines", 0, ["Pablo", "Román", "Fortes,", "firmo"]);
+      const base = makeNerPageInput("doc-two-lines", 0, ["Diego", "Ramos", "Vargas,", "firmo"]);
       const input = {
         ...base,
         words: base.words.map((w, i) => (i >= 1 ? { ...w, bbox: { ...w.bbox, y: 130 } } : w)),
       };
       const output = await engine.processPage(input, ctx);
 
-      const wordPablo = input.words[0]!;
-      const wordRoman = input.words[1]!;
-      const wordFortes = input.words[2]!;
+      const wordDiego = input.words[0]!;
+      const wordRamos = input.words[1]!;
+      const wordVargas = input.words[2]!;
       expect(output.occurrences[0]?.fragments).toEqual([
-        wordPablo.bbox,
+        wordDiego.bbox,
         {
-          x: wordRoman.bbox.x,
-          y: wordRoman.bbox.y,
-          width: wordFortes.bbox.x + wordFortes.bbox.width - wordRoman.bbox.x,
+          x: wordRamos.bbox.x,
+          y: wordRamos.bbox.y,
+          width: wordVargas.bbox.x + wordVargas.bbox.width - wordRamos.bbox.x,
           height: 12,
         },
       ]);
       expect(output.occurrences[0]?.bbox).toEqual({
-        x: Math.min(wordPablo.bbox.x, wordRoman.bbox.x),
-        y: Math.min(wordPablo.bbox.y, wordRoman.bbox.y),
+        x: Math.min(wordDiego.bbox.x, wordRamos.bbox.x),
+        y: Math.min(wordDiego.bbox.y, wordRamos.bbox.y),
         width:
           Math.max(
-            wordPablo.bbox.x + wordPablo.bbox.width,
-            wordFortes.bbox.x + wordFortes.bbox.width,
-          ) - Math.min(wordPablo.bbox.x, wordRoman.bbox.x),
-        height: wordRoman.bbox.y + 12 - wordPablo.bbox.y,
+            wordDiego.bbox.x + wordDiego.bbox.width,
+            wordVargas.bbox.x + wordVargas.bbox.width,
+          ) - Math.min(wordDiego.bbox.x, wordRamos.bbox.x),
+        height: wordRamos.bbox.y + 12 - wordDiego.bbox.y,
       });
     });
 
