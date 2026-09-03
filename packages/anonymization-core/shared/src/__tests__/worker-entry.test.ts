@@ -78,6 +78,26 @@ describe("startWorkerEntry", () => {
       expect(h.posted[0]).toMatchObject({ type: "READY", capabilities: { maxPageBatchSize: 8 } });
     });
 
+    /*
+     * `pdf-engine` corre el motor real del otro lado y no puede decirse listo
+     * antes de que `engine.init()` termine. Los otros cuatro corren un kernel
+     * sin init y postean el READY de una.
+     */
+    it("con `ready`, el READY eager espera a que resuelva", async () => {
+      let resolveReady: (() => void) | undefined;
+      const h = install({
+        ready: new Promise<void>((resolve) => {
+          resolveReady = resolve;
+        }),
+      });
+
+      expect(h.posted).toHaveLength(0);
+      resolveReady?.();
+      await flush();
+      expect(h.posted).toHaveLength(1);
+      expect(h.posted[0]).toMatchObject({ type: "READY" });
+    });
+
     it("le pone al workerId el prefijo del motor y un sufijo propio", () => {
       const a = install();
       vi.unstubAllGlobals();
