@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  findStaleAssets,
   mirrorAsset,
   mirrorAssets,
   readAssetsLock,
@@ -193,6 +194,90 @@ describe("mirror-assets", () => {
       expect(outcomes).toEqual([
         { id: "asset-a", result: "downloaded" },
         { id: "asset-b", result: "downloaded" },
+      ]);
+    });
+  });
+  /*
+   * `findStaleAssets` es la revisión que le faltaba al mirror: el script nunca
+   * borra, y `public/` está en `.gitignore`, así que un asset que salió del
+   * lock sobrevive en la máquina que lo bajó y se sigue sirviendo. Es el modo
+   * de falla real de la errata 2026-09-03 de ADR-090/ADR-119.
+   */
+  describe("findStaleAssets", () => {
+    async function writeFileAt(relativePath: string, content: string): Promise<void> {
+      const absolute = join(rootDir, relativePath);
+      await mkdir(join(absolute, ".."), { recursive: true });
+      await writeFile(absolute, content);
+    }
+
+    it("returns nothing when the destination holds exactly what the lock declares", async () => {
+      const lock: AssetsLock = {
+        version: 1,
+        assets: [makeEntry({ destination: "public/wasm/tesseract/core.js" })],
+      };
+      await writeFileAt("public/wasm/tesseract/core.js", "x");
+
+      expect(await findStaleAssets(lock, rootDir)).toEqual([]);
+    });
+
+    it("reports a file left over from a previous lock", async () => {
+      const lock: AssetsLock = {
+        version: 1,
+        assets: [makeEntry({ destination: "public/wasm/tesseract/tesseract-core.wasm.js" })],
+      };
+      await writeFileAt("public/wasm/tesseract/tesseract-core.wasm.js", "x");
+      await writeFileAt("public/wasm/tesseract/tesseract-core-simd-lstm.wasm.js", "sobra");
+
+      expect(await findStaleAssets(lock, rootDir)).toEqual([
+        "public/wasm/tesseract/tesseract-core-simd-lstm.wasm.js",
+      ]);
+    });
+
+    it("ignores directories the lock does not declare a destination in", async () => {
+      const lock: AssetsLock = {
+        version: 1,
+        assets: [makeEntry({ destination: "public/wasm/tesseract/core.js" })],
+      };
+      await writeFileAt("public/wasm/tesseract/core.js", "x");
+      // `public/pdfjs/` lo llena copy-pdfjs-assets.ts desde pnpm-lock.yaml.
+      await writeFileAt("public/pdfjs/cmaps/Adobe-Japan1-0.bcmap", "x");
+
+      expect(await findStaleAssets(lock, rootDir)).toEqual([]);
+    });
+
+    it("ignores subdirectories and dotfiles inside a declared destination", async () => {
+      const lock: AssetsLock = {
+        version: 1,
+        assets: [makeEntry({ destination: "public/models/ner/config.json" })],
+      };
+      await writeFileAt("public/models/ner/config.json", "x");
+      await writeFileAt("public/models/ner/onnx/model.onnx", "x");
+      await writeFileAt("public/models/ner/.DS_Store", "x");
+
+      expect(await findStaleAssets(lock, rootDir)).toEqual([]);
+    });
+
+    it("returns nothing when the destination directory does not exist yet", async () => {
+      const lock: AssetsLock = {
+        version: 1,
+        assets: [makeEntry({ destination: "public/wasm/tesseract/core.js" })],
+      };
+
+      expect(await findStaleAssets(lock, rootDir)).toEqual([]);
+    });
+
+    it("sorts the report so two runs read the same", async () => {
+      const lock: AssetsLock = {
+        version: 1,
+        assets: [makeEntry({ destination: "public/wasm/tesseract/core.js" })],
+      };
+      await writeFileAt("public/wasm/tesseract/core.js", "x");
+      await writeFileAt("public/wasm/tesseract/z-sobra.js", "x");
+      await writeFileAt("public/wasm/tesseract/a-sobra.js", "x");
+
+      expect(await findStaleAssets(lock, rootDir)).toEqual([
+        "public/wasm/tesseract/a-sobra.js",
+        "public/wasm/tesseract/z-sobra.js",
       ]);
     });
   });

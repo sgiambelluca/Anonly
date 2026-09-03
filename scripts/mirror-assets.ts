@@ -17,12 +17,17 @@
  * se escribe a disco y el proceso termina con exit code 1 — nunca se
  * deposita un archivo cuyo contenido no fue verificado.
  *
+ * **No borra nada**, y por eso además REVISA: un archivo que quedó de un lock
+ * anterior se sigue sirviendo desde `public/` como si estuviera pineado. Ver
+ * `findStaleAssets`.
+ *
  * Actualizar un asset = editar su entrada en `assets.lock.json` (URL,
  * revision, sha256, sizeBytes) en un PR revisable, no editar este script.
  */
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { dirname as posixDirname, basename as posixBasename } from "node:path/posix";
 import { fileURLToPath } from "node:url";
 
 export interface AssetLockEntry {
@@ -117,6 +122,58 @@ export async function mirrorAssets(
   return outcomes;
 }
 
+/*
+ * Assets que quedaron en un destino del lock y que el lock ya NO declara.
+ *
+ * El mirror nunca borró un archivo, y `public/` está en `.gitignore`: un
+ * archivo que salió del lock sobrevive en la máquina que lo había bajado, se
+ * sigue sirviendo desde el mismo origen y nadie se entera. Eso convierte un
+ * asset que falta en un bug que funciona en una máquina y en ninguna otra —
+ * que es exactamente lo que pasó cuando ADR-119 dejó al worker de
+ * reconocimiento pidiendo `tesseract-core-simd-lstm.wasm.js` después de que
+ * ADR-090 lo sacara del lock (errata 2026-09-03 de los dos ADR).
+ *
+ * Se mira **por directorio declarado**, no recursivo: los directorios que el
+ * lock no toca no son asunto de este script (`public/pdfjs/`, que llena
+ * `apps/react-client/scripts/copy-pdfjs-assets.ts` desde `pnpm-lock.yaml`, es
+ * el caso vivo). Un subdirectorio se saltea porque, si tiene assets del lock,
+ * ya entra por su propia entrada.
+ *
+ * Los archivos ocultos se ignoran: ningún asset del lock empieza con punto, y
+ * un `.DS_Store` que rompa el comando es la forma más rápida de que alguien
+ * apague la revisión.
+ */
+export async function findStaleAssets(
+  lock: AssetsLock,
+  rootDir: string,
+): Promise<ReadonlyArray<string>> {
+  const declaredByDir = new Map<string, Set<string>>();
+  for (const entry of lock.assets) {
+    const dir = posixDirname(entry.destination);
+    const names = declaredByDir.get(dir) ?? new Set<string>();
+    names.add(posixBasename(entry.destination));
+    declaredByDir.set(dir, names);
+  }
+
+  const stale: string[] = [];
+  for (const [dir, declared] of declaredByDir) {
+    let entries;
+    try {
+      entries = await readdir(resolve(rootDir, dir), { withFileTypes: true });
+    } catch {
+      // El directorio todavía no existe: no hay nada mirroreado, no hay sobra.
+      continue;
+    }
+    for (const dirent of entries) {
+      if (dirent.isDirectory()) continue;
+      if (dirent.name.startsWith(".")) continue;
+      if (declared.has(dirent.name)) continue;
+      stale.push(`${dir}/${dirent.name}`);
+    }
+  }
+  return stale.sort();
+}
+
 function isMainModule(): boolean {
   if (!process.argv[1]) return false;
   return fileURLToPath(import.meta.url) === resolve(process.argv[1]);
@@ -131,6 +188,19 @@ async function main(): Promise<void> {
   for (const outcome of outcomes) {
     process.stdout.write(`  [${outcome.result}] ${outcome.id}\n`);
   }
+
+  const stale = await findStaleAssets(lock, REPO_ROOT);
+  if (stale.length > 0) {
+    throw new Error(
+      `Hay ${stale.length} archivo(s) en los destinos del mirror que assets.lock.json ya no declara:\n` +
+        stale.map((path) => `  ${path}\n`).join("") +
+        "Este script nunca borra, así que esos archivos se siguen sirviendo desde el mismo origen " +
+        "como si estuvieran pineados: un asset que falta funciona en esta máquina y en ninguna otra. " +
+        "Borralos y volvé a correr `pnpm assets:mirror`:\n" +
+        `  rm ${stale.join(" ")}\n`,
+    );
+  }
+
   process.stdout.write("Listo.\n");
 }
 
