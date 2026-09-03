@@ -1083,3 +1083,23 @@ Dos cosas que la medición decidió y que no se habrían acertado a ojo:
 2. **La segmentación en columnas se descartó**: barrida de 0,8 a 4,0 cuerpos y también desactivada por completo, los resultados son **idénticos**. Con la banda en 0,5 las dos columnas caen en renglones distintos y el corte nunca se dispara. Se dejó afuera en vez de agregar una constante que no hace nada.
 
 **No bloquea** nada de ADR-108/ADR-109: el texto nativo de una sola columna sale igual que siempre.
+
+---
+
+## 30. `nerEnabled` quedó vivo solo para los tests (2026-09-03)
+
+**Procedencia**: el humano, al retirar el toggle de detección de nombres (ADR-126), preguntó para qué queda vivo el flag si continuar sin nombres no es un resultado aceptable. La respuesta honesta es: **para nada del producto**.
+
+Después de ADR-126 no hay un solo camino de la app que escriba `settings.store.nerEnabled`. No hay control en `SettingsDialog`, `persist()` no lo guarda, y el banner de `NER_MODEL_MISSING` dejó de ofrecer "Seguir sin detectar nombres". Lo único que lo lee es `load()`, y el único que lo escribe es `tests/e2e/support/settingsOverride.ts`.
+
+**Por qué se dejó igual**: seis specs E2E lo usan para arrancar sin bajar ni correr el modelo (~178 MB), y el escenario 8 de `07_Performance_Strategy.md` §11.3 —"cargar PDF sin NER activado → verificar que solo Regex detecta"— **es** ese caso. Sacarlo del todo no compra nada de producto y cuesta ese escenario más seis specs corriendo un modelo que no necesitan.
+
+**Por qué queda anotado igual**: es un setting público de `SettingsSlice` y un campo del mapeo de `React_Client.md` §3.7 que **ningún usuario puede alcanzar**. Esa es la forma exacta de la deuda que este repo ya se cobró dos veces —una detección de orientación que nunca corrió (ADR-119), un OCR que llegaba a "Listo" con cero entidades (errata v1.2.1 de `OCR_Engine.md`)—: código vivo que nadie ejercita por el camino real. Acá el riesgo es menor porque los tests **sí** lo ejercitan, pero la asimetría entre "es un setting" y "no es alcanzable" es real y conviene que esté escrita.
+
+**Salidas posibles, si se retoma**:
+
+1. **Dejarlo como está**, con la documentación que ya tiene (`settings.store.ts` lo declara canal de override, no preferencia). Es lo elegido hoy.
+2. **Moverlo fuera de `SettingsSlice`** a un canal de test explícito, para que el tipo del store deje de declarar una preferencia que no existe. Cuesta tocar `settingsToEngineConfig`, el bootstrap y los seis specs.
+3. **Sacarlo del todo** y aceptar que seis specs corran el modelo. Es lo más limpio conceptualmente y lo más caro en tiempo de suite; también borra el escenario 8.
+
+**No bloquea nada.**
