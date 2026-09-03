@@ -28,6 +28,12 @@ export { sharesVerticalBand } from "./shares-vertical-band.js";
 // ADR-127: el solapamiento 2D, una sola vez para todo el Core.
 export { rectsOverlap } from "./rects-overlap.js";
 
+// ADR-128: el esqueleto del entry-point de un worker de motor, una sola vez.
+// Solo tiene sentido invocarlo DENTRO de un Worker; importarlo desde el hilo
+// principal no ejecuta nada (el módulo no toca `self` a nivel de módulo).
+export { startWorkerEntry, postWorkerMessage } from "./worker-entry.js";
+export type { WorkerEntryDefinition, WorkerJobContext } from "./worker-entry.js";
+
 // Normalización de comparación de texto libre — ADR-061 §2 errata
 export { normalizeForComparison, normalizeEntityValue } from "./normalize-for-comparison.js";
 // ADR-105: la primitiva de contexto vive acá porque regex-engine y ner-engine
