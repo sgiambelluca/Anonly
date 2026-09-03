@@ -187,27 +187,27 @@ describe("GroupingEngine — unit tests", () => {
   // ADR-073 §7 — no-regresión: si esto se cae, ADR-073 rompió lo que vino a
   // proteger. Ídem Organization y Address, mismo umbral y mismo mecanismo.
   //
-  // Nota: el par que ilustra ADR-073 Contexto §3 ("Pablo Rornan" por "Pablo
-  // Román", la confusión "rn"→"m") tiene distancia Levenshtein 2 contra
-  // "Pablo Roman" (verificado con la implementación real), similitud 0.833 —
+  // Nota: el par que ilustra ADR-073 Contexto §3 ("Diego Rarnos" por "Diego
+  // Ramos", la confusión "rn"→"m") tiene distancia Levenshtein 2 contra
+  // "Diego Ramos" (verificado con la implementación real), similitud 0.833 —
   // por debajo del umbral 0.88 independientemente de este ADR. No es un caso
   // que la fórmula sin cambios agrupe. Se usa acá una confusión de OCR real
   // de un solo carácter (O↔0) que sí clasifica como "un carácter distinto".
-  it('"Pablo Roman" and "Pablo R0man" still group together', () => {
+  it('"Diego Ramos" and "Diego Ram0s" still group together', () => {
     ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
       documentId: "doc-1",
       occurrence: makeOccurrence({
         entityType: EntityType.Person,
-        value: "Pablo Roman",
-        normalizedValue: "pablo roman",
+        value: "Diego Ramos",
+        normalizedValue: "diego ramos",
       }),
     });
     ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
       documentId: "doc-1",
       occurrence: makeOccurrence({
         entityType: EntityType.Person,
-        value: "Pablo R0man",
-        normalizedValue: "pablo r0man",
+        value: "Diego Ram0s",
+        normalizedValue: "diego ram0s",
       }),
     });
     ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
@@ -364,8 +364,8 @@ describe("GroupingEngine — unit tests", () => {
       documentId: "doc-1",
       occurrence: makeOccurrence({
         entityType: EntityType.Person,
-        value: "Pablo Roman Fortes",
-        normalizedValue: "pablo roman fortes",
+        value: "Diego Ramos Vargas",
+        normalizedValue: "diego ramos vargas",
         bbox: makeBBox(0, 0, 200, 50),
         fragments,
       }),
@@ -389,8 +389,8 @@ describe("GroupingEngine — unit tests", () => {
       // test dejaría de aislar lo que quiere probar.
       occurrence: makeOccurrence({
         entityType: EntityType.Person,
-        value: "Andrea Fortes",
-        normalizedValue: "andrea fortes",
+        value: "Andrea Vargas",
+        normalizedValue: "andrea vargas",
         bbox: makeBBox(0, 0, 200, 50),
         fragments: [makeBBox(0, 0, 200, 20), makeBBox(0, 30, 65, 20)],
       }),
