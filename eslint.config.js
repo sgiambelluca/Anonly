@@ -240,6 +240,31 @@ export default tseslint.config(
     },
   },
   {
+    // Tests del façade. En flat config el último bloque que matchea gana, y el
+    // del façade (arriba) matchea también sus `__tests__`: sin este bloque,
+    // esos tests heredarían la prohibición de `@anonly/test-utils`, y el
+    // façade sería el único del Core cuyos tests no pueden usar los dobles
+    // compartidos (ADR-129).
+    //
+    // Se redeclara completo y no se "quita una regla": `no-restricted-imports`
+    // no se mergea entre bloques. Queda solo React — el façade **sí** puede
+    // importar motores (P-1: es el único que puede) y el bus.
+    files: ["packages/anonymization-core/src/**/__tests__/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["react", "react-dom", "react/jsx-runtime"],
+              message: "El Core no puede importar React. Ver ai/Code_Standards.md P-1.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: ["**/*.test.ts", "**/*.spec.ts", "tests/**"],
     rules: {
       "@typescript-eslint/no-explicit-any": "off",
