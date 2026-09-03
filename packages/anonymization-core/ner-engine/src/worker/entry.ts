@@ -32,21 +32,17 @@
  *   resuelto por `NerEngine` host-side). Si el host llega a enviar `INIT`
  *   con la config real, se re-adopta. Gap conocido, no bloqueante (mismo
  *   precedente que Pdf/Render/Ocr).
+ *
+ * **El ciclo de vida del entry-point lo aporta `startWorkerEntry`**
+ * (`@anonly/shared`, ADR-128): el `Map` de `AbortController` por `signalId`, el
+ * guard de `jobType`, el mapeo de errores que cruzan la frontera, la limpieza
+ * y el `READY` eager. El `PROGRESS` sale por `ctx.progress`, que es el mismo
+ * mensaje con el `jobId` ya puesto.
  */
-import {
-  CancelledError,
-  EngineError,
-  InvalidInputError,
-  type NerPagePayload,
-  type WorkerCapabilities,
-  type WorkerInbound,
-  type WorkerOutbound,
-} from "@anonly/shared";
+
+import { type NerPagePayload, startWorkerEntry } from "@anonly/shared";
 
 import { kernelClassify, kernelDispose } from "./kernel.js";
-
-const WORKER_CAPABILITIES: WorkerCapabilities = { maxPageBatchSize: 8 };
-const WORKER_ID = `ner-worker-${Math.random().toString(36).slice(2)}`;
 
 // Default de Contracts.md §6 (WorkerPoolConfig.timeouts["ner-page"]) — único
 // campo que el kernel necesita de EngineConfig (ver nota de cabecera).
@@ -56,93 +52,35 @@ interface LocalConfigShape {
   readonly workerPool?: { readonly timeouts?: { readonly "ner-page"?: number } };
 }
 
-function applyConfig(config: unknown): void {
-  // Cast de frontera de transporte (ADR-019): INIT.config es unknown a este
-  // nivel; el entry-point de cada motor lo afina a los campos que necesita.
-  const candidate = config as LocalConfigShape | null | undefined;
-  const timeout = candidate?.workerPool?.timeouts?.["ner-page"];
-  if (timeout !== undefined) nerPageTimeoutMs = timeout;
-}
+startWorkerEntry({
+  workerId: "ner",
+  jobType: "ner-page",
+  capabilities: { maxPageBatchSize: 8 },
 
-function post(message: WorkerOutbound): void {
-  self.postMessage(message);
-}
+  applyConfig(config) {
+    // Cast de frontera de transporte (ADR-019): INIT.config es unknown a este
+    // nivel; el entry-point de cada motor lo afina a los campos que necesita.
+    const candidate = config as LocalConfigShape | null | undefined;
+    const timeout = candidate?.workerPool?.timeouts?.["ner-page"];
+    if (timeout !== undefined) nerPageTimeoutMs = timeout;
+  },
 
-/** Un `AbortController` por job en curso, indexado por `signalId` (`=== jobId`, ver `worker-pool.ts#dispatchRemote`). */
-const jobControllers = new Map<string, AbortController>();
-
-async function handleRun(message: Extract<WorkerInbound, { type: "RUN" }>): Promise<void> {
-  const { jobId, signalId, jobType, payload } = message;
-
-  if (jobType !== "ner-page") {
-    post({
-      type: "FAILED",
-      jobId,
-      error: new InvalidInputError(`NerWorker no soporta jobType '${jobType}'.`, {
-        jobType,
-      }).serialize(),
-    });
-    return;
-  }
-
-  const controller = new AbortController();
-  jobControllers.set(signalId, controller);
-
-  try {
+  async run(payload, ctx) {
     // Cast de frontera de transporte (ADR-019): RUN.payload es unknown a este
     // nivel; el entry-point lo afina a NerPagePayload (03_Data_Model.md §18).
-    const nerPayload = payload as NerPagePayload;
-    const spans = await kernelClassify(nerPayload, {
+    const spans = await kernelClassify(payload as NerPagePayload, {
       timeoutMs: nerPageTimeoutMs,
-      abortSignal: controller.signal,
+      abortSignal: ctx.abortSignal,
       // ADR-046 §4: reenvía el ciclo de vida del modelo tal cual, sin
       // traducirlo — la traducción a eventos de dominio ocurre en host.
-      onProgress: (progress, partial) => post({ type: "PROGRESS", jobId, progress, partial }),
+      onProgress: ctx.progress,
     });
     // ADR-046 §1: COMPLETED { spans } — sin bbox/wordSpan/id, el mapeo a
     // Occurrence lo hace el host, que es quien tiene las Word[] de la página.
-    post({ type: "COMPLETED", jobId, result: { spans } });
-  } catch (err: unknown) {
-    if (err instanceof CancelledError) {
-      post({ type: "CANCELLED", jobId, signalId });
-    } else if (err instanceof EngineError) {
-      post({ type: "FAILED", jobId, error: err.serialize() });
-    } else {
-      const message = err instanceof Error ? err.message : String(err);
-      post({ type: "FAILED", jobId, error: new InvalidInputError(message).serialize() });
-    }
-  } finally {
-    jobControllers.delete(signalId);
-  }
-}
+    return { spans };
+  },
 
-function handleCancel(message: Extract<WorkerInbound, { type: "CANCEL" }>): void {
-  jobControllers.get(message.signalId)?.abort();
-}
-
-function handleDispose(): void {
-  void kernelDispose();
-}
-
-self.addEventListener("message", (ev: MessageEvent<WorkerInbound>) => {
-  const message = ev.data;
-  switch (message.type) {
-    case "INIT":
-      applyConfig(message.config);
-      post({ type: "READY", workerId: WORKER_ID, capabilities: WORKER_CAPABILITIES });
-      break;
-    case "RUN":
-      void handleRun(message);
-      break;
-    case "CANCEL":
-      handleCancel(message);
-      break;
-    case "DISPOSE":
-      handleDispose();
-      break;
-  }
+  dispose() {
+    void kernelDispose();
+  },
 });
-
-// Auto-init eager (ver nota de cabecera: WorkerPool no envía INIT en este
-// PR; RUN ya se encola sin esperar READY, mismo patrón que Pdf/Render/OcrWorker).
-post({ type: "READY", workerId: WORKER_ID, capabilities: WORKER_CAPABILITIES });
