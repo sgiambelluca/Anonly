@@ -1,0 +1,29 @@
+{
+  "name": "@anonly/test-utils",
+  "version": "0.0.0",
+  "description": "Dobles de test compartidos por las suites del Core de Anonly. Nunca se publica ni se bundlea.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "sideEffects": false,
+  "main": "./src/index.ts",
+  "module": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@anonly/event-system": "workspace:*",
+    "@anonly/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.2",
+    "vitest": "^3.2.6"
+  }
+}
