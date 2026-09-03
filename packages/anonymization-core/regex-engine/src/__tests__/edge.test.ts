@@ -396,6 +396,15 @@ describe("RegexEngine — edge case tests", () => {
       expect(engine.searchText({ document, query: "   " })).toEqual([]);
       expect(engine.searchText({ document, query: "" })).toEqual([]);
     });
+
+    // ADR-089 §1: con la comparación por sub-token, una consulta de solo
+    // puntuación produce cero sub-tokens — el mismo camino corto que la
+    // consulta vacía, sin recorrer el documento.
+    it("searchText with a punctuation-only query returns an empty array", () => {
+      const document = makeSinglePageDocument("doc-search-text-punct-query", ["Cualquier", "cosa"]);
+      expect(engine.searchText({ document, query: ",.-" })).toEqual([]);
+      expect(engine.searchText({ document, query: "«»" })).toEqual([]);
+    });
   });
 
   // Caso 24 (§13): sincrónico, no promesa rechazada — a diferencia de
@@ -405,6 +414,42 @@ describe("RegexEngine — edge case tests", () => {
       await engine.dispose();
       const document = makeSinglePageDocument("doc-search-text-after-dispose", ["Ana"]);
       expect(() => engine.searchText({ document, query: "Ana" })).toThrow(EngineDisposedError);
+    });
+  });
+
+  /*
+   * Caso 31 (§13): el residuo que ADR-092, Contexto §3 aceptaba — "Argentina"
+   * ES un nombre de pila permitido en el registro de Buenos Aires, así que la
+   * compuerta del léxico lo dejaba pasar.
+   *
+   * **ADR-103 lo cerró**, y este test se invierte con él. La razón por la que
+   * se aceptaba era que el lookbehind que lo evita pierde "el Doctor Pérez,
+   * Juan", y que un falso negativo pesa más que un falso positivo en una
+   * herramienta de privacidad. Ese juicio se revisó: la clase de falso
+   * positivo resultó mucho más grande (adverbios y enumeraciones) y una de
+   * ellas **fusiona dos personas reales en una sola** — que no es un
+   * destildado, es una fuga silenciosa.
+   */
+  describe("Caso 31: carátula — el residuo cerrado por ADR-103", () => {
+    it('"Buenos Aires, Argentina" ya no emite: no hay marca de carátula cerca', async () => {
+      const document = makeSinglePageDocument("doc-caratula-residuo", [
+        "con",
+        "domicilio",
+        "en",
+        "Buenos",
+        "Aires,",
+        "Argentina",
+      ]);
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      await engine.process({ document }, ctx);
+      const personas = busEmitSpy.mock.calls
+        .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
+        .map(([, , payload]) => (payload as EntityFound).occurrence)
+        .filter((o) => o.entityType === EntityType.Person)
+        .map((o) => o.value);
+      busEmitSpy.mockRestore();
+
+      expect(personas).toEqual([]);
     });
   });
 
@@ -471,6 +516,40 @@ describe("RegexEngine — edge case tests", () => {
     it('"Tel.0221-4567890" does not emit (accepted residue)', async () => {
       const document = makeSinglePageDocument("doc-guard-residual", ["Tel.0221-4567890"]);
       expect((await engine.process({ document }, ctx)).occurrenceCount).toBe(0);
+    });
+  });
+
+  // Caso 33 (§13, ADR-096): las trampas duras contra las que se midieron los
+  // cuatro patrones nuevos/reescritos. Ninguna debe emitir License, Plate,
+  // IBAN ni Phone — es la mitad de la medición que protege contra convertir
+  // un patrón más laxo en una fuga sobre referencias legales/administrativas.
+  describe("Caso 33: trampas duras (ADR-096) — ninguna emite License/Plate/IBAN/Phone", () => {
+    const trampas: ReadonlyArray<{ readonly nombre: string; readonly tokens: string[] }> = [
+      { nombre: "Ley 24.240", tokens: ["Ley", "24.240"] },
+      { nombre: "Art. 1234", tokens: ["Art.", "1234"] },
+      { nombre: "CP B1900ABC", tokens: ["CP", "B1900ABC"] },
+      { nombre: "Resolución 45/2024", tokens: ["Resolución", "45/2024"] },
+      { nombre: "Foja 1234", tokens: ["Foja", "1234"] },
+      { nombre: "N° 123456", tokens: ["N°", "123456"] },
+      { nombre: "Decreto 1023/2001", tokens: ["Decreto", "1023/2001"] },
+    ];
+
+    const watchedTypes = new Set([
+      EntityType.License,
+      EntityType.Plate,
+      EntityType.IBAN,
+      EntityType.Phone,
+    ]);
+
+    it.each(trampas)("$nombre no emite License, Plate, IBAN ni Phone", async ({ tokens }) => {
+      const document = makeSinglePageDocument(`doc-trampa-dura-${tokens.join("-")}`, tokens);
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      await engine.process({ document }, ctx);
+      const watchedOccurrences = busEmitSpy.mock.calls
+        .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
+        .map(([, , payload]) => (payload as EntityFound).occurrence)
+        .filter((o) => watchedTypes.has(o.entityType));
+      expect(watchedOccurrences, tokens.join(" ")).toHaveLength(0);
     });
   });
 });

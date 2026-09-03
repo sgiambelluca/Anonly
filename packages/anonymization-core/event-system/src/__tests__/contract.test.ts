@@ -391,6 +391,7 @@ describe("@anonly/event-system — EventBus contracts", () => {
           enabled: true,
           aliases: ["34.567.891"],
           replacementValueUserSet: false,
+          needsReview: false,
           createdAt: 0,
           updatedAt: 0,
         },

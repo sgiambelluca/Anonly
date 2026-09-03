@@ -1,0 +1,12 @@
+# Aislamiento de origen cruzado (ADR-100).
+#
+# Sin estos dos headers el navegador no expone `SharedArrayBuffer`, y
+# `onnxruntime-web` se autolimita a UN hilo: la inferencia de NER tarda el
+# doble (medido: 13 564 ms -> 6 287 ms sobre el dataset de referencia).
+#
+# Formato `_headers`, que leen Netlify y Cloudflare Pages tal cual. Otros
+# hosts piden su propia forma — ver ADR-100 §2. GitHub Pages NO puede mandar
+# headers custom: hostear ahí deja la app en un hilo.
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp

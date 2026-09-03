@@ -1,0 +1,41 @@
+{
+  "documentId": "doc-004",
+  "entities": [
+    {
+      "entityType": "PERSON",
+      "value": "Díaz, Ana",
+      "pageIndex": 0,
+      "detector": "regex"
+    },
+    {
+      "entityType": "DNI",
+      "value": "15.445.309",
+      "pageIndex": 0,
+      "detector": "regex"
+    },
+    {
+      "entityType": "CUIT",
+      "value": "20-49009444-0",
+      "pageIndex": 0,
+      "detector": "regex"
+    },
+    {
+      "entityType": "PERSON",
+      "value": "Ana Díaz",
+      "pageIndex": 1,
+      "detector": "ner"
+    },
+    {
+      "entityType": "DATE",
+      "value": "19/10/2001",
+      "pageIndex": 1,
+      "detector": "regex"
+    },
+    {
+      "entityType": "ORGANIZATION",
+      "value": "Consultora Río",
+      "pageIndex": 1,
+      "detector": "ner"
+    }
+  ]
+}

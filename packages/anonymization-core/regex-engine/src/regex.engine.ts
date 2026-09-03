@@ -1,4 +1,5 @@
 import {
+  buildOccurrenceContext,
   CancelledError,
   DetectionSource,
   EngineDisposedError,
@@ -7,6 +8,7 @@ import {
   EngineNotInitializedError,
   EventChannel,
   InvalidInputError,
+  normalizeEntityValue,
   normalizeForComparison,
   sharesVerticalBand,
   type BoundingBox,
@@ -170,27 +172,18 @@ function computeRunBounds(
  * código. Se aplica también a patrones custom (§4): es una propiedad del
  * texto, no del patrón que lo encontró.
  *
- * Se recorta el espacio de borde del propio match antes de medir (hallazgo
- * post-mergeo, Hito 10.9, escenario 8 de E2E): `phone-mobile-ar` tiene un
- * `[\s-]?` opcional ANTES de su `\b`, así que sobre "CUIT 20-12345678-9" el
- * match crudo es `" 20-12345678"`, con el espacio adentro. Sin este recorte,
- * `computeRunBounds` mide adyacencia contra `text[match.startIndex - 1]` —
- * que ahí es la "T" de "CUIT", el carácter que está ANTES del espacio, no
- * después — y la corrida se extiende por error hasta "CUIT", con letras, y
- * la guarda descarta un teléfono real. Un espacio nunca es un separador
- * válido de corrida (§2): recortarlo no cambia qué corridas con guion/punto/
- * barra se detectan, solo evita que un espacio *adentro* del match crudo se
- * lea como si no existiera.
+ * El espacio de borde que `phone-mobile-ar` se traga (hallazgo post-mergeo,
+ * Hito 10.9, escenario 8 de E2E) ya no llega hasta acá: desde v1.6.2 lo
+ * recorta `runPattern`, antes de construir el `RawMatch`. Que la guarda mida
+ * sobre el match sin espacio sigue siendo tan necesario como entonces —si no,
+ * `computeRunBounds` mide adyacencia contra el carácter que está ANTES del
+ * espacio (la "T" de "CUIT") y la corrida se extiende hasta una palabra con
+ * letras, descartando un teléfono real—; lo que cambió es dónde deja de
+ * existir el espacio.
  */
 function passesRunGuard(text: string, match: RawMatch): boolean {
   if (HAS_LETTER_RE.test(match.rawValue)) return true;
-  const trimmedLeft = match.rawValue.length - match.rawValue.trimStart().length;
-  const trimmedRight = match.rawValue.length - match.rawValue.trimEnd().length;
-  const { start, end } = computeRunBounds(
-    text,
-    match.startIndex + trimmedLeft,
-    match.endIndexExclusive - trimmedRight,
-  );
+  const { start, end } = computeRunBounds(text, match.startIndex, match.endIndexExclusive);
   return !HAS_LETTER_RE.test(text.slice(start, end));
 }
 
@@ -199,6 +192,19 @@ function passesRunGuard(text: string, match: RawMatch): boolean {
  * normalizedValue y el resultado del checksum (si el patrón define uno). El
  * checksum recibe normalizedValue (no el valor crudo): es el formato
  * consistente que esperan los checksums de default-ar.ts (dígitos limpios).
+ *
+ * El espacio de BORDE del match se recorta acá, antes de que exista el
+ * `RawMatch` (v1.6.2). `phone-mobile-ar` tiene un `[\s-]?` opcional ANTES de
+ * su `\b` (ADR-022), así que sobre "CUIT 20-12345678-9" el match crudo es
+ * `" 20-12345678"`, con el espacio adentro — y ese valor es el de la
+ * `Occurrence` y termina siendo el `canonicalValue` del grupo. Un grupo cuyo
+ * valor arranca con espacio **no puede encontrarse a sí mismo**: "Ver
+ * ocurrencias" (ADR-084 §2) empuja ese valor al buscador y el matcheo por
+ * palabra entera no lo halla. Recortar acá y no en cada consumidor deja un
+ * solo lugar donde el espacio deja de existir; `passesRunGuard` ya no necesita
+ * recortarlo por su cuenta. Un espacio nunca es parte de un identificador ni
+ * un separador de corrida válido (ADR-075 §2), así que el recorte no cambia
+ * qué se detecta: solo qué dice el valor.
  */
 function runPattern(pattern: RegexPattern, text: string): RawMatch[] {
   const scanRegex = withGlobalFlag(pattern.pattern);
@@ -207,19 +213,24 @@ function runPattern(pattern: RegexPattern, text: string): RawMatch[] {
   let match: RegExpExecArray | null;
 
   while ((match = scanRegex.exec(text)) !== null) {
-    const rawValue = match[0];
-    if (rawValue.length === 0) {
+    const matched = match[0];
+    if (matched.length === 0) {
       // Evita loop infinito si el patrón puede matchear string vacío.
       scanRegex.lastIndex += 1;
       continue;
     }
+    const leadingSpaces = matched.length - matched.trimStart().length;
+    const rawValue = matched.trim();
+    if (rawValue.length === 0) continue;
+
+    const startIndex = match.index + leadingSpaces;
     const normalizedValue = pattern.normalizer(rawValue);
     const checksumPassed = pattern.checksum ? pattern.checksum(normalizedValue) : true;
     results.push({
       patternId: pattern.id,
       entityType: pattern.entityType,
-      startIndex: match.index,
-      endIndexExclusive: match.index + rawValue.length,
+      startIndex,
+      endIndexExclusive: startIndex + rawValue.length,
       rawValue,
       normalizedValue,
       checksumPassed,
@@ -402,12 +413,17 @@ function buildOccurrence(match: RawMatch, page: Page): Occurrence {
     // el mismo condicional que wordSpan (cuyo valor sí puede estar ausente).
     maskFormat: match.maskFormat,
   };
-  // exactOptionalPropertyTypes: wordSpan y fragments solo se incluyen si
-  // existen (nunca se asigna explícitamente `undefined`).
+  // exactOptionalPropertyTypes: wordSpan, fragments y context solo se incluyen
+  // si existen (nunca se asigna explícitamente `undefined`).
   const withWordSpan = wordMapping ? { ...base, wordSpan: wordMapping.wordSpan } : base;
-  return wordMapping?.fragments
+  const withFragments = wordMapping?.fragments
     ? { ...withWordSpan, fragments: wordMapping.fragments }
     : withWordSpan;
+  // ADR-105: la frase alrededor, con los offsets que este motor ya tiene sobre
+  // `page.text`. La primitiva vive en `shared` porque ner-engine necesita
+  // exactamente lo mismo y los motores no pueden importarse entre sí.
+  const context = buildOccurrenceContext(page.text, match.startIndex, match.endIndexExclusive);
+  return context ? { ...withFragments, context } : withFragments;
 }
 
 // ─── Matcheo de texto literal (ADR-061 §1/§2, errata §8) ───────────────────
@@ -420,34 +436,38 @@ function buildOccurrence(match: RawMatch, page: Page): Occurrence {
 /*
  * `Word` sale de partir el texto por whitespace (ADR-020 §1, pdf-engine y
  * ocr-engine por igual), así que un nombre pegado a puntuación sin espacio
- * ("Gorrister,") vive en un solo `Word.text = "Gorrister,"`.
- * `normalizeForComparison` no la saca (solo mayúsculas/diacríticos/espacios),
- * así que sin este recorte esas ocurrencias nunca matcheaban una búsqueda de
- * "Gorrister" limpio (ADR-061 §2, segunda errata). Se recorta solo el
- * **borde**: la puntuación interna ("O'Brien") no se toca. Se aplica a los
- * dos lados de la comparación (acá y en `slideWordWindowMatches`), no solo a
- * `Word` — si no, un resultado con puntuación pegada (p. ej. "Gorrister," en
- * un `TextMatch.text`) no se podría volver a encontrar por su propio texto
- * vía "Agregar como…" (`ui/Components.md` §5.4c).
+ * ("Gorrister,") vive en un solo `Word.text = "Gorrister,"` y
+ * `normalizeForComparison` no la saca (solo mayúsculas/diacríticos/espacios).
+ * ADR-061 §2 (segunda errata) resolvió eso recortando la puntuación de
+ * **borde**; ADR-089 §1 lo generaliza a partir por toda la puntuación, esté
+ * en el borde o adentro, en los dos lados de la comparación. Un borde deja de
+ * ser un caso especial, y con eso dejan de fallar los dos casos que el recorte
+ * de borde no cubría: "Pérez,Juan" pegado sin espacio, y un prefijo de un
+ * identificador más largo.
  */
-const EDGE_PUNCTUATION_RE = /^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu;
 
-function stripEdgePunctuation(value: string): string {
-  return value.replace(EDGE_PUNCTUATION_RE, "");
+/*
+ * ADR-089 §1: parte un texto ya normalizado en **sub-tokens** — corridas
+ * maximales de [\p{L}\p{N}]. "pérez,juan" da ["perez", "juan"], "20-12345678-9"
+ * da ["20", "12345678", "9"]. Reemplaza al recorte de puntuación de borde: un
+ * borde deja de ser un caso especial porque toda la puntuación separa igual,
+ * esté donde esté. Es lo que hace que dónde el extractor puso el límite de
+ * palabra —cosa que el usuario no ve— deje de decidir si la búsqueda anda.
+ */
+const SUBTOKEN_RE = /[\p{L}\p{N}]+/gu;
+
+function splitIntoSubTokens(normalized: string): string[] {
+  return normalized.match(SUBTOKEN_RE) ?? [];
 }
 
 /*
  * Normaliza primero, tokeniza después: el colapso de espacios repetidos de
  * `normalizeForComparison` sale gratis (§13 caso 17), sin código extra acá.
- * Un valor vacío o solo espacios normaliza a "", cuyo único "token" del split
- * lo descarta el filter → cero tokens, sin recorrer el documento (ADR-061
- * §6/§8).
+ * Un valor vacío o solo de puntuación normaliza a algo sin ninguna corrida
+ * alfanumérica → cero sub-tokens, sin recorrer el documento (ADR-061 §6/§8).
  */
 function tokenizeLiteralValue(value: string): string[] {
-  return normalizeForComparison(value)
-    .split(" ")
-    .map(stripEdgePunctuation)
-    .filter((token) => token.length > 0);
+  return splitIntoSubTokens(normalizeForComparison(value));
 }
 
 interface WordOffset {
@@ -479,48 +499,106 @@ interface WordWindowMatch {
   readonly endWordIndexExclusive: number;
 }
 
+/**
+ * ADR-089 §2: cuánto se afloja la comparación. `Exact` es lo que usa
+ * `findLiteral` —y con él "Agregar como…", que barre el documento entero y
+ * crea reemplazos reales—; `LastTokenPrefix` es lo que usa la lupa, que solo
+ * resalta. La asimetría es el punto: encontrar de más cuesta un resaltado de
+ * un lado y texto tapado de más del otro.
+ */
+const enum MatchMode {
+  Exact = "exact",
+  LastTokenPrefix = "last-token-prefix",
+}
+
+/** Un sub-token del documento, con la palabra de la que salió. */
+interface DocumentSubToken {
+  readonly text: string;
+  readonly wordIndex: number;
+}
+
+function documentSubTokens(words: ReadonlyArray<Word>): DocumentSubToken[] {
+  const subTokens: DocumentSubToken[] = [];
+  words.forEach((word, wordIndex) => {
+    for (const text of splitIntoSubTokens(normalizeForComparison(word.text))) {
+      subTokens.push({ text, wordIndex });
+    }
+  });
+  return subTokens;
+}
+
 /*
- * Barrido por ventana deslizante de `queryTokens.length` palabras
- * consecutivas de `words` (mismo orden de lectura que Page.text). Devuelve
- * los rangos donde el texto normalizado de cada palabra coincide, en orden,
- * con `queryTokens` Y cada par consecutivo de la ventana comparte banda
- * vertical (`sharesVerticalBand`, `@anonly/shared`) — contiguas en
- * `Page.words` no alcanza: sin este chequeo, la última palabra de una línea
- * y la primera de la siguiente se leerían como una sola línea (§13 caso 16).
- * Avanza `queryTokens.length` posiciones tras un match (no reporta
- * solapados) y 1 posición si no matcheó.
+ * Barrido por ventana deslizante de `queryTokens.length` sub-tokens
+ * consecutivos del documento (ADR-089 §1; antes era por palabra entera).
+ * Devuelve el rango de PALABRAS que toca cada coincidencia — puede empezar o
+ * terminar a mitad de palabra, y en ese caso la palabra entra entera, porque
+ * `Word.bbox` es la geometría más fina que existe (ADR-089 §3).
+ *
+ * Se sigue exigiendo banda vertical compartida (`sharesVerticalBand`,
+ * `@anonly/shared`) entre palabras consecutivas: contiguas en `Page.words` no
+ * alcanza, sin eso la última palabra de una línea y la primera de la
+ * siguiente se leerían como una sola línea (§13 caso 16). Dos sub-tokens de
+ * la MISMA palabra no necesitan el chequeo — comparten bbox por
+ * construcción.
+ *
+ * Avanza hasta el final de la coincidencia (no reporta solapados) y 1
+ * posición si no matcheó.
  */
 function slideWordWindowMatches(
   words: ReadonlyArray<Word>,
   queryTokens: ReadonlyArray<string>,
+  mode: MatchMode,
 ): WordWindowMatch[] {
   const matches: WordWindowMatch[] = [];
-  if (queryTokens.length === 0 || words.length < queryTokens.length) return matches;
+  if (queryTokens.length === 0) return matches;
+
+  const subTokens = documentSubTokens(words);
+  if (subTokens.length < queryTokens.length) return matches;
+
+  const lastQueryIndex = queryTokens.length - 1;
 
   let i = 0;
-  while (i <= words.length - queryTokens.length) {
+  while (i <= subTokens.length - queryTokens.length) {
     let matched = true;
     for (let j = 0; j < queryTokens.length; j++) {
-      const word = words[i + j];
+      const subToken = subTokens[i + j];
       const token = queryTokens[j];
-      if (
-        !word ||
-        token === undefined ||
-        stripEdgePunctuation(normalizeForComparison(word.text)) !== token
-      ) {
+      if (!subToken || token === undefined) {
+        matched = false;
+        break;
+      }
+      const acceptsPrefix = mode === MatchMode.LastTokenPrefix && j === lastQueryIndex;
+      if (acceptsPrefix ? !subToken.text.startsWith(token) : subToken.text !== token) {
         matched = false;
         break;
       }
       if (j > 0) {
-        const previousWord = words[i + j - 1];
-        if (!previousWord || !sharesVerticalBand(previousWord.bbox, word.bbox)) {
+        const previous = subTokens[i + j - 1];
+        if (!previous) {
+          matched = false;
+          break;
+        }
+        const previousWord = words[previous.wordIndex];
+        const word = words[subToken.wordIndex];
+        if (
+          previous.wordIndex !== subToken.wordIndex &&
+          (!previousWord || !word || !sharesVerticalBand(previousWord.bbox, word.bbox))
+        ) {
           matched = false;
           break;
         }
       }
     }
+
     if (matched) {
-      matches.push({ startWordIndex: i, endWordIndexExclusive: i + queryTokens.length });
+      const first = subTokens[i];
+      const last = subTokens[i + lastQueryIndex];
+      if (first && last) {
+        matches.push({
+          startWordIndex: first.wordIndex,
+          endWordIndexExclusive: last.wordIndex + 1,
+        });
+      }
       i += queryTokens.length;
     } else {
       i += 1;
@@ -536,8 +614,12 @@ function slideWordWindowMatches(
  * páginas — un núcleo por documento lo borraría en silencio (ADR-061 §8
  * errata, punto 6).
  */
-function collectPageTextMatches(page: Page, queryTokens: ReadonlyArray<string>): TextMatch[] {
-  const wordMatches = slideWordWindowMatches(page.words, queryTokens);
+function collectPageTextMatches(
+  page: Page,
+  queryTokens: ReadonlyArray<string>,
+  mode: MatchMode,
+): TextMatch[] {
+  const wordMatches = slideWordWindowMatches(page.words, queryTokens, mode);
   if (wordMatches.length === 0) return [];
 
   const offsets = computeWordOffsets(page.words);
@@ -571,12 +653,21 @@ function collectPageTextMatches(page: Page, queryTokens: ReadonlyArray<string>):
  * Agrega a un TextMatch lo que el matcheo no trae: `id`, `source: Manual`,
  * `confidence: 1.0`, el `entityType` del input y `normalizedValue` derivado
  * de `match.text` (ADR-061 §8 errata, punto 3).
+ *
+ * ADR-115 §1: `normalizedValue` sale de `normalizeEntityValue`, no de
+ * `normalizeForComparison`. `match.text` son las **palabras enteras** que la
+ * coincidencia tocó (ADR-089 §3), así que arrastra la puntuación que tuvieran
+ * pegada: buscar el apellido de un expediente devuelve `SUAREZ,` en el sello,
+ * `“SUAREZ,` en la carátula y `Suarez.` al final de una oración. Sin el
+ * recorte de bordes esas tres son tres claves distintas, y el pase difuso de
+ * grouping no las junta —0,857 y 0,750 contra un umbral de 0,88—, así que un
+ * solo apellido agregado a mano abría cuatro grupos.
  */
 function buildManualOccurrence(match: TextMatch, entityType: EntityType): Occurrence {
   return {
     id: crypto.randomUUID(),
     value: match.text,
-    normalizedValue: normalizeForComparison(match.text),
+    normalizedValue: normalizeEntityValue(match.text),
     bbox: match.bbox,
     pageIndex: match.pageIndex,
     source: DetectionSource.Manual,
@@ -727,7 +818,7 @@ export class RegexEngine implements IEngine {
             throw new CancelledError(document.id);
           }
 
-          for (const match of collectPageTextMatches(page, queryTokens)) {
+          for (const match of collectPageTextMatches(page, queryTokens, MatchMode.Exact)) {
             const occurrence = buildManualOccurrence(match, entityType);
             ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
               documentId: document.id,
@@ -780,7 +871,7 @@ export class RegexEngine implements IEngine {
 
     const matches: TextMatch[] = [];
     for (const page of document.pages) {
-      matches.push(...collectPageTextMatches(page, queryTokens));
+      matches.push(...collectPageTextMatches(page, queryTokens, MatchMode.LastTokenPrefix));
     }
     return matches;
   }

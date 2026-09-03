@@ -26,6 +26,22 @@
       "sizeBytes": 3954569
     },
     {
+      "id": "tesseract-core",
+      "url": "https://cdn.jsdelivr.net/npm/tesseract.js-core@6.1.2/tesseract-core.wasm.js",
+      "revision": "6.1.2",
+      "sha256": "e66872f6a76f5ad414d73d21512245df0de3060ad4871a97c47efceaab27b955",
+      "destination": "apps/react-client/public/wasm/tesseract/tesseract-core.wasm.js",
+      "sizeBytes": 4750805
+    },
+    {
+      "id": "tesseract-core-simd",
+      "url": "https://cdn.jsdelivr.net/npm/tesseract.js-core@6.1.2/tesseract-core-simd.wasm.js",
+      "revision": "6.1.2",
+      "sha256": "3b0678c47a8dea6abb931b214171c08b742a5b9a9fcbbb1a028a08d5de6e9d4c",
+      "destination": "apps/react-client/public/wasm/tesseract/tesseract-core-simd.wasm.js",
+      "sizeBytes": 4751193
+    },
+    {
       "id": "tesseract-lang-spa",
       "url": "https://cdn.jsdelivr.net/npm/@tesseract.js-data/spa@1.0.0/4.0.0_best_int/spa.traineddata.gz",
       "revision": "1.0.0",
@@ -40,6 +56,14 @@
       "sha256": "45b4cb346724ac1774f1c36f42f182b887bcdb28ebe63e6fff90ac41f3fcff91",
       "destination": "apps/react-client/public/models/tesseract/eng.traineddata.gz",
       "sizeBytes": 2952873
+    },
+    {
+      "id": "tesseract-lang-osd",
+      "url": "https://cdn.jsdelivr.net/npm/@tesseract.js-data/osd@1.0.0/4.0.0_best_int/osd.traineddata.gz",
+      "revision": "1.0.0",
+      "sha256": "be028ddaac8b03402b92cbf526075c068ec39a9f1dbbcd7536dddb9b22209934",
+      "destination": "apps/react-client/public/models/tesseract/osd.traineddata.gz",
+      "sizeBytes": 4320130
     },
     {
       "id": "ner-model-config",

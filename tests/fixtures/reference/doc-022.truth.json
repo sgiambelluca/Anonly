@@ -1,0 +1,17 @@
+{
+  "documentId": "doc-022",
+  "entities": [
+    {
+      "entityType": "IBAN",
+      "value": "ES05 7068 9876 9644 6251 9569",
+      "pageIndex": 0,
+      "detector": "regex"
+    },
+    {
+      "entityType": "IBAN",
+      "value": "ES9121000418450200051332",
+      "pageIndex": 0,
+      "detector": "regex"
+    }
+  ]
+}

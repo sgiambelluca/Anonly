@@ -71,3 +71,16 @@ export function candidateTypes(conflict: Conflict): ReadonlyArray<EntityType> {
   }
   return types;
 }
+
+/**
+ * ADR-106: las escrituras empatadas de un `ambiguous_canonical`, sin repetir y
+ * en el orden en que el motor las reportó.
+ *
+ * `raiseAmbiguousCanonicalConflict` (`grouping-engine`) arma **un candidato por
+ * cada forma** que empató, con su `value`. El dato siempre estuvo: la UI
+ * mostraba `candidates[0]` y nada más, así que el aviso decía que había varias
+ * formas sin decir cuáles.
+ */
+export function spellingChoices(conflict: Conflict): ReadonlyArray<string> {
+  return [...new Set(conflict.candidates.map((candidate) => candidate.value))];
+}

@@ -95,3 +95,45 @@ export function deriveEngineConfigOverrides(settings: BootstrapSettings): Engine
     ...workerPoolOverride(settings.performancePreset),
   };
 }
+
+/**
+ * ¿Dos settings producen el mismo `EngineConfigOverrides`?
+ *
+ * ADR-125 §2: guardar settings sin documento abierto recrea el core, y
+ * recrearlo tira y rearma los cinco workers. `language` es UI pura y no entra
+ * en el override: cambiar el idioma de la interfaz no puede costar eso. La
+ * comparación va sobre el override **derivado** y no sobre los settings
+ * crudos, que es lo que hace que la respuesta sea exactamente "¿cambia algo
+ * que el Core vaya a leer?".
+ *
+ * Comparación explícita y no `JSON.stringify`: `workerPool` está presente o
+ * ausente según el preset (ver `workerPoolOverride`), y dos objetos iguales
+ * pueden serializar distinto según el orden en que se armaron.
+ */
+export function sameEngineConfigOverrides(
+  a: EngineConfigOverrides,
+  b: EngineConfigOverrides,
+): boolean {
+  if (a.ner?.enabled !== b.ner?.enabled) return false;
+
+  const langsA = a.ocr?.languages ?? [];
+  const langsB = b.ocr?.languages ?? [];
+  if (langsA.length !== langsB.length) return false;
+  if (langsA.some((lang, i) => lang !== langsB[i])) return false;
+
+  const poolA = a.workerPool;
+  const poolB = b.workerPool;
+  if ((poolA === undefined) !== (poolB === undefined)) return false;
+  if (poolA !== undefined && poolB !== undefined) {
+    if (
+      poolA.pdfPoolSize !== poolB.pdfPoolSize ||
+      poolA.ocrPoolSize !== poolB.ocrPoolSize ||
+      poolA.nerPoolSize !== poolB.nerPoolSize ||
+      poolA.renderPoolSize !== poolB.renderPoolSize
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}

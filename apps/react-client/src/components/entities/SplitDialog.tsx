@@ -91,7 +91,29 @@ export function SplitDialog({ groupId, open, onClose }: SplitDialogProps) {
                 label={
                   <span className="flex items-center gap-2 text-sm text-text-secondary">
                     <BboxMiniature bbox={member.bbox} />
-                    Página {member.pageIndex + 1} — {DETECTION_SOURCE_LABEL[member.source]}
+                    {/*
+                      ADR-104: el valor **tal cual aparece en el documento**.
+                      Sin esto el diálogo era circular — existe para deshacer
+                      una fusión y no mostraba qué se había fusionado: dos
+                      miembros solo se distinguían por la página, y si caían
+                      en la misma, por nada.
+                    */}
+                    {/*
+                      ADR-105: la frase alrededor. El valor solo no alcanza
+                      cuando el mismo texto se repite —dos personas que se
+                      llaman igual, o un topónimo usado como ciudad y como
+                      nombre de un organismo—, que es el caso más frecuente
+                      para separar. Lo único distinto entre esas apariciones
+                      es la frase que las rodea.
+                    */}
+                    <span className="min-w-0 truncate text-text-secondary">
+                      {member.context ? <span>…{member.context.before}</span> : null}
+                      <span className="font-medium text-text-primary">{member.value}</span>
+                      {member.context ? <span>{member.context.after}…</span> : null}
+                    </span>
+                    <span className="shrink-0 text-text-secondary">
+                      Página {member.pageIndex + 1} — {DETECTION_SOURCE_LABEL[member.source]}
+                    </span>
                   </span>
                 }
               />

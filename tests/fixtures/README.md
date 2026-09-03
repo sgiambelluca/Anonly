@@ -195,9 +195,44 @@ tests/fixtures/reference/
 
 ### Construcción
 
-- **Generado por script**: extender `generate.ts` con `generateReferenceDataset()`, que produce los PDFs y sus `truth.json` desde la misma fuente (imposible que se desincronicen).
-- **Composición inicial** (mínimo para que las métricas sean significativas): ~20 documentos sintéticos con densidad variada — documentos "densos" (muchas entidades por página), "ralos" (1–2 entidades), "trampa" (textos que parecen entidades pero no lo son: números de expediente, códigos postales, fechas inválidas) y "vacíos" (sin entidades).
-- **Sin datos reales**: nombres, DNIs, CUITs y direcciones se generan con el mismo pool sintético de `shared/synthesizer.ts`.
+- **Generado por script** (implementado): `generate.ts` expone `generateReferenceDataset()`, que produce los PDFs y sus `truth.json` desde la misma fuente en memoria — `buildReferenceDocSpecs()`, exportada también, es la única estructura de la que salen los dos. `ReferencePageBuilder.entity()` es el único punto de entrada para declarar una entidad: empuja el valor al texto de la página (lo que se dibuja) y lo registra como entidad esperada (lo que va al truth) en la misma llamada. No hay un camino para escribir texto sin pasar por ahí. `pnpm fixtures:generate` los produce junto con los demás fixtures, en `tests/fixtures/reference/`.
+- **Composición** (20 documentos, `doc-001`…`doc-020`): 6 "densos" (`doc-001`–`doc-006`, varias entidades por página, cubriendo los doce tipos de `EntityType` salvo `Custom`), 6 "ralos" (`doc-007`–`doc-012`, 1–2 entidades), 5 "trampa" (`doc-013`–`doc-017`, cero entidades) y 3 "vacíos" (`doc-018`–`doc-020`, cero entidades, sin siquiera texto trampa).
+- **Sin datos reales**: nombres, DNIs, CUITs, direcciones, teléfonos, IBAN, tarjeta, fecha, patente se sortean con el mismo pool sintético de `shared/synthesizer.ts` (`synthesize()`, vía el helper `synth()` de `generate.ts`). Excepción documentada en "Hallazgos" más abajo: `License` no sale del pool (su forma no es detectable) y se arma con dígitos del pool pero un prefijo de letras inventado con la misma forma que ya usa `ADR-075` §2 en sus propios tests (`"MP-12345"`); es exactamente lo que permite la regla de esta sección ("o es inventado con la misma forma").
+- **Formato de `manifest.json`** (no estaba especificado más allá de "índice: documento → ground truth"; decisión de esta implementación):
+  ```json
+  {
+    "documents": [
+      { "documentId": "doc-001", "pdf": "doc-001.pdf", "truth": "doc-001.truth.json", "category": "dense", "entityCount": 6 }
+    ]
+  }
+  ```
+  `category` es una de `"dense" | "sparse" | "trap" | "empty"`.
+
+### Hallazgos verificados durante la construcción (2026-08-26)
+
+Se armó un simulador fiel del algoritmo real de `regex-engine/regex.engine.ts` (`rawMatches` de los 13 patrones → filtro `checksumPassed && passesRunGuard` → `resolveOverlaps`) para verificar, contra los patrones y checksums reales de `patterns/default-ar.ts`, que cada entidad `detector: "regex"` del dataset efectivamente matchea y que ningún documento "trampa"/"vacío" produce una ocurrencia inesperada. Encontró tres discrepancias entre `shared/synthesizer.ts` y los patrones reales, que `generate.ts` sortea localmente (sin tocar `synthesizer.ts`, fuera de este alcance) y que valen la pena que alguien revise en `shared`:
+
+- **`License`**: `synthesize()` produce un valor puramente numérico ("XX-XXXX-XX"), pero el patrón `license-ar` exige 1 a 3 letras mayúsculas obligatorias al principio (`\b[A-Z]{1,3}-?\d{4,8}-?\d?\b`). Un valor de `synthesize()` para este tipo **nunca** es detectable — ni por este dataset ni como reemplazo mostrado al usuario en un documento anonimizado, que tampoco tendría esta forma.
+- **`IBAN`**: `synthesize()` separa los grupos con espacios (formato de lectura humana), pero el patrón `iban` (`\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b`) no admite espacios internos — verificado que sobre un IBAN con espacios el patrón no matchea **nada**, ni para aceptar ni para rechazar por checksum. Esto también corrige una imprecisión de esta misma sección del README (ver "Contenido conocido de `text-10p.pdf`" más arriba): el IBAN de ese fixture está documentado como "rechazado por checksum", y en realidad el patrón ni siquiera llega a matchearlo — la razón real es más básica que la documentada.
+- **`Phone` (mobile)**: `synthesize()` sortea el código de área de una lista con entradas de 2 y 3 dígitos (`"11" | "221" | "341" | "351" | "343" | "380"`), pero `phone-mobile-ar` exige exactamente 2 dígitos ahí. Con área de 3 dígitos el patrón no matchea.
+
+Un cuarto hallazgo, sin acción tomada porque **el dataset ya lo captura a propósito**: `doc-016` (trampa, CUIT con checksum inválido) reproduce el falso positivo ya anotado en "Contenido conocido de `text-10p.pdf`" (`scenario-8-ner-disabled.spec.ts`) — cuando un CUIT con forma "XX-XXXXXXXX-X" falla su checksum, el motor real **sí** emite una ocurrencia `Phone` espuria sobre sus primeros 10 dígitos (`"20-12345678"`), porque el filtro de checksum corre **antes** que la resolución de overlaps (`regex.engine.ts` líneas ~736-743) y para cuando el overlap se resuelve el CUIT ya no está para ganarle por ser el match más largo. El `truth.json` de `doc-016` sigue declarando cero entidades (es la verdad semántica: no hay ningún teléfono ahí) — la brecha entre eso y lo que el motor real emite es precisamente el defecto que este documento existe para medir, no un error del dataset.
+
+### La regla que mantiene honesto al dataset
+
+> **Cuando la verdad y el motor no coinciden, el que está mal es el motor.**
+
+Ajustar el valor esperado para que el patrón lo tome convierte al dataset en un **espejo del detector**: mide 100 % siempre, detecta regresiones y **no puede mostrar progreso**. Solo es legítimo corregir el valor cuando el fixture estaba generando algo que **no es** la entidad que declara — el caso de una matrícula `12-3456-78`, que no tiene el formato de ninguna matrícula argentina.
+
+Un desacuerdo es un **hallazgo**, no un fixture a corregir. Pasó tres veces al construir este dataset, y una de ellas —los teléfonos con característica de 3 dígitos— era una fuga real que terminó en ADR-093.
+
+### Categoría `forms`: las formas en que un dato se escribe
+
+Un documento por tipo de entidad con **todas las formas en que ese dato aparece en un expediente**, esté o no soportada hoy por el motor. Es la mitad del dataset que busca baches en vez de vigilar regresiones.
+
+Con esta categoría el recall de Regex baja de 100 % a **77 %**, y eso es el objetivo: los 14 faltantes son huecos reales del motor, no ruido del dataset.
+
+**Dos formas quedaron afuera a propósito**, aportadas pero sin confirmar contra un documento real: `MPBA 5563` y `M. Prov. 1601`. Meterlas sin confirmar haría que la métrica diga que el motor falla en algo que quizá no existe. Se agregan el día que aparezca el documento.
 
 ### Cuándo se necesita
 
@@ -207,7 +242,42 @@ tests/fixtures/reference/
 | Hito 5 (NER) | recall/precision NER — informativa en MVP, gate en v1.0 |
 | Hito 11 (Hardening) | gates de CI (`pnpm test:perf`) |
 
+### Estado actual
+
+Generado por script (`pnpm fixtures:generate` → `generateReferenceDataset()`), validado en memoria por `generate.test.ts` → describe `"generate.ts — dataset de referencia (tests/fixtures/reference/)"`. Falta escribir el **evaluador** (compara la salida real del pipeline contra este ground truth y calcula recall/precisión) — está deliberadamente fuera del alcance de quien construyó el dataset: la regla de matcheo tiene decisiones de diseño abiertas (p. ej. qué tan estricta es la comparación de `value`, cómo tratar `doc-016`) que le corresponden al planificador.
+
 El dataset debe existir **antes de cerrar el Hito 4**.
+
+## Documentos de QA manual
+
+`qa-tables-justified.pdf` y `qa-stamp.pdf` existen para el **gate manual** de `adr/ADR-058` §11 y
+`adr/ADR-086` §4, que exige mirar cuatro documentos en un browser real **sobre el PDF exportado** y
+juzgar si las líneas repintadas se distinguen de las que no se tocaron. Ninguna suite headless puede
+juzgar **eso**: el juicio sobre si la costura del repintado se ve sigue siendo a ojo y a mano.
+
+**`qa-stamp.pdf` sí lo consume una suite, desde 2026-08-22**, pero por otra cosa. El gate manual
+encontró en él tres fugas de dato —§23a/§23b/§23c de `roadmap/Post_Hito10.8_Pendientes.md`— y
+`tests/integration/qa-stamp-detection.test.ts` las reproduce con el pipeline real: `pdfjs-dist`
+**sin mockear** (es el único test del repo que ve un `Word` rotado de verdad; todos los demás
+mockean `getDocument`), Regex/NER/Grouping reales, y la inferencia replayeada desde los tokens
+crudos que devolvió el modelo de producción sobre el texto exacto de esa página. Los `it.fails` de
+ese archivo son las tres fugas: pasan mientras el defecto existe y fallan el día que se arregla.
+
+| Fixture | Qué ejercita |
+|---|---|
+| `qa-tables-justified.pdf` | texto **justificado real** (espaciado irregular entre palabras, calculado con `font.widthOfTextAtSize`) y **celdas de tabla angostas**, donde el repintado no tiene espacio en blanco al que correrse |
+| `qa-stamp.pdf` | **sello vertical a 90°** con un dato adentro, **folio a 270°** y **marca de agua diagonal traslúcida** sobre el cuerpo — los tres casos de texto rotado que ADR-063 tuvo que arreglar, más el riesgo de solapamiento que su §6 dejó anotado |
+
+**Son sintéticos, y eso acota qué se puede concluir de ellos.** Reproducen el régimen, no la suciedad
+de un expediente real: un PDF de procesador de texto trae kerning por par de glifos y fuentes
+subseteadas, y un sello escaneado es una imagen y no texto. Sirven para decidir que **hay** defectos
+—de hecho encontraron ocho, cuatro de ellos fugas de dato, ver `roadmap/Post_Hito10.8_Pendientes.md`
+§23— pero **no** para declarar que no hay otros. El día que haya un expediente real, el gate se
+vuelve a correr sobre él.
+
+La tercera fila del gate, el documento **escaneado**, sigue sin fixture propio: `pdf-lib` no rasteriza
+y el repo no tiene rasterizador en Node. El E2E lo resuelve generándolo dentro del browser
+(`tests/e2e/support/scannedPdf.ts`), que es el camino a reusar cuando se complete esa fila.
 
 ## Reglas
 

@@ -29,6 +29,7 @@ function makeGroup(overrides?: Partial<EntityGroup>): EntityGroup {
     enabled: true,
     aliases: ["Empresa S.A."],
     replacementValueUserSet: false,
+    needsReview: false,
     createdAt: 0,
     updatedAt: 0,
     ...overrides,

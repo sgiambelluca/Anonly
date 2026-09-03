@@ -17,7 +17,7 @@
  * así que no aplica esa excepción, y no hace falta ninguna.
  */
 import type { LoadDocumentPayload, RenderPagePayload } from "@anonly/shared";
-import { ReplacementMode } from "@anonly/shared";
+import { REPLACEMENT_FONT_HEIGHT_RATIO, ReplacementMode } from "@anonly/shared";
 import { getDocument } from "pdfjs-dist";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -376,9 +376,12 @@ describe("fitReplacementFont — shrink-to-fit puro (ADR-058 §1, Hito 10.5 PR 1
   });
 
   it("cuando el token ya entra al tamaño inicial, no encoge — mismo tamaño que antes de ADR-058 (no-regresión)", () => {
-    // Fórmula de `fontForMode` previa a este ADR: Math.max(8, round(h*0.7)).
+    // Fórmula de `fontForMode` previa a este ADR: Math.max(8, round(h*ratio)).
+    // El VALOR de la razón lo fija `Contracts.md` §6 y lo pinea el contract
+    // test de `shared`; acá se pinea la fórmula, que es lo que ADR-058 no
+    // debe mover.
     const boxHeight = 14;
-    const expectedInitialSize = Math.max(8, Math.round(boxHeight * 0.7));
+    const expectedInitialSize = Math.max(8, Math.round(boxHeight * REPLACEMENT_FONT_HEIGHT_RATIO));
 
     for (const mode of [
       ReplacementMode.Mask,
@@ -438,8 +441,9 @@ describe("paintReplacements — no-regresión vía kernelRenderPage (ADR-058 §1
     const [canvas] = getCreatedCanvases();
     const fillTextCalls = canvas!.calls.filter((c) => c.op === "fillText");
     expect(fillTextCalls).toHaveLength(1);
-    // Fórmula de `fontForMode` previa a ADR-058: Math.max(8, round(14*0.7)) = 10px.
-    expect(fillTextCalls[0]!.font).toBe("10px monospace, sans-serif");
+    // Fórmula de `fontForMode` previa a ADR-058: Math.max(8, round(14*ratio)).
+    const size = Math.max(8, Math.round(14 * REPLACEMENT_FONT_HEIGHT_RATIO));
+    expect(fillTextCalls[0]!.font).toBe(`${String(size)}px monospace, sans-serif`);
     expect(fillTextCalls[0]!.args).toEqual(["[DNI 01]", 10 + 100 / 2, 20 + 14 / 2, 100]);
   });
 });
@@ -616,8 +620,10 @@ describe("veredicto de degradación por razón de anchos (ADR-086, tests puros)"
   // alguien le devuelve el piso o el `Math.round`, esto cae.
   it("naturalSizePx no tiene piso ni redondeo", () => {
     const chico = fitReplacementFontSized(pureStubMeasure, "A", ReplacementMode.Mask, 5, 1000);
-    // 5 × 0.7 = 3.5, no 8 y no 4.
-    expect(chico.naturalSizePx).toBeCloseTo(3.5, 10);
+    // Exactamente 5 × la razón: ni el piso de 8 ni el `Math.round`.
+    expect(chico.naturalSizePx).toBeCloseTo(5 * REPLACEMENT_FONT_HEIGHT_RATIO, 10);
+    expect(chico.naturalSizePx).toBeLessThan(8);
+    expect(Number.isInteger(chico.naturalSizePx)).toBe(false);
 
     const fraccionario = fitReplacementFontSized(
       pureStubMeasure,
@@ -626,7 +632,7 @@ describe("veredicto de degradación por razón de anchos (ADR-086, tests puros)"
       12,
       1000,
     );
-    expect(fraccionario.naturalSizePx).toBeCloseTo(8.4, 10);
+    expect(fraccionario.naturalSizePx).toBeCloseTo(12 * REPLACEMENT_FONT_HEIGHT_RATIO, 10);
   });
 
   it("un texto que entra holgado no degrada, y el vacío tampoco", () => {

@@ -9,7 +9,7 @@
     "retrievedAt": "2026-08-14T06:22:08.481Z"
   },
   "artifact": {
-    "modulePath": "packages/anonymization-core/grouping-engine/src/gender-lexicon.generated.ts",
+    "modulePath": "packages/anonymization-core/shared/src/gender-lexicon.generated.ts",
     "sha256": "b09f0d4201669b4810b68e7100c9777cfa2b04e7e64d4f50c1bf4cbc4d92cbf0",
     "entryCount": 9788,
     "counts": {

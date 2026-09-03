@@ -47,6 +47,7 @@ export default tseslint.config(
             "commitlint.config.js",
             "vitest.config.ts",
             "playwright.config.ts",
+            "playwright.measure.config.ts",
             "apps/react-client/postcss.config.js",
             "apps/react-client/tailwind.config.js",
           ],

@@ -21,6 +21,7 @@ import { useRef, useState, type DragEvent, type ReactNode } from "react";
 
 import { actions } from "../../core-adapter/actions.js";
 import { Logo } from "../common/Logo.js";
+import { SettingsButton } from "../toolbar/SettingsButton.js";
 
 const PDF_MIME = "application/pdf";
 
@@ -74,7 +75,18 @@ export function LoadScreen() {
   }
 
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-10 overflow-y-auto p-8">
+    <div className="relative flex h-full flex-col items-center justify-center gap-10 overflow-y-auto p-8">
+      {/*
+        ADR-125 §1: el único acceso a Configuración vivía en la `Toolbar`, y
+        ADR-087 la sacó de esta pantalla sin mirar que ahí viajaba también
+        esto. Con la toolbar afuera no había forma de elegir con qué se va a
+        analizar el PDF antes de cargarlo — que es justo cuando se elige.
+        Vuelve el botón, no la toolbar: el estado del pipeline, el progreso y
+        el export siguen sin tener nada que decir sin documento.
+      */}
+      <div className="absolute right-4 top-4">
+        <SettingsButton />
+      </div>
       <div className="anonly-rise anonly-rise-1 flex max-w-lg flex-col items-center gap-4 text-center">
         {/*
           El logo se dibuja censurando su propio renglón (`animated`): la marca

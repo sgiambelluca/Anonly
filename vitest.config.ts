@@ -132,6 +132,16 @@ export default defineConfig({
         find: "@anonly/regex-engine",
         replacement: resolve(rootDir, "packages/anonymization-core/regex-engine/src/index.ts"),
       },
+      // tests/invariants/ corre PdfEngine suelto para obtener las `Page`: los
+      // eventos del bus no las llevan (`PAGE_PARSED` trae `wordCount`, no las
+      // `Word`), y exponer el documento en `IPipelineOrchestrator` sería un
+      // cambio de contrato público por una necesidad de test.
+      // RegExp anclado: `pdf-engine` tiene subpath `./worker`, mismo motivo
+      // que ner-engine y export-engine.
+      {
+        find: /^@anonly\/pdf-engine$/,
+        replacement: resolve(rootDir, "packages/anonymization-core/pdf-engine/src/index.ts"),
+      },
       // RegExp anclado (no string): ver nota de cabecera — evita que
       // `@anonly/ner-engine/worker` (PR15, ADR-046) caiga en este alias.
       {
@@ -185,9 +195,10 @@ export default defineConfig({
         // Módulo generado (ADR-069 §2, `scripts/build-gender-lexicon.ts`):
         // una tabla de datos de 9.788 entradas sin lógica propia. Sin
         // excluirlo, sus ~9.800 líneas de datos (no lógica ejecutable)
-        // hunden el threshold de grouping-engine aunque el resto del motor
-        // esté cubierto.
-        "packages/anonymization-core/grouping-engine/src/gender-lexicon.generated.ts",
+        // hunden el threshold del paquete que lo aloja aunque el resto esté
+        // cubierto. Vive en `shared` desde ADR-091 §1 — el glob se muda con
+        // el archivo, o la exclusión deja de aplicar en silencio.
+        "packages/anonymization-core/shared/src/gender-lexicon.generated.ts",
       ],
       // Gate de cobertura por paquete implementado (ai/Code_Standards.md §10: ≥ 85%
       // líneas por motor). branches/functions en 80 como piso de seguridad (el gate

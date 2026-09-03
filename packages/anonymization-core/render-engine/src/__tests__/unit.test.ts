@@ -13,6 +13,7 @@ import {
   type WorkerInbound,
   type WorkerOutbound,
   type Word,
+  REPLACEMENT_FONT_HEIGHT_RATIO,
 } from "@anonly/shared";
 import { getDocument } from "pdfjs-dist";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -1910,7 +1911,9 @@ describe("RenderEngine — unit tests", () => {
 
       const [canvas] = getCreatedCanvases();
       const fillTextCall = canvas!.calls.find((c) => c.op === "fillText")!;
-      expect(fillTextCall.font).toBe("11px sans-serif");
+      expect(fillTextCall.font).toBe(
+        `${String(Math.max(8, Math.round(16 * REPLACEMENT_FONT_HEIGHT_RATIO)))}px sans-serif`,
+      );
       expect(fillTextCall.args).toEqual([text, 0, 0, 173]);
       expect(fillTextCall.drawnWidth).toBeLessThanOrEqual(173);
     });
@@ -1957,7 +1960,9 @@ describe("RenderEngine — unit tests", () => {
 
       const fillTextCalls = canvas!.calls.filter((c) => c.op === "fillText");
       expect(fillTextCalls).toHaveLength(1);
-      expect(fillTextCalls[0]!.font).toBe("10px monospace, sans-serif");
+      expect(fillTextCalls[0]!.font).toBe(
+        `${String(Math.max(8, Math.round(14 * REPLACEMENT_FONT_HEIGHT_RATIO)))}px monospace, sans-serif`,
+      );
       expect(fillTextCalls[0]!.args).toEqual(["[DNI 01]", 10 + 100 / 2, 20 + 14 / 2, 100]);
     });
 
@@ -2071,7 +2076,9 @@ describe("RenderEngine — unit tests", () => {
       // 180 rotara igual que 90/270.
       const fillTextCalls = canvas!.calls.filter((c) => c.op === "fillText");
       expect(fillTextCalls).toHaveLength(1);
-      expect(fillTextCalls[0]!.font).toBe("10px monospace, sans-serif");
+      expect(fillTextCalls[0]!.font).toBe(
+        `${String(Math.max(8, Math.round(14 * REPLACEMENT_FONT_HEIGHT_RATIO)))}px monospace, sans-serif`,
+      );
       expect(fillTextCalls[0]!.args).toEqual(["[DNI 01]", 10 + 100 / 2, 20 + 14 / 2, 100]);
     });
   });

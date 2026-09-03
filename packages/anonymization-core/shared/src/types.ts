@@ -48,6 +48,23 @@ export interface BoundingBox {
   readonly rotation?: 0 | 90 | 180 | 270;
 }
 
+/**
+ * ADR-091 §1 (`Contracts.md` §5) — léxico de nombres de pila. Valor por
+ * nombre: determinado (`"f"`/`"m"`) o `"ambiguous"`, que es el nombre marcado
+ * `A` (unisex) en el registro de Buenos Aires (ADR-069 §1).
+ *
+ * Las claves están **pre-normalizadas** con `normalizeForComparison`: quien
+ * construye un `GenderLexicon` normaliza antes de insertar.
+ *
+ * Vive acá y no en un motor porque tiene dos consumidores que no pueden
+ * importarse entre sí (P-1/P-2): `grouping-engine` lo usa para inferir el
+ * género del reemplazo (ADR-060 §4) y `regex-engine` como compuerta de nombre
+ * propio del patrón de carátula. Lo que se comparte es el **dato**; la
+ * política de cómo interpretarlo (`inferPersonGender`) se queda en Grouping.
+ */
+export type GenderLexiconLabel = "f" | "m" | "ambiguous";
+export type GenderLexicon = ReadonlyMap<string, GenderLexiconLabel>;
+
 export interface WordSpan {
   readonly startIndex: number;
   readonly endIndexExclusive: number;
@@ -111,6 +128,19 @@ export interface Document {
   readonly importedAt: number;
 }
 
+/**
+ * ADR-105: la frase que rodea a una ocurrencia. La UI arma
+ * `…{before}` **{value}** `{after}…` sin aritmética — el valor NO se repite
+ * acá, ya viaja en `Occurrence.value` / `OccurrenceRef.value` (ADR-104).
+ *
+ * Dos cadenas y no una con offsets: la alternativa obliga a cada consumidor a
+ * recortar bien, y un off-by-one ahí parte una palabra en pantalla.
+ */
+export interface OccurrenceContext {
+  readonly before: string;
+  readonly after: string;
+}
+
 export interface Occurrence {
   readonly id: string;
   readonly value: string;
@@ -138,15 +168,34 @@ export interface Occurrence {
    * presente/discrepante): ver `Regex_Engine.md`/`NER_Engine.md` §10.
    */
   readonly fragments?: ReadonlyArray<BoundingBox>;
+  /**
+   * ADR-105: la frase alrededor, para distinguir apariciones del **mismo**
+   * valor. Opcional al revés que `value`: una ocurrencia puede nacer sin
+   * texto alrededor (agregado manual, página de una sola palabra), y forzar
+   * una cadena vacía obligaría a distinguir "no hay" de "está vacío".
+   */
+  readonly context?: OccurrenceContext;
 }
 
 export interface OccurrenceRef {
   readonly occurrenceId: string;
+  /**
+   * ADR-104: cómo aparece en el documento, **sin normalizar**. Copiado tal
+   * cual de `Occurrence.value`.
+   *
+   * `OccurrenceRef` duplica lo que la UI necesita sin resolver
+   * (`03_Data_Model.md` §8, mismo criterio que `bbox`), y esto lo necesita el
+   * separador: existe para deshacer una fusión, y sin el valor no hay con qué
+   * distinguir a los miembros de un grupo fusionado salvo la página.
+   */
+  readonly value: string;
   readonly pageIndex: number;
   readonly bbox: BoundingBox;
   readonly source: DetectionSource;
   /** ADR-074 §1/§2: copiado tal cual de `Occurrence.fragments` por `toOccurrenceRef`. Misma semántica: ausente ≡ `[bbox]`. */
   readonly fragments?: ReadonlyArray<BoundingBox>;
+  /** ADR-105: copiado tal cual de `Occurrence.context`. */
+  readonly context?: OccurrenceContext;
 }
 
 export interface EntityGroup {
@@ -176,6 +225,25 @@ export interface EntityGroup {
    * (quien eligió "femenino" lee `[MUJER 01]`). Regla en ADR-078 §2.
    */
   readonly replacementValueUserSet: boolean;
+  /**
+   * ADR-094 §4 (`Contracts.md` §5) — `true` en un grupo que el detector
+   * **sugirió sin estar seguro**: una ocurrencia de NER por debajo del
+   * `confidenceThreshold` que no encontró grupo candidato, y que hasta
+   * ADR-094 se descartaba en silencio con un `warn` a un logger nulo.
+   *
+   * Nace junto con `enabled: false`, así que el grupo **no tapa nada** hasta
+   * que el usuario lo habilite: esto cambia qué se le muestra, no qué se
+   * anonimiza.
+   *
+   * Booleano y no la `confidence`, a propósito: quien revisa un expediente
+   * necesita saber a qué prestarle atención, no qué tan segura estaba la red.
+   *
+   * Se apaga solo al **promover** (ADR-094 §3): si después entra al grupo una
+   * ocurrencia que no es de baja confianza, pasa a `enabled: true` y
+   * `needsReview: false`. Sin esa regla un grupo sugerido absorbería una
+   * detección confiable posterior y se quedaría apagado.
+   */
+  readonly needsReview: boolean;
   readonly createdAt: number;
   readonly updatedAt: number;
 }

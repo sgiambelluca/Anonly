@@ -1,0 +1,17 @@
+{
+  "documentId": "doc-009",
+  "entities": [
+    {
+      "entityType": "EMAIL",
+      "value": "user31272@test.net",
+      "pageIndex": 0,
+      "detector": "regex"
+    },
+    {
+      "entityType": "PHONE",
+      "value": "+54 11 4454-3477",
+      "pageIndex": 0,
+      "detector": "regex"
+    }
+  ]
+}

@@ -35,7 +35,7 @@ interface GenderLexiconProvenance {
 function readGenderLexiconProvenance(): GenderLexiconProvenance {
   const provenancePath = fileURLToPath(
     new URL(
-      "../../../../packages/anonymization-core/grouping-engine/assets/gender-lexicon.provenance.json",
+      "../../../../packages/anonymization-core/shared/assets/gender-lexicon.provenance.json",
       import.meta.url,
     ),
   );

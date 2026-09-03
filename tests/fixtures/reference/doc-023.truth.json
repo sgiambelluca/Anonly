@@ -1,0 +1,41 @@
+{
+  "documentId": "doc-023",
+  "entities": [
+    {
+      "entityType": "PLATE",
+      "value": "ABC 123",
+      "pageIndex": 0,
+      "detector": "regex"
+    },
+    {
+      "entityType": "PLATE",
+      "value": "ABC-123",
+      "pageIndex": 0,
+      "detector": "regex"
+    },
+    {
+      "entityType": "PLATE",
+      "value": "AB 123 CD",
+      "pageIndex": 0,
+      "detector": "regex"
+    },
+    {
+      "entityType": "PLATE",
+      "value": "AB-123-CD",
+      "pageIndex": 0,
+      "detector": "regex"
+    },
+    {
+      "entityType": "PLATE",
+      "value": "A 123 BCD",
+      "pageIndex": 0,
+      "detector": "regex"
+    },
+    {
+      "entityType": "PLATE",
+      "value": "A456EFG",
+      "pageIndex": 0,
+      "detector": "regex"
+    }
+  ]
+}

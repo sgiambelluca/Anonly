@@ -38,8 +38,21 @@ export const PREVIEW_CACHE_MAX_BYTES = 200 * 1024 * 1024; // 200 MB
 /**
  * Fracción de `bbox.height` que el render usa como tamaño de fuente del
  * reemplazo. Deja de ser número mágico de `fontForMode` (ADR-057 §5).
+ *
+ * **Bajó de 0,7 a 0,64 en ADR-109 §4, y no cambió de significado**: cambió la
+ * caja. Hasta ADR-109 `bbox.height` de una palabra de PDF era el **cuerpo**
+ * de la fuente; desde ADR-109 es su **alto de tinta**, `(ascent + |descent|) ×
+ * cuerpo`, que sobre el corpus relevado (10 documentos, 4266 items) vale
+ * 1,101 pesado por items. `0,70 / 1,101 = 0,636` es entonces la recalibración
+ * que deja todo igual a la vista: el token se dibuja del mismo tamaño y el
+ * detector de degradación de ADR-086 mide contra la misma referencia, porque
+ * el producto `ratio × height` se conserva.
+ *
+ * No es una decisión tipográfica. Si el token debería medir lo mismo que el
+ * texto que lo rodea —hoy sale ~30 % más chico por construcción— sigue abierto
+ * en `roadmap/Post_Hito10.8_Pendientes.md` §25.
  */
-export const REPLACEMENT_FONT_HEIGHT_RATIO = 0.7;
+export const REPLACEMENT_FONT_HEIGHT_RATIO = 0.64;
 
 /**
  * Avance medio de glifo como fracción del tamaño de fuente, para estimar

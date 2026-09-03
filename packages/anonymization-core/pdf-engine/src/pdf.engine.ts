@@ -121,7 +121,12 @@ type TextContentLike = {
     transform?: readonly number[];
     width?: number;
     height?: number;
+    fontName?: string;
   }>;
+  /* ADR-109 §1: `TextStyle` de pdfjs-dist, indexado por `item.fontName`.
+   * Opcional porque el camino de anotaciones (ADR-066 §1) arma su propio
+   * `TextContentLike` a mano y no tiene de dónde sacarlo. */
+  styles?: Readonly<Record<string, { ascent?: number; descent?: number }>>;
 };
 
 /*
@@ -235,6 +240,64 @@ function boundingBoxFromParallelogram(
 }
 
 /*
+ * ADR-109 §1: cuánto sube y cuánto baja la tinta de una fuente respecto de su
+ * línea de base, en fracciones de cuerpo. `descent` se normaliza a positivo
+ * (pdf.js lo reporta negativo, hacia abajo).
+ */
+interface FontExtents {
+  readonly ascent: number;
+  readonly descent: number;
+}
+
+/*
+ * ADR-109 §2: métricas utilizables, o `undefined` si el productor no las
+ * declara de forma aprovechable. Relevado sobre 10 documentos (4266 items),
+ * `undefined` aplica a 2 — la fuente del código de barras de una carátula.
+ */
+function fontExtentsOf(
+  styles: TextContentLike["styles"],
+  fontName: string | undefined,
+): FontExtents | undefined {
+  if (styles === undefined || fontName === undefined) return undefined;
+  const style = styles[fontName];
+  if (style === undefined) return undefined;
+  const { ascent, descent } = style;
+  if (typeof ascent !== "number" || typeof descent !== "number") return undefined;
+  if (!Number.isFinite(ascent) || !Number.isFinite(descent)) return undefined;
+  if (ascent <= 0 || descent >= 0) return undefined;
+  return { ascent, descent: -descent };
+}
+
+/*
+ * ADR-109 §1: la caja de tinta de un token — el mismo paralelogramo de
+ * ADR-063 §2, pero arrancando un descenso por debajo de la línea de base y
+ * llegando hasta el ascenso en vez de hasta un cuerpo entero.
+ *
+ * Sin métricas cae a la caja previa a ADR-109. Bajar solo el piso, dejando el
+ * techo en un cuerpo, NO es alternativa: medido sobre 752 pares de renglones
+ * consecutivos, fusiona el 75,8 % de los pares de un documento con
+ * interlineado de 1,15 cuerpos, y `sharesVerticalBand` es la definición de
+ * "misma línea" de tres motores.
+ */
+function inkBoxFromParallelogram(
+  origin: Vector2,
+  dir: Vector2,
+  up: Vector2,
+  width: number,
+  height: number,
+  pageHeight: number,
+  extents: FontExtents | undefined,
+): BoundingBox {
+  if (extents === undefined) {
+    return boundingBoxFromParallelogram(origin, dir, up, width, height, pageHeight);
+  }
+  const drop = extents.descent * height;
+  const baseline: Vector2 = { x: origin.x - up.x * drop, y: origin.y - up.y * drop };
+  const inkHeight = (extents.ascent + extents.descent) * height;
+  return boundingBoxFromParallelogram(baseline, dir, up, width, inkHeight, pageHeight);
+}
+
+/*
  * ADR-020 §1: PDF.js devuelve un TextItem por run (frecuentemente línea/frase
  * entera), no por palabra. Se divide str por whitespace en Words individuales,
  * prorrateando el avance linealmente por longitud de caracteres (aproximación:
@@ -243,13 +306,47 @@ function boundingBoxFromParallelogram(
  * normalización NFC (ADR-020 §2). ADR-063 §3: el prorrateo corre sobre el eje
  * de avance (dir), no sobre x — para dir=(1,0) las dos expresiones coinciden.
  */
+/** ADR-102 §2: ancho de un token = suma de los avances de sus glifos. */
+function sumGlyphAdvances(
+  glyphs: ReadonlyArray<PageGlyph>,
+  mapping: ReadonlyArray<number>,
+  from: number,
+  to: number,
+): number {
+  let total = 0;
+  for (let i = from; i < to; i += 1) {
+    const glyph = glyphs[mapping[i] ?? -1];
+    if (glyph !== undefined) total += glyph.advance;
+  }
+  return total;
+}
+
+/*
+ * ADR-097 §5: cuántos items multi-palabra encontraron su lugar en el flujo. Solo esos
+ * consultan la tabla, así que solo esos aportan a la pregunta que decide si
+ * alguna vez conviene la opción B de `Post_Hito10.8_Pendientes.md` §24.
+ */
+interface TextRunJoinStats {
+  readonly eligible: number;
+  readonly joined: number;
+}
+
+interface ConvertedTextItems {
+  readonly words: ReadonlyArray<Word>;
+  readonly joinStats: TextRunJoinStats;
+}
+
 function convertTextItemsToWords(
   textContent: TextContentLike,
   pageIndex: number,
   pageHeight: number,
   originCorrections: ReadonlyArray<TextOriginCorrection> = [],
-): Word[] {
+  glyphs: ReadonlyArray<PageGlyph> = [],
+  glyphIndex: GlyphIndex = new Map(),
+): ConvertedTextItems {
   const words: Word[] = [];
+  let eligible = 0;
+  let joined = 0;
 
   for (const item of textContent.items) {
     if (!item.str || item.str.trim().length === 0 || !item.transform) continue;
@@ -278,39 +375,70 @@ function convertTextItemsToWords(
       y: 1,
     });
 
+    const extents = fontExtentsOf(textContent.styles, item.fontName);
     const tokens = [...str.matchAll(/\S+/g)];
 
     if (tokens.length <= 1) {
       const text = (tokens[0]?.[0] ?? str).normalize("NFC");
-      const bbox = boundingBoxFromParallelogram(
+      const bbox = inkBoxFromParallelogram(
         { x: originX, y: originY },
         dir,
         up,
         width,
         height,
         pageHeight,
+        extents,
       );
       words.push({ text, bbox, pageIndex, confidence: 1.0, source: "pdf" });
       continue;
     }
 
+    /*
+     * ADR-102 §2: se ubica el arranque del item en el flujo de glifos y se
+     * alinea carácter a carácter. Si alinea, el origen y el ancho de cada
+     * token salen de los glifos reales; si no, queda el ancho promedio de
+     * ADR-020 §1 — el camino de reserva, intacto (ADR-102 §4).
+     */
+    eligible++;
+    /*
+     * ADR-108 §4: `getTextContent` aplica `Tw` a todo espacio y el flujo solo a
+     * los que lo llevan (§1), así que en un run con espacios iniciales de
+     * fuente compuesta los dos orígenes difieren — 58,3 pt en la línea de la
+     * fecha de la pericia. Ese es exactamente el par que mide ADR-068: el
+     * reportado es `from` y el que dibuja el renderer es `to`. Se busca por el
+     * reportado y, si no cae en ningún glifo, por el corregido.
+     */
+    const reportedStart = findGlyphAt(glyphs, glyphIndex, reportedX, reportedY);
+    const start =
+      reportedStart >= 0 || correction === undefined
+        ? reportedStart
+        : findGlyphAt(glyphs, glyphIndex, originX, originY);
+    const mapping = start < 0 ? undefined : alignToGlyphs(glyphs, str, start);
+    if (mapping !== undefined) joined++;
     const charWidth = str.length > 0 ? width / str.length : 0;
     for (const token of tokens) {
       const tokenText = token[0];
       if (tokenText === undefined) continue;
       const offset = token.index ?? 0;
+      const end = offset + tokenText.length;
+      const anchor = mapping === undefined ? undefined : glyphs[mapping[offset] ?? -1];
       const advance = charWidth * offset;
-      const tokenOrigin: Vector2 = {
-        x: originX + dir.x * advance,
-        y: originY + dir.y * advance,
-      };
-      const bbox = boundingBoxFromParallelogram(
+      const tokenWidth =
+        mapping === undefined
+          ? charWidth * tokenText.length
+          : sumGlyphAdvances(glyphs, mapping, offset, end);
+      const tokenOrigin: Vector2 =
+        anchor !== undefined
+          ? { x: anchor.x, y: anchor.y }
+          : { x: originX + dir.x * advance, y: originY + dir.y * advance };
+      const bbox = inkBoxFromParallelogram(
         tokenOrigin,
         dir,
         up,
-        charWidth * tokenText.length,
+        tokenWidth,
         height,
         pageHeight,
+        extents,
       );
       words.push({
         text: tokenText.normalize("NFC"),
@@ -322,7 +450,7 @@ function convertTextItemsToWords(
     }
   }
 
-  return words;
+  return { words, joinStats: { eligible, joined } };
 }
 
 /*
@@ -342,11 +470,170 @@ const ROTATED_RUN_GAP_IN_EMS = 2;
 
 type Rotation = NonNullable<BoundingBox["rotation"]>;
 
-/** Comparador histórico (`y` asc con tolerancia, luego `x` asc), intacto. */
+/** Comparador de los runs rotados (`y` asc con tolerancia, luego `x` asc). */
 function compareByReadingOrder(a: BoundingBox, b: BoundingBox): number {
   const dy = a.y - b.y;
   if (Math.abs(dy) > SAME_LINE_TOLERANCE) return dy;
   return a.x - b.x;
+}
+
+/*
+ * ADR-110 §2: ancho de la banda de un renglón, en cuerpos, medido desde la
+ * mediana de los centros verticales de las palabras que ya entraron.
+ *
+ * Barrido contra siete configuraciones sobre un escaneo real: 0,5 es el único
+ * valor que reproduce exacto el orden de lectura del OCR, y el óptimo no es el
+ * intuitivo — con 0,6 el `TRIBUNAL` de la columna izquierda del encabezado se
+ * mete adentro de `PROVINCIA DE BUENOS AIRES`.
+ */
+const LINE_BAND_RATIO = 0.5;
+
+/*
+ * ADR-113 §1: hueco horizontal que separa una COLUMNA, en cuerpos del
+ * renglón. Medido sobre el sello de un fallo escaneado, los huecos entre
+ * palabras de una misma frase van de 2,4 a 13 pt mientras el que separa las
+ * dos columnas del encabezado es de **113,5 pt**, con renglones de ~8 pt de
+ * alto. La decisión queda a un orden de magnitud del umbral, al revés que la
+ * banda vertical, que en ese mismo encabezado se decide por centésimas.
+ *
+ * Barrido sobre las 19 páginas del escaneo: de 2 a 10 cuerpos el sello sale
+ * entero; 2 y 3 son la meseta con el mejor orden de lectura del cuerpo.
+ */
+const COLUMN_GAP_RATIO = 3;
+
+function verticalCenterOf(bbox: BoundingBox): number {
+  return bbox.y + bbox.height / 2;
+}
+
+/** Separación horizontal entre dos cajas; `0` si se solapan en `x`. */
+function horizontalGapBetween(a: BoundingBox, b: BoundingBox): number {
+  if (a.x >= b.x + b.width) return a.x - (b.x + b.width);
+  if (b.x >= a.x + a.width) return b.x - (a.x + a.width);
+  return 0;
+}
+
+function medianOf(values: ReadonlyArray<number>): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)] ?? 0;
+}
+
+/*
+ * ADR-110 §1: agrupa el texto horizontal en renglones.
+ *
+ * El pre-orden por centro vertical es un orden TOTAL —sin tolerancia, por lo
+ * tanto transitivo— y el acumulado es determinista. Eso es lo que reemplaza:
+ * un comparador con tolerancia no es una relación de orden (`a ≈ b` y `b ≈ c`
+ * no implican `a ≈ c`), así que `Array.sort` devolvía un resultado dependiente
+ * de su secuencia interna de comparaciones. En un PDF nativo de una columna
+ * nunca se notó; sobre un escaneo rompía uno de cada tres pares de palabras.
+ *
+ * La banda se mide contra la MEDIANA de los altos del renglón, no contra su
+ * envolvente: una caja de OCR ruidosa —22,1 pt contra 13,9 del mismo renglón
+ * impreso, medido— la ensancharía hasta tragarse el renglón siguiente.
+ */
+function groupIntoLines(words: ReadonlyArray<Word>): Word[][] {
+  const byCenter = [...words].sort(
+    (a, b) => verticalCenterOf(a.bbox) - verticalCenterOf(b.bbox) || a.bbox.x - b.bbox.x,
+  );
+
+  const lines: Word[][] = [];
+  for (const word of byCenter) {
+    const current = lines[lines.length - 1];
+    if (current !== undefined) {
+      const center = medianOf(current.map((w) => verticalCenterOf(w.bbox)));
+      const height = medianOf(current.map((w) => w.bbox.height));
+      if (Math.abs(verticalCenterOf(word.bbox) - center) < LINE_BAND_RATIO * height) {
+        current.push(word);
+        continue;
+      }
+    }
+    lines.push([word]);
+  }
+  return mergeAdjacentFragments(splitLinesAtColumnGaps(lines));
+}
+
+/*
+ * ADR-113 §1 — un renglón se corta donde hay una columna.
+ *
+ * El acumulado de arriba solo mira el ÚLTIMO renglón abierto y su banda sale
+ * de la mediana de altos de ese renglón. Sobre un encabezado de dos columnas
+ * con cuerpos distintos —el sello de un expediente: `PROVINCIA DE BUENOS
+ * AIRES` en 8,6 pt a la izquierda, la carátula en 6,0 pt a la derecha— la
+ * banda de la columna alta llega a la columna baja y se traga sus primeras
+ * palabras. Medido: la caja que decide queda a 4,08 pt de una banda de 4,32,
+ * y la siguiente a 4,32 exactos, o sea que **quién entra lo decide el
+ * redondeo binario** — de ahí que fallara en unas páginas sí y en otras no.
+ *
+ * El hueco horizontal, en cambio, no es ambiguo. Se corta el renglón donde
+ * supera `COLUMN_GAP_RATIO` cuerpos.
+ */
+function splitLinesAtColumnGaps(lines: ReadonlyArray<ReadonlyArray<Word>>): Word[][] {
+  const pieces: Word[][] = [];
+  for (const line of lines) {
+    const byX = [...line].sort((a, b) => a.bbox.x - b.bbox.x);
+    const height = medianOf(byX.map((w) => w.bbox.height));
+    let piece: Word[] = [];
+    let rightEdge = Number.NEGATIVE_INFINITY;
+    for (const word of byX) {
+      if (piece.length > 0 && word.bbox.x - rightEdge > COLUMN_GAP_RATIO * height) {
+        pieces.push(piece);
+        piece = [];
+      }
+      piece.push(word);
+      rightEdge = Math.max(rightEdge, word.bbox.x + word.bbox.width);
+    }
+    if (piece.length > 0) pieces.push(piece);
+  }
+  return pieces;
+}
+
+/*
+ * ADR-113 §2 — y se vuelve a unir lo que el acumulado partió.
+ *
+ * Cortar por hueco separa las columnas pero no repara el otro lado del mismo
+ * defecto: cuando la banda de la columna izquierda se llevó las primeras
+ * palabras de la derecha, el resto de esa línea impresa quedó en un renglón
+ * aparte. Dos trozos son la misma línea impresa si están **pegados en x** (un
+ * espacio de distancia, no una columna) y comparten banda. Sobre el caso
+ * medido: `SUAREZ, BARTOLOME` termina en 338,5 y `ARTURO S/ RECURSO DE`
+ * empieza en 343,2 — 4,7 pt —, mientras `PROVINCIA DE BUENOS AIRES` termina
+ * 113,5 pt antes y no se une con ninguno de los dos.
+ *
+ * La adyacencia es lo que hace la diferencia: una versión previa fusionaba
+ * por SOLAPAMIENTO en `x` y no arreglaba nada, porque los dos trozos de la
+ * carátula no se solapan — se tocan.
+ *
+ * El trozo se fusiona en el PRIMERO que le calza, así que el renglón unido se
+ * emite en la posición del trozo más temprano en el orden vertical.
+ */
+function mergeAdjacentFragments(pieces: ReadonlyArray<ReadonlyArray<Word>>): Word[][] {
+  const merged: Word[][] = [];
+  for (const piece of pieces) {
+    const center = medianOf(piece.map((w) => verticalCenterOf(w.bbox)));
+    const height = medianOf(piece.map((w) => w.bbox.height));
+    const left = Math.min(...piece.map((w) => w.bbox.x));
+    const right = Math.max(...piece.map((w) => w.bbox.x + w.bbox.width));
+
+    const target = merged.find((candidate) => {
+      const otherCenter = medianOf(candidate.map((w) => verticalCenterOf(w.bbox)));
+      const otherHeight = medianOf(candidate.map((w) => w.bbox.height));
+      const otherLeft = Math.min(...candidate.map((w) => w.bbox.x));
+      const otherRight = Math.max(...candidate.map((w) => w.bbox.x + w.bbox.width));
+      const reference = Math.min(height, otherHeight);
+      const gap = horizontalGapBetween(
+        { x: left, y: 0, width: right - left, height: 0 },
+        { x: otherLeft, y: 0, width: otherRight - otherLeft, height: 0 },
+      );
+      return (
+        gap < COLUMN_GAP_RATIO * reference &&
+        Math.abs(center - otherCenter) < LINE_BAND_RATIO * reference
+      );
+    });
+
+    if (target === undefined) merged.push([...piece]);
+    else target.push(...piece);
+  }
+  return merged;
 }
 
 /*
@@ -484,11 +771,100 @@ function buildRotatedRuns(words: ReadonlyArray<Word>): Word[][] {
  * mismo riesgo que ya existía ANTES del ADR, cuando cada word rotado se
  * ordenaba suelto entre las líneas horizontales.
  */
+/**
+ * ADR-120 §1: la rotación de una HOJA ESCANEADA TORCIDA, o `null`.
+ *
+ * Dos condiciones, y las dos hacen falta:
+ *
+ * 1. **Todas** las palabras comparten una misma rotación no nula. Un sello a
+ *    90° en el margen de una hoja derecha no califica: ahí solo unas pocas la
+ *    llevan, y ése sigue siendo el caso de ADR-067.
+ * 2. **Todas** vienen de OCR. Es el discriminador que separa las dos cosas que
+ *    se ven iguales en la geometría: una hoja escaneada de costado —donde
+ *    ADR-090 §4 le estampa la misma rotación a cada palabra de la página— de
+ *    una página NATIVA cuyo único contenido son runs rotados, que es el caso 36
+ *    de ADR-067 (marca de agua y firma compartiendo columna) y tiene que seguir
+ *    yendo por la rama de runs.
+ *
+ * La condición sobre `source` no es un atajo: el único camino que produce una
+ * página entera con una sola rotación es el enderezado de ADR-090, y ése solo
+ * existe para OCR. Un PDF nativo rota runs, no hojas — la hoja la rota su
+ * `/Rotate`, que pdf.js ya aplica al viewport antes de que estas cajas existan.
+ */
+function scannedSheetRotationOf(words: ReadonlyArray<Word>): Rotation | null {
+  const first = words[0];
+  if (first === undefined) return null;
+  const rotation = first.bbox.rotation;
+  if (rotation === undefined || rotation === 0) return null;
+  return words.every((word) => word.bbox.rotation === rotation && word.source === "ocr")
+    ? rotation
+    : null;
+}
+
+/**
+ * ADR-120 §2: las coordenadas de una página uniformemente rotada, llevadas al
+ * marco ENDEREZADO — la inversa de `unrotateBbox` de `ocr-engine`.
+ *
+ * Se descartan las constantes de traslación (el ancho y el alto del raster, que
+ * esta función no conoce y no necesita): `groupIntoLines` compara **diferencias**
+ * de centro, medianas de alto y huecos horizontales, y ordena por `x`. Todo eso
+ * es invariante ante una traslación, así que un origen desplazado —o negativo—
+ * produce exactamente el mismo orden.
+ */
+function toUprightFrame(bbox: BoundingBox, rotation: Rotation): BoundingBox {
+  if (rotation === 90) {
+    return { x: -(bbox.y + bbox.height), y: bbox.x, width: bbox.height, height: bbox.width };
+  }
+  if (rotation === 180) {
+    return {
+      x: -(bbox.x + bbox.width),
+      y: -(bbox.y + bbox.height),
+      width: bbox.width,
+      height: bbox.height,
+    };
+  }
+  return { x: bbox.y, y: -(bbox.x + bbox.width), width: bbox.height, height: bbox.width };
+}
+
 function sortWordsByReadingOrder(words: ReadonlyArray<Word>): Word[] {
-  const horizontal = words.filter(
+  /*
+   * ADR-120: una hoja entera escaneada torcida se lee en el orden HORIZONTAL de
+   * su versión enderezada.
+   *
+   * Sin esto, `bbox.rotation` mandaba las palabras por la rama de runs rotados
+   * de ADR-067 —pensada para un sello o un folio en un margen, y sin el
+   * agrupado por renglón de ADR-110/113— y el orden colapsaba: medido sobre una
+   * página de 268 palabras rotada 90/180/270, **132-152 de 267** pares
+   * consecutivos preservados, contra **265/267** ordenando en el marco
+   * enderezado. El texto se reconocía bien y llegaba al detector revuelto, que
+   * es el mismo modo de falla que ADR-110 cerró para el texto derecho.
+   *
+   * Se ordenan copias con la caja transformada y se emiten los `Word`
+   * ORIGINALES: la geometría que viaja al resto del sistema no se toca.
+   */
+  const uniform = scannedSheetRotationOf(words);
+  if (uniform !== null) {
+    const enMarcoDerecho = words.map((word) => ({
+      word,
+      proxy: { ...word, bbox: toUprightFrame(word.bbox, uniform) },
+    }));
+    const proxies = enMarcoDerecho.map((entry) => entry.proxy);
+    const ordenados = groupIntoLines(proxies).flatMap((line) =>
+      [...line].sort((a, b) => a.bbox.x - b.bbox.x),
+    );
+    const originalDe = new Map(enMarcoDerecho.map((entry) => [entry.proxy, entry.word]));
+    // `as Word` es narrowing seguro: cada proxy sale del map de arriba, así que
+    // siempre tiene su original.
+    return ordenados.map((proxy) => originalDe.get(proxy) as Word);
+  }
+
+  const horizontalWords = words.filter(
     (word) => word.bbox.rotation === undefined || word.bbox.rotation === 0,
   );
-  horizontal.sort((a, b) => compareByReadingOrder(a.bbox, b.bbox));
+  // ADR-110 §1: renglones primero, y dentro de cada uno por `x`.
+  const horizontal = groupIntoLines(horizontalWords).flatMap((line) =>
+    [...line].sort((a, b) => a.bbox.x - b.bbox.x),
+  );
 
   if (horizontal.length === words.length) return horizontal;
 
@@ -859,9 +1235,191 @@ interface TextOriginCorrection {
 /** Tolerancia del match contra el origen reportado por `getTextContent`. */
 const ORIGIN_CORRECTION_EPSILON = 0.05;
 
+/*
+ * ADR-102 §1: el flujo CONTINUO de glifos de una página, en orden de dibujo.
+ *
+ * Sin fronteras de run a propósito: las fronteras eran el problema.
+ * `getTextContent()` re-segmenta el texto en fronteras propias, distintas de
+ * las de dibujo, en una relación de muchos a muchos — medido, exigir que
+ * coincidan (ADR-097 §2) acierta en el 0,2 % de los items de un cuento y en
+ * el 2,9 % de los de un fallo judicial.
+ */
+interface PageGlyph {
+  readonly unicode: string; // exactamente un carácter
+  readonly x: number; // posición absoluta, espacio de página
+  readonly y: number;
+  readonly advance: number; // su propio avance, en unidades de página
+}
+
+/*
+ * Índice por posición cuantizada, para no pagar O(items × glifos) en una
+ * página densa. El bucket es de 0,1 pt y la tolerancia de 0,05, así que un
+ * candidato válido cae en el bucket propio o en uno adyacente.
+ */
+const GLYPH_BUCKET = 10;
+
+type GlyphIndex = ReadonlyMap<string, ReadonlyArray<number>>;
+
+function indexGlyphs(glyphs: ReadonlyArray<PageGlyph>): GlyphIndex {
+  const index = new Map<string, number[]>();
+  for (let i = 0; i < glyphs.length; i += 1) {
+    const glyph = glyphs[i];
+    if (glyph === undefined) continue;
+    const key = `${Math.round(glyph.x * GLYPH_BUCKET)}|${Math.round(glyph.y * GLYPH_BUCKET)}`;
+    const bucket = index.get(key);
+    if (bucket === undefined) index.set(key, [i]);
+    else bucket.push(i);
+  }
+  return index;
+}
+
+/** Primer glifo cuya posición coincide con `(x, y)`, o `-1`. */
+function findGlyphAt(
+  glyphs: ReadonlyArray<PageGlyph>,
+  index: GlyphIndex,
+  x: number,
+  y: number,
+): number {
+  const baseX = Math.round(x * GLYPH_BUCKET);
+  const baseY = Math.round(y * GLYPH_BUCKET);
+  for (let dx = -1; dx <= 1; dx += 1) {
+    for (let dy = -1; dy <= 1; dy += 1) {
+      const bucket = index.get(`${baseX + dx}|${baseY + dy}`);
+      if (bucket === undefined) continue;
+      for (const i of bucket) {
+        const glyph = glyphs[i];
+        if (
+          glyph !== undefined &&
+          Math.abs(glyph.x - x) <= ORIGIN_CORRECTION_EPSILON &&
+          Math.abs(glyph.y - y) <= ORIGIN_CORRECTION_EPSILON
+        ) {
+          return i;
+        }
+      }
+    }
+  }
+  return -1;
+}
+
+/*
+ * ADR-102 §2: alinea `str` con el flujo a partir de `from`, devolviendo el
+ * índice de glifo de cada carácter (`-1` para los que no tienen glifo), o
+ * `undefined` si la alineación no llega hasta el final.
+ *
+ * Las dos segmentaciones no coinciden en cuántos espacios ven, y la tolerancia
+ * va para los dos lados:
+ *
+ * - un espacio de la CADENA sin glifo detrás es uno que pdf.js sintetizó
+ *   porque el productor separó las palabras moviendo el cursor (ADR-102 §2);
+ * - un espacio del FLUJO que la cadena no trae es uno que pdf.js colapsó
+ *   (ADR-108 §2). Se saltea la corrida entera de espacios y se reintenta.
+ *
+ * ADR-102 §3: esta alineación **es** el guard, y sigue siéndolo — todo
+ * carácter visible exige su glifo exacto en orden. Lo único tolerante es la
+ * cantidad de espacios, que es justo donde las segmentaciones difieren.
+ */
+function isBlankGlyph(glyph: PageGlyph | undefined): boolean {
+  return glyph !== undefined && glyph.unicode.trim().length === 0;
+}
+
+function alignToGlyphs(
+  glyphs: ReadonlyArray<PageGlyph>,
+  str: string,
+  from: number,
+): ReadonlyArray<number> | undefined {
+  const mapping: number[] = [];
+  let cursor = from;
+  for (const char of str) {
+    if (glyphs[cursor]?.unicode === char) {
+      mapping.push(cursor);
+      cursor += 1;
+      continue;
+    }
+
+    let ahead = cursor;
+    while (isBlankGlyph(glyphs[ahead])) ahead += 1;
+    if (ahead > cursor && glyphs[ahead]?.unicode === char) {
+      mapping.push(ahead);
+      cursor = ahead + 1;
+      continue;
+    }
+
+    if (char === " ") {
+      mapping.push(-1);
+      continue;
+    }
+    return undefined;
+  }
+  return mapping;
+}
+
+/*
+ * ADR-102 §1: agrega al flujo los glifos de un run de página, con su posición
+ * absoluta y su avance ya en unidades de página.
+ *
+ * El avance por glifo es el de ADR-097 §1, verificado contra las métricas AFM
+ * de Helvetica, MÁS el word spacing de ADR-108 §1. Que `Tw` faltara corría el
+ * flujo ~1,2 pt por espacio, acumulativo dentro del run: sobre el encabezado
+ * de una pericia la séptima palabra caía 9,0 pt a la derecha de su tinta, y
+ * eso afectaba por igual a los items que empalmaban y a los que no. ADR-097 §4
+ * queda superseded; su aritmética (§1), el prorrateo de reserva (§3) y la
+ * instrumentación del empalme (§5) siguen.
+ */
+function appendRunGlyphs(into: PageGlyph[], args: unknown, text: TextState, ctm: Matrix2D): void {
+  if (!Array.isArray(args) || args.length === 0) return;
+  const glyphs: unknown = args[0];
+  if (!Array.isArray(glyphs)) return;
+
+  const composed = composeMatrix(ctm, text.textMatrix);
+  const scale = Math.hypot(composed[0], composed[1]);
+  const dirX = scale === 0 ? 1 : composed[0] / scale;
+  const dirY = scale === 0 ? 0 : composed[1] / scale;
+
+  let accumulated = 0;
+  for (const glyph of glyphs as ReadonlyArray<unknown>) {
+    if (typeof glyph === "number") {
+      // Ajuste de kerning de un TJ: avanza sin aportar carácter.
+      accumulated += (-glyph / 1000) * text.fontSize * text.horizontalScale;
+      continue;
+    }
+    if (!isRecord(glyph) || typeof glyph.unicode !== "string") continue;
+    const width = typeof glyph.width === "number" ? glyph.width : 0;
+    const wordSpacing = glyphTakesWordSpacing(glyph) ? text.wordSpacing : 0;
+    const step =
+      ((width / 1000) * text.fontSize + text.charSpacing + wordSpacing) * text.horizontalScale;
+    const x = composed[4] + dirX * accumulated * scale;
+    const y = composed[5] + dirY * accumulated * scale;
+    // Una ligadura aporta su avance completo en el PRIMER carácter; los
+    // siguientes quedan en la misma posición con avance 0, así que ningún
+    // token arranca adentro de la ligadura.
+    let first = true;
+    for (const char of glyph.unicode) {
+      into.push({ unicode: char, x, y, advance: first ? step * scale : 0 });
+      first = false;
+    }
+    accumulated += step;
+  }
+}
+
 function isWhitespaceGlyph(glyph: unknown): boolean {
   if (!isRecord(glyph)) return false;
   return typeof glyph.unicode === "string" && glyph.unicode.trim().length === 0;
+}
+
+/*
+ * ADR-108 §1: a qué glifo le toca el word spacing. PDF 32000-1 §9.3.3 lo
+ * restringe al código de **un byte** 32: en una fuente compuesta el espacio de
+ * dos bytes NO lo lleva. pdf.js ya resuelve eso y lo deja en `glyph.isSpace`,
+ * y su propio renderer decide con esa misma bandera
+ * (`(glyph.isSpace ? wordSpacing : 0) + charSpacing`). Espejarla es lo que
+ * pone al flujo de acuerdo con la tinta, y no es una heurística: es la misma
+ * línea que dibuja.
+ *
+ * Medido sobre la pericia: el run de la fecha tiene 96 espacios y solo 7 con
+ * `isSpace`. Tratarlos a todos por igual corría la caja 58,3 pt.
+ */
+function glyphTakesWordSpacing(glyph: Record<string, unknown>): boolean {
+  return glyph["isSpace"] === true;
 }
 
 /*
@@ -887,7 +1445,11 @@ function leadingAdvance(
     if (!isWhitespaceGlyph(glyph)) break; // primer glifo visible: se corta
     const width = isRecord(glyph) && typeof glyph.width === "number" ? glyph.width : 0;
     const base = ((width / 1000) * text.fontSize + text.charSpacing) * text.horizontalScale;
-    withoutWordSpacing += base;
+    // `to` tiene que quedar donde el flujo pone el primer glifo visible, así que
+    // usa la misma regla de `Tw` que él (ADR-108 §1); `from` reproduce lo que
+    // reporta `getTextContent`, que lo aplica a todo espacio.
+    const drawn = isRecord(glyph) && glyphTakesWordSpacing(glyph);
+    withoutWordSpacing += base + (drawn ? text.wordSpacing * text.horizontalScale : 0);
     withWordSpacing += base + text.wordSpacing * text.horizontalScale;
   }
 
@@ -981,6 +1543,8 @@ interface AnnotationsAndImages {
   // ADR-068: origen real de los runs de PÁGINA cuyo `transform` de
   // `getTextContent` viene desplazado por el word spacing.
   readonly originCorrections: ReadonlyArray<TextOriginCorrection>;
+  // ADR-102 §1: flujo continuo de glifos de la página, en orden de dibujo.
+  readonly pageGlyphs: ReadonlyArray<PageGlyph>;
 }
 
 /*
@@ -1003,6 +1567,7 @@ function walkOperatorListForAnnotationsAndImages(
   const imageRects: BoundingBox[] = [];
   const annotationWords: Word[] = [];
   const originCorrections: TextOriginCorrection[] = [];
+  const pageGlyphs: PageGlyph[] = [];
 
   const text = new TextState();
   // El cuerpo y el escalado horizontal son estado gráfico: `save`/`restore` los
@@ -1084,7 +1649,10 @@ function walkOperatorListForAnnotationsAndImages(
     } else if (ctm.isInsideAnnotation && (fn === OPS.showText || fn === OPS.showSpacedText)) {
       const run = buildAnnotationTextRun(args, text, ctm.current);
       if (run !== undefined) {
-        const words = convertTextItemsToWords(
+        // ADR-097 §3: el camino de anotaciones NO usa la tabla de avances —
+        // acá la cadena y la geometría salen de la misma fuente, así que no
+        // hay dos fuentes que empalmar.
+        const { words } = convertTextItemsToWords(
           {
             items: [
               { str: run.str, transform: run.transform, width: run.width, height: run.height },
@@ -1110,9 +1678,11 @@ function walkOperatorListForAnnotationsAndImages(
       }
     } else if (!ctm.isInsideAnnotation && (fn === OPS.showText || fn === OPS.showSpacedText)) {
       // ADR-068: el texto de página lo extrae `getTextContent()`; de este
-      // recorrido solo sale la corrección del origen (ver `buildOriginCorrection`).
+      // recorrido salen la corrección del origen (ver `buildOriginCorrection`)
+      // y —ADR-102 §1— los glifos del run, al flujo continuo de la página.
       const correction = buildOriginCorrection(args, text, ctm.current);
       if (correction !== undefined) originCorrections.push(correction);
+      appendRunGlyphs(pageGlyphs, args, text, ctm.current);
     } else if (fn !== undefined && IMAGE_PAINT_OPS.has(fn)) {
       // ADR-066 §5: `ctm.current` ya aplica beginAnnotation.transform cuando
       // la imagen está dentro de una anotación — corrige el defecto latente
@@ -1121,7 +1691,7 @@ function walkOperatorListForAnnotationsAndImages(
     }
   }
 
-  return { imageRects, annotationWords, originCorrections };
+  return { imageRects, annotationWords, originCorrections, pageGlyphs };
 }
 
 // Filtro por rectángulo (ADR-065 §1): descarta imágenes < 1% del área de
@@ -1431,7 +2001,7 @@ async function parsePage(
 
   // ADR-068: el recorrido del operator list precede a la conversión de items
   // porque produce la corrección de origen que ésta consume.
-  const { imageRects, annotationWords, originCorrections } =
+  const { imageRects, annotationWords, originCorrections, pageGlyphs } =
     walkOperatorListForAnnotationsAndImages(
       operatorList,
       pageIndex,
@@ -1440,12 +2010,28 @@ async function parsePage(
       logger,
     );
 
-  const contentWords = convertTextItemsToWords(
+  const { words: contentWords, joinStats } = convertTextItemsToWords(
     textContent,
     pageIndex,
     pageHeight,
     originCorrections,
+    pageGlyphs,
+    indexGlyphs(pageGlyphs),
   );
+
+  // ADR-097 §5: sin esta cuenta, "¿cada cuánto falla el empalme en un
+  // documento real?" —la pregunta que decide si alguna vez conviene la
+  // opción B de `Post_Hito10.8_Pendientes.md` §24— no tiene cómo
+  // contestarse. Es `debug`: un empalme que no ocurre no es un error, es el
+  // camino de reserva funcionando.
+  if (joinStats.eligible > 0) {
+    logger.debug("Empalme de avances por glifo (ADR-097 §5).", {
+      documentId,
+      pageIndex,
+      joined: joinStats.joined,
+      eligible: joinStats.eligible,
+    });
+  }
 
   // ADR-066 §1: el texto de anotaciones se suma al del content stream — las
   // dos fuentes son disjuntas por construcción (getTextContent() no lee

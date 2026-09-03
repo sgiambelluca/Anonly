@@ -1,0 +1,35 @@
+{
+  "documentId": "doc-025",
+  "entities": [
+    {
+      "entityType": "DNI",
+      "value": "34.567.891",
+      "pageIndex": 0,
+      "detector": "regex"
+    },
+    {
+      "entityType": "DNI",
+      "value": "18445212",
+      "pageIndex": 0,
+      "detector": "regex"
+    },
+    {
+      "entityType": "DATE",
+      "value": "07/07/2026",
+      "pageIndex": 0,
+      "detector": "regex"
+    },
+    {
+      "entityType": "DATE",
+      "value": "8-7-2026",
+      "pageIndex": 0,
+      "detector": "regex"
+    },
+    {
+      "entityType": "DATE",
+      "value": "09 de julio de 2026",
+      "pageIndex": 0,
+      "detector": "regex"
+    }
+  ]
+}

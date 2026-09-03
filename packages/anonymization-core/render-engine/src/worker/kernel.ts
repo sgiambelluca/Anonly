@@ -37,6 +37,7 @@ import {
   DEGRADED_FONT_RATIO,
   InvalidInputError,
   REPLACEMENT_FONT_HEIGHT_RATIO,
+  rectsOverlap,
   ReplacementMode,
   sharesVerticalBand,
   type Annotation,
@@ -239,11 +240,6 @@ export function calibrateLineFont(
   );
 }
 
-/** Overlap 2D genérico (X e Y), no solo banda vertical. */
-function overlapsBbox(a: BoundingBox, b: BoundingBox): boolean {
-  return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
-}
-
 interface LineRepaintPlan {
   readonly font: string;
   readonly delta: number;
@@ -322,7 +318,7 @@ function planLineRepaint(
         sharesVerticalBand(word.bbox, replacement.bbox) &&
         word.bbox.x >= replacement.bbox.x + replacement.bbox.width &&
         word.bbox.x < nextReplacementBoundaryPt &&
-        !otherReplacements.some((other) => overlapsBbox(word.bbox, other.bbox)),
+        !otherReplacements.some((other) => rectsOverlap(word.bbox, other.bbox)),
     )
     .sort((wordA, wordB) => wordA.bbox.x - wordB.bbox.x);
   if (neighbors.length === 0) return undefined;

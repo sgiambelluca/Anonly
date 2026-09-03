@@ -66,7 +66,7 @@ test("fusionar y dividir grupos actualiza índices y reemplazos", async ({ page 
     .click();
   const mergeDialog = page.getByRole("dialog", { name: "Fusionar grupo" });
   await expect(mergeDialog).toBeVisible();
-  await mergeDialog.getByRole("combobox", { name: "Grupo destino" }).click();
+  await mergeDialog.getByRole("combobox", { name: "Grupo destino 1" }).click();
   await page.getByRole("option", { name: /34\.567\.891/ }).click();
   await mergeDialog.getByRole("button", { name: "Fusionar" }).click();
   await expect(mergeDialog).toHaveCount(0);
@@ -107,4 +107,62 @@ test("fusionar y dividir grupos actualiza índices y reemplazos", async ({ page 
   const splitOffGroup = page.getByRole("treeitem", { name: "18.445.212" });
   await expect(splitOffGroup).toBeVisible();
   await expect(splitOffGroup).toContainText("(1)");
+});
+
+/*
+ * Fusión de varios grupos en una sola pasada (`ui/Components.md` §3.6,
+ * `UX_Guidelines.md` §3.2: "2+ grupos del mismo tipo").
+ *
+ * El Core sigue recibiendo `GROUP_MERGE_REQUESTED` de a uno y la UI emite N-1
+ * en fila; lo que este escenario prueba es lo que ningún unit test puede
+ * probar — que los N-1 requests seguidos, con el bus y el motor reales,
+ * terminen en UN grupo y no en dos fusiones a medias. Los tres DNI de
+ * `text-10p.pdf` son el caso mínimo que necesita el botón "+".
+ */
+test("fusionar tres grupos en una sola pasada deja un solo grupo", async ({ page }) => {
+  await installSettingsOverride(page, { nerEnabled: false });
+  await page.goto("/", { waitUntil: "networkidle" });
+
+  const file = await textTenPagesFile();
+  await page.locator('input[type="file"]').setInputFiles(file);
+
+  await expect(page.getByRole("button", { name: "Exportar" })).toBeVisible({ timeout: 30_000 });
+
+  const dni1 = page.getByRole("treeitem", { name: "34.567.891" });
+  const dni2 = page.getByRole("treeitem", { name: "18.445.212" });
+  const dni3 = page.getByRole("treeitem", { name: "42.998.103" });
+  for (const group of [dni1, dni2, dni3]) {
+    await expect(group).toContainText("(1)");
+  }
+
+  // Origen: dni3. Destinos: dni1 (el primero, que es el que sobrevive) y dni2.
+  await dni3.getByRole("button", { name: "Más acciones" }).click();
+  await dni3
+    .getByRole("group", { name: "Acciones del grupo" })
+    .getByRole("button", { name: "Fusionar con…" })
+    .click();
+  const mergeDialog = page.getByRole("dialog", { name: "Fusionar grupo" });
+  await expect(mergeDialog).toBeVisible();
+
+  await mergeDialog.getByRole("combobox", { name: "Grupo destino 1" }).click();
+  await page.getByRole("option", { name: /34\.567\.891/ }).click();
+
+  // El botón "+" agrega la segunda fila, que arranca en el único grupo que
+  // queda sin tomar.
+  await mergeDialog.getByRole("button", { name: "Agregar otro grupo" }).click();
+  const secondRow = mergeDialog.getByRole("combobox", { name: "Grupo destino 2" });
+  await expect(secondRow).toBeVisible();
+  await expect(secondRow).toContainText("18.445.212");
+
+  // Sin más grupos del tipo para ofrecer, el "+" queda deshabilitado: no hay
+  // forma de agregar una fila que no tenga nada que elegir.
+  await expect(mergeDialog.getByRole("button", { name: "Agregar otro grupo" })).toBeDisabled();
+
+  await mergeDialog.getByRole("button", { name: "Fusionar" }).click();
+  await expect(mergeDialog).toHaveCount(0);
+
+  // Un solo grupo con las tres ocurrencias: el destino de la primera fila.
+  await expect(dni1).toContainText("(3)");
+  await expect(dni2).toHaveCount(0);
+  await expect(dni3).toHaveCount(0);
 });

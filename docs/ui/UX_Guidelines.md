@@ -659,9 +659,13 @@ documento quieto con la lupa apoyada y la frase sin fundido, que siguen diciendo
 
 ### 7.5 Error
 
-Banner con el mensaje y las salidas disponibles ("Cerrar documento" siempre; "Desactivar NER y
-reanalizar" cuando `error.code === "NER_MODEL_MISSING"`). Sin cambios respecto de la implementación
-vigente.
+Banner con el mensaje y las salidas disponibles: **"Cerrar documento", siempre**.
+
+`NER_MODEL_MISSING` ofrecía además "Desactivar NER y reanalizar", y **ADR-126 §2 lo retira**. Ese
+botón parecía una recuperación y era una trampa: producía un documento que llega a "Listo" y se
+exporta como anonimizado con los identificadores tapados y **todos los nombres intactos**. Un
+análisis al que le falta justamente la categoría más sensible no es un resultado degradado, es un
+resultado equivocado con cara de éxito. La salida de ese error es reintentar, y el mensaje lo dice.
 
 ---
 

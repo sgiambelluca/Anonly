@@ -651,6 +651,7 @@ describe("Orchestrator — contract tests", () => {
       members: [
         {
           occurrenceId: "occ-1",
+          value: "valor",
           pageIndex: 0,
           bbox: { x: 1, y: 2, width: 3, height: 4 },
           source: DetectionSource.Regex,
@@ -721,6 +722,7 @@ describe("Orchestrator — contract tests", () => {
       members: [
         {
           occurrenceId: "occ-line",
+          value: "valor",
           pageIndex: 0,
           bbox: { x: 0, y: 0, width: 20, height: 12 },
           source: DetectionSource.Regex,
@@ -864,6 +866,7 @@ describe("Orchestrator — contract tests", () => {
       members: [
         {
           occurrenceId: "occ-1",
+          value: "valor",
           pageIndex: 0,
           bbox: { x: 1, y: 2, width: 3, height: 4 },
           source: DetectionSource.Regex,

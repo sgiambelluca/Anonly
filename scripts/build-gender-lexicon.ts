@@ -8,7 +8,7 @@
  * la fusión con UCI de ADR-060 §9).
  *
  * Emite un MÓDULO TYPESCRIPT GENERADO — no un JSON suelto — que
- * `grouping-engine` importa como cualquier otro dato del paquete: sin
+ * `grouping-engine` y `regex-engine` importan desde `@anonly/shared`: sin
  * fetch, sin Cache Storage, sin URL configurable (ADR-069 §2). El CSV
  * original nunca entra al repo; el módulo generado sí.
  *
@@ -16,8 +16,8 @@
  *   pnpm lexicon:build
  *
  * Regenera:
- *   - packages/anonymization-core/grouping-engine/src/gender-lexicon.generated.ts
- *   - packages/anonymization-core/grouping-engine/assets/gender-lexicon.provenance.json
+ *   - packages/anonymization-core/shared/src/gender-lexicon.generated.ts
+ *   - packages/anonymization-core/shared/assets/gender-lexicon.provenance.json
  *
  * Determinista: mismo CSV de origen ⇒ mismo módulo ⇒ mismo hash.
  */
@@ -27,15 +27,16 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const GROUPING_ENGINE_SRC_DIR = resolve(
-  REPO_ROOT,
-  "packages/anonymization-core/grouping-engine/src",
-);
-const ASSETS_DIR = resolve(REPO_ROOT, "packages/anonymization-core/grouping-engine/assets");
-const GENERATED_MODULE_PATH = resolve(GROUPING_ENGINE_SRC_DIR, "gender-lexicon.generated.ts");
+// ADR-091 §1: el artefacto vive en `shared`, no en `grouping-engine`. La
+// fuente, el filtro y el contenido no cambian — el `sha256` de procedencia se
+// calcula sobre los DATOS (`serializeArtifact`), no sobre el módulo, así que
+// la mudanza no lo mueve.
+const SHARED_SRC_DIR = resolve(REPO_ROOT, "packages/anonymization-core/shared/src");
+const ASSETS_DIR = resolve(REPO_ROOT, "packages/anonymization-core/shared/assets");
+const GENERATED_MODULE_PATH = resolve(SHARED_SRC_DIR, "gender-lexicon.generated.ts");
 const PROVENANCE_PATH = resolve(ASSETS_DIR, "gender-lexicon.provenance.json");
 const GENERATED_MODULE_REPO_PATH =
-  "packages/anonymization-core/grouping-engine/src/gender-lexicon.generated.ts";
+  "packages/anonymization-core/shared/src/gender-lexicon.generated.ts";
 
 // ─── Fuente (ADR-069 §1) ───
 
@@ -86,7 +87,7 @@ function parseCsvLine(line: string, delimiter: string): ReadonlyArray<string> {
 // escape explícito (no literal): un carácter combinante pegado en el código
 // fuente es indistinguible a simple vista de texto normal y frágil frente a
 // cualquier re-normalización del archivo por el editor/herramientas (mismo
-// criterio que `grouping-engine/src/gender.ts`).
+// criterio que `shared/src/types.ts`).
 /** Normalización de ADR-060 §4: NFC, minúsculas, sin diacríticos. */
 const DIACRITICS_RE = /[\u0300-\u036f]/g;
 
@@ -130,7 +131,7 @@ export function parseBuenosAiresCsv(text: string): ReadonlyMap<string, BaGenderC
 // ─── Mapeo directo y saneamiento (ADR-069 §1/§3) ───
 
 /**
- * Alineado con `GenderLexiconLabel` de `grouping-engine/src/gender.ts`
+ * Alineado con `GenderLexiconLabel` de `shared/src/types.ts` (ADR-091 §1)
  * (ADR-069 §2: son las dos mitades de una misma pieza — el build las emite,
  * `inferPersonGender` las consume — y nunca se habían cruzado: el script
  * original emitía "ambiguo", `gender.ts` esperaba "ambiguous"). No se
@@ -204,7 +205,7 @@ export interface GeneratedModuleMeta {
 }
 
 /**
- * Emite el módulo commiteado que `grouping-engine` importa directamente
+ * Emite el módulo commiteado que `@anonly/shared` reexporta
  * (sin fetch, sin `public/`, ADR-069 §2). `JSON.stringify` por clave/valor
  * en vez de interpolar el string a mano: es una serialización de string
  * literal de JS/TS válida sin escribir un escapador propio, y cubre sin
@@ -230,13 +231,13 @@ export function renderGeneratedModule(
  * Léxico de género por nombre de pila (ADR-069 §1-§3), fuente única Buenos
  * Aires Data "Nombres Permitidos" (CC-BY-2.5-AR). Procedencia completa
  * (URL, licencia, fecha de descarga, hash) en
- * packages/anonymization-core/grouping-engine/assets/gender-lexicon.provenance.json.
+ * packages/anonymization-core/shared/assets/gender-lexicon.provenance.json.
  *
  * ${sortedNames.length} entradas, claves en orden alfabético (el hash de
  * procedencia no depende del orden de iteración).
  * Generado ${meta.generatedAt} — sha256 ${meta.sha256}.
  */
-import type { GenderLexiconLabel } from "./gender.js";
+import type { GenderLexiconLabel } from "./types.js";
 
 export const GENDER_LEXICON: ReadonlyMap<string, GenderLexiconLabel> = new Map([
 ${entries}
@@ -320,7 +321,7 @@ async function main(): Promise<void> {
     },
   };
 
-  await mkdir(GROUPING_ENGINE_SRC_DIR, { recursive: true });
+  await mkdir(SHARED_SRC_DIR, { recursive: true });
   await mkdir(ASSETS_DIR, { recursive: true });
   await writeFile(GENERATED_MODULE_PATH, moduleSource);
   await writeFile(PROVENANCE_PATH, `${JSON.stringify(provenance, null, 2)}\n`);

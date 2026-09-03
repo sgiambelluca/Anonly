@@ -13,7 +13,7 @@
  * plate-vieja-ar: "XXX XXX").
  */
 
-import { EntityType } from "@anonly/shared";
+import { EntityType, GENDER_LEXICON, normalizeForComparison } from "@anonly/shared";
 
 import type { RegexPattern } from "../regex.types.js";
 
@@ -178,6 +178,45 @@ function normalizeTextualDate(value: string): string {
 
 // ─── Patrones default AR (Regex_Engine.md, tabla "Patrones default") ───
 
+// ─── Carátula judicial (ADR-092) ───
+
+/*
+ * ADR-092 §2: `"Pérez, Juan"` normaliza a `"juan perez"` — el MISMO
+ * `normalizedValue` que produciría `"Juan Pérez"` del cuerpo, que es lo que
+ * hace que Grouping los una. Es el mecanismo de ADR-075 §1 (la fecha textual
+ * y la numérica llegando al mismo valor), aplicado al orden invertido.
+ *
+ * Contra una ocurrencia de NER la unión ocurre por el pase DIFUSO, no por el
+ * exacto: `normalizeNerValue` no pliega diacríticos, así que emite
+ * `"juan pérez"` contra este `"juan perez"` — 0,9 sobre un umbral de 0,88.
+ * Es la deuda anotada en ADR-088 §3.
+ */
+function flipCaption(value: string): string {
+  const commaIndex = value.indexOf(",");
+  if (commaIndex === -1) return normalizeForComparison(value);
+  const surname = value.slice(0, commaIndex);
+  const givenNames = value.slice(commaIndex + 1);
+  return normalizeForComparison(`${givenNames} ${surname}`);
+}
+
+/*
+ * ADR-092 §1: la compuerta. `RegexPattern.checksum` es "validación adicional
+ * sobre el normalizedValue", y la de una carátula es que el nombre de pila
+ * sea un nombre de pila — igual que la de un CUIT es que cierre el módulo 11.
+ * Sin ella el patrón matchea `"Buenos Aires, Argentina"`,
+ * `"San Miguel, Tucumán"` y `"Código Civil, Título III"`: medido, 7/10
+ * contra 15/16.
+ *
+ * El valor llega YA invertido por `flipCaption`, así que el nombre de pila es
+ * el PRIMER token. Las claves del léxico están pre-normalizadas con el mismo
+ * criterio que `normalizeForComparison` (ADR-069 §1), así que se consultan
+ * directo.
+ */
+function firstNameIsInLexicon(normalizedValue: string): boolean {
+  const firstToken = normalizedValue.split(" ")[0];
+  return firstToken !== undefined && GENDER_LEXICON.has(firstToken);
+}
+
 export const DEFAULT_PATTERNS_AR: ReadonlyArray<RegexPattern> = [
   {
     id: "dni-ar",
@@ -201,17 +240,41 @@ export const DEFAULT_PATTERNS_AR: ReadonlyArray<RegexPattern> = [
      * formalizada en Regex_Engine.md v1.0.1 — ver adr/ADR-022 para el detalle
      * del problema (el patrón original, sin `\b`, rompía el caso límite 3 del
      * spec) y la decisión.
+     *
+     * ADR-093 §1: la característica telefónica argentina no siempre tiene dos
+     * dígitos (CABA sí, pero La Plata/Rosario/Córdoba/Paraná tienen 3 y las
+     * localidades chicas 4) — lo invariante es que característica + abonado
+     * suman 10 dígitos. De ahí la alternancia de tres ramas, una por longitud
+     * de característica, en vez de un rango `\d{2,4}` que sería más corto y
+     * más legible. **No simplificar a un rango**: medido contra ocho trampas
+     * (ADR-093 §1, tabla), el rango laxo `\d{2,4}[\s-]?\d{2,4}[\s-]?\d{3,4}`
+     * detecta los mismos 7 teléfonos pero agrega 3 falsos positivos que la
+     * enumeración no tiene — se come tres grupos de una tarjeta
+     * (`"4532 1234 5678"`), tres de un IBAN y dos números sueltos adyacentes
+     * (`"expediente 1234 5678"`). Exigir el total de 10 dígitos exacto, por
+     * rama, es lo que discrimina. El `9` opcional cubre el formato de móvil
+     * internacional (`+54 9 11 …`); el separador opcional se ata al prefijo
+     * de país (`54[\s-]?`, `9[\s-]?`) en vez de quedar suelto antes del `\b`.
      */
     id: "phone-mobile-ar",
     entityType: EntityType.Phone,
-    pattern: /(?:\+?54)?[\s-]?\b\d{2}[\s-]?\d{4}[\s-]?\d{4}\b/g,
+    pattern:
+      /(?:\+?54[\s-]?)?(?:9[\s-]?)?\b(?:\d{2}[\s-]?\d{4}[\s-]?\d{4}|\d{3}[\s-]?\d{3}[\s-]?\d{4}|\d{4}[\s-]?\d{2}[\s-]?\d{4})\b/g,
     normalizer: stripNonDigits,
     maskFormat: "+XX XXX XXX-XXXX",
   },
   {
+    /*
+     * ADR-096 §4: el abonado se escribe partido (`"011 4567-8902"`), y el
+     * patrón de antes exigía el abonado en un solo bloque de dígitos
+     * (`\d{6,8}`) — un separador más, en el mismo lugar donde
+     * `phone-mobile-ar` ya lo admite (ADR-093). Este caso apareció solo, en
+     * la corrida del evaluador, no en ninguna lista de formas enumerada a
+     * mano.
+     */
     id: "phone-landline-ar",
     entityType: EntityType.Phone,
-    pattern: /\b0\d{1,4}[\s-]?\d{6,8}\b/g,
+    pattern: /\b0\d{1,4}[\s-]?\d{3,4}[\s-]?\d{4}\b/g,
     normalizer: stripNonDigits,
     maskFormat: "+XX XXX XXX-XXXX",
   },
@@ -223,9 +286,20 @@ export const DEFAULT_PATTERNS_AR: ReadonlyArray<RegexPattern> = [
     maskFormat: "xxxx@xxxx.xx",
   },
   {
+    /*
+     * ADR-096 §3: ISO 13616 recomienda imprimir el IBAN en grupos de cuatro
+     * separados por espacios, y así aparece en cualquier documento — el
+     * patrón sin espacios internos detectaba solo la forma que nadie
+     * escribe. `[A-Z]{2}\d{2}` sigue siendo contiguo (es lo que evita que el
+     * patrón se coma texto en mayúsculas seguido de números) y el checksum
+     * mod-97 sigue siendo la red: una secuencia con la forma pero sin el
+     * dígito verificador correcto se descarta igual. `checksum` y
+     * `normalizer` no se tocan (ADR-096 §5) — `normalizeUppercaseNoSpaces`
+     * ya saca los espacios antes de que `computeIbanChecksum` los vea.
+     */
     id: "iban",
     entityType: EntityType.IBAN,
-    pattern: /\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b/g,
+    pattern: /\b[A-Z]{2}\d{2}(?:\s?[A-Z0-9]){10,30}\b/g,
     checksum: computeIbanChecksum,
     normalizer: normalizeUppercaseNoSpaces,
     maskFormat: "XX00 XXXX XXXX XXXX XXXX",
@@ -256,24 +330,167 @@ export const DEFAULT_PATTERNS_AR: ReadonlyArray<RegexPattern> = [
     maskFormat: "XX/XX/XXXX",
   },
   {
+    /*
+     * ADR-096 §1: la alternativa vieja (`[A-Z]{1,3}-?\d{4,8}-?\d?`) admitía
+     * un guión pero nunca un espacio, que es como en la práctica siempre se
+     * escribe una matrícula — medida contra 11 formas reales, acertaba
+     * **una** (`MN12345`, la que nadie escribe), y el separador de miles la
+     * rompía por el otro lado (`45.318` son 5 dígitos con un punto en el
+     * medio, y el patrón pedía de 4 a 8 dígitos seguidos).
+     *
+     * Tres alternativas, en este orden: (1) el número pelado **anclado en la
+     * etiqueta** — sin el `lookbehind` el patrón matchearía cualquier número
+     * de 3-8 dígitos del expediente (fojas, artículos, montos); el
+     * `lookbehind` es contexto que ancla, el match es solo el valor, nunca
+     * la palabra "Matrícula" (mismo criterio de no sobre-captura que
+     * `caratula-ar`, ADR-092); (2) el número CON separador de miles
+     * (`M.N. 45.318`); (3) el número plano (`MN 12345`, `MP-12345`,
+     * `M.P. 34567`...). El prefijo cubre `MN`, `MP`, `M.N.`, `M.P.` y el
+     * separador admite espacio, guión o nada.
+     *
+     * La alternativa vieja SE RETIRA, y es una decisión medida, no un
+     * descuido: conservada junto a las nuevas no aporta ninguna forma que
+     * éstas no cubran, y sí un falso positivo sobre números de expediente
+     * (`"Expediente A-12345"` → `"A-12345"`). Medido (ADR-096 §1): patrón de
+     * hoy, 1/11 formas + 1 falso positivo; nuevo conservando la vieja, 11/11
+     * + el mismo falso positivo; nuevo sin la vieja, 11/11 + 0 falsos
+     * positivos. Flags `gu`: el `lookbehind` de longitud variable requiere
+     * un motor Unicode-aware (V8 lo soporta).
+     *
+     * El `(?:-\d)?` final conserva la cola de un dígito que la alternativa
+     * retirada sí tomaba (`MP-12345-6`). No es una de las once formas
+     * medidas, pero estaba en la suite y en el `maskFormat` (`XX-XXXX-XX`)
+     * desde ADR-012: sin él, ese valor se emitiría como `MP-12345` y el `-6`
+     * quedaría a la vista — cobertura parcial, que es una fuga chica. Medido:
+     * agregarlo da 12 de 12 formas y sigue en 0 falsos positivos, porque el
+     * match ya viene anclado en el prefijo `M[NP]`.
+     */
     id: "license-ar",
     entityType: EntityType.License,
-    pattern: /\b[A-Z]{1,3}-?\d{4,8}-?\d?\b/g,
+    pattern:
+      /(?<=[Mm]atr[íi]cula\s+[Pp]rofesional\s*:?\s*)\d{3,8}\b|\bM\.?[NP]\.?[\s-]*\d{1,3}(?:\.\d{3})+\b|\bM\.?[NP]\.?[\s-]*\d{3,8}(?:-\d)?\b/gu,
     normalizer: normalizeUppercaseNoDashes,
     maskFormat: "XX-XXXX-XX",
   },
   {
+    /*
+     * ADR-096 §2: el separador pasa de `\s?` a `[\s-]?` en las tres
+     * variantes de patente (ésta y las dos de abajo) — el guión no está en
+     * la chapa, está en cómo se TRANSCRIBE (`"ABC-123"`), y este motor lee
+     * transcripciones, no chapas. Medido: 8/8 formas reales, 0 falsos
+     * positivos sobre las trampas duras.
+     */
     id: "plate-vieja-ar",
     entityType: EntityType.Plate,
-    pattern: /\b[A-Z]{3}\s?\d{3}\b/g,
+    pattern: /\b[A-Z]{3}[\s-]?\d{3}\b/g,
     normalizer: normalizeUppercaseNoSpaces,
     maskFormat: "XXX XXX",
   },
   {
+    // ADR-096 §2: mismo cambio de separador que plate-vieja-ar, ver el
+    // comentario ahí.
     id: "plate-mercosur-ar",
     entityType: EntityType.Plate,
-    pattern: /\b[A-Z]{2}\s?\d{3}\s?[A-Z]{2}\b/g,
+    pattern: /\b[A-Z]{2}[\s-]?\d{3}[\s-]?[A-Z]{2}\b/g,
     normalizer: normalizeUppercaseNoSpaces,
     maskFormat: "XX XXX XX",
+  },
+  {
+    /*
+     * ADR-096 §2: motovehículo Mercosur (1 letra + 3 dígitos + 3 letras) —
+     * la tercera estructura de patente, y la que no estaba cubierta en
+     * absoluto: los motovehículos entran al alcance del producto por primera
+     * vez con este patrón. `maskFormat` propio ("X XXX XXX"), fiel a su
+     * forma real — mismo criterio que ADR-029 §2 le dio a las otras dos
+     * variantes de patente.
+     */
+    id: "plate-mercosur-moto-ar",
+    entityType: EntityType.Plate,
+    pattern: /\b[A-Z][\s-]?\d{3}[\s-]?[A-Z]{3}\b/g,
+    normalizer: normalizeUppercaseNoSpaces,
+    maskFormat: "X XXX XXX",
+  },
+  {
+    /*
+     * ADR-092 §1 — `"Apellido, Nombre"`, la forma canónica de una carátula
+     * judicial. El apellido es **una palabra**, porque sin la coma como ancla
+     * un apellido compuesto no se distingue de un topónimo (`"Mar del Plata,
+     * Buenos Aires"`); el costo es que de `"Ríos de Paz Alberti, Marta"`
+     * solo entra la última palabra.
+     *
+     * Los NOMBRES DE PILA son varios o uno **según si la carátula cierra**, y
+     * esa distinción es ADR-122 §2. El límite de uno solo existía porque no
+     * había nada que frenara al cuantificador: medido sobre la firma de la
+     * pericia (`tests/integration/annotation-signature.test.ts`), con
+     * `(?:\s+…)*` el patrón matchea `"Echeverria, Marta Date"` sobre
+     * `"Echeverria, Marta Date: 07/07/2026"` — la ocurrencia cruza al run
+     * siguiente, su envolvente se estira sobre los dos, y Grouping descarta
+     * por solapamiento el grupo de **Fecha**. Es el mismo mecanismo que
+     * ADR-088 §1 tuvo que cerrar en NER: una entidad que abarca dos runs no
+     * solo tapa de más, hace **desaparecer** a su vecina.
+     *
+     * Cuando la carátula termina en `s/` o `c/`, en cambio, el freno existe y
+     * es explícito, así que ahí el tramo se abre hasta 3 nombres sin reabrir
+     * aquel agujero. Sin cierre sigue entrando uno solo, y el resto es
+     * territorio del NER.
+     *
+     * `maskFormat` es el mismo que `MASK_FORMAT_BY_TYPE[Person]` de
+     * `grouping-engine`: una carátula no tiene una forma de máscara propia,
+     * a diferencia de las dos variantes de patente (ADR-029 §2).
+     */
+    id: "caratula-ar",
+    entityType: EntityType.Person,
+    /*
+     * El orden de las dos ramas importa (ADR-122 §2): la alternancia de JS es
+     * ordenada y las dos arrancan en el mismo índice, así que si la rama de la
+     * MARCA fuera primero se quedaría con el match corto y truncaría el
+     * nombre. Sobre `"Autos: López, María Fernanda c/ Empresa"` eso da
+     * `"López, María"` en vez de `"López, María Fernanda"`. Va primero la que
+     * tiene cierre.
+     *
+     * ADR-122 §1: los dos lados aceptan CAJA ALTA (`\p{Lu}\p{L}+`, no
+     * `\p{Lu}\p{Ll}+`) y el separador puede venir en alta. Una carátula de
+     * expediente se escribe `APELLIDO, NOMBRE S/ RECURSO DE CASACIÓN`: con la
+     * forma anterior el patrón daba **0 matches en 20 páginas** de un fallo
+     * escaneado, o sea que estaba apagado justo sobre el formato para el que
+     * se escribió. El `8/` y el `$/` son los dos glifos que Tesseract puso de
+     * verdad en lugar de la `S` (ADR-122 §3), no una lista defensiva.
+     *
+     * ADR-103: el match exige una MARCA DE CARÁTULA adyacente. Sin ella,
+     * `Palabra, Palabra` es una forma que aparece en prosa normal todo el
+     * tiempo, y producía dos clases de falso positivo que el checksum no
+     * puede filtrar —mira el segundo término, y ahí sí hay un nombre—:
+     *
+     *   adverbio inicial   "Finalmente, Alejandro"
+     *   ENUMERACIÓN        "Abril, Facundo"   <- dos personas REALES,
+     *                                            emitidas como una sola
+     *
+     * La segunda es la grave: no inventa a nadie, **fusiona** a dos que
+     * existen, y anonimizar a una arrastra a la otra sin que se note hasta
+     * leer el PDF exportado — que es como se encontró.
+     *
+     * Dos vías, cualquiera alcanza: la palabra que la introduce ANTES
+     * (`Autos: Pérez, Juan`) o las partículas que separan a las partes
+     * DESPUÉS (`Pérez, Juan c/ Empresa`). La segunda es la que sostiene todo
+     * lo de ADR-122: la caja alta y los nombres de más entran **solo** por
+     * ahí, que es la vía con un límite del lado derecho.
+     *
+     * Las marcas incluyen las de **firma** y **perito**, y no por completitud:
+     * la forma invertida aparece igual en la firma de una pericia
+     * (`Firmado: Echeverria, Marta`) y al designar un profesional
+     * (`perito a López, María`), que son contextos de carátula tanto como el
+     * encabezado. La primera versión de este anclaje las perdía — lo
+     * detectaron los tests de ADR-092, que las tenían codificadas.
+     *
+     * Esto revisa el juicio de ADR-092, que descartó el lookbehind con la
+     * regla "no cambies un falso positivo por un falso negativo". La regla
+     * vale cuando hay uno de cada lado; un FP que se ve y se apaga cuesta un
+     * clic, uno que fusiona dos personas cuesta una fuga silenciosa.
+     */
+    pattern:
+      /\b\p{Lu}\p{L}+,(?:\s+\p{Lu}\p{L}+){1,3}\b(?=\s+(?:[cs]\/|[CS8$]\/))|(?<=(?:[Cc]aratulad[oa]s?|[Aa]utos|[Cc]ausa|[Ee]xpediente|[Ff]irmad[oa]|[Ff]irma|[Pp]erito|[Ss]uscriben?)\s*[:,]?\s{0,3}(?:a\s{1,3})?)\b\p{Lu}\p{Ll}+,\s+\p{Lu}\p{Ll}+\b/gu,
+    checksum: firstNameIsInLexicon,
+    normalizer: flipCaption,
+    maskFormat: "XXXXX XXXXX",
   },
 ];

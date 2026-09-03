@@ -10,6 +10,8 @@
 
 > Convención de citas: `ADR-073 §N` refiere a **Decisión §N**; el contexto se cita como `ADR-073, Contexto §N`.
 
+> **Los nombres de este documento son ficticios.** Precedente: ADR-084.
+
 ## Contexto
 
 ### 1. Dos fechas distintas salen como un solo grupo

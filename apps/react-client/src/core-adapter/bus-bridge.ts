@@ -29,6 +29,7 @@ import {
   PipelineStage,
   type IEventBus,
   type Unsubscribe,
+  type WorkerJobType,
 } from "@anonly/anonymization-core";
 
 import { useDegradedStore } from "../store/degraded.store.js";
@@ -56,11 +57,74 @@ export interface Stores {
 export function subscribe(bus: IEventBus, stores: Stores): Unsubscribe {
   const unsubs: Unsubscribe[] = [];
 
+  /*
+   * `WORKER_JOB_FAILED` solo trae `jobId` y `error` — no dice de qué motor era
+   * el job. El tipo viaja en `WORKER_JOB_DISPATCHED`, así que hay que
+   * recordarlo entre los dos eventos. Se limpia al completar o fallar, y de
+   * cero por documento, para que el mapa no crezca con la sesión.
+   *
+   * Deriva del contrato (`Contracts.md` §8) y no del formato del `jobId`:
+   * hoy es `"<type>-<n>-<timestamp>"`, pero eso no lo garantiza ningún doc.
+   */
+  const jobTypeById = new Map<string, WorkerJobType>();
+
+  function contarFallo(job: WorkerJobType): void {
+    const previas = stores.pipeline.getState().failedJobs;
+    stores.pipeline.setState({
+      failedJobs: { ...previas, [job]: (previas[job] ?? 0) + 1 },
+    });
+  }
+
   // ─── Pipeline (canal `pipeline`) ───
 
   unsubs.push(
     bus.on(EventChannel.Pipeline, EngineEvents.DOCUMENT_IMPORTED, (payload) => {
       stores.document.setState({ id: payload.documentId, name: payload.name });
+      // Documento nuevo, cuenta nueva: si no, el aviso de un análisis viejo
+      // sobrevive al siguiente y acusa a un documento que no tuvo el problema.
+      jobTypeById.clear();
+      stores.pipeline.setState({ failedJobs: {} });
+    }),
+  );
+
+  // ─── Workers (canal `workers`) ───
+  //
+  // Un job que falla NO es un `PIPELINE_FAILED`: el pool rechaza ese job y el
+  // pipeline sigue hasta `Ready`. Hasta este cableado nada de esto llegaba a
+  // ningún store, así que la única señal de que un motor entero se murió era
+  // un `occurrenceCount: 0` indistinguible de "no había nada que detectar".
+
+  unsubs.push(
+    bus.on(EventChannel.Workers, EngineEvents.WORKER_JOB_DISPATCHED, (payload) => {
+      jobTypeById.set(payload.jobId, payload.type);
+    }),
+  );
+
+  unsubs.push(
+    bus.on(EventChannel.Workers, EngineEvents.WORKER_JOB_COMPLETED, (payload) => {
+      jobTypeById.delete(payload.jobId);
+    }),
+  );
+
+  unsubs.push(
+    bus.on(EventChannel.Workers, EngineEvents.WORKER_JOB_FAILED, (payload) => {
+      const job = jobTypeById.get(payload.jobId);
+      jobTypeById.delete(payload.jobId);
+      // Sin el `dispatched` correspondiente no se puede atribuir el fallo a un
+      // motor; contarlo bajo una etiqueta inventada sería peor que no contarlo.
+      if (job !== undefined) contarFallo(job);
+    }),
+  );
+
+  // ─── OCR (canal `ocr`) ───
+  //
+  // Una página que el OCR no puede leer no siempre pasa por un worker caído
+  // (`ocr.engine.ts` emite esto por cualquier fallo de página y sigue con la
+  // siguiente). Cae en el mismo balde: texto que nadie llegó a revisar.
+
+  unsubs.push(
+    bus.on(EventChannel.Ocr, EngineEvents.OCR_PAGE_FAILED, () => {
+      contarFallo("ocr-page");
     }),
   );
 

@@ -1,6 +1,6 @@
 /**
  * Integración (Hito 10.9, ADR-074 §Validación, PR 11): una entidad Persona
- * partida en dos líneas —"Pablo" cierra un renglón, "Roman" abre el
+ * partida en dos líneas —"Diego" cierra un renglón, "Ramos" abre el
  * siguiente, el caso real medido en la pericia (ADR-074, Contexto §1)— de la
  * detección al canvas: dos rectángulos pintados, ninguno cubriendo el ancho
  * de la página.
@@ -118,22 +118,22 @@ function createConfig(): EngineConfig {
 }
 
 /**
- * "Pablo" al final de un renglón (x=520, cerca del borde derecho de una
- * página de 595 pt), "Roman" al principio del siguiente (x=10, borde
+ * "Diego" al final de un renglón (x=520, cerca del borde derecho de una
+ * página de 595 pt), "Ramos" al principio del siguiente (x=10, borde
  * izquierdo) — la misma geometría que Contexto §1 mide sobre la pericia
- * real ("Pablo" en x=524,4; "Román Fortes," en x=14,0).
+ * real ("Diego" en x=524,4; "Ramos Vargas," en x=14,0).
  */
 function createPage(): Page {
   const words: Word[] = [
     {
-      text: "Pablo",
+      text: "Diego",
       bbox: { x: 520, y: 100, width: 40, height: 12 },
       pageIndex: 0,
       confidence: 1,
       source: "pdf",
     },
     {
-      text: "Roman",
+      text: "Ramos",
       bbox: { x: 10, y: 114, width: 45, height: 12 },
       pageIndex: 0,
       confidence: 1,
@@ -209,12 +209,12 @@ describe("integración — entidad partida en dos líneas: fragments de punta a 
   it("paints two rectangles, neither spanning the page width", async () => {
     asPipelineMock(pipeline).mockResolvedValue(
       mockTokenClassificationPipeline((text) => {
-        const pabloIndex = text.indexOf("Pablo");
-        const romanIndex = text.indexOf("Roman");
-        if (pabloIndex < 0 || romanIndex < 0) return Promise.resolve([]);
+        const diegoIndex = text.indexOf("Diego");
+        const ramosIndex = text.indexOf("Ramos");
+        if (diegoIndex < 0 || ramosIndex < 0) return Promise.resolve([]);
         return Promise.resolve([
-          { entity: "B-PER", score: 0.95, index: pabloIndex, word: "Pablo" },
-          { entity: "I-PER", score: 0.93, index: romanIndex, word: "Roman" },
+          { entity: "B-PER", score: 0.95, index: diegoIndex, word: "Diego" },
+          { entity: "I-PER", score: 0.93, index: ramosIndex, word: "Ramos" },
         ]);
       }),
     );

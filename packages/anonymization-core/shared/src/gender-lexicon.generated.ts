@@ -5,13 +5,13 @@
  * Léxico de género por nombre de pila (ADR-069 §1-§3), fuente única Buenos
  * Aires Data "Nombres Permitidos" (CC-BY-2.5-AR). Procedencia completa
  * (URL, licencia, fecha de descarga, hash) en
- * packages/anonymization-core/grouping-engine/assets/gender-lexicon.provenance.json.
+ * packages/anonymization-core/shared/assets/gender-lexicon.provenance.json.
  *
  * 9788 entradas, claves en orden alfabético (el hash de
  * procedencia no depende del orden de iteración).
  * Generado 2026-08-14T06:22:08.481Z — sha256 b09f0d4201669b4810b68e7100c9777cfa2b04e7e64d4f50c1bf4cbc4d92cbf0.
  */
-import type { GenderLexiconLabel } from "./gender.js";
+import type { GenderLexiconLabel } from "./types.js";
 
 export const GENDER_LEXICON: ReadonlyMap<string, GenderLexiconLabel> = new Map([
   ["aaron", "m"],

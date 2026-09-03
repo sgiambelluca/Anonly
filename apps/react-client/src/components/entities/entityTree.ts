@@ -49,7 +49,30 @@ export function cascadeCheckboxState(groups: ReadonlyArray<EntityGroup>): Cascad
 export function visibleTypeEntries(
   groupsByType: ReadonlyMap<EntityType, ReadonlyArray<EntityGroup>>,
 ): ReadonlyArray<readonly [EntityType, ReadonlyArray<EntityGroup>]> {
-  return Array.from(groupsByType.entries()).filter(([, groups]) => groups.length > 0);
+  return Array.from(groupsByType.entries())
+    .filter(([, groups]) => groups.length > 0)
+    .map(([type, groups]) => [type, sortByDocumentOrder(groups)] as const);
+}
+
+/*
+ * El store acumula por orden de LLEGADA (`entities.store.ts#addGroup`:
+ * `[...bucket, group]`), y eso coincidía con el orden del documento **por
+ * accidente**, porque todo el pipeline corría en serie. ADR-101 paralelizó el
+ * despacho de OCR y el accidente se terminó: las entidades empezaron a
+ * aparecer en la lista en el orden en que el motor las encontró, con sus
+ * números salteados.
+ *
+ * `indexInType` es la fuente correcta: ADR-028 lo renumera canónicamente por
+ * **primera aparición documental** antes de `GROUPING_FINISHED`, justamente
+ * porque el orden de llegada de `ENTITY_FOUND` ya se declaraba
+ * no-determinístico. O sea que el dato siempre estuvo bien y lo único que
+ * faltaba era que la lista lo respetara.
+ *
+ * Desempate por `id` para que el orden sea estable mientras el pipeline
+ * todavía corre y hay grupos con índice provisional.
+ */
+function sortByDocumentOrder(groups: ReadonlyArray<EntityGroup>): ReadonlyArray<EntityGroup> {
+  return [...groups].sort((a, b) => a.indexInType - b.indexInType || a.id.localeCompare(b.id));
 }
 
 /** Busca un `EntityGroup` por `id` en cualquier bucket de tipo. `undefined` si no existe. */

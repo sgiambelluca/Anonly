@@ -1,0 +1,17 @@
+{
+  "documentId": "doc-011",
+  "entities": [
+    {
+      "entityType": "ADDRESS",
+      "value": "Pueyrredón 2584",
+      "pageIndex": 0,
+      "detector": "ner"
+    },
+    {
+      "entityType": "DATE",
+      "value": "09/09/2018",
+      "pageIndex": 0,
+      "detector": "regex"
+    }
+  ]
+}

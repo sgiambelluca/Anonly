@@ -244,7 +244,7 @@ Cada spec de motor sigue la plantilla canónica de 15 secciones (Objetivo → Ch
 
 ## Atribución de datos de terceros
 
-El léxico de género usado para inferir `personGender` sobre entidades `Person` (`docs/adr/ADR-060-Reemplazo-Por-Genero.md`, `docs/adr/ADR-069-Lexico-De-Genero-Fuente-Unica-Y-Canal-Del-Usuario.md`) incorpora datos derivados de "Nombres" (Buenos Aires Data, CC-BY-2.5-AR). Atribución completa, licencia y procedencia (URL, fecha de descarga, hash del artefacto) en [`NOTICE`](./NOTICE) y en `packages/anonymization-core/grouping-engine/assets/gender-lexicon.provenance.json`.
+El léxico de género usado para inferir `personGender` sobre entidades `Person` (`docs/adr/ADR-060-Reemplazo-Por-Genero.md`, `docs/adr/ADR-069-Lexico-De-Genero-Fuente-Unica-Y-Canal-Del-Usuario.md`) incorpora datos derivados de "Nombres" (Buenos Aires Data, CC-BY-2.5-AR). Atribución completa, licencia y procedencia (URL, fecha de descarga, hash del artefacto) en [`NOTICE`](./NOTICE) y en `packages/anonymization-core/shared/assets/gender-lexicon.provenance.json`.
 
 ## Roadmap
 
