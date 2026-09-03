@@ -13,7 +13,11 @@ import { fileURLToPath } from "node:url";
 
 import { AnnotationKind, EngineError, ReplacementMode, type Annotation, type MarkerLegendRow, type Replacement, type SerializedEngineError, type Word } from "@anonly/shared";
 import type { EngineConfig, EngineContext } from "@anonly/shared";
-import { createEngineContext as sharedCreateEngineContext, createMockConfig as sharedCreateMockConfig } from "@anonly/test-utils";
+import {
+  createEngineContext as sharedCreateEngineContext,
+  createEngineContextWithRealBus as sharedCreateEngineContextWithRealBus,
+  createMockConfig as sharedCreateMockConfig,
+} from "@anonly/test-utils";
 import type { getDocument } from "pdfjs-dist";
 import { vi } from "vitest";
 
@@ -26,7 +30,6 @@ import type { RenderPageInput } from "../../render.types.js";
  * acá para que cada suite siga importando de un solo lugar.
  */
 export {
-  createEngineContextWithRealBus,
   createMockBus,
   createMockCache,
   createMockLogger,
@@ -767,4 +770,17 @@ export function createMockConfig(overrides?: Partial<EngineConfig>): EngineConfi
  */
 export function createEngineContext(overrides?: Partial<EngineContext>): EngineContext {
   return sharedCreateEngineContext({ config: createMockConfig(), ...overrides });
+}
+
+/*
+ * Igual que `createEngineContext`, pero con bus real — y con la config de ESTE
+ * motor, no la genérica.
+ *
+ * Re-exportar el compartido tal cual dejaba a sus 13 call sites con
+ * `render.previewScale`/`fullScale`/`jpegQuality` y `export.*` distintos de los
+ * que tenían, en silencio: el motor lee los cuatro. El conteo de tests no lo
+ * habría visto — un valor de mock que cambia no borra ningún test.
+ */
+export function createEngineContextWithRealBus(overrides?: Partial<EngineContext>): EngineContext {
+  return sharedCreateEngineContextWithRealBus({ config: createMockConfig(), ...overrides });
 }
