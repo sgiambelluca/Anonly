@@ -370,7 +370,16 @@ Marca los grupos que **el detector sugirió sin estar seguro**: nacen con `enabl
 
 - **Props**: `sourceGroupId`.
 - **Comportamiento**: autocomplete para elegir `targetGroupId` (filtrado por mismo `EntityType`).
-- **Acción**: `actions.mergeGroups(sourceGroupId, targetGroupId)`.
+  **Varios destinos a la vez** (`UX_Guidelines.md` §3.2, "2+ grupos del mismo tipo"): el botón
+  **"+ Agregar otro grupo"** suma una fila de destino, y cada fila ofrece solo los grupos que
+  ninguna otra tomó. La **primera fila es el grupo que sobrevive** —conserva su `id`, su modo y su
+  identidad— y por eso no se puede quitar; las demás tienen su botón de quitar.
+- **Acción**: `actions.mergeGroups(sourceGroupId, targetGroupId)`, una vez por cada paso de
+  `mergePlan(sourceGroupId, targetGroupIds)`. **El contrato no cambia**: `GROUP_MERGE_REQUESTED`
+  sigue siendo 1→1 (`Contracts.md`) y la UI emite N-1 requests contra el mismo destino. Es seguro
+  en fila porque `applyGroupMerge` corre síncrono (no hay `await` en su cuerpo) y porque el grupo
+  que sobrevive es el `target`, que conserva su `id` — el destino de los pasos siguientes existe
+  todavía. Cada paso se queda con `min(index)`, así que el resultado conserva el menor de todos.
 - **Feedback**: toast "Grupos fusionados. Índice conservado: 01."
 
 ### 3.7 `SplitDialog`
