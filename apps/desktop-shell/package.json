@@ -9,7 +9,8 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "pnpm build && electron .",
-    "test": "vitest run src/__tests__"
+    "test": "vitest run src/__tests__",
+    "icon": "electron scripts/render-icon.cjs"
   },
   "devDependencies": {
     "@types/node": "^20.16.10",

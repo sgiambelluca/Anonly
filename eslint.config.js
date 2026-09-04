@@ -50,6 +50,7 @@ export default tseslint.config(
             "playwright.measure.config.ts",
             "apps/react-client/postcss.config.js",
             "apps/react-client/tailwind.config.js",
+            "apps/desktop-shell/scripts/render-icon.cjs",
           ],
         },
         tsconfigRootDir: import.meta.dirname,
@@ -294,6 +295,29 @@ export default tseslint.config(
     rules: {
       "no-restricted-imports": "off",
       "import/no-default-export": "off",
+    },
+  },
+  {
+    /*
+     * Scripts de build del shell. Corren bajo Electron (o sea Node) y viven
+     * fuera de todo tsconfig, así que el project service no les da tipos y
+     * `no-undef` no conoce los globals de Node. Se declaran acá en vez de
+     * meterlos al tsconfig del paquete: ese compila a `dist/` lo que se
+     * empaqueta, y un generador de assets no se empaqueta.
+     */
+    files: ["apps/desktop-shell/scripts/*.cjs"],
+    languageOptions: {
+      sourceType: "commonjs",
+      globals: {
+        require: "readonly",
+        module: "writable",
+        __dirname: "readonly",
+        process: "readonly",
+        setTimeout: "readonly",
+      },
+    },
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
     },
   },
   {

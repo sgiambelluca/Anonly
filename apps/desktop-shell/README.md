@@ -29,6 +29,19 @@ pnpm --filter @anonly/desktop-shell start
 | `src/paths.ts` | Traduce pathname → archivo, y rechaza todo lo que no sea un asset del build. |
 | `src/preload.ts` | La superficie main↔renderer completa: un booleano (ADR-132 §7). |
 
+## El ícono
+
+`assets/icon.svg` es la fuente; `assets/icon.png` (1024×1024) es lo que consume
+`electron-builder` para generar el `.icns` de macOS y el `.ico` de Windows.
+Regenerar el PNG: `pnpm --filter @anonly/desktop-shell icon`.
+
+Es la marca de `Logo.tsx` —documento con una barra de censura— adaptada al
+medio, no un símbolo nuevo: la placa oscura con la geometría de íconos de
+macOS ya lo distingue de un documento PDF suelto, así que el símbolo no tiene
+que hacer ese trabajo. La página va rellena en blanco y no contorneada porque
+a 32 px un contorno de 1 px desaparece contra la placa, y lo único que tiene
+que sobrevivir a ese tamaño es "hoja con una barra azul cruzándola".
+
 ## Por qué `app://` y no `file://`
 
 El renderer usa **module workers** (`worker: { format: "es" }` en el
