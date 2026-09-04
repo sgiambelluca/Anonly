@@ -82,3 +82,11 @@ apps/react-client/public/pdfjs/
 # ninguna versión suba nunca. Ver `RELEASING.md`.
 .measure/
 release/
+
+# Sparkle vendoreado y el addon compilado (ADR-131 §3).
+#
+# `Sparkle.framework` (3 MB) NO se commitea: lo baja `fetch-sparkle.sh` desde
+# el release oficial verificando sha256 — mismo criterio que ADR-018 para los
+# modelos y el wasm. `build/` es salida de node-gyp.
+apps/desktop-shell/native/vendor/
+apps/desktop-shell/native/build/
