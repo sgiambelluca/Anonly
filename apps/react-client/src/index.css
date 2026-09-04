@@ -27,7 +27,18 @@
   --color-success: 16 185 129; /* #10b981 */
   --color-warning: 245 158 11; /* #f59e0b */
   --color-warning-strong: 180 83 9; /* #b45309 */
-  --color-error: 239 68 68; /* #ef4444 */
+  /*
+   * `#dc2626` y no el `#ef4444` de siempre (ADR-087 §3.1, mismo criterio que
+   * `warning-strong`). El anterior fallaba el 4.5:1 de `UX_Guidelines.md` §9 en
+   * los **tres** usos que tiene el token, no en uno:
+   *   - texto blanco sobre el relleno del botón de peligro: 3.76:1
+   *   - `text-error` sobre `bg-primary`: 3.76:1
+   *   - `text-error` sobre `bg-secondary`: 3.60:1
+   * El tercero es el que más pesa: es el color de los mensajes de error, o sea
+   * el texto que menos se puede dar el lujo de no leerse. `#dc2626` da 4.83 /
+   * 4.83 / 4.62 y sigue leyéndose rojo.
+   */
+  --color-error: 220 38 38; /* #dc2626 */
   --color-error-foreground: 255 255 255; /* #ffffff */
 }
 

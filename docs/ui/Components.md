@@ -789,7 +789,7 @@ sale sólido y nada avisa.
 --color-success: #10b981;
 --color-warning: #f59e0b;        /* solo relleno decorativo — ver nota */
 --color-warning-strong: #b45309; /* ADR-087 §3.1: bordes, iconos y texto de precaución */
---color-error: #ef4444;
+--color-error: #dc2626;      /* 4.83:1 — era #ef4444, que fallaba en sus tres usos */
 --radius-sm: 4px;
 --radius-md: 8px;
 --radius-lg: 12px;
@@ -835,6 +835,16 @@ quedara debajo de su mínimo.
 > olvido.** Pintan encima de la página del PDF renderizada, que es blanca en los
 > dos temas. Cambiarlos con el tema los movería respecto del fondo real sobre el
 > que se ven.
+
+> **`--color-error` pasó de `#ef4444` a `#dc2626`.** El anterior fallaba el
+> 4.5:1 de `UX_Guidelines.md` §9 en los tres usos del token: texto blanco sobre
+> el relleno del botón de peligro (3.76:1), y `text-error` sobre `bg-primary`
+> (3.76:1) y sobre `bg-secondary` (3.60:1). El tercero es el que más pesa: es
+> el color de los mensajes de error. `#dc2626` da 4.83 / 4.83 / 4.62.
+>
+> `hl.conflict` (§9) sigue en `#ef4444` y no cambia: es un highlight **no
+> textual** sobre la página blanca del PDF, donde el mínimo aplicable es el 3:1
+> de WCAG 1.4.11 y lo cumple con 3.76:1.
 
 ### 10.3 Notas
 
