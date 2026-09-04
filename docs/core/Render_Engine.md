@@ -186,6 +186,8 @@ Semántica de `rasterizePage` (ADR-034 §1):
 - Rasteriza la página **sin reemplazos ni highlights** (uso: alimentar el OCR desde el Orchestrator, que no puede importar pdfjs).
 - **No emite eventos** (`PREVIEW_UPDATED` incluido) y **no toca el cache LRU** de previews.
 - Precondición: documento cargado vía `loadDocument`; si no, `InvalidInputError` (ADR-030). `pageIndex` fuera de rango o `scale <= 0` → `InvalidInputError`. Fallo de pdfjs/canvas → `RenderPageFailedError` (retryable).
+
+  **Una cancelación de pdfjs NO es un fallo (ADR-133)**: cuando llega un pedido más nuevo para la misma página, pdfjs descarta el render en vuelo con `RenderingCancelledException` y la vista previa se dibuja igual con el pedido nuevo. Eso se mapea a `CancelledError`, que `worker-pool.ts` re-lanza sin emitir `WORKER_JOB_FAILED`. Envolverla en `RenderPageFailedError` hacía que el cliente levantara "No se pudo generar la vista previa de algunas páginas" por una operación que salió bien. Se reconoce por `err.name`, no por el texto del mensaje: `name` es API pública de pdfjs, el mensaje puede cambiar entre versiones.
 - En modo pool corre como job del `RenderPool`; el `ImageData` se transfiere zero-copy al host.
 
 Semántica de `renderLegendPage` (ADR-059 §5):
@@ -299,6 +301,7 @@ El `ImageData` se transfiere zero-copy al host. El host lo convierte a `Blob` y 
 | Code | Clase | Cuándo | Recuperable | Acción |
 |---|---|---|---|---|
 | `RENDER_PAGE_FAILED` | `RenderPageFailedError` | error de renderizado de una página (PDF.js lanza, OOM en canvas) | sí | reintentar 1 vez, si persiste emitir `PREVIEW_PAGE_FAILED` y continuar con otras páginas |
+| `CANCELLED` | `CancelledError` | pdfjs descartó el render en vuelo porque llegó otro más nuevo para la misma página (ADR-133) | — | no es un fallo: la pool no emite `WORKER_JOB_FAILED` y no llega al cliente |
 | `RENDER_TIMEOUT` | `RenderTimeoutError` | timeout (default 10 s por página preview, 30 s full) | sí | reintentar 1 vez |
 | `RENDER_FAILED` | `RenderFailedError` | error fatal en batch, o `getDocument()` falla en `loadDocument` (PDF ilegible para pdfjs; excepcional, la etapa 1 ya lo validó — ADR-030) | no | emitir `RENDER_FAILED`, abortar batch |
 | `ENGINE_NOT_INITIALIZED` | `EngineNotInitializedError` | `renderPage` antes de `init` | no | bug del caller |

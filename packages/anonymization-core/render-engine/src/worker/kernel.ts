@@ -843,12 +843,43 @@ export function fitReplacementFont(
   return fitReplacementFontSized(measureWidth, text, mode, boxHeight, availableWidth).font;
 }
 
-function toPageFailure(
+/**
+ * `RenderingCancelledException` de pdfjs: el render de una página se descartó
+ * porque llegó otro más nuevo para la misma página.
+ *
+ * Se reconoce por `name` y no por el texto del mensaje —"Rendering cancelled,
+ * page N"— porque el mensaje es de la librería y puede cambiar entre
+ * versiones sin aviso; `name` es parte de su API pública.
+ */
+function isRenderingCancelled(err: unknown): boolean {
+  return err instanceof Error && err.name === "RenderingCancelledException";
+}
+
+/**
+ * **Una cancelación no es una falla, y confundirlas le miente al usuario.**
+ *
+ * pdfjs cancela el render en vuelo de una página cuando llega uno más nuevo
+ * para esa misma página — al hacer zoom, al cambiar el tamaño de la ventana, o
+ * al conmutar Original ↔ Anonimizado. Es el camino normal: la vista previa se
+ * dibuja igual, con el pedido nuevo.
+ *
+ * Hasta ADR-133 eso se envolvía en `RenderPageFailedError`, la pool lo emitía
+ * como `WORKER_JOB_FAILED`, y el cliente levantaba el aviso "No se pudo
+ * generar la vista previa de algunas páginas" — un susto por una operación
+ * que salió bien. Medido el 2026-09-04 en el contenedor de escritorio: la
+ * página 0 lo disparaba en cada importación.
+ *
+ * `CancelledError` es el tipo correcto y la pool ya lo distingue: lo re-lanza
+ * sin emitir `WORKER_JOB_FAILED` (`worker-pool.ts`), así que la cancelación
+ * deja de contarse como fallo sin tocar el cliente ni el contrato de eventos.
+ */
+export function toPageFailure(
   documentId: string,
   pageIndex: number,
   err: unknown,
-): RenderPageFailedError | RenderTimeoutError {
+): RenderPageFailedError | RenderTimeoutError | CancelledError {
   if (err instanceof RenderPageFailedError || err instanceof RenderTimeoutError) return err;
+  if (err instanceof CancelledError || isRenderingCancelled(err)) return new CancelledError();
   const reason = err instanceof Error ? err.message : String(err);
   return new RenderPageFailedError(documentId, pageIndex, reason);
 }
