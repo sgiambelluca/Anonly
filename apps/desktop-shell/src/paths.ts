@@ -1,4 +1,5 @@
-import { join, normalize, resolve, sep } from "node:path";
+import * as nodePath from "node:path";
+import type { PlatformPath } from "node:path";
 
 /**
  * Traduce el pathname de una URL `app://` a una ruta de archivo dentro de la
@@ -19,8 +20,19 @@ import { join, normalize, resolve, sep } from "node:path";
  * pathname puede producir ese caso (los `..` ya se rechazaron arriba), así
  * que es defensa en profundidad: sostiene la invariante si el filtro de
  * arriba cambia.
+ *
+ * `platform` existe **para poder verificar Windows sin una máquina Windows**.
+ * `node:path` cambia de semántica según dónde corre —separador, raíces con
+ * letra de unidad, rutas UNC—, así que sin esta costura los tests de esta
+ * función solo prueban POSIX, y Windows es justamente la plataforma donde más
+ * usuarios va a tener el instalador. Es el único parámetro del módulo que
+ * existe por los tests, y se paga barato: en producción nadie lo pasa.
  */
-export function resolveAssetPath(root: string, pathname: string): string | null {
+export function resolveAssetPath(
+  root: string,
+  pathname: string,
+  platform: PlatformPath = nodePath,
+): string | null {
   let decoded: string;
   try {
     decoded = decodeURIComponent(pathname);
@@ -35,11 +47,11 @@ export function resolveAssetPath(root: string, pathname: string): string | null 
   // `\` también separa en Windows: un `..\` tiene que caer por la misma puerta.
   if (decoded.split(/[/\\]/).includes("..")) return null;
 
-  const rootAbs = resolve(root);
+  const rootAbs = platform.resolve(root);
   const relative = decoded === "/" || decoded === "" ? "/index.html" : decoded;
-  const candidate = resolve(join(rootAbs, normalize(relative)));
+  const candidate = platform.resolve(platform.join(rootAbs, platform.normalize(relative)));
 
-  if (candidate !== rootAbs && !candidate.startsWith(rootAbs + sep)) return null;
+  if (candidate !== rootAbs && !candidate.startsWith(rootAbs + platform.sep)) return null;
   return candidate;
 }
 
@@ -51,12 +63,15 @@ export function resolveAssetPath(root: string, pathname: string): string | null 
  * filesystem plano, y el asar no aporta nada sobre bytes que ya son públicos).
  * En desarrollo se toma del workspace.
  */
-export function rendererRoot(options: {
-  readonly isPackaged: boolean;
-  readonly resourcesPath: string;
-  readonly shellDir: string;
-}): string {
+export function rendererRoot(
+  options: {
+    readonly isPackaged: boolean;
+    readonly resourcesPath: string;
+    readonly shellDir: string;
+  },
+  platform: PlatformPath = nodePath,
+): string {
   return options.isPackaged
-    ? join(options.resourcesPath, "renderer")
-    : resolve(options.shellDir, "..", "..", "react-client", "dist");
+    ? platform.join(options.resourcesPath, "renderer")
+    : platform.resolve(options.shellDir, "..", "..", "react-client", "dist");
 }
