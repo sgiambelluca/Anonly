@@ -55,6 +55,17 @@
 
 ### 3.2 CSP verificada (ADR-039, Hito 10 PR10)
 
+> **Desde ADR-130 la CSP no la manda un hosting: la manda el shell.** El
+> contenedor registra el esquema `app://` y sirve el `dist` con estos mismos
+> headers más los dos de aislamiento de ADR-100 (`apps/desktop-shell/src/security.ts`,
+> fuente única). La política es idéntica; lo que cambia es que dejó de depender
+> de configurar bien un servidor ajeno. Lo verifica el gate
+> `csp-under-app-protocol` de §11.
+>
+> `connect-src 'self'` **sigue sin excepciones** aunque el producto ahora tenga
+> un actualizador: ese vive en el proceso main, donde la CSP no aplica y donde
+> no hay documentos (ADR-132 §1).
+
 ```
 default-src 'self';
 script-src 'self' blob: 'wasm-unsafe-eval';
@@ -285,11 +296,30 @@ Para evitar reidentificación por patrones:
 | `export-has-no-text-objects` | integration | ninguna página del export contiene objetos de texto — hace **verificable** la propiedad "el export es 100% imagen" en vez de dejarla como convención (ADR-004, ADR-059 §4) |
 | `metadata-strip` | integration | export no contiene `author`/`creator`/`title` del original |
 | `no-password-in-logs` | unit | spy de logger no recibe password |
-| `csp-strict` | E2E | response headers tienen CSP de §3.2 |
-| `sri-present` | E2E | todos los `<script>` tienen `integrity` |
-| `no-third-party-connect` | E2E | sin requests a dominios no first-party |
+| `csp-under-app-protocol` | E2E (shell) | la CSP de §3.2 y los headers de aislamiento llegan bajo `app://` — reemplaza a `csp-strict`, que leía response headers de un servidor que ya no existe |
+| `shell-no-egress` | E2E (shell) | un pipeline completo no emite **ninguna** request a un host `http(s)`. Reemplaza a `no-third-party-connect`, que solo prohibía dominios ajenos: acá no se permite ninguno |
+| `cross-origin-isolated` | E2E (shell) | `crossOriginIsolated` en el renderer **y adentro de un worker**; sin eso `onnxruntime-web` cae a un hilo (ADR-100) |
+| `webprefs-locked` | E2E (shell) | `contextIsolation`/`sandbox` on, `nodeIntegration` off, y `require`/`process` inalcanzables desde el renderer |
+| `no-cache-storage-writes` | E2E (shell) | ningún intento de escribir en `Cache Storage`, que rechaza `app://` (ADR-132 §7) |
+| `updater-payload-clean` | unit (shell) | el payload que el actualizador manda al renderer se arma **por lista blanca**: nunca contenido, nombre ni metadato de un documento (ADR-131 §5) |
 | `pnpm-audit` | CI | cero high/critical |
 | `lockfile-immutable` | CI | `pnpm-lock.yaml` no cambia sin `pnpm install` deliberado |
+
+> **`sri-present` se retiró (ADR-132 §5).** Verificaba `integrity` en los
+> `<script>`, y eso protege contra un CDN comprometido. No hay `<script>`
+> remoto: todo se sirve desde el propio paquete. La integridad de lo que entra
+> al instalador la garantiza el sha256 de `assets.lock.json` (ADR-018), que es
+> una verificación real y no una vacua.
+>
+> **`csp-strict` y `no-third-party-connect` fueron reemplazados**, no
+> eliminados: cambia el mecanismo —ya no hay response headers de un servidor
+> que leer— y la intención se endurece, porque `shell-no-egress` no permite
+> ningún host en vez de solo los ajenos.
+>
+> **Lo que `shell-no-egress` no puede ver**: solo observa lo que pasa por la
+> sesión de Electron. Un servicio interno de Chromium que use otro contexto no
+> aparecería. Por eso ADR-132 §4 además **apaga** esos caminos por línea de
+> comandos: el gate prueba lo observable, los switches cierran lo que no.
 
 ---
 

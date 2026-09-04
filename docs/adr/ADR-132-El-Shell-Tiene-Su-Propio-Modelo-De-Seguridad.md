@@ -46,7 +46,11 @@ Además: navegación externa y `window.open` bloqueados por defecto — cualquie
 
 ### 4. Chromium no habla con nadie
 
-Chromium hace sus propias salidas de red (Safe Browsing, component updater, prefetch de DNS). En un producto que afirma no tocar internet, hay que apagarlas explícitamente y **poder demostrarlo**. Deja de ser una afirmación del README y pasa a ser una propiedad verificada.
+Chromium hace sus propias salidas de red (Safe Browsing, component updater, prefetch de DNS). En un producto que afirma no tocar internet, hay que apagarlas explícitamente y **poder demostrarlo**.
+
+**Medido antes de tocar nada** (2026-09-04): durante un pipeline completo la app no emitió ninguna request a un host. Los 29 pedidos que registra la sesión son `file://` del propio handler de `app://` leyendo el disco. O sea que los switches no corrigen un problema observado — cierran caminos que Chromium puede abrir por su cuenta en otra versión, en otra plataforma o ante otra configuración. En un producto cuyo argumento es "esto no habla con internet", la diferencia entre *hoy no lo hace* y *no puede hacerlo* es la que importa.
+
+Se apagan por línea de comandos: `disable-background-networking` (el paraguas: variations, component updater, sincronización de tiempo), más `disable-component-update`, `disable-domain-reliability`, `disable-breakpad` y `no-pings`.
 
 ### 5. Gates nuevos en `08_Security_Model.md` §11
 
@@ -59,7 +63,9 @@ Chromium hace sus propias salidas de red (Safe Browsing, component updater, pref
 | `webprefs-locked` | `contextIsolation`/`sandbox` on, `nodeIntegration` off en toda `BrowserWindow` |
 | `no-cache-storage-writes` | ningún intento de escribir en `Cache Storage` durante un pipeline completo (§7) |
 
-`csp-strict` y `no-third-party-connect` cambian de mecanismo (dejan de leer response headers de un server) pero no de intención. **`sri-present` queda sin objeto**: no hay `<script>` remoto que verificar, y la integridad de los assets ya la garantiza el sha256 de `assets.lock.json` en el build del instalador (ADR-018). Se retira del gate y se documenta el reemplazo, en vez de dejarlo verde por vacuidad.
+**Implementados el 2026-09-04**, cinco como E2E contra el contenedor (`tests/e2e/security-gates.spec.ts`) y `updater-payload-clean` como unit del shell — en runtime haría falta un chequeo real contra un servidor, y lo que puede filtrar no es la red sino la función que arma el payload, así que se prueba ahí.
+
+`csp-strict` y `no-third-party-connect` cambian de mecanismo (dejan de leer response headers de un server) pero no de intención; de hecho `shell-no-egress` **endurece**: no permite ningún host, no solo los ajenos. **`sri-present` queda sin objeto**: no hay `<script>` remoto que verificar, y la integridad de los assets ya la garantiza el sha256 de `assets.lock.json` en el build del instalador (ADR-018). Se retira del gate y se documenta el reemplazo, en vez de dejarlo verde por vacuidad.
 
 ### 6. La procedencia reemplaza a la firma como argumento de confianza
 

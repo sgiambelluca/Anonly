@@ -29,6 +29,34 @@ export interface SparkleEvent {
   readonly message?: string;
 }
 
+/** Lo único que cruza al renderer. */
+export interface UpdateEventPayload {
+  readonly type: string;
+  readonly version?: string;
+  readonly percent?: number;
+}
+
+/**
+ * Construye lo que viaja al renderer por IPC, **por lista blanca**.
+ *
+ * Es una función aparte y no un literal adentro del handler para que el gate
+ * `updater-payload-clean` (ADR-132 §5) pueda probarla. La propiedad a sostener
+ * es que por este canal **nunca** viaje contenido, nombre ni metadato de un
+ * documento (ADR-131 §5), y una lista blanca la sostiene aunque el evento de
+ * Sparkle gane campos nuevos en una versión futura — que es exactamente el
+ * caso en que una copia con spread fallaría en silencio.
+ *
+ * `message` queda afuera a propósito: es texto de error de la librería y no
+ * hay nada que garantice que no incluya una ruta del sistema.
+ */
+export function toUpdateEventPayload(event: SparkleEvent): UpdateEventPayload {
+  return {
+    type: event.type,
+    ...(event.version === undefined ? {} : { version: event.version }),
+    ...(event.percent === undefined ? {} : { percent: event.percent }),
+  };
+}
+
 /**
  * Dónde vive el addon compilado.
  *

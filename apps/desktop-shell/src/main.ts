@@ -5,7 +5,7 @@ import { app, BrowserWindow, ipcMain, net, protocol, shell } from "electron";
 
 import { rendererRoot, resolveAssetPath } from "./paths";
 import { headersFor } from "./security";
-import { loadBridge } from "./updater";
+import { loadBridge, toUpdateEventPayload } from "./updater";
 
 const SCHEME = "app";
 const ORIGIN = `${SCHEME}://local`;
@@ -35,6 +35,31 @@ const APPCAST_URL = "https://github.com/sgiambelluca/Anonly/releases/latest/down
  * Va antes de `whenReady`: Electron exige registrarlo con el runtime todavía
  * sin arrancar.
  */
+/*
+ * Chromium apagado hacia afuera (ADR-132 §4).
+ *
+ * Medido antes de tocar nada: durante un pipeline completo la app no emitió
+ * **ninguna** request a un host de red — los 29 pedidos que la sesión registra
+ * son `file://` del propio handler de `app://` leyendo el disco. Así que esto
+ * no arregla un problema observado: cierra caminos que Chromium puede abrir
+ * por su cuenta en otra versión, en otra plataforma o ante otra configuración.
+ *
+ * En un producto cuyo argumento central es "esto no habla con internet", la
+ * diferencia entre "hoy no lo hace" y "no puede hacerlo" es la que importa.
+ *
+ * `--disable-background-networking` es el paraguas (variations, component
+ * updater, sincronización de tiempo); los otros cierran cosas que no cubre.
+ */
+for (const flag of [
+  "disable-background-networking",
+  "disable-component-update",
+  "disable-domain-reliability",
+  "disable-breakpad",
+  "no-pings",
+]) {
+  app.commandLine.appendSwitch(flag);
+}
+
 protocol.registerSchemesAsPrivileged([
   {
     scheme: SCHEME,
@@ -163,11 +188,7 @@ function startUpdater(window: BrowserWindow): void {
     // Solo el ciclo de vida de la actualización: tipo, versión y progreso.
     // Nunca contenido, nombre ni metadato de un documento (ADR-131 §5).
     if (window.isDestroyed()) return;
-    window.webContents.send("updater:event", {
-      type: event.type,
-      ...(event.version === undefined ? {} : { version: event.version }),
-      ...(event.percent === undefined ? {} : { percent: event.percent }),
-    });
+    window.webContents.send("updater:event", toUpdateEventPayload(event));
   });
 
   /*
