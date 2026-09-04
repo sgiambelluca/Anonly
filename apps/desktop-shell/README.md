@@ -20,14 +20,17 @@ pnpm --filter @anonly/react-client build   # el shell sirve este dist
 pnpm --filter @anonly/desktop-shell start
 ```
 
-## Los cuatro archivos
+## Los tres archivos
 
 | Archivo | Qué hace |
 |---|---|
 | `src/main.ts` | Proceso principal: registra `app://`, crea la ventana, bloquea la navegación externa. |
 | `src/security.ts` | CSP y headers de aislamiento. **Fuente única**: si divergen de `08_Security_Model.md` §3.2, el gate falla. |
 | `src/paths.ts` | Traduce pathname → archivo, y rechaza todo lo que no sea un asset del build. |
-| `src/preload.ts` | La superficie main↔renderer completa: un booleano (ADR-132 §7). |
+
+No hay `preload`: la superficie main↔renderer es **cero** (ADR-132 §3). El
+primer canal real lo va a traer el actualizador de ADR-131.
+
 
 ## El ícono
 

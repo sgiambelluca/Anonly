@@ -1,4 +1,3 @@
-import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { app, BrowserWindow, net, protocol, shell } from "electron";
@@ -78,8 +77,22 @@ function createWindow(): BrowserWindow {
     show: false,
     backgroundColor: "#ffffff",
     title: "Anonly",
+    /*
+     * Sin `preload`: la superficie main↔renderer es **cero** (ADR-132 §3).
+     * Hubo uno, que existía solo para avisarle al renderer que corría en el
+     * contenedor; cuando ADR-132 §7 se resolvió apagando la caché en el motor
+     * —donde vive de verdad—, ese aviso se quedó sin nadie que lo leyera. Un
+     * preload que expone un booleano que nadie consume no es superficie
+     * mínima: es superficie muerta que además miente sobre que el renderer se
+     * bifurca por plataforma.
+     *
+     * `contextIsolation` y `sandbox` no dependen del preload: son opciones de
+     * la ventana y siguen puestas.
+     *
+     * El primer canal real lo va a traer el actualizador (ADR-131) para avisar
+     * que hay versión nueva. Se diseña ahí, con su justificación.
+     */
     webPreferences: {
-      preload: join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
