@@ -157,7 +157,16 @@ let deferredCore = createDeferred<IAnonymizationCore>();
  * byte-a-byte el que se publica — difiere en esta función y en nada más.
  */
 function exposeCoreForMeasurement(instance: IAnonymizationCore): void {
-  if (!import.meta.env.DEV && import.meta.env["VITE_E2E"] !== "1") return;
+  /*
+   * Notación de **punto** y no de corchetes. Vite reemplaza `import.meta.env.X`
+   * literalmente en el build; con `import.meta.env["X"]` no lo hace, queda una
+   * búsqueda en runtime, y entonces la condición entera deja de ser
+   * eliminable. Verificado: con corchetes, `__anonlyCore` y `VITE_E2E`
+   * aparecían en el bundle de release — o sea el instalador exponía la
+   * instancia del Core, que es exactamente lo que esta función promete no
+   * hacer fuera de desarrollo.
+   */
+  if (!import.meta.env.DEV && import.meta.env.VITE_E2E !== "1") return;
   (globalThis as { __anonlyCore?: IAnonymizationCore }).__anonlyCore = instance;
 }
 
