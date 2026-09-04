@@ -27,7 +27,7 @@
     "test:snapshot": "vitest run snapshot.test.ts",
     "test:ui": "vitest run --ui",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "playwright test",
+    "test:e2e": "VITE_E2E=1 pnpm --filter @anonly/react-client build && pnpm --filter @anonly/desktop-shell build && playwright test --config=playwright.electron.config.ts",
     "test:measure": "playwright test --config=playwright.measure.config.ts",
     "test:perf": "vitest run tests/perf",
     "test:stress": "vitest run tests/stress",

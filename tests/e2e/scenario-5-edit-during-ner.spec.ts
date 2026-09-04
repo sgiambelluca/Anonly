@@ -52,8 +52,7 @@
  * como no reconocida.
  */
 
-import { expect, test } from "@playwright/test";
-
+import { expect, openApp, test } from "./support/electronApp.js";
 import { textTenPagesWithPersonFile } from "./support/fixtures.js";
 
 // Mismo orden de magnitud que scenario-1 (misma carga: NER real sobre
@@ -63,7 +62,7 @@ import { textTenPagesWithPersonFile } from "./support/fixtures.js";
 test.setTimeout(240_000);
 
 test("editar un grupo mientras NER sigue corriendo no pierde la edición", async ({ page }) => {
-  await page.goto("/", { waitUntil: "networkidle" });
+  await openApp(page, "networkidle");
 
   const file = await textTenPagesWithPersonFile();
   await page.locator('input[type="file"]').setInputFiles(file);
@@ -79,7 +78,25 @@ test("editar un grupo mientras NER sigue corriendo no pierde la edición", async
   // `role="status"` que resuelve acá es el de `ScanScreen`, que es la única
   // pantalla montada en esta fase.
   const status = page.getByRole("status");
-  await expect(status).toContainText(/Preparando el detector de nombres…/, { timeout: 30_000 });
+  /*
+   * Acepta el estado de carga del modelo **o** el de detección.
+   *
+   * El primero es transitorio y en el contenedor de escritorio puede no llegar
+   * a observarse: desde ADR-130 el modelo viaja adentro del instalador, así que
+   * cargarlo es leer un archivo local y `NER_MODEL_READY` llega casi de
+   * inmediato. Contra el dev server, donde el modelo venía por HTTP, la carga
+   * duraba lo suficiente para verlo siempre.
+   *
+   * Lo que este escenario necesita no es ver esa etiqueta: es que el pipeline
+   * esté **en carrera** cuando se edita el grupo, unas líneas más abajo.
+   * "Buscando datos sensibles…" (`PipelineStage.Detecting`) es exactamente esa
+   * fase, y a diferencia de la otra no depende de ganarle a una carga de
+   * archivo.
+   */
+  await expect(status).toContainText(
+    /Preparando el detector de nombres…|Buscando datos sensibles…/,
+    { timeout: 30_000 },
+  );
 
   // El grupo del DNI (Regex) aparece incrementalmente, antes de Ready.
   const dniGroup = page.getByRole("treeitem", { name: "34.567.891" });

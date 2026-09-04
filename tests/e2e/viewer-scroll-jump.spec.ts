@@ -45,8 +45,9 @@
  *   scroll**, y es cobertura nueva de ADR-087 §2.
  */
 
-import { expect, test, type Page } from "@playwright/test";
+import { type Page } from "@playwright/test";
 
+import { expect, openApp, test } from "./support/electronApp.js";
 import { manyNeutralPagesFile } from "./support/fixtures.js";
 import { installSettingsOverride } from "./support/settingsOverride.js";
 
@@ -82,7 +83,7 @@ function viewerContainer(page: Page, kindLabel = "Documento original") {
 }
 
 async function importManyPagesDocument(page: Page): Promise<void> {
-  await page.goto("/", { waitUntil: "networkidle" });
+  await openApp(page, "networkidle");
   const file = await manyNeutralPagesFile(PAGE_COUNT);
   await page.locator('input[type="file"]').setInputFiles(file);
 

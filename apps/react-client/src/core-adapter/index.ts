@@ -143,9 +143,21 @@ let deferredCore = createDeferred<IAnonymizationCore>();
  * `import.meta.env.DEV` es una constante que Vite reemplaza literalmente, así
  * que en el build de producción el cuerpo entero se elimina por dead-code
  * elimination: no llega al bundle.
+ *
+ * **`VITE_E2E` existe porque los E2E dejaron de correr contra el dev server.**
+ * Desde ADR-130 corren contra el contenedor, y el contenedor sirve el build de
+ * producción — donde esta función ya no existe. Sin la bandera, el escenario
+ * que verifica ADR-125 (recrear el core al guardar settings sin documento
+ * abierto) no tiene forma de observar la identidad de la instancia.
+ *
+ * La bandera la pone **solo** `pnpm test:e2e`. El workflow de release no la
+ * define, así que el instalador que baja un usuario sigue sin esta función:
+ * `import.meta.env.VITE_E2E` es `undefined` ahí y el cuerpo se elimina igual.
+ * El costo, que hay que nombrarlo: el binario que prueban los E2E no es
+ * byte-a-byte el que se publica — difiere en esta función y en nada más.
  */
 function exposeCoreForMeasurement(instance: IAnonymizationCore): void {
-  if (!import.meta.env.DEV) return;
+  if (!import.meta.env.DEV && import.meta.env["VITE_E2E"] !== "1") return;
   (globalThis as { __anonlyCore?: IAnonymizationCore }).__anonlyCore = instance;
 }
 
