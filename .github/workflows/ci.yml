@@ -174,7 +174,12 @@ jobs:
   test-e2e:
     name: E2E (Playwright)
     needs: install
-    runs-on: ubuntu-latest
+    # macOS y no ubuntu: desde ADR-130 los E2E corren contra el contenedor
+    # de escritorio, o sea una app de Electron con ventana. En un runner de
+    # Linux eso necesita un display virtual (xvfb) — y encima probaría una
+    # plataforma que el proyecto no publica. macOS es uno de los dos targets
+    # reales, y en repos públicos el runner es gratis.
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - name: Check if e2e tests exist
