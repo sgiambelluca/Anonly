@@ -1,0 +1,20 @@
+{
+  "name": "@anonly/desktop-shell",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Contenedor de escritorio (Electron). Sirve el build de @anonly/react-client por el protocolo app:// con los headers de aislamiento y la CSP del modelo de seguridad. ADR-130, ADR-132.",
+  "license": "MIT",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "pnpm build && electron .",
+    "test": "vitest run src/__tests__"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.10",
+    "electron": "^44.2.0",
+    "typescript": "^5.6.2",
+    "vitest": "^3.2.6"
+  }
+}

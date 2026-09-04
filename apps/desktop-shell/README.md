@@ -1,0 +1,51 @@
+# @anonly/desktop-shell
+
+Contenedor de escritorio de Anonly (Electron). Sirve el build de
+`@anonly/react-client` por un protocolo propio con los headers de aislamiento
+y la CSP del modelo de seguridad.
+
+**No contiene lógica de producto.** No importa motores, no toca `packages/`,
+no procesa documentos: solo aloja al renderer y le garantiza el entorno que la
+web dejaba en manos del hosting.
+
+Decisiones: [ADR-130](../../docs/adr/ADR-130-El-Contenedor-De-Escritorio-Fija-El-Motor.md)
+(por qué Electron), [ADR-131](../../docs/adr/ADR-131-El-Actualizador-Es-La-Primera-Salida-De-Red.md)
+(distribución y updater), [ADR-132](../../docs/adr/ADR-132-El-Shell-Tiene-Su-Propio-Modelo-De-Seguridad.md)
+(esta postura de seguridad).
+
+## Correrlo
+
+```bash
+pnpm --filter @anonly/react-client build   # el shell sirve este dist
+pnpm --filter @anonly/desktop-shell start
+```
+
+## Los cuatro archivos
+
+| Archivo | Qué hace |
+|---|---|
+| `src/main.ts` | Proceso principal: registra `app://`, crea la ventana, bloquea la navegación externa. |
+| `src/security.ts` | CSP y headers de aislamiento. **Fuente única**: si divergen de `08_Security_Model.md` §3.2, el gate falla. |
+| `src/paths.ts` | Traduce pathname → archivo, y rechaza todo lo que no sea un asset del build. |
+| `src/preload.ts` | La superficie main↔renderer completa: un booleano (ADR-132 §7). |
+
+## Por qué `app://` y no `file://`
+
+El renderer usa **module workers** (`worker: { format: "es" }` en el
+`vite.config.ts` del cliente). Bajo `file://` fallan por CORS, y `COOP`/`COEP`
+no aplican a ese esquema — sin ellos no hay `SharedArrayBuffer` y
+`onnxruntime-web` se autolimita a un hilo, que es el doble de tiempo de
+inferencia (ADR-100).
+
+El esquema se registra `standard` **y** `secure`: sin el primero no tiene
+origen y los workers no cargan; sin el segundo no es contexto seguro y no hay
+`SharedArrayBuffer`. Verificado en el spike del 2026-09-04:
+`crossOriginIsolated === true` en el renderer y adentro de los workers, con el
+build `ort-wasm-simd-threaded` cargando.
+
+## Por qué CommonJS
+
+A contramano del resto del monorepo, que es ESM. `sandbox: true` (ADR-132 §3)
+obliga a que el preload sea CommonJS —Electron lo carga con `require`— y
+aflojar el sandbox para ganar coherencia de módulos sería cambiar una
+propiedad de seguridad por una de estilo.

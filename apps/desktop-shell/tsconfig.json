@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    /*
+     * CommonJS, no ESM, y a contramano del resto del monorepo. El motivo es
+     * `sandbox: true` (ADR-132 §3): un preload sandboxeado NO puede ser un
+     * módulo ES —Electron lo carga con `require`— y aflojar el sandbox para
+     * ganar coherencia de módulos sería cambiar una propiedad de seguridad
+     * por una de estilo. Compilar main y preload al mismo formato evita
+     * además un segundo tsconfig solo para el preload.
+     */
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "verbatimModuleSyntax": false,
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"],
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts"]
+}
