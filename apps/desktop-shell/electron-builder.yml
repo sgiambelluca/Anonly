@@ -43,7 +43,11 @@ npmRebuild: false
 mac:
   category: public.app-category.productivity
   target:
+    # El DMG es lo que baja una persona; el ZIP es de lo que Sparkle actualiza
+    # —no sabe instalar desde un DMG—. Los dos salen del mismo build.
     - target: dmg
+      arch: [arm64, x64]
+    - target: zip
       arch: [arm64, x64]
   icon: assets/icon.png
   # Sin certificado de Apple Developer (ADR-131 §4): no se firma ni se
@@ -64,12 +68,12 @@ mac:
   # el Info.plist queda cubierta por la firma del bundle, mientras que una
   # constante en JS vive adentro del asar, que cualquiera reemplaza.
   #
-  # `SUPublicEDKey` vacío hasta que el humano genere el par (ADR-131 §4). Con
-  # la clave vacía Sparkle se niega a arrancar con
-  # `SUSparkleErrorDomain Code=1`, que es el modo correcto de fallar: sin
-  # clave no hay forma de verificar quién firmó lo que se descarga.
+  # La privada del par vive como secret `SPARKLE_PRIVATE_KEY` de GitHub
+  # Actions y nunca en el repo (ADR-131 §4). Si esta clave se cambia, las
+  # instalaciones existentes dejan de aceptar actualizaciones: la validan
+  # contra la que tienen horneada.
   extendInfo:
-    SUPublicEDKey: ""
+    SUPublicEDKey: "8kemzn0NGGxaJS7v8Ko6Pit46kot+7bzSghGPAcwB+s="
     SUFeedURL: https://github.com/sgiambelluca/Anonly/releases/latest/download/appcast.xml
     SUEnableAutomaticChecks: true
 

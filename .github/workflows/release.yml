@@ -65,8 +65,56 @@ jobs:
       - name: Build renderer
         run: pnpm --filter @anonly/react-client build
 
+      # Solo macOS: baja Sparkle (verificando sha256) y compila el addon nativo
+      # del actualizador. Tiene que pasar ANTES de empaquetar — `extraResources`
+      # referencia el `.node` y `extraFiles` el framework.
+      - name: Preparar Sparkle
+        if: matrix.platform == 'mac'
+        run: |
+          pnpm --filter @anonly/desktop-shell sparkle:fetch
+          pnpm --filter @anonly/desktop-shell sparkle:build
+
       - name: Build installer
         run: pnpm --filter @anonly/desktop-shell package:${{ matrix.platform }}
+
+      # Firma cada ZIP con la clave EdDSA y arma el appcast que la app consulta.
+      # La clave privada entra por **stdin** (`--ed-key-file -`): nunca se
+      # escribe a disco ni queda en la línea de comandos, que es visible en la
+      # tabla de procesos del runner.
+      - name: Firmar actualizaciones y generar el appcast
+        if: matrix.platform == 'mac' && startsWith(github.ref, 'refs/tags/v')
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          if [ -z "$SPARKLE_PRIVATE_KEY" ]; then
+            echo "Falta el secret SPARKLE_PRIVATE_KEY: sin él las actualizaciones de macOS no se pueden firmar." >&2
+            exit 1
+          fi
+          cd apps/desktop-shell
+          # Un directorio con SOLO los zips: `generate_appcast` indexa todo lo
+          # que encuentra, y los DMG no son actualizables por Sparkle.
+          mkdir -p updates
+          cp release/*.zip updates/
+          printf '%s' "$SPARKLE_PRIVATE_KEY" | ./native/vendor/bin/generate_appcast \
+            --ed-key-file - \
+            --download-url-prefix "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/" \
+            --link "https://github.com/${{ github.repository }}" \
+            updates/ 2>&1 | tee appcast.log
+
+          # `generate_appcast` NO falla cuando la clave privada no corresponde a
+          # la `SUPublicEDKey` de la app: avisa y genera el appcast **sin
+          # firma**. Publicar eso es peor que no publicar nada — cada usuario
+          # descargaría la actualización y la rechazaría, en silencio y sin que
+          # el release dé ninguna señal. Se convierte en error acá.
+          if grep -q "does not match" appcast.log; then
+            echo "::error::La clave de SPARKLE_PRIVATE_KEY no corresponde a la SUPublicEDKey horneada en la app." >&2
+            exit 1
+          fi
+          if ! grep -q "edSignature" updates/appcast.xml; then
+            echo "::error::El appcast salió sin firma; ninguna instalación aceptaría esta actualización." >&2
+            exit 1
+          fi
+          cp updates/appcast.xml release/appcast.xml
 
       # El paso que hace que Windows no se publique a ciegas: el .exe se
       # construye desde macOS, donde no se puede ejecutar. Acá arranca de
@@ -82,9 +130,11 @@ jobs:
           if-no-files-found: error
           path: |
             apps/desktop-shell/release/*.dmg
+            apps/desktop-shell/release/*.zip
             apps/desktop-shell/release/*.exe
             apps/desktop-shell/release/*.blockmap
             apps/desktop-shell/release/latest*.yml
+            apps/desktop-shell/release/appcast.xml
 
   release:
     name: Publicar release

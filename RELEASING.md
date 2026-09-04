@@ -53,6 +53,16 @@ Ese smoke test existe por Windows: el `.exe` se puede construir desde macOS
 pero no ejecutar, así que sin un runner de Windows abriéndolo una vez, esa
 plataforma se publicaría sin que nadie la haya visto arrancar.
 
+En macOS además firma cada actualización con la clave EdDSA (el secret
+`SPARKLE_PRIVATE_KEY`, que entra por stdin y nunca toca el disco del runner) y
+publica el `appcast.xml` que la app consulta.
+
+Ese paso **falla el build** si la clave privada no corresponde a la
+`SUPublicEDKey` horneada en la app, o si el appcast sale sin firma.
+`generate_appcast` solo avisa en ese caso y genera el archivo igual; publicarlo
+sería peor que no publicar nada, porque cada usuario descargaría la
+actualización y la rechazaría sin que el release dé ninguna señal.
+
 **El release se crea como borrador.** El tag lo arma; publicarlo lo decidís
 vos, desde la página del release. Hasta entonces ningún usuario lo recibe.
 
