@@ -308,10 +308,17 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                 onCheckedChange={setAutoUpdate}
                 label="Actualizar automáticamente"
               />
+              {/*
+                Texto único que describe LOS DOS estados, no el estado actual.
+                La versión anterior decía "Te vamos a avisar..." cuando estaba
+                apagado, y pegada debajo de un checkbox sin marcar se leía como
+                lo que iba a pasar **si lo activabas** — o sea, exactamente al
+                revés. Un texto que cambia con el toggle es ambiguo por
+                posición aunque sea correcto por contenido.
+              */}
               <p className="mt-1 text-sm text-text-secondary">
-                {autoUpdate
-                  ? "Las versiones nuevas se instalan solas al reiniciar la app."
-                  : "Te vamos a avisar cuando haya una versión nueva, y vos decidís cuándo instalarla."}
+                Activado, las versiones nuevas se instalan solas al reiniciar la app. Desactivado,
+                te avisamos y vos decidís cuándo instalarlas.
               </p>
               <button
                 type="button"
