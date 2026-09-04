@@ -16,6 +16,18 @@
  * cuando no eligió nada, lo que diga el sistema operativo.
  */
 :root {
+  /*
+   * `color-scheme` le dice al navegador con qué paleta dibujar lo que NO
+   * pintamos nosotros: fondo por defecto de los `<input>`, barras de scroll,
+   * el caret, los controles nativos.
+   *
+   * Faltaba, y el efecto era visible: el buscador de entidades no declara
+   * fondo propio, así que en tema oscuro quedaba con el blanco por defecto del
+   * navegador y nuestro texto claro encima — texto blanco sobre blanco, no se
+   * leía lo que se escribía. Lo reportó el humano probando el instalador en
+   * Windows 11.
+   */
+  color-scheme: light;
   --color-bg-primary: 255 255 255; /* #ffffff */
   --color-bg-secondary: 249 250 251; /* #f9fafb */
   --color-bg-tertiary: 243 244 246; /* #f3f4f6 */
@@ -45,6 +57,7 @@
 /* Preferencia del sistema, solo si el usuario no eligió explícitamente. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
+    color-scheme: dark;
     --color-bg-primary: 31 41 55; /* #1f2937 */
     --color-bg-secondary: 17 24 39; /* #111827 */
     --color-bg-tertiary: 55 65 81; /* #374151 */
@@ -63,6 +76,7 @@
 
 /* Elección explícita del usuario: gana sobre el sistema, en los dos sentidos. */
 :root[data-theme="dark"] {
+  color-scheme: dark;
   --color-bg-primary: 31 41 55; /* #1f2937 */
   --color-bg-secondary: 17 24 39; /* #111827 */
   --color-bg-tertiary: 55 65 81; /* #374151 */

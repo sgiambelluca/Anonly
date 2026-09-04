@@ -799,6 +799,8 @@ sale sólido y nada avisa.
 
 ### 10.2 Oscuro
 
+**`color-scheme` se declara junto con los tokens, en los tres bloques.** No es opcional: le dice al navegador con qué paleta dibujar lo que la app **no** pinta — el fondo por defecto de un `<input>`, las barras de scroll, el caret, los controles nativos. Sin declararlo, un campo que no fija su propio fondo queda con el blanco por defecto y el texto claro encima: blanco sobre blanco. Pasó con el buscador de entidades y lo encontró un humano usando el instalador, no un test. Hoy lo cubre `tests/e2e/dark-mode-contrast.spec.ts`, que afirma sobre estilos computados y no sobre clases.
+
 Se activa con `data-theme="dark"` en `<html>`, o con `prefers-color-scheme:
 dark` cuando el usuario no eligió explícitamente. La preferencia vive en
 `settings.store.ts` (`theme: "system" | "light" | "dark"`, default `"system"`).
