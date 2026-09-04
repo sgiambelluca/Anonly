@@ -59,10 +59,16 @@ Producto pulido para uso profesional diario. Mejor calidad de detección, mejor 
 - Soporte para screen readers refinado ( VoiceOver, NVDA).
 - Navegación por teclado 100% (sin necesidad de mouse).
 
-### 2.7 PWA
+### 2.7 PWA — ~~en alcance~~ **FUERA DE ALCANCE (ADR-130)**
 
-- **Installable como PWA**: service worker para offline (assets estáticos cacheados).
-- **Modo offline real**: tras primera carga, la app funciona sin red (modelos y wasm ya cacheados).
+El 1.0 se entrega como **aplicación de escritorio empaquetada**, no como PWA, y el escritorio **reemplaza** al cliente web en vez de convivir con él.
+
+La PWA resolvía el modo offline, pero no los dos problemas que motivaron el cambio: (a) sigue necesitando una URL, y la promesa "100% local" es también perceptiva —ver ADR-130 §1—; (b) el motor de render lo sigue decidiendo el navegador desde el que se instala, que es de donde vino el bug de Safari de `polyfills.ts`. Y su modo offline es frágil: los ~202 MB viven en Cache Storage, que el navegador desaloja bajo presión de disco.
+
+Lo que la PWA prometía lo cubre el instalador, mejor: los assets viajan adentro del paquete (ADR-130) y las actualizaciones son automáticas (ADR-131).
+
+- ~~**Installable como PWA**: service worker para offline (assets estáticos cacheados).~~
+- ~~**Modo offline real**: tras primera carga, la app funciona sin red (modelos y wasm ya cacheados).~~
 
 ---
 

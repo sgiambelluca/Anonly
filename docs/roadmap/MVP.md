@@ -550,8 +550,24 @@ De las ~70: **~30 ya estaban cerradas** por hitos posteriores (ADR-053/054/056, 
 - Audit `pnpm audit`.
 - Bundle size check.
 
+### Hito 11.5 — Escritorio (ADR-130, ADR-131, ADR-132)
+
+Insertado con la convención decimal del repo, sin renumerar Release. Adelantado desde v2.0 §2.2: el escritorio deja de ser un target futuro y pasa a ser **el** target del release.
+
+- ~~Spike: confirmar `crossOriginIsolated` y los cinco workers de motor bajo el protocolo `app://`.~~ **CERRADO (2026-09-04)** — los cuatro puntos verdes con Electron 44.2.0, pipeline completo verificado con `text-10p.pdf` y `image-alpha-3p.pdf` (ADR-132 "Verificado en el spike").
+- `apps/desktop-shell` (Electron) cargando el build de `apps/react-client`. Protocolo propio, CSP y headers de aislamiento servidos por el shell.
+- Apagar la caché de assets del renderer cuando corre en el shell: `Cache Storage` no acepta el esquema `app://` y los assets ya son locales (ADR-132 §7).
+- Reescritura de `08_Security_Model.md` para el contenedor + gates nuevos de ADR-132 §5.
+- `electron-builder`: instalador Windows (NSIS) y macOS (DMG, firma ad-hoc).
+- Versionado real con Changesets — hoy todo está en `0.0.0` y el actualizador compara versiones (ADR-131 §6).
+- Workflow de release por tag → GitHub Releases, con `pnpm assets:mirror` como paso previo (los ~202 MB no están versionados).
+- Auto-update: `electron-updater` en Windows; Sparkle vendoreado en macOS, con firma EdDSA propia (ADR-131 §3/§4).
+- Migración de los E2E de Playwright al target shell.
+- Firma de código Windows vía SignPath Foundation (gratis para OSS; requiere el `LICENSE` de la raíz).
+
 ### Hito 12 — Release 0.1.0
-- Docs finales, README del repo, demo, deploy a CDN estático.
+- Docs finales, README del repo, demo.
+- Publicación de instaladores en GitHub Releases. ~~deploy a CDN estático~~ — no hay hosting: la app no se sirve, se descarga (ADR-130, ADR-131 §1).
 
 ---
 
