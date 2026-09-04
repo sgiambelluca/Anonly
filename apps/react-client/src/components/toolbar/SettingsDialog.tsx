@@ -260,7 +260,33 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
 
   return (
     <>
-      <Dialog open={open} onClose={onClose} title="Configuración">
+      <Dialog
+        open={open}
+        onClose={onClose}
+        title="Configuración"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={onClose}>
+              Cancelar
+            </Button>
+            {/*
+              `loading` (no solo `disabled`): guardar puede recrear el core sin
+              documento abierto (ADR-125 §2) y eso tarda lo que tardan cinco
+              workers.
+            */}
+            <Button
+              variant="primary"
+              disabled={ocrLanguagesEmpty}
+              loading={saving}
+              onClick={() => {
+                void handleSave();
+              }}
+            >
+              Guardar
+            </Button>
+          </div>
+        }
+      >
         <div className="flex flex-col gap-4">
           <FormRow label="Idioma">
             <Select
@@ -396,27 +422,6 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
             {saveError}
           </p>
         ) : null}
-
-        <div className="mt-5 flex justify-end gap-2">
-          <Button variant="secondary" onClick={onClose}>
-            Cancelar
-          </Button>
-          {/*
-            `loading` (no solo `disabled`): guardar puede recrear el core sin
-            documento abierto (ADR-125 §2) y eso tarda lo que tardan cinco
-            workers.
-          */}
-          <Button
-            variant="primary"
-            disabled={ocrLanguagesEmpty}
-            loading={saving}
-            onClick={() => {
-              void handleSave();
-            }}
-          >
-            Guardar
-          </Button>
-        </div>
       </Dialog>
 
       <ConfirmDialog
