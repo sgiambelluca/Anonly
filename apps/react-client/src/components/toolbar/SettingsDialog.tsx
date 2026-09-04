@@ -48,15 +48,18 @@ import { useDocumentStore } from "../../store/document.store.js";
 import {
   useSettingsStore,
   type Language,
+  type Theme,
   type PerformancePreset,
 } from "../../store/settings.store.js";
 import { useViewerStore } from "../../store/viewer.store.js";
+import { applyTheme } from "../../theme.js";
 import { getShellUpdater } from "../../updater/index.js";
 import { Button } from "../common/Button.js";
 import { Checkbox } from "../common/Checkbox.js";
 import { ConfirmDialog } from "../common/ConfirmDialog.js";
 import { Dialog } from "../common/Dialog.js";
 import { Select, type SelectOption } from "../common/Select.js";
+import { DARK_PREVIEW, LIGHT_PREVIEW, ThemePreview } from "../common/ThemePreview.js";
 import { computeReanalyzeRenderRequest } from "../viewer/reanalyzeRenderRequest.js";
 
 import { diffReanalyzeChange, planReanalyzePatches } from "./reanalyzePlan.js";
@@ -125,6 +128,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
    * actualizador y la sección entera no se muestra. Se resuelve una vez y no
    * en cada render — no cambia durante la vida de la página.
    */
+  const [theme, setTheme] = useState<Theme>(() => useSettingsStore.getState().theme);
   const [shellUpdater] = useState(() => getShellUpdater());
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -138,6 +142,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     setPerformancePreset(current.performancePreset);
     setOcrLanguages(current.ocrLanguages);
     setAutoUpdate(current.autoUpdate);
+    setTheme(current.theme);
     setSaveError(null);
   }, [open]);
 
@@ -147,17 +152,22 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     nerEnabled: boolean;
     ocrLanguages: ReadonlyArray<string>;
     autoUpdate: boolean;
+    theme: Theme;
   }): void {
     useSettingsStore.setState(next);
     useSettingsStore.getState().persist();
     // El shell no guarda esta preferencia: la lee de acá cada vez que cambia.
     // Una sola fuente de verdad, y es la que el usuario ve.
     shellUpdater?.setAutomatic(next.autoUpdate);
+    // El tema se aplica al guardar y no al elegir: el diálogo es atómico, y si
+    // el usuario cancela nada tiene que haber cambiado. La vista previa es lo
+    // que da la devolución inmediata, que es para lo que existe.
+    applyTheme(next.theme);
   }
 
   async function handleSave(): Promise<void> {
     const previous = useSettingsStore.getState();
-    const next = { language, performancePreset, nerEnabled, ocrLanguages, autoUpdate };
+    const next = { language, performancePreset, nerEnabled, ocrLanguages, autoUpdate, theme };
     const change = diffReanalyzeChange(previous, next);
     const needsReanalyze =
       (change.ner !== undefined || change.ocr !== undefined) && documentId !== null;
@@ -207,7 +217,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
 
   async function handleConfirmReanalyze(): Promise<void> {
     const previous = useSettingsStore.getState();
-    const next = { language, performancePreset, nerEnabled, ocrLanguages, autoUpdate };
+    const next = { language, performancePreset, nerEnabled, ocrLanguages, autoUpdate, theme };
     const change = diffReanalyzeChange(previous, next);
     const patches = planReanalyzePatches(change);
 
@@ -292,6 +302,48 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
             {ocrLanguagesEmpty ? (
               <p role="alert" className="mt-1 text-sm text-error">
                 Elegí al menos un idioma.
+              </p>
+            ) : null}
+          </FormRow>
+
+          <FormRow label="Apariencia">
+            <Checkbox
+              id="settings-theme-system"
+              checked={theme === "system"}
+              onCheckedChange={(checked) => setTheme(checked ? "system" : "light")}
+              label="Seguir la configuración del sistema"
+            />
+            {/*
+              Las miniaturas son el control, no una ilustración al lado del
+              control: elegir un tema mirando su nombre es adivinar, y elegirlo
+              mirando cómo queda es decidir.
+            */}
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              {(
+                [
+                  { value: "light", label: "Modo claro", palette: LIGHT_PREVIEW },
+                  { value: "dark", label: "Modo oscuro", palette: DARK_PREVIEW },
+                ] as const
+              ).map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  aria-pressed={theme === option.value}
+                  onClick={() => setTheme(option.value)}
+                  className={`flex flex-col gap-1.5 rounded-md border p-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                    theme === option.value
+                      ? "border-accent ring-1 ring-accent"
+                      : "border-border hover:border-text-secondary"
+                  } ${theme === "system" ? "opacity-60" : ""}`}
+                >
+                  <ThemePreview palette={option.palette} />
+                  <span className="px-0.5 text-sm text-text-primary">{option.label}</span>
+                </button>
+              ))}
+            </div>
+            {theme === "system" ? (
+              <p className="mt-1 text-sm text-text-secondary">
+                Anonly usa el tema de tu sistema y lo acompaña si lo cambiás.
               </p>
             ) : null}
           </FormRow>

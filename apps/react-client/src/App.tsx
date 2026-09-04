@@ -51,6 +51,7 @@ import { initCore } from "./core-adapter/index.js";
 import { deriveEngineConfigOverrides } from "./core-adapter/settingsToEngineConfig.js";
 import { useEntitiesStore } from "./store/entities.store.js";
 import { useSettingsStore } from "./store/settings.store.js";
+import { applyTheme } from "./theme.js";
 
 export function App() {
   useEffect(() => {
@@ -60,6 +61,9 @@ export function App() {
     // previa tengan efecto real en el próximo createCore, no solo en
     // reanalyze con documento abierto.
     useSettingsStore.getState().load();
+    // Después de hidratar y antes del primer render con contenido: si se
+    // aplicara más tarde, la app parpadearía en claro antes de pasar a oscuro.
+    applyTheme(useSettingsStore.getState().theme);
     const overrides = deriveEngineConfigOverrides(useSettingsStore.getState());
     initCore(overrides).catch((error: unknown) => {
       // console.error es la única salida disponible acá sin ocultar el fallo

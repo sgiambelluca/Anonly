@@ -137,3 +137,27 @@ describe("autoUpdate", () => {
     expect(useSettingsStore.getState().autoUpdate).toBe(false);
   });
 });
+
+describe("theme", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    useSettingsStore.setState({ theme: "system" });
+  });
+
+  it('arranca en "system": la mayoría ya eligió una vez a nivel del sistema', () => {
+    expect(useSettingsStore.getState().theme).toBe("system");
+  });
+
+  it("se persiste y sobrevive a una sesión nueva", () => {
+    const storage = stubLocalStorage();
+    useSettingsStore.setState({ theme: "dark" });
+    useSettingsStore.getState().persist();
+
+    expect(JSON.parse(storage.written() ?? "{}")).toHaveProperty("theme", "dark");
+
+    useSettingsStore.setState({ theme: "light" });
+    useSettingsStore.getState().load();
+
+    expect(useSettingsStore.getState().theme).toBe("dark");
+  });
+});
