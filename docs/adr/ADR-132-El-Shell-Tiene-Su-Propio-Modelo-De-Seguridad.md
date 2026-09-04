@@ -34,9 +34,13 @@ Consecuencias directas:
 - Los mismos dos headers de aislamiento de ADR-100, ahora bajo control propio en vez de del hosting.
 - La CSP de §3.2, tal cual, incluidos `'wasm-unsafe-eval'` y los `blob:` que ADR-039 justificó.
 
-### 3. `webPreferences` bloqueado
+### 3. `webPreferences` bloqueado, y superficie main↔renderer **cero**
 
-`contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`, `webSecurity: true`. La única superficie main↔renderer es un preload con un canal IPC explícito y de superficie mínima. Sin `@electron/remote`.
+`contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`, `webSecurity: true`. Sin `@electron/remote`.
+
+**No hay preload.** La primera versión de este ADR previó uno para el flag de §7; al resolverse §7 en el motor, ese flag desapareció y el preload se quedó sin nadie que lo consumiera. Un preload que expone un booleano que nadie lee no es superficie mínima: es superficie muerta que además miente sobre que el renderer se bifurca por plataforma.
+
+El actualizador de ADR-131 probablemente introduzca el primer canal real —avisar al renderer que hay versión nueva—. Ese canal se diseña ahí, con su justificación, y no se retrofitea sobre un flag sobrante.
 
 Además: navegación externa y `window.open` bloqueados por defecto — cualquier URL que no sea `app://` se rechaza o se delega al navegador del sistema, nunca se carga adentro de la app.
 
@@ -53,6 +57,7 @@ Chromium hace sus propias salidas de red (Safe Browsing, component updater, pref
 | `csp-under-app-protocol` | la CSP de §3.2 llega efectivamente bajo `app://` |
 | `cross-origin-isolated` | `crossOriginIsolated === true` en el renderer y en los workers de motor |
 | `webprefs-locked` | `contextIsolation`/`sandbox` on, `nodeIntegration` off en toda `BrowserWindow` |
+| `no-cache-storage-writes` | ningún intento de escribir en `Cache Storage` durante un pipeline completo (§7) |
 
 `csp-strict` y `no-third-party-connect` cambian de mecanismo (dejan de leer response headers de un server) pero no de intención. **`sri-present` queda sin objeto**: no hay `<script>` remoto que verificar, y la integridad de los assets ya la garantiza el sha256 de `assets.lock.json` en el build del instalador (ADR-018). Se retira del gate y se documenta el reemplazo, en vez de dejarlo verde por vacuidad.
 
@@ -92,9 +97,15 @@ Se ejercitó el pipeline completo con dos fixtures reales, no solo la carga de l
 
 **Se verificó que es del protocolo y no de Electron**: la misma prueba, mismo Electron, mismo `dist`, cambiando **solo** el esquema por `http://127.0.0.1`, no produce ese error. Las otras dos advertencias (`Setting up fake worker` de pdfjs, y `content-length`) **aparecen idénticas en los dos modos**: son preexistentes de la web y esta decisión no las causa ni las arregla.
 
-### 7. La caché de assets se apaga en el shell
+### 7. La caché de `Cache Storage` se apaga en el motor, no con un flag del shell
 
-Cachear en `Cache Storage` assets que ya son archivos locales del instalador no aporta nada: ADR-130 los mete adentro del paquete. La capa se desactiva cuando la app corre dentro del shell, en vez de dejarla fallando en silencio. Eso implica que el renderer tiene que **saber** que está en el contenedor — un flag booleano expuesto por el preload, sin datos y sin capacidades: es la superficie mínima que resuelve el caso y no abre nada (§3).
+**Corregido respecto de la primera redacción de este ADR**, que decía que la capa se desactivaba "cuando la app corre dentro del shell", vía un booleano expuesto por el preload. Al ir a implementarlo apareció dónde vive realmente la caché, y con eso el flag dejó de tener sentido.
+
+Quien cachea es `@huggingface/transformers` (`env.useBrowserCache`, default `true` en browser), desde `ner-engine/src/worker/kernel.ts`. Y ese mismo archivo ya fija `allowRemoteModels = false` y `localModelPath = "/models/ner/"`: **el motor sirve sus modelos desde su propio origen, siempre, en los dos targets**. Guardar en `Cache Storage` una copia de un archivo que ya viene del origen propio no compra nada que el caché HTTP del navegador no dé — y en el escritorio son directamente archivos locales del instalador.
+
+Entonces no es una diferencia entre web y shell: **es una capa que nunca aportó nada en esta aplicación**. Se apaga incondicionalmente en el kernel, y el shell no necesita anunciarse.
+
+Eso evita dos cosas que la redacción original traía: un cambio de contrato del Core para pasarle un flag, y una bifurcación de comportamiento entre web y shell. Lo único que se pierde es que el renderer no sabe que está en el contenedor — y no lo necesita saber.
 
 ## Consecuencias
 
@@ -110,4 +121,4 @@ Cachear en `Cache Storage` assets que ya son archivos locales del instalador no 
 - **Los E2E cambian de target.** Playwright contra navegador deja de ser el vehículo de `csp-strict` y `no-third-party-connect`.
 - **§4 es una lista que hay que mantener**: las salidas de red de Chromium cambian entre versiones, y apagarlas es un compromiso permanente, no una tarea.
 - **La app sin notarizar sigue mostrando el trámite de Gatekeeper.** Este ADR no lo arregla; lo compensa con §6.
-- **§7 mete una diferencia de comportamiento entre web y shell**, y por lo tanto un camino de código que la web no ejercita. Es aceptable porque la web sale de alcance (ADR-130 §2), pero mientras convivan es una bifurcación real.
+- **§7 cambia el comportamiento del motor de NER, no solo el del shell.** Apagar `useBrowserCache` incondicionalmente vale para cualquier cliente que consuma el Core, no solo para el contenedor. Es correcto —el motor sirve sus modelos desde su propio origen en todos los casos— pero es un cambio en `packages/`, no en `apps/`, y hay que leerlo así.
