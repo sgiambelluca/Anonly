@@ -250,6 +250,30 @@ function configureTransformersEnv(wasmPaths: string | NerWasmPaths | undefined):
   env.allowRemoteModels = false;
   env.allowLocalModels = true;
   env.localModelPath = NER_LOCAL_MODEL_PATH;
+
+  /*
+   * Sin `Cache Storage` (ADR-132 §7).
+   *
+   * Transformers.js guarda ahí una copia de cada archivo del modelo para no
+   * volver a pedirlo. Eso servía cuando el target era la web: el origen propio
+   * era un **servidor**, y ahorrarle el viaje evitaba re-descargar ~180 MB en
+   * cada visita y habilitaba el modo offline. Desde ADR-130 el target es un
+   * instalador de escritorio y el modelo es un archivo local: guardar una
+   * copia en `Cache Storage` es copiar del disco al disco para después leer
+   * del disco.
+   *
+   * Y además no puede: `Cache Storage` solo acepta `http(s)`, y el shell sirve
+   * por `app://`. Cada `put` falla con `Request scheme 'app' is unsupported`,
+   * así que hoy la capa corre entera, falla en el 100% de sus intentos y
+   * ensucia la consola sin guardar nada. Medido en el spike del 2026-09-04:
+   * los pipelines de texto y de OCR completaron igual, con la caché inoperante.
+   *
+   * **Si alguna vez vuelve un cliente web o una PWA, esto tiene que volver a
+   * `true`** — ahí la caché sí compra algo, y sin ella la web re-descargaría el
+   * modelo en cada visita sin que nada avise. Ver `NER_Engine.md` §12.
+   */
+  env.useBrowserCache = false;
+
   if (env.backends.onnx.wasm) {
     env.backends.onnx.wasm.wasmPaths = wasmPaths ?? NER_WASM_PATH;
   }

@@ -107,6 +107,8 @@ Entonces no es una diferencia entre web y shell: **es una capa que nunca aportó
 
 Eso evita dos cosas que la redacción original traía: un cambio de contrato del Core para pasarle un flag, y una bifurcación de comportamiento entre web y shell. Lo único que se pierde es que el renderer no sabe que está en el contenedor — y no lo necesita saber.
 
+**La condición que revierte esta decisión**: que vuelva un cliente web o una PWA. Ahí la caché sí compraba algo —el origen propio era un servidor— y sin ella la web re-descarga ~180 MB en cada visita sin que nada avise. Queda anotado en los tres lugares donde alguien lo miraría: el comentario de `configureTransformersEnv()`, `core/NER_Engine.md` §12, y `roadmap/Version_1.0.md` §2.7, que es donde se decidiría reflotar la web.
+
 ## Consecuencias
 
 **A favor**

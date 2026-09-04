@@ -67,6 +67,8 @@ La PWA resolvía el modo offline, pero no los dos problemas que motivaron el cam
 
 Lo que la PWA prometía lo cubre el instalador, mejor: los assets viajan adentro del paquete (ADR-130) y las actualizaciones son automáticas (ADR-131).
 
+> **Si esto se reflota**, hay una cosa que hay que volver a prender: `ner-engine` tiene `env.useBrowserCache = false` desde ADR-132 §7, o sea que **no cachea el modelo**. En escritorio da igual —el modelo es un archivo local del instalador— pero en la web eso significa **re-descargar ~180 MB en cada visita**, y sin modo offline. No falla ni avisa: simplemente vuelve a bajar todo. La constante está en `configureTransformersEnv()` (`packages/anonymization-core/ner-engine/src/worker/kernel.ts`) y el razonamiento en `core/NER_Engine.md` §12.
+
 - ~~**Installable como PWA**: service worker para offline (assets estáticos cacheados).~~
 - ~~**Modo offline real**: tras primera carga, la app funciona sin red (modelos y wasm ya cacheados).~~
 
