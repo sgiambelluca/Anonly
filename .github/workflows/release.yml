@@ -1,0 +1,124 @@
+name: Release
+
+# El tag dispara el release, no el merge a `main` (ADR-131 §1, RELEASING.md).
+# `main` puede acumular cambios sin que ningún usuario reciba nada.
+on:
+  push:
+    tags: ["v*"]
+  # Para ejercitar el pipeline entero sin publicar nada.
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "22"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Instalador (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Sin `fail-fast`: si Windows falla, igual queremos ver si macOS anduvo.
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: mac
+          - os: windows-latest
+            platform: win
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Los ~202 MB de modelos y wasm no están versionados (ADR-018): se
+      # descargan verificando sha256 contra assets.lock.json. El cache evita
+      # bajarlos en cada release.
+      - name: Cache first-party assets
+        uses: actions/cache@v4
+        with:
+          path: |
+            apps/react-client/public/wasm
+            apps/react-client/public/models
+            apps/react-client/src/assets/onnxruntime
+          key: assets-mirror-${{ hashFiles('assets.lock.json') }}
+
+      - name: Mirror first-party assets
+        run: pnpm assets:mirror
+
+      - name: Build renderer
+        run: pnpm --filter @anonly/react-client build
+
+      - name: Build installer
+        run: pnpm --filter @anonly/desktop-shell package:${{ matrix.platform }}
+
+      # El paso que hace que Windows no se publique a ciegas: el .exe se
+      # construye desde macOS, donde no se puede ejecutar. Acá arranca de
+      # verdad y se verifica que sirva su propio origen `app://`.
+      - name: Smoke test del binario empaquetado
+        run: pnpm --filter @anonly/desktop-shell smoke
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.platform }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            apps/desktop-shell/release/*.dmg
+            apps/desktop-shell/release/*.exe
+            apps/desktop-shell/release/*.blockmap
+            apps/desktop-shell/release/latest*.yml
+
+  release:
+    name: Publicar release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      # `gh` viene preinstalado en los runners. Se usa en vez de una action de
+      # terceros a propósito: una action externa con `contents: write` es
+      # superficie de supply chain sobre el repo que produce los binarios que
+      # la gente instala.
+      - name: Crear el release (borrador)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          # Un tag con guion (v0.9.1-beta.1) es prerelease: no le llega a los
+          # usuarios normales (RELEASING.md).
+          PRERELEASE=""
+          case "$TAG" in *-*) PRERELEASE="--prerelease" ;; esac
+
+          # Draft: el tag arma el release, el humano decide cuándo se publica.
+          # Hasta que se publique, ningún usuario lo recibe.
+          gh release create "$TAG" \
+            --draft \
+            --title "Anonly $TAG" \
+            --generate-notes \
+            $PRERELEASE \
+            artifacts/*

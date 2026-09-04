@@ -325,6 +325,7 @@ export default tseslint.config(
         process: "readonly",
         setTimeout: "readonly",
         exports: "writable",
+        fetch: "readonly",
       },
     },
     rules: {

@@ -44,8 +44,20 @@ pnpm version   # sube las versiones y escribe los CHANGELOG
 git tag v0.9.0 && git push origin v0.9.0
 ```
 
-CI buildea en un runner de Windows y uno de macOS, y publica los instaladores
-como assets del release.
+`.github/workflows/release.yml` buildea en un runner de macOS y uno de
+Windows, corre un **smoke test sobre el binario ya empaquetado** —lo arranca de
+verdad y verifica que sirva su propio origen `app://`— y recién ahí sube los
+instaladores.
+
+Ese smoke test existe por Windows: el `.exe` se puede construir desde macOS
+pero no ejecutar, así que sin un runner de Windows abriéndolo una vez, esa
+plataforma se publicaría sin que nadie la haya visto arrancar.
+
+**El release se crea como borrador.** El tag lo arma; publicarlo lo decidís
+vos, desde la página del release. Hasta entonces ningún usuario lo recibe.
+
+`workflow_dispatch` corre todo el pipeline sin publicar nada, para probar que
+el camino funciona antes de tagear.
 
 ## Probar sin romperle la app a nadie
 

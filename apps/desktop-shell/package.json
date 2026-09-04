@@ -13,7 +13,8 @@
     "icon": "electron scripts/render-icon.cjs",
     "package": "pnpm build && electron-builder --publish never",
     "package:mac": "pnpm build && electron-builder --mac --publish never",
-    "package:win": "pnpm build && electron-builder --win --publish never"
+    "package:win": "pnpm build && electron-builder --win --publish never",
+    "smoke": "node scripts/smoke.cjs"
   },
   "devDependencies": {
     "@types/node": "^20.16.10",
