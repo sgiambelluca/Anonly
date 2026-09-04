@@ -16,6 +16,17 @@ export default tseslint.config(
       // (packages/**/coverage/), y sin este segundo patrón ESLint intenta
       // lintear el JS del reporter HTML de v8 y falla con parsing errors.
       "**/coverage/**",
+      // Salida de `electron-builder` (`apps/desktop-shell/release/`). Mismo
+      // motivo y misma semántica que el patrón de coverage de arriba: un
+      // patrón sin "/" inicial ancla a la raíz, así que `build/**` no lo
+      // cubre. Adentro viene el bundle entero de Electron —miles de archivos
+      // JS de terceros— y ESLint no falla con un error de lint: se queda sin
+      // memoria y tira el proceso de Node entero.
+      //
+      // Comentarios de línea y no de bloque a propósito: un glob como el de
+      // abajo contiene la secuencia que cierra un comentario `/*`, así que
+      // citarlo adentro de uno parte el archivo en dos.
+      "**/release/**",
       "**/*.d.ts",
       ".changeset/**",
       "playwright-report/**",
@@ -50,7 +61,6 @@ export default tseslint.config(
             "playwright.measure.config.ts",
             "apps/react-client/postcss.config.js",
             "apps/react-client/tailwind.config.js",
-            "apps/desktop-shell/scripts/render-icon.cjs",
           ],
         },
         tsconfigRootDir: import.meta.dirname,
@@ -314,6 +324,7 @@ export default tseslint.config(
         __dirname: "readonly",
         process: "readonly",
         setTimeout: "readonly",
+        exports: "writable",
       },
     },
     rules: {

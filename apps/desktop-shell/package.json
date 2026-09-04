@@ -10,11 +10,15 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "pnpm build && electron .",
     "test": "vitest run src/__tests__",
-    "icon": "electron scripts/render-icon.cjs"
+    "icon": "electron scripts/render-icon.cjs",
+    "package": "pnpm build && electron-builder --publish never",
+    "package:mac": "pnpm build && electron-builder --mac --publish never",
+    "package:win": "pnpm build && electron-builder --win --publish never"
   },
   "devDependencies": {
     "@types/node": "^20.16.10",
     "electron": "^44.2.0",
+    "electron-builder": "^26.15.3",
     "typescript": "^5.6.2",
     "vitest": "^3.2.6"
   }

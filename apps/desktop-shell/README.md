@@ -62,3 +62,37 @@ A contramano del resto del monorepo, que es ESM. `sandbox: true` (ADR-132 §3)
 obliga a que el preload sea CommonJS —Electron lo carga con `require`— y
 aflojar el sandbox para ganar coherencia de módulos sería cambiar una
 propiedad de seguridad por una de estilo.
+
+
+## Empaquetar
+
+```bash
+pnpm --filter @anonly/react-client build    # el renderer va adentro del instalador
+pnpm --filter @anonly/desktop-shell package # o package:mac / package:win
+```
+
+Salen en `release/`, ignorado por git. Medido el 2026-09-04: **272 MB** el DMG
+de arm64 y **277 MB** el de x64. El grueso son los ~243 MB del `dist` del
+renderer —modelo NER, wasm de Tesseract y onnxruntime, cmaps de pdfjs— que
+viajan adentro en vez de descargarse (inversión de ADR-018, decidida en
+ADR-130).
+
+### La firma ad-hoc no es cosmética
+
+`electron-builder` con `identity: null` no firma, y un binario arm64 queda con
+la firma *linker-signed* que trae de fábrica. Esa firma **no valida**:
+
+```
+code has no resources but signature indicates they must be present
+```
+
+Una app descargada —con `com.apple.quarantine`— cuya firma no valida es la que
+muestra «"Anonly" está dañado y no se puede abrir», el cartel sin salida.
+`scripts/adhoc-sign.cjs` corre en `afterPack` y sella el bundle de verdad
+(`Sealed Resources version=2 ... files=239`, `satisfies its Designated
+Requirement`), con lo que la app cae en el camino de «desarrollador no
+identificado», que sí tiene el botón "Abrir igualmente".
+
+Sigue sin estar notarizada: `spctl` la rechaza, como corresponde sin
+certificado de Apple (ADR-131 §4). Lo que esto evita es que el rechazo sea el
+insalvable.

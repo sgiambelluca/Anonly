@@ -14,7 +14,17 @@
     "verbatimModuleSyntax": false,
     "lib": ["ES2022", "DOM"],
     "types": ["node"],
-    "noEmit": true
+    "noEmit": true,
+    /*
+     * Los scripts de `scripts/` son `.cjs` y entran al proyecto solo para que
+     * ESLint tenga tipos con los que evaluar sus reglas type-aware. Sin esto
+     * caen en el "default project", que tiene un tope de 8 archivos para todo
+     * el repo y ya estaba casi lleno de configs. `checkJs` en false: se
+     * incluyen, no se chequean — el JSDoc alcanza para tipar lo que se usa.
+     * `tsconfig.build.json` no los incluye: no se empaquetan.
+     */
+    "allowJs": true,
+    "checkJs": false
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "scripts/**/*.cjs"]
 }

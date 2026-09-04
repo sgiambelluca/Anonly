@@ -1,0 +1,84 @@
+# Empaquetado de Anonly (ADR-130, ADR-131).
+#
+# El instalador pesa ~350 MB y eso es esperable: los ~243 MB del `dist` del
+# renderer —modelo NER, wasm de Tesseract y de onnxruntime, cmaps de pdfjs—
+# viajan adentro en vez de descargarse a demanda. Es la inversión de ADR-018
+# que ADR-130 decidió: cero red en el primer uso, y el caché de IndexedDB deja
+# de ser un punto único de falla.
+
+appId: io.github.sgiambelluca.anonly
+productName: Anonly
+copyright: Copyright © 2026 Santino Giambelluca
+
+directories:
+  output: release
+  buildResources: assets
+
+# Lo único que entra al asar es el shell compilado. El renderer NO: va como
+# recurso suelto (ver `extraResources`).
+files:
+  - dist/**/*
+  - package.json
+
+# `rendererRoot()` en `src/paths.ts` busca exactamente acá: `<resources>/renderer`.
+# Fuera del asar a propósito — son ~243 MB de wasm y modelos que el runtime
+# lee por el protocolo `app://`, y empaquetarlos en un archivo comprimido solo
+# agrega una capa de indirección sobre bytes que además son públicos.
+extraResources:
+  - from: ../react-client/dist
+    to: renderer
+
+afterPack: scripts/adhoc-sign.cjs
+
+asar: true
+# No hay dependencias nativas: nada que recompilar contra los headers de Electron.
+npmRebuild: false
+
+mac:
+  category: public.app-category.productivity
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+  icon: assets/icon.png
+  # Sin certificado de Apple Developer (ADR-131 §4): no se firma ni se
+  # notariza. `identity: null` evita que electron-builder busque una identidad
+  # y falle el build. La firma ad-hoc que sella el bundle —sin la cual una app
+  # descargada muestra «está dañado» en vez de la advertencia con salida— la
+  # pone `scripts/adhoc-sign.cjs`.
+  identity: null
+  darkModeSupport: false
+
+# Sin `hardenedRuntime` ni `entitlements`: los exige la notarización, que no
+# hacemos. Ponerlos sin notarizar solo agrega restricciones sin ganar nada.
+
+dmg:
+  title: ${productName}
+  contents:
+    - x: 140
+      y: 200
+      type: file
+    - x: 400
+      y: 200
+      type: link
+      path: /Applications
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: assets/icon.png
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Anonly
+
+# El updater lee de acá: los releases del repo, sin hosting propio
+# (ADR-131 §1). `electron-updater` en Windows; macOS va por Sparkle.
+publish:
+  provider: github
+  owner: sgiambelluca
+  repo: Anonly

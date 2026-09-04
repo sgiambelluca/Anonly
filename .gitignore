@@ -81,3 +81,4 @@ apps/react-client/public/pdfjs/
 # al publicar. Ignorarlos hace que `pnpm version` no encuentre nada y que
 # ninguna versión suba nunca. Ver `RELEASING.md`.
 .measure/
+release/
