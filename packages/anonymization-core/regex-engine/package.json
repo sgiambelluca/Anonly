@@ -1,6 +1,6 @@
 {
   "name": "@anonly/regex-engine",
-  "version": "0.0.0",
+  "version": "0.9.0",
   "description": "Regex Engine — Detecta patrones deterministicos (DNI, CUIT, telefono, email, IBAN, tarjeta, fecha, matricula, patente) en el texto de cada pagina.",
   "type": "module",
   "license": "MIT",

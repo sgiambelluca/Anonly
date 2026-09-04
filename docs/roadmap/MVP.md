@@ -4,7 +4,7 @@
 
 > Define el alcance exacto del primer release. Cualquier cosa fuera de esta lista **no** entra en MVP. v1.0 y v2.0 viven en sus propios docs.
 
-**Versión objetivo**: 0.1.0
+**Versión objetivo**: 0.9.0 — corregido desde `0.1.0`. Ese número se escribió cuando el plan era publicar el MVP en un CDN estático; lo que sale ahora es el MVP completo más los Hitos 10.5–10.8 y un contenedor de escritorio. `1.0.0` tampoco corresponde: `Version_1.0.md` §2 define v1.0 con una lista que está mayormente sin construir, y el Hito 11 sigue abierto. `0.9.0` deja `0.9.x` para lo que aparezca con usuarios reales, y hace que `1.0.0` signifique que el producto aguantó ese uso.
 **Criterio de "MVP listo"**: cumple todas las métricas de `00_Project_Vision.md` §7 y todos los gates de `07_Performance_Strategy.md` §11.4.
 
 ---
@@ -565,7 +565,7 @@ Insertado con la convención decimal del repo, sin renumerar Release. Adelantado
 - Migración de los E2E de Playwright al target shell.
 - Firma de código Windows vía SignPath Foundation (gratis para OSS; requiere el `LICENSE` de la raíz).
 
-### Hito 12 — Release 0.1.0
+### Hito 12 — Release 0.9.0
 - Docs finales, README del repo, demo.
 - Publicación de instaladores en GitHub Releases. ~~deploy a CDN estático~~ — no hay hosting: la app no se sirve, se descarga (ADR-130, ADR-131 §1).
 
