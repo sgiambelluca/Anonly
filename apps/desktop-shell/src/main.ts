@@ -1,6 +1,7 @@
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { app, BrowserWindow, net, protocol, shell } from "electron";
+import { app, BrowserWindow, ipcMain, net, protocol, shell } from "electron";
 
 import { rendererRoot, resolveAssetPath } from "./paths";
 import { headersFor } from "./security";
@@ -95,21 +96,13 @@ function createWindow(): BrowserWindow {
     backgroundColor: "#ffffff",
     title: "Anonly",
     /*
-     * Sin `preload`: la superficie main↔renderer es **cero** (ADR-132 §3).
-     * Hubo uno, que existía solo para avisarle al renderer que corría en el
-     * contenedor; cuando ADR-132 §7 se resolvió apagando la caché en el motor
-     * —donde vive de verdad—, ese aviso se quedó sin nadie que lo leyera. Un
-     * preload que expone un booleano que nadie consume no es superficie
-     * mínima: es superficie muerta que además miente sobre que el renderer se
-     * bifurca por plataforma.
-     *
-     * `contextIsolation` y `sandbox` no dependen del preload: son opciones de
-     * la ventana y siguen puestas.
-     *
-     * El primer canal real lo va a traer el actualizador (ADR-131) para avisar
-     * que hay versión nueva. Se diseña ahí, con su justificación.
+     * El `preload` expone exactamente tres mensajes salientes y un suscriptor,
+     * todos del actualizador (ver `preload.ts`). `contextIsolation` y `sandbox`
+     * siguen puestos: el preload corre aislado y no le da al renderer acceso a
+     * Node ni a `ipcRenderer` crudo.
      */
     webPreferences: {
+      preload: join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -136,7 +129,7 @@ async function bootstrap(): Promise<void> {
   const window = createWindow();
   await window.loadURL(`${ORIGIN}/index.html`);
 
-  startUpdater();
+  startUpdater(window);
 
   // En macOS la app sigue viva sin ventanas; el click en el dock la reabre.
   app.on("activate", () => {
@@ -155,7 +148,7 @@ async function bootstrap(): Promise<void> {
  * grave que no arrancar. En Windows no corre —ahí actualiza
  * `electron-updater`— y en macOS sin clave pública tampoco.
  */
-function startUpdater(): void {
+function startUpdater(window: BrowserWindow): void {
   const bridge = loadBridge(
     {
       isPackaged: app.isPackaged,
@@ -167,13 +160,18 @@ function startUpdater(): void {
   if (bridge === null) return;
 
   bridge.setEventHandler((event) => {
-    // Nunca el contenido de un documento: acá solo viaja el ciclo de vida de
-    // la actualización (`08_Security_Model.md`, y ADR-131 §5).
-    process.stdout.write(`[anonly] updater: ${event.type} ${event.version ?? ""}\n`);
+    // Solo el ciclo de vida de la actualización: tipo, versión y progreso.
+    // Nunca contenido, nombre ni metadato de un documento (ADR-131 §5).
+    if (window.isDestroyed()) return;
+    window.webContents.send("updater:event", {
+      type: event.type,
+      ...(event.version === undefined ? {} : { version: event.version }),
+      ...(event.percent === undefined ? {} : { percent: event.percent }),
+    });
   });
 
   /*
-   * Si no arranca —típicamente porque el `Info.plist` todavía no tiene
+   * Si no arranca —típicamente porque el `Info.plist` no tiene
    * `SUPublicEDKey`— se anota y se sigue. La app funciona igual: Anonly
    * anonimiza sin tocar la red, así que quedarse sin actualizarse solo es
    * mucho menos grave que no abrir.
@@ -182,7 +180,25 @@ function startUpdater(): void {
     process.stdout.write("[anonly] actualizador no arrancó (¿falta SUPublicEDKey?)\n");
     return;
   }
+
+  /*
+   * **La política vive en el renderer, no acá.** El usuario elige entre que le
+   * pregunten o que se instale solo, y ese setting se persiste con los demás
+   * en `localStorage`. El main no decide nada: informa lo que Sparkle reporta
+   * y ejecuta lo que el renderer le pide.
+   *
+   * Sparkle chequea igual; lo que cambia es qué pasa cuando encuentra algo.
+   */
   bridge.setAutomaticChecks(true);
+
+  ipcMain.on("updater:check", () => bridge.checkForUpdates());
+  ipcMain.on("updater:install", () => bridge.installUpdateNow());
+  ipcMain.on("updater:set-automatic", (_event, enabled: unknown) => {
+    // El renderer es la parte menos confiable de las dos: lo que llega por IPC
+    // se valida antes de usarse, aunque hoy lo mande código nuestro.
+    if (typeof enabled !== "boolean") return;
+    bridge.setAutomaticChecks(enabled);
+  });
 }
 
 /*
