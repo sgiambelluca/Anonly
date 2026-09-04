@@ -53,6 +53,19 @@ export interface SettingsSlice {
   readonly defaultReplacementMode: ReplacementMode;
   readonly nerEnabled: boolean;
   readonly ocrLanguages: ReadonlyArray<string>;
+  /**
+   * `false` = preguntar antes de instalar una actualización; `true` = aplicarla
+   * sola.
+   *
+   * El default es preguntar, y es una decisión de producto, no una comodidad:
+   * reemplazarle la aplicación en silencio a alguien que está anonimizando
+   * pericias es exactamente lo que genera desconfianza en una herramienta que
+   * se vende como local. Quien prefiera que no le pregunten más lo apaga acá.
+   *
+   * Solo tiene efecto dentro del contenedor de escritorio (ADR-131 §3). En un
+   * navegador no hay actualizador y el control no se muestra.
+   */
+  readonly autoUpdate: boolean;
   persist(): void;
   load(): void;
 }
@@ -61,7 +74,12 @@ const STORAGE_KEY = "anonly:settings";
 
 type SettingsData = Pick<
   SettingsSlice,
-  "language" | "performancePreset" | "defaultReplacementMode" | "nerEnabled" | "ocrLanguages"
+  | "language"
+  | "performancePreset"
+  | "defaultReplacementMode"
+  | "nerEnabled"
+  | "ocrLanguages"
+  | "autoUpdate"
 >;
 
 const DEFAULT_SETTINGS: SettingsData = {
@@ -70,6 +88,7 @@ const DEFAULT_SETTINGS: SettingsData = {
   defaultReplacementMode: ReplacementMode.Placeholder,
   nerEnabled: true,
   ocrLanguages: ["spa", "eng"],
+  autoUpdate: false,
 };
 
 type PersistedSettings = Partial<SettingsData>;
@@ -87,6 +106,7 @@ export const useSettingsStore = create<SettingsSlice>((set, get) => ({
       performancePreset: state.performancePreset,
       defaultReplacementMode: state.defaultReplacementMode,
       ocrLanguages: state.ocrLanguages,
+      autoUpdate: state.autoUpdate,
     };
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(toStore));
@@ -125,6 +145,7 @@ export const useSettingsStore = create<SettingsSlice>((set, get) => ({
         : {}),
       ...(parsed.nerEnabled !== undefined ? { nerEnabled: parsed.nerEnabled } : {}),
       ...(parsed.ocrLanguages !== undefined ? { ocrLanguages: parsed.ocrLanguages } : {}),
+      ...(parsed.autoUpdate !== undefined ? { autoUpdate: parsed.autoUpdate } : {}),
     });
   },
 }));

@@ -51,6 +51,7 @@ import {
   type PerformancePreset,
 } from "../../store/settings.store.js";
 import { useViewerStore } from "../../store/viewer.store.js";
+import { getShellUpdater } from "../../updater/index.js";
 import { Button } from "../common/Button.js";
 import { Checkbox } from "../common/Checkbox.js";
 import { ConfirmDialog } from "../common/ConfirmDialog.js";
@@ -116,6 +117,15 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     () => useSettingsStore.getState().ocrLanguages,
   );
 
+  const [autoUpdate, setAutoUpdate] = useState<boolean>(
+    () => useSettingsStore.getState().autoUpdate,
+  );
+  /*
+   * `null` fuera del contenedor de escritorio: en un navegador no hay
+   * actualizador y la sección entera no se muestra. Se resuelve una vez y no
+   * en cada render — no cambia durante la vida de la página.
+   */
+  const [shellUpdater] = useState(() => getShellUpdater());
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -127,6 +137,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     setLanguage(current.language);
     setPerformancePreset(current.performancePreset);
     setOcrLanguages(current.ocrLanguages);
+    setAutoUpdate(current.autoUpdate);
     setSaveError(null);
   }, [open]);
 
@@ -135,14 +146,18 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     performancePreset: PerformancePreset;
     nerEnabled: boolean;
     ocrLanguages: ReadonlyArray<string>;
+    autoUpdate: boolean;
   }): void {
     useSettingsStore.setState(next);
     useSettingsStore.getState().persist();
+    // El shell no guarda esta preferencia: la lee de acá cada vez que cambia.
+    // Una sola fuente de verdad, y es la que el usuario ve.
+    shellUpdater?.setAutomatic(next.autoUpdate);
   }
 
   async function handleSave(): Promise<void> {
     const previous = useSettingsStore.getState();
-    const next = { language, performancePreset, nerEnabled, ocrLanguages };
+    const next = { language, performancePreset, nerEnabled, ocrLanguages, autoUpdate };
     const change = diffReanalyzeChange(previous, next);
     const needsReanalyze =
       (change.ner !== undefined || change.ocr !== undefined) && documentId !== null;
@@ -192,7 +207,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
 
   async function handleConfirmReanalyze(): Promise<void> {
     const previous = useSettingsStore.getState();
-    const next = { language, performancePreset, nerEnabled, ocrLanguages };
+    const next = { language, performancePreset, nerEnabled, ocrLanguages, autoUpdate };
     const change = diffReanalyzeChange(previous, next);
     const patches = planReanalyzePatches(change);
 
@@ -280,6 +295,33 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
               </p>
             ) : null}
           </FormRow>
+
+          {/*
+            Solo dentro del contenedor de escritorio: en un navegador no hay
+            actualizador y mostrar el control sería ofrecer algo que no existe.
+          */}
+          {shellUpdater !== null ? (
+            <FormRow label="Actualizaciones">
+              <Checkbox
+                id="settings-auto-update"
+                checked={autoUpdate}
+                onCheckedChange={setAutoUpdate}
+                label="Actualizar automáticamente"
+              />
+              <p className="mt-1 text-sm text-text-secondary">
+                {autoUpdate
+                  ? "Las versiones nuevas se instalan solas al reiniciar la app."
+                  : "Te vamos a avisar cuando haya una versión nueva, y vos decidís cuándo instalarla."}
+              </p>
+              <button
+                type="button"
+                onClick={() => shellUpdater.check()}
+                className="mt-2 text-sm text-accent underline"
+              >
+                Buscar actualizaciones ahora
+              </button>
+            </FormRow>
+          ) : null}
         </div>
 
         <AboutSection />
@@ -351,12 +393,44 @@ function FormRow({ label, children }: { label: string; children: ReactNode }) {
 // datos puro, nunca `settings.store`. No participa de `diffReanalyzeChange`
 // ni de `handleSave`/`handleConfirmReanalyze` — "Cancelar" y "Guardar" no lo
 // tocan porque no hay nada de él que aplicar o descartar.
+/**
+ * El repo del proyecto. Constante y no un setting: es una propiedad del
+ * producto, no algo que el usuario configure.
+ */
+const REPOSITORY_URL = "https://github.com/sgiambelluca/Anonly";
+
 function AboutSection() {
   return (
     <>
       <div className="my-4 border-t border-border" />
       <section aria-label="Acerca de" className="flex flex-col gap-3">
         <h3 className="text-sm font-medium text-text-secondary">Acerca de</h3>
+        {/*
+          Que el código sea auditable es parte de la promesa del producto, no
+          un dato de color: alguien que va a confiarle una pericia a esta
+          herramienta tiene que poder ir a mirar qué hace. El link va acá y no
+          escondido en un README.
+        */}
+        <p className="text-sm text-text-secondary">
+          Anonly es software libre.{" "}
+          <a
+            href={REPOSITORY_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-accent underline"
+          >
+            Ver el código fuente en GitHub
+          </a>
+          {" · "}
+          <a
+            href={`${REPOSITORY_URL}/issues/new`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-accent underline"
+          >
+            Reportar un problema
+          </a>
+        </p>
         {THIRD_PARTY_CREDITS.map((credit) => (
           <p key={credit.id} className="text-sm text-text-secondary">
             <a

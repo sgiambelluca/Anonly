@@ -32,6 +32,7 @@ import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 
 import { ToastHost } from "./components/common/ToastHost.js";
+import { UpdateNotice } from "./components/common/UpdateNotice.js";
 import { EntitiesPanel } from "./components/entities/EntitiesPanel.js";
 import { hasAnyGroup } from "./components/entities/entityTree.js";
 import type { AppPhase } from "./components/screens/appPhase.js";
@@ -81,6 +82,13 @@ export function App() {
         etapa cae en la fase `scan`.
       */}
       <PasswordDialog />
+      {/*
+        Fuera del `switch` de fases, mismo criterio que `PasswordDialog`: una
+        actualización puede quedar lista mientras el usuario está en cualquier
+        pantalla, incluida la de análisis. Se renderiza a sí mismo como
+        flotante, así que no altera el layout de ninguna fase.
+      */}
+      <UpdateNotice />
     </>
   );
 }

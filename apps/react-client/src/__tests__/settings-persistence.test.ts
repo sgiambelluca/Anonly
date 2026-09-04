@@ -97,3 +97,43 @@ describe("settings.store persistence", () => {
     expect(useSettingsStore.getState().nerEnabled).toBe(true);
   });
 });
+
+describe("autoUpdate", () => {
+  beforeEach(() => {
+    useSettingsStore.setState({ autoUpdate: false });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("arranca en false: se pregunta antes de instalar", () => {
+    // No es una comodidad: reemplazarle la app en silencio a alguien que está
+    // anonimizando pericias es lo que erosiona la confianza en una herramienta
+    // que se vende como local (ADR-131 §3). El default es preguntar.
+    expect(useSettingsStore.getState().autoUpdate).toBe(false);
+  });
+
+  it("se persiste y sobrevive a una sesión nueva", () => {
+    const storage = stubLocalStorage();
+    useSettingsStore.setState({ autoUpdate: true });
+    useSettingsStore.getState().persist();
+
+    expect(JSON.parse(storage.written() ?? "{}")).toHaveProperty("autoUpdate", true);
+
+    // Simula el arranque siguiente: estado limpio, se hidrata de localStorage.
+    useSettingsStore.setState({ autoUpdate: false });
+    useSettingsStore.getState().load();
+
+    expect(useSettingsStore.getState().autoUpdate).toBe(true);
+  });
+
+  it("una preferencia ausente no pisa el default", () => {
+    // Alguien que actualiza desde una versión sin este setting no debería
+    // encontrarse con que la app se actualiza sola sin habérselo pedido.
+    stubLocalStorage(JSON.stringify({ language: "en" }));
+    useSettingsStore.getState().load();
+
+    expect(useSettingsStore.getState().autoUpdate).toBe(false);
+  });
+});
