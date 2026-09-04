@@ -60,6 +60,21 @@ commit.
 pnpm --filter @anonly/desktop-shell sparkle:fetch
 ```
 
+## Lo único modificado respecto del upstream
+
+Un `rpath` extra en `binding.gyp`: `@loader_path/../../../../Frameworks`.
+
+En la app empaquetada el addon queda en
+`Contents/Resources/native/build/Release/` y `Sparkle.framework` en
+`Contents/Frameworks/`, que es donde macOS espera un framework — Sparkle lanza
+helpers desde adentro y no funciona bien fuera de ahí. Los dos `rpath` que
+traía el upstream asumen un layout de `node_modules` que este repo no usa, y
+el de `../../vendor` solo resuelve en desarrollo. Los tres conviven sin
+molestarse: `dyld` prueba en orden y usa el primero que encuentra.
+
+(No lleva comentario en el archivo porque `binding.gyp` es JSON estricto: una
+clave `"//"` adentro de la lista de flags la rompe.)
+
 ## Actualizarlo
 
 1. Mirar el diff del upstream desde el commit pineado arriba.

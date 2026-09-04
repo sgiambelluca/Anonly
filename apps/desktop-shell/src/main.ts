@@ -4,9 +4,26 @@ import { app, BrowserWindow, net, protocol, shell } from "electron";
 
 import { rendererRoot, resolveAssetPath } from "./paths";
 import { headersFor } from "./security";
+import { loadBridge } from "./updater";
 
 const SCHEME = "app";
 const ORIGIN = `${SCHEME}://local`;
+
+/**
+ * De dónde se lee la lista de versiones (ADR-131 §1). Es un asset del último
+ * release: no hay servidor ni dominio propio.
+ *
+ * **La clave pública no está acá y no puede estarlo.** Sparkle no expone un
+ * setter de runtime para `SUPublicEDKey`: la lee del `Info.plist`, horneada al
+ * empaquetar (`electron-builder.yml`, `mac.extendInfo`). Medido el 2026-09-04:
+ * pasarla por `init()` produce `publicEdKey was supplied but Info.plist has no
+ * SUPublicEDKey` y el arranque muere con `SUSparkleErrorDomain Code=1`.
+ *
+ * Y está bien que sea así: en el `Info.plist` la clave queda cubierta por la
+ * firma del bundle; como constante en JS viviría adentro del asar, que
+ * cualquiera reemplaza sin romper ninguna firma.
+ */
+const APPCAST_URL = "https://github.com/sgiambelluca/Anonly/releases/latest/download/appcast.xml";
 
 /**
  * `standard` y `secure` no son decorativos (ADR-132 §2, verificado en el
@@ -119,6 +136,8 @@ async function bootstrap(): Promise<void> {
   const window = createWindow();
   await window.loadURL(`${ORIGIN}/index.html`);
 
+  startUpdater();
+
   // En macOS la app sigue viva sin ventanas; el click en el dock la reabre.
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -126,6 +145,44 @@ async function bootstrap(): Promise<void> {
       void reopened.loadURL(`${ORIGIN}/index.html`);
     }
   });
+}
+
+/**
+ * Arranca el actualizador de macOS, o no hace nada.
+ *
+ * Ninguna falla acá puede impedir que la app abra: Anonly anonimiza documentos
+ * sin tocar la red, así que quedarse sin actualizarse solo es mucho menos
+ * grave que no arrancar. En Windows no corre —ahí actualiza
+ * `electron-updater`— y en macOS sin clave pública tampoco.
+ */
+function startUpdater(): void {
+  const bridge = loadBridge(
+    {
+      isPackaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      shellDir: __dirname,
+    },
+    (message) => process.stdout.write(`${message}\n`),
+  );
+  if (bridge === null) return;
+
+  bridge.setEventHandler((event) => {
+    // Nunca el contenido de un documento: acá solo viaja el ciclo de vida de
+    // la actualización (`08_Security_Model.md`, y ADR-131 §5).
+    process.stdout.write(`[anonly] updater: ${event.type} ${event.version ?? ""}\n`);
+  });
+
+  /*
+   * Si no arranca —típicamente porque el `Info.plist` todavía no tiene
+   * `SUPublicEDKey`— se anota y se sigue. La app funciona igual: Anonly
+   * anonimiza sin tocar la red, así que quedarse sin actualizarse solo es
+   * mucho menos grave que no abrir.
+   */
+  if (!bridge.init({ appcastUrl: APPCAST_URL, publicEdKey: "" })) {
+    process.stdout.write("[anonly] actualizador no arrancó (¿falta SUPublicEDKey?)\n");
+    return;
+  }
+  bridge.setAutomaticChecks(true);
 }
 
 /*

@@ -24,11 +24,17 @@ files:
 # Fuera del asar a propósito — son ~243 MB de wasm y modelos que el runtime
 # lee por el protocolo `app://`, y empaquetarlos en un archivo comprimido solo
 # agrega una capa de indirección sobre bytes que además son públicos.
+afterPack: scripts/adhoc-sign.cjs
+
+# El addon nativo del actualizador va fuera del asar: `dlopen` no puede abrir
+# un binario que está adentro de un archivo comprimido. Se conserva la
+# jerarquía `native/build/Release` porque el `rpath` compilado en el addon la
+# asume (ver `native/README.md`).
 extraResources:
   - from: ../react-client/dist
     to: renderer
-
-afterPack: scripts/adhoc-sign.cjs
+  - from: native/build/Release/sparkle_bridge.node
+    to: native/build/Release/sparkle_bridge.node
 
 asar: true
 # No hay dependencias nativas: nada que recompilar contra los headers de Electron.
@@ -47,6 +53,25 @@ mac:
   # pone `scripts/adhoc-sign.cjs`.
   identity: null
   darkModeSupport: false
+  # `Sparkle.framework` va a `Contents/Frameworks/`, que es donde macOS espera
+  # un framework: Sparkle lanza helpers desde adentro y no funciona bien fuera
+  # de ahí. `extraFiles` en mac deposita relativo a `Contents/`.
+  extraFiles:
+    - from: native/vendor/Sparkle.framework
+      to: Frameworks/Sparkle.framework
+  # Sparkle lee la clave y el feed de acá y **no** de código: no expone un
+  # setter de runtime para la clave, y es correcto que sea así — horneada en
+  # el Info.plist queda cubierta por la firma del bundle, mientras que una
+  # constante en JS vive adentro del asar, que cualquiera reemplaza.
+  #
+  # `SUPublicEDKey` vacío hasta que el humano genere el par (ADR-131 §4). Con
+  # la clave vacía Sparkle se niega a arrancar con
+  # `SUSparkleErrorDomain Code=1`, que es el modo correcto de fallar: sin
+  # clave no hay forma de verificar quién firmó lo que se descarga.
+  extendInfo:
+    SUPublicEDKey: ""
+    SUFeedURL: https://github.com/sgiambelluca/Anonly/releases/latest/download/appcast.xml
+    SUEnableAutomaticChecks: true
 
 # Sin `hardenedRuntime` ni `entitlements`: los exige la notarización, que no
 # hacemos. Ponerlos sin notarizar solo agrega restricciones sin ganar nada.
