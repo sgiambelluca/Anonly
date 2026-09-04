@@ -37,7 +37,18 @@ Se descartó por eliminación, igualando una variable por vez contra el mismo do
 | Contenedor de escritorio | **Falla la página 0, siempre** |
 | Contenedor, sin el `reload` del arnés de E2E | **Falla igual** |
 
-O sea: no es el tamaño de ventana, ni el DPI, ni el build de producción, ni el instrumental de test. Queda el contenedor — y ahí **la causa exacta de por qué se cancela quedó sin identificar**. Conviene decirlo en vez de fingir que se cerró.
+O sea: no es el tamaño de ventana, ni el DPI, ni el build de producción, ni el instrumental de test.
+
+Se descartó además la hipótesis más obvia —que el visor pidiera el render de la página 0 dos veces— instrumentando `actions.requestRender` en los dos entornos. El resultado fue el contrario del esperado:
+
+| Entorno | Pedidos de render en 60 s | ¿Cancelación? |
+|---|---|---|
+| Navegador | **4** (dos en el mismo milisegundo) | **No** |
+| Contenedor | **2**, separados por ~33 s | **Sí** |
+
+El que pide más es el que **no** falla. La cancelación no viene de los pedidos del visor: tiene que originarse en el render de preview que el propio pipeline dispara durante el análisis.
+
+**La causa exacta queda sin identificar**, y conviene decirlo en vez de fingir que se cerró. Con esta decisión el síntoma desaparece —una cancelación deja de contarse como fallo— y lo que queda es un render desperdiciado: costo de CPU, no de corrección. Cerrarlo del todo es trazar el ciclo de vida del preview del Orchestrator dentro del contenedor.
 
 Pero eso es la causa de la *cancelación*, no del *aviso*. Y la cancelación es legítima en cualquier entorno: la web también las produce al hacer zoom, solo que ahí la carrera no se da al abrir.
 
