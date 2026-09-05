@@ -8,6 +8,7 @@ const BUILDER = desdeLaRaiz("apps/desktop-shell/electron-builder.yml");
 const UNIVERSAL_BRIDGE = desdeLaRaiz(
   "apps/desktop-shell/native/scripts/build-sparkle-universal.sh",
 );
+const ADHOC_SIGN = desdeLaRaiz("apps/desktop-shell/scripts/adhoc-sign.cjs");
 
 describe("empaquetado universal de macOS", () => {
   it("genera un solo target universal para DMG y ZIP", async () => {
@@ -26,5 +27,12 @@ describe("empaquetado universal de macOS", () => {
     expect(script).toContain("build_arch x64");
     expect(script).toContain("lipo -create");
     expect(script).toContain('lipo -archs "$OUTPUT"');
+  });
+
+  it("firma solo el bundle final, después de unir los bundles temporales", async () => {
+    const script = await readFile(ADHOC_SIGN, "utf8");
+
+    expect(script).toContain("-universal-(?:x64|arm64)-temp$");
+    expect(script).toContain('execFileSync("codesign"');
   });
 });

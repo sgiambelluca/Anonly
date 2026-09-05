@@ -42,6 +42,16 @@ const path = require("node:path");
 exports.default = function adhocSign(context) {
   if (context.electronPlatformName !== "darwin") return;
 
+  /*
+   * En un build universal Electron Builder empaqueta primero dos bundles
+   * temporales (`mac-universal-x64-temp` y `mac-universal-arm64-temp`) y luego
+   * los une. Firmarlos acá produciría dos `CodeResources` distintos y
+   * `@electron/universal` rechazaría el merge antes de llegar al bundle final.
+   * El hook vuelve a ejecutarse después del merge, sobre `release/mac-universal`;
+   * ese es el único bundle que debe recibir la firma ad-hoc.
+   */
+  if (/-universal-(?:x64|arm64)-temp$/.test(context.appOutDir)) return;
+
   const appPath = path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`);
 
   // `--deep` está desaconsejado para firmas reales (Apple pide firmar de
