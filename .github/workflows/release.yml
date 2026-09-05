@@ -166,6 +166,10 @@ jobs:
           shasum -a 256 * > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
+      # Los manifiestos van adentro, no solo los binarios: `latest*.yml`,
+      # `*.blockmap` y `appcast.xml` son lo que los dos actualizadores leen
+      # para decidir **qué** descargar. Atestar el `.exe` y dejar afuera el
+      # `latest.yml` que apunta a él cubre la mitad que nadie edita a mano.
       - name: Atestación de procedencia
         uses: actions/attest-build-provenance@v2
         with:
@@ -173,6 +177,9 @@ jobs:
             artifacts/*.dmg
             artifacts/*.zip
             artifacts/*.exe
+            artifacts/latest*.yml
+            artifacts/*.blockmap
+            artifacts/appcast.xml
 
       # `gh` viene preinstalado en los runners. Se usa en vez de una action de
       # terceros a propósito: una action externa con `contents: write` es
