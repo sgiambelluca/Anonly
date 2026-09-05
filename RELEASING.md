@@ -63,11 +63,25 @@ Ese paso **falla el build** si la clave privada no corresponde a la
 sería peor que no publicar nada, porque cada usuario descargaría la
 actualización y la rechazaría sin que el release dé ninguna señal.
 
+En Windows el secret equivalente es `WINDOWS_UPDATE_PRIVATE_KEY`, una privada
+Ed25519 PKCS#8 en PEM. El job la entrega por stdin al firmador y agrega a
+`latest.yml` un sobre que ata versión, nombre y SHA-512 del `.exe`. La pública
+SPKI está horneada en `src/windows-update-signature.ts`; si el secret no
+corresponde a ella, falta o no se genera la metadata `anonlyEd25519`, el release
+falla antes de subir artefactos (ADR-137).
+
+La firma propia protege actualizaciones, no la primera instalación. Hasta que
+se integre Authenticode mediante SignPath, Windows puede mostrar SmartScreen y
+un editor no verificado. Cuando llegue el certificado, el verificador exige
+las dos firmas; la Ed25519 no se retira.
+
 **El release se crea como borrador.** El tag lo arma; publicarlo lo decidís
 vos, desde la página del release. Hasta entonces ningún usuario lo recibe.
 
 `workflow_dispatch` corre todo el pipeline sin publicar nada, para probar que
-el camino funciona antes de tagear.
+el camino funciona antes de tagear. El job de Windows también exige y usa
+`WINDOWS_UPDATE_PRIVATE_KEY` en esa prueba: es la forma segura de validar el
+secret y la firma real sin crear todavía un release.
 
 ## Probar sin romperle la app a nadie
 

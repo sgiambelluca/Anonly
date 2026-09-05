@@ -98,6 +98,26 @@ jobs:
       - name: Build installer
         run: pnpm --filter @anonly/desktop-shell package:${{ matrix.platform }}
 
+      # ADR-137: la privada entra por stdin y la firma queda dentro de
+      # latest.yml, atando versión + nombre + SHA-512 del instalador. También
+      # corre en workflow_dispatch: así se valida el circuito completo con el
+      # secret antes de crear un tag; solo los tags publican.
+      - name: Firmar actualización de Windows con Ed25519
+        if: matrix.platform == 'win'
+        shell: bash
+        env:
+          WINDOWS_UPDATE_PRIVATE_KEY: ${{ secrets.WINDOWS_UPDATE_PRIVATE_KEY }}
+        run: |
+          if [ -z "$WINDOWS_UPDATE_PRIVATE_KEY" ]; then
+            echo "::error::Falta WINDOWS_UPDATE_PRIVATE_KEY: Windows no se publica sin firma Ed25519." >&2
+            exit 1
+          fi
+          printf '%s' "$WINDOWS_UPDATE_PRIVATE_KEY" | pnpm --filter @anonly/desktop-shell sign:windows-update
+          if ! grep -q '^anonlyEd25519:' apps/desktop-shell/release/latest.yml; then
+            echo "::error::latest.yml salió sin metadata Ed25519." >&2
+            exit 1
+          fi
+
       # Firma cada ZIP con la clave EdDSA y arma el appcast que la app consulta.
       # La clave privada entra por **stdin** (`--ed-key-file -`): nunca se
       # escribe a disco ni queda en la línea de comandos, que es visible en la
