@@ -55,10 +55,38 @@ export const ISOLATION_HEADERS: Readonly<Record<string, string>> = Object.freeze
  * `.wasm` o un `.onnx` no significa nada, y repetirlo en cada asset solo
  * agrega bytes y ruido a la hora de auditar qué política rige.
  */
+/**
+ * Los assets de un build son inmutables: viajan adentro del instalador y solo
+ * cambian cuando cambia la versión.
+ *
+ * `immutable` es literal acá, más que en cualquier CDN: el archivo no puede
+ * cambiar sin que cambie el paquete instalado.
+ *
+ * **Sin efecto medible sobre el caso que lo motivó, y conviene decirlo.** Se
+ * agregó al investigar por qué el modelo NER tarda ~30 s en quedar listo en el
+ * contenedor contra ~1 s en la web: el archivo de 178 MB se pide **tres
+ * veces** en una importación, una por worker de la pool. Con el header puesto
+ * se sigue pidiendo tres veces — Chromium no aplica caché HTTP a un esquema
+ * propio desde contextos de worker— y el tiempo no cambió (36,4 s / 33,4 s
+ * contra 39,1 s / 32,1 s: ruido).
+ *
+ * Se conserva porque es correcto para el resto de los assets y es el default
+ * sensato para bytes inmutables, no porque resuelva algo.
+ */
+const IMMUTABLE_CACHE = "public, max-age=31536000, immutable";
+
 export function headersFor(pathname: string): Record<string, string> {
   const headers: Record<string, string> = { ...ISOLATION_HEADERS };
+  /*
+   * El documento no: es el punto de entrada, y cachearlo entre versiones
+   * dejaría al usuario con el HTML de la versión anterior apuntando a chunks
+   * que ya no existen. Todo lo demás lleva hash en el nombre o vive adentro
+   * del paquete.
+   */
   if (pathname.endsWith(".html")) {
     headers["Content-Security-Policy"] = CONTENT_SECURITY_POLICY;
+  } else {
+    headers["Cache-Control"] = IMMUTABLE_CACHE;
   }
   return headers;
 }

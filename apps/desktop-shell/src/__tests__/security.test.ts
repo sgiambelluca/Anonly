@@ -67,6 +67,22 @@ describe("headersFor", () => {
     }
   });
 
+  it("marca los assets como inmutables: sus bytes viajan adentro del instalador", () => {
+    for (const p of [
+      "/assets/ort-wasm-simd-threaded.wasm",
+      "/models/ner/model_quantized.onnx",
+      "/assets/index-a1b2c3.js",
+    ]) {
+      expect(headersFor(p)["Cache-Control"]).toBe("public, max-age=31536000, immutable");
+    }
+  });
+
+  it("no cachea el documento, que es lo único que puede quedar viejo", () => {
+    // Un index.html cacheado entre versiones apunta a chunks con hash que la
+    // versión nueva ya no trae: la app abriría rota y sin forma de recuperarse.
+    expect(headersFor("/index.html")["Cache-Control"]).toBeUndefined();
+  });
+
   it("devuelve un objeto nuevo cada vez, sin alias al congelado", () => {
     const first = headersFor("/index.html");
     first["Cross-Origin-Embedder-Policy"] = "unsafe-none";
