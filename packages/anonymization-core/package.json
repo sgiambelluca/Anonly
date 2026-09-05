@@ -1,6 +1,6 @@
 {
   "name": "@anonly/anonymization-core",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "API pública del Core de Anonly. Compone shared + event-system + motores. Los motores individuales se agregan en hitos 2-8.",
   "type": "module",
   "license": "MIT",

@@ -1,6 +1,6 @@
 {
   "name": "@anonly/desktop-shell",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "private": true,
   "description": "Contenedor de escritorio (Electron). Sirve el build de @anonly/react-client por el protocolo app:// con los headers de aislamiento y la CSP del modelo de seguridad. ADR-130, ADR-132.",
   "license": "MIT",

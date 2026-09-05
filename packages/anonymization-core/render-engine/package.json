@@ -1,6 +1,6 @@
 {
   "name": "@anonly/render-engine",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "Render Engine — Renderiza páginas del PDF (original o anonimizado) a ImageData usando OffscreenCanvas + pdfjs-dist. Aplica los 4 modos de reemplazo visual y soporta preview incremental / delta render.",
   "type": "module",
   "license": "MIT",
