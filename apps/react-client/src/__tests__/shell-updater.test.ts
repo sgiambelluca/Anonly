@@ -27,7 +27,6 @@ describe("getShellUpdater", () => {
       onEvent: () => undefined,
       check: () => undefined,
       install: () => undefined,
-      setAutomatic: () => undefined,
     };
     setWindow({ anonlyUpdater: bridge });
     expect(getShellUpdater()).toBe(bridge);
@@ -38,16 +37,15 @@ describe("getShellUpdater", () => {
     expect(getShellUpdater()).toBeNull();
   });
 
-  it("devuelve null si falta cualquiera de los cuatro métodos", () => {
+  it("devuelve null si falta cualquiera de los tres métodos", () => {
     // Un puente a medias es peor que ninguno: la UI mostraría controles de
     // actualización que revientan al usarse.
     const complete = {
       onEvent: () => undefined,
       check: () => undefined,
       install: () => undefined,
-      setAutomatic: () => undefined,
     };
-    for (const missing of ["onEvent", "check", "install", "setAutomatic"] as const) {
+    for (const missing of ["onEvent", "check", "install"] as const) {
       const partial: Record<string, unknown> = { ...complete };
       delete partial[missing];
       setWindow({ anonlyUpdater: partial });

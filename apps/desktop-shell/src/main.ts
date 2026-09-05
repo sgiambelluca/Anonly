@@ -236,23 +236,21 @@ function startUpdater(window: BrowserWindow): void {
   }
 
   /*
-   * **La política vive en el renderer, no acá.** El usuario elige entre que le
-   * pregunten o que se instale solo, y ese setting se persiste con los demás
-   * en `localStorage`. El main no decide nada: informa lo que Sparkle reporta
-   * y ejecuta lo que el renderer le pide.
+   * **Sparkle chequea siempre.** No es configurable, y sacarle esa perilla al
+   * usuario fue un arreglo: `setAutomaticChecks` mapea a
+   * `automaticallyChecksForUpdates`, que decide si Sparkle **busca**
+   * actualizaciones — no si las instala sin preguntar. Cablearlo al toggle
+   * "Actualizar automáticamente" hacía que apagarlo, que es el default,
+   * dejara la app sin buscar nada mientras la UI prometía avisar.
    *
-   * Sparkle chequea igual; lo que cambia es qué pasa cuando encuentra algo.
+   * **La política vive en el renderer**, donde está el setting del usuario:
+   * cuando llega una actualización descargada, decide si la instala sola o
+   * muestra el aviso. El main informa y ejecuta; no decide.
    */
   bridge.setAutomaticChecks(true);
 
   ipcMain.on("updater:check", () => bridge.checkForUpdates());
   ipcMain.on("updater:install", () => bridge.installUpdateNow());
-  ipcMain.on("updater:set-automatic", (_event, enabled: unknown) => {
-    // El renderer es la parte menos confiable de las dos: lo que llega por IPC
-    // se valida antes de usarse, aunque hoy lo mande código nuestro.
-    if (typeof enabled !== "boolean") return;
-    bridge.setAutomaticChecks(enabled);
-  });
 }
 
 /*

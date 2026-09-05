@@ -156,9 +156,6 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
   }): void {
     useSettingsStore.setState(next);
     useSettingsStore.getState().persist();
-    // El shell no guarda esta preferencia: la lee de acá cada vez que cambia.
-    // Una sola fuente de verdad, y es la que el usuario ve.
-    shellUpdater?.setAutomatic(next.autoUpdate);
     // El tema se aplica al guardar y no al elegir: el diálogo es atómico, y si
     // el usuario cancela nada tiene que haber cambiado. La vista previa es lo
     // que da la devolución inmediata, que es para lo que existe.

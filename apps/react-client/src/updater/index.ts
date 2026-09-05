@@ -11,6 +11,10 @@
  *
  * Nada de lo que viaja por acá toca un documento: solo el ciclo de vida de la
  * actualización (ADR-131 §5).
+ *
+ * **No expone `setAutomatic`.** El shell chequea siempre; que el usuario
+ * prefiera que le pregunten o que se instale solo se resuelve acá, con el
+ * setting que ya está en `localStorage`, sin cruzar el IPC (ADR-136).
  */
 
 export interface UpdateEvent {
@@ -23,7 +27,6 @@ export interface ShellUpdater {
   onEvent(listener: (event: UpdateEvent) => void): void;
   check(): void;
   install(): void;
-  setAutomatic(enabled: boolean): void;
 }
 
 interface WindowWithUpdater {
@@ -36,8 +39,7 @@ function isShellUpdater(value: unknown): value is ShellUpdater {
   return (
     typeof candidate["onEvent"] === "function" &&
     typeof candidate["check"] === "function" &&
-    typeof candidate["install"] === "function" &&
-    typeof candidate["setAutomatic"] === "function"
+    typeof candidate["install"] === "function"
   );
 }
 

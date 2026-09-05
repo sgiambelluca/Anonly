@@ -34,13 +34,17 @@ Consecuencias directas:
 - Los mismos dos headers de aislamiento de ADR-100, ahora bajo control propio en vez de del hosting.
 - La CSP de §3.2, tal cual, incluidos `'wasm-unsafe-eval'` y los `blob:` que ADR-039 justificó.
 
-### 3. `webPreferences` bloqueado, y superficie main↔renderer **cero**
+### 3. `webPreferences` bloqueado, y la superficie main↔renderer es mínima y enumerable
 
-`contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`, `webSecurity: true`. Sin `@electron/remote`.
+`contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`, `webSecurity: true`. Sin `@electron/remote`. Verificado por el gate `webprefs-locked` (§5), que además comprueba desde adentro que `require` y `process` sean inalcanzables — lo que importa no es la config sino el efecto.
 
-**No hay preload.** La primera versión de este ADR previó uno para el flag de §7; al resolverse §7 en el motor, ese flag desapareció y el preload se quedó sin nadie que lo consumiera. Un preload que expone un booleano que nadie lee no es superficie mínima: es superficie muerta que además miente sobre que el renderer se bifurca por plataforma.
+**La superficie es de tres mensajes, y son los del actualizador**: `check` e `install` salientes, y `onEvent` como suscripción. Nada más: sin `invoke` genérico, sin acceso a `ipcRenderer` crudo, sin capacidades de sistema.
 
-El actualizador de ADR-131 probablemente introduzca el primer canal real —avisar al renderer que hay versión nueva—. Ese canal se diseña ahí, con su justificación, y no se retrofitea sobre un flag sobrante.
+> **Corregido respecto de la primera redacción**, que decía "superficie **cero**. No hay preload". Eso fue cierto entre ADR-133 y el actualizador: el preload existió para un flag que quedó sin consumidor y se eliminó. Volvió cuando el actualizador necesitó avisarle al usuario, que es lo que esta misma sección anticipaba — pero el ADR se quedó con el texto viejo y el README del shell también. Un documento de seguridad que declara una superficie que no es la real es peor que no declararla.
+
+**Por qué son tres y no dos.** `setAutomatic` existió y se retiró, y no por prolijidad: mapeaba a `automaticallyChecksForUpdates` de Sparkle, que decide si el actualizador **busca** —no si instala sin preguntar—. Cablearlo al toggle "Actualizar automáticamente" hacía que apagarlo, que es el default, dejara la app sin buscar actualizaciones mientras la UI prometía avisar. El chequeo ahora es incondicional y la política de instalar-o-preguntar se resuelve enteramente en el renderer, donde ya vive el setting: no necesita cruzar el IPC.
+
+**Lo que viaja por `onEvent` se arma por lista blanca**, no por copia (`toUpdateEventPayload`): tipo, versión y progreso. Un campo nuevo del actualizador no llega al renderer sin que alguien lo decida, y el `message` de error queda afuera a propósito porque nada garantiza que no incluya una ruta del sistema.
 
 Además: navegación externa y `window.open` bloqueados por defecto — cualquier URL que no sea `app://` se rechaza o se delega al navegador del sistema, nunca se carga adentro de la app.
 
@@ -56,8 +60,9 @@ Se apagan por línea de comandos: `disable-background-networking` (el paraguas: 
 
 | Gate | Qué verifica |
 |---|---|
-| `shell-no-egress` | con el chequeo de actualizaciones desactivado, la app no emite **ninguna** request saliente |
-| `updater-payload-clean` | la request del updater no lleva contenido, nombre ni metadato de documento — solo versión y plataforma |
+| `shell-no-egress` | un pipeline completo no emite **ninguna** request a un host. **No cubre el actualizador**: los E2E corren desempaquetados, donde Sparkle no arranca por falta de `SUPublicEDKey`, así que ese componente nunca está presente. Eso lo cubren `network-destinations` y `updater-payload-clean` |
+| `updater-payload-clean` | el payload del actualizador se arma por lista blanca: solo tipo, versión y progreso |
+| `network-destinations` | el código del shell no nombra ninguna URL de red fuera de la lista blanca, y el appcast sigue siendo una constante y no una plantilla |
 | `csp-under-app-protocol` | la CSP de §3.2 llega efectivamente bajo `app://` |
 | `cross-origin-isolated` | `crossOriginIsolated === true` en el renderer y en los workers de motor |
 | `webprefs-locked` | `contextIsolation`/`sandbox` on, `nodeIntegration` off en toda `BrowserWindow` |
