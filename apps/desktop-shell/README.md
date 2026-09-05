@@ -44,8 +44,10 @@ Que Squirrel.Windows no exija certificado es lo que hizo *posible* publicar
 para Windows sin pagar uno; el precio es que ahí las actualizaciones **se
 aplican sin verificar quién las firmó**. Lo único que protege ese canal es
 HTTPS contra GitHub: alcanza contra alguien en el medio, no contra un release
-malicioso publicado desde una cuenta comprometida. macOS no tiene ese hueco —
-Sparkle valida con una clave EdDSA cuya privada no vive en GitHub.
+malicioso publicado desde una cuenta comprometida. macOS está mejor —Sparkle
+valida cada actualización con una clave EdDSA propia, que no está en el
+repositorio— aunque no del todo cubierto: esa privada es un *secret* de
+Actions, así que una cuenta comprometida también alcanzaría (ADR-131 §4).
 
 Es un hueco real, decidido a propósito y con fecha de vencimiento: **ADR-136**
 explica por qué se tomó ese camino en vez de dejar a Windows sin parches de

@@ -55,7 +55,9 @@ export function startWindowsUpdater(emit: Emit, log: (message: string) => void):
    * **Lo que queda protegiendo el canal es HTTPS contra GitHub**, que impide
    * que alguien altere el instalador en tránsito pero no cubre un release
    * malicioso publicado desde una cuenta comprometida. macOS no tiene este
-   * hueco: Sparkle valida con la clave EdDSA propia, que no vive en GitHub.
+   * hueco del todo: Sparkle valida con una clave EdDSA propia, que no está en
+   * el repositorio — aunque su privada es un secret de Actions, así que una
+   * cuenta comprometida también alcanzaría (ADR-131 §4).
    *
    * Acá hubo dos líneas que asignaban `verifyUpdateCodeSignature = false`
    * creyendo que eso lo apagaba. No lo apagaba: es un accessor cuyo valor es
