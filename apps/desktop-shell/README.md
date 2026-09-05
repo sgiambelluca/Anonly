@@ -29,7 +29,7 @@ pnpm --filter @anonly/desktop-shell start
 | `src/paths.ts` | Traduce pathname → archivo, y rechaza todo lo que no sea un asset del build. |
 | `src/preload.ts` | La superficie main↔renderer completa: `check`, `install` y `onEvent`, todos del actualizador. |
 | `src/updater.ts` | Carga del puente nativo a Sparkle (macOS) y la lista blanca del payload que cruza al renderer. |
-| `src/windows-updater.ts` | Actualizador de Windows sobre `electron-updater`, traducido a los mismos eventos que emite Sparkle. |
+| `src/windows-updater.ts` | Actualizador de Windows sobre `electron-updater`, traducido a los mismos eventos que emite Sparkle. **Aplica las actualizaciones sin verificar la firma** (ADR-136). |
 | `native/` | El puente N-API a Sparkle, vendoreado. Ver su README. |
 
 **Dos actualizadores, un solo contrato.** El renderer no sabe qué plataforma
@@ -38,6 +38,19 @@ tiene abajo: los dos emiten los mismos eventos, y el aviso, el toggle y
 `electron-updater` porque Squirrel.Windows no exige certificado para aplicar
 una actualización; macOS necesita Sparkle porque Squirrel.Mac **sí** lo exige
 (ADR-131 §2/§3).
+
+**Las dos plataformas no tienen la misma garantía, y conviene decirlo acá.**
+Que Squirrel.Windows no exija certificado es lo que hizo *posible* publicar
+para Windows sin pagar uno; el precio es que ahí las actualizaciones **se
+aplican sin verificar quién las firmó**. Lo único que protege ese canal es
+HTTPS contra GitHub: alcanza contra alguien en el medio, no contra un release
+malicioso publicado desde una cuenta comprometida. macOS no tiene ese hueco —
+Sparkle valida con una clave EdDSA cuya privada no vive en GitHub.
+
+Es un hueco real, decidido a propósito y con fecha de vencimiento: **ADR-136**
+explica por qué se tomó ese camino en vez de dejar a Windows sin parches de
+seguridad, y cuál es su condición de salida. Se cierra cuando llegue el
+certificado de firma de código (SignPath, `roadmap/MVP.md` §Hito 11.5).
 
 ## El ícono
 
