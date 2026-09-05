@@ -43,20 +43,31 @@ export function startWindowsUpdater(emit: Emit, log: (message: string) => void):
   autoUpdater.autoInstallOnAppQuit = false;
 
   /*
-   * Sin firma de código, `electron-updater` no puede validar el publisher del
-   * instalador que descarga, y aborta. Mientras el binario de Windows salga
-   * sin certificado (ADR-131 §4: SignPath está pedido y no llegó), la
-   * verificación se apaga explícitamente.
+   * **Acá no se apaga la verificación de firma, y no hace falta apagarla**
+   * (ADR-136).
+   *
+   * El instalador de Windows sale sin certificado de firma de código, así que
+   * `electron-updater` no verifica nada: `verifySignature()` retorna `null`
+   * antes de llamar al verificador cuando `publisherName` no está configurado,
+   * y `electron-builder.yml` no lo configura porque no hay certificado del
+   * cual derivarlo.
    *
    * **Lo que queda protegiendo el canal es HTTPS contra GitHub**, que impide
    * que alguien altere el instalador en tránsito pero no cubre un release
    * malicioso publicado desde una cuenta comprometida. macOS no tiene este
    * hueco: Sparkle valida con la clave EdDSA propia, que no vive en GitHub.
    *
-   * Se revierte —borrando estas dos líneas— el día que el certificado exista.
+   * Acá hubo dos líneas que asignaban `verifyUpdateCodeSignature = false`
+   * creyendo que eso lo apagaba. No lo apagaba: es un accessor cuyo valor es
+   * una **función**, y su setter descarta los falsy. No vuelven — hay un test
+   * que las prohíbe, porque un no-op con un comentario convincente al lado es
+   * peor que no tener nada.
+   *
+   * La condición de salida tampoco vive en este comentario: el día que exista
+   * el certificado, `electron-builder` va a escribir `publisherName` y la
+   * verificación se enciende sola. `__tests__/windows-updater.test.ts` falla
+   * en ese momento y manda a leer ADR-136.
    */
-  const conVerificacion = autoUpdater as unknown as { verifyUpdateCodeSignature?: boolean };
-  conVerificacion.verifyUpdateCodeSignature = false;
 
   autoUpdater.on("checking-for-update", () => emit(toUpdateEventPayload({ type: "checking" })));
   autoUpdater.on("update-available", (info: { version?: string }) =>
