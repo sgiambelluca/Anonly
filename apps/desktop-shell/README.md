@@ -20,17 +20,24 @@ pnpm --filter @anonly/react-client build   # el shell sirve este dist
 pnpm --filter @anonly/desktop-shell start
 ```
 
-## Los tres archivos
+## Los archivos
 
 | Archivo | Qué hace |
 |---|---|
-| `src/main.ts` | Proceso principal: registra `app://`, crea la ventana, bloquea la navegación externa. |
-| `src/security.ts` | CSP y headers de aislamiento. **Fuente única**: si divergen de `08_Security_Model.md` §3.2, el gate falla. |
+| `src/main.ts` | Proceso principal: registra `app://`, crea la ventana, bloquea la navegación externa y arranca el actualizador que corresponda a la plataforma. |
+| `src/security.ts` | CSP, headers de aislamiento y `Content-Length`. **Fuente única**: si divergen de `08_Security_Model.md` §3.2, el gate `csp-under-app-protocol` falla. |
 | `src/paths.ts` | Traduce pathname → archivo, y rechaza todo lo que no sea un asset del build. |
+| `src/preload.ts` | La superficie main↔renderer completa: `check`, `install` y `onEvent`, todos del actualizador. |
+| `src/updater.ts` | Carga del puente nativo a Sparkle (macOS) y la lista blanca del payload que cruza al renderer. |
+| `src/windows-updater.ts` | Actualizador de Windows sobre `electron-updater`, traducido a los mismos eventos que emite Sparkle. |
+| `native/` | El puente N-API a Sparkle, vendoreado. Ver su README. |
 
-No hay `preload`: la superficie main↔renderer es **cero** (ADR-132 §3). El
-primer canal real lo va a traer el actualizador de ADR-131.
-
+**Dos actualizadores, un solo contrato.** El renderer no sabe qué plataforma
+tiene abajo: los dos emiten los mismos eventos, y el aviso, el toggle y
+`UpdateNotice` son los mismos en macOS y en Windows. Windows va por
+`electron-updater` porque Squirrel.Windows no exige certificado para aplicar
+una actualización; macOS necesita Sparkle porque Squirrel.Mac **sí** lo exige
+(ADR-131 §2/§3).
 
 ## El ícono
 

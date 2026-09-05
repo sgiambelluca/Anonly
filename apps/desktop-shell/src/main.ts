@@ -6,7 +6,8 @@ import { app, BrowserWindow, ipcMain, net, protocol, shell } from "electron";
 
 import { rendererRoot, resolveAssetPath } from "./paths";
 import { headersFor } from "./security";
-import { loadBridge, toUpdateEventPayload } from "./updater";
+import { loadBridge, toUpdateEventPayload, type UpdateEventPayload } from "./updater";
+import { checkWindowsUpdates, installWindowsUpdate, startWindowsUpdater } from "./windows-updater";
 
 const SCHEME = "app";
 const ORIGIN = `${SCHEME}://local`;
@@ -207,22 +208,46 @@ async function bootstrap(): Promise<void> {
  * `electron-updater`— y en macOS sin clave pública tampoco.
  */
 function startUpdater(window: BrowserWindow): void {
+  /*
+   * Solo el ciclo de vida de la actualización: tipo, versión y progreso.
+   * Nunca contenido, nombre ni metadato de un documento (ADR-131 §5).
+   */
+  const emitir = (payload: UpdateEventPayload): void => {
+    if (window.isDestroyed()) return;
+    window.webContents.send("updater:event", payload);
+  };
+  const anotar = (message: string): void => {
+    process.stdout.write(`${message}\n`);
+  };
+
+  /*
+   * Dos actualizadores, un solo contrato hacia el renderer (ADR-131 §2/§3).
+   *
+   * Windows va por `electron-updater`, que aplica una actualización sin exigir
+   * certificado. macOS necesita Sparkle porque Squirrel.Mac **sí** lo exige y
+   * falla con `Could not get code signature for running application`.
+   *
+   * El renderer no sabe cuál está abajo: los dos emiten los mismos eventos, y
+   * el aviso, el toggle y `UpdateNotice` son los mismos en los dos sistemas.
+   */
+  if (process.platform === "win32") {
+    ipcMain.on("updater:check", () => checkWindowsUpdates());
+    ipcMain.on("updater:install", () => installWindowsUpdate());
+    startWindowsUpdater(emitir, anotar);
+    return;
+  }
+
   const bridge = loadBridge(
     {
       isPackaged: app.isPackaged,
       resourcesPath: process.resourcesPath,
       shellDir: __dirname,
     },
-    (message) => process.stdout.write(`${message}\n`),
+    anotar,
   );
   if (bridge === null) return;
 
-  bridge.setEventHandler((event) => {
-    // Solo el ciclo de vida de la actualización: tipo, versión y progreso.
-    // Nunca contenido, nombre ni metadato de un documento (ADR-131 §5).
-    if (window.isDestroyed()) return;
-    window.webContents.send("updater:event", toUpdateEventPayload(event));
-  });
+  bridge.setEventHandler((event) => emitir(toUpdateEventPayload(event)));
 
   /*
    * Si no arranca —típicamente porque el `Info.plist` no tiene
@@ -231,7 +256,7 @@ function startUpdater(window: BrowserWindow): void {
    * mucho menos grave que no abrir.
    */
   if (!bridge.init({ appcastUrl: APPCAST_URL, publicEdKey: "" })) {
-    process.stdout.write("[anonly] actualizador no arrancó (¿falta SUPublicEDKey?)\n");
+    anotar("[anonly] actualizador no arrancó (¿falta SUPublicEDKey?)");
     return;
   }
 
@@ -240,8 +265,8 @@ function startUpdater(window: BrowserWindow): void {
    * usuario fue un arreglo: `setAutomaticChecks` mapea a
    * `automaticallyChecksForUpdates`, que decide si Sparkle **busca**
    * actualizaciones — no si las instala sin preguntar. Cablearlo al toggle
-   * "Actualizar automáticamente" hacía que apagarlo, que es el default,
-   * dejara la app sin buscar nada mientras la UI prometía avisar.
+   * "Actualizar automáticamente" hacía que apagarlo dejara la app sin buscar
+   * nada, mientras la UI prometía avisar.
    *
    * **La política vive en el renderer**, donde está el setting del usuario:
    * cuando llega una actualización descargada, decide si la instala sola o
