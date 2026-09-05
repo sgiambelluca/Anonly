@@ -66,7 +66,7 @@ describe("verificación de firma en Windows (ADR-136)", () => {
     ]) {
       expect(
         builder,
-        `\`${clave}\` apareció en electron-builder.yml: si llegó el certificado de firma, la verificación de Authenticode se enciende sola y el hueco de ADR-136 se cerró. Actualizá ADR-136 y borrá este test.`,
+        `\`${clave}\` apareció en electron-builder.yml: llegó el certificado, así que la verificación de Authenticode se enciende y el hueco de ADR-136 se cierra. Confirmá que además esté \`publisherName\` —firmar con SignPath no alcanza, ADR-136 §2—, actualizá el ADR y borrá este test.`,
       ).not.toContain(clave);
     }
   });

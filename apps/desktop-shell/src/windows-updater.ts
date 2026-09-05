@@ -63,10 +63,15 @@ export function startWindowsUpdater(emit: Emit, log: (message: string) => void):
    * que las prohíbe, porque un no-op con un comentario convincente al lado es
    * peor que no tener nada.
    *
-   * La condición de salida tampoco vive en este comentario: el día que exista
-   * el certificado, `electron-builder` va a escribir `publisherName` y la
-   * verificación se enciende sola. `__tests__/windows-updater.test.ts` falla
-   * en ese momento y manda a leer ADR-136.
+   * La condición de salida tampoco vive en este comentario, sino en
+   * `__tests__/windows-updater.test.ts`, que falla cuando `electron-builder.yml`
+   * declare un certificado y manda a leer ADR-136.
+   *
+   * Ojo con una trampa que ADR-136 §2 detalla: **firmar no alcanza**. SignPath
+   * firma el `.exe` después del build, así que `electron-builder` nunca ve el
+   * certificado y no escribe `publisherName` — el instalador quedaría firmado
+   * y esto seguiría sin verificar, en silencio. Hay que declarar
+   * `win.publisherName` a mano.
    */
 
   autoUpdater.on("checking-for-update", () => emit(toUpdateEventPayload({ type: "checking" })));
