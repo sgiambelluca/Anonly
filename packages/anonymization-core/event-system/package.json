@@ -1,6 +1,6 @@
 {
   "name": "@anonly/event-system",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "Event Bus tipado propio para la comunicación motor↔motor y Core↔UI de Anonly.",
   "type": "module",
   "license": "MIT",

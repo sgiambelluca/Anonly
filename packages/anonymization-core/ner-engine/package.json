@@ -1,6 +1,6 @@
 {
   "name": "@anonly/ner-engine",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "NER Engine — Detecta personas, organizaciones, direcciones y fechas mediante un modelo NER local (Transformers.js + ONNX Runtime Web). Emite Occurrence[] con source: \"ner\".",
   "type": "module",
   "license": "MIT",

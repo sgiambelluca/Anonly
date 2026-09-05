@@ -1,6 +1,6 @@
 {
   "name": "@anonly/export-engine",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "Export Engine — Construye el PDF final reconstruido desde cero, adjuntando las imágenes renderizadas (lado anonimizado) como páginas con pdf-lib. Garantiza no-recuperabilidad y metadata mínima.",
   "type": "module",
   "license": "MIT",
