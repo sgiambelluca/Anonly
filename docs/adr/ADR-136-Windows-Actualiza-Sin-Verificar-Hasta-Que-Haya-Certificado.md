@@ -61,7 +61,11 @@ if (publisherName == null) { return null; }
 
 Y `apps/desktop-shell/electron-builder.yml` no declara `publisherName` porque no hay certificado del cual derivarlo.
 
-**La condición se invierte sola**: el día que exista el certificado, `electron-builder` va a firmar y a escribir `publisherName`, y la verificación se enciende sin que nadie borre una línea.
+**La condición se invierte sola, pero solo por un camino.** Si el certificado se integra por la vía nativa de `electron-builder` (`certificateFile`, o las variables `CSC_LINK`/`CSC_KEY_PASSWORD`), la herramienta firma, deriva `publisherName`, lo escribe en el `app-update.yml` del build, y la verificación se enciende sin que nadie borre una línea.
+
+**Por la vía que el roadmap planea, no.** SignPath Foundation firma el artefacto **después** del build: una action sube el `.exe` sin firmar y lo devuelve firmado, así que `electron-builder` nunca ve el certificado y no escribe `publisherName`. El instalador quedaría firmado, `verifySignature()` seguiría retornando `null`, y la verificación seguiría apagada **en silencio** — el peor de los desenlaces, porque desde afuera parece cerrado.
+
+Cerrarlo por SignPath exige entonces un paso explícito: declarar `win.publisherName` en `electron-builder.yml` con el *subject* del certificado. Está anotado en `roadmap/MVP.md` §Hito 11.5, en el mismo punto de SignPath, para que no se descubra tarde.
 
 ### 3. La condición de salida es un test, no un comentario
 
