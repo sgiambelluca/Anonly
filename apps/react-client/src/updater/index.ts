@@ -14,7 +14,7 @@
  *
  * **No expone `setAutomatic`.** El shell chequea siempre; que el usuario
  * prefiera que le pregunten o que se instale solo se resuelve acá, con el
- * setting que ya está en `localStorage`, sin cruzar el IPC (ADR-136).
+ * setting que ya está en `localStorage`, sin cruzar el IPC (ADR-132 §3).
  */
 
 export interface UpdateEvent {
@@ -29,8 +29,19 @@ export interface ShellUpdater {
   install(): void;
 }
 
-interface WindowWithUpdater {
-  anonlyUpdater?: unknown;
+/*
+ * El shell inyecta esto con `contextBridge.exposeInMainWorld`, así que declarar
+ * la propiedad es lo que corresponde: el objeto **existe** en `window` cuando
+ * hay contenedor. Declararla evita el `as unknown as` que hacía falta para
+ * leerla, que `Code_Standards.md` §2 prohíbe en producción sin ADR propio.
+ *
+ * Queda como `unknown` a propósito: que la propiedad exista no dice nada sobre
+ * su forma, y de validarla se encarga `isShellUpdater`.
+ */
+declare global {
+  interface Window {
+    readonly anonlyUpdater?: unknown;
+  }
 }
 
 function isShellUpdater(value: unknown): value is ShellUpdater {
@@ -53,6 +64,6 @@ function isShellUpdater(value: unknown): value is ShellUpdater {
  */
 export function getShellUpdater(): ShellUpdater | null {
   if (typeof window === "undefined") return null;
-  const candidate = (window as unknown as WindowWithUpdater).anonlyUpdater;
+  const candidate = window.anonlyUpdater;
   return isShellUpdater(candidate) ? candidate : null;
 }
