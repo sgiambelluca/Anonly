@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=seguridad | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,06_Pipeline.md,adr/ADR-130-El-Contenedor-De-Escritorio-Fija-El-Motor.md,adr/ADR-131-El-Actualizador-Es-La-Primera-Salida-De-Red.md,adr/ADR-132-El-Shell-Tiene-Su-Propio-Modelo-De-Seguridad.md | audiencia=IA+humanos | fase=11.5 (reescrito para el contenedor de escritorio: el producto dejó de ser una app web) -->
+<!-- CONTEXT: scope=seguridad | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,06_Pipeline.md,adr/ADR-130-El-Contenedor-De-Escritorio-Fija-El-Motor.md,adr/ADR-131-El-Actualizador-Es-La-Primera-Salida-De-Red.md,adr/ADR-132-El-Shell-Tiene-Su-Propio-Modelo-De-Seguridad.md,adr/ADR-136-Windows-Actualiza-Sin-Verificar-Hasta-Que-Haya-Certificado.md | audiencia=IA+humanos | fase=11.5 (reescrito para el contenedor de escritorio: el producto dejó de ser una app web) -->
 
 # Anonly — Modelo de Seguridad
 
@@ -12,7 +12,7 @@
 
 | # | Promesa | Verificación |
 |---|---|---|
-| S-1 | Ningún byte del documento sale de la máquina del usuario. | gate `shell-no-egress` (§11): un pipeline completo no emite **ninguna** request a un host. La única salida de red del producto es el actualizador, que corre en el proceso main —donde no hay documentos— y cuyo payload se arma por lista blanca (gate `updater-payload-clean`). |
+| S-1 | Ningún byte del documento sale de la máquina del usuario. | gate `shell-no-egress` (§11): un pipeline completo no emite **ninguna** request a un host. Ese gate **no ejercita el actualizador**, que es la única salida de red del producto; lo que lo cubre es que corra en el proceso main —donde no hay documentos—, que su payload se arme por lista blanca (gate `updater-payload-clean`) y que sus destinos estén enumerados desde el código (gate `network-destinations`). |
 | S-2 | Ningún documento se persiste remotamente. | sin endpoints de upload; el Core no hace network (regla R-10 de `ai/AI_Development_Guide.md`). |
 | S-3 | El PDF exportado no permite recuperar la información original. | test de no-recuperabilidad: buscar texto original en el buffer del export. |
 | S-4 | Los modelos IA entran al producto por una vía verificada. | sha256 por asset en `assets.lock.json`, verificado al mirrorearlos y al armar el instalador (ADR-018). **Ya no es SRI**: no hay `<script>` remoto que verificar — todo se sirve desde el propio paquete (ADR-132 §5). |
@@ -36,7 +36,7 @@
 | Recuperación por IndexedDB | escenarios donde se persiste algo | solo modelos y wasm en IndexedDB/Cache; nunca documentos |
 | Supply chain attack | librería comprometida | S-4, S-8, lockfile inmutable, `pnpm audit`, sha256 de `assets.lock.json` |
 | XSS que exfiltra el documento | script injectado | CSP estricta, sin `unsafe-inline` en `script-src`, sin `unsafe-eval`; la única concesión es `'wasm-unsafe-eval'` (acotada a compilar WebAssembly, no habilita `eval()`/`Function()`) — ver §3.2 |
-| Actualización maliciosa | release comprometido, o alguien en el medio | macOS: Sparkle valida cada actualización con una clave EdDSA **cuya privada no vive en GitHub** (ADR-131 §4), así que una cuenta comprometida no alcanza. Windows: hoy solo HTTPS contra GitHub — la verificación de firma queda apagada hasta que exista el certificado (ADR-131 §4), y ese hueco está abierto y anotado. |
+| Actualización maliciosa | release comprometido, o alguien en el medio | macOS: Sparkle valida cada actualización con una clave EdDSA **cuya privada no vive en GitHub** (ADR-131 §4), así que una cuenta comprometida no alcanza. Windows: hoy solo HTTPS contra GitHub — sin certificado de firma de código, `electron-updater` aplica la actualización sin verificarla. **ADR-136** decide ese hueco, con su condición de salida en un test; ADR-131 §4 prohíbe lo contrario y queda acotado por él. |
 | Fuga de datos por el canal del actualizador | el evento de update lleva algo del documento | gate `updater-payload-clean` (§11): el payload se arma por lista blanca, no por copia |
 | Side channel por timing | – | out of scope MVP; mitigación general: sin telemetría |
 | Reidentificación por patrones | un DNI reemplazado por el mismo valor en todos lados | agrupación por defecto + modos `synthetic` y `placeholder` con índices únicos |
@@ -308,7 +308,8 @@ Para evitar reidentificación por patrones:
 | `metadata-strip` | integration | export no contiene `author`/`creator`/`title` del original |
 | `no-password-in-logs` | unit | spy de logger no recibe password |
 | `csp-under-app-protocol` | E2E (shell) | la CSP de §3.2 y los headers de aislamiento llegan bajo `app://` — reemplaza a `csp-strict`, que leía response headers de un servidor que ya no existe |
-| `shell-no-egress` | E2E (shell) | un pipeline completo no emite **ninguna** request a un host `http(s)`. Reemplaza a `no-third-party-connect`, que solo prohibía dominios ajenos: acá no se permite ninguno |
+| `shell-no-egress` | E2E (shell) | un pipeline completo no emite **ninguna** request a un host `http(s)`. Reemplaza a `no-third-party-connect`, que solo prohibía dominios ajenos: acá no se permite ninguno. **No cubre el actualizador**: los E2E corren la app desempaquetada, donde el `Info.plist` no tiene `SUPublicEDKey` y Sparkle no arranca, así que el único componente que habla con la red nunca está presente — hoy pasa por ausencia. Eso lo cubren `network-destinations` y `updater-payload-clean` (ADR-132 §5) |
+| `network-destinations` | unit (shell) | el código del shell no nombra ninguna URL de red fuera de la lista blanca, y el appcast sigue siendo una constante y no una plantilla. Es la contraparte estática de lo que `shell-no-egress` no puede observar |
 | `cross-origin-isolated` | E2E (shell) | `crossOriginIsolated` en el renderer **y adentro de un worker**; sin eso `onnxruntime-web` cae a un hilo (ADR-100) |
 | `webprefs-locked` | E2E (shell) | `contextIsolation`/`sandbox` on, `nodeIntegration` off, y `require`/`process` inalcanzables desde el renderer |
 | `no-cache-storage-writes` | E2E (shell) | ningún intento de escribir en `Cache Storage`, que rechaza `app://` (ADR-132 §7) |
