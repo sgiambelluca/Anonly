@@ -1,6 +1,6 @@
 {
   "name": "@anonly/ocr-engine",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "description": "OCR Engine — Ejecuta OCR con Tesseract.js sobre las páginas sin texto del PDF. Devuelve Word[] con BoundingBox y confidence.",
   "type": "module",
   "license": "MIT",
