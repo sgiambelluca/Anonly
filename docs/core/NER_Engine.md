@@ -282,8 +282,8 @@ Las `Occurrence` también se emiten vía `ENTITY_FOUND` (incremental).
 
 | Test | Archivo | Tipo | Descripción |
 |---|---|---|---|
-| `no emite NER_MODEL_LOADING una vez que el modelo ya está listo` | `unit.test.ts` | edge | ADR-135: pool de dos workers, el segundo reporta su carga después del `model-ready` del primero. Sin la dedup, el indicador de "Preparando el detector de nombres…" quedaba prendido para siempre |
-| `apaga Cache Storage: el target es escritorio y el modelo es local` | `kernel.test.ts` | unit | ADR-132 §7: `env.useBrowserCache = false`, con `allowRemoteModels`/`allowLocalModels` sin cambios |
+| `no emite NER_MODEL_LOADING una vez que el modelo ya está listo (ADR-135)` | `unit.test.ts` | edge | ADR-135: pool de dos workers, el segundo reporta su carga después del `model-ready` del primero. Sin la dedup, el indicador de "Preparando el detector de nombres…" quedaba prendido para siempre |
+| `apaga Cache Storage: el target es escritorio y el modelo es local (ADR-132 §7)` | `kernel.test.ts` | unit | ADR-132 §7: `env.useBrowserCache = false`, con `allowRemoteModels`/`allowLocalModels` sin cambios |
 | `decodes the remote envelope { spans } from NerWorker` | `unit.test.ts` | unit | pool fake que **ignora `run()`** y resuelve exactamente lo que postea `worker/entry.ts`; se emiten `ENTITY_FOUND × N` y `NER_PAGE_FINISHED` con `occurrenceCount > 0` |
 | `decodes the in-process bare array identically` | `unit.test.ts` | unit | mismo fake resolviendo `[...]`; resultado idéntico al de arriba (paridad remoto/in-process) |
 | `throws on an unrecognized dispatch result` | `edge.test.ts` | edge | el fake resuelve `{}` / `null` / un string → `InvalidInputError`, y el error **no** se traga silenciosamente aguas arriba |

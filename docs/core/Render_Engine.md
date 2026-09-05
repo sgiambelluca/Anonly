@@ -376,10 +376,9 @@ El `ImageData` se transfiere zero-copy al host. El host lo convierte a `Blob` y 
    **Por qué el más ancho y no el primero**: el primer fragmento suele ser el trozo corto que quedó al final del renglón (`Diego`, en el caso medido), y meter ahí `[PERSONA 03]` lo manda al shrink-to-fit y a la marca de degradación del caso 28, habiendo un rectángulo holgado un renglón más abajo. Es una decisión de **este** motor y se puede revisar sin tocar ningún contrato.
 33. **Degradación y repintado sobre una unidad de pintado (ADR-074 §4/§6)**: el veredicto del caso 28 se computa contra el fragmento **donde se dibuja**, no contra la envolvente — hoy una entidad de dos líneas mide contra 557 pt de ancho, el token entra sobrado y la marca **nunca se enciende**, justo en el caso peor. Consecuencia esperada: algunas entidades multi-línea encienden la marca que hoy no encienden, con su remedio ya documentado (editar el valor a mano, ADR-058 §4 / ADR-062, que ADR-076 vuelve confiable). Las unidades de solo tapado **no** producen `Degraded` —no dibujan texto, no pueden degradarlo—, así que sigue habiendo como mucho una `Annotation` por `occurrenceId` y su `id` no colisiona. El repintado de línea del caso 26 opera también por unidad: `otherReplacements` ve a los fragmentos vecinos como reemplazos independientes, que es lo correcto para el límite de "no cruzar hacia el territorio de otra entidad".
 
----
-
-
 34. **Cancelación de pdfjs durante un render (ADR-133)**: cuando llega un pedido más nuevo para la misma página —zoom, cambio de tamaño de ventana, conmutar Original ↔ Anonimizado— pdfjs descarta el render en vuelo con `RenderingCancelledException`. La vista previa se dibuja igual con el pedido nuevo. Se mapea a `CancelledError` y **no** a `RenderPageFailedError`: la pool re-lanza el primero sin emitir `WORKER_JOB_FAILED`, así que deja de contarse como fallo. Se reconoce por `err.name` y nunca por el texto del mensaje.
+
+---
 
 ## 14. Casos de prueba
 
