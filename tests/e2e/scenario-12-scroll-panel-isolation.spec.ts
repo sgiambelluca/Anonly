@@ -43,8 +43,9 @@
  * acceso directo al bus.
  */
 
-import { expect, test, type Page } from "@playwright/test";
+import { type Page } from "@playwright/test";
 
+import { expect, openApp, test } from "./support/electronApp.js";
 import { manyNeutralPagesFile } from "./support/fixtures.js";
 
 const PAGE_COUNT = 30;
@@ -60,7 +61,7 @@ test.setTimeout(90_000);
  * Instrumenta `drawImage` para registrar, por `aria-label`, cada bitmap
  * dibujado sobre un canvas de página (y el timestamp del último draw, para
  * `waitForDrawQuiescence`). Se instala ANTES de subir el archivo
- * (inmediatamente tras `page.goto`) para no perderse los draws del render
+ * (inmediatamente tras `openApp`) para no perderse los draws del render
  * inicial, que este spec necesita observar para confirmar que el
  * asentamiento terminó antes de empezar a scrollear.
  */
@@ -122,7 +123,7 @@ test("scrollear el visor en modo original no dispara ningún render de anonymize
   page,
 }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.goto("/", { waitUntil: "networkidle" });
+  await openApp(page, "networkidle");
   await recordCanvasDraws(page);
 
   const file = await manyNeutralPagesFile(PAGE_COUNT);

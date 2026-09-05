@@ -298,7 +298,11 @@ export function EntitiesPanel() {
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Buscar entidades…"
             aria-label="Buscar entidades"
-            className="w-full rounded-md border border-border py-1 pl-7 pr-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent"
+            // `bg-bg-primary` explícito: un input que declara color de texto tiene que
+            // declarar su fondo. Sin él dependía del default del navegador, que con
+            // `color-scheme: dark` ya sería oscuro — pero apoyarse en eso deja el
+            // contraste a merced de una propiedad que vive en otro archivo.
+            className="w-full rounded-md border border-border bg-bg-primary py-1 pl-7 pr-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent"
           />
         </div>
       </div>

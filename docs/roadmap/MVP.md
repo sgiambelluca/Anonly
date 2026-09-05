@@ -4,7 +4,7 @@
 
 > Define el alcance exacto del primer release. Cualquier cosa fuera de esta lista **no** entra en MVP. v1.0 y v2.0 viven en sus propios docs.
 
-**Versión objetivo**: 0.1.0
+**Versión objetivo**: 0.9.0 — corregido desde `0.1.0`. Ese número se escribió cuando el plan era publicar el MVP en un CDN estático; lo que sale ahora es el MVP completo más los Hitos 10.5–10.8 y un contenedor de escritorio. `1.0.0` tampoco corresponde: `Version_1.0.md` §2 define v1.0 con una lista que está mayormente sin construir, y el Hito 11 sigue abierto. `0.9.0` deja `0.9.x` para lo que aparezca con usuarios reales, y hace que `1.0.0` signifique que el producto aguantó ese uso.
 **Criterio de "MVP listo"**: cumple todas las métricas de `00_Project_Vision.md` §7 y todos los gates de `07_Performance_Strategy.md` §11.4.
 
 ---
@@ -550,8 +550,37 @@ De las ~70: **~30 ya estaban cerradas** por hitos posteriores (ADR-053/054/056, 
 - Audit `pnpm audit`.
 - Bundle size check.
 
-### Hito 12 — Release 0.1.0
-- Docs finales, README del repo, demo, deploy a CDN estático.
+### Hito 11.5 — Escritorio (ADR-130, ADR-131, ADR-132)
+
+Insertado con la convención decimal del repo, sin renumerar Release. Adelantado desde v2.0 §2.2: el escritorio deja de ser un target futuro y pasa a ser **el** target del release.
+
+- ~~Spike: confirmar `crossOriginIsolated` y los cinco workers de motor bajo el protocolo `app://`.~~ **CERRADO (2026-09-04)** — los cuatro puntos verdes con Electron 44.2.0, pipeline completo verificado con `text-10p.pdf` y `image-alpha-3p.pdf` (ADR-132 "Verificado en el spike").
+- ~~`apps/desktop-shell` (Electron) cargando el build de `apps/react-client`. Protocolo propio, CSP y headers de aislamiento servidos por el shell.~~ **CERRADO** — `app://` registrado `standard + secure`; ADR-132.
+- ~~Apagar la caché de assets del renderer cuando corre en el shell: `Cache Storage` no acepta el esquema `app://` y los assets ya son locales (ADR-132 §7).~~ **CERRADO** — apagada en el motor de NER, con gate `no-cache-storage-writes`.
+- ~~Reescritura de `08_Security_Model.md` para el contenedor + gates nuevos de ADR-132 §5.~~ **CERRADO** — reescrito (la frontera pasa a ser el proceso, no el navegador) y los siete gates de §11 implementados.
+- ~~`electron-builder`: instalador Windows (NSIS) y macOS (DMG, firma ad-hoc).~~ **CERRADO** — los dos instaladores se generan y se probaron a mano en macOS 14 y en Windows 11.
+- ~~Versionado real con Changesets — hoy todo está en `0.0.0` y el actualizador compara versiones (ADR-131 §6).~~ **CERRADO** — versión única del monorepo, base `0.9.0`.
+- ~~Workflow de release por tag → GitHub Releases, con `pnpm assets:mirror` como paso previo (los ~202 MB no están versionados).~~ **CERRADO** — matriz macOS + Windows, smoke test del binario empaquetado, `SHA256SUMS.txt` y atestación de procedencia (ADR-132 §6).
+- ~~Auto-update: `electron-updater` en Windows; Sparkle vendoreado en macOS, con firma EdDSA propia (ADR-131 §3/§4).~~ **CERRADO, con una salvedad** — macOS valida con la clave EdDSA propia. **Windows aplica actualizaciones sin verificar firma**, porque no hay certificado: es un hueco real, decidido y acotado en **ADR-136**, cuya condición de salida es la línea de abajo.
+- ~~Migración de los E2E de Playwright al target shell.~~ **CERRADO — CORRIDO: 24/24** (1,2 min) contra el contenedor empaquetado, incluidos los cinco gates de seguridad de ADR-132 §5.
+- **ABIERTO, y bloquea la publicación del instalador de Windows** — Verificación de actualizaciones con **clave propia en Windows**, al modo de Sparkle. Es el **Hito 11.6** y tiene su ADR, que se escribe antes del código.
+
+  Decidido por el humano el 2026-09-05: no se publica una versión instalable de Windows que aplique actualizaciones sin chequear nada. Hoy es lo que hace (ADR-136), y hasta que exista SignPath el usuario de Windows tendría por única protección el HTTPS contra GitHub.
+
+  La forma es la de macOS: par Ed25519, la privada como *secret* de Actions, la pública horneada en la app. CI firma el `.exe` al publicarlo y la app valida antes de ejecutarlo, mediante el verificador propio que `electron-updater` acepta en `verifyUpdateCodeSignature` — una función, no un booleano (ADR-136 §2). **Misma garantía que macOS, y el mismo límite**: la privada vive en GitHub, así que una cuenta comprometida alcanzaría (ADR-131 §4, corrección del 2026-09-05).
+
+  **No reemplaza al certificado ni se retira cuando llegue**: cubren momentos distintos. La clave propia solo puede proteger **actualizaciones** — en la primera instalación no hay app que verifique nada, y ese momento lo cubre únicamente Authenticode, que además es lo que saca el cartel de SmartScreen. Cuando llegue SignPath, el verificador hace las dos comprobaciones: primero la clave propia, que es local y cuesta milisegundos, y después Authenticode, que lanza un proceso.
+
+  Lo que el ADR tiene que decidir y todavía no está decidido: qué pasa cuando la firma **no se puede descargar** —sin internet, GitHub caído— que es distinto de que no valide, y no puede terminar bloqueando todas las actualizaciones para siempre; y cómo conviven los dos verificadores en el único slot que `electron-updater` expone.
+
+  Al implementarlo, **ADR-136 deja de ser cierto** y hay que enmendarlo, junto con los tres lugares donde hoy está escrita la divulgación del hueco: `architecture/08_Security_Model.md` §2.1, el `README.md` de la raíz y `apps/desktop-shell/README.md`.
+
+- **ABIERTO** — `apps/desktop-shell` no tiene threshold de cobertura: `vitest.config.ts` solo mira `packages/**`, así que el ≥85% de R-13 no es verificable en el módulo donde vive la superficie de seguridad del contenedor. Medido el 2026-09-05: 23,75% de líneas, porque `main.ts`, `preload.ts` y `windows-updater.ts` necesitan el runtime de Electron y los cubren los E2E y `network-destinations.test.ts`, que no reportan cobertura v8. Un 85% plano no es alcanzable; elegir qué se excluye es política de proyecto y pide su ADR (R-18). Lo señaló el revisor del hito, dos veces.
+- **ABIERTO** — Firma de código Windows vía SignPath Foundation (gratis para OSS; requiere el `LICENSE` de la raíz). Es lo que cierra el hueco de ADR-136. **Firmar no alcanza**: SignPath firma el `.exe` después del build, así que `electron-builder` nunca ve el certificado y no escribe `publisherName` — el instalador quedaría firmado y la verificación seguiría apagada en silencio. Al integrarlo hay que **declarar `win.signtoolOptions.publisherName` a mano** en `electron-builder.yml` con el CN del certificado (en `electron-builder` 26 esa clave vive bajo `signtoolOptions`; `win.publisherName` es error de schema). El test `windows-updater.test.ts` falla en ese momento, a propósito, y manda a leer ADR-136.
+
+### Hito 12 — Release 0.9.0
+- Docs finales, README del repo, demo.
+- Publicación de instaladores en GitHub Releases. ~~deploy a CDN estático~~ — no hay hosting: la app no se sirve, se descarga (ADR-130, ADR-131 §1).
 
 ---
 

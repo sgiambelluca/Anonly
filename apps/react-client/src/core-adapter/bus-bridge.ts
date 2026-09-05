@@ -152,7 +152,14 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribe {
 
   unsubs.push(
     bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_CANCELLED, () => {
-      stores.pipeline.setState({ stage: PipelineStage.Cancelled });
+      /*
+       * `modelLoading` se limpia junto con el stage, y no es cosmético: el
+       * label le da prioridad **sobre** el stage, así que cancelar mientras el
+       * modelo cargaba dejaba "Preparando el detector de nombres…" en pantalla
+       * hasta que la carga terminara sola — y recién ahí aparecía "Cancelado".
+       * Al usuario le parecía que cancelar no había hecho nada.
+       */
+      stores.pipeline.setState({ stage: PipelineStage.Cancelled, modelLoading: null });
     }),
   );
 

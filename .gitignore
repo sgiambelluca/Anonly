@@ -73,8 +73,20 @@ apps/react-client/public/pdfjs/
 # nosotros y `CLAUDE.md` los referencia.
 .claude/skills/
 
-# Changesets temporales
-.changeset/*.md
-!.changeset/config.json
-!.changeset/README.md
+# Changesets: los .md SÍ se commitean.
+#
+# Estaban ignorados —de cuando la herramienta se instaló y no se usó—, y eso
+# rompe el flujo entero: un changeset es la nota de "esto cambió y con qué
+# severidad" que tiene que viajar en el PR para que `pnpm version` la aplique
+# al publicar. Ignorarlos hace que `pnpm version` no encuentre nada y que
+# ninguna versión suba nunca. Ver `RELEASING.md`.
 .measure/
+release/
+
+# Sparkle vendoreado y el addon compilado (ADR-131 §3).
+#
+# `Sparkle.framework` (3 MB) NO se commitea: lo baja `fetch-sparkle.sh` desde
+# el release oficial verificando sha256 — mismo criterio que ADR-018 para los
+# modelos y el wasm. `build/` es salida de node-gyp.
+apps/desktop-shell/native/vendor/
+apps/desktop-shell/native/build/

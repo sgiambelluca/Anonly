@@ -1,8 +1,10 @@
-<!-- CONTEXT: scope=seguridad | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,06_Pipeline.md | audiencia=IA+humanos | fase=1 -->
+<!-- CONTEXT: scope=seguridad | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,06_Pipeline.md,adr/ADR-130-El-Contenedor-De-Escritorio-Fija-El-Motor.md,adr/ADR-131-El-Actualizador-Es-La-Primera-Salida-De-Red.md,adr/ADR-132-El-Shell-Tiene-Su-Propio-Modelo-De-Seguridad.md,adr/ADR-136-Windows-Actualiza-Sin-Verificar-Hasta-Que-Haya-Certificado.md | audiencia=IA+humanos | fase=11.5 (reescrito para el contenedor de escritorio: el producto dejó de ser una app web) -->
 
 # Anonly — Modelo de Seguridad
 
 > Define las garantías de seguridad y privacidad del producto. **Anonly procesa documentos potencialmente confidenciales**: la seguridad no es opcional ni best-effort, es un contracto del producto. Toda decisión aquí se respalda con ADRs.
+
+> **El target es una aplicación de escritorio, no una web** (ADR-130). Eso cambia dónde viven las garantías: la CSP y el aislamiento de origen los sirve el propio contenedor en vez de un hosting, aparece una frontera nueva —el proceso **main** de Electron, que tiene permisos que ninguna página web tiene— y el producto gana su primera salida de red, el actualizador (ADR-131). Las tres cosas están tratadas abajo; donde este documento dice "navegador" hay que leer "el renderer del contenedor", que es un Chromium con las mismas restricciones más las de ADR-132 §3.
 
 ---
 
@@ -10,12 +12,12 @@
 
 | # | Promesa | Verificación |
 |---|---|---|
-| S-1 | Ningún byte del documento sale del navegador del usuario. | audit de network, CSP sin `connect-src` a terceros, test E2E que snifflea network. |
+| S-1 | Ningún byte del documento sale de la máquina del usuario. | gate `shell-no-egress` (§11): un pipeline completo no emite **ninguna** request a un host. Ese gate **no ejercita el actualizador**, que es la única salida de red del producto; lo que lo cubre es que corra en el proceso main —donde no hay documentos—, que su payload se arme por lista blanca (gate `updater-payload-clean`) y que sus destinos estén enumerados desde el código (gate `network-destinations`). |
 | S-2 | Ningún documento se persiste remotamente. | sin endpoints de upload; el Core no hace network (regla R-10 de `ai/AI_Development_Guide.md`). |
 | S-3 | El PDF exportado no permite recuperar la información original. | test de no-recuperabilidad: buscar texto original en el buffer del export. |
-| S-4 | Los modelos IA se cargan solo desde orígenes verificados (SRI). | SRI en todas las tags `<script>` y workers; integrity check al cargar wasm/modelos. |
+| S-4 | Los modelos IA entran al producto por una vía verificada. | sha256 por asset en `assets.lock.json`, verificado al mirrorearlos y al armar el instalador (ADR-018). **Ya no es SRI**: no hay `<script>` remoto que verificar — todo se sirve desde el propio paquete (ADR-132 §5). |
 | S-5 | No se conservan metadatos sensibles del PDF original en el export. | test de metadata del export. |
-| S-6 | El procesamiento ocurre en Web Workers con CSP estricta. | CSP `worker-src 'self' blob:` + `script-src` con `'wasm-unsafe-eval'` acotado a compilar WASM (nunca `'unsafe-eval'` completo — ver §3.2). |
+| S-6 | El procesamiento ocurre en Web Workers con CSP estricta, y el renderer no llega al sistema. | CSP `worker-src 'self' blob:` + `script-src` con `'wasm-unsafe-eval'` acotado a compilar WASM (nunca `'unsafe-eval'` completo — ver §3.2). En el contenedor además `contextIsolation`/`sandbox` activos y `nodeIntegration` apagado, con `require`/`process` inalcanzables desde el renderer (gate `webprefs-locked`, ADR-132 §3). |
 | S-7 | Passwords de PDFs protegidos no se persisten ni loguean. | grep automatizado + test de logger. |
 | S-8 | Supply chain auditada: dependencias con hash, sin `postinstall` opaco. | `pnpm audit`, `pnpm-lock.yaml` inmutable, review de `postinstall`. |
 
@@ -32,15 +34,17 @@
 | Recuperación por metadata | XMP sensible, autor original | S-5, strip de metadata en PDF Engine y export |
 | Recuperación por caché del navegador | cache HTTP con el documento | el documento vive solo en RAM, no en cache HTTP |
 | Recuperación por IndexedDB | escenarios donde se persiste algo | solo modelos y wasm en IndexedDB/Cache; nunca documentos |
-| Supply chain attack | librería comprometida | S-4, S-8, SRI, lockfile inmutable, audit |
+| Supply chain attack | librería comprometida | S-4, S-8, lockfile inmutable, `pnpm audit`, sha256 de `assets.lock.json` |
 | XSS que exfiltra el documento | script injectado | CSP estricta, sin `unsafe-inline` en `script-src`, sin `unsafe-eval`; la única concesión es `'wasm-unsafe-eval'` (acotada a compilar WebAssembly, no habilita `eval()`/`Function()`) — ver §3.2 |
+| Actualización maliciosa | release comprometido, o alguien en el medio | macOS: Sparkle valida cada actualización con una clave EdDSA propia (ADR-131 §4), que no está en el repositorio ni se puede derivar de la pública horneada en la app. Cubre a quien pueda alterar el artefacto después de CI o adjuntar archivos a un release; **no** cubre una cuenta de GitHub comprometida, porque la privada es un *secret* de Actions y quien tenga escritura puede correr un workflow que la use. Cerrar eso pide firmar offline y queda abierto (ADR-131 §4, corrección del 2026-09-05). Windows: hoy solo HTTPS contra GitHub — sin certificado de firma de código, `electron-updater` aplica la actualización sin verificarla. **ADR-136** decide ese hueco, con su condición de salida en un test; ADR-131 §4 prohíbe lo contrario y queda acotado por él. |
+| Fuga de datos por el canal del actualizador | el evento de update lleva algo del documento | gate `updater-payload-clean` (§11): el payload se arma por lista blanca, no por copia |
 | Side channel por timing | – | out of scope MVP; mitigación general: sin telemetría |
 | Reidentificación por patrones | un DNI reemplazado por el mismo valor en todos lados | agrupación por defecto + modos `synthetic` y `placeholder` con índices únicos |
-| Malware en modelo IA | modelo ONNX malicioso | SRI, modelos solo de source verificada (HuggingFace publicadas con commit hash) |
+| Malware en modelo IA | modelo ONNX malicioso | sha256 pineado en `assets.lock.json` (ADR-018): los bytes del modelo entran al instalador por una vía verificable, no por un commit ni por una descarga en runtime |
 
 ### 2.2 Fuera de scope
 
-- Ataques de side channel de hardware (Spectre, etc.): asumimos sandbox del navegador.
+- Ataques de side channel de hardware (Spectre, etc.): asumimos el sandbox del motor de render. En el contenedor eso es Chromium con `sandbox: true` (ADR-132 §3), o sea la misma superficie que en un navegador.
 - Protección contra un usuario malicioso con acceso al dispositivo del otro: fuera de alcance (es un producto local).
 - Anonimización criptográficamente garantizada (k-anonimidad probada): el producto hace anonimización operacional, no criptográfica. Ver `roadmap/Future_Ideas.md` para futuras garantías.
 
@@ -51,9 +55,22 @@
 ### 3.1 Reglas
 
 - El Core **nunca** hace `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource` ni ningún API de red. Regla R-10 de `ai/AI_Development_Guide.md`.
-- Las únicas requests permitidas son desde `apps/react-client` para cargar assets estáticos (chunks, wasm, modelos) desde el CDN propio, y están restringidas por CSP.
+- **No hay CDN ni servidor.** Los assets estáticos —chunks, wasm, modelos— viajan adentro del instalador y los sirve el propio contenedor por el esquema `app://` (ADR-130). El renderer los pide a su propio origen y nada más: `connect-src 'self'`, sin excepciones.
+- **La única salida de red del producto es el actualizador**, y no vive en el renderer sino en el proceso **main**, donde la CSP no aplica y donde no hay documentos (ADR-132 §1). Consulta versiones y descarga actualizaciones —firmadas en macOS; en Windows no, mientras no exista el certificado (§2.1, ADR-136)—; nunca manda contenido, nombre ni metadato de un documento (ADR-131 §5).
+- Esa consulta le revela a GitHub la IP del usuario y la versión instalada. Se dice en la UI y en el README en vez de esperar a que alguien lo descubra, y el chequeo es desactivable.
 
 ### 3.2 CSP verificada (ADR-039, Hito 10 PR10)
+
+> **Desde ADR-130 la CSP no la manda un hosting: la manda el shell.** El
+> contenedor registra el esquema `app://` y sirve el `dist` con estos mismos
+> headers más los dos de aislamiento de ADR-100 (`apps/desktop-shell/src/security.ts`,
+> fuente única). La política es idéntica; lo que cambia es que dejó de depender
+> de configurar bien un servidor ajeno. Lo verifica el gate
+> `csp-under-app-protocol` de §11.
+>
+> `connect-src 'self'` **sigue sin excepciones** aunque el producto ahora tenga
+> un actualizador: ese vive en el proceso main, donde la CSP no aplica y donde
+> no hay documentos (ADR-132 §1).
 
 ```
 default-src 'self';
@@ -212,13 +229,18 @@ El logger se implementa en `event-system` o `shared` y se inyecta vía `EngineCo
 
 ### 8.2 Integridad de assets
 
-- Todos los `<script>` y workers cargados desde HTML tienen `integrity` SRI.
-- Wasm y modelos cargados desde JS verifican `integrity` (Subresource Integrity para `fetch`) o `crypto.subtle.digest` comparado con hash hardcoded en el código.
-- Hashes se almacenan en un archivo `integrity.json` versionado y firmado (futuro: firma con Sigstore; MVP: hash hardcoded con review).
+**SRI se retiró (ADR-132 §5).** Protege contra un CDN comprometido, y no hay CDN: desde ADR-130 todo se sirve desde el propio paquete instalado, por `app://`. Un `integrity` sobre un archivo que viaja adentro del binario no verifica nada que la integridad del binario no verifique antes.
+
+Lo que la reemplaza son dos verificaciones que sí muerden:
+
+- **sha256 por asset en `assets.lock.json`** (ADR-018). Es la única vía por la que bytes de terceros —modelos, wasm de Tesseract y de onnxruntime— entran al build: `pnpm assets:mirror` descarga, compara contra el pin y **no escribe el archivo** si el hash no coincide. Corre en CI antes de empaquetar.
+- **Procedencia del binario publicado** (ADR-132 §6): el workflow de release publica un `SHA256SUMS.txt` y una atestación de `attest-build-provenance`, que ata criptográficamente cada instalador a este commit y a este workflow. Sin certificado de Apple, esto **es** el argumento de confianza, no un extra.
+
+Pendiente de Hito 11: verificación de integridad en runtime del modelo y el wasm (`crypto.subtle.digest` contra `assets.lock.json`, ADR-018 punto 3), que cubre la manipulación del archivo **después** de instalado.
 
 ### 8.3 Modelos IA
 
-- **Todos los modelos y wasm se sirven first-party** (mismo origen de la app o CDN propio bajo el mismo dominio), nunca desde HuggingFace/jsDelivr en runtime (ADR-018).
+- **Todos los modelos y wasm se sirven first-party**: viajan adentro del instalador y los entrega el protocolo `app://` del propio contenedor (ADR-130). Nunca desde HuggingFace ni jsDelivr en runtime (ADR-018).
 - El mirror se construye en build con `assets.lock.json` (URL de origen + revisión + `sha256` pinneados, verificados al descargar y al cargar en runtime).
 - HuggingFace es solo la **fuente** del mirror (pinneada por commit hash), no un origen de runtime.
 - No se cargan modelos desde URLs arbitrarias o configurables por el usuario en MVP.
@@ -285,11 +307,31 @@ Para evitar reidentificación por patrones:
 | `export-has-no-text-objects` | integration | ninguna página del export contiene objetos de texto — hace **verificable** la propiedad "el export es 100% imagen" en vez de dejarla como convención (ADR-004, ADR-059 §4) |
 | `metadata-strip` | integration | export no contiene `author`/`creator`/`title` del original |
 | `no-password-in-logs` | unit | spy de logger no recibe password |
-| `csp-strict` | E2E | response headers tienen CSP de §3.2 |
-| `sri-present` | E2E | todos los `<script>` tienen `integrity` |
-| `no-third-party-connect` | E2E | sin requests a dominios no first-party |
+| `csp-under-app-protocol` | E2E (shell) | la CSP de §3.2 y los headers de aislamiento llegan bajo `app://` — reemplaza a `csp-strict`, que leía response headers de un servidor que ya no existe |
+| `shell-no-egress` | E2E (shell) | un pipeline completo no emite **ninguna** request a un host `http(s)`. Reemplaza a `no-third-party-connect`, que solo prohibía dominios ajenos: acá no se permite ninguno. **No cubre el actualizador**: los E2E corren la app desempaquetada, donde el `Info.plist` no tiene `SUPublicEDKey` y Sparkle no arranca, así que el único componente que habla con la red nunca está presente — hoy pasa por ausencia. Eso lo cubren `network-destinations` y `updater-payload-clean` (ADR-132 §5) |
+| `network-destinations` | unit (shell) | el código del shell no nombra ninguna URL de red fuera de la lista blanca, y el appcast sigue siendo una constante y no una plantilla. Es la contraparte estática de lo que `shell-no-egress` no puede observar |
+| `cross-origin-isolated` | E2E (shell) | `crossOriginIsolated` en el renderer **y adentro de un worker**; sin eso `onnxruntime-web` cae a un hilo (ADR-100) |
+| `webprefs-locked` | E2E (shell) | `contextIsolation`/`sandbox` on, `nodeIntegration` off, y `require`/`process` inalcanzables desde el renderer |
+| `no-cache-storage-writes` | E2E (shell) | ningún intento de escribir en `Cache Storage`, que rechaza `app://` (ADR-132 §7) |
+| `updater-payload-clean` | unit (shell) | el payload que el actualizador manda al renderer se arma **por lista blanca**: nunca contenido, nombre ni metadato de un documento (ADR-131 §5) |
 | `pnpm-audit` | CI | cero high/critical |
 | `lockfile-immutable` | CI | `pnpm-lock.yaml` no cambia sin `pnpm install` deliberado |
+
+> **`sri-present` se retiró (ADR-132 §5).** Verificaba `integrity` en los
+> `<script>`, y eso protege contra un CDN comprometido. No hay `<script>`
+> remoto: todo se sirve desde el propio paquete. La integridad de lo que entra
+> al instalador la garantiza el sha256 de `assets.lock.json` (ADR-018), que es
+> una verificación real y no una vacua.
+>
+> **`csp-strict` y `no-third-party-connect` fueron reemplazados**, no
+> eliminados: cambia el mecanismo —ya no hay response headers de un servidor
+> que leer— y la intención se endurece, porque `shell-no-egress` no permite
+> ningún host en vez de solo los ajenos.
+>
+> **Lo que `shell-no-egress` no puede ver**: solo observa lo que pasa por la
+> sesión de Electron. Un servicio interno de Chromium que use otro contexto no
+> aparecería. Por eso ADR-132 §4 además **apaga** esos caminos por línea de
+> comandos: el gate prueba lo observable, los switches cierran lo que no.
 
 ---
 

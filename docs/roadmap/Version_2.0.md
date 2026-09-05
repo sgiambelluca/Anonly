@@ -26,7 +26,9 @@ Convertir Anonly de "anonimizador de PDF web" a "plataforma de anonimización do
 
 ### 2.2 Plataformas
 
-- **App de escritorio empaquetada**: instalador que el usuario baja una vez, instala, y usa **sin conexión** desde ese momento — con la ventaja de que, si hay red, puede actualizarse solo. Reutiliza todo el Core sin cambios (es 100% browser-compatible). Es el destino final de la promesa "100% local"; el escalón previo es la PWA instalable de `Version_1.0.md` §2.7.
+- **App de escritorio empaquetada** — ~~v2.0~~ **ADELANTADO AL 1.0** (ADR-130/131/132, Hito 11.5 de `MVP.md` §4). Las cuatro observaciones de abajo se mantienen porque son correctas y son la base de esos tres ADR; lo que cambió es *cuándo*. El punto 4 —Electron vs Tauri— quedó resuelto como anticipaba, y el escalón previo de la PWA **no se hace**: el 1.0 va directo al instalador (`Version_1.0.md` §2.7).
+
+  Texto original: instalador que el usuario baja una vez, instala, y usa **sin conexión** desde ese momento — con la ventaja de que, si hay red, puede actualizarse solo. Reutiliza todo el Core sin cambios (es 100% browser-compatible). Es el destino final de la promesa "100% local"; el escalón previo es la PWA instalable de `Version_1.0.md` §2.7.
 
   Cuatro cosas que este empaquetado cambia respecto de la web y que **no** son detalles de packaging:
 
@@ -79,7 +81,7 @@ Convertir Anonly de "anonimizador de PDF web" a "plataforma de anonimización do
 - Word Engine
 - Image Engine
 - Excel Engine
-- Desktop Packaging (Electron vs Tauri, actualizador firmado, assets en el instalador, modelo de seguridad del contenedor — §2.2)
+- ~~Desktop Packaging~~ — **movido al 1.0**, Hito 11.5 (ADR-130, ADR-131, ADR-132)
 - React Native Adaptation
 - Semantic Grouping
 - PDF/A Export
@@ -105,7 +107,7 @@ Mantienen las v1.0 con adiciones:
 1. Word engine.
 2. Image engine.
 3. Modo texto preservado (con research previo).
-4. Desktop packaging (instalador + actualizador; ADRs previos: contenedor y actualizador, §2.2).
+4. ~~Desktop packaging~~ — **hecho en el 1.0** (Hito 11.5).
 5. React Native adaptation.
 6. Batch UI.
 7. Plugin system.

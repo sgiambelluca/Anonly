@@ -45,6 +45,14 @@ import { ReplacementMode } from "@anonly/anonymization-core";
 import { create } from "zustand";
 
 export type Language = "es" | "en";
+
+/**
+ * `"system"` sigue a `prefers-color-scheme` del sistema operativo; los otros
+ * dos lo pisan en las dos direcciones. Default `"system"`: la mayoría de la
+ * gente ya configuró su preferencia una vez a nivel del SO y no quiere
+ * volver a hacerlo por aplicación.
+ */
+export type Theme = "system" | "light" | "dark";
 export type PerformancePreset = "auto" | "low" | "high";
 
 export interface SettingsSlice {
@@ -53,6 +61,20 @@ export interface SettingsSlice {
   readonly defaultReplacementMode: ReplacementMode;
   readonly nerEnabled: boolean;
   readonly ocrLanguages: ReadonlyArray<string>;
+  /**
+   * `false` = preguntar antes de instalar una actualización; `true` = aplicarla
+   * sola.
+   *
+   * El default es preguntar, y es una decisión de producto, no una comodidad:
+   * reemplazarle la aplicación en silencio a alguien que está anonimizando
+   * pericias es exactamente lo que genera desconfianza en una herramienta que
+   * se vende como local. Quien prefiera que no le pregunten más lo apaga acá.
+   *
+   * Solo tiene efecto dentro del contenedor de escritorio (ADR-131 §3). En un
+   * navegador no hay actualizador y el control no se muestra.
+   */
+  readonly autoUpdate: boolean;
+  readonly theme: Theme;
   persist(): void;
   load(): void;
 }
@@ -61,7 +83,13 @@ const STORAGE_KEY = "anonly:settings";
 
 type SettingsData = Pick<
   SettingsSlice,
-  "language" | "performancePreset" | "defaultReplacementMode" | "nerEnabled" | "ocrLanguages"
+  | "language"
+  | "performancePreset"
+  | "defaultReplacementMode"
+  | "nerEnabled"
+  | "ocrLanguages"
+  | "autoUpdate"
+  | "theme"
 >;
 
 const DEFAULT_SETTINGS: SettingsData = {
@@ -70,6 +98,8 @@ const DEFAULT_SETTINGS: SettingsData = {
   defaultReplacementMode: ReplacementMode.Placeholder,
   nerEnabled: true,
   ocrLanguages: ["spa", "eng"],
+  autoUpdate: false,
+  theme: "system",
 };
 
 type PersistedSettings = Partial<SettingsData>;
@@ -87,6 +117,8 @@ export const useSettingsStore = create<SettingsSlice>((set, get) => ({
       performancePreset: state.performancePreset,
       defaultReplacementMode: state.defaultReplacementMode,
       ocrLanguages: state.ocrLanguages,
+      autoUpdate: state.autoUpdate,
+      theme: state.theme,
     };
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(toStore));
@@ -125,6 +157,8 @@ export const useSettingsStore = create<SettingsSlice>((set, get) => ({
         : {}),
       ...(parsed.nerEnabled !== undefined ? { nerEnabled: parsed.nerEnabled } : {}),
       ...(parsed.ocrLanguages !== undefined ? { ocrLanguages: parsed.ocrLanguages } : {}),
+      ...(parsed.autoUpdate !== undefined ? { autoUpdate: parsed.autoUpdate } : {}),
+      ...(parsed.theme !== undefined ? { theme: parsed.theme } : {}),
     });
   },
 }));

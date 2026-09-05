@@ -2,9 +2,11 @@
   "$schema": "https://unpkg.com/@changesets/config@3.0.0/schema.json",
   "changelog": "@changesets/cli/changelog",
   "commit": false,
-  "fixed": [],
+  "fixed": [["@anonly/*"]],
   "linked": [],
   "access": "restricted",
   "baseBranch": "main",
-  "ignore": ["@anonly/react-client"]
+  "updateInternalDependencies": "patch",
+  "ignore": [],
+  "privatePackages": { "version": true, "tag": false }
 }

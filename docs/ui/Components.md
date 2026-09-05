@@ -768,6 +768,15 @@ El patrón de borde (sólido/punteado/doble) permite distinguir tipos incluso pa
 
 ## 10. Tokens de diseño
 
+Desde el modo oscuro, los tokens viven en `apps/react-client/src/index.css`
+como **canales RGB sueltos** y no como `#rrggbb`. No es cosmético: la app usa
+modificadores de opacidad de Tailwind (`border-accent/30` en `Banner`), y esos
+solo se componen si el token entra en `rgb(<canales> / <alpha>)`. Con un hex
+adentro de la variable, cualquier `/30` se rompe **en silencio** — el color
+sale sólido y nada avisa.
+
+### 10.1 Claro (default)
+
 ```css
 /* Tailwind config extend */
 --color-bg-primary: #ffffff;
@@ -780,13 +789,66 @@ El patrón de borde (sólido/punteado/doble) permite distinguir tipos incluso pa
 --color-success: #10b981;
 --color-warning: #f59e0b;        /* solo relleno decorativo — ver nota */
 --color-warning-strong: #b45309; /* ADR-087 §3.1: bordes, iconos y texto de precaución */
---color-error: #ef4444;
+--color-error: #dc2626;      /* 4.83:1 — era #ef4444, que fallaba en sus tres usos */
 --radius-sm: 4px;
 --radius-md: 8px;
 --radius-lg: 12px;
 --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
 --shadow-md: 0 4px 6px rgba(0,0,0,0.1);
 ```
+
+### 10.2 Oscuro
+
+**`color-scheme` se declara junto con los tokens, en los tres bloques.** No es opcional: le dice al navegador con qué paleta dibujar lo que la app **no** pinta — el fondo por defecto de un `<input>`, las barras de scroll, el caret, los controles nativos. Sin declararlo, un campo que no fija su propio fondo queda con el blanco por defecto y el texto claro encima: blanco sobre blanco. Pasó con el buscador de entidades y lo encontró un humano usando el instalador, no un test. Hoy lo cubre `tests/e2e/dark-mode-contrast.spec.ts`, que afirma sobre estilos computados y no sobre clases.
+
+Se activa con `data-theme="dark"` en `<html>`, o con `prefers-color-scheme:
+dark` cuando el usuario no eligió explícitamente. La preferencia vive en
+`settings.store.ts` (`theme: "system" | "light" | "dark"`, default `"system"`).
+
+```css
+--color-bg-primary: #1f2937;        /* superficie: tarjetas, diálogos */
+--color-bg-secondary: #111827;      /* fondo de la app */
+--color-bg-tertiary: #374151;       /* hover */
+--color-border: #6b7280;            /* 3.04:1 sobre la superficie */
+--color-text-primary: #f9fafb;      /* 14.05:1 */
+--color-text-secondary: #9ca3af;    /* 5.78:1 */
+--color-accent: #60a5fa;            /* 5.77:1 como texto/link */
+--color-accent-foreground: #111827; /* 6.98:1 sobre el relleno accent */
+--color-success: #34d399;           /* 7.64:1 */
+--color-warning: #fbbf24;
+--color-warning-strong: #fbbf24;    /* 8.79:1 */
+--color-error: #f87171;             /* 5.31:1 como texto */
+--color-error-foreground: #111827;  /* 6.41:1 sobre el relleno error */
+```
+
+Todos los ratios son contra `--color-bg-primary` del mismo tema —el peor caso,
+porque la superficie es más clara que el fondo— y están **calculados**, no
+estimados: la paleta se iteró contra la fórmula de WCAG hasta que ningún par
+quedara debajo de su mínimo.
+
+> **`--color-accent-foreground` y `--color-error-foreground` son tokens nuevos, y
+> existen por una falla concreta.** Los botones primario y de peligro usaban
+> `text-white` fijo. En oscuro el accent se aclara a `#60a5fa`, y el blanco
+> encima da **2.54:1** — muy por debajo del 4.5:1 que `UX_Guidelines.md` §9
+> promete. El color del texto sobre un relleno pasa a ser un token del tema, no
+> una constante del componente.
+
+> **Los highlights de entidad (§9) no tienen variante oscura, y no es un
+> olvido.** Pintan encima de la página del PDF renderizada, que es blanca en los
+> dos temas. Cambiarlos con el tema los movería respecto del fondo real sobre el
+> que se ven.
+
+> **`--color-error` pasó de `#ef4444` a `#dc2626`.** El anterior fallaba el
+> 4.5:1 de `UX_Guidelines.md` §9 en los tres usos del token: texto blanco sobre
+> el relleno del botón de peligro (3.76:1), y `text-error` sobre `bg-primary`
+> (3.76:1) y sobre `bg-secondary` (3.60:1). El tercero es el que más pesa: es
+> el color de los mensajes de error. `#dc2626` da 4.83 / 4.83 / 4.62.
+>
+> `hl.conflict` (§9) sigue en `#ef4444` y no cambia: es un highlight **no
+> textual** sobre la página blanca del PDF, donde el mínimo aplicable es el 3:1
+> de WCAG 1.4.11 y lo cumple con 3.76:1.
+
+### 10.3 Notas
 
 > **`--color-warning-strong` es nuevo (ADR-087 §3.1) y no es un capricho de paleta.** El
 > `--color-warning` de siempre da **2.15:1** contra `--color-bg-primary`, que falla incluso el 3:1

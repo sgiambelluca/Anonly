@@ -51,9 +51,8 @@
  * de preview del ciclo siguiente haría timeout.
  */
 
-import { expect, test } from "@playwright/test";
-
 import { installBlobUrlTracker, liveBlobUrlCount } from "./support/blobUrlTracker.js";
+import { expect, openApp, test } from "./support/electronApp.js";
 import { manyNeutralPagesFile } from "./support/fixtures.js";
 import { installSettingsOverride } from "./support/settingsOverride.js";
 
@@ -66,7 +65,7 @@ test("Escenario 7: abrir y cerrar 10 documentos consecutivos, estado limpio por 
 }) => {
   await installSettingsOverride(page, { nerEnabled: false });
   await installBlobUrlTracker(page);
-  await page.goto("/", { waitUntil: "networkidle" });
+  await openApp(page, "networkidle");
 
   const file = await manyNeutralPagesFile(3);
 

@@ -1854,7 +1854,31 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     return this.effectiveConfigByDocument.get(documentId) ?? this.config;
   }
 
+  /**
+   * `Cancelled` es **terminal**: ningún evento tardío lo pisa.
+   *
+   * Sin esto, un documento cancelado volvía a su etapa de trabajo. `cancel()`
+   * aborta la señal y deja el stage en `Cancelled`, pero los jobs que ya
+   * estaban en vuelo siguen resolviendo, y sus handlers llamaban `setStage` y
+   * `emitProgress` sin mirar si todavía tenía sentido. El usuario veía
+   * "Cancelado" y medio segundo después "Buscando datos sensibles: página 500
+   * de 500…" — la app diciéndole que seguía procesando el documento que acababa
+   * de pedir que no procesara (ADR-134).
+   *
+   * La guarda va acá y no en cada handler a propósito: son muchos caminos y
+   * alcanza con que uno se olvide. `cancel()` escribe el stage con
+   * `state.update` directo, así que no se bloquea a sí mismo.
+   *
+   * **No mira `cancelRequested`**, que `cancelReanalyze` también levanta:
+   * cancelar un reanalyze vuelve a `Ready` a propósito (caso 22 del spec) y
+   * tiene que poder seguir escribiendo su stage.
+   */
+  private isCancelled(documentId: string): boolean {
+    return this.state.get(documentId)?.stage === PipelineStage.Cancelled;
+  }
+
   private setStage(documentId: string, stage: PipelineStage): void {
+    if (this.isCancelled(documentId)) return;
     const updated = this.state.update(documentId, { stage });
     this.bus.emit(EventChannel.Pipeline, EngineEvents.PIPELINE_STAGE_CHANGED, {
       documentId,
@@ -1873,6 +1897,8 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
   private emitProgress(documentId: string, current: number, total: number): void {
     const state = this.state.get(documentId);
     if (state === undefined) return;
+    // Un documento cancelado no reporta progreso: ver `isCancelled` (ADR-134).
+    if (state.stage === PipelineStage.Cancelled) return;
     this.bus.emit(EventChannel.Pipeline, EngineEvents.PIPELINE_PROGRESS, {
       documentId,
       stage: state.stage,

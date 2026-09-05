@@ -746,6 +746,49 @@ describe("NerEngine — unit tests", () => {
 
   // ─── ADR-046 §4 (caso 17) / §2 (caso 18) ───
 
+  it("no emite NER_MODEL_LOADING una vez que el modelo ya está listo (ADR-135)", async () => {
+    asPipelineMock(pipeline).mockResolvedValue(
+      mockTokenClassificationPipeline(() => Promise.resolve([])),
+    );
+    const config = createMockConfig({
+      ner: {
+        modelId: "test-model-warm",
+        quantization: "q8",
+        confidenceThreshold: 0.7,
+        batchSize: 1,
+        enabled: true,
+      },
+    });
+    const warmCtx = createEngineContext({ config });
+
+    /*
+     * Reproduce un pool de dos workers: el primero reporta que el modelo quedó
+     * listo, el segundo arranca después y reporta su propia carga. Antes de
+     * ADR-135 ese `model-loading` tardío volvía a prender "Preparando el
+     * detector de nombres…" en el cliente, y como su `model-ready` ya estaba
+     * deduplicado, nadie lo apagaba: el usuario veía el cartel de carga
+     * mientras la app ya escaneaba páginas.
+     */
+    const pool = {
+      dispatch: <T>(params: NerPoolDispatchParams<T>): Promise<T> => {
+        params.onProgress?.(1, { phase: "model-ready", modelId: "test-model-warm" });
+        params.onProgress?.(0.4, { phase: "model-loading", modelId: "test-model-warm" });
+        return params.run();
+      },
+    };
+    const pooledEngine = new NerEngine(pool);
+    await pooledEngine.init(warmCtx);
+    const busEmitSpy = vi.spyOn(warmCtx.bus, "emit");
+    await pooledEngine.processPage(makeNerPageInput("doc-warm", 0, ["Juan", "Pérez"]), warmCtx);
+
+    const loadingCalls = busEmitSpy.mock.calls.filter(
+      ([, event]) => event === EngineEvents.NER_MODEL_LOADING,
+    );
+    expect(loadingCalls).toHaveLength(0);
+
+    await pooledEngine.dispose();
+  });
+
   it("NER_MODEL_READY emitted once per instance across several model-ready reports", async () => {
     asPipelineMock(pipeline).mockResolvedValue(
       mockTokenClassificationPipeline(() => Promise.resolve([])),

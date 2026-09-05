@@ -14,6 +14,22 @@ env:
   NODE_VERSION: "22"
   # PNPM_VERSION se lee automáticamente del campo packageManager de package.json.
   # No hardcodearla acá para evitar duplicación y drift.
+  # `onnxruntime-node` baja los binarios de CUDA en su postinstall, y **solo en
+  # linux/x64**: su `install-metadata.js` declara `requirements` vacíos para
+  # macOS y Windows, y `["cuda12"]` para Linux. Los binarios de CPU ya vienen
+  # adentro del paquete, así que lo único que baja son cientos de MB de
+  # aceleración por GPU — en un runner que no tiene GPU.
+  #
+  # Se saltea. El script lee esta variable antes que nada y sale con 0 sin
+  # pedir nada a la red (`install-utils.js`, `parseInstallFlag`): verificado
+  # ejecutándolo, no leyendo el README.
+  #
+  # Entra acá porque es de donde llegó a romper: un ETIMEDOUT contra
+  # api.nuget.org tumbó el job entero. `onnxruntime-node` es transitiva de
+  # `@huggingface/transformers`, que los tests de integración sí usan en Node
+  # —por eso no se bloquea el postinstall entero, solo la parte que no viene
+  # empaquetada—.
+  ONNXRUNTIME_NODE_INSTALL: skip
 
 jobs:
   install:
@@ -174,7 +190,12 @@ jobs:
   test-e2e:
     name: E2E (Playwright)
     needs: install
-    runs-on: ubuntu-latest
+    # macOS y no ubuntu: desde ADR-130 los E2E corren contra el contenedor
+    # de escritorio, o sea una app de Electron con ventana. En un runner de
+    # Linux eso necesita un display virtual (xvfb) — y encima probaría una
+    # plataforma que el proyecto no publica. macOS es uno de los dos targets
+    # reales, y en repos públicos el runner es gratis.
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - name: Check if e2e tests exist

@@ -76,6 +76,50 @@ describe("Orchestrator — edge cases", () => {
     return { bus, engines, orchestrator };
   }
 
+  // ─── ADR-134: `Cancelled` es terminal ───
+
+  describe("un documento cancelado no vuelve a una etapa de trabajo (ADR-134)", () => {
+    it("los jobs en vuelo no resucitan el stage ni emiten progreso", async () => {
+      const { bus, engines, orchestrator } = makeOrchestrator();
+
+      /*
+       * El PDF se queda colgado a mitad del import: reproduce el estado real
+       * en el que el usuario aprieta Cancelar — con trabajo ya despachado que
+       * va a resolver **después** de que la cancelación se procese.
+       */
+      let liberarPdf: (() => void) | undefined;
+      const pdfColgado = new Promise<void>((resolve) => {
+        liberarPdf = resolve;
+      });
+      const procesoOriginal = engines.pdf.process as ReturnType<typeof vi.fn>;
+      const resultadoOriginal = procesoOriginal.getMockImplementation();
+      procesoOriginal.mockImplementationOnce(async (...args: unknown[]) => {
+        await pdfColgado;
+        return resultadoOriginal?.(...args) as unknown;
+      });
+
+      const progresoTrasCancelar: unknown[] = [];
+      const importPromise = orchestrator.importDocument(createImportInput());
+      await Promise.resolve();
+
+      await orchestrator.cancel("doc-1");
+      expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Cancelled);
+
+      // Recién ahora se libera el trabajo en vuelo, y se escucha lo que emita.
+      bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_PROGRESS, (p) => {
+        progresoTrasCancelar.push(p);
+      });
+      liberarPdf?.();
+      await importPromise;
+
+      // Antes de ADR-134 el stage volvía a `Detecting` y la UI mostraba
+      // "Buscando datos sensibles: página N de N…" medio segundo después de
+      // decirle al usuario que había cancelado.
+      expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Cancelled);
+      expect(progresoTrasCancelar).toEqual([]);
+    });
+  });
+
   // ─── Caso 3: password retry ───
 
   it("password retry re-runs extraction", async () => {

@@ -1,6 +1,17 @@
 import { defineConfig, devices } from "@playwright/test";
 
 /**
+ * Config E2E contra el **navegador**. Ya no es el target del producto —desde
+ * ADR-130 lo es el contenedor de escritorio, y `pnpm test:e2e` usa
+ * `playwright.electron.config.ts`—.
+ *
+ * Se conserva a propósito, como **instrumento de diagnóstico**: correr el mismo
+ * spec en los dos entornos es lo que permite decidir si un fallo es del
+ * producto o del contenedor. Se usó dos veces el 2026-09-04, y las dos dio la
+ * respuesta: el aviso de vista previa (ADR-133) y el escape de cancelación de
+ * `scenario-4` resultaron ser del contenedor, porque contra el navegador los
+ * mismos specs pasan.
+ *
  * Playwright config del monorepo.
  *
  * Tests E2E en `tests/e2e/`. Se activan en Hito 10 (React Client).
