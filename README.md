@@ -8,7 +8,7 @@
 
 Buscar si hay una versión nueva. Esa consulta va a GitHub y **le revela tu IP y la versión que tenés instalada** — nada más: nunca el contenido, el nombre ni ningún metadato de un documento, y el chequeo se puede apagar desde Configuración.
 
-Vale la pena decirlo con precisión: **el Core nunca habla con la red** —hay un gate de CI que lo verifica sobre el código— y el contenedor solo lo hace para consultar versiones y bajar actualizaciones. En macOS cada actualización se valida con una clave criptográfica propia antes de instalarse; en Windows, mientras no exista el certificado de firma, lo único que protege el canal es HTTPS.
+Vale la pena decirlo con precisión: **el Core nunca habla con la red** —hay un gate de CI que lo verifica sobre el código— y el contenedor solo lo hace para consultar versiones y bajar actualizaciones. En macOS y Windows cada actualización se valida con una clave Ed25519 propia antes de instalarse. Esto no firma la primera instalación: Windows seguirá mostrando un editor no verificado hasta integrar Authenticode.
 
 Los instaladores se construyen en CI con logs públicos, y cada release publica el sha256 de cada archivo más una atestación que ata el binario a un commit de este repositorio. Cualquiera puede verificar que lo que bajó salió de este código.
 

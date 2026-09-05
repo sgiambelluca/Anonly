@@ -2,11 +2,17 @@
 
 # ADR-136 — Windows actualiza sin verificar firma, hasta que haya certificado
 
-- **Estado**: Accepted
+- **Estado**: Superseded by ADR-137
 - **Fecha**: 2026-09-04
 - **Decidido por**: El humano, sobre el hallazgo del revisor al implementar el actualizador de Windows.
 - **Relacionado con**: ADR-131 §2 (elección de `electron-updater`), ADR-131 §4 (**este ADR lo acota**), `08_Security_Model.md` §2.1
 - **Parte de**: Hito 11.5 — Escritorio
+
+> **Superado el 2026-09-05 por ADR-137.** Este ADR conserva la decisión
+> histórica que describía el producto del Hito 11.5. Windows ahora verifica
+> cada actualización con una clave Ed25519 propia aun sin Authenticode. El
+> certificado sigue pendiente para autenticar la primera instalación y se
+> compone con la verificación propia cuando llegue.
 
 ## Contexto
 
