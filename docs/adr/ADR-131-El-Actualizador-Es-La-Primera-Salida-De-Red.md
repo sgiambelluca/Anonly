@@ -59,6 +59,8 @@ Un actualizador descarga un archivo de internet y lo ejecuta con la confianza qu
 - Toda actualización se firma al publicarse, y la app **rechaza** lo que no valide.
 - HTTPS no sustituye esto: protege el transporte, no el origen. Si la cuenta de GitHub se ve comprometida, HTTPS entrega el release malicioso intacto. La firma cubre ese caso porque **la clave privada no vive en GitHub**.
 
+> **Acotado por ADR-136 (2026-09-04).** Este punto se cumple en macOS y **no** se cumple en Windows: sin certificado de firma de código, `electron-updater` aplica la actualización con HTTPS como única protección. ADR-136 registra esa excepción, por qué se tomó y cuál es su condición de salida. Lo de acá abajo sigue rigiendo tal cual.
+
 Queda **expresamente descartado** el fork de Squirrel.Mac con la verificación removida: resuelve el síntoma creando exactamente el agujero que este punto prohíbe, y su propio README desaconseja usarlo en producción.
 
 ### 5. Qué se envía en el chequeo
