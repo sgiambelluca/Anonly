@@ -1,8 +1,10 @@
-<!-- CONTEXT: scope=seguridad | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,06_Pipeline.md | audiencia=IA+humanos | fase=1 -->
+<!-- CONTEXT: scope=seguridad | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,06_Pipeline.md,adr/ADR-130-El-Contenedor-De-Escritorio-Fija-El-Motor.md,adr/ADR-131-El-Actualizador-Es-La-Primera-Salida-De-Red.md,adr/ADR-132-El-Shell-Tiene-Su-Propio-Modelo-De-Seguridad.md | audiencia=IA+humanos | fase=11.5 (reescrito para el contenedor de escritorio: el producto dejó de ser una app web) -->
 
 # Anonly — Modelo de Seguridad
 
 > Define las garantías de seguridad y privacidad del producto. **Anonly procesa documentos potencialmente confidenciales**: la seguridad no es opcional ni best-effort, es un contracto del producto. Toda decisión aquí se respalda con ADRs.
+
+> **El target es una aplicación de escritorio, no una web** (ADR-130). Eso cambia dónde viven las garantías: la CSP y el aislamiento de origen los sirve el propio contenedor en vez de un hosting, aparece una frontera nueva —el proceso **main** de Electron, que tiene permisos que ninguna página web tiene— y el producto gana su primera salida de red, el actualizador (ADR-131). Las tres cosas están tratadas abajo; donde este documento dice "navegador" hay que leer "el renderer del contenedor", que es un Chromium con las mismas restricciones más las de ADR-132 §3.
 
 ---
 
@@ -10,12 +12,12 @@
 
 | # | Promesa | Verificación |
 |---|---|---|
-| S-1 | Ningún byte del documento sale del navegador del usuario. | audit de network, CSP sin `connect-src` a terceros, test E2E que snifflea network. |
+| S-1 | Ningún byte del documento sale de la máquina del usuario. | gate `shell-no-egress` (§11): un pipeline completo no emite **ninguna** request a un host. La única salida de red del producto es el actualizador, que corre en el proceso main —donde no hay documentos— y cuyo payload se arma por lista blanca (gate `updater-payload-clean`). |
 | S-2 | Ningún documento se persiste remotamente. | sin endpoints de upload; el Core no hace network (regla R-10 de `ai/AI_Development_Guide.md`). |
 | S-3 | El PDF exportado no permite recuperar la información original. | test de no-recuperabilidad: buscar texto original en el buffer del export. |
-| S-4 | Los modelos IA se cargan solo desde orígenes verificados (SRI). | SRI en todas las tags `<script>` y workers; integrity check al cargar wasm/modelos. |
+| S-4 | Los modelos IA entran al producto por una vía verificada. | sha256 por asset en `assets.lock.json`, verificado al mirrorearlos y al armar el instalador (ADR-018). **Ya no es SRI**: no hay `<script>` remoto que verificar — todo se sirve desde el propio paquete (ADR-132 §5). |
 | S-5 | No se conservan metadatos sensibles del PDF original en el export. | test de metadata del export. |
-| S-6 | El procesamiento ocurre en Web Workers con CSP estricta. | CSP `worker-src 'self' blob:` + `script-src` con `'wasm-unsafe-eval'` acotado a compilar WASM (nunca `'unsafe-eval'` completo — ver §3.2). |
+| S-6 | El procesamiento ocurre en Web Workers con CSP estricta, y el renderer no llega al sistema. | CSP `worker-src 'self' blob:` + `script-src` con `'wasm-unsafe-eval'` acotado a compilar WASM (nunca `'unsafe-eval'` completo — ver §3.2). En el contenedor además `contextIsolation`/`sandbox` activos y `nodeIntegration` apagado, con `require`/`process` inalcanzables desde el renderer (gate `webprefs-locked`, ADR-132 §3). |
 | S-7 | Passwords de PDFs protegidos no se persisten ni loguean. | grep automatizado + test de logger. |
 | S-8 | Supply chain auditada: dependencias con hash, sin `postinstall` opaco. | `pnpm audit`, `pnpm-lock.yaml` inmutable, review de `postinstall`. |
 
@@ -32,15 +34,17 @@
 | Recuperación por metadata | XMP sensible, autor original | S-5, strip de metadata en PDF Engine y export |
 | Recuperación por caché del navegador | cache HTTP con el documento | el documento vive solo en RAM, no en cache HTTP |
 | Recuperación por IndexedDB | escenarios donde se persiste algo | solo modelos y wasm en IndexedDB/Cache; nunca documentos |
-| Supply chain attack | librería comprometida | S-4, S-8, SRI, lockfile inmutable, audit |
+| Supply chain attack | librería comprometida | S-4, S-8, lockfile inmutable, `pnpm audit`, sha256 de `assets.lock.json` |
 | XSS que exfiltra el documento | script injectado | CSP estricta, sin `unsafe-inline` en `script-src`, sin `unsafe-eval`; la única concesión es `'wasm-unsafe-eval'` (acotada a compilar WebAssembly, no habilita `eval()`/`Function()`) — ver §3.2 |
+| Actualización maliciosa | release comprometido, o alguien en el medio | macOS: Sparkle valida cada actualización con una clave EdDSA **cuya privada no vive en GitHub** (ADR-131 §4), así que una cuenta comprometida no alcanza. Windows: hoy solo HTTPS contra GitHub — la verificación de firma queda apagada hasta que exista el certificado (ADR-131 §4), y ese hueco está abierto y anotado. |
+| Fuga de datos por el canal del actualizador | el evento de update lleva algo del documento | gate `updater-payload-clean` (§11): el payload se arma por lista blanca, no por copia |
 | Side channel por timing | – | out of scope MVP; mitigación general: sin telemetría |
 | Reidentificación por patrones | un DNI reemplazado por el mismo valor en todos lados | agrupación por defecto + modos `synthetic` y `placeholder` con índices únicos |
-| Malware en modelo IA | modelo ONNX malicioso | SRI, modelos solo de source verificada (HuggingFace publicadas con commit hash) |
+| Malware en modelo IA | modelo ONNX malicioso | sha256 pineado en `assets.lock.json` (ADR-018): los bytes del modelo entran al instalador por una vía verificable, no por un commit ni por una descarga en runtime |
 
 ### 2.2 Fuera de scope
 
-- Ataques de side channel de hardware (Spectre, etc.): asumimos sandbox del navegador.
+- Ataques de side channel de hardware (Spectre, etc.): asumimos el sandbox del motor de render. En el contenedor eso es Chromium con `sandbox: true` (ADR-132 §3), o sea la misma superficie que en un navegador.
 - Protección contra un usuario malicioso con acceso al dispositivo del otro: fuera de alcance (es un producto local).
 - Anonimización criptográficamente garantizada (k-anonimidad probada): el producto hace anonimización operacional, no criptográfica. Ver `roadmap/Future_Ideas.md` para futuras garantías.
 
@@ -51,7 +55,9 @@
 ### 3.1 Reglas
 
 - El Core **nunca** hace `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource` ni ningún API de red. Regla R-10 de `ai/AI_Development_Guide.md`.
-- Las únicas requests permitidas son desde `apps/react-client` para cargar assets estáticos (chunks, wasm, modelos) desde el CDN propio, y están restringidas por CSP.
+- **No hay CDN ni servidor.** Los assets estáticos —chunks, wasm, modelos— viajan adentro del instalador y los sirve el propio contenedor por el esquema `app://` (ADR-130). El renderer los pide a su propio origen y nada más: `connect-src 'self'`, sin excepciones.
+- **La única salida de red del producto es el actualizador**, y no vive en el renderer sino en el proceso **main**, donde la CSP no aplica y donde no hay documentos (ADR-132 §1). Consulta versiones y descarga actualizaciones firmadas; nunca manda contenido, nombre ni metadato de un documento (ADR-131 §5).
+- Esa consulta le revela a GitHub la IP del usuario y la versión instalada. Se dice en la UI y en el README en vez de esperar a que alguien lo descubra, y el chequeo es desactivable.
 
 ### 3.2 CSP verificada (ADR-039, Hito 10 PR10)
 
@@ -223,13 +229,18 @@ El logger se implementa en `event-system` o `shared` y se inyecta vía `EngineCo
 
 ### 8.2 Integridad de assets
 
-- Todos los `<script>` y workers cargados desde HTML tienen `integrity` SRI.
-- Wasm y modelos cargados desde JS verifican `integrity` (Subresource Integrity para `fetch`) o `crypto.subtle.digest` comparado con hash hardcoded en el código.
-- Hashes se almacenan en un archivo `integrity.json` versionado y firmado (futuro: firma con Sigstore; MVP: hash hardcoded con review).
+**SRI se retiró (ADR-132 §5).** Protege contra un CDN comprometido, y no hay CDN: desde ADR-130 todo se sirve desde el propio paquete instalado, por `app://`. Un `integrity` sobre un archivo que viaja adentro del binario no verifica nada que la integridad del binario no verifique antes.
+
+Lo que la reemplaza son dos verificaciones que sí muerden:
+
+- **sha256 por asset en `assets.lock.json`** (ADR-018). Es la única vía por la que bytes de terceros —modelos, wasm de Tesseract y de onnxruntime— entran al build: `pnpm assets:mirror` descarga, compara contra el pin y **no escribe el archivo** si el hash no coincide. Corre en CI antes de empaquetar.
+- **Procedencia del binario publicado** (ADR-132 §6): el workflow de release publica un `SHA256SUMS.txt` y una atestación de `attest-build-provenance`, que ata criptográficamente cada instalador a este commit y a este workflow. Sin certificado de Apple, esto **es** el argumento de confianza, no un extra.
+
+Pendiente de Hito 11: verificación de integridad en runtime del modelo y el wasm (`crypto.subtle.digest` contra `assets.lock.json`, ADR-018 punto 3), que cubre la manipulación del archivo **después** de instalado.
 
 ### 8.3 Modelos IA
 
-- **Todos los modelos y wasm se sirven first-party** (mismo origen de la app o CDN propio bajo el mismo dominio), nunca desde HuggingFace/jsDelivr en runtime (ADR-018).
+- **Todos los modelos y wasm se sirven first-party**: viajan adentro del instalador y los entrega el protocolo `app://` del propio contenedor (ADR-130). Nunca desde HuggingFace ni jsDelivr en runtime (ADR-018).
 - El mirror se construye en build con `assets.lock.json` (URL de origen + revisión + `sha256` pinneados, verificados al descargar y al cargar en runtime).
 - HuggingFace es solo la **fuente** del mirror (pinneada por commit hash), no un origen de runtime.
 - No se cargan modelos desde URLs arbitrarias o configurables por el usuario en MVP.
