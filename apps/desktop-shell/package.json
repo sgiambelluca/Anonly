@@ -1,0 +1,34 @@
+{
+  "name": "@anonly/desktop-shell",
+  "version": "0.9.0",
+  "private": true,
+  "description": "Contenedor de escritorio (Electron). Sirve el build de @anonly/react-client por el protocolo app:// con los headers de aislamiento y la CSP del modelo de seguridad. ADR-130, ADR-132.",
+  "license": "MIT",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "pnpm build && electron .",
+    "test": "vitest run --root ../.. apps/desktop-shell/src/__tests__",
+    "icon": "electron scripts/render-icon.cjs",
+    "package": "pnpm build && electron-builder --publish never",
+    "package:mac": "pnpm build && electron-builder --mac --publish never",
+    "package:win": "pnpm build && electron-builder --win --publish never",
+    "smoke": "node scripts/smoke.cjs",
+    "sparkle:fetch": "bash native/scripts/fetch-sparkle.sh",
+    "sparkle:build": "node-gyp rebuild --directory=native --target=44.2.0 --dist-url=https://electronjs.org/headers"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.10",
+    "electron": "^44.2.0",
+    "electron-builder": "^26.15.3",
+    "node-addon-api": "^8.9.2",
+    "node-gyp": "^13.0.2",
+    "typescript": "^5.6.2",
+    "vitest": "^3.2.6"
+  },
+  "author": "Santino Giambelluca <santinogiambe@gmail.com>",
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  }
+}

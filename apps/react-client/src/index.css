@@ -2,6 +2,96 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Tokens de color (`ui/Components.md` §10), ahora como variables CSS para que
+ * exista el modo oscuro.
+ *
+ * **Los valores son canales RGB sueltos, no `#rrggbb`.** La app usa
+ * modificadores de opacidad de Tailwind (`border-accent/30` en `Banner`,
+ * entre otros), y esos solo funcionan si el token se puede componer como
+ * `rgb(<canales> / <alpha>)`. Con un hex adentro de la variable, cualquier
+ * `/30` se rompe en silencio: el color sale sólido y nadie se entera.
+ *
+ * Tres estados y no dos: elección explícita del usuario (`data-theme`), y
+ * cuando no eligió nada, lo que diga el sistema operativo.
+ */
+:root {
+  /*
+   * `color-scheme` le dice al navegador con qué paleta dibujar lo que NO
+   * pintamos nosotros: fondo por defecto de los `<input>`, barras de scroll,
+   * el caret, los controles nativos.
+   *
+   * Faltaba, y el efecto era visible: el buscador de entidades no declara
+   * fondo propio, así que en tema oscuro quedaba con el blanco por defecto del
+   * navegador y nuestro texto claro encima — texto blanco sobre blanco, no se
+   * leía lo que se escribía. Lo reportó el humano probando el instalador en
+   * Windows 11.
+   */
+  color-scheme: light;
+  --color-bg-primary: 255 255 255; /* #ffffff */
+  --color-bg-secondary: 249 250 251; /* #f9fafb */
+  --color-bg-tertiary: 243 244 246; /* #f3f4f6 */
+  --color-border: 229 231 235; /* #e5e7eb */
+  --color-text-primary: 17 24 39; /* #111827 */
+  --color-text-secondary: 107 114 128; /* #6b7280 */
+  --color-accent: 37 99 235; /* #2563eb */
+  --color-accent-foreground: 255 255 255; /* #ffffff */
+  --color-success: 16 185 129; /* #10b981 */
+  --color-warning: 245 158 11; /* #f59e0b */
+  --color-warning-strong: 180 83 9; /* #b45309 */
+  /*
+   * `#dc2626` y no el `#ef4444` de siempre (ADR-087 §3.1, mismo criterio que
+   * `warning-strong`). El anterior fallaba el 4.5:1 de `UX_Guidelines.md` §9 en
+   * los **tres** usos que tiene el token, no en uno:
+   *   - texto blanco sobre el relleno del botón de peligro: 3.76:1
+   *   - `text-error` sobre `bg-primary`: 3.76:1
+   *   - `text-error` sobre `bg-secondary`: 3.60:1
+   * El tercero es el que más pesa: es el color de los mensajes de error, o sea
+   * el texto que menos se puede dar el lujo de no leerse. `#dc2626` da 4.83 /
+   * 4.83 / 4.62 y sigue leyéndose rojo.
+   */
+  --color-error: 220 38 38; /* #dc2626 */
+  --color-error-foreground: 255 255 255; /* #ffffff */
+}
+
+/* Preferencia del sistema, solo si el usuario no eligió explícitamente. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --color-bg-primary: 31 41 55; /* #1f2937 */
+    --color-bg-secondary: 17 24 39; /* #111827 */
+    --color-bg-tertiary: 55 65 81; /* #374151 */
+    --color-border: 107 114 128; /* #6b7280 */
+    --color-text-primary: 249 250 251; /* #f9fafb */
+    --color-text-secondary: 156 163 175; /* #9ca3af */
+    --color-accent: 96 165 250; /* #60a5fa */
+    --color-accent-foreground: 17 24 39; /* #111827 */
+    --color-success: 52 211 153; /* #34d399 */
+    --color-warning: 251 191 36; /* #fbbf24 */
+    --color-warning-strong: 251 191 36; /* #fbbf24 */
+    --color-error: 248 113 113; /* #f87171 */
+    --color-error-foreground: 17 24 39; /* #111827 */
+  }
+}
+
+/* Elección explícita del usuario: gana sobre el sistema, en los dos sentidos. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-bg-primary: 31 41 55; /* #1f2937 */
+  --color-bg-secondary: 17 24 39; /* #111827 */
+  --color-bg-tertiary: 55 65 81; /* #374151 */
+  --color-border: 107 114 128; /* #6b7280 */
+  --color-text-primary: 249 250 251; /* #f9fafb */
+  --color-text-secondary: 156 163 175; /* #9ca3af */
+  --color-accent: 96 165 250; /* #60a5fa */
+  --color-accent-foreground: 17 24 39; /* #111827 */
+  --color-success: 52 211 153; /* #34d399 */
+  --color-warning: 251 191 36; /* #fbbf24 */
+  --color-warning-strong: 251 191 36; /* #fbbf24 */
+  --color-error: 248 113 113; /* #f87171 */
+  --color-error-foreground: 17 24 39; /* #111827 */
+}
+
 @layer base {
   html,
   body,
@@ -20,7 +110,7 @@
     @apply inline-flex items-center justify-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50;
   }
   .anonly-button-primary {
-    @apply anonly-button bg-accent text-white hover:bg-blue-700;
+    @apply anonly-button bg-accent text-accent-foreground hover:opacity-90;
   }
   .anonly-button-secondary {
     @apply anonly-button bg-bg-tertiary text-text-primary hover:bg-border;
@@ -29,7 +119,7 @@
     @apply anonly-button bg-transparent text-text-secondary hover:bg-bg-tertiary;
   }
   .anonly-button-danger {
-    @apply anonly-button bg-error text-white hover:bg-red-700;
+    @apply anonly-button bg-error text-error-foreground hover:opacity-90;
   }
 }
 

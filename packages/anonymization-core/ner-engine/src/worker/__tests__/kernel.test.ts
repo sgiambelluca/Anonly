@@ -195,6 +195,24 @@ describe("NerKernel — kernelClassify (ADR-046 §1/§4)", () => {
     });
     expect(env.backends.onnx.wasm?.wasmPaths).toBe("/wasm/onnxruntime/");
   });
+  it("apaga Cache Storage: el target es escritorio y el modelo es local (ADR-132 §7)", async () => {
+    const { env } = await import("@huggingface/transformers");
+    asPipelineMock(pipeline).mockResolvedValue(
+      mockTokenClassificationPipeline(() => Promise.resolve([])),
+    );
+
+    await kernelClassify(basePayload({ modelId: "model-no-cache" }), {
+      timeoutMs: 5000,
+      abortSignal: new AbortController().signal,
+    });
+
+    expect(env.useBrowserCache).toBe(false);
+    // Los otros dos siguen como estaban: el modelo se sirve del origen propio
+    // y nunca de HuggingFace (ADR-018).
+    expect(env.allowRemoteModels).toBe(false);
+    expect(env.allowLocalModels).toBe(true);
+  });
+
   // ─── v1.3.1: un subword no puede empezar una entidad ───
 
   it("does not let a wordpiece continuation tagged B- split an entity in two", async () => {

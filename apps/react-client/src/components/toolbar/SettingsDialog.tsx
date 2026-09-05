@@ -48,14 +48,18 @@ import { useDocumentStore } from "../../store/document.store.js";
 import {
   useSettingsStore,
   type Language,
+  type Theme,
   type PerformancePreset,
 } from "../../store/settings.store.js";
 import { useViewerStore } from "../../store/viewer.store.js";
+import { applyTheme } from "../../theme.js";
+import { getShellUpdater } from "../../updater/index.js";
 import { Button } from "../common/Button.js";
 import { Checkbox } from "../common/Checkbox.js";
 import { ConfirmDialog } from "../common/ConfirmDialog.js";
 import { Dialog } from "../common/Dialog.js";
 import { Select, type SelectOption } from "../common/Select.js";
+import { DARK_PREVIEW, LIGHT_PREVIEW, ThemePreview } from "../common/ThemePreview.js";
 import { computeReanalyzeRenderRequest } from "../viewer/reanalyzeRenderRequest.js";
 
 import { diffReanalyzeChange, planReanalyzePatches } from "./reanalyzePlan.js";
@@ -116,6 +120,16 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     () => useSettingsStore.getState().ocrLanguages,
   );
 
+  const [autoUpdate, setAutoUpdate] = useState<boolean>(
+    () => useSettingsStore.getState().autoUpdate,
+  );
+  /*
+   * `null` fuera del contenedor de escritorio: en un navegador no hay
+   * actualizador y la sección entera no se muestra. Se resuelve una vez y no
+   * en cada render — no cambia durante la vida de la página.
+   */
+  const [theme, setTheme] = useState<Theme>(() => useSettingsStore.getState().theme);
+  const [shellUpdater] = useState(() => getShellUpdater());
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -127,6 +141,8 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     setLanguage(current.language);
     setPerformancePreset(current.performancePreset);
     setOcrLanguages(current.ocrLanguages);
+    setAutoUpdate(current.autoUpdate);
+    setTheme(current.theme);
     setSaveError(null);
   }, [open]);
 
@@ -135,14 +151,20 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     performancePreset: PerformancePreset;
     nerEnabled: boolean;
     ocrLanguages: ReadonlyArray<string>;
+    autoUpdate: boolean;
+    theme: Theme;
   }): void {
     useSettingsStore.setState(next);
     useSettingsStore.getState().persist();
+    // El tema se aplica al guardar y no al elegir: el diálogo es atómico, y si
+    // el usuario cancela nada tiene que haber cambiado. La vista previa es lo
+    // que da la devolución inmediata, que es para lo que existe.
+    applyTheme(next.theme);
   }
 
   async function handleSave(): Promise<void> {
     const previous = useSettingsStore.getState();
-    const next = { language, performancePreset, nerEnabled, ocrLanguages };
+    const next = { language, performancePreset, nerEnabled, ocrLanguages, autoUpdate, theme };
     const change = diffReanalyzeChange(previous, next);
     const needsReanalyze =
       (change.ner !== undefined || change.ocr !== undefined) && documentId !== null;
@@ -192,7 +214,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
 
   async function handleConfirmReanalyze(): Promise<void> {
     const previous = useSettingsStore.getState();
-    const next = { language, performancePreset, nerEnabled, ocrLanguages };
+    const next = { language, performancePreset, nerEnabled, ocrLanguages, autoUpdate, theme };
     const change = diffReanalyzeChange(previous, next);
     const patches = planReanalyzePatches(change);
 
@@ -235,7 +257,33 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
 
   return (
     <>
-      <Dialog open={open} onClose={onClose} title="Configuración">
+      <Dialog
+        open={open}
+        onClose={onClose}
+        title="Configuración"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={onClose}>
+              Cancelar
+            </Button>
+            {/*
+              `loading` (no solo `disabled`): guardar puede recrear el core sin
+              documento abierto (ADR-125 §2) y eso tarda lo que tardan cinco
+              workers.
+            */}
+            <Button
+              variant="primary"
+              disabled={ocrLanguagesEmpty}
+              loading={saving}
+              onClick={() => {
+                void handleSave();
+              }}
+            >
+              Guardar
+            </Button>
+          </div>
+        }
+      >
         <div className="flex flex-col gap-4">
           <FormRow label="Idioma">
             <Select
@@ -280,6 +328,91 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
               </p>
             ) : null}
           </FormRow>
+
+          <FormRow label="Apariencia">
+            <Checkbox
+              id="settings-theme-system"
+              checked={theme === "system"}
+              onCheckedChange={(checked) => setTheme(checked ? "system" : "light")}
+              label="Seguir la configuración del sistema"
+            />
+            {/*
+              Las miniaturas son el control, no una ilustración al lado del
+              control: elegir un tema mirando su nombre es adivinar, y elegirlo
+              mirando cómo queda es decidir.
+            */}
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              {(
+                [
+                  { value: "light", label: "Modo claro", palette: LIGHT_PREVIEW },
+                  { value: "dark", label: "Modo oscuro", palette: DARK_PREVIEW },
+                ] as const
+              ).map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  aria-pressed={theme === option.value}
+                  onClick={() => setTheme(option.value)}
+                  className={`flex flex-col gap-1.5 rounded-md border p-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                    theme === option.value
+                      ? "border-accent ring-1 ring-accent"
+                      : "border-border hover:border-text-secondary"
+                  } ${theme === "system" ? "opacity-60" : ""}`}
+                >
+                  <ThemePreview palette={option.palette} />
+                  <span className="px-0.5 text-sm text-text-primary">{option.label}</span>
+                </button>
+              ))}
+            </div>
+            {theme === "system" ? (
+              <p className="mt-1 text-sm text-text-secondary">
+                Anonly usa el tema de tu sistema y lo acompaña si lo cambiás.
+              </p>
+            ) : null}
+          </FormRow>
+
+          {/*
+            Solo dentro del contenedor de escritorio: en un navegador no hay
+            actualizador y mostrar el control sería ofrecer algo que no existe.
+          */}
+          {shellUpdater !== null ? (
+            <FormRow label="Actualizaciones">
+              <Checkbox
+                id="settings-auto-update"
+                checked={autoUpdate}
+                onCheckedChange={setAutoUpdate}
+                label="Actualizar automáticamente"
+              />
+              {/*
+                Texto único que describe LOS DOS estados, no el estado actual.
+                La versión anterior decía "Te vamos a avisar..." cuando estaba
+                apagado, y pegada debajo de un checkbox sin marcar se leía como
+                lo que iba a pasar **si lo activabas** — o sea, exactamente al
+                revés. Un texto que cambia con el toggle es ambiguo por
+                posición aunque sea correcto por contenido.
+              */}
+              <p className="mt-1 text-sm text-text-secondary">
+                Activado, las versiones nuevas se instalan solas al reiniciar la app. Desactivado,
+                te avisamos y vos decidís cuándo instalarlas.
+              </p>
+              {/*
+                ADR-131 §5 obliga a decirlo acá y no solo en el README: buscar
+                actualizaciones es la **única** salida de red del producto, y el
+                usuario tiene que enterarse por la app y no descubriéndolo.
+              */}
+              <p className="mt-1 text-sm text-text-secondary">
+                Para buscarlas, Anonly le consulta a GitHub. Esa consulta revela tu IP y la versión
+                instalada, y nada más: nunca el contenido ni el nombre de un documento.
+              </p>
+              <button
+                type="button"
+                onClick={() => shellUpdater.check()}
+                className="mt-2 text-sm text-accent underline"
+              >
+                Buscar actualizaciones ahora
+              </button>
+            </FormRow>
+          ) : null}
         </div>
 
         <AboutSection />
@@ -295,27 +428,6 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
             {saveError}
           </p>
         ) : null}
-
-        <div className="mt-5 flex justify-end gap-2">
-          <Button variant="secondary" onClick={onClose}>
-            Cancelar
-          </Button>
-          {/*
-            `loading` (no solo `disabled`): guardar puede recrear el core sin
-            documento abierto (ADR-125 §2) y eso tarda lo que tardan cinco
-            workers.
-          */}
-          <Button
-            variant="primary"
-            disabled={ocrLanguagesEmpty}
-            loading={saving}
-            onClick={() => {
-              void handleSave();
-            }}
-          >
-            Guardar
-          </Button>
-        </div>
       </Dialog>
 
       <ConfirmDialog
@@ -351,12 +463,44 @@ function FormRow({ label, children }: { label: string; children: ReactNode }) {
 // datos puro, nunca `settings.store`. No participa de `diffReanalyzeChange`
 // ni de `handleSave`/`handleConfirmReanalyze` — "Cancelar" y "Guardar" no lo
 // tocan porque no hay nada de él que aplicar o descartar.
+/**
+ * El repo del proyecto. Constante y no un setting: es una propiedad del
+ * producto, no algo que el usuario configure.
+ */
+const REPOSITORY_URL = "https://github.com/sgiambelluca/Anonly";
+
 function AboutSection() {
   return (
     <>
       <div className="my-4 border-t border-border" />
       <section aria-label="Acerca de" className="flex flex-col gap-3">
         <h3 className="text-sm font-medium text-text-secondary">Acerca de</h3>
+        {/*
+          Que el código sea auditable es parte de la promesa del producto, no
+          un dato de color: alguien que va a confiarle una pericia a esta
+          herramienta tiene que poder ir a mirar qué hace. El link va acá y no
+          escondido en un README.
+        */}
+        <p className="text-sm text-text-secondary">
+          Anonly es software libre.{" "}
+          <a
+            href={REPOSITORY_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-accent underline"
+          >
+            Ver el código fuente en GitHub
+          </a>
+          {" · "}
+          <a
+            href={`${REPOSITORY_URL}/issues/new`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-accent underline"
+          >
+            Reportar un problema
+          </a>
+        </p>
         {THIRD_PARTY_CREDITS.map((credit) => (
           <p key={credit.id} className="text-sm text-text-secondary">
             <a

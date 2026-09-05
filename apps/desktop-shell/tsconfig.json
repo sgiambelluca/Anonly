@@ -1,0 +1,30 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    /*
+     * CommonJS, no ESM, y a contramano del resto del monorepo. El motivo es
+     * `sandbox: true` (ADR-132 §3): un preload sandboxeado NO puede ser un
+     * módulo ES —Electron lo carga con `require`— y aflojar el sandbox para
+     * ganar coherencia de módulos sería cambiar una propiedad de seguridad
+     * por una de estilo. Compilar main y preload al mismo formato evita
+     * además un segundo tsconfig solo para el preload.
+     */
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "verbatimModuleSyntax": false,
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"],
+    "noEmit": true,
+    /*
+     * Los scripts de `scripts/` son `.cjs` y entran al proyecto solo para que
+     * ESLint tenga tipos con los que evaluar sus reglas type-aware. Sin esto
+     * caen en el "default project", que tiene un tope de 8 archivos para todo
+     * el repo y ya estaba casi lleno de configs. `checkJs` en false: se
+     * incluyen, no se chequean — el JSDoc alcanza para tipar lo que se usa.
+     * `tsconfig.build.json` no los incluye: no se empaquetan.
+     */
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": ["src/**/*.ts", "scripts/**/*.cjs"]
+}

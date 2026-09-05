@@ -97,6 +97,19 @@ const ortUrlAssetStub = {
 export default defineConfig({
   plugins: [ortUrlAssetStub],
   resolve: {
+    /*
+     * Electron 44 depende de @types/node 24, mientras que la raíz mantiene
+     * @types/node 20. `sharp` declara ese paquete como peer opcional, de modo
+     * que pnpm instala dos contextos físicos de @huggingface/transformers en
+     * un checkout limpio. Sin dedupe, los tests globales mockean la copia de
+     * la raíz y ner-engine importa la otra: el modelo real intenta cargarse en
+     * el job unitario de CI, donde los assets first-party no se copian.
+     *
+     * Vite resuelve ambas importaciones desde la raíz para que el mock y el
+     * kernel compartan una sola frontera de librería. Producción y E2E no usan
+     * este config, así que conservan la resolución normal del workspace.
+     */
+    dedupe: ["@huggingface/transformers"],
     alias: [
       {
         find: "@anonly/shared",

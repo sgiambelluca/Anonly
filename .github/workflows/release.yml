@@ -1,0 +1,221 @@
+name: Release
+
+# El tag dispara el release, no el merge a `main` (ADR-131 §1, RELEASING.md).
+# `main` puede acumular cambios sin que ningún usuario reciba nada.
+on:
+  push:
+    tags: ["v*"]
+  # Para ejercitar el pipeline entero sin publicar nada.
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "22"
+  # `onnxruntime-node` baja los binarios de CUDA en su postinstall, y **solo en
+  # linux/x64**: su `install-metadata.js` declara `requirements` vacíos para
+  # macOS y Windows, y `["cuda12"]` para Linux. Los binarios de CPU ya vienen
+  # adentro del paquete, así que lo único que baja son cientos de MB de
+  # aceleración por GPU — en un runner que no tiene GPU.
+  #
+  # Se saltea. El script lee esta variable antes que nada y sale con 0 sin
+  # pedir nada a la red (`install-utils.js`, `parseInstallFlag`): verificado
+  # ejecutándolo, no leyendo el README.
+  #
+  # Entra acá porque es de donde llegó a romper: un ETIMEDOUT contra
+  # api.nuget.org tumbó el job entero. `onnxruntime-node` es transitiva de
+  # `@huggingface/transformers`, que los tests de integración sí usan en Node
+  # —por eso no se bloquea el postinstall entero, solo la parte que no viene
+  # empaquetada—.
+  ONNXRUNTIME_NODE_INSTALL: skip
+
+permissions:
+  contents: write
+  # Las dos que pide `attest-build-provenance`: firma la atestación con un
+  # token efímero de OIDC y la publica en el registro de attestations del repo
+  # (ADR-132 §6).
+  id-token: write
+  attestations: write
+
+jobs:
+  build:
+    name: Instalador (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Sin `fail-fast`: si Windows falla, igual queremos ver si macOS anduvo.
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: mac
+          - os: windows-latest
+            platform: win
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Los ~202 MB de modelos y wasm no están versionados (ADR-018): se
+      # descargan verificando sha256 contra assets.lock.json. El cache evita
+      # bajarlos en cada release.
+      - name: Cache first-party assets
+        uses: actions/cache@v4
+        with:
+          path: |
+            apps/react-client/public/wasm
+            apps/react-client/public/models
+            apps/react-client/src/assets/onnxruntime
+          key: assets-mirror-${{ hashFiles('assets.lock.json') }}
+
+      - name: Mirror first-party assets
+        run: pnpm assets:mirror
+
+      - name: Build renderer
+        run: pnpm --filter @anonly/react-client build
+
+      # Solo macOS: baja Sparkle (verificando sha256) y compila el addon nativo
+      # del actualizador. Tiene que pasar ANTES de empaquetar — `extraResources`
+      # referencia el `.node` y `extraFiles` el framework.
+      - name: Preparar Sparkle
+        if: matrix.platform == 'mac'
+        run: |
+          pnpm --filter @anonly/desktop-shell sparkle:fetch
+          pnpm --filter @anonly/desktop-shell sparkle:build
+
+      - name: Build installer
+        run: pnpm --filter @anonly/desktop-shell package:${{ matrix.platform }}
+
+      # Firma cada ZIP con la clave EdDSA y arma el appcast que la app consulta.
+      # La clave privada entra por **stdin** (`--ed-key-file -`): nunca se
+      # escribe a disco ni queda en la línea de comandos, que es visible en la
+      # tabla de procesos del runner.
+      - name: Firmar actualizaciones y generar el appcast
+        if: matrix.platform == 'mac' && startsWith(github.ref, 'refs/tags/v')
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          if [ -z "$SPARKLE_PRIVATE_KEY" ]; then
+            echo "Falta el secret SPARKLE_PRIVATE_KEY: sin él las actualizaciones de macOS no se pueden firmar." >&2
+            exit 1
+          fi
+          cd apps/desktop-shell
+          # Un directorio con SOLO los zips: `generate_appcast` indexa todo lo
+          # que encuentra, y los DMG no son actualizables por Sparkle.
+          mkdir -p updates
+          cp release/*.zip updates/
+          printf '%s' "$SPARKLE_PRIVATE_KEY" | ./native/vendor/bin/generate_appcast \
+            --ed-key-file - \
+            --download-url-prefix "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/" \
+            --link "https://github.com/${{ github.repository }}" \
+            updates/ 2>&1 | tee appcast.log
+
+          # `generate_appcast` NO falla cuando la clave privada no corresponde a
+          # la `SUPublicEDKey` de la app: avisa y genera el appcast **sin
+          # firma**. Publicar eso es peor que no publicar nada — cada usuario
+          # descargaría la actualización y la rechazaría, en silencio y sin que
+          # el release dé ninguna señal. Se convierte en error acá.
+          if grep -q "does not match" appcast.log; then
+            echo "::error::La clave de SPARKLE_PRIVATE_KEY no corresponde a la SUPublicEDKey horneada en la app." >&2
+            exit 1
+          fi
+          if ! grep -q "edSignature" updates/appcast.xml; then
+            echo "::error::El appcast salió sin firma; ninguna instalación aceptaría esta actualización." >&2
+            exit 1
+          fi
+          cp updates/appcast.xml release/appcast.xml
+
+      # El paso que hace que Windows no se publique a ciegas: el .exe se
+      # construye desde macOS, donde no se puede ejecutar. Acá arranca de
+      # verdad y se verifica que sirva su propio origen `app://`.
+      - name: Smoke test del binario empaquetado
+        run: pnpm --filter @anonly/desktop-shell smoke
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.platform }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            apps/desktop-shell/release/*.dmg
+            apps/desktop-shell/release/*.zip
+            apps/desktop-shell/release/*.exe
+            apps/desktop-shell/release/*.blockmap
+            apps/desktop-shell/release/latest*.yml
+            apps/desktop-shell/release/appcast.xml
+
+  release:
+    name: Publicar release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      # ADR-132 §6: sin certificado de Apple, la procedencia **es** el
+      # argumento de confianza. Un hash por artefacto permite verificar que el
+      # binario que alguien bajó es el que produjo este build, y la atestación
+      # lo ata criptográficamente a este commit y a este workflow — sin que
+      # haya que confiar en la palabra del README.
+      - name: Hashes de los artefactos
+        working-directory: artifacts
+        run: |
+          shasum -a 256 * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      # Los manifiestos van adentro, no solo los binarios: `latest*.yml`,
+      # `*.blockmap` y `appcast.xml` son lo que los dos actualizadores leen
+      # para decidir **qué** descargar. Atestar el `.exe` y dejar afuera el
+      # `latest.yml` que apunta a él cubre la mitad que nadie edita a mano.
+      - name: Atestación de procedencia
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            artifacts/*.dmg
+            artifacts/*.zip
+            artifacts/*.exe
+            artifacts/latest*.yml
+            artifacts/*.blockmap
+            artifacts/appcast.xml
+
+      # `gh` viene preinstalado en los runners. Se usa en vez de una action de
+      # terceros a propósito: una action externa con `contents: write` es
+      # superficie de supply chain sobre el repo que produce los binarios que
+      # la gente instala.
+      - name: Crear el release (borrador)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          # Un tag con guion (v0.9.1-beta.1) es prerelease: no le llega a los
+          # usuarios normales (RELEASING.md).
+          PRERELEASE=""
+          case "$TAG" in *-*) PRERELEASE="--prerelease" ;; esac
+
+          # Draft: el tag arma el release, el humano decide cuándo se publica.
+          # Hasta que se publique, ningún usuario lo recibe.
+          gh release create "$TAG" \
+            --draft \
+            --title "Anonly $TAG" \
+            --generate-notes \
+            $PRERELEASE \
+            artifacts/*

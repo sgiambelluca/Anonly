@@ -52,10 +52,9 @@
  * página 0, mismo patrón que `scenario-8`).
  */
 
-import { expect, test } from "@playwright/test";
-
 import { generateText10p } from "../fixtures/generate.js";
 
+import { expect, expectDownloadFilename, openApp, test } from "./support/electronApp.js";
 import { rasterizeToScannedPdf } from "./support/scannedPdf.js";
 import { installSettingsOverride } from "./support/settingsOverride.js";
 
@@ -66,9 +65,10 @@ test.setTimeout(600_000);
 
 test("Escenario 2: cargar PDF escaneado → ver progreso OCR → ver grupos → exportar", async ({
   page,
+  electronApp,
 }) => {
   await installSettingsOverride(page, { nerEnabled: false });
-  await page.goto("/", { waitUntil: "networkidle" });
+  await openApp(page, "networkidle");
 
   const sourceBytes = await generateText10p();
   const scannedFile = await rasterizeToScannedPdf(page, sourceBytes);
@@ -126,6 +126,9 @@ test("Escenario 2: cargar PDF escaneado → ver progreso OCR → ver grupos → 
   const downloadLink = exportDialog.getByRole("link", { name: "Descargar" });
   await expect(downloadLink).toBeVisible({ timeout: 300_000 });
 
-  const [download] = await Promise.all([page.waitForEvent("download"), downloadLink.click()]);
-  expect(download.suggestedFilename()).toBe("anonimizado.pdf");
+  // La descarga la maneja el proceso main, no el `page` — ver `expectDownloadFilename`.
+  const filename = await expectDownloadFilename(electronApp, async () => {
+    await downloadLink.click();
+  });
+  expect(filename).toBe("anonimizado.pdf");
 });

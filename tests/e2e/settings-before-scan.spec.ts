@@ -28,8 +28,9 @@
  * webServer de Playwright.
  */
 
-import { expect, test, type Page } from "@playwright/test";
+import { type Page } from "@playwright/test";
 
+import { expect, openApp, test } from "./support/electronApp.js";
 import { textTenPagesFile } from "./support/fixtures.js";
 
 test.setTimeout(240_000);
@@ -51,7 +52,7 @@ async function coreUnchanged(page: Page): Promise<boolean> {
 }
 
 test("la configuración elegida antes de cargar el PDF se aplica al análisis", async ({ page }) => {
-  await page.goto("/", { waitUntil: "networkidle" });
+  await openApp(page, "networkidle");
 
   // El botón existe en la pantalla de carga, sin ningún documento abierto
   // (ADR-125 §1). Antes de este ADR no había ninguno.

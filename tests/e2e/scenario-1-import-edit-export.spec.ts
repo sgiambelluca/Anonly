@@ -24,14 +24,16 @@
  * sin cache — de ahí el timeout generoso de este test.
  */
 
-import { expect, test } from "@playwright/test";
-
+import { expect, expectDownloadFilename, openApp, test } from "./support/electronApp.js";
 import { textTenPagesFile } from "./support/fixtures.js";
 
 test.setTimeout(420_000);
 
-test("cargar PDF con texto, ver grupos, editar modo, exportar y descargar", async ({ page }) => {
-  await page.goto("/", { waitUntil: "networkidle" });
+test("cargar PDF con texto, ver grupos, editar modo, exportar y descargar", async ({
+  page,
+  electronApp,
+}) => {
+  await openApp(page, "networkidle");
 
   const file = await textTenPagesFile();
   await page.locator('input[type="file"]').setInputFiles(file);
@@ -93,6 +95,9 @@ test("cargar PDF con texto, ver grupos, editar modo, exportar y descargar", asyn
   const downloadLink = exportDialog.getByRole("link", { name: "Descargar" });
   await expect(downloadLink).toBeVisible({ timeout: 300_000 });
 
-  const [download] = await Promise.all([page.waitForEvent("download"), downloadLink.click()]);
-  expect(download.suggestedFilename()).toBe("anonimizado.pdf");
+  // La descarga la maneja el proceso main, no el `page` — ver `expectDownloadFilename`.
+  const filename = await expectDownloadFilename(electronApp, async () => {
+    await downloadLink.click();
+  });
+  expect(filename).toBe("anonimizado.pdf");
 });

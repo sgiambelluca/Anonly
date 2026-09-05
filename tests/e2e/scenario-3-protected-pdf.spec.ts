@@ -27,8 +27,9 @@
  * escenarios más rápidos.
  */
 
-import { expect, test, type Locator } from "@playwright/test";
+import { type Locator } from "@playwright/test";
 
+import { expect, openApp, test } from "./support/electronApp.js";
 import { protectedFile } from "./support/fixtures.js";
 
 // Margen sobre el default (30 s de Playwright) para las dos idas y vueltas
@@ -65,7 +66,7 @@ async function isSkeletonOnly(canvas: Locator): Promise<boolean> {
 test("Escenario 3: cargar PDF protegido → UI pide password → reintenta → success", async ({
   page,
 }) => {
-  await page.goto("/", { waitUntil: "networkidle" });
+  await openApp(page, "networkidle");
 
   const file = await protectedFile();
   await page.locator('input[type="file"]').setInputFiles(file);

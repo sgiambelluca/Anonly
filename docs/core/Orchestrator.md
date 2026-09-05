@@ -246,7 +246,7 @@ El Orchestrator **no define códigos de error nuevos**: propaga `SerializedEngin
 5. **OCR falla en una página tras reintentos**: esa página queda sin texto; la detección la salta; el pipeline continúa con warning (no `PIPELINE_FAILED`). **Si lo que falló fue una región** (ADR-065 §9), la página **conserva su texto nativo** y su `requiresOCR` sigue en `false`: lo único que se pierde es el contenido de esa región, con `ocrCompleted = false`.
 6. **NER desactivado en settings**: la etapa 5 se salta; tras `REGEX_FINISHED` el Orchestrator invoca `grouping.finishSession(documentId)` y Grouping emite `GROUPING_FINISHED` con solo lo de Regex (ADR-034 §2).
 7. **NER falla en una página**: se descartan las ocurrencias NER de esa página; las Regex se conservan.
-8. **Cancelación durante cualquier etapa**: aborto de todos los jobs del `documentId`, `PIPELINE_CANCELLED`, estado `Cancelled`, documento queda cargado en el último estado estable.
+8. **Cancelación durante cualquier etapa**: aborto de todos los jobs del `documentId`, `PIPELINE_CANCELLED`, estado `Cancelled`, documento queda cargado en el último estado estable. **`Cancelled` es terminal (ADR-134)**: abortar la señal no detiene los jobs ya despachados, y sus handlers seguían llamando `setStage`/`emitProgress` — el usuario veía "Cancelado" y medio segundo después el pipeline reportando progreso otra vez. Ningún evento tardío pisa el stage ni emite progreso para un documento cancelado. Lo que esto **no** hace es detener el trabajo en vuelo: eso pide que cada kernel mire su `AbortSignal`, y sigue pendiente.
 9. **Cancelación durante export**: el `PDFDocument` parcial se descarta; no se emite `EXPORT_FINISHED`.
 10. **Doble `EXPORT_REQUESTED`**: el segundo se encola y corre al terminar el primero.
 11. **`DOCUMENT_CLOSED` con pipeline corriendo**: equivale a cancelar + liberar todo. **Invariante (v1.5.4, ADR-052 §1)**: tras el cierre no queda vivo **ningún** blob URL de ese documento — ni los vigentes al momento del barrido, ni los que lleguen después en un `PREVIEW_UPDATED`/`EXPORT_FINISHED` tardío (esos los revoca el guard de los handlers, §8). El cierre **no** espera a los renders en vuelo: los aborta y sigue (`DOCUMENT_CLOSED` tiene que ser inmediato — la UI lo usa para volver al estado vacío).
@@ -276,6 +276,7 @@ El Orchestrator **no define códigos de error nuevos**: propaga `SerializedEngin
 
 | Test | Archivo | Tipo | Descripción |
 |---|---|---|---|
+| `los jobs en vuelo no resucitan el stage ni emiten progreso` | `edge.test.ts` | edge | ADR-134: se cancela con un job de PDF colgado y se lo libera **después**; el stage sigue en `Cancelled` y no se emite `PIPELINE_PROGRESS`. Verificado que falla sin la guarda (`Expected "cancelled"`, `Received "detecting"`) |
 | `createCore returns wired IAnonymizationCore` | `contract.test.ts` | contract | bus, engines, orchestrator poblados |
 | `importDocument emits DOCUMENT_IMPORTED then PIPELINE_STAGE_CHANGED` | `contract.test.ts` | contract | orden de eventos |
 | `pipeline reaches Ready on GROUPING_FINISHED` | `contract.test.ts` | contract | secuencia feliz con engines mockeados |

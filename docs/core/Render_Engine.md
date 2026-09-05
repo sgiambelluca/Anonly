@@ -186,6 +186,8 @@ Semántica de `rasterizePage` (ADR-034 §1):
 - Rasteriza la página **sin reemplazos ni highlights** (uso: alimentar el OCR desde el Orchestrator, que no puede importar pdfjs).
 - **No emite eventos** (`PREVIEW_UPDATED` incluido) y **no toca el cache LRU** de previews.
 - Precondición: documento cargado vía `loadDocument`; si no, `InvalidInputError` (ADR-030). `pageIndex` fuera de rango o `scale <= 0` → `InvalidInputError`. Fallo de pdfjs/canvas → `RenderPageFailedError` (retryable).
+
+  **Una cancelación de pdfjs NO es un fallo (ADR-133)**: cuando llega un pedido más nuevo para la misma página, pdfjs descarta el render en vuelo con `RenderingCancelledException` y la vista previa se dibuja igual con el pedido nuevo. Eso se mapea a `CancelledError`, que `worker-pool.ts` re-lanza sin emitir `WORKER_JOB_FAILED`. Envolverla en `RenderPageFailedError` hacía que el cliente levantara "No se pudo generar la vista previa de algunas páginas" por una operación que salió bien. Se reconoce por `err.name`, no por el texto del mensaje: `name` es API pública de pdfjs, el mensaje puede cambiar entre versiones.
 - En modo pool corre como job del `RenderPool`; el `ImageData` se transfiere zero-copy al host.
 
 Semántica de `renderLegendPage` (ADR-059 §5):
@@ -299,6 +301,7 @@ El `ImageData` se transfiere zero-copy al host. El host lo convierte a `Blob` y 
 | Code | Clase | Cuándo | Recuperable | Acción |
 |---|---|---|---|---|
 | `RENDER_PAGE_FAILED` | `RenderPageFailedError` | error de renderizado de una página (PDF.js lanza, OOM en canvas) | sí | reintentar 1 vez, si persiste emitir `PREVIEW_PAGE_FAILED` y continuar con otras páginas |
+| `CANCELLED` | `CancelledError` | pdfjs descartó el render en vuelo porque llegó otro más nuevo para la misma página (ADR-133) | — | no es un fallo: la pool no emite `WORKER_JOB_FAILED` y no llega al cliente |
 | `RENDER_TIMEOUT` | `RenderTimeoutError` | timeout (default 10 s por página preview, 30 s full) | sí | reintentar 1 vez |
 | `RENDER_FAILED` | `RenderFailedError` | error fatal en batch, o `getDocument()` falla en `loadDocument` (PDF ilegible para pdfjs; excepcional, la etapa 1 ya lo validó — ADR-030) | no | emitir `RENDER_FAILED`, abortar batch |
 | `ENGINE_NOT_INITIALIZED` | `EngineNotInitializedError` | `renderPage` antes de `init` | no | bug del caller |
@@ -373,12 +376,17 @@ El `ImageData` se transfiere zero-copy al host. El host lo convierte a `Blob` y 
    **Por qué el más ancho y no el primero**: el primer fragmento suele ser el trozo corto que quedó al final del renglón (`Diego`, en el caso medido), y meter ahí `[PERSONA 03]` lo manda al shrink-to-fit y a la marca de degradación del caso 28, habiendo un rectángulo holgado un renglón más abajo. Es una decisión de **este** motor y se puede revisar sin tocar ningún contrato.
 33. **Degradación y repintado sobre una unidad de pintado (ADR-074 §4/§6)**: el veredicto del caso 28 se computa contra el fragmento **donde se dibuja**, no contra la envolvente — hoy una entidad de dos líneas mide contra 557 pt de ancho, el token entra sobrado y la marca **nunca se enciende**, justo en el caso peor. Consecuencia esperada: algunas entidades multi-línea encienden la marca que hoy no encienden, con su remedio ya documentado (editar el valor a mano, ADR-058 §4 / ADR-062, que ADR-076 vuelve confiable). Las unidades de solo tapado **no** producen `Degraded` —no dibujan texto, no pueden degradarlo—, así que sigue habiendo como mucho una `Annotation` por `occurrenceId` y su `id` no colisiona. El repintado de línea del caso 26 opera también por unidad: `otherReplacements` ve a los fragmentos vecinos como reemplazos independientes, que es lo correcto para el límite de "no cruzar hacia el territorio de otra entidad".
 
+34. **Cancelación de pdfjs durante un render (ADR-133)**: cuando llega un pedido más nuevo para la misma página —zoom, cambio de tamaño de ventana, conmutar Original ↔ Anonimizado— pdfjs descarta el render en vuelo con `RenderingCancelledException`. La vista previa se dibuja igual con el pedido nuevo. Se mapea a `CancelledError` y **no** a `RenderPageFailedError`: la pool re-lanza el primero sin emitir `WORKER_JOB_FAILED`, así que deja de contarse como fallo. Se reconoce por `err.name` y nunca por el texto del mensaje.
+
 ---
 
 ## 14. Casos de prueba
 
 | Test | Archivo | Tipo | Descripción |
 |---|---|---|---|
+| `mapea la cancelación de pdfjs a CancelledError, no a RenderPageFailedError` | `kernel.test.ts` | unit | ADR-133 |
+| `no se deja engañar por el texto del mensaje` | `kernel.test.ts` | edge | un fallo real cuyo mensaje dice "cancelled" sigue siendo fallo: la decisión es por `err.name`, que es API pública de pdfjs |
+| `un fallo real sigue siendo RenderPageFailedError con su motivo` | `kernel.test.ts` | unit | el mapeo no se traga los fallos de verdad |
 | `renderPage returns ImageData with correct dimensions` | `contract.test.ts` | contract | invariante |
 | `emits PREVIEW_UPDATED after preview render` | `contract.test.ts` | contract | invariante |
 | `emits RENDER_FINISHED after batch` | `contract.test.ts` | contract | invariante |

@@ -1,6 +1,6 @@
 {
   "name": "@anonly/grouping-engine",
-  "version": "0.0.0",
+  "version": "0.9.0",
   "description": "Grouping Engine — Agrupa Occurrence (Regex/NER) en EntityGroup por tipo y valor canonico, detecta conflictos y resuelve replacementMode/replacementValue via Rule[].",
   "type": "module",
   "license": "MIT",

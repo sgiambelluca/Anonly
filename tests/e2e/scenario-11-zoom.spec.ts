@@ -57,8 +57,9 @@
  * `viewer-scroll-jump.spec.ts`.
  */
 
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { type Locator, type Page } from "@playwright/test";
 
+import { expect, openApp, test } from "./support/electronApp.js";
 import { manyNeutralPagesFile } from "./support/fixtures.js";
 
 test.setTimeout(90_000);
@@ -124,7 +125,7 @@ async function recordCanvasDraws(page: Page): Promise<void> {
 test("cambiar el zoom re-escala de inmediato y reemplaza el bitmap transitorio", async ({
   page,
 }) => {
-  await page.goto("/", { waitUntil: "networkidle" });
+  await openApp(page, "networkidle");
 
   const file = await manyNeutralPagesFile(3);
   await page.locator('input[type="file"]').setInputFiles(file);

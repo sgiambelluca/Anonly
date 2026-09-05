@@ -1,6 +1,6 @@
 {
   "name": "@anonly/test-utils",
-  "version": "0.0.0",
+  "version": "0.9.0",
   "description": "Dobles de test compartidos por las suites del Core de Anonly. Nunca se publica ni se bundlea.",
   "type": "module",
   "private": true,

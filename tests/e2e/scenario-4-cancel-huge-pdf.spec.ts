@@ -26,8 +26,7 @@
  * Hito 11, `07_Performance_Strategy.md` §11.4) — no existe todavía en este PR.
  */
 
-import { expect, test } from "@playwright/test";
-
+import { expect, openApp, test } from "./support/electronApp.js";
 import { manyNeutralPagesFile } from "./support/fixtures.js";
 
 const PAGE_COUNT = 500;
@@ -37,7 +36,7 @@ test.setTimeout(120_000);
 test("cargar PDF enorme, cancelar a mitad del procesamiento y verificar cese de actividad", async ({
   page,
 }) => {
-  await page.goto("/", { waitUntil: "networkidle" });
+  await openApp(page, "networkidle");
 
   const file = await manyNeutralPagesFile(PAGE_COUNT);
   await page.locator('input[type="file"]').setInputFiles(file);

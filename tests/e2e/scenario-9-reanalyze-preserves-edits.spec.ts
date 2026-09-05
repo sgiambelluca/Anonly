@@ -29,8 +29,7 @@
  * El timeout global baja de 480 s a 240 s: sin descarga de modelo en la
  * segunda pasada, el paso más caro desapareció.
  */
-import { expect, test } from "@playwright/test";
-
+import { expect, openApp, test } from "./support/electronApp.js";
 import { textTenPagesFile } from "./support/fixtures.js";
 import { installSettingsOverride } from "./support/settingsOverride.js";
 
@@ -38,7 +37,7 @@ test.setTimeout(240_000);
 
 test("un reanalyze preserva las ediciones previas del usuario", async ({ page }) => {
   await installSettingsOverride(page, { nerEnabled: false });
-  await page.goto("/", { waitUntil: "networkidle" });
+  await openApp(page, "networkidle");
 
   const file = await textTenPagesFile();
   await page.locator('input[type="file"]').setInputFiles(file);

@@ -14,7 +14,8 @@
  *
  * `installSettingsOverride` (`support/settingsOverride.ts`) escribe
  * `nerEnabled: false` en `localStorage` vía `page.addInitScript`, antes de
- * `page.goto`, para que el bootstrap lo lea en su primer `initCore()`.
+ * `openApp` —que recarga—, para que el bootstrap lo lea en su primer
+ * `initCore()`.
  *
  * `text-10p.pdf` (`tests/fixtures/README.md`) trae entidades de ambos
  * detectores: DNI y email (Regex, páginas 0-2) y Personas/Organización
@@ -50,8 +51,7 @@
  * el punto del escenario sin pinear un defecto.
  */
 
-import { expect, test } from "@playwright/test";
-
+import { expect, openApp, test } from "./support/electronApp.js";
 import { textTenPagesFile } from "./support/fixtures.js";
 import { installSettingsOverride } from "./support/settingsOverride.js";
 
@@ -64,7 +64,7 @@ test.setTimeout(90_000);
 
 test("Escenario 8: cargar PDF sin NER activado → solo Regex detecta", async ({ page }) => {
   await installSettingsOverride(page, { nerEnabled: false });
-  await page.goto("/", { waitUntil: "networkidle" });
+  await openApp(page, "networkidle");
 
   const file = await textTenPagesFile();
   await page.locator('input[type="file"]').setInputFiles(file);

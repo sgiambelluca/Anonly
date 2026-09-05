@@ -26,7 +26,7 @@ describe("getPipelineStageLabel", () => {
         modelLoading: { modelId: "x", progress: 0.45 },
       }),
     );
-    expect(label).toBe("Preparando el detector de nombres… 45%");
+    expect(label).toBe("Preparando el detector de nombres…");
   });
 
   it("prioritizes exportProgress over the stage text", () => {

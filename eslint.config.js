@@ -16,6 +16,17 @@ export default tseslint.config(
       // (packages/**/coverage/), y sin este segundo patrón ESLint intenta
       // lintear el JS del reporter HTML de v8 y falla con parsing errors.
       "**/coverage/**",
+      // Salida de `electron-builder` (`apps/desktop-shell/release/`). Mismo
+      // motivo y misma semántica que el patrón de coverage de arriba: un
+      // patrón sin "/" inicial ancla a la raíz, así que `build/**` no lo
+      // cubre. Adentro viene el bundle entero de Electron —miles de archivos
+      // JS de terceros— y ESLint no falla con un error de lint: se queda sin
+      // memoria y tira el proceso de Node entero.
+      //
+      // Comentarios de línea y no de bloque a propósito: un glob como el de
+      // abajo contiene la secuencia que cierra un comentario `/*`, así que
+      // citarlo adentro de uno parte el archivo en dos.
+      "**/release/**",
       "**/*.d.ts",
       ".changeset/**",
       "playwright-report/**",
@@ -48,6 +59,7 @@ export default tseslint.config(
             "vitest.config.ts",
             "playwright.config.ts",
             "playwright.measure.config.ts",
+            "playwright.electron.config.ts",
             "apps/react-client/postcss.config.js",
             "apps/react-client/tailwind.config.js",
           ],
@@ -294,6 +306,31 @@ export default tseslint.config(
     rules: {
       "no-restricted-imports": "off",
       "import/no-default-export": "off",
+    },
+  },
+  {
+    /*
+     * Scripts de build del shell. Corren bajo Electron (o sea Node) y viven
+     * fuera de todo tsconfig, así que el project service no les da tipos y
+     * `no-undef` no conoce los globals de Node. Se declaran acá en vez de
+     * meterlos al tsconfig del paquete: ese compila a `dist/` lo que se
+     * empaqueta, y un generador de assets no se empaqueta.
+     */
+    files: ["apps/desktop-shell/scripts/*.cjs"],
+    languageOptions: {
+      sourceType: "commonjs",
+      globals: {
+        require: "readonly",
+        module: "writable",
+        __dirname: "readonly",
+        process: "readonly",
+        setTimeout: "readonly",
+        exports: "writable",
+        fetch: "readonly",
+      },
+    },
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
     },
   },
   {

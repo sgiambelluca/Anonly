@@ -4,32 +4,42 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Tokens de ui/Components.md §10
+        /*
+         * Tokens de `ui/Components.md` §10. Los valores viven en `index.css`
+         * como canales RGB, para que exista el modo oscuro y para que los
+         * modificadores de opacidad (`border-accent/30`) sigan funcionando —
+         * con un hex adentro de la variable se romperían en silencio.
+         */
         bg: {
-          primary: "#ffffff",
-          secondary: "#f9fafb",
-          tertiary: "#f3f4f6",
+          primary: "rgb(var(--color-bg-primary) / <alpha-value>)",
+          secondary: "rgb(var(--color-bg-secondary) / <alpha-value>)",
+          tertiary: "rgb(var(--color-bg-tertiary) / <alpha-value>)",
         },
-        border: "#e5e7eb",
+        border: "rgb(var(--color-border) / <alpha-value>)",
         text: {
-          primary: "#111827",
-          secondary: "#6b7280",
+          primary: "rgb(var(--color-text-primary) / <alpha-value>)",
+          secondary: "rgb(var(--color-text-secondary) / <alpha-value>)",
         },
-        // El accent era `#3b82f6`: 3.68:1 con texto blanco, bajo el 4.5:1 que
-        // `UX_Guidelines.md` §9 promete, y afectaba a TODO botón primario y a
-        // los links `text-accent` (ADR-087, "Fuera del alcance" §1). `#2563eb`
-        // da 5.17:1 y sirve para las dos cosas: relleno con texto blanco
-        // encima, y texto sobre `bg-primary`.
-        accent: "#2563eb",
-        success: "#10b981",
-        warning: "#f59e0b",
-        // ADR-087 §3.1: `warning` da 2.15:1 contra bg-primary y falla incluso
-        // el 3:1 de elementos no textuales (WCAG 1.4.11), así que no puede
-        // llevar un borde, un icono ni un texto que signifiquen algo.
-        // #b45309 da 5.03:1 y sirve para los tres.
-        "warning-strong": "#b45309",
-        error: "#ef4444",
-        // Highlight por tipo de entidad (ui/Components.md §9)
+        accent: "rgb(var(--color-accent) / <alpha-value>)",
+        /*
+         * El color del texto **encima** del relleno accent. Es un token y no
+         * `text-white` porque en oscuro el accent se aclara (#60a5fa) y el
+         * blanco cae a 2.54:1, muy por debajo del 4.5:1 que `UX_Guidelines.md`
+         * §9 promete. En claro vale blanco (5.17:1); en oscuro, #111827
+         * (6.98:1). Mismo criterio para `error-foreground`.
+         */
+        "accent-foreground": "rgb(var(--color-accent-foreground) / <alpha-value>)",
+        success: "rgb(var(--color-success) / <alpha-value>)",
+        warning: "rgb(var(--color-warning) / <alpha-value>)",
+        "warning-strong": "rgb(var(--color-warning-strong) / <alpha-value>)",
+        error: "rgb(var(--color-error) / <alpha-value>)",
+        "error-foreground": "rgb(var(--color-error-foreground) / <alpha-value>)",
+        /*
+         * Highlight por tipo de entidad (`ui/Components.md` §9). **No tienen
+         * variante oscura y no es un olvido**: pintan encima de la página
+         * renderizada del PDF, que es blanca en los dos temas. Cambiarlos con
+         * el tema los movería respecto del fondo real sobre el que se ven.
+         */
         hl: {
           person: "#10b981",
           organization: "#6366f1",

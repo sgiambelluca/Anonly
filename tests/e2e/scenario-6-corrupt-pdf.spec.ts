@@ -17,12 +17,11 @@
  * así que este test no necesita el timeout extendido de `scenario-1-*`.
  */
 
-import { expect, test } from "@playwright/test";
-
+import { expect, openApp, test } from "./support/electronApp.js";
 import { corruptFile } from "./support/fixtures.js";
 
 test("cargar PDF corrupto muestra un error tipado y mensaje claro", async ({ page }) => {
-  await page.goto("/", { waitUntil: "networkidle" });
+  await openApp(page, "networkidle");
 
   const file = await corruptFile();
   await page.locator('input[type="file"]').setInputFiles(file);

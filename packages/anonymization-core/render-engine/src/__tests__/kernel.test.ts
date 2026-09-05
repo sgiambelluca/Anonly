@@ -17,12 +17,18 @@
  * así que no aplica esa excepción, y no hace falta ninguna.
  */
 import type { LoadDocumentPayload, RenderPagePayload } from "@anonly/shared";
-import { REPLACEMENT_FONT_HEIGHT_RATIO, ReplacementMode } from "@anonly/shared";
+import {
+  CancelledError,
+  EngineErrorCode,
+  REPLACEMENT_FONT_HEIGHT_RATIO,
+  ReplacementMode,
+} from "@anonly/shared";
 import { getDocument } from "pdfjs-dist";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("pdfjs-dist", () => ({ getDocument: vi.fn() }));
 
+import { RenderPageFailedError } from "../render.errors.js";
 import {
   fitReplacementFont,
   fitReplacementFontSized,
@@ -32,6 +38,7 @@ import {
   RenderKernelCanvasFactory,
   RenderKernelCMapReaderFactory,
   RenderKernelStandardFontDataFactory,
+  toPageFailure,
   type KernelRenderLegendOptions,
   type KernelRenderOptions,
 } from "../worker/kernel.js";
@@ -644,5 +651,41 @@ describe("veredicto de degradación por razón de anchos (ADR-086, tests puros)"
     expect(
       fitReplacementFontSized(pureStubMeasure, "", ReplacementMode.Mask, 12, 40).widthRatio,
     ).toBe(1);
+  });
+});
+
+describe("toPageFailure — una cancelación no es una falla (ADR-133)", () => {
+  /**
+   * `RenderingCancelledException` de pdfjs, reproducida por su forma pública:
+   * `name`. No se importa de `pdfjs-dist` porque la clase no está en su
+   * superficie exportada, y depender de un internal para un test la ata a la
+   * versión de la librería.
+   */
+  function cancelacionDePdfjs(): Error {
+    const err = new Error("Rendering cancelled, page 1");
+    err.name = "RenderingCancelledException";
+    return err;
+  }
+
+  it("mapea la cancelación de pdfjs a CancelledError, no a RenderPageFailedError", () => {
+    const mapped = toPageFailure("doc-1", 0, cancelacionDePdfjs());
+    expect(mapped).toBeInstanceOf(CancelledError);
+    expect(mapped.code).toBe(EngineErrorCode.CANCELLED);
+  });
+
+  it("no se deja engañar por el texto del mensaje", () => {
+    // Un fallo real que casualmente mencione "cancelled" sigue siendo un
+    // fallo: la decisión se toma por `name`, que es API pública de pdfjs, y no
+    // por el mensaje, que puede cambiar entre versiones sin aviso.
+    const impostor = new Error("Rendering cancelled, page 1");
+    const mapped = toPageFailure("doc-1", 0, impostor);
+    expect(mapped).toBeInstanceOf(RenderPageFailedError);
+  });
+
+  it("un fallo real sigue siendo RenderPageFailedError con su motivo", () => {
+    const mapped = toPageFailure("doc-1", 3, new Error("canvas sin contexto 2D"));
+    expect(mapped).toBeInstanceOf(RenderPageFailedError);
+    expect(mapped.message).toContain("canvas sin contexto 2D");
+    expect(mapped.details["pageIndex"]).toBe(3);
   });
 });

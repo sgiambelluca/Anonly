@@ -17,8 +17,8 @@
  * El ciclo de vida del modelo (que sí ocurre dentro del kernel) cruza por el
  * canal `PROGRESS` del transporte (`NerKernelProgress`, ADR-046 §4), nunca
  * por eventos de dominio: este motor lo traduce en host a
- * `NER_MODEL_LOADING`/`NER_MODEL_READY` (deduplicado por instancia, flag
- * `modelWarm`) y a `ctx.logger.warn` para los reintentos de carga.
+ * `NER_MODEL_LOADING`/`NER_MODEL_READY` (**los dos** deduplicados por
+ * instancia con el flag `modelWarm`, ADR-135) y a `ctx.logger.warn` para los reintentos de carga.
  */
 import {
   buildOccurrenceContext,
@@ -917,6 +917,20 @@ export class NerEngine implements IEngine {
     if (!isNerKernelProgress(partial)) return;
 
     if (partial.phase === "model-loading") {
+      /*
+       * Mismo dedup que `model-ready`, y por la misma razón (ADR-135). La
+       * asimetría anterior dejaba el indicador colgado: con `nerPoolSize > 1`
+       * cada worker carga su propio modelo, el primero emitía `READY` y el
+       * cliente apagaba "Preparando el detector de nombres…"; después el
+       * segundo emitía `LOADING` y lo volvía a prender — pero su `READY` ya
+       * estaba deduplicado, así que nadie lo apagaba nunca.
+       *
+       * El usuario veía "Preparando el detector de nombres…" mientras la app
+       * ya estaba escaneando páginas. Si un `model-ready` de un segundo worker
+       * "no es un cambio de estado observable" (caso 17), su `model-loading`
+       * tampoco lo es.
+       */
+      if (this.modelWarm) return;
       ctx.bus.emit(EventChannel.Ner, EngineEvents.NER_MODEL_LOADING, {
         modelId: partial.modelId,
         progress,

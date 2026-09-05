@@ -32,8 +32,7 @@
  * tuviera chance de fallar con un mensaje claro.
  */
 
-import { expect, test } from "@playwright/test";
-
+import { expect, openApp, test } from "./support/electronApp.js";
 import { textTenPagesFile } from "./support/fixtures.js";
 import { installSettingsOverride } from "./support/settingsOverride.js";
 
@@ -41,7 +40,7 @@ test.setTimeout(150_000);
 
 test("fusionar y dividir grupos actualiza índices y reemplazos", async ({ page }) => {
   await installSettingsOverride(page, { nerEnabled: false });
-  await page.goto("/", { waitUntil: "networkidle" });
+  await openApp(page, "networkidle");
 
   const file = await textTenPagesFile();
   await page.locator('input[type="file"]').setInputFiles(file);
@@ -121,7 +120,7 @@ test("fusionar y dividir grupos actualiza índices y reemplazos", async ({ page 
  */
 test("fusionar tres grupos en una sola pasada deja un solo grupo", async ({ page }) => {
   await installSettingsOverride(page, { nerEnabled: false });
-  await page.goto("/", { waitUntil: "networkidle" });
+  await openApp(page, "networkidle");
 
   const file = await textTenPagesFile();
   await page.locator('input[type="file"]').setInputFiles(file);
