@@ -9,7 +9,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "pnpm build && electron .",
-    "test": "vitest run src/__tests__",
+    "test": "vitest run --root ../.. apps/desktop-shell/src/__tests__",
     "icon": "electron scripts/render-icon.cjs",
     "package": "pnpm build && electron-builder --publish never",
     "package:mac": "pnpm build && electron-builder --mac --publish never",

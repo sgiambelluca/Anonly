@@ -16,18 +16,19 @@
 
 import { access } from "node:fs/promises";
 import { readdir, readFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 
 import { beforeAll, describe, expect, it } from "vitest";
 
+import { desdeLaRaiz } from "./repoRoot";
+
 /*
- * Ruta desde la raíz del repo y no desde `import.meta.url`: este paquete
- * compila a CommonJS (`sandbox: true` obliga a que el preload lo sea, ADR-132
- * §3) y `import.meta` no es válido ahí, aunque vitest lo transpile. `beforeAll`
- * verifica que la ruta exista, así que un cwd equivocado hace fallar el test en
- * vez de dejarlo pasar sobre cero archivos.
+ * Ruta relativa a la raíz del repo, no al cwd: así el test da lo mismo corrido
+ * desde la raíz (`pnpm test`) o desde el paquete (`pnpm --filter`). `beforeAll`
+ * verifica que exista, así que una ruta rota hace fallar el test en vez de
+ * dejarlo pasar sobre cero archivos.
  */
-const SRC = resolve(process.cwd(), "apps/desktop-shell/src");
+const SRC = desdeLaRaiz("apps/desktop-shell/src");
 
 /**
  * Los únicos destinos que el producto tiene permitido nombrar.

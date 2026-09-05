@@ -12,18 +12,18 @@
  */
 
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
 
 import { beforeAll, describe, expect, it } from "vitest";
 
+import { desdeLaRaiz } from "./repoRoot";
+
 /*
- * Rutas desde la raíz del repo y no desde `import.meta.url`, por lo mismo que
- * `network-destinations.test.ts`: este paquete compila a CommonJS y
- * `import.meta` no es válido ahí. El `beforeAll` hace que un cwd equivocado
- * falle en vez de dejar pasar el test sobre un archivo vacío.
+ * Rutas relativas a la raíz del repo, no al cwd: así el test da lo mismo
+ * corrido desde la raíz o desde el paquete. El `beforeAll` deja que una ruta
+ * rota falle en vez de pasar sobre un archivo vacío.
  */
-const BUILDER = resolve(process.cwd(), "apps/desktop-shell/electron-builder.yml");
-const FUENTE = resolve(process.cwd(), "apps/desktop-shell/src/windows-updater.ts");
+const BUILDER = desdeLaRaiz("apps/desktop-shell/electron-builder.yml");
+const FUENTE = desdeLaRaiz("apps/desktop-shell/src/windows-updater.ts");
 
 let builder = "";
 let fuente = "";
