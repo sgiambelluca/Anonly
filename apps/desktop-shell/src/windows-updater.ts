@@ -71,7 +71,8 @@ export function startWindowsUpdater(emit: Emit, log: (message: string) => void):
    * firma el `.exe` después del build, así que `electron-builder` nunca ve el
    * certificado y no escribe `publisherName` — el instalador quedaría firmado
    * y esto seguiría sin verificar, en silencio. Hay que declarar
-   * `win.publisherName` a mano.
+   * `win.signtoolOptions.publisherName` a mano (bajo `signtoolOptions`, no
+   * suelto en `win`: en electron-builder 26 eso último es error de schema).
    */
 
   autoUpdater.on("checking-for-update", () => emit(toUpdateEventPayload({ type: "checking" })));

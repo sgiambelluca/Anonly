@@ -49,8 +49,10 @@ Sparkle valida con una clave EdDSA cuya privada no vive en GitHub.
 
 Es un hueco real, decidido a propósito y con fecha de vencimiento: **ADR-136**
 explica por qué se tomó ese camino en vez de dejar a Windows sin parches de
-seguridad, y cuál es su condición de salida. Se cierra cuando llegue el
-certificado de firma de código (SignPath, `roadmap/MVP.md` §Hito 11.5).
+seguridad, y cuál es su condición de salida. Lo cierra el certificado de firma
+de código (SignPath, `roadmap/MVP.md` §Hito 11.5) **más** declarar
+`win.signtoolOptions.publisherName`: firmar sin eso deja el instalador firmado
+y la verificación apagada igual. El porqué está en ADR-136 §2.
 
 ## El ícono
 

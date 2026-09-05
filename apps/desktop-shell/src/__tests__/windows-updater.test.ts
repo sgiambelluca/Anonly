@@ -52,10 +52,16 @@ describe("verificación de firma en Windows (ADR-136)", () => {
    * Este es el test que se rompe cuando el hueco se cierra, y romperse es su
    * trabajo. `electron-updater` saltea la verificación solo mientras
    * `publisherName` no esté configurado (`NsisUpdater.verifySignature()`
-   * retorna `null` antes de llamar al verificador). El día que llegue el
-   * certificado, `electron-builder` va a escribirlo y la verificación se
-   * enciende sola: acá hay que venir a actualizar ADR-136, no a descubrirlo
-   * leyendo el código de la dependencia.
+   * retorna `null` antes de llamar al verificador).
+   *
+   * **Que llegue el certificado no basta**, y por eso el test mira el `.yml` y
+   * no la firma del binario: SignPath firma después del build, así que
+   * `electron-builder` nunca ve el certificado y no escribe nada. Cerrar el
+   * hueco pide declarar `win.signtoolOptions.publisherName` a mano, y es esa
+   * edición la que este test detecta (ADR-136 §2).
+   *
+   * Se compara contra el texto crudo del YAML, así que atrapa la clave esté
+   * donde esté anidada.
    */
   it("electron-builder.yml no declara certificado: es lo que hoy saltea la verificación", () => {
     for (const clave of [
