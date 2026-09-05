@@ -53,11 +53,16 @@ export function resolveScanProgress(input: ScanProgressInput): ScanProgress {
   const { stage, current, pageCount, modelLoadingProgress } = input;
 
   if (modelLoadingProgress !== null) {
-    return {
-      kind: "determinate",
-      percent: clampPercent(modelLoadingProgress * 100),
-      counter: null,
-    };
+    /*
+     * **Indeterminada, no 100%.** El progreso que reporta la carga del modelo
+     * no mide nada: desde ADR-130 el modelo es un archivo local del
+     * instalador, y Transformers.js informa la carga completa de una sola vez
+     * — así que el valor llega siempre en 1 y la barra se dibujaba llena
+     * mientras el modelo todavía se estaba preparando. Una barra al 100% que
+     * no avanza es peor que una barra que no promete un número: la primera
+     * parece colgada, la segunda dice la verdad.
+     */
+    return { kind: "indeterminate" };
   }
 
   if (stage === PipelineStage.Detecting && pageCount > 0) {

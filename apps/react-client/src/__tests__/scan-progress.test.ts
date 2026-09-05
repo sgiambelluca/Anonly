@@ -40,25 +40,32 @@ describe("resolveScanProgress", () => {
   });
 
   describe("descarga del modelo", () => {
-    it("muestra su propio porcentaje y NINGÚN contador de páginas", () => {
-      // La descarga tiene progreso real y propio, pero no hay páginas que
-      // contar todavía.
+    it("es indeterminada: el progreso que reporta no mide nada", () => {
+      /*
+       * Antes mostraba su propio porcentaje. Desde ADR-130 el modelo es un
+       * archivo local del instalador y Transformers.js informa la carga
+       * completa de una sola vez, así que el valor llega **siempre** en 1 y la
+       * barra se dibujaba llena mientras el modelo todavía se preparaba. Lo
+       * reportó el humano probando el instalador: "siempre dice 100 y no
+       * refleja absolutamente nada".
+       *
+       * Una barra al 100% que no avanza parece colgada; una indeterminada dice
+       * la verdad. Se afirma con un valor intermedio a propósito: ni siquiera
+       * un progreso que *pareciera* real debe volver a dibujarse determinado.
+       */
       expect(resolveScanProgress({ ...base, current: 1, modelLoadingProgress: 0.42 })).toEqual({
-        kind: "determinate",
-        percent: 42,
-        counter: null,
+        kind: "indeterminate",
+      });
+      expect(resolveScanProgress({ ...base, current: 1, modelLoadingProgress: 1 })).toEqual({
+        kind: "indeterminate",
       });
     });
 
     it("gana sobre el stage: durante la descarga no se cuentan páginas aunque el stage ya sea Detecting", () => {
-      expect(
-        resolveScanProgress({
-          ...base,
-          stage: PipelineStage.Detecting,
-          current: 5,
-          modelLoadingProgress: 1,
-        }).kind,
-      ).toBe("determinate");
+      // Lo que este caso protege sigue igual: la carga del modelo gana sobre
+      // el stage, así que no aparece un contador de páginas mientras el
+      // detector todavía se prepara. Lo que cambió es que ya no promete un
+      // porcentaje (ver el caso de arriba).
       expect(
         resolveScanProgress({
           ...base,
@@ -66,7 +73,7 @@ describe("resolveScanProgress", () => {
           current: 5,
           modelLoadingProgress: 1,
         }),
-      ).toEqual({ kind: "determinate", percent: 100, counter: null });
+      ).toEqual({ kind: "indeterminate" });
     });
   });
 

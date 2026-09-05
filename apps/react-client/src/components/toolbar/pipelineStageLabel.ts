@@ -37,7 +37,10 @@ export function getPipelineStageLabel(snapshot: PipelineProgressSnapshot): strin
   if (modelLoading !== null) {
     // Sin nombrar "NER" (ADR-087 §4/§7.1): es una etapa del pipeline, no
     // vocabulario del usuario. Mismo registro que `ScanScreen`.
-    return `Preparando el detector de nombres… ${Math.round(modelLoading.progress * 100)}%`;
+    // Sin porcentaje: el valor llega siempre en 1 (ver `scanProgress.ts`), así
+    // que mostrarlo era escribir "100%" al lado de algo que todavía no
+    // terminaba.
+    return "Preparando el detector de nombres…";
   }
   if (exportProgress !== null) {
     return `Exportando página ${exportProgress.current} de ${exportProgress.total}…`;

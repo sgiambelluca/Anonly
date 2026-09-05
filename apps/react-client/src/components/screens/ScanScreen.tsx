@@ -48,7 +48,10 @@ function scanStatusLabel(
   modelLoading: { readonly progress: number } | null,
 ): string {
   if (modelLoading !== null) {
-    return `Preparando el detector de nombres… ${Math.round(modelLoading.progress * 100)}%`;
+    // Sin porcentaje: el valor llega siempre en 1 (ver `scanProgress.ts`), así
+    // que mostrarlo era escribir "100%" al lado de algo que todavía no
+    // terminaba.
+    return "Preparando el detector de nombres…";
   }
   switch (stage) {
     case PipelineStage.Importing:
