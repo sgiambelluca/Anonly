@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-mvp | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,adr/ADR-011-Grouping-First.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md | audiencia=humanos+IA | fase=10-cierre (Hitos 1–10 cerrados y mergeados a main; pendientes puntuales diferidos a Hito 11 anotados por hito; antes de arrancar el Hito 11 queda la revisión integral de Hito10_Observaciones_Revision.md y los ADR-053/054/055 de los hallazgos del cierre — ver el bloque CERRADO al final del Hito 10. §4 gana los Hitos **10.5** —legibilidad del reemplazo, ADR-057/058/059— y **10.6** —reemplazo por género, ADR-060 + ADR-069 + ADR-070 + ADR-071 + ADR-072—, y **10.7** —agregado manual de entidades, ADR-061—, y **10.8** —texto rotado y páginas con texto nativo parcial, ADR-063 + ADR-064 + ADR-065 + ADR-066 + ADR-067 + ADR-068—, insertados con la convención decimal del repo sin renumerar Hardening ni Release) -->
+<!-- CONTEXT: scope=roadmap-mvp | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,adr/ADR-011-Grouping-First.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-138-Instalador-Universal-De-macOS.md | audiencia=humanos+IA | fase=11.6 (Hitos 1–10 cerrados y mergeados a main; escritorio y verificación de actualizaciones en validación; instalador universal de macOS documentado por ADR-138) -->
 
 # Anonly — Roadmap MVP
 
@@ -572,6 +572,12 @@ Insertado con la convención decimal del repo, sin renumerar Release. Adelantado
   **No reemplaza al certificado ni se retira cuando llegue**: cubren momentos distintos. La clave propia solo puede proteger **actualizaciones** — en la primera instalación no hay app que verifique nada, y ese momento lo cubre únicamente Authenticode, que además es lo que saca el cartel de SmartScreen. Cuando llegue SignPath, el verificador hace las dos comprobaciones: primero la clave propia, que es local y cuesta milisegundos, y después Authenticode, que lanza un proceso.
 
   ADR-137 resolvió los dos puntos abiertos. La firma viaja en el mismo `latest.yml`, por lo que una falla de red conserva el comportamiento reintentable normal; un manifiesto recibido sin firma se rechaza siempre. El único slot se compone conservando el verificador Authenticode original: hoy un `publisherName` reservado fuerza el callback propio y, al llegar SignPath, se reemplaza por el CN/DN real para exigir Ed25519 primero y Authenticode después.
+
+  **Corrección de empaquetado (2026-09-05, ADR-138)**: macOS se publica como
+  bundle universal (`arm64` + `x86_64`) con un único ZIP y un único
+  `appcast.xml`. El bridge de Sparkle se compila para ambas arquitecturas y el
+  smoke test rechaza bundles o addons de una sola arquitectura. Esto evita que
+  Sparkle encuentre dos ZIP con la misma versión y bloquee el release.
 
   Verificación local ya corrida: 50/50 tests del shell; 1962/1962 tests globales; 96,64% de líneas del módulo criptográfico; 24/24 E2E; empaquetado NSIS exitoso y `app-update.yml` inspeccionado con el `publisherName` reservado. Falta cargar/probar el secret real mediante `workflow_dispatch`; ese flujo firma pero no publica, y es el gate final para cerrar el hito antes del tag.
 

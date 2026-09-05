@@ -17,7 +17,7 @@
  *
  *   node scripts/smoke.cjs
  */
-const { spawn } = require("node:child_process");
+const { execFileSync, spawn } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -31,9 +31,11 @@ function packagedBinary() {
   const candidates =
     process.platform === "darwin"
       ? [
-          // `macos-latest` es arm64; el directorio sin sufijo es el build x64.
-          path.join(RELEASE, "mac-arm64", "Anonly.app", "Contents", "MacOS", "Anonly"),
           path.join(RELEASE, "mac", "Anonly.app", "Contents", "MacOS", "Anonly"),
+          // Compatibilidad para builds previos al instalador universal.
+          path.join(RELEASE, "mac-universal", "Anonly.app", "Contents", "MacOS", "Anonly"),
+          path.join(RELEASE, "mac-arm64", "Anonly.app", "Contents", "MacOS", "Anonly"),
+          path.join(RELEASE, "mac-x64", "Anonly.app", "Contents", "MacOS", "Anonly"),
         ]
       : [path.join(RELEASE, "win-unpacked", "Anonly.exe")];
 
@@ -42,6 +44,48 @@ function packagedBinary() {
     throw new Error(`No hay binario empaquetado. Buscado en:\n  ${candidates.join("\n  ")}`);
   }
   return found;
+}
+
+/**
+ * Un bundle universal no alcanza si el addon nativo sigue teniendo un solo
+ * slice. Verificamos ambos binarios antes de arrancar la app para que el
+ * release falle en CI y no después en un Mac Intel o Apple Silicon.
+ */
+/** @param {string} binary */
+function verifyUniversalMacBundle(binary) {
+  if (process.platform !== "darwin") return;
+
+  const appPath = path.resolve(path.dirname(binary), "..", "..");
+  const addonPath = path.join(
+    appPath,
+    "Contents",
+    "Resources",
+    "native",
+    "build",
+    "Release",
+    "sparkle_bridge.node",
+  );
+  /** @param {string} target @returns {string[]} */
+  const inspect = (target) => {
+    if (!fs.existsSync(target)) throw new Error(`No existe el binario nativo: ${target}`);
+    return execFileSync("lipo", ["-archs", target], { encoding: "utf8" }).trim().split(/\s+/);
+  };
+  const appArchitectures = inspect(binary);
+  const addonArchitectures = inspect(addonPath);
+  for (const binaryInfo of [
+    { label: "app", architectures: appArchitectures },
+    { label: "sparkle_bridge.node", architectures: addonArchitectures },
+  ]) {
+    if (
+      !binaryInfo.architectures.includes("arm64") ||
+      !binaryInfo.architectures.includes("x86_64")
+    ) {
+      throw new Error(`${binaryInfo.label} no es universal: ${binaryInfo.architectures.join(" ")}`);
+    }
+  }
+  process.stdout.write(
+    `smoke: bundle universal OK — app ${appArchitectures.join(" ")}, bridge ${addonArchitectures.join(" ")}\n`,
+  );
 }
 
 /**
@@ -76,6 +120,7 @@ async function findAppPage() {
 
 async function main() {
   const binary = packagedBinary();
+  verifyUniversalMacBundle(binary);
   process.stdout.write(`smoke: arrancando ${binary}\n`);
 
   const child = spawn(binary, [`--remote-debugging-port=${PORT}`], { stdio: "pipe" });

@@ -118,12 +118,17 @@ jobs:
             exit 1
           fi
 
-      # Firma cada ZIP con la clave EdDSA y arma el appcast que la app consulta.
+      # Firma el ZIP universal con la clave EdDSA y arma el único appcast que
+      # la app consulta. Sparkle rechaza dos archivos con el mismo bundle
+      # version, por eso este guard evita volver a publicar builds por
+      # arquitectura separados accidentalmente. También corre en
+      # workflow_dispatch para probar el secret antes de crear un tag; solo el
+      # job de publicación sigue limitado a tags.
       # La clave privada entra por **stdin** (`--ed-key-file -`): nunca se
       # escribe a disco ni queda en la línea de comandos, que es visible en la
       # tabla de procesos del runner.
       - name: Firmar actualizaciones y generar el appcast
-        if: matrix.platform == 'mac' && startsWith(github.ref, 'refs/tags/v')
+        if: matrix.platform == 'mac' && (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch')
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
@@ -132,10 +137,18 @@ jobs:
             exit 1
           fi
           cd apps/desktop-shell
-          # Un directorio con SOLO los zips: `generate_appcast` indexa todo lo
-          # que encuentra, y los DMG no son actualizables por Sparkle.
+          # Un directorio con SOLO el ZIP universal: `generate_appcast` indexa
+          # todo lo que encuentra, y los DMG no son actualizables por Sparkle.
           mkdir -p updates
-          cp release/*.zip updates/
+          shopt -s nullglob
+          zips=(release/*.zip)
+          if [ "${#zips[@]}" -ne 1 ]; then
+            echo "::error::Se esperaba exactamente un ZIP universal; se encontraron ${#zips[@]}." >&2
+            printf '  %s\n' "${zips[@]}" >&2
+            exit 1
+          fi
+          rm -f updates/*.zip updates/appcast.xml appcast.log
+          cp "${zips[0]}" updates/
           printf '%s' "$SPARKLE_PRIVATE_KEY" | ./native/vendor/bin/generate_appcast \
             --ed-key-file - \
             --download-url-prefix "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/" \
