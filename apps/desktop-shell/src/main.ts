@@ -200,12 +200,15 @@ async function bootstrap(): Promise<void> {
 }
 
 /**
- * Arranca el actualizador de macOS, o no hace nada.
+ * Arranca el actualizador que corresponda a la plataforma, o ninguno.
+ *
+ * En Windows es `electron-updater`; en macOS, Sparkle. El renderer no sabe
+ * cuál está abajo: los dos emiten los mismos eventos (ADR-131 §2/§3).
  *
  * Ninguna falla acá puede impedir que la app abra: Anonly anonimiza documentos
  * sin tocar la red, así que quedarse sin actualizarse solo es mucho menos
- * grave que no arrancar. En Windows no corre —ahí actualiza
- * `electron-updater`— y en macOS sin clave pública tampoco.
+ * grave que no arrancar. En macOS sin clave pública no arranca, y eso es un
+ * caso normal —la app desempaquetada de los E2E—, no un error.
  */
 function startUpdater(window: BrowserWindow): void {
   /*
