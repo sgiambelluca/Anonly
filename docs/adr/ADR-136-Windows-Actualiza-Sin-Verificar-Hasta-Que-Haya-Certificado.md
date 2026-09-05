@@ -61,11 +61,37 @@ if (publisherName == null) { return null; }
 
 Y `apps/desktop-shell/electron-builder.yml` no declara `publisherName` porque no hay certificado del cual derivarlo.
 
-**La condición se invierte sola, pero solo por un camino.** Si el certificado se integra por la vía nativa de `electron-builder` (`certificateFile`, o las variables `CSC_LINK`/`CSC_KEY_PASSWORD`), la herramienta firma, deriva `publisherName`, lo escribe en el `app-update.yml` del build, y la verificación se enciende sin que nadie borre una línea.
+Del lado del build, quien lo escribe es `computedPublisherName` (`app-builder-lib@26.15.3`, `out/codeSign/windowsSignToolManager.js`):
 
-**Por la vía que el roadmap planea, no.** SignPath Foundation firma el artefacto **después** del build: una action sube el `.exe` sin firmar y lo devuelve firmado, así que `electron-builder` nunca ve el certificado y no escribe `publisherName`. El instalador quedaría firmado, `verifySignature()` seguiría retornando `null`, y la verificación seguiría apagada **en silencio** — el peor de los desenlaces, porque desde afuera parece cerrado.
+```js
+const publisherName = this.platformSpecificBuildOptions.signtoolOptions?.publisherName;
+if (publisherName === null) { return null; }
+else if (publisherName != null) { return asArray(publisherName); }
+const certInfo = await this.lazyCertInfo.value;
+return certInfo == null ? null : [certInfo.commonName];
+```
 
-Cerrarlo por SignPath exige entonces un paso explícito: declarar `win.publisherName` en `electron-builder.yml` con el *subject* del certificado. Está anotado en `roadmap/MVP.md` §Hito 11.5, en el mismo punto de SignPath, para que no se descubra tarde.
+Sin `publisherName` configurado y sin certificado, `lazyCertInfo` es `null`, esto devuelve `null`, y `PublishManager` (`out/publish/PublishManager.js:202-207`) no lo escribe en el `app-update.yml`. La cadena cierra ahí.
+
+**La condición se invierte sola, pero solo por un camino.** Si el certificado se integra por la vía nativa de `electron-builder` (`win.signtoolOptions.certificateFile`, o las variables `CSC_LINK`/`CSC_KEY_PASSWORD`), la herramienta firma, deriva el `commonName` del certificado, lo escribe como `publisherName`, y la verificación se enciende sin que nadie borre una línea.
+
+**Por la vía que el roadmap planea, no.** SignPath Foundation firma el artefacto **después** del build: una action sube el `.exe` sin firmar y lo devuelve firmado, así que `electron-builder` nunca ve el certificado, `lazyCertInfo` queda en `null` igual que hoy, y no escribe `publisherName`. El instalador quedaría firmado, `verifySignature()` seguiría retornando `null`, y la verificación seguiría apagada **en silencio** — el peor de los desenlaces, porque desde afuera parece cerrado.
+
+**Cerrarlo por SignPath exige un paso explícito**, y la clave importa:
+
+```yaml
+win:
+  signtoolOptions:
+    publisherName: "<CN del certificado>"
+```
+
+**No es `win.publisherName`.** En `electron-builder` 26 esa propiedad vive en `win.signtoolOptions`, y `WindowsConfiguration` declara `additionalProperties: false` en su `scheme.json`, así que `win.publisherName` es un error de configuración y no un campo ignorado. Verificado contra el `winOptions.d.ts` y el `scheme.json` de la versión pinneada, no contra cómo era la API en la 24.
+
+Configurado ahí, `computedPublisherName` devuelve el valor **sin tocar el certificado** —es la primera rama del código de arriba— que es justamente lo que el flujo de SignPath necesita. La otra condición, `isForceCodeSigningVerification`, es `win.verifyUpdateCodeSignature !== false` y hoy está en su default, así que no hay nada más que hacer.
+
+Queda anotado en `roadmap/MVP.md` §Hito 11.5, en el mismo punto de SignPath, para que no se descubra tarde.
+
+> Al margen, y vale decirlo porque es lo que este ADR viene a corregir: `win.verifyUpdateCodeSignature: false` **sí existe** como opción de build, y es la forma honesta de apagar la verificación a propósito. Es otra cosa que la propiedad de runtime del mismo nombre en `autoUpdater`, que es la que resultó ser un no-op. Acá no se usa: no hace falta apagar nada, porque sin `publisherName` no hay verificación que apagar.
 
 ### 3. La condición de salida es un test, no un comentario
 
@@ -88,7 +114,7 @@ El hueco se declara en los tres lugares donde alguien lo buscaría, y ya está e
 
 **En contra**
 
-- **El hueco es real y queda abierto.** Una cuenta de GitHub comprometida entrega una actualización maliciosa a los usuarios de Windows, y la app la aplica. Se cierra con SignPath, que sigue pendiente.
+- **El hueco es real y queda abierto.** Una cuenta de GitHub comprometida entrega una actualización maliciosa a los usuarios de Windows, y la app la aplica. Lo cierra SignPath, que sigue pendiente — **más** el `signtoolOptions.publisherName` de §2: firmar sin declararlo deja el instalador firmado y la verificación apagada.
 - Las dos plataformas tienen garantías distintas bajo la misma UI. El usuario de Windows ve el mismo aviso de actualización que el de macOS, con menos verificación atrás.
 - ADR-131 §4 deja de ser universal. Sigue rigiendo en macOS y sigue siendo la meta en Windows; este ADR es la excepción con fecha de vencimiento, no su derogación.
 
