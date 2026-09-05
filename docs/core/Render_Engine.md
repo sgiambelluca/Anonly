@@ -378,10 +378,16 @@ El `ImageData` se transfiere zero-copy al host. El host lo convierte a `Blob` y 
 
 ---
 
+
+34. **Cancelación de pdfjs durante un render (ADR-133)**: cuando llega un pedido más nuevo para la misma página —zoom, cambio de tamaño de ventana, conmutar Original ↔ Anonimizado— pdfjs descarta el render en vuelo con `RenderingCancelledException`. La vista previa se dibuja igual con el pedido nuevo. Se mapea a `CancelledError` y **no** a `RenderPageFailedError`: la pool re-lanza el primero sin emitir `WORKER_JOB_FAILED`, así que deja de contarse como fallo. Se reconoce por `err.name` y nunca por el texto del mensaje.
+
 ## 14. Casos de prueba
 
 | Test | Archivo | Tipo | Descripción |
 |---|---|---|---|
+| `mapea la cancelación de pdfjs a CancelledError, no a RenderPageFailedError` | `kernel.test.ts` | unit | ADR-133 |
+| `no se deja engañar por el texto del mensaje` | `kernel.test.ts` | edge | un fallo real cuyo mensaje dice "cancelled" sigue siendo fallo: la decisión es por `err.name`, que es API pública de pdfjs |
+| `un fallo real sigue siendo RenderPageFailedError con su motivo` | `kernel.test.ts` | unit | el mapeo no se traga los fallos de verdad |
 | `renderPage returns ImageData with correct dimensions` | `contract.test.ts` | contract | invariante |
 | `emits PREVIEW_UPDATED after preview render` | `contract.test.ts` | contract | invariante |
 | `emits RENDER_FINISHED after batch` | `contract.test.ts` | contract | invariante |
