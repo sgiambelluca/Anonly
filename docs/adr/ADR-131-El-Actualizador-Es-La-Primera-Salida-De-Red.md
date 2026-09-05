@@ -57,7 +57,15 @@ Un actualizador descarga un archivo de internet y lo ejecuta con la confianza qu
 
 - Par de claves **Ed25519**: la privada como *secret* de GitHub Actions, **nunca** en el repo; la pública embebida en la app.
 - Toda actualización se firma al publicarse, y la app **rechaza** lo que no valide.
-- HTTPS no sustituye esto: protege el transporte, no el origen. Si la cuenta de GitHub se ve comprometida, HTTPS entrega el release malicioso intacto. La firma cubre ese caso porque **la clave privada no vive en GitHub**.
+- HTTPS no sustituye esto: protege el transporte, no el origen. Alguien en el medio —wifi ajeno, DNS envenenado, un proxy— no puede alterar un release firmado sin que la app lo rechace.
+
+> **Corregido el 2026-09-05.** Este punto decía además que la firma cubre el caso de una cuenta de GitHub comprometida, "porque la clave privada no vive en GitHub". **Es falso, y se contradecía con el primer ítem de esta misma lista**: la clave privada *sí* vive en GitHub, como *secret* de Actions. No está en el repositorio, que es otra cosa.
+>
+> Lo que la firma cubre de verdad: alguien que pueda alterar el artefacto después de que salió de CI, o adjuntar archivos a un release, **sin poder correr el workflow que firma**. Sube el listón, y no es poco.
+>
+> Lo que **no** cubre: quien tenga acceso de escritura al repo puede agregar un workflow que use ese secret y firmar lo que quiera. Para que una cuenta comprometida no alcanzara, la clave tendría que firmar **fuera** de CI —offline, en la máquina del desarrollador— y eso es una decisión aparte que **queda abierta**.
+>
+> El error se propagó a `08_Security_Model.md` §2.1, a los dos README y a ADR-136, y se corrigió en todos.
 
 > **Acotado por ADR-136 (2026-09-04).** Este punto se cumple en macOS y **no** se cumple en Windows: sin certificado de firma de código, `electron-updater` aplica la actualización con HTTPS como única protección. ADR-136 registra esa excepción, por qué se tomó y cuál es su condición de salida. Lo de acá abajo sigue rigiendo tal cual.
 

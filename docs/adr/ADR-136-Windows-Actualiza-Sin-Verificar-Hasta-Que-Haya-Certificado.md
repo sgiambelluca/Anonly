@@ -14,7 +14,7 @@ ADR-131 §4 decidió que **toda** actualización se verifica con clave propia y 
 
 > "HTTPS no sustituye esto: protege el transporte, no el origen. Si la cuenta de GitHub se ve comprometida, HTTPS entrega el release malicioso intacto."
 
-En macOS eso se cumple: Sparkle valida con una clave Ed25519 cuya privada no vive en GitHub. En Windows **no se cumple**, y la implementación de ADR-131 §2 lo dejó así sin decirlo en ningún ADR.
+En macOS eso se cumple: Sparkle valida cada actualización con una clave Ed25519 propia, que no está en el repositorio ni se puede derivar de la pública horneada en la app (con el límite que ADR-131 §4 anota: la privada es un *secret* de Actions, así que una cuenta comprometida sí alcanzaría). En Windows **no se cumple**, y la implementación de ADR-131 §2 lo dejó así sin decirlo en ningún ADR.
 
 `electron-updater` verifica la firma Authenticode del `.exe` que descarga. Verificar exige un certificado de firma de código, que cuesta dinero. La vía gratuita es SignPath Foundation, que pide que el proyecto sea open source con cierta trayectoria; está anotada como pendiente en `roadmap/MVP.md` §Hito 11.5 y todavía no llegó.
 
