@@ -395,6 +395,15 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                 Activado, las versiones nuevas se instalan solas al reiniciar la app. Desactivado,
                 te avisamos y vos decidís cuándo instalarlas.
               </p>
+              {/*
+                ADR-131 §5 obliga a decirlo acá y no solo en el README: buscar
+                actualizaciones es la **única** salida de red del producto, y el
+                usuario tiene que enterarse por la app y no descubriéndolo.
+              */}
+              <p className="mt-1 text-sm text-text-secondary">
+                Para buscarlas, Anonly le consulta a GitHub. Esa consulta revela tu IP y la versión
+                instalada, y nada más: nunca el contenido ni el nombre de un documento.
+              </p>
               <button
                 type="button"
                 onClick={() => shellUpdater.check()}

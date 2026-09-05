@@ -1,6 +1,16 @@
 # Anonly
 
-> Plataforma de **anonimización documental 100% local**. Detecta, agrupa y reemplaza información sensible en archivos PDF y produce un PDF completamente nuevo donde la información original no es recuperable. Ningún byte del documento sale del navegador del usuario.
+> Plataforma de **anonimización documental 100% local**. Detecta, agrupa y reemplaza información sensible en archivos PDF y produce un PDF completamente nuevo donde la información original no es recuperable. Ningún byte del documento sale de la máquina del usuario.
+
+**Anonly se entrega como aplicación de escritorio** para macOS y Windows (ADR-130). Se baja el instalador una vez y desde ahí funciona sin conexión: el modelo de detección de nombres y los binarios de OCR viajan adentro del paquete, así que no se descarga nada en el primer uso.
+
+### Lo único que la app le pide a internet
+
+Buscar si hay una versión nueva. Esa consulta va a GitHub y **le revela tu IP y la versión que tenés instalada** — nada más: nunca el contenido, el nombre ni ningún metadato de un documento, y el chequeo se puede apagar desde Configuración.
+
+Vale la pena decirlo con precisión: **el Core nunca habla con la red** —hay un gate de CI que lo verifica sobre el código— y el contenedor solo lo hace para consultar versiones y bajar actualizaciones firmadas. En macOS cada actualización se valida con una clave criptográfica propia antes de instalarse; en Windows, mientras no exista el certificado de firma, lo único que protege el canal es HTTPS.
+
+Los instaladores se construyen en CI con logs públicos, y cada release publica el sha256 de cada archivo más una atestación que ata el binario a un commit de este repositorio. Cualquiera puede verificar que lo que bajó salió de este código.
 
 ---
 
@@ -36,7 +46,7 @@ pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract
 | Comando | Qué hace |
 |---|---|
 | `pnpm build` | Compila los paquetes del Core. |
-| `pnpm test:e2e` | Playwright sobre la app real (levanta el dev server solo). |
+| `pnpm test:e2e` | Playwright sobre la **app de escritorio empaquetada**: construye el renderer y el shell y corre los escenarios dentro de Electron (ADR-130). |
 | `pnpm test:integration` | Tests que cruzan varios motores. |
 | `pnpm test:quality` | Recall y precisión sobre el dataset de referencia. Reporta, no falla por número bajo (ADR-095). |
 | `pnpm test:security` | Gates de no-recuperabilidad y de origen de los assets. |
