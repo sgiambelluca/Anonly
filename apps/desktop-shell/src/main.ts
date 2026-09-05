@@ -1,3 +1,4 @@
+import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -91,6 +92,38 @@ function registerProtocol(root: string): void {
 
     const headers = new Headers(response.headers);
     for (const [key, value] of Object.entries(headersFor(pathname))) headers.set(key, value);
+
+    /*
+     * **`Content-Length` explícito, y no es un detalle.**
+     *
+     * `net.fetch` sobre `file://` no lo manda. Sin ese header, quien consume
+     * la respuesta no sabe cuánto va a recibir y hace crecer su buffer a los
+     * tirones: reasignar y copiar, una y otra vez, hasta 178 MB. Transformers.js
+     * lo avisa por consola —"Unable to determine content-length from response
+     * headers. Will expand buffer when needed"— y el costo es brutal.
+     *
+     * Medido sobre el modelo NER, de importar a `NER_MODEL_READY`:
+     *
+     *     sin Content-Length   31.000 ms
+     *     con Content-Length      948 ms
+     *
+     * 33× más rápido, y por debajo del mismo camino servido por HTTP
+     * (1.076 ms) — o sea que el contenedor pasa de ser mucho peor que la web a
+     * ser levemente mejor.
+     *
+     * Se descartaron antes, midiendo: la transferencia (245 ms para los 178 MB),
+     * el tamaño de la pool (31 s con un worker, 32,6 s con dos), el build de
+     * wasm y el aislamiento de origen (idénticos en los dos entornos), y leer
+     * el archivo a memoria en vez de streamearlo (37,7 s, peor).
+     */
+    if (headers.get("content-length") === null) {
+      try {
+        const { size } = await stat(filePath);
+        headers.set("Content-Length", String(size));
+      } catch {
+        // sin tamaño: se sirve igual
+      }
+    }
     return new Response(response.body, { status: response.status, headers });
   });
 }
