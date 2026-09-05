@@ -14,6 +14,7 @@
     "package": "pnpm build && electron-builder --publish never",
     "package:mac": "pnpm build && electron-builder --mac --publish never",
     "package:win": "pnpm build && electron-builder --win --publish never",
+    "sign:windows-update": "tsx scripts/sign-windows-update.ts",
     "smoke": "node scripts/smoke.cjs",
     "sparkle:fetch": "bash native/scripts/fetch-sparkle.sh",
     "sparkle:build": "node-gyp rebuild --directory=native --target=44.2.0 --dist-url=https://electronjs.org/headers"

@@ -11,7 +11,9 @@ web dejaba en manos del hosting.
 Decisiones: [ADR-130](../../docs/adr/ADR-130-El-Contenedor-De-Escritorio-Fija-El-Motor.md)
 (por qué Electron), [ADR-131](../../docs/adr/ADR-131-El-Actualizador-Es-La-Primera-Salida-De-Red.md)
 (distribución y updater), [ADR-132](../../docs/adr/ADR-132-El-Shell-Tiene-Su-Propio-Modelo-De-Seguridad.md)
-(esta postura de seguridad).
+(esta postura de seguridad) y
+[ADR-137](../../docs/adr/ADR-137-Windows-Verifica-Actualizaciones-Con-Clave-Ed25519-Propia.md)
+(firma propia de actualizaciones Windows).
 
 ## Correrlo
 
@@ -29,7 +31,9 @@ pnpm --filter @anonly/desktop-shell start
 | `src/paths.ts` | Traduce pathname → archivo, y rechaza todo lo que no sea un asset del build. |
 | `src/preload.ts` | La superficie main↔renderer completa: `check`, `install` y `onEvent`, todos del actualizador. |
 | `src/updater.ts` | Carga del puente nativo a Sparkle (macOS) y la lista blanca del payload que cruza al renderer. |
-| `src/windows-updater.ts` | Actualizador de Windows sobre `electron-updater`, traducido a los mismos eventos que emite Sparkle. **Aplica las actualizaciones sin verificar la firma** (ADR-136). |
+| `src/windows-updater.ts` | Actualizador de Windows sobre `electron-updater`, traducido a los mismos eventos que emite Sparkle. Compone la verificación Ed25519 propia con Authenticode cuando esté disponible. |
+| `src/windows-update-signature.ts` | Sobre firmado, decoder de `latest.yml` y verificación Ed25519 del instalador descargado. La pública está horneada acá; la privada nunca entra al repo. |
+| `scripts/sign-windows-update.ts` | Paso de release que recibe la privada por stdin y agrega la firma a `latest.yml`. |
 | `native/` | El puente N-API a Sparkle, vendoreado. Ver su README. |
 
 **Dos actualizadores, un solo contrato.** El renderer no sabe qué plataforma
@@ -39,22 +43,20 @@ tiene abajo: los dos emiten los mismos eventos, y el aviso, el toggle y
 una actualización; macOS necesita Sparkle porque Squirrel.Mac **sí** lo exige
 (ADR-131 §2/§3).
 
-**Las dos plataformas no tienen la misma garantía, y conviene decirlo acá.**
-Que Squirrel.Windows no exija certificado es lo que hizo *posible* publicar
-para Windows sin pagar uno; el precio es que ahí las actualizaciones **se
-aplican sin verificar quién las firmó**. Lo único que protege ese canal es
-HTTPS contra GitHub: alcanza contra alguien en el medio, no contra un release
-malicioso publicado desde una cuenta comprometida. macOS está mejor —Sparkle
-valida cada actualización con una clave EdDSA propia, que no está en el
-repositorio— aunque no del todo cubierto: esa privada es un *secret* de
-Actions, así que una cuenta comprometida también alcanzaría (ADR-131 §4).
+**Las dos plataformas verifican las actualizaciones con una clave Ed25519
+propia.** En Windows CI firma un sobre con versión, nombre y SHA-512 del `.exe`;
+la app recalcula el hash y valida la firma antes de que `electron-updater`
+acepte el instalador (ADR-137). Una metadata ausente, inválida o perteneciente
+a otro artefacto falla cerrado.
 
-Es un hueco real, decidido a propósito y con fecha de vencimiento: **ADR-136**
-explica por qué se tomó ese camino en vez de dejar a Windows sin parches de
-seguridad, y cuál es su condición de salida. Lo cierra el certificado de firma
-de código (SignPath, `roadmap/MVP.md` §Hito 11.5) **más** declarar
-`win.signtoolOptions.publisherName`: firmar sin eso deja el instalador firmado
-y la verificación apagada igual. El porqué está en ADR-136 §2.
+Esto no autentica la primera instalación. Hasta que llegue SignPath, Windows
+sigue mostrando un editor no verificado y SmartScreen puede advertir al
+usuario. Cuando exista Authenticode, el mismo callback exigirá primero
+Ed25519 y después la firma del certificado: son garantías complementarias.
+
+Las privadas de las dos plataformas son secrets de Actions. No están en el
+repositorio, pero quien controle un workflow con acceso a esos secrets podría
+firmar; cubrir ese caso exige custodia y firma fuera de GitHub (ADR-131 §4).
 
 ## El ícono
 

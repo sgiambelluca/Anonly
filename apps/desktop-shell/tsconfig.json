@@ -26,5 +26,5 @@
     "allowJs": true,
     "checkJs": false
   },
-  "include": ["src/**/*.ts", "scripts/**/*.cjs"]
+  "include": ["src/**/*.ts", "scripts/**/*.cjs", "scripts/**/*.ts"]
 }

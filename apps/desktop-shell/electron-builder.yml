@@ -96,6 +96,12 @@ win:
     - target: nsis
       arch: [x64]
   icon: assets/icon.png
+  # `NsisUpdater.verifySignature()` retorna antes de invocar el callback si no
+  # hay publisherName. Este valor reservado fuerza la verificación Ed25519
+  # propia sin afirmar que exista Authenticode (ADR-137 §4). Cuando llegue
+  # SignPath se reemplaza por el DN/CN real y el callback exige ambas firmas.
+  signtoolOptions:
+    publisherName: "__ANONLY_ED25519_ONLY__"
 
 nsis:
   oneClick: false

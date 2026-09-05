@@ -1,6 +1,12 @@
 import { autoUpdater } from "electron-updater";
 
 import { toUpdateEventPayload, type UpdateEventPayload } from "./updater";
+import {
+  decodeWindowsUpdateSignature,
+  ED25519_ONLY_PUBLISHER,
+  verifyWindowsUpdateFile,
+  type WindowsUpdateSignatureDecodeResult,
+} from "./windows-update-signature";
 
 /**
  * Actualizador de Windows (ADR-131 §2).
@@ -22,13 +28,23 @@ import { toUpdateEventPayload, type UpdateEventPayload } from "./updater";
 /** Los mismos nombres de evento que reporta el puente de Sparkle. */
 type Emit = (payload: UpdateEventPayload) => void;
 
+type VerifyUpdateCodeSignature = (
+  publisherNames: string[],
+  filePath: string,
+) => Promise<string | null>;
+
+interface SignatureAwareUpdater {
+  verifyUpdateCodeSignature: VerifyUpdateCodeSignature;
+}
+
 /**
  * `exactOptionalPropertyTypes` no admite pasar `version: undefined`: omitir la
  * clave y ponerla en `undefined` son cosas distintas para el type-checker, y
  * acá la correcta es omitirla.
  */
-function conVersion(info: { version?: string }): { version?: string } {
-  return info.version === undefined ? {} : { version: info.version };
+function conVersion(info: unknown): { version?: string } {
+  if (typeof info !== "object" || info === null || !("version" in info)) return {};
+  return typeof info.version === "string" ? { version: info.version } : {};
 }
 
 export function startWindowsUpdater(emit: Emit, log: (message: string) => void): void {
@@ -43,44 +59,47 @@ export function startWindowsUpdater(emit: Emit, log: (message: string) => void):
   autoUpdater.autoInstallOnAppQuit = false;
 
   /*
-   * **Acá no se apaga la verificación de firma, y no hace falta apagarla**
-   * (ADR-136).
+   * ADR-137: `electron-updater` ofrece un único slot de verificación. Se
+   * conserva primero el verificador Authenticode original y se instala uno
+   * compuesto que siempre exige Ed25519.
    *
-   * El instalador de Windows sale sin certificado de firma de código, así que
-   * `electron-updater` no verifica nada: `verifySignature()` retorna `null`
-   * antes de llamar al verificador cuando `publisherName` no está configurado,
-   * y `electron-builder.yml` no lo configura porque no hay certificado del
-   * cual derivarlo.
+   * Mientras el publisher sea el valor reservado, no existe certificado y la
+   * verificación propia es la única aplicable. Cuando SignPath llegue, el YAML
+   * cambia al DN/CN real y esta misma función ejecuta además el verificador
+   * Authenticode guardado. Ninguna capa reemplaza a la otra.
    *
-   * **Lo que queda protegiendo el canal es HTTPS contra GitHub**, que impide
-   * que alguien altere el instalador en tránsito pero no cubre un release
-   * malicioso publicado desde una cuenta comprometida. macOS no tiene este
-   * hueco del todo: Sparkle valida con una clave EdDSA propia, que no está en
-   * el repositorio — aunque su privada es un secret de Actions, así que una
-   * cuenta comprometida también alcanzaría (ADR-131 §4).
-   *
-   * Acá hubo dos líneas que asignaban `verifyUpdateCodeSignature = false`
-   * creyendo que eso lo apagaba. No lo apagaba: es un accessor cuyo valor es
-   * una **función**, y su setter descarta los falsy. No vuelven — hay un test
-   * que las prohíbe, porque un no-op con un comentario convincente al lado es
-   * peor que no tener nada.
-   *
-   * La condición de salida tampoco vive en este comentario, sino en
-   * `__tests__/windows-updater.test.ts`, que falla cuando `electron-builder.yml`
-   * declare un certificado y manda a leer ADR-136.
-   *
-   * Ojo con una trampa que ADR-136 §2 detalla: **firmar no alcanza**. SignPath
-   * firma el `.exe` después del build, así que `electron-builder` nunca ve el
-   * certificado y no escribe `publisherName` — el instalador quedaría firmado
-   * y esto seguiría sin verificar, en silencio. Hay que declarar
-   * `win.signtoolOptions.publisherName` a mano (bajo `signtoolOptions`, no
-   * suelto en `win`: en electron-builder 26 eso último es error de schema).
+   * El manifiesto se decodifica al recibir `update-available`, antes de que la
+   * descarga automática empiece. Una metadata ausente o inválida se conserva
+   * como un rechazo: no se interpreta como un error transitorio de red.
    */
+  const signatureAwareUpdater = autoUpdater as typeof autoUpdater & SignatureAwareUpdater;
+  const verifyAuthenticode = signatureAwareUpdater.verifyUpdateCodeSignature;
+  let pendingSignature: WindowsUpdateSignatureDecodeResult = {
+    ok: false,
+    error: "no hay metadata de firma para la actualización",
+  };
 
-  autoUpdater.on("checking-for-update", () => emit(toUpdateEventPayload({ type: "checking" })));
-  autoUpdater.on("update-available", (info: { version?: string }) =>
-    emit(toUpdateEventPayload({ type: "update-available", ...conVersion(info) })),
-  );
+  signatureAwareUpdater.verifyUpdateCodeSignature = async (publisherNames, filePath) => {
+    if (!pendingSignature.ok) return pendingSignature.error;
+
+    const ownSignatureError = await verifyWindowsUpdateFile(filePath, pendingSignature.value);
+    if (ownSignatureError !== null) return ownSignatureError;
+
+    if (publisherNames.length === 1 && publisherNames[0] === ED25519_ONLY_PUBLISHER) {
+      return null;
+    }
+    return verifyAuthenticode(publisherNames, filePath);
+  };
+
+  autoUpdater.on("checking-for-update", () => {
+    pendingSignature = { ok: false, error: "no hay metadata de firma para la actualización" };
+    emit(toUpdateEventPayload({ type: "checking" }));
+  });
+  autoUpdater.on("update-available", (info: unknown) => {
+    pendingSignature = decodeWindowsUpdateSignature(info);
+    if (!pendingSignature.ok) log(`[anonly] updater: ${pendingSignature.error}`);
+    emit(toUpdateEventPayload({ type: "update-available", ...conVersion(info) }));
+  });
   autoUpdater.on("update-not-available", () =>
     emit(toUpdateEventPayload({ type: "update-not-available" })),
   );
@@ -92,7 +111,7 @@ export function startWindowsUpdater(emit: Emit, log: (message: string) => void):
       }),
     ),
   );
-  autoUpdater.on("update-downloaded", (info: { version?: string }) =>
+  autoUpdater.on("update-downloaded", (info: unknown) =>
     emit(toUpdateEventPayload({ type: "update-downloaded", ...conVersion(info) })),
   );
   autoUpdater.on("error", (error: Error) => {

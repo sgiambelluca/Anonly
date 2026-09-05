@@ -67,7 +67,10 @@ Un actualizador descarga un archivo de internet y lo ejecuta con la confianza qu
 >
 > El error se propagó a `08_Security_Model.md` §2.1, a los dos README y a ADR-136, y se corrigió en todos.
 
-> **Acotado por ADR-136 (2026-09-04).** Este punto se cumple en macOS y **no** se cumple en Windows: sin certificado de firma de código, `electron-updater` aplica la actualización con HTTPS como única protección. ADR-136 registra esa excepción, por qué se tomó y cuál es su condición de salida. Lo de acá abajo sigue rigiendo tal cual.
+> **La excepción de ADR-136 quedó cerrada por ADR-137 (2026-09-05).** Windows
+> verifica cada actualización con una clave Ed25519 propia antes de aplicarla,
+> aun sin certificado de firma de código. Authenticode sigue pendiente para la
+> primera instalación y, cuando llegue, se exigirán las dos comprobaciones.
 
 Queda **expresamente descartado** el fork de Squirrel.Mac con la verificación removida: resuelve el síntoma creando exactamente el agujero que este punto prohíbe, y su propio README desaconseja usarlo en producción.
 

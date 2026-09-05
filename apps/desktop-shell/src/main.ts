@@ -226,9 +226,11 @@ function startUpdater(window: BrowserWindow): void {
   /*
    * Dos actualizadores, un solo contrato hacia el renderer (ADR-131 §2/§3).
    *
-   * Windows va por `electron-updater`, que aplica una actualización sin exigir
-   * certificado. macOS necesita Sparkle porque Squirrel.Mac **sí** lo exige y
-   * falla con `Could not get code signature for running application`.
+   * Windows va por `electron-updater` con la verificación Ed25519 propia de
+   * ADR-137; no exige certificado para reemplazar la app, pero tampoco acepta
+   * bytes que no correspondan a la clave horneada. macOS necesita Sparkle
+   * porque Squirrel.Mac **sí** exige certificado y falla con
+   * `Could not get code signature for running application`.
    *
    * El renderer no sabe cuál está abajo: los dos emiten los mismos eventos, y
    * el aviso, el toggle y `UpdateNotice` son los mismos en los dos sistemas.
