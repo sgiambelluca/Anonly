@@ -139,16 +139,36 @@ test("gate `shell-no-egress`: un pipeline completo no habla con ningún host", a
    * `file://` y `app://` no son salidas de red: son el propio handler del
    * protocolo leyendo el disco. Lo que este gate prohíbe es un host.
    *
-   * **Lo que este gate NO puede ver**, y conviene decirlo: solo observa lo que
-   * pasa por la sesión. Un servicio interno de Chromium que use otro contexto
-   * no aparecería acá. Por eso ADR-132 §4 apaga esos caminos además de
-   * medirlos: el gate prueba lo observable, los switches cierran lo que no.
+   * **Dos cosas que este gate NO cubre**, y hay que decirlas para que nadie lo
+   * lea como más fuerte de lo que es:
+   *
+   * 1. Solo observa lo que pasa por la sesión. Un servicio interno de Chromium
+   *    en otro contexto no aparecería. Por eso ADR-132 §4 **apaga** esos
+   *    caminos además de medirlos: el gate prueba lo observable, los switches
+   *    cierran lo que no.
+   * 2. **No ejercita el actualizador**, que es justamente el único componente
+   *    que sí habla con la red. Los E2E corren la app desempaquetada, donde el
+   *    `Info.plist` no tiene `SUPublicEDKey` y Sparkle no arranca — así que acá
+   *    el gate pasaría igual aunque el actualizador filtrara algo. Eso lo
+   *    cubren `network-destinations.test.ts`, que enumera desde el código los
+   *    destinos que el shell tiene permitido nombrar, y `updater-payload-clean`,
+   *    que fija qué viaja por ese canal.
    */
   const aHosts = todos.filter((u) => /^https?:/i.test(u));
   expect(aHosts, `la app pidió a un host: ${JSON.stringify([...new Set(aHosts)])}`).toEqual([]);
   expect(
     todos.length,
     "la sonda no registró nada: el gate no estaría probando nada",
+  ).toBeGreaterThan(0);
+
+  /*
+   * Precondición explícita: que el pipeline haya corrido de verdad. Sin esto,
+   * un cambio que rompa la importación dejaría el gate en verde con cero
+   * requests — el peor modo de falla de un test de ausencia.
+   */
+  expect(
+    todos.filter((u) => u.includes("model_quantized.onnx")).length,
+    "el modelo NER no se pidió: el pipeline no corrió y el gate no probó nada",
   ).toBeGreaterThan(0);
 });
 
