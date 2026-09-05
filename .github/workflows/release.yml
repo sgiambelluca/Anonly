@@ -14,6 +14,22 @@ concurrency:
 
 env:
   NODE_VERSION: "22"
+  # `onnxruntime-node` baja los binarios de CUDA en su postinstall, y **solo en
+  # linux/x64**: su `install-metadata.js` declara `requirements` vacíos para
+  # macOS y Windows, y `["cuda12"]` para Linux. Los binarios de CPU ya vienen
+  # adentro del paquete, así que lo único que baja son cientos de MB de
+  # aceleración por GPU — en un runner que no tiene GPU.
+  #
+  # Se saltea. El script lee esta variable antes que nada y sale con 0 sin
+  # pedir nada a la red (`install-utils.js`, `parseInstallFlag`): verificado
+  # ejecutándolo, no leyendo el README.
+  #
+  # Entra acá porque es de donde llegó a romper: un ETIMEDOUT contra
+  # api.nuget.org tumbó el job entero. `onnxruntime-node` es transitiva de
+  # `@huggingface/transformers`, que los tests de integración sí usan en Node
+  # —por eso no se bloquea el postinstall entero, solo la parte que no viene
+  # empaquetada—.
+  ONNXRUNTIME_NODE_INSTALL: skip
 
 permissions:
   contents: write
