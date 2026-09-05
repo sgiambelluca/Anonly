@@ -53,9 +53,14 @@ Ese smoke test existe por Windows: el `.exe` se puede construir desde macOS
 pero no ejecutar, así que sin un runner de Windows abriéndolo una vez, esa
 plataforma se publicaría sin que nadie la haya visto arrancar.
 
-En macOS además firma cada actualización con la clave EdDSA (el secret
+En macOS el instalador es universal (arm64 + x86_64) y además firma cada actualización con la clave EdDSA (el secret
 `SPARKLE_PRIVATE_KEY`, que entra por stdin y nunca toca el disco del runner) y
 publica el `appcast.xml` que la app consulta.
+
+El job produce un único ZIP actualizable por Sparkle. No se deben copiar dos
+ZIP de arquitecturas distintas al directorio `updates/`: Sparkle rechaza dos
+archivos con el mismo número de versión. El bridge nativo de Sparkle se
+compila para ambas arquitecturas y se valida antes de empaquetar (ADR-138).
 
 Ese paso **falla el build** si la clave privada no corresponde a la
 `SUPublicEDKey` horneada en la app, o si el appcast sale sin firma.
@@ -79,9 +84,10 @@ las dos firmas; la Ed25519 no se retira.
 vos, desde la página del release. Hasta entonces ningún usuario lo recibe.
 
 `workflow_dispatch` corre todo el pipeline sin publicar nada, para probar que
-el camino funciona antes de tagear. El job de Windows también exige y usa
-`WINDOWS_UPDATE_PRIVATE_KEY` en esa prueba: es la forma segura de validar el
-secret y la firma real sin crear todavía un release.
+el camino funciona antes de tagear. Los jobs de Windows y macOS exigen y usan
+sus respectivos secrets (`WINDOWS_UPDATE_PRIVATE_KEY` y
+`SPARKLE_PRIVATE_KEY`) en esa prueba: es la forma segura de validar ambos
+circuitos de firma sin crear todavía un release.
 
 ## Probar sin romperle la app a nadie
 

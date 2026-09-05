@@ -13,7 +13,9 @@ Decisiones: [ADR-130](../../docs/adr/ADR-130-El-Contenedor-De-Escritorio-Fija-El
 (distribución y updater), [ADR-132](../../docs/adr/ADR-132-El-Shell-Tiene-Su-Propio-Modelo-De-Seguridad.md)
 (esta postura de seguridad) y
 [ADR-137](../../docs/adr/ADR-137-Windows-Verifica-Actualizaciones-Con-Clave-Ed25519-Propia.md)
-(firma propia de actualizaciones Windows).
+(firma propia de actualizaciones Windows),
+[ADR-138](../../docs/adr/ADR-138-Instalador-Universal-De-macOS.md)
+(instalador universal de macOS).
 
 ## Correrlo
 
@@ -100,11 +102,13 @@ pnpm --filter @anonly/react-client build    # el renderer va adentro del instala
 pnpm --filter @anonly/desktop-shell package # o package:mac / package:win
 ```
 
-Salen en `release/`, ignorado por git. Medido el 2026-09-04: **272 MB** el DMG
-de arm64 y **277 MB** el de x64. El grueso son los ~243 MB del `dist` del
-renderer —modelo NER, wasm de Tesseract y onnxruntime, cmaps de pdfjs— que
-viajan adentro en vez de descargarse (inversión de ADR-018, decidida en
-ADR-130).
+Salen en `release/`, ignorado por git. macOS produce un único DMG y un único
+ZIP **universales**: contienen slices `arm64` y `x86_64`, y el sistema elige
+automáticamente el correcto. El bridge nativo de Sparkle también es universal;
+el smoke test lo comprueba con `lipo` antes de subir artefactos. El grueso del
+tamaño siguen siendo los ~243 MB del `dist` del renderer —modelo NER, wasm de
+Tesseract y onnxruntime, cmaps de pdfjs— que viajan adentro en vez de
+descargarse (inversión de ADR-018, decidida en ADR-130).
 
 ### La firma ad-hoc no es cosmética
 

@@ -43,12 +43,16 @@ npmRebuild: false
 mac:
   category: public.app-category.productivity
   target:
-    # El DMG es lo que baja una persona; el ZIP es de lo que Sparkle actualiza
-    # —no sabe instalar desde un DMG—. Los dos salen del mismo build.
+    # El bundle universal contiene los slices arm64 y x86_64. El DMG es lo que
+    # baja una persona; el ZIP es de lo que Sparkle actualiza —no sabe
+    # instalar desde un DMG—. Los dos salen del mismo bundle universal.
     - target: dmg
-      arch: [arm64, x64]
+      arch: [universal]
     - target: zip
-      arch: [arm64, x64]
+      arch: [universal]
+  # @electron/universal debe dejar intacto este addon: ya llega combinado con
+  # lipo y no se puede volver a combinar sin crear slices duplicados.
+  x64ArchFiles: "**/sparkle_bridge.node"
   icon: assets/icon.png
   # Sin certificado de Apple Developer (ADR-131 §4): no se firma ni se
   # notariza. `identity: null` evita que electron-builder busque una identidad

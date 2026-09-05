@@ -17,7 +17,7 @@
     "sign:windows-update": "tsx scripts/sign-windows-update.ts",
     "smoke": "node scripts/smoke.cjs",
     "sparkle:fetch": "bash native/scripts/fetch-sparkle.sh",
-    "sparkle:build": "node-gyp rebuild --directory=native --target=44.2.0 --dist-url=https://electronjs.org/headers"
+    "sparkle:build": "bash native/scripts/build-sparkle-universal.sh"
   },
   "devDependencies": {
     "@types/node": "^20.16.10",
