@@ -36,6 +36,8 @@ Solo la parte nativa, que es la difícil:
 - `src/sparkle_bridge.mm` — el puente Objective-C++ ↔ N-API.
 - `binding.gyp` — la config de compilación, con los `rpath` que le permiten
   encontrar `Sparkle.framework` tanto en desarrollo como dentro del `.app`.
+- `scripts/build-sparkle-universal.sh` — compila el addon para `arm64` y
+  `x86_64` y los combina con `lipo` para el bundle universal.
 - `scripts/fetch-sparkle.sh` — baja Sparkle del release oficial y **verifica
   sha256** antes de extraer. Trae además `generate_keys`, `sign_update` y
   `generate_appcast`.
@@ -58,7 +60,12 @@ commit.
 
 ```bash
 pnpm --filter @anonly/desktop-shell sparkle:fetch
+pnpm --filter @anonly/desktop-shell sparkle:build
 ```
+
+El segundo comando deja `build/Release/sparkle_bridge.node` con las dos
+arquitecturas. Electron Builder lo conserva como binario ya combinado al
+armar el bundle universal (ADR-138).
 
 ## Lo único modificado respecto del upstream
 
