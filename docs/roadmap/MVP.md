@@ -555,15 +555,15 @@ De las ~70: **~30 ya estaban cerradas** por hitos posteriores (ADR-053/054/056, 
 Insertado con la convención decimal del repo, sin renumerar Release. Adelantado desde v2.0 §2.2: el escritorio deja de ser un target futuro y pasa a ser **el** target del release.
 
 - ~~Spike: confirmar `crossOriginIsolated` y los cinco workers de motor bajo el protocolo `app://`.~~ **CERRADO (2026-09-04)** — los cuatro puntos verdes con Electron 44.2.0, pipeline completo verificado con `text-10p.pdf` y `image-alpha-3p.pdf` (ADR-132 "Verificado en el spike").
-- `apps/desktop-shell` (Electron) cargando el build de `apps/react-client`. Protocolo propio, CSP y headers de aislamiento servidos por el shell.
-- Apagar la caché de assets del renderer cuando corre en el shell: `Cache Storage` no acepta el esquema `app://` y los assets ya son locales (ADR-132 §7).
-- Reescritura de `08_Security_Model.md` para el contenedor + gates nuevos de ADR-132 §5.
-- `electron-builder`: instalador Windows (NSIS) y macOS (DMG, firma ad-hoc).
-- Versionado real con Changesets — hoy todo está en `0.0.0` y el actualizador compara versiones (ADR-131 §6).
-- Workflow de release por tag → GitHub Releases, con `pnpm assets:mirror` como paso previo (los ~202 MB no están versionados).
-- Auto-update: `electron-updater` en Windows; Sparkle vendoreado en macOS, con firma EdDSA propia (ADR-131 §3/§4).
-- Migración de los E2E de Playwright al target shell.
-- Firma de código Windows vía SignPath Foundation (gratis para OSS; requiere el `LICENSE` de la raíz).
+- ~~`apps/desktop-shell` (Electron) cargando el build de `apps/react-client`. Protocolo propio, CSP y headers de aislamiento servidos por el shell.~~ **CERRADO** — `app://` registrado `standard + secure`; ADR-132.
+- ~~Apagar la caché de assets del renderer cuando corre en el shell: `Cache Storage` no acepta el esquema `app://` y los assets ya son locales (ADR-132 §7).~~ **CERRADO** — apagada en el motor de NER, con gate `no-cache-storage-writes`.
+- ~~Reescritura de `08_Security_Model.md` para el contenedor + gates nuevos de ADR-132 §5.~~ **CERRADO** — reescrito (la frontera pasa a ser el proceso, no el navegador) y los siete gates de §11 implementados.
+- ~~`electron-builder`: instalador Windows (NSIS) y macOS (DMG, firma ad-hoc).~~ **CERRADO** — los dos instaladores se generan y se probaron a mano en macOS 14 y en Windows 11.
+- ~~Versionado real con Changesets — hoy todo está en `0.0.0` y el actualizador compara versiones (ADR-131 §6).~~ **CERRADO** — versión única del monorepo, base `0.9.0`.
+- ~~Workflow de release por tag → GitHub Releases, con `pnpm assets:mirror` como paso previo (los ~202 MB no están versionados).~~ **CERRADO** — matriz macOS + Windows, smoke test del binario empaquetado, `SHA256SUMS.txt` y atestación de procedencia (ADR-132 §6).
+- ~~Auto-update: `electron-updater` en Windows; Sparkle vendoreado en macOS, con firma EdDSA propia (ADR-131 §3/§4).~~ **CERRADO, con una salvedad** — macOS valida con la clave EdDSA propia. **Windows aplica actualizaciones sin verificar firma**, porque no hay certificado: es un hueco real, decidido y acotado en **ADR-136**, cuya condición de salida es la línea de abajo.
+- ~~Migración de los E2E de Playwright al target shell.~~ **CERRADO — CORRIDO: 24/24** (1,2 min) contra el contenedor empaquetado, incluidos los cinco gates de seguridad de ADR-132 §5.
+- **ABIERTO** — Firma de código Windows vía SignPath Foundation (gratis para OSS; requiere el `LICENSE` de la raíz). Es lo único del hito que queda pendiente, y es lo que cierra el hueco de ADR-136: cuando llegue, `electron-builder` va a escribir `publisherName` y la verificación de Authenticode se enciende sola. El test `windows-updater.test.ts` falla en ese momento, a propósito.
 
 ### Hito 12 — Release 0.9.0
 - Docs finales, README del repo, demo.
