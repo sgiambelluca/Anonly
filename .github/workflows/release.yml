@@ -17,6 +17,11 @@ env:
 
 permissions:
   contents: write
+  # Las dos que pide `attest-build-provenance`: firma la atestación con un
+  # token efímero de OIDC y la publica en el registro de attestations del repo
+  # (ADR-132 §6).
+  id-token: write
+  attestations: write
 
 jobs:
   build:
@@ -149,6 +154,25 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
+
+      # ADR-132 §6: sin certificado de Apple, la procedencia **es** el
+      # argumento de confianza. Un hash por artefacto permite verificar que el
+      # binario que alguien bajó es el que produjo este build, y la atestación
+      # lo ata criptográficamente a este commit y a este workflow — sin que
+      # haya que confiar en la palabra del README.
+      - name: Hashes de los artefactos
+        working-directory: artifacts
+        run: |
+          shasum -a 256 * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Atestación de procedencia
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            artifacts/*.dmg
+            artifacts/*.zip
+            artifacts/*.exe
 
       # `gh` viene preinstalado en los runners. Se usa en vez de una action de
       # terceros a propósito: una action externa con `contents: write` es
