@@ -1,3 +1,5 @@
+import { getEventListeners } from "node:events";
+
 import { PdfPasswordRequiredError, PdfTimeoutError } from "@anonly/pdf-engine";
 import { RenderEngine } from "@anonly/render-engine";
 import {
@@ -12,6 +14,7 @@ import {
   InvalidInputError,
   PipelineStage,
   ReplacementMode,
+  WorkerCrashedError,
   type EngineContext,
 } from "@anonly/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -768,6 +771,114 @@ describe("Orchestrator — unit tests", () => {
 
       await expect(queuedPromise).rejects.toThrow(CancelledError);
       expect(pool.queueLength).toBe(0);
+    });
+  });
+
+  // ─── Limpieza de listeners de abort (H-09C) ───
+  //
+  // `dispatch()` registra `onAbort` con `{ once: true }`, que solo lo retira
+  // cuando el signal aborta. Sin la limpieza explícita de H-09C, un job que
+  // asienta (éxito o fallo) sin que su signal aborte deja el listener
+  // colgado del signal para siempre — y si ese signal vive por documento
+  // (miles de jobs), el listener se acumula sin límite.
+  describe("WorkerPool — limpieza de listeners de abort (H-09C)", () => {
+    let bus: ReturnType<typeof createRealBus>;
+
+    beforeEach(() => {
+      bus = createRealBus();
+    });
+
+    function makePool(
+      overrides?: Partial<ConstructorParameters<typeof WorkerPool>[0]>,
+    ): WorkerPool {
+      return new WorkerPool({
+        poolKey: "render",
+        jobType: "render-page",
+        size: 4,
+        maxQueue: 500,
+        maxRetries: 0,
+        baseRetryDelayMs: 1,
+        maxRetryDelayMs: 1,
+        bus,
+        logger: createMockLogger(),
+        ...overrides,
+      });
+    }
+
+    it("un job que resuelve sin abortar su señal no deja el listener de abort registrado", async () => {
+      const pool = makePool({ size: 1 });
+      const controller = new AbortController();
+
+      await pool.dispatch({ run: () => Promise.resolve(1), signal: controller.signal });
+
+      expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+    });
+
+    it("un job que rechaza sin abortar su señal tampoco deja el listener registrado", async () => {
+      const pool = makePool({ size: 1 });
+      const controller = new AbortController();
+
+      await expect(
+        pool.dispatch({ run: () => Promise.reject(new Error("boom")), signal: controller.signal }),
+      ).rejects.toThrow("boom");
+
+      expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+    });
+
+    it("cientos de jobs sobre la misma señal, sin abortarla, no acumulan listeners", async () => {
+      const pool = makePool();
+      const controller = new AbortController();
+
+      const jobs = Array.from({ length: 300 }, (_, i) =>
+        pool.dispatch({ run: () => Promise.resolve(i), signal: controller.signal }),
+      );
+      await Promise.all(jobs);
+
+      expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+    });
+
+    it("dispose() rechaza los jobs que quedaron en cola y retira sus listeners de abort", async () => {
+      const pool = makePool({ size: 1 });
+
+      // Ocupa el único slot para que los siguientes queden en cola, sin
+      // abortarlo ni esperar su resolución (nunca llega).
+      const blocker = pool.dispatch({
+        run: () => new Promise(() => undefined),
+        signal: new AbortController().signal,
+      });
+      void blocker.catch(() => undefined);
+
+      const controllers = [new AbortController(), new AbortController(), new AbortController()];
+      const queued = controllers.map((c) =>
+        pool
+          .dispatch({ run: () => Promise.resolve("nunca corre"), signal: c.signal })
+          .catch((err: unknown) => err),
+      );
+      expect(pool.queueLength).toBe(3);
+
+      pool.dispose();
+
+      const results = await Promise.all(queued);
+      for (const result of results) {
+        expect(result).toBeInstanceOf(CancelledError);
+      }
+      for (const controller of controllers) {
+        expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+      }
+    });
+
+    it("abortar un job después de que ya resolvió no lo rechaza retroactivamente", async () => {
+      const pool = makePool({ size: 1 });
+      const controller = new AbortController();
+
+      await expect(
+        pool.dispatch({ run: () => Promise.resolve("listo"), signal: controller.signal }),
+      ).resolves.toBe("listo");
+
+      // El listener ya se retiró al resolver: abortar después no debe
+      // lanzar ni afectar a nadie (no queda nada escuchando este signal).
+      expect(() => controller.abort()).not.toThrow();
+      expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
     });
   });
 
@@ -1625,6 +1736,102 @@ describe("Orchestrator — unit tests", () => {
         .jobId;
       worker.emitMessage({ type: "COMPLETED", jobId: dispatchJobId, result: "rendered" });
       await expect(dispatchPromise).resolves.toBe("rendered");
+    });
+
+    // ─── Limpieza de listeners de abort en el transporte remoto (H-09C) ───
+    //
+    // `dispatchRemote` registra `sendCancel` con el mismo `{ once: true }`
+    // problemático que `dispatch()`: solo se retira si el signal aborta. Los
+    // tres caminos por los que un job remoto asienta sin abortar (COMPLETED,
+    // crash de worker, dispose()) deben retirarlo igual.
+    describe("limpieza de listeners de abort (H-09C)", () => {
+      it("un job remoto que completa sin abortar su señal retira el listener sendCancel", async () => {
+        const worker = createFakeWorker();
+        const pool = new WorkerPool({
+          poolKey: "pdf",
+          jobType: "pdf-parse",
+          size: 1,
+          maxQueue: 10,
+          maxRetries: 0,
+          baseRetryDelayMs: 1,
+          maxRetryDelayMs: 1,
+          bus,
+          logger: createMockLogger(),
+          workerFactory: () => worker,
+        });
+        const controller = new AbortController();
+
+        const dispatchPromise = pool.dispatch({
+          run: vi.fn(),
+          payload: {},
+          signal: controller.signal,
+        });
+        await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalled());
+        const jobId = (worker.postMessage.mock.calls[0]?.[0] as { readonly jobId: string }).jobId;
+
+        worker.emitMessage({ type: "COMPLETED", jobId, result: "ok" });
+        await expect(dispatchPromise).resolves.toBe("ok");
+
+        expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+      });
+
+      it("un worker que crashea retira el listener sendCancel del job en curso", async () => {
+        const worker = createFakeWorker();
+        const pool = new WorkerPool({
+          poolKey: "pdf",
+          jobType: "pdf-parse",
+          size: 1,
+          maxQueue: 10,
+          maxRetries: 0,
+          baseRetryDelayMs: 1,
+          maxRetryDelayMs: 1,
+          bus,
+          logger: createMockLogger(),
+          workerFactory: () => worker,
+        });
+        const controller = new AbortController();
+
+        const dispatchPromise = pool.dispatch({
+          run: vi.fn(),
+          payload: {},
+          signal: controller.signal,
+        });
+        await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalled());
+
+        worker.emitError();
+
+        await expect(dispatchPromise).rejects.toThrow(WorkerCrashedError);
+        expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+      });
+
+      it("dispose() con un job remoto en vuelo lo rechaza y retira su listener sendCancel", async () => {
+        const worker = createFakeWorker();
+        const pool = new WorkerPool({
+          poolKey: "pdf",
+          jobType: "pdf-parse",
+          size: 1,
+          maxQueue: 10,
+          maxRetries: 0,
+          baseRetryDelayMs: 1,
+          maxRetryDelayMs: 1,
+          bus,
+          logger: createMockLogger(),
+          workerFactory: () => worker,
+        });
+        const controller = new AbortController();
+
+        const dispatchPromise = pool.dispatch({
+          run: vi.fn(),
+          payload: {},
+          signal: controller.signal,
+        });
+        await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalled());
+
+        pool.dispose();
+
+        await expect(dispatchPromise).rejects.toThrow(CancelledError);
+        expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+      });
     });
   });
 

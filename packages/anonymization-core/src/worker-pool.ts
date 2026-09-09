@@ -115,6 +115,16 @@ interface PendingRemoteJob {
    * render) — no se llama nunca en ese caso.
    */
   readonly onProgress?: (progress: number, partial?: Serializable) => void;
+  /**
+   * Retira el listener `abort`→`sendCancel` registrado sobre el `signal` del
+   * caller en `dispatchRemote()`, si llegó a registrarse (H-09C). Ausente
+   * para los broadcasts (`isBroadcast`, sin signal propio) y para la ventana
+   * entre el registro inicial en `pendingRemoteJobs` y el registro real del
+   * listener (aborts en ese instante se resuelven sin haber registrado
+   * nada). Idempotente: `removeEventListener` no falla sobre un listener que
+   * `{ once: true }` ya autoeliminó al disparar el abort.
+   */
+  readonly cleanup?: () => void;
 }
 
 export interface WorkerPoolOptions {
@@ -227,6 +237,12 @@ interface QueueEntry {
   readonly priority: number;
   readonly createdAt: number;
   readonly execute: () => Promise<void>;
+  /**
+   * Rechaza el `dispatch()` de este job sin ejecutarlo y limpia su listener
+   * de abort (H-09C: usado por `dispose()` sobre entradas que quedaron en
+   * cola). Idempotente — comparte el guard `settled` de `dispatch()`.
+   */
+  readonly cancel: (err: Error) => void;
 }
 
 let jobCounter = 0;
@@ -340,6 +356,29 @@ export class WorkerPool {
         return;
       }
 
+      // H-09C: `{ once: true }` solo retira `onAbort` cuando el signal
+      // aborta — un job que termina (éxito o fallo) sin que su signal aborte
+      // deja el listener registrado para siempre. `settled` + `cleanup()`
+      // garantizan que se retire en **todos** los caminos terminales
+      // (resolve, reject, cancel en cola vía `dispose()`), sin duplicar el
+      // rechazo si dos caminos se disparan casi a la vez.
+      let settled = false;
+      const cleanup = (): void => {
+        params.signal.removeEventListener("abort", onAbort);
+      };
+      const settleResolve = (result: TResult): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(result);
+      };
+      const settleReject = (err: Error): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(err);
+      };
+
       const entry: QueueEntry = {
         jobId,
         priority: params.priority ?? 50,
@@ -347,24 +386,27 @@ export class WorkerPool {
         execute: async (): Promise<void> => {
           try {
             const result = await this.runWithRetry(jobId, params);
-            resolve(result);
+            settleResolve(result);
           } catch (err: unknown) {
             // Mismo patrón que PdfEngine.fuseOcrPage (pdf-engine/src/pdf.engine.ts):
             // reject() espera un Error; `err` es `unknown` por contrato de captura.
-            reject(err instanceof Error ? err : new Error(String(err)));
+            settleReject(err instanceof Error ? err : new Error(String(err)));
           }
         },
+        cancel: (err: Error) => settleReject(err),
       };
 
       const onAbort = (): void => {
         const idx = this.queue.findIndex((e) => e.jobId === jobId);
         if (idx >= 0) {
           this.queue.splice(idx, 1);
-          reject(new CancelledError(jobId));
+          settleReject(new CancelledError(jobId));
         }
         // Si ya no está en cola (en ejecución), la propia llamada al motor
         // observa `ctx.abortSignal` en sus checkpoints internos y rechaza con
-        // CancelledError por su cuenta (mismo patrón que todos los motores).
+        // CancelledError por su cuenta (mismo patrón que todos los motores);
+        // ese rechazo llega acá vía `execute()` → `settleReject`, y el guard
+        // `settled` evita un doble asentamiento.
       };
       params.signal.addEventListener("abort", onAbort, { once: true });
 
@@ -458,7 +500,15 @@ export class WorkerPool {
   /** Rechaza todos los jobs en cola (no los que ya están corriendo) y marca el pool como dispuesto. */
   dispose(): void {
     this.disposed = true;
-    this.queue.length = 0;
+    // H-09C: `splice` en vez de `queue.length = 0` — truncar el array sin
+    // asentar cada entrada dejaba su promesa de `dispatch()` colgada para
+    // siempre (nadie más la resuelve ni la rechaza) y su listener de abort
+    // registrado sin límite. `cancel()` rechaza y limpia por la misma vía
+    // que cualquier otro camino terminal de `dispatch()`.
+    const stale = this.queue.splice(0, this.queue.length);
+    for (const entry of stale) {
+      entry.cancel(new CancelledError(entry.jobId));
+    }
     if (this.idleTimer !== null) {
       clearTimeout(this.idleTimer);
       this.idleTimer = null;
@@ -468,6 +518,7 @@ export class WorkerPool {
     // flujo normal, 05_Worker_Architecture.md §8), no un error de programación.
     for (const [jobId, pending] of this.pendingRemoteJobs) {
       this.pendingRemoteJobs.delete(jobId);
+      pending.cleanup?.();
       pending.reject(new CancelledError(jobId));
     }
     for (const worker of this.remoteWorkers.values()) {
@@ -688,8 +739,9 @@ export class WorkerPool {
             // Abortado mientras se creaba/re-primeaba el worker: nunca llegó
             // a postearse un RUN al que cancelar — se rechaza directo, sin
             // enviar CANCEL (mismo criterio que el guard de `dispatch()` para
-            // un signal ya abortado antes de encolar).
-            this.pendingRemoteJobs.delete(jobId);
+            // un signal ya abortado antes de encolar). `sendCancel` nunca se
+            // registró en este camino, así que no hay listener que limpiar.
+            this.settleRemoteJob(jobId);
             reject(new CancelledError(jobId));
             return;
           }
@@ -700,6 +752,16 @@ export class WorkerPool {
             worker.postMessage(cancelMessage);
           };
           signal.addEventListener("abort", sendCancel, { once: true });
+          // H-09C: el mismo problema de `dispatch()`/`onAbort` acá — sin este
+          // registro, un job remoto que asienta sin que su signal aborte
+          // deja `sendCancel` colgado del signal para siempre.
+          const pendingJob = this.pendingRemoteJobs.get(jobId);
+          if (pendingJob !== undefined) {
+            this.pendingRemoteJobs.set(jobId, {
+              ...pendingJob,
+              cleanup: () => signal.removeEventListener("abort", sendCancel),
+            });
+          }
 
           const runMessage: WorkerInbound = {
             type: "RUN",
@@ -716,10 +778,29 @@ export class WorkerPool {
           else worker.postMessage(runMessage);
         })
         .catch((err: unknown) => {
-          this.pendingRemoteJobs.delete(jobId);
+          this.settleRemoteJob(jobId);
           reject(err instanceof Error ? err : new Error(String(err)));
         });
     });
+  }
+
+  /**
+   * Retira `jobId` de `pendingRemoteJobs` y corre su `cleanup` de listener
+   * (H-09C), si lo tiene. Usado por `handleWorkerMessage` y el `.catch()` de
+   * `dispatchRemote` — los dos caminos que localizan el job **por `jobId`**.
+   * `handleWorkerTransportError` y `dispose()` ya iteran `pendingRemoteJobs`
+   * completo y aplican el mismo `cleanup?.()` inline, sin este helper, para
+   * no repetir el `.get()` que ya tienen resuelto del propio `for...of`.
+   * Devuelve `undefined` si el job ya se había asentado (mensaje tardío o
+   * carrera con dispose/crash) — el caller no debe volver a resolver/
+   * rechazar en ese caso.
+   */
+  private settleRemoteJob(jobId: string): PendingRemoteJob | undefined {
+    const pending = this.pendingRemoteJobs.get(jobId);
+    if (pending === undefined) return undefined;
+    this.pendingRemoteJobs.delete(jobId);
+    pending.cleanup?.();
+    return pending;
   }
 
   /**
@@ -835,10 +916,9 @@ export class WorkerPool {
       return;
     }
 
-    const pending = this.pendingRemoteJobs.get(outbound.jobId);
+    const pending = this.settleRemoteJob(outbound.jobId);
     if (pending === undefined) return; // Mensaje tardío de un job ya resuelto (timeout/cancel previo).
 
-    this.pendingRemoteJobs.delete(outbound.jobId);
     switch (outbound.type) {
       case "COMPLETED":
         pending.resolve(outbound.result);
@@ -898,6 +978,7 @@ export class WorkerPool {
     for (const [jobId, pending] of this.pendingRemoteJobs) {
       if (pending.slotIndex !== slot) continue;
       this.pendingRemoteJobs.delete(jobId);
+      pending.cleanup?.();
       pending.reject(
         new WorkerCrashedError(
           `WorkerPool(${this.options.poolKey}): worker (slot ${slot}) emitió un error de transporte.`,
