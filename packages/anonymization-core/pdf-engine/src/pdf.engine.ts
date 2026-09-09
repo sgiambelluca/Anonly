@@ -190,8 +190,19 @@ function unitVectorOrDefault(x: number, y: number, fallback: Vector2): Vector2 {
 const RIGHT_ANGLE_TOLERANCE_DEG = 1e-6;
 const POPULATED_ROTATIONS: readonly (90 | 180 | 270)[] = [90, 180, 270];
 
+/*
+ * ADR-141 §3: `dir` compuesto vive en un marco con `y` hacia abajo (la parte
+ * lineal del viewport incluye el volteo de eje — en `rotate: 0` es
+ * `[1, 0, 0, -1]`), mientras que `atan2` mide ángulos suponiendo `y` hacia
+ * arriba. Negar `dir.y` antes de medir es lo que convierte esa medición en el
+ * ángulo VISUAL — el que un humano ve al mirar la hoja, que es la convención
+ * que ADR-090 §4 fijó para `bbox.rotation` (90 ⇒ avanza hacia arriba en
+ * pantalla, y decreciente) y que ADR-067 ya consume. Omitir la negación
+ * intercambia 90 ↔ 270 para el mismo texto físico — ver la tabla medida de
+ * ADR-141 §3.
+ */
 function deriveRotation(dir: Vector2): 90 | 180 | 270 | undefined {
-  const angleDeg = ((Math.atan2(dir.y, dir.x) * 180) / Math.PI + 360) % 360;
+  const angleDeg = ((Math.atan2(-dir.y, dir.x) * 180) / Math.PI + 360) % 360;
   for (const candidate of POPULATED_ROTATIONS) {
     if (Math.abs(angleDeg - candidate) < RIGHT_ANGLE_TOLERANCE_DEG) return candidate;
   }
@@ -199,11 +210,15 @@ function deriveRotation(dir: Vector2): 90 | 180 | 270 | undefined {
 }
 
 /*
- * ADR-063 §2: el bbox de un run/token es la envolvente axis-aligned del
- * paralelogramo origin -> +dir·width -> +up·height, convertida a origen
- * arriba-izquierda (y = pageHeight - yMax). Con dir=(1,0)/up=(0,1) (0°) se
- * reduce carácter por carácter a la fórmula anterior a ADR-063 (§13 caso 21):
- * no hay regresión para texto horizontal.
+ * ADR-063 §2 / ADR-141 §2: el bbox de un run/token es la envolvente
+ * axis-aligned del paralelogramo origin -> +dir·width -> +up·height. `origin`/
+ * `dir`/`up` llegan ya compuestos con `viewport.transform` (ADR-141): ese
+ * compuesto YA incluye la inversión del eje `y` de la página presentada, así
+ * que `yMin` es directamente el borde superior — voltear de nuevo acá sería
+ * voltear dos veces (ADR-141 §2, el error que ADR-141 existe para evitar).
+ * Con dir=(1,0)/up=(0,1) (0°, sin rotación) esto reduce carácter por carácter
+ * a la fórmula anterior a ADR-063/141 (§13 caso 21): no hay regresión para
+ * texto horizontal en un documento sin `/Rotate`.
  */
 function boundingBoxFromParallelogram(
   origin: Vector2,
@@ -211,7 +226,6 @@ function boundingBoxFromParallelogram(
   up: Vector2,
   width: number,
   height: number,
-  pageHeight: number,
 ): BoundingBox {
   const corners: readonly Vector2[] = [
     origin,
@@ -233,7 +247,7 @@ function boundingBoxFromParallelogram(
   const rotation = deriveRotation(dir);
   return {
     x: xMin,
-    y: pageHeight - yMax,
+    y: yMin,
     width: xMax - xMin,
     height: yMax - yMin,
     ...(rotation !== undefined ? { rotation } : {}),
@@ -286,16 +300,15 @@ function inkBoxFromParallelogram(
   up: Vector2,
   width: number,
   height: number,
-  pageHeight: number,
   extents: FontExtents | undefined,
 ): BoundingBox {
   if (extents === undefined) {
-    return boundingBoxFromParallelogram(origin, dir, up, width, height, pageHeight);
+    return boundingBoxFromParallelogram(origin, dir, up, width, height);
   }
   const drop = extents.descent * height;
   const baseline: Vector2 = { x: origin.x - up.x * drop, y: origin.y - up.y * drop };
   const inkHeight = (extents.ascent + extents.descent) * height;
-  return boundingBoxFromParallelogram(baseline, dir, up, width, inkHeight, pageHeight);
+  return boundingBoxFromParallelogram(baseline, dir, up, width, inkHeight);
 }
 
 /*
@@ -401,7 +414,14 @@ interface PendingWordTail {
 function convertTextItemsToWords(
   textContent: TextContentLike,
   pageIndex: number,
-  pageHeight: number,
+  // ADR-141 §2: `item.transform` llega en el marco CRUDO de
+  // `getTextContent()` — nunca aplicó `/Rotate`. Se compone con
+  // `viewport.transform` antes de usarlo, igual que el resto de la geometría
+  // del módulo. Default identidad para el camino de anotaciones (§3 más
+  // abajo llama a esta función con un item sintético cuyo `transform` sale de
+  // `ctm.current`, que ya viene compuesto — componer OTRA vez ahí sería
+  // voltear/rotar dos veces).
+  viewportMatrix: Matrix2D = IDENTITY_MATRIX_2D,
   originCorrections: ReadonlyArray<TextOriginCorrection> = [],
   glyphs: ReadonlyArray<PageGlyph> = [],
   glyphIndex: GlyphIndex = new Map(),
@@ -425,11 +445,30 @@ function convertTextItemsToWords(
     }
 
     const str = item.str;
-    const reportedX = item.transform[4] ?? 0;
-    const reportedY = item.transform[5] ?? 0;
+    // ADR-141 §2.1/§2.2: origen y parte lineal (de donde salen `dir`/`up`)
+    // compuestos con `viewport.transform` — no alcanza con corregir `x`/`y`,
+    // a 90°/270° la palabra cambia de orientación y ancho/alto se
+    // intercambian. Con `viewportMatrix` identidad (0° o camino de
+    // anotaciones ya compuesto) esto es exactamente `item.transform` tal cual
+    // llegaba antes de ADR-141: no hay regresión para texto horizontal.
+    const rawItemMatrix: Matrix2D = [
+      item.transform[0] ?? 1,
+      item.transform[1] ?? 0,
+      item.transform[2] ?? 0,
+      item.transform[3] ?? 1,
+      item.transform[4] ?? 0,
+      item.transform[5] ?? 0,
+    ];
+    const composedItemMatrix = composeMatrix(viewportMatrix, rawItemMatrix);
+    const reportedX = composedItemMatrix[4];
+    const reportedY = composedItemMatrix[5];
     // ADR-068: si el origen reportado coincide con uno que se sabe desplazado
     // por el word spacing, se usa el que dibuja el renderer. Sin coincidencia
-    // —el caso de todo documento sin `Tw`— el item queda intacto.
+    // —el caso de todo documento sin `Tw`— el item queda intacto. Las dos
+    // fuentes que se comparan acá (`reportedX`/`reportedY` y
+    // `originCorrections`) están compuestas por igual (ADR-141 §2.3): si un
+    // lado se compusiera y el otro no, el empalme dejaría de alinear en toda
+    // página rotada.
     const correction = originCorrections.find(
       (c) =>
         Math.abs(c.from.x - reportedX) <= ORIGIN_CORRECTION_EPSILON &&
@@ -439,14 +478,21 @@ function convertTextItemsToWords(
     const originY = correction?.to.y ?? reportedY;
     const width = item.width ?? 0;
     const height = item.height ?? 12;
-    const dir = unitVectorOrDefault(item.transform[0] ?? 0, item.transform[1] ?? 0, {
-      x: 1,
-      y: 0,
-    });
-    const up = unitVectorOrDefault(item.transform[2] ?? 0, item.transform[3] ?? 0, {
-      x: 0,
-      y: 1,
-    });
+    // ADR-141 §2: el fallback de un versor degenerado (§13 caso 20) también
+    // se compone — es un default en espacio crudo, y `dir`/`up` acá son
+    // siempre presentados. Sin esto, un `up` degenerado cae al eje crudo
+    // aunque el resto del token ya esté compuesto (mismo error de "componer
+    // en tres de los cuatro lugares" que ADR-141, Consecuencias, advierte).
+    const dir = unitVectorOrDefault(
+      composedItemMatrix[0],
+      composedItemMatrix[1],
+      composeVector(viewportMatrix, { x: 1, y: 0 }),
+    );
+    const up = unitVectorOrDefault(
+      composedItemMatrix[2],
+      composedItemMatrix[3],
+      composeVector(viewportMatrix, { x: 0, y: 1 }),
+    );
 
     const extents = fontExtentsOf(textContent.styles, item.fontName);
     const tokens = [...str.matchAll(/\S+/g)];
@@ -488,7 +534,6 @@ function convertTextItemsToWords(
         up,
         width,
         height,
-        pageHeight,
         extents,
       );
       itemWords.push({ text, bbox, pageIndex, confidence: 1.0, source: "pdf" });
@@ -509,15 +554,7 @@ function convertTextItemsToWords(
           anchor !== undefined
             ? { x: anchor.x, y: anchor.y }
             : { x: originX + dir.x * advance, y: originY + dir.y * advance };
-        const bbox = inkBoxFromParallelogram(
-          tokenOrigin,
-          dir,
-          up,
-          tokenWidth,
-          height,
-          pageHeight,
-          extents,
-        );
+        const bbox = inkBoxFromParallelogram(tokenOrigin, dir, up, tokenWidth, height, extents);
         itemWords.push({
           text: tokenText.normalize("NFC"),
           bbox,
@@ -1049,12 +1086,26 @@ function applyMatrix(m: Matrix2D, x: number, y: number): Vector2 {
 }
 
 /*
+ * Como `applyMatrix`, pero para un VECTOR (dirección), no un punto: ignora la
+ * traslación (`e`/`f`). ADR-141 §2: el versor de reserva de
+ * `unitVectorOrDefault` para un `dir`/`up` degenerado (magnitud 0, §13 caso
+ * 20) es un default en espacio CRUDO — tiene que componerse con
+ * `viewport.transform` igual que cualquier otro versor, o la reserva queda
+ * en el marco viejo mientras el resto del token ya está en el presentado.
+ */
+function composeVector(m: Matrix2D, v: Vector2): Vector2 {
+  return { x: m[0] * v.x + m[2] * v.y, y: m[1] * v.x + m[3] * v.y };
+}
+
+/*
  * ADR-065 §1: "aplicándola [la CTM] al cuadrado unidad sale el rectángulo de
  * esa imagen en puntos de página". Envolvente axis-aligned de los cuatro
- * vértices, convertida a origen arriba-izquierda (mismo patrón que
- * `boundingBoxFromParallelogram`, ADR-063 §2).
+ * vértices. `ctm` ya viene compuesta con `viewport.transform` (ADR-141 §2: el
+ * `CtmTracker` arranca en `viewportMatrix`, no en identidad), así que `yMin`
+ * es directamente el borde superior de la página presentada — sin flip
+ * adicional (mismo motivo que `boundingBoxFromParallelogram`).
  */
-function imageRectFromCTM(ctm: Matrix2D, pageHeight: number): BoundingBox {
+function imageRectFromCTM(ctm: Matrix2D): BoundingBox {
   const corners: readonly Vector2[] = [
     applyMatrix(ctm, 0, 0),
     applyMatrix(ctm, 1, 0),
@@ -1067,7 +1118,7 @@ function imageRectFromCTM(ctm: Matrix2D, pageHeight: number): BoundingBox {
   const xMax = Math.max(...xs);
   const yMin = Math.min(...ys);
   const yMax = Math.max(...ys);
-  return { x: xMin, y: pageHeight - yMax, width: xMax - xMin, height: yMax - yMin };
+  return { x: xMin, y: yMin, width: xMax - xMin, height: yMax - yMin };
 }
 
 /*
@@ -1117,14 +1168,26 @@ function toMatrix2D(args: ReadonlyArray<number>): Matrix2D {
  * página, porque las dos anidaciones no están balanceadas entre sí (una
  * anotación puede tener más `restore` que `save`, o viceversa, sin que eso
  * desincronice el resto de la página).
+ *
+ * ADR-141 §2: `pageCurrent` arranca en `baseMatrix` (`viewport.transform`,
+ * nunca identidad) — así todo lo que se compone encima (`transform()`,
+ * `beginAnnotation()`, y por lo tanto los glifos de ADR-102, las
+ * correcciones de origen de ADR-068 y los rects de imagen de ADR-065) queda
+ * en el marco presentado sin tocar un solo call site de esas funciones. Un
+ * `restore()` de página sin `save()` previo cae de vuelta a `baseMatrix`, no
+ * a la identidad cruda — es la misma CTM con la que arrancó el recorrido.
  */
 class CtmTracker {
-  private pageCurrent: Matrix2D = IDENTITY_MATRIX_2D;
+  private pageCurrent: Matrix2D;
   private readonly pageStack: Matrix2D[] = [];
 
   private insideAnnotationFlag = false;
   private annotationCurrent: Matrix2D = IDENTITY_MATRIX_2D;
   private readonly annotationStack: Matrix2D[] = [];
+
+  constructor(private readonly baseMatrix: Matrix2D) {
+    this.pageCurrent = baseMatrix;
+  }
 
   get current(): Matrix2D {
     return this.insideAnnotationFlag ? this.annotationCurrent : this.pageCurrent;
@@ -1146,7 +1209,7 @@ class CtmTracker {
     if (this.insideAnnotationFlag) {
       this.annotationCurrent = this.annotationStack.pop() ?? IDENTITY_MATRIX_2D;
     } else {
-      this.pageCurrent = this.pageStack.pop() ?? IDENTITY_MATRIX_2D;
+      this.pageCurrent = this.pageStack.pop() ?? this.baseMatrix;
     }
   }
 
@@ -1197,19 +1260,33 @@ function parseBeginAnnotationArgs(args: unknown): BeginAnnotationArgs | undefine
   };
 }
 
-// El `rect` de beginAnnotation viaja en el mismo espacio que `item.transform`
-// (origen abajo-izquierda, y-up); se convierte a origen arriba-izquierda con
-// el mismo patrón que el resto del módulo (ADR-066 §3, el oráculo).
+/*
+ * El `rect` de `beginAnnotation` viaja en el mismo espacio crudo que
+ * `item.transform` (`/Rect` en espacio de usuario de página, independiente de
+ * cualquier CTM de content stream — ADR-066 §3, el oráculo). ADR-141 §2.4: se
+ * compone con `viewport.transform` igual que el resto de la geometría del
+ * módulo, aplicada a los CUATRO vértices (no a `[x0,y0]`/`[x1,y1]` como si
+ * siguieran siendo esquinas opuestas del rectángulo compuesto — con rotación
+ * en la composición ya no lo son necesariamente).
+ */
 function annotationRectToBoundingBox(
   rect: readonly [number, number, number, number],
-  pageHeight: number,
+  viewport: Matrix2D,
 ): BoundingBox {
   const [x0, y0, x1, y1] = rect;
-  const xMin = Math.min(x0, x1);
-  const xMax = Math.max(x0, x1);
-  const yMin = Math.min(y0, y1);
-  const yMax = Math.max(y0, y1);
-  return { x: xMin, y: pageHeight - yMax, width: xMax - xMin, height: yMax - yMin };
+  const corners: readonly Vector2[] = [
+    applyMatrix(viewport, x0, y0),
+    applyMatrix(viewport, x1, y0),
+    applyMatrix(viewport, x0, y1),
+    applyMatrix(viewport, x1, y1),
+  ];
+  const xs = corners.map((p) => p.x);
+  const ys = corners.map((p) => p.y);
+  const xMin = Math.min(...xs);
+  const xMax = Math.max(...xs);
+  const yMin = Math.min(...ys);
+  const yMax = Math.max(...ys);
+  return { x: xMin, y: yMin, width: xMax - xMin, height: yMax - yMin };
 }
 
 /*
@@ -1508,8 +1585,14 @@ function appendRunGlyphs(into: PageGlyph[], args: unknown, text: TextState, ctm:
 
   const composed = composeMatrix(ctm, text.textMatrix);
   const scale = Math.hypot(composed[0], composed[1]);
-  const dirX = scale === 0 ? 1 : composed[0] / scale;
-  const dirY = scale === 0 ? 0 : composed[1] / scale;
+  // ADR-141 §2: `ctm` ya está compuesta con `viewport.transform` (el
+  // CtmTracker arranca en `viewportMatrix`) — el fallback degenerado
+  // (`Tm` sin parte lineal utilizable) tiene que salir de componer el eje
+  // por defecto con `ctm`, no de un `(1,0)` crudo (mismo caso 20 que
+  // `unitVectorOrDefault` en `convertTextItemsToWords`).
+  const fallbackDir = scale === 0 ? composeVector(ctm, { x: 1, y: 0 }) : undefined;
+  const dirX = fallbackDir?.x ?? composed[0] / scale;
+  const dirY = fallbackDir?.y ?? composed[1] / scale;
 
   let accumulated = 0;
   for (const glyph of glyphs as ReadonlyArray<unknown>) {
@@ -1695,11 +1778,11 @@ interface AnnotationsAndImages {
 function walkOperatorListForAnnotationsAndImages(
   operatorList: OperatorListLike,
   pageIndex: number,
-  pageHeight: number,
+  viewportMatrix: Matrix2D,
   documentId: string,
   logger: ILogger,
 ): AnnotationsAndImages {
-  const ctm = new CtmTracker();
+  const ctm = new CtmTracker(viewportMatrix);
   const imageRects: BoundingBox[] = [];
   const annotationWords: Word[] = [];
   const originCorrections: TextOriginCorrection[] = [];
@@ -1733,7 +1816,7 @@ function walkOperatorListForAnnotationsAndImages(
       const parsed = parseBeginAnnotationArgs(args);
       if (parsed !== undefined) {
         ctm.beginAnnotation(parsed.transform);
-        currentAnnotationRect = annotationRectToBoundingBox(parsed.rect, pageHeight);
+        currentAnnotationRect = annotationRectToBoundingBox(parsed.rect, viewportMatrix);
         currentAnnotationId = parsed.id;
       } else {
         // Forma inesperada de beginAnnotation: se preserva la separación de
@@ -1788,6 +1871,10 @@ function walkOperatorListForAnnotationsAndImages(
         // ADR-097 §3: el camino de anotaciones NO usa la tabla de avances —
         // acá la cadena y la geometría salen de la misma fuente, así que no
         // hay dos fuentes que empalmar.
+        // `run.transform` sale de `ctm.current`, ya compuesto con
+        // `viewport.transform` (ADR-141 §2: el CtmTracker arranca en
+        // `viewportMatrix`) — se deja `viewportMatrix` en su default
+        // identidad para no componer dos veces.
         const { words } = convertTextItemsToWords(
           {
             items: [
@@ -1795,7 +1882,6 @@ function walkOperatorListForAnnotationsAndImages(
             ],
           },
           pageIndex,
-          pageHeight,
         );
         for (const word of words) {
           if (currentAnnotationRect === undefined) continue;
@@ -1823,7 +1909,7 @@ function walkOperatorListForAnnotationsAndImages(
       // ADR-066 §5: `ctm.current` ya aplica beginAnnotation.transform cuando
       // la imagen está dentro de una anotación — corrige el defecto latente
       // de ADR-065, Contexto §4.
-      imageRects.push(imageRectFromCTM(ctm.current, pageHeight));
+      imageRects.push(imageRectFromCTM(ctm.current));
     }
   }
 
@@ -2118,6 +2204,14 @@ async function parsePage(
   const viewport = pageProxy.getViewport({ scale: 1 });
   const pageWidth = viewport.width;
   const pageHeight = viewport.height;
+  /*
+   * ADR-141 §1/§2: el marco canónico es el de la página presentada —
+   * `viewport.transform` ya aplicó `/Rotate` y la inversión del eje `y`. Se
+   * compone exactamente una vez, en este productor, sobre las cuatro fuentes
+   * crudas del módulo (items de texto, flujo de glifos + correcciones de
+   * origen, rects de imagen, palabras de anotación); nadie más cambia.
+   */
+  const viewportMatrix = toMatrix2D(viewport.transform);
 
   let textContent: TextContentLike;
   let operatorList: OperatorListLike;
@@ -2141,7 +2235,7 @@ async function parsePage(
     walkOperatorListForAnnotationsAndImages(
       operatorList,
       pageIndex,
-      pageHeight,
+      viewportMatrix,
       documentId,
       logger,
     );
@@ -2149,7 +2243,7 @@ async function parsePage(
   const { words: contentWords, joinStats } = convertTextItemsToWords(
     textContent,
     pageIndex,
-    pageHeight,
+    viewportMatrix,
     originCorrections,
     pageGlyphs,
     indexGlyphs(pageGlyphs),

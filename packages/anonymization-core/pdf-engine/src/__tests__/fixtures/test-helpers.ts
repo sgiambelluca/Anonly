@@ -333,6 +333,29 @@ export function buildMockOperatorList(
   return { fnArray, argsArray };
 }
 
+/**
+ * ADR-141 §1/§2: `viewport.transform` real de pdf.js (`PageViewport`,
+ * `display_utils.js`), para un `MediaBox` con origen `(0,0)`, `scale: 1`,
+ * `userUnit: 1`, sin offset ni `dontFlip` — exactamente el caso de
+ * `parsePage` (`getViewport({ scale: 1 })`). `width`/`height` acá son los
+ * que YA devuelve `getViewport()` (después de intercambiar a 90°/270°, no el
+ * `MediaBox` crudo), que es lo que ya reciben los mocks de este archivo.
+ * Verificado byte a byte contra `pdfjs-dist@4.10.38` real (ADR-140/141) en
+ * los cuatro ángulos.
+ */
+export function viewportTransformFor(rotate: number, width: number, height: number): number[] {
+  switch (((rotate % 360) + 360) % 360) {
+    case 90:
+      return [0, 1, 1, 0, 0, 0];
+    case 180:
+      return [-1, 0, 0, 1, width, 0];
+    case 270:
+      return [0, -1, -1, 0, width, height];
+    default:
+      return [1, 0, 0, -1, 0, height];
+  }
+}
+
 export function createMockPage(
   pageIndex: number,
   textItems?: ReadonlyArray<MockTextItem>,
@@ -354,7 +377,11 @@ export function createMockPage(
 
   return {
     rotate,
-    getViewport: vi.fn(() => ({ width: size.width, height: size.height })),
+    getViewport: vi.fn(() => ({
+      width: size.width,
+      height: size.height,
+      transform: viewportTransformFor(rotate, size.width, size.height),
+    })),
     getTextContent: vi.fn(() =>
       Promise.resolve({
         items: items.map((item) => ({
@@ -413,7 +440,7 @@ export function createMockPdfDocument(
     } else if (options?.textless) {
       pages.push({
         rotate: 0,
-        getViewport: vi.fn(() => ({ width: 595, height: 842 })),
+        getViewport: vi.fn(() => ({ width: 595, height: 842, transform: [1, 0, 0, -1, 0, 842] })),
         getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
         // ADR-066 §1: parsePage llama getOperatorList() en TODA página (el
         // texto de anotaciones puede ser la única fuente de texto), no solo

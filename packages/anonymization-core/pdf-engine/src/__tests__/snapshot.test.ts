@@ -33,7 +33,7 @@ function createSnapshotPdfDocument(): Record<string, unknown> {
       const pages: Record<string, unknown>[] = [
         {
           rotate: 0,
-          getViewport: vi.fn(() => ({ width: 595, height: 842 })),
+          getViewport: vi.fn(() => ({ width: 595, height: 842, transform: [1, 0, 0, -1, 0, 842] })),
           getTextContent: vi.fn(() =>
             Promise.resolve({
               items: [
@@ -46,7 +46,7 @@ function createSnapshotPdfDocument(): Record<string, unknown> {
         },
         {
           rotate: 0,
-          getViewport: vi.fn(() => ({ width: 612, height: 792 })),
+          getViewport: vi.fn(() => ({ width: 612, height: 792, transform: [1, 0, 0, -1, 0, 792] })),
           getTextContent: vi.fn(() =>
             Promise.resolve({
               items: [
@@ -60,7 +60,7 @@ function createSnapshotPdfDocument(): Record<string, unknown> {
         },
         {
           rotate: 0,
-          getViewport: vi.fn(() => ({ width: 595, height: 842 })),
+          getViewport: vi.fn(() => ({ width: 595, height: 842, transform: [1, 0, 0, -1, 0, 842] })),
           getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
           getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
         },

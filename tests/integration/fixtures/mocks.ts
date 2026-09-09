@@ -145,7 +145,18 @@ export function createMockPdfPage(
     // (sin rotación). Sin esto, `pageProxy.rotate !== 0` de `parsePage`
     // rechaza con `PdfPageRotatedError` cualquier página con texto nativo.
     rotate: 0,
-    getViewport: vi.fn(({ scale }: { scale: number }) => ({ width: 595 * scale, height: 842 * scale })),
+    // ADR-141 §5: los mocks de `getViewport()` tienen que declarar
+    // `transform` — `pdf-engine` lo compone con `item.transform` para toda
+    // la geometría (ADR-141 §2). Página sin rotación: `[scale, 0, 0, -scale,
+    // 0, height]`, el mismo volteo que antes hacía `pageHeight - y` a mano,
+    // ahora adentro de la matriz (ver `viewportTransformFor` en
+    // `pdf-engine/src/__tests__/fixtures/test-helpers.ts` para el caso
+    // general con rotación).
+    getViewport: vi.fn(({ scale }: { scale: number }) => ({
+      width: 595 * scale,
+      height: 842 * scale,
+      transform: [scale, 0, 0, -scale, 0, 842 * scale],
+    })),
     getTextContent: vi.fn(() =>
       Promise.resolve({
         items: textItems.map((item) => ({

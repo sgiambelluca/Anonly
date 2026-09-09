@@ -234,7 +234,11 @@ describe("PdfEngine — contract tests", () => {
           if (i === 0) {
             // Página 0: textless — va por fuseOcrPage (página entera).
             return {
-              getViewport: vi.fn(() => ({ width: 595, height: 842 })),
+              getViewport: vi.fn(() => ({
+                width: 595,
+                height: 842,
+                transform: [1, 0, 0, -1, 0, 842],
+              })),
               getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
               getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
             };
