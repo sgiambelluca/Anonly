@@ -256,6 +256,10 @@ Cada uno de estos se midió y se descartó. Repetirlos es tiempo perdido.
 - **Un doble que devuelve lo que se le pide no puede detectar una regresión en lo que se le pide** (2026-09-02). El defecto de ADR-111 §1 vivió detrás de una suite verde porque `mockTokenClassificationPipeline` devolvía los tokens que cada test le daba, ignorando las opciones de la llamada — justo el parámetro que estaba mal. El doble tiene que **imitar la regla de la librería**, no obedecer al test: `mockPipelineHonouringIgnoreLabels` filtra como filtra el pipeline real, y por eso los tests de §1 fallan si se revierte el mecanismo.
 - **Medir recall sin medir precisión responde media pregunta** (2026-09-02). La primera medición de PSM 11 solo tenía recall de palabra y sugería un costo de −0,34 pp; agregando precisión resultó que PSM 11 **inventa menos** palabras que el default, y con más páginas el costo de recall se fue a −0,03 pp. Cuando la pregunta es "¿esto mete más ruido?", la métrica es precisión.
 
-## 7. Higiene pendiente
+## 7. Higiene documental y del historial
 
-Varias docs de este repo —incluidas ADR-110 y `Post_Hito10.8_Pendientes.md` §29, escritas en esta campaña— contienen **nombres reales de un expediente penal** usados como ejemplo de medición. En una herramienta de anonimización eso es material que no debería estar. Los valores técnicos (posiciones, alturas, orden) se conservan igual reemplazando los nombres por marcadores. Hay precedente previo (ADR-084), así que la decisión es de alcance más amplio que esta campaña.
+**Actualizado el 2026-09-08.** La observación original sobre nombres reales motivó sustituciones posteriores en la documentación y los fixtures. En las versiones actuales de ADR-110 y `Post_Hito10.8_Pendientes.md` §29 esos ejemplos ya usan marcadores. Las posiciones, alturas y mediciones se conservan; los identificadores de las pericias de referencia se expresan como `PERICIA_A` y `PERICIA_B`.
+
+Corregir un archivo no elimina sus versiones anteriores. El saneamiento del historial se prepara y verifica por separado, incluyendo ramas, etiquetas, stash y referencias de PR. Su cierre exige comprobar las referencias publicadas y tramitar ante GitHub cualquier copia retenida que no se pueda eliminar desde Git. No se declara cerrado ese trabajo por haber actualizado esta nota.
+
+El inventario de valores originales, los respaldos y el mapa de commits se mantienen fuera del repositorio. No deben agregarse a un ADR, test, issue ni log público como prueba de la limpieza. Precedentes: ADR-084 y ADR-124 §3.
