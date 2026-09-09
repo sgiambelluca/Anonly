@@ -324,7 +324,7 @@ export function createResolvedOcrPool(resolvedValue: unknown): {
  */
 export function createMockConfig(overrides?: Partial<EngineConfig>): EngineConfig {
   return sharedCreateMockConfig({
-    ocr: { languages: ["spa", "eng"], dpi: 300 },
+    ocr: { languages: ["spa", "eng"], dpi: 300, maxLiveImageBytes: 128 * 1024 * 1024 },
     ...overrides,
   });
 }

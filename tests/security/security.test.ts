@@ -202,7 +202,7 @@ function createEngineConfig(): EngineConfig {
       batchSize: 1,
       enabled: false,
     },
-    ocr: { languages: ["spa"], dpi: 300 },
+    ocr: { languages: ["spa"], dpi: 300, maxLiveImageBytes: 128 * 1024 * 1024 },
     grouping: { similarityThreshold: 0.88, minAliasFrequency: 1 },
     render: { previewScale: 1, fullScale: 2.08, jpegQuality: 0.85, cachePages: 16 },
     export: { defaultDpi: 150, defaultImageFormat: "jpeg", defaultJpegQuality: 0.85 },

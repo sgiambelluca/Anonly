@@ -86,12 +86,17 @@ Recibir `ImageData` de páginas sin texto y producir `Word[]` con posiciones y c
 
 ```ts
 // OcrConfig se define en core/Contracts.md §6 (source of truth) y se importa de @anonly/shared.
-// Solo contiene languages y dpi; el timeout y los retries por página se leen de
+// languages y dpi; el timeout y los retries por página se leen de
 // ctx.config.workerPool.timeouts["ocr-page"] (default 60000) y
 // ctx.config.workerPool.maxRetries["ocr-page"] (default 2) — fuente única, ver ADR-021 §2.
 export interface OcrConfig {
   readonly languages: ReadonlyArray<string>; // default ["spa", "eng"]
   readonly dpi: number;                       // default 300 (calidad OCR)
+  // ADR-143 §3: máximo de bytes RGBA estimados en vivo entre las imágenes
+  // que processSession produce a la vez (reserva atómica antes de
+  // rasterizar). Un descriptor cuyo estimatedBytes lo supera por sí solo
+  // falla la página, no se encoge en silencio (§4).
+  readonly maxLiveImageBytes: number; // default 128 * 1024 * 1024 (128 MiB)
 }
 
 export interface OcrPageInput {

@@ -552,7 +552,9 @@ describe("OcrEngine — unit tests", () => {
   describe("Fallback de idiomas por defecto", () => {
     it("falls back to default languages when ctx.config.ocr.languages is empty", async () => {
       const emptyLangCtx = createEngineContext({
-        config: createMockConfig({ ocr: { languages: [], dpi: 300 } }),
+        config: createMockConfig({
+          ocr: { languages: [], dpi: 300, maxLiveImageBytes: 128 * 1024 * 1024 },
+        }),
       });
       vi.mocked(createWorker).mockResolvedValue(mockTesseractWorker(mockEmptyRecognizeData()));
 
@@ -1147,7 +1149,13 @@ describe("OcrEngine — unit tests", () => {
       // ADR-045 §3: otro set de idiomas recrea la instancia, y una instancia
       // nueva no tiene el modo aplicado.
       const otroCtx = createEngineContext({
-        config: createMockConfig({ ocr: { languages: ["eng"], dpi: ctx.config.ocr.dpi } }),
+        config: createMockConfig({
+          ocr: {
+            languages: ["eng"],
+            dpi: ctx.config.ocr.dpi,
+            maxLiveImageBytes: 128 * 1024 * 1024,
+          },
+        }),
       });
       const otroEngine = new OcrEngine();
       await otroEngine.init(otroCtx);

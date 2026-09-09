@@ -685,6 +685,11 @@ export interface OcrConfig {
   readonly dpi: number;
   // Timeout y retries por pagina: fuente unica workerPool.timeouts["ocr-page"] y
   // maxRetries["ocr-page"] (ADR-021 §2, precedente ADR-013).
+  // ADR-143 §3: máximo de bytes RGBA estimados en vivo entre las imágenes que
+  // OcrEngine.processSession produce a la vez (reserva atómica antes de
+  // rasterizar). Un descriptor cuyo estimatedBytes lo supera por sí solo
+  // falla la página (OCR_PAGE_FAILED), no se encoge en silencio.
+  readonly maxLiveImageBytes: number; // OCR_MAX_LIVE_IMAGE_BYTES, default 128 MiB
 }
 
 export interface GroupingConfig {
@@ -717,6 +722,7 @@ export interface ExportConfig {
 | `PREVIEW_CACHE_PAGES` | `16` | `RenderConfig` |
 | `WORDS_CACHE_PAGES` | `32` | `EngineConfig.cache` |
 | `MAX_RENDER_SCALE` | `4` | Guard de `RenderRequested.scale`/`RenderPageInput.scale` (ADR-037 §2) |
+| `OCR_MAX_LIVE_IMAGE_BYTES` | `128 * 1024 * 1024` (128 MiB) | `OcrConfig.maxLiveImageBytes` (ADR-143 §3) |
 | `PREVIEW_CACHE_MAX_BYTES` | `200 MB` | Límite por bytes del cache LRU de previews, además de `PREVIEW_CACHE_PAGES` (ADR-037 §3) |
 | `REPLACEMENT_FONT_HEIGHT_RATIO` | `0.64` | Fracción de `bbox.height` que el render usa como tamaño de fuente del reemplazo. Deja de ser número mágico de `fontForMode` (ADR-057 §5; **valor recalibrado por ADR-109 §4**, de `0.7`) |
 | `AVG_GLYPH_ADVANCE_RATIO` | `0.6` | Avance medio de glifo como fracción del tamaño de fuente, para estimar ancho sin canvas (ADR-057 §5) |

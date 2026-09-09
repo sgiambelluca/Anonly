@@ -1643,6 +1643,7 @@ describe("@anonly/shared — Contracts", () => {
         ocr: {
           languages: ["spa", "eng"],
           dpi: 300,
+          maxLiveImageBytes: 128 * 1024 * 1024,
         },
         grouping: {
           similarityThreshold: 0.88,

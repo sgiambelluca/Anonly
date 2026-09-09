@@ -134,6 +134,10 @@ export interface OcrConfig {
   readonly dpi: number;
   // Timeout y retries por página: fuente única workerPool.timeouts["ocr-page"] y
   // maxRetries["ocr-page"] (ADR-021 §2, precedente ADR-013).
+  // ADR-143 §3: máximo de bytes RGBA estimados en vivo entre las imágenes que
+  // OcrEngine.processSession produce a la vez. Un descriptor que lo supera
+  // por sí solo falla la página, no se encoge en silencio (ADR-143 §4).
+  readonly maxLiveImageBytes: number; // OCR_MAX_LIVE_IMAGE_BYTES, default 128 MiB
 }
 
 /**
