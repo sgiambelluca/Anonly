@@ -16,6 +16,7 @@ import {
   ReplacementMode,
   WorkerCrashedError,
   type EngineContext,
+  type ICache,
 } from "@anonly/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -2406,6 +2407,76 @@ describe("PIPELINE_PROGRESS (Orchestrator.md §8, ADR-034 §4)", () => {
     expect(ocrEvents.every((e) => e.documentId === "doc-1")).toBe(true);
   });
 
+  /*
+   * ADR-145 §1/§2: con la protección de LruCache, este `warn` es
+   * inalcanzable por construcción en el camino real del handoff (depósito y
+   * consumo ocurren en el mismo turno síncrono, ADR-041 §3) — pero sigue
+   * siendo el guard defensivo que evita la peor fuga posible: la página
+   * sigue hasta Ready sin palabras, sin texto y sin ningún error visible. Se
+   * fuerza inyectando una caché mínima cuyo `get()` siempre devuelve
+   * `undefined`, simulando "el depósito no está" sin depender de ningún
+   * detalle interno de `LruCache`.
+   */
+  it("handleOcrPageFinished loguea warn y no revienta si el depósito de palabras no está (ADR-145 §1/§2)", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({
+        pageCount: 1,
+        pages: [createPage({ index: 0, requiresOCR: true })],
+      }),
+      textlessPages: [0],
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+    vi.spyOn(engines.ocr, "processPages").mockImplementation(async (inputs) => {
+      const outputs = [];
+      for (const input of inputs) {
+        bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
+          documentId: input.documentId,
+          pageIndex: input.pageIndex,
+          wordCount: 3,
+          confidence: 0.9,
+        });
+        outputs.push({
+          documentId: input.documentId,
+          pageIndex: input.pageIndex,
+          words: [],
+          confidence: 0.9,
+          durationMs: 1,
+        });
+      }
+      return outputs;
+    });
+
+    // Caché mínima (ADR-145 §1): `get()` nunca encuentra nada, `set()` no
+    // hace nada — fuerza la rama que la protección de LruCache vuelve
+    // inalcanzable en el handoff real, sin tocar su implementación.
+    const emptyCache: ICache = {
+      get: () => undefined,
+      set: () => undefined,
+      delete: () => undefined,
+      clear: () => undefined,
+      size: 0,
+      bytes: 0,
+    };
+    const logger = createMockLogger();
+
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger,
+      cache: emptyCache,
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await expect(orchestrator.importDocument(createImportInput())).resolves.not.toThrow();
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      "OCR_PAGE_FINISHED sin ocr-words en cache; se ignora la fusión.",
+      expect.objectContaining({ documentId: "doc-1", pageIndex: 0 }),
+    );
+  });
+
   // ─── ADR-065 §2: total = textlessPages.length + ocrRegions.length ───
 
   it("OCR: total counts textlessPages.length + ocrRegions.length (ADR-065 §2)", async () => {
@@ -2624,6 +2695,70 @@ describe("LruCache", () => {
     expect(cache.get("b")).toBeUndefined();
     expect(cache.get("a")).toBe(1);
     expect(cache.get("c")).toBe(3);
+  });
+
+  // ADR-145 §1: nunca expulsa la entrada que acaba de insertarse.
+  describe("nunca expulsa la entrada recién insertada (ADR-145 §1)", () => {
+    it("una única entrada que excede maxBytes por sí sola se conserva igual", () => {
+      const cache = new LruCache({ maxItems: 100, maxBytes: 10 });
+
+      cache.set("huge", "palabras-de-la-pagina", 1000);
+
+      expect(cache.get("huge")).toBe("palabras-de-la-pagina");
+      expect(cache.size).toBe(1);
+      // La caché queda por encima de su presupuesto por esta única entrada
+      // — el exceso acotado que el ADR prefiere sobre perder la entrada.
+      expect(cache.bytes).toBe(1000);
+    });
+
+    it("expulsa todo lo demás antes de tocar la entrada recién insertada", () => {
+      const cache = new LruCache({ maxItems: 100, maxBytes: 100 });
+
+      cache.set("a", "vieja-1", 30);
+      cache.set("b", "vieja-2", 30);
+      cache.set("huge", "pagina-densa", 500); // sola ya excede maxBytes
+
+      expect(cache.get("a")).toBeUndefined();
+      expect(cache.get("b")).toBeUndefined();
+      expect(cache.get("huge")).toBe("pagina-densa");
+      expect(cache.size).toBe(1);
+    });
+
+    it("una entrada que SÍ entra en el presupuesto sigue expulsando la más vieja como siempre", () => {
+      // No regresión: la protección solo aplica cuando expulsar la más
+      // vieja no alcanzaría — con maxItems=1 y una entrada nueva que entra
+      // sola en el presupuesto, la vieja se expulsa igual.
+      const cache = new LruCache({ maxItems: 1, maxBytes: 1_000_000 });
+
+      cache.set("a", 1);
+      cache.set("b", 2);
+
+      expect(cache.get("a")).toBeUndefined();
+      expect(cache.get("b")).toBe(2);
+      expect(cache.size).toBe(1);
+    });
+  });
+
+  // ADR-145 §3: bytes finito y no negativo, o error tipado — nunca
+  // normalizado en silencio a 0 (el bug que dejaba el límite sin efecto).
+  describe("valida bytes en set() (ADR-145 §3)", () => {
+    it.each([-1, NaN, Infinity, -Infinity])("rechaza bytes=%p con InvalidInputError", (bytes) => {
+      const cache = new LruCache();
+      expect(() => cache.set("k", "v", bytes)).toThrow(InvalidInputError);
+      expect(cache.size).toBe(0);
+    });
+
+    it("bytes ausente sigue siendo válido y cuenta como 0 (sin cambio de contrato)", () => {
+      const cache = new LruCache();
+      expect(() => cache.set("k", "v")).not.toThrow();
+      expect(cache.bytes).toBe(0);
+    });
+
+    it("bytes=0 explícito es válido", () => {
+      const cache = new LruCache();
+      expect(() => cache.set("k", "v", 0)).not.toThrow();
+      expect(cache.bytes).toBe(0);
+    });
   });
 });
 
