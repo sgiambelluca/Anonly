@@ -188,7 +188,12 @@ describe("OcrEngine — contract tests", () => {
     const cacheSetSpy = vi.spyOn(ctx.cache, "set");
     const output = await engine.processPage(createValidOcrPageInput("doc-cache", 3), ctx);
 
-    expect(cacheSetSpy).toHaveBeenCalledWith("ocr-words:doc-cache:3", output.words);
+    // ADR-145 §2/§4: tercer argumento — la estimación de bytes del depósito.
+    expect(cacheSetSpy).toHaveBeenCalledWith(
+      "ocr-words:doc-cache:3",
+      output.words,
+      expect.any(Number),
+    );
   });
 
   it("engine never subscribes to the bus (ADR-014)", async () => {

@@ -91,6 +91,35 @@ function cacheKey(documentId: string, pageIndex: number): string {
   return `ocr-words:${documentId}:${pageIndex}`;
 }
 
+// ADR-145 §2: estimación SERIALIZADA de cuánto pesa el depósito de palabras
+// de una página — no RAM. El tamaño real de un objeto JS no es observable ni
+// portable; lo único que un límite por bytes necesita es que la estimación
+// crezca con la entrada y nunca sea cero para datos no vacíos. El overhead
+// fijo por palabra existe solo para garantizar esa segunda propiedad, no
+// para aproximar el costo real de un objeto V8.
+const UTF16_BYTES_PER_UNIT = 2; // `text`/`source`: 2 bytes por unidad de código.
+const NUMERIC_FIELD_BYTES = 8; // bbox.x/y/width/height, pageIndex, confidence, bbox.rotation.
+const WORD_OVERHEAD_BYTES = 32; // fijo, documentado — no una medición de RAM.
+
+/**
+ * ADR-145 §2: tamaño serializado estimado del depósito de palabras de una
+ * página (`ctx.cache.set("ocr-words:...", words, estimateWordsBytes(words))`).
+ * Cero solo para `words.length === 0` (una página sin datos que depositar);
+ * cualquier palabra real suma al menos `WORD_OVERHEAD_BYTES`.
+ */
+export function estimateWordsBytes(words: ReadonlyArray<Word>): number {
+  let total = 0;
+  for (const word of words) {
+    total += WORD_OVERHEAD_BYTES;
+    total += word.text.length * UTF16_BYTES_PER_UNIT;
+    total += word.source.length * UTF16_BYTES_PER_UNIT;
+    // bbox.x, bbox.y, bbox.width, bbox.height, pageIndex, confidence.
+    total += 6 * NUMERIC_FIELD_BYTES;
+    if (word.bbox.rotation !== undefined) total += NUMERIC_FIELD_BYTES;
+  }
+  return total;
+}
+
 // ─── Puerto interno de despacho (ADR-045 §2, espejo exacto de
 // RenderJobPool/RenderDispatchParams en render-engine/src/render.engine.ts).
 // No exportado desde index.ts — detalle de wiring interno, mismo criterio
@@ -397,8 +426,11 @@ export class OcrEngine implements IEngine {
         }
 
         // ADR-045 §1: depósito + emisión, en ese orden, host-side — restaura
-        // ADR-014 §1 literal y elimina la carrera EVENT/COMPLETED.
-        ctx.cache.set(cacheKey(documentId, pageIndex), words);
+        // ADR-014 §1 literal y elimina la carrera EVENT/COMPLETED. ADR-145
+        // §2/§4: el tercer argumento no cambia ese orden, solo hace que la
+        // entrada cuente contra el límite de bytes de la LRU en vez de
+        // contar como 0 (el agujero de contabilidad que ADR-145 cierra).
+        ctx.cache.set(cacheKey(documentId, pageIndex), words, estimateWordsBytes(words));
         ctx.bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
           documentId,
           pageIndex,

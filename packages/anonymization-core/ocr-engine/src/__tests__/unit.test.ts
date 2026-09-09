@@ -21,7 +21,7 @@ vi.mock("tesseract.js", () => ({
   OEM: { TESSERACT_ONLY: 0, LSTM_ONLY: 1, TESSERACT_LSTM_COMBINED: 2, DEFAULT: 3 },
 }));
 
-import { OcrEngine } from "../ocr.engine.js";
+import { estimateWordsBytes, OcrEngine } from "../ocr.engine.js";
 import { OcrModelMissingError, OcrPageFailedError } from "../ocr.errors.js";
 
 import {
@@ -262,7 +262,58 @@ describe("OcrEngine — unit tests", () => {
       const cacheSetSpy = vi.spyOn(ctx.cache, "set");
       await engine.processPage(createValidOcrPageInput("doc-key", 7), ctx);
 
-      expect(cacheSetSpy).toHaveBeenCalledWith("ocr-words:doc-key:7", expect.any(Array));
+      // ADR-145 §2/§4: tercer argumento — la estimación de bytes del
+      // depósito, calculada antes de emitir OCR_PAGE_FINISHED.
+      expect(cacheSetSpy).toHaveBeenCalledWith(
+        "ocr-words:doc-key:7",
+        expect.any(Array),
+        expect.any(Number),
+      );
+    });
+  });
+
+  describe("estimateWordsBytes (ADR-145 §2)", () => {
+    const word = (overrides?: Partial<Word>): Word => ({
+      text: "Palabra",
+      bbox: { x: 0, y: 0, width: 10, height: 10 },
+      pageIndex: 0,
+      confidence: 1,
+      source: "ocr",
+      ...overrides,
+    });
+
+    it("es cero para una página sin palabras", () => {
+      expect(estimateWordsBytes([])).toBe(0);
+    });
+
+    it("nunca es cero para una entrada no vacía", () => {
+      expect(estimateWordsBytes([word({ text: "" })])).toBeGreaterThan(0);
+    });
+
+    it("crece con la cantidad de palabras", () => {
+      const one = estimateWordsBytes([word()]);
+      const three = estimateWordsBytes([word(), word(), word()]);
+      expect(three).toBeGreaterThan(one);
+      expect(three).toBe(one * 3);
+    });
+
+    it("crece con la longitud del texto", () => {
+      const short = estimateWordsBytes([word({ text: "a" })]);
+      const long = estimateWordsBytes([word({ text: "a".repeat(100) })]);
+      expect(long).toBeGreaterThan(short);
+    });
+
+    it("cuenta bbox.rotation cuando está presente", () => {
+      const without = estimateWordsBytes([word()]);
+      const withRotation = estimateWordsBytes([
+        word({ bbox: { x: 0, y: 0, width: 10, height: 10, rotation: 90 } }),
+      ]);
+      expect(withRotation).toBeGreaterThan(without);
+    });
+
+    it("es determinista para la misma entrada", () => {
+      const words = [word({ text: "Uno" }), word({ text: "Dos" })];
+      expect(estimateWordsBytes(words)).toBe(estimateWordsBytes(words));
     });
   });
 
