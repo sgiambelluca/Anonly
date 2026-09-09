@@ -141,6 +141,10 @@ export function createMockPdfPage(
   annotations: ReadonlyArray<MockSignatureAnnotation> = [],
 ): Record<string, unknown> {
   return {
+    // ADR-140 §2: `PDFPageProxy.rotate` real nunca es `undefined` — default 0
+    // (sin rotación). Sin esto, `pageProxy.rotate !== 0` de `parsePage`
+    // rechaza con `PdfPageRotatedError` cualquier página con texto nativo.
+    rotate: 0,
     getViewport: vi.fn(({ scale }: { scale: number }) => ({ width: 595 * scale, height: 842 * scale })),
     getTextContent: vi.fn(() =>
       Promise.resolve({
