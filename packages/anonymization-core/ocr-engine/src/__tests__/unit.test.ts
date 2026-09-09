@@ -30,6 +30,7 @@ import {
   createResolvedOcrPool,
   createImageData,
   createValidOcrPageInput,
+  createValidOcrPageRequest,
   mockDetectData,
   mockEmptyRecognizeData,
   mockRecognizeData,
@@ -667,6 +668,95 @@ describe("OcrEngine — unit tests", () => {
       abortController.abort();
 
       await expect(resultPromise).rejects.toThrow(CancelledError);
+    });
+  });
+
+  describe("processSession — presupuesto de bytes en vivo (ADR-143 §3/§6)", () => {
+    it("serializes access to produce() when the byte budget only fits one image, even though ocrPoolSize would allow more concurrency", async () => {
+      vi.mocked(createWorker).mockResolvedValue(mockTesseractWorker(mockEmptyRecognizeData()));
+
+      const budgetCtx = createEngineContext({
+        config: createMockConfig({
+          workerPool: { ...createMockConfig().workerPool, ocrPoolSize: 3 },
+          ocr: { languages: ["spa", "eng"], dpi: 300, maxLiveImageBytes: 100 },
+        }),
+      });
+      await engine.init(budgetCtx);
+
+      const produceDeferreds: Array<() => void> = [];
+      let liveProduceCalls = 0;
+      let maxLiveProduceCalls = 0;
+      const produce = vi.fn(
+        () =>
+          new Promise<ImageData>((resolve) => {
+            liveProduceCalls += 1;
+            maxLiveProduceCalls = Math.max(maxLiveProduceCalls, liveProduceCalls);
+            produceDeferreds.push(() => {
+              liveProduceCalls -= 1;
+              resolve(createImageData(1, 1));
+            });
+          }),
+      );
+      // Tres descriptores, cada uno pide el presupuesto ENTERO por sí solo:
+      // con ocrPoolSize: 3 los tres drainQueue workers arrancan de entrada,
+      // pero solo uno puede tener su imagen viva a la vez.
+      const requests = [
+        createValidOcrPageRequest("doc-budget-serial", 0, { estimatedBytes: 100 }),
+        createValidOcrPageRequest("doc-budget-serial", 1, { estimatedBytes: 100 }),
+        createValidOcrPageRequest("doc-budget-serial", 2, { estimatedBytes: 100 }),
+      ];
+
+      const sessionPromise = engine.processSession(requests, produce, budgetCtx);
+
+      await vi.waitFor(() => expect(produce).toHaveBeenCalledTimes(1));
+      expect(maxLiveProduceCalls).toBe(1);
+
+      // Libera la primera imagen (y deja que su processPage se asiente):
+      // recién ENTONCES puede entrar la segunda.
+      produceDeferreds[0]?.();
+      await vi.waitFor(() => expect(produce).toHaveBeenCalledTimes(2));
+      expect(maxLiveProduceCalls).toBe(1);
+
+      produceDeferreds[1]?.();
+      await vi.waitFor(() => expect(produce).toHaveBeenCalledTimes(3));
+      expect(maxLiveProduceCalls).toBe(1);
+
+      produceDeferreds[2]?.();
+      const outputs = await sessionPromise;
+      expect(outputs.map((o) => o.pageIndex)).toEqual([0, 1, 2]);
+    });
+
+    it("wakes a consumer blocked waiting for budget when the session is aborted, instead of hanging forever", async () => {
+      vi.mocked(createWorker).mockResolvedValue(mockTesseractWorker(mockEmptyRecognizeData()));
+
+      const abortController = new AbortController();
+      const budgetCtx = createEngineContext({
+        abortSignal: abortController.signal,
+        config: createMockConfig({
+          workerPool: { ...createMockConfig().workerPool, ocrPoolSize: 2 },
+          ocr: { languages: ["spa", "eng"], dpi: 300, maxLiveImageBytes: 100 },
+        }),
+      });
+      await engine.init(budgetCtx);
+
+      // La primera imagen nunca se resuelve: retiene el único lugar del
+      // presupuesto para siempre — el modo de falla que ADR-143 §6 exige
+      // descartar por test, no por lectura.
+      const produce = vi.fn(() => new Promise<ImageData>(() => {}));
+      const requests = [
+        createValidOcrPageRequest("doc-budget-hang", 0, { estimatedBytes: 100 }),
+        createValidOcrPageRequest("doc-budget-hang", 1, { estimatedBytes: 100 }),
+      ];
+
+      const sessionPromise = engine.processSession(requests, produce, budgetCtx);
+      // Deja que ambos drainQueue workers arranquen: el primero reserva y
+      // queda esperando produce() para siempre; el segundo queda esperando
+      // presupuesto que nunca se libera.
+      await vi.waitFor(() => expect(produce).toHaveBeenCalledTimes(1));
+
+      abortController.abort();
+
+      await expect(sessionPromise).rejects.toThrow(CancelledError);
     });
   });
 

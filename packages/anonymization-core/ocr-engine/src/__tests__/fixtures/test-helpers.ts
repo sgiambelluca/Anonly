@@ -14,7 +14,7 @@ import type { createWorker } from "tesseract.js";
 import { vi } from "vitest";
 
 
-import type { OcrPageInput } from "../../ocr.types.js";
+import type { OcrImageProducer, OcrPageInput, OcrPageRequest } from "../../ocr.types.js";
 
 
 /*
@@ -198,6 +198,31 @@ export function createValidOcrPageInput(
     languages: ["spa", "eng"],
     ...overrides,
   };
+}
+
+/** ADR-143 §1: descriptor liviano para `processSession`, espejo de `createValidOcrPageInput`. */
+export function createValidOcrPageRequest(
+  documentId: string,
+  pageIndex = 0,
+  overrides?: Partial<OcrPageRequest>,
+): OcrPageRequest {
+  return {
+    documentId,
+    pageIndex,
+    dpi: 300,
+    languages: ["spa", "eng"],
+    // Chico y arbitrario: por debajo de cualquier maxLiveImageBytes salvo que
+    // un test lo pise a propósito (§4, presupuesto excedido).
+    estimatedBytes: 1024,
+    ...overrides,
+  };
+}
+
+/** `OcrImageProducer` trivial: siempre resuelve con la misma `ImageData` (ADR-143 §1). */
+export function createImageProducer(
+  imageData: ImageData = createImageData(100, 40),
+): OcrImageProducer {
+  return () => Promise.resolve(imageData);
 }
 
 /**

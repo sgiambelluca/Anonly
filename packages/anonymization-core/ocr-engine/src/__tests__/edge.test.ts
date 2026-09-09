@@ -30,8 +30,10 @@ import type { OcrPageInput } from "../ocr.types.js";
 import {
   createEngineContext,
   createImageData,
+  createImageProducer,
   createResolvedOcrPool,
   createValidOcrPageInput,
+  createValidOcrPageRequest,
   mockEmptyRecognizeData,
   mockRecognizeData,
   mockTesseractWorker,
@@ -440,6 +442,108 @@ describe("OcrEngine — edge case tests", () => {
       );
 
       await pooledEngine.dispose();
+    });
+  });
+
+  // Caso 17 (§13, ADR-143 §4): un descriptor cuyo estimatedBytes por sí solo
+  // supera ocr.maxLiveImageBytes falla sin producir — nunca se encoge el DPI
+  // ni se recorta en silencio.
+  describe("Caso 17: estimatedBytes de un descriptor supera maxLiveImageBytes por sí solo", () => {
+    it("fails the page with OcrPageFailedError, without calling produce(), and continues with the rest", async () => {
+      vi.mocked(createWorker).mockResolvedValue(mockTesseractWorker(mockEmptyRecognizeData()));
+
+      await engine.init(ctx);
+      const produce = vi.fn(createImageProducer());
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      const requests = [
+        // ctx.config.ocr.maxLiveImageBytes = 128 MiB (createMockConfig).
+        createValidOcrPageRequest("doc-budget-alone", 0, { estimatedBytes: 200 * 1024 * 1024 }),
+        createValidOcrPageRequest("doc-budget-alone", 1),
+      ];
+
+      const outputs = await engine.processSession(requests, produce, ctx);
+
+      expect(outputs.map((o) => o.pageIndex)).toEqual([1]);
+      // produce() nunca se invoca para la página 0: ni rasteriza de más.
+      expect(produce).toHaveBeenCalledTimes(1);
+      expect(produce).toHaveBeenCalledWith(requests[1], ctx.abortSignal);
+
+      const pageFailedCall = busEmitSpy.mock.calls.find(
+        ([, event, payload]) =>
+          event === EngineEvents.OCR_PAGE_FAILED &&
+          (payload as { pageIndex: number }).pageIndex === 0,
+      );
+      expect(pageFailedCall).toBeDefined();
+      const errorPayload = (
+        pageFailedCall?.[2] as { error: { message: string; details: Record<string, unknown> } }
+      ).error;
+      expect(errorPayload.message).toContain("supera ocr.maxLiveImageBytes");
+      expect(errorPayload.details.documentId).toBe("doc-budget-alone");
+      expect(errorPayload.details.pageIndex).toBe(0);
+    });
+  });
+
+  // Caso 18 (§13, ADR-143 §4): un fallo del productor (Render) recibe el
+  // mismo tratamiento que un fallo de página, con el `code` del error
+  // original en `details`. OCR no reintenta la producción por su cuenta.
+  describe("Caso 18: fallo del productor (Render)", () => {
+    it("reports a producer failure as OCR_PAGE_FAILED carrying the original error's code, and continues", async () => {
+      vi.mocked(createWorker).mockResolvedValue(mockTesseractWorker(mockEmptyRecognizeData()));
+
+      await engine.init(ctx);
+      const renderError = new InvalidInputError("rasterización fallida: PDF corrupto", {
+        documentId: "doc-producer-fails",
+      });
+      const okImage = createImageData(100, 40);
+      // ctx.config.workerPool.ocrPoolSize = 1 (createMockConfig): concurrency
+      // 1 garantiza orden estrictamente secuencial por índice, así que la
+      // PRIMERA llamada a produce() es siempre la de la página 0.
+      const produce = vi
+        .fn<(request: unknown, signal: AbortSignal) => Promise<ImageData>>()
+        .mockRejectedValueOnce(renderError)
+        .mockResolvedValueOnce(okImage);
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      const requests = [
+        createValidOcrPageRequest("doc-producer-fails", 0),
+        createValidOcrPageRequest("doc-producer-fails", 1),
+      ];
+
+      const outputs = await engine.processSession(requests, produce, ctx);
+
+      expect(outputs.map((o) => o.pageIndex)).toEqual([1]);
+      const pageFailedCall = busEmitSpy.mock.calls.find(
+        ([, event, payload]) =>
+          event === EngineEvents.OCR_PAGE_FAILED &&
+          (payload as { pageIndex: number }).pageIndex === 0,
+      );
+      expect(pageFailedCall).toBeDefined();
+      const errorPayload = (
+        pageFailedCall?.[2] as { error: { message: string; details: Record<string, unknown> } }
+      ).error;
+      expect(errorPayload.message).toContain("PDF corrupto");
+      expect(errorPayload.details.originalCode).toBe(renderError.code);
+
+      // OCR no reintenta la producción por su cuenta (ADR-143 §4): un único
+      // intento fallido por la página 0.
+      expect(produce).toHaveBeenCalledTimes(2);
+    });
+
+    it("propagates a CancelledError from the producer instead of treating it as a page failure", async () => {
+      vi.mocked(createWorker).mockResolvedValue(mockTesseractWorker(mockEmptyRecognizeData()));
+
+      const abortController = new AbortController();
+      const abortedCtx = createEngineContext({ abortSignal: abortController.signal });
+      await engine.init(abortedCtx);
+
+      const produce = vi.fn(() => {
+        abortController.abort();
+        return Promise.reject(new CancelledError("doc-producer-cancel"));
+      });
+      const requests = [createValidOcrPageRequest("doc-producer-cancel", 0)];
+
+      await expect(engine.processSession(requests, produce, abortedCtx)).rejects.toThrow(
+        CancelledError,
+      );
     });
   });
 });

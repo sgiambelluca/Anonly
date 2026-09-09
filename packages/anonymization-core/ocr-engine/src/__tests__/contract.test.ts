@@ -28,8 +28,10 @@ import { OcrEngine } from "../ocr.engine.js";
 
 import {
   createEngineContext,
+  createImageProducer,
   createTrackingOcrPool,
   createValidOcrPageInput,
+  createValidOcrPageRequest,
   mockEmptyRecognizeData,
   mockRecognizeData,
   mockTesseractWorker,
@@ -314,5 +316,84 @@ describe("OcrEngine — contract tests", () => {
 
     expect(eventsB).toEqual(eventsA);
     await pooledEngine.dispose();
+  });
+
+  // ─── ADR-143 — processSession ───
+
+  it("processSession() before init() throws EngineNotInitializedError", async () => {
+    const requests = [createValidOcrPageRequest("doc-1", 0)];
+    await expect(engine.processSession(requests, createImageProducer(), ctx)).rejects.toThrow(
+      EngineNotInitializedError,
+    );
+  });
+
+  it("emits OCR_STARTED once and OCR_FINISHED once for the whole session, not per descriptor (ADR-143 §2)", async () => {
+    vi.mocked(createWorker).mockResolvedValue(mockTesseractWorker(mockEmptyRecognizeData()));
+
+    await engine.init(ctx);
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+    const requests = [
+      createValidOcrPageRequest("doc-session-started", 0),
+      createValidOcrPageRequest("doc-session-started", 1),
+      createValidOcrPageRequest("doc-session-started", 2),
+    ];
+    await engine.processSession(requests, createImageProducer(), ctx);
+
+    const startedCalls = busEmitSpy.mock.calls.filter(
+      (call) => call[1] === EngineEvents.OCR_STARTED,
+    );
+    const finishedCalls = busEmitSpy.mock.calls.filter(
+      (call) => call[1] === EngineEvents.OCR_FINISHED,
+    );
+    expect(startedCalls.length).toBe(1);
+    expect(finishedCalls.length).toBe(1);
+    expect(startedCalls[0]?.[2]).toMatchObject({
+      documentId: "doc-session-started",
+      pagesToProcess: [0, 1, 2],
+    });
+  });
+
+  it("processSession returns outputs in the same order as requests", async () => {
+    vi.mocked(createWorker).mockResolvedValue(mockTesseractWorker(mockEmptyRecognizeData()));
+
+    await engine.init(ctx);
+    const requests = [
+      createValidOcrPageRequest("doc-session-order", 2),
+      createValidOcrPageRequest("doc-session-order", 0),
+      createValidOcrPageRequest("doc-session-order", 1),
+    ];
+    const outputs = await engine.processSession(requests, createImageProducer(), ctx);
+
+    expect(outputs.map((o) => o.pageIndex)).toEqual([2, 0, 1]);
+  });
+
+  it("processSession invokes produce() with the exact request object and ctx.abortSignal (ADR-143 §1)", async () => {
+    vi.mocked(createWorker).mockResolvedValue(mockTesseractWorker(mockEmptyRecognizeData()));
+
+    await engine.init(ctx);
+    const requests = [createValidOcrPageRequest("doc-session-produce-args", 0)];
+    const produce = vi.fn(createImageProducer());
+    await engine.processSession(requests, produce, ctx);
+
+    expect(produce).toHaveBeenCalledTimes(1);
+    expect(produce).toHaveBeenCalledWith(requests[0], ctx.abortSignal);
+  });
+
+  it("processPages routes through processSession with estimatedBytes: 0, so the byte budget never gates an already-materialized image (ADR-143 §1)", async () => {
+    vi.mocked(createWorker).mockResolvedValue(mockTesseractWorker(mockEmptyRecognizeData()));
+
+    // Presupuesto absurdamente chico: si processPages reservara con el
+    // tamaño real de la imagen, esta llamada se colgaría esperando turno
+    // (nunca hay ninguna otra reserva que lo libere). Con estimatedBytes: 0
+    // no hay nada que reservar, así que resuelve igual.
+    const tightCtx = createEngineContext({
+      config: { ...ctx.config, ocr: { ...ctx.config.ocr, maxLiveImageBytes: 1 } },
+    });
+    await engine.init(tightCtx);
+    const inputs = [createValidOcrPageInput("doc-pages-tight-budget", 0)];
+
+    const outputs = await engine.processPages(inputs, tightCtx);
+
+    expect(outputs.length).toBe(1);
   });
 });

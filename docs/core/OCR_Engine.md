@@ -1,12 +1,14 @@
-<!-- CONTEXT: scope=ocr-engine | dependencias=core/Contracts.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-018-First-Party-Assets.md,adr/ADR-021-Engines-Inline-Hasta-Hito9.md,adr/ADR-041-FuseOcrPage-Funcion-Pura-Sin-Estado-Retenido.md,adr/ADR-045-OcrEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-064-Palabras-De-OCR-En-Puntos.md,adr/ADR-090-La-Orientacion-De-Un-Escaneo-Se-Detecta.md,adr/ADR-119-La-Orientacion-Se-Detecta-Con-El-Motor-Que-La-Sabe-Leer.md,adr/ADR-112-El-Sello-No-Es-Un-Parrafo.md,adr/ADR-121-El-Sello-Rotado-Vive-En-El-Margen.md | audiencia=IA-implementador | fase=11 (§10/§13/§14/§15 en fase 11 por ADR-121: las pasadas rotadas sobre las franjas de margen; §13/§14/§15 en fase 11 por ADR-112: el modo de segmentación de página es SPARSE_TEXT; §2/§6/§12/§15 actualizados en fase 10: clase host-side dueña de su pool + kernel de reconocimiento en el worker, ADR-045; §9/§10/§11/§13/§14 en fase 10.8: las palabras salen en puntos de página, no en píxeles del raster, ADR-064) -->
+<!-- CONTEXT: scope=ocr-engine | dependencias=core/Contracts.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-018-First-Party-Assets.md,adr/ADR-021-Engines-Inline-Hasta-Hito9.md,adr/ADR-041-FuseOcrPage-Funcion-Pura-Sin-Estado-Retenido.md,adr/ADR-045-OcrEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-064-Palabras-De-OCR-En-Puntos.md,adr/ADR-090-La-Orientacion-De-Un-Escaneo-Se-Detecta.md,adr/ADR-119-La-Orientacion-Se-Detecta-Con-El-Motor-Que-La-Sabe-Leer.md,adr/ADR-112-El-Sello-No-Es-Un-Parrafo.md,adr/ADR-121-El-Sello-Rotado-Vive-En-El-Margen.md,adr/ADR-101-El-Despacho-Paralelo-De-OCR-Que-Nunca-Aterrizo.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md | audiencia=IA-implementador | fase=11 (§6/§9/§11/§13/§14/§15 en fase 11 por ADR-143: processSession pide cada imagen bajo demanda, con presupuesto de bytes en vivo, en vez de que el caller materialice todo el documento antes de empezar; §10/§13/§14/§15 en fase 11 por ADR-121: las pasadas rotadas sobre las franjas de margen; §13/§14/§15 en fase 11 por ADR-112: el modo de segmentación de página es SPARSE_TEXT; §2/§6/§12/§15 actualizados en fase 10: clase host-side dueña de su pool + kernel de reconocimiento en el worker, ADR-045; §9/§10/§11/§13/§14 en fase 10.8: las palabras salen en puntos de página, no en píxeles del raster, ADR-064) -->
 
 # OCR Engine — Spec de Motor
 
 > Ejecuta OCR sobre las páginas sin texto del PDF. Solo corre si `PdfEngineOutput.textlessPages.length > 0`. Devuelve `Word[]` con `BoundingBox` y `confidence` que el PDF Engine fusiona.
 
 **EngineId**: `ocr`
-**Versión del spec**: 1.8.0
-**Última actualización**: 2026-09-02
+**Versión del spec**: 1.9.0
+**Última actualización**: 2026-09-09
+
+> **Nota (v1.9.0, ADR-143, 2026-09-09 — las imágenes de OCR se producen cuando hay lugar)**: `Orchestrator.runOcrStage` rasterizaba **todo** el documento antes de llamar a `processPages` — 50 páginas A4 a 300 dpi son 1,74 GB de `ImageData` vivos antes de que Tesseract lea la primera. `processSession` (§6) es la entrada nueva: recibe descriptores livianos (`OcrPageRequest`, sin imagen) y un productor (`OcrImageProducer`) que el façade implementa llamando a `RenderEngine.rasterizePage` host-side — la función nunca cruza un `postMessage` y no entra en `EngineConfig`. Cada uno de los `C = min(ocrPoolSize, requests.length)` consumidores reserva presupuesto (`ocr.maxLiveImageBytes`, campo nuevo de `OcrConfig`, default 128 MiB) **antes** de pedir su imagen, la procesa y suelta la reserva recién cuando la página se asienta — el pico de imágenes vivas pasa a depender de `C`, no del largo del documento. Un descriptor cuyo `estimatedBytes` solo supera el presupuesto falla con `OCR_PAGE_FAILED` (§11, §13 caso 17): no se baja el DPI ni se recorta en silencio. Un fallo del productor (Render) recibe el mismo tratamiento, con el `code` del error original en `details` (§13 caso 18). `processPages` se **conserva** con su firma y semántica actuales — pasa a ser el caso particular cuyo productor devuelve la imagen que el caller ya tenía en memoria, con `estimatedBytes: 0` porque no hay nada que reservar; ningún consumidor existente cambia (los 108 tests previos de este paquete pasan sin tocar). `OCR_STARTED`/`OCR_FINISHED` siguen siendo una sesión, no un evento por minilote — eso no cambia, solo de dónde sale la imagen de cada página. Ver §6, §9, §11, §13 casos 17-18, §14 y §15 item 29.
 
 > **Nota (v1.8.1, 2026-09-03 — errata de mirror: ADR-119 dejó al reconocimiento sin su core; sin ADR propio, es un pin que faltó)**: ADR-119 §1 le sacó `legacyCore` al worker principal —correcto, ese worker ya no detecta—, pero nadie tocó `assets.lock.json`, que desde ADR-090 §1 mirrorea **solo** los cores completos. tesseract.js elige el archivo dentro de `corePath` por `lstmOnly`, que sale de `[OEM.DEFAULT, OEM.LSTM_ONLY].includes(oem) && !options.legacyCore` (`createWorker.js:36`) y en el worker principal vale `true`: pide `tesseract-core-simd-lstm.wasm.js`, que **ya no está mirroreado**. `importScripts` da 404, `createWorker` rechaza y **toda página escaneada** muere con `OcrModelMissingError` — mismo modo de falla que la errata v1.2.1, y otra vez con el pipeline llegando al final (ahora con el aviso de análisis incompleto, no en silencio). La regla queda: **los dos workers eligen distinto, así que el mirror lleva los cuatro cores** — `tesseract-core[-simd]-lstm` para reconocer, `tesseract-core[-simd]` para OSD. Es exactamente la alternativa que ADR-090 descartó por *"duplica lo mirroreado sin ningún caso que lo pida"*: ADR-119 creó el caso. Cuesta +7,9 MB **en el mirror**; el usuario sigue bajando **dos** cores, uno por worker. El único gate que lo ve es el Escenario 2 E2E, que es el único que corre Tesseract de verdad: los `vi.mock("tesseract.js", …)` no bajan archivos. Fix: `assets.lock.json`, item §15.27.
 
@@ -115,6 +117,26 @@ export interface OcrPageOutput {
   readonly durationMs: number;
 }
 
+// ADR-143 §1: descriptor liviano — SIN imagen — de una página o región a
+// OCR-ear. processSession pide la ImageData real recién cuando tiene lugar
+// en la ventana de trabajo (§3), no por adelantado.
+export interface OcrPageRequest {
+  readonly documentId: string;
+  readonly pageIndex: number;
+  readonly region?: BoundingBox;    // ADR-065: presente si es un recorte
+  readonly dpi: number;
+  readonly languages: ReadonlyArray<string>;
+  readonly estimatedBytes: number;  // bytes RGBA estimados, ANTES de producir
+}
+
+// ADR-143 §1/§3: produce la ImageData de un descriptor. Nunca cruza un
+// postMessage ni entra en EngineConfig — el façade la implementa llamando a
+// RenderEngine.rasterizePage host-side.
+export type OcrImageProducer = (
+  request: OcrPageRequest,
+  signal: AbortSignal,
+) => Promise<ImageData>;
+
 export class OcrEngine implements IEngine {
   readonly id = EngineId.Ocr;
   // pool (ADR-045 §2): puerto interno de despacho, inyectado por el façade en
@@ -124,12 +146,23 @@ export class OcrEngine implements IEngine {
   constructor(pool?: OcrJobPool);
   init(ctx: EngineContext): Promise<void>;
   processPage(input: OcrPageInput, ctx: EngineContext): Promise<OcrPageOutput>;
+  // ADR-143 §1: se conserva con firma y semántica actuales — caso particular
+  // de processSession cuyo productor devuelve la imagen que ya recibió.
   processPages(inputs: ReadonlyArray<OcrPageInput>, ctx: EngineContext): Promise<ReadonlyArray<OcrPageOutput>>;
+  // ADR-143 §1: entrada nueva. Una sesión lógica (§2): OCR_STARTED/OCR_FINISHED
+  // se emiten una vez, con pagesToProcess = los pageIndex de TODOS los requests.
+  processSession(
+    requests: ReadonlyArray<OcrPageRequest>,
+    produce: OcrImageProducer,
+    ctx: EngineContext,
+  ): Promise<ReadonlyArray<OcrPageOutput>>;
   dispose(): Promise<void>;
 }
 ```
 
-Semántica del despacho (ADR-045 §2): `processPage` envía **solo el reconocimiento** por el puerto — `dispatch({ jobType: "ocr-page", payload: OcrPagePayload, run: () => kernel, signal, maxRetriesOverride: 0 })`. El retry vive únicamente en el loop del motor (la distinción `OcrTimeoutError`-reintenta / resto-no de §11 no cambia); todo timeout que emerja del despacho se normaliza a `OcrTimeoutError` antes del loop. El depósito en `ctx.cache` y la emisión de `OCR_PAGE_FINISHED` ocurren en el host, **en ese orden**, al resolver el despacho.
+Semántica del despacho (ADR-045 §2): `processPage` envía **solo el reconocimiento** por el puerto — `dispatch({ jobType: "ocr-page", payload: OcrPagePayload, run: () => kernel, signal, maxRetriesOverride: 0 })`. El retry vive únicamente en el loop del motor (la distinción `OcrTimeoutError`-reintenta / resto-no de §11 no cambia); todo timeout que emerja del despacho se normaliza a `OcrTimeoutError` antes del loop. El depósito en `ctx.cache` y la emisión de `OCR_PAGE_FINISHED` ocurren en el host, **en ese orden**, al resolver el despacho. `processSession` (ADR-143 §3) llama a `processPage` internamente por cada descriptor —después de reservar presupuesto y producir la imagen—, así que esta secuencia no cambia por página; lo único nuevo es de dónde sale el `ImageData` que se le pasa.
+
+**Presupuesto de imágenes vivas (ADR-143 §3/§6)**: cada uno de los `C = min(ocrPoolSize, requests.length)` consumidores de `processSession` reserva `request.estimatedBytes` contra `ctx.config.ocr.maxLiveImageBytes` **antes** de llamar a `produce`, y libera la reserva cuando la página se asienta (éxito, fallo definitivo o cancelación) — nunca antes. La reserva es atómica entre consumidores; la espera por presupuesto se despierta con `ctx.abortSignal`, nunca es una espera no cancelable. Un descriptor cuyo `estimatedBytes` por sí solo supera el presupuesto falla esa página con `OcrPageFailedError` sin llegar a producir (§11, §13 caso 17).
 
 ---
 
@@ -148,7 +181,7 @@ Canal: `EventChannel.Ocr`.
 
 ## 8. Eventos que consume
 
-No consume eventos. Es un motor de "entrada-salida" puro; el Orchestrator lo invoca directamente vía `processPage`/`processPages`.
+No consume eventos. Es un motor de "entrada-salida" puro; el Orchestrator lo invoca directamente vía `processPage`/`processPages`/`processSession`.
 
 ---
 
@@ -174,6 +207,23 @@ OcrPageInput {
 **`imageData` puede ser un recorte de la página (ADR-065 §3)**: desde el OCR por región, el caller puede pasar el raster de **una parte** de la página en vez de la página entera (`rasterizePage` con `region`, `Render_Engine.md` §6). Para este motor no cambia nada —recibe una imagen y la reconoce— pero sí cambia qué significan las coordenadas que devuelve: las `words` de §10 salen en puntos **relativos a la imagen recibida**, o sea al recorte. Llevarlas a coordenadas de página es responsabilidad del caller, que es el único que sabe de qué región vino (`fuseOcrRegion` de `pdf-engine`, `PDF_Engine.md` §6). Este motor **no** conoce el concepto de región y no debe ganarlo.
 
 **Precondición de `dpi` (ADR-064 §3)**: `dpi` **debe ser el DPI con el que se rasterizó `imageData`**. No es un dato informativo: es el divisor con el que §10 convierte las coordenadas de Tesseract a puntos de página, así que un valor que no corresponda produce geometría mal escalada en silencio. El caller es responsable de que las dos cosas se muevan juntas — hoy el Orchestrator las deriva del mismo `ctx.config.ocr.dpi` (`scale = dpi/72` para rasterizar, `dpi` para este input; `Orchestrator.md` §2). El motor **no** lo verifica: no conoce el tamaño en puntos de la página, así que no tiene contra qué comparar.
+
+**`OcrPageRequest` (ADR-143 §1), entrada de `processSession`**:
+
+```ts
+OcrPageRequest {
+  documentId: string;
+  pageIndex: number;
+  region?: BoundingBox;      // ADR-065: presente si es un recorte
+  dpi: number;
+  languages: ReadonlyArray<string>;
+  estimatedBytes: number;    // bytes RGBA estimados por dimensiones × escala, ANTES de producir
+}
+```
+
+- Mismas restricciones de `pageIndex`, `dpi` y `languages` que `OcrPageInput` — se validan recién cuando `processSession` arma el `OcrPageInput` sintético tras producir la imagen (mismo `processPage` de siempre, sin cambios).
+- `estimatedBytes` **no** se valida contra la imagen real: es una estimación previa (dimensiones × escala, calculada por el caller sin rasterizar) usada solo para la reserva de presupuesto (§6). Si `estimatedBytes > ctx.config.ocr.maxLiveImageBytes`, la página falla con `OcrPageFailedError` **sin llamar a `produce`** (§11, §13 caso 17) — no hay verificación posterior contra el tamaño real de `imageData`.
+- `region`, igual que en `OcrPageInput` recortado (ADR-065 §3): el motor no lo lee directamente —viaja hacia el productor, que es quien rasteriza—, así que sigue sin conocer el concepto de región.
 
 ---
 
@@ -207,7 +257,7 @@ OcrPageOutput {
 
 | Code | Clase | Cuándo | Recuperable | Acción |
 |---|---|---|---|---|
-| `OCR_PAGE_FAILED` | `OcrPageFailedError` | Tesseract lanza error en una página tras `maxRetries` | no | esa página queda sin OCR; las detecciones posteriores se saltan sus ocurrencias; warning al usuario |
+| `OCR_PAGE_FAILED` | `OcrPageFailedError` | Tesseract lanza error en una página tras `maxRetries`; **o** (ADR-143 §4) `estimatedBytes` de un `OcrPageRequest` supera `ocr.maxLiveImageBytes` por sí solo; **o** el productor (Render) de `processSession` falla —con el `code` del error original en `details.originalCode`— | no | esa página queda sin OCR; las detecciones posteriores se saltan sus ocurrencias; warning al usuario |
 | `OCR_TIMEOUT` | `OcrTimeoutError` | timeout por página excedido | sí | reintentar hasta `workerPool.maxRetries["ocr-page"]` (Hito 3 inline: loop del propio engine; Hito 9: el pool — ADR-021 §2), luego `OCR_PAGE_FAILED` |
 | `OCR_MODEL_MISSING` | `OcrModelMissingError` | no se pudo cargar/descargar el modelo Tesseract | no | abortar OCR; el usuario debe reintentar o desactivar OCR |
 | `ENGINE_NOT_INITIALIZED` | `EngineNotInitializedError` | `processPage` antes de `init` | no | bug del caller |
@@ -253,6 +303,10 @@ OcrPageOutput {
 15. **`tessedit_pageseg_mode`** (ADR-112 §1): fijo en `PSM.SPARSE_TEXT`, aplicado **una vez por instancia** de worker — no por página, porque no es un valor que viaje por payload sino una constante. Una instancia nueva (cambio de idiomas, ADR-045 §3) lo vuelve a aplicar. Un `setParameters` que rechaza es best-effort, igual que el caso 14: se reconoce con el default de Tesseract, que es el camino previo al ADR. El texto **rotado dentro de una página derecha** (un sello a 90° en el margen) no lo lee ninguno de los dos modos —ADR-090 endereza la *página*, no un run adentro de ella—; lo cierra el caso 16.
 
 16. **Franjas de margen rotadas** (ADR-121): después de la pasada derecha se recorta una franja de `MARGIN_STRIP_RATIO` del ancho a cada lado del raster enderezado y se reconoce cada una a 90° y 270°. Una candidata entra solo si **no solapa** ninguna palabra de la pasada derecha (`intersectionRatio > 0` la descarta) y su confianza llega a `ROTATED_MIN_CONFIDENCE`. Las que entran salen con `bbox.rotation` compuesta (§10) y mapeadas al espacio de la página original, en puntos. Sobre una página **sin** texto rotado el aporte es **0 palabras**: es el caso normal, y el que permite que no haya interruptor. Una franja que falla se saltea sin error ni evento —el texto derecho ya está reconocido—, pero una `CancelledError` sí se propaga: la cancelación se chequea entre pasadas. **El recorte va adentro de ese guard**, y `cropImageData` trunca las dimensiones a entero antes de indexar filas: `viewport.width` de pdf.js es un float y nada en el tipo `ImageData` lo prohíbe, y sin truncar el `set()` de la última fila se pasa del buffer y tira `RangeError` — que, con el recorte afuera del guard, costaba **la página entera**.
+
+17. **`estimatedBytes` de un `OcrPageRequest` supera `ocr.maxLiveImageBytes` por sí solo** (ADR-143 §4): `processSession` falla esa página con `OcrPageFailedError`/`OCR_PAGE_FAILED` **sin llamar a `produce`** — nunca baja el DPI ni recorta la página en silencio. La sesión continúa con los demás descriptores; `OCR_STARTED`/`OCR_FINISHED` no cambian.
+
+18. **Fallo del productor (Render) en `processSession`** (ADR-143 §4): recibe el **mismo tratamiento** que un fallo de página — `OcrPageFailedError`/`OCR_PAGE_FAILED`, con el `code` del error original en `details.originalCode` — y la sesión continúa con las demás. OCR no reintenta la producción por su cuenta: el retry del pool de Render ya corrió. Una `CancelledError` del productor se propaga tal cual, sin envolver.
 
 ---
 
@@ -308,6 +362,16 @@ OcrPageOutput {
 | `crops a strip of full height, keeping the right columns` | `kernel.test.ts` | unit | caso 16 — el recorte, con un valor distinto por columna para afirmar **cuáles** quedaron |
 | `does not throw on a raster whose width is not an integer` | `kernel.test.ts` | unit | caso 16 — el `RangeError` que costaba la página; la otra mitad (que el recorte esté adentro del guard) la mide `tests/integration/ocr-pdf-fusion.test.ts` |
 | `the mode is the tesseract.js PSM enum member, not a hardcoded number` | `unit.test.ts` | unit | caso 15 — contrasta el doble contra el enum REAL; si tesseract.js renumera, esto falla en vez de dejar la suite verde con el número viejo |
+| `processSession() before init() throws EngineNotInitializedError` | `contract.test.ts` | contract | ADR-143 §1 — misma guarda que `processPage`/`processPages` |
+| `emits OCR_STARTED once and OCR_FINISHED once for the whole session, not per descriptor` | `contract.test.ts` | contract | ADR-143 §2 |
+| `processSession returns outputs in the same order as requests` | `contract.test.ts` | contract | ADR-143 §1 — por índice, no por llegada (mismo criterio que `processPages`, ADR-101) |
+| `processSession invokes produce() with the exact request object and ctx.abortSignal` | `contract.test.ts` | contract | ADR-143 §1 — firma de `OcrImageProducer` |
+| `processPages routes through processSession with estimatedBytes: 0, so the byte budget never gates an already-materialized image` | `contract.test.ts` | contract | ADR-143 §1 — con `maxLiveImageBytes: 1` no se cuelga |
+| `fails the page with OcrPageFailedError, without calling produce(), and continues with the rest` | `edge.test.ts` | edge | caso 17 |
+| `reports a producer failure as OCR_PAGE_FAILED carrying the original error's code, and continues` | `edge.test.ts` | edge | caso 18 |
+| `propagates a CancelledError from the producer instead of treating it as a page failure` | `edge.test.ts` | edge | caso 18 — la excepción a "mismo tratamiento que un fallo de página" |
+| `serializes access to produce() when the byte budget only fits one image, even though ocrPoolSize would allow more concurrency` | `unit.test.ts` | unit | ADR-143 §3 — discriminación: falla contra una reserva no-op (verificado manualmente) |
+| `wakes a consumer blocked waiting for budget when the session is aborted, instead of hanging forever` | `unit.test.ts` | unit | ADR-143 §6 — el modo de falla que el ADR exige descartar por test |
 
 **Fixtures y mocks (ADR-021 §5)**: los tests **unit / contract / edge** (Hito 3) mockean la frontera `tesseract.js` — deterministas, sin wasm ni descargas; el cast de frontera va en un helper único de `__tests__/fixtures/` (Code_Standards §10, precedente `mockGetDocumentResult` del pdf-engine). Los tests **stress / cancel / integration** son Hito 11 y usan `tests/fixtures/scanned-10p.pdf` (rasterizado a `ImageData` por el host), imagen blanca e imagen con texto pequeño.
 
@@ -339,6 +403,8 @@ OcrPageOutput {
 - [ ] 21. (Hito 10, PR14 — ADR-045) Subpath export `"./worker"` + wiring en la app; E2E: pipeline con PDF escaneado real vía OcrWorker (fixture diferida de PR12, ADR-041), `OCR_PAGE_FINISHED` incremental observable.
 - [ ] 22. (Hito 10, PR 17.6 — erratas v1.2.1 y v1.2.2, sin ADR) Dos partes, las dos necesarias: (a) `TESSERACT_WORKER_PATH` → `"/wasm/tesseract/worker.min.js"` (archivo, no directorio; arregla el fallback in-process); (b) absolutizar las **tres** rutas contra `self.location.origin` antes de `createWorker`, con fallback a la ruta root-relative si `self.location` no existe (node/tests) — sin esto el camino real (OcrWorker) sigue roto, porque los paths terminan resolviéndose contra una base `blob:`. Palanca de reserva si aparece una resolución interna root-relative de tesseract: `workerBlobURL: false` (documentar el motivo si se usa). Verificar en browser real, no solo en unit tests: el mock de tesseract no ejercita la resolución de URLs. Test: el Escenario 2 E2E (PDF escaneado) debe producir entidades > 0 — hoy pasa a "Listo" con 0 y **en verde**, así que el spec tiene que afirmar el resultado del OCR, no solo el stage.
 - [x] 23. (Hito 10.8, paso 0 — ADR-064) `toWords` recibe el `dpi` del payload y convierte cada `bbox` a puntos con `pt = px · 72 / dpi`, **después** de `sortWordsByReadingOrder` (la tolerancia de misma-línea sigue siendo de 1px, ADR-064 §2). Guard de `dpi` finito y `> 0` → `InvalidInputError` (§9, §11). Actualizar el fixture de `tests/integration/ocr-pdf-fusion.test.ts`, que hoy usa valores que pasan en cualquier espacio de coordenadas. Casos 7-8 de §13 y cuatro filas nuevas en §14.
+
+- [x] 29. (ADR-143) `ocr.types.ts`: `OcrPageRequest`, `OcrImageProducer`. `ocr.engine.ts`: `LiveImageBudget` (reserva atómica cancelable, `ocr.maxLiveImageBytes`), `processSession` (una sesión, `C = min(ocrPoolSize, requests.length)` consumidores, cada uno reserva → produce → `processPage` → libera en `finally`), `processPages` reimplementado sobre `processSession` con un productor que devuelve la imagen ya recibida y `estimatedBytes: 0`. `ocr.errors.ts`: `OcrPageFailedError` gana un 4º parámetro opcional (`extraDetails`) para el `code` original de un fallo de productor. **No** toca `processPage` ni el kernel. `Contracts.md`/`config.ts`: `OcrConfig.maxLiveImageBytes` (commit de contrato aparte, con el ADR y nada más adentro). Casos 17-18 de §13, diez filas nuevas en §14.
 
 - [x] 28. (`Duplicacion_De_Logica.md` §6, sin ADR) Kernel: guarda de `typeof OffscreenCanvas === "undefined"` en `toTesseractImage`, lanzando `OcrPageFailedError` como el resto de los fallos de página de este motor. `render-engine` ya protegía sus **dos** construcciones de canvas y ésta era la única sin proteger. Lo que cambia no es que falle —el constructor ya fallaba— sino **cómo**: un `ReferenceError` crudo no es `OcrPageFailedError`, así que no llegaba como `OCR_PAGE_FAILED` y la página se perdía sin el aviso de análisis incompleto de ADR-094. No toca contratos ni `OcrConfig`.
 

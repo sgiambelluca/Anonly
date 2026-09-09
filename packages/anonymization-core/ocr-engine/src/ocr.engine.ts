@@ -48,7 +48,7 @@ import {
 } from "@anonly/shared";
 
 import { OcrModelMissingError, OcrPageFailedError, OcrTimeoutError } from "./ocr.errors.js";
-import type { OcrPageInput, OcrPageOutput } from "./ocr.types.js";
+import type { OcrImageProducer, OcrPageInput, OcrPageOutput, OcrPageRequest } from "./ocr.types.js";
 import type { KernelOcrResult } from "./worker/kernel.js";
 
 /*
@@ -163,6 +163,57 @@ const IMMEDIATE_POOL: OcrJobPool = {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// ─── Presupuesto de bytes en vivo (ADR-143 §3/§6) ───
+
+// 05_Worker_Architecture.md §6.3 usa el mismo intervalo para
+// `WorkerPool.waitForCapacity`; se reutiliza acá por el mismo motivo
+// (consistencia, riesgo bajo) — no es una medición, es el paso de polling.
+const BUDGET_POLL_INTERVAL_MS = 10;
+
+/**
+ * ADR-143 §3: reserva atómica de bytes RGBA "en vivo" antes de rasterizar,
+ * con espera cancelable (§6: "la espera por presupuesto se despierta con la
+ * señal, no hay espera no cancelable"). El caller filtra antes cualquier
+ * `bytes > limitBytes` (§4, "una página que no entra falla, no se encoge") —
+ * `reserve` asume que la cantidad pedida cabe sola y solo espera turno frente
+ * a las demás reservas vivas.
+ */
+class LiveImageBudget {
+  private usedBytes = 0;
+
+  constructor(private readonly limitBytes: number) {}
+
+  async reserve(bytes: number, documentId: string, signal: AbortSignal): Promise<void> {
+    for (;;) {
+      if (signal.aborted) throw new CancelledError(documentId);
+      if (this.usedBytes + bytes <= this.limitBytes) {
+        this.usedBytes += bytes;
+        return;
+      }
+      await this.waitForChangeOrAbort(signal);
+    }
+  }
+
+  release(bytes: number): void {
+    this.usedBytes -= bytes;
+  }
+
+  private waitForChangeOrAbort(signal: AbortSignal): Promise<void> {
+    if (signal.aborted) return Promise.resolve();
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        signal.removeEventListener("abort", onAbort);
+        resolve();
+      }, BUDGET_POLL_INTERVAL_MS);
+      const onAbort = (): void => {
+        clearTimeout(timer);
+        resolve();
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+  }
 }
 
 // ─── Decoder del sobre `COMPLETED.result` (ADR-055 §2-§4) ───
@@ -466,19 +517,30 @@ export class OcrEngine implements IEngine {
     throw failure;
   }
 
-  async processPages(
-    inputs: ReadonlyArray<OcrPageInput>,
+  /**
+   * ADR-143 §1: entrada nueva — descriptores livianos, sin imagen. Pide cada
+   * `ImageData` recién cuando un consumidor tiene lugar (§3), en vez de que
+   * el caller materialice todo el set por adelantado (`processPages` de
+   * abajo, que ahora es el caso particular "la imagen ya está en memoria").
+   *
+   * Una sesión lógica (§2): `OCR_STARTED`/`OCR_FINISHED` se emiten una vez
+   * acá, nunca por minilote. Por página se conserva la secuencia exacta de
+   * ADR-045 (`processPage`, sin tocar).
+   */
+  async processSession(
+    requests: ReadonlyArray<OcrPageRequest>,
+    produce: OcrImageProducer,
     ctx: EngineContext,
   ): Promise<ReadonlyArray<OcrPageOutput>> {
     this.assertNotDisposed();
     this.assertInitialized();
 
-    if (inputs == null) {
-      throw new InvalidInputError("inputs es null o undefined.", { engineId: EngineId.Ocr });
+    if (requests == null) {
+      throw new InvalidInputError("requests es null o undefined.", { engineId: EngineId.Ocr });
     }
 
-    const documentId = inputs[0]?.documentId ?? "";
-    const pagesToProcess = inputs.map((i) => i.pageIndex);
+    const documentId = requests[0]?.documentId ?? "";
+    const pagesToProcess = requests.map((r) => r.pageIndex);
     const modelAlreadyLoaded = this.modelWarm;
     const startedAt = Date.now();
 
@@ -489,24 +551,16 @@ export class OcrEngine implements IEngine {
     });
 
     /*
-     * ADR-101: hasta `ocrPoolSize` páginas en vuelo a la vez.
-     *
-     * Este loop era secuencial **a propósito**, y el comentario que estaba
-     * acá lo decía: el checklist §15.7 lo fijaba así para el Hito 3 y dejaba
-     * "el despacho paralelo al pool" a cargo del Orchestrator en el Hito 9.
-     * El Hito 9 cerró y el Orchestrator hace una sola llamada a
-     * `processPages`: el traspaso nunca aterrizó, y el pool quedó con dos
-     * lugares y uno usado.
-     *
-     * El límite sale de `ocrPoolSize`, que ya se adapta al equipo
-     * (`config.ts`: 1 en `lowResource`, 2 si no) — o sea que en una máquina
-     * chica esto sigue siendo exactamente el loop de antes.
+     * ADR-101/ADR-143 §3: hasta `ocrPoolSize` descriptores en vuelo a la vez,
+     * cada uno con a lo sumo una imagen viva. El límite sale de `ocrPoolSize`,
+     * que ya se adapta al equipo (`config.ts`: 1 en `lowResource`, 2 si no).
      */
-    const concurrency = Math.max(1, Math.min(ctx.config.workerPool.ocrPoolSize, inputs.length));
-    // Por índice, no por orden de llegada: con varias páginas en vuelo
-    // terminan desordenadas, y `outputs` tiene que respetar el orden recibido.
+    const budget = new LiveImageBudget(ctx.config.ocr.maxLiveImageBytes);
+    const concurrency = Math.max(1, Math.min(ctx.config.workerPool.ocrPoolSize, requests.length));
+    // Por índice, no por orden de llegada: con varios descriptores en vuelo
+    // terminan desordenados, y `outputs` tiene que respetar el orden recibido.
     const slots: (OcrPageOutput | undefined)[] = new Array<OcrPageOutput | undefined>(
-      inputs.length,
+      requests.length,
     );
     let nextIndex = 0;
 
@@ -514,24 +568,13 @@ export class OcrEngine implements IEngine {
       for (;;) {
         const index = nextIndex;
         nextIndex += 1;
-        const input = inputs[index];
-        if (input === undefined) return;
+        const request = requests[index];
+        if (request === undefined) return;
+        // ADR-143 §6: al abortar, se deja de pedir descriptores nuevos.
         if (ctx.abortSignal.aborted) {
           throw new CancelledError(documentId);
         }
-        try {
-          slots[index] = await this.processPage(input, ctx);
-        } catch (err: unknown) {
-          if (err instanceof CancelledError || err instanceof OcrModelMissingError) {
-            throw err;
-          }
-          // OcrPageFailedError: ya emitió OCR_PAGE_FAILED dentro de processPage.
-          // Se continúa con las demás páginas (OCR_Engine.md §13 caso 6).
-          ctx.logger.warn(
-            `OCR de la página ${input.pageIndex} falló; se continúa con las demás páginas.`,
-            { documentId: input.documentId, pageIndex: input.pageIndex },
-          );
-        }
+        slots[index] = await this.processOneRequest(request, produce, budget, ctx);
       }
     };
 
@@ -548,6 +591,166 @@ export class OcrEngine implements IEngine {
     });
 
     return outputs;
+  }
+
+  /**
+   * Un descriptor de `processSession`, de punta a punta: presupuesto →
+   * producir → `processPage`. Nunca lanza salvo `CancelledError` u
+   * `OcrModelMissingError` (mismo criterio que el `drainQueue` de antes de
+   * ADR-143): cualquier otro fallo ya emitió `OCR_PAGE_FAILED` y devuelve
+   * `undefined` para que la sesión siga con las demás páginas.
+   */
+  private async processOneRequest(
+    request: OcrPageRequest,
+    produce: OcrImageProducer,
+    budget: LiveImageBudget,
+    ctx: EngineContext,
+  ): Promise<OcrPageOutput | undefined> {
+    // ADR-143 §4: una página que no entra por sí sola falla, no se encoge.
+    if (request.estimatedBytes > ctx.config.ocr.maxLiveImageBytes) {
+      this.reportPageFailure(
+        ctx,
+        request.documentId,
+        request.pageIndex,
+        new OcrPageFailedError(
+          request.documentId,
+          request.pageIndex,
+          `La imagen estimada (${request.estimatedBytes} bytes) supera ocr.maxLiveImageBytes ` +
+            `(${ctx.config.ocr.maxLiveImageBytes} bytes) por sí sola; no se reduce el DPI ni se ` +
+            "recorta en silencio (ADR-143 §4).",
+        ),
+      );
+      return undefined;
+    }
+
+    // ADR-143 §3/§5: reserva antes de producir, se libera cuando la página se
+    // asienta (éxito, fallo definitivo o cancelación) — nunca antes.
+    await budget.reserve(request.estimatedBytes, request.documentId, ctx.abortSignal);
+    try {
+      let imageData: ImageData;
+      try {
+        imageData = await produce(request, ctx.abortSignal);
+      } catch (err: unknown) {
+        if (err instanceof CancelledError) throw err;
+        // ADR-143 §4: un fallo del productor (Render) recibe el mismo
+        // tratamiento que un fallo de página — OCR no reintenta la
+        // producción, el retry del pool de Render ya corrió.
+        this.reportPageFailure(
+          ctx,
+          request.documentId,
+          request.pageIndex,
+          this.toProducerFailure(err, request),
+        );
+        return undefined;
+      }
+
+      const input: OcrPageInput = {
+        documentId: request.documentId,
+        pageIndex: request.pageIndex,
+        imageData,
+        dpi: request.dpi,
+        languages: request.languages,
+      };
+      try {
+        return await this.processPage(input, ctx);
+      } catch (err: unknown) {
+        if (err instanceof CancelledError || err instanceof OcrModelMissingError) {
+          throw err;
+        }
+        // OcrPageFailedError: ya emitió OCR_PAGE_FAILED dentro de processPage.
+        // Se continúa con las demás páginas (OCR_Engine.md §13 caso 6).
+        ctx.logger.warn(
+          `OCR de la página ${request.pageIndex} falló; se continúa con las demás páginas.`,
+          { documentId: request.documentId, pageIndex: request.pageIndex },
+        );
+        return undefined;
+      }
+    } finally {
+      budget.release(request.estimatedBytes);
+    }
+  }
+
+  /** Emite `OCR_PAGE_FAILED` y avisa por log — para los dos fallos que `processPage` nunca ve (§4). */
+  private reportPageFailure(
+    ctx: EngineContext,
+    documentId: string,
+    pageIndex: number,
+    failure: OcrPageFailedError,
+  ): void {
+    ctx.bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FAILED, {
+      documentId,
+      pageIndex,
+      error: failure.serialize(),
+    });
+    ctx.logger.warn(`OCR de la página ${pageIndex} falló; se continúa con las demás páginas.`, {
+      documentId,
+      pageIndex,
+    });
+  }
+
+  /** ADR-143 §4: "con el `code` del error original en `details`". */
+  private toProducerFailure(err: unknown, request: OcrPageRequest): OcrPageFailedError {
+    const reason = err instanceof Error ? err.message : String(err);
+    const originalCode = err instanceof EngineError ? err.code : undefined;
+    return new OcrPageFailedError(
+      request.documentId,
+      request.pageIndex,
+      `Falló la producción de la imagen (Render): ${reason}`,
+      originalCode === undefined ? undefined : { originalCode },
+    );
+  }
+
+  /**
+   * ADR-143 §1: se conserva con su firma y semántica actuales — lo usan los
+   * tests de contrato y cualquier caller que ya tenga las imágenes en
+   * memoria. Ahora es el caso particular de `processSession` cuyo productor
+   * devuelve la imagen que ya recibió, con `estimatedBytes: 0` porque no hay
+   * nada que reservar: la imagen ya está viva pase lo que pase (§3 gobierna
+   * lo que se produce bajo demanda, no lo que el caller ya materializó).
+   * Ningún consumidor existente cambia.
+   */
+  async processPages(
+    inputs: ReadonlyArray<OcrPageInput>,
+    ctx: EngineContext,
+  ): Promise<ReadonlyArray<OcrPageOutput>> {
+    this.assertNotDisposed();
+    this.assertInitialized();
+
+    if (inputs == null) {
+      throw new InvalidInputError("inputs es null o undefined.", { engineId: EngineId.Ocr });
+    }
+
+    // Map por identidad del objeto `request` (no por documentId/pageIndex):
+    // `processSession` siempre invoca `produce` con el MISMO objeto que
+    // recibió en `requests`, así que no hace falta una clave compuesta ni
+    // hay riesgo de colisión si dos inputs compartieran documentId/pageIndex.
+    const imageByRequest = new Map<OcrPageRequest, ImageData>();
+    const requests: OcrPageRequest[] = inputs.map((input) => {
+      const request: OcrPageRequest = {
+        documentId: input.documentId,
+        pageIndex: input.pageIndex,
+        dpi: input.dpi,
+        languages: input.languages,
+        estimatedBytes: 0,
+      };
+      imageByRequest.set(request, input.imageData);
+      return request;
+    });
+
+    const produce: OcrImageProducer = (request) => {
+      const imageData = imageByRequest.get(request);
+      // Invariante interna: `processSession` reenvía el mismo objeto que le
+      // entregamos en `requests`, así que el Map siempre resuelve.
+      if (imageData === undefined) {
+        throw new InvalidInputError(
+          "processSession invocó produce() con un OcrPageRequest desconocido.",
+          { engineId: EngineId.Ocr, documentId: request.documentId, pageIndex: request.pageIndex },
+        );
+      }
+      return Promise.resolve(imageData);
+    };
+
+    return this.processSession(requests, produce, ctx);
   }
 
   async dispose(): Promise<void> {
