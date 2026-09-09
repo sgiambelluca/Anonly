@@ -38,10 +38,11 @@ changesets sin que ningún usuario reciba una actualización.
 pnpm version   # sube las versiones y escribe los CHANGELOG
 ```
 
-**4. Tageás.** El tag es lo que dispara el release, no el merge:
+**4. Esperás CI verde en `main` y tageás ese commit.** El tag debe coincidir exactamente con `v` + la versión de `apps/desktop-shell/package.json`. La validación del release rechaza un commit fuera de `main`, un tag que no coincide o un SHA sin CI exitosa. El tag dispara el release:
 
 ```bash
-git tag v0.9.0 && git push origin v0.9.0
+git tag v0.9.3
+git push origin v0.9.3
 ```
 
 `.github/workflows/release.yml` buildea en un runner de macOS y uno de
@@ -83,16 +84,75 @@ las dos firmas; la Ed25519 no se retira.
 **El release se crea como borrador.** El tag lo arma; publicarlo lo decidís
 vos, desde la página del release. Hasta entonces ningún usuario lo recibe.
 
-`workflow_dispatch` corre todo el pipeline sin publicar nada, para probar que
+`workflow_dispatch`, seleccionado sobre `main`, corre todo el pipeline sin publicar nada, para probar que
 el camino funciona antes de tagear. Los jobs de Windows y macOS exigen y usan
 sus respectivos secrets (`WINDOWS_UPDATE_PRIVATE_KEY` y
 `SPARKLE_PRIVATE_KEY`) en esa prueba: es la forma segura de validar ambos
 circuitos de firma sin crear todavía un release.
 
+## Entorno protegido y aprobación
+
+El workflow declara el entorno `release` en los jobs de firma y de publicación
+(ADR-139). En Settings → Environments → release deben estar:
+
+- Revisor requerido: `sgiambelluca`. La autoaprobación está permitida mientras
+  el proyecto tenga un solo autor; no es una segunda revisión independiente.
+- Ramas/tags permitidos: rama `main` y tags `v*`.
+- Environment secrets: `SPARKLE_PRIVATE_KEY` y `WINDOWS_UPDATE_PRIVATE_KEY`.
+  No deben quedar copias con alcance de repositorio u organización.
+
+Al ejecutar el workflow, abrí Actions → Release → ejecución → Review deployments.
+Verificá el SHA, el tag y el resultado de CI antes de aprobar el entorno. Los
+secrets se entregan al job después de esa aprobación. No apruebes un workflow
+modificado en una rama de trabajo, aunque la interfaz lo permita seleccionar.
+
+Para migrar claves existentes, agregá sus valores originales al entorno,
+confirmá que ambos nombres están presentes y retiralos del alcance repositorio.
+No cambies las claves públicas ni generes pares nuevos durante esa migración.
+Probá después con Run workflow sobre `main`; la prueba también solicita
+aprobación y no crea un release. Mantené el workflow pausado hasta terminar la
+configuración y publicar su versión protegida.
+
+Las actions se fijan a commits completos. Revisá los PR de Dependabot de
+`github-actions` antes de integrar cambios. Los tokens de build solo leen el
+repositorio; la escritura y la atestación están limitadas al job de publicación.
+
+## Nombres y hashes de los archivos
+
+El job de publicación normaliza espacios a puntos en los nombres de assets
+antes de escribir `SHA256SUMS.txt`, para que coincidan con las descargas de
+GitHub. Los bytes y manifiestos firmados no se modifican. El proceso rechaza
+colisiones y no incluye el propio manifest dentro de su lista de hashes.
+
+Descargá los assets y `SHA256SUMS.txt` en una misma carpeta. En macOS verificá
+con `shasum -a 256 -c SHA256SUMS.txt`; en Linux, con
+`sha256sum --check SHA256SUMS.txt`. Si falta un archivo listado, la comprobación
+de ese archivo falla: descargalo antes de concluir que está corrupto.
+
+## Mantenimiento de tags e historial
+
+Las etiquetas de versión se protegen contra actualización y borrado. No muevas
+una etiqueta para distribuir binarios diferentes con el mismo número de versión.
+Una reescritura por datos sensibles es mantenimiento excepcional: requiere
+respaldo privado, release pausado, mapeo verificado de referencias y restitución
+de las protecciones al terminar.
+
+Cuando se sanea el historial sin reconstruir una publicación anterior, los
+instaladores conservan sus bytes y firmas. Sus atestaciones siguen apuntando al
+commit original de construcción; no se presentan como emitidas sobre el nuevo
+hash del tag. Los ZIP/tar de fuentes automáticos corresponden al tag saneado.
+Las copias cacheadas y referencias de PR pueden requerir asistencia de GitHub.
+
 ## Probar sin romperle la app a nadie
 
-Un tag de prerelease (`v0.9.1-beta.1`) marcado como _prerelease_ en GitHub
-**no llega a los usuarios normales**. Se prueba, y si está bien se promueve.
+El workflow crea un borrador y marca como pre-release los tags con guion, como
+`v0.9.3-beta.1`. Revisá el canal elegido antes de publicar el borrador.
+
+Mientras solo haya pre-releases, GitHub responde 404 a `releases/latest`; el
+feed estable de Sparkle no tiene una publicación de la que leer. Conservar una
+pre-release no resuelve esa ausencia. No la marques estable para esconder el
+404: publicá una versión estable cuando esté validada para ese uso. El
+comportamiento del actualizador de la app se valida en su trabajo específico.
 
 Y si una versión mala llega igual a producción, se arregla publicando el
 arreglo: el updater se lo empuja a todos. Es para lo que sirve tener
