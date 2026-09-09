@@ -248,11 +248,11 @@ export function wireHappyPathSpies(
   // espiar acá.
   vi.spyOn(engines.pdf, "dispose").mockResolvedValue(undefined);
 
-  vi.spyOn(engines.ocr, "processPages").mockImplementation((inputs) =>
+  vi.spyOn(engines.ocr, "processSession").mockImplementation((requests) =>
     Promise.resolve(
-      inputs.map((input) => ({
-        documentId: input.documentId,
-        pageIndex: input.pageIndex,
+      requests.map((request) => ({
+        documentId: request.documentId,
+        pageIndex: request.pageIndex,
         words: [],
         confidence: 0.9,
         durationMs: 1,
@@ -385,7 +385,7 @@ export async function makeOrchestratorWithRealDetection(pdfOutput?: PdfEngineOut
 
   vi.spyOn(engines.pdf, "process").mockResolvedValue(output);
   vi.spyOn(engines.pdf, "dispose").mockResolvedValue(undefined);
-  vi.spyOn(engines.ocr, "processPages").mockResolvedValue([]);
+  vi.spyOn(engines.ocr, "processSession").mockResolvedValue([]);
   vi.spyOn(engines.ocr, "dispose").mockResolvedValue(undefined);
   vi.spyOn(engines.ner, "processPages").mockResolvedValue([]);
   vi.spyOn(engines.ner, "dispose").mockResolvedValue(undefined);

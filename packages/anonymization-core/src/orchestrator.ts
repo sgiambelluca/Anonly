@@ -20,7 +20,7 @@
 import { buildPageReplacements } from "@anonly/export-engine";
 import type { ExportEngineInput, RenderPageProvider } from "@anonly/export-engine";
 import type { NerPageInput } from "@anonly/ner-engine";
-import type { OcrPageInput } from "@anonly/ocr-engine";
+import type { OcrImageProducer, OcrPageRequest } from "@anonly/ocr-engine";
 import { decodePdfEngineOutput, fuseOcrPage, fuseOcrRegion } from "@anonly/pdf-engine";
 import type { PdfEngineOutput } from "@anonly/pdf-engine";
 import { RenderFailedError } from "@anonly/render-engine";
@@ -102,6 +102,22 @@ function ocrWordsCacheKey(documentId: string, pageIndex: number): string {
   // Formato de clave documentado (ADR-014 §Decisión, ADR-021 §4): el lado
   // host del OcrPool deposita las Word[] acá — hoy, el propio OcrEngine.
   return `ocr-words:${documentId}:${pageIndex}`;
+}
+
+/**
+ * ADR-143 §1: `OcrPageRequest.estimatedBytes` — "bytes RGBA estimados por
+ * dimensiones × escala, ANTES de producir". `widthPoints`/`heightPoints` son
+ * los de la página entera o del recorte (ambos en puntos de página, mismo
+ * espacio que `rasterizePage` recibe). `Math.ceil` por eje da una cota
+ * superior segura del raster que `getViewport({ scale })` termina
+ * produciendo — nunca subestima el buffer real, que es lo único que le
+ * importa a una reserva de presupuesto (§3: mejor sobrestimar de más que
+ * dejar pasar una imagen que no entra).
+ */
+function estimateRasterBytes(widthPoints: number, heightPoints: number, scale: number): number {
+  const widthPx = Math.max(0, Math.ceil(widthPoints * scale));
+  const heightPx = Math.max(0, Math.ceil(heightPoints * scale));
+  return widthPx * heightPx * 4; // RGBA
 }
 
 // ─── reanalyze (ADR-038 §1): helpers de módulo (sin estado de instancia) ───
@@ -1022,59 +1038,68 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     // Orchestrator (garantizado por ensureRenderDocumentLoaded).
     await this.ensureRenderDocumentLoaded(documentId);
 
-    const scale = ctx.config.ocr.dpi / 72;
-    const ocrInputs: OcrPageInput[] = [];
+    // ADR-143 §1: los descriptores solo necesitan las dimensiones de página
+    // (en puntos, ya parseadas por el PDF Engine) para estimar bytes — no
+    // hace falta rasterizar nada todavía.
+    const document = this.documents.get(documentId);
+    if (document === undefined) {
+      throw new InvalidInputError(`Documento ${documentId} no disponible para OCR.`, {
+        documentId,
+      });
+    }
 
-    // ADR-043 §2: el Orchestrator deja de envolver `rasterizePage` en
-    // `pool.dispatch({run})` — invoca el método del motor directo; es el
-    // propio `RenderEngine` quien despacha internamente contra su
-    // `RenderPool` (inyectada por el façade en `create-core.ts`). La
-    // limitación de tasa por `waitForCapacity()` que existía acá desaparece
-    // junto con la referencia directa al pool: el límite de concurrencia real
-    // (`renderPoolSize`) lo sigue aplicando la propia pool del motor.
+    const scale = ctx.config.ocr.dpi / 72;
+    const requests: OcrPageRequest[] = [];
+
     for (const pageIndex of textlessPages) {
-      if (ctx.abortSignal.aborted) throw new CancelledError(documentId);
-      const imageData = await this.engines.render.rasterizePage(documentId, pageIndex, scale, ctx);
-      ocrInputs.push({
+      const page: Page | undefined = document.pages[pageIndex];
+      requests.push({
         documentId,
         pageIndex,
-        imageData,
         dpi: ctx.config.ocr.dpi,
         languages: ctx.config.ocr.languages,
+        estimatedBytes: estimateRasterBytes(page?.width ?? 0, page?.height ?? 0, scale),
       });
     }
 
-    // ADR-065 §3/§5: se OCR-ea la región, no la página — `rasterizePage`
-    // recibe `region.bbox` y devuelve solo el recorte (en puntos de página,
-    // el motor la multiplica por `scale` internamente). El `OcrPageInput` es
-    // el de siempre: el OCR Engine no sabe ni necesita saber que su
-    // `imageData` es un recorte en vez de una página completa.
+    // ADR-065 §3/§5: se OCR-ea la región, no la página — el descriptor lleva
+    // `region.bbox` (en puntos de página) y el productor de abajo se lo pasa
+    // a `rasterizePage`, que devuelve solo el recorte. El `OcrPageRequest` es
+    // el de siempre: el OCR Engine no sabe ni necesita saber que su imagen es
+    // un recorte en vez de una página completa (§9 de OCR_Engine.md).
     for (const region of ocrRegions) {
-      if (ctx.abortSignal.aborted) throw new CancelledError(documentId);
-      const imageData = await this.engines.render.rasterizePage(
-        documentId,
-        region.pageIndex,
-        scale,
-        ctx,
-        region.bbox,
-      );
-      ocrInputs.push({
+      requests.push({
         documentId,
         pageIndex: region.pageIndex,
-        imageData,
+        region: region.bbox,
         dpi: ctx.config.ocr.dpi,
         languages: ctx.config.ocr.languages,
+        estimatedBytes: estimateRasterBytes(region.bbox.width, region.bbox.height, scale),
       });
     }
 
-    // ADR-045 §2: el Orchestrator deja de envolver `processPages` en
-    // `pool.dispatch({run})` — invoca el método del motor directo; es el
+    // ADR-143 §1: el productor rasteriza recién cuando `processSession` tiene
+    // lugar en la ventana de trabajo — nunca por adelantado. Nunca cruza un
+    // `postMessage` ni entra en `EngineConfig`: vive acá, host-side, porque
+    // llama a `RenderEngine` y un motor no importa a otro (P-1). Mismo
+    // criterio de ADR-043 §2 que ya regía `rasterizePage` acá: el Orchestrator
+    // invoca el método del motor directo, sin envolverlo en `pool.dispatch`.
+    const produce: OcrImageProducer = (request, signal) =>
+      this.engines.render.rasterizePage(
+        request.documentId,
+        request.pageIndex,
+        scale,
+        { ...ctx, abortSignal: signal },
+        request.region,
+      );
+
+    // ADR-045 §2/ADR-143 §3: el Orchestrator deja de envolver `processSession`
+    // en `pool.dispatch({run})` — invoca el método del motor directo; es el
     // propio `OcrEngine` quien despacha internamente, por página, contra su
-    // `OcrPool` (inyectada por el façade en `create-core.ts`), mismo criterio
-    // que ADR-043 aplicó a `rasterizePage`/`renderPage`. El límite de
-    // concurrencia real (`ocrPoolSize`) lo sigue aplicando la propia pool del
-    // motor.
-    await this.engines.ocr.processPages(ocrInputs, ctx);
+    // `OcrPool` (inyectada por el façade en `create-core.ts`) y reserva el
+    // presupuesto de imágenes vivas (`ocr.maxLiveImageBytes`) antes de pedirle
+    // cada imagen a `produce`.
+    await this.engines.ocr.processSession(requests, produce, ctx);
 
     // ADR-041 §3: la fusión (ADR-014) la dispara `handleOcrPageFinished` de
     // forma síncrona por cada `OCR_PAGE_FINISHED` (IEventBus.emit despacha en

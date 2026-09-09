@@ -70,7 +70,7 @@ Notas: el archivo se lee como `ArrayBuffer` en el main thread y se mantiene en m
 
 ## 4. Etapa 2 — OCR (OCR Engine)
 
-**Entra**: para cada `pageIndex ∈ textlessPages`, el Orchestrator obtiene el `ImageData` vía `RenderEngine.rasterizePage(documentId, pageIndex, scale, ctx)` con `scale = ctx.config.ocr.dpi / 72` (ADR-034 §1; corre en el `RenderPool`, sin emitir eventos de preview) y dispatcha `OcrPool.dispatch({ type: "ocr-page", payload: { documentId, pageIndex, imageData, dpi, languages } })`. `imageData` se transfiere. Precondición: el Orchestrator adelanta `RenderEngine.loadDocument(documentId, buffer, password?)` a esta etapa con los bytes retenidos de la etapa 0 (ADR-030, ADR-034 §1; el tercer argumento opcional lo agregó ADR-050 para los documentos encriptados).
+**Entra**: para cada `pageIndex ∈ textlessPages` (y cada región de `ocrRegions`, ADR-065), el Orchestrator arma un descriptor liviano **sin imagen** (`OcrPageRequest`: `documentId`, `pageIndex`, `region?`, `dpi`, `languages`, `estimatedBytes`) y llama a `OcrEngine.processSession(requests, produce, ctx)`. `produce` es una función host-side que el Orchestrator define y que recién invoca `RenderEngine.rasterizePage(documentId, pageIndex, scale, ctx, region?)` con `scale = ctx.config.ocr.dpi / 72` cuando `OcrEngine` tiene lugar para esa imagen — nunca por adelantado, con a lo sumo `min(ocrPoolSize, requests.length)` imágenes vivas a la vez (ADR-143). Precondición: el Orchestrator adelanta `RenderEngine.loadDocument(documentId, buffer, password?)` a esta etapa con los bytes retenidos de la etapa 0 (ADR-030, ADR-034 §1; el tercer argumento opcional lo agregó ADR-050 para los documentos encriptados).
 **Sale**: `Word[]` por página con `confidence` y `source: "ocr"`. El PDF Engine fusiona esas palabras en `Page.words` (vía `OCR_PAGE_FINISHED`).
 **Eventos emitidos**: `OCR_STARTED`, `OCR_PAGE_FINISHED`, `OCR_FINISHED`, `OCR_PAGE_FAILED`.
 **Errores**:
@@ -80,7 +80,7 @@ Notas: el archivo se lee como `ArrayBuffer` en el main thread y se mantiene en m
 **Métricas**: `pagesProcessed`, `avgConfidence`, `durationMs` por página y total.
 **Etapa siguiente**: Etapa 3.
 
-**Optimización**: las páginas se procesan en paralelo respetando el tamaño del `OcrPool`. La cola prioriza las páginas visibles en la UI (ver `05_Worker_Architecture.md` §6.2).
+**Optimización**: las páginas se procesan en paralelo respetando el tamaño del `OcrPool`, y el presupuesto `ocr.maxLiveImageBytes` (default 128 MiB) acota cuántas imágenes rasterizadas pueden estar vivas a la vez, sin importar el largo del documento (ADR-143). La cola prioriza las páginas visibles en la UI (ver `05_Worker_Architecture.md` §6.2).
 
 ---
 

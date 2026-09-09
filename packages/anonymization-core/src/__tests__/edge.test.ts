@@ -387,9 +387,9 @@ describe("Orchestrator — edge cases", () => {
       sourceKind: "scanned" as const,
     };
     (engines.pdf.process as ReturnType<typeof vi.fn>).mockResolvedValueOnce(pdfOutput);
-    // ocr.processPages resuelve con 0 outputs (la página falló internamente y
-    // OcrEngine ya la descartó con warning, sin lanzar — comportamiento real).
-    (engines.ocr.processPages as ReturnType<typeof vi.fn>).mockResolvedValueOnce([]);
+    // ocr.processSession resuelve con 0 outputs (la página falló internamente
+    // y OcrEngine ya la descartó con warning, sin lanzar — comportamiento real).
+    (engines.ocr.processSession as ReturnType<typeof vi.fn>).mockResolvedValueOnce([]);
 
     await orchestrator.importDocument(createImportInput());
 
@@ -424,14 +424,14 @@ describe("Orchestrator — edge cases", () => {
     // entera, acá la página YA tenía requiresOCR===false y texto nativo
     // desde la extracción; un fallo de región no debe tocar ninguno de los
     // dos.
-    (engines.ocr.processPages as ReturnType<typeof vi.fn>).mockImplementationOnce(
+    (engines.ocr.processSession as ReturnType<typeof vi.fn>).mockImplementationOnce(
       async (
-        inputs: ReadonlyArray<{ readonly documentId: string; readonly pageIndex: number }>,
+        requests: ReadonlyArray<{ readonly documentId: string; readonly pageIndex: number }>,
       ) => {
-        for (const input of inputs) {
+        for (const request of requests) {
           bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FAILED, {
-            documentId: input.documentId,
-            pageIndex: input.pageIndex,
+            documentId: request.documentId,
+            pageIndex: request.pageIndex,
             error: {
               code: EngineErrorCode.OCR_PAGE_FAILED,
               engineId: EngineId.Ocr,
@@ -1068,8 +1068,7 @@ describe("Orchestrator — edge cases", () => {
       await orchestrator.importDocument(createImportInput());
       expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
 
-      (engines.render.rasterizePage as ReturnType<typeof vi.fn>).mockClear();
-      (engines.ocr.processPages as ReturnType<typeof vi.fn>).mockClear();
+      (engines.ocr.processSession as ReturnType<typeof vi.fn>).mockClear();
       (engines.regex.process as ReturnType<typeof vi.fn>).mockClear();
       (engines.ner.processPages as ReturnType<typeof vi.fn>).mockClear();
 
@@ -1082,13 +1081,15 @@ describe("Orchestrator — edge cases", () => {
       expect(engines.grouping.dropOccurrences).toHaveBeenCalledWith("doc-1", {
         pageIndices: [0],
       });
-      expect(engines.render.rasterizePage).toHaveBeenCalledWith(
-        "doc-1",
-        0,
-        expect.any(Number),
+      // ADR-143 §1: rasterizePage ya no lo llama el Orchestrator directo —
+      // vive dentro del productor que le pasa a processSession, y corre
+      // recién cuando OcrEngine lo pide. Lo que el Orchestrator sí construye
+      // y se puede afirmar acá es el descriptor de la página re-OCR-eada.
+      expect(engines.ocr.processSession).toHaveBeenCalledWith(
+        [expect.objectContaining({ documentId: "doc-1", pageIndex: 0 })],
+        expect.any(Function),
         expect.anything(),
       );
-      expect(engines.ocr.processPages).toHaveBeenCalled();
       expect(engines.regex.process).toHaveBeenCalled();
       expect(engines.ner.processPages).toHaveBeenCalledWith(
         [expect.objectContaining({ documentId: "doc-1", pageIndex: 0 })],
@@ -1103,11 +1104,11 @@ describe("Orchestrator — edge cases", () => {
 
       const stageChangedSpy = vi.fn();
       bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_STAGE_CHANGED, stageChangedSpy);
-      (engines.ocr.processPages as ReturnType<typeof vi.fn>).mockClear();
+      (engines.ocr.processSession as ReturnType<typeof vi.fn>).mockClear();
 
       await orchestrator.reanalyze("doc-1", { ocr: { languages: ["eng"] } });
 
-      expect(engines.ocr.processPages).not.toHaveBeenCalled();
+      expect(engines.ocr.processSession).not.toHaveBeenCalled();
       expect(stageChangedSpy).not.toHaveBeenCalled();
       expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
     });
@@ -1143,23 +1144,21 @@ describe("Orchestrator — edge cases", () => {
         await orchestrator.importDocument(createImportInput());
         expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
 
-        (engines.render.rasterizePage as ReturnType<typeof vi.fn>).mockClear();
-        (engines.ocr.processPages as ReturnType<typeof vi.fn>).mockClear();
+        (engines.ocr.processSession as ReturnType<typeof vi.fn>).mockClear();
         (engines.regex.process as ReturnType<typeof vi.fn>).mockClear();
         (engines.grouping.dropOccurrences as ReturnType<typeof vi.fn>).mockClear();
 
         await orchestrator.reanalyze("doc-1", { ocr: { languages: ["eng"] } });
 
-        // La región SE re-escanea: rasterizePage recibe el bbox de la
-        // región (recorte, no página completa) y ocr.processPages corre.
-        expect(engines.render.rasterizePage).toHaveBeenCalledWith(
-          "doc-1",
-          0,
-          expect.any(Number),
+        // La región SE re-escanea: el descriptor que llega a processSession
+        // lleva `region: region.bbox` (recorte, no página completa) — la
+        // rasterización en sí la dispara el productor recién cuando OcrEngine
+        // la pide (ADR-143 §1), no el Orchestrator de entrada.
+        expect(engines.ocr.processSession).toHaveBeenCalledWith(
+          [expect.objectContaining({ documentId: "doc-1", pageIndex: 0, region: region.bbox })],
+          expect.any(Function),
           expect.anything(),
-          region.bbox,
         );
-        expect(engines.ocr.processPages).toHaveBeenCalled();
         expect(engines.grouping.dropOccurrences).toHaveBeenCalledWith("doc-1", {
           pageIndices: [0],
         });

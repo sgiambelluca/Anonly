@@ -170,13 +170,15 @@ describe("Orchestrator — contract tests", () => {
       expect.any(ArrayBuffer),
       undefined,
     );
-    expect(engines.render.rasterizePage).toHaveBeenCalledWith(
-      "doc-1",
-      0,
-      expect.any(Number),
+    // ADR-143 §1: rasterizePage ya no lo llama el Orchestrator directo — vive
+    // dentro del productor que le pasa a processSession, y corre recién
+    // cuando OcrEngine lo pide (§3). Lo que el Orchestrator construye y se
+    // puede afirmar acá es el descriptor de la página.
+    expect(engines.ocr.processSession).toHaveBeenCalledWith(
+      [expect.objectContaining({ documentId: "doc-1", pageIndex: 0 })],
+      expect.any(Function),
       expect.anything(),
     );
-    expect(engines.ocr.processPages).toHaveBeenCalled();
   });
 
   it("no textless pages skip OCR stage", async () => {
@@ -193,7 +195,7 @@ describe("Orchestrator — contract tests", () => {
 
     await orchestrator.importDocument(createImportInput());
 
-    expect(engines.ocr.processPages).not.toHaveBeenCalled();
+    expect(engines.ocr.processSession).not.toHaveBeenCalled();
     expect(engines.render.rasterizePage).not.toHaveBeenCalled();
   });
 
@@ -223,16 +225,15 @@ describe("Orchestrator — contract tests", () => {
 
     await orchestrator.importDocument(createImportInput());
 
-    // ADR-065 §5: rasterizePage recibe el bbox de la región como quinto
-    // argumento — es el recorte, no la página completa, lo que se manda a OCR.
-    expect(engines.render.rasterizePage).toHaveBeenCalledWith(
-      "doc-1",
-      0,
-      expect.any(Number),
+    // ADR-065 §5/ADR-143 §1: el descriptor que llega a processSession lleva
+    // `region: region.bbox` — es el recorte, no la página completa, lo que se
+    // manda a OCR. La rasterización en sí la dispara el productor recién
+    // cuando OcrEngine la pide, no el Orchestrator de entrada.
+    expect(engines.ocr.processSession).toHaveBeenCalledWith(
+      [expect.objectContaining({ documentId: "doc-1", pageIndex: 0, region: region.bbox })],
+      expect.any(Function),
       expect.anything(),
-      region.bbox,
     );
-    expect(engines.ocr.processPages).toHaveBeenCalled();
     expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
   });
 
@@ -257,17 +258,17 @@ describe("Orchestrator — contract tests", () => {
         source: "ocr" as const,
       },
     ];
-    vi.spyOn(engines.ocr, "processPages").mockImplementation(async (inputs) => {
-      cache.set(`ocr-words:${inputs[0]?.documentId}:${inputs[0]?.pageIndex}`, words);
+    vi.spyOn(engines.ocr, "processSession").mockImplementation(async (requests) => {
+      cache.set(`ocr-words:${requests[0]?.documentId}:${requests[0]?.pageIndex}`, words);
       bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
-        documentId: inputs[0]?.documentId ?? "",
-        pageIndex: inputs[0]?.pageIndex ?? 0,
+        documentId: requests[0]?.documentId ?? "",
+        pageIndex: requests[0]?.pageIndex ?? 0,
         wordCount: words.length,
         confidence: 0.9,
       });
-      return inputs.map((i) => ({
-        documentId: i.documentId,
-        pageIndex: i.pageIndex,
+      return requests.map((r) => ({
+        documentId: r.documentId,
+        pageIndex: r.pageIndex,
         words,
         confidence: 0.9,
         durationMs: 1,
@@ -339,17 +340,17 @@ describe("Orchestrator — contract tests", () => {
       source: "ocr",
       confidence: 0.85,
     });
-    vi.spyOn(engines.ocr, "processPages").mockImplementation(async (inputs) => {
-      cache.set(`ocr-words:${inputs[0]?.documentId}:${inputs[0]?.pageIndex}`, [ocrWord]);
+    vi.spyOn(engines.ocr, "processSession").mockImplementation(async (requests) => {
+      cache.set(`ocr-words:${requests[0]?.documentId}:${requests[0]?.pageIndex}`, [ocrWord]);
       bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
-        documentId: inputs[0]?.documentId ?? "",
-        pageIndex: inputs[0]?.pageIndex ?? 0,
+        documentId: requests[0]?.documentId ?? "",
+        pageIndex: requests[0]?.pageIndex ?? 0,
         wordCount: 1,
         confidence: 0.85,
       });
-      return inputs.map((i) => ({
-        documentId: i.documentId,
-        pageIndex: i.pageIndex,
+      return requests.map((r) => ({
+        documentId: r.documentId,
+        pageIndex: r.pageIndex,
         words: [ocrWord],
         confidence: 0.85,
         durationMs: 1,
@@ -562,7 +563,7 @@ describe("Orchestrator — contract tests", () => {
     expect(callOrder).toEqual(["startSession", "regex.process"]);
   });
 
-  it("textless pages rasterized via RenderEngine before OCR dispatch", async () => {
+  it("OCR dispatch passes a producer that rasterizes via RenderEngine on demand (ADR-143 §1)", async () => {
     const bus = createRealBus();
     const engines = createMockEngines();
     const pdfOutput = createPdfEngineOutput({
@@ -575,12 +576,26 @@ describe("Orchestrator — contract tests", () => {
       callOrder.push("rasterizePage");
       return { data: new Uint8ClampedArray(4), width: 1, height: 1, colorSpace: "srgb" as const };
     });
-    (engines.ocr.processPages as ReturnType<typeof vi.fn>).mockImplementation(
-      async (inputs: ReadonlyArray<{ documentId: string; pageIndex: number }>) => {
-        callOrder.push("ocr.processPages");
-        return inputs.map((i) => ({
-          documentId: i.documentId,
-          pageIndex: i.pageIndex,
+    // ADR-143 §1: la rasterización ya no la dispara el Orchestrator por
+    // adelantado — vive en el productor que recibe processSession, y este
+    // motor (mockeado) es quien decide cuándo invocarlo. Un OcrEngine real
+    // lo llama uno por consumidor, bajo demanda (§3); acá alcanza con
+    // invocarlo para probar que el productor efectivamente rasteriza.
+    (engines.ocr.processSession as ReturnType<typeof vi.fn>).mockImplementation(
+      async (requests, produce: (request: unknown, signal: AbortSignal) => Promise<unknown>) => {
+        callOrder.push("ocr.processSession");
+        const controller = new AbortController();
+        for (const request of requests as ReadonlyArray<{
+          readonly documentId: string;
+          readonly pageIndex: number;
+        }>) {
+          await produce(request, controller.signal);
+        }
+        return (
+          requests as ReadonlyArray<{ readonly documentId: string; readonly pageIndex: number }>
+        ).map((r) => ({
+          documentId: r.documentId,
+          pageIndex: r.pageIndex,
           words: [],
           confidence: 1,
           durationMs: 1,
@@ -598,7 +613,10 @@ describe("Orchestrator — contract tests", () => {
 
     await orchestrator.importDocument(createImportInput());
 
-    expect(callOrder).toEqual(["rasterizePage", "ocr.processPages"]);
+    // processSession arranca antes de que se rasterice nada: es el productor
+    // que recibe quien dispara rasterizePage, bajo demanda — al revés del
+    // orden que regía antes de ADR-143.
+    expect(callOrder).toEqual(["ocr.processSession", "rasterizePage"]);
     expect(engines.render.loadDocument).toHaveBeenCalledBefore(
       engines.render.rasterizePage as ReturnType<typeof vi.fn>,
     );

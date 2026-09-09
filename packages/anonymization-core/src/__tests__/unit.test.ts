@@ -2367,18 +2367,18 @@ describe("PIPELINE_PROGRESS (Orchestrator.md §8, ADR-034 §4)", () => {
       textlessPages: [0, 1],
     });
     wireHappyPathSpies(engines, bus, { pdfOutput });
-    vi.spyOn(engines.ocr, "processPages").mockImplementation(async (inputs) => {
+    vi.spyOn(engines.ocr, "processSession").mockImplementation(async (requests) => {
       const outputs = [];
-      for (const input of inputs) {
+      for (const request of requests) {
         bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
-          documentId: input.documentId,
-          pageIndex: input.pageIndex,
+          documentId: request.documentId,
+          pageIndex: request.pageIndex,
           wordCount: 0,
           confidence: 0.9,
         });
         outputs.push({
-          documentId: input.documentId,
-          pageIndex: input.pageIndex,
+          documentId: request.documentId,
+          pageIndex: request.pageIndex,
           words: [],
           confidence: 0.9,
           durationMs: 1,
@@ -2428,18 +2428,18 @@ describe("PIPELINE_PROGRESS (Orchestrator.md §8, ADR-034 §4)", () => {
       textlessPages: [0],
     });
     wireHappyPathSpies(engines, bus, { pdfOutput });
-    vi.spyOn(engines.ocr, "processPages").mockImplementation(async (inputs) => {
+    vi.spyOn(engines.ocr, "processSession").mockImplementation(async (requests) => {
       const outputs = [];
-      for (const input of inputs) {
+      for (const request of requests) {
         bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
-          documentId: input.documentId,
-          pageIndex: input.pageIndex,
+          documentId: request.documentId,
+          pageIndex: request.pageIndex,
           wordCount: 3,
           confidence: 0.9,
         });
         outputs.push({
-          documentId: input.documentId,
-          pageIndex: input.pageIndex,
+          documentId: request.documentId,
+          pageIndex: request.pageIndex,
           words: [],
           confidence: 0.9,
           durationMs: 1,
@@ -2495,18 +2495,18 @@ describe("PIPELINE_PROGRESS (Orchestrator.md §8, ADR-034 §4)", () => {
       ocrRegions: [region],
     });
     wireHappyPathSpies(engines, bus, { pdfOutput });
-    vi.spyOn(engines.ocr, "processPages").mockImplementation(async (inputs) => {
+    vi.spyOn(engines.ocr, "processSession").mockImplementation(async (requests) => {
       const outputs = [];
-      for (const input of inputs) {
+      for (const request of requests) {
         bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
-          documentId: input.documentId,
-          pageIndex: input.pageIndex,
+          documentId: request.documentId,
+          pageIndex: request.pageIndex,
           wordCount: 0,
           confidence: 0.9,
         });
         outputs.push({
-          documentId: input.documentId,
-          pageIndex: input.pageIndex,
+          documentId: request.documentId,
+          pageIndex: request.pageIndex,
           words: [],
           confidence: 0.9,
           durationMs: 1,
@@ -2601,20 +2601,20 @@ describe("PIPELINE_PROGRESS (Orchestrator.md §8, ADR-034 §4)", () => {
       textlessPages: [0],
     });
     wireHappyPathSpies(engines, bus, { pdfOutput });
-    vi.spyOn(engines.ocr, "processPages").mockImplementation(async (inputs) => {
+    vi.spyOn(engines.ocr, "processSession").mockImplementation(async (requests) => {
       // Emite OCR_PAGE_FINISHED dos veces para la misma (única) página
       // tracked, simulando una entrega duplicada del bus.
       for (let i = 0; i < 2; i += 1) {
         bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
-          documentId: inputs[0]?.documentId ?? "",
+          documentId: requests[0]?.documentId ?? "",
           pageIndex: 0,
           wordCount: 0,
           confidence: 0.9,
         });
       }
-      return inputs.map((input) => ({
-        documentId: input.documentId,
-        pageIndex: input.pageIndex,
+      return requests.map((request) => ({
+        documentId: request.documentId,
+        pageIndex: request.pageIndex,
         words: [],
         confidence: 0.9,
         durationMs: 1,
