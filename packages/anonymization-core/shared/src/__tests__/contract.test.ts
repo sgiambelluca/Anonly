@@ -266,10 +266,11 @@ describe("@anonly/shared — Contracts", () => {
   describe("EngineErrorCode", () => {
     it("tiene exactamente el set completo de códigos de Contracts.md §4", () => {
       const expected = [
-        // PDF (4)
+        // PDF (5)
         "PDF_PASSWORD_REQUIRED",
         "PDF_INVALID",
         "PDF_CORRUPTED",
+        "PDF_PAGE_ROTATED", // ADR-140
         "PDF_TIMEOUT",
         // OCR (3)
         "OCR_PAGE_FAILED",

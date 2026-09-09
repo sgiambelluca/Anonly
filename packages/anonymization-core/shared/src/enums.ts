@@ -196,6 +196,10 @@ export enum EngineErrorCode {
   PDF_PASSWORD_REQUIRED = "PDF_PASSWORD_REQUIRED",
   PDF_INVALID = "PDF_INVALID",
   PDF_CORRUPTED = "PDF_CORRUPTED",
+  // ADR-140: página con `/Rotate` (heredado o propio) distinto de 0 que
+  // produce al menos una palabra nativa. No aplica a una página rotada sin
+  // texto nativo — ese camino va entero por OCR, cuyo ráster ya está rotado.
+  PDF_PAGE_ROTATED = "PDF_PAGE_ROTATED",
   PDF_TIMEOUT = "PDF_TIMEOUT",
   // OCR
   OCR_PAGE_FAILED = "OCR_PAGE_FAILED",
