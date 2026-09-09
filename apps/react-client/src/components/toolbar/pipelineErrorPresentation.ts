@@ -47,6 +47,14 @@ export interface PipelineErrorPresentation {
  */
 const MESSAGE_BY_CODE: Readonly<Partial<Record<EngineErrorCode, string>>> = {
   [EngineErrorCode.PDF_INVALID]: "El archivo no es un PDF válido. Probá con otro documento.",
+  /*
+   * ADR-140: el guard de página rotada con texto nativo. El mensaje evita dos
+   * cosas a propósito — no dice "/Rotate" (jerga que no ayuda a nadie) y no
+   * afirma que el archivo esté dañado (es un PDF válido; es una limitación de
+   * esta versión, no un defecto del documento).
+   */
+  [EngineErrorCode.PDF_PAGE_ROTATED]:
+    "Una de las páginas de este PDF está girada y esta versión no puede analizarla de forma segura. Es un PDF válido — probá con otro documento por ahora.",
   [EngineErrorCode.NER_MODEL_MISSING]:
     "No se pudo cargar el detector de nombres, así que el documento no se puede analizar completo. Recargá la página y probá de nuevo.",
   [EngineErrorCode.EXPORT_FAILED]: "No se pudo exportar el documento. Probá de nuevo.",
