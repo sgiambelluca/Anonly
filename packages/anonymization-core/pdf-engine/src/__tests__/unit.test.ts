@@ -1095,6 +1095,7 @@ describe("PdfEngine — unit tests", () => {
       vi.mocked(getDocument).mockReturnValue(
         mockGetDocumentResult(
           createMockPdfDocument(1, () => ({
+            rotate: 0,
             getViewport: vi.fn(() => ({ width: 596, height: 842 })),
             getTextContent: vi.fn(() =>
               Promise.resolve({
@@ -1130,6 +1131,7 @@ describe("PdfEngine — unit tests", () => {
               // extensión (sin swap de width/height), origen en la esquina
               // opuesta.
               return {
+                rotate: 0,
                 getViewport: vi.fn(() => ({ width: 595, height: 800 })),
                 getTextContent: vi.fn(() =>
                   Promise.resolve({
@@ -1143,6 +1145,7 @@ describe("PdfEngine — unit tests", () => {
             }
             // 270°: dir=(0,-1), up=(1,0). Swap de width/height, igual que 90°.
             return {
+              rotate: 0,
               getViewport: vi.fn(() => ({ width: 595, height: 800 })),
               getTextContent: vi.fn(() =>
                 Promise.resolve({
@@ -1176,6 +1179,7 @@ describe("PdfEngine — unit tests", () => {
       vi.mocked(getDocument).mockReturnValue(
         mockGetDocumentResult(
           createMockPdfDocument(1, () => ({
+            rotate: 0,
             getViewport: vi.fn(() => ({ width: 595, height: 842 })),
             getTextContent: vi.fn(() =>
               Promise.resolve({
@@ -1202,6 +1206,7 @@ describe("PdfEngine — unit tests", () => {
       vi.mocked(getDocument).mockReturnValue(
         mockGetDocumentResult(
           createMockPdfDocument(1, () => ({
+            rotate: 0,
             getViewport: vi.fn(() => ({ width: 595, height: 800 })),
             getTextContent: vi.fn(() =>
               Promise.resolve({
@@ -1249,6 +1254,7 @@ describe("PdfEngine — unit tests", () => {
       vi.mocked(getDocument).mockReturnValue(
         mockGetDocumentResult(
           createMockPdfDocument(1, () => ({
+            rotate: 0,
             getViewport: vi.fn(() => ({ width: 595, height: pageHeight })),
             getTextContent: vi.fn(() =>
               Promise.resolve({
@@ -1291,6 +1297,7 @@ describe("PdfEngine — unit tests", () => {
       vi.mocked(getDocument).mockReturnValue(
         mockGetDocumentResult(
           createMockPdfDocument(1, () => ({
+            rotate: 0,
             getViewport: vi.fn(() => ({ width: 595, height: 842 })),
             getTextContent: vi.fn(() =>
               Promise.resolve({
@@ -1579,6 +1586,7 @@ describe("PdfEngine — unit tests", () => {
       vi.mocked(getDocument).mockReturnValue(
         mockGetDocumentResult(
           createMockPdfDocument(1, () => ({
+            rotate: 0,
             getViewport: vi.fn(() => ({ width: 800, height: 800 })),
             getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
             getOperatorList: vi.fn(() => Promise.resolve({ fnArray, argsArray })),

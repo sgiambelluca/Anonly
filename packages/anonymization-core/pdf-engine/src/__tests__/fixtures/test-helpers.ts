@@ -341,6 +341,10 @@ export function createMockPage(
   annotations?: ReadonlyArray<MockAnnotationSpec>,
   pageTextOps?: ReadonlyArray<MockAnnotationInnerOp>,
   textStyles?: Readonly<Record<string, { readonly ascent: number; readonly descent: number }>>,
+  // ADR-140 §2: `PDFPageProxy.rotate` real nunca es `undefined` — default 0
+  // (sin rotación), como cualquier página nativa del corpus existente. Los
+  // tests de ADR-140 pasan un valor distinto de 0 explícitamente.
+  rotate = 0,
 ): Record<string, unknown> {
   const items = textItems ?? [
     { str: `Page${pageIndex}Word1`, x: 50, y: 800, width: 50, height: 12 },
@@ -349,6 +353,7 @@ export function createMockPage(
   const size = pageSize ?? { width: 595, height: 842 };
 
   return {
+    rotate,
     getViewport: vi.fn(() => ({ width: size.width, height: size.height })),
     getTextContent: vi.fn(() =>
       Promise.resolve({
@@ -407,6 +412,7 @@ export function createMockPdfDocument(
       pages.push({});
     } else if (options?.textless) {
       pages.push({
+        rotate: 0,
         getViewport: vi.fn(() => ({ width: 595, height: 842 })),
         getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
         // ADR-066 §1: parsePage llama getOperatorList() en TODA página (el

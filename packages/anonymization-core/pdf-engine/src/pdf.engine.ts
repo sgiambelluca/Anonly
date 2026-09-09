@@ -22,6 +22,7 @@ import { getDocument, OPS, type PDFDocumentProxy, type PDFPageProxy } from "pdfj
 import {
   PdfCorruptedError,
   PdfInvalidError,
+  PdfPageRotatedError,
   PdfPasswordRequiredError,
   PdfTimeoutError,
 } from "./pdf.errors.js";
@@ -2179,6 +2180,18 @@ async function parsePage(
       pageIndex,
       merged: joinStats.merged,
     });
+  }
+
+  /*
+   * ADR-140 §2/§3: una página con `/Rotate` distinto de 0 que produce al
+   * menos una palabra nativa (content stream o anotación) mezcla el marco de
+   * `viewport` —que ya aplicó la rotación, y del que salen `pageWidth`/
+   * `pageHeight`— con el de `item.transform`, que no. Una página rotada SIN
+   * texto nativo no entra acá: va entera por OCR, cuyo ráster ya está
+   * rotado por el mismo `getViewport()` (consistente, ADR-140 §3).
+   */
+  if (pageProxy.rotate !== 0 && (contentWords.length > 0 || annotationWords.length > 0)) {
+    throw new PdfPageRotatedError(documentId, pageIndex, pageProxy.rotate);
   }
 
   // ADR-066 §1: el texto de anotaciones se suma al del content stream — las

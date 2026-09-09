@@ -179,6 +179,7 @@ describe("PdfEngine — edge case tests", () => {
           numPages: 2,
           getPage: vi.fn((_pageNum: number) =>
             Promise.resolve({
+              rotate: 0,
               getViewport: vi.fn(() => ({ width: 595, height: 842 })),
               getTextContent: vi.fn(() =>
                 Promise.resolve({
@@ -364,11 +365,13 @@ describe("PdfEngine — edge case tests", () => {
             const textless = i === 1;
             return textless
               ? {
+                  rotate: 0,
                   getViewport: vi.fn(() => ({ width: 595, height: 842 })),
                   getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
                   getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
                 }
               : {
+                  rotate: 0,
                   getViewport: vi.fn(() => ({ width: 595, height: 842 })),
                   getTextContent: vi.fn(() =>
                     Promise.resolve({
@@ -398,6 +401,7 @@ describe("PdfEngine — edge case tests", () => {
       vi.mocked(getDocument).mockReturnValue(
         mockGetDocumentResult(
           createMockPdfDocument(1, () => ({
+            rotate: 0,
             getViewport: vi.fn(() => ({ width: 595, height: 500 })),
             getTextContent: vi.fn(() =>
               Promise.resolve({
