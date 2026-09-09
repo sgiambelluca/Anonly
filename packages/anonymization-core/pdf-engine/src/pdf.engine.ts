@@ -325,15 +325,76 @@ function sumGlyphAdvances(
  * ADR-097 §5: cuántos items multi-palabra encontraron su lugar en el flujo. Solo esos
  * consultan la tabla, así que solo esos aportan a la pregunta que decide si
  * alguna vez conviene la opción B de `Post_Hito10.8_Pendientes.md` §24.
+ * `merged` es de ADR-142 §4: cuántas veces el último token de un item y el
+ * primero del siguiente resultaron ser la misma palabra partida por pdf.js.
  */
 interface TextRunJoinStats {
   readonly eligible: number;
   readonly joined: number;
+  readonly merged: number;
 }
 
 interface ConvertedTextItems {
   readonly words: ReadonlyArray<Word>;
   readonly joinStats: TextRunJoinStats;
+}
+
+/*
+ * ADR-142 §1.6: mismo factor con el que el extractor de pdf.js decide que un
+ * hueco entre glifos no es un espacio (`TRACKING_SPACE_FACTOR`,
+ * pdf.worker.mjs). Si el hueco entre el último glifo de un item y el primero
+ * del siguiente fuera mayor, el propio pdf.js habría sintetizado un espacio y
+ * no estaríamos ante una palabra partida — así que reusar su umbral no es una
+ * elección arbitraria, es la misma pregunta que ya contestó el extractor.
+ */
+const TRACKING_SPACE_FACTOR = 0.102;
+
+/** ADR-142 §1.4: mismo versor de avance/ascenso, con tolerancia de punto flotante. */
+function vectorsClose(a: Vector2, b: Vector2, epsilon = 1e-9): boolean {
+  return Math.abs(a.x - b.x) <= epsilon && Math.abs(a.y - b.y) <= epsilon;
+}
+
+/*
+ * ADR-142 §2: envolvente axis-aligned de dos cajas de tinta ya orientadas
+ * igual (condición 4 del ADR ya lo garantiza antes de llegar acá). Con
+ * kerning negativo los fragmentos pueden superponerse; la envolvente sigue
+ * siendo correcta porque toma mín/máx de las cuatro coordenadas.
+ */
+function envelopeOfInkBoxes(a: BoundingBox, b: BoundingBox): BoundingBox {
+  const xMin = Math.min(a.x, b.x);
+  const yMin = Math.min(a.y, b.y);
+  const xMax = Math.max(a.x + a.width, b.x + b.width);
+  const yMax = Math.max(a.y + a.height, b.y + b.height);
+  return {
+    x: xMin,
+    y: yMin,
+    width: xMax - xMin,
+    height: yMax - yMin,
+    ...(a.rotation !== undefined ? { rotation: a.rotation } : {}),
+  };
+}
+
+/**
+ * ADR-142 §2: concatena dos fragmentos de una palabra partida entre items —
+ * sin separador, normalizado NFC **después** de concatenar (un diacrítico
+ * combinante partido entre items solo compone así).
+ */
+function mergeSplitWord(a: Word, b: Word): Word {
+  return {
+    text: (a.text + b.text).normalize("NFC"),
+    bbox: envelopeOfInkBoxes(a.bbox, b.bbox),
+    pageIndex: a.pageIndex,
+    confidence: 1.0,
+    source: "pdf",
+  };
+}
+
+/** ADR-142 §1: lo que se necesita del último token alineado de un item para decidir si el próximo lo continúa. */
+interface PendingWordTail {
+  readonly dir: Vector2;
+  readonly up: Vector2;
+  readonly height: number;
+  readonly lastGlyphIndex: number;
 }
 
 function convertTextItemsToWords(
@@ -347,9 +408,20 @@ function convertTextItemsToWords(
   const words: Word[] = [];
   let eligible = 0;
   let joined = 0;
+  let merged = 0;
+
+  // ADR-142 §1: cola del item anterior, candidata a empalmarse con el
+  // primero del próximo. `undefined` cuando el anterior no calificó (no
+  // alineó, terminó en espacio, o hubo un hueco/salto de línea en el medio).
+  let pendingTail: PendingWordTail | undefined;
 
   for (const item of textContent.items) {
-    if (!item.str || item.str.trim().length === 0 || !item.transform) continue;
+    if (!item.str || item.str.trim().length === 0 || !item.transform) {
+      // Un item vacío/blanco es, por definición, un espacio real entre lo
+      // que vino antes y lo que sigue: nunca es una palabra partida.
+      pendingTail = undefined;
+      continue;
+    }
 
     const str = item.str;
     const reportedX = item.transform[4] ?? 0;
@@ -378,31 +450,14 @@ function convertTextItemsToWords(
     const extents = fontExtentsOf(textContent.styles, item.fontName);
     const tokens = [...str.matchAll(/\S+/g)];
 
-    if (tokens.length <= 1) {
-      const text = (tokens[0]?.[0] ?? str).normalize("NFC");
-      const bbox = inkBoxFromParallelogram(
-        { x: originX, y: originY },
-        dir,
-        up,
-        width,
-        height,
-        pageHeight,
-        extents,
-      );
-      words.push({ text, bbox, pageIndex, confidence: 1.0, source: "pdf" });
-      continue;
-    }
-
     /*
-     * ADR-102 §2: se ubica el arranque del item en el flujo de glifos y se
-     * alinea carácter a carácter. Si alinea, el origen y el ancho de cada
-     * token salen de los glifos reales; si no, queda el ancho promedio de
-     * ADR-020 §1 — el camino de reserva, intacto (ADR-102 §4).
-     */
-    eligible++;
-    /*
-     * ADR-108 §4: `getTextContent` aplica `Tw` a todo espacio y el flujo solo a
-     * los que lo llevan (§1), así que en un run con espacios iniciales de
+     * ADR-142 §3: la alineación se calcula para TODO item, tenga uno o más
+     * tokens — el fragmento típico de una palabra partida ("N") es
+     * justamente un item de un solo token, y sin su glifo de arranque acá el
+     * empalme de más abajo nunca tiene a quién mirar.
+     *
+     * ADR-108 §4: `getTextContent` aplica `Tw` a todo espacio y el flujo solo
+     * a los que lo llevan (§1), así que en un run con espacios iniciales de
      * fuente compuesta los dos orígenes difieren — 58,3 pt en la línea de la
      * fecha de la pericia. Ese es exactamente el par que mide ADR-068: el
      * reportado es `from` y el que dibuja el renderer es `to`. Se busca por el
@@ -414,43 +469,123 @@ function convertTextItemsToWords(
         ? reportedStart
         : findGlyphAt(glyphs, glyphIndex, originX, originY);
     const mapping = start < 0 ? undefined : alignToGlyphs(glyphs, str, start);
-    if (mapping !== undefined) joined++;
-    const charWidth = str.length > 0 ? width / str.length : 0;
-    for (const token of tokens) {
-      const tokenText = token[0];
-      if (tokenText === undefined) continue;
-      const offset = token.index ?? 0;
-      const end = offset + tokenText.length;
-      const anchor = mapping === undefined ? undefined : glyphs[mapping[offset] ?? -1];
-      const advance = charWidth * offset;
-      const tokenWidth =
-        mapping === undefined
-          ? charWidth * tokenText.length
-          : sumGlyphAdvances(glyphs, mapping, offset, end);
-      const tokenOrigin: Vector2 =
-        anchor !== undefined
-          ? { x: anchor.x, y: anchor.y }
-          : { x: originX + dir.x * advance, y: originY + dir.y * advance };
+
+    if (tokens.length > 1) {
+      // ADR-097 §5: solo los items multi-palabra consultan la tabla de
+      // avances; `merged` (ADR-142 §4) cuenta aparte, incluye items de un
+      // solo token y no cambia el significado de este contador.
+      eligible++;
+      if (mapping !== undefined) joined++;
+    }
+
+    const itemWords: Word[] = [];
+    if (tokens.length <= 1) {
+      const text = (tokens[0]?.[0] ?? str).normalize("NFC");
       const bbox = inkBoxFromParallelogram(
-        tokenOrigin,
+        { x: originX, y: originY },
         dir,
         up,
-        tokenWidth,
+        width,
         height,
         pageHeight,
         extents,
       );
-      words.push({
-        text: tokenText.normalize("NFC"),
-        bbox,
-        pageIndex,
-        confidence: 1.0,
-        source: "pdf",
-      });
+      itemWords.push({ text, bbox, pageIndex, confidence: 1.0, source: "pdf" });
+    } else {
+      const charWidth = str.length > 0 ? width / str.length : 0;
+      for (const token of tokens) {
+        const tokenText = token[0];
+        if (tokenText === undefined) continue;
+        const offset = token.index ?? 0;
+        const end = offset + tokenText.length;
+        const anchor = mapping === undefined ? undefined : glyphs[mapping[offset] ?? -1];
+        const advance = charWidth * offset;
+        const tokenWidth =
+          mapping === undefined
+            ? charWidth * tokenText.length
+            : sumGlyphAdvances(glyphs, mapping, offset, end);
+        const tokenOrigin: Vector2 =
+          anchor !== undefined
+            ? { x: anchor.x, y: anchor.y }
+            : { x: originX + dir.x * advance, y: originY + dir.y * advance };
+        const bbox = inkBoxFromParallelogram(
+          tokenOrigin,
+          dir,
+          up,
+          tokenWidth,
+          height,
+          pageHeight,
+          extents,
+        );
+        itemWords.push({
+          text: tokenText.normalize("NFC"),
+          bbox,
+          pageIndex,
+          confidence: 1.0,
+          source: "pdf",
+        });
+      }
     }
+
+    /*
+     * ADR-142 §1: las seis condiciones. La 1 (los dos items alinearon) y la 3
+     * (sin espacio de por medio) ya están cubiertas por `mapping !== undefined`
+     * acá y por `pendingTail`/`startsWithSpace` — un item que terminó en
+     * espacio nunca deja `pendingTail`, y uno que empieza con espacio no
+     * puede empalmar con lo anterior.
+     */
+    const firstWord = itemWords[0];
+    const startsWithSpace = /^\s/.test(str);
+    if (
+      pendingTail !== undefined &&
+      firstWord !== undefined &&
+      mapping !== undefined &&
+      !startsWithSpace &&
+      vectorsClose(pendingTail.dir, dir) &&
+      vectorsClose(pendingTail.up, up)
+    ) {
+      const b0Index = mapping[0];
+      // Condición 2: el primer glifo de B es exactamente el siguiente del
+      // último de A en el flujo continuo — un glifo en el medio (de espacio
+      // o de cualquier otra cosa) cancela el empalme.
+      if (b0Index !== undefined && b0Index === pendingTail.lastGlyphIndex + 1) {
+        const glyphA = glyphs[pendingTail.lastGlyphIndex];
+        const glyphB = glyphs[b0Index];
+        if (glyphA !== undefined && glyphB !== undefined) {
+          const deltaX = glyphB.x - (glyphA.x + dir.x * glyphA.advance);
+          const deltaY = glyphB.y - (glyphA.y + dir.y * glyphA.advance);
+          // Condición 6: hueco a lo largo del avance, proyectado sobre `dir`.
+          const alongAdvance = deltaX * dir.x + deltaY * dir.y;
+          // Condición 5: desplazamiento transversal, proyectado sobre `up`.
+          const transverse = Math.abs(deltaX * up.x + deltaY * up.y);
+          if (
+            transverse <= SAME_LINE_TOLERANCE &&
+            alongAdvance < TRACKING_SPACE_FACTOR * pendingTail.height
+          ) {
+            const previousWord = words.pop();
+            if (previousWord !== undefined) {
+              itemWords[0] = mergeSplitWord(previousWord, firstWord);
+              merged++;
+            }
+          }
+        }
+      }
+    }
+
+    words.push(...itemWords);
+
+    // ADR-142 §1: cola de ESTE item para el próximo — según su propia
+    // alineación real, sin importar si su propio primer token se acaba de
+    // empalmar con el anterior (transitividad: la regla se pliega de a pares).
+    const endsWithSpace = /\s$/.test(str);
+    const lastGlyphIndex = mapping?.at(-1);
+    pendingTail =
+      mapping !== undefined && !endsWithSpace && lastGlyphIndex !== undefined && lastGlyphIndex >= 0
+        ? { dir, up, height, lastGlyphIndex }
+        : undefined;
   }
 
-  return { words, joinStats: { eligible, joined } };
+  return { words, joinStats: { eligible, joined, merged } };
 }
 
 /*
@@ -2030,6 +2165,19 @@ async function parsePage(
       pageIndex,
       joined: joinStats.joined,
       eligible: joinStats.eligible,
+    });
+  }
+
+  // ADR-142 §4: sin esta cuenta, "¿cada cuánto pasa esto en un documento
+  // real?" tampoco tiene cómo contestarse sin volver a instrumentar a mano.
+  // Un merge que no ocurre no es un error, es la ausencia de una palabra
+  // partida — y `merged` puede ser > 0 aunque `joinStats.eligible` sea 0
+  // (el fragmento típico de una palabra partida es un item de un solo token).
+  if (joinStats.merged > 0) {
+    logger.debug("Palabras empalmadas entre items adyacentes (ADR-142).", {
+      documentId,
+      pageIndex,
+      merged: joinStats.merged,
     });
   }
 
