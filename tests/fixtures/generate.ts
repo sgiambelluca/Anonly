@@ -112,6 +112,173 @@ export async function generateText10p(): Promise<Uint8Array> {
 }
 
 /**
+ * Páginas con una entidad conocida (Person + DNI), cada 10 —0, 10, 20, 30,
+ * 40—: cinco puntos de verificación repartidos a lo largo del documento, ni
+ * tan densos como para que cada página compita por recursos con la anterior
+ * ni tan pocos como para no poder confirmar "el pipeline procesó el
+ * documento entero" (H-10, `Post_Hito10.8_Pendientes.md`-style validación de
+ * salida).
+ */
+export const TEXT_50P_ENTITY_PAGE_INDICES: ReadonlyArray<number> = [0, 10, 20, 30, 40];
+
+/** Semilla fija: `text-50p` es reproducible entre corridas, igual que el dataset de referencia. */
+const TEXT_50P_SEED = "text-50p-v1";
+
+/**
+ * 50 páginas de texto ficticio, densidad documentada (H-10, ADR-146 §15.2
+ * punto 2): ~35-45 palabras por página, dos o tres líneas de wrap. Ninguna
+ * página es idéntica a otra —ni siquiera las neutras, que llevan su propio
+ * número— a propósito: rasterizadas (ver `rasterizeToScannedPdf`), 50
+ * imágenes idénticas favorecerían cualquier deduplicación de caché y
+ * esconderían el caso real que H-10 mide.
+ *
+ * Cinco páginas (`TEXT_50P_ENTITY_PAGE_INDICES`) llevan una entidad conocida
+ * de cada camino de detección — un nombre (NER) y un DNI (Regex) — para que
+ * la medición tenga un resultado de calidad verificable, no solo un tiempo.
+ * Las otras 45 son texto neutro: contexto de expediente genérico que no
+ * dispara ningún detector, variado por página para que la imagen cambie.
+ */
+export async function generateText50p(): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const documentId = "fixture-text-50p";
+
+  for (let index = 0; index < 50; index++) {
+    const pageNumber = index + 1;
+    const text = TEXT_50P_ENTITY_PAGE_INDICES.includes(index)
+      ? buildText50pEntityParagraph(documentId, index, pageNumber)
+      : buildText50pNeutralParagraph(pageNumber);
+
+    const page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+    const lines = wrapText(text, WRAP_CHARS);
+    let y = MARGIN_Y;
+    for (const line of lines) {
+      page.drawText(line, { x: MARGIN_X, y, size: FONT_SIZE, font, color: rgb(0, 0, 0) });
+      y -= LINE_HEIGHT;
+    }
+  }
+
+  return doc.save();
+}
+
+export function buildText50pEntityParagraph(
+  documentId: string,
+  index: number,
+  pageNumber: number,
+): string {
+  const entityIndex = TEXT_50P_ENTITY_PAGE_INDICES.indexOf(index);
+  const name = synthesize({
+    type: EntityType.Person,
+    groupId: `${documentId}-person-${entityIndex}`,
+    seed: TEXT_50P_SEED,
+    indexInType: entityIndex,
+  });
+  const dni = synthesize({
+    type: EntityType.DNI,
+    groupId: `${documentId}-dni-${entityIndex}`,
+    seed: TEXT_50P_SEED,
+    indexInType: entityIndex,
+  });
+  return (
+    `Página ${pageNumber} de 50. Se deja constancia de que ${name}, DNI ${dni}, ` +
+    "compareció en autos y ratificó su presentación anterior, sin objeciones de la contraria."
+  );
+}
+
+/**
+ * Variante **densa** de `generateText50p` (H-10, a pedido del humano: "si
+ * tiene mayor carga de entidades, ¿aumenta lo que pesa en memoria?"). La
+ * versión liviana concentra datos en 5 de 50 páginas (`TEXT_50P_ENTITY_PAGE_INDICES`)
+ * a propósito, para no pagar OCR/NER de más en cada corrida — esta variante
+ * es el control que aísla la otra variable: **las 50 páginas** llevan
+ * entidades, 5 por página (Person, DNI, CUIT, Phone, Email) y un párrafo
+ * ~2× más largo (~80 palabras contra ~35-45, medido). Mismas 50 páginas,
+ * mismo DPI de OCR, misma semilla — la única variable que cambia es cuánto
+ * texto/cuántas entidades hay que detectar y agrupar.
+ */
+export const TEXT_50P_DENSE_ENTITY_TYPES_PER_PAGE = 5;
+
+const TEXT_50P_DENSE_SEED = "text-50p-dense-v1";
+
+export async function generateText50pDense(): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const documentId = "fixture-text-50p-dense";
+
+  for (let index = 0; index < 50; index++) {
+    const pageNumber = index + 1;
+    const text = buildText50pDenseParagraph(documentId, index, pageNumber);
+
+    const page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+    const lines = wrapText(text, WRAP_CHARS);
+    let y = MARGIN_Y;
+    for (const line of lines) {
+      if (y < 40) break; // guard defensivo: no desbordar la página.
+      page.drawText(line, { x: MARGIN_X, y, size: FONT_SIZE, font, color: rgb(0, 0, 0) });
+      y -= LINE_HEIGHT;
+    }
+  }
+
+  return doc.save();
+}
+
+export function buildText50pDenseParagraph(documentId: string, index: number, pageNumber: number): string {
+  const name = synthesize({
+    type: EntityType.Person,
+    groupId: `${documentId}-person-${index}`,
+    seed: TEXT_50P_DENSE_SEED,
+    indexInType: index,
+  });
+  const dni = synthesize({
+    type: EntityType.DNI,
+    groupId: `${documentId}-dni-${index}`,
+    seed: TEXT_50P_DENSE_SEED,
+    indexInType: index,
+  });
+  const cuit = synthesize({
+    type: EntityType.CUIT,
+    groupId: `${documentId}-cuit-${index}`,
+    seed: TEXT_50P_DENSE_SEED,
+    indexInType: index,
+  });
+  const phone = syntheticMobilePhone(`${documentId}-dense`, index);
+  const email = synthesize({
+    type: EntityType.Email,
+    groupId: `${documentId}-email-${index}`,
+    seed: TEXT_50P_DENSE_SEED,
+    indexInType: index,
+  });
+  return (
+    `Página ${pageNumber} de 50. Se deja constancia de que ${name}, DNI ${dni}, CUIT ${cuit}, ` +
+    `con domicilio constituido a los efectos legales y teléfono de contacto ${phone}, correo ` +
+    `electrónico ${email}, compareció en autos por derecho propio, ratificó en todos sus ` +
+    "términos la presentación anterior, ofreció la prueba documental acompañada en esta misma " +
+    "fecha y solicitó se tenga presente para su oportuno tratamiento, sin perjuicio de las " +
+    "objeciones que pudiera formular la contraria dentro del plazo que por derecho corresponde."
+  );
+}
+
+const TEXT_50P_NEUTRAL_TEMPLATES: ReadonlyArray<(pageNumber: number) => string> = [
+  (n) =>
+    `Página ${n} de 50. El presente expediente continúa su trámite ordinario, sin novedades ` +
+    "que informar en esta instancia procesal.",
+  (n) =>
+    `Página ${n} de 50. Se adjunta constancia de notificación electrónica cursada en la fecha, ` +
+    "sin datos personales adicionales en este folio.",
+  (n) =>
+    `Página ${n} de 50. Por cuerda separada tramita la incidencia conexa, que no modifica el ` +
+    "objeto principal de estas actuaciones.",
+  (n) =>
+    `Página ${n} de 50. Corresponde el pase a despacho para la resolución de las cuestiones ` +
+    "pendientes, previa vista a las partes.",
+];
+
+export function buildText50pNeutralParagraph(pageNumber: number): string {
+  const template = TEXT_50P_NEUTRAL_TEMPLATES[pageNumber % TEXT_50P_NEUTRAL_TEMPLATES.length];
+  return (template ?? TEXT_50P_NEUTRAL_TEMPLATES[0]!)(pageNumber);
+}
+
+/**
  * PNG mínimo **con canal alfa**, en bytes literales.
  *
  * El alfa es el punto: `pdf-lib` lo embebe como un **SMask**, y el SMask es

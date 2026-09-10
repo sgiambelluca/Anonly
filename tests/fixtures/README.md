@@ -11,7 +11,7 @@ Fixtures (PDFs de prueba) para los tests del Core de Anonly.
 | Fixture | Tamaño aprox. | Propósito | Specs que lo usan |
 |---|---|---|---|
 | `text-10p.pdf` | ~100 KB | PDF con texto, 10 páginas, caso base | PDF Engine, Regex Engine, NER Engine, Grouping Engine, Render Engine, Export Engine, snapshot |
-| `text-50p.pdf` | ~500 KB | PDF con texto, 50 páginas, stress | PDF Engine, perf |
+| `text-50p.pdf` | ~20 KB | PDF con texto, 50 páginas, densidad documentada, 5 páginas con entidad conocida | PDF Engine, perf, H-10 (fuente para el escaneado sintético de memoria, ADR-146) |
 | `scanned-10p.pdf` | ~5 MB | PDF escaneado, requiere OCR | OCR Engine |
 | `corrupt.pdf` | ~1 KB | header %PDF- válido + cuerpo no-PDF determinista | PDF Engine edge |
 | `protected.pdf` | ~100 KB | protegido con password `test1234` | PDF Engine edge |
@@ -115,6 +115,7 @@ Para fixtures que no se pueden generar automáticamente y pesan > 5 MB, descarga
 | Fixture | Generador | Test que lo valida | Descripción |
 |---|---|---|---|
 | `text-10p.pdf` | `pnpm fixtures:generate` → `generateText10p()` | `generate.test.ts` → "generate.ts — text-10p.pdf" | 10 páginas, texto con entidades conocidas para Regex/NER/Grouping |
+| `text-50p.pdf` | `generateText50p()` (no commiteado — se genera en memoria en el test, ADR-146 §15.2 punto 4: fuera de la ventana de medición) | `generate.test.ts` → "generate.ts — text-50p.pdf (H-10, ADR-146)" | 50 páginas, ninguna idéntica a otra; 5 con Person+DNI sintetizados (`TEXT_50P_ENTITY_PAGE_INDICES` = [0,10,20,30,40]), 45 neutras. `rasterizeToScannedPdf` lo convierte al escaneado sintético que H-10 mide. |
 | `empty.pdf` | `pnpm fixtures:generate` → `generateEmpty()` | `generate.test.ts` → "generate.ts — empty.pdf" | 1 página vacía sin contenido. El nombre "empty" es histórico: pdf-lib no permite PDFs con 0 páginas. Equivalente a "página textless" para el PDF Engine. |
 | `corrupt.pdf` | `pnpm fixtures:generate` → `generateCorrupt()` | `generate.test.ts` → "generate.ts — corrupt.pdf" | Header %PDF- válido + cuerpo no-PDF determinista (200 bytes de 0x41). No parseable por PDF.js pero con header que pasa la heurística inicial. |
 
@@ -123,7 +124,6 @@ Para fixtures que no se pueden generar automáticamente y pesan > 5 MB, descarga
 | Fixture | Cómo generarlo | Hito |
 |---|---|---|
 | `protected.pdf` | `qpdf --encrypt test1234 test1234 256 -- text-10p.pdf protected.pdf` — **único fixture commiteado** (pdf-lib no encripta): se genera una vez y el binario ~100 KB entra al repo. No lo cubre ADR-018 (eso rige los assets first-party mirroreados, no los fixtures de test) | 10 / PR17 (ADR-048 §7 punto 1) |
-| `text-50p.pdf` | Extender `generate.ts` con `generateText50p()` | 11 (perf) |
 | `huge-1000p.pdf` | Extender `generate.ts` (Git LFS) | 11 (stress) |
 | `scanned-10p.pdf` | `pdftoppm` + `pdf-lib` | 3 (OCR) |
 | `mixed-30p.pdf` | Combinar text + scanned | 3 (OCR integration) |
