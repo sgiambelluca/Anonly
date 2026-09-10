@@ -557,7 +557,7 @@ Estados:
 > **El ancho del estado no puede ser fijo.** El `min-w-[220px]` anterior truncaba el texto a
 > < 1100 px y a 900 px la barra quedaba tapada por el botón "Exportar".
 
-### 7.2 La pantalla de escaneo (②a) y cuándo suelta (ADR-087 §6)
+### 7.2 La pantalla de escaneo (②a) y cuándo suelta (ADR-150, ADR-151)
 
 **Por qué existe.** Dos razones, y la segunda es la fuerte:
 
@@ -567,41 +567,34 @@ Estados:
    incrementalmente (UX-6) y cada una **renumera los marcadores** de todo el documento (§5.4b):
    `[PERSONA 03]` puede pasar a `[PERSONA 04]` bajo el cursor.
 
-**Dónde se mide el umbral.** El tracker de progreso del Orchestrator **se reasigna por etapa**
-(`orchestrator.ts:267`: *"OCR, luego Detecting con NER activo"*). El umbral se mide sobre
-**`Detecting`**, que es la etapa larga y la que produce la mayoría de las entidades — no sobre
-"% del documento", que promedia etapas de duración incomparable.
+**La regla, desde ADR-150 (antes había además un techo de 6 s y un umbral de 20 % de páginas en
+`Detecting` — ver el ADR para por qué se retiraron: no hay techo que cumpla las dos razones de
+arriba a la vez, porque cualquier pase antes de `Ready` es un pase sobre datos en movimiento).**
+La única condición de pase es que el `stage` sea terminal:
 
-**La regla.** Se pasa de ②a a ②b cuando se cumple **la primera** de:
-
-- `Detecting` procesó **≥ 20 %** de las páginas —con `document.store.pageCount`
-  como denominador, y solo con `modelLoading === null`—, o
-- pasaron **6 s** desde `IMPORT_REQUESTED`;
-
-y **nunca antes de 1,2 s** desde `IMPORT_REQUESTED`.
-
-> **El denominador es `pageCount` y no `pipeline.store.total`, y la razón es un
-> bug medido.** `total` se reasigna por etapa, y durante la descarga del modelo
-> NER el store reporta `current/total = 1/1` **con el stage ya en `Detecting`**:
-> una razón de 1.0 que satisfacía el umbral al instante y soltaba al usuario
-> apenas terminaba el OCR — justo lo que esta pantalla existe para no hacer.
-> `pageCount` viene de `DOCUMENT_PARSED` y significa siempre lo mismo.
->
-> La guarda de `modelLoading` es la mitad semántica del mismo problema:
-> mientras el modelo se descarga **no se está detectando nada**, así que "se
-> analizó el 20 %" no puede ser cierto. **El techo sí sigue aplicando** durante
-> la descarga: es exactamente el caso que el techo global acota.
+- **`Ready`/`Done`** ⇒ se pasa cuando se cumplen las dos: pasaron **1,2 s** desde el import (el
+  piso, que evita el parpadeo de un PDF chico), y la **página 1 ya está dibujada** —el precalentado
+  de ADR-151— o vencieron **1 s** desde que se alcanzó `Ready` (la gracia, para que un render que
+  falla o se cuelga no encierre a nadie). Vencer la gracia **no es un error**: se entra igual y el
+  panel se llena como antes de ADR-151.
+- **`Failed`/`Cancelled`** ⇒ se pasa **de inmediato**, sin piso y sin esperar ningún preview: no
+  hay panel que llenar, y retener al usuario frente a un error sería retenerlo sobre el error.
+- Cualquier otro stage ⇒ se queda.
 
 | Constante | Valor | Rol |
 |---|---|---|
-| `SCAN_ADVANCE_PAGE_RATIO` | `0.20` | Umbral de páginas analizadas en `Detecting`. |
-| `SCAN_ADVANCE_MAX_MS` | `6000` | Techo. Un escaneado de 200 páginas no atrapa a nadie. |
-| `SCAN_ADVANCE_MIN_MS` | `1200` | Piso. Un PDF de texto de 6 páginas no hace parpadear la pantalla. |
+| `SCAN_ADVANCE_MIN_MS` | `1200` | Piso desde el import. Un PDF de texto de 6 páginas no hace parpadear la pantalla. |
+| `SCAN_ADVANCE_PREWARM_GRACE_MS` | `1000` | Gracia desde `Ready`/`Done` para que la página 1 precalentada (ADR-151) aparezca. |
 
-**Piso y techo son globales** (desde el import), no relativos a `Detecting`: la descarga del modelo
-NER es tiempo muerto sin entidades, y un techo medido desde `Detecting` dejaría al usuario mirando
-"preparando" sin cota. Con el techo global ese caso entra a ②b con el árbol vacío y el estado
-honesto de §7.1.
+**Sin techo.** ②a dura lo que dure el trabajo: un escaneado de 200 páginas retiene al usuario todo
+el escaneo, en vez de soltarlo a los 6 s con el árbol vacío. Lo que hace tolerable la espera sin
+cota es progreso real por etapa (§7.3, ADR-152) y `Cancelar` operativo (§7.4) — si una etapa deja
+de reportar avance, la espera se vuelve ciega, y por eso ADR-152 es parte de esta misma decisión y
+no un trabajo aparte.
+
+**Qué encuentra el usuario al entrar**, por construcción: el árbol de entidades completo y los
+marcadores quietos, el botón de exportar visible (`stage ∈ {Ready, Done}` es también su condición
+de montaje) y la página 1 ya dibujada.
 
 ### 7.3 Qué muestra la pantalla de escaneo
 

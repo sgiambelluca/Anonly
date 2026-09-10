@@ -204,19 +204,16 @@ apps/react-client/src/components/
   > primera impresión del dato en un lugar donde no sirve. Lo que sostiene la paciencia pasa a ser
   > el movimiento.
 - **Sin skeleton del documento**: no promete un layout que todavía no existe.
-- **Salida** (`UX_Guidelines.md` §7.2): pasa a ②b con la primera de — `Detecting` ≥
-  `SCAN_ADVANCE_PAGE_RATIO` (0.20) de `document.store.pageCount`, con `modelLoading === null`, o
-  `SCAN_ADVANCE_MAX_MS` (6000 ms) desde el import — y **nunca** antes de `SCAN_ADVANCE_MIN_MS`
-  (1200 ms).
+- **Salida** (`UX_Guidelines.md` §7.2, ADR-150/ADR-151): la única condición de pase es que el
+  `stage` sea terminal. `Ready`/`Done` ⇒ pasa cuando pasaron `SCAN_ADVANCE_MIN_MS` (1200 ms) desde
+  el import **y** la página 1 ya está dibujada (precalentada en `Ready`, ADR-151) o vencieron
+  `SCAN_ADVANCE_PREWARM_GRACE_MS` (1000 ms) desde `Ready`. `Failed`/`Cancelled` ⇒ pasa de
+  inmediato, sin piso y sin esperar preview.
 
-  > **El denominador es `pageCount`, no `pipeline.store.total`**: `total` se reasigna por etapa, y
-  > durante la descarga del modelo NER vale 1 con el stage ya en `Detecting` — razón 1.0, umbral
-  > satisfecho al instante, usuario soltado apenas termina el OCR. Medido en el browser.
-
-  > Piso y techo son **globales** desde el import, no relativos a `Detecting`: la descarga del
-  > modelo NER es tiempo muerto sin entidades, y un techo medido desde `Detecting` dejaría al
-  > usuario sin cota. El umbral de páginas sí se mide sobre `Detecting`, que es la etapa larga y la
-  > que produce la mayoría de las entidades (`orchestrator.ts:267`).
+  > **Sin techo ni umbral de páginas** (retirados por ADR-150: `SCAN_ADVANCE_MAX_MS` y
+  > `SCAN_ADVANCE_PAGE_RATIO` ya no existen). ②a dura lo que dure el escaneo — lo que lo hace
+  > tolerable es el progreso real por etapa de `UX_Guidelines.md` §7.3 (ADR-152) y `Cancelar`
+  > operativo, no una cota de tiempo.
 
 - **Tras el pase, el escaneo sigue** en segundo plano, con el estado visible en `PipelineStatus`
   (§2.3) y `CancelButton` (§2.4) activos.

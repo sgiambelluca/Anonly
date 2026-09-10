@@ -24,8 +24,9 @@
  * cuenta el escaneo del documento y nada más. Las etapas de preparación
  * muestran una barra indeterminada.
  *
- * Cuándo suelta: `scanAdvance.ts` (piso, techo y umbral sobre `Detecting`).
- * El latch que evita volver acá tras un `reanalyze` vive en `appPhase.ts`.
+ * Cuándo suelta: `scanAdvance.ts` (ADR-150) — el `stage` terminal es la única
+ * condición de pase; sin techo, dura lo que dure el escaneo. El latch que
+ * evita volver acá tras un `reanalyze` vive en `appPhase.ts`.
  */
 
 import { PipelineStage } from "@anonly/anonymization-core";

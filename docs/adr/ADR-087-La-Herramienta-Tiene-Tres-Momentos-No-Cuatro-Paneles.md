@@ -366,6 +366,20 @@ Valores fijos, retirados del formulario:
 
 ### 6. La pantalla de escaneo suelta temprano, con piso y techo, medida sobre `Detecting`
 
+> **Superseded por ADR-150 (2026-09-10) en su regla de pase.** Medido contra el
+> build de producción, el pase temprano dejaba al usuario en ②b entre 700 y
+> 1200 ms **antes** de que el documento estuviera listo (`stage === Detecting`,
+> sin botón de exportar), contradiciendo la razón fuerte de este mismo §6 —no
+> editar sobre datos que se mueven. ADR-150 retira el techo (`SCAN_ADVANCE_MAX_MS`)
+> y el umbral de páginas (`SCAN_ADVANCE_PAGE_RATIO`, y con él la guarda
+> `modelLoading === null`): la única condición de pase pasa a ser que el
+> `stage` sea terminal. El piso (`SCAN_ADVANCE_MIN_MS`, 1200 ms) **se
+> conserva** y ADR-151 le suma una segunda condición para `Ready`/`Done` —que
+> la página 1 ya esté dibujada, o venza su gracia. El resto de esta sección
+> (por qué existe la pantalla, la corrección del denominador `pageCount`) sigue
+> siendo contexto histórico válido; la regla de pase en sí la reemplaza
+> ADR-150 §1.
+
 **Por qué existe.** Dos razones, y la segunda es la fuerte:
 
 1. Acota el tiempo en que el usuario espera sin nada que hacer, y le da prueba de vida — las entidades aparecen en vivo, que es lo que distingue "está trabajando" de "se colgó".
