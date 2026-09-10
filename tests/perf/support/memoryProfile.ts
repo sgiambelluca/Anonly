@@ -54,6 +54,7 @@ declare global {
         groupCount: number;
         entityCount: number;
         failedAt?: number;
+        workerPeakByType: Record<string, number>;
       }
     | undefined;
 }
@@ -70,37 +71,108 @@ const PHASE_EVENTS: ReadonlyArray<readonly [string, string]> = [
   ["pipeline", "PIPELINE_FAILED"],
 ];
 
+/**
+ * Eventos de fin de job (`docs/core/Contracts.md`) que liberan el slot de
+ * concurrencia que `WORKER_JOB_DISPATCHED` ocupó — ver el conteo de workers
+ * más abajo.
+ */
+const WORKER_TERMINAL_EVENTS: ReadonlyArray<string> = [
+  "WORKER_JOB_COMPLETED",
+  "WORKER_JOB_FAILED",
+  "WORKER_JOB_CANCELLED",
+  "WORKER_JOB_TIMEOUT",
+];
+
 async function installRunCollector(page: Page): Promise<void> {
-  await page.evaluate((phaseEvents) => {
-    const core = globalThis.__anonlyCore;
-    if (core === undefined) throw new Error("__anonlyCore ausente: ¿VITE_E2E=1 en el build?");
+  await page.evaluate(
+    ({ phaseEvents, workerTerminalEvents }) => {
+      const core = globalThis.__anonlyCore;
+      if (core === undefined) throw new Error("__anonlyCore ausente: ¿VITE_E2E=1 en el build?");
 
-    const run: NonNullable<typeof globalThis.__anonlyMemoryRun> = {
-      phases: {},
-      groupCount: 0,
-      entityCount: 0,
-    };
-    globalThis.__anonlyMemoryRun = run;
+      const run: NonNullable<typeof globalThis.__anonlyMemoryRun> = {
+        phases: {},
+        groupCount: 0,
+        entityCount: 0,
+        workerPeakByType: {},
+      };
+      globalThis.__anonlyMemoryRun = run;
 
-    for (const [channel, event] of phaseEvents) {
-      core.bus.on(channel, event, (payload: unknown) => {
-        if (!(event in run.phases)) run.phases[event] = performance.now();
-        if (event === "DOCUMENT_IMPORTED") {
-          run.documentId = (payload as { documentId: string }).documentId;
-        }
-        if (event === "PIPELINE_FAILED") run.failedAt = performance.now();
+      for (const [channel, event] of phaseEvents) {
+        core.bus.on(channel, event, (payload: unknown) => {
+          if (!(event in run.phases)) run.phases[event] = performance.now();
+          if (event === "DOCUMENT_IMPORTED") {
+            run.documentId = (payload as { documentId: string }).documentId;
+          }
+          if (event === "PIPELINE_FAILED") run.failedAt = performance.now();
+        });
+      }
+      core.bus.on("grouping", "ENTITY_GROUP_CREATED", () => {
+        run.groupCount += 1;
       });
-    }
-    core.bus.on("grouping", "ENTITY_GROUP_CREATED", () => {
-      run.groupCount += 1;
-    });
-    core.bus.on("regex", "ENTITY_FOUND", () => {
-      run.entityCount += 1;
-    });
-    core.bus.on("ner", "ENTITY_FOUND", () => {
-      run.entityCount += 1;
-    });
-  }, PHASE_EVENTS);
+      core.bus.on("regex", "ENTITY_FOUND", () => {
+        run.entityCount += 1;
+      });
+      core.bus.on("ner", "ENTITY_FOUND", () => {
+        run.entityCount += 1;
+      });
+
+      // Conteo de workers vivos por pool en el pico, sin tocar el Core
+      // (`packages/anonymization-core/src/worker-pool.ts`, leído para esto:
+      // `workerId` en el payload es `${poolKey}-pool`, una constante por
+      // pool, inútil para contar). `WORKER_JOB_DISPATCHED` se emite desde
+      // `entry.execute()` -cuando el job empieza a correr, no al encolarse-
+      // y los workers remotos se crean perezosamente por slot de
+      // concurrencia (`workerForSlot`): un slot solo se ocupa mientras un
+      // job corre, así que el máximo de jobs concurrentes por `type` a lo
+      // largo de la corrida ES el número de workers que ese pool llegó a
+      // crear. `broadcast()` (los controles load-document/unload-document de
+      // RenderPool) crea el slot 0 sin pasar por `dispatch()` -sin
+      // DISPATCHED-, así que este conteo no ve ese piso de 1 worker por pool
+      // con documento cargado; ninguno de los perfiles de H-10 depende de
+      // distinguir 0 de 1 workers, así que no hace falta corregirlo acá.
+      const inFlightByType = new Map<string, number>();
+      const typeByJobId = new Map<string, string>();
+
+      function decrement(jobId: string): void {
+        const type = typeByJobId.get(jobId);
+        // Sin tipo registrado: evento tardío de un job que ya se decrementó,
+        // o -caso real, ver abajo- un job cancelado a mitad de ejecución
+        // (el motor observa `ctx.abortSignal` y lanza `CancelledError`
+        // directo, sin pasar por el WORKER_JOB_CANCELLED de la punta
+        // superior del loop de `runWithRetry`): esos nunca decrementan por
+        // evento. Ninguno de los perfiles de H-10 cancela un job en vuelo
+        // (cierran el documento recién después de PIPELINE_READY), así que
+        // esta corrida no lo dispara.
+        if (type === undefined) return;
+        typeByJobId.delete(jobId);
+        const current = inFlightByType.get(type) ?? 0;
+        inFlightByType.set(type, Math.max(0, current - 1));
+      }
+
+      core.bus.on("workers", "WORKER_JOB_DISPATCHED", (payload: unknown) => {
+        const { jobId, type } = payload as { jobId: string; type: string };
+        typeByJobId.set(jobId, type);
+        const next = (inFlightByType.get(type) ?? 0) + 1;
+        inFlightByType.set(type, next);
+        run.workerPeakByType[type] = Math.max(run.workerPeakByType[type] ?? 0, next);
+      });
+      // Las cuatro decrementan igual. WORKER_JOB_TIMEOUT no siempre es
+      // terminal -un job puede reintentar tras un timeout, sin un nuevo
+      // DISPATCHED, dentro del mismo slot- así que un timeout seguido de
+      // reintento decrementa de más por un instante; no infla el pico
+      // (`pump()` sigue topeado por el tamaño del pool, así que un slot
+      // "liberado de más" no habilita un DISPATCHED nuevo que no hubiera
+      // cabido igual) y ningún perfil de H-10 corre con reintentos por
+      // timeout en un camino feliz (`ok: true` en todas las corridas hasta
+      // ahora).
+      for (const event of workerTerminalEvents) {
+        core.bus.on("workers", event, (payload: unknown) => {
+          decrement((payload as { jobId: string }).jobId);
+        });
+      }
+    },
+    { phaseEvents: PHASE_EVENTS, workerTerminalEvents: WORKER_TERMINAL_EVENTS },
+  );
 }
 
 async function waitForRunSettled(page: Page, timeoutMs: number): Promise<void> {
@@ -118,7 +190,7 @@ async function readRun(page: Page): Promise<NonNullable<typeof globalThis.__anon
   return page.evaluate(() => {
     const r = globalThis.__anonlyMemoryRun;
     if (r === undefined) throw new Error("__anonlyMemoryRun ausente");
-    return { ...r, phases: { ...r.phases } };
+    return { ...r, phases: { ...r.phases }, workerPeakByType: { ...r.workerPeakByType } };
   });
 }
 
@@ -138,6 +210,14 @@ export interface RunReport {
    */
   readonly m1Bytes: number | null;
   readonly phases: Readonly<Record<string, number>>;
+  /**
+   * Máximo de jobs concurrentes por `WorkerJobType` (`pdf-parse`/`ocr-page`/
+   * `ner-page`/`render-page`/`export-page`) durante esta corrida — ver el
+   * comentario de `installRunCollector`. Es el número de workers que ese
+   * pool llegó a crear, no un tamaño de pool configurado: un pool con
+   * `size: 4` que nunca recibió 4 jobs a la vez cuenta menos de 4 acá.
+   */
+  readonly workerPeakByType: Readonly<Record<string, number>>;
   readonly startedAtMs: number;
   readonly readyAtMs: number | null;
   readonly totalMs: number | null;
@@ -184,6 +264,7 @@ async function runImport(
     peakSumBytes: peak,
     m1Bytes: temperature === "hot" ? peak - baselineBytes : null,
     phases: run.phases,
+    workerPeakByType: run.workerPeakByType,
     startedAtMs,
     readyAtMs,
     totalMs: readyAtMs !== null && startedAtPerf !== null ? readyAtMs - startedAtPerf : null,
@@ -276,17 +357,26 @@ export function formatMB(bytes: number): string {
   return `${(bytes / 1_000_000).toFixed(1)} MB`;
 }
 
+/** `{ "ocr-page": 2, "ner-page": 1 }` → `"ocr-page=2 ner-page=1"`, orden estable para diffs legibles entre corridas. */
+function formatWorkerPeaks(peaks: Readonly<Record<string, number>>): string {
+  const entries = Object.entries(peaks).sort(([a], [b]) => a.localeCompare(b));
+  if (entries.length === 0) return "?";
+  return entries.map(([type, count]) => `${type}=${count}`).join(" ");
+}
+
 export function printReport(report: ProfileReport): void {
   const { cold, hot } = report;
   process.stdout.write(
     `\n=== H-10 — perfil ${report.profile} (${report.identity.platform}/${report.identity.arch}, ` +
       `${report.identity.cpuCount} CPUs, ${formatMB(report.identity.totalMemBytes)} RAM) ===\n` +
       `  frío    — M2 (pico suma RSS): ${formatMB(cold.peakSumBytes)}  ` +
-      `total: ${cold.totalMs?.toFixed(0) ?? "?"} ms  ok: ${cold.ok}  grupos: ${cold.groupCount}\n` +
+      `total: ${cold.totalMs?.toFixed(0) ?? "?"} ms  ok: ${cold.ok}  grupos: ${cold.groupCount}  ` +
+      `workers: ${formatWorkerPeaks(cold.workerPeakByType)}\n` +
       `  caliente — M2: ${formatMB(hot.peakSumBytes)}  ` +
       `M1 (atribuible al documento): ${hot.m1Bytes !== null ? formatMB(hot.m1Bytes) : "?"}  ` +
       `línea de base: ${formatMB(hot.baselineBytes)}  ` +
-      `total: ${hot.totalMs?.toFixed(0) ?? "?"} ms  ok: ${hot.ok}  grupos: ${hot.groupCount}\n`,
+      `total: ${hot.totalMs?.toFixed(0) ?? "?"} ms  ok: ${hot.ok}  grupos: ${hot.groupCount}  ` +
+      `workers: ${formatWorkerPeaks(hot.workerPeakByType)}\n`,
   );
 }
 
