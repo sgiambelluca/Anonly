@@ -2,7 +2,7 @@
 
 # ADR-087 — La herramienta tiene tres momentos, no cuatro paneles
 
-- **Estado**: Accepted
+- **Estado**: Accepted (**§6 superseded en su regla de pase por ADR-150**, 2026-09-09: se pasa a ②b cuando el pipeline **terminó**, no antes. Desaparecen el techo de 6 s y el umbral del 20 % de páginas; el piso de 1,2 s se conserva y recién ahí ata de verdad. El motivo es la propia razón fuerte de §6 —no editar sobre datos que se mueven—, que el techo contradecía: medido, el pase caía ~700-1200 ms antes de `Ready`, con el árbol todavía renumerando marcadores y sin botón de exportar. El resto de §6 —por qué existe la pantalla, qué muestra, que el escaneo siga con `Cancelar`— queda intacto)
 - **Fecha**: 2026-08-21
 - **Decidido por**: El humano, tras una auditoría de la UI contra las heurísticas de Nielsen: *"en vez de que sea todo una SPA, que sea como un wizard de algunos pasos"*, *"el panel de reglas apenas y lo uso"*, *"mostrar un solo visor con un toggle puede servir más que el modo actual"*, *"no hace falta mostrar con qué calidad exportarlo"*, *"alguien que no usó nunca la herramienta no sabe qué es placeholder o redacted"*.
 - **Relacionado con**: `00_Project_Vision.md` §8 (layout), `ui/UX_Guidelines.md` §2/§3/§4/§5/§7/§8/§11, `ui/Components.md` §1/§2/§3/§4/§5/§7, ADR-012 (los cuatro modos), ADR-044 (de dónde salen los `replacements` del preview), ADR-054/ADR-056 (scroll y render por panel), ADR-059 (referencia de marcadores), ADR-078 ("Personalizado" ya está tomado; y el valor escrito a mano que §3.3 protege), `core/Grouping_Engine.md` §"Resolución de modo" (la precedencia que §3.1a/§3.1b usan).
