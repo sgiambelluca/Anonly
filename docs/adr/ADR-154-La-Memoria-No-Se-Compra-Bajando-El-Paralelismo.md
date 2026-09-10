@@ -1,0 +1,121 @@
+<!-- CONTEXT: scope=adr | dependencias=07_Performance_Strategy.md,00_Project_Vision.md,core/NER_Engine.md,ui/React_Client.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-080-Idle-Dispose-En-El-Pool-No-En-El-Manager.md,adr/ADR-135-El-Ciclo-Del-Modelo-Se-Deduplica-Entero.md,adr/ADR-126-Detectar-Nombres-No-Es-Una-Preferencia.md | audiencia=humanos+IA | fase=11 -->
+
+# ADR-154 — La memoria no se compra bajando el paralelismo
+
+- **Estado**: Accepted
+- **Fecha**: 2026-09-10
+- **Decidido por**: El humano, sobre la atribución de H-10: *"no resulta redituable el hecho de tener que bajar el rendimiento de la aplicación para poder ganar un poco de memoria… reducirlo no es lo correcto"*.
+- **Relacionado con**: ADR-146 (las dos métricas y sus presupuestos), ADR-143 (las imágenes de OCR bajo demanda), ADR-080 (liberación por idle), ADR-135 (el ciclo del modelo), ADR-126 §2 (precedente: no degradar el producto para que un número cierre)
+- **Parte de**: Hito 11 — Hardening
+
+## Contexto
+
+### 1. Hay un atajo, y es el equivocado
+
+La caracterización de H-10 midió, sobre 50 páginas escaneadas, un M1 de 640-785 MB
+contra el presupuesto de 512 MB de `00_Project_Vision.md` §7. Y la atribución
+encontró que con `performancePreset: low` —los cuatro pools en 1— ese mismo
+documento da **355 MB**, bajo el presupuesto.
+
+De ahí sale una salida tentadora y de una línea: bajar los defaults y declarar el
+presupuesto cumplido.
+
+**Las dos cifras vienen de un instrumento con un defecto conocido** —el fixture
+se rasteriza dentro del mismo renderer que después se mide, contra lo que ADR-146
+§4 pide— así que no son finales. Pero la dirección es clara y la tentación
+existe igual.
+
+### 2. Por qué ese atajo no se toma
+
+Bajar `nerPoolSize` y `ocrPoolSize` no arregla nada: **paga memoria con tiempo
+del usuario**, y el tiempo del usuario también es contractual
+(`00_Project_Vision.md` §7 fija 8 s y 60 s). Cerrar un presupuesto rompiendo otro
+no es una optimización, es mover el problema.
+
+Y hay una asimetría que lo decide: lo que se duplica **no es trabajo, es
+inventario**. Dos workers de NER no hacen el doble de cosas con la misma
+memoria: hacen el doble de cosas **y cargan dos copias de los mismos pesos**. La
+segunda copia no compra velocidad — la compra el segundo hilo de ejecución, que
+es otra cosa. Atacar la duplicación no cuesta throughput; recortar workers sí.
+
+Es el mismo criterio de ADR-126 §2: no se degrada lo que el producto hace para
+que un número cierre.
+
+## Decisión
+
+### 1. Recortar el paralelismo no es una salida aceptada
+
+En un equipo que puede pagarlo, el presupuesto de memoria **no se cumple**
+bajando `nerPoolSize`, `ocrPoolSize`, `renderPoolSize` ni `pdfPoolSize` respecto
+de lo que el equipo permite. Un cambio de defaults que reduzca paralelismo
+necesita su propio ADR y una razón que no sea "así entra en el presupuesto".
+
+### 2. Los levers aceptados, en orden
+
+1. **Duplicación que no compra nada.** Dos workers de NER son dos copias de los
+   pesos. El binario que se empaqueta es el multihilo
+   (`ort-wasm-simd-threaded.asyncify.wasm`) y el contenedor corre
+   `crossOriginIsolated` con `SharedArrayBuffer` — verificado sobre el shell
+   empaquetado. Una sesión con N hilos tiene **una** copia y paraleliza dentro
+   de la inferencia. Es el primer lever porque es el único que puede sacar
+   memoria **sin** tocar velocidad.
+2. **Solapamiento OCR/NER.** El pool de OCR sobrevive a su etapa por la
+   liberación por idle (60 s), así que Tesseract y ONNX conviven durante toda la
+   detección. Darlo de baja al terminar la etapa de OCR libera un heap entero de
+   WASM —la única forma real de recuperarlo— sin quitarle un solo worker a nadie.
+3. **Copias por página.** Cada ráster existe hoy tres veces a la vez (canvas del
+   worker de Render, `ImageData` del host, clon estructurado en el worker de
+   OCR). Transferir en vez de clonar, re-rasterizando en el reintento, saca una
+   copia entera del camino normal.
+4. **DPI.** La memoria va con el cuadrado del DPI: 300 → 200 es −55 %. Es el
+   único lever de esta lista que **cambia calidad de reconocimiento**, así que
+   no se toca sin medir contra la baseline de ADR-147 y sin decisión del humano.
+
+### 3. La adaptación de recursos bajos se conserva
+
+`deviceMemory < 4` o `hardwareConcurrency < 4` sigue bajando los pools
+(`07_Performance_Strategy.md` §5.1). No es lo mismo: ahí se ajusta a un equipo
+que **no puede** pagar el paralelismo, no se compra memoria en uno que sí puede.
+El perfil `low` de la UI también se conserva como elección del usuario.
+
+### 4. H-09D1 cambia de pregunta
+
+Deja de ser "política de workers de NER" y pasa a ser **"qué tipo de paralelismo
+usa NER"**: medir 2 workers × 1 hilo contra 1 worker × N hilos —y 2 × N si el
+runtime lo permite— comparando **memoria y tiempo juntos**. Su criterio de cierre
+pasa a incluir que no se pierda throughput.
+
+### 5. Si aún así no entra
+
+Si después de agotar los levers de §2 el presupuesto sigue sin cumplirse, la
+decisión vuelve al humano: revisar el presupuesto —por perfil, como ADR-146 ya
+separa métricas— o aceptar el exceso declarado. Lo que **no** se hace es cerrar
+la brecha en silencio con menos paralelismo.
+
+## Consecuencias
+
+**A favor**
+
+- El trabajo de memoria apunta a lo que se duplica sin comprar nada, que es
+  donde están las ganancias reales y donde no hay que ceder nada a cambio.
+- Cierra por escrito un atajo que cualquier agente futuro —o cualquiera de
+  nosotros con prisa— habría tomado mirando el número del perfil `low`.
+- Deja los dos presupuestos contractuales, el de memoria y el de tiempo, con el
+  mismo rango: ninguno se cierra rompiendo el otro.
+
+**En contra**
+
+- **Puede terminar en que el presupuesto no se cumpla.** Si los levers de §2 no
+  alcanzan, este ADR garantiza que el exceso quede visible en vez de disimulado.
+  Es intencional, y §5 dice qué pasa entonces.
+- Los levers aceptados son **más caros** que bajar un número de configuración:
+  uno es un spike de runtime, otro toca el ciclo de vida de un pool, otro el
+  transporte de un buffer. Ninguno es de una línea.
+- Se decide con cifras de un instrumento que **todavía tiene un defecto conocido**
+  (§1). La dirección no depende de esas cifras —es una decisión sobre qué se
+  está dispuesto a ceder— pero las magnitudes sí, y hay que releerlas cuando el
+  instrumento esté arreglado.
+
+**Lo que no toca**: los presupuestos de `00_Project_Vision.md` §7, la adaptación
+de recursos bajos, el perfil `low` de la UI, ni una línea de código: es una
+restricción sobre qué soluciones se aceptan, no una solución.
