@@ -1551,6 +1551,11 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       groupCount: payload.groupCount,
       conflictCount: payload.conflictCount,
     });
+    // ADR-151 §1: en el mismo turno en que se alcanza Ready, no antes (un
+    // documento cancelado/fallido no llega acá — ver el early return de
+    // arriba) ni al cargar el documento (se tiraría si el usuario cancela a
+    // mitad del escaneo, ver "Alternativas consideradas" del ADR).
+    this.prewarmFirstPagePreview(payload.documentId);
   }
 
   // ─── Mediación grupos→Render del preview (ADR-044) ───
@@ -1743,6 +1748,38 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
         pageIndex,
         reason: err instanceof Error ? err.message : String(err),
       });
+    });
+  }
+
+  /**
+   * Precalienta la página 1 del lado original al llegar a `Ready` (ADR-151
+   * §1): invocación directa (mismo patrón que `renderMediatedPreview`, no la
+   * vía `RENDER_REQUESTED` del visor), así que `RenderEngine` la despacha con
+   * prioridad de "preview no visible" (20, `05_Worker_Architecture.md` §6.2 /
+   * `render.engine.ts` `PREVIEW_PRIORITY_NOT_VISIBLE`) — no puede competir con
+   * un export. Sin `scale`: cae al `previewScale` default, la escala con la
+   * que el visor pide al montar con zoom 1. Best-effort: un fallo se loguea y
+   * nunca escala a `PIPELINE_FAILED` — el preview no es motivo para fallar el
+   * pipeline. No hace falta tocar el visor ni el store: `bus-bridge.ts` ya
+   * escribe todo `PREVIEW_UPDATED` en `viewer.store.previewByPage` haya o no
+   * un visor montado, así que el precalentado queda ahí para cuando ②b monte.
+   */
+  private prewarmFirstPagePreview(documentId: string): void {
+    const ctx = this.mediatedPreviewCtx(documentId);
+    const input: RenderPageInput = {
+      documentId,
+      pageIndex: 0,
+      kind: "original",
+      mode: "preview",
+    };
+    this.engines.render.renderPage(input, ctx).catch((err: unknown) => {
+      this.logger.warn(
+        "Precalentado de la página 1 (lado original) falló (best-effort, ADR-151).",
+        {
+          documentId,
+          reason: err instanceof Error ? err.message : String(err),
+        },
+      );
     });
   }
 

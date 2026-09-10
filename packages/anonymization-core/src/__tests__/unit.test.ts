@@ -38,6 +38,7 @@ import {
   createPage,
   createPdfEngineOutput,
   createRealBus,
+  createRenderPageOutput,
   createReplacement,
   createWord,
   makeOrchestratorWithRealDetection,
@@ -2783,6 +2784,115 @@ describe("Orchestrator — disposed guard", () => {
     await expect(orchestrator.retryWithPassword("doc-1", "x")).rejects.toThrow(
       OrchestratorDisposedError,
     );
+  });
+});
+
+describe("Precalentado de la página 1 al llegar a Ready (ADR-151)", () => {
+  it("renderiza la página 1, lado original, en preview, en el mismo turno en que se alcanza Ready", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    wireHappyPathSpies(engines, bus);
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+
+    // Único render en el happy path (wireHappyPathSpies deja getSnapshot con
+    // groups: [] por default, así que el seed anonimizado de ADR-044 no
+    // dispara ninguno): es el precalentado, no un side-effect de otra cosa.
+    expect(engines.render.renderPage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentId: "doc-1",
+        pageIndex: 0,
+        kind: "original",
+        mode: "preview",
+      }),
+      expect.anything(),
+    );
+    // Sin `scale`: cae al previewScale default (ADR-151 §1).
+    const call = (engines.render.renderPage as ReturnType<typeof vi.fn>).mock.calls.find(
+      (c) => (c[0] as { kind: string }).kind === "original",
+    );
+    expect((call?.[0] as { scale?: number }).scale).toBeUndefined();
+  });
+
+  it("no precalienta un documento que terminó Cancelled (ADR-151 §1: solo Ready/Done)", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    wireHappyPathSpies(engines, bus);
+    // Fuerza el camino de reanalyze-cancelado (handleGroupingFinished retorna
+    // antes de Ready cuando cancelRequested ya está seteado) simulando la
+    // cancelación de un reanalyze en curso.
+    vi.spyOn(engines.ner, "processPages").mockImplementation(async (inputs) => {
+      bus.emit(EventChannel.Ner, EngineEvents.NER_FINISHED, {
+        documentId: "doc-1",
+        occurrenceCount: 0,
+        durationMs: 1,
+      });
+      await orchestrator.cancel("doc-1");
+      await engines.grouping.finishSession("doc-1");
+      return inputs.map((input) => ({
+        documentId: input.documentId,
+        pageIndex: input.pageIndex,
+        occurrences: [],
+        durationMs: 1,
+      }));
+    });
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Cancelled);
+    expect(engines.render.renderPage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "original", mode: "preview" }),
+      expect.anything(),
+    );
+  });
+
+  it("un fallo del precalentado no escala a PIPELINE_FAILED (best-effort, ADR-151 §1)", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    wireHappyPathSpies(engines, bus);
+    vi.spyOn(engines.render, "renderPage").mockImplementation((input) => {
+      if (input.kind === "original" && input.mode === "preview") {
+        return Promise.reject(new Error("precalentado explotó"));
+      }
+      return Promise.resolve(
+        createRenderPageOutput({
+          documentId: input.documentId,
+          pageIndex: input.pageIndex,
+          kind: input.kind,
+        }),
+      );
+    });
+    const failedSpy = vi.fn();
+    bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_FAILED, failedSpy);
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+    // El catch de prewarmFirstPagePreview es fire-and-forget: da un tick para
+    // que corra antes de afirmar que no escaló a nada.
+    await Promise.resolve();
+
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    expect(failedSpy).not.toHaveBeenCalled();
   });
 });
 
