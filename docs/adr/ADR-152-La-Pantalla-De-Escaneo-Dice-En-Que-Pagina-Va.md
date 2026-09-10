@@ -61,9 +61,9 @@ el contador es honesto sin más aritmética.
 | Etapa | Qué se muestra | Progreso |
 |---|---|---|
 | `Importing` / `Extracting` | "Abriendo el documento…" | indeterminado |
-| `OCRing` | **"Pasando el PDF a texto: página X de Y"** | determinado, `X = current`, `Y = total` de `pipeline.store` |
+| `OCRing` | **"Leyendo el documento: página X de Y"**, con `X` = la última página leída (índice + 1) y `Y` = `document.store.pageCount` | determinado, con la fracción `current/total` de `pipeline.store` |
 | `Detecting`, con el modelo cargando | "Preparando el detector…" | indeterminado |
-| `Detecting`, detectando | **"Escaneando el documento: página X de Y"** | determinado, `X = current`, `Y = document.store.pageCount` |
+| `Detecting`, detectando | **"Escaneando el documento: página X de Y"**, con `Y` = `document.store.pageCount` | determinado, `X = current` |
 | `Grouping` | "Ordenando los resultados…" | indeterminado |
 
 Las frases son de producto y se ajustan en `ui/UX_Guidelines.md`; lo normativo
@@ -71,20 +71,38 @@ acá es **qué se puede afirmar en cada etapa y con qué números**. Ninguna nom
 OCR, NER, workers ni modelos: el usuario no tiene por qué saber cómo funciona la
 herramienta por debajo para saber si está avanzando.
 
-### 2. De dónde sale el denominador de cada contador, y por qué son distintos
+### 2. El único total que se muestra es el del documento
 
-- En `OCRing`, `Y` es **`pipeline.store.total`**: la cantidad de páginas que
-  necesitan OCR, que en un documento mixto es menor que el total del documento.
-  Por eso la frase habla del PDF y no promete recorrerlo entero.
-- En `Detecting`, `Y` sigue siendo **`document.store.pageCount`** y **no**
-  `total`, exactamente por la razón ya medida en ADR-087 §6: durante la carga
-  del modelo el store reporta `current/total = 1/1` con el stage ya en
-  `Detecting`. Esa trampa es específica de esta etapa y su guarda —no mostrar
-  contador mientras el modelo carga— se conserva.
+**Regla dura: `Y` es siempre `document.store.pageCount`, en todas las etapas.**
 
-Los dos contadores **no se mezclan ni se promedian** en una sola barra: son dos
-trabajos con dos denominadores, y una barra única que los sume mentiría en el
-documento mixto.
+El motivo es de producto y es el que decide esta sección. En un documento mixto
+—digamos 20 páginas, de las cuales 8 son escaneadas— el trabajo de OCR son 8
+unidades, y mostrar "3 de 8" sobre un documento que el usuario sabe que tiene 20
+páginas no se lee como "3 de las 8 que hay que leer": se lee como **"cargué el
+archivo equivocado"**. Un usuario que ve un total que no reconoce cancela el
+procesamiento, y cancela justo cuando la aplicación estaba funcionando bien.
+Nadie cuenta las páginas que ya pasaron; todo el mundo mira el total y lo
+compara con su documento.
+
+De ahí sale la forma de cada etapa:
+
+- En `OCRing`, `X` **no** es cuántas páginas se leyeron: es **cuál** se está
+  leyendo, numerada sobre el documento entero. Sale del `pageIndex` de
+  `OCR_PAGE_FINISHED` (+1), que la UI ya puede escuchar sin tocar el Core. La
+  afirmación "estoy leyendo la página 12 de 20" es literalmente cierta en un
+  mixto, y no promete que se vayan a leer las 20.
+- La **barra**, en cambio, sí usa `current/total` de `pipeline.store` —la
+  fracción real del trabajo de OCR—, así que avanza parejo aunque los números de
+  página salten. El total del trabajo gobierna el largo de la barra y **nunca se
+  muestra como número**.
+- En `Detecting`, `X = current` y `Y` sigue siendo `pageCount` y **no** `total`,
+  exactamente por la razón ya medida en ADR-087 §6: durante la carga del modelo
+  el store reporta `current/total = 1/1` con el stage ya en `Detecting`. Esa
+  trampa es específica de esta etapa y su guarda —no mostrar contador mientras
+  el modelo carga— se conserva.
+
+Los dos contadores **no se promedian** en una sola barra: son dos trabajos
+distintos y cada uno gobierna la suya mientras está vigente.
 
 ### 3. El contador nunca retrocede dentro de una etapa
 
@@ -131,10 +149,15 @@ de esta pantalla, no un detalle de layout.
   verificarlo con usuarios y no solo con un test.
 - La frase rotativa pierde protagonismo, y era parte de la personalidad de la
   pantalla.
-- En un documento mixto, "página X de Y" durante el OCR usa un `Y` menor que el
-  total del documento. Es correcto y es lo que se está haciendo, pero se lee
-  raro junto al contador siguiente, que sí cuenta el documento entero. La
-  redacción de las dos frases es lo que tiene que dejarlo claro.
+- **En un documento mixto los números de página saltan** durante el OCR: va por
+  la 3 y después por la 12, porque las del medio ya tenían texto y no se leen.
+  Cada afirmación es cierta y el total es el que el usuario reconoce, que es lo
+  que §2 protege; pero el salto no está probado con usuarios y es lo que hay que
+  mirar en la próxima ronda. En un documento **enteramente escaneado** —el caso
+  frecuente— no hay salto: cuenta 1, 2, 3… de 20.
+- La UI pasa a escuchar `OCR_PAGE_FINISHED` para saber por cuál página va. Es
+  una suscripción más en `bus-bridge.ts` y un campo más de store; no cambia el
+  Core, pero es estado nuevo que hay que limpiar al cerrar el documento.
 
 **Lo que no toca**: el Core —ninguna línea; los eventos y los totales ya son los
 que hacen falta—, las tres fases de ADR-087 §1, ni el momento del pase, que lo
