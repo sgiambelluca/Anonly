@@ -25,10 +25,18 @@
  * sentido en la corrida caliente: su definición exige una línea de base
  * "con los modelos ya cargados y sin documento abierto" (ADR-146 §1), que
  * recién existe después de haber procesado al menos un documento.
+ *
+ * Los PDF escaneados se generan con `getOrGenerateScannedFixture`
+ * (`support/scannedFixtureCache.ts`), **no** con `rasterizeToScannedPdf(page, …)`
+ * usando la `page` medida — corregido a partir de una revisión del
+ * planificador: rasterizar dentro del mismo renderer que después mide
+ * `memorySampler` deja residencia de la propia generación (imports
+ * dinámicos de pdfjs-dist/pdf-lib, 50 renders a canvas) contaminando la
+ * línea de base "fría", contra lo que pide ADR-146 §4 ("en un proceso
+ * separado que termine antes de medir").
  */
 import { expect, openApp, test } from "../e2e/support/electronApp.js";
 import { textTenPagesFile } from "../e2e/support/fixtures.js";
-import { rasterizeToScannedPdf } from "../e2e/support/scannedPdf.js";
 import {
   TEXT_50P_ENTITY_PAGE_INDICES,
   generateText50p,
@@ -36,6 +44,7 @@ import {
 } from "../fixtures/generate.js";
 
 import { measureProfile, printReport, writeReport } from "./support/memoryProfile.js";
+import { getOrGenerateScannedFixture } from "./support/scannedFixtureCache.js";
 
 test.setTimeout(300_000);
 
@@ -55,11 +64,11 @@ test("P1 — 10 páginas de texto nativo (control)", async ({ page, electronApp 
 });
 
 test("P2 — 50 páginas escaneadas (fixture de H-10)", async ({ page, electronApp }, testInfo) => {
-  await openApp(page, "networkidle");
   const textSource = await generateText50p();
-  // Fuera de la ventana de medición (ADR-146 §15.2 punto 4): se rasteriza
-  // ANTES de instalar cualquier sampler.
-  const file = await rasterizeToScannedPdf(page, new Uint8Array(textSource));
+  // Fuera de la ventana de medición Y fuera del renderer medido (ADR-146
+  // §15.2 punto 4 / §4): un chromium aparte, cerrado antes de abrir la app.
+  const file = await getOrGenerateScannedFixture("p2-scanned-50p", new Uint8Array(textSource));
+  await openApp(page, "networkidle");
 
   const report = await measureProfile(page, electronApp, "p2-scanned-50p", file);
   printReport(report);
@@ -77,9 +86,12 @@ test("P2-dense — 50 páginas escaneadas, entidades en las 50 (control de densi
   page,
   electronApp,
 }, testInfo) => {
-  await openApp(page, "networkidle");
   const textSource = await generateText50pDense();
-  const file = await rasterizeToScannedPdf(page, new Uint8Array(textSource));
+  const file = await getOrGenerateScannedFixture(
+    "p2-scanned-50p-dense",
+    new Uint8Array(textSource),
+  );
+  await openApp(page, "networkidle");
 
   const report = await measureProfile(page, electronApp, "p2-scanned-50p-dense", file);
   printReport(report);

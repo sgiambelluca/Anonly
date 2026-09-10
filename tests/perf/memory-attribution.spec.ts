@@ -37,13 +37,18 @@
  * anota como tal en el reporte en vez de gastar más corridas de ~30-60s
  * cada una para una pregunta que ADR-146 §6/ADR-149 §5 prohíben resolver
  * mirando un número aislado.
+ *
+ * Los PDF escaneados salen de `getOrGenerateScannedFixture`
+ * (`support/scannedFixtureCache.ts`), no de rasterizar con la `page` medida
+ * — mismo arreglo que `memory.spec.ts` (revisión del planificador sobre el
+ * defecto del instrumento, ver ese archivo).
  */
 import { expect, openApp, test } from "../e2e/support/electronApp.js";
-import { rasterizeToScannedPdf } from "../e2e/support/scannedPdf.js";
 import { installSettingsOverride } from "../e2e/support/settingsOverride.js";
 import { generateText50p, generateText50pSmallPage } from "../fixtures/generate.js";
 
 import { measureProfile, printReport, writeReport } from "./support/memoryProfile.js";
+import { getOrGenerateScannedFixture } from "./support/scannedFixtureCache.js";
 
 test.setTimeout(300_000);
 
@@ -51,10 +56,10 @@ test("P2-attrib — NER apagado (cuánto es del detector)", async ({
   page,
   electronApp,
 }, testInfo) => {
+  const textSource = await generateText50p();
+  const file = await getOrGenerateScannedFixture("p2-scanned-50p", new Uint8Array(textSource));
   await installSettingsOverride(page, { nerEnabled: false });
   await openApp(page, "networkidle");
-  const textSource = await generateText50p();
-  const file = await rasterizeToScannedPdf(page, new Uint8Array(textSource));
 
   const report = await measureProfile(page, electronApp, "p2-attrib-ner-off", file);
   printReport(report);
@@ -72,10 +77,10 @@ test("P2-attrib — ocrPoolSize:1 vía performancePreset low (cuánto escala con
   page,
   electronApp,
 }, testInfo) => {
+  const textSource = await generateText50p();
+  const file = await getOrGenerateScannedFixture("p2-scanned-50p", new Uint8Array(textSource));
   await installSettingsOverride(page, { performancePreset: "low" });
   await openApp(page, "networkidle");
-  const textSource = await generateText50p();
-  const file = await rasterizeToScannedPdf(page, new Uint8Array(textSource));
 
   const report = await measureProfile(page, electronApp, "p2-attrib-low-preset", file);
   printReport(report);
@@ -90,9 +95,12 @@ test("P2-attrib — página a 4/9 de área (proxy de ocr.dpi 200 contra 300; cu�
   page,
   electronApp,
 }, testInfo) => {
-  await openApp(page, "networkidle");
   const textSource = await generateText50pSmallPage();
-  const file = await rasterizeToScannedPdf(page, new Uint8Array(textSource));
+  const file = await getOrGenerateScannedFixture(
+    "p2-attrib-small-page",
+    new Uint8Array(textSource),
+  );
+  await openApp(page, "networkidle");
 
   const report = await measureProfile(page, electronApp, "p2-attrib-small-page", file);
   printReport(report);
