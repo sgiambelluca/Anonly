@@ -18,6 +18,7 @@ import type { ElectronApplication, Page } from "@playwright/test";
 import type { E2eFilePayload } from "../../e2e/support/fixtures.js";
 
 import {
+  minSumBytes,
   peakSumBytes,
   samplesSince,
   startMemorySampling,
@@ -30,6 +31,20 @@ const OUT_DIR = resolve(HERE, "../../../.measure");
 export const SAMPLE_INTERVAL_MS = 150;
 /** Gracia tras `PIPELINE_READY` antes de tomar el pico (ADR-146 §15.3 punto 8: el seed/precalentado de ADR-151 sigue corriendo un instante más). */
 const SETTLE_GRACE_MS = 600;
+/**
+ * Ventana de asentamiento tras `closeDocument()` para la línea de base
+ * caliente (revisión del planificador sobre el instrumento: una sola
+ * muestra inmediata quedaba expuesta a basura del documento recién cerrado
+ * que el GC todavía no liberó — rango observado en 3 corridas: 763.9-1477.1
+ * MB, 647 MB de dispersión, suficiente para tapar cualquier delta de
+ * atribución por pool). No fuerza el GC (ADR-146 §6 ya anticipa que no hay
+ * forma de forzarlo desde el arnés): solo le da tiempo y se queda con la
+ * lectura más baja del sampler de fondo (`startMemorySampling`, que sigue
+ * corriendo cada `SAMPLE_INTERVAL_MS` durante esta espera). No cambia la
+ * definición de ADR-146 §1 ("la base con modelos cargados y sin documento"),
+ * solo la mide de forma más confiable.
+ */
+const HOT_BASELINE_SETTLE_WINDOW_MS = 4_000;
 
 declare global {
   var __anonlyMemoryRun:
@@ -229,10 +244,13 @@ export async function measureProfile(
     await closeDocument(page);
     // Línea de base CALIENTE: los modelos que cargó la corrida fría siguen
     // retenidos (ADR-080 idle-dispose) y ya no hay documento — es la línea
-    // de base que ADR-146 §1 exige para M1.
-    const hotBaseline = await sampler.sampleOnce();
+    // de base que ADR-146 §1 exige para M1. Mínimo de la ventana de
+    // asentamiento (ver HOT_BASELINE_SETTLE_WINDOW_MS), no una sola muestra.
+    const hotBaselineSinceMs = sampler.samples.at(-1)?.atMs ?? 0;
+    await page.waitForTimeout(HOT_BASELINE_SETTLE_WINDOW_MS);
+    const hotBaselineBytes = minSumBytes(samplesSince(sampler.samples, hotBaselineSinceMs));
 
-    const hot = await runImport(page, file, sampler, "hot", hotBaseline.sumWorkingSetSizeBytes);
+    const hot = await runImport(page, file, sampler, "hot", hotBaselineBytes);
     await closeDocument(page);
 
     return {

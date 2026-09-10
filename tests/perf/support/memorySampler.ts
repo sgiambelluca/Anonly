@@ -101,6 +101,19 @@ export function peakSumBytes(samples: ReadonlyArray<MemorySample>): number {
   return samples.reduce((max, s) => Math.max(max, s.sumWorkingSetSizeBytes), 0);
 }
 
+/**
+ * El mínimo de `sumWorkingSetSizeBytes` entre las muestras dadas — la línea
+ * de base caliente de H-10 lo usa sobre una ventana de asentamiento
+ * (`memoryProfile.ts`) en vez de una sola lectura, para no capturar basura
+ * del documento recién cerrado antes de que el GC la libere. `0` si no hay
+ * ninguna muestra (no debería ocurrir con una ventana bien dimensionada, ya
+ * que el sampler de fondo sigue corriendo).
+ */
+export function minSumBytes(samples: ReadonlyArray<MemorySample>): number {
+  if (samples.length === 0) return 0;
+  return samples.reduce((min, s) => Math.min(min, s.sumWorkingSetSizeBytes), Infinity);
+}
+
 /** Las muestras con `atMs` estrictamente posterior a `sinceMs` — para acotar un pico a una ventana (p. ej. "desde que arrancó la corrida caliente"). */
 export function samplesSince(
   samples: ReadonlyArray<MemorySample>,
