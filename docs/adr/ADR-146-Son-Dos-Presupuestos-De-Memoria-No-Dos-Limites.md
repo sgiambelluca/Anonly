@@ -2,7 +2,7 @@
 
 # ADR-146 — Son dos presupuestos de memoria, no dos límites del mismo
 
-- **Estado**: Accepted
+- **Estado**: Accepted (**§1 precisado y §6 ampliado el 2026-09-10**, tras medir con el instrumento ya corregido: M1 es una **cota inferior**, no una medida de demanda, y la atribución compara **picos entre sí**, no diferencias contra una línea de base. Ver la enmienda al final de la Decisión)
 - **Fecha**: 2026-09-09
 - **Decidido por**: El planificador, resolviendo D-06 del plan de campaña de hardening (§2, §2.1, §15).
 - **Relacionado con**: `00_Project_Vision.md` §7 (la métrica contractual), `07_Performance_Strategy.md` §1/§7/§11.4, ADR-130/132 (el contenedor, que es dónde se mide ahora), ADR-080 (workers liberables por idle)
@@ -125,7 +125,46 @@ parcial".
 
 Un resultado no disponible se reporta como **inconcluso**, no como cero.
 
-### 7. Qué se corrige en los documentos
+### 7. Enmienda (2026-09-10): M1 es una cota inferior, y la atribución compara picos
+
+Medido con el fixture ya fuera del renderer y con la línea de base caliente
+tomada como el mínimo de una ventana de 4 s tras el cierre —las dos correcciones
+que este ADR pedía—, tres corridas del mismo perfil P2 dieron:
+
+| corrida | línea de base | pico | M1 (pico − base) |
+|---|---|---|---|
+| 1 | 1031,9 MB | 1788,4 MB | 756,5 MB |
+| 2 | 1076,4 MB | 1943,9 MB | 867,5 MB |
+| 3 | **1632,3 MB** | **2133,1 MB** | **500,8 MB** |
+
+La corrida 3 no tiene una línea de base "sucia" por retraso del recolector: tiene
+la línea de base **y** el pico más altos de las tres. Las dos se movieron juntas,
+y la resta salió **más chica**.
+
+Eso no es ruido de muestreo: es cómo funciona el RSS. Cuando el proceso ya tiene
+memoria residente libre por dentro, el trabajo del documento se acomoda ahí sin
+pedirle nada nuevo al sistema, y el crecimiento observado **subestima la demanda
+real**. Ninguna ventana más larga lo arregla, porque no es un problema de cuándo
+se mira.
+
+**Consecuencias normativas:**
+
+1. **M1 es una cota inferior de lo que cuesta el documento**, no una medida de su
+   demanda. Un M1 por debajo del presupuesto **no** demuestra que el perfil
+   cumpla; un M1 por encima sí demuestra que no cumple. Se reporta como tal.
+2. **M2 es la métrica primaria.** Es una lectura directa del pico, sin resta, y
+   por lo tanto no hereda este problema.
+3. **La atribución compara picos entre sí, no restas.** Para saber cuánto cuesta
+   un componente se corren dos configuraciones que solo difieran en él y se
+   comparan sus **M2**, alternando las condiciones corrida por corrida para que
+   la deriva del equipo no se le atribuya a una sola.
+4. **Solo se comparan corridas de la misma sesión y con el equipo por lo demás
+   inactivo.** Medido: la dispersión de M2 pasó de 3,4 % a 17,6 % entre dos
+   tandas del mismo perfil, con medias casi idénticas (1968 contra 1955 MB) — o
+   sea, variación del entorno, no del producto. Con 17,6 % sobre ~2 GB, el ruido
+   es de ~345 MB: más grande que varios de los deltas que la atribución busca.
+
+### 8. Qué se corrige en los documentos
 
 `07_Performance_Strategy.md` §1 y §7 dejan de presentar dos números sin
 etiqueta: cada fila declara si es M1 o M2, y §7.1 separa las líneas de runtime
