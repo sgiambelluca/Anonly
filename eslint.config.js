@@ -60,6 +60,7 @@ export default tseslint.config(
             "playwright.config.ts",
             "playwright.measure.config.ts",
             "playwright.electron.config.ts",
+            "playwright.perf.config.ts",
             "apps/react-client/postcss.config.js",
             "apps/react-client/tailwind.config.js",
           ],

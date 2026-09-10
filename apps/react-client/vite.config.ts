@@ -78,6 +78,23 @@ export default defineConfig({
       "Cross-Origin-Embedder-Policy": "require-corp",
     },
   },
+  /*
+   * `vite preview` NO hereda `server.headers` — son bloques separados. El
+   * gate de tiempos (H-07) ya NO corre contra `vite preview` (ADR-153: medido
+   * ~5 s más lento que el producto real, causa sin identificar, así que deja
+   * de usarse para medir cualquier cosa) — este bloque no es su arreglo.
+   * Existe para quien corra `pnpm preview` a mano: sin esto, esa sesión
+   * pierde `SharedArrayBuffer` y `onnxruntime-web` cae a un hilo (ADR-130
+   * §3), y saca conclusiones equivocadas sobre qué tan rápido es el producto.
+   */
+  preview: {
+    port: 4173,
+    strictPort: true,
+    headers: {
+      "Cross-Origin-Opener-Policy": "same-origin",
+      "Cross-Origin-Embedder-Policy": "require-corp",
+    },
+  },
   build: {
     target: "es2022",
     sourcemap: true,

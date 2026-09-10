@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=performance | dependencias=05_Worker_Architecture.md,06_Pipeline.md,03_Data_Model.md,adr/ADR-054-Scroll-Independiente-Por-Panel.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md | audiencia=IA+humanos | fase=1 (§3.1 actualizado en el cierre de fase 10: scroll independiente por panel, ADR-054; §11.3 en fase 11: escenario 12 —un panel no dispara el render del otro—, ADR-056) -->
+<!-- CONTEXT: scope=performance | dependencias=05_Worker_Architecture.md,06_Pipeline.md,03_Data_Model.md,adr/ADR-054-Scroll-Independiente-Por-Panel.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-151-La-Primera-Pagina-Ya-Esta-Dibujada-Cuando-Se-Abre-El-Panel.md,adr/ADR-153-El-Gate-De-Tiempos-Se-Mide-Sobre-El-Producto.md | audiencia=IA+humanos | fase=1 (§3.1 actualizado en el cierre de fase 10: scroll independiente por panel, ADR-054; §11.3 en fase 11: escenario 12 —un panel no dispara el render del otro—, ADR-056; §1/§11.4 en fase 11 por ADR-151/ADR-153 — retira "first preview", agrega las dos filas de página-1-visible e import→panel, y el gate de Performance pasa a correr sobre el shell de Electron empaquetado en vez de un servidor HTTP) -->
 
 # Anonly — Estrategia de Performance (TAD bloque 10)
 
@@ -15,8 +15,20 @@
 | Pico de memoria para 50 páginas | < 512 MB |
 | Bundle inicial (sin modelos IA) | < 800 KB gz |
 | Cancelación efectiva | < 200 ms desde input hasta cese de CPU |
-| First preview (página 1, lado original) | < 1.5 s desde import |
+| Primera página visible al abrir el panel de trabajo | ya dibujada: cero `RENDER_REQUESTED` necesarios y píxeles en el primer frame de ②b |
+| Import → panel de trabajo | el presupuesto de extremo a extremo de su clase de documento (< 8 s nativo, < 60 s escaneado — mismas dos filas de arriba), más el piso de 1,2 s de ADR-150 |
 | Re-render delta tras editar 1 grupo | < 150 ms |
+
+> **ADR-151 §3 (2026-09-10)**: retira el renglón "First preview (página 1, lado original) < 1.5 s
+> desde import", vigente desde la fase 1 con una UI de cuatro paneles simultáneos que ADR-087 §1
+> retiró — el visor no monta hasta que la pantalla de escaneo suelta al usuario, así que ese
+> renglón terminaba midiendo la pantalla de escaneo entera, no el dibujo (~120 ms de render contra
+> ~2,4-3,9 s de espera real, medido). Lo reemplazan las dos filas de arriba: la primera verifica que
+> el precalentado de ADR-151 §1 hizo su trabajo; la segunda **no agrega un número nuevo** — desde
+> ADR-150, "import → panel de trabajo" y "import → `Ready`" son el mismo instante, y ya tiene
+> presupuesto contractual en las dos filas de arriba. Este renglón retirado nunca estuvo en la
+> tabla contractual de `00_Project_Vision.md` §7 (se había agregado solo acá): retirarlo no toca el
+> contrato de producto.
 
 ---
 
@@ -250,7 +262,7 @@ Fixtures pesados (> 5 MB) vía Git LFS o descargados en `postinstall` con hash v
 | Snapshot (aislado) | `pnpm test:snapshot` | cualquier drift | activo (local / pre-PR) |
 | Integration | `pnpm test:integration` | cualquier par crítico rojo (pares mínimos en ADR-034 §6) | auto-activa al existir `tests/integration/` (Hito 9); también corre dentro de `pnpm test` |
 | E2E | `pnpm assets:mirror && pnpm test:e2e` | cualquier escenario crítico de §11.3 rojo | auto-activa al existir `tests/e2e/` (Hito 10). **`pnpm assets:mirror` es prerequisito obligatorio** (ADR-048 §1): los assets first-party no se commitean (ADR-018) y sin ellos Vite ni siquiera resuelve el `import ?url` de `src/assets/onnxruntime/` — se cae la suite entera, no solo los escenarios de NER/OCR. En CI: paso previo al `pnpm test:e2e` del job `test-e2e`, con cache por hash de `assets.lock.json` |
-| Performance | `pnpm test:perf` | métrica gate de `00_Project_Vision.md` §7 fuera de target ± 10% | auto-activa al existir `tests/perf/` (Hito 11) |
+| Performance | `pnpm assets:mirror && VITE_E2E=1 pnpm --filter @anonly/react-client build && pnpm --filter @anonly/desktop-shell build && pnpm test:perf` | tiempo end-to-end de §1 (10 páginas con texto, 10 páginas escaneadas) o la primera fila de ADR-151 §3 (página 1 en el store sin `RENDER_REQUESTED`) fuera de target | auto-activa al existir `tests/perf/` (Hito 11). Corre sobre el **shell de Electron empaquetado** (`playwright.perf.config.ts`, mismo arnés que `test:e2e` — `tests/e2e/support/electronApp.ts`), no Vitest/Node ni un servidor HTTP: ADR-153 midió `vite preview` ~5 s más lento que el producto real para el mismo trabajo, con la causa sin identificar — un servidor de desarrollo no es el artefacto que se instala (ADR-130), y un gate de tiempos tiene que medir ese artefacto. Puede compartir el build con el job de E2E |
 | Stress | `pnpm test:stress` | documento grande excede presupuesto de memoria/tiempo | auto-activa al existir `tests/stress/` (Hito 11) |
 | Leak | `pnpm test:leak` | memoria no regresa al baseline tras 10 open/close | auto-activa al existir `tests/leak/` (Hito 11) |
 | Cancel | `pnpm test:cancel` | SLA > 200 ms en cualquier motor | auto-activa al existir `tests/cancel/` (Hito 11) |
