@@ -2668,4 +2668,264 @@ describe("RenderEngine — unit tests", () => {
       expect(outboundOfType(fakeSelf, "COMPLETED")?.result).toBeUndefined();
     });
   });
+
+  // ─── PreviewRenderScheduler — wiring en RenderEngine (ADR-144, H-09B) ───
+  //
+  // Los tests de la clase en aislamiento (semáforo, coalescencia, generación,
+  // limpieza) viven en `preview-scheduler.test.ts`. Acá se verifica el
+  // comportamiento observable a través de la API pública de `RenderEngine`:
+  // Render_Engine.md §13 casos 35-36, §14. Los pools acá son estructurales
+  // (mismo patrón que `spyPool` más arriba en este archivo): el tipo interno
+  // `RenderJobPool` no se exporta desde este paquete.
+  describe("PreviewRenderScheduler wiring (ADR-144)", () => {
+    function fakeImageData(): ImageData {
+      return {
+        data: new Uint8ClampedArray(4),
+        width: 1,
+        height: 1,
+        colorSpace: "srgb",
+      } as ImageData;
+    }
+
+    function fakeEncoded(): {
+      bytes: ArrayBuffer;
+      format: string;
+      widthPx: number;
+      heightPx: number;
+    } {
+      return { bytes: new Uint8Array([1]).buffer, format: "png", widthPx: 1, heightPx: 1 };
+    }
+
+    function fakeKernelRenderResult(): unknown {
+      return { imageData: fakeImageData(), encoded: fakeEncoded(), degraded: [] };
+    }
+
+    beforeEach(() => {
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument({ pageCount: 5 })),
+      );
+    });
+
+    it("coalesces N rapid renderPage calls for the same preview key into a single dispatch to the pool, and every caller resolves with the same output", async () => {
+      const dispatchCalls: Array<number | undefined> = [];
+      let releaseDispatch: ((value: unknown) => void) | undefined;
+      const pool = {
+        dispatch: (params: { readonly priority?: number }): Promise<unknown> => {
+          dispatchCalls.push(params.priority);
+          return new Promise((resolve) => {
+            releaseDispatch = resolve;
+          });
+        },
+        broadcast: async <T>(
+          _payload: unknown,
+          run: () => Promise<T>,
+        ): Promise<ReadonlyArray<T>> => [await run()],
+      };
+      const pooledEngine = new RenderEngine(pool);
+      const docId = "doc-coalesce";
+      await pooledEngine.init(ctx);
+      await pooledEngine.loadDocument(docId, createValidBuffer());
+
+      // Tres llamadas rápidas a la MISMA clave (documentId/pageIndex/kind/
+      // mode/scale/imageFormat), con `replacements` DISTINTOS — justo lo que
+      // ADR-144 §3 excluye de la clave de coalescencia.
+      const p1 = pooledEngine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+          replacements: [makeReplacement({ groupId: "g1" })],
+        }),
+        ctx,
+      );
+      const p2 = pooledEngine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+          replacements: [makeReplacement({ groupId: "g2" })],
+        }),
+        ctx,
+      );
+      const p3 = pooledEngine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+          replacements: [makeReplacement({ groupId: "g3" })],
+        }),
+        ctx,
+      );
+
+      await vi.waitFor(() => expect(dispatchCalls).toHaveLength(1));
+      // Confirma que NO hay un segundo dispatch en camino antes de liberar.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(dispatchCalls).toHaveLength(1);
+
+      releaseDispatch?.(fakeKernelRenderResult());
+
+      const [o1, o2, o3] = await Promise.all([p1, p2, p3]);
+      expect(o1).toBe(o2);
+      expect(o2).toBe(o3);
+
+      await pooledEngine.dispose();
+    });
+
+    it("bounds concurrent preview dispatches to renderPoolSize under a flood of distinct pages — the case that motivated ADR-144", async () => {
+      const totalPages = 30;
+      const renderPoolSize = 3;
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument({ pageCount: totalPages })),
+      );
+
+      const floodCtx = createEngineContext({
+        config: createMockConfig({
+          workerPool: { ...createMockConfig().workerPool, renderPoolSize },
+        }),
+      });
+
+      let liveDispatches = 0;
+      let maxLiveDispatches = 0;
+      const pendingResolvers: Array<(value: unknown) => void> = [];
+      const pool = {
+        dispatch: (): Promise<unknown> => {
+          liveDispatches += 1;
+          maxLiveDispatches = Math.max(maxLiveDispatches, liveDispatches);
+          return new Promise((resolve) => {
+            pendingResolvers.push((value: unknown) => {
+              liveDispatches -= 1;
+              resolve(value);
+            });
+          });
+        },
+        broadcast: async <T>(
+          _payload: unknown,
+          run: () => Promise<T>,
+        ): Promise<ReadonlyArray<T>> => [await run()],
+      };
+      const pooledEngine = new RenderEngine(pool);
+      const docId = "doc-flood";
+      await pooledEngine.init(floodCtx);
+      await pooledEngine.loadDocument(docId, createValidBuffer());
+
+      // El seed dispara TODAS las páginas sin esperar (ADR-144, Contexto §1:
+      // `Orchestrator.seedAnonymizedPreview` en un expediente de 200 páginas).
+      const outputPromises = Array.from({ length: totalPages }, (_, pageIndex) =>
+        pooledEngine.renderPage(
+          createRenderPageInput({
+            documentId: docId,
+            pageIndex,
+            kind: "original",
+            mode: "preview",
+          }),
+          floodCtx,
+        ),
+      );
+
+      await vi.waitFor(() => expect(pendingResolvers).toHaveLength(renderPoolSize));
+      expect(maxLiveDispatches).toBe(renderPoolSize);
+
+      let resolvedCount = 0;
+      while (resolvedCount < totalPages) {
+        await vi.waitFor(() => expect(pendingResolvers.length).toBeGreaterThan(0));
+        const resolve = pendingResolvers.shift();
+        resolve?.(fakeKernelRenderResult());
+        resolvedCount += 1;
+      }
+
+      await Promise.all(outputPromises);
+      // La aserción que representa la garantía de ADR-144 §4: el pico de
+      // despachos EN VUELO nunca superó renderPoolSize, ni con 30 páginas
+      // distintas lanzadas en el mismo turno.
+      expect(maxLiveDispatches).toBeLessThanOrEqual(renderPoolSize);
+    });
+
+    it("dispatches with priority 70 via RENDER_REQUESTED (visible) and 20 via a direct call (seed/flush mediado) — ADR-144 §7", async () => {
+      const docId = "doc-priority";
+      const dispatchPriorities: Array<number | undefined> = [];
+      const pool = {
+        dispatch: (params: { readonly priority?: number }): Promise<unknown> => {
+          dispatchPriorities.push(params.priority);
+          return Promise.resolve(fakeKernelRenderResult());
+        },
+        broadcast: async <T>(
+          _payload: unknown,
+          run: () => Promise<T>,
+        ): Promise<ReadonlyArray<T>> => [await run()],
+      };
+      const pooledEngine = new RenderEngine(pool);
+      const realCtx = createEngineContextWithRealBus();
+      await pooledEngine.init(realCtx);
+      await pooledEngine.loadDocument(docId, createValidBuffer());
+
+      // Llamada directa (seed/flush mediado del Orchestrator): prioridad 20.
+      await pooledEngine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "original",
+          mode: "preview",
+        }),
+        realCtx,
+      );
+
+      // RENDER_REQUESTED (el visor pidiendo lo que mira): prioridad 70.
+      let renderFinished = false;
+      realCtx.bus.on(EventChannel.Render, EngineEvents.RENDER_FINISHED, () => {
+        renderFinished = true;
+      });
+      realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+        documentId: docId,
+        pageIndices: [1],
+        mode: "preview",
+        kind: "original",
+        scale: 1,
+      });
+      await vi.waitFor(() => expect(renderFinished).toBe(true));
+
+      expect(dispatchPriorities).toEqual([20, 70]);
+      await pooledEngine.dispose();
+    });
+
+    it("mode: 'full' bypasses the scheduler entirely — two simultaneous full renders of the same page produce two independent dispatches, not one coalesced (no regresión)", async () => {
+      const docId = "doc-full-bypass";
+      let dispatchCount = 0;
+      const dispatchPriorities: Array<number | undefined> = [];
+      const pool = {
+        dispatch: (params: { readonly priority?: number }): Promise<unknown> => {
+          dispatchCount += 1;
+          dispatchPriorities.push(params.priority);
+          return Promise.resolve(fakeKernelRenderResult());
+        },
+        broadcast: async <T>(
+          _payload: unknown,
+          run: () => Promise<T>,
+        ): Promise<ReadonlyArray<T>> => [await run()],
+      };
+      const pooledEngine = new RenderEngine(pool);
+      await pooledEngine.init(ctx);
+      await pooledEngine.loadDocument(docId, createValidBuffer());
+
+      const input = createRenderPageInput({
+        documentId: docId,
+        pageIndex: 0,
+        kind: "anonymized",
+        mode: "full",
+        replacements: [makeReplacement({ groupId: "g1" })],
+      });
+      const [o1, o2] = await Promise.all([
+        pooledEngine.renderPage(input, ctx),
+        pooledEngine.renderPage(input, ctx),
+      ]);
+
+      expect(dispatchCount).toBe(2); // NUNCA se coalesce "full" — ADR-144 §2, Decisión.
+      expect(dispatchPriorities).toEqual([1000, 1000]);
+      expect(o1).not.toBe(o2); // dos ejecuciones independientes, no una promesa compartida.
+
+      await pooledEngine.dispose();
+    });
+  });
 });

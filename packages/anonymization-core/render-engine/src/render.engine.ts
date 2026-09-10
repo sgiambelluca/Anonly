@@ -1,14 +1,59 @@
 /**
  * @anonly/render-engine — `RenderEngine` (implementa `IEngine`).
  *
- * Fuente de verdad: docs/core/Render_Engine.md (v1.12.0, ADR-030, ADR-031,
+ * Fuente de verdad: docs/core/Render_Engine.md (v1.15.0, ADR-030, ADR-031,
  * ADR-034, ADR-037, ADR-043, ADR-044, ADR-050, ADR-053, ADR-056, ADR-059,
- * ADR-065).
+ * ADR-065, ADR-144).
  * ADR-055 NO está en esa lista: es un PR preventivo de endurecimiento (D2 de
  * la serie D1..D4 de `roadmap/MVP.md`, ADR-055 §9 fila "3-5") que no cambia
  * ningún contrato público ni comportamiento
  * documentado en el spec — solo angosta el puerto interno de este archivo
  * (nota más abajo), así que Render_Engine.md no se toca (R-21).
+ *
+ * ADR-144 (2026-09-09 — el input se registra ya; el trabajo se planifica,
+ * H-09B de la campaña de hardening, resuelve D-08 del plan): el seed
+ * (`Orchestrator.seedAnonymizedPreview`) llama `renderPage` por cada página
+ * del documento sin esperar, y `WorkerPool.enqueue` acepta encolar de más
+ * aunque pase `maxQueue` (emite `WORKER_POOL_SATURATED` y encola igual) — en
+ * un expediente de 200 páginas eso son ~200 renders lanzados en el mismo
+ * turno. Posponer `renderPage` entero para acotar la cola rompería
+ * `rememberInput` (nota de implementación 1, abajo), que tiene que correr YA
+ * para que la reconstrucción de `RENDER_REQUESTED` no pierda reemplazos: las
+ * dos mitades de `renderPage` tienen urgencias distintas. `rememberInput`
+ * sigue sincrónico al principio de `renderPageInternal`, sin condicionar a
+ * nada (§1 del ADR); lo que se demora es el trabajo PESADO —cache check +
+ * dispatch al kernel— y SOLO para `mode: "preview"` (`mode: "full"`/export
+ * sigue despachando inmediato, prioridad 1000, bit a bit como antes). Ese
+ * trabajo pasa por `PreviewRenderScheduler` (`./preview-scheduler.ts`, no
+ * exportado desde `index.ts` — wiring interno, mismo criterio que
+ * `RenderJobPool`): coalesce por clave `documentId|pageIndex|kind|mode|
+ * scale|imageFormat` (§3 — sin `replacements`/`annotations`, que es
+ * justamente lo que cambia entre una ráfaga de ediciones sobre la misma
+ * página) y acota la concurrencia a `ctx.config.workerPool.renderPoolSize`
+ * despachos de preview EN VUELO a la vez (§4), con el cupo reservado ANTES
+ * de despachar. Una solicitud nueva sobre una clave con trabajo pendiente
+ * reemplaza el descriptor (bump de generación + `Math.max` de prioridad) y
+ * devuelve la MISMA promesa — no dispara nada nuevo; si el kernel resuelve
+ * con una generación vieja (alguien coalesció una solicitud más nueva
+ * mientras corría), el resultado se descarta sin cachear ni emitir
+ * `PREVIEW_UPDATED` y se redespacha leyendo el input VIGENTE
+ * (`lastAnonymizedInputs`/`lastOriginalInputs`, nunca el snapshot que armó
+ * la entrada — §5). Prioridad (§7, la fila que `05_Worker_Architecture.md`
+ * §6.2 ya documentaba y el código no implementaba: preview visible=70, no
+ * visible=20): la decide `renderPageInternal` a partir del
+ * `participatesInSupersede` que YA recibía (viene de `handleRenderRequested`
+ * → 70; llamada directa, seed/flush mediado → 20), sin parámetro nuevo en la
+ * firma pública. El mecanismo de supersede de ADR-037 §4 (`pendingRenders`,
+ * checkpoint antes/después del kernel) NO se toca: son dos coalescings
+ * ortogonales — ADR-037 detecta "cambió la escala pedida para esta clave SIN
+ * escala"; ADR-144 coalesce por una clave que SÍ incluye `scale`, y solo
+ * bajo `mode: "preview"` (ver el comentario de `previewSchedulerKey`). Baja
+ * de documento (§8): `clearDocumentState`/`dispose` propagan a
+ * `previewScheduler.clearDocument`/`.clear()` — un descriptor que sobreviva
+ * a un `unloadDocument` es la fuga que el ADR declara en sus Consecuencias.
+ * Sin cambios de contrato (`Contracts.md` intacto), sin tocar el camino de
+ * export, la mediación de ADR-044 del lado del Orchestrator ni `WorkerPool`
+ * (ADR-144, "Lo que no toca").
  *
  * ADR-065 (2026-08-09 — `rasterizePage` acepta un recorte, Hito 10.8 PR6):
  * quinto parámetro opcional `region?: BoundingBox` (§6/§13 caso 30). El motor
@@ -258,8 +303,10 @@ import {
   type Replacement,
   type Unsubscribe,
   type UnloadDocumentPayload,
+  type Word,
 } from "@anonly/shared";
 
+import { PreviewRenderScheduler } from "./preview-scheduler.js";
 import { isRetryablePageError, RenderFailedError, RenderPageFailedError } from "./render.errors.js";
 import type { RenderPageInput, RenderPageOutput } from "./render.types.js";
 import {
@@ -275,6 +322,20 @@ import {
 const DEFAULT_TIMEOUT_MS = 10_000; // render-page preview (05_Worker_Architecture.md §4); full=30s idem si config lo define.
 const MAX_RETRIES = 1; // spec §11: "reintentar 1 vez"
 const DEFAULT_CACHE_PAGES = 16;
+
+// ADR-144 §7: la fila que 05_Worker_Architecture.md §6.2 ya documentaba
+// (preview visible=70, no visible=20) — antes de este ADR el código
+// despachaba 70 fijo para todo "preview" (ver nota 7 de cabecera, versiones
+// previas de este archivo). `PreviewRenderScheduler.schedule` recibe una de
+// estas dos, decidida acá según `participatesInSupersede` (nunca al revés).
+const PREVIEW_PRIORITY_VISIBLE = 70; // RENDER_REQUESTED (handleRenderRequested): el visor pide lo que mira.
+const PREVIEW_PRIORITY_NOT_VISIBLE = 20; // invocación directa: seed/flush mediado, barre el documento entero.
+const EXPORT_PRIORITY = 1000; // mode "full": camino completo del export (05_Worker_Architecture.md §6.2).
+
+// ADR-144 §4: mismo criterio defensivo que `evictCacheIfNeeded` con
+// `DEFAULT_CACHE_PAGES` — un `renderPoolSize` no positivo dejaría al
+// scheduler sin ningún slot que otorgar nunca (deadlock de todo preview).
+const DEFAULT_RENDER_POOL_SIZE = 2;
 
 // ─── Puerto interno de despacho (ADR-043 §2; ver nota 7 de cabecera) ───
 
@@ -596,6 +657,25 @@ function isValidScale(scale: number): boolean {
   return Number.isFinite(scale) && scale > 0 && scale <= MAX_RENDER_SCALE;
 }
 
+// ADR-144 §3: clave de coalescencia de PreviewRenderScheduler — construida
+// SOLO para mode "preview" ("full" nunca entra al scheduler). Deliberadamente
+// NO incluye `replacements`/`annotations` (`buildCacheKey`, arriba, sí): son
+// justo lo que cambia entre una ráfaga de ediciones sobre la misma página, y
+// coalescerlas es el objetivo del ADR. Separador "|" (no ":", que ya usan
+// `buildCacheKey`/`pageKey`/`supersedeKey`) para que `clearDocument` del
+// scheduler pueda matchear por prefijo `${documentId}|` sin ambigüedad
+// contra esas otras claves si algún día conviven en el mismo namespace.
+function previewSchedulerKey(
+  documentId: string,
+  pageIndex: number,
+  kind: "original" | "anonymized",
+  mode: "preview" | "full",
+  scale: number,
+  imageFormat: "png" | "jpeg",
+): string {
+  return `${documentId}|${pageIndex}|${kind}|${mode}|${scale}|${imageFormat}`;
+}
+
 /**
  * Entrada interna del cache LRU: a diferencia de `RenderPageOutput` (público,
  * `encoded` opcional según `mode` — Render_Engine.md §10), acá `encoded`
@@ -643,6 +723,20 @@ function toPublicOutput(entry: InternalCacheEntry, mode: "preview" | "full"): Re
 }
 
 /**
+ * Salida de la "cola pesada" de un render (ADR-144, "Ojo con la
+ * responsabilidad de cachear/emitir" en la decisión): cache check + dispatch
+ * al kernel, SIN cachear ni emitir — eso lo hace `settleRenderJob`, invocado
+ * por el caller (directo para `mode: "full"`; por `PreviewRenderScheduler`,
+ * solo si la generación no quedó vieja, para `mode: "preview"`).
+ */
+interface PreviewJobResult {
+  readonly cacheKey: string;
+  readonly entry: InternalCacheEntry;
+  readonly output: RenderPageOutput;
+  readonly cacheHit: boolean;
+}
+
+/**
  * Documento retenido host-side desde ADR-043 §3: ya no es el
  * `PDFDocumentProxy` (vive en el worker/kernel), solo lo necesario para las
  * precondiciones de ADR-030 y el re-priming. `password` (ADR-050 §2):
@@ -679,6 +773,12 @@ export class RenderEngine implements IEngine {
   // RENDER_REQUESTED. Poblada únicamente por handleRenderRequested y
   // consultada solo por renders con participatesInSupersede = true.
   private readonly pendingRenders = new Map<string, number>();
+  // ADR-144: planificador del trabajo pesado de "mode: preview" — coalesce
+  // por clave (ADR-144 §3) y acota la concurrencia a
+  // ctx.config.workerPool.renderPoolSize (§4). Construido en init() (recién
+  // ahí se conoce ctx.config); null hasta entonces/tras dispose() — mismo
+  // criterio nullable que `this.ctx`.
+  private previewScheduler: PreviewRenderScheduler<PreviewJobResult> | null = null;
 
   /**
    * `pool` (ADR-043 §2): inyectada por el façade en `createCore`
@@ -695,6 +795,13 @@ export class RenderEngine implements IEngine {
     this.ctx = ctx;
     this.initialized = true;
     this.disposed = false;
+    // ADR-144 §4: tamaño del semáforo de despachos de preview en vuelo. Piso
+    // defensivo de DEFAULT_RENDER_POOL_SIZE — ver su comentario arriba.
+    const renderPoolSize =
+      ctx.config.workerPool.renderPoolSize > 0
+        ? ctx.config.workerPool.renderPoolSize
+        : DEFAULT_RENDER_POOL_SIZE;
+    this.previewScheduler = new PreviewRenderScheduler<PreviewJobResult>(renderPoolSize);
     // ADR-044: único canal escuchado desde el retiro del delta render por
     // eventos de Grouping (`GROUP_REPLACEMENT_CHANGED`/`GROUP_TOGGLED`).
     this.unsubscribers = [
@@ -901,7 +1008,9 @@ export class RenderEngine implements IEngine {
     // ADR-037 §4, alcance precisado por el hallazgo del PR4 (nota 6 de
     // cabecera): solo los renders originados en RENDER_REQUESTED participan
     // del supersede; en la vía directa el checkpoint degrada al chequeo
-    // preexistente de ctx.abortSignal.
+    // preexistente de ctx.abortSignal. ADR-144 NO toca este mecanismo: son
+    // dos mecanismos de supersede/coalescing distintos y complementarios
+    // (ver el comentario de `previewSchedulerKey`).
     const checkpoint = participatesInSupersede
       ? (): void => {
           this.throwIfSuperseded(ctx, documentId, pageIndex, kind, scale);
@@ -914,7 +1023,136 @@ export class RenderEngine implements IEngine {
     // descarta acá, antes de tocar rememberInput/cache, sin haber ejecutado nada.
     checkpoint();
 
+    // ADR-144 §1: el registro del input autoritativo es SIEMPRE sincrónico y
+    // corre ACÁ, antes de decidir si esta clave va al scheduler o despacha
+    // inmediato — ninguna página queda sin su input por estar esperando
+    // turno. `handleRenderRequested` reconstruye RENDER_REQUESTED desde acá.
     this.rememberInput(input);
+
+    if (mode === "full") {
+      // ADR-144 §2, Decisión: "full" (export) NO entra al scheduler —
+      // despacho inmediato, autoritativo, no se coalesce ni se demora nunca.
+      // Bit a bit el comportamiento de siempre, solo reordenado (extraído a
+      // runRenderKernelJob + settleRenderJob).
+      const result = await this.runRenderKernelJob({
+        documentId,
+        pageIndex,
+        kind,
+        mode,
+        scale,
+        imageFormat,
+        replacements,
+        annotations,
+        lineWords: input.lineWords,
+        ctx,
+        checkpoint,
+        priority: EXPORT_PRIORITY,
+      });
+      await this.settleRenderJob(ctx, mode, result);
+      return result.output;
+    }
+
+    // mode === "preview": el trabajo pesado pasa por PreviewRenderScheduler
+    // (ADR-144), coalescido por clave (sin replacements/annotations, ver
+    // previewSchedulerKey) y acotado a
+    // ctx.config.workerPool.renderPoolSize despachos simultáneos.
+    if (this.previewScheduler === null) {
+      // assertInitialized() ya garantiza this.ctx !== null; previewScheduler
+      // se construye junto con él en init() — guard explícito solo para que
+      // TS estreche el tipo acá (mismo patrón que loadDocument).
+      throw new EngineNotInitializedError(EngineId.Render);
+    }
+    const scheduler = this.previewScheduler;
+
+    // ADR-144 §7: la fila que 05_Worker_Architecture.md §6.2 ya documentaba
+    // (preview visible=70, no visible=20). `participatesInSupersede` YA
+    // distingue exactamente esto — viene de `handleRenderRequested` (el
+    // visor pidiendo lo que mira) vs. una llamada directa (seed/flush
+    // mediado del Orchestrator, que barre el documento entero) — así que no
+    // hace falta ningún parámetro nuevo en la firma pública.
+    const priority = participatesInSupersede
+      ? PREVIEW_PRIORITY_VISIBLE
+      : PREVIEW_PRIORITY_NOT_VISIBLE;
+    const key = previewSchedulerKey(documentId, pageIndex, kind, mode, scale, imageFormat);
+
+    const result = await scheduler.schedule(
+      key,
+      priority,
+      ctx,
+      (currentPriority) => {
+        // ADR-144 §5: el input se lee al DESPACHAR, no al encolar/coalescer
+        // — nunca el `replacements`/`annotations`/`lineWords` de ESTA
+        // invocación de renderPageInternal (puede estar obsoleto para
+        // cuando el kernel efectivamente corre), sino el vigente
+        // (readFreshInputParts). `documentId`/`pageIndex`/`kind`/`scale`/
+        // `imageFormat` sí son fijos: forman parte de `key`, así que son
+        // idénticos para toda solicitud coalescida en esta entrada.
+        const fresh = this.readFreshInputParts(documentId, pageIndex, kind);
+        return this.runRenderKernelJob({
+          documentId,
+          pageIndex,
+          kind,
+          mode,
+          scale,
+          imageFormat,
+          replacements: fresh.replacements,
+          annotations: fresh.annotations,
+          lineWords: fresh.lineWords,
+          ctx,
+          checkpoint,
+          priority: currentPriority,
+        });
+      },
+      (settledResult) => this.settleRenderJob(ctx, mode, settledResult),
+    );
+    return result.output;
+  }
+
+  /**
+   * "Cola pesada" de un render de página (ADR-144, decisión "Ojo con la
+   * responsabilidad de cachear/emitir"): cache check + dispatch al kernel +
+   * construcción de la entrada de cache — SIN cachear ni emitir. Eso queda a
+   * cargo de `settleRenderJob`, invocado por el caller: directo para
+   * `mode: "full"`, o por `PreviewRenderScheduler` (solo si la generación no
+   * quedó vieja) para `mode: "preview"` — así se puede saltear cachear/emitir
+   * un resultado descartado por obsoleto sin tocar esta función.
+   *
+   * Segundo checkpoint (ver nota 6 de cabecera de este archivo): revalida
+   * supersede/abort una vez más ahora que el kernel resolvió, antes de
+   * construir la entrada — ADR-144 no toca este mecanismo. Un
+   * `CancelledError` acá se propaga tal cual: para `mode: "full"` rechaza
+   * `renderPageInternal` directo; para `mode: "preview"` rechaza `runJob`
+   * dentro del scheduler, que sin lógica especial adicional (ver
+   * `preview-scheduler.ts`) rechaza la promesa compartida de esa clave.
+   */
+  private async runRenderKernelJob(params: {
+    readonly documentId: string;
+    readonly pageIndex: number;
+    readonly kind: "original" | "anonymized";
+    readonly mode: "preview" | "full";
+    readonly scale: number;
+    readonly imageFormat: "png" | "jpeg";
+    readonly replacements: ReadonlyArray<Replacement>;
+    readonly annotations: ReadonlyArray<Annotation>;
+    readonly lineWords: ReadonlyArray<Word> | undefined;
+    readonly ctx: EngineContext;
+    readonly checkpoint: () => void;
+    readonly priority: number;
+  }): Promise<PreviewJobResult> {
+    const {
+      documentId,
+      pageIndex,
+      kind,
+      mode,
+      scale,
+      imageFormat,
+      replacements,
+      annotations,
+      lineWords,
+      ctx,
+      checkpoint,
+      priority,
+    } = params;
 
     const cacheKey = buildCacheKey(
       documentId,
@@ -927,9 +1165,7 @@ export class RenderEngine implements IEngine {
     );
     const cached = this.cache.get(cacheKey);
     if (cached !== undefined) {
-      this.touchCache(cacheKey);
-      if (mode === "preview") await this.emitPreviewUpdated(ctx, cached);
-      return toPublicOutput(cached, mode);
+      return { cacheKey, entry: cached, output: toPublicOutput(cached, mode), cacheHit: true };
     }
 
     const startedAt = Date.now();
@@ -950,18 +1186,16 @@ export class RenderEngine implements IEngine {
       // razonamiento por el que pageIndex tampoco entra ahí.
       // exactOptionalPropertyTypes: conditional spread, no asignar `undefined`
       // explícito (mismo patrón que `password` más arriba en este archivo).
-      ...(input.lineWords !== undefined ? { lineWords: input.lineWords } : {}),
+      ...(lineWords !== undefined ? { lineWords } : {}),
     };
 
     // ADR-043 §2: única vía de despacho — converge en pool.dispatch (kernel
     // remoto o in-process). maxRetriesOverride: 0 — ver nota 7 de cabecera
     // (el reintento de "1 vez" lo sigue aplicando renderPagesInternal, no la
-    // pool). Prioridad (05_Worker_Architecture.md §6.2): el camino completo
-    // del export (mode "full") va a 1000; preview usa 70 (nivel "visible" —
-    // este motor no recibe información de visibilidad de página en su
-    // input, así que no distingue visible/no-visible dentro de "preview";
-    // el orden de despacho de `renderPagesInternal` ya prioriza por el orden
-    // en que el caller arma `inputs`, mismo criterio preexistente).
+    // pool). Prioridad (05_Worker_Architecture.md §6.2, ADR-144 §7): la
+    // decide el caller — 1000 fijo para "full"; para "preview", la vigente
+    // de la entrada del scheduler (70 visible / 20 no visible, coalescida
+    // por Math.max si el request más urgente llegó después).
     const dispatchResult = await this.pool.dispatch({
       run: () =>
         kernelRenderPage(payload, {
@@ -971,7 +1205,7 @@ export class RenderEngine implements IEngine {
           onWarn: (message, meta) => ctx.logger.warn(message, meta),
         }),
       signal: ctx.abortSignal,
-      priority: mode === "full" ? 1000 : 70,
+      priority,
       payload,
       maxRetriesOverride: 0,
     });
@@ -980,11 +1214,7 @@ export class RenderEngine implements IEngine {
     // ciegas). Ver su comentario más arriba (junto a IMMEDIATE_POOL).
     const kernelResult = decodeKernelRenderResult(dispatchResult, documentId, pageIndex);
 
-    // Segundo checkpoint (ver nota 6 de cabecera): revalida supersede/abort
-    // una vez más ahora que el kernel resolvió, antes de cachear/emitir. El
-    // trabajo de canvas del kernel para un render ya superado no se
-    // interrumpe a mitad de camino (ADR-043 no lo prioriza), pero su
-    // resultado se descarta acá sin efectos observables.
+    // Segundo checkpoint — ver el comentario de cabecera de este método.
     checkpoint();
 
     const durationMs = Date.now() - startedAt;
@@ -998,14 +1228,68 @@ export class RenderEngine implements IEngine {
       degraded: kernelResult.degraded,
     };
 
-    this.setCacheEntry(cacheKey, entry);
-    this.evictCacheIfNeeded(ctx);
+    return { cacheKey, entry, output: toPublicOutput(entry, mode), cacheHit: false };
+  }
 
-    if (mode === "preview") {
-      await this.emitPreviewUpdated(ctx, entry);
+  /**
+   * Único punto donde se cachea/emite (ADR-144 §6): para `mode: "full"` lo
+   * invoca `renderPageInternal` directo, siempre; para `mode: "preview"` lo
+   * invoca `PreviewRenderScheduler` desde adentro de su loop de despacho,
+   * SOLO cuando la generación no quedó vieja durante el despacho — así un
+   * resultado obsoleto (superado por una solicitud más nueva sobre la misma
+   * clave) nunca cachea ni emite `PREVIEW_UPDATED` (ADR-144 §5).
+   *
+   * `touchCache` en el hit vs. `setCacheEntry`+`evictCacheIfNeeded` en el
+   * miss: mismo comportamiento que tenía `renderPageInternal` antes de este
+   * refactor, solo movido a un método propio.
+   */
+  private settleRenderJob(
+    ctx: EngineContext,
+    mode: "preview" | "full",
+    result: PreviewJobResult,
+  ): Promise<void> {
+    if (result.cacheHit) {
+      this.touchCache(result.cacheKey);
+    } else {
+      this.setCacheEntry(result.cacheKey, result.entry);
+      this.evictCacheIfNeeded(ctx);
     }
+    if (mode === "preview") {
+      return this.emitPreviewUpdated(ctx, result.entry);
+    }
+    return Promise.resolve();
+  }
 
-    return toPublicOutput(entry, mode);
+  /**
+   * Input autoritativo VIGENTE para una clave de preview, leído en el
+   * momento del despacho (ADR-144 §5) — nunca el `input` que originó la
+   * llamada que armó/coalesció la entrada del scheduler, que puede estar
+   * obsoleto para cuando el kernel efectivamente corre.
+   *
+   * Invariante: `rememberInput` corre SIEMPRE sincrónico en
+   * `renderPageInternal`, antes de programar cualquier trabajo para esta
+   * `(documentId, pageIndex, kind)` (ver más arriba) — así que la entrada
+   * remembrada está garantizada presente acá. No hace falta un guard
+   * defensivo que lance: el `?.` de abajo alcanza para que TypeScript
+   * compile sin asumir lo que el invariante ya garantiza.
+   */
+  private readFreshInputParts(
+    documentId: string,
+    pageIndex: number,
+    kind: "original" | "anonymized",
+  ): {
+    readonly replacements: ReadonlyArray<Replacement>;
+    readonly annotations: ReadonlyArray<Annotation>;
+    readonly lineWords: ReadonlyArray<Word> | undefined;
+  } {
+    const key = pageKey(documentId, pageIndex);
+    const remembered =
+      kind === "anonymized" ? this.lastAnonymizedInputs.get(key) : this.lastOriginalInputs.get(key);
+    return {
+      replacements: kind === "anonymized" ? (remembered?.replacements ?? []) : [],
+      annotations: kind === "original" ? (remembered?.annotations ?? []) : [],
+      lineWords: remembered?.lineWords,
+    };
   }
 
   /**
@@ -1266,6 +1550,12 @@ export class RenderEngine implements IEngine {
     this.lastAnonymizedInputs.clear();
     this.lastOriginalInputs.clear();
     this.pendingRenders.clear();
+    // ADR-144 §8: mismo criterio que `clearDocument` (ver
+    // `clearDocumentState` más abajo) pero sin filtro de prefijo — rechaza
+    // TODA entrada pendiente/en vuelo del scheduler. `?.` porque `dispose()`
+    // puede correr sin `init()` previo exitoso en algún camino de teardown.
+    this.previewScheduler?.clear();
+    this.previewScheduler = null;
     this.disposed = true;
     this.initialized = false;
     this.ctx = null;
@@ -1503,6 +1793,12 @@ export class RenderEngine implements IEngine {
     for (const key of [...this.pendingRenders.keys()]) {
       if (key.startsWith(prefix)) this.pendingRenders.delete(key);
     }
+    // ADR-144 §8: baja de documento — toda entrada pendiente/en vuelo del
+    // scheduler para este documentId se rechaza (CancelledError) y se borra
+    // de inmediato, sin esperar ningún despacho en curso. `?.` porque
+    // `unloadDocument` corre sin asserts (no-op idempotente incluso tras
+    // dispose(), ADR-030 §1/§3) y puede llegar acá con el scheduler ya null.
+    this.previewScheduler?.clearDocument(documentId);
   }
 
   private assertInitialized(): void {

@@ -1847,4 +1847,182 @@ describe("RenderEngine — edge cases", () => {
     );
     expect(degradedStrokes).toHaveLength(1);
   });
+
+  // ─── PreviewRenderScheduler — casos límite (ADR-144, H-09B) ───
+  //
+  // Coalescencia/prioridad/bypass de "full"/concurrencia bajo flood viven en
+  // `unit.test.ts`; la clase en aislamiento (semáforo, generación, limpieza)
+  // vive en `preview-scheduler.test.ts`. Acá: generación vieja descartada
+  // (Render_Engine.md §13 caso 36) y limpieza en unloadDocument/dispose
+  // (caso 35).
+  describe("PreviewRenderScheduler — casos límite (ADR-144)", () => {
+    function fakeImageData(): ImageData {
+      return {
+        data: new Uint8ClampedArray(4),
+        width: 1,
+        height: 1,
+        colorSpace: "srgb",
+      } as ImageData;
+    }
+
+    function fakeEncoded(): {
+      bytes: ArrayBuffer;
+      format: string;
+      widthPx: number;
+      heightPx: number;
+    } {
+      return { bytes: new Uint8Array([1]).buffer, format: "png", widthPx: 1, heightPx: 1 };
+    }
+
+    function fakeKernelRenderResult(): unknown {
+      return { imageData: fakeImageData(), encoded: fakeEncoded(), degraded: [] };
+    }
+
+    it("a stale generation result is discarded without caching nor emitting PREVIEW_UPDATED; only the redispatch (fresh input) does — caso 36", async () => {
+      const docId = "doc-stale-gen";
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+      );
+
+      let dispatchCall = 0;
+      let releaseFirst: ((value: unknown) => void) | undefined;
+      const pool = {
+        dispatch: (): Promise<unknown> => {
+          dispatchCall += 1;
+          if (dispatchCall === 1) {
+            return new Promise((resolve) => {
+              releaseFirst = resolve;
+            });
+          }
+          return Promise.resolve(fakeKernelRenderResult());
+        },
+        broadcast: async <T>(
+          _payload: unknown,
+          run: () => Promise<T>,
+        ): Promise<ReadonlyArray<T>> => [await run()],
+      };
+      const pooledEngine = new RenderEngine(pool);
+      const realCtx = createEngineContextWithRealBus();
+      await pooledEngine.init(realCtx);
+      await pooledEngine.loadDocument(docId, createValidBuffer());
+
+      const previewUpdates: unknown[] = [];
+      realCtx.bus.on(EventChannel.Render, EngineEvents.PREVIEW_UPDATED, (payload) => {
+        previewUpdates.push(payload);
+      });
+
+      const first = pooledEngine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+          replacements: [makeReplacement({ groupId: "g-old" })],
+        }),
+        realCtx,
+      );
+      await vi.waitFor(() => expect(dispatchCall).toBe(1));
+
+      // Segunda solicitud, MISMA clave, llega ANTES de que la primera
+      // termine — coalesce sobre la entrada existente y bumpea su generación.
+      const second = pooledEngine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+          replacements: [makeReplacement({ groupId: "g-new" })],
+        }),
+        realCtx,
+      );
+
+      // "Termina" el primer despacho: su resultado quedó viejo (ADR-144 §5).
+      releaseFirst?.(fakeKernelRenderResult());
+
+      const [output1, output2] = await Promise.all([first, second]);
+      expect(output1).toBe(output2); // misma promesa compartida para las dos.
+
+      expect(dispatchCall).toBe(2); // el primero se descartó; hubo un redespacho.
+      expect(previewUpdates).toHaveLength(1); // solo el redespacho emitió PREVIEW_UPDATED.
+
+      await pooledEngine.dispose();
+    });
+
+    it("unloadDocument rejects a pending/in-flight preview scheduler entry with CancelledError and leaves no entry for that document — caso 35", async () => {
+      const docId = "doc-cleanup-unload";
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+      );
+      const pool = {
+        // Nunca resuelve: el kernel queda "en vuelo" para siempre — es
+        // deliberado (ADR-144 §8, "no hay forma de cancelar a mitad de
+        // camino un pool.dispatch ya en curso").
+        dispatch: (): Promise<unknown> => new Promise(() => {}),
+        broadcast: async <T>(
+          _payload: unknown,
+          run: () => Promise<T>,
+        ): Promise<ReadonlyArray<T>> => [await run()],
+      };
+      const pooledEngine = new RenderEngine(pool);
+      await pooledEngine.init(ctx);
+      await pooledEngine.loadDocument(docId, createValidBuffer());
+
+      const pending = pooledEngine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "original",
+          mode: "preview",
+        }),
+        ctx,
+      );
+      // Deja que el scheduler efectivamente reserve el slot y arranque runJob.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      await pooledEngine.unloadDocument(docId);
+
+      await expect(pending).rejects.toThrow(CancelledError);
+
+      // Invariante verificable ("un descriptor que sobreviva a un
+      // closeDocument es una fuga", ADR-144 §8 Consecuencias): ningún
+      // descriptor con el prefijo de este documentId sigue en el Map interno.
+      const scheduler = pooledEngine["previewScheduler"];
+      const remaining = scheduler === null ? [] : [...scheduler["entries"].keys()];
+      expect(remaining.every((key) => !key.startsWith(`${docId}|`))).toBe(true);
+
+      await pooledEngine.dispose();
+    });
+
+    it("dispose rejects a pending/in-flight preview scheduler entry across all documents, unconditionally — caso 35", async () => {
+      const docId = "doc-cleanup-dispose";
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+      );
+      const pool = {
+        dispatch: (): Promise<unknown> => new Promise(() => {}),
+        broadcast: async <T>(
+          _payload: unknown,
+          run: () => Promise<T>,
+        ): Promise<ReadonlyArray<T>> => [await run()],
+      };
+      const pooledEngine = new RenderEngine(pool);
+      await pooledEngine.init(ctx);
+      await pooledEngine.loadDocument(docId, createValidBuffer());
+
+      const pending = pooledEngine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "original",
+          mode: "preview",
+        }),
+        ctx,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      await pooledEngine.dispose();
+
+      await expect(pending).rejects.toThrow(CancelledError);
+    });
+  });
 });
