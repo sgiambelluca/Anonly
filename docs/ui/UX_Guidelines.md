@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=ux | dependencias=00_Project_Vision.md,ui/React_Client.md,ADR-011-Grouping-First.md,ADR-012-Replacement-Modes.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md | audiencia=IA-implementador-ui+humanos | fase=4 (§3.1 aclarado en fase 10, ADR-036 §9; §3.3/§5.4 en fase 10.5 por ADR-057 —tokens abreviados— y ADR-058 —el reemplazo no se derrama, marca de degradado—, §8.2 por ADR-059 —checkbox de referencia de marcadores—; §3.3/§5.4 en fase 10.6 por ADR-060 —género— y por ADR-071/ADR-072 —el control de género pasa a ser un botón de tres estados visible solo en `placeholder`/`synthetic`, con la marca de "sin determinar" fusionada adentro, y el sintético respeta el género y deja de cambiar solo—; §5.4b en fase 10.7 por ADR-061 —agregado manual de entidades—; §5.4 en fase 10.9 por ADR-076 —un texto de reemplazo escrito a mano se conserva, qué lo reemplaza y cómo se vuelve al automático— y ADR-074 §6 —la marca de degradado se enciende más seguido porque ahora mide contra el rectángulo real—; §1/§2/§3/§4/§5/§7/§8/§11 reescritos en el rediseño post-10.9 por **ADR-087** —tres momentos en vez de cuatro paneles: un solo visor con toggle, el modo de reemplazo en tres niveles del árbol, el panel de Reglas retirado, el export sin controles técnicos, y la pantalla de escaneo con piso y techo—) -->
+<!-- CONTEXT: scope=ux | dependencias=00_Project_Vision.md,ui/React_Client.md,ADR-011-Grouping-First.md,ADR-012-Replacement-Modes.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-150-La-Pantalla-De-Escaneo-Dura-Lo-Que-Dura-El-Escaneo.md,adr/ADR-151-La-Primera-Pagina-Ya-Esta-Dibujada-Cuando-Se-Abre-El-Panel.md,adr/ADR-152-La-Pantalla-De-Escaneo-Dice-En-Que-Pagina-Va.md | audiencia=IA-implementador-ui+humanos | fase=4 (§3.1 aclarado en fase 10, ADR-036 §9; §3.3/§5.4 en fase 10.5 por ADR-057 —tokens abreviados— y ADR-058 —el reemplazo no se derrama, marca de degradado—, §8.2 por ADR-059 —checkbox de referencia de marcadores—; §3.3/§5.4 en fase 10.6 por ADR-060 —género— y por ADR-071/ADR-072 —el control de género pasa a ser un botón de tres estados visible solo en `placeholder`/`synthetic`, con la marca de "sin determinar" fusionada adentro, y el sintético respeta el género y deja de cambiar solo—; §5.4b en fase 10.7 por ADR-061 —agregado manual de entidades—; §5.4 en fase 10.9 por ADR-076 —un texto de reemplazo escrito a mano se conserva, qué lo reemplaza y cómo se vuelve al automático— y ADR-074 §6 —la marca de degradado se enciende más seguido porque ahora mide contra el rectángulo real—; §1/§2/§3/§4/§5/§7/§8/§11 reescritos en el rediseño post-10.9 por **ADR-087** —tres momentos en vez de cuatro paneles: un solo visor con toggle, el modo de reemplazo en tres niveles del árbol, el panel de Reglas retirado, el export sin controles técnicos, y la pantalla de escaneo con piso y techo—; §7.2/§7.3 en fase 11 por ADR-150/ADR-151/ADR-152 — la pantalla de escaneo pierde el techo y suelta cuando el stage es terminal, precalienta la página 1 para no entrar a un panel vacío, y muestra progreso real por etapa incluido el OCR) -->
 
 # Anonly — UX Guidelines
 
@@ -604,30 +604,42 @@ de montaje) y la página 1 ya dibujada.
   documento" sin pedirle al usuario que lea nada.
 - Nombre del archivo y cantidad de páginas.
 - **Una frase que rota los tipos de dato** que se están buscando ("Buscando *nombres* → *DNI* →
-  *direcciones*…"), con cada término armándose y deshaciéndose por fundido. Dice **qué** busca, que
-  es la mitad que la animación no cuenta.
-- Estado en lenguaje llano (los mismos textos de §7.1).
-- Progreso, con tres formas según el momento:
+  *direcciones*…"), con cada término armándose y deshaciéndose por fundido. Dice **qué** busca, y
+  acompaña a la etapa vigente — **desde ADR-152 §4 deja de ser el contenido principal**: con
+  `Ready` sin techo (§7.2, ADR-150) esta pantalla puede durar minutos, y una frase que cicla sin
+  cambiar de estado es indistinguible de una app colgada. Si la etapa vigente tiene contador, el
+  contador manda.
+- Estado en lenguaje llano.
+- Progreso, con un rótulo y un número por etapa (ADR-152 §1):
 
-  | Momento | Barra | Contador `X de Y` |
+  | Etapa | Qué se muestra | Progreso |
   |---|---|---|
-  | Abrir / leer el texto / reconocer imágenes / agrupar | **indeterminada** | no |
-  | Descarga del modelo de nombres | determinada, con su propio % | no |
-  | **Escaneo del documento** (`Detecting`) | determinada, páginas sobre `pageCount` | **sí** |
+  | `Importing`/`Extracting` | "Abriendo el documento…" | indeterminado |
+  | `OCRing` | "Leyendo el documento…", **página X de Y** | determinado — barra con `current`/`total` del trabajo de OCR, contador con `X` = última página leída (`OCR_PAGE_FINISHED.pageIndex + 1`) e `Y` = `pageCount` |
+  | `Detecting`, modelo cargando | "Preparando el detector…" | indeterminado |
+  | `Detecting`, detectando | "Escaneando el documento…", **página X de Y** | determinado — `X = current`, `Y = pageCount` |
+  | `Grouping` | "Ordenando los resultados…" | indeterminado |
 
-- `Cancelar`.
+- `Cancelar`, visible y efectivo mientras el escaneo corre (ADR-152 §5).
 
-> **El contador cuenta el escaneo del documento, y nada más.** Una versión anterior lo hacía correr
-> también en las etapas de preparación, y el resultado era que llegaba a **"10 de 10" antes de haber
-> detectado nada** y después volvía a "1 de 10" al arrancar la detección: dos recorridos completos
-> del mismo número para dos cosas distintas, y el primero diciendo "terminé" sobre un trabajo que el
-> usuario ni siquiera considera el trabajo. Las etapas de preparación pasan a barra **indeterminada**
-> — hay movimiento, no hay número —, que es lo honesto: están trabajando, pero su progreso no es el
-> progreso que esta pantalla promete.
+> **Regla dura: el total que se muestra es siempre `document.store.pageCount`**, en las dos etapas
+> con contador (ADR-152 §2). En un documento mixto (20 páginas, 8 escaneadas) mostrar "3 de 8"
+> sobre un documento que el usuario sabe que tiene 20 se lee como "cargué el archivo equivocado", no
+> como "3 de las 8 que hay que leer" — y un usuario que ve un total que no reconoce cancela justo
+> cuando la herramienta está funcionando bien. Por eso en `OCRing` el número de página **no** cuenta
+> cuántas se leyeron: es **cuál** se está leyendo, numerada sobre el documento entero. La barra, en
+> cambio, sí usa el tamaño real del trabajo de OCR — avanza pareja aunque los números de página
+> salten.
 >
-> **Desvío aceptado**: en un PDF escaneado grande, el reconocimiento de texto puede ser largo y su
-> avance por página deja de verse acá. Se sigue viendo en la toolbar del panel de trabajo una vez que
-> la pantalla suelta (§7.2), que es donde el usuario está mirando para entonces.
+> **Dos contadores, dos denominadores, y ninguno de los dos es un defecto.** `OCRing` y `Detecting`
+> son trabajos distintos y cada uno lleva su rótulo; que el número vuelva a empezar al cambiar de
+> etapa es correcto. Lo que se prohíbe es que retroceda **sin** cambiar de rótulo.
+>
+> **Pendiente de validar con usuarios**: en un documento mixto, el número de página del OCR salta
+> (va por la 3 y después por la 12, porque las del medio ya tenían texto). Cada afirmación es
+> cierta, pero el salto en sí no está probado — `roadmap/Post_Hito10.8_Pendientes.md` §32 tiene el
+> plan y las dos salidas si molesta. En un documento enteramente escaneado, el caso frecuente, no
+> hay salto.
 
 > **Sin la lista de entidades encontradas.** Una versión anterior de esta sección las mostraba
 > apareciendo en vivo acá. Se retira: **se ven mejor donde importan**, que es el árbol de ②b, donde

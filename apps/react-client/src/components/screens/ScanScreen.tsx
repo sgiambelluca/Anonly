@@ -20,9 +20,12 @@
  * propios, así que la toolbar arriba dejaba dos barras de progreso del mismo
  * pipeline y dos botones "Cancelar" al mismo tiempo.
  *
- * **El contador por página solo corre en `Detecting`** (`scanProgress.ts`):
- * cuenta el escaneo del documento y nada más. Las etapas de preparación
- * muestran una barra indeterminada.
+ * **El contador por página corre en `OCRing` y en `Detecting`**
+ * (`scanProgress.ts`, ADR-152), cada uno con su propio rótulo y su propio
+ * denominador reiniciado — son dos trabajos distintos, no el mismo contador
+ * continuando. Las etapas de preparación (`Importing`/`Extracting`/
+ * `Grouping`, y `Detecting` mientras el modelo carga) muestran una barra
+ * indeterminada.
  *
  * Cuándo suelta: `scanAdvance.ts` (ADR-150) — el `stage` terminal es la única
  * condición de pase; sin techo, dura lo que dure el escaneo. El latch que
@@ -41,8 +44,10 @@ import { SCAN_PHRASE_INTERVAL_MS, scanPhraseTermAt } from "./scanPhrase.js";
 import { resolveScanProgress } from "./scanProgress.js";
 
 /**
- * Texto de estado en lenguaje llano (`UX_Guidelines.md` §7.1). **No nombra
- * "NER" ni "OCR"**: son etapas del pipeline, no vocabulario del usuario.
+ * Texto de estado en lenguaje llano (`UX_Guidelines.md` §7.1/§7.3, ADR-152
+ * §1). **No nombra "NER" ni "OCR"**: son etapas del pipeline, no vocabulario
+ * del usuario. `Importing`/`Extracting` comparten frase — para el usuario
+ * las dos son "todavía no hay nada que mostrar".
  */
 function scanStatusLabel(
   stage: PipelineStage,
@@ -52,19 +57,18 @@ function scanStatusLabel(
     // Sin porcentaje: el valor llega siempre en 1 (ver `scanProgress.ts`), así
     // que mostrarlo era escribir "100%" al lado de algo que todavía no
     // terminaba.
-    return "Preparando el detector de nombres…";
+    return "Preparando el detector…";
   }
   switch (stage) {
     case PipelineStage.Importing:
-      return "Abriendo el documento…";
     case PipelineStage.Extracting:
-      return "Leyendo el texto…";
+      return "Abriendo el documento…";
     case PipelineStage.OCRing:
-      return "Reconociendo texto de las imágenes…";
+      return "Leyendo el documento…";
     case PipelineStage.Detecting:
-      return "Buscando datos sensibles…";
+      return "Escaneando el documento…";
     case PipelineStage.Grouping:
-      return "Agrupando lo encontrado…";
+      return "Ordenando los resultados…";
     default:
       return "Analizando…";
   }
@@ -75,7 +79,9 @@ export function ScanScreen() {
   const pageCount = useDocumentStore((state) => state.pageCount);
   const stage = usePipelineStore((state) => state.stage);
   const current = usePipelineStore((state) => state.current);
+  const total = usePipelineStore((state) => state.total);
   const modelLoading = usePipelineStore((state) => state.modelLoading);
+  const lastOcrPageIndex = usePipelineStore((state) => state.lastOcrPageIndex);
 
   const [phraseTick, setPhraseTick] = useState(0);
   useEffect(() => {
@@ -88,8 +94,10 @@ export function ScanScreen() {
   const progress = resolveScanProgress({
     stage,
     current,
+    total,
     pageCount,
     modelLoadingProgress: modelLoading?.progress ?? null,
+    lastOcrPageIndex,
   });
 
   return (
@@ -137,7 +145,7 @@ export function ScanScreen() {
             </span>
             {progress.kind === "determinate" && progress.counter !== null ? (
               <span className="shrink-0 text-sm tabular-nums text-text-secondary">
-                {progress.counter.current} de {progress.counter.total}
+                página {progress.counter.current} de {progress.counter.total}
               </span>
             ) : null}
           </div>

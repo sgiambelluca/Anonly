@@ -128,6 +128,18 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribe {
     }),
   );
 
+  // ADR-152 §3/§4: la pantalla de escaneo necesita saber por cuál página va
+  // el OCR para mostrar "página X de Y" — el dato lo trae el propio evento
+  // (`pageIndex`), sin instrumentar nada nuevo en el Core. Se limpia solo:
+  // `closeDocument` ya llama `usePipelineStore.getState().reset()`
+  // (`actions.ts`), y `lastOcrPageIndex` vuelve a `null` con el resto del
+  // estado por documento.
+  unsubs.push(
+    bus.on(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, (payload) => {
+      stores.pipeline.setState({ lastOcrPageIndex: payload.pageIndex });
+    }),
+  );
+
   unsubs.push(
     bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_STAGE_CHANGED, (payload) => {
       stores.pipeline.setState({ stage: payload.stage, progress: payload.progress });

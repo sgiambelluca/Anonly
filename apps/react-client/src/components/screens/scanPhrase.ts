@@ -31,9 +31,13 @@ export const SCAN_PHRASE_TERMS: ReadonlyArray<string> = [
 export const SCAN_PHRASE_INTERVAL_MS = 2400;
 
 /**
- * Término que corresponde al tick `n`. Cicla indefinidamente: la pantalla dura
- * entre 1,2 y 6 s (`scanAdvance.ts`), así que en el caso normal se ven dos o
- * tres — la lista completa nunca se recorre, y no tiene por qué.
+ * Término que corresponde al tick `n`. Cicla indefinidamente mientras la
+ * pantalla esté arriba — desde ADR-150 eso puede ser minutos en un
+ * escaneado largo, no los 1,2-6 s de la regla anterior (ADR-087 §6,
+ * superseded). La lista completa se recorre las veces que haga falta: en un
+ * documento largo esta frase deja de ser el contenido principal y pasa a
+ * acompañar a la etapa con contador (ADR-152 §4) — si la etapa vigente
+ * afirma un número, el número manda.
  */
 export function scanPhraseTermAt(tick: number): string {
   const term = SCAN_PHRASE_TERMS[tick % SCAN_PHRASE_TERMS.length];

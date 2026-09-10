@@ -21,6 +21,14 @@ export interface PipelineSlice {
   readonly groupCount: number;
   readonly conflictCount: number;
   readonly modelLoading: { modelId: string; progress: number } | null;
+  /**
+   * `pageIndex` del último `OCR_PAGE_FINISHED` (ADR-152 §3): la pantalla de
+   * escaneo lo usa para mostrar "página X de Y" durante `OCRing`, numerado
+   * sobre `document.store.pageCount` y no sobre el tamaño del trabajo de OCR
+   * (`current`/`total` de esta misma store). `null` hasta que termine la
+   * primera página.
+   */
+  readonly lastOcrPageIndex: number | null;
   readonly exportProgress: { current: number; total: number } | null;
   readonly exportResult: { blobUrl: string; sizeBytes: number } | null;
   readonly error: SerializedEngineError | null;
@@ -46,6 +54,7 @@ const initialState: PipelineData = {
   groupCount: 0,
   conflictCount: 0,
   modelLoading: null,
+  lastOcrPageIndex: null,
   exportProgress: null,
   exportResult: null,
   error: null,
