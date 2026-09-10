@@ -28,6 +28,7 @@ import {
   generateText10p,
   generateText50p,
   generateText50pDense,
+  generateText50pSmallPage,
 } from "./generate.js";
 
 /**
@@ -190,6 +191,23 @@ describe("generate.ts — text-50p-dense.pdf (H-10, control de densidad)", () =>
     const first = buildText50pDenseParagraph("fixture-text-50p-dense", 0, 1);
     const second = buildText50pDenseParagraph("fixture-text-50p-dense", 1, 2);
     expect(first).not.toBe(second);
+  });
+});
+
+describe("generate.ts — text-50p-small-page.pdf (H-10, atribución — proxy de DPI)", () => {
+  it("produce 50 páginas, con área ≈ 4/9 de una A4 (mismo ratio que 200dpi contra 300dpi)", async () => {
+    const bytes = await generateText50pSmallPage();
+    const pdf = await PDFDocument.load(bytes);
+    expect(pdf.getPageCount()).toBe(50);
+    const [page0] = pdf.getPages();
+    const areaRatio = (page0!.getWidth() * page0!.getHeight()) / (595 * 842);
+    expect(areaRatio).toBeCloseTo(4 / 9, 2);
+  });
+
+  it("es determinista: dos corridas producen bytes idénticos", async () => {
+    const first = await generateText50pSmallPage();
+    const second = await generateText50pSmallPage();
+    expect(Buffer.from(first).equals(Buffer.from(second))).toBe(true);
   });
 });
 

@@ -161,6 +161,53 @@ export async function generateText50p(): Promise<Uint8Array> {
   return doc.save();
 }
 
+/**
+ * Variante de **página más chica**, mismo contenido que `generateText50p`
+ * (5 de 50 páginas con entidad, `TEXT_50P_ENTITY_PAGE_INDICES`). H-10,
+ * atribución del exceso de M1 sobre 512 MB: el área rasterizada de una
+ * página escala con (ancho × alto), así que reducir el tamaño físico de la
+ * página es un proxy honesto de reducir el DPI de OCR sin tocar
+ * `ocr.dpi` — que no es una `SettingsOverride` alcanzable desde el arnés de
+ * test sin tocar producción (`settingsToEngineConfig.ts` solo deriva
+ * `ner.enabled`/`ocr.languages`/tamaños de pool, nunca `ocr.dpi`).
+ *
+ * `SMALL_PAGE_SCALE = 2/3` da área ≈ 4/9 ≈ 0.444 de la original — el mismo
+ * factor que (200/300)², la comparación de DPI que pidió el planificador.
+ * Es una prueba de la MISMA hipótesis (¿el costo es proporcional al área
+ * rasterizada?), no literalmente "OCR a 200 dpi": documentado acá y en el
+ * spec que la usa para que nadie lo lea como si fuera lo mismo.
+ */
+const SMALL_PAGE_SCALE = 2 / 3;
+const SMALL_PAGE_WIDTH = PAGE_WIDTH * SMALL_PAGE_SCALE;
+const SMALL_PAGE_HEIGHT = PAGE_HEIGHT * SMALL_PAGE_SCALE;
+const SMALL_MARGIN_X = MARGIN_X * SMALL_PAGE_SCALE;
+const SMALL_MARGIN_Y = MARGIN_Y * SMALL_PAGE_SCALE;
+const SMALL_WRAP_CHARS = Math.round(WRAP_CHARS * SMALL_PAGE_SCALE);
+
+export async function generateText50pSmallPage(): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const documentId = "fixture-text-50p-small-page";
+
+  for (let index = 0; index < 50; index++) {
+    const pageNumber = index + 1;
+    const text = TEXT_50P_ENTITY_PAGE_INDICES.includes(index)
+      ? buildText50pEntityParagraph(documentId, index, pageNumber)
+      : buildText50pNeutralParagraph(pageNumber);
+
+    const page = doc.addPage([SMALL_PAGE_WIDTH, SMALL_PAGE_HEIGHT]);
+    const lines = wrapText(text, SMALL_WRAP_CHARS);
+    let y = SMALL_MARGIN_Y;
+    for (const line of lines) {
+      if (y < 20) break; // guard defensivo: no desbordar la página chica.
+      page.drawText(line, { x: SMALL_MARGIN_X, y, size: FONT_SIZE, font, color: rgb(0, 0, 0) });
+      y -= LINE_HEIGHT;
+    }
+  }
+
+  return doc.save();
+}
+
 export function buildText50pEntityParagraph(
   documentId: string,
   index: number,
