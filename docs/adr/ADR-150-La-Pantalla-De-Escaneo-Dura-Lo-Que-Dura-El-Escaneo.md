@@ -5,7 +5,7 @@
 - **Estado**: Accepted
 - **Fecha**: 2026-09-09
 - **Decidido por**: El humano, sobre la medición del "first preview" del plan de campaña de hardening (§9, H-07). Pidió expresamente sacar el techo, conservar el piso y entrar al panel de trabajo con el escaneo terminado y el botón de exportar ya visible.
-- **Relacionado con**: **ADR-087 §6 (superseded en su regla de pase)**, ADR-038 §5 (el reanálisis que vuelve a `Detecting`), ADR-151 (la página ya dibujada al entrar)
+- **Relacionado con**: **ADR-087 §6 (superseded en su regla de pase)**, ADR-038 §5 (el reanálisis que vuelve a `Detecting`), ADR-151 (la página ya dibujada al entrar), **ADR-152 (el progreso que esta decisión vuelve obligatorio)**
 - **Parte de**: Hito 11 — Hardening
 
 ## Contexto
@@ -63,13 +63,21 @@ paga el (1) con lo que la pantalla de escaneo ya tiene: progreso real en vivo y
 `shouldAdvanceFromScan` pasa a tener una sola condición de pase: el `stage` es
 terminal.
 
-- **`Ready` / `Done`** ⇒ se pasa, **respetando el piso** de 1,2 s desde el
-  import.
-- **`Failed` / `Cancelled`** ⇒ se pasa **de inmediato, sin piso**. El piso
-  existe para que una transición rápida no parpadee, no para retener a nadie
-  frente a un error (el criterio ya escrito en `scanAdvance.ts`, que acá se
-  conserva y se acota a estos dos stages).
+- **`Ready` / `Done`** ⇒ se pasa cuando se cumplen las dos cosas: transcurrió
+  el **piso** de 1,2 s desde el import, y la **página 1 ya está dibujada**
+  (ADR-151 §1) o venció su gracia.
+- **`Failed` / `Cancelled`** ⇒ se pasa **de inmediato, sin piso y sin esperar
+  ningún preview**. El piso existe para que una transición rápida no parpadee,
+  no para retener a nadie frente a un error (el criterio ya escrito en
+  `scanAdvance.ts`, que acá se conserva y se acota a estos dos stages).
 - Cualquier otro stage ⇒ se queda.
+
+La gracia —`SCAN_ADVANCE_PREWARM_GRACE_MS`, **1000 ms** desde `Ready`— existe
+para que un render que falla o se cuelga no encierre a nadie en la pantalla de
+escaneo. Vencida, se pasa igual y el panel se llena como antes de ADR-151. Es un
+valor de partida: la referencia medida es un render de ~120 ms en un PDF nativo,
+y H-10 lo confirma sobre una página escaneada, que es más pesada. Su vencimiento
+**no es un error** y no se reporta como tal.
 
 ### 2. Desaparecen el techo y el umbral por páginas
 
@@ -91,15 +99,20 @@ Por construcción, y esto es la decisión de producto, no un efecto lateral:
   quietos;
 - el **botón de exportar visible**, porque `stage ∈ {Ready, Done}` es su misma
   condición de montaje;
-- la **página 1 ya dibujada**, que es lo que decide ADR-151.
+- la **página 1 ya dibujada**, que es lo que decide ADR-151 y lo que §1 espera
+  antes de soltar.
 
 ### 4. La pantalla de escaneo pasa a ser la única cota, y tiene que ganárselo
 
-Sin techo, ②a dura lo que dure el trabajo. Lo que la hace tolerable es lo que ya
-tiene y no puede degradarse: progreso real por etapa, entidades apareciendo en
-vivo como prueba de vida, y `Cancelar` operativo. Si algún día una etapa deja de
-reportar progreso, esta pantalla se vuelve una espera ciega — y ese es el
-riesgo que este ADR asume conscientemente.
+Sin techo, ②a dura lo que dure el trabajo. Lo que la hace tolerable es progreso
+real por etapa, entidades apareciendo en vivo como prueba de vida, y `Cancelar`
+operativo. Si una etapa deja de reportar progreso, esta pantalla se vuelve una
+espera ciega — y hoy hay una que no reporta: el OCR, que además es la etapa
+larga de un documento escaneado.
+
+**Esa condición la cumple ADR-152**, que es parte de esta decisión y no un
+trabajo posterior opcional: sacar el techo sin arreglar el progreso deja al
+usuario esperando sin cota y sin señal.
 
 ### 5. El reanálisis no vuelve a ②a
 

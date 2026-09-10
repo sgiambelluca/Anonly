@@ -47,23 +47,36 @@ alguien la haya pedido.
 
 ## Decisión
 
-### 1. La página 1 se precalienta apenas Render tiene el documento
+### 1. La página 1 se precalienta **al terminar el escaneo**, no al empezarlo
 
 El **Orchestrator** invoca `renderPage` para `(pageIndex: 0, kind: "original",
-mode: "preview")` inmediatamente después de que `ensureRenderDocumentLoaded`
-resuelve — el mismo punto del pipeline que ya existe, mucho antes de `Ready`.
+mode: "preview")` cuando el pipeline llega a `Ready` — en el mismo turno en que
+lo alcanza, antes de que el usuario entre a ②b.
 
+- **Solo en `Ready`/`Done`.** Un documento cancelado o fallido no precalienta
+  nada: no hay panel que llenar, y ese es justamente el caso en el que el render
+  se desperdiciaría.
 - **Best-effort**, exactamente como el seed mediado de ADR-044: un fallo se
   loguea y no interrumpe nada ni escala a `PIPELINE_FAILED`. El preview nunca es
   motivo para fallar un pipeline.
 - **Prioridad 20**, la de "preview de página no visible" que ADR-144 §7 ya
-  distingue: precalentar no puede competir con lo que el usuario está mirando ni
-  con un export.
+  distingue: precalentar no puede competir con un export.
 - **Al `previewScale` por defecto**, que es la escala con la que el visor pide
   al montar con zoom 1 (medido: `scale=1`). Un zoom inicial distinto es un miss
   de caché, no un error: se dibuja como hoy.
-- **Una sola página.** Precalentar más es trabajo que compite con el escaneo,
-  que es lo que el usuario está esperando de verdad.
+- **Una sola página.**
+
+**Y el pase a ②b espera ese preview** (ADR-150 §1). Sin esa espera el
+precalentado en `Ready` no sirve para nada: el pase se dispara con el mismo
+`stage === Ready` que lo lanza, así que la pantalla soltaría al usuario con el
+render todavía en vuelo y el blanco volvería igual. La espera está acotada por
+una gracia, para que un render que falla no deje a nadie encerrado en la
+pantalla de escaneo.
+
+En el caso rápido no cuesta nada: un PDF nativo chico llega a `Ready` en menos de
+un segundo y el render entra **adentro del piso de 1,2 s** de ADR-150, que el
+usuario iba a esperar de todos modos. En el caso lento —un escaneado largo— suma
+un render de una página al final de una espera que ya fue de segundos.
 
 ### 2. No hace falta tocar el visor
 
@@ -122,16 +135,25 @@ retirado: un gate no puede verificar una métrica que ya no existe.
 
 **En contra**
 
-- **Un render que puede no usarse.** Si el usuario cancela durante el escaneo,
-  se pagó una página de render y un blob URL que se revoca. Es el precio más
-  barato de la lista y es acotado a una página.
-- El precalentado **compite** —poco, pero compite— con la rasterización de OCR
-  en un documento escaneado, que usa la misma pool. La prioridad 20 lo pone
-  atrás de todo; si H-10 mide que igual molesta, la salida es condicionarlo a
-  documentos sin páginas para OCR, no subirle la prioridad.
+- **El pase a ②b queda atado a un render.** Si ese render se cuelga, lo único
+  que separa al usuario de su panel es la gracia. Por eso la gracia es
+  obligatoria y su vencimiento es un camino normal, no un error: se entra igual,
+  con el blanco de antes. Un pase que dependa de que un render salga bien sería
+  peor que el problema que arregla.
+- **Se suma un render al final de la espera.** Medido en un PDF nativo son
+  ~120 ms sobre una espera de 3,5-4 s; en un escaneado grande la página es más
+  pesada y no está medida. H-10 la mide con su fixture de 50 páginas.
 - Si algún día ②b vuelve a montarse antes de `Ready` (o sea, si se revierte
   ADR-150), el precalentado sigue siendo correcto pero deja de ser suficiente:
   habría que precalentar el rango visible, no una página.
 
 **Lo que no toca**: `Contracts.md` —no hay evento, tipo ni error code nuevo—, el
 visor, el store, el camino de export, ni la mediación de ADR-044.
+
+## Alternativas consideradas
+
+| Decisión | Alternativa | Por qué no |
+|---|---|---|
+| Precalentar en `Ready` | Precalentar apenas `ensureRenderDocumentLoaded` resuelve, mucho antes (era la primera redacción de este ADR) | Gasta un render y un blob que se tiran si el usuario cancela a mitad del escaneo, y compite —poco, pero compite— con la rasterización de OCR, que usa la misma pool. En `Ready` no hay nada con qué competir y el trabajo no puede desperdiciarse: el panel se abre sí o sí. El costo de mover el precalentado al final es que el pase tiene que esperarlo, y ese costo está acotado por la gracia y absorbido por el piso en los documentos rápidos. |
+| Precalentar la página 1 | Precalentar el rango visible inicial | Cuántas páginas entran en el viewport depende del tamaño de ventana y del zoom, que el Core no conoce y no debe conocer (ADR-144 §8: no se importan stores de React al motor). La página 1 es la única que se sabe visible sin preguntarle nada a la UI. |
+| Que el pase espere el preview | Que el pase salga en `Ready` y el preview llegue cuando llegue | Es exactamente el blanco que este ADR existe para sacar. Sin la espera, precalentar en `Ready` no cambia nada respecto de no precalentar. |
