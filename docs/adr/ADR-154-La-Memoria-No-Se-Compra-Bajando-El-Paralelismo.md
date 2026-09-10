@@ -2,7 +2,7 @@
 
 # ADR-154 — La memoria no se compra bajando el paralelismo
 
-- **Estado**: Accepted
+- **Estado**: Accepted (**§2 corregido el mismo día, sobre medición**: el segundo worker de NER **no existe** en el uso de hoy —`processPages` es secuencial y los workers se crean por slot—, así que la duplicación que el lever 1 nombraba no se está pagando. Lo que hay es paralelismo faltante, §2.1, y el sospechoso medido pasa a ser el pool de Render con sus cuatro copias del documento. La decisión de §1 no cambia)
 - **Fecha**: 2026-09-10
 - **Decidido por**: El humano, sobre la atribución de H-10: *"no resulta redituable el hecho de tener que bajar el rendimiento de la aplicación para poder ganar un poco de memoria… reducirlo no es lo correcto"*.
 - **Relacionado con**: ADR-146 (las dos métricas y sus presupuestos), ADR-143 (las imágenes de OCR bajo demanda), ADR-080 (liberación por idle), ADR-135 (el ciclo del modelo), ADR-126 §2 (precedente: no degradar el producto para que un número cierre)
@@ -52,22 +52,47 @@ necesita su propio ADR y una razón que no sea "así entra en el presupuesto".
 
 ### 2. Los levers aceptados, en orden
 
-1. **Duplicación que no compra nada.** Dos workers de NER son dos copias de los
-   pesos. El binario que se empaqueta es el multihilo
-   (`ort-wasm-simd-threaded.asyncify.wasm`) y el contenedor corre
+1. **Duplicación que no compra nada.**
+
+   > **Corregido el 2026-09-10, medido.** Este lever decía "dos workers de NER
+   > son dos copias de los pesos". **No es lo que pasa hoy**: el conteo de
+   > concurrencia real sobre dos documentos midió `ner-page` en **1**, con
+   > `nerPoolSize: 2` configurado. `NerEngine.processPages` recorre las páginas
+   > con un `for`/`await` plano, así que nunca hay dos jobs de NER en vuelo; y
+   > como `WorkerPool` crea sus workers perezosamente por slot, **el segundo
+   > worker de NER no llega a existir** y su copia del modelo no se paga. El
+   > costo que `05_Worker_Architecture.md` §1.1 le atribuye a `nerPoolSize: 2`
+   > es, en el uso de hoy, hipotético.
+   >
+   > Lo que hay no es una duplicación a eliminar: es un **paralelismo que falta**
+   > (§2.1). El lever sigue existiendo, pero como condición sobre **cómo** se
+   > agregue ese paralelismo, no como un ahorro disponible.
+
+   Cuando NER se paralelice por página, se hace con **hilos dentro de una
+   sesión**, no con un worker por página. El binario que se empaqueta es el
+   multihilo (`ort-wasm-simd-threaded.asyncify.wasm`) y el contenedor corre
    `crossOriginIsolated` con `SharedArrayBuffer` — verificado sobre el shell
-   empaquetado. Una sesión con N hilos tiene **una** copia y paraleliza dentro
-   de la inferencia. Es el primer lever porque es el único que puede sacar
-   memoria **sin** tocar velocidad.
-2. **Solapamiento OCR/NER.** El pool de OCR sobrevive a su etapa por la
+   empaquetado. Una sesión con N hilos tiene **una** copia de los pesos; N
+   workers tienen N. La velocidad que se busca la da el paralelismo, no la
+   segunda copia.
+
+2. **Cuatro workers de Render, cuatro copias del documento.** Medido en el mismo
+   conteo: `render-page` **sí** alcanza su tamaño de pool (4 con 8 CPUs), y cada
+   worker de Render recibe el documento por el `broadcast` de `load-document`
+   (`reprimeWorkers`, ADR-043 §5), que **no puede transferir** su buffer porque
+   va a N destinos. En un escaneado de 50 páginas eso es el archivo entero
+   clonado cuatro veces, más lo que cada instancia de pdf.js decodifique.
+   Es el sospechoso que la primera atribución le atribuyó a NER por error, y es
+   el primero que hay que aislar.
+3. **Solapamiento OCR/NER.** El pool de OCR sobrevive a su etapa por la
    liberación por idle (60 s), así que Tesseract y ONNX conviven durante toda la
    detección. Darlo de baja al terminar la etapa de OCR libera un heap entero de
    WASM —la única forma real de recuperarlo— sin quitarle un solo worker a nadie.
-3. **Copias por página.** Cada ráster existe hoy tres veces a la vez (canvas del
+4. **Copias por página.** Cada ráster existe hoy tres veces a la vez (canvas del
    worker de Render, `ImageData` del host, clon estructurado en el worker de
    OCR). Transferir en vez de clonar, re-rasterizando en el reintento, saca una
    copia entera del camino normal.
-4. **DPI.** La memoria va con el cuadrado del DPI: 300 → 200 es −55 %. Es el
+5. **DPI.** La memoria va con el cuadrado del DPI: 300 → 200 es −55 %. Es el
    único lever de esta lista que **cambia calidad de reconocimiento**, así que
    no se toca sin medir contra la baseline de ADR-147 y sin decisión del humano.
 
@@ -78,12 +103,39 @@ necesita su propio ADR y una razón que no sea "así entra en el presupuesto".
 que **no puede** pagar el paralelismo, no se compra memoria en uno que sí puede.
 El perfil `low` de la UI también se conserva como elección del usuario.
 
+### 2.1 NER no tiene paralelismo por página, y eso es lo que hay que resolver
+
+`NerEngine.processPages` procesa una página por vez, y su propio comentario dice
+por qué: *"Secuencial a propósito (mismo criterio que `ocr-engine.processPages`,
+ADR-021: la priorización por visibilidad y el despacho paralelo al pool son del
+Orchestrator, Hito 9)"*. ADR-046 §8 lo dejó escrito como mejora futura.
+
+**Es exactamente la situación que ADR-101 encontró y cerró para OCR**: el
+traspaso al Orchestrator nunca aterrizó, el Hito 9 cerró, y el pool quedó "con
+dos lugares y uno usado". OCR hoy corre `Promise.all` sobre `ocrPoolSize` colas;
+NER quedó atrás con el mismo comentario apuntando al mismo traspaso que no pasó.
+
+Así que la oportunidad de NER **no es de memoria, es de velocidad**, y tiene dos
+formas con costos muy distintos:
+
+| Forma | Velocidad | Memoria |
+|---|---|---|
+| N workers, una página cada uno (lo que haría un ADR-101 para NER) | sí | **N copias de los pesos** |
+| Una sesión, N hilos | sí, si el runtime la da | **una** copia |
+
+Por eso §2 lever 1 pasa a ser una condición sobre el cómo: se paraleliza con
+hilos, y solo se recurre a workers si se mide que los hilos no rinden.
+
 ### 4. H-09D1 cambia de pregunta
 
-Deja de ser "política de workers de NER" y pasa a ser **"qué tipo de paralelismo
-usa NER"**: medir 2 workers × 1 hilo contra 1 worker × N hilos —y 2 × N si el
-runtime lo permite— comparando **memoria y tiempo juntos**. Su criterio de cierre
-pasa a incluir que no se pierda throughput.
+Deja de ser "política de workers de NER" y pasa a ser **"cómo se paraleliza
+NER"**: hoy no se paraleliza por página (§2.1), así que el spike compara el
+estado actual —1 worker, 1 página por vez— contra una sesión con N hilos, y
+mide **memoria y tiempo juntos**. La comparación contra "2 workers" que este ADR
+proponía en su primera redacción no tiene sentido: esa configuración está
+declarada pero no se ejerce. Su criterio de cierre pasa a incluir que no se
+pierda throughput — y con el punto de partida corregido, lo esperable es
+**ganarlo**.
 
 ### 5. Si aún así no entra
 
