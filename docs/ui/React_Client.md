@@ -473,6 +473,16 @@ Sin documento abierto, `nerEnabled`/`ocrLanguages` se persisten y aplican al **p
 
 El escenario E2E 9 (`07_Performance_Strategy.md` §11.3: "activar NER en runtime → descarga modelo y reanaliza preservando las ediciones previas del usuario") se cumple con el flujo de `reanalyze`.
 
+**Canal de overrides del arnés de medición (ADR-155)**: además del override derivado de la tabla de arriba, `initCore` lee `localStorage["anonly:engine-overrides"]` y lo mergea **por encima**, sección por sección — necesario porque el único lever de tamaño de pool alcanzable desde los settings del usuario es `performancePreset`, bucketado (`low`/`high` mueven `pdfPoolSize`/`ocrPoolSize`/`nerPoolSize`/`renderPoolSize` los cuatro juntos), y H-10 necesita atribuir memoria pool por pool. No es un mapeo de settings: no hay fila en la tabla porque no es una preferencia del usuario.
+
+- **No hay tipo nuevo**: el valor es un `EngineConfigOverrides` (ADR-039), el mismo que `createCore` ya acepta.
+- **Solo bajo `import.meta.env.DEV || import.meta.env.VITE_E2E === "1"`** — la misma guarda que expone `__anonlyCore` (§4). En un build de producción el cuerpo se elimina y el canal no existe.
+- **Se lee una sola vez, en el boot.** No hay setter ni suscripción — cambiarlo con la app corriendo no tiene efecto hasta el próximo `initCore`/`recreateCore`.
+- **Falla cerrado y en silencio**: JSON inválido, algo que no sea un objeto plano, una clave fuera de `EngineConfig`, o una sección que no sea un objeto, descartan el valor **entero** (no se aplica parcialmente) y el boot sigue con los settings normales.
+- **No es una preferencia**: no vive en `SettingsSlice`, la app nunca lo escribe, no tiene control de UI ni se muestra en ningún lado.
+
+Documentado también en `tests/perf/README.md` — condición de la autorización, no un extra (`Post_Hito10.8_Pendientes.md` §30: la misma deuda que dejó `nerEnabled` vivo solo para los tests, acá escrita desde el principio en vez de encontrada después).
+
 ---
 
 ## 4. API pública del Core (consumida por el adapter)

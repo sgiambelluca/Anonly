@@ -114,12 +114,14 @@ let deferredCore = createDeferred<IAnonymizationCore>();
  * Inicializa el Core (idempotente: una llamada repetida devuelve la misma
  * instancia) y suscribe el bus-bridge a los 6 stores. `config` es un override
  * parcial opcional de `EngineConfig` (`EngineConfigOverrides`, ADR-039 —
- * parciales por sección, ya no exige sub-objetos completos), mergeado con la
- * inyección de `ner.wasmPaths` de acá (el caller puede pisarla si alguna vez
- * hiciera falta). Desde PR16.5 (ADR-048 §7 punto 2), el caller (`App.tsx`)
- * deriva ese override de los settings persistidos vía
- * `settingsToEngineConfig.ts` antes de llamar acá — esta función no lee
- * `settings.store` directamente, solo mergea lo que recibe.
+ * parciales por sección, ya no exige sub-objetos completos). Desde PR16.5
+ * (ADR-048 §7 punto 2), el caller (`App.tsx`) deriva ese override de los
+ * settings persistidos vía `settingsToEngineConfig.ts` antes de llamar acá —
+ * esta función no lee `settings.store` directamente, solo mergea lo que
+ * recibe con, en orden de prioridad creciente: la inyección de
+ * `ner.wasmPaths` de acá (el caller puede pisarla si alguna vez hiciera
+ * falta) y el canal de overrides del arnés de medición (`readTestEngineOverrides`,
+ * ADR-155 — solo activo bajo `DEV`/`VITE_E2E`).
  *
  * Única función con potestad para arrancar `createCore()` — hoy solo
  * `App.tsx` la llama (con `config`). Cualquier otro consumidor que solo
@@ -170,14 +172,93 @@ function exposeCoreForMeasurement(instance: IAnonymizationCore): void {
   (globalThis as { __anonlyCore?: IAnonymizationCore }).__anonlyCore = instance;
 }
 
+const ENGINE_OVERRIDES_STORAGE_KEY = "anonly:engine-overrides";
+const ENGINE_CONFIG_SECTIONS: ReadonlySet<keyof EngineConfigOverrides> = new Set([
+  "workerPool",
+  "pdf",
+  "ner",
+  "ocr",
+  "grouping",
+  "render",
+  "export",
+]);
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Canal de overrides del arnés de medición (ADR-155, autorizado por el
+ * planificador para H-10: atribuir memoria pool por pool exige mover
+ * `ocrPoolSize`/`nerPoolSize`/etc. por separado, y el único lever expuesto a
+ * los settings del usuario es el preset bucketado — ver
+ * `settingsToEngineConfig.ts`). Documentado también en `React_Client.md` §3.7
+ * y `tests/perf/README.md`: la documentación es condición de la
+ * autorización, no un extra (`Post_Hito10.8_Pendientes.md` §30 — la misma
+ * deuda que dejó `nerEnabled` vivo solo para los tests, ahora escrita antes
+ * de repetirse).
+ *
+ * Reglas de ADR-155 §2, las cuatro no negociables:
+ * - Se lee **una sola vez**, acá, en el boot — no hay setter ni suscripción.
+ * - **Falla cerrado y en silencio**: JSON inválido, algo que no sea un
+ *   objeto plano, una clave fuera de `EngineConfig`, o una sección que no sea
+ *   un objeto, descartan el valor **entero** — no se aplica parcialmente — y
+ *   el boot sigue con los settings normales.
+ * - No es una preferencia: no vive en `SettingsSlice`, la app nunca la
+ *   escribe, no tiene control de UI.
+ * - No hay tipo nuevo: el valor es un `EngineConfigOverrides` (ADR-039), el
+ *   mismo que `createCore` ya acepta.
+ */
+function readTestEngineOverrides(): EngineConfigOverrides | undefined {
+  if (!import.meta.env.DEV && import.meta.env.VITE_E2E !== "1") return undefined;
+  try {
+    const raw = window.localStorage.getItem(ENGINE_OVERRIDES_STORAGE_KEY);
+    if (raw === null) return undefined;
+    const parsed: unknown = JSON.parse(raw);
+    if (!isPlainObject(parsed)) return undefined;
+    for (const [key, value] of Object.entries(parsed)) {
+      if (!ENGINE_CONFIG_SECTIONS.has(key as keyof EngineConfigOverrides)) return undefined;
+      if (!isPlainObject(value)) return undefined;
+    }
+    return parsed as EngineConfigOverrides;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Mergea `testOverrides` por encima de `config` (ADR-155 §1), sección por
+ * sección — no un `{...config, ...testOverrides}` plano, que borraría el
+ * resto de una sección si el canal de test solo fija un campo (p. ej.
+ * `{ workerPool: { ocrPoolSize: 1 } }` no puede pisar `nerPoolSize` de
+ * `config.workerPool`). Mismo criterio que `mergeEngineConfig`
+ * (`packages/anonymization-core/src/config.ts`) al mergear contra defaults.
+ */
+function mergeTestEngineOverrides(
+  config: EngineConfigOverrides | undefined,
+  testOverrides: EngineConfigOverrides | undefined,
+): EngineConfigOverrides {
+  if (testOverrides === undefined) return config ?? {};
+  return {
+    workerPool: { ...config?.workerPool, ...testOverrides.workerPool },
+    pdf: { ...config?.pdf, ...testOverrides.pdf },
+    ner: { ...config?.ner, ...testOverrides.ner },
+    ocr: { ...config?.ocr, ...testOverrides.ocr },
+    grouping: { ...config?.grouping, ...testOverrides.grouping },
+    render: { ...config?.render, ...testOverrides.render },
+    export: { ...config?.export, ...testOverrides.export },
+  };
+}
+
 export async function initCore(config?: EngineConfigOverrides): Promise<IAnonymizationCore> {
   if (core) return core;
   if (creationStarted) return deferredCore.promise;
   creationStarted = true;
 
+  const withTestOverrides = mergeTestEngineOverrides(config, readTestEngineOverrides());
   const mergedConfig: EngineConfigOverrides = {
-    ...config,
-    ner: { wasmPaths: { wasm: ortWasmUrl, mjs: ortWasmMjsUrl }, ...config?.ner },
+    ...withTestOverrides,
+    ner: { wasmPaths: { wasm: ortWasmUrl, mjs: ortWasmMjsUrl }, ...withTestOverrides.ner },
   };
 
   try {
