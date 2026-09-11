@@ -42,25 +42,25 @@
 
 ## 1. Objetivo
 
-Recibir `ImageData` de páginas sin texto y producir `Word[]` con posiciones y confianza, reutilizando el modelo Tesseract ya cargado (inline en Hito 3; en cada worker del `OcrPool` desde Hito 9 — ADR-021).
+Recibir la imagen **codificada** (PNG, ADR-158 §2) de páginas sin texto y producir `Word[]` con posiciones y confianza, reutilizando el modelo Tesseract ya cargado (inline en Hito 3; en cada worker del `OcrPool` desde Hito 9 — ADR-021).
 
 ---
 
 ## 2. Responsabilidades
 
 - Cargar Tesseract.js y el modelo `spa+eng` (default). Hito 3: inline; desde PR14 (ADR-045): en el kernel — cada worker del `OcrPool` carga su instancia; el fallback in-process usa el mismo módulo de kernel.
-- Recibir `ImageData` por página y ejecutar OCR.
+- Recibir la imagen codificada por página, **decodificarla una sola vez** (ADR-158 §3) y ejecutar OCR.
 - Producir `Word[]` con `BoundingBox`, `confidence`, `source: "ocr"`.
 - Cache el modelo en IndexedDB tras primera descarga.
 - Emitir `OCR_STARTED`, `OCR_PAGE_FINISHED`, `OCR_FINISHED`, `OCR_PAGE_FAILED`.
-- Transferir zero-copy `ImageData` al worker.
+- Clonar la imagen codificada hacia el worker — **no** se transfiere: el reintento reusa el buffer (ADR-079, ADR-158 §5).
 - Depositar las `Word[]` en `ctx.cache` con clave `ocr-words:<documentId>:<pageIndex>` y emitir `OCR_PAGE_FINISHED`; el **Orchestrator** (no el PDF Engine) lo escucha y aplica la función pura `fuseOcrPage` de `pdf-engine` sobre su `Document` retenido (ADR-014, ADR-041).
 
 ---
 
 ## 3. Fuera de alcance
 
-- Rasterizar el PDF a `ImageData` (es tarea del host o de un `RenderWorker` ligero).
+- Rasterizar el PDF (es tarea del host o de un `RenderWorker` ligero; desde ADR-158 §1 `rasterizePage` devuelve la imagen ya codificada).
 - Detectar entidades (Regex/NER).
 - Fusionar las palabras en `Page` (es tarea del PDF Engine vía `fuseOcrPage`).
 - Renderizar el PDF final.
@@ -126,7 +126,7 @@ export interface OcrPageOutput {
 }
 
 // ADR-143 §1: descriptor liviano — SIN imagen — de una página o región a
-// OCR-ear. processSession pide la ImageData real recién cuando tiene lugar
+// OCR-ear. processSession pide la imagen real recién cuando tiene lugar
 // en la ventana de trabajo (§3), no por adelantado.
 export interface OcrPageRequest {
   readonly documentId: string;
@@ -141,7 +141,7 @@ export interface OcrPageRequest {
   readonly estimatedBytes: number;  // bytes RGBA estimados, ANTES de producir
 }
 
-// ADR-143 §1/§3: produce la ImageData de un descriptor. Nunca cruza un
+// ADR-143 §1/§3 + ADR-158 §2: produce la imagen CODIFICADA de un descriptor. Nunca cruza un
 // postMessage ni entra en EngineConfig — el façade la implementa llamando a
 // RenderEngine.rasterizePage host-side.
 export type OcrImageProducer = (
@@ -210,22 +210,22 @@ No consume eventos. Es un motor de "entrada-salida" puro; el Orchestrator lo inv
 OcrPageInput {
   documentId: string;
   pageIndex: number;
-  imageData: ImageData;     // rasterización de la página; se transfiere
+  image: EncodedPageImage;  // ADR-158 §2: PNG de la página; se CLONA, no se transfiere
   dpi: number;              // default 300
   languages: ReadonlyArray<string>;  // default ["spa", "eng"]
 }
 ```
 
 **Restricciones**:
-- `imageData.width > 0 && imageData.height > 0`. Si no, lanza `InvalidInputError`.
+- `image.widthPx > 0 && image.heightPx > 0` y `image.bytes.byteLength > 0`. Si no, lanza `InvalidInputError`.
 - `pageIndex >= 0`.
 - `dpi` debe ser finito y `> 0`. Si no, lanza `InvalidInputError` (ADR-064 §4): es el divisor de la conversión a puntos de §10.
 - `languages` debe contener al menos un idioma cargado en el modelo del worker.
-- `imageData` se transfiere (zero-copy). El host pierde acceso tras `processPage`.
+- `image` **se clona**: el host conserva su copia y el motor puede reintentar con el mismo buffer (ADR-079, ADR-158 §5). Hasta ADR-158 se transfería y el host perdía acceso tras `processPage`.
 
-**`imageData` puede ser un recorte de la página (ADR-065 §3)**: desde el OCR por región, el caller puede pasar el raster de **una parte** de la página en vez de la página entera (`rasterizePage` con `region`, `Render_Engine.md` §6). Para este motor no cambia nada —recibe una imagen y la reconoce— pero sí cambia qué significan las coordenadas que devuelve: las `words` de §10 salen en puntos **relativos a la imagen recibida**, o sea al recorte. Llevarlas a coordenadas de página es responsabilidad del caller, que es el único que sabe de qué región vino (`fuseOcrRegion` de `pdf-engine`, `PDF_Engine.md` §6). Este motor **no** conoce el concepto de región y no debe ganarlo.
+**`image` puede ser un recorte de la página (ADR-065 §3)**: desde el OCR por región, el caller puede pasar el raster de **una parte** de la página en vez de la página entera (`rasterizePage` con `region`, `Render_Engine.md` §6). Para este motor no cambia nada —recibe una imagen y la reconoce— pero sí cambia qué significan las coordenadas que devuelve: las `words` de §10 salen en puntos **relativos a la imagen recibida**, o sea al recorte. Llevarlas a coordenadas de página es responsabilidad del caller, que es el único que sabe de qué región vino (`fuseOcrRegion` de `pdf-engine`, `PDF_Engine.md` §6). Este motor **no** conoce el concepto de región y no debe ganarlo.
 
-**Precondición de `dpi` (ADR-064 §3)**: `dpi` **debe ser el DPI con el que se rasterizó `imageData`**. No es un dato informativo: es el divisor con el que §10 convierte las coordenadas de Tesseract a puntos de página, así que un valor que no corresponda produce geometría mal escalada en silencio. El caller es responsable de que las dos cosas se muevan juntas — hoy el Orchestrator las deriva del mismo `ctx.config.ocr.dpi` (`scale = dpi/72` para rasterizar, `dpi` para este input; `Orchestrator.md` §2). El motor **no** lo verifica: no conoce el tamaño en puntos de la página, así que no tiene contra qué comparar.
+**Precondición de `dpi` (ADR-064 §3)**: `dpi` **debe ser el DPI con el que se rasterizó la imagen**. No es un dato informativo: es el divisor con el que §10 convierte las coordenadas de Tesseract a puntos de página, así que un valor que no corresponda produce geometría mal escalada en silencio. El caller es responsable de que las dos cosas se muevan juntas — hoy el Orchestrator las deriva del mismo `ctx.config.ocr.dpi` (`scale = dpi/72` para rasterizar, `dpi` para este input; `Orchestrator.md` §2). El motor **no** lo verifica: no conoce el tamaño en puntos de la página, así que no tiene contra qué comparar.
 
 **`OcrPageRequest` (ADR-143 §1), entrada de `processSession`**:
 
@@ -264,7 +264,7 @@ OcrPageOutput {
 - **Este orden es interno de este motor y no es el que ve el detector** (ADR-110).
 
   > **Precisión (2026-09-03)**: el comentario inline de `words` decía *"ordenadas por `bbox.y` asc, luego `bbox.x` asc"*, y desde **ADR-121** eso ya no describe el array completo. Las palabras de la pasada derecha sí salen con ese orden; las que vienen de las **franjas de margen rotadas** se concatenan **después** (`[...words, ...rotated]`), sin re-ordenar. No es un defecto: ese orden no es el que ve el detector, así que re-ordenar acá sería trabajo que `fuseOcrPage` deshace. Lo que estaba mal era la promesa, no el código. `fuseOcrPage`/`fuseOcrRegion` (`PDF_Engine.md` §6) re-ordenan las palabras al fusionarlas en la página, y desde ADR-110 lo hacen **agrupando en renglones** en vez de por una clave escalar con tolerancia — que sobre un escaneo rompía uno de cada tres pares de palabras consecutivos. Este motor **no cambia**: su orden en píxeles con tolerancia de 1 px queda como lo fijó ADR-064 §2.
-- **`words[i].bbox` está en puntos**, no en píxeles del raster (ADR-064 §1) — de página cuando `imageData` es la página entera, y **relativos al recorte** cuando es una región (§9, ADR-065 §3). Tesseract devuelve píxeles de la `imageData` recibida; el kernel los convierte con `pt = px · 72 / dpi` sobre `x`, `y`, `width` y `height`. Es un escalado puro, sin corrimiento de origen: el raster de `rasterizePage` sale de `getViewport({ scale })`, cuya esquina superior-izquierda con `y` hacia abajo es **la misma convención** que exige `03_Data_Model.md` §137. Con esto, `Word.bbox` tiene un único espacio de coordenadas sea `source` `"pdf"` u `"ocr"`.
+- **`words[i].bbox` está en puntos**, no en píxeles del raster (ADR-064 §1) — de página cuando `image` es la página entera, y **relativos al recorte** cuando es una región (§9, ADR-065 §3). Tesseract devuelve píxeles de la imagen recibida —ya decodificada por el motor, ADR-158 §3—; el kernel los convierte con `pt = px · 72 / dpi` sobre `x`, `y`, `width` y `height`. Es un escalado puro, sin corrimiento de origen: el raster de `rasterizePage` sale de `getViewport({ scale })`, cuya esquina superior-izquierda con `y` hacia abajo es **la misma convención** que exige `03_Data_Model.md` §137. Con esto, `Word.bbox` tiene un único espacio de coordenadas sea `source` `"pdf"` u `"ocr"`.
 - El orden de lectura se calcula **antes** de convertir, con la tolerancia de misma-línea de 1px intacta (ADR-064 §2). El array resultante queda en el mismo orden que produciría sin la conversión: un escalado positivo uniforme no altera el orden, y la tolerancia sigue significando un píxel y no un punto.
 - **`bbox.rotation` se puebla desde ADR-090 §4** — hasta la v1.3.1 este motor nunca lo hacía, y §10 lo afirmaba. Ahora lleva el mismo valor que `orientation_degrees` de OSD (ausente ≡ 0, así que un escaneo derecho sigue sin el campo y entra por la rama horizontal de siempre). La correspondencia es la identidad y está verificada contra los runs rotados que produce `pdf-engine`: `270` ⇒ el texto avanza hacia abajo en espacio de página, `90` ⇒ hacia arriba. **Desde ADR-121 hay una segunda fuente**: una palabra que salió de una franja de margen lleva la rotación de su pasada **compuesta** con la orientación de la página, `(pasada + orientación) % 360`, porque la franja se recorta del raster ya enderezado. En una página derecha eso es 90 o 270 directo. Con esto se cumple lo que ADR-067 §5 dejó anotado: el orden por runs rotados de `pdf-engine` y el pintado rotado de ADR-066 §7 **cubren el texto de OCR sin un cambio más**.
 - **El orden de lectura de un escaneo rotado se calcula en el espacio enderezado** (ADR-090 §3), antes de mapear las cajas de vuelta y antes de convertir a puntos. Es el único espacio donde la tolerancia de misma-línea significa lo que dice. Con orientación 0 el orden es idéntico al de antes del ADR.
@@ -281,7 +281,7 @@ OcrPageOutput {
 | `OCR_MODEL_MISSING` | `OcrModelMissingError` | no se pudo cargar/descargar el modelo Tesseract | no | abortar OCR; el usuario debe reintentar o desactivar OCR |
 | `ENGINE_NOT_INITIALIZED` | `EngineNotInitializedError` | `processPage` antes de `init` | no | bug del caller |
 | `ENGINE_DISPOSED` | `EngineDisposedError` | `processPage` tras `dispose` | no | bug del caller |
-| `INVALID_INPUT` | `InvalidInputError` | input null/undefined, `imageData` vacío, o `dpi` no finito o `≤ 0` (ADR-064 §4) | no | bug del caller |
+| `INVALID_INPUT` | `InvalidInputError` | input null/undefined, `image` sin bytes o con dimensiones no positivas, o `dpi` no finito o `≤ 0` (ADR-064 §4) | no | bug del caller |
 
 `retryable`: `OCR_TIMEOUT = true`, resto `false`.
 
@@ -292,7 +292,7 @@ OcrPageOutput {
 - Hito 3: corre inline en el host (ADR-021; tesseract.js mantiene sus workers internos propios). Desde PR14 (ADR-045): la clase corre host-side y despacha el reconocimiento a `OcrPool` (1–2 workers default; 1 en móviles) vía su puerto interno; sin factory de workers, el mismo kernel corre in-process.
 - Costo: 3–10 s por página A4 a 300 DPI (depende de densidad de texto).
 - Memoria: 150–300 MB por worker (modelo cargado). El modelo se reutiliza entre jobs.
-- `imageData` se transfiere (zero-copy).
+- `image` se clona (ADR-158 §5); el buffer codificado sobrevive al reintento.
 - Paralelismo: el pool despacha en paralelo respetando `ocrPoolSize`. Backpressure si `queue > MAX_QUEUE_PER_POOL = 8`.
 - Cancelación: Tesseract expone callback de progreso; el worker chequea `shouldCancel` entre líneas y aborta en < 200 ms.
 - Modelo cacheado en IndexedDB tras primera descarga (~30 MB). Sesiones posteriores no descargan.
@@ -306,7 +306,7 @@ OcrPageOutput {
 1. **Página completamente vacía (blanca)**: `words = []`, `confidence = 0`. `OCR_PAGE_FINISHED` se emite normalmente.
 2. **Página con imagen sin texto**: `words = []`, `confidence = 0`. Normal.
 3. **Página con texto muy pequeño (calidad baja)**: `confidence < 0.5`. El usuario puede ver warning; las ocurrencias NER posteriores tendrán `confidence = min(ocrConf, nerConf)`.
-4. **`imageData` ya transferido**: lanza `InvalidInputError`. (Hito 9; inline no hay transferencia zero-copy — ADR-021 §1, precedente ADR-020 §9.)
+4. **`image.bytes` *detached*** (ADR-158 §5): lanza `InvalidInputError`. Este motor **ya no transfiere** —clona, para que el reintento pueda reusar el buffer (ADR-079)—, así que el caso dejó de poder originarse en la frontera façade→worker; sigue siendo alcanzable si un caller transfirió ese `ArrayBuffer` por su cuenta antes de llamar. Hasta ADR-158 el caso era "`imageData` ya transferido" y lo producía el propio motor.
 5. **Idioma no cargado en el modelo**: lanza `OcrModelMissingError`.
 6. **Timeout por página**: reintentar 2 veces. Si persiste, `OCR_PAGE_FAILED` y se continúa con las demás páginas.
 7. **`dpi = 72`**: la conversión de §10 es la identidad (factor `72/72 = 1`). Caso degenerado útil como fijación de la fórmula, no un modo de uso recomendado (§12: 300 DPI para OCR preciso).
@@ -345,7 +345,7 @@ OcrPageOutput {
 | `empty page returns empty words` | `edge.test.ts` | edge | caso 1 |
 | `image-only page returns empty words` | `edge.test.ts` | edge | caso 2 |
 | `low confidence warns` | `edge.test.ts` | edge | caso 3 |
-| `throws on already-transferred imageData` | `edge.test.ts` | edge | caso 4 |
+| `throws on a detached image.bytes` | `edge.test.ts` | edge | caso 4 (ADR-158 §5) |
 | `throws on unknown language` | `edge.test.ts` | edge | caso 5 |
 | `retries on timeout up to maxRetries` | `edge.test.ts` | edge | caso 6 |
 | `word bboxes are converted from raster pixels to page points` | `unit.test.ts` | unit | ADR-064 §1: bbox `(0,0)-(417,417)` px con `dpi = 300` → `{ x: 0, y: 0, width: 100.08, height: 100.08 }` pt |

@@ -2,7 +2,7 @@
 
 # ADR-143 — Las imágenes de OCR se producen cuando hay lugar
 
-- **Estado**: Accepted
+- **Estado**: Accepted (**§1 amendado por ADR-158 §2**, 2026-09-12: `OcrImageProducer` devuelve `EncodedPageImage` en vez de `ImageData`. `estimatedBytes` y `maxLiveImageBytes` **no cambian**: siguen midiendo el tamaño decodificado, que es lo que el worker materializa — ADR-158 §4)
 - **Fecha**: 2026-09-09
 - **Decidido por**: El planificador, resolviendo D-07 del plan de campaña de hardening (§2, §11.2).
 - **Relacionado con**: ADR-101 (el paralelismo de OCR, que ya existe y no se toca), ADR-045 (depósito y emisión host-side), ADR-065 (páginas y regiones, conjuntos disjuntos), ADR-014 (la fusión síncrona), ADR-079 (por qué OCR no transfiere su buffer)

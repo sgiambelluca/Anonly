@@ -227,7 +227,7 @@ El usuario puede overridear cualquiera desde la UI, emitiendo `CONFLICT_RESOLVE_
 ## 12. Etapa 10 — Render completo (Render Engine)
 
 **Entra**: `Document` + `EntityGroup[]` (enabled) + `Replacement[]` resueltos. El PDF fuente ya está cargado en Render desde la etapa 8 (`loadDocument`; ADR-030).
-**Sale**: `ImageData` o `ArrayBuffer` PNG por página, lista para ensamblar en el Export Engine.
+**Sale**: por página, `ImageData` (preview) o `EncodedPageImage` PNG/JPEG (export y rasterizado para OCR, ADR-158 §1), lista para ensamblar en el Export Engine.
 **Eventos emitidos**: `RENDER_FINISHED`, `RENDER_FAILED`.
 **Errores**: `RENDER_FAILED` → reintento (1) → `EXPORT_FAILED`.
 **Cancelación**: entre páginas, SLA < 200 ms.
@@ -298,7 +298,7 @@ sequenceDiagram
   PP-->>Orch: PAGE_PARSED x N
   PP-->>Orch: DOCUMENT_PARSED (textlessPages?)
   alt hay páginas sin texto
-    Orch->>OP: dispatch ocr-page x M (transfiere imageData)
+    Orch->>OP: dispatch ocr-page x M (clona la imagen PNG, ADR-158)
     OP-->>Orch: OCR_PAGE_FINISHED x M
     OP-->>Orch: OCR_FINISHED
   end
