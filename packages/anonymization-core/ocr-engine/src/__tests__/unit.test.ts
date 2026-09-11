@@ -2,6 +2,7 @@ import {
   CancelledError,
   EngineEvents,
   EventChannel,
+  type EncodedPageImage,
   type EngineContext,
   type Word,
 } from "@anonly/shared";
@@ -25,11 +26,11 @@ import { estimateWordsBytes, OcrEngine } from "../ocr.engine.js";
 import { OcrModelMissingError, OcrPageFailedError } from "../ocr.errors.js";
 
 import {
+  createEncodedPageImage,
   createEngineContext,
   createMockConfig,
   createResolvedOcrPool,
   createTrackingOcrPool,
-  createImageData,
   createValidOcrPageInput,
   createValidOcrPageRequest,
   mockDetectData,
@@ -689,12 +690,12 @@ describe("OcrEngine — unit tests", () => {
       let maxLiveProduceCalls = 0;
       const produce = vi.fn(
         () =>
-          new Promise<ImageData>((resolve) => {
+          new Promise<EncodedPageImage>((resolve) => {
             liveProduceCalls += 1;
             maxLiveProduceCalls = Math.max(maxLiveProduceCalls, liveProduceCalls);
             produceDeferreds.push(() => {
               liveProduceCalls -= 1;
-              resolve(createImageData(1, 1));
+              resolve(createEncodedPageImage(1, 1));
             });
           }),
       );
@@ -743,7 +744,7 @@ describe("OcrEngine — unit tests", () => {
       // La primera imagen nunca se resuelve: retiene el único lugar del
       // presupuesto para siempre — el modo de falla que ADR-143 §6 exige
       // descartar por test, no por lectura.
-      const produce = vi.fn(() => new Promise<ImageData>(() => {}));
+      const produce = vi.fn(() => new Promise<EncodedPageImage>(() => {}));
       const requests = [
         createValidOcrPageRequest("doc-budget-hang", 0, { estimatedBytes: 100 }),
         createValidOcrPageRequest("doc-budget-hang", 1, { estimatedBytes: 100 }),
@@ -878,7 +879,7 @@ describe("OcrEngine — unit tests", () => {
 
     /** Raster de 100 × 40, el mismo que arma `createValidOcrPageInput`. */
     function inputConRaster(documentId: string): ReturnType<typeof createValidOcrPageInput> {
-      return { ...createValidOcrPageInput(documentId, 0), imageData: createImageData(100, 40) };
+      return { ...createValidOcrPageInput(documentId, 0), image: createEncodedPageImage(100, 40) };
     }
 
     it("tells Tesseract the dpi instead of letting it estimate, and only when it changes", async () => {
@@ -986,7 +987,7 @@ describe("OcrEngine — unit tests", () => {
       { text: "Perez", confidence: 90, bbox: { x0: 10, y0: 20, x1: 50, y1: 40 } },
     ];
     function inputConRaster(documentId: string): ReturnType<typeof createValidOcrPageInput> {
-      return { ...createValidOcrPageInput(documentId, 0), imageData: createImageData(100, 40) };
+      return { ...createValidOcrPageInput(documentId, 0), image: createEncodedPageImage(100, 40) };
     }
 
     it("the OSD worker uses the legacy OCR engine mode", async () => {
@@ -1065,7 +1066,7 @@ describe("OcrEngine — unit tests", () => {
     const SELLO = [{ text: "PERITO", confidence: 92, bbox: { x0: 2, y0: 2, x1: 30, y1: 14 } }];
 
     function inputConRaster(documentId: string): ReturnType<typeof createValidOcrPageInput> {
-      return { ...createValidOcrPageInput(documentId, 0), imageData: createImageData(100, 40) };
+      return { ...createValidOcrPageInput(documentId, 0), image: createEncodedPageImage(100, 40) };
     }
 
     /**
@@ -1230,7 +1231,7 @@ describe("OcrEngine — unit tests", () => {
     ];
 
     function inputConRaster(documentId: string): ReturnType<typeof createValidOcrPageInput> {
-      return { ...createValidOcrPageInput(documentId, 0), imageData: createImageData(100, 40) };
+      return { ...createValidOcrPageInput(documentId, 0), image: createEncodedPageImage(100, 40) };
     }
 
     /** Doble de `setParameters` con el parámetro declarado, para poder leerlo. */

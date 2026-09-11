@@ -5,6 +5,7 @@ import {
   EngineEvents,
   EventChannel,
   InvalidInputError,
+  type EncodedPageImage,
   type EngineContext,
 } from "@anonly/shared";
 import { createWorker } from "tesseract.js";
@@ -28,8 +29,8 @@ import { OcrModelMissingError, OcrPageFailedError, OcrTimeoutError } from "../oc
 import type { OcrPageInput } from "../ocr.types.js";
 
 import {
+  createEncodedPageImage,
   createEngineContext,
-  createImageData,
   createImageProducer,
   createResolvedOcrPool,
   createValidOcrPageInput,
@@ -110,12 +111,13 @@ describe("OcrEngine — edge case tests", () => {
   // Caso 4 (§13): imageData ya transferido. Hito 9: Transferable real
   // (ADR-021 §1). Inline (Hito 3), un imageData "ya transferido/consumido"
   // es indistinguible de un imageData vacío (width/height <= 0) — mismo
-  // tratamiento que ADR-020 §9 aplicó al buffer del PDF Engine.
+  // tratamiento que ADR-020 §9 aplicó al buffer del PDF Engine. ADR-158 §2:
+  // la validación ahora lee widthPx/heightPx de EncodedPageImage.
   describe("Caso 4: imageData ya transferido", () => {
     it("throws on already-transferred imageData", async () => {
       await engine.init(ctx);
       const input = createValidOcrPageInput("doc-transferred", 0, {
-        imageData: createImageData(0, 0),
+        image: createEncodedPageImage(0, 0),
       });
 
       await expect(engine.processPage(input, ctx)).rejects.toThrow(InvalidInputError);
@@ -124,7 +126,7 @@ describe("OcrEngine — edge case tests", () => {
     it("throws InvalidInputError when width is 0", async () => {
       await engine.init(ctx);
       const input = createValidOcrPageInput("doc-zero-width", 0, {
-        imageData: createImageData(0, 50),
+        image: createEncodedPageImage(0, 50),
       });
       await expect(engine.processPage(input, ctx)).rejects.toThrow(InvalidInputError);
     });
@@ -132,7 +134,7 @@ describe("OcrEngine — edge case tests", () => {
     it("throws InvalidInputError when height is 0", async () => {
       await engine.init(ctx);
       const input = createValidOcrPageInput("doc-zero-height", 0, {
-        imageData: createImageData(50, 0),
+        image: createEncodedPageImage(50, 0),
       });
       await expect(engine.processPage(input, ctx)).rejects.toThrow(InvalidInputError);
     });
@@ -495,12 +497,12 @@ describe("OcrEngine — edge case tests", () => {
       const renderError = new InvalidInputError("rasterización fallida: PDF corrupto", {
         documentId: "doc-producer-fails",
       });
-      const okImage = createImageData(100, 40);
+      const okImage = createEncodedPageImage(100, 40);
       // ctx.config.workerPool.ocrPoolSize = 1 (createMockConfig): concurrency
       // 1 garantiza orden estrictamente secuencial por índice, así que la
       // PRIMERA llamada a produce() es siempre la de la página 0.
       const produce = vi
-        .fn<(request: unknown, signal: AbortSignal) => Promise<ImageData>>()
+        .fn<(request: unknown, signal: AbortSignal) => Promise<EncodedPageImage>>()
         .mockRejectedValueOnce(renderError)
         .mockResolvedValueOnce(okImage);
       const busEmitSpy = vi.spyOn(ctx.bus, "emit");

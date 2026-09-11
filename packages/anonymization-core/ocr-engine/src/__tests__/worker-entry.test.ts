@@ -41,7 +41,7 @@ vi.mock("tesseract.js", () => ({
 }));
 
 import {
-  createImageData,
+  createEncodedPageImage,
   mockEmptyRecognizeData,
   mockRecognizeData,
   mockTesseractWorker,
@@ -86,7 +86,7 @@ function basePayload(overrides?: Partial<OcrPagePayload>): OcrPagePayload {
   return {
     documentId: "doc-worker",
     pageIndex: 0,
-    imageData: createImageData(100, 40),
+    image: createEncodedPageImage(100, 40),
     dpi: 300,
     languages: ["spa", "eng"],
     ...overrides,

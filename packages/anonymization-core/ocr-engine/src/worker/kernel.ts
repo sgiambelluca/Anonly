@@ -28,7 +28,13 @@
  * instancia — cubre `reanalyze` con `ocr.languages` (ADR-038 §5.3) sin
  * mensaje de control nuevo.
  */
-import { CancelledError, type BoundingBox, type OcrPagePayload, type Word } from "@anonly/shared";
+import {
+  CancelledError,
+  type BoundingBox,
+  type EncodedPageImage,
+  type OcrPagePayload,
+  type Word,
+} from "@anonly/shared";
 import { createWorker, OEM, PSM } from "tesseract.js";
 
 import { OcrModelMissingError, OcrPageFailedError, OcrTimeoutError } from "../ocr.errors.js";
@@ -251,9 +257,10 @@ async function ensurePageSegModeApplied(): Promise<void> {
  * (node_modules/tesseract.js/src/index.d.ts) es
  * `string | HTMLImageElement | HTMLCanvasElement | HTMLVideoElement |
  * CanvasRenderingContext2D | File | Blob | Buffer | OffscreenCanvas` — sin
- * `ImageData`. `OcrPageInput.imageData: ImageData` es el contrato fijo de
- * OCR_Engine.md §6/§9 (no se puede romper, R-2), así que la conversión vive
- * acá, en la frontera con tesseract.js.
+ * `ImageData`. El reconocimiento principal, el enderezado de ADR-120 y las
+ * franjas de margen de ADR-121 operan todos sobre `ImageData` (rotar/recortar
+ * son operaciones de píxeles), así que la conversión de vuelta a un
+ * `OffscreenCanvas` que tesseract.js sí acepta vive acá, en cada pasada.
  */
 function toTesseractImage(
   imageData: ImageData,
@@ -290,6 +297,61 @@ function toTesseractImage(
   }
   context.putImageData(imageData, 0, 0);
   return canvas;
+}
+
+/*
+ * ADR-158 §2/§3: `OcrPagePayload.image` llega CODIFICADA (PNG) — la decodifica
+ * UNA sola vez, con `createImageBitmap`, al principio de `kernelRecognize`.
+ * De acá para abajo el camino es idéntico al previo al ADR: el `ImageData`
+ * resultante alimenta el reconocimiento principal, el enderezado de ADR-120 y
+ * las franjas de margen de ADR-121 exactamente igual que cuando llegaba cruda
+ * por transporte — la salvedad declarada en el ADR es justamente esa: el
+ * worker sigue materializando una página entera de píxeles, lo que
+ * desaparece es la copia que cruzaba el `postMessage` y la que retenía el
+ * host.
+ */
+async function decodeEncodedImage(
+  image: EncodedPageImage,
+  documentId: string,
+  pageIndex: number,
+): Promise<ImageData> {
+  if (typeof OffscreenCanvas === "undefined") {
+    throw new OcrPageFailedError(
+      documentId,
+      pageIndex,
+      "OffscreenCanvas no disponible en este entorno.",
+    );
+  }
+
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await createImageBitmap(new Blob([image.bytes], { type: `image/${image.format}` }));
+  } catch (err: unknown) {
+    throw new OcrPageFailedError(
+      documentId,
+      pageIndex,
+      `No se pudo decodificar la imagen de la página ${pageIndex} (${image.format}): ` +
+        `${err instanceof Error ? err.message : String(err)}.`,
+    );
+  }
+
+  // `image.widthPx`/`heightPx` (no `bitmap.width`/`height`): son las
+  // dimensiones AUTORITATIVAS que ya declaraba el productor (Render), las
+  // mismas que `maxLiveImageBytes`/`estimatedBytes` usaron para presupuestar
+  // (ADR-158 §4) — no hace falta releerlas del bitmap decodificado.
+  const canvas = new OffscreenCanvas(image.widthPx, image.heightPx);
+  const context = canvas.getContext("2d");
+  if (context === null) {
+    bitmap.close();
+    throw new OcrPageFailedError(
+      documentId,
+      pageIndex,
+      "No se pudo obtener un contexto 2D de OffscreenCanvas para decodificar la imagen.",
+    );
+  }
+  context.drawImage(bitmap, 0, 0);
+  bitmap.close();
+  return context.getImageData(0, 0, image.widthPx, image.heightPx);
 }
 
 function clampConfidence(value: number): number {
@@ -912,13 +974,20 @@ export async function kernelRecognize(
   payload: OcrPagePayload,
   opts: KernelRecognizeOptions,
 ): Promise<KernelOcrResult> {
-  const { documentId, pageIndex, imageData, languages, dpi } = payload;
+  const { documentId, pageIndex, image, languages, dpi } = payload;
 
   if (opts.abortSignal.aborted) throw new CancelledError(documentId);
 
   await ensureWorkerLoaded(languages);
   await ensureDpiApplied(dpi);
   await ensurePageSegModeApplied();
+
+  if (opts.abortSignal.aborted) throw new CancelledError(documentId);
+
+  // ADR-158 §2/§3: decodificación única. De acá para abajo, `imageData` es
+  // exactamente lo que antes llegaba crudo por `payload.imageData` — nada del
+  // resto de esta función cambia.
+  const imageData = await decodeEncodedImage(image, documentId, pageIndex);
 
   if (opts.abortSignal.aborted) throw new CancelledError(documentId);
 

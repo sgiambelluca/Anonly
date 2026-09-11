@@ -6,7 +6,7 @@
  * ADR-021 §2) y se re-exporta desde index.ts para conveniencia del caller.
  */
 
-import type { BoundingBox, Word } from "@anonly/shared";
+import type { BoundingBox, EncodedPageImage, Word } from "@anonly/shared";
 
 /**
  * ADR-143 §1: descriptor liviano — sin imagen — de una página o región a
@@ -25,18 +25,27 @@ export interface OcrPageRequest {
 }
 
 /**
- * ADR-143 §1/§3: produce la `ImageData` de un descriptor. Nunca cruza un
+ * ADR-143 §1/§3: produce la imagen de un descriptor. Nunca cruza un
  * `postMessage` ni entra en `EngineConfig` (`OcrConfig` se serializa hacia
  * los workers; una función no sobrevive eso) — el façade la implementa
  * llamando a `RenderEngine.rasterizePage` host-side.
+ *
+ * ADR-158 §2: devuelve `EncodedPageImage` (PNG), no `ImageData` cruda —
+ * `RenderEngine.rasterizePage` ya la entrega codificada, y tesseract.js no
+ * acepta píxeles crudos en ningún formato.
  */
-export type OcrImageProducer = (request: OcrPageRequest, signal: AbortSignal) => Promise<ImageData>;
+export type OcrImageProducer = (
+  request: OcrPageRequest,
+  signal: AbortSignal,
+) => Promise<EncodedPageImage>;
 
 export interface OcrPageInput {
   readonly documentId: string;
   readonly pageIndex: number;
-  /** Rasterización de la página. Zero-copy transfer real: Hito 9 (ADR-021 §1). */
-  readonly imageData: ImageData;
+  // ADR-158 §2: imagen CODIFICADA (PNG), no píxeles crudos. Se CLONA, no se
+  // transfiere — el reintento reusa el buffer (ADR-079/ADR-158 §5). El motor
+  // la decodifica una sola vez, en el worker (worker/kernel.ts#kernelRecognize).
+  readonly image: EncodedPageImage;
   readonly dpi: number;
   readonly languages: ReadonlyArray<string>;
 }

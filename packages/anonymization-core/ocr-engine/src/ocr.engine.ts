@@ -41,6 +41,7 @@ import {
   EventChannel,
   InvalidInputError,
   type BoundingBox,
+  type EncodedPageImage,
   type EngineContext,
   type IEngine,
   type OcrPagePayload,
@@ -374,7 +375,7 @@ export class OcrEngine implements IEngine {
       throw new InvalidInputError("Input es null o undefined.", { engineId: EngineId.Ocr });
     }
 
-    const { documentId, pageIndex, imageData, languages, dpi } = input;
+    const { documentId, pageIndex, image, languages, dpi } = input;
 
     // ADR-064 §4: `dpi` es el divisor de la conversión px→pt del kernel
     // (OCR_Engine.md §10). Antes del ADR el valor no se leía y un 0 era
@@ -386,10 +387,12 @@ export class OcrEngine implements IEngine {
       );
     }
 
-    if (imageData.width <= 0 || imageData.height <= 0) {
+    // ADR-158 §2: la validación de dimensiones pasa a leer el EncodedPageImage
+    // (widthPx/heightPx, ya conocidos sin decodificar) en vez de ImageData.
+    if (image.widthPx <= 0 || image.heightPx <= 0) {
       throw new InvalidInputError(
-        `imageData inválida en la página ${pageIndex}: width y height deben ser mayores a 0.`,
-        { documentId, pageIndex, width: imageData.width, height: imageData.height },
+        `image inválida en la página ${pageIndex}: widthPx y heightPx deben ser mayores a 0.`,
+        { documentId, pageIndex, widthPx: image.widthPx, heightPx: image.heightPx },
       );
     }
 
@@ -418,7 +421,7 @@ export class OcrEngine implements IEngine {
     const payload: OcrPagePayload = {
       documentId,
       pageIndex,
-      imageData,
+      image,
       dpi: input.dpi,
       languages: configuredLanguages,
     };
@@ -444,20 +447,23 @@ export class OcrEngine implements IEngine {
           priority: DISPATCH_PRIORITY,
           payload,
           maxRetriesOverride: 0,
-          // SIN `transferList`, a propósito (ADR-079 §1, fila corregida).
+          // SIN `transferList`, a propósito (ADR-079 §1, fila corregida;
+          // ADR-158 §5: el criterio no cambia con el payload codificado).
           //
-          // El `imageData` de una página A4 a 300 dpi son ~8 MB y transferirlo
-          // parecía seguro: el host lo rasteriza para ESTE job y lo suelta.
-          // Pero el emisor no es solo el host — **es este loop**. `payload` se
-          // construye una vez arriba y se re-despacha en cada intento, así que
-          // el primer transfer deja el `ArrayBuffer` detachado (`byteLength`
-          // 0) y el segundo lanza `DataCloneError: Cannot transfer object of
-          // unsupported type`. O sea que transferir acá MATA el reintento —
-          // justo el que `normalizeTimeout` existe para habilitar.
+          // `image.bytes` (PNG, ADR-158 §2) pesa unos pocos MB por página —
+          // mucho menos que el `ImageData` crudo de antes (~35 MB a 300 dpi),
+          // pero transferirlo seguiría siendo un error por la misma razón de
+          // fondo: el emisor no es solo el host — **es este loop**. `payload`
+          // se construye una vez arriba y se re-despacha en cada intento, así
+          // que el primer transfer deja el `ArrayBuffer` detachado
+          // (`byteLength` 0) y el segundo lanza `DataCloneError: Cannot
+          // transfer object of unsupported type`. O sea que transferir acá
+          // MATA el reintento — justo el que `normalizeTimeout` existe para
+          // habilitar.
           //
-          // Copiar el buffer para conservar una fuente de reintento costaría
-          // exactamente lo que el transfer ahorra, así que no hay nada que
-          // ganar: se clona, como antes.
+          // Copiar el buffer para conservar una fuente de reintento cuesta
+          // ahora unos pocos MB en vez de decenas: se clona, como antes, pero
+          // más barato.
         });
         // ADR-055 §2: `dispatchResult` es `unknown` — decodeKernelOcrResult es
         // el único paso permitido antes de desestructurar `words`/`confidence`
@@ -636,9 +642,9 @@ export class OcrEngine implements IEngine {
     // asienta (éxito, fallo definitivo o cancelación) — nunca antes.
     await budget.reserve(request.estimatedBytes, request.documentId, ctx.abortSignal);
     try {
-      let imageData: ImageData;
+      let image: EncodedPageImage;
       try {
-        imageData = await produce(request, ctx.abortSignal);
+        image = await produce(request, ctx.abortSignal);
       } catch (err: unknown) {
         if (err instanceof CancelledError) throw err;
         // ADR-143 §4: un fallo del productor (Render) recibe el mismo
@@ -656,7 +662,7 @@ export class OcrEngine implements IEngine {
       const input: OcrPageInput = {
         documentId: request.documentId,
         pageIndex: request.pageIndex,
-        imageData,
+        image,
         dpi: request.dpi,
         languages: request.languages,
       };
@@ -733,7 +739,7 @@ export class OcrEngine implements IEngine {
     // `processSession` siempre invoca `produce` con el MISMO objeto que
     // recibió en `requests`, así que no hace falta una clave compuesta ni
     // hay riesgo de colisión si dos inputs compartieran documentId/pageIndex.
-    const imageByRequest = new Map<OcrPageRequest, ImageData>();
+    const imageByRequest = new Map<OcrPageRequest, EncodedPageImage>();
     const requests: OcrPageRequest[] = inputs.map((input) => {
       const request: OcrPageRequest = {
         documentId: input.documentId,
@@ -742,21 +748,21 @@ export class OcrEngine implements IEngine {
         languages: input.languages,
         estimatedBytes: 0,
       };
-      imageByRequest.set(request, input.imageData);
+      imageByRequest.set(request, input.image);
       return request;
     });
 
     const produce: OcrImageProducer = (request) => {
-      const imageData = imageByRequest.get(request);
+      const image = imageByRequest.get(request);
       // Invariante interna: `processSession` reenvía el mismo objeto que le
       // entregamos en `requests`, así que el Map siempre resuelve.
-      if (imageData === undefined) {
+      if (image === undefined) {
         throw new InvalidInputError(
           "processSession invocó produce() con un OcrPageRequest desconocido.",
           { engineId: EngineId.Ocr, documentId: request.documentId, pageIndex: request.pageIndex },
         );
       }
-      return Promise.resolve(imageData);
+      return Promise.resolve(image);
     };
 
     return this.processSession(requests, produce, ctx);

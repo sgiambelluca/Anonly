@@ -8,7 +8,7 @@
  * (Code_Standards.md §10; ADR-021 §5; precedente: mockGetDocumentResult en
  * pdf-engine).
  */
-import type { EngineConfig, EngineContext } from "@anonly/shared";
+import type { EncodedPageImage, EngineConfig, EngineContext } from "@anonly/shared";
 import { createEngineContext as sharedCreateEngineContext, createMockConfig as sharedCreateMockConfig } from "@anonly/test-utils";
 import type { createWorker } from "tesseract.js";
 import { vi } from "vitest";
@@ -185,6 +185,28 @@ export function createImageData(width: number, height: number): ImageData {
   };
 }
 
+/**
+ * ADR-158 §2: `EncodedPageImage` de prueba — `bytes` vacíos a propósito. La
+ * decodificación real (`createImageBitmap`) está stubbeada acá abajo
+ * (`installCreateImageBitmapStub`) y `decodeEncodedImage`
+ * (worker/kernel.ts) arma el canvas con `widthPx`/`heightPx` del propio
+ * `EncodedPageImage` — nunca lee dimensiones del bitmap decodificado —, así
+ * que el contenido de `bytes` nunca importa en tests, solo estos dos campos.
+ */
+export function createEncodedPageImage(
+  widthPx: number,
+  heightPx: number,
+  overrides?: Partial<EncodedPageImage>,
+): EncodedPageImage {
+  return {
+    bytes: new ArrayBuffer(0),
+    format: "png",
+    widthPx,
+    heightPx,
+    ...overrides,
+  };
+}
+
 export function createValidOcrPageInput(
   documentId: string,
   pageIndex = 0,
@@ -193,7 +215,7 @@ export function createValidOcrPageInput(
   return {
     documentId,
     pageIndex,
-    imageData: createImageData(100, 40),
+    image: createEncodedPageImage(100, 40),
     dpi: 300,
     languages: ["spa", "eng"],
     ...overrides,
@@ -218,11 +240,11 @@ export function createValidOcrPageRequest(
   };
 }
 
-/** `OcrImageProducer` trivial: siempre resuelve con la misma `ImageData` (ADR-143 §1). */
+/** `OcrImageProducer` trivial: siempre resuelve con el mismo `EncodedPageImage` (ADR-143 §1, ADR-158 §2). */
 export function createImageProducer(
-  imageData: ImageData = createImageData(100, 40),
+  image: EncodedPageImage = createEncodedPageImage(100, 40),
 ): OcrImageProducer {
-  return () => Promise.resolve(imageData);
+  return () => Promise.resolve(image);
 }
 
 /**
@@ -251,10 +273,23 @@ class StubOffscreenCanvas {
    * de detectar la orientación. Como `putImageData`, no rasteriza: los tests
    * mockean tesseract.js entero y lo único observable —y lo único que hace
    * falta observar— son las DIMENSIONES del canvas que recibe `detect`.
+   *
+   * ADR-158 §2/§3: `getImageData` existe porque `decodeEncodedImage`
+   * (worker/kernel.ts) lo llama para materializar el `ImageData` decodificado
+   * — devuelve un `createImageData(w, h)` de la forma pedida, mismo criterio
+   * que el resto del stub: sin píxeles reales, solo dimensiones correctas.
    */
-  getContext(): { putImageData: () => void; drawImage: () => void } | null {
+  getContext(): {
+    putImageData: () => void;
+    drawImage: () => void;
+    getImageData: (x: number, y: number, w: number, h: number) => ImageData;
+  } | null {
     if (!stubCanvasContextAvailable) return null;
-    return { putImageData: () => undefined, drawImage: () => undefined };
+    return {
+      putImageData: () => undefined,
+      drawImage: () => undefined,
+      getImageData: (_x: number, _y: number, w: number, h: number) => createImageData(w, h),
+    };
   }
 }
 
@@ -281,6 +316,27 @@ function installOffscreenCanvasStub(): void {
 }
 
 installOffscreenCanvasStub();
+
+/**
+ * Stub de `createImageBitmap` para el entorno `node` de Vitest (sin DOM):
+ * `createImageBitmap` no existe en Node de forma nativa (a diferencia de
+ * `Blob`, global desde Node 18). `decodeEncodedImage` (worker/kernel.ts) lo
+ * llama para decodificar `EncodedPageImage.bytes`, pero nunca lee
+ * `bitmap.width`/`bitmap.height` — arma el canvas con `widthPx`/`heightPx`
+ * del propio `EncodedPageImage` — así que el bitmap devuelto acá solo
+ * necesita `close()`. No instala si ya existe (entorno con soporte real).
+ */
+function installCreateImageBitmapStub(): void {
+  if (typeof globalThis.createImageBitmap !== "undefined") return;
+
+  Object.defineProperty(globalThis, "createImageBitmap", {
+    value: (): Promise<{ close: () => void }> => Promise.resolve({ close: () => undefined }),
+    writable: true,
+    configurable: true,
+  });
+}
+
+installCreateImageBitmapStub();
 
 // ─── Puerto interno OcrJobPool (ADR-045 §2) — fake estructural para tests ───
 
