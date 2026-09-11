@@ -181,6 +181,25 @@ se mira.
    sea, variación del entorno, no del producto. Con 17,6 % sobre ~2 GB, el ruido
    es de ~345 MB: más grande que varios de los deltas que la atribución busca.
 
+### 7bis. Enmienda (2026-09-12): la corrida caliente espera a que la instancia se asiente
+
+El perfil caliente de §4 —importar, cerrar, importar de nuevo en la misma
+instancia— arranca la segunda importación sin esperar a que la memoria del primer
+documento termine de decaer. Medido sobre 3 corridas de P2: las líneas de base
+calientes fueron 849, 2094 y 2333 MB, y en **2 de las 3** el máximo de todo el run
+caliente cayó **antes de `DOCUMENT_IMPORTED`** — o sea que el "pico" del run no
+tuvo nada que ver con procesar el documento.
+
+Eso contamina las dos métricas: a M1 ya se le conocía (§7), y a **M2** le arruina
+la ubicación del máximo, que es justo lo que la atribución por fase necesita.
+
+La corrida caliente pasa a **esperar a que el RSS se estabilice** antes de
+importar el segundo documento —el mismo criterio con el que §7 toma la línea de
+base: muestrear hasta que la serie deje de bajar, sin forzar GC—, y la línea de
+base caliente se toma de esa ventana estabilizada. Una corrida cuyo máximo caiga
+igual fuera de toda fase se reporta como **inválida**, no se promedia con las
+otras.
+
 ### 8. Qué se corrige en los documentos
 
 `07_Performance_Strategy.md` §1 y §7 dejan de presentar dos números sin

@@ -107,6 +107,27 @@ necesita su propio ADR y una razón que no sea "así entra en el presupuesto".
    > actúan después —este, y la caché de preview de ADR-156, que actúa en el seed
    > posterior a `Ready`— mejoran el sostenido y no el máximo, por más que
    > funcionen.
+   >
+   > **Corregido el 2026-09-12, con las 3 corridas completas.** "El pico está
+   > dentro del OCR" salía de **una** corrida y se sostiene en **1 de 3**. En las
+   > otras dos el máximo del run caliente cae **antes** de que el documento se
+   > importe: es memoria del documento **anterior** que no terminó de decaer
+   > (líneas de base de 2094 y 2333 MB contra 849 del run limpio). No es una
+   > propiedad del producto, es el perfil caliente de ADR-146 §4 arrancando antes
+   > de que la instancia se asiente.
+   >
+   > Dos consecuencias, y la segunda invierte lo que dice el párrafo de arriba:
+   >
+   > 1. Medido **de entrada a pico de la ventana de OCR**, que es la comparación
+   >    limpia, las 3 corridas coinciden: la app crece **+335 a +563 MB** ahí
+   >    adentro. El OCR sigue siendo la fase de mayor crecimiento y el lever 4
+   >    sigue siendo el que apunta ahí.
+   > 2. Pero si el máximo del run caliente resulta ser el residuo del documento
+   >    anterior, entonces **bajar el nivel sostenido sí baja ese pico** — el del
+   >    documento siguiente. O sea que ADR-156 y ADR-157 no son ajenos al máximo
+   >    en el uso real, que es abrir varios documentos en una sesión. Lo que se
+   >    midió como "no bajan el pico" era el pico de un solo documento en una
+   >    instancia recién arrancada.
 
    El texto original: El pool de OCR sobrevive a su etapa por la
    liberación por idle (60 s), así que Tesseract y ONNX conviven durante toda la
@@ -130,6 +151,15 @@ necesita su propio ADR y una razón que no sea "así entra en el presupuesto".
    Salvedad medida: el worker de OCR sigue necesitando un canvas para la rotación
    de ADR-120 y las franjas de margen de ADR-121, así que decodifica una vez. Lo
    que se ahorra es la copia grande cruzando la frontera, no el canvas.
+
+   > **Hallazgo nuevo (2026-09-12), del desglose por proceso**: durante la
+   > ventana de OCR el proceso **GPU crece entre 80 y 216 MB**, consistente en
+   > las 3 corridas, y **ese consumo no está en ninguno de nuestros
+   > presupuestos** — los ~500 MB que sabíamos nombrar (Tesseract 300 + rásters
+   > 209) son todos heap de JS/WASM. Los backing stores de canvas en Chromium
+   > salen por ahí. Es parte de la mitad no explicada, y la tocan este lever y el
+   > 5: menos canvas y canvas más chicos actúan sobre un proceso que hasta hoy no
+   > estábamos contando.
 
 5. **La caché de preview guarda cada página dos veces** (ADR-156): el `ImageData`
    crudo y el codificado, y nadie fuera del motor lee el crudo. Verificado sobre
