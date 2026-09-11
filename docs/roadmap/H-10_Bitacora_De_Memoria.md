@@ -202,4 +202,25 @@ Cinco cosas que costaron rondas y conviene no volver a aprender:
 
 **El intento que cerró la búsqueda**: comparar la pendiente del renderer en la ventana de detección contra la de OCR. No localizó — sobre 17-19 muestras en 2,5-2,8 s, el R² salta de 0,000 a 0,806 entre corridas, que es la firma de ajustar ruido, no una señal débil.
 
+### 7.1 Las tres alternativas abiertas
+
+Anotadas para retomar. Ninguna está tomada; la decisión es del humano (ADR-154 §5).
+
+| Alternativa | Rinde | Cuesta | Estado |
+|---|---|---|---|
+| **A — Actualizar el presupuesto con lo medido** | cierra la brecha por definición: reemplaza una suma de estimaciones de la fase 1 —que omitía el proceso GPU entero— por componentes medidos, y declara el perfil de 50 páginas escaneadas en ~1,8 GB | nada de código; una pasada por `07_Performance_Strategy.md` §7 y su fila de §1 | **Recomendada.** Cierra H-10 y libera al implementador |
+| **B — Reciclar los workers de OCR a mitad del documento** | ~75-100 MB **si** la hipótesis de la marca de agua de Tesseract es correcta; **cero** si no lo es | una recarga de modelo por reciclo (local, ~1-3 s), y drenar el pool en un límite de página. No toca paralelismo ni DPI | Apuesta sobre una hipótesis **no probada**, y sin forma barata de probarla antes |
+| **C — Bajar el DPI de 300 a 200** | **−55 %** del conjunto de trabajo por página; el único lever grande y predecible que queda | calidad de reconocimiento — hay que medir contra la baseline de ADR-147 **antes** de tocar nada, y aceptar o no esa pérdida es decisión del humano | Postergada por preferencia explícita del humano, no descartada |
+
+Lo que **no** está entre las alternativas, y por qué: recortar paralelismo lo prohíbe ADR-154 §1; el lever del canvas que solo crece (ADR-154 §2 lever 5) apunta al proceso GPU, que aporta 75-99 MB y donde la acumulación **no** está (el renderer explica el 73-81 % de la pendiente); y el paralelismo por hilos en vez de workers no aplica acá — ver §7.2.
+
+### 7.2 Por qué los hilos no sirven para el OCR
+
+La idea de paralelizar con **hilos dentro de una sesión** en vez de con **N workers** —una copia de los pesos en vez de N— aparece en ADR-154 §2 lever 1, y es tentador extenderla al OCR, que es donde está el problema. **No aplica**, por dos razones distintas:
+
+1. **Es de NER, y ahí no ahorra memoria.** Medido: `ner-page` da **1** con `nerPoolSize: 2` configurado, porque `processPages` recorre las páginas de a una y los workers se crean por slot. El segundo worker **nunca existe**, así que no hay segunda copia del modelo que eliminar. Lo que los hilos comprarían ahí es **velocidad** —NER no tiene paralelismo por página, §5.4—, no memoria.
+2. **Y no hay equivalente en OCR.** `tesseract.js-core@6.1.2` publica seis builds —`tesseract-core`, `-simd`, `-lstm`, `-simd-lstm` y sus `.wasm.js`— y **ninguno es multihilo**. A diferencia de onnxruntime-web, que sí empaqueta el build con pthreads que la app usa, Tesseract solo paraleliza por instancia. Una instancia por worker, y cada una con su heap.
+
+**Y el peor problema sí es el de OCR**: el pico del run cae dentro de la ventana `OCR_STARTED → OCR_FINISHED`, y es ahí donde se acumulan los 2,4-4,2 MB por página que no se pudieron localizar.
+
 **Y el presupuesto contra el que se mide**: los ~1,6 GB de `07_Performance_Strategy.md` §7 **nunca se midieron, se sumaron** — son estimaciones de componentes de la fase 1, hechas antes de que existiera casi todo. Esta campaña demostró que esa suma **omitía un proceso entero**: el GPU, que aporta 75-99 MB durante el OCR y no figura en ninguna fila. Reemplazarlo por componentes medidos no es correr el arco; es lo que ADR-146 ya hizo al separar M1 de M2. **La decisión de hacerlo, o de aceptar el exceso declarado, es del humano** (ADR-154 §5) y está pendiente.
