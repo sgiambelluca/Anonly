@@ -398,11 +398,12 @@ export interface PdfParsePayload {
 export interface OcrPagePayload {
   readonly documentId: string;
   readonly pageIndex: number;
-  // Errata corregida (ADR-036 §4): era ArrayBuffer, que no transporta
-  // width/height y el OcrWorker no puede reconstruir la imagen. Coincide con
-  // OcrPageInput del motor (03_Data_Model.md §18). Transferencia:
-  // postMessage(msg, [imageData.data.buffer]).
-  readonly imageData: ImageData;
+  // ADR-158 §2: imagen CODIFICADA (PNG), no píxeles crudos. Antes era
+  // `imageData: ImageData` (~35 MB por A4 a 300 dpi) — tesseract.js no acepta
+  // píxeles crudos en ningún formato, así que se reconstruía un canvas del
+  // otro lado y se encodeaba igual. Se CLONA, no se transfiere: el reintento
+  // del pool reusa el buffer (ADR-079/ADR-158 §5).
+  readonly image: EncodedPageImage;
   readonly dpi: number;
   readonly languages: ReadonlyArray<string>;
 }
