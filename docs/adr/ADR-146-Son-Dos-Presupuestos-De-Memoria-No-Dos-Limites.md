@@ -154,10 +154,27 @@ se mira.
    cumpla; un M1 por encima sí demuestra que no cumple. Se reporta como tal.
 2. **M2 es la métrica primaria.** Es una lectura directa del pico, sin resta, y
    por lo tanto no hereda este problema.
-3. **La atribución compara picos entre sí, no restas.** Para saber cuánto cuesta
-   un componente se corren dos configuraciones que solo difieran en él y se
-   comparan sus **M2**, alternando las condiciones corrida por corrida para que
-   la deriva del equipo no se le atribuya a una sola.
+3. **La atribución se hace _dentro_ de una corrida, por fase — no comparando
+   corridas.** Esta regla decía "comparar M2 entre configuraciones, alternando
+   condición por condición". Se probó y **no tiene resolución**: aislando
+   `renderPoolSize` (4 contra 1, alternado, 3 pares) los deltas fueron −83 MB en
+   caliente y +264 MB en frío —direcciones opuestas, cada una consistente 3/3
+   consigo misma— con un ruido de M2 ya medido de ~345 MB. Con n=3, tres de tres
+   en una dirección ocurre una de cada cuatro veces por azar.
+
+   Ningún lever candidato (50-400 MB) es más grande que el ruido entre corridas,
+   así que **restar dos corridas no puede resolverlos**, ni con el doble de
+   repeticiones: bajar el error estándar por debajo de 50 MB pediría del orden de
+   cincuenta corridas por condición.
+
+   En su lugar se usa la **serie temporal por fase de una sola corrida**, que el
+   sampler ya produce y cuyos límites ya están instrumentados (`OCR_STARTED`,
+   `OCR_FINISHED`, `NER_MODEL_READY`, `PIPELINE_READY`…): cuánto sube el RSS
+   durante cada fase, cuánto baja al terminarla y cuál es el máximo dentro de
+   cada una. Es una medición **intra-corrida**, inmune a la deriva entre
+   corridas, y atribuye por etapa —que es lo que se quiere saber— en vez de por
+   configuración. Para que sirva hay que **persistir la serie**, no solo el
+   máximo.
 4. **Solo se comparan corridas de la misma sesión y con el equipo por lo demás
    inactivo.** Medido: la dispersión de M2 pasó de 3,4 % a 17,6 % entre dos
    tandas del mismo perfil, con medias casi idénticas (1968 contra 1955 MB) — o

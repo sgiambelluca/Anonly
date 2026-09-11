@@ -76,14 +76,24 @@ necesita su propio ADR y una razón que no sea "así entra en el presupuesto".
    workers tienen N. La velocidad que se busca la da el paralelismo, no la
    segunda copia.
 
-2. **Cuatro workers de Render, cuatro copias del documento.** Medido en el mismo
-   conteo: `render-page` **sí** alcanza su tamaño de pool (4 con 8 CPUs), y cada
-   worker de Render recibe el documento por el `broadcast` de `load-document`
-   (`reprimeWorkers`, ADR-043 §5), que **no puede transferir** su buffer porque
-   va a N destinos. En un escaneado de 50 páginas eso es el archivo entero
-   clonado cuatro veces, más lo que cada instancia de pdf.js decodifique.
-   Es el sospechoso que la primera atribución le atribuyó a NER por error, y es
-   el primero que hay que aislar.
+2. **Los workers de Render y su estado por instancia.**
+
+   > **Corregido el 2026-09-11, medido.** Este lever decía "cuatro copias del
+   > documento" y ponía ahí el grueso del costo. El fixture de P2 pesa
+   > **1,71 MB**: cuatro clones son **6,9 MB**, tres de más son **5,1 MB**. La
+   > premisa estaba errada por dos órdenes de magnitud, y era mía.
+   >
+   > La medición aislando `renderPoolSize` (4 contra 1, alternando condición
+   > corrida por corrida) dio **−83 MB de promedio en caliente** y **+264 MB en
+   > frío**, cada una consistente 3/3 en su propia dirección y contradictorias
+   > entre sí. Las dos están **por debajo del ruido de M2 ya medido (~345 MB)**,
+   > y 3/3 con n=3 ocurre una de cada cuatro veces por azar. **No hay resultado.**
+
+   Lo que queda en pie del lever no es el archivo sino el **estado por
+   instancia**: cada worker que se crea tiene su canvas y lo que su pdf.js haya
+   decodificado. El orden de magnitud del delta caliente es compatible con eso,
+   pero el instrumento no lo resuelve. Queda como sospechoso **de baja prioridad
+   y sin confirmar**, por detrás de los levers 3 y 4.
 3. **Solapamiento OCR/NER.** El pool de OCR sobrevive a su etapa por la
    liberación por idle (60 s), así que Tesseract y ONNX conviven durante toda la
    detección. Darlo de baja al terminar la etapa de OCR libera un heap entero de
