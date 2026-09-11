@@ -236,10 +236,15 @@ describe("RenderEngine — contract tests", () => {
     await engine.loadDocument(docId, createValidBuffer());
     const emitSpy = vi.spyOn(ctx.bus, "emit");
 
-    const imageData = await engine.rasterizePage(docId, 0, 2, ctx);
+    // ADR-158 §1: rasterizePage ahora devuelve EncodedPageImage (PNG), no
+    // ImageData pelado — el nombre del test se conserva (Render_Engine.md
+    // §14), solo cambia la forma que se asertea.
+    const encoded = await engine.rasterizePage(docId, 0, 2, ctx);
 
-    expect(imageData.width).toBe(400); // 200 * scale(2)
-    expect(imageData.height).toBe(600);
+    expect(encoded.format).toBe("png");
+    expect(encoded.widthPx).toBe(400); // 200 * scale(2)
+    expect(encoded.heightPx).toBe(600);
+    expect(encoded.bytes.byteLength).toBeGreaterThan(0);
     expect(emitSpy).not.toHaveBeenCalled();
     expect(engine["cache"].size).toBe(0);
   });

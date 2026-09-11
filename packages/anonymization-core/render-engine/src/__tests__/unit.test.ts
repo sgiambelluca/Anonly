@@ -538,12 +538,17 @@ describe("RenderEngine — unit tests", () => {
     await engine.loadDocument(docId, createValidBuffer());
 
     const region = { x: 20, y: 30, width: 50, height: 40 };
-    const imageData = await engine.rasterizePage(docId, 0, 2, ctx, region);
+    // ADR-158 §1: EncodedPageImage — `widthPx`/`heightPx` en vez de `width`/`height`.
+    const encoded = await engine.rasterizePage(docId, 0, 2, ctx, region);
 
     // tamaño = region × scale (Render_Engine.md §13 caso 30).
-    expect(imageData.width).toBe(100); // 50 * scale(2)
-    expect(imageData.height).toBe(80); // 40 * scale(2)
+    expect(encoded.format).toBe("png");
+    expect(encoded.widthPx).toBe(100); // 50 * scale(2)
+    expect(encoded.heightPx).toBe(80); // 40 * scale(2)
 
+    // El primer canvas creado sigue siendo el de la página completa (el
+    // recorte se extrae de ahí con getImageData antes de codificarse aparte
+    // en un segundo canvas, ADR-158 §1).
     const [canvas] = getCreatedCanvases();
     const getImageDataCall = canvas?.calls.find((call) => call.op === "getImageData");
     expect(getImageDataCall?.args).toEqual([40, 60, 100, 80]); // region.x/y/width/height * scale
@@ -564,14 +569,19 @@ describe("RenderEngine — unit tests", () => {
 
     // Garantía de no regresión (ADR-065 §5): sin `region`, el flujo OCR de
     // páginas textless que ya usa `rasterizePage` no se toca.
-    const imageData = await engine.rasterizePage(docId, 0, 2, ctx);
+    const encoded = await engine.rasterizePage(docId, 0, 2, ctx);
 
-    expect(imageData.width).toBe(400); // 200 * scale(2), página entera
-    expect(imageData.height).toBe(600);
+    expect(encoded.format).toBe("png");
+    expect(encoded.widthPx).toBe(400); // 200 * scale(2), página entera
+    expect(encoded.heightPx).toBe(600);
 
+    // ADR-158 §1: sin `region`, el kernel codifica el canvas directo
+    // (`convertToBlob`) — nunca pasa por `getImageData`/`putImageData`, así
+    // que sigue habiendo un único canvas, del tamaño de la página completa.
     const [canvas] = getCreatedCanvases();
-    const getImageDataCall = canvas?.calls.find((call) => call.op === "getImageData");
-    expect(getImageDataCall?.args).toEqual([0, 0, 400, 600]); // sin recorte
+    expect(canvas?.width).toBe(400);
+    expect(canvas?.height).toBe(600);
+    expect(canvas?.calls.some((call) => call.op === "getImageData")).toBe(false);
   });
 
   // ─── ADR-050 §2 + ADR-043 §5 (Hito 10, PR17.4): re-priming con password ───
@@ -726,48 +736,43 @@ describe("RenderEngine — unit tests", () => {
       await pooledEngine.dispose();
     });
 
-    it("rasterizePage decodes the bare COMPLETED.result posted by worker/entry.ts for rasterize (ImageData pelado, ADR-055 §2)", async () => {
-      const remoteImageData = {
-        data: new Uint8ClampedArray(8),
-        width: 2,
-        height: 1,
-        colorSpace: "srgb",
+    it("rasterizePage decodes the bare COMPLETED.result posted by worker/entry.ts for rasterize (EncodedPageImage pelado, ADR-158 §1/ADR-055 §2)", async () => {
+      const remoteEncodedImage = {
+        bytes: new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]).buffer,
+        format: "png",
+        widthPx: 2,
+        heightPx: 1,
       };
-      const pool = createResolvedRenderDispatchPool(remoteImageData);
+      const pool = createResolvedRenderDispatchPool(remoteEncodedImage);
       const pooledEngine = new RenderEngine(pool);
       await pooledEngine.init(ctx);
       await pooledEngine.loadDocument("doc-envelope-rasterize", createValidBuffer());
 
-      const imageData = await pooledEngine.rasterizePage("doc-envelope-rasterize", 0, 1, ctx);
+      const encoded = await pooledEngine.rasterizePage("doc-envelope-rasterize", 0, 1, ctx);
 
-      expect(imageData).toBe(remoteImageData);
+      expect(encoded).toBe(remoteEncodedImage);
 
       await pooledEngine.dispose();
     });
 
     it("rasterizePage decodes the identical in-process shape (parity, ADR-055 §2)", async () => {
       // Mismo razonamiento que el par de tests de renderPage arriba:
-      // kernelRasterizePage produce la misma forma ImageData pelada en
-      // ambos caminos.
-      const inProcessImageData = {
-        data: new Uint8ClampedArray(8),
-        width: 2,
-        height: 1,
-        colorSpace: "srgb",
+      // kernelRasterizePage produce la misma forma EncodedPageImage pelada
+      // (ADR-158 §1) en ambos caminos.
+      const inProcessEncodedImage = {
+        bytes: new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]).buffer,
+        format: "png",
+        widthPx: 2,
+        heightPx: 1,
       };
-      const pool = createResolvedRenderDispatchPool(inProcessImageData);
+      const pool = createResolvedRenderDispatchPool(inProcessEncodedImage);
       const pooledEngine = new RenderEngine(pool);
       await pooledEngine.init(ctx);
       await pooledEngine.loadDocument("doc-envelope-parity-rasterize", createValidBuffer());
 
-      const imageData = await pooledEngine.rasterizePage(
-        "doc-envelope-parity-rasterize",
-        0,
-        1,
-        ctx,
-      );
+      const encoded = await pooledEngine.rasterizePage("doc-envelope-parity-rasterize", 0, 1, ctx);
 
-      expect(imageData).toBe(inProcessImageData);
+      expect(encoded).toBe(inProcessEncodedImage);
 
       await pooledEngine.dispose();
     });
@@ -2670,8 +2675,13 @@ describe("RenderEngine — unit tests", () => {
         payload: rasterizePayload,
       });
       await vi.waitFor(() => expect(outboundOfType(fakeSelf, "COMPLETED")).toBeDefined());
-      const rasterizeResult = outboundOfType(fakeSelf, "COMPLETED")?.result as ImageData;
-      expect(rasterizeResult.width).toBe(50);
+      // ADR-158 §1: kernelRasterizePage devuelve EncodedPageImage, no ImageData.
+      const rasterizeResult = outboundOfType(fakeSelf, "COMPLETED")?.result as {
+        readonly widthPx: number;
+        readonly format: string;
+      };
+      expect(rasterizeResult.widthPx).toBe(50);
+      expect(rasterizeResult.format).toBe("png");
       fakeSelf.postMessage.mockClear();
 
       // 5) sin ninguno de los 4 campos -> unload (fallback, único de los 5

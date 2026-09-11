@@ -507,9 +507,11 @@ function decodeKernelRenderResult(
 
 /**
  * Decodifica el resultado de `pool.dispatch` en `rasterizePage` (operación
- * 2/4): única forma legítima, `ImageData` pelado
- * (`worker/kernel.ts#kernelRasterizePage`) — mismo razonamiento de paridad
- * remoto/in-process que `decodeKernelRenderResult`.
+ * 2/4): única forma legítima, `EncodedPageImage` pelado
+ * (`worker/kernel.ts#kernelRasterizePage`) — reusa el guard
+ * `isEncodedPageImage` ya definido para `decodeKernelRenderResult`, mismo
+ * razonamiento de paridad remoto/in-process (ADR-158 §1: antes de este ADR
+ * la única forma legítima era `ImageData` pelado).
  *
  * Mismo mapeo de clase que arriba y por el mismo motivo (spec §6: "Fallo de
  * pdfjs/canvas → RenderPageFailedError (retryable)"): `RenderPageFailedError`,
@@ -523,13 +525,13 @@ function decodeRasterizeResult(
   dispatchResult: unknown,
   documentId: string,
   pageIndex: number,
-): ImageData {
-  if (isImageData(dispatchResult)) return dispatchResult;
+): EncodedPageImage {
+  if (isEncodedPageImage(dispatchResult)) return dispatchResult;
   throw new RenderPageFailedError(
     documentId,
     pageIndex,
     "RenderJobPool.dispatch() resolvió con una forma no reconocida: se esperaba " +
-      "ImageData pelado (worker/kernel.ts#kernelRasterizePage) — misma forma en " +
+      "EncodedPageImage pelado (worker/kernel.ts#kernelRasterizePage) — misma forma en " +
       "el camino remoto y en el in-process (ADR-055 §2). Devolver un default en " +
       `silencio está prohibido (ADR-055 §3). Forma recibida: ${describeDispatchResultShape(dispatchResult)}.`,
   );
@@ -1319,10 +1321,15 @@ export class RenderEngine implements IEngine {
   }
 
   /**
-   * Rasterización pura de una página a `ImageData`, sin reemplazos ni
-   * highlights (ADR-034 §1): alimenta el OCR desde el Orchestrator, que no
-   * puede importar pdfjs. No emite eventos (ni `PREVIEW_UPDATED`) ni toca el
-   * cache LRU de previews.
+   * Rasterización pura de una página, sin reemplazos ni highlights (ADR-034
+   * §1): alimenta el OCR desde el Orchestrator, que no puede importar pdfjs.
+   * No emite eventos (ni `PREVIEW_UPDATED`) ni toca el cache LRU de previews.
+   *
+   * ADR-158 §1: devuelve `EncodedPageImage` (PNG, sin pérdida) en vez de
+   * `ImageData` pelado — el `convertToBlob` se hace del lado donde el canvas
+   * ya existe (el kernel), así que el consumidor recibe unos pocos MB
+   * codificados en vez de ~35 MB de píxeles crudos cruzando el boundary del
+   * worker.
    *
    * `region` opcional (ADR-065 §5): recorte en PUNTOS de página. Este método
    * no la valida/clampea — no tiene las dimensiones de página en puntos
@@ -1338,7 +1345,7 @@ export class RenderEngine implements IEngine {
     scale: number,
     ctx: EngineContext,
     region?: BoundingBox,
-  ): Promise<ImageData> {
+  ): Promise<EncodedPageImage> {
     this.assertNotDisposed();
     this.assertInitialized();
 
@@ -1394,7 +1401,7 @@ export class RenderEngine implements IEngine {
       maxRetriesOverride: 0,
     });
     // ADR-055 §2: idem renderPageInternal — decodeRasterizeResult antes de
-    // devolver el ImageData al caller (nunca un cast a ciegas).
+    // devolver el EncodedPageImage al caller (nunca un cast a ciegas).
     return decodeRasterizeResult(dispatchResult, documentId, pageIndex);
   }
 

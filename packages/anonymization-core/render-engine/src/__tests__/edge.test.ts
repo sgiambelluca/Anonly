@@ -800,10 +800,12 @@ describe("RenderEngine — edge cases", () => {
     // Página 100x100pt, scale 1: [80,80]-[130,130] excede el borde
     // derecho/inferior y se clampea a [80,80]-[100,100] -> 20x20.
     const region = { x: 80, y: 80, width: 50, height: 50 };
-    const imageData = await engine.rasterizePage(docId, 0, 1, ctx, region);
+    // ADR-158 §1: EncodedPageImage, no ImageData — `widthPx`/`heightPx` en
+    // vez de `width`/`height`.
+    const encoded = await engine.rasterizePage(docId, 0, 1, ctx, region);
 
-    expect(imageData.width).toBe(20);
-    expect(imageData.height).toBe(20);
+    expect(encoded.widthPx).toBe(20);
+    expect(encoded.heightPx).toBe(20);
   });
 
   it("rasterizePage throws InvalidInputError on an empty region", async () => {
@@ -1438,11 +1440,11 @@ describe("RenderEngine — edge cases", () => {
       }
     });
 
-    it("rasterizePage throws even when the malformed shape would NOT crash a blind destructure (ImageData without height, ADR-055 §3)", async () => {
+    it("rasterizePage throws even when the malformed shape would NOT crash a blind destructure (EncodedPageImage without heightPx, ADR-055 §3)", async () => {
       const pool = createResolvedRenderDispatchPool({
-        data: new Uint8ClampedArray(4),
-        width: 2,
-        colorSpace: "srgb",
+        bytes: new ArrayBuffer(4),
+        format: "png",
+        widthPx: 2,
       });
       const pooledEngine = new RenderEngine(pool);
       await pooledEngine.init(ctx);

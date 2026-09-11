@@ -197,9 +197,11 @@ describe("RenderWorker entry-point (ADR-043 §4)", () => {
     await vi.waitFor(() => expect(outboundOfType(fakeSelf, "COMPLETED")).toBeDefined());
     const completed = outboundOfType(fakeSelf, "COMPLETED");
     expect(completed?.jobId).toBe("job-rasterize");
-    const imageData = completed?.result as ImageData;
-    expect(imageData.width).toBe(100); // 50 * scale(2)
-    expect(imageData.height).toBe(120); // 60 * scale(2)
+    // ADR-158 §1: kernelRasterizePage devuelve EncodedPageImage, no ImageData.
+    const result = completed?.result as { format: string; widthPx: number; heightPx: number };
+    expect(result.format).toBe("png");
+    expect(result.widthPx).toBe(100); // 50 * scale(2)
+    expect(result.heightPx).toBe(120); // 60 * scale(2)
   });
 
   it('RUN("render-page") con payload sin "buffer"/"kind"/"pageIndex" despacha unload (idempotente)', async () => {
