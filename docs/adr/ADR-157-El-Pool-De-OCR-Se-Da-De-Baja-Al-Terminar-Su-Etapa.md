@@ -150,10 +150,29 @@ de ese orden sería esperar indefinidamente.
 
 ## Consecuencias
 
+> **Medido el 2026-09-11, con el cambio ya implementado.** En las tres corridas
+> calientes de P2 aparece, inmediatamente después de `OCR_FINISHED`, una caída de
+> **702 a 1009 MB** que antes de este cambio no existía (la corrida previa daba
+> ~0, plana). El mecanismo funciona, y **rinde más del triple** de los ~300 MB
+> que §1 estimaba: además del heap de Tesseract se va todo lo que quedaba
+> alcanzable desde sus workers.
+>
+> **Pero no baja M2**, y hay que corregir lo que este ADR afirmaba: el pico del
+> run coincide con el pico **interno** del tramo `OCR_STARTED → OCR_FINISHED`. El
+> máximo ya ocurrió cuando esta baja se dispara, así que liberar después no puede
+> bajarlo. Lo que esta decisión mejora es el **nivel sostenido** durante la
+> detección y el que queda después, no el pico.
+>
+> Consecuencia para ADR-154: la convivencia OCR/NER **nunca fue** lo que fijaba
+> el pico. El lever sigue valiendo —700 a 1000 MB de holgura para que NER trabaje
+> y para el que abre varios documentos seguidos— pero deja de ser el candidato a
+> cerrar la brecha contra el presupuesto.
+
 **A favor**
 
-- Saca del pico la convivencia de los dos motores, que es el único lever con
-  magnitud predicha (~300 MB) por encima del ruido del instrumento.
+- Devuelve entre **702 y 1009 MB** apenas termina la etapa, medido en 3 de 3
+  corridas calientes. Es holgura real para la detección y para el documento
+  siguiente.
 - Usa un mecanismo que ya existe y ya está probado (ADR-080), en vez de agregar
   uno nuevo.
 - Da un orden garantizado en vez de una carrera contra un temporizador.

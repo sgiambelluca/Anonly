@@ -94,7 +94,21 @@ necesita su propio ADR y una razón que no sea "así entra en el presupuesto".
    decodificado. El orden de magnitud del delta caliente es compatible con eso,
    pero el instrumento no lo resuelve. Queda como sospechoso **de baja prioridad
    y sin confirmar**, por detrás de los levers 3 y 4.
-3. **Solapamiento OCR/NER.** El pool de OCR sobrevive a su etapa por la
+3. **Solapamiento OCR/NER** (ADR-157, implementado).
+
+   > **Medido el 2026-09-11**: rinde **702-1009 MB**, el triple de lo estimado —
+   > pero **no baja el pico**, porque el pico del run ocurre *dentro* de la etapa
+   > de OCR, antes de que la baja se dispare. Lo que mejora es el nivel sostenido
+   > durante la detección y el que queda después. El solapamiento nunca fue lo
+   > que fijaba el máximo.
+   >
+   > De ahí sale el reordenamiento de esta lista: **lo único que puede bajar el
+   > pico es lo que actúa durante la etapa de OCR**, o sea el lever 4. Los que
+   > actúan después —este, y la caché de preview de ADR-156, que actúa en el seed
+   > posterior a `Ready`— mejoran el sostenido y no el máximo, por más que
+   > funcionen.
+
+   El texto original: El pool de OCR sobrevive a su etapa por la
    liberación por idle (60 s), así que Tesseract y ONNX conviven durante toda la
    detección. Darlo de baja al terminar la etapa de OCR libera un heap entero de
    WASM —la única forma real de recuperarlo— sin quitarle un solo worker a nadie.
