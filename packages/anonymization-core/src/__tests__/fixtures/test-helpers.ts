@@ -34,6 +34,7 @@ import {
   ReplacementMode,
   type Document,
   type DocumentMetadata,
+  type EncodedPageImage,
   type EngineConfig,
   type EngineContext,
   type EntityGroup,
@@ -188,6 +189,11 @@ export function createImageData(width = 10, height = 10): ImageData {
   return { data: new Uint8ClampedArray(width * height * 4), width, height, colorSpace: "srgb" };
 }
 
+/** ADR-158 §1: lo que `RenderEngine.rasterizePage` devuelve — PNG, no `ImageData` crudo. */
+export function createEncodedPageImage(widthPx = 10, heightPx = 10): EncodedPageImage {
+  return { bytes: new ArrayBuffer(0), format: "png", widthPx, heightPx };
+}
+
 export function createEntityGroup(overrides?: Partial<EntityGroup>): EntityGroup {
   return {
     id: "group-1",
@@ -324,7 +330,7 @@ export function wireHappyPathSpies(
 
   vi.spyOn(engines.render, "loadDocument").mockResolvedValue(undefined);
   vi.spyOn(engines.render, "unloadDocument").mockResolvedValue(undefined);
-  vi.spyOn(engines.render, "rasterizePage").mockResolvedValue(createImageData());
+  vi.spyOn(engines.render, "rasterizePage").mockResolvedValue(createEncodedPageImage());
   vi.spyOn(engines.render, "renderPage").mockImplementation((input) =>
     Promise.resolve(
       createRenderPageOutput({ documentId: input.documentId, pageIndex: input.pageIndex, kind: input.kind }),
@@ -391,7 +397,7 @@ export async function makeOrchestratorWithRealDetection(pdfOutput?: PdfEngineOut
   vi.spyOn(engines.ner, "dispose").mockResolvedValue(undefined);
   vi.spyOn(engines.render, "loadDocument").mockResolvedValue(undefined);
   vi.spyOn(engines.render, "unloadDocument").mockResolvedValue(undefined);
-  vi.spyOn(engines.render, "rasterizePage").mockResolvedValue(createImageData());
+  vi.spyOn(engines.render, "rasterizePage").mockResolvedValue(createEncodedPageImage());
   vi.spyOn(engines.render, "renderPage").mockImplementation((input) =>
     Promise.resolve(
       createRenderPageOutput({

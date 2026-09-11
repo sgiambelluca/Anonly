@@ -1892,18 +1892,19 @@ describe("Orchestrator — unit tests", () => {
       const r2 = engine.rasterizePage("doc-a", 1, 1, ctx);
       await vi.waitFor(() => expect(workerB.postMessage).toHaveBeenCalledTimes(1));
 
-      const fakeImageData = {
-        data: new Uint8ClampedArray(4),
-        width: 1,
-        height: 1,
-        colorSpace: "srgb",
+      // ADR-158 §1: rasterizePage devuelve EncodedPageImage (PNG), no ImageData crudo.
+      const fakeEncodedImage = {
+        bytes: new ArrayBuffer(0),
+        format: "png",
+        widthPx: 1,
+        heightPx: 1,
       };
       const rasterJobIdA = (workerA.postMessage.mock.calls[0]?.[0] as { readonly jobId: string })
         .jobId;
       const rasterJobIdB = (workerB.postMessage.mock.calls[0]?.[0] as { readonly jobId: string })
         .jobId;
-      workerA.emitMessage({ type: "COMPLETED", jobId: rasterJobIdA, result: fakeImageData });
-      workerB.emitMessage({ type: "COMPLETED", jobId: rasterJobIdB, result: fakeImageData });
+      workerA.emitMessage({ type: "COMPLETED", jobId: rasterJobIdA, result: fakeEncodedImage });
+      workerB.emitMessage({ type: "COMPLETED", jobId: rasterJobIdB, result: fakeEncodedImage });
       await Promise.all([r1, r2]);
 
       // Ahora sí: unloadDocument (lo que closeDocument()/DOCUMENT_CLOSED
@@ -2012,14 +2013,19 @@ describe("Orchestrator — unit tests", () => {
         expect.objectContaining({ documentId: "doc-a", pageIndex: 0 }),
       );
 
-      const fakeImageData = {
-        data: new Uint8ClampedArray(4),
-        width: 1,
-        height: 1,
-        colorSpace: "srgb",
+      // ADR-158 §1: rasterizePage devuelve EncodedPageImage (PNG), no ImageData crudo.
+      const fakeEncodedImage = {
+        bytes: new ArrayBuffer(0),
+        format: "png",
+        widthPx: 1,
+        heightPx: 1,
       };
-      workerB.emitMessage({ type: "COMPLETED", jobId: secondMsgToB.jobId, result: fakeImageData });
-      await expect(rasterizePromise).resolves.toEqual(fakeImageData);
+      workerB.emitMessage({
+        type: "COMPLETED",
+        jobId: secondMsgToB.jobId,
+        result: fakeEncodedImage,
+      });
+      await expect(rasterizePromise).resolves.toEqual(fakeEncodedImage);
     });
   });
 
