@@ -315,6 +315,7 @@ describe("OcrEngine — edge case tests", () => {
           }
           return params.run();
         },
+        releaseIdleWorkers: (): void => undefined,
       };
       const pooledEngine = new OcrEngine(pool);
       await pooledEngine.init(ctx);

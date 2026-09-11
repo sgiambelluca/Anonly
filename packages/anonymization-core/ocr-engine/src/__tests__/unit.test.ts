@@ -28,6 +28,7 @@ import {
   createEngineContext,
   createMockConfig,
   createResolvedOcrPool,
+  createTrackingOcrPool,
   createImageData,
   createValidOcrPageInput,
   createValidOcrPageRequest,
@@ -831,6 +832,39 @@ describe("OcrEngine — unit tests", () => {
       expect(output.confidence).toBe(0.42);
 
       await pooledEngine.dispose();
+    });
+  });
+
+  // ─── ADR-157 §1bis: releaseIdleWorkers ───
+
+  describe("releaseIdleWorkers (ADR-157 §1bis)", () => {
+    it("delegates to the injected pool's own releaseIdleWorkers", async () => {
+      const pool = createTrackingOcrPool();
+      const pooledEngine = new OcrEngine(pool);
+      await pooledEngine.init(ctx);
+
+      pooledEngine.releaseIdleWorkers();
+
+      expect(pool.releaseIdleWorkersCallCount()).toBe(1);
+
+      await pooledEngine.dispose();
+    });
+
+    it("without a real pool (in-process fallback), is a harmless no-op", async () => {
+      // IMMEDIATE_POOL (sin workerFactory real): no hay ningún WorkerLike que
+      // terminar. No debe lanzar ni dejar al motor en un estado inconsistente
+      // — sigue procesando después de llamarlo.
+      const inProcessEngine = new OcrEngine();
+      await inProcessEngine.init(ctx);
+
+      expect(() => inProcessEngine.releaseIdleWorkers()).not.toThrow();
+
+      vi.mocked(createWorker).mockResolvedValue(mockTesseractWorker(mockRecognizeData([]), {}));
+      await expect(
+        inProcessEngine.processPage(createValidOcrPageInput("doc-after-release", 0), ctx),
+      ).resolves.toBeDefined();
+
+      await inProcessEngine.dispose();
     });
   });
 

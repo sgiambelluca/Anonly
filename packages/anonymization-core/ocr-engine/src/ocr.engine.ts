@@ -143,6 +143,13 @@ interface OcrDispatchParams {
 
 interface OcrJobPool {
   dispatch(params: OcrDispatchParams): Promise<unknown>;
+  /**
+   * ADR-157 §1bis: termina los workers vivos del pool sin disponerlo — el
+   * pool sigue usable, el próximo `dispatch` lo reconstruye perezoso
+   * (ADR-080). Espejo exacto de `WorkerPool.releaseIdleWorkers()`, mismo
+   * nombre y misma guarda (no hace nada si el pool no está ocioso).
+   */
+  releaseIdleWorkers(): void;
 }
 
 /**
@@ -159,6 +166,8 @@ interface OcrJobPool {
  */
 const IMMEDIATE_POOL: OcrJobPool = {
   dispatch: (params: OcrDispatchParams): Promise<unknown> => params.run(),
+  // Sin pool real no hay ningún `WorkerLike` que terminar — no-op inocuo.
+  releaseIdleWorkers: (): void => undefined,
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -751,6 +760,26 @@ export class OcrEngine implements IEngine {
     };
 
     return this.processSession(requests, produce, ctx);
+  }
+
+  /**
+   * ADR-157 §1bis: da de baja los workers vivos del `OcrPool` sin disponer
+   * el motor — no terminal, a diferencia de `dispose()`. El único caller es
+   * `Orchestrator.runOcrStage`, al terminar la etapa: retener Tesseract
+   * (~300 MB) durante toda la detección posterior (NER) no se justifica
+   * cuando OCR ya no tiene trabajo, y el idle-dispose de ADR-080 (60 s)
+   * llega tarde para este pool — transcurre justo durante esa detección.
+   *
+   * Delega en `this.pool.releaseIdleWorkers()`, que trae su propia guarda
+   * (`WorkerPool`, ADR-080): no hace nada si el pool no está ocioso —
+   * `terminate()` no dispara `error`, así que matar un worker con un job en
+   * vuelo dejaría esa promesa colgada para siempre. El pool sigue usable
+   * después: el próximo `processPage`/`processSession` (p. ej. un
+   * `reanalyze` que cambie `ocr.languages`) lo reconstruye perezoso,
+   * pagando la recarga del modelo como costo declarado.
+   */
+  releaseIdleWorkers(): void {
+    this.pool.releaseIdleWorkers();
   }
 
   async dispose(): Promise<void> {

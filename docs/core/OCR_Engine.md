@@ -5,9 +5,11 @@
 > Ejecuta OCR sobre las páginas sin texto del PDF. Solo corre si `PdfEngineOutput.textlessPages.length > 0`. Devuelve `Word[]` con `BoundingBox` y `confidence` que el PDF Engine fusiona.
 
 **EngineId**: `ocr`
-**Versión del spec**: 1.9.0
-**Última actualización**: 2026-09-09
+**Versión del spec**: 1.10.0
+**Última actualización**: 2026-09-11
 
+> **Nota (v1.10.0, ADR-157 §1bis, 2026-09-11 — el motor expone la baja de su propio pool)**: `runOcrStage` necesita dar de baja el `OcrPool` al terminar la etapa (ADR-157 §1) para no dejar Tesseract (~300 MB) residente durante toda la detección, pero desde ADR-045 el Orchestrator **no tiene ninguna referencia** a ese pool — lo construye `create-core.ts` y se inyecta directo en el constructor del motor. `OcrEngine` gana `releaseIdleWorkers(): void` (§6), que delega en su pool privado — mismo nombre que `WorkerPool.releaseIdleWorkers()` (ADR-080) a propósito: la semántica es idéntica, incluida su guarda (`§1ter` del ADR: no hace nada si el pool no está ocioso — un worker con un job en vuelo no se termina nunca, porque `terminate()` no dispara `error` y la promesa de ese job quedaría colgada para siempre). **No se agrega a `IEngine`**: es específico de este motor, sin equivalente en NER (ADR-157 §4) ni en los demás. No hay tipo, evento ni error code nuevo — es superficie de la interfaz pública de este motor, y por eso va acá y no en `Contracts.md`. Ver §6.
+>
 > **Nota (v1.9.0, ADR-143, 2026-09-09 — las imágenes de OCR se producen cuando hay lugar)**: `Orchestrator.runOcrStage` rasterizaba **todo** el documento antes de llamar a `processPages` — 50 páginas A4 a 300 dpi son 1,74 GB de `ImageData` vivos antes de que Tesseract lea la primera. `processSession` (§6) es la entrada nueva: recibe descriptores livianos (`OcrPageRequest`, sin imagen) y un productor (`OcrImageProducer`) que el façade implementa llamando a `RenderEngine.rasterizePage` host-side — la función nunca cruza un `postMessage` y no entra en `EngineConfig`. Cada uno de los `C = min(ocrPoolSize, requests.length)` consumidores reserva presupuesto (`ocr.maxLiveImageBytes`, campo nuevo de `OcrConfig`, default 128 MiB) **antes** de pedir su imagen, la procesa y suelta la reserva recién cuando la página se asienta — el pico de imágenes vivas pasa a depender de `C`, no del largo del documento. Un descriptor cuyo `estimatedBytes` solo supera el presupuesto falla con `OCR_PAGE_FAILED` (§11, §13 caso 17): no se baja el DPI ni se recorta en silencio. Un fallo del productor (Render) recibe el mismo tratamiento, con el `code` del error original en `details` (§13 caso 18). `processPages` se **conserva** con su firma y semántica actuales — pasa a ser el caso particular cuyo productor devuelve la imagen que el caller ya tenía en memoria, con `estimatedBytes: 0` porque no hay nada que reservar; ningún consumidor existente cambia (los 108 tests previos de este paquete pasan sin tocar). `OCR_STARTED`/`OCR_FINISHED` siguen siendo una sesión, no un evento por minilote — eso no cambia, solo de dónde sale la imagen de cada página. Ver §6, §9, §11, §13 casos 17-18, §14 y §15 item 29.
 
 > **Nota (v1.8.1, 2026-09-03 — errata de mirror: ADR-119 dejó al reconocimiento sin su core; sin ADR propio, es un pin que faltó)**: ADR-119 §1 le sacó `legacyCore` al worker principal —correcto, ese worker ya no detecta—, pero nadie tocó `assets.lock.json`, que desde ADR-090 §1 mirrorea **solo** los cores completos. tesseract.js elige el archivo dentro de `corePath` por `lstmOnly`, que sale de `[OEM.DEFAULT, OEM.LSTM_ONLY].includes(oem) && !options.legacyCore` (`createWorker.js:36`) y en el worker principal vale `true`: pide `tesseract-core-simd-lstm.wasm.js`, que **ya no está mirroreado**. `importScripts` da 404, `createWorker` rechaza y **toda página escaneada** muere con `OcrModelMissingError` — mismo modo de falla que la errata v1.2.1, y otra vez con el pipeline llegando al final (ahora con el aviso de análisis incompleto, no en silencio). La regla queda: **los dos workers eligen distinto, así que el mirror lleva los cuatro cores** — `tesseract-core[-simd]-lstm` para reconocer, `tesseract-core[-simd]` para OSD. Es exactamente la alternativa que ADR-090 descartó por *"duplica lo mirroreado sin ningún caso que lo pida"*: ADR-119 creó el caso. Cuesta +7,9 MB **en el mirror**; el usuario sigue bajando **dos** cores, uno por worker. El único gate que lo ve es el Escenario 2 E2E, que es el único que corre Tesseract de verdad: los `vi.mock("tesseract.js", …)` no bajan archivos. Fix: `assets.lock.json`, item §15.27.
@@ -156,6 +158,13 @@ export class OcrEngine implements IEngine {
     produce: OcrImageProducer,
     ctx: EngineContext,
   ): Promise<ReadonlyArray<OcrPageOutput>>;
+  // ADR-157 §1bis: da de baja los workers vivos del pool interno — no
+  // terminal, el pool sigue usable (el próximo dispatch lo reconstruye
+  // perezoso, ADR-080). Delega en `WorkerPool.releaseIdleWorkers()`, mismo
+  // nombre y misma guarda: no hace nada si el pool no está ocioso (un job
+  // en vuelo no se interrumpe). Único caller: `Orchestrator.runOcrStage`,
+  // al terminar la etapa.
+  releaseIdleWorkers(): void;
   dispose(): Promise<void>;
 }
 ```
@@ -307,6 +316,8 @@ OcrPageOutput {
 17. **`estimatedBytes` de un `OcrPageRequest` supera `ocr.maxLiveImageBytes` por sí solo** (ADR-143 §4): `processSession` falla esa página con `OcrPageFailedError`/`OCR_PAGE_FAILED` **sin llamar a `produce`** — nunca baja el DPI ni recorta la página en silencio. La sesión continúa con los demás descriptores; `OCR_STARTED`/`OCR_FINISHED` no cambian.
 
 18. **Fallo del productor (Render) en `processSession`** (ADR-143 §4): recibe el **mismo tratamiento** que un fallo de página — `OcrPageFailedError`/`OCR_PAGE_FAILED`, con el `code` del error original en `details.originalCode` — y la sesión continúa con las demás. OCR no reintenta la producción por su cuenta: el retry del pool de Render ya corrió. Una `CancelledError` del productor se propaga tal cual, sin envolver.
+
+19. **`releaseIdleWorkers()` con el pool ocioso** (ADR-157 §1bis): termina los `WorkerLike` vivos del pool interno. No es `dispose()` — el motor sigue usable, y el próximo `processPage`/`processSession` reconstruye el worker perezoso (ADR-080), pagando la recarga del modelo de Tesseract. **Con el pool NO ocioso** (un job todavía en vuelo): no hace nada (guarda de `WorkerPool.releaseIdleWorkers()`, `§1ter` del ADR) — `terminate()` no dispara `error`, así que matar un worker con un job pendiente dejaría esa promesa colgada para siempre. Sin `workerFactory` (fallback in-process): no hay ningún `WorkerLike` que terminar, así que es un no-op inocuo en los dos casos.
 
 ---
 

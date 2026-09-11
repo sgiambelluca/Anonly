@@ -300,6 +300,8 @@ export interface OcrDispatchCall {
 export interface TrackingOcrPool {
   readonly dispatch: <T>(params: OcrPoolDispatchParams<T>) => Promise<T>;
   readonly calls: OcrDispatchCall[];
+  readonly releaseIdleWorkers: () => void;
+  readonly releaseIdleWorkersCallCount: () => number;
 }
 
 /**
@@ -314,12 +316,22 @@ export interface TrackingOcrPool {
  */
 export function createTrackingOcrPool(): TrackingOcrPool {
   const calls: OcrDispatchCall[] = [];
+  let releaseIdleWorkersCalls = 0;
   return {
     calls,
     dispatch: <T>(params: OcrPoolDispatchParams<T>): Promise<T> => {
       calls.push({ payload: params.payload, maxRetriesOverride: params.maxRetriesOverride });
       return params.run();
     },
+    // ADR-157 §1bis: cuenta las llamadas en vez de simular la guarda de
+    // ociosidad real de `WorkerPool` — esa guarda ya la prueba
+    // `worker-pool.test.ts`/`unit.test.ts` de `packages/anonymization-core/src`
+    // (`releaseIdleWorkers es no-op si el pool NO está ocioso`); acá solo
+    // hace falta confirmar que `OcrEngine.releaseIdleWorkers()` delega.
+    releaseIdleWorkers: (): void => {
+      releaseIdleWorkersCalls += 1;
+    },
+    releaseIdleWorkersCallCount: (): number => releaseIdleWorkersCalls,
   };
 }
 
@@ -336,9 +348,11 @@ export function createTrackingOcrPool(): TrackingOcrPool {
  */
 export function createResolvedOcrPool(resolvedValue: unknown): {
   readonly dispatch: (params: OcrPoolDispatchParams<unknown>) => Promise<unknown>;
+  readonly releaseIdleWorkers: () => void;
 } {
   return {
     dispatch: (): Promise<unknown> => Promise.resolve(resolvedValue),
+    releaseIdleWorkers: (): void => undefined,
   };
 }
 
