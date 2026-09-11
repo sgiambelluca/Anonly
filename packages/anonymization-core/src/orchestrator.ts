@@ -1017,97 +1017,128 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     this.failPipeline(documentId, err);
   }
 
+  /**
+   * ADR-157: el pool de OCR se da de baja al terminar esta etapa —éxito,
+   * cancelación o fallo, ver el `finally` al final— en vez de esperar los
+   * 60 s de inactividad de ADR-080. Ese temporizador llega tarde PARA ESTE
+   * POOL por una razón de calendario (ADR-157 §2): sus 60 s de inactividad
+   * transcurren justo mientras corre la detección (NER), que es donde está
+   * el pico de memoria — para cuando el pool se liberaría solo, el pico ya
+   * pasó. `idleDisposeMs` no se toca: gobierna los cinco pools y seguiría
+   * siendo una carrera contra la duración de la detección, no un orden
+   * garantizado. La baja la expone `OcrEngine.releaseIdleWorkers()`
+   * (ADR-157 §1bis): el Orchestrator no tiene ninguna referencia al `OcrPool`
+   * desde ADR-045 (lo construye `create-core.ts` e inyecta directo en el
+   * motor), así que llamar a `this.pools.getPool("ocr")` acá construiría un
+   * pool nuevo, vacío y desconectado — no el que `OcrEngine` usa de verdad.
+   */
   private async runOcrStage(
     documentId: string,
     textlessPages: ReadonlyArray<number>,
     ocrRegions: ReadonlyArray<OcrRegion>,
     ctx: EngineContext,
   ): Promise<void> {
-    // Progreso granular OCR (spec Orchestrator.md §8, ADR-065 §2): total fijo
-    // para toda la etapa (textlessPages.length + ocrRegions.length, ambos
-    // conjuntos disjuntos); current arranca en 0 y lo incrementa
-    // handleOcrPageFinished por cada OCR_PAGE_FINISHED, sea de página entera
-    // o de región.
-    this.progressByDocument.set(documentId, {
-      total: textlessPages.length + ocrRegions.length,
-      current: 0,
-    });
-
-    // ADR-034 §1: adelanta loadDocument a la etapa 2 (bytes retenidos de la
-    // 0). v1.2.1 (bug #6, caso 23): copia — el buffer retenido nunca sale del
-    // Orchestrator (garantizado por ensureRenderDocumentLoaded).
-    await this.ensureRenderDocumentLoaded(documentId);
-
-    // ADR-143 §1: los descriptores solo necesitan las dimensiones de página
-    // (en puntos, ya parseadas por el PDF Engine) para estimar bytes — no
-    // hace falta rasterizar nada todavía.
-    const document = this.documents.get(documentId);
-    if (document === undefined) {
-      throw new InvalidInputError(`Documento ${documentId} no disponible para OCR.`, {
-        documentId,
+    try {
+      // Progreso granular OCR (spec Orchestrator.md §8, ADR-065 §2): total fijo
+      // para toda la etapa (textlessPages.length + ocrRegions.length, ambos
+      // conjuntos disjuntos); current arranca en 0 y lo incrementa
+      // handleOcrPageFinished por cada OCR_PAGE_FINISHED, sea de página entera
+      // o de región.
+      this.progressByDocument.set(documentId, {
+        total: textlessPages.length + ocrRegions.length,
+        current: 0,
       });
+
+      // ADR-034 §1: adelanta loadDocument a la etapa 2 (bytes retenidos de la
+      // 0). v1.2.1 (bug #6, caso 23): copia — el buffer retenido nunca sale del
+      // Orchestrator (garantizado por ensureRenderDocumentLoaded).
+      await this.ensureRenderDocumentLoaded(documentId);
+
+      // ADR-143 §1: los descriptores solo necesitan las dimensiones de página
+      // (en puntos, ya parseadas por el PDF Engine) para estimar bytes — no
+      // hace falta rasterizar nada todavía.
+      const document = this.documents.get(documentId);
+      if (document === undefined) {
+        throw new InvalidInputError(`Documento ${documentId} no disponible para OCR.`, {
+          documentId,
+        });
+      }
+
+      const scale = ctx.config.ocr.dpi / 72;
+      const requests: OcrPageRequest[] = [];
+
+      for (const pageIndex of textlessPages) {
+        const page: Page | undefined = document.pages[pageIndex];
+        requests.push({
+          documentId,
+          pageIndex,
+          dpi: ctx.config.ocr.dpi,
+          languages: ctx.config.ocr.languages,
+          estimatedBytes: estimateRasterBytes(page?.width ?? 0, page?.height ?? 0, scale),
+        });
+      }
+
+      // ADR-065 §3/§5: se OCR-ea la región, no la página — el descriptor lleva
+      // `region.bbox` (en puntos de página) y el productor de abajo se lo pasa
+      // a `rasterizePage`, que devuelve solo el recorte. El `OcrPageRequest` es
+      // el de siempre: el OCR Engine no sabe ni necesita saber que su imagen es
+      // un recorte en vez de una página completa (§9 de OCR_Engine.md).
+      for (const region of ocrRegions) {
+        requests.push({
+          documentId,
+          pageIndex: region.pageIndex,
+          region: region.bbox,
+          dpi: ctx.config.ocr.dpi,
+          languages: ctx.config.ocr.languages,
+          estimatedBytes: estimateRasterBytes(region.bbox.width, region.bbox.height, scale),
+        });
+      }
+
+      // ADR-143 §1: el productor rasteriza recién cuando `processSession` tiene
+      // lugar en la ventana de trabajo — nunca por adelantado. Nunca cruza un
+      // `postMessage` ni entra en `EngineConfig`: vive acá, host-side, porque
+      // llama a `RenderEngine` y un motor no importa a otro (P-1). Mismo
+      // criterio de ADR-043 §2 que ya regía `rasterizePage` acá: el Orchestrator
+      // invoca el método del motor directo, sin envolverlo en `pool.dispatch`.
+      const produce: OcrImageProducer = (request, signal) =>
+        this.engines.render.rasterizePage(
+          request.documentId,
+          request.pageIndex,
+          scale,
+          { ...ctx, abortSignal: signal },
+          request.region,
+        );
+
+      // ADR-045 §2/ADR-143 §3: el Orchestrator deja de envolver `processSession`
+      // en `pool.dispatch({run})` — invoca el método del motor directo; es el
+      // propio `OcrEngine` quien despacha internamente, por página, contra su
+      // `OcrPool` (inyectada por el façade en `create-core.ts`) y reserva el
+      // presupuesto de imágenes vivas (`ocr.maxLiveImageBytes`) antes de pedirle
+      // cada imagen a `produce`.
+      await this.engines.ocr.processSession(requests, produce, ctx);
+
+      // ADR-041 §3: la fusión (ADR-014) la dispara `handleOcrPageFinished` de
+      // forma síncrona por cada `OCR_PAGE_FINISHED` (IEventBus.emit despacha en
+      // línea, 04_Event_System.md §13): para cuando el `await` de arriba
+      // resuelve, todas las fusiones de este batch ya corrieron y persistieron
+      // en `this.documents`. Ya no hace falta esperar promesas de fusión
+      // pendientes (waitForPendingFusions se eliminó junto con el bookkeeping
+      // asíncrono que ya no existe).
+    } finally {
+      // ADR-157 §1/§3/§1bis: baja determinística, no por temporizador —
+      // corre en los tres caminos terminales (éxito, cancelación, fallo).
+      // `OcrEngine.releaseIdleWorkers()` trae su propia guarda (ADR-080,
+      // ADR-157 §1ter): no hace nada si el pool no está ocioso, así que en
+      // cancelación puede ser un no-op silencioso (un job todavía en vuelo
+      // no se interrumpe — `terminate()` no dispara `error` y dejaría esa
+      // promesa colgada para siempre) y la memoria la libera el temporizador
+      // de ADR-080 como hasta hoy. En el camino feliz el pool sí está
+      // ocioso para cuando este `finally` corre. El motor queda usable: el
+      // próximo `processSession` (un futuro `reanalyze` de `ocr.languages`,
+      // `runReanalyzeOcrFlow`) lo reconstruye perezoso, pagando la recarga
+      // del modelo de Tesseract como costo declarado (ADR-157 §2).
+      this.engines.ocr.releaseIdleWorkers();
     }
-
-    const scale = ctx.config.ocr.dpi / 72;
-    const requests: OcrPageRequest[] = [];
-
-    for (const pageIndex of textlessPages) {
-      const page: Page | undefined = document.pages[pageIndex];
-      requests.push({
-        documentId,
-        pageIndex,
-        dpi: ctx.config.ocr.dpi,
-        languages: ctx.config.ocr.languages,
-        estimatedBytes: estimateRasterBytes(page?.width ?? 0, page?.height ?? 0, scale),
-      });
-    }
-
-    // ADR-065 §3/§5: se OCR-ea la región, no la página — el descriptor lleva
-    // `region.bbox` (en puntos de página) y el productor de abajo se lo pasa
-    // a `rasterizePage`, que devuelve solo el recorte. El `OcrPageRequest` es
-    // el de siempre: el OCR Engine no sabe ni necesita saber que su imagen es
-    // un recorte en vez de una página completa (§9 de OCR_Engine.md).
-    for (const region of ocrRegions) {
-      requests.push({
-        documentId,
-        pageIndex: region.pageIndex,
-        region: region.bbox,
-        dpi: ctx.config.ocr.dpi,
-        languages: ctx.config.ocr.languages,
-        estimatedBytes: estimateRasterBytes(region.bbox.width, region.bbox.height, scale),
-      });
-    }
-
-    // ADR-143 §1: el productor rasteriza recién cuando `processSession` tiene
-    // lugar en la ventana de trabajo — nunca por adelantado. Nunca cruza un
-    // `postMessage` ni entra en `EngineConfig`: vive acá, host-side, porque
-    // llama a `RenderEngine` y un motor no importa a otro (P-1). Mismo
-    // criterio de ADR-043 §2 que ya regía `rasterizePage` acá: el Orchestrator
-    // invoca el método del motor directo, sin envolverlo en `pool.dispatch`.
-    const produce: OcrImageProducer = (request, signal) =>
-      this.engines.render.rasterizePage(
-        request.documentId,
-        request.pageIndex,
-        scale,
-        { ...ctx, abortSignal: signal },
-        request.region,
-      );
-
-    // ADR-045 §2/ADR-143 §3: el Orchestrator deja de envolver `processSession`
-    // en `pool.dispatch({run})` — invoca el método del motor directo; es el
-    // propio `OcrEngine` quien despacha internamente, por página, contra su
-    // `OcrPool` (inyectada por el façade en `create-core.ts`) y reserva el
-    // presupuesto de imágenes vivas (`ocr.maxLiveImageBytes`) antes de pedirle
-    // cada imagen a `produce`.
-    await this.engines.ocr.processSession(requests, produce, ctx);
-
-    // ADR-041 §3: la fusión (ADR-014) la dispara `handleOcrPageFinished` de
-    // forma síncrona por cada `OCR_PAGE_FINISHED` (IEventBus.emit despacha en
-    // línea, 04_Event_System.md §13): para cuando el `await` de arriba
-    // resuelve, todas las fusiones de este batch ya corrieron y persistieron
-    // en `this.documents`. Ya no hace falta esperar promesas de fusión
-    // pendientes (waitForPendingFusions se eliminó junto con el bookkeeping
-    // asíncrono que ya no existe).
   }
 
   private async runDetectionStage(documentId: string, ctx: EngineContext): Promise<void> {

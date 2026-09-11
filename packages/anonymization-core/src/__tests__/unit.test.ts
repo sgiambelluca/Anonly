@@ -2478,6 +2478,97 @@ describe("PIPELINE_PROGRESS (Orchestrator.md §8, ADR-034 §4)", () => {
     );
   });
 
+  // ─── ADR-157: el pool de OCR se da de baja al terminar runOcrStage ───
+
+  it("ADR-157: releases the OCR pool's idle workers after a successful OCR stage", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({
+        pageCount: 1,
+        pages: [createPage({ index: 0, requiresOCR: true })],
+      }),
+      textlessPages: [0],
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+    vi.spyOn(engines.ocr, "processSession").mockImplementation(async (requests) =>
+      requests.map((request) => ({
+        documentId: request.documentId,
+        pageIndex: request.pageIndex,
+        words: [],
+        confidence: 0.9,
+        durationMs: 1,
+      })),
+    );
+    const releaseSpy = vi.spyOn(engines.ocr, "releaseIdleWorkers");
+
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    // El finally de runOcrStage corre una vez que processSession resolvió —
+    // el camino feliz, donde el pool está ocioso para cuando esto se llama.
+    expect(releaseSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("ADR-157 §1ter: cancelling mid-OCR still reaches PIPELINE_CANCELLED — the finally doesn't break cancellation (not an assertion that the pool was actually freed)", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({
+        pageCount: 1,
+        pages: [createPage({ index: 0, requiresOCR: true })],
+      }),
+      textlessPages: [0],
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+
+    // Mismo patrón que "case 22" (cancelación durante reanalyze, más abajo
+    // en este archivo): `orchestrator.cancel()` es lo único que fija
+    // stage=Cancelled y emite PIPELINE_CANCELLED — sin llamarlo, el reject
+    // de abajo no reproduciría una cancelación real, solo un fallo. Tras
+    // cancelar, se rechaza con CancelledError, tal como lo haría un job en
+    // vuelo cuyo signal abortó. No se afirma que releaseIdleWorkers() haya
+    // liberado nada — con un job todavía en vuelo, su propia guarda
+    // (WorkerPool, ADR-080) lo vuelve un no-op por diseño (ADR-157 §1ter);
+    // eso ya lo cubren los tests de WorkerPool y de OcrEngine.releaseIdleWorkers.
+    // Lo que este test verifica es que el `finally` de runOcrStage no rompe
+    // el camino de cancelación existente.
+    vi.spyOn(engines.ocr, "processSession").mockImplementation(async () => {
+      await orchestrator.cancel("doc-1");
+      throw new CancelledError("doc-1");
+    });
+    const releaseSpy = vi.spyOn(engines.ocr, "releaseIdleWorkers");
+
+    const cancelledSpy = vi.fn();
+    bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_CANCELLED, cancelledSpy);
+
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await expect(orchestrator.importDocument(createImportInput())).resolves.not.toThrow();
+
+    // Nada se rompe: el pipeline llega a su estado terminal de siempre para
+    // una cancelación en vuelo, sin una excepción sin manejar.
+    expect(cancelledSpy).toHaveBeenCalledWith(expect.objectContaining({ documentId: "doc-1" }));
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Cancelled);
+    // El finally sigue corriendo (se llama), sin importar si adentro terminó
+    // siendo un no-op.
+    expect(releaseSpy).toHaveBeenCalledTimes(1);
+  });
+
   // ─── ADR-065 §2: total = textlessPages.length + ocrRegions.length ───
 
   it("OCR: total counts textlessPages.length + ocrRegions.length (ADR-065 §2)", async () => {
