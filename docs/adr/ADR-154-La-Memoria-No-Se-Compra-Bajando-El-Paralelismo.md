@@ -164,6 +164,28 @@ necesita su propio ADR y una razón que no sea "así entra en el presupuesto".
 5. **La caché de preview guarda cada página dos veces** (ADR-156): el `ImageData`
    crudo y el codificado, y nadie fuera del motor lee el crudo. Verificado sobre
    todo el repo. Es el lever más barato de la lista y el único ya cerrado.
+**Descartado con medición (2026-09-13): pdf.js no acumula las páginas
+escaneadas.** La hipótesis era que los `PDFPageProxy` retenían la imaginería
+decodificada de cada página —nunca se llama `cleanup()` en todo el kernel de
+Render— y que eso explicaba los 2,4-4,2 MB por página que se acumulan en el
+proceso del renderer. Un spike la probó (rama `spike/pageproxy-cleanup-ocr`,
+`f96b351`): el pico no se movió (+35,9 / −5,6 / −0,7 MB, contra un piso de ruido
+de ~345 MB) y la pendiente no se aplanó de forma consistente.
+
+El código dice por qué, y cierra la puerta para los dos lados:
+
+1. **`PDFPageProxy.cleanup()` es solo del lado principal.** Limpia
+   `_intentStates` y `objs`; lo que vive del lado del worker de pdf.js solo lo
+   alcanza `PDFDocumentProxy.cleanup()`, que manda un mensaje `"Cleanup"`. El
+   spike limpiaba la mitad barata.
+2. **Y del otro lado no hay nada que limpiar para este caso.** El
+   `GlobalImageCache` de pdf.js tiene `NUM_PAGES_THRESHOLD = 2`: **solo cachea
+   imágenes que aparecen en dos o más páginas**. En un escaneado cada página
+   trae su propia imagen, así que ninguna entra nunca a esa caché.
+
+No reintentar por la vía de `PDFDocumentProxy.cleanup()`: el segundo punto la
+descarta antes de escribirla.
+
 6. **DPI.** La memoria va con el cuadrado del DPI: 300 → 200 es −55 %. Es el
    único lever de esta lista que **cambia calidad de reconocimiento**, así que
    no se toca sin medir contra la baseline de ADR-147 y sin decisión del humano.
