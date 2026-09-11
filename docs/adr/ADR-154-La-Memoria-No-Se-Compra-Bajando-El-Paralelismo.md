@@ -98,11 +98,29 @@ necesita su propio ADR y una razón que no sea "así entra en el presupuesto".
    liberación por idle (60 s), así que Tesseract y ONNX conviven durante toda la
    detección. Darlo de baja al terminar la etapa de OCR libera un heap entero de
    WASM —la única forma real de recuperarlo— sin quitarle un solo worker a nadie.
-4. **Copias por página.** Cada ráster existe hoy tres veces a la vez (canvas del
-   worker de Render, `ImageData` del host, clon estructurado en el worker de
-   OCR). Transferir en vez de clonar, re-rasterizando en el reintento, saca una
-   copia entera del camino normal.
-5. **DPI.** La memoria va con el cuadrado del DPI: 300 → 200 es −55 %. Es el
+4. **Copias por página.** Verificado el 2026-09-11, y son **más de tres**: canvas
+   del worker de Render, `ImageData` del host, clon estructurado en el worker de
+   OCR, **canvas que ese worker reconstruye** (`toTesseractImage` hace
+   `putImageData` sobre un `OffscreenCanvas` nuevo) y el PNG que tesseract.js
+   produce de ese canvas antes de pasárselo a su core — porque **tesseract.js no
+   acepta píxeles crudos**: `loadImage` convierte todo a bytes de imagen
+   codificada.
+
+   De ahí sale la forma del lever: que **Render entregue el ráster ya codificado**
+   en vez de `ImageData`. El canvas ya existe de su lado, así que el `convertToBlob`
+   no es trabajo nuevo — es el mismo que hoy hace tesseract.js, movido a donde no
+   hay que reconstruir un canvas para hacerlo. El clon que cruza el `postMessage`
+   pasa de ~35 MB a unos pocos, y el reintento retiene ese buffer chico en vez del
+   crudo (ADR-079/143). PNG es **sin pérdida**: no toca calidad.
+
+   Salvedad medida: el worker de OCR sigue necesitando un canvas para la rotación
+   de ADR-120 y las franjas de margen de ADR-121, así que decodifica una vez. Lo
+   que se ahorra es la copia grande cruzando la frontera, no el canvas.
+
+5. **La caché de preview guarda cada página dos veces** (ADR-156): el `ImageData`
+   crudo y el codificado, y nadie fuera del motor lee el crudo. Verificado sobre
+   todo el repo. Es el lever más barato de la lista y el único ya cerrado.
+6. **DPI.** La memoria va con el cuadrado del DPI: 300 → 200 es −55 %. Es el
    único lever de esta lista que **cambia calidad de reconocimiento**, así que
    no se toca sin medir contra la baseline de ADR-147 y sin decisión del humano.
 
