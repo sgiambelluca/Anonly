@@ -19,9 +19,16 @@ import { defineConfig } from "@playwright/test";
  * igual que `test:e2e`) y este config no levanta ningún `webServer`: usa el
  * mismo arnés que los E2E (`tests/e2e/support/electronApp.ts`,
  * `_electron.launch()` con un `--user-data-dir` propio por test).
+ *
+ * `globalSetup` (`support/globalSetup.config.ts` → `support/checkFreshBuild.ts`):
+ * revienta si alguien corre este config directo, sin pasar por
+ * `pnpm test:perf` (que reconstruye antes de medir) — Task 4 de H-10 perdió
+ * una tanda entera de mediciones así, con los gates en verde porque ninguno
+ * depende del build empaquetado.
  */
 export default defineConfig({
   testDir: "./tests/perf",
+  globalSetup: "./tests/perf/support/globalSetup.config.ts",
   fullyParallel: false,
   workers: 1,
   retries: 0,
