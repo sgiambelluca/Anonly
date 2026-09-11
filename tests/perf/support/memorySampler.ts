@@ -34,6 +34,15 @@ export interface MemorySample {
 
 export interface MemorySampler {
   readonly samples: ReadonlyArray<MemorySample>;
+  /**
+   * `Date.now()` de cuando arrancó este sampler — mismo reloj de pared que
+   * usan los timestamps de fase del renderer (`installRunCollector`,
+   * `memoryProfile.ts`, ambos procesos comparten el reloj del sistema).
+   * Permite convertir un evento de fase a un `atMs` comparable contra
+   * `samples` sin pasar por `performance.now()` (que arranca en la
+   * navegación de la página, un origen de tiempo distinto).
+   */
+  readonly startedAtMs: number;
   /** Une una lectura más antes de cortar — para no perder el pico si cae justo entre dos ticks del intervalo. */
   sampleOnce(): Promise<MemorySample>;
   stop(): void;
@@ -84,6 +93,7 @@ export function startMemorySampling(
 
   return {
     samples,
+    startedAtMs: startedAt,
     async sampleOnce(): Promise<MemorySample> {
       const sample = await readOnce();
       if (!stopped) samples.push(sample);
@@ -120,4 +130,35 @@ export function samplesSince(
   sinceMs: number,
 ): ReadonlyArray<MemorySample> {
   return samples.filter((s) => s.atMs > sinceMs);
+}
+
+/** Las muestras con `atMs` en `[fromMs, toMs]` (inclusive) — el pico interno de una fase. */
+export function samplesBetween(
+  samples: ReadonlyArray<MemorySample>,
+  fromMs: number,
+  toMs: number,
+): ReadonlyArray<MemorySample> {
+  return samples.filter((s) => s.atMs >= fromMs && s.atMs <= toMs);
+}
+
+/**
+ * La muestra cuyo `atMs` está más cerca de `targetMs` — el sampler corre
+ * cada `SAMPLE_INTERVAL_MS` (150 ms de partida), así que un límite de fase
+ * casi nunca cae exacto sobre una muestra. `undefined` si `samples` está
+ * vacío.
+ */
+export function sampleNear(
+  samples: ReadonlyArray<MemorySample>,
+  targetMs: number,
+): MemorySample | undefined {
+  let closest: MemorySample | undefined;
+  let closestDiffMs = Infinity;
+  for (const sample of samples) {
+    const diffMs = Math.abs(sample.atMs - targetMs);
+    if (diffMs < closestDiffMs) {
+      closest = sample;
+      closestDiffMs = diffMs;
+    }
+  }
+  return closest;
 }

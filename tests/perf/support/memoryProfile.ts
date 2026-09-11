@@ -20,8 +20,11 @@ import type { E2eFilePayload } from "../../e2e/support/fixtures.js";
 import {
   minSumBytes,
   peakSumBytes,
+  sampleNear,
+  samplesBetween,
   samplesSince,
   startMemorySampling,
+  type MemorySample,
   type MemorySampler,
 } from "./memorySampler.js";
 
@@ -51,6 +54,17 @@ declare global {
     | {
         documentId?: string;
         phases: Record<string, number>;
+        /**
+         * Mismo evento que `phases`, pero en `Date.now()` (reloj de pared)
+         * en vez de `performance.now()` (que arranca en la navegación de la
+         * página, un origen distinto). El proceso de Node/Playwright y el
+         * renderer de Electron comparten el reloj del sistema operativo —
+         * eso es lo que permite convertir un límite de fase a un `atMs`
+         * comparable contra las muestras del sampler (`computePhaseSegments`
+         * más abajo), sin necesidad de reconciliar dos orígenes de
+         * `performance.now()` distintos.
+         */
+        phasesEpochMs: Record<string, number>;
         groupCount: number;
         entityCount: number;
         failedAt?: number;
@@ -91,6 +105,7 @@ async function installRunCollector(page: Page): Promise<void> {
 
       const run: NonNullable<typeof globalThis.__anonlyMemoryRun> = {
         phases: {},
+        phasesEpochMs: {},
         groupCount: 0,
         entityCount: 0,
         workerPeakByType: {},
@@ -99,7 +114,10 @@ async function installRunCollector(page: Page): Promise<void> {
 
       for (const [channel, event] of phaseEvents) {
         core.bus.on(channel, event, (payload: unknown) => {
-          if (!(event in run.phases)) run.phases[event] = performance.now();
+          if (!(event in run.phases)) {
+            run.phases[event] = performance.now();
+            run.phasesEpochMs[event] = Date.now();
+          }
           if (event === "DOCUMENT_IMPORTED") {
             run.documentId = (payload as { documentId: string }).documentId;
           }
@@ -190,8 +208,78 @@ async function readRun(page: Page): Promise<NonNullable<typeof globalThis.__anon
   return page.evaluate(() => {
     const r = globalThis.__anonlyMemoryRun;
     if (r === undefined) throw new Error("__anonlyMemoryRun ausente");
-    return { ...r, phases: { ...r.phases }, workerPeakByType: { ...r.workerPeakByType } };
+    return {
+      ...r,
+      phases: { ...r.phases },
+      phasesEpochMs: { ...r.phasesEpochMs },
+      workerPeakByType: { ...r.workerPeakByType },
+    };
   });
+}
+
+/**
+ * Atribución intra-corrida, por fase (ADR-146 §7 punto 3, reemplaza el
+ * método de comparar M2 entre corridas — ver `tests/perf/README.md` y
+ * `memory-attribution.spec.ts` por qué: restar corridas no puede resolver
+ * levers de 50-400 MB contra un ruido entre corridas de ~345 MB). Convierte
+ * cada límite de fase (`phasesEpochMs`, reloj de pared) a un `atMs`
+ * comparable contra `samples` restando `samplerStartedAtMs` — el origen que
+ * `MemorySampler` ya expone —, ordena los eventos por ese `atMs` y arma un
+ * segmento por cada par consecutivo. Sin ordenar por declaración: un
+ * perfil sin OCR (P1, texto nativo) nunca emite `OCR_STARTED`, así que la
+ * lista de fases presentes varía corrida a corrida.
+ */
+function computePhaseSegments(
+  phasesEpochMs: Readonly<Record<string, number>>,
+  samples: ReadonlyArray<MemorySample>,
+  samplerStartedAtMs: number,
+): ReadonlyArray<PhaseSegment> {
+  const boundaries = Object.entries(phasesEpochMs)
+    .map(([event, epochMs]) => ({ event, atMs: epochMs - samplerStartedAtMs }))
+    .sort((a, b) => a.atMs - b.atMs);
+
+  const segments: PhaseSegment[] = [];
+  for (let i = 0; i < boundaries.length - 1; i += 1) {
+    const from = boundaries[i];
+    const to = boundaries[i + 1];
+    if (from === undefined || to === undefined) continue;
+
+    const entry = sampleNear(samples, from.atMs);
+    const exit = sampleNear(samples, to.atMs);
+    const entryBytes = entry?.sumWorkingSetSizeBytes ?? 0;
+    const exitBytes = exit?.sumWorkingSetSizeBytes ?? 0;
+
+    segments.push({
+      fromEvent: from.event,
+      toEvent: to.event,
+      fromAtMs: from.atMs,
+      toAtMs: to.atMs,
+      rssAtEntryBytes: entryBytes,
+      rssAtExitBytes: exitBytes,
+      peakInternalBytes: peakSumBytes(samplesBetween(samples, from.atMs, to.atMs)),
+      deltaBytes: exitBytes - entryBytes,
+    });
+  }
+  return segments;
+}
+
+/**
+ * Un tramo entre dos eventos de fase consecutivos (ADR-146 §7 punto 3):
+ * cuánto sube o baja el RSS durante esa etapa del pipeline, dentro de una
+ * sola corrida — inmune a la deriva entre corridas que hundió el método de
+ * comparar M2 entre configuraciones (ver `memory-attribution.spec.ts`).
+ */
+export interface PhaseSegment {
+  readonly fromEvent: string;
+  readonly toEvent: string;
+  readonly fromAtMs: number;
+  readonly toAtMs: number;
+  readonly rssAtEntryBytes: number;
+  readonly rssAtExitBytes: number;
+  /** Pico dentro del tramo — puede superar tanto la entrada como la salida (p. ej. un pico intermedio que ya bajó al llegar a `toEvent`). */
+  readonly peakInternalBytes: number;
+  /** `rssAtExitBytes - rssAtEntryBytes`. Negativo = el RSS bajó durante este tramo. */
+  readonly deltaBytes: number;
 }
 
 export interface RunReport {
@@ -224,6 +312,17 @@ export interface RunReport {
   readonly groupCount: number;
   readonly entityCount: number;
   readonly ok: boolean;
+  /** Atribución por fase, dentro de esta corrida (ADR-146 §7 punto 3) — ver `PhaseSegment`. */
+  readonly phaseSegments: ReadonlyArray<PhaseSegment>;
+  /**
+   * La serie temporal cruda de esta corrida (ADR-146 §7 punto 3: "hay que
+   * persistir la serie, no solo el máximo") — mismas muestras que
+   * `computePhaseSegments` ya usó, guardadas para poder re-analizar sin
+   * volver a correr el import (p. ej. otra segmentación de fases, un
+   * gráfico). Acotada a esta corrida (`samplesSince(sinceMs)`), no a toda la
+   * sesión de Electron.
+   */
+  readonly samples: ReadonlyArray<MemorySample>;
 }
 
 /**
@@ -254,7 +353,8 @@ async function runImport(
   await sampler.sampleOnce();
 
   const run = await readRun(page);
-  const peak = peakSumBytes(samplesSince(sampler.samples, sinceMs));
+  const runSamples = samplesSince(sampler.samples, sinceMs);
+  const peak = peakSumBytes(runSamples);
   const readyAtMs = run.phases.PIPELINE_READY ?? null;
   const startedAtPerf = run.phases.DOCUMENT_IMPORTED ?? null;
 
@@ -267,6 +367,8 @@ async function runImport(
     workerPeakByType: run.workerPeakByType,
     startedAtMs,
     readyAtMs,
+    phaseSegments: computePhaseSegments(run.phasesEpochMs, runSamples, sampler.startedAtMs),
+    samples: runSamples,
     totalMs: readyAtMs !== null && startedAtPerf !== null ? readyAtMs - startedAtPerf : null,
     groupCount: run.groupCount,
     entityCount: run.entityCount,
@@ -364,6 +466,25 @@ function formatWorkerPeaks(peaks: Readonly<Record<string, number>>): string {
   return entries.map(([type, count]) => `${type}=${count}`).join(" ");
 }
 
+function formatSignedMB(bytes: number): string {
+  const sign = bytes >= 0 ? "+" : "";
+  return `${sign}${formatMB(bytes)}`;
+}
+
+/** Una línea por `PhaseSegment`, en orden temporal — la vista que contesta "¿baja el RSS al terminar el OCR, o se queda arriba?" (ADR-154 §2 lever 3). */
+function formatPhaseSegments(segments: ReadonlyArray<PhaseSegment>): string {
+  if (segments.length === 0)
+    return "    (sin segmentos — ¿corrida fallida antes del segundo evento de fase?)\n";
+  return segments
+    .map(
+      (s) =>
+        `    ${s.fromEvent} → ${s.toEvent}: entrada ${formatMB(s.rssAtEntryBytes)}, ` +
+        `salida ${formatMB(s.rssAtExitBytes)}, pico interno ${formatMB(s.peakInternalBytes)}, ` +
+        `delta ${formatSignedMB(s.deltaBytes)}\n`,
+    )
+    .join("");
+}
+
 export function printReport(report: ProfileReport): void {
   const { cold, hot } = report;
   process.stdout.write(
@@ -372,11 +493,13 @@ export function printReport(report: ProfileReport): void {
       `  frío    — M2 (pico suma RSS): ${formatMB(cold.peakSumBytes)}  ` +
       `total: ${cold.totalMs?.toFixed(0) ?? "?"} ms  ok: ${cold.ok}  grupos: ${cold.groupCount}  ` +
       `workers: ${formatWorkerPeaks(cold.workerPeakByType)}\n` +
+      formatPhaseSegments(cold.phaseSegments) +
       `  caliente — M2: ${formatMB(hot.peakSumBytes)}  ` +
       `M1 (atribuible al documento): ${hot.m1Bytes !== null ? formatMB(hot.m1Bytes) : "?"}  ` +
       `línea de base: ${formatMB(hot.baselineBytes)}  ` +
       `total: ${hot.totalMs?.toFixed(0) ?? "?"} ms  ok: ${hot.ok}  grupos: ${hot.groupCount}  ` +
-      `workers: ${formatWorkerPeaks(hot.workerPeakByType)}\n`,
+      `workers: ${formatWorkerPeaks(hot.workerPeakByType)}\n` +
+      formatPhaseSegments(hot.phaseSegments),
   );
 }
 

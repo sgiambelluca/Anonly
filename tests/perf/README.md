@@ -40,6 +40,23 @@ Dos huecos conocidos, ninguno de los dos disparado por los perfiles de H-10 hoy:
 
 Si algún día hace falta distinguir estos casos, la vía es un getter público en el Core (`WorkerPool.activeCount`/`remoteWorkers.size` ya existen, privados) — no se agregó acá porque ninguna medición de H-10 lo necesitó.
 
+### Atribución por fase, dentro de una sola corrida (ADR-146 §7 punto 3)
+
+Reemplaza el método anterior ("comparar M2 entre corridas alternadas") — ver por qué en `memory-attribution.spec.ts` y más abajo: se probó y no tuvo resolución. Este mide **dentro** de una corrida, así que es inmune a la deriva entre corridas.
+
+`RunReport.phaseSegments` (`PhaseSegment[]`, `support/memoryProfile.ts`) parte la corrida en tramos entre eventos de fase consecutivos (`DOCUMENT_IMPORTED`, `DOCUMENT_PARSED`, `OCR_STARTED`, `OCR_FINISHED`, `NER_MODEL_READY`, `NER_FINISHED`, `GROUPING_FINISHED`, `PIPELINE_READY`/`PIPELINE_FAILED` — los que hayan ocurrido en esa corrida particular; un perfil sin OCR nunca emite `OCR_STARTED`) y reporta, por tramo: RSS al entrar, RSS al salir, el pico interno, y el delta (salida − entrada). `printReport` lo imprime como una línea por tramo debajo de cada fila de frío/caliente.
+
+**Reconciliación de reloj**: los límites de fase se capturan en el renderer (`installRunCollector`) y las muestras de memoria en el proceso de Node/Playwright (`electronApp.evaluate`) — dos procesos de la misma instancia de Electron. En vez de reconciliar dos orígenes de `performance.now()` distintos (uno por proceso), cada evento de fase también guarda `Date.now()` (`phasesEpochMs`, reloj de pared, compartido entre procesos en la misma máquina) y se le resta `MemorySampler.startedAtMs` para obtener un `atMs` directamente comparable contra `samples`. `sampleNear`/`samplesBetween` (`support/memorySampler.ts`) hacen la búsqueda; con un muestreo cada `SAMPLE_INTERVAL_MS` (150 ms) un límite de fase casi nunca cae exacto sobre una muestra, así que `sampleNear` toma la más cercana.
+
+**Se persiste la serie cruda** (`RunReport.samples`), no solo los segmentos ya calculados — para poder re-segmentar o graficar sin volver a correr el import (ADR-146 §7 punto 3 lo pide explícitamente: "hay que persistir la serie, no solo el máximo").
+
+**Primer resultado real** (P2, una corrida frío→cerrar→caliente, sin repetir todavía — ver `.measure/memory-p2-scanned-50p-run0.json`): la pregunta que motivó esto — "¿baja el RSS al terminar el OCR, o se queda arriba?" (ADR-154 §2 lever 3, solapamiento OCR/NER) — dio una respuesta matizada, no un sí/no limpio:
+
+- **Frío**: `OCR_FINISHED → NER_MODEL_READY` da +6.2 MB (flat, no baja). El drop grande (−355.7 MB) aparece recién en `NER_MODEL_READY → PIPELINE_READY` — es decir, en algún punto **durante** la inferencia de NER, no apenas termina OCR.
+- **Caliente**: `OCR_FINISHED → PIPELINE_READY` da −0.5 MB — prácticamente flat de punta a punta (acá `NER_MODEL_READY` no se repite: ADR-046 lo deduplica por instancia del motor, el modelo ya estaba tibio de la corrida fría).
+
+En ninguna de las dos hay una caída **inmediatamente** al terminar OCR, lo que es compatible con que el pool de OCR sigue vivo durante NER (lever 3) — pero la caída fría tampoco es concluyente por sí sola: podría ser GC ordinario reaccionando a la presión de NER, no necesariamente el pool de OCR liberándose (no se libera solo: el idle-dispose son 60 s y la corrida entera dura ~30 s). Falta repetir (esto es una sola corrida) y cruzar contra el conteo de workers por fase antes de afirmar nada.
+
 ### Correr
 
 ```bash
@@ -83,14 +100,17 @@ P2 (50 páginas escaneadas), ya sin el defecto de contaminación del fixture, da
 - **M2 — el hallazgo firme.** Pico de la suma RSS del árbol de procesos, sin resta: **1788.5-2133.1 MB** en las 6 corridas de las dos tandas, siempre por encima de los **~1.6 GB** de `07_Performance_Strategy.md` §7.1 ("Total pico (con OCR + NER)"). Lectura directa, no depende de ninguna línea de base — es el número que se cita para "P2 excede el presupuesto".
 - **M1 — cota inferior, se lee con cuidado.** 756.5 / 867.5 / 500.8 MB en la tanda post-ventana. No es ruido de muestreo insuficiente: la corrida de 500.8 MB tiene la línea de base **y** el pico más altos de las tres (ver ADR-146 §7) — la resta subestima el costo real del documento cuando el proceso tiene memoria residente libre por dentro para absorber su trabajo sin pedirle nada nuevo al sistema. Un M1 por debajo del presupuesto no demuestra que el perfil cumple; uno por encima sí demuestra que no.
 
-La dispersión de M2 también cambió entre las dos tandas (3.4% en la primera, 17.6% en la segunda — ~345 MB de ruido sobre ~2 GB) con medias casi idénticas (1968 vs. 1955 MB): variación del entorno entre sesiones separadas en el tiempo, no del producto ni del instrumento (ADR-146 §7 punto 4). Por eso la atribución compara configuraciones **dentro de la misma sesión**, alternando condición por condición, con el equipo por lo demás inactivo — 345 MB de ruido entre sesiones es del orden de varios de los deltas por pool que se buscan.
-
 (P1 no sirve de control de ruido para P2: genera su PDF en Node, sin nada que rastrear en el renderer medido; P2 rasterizaba 50 páginas *dentro* de ese mismo tipo de proceso hasta que `getOrGenerateScannedFixture` (`support/scannedFixtureCache.ts`) lo movió a un `chromium.launch()` aparte, cerrado antes de medir. Los dos perfiles nunca compartieron la fuente de ruido, así que la baja dispersión de uno no decía nada sobre el otro.)
 
-Antes de decidir qué hacer con ese exceso hace falta saber de qué componente sale. Tres corridas, cada una aislando una variable:
+### El método de comparar M2 entre corridas separadas quedó retirado
 
-1. **NER apagado** (`installSettingsOverride({nerEnabled: false})`) — cuánto es del detector de nombres.
-2. **`performancePreset: "low"`** — el único lever de tamaño de pool alcanzable sin tocar producción; confunde `ocrPoolSize` con `pdfPoolSize`/`nerPoolSize`/`renderPoolSize`, los cuatro bajan a 1 juntos.
-3. **`generateText50pSmallPage()`** (`tests/fixtures/generate.ts`) — página a 4/9 de área, el mismo ratio que (200/300)² dpi. Proxy de `ocr.dpi: 200`: ese campo no es una `SettingsOverride` alcanzable (no es un setting de usuario), así que se prueba la misma hipótesis —¿el costo escala con el área rasterizada?— reduciendo el tamaño físico de la página en vez del DPI.
+Se intentó aislar `renderPoolSize` (4 contra 1, alternando 3 pares dentro de la misma sesión, con el canal de overrides de ADR-155) y no tuvo resolución: −83 MB de promedio en caliente, +264 MB en frío, cada uno consistente 3/3 en su propia dirección y contradictorios entre sí, los dos por debajo del ruido de M2 ya medido entre tandas (~345 MB — la dispersión pasó de 3.4% a 17.6% entre dos tandas separadas en el tiempo, con medias casi idénticas: variación de entorno, no del producto). Con n=3, tres de tres en una dirección ocurre una de cada cuatro veces por azar puro — no hay resultado, y ni triplicando las repeticiones alcanzaría (bajar el error estándar de 345 a 50 MB pediría del orden de cincuenta corridas por condición). ADR-146 §7 punto 3 reemplazó la regla al día siguiente de escribirla: la atribución se hace **dentro** de una corrida, por fase (ver más arriba), no restando corridas.
 
-Una corrida por condición, no una caracterización de 3+3: es atribución exploratoria. Si el delta contra P2 base es grande y consistente con la hipótesis, alcanza para orientar la siguiente decisión; si es chico o ambiguo, se reporta así en vez de gastar más corridas.
+`renderPoolSize` queda como sospechoso de baja prioridad y sin confirmar (ADR-154 §2 lever 2) — su premisa original ("cuatro copias del documento, cientos de MB") también estaba mal por dos órdenes de magnitud: el fixture de P2 pesa 1.71 MB, tres clones de más son 5.1 MB, no cientos. Lo que sobrevive del lever es el estado por instancia de cada worker (canvas, lo que su pdf.js decodificó), compatible en magnitud con el delta caliente pero no resuelto.
+
+`memory-attribution.spec.ts` conserva las 6 corridas alternadas de `renderPoolSize` — no como resultado de atribución, sino porque validan el canal de overrides de punta a punta contra un build real (`render-page` respondió 4 vs. 1 según la condición). La primera vez que se corrieron dieron un falso negativo por un `apps/react-client/dist` de 5.7 h de antigüedad — de ahí el `globalSetup` de `playwright.perf.config.ts` (`support/checkFreshBuild.ts`), que ahora revienta si el build está más viejo que el fuente.
+
+Dos hipótesis más en el mismo archivo, cada una con una corrida exploratoria (no comparan pool sizes, así que no las alcanza el problema de arriba):
+
+1. **NER apagado** (`installSettingsOverride({nerEnabled: false})`) — cuánto es del detector de nombres en sí.
+2. **`generateText50pSmallPage()`** (`tests/fixtures/generate.ts`) — página a 4/9 de área, el mismo ratio que (200/300)² dpi. Proxy de `ocr.dpi: 200` (no alcanzable como setting de usuario): prueba si el costo escala con el área rasterizada, reduciendo el tamaño físico de la página en vez del DPI.
