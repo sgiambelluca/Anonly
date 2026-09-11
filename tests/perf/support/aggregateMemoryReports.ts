@@ -28,6 +28,10 @@ interface RunReport {
   readonly groupCount: number;
   readonly entityCount: number;
   readonly ok: boolean;
+  /** ADR-146 §7bis: `false` si el pico de la corrida cae fuera de toda fase (residuo del documento anterior, no de este) — no se promedia. `undefined` en reportes de antes de este campo. */
+  readonly peakWithinPhases?: boolean;
+  /** ADR-146 §7bis: `false` si la línea de base caliente no llegó a asentar dentro del techo de 30s — la corrida sigue en pie, solo queda marcada. `undefined`/`null` en frío o en reportes de antes de este campo. */
+  readonly hotBaselineSettled?: boolean | null;
 }
 
 interface ProfileReport {
@@ -87,18 +91,40 @@ async function main(): Promise<void> {
       const runs = reports.map((r) => r[temperature]);
       const failed = runs.filter((r) => !r.ok);
       const ok = runs.filter((r) => r.ok);
+      // ADR-146 §7bis: un pico fuera de toda fase es el residuo del
+      // documento anterior, no de este — se reporta, no se promedia.
+      // `peakWithinPhases === false` explícito la invalida; `undefined`
+      // (reportes de antes de este campo) se trata como válida.
+      const invalidPeak = ok.filter((r) => r.peakWithinPhases === false);
+      const valid = ok.filter((r) => r.peakWithinPhases !== false);
 
       if (failed.length > 0) {
         process.stdout.write(
           `  ${temperature}: ${failed.length}/${runs.length} corridas NO ok (PIPELINE_FAILED) — no promediadas.\n`,
         );
       }
-      if (ok.length === 0) continue;
+      if (invalidPeak.length > 0) {
+        process.stdout.write(
+          `  ${temperature}: ${invalidPeak.length}/${runs.length} corridas con pico fuera de toda fase ` +
+            `(ADR-146 §7bis — residuo del documento anterior) — no promediadas: ` +
+            `${invalidPeak.map((r) => formatMB(r.peakSumBytes)).join(", ")}.\n`,
+        );
+      }
+      if (temperature === "hot") {
+        const unsettled = ok.filter((r) => r.hotBaselineSettled === false);
+        if (unsettled.length > 0) {
+          process.stdout.write(
+            `  ${temperature}: ${unsettled.length}/${runs.length} corridas con línea de base caliente ` +
+              `sin asentar (venció el techo de 30s, ADR-146 §7bis) — no se descartan, pero su M1 es menos confiable.\n`,
+          );
+        }
+      }
+      if (valid.length === 0) continue;
 
-      const m2 = stats(ok.map((r) => r.peakSumBytes));
-      const totals = ok.map((r) => r.totalMs).filter((v): v is number => v !== null);
+      const m2 = stats(valid.map((r) => r.peakSumBytes));
+      const totals = valid.map((r) => r.totalMs).filter((v): v is number => v !== null);
       const timeStats = totals.length > 0 ? stats(totals) : null;
-      const groupCounts = ok.map((r) => r.groupCount);
+      const groupCounts = valid.map((r) => r.groupCount);
 
       process.stdout.write(
         `  ${temperature.padEnd(4)} — M2 pico: min ${formatMB(m2.min)} / avg ${formatMB(m2.avg)} / max ${formatMB(m2.max)}` +
@@ -109,7 +135,7 @@ async function main(): Promise<void> {
       );
 
       if (temperature === "hot") {
-        const m1Values = ok.map((r) => r.m1Bytes).filter((v): v is number => v !== null);
+        const m1Values = valid.map((r) => r.m1Bytes).filter((v): v is number => v !== null);
         if (m1Values.length > 0) {
           const m1 = stats(m1Values);
           process.stdout.write(

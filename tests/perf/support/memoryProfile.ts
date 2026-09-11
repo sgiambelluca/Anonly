@@ -35,19 +35,21 @@ export const SAMPLE_INTERVAL_MS = 150;
 /** Gracia tras `PIPELINE_READY` antes de tomar el pico (ADR-146 §15.3 punto 8: el seed/precalentado de ADR-151 sigue corriendo un instante más). */
 const SETTLE_GRACE_MS = 600;
 /**
- * Ventana de asentamiento tras `closeDocument()` para la línea de base
- * caliente (revisión del planificador sobre el instrumento: una sola
- * muestra inmediata quedaba expuesta a basura del documento recién cerrado
- * que el GC todavía no liberó — rango observado en 3 corridas: 763.9-1477.1
- * MB, 647 MB de dispersión, suficiente para tapar cualquier delta de
- * atribución por pool). No fuerza el GC (ADR-146 §6 ya anticipa que no hay
- * forma de forzarlo desde el arnés): solo le da tiempo y se queda con la
- * lectura más baja del sampler de fondo (`startMemorySampling`, que sigue
- * corriendo cada `SAMPLE_INTERVAL_MS` durante esta espera). No cambia la
- * definición de ADR-146 §1 ("la base con modelos cargados y sin documento"),
- * solo la mide de forma más confiable.
+ * Asentamiento del RSS tras `closeDocument()` para la línea de base caliente
+ * (ADR-146 §7bis): un residuo del documento anterior que todavía no decayó
+ * puede quedar por encima de cualquier cosa que el documento siguiente
+ * produzca — medido en 2 de 3 corridas de P2, donde el máximo de todo el run
+ * caliente cayó antes de `DOCUMENT_IMPORTED`. "Asentado" = `
+ * HOT_BASELINE_SETTLE_WINDOW_SAMPLES` muestras consecutivas dentro de
+ * `±HOT_BASELINE_SETTLE_TOLERANCE` de su mediana (ver `lastSettledWindow`).
+ * No fuerza GC (ADR-146 §6 ya anticipa que no hay forma de forzarlo desde el
+ * arnés): solo espera, sondeando el sampler de fondo que ya corre
+ * (`startMemorySampling`).
  */
-const HOT_BASELINE_SETTLE_WINDOW_MS = 4_000;
+const HOT_BASELINE_SETTLE_WINDOW_SAMPLES = 5;
+const HOT_BASELINE_SETTLE_TOLERANCE = 0.02;
+/** Si no asienta en este tiempo, la corrida sigue igual — no se descarta — y el reporte queda marcado (`RunReport.hotBaselineSettled: false`) para no promediarse a ciegas. */
+const HOT_BASELINE_SETTLE_CEILING_MS = 30_000;
 
 declare global {
   var __anonlyMemoryRun:
@@ -69,8 +71,31 @@ declare global {
         entityCount: number;
         failedAt?: number;
         workerPeakByType: Record<string, number>;
+        /**
+         * Cada `WORKER_JOB_DISPATCHED` (+1) y su evento terminal (-1),
+         * con el `Date.now()` del handler (P3 de H-10: `workerPeakByType`
+         * es un máximo plano de toda la corrida, sin ventana temporal — esto
+         * es lo que falta para acotar la concurrencia a una fase).
+         * `IEventBus.emit` despacha en línea (`04_Event_System.md` §13), así
+         * que ese `Date.now()` es el momento real del despacho.
+         */
+        workerEvents: WorkerJobEvent[];
       }
     | undefined;
+}
+
+/** Un evento de concurrencia de worker, con el reloj de pared del handler — mismo origen que `phasesEpochMs` (ver `computePhaseSegments`). */
+export interface WorkerJobEvent {
+  readonly type: string;
+  readonly epochMs: number;
+  readonly delta: 1 | -1;
+}
+
+/** `WorkerJobEvent` con `atMs` ya relativo al sampler (`epochMs - samplerStartedAtMs`) — mismo origen que `MemorySample.atMs`, comparable contra `samples`/`phaseSegments`. */
+export interface WorkerJobEventAtMs {
+  readonly type: string;
+  readonly atMs: number;
+  readonly delta: 1 | -1;
 }
 
 const PHASE_EVENTS: ReadonlyArray<readonly [string, string]> = [
@@ -109,6 +134,7 @@ async function installRunCollector(page: Page): Promise<void> {
         groupCount: 0,
         entityCount: 0,
         workerPeakByType: {},
+        workerEvents: [],
       };
       globalThis.__anonlyMemoryRun = run;
 
@@ -165,6 +191,7 @@ async function installRunCollector(page: Page): Promise<void> {
         typeByJobId.delete(jobId);
         const current = inFlightByType.get(type) ?? 0;
         inFlightByType.set(type, Math.max(0, current - 1));
+        run.workerEvents.push({ type, epochMs: Date.now(), delta: -1 });
       }
 
       core.bus.on("workers", "WORKER_JOB_DISPATCHED", (payload: unknown) => {
@@ -173,6 +200,7 @@ async function installRunCollector(page: Page): Promise<void> {
         const next = (inFlightByType.get(type) ?? 0) + 1;
         inFlightByType.set(type, next);
         run.workerPeakByType[type] = Math.max(run.workerPeakByType[type] ?? 0, next);
+        run.workerEvents.push({ type, epochMs: Date.now(), delta: 1 });
       });
       // Las cuatro decrementan igual. WORKER_JOB_TIMEOUT no siempre es
       // terminal -un job puede reintentar tras un timeout, sin un nuevo
@@ -213,8 +241,50 @@ async function readRun(page: Page): Promise<NonNullable<typeof globalThis.__anon
       phases: { ...r.phases },
       phasesEpochMs: { ...r.phasesEpochMs },
       workerPeakByType: { ...r.workerPeakByType },
+      workerEvents: [...r.workerEvents],
     };
   });
+}
+
+/**
+ * Máximo de jobs concurrentes por `type` durante `[fromAtMs, toAtMs]` — P3 de
+ * H-10 (ADR-146 §7bis): a diferencia de `workerPeakByType` (máximo de toda la
+ * corrida), esto acota la concurrencia a una fase.
+ *
+ * Dos pasadas sobre los eventos ordenados: la primera reproduce todo lo
+ * anterior a la ventana para saber cuántos jobs ya estaban en vuelo al
+ * entrar — ese conteo es un candidato a pico **aunque ningún evento propio
+ * caiga adentro** (un job largo que arrancó antes de la ventana y sigue
+ * corriendo durante toda ella no dispararía ningún evento dentro de
+ * `[fromAtMs, toAtMs]`, y contarlo en cero sería el bug). La segunda
+ * reproduce los eventos que sí caen dentro, actualizando el pico en cada
+ * transición.
+ */
+export function computeWorkerPeakByTypeInWindow(
+  events: ReadonlyArray<WorkerJobEventAtMs>,
+  fromAtMs: number,
+  toAtMs: number,
+): Record<string, number> {
+  const sorted = [...events].sort((a, b) => a.atMs - b.atMs);
+  const counts = new Map<string, number>();
+  const peaks: Record<string, number> = {};
+
+  for (const event of sorted) {
+    if (event.atMs >= fromAtMs) break;
+    counts.set(event.type, Math.max(0, (counts.get(event.type) ?? 0) + event.delta));
+  }
+  for (const [type, count] of counts) {
+    if (count > 0) peaks[type] = count;
+  }
+
+  for (const event of sorted) {
+    if (event.atMs < fromAtMs || event.atMs > toAtMs) continue;
+    const next = Math.max(0, (counts.get(event.type) ?? 0) + event.delta);
+    counts.set(event.type, next);
+    peaks[event.type] = Math.max(peaks[event.type] ?? 0, next);
+  }
+
+  return peaks;
 }
 
 /**
@@ -233,10 +303,16 @@ function computePhaseSegments(
   phasesEpochMs: Readonly<Record<string, number>>,
   samples: ReadonlyArray<MemorySample>,
   samplerStartedAtMs: number,
+  workerEvents: ReadonlyArray<WorkerJobEvent>,
 ): ReadonlyArray<PhaseSegment> {
   const boundaries = Object.entries(phasesEpochMs)
     .map(([event, epochMs]) => ({ event, atMs: epochMs - samplerStartedAtMs }))
     .sort((a, b) => a.atMs - b.atMs);
+  const workerEventsAtMs = workerEvents.map((e) => ({
+    type: e.type,
+    atMs: e.epochMs - samplerStartedAtMs,
+    delta: e.delta,
+  }));
 
   const segments: PhaseSegment[] = [];
   for (let i = 0; i < boundaries.length - 1; i += 1) {
@@ -258,6 +334,7 @@ function computePhaseSegments(
       rssAtExitBytes: exitBytes,
       peakInternalBytes: peakSumBytes(samplesBetween(samples, from.atMs, to.atMs)),
       deltaBytes: exitBytes - entryBytes,
+      workerPeakByType: computeWorkerPeakByTypeInWindow(workerEventsAtMs, from.atMs, to.atMs),
     });
   }
   return segments;
@@ -280,6 +357,8 @@ export interface PhaseSegment {
   readonly peakInternalBytes: number;
   /** `rssAtExitBytes - rssAtEntryBytes`. Negativo = el RSS bajó durante este tramo. */
   readonly deltaBytes: number;
+  /** Máximo de jobs concurrentes por `type` **dentro de este tramo** (P3 de H-10) — ver `computeWorkerPeakByTypeInWindow`. A diferencia de `RunReport.workerPeakByType` (máximo de toda la corrida), esto ya está acotado a la fase. */
+  readonly workerPeakByType: Readonly<Record<string, number>>;
 }
 
 export interface RunReport {
@@ -323,6 +402,29 @@ export interface RunReport {
    * sesión de Electron.
    */
   readonly samples: ReadonlyArray<MemorySample>;
+  /**
+   * Los eventos crudos de concurrencia de worker de esta corrida, con `atMs`
+   * ya relativo al sampler (mismo origen que `samples`/`phaseSegments`) —
+   * persistidos por la misma razón que `samples` (ADR-146 §7 punto 3), para
+   * poder recalcular `workerPeakByType` sobre cualquier ventana sin volver a
+   * correr el import.
+   */
+  readonly workerEvents: ReadonlyArray<WorkerJobEventAtMs>;
+  /**
+   * `false` si el pico de esta corrida (`peakSumBytes`) cae fuera de
+   * `[primera fase, última fase]` — ADR-146 §7bis: un run caliente cuyo
+   * máximo es en realidad el residuo del documento anterior, no algo que
+   * este documento produjo. Una corrida con `peakWithinPhases: false` se
+   * reporta, no se descarta, pero no debe promediarse con las demás.
+   */
+  readonly peakWithinPhases: boolean;
+  /**
+   * `null` en frío (no aplica). En caliente: si `waitForHotBaselineToSettle`
+   * encontró una ventana asentada dentro de `HOT_BASELINE_SETTLE_CEILING_MS`
+   * antes de tomar `baselineBytes` (ADR-146 §7bis). `false` no invalida la
+   * corrida — la deja marcada como de línea de base menos confiable.
+   */
+  readonly hotBaselineSettled: boolean | null;
 }
 
 /**
@@ -357,6 +459,17 @@ async function runImport(
   const peak = peakSumBytes(runSamples);
   const readyAtMs = run.phases.PIPELINE_READY ?? null;
   const startedAtPerf = run.phases.DOCUMENT_IMPORTED ?? null;
+  const phaseSegments = computePhaseSegments(
+    run.phasesEpochMs,
+    runSamples,
+    sampler.startedAtMs,
+    run.workerEvents,
+  );
+  const workerEventsAtMs = run.workerEvents.map((e) => ({
+    type: e.type,
+    atMs: e.epochMs - sampler.startedAtMs,
+    delta: e.delta,
+  }));
 
   return {
     temperature,
@@ -367,13 +480,36 @@ async function runImport(
     workerPeakByType: run.workerPeakByType,
     startedAtMs,
     readyAtMs,
-    phaseSegments: computePhaseSegments(run.phasesEpochMs, runSamples, sampler.startedAtMs),
+    phaseSegments,
     samples: runSamples,
+    workerEvents: workerEventsAtMs,
+    peakWithinPhases: peakFallsWithinPhases(findPeakSample(runSamples), phaseSegments),
+    hotBaselineSettled: null,
     totalMs: readyAtMs !== null && startedAtPerf !== null ? readyAtMs - startedAtPerf : null,
     groupCount: run.groupCount,
     entityCount: run.entityCount,
     ok: run.failedAt === undefined,
   };
+}
+
+/** La muestra con `sumWorkingSetSizeBytes` máximo. `undefined` si `samples` está vacío. */
+function findPeakSample(samples: ReadonlyArray<MemorySample>): MemorySample | undefined {
+  return samples.reduce<MemorySample | undefined>(
+    (max, s) =>
+      max === undefined || s.sumWorkingSetSizeBytes > max.sumWorkingSetSizeBytes ? s : max,
+    undefined,
+  );
+}
+
+/** `true` si `peakSample` cae dentro de `[primera fase, última fase]` (ADR-146 §7bis) — `phaseSegments` cubre ese rango sin huecos, así que "fuera de toda fase" es "fuera de ese intervalo". Sin segmentos (corrida fallida antes del segundo evento de fase), no hay nada que invalidar. */
+function peakFallsWithinPhases(
+  peakSample: MemorySample | undefined,
+  segments: ReadonlyArray<PhaseSegment>,
+): boolean {
+  const first = segments[0];
+  const last = segments[segments.length - 1];
+  if (first === undefined || last === undefined || peakSample === undefined) return true;
+  return peakSample.atMs >= first.fromAtMs && peakSample.atMs <= last.toAtMs;
 }
 
 /**
@@ -411,6 +547,57 @@ export interface ProfileReport {
   readonly capturedAt: string;
 }
 
+/**
+ * Espera a que el RSS se asiente antes de tomar la línea de base caliente
+ * (ADR-146 §7bis) — ver `lastSettledWindow`. Si asienta, la línea de base es
+ * el mínimo de esa ventana asentada (mismo criterio de mínimo que ADR-146
+ * §7). Si vence `HOT_BASELINE_SETTLE_CEILING_MS` sin asentar, la corrida
+ * sigue igual con el mínimo de todo lo acumulado hasta ahí, y `settled: false`
+ * — no se descarta, pero queda marcada.
+ */
+async function waitForHotBaselineToSettle(
+  page: Page,
+  sampler: MemorySampler,
+  sinceMs: number,
+): Promise<{ baselineBytes: number; settled: boolean }> {
+  const deadline = Date.now() + HOT_BASELINE_SETTLE_CEILING_MS;
+  for (;;) {
+    const samples = samplesSince(sampler.samples, sinceMs);
+    const window = lastSettledWindow(samples);
+    if (window !== undefined) {
+      return { baselineBytes: minSumBytes(window), settled: true };
+    }
+    if (Date.now() >= deadline) {
+      return { baselineBytes: minSumBytes(samples), settled: false };
+    }
+    await page.waitForTimeout(SAMPLE_INTERVAL_MS);
+  }
+}
+
+/**
+ * Las últimas `HOT_BASELINE_SETTLE_WINDOW_SAMPLES` muestras, si todas caen
+ * dentro de `±HOT_BASELINE_SETTLE_TOLERANCE` de su mediana. `undefined` si
+ * todavía no hay suficientes muestras o esas últimas no asentaron.
+ */
+function lastSettledWindow(
+  samples: ReadonlyArray<MemorySample>,
+): ReadonlyArray<MemorySample> | undefined {
+  if (samples.length < HOT_BASELINE_SETTLE_WINDOW_SAMPLES) return undefined;
+  const window = samples.slice(-HOT_BASELINE_SETTLE_WINDOW_SAMPLES);
+  const sorted = window.map((s) => s.sumWorkingSetSizeBytes).sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const lower = sorted[mid - 1];
+  const upper = sorted[mid];
+  // No debería pasar: `window` tiene exactamente HOT_BASELINE_SETTLE_WINDOW_SAMPLES
+  // elementos por el guard de arriba, así que `sorted[mid]` siempre existe en
+  // tiempo de ejecución — el chequeo es para noUncheckedIndexedAccess.
+  if (upper === undefined) return undefined;
+  const median = sorted.length % 2 === 0 && lower !== undefined ? (lower + upper) / 2 : upper;
+  const tolerance = median * HOT_BASELINE_SETTLE_TOLERANCE;
+  const settled = window.every((s) => Math.abs(s.sumWorkingSetSizeBytes - median) <= tolerance);
+  return settled ? window : undefined;
+}
+
 export async function measureProfile(
   page: Page,
   electronApp: ElectronApplication,
@@ -427,13 +614,16 @@ export async function measureProfile(
     await closeDocument(page);
     // Línea de base CALIENTE: los modelos que cargó la corrida fría siguen
     // retenidos (ADR-080 idle-dispose) y ya no hay documento — es la línea
-    // de base que ADR-146 §1 exige para M1. Mínimo de la ventana de
-    // asentamiento (ver HOT_BASELINE_SETTLE_WINDOW_MS), no una sola muestra.
+    // de base que ADR-146 §1 exige para M1. Espera a que asiente (ADR-146
+    // §7bis) en vez de una ventana fija: un residuo del documento anterior
+    // sin decaer puede quedar por encima de todo lo que produzca el
+    // siguiente, y eso ya se midió (2 de 3 corridas de P2).
     const hotBaselineSinceMs = sampler.samples.at(-1)?.atMs ?? 0;
-    await page.waitForTimeout(HOT_BASELINE_SETTLE_WINDOW_MS);
-    const hotBaselineBytes = minSumBytes(samplesSince(sampler.samples, hotBaselineSinceMs));
+    const { baselineBytes: hotBaselineBytes, settled: hotBaselineSettled } =
+      await waitForHotBaselineToSettle(page, sampler, hotBaselineSinceMs);
 
-    const hot = await runImport(page, file, sampler, "hot", hotBaselineBytes);
+    const hotRun = await runImport(page, file, sampler, "hot", hotBaselineBytes);
+    const hot: RunReport = { ...hotRun, hotBaselineSettled };
     await closeDocument(page);
 
     return {
@@ -480,9 +670,15 @@ function formatPhaseSegments(segments: ReadonlyArray<PhaseSegment>): string {
       (s) =>
         `    ${s.fromEvent} → ${s.toEvent}: entrada ${formatMB(s.rssAtEntryBytes)}, ` +
         `salida ${formatMB(s.rssAtExitBytes)}, pico interno ${formatMB(s.peakInternalBytes)}, ` +
-        `delta ${formatSignedMB(s.deltaBytes)}\n`,
+        `delta ${formatSignedMB(s.deltaBytes)}, workers ${formatWorkerPeaks(s.workerPeakByType)}\n`,
     )
     .join("");
+}
+
+/** "sí" / "NO — <motivo>" / "?" (no aplica, p. ej. frío) — para `peakWithinPhases` y `hotBaselineSettled`. */
+function formatFlag(value: boolean | null, invalidLabel: string): string {
+  if (value === null) return "?";
+  return value ? "sí" : `NO — ${invalidLabel}`;
 }
 
 export function printReport(report: ProfileReport): void {
@@ -491,12 +687,14 @@ export function printReport(report: ProfileReport): void {
     `\n=== H-10 — perfil ${report.profile} (${report.identity.platform}/${report.identity.arch}, ` +
       `${report.identity.cpuCount} CPUs, ${formatMB(report.identity.totalMemBytes)} RAM) ===\n` +
       `  frío    — M2 (pico suma RSS): ${formatMB(cold.peakSumBytes)}  ` +
+      `pico dentro de fase: ${formatFlag(cold.peakWithinPhases, "ADR-146 §7bis, no promediar")}  ` +
       `total: ${cold.totalMs?.toFixed(0) ?? "?"} ms  ok: ${cold.ok}  grupos: ${cold.groupCount}  ` +
       `workers: ${formatWorkerPeaks(cold.workerPeakByType)}\n` +
       formatPhaseSegments(cold.phaseSegments) +
       `  caliente — M2: ${formatMB(hot.peakSumBytes)}  ` +
       `M1 (atribuible al documento): ${hot.m1Bytes !== null ? formatMB(hot.m1Bytes) : "?"}  ` +
-      `línea de base: ${formatMB(hot.baselineBytes)}  ` +
+      `línea de base: ${formatMB(hot.baselineBytes)} (asentada: ${formatFlag(hot.hotBaselineSettled, "venció el techo de 30s, ADR-146 §7bis")})  ` +
+      `pico dentro de fase: ${formatFlag(hot.peakWithinPhases, "ADR-146 §7bis, no promediar")}  ` +
       `total: ${hot.totalMs?.toFixed(0) ?? "?"} ms  ok: ${hot.ok}  grupos: ${hot.groupCount}  ` +
       `workers: ${formatWorkerPeaks(hot.workerPeakByType)}\n` +
       formatPhaseSegments(hot.phaseSegments),
