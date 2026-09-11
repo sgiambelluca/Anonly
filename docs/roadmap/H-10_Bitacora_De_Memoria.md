@@ -200,6 +200,26 @@ Cinco cosas que costaron rondas y conviene no volver a aprender:
 
 **La hipótesis que mejor encaja, no probada**: la marca de agua del heap de WASM de Tesseract. La memoria lineal de WASM **solo crece**; lo único que la devuelve es terminar la instancia — que es exactamente lo que hace ADR-157 al final de la etapa, y por eso libera 702-1009 MB de una. Si es correcta, es **irreducible dentro de una corrida**, y las únicas salidas serían reciclar los workers de OCR a mitad del documento (paga una recarga de modelo por reciclo) o achicar el conjunto de trabajo por página (el DPI).
 
+**Objeción a esa hipótesis, planteada el 2026-09-13 y sin resolver**: el fixture de
+P2 tiene **50 páginas casi idénticas** (45 con el mismo párrafo neutro, 5 con uno
+de entidades). Una marca de agua de allocator sobre trabajo uniforme debería
+**aplanarse después de las primeras páginas**, no subir en línea recta durante
+las 50. Que la pendiente se mantenga lineal sobre contenido repetido es evidencia
+**en contra** de la hipótesis del heap y **a favor** de que algo se **retiene**
+por página. Tampoco es el ráster: ADR-158 achicó ese transporte ~30× y la
+pendiente solo bajó de 2,8-5,5 a 2,4-4,2 MB/página.
+
+**El experimento que lo decide, y que además contesta una pregunta de producto**:
+correr el mismo perfil con **200 páginas** —un expediente judicial realista, y el
+generador de fixtures ya existe; es cambiar el límite de un `for`—. Si el pico se
+queda cerca de ~1,8 GB, la acumulación está acotada y la extrapolación es falsa;
+si llega a ~2,0-2,4 GB, es retención real y crece sin techo con el largo del
+documento, que importa mucho más que los 94-190 MB del presupuesto.
+
+Extrapolación lineal, **no medición**: 200 páginas × 2,4-4,2 MB = 480-840 MB de
+aporte, contra los 120-210 MB que aportan 50 — o sea un pico de **~2,0 a
+~2,4 GB**.
+
 **El intento que cerró la búsqueda**: comparar la pendiente del renderer en la ventana de detección contra la de OCR. No localizó — sobre 17-19 muestras en 2,5-2,8 s, el R² salta de 0,000 a 0,806 entre corridas, que es la firma de ajustar ruido, no una señal débil.
 
 ### 7.1 Las tres alternativas abiertas
