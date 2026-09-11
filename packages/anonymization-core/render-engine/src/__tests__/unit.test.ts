@@ -50,6 +50,7 @@ import {
   mockGetDocumentResult,
   readProtectedPdfFixtureBuffer,
   resetCreatedCanvases,
+  setConvertToBlobByteLength,
   type DrawCall,
   type ResolvedRenderPool,
 } from "./fixtures/test-helpers.js";
@@ -470,11 +471,16 @@ describe("RenderEngine — unit tests", () => {
 
   it("cache evicts by PREVIEW_CACHE_MAX_BYTES in addition to cachePages", async () => {
     const docId = "doc-cache-bytes";
-    const bigDimension = 5000; // 5000*5000*4 bytes = 100.000.000 bytes (~95.4 MiB) por página.
-    const mockDoc = createMockPdfDocument({
-      pageCount: 3,
-      pageFactory: () => createMockPage({ width: bigDimension, height: bigDimension }),
-    });
+    // ADR-156: `estimateEntryBytes` cuenta `encoded.bytes.byteLength`, no
+    // `imageData` (que la entrada interna ya no retiene) — el PNG de
+    // juguete de `StubOffscreenCanvas#convertToBlob` es de 6 bytes fijos
+    // sin importar el tamaño del canvas, así que el dominio del tamaño de
+    // página no alcanza para ejercitar la eviction por bytes. Se fija el
+    // tamaño codificado directo: 100.000.000 bytes (~95.4 MiB) por página,
+    // mismos números que antes de ADR-156 (cuando los dominaba el
+    // `ImageData` crudo de una página de 5000×5000).
+    setConvertToBlobByteLength(100_000_000);
+    const mockDoc = createMockPdfDocument({ pageCount: 3 });
     vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(mockDoc));
     // cachePages generoso: el único límite que debe disparar la eviction acá
     // es PREVIEW_CACHE_MAX_BYTES (200 MiB), no el límite por items.
@@ -661,7 +667,11 @@ describe("RenderEngine — unit tests", () => {
         ctx,
       );
 
-      expect(output.imageData).toBe(remoteImageData);
+      // ADR-156: el decoder acepta `imageData` presente (forma legítima en
+      // mode "full", ver `remoteImageData` arriba), pero el host lo descarta
+      // al construir la entrada interna — el output público nunca lo expone,
+      // en ningún `mode`.
+      expect(output.imageData).toBeUndefined();
       expect(output.encoded).toBe(remoteEncoded);
 
       await pooledEngine.dispose();
@@ -707,7 +717,10 @@ describe("RenderEngine — unit tests", () => {
         ctx,
       );
 
-      expect(output.imageData).toBe(inProcessImageData);
+      // ADR-156: mismo criterio que el test de arriba — el decoder acepta
+      // `imageData` (forma legítima en mode "full"), pero el output público
+      // nunca lo expone.
+      expect(output.imageData).toBeUndefined();
       expect(output.encoded).toBe(inProcessEncoded);
 
       await pooledEngine.dispose();
@@ -2631,10 +2644,16 @@ describe("RenderEngine — unit tests", () => {
         payload: renderPayload,
       });
       await vi.waitFor(() => expect(outboundOfType(fakeSelf, "COMPLETED")).toBeDefined());
+      // ADR-156: `mode: "preview"` ya no trae `imageData` en el resultado —
+      // `encoded` es el único campo con dimensiones que sobrevive en los dos
+      // modos, y es lo que confirma que esto se ruteó a render (kernelRenderPage)
+      // y no a alguno de los otros cuatro payloads.
       const renderResult = outboundOfType(fakeSelf, "COMPLETED")?.result as {
-        readonly imageData: ImageData;
+        readonly imageData?: ImageData;
+        readonly encoded: { readonly widthPx: number };
       };
-      expect(renderResult.imageData.width).toBe(50);
+      expect(renderResult.imageData).toBeUndefined();
+      expect(renderResult.encoded.widthPx).toBe(50);
       fakeSelf.postMessage.mockClear();
 
       // 4) "pageIndex" (sin "buffer"/"rows"/"kind") -> rasterize.

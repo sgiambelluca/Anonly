@@ -428,13 +428,22 @@ describe("RenderEngine — edge cases", () => {
     await engine.init(ctx);
     await engine.loadDocument(docId, createValidBuffer());
 
+    // mode: "full" (no "preview") + scale: 1 explícito: desde ADR-156,
+    // `output.imageData` ya no existe en ningún modo, y `encoded` (el único
+    // campo público con dimensiones) solo se expone en mode "full".
     const output = await engine.renderPage(
-      createRenderPageInput({ documentId: docId, pageIndex: 0, kind: "original", mode: "preview" }),
+      createRenderPageInput({
+        documentId: docId,
+        pageIndex: 0,
+        kind: "original",
+        mode: "full",
+        scale: 1,
+      }),
       ctx,
     );
 
-    expect(output.imageData.width).toBe(842);
-    expect(output.imageData.height).toBe(595);
+    expect(output.encoded?.widthPx).toBe(842);
+    expect(output.encoded?.heightPx).toBe(595);
   });
 
   it("throws InvalidInputError when document not loaded", async () => {

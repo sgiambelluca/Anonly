@@ -1,9 +1,18 @@
 /**
  * @anonly/render-engine — `RenderEngine` (implementa `IEngine`).
  *
- * Fuente de verdad: docs/core/Render_Engine.md (v1.15.0, ADR-030, ADR-031,
+ * Fuente de verdad: docs/core/Render_Engine.md (v1.16.0, ADR-030, ADR-031,
  * ADR-034, ADR-037, ADR-043, ADR-044, ADR-050, ADR-053, ADR-056, ADR-059,
- * ADR-065, ADR-144).
+ * ADR-065, ADR-144, ADR-156).
+ *
+ * ADR-156 (2026-09-11 — el preview no guarda ni transporta los píxeles que
+ * nadie lee): `RenderPageOutput.imageData` pasa a opcional y queda siempre
+ * ausente en la práctica — verificado sobre todo el repo, ningún consumidor
+ * lo lee en ninguno de los dos `mode`. `InternalCacheEntry` deja de
+ * retenerlo (`estimateEntryBytes` cuenta solo `encoded`), y el kernel deja
+ * de incluirlo en el resultado que cruza el `postMessage` cuando
+ * `mode: "preview"` (`KernelRenderResult.imageData`, `worker/kernel.ts`) —
+ * en `mode: "full"` no cambia nada. Ver §6, §10, §12, §13 caso 37.
  * ADR-055 NO está en esa lista: es un PR preventivo de endurecimiento (D2 de
  * la serie D1..D4 de `roadmap/MVP.md`, ADR-055 §9 fila "3-5") que no cambia
  * ningún contrato público ni comportamiento
@@ -437,7 +446,10 @@ function isEncodedPageImage(value: unknown): value is EncodedPageImage {
 function isKernelRenderResult(value: unknown): value is KernelRenderResult {
   return (
     isRecord(value) &&
-    isImageData(value.imageData) &&
+    // ADR-156 §2: `imageData` es opcional — presente en `mode: "full"`,
+    // ausente en `mode: "preview"`. Las dos formas son legítimas; ausente no
+    // es "forma no reconocida".
+    (value.imageData === undefined || isImageData(value.imageData)) &&
     isEncodedPageImage(value.encoded) &&
     // ADR-062 §1: `degraded` es obligatorio en el resultado del kernel (array
     // vacío cuando no hay ninguna). Se valida acá y no se tolera ausente:
@@ -486,9 +498,9 @@ function decodeKernelRenderResult(
     documentId,
     pageIndex,
     "RenderJobPool.dispatch() resolvió con una forma no reconocida: se esperaba " +
-      "{ imageData: ImageData, encoded: EncodedPageImage, degraded: Annotation[] } (KernelRenderResult, " +
-      "worker/kernel.ts#kernelRenderPage) — misma forma en el camino remoto y en " +
-      "el in-process (ADR-055 §2). Devolver un default en silencio está prohibido " +
+      "{ imageData?: ImageData, encoded: EncodedPageImage, degraded: Annotation[] } (KernelRenderResult, " +
+      "imageData presente solo en mode: 'full' desde ADR-156) (worker/kernel.ts#kernelRenderPage) " +
+      "— misma forma en el camino remoto y en el in-process (ADR-055 §2). Devolver un default en silencio está prohibido " +
       `(ADR-055 §3). Forma recibida: ${describeDispatchResultShape(dispatchResult)}.`,
   );
 }
@@ -683,12 +695,19 @@ function previewSchedulerKey(
  * ADR-043, ver `KernelRenderResult`) — permite reusar los mismos bytes para
  * el blob de `PREVIEW_UPDATED` en cache hits de `mode: "preview"` sin volver
  * a tocar `OffscreenCanvas` fuera del kernel.
+ *
+ * ADR-156: **no lleva `imageData`**, en ningún `mode`. Nadie fuera de este
+ * motor lo leía (verificado sobre todo el repo) — dentro, solo lo leían el
+ * contador de bytes de abajo y `toPublicOutput`, que lo copiaba a un campo
+ * público que tampoco consumía nadie. En `mode: "full"` el kernel sigue
+ * devolviendo `imageData` (sin cambios ahí), pero esta entrada ya no lo
+ * retiene: se descarta una vez decodificado, junto con el resto del
+ * `KernelRenderResult` que no hace falta cachear.
  */
 interface InternalCacheEntry {
   readonly documentId: string;
   readonly pageIndex: number;
   readonly kind: "original" | "anonymized";
-  readonly imageData: ImageData;
   readonly encoded: EncodedPageImage;
   readonly durationMs: number;
   /**
@@ -703,20 +722,26 @@ interface InternalCacheEntry {
   readonly degraded: ReadonlyArray<Annotation>;
 }
 
-// ADR-037 §3: tamaño estimado de una entrada de cache para el límite por bytes
-// (PREVIEW_CACHE_MAX_BYTES) — los píxeles RGBA crudos dominan el costo; se
-// suman los bytes codificados (siempre presentes en la entrada interna).
+// ADR-037 §3 (redefinido por ADR-156): tamaño estimado de una entrada de
+// cache para el límite por bytes (PREVIEW_CACHE_MAX_BYTES). Antes sumaba
+// `imageData.data.byteLength` — los píxeles RGBA crudos, que dominaban el
+// costo (hasta ~32 MB por página a `MAX_RENDER_SCALE` contra ~1 MB
+// codificado) — y ya no existen en la entrada: se cuenta solo lo que de
+// verdad queda retenido.
 function estimateEntryBytes(entry: InternalCacheEntry): number {
-  return entry.imageData.data.byteLength + entry.encoded.bytes.byteLength;
+  return entry.encoded.bytes.byteLength;
 }
 
-/** Proyecta la entrada interna al `RenderPageOutput` público: `encoded` solo se expone si `mode === "full"` (Render_Engine.md §10). */
+/**
+ * Proyecta la entrada interna al `RenderPageOutput` público: `encoded` solo
+ * se expone si `mode === "full"` (Render_Engine.md §10). `imageData` no se
+ * proyecta nunca (ADR-156) — la entrada ya no lo tiene, en ningún `mode`.
+ */
 function toPublicOutput(entry: InternalCacheEntry, mode: "preview" | "full"): RenderPageOutput {
   return {
     documentId: entry.documentId,
     pageIndex: entry.pageIndex,
     kind: entry.kind,
-    imageData: entry.imageData,
     durationMs: entry.durationMs,
     ...(mode === "full" ? { encoded: entry.encoded } : {}),
   };
@@ -1218,11 +1243,12 @@ export class RenderEngine implements IEngine {
     checkpoint();
 
     const durationMs = Date.now() - startedAt;
+    // ADR-156: `kernelResult.imageData` (presente solo en mode: "full") se
+    // descarta acá — la entrada interna no lo retiene en ningún `mode`.
     const entry: InternalCacheEntry = {
       documentId,
       pageIndex,
       kind,
-      imageData: kernelResult.imageData,
       encoded: kernelResult.encoded,
       durationMs,
       degraded: kernelResult.degraded,

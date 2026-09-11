@@ -1368,7 +1368,17 @@ export interface KernelRenderOptions {
 }
 
 export interface KernelRenderResult {
-  readonly imageData: ImageData;
+  /**
+   * ADR-156: presente solo en `mode: "full"`. En `mode: "preview"` el kernel
+   * ya no lo incluye en el resultado que cruza el `postMessage` — el ahorro
+   * no es dejar de guardarlo (eso lo resuelve el host, `InternalCacheEntry`),
+   * es dejar de materializar la copia completa del RGBA (hasta ~32 MB por
+   * página a `MAX_RENDER_SCALE`) en el proceso host para algo que ningún
+   * consumidor lee. `getImageData()` sigue corriendo igual en los dos modos
+   * —hace falta para producir `encoded`—, lo que cambia es si el resultado
+   * ya construido se **incluye** en lo que se devuelve.
+   */
+  readonly imageData?: ImageData;
   /**
    * ADR-062 §1: las anotaciones `Degraded` de ESTE render. El kernel ya las
    * calculaba para decidir si pintar el recuadro de aviso en el preview; lo
@@ -1501,7 +1511,13 @@ export async function kernelRenderPage(
     opts.onWarn,
   );
 
-  return { imageData, encoded, degraded: degradedVerdict };
+  // ADR-156 §2: `imageData` solo cruza el postMessage en `mode: "full"` — es
+  // exactamente el ahorro del ADR (no materializar en el host una copia que
+  // nadie lee en preview). `getImageData()` de arriba ya corrió en los dos
+  // modos, sin condicional: hace falta igual para producir `encoded`.
+  return mode === "full"
+    ? { imageData, encoded, degraded: degradedVerdict }
+    : { encoded, degraded: degradedVerdict };
 }
 
 export interface KernelRasterizeOptions {

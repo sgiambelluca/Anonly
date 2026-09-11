@@ -70,7 +70,7 @@ describe("RenderEngine — contract tests", () => {
     await expect(engine.renderPage(input, ctx)).rejects.toThrow(EngineDisposedError);
   });
 
-  it("renderPage returns ImageData with correct dimensions", async () => {
+  it("renderPage returns an encoded image with correct dimensions (ADR-156: imageData is always undefined)", async () => {
     const docId = "doc-dimensions";
     vi.mocked(getDocument).mockReturnValue(
       mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
@@ -78,14 +78,25 @@ describe("RenderEngine — contract tests", () => {
     await engine.init(ctx);
     await engine.loadDocument(docId, createValidBuffer());
 
+    // mode: "full" (no "preview"): desde ADR-156, `encoded` solo se expone
+    // públicamente en mode "full" — es el único lugar donde queda una
+    // dimensión verificable en el output. `scale: 1` explícito para no
+    // depender de `fullScale` (2.08 por default) y mantener los mismos
+    // 595×842 del mock, sea cual sea el default de config.
     const output = await engine.renderPage(
-      createRenderPageInput({ documentId: docId, pageIndex: 0, kind: "original", mode: "preview" }),
+      createRenderPageInput({
+        documentId: docId,
+        pageIndex: 0,
+        kind: "original",
+        mode: "full",
+        scale: 1,
+      }),
       ctx,
     );
 
-    expect(output.imageData.width).toBe(595); // width mock * previewScale (1)
-    expect(output.imageData.height).toBe(842);
-    expect(output.imageData.data.length).toBe(595 * 842 * 4);
+    expect(output.encoded?.widthPx).toBe(595); // width mock * scale (1)
+    expect(output.encoded?.heightPx).toBe(842);
+    expect(output.imageData).toBeUndefined(); // ADR-156: nunca poblado, ni en mode "full".
     expect(output.documentId).toBe(docId);
     expect(output.pageIndex).toBe(0);
     expect(output.kind).toBe("original");
@@ -249,8 +260,12 @@ describe("RenderEngine — contract tests", () => {
     expect(output.encoded).toBeDefined();
     expect(output.encoded?.format).toBe("jpeg"); // default full imageFormat (§9)
     expect(output.encoded?.bytes.byteLength).toBeGreaterThan(0);
-    expect(output.encoded?.widthPx).toBe(output.imageData.width);
-    expect(output.encoded?.heightPx).toBe(output.imageData.height);
+    // ADR-156: `output.imageData` ya no existe para comparar contra —la
+    // dimensión exacta a `scale: 1` ya se verifica en el test de arriba
+    // ("returns an encoded image with correct dimensions").
+    expect(output.encoded?.widthPx).toBeGreaterThan(0);
+    expect(output.encoded?.heightPx).toBeGreaterThan(0);
+    expect(output.imageData).toBeUndefined(); // ADR-156: nunca poblado, ni en mode "full".
   });
 
   // ─── ADR-037 §1 (Hito 10): RENDER_REQUESTED.scale ───
