@@ -1,15 +1,17 @@
-<!-- CONTEXT: scope=ocr-engine | dependencias=core/Contracts.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-018-First-Party-Assets.md,adr/ADR-021-Engines-Inline-Hasta-Hito9.md,adr/ADR-041-FuseOcrPage-Funcion-Pura-Sin-Estado-Retenido.md,adr/ADR-045-OcrEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-064-Palabras-De-OCR-En-Puntos.md,adr/ADR-090-La-Orientacion-De-Un-Escaneo-Se-Detecta.md,adr/ADR-119-La-Orientacion-Se-Detecta-Con-El-Motor-Que-La-Sabe-Leer.md,adr/ADR-112-El-Sello-No-Es-Un-Parrafo.md,adr/ADR-121-El-Sello-Rotado-Vive-En-El-Margen.md,adr/ADR-101-El-Despacho-Paralelo-De-OCR-Que-Nunca-Aterrizo.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md | audiencia=IA-implementador | fase=11 (§6/§9/§11/§13/§14/§15 en fase 11 por ADR-143: processSession pide cada imagen bajo demanda, con presupuesto de bytes en vivo, en vez de que el caller materialice todo el documento antes de empezar; §10/§13/§14/§15 en fase 11 por ADR-121: las pasadas rotadas sobre las franjas de margen; §13/§14/§15 en fase 11 por ADR-112: el modo de segmentación de página es SPARSE_TEXT; §2/§6/§12/§15 actualizados en fase 10: clase host-side dueña de su pool + kernel de reconocimiento en el worker, ADR-045; §9/§10/§11/§13/§14 en fase 10.8: las palabras salen en puntos de página, no en píxeles del raster, ADR-064) -->
+<!-- CONTEXT: scope=ocr-engine | dependencias=core/Contracts.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-018-First-Party-Assets.md,adr/ADR-021-Engines-Inline-Hasta-Hito9.md,adr/ADR-041-FuseOcrPage-Funcion-Pura-Sin-Estado-Retenido.md,adr/ADR-045-OcrEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-064-Palabras-De-OCR-En-Puntos.md,adr/ADR-090-La-Orientacion-De-Un-Escaneo-Se-Detecta.md,adr/ADR-119-La-Orientacion-Se-Detecta-Con-El-Motor-Que-La-Sabe-Leer.md,adr/ADR-112-El-Sello-No-Es-Un-Parrafo.md,adr/ADR-121-El-Sello-Rotado-Vive-En-El-Margen.md,adr/ADR-101-El-Despacho-Paralelo-De-OCR-Que-Nunca-Aterrizo.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-158-El-Raster-De-OCR-Viaja-Codificado.md | audiencia=IA-implementador | fase=11 (§6/§9/§11/§13/§14/§15 en fase 11 por ADR-143: processSession pide cada imagen bajo demanda, con presupuesto de bytes en vivo, en vez de que el caller materialice todo el documento antes de empezar; §10/§13/§14/§15 en fase 11 por ADR-121: las pasadas rotadas sobre las franjas de margen; §13/§14/§15 en fase 11 por ADR-112: el modo de segmentación de página es SPARSE_TEXT; §2/§6/§12/§15 actualizados en fase 10: clase host-side dueña de su pool + kernel de reconocimiento en el worker, ADR-045; §9/§10/§11/§13/§14 en fase 10.8: las palabras salen en puntos de página, no en píxeles del raster, ADR-064) -->
 
 # OCR Engine — Spec de Motor
 
 > Ejecuta OCR sobre las páginas sin texto del PDF. Solo corre si `PdfEngineOutput.textlessPages.length > 0`. Devuelve `Word[]` con `BoundingBox` y `confidence` que el PDF Engine fusiona.
 
 **EngineId**: `ocr`
-**Versión del spec**: 1.10.0
-**Última actualización**: 2026-09-11
+**Versión del spec**: 1.11.0
+**Última actualización**: 2026-09-12
 
 > **Nota (v1.10.0, ADR-157 §1bis, 2026-09-11 — el motor expone la baja de su propio pool)**: `runOcrStage` necesita dar de baja el `OcrPool` al terminar la etapa (ADR-157 §1) para no dejar Tesseract (~300 MB) residente durante toda la detección, pero desde ADR-045 el Orchestrator **no tiene ninguna referencia** a ese pool — lo construye `create-core.ts` y se inyecta directo en el constructor del motor. `OcrEngine` gana `releaseIdleWorkers(): void` (§6), que delega en su pool privado — mismo nombre que `WorkerPool.releaseIdleWorkers()` (ADR-080) a propósito: la semántica es idéntica, incluida su guarda (`§1ter` del ADR: no hace nada si el pool no está ocioso — un worker con un job en vuelo no se termina nunca, porque `terminate()` no dispara `error` y la promesa de ese job quedaría colgada para siempre). **No se agrega a `IEngine`**: es específico de este motor, sin equivalente en NER (ADR-157 §4) ni en los demás. No hay tipo, evento ni error code nuevo — es superficie de la interfaz pública de este motor, y por eso va acá y no en `Contracts.md`. Ver §6.
 >
+> **Nota (v1.11.0, ADR-158, 2026-09-12 — el ráster llega codificado)**: la imagen de cada página llegaba como `ImageData` crudo —~35 MB por página A4 a 300 dpi— y este motor construía **otro** `OffscreenCanvas` con `putImageData` para dárselo a tesseract.js… que lo **encodeaba a PNG igual**, porque su `loadImage` convierte cualquier entrada a bytes de imagen codificada y su core no acepta píxeles crudos. Cuatro materializaciones por página en vuelo, y el consumidor final comprimía de todas formas. `OcrPageInput.imageData: ImageData` pasa a `image: EncodedPageImage` (PNG, **sin pérdida** — jpeg queda descartado por no tocar la calidad de entrada del reconocimiento), y `OcrImageProducer` devuelve lo mismo. **El motor decodifica una sola vez**, con `createImageBitmap` sobre un canvas: desde ahí salen el reconocimiento principal, el enderezado de ADR-120 —solo si la orientación no es 0— y las franjas de margen de ADR-121, que corren **siempre** y ahora se recortan con `getImageData` sobre la franja (20 % del ancho) en vez de sobre la página entera. **La salvedad, declarada**: el worker sigue materializando una página de píxeles; lo que desaparece es el clon que cruzaba el `postMessage`, el que el host retenía y el segundo canvas — el ahorro es del host y de la frontera, no de este motor. `estimatedBytes` y `maxLiveImageBytes` siguen midiendo el tamaño **decodificado** (§6), que es lo que este motor materializa. El corpus de detección de ADR-147 tiene que dar **idéntico**: PNG es sin pérdida, así que cualquier diferencia es un defecto de la conversión, no una degradación aceptable. Ver §6, §9, §10, §13, §14, §15.
+
 > **Nota (v1.9.0, ADR-143, 2026-09-09 — las imágenes de OCR se producen cuando hay lugar)**: `Orchestrator.runOcrStage` rasterizaba **todo** el documento antes de llamar a `processPages` — 50 páginas A4 a 300 dpi son 1,74 GB de `ImageData` vivos antes de que Tesseract lea la primera. `processSession` (§6) es la entrada nueva: recibe descriptores livianos (`OcrPageRequest`, sin imagen) y un productor (`OcrImageProducer`) que el façade implementa llamando a `RenderEngine.rasterizePage` host-side — la función nunca cruza un `postMessage` y no entra en `EngineConfig`. Cada uno de los `C = min(ocrPoolSize, requests.length)` consumidores reserva presupuesto (`ocr.maxLiveImageBytes`, campo nuevo de `OcrConfig`, default 128 MiB) **antes** de pedir su imagen, la procesa y suelta la reserva recién cuando la página se asienta — el pico de imágenes vivas pasa a depender de `C`, no del largo del documento. Un descriptor cuyo `estimatedBytes` solo supera el presupuesto falla con `OCR_PAGE_FAILED` (§11, §13 caso 17): no se baja el DPI ni se recorta en silencio. Un fallo del productor (Render) recibe el mismo tratamiento, con el `code` del error original en `details` (§13 caso 18). `processPages` se **conserva** con su firma y semántica actuales — pasa a ser el caso particular cuyo productor devuelve la imagen que el caller ya tenía en memoria, con `estimatedBytes: 0` porque no hay nada que reservar; ningún consumidor existente cambia (los 108 tests previos de este paquete pasan sin tocar). `OCR_STARTED`/`OCR_FINISHED` siguen siendo una sesión, no un evento por minilote — eso no cambia, solo de dónde sale la imagen de cada página. Ver §6, §9, §11, §13 casos 17-18, §14 y §15 item 29.
 
 > **Nota (v1.8.1, 2026-09-03 — errata de mirror: ADR-119 dejó al reconocimiento sin su core; sin ADR propio, es un pin que faltó)**: ADR-119 §1 le sacó `legacyCore` al worker principal —correcto, ese worker ya no detecta—, pero nadie tocó `assets.lock.json`, que desde ADR-090 §1 mirrorea **solo** los cores completos. tesseract.js elige el archivo dentro de `corePath` por `lstmOnly`, que sale de `[OEM.DEFAULT, OEM.LSTM_ONLY].includes(oem) && !options.legacyCore` (`createWorker.js:36`) y en el worker principal vale `true`: pide `tesseract-core-simd-lstm.wasm.js`, que **ya no está mirroreado**. `importScripts` da 404, `createWorker` rechaza y **toda página escaneada** muere con `OcrModelMissingError` — mismo modo de falla que la errata v1.2.1, y otra vez con el pipeline llegando al final (ahora con el aviso de análisis incompleto, no en silencio). La regla queda: **los dos workers eligen distinto, así que el mirror lleva los cuatro cores** — `tesseract-core[-simd]-lstm` para reconocer, `tesseract-core[-simd]` para OSD. Es exactamente la alternativa que ADR-090 descartó por *"duplica lo mirroreado sin ningún caso que lo pida"*: ADR-119 creó el caso. Cuesta +7,9 MB **en el mirror**; el usuario sigue bajando **dos** cores, uno por worker. El único gate que lo ve es el Escenario 2 E2E, que es el único que corre Tesseract de verdad: los `vi.mock("tesseract.js", …)` no bajan archivos. Fix: `assets.lock.json`, item §15.27.
@@ -99,14 +101,18 @@ export interface OcrConfig {
   // ADR-143 §3: máximo de bytes RGBA estimados en vivo entre las imágenes
   // que processSession produce a la vez (reserva atómica antes de
   // rasterizar). Un descriptor cuyo estimatedBytes lo supera por sí solo
-  // falla la página, no se encoge en silencio (§4).
+  // falla la página, no se encoge en silencio (§4). ADR-158 §4: lo que se
+  // reserva sigue siendo el tamaño DECODIFICADO, aunque lo que viaje sea PNG.
   readonly maxLiveImageBytes: number; // default 128 * 1024 * 1024 (128 MiB)
 }
 
 export interface OcrPageInput {
   readonly documentId: string;
   readonly pageIndex: number;
-  readonly imageData: ImageData;              // se transfiere (zero-copy)
+  // ADR-158 §2: imagen CODIFICADA (PNG), no píxeles crudos. Se CLONA, no se
+  // transfiere: el reintento reusa el buffer (ADR-079), y a unos pocos MB el
+  // ahorro de transferir no compensa dejarlo detached en el segundo intento.
+  readonly image: EncodedPageImage;
   readonly dpi: number;
   readonly languages: ReadonlyArray<string>;
 }
@@ -128,6 +134,10 @@ export interface OcrPageRequest {
   readonly region?: BoundingBox;    // ADR-065: presente si es un recorte
   readonly dpi: number;
   readonly languages: ReadonlyArray<string>;
+  // ADR-158 §4: sigue siendo el tamaño DECODIFICADO (ancho × alto × 4), no el
+  // del PNG que viaja. Es lo que el worker materializa de verdad; estimar el
+  // transportado aflojaría el presupuesto de ADR-143 entre diez y treinta
+  // veces sin que nadie lo hubiera decidido.
   readonly estimatedBytes: number;  // bytes RGBA estimados, ANTES de producir
 }
 
@@ -137,7 +147,7 @@ export interface OcrPageRequest {
 export type OcrImageProducer = (
   request: OcrPageRequest,
   signal: AbortSignal,
-) => Promise<ImageData>;
+) => Promise<EncodedPageImage>;   // ADR-158 §2
 
 export class OcrEngine implements IEngine {
   readonly id = EngineId.Ocr;
