@@ -2,7 +2,7 @@
 
 # ADR-157 — El pool de OCR se da de baja al terminar su etapa
 
-- **Estado**: Accepted
+- **Estado**: Accepted (**§1 corregido el 2026-09-11**, antes de implementar: el Orchestrator **no tiene** referencia al pool de OCR desde ADR-045, así que la baja la expone `OcrEngine`. Ver §1bis)
 - **Fecha**: 2026-09-11
 - **Decidido por**: El humano, sobre H-09D3-c: *"no hay forma que el usuario vuelva a necesitar el OCR una vez la aplicación haya terminado de escanear"*. Casi — ver §2.
 - **Relacionado con**: ADR-080 (la liberación por inactividad, que acá no alcanza), ADR-038 §1 (el reanálisis, la única excepción), ADR-154 §2 (los levers aceptados)
@@ -63,6 +63,59 @@ corrieron), el Orchestrator **dispone el pool de OCR** antes de pasar a
 siendo un temporizador: una carrera contra la duración de la detección en vez de
 un orden garantizado.
 
+### 1bis. Quién puede darlo de baja: `OcrEngine`, no el Orchestrator
+
+§1 decía "el Orchestrator dispone el pool de OCR". **No puede**, y el
+implementador lo frenó antes de escribir algo que habría compilado sin hacer
+nada.
+
+Desde ADR-045 el `OcrPool` lo construye `create-core.ts` y se **inyecta en el
+constructor del motor**; el `WorkerPoolManager` que vive en el Orchestrator solo
+posee el de pdf. El encabezado de `create-core.ts` lo dice literal: *"El
+Orchestrator ya no sostiene ninguna referencia a un pool de render, ocr, ner o
+export"*.
+
+Y la trampa que hay que dejar escrita, porque el próximo que pase va a caer en
+ella: `WorkerPoolManager.getPool("ocr")` **no falla** — crea un pool nuevo,
+vacío y desconectado bajo esa clave. Llamarle `releaseIdleWorkers()` a ese objeto
+compila, pasa un test superficial y no libera absolutamente nada, porque ningún
+job de OCR se despachó nunca contra él.
+
+**La baja la expone el motor**, que es su dueño:
+
+```ts
+// ocr-engine, interfaz pública
+releaseIdleWorkers(): void;   // delega en su pool privado
+```
+
+Es la opción que respeta el reparto de ADR-045 en vez de esquivarlo. La
+alternativa —que el façade retuviera el pool y le pasara un callback al
+Orchestrator— reintroduce por la ventana la referencia que ADR-045 sacó por la
+puerta, y deja al motor sin saber que alguien le está apagando los workers.
+
+**No se agrega a `IEngine`**: NER no lo necesita (§4) y los demás tampoco. Es un
+método de `OcrEngine`, y por eso va a la sección de interfaces públicas de
+`core/OCR_Engine.md` **antes** del código (R-2/R-19).
+
+**Alcance**: son dos módulos, así que **dos commits** (R-1/R-5) —
+primero `ocr-engine` con el método y su línea de spec, después el façade con la
+llamada—, y no uno.
+
+### 1ter. `releaseIdleWorkers` no hace nada si el pool no está ocioso
+
+`WorkerPool.releaseIdleWorkers()` arranca con `if (!this.isIdle) return;`, e
+`isIdle` exige `active === 0`, cola vacía, sin jobs remotos pendientes y sin
+broadcasts en vuelo. La guarda existe por una razón dura: `terminate()` no
+dispara el evento `error`, así que matar un worker con un job en vuelo deja esa
+promesa colgada **para siempre**.
+
+Consecuencia para §3: en el camino feliz el pool está ocioso cuando
+`processSession` resuelve, y la baja ocurre. En **cancelación** puede no estarlo,
+y entonces la llamada es un no-op silencioso y la memoria la libera el
+temporizador de ADR-080 como hasta hoy. Eso es correcto —es preferible a dejar
+promesas colgadas— pero hay que **escribirlo en el test**: la prueba de la vía de
+cancelación afirma que no se rompe nada, no que se liberó.
+
 ### 2. El pool queda usable, y el reanálisis paga la recarga
 
 ADR-080 ya define que un pool dispuesto por inactividad **sigue usable**: el
@@ -116,6 +169,12 @@ de ese orden sería esperar indefinidamente.
 - El Orchestrator gana una responsabilidad más sobre el ciclo de vida de un pool
   que hasta ahora se gobernaba solo.
 
+- **`ocr-engine` gana superficie pública** (§1bis). Es un método de ciclo de vida
+  en un motor que hasta ahora solo exponía `init`/`process*`/`dispose`, y lo usa
+  un único caller. Se acepta porque la alternativa era peor —el façade metiendo
+  mano en un pool que no es suyo—, pero es superficie nueva y va documentada.
+
 **Lo que no toca**: `idleDisposeMs` ni el mecanismo de ADR-080, el pool de NER,
-`Contracts.md` —no hay tipo, evento ni error code nuevo—, ni el camino de
-reanálisis, que sigue funcionando por la reconstrucción perezosa.
+`Contracts.md` —no hay tipo, evento ni error code nuevo; el método es de la
+interfaz pública del motor, que vive en su spec—, ni el camino de reanálisis, que
+sigue funcionando por la reconstrucción perezosa.
