@@ -1,12 +1,25 @@
-<!-- CONTEXT: scope=ocr-engine | dependencias=core/Contracts.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-018-First-Party-Assets.md,adr/ADR-021-Engines-Inline-Hasta-Hito9.md,adr/ADR-041-FuseOcrPage-Funcion-Pura-Sin-Estado-Retenido.md,adr/ADR-045-OcrEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-064-Palabras-De-OCR-En-Puntos.md,adr/ADR-090-La-Orientacion-De-Un-Escaneo-Se-Detecta.md,adr/ADR-119-La-Orientacion-Se-Detecta-Con-El-Motor-Que-La-Sabe-Leer.md,adr/ADR-112-El-Sello-No-Es-Un-Parrafo.md,adr/ADR-121-El-Sello-Rotado-Vive-En-El-Margen.md,adr/ADR-101-El-Despacho-Paralelo-De-OCR-Que-Nunca-Aterrizo.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-158-El-Raster-De-OCR-Viaja-Codificado.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md | audiencia=IA-implementador | fase=11 (§12/§13/§15 en fase 11 por ADR-160: el kernel no materializa la pagina completa en el camino comun — los bytes codificados van directo a tesseract.js, el OSD decodifica reducido y las franjas de ADR-121 decodifican solo su franja; §6/§9/§11/§13/§14/§15 en fase 11 por ADR-143: processSession pide cada imagen bajo demanda, con presupuesto de bytes en vivo, en vez de que el caller materialice todo el documento antes de empezar; §10/§13/§14/§15 en fase 11 por ADR-121: las pasadas rotadas sobre las franjas de margen; §13/§14/§15 en fase 11 por ADR-112: el modo de segmentación de página es SPARSE_TEXT; §2/§6/§12/§15 actualizados en fase 10: clase host-side dueña de su pool + kernel de reconocimiento en el worker, ADR-045; §9/§10/§11/§13/§14 en fase 10.8: las palabras salen en puntos de página, no en píxeles del raster, ADR-064) -->
+<!-- CONTEXT: scope=ocr-engine | dependencias=core/Contracts.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-018-First-Party-Assets.md,adr/ADR-021-Engines-Inline-Hasta-Hito9.md,adr/ADR-041-FuseOcrPage-Funcion-Pura-Sin-Estado-Retenido.md,adr/ADR-045-OcrEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-064-Palabras-De-OCR-En-Puntos.md,adr/ADR-090-La-Orientacion-De-Un-Escaneo-Se-Detecta.md,adr/ADR-119-La-Orientacion-Se-Detecta-Con-El-Motor-Que-La-Sabe-Leer.md,adr/ADR-112-El-Sello-No-Es-Un-Parrafo.md,adr/ADR-121-El-Sello-Rotado-Vive-En-El-Margen.md,adr/ADR-101-El-Despacho-Paralelo-De-OCR-Que-Nunca-Aterrizo.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-158-El-Raster-De-OCR-Viaja-Codificado.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md,adr/ADR-161-Una-Franja-Sin-Tinta-No-Se-Reconoce.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md | audiencia=IA-implementador | fase=11 (§12/§13/§14/§15 en fase 11 por ADR-162: cada franja visualmente blanca evita sus dos pasadas, con una compuerta exacta y fail-open; §12/§13/§15 en fase 11 por ADR-160: el kernel no materializa la pagina completa en el camino comun — los bytes codificados van directo a tesseract.js, el OSD decodifica reducido y las franjas de ADR-121 decodifican solo su franja; §6/§9/§11/§13/§14/§15 en fase 11 por ADR-143: processSession pide cada imagen bajo demanda, con presupuesto de bytes en vivo, en vez de que el caller materialice todo el documento antes de empezar; §10/§13/§14/§15 en fase 11 por ADR-121: las pasadas rotadas sobre las franjas de margen; §13/§14/§15 en fase 11 por ADR-112: el modo de segmentación de página es SPARSE_TEXT; §2/§6/§12/§15 actualizados en fase 10: clase host-side dueña de su pool + kernel de reconocimiento en el worker, ADR-045; §9/§10/§11/§13/§14 en fase 10.8: las palabras salen en puntos de página, no en píxeles del raster, ADR-064) -->
 
 # OCR Engine — Spec de Motor
 
 > Ejecuta OCR sobre las páginas sin texto del PDF. Solo corre si `PdfEngineOutput.textlessPages.length > 0`. Devuelve `Word[]` con `BoundingBox` y `confidence` que el PDF Engine fusiona.
 
 **EngineId**: `ocr`
-**Versión del spec**: 1.12.0
+**Versión del spec**: 1.13.0
 **Última actualización**: 2026-09-13
+
+> **Nota (v1.13.0, ADR-162, 2026-09-13 — solo una franja visualmente blanca
+> se saltea)**: ADR-161 proponía una métrica de tinta calibrada, pero dejaba sin
+> fijar el umbral de luminancia, el mínimo de densidad y el margen bajo el piso;
+> además, la baseline de ADR-147 no está promovida y el corpus no contiene un
+> escaneo real con sello rotado. T-4 adopta la única compuerta que no necesita
+> esos números: una franja evita sus dos pasadas solo cuando **cada** píxel es
+> totalmente transparente o RGB blanco puro. Cualquier píxel visible no blanco
+> —incluidos `(254,255,255)` opaco y negro con `alpha = 1`— conserva ambas
+> pasadas. Se evalúa por franja, una vez antes de 90°/270°; una incertidumbre o
+> fallo del predicado abre la compuerta. Sin campo de `OcrConfig`, sin umbral y
+> sin cambio de fusión. La variante calibrada para fondos grises/ruidosos queda
+> como T-4b bloqueada por corpus. Ver §12, §13 casos 23-25, §14 y §15 item 31.
 
 > **Nota (v1.12.0, ADR-160, 2026-09-11 — el worker no decodifica la página)**: la salvedad de v1.11.0 ("el motor decodifica una sola vez", "el worker sigue materializando una página de píxeles") **queda retirada para el camino común**. Verificado en la fuente de `tesseract.js@6.0.1`: su `loadImage` acepta un `Blob` y entrega los bytes tal cual al core, que decodifica adentro del WASM — el `ImageData` de página y los **tres** `OffscreenCanvas` de página completa que el kernel construye por página son costo íntegramente nuestro. Con orientación 0: el reconocimiento principal recibe un `Blob` sobre `image.bytes`, el OSD recibe un bitmap producido ya reducido con `createImageBitmap(blob, { resizeWidth, resizeHeight })`, y cada franja de ADR-121 se obtiene con recorte en la propia decodificación. **Cero superficies de página completa.** Los píxeles que llegan al core son bit a bit los mismos (PNG es sin pérdida) y se ahorra un round-trip decode/encode: **este cambio no tiene dimensión de calidad**. El camino de ADR-120 con orientación ≠ 0 decodifica completo como hasta ahora, y es el camino lento declarado. El `angle` de `SetImageFile` **no sirve** para reemplazar la rotación de ADR-120/121 — va a `pixRotate` con `L_ROTATE_AREA_MAP` y salida clavada al tamaño de entrada; no reintentar por esa vía (ADR-160 §4 del Contexto). No toca contratos ni otro motor. Ver §12, §13 (casos 20-22), §15 (item 30).
 >
@@ -311,10 +324,13 @@ OcrPageOutput {
 - **Camino lento, declarado**: con orientación ≠ 0 el enderezado de ADR-120
   necesita la página entera en píxeles y se decodifica completa, igual que antes
   de ADR-160. Es el ~1 % de las páginas.
-- **Pasadas de Tesseract por página**: hoy son **seis** — una de OSD, una
-  principal y cuatro de franjas (ADR-121) — y cada `SetImageFile` copia la página
-  adentro del heap de WASM. Gatear las cuatro de franja es trabajo aparte, con su
-  propio ADR (`roadmap/Optimizacion_De_Memoria_Plan.md` T-4).
+- **Pasadas de Tesseract por página** (ADR-162): son entre **dos y seis** — una
+  de OSD, una principal y cero/dos/cuatro de franjas según haya cero/una/dos
+  franjas activas. Una franja evita sus dos pasadas únicamente cuando todos sus
+  píxeles son transparentes o RGB blanco puro; cualquier señal visible conserva
+  el comportamiento de ADR-121. Cada `SetImageFile` evitado deja de copiar esa
+  franja dentro del heap de WASM. En conteo de `recognize` —OSD usa `detect`— los
+  totales son 1/3/5.
 - **Instancias de Tesseract vivas**: **dos por worker de OCR**, no una — la
   principal y la de OSD (`legacyCore: true`, ADR-119 §1). Con `ocrPoolSize: 2`
   son cuatro.
@@ -359,6 +375,24 @@ OcrPageOutput {
 21. **Página con orientación ≠ 0** (ADR-160 §4): camino lento, declarado. Se decodifica la página completa y el enderezado de ADR-120 opera sobre sus píxeles, exactamente como antes de ADR-160. No es una degradación: es el único camino posible, porque la rotación ortogonal del core no es alcanzable (`angle` va a `pixRotate` con `L_ROTATE_AREA_MAP` y salida clavada al tamaño de entrada; `exif` no es un parámetro de la API). **No reintentar por esa vía.**
 
 22. **`createImageBitmap` no disponible o que rechaza** (ADR-160): mismo tratamiento que el resto de los fallos de página de este motor — `OcrPageFailedError`/`OCR_PAGE_FAILED`, nunca un `ReferenceError` crudo (mismo criterio que el caso de `OffscreenCanvas` del item 28 de §15). Un fallo al decodificar la **franja** se saltea sin voltear la página, igual que hoy (caso 16).
+
+23. **Franja visualmente blanca** (ADR-162): si todos sus píxeles tienen
+    `alpha = 0` o RGB `(255,255,255)`, la franja no se rota ni se entrega a
+    Tesseract; sus dos llamadas de margen a `recognize` no ocurren. La decisión
+    es independiente para izquierda y derecha. Con las dos blancas queda una
+    sola llamada a `recognize` —la principal— más el `detect` de OSD.
+
+24. **Cualquier señal visible o incertidumbre** (ADR-162): un único píxel con
+    `alpha > 0` y algún canal RGB `< 255` activa la franja completa. Incluye un
+    píxel `(254,255,255,255)` y uno `(0,0,0,1)`. Fondo gris, ruido y artefactos
+    también activan: reconocer de más es el lado seguro. Si el predicado no se
+    puede evaluar o lanza, se intentan las dos pasadas — nunca se interpreta el
+    fallo como “vacío”.
+
+25. **Una franja blanca y la otra activa** (ADR-162): se ejecutan exactamente
+    dos llamadas de margen a `recognize`, ambas sobre la franja activa a
+    90°/270°. Las palabras, confianza, cajas y regla de fusión de esa franja son
+    idénticas a ADR-121; la compuerta no participa en qué candidata entra.
 
 ---
 
@@ -434,6 +468,12 @@ OcrPageOutput {
 | `createImageBitmap missing or rejecting fails the page as OcrPageFailedError, not a raw ReferenceError` | `edge.test.ts` | edge | caso 22 — mismo criterio que la guarda de `OffscreenCanvas` (item 28 de §15) |
 | `a strip that fails to decode is skipped without costing the upright text` | `edge.test.ts` | edge | caso 22 — el guard de ADR-121 sigue valiendo para el nuevo camino de recorte |
 | `words and confidence are identical to the pre-ADR kernel for the same PNG` | `snapshot.test.ts` | snapshot | ADR-160 §1 — PNG es sin pérdida y los bytes que llegan al core son los mismos: **cualquier diferencia es un defecto de la conversión, no una degradación aceptable** |
+| `opaque white and transparent colored strips skip both margin recognizes` | `unit.test.ts` | unit | caso 23 — cuenta llamadas de margen (0), no palabras; un assert solo sobre `words = []` pasaría también antes del cambio y viola ADR-149 §2 |
+| `one near-white opaque pixel keeps both margin recognizes` | `unit.test.ts` | unit | caso 24 — `(254,255,255,255)` fija que no existe umbral de luminancia oculto |
+| `one almost-transparent black pixel keeps both margin recognizes` | `unit.test.ts` | unit | caso 24 — `(0,0,0,1)` fija el sesgo conservador de ADR-162 |
+| `one white strip and one active strip run exactly two margin recognizes` | `unit.test.ts` | unit | caso 25 — discriminante por franja; `recognize` total = 3 contando la principal, operaciones Tesseract = 4 contando OSD |
+| `ink-gate uncertainty fails open and preserves both margin recognizes` | `edge.test.ts` | edge | caso 24 — una excepción al inspeccionar la franja no se convierte en falso vacío |
+| `active strips preserve ADR-121 words, confidence, bboxes and fusion` | `snapshot.test.ts` | snapshot | caso 25 — la compuerta decide si entra; una vez adentro, la salida es bit-idéntica al camino anterior |
 
 **Fixtures y mocks (ADR-021 §5)**: los tests **unit / contract / edge** (Hito 3) mockean la frontera `tesseract.js` — deterministas, sin wasm ni descargas; el cast de frontera va en un helper único de `__tests__/fixtures/` (Code_Standards §10, precedente `mockGetDocumentResult` del pdf-engine). Los tests **stress / cancel / integration** son Hito 11 y usan `tests/fixtures/scanned-10p.pdf` (rasterizado a `ImageData` por el host), imagen blanca e imagen con texto pequeño.
 
@@ -467,6 +507,24 @@ OcrPageOutput {
 - [x] 23. (Hito 10.8, paso 0 — ADR-064) `toWords` recibe el `dpi` del payload y convierte cada `bbox` a puntos con `pt = px · 72 / dpi`, **después** de `sortWordsByReadingOrder` (la tolerancia de misma-línea sigue siendo de 1px, ADR-064 §2). Guard de `dpi` finito y `> 0` → `InvalidInputError` (§9, §11). Actualizar el fixture de `tests/integration/ocr-pdf-fusion.test.ts`, que hoy usa valores que pasan en cualquier espacio de coordenadas. Casos 7-8 de §13 y cuatro filas nuevas en §14.
 
 - [x] 30. (ADR-160) Kernel, **solo `ocr-engine`, sin tocar contratos**: `kernelRecognize` deja de llamar a `decodeEncodedImage` en el camino común. (a) el reconocimiento principal recibe ``new Blob([image.bytes], { type: `image/<format>` })``; (b) `detectOrientation` recibe un canvas producido desde `createImageBitmap(blob, { resizeWidth, resizeHeight })` a `OSD_SCALE` — `scaleForOsd` se retira si queda sin llamadores; (c) `recognizeRotatedMargins` obtiene cada franja con `createImageBitmap(blob, sx, sy, sw, sh)` — `cropImageData` se retira si queda sin llamadores; (d) `toWords` usa `image.widthPx`/`image.heightPx` en vez de `imageData.width`/`height`; (e) el camino de orientación ≠ 0 conserva la decodificación completa (caso 21 de §13). **No** tocar: la regla de fusión de ADR-121 (umbral de solape, `ROTATED_MIN_CONFIDENCE`, el guard que impide que una franja fallada cueste el texto derecho), `rotateImageData`, el orden de lectura, `ensureDpiApplied`/`ensurePageSegModeApplied`, `OcrConfig`, `estimatedBytes`/`maxLiveImageBytes` (ADR-143 sigue estimando lo decodificado). **Test obligatorio** (ADR-160, Consecuencias): uno que fije que el camino común **no construye un `OffscreenCanvas` de página completa** — la premisa vive en una dependencia y puede desaparecer en silencio sin romper nada, y **necesita su discriminante**: contra el kernel previo al ADR ese conteo tiene que dar > 0, o el test no está midiendo nada (ADR-149 §2). Casos 20-22 de §13, **diez filas nuevas en §14**.
+
+- [x] 31. (ADR-162, T-4) Kernel, **solo `ocr-engine`, sin tocar contratos ni
+  configuración**: antes de rotar una franja, inspeccionar su `ImageData` con
+  el predicado exacto de §13 caso 23. Si todos los píxeles son transparentes o
+  RGB blanco puro, retornar vacío para esa franja sin invocar sus dos
+  `recognize`; cualquier píxel con `alpha > 0` y algún canal `< 255` conserva
+  ambas pasadas. La decisión es por franja y ocurre una sola vez antes de
+  90°/270°. Si la inspección falla, abrir la compuerta. **No** agregar umbral de
+  luminancia/densidad, constante provisional, campo de `OcrConfig` ni fixture de
+  corpus; eso es T-4b y sigue bloqueado. **No** tocar la regla de fusión de
+  ADR-121, `MARGIN_STRIP_RATIO`, `ROTATED_MIN_CONFIDENCE`, geometría, orden,
+  OSD ni la semántica de fallos/cancelación. Implementar las seis filas de §14
+  asociadas a ADR-162; el discriminante de franja blanca cuenta llamadas de
+  margen y tiene que pasar de 2 a 0 respecto del kernel anterior.
+
+  **Implementado y verificado el 2026-09-13**: 137/137 tests scoped, typecheck
+  y ESLint del paquete verdes. La medición P2 queda como caracterización
+  posterior y no condiciona el cierre funcional de T-4.
 
 - [x] 29. (ADR-143) `ocr.types.ts`: `OcrPageRequest`, `OcrImageProducer`. `ocr.engine.ts`: `LiveImageBudget` (reserva atómica cancelable, `ocr.maxLiveImageBytes`), `processSession` (una sesión, `C = min(ocrPoolSize, requests.length)` consumidores, cada uno reserva → produce → `processPage` → libera en `finally`), `processPages` reimplementado sobre `processSession` con un productor que devuelve la imagen ya recibida y `estimatedBytes: 0`. `ocr.errors.ts`: `OcrPageFailedError` gana un 4º parámetro opcional (`extraDetails`) para el `code` original de un fallo de productor. **No** toca `processPage` ni el kernel. `Contracts.md`/`config.ts`: `OcrConfig.maxLiveImageBytes` (commit de contrato aparte, con el ADR y nada más adentro). Casos 17-18 de §13, diez filas nuevas en §14.
 

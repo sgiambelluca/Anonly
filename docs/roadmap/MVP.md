@@ -546,6 +546,10 @@ De las ~70: **~30 ya estaban cerradas** por hitos posteriores (ADR-053/054/056, 
 - Performance gates (todas las métricas de `00_Project_Vision.md` §7).
 - Leak tests, cancel tests.
 - Security tests.
+- Campaña de memoria H-10: T-1/T-2 cerradas, T-3 cerrada inconclusa con la
+  extrapolación lineal descartada; T-4 cerrada como compuerta exacta de franjas
+  blancas (ADR-162), con 137/137 tests scoped verdes. La heurística calibrada para márgenes
+  ruidosos queda separada como T-4b y bloqueada por el corpus de ADR-147.
 - Verificación de integridad en runtime de modelos/wasm (`crypto.subtle.digest` contra `assets.lock.json`, ADR-018 punto 3) en `ocr-engine` y `ner-engine`; hash mismatch → `OCR_MODEL_MISSING` / `NER_MODEL_LOAD_FAILED`. Incluye test de integridad: asset con hash alterado → error tipado, no se carga.
 - Audit `pnpm audit`.
 - Bundle size check.

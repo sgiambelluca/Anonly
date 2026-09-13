@@ -1,10 +1,10 @@
-<!-- CONTEXT: scope=adr | dependencias=core/OCR_Engine.md,adr/ADR-121-El-Sello-Rotado-Vive-En-El-Margen.md,adr/ADR-120-Una-Hoja-Torcida-Se-Lee-Enderezada.md,adr/ADR-147-Perder-Un-Identificador-Cubierto-Es-Una-Regresion.md,adr/ADR-149-Un-Gate-Que-No-Ejecuta-Nada-Es-Rojo.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=core/OCR_Engine.md,adr/ADR-121-El-Sello-Rotado-Vive-En-El-Margen.md,adr/ADR-120-Una-Hoja-Torcida-Se-Lee-Enderezada.md,adr/ADR-147-Perder-Un-Identificador-Cubierto-Es-Una-Regresion.md,adr/ADR-149-Un-Gate-Que-No-Ejecuta-Nada-Es-Rojo.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-161 — Una franja sin tinta no se reconoce
 
-- **Estado**: Accepted — **con el umbral sin fijar a propósito** (§3). El
-  procedimiento de calibración es parte de la decisión; el número sale de
-  ejecutarlo, no de elegirlo.
+- **Estado**: Accepted, **parcialmente superseded por ADR-162**. T-4 implementa
+  la compuerta exacta de blanco; la calibración de §Decisión.1–3 queda como
+  T-4b, bloqueada por corpus.
 - **Fecha**: 2026-09-12
 - **Decidido por**: El planificador, sobre el conteo de pasadas de OCR por página
   y la lectura del fork de Tesseract que compila `tesseract.js-core`.
@@ -12,6 +12,14 @@
   (la baseline que decide el umbral), ADR-149 §2 (un gate necesita su
   discriminante), ADR-160 (el otro lever del mismo camino), ADR-154 §2
 - **Parte de**: Hito 11 — Hardening
+
+> **Enmienda 2026-09-13 (ADR-162).** La auditoría previa a implementación
+> confirmó que este documento no fijaba el umbral de luminancia, el mínimo de
+> densidad ni el “margen” bajo el piso, y que la baseline/caso positivo de
+> ADR-147 todavía no existen. T-4 no inventa esos valores: saltea solo una
+> franja visualmente blanca mediante el predicado exacto de ADR-162. El
+> procedimiento calibrado de §Decisión.3 sobrevive con el nombre **T-4b** y no
+> se implementa ahora.
 
 ## Contexto
 

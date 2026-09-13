@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-plan | dependencias=roadmap/H-10_Bitacora_De_Memoria.md,architecture/07_Performance_Strategy.md,core/OCR_Engine.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-147-Perder-Un-Identificador-Cubierto-Es-Una-Regresion.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-157-El-Pool-De-OCR-Se-Da-De-Baja-Al-Terminar-Su-Etapa.md,adr/ADR-158-El-Raster-De-OCR-Viaja-Codificado.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md,adr/ADR-161-Una-Franja-Sin-Tinta-No-Se-Reconoce.md,tests/fixtures/README.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=roadmap-plan | dependencias=roadmap/H-10_Bitacora_De_Memoria.md,architecture/07_Performance_Strategy.md,core/OCR_Engine.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-147-Perder-Un-Identificador-Cubierto-Es-Una-Regresion.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-157-El-Pool-De-OCR-Se-Da-De-Baja-Al-Terminar-Su-Etapa.md,adr/ADR-158-El-Raster-De-OCR-Viaja-Codificado.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md,adr/ADR-161-Una-Franja-Sin-Tinta-No-Se-Reconoce.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,tests/fixtures/README.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 -->
 
 # Optimización de memoria — plan de campaña
 
@@ -9,7 +9,9 @@
 > **Estado (2026-09-12)**: T-1 cerrada; **T-2 cerrada**, implementada y
 > verificada con control A/B; **T-3 cerrada con resultado inconcluso** —la
 > extrapolación lineal no ocurrió, pero tampoco apareció una meseta limpia—;
-> T-4 documentada pero bloqueada por el corpus de ADR-147; T-5 postergada;
+> T-4 **cerrada** en su variante exacta y sin calibración (ADR-162), con sus
+> gates scoped verdes; T-4b conserva la heurística calibrada y sigue bloqueada por el
+> corpus de ADR-147; T-5 postergada;
 > T-6 partida en T-6a (autorizada) y T-6b (medición pendiente).
 
 **Perfil de referencia**: P2 — 50 páginas escaneadas, OCR + NER reales, sobre el
@@ -373,30 +375,70 @@ cuadro comparativo quedó transcripto y el planificador registró una conclusió
 estructural/acotada/inconclusa. **Cumplido el 2026-09-13: T-3 cierra como
 inconclusa, con la extrapolación lineal descartada.**
 
-### T-4 — Gatear las franjas de margen de ADR-121
+### T-4 — Gatear las franjas visualmente blancas de ADR-121 — **CERRADA**
 
-**Dónde**: `ocr-engine`. **ADR**: **161, escrito** — con el umbral deliberadamente
-sin fijar: §3 define el procedimiento de calibración contra el corpus de ADR-147
-y el número sale de ejecutarlo, no de elegirlo. **Bloqueada hasta tener ese
-corpus corrido**: si no contiene franjas con texto rotado, no hay piso que medir
-y el gate no se activa (ADR-161 §3, último párrafo).
+**Dónde**: `ocr-engine` únicamente. **ADR**: 161 + **162**. **Contrato**: no
+cambia. ADR-162 cierra la ambigüedad que impedía entregar ADR-161: T-4 no usa un
+umbral de luminancia ni densidad; saltea solo una franja demostrablemente blanca.
 
 > **El modo de falla es asimétrico y define la forma del gate**: saltear una
 > franja con un sello es una **fuga de datos**; correr una franja vacía es tiempo
-> y memoria. El sesgo es explícito — ante la duda, se reconoce (ADR-161 §2).
+> y memoria. Por eso cualquier píxel visible distinto de blanco —aunque tenga
+> `alpha = 1` o un único canal en 254— conserva las dos pasadas. Ruido, fondo
+> gris o incertidumbre también conservan el camino anterior.
 
 Hoy las cuatro pasadas rotadas corren **siempre**, sin condición. El propio
 ADR-121 dice que sobre un documento sin texto rotado *"las cuatro pasadas
 producen 4 candidatas y entran 0. Lo único que cambia ahí es el reloj"* — no es
-lo único: son 4 de las 6 pasadas de Tesseract por página, y cada
-`SetImageFile` materializa una copia completa dentro del heap de WASM
-(`thresholder.cpp`: `pix_ = src.copy()`, con el comentario *"Guarantee that we
-always end up with our own copy"*). Cortar 4 de 6 ahorra **en el heap que nunca
-se achica**, que es justo donde §7 ponía lo irreducible.
+lo único: son 4 de las 6 operaciones de Tesseract por página, y cada
+`SetImageFile` materializa una copia dentro del heap de WASM
+(`thresholder.cpp`: `pix_ = src.copy()`).
 
-Un chequeo de tinta sobre la franja las saltea cuando el margen está vacío. **El
-umbral necesita la baseline de ADR-147 antes de fijarse** — por eso tiene ADR
-propio y no entra en ADR-160.
+#### 4.1 Propiedad exacta
+
+Una franja es blanca si cada píxel tiene `alpha = 0` o RGB `(255,255,255)`.
+No hay porcentajes ni constantes configurables. Se inspecciona el `ImageData`
+de cada franja una vez, antes de sus rotaciones 90°/270°:
+
+| márgenes | llamadas `recognize` de margen | `recognize` totales | operaciones con OSD |
+|---|---:|---:|---:|
+| ambos blancos | 0 | 1 | 2 |
+| uno activo | 2 | 3 | 4 |
+| ambos activos | 4 | 5 | 6 |
+
+El fallo del predicado abre la compuerta. Un fallo posterior de la franja
+conserva el guard de ADR-121; una cancelación se propaga. La regla de fusión,
+`MARGIN_STRIP_RATIO`, `ROTATED_MIN_CONFIDENCE`, geometría y salida no cambian.
+
+#### 4.2 Tests que cierran la implementación
+
+1. blanco opaco y transparente con RGB no blanco: cero llamadas de margen;
+2. un solo píxel opaco `(254,255,255)`: dos llamadas;
+3. un solo píxel negro con `alpha = 1`: dos llamadas;
+4. izquierda blanca + derecha activa: exactamente dos llamadas de margen;
+5. dos franjas activas: palabras, confianza, cajas y fusión idénticas al camino
+   previo;
+6. una excepción del predicado conserva ambas pasadas;
+7. el test de blanco cuenta llamadas — afirmar solo salida vacía no discrimina
+   contra el código anterior (ADR-149 §2).
+
+**Cierra implementación cuando**: los tests anteriores y los gates scoped de
+`ocr-engine` están verdes, sin cambios fuera del módulo. La medición P2 posterior
+dimensiona memoria/tiempo, pero no decide la seguridad de la compuerta ni es
+necesaria para demostrar que el trabajo se eliminó.
+
+**Cumplido el 2026-09-13**: implementado exclusivamente en `ocr-engine`; 137/137
+tests scoped, typecheck y ESLint del paquete verdes. El caso blanco prueba el
+discriminante contando cero llamadas de margen, y el caso fail-open prueba dos
+rotaciones de la franja incierta con la otra franja blanca.
+
+#### T-4b — Heurística para márgenes no blancos — **BLOQUEADA**
+
+La calibración más agresiva que proponía ADR-161 queda separada. Requiere la
+baseline Chromium/WASM de ADR-147, un escaneo real anonimizado con texto rotado
+tenue en el margen y un ADR nuevo que fije fórmula, umbral de píxel y margen
+numérico. No forma parte de T-4 y el implementador no deja constantes
+provisorias para ella.
 
 ### T-5 — La segunda instancia de Tesseract — **POSTERGADA por decisión del humano (2026-09-12)**
 

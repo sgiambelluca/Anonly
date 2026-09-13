@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-bitacora | dependencias=architecture/07_Performance_Strategy.md,00_Project_Vision.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-145-El-Deposito-No-Expulsa-Lo-Que-Acaba-De-Guardar.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-155-El-Arnes-De-Medicion-Configura-El-Core-Por-Un-Canal-Propio.md,adr/ADR-156-El-Preview-No-Guarda-Los-Pixeles-Que-Nadie-Lee.md,adr/ADR-157-El-Pool-De-OCR-Se-Da-De-Baja-Al-Terminar-Su-Etapa.md,adr/ADR-158-El-Raster-De-OCR-Viaja-Codificado.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md,roadmap/Optimizacion_De_Memoria_Plan.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=roadmap-bitacora | dependencias=architecture/07_Performance_Strategy.md,00_Project_Vision.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-145-El-Deposito-No-Expulsa-Lo-Que-Acaba-De-Guardar.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-155-El-Arnes-De-Medicion-Configura-El-Core-Por-Un-Canal-Propio.md,adr/ADR-156-El-Preview-No-Guarda-Los-Pixeles-Que-Nadie-Lee.md,adr/ADR-157-El-Pool-De-OCR-Se-Da-De-Baja-Al-Terminar-Su-Etapa.md,adr/ADR-158-El-Raster-De-OCR-Viaja-Codificado.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,roadmap/Optimizacion_De_Memoria_Plan.md | audiencia=humanos+IA | fase=11 -->
 
 # H-10 — Bitácora de memoria: qué se intentó, qué midió y qué se decidió
 
@@ -12,6 +12,14 @@
 > No reprodujo la extrapolación lineal de ADR-159 §5, pero tampoco dio una meseta
 > tardía consistente: T-3 cierra **inconclusa** entre esas dos formas, con la
 > extrapolación lineal descartada. Datos en §8.
+>
+> **T-4 cerrada, 2026-09-13.** La variante calibrada de ADR-161 no estaba
+> lista: faltaban dos umbrales, el margen numérico y el corpus positivo. ADR-162
+> separa una compuerta exacta —solo se saltea una franja visualmente blanca— y
+> deja la heurística para fondos ruidosos como T-4b bloqueada. La compuerta
+> exacta quedó implementada y verificada con 137/137 tests scoped, typecheck y
+> ESLint verdes. El detalle vive en `core/OCR_Engine.md` v1.13.0 y en el plan
+> vivo §T-4.
 
 **Perfil de referencia en todo el documento**: P2 — 50 páginas escaneadas, OCR + NER reales, sobre el shell de Electron empaquetado. darwin/arm64, 8 CPUs, 8,6 GB de RAM. Salvo aclaración, los números son de corridas **calientes** (modelos ya cargados).
 
@@ -53,6 +61,7 @@
 | 10 | Bajar paralelismo en general | **Prohibido** por decisión del humano (ADR-154 §1) |
 | 11 | Bajar el DPI | **Disponible, no usado** — costo de calidad |
 | 12 | El worker de OCR no decodifica la página (ADR-160) | **Tomado y medido** — el de mayor efecto sobre el pico (§3.6) |
+| 13 | Saltear franjas visualmente blancas (ADR-162) | **Tomado e implementado** — elimina 0/2/4 pasadas de margen; magnitud P2 pendiente |
 
 ---
 
