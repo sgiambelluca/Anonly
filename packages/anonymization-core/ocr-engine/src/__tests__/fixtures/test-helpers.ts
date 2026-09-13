@@ -338,6 +338,83 @@ function installCreateImageBitmapStub(): void {
 
 installCreateImageBitmapStub();
 
+// ─── Instrumentación para ADR-160 (el kernel no decodifica la página) ───────
+
+export interface OffscreenCanvasConstruction {
+  readonly width: number;
+  readonly height: number;
+}
+
+/**
+ * Intercepta cada `new OffscreenCanvas(...)` durante la vida del test
+ * (ADR-160 §6.2: el test estructural "cero superficies de página completa").
+ * Envuelve la clase YA instalada (`StubOffscreenCanvas` arriba, o la nativa
+ * si el entorno la trae) en vez de reemplazarla por una propia: el
+ * comportamiento de `getContext`/`drawImage`/`getImageData` sigue siendo el
+ * mismo, solo se agrega el registro de tamaños. Llamar a `restore()` en un
+ * `finally` — deja `globalThis.OffscreenCanvas` como estaba.
+ */
+export function trackOffscreenCanvasConstructions(): {
+  readonly constructions: ReadonlyArray<OffscreenCanvasConstruction>;
+  readonly restore: () => void;
+} {
+  const original = globalThis.OffscreenCanvas;
+  const constructions: OffscreenCanvasConstruction[] = [];
+  class TrackingOffscreenCanvas extends original {
+    constructor(width: number, height: number) {
+      super(width, height);
+      constructions.push({ width, height });
+    }
+  }
+  Object.defineProperty(globalThis, "OffscreenCanvas", {
+    value: TrackingOffscreenCanvas,
+    writable: true,
+    configurable: true,
+  });
+  return {
+    constructions,
+    restore: (): void => {
+      Object.defineProperty(globalThis, "OffscreenCanvas", {
+        value: original,
+        writable: true,
+        configurable: true,
+      });
+    },
+  };
+}
+
+/**
+ * Intercepta cada `createImageBitmap(...)` (ADR-160 §2/§3: verificar que el
+ * OSD y las franjas de margen piden un recorte/resize, no la página entera)
+ * delegando en la implementación ya instalada. Mismo criterio de `restore()`
+ * que `trackOffscreenCanvasConstructions`.
+ */
+export function trackCreateImageBitmapCalls(): {
+  readonly calls: ReadonlyArray<ReadonlyArray<unknown>>;
+  readonly restore: () => void;
+} {
+  const original = globalThis.createImageBitmap;
+  const calls: unknown[][] = [];
+  Object.defineProperty(globalThis, "createImageBitmap", {
+    value: (...args: Parameters<typeof original>): ReturnType<typeof original> => {
+      calls.push(args);
+      return original(...args);
+    },
+    writable: true,
+    configurable: true,
+  });
+  return {
+    calls,
+    restore: (): void => {
+      Object.defineProperty(globalThis, "createImageBitmap", {
+        value: original,
+        writable: true,
+        configurable: true,
+      });
+    },
+  };
+}
+
 // ─── Puerto interno OcrJobPool (ADR-045 §2) — fake estructural para tests ───
 
 export interface OcrPoolDispatchParams<T> {

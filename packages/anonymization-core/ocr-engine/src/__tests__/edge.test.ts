@@ -35,9 +35,11 @@ import {
   createResolvedOcrPool,
   createValidOcrPageInput,
   createValidOcrPageRequest,
+  mockDetectData,
   mockEmptyRecognizeData,
   mockRecognizeData,
   mockTesseractWorker,
+  trackOffscreenCanvasConstructions,
 } from "./fixtures/test-helpers.js";
 
 describe("OcrEngine — edge case tests", () => {
@@ -547,6 +549,97 @@ describe("OcrEngine — edge case tests", () => {
       await expect(engine.processSession(requests, produce, abortedCtx)).rejects.toThrow(
         CancelledError,
       );
+    });
+  });
+
+  // Caso 21 (§13, ADR-160 §4): orientación ≠ 0 — camino lento, declarado.
+  describe("Caso 21: orientación ≠ 0 (camino lento)", () => {
+    it("orientation !== 0 still decodes the full page (slow path)", async () => {
+      const image = createEncodedPageImage(100, 40);
+      const detect = vi.fn((_image: unknown) => Promise.resolve(mockDetectData(180)));
+      const raw = [{ text: "giro", confidence: 90, bbox: { x0: 10, y0: 10, x1: 30, y1: 20 } }];
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(raw), { detect }),
+      );
+      await engine.init(ctx);
+
+      const tracker = trackOffscreenCanvasConstructions();
+      let output: Awaited<ReturnType<typeof engine.processPage>>;
+      try {
+        output = await engine.processPage(
+          { ...createValidOcrPageInput("doc-caso21-slow-path", 0), image },
+          ctx,
+        );
+      } finally {
+        tracker.restore();
+      }
+
+      // Es EXACTAMENTE el discriminante que pide ADR-149 §2 para el test
+      // estructural de unit.test.ts: acá tiene que dar > 0.
+      expect(tracker.constructions.some((c) => c.width === 100 && c.height === 40)).toBe(true);
+      expect(output.words[0]?.bbox.rotation).toBe(180);
+    });
+  });
+
+  // Caso 22 (§13, ADR-160): createImageBitmap ausente o que rechaza.
+  describe("Caso 22: createImageBitmap ausente o que rechaza", () => {
+    it("createImageBitmap missing or rejecting fails the page as OcrPageFailedError, not a raw ReferenceError", async () => {
+      vi.mocked(createWorker).mockResolvedValue(mockTesseractWorker(mockEmptyRecognizeData()));
+      await engine.init(ctx);
+
+      const original = globalThis.createImageBitmap;
+      // @ts-expect-error -- se borra a propósito para simular el entorno sin la API.
+      delete globalThis.createImageBitmap;
+      try {
+        await expect(
+          engine.processPage(createValidOcrPageInput("doc-caso22-sin-bitmap", 0), ctx),
+        ).rejects.toThrow(OcrPageFailedError);
+      } finally {
+        globalThis.createImageBitmap = original;
+      }
+    });
+
+    it("a rejecting createImageBitmap fails the page as OcrPageFailedError", async () => {
+      vi.mocked(createWorker).mockResolvedValue(mockTesseractWorker(mockEmptyRecognizeData()));
+      await engine.init(ctx);
+
+      const original = globalThis.createImageBitmap;
+      globalThis.createImageBitmap = ((): Promise<ImageBitmap> =>
+        Promise.reject(new Error("boom"))) as typeof createImageBitmap;
+      try {
+        await expect(
+          engine.processPage(createValidOcrPageInput("doc-caso22-bitmap-rechaza", 0), ctx),
+        ).rejects.toThrow(OcrPageFailedError);
+      } finally {
+        globalThis.createImageBitmap = original;
+      }
+    });
+
+    it("a strip that fails to decode is skipped without costing the upright text", async () => {
+      // La franja falla (createImageBitmap rechaza SOLO para el recorte de 5
+      // argumentos — OSD y el reconocimiento principal siguen andando), y el
+      // texto derecho, ya reconocido, sobrevive intacto — mismo criterio que
+      // el caso 16 con `cropImageData`.
+      const CUERPO = [{ text: "cuerpo", confidence: 95, bbox: { x0: 60, y0: 10, x1: 90, y1: 22 } }];
+      vi.mocked(createWorker).mockResolvedValue(mockTesseractWorker(mockRecognizeData(CUERPO)));
+      await engine.init(ctx);
+
+      const original = globalThis.createImageBitmap;
+      globalThis.createImageBitmap = ((...args: Parameters<typeof original>) => {
+        if (args.length === 5) return Promise.reject(new Error("franja rota"));
+        return original(...args);
+      }) as typeof createImageBitmap;
+      try {
+        const output = await engine.processPage(
+          createValidOcrPageInput("doc-caso22-franja-falla", 0, {
+            image: createEncodedPageImage(100, 40),
+          }),
+          ctx,
+        );
+        expect(output.words.map((w) => w.text)).toEqual(["cuerpo"]);
+      } finally {
+        globalThis.createImageBitmap = original;
+      }
     });
   });
 });

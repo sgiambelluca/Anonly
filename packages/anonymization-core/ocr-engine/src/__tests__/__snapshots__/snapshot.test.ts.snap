@@ -1,0 +1,35 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`OcrEngine — snapshot (ADR-160 §1/§6) > words and confidence are identical to the pre-ADR kernel for the same PNG 1`] = `
+{
+  "confidence": 0.898,
+  "documentId": "doc-snapshot",
+  "pageIndex": 0,
+  "words": [
+    {
+      "bbox": {
+        "height": 3.84,
+        "width": 9.6,
+        "x": 2.88,
+        "y": 1.92,
+      },
+      "confidence": 0.915,
+      "pageIndex": 0,
+      "source": "ocr",
+      "text": "Pérez",
+    },
+    {
+      "bbox": {
+        "height": 3.84,
+        "width": 9.12,
+        "x": 14.399999999999999,
+        "y": 1.92,
+      },
+      "confidence": 0.882,
+      "pageIndex": 0,
+      "source": "ocr",
+      "text": "34.567.891",
+    },
+  ],
+}
+`;

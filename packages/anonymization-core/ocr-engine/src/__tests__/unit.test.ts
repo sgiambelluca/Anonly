@@ -38,6 +38,8 @@ import {
   mockRecognizeData,
   mockTesseractWorker,
   setStubCanvasContextAvailable,
+  trackCreateImageBitmapCalls,
+  trackOffscreenCanvasConstructions,
 } from "./fixtures/test-helpers.js";
 
 describe("OcrEngine — unit tests", () => {
@@ -1220,6 +1222,182 @@ describe("OcrEngine — unit tests", () => {
       const output = await engine.processPage(inputConRaster("doc-121-falla"), ctx);
 
       expect(output.words.map((w) => w.text)).toEqual(["cuerpo"]);
+    });
+  });
+
+  // ─── ADR-160: el kernel no decodifica la página (camino común) ───
+
+  describe("el kernel no decodifica la página (ADR-160)", () => {
+    function inputConRaster(
+      documentId: string,
+      overrides?: Partial<EncodedPageImage>,
+    ): ReturnType<typeof createValidOcrPageInput> {
+      return {
+        ...createValidOcrPageInput(documentId, 0),
+        image: createEncodedPageImage(100, 40, overrides),
+      };
+    }
+
+    it("the common path builds no full-page OffscreenCanvas", async () => {
+      // Fase 1 (orientación 0, camino común): cero canvas de página completa.
+      vi.mocked(createWorker).mockResolvedValue(mockTesseractWorker(mockEmptyRecognizeData()));
+      await engine.init(ctx);
+      let tracker = trackOffscreenCanvasConstructions();
+      try {
+        await engine.processPage(inputConRaster("doc-160-upright"), ctx);
+      } finally {
+        tracker.restore();
+      }
+      expect(tracker.constructions.filter((c) => c.width === 100 && c.height === 40)).toHaveLength(
+        0,
+      );
+
+      // Discriminante obligatorio (ADR-149 §2): el MISMO contador, sobre el
+      // camino lento (orientación ≠ 0, que decodifica la página completa por
+      // diseño — caso 21) tiene que dar > 0. Si diera 0 acá también, el
+      // contador de la fase 1 no estaría midiendo nada.
+      await engine.dispose();
+      engine = new OcrEngine();
+      const detect = vi.fn(() => Promise.resolve(mockDetectData(90)));
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockEmptyRecognizeData(), { detect }),
+      );
+      await engine.init(ctx);
+      tracker = trackOffscreenCanvasConstructions();
+      try {
+        await engine.processPage(inputConRaster("doc-160-rotated"), ctx);
+      } finally {
+        tracker.restore();
+      }
+      expect(
+        tracker.constructions.filter((c) => c.width === 100 && c.height === 40).length,
+      ).toBeGreaterThan(0);
+    });
+
+    it("hands the encoded bytes to recognize(), not a canvas", async () => {
+      const recognize = vi.fn((_image: unknown) =>
+        Promise.resolve({ jobId: "j", data: mockEmptyRecognizeData() }),
+      );
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockEmptyRecognizeData(), { recognize }),
+      );
+      await engine.init(ctx);
+
+      await engine.processPage(inputConRaster("doc-160-blob"), ctx);
+
+      // La primera llamada es el reconocimiento principal — las de franja
+      // llegan después, con un raster de otro tamaño (mismo criterio de
+      // discriminación que usa `mockTesseractWorker`).
+      const mainImage = recognize.mock.calls[0]?.[0];
+      expect(mainImage).toBeInstanceOf(Blob);
+    });
+
+    it("maps bboxes with image.widthPx/heightPx, not with a decoded ImageData", async () => {
+      // 137 x 59: dimensiones fuera de lo común — si el mapeo alguna vez
+      // leyera de otro lado (un ImageData decodificado, un default), este
+      // test lo nota. Orientación 90 para que sourceWidth/sourceHeight
+      // entren en juego de verdad (con 0 son la identidad).
+      const image = createEncodedPageImage(137, 59);
+      const detect = vi.fn(() => Promise.resolve(mockDetectData(90)));
+      const raw = [{ text: "x", confidence: 90, bbox: { x0: 5, y0: 5, x1: 15, y1: 15 } }];
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(raw), { detect }),
+      );
+      await engine.init(ctx);
+
+      const output = await engine.processPage(
+        { ...createValidOcrPageInput("doc-160-widthpx", 0), image },
+        ctx,
+      );
+
+      // unrotateBbox(90, sourceWidth=137, sourceHeight=59): x = y0,
+      // y = sourceHeight - (x0 + width).
+      const factor = 72 / ctx.config.ocr.dpi;
+      const word = output.words[0];
+      expect(word?.bbox.x).toBeCloseTo(5 * factor, 6);
+      expect(word?.bbox.y).toBeCloseTo((59 - (5 + 10)) * factor, 6);
+    });
+
+    it("OSD receives an image already reduced to OSD_SCALE, never a full-page one", async () => {
+      const detect = vi.fn((_image: unknown) => Promise.resolve(mockDetectData(0)));
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockEmptyRecognizeData(), { detect }),
+      );
+      await engine.init(ctx);
+
+      await engine.processPage(inputConRaster("doc-160-osd-scale"), ctx);
+
+      expect(detect).toHaveBeenCalledTimes(1);
+      const osdImage = detect.mock.calls[0]?.[0] as { width: number; height: number };
+      // OSD_SCALE = 0.5 (ADR-119 §2), no exportada — se verifica el
+      // RESULTADO (mitad de cada dimensión de la página, 100x40).
+      expect(osdImage.width).toBe(50);
+      expect(osdImage.height).toBe(20);
+    });
+
+    it("margin strips decode only their strip, not the whole page", async () => {
+      vi.mocked(createWorker).mockResolvedValue(mockTesseractWorker(mockEmptyRecognizeData()));
+      await engine.init(ctx);
+
+      const tracker = trackCreateImageBitmapCalls();
+      try {
+        await engine.processPage(inputConRaster("doc-160-strip-decode"), ctx);
+      } finally {
+        tracker.restore();
+      }
+
+      // Las llamadas de franja tienen 5 argumentos (blob, sx, sy, sw, sh); la
+      // de OSD y la del reconocimiento principal usan otras formas (2 args
+      // con `Blob` solo, o `Blob` + opciones de resize).
+      const stripCalls = tracker.calls.filter((c) => c.length === 5);
+      expect(stripCalls.length).toBeGreaterThan(0);
+      for (const call of stripCalls) {
+        const [, , , sw, sh] = call as [unknown, number, number, number, number];
+        // MARGIN_STRIP_RATIO = 0.2 (ADR-121 §1) de 100 de ancho; alto
+        // completo — las franjas son de alto completo, solo se recorta el
+        // ancho (mismo criterio que `cropImageData`).
+        expect(sw).toBe(20);
+        expect(sh).toBe(40);
+      }
+    });
+
+    it("ADR-121 fusion rule is unchanged: same overlap threshold, same ROTATED_MIN_CONFIDENCE, same per-strip guard", async () => {
+      // El descarte por solapamiento ya lo regresionan, sin cambios, los
+      // tests de "franjas de margen rotadas (ADR-121)" de arriba (corren
+      // sobre este mismo camino nuevo y siguen en verde). Acá se fija el
+      // VALOR exacto del piso de confianza: 60 entra, 59 se descarta — si la
+      // constante cambiara, este test lo nota.
+      const CUERPO = [{ text: "cuerpo", confidence: 95, bbox: { x0: 60, y0: 10, x1: 90, y1: 22 } }];
+      let call = 0;
+      const recognize = vi.fn(() => {
+        call += 1;
+        if (call === 1) {
+          return Promise.resolve({ jobId: "j", data: mockRecognizeData(CUERPO) });
+        }
+        if (call === 2) {
+          return Promise.resolve({
+            jobId: "j",
+            data: mockRecognizeData([
+              { text: "piso", confidence: 60, bbox: { x0: 2, y0: 2, x1: 10, y1: 10 } },
+            ]),
+          });
+        }
+        return Promise.resolve({
+          jobId: "j",
+          data: mockRecognizeData([
+            { text: "debajo", confidence: 59, bbox: { x0: 2, y0: 2, x1: 10, y1: 10 } },
+          ]),
+        });
+      });
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(CUERPO), { recognize }),
+      );
+      await engine.init(ctx);
+
+      const output = await engine.processPage(inputConRaster("doc-160-piso"), ctx);
+
+      expect(output.words.some((w) => w.text === "piso")).toBe(true);
+      expect(output.words.some((w) => w.text === "debajo")).toBe(false);
     });
   });
 
