@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=07_Performance_Strategy.md,00_Project_Vision.md,core/NER_Engine.md,ui/React_Client.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-080-Idle-Dispose-En-El-Pool-No-En-El-Manager.md,adr/ADR-135-El-Ciclo-Del-Modelo-Se-Deduplica-Entero.md,adr/ADR-126-Detectar-Nombres-No-Es-Una-Preferencia.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=07_Performance_Strategy.md,00_Project_Vision.md,core/NER_Engine.md,ui/React_Client.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-080-Idle-Dispose-En-El-Pool-No-En-El-Manager.md,adr/ADR-135-El-Ciclo-Del-Modelo-Se-Deduplica-Entero.md,adr/ADR-126-Detectar-Nombres-No-Es-Una-Preferencia.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-154 — La memoria no se compra bajando el paralelismo
 
@@ -51,6 +51,17 @@ de lo que el equipo permite. Un cambio de defaults que reduzca paralelismo
 necesita su propio ADR y una razón que no sea "así entra en el presupuesto".
 
 ### 2. Los levers aceptados, en orden
+
+> **Agregado el 2026-09-11: hay un lever 0, y va antes que todos los de abajo.**
+> **Que el worker de OCR no decodifique la página** (ADR-160). Verificado en la
+> fuente de `tesseract.js@6.0.1`: su `loadImage` acepta un `Blob` y lo pasa tal
+> cual al core, que decodifica adentro del WASM — el `ImageData` y los tres
+> canvas de página completa que el worker construye por página son costo
+> nuestro y evitable. Cumple las tres condiciones de este ADR a la vez: **no
+> toca paralelismo (§1), no toca el DPI (lever 6), y no tiene dimensión de
+> calidad** (el PNG es sin pérdida y los píxeles que llegan al core son bit a
+> bit los mismos). El orden completo de ejecución está en
+> `roadmap/Optimizacion_De_Memoria_Plan.md` §2.
 
 1. **Duplicación que no compra nada.**
 
@@ -160,6 +171,21 @@ necesita su propio ADR y una razón que no sea "así entra en el presupuesto".
    > salen por ahí. Es parte de la mitad no explicada, y la tocan este lever y el
    > 5: menos canvas y canvas más chicos actúan sobre un proceso que hasta hoy no
    > estábamos contando.
+
+   > **Confirmado y ampliado el 2026-09-11 (ADR-159).** El desglose posterior
+   > había concluido que la acumulación por página estaba en Tab y que GPU era
+   > "secundario y por debajo del ruido en 2 de 3 corridas". **Eso salía de una
+   > regresión de RSS sobre un diente de sierra de 430-660 MB.** Por el piso
+   > —mínimo del primer cuarto de la ventana contra mínimo del último— GPU sube
+   > **3 de 3** (+1,15 / +3,06 / +3,13 MB/página), tanto o más que Tab en dos
+   > corridas. Este lever y el 5 **dejan de estar postergados por falta de
+   > evidencia**: la evidencia estaba, leída con el estadístico equivocado.
+   >
+   > Y la salvedad de arriba —"el worker de OCR sigue necesitando un canvas […]
+   > así que decodifica una vez"— **queda retirada para el camino común** por
+   > ADR-160: verificado en la fuente de `tesseract.js`, su `loadImage` acepta un
+   > `Blob` y lo pasa tal cual, así que el canvas por página es costo
+   > íntegramente nuestro y evitable.
 
 5. **La caché de preview guarda cada página dos veces** (ADR-156): el `ImageData`
    crudo y el codificado, y nadie fuera del motor lee el crudo. Verificado sobre

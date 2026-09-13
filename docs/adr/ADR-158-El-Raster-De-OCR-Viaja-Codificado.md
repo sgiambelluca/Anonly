@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=core/Contracts.md,core/Render_Engine.md,core/OCR_Engine.md,core/Orchestrator.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-079-Transferencia-Real-Por-Direccion-Y-Payload.md,adr/ADR-120-Una-Hoja-Torcida-Se-Lee-Enderezada.md,adr/ADR-121-El-Sello-Rotado-Vive-En-El-Margen.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=core/Contracts.md,core/Render_Engine.md,core/OCR_Engine.md,core/Orchestrator.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-079-Transferencia-Real-Por-Direccion-Y-Payload.md,adr/ADR-120-Una-Hoja-Torcida-Se-Lee-Enderezada.md,adr/ADR-121-El-Sello-Rotado-Vive-En-El-Margen.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-158 — El ráster de OCR viaja codificado
 
@@ -89,6 +89,14 @@ Decodifica **una vez**, con `createImageBitmap`, y dibuja en un canvas. Desde ah
 `postMessage`, la que el host retenía, y el segundo canvas de
 `toTesseractImage`. El ahorro es del lado del host y de la frontera, no del
 worker.
+
+> **Retirada el 2026-09-11 para el camino común, por ADR-160.** Esta salvedad
+> daba por necesario decodificar en el worker, y no lo es: verificado en la
+> fuente, el `loadImage` de `tesseract.js@6.0.1` acepta un `Blob` y lo entrega
+> tal cual al core, que decodifica adentro del WASM. Con orientación 0 y las
+> franjas recortadas en la propia decodificación, el worker **no materializa
+> ninguna página completa**. La salvedad sigue valiendo para el camino de
+> ADR-120 con orientación ≠ 0, que sí necesita los píxeles enteros.
 
 ### 4. El presupuesto de ADR-143 pasa a estimar lo **decodificado**
 
