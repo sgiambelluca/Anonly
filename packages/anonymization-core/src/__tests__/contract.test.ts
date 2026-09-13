@@ -181,6 +181,116 @@ describe("Orchestrator — contract tests", () => {
     );
   });
 
+  it("uses the page cap for dpi, reservation, and raster scale (ADR-163)", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({
+        pages: [
+          createPage({ index: 0, width: 600, height: 800, requiresOCR: true, ocrDpiCap: 200 }),
+        ],
+      }),
+      textlessPages: [0],
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+
+    const request = (engines.ocr.processSession as ReturnType<typeof vi.fn>).mock
+      .calls[0]?.[0]?.[0] as { readonly dpi: number; readonly estimatedBytes: number } | undefined;
+    expect(request?.dpi).toBe(200);
+    expect(request?.estimatedBytes).toBe(
+      Math.ceil(600 * (200 / 72)) * Math.ceil(800 * (200 / 72)) * 4,
+    );
+  });
+
+  it("falls back to configured DPI for absent, high, invalid caps and regions (ADR-163)", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const region = { pageIndex: 3, bbox: { x: 1, y: 2, width: 20, height: 30 } };
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({
+        pageCount: 4,
+        pages: [
+          createPage({ index: 0, requiresOCR: true }),
+          createPage({ index: 1, requiresOCR: true, ocrDpiCap: 400 }),
+          createPage({ index: 2, requiresOCR: true, ocrDpiCap: Number.NaN }),
+          createPage({ index: 3, ocrDpiCap: 200 }),
+        ],
+      }),
+      textlessPages: [0, 1, 2],
+      ocrRegions: [region],
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+    await orchestrator.importDocument(createImportInput());
+    const requests = (engines.ocr.processSession as ReturnType<typeof vi.fn>).mock
+      .calls[0]?.[0] as Array<{ readonly dpi: number; readonly region?: unknown }>;
+    expect(requests.map((request) => request.dpi)).toEqual([300, 300, 300, 300]);
+    expect(requests[3]?.region).toEqual(region.bbox);
+  });
+
+  it("derives producer scales independently from each request DPI (ADR-163)", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({
+        pages: [
+          createPage({ index: 0, requiresOCR: true, ocrDpiCap: 200 }),
+          createPage({ index: 1, requiresOCR: true, ocrDpiCap: 100 }),
+        ],
+      }),
+      textlessPages: [0, 1],
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+    const scales: number[] = [];
+    vi.spyOn(engines.ocr, "processSession").mockImplementation(async (requests, produce) => {
+      for (const request of requests) {
+        await produce(request, new AbortController().signal);
+        scales.push(request.dpi / 72);
+      }
+      return [];
+    });
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+    await orchestrator.importDocument(createImportInput());
+    expect(scales).toEqual([200 / 72, 100 / 72]);
+    expect(engines.render.rasterizePage).toHaveBeenNthCalledWith(
+      1,
+      "doc-1",
+      0,
+      200 / 72,
+      expect.anything(),
+      undefined,
+    );
+    expect(engines.render.rasterizePage).toHaveBeenNthCalledWith(
+      2,
+      "doc-1",
+      1,
+      100 / 72,
+      expect.anything(),
+      undefined,
+    );
+  });
+
   it("no textless pages skip OCR stage", async () => {
     const bus = createRealBus();
     const engines = createMockEngines();

@@ -120,6 +120,14 @@ function estimateRasterBytes(widthPoints: number, heightPoints: number, scale: n
   return widthPx * heightPx * 4; // RGBA
 }
 
+/** ADR-163: el cap solo aplica al descriptor de página completa. */
+function effectiveOcrDpi(page: Page | undefined, configuredDpi: number): number {
+  const cap = page?.ocrDpiCap;
+  return typeof cap === "number" && Number.isFinite(cap) && cap > 0
+    ? Math.min(configuredDpi, cap)
+    : configuredDpi;
+}
+
 // ─── reanalyze (ADR-038 §1): helpers de módulo (sin estado de instancia) ───
 
 const REANALYZE_PATCH_KEYS = new Set(["ner", "ocr"]);
@@ -1064,15 +1072,16 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
         });
       }
 
-      const scale = ctx.config.ocr.dpi / 72;
       const requests: OcrPageRequest[] = [];
 
       for (const pageIndex of textlessPages) {
         const page: Page | undefined = document.pages[pageIndex];
+        const dpi = effectiveOcrDpi(page, ctx.config.ocr.dpi);
+        const scale = dpi / 72;
         requests.push({
           documentId,
           pageIndex,
-          dpi: ctx.config.ocr.dpi,
+          dpi,
           languages: ctx.config.ocr.languages,
           estimatedBytes: estimateRasterBytes(page?.width ?? 0, page?.height ?? 0, scale),
         });
@@ -1084,11 +1093,13 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       // el de siempre: el OCR Engine no sabe ni necesita saber que su imagen es
       // un recorte en vez de una página completa (§9 de OCR_Engine.md).
       for (const region of ocrRegions) {
+        const dpi = ctx.config.ocr.dpi;
+        const scale = dpi / 72;
         requests.push({
           documentId,
           pageIndex: region.pageIndex,
           region: region.bbox,
-          dpi: ctx.config.ocr.dpi,
+          dpi,
           languages: ctx.config.ocr.languages,
           estimatedBytes: estimateRasterBytes(region.bbox.width, region.bbox.height, scale),
         });
@@ -1104,7 +1115,7 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
         this.engines.render.rasterizePage(
           request.documentId,
           request.pageIndex,
-          scale,
+          request.dpi / 72,
           { ...ctx, abortSignal: signal },
           request.region,
         );
