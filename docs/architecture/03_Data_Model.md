@@ -108,6 +108,7 @@ export interface Page {
   readonly requiresOCR: boolean;             // true si PDF Engine no extrajo texto
   readonly ocrCompleted: boolean;            // true si OCR ya completó esta página
   readonly dpi?: number;                     // si fue OCR-ada
+  readonly ocrDpiCap?: number;               // cap seguro derivado del único ráster fuente (ADR-163)
 }
 ```
 
@@ -115,6 +116,11 @@ export interface Page {
 - `words` está **agrupado en renglones** y, dentro de cada renglón, ordenado por `bbox.x` asc (ADR-110 §1). No hay una clave escalar con tolerancia: un word entra al renglón vigente si su centro vertical cae dentro de la banda de ese renglón (mediana de sus centros ± 0,5 × la mediana de sus altos), y si no, abre uno nuevo. Hasta ADR-110 el orden salía de un comparador con tolerancia, que **no es transitivo** — sobre un escaneo eso rompía uno de cada tres pares de palabras consecutivos. **ADR-067**: los words con `bbox.rotation` 90/180/270 se agrupan en *runs* —misma coordenada transversal (tolerancia 1) y contiguos sobre el eje de avance (hueco ≤ 2 cuerpos)—, cada run se ordena en su dirección de avance, y los runs se emiten **enteros y contiguos, en una pasada aparte después de todo el texto horizontal** (nunca intercalados: intercalarlos parte una línea horizontal al medio, porque el comparador con tolerancia no es transitivo). Para `rotation` ausente o `0` el orden es literalmente el de la primera oración, en **cualquier** página tenga o no texto rotado.
 - Si `requiresOCR === false`, entonces `words.length > 0` o la página es genuinamente vacía.
 - `ocrCompleted === true` implica que la página **pasó por OCR**, entera o por región (ADR-065 §7). Hasta ADR-065 implicaba `requiresOCR === true`, porque solo existía el camino de página entera; con el OCR por región una página con texto nativo (`requiresOCR === false`) también puede haber pasado por OCR. `requiresOCR` conserva su significado exacto —"`pdf-engine` no extrajo texto nativo de esta página"— y no debe leerse como "esta página no vio OCR".
+- `ocrDpiCap` solo existe cuando `requiresOCR === true` y PDF Engine demostró
+  que todo el contenido pintado es un único ráster con dimensiones nativas
+  válidas (ADR-163). Es un entero positivo calculado con el eje de mayor
+  densidad; ausente significa conservar `OcrConfig.dpi`. No es el `dpi` al que
+  ya se ejecutó OCR.
 - `text` es la concatenación de `words.map(w => w.text).join(" ")` con normalización NFC.
 
 ### 4.1 `OcrRegion`

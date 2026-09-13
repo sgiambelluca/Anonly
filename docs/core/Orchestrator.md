@@ -6,8 +6,20 @@
 
 **Componente**: Orchestrator + façade `@anonly/anonymization-core` (no es un motor: **no tiene `EngineId`** y no implementa `IEngine`; este spec adapta la plantilla de 15 secciones de `ai/Module_Specification_Template.md` a un componente host)
 **Ubicación**: `packages/anonymization-core/src/`
-**Versión del spec**: 1.11.0
-**Última actualización**: 2026-09-11
+**Versión del spec**: 1.12.0
+**Última actualización**: 2026-09-13
+
+> **Nota (v1.12.0, ADR-163, T-6a — DPI efectivo por request)**: `runOcrStage`
+> deja de cerrar sobre un único `scale`. Para cada página completa deriva
+> `effectiveDpi = min(config.ocr.dpi, page.ocrDpiCap ?? config.ocr.dpi)`; ese
+> valor va simultáneamente a `OcrPageRequest.dpi`, a `estimatedBytes` mediante
+> `effectiveDpi/72`, y a `rasterizePage` porque el productor calcula
+> `request.dpi/72`. Esa pareja inseparable preserva la geometría de ADR-064 y el
+> presupuesto de ADR-143. Para regiones OCR, cap ausente o cap mayor al
+> configurado, el resultado es bit-idéntico al actual. Como defensa del boundary,
+> un cap no numérico, no finito o `<= 0` también se trata como ausente. Sin estado, eventos,
+> errores ni configuración nuevos; `reanalyze` hereda la regla al reutilizar
+> `runOcrStage`.
 
 > **Nota (v1.11.0, ADR-157, 2026-09-11 — el pool de OCR se da de baja al terminar su etapa)**: `runOcrStage` da de baja los workers vivos de OCR (`this.engines.ocr.releaseIdleWorkers()`, ADR-157 §1bis) en un `finally` que envuelve toda la etapa — corre en los tres caminos terminales: éxito, cancelación y fallo. Reemplaza esperar los 60 s de inactividad de ADR-080, que para este pool llegan tarde: transcurren justo mientras corre la detección (NER) que sigue, que es donde está el pico de memoria (ADR-157 §2). El Orchestrator **no tiene ninguna referencia** al `OcrPool` desde ADR-045 —lo construye `create-core.ts` e inyecta directo en `OcrEngine`—, así que la baja no puede salir de `WorkerPoolManager`/`this.pools` (`getPool("ocr")` construiría un pool nuevo, vacío y desconectado): la expone el propio motor (`OcrEngine.releaseIdleWorkers()`, `OCR_Engine.md` §6). Esa llamada trae su propia guarda (ADR-080/ADR-157 §1ter): si el pool no está ocioso —un job en cancelación todavía en vuelo— no hace nada, y la memoria la libera igual el temporizador de ADR-080 como hasta hoy. `idleDisposeMs` no cambia: sigue gobernando los cinco pools. El pool queda usable después: un `reanalyze` con `ocr.languages` (caso 20) lo reconstruye perezoso y paga la recarga del modelo de Tesseract como costo declarado. NER no entra en este cambio (ADR-157 §4): su pool ya se libera a tiempo con el temporizador existente. Ver §13 caso 33.
 >
@@ -277,6 +289,9 @@ El Orchestrator **no define códigos de error nuevos**: propaga `SerializedEngin
 31. **Página en `textlessPages` y en `ocrRegions` a la vez**: no puede ocurrir — los dos conjuntos son disjuntos por contrato de `PdfEngineOutput` (ADR-065 §4). Si un `PdfEngineOutput` los trajera solapados sería un bug de `pdf-engine`: el Orchestrator no lo compensa, y la doble fusión fallaría ruidosamente por los guards espejo de `fuseOcrPage`/`fuseOcrRegion`.
 32. **Precalentado de la página 1 al llegar a `Ready` (ADR-151)**: `handleGroupingFinished` dispara `prewarmFirstPagePreview` solo cuando la cascada llega a emitir `PIPELINE_READY` — un documento que corta antes por `state.cancelRequested` (caso 22, reanalyze cancelado) no precalienta nada, porque ese camino retorna antes de la línea que lo invoca. El fallo del render precalentado es best-effort: se loguea y no toca `stage` ni emite `PIPELINE_FAILED`, igual que el seed/flush del preview mediado (ADR-044, casos 26/27).
 33. **Baja del pool de OCR al terminar `runOcrStage` (ADR-157)**: `this.engines.ocr.releaseIdleWorkers()` corre en un `finally` que envuelve toda la etapa. **Camino feliz**: `processSession` ya resolvió con todas las páginas asentadas, el pool está ocioso, la baja ocurre — el próximo `reanalyze` con `ocr.languages` (caso 20) reconstruye el pool perezoso y paga la recarga del modelo. **Cancelación o fallo a mitad de etapa**: la llamada puede encontrar el pool NO ocioso (un job todavía en vuelo) — `releaseIdleWorkers()` trae su propia guarda y no hace nada en ese caso, sin lanzar ni enmascarar el error/cancelación real de la etapa; la memoria la libera el temporizador de ADR-080 (60 s) como hasta hoy. Ninguna de las dos ramas dispone el motor (`dispose()`): sigue usable en ambas.
+34. **Página completa con `ocrDpiCap = 200` y config 300** (ADR-163): el descriptor lleva `dpi: 200`, la reserva se estima a escala `200/72` y el productor rasteriza a esa misma escala.
+35. **Cap ausente, inválido, cap 400 con config 300 o request de región** (ADR-163): todos conservan `dpi: 300` y `scale: 300/72`; inválido incluye no numérico, no finito o `<= 0` recibido a través del boundary superficial.
+36. **Dos páginas con caps distintos** (ADR-163): cada invocación del productor deriva la escala de su propio `request.dpi`; una escala global capturada es una regresión aunque el primer request pase.
 
 ---
 
@@ -405,6 +420,8 @@ Los tests de contract/unit/edge mockean los motores (interfaces de `Contracts.md
 - [x] 24d. (Hito 10.7, PR **4c** — ADR-061 §6 errata) `addManualEntity` devuelve `Promise<ManualEntityResult>` (`Contracts.md` §3.5) en vez de `Promise<void>`: propaga el `occurrenceCount` del `RegexEngineOutput` que `regex.findLiteral` ya devuelve y que antes se descartaba. **Cero sigue sin lanzar** — es un resultado, no un error (ADR-061 §6). El conteo es el de `findLiteral`, o sea apariciones **antes** del dedup de Grouping: no se reinterpreta ni se recalcula contra el árbol. Cambio **aditivo**: los call sites que ignoran el retorno siguen compilando, así que los tests del PR 3 fueron la no regresión. `ManualEntityResult` se declaró en `src/types.ts`, junto a `ImportDocumentInput` y **no** en `shared` — ningún motor lo toca (errata de §6, punto 5). Los tres tests de §14. Desbloqueó el PR 4 (diálogo de agregado).
 - [x] 25. (Hito 11, ADR-143) `runOcrStage` deja de rasterizar por adelantado: arma `OcrPageRequest[]` desde `Document.pages[pageIndex].width/height`/`region.bbox` × `scale` (`estimateRasterBytes`, función de módulo) y llama a `OcrEngine.processSession(requests, produce, ctx)` con un `produce: OcrImageProducer` que rasteriza vía `RenderEngine.rasterizePage` recién cuando `OcrEngine` lo pide. **No** toca el enrutamiento de página/región (ADR-065, `region` ahora vive en el descriptor en vez de ser un argumento posicional de `rasterizePage`) ni la mediación de fusión (ADR-014/ADR-041, sin tocar). `runReanalyzeOcrFlow` hereda el fix automáticamente: sigue llamando a `runOcrStage`.
 - [x] 26. (Hito 11, ADR-151) `prewarmFirstPagePreview(documentId)`: invocación directa de `renderPage({pageIndex: 0, kind: "original", mode: "preview"}, mediatedPreviewCtx(documentId))`, disparada desde `handleGroupingFinished` en el mismo turno que `PIPELINE_READY`, después del early return de `cancelRequested`. Best-effort (catch + `logger.warn`, nunca `PIPELINE_FAILED`). Sin cambios en `Contracts.md`, el visor ni el store — `bus-bridge.ts` ya deja todo `PREVIEW_UPDATED` en `viewer.store.previewByPage`. Los tres tests de §14 (caso 32).
+
+- [x] 27. (ADR-163, T-6a) `runOcrStage`: helper puro para el DPI efectivo de página completa; construir cada `OcrPageRequest` con su `dpi` y su `estimatedBytes` derivados de la misma escala. El `OcrImageProducer` usa `request.dpi / 72`, nunca una variable global. Regiones conservan `ctx.config.ocr.dpi`. No tocar `OcrConfig`, Render, OCR, eventos, fusión ni progreso. Tests de casos 34-36 y no-regresión cuando el campo falta.
 
 ---
 

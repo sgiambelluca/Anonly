@@ -550,6 +550,9 @@ De las ~70: **~30 ya estaban cerradas** por hitos posteriores (ADR-053/054/056, 
   extrapolación lineal descartada; T-4 cerrada como compuerta exacta de franjas
   blancas (ADR-162), con 137/137 tests scoped verdes. La heurística calibrada para márgenes
   ruidosos queda separada como T-4b y bloqueada por el corpus de ADR-147.
+  T-6a cerrada e implementada como cap conservador por página de ráster único
+  (ADR-163), con 508/508 tests afectados y gates scoped verdes; T-6b continúa
+  siendo la medición posterior de calidad.
 - Verificación de integridad en runtime de modelos/wasm (`crypto.subtle.digest` contra `assets.lock.json`, ADR-018 punto 3) en `ocr-engine` y `ner-engine`; hash mismatch → `OCR_MODEL_MISSING` / `NER_MODEL_LOAD_FAILED`. Incluye test de integridad: asset con hash alterado → error tipado, no se carga.
 - Audit `pnpm audit`.
 - Bundle size check.

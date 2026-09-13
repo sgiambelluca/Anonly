@@ -6,13 +6,14 @@
 > anterior **al momento de pausarla**. Esto la reanuda: qué se verificó para
 > poder decidir, qué se decidió, y en qué orden se ejecuta.
 >
-> **Estado (2026-09-12)**: T-1 cerrada; **T-2 cerrada**, implementada y
+> **Estado (2026-09-13)**: T-1 cerrada; **T-2 cerrada**, implementada y
 > verificada con control A/B; **T-3 cerrada con resultado inconcluso** —la
 > extrapolación lineal no ocurrió, pero tampoco apareció una meseta limpia—;
 > T-4 **cerrada** en su variante exacta y sin calibración (ADR-162), con sus
 > gates scoped verdes; T-4b conserva la heurística calibrada y sigue bloqueada por el
 > corpus de ADR-147; T-5 postergada;
-> T-6 partida en T-6a (autorizada) y T-6b (medición pendiente).
+> T-6a **cerrada e implementada** como cap conservador por página (ADR-163);
+> T-6b conserva la medición P2 pendiente.
 
 **Perfil de referencia**: P2 — 50 páginas escaneadas, OCR + NER reales, sobre el
 shell de Electron empaquetado.
@@ -454,7 +455,7 @@ provisorias para ella.
 > recién entonces se evalúa si ese riesgo vale el ahorro. No se escribe ADR hasta
 > tener ese número.
 
-### T-6a — DPI adaptativo — **AUTORIZADA (2026-09-12)**
+### T-6a — DPI adaptativo — **CERRADA (ADR-163)**
 
 **Sin costo de calidad: es aritmética, no criterio.** Hoy
 `scale = ctx.config.ocr.dpi / 72` es fijo **sin mirar la página**. Si la imagen
@@ -465,6 +466,31 @@ embebida de un escaneo está a 200 dpi, rasterizar a 300 la **sobremuestrea**:
 Es un **punto fijo**: no hay umbral que elegir ni concesión que aceptar — o la
 página trae la resolución o no la trae, y si no la trae se usa el `dpi`
 configurado como hoy.
+
+**Especificación cerrada el 2026-09-13.** El borrador anterior no decía de
+dónde salía la resolución, qué ocurría con contenido compuesto ni cómo evitar
+desacoplar el raster de la conversión de cajas. ADR-163 lo restringe al caso
+demostrable y común: página `requiresOCR` cuyo único contenido pintado es un
+ráster con dimensiones nativas válidas. `pdf-engine` publica el cap opcional
+`Page.ocrDpiCap`; el Orchestrator usa por request la pareja inseparable
+`effectiveDpi`/`scale = effectiveDpi / 72`. Cualquier ambigüedad conserva el DPI
+configurado; por defensa del boundary, también lo conserva ante un cap no
+numérico, no finito o `<= 0`. Regiones OCR quedan fuera de T-6a.
+
+**Reparto de implementación** (sin mezclar módulos en un commit):
+
+1. `shared`: campo público opcional `Page.ocrDpiCap`;
+2. `pdf-engine`: cálculo exacto desde dimensiones de píxel y ejes CTM, sin una
+   segunda pasada del operator list;
+3. façade: DPI, estimación y escala por descriptor; ningún cambio en OCR ni
+   Render.
+
+**Cerrada el 2026-09-13.** Los tests discriminantes de ADR-163 quedaron verdes
+en los tres scopes, incluidos fallback por contenido compuesto, cap inválido y
+dos páginas con escalas independientes. Verificación: 508/508 tests afectados,
+2157/2157 globales, 311/311 contract tests, typecheck global, ESLint scoped y
+Prettier. Una medición P2 caracteriza magnitud en T-6b, pero no condiciona este
+cierre funcional.
 
 **No se puede dimensionar con el fixture actual** (§4): cuánto rinde depende de
 la resolución de los escaneos reales, y el fixture es sintético. Eso no bloquea

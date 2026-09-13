@@ -87,6 +87,8 @@ export interface Page {
   readonly requiresOCR: boolean;
   readonly ocrCompleted: boolean;
   readonly dpi?: number;
+  /** Cap seguro derivado de un único ráster fuente (ADR-163). */
+  readonly ocrDpiCap?: number;
 }
 
 /**

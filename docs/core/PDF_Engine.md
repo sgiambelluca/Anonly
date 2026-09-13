@@ -5,8 +5,22 @@
 > Extrae texto y posiciones de cada página del PDF. Marca las páginas sin texto para que OCR las procese. Descarta metadata sensible.
 
 **EngineId**: `pdf` (valor del enum `EngineId`)
-**Versión del spec**: 1.17.0
-**Última actualización**: 2026-09-09
+**Versión del spec**: 1.18.0
+**Última actualización**: 2026-09-13
+
+> **Nota (v1.18.0, ADR-163, T-6a — cap seguro de DPI para una página de
+> ráster único)**: el recorrido existente del operator list conserva, para una
+> página `requiresOCR`, las dimensiones nativas y los dos ejes de CTM de su
+> única imagen. `Page.ocrDpiCap` se puebla solo si todo el contenido pintado es
+> exactamente ese `paintImageXObject`/`paintInlineImageXObject`, sin texto,
+> paths, rellenos, sombreado, máscara ni segunda imagen, y todos los números son
+> finitos y positivos. Fórmula: `ceil(72 × max(wpx/hypot(a,b),
+> hpx/hypot(c,d)))`. Cualquier forma desconocida deja el campo ausente; nunca
+> inventa dimensiones ni baja el DPI por aproximación. No se aplica a
+> `ocrRegions`. `OPS.dependency` se acepta como estructural; las dimensiones de
+> XObject vienen de args 1/2 y las del inline image del objeto en args 0. Es un
+> campo público opcional de `Page` declarado por ADR-163 en
+> `Contracts.md`/`03_Data_Model.md`; no cambia eventos ni errores.
 
 > **Nota (v1.17.0, ADR-141, 2026-09-09 — la geometría se entrega en la página que se ve)**: `parsePage` producía posiciones en el marco **crudo** de PDF (`item.transform` sin componer) y dimensiones (`Page.width`/`Page.height`) en el **presentado** (`getViewport()`, con `/Rotate` ya aplicado) — la contradicción que ADR-063 §7 registró y que ADR-140 midió (130-268 pt de error a 90°/180°/270°, cero exacto en 0°). El marco presentado ya es el de `RenderEngine`, OCR, el preview y el export; este ADR no elige una convención nueva, hace verdadera la garantía que `Render_Engine.md` §13 ya declaraba. **Definición normativa** (va también a `03_Data_Model.md` §6, junto a `BoundingBox`): origen arriba-izquierda de la página tal como se ve, `x` a la derecha, `y` hacia abajo, en puntos PDF a `scale: 1`, `0 ≤ x ≤ Page.width`, `0 ≤ y ≤ Page.height` (ya intercambiados a 90°/270°); `CropBox`/`MediaBox` los resuelve `getViewport()`, nunca se compensan a mano. `viewport.transform` se compone, exactamente una vez, sobre el origen de cada `TextItem`, la parte lineal (de donde salen `dir`/`up` de ADR-063 §1), las posiciones del flujo de glifos de ADR-102 y los orígenes corregidos de ADR-068, y los rectángulos de imagen de ADR-065/ADR-066 §1. El volteo `y = pageHeight − yMax` de ADR-063 §2 **desaparece**: `viewport.transform` ya lo incluye. `bbox.rotation` **no cambia de definición** (la fijó ADR-090 §4 para OCR: 90 ⇒ el texto avanza hacia arriba en pantalla, 270 ⇒ hacia abajo) — cambia respecto de qué página se mide. La fórmula: `deriveRotation` mide el ángulo **visual** del `dir` compuesto, `atan2(−dir.y, dir.x)` — la negación es obligatoria porque la parte lineal del viewport ya volteó el eje `y` (`[1,0,0,−1]` en `rotate: 0`), y omitirla intercambia las etiquetas 90↔270 sin que ningún test de página sin rotar lo detecte (el snapshot y la posición/tamaño de las cuatro cajas siguen dando bien; solo las etiquetas quedan invertidas — de ahí el control discriminante de un run vertical en una página `/Rotate 0`, que tiene que seguir etiquetando 90, `unit.test.ts` describe "Rotation field on BoundingBox"). Con `rotate === 0` la matriz compuesta es exactamente el volteo actual: ningún documento sin rotación se mueve, verificado por `snapshot.test.ts`. `advanceStartOf`/`advanceEndOf`/`compareAlongAdvance`/`crossAxisOf` (ADR-067), `toUprightFrame`, el pintado rotado de ADR-066 §7 y el `bbox.rotation` que puebla OCR **no cambian una línea** — misma convención, solo la fuente de `dir` cambió de crudo a compuesto. El guard de ADR-140 **sigue puesto**: se retira en un commit posterior, después de verificar original, preview anonimizado y PDF exportado, con al menos dos escalas de preview, y solo para los ángulos verificados (ADR-141 §6) — este commit es solo el productor (`pdf-engine`), con la composición y el corpus de los cuatro ángulos (`/Rotate` × dirección cruda horizontal/vertical). Ver §10, §13 casos 64-65, §14.
 
@@ -246,6 +260,10 @@ PdfEngineOutput {
 ```
 
 - `document.pages[i].index === i` para todo `i`.
+- `document.pages[i].ocrDpiCap`, cuando existe, es un entero positivo y solo
+  aparece en una página `requiresOCR` cuyo contenido pintado es un único ráster
+  con dimensiones nativas verificables (ADR-163). Ausente es el caso de reserva
+  y no es un error.
 - **`Word.bbox` vive en el marco de la página presentada, no en el crudo de PDF** (ADR-141 §1, definición normativa completa en `03_Data_Model.md` §6): origen arriba-izquierda tal como se ve, `x` a la derecha, `y` hacia abajo, en puntos a `scale: 1`, con `0 ≤ x ≤ Page.width` y `0 ≤ y ≤ Page.height` — los mismos `Page.width`/`Page.height` de esta salida, que ya vienen del `viewport` (§9 de este documento no lo dice dos veces: es el mismo marco, una sola definición). `bbox.rotation` sigue siendo el ángulo visual de ADR-090 §4, ahora medido sobre el `dir` ya compuesto con `viewport.transform`.
 - `document.pages[i].words` está **agrupado en renglones** y, dentro de cada renglón, ordenado por `bbox.x` asc (ADR-110 §1). No hay una clave escalar de orden: el renglón es un grupo, no una coordenada.
 - `textlessPages` está ordenado asc.
@@ -395,6 +413,9 @@ PdfEngineOutput {
 63. **Página con `/Rotate` distinto de 0 y SIN texto nativo** (un escaneo cuyo scanner declaró la rotación): no lanza. Va entera por OCR — `requiresOCR = true`, `words = []`, se agrega a `textlessPages` — porque `rasterizePage` ya rota el ráster con el mismo `getViewport()` (ADR-140 §3). Es el control que decide si el guard debía ser por documento entero o solo por el camino nativo.
 64. **Texto crudo horizontal sobre una página con `/Rotate` genuino ("doble rotación", ADR-141 §2/§3)**: la composición produce una palabra cuyo `bbox` queda vertical y con `rotation` poblada — un run que en el content stream es horizontal (`dir` crudo `(1,0)`) sale, tras componer con `viewport.transform` de una página `/Rotate 90`, etiquetado `270` (tabla medida de ADR-141 §3). Antes de ADR-141 esto era imposible de producir: ningún código leía la rotación de la página para una palabra de texto nativo.
 65. **Run vertical en una página `/Rotate 0`** (control discriminante de ADR-141 §3/Consecuencias): tiene que seguir etiquetando `rotation: 90`, igual que antes de ADR-141. Es el caso que una implementación de `deriveRotation` sin la negación del eje `y` NO detecta — posición y tamaño de la caja siguen saliendo bien y el snapshot pasa, solo la etiqueta queda invertida (90↔270) — así que este caso es el que efectivamente prueba la fórmula, no los de página sin rotar.
+66. **Página textless con un único ráster 1200×1600 dibujado sobre ejes de 600×800 pt** (ADR-163): `ocrDpiCap = 144`. La misma imagen con CTM rotada produce el mismo valor.
+67. **Resolución nativa incierta** (ADR-163): dimensiones ausentes/no finitas/no positivas, eje CTM degenerado, máscara, segundo ráster o cualquier operación adicional que pinte dejan `ocrDpiCap` ausente. El comportamiento del caller queda en el DPI configurado.
+68. **Página con texto nativo y región OCR** (ADR-163): `ocrDpiCap` queda ausente aunque contenga una imagen; T-6a no cambia el camino de `ocrRegions`.
 
 ---
 
@@ -565,6 +586,14 @@ PdfEngineOutput {
 - [x] 25. (Hito 10.8, paso 4 — ADR-067) `sortWordsByReadingOrder`: agrupar los words con `bbox.rotation` 90/180/270 en runs (columna con tolerancia 1 **y** hueco de avance ≤ 2 cuerpos), ordenarlos en su dirección de avance y emitirlos en una **pasada aparte, después de todo el texto horizontal** — nunca intercalados (§12, ADR-067 §4 y su corrección). La rama sin rotación **no cambia** y el snapshot de `snapshot.test.ts` **no se regenera**. **No** tocar `ocr-engine` (ADR-067 §5) ni `fuseOcrPage`/`fuseOcrRegion`, que heredan el orden sin cambios (§6). Casos 34-39 de §13 y once filas nuevas en §14.
 
 - [x] 26. (Hito 10.8, paso 5 — ADR-068) En el mismo recorrido del operator list, emitir por cada `showText`/`showSpacedText` **de página** el par `from`/`to` del origen cuando `Tw ≠ 0` y el run tiene espacios iniciales; `convertTextItemsToWords` corrige un item solo si su origen coincide con un `from` (§12). **No** tocar `item.width` ni el prorrateo de ADR-020 §1. El snapshot **no se regenera**. Caso 41 de §13 y tres filas nuevas en §14.
+
+- [x] 34. (ADR-163, T-6a) En el mismo recorrido del operator list, calcular
+  `Page.ocrDpiCap` únicamente para `requiresOCR` + un solo ráster + cero pintura
+  adicional, con la fórmula de v1.18.0. Soportar dimensiones válidas de
+  `paintImageXObject` y `paintInlineImageXObject`; máscara o forma desconocida
+  abre el gate y deja `undefined`. No agregar umbrales, nuevas llamadas a
+  `getOperatorList`, configuración, eventos ni errores. Tests de §13 casos
+  66-68, incluido el discriminante rotado y todos los fallbacks.
 
 - [ ] 27. (Hito 11 — ADR-108) `appendRunGlyphs`: sumar `text.wordSpacing` al avance de los glifos con **`glyph.isSpace === true`**, no de todo `unicode === " "` (§12, ADR-108 §1). `alignToGlyphs`: saltear del lado del flujo los glifos de espacio que la cadena no trae, devolviendo el cursor si aun así no casa (ADR-108 §2). `leadingAdvance`: su rama "sin word spacing" usa la misma regla de `isSpace`, para que `to` caiga sobre el glifo. Y buscar el origen **primero por el reportado y después por el corregido** (ADR-108 §4). **No** ampliar la tolerancia de 0,05 pt de `findGlyphAt`: quedó **descartado por medición** (ADR-108 §3). El snapshot **no se regenera**: ningún fixture del repo usa `Tw`. Casos 47-48 y 51 de §13 y ocho filas nuevas en §14.
 - [ ] 28. (Hito 11 — ADR-109) La caja de una palabra pasa a ir del descenso al ascenso de su fuente, con `ascent`/`descent` de `styles[item.fontName]` y reserva a la caja previa cuando las métricas no sirven (§12, ADR-109 §1/§2). Va **después** del ítem 27: sin él el corrimiento horizontal tapa el defecto vertical y el gate visual no distingue cuál de los dos se arregló. En dos pasos verificables por separado dentro del mismo PR: **(a)** el texto horizontal pasa a ordenarse por `bbox.y + bbox.height` —no-op demostrable sobre la geometría de hoy—; **(b)** la caja nueva. `REPLACEMENT_FONT_HEIGHT_RATIO` baja a 0,64 en `shared` en el mismo cambio (`Contracts.md` §6, ADR-109 §4). **No** tocar el orden entre runs rotados (ADR-067 §3), ni el camino de anotaciones, ni `ocr-engine`. Casos 49-50 de §13 y seis filas nuevas en §14. **El snapshot no se mueve**, y no porque el cambio sea inocuo: su fixture en memoria no declara `styles` y cae en la reserva de ADR-109 §2 — ver el ítem 29.

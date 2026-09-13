@@ -443,6 +443,24 @@ Los tipos completos están en `03_Data_Model.md`. Aquí solo los enums referenci
 
 ```ts
 /**
+ * ADR-163: límite opcional y conservador para rasterizar OCR. Solo existe
+ * cuando pdf-engine demostró que la página sin texto es un único ráster con
+ * dimensiones nativas válidas y sin otro contenido pintado. Ausente obliga a
+ * usar OcrConfig.dpi. No reemplaza `dpi`, que describe una página ya OCR-eada.
+ */
+export interface Page {
+  readonly index: number;
+  readonly width: number;
+  readonly height: number;
+  readonly words: ReadonlyArray<Word>;
+  readonly text: string;
+  readonly requiresOCR: boolean;
+  readonly ocrCompleted: boolean;
+  readonly dpi?: number;
+  readonly ocrDpiCap?: number;
+}
+
+/**
  * ADR-066 §6 (supersede ADR-063 §5): orientación del texto que ocupa la caja.
  * Ausente ≡ 0, así que todo `BoundingBox` previo sigue siendo válido y se
  * pinta igual. NO cambia la geometría — el rectángulo sigue siendo

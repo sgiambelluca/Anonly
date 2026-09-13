@@ -20,6 +20,13 @@
 > exacta quedó implementada y verificada con 137/137 tests scoped, typecheck y
 > ESLint verdes. El detalle vive en `core/OCR_Engine.md` v1.13.0 y en el plan
 > vivo §T-4.
+>
+> **T-6a cerrada, 2026-09-13.** ADR-163 quedó implementada: cap opcional solo
+> para páginas de un único ráster demostrable, fórmula exacta por ejes CTM y
+> DPI/escala por request. Contenido compuesto, datos inciertos y OCR por región
+> conservan el DPI configurado. Pasaron 508/508 tests afectados, 2157/2157
+> globales, 311/311 contract tests, typecheck global y ESLint scoped. La
+> medición de magnitud queda separada como T-6b.
 
 **Perfil de referencia en todo el documento**: P2 — 50 páginas escaneadas, OCR + NER reales, sobre el shell de Electron empaquetado. darwin/arm64, 8 CPUs, 8,6 GB de RAM. Salvo aclaración, los números son de corridas **calientes** (modelos ya cargados).
 
@@ -62,6 +69,7 @@
 | 11 | Bajar el DPI | **Disponible, no usado** — costo de calidad |
 | 12 | El worker de OCR no decodifica la página (ADR-160) | **Tomado y medido** — el de mayor efecto sobre el pico (§3.6) |
 | 13 | Saltear franjas visualmente blancas (ADR-162) | **Tomado e implementado** — elimina 0/2/4 pasadas de margen; magnitud P2 pendiente |
+| 14 | DPI adaptativo por ráster fuente (ADR-163) | **Tomado e implementado** — evita sobremuestreo demostrable; magnitud P2 en T-6b |
 
 ---
 

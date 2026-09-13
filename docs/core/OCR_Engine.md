@@ -5,8 +5,16 @@
 > Ejecuta OCR sobre las páginas sin texto del PDF. Solo corre si `PdfEngineOutput.textlessPages.length > 0`. Devuelve `Word[]` con `BoundingBox` y `confidence` que el PDF Engine fusiona.
 
 **EngineId**: `ocr`
-**Versión del spec**: 1.13.0
+**Versión del spec**: 1.14.0
 **Última actualización**: 2026-09-13
+
+> **Nota (v1.14.0, ADR-163, T-6a — `dpi` puede variar por página)**: el campo
+> `dpi` de cada `OcrPageRequest` sigue siendo exactamente el DPI usado para
+> rasterizar su `image`; ya no tiene por qué coincidir con el default global.
+> El Orchestrator puede limitar una página de ráster único mediante
+> `Page.ocrDpiCap`, pero siempre mueve juntos `dpi`, `estimatedBytes` y
+> `scale = dpi/72`. Este motor no calcula ni interpreta el cap y no cambia una
+> línea: la precondición de ADR-064 sigue siendo la misma.
 
 > **Nota (v1.13.0, ADR-162, 2026-09-13 — solo una franja visualmente blanca
 > se saltea)**: ADR-161 proponía una métrica de tinta calibrada, pero dejaba sin
