@@ -78,4 +78,21 @@ describe("OcrEngine — snapshot (ADR-160 §1/§6)", () => {
     const { durationMs: _durationMs, ...comparable } = output;
     expect(comparable).toMatchSnapshot();
   });
+
+  it("active strips preserve ADR-121 words, confidence, bboxes and fusion", async () => {
+    const BODY = [{ text: "cuerpo", confidence: 95, bbox: { x0: 60, y0: 10, x1: 90, y1: 22 } }];
+    const recognize = vi.fn(() =>
+      Promise.resolve({ jobId: "j", data: mockRecognizeData(BODY, 95) }),
+    );
+    vi.mocked(createWorker).mockResolvedValue(
+      mockTesseractWorker(mockRecognizeData(BODY, 95), { recognize }),
+    );
+    await engine.init(ctx);
+    const output = await engine.processPage(
+      { ...createValidOcrPageInput("doc-162-active", 0), image: createEncodedPageImage(100, 40) },
+      ctx,
+    );
+    const { durationMs: _durationMs, ...comparable } = output;
+    expect(comparable).toMatchSnapshot();
+  });
 });

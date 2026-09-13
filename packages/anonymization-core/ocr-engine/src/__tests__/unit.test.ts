@@ -38,6 +38,8 @@ import {
   mockRecognizeData,
   mockTesseractWorker,
   setStubCanvasContextAvailable,
+  setStubDecodedPixel,
+  setStubDecodedPixelSequence,
   trackCreateImageBitmapCalls,
   trackOffscreenCanvasConstructions,
 } from "./fixtures/test-helpers.js";
@@ -48,6 +50,7 @@ describe("OcrEngine — unit tests", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    setStubDecodedPixel([0, 0, 0, 255]);
     engine = new OcrEngine();
     ctx = createEngineContext();
   });
@@ -1222,6 +1225,64 @@ describe("OcrEngine — unit tests", () => {
       const output = await engine.processPage(inputConRaster("doc-121-falla"), ctx);
 
       expect(output.words.map((w) => w.text)).toEqual(["cuerpo"]);
+    });
+
+    it("opaque white and transparent colored strips skip both margin recognizes", async () => {
+      const recognize = vi.fn(() =>
+        Promise.resolve({ jobId: "j", data: mockEmptyRecognizeData() }),
+      );
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockEmptyRecognizeData(), { recognize }),
+      );
+      await engine.init(ctx);
+      setStubDecodedPixelSequence([
+        [255, 255, 255, 255],
+        [10, 20, 30, 0],
+      ]);
+      await engine.processPage(inputConRaster("doc-162-white"), ctx);
+      expect(recognize).toHaveBeenCalledTimes(1);
+    });
+
+    it("one near-white opaque pixel keeps both margin recognizes", async () => {
+      const recognize = vi.fn(() =>
+        Promise.resolve({ jobId: "j", data: mockEmptyRecognizeData() }),
+      );
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockEmptyRecognizeData(), { recognize }),
+      );
+      await engine.init(ctx);
+      setStubDecodedPixel([254, 255, 255, 255]);
+      await engine.processPage(inputConRaster("doc-162-near-white"), ctx);
+      expect(recognize).toHaveBeenCalledTimes(5);
+    });
+
+    it("one almost-transparent black pixel keeps both margin recognizes", async () => {
+      const recognize = vi.fn(() =>
+        Promise.resolve({ jobId: "j", data: mockEmptyRecognizeData() }),
+      );
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockEmptyRecognizeData(), { recognize }),
+      );
+      await engine.init(ctx);
+      setStubDecodedPixel([0, 0, 0, 1]);
+      await engine.processPage(inputConRaster("doc-162-alpha"), ctx);
+      expect(recognize).toHaveBeenCalledTimes(5);
+    });
+
+    it("one white strip and one active strip run exactly two margin recognizes", async () => {
+      const recognize = vi.fn(() =>
+        Promise.resolve({ jobId: "j", data: mockEmptyRecognizeData() }),
+      );
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockEmptyRecognizeData(), { recognize }),
+      );
+      await engine.init(ctx);
+      setStubDecodedPixelSequence([
+        [255, 255, 255, 255],
+        [0, 0, 0, 255],
+      ]);
+      await engine.processPage(inputConRaster("doc-162-mixed"), ctx);
+      expect(recognize).toHaveBeenCalledTimes(3);
     });
   });
 

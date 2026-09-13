@@ -39,6 +39,8 @@ import {
   mockEmptyRecognizeData,
   mockRecognizeData,
   mockTesseractWorker,
+  setStubDecodedDataReadThrowsOnce,
+  setStubDecodedPixelSequence,
   trackOffscreenCanvasConstructions,
 } from "./fixtures/test-helpers.js";
 
@@ -59,6 +61,29 @@ describe("OcrEngine — edge case tests", () => {
   });
 
   // Caso 1 (§13): página completamente vacía (blanca).
+  it("ink-gate uncertainty fails open and preserves both margin recognizes", async () => {
+    const recognize = vi.fn(() => Promise.resolve({ jobId: "j", data: mockEmptyRecognizeData() }));
+    vi.mocked(createWorker).mockResolvedValue(
+      mockTesseractWorker(mockEmptyRecognizeData(), { recognize }),
+    );
+    setStubDecodedPixelSequence([
+      [0, 0, 0, 255],
+      [255, 255, 255, 255],
+    ]);
+    setStubDecodedDataReadThrowsOnce();
+    await engine.init(ctx);
+    await engine.processPage(
+      {
+        ...createValidOcrPageInput("doc-162-uncertain", 0),
+        image: createEncodedPageImage(100, 40),
+      },
+      ctx,
+    );
+    // La primera inspección falla abierta; la franja que llega al doble corre
+    // sus dos rotaciones (la pasada principal completa el total en 3).
+    expect(recognize).toHaveBeenCalledTimes(3);
+  });
+
   describe("Caso 1: página completamente vacía (blanca)", () => {
     it("empty page returns empty words", async () => {
       vi.mocked(createWorker).mockResolvedValue(mockTesseractWorker(mockEmptyRecognizeData()));

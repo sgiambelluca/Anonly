@@ -1011,6 +1011,21 @@ async function recognizeRotatedMargins(params: {
       continue;
     }
 
+    /*
+     * ADR-162 §13 caso 23: la compuerta es deliberadamente exacta. Una franja
+     * solo se considera visualmente blanca cuando cada píxel es transparente
+     * o tiene sus tres canales RGB en 255. La decisión se toma una sola vez,
+     * antes de las dos rotaciones; una excepción abre la compuerta (el texto
+     * visible nunca debe perderse por una inspección defensiva).
+     */
+    let visuallyWhite = false;
+    try {
+      visuallyWhite = isVisuallyWhiteStrip(cropped);
+    } catch {
+      visuallyWhite = false;
+    }
+    if (visuallyWhite) continue;
+
     for (const rotation of rotations) {
       if (opts.abortSignal.aborted) throw new CancelledError(documentId);
       let data: unknown;
@@ -1070,6 +1085,29 @@ async function recognizeRotatedMargins(params: {
     }
   }
   return found;
+}
+
+/** ADR-162: predicado exacto de blanco/transparencia, sin umbrales implícitos. */
+function isVisuallyWhiteStrip(image: ImageData): boolean {
+  const { data } = image;
+  if (
+    image.width <= 0 ||
+    image.height <= 0 ||
+    data.length === 0 ||
+    data.length !== image.width * image.height * 4
+  ) {
+    return false;
+  }
+  for (let index = 0; index < data.length; index += 4) {
+    const alpha = data[index + 3];
+    if (
+      alpha !== 0 &&
+      (data[index] !== 255 || data[index + 1] !== 255 || data[index + 2] !== 255)
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 export interface KernelRecognizeOptions {

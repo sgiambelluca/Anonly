@@ -260,6 +260,29 @@ export function createImageProducer(
  * los píxeles.
  */
 let stubCanvasContextAvailable = true;
+let stubDecodedPixel: readonly [number, number, number, number] = [0, 0, 0, 255];
+let stubDecodedPixelSequence: ReadonlyArray<readonly [number, number, number, number]> | undefined;
+let stubDecodedDataReadThrowsOnce = false;
+
+/** Permite a los tests de ADR-162 elegir el contenido de la franja decodificada. */
+export function setStubDecodedPixel(
+  pixel: readonly [number, number, number, number],
+): void {
+  stubDecodedPixel = pixel;
+  stubDecodedPixelSequence = undefined;
+  stubDecodedDataReadThrowsOnce = false;
+}
+
+export function setStubDecodedPixelSequence(
+  pixels: ReadonlyArray<readonly [number, number, number, number]>,
+): void {
+  stubDecodedPixelSequence = pixels;
+}
+
+export function setStubDecodedDataReadThrowsOnce(): void {
+  stubDecodedDataReadThrowsOnce = true;
+}
+
 
 class StubOffscreenCanvas {
   width: number;
@@ -288,7 +311,39 @@ class StubOffscreenCanvas {
     return {
       putImageData: () => undefined,
       drawImage: () => undefined,
-      getImageData: (_x: number, _y: number, w: number, h: number) => createImageData(w, h),
+      getImageData: (_x: number, _y: number, w: number, h: number) => {
+        const image = createImageData(w, h);
+        const nextPixel = stubDecodedPixelSequence?.[0] ?? stubDecodedPixel;
+        if (stubDecodedPixelSequence !== undefined) {
+          stubDecodedPixelSequence = stubDecodedPixelSequence.slice(1);
+        }
+        for (let index = 0; index < image.data.length; index += 4) {
+          image.data[index] = nextPixel[0];
+          image.data[index + 1] = nextPixel[1];
+          image.data[index + 2] = nextPixel[2];
+          image.data[index + 3] = nextPixel[3];
+        }
+        if (stubDecodedDataReadThrowsOnce) {
+          stubDecodedDataReadThrowsOnce = false;
+          let throwOnDataRead = true;
+          return new Proxy(image, {
+            get(target, property) {
+              if (property === "data") {
+                if (throwOnDataRead) {
+                  throwOnDataRead = false;
+                  throw new Error("uncertain");
+                }
+                return target.data;
+              }
+              if (property === "width") return target.width;
+              if (property === "height") return target.height;
+              if (property === "colorSpace") return target.colorSpace;
+              return undefined;
+            },
+          });
+        }
+        return image;
+      },
     };
   }
 }
