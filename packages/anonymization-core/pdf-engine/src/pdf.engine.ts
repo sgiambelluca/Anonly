@@ -1149,6 +1149,25 @@ const IMAGE_PAINT_OPS: ReadonlySet<number> = new Set([
   OPS.paintInlineImageXObject,
 ]);
 
+const NON_PAINTING_OPS: ReadonlySet<number> = new Set([
+  OPS.save,
+  OPS.restore,
+  OPS.transform,
+  OPS.dependency,
+  OPS.beginAnnotation,
+  OPS.endAnnotation,
+  OPS.beginText,
+  OPS.setFont,
+  OPS.setTextMatrix,
+  OPS.moveText,
+  OPS.setCharSpacing,
+  OPS.setWordSpacing,
+  OPS.setHScale,
+  OPS.setLeading,
+  OPS.setLeadingMoveText,
+  OPS.nextLine,
+]);
+
 function isNumberArray(value: unknown): value is ReadonlyArray<number> {
   return Array.isArray(value) && value.every((v) => typeof v === "number");
 }
@@ -1758,6 +1777,12 @@ function buildAnnotationTextRun(
 
 interface AnnotationsAndImages {
   readonly imageRects: ReadonlyArray<BoundingBox>;
+  readonly rasterCandidates: ReadonlyArray<{
+    readonly nativeWidth: number | undefined;
+    readonly nativeHeight: number | undefined;
+    readonly ctm: Matrix2D;
+  }>;
+  readonly hasAdditionalPainting: boolean;
   readonly annotationWords: ReadonlyArray<Word>;
   // ADR-068: origen real de los runs de PÁGINA cuyo `transform` de
   // `getTextContent` viene desplazado por el word spacing.
@@ -1784,6 +1809,12 @@ function walkOperatorListForAnnotationsAndImages(
 ): AnnotationsAndImages {
   const ctm = new CtmTracker(viewportMatrix);
   const imageRects: BoundingBox[] = [];
+  const rasterCandidates: Array<{
+    readonly nativeWidth: number | undefined;
+    readonly nativeHeight: number | undefined;
+    readonly ctm: Matrix2D;
+  }> = [];
+  let hasAdditionalPainting = false;
   const annotationWords: Word[] = [];
   const originCorrections: TextOriginCorrection[] = [];
   const pageGlyphs: PageGlyph[] = [];
@@ -1866,6 +1897,7 @@ function walkOperatorListForAnnotationsAndImages(
     } else if (fn === OPS.nextLine) {
       text.nextLine();
     } else if (ctm.isInsideAnnotation && (fn === OPS.showText || fn === OPS.showSpacedText)) {
+      hasAdditionalPainting = true;
       const run = buildAnnotationTextRun(args, text, ctm.current);
       if (run !== undefined) {
         // ADR-097 §3: el camino de anotaciones NO usa la tabla de avances —
@@ -1899,6 +1931,7 @@ function walkOperatorListForAnnotationsAndImages(
         }
       }
     } else if (!ctm.isInsideAnnotation && (fn === OPS.showText || fn === OPS.showSpacedText)) {
+      hasAdditionalPainting = true;
       // ADR-068: el texto de página lo extrae `getTextContent()`; de este
       // recorrido salen la corrección del origen (ver `buildOriginCorrection`)
       // y —ADR-102 §1— los glifos del run, al flujo continuo de la página.
@@ -1910,10 +1943,73 @@ function walkOperatorListForAnnotationsAndImages(
       // la imagen está dentro de una anotación — corrige el defecto latente
       // de ADR-065, Contexto §4.
       imageRects.push(imageRectFromCTM(ctm.current));
+      if (fn === OPS.paintImageMaskXObject) {
+        // A mask is not a demonstrably self-contained raster for this ADR.
+        hasAdditionalPainting = true;
+        continue;
+      }
+      const imageArgs = Array.isArray(args) ? (args as ReadonlyArray<unknown>) : [];
+      const inlineDimensions =
+        fn === OPS.paintInlineImageXObject && isRecord(imageArgs[0]) ? imageArgs[0] : undefined;
+      const nativeWidth =
+        typeof imageArgs[1] === "number"
+          ? imageArgs[1]
+          : inlineDimensions !== undefined && typeof inlineDimensions.width === "number"
+            ? inlineDimensions.width
+            : undefined;
+      const nativeHeight =
+        typeof imageArgs[2] === "number"
+          ? imageArgs[2]
+          : inlineDimensions !== undefined && typeof inlineDimensions.height === "number"
+            ? inlineDimensions.height
+            : undefined;
+      rasterCandidates.push({ nativeWidth, nativeHeight, ctm: ctm.current });
+    } else if (fn !== undefined) {
+      // Unknown operators are treated as painting: preserving the cap requires
+      // proof that the image is the complete painted content.
+      if (!NON_PAINTING_OPS.has(fn)) hasAdditionalPainting = true;
     }
   }
 
-  return { imageRects, annotationWords, originCorrections, pageGlyphs };
+  return {
+    imageRects,
+    rasterCandidates,
+    hasAdditionalPainting,
+    annotationWords,
+    originCorrections,
+    pageGlyphs,
+  };
+}
+
+function deriveOcrDpiCap(
+  requiresOCR: boolean,
+  rasterCandidates: ReadonlyArray<{
+    readonly nativeWidth: number | undefined;
+    readonly nativeHeight: number | undefined;
+    readonly ctm: Matrix2D;
+  }>,
+  hasAdditionalPainting: boolean,
+): number | undefined {
+  if (!requiresOCR || hasAdditionalPainting || rasterCandidates.length !== 1) return undefined;
+  const candidate = rasterCandidates[0];
+  if (candidate === undefined) return undefined;
+  const { nativeWidth, nativeHeight, ctm } = candidate;
+  if (
+    nativeWidth === undefined ||
+    nativeHeight === undefined ||
+    !Number.isFinite(nativeWidth) ||
+    !Number.isFinite(nativeHeight) ||
+    nativeWidth <= 0 ||
+    nativeHeight <= 0
+  )
+    return undefined;
+  const axisX = Math.hypot(ctm[0], ctm[1]);
+  const axisY = Math.hypot(ctm[2], ctm[3]);
+  if (!Number.isFinite(axisX) || !Number.isFinite(axisY) || axisX <= 0 || axisY <= 0) {
+    return undefined;
+  }
+  const cap = Math.ceil(72 * Math.max(nativeWidth / axisX, nativeHeight / axisY));
+  return Number.isFinite(cap) && cap > 0 ? cap : undefined;
 }
 
 // Filtro por rectángulo (ADR-065 §1): descarta imágenes < 1% del área de
@@ -2231,14 +2327,20 @@ async function parsePage(
 
   // ADR-068: el recorrido del operator list precede a la conversión de items
   // porque produce la corrección de origen que ésta consume.
-  const { imageRects, annotationWords, originCorrections, pageGlyphs } =
-    walkOperatorListForAnnotationsAndImages(
-      operatorList,
-      pageIndex,
-      viewportMatrix,
-      documentId,
-      logger,
-    );
+  const {
+    imageRects,
+    rasterCandidates,
+    hasAdditionalPainting,
+    annotationWords,
+    originCorrections,
+    pageGlyphs,
+  } = walkOperatorListForAnnotationsAndImages(
+    operatorList,
+    pageIndex,
+    viewportMatrix,
+    documentId,
+    logger,
+  );
 
   const { words: contentWords, joinStats } = convertTextItemsToWords(
     textContent,
@@ -2294,6 +2396,7 @@ async function parsePage(
   const sortedWords = sortWordsByReadingOrder([...contentWords, ...annotationWords]);
   const text = sortedWords.map((w) => w.text).join(" ");
   const requiresOCR = sortedWords.length === 0;
+  const ocrDpiCap = deriveOcrDpiCap(requiresOCR, rasterCandidates, hasAdditionalPainting);
 
   const page: Page = {
     index: pageIndex,
@@ -2303,6 +2406,7 @@ async function parsePage(
     text,
     requiresOCR,
     ocrCompleted: false,
+    ...(ocrDpiCap !== undefined ? { ocrDpiCap } : {}),
   };
 
   // ADR-065 §1/§4: las compuertas de OCR por región solo corren para páginas

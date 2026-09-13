@@ -961,6 +961,137 @@ describe("PdfEngine — unit tests", () => {
       expect(output.textlessPages).toEqual([0]);
     });
 
+    it("derives the conservative DPI cap from the unique raster (ADR-163)", async () => {
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () =>
+            createMockPage(
+              0,
+              [],
+              [{ x: 0, y: 0, width: 600, height: 800, nativeWidth: 1200, nativeHeight: 1600 }],
+              { width: 600, height: 800 },
+            ),
+          ),
+        ),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-dpi-cap"), ctx);
+
+      expect(output.document.pages[0]!.ocrDpiCap).toBe(144);
+    });
+
+    it("leaves the cap absent when raster dimensions are unknown", async () => {
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () =>
+            createMockPage(
+              0,
+              [],
+              [{ x: 0, y: 0, width: 600, height: 800, nativeWidth: Number.NaN }],
+              { width: 600, height: 800 },
+            ),
+          ),
+        ),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-dpi-unknown"), ctx);
+
+      expect(output.document.pages[0]!.ocrDpiCap).toBeUndefined();
+    });
+
+    it("allows dependency operators before the unique XObject", async () => {
+      const page = createMockPage(
+        0,
+        [],
+        [{ x: 0, y: 0, width: 600, height: 800, nativeWidth: 1200, nativeHeight: 1600 }],
+      );
+      page.getOperatorList = vi.fn(() =>
+        Promise.resolve({
+          fnArray: [OPS.dependency, OPS.save, OPS.transform, OPS.paintImageXObject, OPS.restore],
+          argsArray: [[], [], [600, 0, 0, 800, 0, 0], ["img", 1200, 1600], []],
+        }),
+      );
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument(1, () => page)),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-dpi-dependency"), ctx);
+
+      expect(output.document.pages[0]!.ocrDpiCap).toBe(144);
+    });
+
+    it("reads native dimensions from an inline image object", async () => {
+      const page = createMockPage(0);
+      page.getTextContent = vi.fn(() => Promise.resolve({ items: [] }));
+      page.getOperatorList = vi.fn(() =>
+        Promise.resolve({
+          fnArray: [OPS.save, OPS.transform, OPS.paintInlineImageXObject, OPS.restore],
+          argsArray: [[], [600, 0, 0, 800, 0, 0], [{ width: 1200, height: 1600 }], []],
+        }),
+      );
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument(1, () => page)),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-dpi-inline"), ctx);
+
+      expect(output.document.pages[0]!.ocrDpiCap).toBe(144);
+    });
+
+    it.each([
+      [
+        "rotated CTM",
+        [OPS.save, OPS.transform, OPS.paintImageXObject, OPS.restore],
+        [[], [0, 600, 800, 0, 0, 0], ["img", 1200, 1600], []],
+      ],
+      [
+        "two images",
+        [OPS.paintImageXObject, OPS.paintImageXObject],
+        [
+          ["a", 1200, 1600],
+          ["b", 1200, 1600],
+        ],
+      ],
+      ["mask", [OPS.paintImageMaskXObject], [["mask", 1200, 1600]]],
+      ["extra painting", [OPS.paintImageXObject, OPS.fill], [["img", 1200, 1600], []]],
+      [
+        "degenerate CTM",
+        [OPS.save, OPS.transform, OPS.paintImageXObject, OPS.restore],
+        [[], [0, 0, 0, 800, 0, 0], ["img", 1200, 1600], []],
+      ],
+    ] as const)("handles discriminant %s", async (name, fnArray, opArgs) => {
+      const page = createMockPage(0, [], []);
+      page.getTextContent = vi.fn(() => Promise.resolve({ items: [] }));
+      page.getOperatorList = vi.fn(() => Promise.resolve({ fnArray, argsArray: opArgs }));
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument(1, () => page)),
+      );
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput(`doc-dpi-${name}`), ctx);
+      expect(output.document.pages[0]!.ocrDpiCap).toBe(name === "rotated CTM" ? 144 : undefined);
+    });
+
+    it("leaves cap absent on a native-text page", async () => {
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () =>
+            createMockPage(
+              0,
+              [{ str: "native", x: 10, y: 700, width: 40, height: 12 }],
+              [{ x: 0, y: 0, width: 600, height: 800, nativeWidth: 1200, nativeHeight: 1600 }],
+            ),
+          ),
+        ),
+      );
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-dpi-native"), ctx);
+      expect(output.document.pages[0]!.ocrDpiCap).toBeUndefined();
+    });
+
     it("marks page with text content as requiresOCR=false", async () => {
       vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(createMockPdfDocument(2)));
 

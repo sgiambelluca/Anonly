@@ -165,6 +165,8 @@ export type MockImageRect = {
   readonly y: number;
   readonly width: number;
   readonly height: number;
+  readonly nativeWidth?: number;
+  readonly nativeHeight?: number;
 };
 
 export type Matrix6 = readonly [number, number, number, number, number, number];
@@ -272,7 +274,7 @@ export function buildMockOperatorList(
     fnArray.push(OPS.transform);
     argsArray.push([image.width, 0, 0, image.height, image.x, image.y]);
     fnArray.push(OPS.paintImageXObject);
-    argsArray.push(["img", image.width, image.height]);
+    argsArray.push(["img", image.nativeWidth ?? image.width, image.nativeHeight ?? image.height]);
     fnArray.push(OPS.restore);
     argsArray.push([]);
   }
