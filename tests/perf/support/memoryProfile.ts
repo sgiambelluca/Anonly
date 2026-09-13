@@ -18,6 +18,15 @@ import type { ElectronApplication, Page } from "@playwright/test";
 import type { E2eFilePayload } from "../../e2e/support/fixtures.js";
 
 import {
+  heapSampleNear,
+  heapSamplesBetween,
+  heapSamplesSince,
+  startHeapSampling,
+  type ClassifiedTargetHeapSample,
+  type HeapSample,
+  type HeapSampler,
+} from "./cdpHeap.js";
+import {
   minSumBytes,
   peakSumBytes,
   sampleNear,
@@ -288,6 +297,116 @@ export function computeWorkerPeakByTypeInWindow(
 }
 
 /**
+ * Bytes "atribuidos" de un isolate leído con éxito (ADR-159 §8): heap de
+ * objetos de V8 (`usedSizeBytes`) + heap del embebedor — DOM/Blink, no WASM
+ * (`embedderHeapUsedSizeBytes`) + backing stores de `ArrayBuffer`/canvas/
+ * strings externos (`backingStorageSizeBytes`). Deliberadamente NO incluye
+ * `totalSizeBytes` (capacidad asignada, no uso real). Un target con
+ * `readError` no aporta nada a la suma — ni cero real ni un valor viejo,
+ * simplemente no participa (`computeUnattributedResidual` es quien decide
+ * qué hacer con eso).
+ */
+export function attributedIsolateBytes(targets: ReadonlyArray<ClassifiedTargetHeapSample>): number {
+  return targets
+    .filter((t) => t.readError === undefined)
+    .reduce(
+      (acc, t) =>
+        acc +
+        (t.usedSizeBytes ?? 0) +
+        (t.embedderHeapUsedSizeBytes ?? 0) +
+        (t.backingStorageSizeBytes ?? 0),
+      0,
+    );
+}
+
+/**
+ * Suma de RSS de los procesos tipo `"Tab"` en una muestra de RSS — el
+ * proceso donde Chromium aloja el JS realm de la página y sus dedicated
+ * workers (arquitectura por defecto sin site-isolation cross-origin; esta
+ * app es una sola ventana, un solo origen `app://local`, así que hay un
+ * único proceso "Tab"). Es el proceso contra el que tiene sentido restar
+ * `attributedIsolateBytes`: los isolates que `cdpHeap.ts` lee viven ahí, no
+ * en GPU/Browser/Utility. `undefined` si la muestra no existe o no trae
+ * ningún proceso de ese tipo.
+ */
+export function tabProcessBytes(sample: MemorySample | undefined): number | undefined {
+  if (sample === undefined) return undefined;
+  const tabProcesses = sample.perProcess.filter((p) => p.type === "Tab");
+  if (tabProcesses.length === 0) return undefined;
+  return tabProcesses.reduce((acc, p) => acc + p.workingSetSizeBytes, 0);
+}
+
+/**
+ * El residuo "no atribuido (WASM + nativo)" de ADR-159 §8: RSS del proceso
+ * Tab, menos lo que los isolates leídos explican. **Es una cota, no una
+ * medición** — ADR-159 §7 demostró que `WebAssembly.Memory` no aparece en
+ * ningún campo de `Runtime.getHeapUsage`, así que este número mezcla el
+ * heap de WASM de verdad (Tesseract, onnxruntime) con cualquier otra
+ * memoria nativa del proceso que tampoco pasa por CDP. Nunca se omite:
+ * `undefined` solo cuando falta la muestra de RSS o de heap (no cuando el
+ * residuo da 0 o negativo — un negativo es una señal real de que
+ * `attributedIsolateBytes` sobreestimó, no se oculta).
+ *
+ * **`rssSample` y `heapSample` tienen que ser del MISMO instante**, no cada
+ * uno "más cercano a su manera" al límite de fase por separado — el
+ * llamador (`computePhaseSegments`) ya hace esa alineación antes de pasar
+ * los argumentos. Medido el costo de no hacerlo: sobre P2 real, una lectura
+ * de heap que cayó 1,45s después del límite de fase (mientras el pool de
+ * OCR terminaba de darse de baja y el de NER ya había arrancado, ADR-157)
+ * comparada contra el RSS tomado justo EN el límite dio un residuo de
+ * ~1,2 MB — casi cero, pero no porque no quedara nada sin atribuir: porque
+ * el numerador y el denominador eran de dos instantes distintos, y en ese
+ * tramo el conjunto de targets cambia rápido. Pasar un `rssSample` que no
+ * es simultáneo con `heapSample` reproduce ese defecto.
+ */
+export function computeUnattributedResidual(
+  rssSample: MemorySample | undefined,
+  heapSample: HeapSample | undefined,
+): number | undefined {
+  const tabBytes = tabProcessBytes(rssSample);
+  if (tabBytes === undefined || heapSample === undefined) return undefined;
+  return tabBytes - attributedIsolateBytes(heapSample.targets);
+}
+
+/**
+ * Cobertura por target dentro de una fase (obligación de ADR-159 §6, último
+ * párrafo): cuántas de las muestras de heap tomadas durante `[fromMs, toMs]`
+ * intentaron leer cada `sessionId`, y cuántas lo consiguieron
+ * (`readError === undefined`). Clave por `sessionId`, no por `label`: dos
+ * snapshots distintos pueden numerar el mismo target distinto si otro
+ * target de su mismo grupo apareció o desapareció entre medio
+ * (`classifyTargets` numera por orden de aparición DENTRO de cada
+ * snapshot, no es una identidad global) — `label` acá es solo la última
+ * etiqueta vista, para mostrar, no la clave de agrupación.
+ */
+export interface TargetCoverage {
+  readonly sessionId: string;
+  readonly label: string;
+  readonly attempted: number;
+  readonly succeeded: number;
+}
+
+export function computeTargetCoverage(
+  heapSamplesInWindow: ReadonlyArray<HeapSample>,
+): ReadonlyArray<TargetCoverage> {
+  const bySessionId = new Map<string, { label: string; attempted: number; succeeded: number }>();
+  for (const sample of heapSamplesInWindow) {
+    for (const target of sample.targets) {
+      const entry = bySessionId.get(target.sessionId) ?? {
+        label: target.label,
+        attempted: 0,
+        succeeded: 0,
+      };
+      entry.label = target.label;
+      entry.attempted += 1;
+      if (target.readError === undefined) entry.succeeded += 1;
+      bySessionId.set(target.sessionId, entry);
+    }
+  }
+  return [...bySessionId.entries()].map(([sessionId, v]) => ({ sessionId, ...v }));
+}
+
+/**
  * Atribución intra-corrida, por fase (ADR-146 §7 punto 3, reemplaza el
  * método de comparar M2 entre corridas — ver `tests/perf/README.md` y
  * `memory-attribution.spec.ts` por qué: restar corridas no puede resolver
@@ -304,9 +423,15 @@ function computePhaseSegments(
   samples: ReadonlyArray<MemorySample>,
   samplerStartedAtMs: number,
   workerEvents: ReadonlyArray<WorkerJobEvent>,
+  heapSamples: ReadonlyArray<HeapSample>,
+  heapSamplerStartedAtMs: number,
 ): ReadonlyArray<PhaseSegment> {
   const boundaries = Object.entries(phasesEpochMs)
-    .map(([event, epochMs]) => ({ event, atMs: epochMs - samplerStartedAtMs }))
+    .map(([event, epochMs]) => ({
+      event,
+      atMs: epochMs - samplerStartedAtMs,
+      heapAtMs: epochMs - heapSamplerStartedAtMs,
+    }))
     .sort((a, b) => a.atMs - b.atMs);
   const workerEventsAtMs = workerEvents.map((e) => ({
     type: e.type,
@@ -325,6 +450,38 @@ function computePhaseSegments(
     const entryBytes = entry?.sumWorkingSetSizeBytes ?? 0;
     const exitBytes = exit?.sumWorkingSetSizeBytes ?? 0;
 
+    // ADR-159 §2: heap por target en los mismos dos límites, leído del
+    // sampler de CDP (`cdpHeap.ts`), no del de RSS. `heapSampleNear` busca en
+    // su propia serie (muestreada cada `HEAP_SAMPLE_INTERVAL_MS`, mucho más
+    // espaciado que el de RSS) — el `LagMs` de cada lado es la distancia real
+    // entre el límite de fase y la muestra que se usó, para no presentar un
+    // heap desfasado como si fuera exacto al límite.
+    const heapEntry = heapSampleNear(heapSamples, from.heapAtMs);
+    const heapExit = heapSampleNear(heapSamples, to.heapAtMs);
+    const heapWindow = heapSamplesBetween(heapSamples, from.heapAtMs, to.heapAtMs);
+
+    // El residuo (ADR-159 §8) compara RSS contra heap EN EL MISMO INSTANTE
+    // del reloj, no cada uno contra el límite de fase por separado. Medido
+    // sobre P2 real: sin este ajuste, un residuo puede dar ~0 simplemente
+    // porque la lectura de heap más cercana cayó hasta 1,45s después del
+    // límite — del otro lado de que el pool de OCR se dé de baja (ADR-157) y
+    // el de NER ya haya arrancado — sumando ambos pools a la vez contra un
+    // RSS leído en el instante del límite, no en el de esa lectura de heap.
+    // `heapEntry.atMs - from.heapAtMs` es un delta de tiempo TRANSCURRIDO en
+    // el reloj del sampler de heap; sumado a `from.atMs` (mismo transcurrido,
+    // reloj del sampler de RSS) da el instante equivalente en ESE reloj sin
+    // necesitar conocer el offset absoluto entre los dos orígenes — los dos
+    // samplers miden el mismo tiempo de pared, solo arrancan en momentos
+    // distintos.
+    const rssAtHeapEntryAtMs =
+      heapEntry === undefined ? undefined : from.atMs + (heapEntry.atMs - from.heapAtMs);
+    const rssAtHeapExitAtMs =
+      heapExit === undefined ? undefined : to.atMs + (heapExit.atMs - to.heapAtMs);
+    const rssForResidualAtEntry =
+      rssAtHeapEntryAtMs === undefined ? undefined : sampleNear(samples, rssAtHeapEntryAtMs);
+    const rssForResidualAtExit =
+      rssAtHeapExitAtMs === undefined ? undefined : sampleNear(samples, rssAtHeapExitAtMs);
+
     segments.push({
       fromEvent: from.event,
       toEvent: to.event,
@@ -335,6 +492,18 @@ function computePhaseSegments(
       peakInternalBytes: peakSumBytes(samplesBetween(samples, from.atMs, to.atMs)),
       deltaBytes: exitBytes - entryBytes,
       workerPeakByType: computeWorkerPeakByTypeInWindow(workerEventsAtMs, from.atMs, to.atMs),
+      heapByTargetAtEntry: heapEntry?.targets,
+      heapByTargetAtEntryLagMs:
+        heapEntry === undefined ? undefined : Math.abs(heapEntry.atMs - from.heapAtMs),
+      heapByTargetAtExit: heapExit?.targets,
+      heapByTargetAtExitLagMs:
+        heapExit === undefined ? undefined : Math.abs(heapExit.atMs - to.heapAtMs),
+      unattributedResidualAtEntryBytes: computeUnattributedResidual(
+        rssForResidualAtEntry,
+        heapEntry,
+      ),
+      unattributedResidualAtExitBytes: computeUnattributedResidual(rssForResidualAtExit, heapExit),
+      targetCoverage: computeTargetCoverage(heapWindow),
     });
   }
   return segments;
@@ -359,6 +528,39 @@ export interface PhaseSegment {
   readonly deltaBytes: number;
   /** Máximo de jobs concurrentes por `type` **dentro de este tramo** (P3 de H-10) — ver `computeWorkerPeakByTypeInWindow`. A diferencia de `RunReport.workerPeakByType` (máximo de toda la corrida), esto ya está acotado a la fase. */
   readonly workerPeakByType: Readonly<Record<string, number>>;
+  /**
+   * Heap de cada target vivo, con GC forzado, en la muestra de
+   * `cdpHeap.ts` más cercana a `fromAtMs`/`toAtMs` (ADR-159 §2) —
+   * `undefined` si no hay ninguna muestra de heap todavía (p. ej. la
+   * conexión CDP tardó en establecerse). El sampler de heap corre mucho más
+   * espaciado que el de RSS (`HEAP_SAMPLE_INTERVAL_MS` = 2 s contra 150 ms),
+   * así que la muestra usada puede no caer exacto sobre el límite de
+   * fase — `heapByTargetAtEntryLagMs`/`heapByTargetAtExitLagMs` dicen cuánto
+   * se desvió, para no leer un número desfasado como si fuera del instante
+   * exacto.
+   */
+  readonly heapByTargetAtEntry: ReadonlyArray<ClassifiedTargetHeapSample> | undefined;
+  readonly heapByTargetAtEntryLagMs: number | undefined;
+  readonly heapByTargetAtExit: ReadonlyArray<ClassifiedTargetHeapSample> | undefined;
+  readonly heapByTargetAtExitLagMs: number | undefined;
+  /**
+   * ADR-159 §8: RSS del proceso "Tab" en `fromAtMs`/`toAtMs`, menos lo que
+   * `heapByTargetAtEntry`/`AtExit` explica (`computeUnattributedResidual`).
+   * Es una COTA sobre WASM + nativo, no una medición — ADR-159 §7 verificó
+   * que `WebAssembly.Memory` no aparece en ningún campo de
+   * `Runtime.getHeapUsage`. `undefined` solo cuando falta la muestra de RSS
+   * o de heap; nunca se omite por dar 0 o negativo.
+   */
+  readonly unattributedResidualAtEntryBytes: number | undefined;
+  readonly unattributedResidualAtExitBytes: number | undefined;
+  /**
+   * Cobertura por target durante ESTA fase (ADR-159 §6, último párrafo):
+   * cuántas muestras de heap se intentaron y cuántas respondieron, por
+   * `sessionId`. Un target con `succeeded` bajo contra `attempted` estuvo
+   * ocupado la mayor parte de la fase — `printReport`/`formatHeapByTarget`
+   * lo marcan como disperso en vez de publicar el número sin más contexto.
+   */
+  readonly targetCoverage: ReadonlyArray<TargetCoverage>;
 }
 
 export interface RunReport {
@@ -425,6 +627,13 @@ export interface RunReport {
    * corrida — la deja marcada como de línea de base menos confiable.
    */
   readonly hotBaselineSettled: boolean | null;
+  /**
+   * La serie temporal cruda de heap-por-target de esta corrida (ADR-159 §2),
+   * mismo criterio que `samples` para RSS: se persiste completa, no solo el
+   * máximo, para poder re-analizar sin volver a correr el import. Acotada a
+   * esta corrida (`heapSamplesSince`), no a toda la sesión de Electron.
+   */
+  readonly heapSamples: ReadonlyArray<HeapSample>;
 }
 
 /**
@@ -437,8 +646,10 @@ async function runImport(
   page: Page,
   file: E2eFilePayload,
   sampler: MemorySampler,
+  heapSampler: HeapSampler,
   temperature: "cold" | "hot",
   baselineBytes: number,
+  runTimeoutMs: number,
 ): Promise<RunReport> {
   // Sincroniza con la fase "load" (`appPhase.ts`) antes de soltar el
   // archivo — necesario tras un `closeDocument()`, inocuo en la primera
@@ -447,15 +658,22 @@ async function runImport(
 
   await installRunCollector(page);
   const sinceMs = sampler.samples.at(-1)?.atMs ?? 0;
+  const sinceHeapMs = heapSampler.samples.at(-1)?.atMs ?? 0;
   const startedAtMs = Date.now();
 
   await page.locator('input[type="file"]').setInputFiles(file);
-  await waitForRunSettled(page, 180_000);
+  await waitForRunSettled(page, runTimeoutMs);
   await page.waitForTimeout(SETTLE_GRACE_MS);
   await sampler.sampleOnce();
+  // Heap-por-target al asentar (ADR-159 §2) — igual que el `sampleOnce()` de
+  // RSS de la línea de arriba, para no perder el estado de cierre de la
+  // corrida entre dos ticks del sampler periódico (`HEAP_SAMPLE_INTERVAL_MS`
+  // = 2 s, mucho más espaciado que el de RSS).
+  await heapSampler.sampleOnce();
 
   const run = await readRun(page);
   const runSamples = samplesSince(sampler.samples, sinceMs);
+  const runHeapSamples = heapSamplesSince(heapSampler.samples, sinceHeapMs);
   const peak = peakSumBytes(runSamples);
   const readyAtMs = run.phases.PIPELINE_READY ?? null;
   const startedAtPerf = run.phases.DOCUMENT_IMPORTED ?? null;
@@ -464,6 +682,8 @@ async function runImport(
     runSamples,
     sampler.startedAtMs,
     run.workerEvents,
+    runHeapSamples,
+    heapSampler.startedAtMs,
   );
   const workerEventsAtMs = run.workerEvents.map((e) => ({
     type: e.type,
@@ -482,6 +702,7 @@ async function runImport(
     readyAtMs,
     phaseSegments,
     samples: runSamples,
+    heapSamples: runHeapSamples,
     workerEvents: workerEventsAtMs,
     peakWithinPhases: peakFallsWithinPhases(findPeakSample(runSamples), phaseSegments),
     hotBaselineSettled: null,
@@ -601,15 +822,31 @@ function lastSettledWindow(
 export async function measureProfile(
   page: Page,
   electronApp: ElectronApplication,
+  userDataDir: string,
   profile: string,
   file: E2eFilePayload,
+  runTimeoutMs = 180_000,
 ): Promise<ProfileReport> {
   const sampler = startMemorySampling(electronApp, SAMPLE_INTERVAL_MS);
+  // ADR-159 §2: heap por target, vía CDP — sampler aparte del de RSS de
+  // arriba, misma vida útil (frío + caliente de la misma instancia).
+  // `userDataDir` es de dónde `cdpHeap.ts` descubre el puerto de CDP
+  // (`--remote-debugging-port=0` en `electronApp.ts` hace que Chromium
+  // escriba `DevToolsActivePort` ahí).
+  const heapSampler = await startHeapSampling(userDataDir);
   try {
     // Línea de base FRÍA: recién arrancado, sin modelos, sin documento.
     const coldBaseline = await sampler.sampleOnce();
 
-    const cold = await runImport(page, file, sampler, "cold", coldBaseline.sumWorkingSetSizeBytes);
+    const cold = await runImport(
+      page,
+      file,
+      sampler,
+      heapSampler,
+      "cold",
+      coldBaseline.sumWorkingSetSizeBytes,
+      runTimeoutMs,
+    );
 
     await closeDocument(page);
     // Línea de base CALIENTE: los modelos que cargó la corrida fría siguen
@@ -622,7 +859,15 @@ export async function measureProfile(
     const { baselineBytes: hotBaselineBytes, settled: hotBaselineSettled } =
       await waitForHotBaselineToSettle(page, sampler, hotBaselineSinceMs);
 
-    const hotRun = await runImport(page, file, sampler, "hot", hotBaselineBytes);
+    const hotRun = await runImport(
+      page,
+      file,
+      sampler,
+      heapSampler,
+      "hot",
+      hotBaselineBytes,
+      runTimeoutMs,
+    );
     const hot: RunReport = { ...hotRun, hotBaselineSettled };
     await closeDocument(page);
 
@@ -642,6 +887,7 @@ export async function measureProfile(
     };
   } finally {
     sampler.stop();
+    heapSampler.stop();
   }
 }
 
@@ -661,17 +907,110 @@ function formatSignedMB(bytes: number): string {
   return `${sign}${formatMB(bytes)}`;
 }
 
-/** Una línea por `PhaseSegment`, en orden temporal — la vista que contesta "¿baja el RSS al terminar el OCR, o se queda arriba?" (ADR-154 §2 lever 3). */
+/**
+ * "" / " (leído N/M)" / " (leído N/M — disperso, no promediar)" — ADR-159
+ * §6: un target sin cobertura registrada en esta fase (nunca visto, p. ej.
+ * un worker de otra fase) no lleva anotación; `succeeded === 0` es el caso
+ * explícito que pide el ADR ("sin lectura, ocupado, N de M"); por debajo de
+ * la mitad se marca "disperso" para que no se lea como un número limpio.
+ */
+function formatCoverageNote(coverage: TargetCoverage | undefined): string {
+  if (coverage === undefined || coverage.attempted === 0) return "";
+  const { attempted, succeeded } = coverage;
+  if (succeeded === 0) return ` (sin lectura, ocupado, 0/${attempted})`;
+  if (succeeded / attempted < 0.5)
+    return ` (leído ${succeeded}/${attempted} — disperso, no promediar)`;
+  return ` (leído ${succeeded}/${attempted})`;
+}
+
+/** `{label: "ocr-worker-1", usedSizeBytes: 1_500_000, ...}[]` → una línea por target, orden estable (por label) — ADR-159 §2: heap por target, no la suma. */
+function formatHeapByTarget(
+  targets: ReadonlyArray<ClassifiedTargetHeapSample> | undefined,
+  lagMs: number | undefined,
+  coverageBySessionId: ReadonlyMap<string, TargetCoverage>,
+): string {
+  if (targets === undefined) return "      heap por target: (sin muestra de CDP todavía)\n";
+  const sorted = [...targets].sort((a, b) => a.label.localeCompare(b.label));
+  const lagNote =
+    lagMs === undefined ? "" : ` (muestra a ${lagMs.toFixed(0)}ms del límite de fase)`;
+  const lines = sorted.map((t) => {
+    const coverageNote = formatCoverageNote(coverageBySessionId.get(t.sessionId));
+    if (t.readError !== undefined)
+      return `      ${t.label}: sin lectura (${t.readError})${coverageNote}`;
+    const used = t.usedSizeBytes === undefined ? "?" : formatMB(t.usedSizeBytes);
+    const total = t.totalSizeBytes === undefined ? "?" : formatMB(t.totalSizeBytes);
+    // backingStorage: ArrayBuffers/strings externos (canvas, TypedArrays
+    // grandes) — verificado que usedSize/totalSize NO lo reflejan
+    // (cdpHeap.ts, docstring de RawTargetHeapReading). Ninguno de los cuatro
+    // campos de esta línea ve WebAssembly.Memory (ADR-159 §7, verificado
+    // corriendo): el heap de WASM de tesseract.js/onnxruntime-web no es
+    // visible acá — es exactamente lo que `unattributedResidual*Bytes` deja
+    // como cota, no como medición (ADR-159 §8).
+    const backing =
+      t.backingStorageSizeBytes === undefined ? "?" : formatMB(t.backingStorageSizeBytes);
+    return `      ${t.label}: used=${used} total=${total} backingStorage=${backing}${coverageNote}`;
+  });
+  return `      heap por target${lagNote}:\n${lines.join("\n")}\n`;
+}
+
+/**
+ * "?" cuando no hay dato — nunca 0 implícito (ADR-159 §8). Lleva la cuenta
+ * de targets de ESTE punto al lado del número a propósito: entrada y salida
+ * de una fase pueden tener conjuntos de targets distintos (el pool de OCR
+ * nace y se da de baja, ADR-157, adentro de la misma fase) — la cuenta hace
+ * visible que dos residuos del mismo `PhaseSegment` no son necesariamente
+ * comparables entre sí, sin que haga falta ir al JSON a averiguarlo.
+ */
+function formatUnattributedResidual(
+  label: string,
+  residualBytes: number | undefined,
+  targetCount: number | undefined,
+): string {
+  const countNote =
+    targetCount === undefined
+      ? ""
+      : ` (${targetCount} target${targetCount === 1 ? "" : "s"} leídos en este punto)`;
+  if (residualBytes === undefined)
+    return `      no atribuido (WASM + nativo) ${label}: ?${countNote} (sin muestra de RSS o de heap)\n`;
+  return `      no atribuido (WASM + nativo) ${label}: ${formatSignedMB(residualBytes)}${countNote} (cota, no medición — ADR-159 §7/§8)\n`;
+}
+
+/**
+ * Una línea por `PhaseSegment`, en orden temporal — la vista que contesta
+ * "¿baja el RSS al terminar el OCR, o se queda arriba?" (ADR-154 §2 lever
+ * 3). Entrada y salida se imprimen como dos lecturas INDEPENDIENTES, nunca
+ * conectadas por una flecha o un delta: cuando el conjunto de targets
+ * cambia entre las dos (`heapByTargetAtEntry`/`AtExit` de longitud
+ * distinta — típico si el pool de OCR nace o se da de baja adentro de la
+ * fase), restarlas compararía denominadores distintos. `formatUnattributedResidual`
+ * ya anota la cuenta de targets de cada punto para que esto se vea sin ir al JSON.
+ */
 function formatPhaseSegments(segments: ReadonlyArray<PhaseSegment>): string {
   if (segments.length === 0)
     return "    (sin segmentos — ¿corrida fallida antes del segundo evento de fase?)\n";
   return segments
-    .map(
-      (s) =>
+    .map((s) => {
+      const coverageBySessionId = new Map(s.targetCoverage.map((c) => [c.sessionId, c]));
+      return (
         `    ${s.fromEvent} → ${s.toEvent}: entrada ${formatMB(s.rssAtEntryBytes)}, ` +
         `salida ${formatMB(s.rssAtExitBytes)}, pico interno ${formatMB(s.peakInternalBytes)}, ` +
-        `delta ${formatSignedMB(s.deltaBytes)}, workers ${formatWorkerPeaks(s.workerPeakByType)}\n`,
-    )
+        `delta ${formatSignedMB(s.deltaBytes)}, workers ${formatWorkerPeaks(s.workerPeakByType)}\n` +
+        `    entrada ${s.fromEvent}:\n` +
+        formatHeapByTarget(s.heapByTargetAtEntry, s.heapByTargetAtEntryLagMs, coverageBySessionId) +
+        formatUnattributedResidual(
+          `(entrada ${s.fromEvent})`,
+          s.unattributedResidualAtEntryBytes,
+          s.heapByTargetAtEntry?.length,
+        ) +
+        `    salida ${s.toEvent}:\n` +
+        formatHeapByTarget(s.heapByTargetAtExit, s.heapByTargetAtExitLagMs, coverageBySessionId) +
+        formatUnattributedResidual(
+          `(salida ${s.toEvent})`,
+          s.unattributedResidualAtExitBytes,
+          s.heapByTargetAtExit?.length,
+        )
+      );
+    })
     .join("");
 }
 

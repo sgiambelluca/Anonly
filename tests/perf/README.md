@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=tests-perf | dependencias=adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-149-Un-Gate-Que-No-Ejecuta-Nada-Es-Rojo.md,adr/ADR-153-El-Gate-De-Tiempos-Se-Mide-Sobre-El-Producto.md,tests/e2e/README.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=tests-perf | dependencias=adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-149-Un-Gate-Que-No-Ejecuta-Nada-Es-Rojo.md,adr/ADR-153-El-Gate-De-Tiempos-Se-Mide-Sobre-El-Producto.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,roadmap/Optimizacion_De_Memoria_Plan.md,tests/e2e/README.md | audiencia=humanos+IA | fase=11 -->
 
 # `tests/perf/` — tiempos y memoria sobre el producto real
 
@@ -11,6 +11,47 @@ Dos instrumentos, un mismo arnés (`tests/e2e/support/electronApp.ts`): `pipelin
 ## `memory.spec.ts` — el instrumento de H-10 (ADR-146)
 
 **No es un gate**: no afirma umbrales, mide y reporta a `.measure/` (gitignoreado). ADR-146 §6/ADR-149 §5: fijar un número mirando una corrida sola es exactamente lo que esto evita — primero se mide, después se decide el presupuesto (o se descubre que no hace falta tocarlo).
+
+### Perfil opt-in `p2-scanned-200p` — H-10 T-3
+
+**Implementado y caracterizado el 2026-09-13**: tres corridas de 50p y tres de
+200p, cada una fría+caliente, terminaron válidas y sin OOM ni timeout. Resultado:
+cuadruplicar páginas no cuadruplicó el delta del piso —se descarta la
+extrapolación lineal—, pero el último cuarto de OCR dio signos mixtos y no permite
+declarar una meseta limpia. T-3 cerró como **inconclusa**; los datos completos
+están transcriptos en el plan.
+
+T-3 agrega una extensión de P2 con 200 páginas, destinada a comprobar si el
+piso de memoria continúa creciendo con el largo del documento. **No es P3**:
+ADR-146 §4 reserva P3 para el ciclo de 10 open/close.
+
+El perfil queda saltado salvo que `ANONLY_MEMORY_200P=1`; por tanto,
+`pnpm test:perf` conserva su duración y alcance cotidianos. No se trata de un
+gate omitido: este archivo es un instrumento de caracterización sin threshold.
+Su corrida explícita, después de construir ambas mitades del producto, es:
+
+```bash
+ANONLY_MEMORY_200P=1 npx playwright test --config=playwright.perf.config.ts tests/perf/memory.spec.ts --grep "P2-200" --repeat-each=3
+```
+
+Usa el fixture liviano `generateText200p()` —20 páginas con Person + DNI, una
+cada diez, y 180 neutras— convertido por `getOrGenerateScannedFixture` fuera del
+Electron medido. No existe una variante densa de 200 páginas. El identificador
+del fixture, del perfil y del reporte es `p2-scanned-200p`.
+
+El límite es propio del perfil: 900 000 ms por cada import y 2 100 000 ms para
+el test completo; los perfiles existentes conservan 180 000 ms por import. Un
+timeout u OOM se reporta como fallo/inconcluso según ADR-146 §6, nunca se oculta
+aumentando el límite después de medir.
+
+La caracterización final vuelve a correr `p2-scanned-50p` con la misma versión
+del instrumento y produce tres pares fría/caliente por perfil, siempre en serie
+y sobre el mismo build. Se comparan M2, M1 rotulada cota inferior, tiempo, pico
+Tab/GPU de OCR y pisos Tab/GPU de OCR. Los pisos se publican por corrida, sin
+promedio, y el residuo sigue rotulado “no atribuido (WASM + nativo)”. La decisión
+estructural/acotada/inconclusa y el cierre documental pertenecen al planificador;
+el implementador entrega el perfil y los reportes. La especificación completa
+vive en `docs/roadmap/Optimizacion_De_Memoria_Plan.md` §T-3.
 
 Dos métricas (ADR-146 §1):
 

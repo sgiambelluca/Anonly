@@ -38,7 +38,9 @@
 import { expect, openApp, test } from "../e2e/support/electronApp.js";
 import { textTenPagesFile } from "../e2e/support/fixtures.js";
 import {
+  TEXT_200P_ENTITY_PAGE_INDICES,
   TEXT_50P_ENTITY_PAGE_INDICES,
+  generateText200p,
   generateText50p,
   generateText50pDense,
 } from "../fixtures/generate.js";
@@ -48,11 +50,21 @@ import { getOrGenerateScannedFixture } from "./support/scannedFixtureCache.js";
 
 test.setTimeout(300_000);
 
-test("P1 — 10 páginas de texto nativo (control)", async ({ page, electronApp }, testInfo) => {
+test("P1 — 10 páginas de texto nativo (control)", async ({
+  page,
+  electronApp,
+  electronUserDataDir,
+}, testInfo) => {
   await openApp(page, "networkidle");
   const file = await textTenPagesFile();
 
-  const report = await measureProfile(page, electronApp, "p1-native-10p", file);
+  const report = await measureProfile(
+    page,
+    electronApp,
+    electronUserDataDir,
+    "p1-native-10p",
+    file,
+  );
   printReport(report);
   await writeReport(report, testInfo.repeatEachIndex);
 
@@ -63,14 +75,24 @@ test("P1 — 10 páginas de texto nativo (control)", async ({ page, electronApp 
   expect(report.hot.groupCount).toBeGreaterThan(0);
 });
 
-test("P2 — 50 páginas escaneadas (fixture de H-10)", async ({ page, electronApp }, testInfo) => {
+test("P2 — 50 páginas escaneadas (fixture de H-10)", async ({
+  page,
+  electronApp,
+  electronUserDataDir,
+}, testInfo) => {
   const textSource = await generateText50p();
   // Fuera de la ventana de medición Y fuera del renderer medido (ADR-146
   // §15.2 punto 4 / §4): un chromium aparte, cerrado antes de abrir la app.
   const file = await getOrGenerateScannedFixture("p2-scanned-50p", new Uint8Array(textSource));
   await openApp(page, "networkidle");
 
-  const report = await measureProfile(page, electronApp, "p2-scanned-50p", file);
+  const report = await measureProfile(
+    page,
+    electronApp,
+    electronUserDataDir,
+    "p2-scanned-50p",
+    file,
+  );
   printReport(report);
   await writeReport(report, testInfo.repeatEachIndex);
 
@@ -85,6 +107,7 @@ test("P2 — 50 páginas escaneadas (fixture de H-10)", async ({ page, electronA
 test("P2-dense — 50 páginas escaneadas, entidades en las 50 (control de densidad)", async ({
   page,
   electronApp,
+  electronUserDataDir,
 }, testInfo) => {
   const textSource = await generateText50pDense();
   const file = await getOrGenerateScannedFixture(
@@ -93,7 +116,13 @@ test("P2-dense — 50 páginas escaneadas, entidades en las 50 (control de densi
   );
   await openApp(page, "networkidle");
 
-  const report = await measureProfile(page, electronApp, "p2-scanned-50p-dense", file);
+  const report = await measureProfile(
+    page,
+    electronApp,
+    electronUserDataDir,
+    "p2-scanned-50p-dense",
+    file,
+  );
   printReport(report);
   await writeReport(report, testInfo.repeatEachIndex);
 
@@ -104,4 +133,37 @@ test("P2-dense — 50 páginas escaneadas, entidades en las 50 (control de densi
   // un OCR/NER roto) no pase inadvertido en el perfil que más volumen mueve.
   expect(report.cold.groupCount).toBeGreaterThan(TEXT_50P_ENTITY_PAGE_INDICES.length * 5);
   expect(report.hot.groupCount).toBeGreaterThan(TEXT_50P_ENTITY_PAGE_INDICES.length * 5);
+});
+
+test.describe("P2-200 — 200 páginas escaneadas (fixture de H-10 T-3)", () => {
+  test.skip(process.env.ANONLY_MEMORY_200P !== "1", "T-3 es un perfil opt-in");
+
+  test("perfil p2-scanned-200p", async ({ page, electronApp, electronUserDataDir }, testInfo) => {
+    test.setTimeout(2_100_000);
+
+    const textSource = await generateText200p();
+    // Fuera de la ventana de medición Y fuera del renderer medido: el
+    // escaneado se construye en un Chromium separado y se cachea antes de
+    // abrir el Electron que mide memoria (ADR-146 §4).
+    const file = await getOrGenerateScannedFixture("p2-scanned-200p", new Uint8Array(textSource));
+    await openApp(page, "networkidle");
+
+    const report = await measureProfile(
+      page,
+      electronApp,
+      electronUserDataDir,
+      "p2-scanned-200p",
+      file,
+      900_000,
+    );
+    printReport(report);
+    await writeReport(report, testInfo.repeatEachIndex);
+
+    expect(report.cold.ok, "la corrida fría terminó en PIPELINE_FAILED").toBe(true);
+    expect(report.hot.ok, "la corrida caliente terminó en PIPELINE_FAILED").toBe(true);
+    // Una entidad conocida por cada una de las 20 posiciones de verificación.
+    // Sirve además para detectar un pipeline que no alcanzó el final del PDF.
+    expect(report.cold.groupCount).toBeGreaterThanOrEqual(TEXT_200P_ENTITY_PAGE_INDICES.length);
+    expect(report.hot.groupCount).toBeGreaterThanOrEqual(TEXT_200P_ENTITY_PAGE_INDICES.length);
+  });
 });

@@ -267,6 +267,32 @@ export function installOffscreenCanvasStub(): void {
   });
 }
 
+/**
+ * Hermano de `installOffscreenCanvasStub` para el entorno `node` de Vitest:
+ * `createImageBitmap` no existe en Node de forma nativa. Desde ADR-158 el
+ * kernel de OCR lo llama en `decodeEncodedImage` para decodificar
+ * `EncodedPageImage.bytes`, así que sin este stub **toda** página de OCR
+ * falla con `OcrPageFailedError` y `OCR_PAGE_FINISHED` no se emite nunca.
+ *
+ * `ocr-engine` instaló el suyo junto con ADR-158
+ * (`src/__tests__/fixtures/test-helpers.ts`) y estos dobles de integración
+ * quedaron sin el equivalente: los dos tests que ejercitan el kernel real
+ * —`ocr-pdf-fusion.test.ts` y `ocr-region.test.ts`— llevaban rojos desde
+ * entonces.
+ *
+ * El bitmap devuelto solo necesita `close()`: el kernel arma su canvas con
+ * `widthPx`/`heightPx` del propio `EncodedPageImage` (ADR-158 §4) y nunca
+ * lee `bitmap.width`/`height`.
+ */
+export function installCreateImageBitmapStub(): void {
+  if (typeof globalThis.createImageBitmap !== "undefined") return;
+  Object.defineProperty(globalThis, "createImageBitmap", {
+    value: (): Promise<{ close: () => void }> => Promise.resolve({ close: () => undefined }),
+    writable: true,
+    configurable: true,
+  });
+}
+
 /** Los `calls` grabados de cada `OffscreenCanvas` creado, en orden de creación. */
 export function getCreatedCanvasCalls(): ReadonlyArray<ReadonlyArray<RecordedDrawCall>> {
   return createdCanvases.map((c) => c.context.calls);

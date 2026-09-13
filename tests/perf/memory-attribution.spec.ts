@@ -90,13 +90,20 @@ test.setTimeout(300_000);
 test("P2-attrib — NER apagado (cuánto es del detector)", async ({
   page,
   electronApp,
+  electronUserDataDir,
 }, testInfo) => {
   const textSource = await generateText50p();
   const file = await getOrGenerateScannedFixture("p2-scanned-50p", new Uint8Array(textSource));
   await installSettingsOverride(page, { nerEnabled: false });
   await openApp(page, "networkidle");
 
-  const report = await measureProfile(page, electronApp, "p2-attrib-ner-off", file);
+  const report = await measureProfile(
+    page,
+    electronApp,
+    electronUserDataDir,
+    "p2-attrib-ner-off",
+    file,
+  );
   printReport(report);
   await writeReport(report, testInfo.repeatEachIndex);
 
@@ -137,13 +144,20 @@ for (let rep = 0; rep < RENDER_POOL_REPEATS; rep += 1) {
     test(`P2-attrib — renderPoolSize ${condition.label} (alternada, corrida ${rep + 1}/${RENDER_POOL_REPEATS})`, async ({
       page,
       electronApp,
+      electronUserDataDir,
     }) => {
       const textSource = await generateText50p();
       const file = await getOrGenerateScannedFixture("p2-scanned-50p", new Uint8Array(textSource));
       await installEngineOverrides(page, condition.overrides);
       await openApp(page, "networkidle");
 
-      const report = await measureProfile(page, electronApp, condition.profile, file);
+      const report = await measureProfile(
+        page,
+        electronApp,
+        electronUserDataDir,
+        condition.profile,
+        file,
+      );
       printReport(report);
       await writeReport(report, rep);
 
@@ -157,6 +171,7 @@ for (let rep = 0; rep < RENDER_POOL_REPEATS; rep += 1) {
 test("P2-attrib — página a 4/9 de área (proxy de ocr.dpi 200 contra 300; cuánto es proporcional al área rasterizada)", async ({
   page,
   electronApp,
+  electronUserDataDir,
 }, testInfo) => {
   const textSource = await generateText50pSmallPage();
   const file = await getOrGenerateScannedFixture(
@@ -165,7 +180,13 @@ test("P2-attrib — página a 4/9 de área (proxy de ocr.dpi 200 contra 300; cu�
   );
   await openApp(page, "networkidle");
 
-  const report = await measureProfile(page, electronApp, "p2-attrib-small-page", file);
+  const report = await measureProfile(
+    page,
+    electronApp,
+    electronUserDataDir,
+    "p2-attrib-small-page",
+    file,
+  );
   printReport(report);
   await writeReport(report, testInfo.repeatEachIndex);
 

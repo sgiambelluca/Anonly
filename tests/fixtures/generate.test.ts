@@ -15,9 +15,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   TEXT_10P_PAGES,
+  TEXT_200P_ENTITY_PAGE_INDICES,
   TEXT_50P_ENTITY_PAGE_INDICES,
   buildReferenceDocSpecs,
   buildReferenceManifest,
+  buildText200pEntityParagraph,
+  buildText200pNeutralParagraph,
   buildText50pDenseParagraph,
   buildText50pEntityParagraph,
   buildText50pNeutralParagraph,
@@ -26,6 +29,7 @@ import {
   generateImageAlpha,
   generateReferenceDataset,
   generateText10p,
+  generateText200p,
   generateText50p,
   generateText50pDense,
   generateText50pSmallPage,
@@ -191,6 +195,57 @@ describe("generate.ts — text-50p-dense.pdf (H-10, control de densidad)", () =>
     const first = buildText50pDenseParagraph("fixture-text-50p-dense", 0, 1);
     const second = buildText50pDenseParagraph("fixture-text-50p-dense", 1, 2);
     expect(first).not.toBe(second);
+  });
+});
+
+describe("generate.ts — text-200p.pdf (H-10 T-3)", () => {
+  it("produce 200 páginas A4", async () => {
+    const bytes = await generateText200p();
+    const pdf = await PDFDocument.load(bytes);
+    expect(pdf.getPageCount()).toBe(200);
+    const firstPage = pdf.getPages()[0];
+    expect(firstPage?.getWidth()).toBe(595);
+    expect(firstPage?.getHeight()).toBe(842);
+  });
+
+  it("produce un PDF con header %PDF-", async () => {
+    const bytes = await generateText200p();
+    const header = new TextDecoder().decode(bytes.slice(0, 5));
+    expect(header).toBe("%PDF-");
+  });
+
+  it("es determinista: dos corridas producen bytes idénticos", async () => {
+    const first = await generateText200p();
+    const second = await generateText200p();
+    expect(Buffer.from(first).equals(Buffer.from(second))).toBe(true);
+  });
+
+  it("mantiene 20 páginas con entidad, una cada diez, incluida la última verificación", () => {
+    expect(TEXT_200P_ENTITY_PAGE_INDICES).toEqual(
+      Array.from({ length: 20 }, (_, entityIndex) => entityIndex * 10),
+    );
+    expect(TEXT_200P_ENTITY_PAGE_INDICES.at(-1)).toBe(190);
+    for (const index of TEXT_200P_ENTITY_PAGE_INDICES) {
+      const text = buildText200pEntityParagraph("fixture-text-200p", index, index + 1);
+      expect(text).toContain(`Página ${index + 1} de 200`);
+      const entityMatch = text.match(/Se deja constancia de que (.+), DNI (\d{1,2}\.\d{3}\.\d{3}),/);
+      expect(entityMatch?.[1]?.trim().length).toBeGreaterThan(0);
+      expect(entityMatch?.[2]).toMatch(/^\d{1,2}\.\d{3}\.\d{3}$/);
+    }
+  });
+
+  it("tiene texto fuente distinto en las 200 páginas y rótulos de 200 páginas", () => {
+    const texts = new Set<string>();
+    for (let index = 0; index < 200; index++) {
+      const pageNumber = index + 1;
+      const text = TEXT_200P_ENTITY_PAGE_INDICES.includes(index)
+        ? buildText200pEntityParagraph("fixture-text-200p", index, pageNumber)
+        : buildText200pNeutralParagraph(pageNumber);
+      texts.add(text);
+      expect(text).toContain(`Página ${pageNumber} de 200`);
+      if (!TEXT_200P_ENTITY_PAGE_INDICES.includes(index)) expect(text).not.toContain("DNI");
+    }
+    expect(texts.size).toBe(200);
   });
 });
 

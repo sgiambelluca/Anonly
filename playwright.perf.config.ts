@@ -25,9 +25,20 @@ import { defineConfig } from "@playwright/test";
  * `pnpm test:perf` (que reconstruye antes de medir) — Task 4 de H-10 perdió
  * una tanda entera de mediciones así, con los gates en verde porque ninguno
  * depende del build empaquetado.
+ *
+ * `testMatch` explícito a `*.spec.ts`: el default de Playwright también
+ * matchea `*.test.ts`, y `support/` (ADR-159 §2, `cdpHeap.ts`) tiene sus
+ * propios tests de Vitest (`cdpHeap.test.ts`, `aggregateMemoryReports.test.ts`)
+ * colocados junto al código que prueban — convención ya establecida en el
+ * resto del repo (`.test.ts` es de Vitest, `.spec.ts` es de Playwright;
+ * `vitest.config.ts` incluye todo `.test.ts` bajo `tests/`, recursivo). Sin
+ * esto Playwright intenta correr un archivo de Vitest como si fuera un test
+ * propio y revienta con "Vitest failed to access its internal state" — no es
+ * un caso hipotético, es lo que pasaba antes de esta línea.
  */
 export default defineConfig({
   testDir: "./tests/perf",
+  testMatch: /.*\.spec\.ts$/,
   globalSetup: "./tests/perf/support/globalSetup.config.ts",
   fullyParallel: false,
   workers: 1,

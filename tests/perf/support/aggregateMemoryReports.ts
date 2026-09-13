@@ -14,39 +14,12 @@
  */
 import { readdir, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+import type { ProfileReport, RunReport } from "./memoryProfile.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = resolve(HERE, "../../../.measure");
-
-interface RunReport {
-  readonly temperature: "cold" | "hot";
-  readonly baselineBytes: number;
-  readonly peakSumBytes: number;
-  readonly m1Bytes: number | null;
-  readonly totalMs: number | null;
-  readonly groupCount: number;
-  readonly entityCount: number;
-  readonly ok: boolean;
-  /** ADR-146 §7bis: `false` si el pico de la corrida cae fuera de toda fase (residuo del documento anterior, no de este) — no se promedia. `undefined` en reportes de antes de este campo. */
-  readonly peakWithinPhases?: boolean;
-  /** ADR-146 §7bis: `false` si la línea de base caliente no llegó a asentar dentro del techo de 30s — la corrida sigue en pie, solo queda marcada. `undefined`/`null` en frío o en reportes de antes de este campo. */
-  readonly hotBaselineSettled?: boolean | null;
-}
-
-interface ProfileReport {
-  readonly profile: string;
-  readonly identity: {
-    readonly platform: string;
-    readonly arch: string;
-    readonly cpuModel: string | undefined;
-    readonly cpuCount: number;
-    readonly totalMemBytes: number;
-  };
-  readonly cold: RunReport;
-  readonly hot: RunReport;
-  readonly capturedAt: string;
-}
 
 function formatMB(bytes: number): string {
   return `${(bytes / 1_000_000).toFixed(1)} MB`;
@@ -60,6 +33,110 @@ function stats(values: ReadonlyArray<number>): { min: number; max: number; avg: 
   };
 }
 
+/**
+ * El piso de una fase, por proceso (ADR-159 §3): mínimo del primer cuarto de
+ * la ventana de la fase contra mínimo del último cuarto — el estadístico que
+ * ADR-159 §1 encontró que sí sirve para "¿se retiene algo por página?",
+ * contra la regresión sobre la nube de RSS completa, que **no** se publica
+ * como pendiente de acumulación (misma sección). Positivo = el piso subió
+ * durante la fase; negativo = bajó.
+ */
+export interface ProcessFloor {
+  readonly processType: string;
+  readonly fromEvent: string;
+  readonly toEvent: string;
+  readonly firstQuarterMinBytes: number;
+  readonly lastQuarterMinBytes: number;
+  readonly floorDeltaBytes: number;
+}
+
+/**
+ * Calcula el piso por proceso de CADA `PhaseSegment` de una corrida
+ * individual — nunca promediado entre corridas (ADR-159 §3: "reportado por
+ * corrida individual"). Usa `RunReport.samples` (la serie cruda que ya
+ * persiste `memoryProfile.ts`, sin volver a correr nada) y agrupa por
+ * `ProcessMemorySample.type` (`"Tab"`, `"GPU"`, …) sumando el RSS de todos
+ * los procesos de ese tipo en cada muestra — mismo criterio de suma que usa
+ * `sumWorkingSetSizeBytes` para el total, acotado a un tipo.
+ *
+ * Una fase con menos de una muestra en alguno de los dos cuartos queda
+ * afuera (no hay piso que calcular con cero muestras) en vez de dividir por
+ * cero o inventar un valor.
+ */
+export function computeProcessFloors(run: RunReport): ReadonlyArray<ProcessFloor> {
+  // `phaseSegments`/`samples` no existen en reportes escritos antes de
+  // ADR-146 §7 punto 3 (mismo criterio que `peakWithinPhases`/
+  // `hotBaselineSettled` más abajo: el tipo los declara requeridos porque lo
+  // son desde hoy, pero un JSON viejo en `.measure/` no los tiene — `[]` en
+  // vez de reventar sobre un `.json` de antes de este campo). `=== undefined`
+  // y no `Array.isArray`: sobre un tipo ya declarado `ReadonlyArray<T>`,
+  // `Array.isArray` angosta la rama a `any[]` (pierde `T` — un defecto
+  // conocido de sus tipos en lib.es5.d.ts), lo que corriente abajo vuelve
+  // implícito el tipo de cada elemento.
+  if (run.phaseSegments === undefined || run.samples === undefined) return [];
+
+  const floors: ProcessFloor[] = [];
+
+  for (const segment of run.phaseSegments) {
+    const windowSamples = run.samples.filter(
+      (s) => s.atMs >= segment.fromAtMs && s.atMs <= segment.toAtMs,
+    );
+    if (windowSamples.length === 0) continue;
+
+    const processTypes = new Set<string>();
+    for (const sample of windowSamples) {
+      for (const p of sample.perProcess) processTypes.add(p.type);
+    }
+
+    const duration = segment.toAtMs - segment.fromAtMs;
+    const firstQuarterEnd = segment.fromAtMs + duration / 4;
+    const lastQuarterStart = segment.toAtMs - duration / 4;
+    const firstQuarterSamples = windowSamples.filter((s) => s.atMs <= firstQuarterEnd);
+    const lastQuarterSamples = windowSamples.filter((s) => s.atMs >= lastQuarterStart);
+    if (firstQuarterSamples.length === 0 || lastQuarterSamples.length === 0) continue;
+
+    for (const processType of processTypes) {
+      const bytesForType = (samples: typeof windowSamples): number[] =>
+        samples.map((s) =>
+          s.perProcess
+            .filter((p) => p.type === processType)
+            .reduce((acc, p) => acc + p.workingSetSizeBytes, 0),
+        );
+      const firstQuarterMinBytes = Math.min(...bytesForType(firstQuarterSamples));
+      const lastQuarterMinBytes = Math.min(...bytesForType(lastQuarterSamples));
+
+      floors.push({
+        processType,
+        fromEvent: segment.fromEvent,
+        toEvent: segment.toEvent,
+        firstQuarterMinBytes,
+        lastQuarterMinBytes,
+        floorDeltaBytes: lastQuarterMinBytes - firstQuarterMinBytes,
+      });
+    }
+  }
+
+  return floors;
+}
+
+function formatSignedMB(bytes: number): string {
+  const sign = bytes >= 0 ? "+" : "";
+  return `${sign}${formatMB(bytes)}`;
+}
+
+/** Una línea por `ProcessFloor` — SIN promediar entre corridas (ADR-159 §3), por eso se llama con una sola corrida a la vez. */
+function formatProcessFloors(floors: ReadonlyArray<ProcessFloor>): string {
+  if (floors.length === 0) return "";
+  return floors
+    .map(
+      (f) =>
+        `         piso ${f.processType} (${f.fromEvent} → ${f.toEvent}): ` +
+        `1er cuarto ${formatMB(f.firstQuarterMinBytes)} → ultimo cuarto ${formatMB(f.lastQuarterMinBytes)}, ` +
+        `delta ${formatSignedMB(f.floorDeltaBytes)}\n`,
+    )
+    .join("");
+}
+
 async function main(): Promise<void> {
   const entries = await readdir(OUT_DIR);
   const reportFiles = entries.filter((f) => /^memory-.+-run\d+\.json$/.test(f));
@@ -68,19 +145,29 @@ async function main(): Promise<void> {
     return;
   }
 
-  const byProfile = new Map<string, ProfileReport[]>();
+  // `runLabel` viaja pegado al reporte (no solo el objeto) para poder
+  // imprimir el piso de ADR-159 §3 "por corrida individual" con una etiqueta
+  // legible (`run0`, `run1`, …) en vez de un índice de array que no dice
+  // nada del archivo de origen.
+  interface LabeledReport {
+    readonly report: ProfileReport;
+    readonly runLabel: string;
+  }
+
+  const byProfile = new Map<string, LabeledReport[]>();
   for (const file of reportFiles) {
     const raw = await readFile(resolve(OUT_DIR, file), "utf-8");
     const report = JSON.parse(raw) as ProfileReport;
+    const runLabel = /-(run\d+)\.json$/.exec(file)?.[1] ?? file;
     const list = byProfile.get(report.profile) ?? [];
-    list.push(report);
+    list.push({ report, runLabel });
     byProfile.set(report.profile, list);
   }
 
   for (const [profile, reports] of [...byProfile.entries()].sort(([a], [b]) =>
     a.localeCompare(b),
   )) {
-    const first = reports[0]!;
+    const first = reports[0]!.report;
     process.stdout.write(
       `\n=== ${profile} — ${reports.length} corrida(s) — ${first.identity.platform}/${first.identity.arch}, ` +
         `${first.identity.cpuCount} CPUs (${first.identity.cpuModel ?? "?"}), ` +
@@ -88,15 +175,15 @@ async function main(): Promise<void> {
     );
 
     for (const temperature of ["cold", "hot"] as const) {
-      const runs = reports.map((r) => r[temperature]);
-      const failed = runs.filter((r) => !r.ok);
-      const ok = runs.filter((r) => r.ok);
+      const runs = reports.map(({ report, runLabel }) => ({ run: report[temperature], runLabel }));
+      const failed = runs.filter((r) => !r.run.ok);
+      const ok = runs.filter((r) => r.run.ok);
       // ADR-146 §7bis: un pico fuera de toda fase es el residuo del
       // documento anterior, no de este — se reporta, no se promedia.
       // `peakWithinPhases === false` explícito la invalida; `undefined`
       // (reportes de antes de este campo) se trata como válida.
-      const invalidPeak = ok.filter((r) => r.peakWithinPhases === false);
-      const valid = ok.filter((r) => r.peakWithinPhases !== false);
+      const invalidPeak = ok.filter((r) => r.run.peakWithinPhases === false);
+      const valid = ok.filter((r) => r.run.peakWithinPhases !== false);
 
       if (failed.length > 0) {
         process.stdout.write(
@@ -107,11 +194,11 @@ async function main(): Promise<void> {
         process.stdout.write(
           `  ${temperature}: ${invalidPeak.length}/${runs.length} corridas con pico fuera de toda fase ` +
             `(ADR-146 §7bis — residuo del documento anterior) — no promediadas: ` +
-            `${invalidPeak.map((r) => formatMB(r.peakSumBytes)).join(", ")}.\n`,
+            `${invalidPeak.map((r) => formatMB(r.run.peakSumBytes)).join(", ")}.\n`,
         );
       }
       if (temperature === "hot") {
-        const unsettled = ok.filter((r) => r.hotBaselineSettled === false);
+        const unsettled = ok.filter((r) => r.run.hotBaselineSettled === false);
         if (unsettled.length > 0) {
           process.stdout.write(
             `  ${temperature}: ${unsettled.length}/${runs.length} corridas con línea de base caliente ` +
@@ -121,10 +208,10 @@ async function main(): Promise<void> {
       }
       if (valid.length === 0) continue;
 
-      const m2 = stats(valid.map((r) => r.peakSumBytes));
-      const totals = valid.map((r) => r.totalMs).filter((v): v is number => v !== null);
+      const m2 = stats(valid.map((r) => r.run.peakSumBytes));
+      const totals = valid.map((r) => r.run.totalMs).filter((v): v is number => v !== null);
       const timeStats = totals.length > 0 ? stats(totals) : null;
-      const groupCounts = valid.map((r) => r.groupCount);
+      const groupCounts = valid.map((r) => r.run.groupCount);
 
       process.stdout.write(
         `  ${temperature.padEnd(4)} — M2 pico: min ${formatMB(m2.min)} / avg ${formatMB(m2.avg)} / max ${formatMB(m2.max)}` +
@@ -135,7 +222,7 @@ async function main(): Promise<void> {
       );
 
       if (temperature === "hot") {
-        const m1Values = valid.map((r) => r.m1Bytes).filter((v): v is number => v !== null);
+        const m1Values = valid.map((r) => r.run.m1Bytes).filter((v): v is number => v !== null);
         if (m1Values.length > 0) {
           const m1 = stats(m1Values);
           process.stdout.write(
@@ -143,8 +230,31 @@ async function main(): Promise<void> {
           );
         }
       }
+
+      // ADR-159 §3: el piso, por corrida individual — nunca promediado. Es
+      // deliberado que esto vaya DESPUÉS de los agregados de arriba (que sí
+      // promedian M2/M1/tiempo): mezclar los dos estilos en una sola tabla
+      // invitaría a leer el piso como si fuera otro promedio más.
+      const floorsByRun = valid.map((r) => ({
+        runLabel: r.runLabel,
+        floors: computeProcessFloors(r.run),
+      }));
+      if (floorsByRun.some((f) => f.floors.length > 0)) {
+        process.stdout.write(`       piso por proceso (ADR-159 §3, por corrida, sin promediar):\n`);
+        for (const { runLabel, floors } of floorsByRun) {
+          if (floors.length === 0) continue;
+          process.stdout.write(`       ${runLabel}:\n${formatProcessFloors(floors)}`);
+        }
+      }
     }
   }
 }
 
-await main();
+// Corre `main()` solo cuando este archivo es el entrypoint (`pnpm tsx
+// tests/perf/support/aggregateMemoryReports.ts`), no cuando otro módulo lo
+// importa por sus funciones puras (`computeProcessFloors`, exportada para
+// `aggregateMemoryReports.test.ts`) — sin esto, importar el archivo para
+// testear dispararía una lectura de `.measure/` como efecto de lado.
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await main();
+}

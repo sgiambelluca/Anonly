@@ -36,34 +36,57 @@ const ELECTRON_BIN = resolve(SHELL_DIR, "node_modules/.bin/electron");
 
 export interface ElectronFixtures {
   readonly electronApp: ElectronApplication;
+  /**
+   * El `--user-data-dir` de esta instancia. Separado de `electronApp` como
+   * fixture propia porque `tests/perf/support/cdpHeap.ts` (ADR-159 §2) lo
+   * necesita para descubrir el puerto de CDP (`DevToolsActivePort` se
+   * escribe ahí) sin tener que reconstruirlo a mano ni acoplar ese archivo a
+   * los detalles internos de este fixture.
+   */
+  readonly electronUserDataDir: string;
 }
 
 export const test = base.extend<ElectronFixtures>({
+  /*
+   * **Un directorio de datos por test.** Sin esto todas las instancias
+   * comparten el perfil por defecto de la app, y con él el `localStorage`:
+   * los settings que un spec escribe sobreviven al siguiente.
+   *
+   * No es teórico. `scenario-8` apaga la detección de nombres con
+   * `settingsOverride`, y eso se filtraba a `scenario-5`, que necesita que
+   * NER corra: el pipeline pasaba de "Leyendo el texto…" a "Listo" sin
+   * detectar nada, y el spec fallaba **solo cuando corría después** de
+   * scenario-8 — pasaba perfecto si se lo corría solo.
+   *
+   * Contra el navegador esto no existía: cada test de Playwright arranca con
+   * almacenamiento limpio. Es aislamiento que el target de escritorio no
+   * regala y hay que construir.
+   */
   // eslint-disable-next-line no-empty-pattern -- la firma de fixture de Playwright exige el patrón, no hay dependencias que desestructurar
-  electronApp: async ({}, use) => {
-    /*
-     * **Un directorio de datos por test.** Sin esto todas las instancias
-     * comparten el perfil por defecto de la app, y con él el `localStorage`:
-     * los settings que un spec escribe sobreviven al siguiente.
-     *
-     * No es teórico. `scenario-8` apaga la detección de nombres con
-     * `settingsOverride`, y eso se filtraba a `scenario-5`, que necesita que
-     * NER corra: el pipeline pasaba de "Leyendo el texto…" a "Listo" sin
-     * detectar nada, y el spec fallaba **solo cuando corría después** de
-     * scenario-8 — pasaba perfecto si se lo corría solo.
-     *
-     * Contra el navegador esto no existía: cada test de Playwright arranca con
-     * almacenamiento limpio. Es aislamiento que el target de escritorio no
-     * regala y hay que construir.
-     */
+  electronUserDataDir: async ({}, use) => {
     const userDataDir = await mkdtemp(join(tmpdir(), "anonly-e2e-"));
+    await use(userDataDir);
+    await rm(userDataDir, { recursive: true, force: true });
+  },
+
+  electronApp: async ({ electronUserDataDir }, use) => {
     const app = await electron.launch({
-      args: [SHELL_DIR, `--user-data-dir=${userDataDir}`],
+      args: [
+        SHELL_DIR,
+        `--user-data-dir=${electronUserDataDir}`,
+        // Puerto efímero (`0` = que lo elija el SO) de Chrome DevTools
+        // Protocol — flag propio de Chromium, no algo que este repo agregue
+        // a la app. Electron escribe el puerto elegido en
+        // `<userDataDir>/DevToolsActivePort`, que es cómo lo descubre
+        // `tests/perf/support/cdpHeap.ts` (ADR-159 §2: la retención se lee
+        // del heap por target vía CDP, no del RSS). No cambia nada de la app
+        // empaquetada ni de los specs E2E que no lo usan.
+        "--remote-debugging-port=0",
+      ],
       executablePath: ELECTRON_BIN,
     });
     await use(app);
     await app.close();
-    await rm(userDataDir, { recursive: true, force: true });
   },
 
   /*

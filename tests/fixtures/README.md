@@ -2,7 +2,10 @@
 
 Fixtures (PDFs de prueba) para los tests del Core de Anonly.
 
-> Fuente de verdad: `docs/architecture/07_Performance_Strategy.md` §11.2.
+> Fuente de verdad de la suite base: `docs/architecture/07_Performance_Strategy.md`
+> §11.2. Los fixtures exclusivos de una campaña de medición se especifican en
+> su plan; `text-200p.pdf` depende de
+> `docs/roadmap/Optimizacion_De_Memoria_Plan.md` §T-3.
 
 ---
 
@@ -12,6 +15,7 @@ Fixtures (PDFs de prueba) para los tests del Core de Anonly.
 |---|---|---|---|
 | `text-10p.pdf` | ~100 KB | PDF con texto, 10 páginas, caso base | PDF Engine, Regex Engine, NER Engine, Grouping Engine, Render Engine, Export Engine, snapshot |
 | `text-50p.pdf` | ~20 KB | PDF con texto, 50 páginas, densidad documentada, 5 páginas con entidad conocida | PDF Engine, perf, H-10 (fuente para el escaneado sintético de memoria, ADR-146) |
+| `text-200p.pdf` | generado en memoria | PDF con texto, 200 páginas, misma densidad de P2 y 20 páginas con entidad conocida | H-10 T-3 (fuente para el perfil opt-in `p2-scanned-200p`; no se commitea) |
 | `scanned-10p.pdf` | ~5 MB | PDF escaneado, requiere OCR | OCR Engine |
 | `corrupt.pdf` | ~1 KB | header %PDF- válido + cuerpo no-PDF determinista | PDF Engine edge |
 | `protected.pdf` | ~100 KB | protegido con password `test1234` | PDF Engine edge |
@@ -118,6 +122,21 @@ Para fixtures que no se pueden generar automáticamente y pesan > 5 MB, descarga
 | `text-50p.pdf` | `generateText50p()` (no commiteado — se genera en memoria en el test, ADR-146 §15.2 punto 4: fuera de la ventana de medición) | `generate.test.ts` → "generate.ts — text-50p.pdf (H-10, ADR-146)" | 50 páginas, ninguna idéntica a otra; 5 con Person+DNI sintetizados (`TEXT_50P_ENTITY_PAGE_INDICES` = [0,10,20,30,40]), 45 neutras. `rasterizeToScannedPdf` lo convierte al escaneado sintético que H-10 mide. |
 | `empty.pdf` | `pnpm fixtures:generate` → `generateEmpty()` | `generate.test.ts` → "generate.ts — empty.pdf" | 1 página vacía sin contenido. El nombre "empty" es histórico: pdf-lib no permite PDFs con 0 páginas. Equivalente a "página textless" para el PDF Engine. |
 | `corrupt.pdf` | `pnpm fixtures:generate` → `generateCorrupt()` | `generate.test.ts` → "generate.ts — corrupt.pdf" | Header %PDF- válido + cuerpo no-PDF determinista (200 bytes de 0x41). No parseable por PDF.js pero con header que pasa la heurística inicial. |
+
+### Implementado — H-10 T-3
+
+`text-200p.pdf` se implementa como `generateText200p()` y **no se commitea**.
+Conserva A4, layout, plantilla y densidad de la variante liviana de 50 páginas;
+lleva Person + DNI en los índices `[0, 10, ..., 190]` y texto neutro en las otras
+180 páginas. Todas las páginas son distintas y sus rótulos dicen `Página N de
+200`. No existe una variante densa de 200 páginas: introduciría una segunda
+variable en el experimento.
+
+El perfil de memoria transforma esta fuente con
+`getOrGenerateScannedFixture("p2-scanned-200p", ...)` en un Chromium separado,
+cerrado antes de abrir el Electron medido. El resultado vive únicamente en
+`.measure/fixtures/`, que está ignorado por git. Fuente normativa y criterios de
+cierre: `docs/roadmap/Optimizacion_De_Memoria_Plan.md` §T-3.
 
 ### Pendientes (requieren tools externos)
 

@@ -121,6 +121,11 @@ export async function generateText10p(): Promise<Uint8Array> {
  */
 export const TEXT_50P_ENTITY_PAGE_INDICES: ReadonlyArray<number> = [0, 10, 20, 30, 40];
 
+/** Páginas con entidad de `text-200p.pdf`, una cada diez (20 de 200). */
+export const TEXT_200P_ENTITY_PAGE_INDICES: ReadonlyArray<number> = [
+  0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190,
+];
+
 /** Semilla fija: `text-50p` es reproducible entre corridas, igual que el dataset de referencia. */
 const TEXT_50P_SEED = "text-50p-v1";
 
@@ -148,6 +153,105 @@ export async function generateText50p(): Promise<Uint8Array> {
     const text = TEXT_50P_ENTITY_PAGE_INDICES.includes(index)
       ? buildText50pEntityParagraph(documentId, index, pageNumber)
       : buildText50pNeutralParagraph(pageNumber);
+
+    const page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+    const lines = wrapText(text, WRAP_CHARS);
+    let y = MARGIN_Y;
+    for (const line of lines) {
+      page.drawText(line, { x: MARGIN_X, y, size: FONT_SIZE, font, color: rgb(0, 0, 0) });
+      y -= LINE_HEIGHT;
+    }
+  }
+
+  return doc.save();
+}
+
+/**
+ * 200 páginas de texto ficticio, con la misma densidad y layout que P2.
+ * Solo cambia la longitud del documento: 20 páginas llevan Person + DNI y
+ * las otras 180 son neutras. El PDF fuente se rasteriza fuera del Electron
+ * medido por el perfil `p2-scanned-200p` (H-10 T-3).
+ */
+export async function generateText200p(): Promise<Uint8Array> {
+  return generateTextPages(200, TEXT_200P_ENTITY_PAGE_INDICES, "fixture-text-200p", "text-200p-v1");
+}
+
+/** Construye el texto de una página de entidad de `text-200p.pdf`. */
+export function buildText200pEntityParagraph(
+  documentId: string,
+  index: number,
+  pageNumber: number,
+): string {
+  const entityIndex = TEXT_200P_ENTITY_PAGE_INDICES.indexOf(index);
+  return buildTextEntityParagraph(documentId, pageNumber, 200, entityIndex, "text-200p-v1");
+}
+
+/** Construye el texto neutro de una página de `text-200p.pdf`. */
+export function buildText200pNeutralParagraph(pageNumber: number): string {
+  return buildTextNeutralParagraph(pageNumber, 200);
+}
+
+function buildTextEntityParagraph(
+  documentId: string,
+  pageNumber: number,
+  pageCount: number,
+  entityIndex: number,
+  seed: string,
+): string {
+  const name = synthesize({
+    type: EntityType.Person,
+    groupId: `${documentId}-person-${entityIndex}`,
+    seed,
+    indexInType: entityIndex,
+  });
+  const dni = synthesize({
+    type: EntityType.DNI,
+    groupId: `${documentId}-dni-${entityIndex}`,
+    seed,
+    indexInType: entityIndex,
+  });
+  return (
+    `Página ${pageNumber} de ${pageCount}. Se deja constancia de que ${name}, DNI ${dni}, ` +
+    "compareció en autos y ratificó su presentación anterior, sin objeciones de la contraria."
+  );
+}
+
+function buildTextNeutralParagraph(pageNumber: number, pageCount: number): string {
+  const template = TEXT_NEUTRAL_TEMPLATES[pageNumber % TEXT_NEUTRAL_TEMPLATES.length];
+  return (template ?? TEXT_NEUTRAL_TEMPLATES[0]!)(pageNumber, pageCount);
+}
+
+const TEXT_NEUTRAL_TEMPLATES: ReadonlyArray<(pageNumber: number, pageCount: number) => string> = [
+  (n, count) =>
+    `Página ${n} de ${count}. El presente expediente continúa su trámite ordinario, sin novedades ` +
+    "que informar en esta instancia procesal.",
+  (n, count) =>
+    `Página ${n} de ${count}. Se adjunta constancia de notificación electrónica cursada en la fecha, ` +
+    "sin datos personales adicionales en este folio.",
+  (n, count) =>
+    `Página ${n} de ${count}. Por cuerda separada tramita la incidencia conexa, que no modifica el ` +
+    "objeto principal de estas actuaciones.",
+  (n, count) =>
+    `Página ${n} de ${count}. Corresponde el pase a despacho para la resolución de las cuestiones ` +
+    "pendientes, previa vista a las partes.",
+];
+
+async function generateTextPages(
+  pageCount: number,
+  entityPageIndices: ReadonlyArray<number>,
+  documentId: string,
+  seed: string,
+): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+
+  for (let index = 0; index < pageCount; index++) {
+    const pageNumber = index + 1;
+    const entityIndex = entityPageIndices.indexOf(index);
+    const text =
+      entityIndex >= 0
+        ? buildTextEntityParagraph(documentId, pageNumber, pageCount, entityIndex, seed)
+        : buildTextNeutralParagraph(pageNumber, pageCount);
 
     const page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
     const lines = wrapText(text, WRAP_CHARS);
@@ -214,22 +318,7 @@ export function buildText50pEntityParagraph(
   pageNumber: number,
 ): string {
   const entityIndex = TEXT_50P_ENTITY_PAGE_INDICES.indexOf(index);
-  const name = synthesize({
-    type: EntityType.Person,
-    groupId: `${documentId}-person-${entityIndex}`,
-    seed: TEXT_50P_SEED,
-    indexInType: entityIndex,
-  });
-  const dni = synthesize({
-    type: EntityType.DNI,
-    groupId: `${documentId}-dni-${entityIndex}`,
-    seed: TEXT_50P_SEED,
-    indexInType: entityIndex,
-  });
-  return (
-    `Página ${pageNumber} de 50. Se deja constancia de que ${name}, DNI ${dni}, ` +
-    "compareció en autos y ratificó su presentación anterior, sin objeciones de la contraria."
-  );
+  return buildTextEntityParagraph(documentId, pageNumber, 50, entityIndex, TEXT_50P_SEED);
 }
 
 /**
@@ -305,24 +394,8 @@ export function buildText50pDenseParagraph(documentId: string, index: number, pa
   );
 }
 
-const TEXT_50P_NEUTRAL_TEMPLATES: ReadonlyArray<(pageNumber: number) => string> = [
-  (n) =>
-    `Página ${n} de 50. El presente expediente continúa su trámite ordinario, sin novedades ` +
-    "que informar en esta instancia procesal.",
-  (n) =>
-    `Página ${n} de 50. Se adjunta constancia de notificación electrónica cursada en la fecha, ` +
-    "sin datos personales adicionales en este folio.",
-  (n) =>
-    `Página ${n} de 50. Por cuerda separada tramita la incidencia conexa, que no modifica el ` +
-    "objeto principal de estas actuaciones.",
-  (n) =>
-    `Página ${n} de 50. Corresponde el pase a despacho para la resolución de las cuestiones ` +
-    "pendientes, previa vista a las partes.",
-];
-
 export function buildText50pNeutralParagraph(pageNumber: number): string {
-  const template = TEXT_50P_NEUTRAL_TEMPLATES[pageNumber % TEXT_50P_NEUTRAL_TEMPLATES.length];
-  return (template ?? TEXT_50P_NEUTRAL_TEMPLATES[0]!)(pageNumber);
+  return buildTextNeutralParagraph(pageNumber, 50);
 }
 
 /**

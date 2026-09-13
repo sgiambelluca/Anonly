@@ -51,6 +51,7 @@ vi.mock("@huggingface/transformers", () => ({
 import {
   createMockPdfDocument,
   createMockPdfPage,
+  installCreateImageBitmapStub,
   installOffscreenCanvasStub,
   mockGetDocumentResult,
   mockRecognizeData,
@@ -86,6 +87,7 @@ describe("integración — OCR por región: imagen con texto que ningún texto n
   beforeEach(() => {
     vi.clearAllMocks();
     installOffscreenCanvasStub();
+    installCreateImageBitmapStub();
   });
 
   afterEach(async () => {

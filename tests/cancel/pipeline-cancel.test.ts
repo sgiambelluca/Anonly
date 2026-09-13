@@ -107,6 +107,22 @@ function installOffscreenCanvasStub(): void {
   });
 }
 
+/**
+ * Desde ADR-158 el kernel de OCR decodifica `EncodedPageImage.bytes` con
+ * `createImageBitmap` **antes** de reconocer, y en el entorno `node` de
+ * Vitest esa función no existe. Sin este stub cada página falla al
+ * decodificar y `recognize` no se llama nunca — que es exactamente lo que
+ * medía de menos el caso de OCR de abajo (esperaba ≥ 2 despachos y veía 0).
+ */
+function installCreateImageBitmapStub(): void {
+  if (typeof globalThis.createImageBitmap !== "undefined") return;
+  Object.defineProperty(globalThis, "createImageBitmap", {
+    value: (): Promise<{ close: () => void }> => Promise.resolve({ close: () => undefined }),
+    writable: true,
+    configurable: true,
+  });
+}
+
 // ─── pdfjs-dist ───
 
 interface MockTextItem {
@@ -220,6 +236,7 @@ describe("gate de cancelación — SLA de 200 ms sobre el façade real (ADR-149 
   beforeEach(() => {
     vi.clearAllMocks();
     installOffscreenCanvasStub();
+    installCreateImageBitmapStub();
     // Default inocuo: los casos que no ejercitan NER igual pueden llegar a
     // necesitarlo si el pipeline avanzara más de lo esperado por un bug —
     // que resuelva vacío en vez de colgarse evita un test que cuelga en rojo

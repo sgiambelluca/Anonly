@@ -48,6 +48,7 @@ vi.mock("@huggingface/transformers", () => ({
 import {
   createMockPdfDocument,
   createMockPdfPage,
+  installCreateImageBitmapStub,
   installOffscreenCanvasStub,
   mockGetDocumentResult,
   mockRecognizeData,
@@ -69,78 +70,86 @@ describe("integration — OCR_PAGE_FINISHED -> Orchestrator -> PdfEngine.fuseOcr
   beforeEach(() => {
     vi.clearAllMocks();
     installOffscreenCanvasStub();
+    installCreateImageBitmapStub();
   });
 
   afterEach(async () => {
     await core?.dispose();
   });
 
-  it("fuses OCR words into the retained Document so Regex/Grouping detect them", async () => {
-    // Página sin texto -> requiresOCR/textlessPages=[0] (ADR-034 §1).
-    const textlessPage = createMockPdfPage([]);
-    vi.mocked(getDocument).mockReturnValue(
-      mockGetDocumentResult(createMockPdfDocument([textlessPage])),
-    );
+  // ADR-158/160: este recorrido materializa y codifica/decodifica un raster A4
+  // real en el entorno node; el default de Vitest (5 s) no alcanza aunque la
+  // operación termine correctamente.
+  it(
+    "fuses OCR words into the retained Document so Regex/Grouping detect them",
+    { timeout: 60_000 },
+    async () => {
+      // Página sin texto -> requiresOCR/textlessPages=[0] (ADR-034 §1).
+      const textlessPage = createMockPdfPage([]);
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument([textlessPage])),
+      );
 
-    // "34.567.891" matchea el patrón DNI de regex-engine (\b\d{1,2}\.?\d{3}\.?\d{3}\b) —
-    // prueba observable de que el texto OCR llegó al Document que Regex procesa.
-    vi.mocked(createWorker).mockResolvedValue(
-      mockTesseractWorker(
-        mockRecognizeData([
-          { text: "34.567.891", confidence: 92, bbox: { x0: 10, y0: 10, x1: 100, y1: 30 } },
-        ]),
-      ),
-    );
+      // "34.567.891" matchea el patrón DNI de regex-engine (\b\d{1,2}\.?\d{3}\.?\d{3}\b) —
+      // prueba observable de que el texto OCR llegó al Document que Regex procesa.
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(
+          mockRecognizeData([
+            { text: "34.567.891", confidence: 92, bbox: { x0: 10, y0: 10, x1: 100, y1: 30 } },
+          ]),
+        ),
+      );
 
-    core = await createCore({
-      ner: {
-        modelId: "x",
-        quantization: "q8",
-        confidenceThreshold: 0.7,
-        batchSize: 1,
-        enabled: false,
-      },
-    });
+      core = await createCore({
+        ner: {
+          modelId: "x",
+          quantization: "q8",
+          confidenceThreshold: 0.7,
+          batchSize: 1,
+          enabled: false,
+        },
+      });
 
-    const ocrPageFinishedSpy = vi.fn();
-    core.bus.on(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, ocrPageFinishedSpy);
-    const groupCreatedSpy = vi.fn();
-    core.bus.on(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_CREATED, groupCreatedSpy);
-    const entityFoundSpy = vi.fn();
-    core.bus.on(EventChannel.Regex, EngineEvents.ENTITY_FOUND, entityFoundSpy);
+      const ocrPageFinishedSpy = vi.fn();
+      core.bus.on(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, ocrPageFinishedSpy);
+      const groupCreatedSpy = vi.fn();
+      core.bus.on(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_CREATED, groupCreatedSpy);
+      const entityFoundSpy = vi.fn();
+      core.bus.on(EventChannel.Regex, EngineEvents.ENTITY_FOUND, entityFoundSpy);
 
-    await core.orchestrator.importDocument({
-      documentId: "doc-ocr-fusion",
-      name: "scanned.pdf",
-      buffer: pdfBufferWithHeader(),
-    });
-
-    expect(ocrPageFinishedSpy).toHaveBeenCalled();
-    expect(groupCreatedSpy).toHaveBeenCalledWith(
-      expect.objectContaining({
+      await core.orchestrator.importDocument({
         documentId: "doc-ocr-fusion",
-        group: expect.objectContaining({ canonicalValue: "34.567.891" }),
-      }),
-    );
+        name: "scanned.pdf",
+        buffer: pdfBufferWithHeader(),
+      });
 
-    // ADR-064: la ocurrencia detectada sobre el texto fusionado tiene que quedar
-    // en PUNTOS de página, no en píxeles del raster. El bbox mockeado es
-    // (10,10)-(100,30) px y el default de OCR es 300 DPI, así que el factor es
-    // 72/300 = 0.24. Regex arma el bbox de la ocurrencia como unión de los
-    // Word.bbox que la cubren, y acá la cubre una sola palabra. Antes de
-    // ADR-064 este test pasaba con cualquier espacio de coordenadas: no
-    // verificaba ninguno.
-    expect(entityFoundSpy).toHaveBeenCalled();
-    const found = entityFoundSpy.mock.calls
-      .map(([payload]) => payload as EntityFound)
-      .find((p) => p.occurrence.value === "34.567.891");
-    expect(found).toBeDefined();
-    expect(found!.occurrence.bbox.x).toBeCloseTo(2.4, 5);
-    expect(found!.occurrence.bbox.y).toBeCloseTo(2.4, 5);
-    expect(found!.occurrence.bbox.width).toBeCloseTo(21.6, 5);
-    expect(found!.occurrence.bbox.height).toBeCloseTo(4.8, 5);
+      expect(ocrPageFinishedSpy).toHaveBeenCalled();
+      expect(groupCreatedSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          documentId: "doc-ocr-fusion",
+          group: expect.objectContaining({ canonicalValue: "34.567.891" }),
+        }),
+      );
 
-    // El pipeline sigue hasta Ready con el texto fusionado (Regex/Grouping corren sobre él).
-    expect(core.orchestrator.getState("doc-ocr-fusion").stage).toBe(PipelineStage.Ready);
-  });
+      // ADR-064: la ocurrencia detectada sobre el texto fusionado tiene que quedar
+      // en PUNTOS de página, no en píxeles del raster. El bbox mockeado es
+      // (10,10)-(100,30) px y el default de OCR es 300 DPI, así que el factor es
+      // 72/300 = 0.24. Regex arma el bbox de la ocurrencia como unión de los
+      // Word.bbox que la cubren, y acá la cubre una sola palabra. Antes de
+      // ADR-064 este test pasaba con cualquier espacio de coordenadas: no
+      // verificaba ninguno.
+      expect(entityFoundSpy).toHaveBeenCalled();
+      const found = entityFoundSpy.mock.calls
+        .map(([payload]) => payload as EntityFound)
+        .find((p) => p.occurrence.value === "34.567.891");
+      expect(found).toBeDefined();
+      expect(found!.occurrence.bbox.x).toBeCloseTo(2.4, 5);
+      expect(found!.occurrence.bbox.y).toBeCloseTo(2.4, 5);
+      expect(found!.occurrence.bbox.width).toBeCloseTo(21.6, 5);
+      expect(found!.occurrence.bbox.height).toBeCloseTo(4.8, 5);
+
+      // El pipeline sigue hasta Ready con el texto fusionado (Regex/Grouping corren sobre él).
+      expect(core.orchestrator.getState("doc-ocr-fusion").stage).toBe(PipelineStage.Ready);
+    },
+  );
 });
