@@ -133,6 +133,22 @@ export async function createCore(
     ...(runtime?.workers?.ocr !== undefined ? { workerFactory: runtime.workers.ocr } : {}),
   });
 
+  const orientationPool = new WorkerPool({
+    poolKey: "ocr-orientation",
+    jobType: "ocr-orient",
+    size: 1,
+    maxQueue: mergedConfig.workerPool.maxQueuePerPool.ocr,
+    maxRetries: 0,
+    baseRetryDelayMs: mergedConfig.workerPool.baseRetryDelayMs,
+    maxRetryDelayMs: mergedConfig.workerPool.maxRetryDelayMs,
+    idleDisposeMs: mergedConfig.workerPool.idleDisposeMs,
+    bus,
+    logger,
+    ...(runtime?.workers?.["ocr-orientation"] !== undefined
+      ? { workerFactory: runtime.workers["ocr-orientation"] }
+      : {}),
+  });
+
   // ADR-046 §2/§7: tercer espejo de renderPool/ocrPool, sin onWorkerCreated
   // (sin estado por documento que re-primear, ADR-041 §5/§9).
   const nerPool = new WorkerPool({
@@ -185,7 +201,7 @@ export async function createCore(
 
   const engines: AnonymizationCoreEngines = {
     pdf: new PdfEngine(),
-    ocr: new OcrEngine(ocrPool),
+    ocr: new OcrEngine(ocrPool, orientationPool),
     regex: new RegexEngine(),
     ner: new NerEngine(nerPool),
     grouping: new GroupingEngine(),
@@ -235,6 +251,7 @@ export async function createCore(
       initAbortController.abort();
       renderPool.dispose();
       ocrPool.dispose();
+      orientationPool.dispose();
       nerPool.dispose();
       exportPool.dispose();
       await orchestrator.dispose();

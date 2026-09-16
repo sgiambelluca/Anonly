@@ -15,6 +15,7 @@ import type { EngineConfig, EngineConfigOverrides, WorkerJobType } from "@anonly
 const DEFAULT_TIMEOUTS: Readonly<Record<WorkerJobType, number>> = {
   "pdf-parse": 30_000,
   "ocr-page": 60_000,
+  "ocr-orient": 60_000,
   "ner-page": 20_000,
   "render-page": 10_000,
   "export-page": 30_000,
@@ -23,6 +24,7 @@ const DEFAULT_TIMEOUTS: Readonly<Record<WorkerJobType, number>> = {
 const DEFAULT_MAX_RETRIES: Readonly<Record<WorkerJobType, number>> = {
   "pdf-parse": 1,
   "ocr-page": 2,
+  "ocr-orient": 0,
   "ner-page": 1,
   "render-page": 1,
   "export-page": 1,

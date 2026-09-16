@@ -57,13 +57,13 @@ import {
 // prioritaria multi-worker, sin clave propia en `WorkerPoolConfig`): por eso
 // `WorkerPoolManager` (que sí gestiona los cuatro pools "de verdad", con
 // creación perezosa y disposición por idle) lo excluye vía `ManagedPoolKey`.
-export type PoolKey = "pdf" | "ocr" | "ner" | "render" | "export";
+export type PoolKey = "pdf" | "ocr" | "ocr-orientation" | "ner" | "render" | "export";
 
 // Unión de los cuatro pools que gestiona `WorkerPoolManager` (creación
 // perezosa, disposición por idle). Excluye "export": ese `WorkerPool` lo
 // construye e inyecta `create-core.ts` directo al `ExportEngine` (ADR-047
 // §2, espejo de `ocrPool`/`nerPool`), sin pasar por el manager.
-export type ManagedPoolKey = Exclude<PoolKey, "export">;
+export type ManagedPoolKey = Exclude<PoolKey, "export" | "ocr-orientation">;
 
 const WORKER_OUTBOUND_TYPES: ReadonlySet<string> = new Set([
   "READY",
