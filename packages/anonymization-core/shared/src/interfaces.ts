@@ -197,7 +197,7 @@ export interface WorkerLike {
 export type WorkerFactory = () => WorkerLike;
 
 // "export" refiere al ExportWorker único (sin pool propio, ADR-036 §1).
-export type WorkerEntryKind = "pdf" | "ocr" | "ner" | "render" | "export";
+export type WorkerEntryKind = "pdf" | "ocr" | "ocr-orientation" | "ner" | "render" | "export";
 
 export interface CoreRuntimeOptions {
   readonly workers?: Partial<Readonly<Record<WorkerEntryKind, WorkerFactory>>>;

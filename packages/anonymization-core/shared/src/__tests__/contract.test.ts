@@ -63,6 +63,9 @@ import type {
   Occurrence,
   OccurrenceRef,
   OcrRegion,
+  OcrOrientationPayload,
+  OcrOrientationResult,
+  OcrPagePayload,
   Page,
   PageParsed,
   PersonGender,
@@ -1616,6 +1619,7 @@ describe("@anonly/shared — Contracts", () => {
           timeouts: {
             "pdf-parse": 30000,
             "ocr-page": 60000,
+            "ocr-orient": 60000,
             "ner-page": 20000,
             "render-page": 10000,
             "export-page": 30000,
@@ -1623,6 +1627,7 @@ describe("@anonly/shared — Contracts", () => {
           maxRetries: {
             "pdf-parse": 1,
             "ocr-page": 2,
+            "ocr-orient": 0,
             "ner-page": 1,
             "render-page": 1,
             "export-page": 1,
@@ -1734,6 +1739,27 @@ describe("@anonly/shared — Contracts", () => {
       // @ts-expect-error R-11: todo dato público es readonly.
       payload.degraded = [];
       expect(payload.degraded).toBeDefined();
+    });
+  });
+
+  describe("OCR orientation transport (ADR-164)", () => {
+    it("exposes the dedicated job payload/result and requires orientation on OCR pages", () => {
+      const orientationPayload: OcrOrientationPayload = {
+        documentId: "doc-orientation",
+        pageIndex: 3,
+        image: { bytes: new ArrayBuffer(0), format: "png", widthPx: 100, heightPx: 40 },
+        languages: ["spa", "eng"],
+        timeoutMs: 60000,
+      };
+      const orientationResult: OcrOrientationResult = { orientation: 270 };
+      const page: OcrPagePayload = {
+        ...orientationPayload,
+        dpi: 300,
+        orientation: orientationResult.orientation,
+      };
+
+      expect(orientationPayload.timeoutMs).toBe(60000);
+      expect(page.orientation).toBe(270);
     });
   });
 });

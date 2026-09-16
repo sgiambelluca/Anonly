@@ -182,7 +182,13 @@ export enum PipelineStage {
 
 export type RuleScope = "group" | "type" | "global";
 
-export type WorkerJobType = "pdf-parse" | "ocr-page" | "ner-page" | "render-page" | "export-page";
+export type WorkerJobType =
+  | "pdf-parse"
+  | "ocr-page"
+  | "ocr-orient"
+  | "ner-page"
+  | "render-page"
+  | "export-page";
 
 /**
  * Códigos de error canónicos del Core.

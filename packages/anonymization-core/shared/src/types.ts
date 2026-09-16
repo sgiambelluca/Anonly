@@ -406,8 +406,23 @@ export interface OcrPagePayload {
   // otro lado y se encodeaba igual. Se CLONA, no se transfiere: el reintento
   // del pool reusa el buffer (ADR-079/ADR-158 §5).
   readonly image: EncodedPageImage;
+  readonly orientation: OcrOrientation;
   readonly dpi: number;
   readonly languages: ReadonlyArray<string>;
+}
+
+export type OcrOrientation = 0 | 90 | 180 | 270;
+
+export interface OcrOrientationPayload {
+  readonly documentId: string;
+  readonly pageIndex: number;
+  readonly image: EncodedPageImage;
+  readonly languages: ReadonlyArray<string>;
+  readonly timeoutMs: number;
+}
+
+export interface OcrOrientationResult {
+  readonly orientation: OcrOrientation;
 }
 
 // ADR-046 §3/§5: `text` es el texto de UN BATCH de NerConfig.batchSize
