@@ -1,12 +1,32 @@
-<!-- CONTEXT: scope=ocr-engine | dependencias=core/Contracts.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-018-First-Party-Assets.md,adr/ADR-021-Engines-Inline-Hasta-Hito9.md,adr/ADR-041-FuseOcrPage-Funcion-Pura-Sin-Estado-Retenido.md,adr/ADR-045-OcrEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-064-Palabras-De-OCR-En-Puntos.md,adr/ADR-090-La-Orientacion-De-Un-Escaneo-Se-Detecta.md,adr/ADR-119-La-Orientacion-Se-Detecta-Con-El-Motor-Que-La-Sabe-Leer.md,adr/ADR-112-El-Sello-No-Es-Un-Parrafo.md,adr/ADR-121-El-Sello-Rotado-Vive-En-El-Margen.md,adr/ADR-101-El-Despacho-Paralelo-De-OCR-Que-Nunca-Aterrizo.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-158-El-Raster-De-OCR-Viaja-Codificado.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md,adr/ADR-161-Una-Franja-Sin-Tinta-No-Se-Reconoce.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md | audiencia=IA-implementador | fase=11 (§12/§13/§14/§15 en fase 11 por ADR-162: cada franja visualmente blanca evita sus dos pasadas, con una compuerta exacta y fail-open; §12/§13/§15 en fase 11 por ADR-160: el kernel no materializa la pagina completa en el camino comun — los bytes codificados van directo a tesseract.js, el OSD decodifica reducido y las franjas de ADR-121 decodifican solo su franja; §6/§9/§11/§13/§14/§15 en fase 11 por ADR-143: processSession pide cada imagen bajo demanda, con presupuesto de bytes en vivo, en vez de que el caller materialice todo el documento antes de empezar; §10/§13/§14/§15 en fase 11 por ADR-121: las pasadas rotadas sobre las franjas de margen; §13/§14/§15 en fase 11 por ADR-112: el modo de segmentación de página es SPARSE_TEXT; §2/§6/§12/§15 actualizados en fase 10: clase host-side dueña de su pool + kernel de reconocimiento en el worker, ADR-045; §9/§10/§11/§13/§14 en fase 10.8: las palabras salen en puntos de página, no en píxeles del raster, ADR-064) -->
+<!-- CONTEXT: scope=ocr-engine | dependencias=core/Contracts.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-018-First-Party-Assets.md,adr/ADR-021-Engines-Inline-Hasta-Hito9.md,adr/ADR-041-FuseOcrPage-Funcion-Pura-Sin-Estado-Retenido.md,adr/ADR-045-OcrEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-064-Palabras-De-OCR-En-Puntos.md,adr/ADR-090-La-Orientacion-De-Un-Escaneo-Se-Detecta.md,adr/ADR-119-La-Orientacion-Se-Detecta-Con-El-Motor-Que-La-Sabe-Leer.md,adr/ADR-112-El-Sello-No-Es-Un-Parrafo.md,adr/ADR-121-El-Sello-Rotado-Vive-En-El-Margen.md,adr/ADR-101-El-Despacho-Paralelo-De-OCR-Que-Nunca-Aterrizo.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-158-El-Raster-De-OCR-Viaja-Codificado.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md,adr/ADR-161-Una-Franja-Sin-Tinta-No-Se-Reconoce.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md | audiencia=IA-implementador | fase=11 (§12/§13/§14/§15 en fase 11 por ADR-162: cada franja visualmente blanca evita sus dos pasadas, con una compuerta exacta y fail-open; §12/§13/§15 en fase 11 por ADR-160: el kernel no materializa la pagina completa en el camino comun — los bytes codificados van directo a tesseract.js, el OSD decodifica reducido y las franjas de ADR-121 decodifican solo su franja; §6/§9/§11/§13/§14/§15 en fase 11 por ADR-143: processSession pide cada imagen bajo demanda, con presupuesto de bytes en vivo, en vez de que el caller materialice todo el documento antes de empezar; §10/§13/§14/§15 en fase 11 por ADR-121: las pasadas rotadas sobre las franjas de margen; §13/§14/§15 en fase 11 por ADR-112: el modo de segmentación de página es SPARSE_TEXT; §2/§6/§12/§15 actualizados en fase 10: clase host-side dueña de su pool + kernel de reconocimiento en el worker, ADR-045; §9/§10/§11/§13/§14 en fase 10.8: las palabras salen en puntos de página, no en píxeles del raster, ADR-064) -->
 
 # OCR Engine — Spec de Motor
 
 > Ejecuta OCR sobre las páginas sin texto del PDF. Solo corre si `PdfEngineOutput.textlessPages.length > 0`. Devuelve `Word[]` con `BoundingBox` y `confidence` que el PDF Engine fusiona.
 
 **EngineId**: `ocr`
-**Versión del spec**: 1.14.0
-**Última actualización**: 2026-09-13
+**Versión del spec**: 1.16.0
+**Última actualización**: 2026-09-15
+
+> **Nota (v1.16.0, ADR-164 §2.3)**: especificación cerrada para implementar
+> una página de adelanto. Con pool LSTM inyectado y `ocrPoolSize: 2`, la ventana
+> de `processSession` pasa de dos a tres consumidores; el pool físico sigue en
+> dos y OSD en uno. Los 128 MiB siguen incluyendo cada imagen hasta finalizar
+> reconocimiento/retry. El límite de consumidores de las notas históricas
+> ADR-101/143 queda sustituido por §6. LowResource y fallback conservan sus
+> límites previos. Casos 34–38 y pruebas nuevas fijan adelanto, presupuesto y
+> limpieza; el caso 28 precisa la recuperación tras inicialización bloqueada.
+> Implementación y aceptación final pendientes, sin ahorro RSS declarado.
+
+> **Nota (v1.15.0, ADR-164, T-5 — especificación cerrada; implementación pendiente)**:
+> un único worker OSD por Core atiende todas las imágenes con una cola serial;
+> cada OcrWorker conserva solo LSTM. `OcrEngine.processPage` orienta y luego
+> reconoce dentro del mismo retry y reserva de imagen. El payload LSTM recibe
+> el ángulo requerido; no detecta por su cuenta. Dos reconocedores pasan de
+> cuatro a tres instancias Tesseract. Se conservan detección por imagen,
+> geometría, píxeles, franjas y configuración. ADR-164 fija la nueva propiedad
+> del recurso y su cancelación/limpieza, supersediendo las referencias a OSD
+> por OcrWorker de las notas históricas. No hay mejora de MB/tiempo declarada.
 
 > **Nota (v1.14.0, ADR-163, T-6a — `dpi` puede variar por página)**: el campo
 > `dpi` de cada `OcrPageRequest` sigue siendo exactamente el DPI usado para
@@ -72,7 +92,7 @@ Recibir la imagen **codificada** (PNG, ADR-158 §2) de páginas sin texto y prod
 ## 2. Responsabilidades
 
 - Cargar Tesseract.js y el modelo `spa+eng` (default). Hito 3: inline; desde PR14 (ADR-045): en el kernel — cada worker del `OcrPool` carga su instancia; el fallback in-process usa el mismo módulo de kernel.
-- Recibir la imagen codificada por página, **decodificarla una sola vez** (ADR-158 §3) y ejecutar OCR.
+- Recibir la imagen codificada por página; orientar en el servicio OSD único y reconocer en LSTM. Mantener la decodificación reducida/parcial de ADR-160, sin superficies completas en el camino derecho.
 - Producir `Word[]` con `BoundingBox`, `confidence`, `source: "ocr"`.
 - Cache el modelo en IndexedDB tras primera descarga.
 - Emitir `OCR_STARTED`, `OCR_PAGE_FINISHED`, `OCR_FINISHED`, `OCR_PAGE_FAILED`.
@@ -150,7 +170,7 @@ export interface OcrPageOutput {
 
 // ADR-143 §1: descriptor liviano — SIN imagen — de una página o región a
 // OCR-ear. processSession pide la imagen real recién cuando tiene lugar
-// en la ventana de trabajo (§3), no por adelantado.
+// en la ventana de trabajo (ADR-164 §2.3), incluido su único cupo de adelanto.
 export interface OcrPageRequest {
   readonly documentId: string;
   readonly pageIndex: number;
@@ -178,7 +198,7 @@ export class OcrEngine implements IEngine {
   // createCore (espejo de RenderEngine/ADR-043 §2). Sin argumento → fallback
   // in-process inmediato que invoca el mismo kernel (bit-idéntico, ADR-035);
   // es lo que los tests del motor y los helpers existentes ya esperan.
-  constructor(pool?: OcrJobPool);
+  constructor(pool?: OcrJobPool, orientationPool?: OcrJobPool); // ADR-164: segundo puerto serial
   init(ctx: EngineContext): Promise<void>;
   processPage(input: OcrPageInput, ctx: EngineContext): Promise<OcrPageOutput>;
   // ADR-143 §1: se conserva con firma y semántica actuales — caso particular
@@ -202,9 +222,40 @@ export class OcrEngine implements IEngine {
 }
 ```
 
-Semántica del despacho (ADR-045 §2): `processPage` envía **solo el reconocimiento** por el puerto — `dispatch({ jobType: "ocr-page", payload: OcrPagePayload, run: () => kernel, signal, maxRetriesOverride: 0 })`. El retry vive únicamente en el loop del motor (la distinción `OcrTimeoutError`-reintenta / resto-no de §11 no cambia); todo timeout que emerja del despacho se normaliza a `OcrTimeoutError` antes del loop. El depósito en `ctx.cache` y la emisión de `OCR_PAGE_FINISHED` ocurren en el host, **en ese orden**, al resolver el despacho. `processSession` (ADR-143 §3) llama a `processPage` internamente por cada descriptor —después de reservar presupuesto y producir la imagen—, así que esta secuencia no cambia por página; lo único nuevo es de dónde sale el `ImageData` que se le pasa.
+**Semántica vigente de orientación (ADR-164)**: `processPage` despacha primero
+`OcrOrientationPayload` a `orientationPool` (size 1), valida el
+`OcrOrientationResult` y arma `OcrPagePayload` con `orientation` requerido.
+Ambos pasos viven dentro del retry de página y la reserva de ADR-143; cada
+attempt vuelve a orientar. Ambos dispatch llevan `maxRetriesOverride: 0`.
+El timeout OSD usa `workerPool.timeouts["ocr-orient"]` (default 60000), enviado
+en payload; `maxRetries["ocr-orient"] = 0`. La cola local sin puerto inyectado
+es exclusiva y su kernel pertenece a esta instancia OcrEngine. No importar
+Tesseract eagerly al iniciar el Core. Los kernels usan un helper de rutas
+first-party común. Ciclo de vida/cancelación y errores: ADR-164 §3, normativo.
+`releaseIdleWorkers` libera ambos servicios solo si no hay processPage activo
+ni trabajo admitido de sesión aún produciendo o esperando (§13 caso 37);
+`dispose` espera limpieza local y el façade dispone los pools inyectados.
 
-**Presupuesto de imágenes vivas (ADR-143 §3/§6)**: cada uno de los `C = min(ocrPoolSize, requests.length)` consumidores de `processSession` reserva `request.estimatedBytes` contra `ctx.config.ocr.maxLiveImageBytes` **antes** de llamar a `produce`, y libera la reserva cuando la página se asienta (éxito, fallo definitivo o cancelación) — nunca antes. La reserva es atómica entre consumidores; la espera por presupuesto se despierta con `ctx.abortSignal`, nunca es una espera no cancelable. Un descriptor cuyo `estimatedBytes` por sí solo supera el presupuesto falla esa página con `OcrPageFailedError` sin llegar a producir (§11, §13 caso 17).
+Semántica del despacho **de reconocimiento**, posterior a orientación (ADR-045 §2 y ADR-164): `processPage` envía **solo el reconocimiento** por el puerto — `dispatch({ jobType: "ocr-page", payload: OcrPagePayload, run: () => kernel, signal, maxRetriesOverride: 0 })`. El retry vive únicamente en el loop del motor (la distinción `OcrTimeoutError`-reintenta / resto-no de §11 no cambia); todo timeout que emerja del despacho se normaliza a `OcrTimeoutError` antes del loop. El depósito en `ctx.cache` y la emisión de `OCR_PAGE_FINISHED` ocurren en el host, **en ese orden**, al resolver el despacho. `processSession` (ADR-143 §3) llama a `processPage` internamente por cada descriptor —después de reservar presupuesto y producir la imagen—, así que esta secuencia no cambia por página; lo único nuevo es de dónde sale el `ImageData` que se le pasa.
+
+**Ventana de trabajo (ADR-164 §2.3)**: con puerto LSTM inyectado y
+`ocrPoolSize === 2`, `C = min(3, requests.length)`; en los demás casos se
+conserva `C = min(ocrPoolSize, requests.length)`. Sesión vacía no produce
+imágenes. No mutar/clonar config con un tamaño ficticio ni crear un tercer
+reconocedor. El tercer consumidor puede producir, orientar y esperar un LSTM
+mientras los otros dos reconocen. No hay cola adicional ni cache de ángulos.
+La regla aplica a `processPages` a través de `processSession`, conservando
+`estimatedBytes: 0` para imágenes que el caller ya materializó.
+
+**Presupuesto de imágenes vivas (ADR-143 §3/§6 y ADR-164 §2.3)**: cada
+consumidor reserva `request.estimatedBytes` contra
+`ctx.config.ocr.maxLiveImageBytes` **antes** de llamar a `produce`, y libera
+la reserva cuando la página se asienta (éxito, fallo definitivo o cancelación)
+— nunca antes, tampoco al terminar OSD. Incluye espera LSTM y retries.
+La reserva es atómica; la espera se despierta con `ctx.abortSignal`. Si solo
+caben una/dos imágenes, se limita la producción aunque existan tres
+consumidores. Un descriptor que supera solo el presupuesto falla sin producir
+(§13 caso 17). Sin cambios de DPI, estimación RGBA ni presupuesto adicional PNG.
 
 ---
 
@@ -339,11 +390,11 @@ OcrPageOutput {
   el comportamiento de ADR-121. Cada `SetImageFile` evitado deja de copiar esa
   franja dentro del heap de WASM. En conteo de `recognize` —OSD usa `detect`— los
   totales son 1/3/5.
-- **Instancias de Tesseract vivas**: **dos por worker de OCR**, no una — la
-  principal y la de OSD (`legacyCore: true`, ADR-119 §1). Con `ocrPoolSize: 2`
-  son cuatro.
+- **Instancias de Tesseract vivas** (ADR-164, objetivo T-5): una LSTM por
+  OcrWorker más **un OSD por Core**. Con `ocrPoolSize: 2` son tres; el control
+  previo tiene cuatro. El wrapper OSD adicional no contiene otro LSTM.
 - Paralelismo: el pool despacha en paralelo respetando `ocrPoolSize`. Backpressure si `queue > MAX_QUEUE_PER_POOL = 8`.
-- Cancelación: Tesseract expone callback de progreso; el worker chequea `shouldCancel` entre líneas y aborta en < 200 ms.
+- Cancelación: OSD usa el wrapper propio para recibir CANCEL, termina su hijo Tesseract e invalida la generación (ADR-164 §3.1); no convierte abort/timeout a ángulo 0. El reconocimiento conserva sus checkpoints/race existentes. El SLA se verifica con el gate correspondiente, no se deduce del callback de progreso.
 - Modelo cacheado en IndexedDB tras primera descarga (~30 MB). Sesiones posteriores no descargan.
 - `dpi` recomendado: 300 para OCR preciso. 200 acceptable para texto grande. 600 innecesario (más lento sin beneficio).
 - Progreso: Tesseract reporta progreso 0..1 por palabra/línea; el worker emite `PROGRESS` al pool, el Orchestrator traduce a `PIPELINE_PROGRESS`.
@@ -404,10 +455,80 @@ OcrPageOutput {
 
 ---
 
+### Casos 26–33: OSD compartido (ADR-164)
+
+26. Solicitudes concurrentes: una inicialización OSD, máximo un detect en vuelo;
+    reconocer la página A puede solaparse con orientar B. Detección por cada imagen.
+27. Dos regiones con pageIndex repetido y ángulos distintos: cada resultado
+    vuelve a su job; no existe cache de orientación por página/documento.
+28. Cola cancelada, abort/timeout en carga/decodificación/detect: no se reconoce
+    esa imagen; se asienta la promesa y se descarta la generación en vuelo.
+    Worker o bitmap creados tarde se liberan; ninguna operación tardía usa la
+    instancia nueva. La siguiente solicitud válida puede completar sin esperar
+    la carga vieja: invalidar desvincula su promesa; su finally tardío no borra
+    la nueva. dispose no espera una inicialización invalidada que nunca resuelve
+    (ADR-164 §3). Probar sin resolver manualmente la carga vieja.
+29. Carga OSD imposible incluso tras serialización: OCR_MODEL_MISSING. Detect
+    no concluyente conserva 0; crash/sobre inválido/decodificación no se ocultan
+    como 0. Solo OCR_TIMEOUT reintenta la página, sin retries del pool.
+30. Liberación mientras hay una página activa: no-op. Ociosa: libera OSD y
+    LSTM; siguiente reanálisis vuelve a crearlos. dispose es terminal.
+31. Dos motores/Core independientes, incluidos fallbacks: no comparten OSD;
+    liberar uno no afecta al otro. Sin páginas OCR no se carga OSD.
+32. LSTM recibe orientación ausente/45/NaN: InvalidInputError, sin OSD local;
+    mismo guard si se invoca el kernel sin transporte.
+33. Orientaciones mezcladas 0/90/180/270, página tardía girada y márgenes:
+    iguales palabras, confianza, orden y cajas que el control; transporte PNG
+    sin transferencia, con la ventana y presupuesto de §6.
+
+34. **Adelanto discriminante**: con pool 2 y presupuesto suficiente, bloquear
+    los primeros dos reconocimientos y comprobar que se orienta el tercer
+    request antes de soltarlos. No se produce el cuarto hasta liberar un
+    consumidor; máximo dos reconocimientos y un detect simultáneos.
+35. **Presupuesto vinculante**: con espacio para una/dos imágenes, la siguiente
+    producción espera. Se conserva la reserva tras OSD, durante espera LSTM y
+    retry; fallo/cancelación la liberan exactamente una vez. Un request grande
+    mantiene caso 17. Mezclar tamaños y regiones sin cambiar su estimación.
+36. **Compatibilidad**: pool size 1 no gana adelanto; sin puerto LSTM no aumenta
+    el límite previo; otros tamaños conservan su límite. processPages mantiene
+    estimatedBytes 0 y outputs por índice. Sesiones de cero/una/dos requests no
+    producen trabajo ficticio ni cambian la cardinalidad de eventos.
+37. **Adelanto cancelado o en producción**: releaseIdleWorkers no actúa mientras
+    quede trabajo admitido esperando presupuesto, produciendo, orientando o
+    reconociendo, incluso si otra rama ya rechazó. Al abortar no se admiten
+    requests nuevos ni se despacha LSTM para una imagen adelantada en espera;
+    las reservas, listeners y referencias se limpian al asentarse cada rama.
+38. **Reanálisis e identidad**: después de liberar los servicios, ejecutar una
+    segunda sesión real con idiomas cambiados; recrear recursos y no reutilizar
+    ángulos/PNG previos. En una sesión con dos regiones de pageIndex repetido y
+    distinta orientación, los outputs siguen el índice del descriptor aun si
+    terminan desordenados. No alterar fusión ni el orden cache → evento.
+
+---
+
 ## 14. Casos de prueba
 
 | Test | Archivo | Tipo | Descripción |
 |---|---|---|---|
+| `orients the third request while two recognitions are blocked without producing a fourth` | `t5-shared-osd.test.ts` | unit | caso 34; falla contra ventana de dos consumidores; pool físico 2 y detect serial |
+| `keeps lookahead under the decoded image budget through recognition and retries` | `t5-shared-osd.test.ts` | unit/edge | caso 35; capacidades de una/dos/tres imágenes y liberación por fallo/abort |
+| `preserves low-resource fallback and pre-materialized input behavior` | `t5-shared-osd.test.ts` | contract | caso 36; sin cambios de presets, configuración ni firma |
+| `does not release services while producing and cancels the pending lookahead` | `t5-shared-osd.test.ts` | edge | caso 37; producción diferida y trabajo real aún pendiente |
+| `recreates services in a second OCR session and preserves repeated-region identity` | `t5-shared-osd.test.ts` | integration | caso 38; no sustituir segunda sesión por un llamado a dispose |
+| `recovers and disposes without waiting for an invalidated initialization` | `orientation-kernel.test.ts` | edge | caso 28; dos repros de r4, más resolución/rechazo tardío sin pisar generación nueva |
+| `shares one OSD across concurrent OCR requests and overlaps detection with recognition` | `unit.test.ts` | unit | caso 26; discriminante de 2 OSD a 1 |
+| `routes different orientations for regions sharing a pageIndex by job` | `contract.test.ts` | contract | caso 27 |
+| `cancels queued orientation without loading or recognizing` | `edge.test.ts` | edge | caso 28 |
+| `terminates timed out or aborted OSD and ignores late initialization and decode` | `edge.test.ts` | edge | caso 28; cubre carga, bitmap y detect |
+| `preserves OSD failure semantics across the worker boundary` | `contract.test.ts` | contract | caso 29; errores deserializados |
+| `retries an OSD timeout only through the page retry loop` | `unit.test.ts` | unit | caso 29 |
+| `releases both OCR services only when idle and recreates them on reanalysis` | `unit.test.ts` | unit | caso 30 |
+| `isolates orientation state between OcrEngine instances` | `unit.test.ts` | unit | caso 31; fallback incluido |
+| `rejects missing or invalid recognition orientation without creating OSD` | `edge.test.ts` | edge | caso 32 |
+| `preserves words confidence and geometry for mixed page orientations` | `snapshot.test.ts` | snapshot | caso 33 |
+| `orientation entry decodes reduced and returns only its validated angle` | `worker-entry.test.ts` | unit | frontera OSD nueva; una instancia legacy y cero LSTM |
+| `keeps the image reservation across orientation queue and recognition` | `unit.test.ts` | unit | ADR-143 + ADR-164, cancel libera reserva |
+
 | `emits OCR_STARTED before pages` | `contract.test.ts` | contract | invariante de orden |
 | `emits OCR_PAGE_FINISHED per page` | `contract.test.ts` | contract | uno por página |
 | `emits OCR_FINISHED after all pages` | `contract.test.ts` | contract | al final |
@@ -488,6 +609,27 @@ OcrPageOutput {
 ---
 
 ## 15. Checklist de implementación
+
+> Items 32–33 verificados en el cierre T5 del 2026-09-15. Evidencia funcional,
+> controles y límites de la comparación separados de ImageData en
+> `roadmap/T5_OSD_Compartido_Cierre_Final.md`.
+
+- [x] 33. (ADR-164 §2.3, revisión 2026-09-15) Implementar la ventana de §6,
+  casos 34–38 y precisión del caso 28. Cambios de producto limitados a OCR;
+  tests/instrumento/E2E según handoff vigente. Reusar el trabajo inicial del
+  item 32, corregir recuperación y no introducir más LSTM ni modificar config.
+  A/B final contra dos OSD, con huellas completas y E2E de giros/exportación.
+  La aceptación final corresponde al revisor tras los gates globales.
+
+- [x] 32. (ADR-164, T-5) Implementar §6 y casos 26–33, en el orden de
+  `roadmap/T5_OSD_Compartido_Handoff.md` §2. Nuevo kernel OSD por instancia,
+  entry y exports de subpath; helper común de rutas; kernel LSTM usa ángulo
+  requerido; OcrEngine con dos puertos y cola fallback exclusiva; init de OSD
+  cacheada por promesa/generación; cancelación/timeout/liberación como ADR-164
+  §3. Tests de las doce filas nuevas de §14 y regresiones previas. No modificar
+  specs desde el implementador. Gates scoped, cobertura ≥85% y E2E real;
+  medición con dos reconocedores, mismo PNG/fixture y configuración. La
+  implementación no equivale a declarar ahorro medido.
 
 - [ ] 1. Crear paquete `packages/anonymization-core/ocr-engine/`.
 - [ ] 2. Definir `types.ts` con `OcrPageInput`, `OcrPageOutput` (`OcrConfig` viene de `@anonly/shared`).

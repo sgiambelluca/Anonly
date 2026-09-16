@@ -1,6 +1,8 @@
-<!-- CONTEXT: scope=contratos-base | dependencias=03_Data_Model.md,04_Event_System.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-049-Errores-Cruzando-Worker-Discriminacion-Por-Code.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-061-Agregado-Manual-De-Entidades.md,adr/ADR-065-OCR-Por-Region.md,adr/ADR-066-Texto-De-Anotaciones-Y-Reemplazo-Rotado.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-062-Veredicto-De-Degradacion-Hasta-La-UI.md,adr/ADR-086-El-Detector-De-Degradacion-Mide-El-Ancho.md,adr/ADR-109-La-Caja-De-Una-Palabra-Es-Su-Caja-De-Tinta.md | audiencia=IA-implementador | fase=3 (fase 10.9: §5 nota de `fragments` junto a `BoundingBox` — el campo va en `Occurrence`/`OccurrenceRef`/`Replacement`, no adentro del rectángulo, ADR-074 §1; §3.5 actualizado en fase 10: CoreRuntimeOptions/WorkerLike/WorkerFactory para transporte de workers —ADR-036 §2—, IPipelineOrchestrator.reanalyze/ReanalyzeConfigPatch —ADR-038 §1—; §6 gana MAX_RENDER_SCALE/PREVIEW_CACHE_MAX_BYTES —ADR-037 §2-3—; §8 RenderRequested.scale —ADR-037 §1—; §4 precisa qué garantiza deserialize() al cruzar el boundary, sin cambio de shape —ADR-049 §2—; fase 11: §8 RenderRequested.kind requerido —ADR-056 §1—; fase 10.5/10.6: §5 AnnotationKind.Degraded —ADR-058 §7— y PersonGender —ADR-060 §2—, §6 REPLACEMENT_FONT_HEIGHT_RATIO/AVG_GLYPH_ADVANCE_RATIO/estimateTokenWidth —ADR-057 §5— y DEGRADED_FONT_RATIO —ADR-058 §7—; fase 10.8: §5 gana los primeros tipos públicos que §10 regla 1 obliga a declarar acá antes que en `shared/src/types.ts` — `BoundingBox.rotation` —ADR-066 §6— y `OcrRegion` —ADR-065 §4—; fase 10.6: §5 `PersonGenderChoice` y §8 `GroupUpdateRequested.patch.personGender` —ADR-069 §4—, §5 `SyntheticRequest` y §6 la declaración de `synthesize` —ADR-072 §2, que la trae al contrato: se exportaba desde `shared` sin estar acá, contra §10 regla 1—; fase 10.7: §6 gana `sharesVerticalBand` y `normalizeForComparison` —ADR-061 §2 errata: dos primitivas que ya estaban duplicadas dentro de motores y façade por no tener lugar donde vivir—, y §3.5 gana `ManualEntityResult` con `addManualEntity` devolviéndolo en vez de `void` —ADR-061 §6 errata: sin eso la UI no puede distinguir "no se encontró" de "agregado"—; post-Hito 10.10: §8 `PreviewUpdated.degraded` —ADR-062, el veredicto de legibilidad sale de Render por acá— y §6 `DEGRADED_FONT_RATIO` con **criterio y valor nuevos** —ADR-086: pasa a medir la razón de ANCHOS y baja a 0,5, porque el cociente de tamaños era estructuralmente inalcanzable en cuerpo de texto—; fase 11: §5 la caja de una palabra pasa a ser su caja de tinta —del descenso al ascenso de su fuente, no de la línea de base hacia arriba por un cuerpo— y §6 `REPLACEMENT_FONT_HEIGHT_RATIO` se recalibra de 0,7 a 0,64 para que el token siga dibujándose igual —ADR-109 §1/§4—; fase 11 (plan de campaña, H-01A): §4 gana `EngineErrorCode.PDF_PAGE_ROTATED` —ADR-140: página con `/Rotate` heredado y texto nativo, rechazo tipado en vez de una geometría equivocada con cara de éxito; retirado por ángulo cuando ADR-141 lo verifique de punta a punta—; fase 11 (plan de campaña, H-09D3-b): §7.1 declara por primera vez `OcrPagePayload` —que se exportaba desde `shared` sin estar acá, contra §10 regla 1— y lo cambia: la imagen del job `ocr-page` viaja **codificada** (PNG) en vez de `ImageData` crudo, ADR-158 §2) -->
+<!-- CONTEXT: scope=contratos-base | dependencias=03_Data_Model.md,04_Event_System.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-049-Errores-Cruzando-Worker-Discriminacion-Por-Code.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-061-Agregado-Manual-De-Entidades.md,adr/ADR-065-OCR-Por-Region.md,adr/ADR-066-Texto-De-Anotaciones-Y-Reemplazo-Rotado.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-062-Veredicto-De-Degradacion-Hasta-La-UI.md,adr/ADR-086-El-Detector-De-Degradacion-Mide-El-Ancho.md,adr/ADR-109-La-Caja-De-Una-Palabra-Es-Su-Caja-De-Tinta.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md | audiencia=IA-implementador | fase=3 (fase 10.9: §5 nota de `fragments` junto a `BoundingBox` — el campo va en `Occurrence`/`OccurrenceRef`/`Replacement`, no adentro del rectángulo, ADR-074 §1; §3.5 actualizado en fase 10: CoreRuntimeOptions/WorkerLike/WorkerFactory para transporte de workers —ADR-036 §2—, IPipelineOrchestrator.reanalyze/ReanalyzeConfigPatch —ADR-038 §1—; §6 gana MAX_RENDER_SCALE/PREVIEW_CACHE_MAX_BYTES —ADR-037 §2-3—; §8 RenderRequested.scale —ADR-037 §1—; §4 precisa qué garantiza deserialize() al cruzar el boundary, sin cambio de shape —ADR-049 §2—; fase 11: §8 RenderRequested.kind requerido —ADR-056 §1—; fase 10.5/10.6: §5 AnnotationKind.Degraded —ADR-058 §7— y PersonGender —ADR-060 §2—, §6 REPLACEMENT_FONT_HEIGHT_RATIO/AVG_GLYPH_ADVANCE_RATIO/estimateTokenWidth —ADR-057 §5— y DEGRADED_FONT_RATIO —ADR-058 §7—; fase 10.8: §5 gana los primeros tipos públicos que §10 regla 1 obliga a declarar acá antes que en `shared/src/types.ts` — `BoundingBox.rotation` —ADR-066 §6— y `OcrRegion` —ADR-065 §4—; fase 10.6: §5 `PersonGenderChoice` y §8 `GroupUpdateRequested.patch.personGender` —ADR-069 §4—, §5 `SyntheticRequest` y §6 la declaración de `synthesize` —ADR-072 §2, que la trae al contrato: se exportaba desde `shared` sin estar acá, contra §10 regla 1—; fase 10.7: §6 gana `sharesVerticalBand` y `normalizeForComparison` —ADR-061 §2 errata: dos primitivas que ya estaban duplicadas dentro de motores y façade por no tener lugar donde vivir—, y §3.5 gana `ManualEntityResult` con `addManualEntity` devolviéndolo en vez de `void` —ADR-061 §6 errata: sin eso la UI no puede distinguir "no se encontró" de "agregado"—; post-Hito 10.10: §8 `PreviewUpdated.degraded` —ADR-062, el veredicto de legibilidad sale de Render por acá— y §6 `DEGRADED_FONT_RATIO` con **criterio y valor nuevos** —ADR-086: pasa a medir la razón de ANCHOS y baja a 0,5, porque el cociente de tamaños era estructuralmente inalcanzable en cuerpo de texto—; fase 11: §5 la caja de una palabra pasa a ser su caja de tinta —del descenso al ascenso de su fuente, no de la línea de base hacia arriba por un cuerpo— y §6 `REPLACEMENT_FONT_HEIGHT_RATIO` se recalibra de 0,7 a 0,64 para que el token siga dibujándose igual —ADR-109 §1/§4—; fase 11 (plan de campaña, H-01A): §4 gana `EngineErrorCode.PDF_PAGE_ROTATED` —ADR-140: página con `/Rotate` heredado y texto nativo, rechazo tipado en vez de una geometría equivocada con cara de éxito; retirado por ángulo cuando ADR-141 lo verifique de punta a punta—; fase 11 (plan de campaña, H-09D3-b): §7.1 declara por primera vez `OcrPagePayload` —que se exportaba desde `shared` sin estar acá, contra §10 regla 1— y lo cambia: la imagen del job `ocr-page` viaja **codificada** (PNG) en vez de `ImageData` crudo, ADR-158 §2) -->
 
 # Anonly — Contratos Base (`@anonly/shared`)
+
+> **T-5 / ADR-164, revisión 2026-09-15**: orientación separada en `ocr-orient` y factory `ocr-orientation`; ver §7.2. Implementación inicial revisada con pendientes. La evolución añade un consumidor de preparación con dos LSTM (§6), sin nuevos tipos ni campos públicos; aceptación final pendiente.
 
 > Define **todos** los tipos, interfaces, enums, error codes y contratos compartidos entre motores. Es el único paquete del que un motor puede importar tipos. Un implementador debe leer este archivo **completo** antes de tocar cualquier motor.
 
@@ -309,7 +311,7 @@ export interface WorkerLike {
 export type WorkerFactory = () => WorkerLike;
 
 // "export" refiere al ExportWorker único (sin pool propio, ADR-036 §1).
-export type WorkerEntryKind = "pdf" | "ocr" | "ner" | "render" | "export";
+export type WorkerEntryKind = "pdf" | "ocr" | "ocr-orientation" | "ner" | "render" | "export";
 
 export interface CoreRuntimeOptions {
   readonly workers?: Partial<Readonly<Record<WorkerEntryKind, WorkerFactory>>>;
@@ -629,6 +631,7 @@ export type RuleScope = "group" | "type" | "global";
 export type WorkerJobType =
   | "pdf-parse"
   | "ocr-page"
+  | "ocr-orient" // ADR-164: orientación serial compartida, distinta del reconocimiento
   | "ner-page"
   | "render-page"
   | "export-page";
@@ -657,6 +660,21 @@ export type GenderLexicon = ReadonlyMap<string, GenderLexiconLabel>;
 ---
 
 ## 6. Configuración por motor
+
+**ADR-164 (T-5)**: `WorkerJobType` gana `ocr-orient`; los mapas exhaustivos de
+`timeouts` y `maxRetries` ganan defaults **60000** y **0**, respectivamente.
+`maxRetries["ocr-page"]` sigue gobernando el único retry del motor sobre ambos
+pasos. El timeout OSD empieza al obtener turno y viaja en su payload. No se
+agrega tamaño de pool ni clave de `maxQueuePerPool`: orientación tiene tamaño
+fijo 1 y usa la cola máxima de OCR. Ningún preset cambia.
+
+**Adelanto, ADR-164 §2.3 (2026-09-15)**: `ocrPoolSize` sigue significando
+capacidad del pool LSTM. Con valor 2 y puerto de reconocimiento inyectado,
+`processSession` admite hasta tres requests simultáneos; conserva el límite
+previo para valor 1, otros tamaños y fallback sin puerto. No agrega un campo
+a `OcrConfig`: cada imagen, incluida la adelantada, reserva RGBA estimado
+contra `maxLiveImageBytes` antes de producir y hasta completar su trabajo.
+El presupuesto puede impedir admitir la tercera imagen y nunca se amplía.
 
 ```ts
 export interface WorkerPoolConfig {
@@ -823,6 +841,7 @@ export interface OcrPagePayload {
   // igual. Ahora el encode ocurre una sola vez, donde el canvas ya existe
   // (`RenderEngine.rasterizePage`, `Render_Engine.md` §6).
   readonly image: EncodedPageImage;   // format: "png" (sin pérdida)
+  readonly orientation: OcrOrientation; // ADR-164: requerido; validado, nunca inferido por LSTM
   readonly dpi: number;
   readonly languages: ReadonlyArray<string>;
 }
@@ -831,6 +850,36 @@ export interface OcrPagePayload {
 **Se clona, no se transfiere** (ADR-158 §5): el reintento del pool reusa el buffer (ADR-079), y a unos pocos MB el ahorro de `transferList` no compensa dejarlo *detached* en el segundo intento. Es el mismo criterio de antes, ahora sobre un buffer mucho más chico.
 
 **El presupuesto no sigue al transporte** (ADR-158 §4): `OcrConfig.maxLiveImageBytes` y `OcrPageRequest.estimatedBytes` (`OCR_Engine.md` §6) siguen midiendo el tamaño **decodificado** —`widthPx × heightPx × 4`—, porque eso es lo que el worker materializa. Estimar el PNG aflojaría el presupuesto de ADR-143 entre diez y treinta veces sin que nadie lo hubiera decidido.
+
+---
+
+### 7.2 Orientación compartida de OCR (ADR-164)
+
+```ts
+export type OcrOrientation = 0 | 90 | 180 | 270;
+
+export interface OcrOrientationPayload {
+  readonly documentId: string;
+  readonly pageIndex: number;
+  readonly image: EncodedPageImage;
+  readonly languages: ReadonlyArray<string>; // contexto del error; carga solo osd
+  readonly timeoutMs: number; // config efectiva timeouts["ocr-orient"]
+}
+
+export interface OcrOrientationResult {
+  readonly orientation: OcrOrientation;
+}
+```
+
+`ocr-orient` recibe PNG clonado y devuelve `OcrOrientationResult`; el motor
+valida su forma en runtime. La correlación usa jobId por intento, también si
+varias regiones comparten pageIndex. La orientación es el giro horario de
+corrección (ADR-090/119), no el giro original de la imagen.
+`OcrPagePayload.orientation` se hace requerido; `OcrPageInput` público no cambia.
+El LSTM rechaza ángulo ausente/inválido: no crea OSD ni asume 0 como fallback.
+Cada instancia de Core posee un servicio OSD independiente, serial, con creación
+perezosa y liberación de etapa. Los detalles del transporte, timeout y ciclo de
+vida están en ADR-164 §2/§3 y OCR_Engine §6/§13. No hay eventos ni errores nuevos.
 
 ---
 

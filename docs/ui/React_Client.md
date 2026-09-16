@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=ui-contract | dependencias=01_Technical_Architecture_Document.md,03_Data_Model.md,04_Event_System.md,ADR-005-State-Management.md,adr/ADR-034-Auditoria-Pre-Hito9-Orchestrator.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-054-Scroll-Independiente-Por-Panel.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-069-Lexico-De-Genero-Fuente-Unica-Y-Canal-Del-Usuario.md | audiencia=IA-implementador-ui | fase=4 (reconciliado en fase 10 por ADR-036: acciones completas §2.3, workers §2.4, settings §3.7, zoom §7, errores §8; §2.3/§3.7/§7 reescritos por ADR-037 —zoom con re-render real— y ADR-038 —reanalyze preservando ediciones, supersede el flujo "recrear el core"; §2.3/§7 en fase 11 por ADR-056 —requestRender con kind requerido, cada panel pide lo suyo—; §2.3 en fase 10.6 por ADR-069 §4 —`updateGroup.patch` gana `personGender?: PersonGenderChoice`, para el control de género del PR 12, que ADR-071 rebautiza `PersonGenderToggle` sin tocar este contrato—; post-Hito 10.10: §2.2 y §3.6b nuevas por ADR-062 —`degraded.store`, el séptimo slice: convierte el veredicto por página que trae `PREVIEW_UPDATED.degraded` en la marca por grupo del árbol, con sus tres reglas de consumo—; §3.5 pierde `sideBySide`, que estaba declarado sin setter ni consumidor desde PR7); §3.5/§3.6/§6 reescritos en el rediseño post-10.9 por **ADR-087** —un solo visor con toggle: `viewer.currentPageIndex`/`visibleRange` dejan de ser por `kind` y aparece `viewer.mode`; `settings.scrollSyncEnabled` se retira; el recap de layout pasa a los tres momentos— -->
+<!-- CONTEXT: scope=ui-contract | dependencias=01_Technical_Architecture_Document.md,03_Data_Model.md,04_Event_System.md,ADR-005-State-Management.md,adr/ADR-034-Auditoria-Pre-Hito9-Orchestrator.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-054-Scroll-Independiente-Por-Panel.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-069-Lexico-De-Genero-Fuente-Unica-Y-Canal-Del-Usuario.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md | audiencia=IA-implementador-ui | fase=4 (reconciliado en fase 10 por ADR-036: acciones completas §2.3, workers §2.4, settings §3.7, zoom §7, errores §8; §2.3/§3.7/§7 reescritos por ADR-037 —zoom con re-render real— y ADR-038 —reanalyze preservando ediciones, supersede el flujo "recrear el core"; §2.3/§7 en fase 11 por ADR-056 —requestRender con kind requerido, cada panel pide lo suyo—; §2.3 en fase 10.6 por ADR-069 §4 —`updateGroup.patch` gana `personGender?: PersonGenderChoice`, para el control de género del PR 12, que ADR-071 rebautiza `PersonGenderToggle` sin tocar este contrato—; post-Hito 10.10: §2.2 y §3.6b nuevas por ADR-062 —`degraded.store`, el séptimo slice: convierte el veredicto por página que trae `PREVIEW_UPDATED.degraded` en la marca por grupo del árbol, con sus tres reglas de consumo—; §3.5 pierde `sideBySide`, que estaba declarado sin setter ni consumidor desde PR7); §3.5/§3.6/§6 reescritos en el rediseño post-10.9 por **ADR-087** —un solo visor con toggle: `viewer.currentPageIndex`/`visibleRange` dejan de ser por `kind` y aparece `viewer.mode`; `settings.scrollSyncEnabled` se retira; el recap de layout pasa a los tres momentos— -->
 
 # Anonly — React Client (UI Contract, TAD bloque 9)
 
@@ -514,6 +514,15 @@ export async function createCore(
 El adapter **solo** usa esta API. Nunca accede a `pdf.engine.ts` ni a internals. `snapshots.ts` usa `core.engines.grouping.getSnapshot(documentId)` (U-6) como **hidratación puntual** (p. ej. montar un panel tarde); la fuente reactiva son los eventos del bus.
 
 ---
+
+### 4.1 Factory de orientación OCR (ADR-164, T-5)
+
+El adapter importa `@anonly/ocr-engine/orientation-worker?worker` y entrega
+`runtime.workers["ocr-orientation"]` junto con `ocr`. Mantiene ambos workers
+fuera de UI y respeta el subpath público. Actualizar mocks/decls de Vite y tests
+del adapter: la factory nueva existe y se inyecta; presets high/auto/low no se
+modifican. No agregar settings, flags BEFORE/AFTER de producto ni una segunda
+cuenta de páginas fallidas: OCR_PAGE_FAILED sigue siendo la fuente del aviso.
 
 ## 5. Independencia del framework
 

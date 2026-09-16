@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=pipeline | dependencias=03_Data_Model.md,04_Event_System.md,05_Worker_Architecture.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md | audiencia=IA+humanos | fase=1 (§14 precisado en fase 10: etapa 11 en ExportWorker único, ADR-036 §1; §10/§11 y el diagrama de secuencia en fase 10: re-render por edición mediado por el Orchestrator, ADR-044; §10 en fase 11: un RENDER_REQUESTED renderiza un solo kind, ADR-056) -->
+<!-- CONTEXT: scope=pipeline | dependencias=03_Data_Model.md,04_Event_System.md,05_Worker_Architecture.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md | audiencia=IA+humanos | fase=1 (§14 precisado en fase 10: etapa 11 en ExportWorker único, ADR-036 §1; §10/§11 y el diagrama de secuencia en fase 10: re-render por edición mediado por el Orchestrator, ADR-044; §10 en fase 11: un RENDER_REQUESTED renderiza un solo kind, ADR-056) -->
 
 # Anonly — Pipeline (TAD bloque 6)
 
@@ -70,7 +70,7 @@ Notas: el archivo se lee como `ArrayBuffer` en el main thread y se mantiene en m
 
 ## 4. Etapa 2 — OCR (OCR Engine)
 
-**Entra**: para cada `pageIndex ∈ textlessPages` (y cada región de `ocrRegions`, ADR-065), el Orchestrator arma un descriptor liviano **sin imagen** (`OcrPageRequest`: `documentId`, `pageIndex`, `region?`, `dpi`, `languages`, `estimatedBytes`) y llama a `OcrEngine.processSession(requests, produce, ctx)`. Para una página completa usa `effectiveDpi = min(ctx.config.ocr.dpi, page.ocrDpiCap ?? ctx.config.ocr.dpi)`; para una región conserva el configurado. `produce` deriva `scale = request.dpi / 72` y recién invoca `RenderEngine.rasterizePage(documentId, pageIndex, scale, ctx, region?)` cuando `OcrEngine` tiene lugar para esa imagen — nunca por adelantado, con a lo sumo `min(ocrPoolSize, requests.length)` imágenes vivas a la vez (ADR-143/ADR-163). Precondición: el Orchestrator adelanta `RenderEngine.loadDocument(documentId, buffer, password?)` a esta etapa con los bytes retenidos de la etapa 0 (ADR-030, ADR-034 §1; el tercer argumento opcional lo agregó ADR-050 para los documentos encriptados).
+**Entra**: para cada `pageIndex ∈ textlessPages` (y cada región de `ocrRegions`, ADR-065), el Orchestrator arma un descriptor liviano **sin imagen** (`OcrPageRequest`: `documentId`, `pageIndex`, `region?`, `dpi`, `languages`, `estimatedBytes`) y llama a `OcrEngine.processSession(requests, produce, ctx)`. Para una página completa usa `effectiveDpi = min(ctx.config.ocr.dpi, page.ocrDpiCap ?? ctx.config.ocr.dpi)`; para una región conserva el configurado. `produce` deriva `scale = request.dpi / 72` y recién invoca `RenderEngine.rasterizePage(documentId, pageIndex, scale, ctx, region?)` cuando `OcrEngine` reserva presupuesto para esa imagen. ADR-164 §2.3 permite hasta tres requests con pool LSTM 2 inyectado, para preparar una página mientras dos se reconocen; los demás casos conservan su límite previo. Todas las imágenes quedan dentro de `maxLiveImageBytes`, sin rasterizar el documento completo por anticipado (ADR-143/163). Precondición: el Orchestrator adelanta `RenderEngine.loadDocument(documentId, buffer, password?)` a esta etapa con los bytes retenidos de la etapa 0 (ADR-030, ADR-034 §1; el tercer argumento opcional lo agregó ADR-050 para los documentos encriptados).
 **Sale**: `Word[]` por página con `confidence` y `source: "ocr"`. El PDF Engine fusiona esas palabras en `Page.words` (vía `OCR_PAGE_FINISHED`).
 **Eventos emitidos**: `OCR_STARTED`, `OCR_PAGE_FINISHED`, `OCR_FINISHED`, `OCR_PAGE_FAILED`.
 **Errores**:
@@ -263,7 +263,7 @@ El usuario puede overridear cualquiera desde la UI, emitiendo `CONFLICT_RESOLVE_
 | Etapa | Pool usado | Job type |
 |---|---|---|
 | 1. Extracción | `PdfPool` | `pdf-parse` |
-| 2. OCR | `OcrPool` | `ocr-page` |
+| 2. OCR | `OcrOrientationPool` serial → `OcrPool` | `ocr-orient` → `ocr-page` (ADR-164; secuencia por imagen, sin barrera de documento) |
 | 3. Normalización | (main thread, shared) | – |
 | 4. Regex | (main thread, CPU bajo) | – |
 | 5. NER | `NerPool` | `ner-page` |

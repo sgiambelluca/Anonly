@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=orchestrator | dependencias=core/Contracts.md,architecture/03_Data_Model.md,architecture/04_Event_System.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-015-UI-Channel-Canonical.md,adr/ADR-030-RenderEngine-LoadDocument.md,adr/ADR-031-RenderFailed-ErrorCode-Erratas-Render.md,adr/ADR-032-Export-EncodedPageImage-Requested-Warning.md,adr/ADR-034-Auditoria-Pre-Hito9-Orchestrator.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-041-FuseOcrPage-Funcion-Pura-Sin-Estado-Retenido.md,adr/ADR-044-Preview-Grupos-Mediacion-Orchestrator.md,adr/ADR-049-Errores-Cruzando-Worker-Discriminacion-Por-Code.md,adr/ADR-065-OCR-Por-Region.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-151-La-Primera-Pagina-Ya-Esta-Dibujada-Cuando-Se-Abre-El-Panel.md | audiencia=IA-implementador | fase=10 (Hito 9 cerrado; transporte de workers Hito 10, ADR-036; método `reanalyze` Hito 10, ADR-038; fusión OCR→PDF como función pura host-side, ADR-041; mediación de grupos→Render para el preview, ADR-044; discriminación de errores por `code` a través del boundary de Worker, ADR-049; §2/§13/§15 en fase 10.8: enrutar las dos formas de OCR —textlessPages vs ocrRegions, disjuntos—, progreso de etapa textlessPages.length + ocrRegions.length, retención de ocrRegions por documento y reanalyze sobre la unión, ADR-065, casos 1/5/20/28/29, item 23); fase 10.9: §14/§15 ítem 22c — `selectLineWords` evalúa por fragmento y no por envolvente, ADR-074 §8; fase 11: §2/§13/§15 por ADR-143 — la etapa OCR arma descriptores y produce bajo demanda en vez de rasterizar todo el documento por adelantado; fase 11: §13 caso 32/§14/§15 ítem 26 por ADR-151 — la página 1 se precalienta al llegar a Ready -->
+<!-- CONTEXT: scope=orchestrator | dependencias=core/Contracts.md,architecture/03_Data_Model.md,architecture/04_Event_System.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-015-UI-Channel-Canonical.md,adr/ADR-030-RenderEngine-LoadDocument.md,adr/ADR-031-RenderFailed-ErrorCode-Erratas-Render.md,adr/ADR-032-Export-EncodedPageImage-Requested-Warning.md,adr/ADR-034-Auditoria-Pre-Hito9-Orchestrator.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-041-FuseOcrPage-Funcion-Pura-Sin-Estado-Retenido.md,adr/ADR-044-Preview-Grupos-Mediacion-Orchestrator.md,adr/ADR-049-Errores-Cruzando-Worker-Discriminacion-Por-Code.md,adr/ADR-065-OCR-Por-Region.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-151-La-Primera-Pagina-Ya-Esta-Dibujada-Cuando-Se-Abre-El-Panel.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md | audiencia=IA-implementador | fase=10 (Hito 9 cerrado; transporte de workers Hito 10, ADR-036; método `reanalyze` Hito 10, ADR-038; fusión OCR→PDF como función pura host-side, ADR-041; mediación de grupos→Render para el preview, ADR-044; discriminación de errores por `code` a través del boundary de Worker, ADR-049; §2/§13/§15 en fase 10.8: enrutar las dos formas de OCR —textlessPages vs ocrRegions, disjuntos—, progreso de etapa textlessPages.length + ocrRegions.length, retención de ocrRegions por documento y reanalyze sobre la unión, ADR-065, casos 1/5/20/28/29, item 23); fase 10.9: §14/§15 ítem 22c — `selectLineWords` evalúa por fragmento y no por envolvente, ADR-074 §8; fase 11: §2/§13/§15 por ADR-143 — la etapa OCR arma descriptores y produce bajo demanda en vez de rasterizar todo el documento por adelantado; fase 11: §13 caso 32/§14/§15 ítem 26 por ADR-151 — la página 1 se precalienta al llegar a Ready -->
 
 # Orchestrator — Spec del Componente Host
 
@@ -125,6 +125,21 @@ Como composition root, es el **único** paquete del Core que puede importar moto
 ---
 
 ## 6. Interfaces públicas
+
+**ADR-164 (T-5, revisión 2026-09-15; aceptación pendiente)**: createCore
+construye un WorkerPool adicional `ocr-orientation`, job `ocr-orient`, size 1,
+maxQueue de OCR, retries 0, mismo backoff/idle y factory
+`runtime.workers["ocr-orientation"]`. Lo inyecta como segundo puerto en
+OcrEngine y lo dispone junto al pool LSTM. No lo registra en WorkerPoolManager;
+PoolKey gana la clave y ManagedPoolKey la excluye junto con export.
+Defaults del contrato: timeout ocr-orient 60000 y retries 0. El Orchestrator
+sigue usando processSession y releaseIdleWorkers del motor, sin gestionar el
+ángulo ni retener referencias al nuevo pool. La app aporta la nueva factory.
+La ventana de imágenes se decide en OCR_Engine §6/ADR-164 §2.3: con pool 2
+inyectado puede haber tres requests bajo el mismo presupuesto. Esta regla
+sustituye el límite de consumidores de la nota histórica v1.9.0; el
+Orchestrator conserva su productor bajo demanda y no cambia tamaños de pool
+ni retiene una lista de imágenes/ángulos por adelantado.
 
 ```ts
 export interface IAnonymizationCore {
@@ -297,6 +312,12 @@ El Orchestrator **no define códigos de error nuevos**: propaga `SerializedEngin
 
 ## 14. Casos de prueba
 
+**T-5 / ADR-164**: tests de createCore deben afirmar que la factory
+ocr-orientation recibe RUN de ocr-orient, que dos páginas orientadas pasan al
+pool ocr-page con sus propios ángulos y que dispose libera ambos pools. Dos
+Core no comparten workers OSD. Los tests del manager verifican que no administra
+la nueva clave. Fakes remotos resuelven el sobre real, no ejecutan run().
+
 | Test | Archivo | Tipo | Descripción |
 |---|---|---|---|
 | `los jobs en vuelo no resucitan el stage ni emiten progreso` | `edge.test.ts` | edge | ADR-134: se cancela con un job de PDF colgado y se lo libera **después**; el stage sigue en `Cancelled` y no se emite `PIPELINE_PROGRESS`. Verificado que falla sin la guarda (`Expected "cancelled"`, `Received "detecting"`) |
@@ -386,6 +407,11 @@ Los tests de contract/unit/edge mockean los motores (interfaces de `Contracts.md
 ---
 
 ## 15. Checklist de implementación
+
+- [ ] 28. (ADR-164, T-5-F) Conectar orientationPool size 1 según §6; nuevos
+  defaults de config y PoolKey/ManagedPoolKey; dispose de ambos pools y pruebas
+  de §14. Sin cambio en runOcrStage ni en los otros motores. Scopes/medición en
+  `roadmap/T5_OSD_Compartido_Handoff.md`.
 
 - [ ] 1. Definir `types.ts` con `IAnonymizationCore`, `IPipelineOrchestrator`, `ImportDocumentInput`, reflejados en `core/Contracts.md` §3.5 (ADR-034 §7: sí se comparten — la UI los importa).
 - [ ] 2. Implementar `EngineContext` real: bus, logger, cache LRU, abortSignal, config mergeada con defaults.
