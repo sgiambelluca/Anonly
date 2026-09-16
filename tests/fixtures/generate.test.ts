@@ -11,7 +11,7 @@
 
 import { EntityType } from "@anonly/shared";
 import { PDFDocument } from "pdf-lib";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   TEXT_10P_PAGES,
@@ -34,6 +34,22 @@ import {
   generateText50pDense,
   generateText50pSmallPage,
 } from "./generate.js";
+
+async function expectStableGeneratedPdf(generate: () => Promise<Uint8Array>): Promise<void> {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
+    const first = await generate();
+    vi.setSystemTime(new Date("2040-01-01T00:00:00.000Z"));
+    const second = await generate();
+    expect(Buffer.from(first).equals(Buffer.from(second))).toBe(true);
+    const pdf = await PDFDocument.load(first, { updateMetadata: false });
+    expect(pdf.getCreationDate()).toEqual(new Date("2026-01-01T00:00:00.000Z"));
+    expect(pdf.getModificationDate()).toEqual(new Date("2026-01-01T00:00:00.000Z"));
+  } finally {
+    vi.useRealTimers();
+  }
+}
 
 /**
  * Helper para acceder a un índice con la garantía de que existe.
@@ -113,9 +129,7 @@ describe("generate.ts — text-50p.pdf (H-10, ADR-146)", () => {
   });
 
   it("es determinista: dos corridas producen bytes idénticos", async () => {
-    const first = await generateText50p();
-    const second = await generateText50p();
-    expect(Buffer.from(first).equals(Buffer.from(second))).toBe(true);
+    await expectStableGeneratedPdf(generateText50p);
   });
 
   it("el texto fuente de cada una de las 50 páginas es distinto del de las demás (no se rasteriza la misma imagen 50 veces)", () => {
@@ -169,9 +183,7 @@ describe("generate.ts — text-50p-dense.pdf (H-10, control de densidad)", () =>
   });
 
   it("es determinista: dos corridas producen bytes idénticos", async () => {
-    const first = await generateText50pDense();
-    const second = await generateText50pDense();
-    expect(Buffer.from(first).equals(Buffer.from(second))).toBe(true);
+    await expectStableGeneratedPdf(generateText50pDense);
   });
 
   it("las 50 páginas llevan las 5 entidades (Person, DNI, CUIT, Phone, Email), no solo 5 de 50", () => {
@@ -199,6 +211,8 @@ describe("generate.ts — text-50p-dense.pdf (H-10, control de densidad)", () =>
 });
 
 describe("generate.ts — text-200p.pdf (H-10 T-3)", () => {
+  afterEach(() => vi.useRealTimers());
+
   it("produce 200 páginas A4", async () => {
     const bytes = await generateText200p();
     const pdf = await PDFDocument.load(bytes);
@@ -215,10 +229,16 @@ describe("generate.ts — text-200p.pdf (H-10 T-3)", () => {
   });
 
   it("es determinista: dos corridas producen bytes idénticos", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
     const first = await generateText200p();
+    vi.setSystemTime(new Date("2040-01-01T00:00:00.000Z"));
     const second = await generateText200p();
     expect(Buffer.from(first).equals(Buffer.from(second))).toBe(true);
-  });
+    const pdf = await PDFDocument.load(first, { updateMetadata: false });
+    expect(pdf.getCreationDate()).toEqual(new Date("2026-01-01T00:00:00.000Z"));
+    expect(pdf.getModificationDate()).toEqual(new Date("2026-01-01T00:00:00.000Z"));
+  }, 15_000);
 
   it("mantiene 20 páginas con entidad, una cada diez, incluida la última verificación", () => {
     expect(TEXT_200P_ENTITY_PAGE_INDICES).toEqual(
@@ -260,9 +280,7 @@ describe("generate.ts — text-50p-small-page.pdf (H-10, atribución — proxy d
   });
 
   it("es determinista: dos corridas producen bytes idénticos", async () => {
-    const first = await generateText50pSmallPage();
-    const second = await generateText50pSmallPage();
-    expect(Buffer.from(first).equals(Buffer.from(second))).toBe(true);
+    await expectStableGeneratedPdf(generateText50pSmallPage);
   });
 });
 

@@ -145,6 +145,8 @@ const TEXT_50P_SEED = "text-50p-v1";
  */
 export async function generateText50p(): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
+  doc.setCreationDate(new Date("2026-01-01T00:00:00.000Z"));
+  doc.setModificationDate(new Date("2026-01-01T00:00:00.000Z"));
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const documentId = "fixture-text-50p";
 
@@ -243,6 +245,11 @@ async function generateTextPages(
   seed: string,
 ): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
+  if (documentId === "fixture-text-200p") {
+    const fixedDate = new Date("2026-01-01T00:00:00.000Z");
+    doc.setCreationDate(fixedDate);
+    doc.setModificationDate(fixedDate);
+  }
   const font = await doc.embedFont(StandardFonts.Helvetica);
 
   for (let index = 0; index < pageCount; index++) {
@@ -290,6 +297,8 @@ const SMALL_WRAP_CHARS = Math.round(WRAP_CHARS * SMALL_PAGE_SCALE);
 
 export async function generateText50pSmallPage(): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
+  doc.setCreationDate(new Date("2026-01-01T00:00:00.000Z"));
+  doc.setModificationDate(new Date("2026-01-01T00:00:00.000Z"));
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const documentId = "fixture-text-50p-small-page";
 
@@ -338,6 +347,8 @@ const TEXT_50P_DENSE_SEED = "text-50p-dense-v1";
 
 export async function generateText50pDense(): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
+  doc.setCreationDate(new Date("2026-01-01T00:00:00.000Z"));
+  doc.setModificationDate(new Date("2026-01-01T00:00:00.000Z"));
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const documentId = "fixture-text-50p-dense";
 
