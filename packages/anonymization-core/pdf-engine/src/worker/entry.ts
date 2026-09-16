@@ -97,6 +97,7 @@ function buildLocalDefaultConfig(): EngineConfig {
       timeouts: {
         "pdf-parse": 30_000,
         "ocr-page": 60_000,
+        "ocr-orient": 60_000,
         "ner-page": 20_000,
         "render-page": 10_000,
         "export-page": 30_000,
@@ -104,6 +105,7 @@ function buildLocalDefaultConfig(): EngineConfig {
       maxRetries: {
         "pdf-parse": 1,
         "ocr-page": 2,
+        "ocr-orient": 0,
         "ner-page": 1,
         "render-page": 1,
         "export-page": 1,
