@@ -39,6 +39,7 @@ import {
 } from "@anonly/anonymization-core";
 import ExportWorker from "@anonly/export-engine/worker?worker";
 import NerWorker from "@anonly/ner-engine/worker?worker";
+import OcrOrientationWorker from "@anonly/ocr-engine/orientation-worker?worker";
 import OcrWorker from "@anonly/ocr-engine/worker?worker";
 import PdfWorker from "@anonly/pdf-engine/worker?worker";
 import RenderWorker from "@anonly/render-engine/worker?worker";
@@ -267,6 +268,7 @@ export async function initCore(config?: EngineConfigOverrides): Promise<IAnonymi
         pdf: () => new PdfWorker(),
         render: () => new RenderWorker(),
         ocr: () => new OcrWorker(),
+        "ocr-orientation": () => new OcrOrientationWorker(),
         ner: () => new NerWorker(),
         export: () => new ExportWorker(),
       },
