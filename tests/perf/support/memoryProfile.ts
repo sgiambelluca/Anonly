@@ -13,6 +13,7 @@ import os from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import type { Word } from "@anonly/shared";
 import type { ElectronApplication, Page } from "@playwright/test";
 
 import type { E2eFilePayload } from "../../e2e/support/fixtures.js";
@@ -78,6 +79,8 @@ declare global {
         phasesEpochMs: Record<string, number>;
         groupCount: number;
         entityCount: number;
+        ocrPages: Array<OcrPageSummary>;
+        ocrWords: Array<OcrPageWords>;
         failedAt?: number;
         workerPeakByType: Record<string, number>;
         /**
@@ -105,6 +108,18 @@ export interface WorkerJobEventAtMs {
   readonly type: string;
   readonly atMs: number;
   readonly delta: 1 | -1;
+}
+
+/** Resumen observable de cada página OCR; suficiente para una huella estable sin tocar el Core. */
+export interface OcrPageSummary {
+  readonly pageIndex: number;
+  readonly wordCount: number;
+  readonly confidence: number;
+}
+
+export interface OcrPageWords {
+  readonly pageIndex: number;
+  readonly words: ReadonlyArray<Word>;
 }
 
 const PHASE_EVENTS: ReadonlyArray<readonly [string, string]> = [
@@ -136,12 +151,25 @@ async function installRunCollector(page: Page): Promise<void> {
     ({ phaseEvents, workerTerminalEvents }) => {
       const core = globalThis.__anonlyCore;
       if (core === undefined) throw new Error("__anonlyCore ausente: ¿VITE_E2E=1 en el build?");
+      const coreWithOcr = core as typeof core & {
+        readonly engines: {
+          readonly ocr: {
+            readonly ctx?: {
+              readonly cache?: {
+                readonly get: <T>(key: string) => T | undefined;
+              };
+            };
+          };
+        };
+      };
 
       const run: NonNullable<typeof globalThis.__anonlyMemoryRun> = {
         phases: {},
         phasesEpochMs: {},
         groupCount: 0,
         entityCount: 0,
+        ocrPages: [],
+        ocrWords: [],
         workerPeakByType: {},
         workerEvents: [],
       };
@@ -167,6 +195,32 @@ async function installRunCollector(page: Page): Promise<void> {
       });
       core.bus.on("ner", "ENTITY_FOUND", () => {
         run.entityCount += 1;
+      });
+      core.bus.on("ocr", "OCR_PAGE_FINISHED", (payload: unknown) => {
+        if (typeof payload !== "object" || payload === null) return;
+        const page = payload as { pageIndex?: unknown; wordCount?: unknown; confidence?: unknown };
+        if (
+          typeof page.pageIndex !== "number" ||
+          typeof page.wordCount !== "number" ||
+          typeof page.confidence !== "number"
+        )
+          return;
+        run.ocrPages.push({
+          pageIndex: page.pageIndex,
+          wordCount: page.wordCount,
+          confidence: page.confidence,
+        });
+        // The public event deliberately carries a summary. For the T-5
+        // quality gate, read the host cache immediately after that event so
+        // the measured OCR path remains untouched and the complete Word[] is
+        // compared outside the timing window.
+        const ocr = coreWithOcr.engines.ocr;
+        const documentId = run.documentId;
+        const words =
+          documentId === undefined
+            ? undefined
+            : ocr.ctx?.cache?.get<ReadonlyArray<Word>>(`ocr-words:${documentId}:${page.pageIndex}`);
+        if (words !== undefined) run.ocrWords.push({ pageIndex: page.pageIndex, words });
       });
 
       // Conteo de workers vivos por pool en el pico, sin tocar el Core
@@ -251,6 +305,7 @@ async function readRun(page: Page): Promise<NonNullable<typeof globalThis.__anon
       phasesEpochMs: { ...r.phasesEpochMs },
       workerPeakByType: { ...r.workerPeakByType },
       workerEvents: [...r.workerEvents],
+      ocrWords: [...r.ocrWords],
     };
   });
 }
@@ -592,6 +647,16 @@ export interface RunReport {
   readonly totalMs: number | null;
   readonly groupCount: number;
   readonly entityCount: number;
+  readonly ocrPages?: ReadonlyArray<OcrPageSummary>;
+  /** Full cached Word[] captured after OCR events, outside the measured window. */
+  readonly ocrWords?: ReadonlyArray<OcrPageWords>;
+  readonly ocrStartedAtMs?: number | null;
+  readonly ocrFinishedAtMs?: number | null;
+  readonly ocrDurationMs?: number | null;
+  readonly readyDurationMs?: number | null;
+  readonly rssPeakDuringOcrBytes?: number | null;
+  readonly rssPeakGlobalBytes?: number;
+  readonly processPeakRssBytes?: Readonly<Record<string, number>>;
   readonly ok: boolean;
   /** Atribución por fase, dentro de esta corrida (ADR-146 §7 punto 3) — ver `PhaseSegment`. */
   readonly phaseSegments: ReadonlyArray<PhaseSegment>;
@@ -636,6 +701,33 @@ export interface RunReport {
   readonly heapSamples: ReadonlyArray<HeapSample>;
 }
 
+/** Convierte los límites de fase de pared al origen del sampler sin mezclarlo
+ * con `performance.now()` de la página. */
+export function computeRunDurations(
+  phasesEpochMs: Readonly<Record<string, number>>,
+  samplerStartedAtMs: number,
+): {
+  readonly importedAtMs: number | null;
+  readonly readyAtMs: number | null;
+  readonly totalMs: number | null;
+  readonly readyDurationMs: number | null;
+} {
+  const importedEpochMs = phasesEpochMs.DOCUMENT_IMPORTED;
+  const readyEpochMs = phasesEpochMs.PIPELINE_READY;
+  const importedAtMs = importedEpochMs === undefined ? null : importedEpochMs - samplerStartedAtMs;
+  const readyAtMs = readyEpochMs === undefined ? null : readyEpochMs - samplerStartedAtMs;
+  const duration =
+    importedEpochMs === undefined || readyEpochMs === undefined
+      ? null
+      : readyEpochMs - importedEpochMs;
+  return {
+    importedAtMs,
+    readyAtMs,
+    totalMs: duration,
+    readyDurationMs: duration,
+  };
+}
+
 /**
  * Corre un import de punta a punta (`file`, ya en memoria) y devuelve su
  * reporte. `sinceMs` acota el pico de memoria a las muestras posteriores a
@@ -650,6 +742,8 @@ async function runImport(
   temperature: "cold" | "hot",
   baselineBytes: number,
   runTimeoutMs: number,
+  extraCollectors: ReadonlyArray<(page: Page) => Promise<void>> = [],
+  postRunCapture?: (page: Page, temperature: "cold" | "hot") => Promise<void>,
 ): Promise<RunReport> {
   // Sincroniza con la fase "load" (`appPhase.ts`) antes de soltar el
   // archivo — necesario tras un `closeDocument()`, inocuo en la primera
@@ -657,6 +751,14 @@ async function runImport(
   await page.getByRole("button", { name: "Elegir archivo" }).waitFor({ state: "visible" });
 
   await installRunCollector(page);
+  // `extraCollectors` (default vacío, no cambia el comportamiento de
+  // `memory.spec.ts`/`memory-attribution.spec.ts`): un tercer consumidor —
+  // `imagedata-profile.spec.ts` — necesita instalar SU colector con el mismo
+  // timing exacto que `installRunCollector` (después de que `__anonlyCore`
+  // existe, antes de soltar el archivo) y reinstalado en CADA corrida
+  // (frío y caliente), no solo una vez por sesión — mismo criterio que
+  // `installRunCollector` ya aplica para `__anonlyMemoryRun`.
+  for (const install of extraCollectors) await install(page);
   const sinceMs = sampler.samples.at(-1)?.atMs ?? 0;
   const sinceHeapMs = heapSampler.samples.at(-1)?.atMs ?? 0;
   const startedAtMs = Date.now();
@@ -672,11 +774,16 @@ async function runImport(
   await heapSampler.sampleOnce();
 
   const run = await readRun(page);
+  // `postRunCapture` (opcional): captura lo que un `extraCollector` dejó en
+  // el `page` ANTES de que la próxima corrida (fría→caliente) reinstale su
+  // colector y pise el estado global — mismo motivo por el que
+  // `installRunCollector` se reinstala en cada `runImport` en vez de
+  // instalarse una sola vez por sesión.
+  if (postRunCapture !== undefined) await postRunCapture(page, temperature);
   const runSamples = samplesSince(sampler.samples, sinceMs);
   const runHeapSamples = heapSamplesSince(heapSampler.samples, sinceHeapMs);
   const peak = peakSumBytes(runSamples);
-  const readyAtMs = run.phases.PIPELINE_READY ?? null;
-  const startedAtPerf = run.phases.DOCUMENT_IMPORTED ?? null;
+  const durations = computeRunDurations(run.phasesEpochMs, sampler.startedAtMs);
   const phaseSegments = computePhaseSegments(
     run.phasesEpochMs,
     runSamples,
@@ -690,6 +797,28 @@ async function runImport(
     atMs: e.epochMs - sampler.startedAtMs,
     delta: e.delta,
   }));
+  const ocrStartedAtMs =
+    run.phasesEpochMs.OCR_STARTED === undefined
+      ? null
+      : run.phasesEpochMs.OCR_STARTED - sampler.startedAtMs;
+  const ocrFinishedAtMs =
+    run.phasesEpochMs.OCR_FINISHED === undefined
+      ? null
+      : run.phasesEpochMs.OCR_FINISHED - sampler.startedAtMs;
+  const processPeakRssBytes: Record<string, number> = {};
+  for (const sample of runSamples) {
+    for (const process of sample.perProcess) {
+      const key = `${process.type}:${process.pid}`;
+      processPeakRssBytes[key] = Math.max(
+        processPeakRssBytes[key] ?? 0,
+        process.workingSetSizeBytes,
+      );
+    }
+  }
+  const ocrSamples =
+    ocrStartedAtMs === null || ocrFinishedAtMs === null
+      ? []
+      : samplesBetween(runSamples, ocrStartedAtMs, ocrFinishedAtMs);
 
   return {
     temperature,
@@ -699,16 +828,26 @@ async function runImport(
     phases: run.phases,
     workerPeakByType: run.workerPeakByType,
     startedAtMs,
-    readyAtMs,
+    readyAtMs: durations.readyAtMs,
     phaseSegments,
     samples: runSamples,
     heapSamples: runHeapSamples,
     workerEvents: workerEventsAtMs,
     peakWithinPhases: peakFallsWithinPhases(findPeakSample(runSamples), phaseSegments),
     hotBaselineSettled: null,
-    totalMs: readyAtMs !== null && startedAtPerf !== null ? readyAtMs - startedAtPerf : null,
+    totalMs: durations.totalMs,
     groupCount: run.groupCount,
     entityCount: run.entityCount,
+    ocrPages: run.ocrPages,
+    ocrWords: run.ocrWords,
+    ocrStartedAtMs,
+    ocrFinishedAtMs,
+    ocrDurationMs:
+      ocrStartedAtMs === null || ocrFinishedAtMs === null ? null : ocrFinishedAtMs - ocrStartedAtMs,
+    readyDurationMs: durations.readyDurationMs,
+    rssPeakDuringOcrBytes: ocrSamples.length === 0 ? null : peakSumBytes(ocrSamples),
+    rssPeakGlobalBytes: peak,
+    processPeakRssBytes,
     ok: run.failedAt === undefined,
   };
 }
@@ -826,6 +965,8 @@ export async function measureProfile(
   profile: string,
   file: E2eFilePayload,
   runTimeoutMs = 180_000,
+  extraCollectors: ReadonlyArray<(page: Page) => Promise<void>> = [],
+  postRunCapture?: (page: Page, temperature: "cold" | "hot") => Promise<void>,
 ): Promise<ProfileReport> {
   const sampler = startMemorySampling(electronApp, SAMPLE_INTERVAL_MS);
   // ADR-159 §2: heap por target, vía CDP — sampler aparte del de RSS de
@@ -846,6 +987,8 @@ export async function measureProfile(
       "cold",
       coldBaseline.sumWorkingSetSizeBytes,
       runTimeoutMs,
+      extraCollectors,
+      postRunCapture,
     );
 
     await closeDocument(page);
@@ -867,6 +1010,8 @@ export async function measureProfile(
       "hot",
       hotBaselineBytes,
       runTimeoutMs,
+      extraCollectors,
+      postRunCapture,
     );
     const hot: RunReport = { ...hotRun, hotBaselineSettled };
     await closeDocument(page);

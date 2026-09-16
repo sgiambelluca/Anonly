@@ -51,7 +51,12 @@ describe("classifyTargets", () => {
     // urls hijas son distintas entre sí.
     const samples = classifyTargets([
       target({ sessionId: "page", type: "page", url: "app://local/index.html" }),
-      target({ sessionId: "ocr1", parentSessionId: "page", attachedAtMs: 100 }),
+      target({
+        sessionId: "ocr1",
+        parentSessionId: "page",
+        url: "app://local/assets/ocr-entry-XXXX.js",
+        attachedAtMs: 100,
+      }),
       target({
         sessionId: "ocr1-lstm",
         parentSessionId: "ocr1",
@@ -123,7 +128,12 @@ describe("classifyTargets", () => {
     // regla "urls hijas distintas entre sí" es trivialmente cierta.
     const samples = classifyTargets([
       target({ sessionId: "page", type: "page", url: "app://local/index.html" }),
-      target({ sessionId: "ocr1", parentSessionId: "page", attachedAtMs: 100 }),
+      target({
+        sessionId: "ocr1",
+        parentSessionId: "page",
+        url: "app://local/assets/ocr-entry-XXXX.js",
+        attachedAtMs: 100,
+      }),
       target({
         sessionId: "ocr1-lstm",
         parentSessionId: "ocr1",
@@ -134,6 +144,29 @@ describe("classifyTargets", () => {
     const byId = new Map(samples.map((s) => [s.sessionId, s]));
     expect(byId.get("ocr1")?.label).toBe("ocr-worker-1");
     expect(byId.get("ocr1-lstm")?.label).toBe("ocr-worker-1/tesseract-lstm");
+  });
+
+  it("clasifica el hijo OSD por el chunk de orientation-entry, nunca por el orden", () => {
+    const samples = classifyTargets([
+      target({ sessionId: "page", type: "page", url: "app://local/index.html" }),
+      target({
+        sessionId: "orientation1",
+        parentSessionId: "page",
+        url: "app://local/assets/orientation-entry-ABCD.js",
+        attachedAtMs: 100,
+      }),
+      target({
+        sessionId: "orientation1-osd",
+        parentSessionId: "orientation1",
+        url: "blob:app://local/first",
+        attachedAtMs: 200,
+      }),
+    ]);
+    const byId = new Map(samples.map((sample) => [sample.sessionId, sample]));
+    expect(byId.get("orientation1")?.factoryChunk).toBe("orientation-entry");
+    expect(byId.get("orientation1")?.workerRole).toBe("orientation");
+    expect(byId.get("orientation1-osd")?.label).toBe("ocr-orientation-worker-1/tesseract-osd");
+    expect(byId.get("orientation1-osd")?.workerRole).toBe("orientation");
   });
 
   it("conserva el error de lectura de heap sin que afecte la clasificación", () => {

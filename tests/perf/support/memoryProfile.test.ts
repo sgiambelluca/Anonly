@@ -12,6 +12,7 @@ import {
   attributedIsolateBytes,
   computeTargetCoverage,
   computeUnattributedResidual,
+  computeRunDurations,
   tabProcessBytes,
 } from "./memoryProfile.js";
 import type { MemorySample } from "./memorySampler.js";
@@ -31,6 +32,8 @@ function target(
     readError: undefined,
     label: "leaf-worker-1",
     note: "",
+    factoryChunk: "unknown",
+    workerRole: "unknown",
     ...overrides,
   };
 }
@@ -139,6 +142,21 @@ describe("computeUnattributedResidual", () => {
       targets: [target({ sessionId: "a", usedSizeBytes: 50_000_000 })],
     };
     expect(computeUnattributedResidual(rss, heap)).toBe(10_000_000 - 50_000_000);
+  });
+});
+
+describe("computeRunDurations", () => {
+  it("uses epoch phase limits even when page performance origins are shifted", () => {
+    const durations = computeRunDurations(
+      { DOCUMENT_IMPORTED: 10_000, PIPELINE_READY: 10_325 },
+      9_000,
+    );
+    expect(durations).toEqual({
+      importedAtMs: 1_000,
+      readyAtMs: 1_325,
+      totalMs: 325,
+      readyDurationMs: 325,
+    });
   });
 });
 

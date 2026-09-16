@@ -524,6 +524,31 @@ export interface ClassifiedTargetHeapSample extends RawTargetHeapReading {
   readonly label: string;
   /** Por qué se le puso esa etiqueta — para que un reporte no la presente como más certeza de la que tiene. */
   readonly note: string;
+  /** Chunk/factory evidence observed in the parent target, when the Vite build exposes it. */
+  readonly factoryChunk: "ocr-entry" | "orientation-entry" | "unknown";
+  /** Role inferred from the factory chunk; unknown stays unknown rather than becoming LSTM. */
+  readonly workerRole: "lstm" | "orientation" | "unknown";
+}
+
+function factoryChunk(url: string): ClassifiedTargetHeapSample["factoryChunk"] {
+  const configured = process.env.ANONLY_T5_FACTORY_CHUNKS;
+  if (configured !== undefined) {
+    try {
+      const parsed: unknown = JSON.parse(configured);
+      if (isRecord(parsed)) {
+        for (const [chunk, role] of Object.entries(parsed)) {
+          if (url.includes(chunk) && (role === "ocr-entry" || role === "orientation-entry")) {
+            return role;
+          }
+        }
+      }
+    } catch {
+      // El arnés conserva la topología cruda y deja la clasificación en unknown.
+    }
+  }
+  if (/orientation-entry/i.test(url)) return "orientation-entry";
+  if (/ocr[-_]entry|worker[-_]entry/i.test(url)) return "ocr-entry";
+  return "unknown";
 }
 
 /**
@@ -576,19 +601,30 @@ export function classifyTargets(
 
       const distinctChildUrls = new Set(grandchildren.map((c) => c.url)).size;
       const isOcrLike = distinctChildUrls === grandchildren.length;
-      if (isOcrLike) {
+      if (isOcrLike && factoryChunk(worker.url) !== "unknown") {
         ocrCount += 1;
-        const ocrLabel = `ocr-worker-${ocrCount}`;
+        const parentChunk = factoryChunk(worker.url);
+        const orientation = parentChunk === "orientation-entry";
+        const ocrLabel = orientation
+          ? `ocr-orientation-worker-${ocrCount}`
+          : `ocr-worker-${ocrCount}`;
         labels.set(worker.sessionId, {
           label: ocrLabel,
           note:
             `worker con ${grandchildren.length} hijo(s) de url blob: DISTINTA entre si — ` +
-            "firma de ocr-engine/src/worker/kernel.ts (ensureWorkerLoaded + " +
-            "ensureOsdWorkerLoaded, cada uno createWorker() independiente, ADR-119 §1).",
+            `factory chunk ${parentChunk}; ` +
+            (orientation
+              ? "corresponde a orientation-entry y su único worker Tesseract es OSD."
+              : "corresponde a ocr-entry; el rol del hijo solo se afirma si el chunk lo permite."),
         });
         grandchildren.forEach((child, index) => {
-          const childName =
-            index === 0 ? "tesseract-lstm" : index === 1 ? "tesseract-osd" : `tesseract-${index}`;
+          const childName = orientation
+            ? "tesseract-osd"
+            : index === 0
+              ? "tesseract-lstm"
+              : index === 1
+                ? "tesseract-osd"
+                : `tesseract-${index}`;
           labels.set(child.sessionId, {
             label: `${ocrLabel}/${childName}`,
             note: `hijo #${index + 1} (orden de attach) de ${ocrLabel} — ver nota de ${ocrLabel}.`,
@@ -596,18 +632,21 @@ export function classifyTargets(
         });
       } else {
         threadPoolCount += 1;
-        const poolLabel = `thread-pool-worker-${threadPoolCount}`;
+        const poolLabel = isOcrLike
+          ? `unclassified-worker-${threadPoolCount}`
+          : `thread-pool-worker-${threadPoolCount}`;
         labels.set(worker.sessionId, {
           label: poolLabel,
-          note:
-            `worker con ${grandchildren.length} hijo(s) que REPITEN la misma url blob: entre si — ` +
-            "firma de un pool de hilos que reusa un unico script compilado (medido: " +
-            "coincide con el pool de pthreads de onnxruntime-web que arma ner-engine " +
-            "cuando su backend WASM habilita hilos). No confirmado por CDP solo.",
+          note: isOcrLike
+            ? `worker con ${grandchildren.length} hijo(s) de url distinta entre sí, pero sin chunk/factory identificable; no se atribuye a LSTM u OSD.`
+            : `worker con ${grandchildren.length} hijo(s) que REPITEN la misma url blob: entre si — ` +
+              "firma de un pool de hilos que reusa un unico script compilado (medido: " +
+              "coincide con el pool de pthreads de onnxruntime-web que arma ner-engine " +
+              "cuando su backend WASM habilita hilos). No confirmado por CDP solo.",
         });
         grandchildren.forEach((child, index) => {
           labels.set(child.sessionId, {
-            label: `${poolLabel}/thread-${index}`,
+            label: isOcrLike ? `${poolLabel}/child-${index}` : `${poolLabel}/thread-${index}`,
             note: `hijo #${index + 1} (orden de attach) de ${poolLabel} — ver nota de ${poolLabel}.`,
           });
         });
@@ -633,6 +672,20 @@ export function classifyTargets(
       note:
         found?.note ??
         "no se pudo ubicar en el arbol de targets (padre desconocido en este snapshot).",
+      factoryChunk:
+        found?.label.startsWith("ocr-orientation-worker-") === true
+          ? "orientation-entry"
+          : found?.label.startsWith("ocr-worker-") === true
+            ? "ocr-entry"
+            : "unknown",
+      workerRole:
+        found?.label.startsWith("ocr-orientation-worker-") === true
+          ? "orientation"
+          : found?.label.startsWith("ocr-worker-") === true
+            ? "lstm"
+            : found?.label.includes("tesseract-lstm") === true
+              ? "lstm"
+              : "unknown",
     };
   });
 }

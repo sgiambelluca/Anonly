@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=tests-perf | dependencias=adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-149-Un-Gate-Que-No-Ejecuta-Nada-Es-Rojo.md,adr/ADR-153-El-Gate-De-Tiempos-Se-Mide-Sobre-El-Producto.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,roadmap/Optimizacion_De_Memoria_Plan.md,tests/e2e/README.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=tests-perf | dependencias=adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-149-Un-Gate-Que-No-Ejecuta-Nada-Es-Rojo.md,adr/ADR-153-El-Gate-De-Tiempos-Se-Mide-Sobre-El-Producto.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,roadmap/Optimizacion_De_Memoria_Plan.md,tests/e2e/README.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md | audiencia=humanos+IA | fase=11 -->
 
 # `tests/perf/` — tiempos y memoria sobre el producto real
 
@@ -155,3 +155,22 @@ Dos hipótesis más en el mismo archivo, cada una con una corrida exploratoria (
 
 1. **NER apagado** (`installSettingsOverride({nerEnabled: false})`) — cuánto es del detector de nombres en sí.
 2. **`generateText50pSmallPage()`** (`tests/fixtures/generate.ts`) — página a 4/9 de área, el mismo ratio que (200/300)² dpi. Proxy de `ocr.dpi: 200` (no alcanzable como setting de usuario): prueba si el costo escala con el área rasterizada, reduciendo el tamaño físico de la página en vez del DPI.
+
+
+## T-5 — Comparación OSD compartido (ADR-164)
+
+Protocolo normativo: `docs/roadmap/T5_OSD_Compartido_Handoff.md` §3.
+Nuevo arnés opt-in `osd-sharing.spec.ts` (implementación pendiente), fixture P2
+congelado por SHA-256, checkouts BEFORE/AFTER separados y seis sesiones en orden
+A1/B1, B2/A2, A3/B3, cada una frío/cerrar/caliente. Instrumento idéntico en ambos
+builds, tamaño LSTM 2 fijo. Guardar directorios únicos por corrida y series
+crudas; no pisar JSON previos. La ventana de memoria primaria es OCR, con pico
+de suma simultánea, no suma de máximos por proceso. T-1 no ve memoria WASM.
+
+El clasificador CDP histórico de dos hijos por OcrWorker no identifica la
+nueva topología: no etiquetar al OSD único como LSTM por ser primer hijo.
+Conservar topología y mapa de chunks del build, documentar cobertura. Los jobs
+ocr-orient usan telemetría WORKER_JOB_* existente. La huella de palabras/cajas
+se compara excluyendo ids/duraciones. M1 es solo contexto: ADR-157 libera OCR
+entre frío y caliente. Las cifras históricas aquí conservadas no son el control
+actual ni un ahorro prometido.
