@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-mvp | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,adr/ADR-011-Grouping-First.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-138-Instalador-Universal-De-macOS.md | audiencia=humanos+IA | fase=11.6 (Hitos 1–10 cerrados y mergeados a main; escritorio y verificación de actualizaciones en validación; instalador universal de macOS documentado por ADR-138) -->
+<!-- CONTEXT: scope=roadmap-mvp | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,adr/ADR-011-Grouping-First.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-138-Instalador-Universal-De-macOS.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md | audiencia=humanos+IA | fase=11.6 (Hitos 1–10 cerrados y mergeados a main; escritorio y verificación de actualizaciones en validación; instalador universal de macOS documentado por ADR-138) -->
 
 # Anonly — Roadmap MVP
 
@@ -552,7 +552,15 @@ De las ~70: **~30 ya estaban cerradas** por hitos posteriores (ADR-053/054/056, 
   ruidosos queda separada como T-4b y bloqueada por el corpus de ADR-147.
   T-6a cerrada e implementada como cap conservador por página de ráster único
   (ADR-163), con 508/508 tests afectados y gates scoped verdes; T-6b continúa
-  siendo la medición posterior de calidad.
+  siendo la medición posterior de calidad. **T-5 cerrada el 2026-09-15**:
+  OSD compartido con una página de adelanto implementado y aceptado por el
+  humano, con validación funcional y controles generales verdes. La campaña
+  separada observó −24–25% de tiempo frente al control con igual comportamiento
+  histórico de ImageData, sin ahorro RSS demostrado. Evidencia y límites en
+  `T5_OSD_Compartido_Cierre_Final.md`. Continúa por separado la evaluación de
+  ImageData (`ImageData_Perfilado_Plan.md`), sin reabrir OSD/adelanto.
+- Después del hardening: intención de migrar Electron a Tauri para evaluar
+  menor costo del contenedor, como campaña separada (`Future_Ideas.md` §2.5).
 - Verificación de integridad en runtime de modelos/wasm (`crypto.subtle.digest` contra `assets.lock.json`, ADR-018 punto 3) en `ocr-engine` y `ner-engine`; hash mismatch → `OCR_MODEL_MISSING` / `NER_MODEL_LOAD_FAILED`. Incluye test de integridad: asset con hash alterado → error tipado, no se carga.
 - Audit `pnpm audit`.
 - Bundle size check.

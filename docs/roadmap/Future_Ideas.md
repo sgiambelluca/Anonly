@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-future | dependencias=roadmap/Version_2.0.md,00_Project_Vision.md | audiencia=humanos | fase=5 (§5.6-§5.9 en fase 10.9: los residuos anotados por ADR-076 §5, ADR-075 §1/§4 y ADR-074 §3) -->
+<!-- CONTEXT: scope=roadmap-future | dependencias=roadmap/Version_2.0.md,00_Project_Vision.md,roadmap/T5_OSD_Investigacion_Scheduling.md | audiencia=humanos | fase=5 (§5.6-§5.9 en fase 10.9; §2.5 intención posterior al hardening registrada el 2026-09-14) -->
 
 # Anonly — Future Ideas
 
@@ -85,6 +85,29 @@ Servicio server-side para batch masivo (millones de documentos), dirigido a empr
 ### 2.4 VS Code extension
 
 Procesar PDFs abiertos en VS Code sin salir del editor.
+
+### 2.5 Migración Electron → Tauri después del hardening
+
+**Intención del humano registrada el 2026-09-14:** migrar el contenedor de
+escritorio a Tauri una vez terminada la campaña actual de hardening, buscando
+reducir el costo base de memoria y distribución. Se conserva Electron durante
+la campaña y las mediciones de T5. No se asigna fecha ni se inicia la migración
+con esta anotación.
+
+Tauri utiliza el WebView del sistema, lo que evita distribuir un runtime web
+propio y favorece un paquete pequeño ([arquitectura oficial de Tauri](https://v2.tauri.app/concept/architecture/)).
+Eso no cuantifica el ahorro RSS de Anonly: el procesamiento con Tesseract,
+PDF.js, ONNX/WASM, imágenes y GPU seguirá consumiendo recursos, y su costo
+deberá medirse en los WebViews/plataformas objetivo. No equiparar tamaño del
+instalador con memoria durante OCR ni prometer resolver el pico del Core al
+cambiar solamente el contenedor.
+
+Al retomarlo: ADR propio, inventario de integraciones del shell (archivos,
+assets offline, actualización/instalación y permisos), compatibilidad de
+workers anidados, OffscreenCanvas y WASM, y comparación Electron/Tauri sobre
+el mismo corpus, configuración y calidad. Medir arranque/idle y pipeline por
+separado; conservar baseline y garantías locales de seguridad. El caso OSD
+de una página de adelanto queda independiente de esa migración.
 
 ---
 

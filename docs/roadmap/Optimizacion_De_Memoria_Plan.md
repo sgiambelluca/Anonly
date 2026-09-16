@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-plan | dependencias=roadmap/H-10_Bitacora_De_Memoria.md,architecture/07_Performance_Strategy.md,core/OCR_Engine.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-147-Perder-Un-Identificador-Cubierto-Es-Una-Regresion.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-157-El-Pool-De-OCR-Se-Da-De-Baja-Al-Terminar-Su-Etapa.md,adr/ADR-158-El-Raster-De-OCR-Viaja-Codificado.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md,adr/ADR-161-Una-Franja-Sin-Tinta-No-Se-Reconoce.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,tests/fixtures/README.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=roadmap-plan | dependencias=roadmap/H-10_Bitacora_De_Memoria.md,architecture/07_Performance_Strategy.md,core/OCR_Engine.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-147-Perder-Un-Identificador-Cubierto-Es-Una-Regresion.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-157-El-Pool-De-OCR-Se-Da-De-Baja-Al-Terminar-Su-Etapa.md,adr/ADR-158-El-Raster-De-OCR-Viaja-Codificado.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md,adr/ADR-161-Una-Franja-Sin-Tinta-No-Se-Reconoce.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,tests/fixtures/README.md,tests/perf/README.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md | audiencia=humanos+IA | fase=11 -->
 
 # Optimización de memoria — plan de campaña
 
@@ -6,12 +6,14 @@
 > anterior **al momento de pausarla**. Esto la reanuda: qué se verificó para
 > poder decidir, qué se decidió, y en qué orden se ejecuta.
 >
-> **Estado (2026-09-13)**: T-1 cerrada; **T-2 cerrada**, implementada y
+> **Estado (2026-09-15)**: T-1 cerrada; **T-2 cerrada**, implementada y
 > verificada con control A/B; **T-3 cerrada con resultado inconcluso** —la
 > extrapolación lineal no ocurrió, pero tampoco apareció una meseta limpia—;
 > T-4 **cerrada** en su variante exacta y sin calibración (ADR-162), con sus
 > gates scoped verdes; T-4b conserva la heurística calibrada y sigue bloqueada por el
-> corpus de ADR-147; T-5 postergada;
+> corpus de ADR-147; **T-5 cerrada**, OSD compartido + una página de adelanto
+> aceptado, con implementación, validación y controles finales completos.
+> ImageData continúa como evaluación separada;
 > T-6a **cerrada e implementada** como cap conservador por página (ADR-163);
 > T-6b conserva la medición P2 pendiente.
 
@@ -441,19 +443,55 @@ tenue en el margen y un ADR nuevo que fije fórmula, umbral de píxel y margen
 numérico. No forma parte de T-4 y el implementador no deja constantes
 provisorias para ella.
 
-### T-5 — La segunda instancia de Tesseract — **POSTERGADA por decisión del humano (2026-09-12)**
+### T-5 — OSD compartido — **CERRADA (2026-09-15)**
 
-`ensureOsdWorkerLoaded` levanta un worker de tesseract.js aparte con
-`legacyCore: true`. Con `ocrPoolSize: 2` hay **cuatro** instancias vivas, no dos
-— lo que explica por qué ADR-157 midió −702 a −1009 MB donde estimaba ~300.
+**Decisión del humano y aceptación final:** se conserva un OSD por Core con
+una página de adelanto y dos reconocedores LSTM, bajo el presupuesto de
+imágenes de 128 MiB. Se acepta por la mejora temporal observada, aunque no
+se haya demostrado ahorro de memoria. No se afirma equivalencia estadística
+ni reducción de RSS.
 
-> **Decisión del humano: esperar a T-2 y T-3 antes de decidir.** Las tres salidas
-> evaluadas —dejarlo como está, decidir la orientación sobre una muestra y
-> liberar el OSD, u OSD perezoso— tienen riesgo de producto: una hoja escaneada
-> al revés en el medio de un expediente se leería mal y sus datos no se taparían.
-> **Primero se mide cuánto pesa realmente el OSD** con el instrumento de T-1, y
-> recién entonces se evalúa si ese riesgo vale el ahorro. No se escribe ADR hasta
-> tener ese número.
+La implementación y los cinco pendientes de validación están resueltos:
+drenaje/dispose, reconstrucción, aislamiento, identidad y orden de regiones,
+reanálisis por generación y censura/conservación externa en Electron real.
+Controles generales verdes: lint, typecheck, 2193 tests con cobertura y
+thresholds, 312 tests de contrato y formato. E2E T5 con build fresco: PASS.
+Cobertura agregada de OCR, incluidos workers: **93,79 %**.
+
+Evidencia definitiva, artefactos y límites en
+[`T5_OSD_Compartido_Cierre_Final.md`](T5_OSD_Compartido_Cierre_Final.md).
+El cierre T5 no declara terminada toda la campaña de hardening ni los gates
+propios de una release completa.
+
+| Campaña separada P2, 50 páginas | Frío | Caliente |
+| --- | ---: | ---: |
+| A → B, OSD/adelanto con igual comportamiento histórico de ImageData | −24,0 % | −25,4 % |
+| B → C, corrección ImageData que restituye las rotaciones | +5,882 s | +6,099 s |
+
+No extrapolar el primer porcentaje a la versión con márgenes reparados. Las
+huellas del P2 coinciden, pero ese fixture no mide el beneficio de recuperar
+un sello vertical. Se conservan los datos y las limitaciones de la campaña en
+[`T5_OSD_Compartido_Revision_Separados.md`](T5_OSD_Compartido_Revision_Separados.md).
+
+**Continúa por separado:** evaluación y optimización de ImageData desde la
+versión funcional aceptada. No se cambia su implementación durante este cierre
+ni se revierten capacidades para mejorar artificialmente el reloj. Ver
+[`T5_ImageData_Investigacion.md`](T5_ImageData_Investigacion.md),
+[`ImageData_Perfilado_Plan.md`](ImageData_Perfilado_Plan.md), su handoff de
+perfilado [`ImageData_Perfilado_Handoff.md`](ImageData_Perfilado_Handoff.md)
+y los resultados de ese perfilado
+[`ImageData_Perfilado_Resultados.md`](ImageData_Perfilado_Resultados.md).
+El perfil está hecho; ninguna candidata está implementada ni autorizada: las
+dos del plan original quedaron descartadas **por medición** (0,54 % y 3,2 %
+del costo de margen). El 74 % está en el área que se le entrega a Tesseract,
+y las tres ideas que atacan eso —sin recortar la capacidad— se investigan en
+[`Margenes_Menos_Pixeles_Plan.md`](Margenes_Menos_Pixeles_Plan.md), bajo la
+regla de documentar → medir → implementar solo si rinde.
+
+Las alternativas de prepasada completa y dos páginas de adelanto permanecen
+registradas y no seleccionadas en
+[`T5_OSD_Investigacion_Scheduling.md`](T5_OSD_Investigacion_Scheduling.md).
+Los handoffs e informes anteriores son historial, no instrucciones pendientes.
 
 ### T-6a — DPI adaptativo — **CERRADA (ADR-163)**
 
@@ -581,7 +619,7 @@ estos levers importan.** No bloquea T-1 a T-4; sí bloquea dimensionar T-6.
 
 ## 5. Lo que sigue pendiente de decisión del humano
 
-1. **T-5 y T-6**: los dos tocan calidad de reconocimiento.
+1. **Resultados de T-6b**: T-5 está cerrada. La evaluación posterior de ImageData es un trabajo separado; aumentar el número de reconocedores o reducir DPI por calidad también requiere su propia decisión.
 2. **El presupuesto**: la alternativa A de la bitácora §7.1 (reemplazar los
    ~1600 MB estimados de `07_Performance_Strategy.md` §7 por componentes
    medidos) sigue disponible, pero **sobre números nuevos** — los de hoy salen
@@ -590,3 +628,11 @@ estos levers importan.** No bloquea T-1 a T-4; sí bloquea dimensionar T-6.
    del documento) **no se recomienda arrancar todavía**: apostaba entera a la
    hipótesis del heap, y ADR-159 §3 le sacó la mitad del peso. Se re-evalúa con
    lo que midan T-1 y T-2.
+
+## 6. Trabajo posterior al hardening
+
+El humano prevé migrar el contenedor Electron a Tauri **después de terminar
+hardening**, con el objetivo de reducir su costo de recursos. Se registra en
+[`Future Ideas §2.5`](Future_Ideas.md#25-migración-electron--tauri-después-del-hardening).
+No se inicia esa migración durante T-5 ni se usa un ahorro hipotético del shell
+para aceptar métricas actuales del Core.
