@@ -38,10 +38,142 @@ export interface E2eFilePayload {
 
 const FIXTURES_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../fixtures");
 
+const T5_ORIENTATION_PAGE_WIDTH = 595;
+const T5_ORIENTATION_PAGE_HEIGHT = 842;
+const T5_ORIENTATION_FONT_SIZE = 18;
+const T5_ORIENTATION_LINE_BASELINE = 790;
+const T5_ORIENTATION_FIELDS = [
+  "DNI 34.567.891 Nombre Marina Suarez domicilio Belgrano 1234",
+  "DNI 18.445.212 Nombre Alberto Gomez domicilio Rivadavia 2345",
+  "DNI 42.998.103 Nombre Lucia Fernandez domicilio Moreno 3456",
+  "DNI 34.567.891 Nombre Marina Suarez domicilio Belgrano 1234",
+  "DNI 18.445.212 Nombre Alberto Gomez domicilio Rivadavia 2345",
+] as const;
+const T5_ORIENTATION_ROTATIONS = [0, 90, 180, 0, 270] as const;
+
+export interface T5OrientationRect {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+export interface T5OrientationGroundTruthPage {
+  readonly pageIndex: number;
+  readonly rotation: (typeof T5_ORIENTATION_ROTATIONS)[number];
+  /** Convención de BoundingBox: la inversa del giro físico del raster. */
+  readonly expectedOcrRotation: (typeof T5_ORIENTATION_ROTATIONS)[number];
+  readonly expectedText: string;
+  readonly expectedEntityValue: string;
+  readonly expectedEntities: ReadonlyArray<string>;
+  /** Coordenadas en el PDF ya girado, independientes del OCR. */
+  readonly sensitiveRegions: ReadonlyArray<T5OrientationRect>;
+  /** Texto neutro fuera de todas las regiones sensibles. */
+  readonly externalRegion: T5OrientationRect;
+}
+
+function rotateT5Rect(
+  rect: T5OrientationRect,
+  rotation: (typeof T5_ORIENTATION_ROTATIONS)[number],
+): T5OrientationRect {
+  if (rotation === 0) return rect;
+  if (rotation === 90) {
+    return {
+      x: T5_ORIENTATION_PAGE_HEIGHT - (rect.y + rect.height),
+      y: rect.x,
+      width: rect.height,
+      height: rect.width,
+    };
+  }
+  if (rotation === 180) {
+    return {
+      x: T5_ORIENTATION_PAGE_WIDTH - (rect.x + rect.width),
+      y: T5_ORIENTATION_PAGE_HEIGHT - (rect.y + rect.height),
+      width: rect.width,
+      height: rect.height,
+    };
+  }
+  return {
+    x: rect.y,
+    y: T5_ORIENTATION_PAGE_WIDTH - (rect.x + rect.width),
+    width: rect.height,
+    height: rect.width,
+  };
+}
+
 /** `text-10p.pdf` (`tests/fixtures/README.md`): 10 páginas, entidades conocidas. */
 export async function textTenPagesFile(): Promise<E2eFilePayload> {
   const bytes = await generateText10p();
   return { name: "text-10p.pdf", mimeType: "application/pdf", buffer: Buffer.from(bytes) };
+}
+
+/** Cinco páginas OCR con rotaciones físicas 0/90/180/0/270; el helper de
+ * rasterización se ejecuta en el browser del E2E y no usa `/Rotate`. */
+export async function t5PixelOrientationSourceFile(): Promise<E2eFilePayload> {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  for (const [pageIndex, field] of T5_ORIENTATION_FIELDS.entries()) {
+    const page = doc.addPage([T5_ORIENTATION_PAGE_WIDTH, T5_ORIENTATION_PAGE_HEIGHT]);
+    for (let line = 0; line < 18; line += 1) {
+      page.drawText(`${field} linea ${line + 1}`, {
+        x: 36,
+        y: T5_ORIENTATION_LINE_BASELINE - line * 40,
+        size: T5_ORIENTATION_FONT_SIZE,
+        font,
+        color: rgb(0, 0, 0),
+      });
+    }
+    page.drawText(`Pagina sintetica ${pageIndex + 1}`, {
+      x: 36,
+      y: 40,
+      size: 14,
+      font,
+      color: rgb(0, 0, 0),
+    });
+  }
+  const bytes = await doc.save();
+  return {
+    name: "t5-orientation-source.pdf",
+    mimeType: "application/pdf",
+    buffer: Buffer.from(bytes),
+  };
+}
+
+/** Ground truth geométrico del mismo fixture, construido desde el texto fuente. */
+export async function t5PixelOrientationGroundTruth(): Promise<
+  ReadonlyArray<T5OrientationGroundTruthPage>
+> {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  return T5_ORIENTATION_FIELDS.map((field, pageIndex) => {
+    const rotation = T5_ORIENTATION_ROTATIONS[pageIndex] ?? 0;
+    const sensitiveValue = field.slice("DNI ".length, "DNI ".length + 10);
+    const sensitiveX = 36 + font.widthOfTextAtSize("DNI ", T5_ORIENTATION_FONT_SIZE);
+    const sensitiveWidth = font.widthOfTextAtSize(sensitiveValue, T5_ORIENTATION_FONT_SIZE);
+    const sensitiveRegions = Array.from({ length: 18 }, (_, line) =>
+      rotateT5Rect(
+        {
+          x: sensitiveX,
+          y:
+            T5_ORIENTATION_PAGE_HEIGHT -
+            (T5_ORIENTATION_LINE_BASELINE - line * 40 + T5_ORIENTATION_FONT_SIZE),
+          width: sensitiveWidth,
+          height: T5_ORIENTATION_FONT_SIZE + 2,
+        },
+        rotation,
+      ),
+    );
+    return {
+      pageIndex,
+      rotation,
+      expectedOcrRotation: rotation === 90 ? 270 : rotation === 270 ? 90 : rotation,
+      expectedText: field,
+      expectedEntityValue: sensitiveValue,
+      expectedEntities: [sensitiveValue.replaceAll(".", "")],
+      sensitiveRegions,
+      externalRegion: rotateT5Rect({ x: 36, y: 784, width: 190, height: 24 }, rotation),
+    };
+  });
 }
 
 /** `corrupt.pdf` (`tests/fixtures/README.md`): header %PDF- válido + cuerpo no-PDF. */

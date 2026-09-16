@@ -178,6 +178,7 @@ function createEngineConfig(): EngineConfig {
       timeouts: {
         "pdf-parse": 30000,
         "ocr-page": 60000,
+        "ocr-orient": 60000,
         "ner-page": 20000,
         "render-page": 10000,
         "export-page": 30000,
@@ -185,6 +186,7 @@ function createEngineConfig(): EngineConfig {
       maxRetries: {
         "pdf-parse": 1,
         "ocr-page": 2,
+        "ocr-orient": 0,
         "ner-page": 1,
         "render-page": 1,
         "export-page": 1,

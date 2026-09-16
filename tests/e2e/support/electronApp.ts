@@ -18,7 +18,7 @@
  * dependientes del orden en que corren.
  */
 
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -183,6 +183,33 @@ export async function expectDownloadFilename(
   );
   await trigger();
   return await filename;
+}
+
+/** Captura el PDF producido por el proceso main para verificaciones de
+ * contenido fuera del flujo visual. */
+export async function captureDownload(
+  electronApp: ElectronApplication,
+  trigger: () => Promise<void>,
+  savePath: string,
+  timeoutMs = 300_000,
+): Promise<Buffer> {
+  const done = electronApp.evaluate(
+    async ({ session }, args) =>
+      await new Promise<string>((resolve, reject) => {
+        session.defaultSession.once("will-download", (_event, item) => {
+          item.setSavePath(args.savePath);
+          item.once("done", (_downloadEvent, state) => {
+            if (state === "completed") resolve(args.savePath);
+            else reject(new Error(`descarga no completada: ${state}`));
+          });
+        });
+        setTimeout(() => reject(new Error("timeout esperando la exportación")), args.timeoutMs);
+      }),
+    { savePath, timeoutMs },
+  );
+  await trigger();
+  const completedPath = await done;
+  return readFile(completedPath);
 }
 
 export { expect } from "@playwright/test";
