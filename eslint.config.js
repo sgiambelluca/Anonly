@@ -45,6 +45,8 @@ export default tseslint.config(
       // (Vite los procesa como módulos vía `?url`) siguen siendo vendor, no
       // código propio — mismo criterio que los de public/ de arriba.
       "apps/react-client/src/assets/onnxruntime/**",
+      ".measure/**",
+      ".agents/skills/**",
     ],
   },
   js.configs.recommended,
@@ -53,6 +55,7 @@ export default tseslint.config(
     languageOptions: {
       parserOptions: {
         projectService: {
+          maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 9,
           allowDefaultProject: [
             "eslint.config.js",
             "commitlint.config.js",
