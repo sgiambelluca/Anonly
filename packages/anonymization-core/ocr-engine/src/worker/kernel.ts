@@ -30,14 +30,22 @@
  */
 import {
   CancelledError,
+  InvalidInputError,
   type BoundingBox,
   type EncodedPageImage,
   type OcrPagePayload,
   type Word,
 } from "@anonly/shared";
-import { createWorker, OEM, PSM } from "tesseract.js";
+import { createWorker, PSM } from "tesseract.js";
 
 import { OcrModelMissingError, OcrPageFailedError, OcrTimeoutError } from "../ocr.errors.js";
+
+import {
+  resolveTesseractPath,
+  TESSERACT_CORE_PATH,
+  TESSERACT_LANG_PATH,
+  TESSERACT_WORKER_PATH,
+} from "./tesseract-paths.js";
 
 type TesseractWorker = Awaited<ReturnType<typeof createWorker>>;
 
@@ -55,9 +63,7 @@ type TesseractWorker = Awaited<ReturnType<typeof createWorker>>;
  * (errata corregida en ADR-018 §2 / OCR_Engine.md v1.2.1 §15.22, PR 17.6
  * parte a).
  */
-const TESSERACT_LANG_PATH = "/models/tesseract/";
-const TESSERACT_CORE_PATH = "/wasm/tesseract/";
-const TESSERACT_WORKER_PATH = "/wasm/tesseract/worker.min.js";
+// Las rutas y su resolución viven en `tesseract-paths.ts`, compartidas con OSD.
 
 /*
  * ADR-018 §2 (precisión 2026-07-30) / OCR_Engine.md v1.2.2, §15.22 parte b:
@@ -102,24 +108,7 @@ const TESSERACT_WORKER_PATH = "/wasm/tesseract/worker.min.js";
  * correspondería agregar `workerBlobURL: false` con su propio comentario
  * justificativo.
  */
-function resolveTesseractPath(path: string): string {
-  if (typeof self === "undefined") return path;
-  const origin = self.location?.origin;
-  if (origin === undefined) return path;
-  return new URL(path, origin).href;
-}
-
-/** ADR-090 §1: el modelo de orientación, cargado siempre junto a los idiomas. */
-const OSD_LANGUAGE = "osd";
-
-/*
- * ADR-090 §3: piso de `orientation_confidence` para hacerle caso a OSD. La
- * escala de Tesseract no es 0-100 y no tiene un máximo definido; medido sobre
- * una A4 a 300 DPI con texto denso da 17,1 (derecha) y 17,6 (rotada 90°), un
- * orden de magnitud sobre este piso. Debajo del piso —o si `detect` falla, o
- * devuelve `null`— no se rota nada y el camino es el de antes del ADR.
- */
-const MIN_ORIENTATION_CONFIDENCE = 1;
+// La orientación se detecta en `orientation-kernel.ts`, una instancia por Core.
 
 /*
  * ADR-112 §1: modo de segmentación de página, fijo.
@@ -158,19 +147,9 @@ const PAGE_SEG_MODE = PSM.SPARSE_TEXT;
  * alimentado no es "no contesta", es "contesta mal con confianza suficiente",
  * y contra eso el piso no protege: protege el margen.
  */
-const OSD_SCALE = 0.5;
-
 /** Instancia de tesseract cargada, y el set de idiomas con el que se cargó. */
 let worker: TesseractWorker | null = null;
 let loadedLanguages: ReadonlySet<string> = new Set();
-/**
- * ADR-119 §1: worker dedicado a OSD. `detect()` no alcanza con el core legacy
- * (`legacyCore: true`, que es lo que ADR-090 §1 dedujo): necesita además que
- * el **OEM** sea legacy. Y el OEM no se puede mezclar — con `oem: 0` los
- * idiomas de reconocimiento no cargan, porque el `traineddata` pineado es
- * `tessdata_best`, que es solo LSTM. Un worker detecta o reconoce, no las dos.
- */
-let osdWorker: TesseractWorker | null = null;
 /** ADR-090 §2: último `user_defined_dpi` aplicado a la instancia vigente. */
 let appliedDpi: number | null = null;
 /** ADR-112 §1: si la instancia vigente ya tiene aplicado `PAGE_SEG_MODE`. */
@@ -386,8 +365,18 @@ async function ensureDpiApplied(dpi: number): Promise<void> {
  */
 export type Rotation = 0 | 90 | 180 | 270;
 
-function isRotation(value: unknown): value is Rotation {
-  return value === 0 || value === 90 || value === 180 || value === 270;
+/** Conserva la forma estructural de los tests Node y crea un ImageData nativo
+ * en browser, que es necesario para `OffscreenCanvas.putImageData`. */
+function createImageDataResult(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  colorSpace: PredefinedColorSpace,
+): ImageData {
+  const stableData = new Uint8ClampedArray(data.length);
+  stableData.set(data);
+  if (typeof ImageData !== "undefined") return new ImageData(stableData, width, height);
+  return { data: stableData, width, height, colorSpace };
 }
 
 /*
@@ -435,7 +424,7 @@ export function rotateImageData(source: ImageData, degrees: Rotation): ImageData
     }
   }
 
-  return { data: out, width: outWidth, height: outHeight, colorSpace: source.colorSpace };
+  return createImageDataResult(out, outWidth, outHeight, source.colorSpace);
 }
 
 /*
@@ -476,19 +465,6 @@ export function unrotateBbox(
   };
 }
 
-interface DetectOrientationResult {
-  readonly orientation_degrees?: number | null;
-  readonly orientation_confidence?: number | null;
-}
-
-function readOrientation(data: unknown): Rotation {
-  if (typeof data !== "object" || data === null) return 0;
-  const { orientation_degrees: degrees, orientation_confidence: confidence } =
-    data as DetectOrientationResult;
-  if (typeof confidence !== "number" || confidence < MIN_ORIENTATION_CONFIDENCE) return 0;
-  return isRotation(degrees) ? degrees : 0;
-}
-
 /**
  * ADR-119 §1: worker dedicado a la detección de orientación.
  *
@@ -503,22 +479,6 @@ function readOrientation(data: unknown): Rotation {
  * mismo que "todas las páginas están derechas", y esa confusión es
  * exactamente la que dejó a ADR-090 sin funcionar sin que nadie se enterara.
  */
-async function ensureOsdWorkerLoaded(languages: ReadonlyArray<string>): Promise<TesseractWorker> {
-  if (osdWorker !== null) return osdWorker;
-  try {
-    osdWorker = await createWorker([OSD_LANGUAGE], OEM.TESSERACT_ONLY, {
-      langPath: resolveTesseractPath(TESSERACT_LANG_PATH),
-      corePath: resolveTesseractPath(TESSERACT_CORE_PATH),
-      workerPath: resolveTesseractPath(TESSERACT_WORKER_PATH),
-      legacyCore: true,
-    });
-  } catch (err: unknown) {
-    const reason = err instanceof Error ? err.message : String(err);
-    throw new OcrModelMissingError([...languages, OSD_LANGUAGE], reason);
-  }
-  return osdWorker;
-}
-
 /*
  * ADR-160 §2: la imagen de OSD se decodifica YA reducida, en un solo paso
  * (`createImageBitmap(blob, { resizeWidth, resizeHeight })`) — la página
@@ -533,50 +493,6 @@ async function ensureOsdWorkerLoaded(languages: ReadonlyArray<string>): Promise<
  * imagen que ofrecerle a OSD: no es "no sé la orientación", es "no puedo
  * prepararle nada".
  */
-async function buildOsdImage(
-  blob: Blob,
-  widthPx: number,
-  heightPx: number,
-  documentId: string,
-  pageIndex: number,
-): Promise<OffscreenCanvas> {
-  if (typeof OffscreenCanvas === "undefined") {
-    throw new OcrPageFailedError(
-      documentId,
-      pageIndex,
-      "OffscreenCanvas no disponible en este entorno.",
-    );
-  }
-  const resizeWidth = Math.max(1, Math.round(widthPx * OSD_SCALE));
-  const resizeHeight = Math.max(1, Math.round(heightPx * OSD_SCALE));
-
-  let bitmap: ImageBitmap;
-  try {
-    bitmap = await createImageBitmap(blob, { resizeWidth, resizeHeight });
-  } catch (err: unknown) {
-    throw new OcrPageFailedError(
-      documentId,
-      pageIndex,
-      `No se pudo decodificar la imagen reducida para OSD de la página ${pageIndex}: ` +
-        `${err instanceof Error ? err.message : String(err)}.`,
-    );
-  }
-
-  const canvas = new OffscreenCanvas(resizeWidth, resizeHeight);
-  const context = canvas.getContext("2d");
-  if (context === null) {
-    bitmap.close();
-    throw new OcrPageFailedError(
-      documentId,
-      pageIndex,
-      "No se pudo obtener un contexto 2D de OffscreenCanvas para la imagen de OSD.",
-    );
-  }
-  context.drawImage(bitmap, 0, 0);
-  bitmap.close();
-  return canvas;
-}
-
 /*
  * ADR-090 §3, paso 1-2. Una falla de `detect` —que `DetectOS` no concluya, que
  * la página tenga muy poco texto— cae a `0`, que es exactamente el
@@ -589,24 +505,6 @@ async function buildOsdImage(
  * misma: `buildOsdImage` corre AFUERA del try — una falla de decodificación
  * no es lo mismo que una falla de `detect()`.
  */
-async function detectOrientation(
-  blob: Blob,
-  widthPx: number,
-  heightPx: number,
-  documentId: string,
-  pageIndex: number,
-  languages: ReadonlyArray<string>,
-): Promise<Rotation> {
-  const osd = await ensureOsdWorkerLoaded(languages);
-  const osdImage = await buildOsdImage(blob, widthPx, heightPx, documentId, pageIndex);
-  try {
-    const { data } = await osd.detect(osdImage);
-    return readOrientation(data);
-  } catch {
-    return 0;
-  }
-}
-
 /*
  * Orden **interno** de este motor, y no el que ve el detector (OCR_Engine.md
  * §10, ADR-110): `fuseOcrPage` re-ordena al fusionar, con el criterio de
@@ -826,7 +724,7 @@ export function cropImageData(source: ImageData, x0: number, width: number): Ima
     const from = (y * sourceWidth + startX) * 4;
     out.set(data.subarray(from, from + cropWidth * 4), y * cropWidth * 4);
   }
-  return { data: out, width: cropWidth, height, colorSpace: source.colorSpace };
+  return createImageDataResult(out, cropWidth, height, source.colorSpace);
 }
 
 /** Fracción del área del rectángulo MÁS CHICO que comparten dos cajas. */
@@ -1218,7 +1116,14 @@ export async function kernelRecognize(
   payload: OcrPagePayload,
   opts: KernelRecognizeOptions,
 ): Promise<KernelOcrResult> {
-  const { documentId, pageIndex, image, languages, dpi } = payload;
+  const { documentId, pageIndex, image, languages, dpi, orientation } = payload;
+
+  if (orientation !== 0 && orientation !== 90 && orientation !== 180 && orientation !== 270) {
+    throw new InvalidInputError("orientation inválida en OcrPagePayload.", {
+      engineId: "ocr",
+      orientation,
+    });
+  }
 
   if (opts.abortSignal.aborted) throw new CancelledError(documentId);
 
@@ -1231,17 +1136,6 @@ export async function kernelRecognize(
   // ADR-160 §1: el blob codificado (ADR-158 §2) es la única forma de imagen
   // que existe hasta que el camino lento decide que hace falta más.
   const blob = new Blob([image.bytes], { type: `image/${image.format}` });
-
-  // ADR-090 §3: detectar antes de reconocer. ADR-160 §2: el OSD recibe la
-  // imagen ya reducida a OSD_SCALE — tampoco decodifica la página completa.
-  const orientation = await detectOrientation(
-    blob,
-    image.widthPx,
-    image.heightPx,
-    documentId,
-    pageIndex,
-    languages,
-  );
 
   if (opts.abortSignal.aborted) throw new CancelledError(documentId);
 
@@ -1267,18 +1161,6 @@ export async function kernelDispose(): Promise<void> {
       await current.terminate();
     } catch {
       // best-effort: liberar igual el estado interno aunque terminate() falle.
-    }
-  }
-  // ADR-119 §1: son dos instancias de tesseract y hay que liberar las dos. El
-  // `try` es independiente a propósito: que el principal falle al terminar no
-  // puede dejar vivo al de OSD, que son ~99 MB.
-  if (osdWorker !== null) {
-    const currentOsd = osdWorker;
-    osdWorker = null;
-    try {
-      await currentOsd.terminate();
-    } catch {
-      // best-effort, mismo criterio que el worker principal.
     }
   }
   loadedLanguages = new Set();

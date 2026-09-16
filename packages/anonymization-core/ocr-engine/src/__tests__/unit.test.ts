@@ -746,10 +746,17 @@ describe("OcrEngine — unit tests", () => {
       });
       await engine.init(budgetCtx);
 
-      // La primera imagen nunca se resuelve: retiene el único lugar del
-      // presupuesto para siempre — el modo de falla que ADR-143 §6 exige
-      // descartar por test, no por lectura.
-      const produce = vi.fn(() => new Promise<EncodedPageImage>(() => {}));
+      // La primera imagen retiene el único lugar del presupuesto hasta que la
+      // cancelación la asienta; un productor real debe observar el signal para
+      // no dejar una rama viva después del aborto.
+      const produce = vi.fn(
+        (_request: ReturnType<typeof createValidOcrPageRequest>, signal: AbortSignal) =>
+          new Promise<EncodedPageImage>((_resolve, reject) => {
+            signal.addEventListener("abort", () => reject(new CancelledError("doc-budget-hang")), {
+              once: true,
+            });
+          }),
+      );
       const requests = [
         createValidOcrPageRequest("doc-budget-hang", 0, { estimatedBytes: 100 }),
         createValidOcrPageRequest("doc-budget-hang", 1, { estimatedBytes: 100 }),

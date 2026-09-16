@@ -45,12 +45,15 @@ import {
   type EngineContext,
   type IEngine,
   type OcrPagePayload,
+  type OcrOrientationPayload,
+  type OcrOrientationResult,
   type Word,
 } from "@anonly/shared";
 
 import { OcrModelMissingError, OcrPageFailedError, OcrTimeoutError } from "./ocr.errors.js";
 import type { OcrImageProducer, OcrPageInput, OcrPageOutput, OcrPageRequest } from "./ocr.types.js";
 import type { KernelOcrResult } from "./worker/kernel.js";
+import type { OrientationKernel } from "./worker/orientation-kernel.js";
 
 /*
  * ADR-099: el kernel se importa **dinámicamente**.
@@ -153,6 +156,8 @@ interface OcrJobPool {
   releaseIdleWorkers(): void;
 }
 
+type OcrOrientationPool = OcrJobPool;
+
 /**
  * Fallback in-process trivial: sin `OcrPool` inyectada, ejecuta `run()`
  * directo, sin cola ni reintentos propios (el único loop de retry es el de
@@ -170,6 +175,56 @@ const IMMEDIATE_POOL: OcrJobPool = {
   // Sin pool real no hay ningún `WorkerLike` que terminar — no-op inocuo.
   releaseIdleWorkers: (): void => undefined,
 };
+
+function createImmediateOrientationPool(): OcrOrientationPool {
+  interface PendingOrientation {
+    readonly params: OcrDispatchParams;
+    readonly resolve: (value: unknown) => void;
+    readonly reject: (reason: unknown) => void;
+    readonly onAbort: () => void;
+  }
+  const pending: PendingOrientation[] = [];
+  let running = false;
+
+  const pump = (): void => {
+    if (running) return;
+    const next = pending.shift();
+    if (next === undefined) return;
+    running = true;
+    void next.params
+      .run()
+      .then(next.resolve, next.reject)
+      .finally(() => {
+        next.params.signal.removeEventListener("abort", next.onAbort);
+        running = false;
+        pump();
+      });
+  };
+
+  return {
+    dispatch: (params: OcrDispatchParams): Promise<unknown> => {
+      if (params.signal.aborted) return Promise.reject(new CancelledError("ocr-orient"));
+      return new Promise<unknown>((resolve, reject) => {
+        const entry: PendingOrientation = {
+          params,
+          resolve,
+          reject,
+          onAbort: (): void => {
+            const index = pending.indexOf(entry);
+            if (index >= 0) {
+              pending.splice(index, 1);
+              reject(new CancelledError("ocr-orient"));
+            }
+          },
+        };
+        pending.push(entry);
+        params.signal.addEventListener("abort", entry.onAbort, { once: true });
+        pump();
+      });
+    },
+    releaseIdleWorkers: (): void => undefined,
+  };
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -334,14 +389,34 @@ function normalizeTimeout(
   return err;
 }
 
+function normalizeModelMissing(err: unknown): OcrModelMissingError | null {
+  if (err instanceof OcrModelMissingError) return err;
+  if (!(err instanceof EngineError) || err.code !== EngineErrorCode.OCR_MODEL_MISSING) return null;
+  const languagesValue = err.details.languages;
+  const languages = Array.isArray(languagesValue)
+    ? languagesValue.filter((value): value is string => typeof value === "string")
+    : [];
+  const reason = typeof err.details.reason === "string" ? err.details.reason : err.message;
+  return new OcrModelMissingError(languages, reason);
+}
+
 export class OcrEngine implements IEngine {
   readonly id = EngineId.Ocr;
 
   private readonly pool: OcrJobPool;
+  private readonly orientationPool: OcrOrientationPool;
+  private readonly hasInjectedRecognitionPool: boolean;
+  private orientationKernel: OrientationKernel | null = null;
+  private orientationKernelPromise: Promise<OrientationKernel> | null = null;
 
   private ctx: EngineContext | null = null;
   private initialized = false;
   private disposed = false;
+  private activeProcessPages = 0;
+  private activeProcessSessions = 0;
+  private activeProcessBranches = 0;
+  private activeDrainResolvers: Array<() => void> = [];
+  private cleanupPromise: Promise<void> | null = null;
   // "Ningún reconocimiento completado aún" (ADR-045 §4) — reemplaza
   // `this.worker !== null` de antes de ADR-045: misma semántica per-instancia
   // (OCR_STARTED.modelLoading/OCR_FINISHED.modelDownloaded), pero el estado
@@ -355,8 +430,10 @@ export class OcrEngine implements IEngine {
    * comportamiento que este motor tenía antes de ADR-045, usado por sus
    * propios tests.
    */
-  constructor(pool?: OcrJobPool) {
+  constructor(pool?: OcrJobPool, orientationPool?: OcrOrientationPool) {
     this.pool = pool ?? IMMEDIATE_POOL;
+    this.hasInjectedRecognitionPool = pool !== undefined;
+    this.orientationPool = orientationPool ?? createImmediateOrientationPool();
   }
 
   init(ctx: EngineContext): Promise<void> {
@@ -368,6 +445,20 @@ export class OcrEngine implements IEngine {
   }
 
   async processPage(input: OcrPageInput, ctx: EngineContext): Promise<OcrPageOutput> {
+    this.activeProcessPages += 1;
+    try {
+      await this.awaitCleanup();
+      return await this.processPageInternal(input, ctx);
+    } finally {
+      this.activeProcessPages -= 1;
+      this.resolveActiveDrains();
+    }
+  }
+
+  private async processPageInternal(
+    input: OcrPageInput,
+    ctx: EngineContext,
+  ): Promise<OcrPageOutput> {
     this.assertNotDisposed();
     this.assertInitialized();
 
@@ -412,19 +503,20 @@ export class OcrEngine implements IEngine {
     this.assertLanguagesRequestable(languages, configuredLanguages, documentId, pageIndex);
 
     const timeoutMs = ctx.config.workerPool.timeouts["ocr-page"] ?? DEFAULT_TIMEOUT_MS;
+    const orientationTimeoutMs = ctx.config.workerPool.timeouts["ocr-orient"] ?? DEFAULT_TIMEOUT_MS;
     const maxRetries = ctx.config.workerPool.maxRetries["ocr-page"] ?? DEFAULT_MAX_RETRIES;
     const startedAt = Date.now();
 
     // El payload transporta la config EFECTIVA (con fallback de default ya
     // resuelto), no `input.languages` crudo: es lo que el kernel debe tener
     // cargado (ADR-045 §3); la restricción per-página ya se validó arriba.
-    const payload: OcrPagePayload = {
+    const basePayload = {
       documentId,
       pageIndex,
       image,
       dpi: input.dpi,
       languages: configuredLanguages,
-    };
+    } satisfies Omit<OcrPagePayload, "orientation">;
 
     let lastError: unknown = null;
 
@@ -434,6 +526,22 @@ export class OcrEngine implements IEngine {
       }
 
       try {
+        const orientationPayload: OcrOrientationPayload = {
+          documentId,
+          pageIndex,
+          image,
+          languages: configuredLanguages,
+          timeoutMs: orientationTimeoutMs,
+        };
+        const orientationResult = await this.orientationPool.dispatch({
+          run: async () => this.runOrientation(orientationPayload, ctx.abortSignal),
+          signal: ctx.abortSignal,
+          priority: DISPATCH_PRIORITY,
+          payload: orientationPayload,
+          maxRetriesOverride: 0,
+        });
+        const orientation = this.decodeOrientationResult(orientationResult);
+        const payload: OcrPagePayload = { ...basePayload, orientation };
         // ADR-045 §2: solo el reconocimiento cruza el puerto.
         // `maxRetriesOverride: 0` — el pool nunca reintenta un `ocr-page`; el
         // único loop de retry es este.
@@ -511,12 +619,20 @@ export class OcrEngine implements IEngine {
         // cargó": se propaga tal cual, sin envolver en OcrPageFailedError
         // (mismo criterio que antes de ADR-045: ensureWorkerLoaded corría
         // fuera del loop de retry).
-        if (err instanceof OcrModelMissingError) throw err;
+        const modelMissing = normalizeModelMissing(err);
+        if (modelMissing !== null) throw modelMissing;
         // Cualquier otro resultado del despacho (éxito de carga, falla de
         // reconocimiento) implica que el modelo sí quedó cargado.
         this.modelWarm = true;
 
-        const normalized = normalizeTimeout(err, documentId, pageIndex, timeoutMs);
+        const normalized = normalizeTimeout(
+          err,
+          documentId,
+          pageIndex,
+          err instanceof EngineError && err.code === EngineErrorCode.OCR_TIMEOUT
+            ? orientationTimeoutMs
+            : timeoutMs,
+        );
         lastError = normalized;
         if (!(normalized instanceof OcrTimeoutError)) break; // no recuperable: no reintentar
         // OcrTimeoutError: recuperable, el for reintenta si quedan intentos.
@@ -547,6 +663,21 @@ export class OcrEngine implements IEngine {
     produce: OcrImageProducer,
     ctx: EngineContext,
   ): Promise<ReadonlyArray<OcrPageOutput>> {
+    this.activeProcessSessions += 1;
+    try {
+      await this.awaitCleanup();
+      return await this.processSessionInternal(requests, produce, ctx);
+    } finally {
+      this.activeProcessSessions -= 1;
+      this.resolveActiveDrains();
+    }
+  }
+
+  private async processSessionInternal(
+    requests: ReadonlyArray<OcrPageRequest>,
+    produce: OcrImageProducer,
+    ctx: EngineContext,
+  ): Promise<ReadonlyArray<OcrPageOutput>> {
     this.assertNotDisposed();
     this.assertInitialized();
 
@@ -571,7 +702,11 @@ export class OcrEngine implements IEngine {
      * que ya se adapta al equipo (`config.ts`: 1 en `lowResource`, 2 si no).
      */
     const budget = new LiveImageBudget(ctx.config.ocr.maxLiveImageBytes);
-    const concurrency = Math.max(1, Math.min(ctx.config.workerPool.ocrPoolSize, requests.length));
+    const configuredPoolSize = ctx.config.workerPool.ocrPoolSize;
+    const concurrency =
+      this.hasInjectedRecognitionPool && configuredPoolSize === 2
+        ? Math.min(3, requests.length)
+        : Math.min(configuredPoolSize, requests.length);
     // Por índice, no por orden de llegada: con varios descriptores en vuelo
     // terminan desordenados, y `outputs` tiene que respetar el orden recibido.
     const slots: (OcrPageOutput | undefined)[] = new Array<OcrPageOutput | undefined>(
@@ -593,7 +728,17 @@ export class OcrEngine implements IEngine {
       }
     };
 
-    await Promise.all(Array.from({ length: concurrency }, () => drainQueue()));
+    const runBranch = async (): Promise<void> => {
+      this.activeProcessBranches += 1;
+      try {
+        await drainQueue();
+      } finally {
+        this.activeProcessBranches -= 1;
+        this.resolveActiveDrains();
+      }
+    };
+
+    await Promise.all(Array.from({ length: concurrency }, () => runBranch()));
     const outputs: OcrPageOutput[] = slots.filter(
       (output): output is OcrPageOutput => output !== undefined,
     );
@@ -785,20 +930,107 @@ export class OcrEngine implements IEngine {
    * pagando la recarga del modelo como costo declarado.
    */
   releaseIdleWorkers(): void {
-    this.pool.releaseIdleWorkers();
+    if (
+      this.activeProcessPages !== 0 ||
+      this.activeProcessSessions !== 0 ||
+      this.activeProcessBranches !== 0
+    )
+      return;
+    const cleanup = async (): Promise<void> => {
+      this.pool.releaseIdleWorkers();
+      this.orientationPool.releaseIdleWorkers();
+      const kernel = this.orientationKernel;
+      this.orientationKernel = null;
+      this.orientationKernelPromise = null;
+      if (kernel !== null) await kernel.dispose();
+      if (kernelModule !== undefined) await (await kernelModule).kernelDispose();
+      this.modelWarm = false;
+    };
+    const pending = this.cleanupPromise === null ? cleanup() : this.cleanupPromise.then(cleanup);
+    this.cleanupPromise = pending.catch(() => undefined);
+    void pending.catch(() => undefined);
+  }
+
+  private async awaitCleanup(): Promise<void> {
+    if (this.cleanupPromise !== null) {
+      await this.cleanupPromise;
+      this.cleanupPromise = null;
+    }
+  }
+
+  private waitForNoActivePages(): Promise<void> {
+    if (
+      this.activeProcessPages === 0 &&
+      this.activeProcessSessions === 0 &&
+      this.activeProcessBranches === 0
+    ) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => this.activeDrainResolvers.push(resolve));
+  }
+
+  private resolveActiveDrains(): void {
+    if (
+      this.activeProcessPages !== 0 ||
+      this.activeProcessSessions !== 0 ||
+      this.activeProcessBranches !== 0
+    )
+      return;
+    const resolvers = this.activeDrainResolvers.splice(0);
+    for (const resolve of resolvers) resolve();
   }
 
   async dispose(): Promise<void> {
+    this.disposed = true;
+    await this.waitForNoActivePages();
+    await this.awaitCleanup();
+    this.pool.releaseIdleWorkers();
+    this.orientationPool.releaseIdleWorkers();
     // ADR-045 §2: no pasa por pool.dispatch (dispose no es la operación del
     // puerto) — libera directo el kernel local. La liberación server-side en
     // un OcrWorker real llega por el mensaje genérico DISPOSE del protocolo.
     // Si el kernel nunca se cargó no hay nada que liberar — y cargarlo para
     // liberarlo anularía el punto de ADR-099.
     if (kernelModule !== undefined) await (await kernelModule).kernelDispose();
+    if (this.orientationKernelPromise !== null) {
+      await this.orientationKernelPromise.catch(() => undefined);
+    }
+    if (this.orientationKernel !== null) await this.orientationKernel.dispose();
+    this.orientationKernel = null;
+    this.orientationKernelPromise = null;
     this.modelWarm = false;
     this.disposed = true;
     this.initialized = false;
     this.ctx = null;
+  }
+
+  private async runOrientation(
+    payload: OcrOrientationPayload,
+    signal: AbortSignal,
+  ): Promise<OcrOrientationResult> {
+    if (this.orientationKernelPromise === null) {
+      this.orientationKernelPromise = import("./worker/orientation-kernel.js").then((module) =>
+        module.createOrientationKernel(),
+      );
+    }
+    this.orientationKernel = await this.orientationKernelPromise;
+    return this.orientationKernel.detect(payload, signal);
+  }
+
+  private decodeOrientationResult(value: unknown): OcrOrientationResult["orientation"] {
+    if (typeof value !== "object" || value === null || !("orientation" in value)) {
+      throw new InvalidInputError("Resultado de orientación inválido.", {
+        engineId: EngineId.Ocr,
+      });
+    }
+    const orientation = (value as { readonly orientation: unknown }).orientation;
+    if (orientation !== 0 && orientation !== 90 && orientation !== 180 && orientation !== 270) {
+      throw new InvalidInputError("Ángulo de orientación inválido.", {
+        engineId: EngineId.Ocr,
+        orientation,
+      });
+    }
+    return orientation;
   }
 
   private assertLanguagesRequestable(

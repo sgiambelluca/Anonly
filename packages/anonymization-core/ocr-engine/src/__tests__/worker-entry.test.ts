@@ -87,6 +87,7 @@ function basePayload(overrides?: Partial<OcrPagePayload>): OcrPagePayload {
     documentId: "doc-worker",
     pageIndex: 0,
     image: createEncodedPageImage(100, 40),
+    orientation: 0,
     dpi: 300,
     languages: ["spa", "eng"],
     ...overrides,
@@ -207,8 +208,8 @@ describe("OcrWorker entry-point — kernel puro (ADR-045 §3)", () => {
     // handleDispose() es async (kernelDispose -> terminate()); deja pasar microtasks.
     await Promise.resolve();
     await Promise.resolve();
-    // ADR-119 §1: DISPOSE libera los DOS workers, el de reconocimiento y el de OSD.
-    expect(terminate).toHaveBeenCalledTimes(2);
+    // ADR-164: OSD vive en su worker compartido, fuera de este entry.
+    expect(terminate).toHaveBeenCalledTimes(1);
 
     fakeSelf.postMessage.mockClear();
     fakeSelf.emitMessage({
@@ -223,8 +224,8 @@ describe("OcrWorker entry-point — kernel puro (ADR-045 §3)", () => {
     // precondición de "documento cargado": recarga la instancia de tesseract
     // bajo demanda y el RUN posterior a DISPOSE completa igual.
     await vi.waitFor(() => expect(outboundOfType(fakeSelf, "COMPLETED")).toBeDefined());
-    // dos por el primer RUN (reconocimiento + OSD) y dos por el posterior a DISPOSE
-    expect(createWorker).toHaveBeenCalledTimes(4);
+    // Un LSTM por RUN; OSD pertenece al entry compartido.
+    expect(createWorker).toHaveBeenCalledTimes(2);
   });
 
   it("INIT adopta la config real (workerPool.timeouts['ocr-page']) y vuelve a publicar READY", async () => {
@@ -277,19 +278,14 @@ describe("OcrWorker entry-point — kernel puro (ADR-045 §3)", () => {
 
   it("kernel recreates tesseract instance on language set change", async () => {
     const terminateA = vi.fn(() => Promise.resolve());
-    const terminateOsd = vi.fn(() => Promise.resolve());
     const terminateB = vi.fn(() => Promise.resolve());
     /*
-     * ADR-119 §1: el orden de creacion es reconocimiento -> OSD -> el
-     * reconocimiento recreado. El de OSD NO se recrea al cambiar de idioma:
-     * carga solo `osd`, que no depende de la config.
+     * ADR-164: solo se recrea el worker LSTM al cambiar de idioma; OSD vive en
+     * su entry compartido.
      */
     vi.mocked(createWorker)
       .mockResolvedValueOnce(
         mockTesseractWorker(mockEmptyRecognizeData(), { terminate: terminateA }),
-      )
-      .mockResolvedValueOnce(
-        mockTesseractWorker(mockEmptyRecognizeData(), { terminate: terminateOsd }),
       )
       .mockResolvedValueOnce(
         mockTesseractWorker(mockEmptyRecognizeData(), { terminate: terminateB }),
@@ -306,8 +302,8 @@ describe("OcrWorker entry-point — kernel puro (ADR-045 §3)", () => {
       payload: withLanguages(["spa", "eng"]),
     });
     await vi.waitFor(() => expect(outboundOfType(fakeSelf, "COMPLETED")).toBeDefined());
-    // ADR-119 §1: un RUN crea DOS workers — el de reconocimiento y el de OSD.
-    expect(createWorker).toHaveBeenCalledTimes(2);
+    // ADR-164: este entry crea únicamente la instancia LSTM.
+    expect(createWorker).toHaveBeenCalledTimes(1);
     expect(createWorker).toHaveBeenNthCalledWith(1, ["spa", "eng"], undefined, expect.anything());
 
     fakeSelf.postMessage.mockClear();
@@ -322,11 +318,8 @@ describe("OcrWorker entry-point — kernel puro (ADR-045 §3)", () => {
     });
     await vi.waitFor(() => expect(outboundOfType(fakeSelf, "COMPLETED")).toBeDefined());
     expect(terminateA).toHaveBeenCalledTimes(1);
-    // reconocimiento + OSD + reconocimiento recreado (ADR-119 §1)
-    expect(createWorker).toHaveBeenCalledTimes(3);
-    // ADR-119 §1: el worker de OSD no se recrea al cambiar de idioma —
-    // solo carga `osd`—, asi que la recarga de idiomas es la 3ra llamada.
-    expect(createWorker).toHaveBeenNthCalledWith(3, ["fra"], undefined, expect.anything());
+    expect(createWorker).toHaveBeenCalledTimes(2);
+    expect(createWorker).toHaveBeenNthCalledWith(2, ["fra"], undefined, expect.anything());
 
     fakeSelf.postMessage.mockClear();
 
@@ -339,8 +332,8 @@ describe("OcrWorker entry-point — kernel puro (ADR-045 §3)", () => {
       payload: withLanguages(["fra"]),
     });
     await vi.waitFor(() => expect(outboundOfType(fakeSelf, "COMPLETED")).toBeDefined());
-    // sigue en 3: el tercer RUN reusa la instancia, no crea ninguna (ADR-119 §1)
-    expect(createWorker).toHaveBeenCalledTimes(3);
+    // sigue en 2: el tercer RUN reusa la instancia, no crea ninguna nueva.
+    expect(createWorker).toHaveBeenCalledTimes(2);
     expect(terminateB).not.toHaveBeenCalled();
   });
 
