@@ -4,11 +4,13 @@ import {
   analyzeMarginInk,
   checkMarginInkInvariants,
   computeMarginInkCorrelation,
+  computeMarginInkCorrelationExact,
   computeResidualHistogram,
   fractionOfStripHeight,
   MarginInkInvariantError,
   MarginInkParseError,
   parseMarginInkStripRecord,
+  summarizeSmallestZeroDilation,
   type MarginInkBoxPx,
   type MarginInkStripRecord,
 } from "./marginInk.js";
@@ -33,6 +35,12 @@ function buildActiveRecord(overrides: Partial<MarginInkStripRecord> = {}): Margi
     maskedWordBoxes: 1,
     residualInkPixels: [10, 8, 4, 0],
     residualBox: [box(20, 20, 30, 30), box(20, 20, 29, 29), box(21, 21, 28, 28), null],
+    // M-1b: superconjunto del criterio de brillo en cada d compartido
+    // (15>=10, 12>=8, 6>=4, 1>=0) y en el total (50>=40); llega a cero en
+    // d=4 (índice 4 de la escalera [0,1,2,3,4,6,8]).
+    inkPixelsExact: 50,
+    residualExact: [15, 12, 6, 1, 0, 0, 0],
+    smallestZeroDilation: 4,
     wouldSkipByWhiteGate: false,
     wordsAddedByThisStrip: 0,
     addedWordTexts: [],
@@ -54,6 +62,10 @@ function buildSkippedRecord(overrides: Partial<MarginInkStripRecord> = {}): Marg
     maskedWordBoxes: 0,
     residualInkPixels: [0, 0, 0, 0],
     residualBox: [null, null, null, null],
+    // M-1b: márgenes blancos — sin tinta bajo ninguno de los dos criterios.
+    inkPixelsExact: 0,
+    residualExact: [0, 0, 0, 0, 0, 0, 0],
+    smallestZeroDilation: 0,
     wouldSkipByWhiteGate: true,
     wordsAddedByThisStrip: 0,
     addedWordTexts: [],
@@ -133,6 +145,32 @@ describe("parseMarginInkStripRecord", () => {
     const broken = { ...deepClone(buildActiveRecord()), inkPixels: 1.5 };
     expect(() => parseMarginInkStripRecord(broken)).toThrow(MarginInkParseError);
   });
+
+  // M-1b (Handoff §8.2)
+
+  it("lanza si residualExact no tiene longitud 7", () => {
+    const broken = { ...deepClone(buildActiveRecord()), residualExact: [0, 0, 0, 0] };
+    expect(() => parseMarginInkStripRecord(broken)).toThrow(MarginInkParseError);
+  });
+
+  it("lanza si inkPixelsExact es negativo", () => {
+    const broken = { ...deepClone(buildActiveRecord()), inkPixelsExact: -1 };
+    expect(() => parseMarginInkStripRecord(broken)).toThrow(MarginInkParseError);
+  });
+
+  it("lanza si smallestZeroDilation no es null ni un valor de la escalera", () => {
+    const broken = { ...deepClone(buildActiveRecord()), smallestZeroDilation: 5 };
+    expect(() => parseMarginInkStripRecord(broken)).toThrow(MarginInkParseError);
+  });
+
+  it("acepta smallestZeroDilation null", () => {
+    const record = buildActiveRecord({
+      smallestZeroDilation: null,
+      residualExact: [1, 1, 1, 1, 1, 1, 1],
+    });
+    const parsed = parseMarginInkStripRecord(deepClone(record));
+    expect(parsed.smallestZeroDilation).toBeNull();
+  });
 });
 
 // ─── Invariantes (Handoff §2.4) ─────────────────────────────────────────────
@@ -204,6 +242,28 @@ describe("checkMarginInkInvariants", () => {
     const violations = checkMarginInkInvariants([buildActiveRecord()]);
     expect(violations.some((v) => v.rule === "whiteGateImpliesZeroInk")).toBe(false);
   });
+
+  // Invariante nuevo (Handoff §8.3): residualExact[d] >= residualInkPixels[d]
+  // y inkPixelsExact >= inkPixels — el criterio exacto cuenta un
+  // superconjunto del umbral de brillo.
+
+  it("invariante 5a: inkPixelsExact < inkPixels dispara exactSupersetOfBrightness", () => {
+    const broken = buildActiveRecord({ inkPixelsExact: 30 }); // inkPixels=40
+    const violations = checkMarginInkInvariants([broken]);
+    expect(violations.some((v) => v.rule === "exactSupersetOfBrightness")).toBe(true);
+  });
+
+  it("invariante 5b: residualExact[d] < residualInkPixels[d] dispara exactSupersetOfBrightness", () => {
+    // residualInkPixels=[10,8,4,0]; acá residualExact[1]=5 < 8.
+    const broken = buildActiveRecord({ residualExact: [15, 5, 6, 1, 0, 0, 0] });
+    const violations = checkMarginInkInvariants([broken]);
+    expect(violations.some((v) => v.rule === "exactSupersetOfBrightness")).toBe(true);
+  });
+
+  it("invariante 5: un registro consistente (exacto superconjunto del de brillo) NO dispara exactSupersetOfBrightness", () => {
+    const violations = checkMarginInkInvariants([buildActiveRecord(), buildSkippedRecord()]);
+    expect(violations.some((v) => v.rule === "exactSupersetOfBrightness")).toBe(false);
+  });
 });
 
 // ─── analyzeMarginInk: lanza sobre lote inconsistente, agrega sobre uno sano ─
@@ -219,6 +279,10 @@ describe("analyzeMarginInk", () => {
     expect(result.totalProjectionMismatches).toBe(0);
     expect(result.residualHistogramByDilation[0].n).toBe(2);
     expect(result.correlation.cells.reduce((sum, c) => sum + c.count, 0)).toBe(2);
+    // M-1b: la correlación exacta y la distribución de smallestZeroDilation
+    // también se agregan, sobre el mismo lote.
+    expect(result.correlationExact.cells.reduce((sum, c) => sum + c.count, 0)).toBe(2);
+    expect(result.smallestZeroDilationDistribution).toEqual({ "4": 1, "0": 1 });
   });
 });
 
@@ -263,6 +327,52 @@ describe("computeMarginInkCorrelation", () => {
     const cell = correlation.cells.find((c) => !c.residualZero && c.wordsAdded);
     expect(cell?.count).toBe(1);
     expect(correlation.disqualifyingRows).toEqual([]);
+  });
+});
+
+// ─── La correlación exacta y la distribución de smallestZeroDilation (M-1b, Handoff §8.4) ─
+
+describe("computeMarginInkCorrelationExact", () => {
+  it("usa residualExact[0], no residualInkPixels[0], para decidir residuo cero", () => {
+    // residualInkPixels[0]=0 (residuo de brillo cero) pero residualExact[0]=3
+    // (bajo el criterio exacto todavía queda tinta) — tienen que clasificar distinto.
+    const record = buildActiveRecord({
+      residualInkPixels: [0, 0, 0, 0],
+      residualExact: [3, 2, 1, 0, 0, 0, 0],
+      wordsAddedByThisStrip: 0,
+      addedWordTexts: [],
+    });
+    const brightness = computeMarginInkCorrelation([record]);
+    const exact = computeMarginInkCorrelationExact([record]);
+    expect(brightness.cells.find((c) => c.residualZero && !c.wordsAdded)?.count).toBe(1);
+    expect(exact.cells.find((c) => !c.residualZero && !c.wordsAdded)?.count).toBe(1);
+  });
+
+  it("una tira con residualExact[0]=0 que aportó palabras cae en disqualifyingRows bajo el criterio exacto", () => {
+    const record = buildActiveRecord({
+      residualInkPixels: [0, 0, 0, 0],
+      residualExact: [0, 0, 0, 0, 0, 0, 0],
+      wordsAddedByThisStrip: 1,
+      addedWordTexts: ["FOJA"],
+    });
+    const exact = computeMarginInkCorrelationExact([record]);
+    expect(exact.disqualifyingRows).toHaveLength(1);
+  });
+});
+
+describe("summarizeSmallestZeroDilation", () => {
+  it("cuenta cuántas tiras apagan el residuo exacto en cada d, y agrupa las que nunca lo apagan bajo 'null'", () => {
+    const records = [
+      buildActiveRecord({ smallestZeroDilation: 0 }),
+      buildActiveRecord({ smallestZeroDilation: 0 }),
+      buildActiveRecord({ smallestZeroDilation: 4 }),
+      buildActiveRecord({ smallestZeroDilation: null, residualExact: [5, 5, 5, 5, 5, 5, 5] }),
+    ];
+    expect(summarizeSmallestZeroDilation(records)).toEqual({ "0": 2, "4": 1, null: 1 });
+  });
+
+  it("devuelve un objeto vacío para un lote vacío", () => {
+    expect(summarizeSmallestZeroDilation([])).toEqual({});
   });
 });
 

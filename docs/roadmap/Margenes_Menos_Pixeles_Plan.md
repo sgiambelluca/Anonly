@@ -243,7 +243,14 @@ se aplica el criterio de §5:
    con las dimensiones equivocadas en 90/270). No es solo prioridad: **toca la
    misma función** que va a tocar I-1, `recognizeRotatedMargins`. I-1 se
    construye sobre el árbol ya corregido, no en paralelo.
-2. **ADR de I-1 + su handoff**, escritos por el planificador.
+2. **ADR de I-1 + su handoff**, escritos por el planificador. Hechos:
+   [ADR-165](../adr/ADR-165-Una-Franja-Ya-Explicada-No-Se-Reconoce.md),
+   `OCR_Engine.md` v1.17.0 y
+   [`Margenes_Menos_Pixeles_Implementacion_Handoff.md`](Margenes_Menos_Pixeles_Implementacion_Handoff.md).
+   La medición M-1b (§8 del handoff de medición) ubicó el resultado en el
+   **Mundo B**: el criterio exacto de ADR-162 necesita una tolerancia
+   geométrica de 1 px, y cualquier valor entre 1 y 8 toma las mismas 112
+   decisiones.
 3. **Implementación** en `ocr-engine`, un solo commit, con sus tests.
 4. **Medición A/B real** del cambio implementado.
 5. **Conclusión**: se mantiene o se revierte.

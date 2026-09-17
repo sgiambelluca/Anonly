@@ -42,6 +42,13 @@ export type MarginInkStrip = "left" | "right";
 export const MARGIN_INK_DILATIONS = [0, 1, 2, 3] as const;
 export type MarginInkDilationIndex = 0 | 1 | 2 | 3;
 
+/** M-1b (Handoff §8.2): escalera larga para el criterio EXACTO de ADR-162 —
+ * más larga que la de arriba a propósito, para ver dónde se apaga el residuo
+ * bajo un criterio sin umbral. Los primeros cuatro valores coinciden con
+ * `MARGIN_INK_DILATIONS`, en el mismo orden. */
+export const MARGIN_INK_EXACT_DILATIONS = [0, 1, 2, 3, 4, 6, 8] as const;
+export type MarginInkExactDilationIndex = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+
 /**
  * Caja en píxeles de la tira, formato `(x0,y0,x1,y1)` — el que pide la tabla
  * del Handoff §2.2, distinto del `{x,y,width,height}` de `BoundingBox` de
@@ -90,6 +97,20 @@ export interface MarginInkStripRecord {
     MarginInkBoxPx | null,
     MarginInkBoxPx | null,
   ];
+  /**
+   * M-1b (Handoff §8.2, corrigiendo un error de §2.2: la definición de tinta
+   * original es un umbral de brillo, `v < 128`, no el criterio exacto de
+   * ADR-162). Mismo escaneo de píxeles que los campos de arriba, con el
+   * predicado EXACTO de `isVisuallyWhiteStrip` en vez del umbral —
+   * `inkPixelsExact` es un superconjunto de `inkPixels` por construcción
+   * (invariante nuevo, ver `checkExactSupersetOfBrightness`).
+   */
+  readonly inkPixelsExact: number;
+  /** Índice = posición en `MARGIN_INK_EXACT_DILATIONS`, no el valor de `d`. */
+  readonly residualExact: readonly [number, number, number, number, number, number, number];
+  /** El `d` (valor, no índice) más chico de `MARGIN_INK_EXACT_DILATIONS` con
+   * `residualExact[d] === 0`, o `null` si ninguno de los siete lo logra. */
+  readonly smallestZeroDilation: number | null;
   readonly wouldSkipByWhiteGate: boolean;
   readonly wordsAddedByThisStrip: number;
   readonly addedWordTexts: ReadonlyArray<string>;
@@ -148,21 +169,47 @@ function parseBoxOrNull(value: unknown, path: string): MarginInkBoxPx | null {
   return box;
 }
 
-function parseResidualTuple(
+/** Parseo genérico de una tupla de enteros >= 0 de longitud fija — reusado
+ * para la escalera corta (4) de §2.2 y la larga (7) de §8.2. */
+function parseNonNegativeIntTuple(
   value: unknown,
   path: string,
-): readonly [number, number, number, number] {
+  length: number,
+): ReadonlyArray<number> {
   assertField(Array.isArray(value), `${path} no es un array`);
   const arr = value as ReadonlyArray<unknown>;
-  assertField(arr.length === 4, `${path} no tiene longitud 4 (tiene ${arr.length})`);
-  const parsed = arr.map((entry, index) => {
+  assertField(arr.length === length, `${path} no tiene longitud ${length} (tiene ${arr.length})`);
+  return arr.map((entry, index) => {
     assertField(
       isFiniteNumber(entry) && Number.isInteger(entry) && entry >= 0,
       `${path}[${index}] no es un entero >= 0: ${describeUnknown(entry)}`,
     );
     return entry as number;
   });
+}
+
+function parseResidualTuple(
+  value: unknown,
+  path: string,
+): readonly [number, number, number, number] {
+  const parsed = parseNonNegativeIntTuple(value, path, 4);
   return [parsed[0] as number, parsed[1] as number, parsed[2] as number, parsed[3] as number];
+}
+
+function parseResidualExactTuple(
+  value: unknown,
+  path: string,
+): readonly [number, number, number, number, number, number, number] {
+  const parsed = parseNonNegativeIntTuple(value, path, 7);
+  return [
+    parsed[0] as number,
+    parsed[1] as number,
+    parsed[2] as number,
+    parsed[3] as number,
+    parsed[4] as number,
+    parsed[5] as number,
+    parsed[6] as number,
+  ];
 }
 
 function parseBoxTuple(
@@ -238,6 +285,21 @@ export function parseMarginInkStripRecord(value: unknown): MarginInkStripRecord 
   );
   const residualInkPixels = parseResidualTuple(record.residualInkPixels, "residualInkPixels");
   const residualBox = parseBoxTuple(record.residualBox, "residualBox");
+  assertField(
+    isFiniteNumber(record.inkPixelsExact) &&
+      Number.isInteger(record.inkPixelsExact) &&
+      record.inkPixelsExact >= 0,
+    "inkPixelsExact inválido",
+  );
+  const residualExact = parseResidualExactTuple(record.residualExact, "residualExact");
+  assertField(
+    record.smallestZeroDilation === null ||
+      (isFiniteNumber(record.smallestZeroDilation) &&
+        (MARGIN_INK_EXACT_DILATIONS as ReadonlyArray<number>).includes(
+          record.smallestZeroDilation,
+        )),
+    `smallestZeroDilation inválido: ${describeUnknown(record.smallestZeroDilation)}`,
+  );
   assertField(typeof record.wouldSkipByWhiteGate === "boolean", "wouldSkipByWhiteGate no booleano");
   assertField(
     isFiniteNumber(record.wordsAddedByThisStrip) &&
@@ -269,6 +331,9 @@ export function parseMarginInkStripRecord(value: unknown): MarginInkStripRecord 
     maskedWordBoxes: record.maskedWordBoxes as number,
     residualInkPixels,
     residualBox,
+    inkPixelsExact: record.inkPixelsExact as number,
+    residualExact,
+    smallestZeroDilation: record.smallestZeroDilation as number | null,
     wouldSkipByWhiteGate: record.wouldSkipByWhiteGate as boolean,
     wordsAddedByThisStrip: record.wordsAddedByThisStrip as number,
     addedWordTexts,
@@ -376,7 +441,8 @@ export interface MarginInkViolation {
     | "residualBoxWithinInkBox"
     | "inkBoxWithinStrip"
     | "uniqueRecordPerStrip"
-    | "whiteGateImpliesZeroInk";
+    | "whiteGateImpliesZeroInk"
+    | "exactSupersetOfBrightness";
   readonly detail: string;
 }
 
@@ -414,6 +480,43 @@ function checkResidualMonotonic(
       });
     }
     previous = value;
+  }
+}
+
+/**
+ * Invariante nuevo (Handoff §8.3): `residualExact[d] >= residualInkPixels[d]`
+ * para los `d` que las dos escaleras comparten (los primeros cuatro de
+ * `MARGIN_INK_EXACT_DILATIONS`, idénticos a `MARGIN_INK_DILATIONS`), y lo
+ * mismo para los totales (`inkPixelsExact >= inkPixels`). Un píxel oscuro
+ * (`v < 128`) nunca es blanco puro, así que el criterio exacto cuenta un
+ * SUPERCONJUNTO — si esta desigualdad se rompe, uno de los dos predicados
+ * está mal aplicado y la corrida no vale (no se ajusta el invariante).
+ */
+function checkExactSupersetOfBrightness(
+  record: MarginInkStripRecord,
+  violations: MarginInkViolation[],
+): void {
+  if (record.inkPixelsExact < record.inkPixels) {
+    violations.push({
+      documentId: record.documentId,
+      pageIndex: record.pageIndex,
+      strip: record.strip,
+      rule: "exactSupersetOfBrightness",
+      detail: `inkPixelsExact=${record.inkPixelsExact} < inkPixels=${record.inkPixels}`,
+    });
+  }
+  for (let d = 0; d < MARGIN_INK_DILATIONS.length; d++) {
+    const exactValue = record.residualExact[d] as number;
+    const brightnessValue = record.residualInkPixels[d] as number;
+    if (exactValue < brightnessValue) {
+      violations.push({
+        documentId: record.documentId,
+        pageIndex: record.pageIndex,
+        strip: record.strip,
+        rule: "exactSupersetOfBrightness",
+        detail: `residualExact[${d}]=${exactValue} < residualInkPixels[${d}]=${brightnessValue}`,
+      });
+    }
   }
 }
 
@@ -521,6 +624,7 @@ export function checkMarginInkInvariants(
     checkResidualMonotonic(record, violations);
     checkBoxContainment(record, violations);
     checkWhiteGateImpliesZeroInk(record, violations);
+    checkExactSupersetOfBrightness(record, violations);
   }
   return violations;
 }
@@ -568,23 +672,25 @@ export interface MarginInkCorrelation {
 }
 
 /**
- * Cruza, por cada tira, `residualInkPixels[0] === 0` contra
- * `wordsAddedByThisStrip > 0` (Handoff §3). Opera sobre `d = 0` exactamente
- * — la curva `d = 0..3` es diagnóstico aparte (Handoff §2.2), no reemplaza
- * esta tabla.
+ * Cruza, por cada tira, `residualZero(record)` contra `wordsAddedByThisStrip
+ * > 0` (Handoff §3). Compartida entre el criterio de brillo (`d = 0` de
+ * `residualInkPixels`) y el exacto de M-1b (`d = 0` de `residualExact`,
+ * Handoff §8.4) — la lógica de cruce es la misma, solo cambia qué campo
+ * decide "residuo cero".
  */
-export function computeMarginInkCorrelation(
+function computeMarginInkCorrelationBy(
   records: ReadonlyArray<MarginInkStripRecord>,
+  residualZero: (record: MarginInkStripRecord) => boolean,
 ): MarginInkCorrelation {
   const cellCounts = new Map<string, number>();
   const disqualifyingRows: MarginInkDisqualifyingRow[] = [];
 
   for (const record of records) {
-    const residualZero = (record.residualInkPixels[0] as number) === 0;
+    const isZero = residualZero(record);
     const wordsAdded = record.wordsAddedByThisStrip > 0;
-    const key = `${String(residualZero)}:${String(wordsAdded)}`;
+    const key = `${String(isZero)}:${String(wordsAdded)}`;
     cellCounts.set(key, (cellCounts.get(key) ?? 0) + 1);
-    if (residualZero && wordsAdded) {
+    if (isZero && wordsAdded) {
       disqualifyingRows.push({
         documentId: record.documentId,
         pageIndex: record.pageIndex,
@@ -603,6 +709,53 @@ export function computeMarginInkCorrelation(
   ];
 
   return { cells, disqualifyingRows };
+}
+
+/**
+ * Cruza, por cada tira, `residualInkPixels[0] === 0` contra
+ * `wordsAddedByThisStrip > 0` (Handoff §3, criterio de BRILLO). Opera sobre
+ * `d = 0` exactamente — la curva `d = 0..3` es diagnóstico aparte (Handoff
+ * §2.2), no reemplaza esta tabla.
+ */
+export function computeMarginInkCorrelation(
+  records: ReadonlyArray<MarginInkStripRecord>,
+): MarginInkCorrelation {
+  return computeMarginInkCorrelationBy(
+    records,
+    (record) => (record.residualInkPixels[0] as number) === 0,
+  );
+}
+
+/**
+ * La misma correlación, bajo el criterio EXACTO de ADR-162 (Handoff §8.4:
+ * "la correlación de §3, repetida bajo el criterio exacto"). Opera sobre
+ * `residualExact[0]`.
+ */
+export function computeMarginInkCorrelationExact(
+  records: ReadonlyArray<MarginInkStripRecord>,
+): MarginInkCorrelation {
+  return computeMarginInkCorrelationBy(
+    records,
+    (record) => (record.residualExact[0] as number) === 0,
+  );
+}
+
+/**
+ * Distribución de `smallestZeroDilation` (Handoff §8.4) — cuenta cuántas
+ * tiras del lote apagan su residuo exacto en cada `d` de
+ * `MARGIN_INK_EXACT_DILATIONS`, y cuántas nunca lo apagan (`null`). Las
+ * claves de dilatación son el valor de `d` como string; `"null"` agrupa las
+ * que no llegan a cero en ningún escalón de la escalera.
+ */
+export function summarizeSmallestZeroDilation(
+  records: ReadonlyArray<MarginInkStripRecord>,
+): Readonly<Record<string, number>> {
+  const counts = new Map<string, number>();
+  for (const record of records) {
+    const key = record.smallestZeroDilation === null ? "null" : String(record.smallestZeroDilation);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return Object.fromEntries(counts);
 }
 
 // ─── Histograma de residuo (Handoff §5.2/§5.3) ─────────────────────────────
@@ -653,17 +806,23 @@ export function fractionOfStripHeight(
 
 export interface MarginInkAnalysis {
   readonly correlation: MarginInkCorrelation;
+  /** M-1b (Handoff §8.4): la misma correlación bajo el criterio exacto. */
+  readonly correlationExact: MarginInkCorrelation;
   readonly residualHistogramByDilation: Readonly<
     Record<MarginInkDilationIndex, MarginInkHistogramStats>
   >;
+  /** M-1b (Handoff §8.4): distribución de `smallestZeroDilation`. */
+  readonly smallestZeroDilationDistribution: Readonly<Record<string, number>>;
   readonly totalProjectionMismatches: number;
 }
 
 /**
- * Valida los invariantes del Handoff §2.4 y agrega la correlación de §3 más
- * el histograma de residuo de §5.2. Lanza `MarginInkInvariantError` si algún
- * invariante no se cumple — agregar igual sobre un lote inconsistente sería
- * exactamente el modo de falla silenciosa que el Handoff advierte.
+ * Valida los invariantes del Handoff §2.4 + §8.3 y agrega la correlación de
+ * §3 (brillo y exacta) más el histograma de residuo de §5.2 y la
+ * distribución de `smallestZeroDilation` de §8.4. Lanza
+ * `MarginInkInvariantError` si algún invariante no se cumple — agregar igual
+ * sobre un lote inconsistente sería exactamente la falla silenciosa que el
+ * Handoff advierte.
  */
 export function analyzeMarginInk(records: ReadonlyArray<MarginInkStripRecord>): MarginInkAnalysis {
   const violations = checkMarginInkInvariants(records);
@@ -673,12 +832,14 @@ export function analyzeMarginInk(records: ReadonlyArray<MarginInkStripRecord>): 
 
   return {
     correlation: computeMarginInkCorrelation(records),
+    correlationExact: computeMarginInkCorrelationExact(records),
     residualHistogramByDilation: {
       0: computeResidualHistogram(records, 0),
       1: computeResidualHistogram(records, 1),
       2: computeResidualHistogram(records, 2),
       3: computeResidualHistogram(records, 3),
     },
+    smallestZeroDilationDistribution: summarizeSmallestZeroDilation(records),
     totalProjectionMismatches,
   };
 }

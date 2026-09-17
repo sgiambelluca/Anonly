@@ -269,3 +269,82 @@ Y una lección cara de la fase anterior: **antes de declarar que un número
 propio contradice un ADR, leer la fila completa de la tabla que se está
 citando.** Un "esto no coincide con el spec" mal leído manda a alguien a
 investigar un fantasma.
+
+## 8. M-1b — el mismo residuo, con el criterio exacto de ADR-162
+
+Agregado el 2026-09-16 por el planificador, **corrigiendo un error propio de
+§2.2 de este handoff**.
+
+### 8.1 Qué estuvo mal
+
+§2.2 fijó como definición de tinta la composición de ADR-164 §5.1 —`v < 128`—
+por venir ya del repo. **Es un umbral de brillo**, y el motor tiene al lado
+un criterio **exacto** para lo mismo: `isVisuallyWhiteStrip` (ADR-162) cuenta
+un píxel como no blanco si no es transparente y no tiene los tres canales en
+255, sin umbral y a propósito.
+
+La consecuencia, que §2.2 no siguió hasta el final aunque advirtiera que el
+criterio no sirve para tinta tenue real: el resultado de M-1 —residuo
+exactamente cero en las 100 franjas de P2— **está medido con el umbral**.
+Llevarlo al producto tal cual introduciría el umbral de blanco aproximado que
+§6 del plan prohíbe sin resolver T-4b. Y bajo el criterio exacto no hay dato:
+en P2 la compuerta de ADR-162 no saltearía ninguna de las 100 franjas, así que
+todas tienen píxeles no blancos, y nunca se midió si esos píxeles quedan
+cubiertos por las cajas de las palabras ya leídas.
+
+### 8.2 Qué se mide
+
+**Los dos criterios en la misma corrida**, no una campaña nueva. Medirlos
+juntos elimina la varianza entre corridas y hace la comparación pareada
+exacta, franja por franja.
+
+Por cada franja, además de lo que ya registra §2.2:
+
+| Campo | Definición |
+| --- | --- |
+| `inkPixelsExact` | Píxeles **no blancos** según el predicado de `isVisuallyWhiteStrip`: `alpha !== 0 && !(r === 255 && g === 255 && b === 255)` |
+| `residualExact[d]` | Los de arriba que no quedan bajo ninguna caja de palabra dilatada `d` |
+| `smallestZeroDilation` | El `d` más chico con `residualExact[d] === 0`, o `null` si ninguno |
+
+**Escalera de dilatación para el criterio exacto: `d = 0, 1, 2, 3, 4, 6, 8`.**
+Más larga que la de §2.2 a propósito: bajo el criterio exacto los bordes
+suavizados de un glifo cuentan como tinta, y hay que ver **dónde** se apaga el
+residuo, no solo si se apaga en 3. La escalera corta original se conserva para
+el criterio de brillo, para que M-1 siga siendo comparable consigo mismo.
+
+**Reutilizar el predicado del producto, no reescribirlo.** El criterio exacto
+tiene que ser literalmente la misma condición que usa `isVisuallyWhiteStrip`;
+si el instrumento escribe su propia versión, mide otra cosa y no nos enteramos.
+
+### 8.3 Invariante nuevo
+
+`residualExact[d] >= residualInkPixels[d]` para todo `d`, y lo mismo para los
+totales de tinta. Un píxel oscuro (`v < 128`) nunca es blanco puro, así que el
+criterio exacto cuenta un **superconjunto**. Si esa desigualdad se rompe, uno
+de los dos predicados está mal aplicado y la corrida no vale. Con su test que
+lo rompe a propósito, como los otros cuatro.
+
+### 8.4 Qué tiene que contestar el reporte
+
+La correlación de §3, **repetida bajo el criterio exacto**: por cada franja,
+`residualExact[0] === 0` contra `wordsAddedByThisStrip`, con el conteo crudo.
+Y la distribución de `smallestZeroDilation` sobre las 100 franjas de P2.
+
+Eso ubica el resultado en uno de tres mundos, y el reporte dice cuál **sin
+elegir ninguno**:
+
+| Mundo | Qué se observa | Qué significa |
+| --- | --- | --- |
+| A | `residualExact[0] === 0` en buena parte de P2 | I-1 sale exacta, sin un solo parámetro nuevo |
+| B | Cero recién con `d > 0` | La regla necesita una tolerancia **geométrica**; es un parámetro, distinto de un umbral de brillo, y lo decide el humano con la distribución a la vista |
+| C | Nunca llega a cero | I-1 no funciona como regla exacta y queda condicionada a T-4b |
+
+El sello de qa-stamp tiene que sobrevivir en los tres mundos: el criterio
+exacto cuenta más tinta, no menos, así que un residuo que ya era de 9.651
+píxeles solo puede crecer. Si no sobrevive, hay un error de implementación.
+
+### 8.5 Alcance
+
+Mismos cuatro fixtures congelados, misma segunda corrida de P2, mismo
+protocolo de §4, misma entrega de §6. No se implementa nada de I-1, no se toca
+la compuerta de ADR-162 ni ningún otro comportamiento del producto.
