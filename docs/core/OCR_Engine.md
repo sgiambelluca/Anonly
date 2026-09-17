@@ -5,8 +5,39 @@
 > Ejecuta OCR sobre las páginas sin texto del PDF. Solo corre si `PdfEngineOutput.textlessPages.length > 0`. Devuelve `Word[]` con `BoundingBox` y `confidence` que el PDF Engine fusiona.
 
 **EngineId**: `ocr`
-**Versión del spec**: 1.16.0
-**Última actualización**: 2026-09-15
+**Versión del spec**: 1.16.1
+**Última actualización**: 2026-09-16
+
+> **Nota (v1.16.1, 2026-09-16 — errata: la caja de una franja se desenrolla con
+> las dimensiones equivocadas)**: en `recognizeRotatedMargins`, el último paso del
+> mapeo —del raster **enderezado** de vuelta al **original**— llama a
+> `unrotateBbox(inUpright, orientation, uprightWidth, uprightHeight)`. Esa función
+> pide las dimensiones del raster **original**, como dice su propia firma; ahí
+> recibe las del enderezado, que en 90/270 están **intercambiadas**. `toWords`,
+> veinte líneas más abajo, llama a la misma función con `image.widthPx`/
+> `image.heightPx` —las correctas—: los dos llamadores no coinciden y uno está mal.
+>
+> Verificado numéricamente sobre un raster 4×6 y un píxel conocido: con las
+> dimensiones originales el punto vuelve a su lugar en 90/180/270; con las del
+> enderezado vuelve mal en **90 y 270**, y bien en 180 (donde no hay intercambio)
+> y en 0 (donde la función es la identidad). **El camino común no está afectado**:
+> con orientación 0 `unrotateBbox` devuelve la caja tal cual.
+>
+> **Consecuencia**: una palabra recuperada de una franja de margen en una página
+> que venía girada 90 o 270 sale con su caja en una posición equivocada de la
+> página. Se detecta el dato sensible y se lo censura en otro lado. **Ningún test
+> lo detectó** porque en el fixture de páginas giradas las pasadas de margen
+> aportan **cero palabras** —las 108 candidatas caen por confianza, confirmado en
+> la campaña de márgenes del 2026-09-16, `wordsAddedByThisStrip = 0` en sus ocho
+> franjas— y el único fixture con sello, `qa-stamp`, es una página derecha. La
+> línea nunca ejecutó con una candidata real.
+>
+> **Arreglo**: pasar a ese `unrotateBbox` las dimensiones del raster original.
+> `MARGIN_STRIP_RATIO` y la geometría de la franja siguen calculándose sobre el
+> enderezado, que es de donde se recorta: son dos espacios distintos y el arreglo
+> no los unifica. No cambia contratos, ni el umbral de solape, ni
+> `ROTATED_MIN_CONFIDENCE`, ni el orden de lectura, ni otro motor. Requiere un
+> test que **falle antes** del arreglo (ADR-149 §2). Ver §14 y §15 item 31.
 
 > **Nota (v1.16.0, ADR-164 §2.3)**: especificación cerrada para implementar
 > una página de adelanto. Con pool LSTM inyectado y `ocrPoolSize: 2`, la ventana
@@ -566,6 +597,9 @@ OcrPageOutput {
 | `rotates clockwise: the top-left pixel lands on the top-right corner` | `kernel.test.ts` | unit | ADR-090 §3 — el sentido de giro; al revés daría el texto invertido |
 | `four 90° turns return the original, pixel by pixel` | `kernel.test.ts` | unit | ADR-090 §3 |
 | `unrotateBbox brings the box back inside the original raster, on the three angles` | `kernel.test.ts` | unit | ADR-090 §3 — que la caja no se salga de la página ni se deforme |
+| `a margin word on a 90 deg rotated page lands on its real page position` | `unit.test.ts` | unit | v1.16.1 — discriminante de la errata: contra el mapeo viejo tiene que **fallar**, o no mide nada |
+| `a margin word on a 270 deg rotated page lands on its real page position` | `unit.test.ts` | unit | v1.16.1 — el otro ángulo con intercambio de dimensiones |
+| `a margin word on a 180 deg rotated page keeps its position` | `unit.test.ts` | unit | v1.16.1 — control: 180 no intercambia dimensiones y ya era correcto, no puede regresionar |
 | `applies sparse-text segmentation once per worker instance` | `unit.test.ts` | unit | caso 15 — el modo es constante, no viaja por payload |
 | `re-applies the mode when the worker is recreated for a different language set` | `unit.test.ts` | unit | caso 15 — una instancia nueva no lo tiene aplicado (ADR-045 §3) |
 | `a rejecting setParameters does not fail the page` | `unit.test.ts` | unit | caso 15 — best-effort, mismo criterio que el dpi |
@@ -681,6 +715,16 @@ OcrPageOutput {
 - [x] 28. (`Duplicacion_De_Logica.md` §6, sin ADR) Kernel: guarda de `typeof OffscreenCanvas === "undefined"` en `toTesseractImage`, lanzando `OcrPageFailedError` como el resto de los fallos de página de este motor. `render-engine` ya protegía sus **dos** construcciones de canvas y ésta era la única sin proteger. Lo que cambia no es que falle —el constructor ya fallaba— sino **cómo**: un `ReferenceError` crudo no es `OcrPageFailedError`, así que no llegaba como `OCR_PAGE_FAILED` y la página se perdía sin el aviso de análisis incompleto de ADR-094. No toca contratos ni `OcrConfig`.
 
 - [x] 27. (errata v1.8.1, sin ADR) `assets.lock.json`: **volver a pinear** `tesseract-core-lstm` y `tesseract-core-simd-lstm` junto a los completos que agregó ADR-090 §1 — cuatro cores, porque desde ADR-119 §1 el worker de reconocimiento (`lstmOnly: true`) y el de OSD (`legacyCore: true`) piden **archivos distintos del mismo `corePath`**. Solo el lock: no toca el kernel, ni `OcrConfig`, ni ningún contrato. La regresión que lo cubre no puede ser unitaria —los dobles de tesseract.js no descargan nada—: es el Escenario 2 E2E, que ya afirma entidades > 0 sobre un PDF escaneado (item 22).
+
+- [ ] 31. (v1.16.1, errata) Kernel, **solo `ocr-engine`, sin tocar contratos**:
+  `recognizeRotatedMargins` recibe las dimensiones del raster **original** y se
+  las pasa al `unrotateBbox` final, en lugar de `uprightWidth`/`uprightHeight`.
+  La geometría de la franja sigue saliendo del raster enderezado. **No** tocar
+  el umbral de solape, `ROTATED_MIN_CONFIDENCE`, el guard por franja, `toWords`
+  ni el orden de lectura. **Test obligatorio con discriminante**: una palabra de
+  margen sobre páginas de 90 y 270 tiene que caer en su posición real, y esos
+  tests tienen que **fallar contra el código actual**; más un control en 180.
+  Tres filas nuevas en §14.
 
 - [x] 26. (ADR-121) Kernel: `cropImageData` + `recognizeRotatedMargins()` invocado desde `kernelRecognize` **después** de la pasada derecha, con las constantes `MARGIN_STRIP_RATIO` y `ROTATED_MIN_CONFIDENCE`; el mapeo de cada caja es franja-rotada → franja (`unrotateBbox`) → raster enderezado (`+ x0`) → raster original (`unrotateBbox` con la orientación de la página) → puntos, y `bbox.rotation` sale de componer las dos rotaciones. Descarte por solapamiento contra las palabras derechas y por piso de confianza. Un fallo de franja se saltea —**el recorte incluido**, y `cropImageData` trunca a entero antes de indexar: sin eso un ancho fraccionario tira `RangeError` y se lleva la página—; `CancelledError` se propaga. **No** agregar un campo a `OcrConfig`, ni tocar el worker de OSD (ADR-119), el modo de segmentación (ADR-112), `toWords` ni el orden de lectura. El doble de `mockTesseractWorker` tiene que devolver **vacío** para los rasters de franja, o cada test de conteo mide cinco veces la misma página. Caso 16 de §13, cinco filas nuevas en §14.
 
