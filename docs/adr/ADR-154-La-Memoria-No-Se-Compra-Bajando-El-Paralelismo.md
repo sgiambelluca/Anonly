@@ -144,6 +144,39 @@ necesita su propio ADR y una razón que no sea "así entra en el presupuesto".
    liberación por idle (60 s), así que Tesseract y ONNX conviven durante toda la
    detección. Darlo de baja al terminar la etapa de OCR libera un heap entero de
    WASM —la única forma real de recuperarlo— sin quitarle un solo worker a nadie.
+
+   > **Descartado con medición (2026-09-17): este lever no se recorre al revés.**
+   > Lo que este lever hace es **reducir** la convivencia de OCR y NER. La idea
+   > simétrica —**adelantar** la carga del modelo NER para que ocurra mientras
+   > el OCR todavía trabaja, y así ocultar los 942,94 ms de `modelLoadMs` en
+   > frío que midió el perfilado interno de NER— se midió y no rinde. Tres
+   > rondas intercaladas `A1→B1→B2→A2` sobre P2, un único build instrumentado,
+   > con un control a cada lado de cada variante:
+   >
+   > - **Carga al empezar el OCR (B1)**: el efecto sobre `import→Ready`
+   >   **cambia de signo** entre rondas (+3,03 / −2,82 / −0,36 s) y su mediana
+   >   queda por debajo del mínimo de 0,5 s que el plan exigía. El pico de RSS
+   >   subió **en las tres** (+144 / +422 / +230 MB) y, en cada ronda, ese
+   >   aumento supera la dispersión de sus propios controles (50 / 224 /
+   >   92 MB): no es ruido. El OCR se retrasó en dos de tres.
+   > - **Carga al 75 % de las páginas (B2)**: `Ready` empeoró en las tres
+   >   rondas y el OCR se retrasó entre 2,08 y 6,33 s.
+   >
+   > Y hay un resultado que decide sin depender de ninguna de las dos: **la
+   > oportunidad es más chica que el ruido del banco**. La diferencia entre los
+   > dos controles de una misma ronda —A1 y A2, el mismo código medido dos
+   > veces— fue de 0,06, 1,83 y 2,54 s sobre `Ready`. En dos de tres rondas, la
+   > deriva del instrumento duplica o triplica el segundo entero que había para
+   > ganar. Una mejora cuyo techo teórico no se distingue de esa deriva no se
+   > puede validar al implementarla ni defender después en una regresión.
+   >
+   > La calidad nunca fue el problema: las huellas de OCR y de detección
+   > coincidieron exactamente en las 12 celdas de P2, con un solo worker NER.
+   > El producto conserva el orden OCR → NER, y el modelo se carga dentro del
+   > primer batch de NER, ya terminado el escaneo. Evidencia, límites y la
+   > variante de arranque —descartada sin medir— en
+   > `roadmap/Precalentamiento_NER_Durante_OCR_Medicion.md` §7.
+
 4. **Copias por página.** Verificado el 2026-09-11, y son **más de tres**: canvas
    del worker de Render, `ImageData` del host, clon estructurado en el worker de
    OCR, **canvas que ese worker reconstruye** (`toTesseractImage` hace
