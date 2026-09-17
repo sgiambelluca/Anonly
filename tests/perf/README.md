@@ -53,6 +53,13 @@ estructural/acotada/inconclusa y el cierre documental pertenecen al planificador
 el implementador entrega el perfil y los reportes. La especificación completa
 vive en `docs/roadmap/Optimizacion_De_Memoria_Plan.md` §T-3.
 
+> **Enmienda 2026-09-17 (ADR-146 §7ter) — leer antes de interpretar cualquier reporte.**
+>
+> 1. **La validez se clasifica por posición del máximo**, no por «dentro o fuera de fase». Solo un máximo **anterior** a `DOCUMENT_IMPORTED` invalida la corrida: ese es el residuo del documento previo que §7bis quería atrapar. Un máximo **posterior** a la última fase es trabajo real del documento —precalentado de la página 1 (ADR-151) y seed de previews (ADR-044)— y la corrida es **válida**. Medido: de las 12 corridas que el criterio viejo descartaba, las 12 eran de este segundo tipo, y entre ellas estaba P1 entero, que es el control.
+> 2. **M2 y M1 se calculan sobre la ventana de fases.** El máximo posterior a `Ready` se reporta aparte, en su propia métrica, y nunca se funde con M2 ni se omite. M2 mide *procesar el documento*; *dibujar la interfaz* se mide por separado.
+> 3. **El reporte trae la presión de memoria del sistema** (`systemPressureAtStart`/`AtEnd`): páginas libres, páginas del compresor y swap. Sin eso, dos corridas no son comparables — el 2026-09-17, el mismo commit y el mismo build dieron una línea de base de 685,9 MB con la máquina cargada y de 1077,8 MB recién reiniciada, con el pico desplazado en la misma proporción. En una plataforma sin fuente disponible el campo dice por qué, nunca un cero silencioso.
+> 4. **Una fase sin muestras se declara no medible.** Con `SAMPLE_INTERVAL_MS` de 150 ms y fases de P1 que duran 9-17 ms, había fases con cero muestras cuyo `peakInternalBytes` se publicaba como `0`. Ahora es `null` y el reporte lo dice; P1 además muestrea más fino.
+
 Dos métricas (ADR-146 §1):
 
 - **M2** — pico de la suma de `workingSetSize` (KB→bytes) de todos los procesos de Electron, leído con `app.getAppMetrics()` vía `electronApp.evaluate()`. Es una **suma RSS**: páginas compartidas entre procesos se cuentan más de una vez. Es la **métrica primaria** (ADR-146 §7, enmienda 2026-09-10): lectura directa del pico, sin resta.

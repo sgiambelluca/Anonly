@@ -37,6 +37,11 @@ import {
   type MemorySample,
   type MemorySampler,
 } from "./memorySampler.js";
+import {
+  formatSystemMemoryPressure,
+  readSystemMemoryPressure,
+  type SystemMemoryPressureSample,
+} from "./systemMemoryPressure.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = resolve(HERE, "../../../.measure");
@@ -473,7 +478,7 @@ export function computeTargetCoverage(
  * perfil sin OCR (P1, texto nativo) nunca emite `OCR_STARTED`, así que la
  * lista de fases presentes varía corrida a corrida.
  */
-function computePhaseSegments(
+export function computePhaseSegments(
   phasesEpochMs: Readonly<Record<string, number>>,
   samples: ReadonlyArray<MemorySample>,
   samplerStartedAtMs: number,
@@ -537,6 +542,15 @@ function computePhaseSegments(
     const rssForResidualAtExit =
       rssAtHeapExitAtMs === undefined ? undefined : sampleNear(samples, rssAtHeapExitAtMs);
 
+    // A-3 (plan de arreglo del instrumento §4): con el muestreo de
+    // referencia (150 ms) y fases de P1 de 9-17 ms, la ventana de una fase
+    // corta suele no contener NINGUNA muestra cruda de RSS —
+    // `samplesBetween` devuelve `[]` y `peakSumBytes([])` daría `0`, un
+    // "pico interno" fabricado, no medido. `measurable` lo declara en vez de
+    // publicarlo.
+    const windowSamples = samplesBetween(samples, from.atMs, to.atMs);
+    const measurable = windowSamples.length > 0;
+
     segments.push({
       fromEvent: from.event,
       toEvent: to.event,
@@ -544,7 +558,9 @@ function computePhaseSegments(
       toAtMs: to.atMs,
       rssAtEntryBytes: entryBytes,
       rssAtExitBytes: exitBytes,
-      peakInternalBytes: peakSumBytes(samplesBetween(samples, from.atMs, to.atMs)),
+      sampleCountInWindow: windowSamples.length,
+      measurable,
+      peakInternalBytes: measurable ? peakSumBytes(windowSamples) : null,
       deltaBytes: exitBytes - entryBytes,
       workerPeakByType: computeWorkerPeakByTypeInWindow(workerEventsAtMs, from.atMs, to.atMs),
       heapByTargetAtEntry: heapEntry?.targets,
@@ -577,8 +593,17 @@ export interface PhaseSegment {
   readonly toAtMs: number;
   readonly rssAtEntryBytes: number;
   readonly rssAtExitBytes: number;
-  /** Pico dentro del tramo — puede superar tanto la entrada como la salida (p. ej. un pico intermedio que ya bajó al llegar a `toEvent`). */
-  readonly peakInternalBytes: number;
+  /**
+   * Cuántas muestras CRUDAS de RSS cayeron dentro de `[fromAtMs, toAtMs]`
+   * (A-3, plan de arreglo del instrumento §4). Con el muestreo de referencia
+   * (150 ms) y fases de P1 de 9-17 ms, la mayoría de los tramos cortos da 0
+   * — determina `measurable`.
+   */
+  readonly sampleCountInWindow: number;
+  /** `sampleCountInWindow > 0`. En `false`, `peakInternalBytes` es `null` — nunca un 0 fabricado por falta de muestras. */
+  readonly measurable: boolean;
+  /** Pico dentro del tramo — puede superar tanto la entrada como la salida (p. ej. un pico intermedio que ya bajó al llegar a `toEvent`). `null` si `!measurable`. */
+  readonly peakInternalBytes: number | null;
   /** `rssAtExitBytes - rssAtEntryBytes`. Negativo = el RSS bajó durante este tramo. */
   readonly deltaBytes: number;
   /** Máximo de jobs concurrentes por `type` **dentro de este tramo** (P3 de H-10) — ver `computeWorkerPeakByTypeInWindow`. A diferencia de `RunReport.workerPeakByType` (máximo de toda la corrida), esto ya está acotado a la fase. */
@@ -621,16 +646,37 @@ export interface PhaseSegment {
 export interface RunReport {
   readonly temperature: "cold" | "hot";
   readonly baselineBytes: number;
+  /**
+   * M2 (ADR-146 §3/§7). **Desde §7ter (plan A-2): pico dentro de la ventana
+   * de fases**, no el pico global del run — `computeM2WithinPhases`. El pico
+   * posterior a la última fase, si lo hay, se reporta aparte en
+   * `postReadyPeakBytes`, nunca fundido acá. Cae de vuelta al pico global
+   * (`rssPeakGlobalBytes`) solo cuando no hay segmentos de fase (corrida
+   * fallida antes del segundo evento de fase).
+   */
   readonly peakSumBytes: number;
   /**
+   * El pico posterior a la última fase (ADR-146 §7ter) — el precalentado de
+   * la página 1 (ADR-151) y el seed de previews (ADR-044), trabajo real del
+   * documento que ya no cuenta `peakSumBytes`. **Obligatorio de reportar,
+   * nunca se omite ni se funde con M2**: sin este campo la corrección de
+   * §7ter escondería exactamente el pico que ADR-146 §7bis quería que no se
+   * perdiera. `null` si no hay muestras posteriores a la última fase o no
+   * hay segmentos.
+   */
+  readonly postReadyPeakBytes: number | null;
+  /**
    * `peakSumBytes - baselineBytes` — solo tiene sentido en caliente
-   * (ADR-146 §1). `null` en frío. **Puede dar levemente negativo**: la
-   * línea de base caliente se muestrea justo después de `closeDocument()`,
-   * antes de que el GC libere la basura del documento recién cerrado — no
-   * es un bug del instrumento, es inherente a muestrear RSS crudo sin
-   * forzar GC (anticipado por ADR-146 §6). Visto en la práctica: -16.4 MB
-   * en un perfil de 10 páginas nativas, contra un M1 esperado de ~30 MB —
-   * define el piso de ruido del método en ±40 MB aprox.
+   * (ADR-146 §1). `null` en frío. Comparte base con `peakSumBytes` (§7ter):
+   * en una corrida `"after-last-phase"` no incluye el precalentado/seed
+   * posterior a `Ready`, que no es "procesamiento del documento" sino
+   * "dibujar la interfaz". **Puede dar levemente negativo**: la línea de
+   * base caliente se muestrea justo después de `closeDocument()`, antes de
+   * que el GC libere la basura del documento recién cerrado — no es un bug
+   * del instrumento, es inherente a muestrear RSS crudo sin forzar GC
+   * (anticipado por ADR-146 §6). Visto en la práctica: -16.4 MB en un perfil
+   * de 10 páginas nativas, contra un M1 esperado de ~30 MB — define el piso
+   * de ruido del método en ±40 MB aprox.
    */
   readonly m1Bytes: number | null;
   readonly phases: Readonly<Record<string, number>>;
@@ -655,6 +701,12 @@ export interface RunReport {
   readonly ocrDurationMs?: number | null;
   readonly readyDurationMs?: number | null;
   readonly rssPeakDuringOcrBytes?: number | null;
+  /**
+   * El pico global del run, SIN acotar a la ventana de fases — a diferencia
+   * de `peakSumBytes` desde §7ter. Diagnóstico: en una corrida
+   * `"after-last-phase"` coincide con `postReadyPeakBytes`; en una
+   * `"within-phases"` coincide con `peakSumBytes`.
+   */
   readonly rssPeakGlobalBytes?: number;
   readonly processPeakRssBytes?: Readonly<Record<string, number>>;
   readonly ok: boolean;
@@ -678,13 +730,15 @@ export interface RunReport {
    */
   readonly workerEvents: ReadonlyArray<WorkerJobEventAtMs>;
   /**
-   * `false` si el pico de esta corrida (`peakSumBytes`) cae fuera de
-   * `[primera fase, última fase]` — ADR-146 §7bis: un run caliente cuyo
-   * máximo es en realidad el residuo del documento anterior, no algo que
-   * este documento produjo. Una corrida con `peakWithinPhases: false` se
-   * reporta, no se descarta, pero no debe promediarse con las demás.
+   * Dónde cae el máximo GLOBAL de esta corrida respecto a la ventana de
+   * fases (ADR-146 §7ter, plan A-2) — ver `classifyPeakPosition`. Solo
+   * `"before-imported"` invalida la corrida (residuo del documento
+   * anterior, el caso que motivó ADR-146 §7bis); `"after-last-phase"` es
+   * válida desde §7ter (antes se descartaba junto con el caso anterior, y
+   * eso dejó a P1 3/3 inválido en caliente en la re-caracterización del
+   * 2026-09-17 — ver el plan de arreglo del instrumento).
    */
-  readonly peakWithinPhases: boolean;
+  readonly peakPosition: PeakPosition;
   /**
    * `null` en frío (no aplica). En caliente: si `waitForHotBaselineToSettle`
    * encontró una ventana asentada dentro de `HOT_BASELINE_SETTLE_CEILING_MS`
@@ -699,6 +753,18 @@ export interface RunReport {
    * esta corrida (`heapSamplesSince`), no a toda la sesión de Electron.
    */
   readonly heapSamples: ReadonlyArray<HeapSample>;
+  /**
+   * Presión de memoria del SISTEMA al abrir esta corrida (A-1, plan de
+   * arreglo del instrumento §2) — `systemMemoryPressure.ts`. Es la variable
+   * que la re-caracterización del 2026-09-17 encontró sin registrar: dos
+   * tandas del mismo build dieron M2 53% distinto según cuánta presión tenía
+   * la máquina, y sin este campo un reporte viejo no dice en qué condiciones
+   * se tomó. `available: false` con motivo en vez de un cero silencioso
+   * cuando la plataforma no tiene lector.
+   */
+  readonly systemPressureAtStart: SystemMemoryPressureSample;
+  /** Mismo campo que `systemPressureAtStart`, al cerrar esta corrida (tras el settle de `SETTLE_GRACE_MS`). */
+  readonly systemPressureAtEnd: SystemMemoryPressureSample;
 }
 
 /** Convierte los límites de fase de pared al origen del sampler sin mezclarlo
@@ -762,6 +828,10 @@ async function runImport(
   const sinceMs = sampler.samples.at(-1)?.atMs ?? 0;
   const sinceHeapMs = heapSampler.samples.at(-1)?.atMs ?? 0;
   const startedAtMs = Date.now();
+  // A-1 (plan de arreglo del instrumento §2): presión de memoria del sistema
+  // al ABRIR esta corrida — antes de soltar el archivo, mismo instante que
+  // `startedAtMs`.
+  const systemPressureAtStart = await readSystemMemoryPressure();
 
   await page.locator('input[type="file"]').setInputFiles(file);
   await waitForRunSettled(page, runTimeoutMs);
@@ -772,6 +842,8 @@ async function runImport(
   // corrida entre dos ticks del sampler periódico (`HEAP_SAMPLE_INTERVAL_MS`
   // = 2 s, mucho más espaciado que el de RSS).
   await heapSampler.sampleOnce();
+  // A-1: presión de memoria del sistema al CERRAR esta corrida.
+  const systemPressureAtEnd = await readSystemMemoryPressure();
 
   const run = await readRun(page);
   // `postRunCapture` (opcional): captura lo que un `extraCollector` dejó en
@@ -782,7 +854,7 @@ async function runImport(
   if (postRunCapture !== undefined) await postRunCapture(page, temperature);
   const runSamples = samplesSince(sampler.samples, sinceMs);
   const runHeapSamples = heapSamplesSince(heapSampler.samples, sinceHeapMs);
-  const peak = peakSumBytes(runSamples);
+  const globalPeakBytes = peakSumBytes(runSamples);
   const durations = computeRunDurations(run.phasesEpochMs, sampler.startedAtMs);
   const phaseSegments = computePhaseSegments(
     run.phasesEpochMs,
@@ -792,6 +864,15 @@ async function runImport(
     runHeapSamples,
     heapSampler.startedAtMs,
   );
+  // ADR-146 §7ter (plan A-2): M2 se mide dentro de la ventana de fases, con
+  // el pico global como respaldo cuando no hay segmentos (corrida fallida
+  // antes del segundo evento de fase) — mismo criterio por defecto que tenía
+  // `peakFallsWithinPhases` antes de esta enmienda. `m1Bytes` comparte esta
+  // base: es la misma resta de siempre, aplicada al pico ya corregido.
+  const peakPosition = classifyPeakPosition(runSamples, phaseSegments);
+  const m2WithinPhasesBytes = computeM2WithinPhases(runSamples, phaseSegments);
+  const reportedPeakBytes = m2WithinPhasesBytes ?? globalPeakBytes;
+  const postReadyPeakBytes = computePostReadyPeakBytes(runSamples, phaseSegments);
   const workerEventsAtMs = run.workerEvents.map((e) => ({
     type: e.type,
     atMs: e.epochMs - sampler.startedAtMs,
@@ -823,8 +904,9 @@ async function runImport(
   return {
     temperature,
     baselineBytes,
-    peakSumBytes: peak,
-    m1Bytes: temperature === "hot" ? peak - baselineBytes : null,
+    peakSumBytes: reportedPeakBytes,
+    postReadyPeakBytes,
+    m1Bytes: temperature === "hot" ? reportedPeakBytes - baselineBytes : null,
     phases: run.phases,
     workerPeakByType: run.workerPeakByType,
     startedAtMs,
@@ -833,7 +915,7 @@ async function runImport(
     samples: runSamples,
     heapSamples: runHeapSamples,
     workerEvents: workerEventsAtMs,
-    peakWithinPhases: peakFallsWithinPhases(findPeakSample(runSamples), phaseSegments),
+    peakPosition,
     hotBaselineSettled: null,
     totalMs: durations.totalMs,
     groupCount: run.groupCount,
@@ -846,9 +928,11 @@ async function runImport(
       ocrStartedAtMs === null || ocrFinishedAtMs === null ? null : ocrFinishedAtMs - ocrStartedAtMs,
     readyDurationMs: durations.readyDurationMs,
     rssPeakDuringOcrBytes: ocrSamples.length === 0 ? null : peakSumBytes(ocrSamples),
-    rssPeakGlobalBytes: peak,
+    rssPeakGlobalBytes: globalPeakBytes,
     processPeakRssBytes,
     ok: run.failedAt === undefined,
+    systemPressureAtStart,
+    systemPressureAtEnd,
   };
 }
 
@@ -861,15 +945,73 @@ function findPeakSample(samples: ReadonlyArray<MemorySample>): MemorySample | un
   );
 }
 
-/** `true` si `peakSample` cae dentro de `[primera fase, última fase]` (ADR-146 §7bis) — `phaseSegments` cubre ese rango sin huecos, así que "fuera de toda fase" es "fuera de ese intervalo". Sin segmentos (corrida fallida antes del segundo evento de fase), no hay nada que invalidar. */
-function peakFallsWithinPhases(
-  peakSample: MemorySample | undefined,
+/**
+ * Dónde cae el máximo global de RSS de la corrida, relativo a la ventana de
+ * fases (ADR-146 §7ter, plan A-2). Reemplaza a la vieja `peakFallsWithinPhases`
+ * (ADR-146 §7bis), que trataba "antes de la primera fase" y "después de la
+ * última" como el mismo caso —residuo del documento anterior— y con eso
+ * descartó las 12 corridas del 2026-09-17 cuyo máximo era en realidad el
+ * precalentado de la página 1 (ADR-151) y el seed de previews (ADR-044),
+ * trabajo real del documento recién importado, no residuo ajeno.
+ *
+ * Solo `"before-imported"` invalida la corrida. `"no-phase-data"` (sin
+ * segmentos — corrida fallida antes del segundo evento de fase) se trata
+ * como válida por falta de datos que invaliden, mismo criterio por defecto
+ * que ya usaba `peakFallsWithinPhases`.
+ */
+export type PeakPosition =
+  | "before-imported"
+  | "within-phases"
+  | "after-last-phase"
+  | "no-phase-data";
+
+export function classifyPeakPosition(
+  samples: ReadonlyArray<MemorySample>,
   segments: ReadonlyArray<PhaseSegment>,
-): boolean {
+): PeakPosition {
   const first = segments[0];
   const last = segments[segments.length - 1];
-  if (first === undefined || last === undefined || peakSample === undefined) return true;
-  return peakSample.atMs >= first.fromAtMs && peakSample.atMs <= last.toAtMs;
+  const peakSample = findPeakSample(samples);
+  if (first === undefined || last === undefined || peakSample === undefined) return "no-phase-data";
+  if (peakSample.atMs < first.fromAtMs) return "before-imported";
+  if (peakSample.atMs > last.toAtMs) return "after-last-phase";
+  return "within-phases";
+}
+
+/**
+ * M2 (ADR-146 §7ter): el pico se mide sobre las muestras de la ventana de
+ * fases, ya no sobre todo el run — así una corrida `"after-last-phase"` no
+ * reporta como M2 el precalentado/seed posterior a `Ready`, que
+ * `computePostReadyPeakBytes` cubre aparte. `null` sin segmentos (corrida
+ * fallida antes del segundo evento de fase); el llamador cae de vuelta al
+ * pico global en ese caso, igual que antes de esta enmienda.
+ */
+export function computeM2WithinPhases(
+  samples: ReadonlyArray<MemorySample>,
+  segments: ReadonlyArray<PhaseSegment>,
+): number | null {
+  const first = segments[0];
+  const last = segments[segments.length - 1];
+  if (first === undefined || last === undefined) return null;
+  return peakSumBytes(samplesBetween(samples, first.fromAtMs, last.toAtMs));
+}
+
+/**
+ * El pico posterior a la última fase (ADR-146 §7ter): métrica propia
+ * **obligatoria**, nunca fundida con M2 ni descartada — es el precalentado
+ * de la página 1 (ADR-151) y el seed de previews (ADR-044), el pico que el
+ * usuario atraviesa al ver abrirse el panel aunque ya no lo cuente M2.
+ * `null` si no hay ninguna muestra posterior a la última fase (p. ej. la
+ * corrida terminó de medir justo en `Ready`) o si no hay segmentos.
+ */
+export function computePostReadyPeakBytes(
+  samples: ReadonlyArray<MemorySample>,
+  segments: ReadonlyArray<PhaseSegment>,
+): number | null {
+  const last = segments[segments.length - 1];
+  if (last === undefined) return null;
+  const after = samples.filter((s) => s.atMs > last.toAtMs);
+  return after.length === 0 ? null : peakSumBytes(after);
 }
 
 /**
@@ -967,8 +1109,17 @@ export async function measureProfile(
   runTimeoutMs = 180_000,
   extraCollectors: ReadonlyArray<(page: Page) => Promise<void>> = [],
   postRunCapture?: (page: Page, temperature: "cold" | "hot") => Promise<void>,
+  // A-3 (plan de arreglo del instrumento §4): parámetro nuevo, agregado al
+  // FINAL de la lista a propósito — todo llamador existente que pasa hasta
+  // `postRunCapture` posicional sigue intacto (ninguno pasa un 9º argumento
+  // hoy). Perfiles cortos (P1: pipeline de 441-509 ms con fases de 9-17 ms)
+  // pueden pasar una cadencia más fina que el default de 150 ms para que más
+  // fases capturen al menos una muestra — no es una garantía (el costo del
+  // propio `evaluate()` tiene un piso), por eso `PhaseSegment.measurable`
+  // sigue siendo la defensa real, no la cadencia.
+  sampleIntervalMs = SAMPLE_INTERVAL_MS,
 ): Promise<ProfileReport> {
-  const sampler = startMemorySampling(electronApp, SAMPLE_INTERVAL_MS);
+  const sampler = startMemorySampling(electronApp, sampleIntervalMs);
   // ADR-159 §2: heap por target, vía CDP — sampler aparte del de RSS de
   // arriba, misma vida útil (frío + caliente de la misma instancia).
   // `userDataDir` es de dónde `cdpHeap.ts` descubre el puerto de CDP
@@ -1121,6 +1272,20 @@ function formatUnattributedResidual(
 }
 
 /**
+ * Número en MB, o el motivo explícito por el que este tramo no es medible a
+ * la resolución de muestreo usada (A-3, plan de arreglo del instrumento §4)
+ * — nunca un `0 MB` fabricado por `peakSumBytes([])` cuando no cayó ninguna
+ * muestra cruda dentro del tramo.
+ */
+function formatPeakInternal(segment: PhaseSegment): string {
+  if (!segment.measurable || segment.peakInternalBytes === null) {
+    const durationMs = segment.toAtMs - segment.fromAtMs;
+    return `no medible a esta resolución (${segment.sampleCountInWindow} muestras en tramo de ${durationMs.toFixed(0)}ms)`;
+  }
+  return formatMB(segment.peakInternalBytes);
+}
+
+/**
  * Una línea por `PhaseSegment`, en orden temporal — la vista que contesta
  * "¿baja el RSS al terminar el OCR, o se queda arriba?" (ADR-154 §2 lever
  * 3). Entrada y salida se imprimen como dos lecturas INDEPENDIENTES, nunca
@@ -1136,10 +1301,13 @@ function formatPhaseSegments(segments: ReadonlyArray<PhaseSegment>): string {
   return segments
     .map((s) => {
       const coverageBySessionId = new Map(s.targetCoverage.map((c) => [c.sessionId, c]));
+      const notMeasurableNote = s.measurable
+        ? ""
+        : "  [NO MEDIBLE A ESTA RESOLUCIÓN — entrada/salida son la muestra más cercana, no dentro del tramo]";
       return (
         `    ${s.fromEvent} → ${s.toEvent}: entrada ${formatMB(s.rssAtEntryBytes)}, ` +
-        `salida ${formatMB(s.rssAtExitBytes)}, pico interno ${formatMB(s.peakInternalBytes)}, ` +
-        `delta ${formatSignedMB(s.deltaBytes)}, workers ${formatWorkerPeaks(s.workerPeakByType)}\n` +
+        `salida ${formatMB(s.rssAtExitBytes)}, pico interno ${formatPeakInternal(s)}, ` +
+        `delta ${formatSignedMB(s.deltaBytes)}, workers ${formatWorkerPeaks(s.workerPeakByType)}${notMeasurableNote}\n` +
         `    entrada ${s.fromEvent}:\n` +
         formatHeapByTarget(s.heapByTargetAtEntry, s.heapByTargetAtEntryLagMs, coverageBySessionId) +
         formatUnattributedResidual(
@@ -1159,10 +1327,28 @@ function formatPhaseSegments(segments: ReadonlyArray<PhaseSegment>): string {
     .join("");
 }
 
-/** "sí" / "NO — <motivo>" / "?" (no aplica, p. ej. frío) — para `peakWithinPhases` y `hotBaselineSettled`. */
+/** "sí" / "NO — <motivo>" / "?" (no aplica, p. ej. frío) — para `hotBaselineSettled`. */
 function formatFlag(value: boolean | null, invalidLabel: string): string {
   if (value === null) return "?";
   return value ? "sí" : `NO — ${invalidLabel}`;
+}
+
+/** ADR-146 §7ter (plan A-2) — reemplaza al viejo `formatFlag(peakWithinPhases, …)` booleano: ahora hay tres posiciones válidas y una inválida, no dos. */
+function formatPeakPosition(position: PeakPosition): string {
+  switch (position) {
+    case "within-phases":
+      return "dentro de fase";
+    case "after-last-phase":
+      return "después de Ready (válida — ver pico posterior)";
+    case "before-imported":
+      return "INVÁLIDA — antes de DOCUMENT_IMPORTED (residuo del documento anterior, ADR-146 §7bis), no promediar";
+    case "no-phase-data":
+      return "?";
+  }
+}
+
+function formatPostReadyPeak(bytes: number | null): string {
+  return bytes === null ? "? (sin muestras posteriores a Ready)" : formatMB(bytes);
 }
 
 export function printReport(report: ProfileReport): void {
@@ -1170,17 +1356,23 @@ export function printReport(report: ProfileReport): void {
   process.stdout.write(
     `\n=== H-10 — perfil ${report.profile} (${report.identity.platform}/${report.identity.arch}, ` +
       `${report.identity.cpuCount} CPUs, ${formatMB(report.identity.totalMemBytes)} RAM) ===\n` +
-      `  frío    — M2 (pico suma RSS): ${formatMB(cold.peakSumBytes)}  ` +
-      `pico dentro de fase: ${formatFlag(cold.peakWithinPhases, "ADR-146 §7bis, no promediar")}  ` +
+      `  frío    — M2 (pico dentro de fase): ${formatMB(cold.peakSumBytes)}  ` +
+      `pico posterior a Ready: ${formatPostReadyPeak(cold.postReadyPeakBytes)}  ` +
+      `posición del máximo: ${formatPeakPosition(cold.peakPosition)}  ` +
       `total: ${cold.totalMs?.toFixed(0) ?? "?"} ms  ok: ${cold.ok}  grupos: ${cold.groupCount}  ` +
       `workers: ${formatWorkerPeaks(cold.workerPeakByType)}\n` +
+      `    presión del sistema — apertura: ${formatSystemMemoryPressure(cold.systemPressureAtStart)}  ` +
+      `cierre: ${formatSystemMemoryPressure(cold.systemPressureAtEnd)}\n` +
       formatPhaseSegments(cold.phaseSegments) +
-      `  caliente — M2: ${formatMB(hot.peakSumBytes)}  ` +
+      `  caliente — M2 (pico dentro de fase): ${formatMB(hot.peakSumBytes)}  ` +
+      `pico posterior a Ready: ${formatPostReadyPeak(hot.postReadyPeakBytes)}  ` +
       `M1 (atribuible al documento): ${hot.m1Bytes !== null ? formatMB(hot.m1Bytes) : "?"}  ` +
       `línea de base: ${formatMB(hot.baselineBytes)} (asentada: ${formatFlag(hot.hotBaselineSettled, "venció el techo de 30s, ADR-146 §7bis")})  ` +
-      `pico dentro de fase: ${formatFlag(hot.peakWithinPhases, "ADR-146 §7bis, no promediar")}  ` +
+      `posición del máximo: ${formatPeakPosition(hot.peakPosition)}  ` +
       `total: ${hot.totalMs?.toFixed(0) ?? "?"} ms  ok: ${hot.ok}  grupos: ${hot.groupCount}  ` +
       `workers: ${formatWorkerPeaks(hot.workerPeakByType)}\n` +
+      `    presión del sistema — apertura: ${formatSystemMemoryPressure(hot.systemPressureAtStart)}  ` +
+      `cierre: ${formatSystemMemoryPressure(hot.systemPressureAtEnd)}\n` +
       formatPhaseSegments(hot.phaseSegments),
   );
 }

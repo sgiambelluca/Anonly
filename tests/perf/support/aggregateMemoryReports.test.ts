@@ -40,6 +40,8 @@ function segment(
     toEvent: "OCR_FINISHED",
     rssAtEntryBytes: 0,
     rssAtExitBytes: 0,
+    sampleCountInWindow: 1,
+    measurable: true,
     peakInternalBytes: 0,
     deltaBytes: 0,
     workerPeakByType: {},
@@ -59,6 +61,7 @@ function run(overrides: Partial<RunReport>): RunReport {
     temperature: "hot",
     baselineBytes: 0,
     peakSumBytes: 0,
+    postReadyPeakBytes: null,
     m1Bytes: null,
     phases: {},
     workerPeakByType: {},
@@ -72,8 +75,10 @@ function run(overrides: Partial<RunReport>): RunReport {
     samples: [],
     heapSamples: [],
     workerEvents: [],
-    peakWithinPhases: true,
+    peakPosition: "within-phases",
     hotBaselineSettled: null,
+    systemPressureAtStart: { available: false, reason: "no aplica en este fixture de test" },
+    systemPressureAtEnd: { available: false, reason: "no aplica en este fixture de test" },
     ...overrides,
   };
 }

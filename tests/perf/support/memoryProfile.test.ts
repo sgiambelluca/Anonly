@@ -1,21 +1,51 @@
 /**
  * `memoryProfile.test.ts` — cubre las funciones puras de ADR-159 §8 (el
- * residuo "no atribuido") y §6 (cobertura por target/fase) que
- * `memoryProfile.ts` exporta para esto. No cubre `measureProfile`/
- * `runImport` (necesitan una `Page`/`ElectronApplication` reales — eso lo
- * prueba `pnpm test:perf`, no vitest).
+ * residuo "no atribuido"), §6 (cobertura por target/fase), y de ADR-146
+ * §7ter/plan de arreglo del instrumento A-2 (clasificación por posición del
+ * máximo) y A-3 (fases sin muestras). No cubre `measureProfile`/`runImport`
+ * (necesitan una `Page`/`ElectronApplication` reales — eso lo prueba
+ * `pnpm test:perf`, no vitest).
  */
 import { describe, expect, it } from "vitest";
 
 import type { ClassifiedTargetHeapSample, HeapSample } from "./cdpHeap.js";
 import {
   attributedIsolateBytes,
+  classifyPeakPosition,
+  computeM2WithinPhases,
+  computePhaseSegments,
+  computePostReadyPeakBytes,
   computeTargetCoverage,
   computeUnattributedResidual,
   computeRunDurations,
   tabProcessBytes,
 } from "./memoryProfile.js";
+import type { PhaseSegment } from "./memoryProfile.js";
 import type { MemorySample } from "./memorySampler.js";
+
+/** `PhaseSegment` mínimo para los tests de clasificación — solo `fromAtMs`/`toAtMs` importan ahí. */
+function segment(fromAtMs: number, toAtMs: number): PhaseSegment {
+  return {
+    fromEvent: "A",
+    toEvent: "B",
+    fromAtMs,
+    toAtMs,
+    rssAtEntryBytes: 0,
+    rssAtExitBytes: 0,
+    sampleCountInWindow: 1,
+    measurable: true,
+    peakInternalBytes: 0,
+    deltaBytes: 0,
+    workerPeakByType: {},
+    heapByTargetAtEntry: undefined,
+    heapByTargetAtEntryLagMs: undefined,
+    heapByTargetAtExit: undefined,
+    heapByTargetAtExitLagMs: undefined,
+    unattributedResidualAtEntryBytes: undefined,
+    unattributedResidualAtExitBytes: undefined,
+    targetCoverage: [],
+  };
+}
 
 function target(
   overrides: Partial<ClassifiedTargetHeapSample> & Pick<ClassifiedTargetHeapSample, "sessionId">,
@@ -210,5 +240,128 @@ describe("computeTargetCoverage", () => {
       attempted: 1,
       succeeded: 0,
     });
+  });
+});
+
+describe("classifyPeakPosition (ADR-146 §7ter, plan A-2)", () => {
+  it("'before-imported' cuando el máximo cae antes de la primera fase — el caso que §7bis quería atrapar", () => {
+    const samples = [
+      rssSample(0, { Tab: 900_000_000 }),
+      rssSample(600, { Tab: 100_000_000 }),
+      rssSample(1100, { Tab: 200_000_000 }),
+    ];
+    expect(classifyPeakPosition(samples, [segment(500, 1000)])).toBe("before-imported");
+  });
+
+  it("'within-phases' cuando el máximo cae dentro de la ventana de fases", () => {
+    const samples = [
+      rssSample(0, { Tab: 100_000_000 }),
+      rssSample(700, { Tab: 900_000_000 }),
+      rssSample(1200, { Tab: 200_000_000 }),
+    ];
+    expect(classifyPeakPosition(samples, [segment(500, 1000)])).toBe("within-phases");
+  });
+
+  it("'after-last-phase' cuando el máximo cae después de la última fase — el caso de las 12 corridas del 2026-09-17", () => {
+    const samples = [
+      rssSample(0, { Tab: 100_000_000 }),
+      rssSample(700, { Tab: 200_000_000 }),
+      rssSample(1200, { Tab: 900_000_000 }),
+    ];
+    expect(classifyPeakPosition(samples, [segment(500, 1000)])).toBe("after-last-phase");
+  });
+
+  it("'no-phase-data' sin segmentos — corrida fallida antes del segundo evento de fase", () => {
+    expect(classifyPeakPosition([rssSample(0, { Tab: 1 })], [])).toBe("no-phase-data");
+  });
+
+  it("discriminante (ADR-149 §2): la regla vieja de §7bis invalidaba 'after-last-phase' igual que 'before-imported' — la nueva las distingue", () => {
+    // Números reales de memory-p1-native-10p-run0.json [hot]
+    // (.measure/memory-recaracterizacion/20260917T174553Z/): peakAtMs=8151,
+    // ventana de fases [6750, 7277] — una de las 12 corridas descartadas por
+    // §7bis y que §7ter revalida.
+    const samples = [
+      rssSample(6750, { Tab: 500_000_000 }),
+      rssSample(7277, { Tab: 550_000_000 }),
+      rssSample(8151, { Tab: 563_300_000 }),
+    ];
+    const position = classifyPeakPosition(samples, [segment(6750, 7277)]);
+    // La regla vieja (ADR-146 §7bis: "cualquier pico fuera de [primera,
+    // última fase] invalida") no distinguía este caso del residuo del
+    // documento anterior — las dos daban `peakFallsWithinPhases: false`.
+    // §7ter exige además que el máximo esté ANTES de la ventana.
+    expect(position).toBe("after-last-phase");
+    expect(position).not.toBe("before-imported");
+  });
+});
+
+describe("computeM2WithinPhases (ADR-146 §7ter)", () => {
+  it("M2 es el máximo DENTRO de la ventana de fases, no el máximo global del run", () => {
+    const samples = [
+      rssSample(0, { Tab: 100_000_000 }),
+      rssSample(700, { Tab: 400_000_000 }), // dentro de la ventana — es el M2 esperado
+      rssSample(1200, { Tab: 900_000_000 }), // después de Ready — no debe contar para M2
+    ];
+    expect(computeM2WithinPhases(samples, [segment(500, 1000)])).toBe(400_000_000);
+  });
+
+  it("null sin segmentos — el llamador cae de vuelta al pico global en ese caso", () => {
+    expect(computeM2WithinPhases([rssSample(0, { Tab: 1 })], [])).toBeNull();
+  });
+});
+
+describe("computePostReadyPeakBytes (ADR-146 §7ter — métrica obligatoria, nunca fundida con M2)", () => {
+  it("el máximo de las muestras posteriores a la última fase", () => {
+    const samples = [
+      rssSample(700, { Tab: 400_000_000 }),
+      rssSample(1200, { Tab: 900_000_000 }),
+      rssSample(1400, { Tab: 700_000_000 }),
+    ];
+    expect(computePostReadyPeakBytes(samples, [segment(500, 1000)])).toBe(900_000_000);
+  });
+
+  it("null si no hay ninguna muestra posterior a la última fase — no se inventa un 0", () => {
+    const samples = [rssSample(700, { Tab: 400_000_000 })];
+    expect(computePostReadyPeakBytes(samples, [segment(500, 1000)])).toBeNull();
+  });
+
+  it("null sin segmentos", () => {
+    expect(computePostReadyPeakBytes([rssSample(0, { Tab: 1 })], [])).toBeNull();
+  });
+});
+
+describe("computePhaseSegments — fases sin muestras (A-3, plan de arreglo del instrumento §4)", () => {
+  it("measurable=false y peakInternalBytes=null cuando ninguna muestra cae dentro del tramo — nunca un 0 fabricado", () => {
+    // Réplica de P1: cadencia de referencia 150ms, fase de 12ms — ninguna
+    // muestra cae dentro de [1000, 1012] (README: "las fases cortas no
+    // reciben ninguna").
+    const samples: MemorySample[] = [
+      rssSample(850, { Tab: 500_000_000 }),
+      rssSample(1150, { Tab: 520_000_000 }),
+    ];
+    const segments = computePhaseSegments({ PHASE_A: 1000, PHASE_B: 1012 }, samples, 0, [], [], 0);
+    expect(segments).toHaveLength(1);
+    const seg = segments[0]!;
+    expect(seg.sampleCountInWindow).toBe(0);
+    expect(seg.measurable).toBe(false);
+    expect(seg.peakInternalBytes).toBeNull();
+    // Discriminante (ADR-149 §2): la lógica vieja calculaba
+    // `peakSumBytes(samplesBetween(...))` sin chequear si el resultado tenía
+    // datos — `peakSumBytes([])` da `0`, un pico fabricado. Confirma que acá
+    // NO se publica ese 0.
+    expect(seg.peakInternalBytes).not.toBe(0);
+  });
+
+  it("measurable=true y un pico real cuando al menos una muestra cae dentro del tramo", () => {
+    const samples: MemorySample[] = [
+      rssSample(950, { Tab: 500_000_000 }),
+      rssSample(1005, { Tab: 600_000_000 }), // dentro de [1000, 1012]
+      rssSample(1150, { Tab: 520_000_000 }),
+    ];
+    const segments = computePhaseSegments({ PHASE_A: 1000, PHASE_B: 1012 }, samples, 0, [], [], 0);
+    const seg = segments[0]!;
+    expect(seg.sampleCountInWindow).toBe(1);
+    expect(seg.measurable).toBe(true);
+    expect(seg.peakInternalBytes).toBe(600_000_000);
   });
 });

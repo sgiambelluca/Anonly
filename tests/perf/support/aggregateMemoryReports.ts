@@ -16,7 +16,15 @@ import { readdir, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import type { ProfileReport, RunReport } from "./memoryProfile.js";
+import {
+  classifyPeakPosition,
+  computeM2WithinPhases,
+  computePostReadyPeakBytes,
+  type PeakPosition,
+  type ProfileReport,
+  type RunReport,
+} from "./memoryProfile.js";
+import { peakSumBytes } from "./memorySampler.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = resolve(HERE, "../../../.measure");
@@ -178,12 +186,31 @@ async function main(): Promise<void> {
       const runs = reports.map(({ report, runLabel }) => ({ run: report[temperature], runLabel }));
       const failed = runs.filter((r) => !r.run.ok);
       const ok = runs.filter((r) => r.run.ok);
-      // ADR-146 §7bis: un pico fuera de toda fase es el residuo del
-      // documento anterior, no de este — se reporta, no se promedia.
-      // `peakWithinPhases === false` explícito la invalida; `undefined`
-      // (reportes de antes de este campo) se trata como válida.
-      const invalidPeak = ok.filter((r) => r.run.peakWithinPhases === false);
-      const valid = ok.filter((r) => r.run.peakWithinPhases !== false);
+
+      // ADR-146 §7ter (plan A-2): la posición se RECALCULA desde `samples`/
+      // `phaseSegments` crudos, nunca leída de un campo `peakPosition`/
+      // `peakWithinPhases` que puede no existir en un `.json` escrito antes
+      // de esta enmienda (`.measure/` es gitignoreado; un reporte viejo en
+      // disco no tiene por qué haberse vuelto a correr). Recalcular desde la
+      // serie persistida es justamente lo que permite reclasificar sin
+      // re-correr nada — las 12 corridas del 2026-09-17 se validan así.
+      // Mismo criterio, M2 y el pico posterior a Ready también se
+      // recalculan: un reporte viejo tiene en `peakSumBytes` el pico GLOBAL
+      // sin acotar (la definición pre-§7ter), no el de la ventana de fases.
+      const withMetrics = ok.map((r) => {
+        const samples = r.run.samples ?? [];
+        const segments = r.run.phaseSegments ?? [];
+        const peakPosition: PeakPosition = classifyPeakPosition(samples, segments);
+        const m2Bytes = computeM2WithinPhases(samples, segments) ?? r.run.peakSumBytes;
+        const postReadyPeakBytes = computePostReadyPeakBytes(samples, segments);
+        const m1Bytes = temperature === "hot" ? m2Bytes - r.run.baselineBytes : null;
+        return { ...r, peakPosition, m2Bytes, postReadyPeakBytes, m1Bytes };
+      });
+      // Solo "antes de DOCUMENT_IMPORTED" invalida (ADR-146 §7ter) — el caso
+      // de residuo del documento anterior que motivó §7bis. "Después de la
+      // última fase" pasa a ser válida desde §7ter.
+      const invalidPeak = withMetrics.filter((r) => r.peakPosition === "before-imported");
+      const valid = withMetrics.filter((r) => r.peakPosition !== "before-imported");
 
       if (failed.length > 0) {
         process.stdout.write(
@@ -192,9 +219,9 @@ async function main(): Promise<void> {
       }
       if (invalidPeak.length > 0) {
         process.stdout.write(
-          `  ${temperature}: ${invalidPeak.length}/${runs.length} corridas con pico fuera de toda fase ` +
-            `(ADR-146 §7bis — residuo del documento anterior) — no promediadas: ` +
-            `${invalidPeak.map((r) => formatMB(r.run.peakSumBytes)).join(", ")}.\n`,
+          `  ${temperature}: ${invalidPeak.length}/${runs.length} corridas con el máximo antes de ` +
+            `DOCUMENT_IMPORTED (ADR-146 §7bis/§7ter — residuo del documento anterior) — no promediadas: ` +
+            `${invalidPeak.map((r) => formatMB(peakSumBytes(r.run.samples ?? []))).join(", ")}.\n`,
         );
       }
       if (temperature === "hot") {
@@ -208,21 +235,43 @@ async function main(): Promise<void> {
       }
       if (valid.length === 0) continue;
 
-      const m2 = stats(valid.map((r) => r.run.peakSumBytes));
+      const afterLastPhase = valid.filter((r) => r.peakPosition === "after-last-phase");
+      if (afterLastPhase.length > 0) {
+        process.stdout.write(
+          `  ${temperature}: ${afterLastPhase.length}/${runs.length} corridas con el máximo después de ` +
+            `Ready (ADR-146 §7ter — válidas; M2 es el máximo dentro de fase, el pico posterior se reporta aparte).\n`,
+        );
+      }
+
+      const m2 = stats(valid.map((r) => r.m2Bytes));
       const totals = valid.map((r) => r.run.totalMs).filter((v): v is number => v !== null);
       const timeStats = totals.length > 0 ? stats(totals) : null;
       const groupCounts = valid.map((r) => r.run.groupCount);
 
       process.stdout.write(
-        `  ${temperature.padEnd(4)} — M2 pico: min ${formatMB(m2.min)} / avg ${formatMB(m2.avg)} / max ${formatMB(m2.max)}` +
+        `  ${temperature.padEnd(4)} — M2 pico (dentro de fase): min ${formatMB(m2.min)} / avg ${formatMB(m2.avg)} / max ${formatMB(m2.max)}` +
           (timeStats
             ? `  |  tiempo: min ${timeStats.min.toFixed(0)}ms / avg ${timeStats.avg.toFixed(0)}ms / max ${timeStats.max.toFixed(0)}ms`
             : "") +
           `  |  grupos: ${groupCounts.join(", ")}\n`,
       );
 
+      // ADR-146 §7ter: métrica obligatoria, siempre al lado de M2 — nunca
+      // fundida ni omitida, aunque ninguna corrida la dispare (`.length === 0`).
+      const postReadyValues = valid
+        .map((r) => r.postReadyPeakBytes)
+        .filter((v): v is number => v !== null);
+      if (postReadyValues.length > 0) {
+        const postReady = stats(postReadyValues);
+        process.stdout.write(
+          `       pico posterior a Ready (ADR-146 §7ter, no fundido con M2): ` +
+            `min ${formatMB(postReady.min)} / avg ${formatMB(postReady.avg)} / max ${formatMB(postReady.max)} ` +
+            `(${postReadyValues.length}/${valid.length} corridas con muestras posteriores a Ready)\n`,
+        );
+      }
+
       if (temperature === "hot") {
-        const m1Values = valid.map((r) => r.run.m1Bytes).filter((v): v is number => v !== null);
+        const m1Values = valid.map((r) => r.m1Bytes).filter((v): v is number => v !== null);
         if (m1Values.length > 0) {
           const m1 = stats(m1Values);
           process.stdout.write(

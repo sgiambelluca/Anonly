@@ -50,6 +50,17 @@ import { getOrGenerateScannedFixture } from "./support/scannedFixtureCache.js";
 
 test.setTimeout(300_000);
 
+/**
+ * A-3 (`docs/roadmap/Instrumento_De_Memoria_Arreglo_Plan.md` §4): P1 es el
+ * único perfil cuyo pipeline caliente entero (441-509 ms) es más corto que
+ * unas pocas cadencias del default de 150 ms — sus fases individuales duran
+ * 9-17 ms. Una cadencia más fina no garantiza cubrir cada fase (el costo de
+ * `electronApp.evaluate()` tiene un piso), pero sí reduce cuántas quedan sin
+ * ninguna muestra — el resto lo cubre `PhaseSegment.measurable`, que declara
+ * explícitamente la fase no medible en vez de publicar un pico fabricado.
+ */
+const P1_SAMPLE_INTERVAL_MS = 30;
+
 test("P1 — 10 páginas de texto nativo (control)", async ({
   page,
   electronApp,
@@ -64,6 +75,10 @@ test("P1 — 10 páginas de texto nativo (control)", async ({
     electronUserDataDir,
     "p1-native-10p",
     file,
+    180_000,
+    [],
+    undefined,
+    P1_SAMPLE_INTERVAL_MS,
   );
   printReport(report);
   await writeReport(report, testInfo.repeatEachIndex);
