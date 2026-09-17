@@ -614,7 +614,12 @@ cambiar ADR-163.
 ### T-7 — De qué está hecha la línea de base caliente — **abierta, es una medición**
 
 **Dónde**: `tests/` únicamente. **ADR**: ninguno; no cambia producto. **La
-desbloquea**: el instrumento arreglado, cerrado el 2026-09-17.
+desbloquea**: el instrumento arreglado, cerrado el 2026-09-17. **Plan detallado
+y protocolo**: [`Perfilado_Base_Caliente_Plan.md`](Perfilado_Base_Caliente_Plan.md),
+que además fija la hipótesis principal: la base caliente se toma con un techo de
+30 s (`HOT_BASELINE_SETTLE_CEILING_MS`) y el pool libera por inactividad a los
+60 s (`idleDisposeMs`, ADR-080), así que **ninguna medición de la campaña vio
+nunca esa liberación**.
 
 **Pregunta**: de los 1,7–2,2 GB que la aplicación retiene después de cerrar un
 documento (§1bis), ¿cuánto se libera solo y cuánto es piso irreducible?
