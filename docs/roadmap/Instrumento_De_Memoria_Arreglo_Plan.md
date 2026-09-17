@@ -2,6 +2,8 @@
 
 # Arreglo del instrumento de memoria — plan
 
+**Estado: CERRADO (2026-09-17).** Los tres arreglos están implementados y validados; ver §7.
+
 **Por qué existe este plan.** La re-caracterización del 2026-09-17 no pudo
 responder si los cambios de OCR bajaron la memoria, y al investigar por qué
 aparecieron tres defectos del instrumento. Ninguno se arregla solo, y mientras
@@ -134,3 +136,50 @@ abrir sobre datos comparables. El dato más firme que hay hoy es que **P2-dense
 da M1 de 783,4 / 797,3 / 814,1 MB contra el presupuesto de 512 MB**, tres de
 tres y con 31 MB de dispersión — pero es un peor caso sintético, y si representa
 o no un expediente real lo contesta el perfil P4, que sigue sin existir.
+
+---
+
+## 7. Cierre (2026-09-17)
+
+**Los tres arreglos están implementados, verificados y commiteados**
+(`fc6f927` el instrumento, `245a76b` y `c2a94ff` la enmienda de ADR-146 §7ter).
+La tanda de validación está en `.measure/memory-recaracterizacion/20260917T210735Z/`.
+
+### 7.1 Qué demuestra la validación
+
+| | antes | después |
+|---|---|---|
+| Corridas válidas | 12 descartadas entre las dos tandas del día | **18 de 18** |
+| Control P1, M1 caliente | 2,7 – 182,1 MB, y descartado 3/3 | **6,5 / 6,7 / 7,0 MB** |
+| Fase sin muestras | publicaba `peakInternalBytes: 0` | declarada no medible |
+| Presión del sistema | no registrada | `systemPressureAtStart`/`AtEnd` en cada reporte |
+
+Medio megabyte de dispersión en el control, sobre un perfil que antes daba dos
+órdenes de magnitud y ni siquiera se promediaba. El instrumento distingue ahora
+lo que mide de las condiciones en que lo mide.
+
+### 7.2 La métrica nueva no era decorativa
+
+El pico posterior a `Ready`, contra M2 acotado a fases, en P2:
+
+| importación | delta `postReadyPeakBytes` − M2 |
+|---|---|
+| **fría** | **+167,5 / +253,8 / +349,0 MB** — mayor en 3 de 3 |
+| caliente | −781,0 / −652,7 / −780,6 MB — menor en 3 de 3 |
+
+En la primera importación —la que el usuario vive como «abrir un documento»— el
+pico real está **después** de `PIPELINE_READY` y supera al del pipeline por 167
+a 349 MB: es el precalentado de la página 1 (ADR-151) y el seed de previews
+(ADR-044) haciendo render que antes no ocurrió. En caliente no pasa, porque ese
+trabajo ya se hizo en la importación previa de la misma instancia.
+
+Esto es exactamente el costo que ADR-146 §7ter aceptó por escrito al acotar M2.
+Queda **cuantificado y visible** en vez de discutido, que era la razón de exigir
+que la métrica fuese obligatoria y no opcional.
+
+### 7.3 Lo que este plan no hizo
+
+No se midió cuánto rindieron en memoria los cambios de OCR de la campaña
+anterior. Es deliberado: los cambios se conservan por su ahorro de tiempo, así
+que el resultado no cambiaría ninguna decisión. Queda dicho para que nadie lo
+lea como un pendiente.
