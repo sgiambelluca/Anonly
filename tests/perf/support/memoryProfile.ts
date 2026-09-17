@@ -48,7 +48,12 @@ const OUT_DIR = resolve(HERE, "../../../.measure");
 
 export const SAMPLE_INTERVAL_MS = 150;
 /** Gracia tras `PIPELINE_READY` antes de tomar el pico (ADR-146 §15.3 punto 8: el seed/precalentado de ADR-151 sigue corriendo un instante más). */
-const SETTLE_GRACE_MS = 600;
+/**
+ * Exportado desde T-7 (`docs/roadmap/Perfilado_Base_Caliente_Plan.md`):
+ * `support/hotBaselineCurve.ts` reusa esta misma gracia post-`Ready`, en vez
+ * de un valor propio que pudiera divergir de la corrida estándar.
+ */
+export const SETTLE_GRACE_MS = 600;
 /**
  * Asentamiento del RSS tras `closeDocument()` para la línea de base caliente
  * (ADR-146 §7bis): un residuo del documento anterior que todavía no decayó
@@ -151,7 +156,13 @@ const WORKER_TERMINAL_EVENTS: ReadonlyArray<string> = [
   "WORKER_JOB_TIMEOUT",
 ];
 
-async function installRunCollector(page: Page): Promise<void> {
+/**
+ * Exportada para T-7 (`support/hotBaselineCurve.ts`): la curva extendida de
+ * liberación necesita el mismo colector de fases que la corrida estándar,
+ * no una copia — dos implementaciones del mismo listener divergirían con el
+ * tiempo.
+ */
+export async function installRunCollector(page: Page): Promise<void> {
   await page.evaluate(
     ({ phaseEvents, workerTerminalEvents }) => {
       const core = globalThis.__anonlyCore;
@@ -289,7 +300,8 @@ async function installRunCollector(page: Page): Promise<void> {
   );
 }
 
-async function waitForRunSettled(page: Page, timeoutMs: number): Promise<void> {
+/** Exportada por el mismo motivo que `installRunCollector` (T-7). */
+export async function waitForRunSettled(page: Page, timeoutMs: number): Promise<void> {
   await page.waitForFunction(
     () => {
       const r = globalThis.__anonlyMemoryRun;
@@ -300,7 +312,10 @@ async function waitForRunSettled(page: Page, timeoutMs: number): Promise<void> {
   );
 }
 
-async function readRun(page: Page): Promise<NonNullable<typeof globalThis.__anonlyMemoryRun>> {
+/** Exportada por el mismo motivo que `installRunCollector` (T-7). */
+export async function readRun(
+  page: Page,
+): Promise<NonNullable<typeof globalThis.__anonlyMemoryRun>> {
   return page.evaluate(() => {
     const r = globalThis.__anonlyMemoryRun;
     if (r === undefined) throw new Error("__anonlyMemoryRun ausente");
@@ -1024,7 +1039,12 @@ export function computePostReadyPeakBytes(
  * siguiente. Mismo patrón que `tests/e2e/scenario-7-open-close-cycle.spec.ts`
  * (el ciclo de H-07/leak): botón real → `ConfirmDialog` real (ADR-051 §2).
  */
-async function closeDocument(page: Page): Promise<void> {
+/**
+ * Exportada para T-7: la curva extendida cierra el documento por la misma UI
+ * real que la corrida estándar, para que "justo después de cerrar" signifique
+ * lo mismo en las dos mediciones.
+ */
+export async function closeDocument(page: Page): Promise<void> {
   const closeButton = page.getByRole("button", { name: "Cerrar documento" });
   const confirmDialog = page.getByRole("dialog", { name: "Cerrar documento" });
   await closeButton.waitFor({ state: "visible", timeout: 30_000 });
@@ -1057,7 +1077,16 @@ export interface ProfileReport {
  * sigue igual con el mínimo de todo lo acumulado hasta ahí, y `settled: false`
  * — no se descarta, pero queda marcada.
  */
-async function waitForHotBaselineToSettle(
+/**
+ * Exportada para T-7 (`docs/roadmap/Perfilado_Base_Caliente_Plan.md`): la
+ * curva extendida de liberación reusa **esta misma función**, sin
+ * reimplementarla, para que `standardBaselineBytes` comparta
+ * exactamente la definición de `RunReport.baselineBytes` — incluido el techo
+ * `HOT_BASELINE_SETTLE_CEILING_MS`, que el plan prohíbe tocar. La curva
+ * extendida sigue observando *después* de que esta función resuelve; no la
+ * reemplaza.
+ */
+export async function waitForHotBaselineToSettle(
   page: Page,
   sampler: MemorySampler,
   sinceMs: number,
