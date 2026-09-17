@@ -862,14 +862,26 @@ async function decodeStrip(
  * sin bifurcar. `getStrip` la resuelve: `kernelRecognizeUpright` decodifica
  * la franja directo del blob (`decodeStrip`); `kernelRecognizeRotated` sigue
  * recortando el `ImageData` de página ya decodificado (`cropImageData`, sin
- * cambios). `uprightWidth`/`uprightHeight` reemplazan a `upright.width/height`
- * porque el camino común no tiene ningún `ImageData` de página del que
- * leerlos.
+ * cambios). `uprightWidth` reemplaza a `upright.width` porque el camino
+ * común no tiene ningún `ImageData` de página del que leerlo.
+ *
+ * v1.16.1: `uprightWidth` es del raster ENDEREZADO — de ahí sale la
+ * geometría de la franja (`stripWidth`, el `x0` de cada lado, el recorte),
+ * que es de donde se recorta de verdad; el alto no hace falta acá porque
+ * cada franja es de alto completo y `getStrip` ya lo captura por closure.
+ * Pero el ÚLTIMO paso del mapeo de cada caja —franja rotada → franja →
+ * enderezado → raster ORIGINAL— tiene que deshacer la rotación de PÁGINA con
+ * las dimensiones del raster ORIGINAL (`originalWidth`/`originalHeight`),
+ * como pide la firma de `unrotateBbox`. En 90/270 el enderezado tiene el
+ * ancho y el alto intercambiados respecto del original, así que reusar
+ * `uprightWidth` ahí saca la caja de su lugar real. Son dos espacios
+ * distintos a propósito; no se unifican.
  */
 async function recognizeRotatedMargins(params: {
   readonly getStrip: (x0: number, width: number) => Promise<ImageData>;
   readonly uprightWidth: number;
-  readonly uprightHeight: number;
+  readonly originalWidth: number;
+  readonly originalHeight: number;
   readonly words: ReadonlyArray<Word>;
   readonly orientation: Rotation;
   readonly documentId: string;
@@ -880,7 +892,8 @@ async function recognizeRotatedMargins(params: {
   const {
     getStrip,
     uprightWidth,
-    uprightHeight,
+    originalWidth,
+    originalHeight,
     words,
     orientation,
     documentId,
@@ -958,8 +971,11 @@ async function recognizeRotatedMargins(params: {
           cropped.height,
         );
         const inUpright = { ...inStrip, x: inStrip.x + strip.x0 };
+        // v1.16.1: dimensiones del raster ORIGINAL, no las del enderezado —
+        // es la inversa de la rotación de PÁGINA, y unrotateBbox pide el
+        // tamaño de a dónde vuelve, no de dónde sale.
         const bbox = toPagePoints(
-          unrotateBbox(inUpright, orientation, uprightWidth, uprightHeight),
+          unrotateBbox(inUpright, orientation, originalWidth, originalHeight),
           dpi,
         );
 
@@ -1049,7 +1065,9 @@ async function kernelRecognizeUpright(
   const rotated = await recognizeRotatedMargins({
     getStrip: (x0, width) => decodeStrip(blob, x0, width, image.heightPx, documentId, pageIndex),
     uprightWidth: image.widthPx,
-    uprightHeight: image.heightPx,
+    // Orientación 0: enderezado y original son el mismo raster.
+    originalWidth: image.widthPx,
+    originalHeight: image.heightPx,
     words,
     orientation: 0,
     documentId,
@@ -1093,7 +1111,10 @@ async function kernelRecognizeRotated(
   const rotated = await recognizeRotatedMargins({
     getStrip: (x0, width) => Promise.resolve(cropImageData(upright, x0, width)),
     uprightWidth: upright.width,
-    uprightHeight: upright.height,
+    // v1.16.1: el raster ORIGINAL es `image`, no `upright` — en 90/270
+    // `upright` tiene el ancho y el alto intercambiados respecto de él.
+    originalWidth: image.widthPx,
+    originalHeight: image.heightPx,
     words,
     orientation,
     documentId,

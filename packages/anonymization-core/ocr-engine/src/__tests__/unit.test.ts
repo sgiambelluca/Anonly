@@ -1293,6 +1293,154 @@ describe("OcrEngine — unit tests", () => {
     });
   });
 
+  // ─── v1.16.1: unrotateBbox final con dimensiones equivocadas (errata) ───
+
+  describe("mapeo final de una franja rotada a la página (errata v1.16.1)", () => {
+    // Cuerpo genérico, lejos de cualquier candidata de margen en los tres
+    // tests: solo está para que la pasada derecha tenga algo que leer.
+    const CUERPO = [{ text: "cuerpo", confidence: 95, bbox: { x0: 2, y0: 2, x1: 12, y1: 8 } }];
+
+    it("a margin word on a 90 deg rotated page lands on its real page position", async () => {
+      /*
+       * El último `unrotateBbox` de `recognizeRotatedMargins` recibía
+       * `uprightWidth`/`uprightHeight` (las del raster ENDEREZADO) en vez de
+       * las del raster ORIGINAL que la función pide (ver su firma y el
+       * comentario que la precede). En 90°/270° están intercambiadas.
+       *
+       * Mapeo a mano — raster original 100×40, orientación 90 (endereza a
+       * 40×100): franja IZQUIERDA (x0=0) de 8×100, rotada 90° da un canvas de
+       * 100×8; ahí Tesseract lee (10,2)-(30,6). Deshaciendo paso a paso:
+       * franja → (2,70)-(6,90); enderezado → mismo (2,70)-(6,90) (x0=0);
+       * ORIGINAL con unrotateBbox(., 90, 100, 40) → x=70, y=40-(2+4)=34.
+       *
+       * Con el bug (dimensiones del enderezado, 40×100): y=100-(2+4)=94 —
+       * más alto que la página entera (40 px): la caja cae afuera.
+       */
+      const SELLO = [{ text: "SELLO90", confidence: 90, bbox: { x0: 10, y0: 2, x1: 30, y1: 6 } }];
+      const detect = vi.fn(() => Promise.resolve(mockDetectData(90)));
+      let llamada = 0;
+      const recognize = vi.fn(() => {
+        llamada += 1;
+        // 1 = pasada derecha; 2 = franja izquierda a 90° (la que trae el
+        // sello); el resto de las pasadas de margen no aportan nada.
+        const data =
+          llamada === 1
+            ? mockRecognizeData(CUERPO)
+            : llamada === 2
+              ? mockRecognizeData(SELLO)
+              : mockEmptyRecognizeData();
+        return Promise.resolve({ jobId: "j", data });
+      });
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(CUERPO), { recognize, detect }),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.processPage(createValidOcrPageInput("doc-121-errata-90"), ctx);
+
+      const factor = 72 / ctx.config.ocr.dpi;
+      const sello = output.words.find((w) => w.text === "SELLO90");
+      expect(sello).toBeDefined();
+      expect(sello?.bbox.x).toBeCloseTo(70 * factor, 6);
+      expect(sello?.bbox.y).toBeCloseTo(34 * factor, 6);
+      expect(sello?.bbox.width).toBeCloseTo(20 * factor, 6);
+      expect(sello?.bbox.height).toBeCloseTo(4 * factor, 6);
+      // La página mide 40 px de alto: con el mapeo viejo la caja cae afuera.
+      expect(sello!.bbox.y).toBeLessThan(40 * factor);
+    });
+
+    it("a margin word on a 270 deg rotated page lands on its real page position", async () => {
+      /*
+       * Mismo bug, el otro ángulo con intercambio de dimensiones. Franja
+       * DERECHA (x0=32 del enderezado 40×100) de 8×100, rotada 270° da un
+       * canvas de 100×8; ahí Tesseract lee (15,1)-(35,5). Deshaciendo:
+       * franja → (3,15)-(7,35); enderezado (+x0=32) → (35,15)-(39,35);
+       * ORIGINAL con unrotateBbox(., 270, 100, 40) →
+       * x=100-(15+20)=65, y=35.
+       *
+       * Con el bug (dimensiones del enderezado, 40×100): x=40-(15+20)=5 — a
+       * 60 px de la posición real. Acá no queda afuera de la página, pero
+       * está en el lugar equivocado: el discriminante es la coordenada, no
+       * el borde.
+       */
+      const SELLO = [{ text: "SELLO270", confidence: 88, bbox: { x0: 15, y0: 1, x1: 35, y1: 5 } }];
+      const detect = vi.fn(() => Promise.resolve(mockDetectData(270)));
+      let llamada = 0;
+      const recognize = vi.fn(() => {
+        llamada += 1;
+        // 1 = pasada derecha; 2-4 = izquierda×90, izquierda×270, derecha×90
+        // (vacías); 5 = derecha×270, la que trae el sello.
+        const data =
+          llamada === 1
+            ? mockRecognizeData(CUERPO)
+            : llamada === 5
+              ? mockRecognizeData(SELLO)
+              : mockEmptyRecognizeData();
+        return Promise.resolve({ jobId: "j", data });
+      });
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(CUERPO), { recognize, detect }),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.processPage(createValidOcrPageInput("doc-121-errata-270"), ctx);
+
+      const factor = 72 / ctx.config.ocr.dpi;
+      const sello = output.words.find((w) => w.text === "SELLO270");
+      expect(sello).toBeDefined();
+      expect(sello?.bbox.x).toBeCloseTo(65 * factor, 6);
+      expect(sello?.bbox.y).toBeCloseTo(35 * factor, 6);
+      expect(sello?.bbox.width).toBeCloseTo(20 * factor, 6);
+      expect(sello?.bbox.height).toBeCloseTo(4 * factor, 6);
+    });
+
+    it("a margin word on a 180 deg rotated page keeps its position", async () => {
+      /*
+       * Control (ADR-149 §2): 180° NO intercambia dimensiones —
+       * `rotateImageData` solo lo hace en 90/270—, así que el raster
+       * enderezado mide lo mismo que el original (100×40) y este caso ya
+       * daba bien antes del fix. Tiene que seguir dando lo mismo después: si
+       * este test se rompe, el fix tocó más de lo que debía.
+       *
+       * Franja DERECHA (x0=80 del enderezado 100×40) de 20×40, rotada 90°
+       * da un canvas de 40×20; ahí Tesseract lee (5,2)-(25,10). Deshaciendo:
+       * franja → (2,15)-(10,35); enderezado (+x0=80) → (82,15)-(90,35);
+       * ORIGINAL con unrotateBbox(., 180, 100, 40) →
+       * x=100-(82+8)=10, y=40-(15+20)=5 — idéntico con las dos dimensiones,
+       * porque en 180 son la misma.
+       */
+      const SELLO = [{ text: "SELLO180", confidence: 91, bbox: { x0: 5, y0: 2, x1: 25, y1: 10 } }];
+      const detect = vi.fn(() => Promise.resolve(mockDetectData(180)));
+      let llamada = 0;
+      const recognize = vi.fn(() => {
+        llamada += 1;
+        // 1 = pasada derecha; 2-3 = izquierda×90, izquierda×270 (vacías);
+        // 4 = derecha×90, la que trae el sello; 5 = derecha×270 (vacía).
+        const data =
+          llamada === 1
+            ? mockRecognizeData(CUERPO)
+            : llamada === 4
+              ? mockRecognizeData(SELLO)
+              : mockEmptyRecognizeData();
+        return Promise.resolve({ jobId: "j", data });
+      });
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(CUERPO), { recognize, detect }),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.processPage(createValidOcrPageInput("doc-121-errata-180"), ctx);
+
+      const factor = 72 / ctx.config.ocr.dpi;
+      const sello = output.words.find((w) => w.text === "SELLO180");
+      expect(sello).toBeDefined();
+      expect(sello?.bbox.x).toBeCloseTo(10 * factor, 6);
+      expect(sello?.bbox.y).toBeCloseTo(5 * factor, 6);
+      expect(sello?.bbox.width).toBeCloseTo(8 * factor, 6);
+      expect(sello?.bbox.height).toBeCloseTo(20 * factor, 6);
+    });
+  });
+
   // ─── ADR-160: el kernel no decodifica la página (camino común) ───
 
   describe("el kernel no decodifica la página (ADR-160)", () => {
