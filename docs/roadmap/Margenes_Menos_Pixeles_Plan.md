@@ -2,9 +2,9 @@
 
 # Márgenes — leer menos píxeles
 
-Estado: **planificación**, 2026-09-16. Ninguna idea está implementada ni
-autorizada a implementarse. Este documento describe tres ideas y **cómo
-decidir entre ellas midiendo**, no qué hacer.
+Estado: **I-1 conservada; I-2 medida y cerrada sin implementación; I-3 no
+activada**, 2026-09-17. Este documento conserva el plan previo y registra
+las decisiones tomadas con las mediciones.
 
 **Regla de avance fijada por el humano el 2026-09-16: primero documentar,
 después medir, y recién implementar si la medición muestra que vale la pena.**
@@ -298,3 +298,43 @@ es un resultado publicable, no algo a rescatar ajustando el experimento.
   que lo tapa, es decir ilegible de todos modos. La medición no puede descartar
   ese caso —no apareció en 112 tiras—, así que se declara como riesgo asumido
   con su argumento, no como imposibilidad demostrada.
+
+## 9. Cierre de I-1 (2026-09-17)
+
+La secuencia de §8.1 está completa: errata de coordenadas, ADR-165 y spec,
+implementación en `b76d18c`, y campaña A/B reproducible. El reporte de
+[`Margenes_Menos_Pixeles_Medicion_I1.md`](Margenes_Menos_Pixeles_Medicion_I1.md)
+conserva los manifiestos, logs y resultados crudos de tres pares alternados.
+La primera campaña A/B se conserva como preliminar, pero no se usa para la
+decisión porque carecía de trazabilidad de build por sesión.
+
+La campaña válida observó **6,234 s de ahorro neto medio de OCR por 50 páginas
+P2** (34,5 % frente al control), con las seis comparaciones positivas y las
+200 pasadas de margen del control reducidas a cero. La huella de P2 quedó
+idéntica (`c723dace…`, 1.038 palabras) y qa-stamp mantuvo sus cuatro pasadas
+y su huella de 79 palabras OCR. Las 21 palabras atribuidas al margen en la
+medición previa permanecen en esa huella. **Se conserva I-1**, conforme al
+criterio escrito antes de medir en §8.3 y ADR-165 §7.
+
+I-2 seguía abierta al cerrar esta campaña; su medición y decisión posteriores
+constan en §10. I-3 no se activa.
+Esta campaña no mide ahorro de RSS ni calidad sobre un corpus de escaneos
+reales, así que esos resultados no se extrapolan.
+
+## 10. Cierre de I-2 (2026-09-17)
+
+La medición experimental posterior a I-1 está documentada en
+[`Margenes_Menos_Pixeles_Medicion_I2.md`](Margenes_Menos_Pixeles_Medicion_I2.md).
+P2 no dejó franjas para recortar. En qa-stamp, los recortes de 0 y 32 px
+cambiaron la salida total (79→77 y 79→78), pero conservaron las 15 palabras
+reales del sello y folio; 64 y 128 px conservaron además la huella exacta.
+Tres parejas alternadas con 64 px ahorraron 147 ms medios de OCR
+completo por página qa-stamp (6,0 %); el tramo cronometrado dentro de las
+cuatro pasadas de margen bajó 18,0 %. La muestra positiva abarca solo dos
+franjas de un PDF sintético.
+
+**I-2 no avanza a ADR ni a implementación.** El ahorro no alcanza el criterio
+preestablecido en P2 (cero frente al piso de ≥20 %) y los recortes más
+agresivos alteraron la salida de Tesseract.
+I-1 sigue conservada; I-3 permanece sin activar porque su
+condición original no se cumplió.
