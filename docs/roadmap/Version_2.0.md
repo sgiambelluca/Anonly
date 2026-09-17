@@ -66,7 +66,7 @@ Convertir Anonly de "anonimizador de PDF web" a "plataforma de anonimización do
 
 ### 2.7 Performance
 
-- **SharedArrayBuffer + WASM threads** para NER y OCR (si COOP/COEP ampliamente adoptable).
+- **Investigar un backend/build de OCR con WASM multihilo**, si aparece una opción compatible y la medición justifica el cambio. El `tesseract.js-core@6.1.2` usado actualmente no incluye un build multihilo (`H-10_Bitacora_De_Memoria.md` §7.2). El multihilo de ONNX Runtime para NER ya se habilitó en el escritorio (ADR-100/130/132).
 - **Streaming de PDFs enormes** (> 1000 páginas) sin OOM, descartando páginas procesadas.
 - **Cache de grupos en IndexedDB** (solo metadatos no sensibles) para reabrir documentos recientes.
 

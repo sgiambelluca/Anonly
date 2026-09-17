@@ -13,9 +13,11 @@
 > gates scoped verdes; T-4b conserva la heurística calibrada y sigue bloqueada por el
 > corpus de ADR-147; **T-5 cerrada**, OSD compartido + una página de adelanto
 > aceptado, con implementación, validación y controles finales completos.
-> ImageData continúa como evaluación separada;
+> El perfilado de ImageData cerró como evaluación separada; I-1 de márgenes
+> quedó implementada y conservada tras medición A/B (`Margenes_Menos_Pixeles_Plan.md` §9);
 > T-6a **cerrada e implementada** como cap conservador por página (ADR-163);
-> T-6b conserva la medición P2 pendiente.
+> T-6b queda en pausa por la decisión del humano del 2026-09-17 de conservar
+> 300 DPI como valor configurado, priorizando calidad. T-6a sigue vigente.
 
 **Perfil de referencia**: P2 — 50 páginas escaneadas, OCR + NER reales, sobre el
 shell de Electron empaquetado.
@@ -481,16 +483,15 @@ ni se revierten capacidades para mejorar artificialmente el reloj. Ver
 perfilado [`ImageData_Perfilado_Handoff.md`](ImageData_Perfilado_Handoff.md)
 y los resultados de ese perfilado
 [`ImageData_Perfilado_Resultados.md`](ImageData_Perfilado_Resultados.md).
-El perfil está hecho; ninguna candidata está implementada ni autorizada: las
-dos del plan original quedaron descartadas **por medición** (0,54 % y 3,2 %
-del costo de margen). El 74 % está en el área que se le entrega a Tesseract,
-y las tres ideas que atacan eso —sin recortar la capacidad— se investigan en
-[`Margenes_Menos_Pixeles_Plan.md`](Margenes_Menos_Pixeles_Plan.md), bajo la
-regla de documentar → medir → implementar solo si rinde. **Medido el
-2026-09-16**: la idea I-1 —no leer una franja cuya tinta ya esta explicada por
-palabras reconocidas— acierta en las 112 franjas medidas y proyecta ~100 % del
-costo de margen. Queda aprobada para implementar, despues de la errata v1.16.1
-de `OCR_Engine.md`, que toca la misma funcion.
+El perfil está hecho. Las dos candidatas del plan original quedaron
+descartadas **por medición** (0,54 % y 3,2 % del costo de margen). La campaña
+posterior de márgenes eligió I-1 —no leer una franja cuya tinta ya está
+explicada por palabras reconocidas—, la implementó y la conservó tras una
+medición A/B reproducible: **6,234 s de ahorro neto medio de OCR por 50 páginas
+P2**, con huella de calidad idéntica y el sello conservado. La decisión y sus
+límites están en
+[`Margenes_Menos_Pixeles_Plan.md`](Margenes_Menos_Pixeles_Plan.md) §9 y
+[`Margenes_Menos_Pixeles_Medicion_I1.md`](Margenes_Menos_Pixeles_Medicion_I1.md).
 
 Las alternativas de prepasada completa y dos páginas de adelanto permanecen
 registradas y no seleccionadas en
@@ -538,7 +539,7 @@ cierre funcional.
 la resolución de los escaneos reales, y el fixture es sintético. Eso no bloquea
 implementarlo — bloquea estimarlo de antemano.
 
-### T-6b — La curva de calidad contra DPI — **pendiente, es una medición, no un cambio**
+### T-6b — La curva de calidad contra DPI — **en pausa por decisión del humano (2026-09-17)**
 
 Distinta de T-6a y posterior. **No cambia código de producto**: mide, sobre el
 corpus de ADR-147, cuánto cae la calidad de detección a medida que baja el DPI
@@ -549,6 +550,15 @@ corpus de ADR-147, cuánto cae la calidad de detección a medida que baja el DPI
 > en la mano se decide** si se baja el DPI por default y hasta dónde. Sin la
 > curva, bajar el DPI sería aceptar una pérdida de calidad sin saber cuánta — que
 > es exactamente lo que ADR-154 §1 y ADR-126 §2 prohíben.
+
+**Decisión posterior:** se conserva `config.ocr.dpi = 300` y no se impulsa una
+reducción general a 250/200/150 DPI. La curva T-6b queda en pausa mientras esa
+preferencia siga vigente. Esto no revierte T-6a: en páginas completas formadas
+por un solo ráster cuya resolución nativa comprobable sea menor, ADR-163 usa
+`min(300, ocrDpiCap)`; las regiones OCR y los casos ambiguos siguen a 300.
+Forzar 300 **efectivos** también sobre un ráster fuente de menor resolución
+sería una decisión distinta, con una comparación de calidad propia antes de
+cambiar ADR-163.
 
 ---
 
@@ -621,9 +631,12 @@ estos levers importan.** No bloquea T-1 a T-4; sí bloquea dimensionar T-6.
 
 ---
 
-## 5. Lo que sigue pendiente de decisión del humano
+## 5. Decisiones y pendientes del humano
 
-1. **Resultados de T-6b**: T-5 está cerrada. La evaluación posterior de ImageData es un trabajo separado; aumentar el número de reconocedores o reducir DPI por calidad también requiere su propia decisión.
+1. **T-6b en pausa**: se conserva la configuración de 300 DPI por preferencia
+   del humano del 2026-09-17; no se propone bajarla sin reabrir la decisión.
+   La evaluación posterior de ImageData es un trabajo separado. Aumentar el
+   número de reconocedores también requiere su propia decisión.
 2. **El presupuesto**: la alternativa A de la bitácora §7.1 (reemplazar los
    ~1600 MB estimados de `07_Performance_Strategy.md` §7 por componentes
    medidos) sigue disponible, pero **sobre números nuevos** — los de hoy salen
@@ -632,6 +645,16 @@ estos levers importan.** No bloquea T-1 a T-4; sí bloquea dimensionar T-6.
    del documento) **no se recomienda arrancar todavía**: apostaba entera a la
    hipótesis del heap, y ADR-159 §3 le sacó la mitad del peso. Se re-evalúa con
    lo que midan T-1 y T-2.
+4. **Precargar NER durante el OCR: descartado el 2026-09-17, decisión tomada.**
+   Era una idea de velocidad, pero el costo que midió fue de memoria: el disparo
+   temprano subió el pico de RSS **144–422 MB en las tres rondas**, por encima
+   de la dispersión de sus propios controles en cada una, y sin una mejora
+   estable de `import→Ready`. Va en dirección contraria a ADR-157, que da de
+   baja el pool de OCR para que Tesseract y ONNX no convivan. El descarte está
+   anotado en el lever 3 de ADR-154 §2, con la evidencia en
+   [`Precalentamiento_NER_Durante_OCR_Medicion.md`](Precalentamiento_NER_Durante_OCR_Medicion.md)
+   §7. No se reabre sin un `modelLoadMs` materialmente mayor o un banco menos
+   ruidoso.
 
 ## 6. Trabajo posterior al hardening
 

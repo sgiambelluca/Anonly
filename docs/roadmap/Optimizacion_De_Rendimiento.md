@@ -4,7 +4,7 @@
 
 > **Procedencia**: relevamiento del 2026-08-27 con cuatro agentes de investigación (carga/arranque, OCR por página, NER por página, duplicación+UI). **Cada número de este documento fue verificado a mano** contra el código o remedido; lo que no se pudo medir está marcado como tal.
 
-**Estado**: relevado, plan acordado, **nada implementado**.
+**Estado actual (2026-09-17)**: este relevamiento conserva las mediciones originales. El multihilo interno de ONNX Runtime para NER quedó habilitado en el producto (ADR-100/130/132); la segunda instancia de worker NER se midió y se revirtió. D1 y el OCR paralelo también se implementaron. Ver el estado por intervención en «Plan acordado».
 
 ## Los dos focos
 
@@ -39,11 +39,11 @@ Es el tipo de documento al que apunta el producto.
 
 ## Velocidad — ordenado por ganancia sobre riesgo
 
-### A. El WASM corre en un solo hilo — **MEDIDO el 2026-08-27; falta decidir el despliegue**
+### A. Multihilo WASM de ONNX Runtime para NER — **IMPLEMENTADO**
 
-`crossOriginIsolated` es `false` y no hay `SharedArrayBuffer`, así que `onnxruntime-web` fuerza `numThreads = 1`. El motor nunca toca `numThreads` (`ner-engine/src/worker/kernel.ts`, `configureTransformersEnv`): queda en el default de la librería.
+**Baseline histórico del 2026-08-27**: en la web sin aislamiento, `crossOriginIsolated` era `false` y no había `SharedArrayBuffer`, por lo que `onnxruntime-web` forzaba `numThreads = 1`. El motor no configura `numThreads` (`ner-engine/src/worker/kernel.ts`, `configureTransformersEnv`): usa el valor automático de la librería.
 
-El propio repo ya lo admite — `07_Performance_Strategy.md` línea 232: *"`performance.measureUserAgentSpecificMemory()` exige `crossOriginIsolated` (COOP/COEP), **headers que la app de producción no lleva**"*.
+**Producto actual**: ADR-100 declaró los headers para la variante web y ADR-130/132 fijaron el aislamiento en el contenedor de escritorio. El spike de ADR-132 («Verificado en el spike») comprobó `crossOriginIsolated === true` en renderer y workers, `SharedArrayBuffer` dentro del worker NER y la carga de `ort-wasm-simd-threaded.asyncify`. ONNX Runtime decide automáticamente cuántos hilos usa según el entorno; esa cifra efectiva no se registró en este relevamiento. Esos hilos ejecutan una inferencia **dentro de un worker NER**; `nerPoolSize` controla cuántos workers NER podrían existir y es un mecanismo distinto.
 
 #### Medido: la inferencia baja a la mitad
 
@@ -63,20 +63,13 @@ Sobre el documento denso (`doc-026`): **2986 ms → 1085 ms, −63,7 %**. La car
 
 **La calidad no cambió en nada**: recall de Regex 61/61, recall de NER 12/17, precisión 84/97 — idénticos a la corrida previa. Era lo esperado (esto no toca tokenización, agregación BIO ni umbral) pero se corrió igual, no se asumió.
 
-**El prototipo se revirtió**: el cambio de headers no está commiteado, porque la decisión no es del repo (ver abajo).
+**El prototipo de medición se revirtió entonces**; los headers para la variante web se declararon después mediante ADR-100 y el aislamiento del producto de escritorio se implementó con ADR-130/132. La reversión del prototipo no describe el estado actual.
 
-#### Lo que falta decidir, y por qué no es del repo
+#### Decisión de despliegue — resuelta
 
-La app es un **SPA estático**: no puede mandarse headers a sí misma. Ponerlos en el dev server hace que **dev y producción difieran en algo que se nota** —threading sí / threading no—, así que cualquier medición local dejaría de describir el producto. Las opciones:
+En el relevamiento original, la app era un **SPA estático** y faltaba decidir quién enviaría COOP/COEP en producción. Habilitarlos solo en el servidor de desarrollo habría hecho que las mediciones locales describieran otra configuración. ADR-100 dejó los headers declarados para un hosting web compatible; ADR-130/132 trasladaron el producto al contenedor de escritorio, que sirve el origen aislado.
 
-1. **Comprometer el hosting** a mandar los dos headers, y recién ahí ponerlos también en dev. Es lo único que hace real la ganancia.
-2. Ponerlos solo en dev. **Desaconsejado**: mide una app que no existe.
-3. No hacer nada y quedarse con un hilo.
-
-Hay que auditar además que `COEP: require-corp` no rompa ninguna carga cross-origin. En dev no rompió nada (el pipeline completo corrió y la calidad no se movió), y la app es 100 % first-party por diseño, pero el hosting real puede traer recursos que el dev server no tiene.
-
-- **Riesgo de calidad**: **ninguno, verificado.** No toca tokenización, agregación BIO ni umbral, y la corrida lo confirma.
-- **Costo**: chico en código (cinco líneas más un ADR); la parte cara es el compromiso de despliegue.
+La medición original no mostró pérdida de calidad: no cambió tokenización, agregación BIO ni umbral. La validación posterior del shell en ADR-132 comprobó que la variante multihilo carga y que el pipeline completo funciona bajo `app://`.
 
 ### B. OCR procesa de a una página aunque el pool tiene dos
 
@@ -175,6 +168,17 @@ Tres cambios chicos, **un motor cada uno** — encajan con R-1 sin fricción. Ri
 - **Las 14 patrones de Regex sobre texto normal**: 3,5 ms por página densa. Irrelevante frente a NER.
 - **Worker de Tesseract y modelo NER**: se cachean entre páginas, no se recrean. Correcto.
 - **Blob URLs, `PDFDocumentProxy`, LRU de render**: sin fugas evidentes.
+- **Adelantar la carga del modelo NER para solaparla con el OCR** (2026-09-17): tres
+  rondas intercaladas `A1→B1→B2→A2` sobre P2, un solo build instrumentado. Ni el
+  disparo al empezar el OCR ni el del 75 % dieron una mejora estable de
+  `import→Ready`; el primero subió el pico de RSS 144–422 MB en las tres rondas.
+  Lo que cierra el tema: la oportunidad entera eran **0,94 s** de `modelLoadMs`
+  frío, y la deriva del banco entre dos controles idénticos de una misma ronda
+  fue de **0,06, 1,83 y 2,54 s** — el premio es más chico que el error de
+  medición. Cargar el modelo al abrir la aplicación está descartado aparte, sin
+  medir, por `idleDisposeMs` de 60 s y memoria ocupada sin documento. Ver
+  [`Precalentamiento_NER_Durante_OCR_Medicion.md`](Precalentamiento_NER_Durante_OCR_Medicion.md)
+  §7 y ADR-154 §2 lever 3.
 
 ---
 
@@ -211,7 +215,7 @@ Y `test:quality` corre **con NER apagado** (ADR-095 §5), así que hoy no hay fo
 | ~~**0**~~ | ~~montar la medición que falta~~ — **hecho**: `pnpm test:measure` (`tests/measure/`), con recall de NER medible por primera vez | sin esto, "no bajó la calidad" es una opinión |
 | ~~**1**~~ | ~~truncamiento silencioso~~ — **hecho**: ADR-098 | el único que ya estaba costando calidad |
 | ~~**2**~~ | ~~**D1**~~ — **hecho**: ADR-099, chunk inicial de 549 a 208 KB gz (−62 %) | foco declarado nº 1, riesgo cero, tres cambios chicos |
-| **3** | **A** (COOP/COEP) — **medido: −53,6 % de inferencia, calidad intacta**; falta decidir el despliegue | la ganancia más grande; medir antes de comprometerse |
+| ~~**3**~~ | ~~**A** (aislamiento para ONNX Runtime)~~ — **hecho**: ADR-100/130/132; medición inicial: −53,6 % de inferencia, calidad intacta | la ganancia más grande; verificación posterior en el shell |
 | ~~**4**~~ | ~~**B** (OCR en paralelo)~~ — **hecho**: ADR-101, −22 % a −27 % en documentos de dos páginas | limpio, sin riesgo de calidad |
 | ~~**5**~~ | ~~**C**~~ — **medido y REVERTIDO**: no aporta nada sobre A | tres cortes; revertir si A ya se llevó la ganancia |
 | — | **D2**, los dos O(n²) | **diferidos**, a rediscutir al cerrar lo anterior |

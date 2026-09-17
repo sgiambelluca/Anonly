@@ -551,14 +551,43 @@ De las ~70: **~30 ya estaban cerradas** por hitos posteriores (ADR-053/054/056, 
   blancas (ADR-162), con 137/137 tests scoped verdes. La heurística calibrada para márgenes
   ruidosos queda separada como T-4b y bloqueada por el corpus de ADR-147.
   T-6a cerrada e implementada como cap conservador por página de ráster único
-  (ADR-163), con 508/508 tests afectados y gates scoped verdes; T-6b continúa
-  siendo la medición posterior de calidad. **T-5 cerrada el 2026-09-15**:
+  (ADR-163), con 508/508 tests afectados y gates scoped verdes; T-6b queda en
+  pausa desde el 2026-09-17 por la preferencia de conservar 300 DPI
+  configurados, sin revertir el cap de resolución nativa de T-6a.
+  **T-5 cerrada el 2026-09-15**:
   OSD compartido con una página de adelanto implementado y aceptado por el
   humano, con validación funcional y controles generales verdes. La campaña
   separada observó −24–25% de tiempo frente al control con igual comportamiento
   histórico de ImageData, sin ahorro RSS demostrado. Evidencia y límites en
-  `T5_OSD_Compartido_Cierre_Final.md`. Continúa por separado la evaluación de
-  ImageData (`ImageData_Perfilado_Plan.md`), sin reabrir OSD/adelanto.
+  `T5_OSD_Compartido_Cierre_Final.md`. Por separado, el perfilado de ImageData
+  cerró y la optimización de franjas I-1 quedó conservada tras A/B reproducible
+  (`Margenes_Menos_Pixeles_Plan.md` §9). I-2 se midió y cerró sin implementación:
+  ahorro cero en P2 tras I-1, 147 ms medios en el único fixture con franjas
+  activas y calidad conservada solo con padding suficiente
+  (`Margenes_Menos_Pixeles_Medicion_I2.md`). Sin reabrir OSD/adelanto.
+  La campaña de optimización de tiempo del OCR se cierra por ahora con I-1.
+  El perfilado fuera de OCR M-0..M-3 atribuyó casi todo el tramo posterior al
+  OCR de P2 al trabajo inclusivo de NER; Grouping medido ronda 1 ms
+  (`Perfilado_Tiempo_Fuera_OCR_Medicion_M0_M1.md`). El siguiente paso es
+  separar carga, despacho y trabajo por lote de NER: la campaña A1/B/A2 quedó
+  cerrada y localizó el costo dominante en la llamada de clasificación,
+  incluida la tokenización interna del modelo, sin optimización implementada
+  (`Perfilado_NER_Interno_Plan.md`,
+  `Perfilado_NER_Interno_Medicion.md`). Esto no cierra los gates de calidad
+  y release del Hito 11. También se midió adelantar la carga del modelo NER
+  durante OCR con un mismo build y tres rondas intercaladas. **Descartado por
+  decisión humana, sin implementación**: la carga temprana no mejoró de forma
+  estable el tiempo total hasta `Ready` y elevó el pico RSS 144–422 MB en
+  las tres rondas; la carga tardía empeoró `Ready` y OCR en las tres. La
+  oportunidad era ocultar ~0,94 s de carga fría y no compensa el costo ni el
+  riesgo de concurrencia. Lo que cierra el tema es que esa oportunidad es más
+  chica que el ruido del banco: la deriva entre dos controles idénticos de una
+  misma ronda fue de 0,06, 1,83 y 2,54 s sobre `Ready`. Cargar el modelo al
+  abrir la aplicación queda descartado aparte, sin medir, por `idleDisposeMs`
+  y memoria ocupada sin documento. Veredicto en
+  `Precalentamiento_NER_Durante_OCR_Medicion.md` §7, anotado como descarte
+  medido en ADR-154 §2 lever 3 (`Precalentamiento_NER_Durante_OCR_Plan.md`;
+  evidencia cruda en `.measure/ner-preload-ocr/20260917T163638Z/`).
 - Después del hardening: intención de migrar Electron a Tauri para evaluar
   menor costo del contenedor, como campaña separada (`Future_Ideas.md` §2.5).
 - Verificación de integridad en runtime de modelos/wasm (`crypto.subtle.digest` contra `assets.lock.json`, ADR-018 punto 3) en `ocr-engine` y `ner-engine`; hash mismatch → `OCR_MODEL_MISSING` / `NER_MODEL_LOAD_FAILED`. Incluye test de integridad: asset con hash alterado → error tipado, no se carga.

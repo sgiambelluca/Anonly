@@ -394,7 +394,7 @@ Lo que **no** está entre las alternativas, y por qué: recortar paralelismo lo 
 
 La idea de paralelizar con **hilos dentro de una sesión** en vez de con **N workers** —una copia de los pesos en vez de N— aparece en ADR-154 §2 lever 1, y es tentador extenderla al OCR, que es donde está el problema. **No aplica**, por dos razones distintas:
 
-1. **Es de NER, y ahí no ahorra memoria.** Medido: `ner-page` da **1** con `nerPoolSize: 2` configurado, porque `processPages` recorre las páginas de a una y los workers se crean por slot. El segundo worker **nunca existe**, así que no hay segunda copia del modelo que eliminar. Lo que los hilos comprarían ahí es **velocidad** —NER no tiene paralelismo por página, §5.4—, no memoria.
+1. **Es de NER, y ahí no ahorra memoria.** Medido: `ner-page` da **1** con `nerPoolSize: 2` configurado, porque `processPages` recorre las páginas de a una y los workers se crean por slot. El segundo worker **nunca existe**, así que no hay segunda copia del modelo que eliminar. Los hilos internos de ONNX Runtime ya aportan **velocidad** dentro de ese worker (ADR-100/130/132); NER no tiene paralelismo por página (§5.4), y esos hilos no eliminan ninguna copia adicional del modelo.
 2. **Y no hay equivalente en OCR.** `tesseract.js-core@6.1.2` publica seis builds —`tesseract-core`, `-simd`, `-lstm`, `-simd-lstm` y sus `.wasm.js`— y **ninguno es multihilo**. A diferencia de onnxruntime-web, que sí empaqueta el build con pthreads que la app usa, Tesseract solo paraleliza por instancia. Una instancia por worker, y cada una con su heap.
 
 **Y el peor problema sí es el de OCR**: el pico del run cae dentro de la ventana `OCR_STARTED → OCR_FINISHED`, y es ahí donde se acumulan los 2,4-4,2 MB por página que no se pudieron localizar.
