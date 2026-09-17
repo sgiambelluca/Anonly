@@ -140,6 +140,14 @@ Su pool sí es liberado a tiempo por el temporizador de ADR-080 (§2), y darlo d
 baja al llegar a `Ready` cambiaría el costo del reanálisis de NER, que es la
 acción más frecuente de las dos. Es una pregunta propia y no se resuelve acá.
 
+> **Resuelta el 2026-09-17 por ADR-166, con medición: NER sí entra, en su propio
+> ADR.** La premisa de arriba —"su pool sí es liberado a tiempo"— no se sostiene:
+> T-7 midió que esa liberación llega **60 s tarde** y que vale **922 MB en P1 y
+> 1027 MB en P2**. El segundo argumento, que el reanálisis de NER es más
+> frecuente, sigue siendo cierto y ADR-166 lo acepta como costo declarado
+> (942,94 ms), porque ahora los dos lados están medidos y cuando se escribió esto
+> ninguno lo estaba.
+
 ### 5. Esto no espera a la medición
 
 La medición por fase de H-10 va a decir **cuánto** rinde, y sirve. Pero retener
