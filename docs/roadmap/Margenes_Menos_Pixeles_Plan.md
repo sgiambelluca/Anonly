@@ -215,3 +215,79 @@ igual que en la fase anterior: este plan **no** es autorización para que un
 implementador improvise la arquitectura del análisis. La elección entre las
 ideas se toma con los histogramas sobre la mesa. Conservar o recortar la
 capacidad de margen sigue siendo decisión del humano.
+
+## 8. Decisión del planificador tras M-1 + M-2 (2026-09-16)
+
+Con los histogramas sobre la mesa
+([`Margenes_Menos_Pixeles_Resultados.md`](Margenes_Menos_Pixeles_Resultados.md)),
+se aplica el criterio de §5:
+
+- **I-1 pasa, y en su forma exacta.** 110 de 112 tiras con residuo
+  **exactamente cero** en dilatación 0, **cero filas** en la categoría
+  descalificante (residuo cero que igual aportó palabras), el sello de
+  qa-stamp sobrevive con 9.651 píxeles sin explicar, y el residuo es
+  **idéntico en las cuatro dilataciones**: la tinta está claramente cubierta o
+  claramente no. No hace falta umbral, así que no arrastra los prerrequisitos
+  de T-4b. Proyección sobre el perfil de P2: ~100 % del costo de margen, muy
+  por encima del piso de 20 %.
+- **I-2 queda abierta, no descartada.** Sin datos suficientes para decidirla:
+  P2 no tiene residuo que recortar y qa-stamp aporta solo dos tiras. Si I-1 se
+  mantiene, I-2 pierde casi todo su objeto —no se recorta lo que no se lee—;
+  si I-1 se revierte, vuelve a la mesa con una medición propia.
+- **I-3 no se mide.** Su condición de activación era que I-1 e I-2 no llegaran
+  al piso, y no se cumplió.
+
+### 8.1 Orden de ejecución, fijado por el humano
+
+1. **Primero la errata v1.16.1** de `OCR_Engine.md` (caja de margen desenrollada
+   con las dimensiones equivocadas en 90/270). No es solo prioridad: **toca la
+   misma función** que va a tocar I-1, `recognizeRotatedMargins`. I-1 se
+   construye sobre el árbol ya corregido, no en paralelo.
+2. **ADR de I-1 + su handoff**, escritos por el planificador.
+3. **Implementación** en `ocr-engine`, un solo commit, con sus tests.
+4. **Medición A/B real** del cambio implementado.
+5. **Conclusión**: se mantiene o se revierte.
+
+### 8.2 El experimento tiene potencia para detectar el efecto
+
+Vale registrarlo antes de medir, para que un resultado nulo signifique algo. El
+piso de ruido de esta máquina está caracterizado: en el perfilado de ImageData
+los deltas `I − C` iban de 446 a 1693 ms según caso y métrica, y **se comían su
+propia mediana**. El efecto esperado de I-1 sobre P2 es de ~5,9 s, **un orden de
+magnitud por encima** de ese piso.
+
+Es decir: si el ahorro está, esta medición lo ve. Un resultado nulo no sería
+falta de potencia — sería que la proyección estaba equivocada, y eso es
+información, no un empate.
+
+### 8.3 Criterio para mantener
+
+| Condición | Cómo se verifica |
+| --- | --- |
+| El ahorro aparece por encima del ruido | Pares alternados sobre el P2 congelado, frío y caliente |
+| No se pierde texto | Huella de calidad de P2 idéntica a `c723dace…`, 1038 palabras |
+| El sello se sigue recuperando | qa-stamp conserva sus 21 palabras (15 rotadas + 6 sobrantes de ADR-121) |
+| El costo propio de la regla está neteado | I-1 **agrega** trabajo por tira; el ahorro que se informa es el neto |
+
+Si el ahorro no aparece, o la calidad se mueve en cualquier dirección: **se
+revierte y se informa como tal**. Una mejora proyectada que no se materializa
+es un resultado publicable, no algo a rescatar ajustando el experimento.
+
+### 8.4 Lo que el ADR tiene que resolver, y que la medición no contesta
+
+- **Si la regla nueva reemplaza la compuerta exacta de ADR-162 o convive con
+  ella.** Lógicamente la subsume —tinta cero implica residuo cero— pero la
+  compuerta es más barata y puede quedar como atajo. Es una decisión, no un
+  hallazgo.
+- **Qué pasa si la proyección de cajas falla.** ADR-162 falla abierta por
+  diseño: ante la duda se lee. La regla nueva tiene que heredar esa postura, no
+  inventar una propia.
+- **Que el enmascarado es solo para decidir.** La tira que se lee recibe sus
+  píxeles originales, intactos. Esto ya estaba en §2 de este plan y no se
+  relaja al implementar.
+- **El único modo de perder un sello**, que hay que dejar escrito aunque sea
+  razonamiento y no medición: que **toda** su tinta caiga dentro de cajas de
+  palabras ya leídas. Geométricamente eso exige un sello más chico que el texto
+  que lo tapa, es decir ilegible de todos modos. La medición no puede descartar
+  ese caso —no apareció en 112 tiras—, así que se declara como riesgo asumido
+  con su argumento, no como imposibilidad demostrada.

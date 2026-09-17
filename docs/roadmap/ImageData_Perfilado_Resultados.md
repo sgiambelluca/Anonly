@@ -433,13 +433,21 @@ confundan más adelante.
 
 ### 11.1 El OCR cobra por píxeles, no por palabras
 
-**Inferido de dos puntos medidos.** Una tira de margen son 1,74 Mpx
-(496 × 3507, el 20 % del ancho de una A4 a 300 DPI por el alto completo) y
-su `recognizeCall` mediano es de 56 ms. La página completa son 8,70 Mpx y
-su `recognizeCall` está alrededor de los 350 ms (§3, p90 de la muestra
-mezclada). La razón de píxeles es 5,0 y la de tiempos ~6,3: el costo es
+**Inferido de dos puntos medidos.** Una tira de margen es el 20 % del ancho
+de la página por su alto completo, así que su área es **exactamente un quinto**
+de la página, sea cual sea el DPI efectivo. En el P2 congelado las tiras miden
+357 × 2526 px (0,90 Mpx) sobre una página de 1785 × 2526 px (4,51 Mpx),
+medido en la campaña de márgenes del 2026-09-16. Su `recognizeCall` mediano es
+de 56 ms contra los ~350 ms de la página completa (§3, p90 de la muestra
+mezclada). Razón de píxeles 5,0, razón de tiempos ~6,3: el costo es
 **aproximadamente proporcional al área**, con un overhead fijo por llamada
 que no domina.
+
+*Corrección del 2026-09-16:* una versión anterior de este párrafo daba
+1,74 Mpx por tira y 8,70 Mpx por página, derivados de suponer A4 a 300 DPI.
+El fixture real rasteriza más chico. **La razón 5,0 no cambia** —es
+estructural, no depende del DPI— así que la inferencia se sostiene; los
+absolutos eran incorrectos y están reemplazados por los medidos.
 
 Son dos puntos, no una curva: alcanza para orientar decisiones de diseño, no
 para predecir un tiempo concreto. Pero la consecuencia práctica es firme y
@@ -454,9 +462,10 @@ sobrevive a bastante error en la pendiente:
 
 ### 11.2 Por página escaneada se lee casi una página extra de margen
 
-**Medido.** Cuatro pasadas × 1,74 Mpx = **6,96 Mpx de margen por página**,
-contra los 8,70 Mpx de la página misma. El 80 % de una página adicional,
-compuesta en su enorme mayoría por papel sin texto vertical.
+**Medido y estructural.** Cuatro pasadas × un quinto de página = **80 % de
+una página adicional leída por cada página**, y ese 80 % no depende del DPI:
+sale de `MARGIN_STRIP_RATIO = 0,2`, dos franjas y dos rotaciones. Sobre el P2
+congelado son 3,61 Mpx de margen contra 4,51 Mpx de página.
 
 Con eso, que las pasadas de margen expliquen ~30 % del tiempo de OCR deja de
 ser una anomalía y pasa a ser aritmética. **El problema no es "cuatro

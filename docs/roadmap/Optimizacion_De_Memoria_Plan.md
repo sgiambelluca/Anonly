@@ -486,7 +486,11 @@ dos del plan original quedaron descartadas **por medición** (0,54 % y 3,2 %
 del costo de margen). El 74 % está en el área que se le entrega a Tesseract,
 y las tres ideas que atacan eso —sin recortar la capacidad— se investigan en
 [`Margenes_Menos_Pixeles_Plan.md`](Margenes_Menos_Pixeles_Plan.md), bajo la
-regla de documentar → medir → implementar solo si rinde.
+regla de documentar → medir → implementar solo si rinde. **Medido el
+2026-09-16**: la idea I-1 —no leer una franja cuya tinta ya esta explicada por
+palabras reconocidas— acierta en las 112 franjas medidas y proyecta ~100 % del
+costo de margen. Queda aprobada para implementar, despues de la errata v1.16.1
+de `OCR_Engine.md`, que toca la misma funcion.
 
 Las alternativas de prepasada completa y dos páginas de adelanto permanecen
 registradas y no seleccionadas en
