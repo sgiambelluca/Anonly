@@ -92,6 +92,23 @@ Aplicar un modelo NER local sobre `Page.text` y emitir `Occurrence[]` para entid
 
 ## 6. Interfaces públicas
 
+> **Nota (ADR-166, 2026-09-17 — el motor expone la baja de su propio pool)**: la
+> detección termina y el modelo de NER —200-400 MB de pesos más su sesión de
+> inferencia (§12)— queda residente hasta que el temporizador de ADR-080 lo suelte,
+> 60 s después. T-7 midió lo que eso cuesta: **922 MB en P1 y 1027 MB en P2** que se
+> liberan un minuto tarde, justo mientras el usuario revisa el documento o abre el
+> siguiente (`roadmap/Perfilado_Base_Caliente_Medicion.md`). `NerEngine` gana
+> `releaseIdleWorkers(): void` (abajo), **espejo exacto** del de `OcrEngine`
+> (`OCR_Engine.md` §6, ADR-157 §1bis): mismo nombre que
+> `WorkerPool.releaseIdleWorkers()` (ADR-080) porque la semántica es idéntica,
+> **incluida su guarda — no hace nada si el pool no está ocioso**, ya que
+> `terminate()` no dispara `error` y matar un worker con un job en vuelo dejaría esa
+> promesa colgada para siempre. **No se agrega a `IEngine`**: es superficie de la
+> interfaz pública de este motor, sin tipo, evento ni error code nuevo, y por eso va
+> acá y no en `Contracts.md`. El Orchestrator la invoca al cerrar la etapa de
+> detección (`Orchestrator.md` §13 caso 34). Ver §13 casos 28-30.
+
+
 ```ts
 // NerConfig es el tipo canónico de Contracts.md §6 (re-exportado por @anonly/shared);
 // se reproduce aquí solo para documentar sus defaults (ADR-023).
@@ -135,6 +152,17 @@ export class NerEngine implements IEngine {
 ```
 
 **Semántica del despacho (ADR-046 §2–§4)**: `processPage` particiona la página en batches de `NerConfig.batchSize` palabras y envía **solo la inferencia** por el puerto, un despacho por batch — `dispatch({ jobType: "ner-page", payload: NerPagePayload, run: () => kernel, signal, priority: 80, maxRetriesOverride: 0, onProgress })`. El retry vive únicamente en el loop del motor (la política de §11 no cambia); antes de decidir si reintenta, el motor re-instancia por `code` los errores que cruzaron un worker remoto (`NER_TIMEOUT` → `NerTimeoutError`, reintenta; `NER_MODEL_MISSING` → `NerModelMissingError`, aborta NER sin envolver en `NerPageFailedError`), porque `EngineError.deserialize` devuelve una instancia genérica que falla el `instanceof`. El mapeo span→`Occurrence` (bbox, `wordSpan`, id), la emisión de `ENTITY_FOUND` por ocurrencia y la de `NER_PAGE_FINISHED` ocurren en el host, **en ese orden**, al resolver los batches de la página.
+
+```ts
+// ADR-166: da de baja los workers vivos del pool interno — no es `dispose()`.
+// El motor sigue usable y el próximo `processPage` reconstruye el worker
+// perezoso (ADR-080), pagando la recarga del modelo (942,94 ms medianos en
+// frío, `roadmap/Perfilado_NER_Interno_Medicion.md`). Delega en
+// `WorkerPool.releaseIdleWorkers()`, misma guarda: no-op si el pool no está
+// ocioso. Sin `workerFactory` (fallback in-process) no hay `WorkerLike` que
+// terminar y es un no-op inocuo.
+releaseIdleWorkers(): void;
+```
 
 `isModelReady()` devuelve el flag host-side de la instancia (`true` desde el primer `model-ready` reportado por un kernel), no la existencia de un clasificador local; `getModelId()` sigue saliendo de la config. Ambos válidos en modo pool y en fallback.
 
@@ -227,7 +255,7 @@ Las `Occurrence` también se emiten vía `ENTITY_FOUND` (incremental).
 
 - Corre en `NerPool` (1–2 workers default), propiedad del propio motor desde ADR-046 §2/§7: la pool la construye el façade en `create-core.ts` y se inyecta por constructor; el Orchestrator ya no envuelve `processPages` en `pool.dispatch`. Un despacho por batch (`ceil(words / batchSize)` por página, típicamente 1–3 con el default de 256): el costo de mensajería es despreciable frente a la inferencia. **Desde ADR-088 §1 los batches se cortan además en cada cambio de `bbox.rotation`**, así que una página con runs rotados hace más despachos —uno por run, cada uno más corto— y una página sin texto rotado hace exactamente los mismos que antes.
 - Costo: 5–15 s por página de texto denso.
-- Memoria: 200–400 MB por worker (modelo + sesión de inferencia).
+- Memoria: 200–400 MB por worker (modelo + sesión de inferencia). **Desde ADR-166 esa memoria se suelta al terminar la detección**, sin esperar los 60 s de `idleDisposeMs` (§6, §13 casos 28-30).
 - **Modelo NO cacheado en Cache Storage** (~150–180 MB Q8 para mBERT, ADR-023). Lo estuvo hasta ADR-132 §7. Dos razones para apagarlo, y la segunda es la que manda:
 
   1. **No puede funcionar.** `Cache Storage` solo acepta esquemas `http(s)`, y el shell de escritorio sirve por `app://` (ADR-132 §2). Cada `put` falla con `Request scheme 'app' is unsupported`: la capa corre entera, falla en todos sus intentos y no guarda nada. Medido en el spike del 2026-09-04, con los pipelines de texto y de OCR completando igual.
@@ -274,6 +302,10 @@ Las `Occurrence` también se emiten vía `ENTITY_FOUND` (incremental).
 18. **Error de inferencia originado en un worker remoto**: llega deserializado (instancia genérica con el `code` correcto, `Contracts.md` §4). El motor lo re-instancia por `code` antes de decidir: `NER_TIMEOUT` se reintenta igual que el local; `NER_MODEL_MISSING` aborta NER; cualquier otro corta el loop y produce `NerPageFailedError` para esa página. La política observable es idéntica con pool real y con fallback in-process (ADR-035).
 
 27. **Una letra suelta pegada a una barra es del separador** (ADR-123): un span que termina en un token de **una** letra y tiene una `/` inmediatamente después pierde esa letra — `BARTOLOME ARTURO S` sobre `"SUAREZ, BARTOLOME ARTURO S/ RECURSO DE"` queda en `BARTOLOME ARTURO`, con la clave del nombre. Las **dos** condiciones son necesarias: sin exigir la barra se pierde una inicial legítima (`Juan P. García` → `Juan P`, que se conserva porque lo que sigue es un punto); sin exigir que la letra sea un token suelto, de `Quilmes/ La Plata` saldría `Quilme`. Corre **después** del encaje de bordes del caso 25, y el motivo no es que el ensanche pueda devolver la letra —no puede: tras el recorte el borde cae sobre un espacio—, sino que **la letra es ambigua hasta que la palabra está completa**. `Documento IPS/ 12` tiene la misma forma que la carátula, pero ahí la `S` es la cola de `IPS`: con la palabra armada, el carácter anterior es una `P` y no un espacio, y el recorte se abstiene. Corriendo antes, vería un span de una sola letra y borraría `IPS` entero. El encaje tampoco resuelve el caso de la carátula por su cuenta: `/` no es carácter de palabra, así que para él la `S` ya está completa. Un span que se queda sin letras ni dígitos (el modelo etiquetó la `S` sola) **no se emite**.
+
+28. **`releaseIdleWorkers()` con el pool ocioso** (ADR-166): termina los `WorkerLike` vivos del pool interno. No es `dispose()` — el motor sigue usable, y el próximo `processPage` reconstruye el worker perezoso (ADR-080) pagando la recarga del modelo. `isModelReady()` vuelve a `false` tras la baja: el flag host-side describe si hay un kernel con el modelo cargado, y después de terminar los workers no lo hay. Un `getModelId()` posterior sigue devolviendo el de la config, que no depende del worker.
+29. **`releaseIdleWorkers()` con el pool NO ocioso** (ADR-166): no hace nada, por la guarda de `WorkerPool.releaseIdleWorkers()` — `terminate()` no dispara `error`, así que matar un worker con un job pendiente dejaría esa promesa colgada para siempre. La memoria la libera el temporizador de ADR-080 (60 s) como hasta hoy. Es el caso de una cancelación con un batch todavía en vuelo. Sin `workerFactory` (fallback in-process): no-op inocuo en los dos casos.
+30. **Reanálisis después de la baja** (ADR-166 §2): `runReanalyzeNerOnFlow` y `runReanalyzeOcrFlow` vuelven a llamar a `processPages` con el pool ya dado de baja; el worker se reconstruye y el modelo se recarga. Es el **costo declarado** del ADR —942,94 ms medianos en frío— y no un error: no emite `NER_MODEL_LOAD_FAILED` ni ninguna señal nueva, y el camino es indistinguible de la primera carga del documento.
 
 ---
 
