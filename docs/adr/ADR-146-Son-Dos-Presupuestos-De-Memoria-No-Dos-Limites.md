@@ -2,7 +2,7 @@
 
 # ADR-146 — Son dos presupuestos de memoria, no dos límites del mismo
 
-- **Estado**: Accepted (**§1 precisado y §6 ampliado el 2026-09-10**, tras medir con el instrumento ya corregido: M1 es una **cota inferior**, no una medida de demanda, y la atribución compara **picos entre sí**, no diferencias contra una línea de base. Ver la enmienda al final de la Decisión)
+- **Estado**: Accepted (**§1 precisado y §6 ampliado el 2026-09-10**, tras medir con el instrumento ya corregido: M1 es una **cota inferior**, no una medida de demanda, y la atribución compara **picos entre sí**, no diferencias contra una línea de base. Ver la enmienda al final de la Decisión. **§7ter, 2026-09-17, decidido por el humano**: «fuera de fase» mezclaba dos casos y descartó 12 corridas válidas; M2 pasa a medirse dentro de la ventana de fases y el pico posterior a `Ready` se reporta como métrica propia)
 - **Fecha**: 2026-09-09
 - **Decidido por**: El planificador, resolviendo D-06 del plan de campaña de hardening (§2, §2.1, §15).
 - **Relacionado con**: `00_Project_Vision.md` §7 (la métrica contractual), `07_Performance_Strategy.md` §1/§7/§11.4, ADR-130/132 (el contenedor, que es dónde se mide ahora), ADR-080 (workers liberables por idle)
@@ -199,6 +199,52 @@ base: muestrear hasta que la serie deje de bajar, sin forzar GC—, y la línea 
 base caliente se toma de esa ventana estabilizada. Una corrida cuyo máximo caiga
 igual fuera de toda fase se reporta como **inválida**, no se promedia con las
 otras.
+
+### 7ter. Enmienda (2026-09-17): «fuera de fase» eran dos casos, y solo uno es inválido
+
+§7bis marca inválida toda corrida cuyo máximo caiga fuera de las fases. Nació de
+un caso concreto y bien identificado: el máximo que es **residuo del documento
+anterior**, que aparece *antes* de `DOCUMENT_IMPORTED`. El criterio que se
+escribió es más ancho que el caso que lo motivó, y esa diferencia resultó cara.
+
+**Medido sobre dos tandas completas del 2026-09-17** (mismo commit `1bbb219`,
+mismo build, distinto estado de máquina): de las **12 corridas descartadas, las
+12 tienen el máximo *después* de la última fase. Ninguna antes.** Lo que ocurre
+ahí no es residuo ajeno: es el precalentado de la página 1 (ADR-151) y el seed
+de previews (ADR-044), trabajo real del documento recién importado, que corre
+justo después de `PIPELINE_READY`.
+
+El costo fue concreto: **P1 quedó 3/3 inválido en caliente en las dos tandas**.
+Su pipeline dura 441-509 ms, así que su trabajo posterior a `Ready` pesa
+relativamente más que en P2 — y P1 es el control de ruido. La campaña se quedó
+sin control justo en la tanda que debía interpretar un resultado dudoso.
+
+#### La clasificación pasa a ser por posición del máximo
+
+| Posición del máximo del run | Corrida | M2 |
+|---|---|---|
+| Antes de `DOCUMENT_IMPORTED` | **inválida** — es el caso de §7bis | — |
+| Dentro de las fases | válida | el máximo |
+| Después de la última fase | **válida** | el máximo **dentro de las fases** |
+
+Y **M2 pasa a definirse sobre las muestras de la ventana de fases**, no sobre
+todo el run. El máximo posterior a `Ready` se reporta **como métrica propia**,
+junto a M2, nunca fundido con él ni descartado.
+
+#### Lo que esta decisión cuesta, dicho de frente
+
+M2 deja de ser el pico absoluto de la aplicación durante la corrida. Un usuario
+que importa un documento y ve abrirse el panel atraviesa ese pico posterior, y a
+partir de esta enmienda M2 no lo cuenta. **Se acepta a sabiendas**: la decisión
+del humano es que M2 mida *procesar el documento* y que *dibujar la interfaz*
+sea una métrica separada, en vez de una sola cifra que mezcla las dos y no
+permite atribuir ninguna. Por eso la métrica nueva es obligatoria y no opcional:
+sin ella este cambio sí escondería el pico, que es exactamente lo que §7bis
+quería evitar.
+
+Un presupuesto que se compare contra M2 se compara, desde acá, contra el pico
+del pipeline. Si alguna vez se quiere un umbral sobre el pico que ve el usuario,
+es sobre la métrica nueva y necesita su propia decisión.
 
 ### 8. Qué se corrige en los documentos
 
