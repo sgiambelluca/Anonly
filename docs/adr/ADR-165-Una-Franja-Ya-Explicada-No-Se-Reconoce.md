@@ -2,7 +2,7 @@
 
 # ADR-165 — Una franja ya explicada no se reconoce
 
-- **Estado**: Accepted; implementación y medición pendientes. Se revierte si la medición de §7 no muestra el ahorro o mueve la calidad.
+- **Estado**: Accepted; implementado en `b76d18c` y conservado tras la medición A/B del 2026-09-17 (§7).
 - **Fecha**: 2026-09-16.
 - **Decidido por**: el humano autoriza implementar y medir, con la secuencia documentar → medir → implementar → medir → conservar o revertir.
 - **Parte de**: campaña de márgenes, `roadmap/Margenes_Menos_Pixeles_Plan.md` §8.
@@ -163,3 +163,17 @@ de ruido caracterizado de esta máquina (deltas de 446 a 1693 ms que se comían
 su propia mediana), así que **un resultado nulo no sería falta de potencia**:
 sería que la proyección estaba equivocada. Si eso pasa, se revierte y se
 informa como tal.
+
+### Resultado de aceptación (2026-09-17)
+
+La campaña reproducible de
+[`Margenes_Menos_Pixeles_Medicion_I1.md`](../roadmap/Margenes_Menos_Pixeles_Medicion_I1.md)
+cumplió las tres condiciones. En tres pares alternados de P2, el ahorro neto
+medio de `ocrDurationMs` fue **6,234 s por 50 páginas** (34,5 % del tiempo OCR
+del control); las seis comparaciones fueron positivas, entre 4,826 y 6,978 s.
+La regla evitó las 200 pasadas de margen del control sin cambiar la huella de
+calidad de P2 (`c723dace…`, 50 páginas, 1.038 palabras). En qa-stamp ejecutó
+las cuatro pasadas en ambos estados y mantuvo idéntica la huella de las 79
+palabras OCR; la atribución de 21 palabras de margen procede de la medición
+previa por tira sobre el mismo fixture. Se **conserva I-1**. Esta aceptación no
+demuestra ahorro RSS ni extiende el resultado temporal a otros documentos.
