@@ -5,8 +5,55 @@
 > Ejecuta OCR sobre las páginas sin texto del PDF. Solo corre si `PdfEngineOutput.textlessPages.length > 0`. Devuelve `Word[]` con `BoundingBox` y `confidence` que el PDF Engine fusiona.
 
 **EngineId**: `ocr`
-**Versión del spec**: 1.16.1
+**Versión del spec**: 1.17.0
 **Última actualización**: 2026-09-16
+
+> **Nota (v1.17.0, ADR-165, 2026-09-16 — una franja ya explicada no se
+> reconoce)**: las cuatro pasadas de margen de ADR-121 cuestan **~301 ms por
+> página escaneada, 74,4 % en `recognizeCall`**, y como cada franja es un quinto
+> de la página son **el 80 % de una página adicional leída por cada página**
+> (medido, `roadmap/ImageData_Perfilado_Resultados.md` §11). Sobre P2 son 200
+> pasadas que devuelven **cero palabras**. La compuerta de ADR-162 no las evita
+> porque es exacta y angosta: basta con que el cuerpo horizontal invada el 20 %
+> lateral —el caso normal— para que la franja quede activa. Medido: saltearía
+> **0 de 100** en P2.
+>
+> Ahora, antes de las dos pasadas rotadas de una franja, se proyectan sobre ella
+> las cajas de las palabras que **la pasada derecha ya reconoció**, dilatadas
+> **1 píxel**. Si no queda ningún píxel presente fuera de esas cajas, **las dos
+> pasadas de esa franja no se ejecutan**. No es una estimación: una franja cuya
+> tinta está enteramente explicada no puede aportar una palabra nueva — sus
+> candidatas las descartaría `intersectionRatio` igual, después de haber pagado
+> el reconocimiento.
+>
+> **El predicado de píxel es el de `isVisuallyWhiteStrip`, reutilizado literal**
+> (`alpha !== 0 && !(r === 255 && g === 255 && b === 255)`): exacto, sin umbral
+> de brillo. Una copia divergente mide otra cosa y no avisa. **La dilatación de
+> 1 px** absorbe el borde suavizado del glifo —que cae fuera de la caja ajustada
+> que reporta Tesseract— y el redondeo de puntos→píxeles; mismo motivo y mismo
+> valor que el radio Chebyshev 1 de ADR-164 §5.1. Medido sobre 112 franjas:
+> **cualquier `d` entre 1 y 8 toma las mismas 112 decisiones** (0 px de residuo
+> en las 108 sin contenido propio, ~4.900 y ~13.200 en las 2 del sello), así que
+> no es un número calibrado: hay una sola transición, de 0 a 1.
+>
+> La compuerta de ADR-162 **se conserva antes** de esta regla, como atajo barato
+> que corta al primer píxel no blanco; queda lógicamente subsumida pero no se
+> modifica. Ante cualquier fallo —proyección, lectura de píxeles, dimensiones
+> incoherentes— **se ejecutan las pasadas**, nunca al revés (fail-open de
+> ADR-162). **La franja que sí se reconoce recibe sus píxeles originales**: el
+> enmascarado es solo para decidir, así que sobre lo que se lee el riesgo de
+> calidad es cero. Sin campo de `OcrConfig` y sin interruptor, como ADR-121.
+>
+> **Regla que evita el próximo error de espacios** (la errata v1.16.1 fue
+> exactamente esto): `unrotateBbox` siempre recibe **las dimensiones del espacio
+> al que la caja va**, no del que viene. Enderezado → original usa las del
+> original; original → enderezado usa el ángulo complementario y las del
+> enderezado. Verificado numéricamente en las cuatro orientaciones.
+>
+> Se implementa **para medir**: se conserva solo si la medición A/B muestra el
+> ahorro neteado del costo propio de la regla, con huella de calidad de P2
+> idéntica y las 15 palabras de `qa-stamp` intactas (ADR-165 §7). Ver §13 casos
+> 26-29, §14 y §15 item 32.
 
 > **Nota (v1.16.1, 2026-09-16 — errata: la caja de una franja se desenrolla con
 > las dimensiones equivocadas)**: en `recognizeRotatedMargins`, el último paso del
@@ -484,6 +531,26 @@ OcrPageOutput {
     90°/270°. Las palabras, confianza, cajas y regla de fusión de esa franja son
     idénticas a ADR-121; la compuerta no participa en qué candidata entra.
 
+26. **Franja cuya tinta está enteramente explicada** (ADR-165): todos sus
+    píxeles presentes caen dentro de alguna caja de palabra de la pasada
+    derecha dilatada 1 px. **Cero llamadas a `recognize` para esa franja**; la
+    página conserva sus palabras derechas y sus eventos. No es un fallo ni
+    produce evento propio, igual que el caso 23.
+
+27. **Un píxel presente fuera de toda caja dilatada** (ADR-165): la franja
+    **se reconoce**, con sus dos pasadas, como antes de este ADR. La tolerancia
+    es exactamente 1 px, no "un poco": un píxel a distancia 2 de toda caja
+    obliga a leer.
+
+28. **Fallo al proyectar o al inspeccionar** (ADR-165): dimensiones
+    incoherentes, lectura de píxeles que tira, proyección imposible. **Se
+    ejecutan las pasadas**, sin evento ni error, heredando el fail-open de
+    ADR-162. Nunca se saltea por no haber podido comprobar.
+
+29. **La franja que se reconoce recibe sus píxeles originales** (ADR-165): el
+    enmascarado existe solo para decidir. A `recognize` nunca le llega una
+    imagen con regiones tapadas.
+
 ---
 
 ### Casos 26–33: OSD compartido (ADR-164)
@@ -600,6 +667,11 @@ OcrPageOutput {
 | `a margin word on a 90 deg rotated page lands on its real page position` | `unit.test.ts` | unit | v1.16.1 — discriminante de la errata: contra el mapeo viejo tiene que **fallar**, o no mide nada |
 | `a margin word on a 270 deg rotated page lands on its real page position` | `unit.test.ts` | unit | v1.16.1 — el otro ángulo con intercambio de dimensiones |
 | `a margin word on a 180 deg rotated page keeps its position` | `unit.test.ts` | unit | v1.16.1 — control: 180 no intercambia dimensiones y ya era correcto, no puede regresionar |
+| `a strip whose ink is fully explained runs zero recognize passes` | `unit.test.ts` | unit | ADR-165 — caso 26 |
+| `a strip with one present pixel outside every dilated box still runs both passes` | `unit.test.ts` | unit | ADR-165 — **discriminante**: contra una implementación que saltee siempre tiene que fallar |
+| `a pixel two px away from every box forces the passes` | `unit.test.ts` | unit | ADR-165 §2.2 — fija que la tolerancia es 1, no "un poco" |
+| `a failure while projecting or inspecting runs the passes` | `unit.test.ts` | unit | ADR-165 §2.5 — fail-open, caso 28 |
+| `the recognized strip receives untouched pixels` | `unit.test.ts` | unit | ADR-165 §2.4 — caso 29 |
 | `applies sparse-text segmentation once per worker instance` | `unit.test.ts` | unit | caso 15 — el modo es constante, no viaja por payload |
 | `re-applies the mode when the worker is recreated for a different language set` | `unit.test.ts` | unit | caso 15 — una instancia nueva no lo tiene aplicado (ADR-045 §3) |
 | `a rejecting setParameters does not fail the page` | `unit.test.ts` | unit | caso 15 — best-effort, mismo criterio que el dpi |
@@ -715,6 +787,22 @@ OcrPageOutput {
 - [x] 28. (`Duplicacion_De_Logica.md` §6, sin ADR) Kernel: guarda de `typeof OffscreenCanvas === "undefined"` en `toTesseractImage`, lanzando `OcrPageFailedError` como el resto de los fallos de página de este motor. `render-engine` ya protegía sus **dos** construcciones de canvas y ésta era la única sin proteger. Lo que cambia no es que falle —el constructor ya fallaba— sino **cómo**: un `ReferenceError` crudo no es `OcrPageFailedError`, así que no llegaba como `OCR_PAGE_FAILED` y la página se perdía sin el aviso de análisis incompleto de ADR-094. No toca contratos ni `OcrConfig`.
 
 - [x] 27. (errata v1.8.1, sin ADR) `assets.lock.json`: **volver a pinear** `tesseract-core-lstm` y `tesseract-core-simd-lstm` junto a los completos que agregó ADR-090 §1 — cuatro cores, porque desde ADR-119 §1 el worker de reconocimiento (`lstmOnly: true`) y el de OSD (`legacyCore: true`) piden **archivos distintos del mismo `corePath`**. Solo el lock: no toca el kernel, ni `OcrConfig`, ni ningún contrato. La regresión que lo cubre no puede ser unitaria —los dobles de tesseract.js no descargan nada—: es el Escenario 2 E2E, que ya afirma entidades > 0 sobre un PDF escaneado (item 22).
+
+- [ ] 32. (ADR-165) Kernel, **solo `ocr-engine`, sin tocar contratos**: antes de
+  las dos pasadas rotadas de cada franja, proyectar las cajas de las palabras de
+  la pasada derecha al espacio de la franja, dilatarlas 1 px e inspeccionar la
+  franja con el predicado de `isVisuallyWhiteStrip` **reutilizado, no copiado**.
+  Sin píxeles presentes fuera de las cajas: no se ejecutan las pasadas. La
+  proyección es puntos → píxeles (`dpi/72`) → `unrotateBbox` con el ángulo
+  **complementario** y las dimensiones del **enderezado** → `- x0` de la franja.
+  Conservar la compuerta de ADR-162 **antes**, sin modificarla. Fail-open en
+  todos los caminos. **No** tocar `MARGIN_STRIP_RATIO`, `ROTATED_MIN_CONFIDENCE`,
+  el umbral de solape, el guard por franja, `toWords`, el orden de lectura ni
+  `OcrConfig`. **Test discriminante obligatorio** (ADR-149 §2): el de la franja
+  con tinta **no** explicada tiene que fallar contra una implementación que
+  saltee siempre. Casos 26-29 de §13, cinco filas nuevas en §14. La conservación sobre el
+  `qa-stamp` rasterizado **no** es fila de §14: se verifica en la medición de
+  etapa 2 (ADR-165 §7), sobre el fixture congelado.
 
 - [ ] 31. (v1.16.1, errata) Kernel, **solo `ocr-engine`, sin tocar contratos**:
   `recognizeRotatedMargins` recibe las dimensiones del raster **original** y se
