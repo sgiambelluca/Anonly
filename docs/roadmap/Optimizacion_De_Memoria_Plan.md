@@ -18,6 +18,10 @@
 > T-6a **cerrada e implementada** como cap conservador por página (ADR-163);
 > T-6b queda en pausa por la decisión del humano del 2026-09-17 de conservar
 > 300 DPI como valor configurado, priorizando calidad. T-6a sigue vigente.
+> **Reapuntada el 2026-09-17 (§1bis)**: con el instrumento arreglado, procesar
+> un documento cumple el presupuesto (M1 de P2 = 204,8 MB contra 512) y el
+> exceso está en lo que la app retiene después de cerrarlo (base caliente de
+> 1,7–2,2 GB). **T-7 abierta** para atribuir esa base.
 
 **Perfil de referencia**: P2 — 50 páginas escaneadas, OCR + NER reales, sobre el
 shell de Electron empaquetado.
@@ -51,6 +55,51 @@ nuestro.** En cambio el `angle` de `SetImageFile` va a `pixRotate` con
 90°/270° de ADR-121 y sería una pérdida de calidad.
 
 → **ADR-160**, con el `angle` descartado por escrito para que nadie lo reintente.
+
+---
+
+## 1bis. Corrección de rumbo (2026-09-17): el exceso no está en el pipeline
+
+Con el instrumento arreglado (`Instrumento_De_Memoria_Arreglo_Plan.md`, cerrado)
+la primera tanda interpretable dice algo que reordena esta campaña.
+
+**Procesar un documento no es lo que excede el presupuesto.** M1 de P2 dio
+**78,5 / 204,8 / 389,1 MB** contra los 512 MB de `00_Project_Vision.md` §7:
+cumple. El control P1 dio **6,7 MB** de mediana con medio megabyte de
+dispersión.
+
+**Lo que pesa es lo que la aplicación retiene después de cerrar el documento:**
+
+| perfil | base fría | base caliente | base / M2 caliente |
+|---|---:|---:|---:|
+| P1 — 10 p de texto | 429,5 MB | **1723,9 MB** | **100 %** |
+| P2 — 50 p escaneadas | 412,2 MB | **2158,1 MB** | **91 %** |
+
+La app arranca en ~420 MB. Después de abrir y cerrar **un** documento queda en
+1,7–2,2 GB **sin documento abierto**, y procesar el siguiente cuesta 6,7 MB en
+P1 y 204,8 MB en P2. En la corrida caliente de P1, la línea de base **es** el
+100 % de M2: todo lo que se mide ya estaba ahí antes de importar nada.
+
+Parte es por diseño —ADR-146 §1 define la base caliente con los modelos ya
+cargados— pero los componentes que `07_Performance_Strategy.md` §7.1 sabe
+nombrar suman ~1 GB con Electron incluido. Entre **700 MB y 1,2 GB** no están
+atribuidos.
+
+### Esto confirma una corrección que ya estaba escrita y no se explotó
+
+ADR-154 §2 lever 3 lo anticipó el 2026-09-12, por inferencia sobre tres
+corridas: *«bajar el nivel sostenido sí baja ese pico — el del documento
+siguiente. O sea que ADR-156 y ADR-157 no son ajenos al máximo en el uso real,
+que es abrir varios documentos en una sesión»*. Hoy ese nivel sostenido tiene
+número, y es el 91–100 % de lo que mide la corrida siguiente.
+
+**Consecuencia para el orden de esta campaña**: los levers que actúan sobre el
+pico *durante* el procesamiento —copias por página, canvas, GPU, DPI— apuntan a
+una porción que ya entra en presupuesto. El trabajo pasa a la retención
+posterior al documento, que es T-7.
+
+Lo que **no** cambia: T-6b sigue en pausa, y el límite de §4 sigue vigente —el
+fixture no es un escaneo real, y P4 no existe.
 
 ---
 
@@ -561,6 +610,37 @@ sería una decisión distinta, con una comparación de calidad propia antes de
 cambiar ADR-163.
 
 ---
+
+### T-7 — De qué está hecha la línea de base caliente — **abierta, es una medición**
+
+**Dónde**: `tests/` únicamente. **ADR**: ninguno; no cambia producto. **La
+desbloquea**: el instrumento arreglado, cerrado el 2026-09-17.
+
+**Pregunta**: de los 1,7–2,2 GB que la aplicación retiene después de cerrar un
+documento (§1bis), ¿cuánto se libera solo y cuánto es piso irreducible?
+
+Tres cortes, todos medibles con el instrumento actual:
+
+1. **Esperar más allá del `idleDisposeMs` de 60 s** con el documento ya cerrado,
+   muestreando. El pool libera sus workers por inactividad (ADR-080) y el de OCR
+   se da de baja al terminar su etapa (ADR-157). Si la base cae al pasar ese
+   umbral, el lever es de ciclo de vida y el número dice cuánto vale.
+2. **Atribuir por proceso** lo que quede: Tab, GPU, Browser y Utility ya se
+   registran por separado. Un piso que viva en GPU no se ataca igual que uno del
+   renderer.
+3. **Comparar con NER deshabilitado**, que es el corte más limpio disponible sin
+   tocar producto: separa el modelo residente del resto del piso.
+
+**Cierra cuando** cada uno de los tres cortes tenga su número con sus tres
+corridas y el reporte diga **qué fracción de la base caliente es recuperable y
+qué fracción no**. No decide ninguna optimización: entrega la atribución que hoy
+falta para poder elegir un lever.
+
+**Límite declarado de entrada**: M2 se mueve con la presión de memoria del
+sistema (`Instrumento_De_Memoria_Arreglo_Plan.md` §1), así que las
+comparaciones válidas son entre condiciones medidas en la misma sesión y con la
+presión registrada. No comparar contra tandas anteriores al 2026-09-17: no
+tienen ese dato.
 
 ## 2bis. Cómo se corre una medición sin arruinarla
 
