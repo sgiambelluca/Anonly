@@ -1,0 +1,195 @@
+diff --git a/packages/anonymization-core/ner-engine/src/ner.engine.ts b/packages/anonymization-core/ner-engine/src/ner.engine.ts
+--- a/packages/anonymization-core/ner-engine/src/ner.engine.ts
++++ b/packages/anonymization-core/ner-engine/src/ner.engine.ts
+@@ -512,6 +512,31 @@
+   );
+ }
+ 
++// Medición temporal: solo metadatos y duraciones; no guarda texto ni entidades.
++interface NerProbeBatch {
++  readonly pageIndex: number;
++  readonly batchIndex: number;
++  readonly wordCount: number;
++  readonly textLength: number;
++  dispatchMs: number;
++  worker?: Serializable;
++}
++
++interface NerProbeRecord {
++  chunkMs: number;
++  mappingMs: number;
++  emitMs: number;
++  readonly batches: NerProbeBatch[];
++}
++
++function nerProbeRecord(documentId: string): NerProbeRecord {
++  const root = globalThis as typeof globalThis & {
++    __anonlyNerProbe?: Record<string, NerProbeRecord>;
++  };
++  const records = (root.__anonlyNerProbe ??= {});
++  return (records[documentId] ??= { chunkMs: 0, mappingMs: 0, emitMs: 0, batches: [] });
++}
++
+ export class NerEngine implements IEngine {
+   readonly id = EngineId.Ner;
+ 
+@@ -608,13 +633,18 @@
+ 
+       try {
+         const spans = await this.runInferenceInBatches(input, batchSize, timeoutMs, ctx);
++        const mappingStarted = performance.now();
+         const occurrences = spans.map((span) =>
+           this.buildOccurrence(span, words, pageIndex, input.text),
+         );
+-
++        const probe = nerProbeRecord(documentId);
++        probe.mappingMs += performance.now() - mappingStarted;
++
++        const emitStarted = performance.now();
+         for (const occurrence of occurrences) {
+           ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, { documentId, occurrence });
+         }
++        probe.emitMs += performance.now() - emitStarted;
+ 
+         const durationMs = Date.now() - startedAt;
+         ctx.bus.emit(EventChannel.Ner, EngineEvents.NER_PAGE_FINISHED, {
+@@ -822,8 +852,12 @@
+     timeoutMs: number,
+     ctx: EngineContext,
+   ): Promise<ReadonlyArray<NerKernelSpan>> {
++    const chunkStarted = performance.now();
+     const chunks = computeWordChunks(input.words, batchSize);
++    const probe = nerProbeRecord(input.documentId);
++    probe.chunkMs += performance.now() - chunkStarted;
+     const spans: NerKernelSpan[] = [];
++    let batchIndex = 0;
+ 
+     for (const chunk of chunks) {
+       // Checkpoint de cancelación entre batches de inferencia (spec §12).
+@@ -842,9 +876,29 @@
+         ...(ctx.config.ner.wasmPaths !== undefined ? { wasmPaths: ctx.config.ner.wasmPaths } : {}),
+       };
+ 
+-      const onProgress = (progress: number, partial?: Serializable): void =>
++      const batch: NerProbeBatch = {
++        pageIndex: input.pageIndex,
++        batchIndex: batchIndex++,
++        wordCount: chunk.words.length,
++        textLength: chunkText.length,
++        dispatchMs: 0,
++      };
++      probe.batches.push(batch);
++      const onProgress = (progress: number, partial?: Serializable): void => {
++        if (
++          partial !== undefined && partial !== null &&
++          typeof partial === "object" &&
++          !Array.isArray(partial) &&
++          "phase" in partial &&
++          partial.phase === "__nerProbe"
++        ) {
++          batch.worker = partial;
++          return;
++        }
+         this.handleKernelProgress(progress, partial, ctx);
+-
++      };
++
++      const dispatchStarted = performance.now();
+       const dispatchResult = await this.pool.dispatch({
+         run: async () =>
+           (await loadNerKernel()).kernelClassify(payload, {
+@@ -858,6 +912,7 @@
+         maxRetriesOverride: 0,
+         onProgress,
+       });
++      batch.dispatchMs = performance.now() - dispatchStarted;
+       // ADR-055 §2: `dispatchResult` es `unknown` — decodeKernelSpans es el
+       // único paso permitido antes de iterarlo (nunca un cast a ciegas).
+       let kernelSpans: ReadonlyArray<NerKernelSpan>;
+diff --git a/packages/anonymization-core/ner-engine/src/worker/kernel.ts b/packages/anonymization-core/ner-engine/src/worker/kernel.ts
+--- a/packages/anonymization-core/ner-engine/src/worker/kernel.ts
++++ b/packages/anonymization-core/ner-engine/src/worker/kernel.ts
+@@ -881,7 +881,10 @@
+ 
+   if (opts.abortSignal.aborted) throw new CancelledError(documentId);
+ 
++  const probeStarted = performance.now();
++  const modelWasWarm = classifier !== null && loadedModelKey === `${modelId}:${resolveDtype(quantization)}`;
+   await ensureClassifierLoaded(modelId, quantization, wasmPaths, opts.onProgress);
++  const modelLoadMs = performance.now() - probeStarted;
+ 
+   if (opts.abortSignal.aborted) throw new CancelledError(documentId);
+ 
+@@ -890,7 +893,9 @@
+   // `titleCaseUppercaseRuns` mapea carácter a carácter, así que
+   // `inferenceText.length === text.length` y un índice de corte vale para los
+   // dos (ADR-098 §3).
++  const textPrepStarted = performance.now();
+   const inferenceText = titleCaseUppercaseRuns(text);
++  const textPrepMs = performance.now() - textPrepStarted;
+ 
+   /*
+    * ADR-098 §1: el lote se cortó en PALABRAS (`computeWordChunks`, host) pero
+@@ -905,8 +910,14 @@
+   const starts = wordStartOffsets(inferenceText);
+ 
+   const spans: NerKernelSpan[] = [];
++  let tokenBudgetMs = 0;
++  let classifyMs = 0;
++  let aggregateMs = 0;
++  let subBatchCount = 0;
++  let splitCount = 0;
+   let from = 0;
+   while (from < inferenceText.length) {
++    const budgetStarted = performance.now();
+     const remaining =
+       tokenizer === undefined ? undefined : tokenLengthOf(tokenizer, inferenceText.slice(from));
+     const to =
+@@ -914,6 +925,10 @@
+         ? inferenceText.length
+         : findSplitOffset(tokenizer, inferenceText, from, starts, budget);
+ 
++    tokenBudgetMs += performance.now() - budgetStarted;
++    if (to < inferenceText.length) splitCount++;
++    subBatchCount++;
++    const classifyStarted = performance.now();
+     const rawTokens = await classifyWithTimeout(
+       inferenceText.slice(from, to),
+       documentId,
+@@ -922,11 +937,14 @@
+       opts.abortSignal,
+       modelId,
+     );
++    classifyMs += performance.now() - classifyStarted;
++    const aggregateStarted = performance.now();
+     const subSpans = aggregateTokensToSpans(
+       rawTokens,
+       inferenceText.slice(from, to),
+       text.slice(from, to),
+     );
++    aggregateMs += performance.now() - aggregateStarted;
+     // ADR-098 §3: los offsets vuelven a coordenadas del LOTE, que es lo que
+     // el host espera (ADR-046 §1).
+     for (const span of subSpans) {
+@@ -944,6 +962,21 @@
+     from = to;
+   }
+ 
++  const totalMs = performance.now() - probeStarted;
++  opts.onProgress?.(1, {
++    phase: "__nerProbe",
++    modelWasWarm,
++    modelLoadMs,
++    textPrepMs,
++    tokenBudgetMs,
++    classifyMs,
++    aggregateMs,
++    otherMs: totalMs - modelLoadMs - textPrepMs - tokenBudgetMs - classifyMs - aggregateMs,
++    totalMs,
++    subBatchCount,
++    splitCount,
++    spanCount: spans.length,
++  });
+   return spans;
+ }
+ 

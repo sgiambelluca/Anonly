@@ -1,0 +1,188 @@
+--- a/packages/anonymization-core/ocr-engine/src/worker/kernel.ts
++++ b/packages/anonymization-core/ocr-engine/src/worker/kernel.ts
+@@ -1014,6 +1014,46 @@
+  * `uprightWidth` ahí saca la caja de su lugar real. Son dos espacios
+  * distintos a propósito; no se unifican.
+  */
++interface MarginI2ProbeMetric {
++  readonly stripX0: number;
++  readonly stripWidth: number;
++  readonly stripHeight: number;
++  readonly residualY0: number | null;
++  readonly residualY1: number | null;
++  readonly cropY0: number;
++  readonly cropY1: number;
++  readonly recognizeMs: number;
++}
++
++// INSTRUMENTO DESCARTABLE I-2: -1 = control con análisis, 64 = candidato.
++const MARGIN_I2_PADDING_PX = -1;
++
++function residualVerticalBounds(
++  strip: ImageData,
++  explainedBoxes: ReadonlyArray<BoundingBox>,
++): { readonly y0: number; readonly y1: number } | null {
++  const { width, height, data } = strip;
++  if (width <= 0 || height <= 0 || data.length !== width * height * 4) return null;
++  let y0 = height;
++  let y1 = 0;
++  for (let y = 0; y < height; y++) {
++    for (let x = 0; x < width; x++) {
++      const index = (y * width + x) * 4;
++      if (!isPixelPresent(data[index], data[index + 1], data[index + 2], data[index + 3])) continue;
++      if (explainedBoxes.some((box) => isPointInsideBox(x, y, box))) continue;
++      y0 = Math.min(y0, y);
++      y1 = Math.max(y1, y + 1);
++    }
++  }
++  return y1 > y0 ? { y0, y1 } : null;
++}
++
++function cropVerticalForI2(strip: ImageData, y0: number, y1: number): ImageData {
++  const rowBytes = strip.width * 4;
++  const copy = new Uint8ClampedArray(strip.data.subarray(y0 * rowBytes, y1 * rowBytes));
++  return createImageDataResult(copy, strip.width, y1 - y0, strip.colorSpace);
++}
++
+ async function recognizeRotatedMargins(params: {
+   readonly getStrip: (x0: number, width: number) => Promise<ImageData>;
+   readonly uprightWidth: number;
+@@ -1025,7 +1065,7 @@
+   readonly pageIndex: number;
+   readonly dpi: number;
+   readonly opts: KernelRecognizeOptions;
+-}): Promise<Word[]> {
++}): Promise<{ readonly words: Word[]; readonly metrics: MarginI2ProbeMetric[] }> {
+   const {
+     getStrip,
+     uprightWidth,
+@@ -1039,7 +1079,7 @@
+     opts,
+   } = params;
+   const stripWidth = Math.round(uprightWidth * MARGIN_STRIP_RATIO);
+-  if (stripWidth <= 0) return [];
++  if (stripWidth <= 0) return { words: [], metrics: [] };
+ 
+   const strips: ReadonlyArray<{ readonly x0: number }> = [
+     { x0: 0 },
+@@ -1047,6 +1087,7 @@
+   ];
+   const rotations: ReadonlyArray<Rotation> = [90, 270];
+   const found: Word[] = [];
++  const metrics: MarginI2ProbeMetric[] = [];
+ 
+   for (const strip of strips) {
+     // El recorte entra al guard igual que el reconocimiento: la pasada rotada
+@@ -1098,17 +1139,38 @@
+     }
+     if (fullyExplained) continue;
+ 
++    // La caja usa exactamente el criterio de píxel y la proyección de I-1.
++    // Ante una geometría dudosa se conserva la franja completa.
++    let residual: { readonly y0: number; readonly y1: number } | null = null;
++    try {
++      const explainedBoxes = collectExplainedBoxes(
++        words, dpi, orientation, uprightWidth, cropped.height, strip.x0,
++      );
++      if (explainedBoxes !== null) residual = residualVerticalBounds(cropped, explainedBoxes);
++    } catch {
++      residual = null;
++    }
++    const cropY0 = MARGIN_I2_PADDING_PX >= 0 && residual !== null
++      ? Math.max(0, residual.y0 - MARGIN_I2_PADDING_PX) : 0;
++    const cropY1 = MARGIN_I2_PADDING_PX >= 0 && residual !== null
++      ? Math.min(cropped.height, residual.y1 + MARGIN_I2_PADDING_PX) : cropped.height;
++    const recognitionImage = cropY0 === 0 && cropY1 === cropped.height
++      ? cropped : cropVerticalForI2(cropped, cropY0, cropY1);
++    let recognizeMs = 0;
++
+     for (const rotation of rotations) {
+       if (opts.abortSignal.aborted) throw new CancelledError(documentId);
+       let data: unknown;
+       try {
++        const startedAt = performance.now();
+         data = await recognizeWithTimeout(
+-          toTesseractImage(rotateImageData(cropped, rotation), documentId, pageIndex),
++          toTesseractImage(rotateImageData(recognitionImage, rotation), documentId, pageIndex),
+           documentId,
+           pageIndex,
+           opts.timeoutMs,
+           opts.abortSignal,
+         );
++        recognizeMs += performance.now() - startedAt;
+       } catch (err: unknown) {
+         if (err instanceof CancelledError) throw err;
+         continue;
+@@ -1128,10 +1190,10 @@
+             height: raw.bbox.y1 - raw.bbox.y0,
+           },
+           rotation,
+-          cropped.width,
+-          cropped.height,
++          recognitionImage.width,
++          recognitionImage.height,
+         );
+-        const inUpright = { ...inStrip, x: inStrip.x + strip.x0 };
++        const inUpright = { ...inStrip, x: inStrip.x + strip.x0, y: inStrip.y + cropY0 };
+         // v1.16.1: dimensiones del raster ORIGINAL, no las del enderezado —
+         // es la inversa de la rotación de PÁGINA, y unrotateBbox pide el
+         // tamaño de a dónde vuelve, no de dónde sale.
+@@ -1158,8 +1220,18 @@
+         });
+       }
+     }
++    metrics.push({
++      stripX0: strip.x0,
++      stripWidth: cropped.width,
++      stripHeight: cropped.height,
++      residualY0: residual?.y0 ?? null,
++      residualY1: residual?.y1 ?? null,
++      cropY0,
++      cropY1,
++      recognizeMs,
++    });
+   }
+-  return found;
++  return { words: found, metrics };
+ }
+ 
+ /**
+@@ -1203,6 +1275,7 @@
+ export interface KernelOcrResult {
+   readonly words: ReadonlyArray<Word>;
+   readonly confidence: number;
++  readonly marginI2Metrics?: ReadonlyArray<MarginI2ProbeMetric>;
+ }
+ 
+ /*
+@@ -1247,7 +1320,7 @@
+     opts,
+   });
+ 
+-  return { words: [...words, ...rotated], confidence };
++  return { words: [...words, ...rotated.words], confidence, marginI2Metrics: rotated.metrics };
+ }
+ 
+ /*
+@@ -1294,7 +1367,7 @@
+     opts,
+   });
+ 
+-  return { words: [...words, ...rotated], confidence };
++  return { words: [...words, ...rotated.words], confidence, marginI2Metrics: rotated.metrics };
+ }
+ 
+ /**
+--- a/packages/anonymization-core/ocr-engine/src/ocr.engine.ts
++++ b/packages/anonymization-core/ocr-engine/src/ocr.engine.ts
+@@ -585,6 +585,10 @@
+         this.modelWarm = true;
+ 
+         const { words, confidence } = result;
++        // INSTRUMENTO DESCARTABLE I-2: transportar geometría y duración por tira.
++        if (result.marginI2Metrics !== undefined) {
++          ctx.cache.set(`margin-i2:${documentId}:${pageIndex}`, result.marginI2Metrics);
++        }
+         const durationMs = Date.now() - startedAt;
+ 
+         // Caso 3 (§13): páginas con texto detectado pero de baja calidad. Las
