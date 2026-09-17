@@ -60,6 +60,27 @@ nuestro.** En cambio el `angle` de `SetImageFile` va a `pixRotate` con
 
 ## 1bis. Corrección de rumbo (2026-09-17): el exceso no está en el pipeline
 
+> **Corregido por T-7 el 2026-09-17, con medición
+> ([`Perfilado_Base_Caliente_Medicion.md`](Perfilado_Base_Caliente_Medicion.md)).**
+> Esta sección concluía que había un residuo **estructural** de 700 MB–1,2 GB
+> retenido tras cerrar el documento. **No es así.** Esa base caliente se tomaba
+> en una ventana de ≤30 s (`HOT_BASELINE_SETTLE_CEILING_MS`) y la liberación por
+> inactividad ocurre después: extendiendo la observación a 120 s, la app cae de
+> 1506,0 a 583,9 MB en P1 y de 1393,7 a 366,1 MB en P2, cerca de su base fría
+> (~420 MB). Era memoria **en tránsito hacia su liberación**, medida antes de que
+> ocurriera; no un piso.
+>
+> Lo que sigue en pie de esta sección es el otro hecho: **procesar un documento
+> cumple el presupuesto** (M1 de P2 = 204,8 MB contra 512). Y lo que reemplaza al
+> diagnóstico equivocado es más accionable que él: **la liberación funciona, pero
+> su reloj está calibrado para un usuario que espera entre documentos.** Quien
+> encadena varios en menos de un minuto abre el segundo sobre la base todavía
+> inflada — el «residuo del documento anterior» de ADR-146 §7bis. El lever no es
+> buscar una fuga; es cuándo se libera.
+>
+> El texto original se conserva abajo para que la corrección sea legible.
+
+
 Con el instrumento arreglado (`Instrumento_De_Memoria_Arreglo_Plan.md`, cerrado)
 la primera tanda interpretable dice algo que reordena esta campaña.
 
@@ -611,7 +632,7 @@ cambiar ADR-163.
 
 ---
 
-### T-7 — De qué está hecha la línea de base caliente — **abierta, es una medición**
+### T-7 — De qué está hecha la línea de base caliente — **CERRADA (2026-09-17)**
 
 **Dónde**: `tests/` únicamente. **ADR**: ninguno; no cambia producto. **La
 desbloquea**: el instrumento arreglado, cerrado el 2026-09-17. **Plan detallado
@@ -620,6 +641,24 @@ que además fija la hipótesis principal: la base caliente se toma con un techo 
 30 s (`HOT_BASELINE_SETTLE_CEILING_MS`) y el pool libera por inactividad a los
 60 s (`idleDisposeMs`, ADR-080), así que **ninguna medición de la campaña vio
 nunca esa liberación**.
+
+> **Cerrada con resultado** (`Perfilado_Base_Caliente_Medicion.md`, 12 corridas
+> válidas): **casi todo se libera solo**. P1 cae de 1506,0 a 583,9 MB y P2 de
+> 1393,7 a 366,1 MB al extender la observación a 120 s — cerca de la base fría de
+> ~420 MB. El «piso irreducible» que la pregunta suponía no aparece, y el hueco
+> de §1bis queda disuelto.
+>
+> Refinamiento del informe, que conviene no perder: el escalón único cerca de los
+> 60 s describe bien el caso de un solo pool (P1 sin NER: −76,3 / −76,1 /
+> −76,2 MB, tres corridas casi idénticas), pero **solo 6 de 12 corridas tienen
+> ahí su paso mayor**; el resto libera antes. Es compatible con que cada pool
+> tenga su propio reloj anclado a su último job, y el informe lo deja como
+> lectura de la forma de la curva, **no verificado**: el arnés no persiste
+> `OCR_FINISHED`/`NER_FINISHED` después del cierre.
+>
+> **Lo que queda abierto no es un residuo, es un reloj**: la liberación funciona
+> pero llega tarde para quien encadena documentos en menos de un minuto. Elegir
+> qué hacer con eso es decisión del humano, con su propio ADR (ADR-154 §1/§5).
 
 **Pregunta**: de los 1,7–2,2 GB que la aplicación retiene después de cerrar un
 documento (§1bis), ¿cuánto se libera solo y cuánto es piso irreducible?
