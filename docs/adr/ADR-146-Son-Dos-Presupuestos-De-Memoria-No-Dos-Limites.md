@@ -231,6 +231,23 @@ Y **M2 pasa a definirse sobre las muestras de la ventana de fases**, no sobre
 todo el run. El máximo posterior a `Ready` se reporta **como métrica propia**,
 junto a M2, nunca fundido con él ni descartado.
 
+#### M1 se acota a la misma ventana, y no es una decisión nueva
+
+M1 comparte la base de M2: es el pico **menos** la línea de base. Al acotar el
+pico a la ventana de fases, M1 se calcula sobre ese mismo pico. No es una
+extensión de esta enmienda sino lo que §1 ya decía —*«pico observado **durante
+el procesamiento** menos la línea de base»*—: lo que estaba mal era restar
+contra un máximo que podía caer fuera del procesamiento.
+
+El efecto es acotado y verificable. Sobre las corridas del 2026-09-17, M1 de P2
+(247,2 / 377,5 / 509,3 MB) y de P2-dense (783,4 / 797,3 / 814,1 MB) **no cambia**:
+sus máximos calientes ya caían dentro de fase. El único perfil que se mueve es
+P1, y hacia un valor sano: pasa de 2,7-182,1 MB —una dispersión de dos órdenes
+de magnitud sobre corridas que además se descartaban— a **6,5 / 7,3 / 8,0 MB**.
+Para diez páginas de texto nativo, ese es el orden que corresponde.
+
+Ningún número publicado de la campaña cambia por esta aclaración.
+
 #### Lo que esta decisión cuesta, dicho de frente
 
 M2 deja de ser el pico absoluto de la aplicación durante la corrida. Un usuario
