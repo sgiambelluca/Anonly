@@ -16,7 +16,13 @@
 import type { BoundingBox } from "@anonly/shared";
 import { describe, it, expect } from "vitest";
 
-import { cropImageData, rotateImageData, unrotateBbox, type Rotation } from "../worker/kernel.js";
+import {
+  cropImageData,
+  projectWordBoxToStrip,
+  rotateImageData,
+  unrotateBbox,
+  type Rotation,
+} from "../worker/kernel.js";
 
 /**
  * Imagen de `width × height` donde cada píxel lleva su índice en el canal R:
@@ -151,4 +157,116 @@ describe("OcrKernel — geometría de orientación (ADR-090 §3/§4)", () => {
     const bbox: BoundingBox = { x: 7, y: 9, width: 11, height: 13 };
     expect(unrotateBbox(bbox, 0, 100, 40)).toEqual(bbox);
   });
+});
+
+/*
+ * Verificación propia (no una fila de §14): `projectWordBoxToStrip` va en el
+ * sentido CONTRARIO al de `toWords` —de original a enderezado, con el ángulo
+ * COMPLEMENTARIO— y es exactamente la clase de mapeo donde v1.16.1 tuvo un
+ * error de producto por pasar las dimensiones del espacio equivocado. Cada
+ * caso arma `rawUprightBox` (lo que Tesseract "leyó" en el raster
+ * ENDEREZADO), lo lleva a puntos con la MISMA función que usa `toWords`
+ * (`unrotateBbox` + el factor de ADR-064), y comprueba que `projectWordBoxToStrip`
+ * lo recupera intacto (salvo la dilatación de 1 px y el `x0` de la franja) —
+ * si las dimensiones fueran las del espacio equivocado, en 90/270 saldría
+ * una caja con el ancho y el alto de la página cambiados entre sí.
+ */
+describe("OcrKernel — proyección de una caja explicada (ADR-165 §2, handoff §1.1)", () => {
+  const ORIGINAL_WIDTH = 100;
+  const ORIGINAL_HEIGHT = 40;
+  const DPI = 300;
+  const POINTS_PER_PIXEL = 72 / DPI;
+
+  function dilate(box: BoundingBox, amount: number): BoundingBox {
+    return {
+      x: box.x - amount,
+      y: box.y - amount,
+      width: box.width + amount * 2,
+      height: box.height + amount * 2,
+    };
+  }
+
+  function toPoints(box: BoundingBox): BoundingBox {
+    return {
+      x: box.x * POINTS_PER_PIXEL,
+      y: box.y * POINTS_PER_PIXEL,
+      width: box.width * POINTS_PER_PIXEL,
+      height: box.height * POINTS_PER_PIXEL,
+    };
+  }
+
+  function expectCloseBox(actual: BoundingBox | null, expected: BoundingBox): void {
+    expect(actual).not.toBeNull();
+    expect(actual?.x).toBeCloseTo(expected.x, 6);
+    expect(actual?.y).toBeCloseTo(expected.y, 6);
+    expect(actual?.width).toBeCloseTo(expected.width, 6);
+    expect(actual?.height).toBeCloseTo(expected.height, 6);
+  }
+
+  const casos: ReadonlyArray<{
+    readonly degrees: Rotation;
+    readonly uprightWidth: number;
+    readonly uprightHeight: number;
+    readonly rawUprightBox: BoundingBox;
+    readonly stripX0: number;
+  }> = [
+    // 0°: enderezado === original, sin swap. Ejercita también el `x0` de franja.
+    {
+      degrees: 0,
+      uprightWidth: ORIGINAL_WIDTH,
+      uprightHeight: ORIGINAL_HEIGHT,
+      rawUprightBox: { x: 10, y: 5, width: 20, height: 40 },
+      stripX0: 10,
+    },
+    // 90°/270°: enderezado 40×100, dimensiones INTERCAMBIADAS respecto del
+    // original — la pareja donde v1.16.1 tuvo el error en sentido contrario.
+    {
+      degrees: 90,
+      uprightWidth: 40,
+      uprightHeight: 100,
+      rawUprightBox: { x: 1, y: 5, width: 4, height: 90 },
+      stripX0: 0,
+    },
+    {
+      degrees: 270,
+      uprightWidth: 40,
+      uprightHeight: 100,
+      rawUprightBox: { x: 1, y: 5, width: 4, height: 90 },
+      stripX0: 0,
+    },
+    // 180°: no intercambia dimensiones (control, como en la errata v1.16.1).
+    {
+      degrees: 180,
+      uprightWidth: ORIGINAL_WIDTH,
+      uprightHeight: ORIGINAL_HEIGHT,
+      rawUprightBox: { x: 10, y: 5, width: 10, height: 10 },
+      stripX0: 0,
+    },
+  ];
+
+  for (const { degrees, uprightWidth, uprightHeight, rawUprightBox, stripX0 } of casos) {
+    it(`recovers the upright box at ${degrees}°, offset by the strip's x0`, () => {
+      // Mismo camino que `toWords`: enderezado → original (unrotateBbox con
+      // el ángulo de la PÁGINA) → puntos.
+      const originalPixelBox = unrotateBbox(
+        rawUprightBox,
+        degrees,
+        ORIGINAL_WIDTH,
+        ORIGINAL_HEIGHT,
+      );
+      const wordBboxPoints = toPoints(originalPixelBox);
+
+      const projected = projectWordBoxToStrip(
+        wordBboxPoints,
+        DPI,
+        degrees,
+        uprightWidth,
+        uprightHeight,
+        stripX0,
+      );
+
+      const expected = dilate({ ...rawUprightBox, x: rawUprightBox.x - stripX0 }, 1);
+      expectCloseBox(projected, expected);
+    });
+  }
 });

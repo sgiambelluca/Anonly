@@ -33,15 +33,18 @@ import {
   createTrackingOcrPool,
   createValidOcrPageInput,
   createValidOcrPageRequest,
+  getPutImageDataCalls,
   mockDetectData,
   mockEmptyRecognizeData,
   mockRecognizeData,
   mockTesseractWorker,
   setStubCanvasContextAvailable,
   setStubDecodedPixel,
+  setStubDecodedPixelPainterSequence,
   setStubDecodedPixelSequence,
   trackCreateImageBitmapCalls,
   trackOffscreenCanvasConstructions,
+  type MockRecognizeWord,
 } from "./fixtures/test-helpers.js";
 
 describe("OcrEngine — unit tests", () => {
@@ -1290,6 +1293,154 @@ describe("OcrEngine — unit tests", () => {
       ]);
       await engine.processPage(inputConRaster("doc-162-mixed"), ctx);
       expect(recognize).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  // ─── ADR-165: una franja ya explicada no se reconoce ───
+
+  describe("franja ya explicada por la pasada derecha (ADR-165)", () => {
+    // Raster 100×40, dpi 300 (default de createValidOcrPageInput): franja
+    // izquierda = x0 0, ancho 20, alto 40 completo. En orientación 0 el
+    // espacio "enderezado" y el "original" son el mismo raster, así que la
+    // caja de la palabra (en píxeles) y la caja explicada en la franja
+    // coinciden sin ningún corrimiento salvo el `x0` de la franja — acá 0.
+    const CUERPO_MITAD_IZQUIERDA: ReadonlyArray<MockRecognizeWord> = [
+      { text: "cuerpo", confidence: 95, bbox: { x0: 0, y0: 0, x1: 10, y1: 40 } },
+    ];
+
+    /** Primer `recognize()` = la pasada derecha; el resto, vacío — el
+     * contenido de las pasadas de margen no importa en estos tests, solo
+     * cuántas veces se llaman. */
+    function primeraLlamadaDerecha(
+      cuerpo: ReadonlyArray<MockRecognizeWord>,
+    ): ReturnType<typeof vi.fn> {
+      let llamadas = 0;
+      return vi.fn(() => {
+        llamadas += 1;
+        const data = llamadas === 1 ? mockRecognizeData(cuerpo) : mockEmptyRecognizeData();
+        return Promise.resolve({ jobId: "j", data });
+      });
+    }
+
+    const BLANCO: readonly [number, number, number, number] = [255, 255, 255, 255];
+
+    it("a strip whose ink is fully explained runs zero recognize passes", async () => {
+      // La palabra derecha cubre exactamente [0,20)×[0,40): toda la franja
+      // izquierda cae dentro de su caja dilatada. Con tinta uniforme en toda
+      // la franja, ningún píxel presente queda afuera.
+      const CUBRE_TODA_LA_FRANJA: ReadonlyArray<MockRecognizeWord> = [
+        { text: "cuerpo", confidence: 95, bbox: { x0: 0, y0: 0, x1: 20, y1: 40 } },
+      ];
+      const recognize = primeraLlamadaDerecha(CUBRE_TODA_LA_FRANJA);
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(CUBRE_TODA_LA_FRANJA), { recognize }),
+      );
+      await engine.init(ctx);
+      setStubDecodedPixelSequence([[0, 0, 0, 255], BLANCO]);
+
+      await engine.processPage(createValidOcrPageInput("doc-165-explicada"), ctx);
+
+      // Franja izquierda: cero pasadas (explicada). Franja derecha: blanca,
+      // cero pasadas (ADR-162). Solo queda la pasada derecha.
+      expect(recognize).toHaveBeenCalledTimes(1);
+    });
+
+    it("a strip with one present pixel outside every dilated box still runs both passes", async () => {
+      // DISCRIMINANTE (ADR-149 §2): contra un stub que saltea siempre, este
+      // test tiene que fallar. La palabra derecha explica solo la mitad
+      // izquierda de la franja (x < 11 con la dilatación); el único píxel de
+      // tinta está bien afuera, en x = 19.
+      const recognize = primeraLlamadaDerecha(CUERPO_MITAD_IZQUIERDA);
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(CUERPO_MITAD_IZQUIERDA), { recognize }),
+      );
+      await engine.init(ctx);
+      setStubDecodedPixelPainterSequence([
+        (x) => (x === 19 ? [10, 20, 30, 255] : BLANCO),
+        () => BLANCO,
+      ]);
+
+      await engine.processPage(createValidOcrPageInput("doc-165-discriminante"), ctx);
+
+      // 1 pasada derecha + 2 de la franja izquierda (no explicada).
+      expect(recognize).toHaveBeenCalledTimes(3);
+    });
+
+    it("a pixel two px away from every box forces the passes", async () => {
+      // ADR-165 §2.2: la caja explicada es x ∈ [0,10), dilatada a [-1,11) —
+      // cubre hasta el píxel x=10 (distancia 1, "tocando"). Un píxel en
+      // x=11 está a distancia 2 del borde original y NO debe quedar
+      // cubierto: fija que la tolerancia es exactamente 1, no "un poco".
+      const recognize = primeraLlamadaDerecha(CUERPO_MITAD_IZQUIERDA);
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(CUERPO_MITAD_IZQUIERDA), { recognize }),
+      );
+      await engine.init(ctx);
+      setStubDecodedPixelPainterSequence([
+        (x) => (x === 11 ? [10, 20, 30, 255] : BLANCO),
+        () => BLANCO,
+      ]);
+
+      await engine.processPage(createValidOcrPageInput("doc-165-distancia-2"), ctx);
+
+      expect(recognize).toHaveBeenCalledTimes(3);
+    });
+
+    it("a failure while projecting or inspecting runs the passes", async () => {
+      // ADR-165 §2.5 / caso 28: una caja de la pasada derecha con datos
+      // incoherentes (NaN) no se puede proyectar. Fail-open: se ejecutan las
+      // pasadas igual, sin importar que la tinta sea uniforme y "parecería"
+      // explicable si la proyección funcionara.
+      const CUERPO_INCOHERENTE: ReadonlyArray<MockRecognizeWord> = [
+        { text: "cuerpo", confidence: 95, bbox: { x0: NaN, y0: 0, x1: 10, y1: 10 } },
+      ];
+      const recognize = primeraLlamadaDerecha(CUERPO_INCOHERENTE);
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(CUERPO_INCOHERENTE), { recognize }),
+      );
+      await engine.init(ctx);
+      setStubDecodedPixelSequence([[0, 0, 0, 255], BLANCO]);
+
+      await engine.processPage(createValidOcrPageInput("doc-165-nan"), ctx);
+
+      expect(recognize).toHaveBeenCalledTimes(3);
+    });
+
+    it("the recognized strip receives untouched pixels", async () => {
+      // ADR-165 §2.4 / caso 29: la mitad "explicada" (x < 10) lleva un color
+      // MARCA; la mitad de afuera lleva otro color, para forzar que la
+      // franja igual se reconozca. Si una implementación tapara la región
+      // explicada antes de reconocer, la marca desaparecería del canvas que
+      // llega a `recognize`.
+      const MARCA: readonly [number, number, number, number] = [7, 8, 9, 255];
+      const OTRA_TINTA: readonly [number, number, number, number] = [50, 60, 70, 255];
+      const recognize = primeraLlamadaDerecha(CUERPO_MITAD_IZQUIERDA);
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(CUERPO_MITAD_IZQUIERDA), { recognize }),
+      );
+      await engine.init(ctx);
+      setStubDecodedPixelPainterSequence([(x) => (x < 10 ? MARCA : OTRA_TINTA), () => BLANCO]);
+
+      await engine.processPage(createValidOcrPageInput("doc-165-sin-enmascarar"), ctx);
+
+      expect(recognize).toHaveBeenCalledTimes(3);
+      const puts = getPutImageDataCalls();
+      expect(puts.length).toBeGreaterThan(0);
+      const contieneMarca = puts.some((imageData) => {
+        const { data } = imageData;
+        for (let i = 0; i < data.length; i += 4) {
+          if (
+            data[i] === MARCA[0] &&
+            data[i + 1] === MARCA[1] &&
+            data[i + 2] === MARCA[2] &&
+            data[i + 3] === MARCA[3]
+          ) {
+            return true;
+          }
+        }
+        return false;
+      });
+      expect(contieneMarca).toBe(true);
     });
   });
 

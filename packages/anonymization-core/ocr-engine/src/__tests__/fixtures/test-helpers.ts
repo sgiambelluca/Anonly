@@ -263,6 +263,19 @@ let stubCanvasContextAvailable = true;
 let stubDecodedPixel: readonly [number, number, number, number] = [0, 0, 0, 255];
 let stubDecodedPixelSequence: ReadonlyArray<readonly [number, number, number, number]> | undefined;
 let stubDecodedDataReadThrowsOnce = false;
+/**
+ * ADR-165: a diferencia de `stubDecodedPixelSequence` (un color uniforme por
+ * franja), los tests de la caja explicada necesitan un patrón NO uniforme
+ * dentro de una misma franja — un solo píxel de tinta en una posición
+ * precisa. Cada entrada pinta UNA decodificación completa (mismo criterio de
+ * "una por llamada, en orden" que la secuencia de color uniforme).
+ */
+let stubDecodedPixelPainterSequence:
+  | ReadonlyArray<(x: number, y: number) => readonly [number, number, number, number]>
+  | undefined;
+/** ADR-165: contenido real que llegó a `putImageData` (no-op en el resto del
+ * stub) — permite afirmar que la franja reconocida recibe píxeles sin tocar. */
+let putImageDataCalls: ImageData[] = [];
 
 /** Permite a los tests de ADR-162 elegir el contenido de la franja decodificada. */
 export function setStubDecodedPixel(
@@ -271,6 +284,8 @@ export function setStubDecodedPixel(
   stubDecodedPixel = pixel;
   stubDecodedPixelSequence = undefined;
   stubDecodedDataReadThrowsOnce = false;
+  stubDecodedPixelPainterSequence = undefined;
+  putImageDataCalls = [];
 }
 
 export function setStubDecodedPixelSequence(
@@ -281,6 +296,18 @@ export function setStubDecodedPixelSequence(
 
 export function setStubDecodedDataReadThrowsOnce(): void {
   stubDecodedDataReadThrowsOnce = true;
+}
+
+/** ADR-165: una función de pintado por decodificación, consumida en orden. */
+export function setStubDecodedPixelPainterSequence(
+  painters: ReadonlyArray<(x: number, y: number) => readonly [number, number, number, number]>,
+): void {
+  stubDecodedPixelPainterSequence = painters;
+}
+
+/** ADR-165: lo que efectivamente se dibujó vía `putImageData`, en orden de llamada. */
+export function getPutImageDataCalls(): ReadonlyArray<ImageData> {
+  return putImageDataCalls;
 }
 
 
@@ -303,16 +330,35 @@ class StubOffscreenCanvas {
    * que el resto del stub: sin píxeles reales, solo dimensiones correctas.
    */
   getContext(): {
-    putImageData: () => void;
+    putImageData: (imageData: ImageData, dx: number, dy: number) => void;
     drawImage: () => void;
     getImageData: (x: number, y: number, w: number, h: number) => ImageData;
   } | null {
     if (!stubCanvasContextAvailable) return null;
     return {
-      putImageData: () => undefined,
+      putImageData: (imageData: ImageData): void => {
+        putImageDataCalls.push(imageData);
+      },
       drawImage: () => undefined,
       getImageData: (_x: number, _y: number, w: number, h: number) => {
         const image = createImageData(w, h);
+        if (stubDecodedPixelPainterSequence !== undefined) {
+          const [painter, ...rest] = stubDecodedPixelPainterSequence;
+          if (painter !== undefined) {
+            stubDecodedPixelPainterSequence = rest;
+            for (let y = 0; y < h; y++) {
+              for (let x = 0; x < w; x++) {
+                const [r, g, b, a] = painter(x, y);
+                const index = (y * w + x) * 4;
+                image.data[index] = r;
+                image.data[index + 1] = g;
+                image.data[index + 2] = b;
+                image.data[index + 3] = a;
+              }
+            }
+            return image;
+          }
+        }
         const nextPixel = stubDecodedPixelSequence?.[0] ?? stubDecodedPixel;
         if (stubDecodedPixelSequence !== undefined) {
           stubDecodedPixelSequence = stubDecodedPixelSequence.slice(1);

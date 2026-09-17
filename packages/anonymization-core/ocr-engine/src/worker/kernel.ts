@@ -739,6 +739,143 @@ function intersectionRatio(a: BoundingBox, b: BoundingBox): number {
 }
 
 /*
+ * ADR-165 §2.2: la única tolerancia de esta regla, y la mínima que funciona.
+ * El barrido de la ADR (112 franjas, d = 0..8) toma la MISMA decisión para
+ * cualquier d entre 1 y 8 — no hay un óptimo que calibrar, así que se elige
+ * el mínimo, que es también el que menos expone al riesgo de §6 del ADR.
+ */
+const EXPLAINED_INK_DILATION_PX = 1;
+
+/** Inversa de `toPagePoints`: puntos de página → píxeles del raster. */
+function fromPagePoints(bbox: BoundingBox, dpi: number): BoundingBox {
+  const factor = dpi / POINTS_PER_INCH;
+  return {
+    x: bbox.x * factor,
+    y: bbox.y * factor,
+    width: bbox.width * factor,
+    height: bbox.height * factor,
+  };
+}
+
+/** Expande una caja `amount` px hacia los cuatro lados. */
+function dilateBox(box: BoundingBox, amount: number): BoundingBox {
+  return {
+    x: box.x - amount,
+    y: box.y - amount,
+    width: box.width + amount * 2,
+    height: box.height + amount * 2,
+  };
+}
+
+function isFiniteBox(box: BoundingBox): boolean {
+  return (
+    Number.isFinite(box.x) &&
+    Number.isFinite(box.y) &&
+    Number.isFinite(box.width) &&
+    Number.isFinite(box.height)
+  );
+}
+
+/**
+ * ADR-165 §2 / handoff §1.1: proyecta la caja de una palabra de la pasada
+ * derecha —en puntos, espacio del raster ORIGINAL, que es donde sale
+ * `Word.bbox`— al espacio de píxeles de la franja (el ENDEREZADO, con el
+ * `x0` de la franja ya restado), dilatada `EXPLAINED_INK_DILATION_PX`.
+ *
+ * Es el mapeo INVERSO del que hace `toWords`: ahí `unrotateBbox` lleva una
+ * caja del enderezado al original con el ángulo de la página. Acá se va al
+ * revés —original a enderezado— así que el ángulo que corresponde es el
+ * COMPLEMENTARIO (`(360 - orientation) % 360`), con las dimensiones del
+ * espacio AL QUE la caja va (el enderezado) — la misma regla que fija
+ * v1.16.1, aplicada en el sentido contrario. `null` ante una caja no finita:
+ * el caller decide qué hacer con eso (fail-open, nunca en silencio).
+ */
+export function projectWordBoxToStrip(
+  wordBboxPoints: BoundingBox,
+  dpi: number,
+  orientation: Rotation,
+  uprightWidth: number,
+  uprightHeight: number,
+  stripX0: number,
+): BoundingBox | null {
+  const pixelsInOriginal = fromPagePoints(wordBboxPoints, dpi);
+  const complementary = ((360 - orientation) % 360) as Rotation;
+  const pixelsInUpright = unrotateBbox(
+    pixelsInOriginal,
+    complementary,
+    uprightWidth,
+    uprightHeight,
+  );
+  const local = dilateBox(
+    { ...pixelsInUpright, x: pixelsInUpright.x - stripX0 },
+    EXPLAINED_INK_DILATION_PX,
+  );
+  return isFiniteBox(local) ? local : null;
+}
+
+/**
+ * Proyecta TODAS las palabras de la pasada derecha al espacio de la franja.
+ * `null` si alguna cae en una caja no finita: una sola proyección incoherente
+ * basta para no confiar en el resto (ADR-165 §2.5, fail-open).
+ */
+function collectExplainedBoxes(
+  words: ReadonlyArray<Word>,
+  dpi: number,
+  orientation: Rotation,
+  uprightWidth: number,
+  uprightHeight: number,
+  stripX0: number,
+): ReadonlyArray<BoundingBox> | null {
+  const boxes: BoundingBox[] = [];
+  for (const word of words) {
+    const box = projectWordBoxToStrip(
+      word.bbox,
+      dpi,
+      orientation,
+      uprightWidth,
+      uprightHeight,
+      stripX0,
+    );
+    if (box === null) return null;
+    boxes.push(box);
+  }
+  return boxes;
+}
+
+function isPointInsideBox(x: number, y: number, box: BoundingBox): boolean {
+  return x >= box.x && x < box.x + box.width && y >= box.y && y < box.y + box.height;
+}
+
+/**
+ * ADR-165: `true` si NINGÚN píxel presente de la franja cae fuera de
+ * `explainedBoxes` — la franja no puede aportar nada que `intersectionRatio`
+ * no fuera a descartar de todos modos. Corta apenas encuentra uno afuera
+ * (handoff §1.4): no hace falta contar el resto, y ese corte es lo que
+ * mantiene barato el caso que sí se saltea. Geometría incoherente del propio
+ * buffer (mismo guard que `isVisuallyWhiteStrip`): `false` — que acá también
+ * significa "no está explicada", o sea que corren las pasadas.
+ */
+function isStripInkFullyExplained(
+  strip: ImageData,
+  explainedBoxes: ReadonlyArray<BoundingBox>,
+): boolean {
+  const { data, width, height } = strip;
+  if (width <= 0 || height <= 0 || data.length === 0 || data.length !== width * height * 4) {
+    return false;
+  }
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const index = (y * width + x) * 4;
+      if (!isPixelPresent(data[index], data[index + 1], data[index + 2], data[index + 3])) {
+        continue;
+      }
+      if (!explainedBoxes.some((box) => isPointInsideBox(x, y, box))) return false;
+    }
+  }
+  return true;
+}
+
+/*
  * ADR-160 §1: `image` acepta también `Blob` — el camino común (orientación 0)
  * le pasa a `recognize()` el blob codificado directo, sin canvas de por
  * medio. El camino lento (orientación ≠ 0) y las franjas de margen siguen
@@ -937,6 +1074,30 @@ async function recognizeRotatedMargins(params: {
     }
     if (visuallyWhite) continue;
 
+    /*
+     * ADR-165: si toda la tinta que queda cae dentro de una caja de la
+     * pasada derecha (dilatada), esta franja no puede aportar nada nuevo —
+     * `intersectionRatio` descartaría cualquier candidata de todos modos,
+     * después de haber pagado el reconocimiento. Fail-open, mismo criterio
+     * que la compuerta de arriba: cualquier excepción o proyección
+     * incoherente dejan `fullyExplained` en `false`.
+     */
+    let fullyExplained = false;
+    try {
+      const explainedBoxes = collectExplainedBoxes(
+        words,
+        dpi,
+        orientation,
+        uprightWidth,
+        cropped.height,
+        strip.x0,
+      );
+      fullyExplained = explainedBoxes !== null && isStripInkFullyExplained(cropped, explainedBoxes);
+    } catch {
+      fullyExplained = false;
+    }
+    if (fullyExplained) continue;
+
     for (const rotation of rotations) {
       if (opts.abortSignal.aborted) throw new CancelledError(documentId);
       let data: unknown;
@@ -1001,6 +1162,20 @@ async function recognizeRotatedMargins(params: {
   return found;
 }
 
+/**
+ * ADR-162 §13 caso 23 / ADR-165 §2.1: predicado de "píxel presente",
+ * reutilizado LITERAL por las dos reglas — una copia divergente mediría otra
+ * cosa y ningún test lo detectaría (handoff §1.2).
+ */
+function isPixelPresent(
+  r: number | undefined,
+  g: number | undefined,
+  b: number | undefined,
+  alpha: number | undefined,
+): boolean {
+  return alpha !== 0 && (r !== 255 || g !== 255 || b !== 255);
+}
+
 /** ADR-162: predicado exacto de blanco/transparencia, sin umbrales implícitos. */
 function isVisuallyWhiteStrip(image: ImageData): boolean {
   const { data } = image;
@@ -1013,11 +1188,7 @@ function isVisuallyWhiteStrip(image: ImageData): boolean {
     return false;
   }
   for (let index = 0; index < data.length; index += 4) {
-    const alpha = data[index + 3];
-    if (
-      alpha !== 0 &&
-      (data[index] !== 255 || data[index + 1] !== 255 || data[index + 2] !== 255)
-    ) {
+    if (isPixelPresent(data[index], data[index + 1], data[index + 2], data[index + 3])) {
       return false;
     }
   }
