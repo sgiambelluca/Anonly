@@ -109,6 +109,62 @@ el mismo corpus, configuración y calidad. Medir arranque/idle y pipeline por
 separado; conservar baseline y garantías locales de seguridad. El caso OSD
 de una página de adelanto queda independiente de esa migración.
 
+#### Cuánto puede ahorrar, con el desglose por proceso que ya medimos
+
+**Analizado el 2026-09-17**, sobre las 12 celdas de control de P2 de
+`Precalentamiento_NER_Durante_OCR_Medicion.md` (`processPeakRssBytes` de cada
+corrida, 50 páginas escaneadas, frío y caliente). Mediana del pico por proceso:
+
+| Proceso | Pico mediano | % | Qué pasa con Tauri |
+|---|---:|---:|---|
+| **Tab** (renderer) | 981,0 MB | 65,2 % | **No cambia.** Tesseract WASM, ONNX, canvas y pdf.js viven acá |
+| **GPU** | 293,1 MB | 19,5 % | Sale de nuestro árbol de procesos; el trabajo sigue existiendo en la máquina |
+| **Browser** (main) | 189,0 MB | 12,6 % | Se reemplaza por un binario Rust, que no es gratis |
+| **Utility** | 41,3 MB | 2,7 % | Parcialmente |
+
+El techo optimista del ahorro de contenedor son los **~230 MB** de Browser más
+Utility, y menos que eso en el pico real: esos máximos no son simultáneos con el
+de Tab, y por eso el pico de la **suma** (1312 MB en la primera celda) es menor
+que la suma de los **picos** (1499 MB).
+
+**Los dos tercios que importan no se mueven.** El exceso que la campaña de
+memoria persigue se genera dentro de la ventana de OCR, en el proceso del
+renderer, y son los mismos bytes de WASM y los mismos rásters en cualquier motor
+web. Cambiar el contenedor cambia quién hospeda el motor, no qué corre adentro.
+
+Sobre «Rust es más eficiente»: Rust reemplaza el **proceso host**, ese 12,6 %. El
+código de Anonly sigue siendo JS y WASM dentro de un WebView —WKWebView en
+macOS, WebView2 en Windows—, que es un motor de navegador completo igual. Lo que
+sí cambiaría el orden de magnitud es mover OCR y NER a **Rust nativo** (Tesseract
+nativo, ONNX Runtime en Rust), pero eso no es migrar el contenedor: es reescribir
+el Core y renunciar a la variante web. Es una decisión de producto distinta y no
+está propuesta acá.
+
+#### El riesgo que ya tenemos cuantificado
+
+El multihilo de ONNX Runtime depende de `crossOriginIsolated` y
+`SharedArrayBuffer`, verificados sobre el shell de Electron en ADR-132. En Tauri,
+con su protocolo propio, esas condiciones hay que reconstruirlas y **comprobarlas
+antes de comparar nada**. Si no se logran, la inferencia vuelve a un hilo: la
+medición propia de `Optimizacion_De_Rendimiento.md` §A dio **−53,6 %** al
+activarlos, así que perderlos llevaría la clasificación de P2 de ~3,4 s a unos
+7 s. Sería pagar una regresión de tiempo medida a cambio de un ahorro de memoria
+que no cierra la brecha.
+
+Hay además un costo de instrumento: `app.getAppMetrics()` es de Electron y es la
+fuente de M1/M2 (ADR-146) y de esta misma tabla por proceso. Migrar implica
+reconstruir la instrumentación de memoria antes de poder afirmar si la migración
+mejoró algo.
+
+#### Qué queda en pie, y qué no
+
+La migración conserva sus motivos legítimos —tamaño del instalador, costo de
+distribución, arranque— y ninguno de ellos se apoya en el pico de memoria del
+pipeline. **Lo que este análisis descarta es usarla como vía para el presupuesto
+de memoria de `00_Project_Vision.md` §7.** Si se retoma, el ADR debería declarar
+de entrada cuál de los dos objetivos persigue, porque el desglose de arriba dice
+que no persigue los dos.
+
 ---
 
 ## 3. Compliance y legal
