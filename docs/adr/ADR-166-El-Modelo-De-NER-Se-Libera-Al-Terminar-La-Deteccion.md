@@ -2,7 +2,7 @@
 
 # ADR-166 — El modelo de NER se libera al terminar la detección
 
-- **Estado**: Accepted. Sin implementar.
+- **Estado**: Accepted, **implementado el 2026-09-18** (`6571a2e` ner-engine, `18d4442` core). **Enmienda del 2026-09-18**: la primera verificación dejó el **costo confirmado** y el **beneficio de memoria sin demostrar** — ver la Enmienda al final. Mientras T-8 no cierre, el primer punto de «A favor» es una expectativa, no un número medido.
 - **Fecha**: 2026-09-17
 - **Decidido por**: El humano, sobre el resultado de T-7: _"seria mas correcto a nivel de costo/beneficio liberar la memoria del NER cuando termina y luego volver a cargarlo en caso de ser necesario. Principalmente por lo que tarda en cargar el modelo NER, que es basicamente un segundo, en contraposición a poder liberar aproximadamente 1GB de memoria ram por mas que sea por un minuto."_
 - **Relacionado con**: ADR-157 (el mismo criterio, aplicado a OCR), ADR-080 (la liberación por inactividad, que acá también llega tarde), ADR-154 §2 lever 3 (bajar el sostenido baja el pico del documento siguiente), ADR-038 (el reanálisis, la excepción)
@@ -201,3 +201,66 @@ preguntas independientes.
 reemplaza, actúa antes—, los presupuestos de `00_Project_Vision.md` §7, la
 detección, ni el orden OCR → NER del pipeline (ADR-154 §2 lever 3, descarte del
 2026-09-17).
+
+
+## Enmienda (2026-09-18) — implementado, costo confirmado, beneficio sin demostrar
+
+Implementado y con los cuatro gates en verde. La verificación posterior
+([`roadmap/Verificacion_Liberacion_NER_Medicion.md`](../roadmap/Verificacion_Liberacion_NER_Medicion.md))
+dejó las dos mitades de este ADR en estados distintos, y conviene que se lea así
+antes de citarlo.
+
+### Lo que quedó confirmado
+
+**El mecanismo funciona tal como lo describe §1bis.** `NER_MODEL_READY` reaparece
+en la corrida caliente de los tres perfiles, donde antes estaba ausente en las
+nueve: el modelo se da de baja y se recarga de verdad, y la dedup pasó de «una vez
+por instancia» a «una vez por ciclo de carga» como se especificó.
+
+**El costo de §2 está bien declarado.** El segundo documento de la misma instancia
+paga **+874 a +1127 ms** según el perfil; los 942,94 ms declarados caen en el
+medio de ese rango. Tres pipelines de 0,5 s, 15 s y 42 s convergen en el mismo
+sobrecosto, que es lo que corresponde a una recarga de modelo.
+
+### Lo que no quedó demostrado
+
+**«Recupera del orden de 1 GB» sigue sin verificación.** No está refutado
+tampoco: la tanda comparó las dos versiones en campañas separadas por horas, con
+el banco en regímenes de memoria distintos, y los absolutos de RSS no se comparan
+así (ADR-146 §7ter). La dispersión entre corridas idénticas —255 MB— es del orden
+de la diferencia que habría que explicar.
+
+Quien cite este ADR para justificar otra decisión de memoria debe usar §2 (el
+costo, medido) y **no** el primer punto de «A favor», hasta que T-8 cierre.
+
+### Un costo que este ADR no declaró
+
+Hay una consecuencia estructural que §1 anticipó sin nombrarla: al liberar el
+modelo, **la recarga del documento siguiente ocurre dentro de su propia ventana de
+procesamiento**, sumándose a lo que el renderer ya tiene, en vez de estar pagada
+de antes. Los picos medidos del segundo documento subieron en los tres perfiles
+(`Verificacion_Liberacion_NER_Medicion.md` §5), con el mismo confound encima, así
+que tampoco están confirmados.
+
+Si T-8 los confirma, este ADR paga **dos** costos y no uno —tiempo y pico del
+documento siguiente— contra un beneficio de memoria sostenida. Eso cambiaría el
+balance que se aceptó, y la decisión habría que retomarla.
+
+### Qué lo cierra
+
+[`roadmap/AB_Intercalado_Plan.md`](../roadmap/AB_Intercalado_Plan.md) (T-8): las
+dos versiones alternadas corrida por corrida en la misma sesión, con el brazo B
+distinto del A **en una sola línea** —la invocación de la baja—, para que la
+diferencia no se pueda atribuir a otra cosa.
+
+Tres desenlaces, y los tres son resultados:
+
+1. **La baja temprana recupera memoria sostenida.** Se conserva como está.
+2. **No mueve el punto de reposo.** Entonces cuesta ~1 s por reanálisis sin
+   comprar nada, y corresponde revertir o reubicar la llamada.
+3. **Lo empeora.** Se revierte, y la ubicación de la baja pasa a ser la pregunta
+   —al cerrar el documento, o un `idleDisposeMs` propio para NER—, no si liberar.
+
+**Nada de esto invalida la decisión de §1.** El humano la tomó con el número de
+T-7, que sigue en pie: alrededor de 1 GB se libera solo, un minuto tarde. Lo que
+está en duda es si adelantarlo a este punto del pipeline lo consigue.
