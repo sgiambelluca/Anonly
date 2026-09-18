@@ -2,7 +2,10 @@
 
 # ADR-167 — El modelo de NER se libera a los 15 s de inactividad
 
-- **Estado**: Accepted. Sin implementar.
+- **Estado**: Accepted, **implementado el 2026-09-18** (`c006059` contrato, `1b09383` core,
+  `a9c0ac7` ner-engine) y **verificado de punta a punta** en la app empaquetada:
+  tras 20 s de revisión la recarga emite `NER_MODEL_READY` (antes era muda); con
+  ~1,3 s entre documentos no recarga. Datos en `roadmap/AB_Intercalado_Medicion.md` §9.
 - **Fecha**: 2026-09-18
 - **Decidido por**: El humano, sobre los tres brazos de T-8: _«Sí, vamos por C»_.
 - **Reemplaza**: ADR-166 §1 (la baja del pool al terminar la detección). **No
