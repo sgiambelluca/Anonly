@@ -115,6 +115,28 @@ la misma instancia**. Sin ese reinicio la recarga sería muda y el usuario verí
 el reanálisis detenido cerca de un segundo sin ninguna señal, que es exactamente
 el indicador desincronizado que ADR-135 existe para evitar.
 
+**El reinicio es condicional a que la baja haya ocurrido de verdad.** Encontrado
+al implementar, verificado en el código: `WorkerPool.releaseIdleWorkers()` tiene
+su propia guarda (`if (!this.isIdle) return;`) y devolvía `void`, así que el motor
+no podía distinguir "liberé" de "la guarda me frenó". Y el kernel hace
+`if (classifier !== null && loadedModelKey === key) return;` **sin reportar
+nada**: si el worker sobrevive con el pipeline cargado, la carga siguiente no
+emite `model-loading` ni `model-ready`.
+
+Combinando las dos, había un camino alcanzable —cancelar durante la detección y
+después reanalizar— donde `modelWarm` quedaba en `false` con el modelo cargado y
+sin nadie que volviera a ponerlo en `true`. Ahí `isModelReady()` y
+`NerStarted.modelLoading` **mienten**, las dos señales públicas que describen
+justamente eso. No rompe el indicador del cliente actual, que se maneja con el par
+`LOADING`/`READY`, pero un cliente que use el contrato tal como está escrito se
+rompe.
+
+Por eso `WorkerPool.releaseIdleWorkers()` pasa a devolver `boolean` —`true` solo
+si terminó workers— y `NerEngine` reinicia `modelWarm` **solo en ese caso**. La
+firma pública del motor no cambia: sigue siendo `releaseIdleWorkers(): void`, el
+booleano es interno. `OcrEngine` puede ignorar el retorno: sus señales son de una
+sola vez y no forman un par con estado.
+
 **Es un cambio observable y hay que decirlo**: `NER_MODEL_READY` deja de ser "una
 vez por instancia del motor" y pasa a ser "una vez por ciclo de carga". Un
 cliente que cuente esos eventos verá más de uno por documento si hubo
