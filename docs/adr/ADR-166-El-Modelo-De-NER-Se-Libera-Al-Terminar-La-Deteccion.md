@@ -102,6 +102,25 @@ La guarda es la misma y es innegociable: **no hace nada si el pool no está
 ocioso.** Un job en vuelo no se interrumpe; en ese caso la baja es un no-op
 silencioso y la memoria la libera el temporizador de ADR-080 como hasta hoy.
 
+### 1bis. La baja reinicia el ciclo del modelo
+
+`releaseIdleWorkers()` reinicia el flag `modelWarm`, así que `isModelReady()`
+vuelve a `false` y la recarga posterior emite `NER_MODEL_LOADING` y
+`NER_MODEL_READY` como cualquier primera carga.
+
+No es un capricho: es el criterio que ADR-135 ya había fijado —*"un cliente que
+recree el Core reinicia el flag, que es lo correcto: ahí el modelo sí se carga de
+nuevo"*— aplicado al caso nuevo que este ADR crea, una recarga real **dentro de
+la misma instancia**. Sin ese reinicio la recarga sería muda y el usuario vería
+el reanálisis detenido cerca de un segundo sin ninguna señal, que es exactamente
+el indicador desincronizado que ADR-135 existe para evitar.
+
+**Es un cambio observable y hay que decirlo**: `NER_MODEL_READY` deja de ser "una
+vez por instancia del motor" y pasa a ser "una vez por ciclo de carga". Un
+cliente que cuente esos eventos verá más de uno por documento si hubo
+reanálisis. Para el caso que motivó ADR-135 —el segundo worker del pool
+calentándose— no cambia nada: ese sigue deduplicado.
+
 ### 2. El costo, declarado
 
 Un reanálisis posterior —activar NER, o cambiar los idiomas de OCR— paga la

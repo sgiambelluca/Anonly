@@ -55,4 +55,15 @@ El argumento es el que el propio motor ya usaba, aplicado al otro evento: si el 
 - **Se pierde visibilidad del calentamiento del segundo worker.** Si algún día ese segundo modelo tardara muchísimo o fallara, nada lo mostraría. Es aceptable porque el pipeline ya está produciendo resultados con el primero, pero conviene saberlo.
 - La dedup es **por instancia del motor**. Un cliente que recree el Core (ADR-125) reinicia el flag, que es lo correcto: ahí el modelo sí se carga de nuevo.
 
+> **Extendido por ADR-166 (2026-09-17)**: ese «reiniciar el flag cuando el modelo
+> se carga de nuevo» deja de ser exclusivo de recrear el Core. ADR-166 da de baja
+> el pool de NER al terminar la detección, así que un reanálisis posterior
+> **vuelve a cargar el modelo dentro de la misma instancia**. Por el mismo
+> criterio de arriba, `releaseIdleWorkers()` reinicia `modelWarm`: si no lo
+> hiciera, esa recarga ocurriría muda —sin `LOADING` ni `READY`— y el usuario
+> vería el reanálisis detenido ~1 s sin explicación, que es la misma clase de
+> indicador desincronizado que este ADR existe para evitar. La dedup pasa a ser
+> **por ciclo de carga**, no por instancia; para el caso que motivó este ADR —el
+> segundo worker del pool calentándose— no cambia nada.
+
 **Lo que no toca**: el contrato de eventos, los códigos de error, ni el cliente.
