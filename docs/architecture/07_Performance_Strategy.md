@@ -242,6 +242,20 @@ Fixtures pesados (> 5 MB) vía Git LFS o descargados en `postinstall` con hash v
 5. Editar grupo mientras NER sigue corriendo → verificar que no se pierden ediciones.
 6. Cargar PDF corrupto → verificar error tipado y mensaje claro.
 7. Abrir y cerrar 10 documentos consecutivos → verificar que la memoria regresa al baseline. **Reparto (ADR-048 §3)**: el E2E ejercita el **flujo** (cada `DOCUMENT_CLOSED` deja estado limpio —sin documento activo, sin preview, sin blob URLs vivos— y el ciclo 10 se comporta como el 1); la **medición de bytes contra baseline** es del gate `test:leak` (`tests/leak/`, Hito 11), porque `performance.measureUserAgentSpecificMemory()` exige `crossOriginIsolated` (COOP/COEP) — headers que la app **no llevaba** hasta ADR-100, que los declara en `public/_headers` y los replica en el dev server; con eso este bloqueo del gate `test:leak` desaparece. **Depende de ADR-051 (PR 17.7)**: el supuesto de ADR-048 §3 —que el ciclo open/close ya era ejercitable— era falso. Hasta ese PR no existe ningún control de UI para cerrar un documento que llegó a `Ready` (solo el banner de `Failed` y el cancelar de `PasswordDialog`), así que ni este escenario ni el gate `test:leak` tienen ciclo que medir.
+
+   > **Medido el 2026-09-18 (T-8, Paso 0): la API no está disponible en la app
+   > empaquetada.** `performance.measureUserAgentSpecificMemory()` existe como
+   > función y `crossOriginIsolated` da `true`, pero al llamarla el runtime lanza
+   > *«performance.measureUserAgentSpecificMemory is not available»*. El control de
+   > la sonda confirmó que la memoria de prueba estaba montada, así que el negativo
+   > es de la API (`roadmap/AB_Intercalado_Medicion.md` §2). La causa probable es
+   > que la app se sirve por `app://` (ADR-130/132) — **plausible, no verificado**, y
+   > **no se probó contra el dev server**. Lo que sí queda establecido: **ADR-100 no
+   > levantó el bloqueo de `test:leak` en el producto empaquetado**, que es sobre lo
+   > que se miden los gates de rendimiento (ADR-153). Antes de construir
+   > `tests/leak/` hay que elegir otra fuente de bytes: el RSS por proceso que ya lee
+   > `memorySampler.ts`, con su ruido declarado, o un instrumento nuevo.
+
 8. Cargar PDF sin NER activado → verificar que solo Regex detecta. **Desbloqueado por PR16.5** (ADR-048 §7 punto 2): hasta entonces no existía forma de desactivar NER antes de la primera importación (`App.tsx` llamaba `initCore()` sin derivar overrides de `settings.store`) y el spec estaba en `test.fixme` desde PR10. PR17 lo saca del `fixme`.
 9. Disparar un `reanalyze` (ADR-038) con documento abierto → verificar que reanaliza **preservando las ediciones previas del usuario**: un grupo que el usuario deshabilitó sigue deshabilitado, una regla creada sigue aplicando, un merge manual persiste. **Disparador (ADR-126)**: el escenario decía "activar NER en runtime", que era el disparador y no lo que mide; ese control se retiró —la detección de nombres está siempre activa— y con él la única forma de activarla en runtime. El disparador pasa a ser **Idiomas del documento**, el otro setting que abre la confirmación de reanálisis. La mitad "se descarga el modelo en runtime" ya no describe ningún camino de usuario: que el detector corre y llega a la UI lo cubre el escenario 5.
 10. Fusionar y dividir grupos → verificar índices y reemplazos.
