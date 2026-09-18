@@ -19,14 +19,13 @@
  * por eventos de dominio: este motor lo traduce en host a
  * `NER_MODEL_LOADING`/`NER_MODEL_READY` (**los dos** deduplicados con el
  * flag `modelWarm`, ADR-135) y a `ctx.logger.warn` para los reintentos de
- * carga. Desde ADR-166 §1bis, `releaseIdleWorkers()` reinicia `modelWarm`
- * cuando la baja del pool terminó workers de verdad, así que la dedup pasa
- * de "una vez por instancia" a "una vez por ciclo de carga": una recarga
- * tras la baja del pool vuelve a emitir el par. Si la baja fue un no-op —el
- * pool no estaba ocioso, un worker sigue vivo con el modelo cargado— el
- * flag no se toca: reiniciarlo ahí lo dejaría mintiendo para siempre, porque
- * ese worker no vuelve a reportar `model-loading`/`model-ready` sobre un
- * modelo que ya tiene (spec §13 caso 29).
+ * carga. El motor no expone ninguna baja propia del pool (ADR-167 §1: el
+ * pool se libera solo, por su propio temporizador `nerIdleDisposeMs`); se
+ * suscribe a `onWorkersReleased` del puerto en el constructor y reinicia
+ * `modelWarm` en cada baja efectiva notificada, venga del temporizador o de
+ * una llamada explícita (ADR-167 §3) — así la dedup pasa de "una vez por
+ * instancia" a "una vez por ciclo de carga", y una recarga tras la baja
+ * vuelve a emitir el par LOADING/READY (spec §13 casos 28/30).
  */
 import {
   buildOccurrenceContext,
@@ -334,22 +333,12 @@ interface NerDispatchParams {
 interface NerJobPool {
   dispatch(params: NerDispatchParams): Promise<unknown>;
   /**
-   * ADR-166 §1bis: termina los workers vivos del pool sin disponerlo — el
-   * pool sigue usable, el próximo `dispatch` lo reconstruye perezoso
-   * (ADR-080). Mismo nombre que `WorkerPool.releaseIdleWorkers()` porque la
-   * semántica es idéntica, incluida su guarda (no hace nada si el pool no
-   * está ocioso).
-   *
-   * Devuelve `boolean` (a diferencia de `OcrJobPool.releaseIdleWorkers()`,
-   * que sigue en `void`): `true` solo si terminó workers de verdad, `false`
-   * si la guarda de `WorkerPool` lo frenó. El motor lo necesita para no
-   * reiniciar `modelWarm` con un worker vivo que sigue teniendo el modelo
-   * cargado — `ensureClassifierLoaded` del kernel hace early-return sin
-   * reportar `model-loading`/`model-ready` sobre un modelo que ya tiene, así
-   * que reiniciar el flag ahí lo dejaría en `false` para siempre (spec §13
-   * caso 29).
+   * ADR-167 §3: notifica cada baja efectiva de los workers del pool —
+   * temporizador de inactividad (`nerIdleDisposeMs`) o llamada explícita,
+   * cualquiera de los dos caminos de `WorkerPool.releaseIdleWorkers()`
+   * devolviendo `true`. Devuelve la desuscripción.
    */
-  releaseIdleWorkers(): boolean;
+  onWorkersReleased(listener: () => void): () => void;
 }
 
 /**
@@ -363,10 +352,9 @@ interface NerJobPool {
  */
 const IMMEDIATE_POOL: NerJobPool = {
   dispatch: (params: NerDispatchParams): Promise<unknown> => params.run(),
-  // Sin pool real no hay ningún `WorkerLike` que terminar — no-op inocuo
-  // (ADR-166 §1bis, espejo de IMMEDIATE_POOL en ocr-engine). `false`: no
-  // terminó nada.
-  releaseIdleWorkers: (): boolean => false,
+  // Sin pool real no hay ningún `WorkerLike` que libere nunca — no-op inocuo
+  // que devuelve una desuscripción también no-op (ADR-167 §3).
+  onWorkersReleased: (): (() => void) => () => {},
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -545,29 +533,23 @@ export class NerEngine implements IEngine {
   readonly id = EngineId.Ner;
 
   private readonly pool: NerJobPool;
+  private readonly unsubscribeFromPool: () => void;
 
   private ctx: EngineContext | null = null;
   private modelId: string | null = null;
   private initialized = false;
   private disposed = false;
   // "Ningún model-ready reportado aún para el ciclo de carga actual"
-  // (ADR-046 §4, ADR-166 §1bis) — reemplaza `this.classifier !== null` de
-  // antes de ADR-046: misma semántica (NerStarted.modelLoading/
-  // isModelReady()), pero el pipeline de Transformers.js ahora vive en el
-  // kernel, no en la instancia. Deduplica NER_MODEL_READY: con
-  // nerPoolSize > 1, cada worker carga su propio modelo y reportaría un
-  // model-ready propio que no es un cambio de estado observable (spec §13
-  // caso 17). `releaseIdleWorkers()` lo reinicia (ADR-166 §1bis): a partir
-  // de ahí deja de ser "una vez por instancia" y pasa a ser "una vez por
-  // ciclo de carga" (spec §13 casos 28/30).
+  // (ADR-046 §4) — reemplaza `this.classifier !== null` de antes de
+  // ADR-046: misma semántica (NerStarted.modelLoading/isModelReady()), pero
+  // el pipeline de Transformers.js ahora vive en el kernel, no en la
+  // instancia. Deduplica NER_MODEL_READY: con nerPoolSize > 1, cada worker
+  // carga su propio modelo y reportaría un model-ready propio que no es un
+  // cambio de estado observable (spec §13 caso 17). El listener de
+  // `onWorkersReleased` (constructor, ADR-167 §3) lo reinicia en cada baja
+  // efectiva del pool: a partir de ahí deja de ser "una vez por instancia" y
+  // pasa a ser "una vez por ciclo de carga" (spec §13 casos 28/30).
   private modelWarm = false;
-  // Cuenta processPage()/processPages() en curso en ESTA instancia
-  // (ADR-166, espejo de activeProcessPages/activeProcessSessions en
-  // ocr-engine). `releaseIdleWorkers()` la usa como guarda: mientras haya
-  // trabajo propio en vuelo, no toca el pool ni reinicia `modelWarm` — ver
-  // su comentario para el motivo (spec §13 caso 29).
-  private activeProcessPages = 0;
-  private activeProcessPagesBatches = 0;
 
   /**
    * `pool` (ADR-046 §2): inyectada por el façade en `createCore`
@@ -575,9 +557,15 @@ export class NerEngine implements IEngine {
    * RenderEngine(renderPool)`). Sin argumento, cae al fallback in-process
    * trivial (`IMMEDIATE_POOL`) — el comportamiento que este motor tenía
    * antes de ADR-046, usado por sus propios tests.
+   *
+   * ADR-167 §3: se suscribe a `onWorkersReleased` acá para que ninguna baja
+   * del pool —temporizador o explícita— deje `modelWarm` desincronizado.
    */
   constructor(pool?: NerJobPool) {
     this.pool = pool ?? IMMEDIATE_POOL;
+    this.unsubscribeFromPool = this.pool.onWorkersReleased(() => {
+      this.modelWarm = false;
+    });
   }
 
   init(ctx: EngineContext): Promise<void> {
@@ -602,18 +590,6 @@ export class NerEngine implements IEngine {
   }
 
   async processPage(input: NerPageInput, ctx: EngineContext): Promise<NerPageOutput> {
-    this.activeProcessPages += 1;
-    try {
-      return await this.processPageInternal(input, ctx);
-    } finally {
-      this.activeProcessPages -= 1;
-    }
-  }
-
-  private async processPageInternal(
-    input: NerPageInput,
-    ctx: EngineContext,
-  ): Promise<NerPageOutput> {
     this.assertNotDisposed();
     this.assertInitialized();
 
@@ -714,18 +690,6 @@ export class NerEngine implements IEngine {
     inputs: ReadonlyArray<NerPageInput>,
     ctx: EngineContext,
   ): Promise<ReadonlyArray<NerPageOutput>> {
-    this.activeProcessPagesBatches += 1;
-    try {
-      return await this.processPagesInternal(inputs, ctx);
-    } finally {
-      this.activeProcessPagesBatches -= 1;
-    }
-  }
-
-  private async processPagesInternal(
-    inputs: ReadonlyArray<NerPageInput>,
-    ctx: EngineContext,
-  ): Promise<ReadonlyArray<NerPageOutput>> {
     this.assertNotDisposed();
     this.assertInitialized();
 
@@ -808,52 +772,15 @@ export class NerEngine implements IEngine {
     return outputs;
   }
 
-  /**
-   * ADR-166: da de baja los workers vivos del `NerPool` interno — no es
-   * `dispose()`. El motor sigue usable y el próximo `processPage`/
-   * `processPages` reconstruye el worker perezoso (ADR-080), pagando la
-   * recarga del modelo (942,94 ms medianos en frío,
-   * `roadmap/Perfilado_NER_Interno_Medicion.md`). Único caller:
-   * `Orchestrator.runDetectionStage`, al cerrar la etapa de detección.
-   *
-   * No hace nada si hay un `processPage`/`processPages` en curso en esta
-   * instancia (spec §13 caso 29, primera guarda). El único caller
-   * documentado siempre llama después de que `processPages` ya resolvió o
-   * rechazó, así que en la práctica esta guarda nunca frena a
-   * `Orchestrator.runDetectionStage` — protege un llamador concurrente
-   * hipotético (o un test).
-   *
-   * Segunda guarda, independiente de la primera: `this.pool.releaseIdleWorkers()`
-   * trae la suya propia (`WorkerPool`, ADR-080) y nunca termina un worker
-   * con un job en vuelo —`terminate()` no dispara `error`, esa promesa
-   * quedaría colgada para siempre—, y devuelve `boolean` (ADR-166 §1bis)
-   * para que acá se sepa si actuó de verdad o fue un no-op. `modelWarm`
-   * **solo** se reinicia cuando devuelve `true`: si devuelve `false`, el
-   * worker sigue vivo con el pipeline cargado, y `ensureClassifierLoaded`
-   * del kernel hace early-return sin reportar `model-loading`/`model-ready`
-   * sobre un modelo que ya tiene — reiniciar el flag ahí lo dejaría en
-   * `false` para siempre, con `isModelReady()`/`NerStarted.modelLoading`
-   * mintiendo sobre un modelo que sigue cargado (spec §13 caso 29, hallazgo
-   * verificado en el código y aceptado en ADR-166 §1bis).
-   *
-   * Cuando sí reinicia (ADR-166 §1bis, ADR-135 extendido el 2026-09-17):
-   * `isModelReady()` vuelve a `false` y la próxima carga —un reanálisis que
-   * reactive NER o cambie `ocr.languages`— vuelve a emitir
-   * `NER_MODEL_LOADING` y `NER_MODEL_READY` (spec §13 caso 30), en vez de
-   * dejar la recarga muda ~1 s sin ninguna señal para el cliente.
-   */
-  releaseIdleWorkers(): void {
-    if (this.activeProcessPages !== 0 || this.activeProcessPagesBatches !== 0) return;
-    const released = this.pool.releaseIdleWorkers();
-    if (released) this.modelWarm = false;
-  }
-
   async dispose(): Promise<void> {
     // ADR-046 §2: no pasa por pool.dispatch (dispose no es la operación del
     // puerto) — libera directo el kernel local. La liberación server-side en
     // un NerWorker real llega por el mensaje genérico DISPOSE del protocolo.
     // Si el kernel nunca se cargó no hay nada que liberar (ADR-099).
     if (kernelModule !== undefined) await (await kernelModule).kernelDispose();
+    // ADR-167 §3: se desuscribe de onWorkersReleased — una baja del pool
+    // después de dispose() no debe tocar el estado de esta instancia.
+    this.unsubscribeFromPool();
     this.modelWarm = false;
     this.disposed = true;
     this.initialized = false;
@@ -1008,9 +935,9 @@ export class NerEngine implements IEngine {
    * Traduce el ciclo de vida del modelo reportado por el kernel (ADR-046
    * §4) a eventos de dominio / logging, en host. `model-loading` →
    * `NER_MODEL_LOADING`; `model-ready` → `NER_MODEL_READY` **una sola vez
-   * por ciclo de carga** (dedup vía `modelWarm`, spec §13 caso 17;
-   * `releaseIdleWorkers()` reinicia el flag y reabre el ciclo, ADR-166
-   * §1bis, spec §13 caso 30);
+   * por ciclo de carga** (dedup vía `modelWarm`, spec §13 caso 17; el
+   * listener de `onWorkersReleased` reinicia el flag y reabre el ciclo,
+   * ADR-167 §3, spec §13 caso 30);
    * `model-load-retry` → `ctx.logger.warn` con el mensaje de
    * `NerModelLoadFailedError` (sin puente `LOG` en el worker).
    */

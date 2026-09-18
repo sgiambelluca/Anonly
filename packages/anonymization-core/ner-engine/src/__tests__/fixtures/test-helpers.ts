@@ -11,7 +11,7 @@
 import type { EngineConfig, EngineContext, Serializable, Word } from "@anonly/shared";
 import { createEngineContext as sharedCreateEngineContext, createMockConfig as sharedCreateMockConfig } from "@anonly/test-utils";
 import type { pipeline, TokenClassificationOutput } from "@huggingface/transformers";
-import { vi, type Mock } from "vitest";
+import type { Mock } from "vitest";
 
 import type { NerPageInput } from "../../ner.types.js";
 
@@ -246,7 +246,9 @@ export interface NerDispatchCall {
 export interface TrackingNerPool {
   readonly dispatch: <T>(params: NerPoolDispatchParams<T>) => Promise<T>;
   readonly calls: NerDispatchCall[];
-  readonly releaseIdleWorkers: () => boolean;
+  readonly onWorkersReleased: (listener: () => void) => () => void;
+  /** Simula una baja efectiva del pool (ADR-167 §3): invoca a los suscriptos. */
+  readonly triggerRelease: () => void;
 }
 
 /**
@@ -254,20 +256,26 @@ export interface TrackingNerPool {
  * ocr-engine) que registra cada dispatch y delega en `params.run()` — usada
  * por los tests que necesitan inspeccionar los parámetros de despacho
  * (`maxRetriesOverride`, `payload`) sin depender de un `WorkerPool` real.
- * `releaseIdleWorkers` (ADR-166 §1bis) es un `vi.fn()` que devuelve `true`
- * ("liberó de verdad") — los tests que necesiten simular la guarda de
- * `WorkerPool` frenándolo (`false`, §13 caso 29) pasan un fake ad-hoc en vez
- * de este.
+ * `triggerRelease` simula al pool notificando una baja efectiva
+ * (ADR-167 §3) para los tests que necesitan ejercitar el listener que
+ * `NerEngine` registra en su constructor.
  */
 export function createTrackingNerPool(): TrackingNerPool {
   const calls: NerDispatchCall[] = [];
+  const listeners = new Set<() => void>();
   return {
     calls,
     dispatch: <T>(params: NerPoolDispatchParams<T>): Promise<T> => {
       calls.push({ payload: params.payload, maxRetriesOverride: params.maxRetriesOverride });
       return params.run();
     },
-    releaseIdleWorkers: vi.fn((): boolean => true),
+    onWorkersReleased: (listener: () => void): (() => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    triggerRelease: (): void => {
+      for (const listener of listeners) listener();
+    },
   };
 }
 
@@ -284,11 +292,11 @@ export function createTrackingNerPool(): TrackingNerPool {
  */
 export function createResolvedNerPool(resolvedValue: unknown): {
   readonly dispatch: (params: NerPoolDispatchParams<unknown>) => Promise<unknown>;
-  readonly releaseIdleWorkers: () => boolean;
+  readonly onWorkersReleased: (listener: () => void) => () => void;
 } {
   return {
     dispatch: (): Promise<unknown> => Promise.resolve(resolvedValue),
-    releaseIdleWorkers: vi.fn((): boolean => true),
+    onWorkersReleased: (): (() => void) => () => {},
   };
 }
 
