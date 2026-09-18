@@ -30,6 +30,7 @@ import {
   makeNerPageInput,
   mockTokenClassificationPipeline,
   nerToken,
+  type NerPoolDispatchParams,
 } from "./fixtures/test-helpers.js";
 
 describe("NerEngine — edge case tests", () => {
@@ -403,6 +404,69 @@ describe("NerEngine — edge case tests", () => {
 
         await pooledEngine.dispose();
       }
+    });
+  });
+
+  // ADR-166 §1bis (spec §13 caso 29): un `NerJobPool` real (`WorkerPool`,
+  // ADR-080) no termina workers con un job en vuelo — `terminate()` no
+  // dispara `error`, y esa promesa quedaría colgada para siempre. Acá se
+  // simula esa guarda del lado del pool (en vez del lado del motor, que
+  // cubre "does nothing while a processPage is still in flight" en
+  // unit.test.ts): un `releaseIdleWorkers()` que deliberadamente no hace
+  // nada, como haría el pool real cuando no está ocioso.
+  describe("releaseIdleWorkers con el pool NO ocioso (ADR-166 §13 caso 29)", () => {
+    it("is a no-op when the pool's own guard blocks it, and the engine keeps working", async () => {
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockTokenClassificationPipeline(() => Promise.resolve([])),
+      );
+      const pool = {
+        dispatch: <T>(params: NerPoolDispatchParams<T>): Promise<T> => params.run(),
+        releaseIdleWorkers: (): boolean => false, // pool "no ocioso": no liberó nada
+      };
+      const pooledEngine = new NerEngine(pool);
+      await pooledEngine.init(ctx);
+
+      expect(() => pooledEngine.releaseIdleWorkers()).not.toThrow();
+
+      await expect(
+        pooledEngine.processPage(makeNerPageInput("doc-not-idle", 0, ["Juan"]), ctx),
+      ).resolves.toBeDefined();
+
+      await pooledEngine.dispose();
+    });
+
+    // El caso que la primera versión de ADR-166 no podía cubrir (hallazgo
+    // del implementador, verificado y aceptado — commit 7529831): con el
+    // puerto devolviendo `void`, el motor no tenía forma de saber que la
+    // guarda del pool había frenado la baja, y reiniciaba `modelWarm`
+    // igual — dejando `isModelReady()`/`NerStarted.modelLoading` mintiendo
+    // sobre un worker que seguía vivo con el modelo cargado, porque
+    // `ensureClassifierLoaded` del kernel no vuelve a reportar
+    // `model-loading`/`model-ready` sobre un modelo que ya tiene. Con el
+    // puerto devolviendo `boolean`, un `releaseIdleWorkers()` de pool que
+    // devuelve `false` (guarda interna activa) dice explícitamente "no
+    // liberé nada", y el motor conserva `modelWarm` tal como estaba.
+    it("when the pool reports it did NOT release anything, modelWarm is preserved and isModelReady() stays true", async () => {
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockTokenClassificationPipeline(() => Promise.resolve([])),
+      );
+      const pool = {
+        dispatch: <T>(params: NerPoolDispatchParams<T>): Promise<T> => {
+          params.onProgress?.(1, { phase: "model-ready", modelId: "test-model-not-idle" });
+          return params.run();
+        },
+        releaseIdleWorkers: (): boolean => false, // guarda interna activa: no liberó nada
+      };
+      const pooledEngine = new NerEngine(pool);
+      await pooledEngine.init(ctx);
+      await pooledEngine.processPage(makeNerPageInput("doc-not-idle-warm", 0, ["Juan"]), ctx);
+      expect(pooledEngine.isModelReady()).toBe(true);
+
+      pooledEngine.releaseIdleWorkers();
+
+      expect(pooledEngine.isModelReady()).toBe(true);
+
+      await pooledEngine.dispose();
     });
   });
 });

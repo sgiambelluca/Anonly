@@ -11,7 +11,7 @@
 import type { EngineConfig, EngineContext, Serializable, Word } from "@anonly/shared";
 import { createEngineContext as sharedCreateEngineContext, createMockConfig as sharedCreateMockConfig } from "@anonly/test-utils";
 import type { pipeline, TokenClassificationOutput } from "@huggingface/transformers";
-import { type Mock } from "vitest";
+import { vi, type Mock } from "vitest";
 
 import type { NerPageInput } from "../../ner.types.js";
 
@@ -246,6 +246,7 @@ export interface NerDispatchCall {
 export interface TrackingNerPool {
   readonly dispatch: <T>(params: NerPoolDispatchParams<T>) => Promise<T>;
   readonly calls: NerDispatchCall[];
+  readonly releaseIdleWorkers: () => boolean;
 }
 
 /**
@@ -253,6 +254,10 @@ export interface TrackingNerPool {
  * ocr-engine) que registra cada dispatch y delega en `params.run()` — usada
  * por los tests que necesitan inspeccionar los parámetros de despacho
  * (`maxRetriesOverride`, `payload`) sin depender de un `WorkerPool` real.
+ * `releaseIdleWorkers` (ADR-166 §1bis) es un `vi.fn()` que devuelve `true`
+ * ("liberó de verdad") — los tests que necesiten simular la guarda de
+ * `WorkerPool` frenándolo (`false`, §13 caso 29) pasan un fake ad-hoc en vez
+ * de este.
  */
 export function createTrackingNerPool(): TrackingNerPool {
   const calls: NerDispatchCall[] = [];
@@ -262,6 +267,7 @@ export function createTrackingNerPool(): TrackingNerPool {
       calls.push({ payload: params.payload, maxRetriesOverride: params.maxRetriesOverride });
       return params.run();
     },
+    releaseIdleWorkers: vi.fn((): boolean => true),
   };
 }
 
@@ -278,9 +284,11 @@ export function createTrackingNerPool(): TrackingNerPool {
  */
 export function createResolvedNerPool(resolvedValue: unknown): {
   readonly dispatch: (params: NerPoolDispatchParams<unknown>) => Promise<unknown>;
+  readonly releaseIdleWorkers: () => boolean;
 } {
   return {
     dispatch: (): Promise<unknown> => Promise.resolve(resolvedValue),
+    releaseIdleWorkers: vi.fn((): boolean => true),
   };
 }
 
