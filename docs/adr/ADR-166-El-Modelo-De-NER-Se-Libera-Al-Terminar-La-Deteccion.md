@@ -2,7 +2,7 @@
 
 # ADR-166 — El modelo de NER se libera al terminar la detección
 
-- **Estado**: Accepted, **implementado el 2026-09-18** (`6571a2e` ner-engine, `18d4442` core). **Enmienda del 2026-09-18**: la primera verificación dejó el **costo confirmado** y el **beneficio de memoria sin demostrar** — ver la Enmienda al final. Mientras T-8 no cierre, el primer punto de «A favor» es una expectativa, no un número medido.
+- **Estado**: **Superseded by ADR-167 en su §1** (2026-09-18). La baja al terminar la detección se retira; **§1bis sigue vigente** —la baja reinicia el ciclo del modelo—, extendido por ADR-167 §3 al camino del temporizador. Estuvo implementado (`6571a2e`, `18d4442`) y nunca llegó a `main`.
 - **Fecha**: 2026-09-17
 - **Decidido por**: El humano, sobre el resultado de T-7: _"seria mas correcto a nivel de costo/beneficio liberar la memoria del NER cuando termina y luego volver a cargarlo en caso de ser necesario. Principalmente por lo que tarda en cargar el modelo NER, que es basicamente un segundo, en contraposición a poder liberar aproximadamente 1GB de memoria ram por mas que sea por un minuto."_
 - **Relacionado con**: ADR-157 (el mismo criterio, aplicado a OCR), ADR-080 (la liberación por inactividad, que acá también llega tarde), ADR-154 §2 lever 3 (bajar el sostenido baja el pico del documento siguiente), ADR-038 (el reanálisis, la excepción)
@@ -264,3 +264,26 @@ Tres desenlaces, y los tres son resultados:
 **Nada de esto invalida la decisión de §1.** El humano la tomó con el número de
 T-7, que sigue en pie: alrededor de 1 GB se libera solo, un minuto tarde. Lo que
 está en duda es si adelantarlo a este punto del pipeline lo consigue.
+
+## Cierre (2026-09-18) — T-8 midió, y §1 se reemplaza
+
+T-8 corrió con A/B intercalado en dos sesiones independientes
+([`roadmap/AB_Intercalado_Medicion.md`](../roadmap/AB_Intercalado_Medicion.md)) y
+contestó las dos mitades de §1 por separado:
+
+- **«Baja el nivel sostenido mientras el usuario revisa»**: confirmado, pero son
+  **~450 MB**, no «del orden de 1 GB», y solo durante los primeros ~70 s.
+- **«Baja el punto de partida del documento siguiente»**: **refutado**. El documento
+  siguiente pica **+485 / +636 MB** más alto y tarda **+1256 / +1177 ms** más,
+  porque la recarga cae dentro de su propia ventana.
+
+De los tres desenlaces que la Enmienda anterior dejó escritos, salió uno que no
+estaba en la lista: **mejor reubicar la baja que conservarla o revertirla**. Un
+temporizador propio de 15 s captura casi todo el beneficio sin el costo de
+encadenar documentos. Esa es la decisión de ADR-167.
+
+Midiendo esa alternativa apareció además que **la recarga posterior a una baja por
+temporizador es muda** —el temporizador no le avisa al motor— y que eso ya pasaba
+con los 60 s de ADR-080. §1bis de este ADR solo lo resolvía para su propio camino;
+ADR-167 §3 lo resuelve para todos.
+

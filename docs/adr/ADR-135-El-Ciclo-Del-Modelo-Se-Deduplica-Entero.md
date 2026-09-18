@@ -66,4 +66,15 @@ El argumento es el que el propio motor ya usaba, aplicado al otro evento: si el 
 > **por ciclo de carga**, no por instancia; para el caso que motivó este ADR —el
 > segundo worker del pool calentándose— no cambia nada.
 
+> **Generalizado por ADR-167 (2026-09-18)**: el ciclo se reabre con **cualquier**
+> baja del pool, no solo con la que pedía ADR-166. La nota de arriba dejó un
+> camino afuera sin saberlo: el temporizador de ADR-080 libera el pool sin
+> avisarle al motor, así que tras una liberación por inactividad `modelWarm`
+> quedaba en `true` y la recarga siguiente era **muda** — medido: el modelo se
+> recarga (~2 s) y `NER_MODEL_READY` no se emite. Pasaba desde ADR-080 con los
+> 60 s, cada vez que alguien revisaba más de un minuto. ADR-167 §3 mueve el
+> reinicio al pool (`onWorkersReleased`), que notifica toda baja efectiva, venga
+> del temporizador o de una llamada explícita. La regla de este ADR no cambia;
+> cambia quién se entera.
+
 **Lo que no toca**: el contrato de eventos, los códigos de error, ni el cliente.
