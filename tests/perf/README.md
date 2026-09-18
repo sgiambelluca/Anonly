@@ -164,6 +164,31 @@ Dos hipótesis más en el mismo archivo, cada una con una corrida exploratoria (
 2. **`generateText50pSmallPage()`** (`tests/fixtures/generate.ts`) — página a 4/9 de área, el mismo ratio que (200/300)² dpi. Proxy de `ocr.dpi: 200` (no alcanzable como setting de usuario): prueba si el costo escala con el área rasterizada, reduciendo el tamaño físico de la página en vez del DPI.
 
 
+## T-8 — A/B intercalado: comparar dos versiones del código
+
+La sección de arriba retira **restar corridas separadas** como método. Esto es lo que se usa cuando la pregunta es inevitablemente de ese tipo: **¿la versión B consume distinto que la A?** —algo que por definición no se contesta dentro de una sola corrida—. Protocolo en `docs/roadmap/AB_Intercalado_Plan.md`, resultado de su primer uso (ADR-166 contra un temporizador de 15 s) en `docs/roadmap/AB_Intercalado_Medicion.md`.
+
+Qué lo separa del método retirado:
+
+- **Los brazos corren alternados en la misma sesión** (`A B C A B C …`), así que la deriva del banco los atraviesa por igual. La comparación es **pareada por ronda**, no entre promedios sueltos.
+- **Cada brazo es un parche de una línea sobre el árbol limpio** (`support/ab-*.patch`). Si el brazo revirtiera un commit entero, una diferencia no se podría atribuir al cambio que interesa.
+- **La resolución se declara antes de medir**: con 6 rondas distingue ~250 MB o más en el punto de reposo. Por debajo se reporta sin resolución, y **no se agregan corridas** hasta que el promedio se acomode.
+
+Correr:
+
+```
+ANONLY_AB_ARMS="A B C" ./tests/perf/run-ab-intercalado.sh      # etapa 1: punto de reposo, ~45 min
+ANONLY_AB_ARMS="A B C" ./tests/perf/run-ab-etapa2.sh <dir>     # etapa 2: 2° documento, ~4 min
+```
+
+La etapa 2 reusa los `dist` que construyó la etapa 1 en `<dir>`: reconstruirlos daría otro bundle.
+
+**Esto anula `checkFreshBuild`** —el `dist` se intercambia con `cp -R` y siempre queda recién copiado—, así que el script lo reemplaza por dos verificaciones más fuertes: el **digest del contenido** del `dist` activo contra el del brazo anunciado, antes de cada corrida, y un **pre-vuelo de comportamiento** por brazo (`ab-preflight.spec.ts`) que aborta la campaña si los brazos no se distinguen. Para agregar un brazo: su parche en `support/`, y una línea en `patch_for_arm` y en `expect_reload_for_arm` del script.
+
+`ab-preflight.spec.ts` acepta `ANONLY_AB_GAP_MS`: una espera con el primer documento abierto antes de cerrarlo, para simular a alguien revisando. Con 20 s fue lo que mostró que **la recarga tras una liberación por temporizador no emitía `NER_MODEL_READY`** (ADR-167 §3). Ojo al leer sus resultados: **el arnés no registra `NER_MODEL_LOADING` como fase**, así que su ausencia no prueba nada; y en un brazo que no reinicia el flag, la ausencia de `NER_MODEL_READY` tampoco prueba que no hubo recarga — eso lo dice el tiempo.
+
+`wasm-heap-probe.spec.ts` registra el Paso 0 de T-8, que salió negativo: `performance.measureUserAgentSpecificMemory()` existe en este runtime pero lanza *«not available»*, pese a `crossOriginIsolated: true`. Junto con ADR-159 §8 —`Runtime.getHeapUsage` tampoco ve WASM—, son dos vías cerradas para leer el heap del modelo sin pasar por el RSS. La tercera, sin construir, está descripta en el informe.
+
 ## T-5 — Comparación OSD compartido (ADR-164)
 
 Protocolo normativo: `docs/roadmap/T5_OSD_Compartido_Handoff.md` §3.

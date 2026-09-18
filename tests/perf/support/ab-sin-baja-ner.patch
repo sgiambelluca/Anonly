@@ -1,0 +1,16 @@
+diff --git a/packages/anonymization-core/src/orchestrator.ts b/packages/anonymization-core/src/orchestrator.ts
+index 2ee5eb7..d5ef4e3 100644
+--- a/packages/anonymization-core/src/orchestrator.ts
++++ b/packages/anonymization-core/src/orchestrator.ts
+@@ -1207,7 +1207,10 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
+       // Contexto §3). El motor queda usable: `runReanalyzeNerOnFlow`/
+       // `runReanalyzeOcrFlow` lo reconstruyen perezoso, pagando la recarga
+       // del modelo como costo declarado (ADR-166 §2).
+-      this.engines.ner.releaseIdleWorkers();
++      // BRAZO B de T-8 (AB_Intercalado_Plan.md §3): la baja de ADR-166 NO se
++      // invoca. La memoria la libera el temporizador de ADR-080 a los 60 s,
++      // como antes de ADR-166. Todo lo demas del commit queda identico.
++      void this.engines.ner;
+     }
+   }
+ 

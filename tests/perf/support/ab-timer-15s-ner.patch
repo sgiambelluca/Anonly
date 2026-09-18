@@ -1,0 +1,36 @@
+diff --git a/packages/anonymization-core/src/create-core.ts b/packages/anonymization-core/src/create-core.ts
+index fefe86e..9af3f9a 100644
+--- a/packages/anonymization-core/src/create-core.ts
++++ b/packages/anonymization-core/src/create-core.ts
+@@ -159,11 +159,11 @@ export async function createCore(
+     maxRetries: mergedConfig.workerPool.maxRetries["ner-page"],
+     baseRetryDelayMs: mergedConfig.workerPool.baseRetryDelayMs,
+     maxRetryDelayMs: mergedConfig.workerPool.maxRetryDelayMs,
+-    // ADR-080: los cuatro pools que construye este archivo salieron de
+-    // `WorkerPoolManager` (ADR-043/045/046/047) y con eso perdieron el
+-    // idle-dispose de `05_Worker_Architecture.md` §8 — retenían sus workers
+-    // (incluidos los ~178 MB del modelo NER) hasta cerrar la pestaña.
+-    idleDisposeMs: mergedConfig.workerPool.idleDisposeMs,
++    // BRAZO C de T-8: temporizador propio para NER, 15 s en vez de los 60 s
++    // compartidos. El que cierra y se va libera casi tan rapido como con la
++    // baja inmediata; el que abre el documento siguiente enseguida todavia
++    // encuentra el modelo cargado y no paga la recarga.
++    idleDisposeMs: 15_000,
+     bus,
+     logger,
+     ...(runtime?.workers?.ner !== undefined ? { workerFactory: runtime.workers.ner } : {}),
+diff --git a/packages/anonymization-core/src/orchestrator.ts b/packages/anonymization-core/src/orchestrator.ts
+index 2ee5eb7..1210e41 100644
+--- a/packages/anonymization-core/src/orchestrator.ts
++++ b/packages/anonymization-core/src/orchestrator.ts
+@@ -1207,7 +1207,9 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
+       // Contexto §3). El motor queda usable: `runReanalyzeNerOnFlow`/
+       // `runReanalyzeOcrFlow` lo reconstruyen perezoso, pagando la recarga
+       // del modelo como costo declarado (ADR-166 §2).
+-      this.engines.ner.releaseIdleWorkers();
++      // BRAZO C de T-8: sin la baja inmediata de ADR-166. La libera el
++      // temporizador, que para NER baja de 60 s a 15 s (ver create-core.ts).
++      void this.engines.ner;
+     }
+   }
+ 
