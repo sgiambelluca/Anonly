@@ -599,20 +599,28 @@ export class WorkerPool {
    *
    * Público para que `WorkerPoolManager` lo use en lugar de destruir el pool
    * entero, y para que los tests puedan forzarlo sin esperar un temporizador.
+   *
+   * Devuelve `boolean` (ADR-166 §1bis): `true` solo si terminó workers de
+   * verdad, `false` si la guarda de abajo lo frenó. Antes devolvía `void`, y
+   * un caller no tenía forma de distinguir "liberé" de "la guarda me frenó"
+   * — el motivo concreto por el que `NerEngine.releaseIdleWorkers()` podía
+   * reiniciar `modelWarm` con un worker vivo que seguía teniendo el modelo
+   * cargado (`NER_Engine.md` §13 caso 29).
    */
-  releaseIdleWorkers(): void {
+  releaseIdleWorkers(): boolean {
     // Guarda propia y no solo la del temporizador: este método es público, y
     // matar workers con jobs en vuelo los deja colgados PARA SIEMPRE —
     // `terminate()` no dispara el evento `error`, así que
     // `handleWorkerTransportError` nunca corre y nadie rechaza sus promesas.
     // A diferencia de `dispose()`, que sí las rechaza con `CancelledError`.
-    if (!this.isIdle) return;
+    if (!this.isIdle) return false;
     for (const worker of this.remoteWorkers.values()) {
       const disposeMessage: WorkerInbound = { type: "DISPOSE" };
       worker.postMessage(disposeMessage);
       worker.terminate();
     }
     this.remoteWorkers.clear();
+    return true;
   }
 
   private async runWithRetry<TResult>(

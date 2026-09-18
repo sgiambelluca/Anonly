@@ -1153,43 +1153,62 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
   }
 
   private async runDetectionStage(documentId: string, ctx: EngineContext): Promise<void> {
-    const document = this.documents.get(documentId);
-    if (document === undefined) {
-      throw new InvalidInputError(`Documento ${documentId} no disponible para detección.`, {
+    try {
+      const document = this.documents.get(documentId);
+      if (document === undefined) {
+        throw new InvalidInputError(`Documento ${documentId} no disponible para detección.`, {
+          documentId,
+        });
+      }
+
+      // Regex en main thread (06_Pipeline.md §14, sin pool). `handleRegexFinished`
+      // invoca `grouping.finishSession` si NER está desactivado (ADR-034 §2).
+      await this.engines.regex.process({ document }, ctx);
+
+      if (!ctx.config.ner.enabled) return;
+
+      // Progreso granular de detección con NER activo (spec Orchestrator.md
+      // §8): total = pageCount del documento; current arranca en 0 y lo
+      // incrementa handleNerPageFinished por cada NER_PAGE_FINISHED.
+      // REGEX_FINISHED no emite progreso granular (es un evento por
+      // documento, no por página).
+      this.progressByDocument.set(documentId, { total: document.pageCount, current: 0 });
+
+      const nerInputs: NerPageInput[] = document.pages.map((page) => ({
         documentId,
-      });
+        pageIndex: page.index,
+        text: page.text,
+        words: page.words,
+      }));
+
+      // ADR-046 §7: el Orchestrator deja de envolver `processPages` en
+      // `pools.getPool("ner").dispatch({run})` — invoca el método del motor
+      // directo; es el propio `NerEngine` quien despacha internamente, por
+      // batch, contra su `NerPool` (inyectada por el façade en
+      // `create-core.ts`), mismo criterio que ADR-045 aplicó a `processPages`
+      // de OCR.
+      await this.engines.ner.processPages(nerInputs, ctx);
+      // Grouping auto-finaliza al recibir REGEX_FINISHED + NER_FINISHED por su
+      // propia suscripción (sin cambios respecto de Hito 6); no hace falta
+      // invocar finishSession acá.
+    } finally {
+      // ADR-166 §1/§1bis: baja determinística del NerPool al cerrar la etapa
+      // de detección — corre en los tres caminos terminales (éxito,
+      // cancelación, fallo), mismo mecanismo que ADR-157 §1/§3 ya aplica a
+      // OCR en `runOcrStage`. `NerEngine.releaseIdleWorkers()` trae su propia
+      // guarda (ADR-080): no hace nada si el pool no está ocioso, así que en
+      // cancelación puede ser un no-op silencioso (un batch todavía en vuelo
+      // no se interrumpe — `terminate()` no dispara `error` y dejaría esa
+      // promesa colgada para siempre) y la memoria la libera el temporizador
+      // de ADR-080 como hasta hoy. A diferencia de OCR, acá el minuto de
+      // inactividad transcurre DESPUÉS de `PIPELINE_READY` —no durante una
+      // etapa siguiente—, así que lo que se adelanta no es el pico del
+      // documento actual sino el punto de partida del siguiente (ADR-166
+      // Contexto §3). El motor queda usable: `runReanalyzeNerOnFlow`/
+      // `runReanalyzeOcrFlow` lo reconstruyen perezoso, pagando la recarga
+      // del modelo como costo declarado (ADR-166 §2).
+      this.engines.ner.releaseIdleWorkers();
     }
-
-    // Regex en main thread (06_Pipeline.md §14, sin pool). `handleRegexFinished`
-    // invoca `grouping.finishSession` si NER está desactivado (ADR-034 §2).
-    await this.engines.regex.process({ document }, ctx);
-
-    if (!ctx.config.ner.enabled) return;
-
-    // Progreso granular de detección con NER activo (spec Orchestrator.md
-    // §8): total = pageCount del documento; current arranca en 0 y lo
-    // incrementa handleNerPageFinished por cada NER_PAGE_FINISHED.
-    // REGEX_FINISHED no emite progreso granular (es un evento por
-    // documento, no por página).
-    this.progressByDocument.set(documentId, { total: document.pageCount, current: 0 });
-
-    const nerInputs: NerPageInput[] = document.pages.map((page) => ({
-      documentId,
-      pageIndex: page.index,
-      text: page.text,
-      words: page.words,
-    }));
-
-    // ADR-046 §7: el Orchestrator deja de envolver `processPages` en
-    // `pools.getPool("ner").dispatch({run})` — invoca el método del motor
-    // directo; es el propio `NerEngine` quien despacha internamente, por
-    // batch, contra su `NerPool` (inyectada por el façade en
-    // `create-core.ts`), mismo criterio que ADR-045 aplicó a `processPages`
-    // de OCR.
-    await this.engines.ner.processPages(nerInputs, ctx);
-    // Grouping auto-finaliza al recibir REGEX_FINISHED + NER_FINISHED por su
-    // propia suscripción (sin cambios respecto de Hito 6); no hace falta
-    // invocar finishSession acá.
   }
 
   private handleCancellationIfAny(documentId: string, err: unknown): boolean {

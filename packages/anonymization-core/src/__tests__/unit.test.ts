@@ -2108,14 +2108,17 @@ describe("Orchestrator — unit tests", () => {
       // Llamada directa con un job en vuelo: no debe matar el worker. Si lo
       // matara, la promesa quedaría colgada (terminate() no dispara `error`,
       // así que nadie rechaza los pendientes).
-      pool.releaseIdleWorkers();
+      // ADR-166 §1bis: devuelve `false` — un caller (NerEngine) necesita
+      // distinguir "no hice nada" de "liberé de verdad" para no reiniciar
+      // estado propio (`modelWarm`) con un worker que sigue vivo.
+      expect(pool.releaseIdleWorkers()).toBe(false);
       expect(worker.terminate).not.toHaveBeenCalled();
 
       const jobId = (worker.postMessage.mock.calls[0]?.[0] as { readonly jobId: string }).jobId;
       worker.emitMessage({ type: "COMPLETED", jobId, result: "ok" });
       await expect(dispatched).resolves.toBe("ok");
 
-      pool.releaseIdleWorkers();
+      expect(pool.releaseIdleWorkers()).toBe(true);
       expect(worker.terminate).toHaveBeenCalledTimes(1);
     });
 
@@ -2572,6 +2575,114 @@ describe("PIPELINE_PROGRESS (Orchestrator.md §8, ADR-034 §4)", () => {
     expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Cancelled);
     // El finally sigue corriendo (se llama), sin importar si adentro terminó
     // siendo un no-op.
+    expect(releaseSpy).toHaveBeenCalledTimes(1);
+  });
+
+  // ─── ADR-166: el pool de NER se da de baja al terminar runDetectionStage ───
+  // Espejo exacto de los dos tests de ADR-157 de arriba, aplicado al otro
+  // motor (Orchestrator.md §13 caso 35).
+
+  it("ADR-166: releases the NER pool's idle workers after a successful detection stage", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({ pageCount: 1, pages: [createPage({ index: 0 })] }),
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+    const releaseSpy = vi.spyOn(engines.ner, "releaseIdleWorkers");
+
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    // El finally de runDetectionStage corre una vez que processPages
+    // resolvió — el camino feliz, donde el pool está ocioso para cuando
+    // esto se llama.
+    expect(releaseSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("ADR-166: cancelling mid-detection still reaches PIPELINE_CANCELLED — the finally doesn't break cancellation (not an assertion that the pool was actually freed)", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({ pageCount: 1, pages: [createPage({ index: 0 })] }),
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+
+    // Mismo patrón que el test de cancelación de ADR-157, más arriba:
+    // `orchestrator.cancel()` es lo único que fija stage=Cancelled y emite
+    // PIPELINE_CANCELLED. No se afirma que releaseIdleWorkers() haya
+    // liberado nada — con un batch todavía en vuelo, su propia guarda
+    // (WorkerPool, ADR-080) lo vuelve un no-op por diseño (spec §13 caso
+    // 29); eso ya lo cubren los tests de WorkerPool y de
+    // NerEngine.releaseIdleWorkers. Lo que este test verifica es que el
+    // `finally` de runDetectionStage no rompe el camino de cancelación
+    // existente.
+    vi.spyOn(engines.ner, "processPages").mockImplementation(async () => {
+      await orchestrator.cancel("doc-1");
+      throw new CancelledError("doc-1");
+    });
+    const releaseSpy = vi.spyOn(engines.ner, "releaseIdleWorkers");
+
+    const cancelledSpy = vi.fn();
+    bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_CANCELLED, cancelledSpy);
+
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await expect(orchestrator.importDocument(createImportInput())).resolves.not.toThrow();
+
+    expect(cancelledSpy).toHaveBeenCalledWith(expect.objectContaining({ documentId: "doc-1" }));
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Cancelled);
+    // El finally sigue corriendo (se llama), sin importar si adentro terminó
+    // siendo un no-op.
+    expect(releaseSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("ADR-166: NER disabled still runs the finally — releaseIdleWorkers is called even though processPages never ran", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({ pageCount: 1, pages: [createPage({ index: 0 })] }),
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput, nerEnabled: false });
+    const processPagesSpy = vi.spyOn(engines.ner, "processPages");
+    const releaseSpy = vi.spyOn(engines.ner, "releaseIdleWorkers");
+
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig({
+        ner: {
+          modelId: "x",
+          quantization: "q8",
+          confidenceThreshold: 0.7,
+          batchSize: 1,
+          enabled: false,
+        },
+      }),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+
+    // `runDetectionStage` vuelve apenas ve `ner.enabled === false` (antes de
+    // despachar nada), pero el `finally` envuelve la función entera: el
+    // caso 35/§1 no hace ninguna excepción para este camino.
+    expect(processPagesSpy).not.toHaveBeenCalled();
     expect(releaseSpy).toHaveBeenCalledTimes(1);
   });
 
