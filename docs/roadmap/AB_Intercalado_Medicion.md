@@ -292,3 +292,18 @@ de construir nada, en vez de medir un brazo equivocado.
 Una lección que queda en el propio script: la primera corrida de tres brazos abortó
 en el segundo 1 por una variable que quedó sin definir al generalizarlo, y `set -u`
 la frenó antes de construir nada. Sin esa opción habría corrido con un parche vacío.
+
+## 9. Verificación de ADR-167, una vez implementado
+
+Los tests unitarios prueban las dos mitades por separado —el temporizador del
+pool avisa, el motor escucha—, pero del lado del motor lo hacen con un pool falso.
+La cadena entera se verificó en la app empaquetada con el mismo experimento que
+destapó el defecto (`ab-preflight.spec.ts`, commit `a9c0ac7`):
+
+| 2° documento | tiempo | `NER_MODEL_READY` |
+| --- | ---: | --- |
+| tras 20 s de revisión, ronda 1 / 2 | 2019 / 2026 ms — recarga | **sí / sí** |
+| ~1,3 s después, ronda 1 / 2 | 472 / 442 ms — reusa el modelo | no / no |
+| *brazo C antes del arreglo, tras 20 s* | *2065 / 1983 ms* | ***no / no — muda*** |
+
+La recarga ahora avisa, y quien encadena documentos sigue sin pagarla.

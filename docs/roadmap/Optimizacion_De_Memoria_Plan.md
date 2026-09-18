@@ -35,7 +35,8 @@
 > ADR-166 suelta ~450 MB durante ~70 s pero le cobra al documento siguiente ~1,2 s
 > y ~500-600 MB de pico. **ADR-167 lo reemplaza** por un temporizador propio de 15 s
 > para NER, y arregla de paso la recarga muda tras una liberación por temporizador.
-> ADR-167 está decidido y documentado; **falta implementarlo**.
+> ADR-167 está **implementado** (`c006059`, `1b09383`, `a9c0ac7`) y verificado de
+> punta a punta en la app empaquetada.
 
 **Perfil de referencia**: P2 — 50 páginas escaneadas, OCR + NER reales, sobre el
 shell de Electron empaquetado.
@@ -848,7 +849,7 @@ estos levers importan.** No bloquea T-1 a T-4; sí bloquea dimensionar T-6.
    inmediata de ADR-166, que ahorraba ~450 MB (no ~1 GB) durante ~70 s pero le
    cobraba ~1,2 s y ~500-600 MB de pico al documento siguiente. Su punto débil,
    declarado: quien abre el siguiente documento entre 15 y 60 s paga una recarga
-   que con 60 s se ahorraba. **Pendiente: implementarlo.**
+   que con 60 s se ahorraba. **Implementado y verificado el 2026-09-18.**
 6. **Banco de medición: macOS primero, Windows después.** Decisión del humano del
    2026-09-18. Se evaluó mover las mediciones a un escritorio con Windows 11 y
    16 GB buscando estabilidad; el análisis dice que **el sistema operativo no es
