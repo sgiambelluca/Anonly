@@ -2,6 +2,7 @@ import { ExportEngine } from "@anonly/export-engine";
 import type { RenderPageProvider } from "@anonly/export-engine";
 import { GroupingEngine } from "@anonly/grouping-engine";
 import { NerEngine } from "@anonly/ner-engine";
+import type { NerPageInput } from "@anonly/ner-engine";
 import { OcrEngine } from "@anonly/ocr-engine";
 import { PdfEngine } from "@anonly/pdf-engine";
 import { RegexEngine } from "@anonly/regex-engine";
@@ -18,6 +19,7 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { LruCache } from "../cache.js";
+import { mergeEngineConfig } from "../config.js";
 import { createCore } from "../index.js";
 import { PipelineOrchestrator } from "../orchestrator.js";
 
@@ -25,6 +27,7 @@ import {
   createDocument,
   createEngineConfig,
   createEntityGroup,
+  createFakeWorker,
   createImportInput,
   createMockEngines,
   createMockLogger,
@@ -86,6 +89,48 @@ describe("Orchestrator — contract tests", () => {
       expect(core.orchestrator).toBeInstanceOf(PipelineOrchestrator);
     } finally {
       await core.dispose();
+    }
+  });
+
+  // Discriminante (ADR-149 §2, ADR-167 §5.2): si create-core.ts wireara el
+  // pool de NER con `idleDisposeMs` (default 60 s) en vez de
+  // `nerIdleDisposeMs`, el worker falso seguiría vivo a los 500 ms de acá.
+  it("createCore wirea el pool de NER con workerPool.nerIdleDisposeMs, no idleDisposeMs (ADR-167 §5.2)", async () => {
+    vi.useFakeTimers();
+    try {
+      const worker = createFakeWorker();
+      const core = await createCore(
+        { workerPool: { nerIdleDisposeMs: 500 } },
+        { workers: { ner: () => worker } },
+      );
+      try {
+        const ctx: EngineContext = {
+          bus: core.bus,
+          logger: createMockLogger(),
+          cache: new LruCache(),
+          abortSignal: new AbortController().signal,
+          config: mergeEngineConfig({ workerPool: { nerIdleDisposeMs: 500 } }),
+        };
+        const input: NerPageInput = {
+          documentId: "doc-1",
+          pageIndex: 0,
+          text: "Juan",
+          words: [createWord({ text: "Juan" })],
+        };
+        const pending = core.engines.ner.processPage(input, ctx);
+        await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalled());
+        const jobId = (worker.postMessage.mock.calls[0]?.[0] as { readonly jobId: string }).jobId;
+        worker.emitMessage({ type: "COMPLETED", jobId, result: { spans: [] } });
+        await pending;
+
+        await vi.advanceTimersByTimeAsync(500);
+
+        expect(worker.terminate).toHaveBeenCalledTimes(1);
+      } finally {
+        await core.dispose();
+      }
+    } finally {
+      vi.useRealTimers();
     }
   });
 

@@ -316,6 +316,9 @@ export class WorkerPool {
   /** Temporizador de `releaseIdleWorkers` (ADR-080). `null` = no armado. */
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
 
+  /** Suscriptos de `onWorkersReleased` (ADR-167 §3). */
+  private readonly releaseListeners = new Set<() => void>();
+
   constructor(options: WorkerPoolOptions) {
     this.options = options;
   }
@@ -527,6 +530,7 @@ export class WorkerPool {
       worker.terminate();
     }
     this.remoteWorkers.clear();
+    this.releaseListeners.clear();
   }
 
   private enqueue(entry: QueueEntry): void {
@@ -600,12 +604,10 @@ export class WorkerPool {
    * Público para que `WorkerPoolManager` lo use en lugar de destruir el pool
    * entero, y para que los tests puedan forzarlo sin esperar un temporizador.
    *
-   * Devuelve `boolean` (ADR-166 §1bis): `true` solo si terminó workers de
-   * verdad, `false` si la guarda de abajo lo frenó. Antes devolvía `void`, y
-   * un caller no tenía forma de distinguir "liberé" de "la guarda me frenó"
-   * — el motivo concreto por el que `NerEngine.releaseIdleWorkers()` podía
-   * reiniciar `modelWarm` con un worker vivo que seguía teniendo el modelo
-   * cargado (`NER_Engine.md` §13 caso 29).
+   * Devuelve `true` si la guarda no frenó la baja: al volver, ningún worker
+   * del pool conserva estado cargado — incluido el caso de cero workers vivos
+   * (ADR-167 §4). `false` si la guarda la frenó. Los suscriptos de
+   * `onWorkersReleased` se notifican exactamente cuando devuelve `true`.
    */
   releaseIdleWorkers(): boolean {
     // Guarda propia y no solo la del temporizador: este método es público, y
@@ -620,7 +622,20 @@ export class WorkerPool {
       worker.terminate();
     }
     this.remoteWorkers.clear();
+    // ADR-167 §3: se notifica acá y no en `refreshIdleTimer`, para que el
+    // temporizador y cualquier llamada explícita pasen por el mismo lugar.
+    for (const listener of this.releaseListeners) listener();
     return true;
+  }
+
+  /**
+   * Notifica cada baja efectiva de este pool (ADR-167 §3): `releaseIdleWorkers()`
+   * devolviendo `true`, sea por el temporizador de inactividad o por una
+   * llamada explícita. Devuelve la desuscripción.
+   */
+  onWorkersReleased(listener: () => void): () => void {
+    this.releaseListeners.add(listener);
+    return () => this.releaseListeners.delete(listener);
   }
 
   private async runWithRetry<TResult>(

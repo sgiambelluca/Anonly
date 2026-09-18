@@ -34,6 +34,7 @@ import {
   createFakeWorker,
   createImportInput,
   createMockEngines,
+  createMockEnginesWithNerPool,
   createMockLogger,
   createPage,
   createPdfEngineOutput,
@@ -1501,6 +1502,174 @@ describe("Orchestrator — unit tests", () => {
       }
     });
 
+    // ─── onWorkersReleased (ADR-167 §3) ───
+
+    it("onWorkersReleased se notifica cuando el temporizador de inactividad libera", async () => {
+      vi.useFakeTimers();
+      try {
+        const worker = createFakeWorker();
+        const pool = new WorkerPool({
+          poolKey: "ner",
+          jobType: "ner-page",
+          size: 1,
+          maxQueue: 10,
+          maxRetries: 0,
+          baseRetryDelayMs: 1,
+          maxRetryDelayMs: 1,
+          bus,
+          logger: createMockLogger(),
+          workerFactory: () => worker,
+          idleDisposeMs: 1000,
+        });
+        const listener = vi.fn();
+        pool.onWorkersReleased(listener);
+
+        const dispatched = pool.dispatch({
+          run: vi.fn(),
+          payload: {},
+          signal: new AbortController().signal,
+        });
+        await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalled());
+        const jobId = (worker.postMessage.mock.calls[0]?.[0] as { readonly jobId: string }).jobId;
+        worker.emitMessage({ type: "COMPLETED", jobId, result: "ok" });
+        await expect(dispatched).resolves.toBe("ok");
+        expect(listener).not.toHaveBeenCalled();
+
+        vi.advanceTimersByTime(1000);
+
+        expect(worker.terminate).toHaveBeenCalledTimes(1);
+        expect(listener).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("onWorkersReleased se notifica en una llamada explícita a releaseIdleWorkers()", async () => {
+      const worker = createFakeWorker();
+      const pool = new WorkerPool({
+        poolKey: "ner",
+        jobType: "ner-page",
+        size: 1,
+        maxQueue: 10,
+        maxRetries: 0,
+        baseRetryDelayMs: 1,
+        maxRetryDelayMs: 1,
+        bus,
+        logger: createMockLogger(),
+        workerFactory: () => worker,
+      });
+      const listener = vi.fn();
+      pool.onWorkersReleased(listener);
+
+      const dispatched = pool.dispatch({
+        run: vi.fn(),
+        payload: {},
+        signal: new AbortController().signal,
+      });
+      await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalled());
+      const jobId = (worker.postMessage.mock.calls[0]?.[0] as { readonly jobId: string }).jobId;
+      worker.emitMessage({ type: "COMPLETED", jobId, result: "ok" });
+      await expect(dispatched).resolves.toBe("ok");
+
+      expect(pool.releaseIdleWorkers()).toBe(true);
+
+      expect(listener).toHaveBeenCalledTimes(1);
+    });
+
+    it("onWorkersReleased NO se notifica cuando releaseIdleWorkers() devuelve false — el pool no está ocioso (ADR-167 §5.4)", async () => {
+      const worker = createFakeWorker();
+      const pool = new WorkerPool({
+        poolKey: "ner",
+        jobType: "ner-page",
+        size: 1,
+        maxQueue: 10,
+        maxRetries: 0,
+        baseRetryDelayMs: 1,
+        maxRetryDelayMs: 1,
+        bus,
+        logger: createMockLogger(),
+        workerFactory: () => worker,
+      });
+      const listener = vi.fn();
+      pool.onWorkersReleased(listener);
+
+      const dispatched = pool.dispatch({
+        run: vi.fn(),
+        payload: {},
+        signal: new AbortController().signal,
+      });
+      await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalled());
+
+      // Job todavía en vuelo: la guarda de releaseIdleWorkers() (ADR-080) lo frena.
+      expect(pool.releaseIdleWorkers()).toBe(false);
+      expect(listener).not.toHaveBeenCalled();
+      expect(worker.terminate).not.toHaveBeenCalled();
+
+      const jobId = (worker.postMessage.mock.calls[0]?.[0] as { readonly jobId: string }).jobId;
+      worker.emitMessage({ type: "COMPLETED", jobId, result: "ok" });
+      await expect(dispatched).resolves.toBe("ok");
+    });
+
+    it("la desuscripción de onWorkersReleased detiene las notificaciones", async () => {
+      const worker = createFakeWorker();
+      const pool = new WorkerPool({
+        poolKey: "ner",
+        jobType: "ner-page",
+        size: 1,
+        maxQueue: 10,
+        maxRetries: 0,
+        baseRetryDelayMs: 1,
+        maxRetryDelayMs: 1,
+        bus,
+        logger: createMockLogger(),
+        workerFactory: () => worker,
+      });
+      const listener = vi.fn();
+      const unsubscribe = pool.onWorkersReleased(listener);
+      unsubscribe();
+
+      const dispatched = pool.dispatch({
+        run: vi.fn(),
+        payload: {},
+        signal: new AbortController().signal,
+      });
+      await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalled());
+      const jobId = (worker.postMessage.mock.calls[0]?.[0] as { readonly jobId: string }).jobId;
+      worker.emitMessage({ type: "COMPLETED", jobId, result: "ok" });
+      await expect(dispatched).resolves.toBe("ok");
+
+      expect(pool.releaseIdleWorkers()).toBe(true);
+
+      expect(listener).not.toHaveBeenCalled();
+    });
+
+    it("dispose() limpia los listeners de onWorkersReleased", () => {
+      const worker = createFakeWorker();
+      const pool = new WorkerPool({
+        poolKey: "ner",
+        jobType: "ner-page",
+        size: 1,
+        maxQueue: 10,
+        maxRetries: 0,
+        baseRetryDelayMs: 1,
+        maxRetryDelayMs: 1,
+        bus,
+        logger: createMockLogger(),
+        workerFactory: () => worker,
+      });
+      const listener = vi.fn();
+      pool.onWorkersReleased(listener);
+
+      pool.dispose();
+
+      // Tras dispose() el pool queda trivialmente ocioso (sin workers vivos
+      // ni jobs pendientes), así que releaseIdleWorkers() sigue devolviendo
+      // `true` — lo que prueba que dispose() vació releaseListeners es que
+      // ese `true` ya no llega a nadie.
+      expect(pool.releaseIdleWorkers()).toBe(true);
+      expect(listener).not.toHaveBeenCalled();
+    });
+
     // ─── broadcast() + onWorkerCreated (ADR-043 §4/§5, PR13) ───
 
     it("broadcast() envía el mismo payload a cada worker vivo y agrega los COMPLETED", async () => {
@@ -2578,112 +2747,73 @@ describe("PIPELINE_PROGRESS (Orchestrator.md §8, ADR-034 §4)", () => {
     expect(releaseSpy).toHaveBeenCalledTimes(1);
   });
 
-  // ─── ADR-166: el pool de NER se da de baja al terminar runDetectionStage ───
-  // Espejo exacto de los dos tests de ADR-157 de arriba, aplicado al otro
-  // motor (Orchestrator.md §13 caso 35).
+  // ─── ADR-167: runDetectionStage ya NO da de baja el pool de NER ───
+  // Reemplaza los tres tests de ADR-166 (Orchestrator.md §13 caso 37): el
+  // pool de NER se libera solo, por su propio temporizador
+  // (`nerIdleDisposeMs`, vive en `WorkerPool`) — el Orchestrator no hace
+  // nada con él al cerrar la detección, a diferencia de OCR (ADR-157, que no
+  // cambia). El discriminante es un `NerEngine` con un `WorkerPool` real
+  // detrás (workerFactory de un `FakeWorker`) para poder observar si su
+  // worker sigue vivo después de la etapa.
 
-  it("ADR-166: releases the NER pool's idle workers after a successful detection stage", async () => {
+  it("ADR-167 caso 37: runDetectionStage no da de baja el pool de NER — el worker falso sigue vivo", async () => {
     const bus = createRealBus();
-    const engines = createMockEngines();
-    const pdfOutput = createPdfEngineOutput({
-      document: createDocument({ pageCount: 1, pages: [createPage({ index: 0 })] }),
-    });
-    wireHappyPathSpies(engines, bus, { pdfOutput });
-    const releaseSpy = vi.spyOn(engines.ner, "releaseIdleWorkers");
-
-    const orchestrator = new PipelineOrchestrator({
+    const worker = createFakeWorker();
+    const nerPool = new WorkerPool({
+      poolKey: "ner",
+      jobType: "ner-page",
+      size: 1,
+      maxQueue: 10,
+      maxRetries: 0,
+      baseRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
       bus,
       logger: createMockLogger(),
-      cache: new LruCache(),
-      config: createEngineConfig(),
-      engines,
+      workerFactory: () => worker,
+      // Sin idleDisposeMs: nada de temporizador propio en este test — lo
+      // único que se afirma es que el Orchestrator no llama a una baja
+      // explícita (ver el test de WorkerPool.onWorkersReleased para el
+      // camino del temporizador).
     });
-
-    await orchestrator.importDocument(createImportInput());
-
-    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
-    // El finally de runDetectionStage corre una vez que processPages
-    // resolvió — el camino feliz, donde el pool está ocioso para cuando
-    // esto se llama.
-    expect(releaseSpy).toHaveBeenCalledTimes(1);
-  });
-
-  it("ADR-166: cancelling mid-detection still reaches PIPELINE_CANCELLED — the finally doesn't break cancellation (not an assertion that the pool was actually freed)", async () => {
-    const bus = createRealBus();
-    const engines = createMockEngines();
+    const engines = createMockEnginesWithNerPool(nerPool);
     const pdfOutput = createPdfEngineOutput({
-      document: createDocument({ pageCount: 1, pages: [createPage({ index: 0 })] }),
-    });
-    wireHappyPathSpies(engines, bus, { pdfOutput });
-
-    // Mismo patrón que el test de cancelación de ADR-157, más arriba:
-    // `orchestrator.cancel()` es lo único que fija stage=Cancelled y emite
-    // PIPELINE_CANCELLED. No se afirma que releaseIdleWorkers() haya
-    // liberado nada — con un batch todavía en vuelo, su propia guarda
-    // (WorkerPool, ADR-080) lo vuelve un no-op por diseño (spec §13 caso
-    // 29); eso ya lo cubren los tests de WorkerPool y de
-    // NerEngine.releaseIdleWorkers. Lo que este test verifica es que el
-    // `finally` de runDetectionStage no rompe el camino de cancelación
-    // existente.
-    vi.spyOn(engines.ner, "processPages").mockImplementation(async () => {
-      await orchestrator.cancel("doc-1");
-      throw new CancelledError("doc-1");
-    });
-    const releaseSpy = vi.spyOn(engines.ner, "releaseIdleWorkers");
-
-    const cancelledSpy = vi.fn();
-    bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_CANCELLED, cancelledSpy);
-
-    const orchestrator = new PipelineOrchestrator({
-      bus,
-      logger: createMockLogger(),
-      cache: new LruCache(),
-      config: createEngineConfig(),
-      engines,
-    });
-
-    await expect(orchestrator.importDocument(createImportInput())).resolves.not.toThrow();
-
-    expect(cancelledSpy).toHaveBeenCalledWith(expect.objectContaining({ documentId: "doc-1" }));
-    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Cancelled);
-    // El finally sigue corriendo (se llama), sin importar si adentro terminó
-    // siendo un no-op.
-    expect(releaseSpy).toHaveBeenCalledTimes(1);
-  });
-
-  it("ADR-166: NER disabled still runs the finally — releaseIdleWorkers is called even though processPages never ran", async () => {
-    const bus = createRealBus();
-    const engines = createMockEngines();
-    const pdfOutput = createPdfEngineOutput({
-      document: createDocument({ pageCount: 1, pages: [createPage({ index: 0 })] }),
-    });
-    wireHappyPathSpies(engines, bus, { pdfOutput, nerEnabled: false });
-    const processPagesSpy = vi.spyOn(engines.ner, "processPages");
-    const releaseSpy = vi.spyOn(engines.ner, "releaseIdleWorkers");
-
-    const orchestrator = new PipelineOrchestrator({
-      bus,
-      logger: createMockLogger(),
-      cache: new LruCache(),
-      config: createEngineConfig({
-        ner: {
-          modelId: "x",
-          quantization: "q8",
-          confidenceThreshold: 0.7,
-          batchSize: 1,
-          enabled: false,
-        },
+      document: createDocument({
+        pageCount: 1,
+        pages: [createPage({ index: 0, text: "Juan", words: [createWord({ text: "Juan" })] })],
       }),
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+    // `wireHappyPathSpies` mockea `engines.ner.processPages` (no toca ningún
+    // pool): acá hace falta la implementación REAL para que el despacho
+    // llegue al `WorkerPool` y cree el worker falso.
+    vi.spyOn(engines.ner, "processPages").mockRestore();
+    await engines.ner.init({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      abortSignal: new AbortController().signal,
+      config: createEngineConfig(),
+    });
+
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
       engines,
     });
 
-    await orchestrator.importDocument(createImportInput());
+    const importPromise = orchestrator.importDocument(createImportInput());
+    await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalled());
+    const jobId = (worker.postMessage.mock.calls[0]?.[0] as { readonly jobId: string }).jobId;
+    worker.emitMessage({ type: "COMPLETED", jobId, result: { spans: [] } });
+    await importPromise;
 
-    // `runDetectionStage` vuelve apenas ve `ner.enabled === false` (antes de
-    // despachar nada), pero el `finally` envuelve la función entera: el
-    // caso 35/§1 no hace ninguna excepción para este camino.
-    expect(processPagesSpy).not.toHaveBeenCalled();
-    expect(releaseSpy).toHaveBeenCalledTimes(1);
+    // El worker falso llegó a despacharse de verdad (el dispatch cruzó al
+    // pool real) y, a diferencia de ADR-166, nadie lo terminó al cerrar la
+    // detección.
+    expect(worker.postMessage).toHaveBeenCalled();
+    expect(worker.terminate).not.toHaveBeenCalled();
   });
 
   // ─── ADR-065 §2: total = textlessPages.length + ocrRegions.length ───

@@ -53,6 +53,7 @@ import { LruCache } from "../../cache.js";
 import { mergeEngineConfig } from "../../config.js";
 import { PipelineOrchestrator } from "../../orchestrator.js";
 import type { AnonymizationCoreEngines, ImportDocumentInput } from "../../types.js";
+import type { WorkerPool } from "../../worker-pool.js";
 
 export function createMockLogger(): ILogger {
   return {
@@ -85,6 +86,23 @@ export function createMockEngines(): AnonymizationCoreEngines {
     ocr: new OcrEngine(),
     regex: new RegexEngine(),
     ner: new NerEngine(),
+    grouping: new GroupingEngine(),
+    render: new RenderEngine(),
+    export: new ExportEngine(),
+  };
+}
+
+/**
+ * Como `createMockEngines`, pero con `NerEngine` construido sobre `nerPool`
+ * en vez del fallback in-process — para tests que necesitan observar el
+ * `WorkerPool` real detrás de NER (Orchestrator.md §13 caso 37, ADR-167).
+ */
+export function createMockEnginesWithNerPool(nerPool: WorkerPool): AnonymizationCoreEngines {
+  return {
+    pdf: new PdfEngine(),
+    ocr: new OcrEngine(),
+    regex: new RegexEngine(),
+    ner: new NerEngine(nerPool),
     grouping: new GroupingEngine(),
     render: new RenderEngine(),
     export: new ExportEngine(),

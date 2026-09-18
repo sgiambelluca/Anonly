@@ -159,11 +159,10 @@ export async function createCore(
     maxRetries: mergedConfig.workerPool.maxRetries["ner-page"],
     baseRetryDelayMs: mergedConfig.workerPool.baseRetryDelayMs,
     maxRetryDelayMs: mergedConfig.workerPool.maxRetryDelayMs,
-    // ADR-080: los cuatro pools que construye este archivo salieron de
-    // `WorkerPoolManager` (ADR-043/045/046/047) y con eso perdieron el
-    // idle-dispose de `05_Worker_Architecture.md` §8 — retenían sus workers
-    // (incluidos los ~178 MB del modelo NER) hasta cerrar la pestaña.
-    idleDisposeMs: mergedConfig.workerPool.idleDisposeMs,
+    // ADR-167 §2: temporizador propio, no el `idleDisposeMs` compartido —
+    // 15 s default en vez de 60 s, para no trasladarle al documento
+    // siguiente el costo de recarga que ADR-166 medía.
+    idleDisposeMs: mergedConfig.workerPool.nerIdleDisposeMs,
     bus,
     logger,
     ...(runtime?.workers?.ner !== undefined ? { workerFactory: runtime.workers.ner } : {}),
