@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-plan | dependencias=roadmap/H-10_Bitacora_De_Memoria.md,architecture/07_Performance_Strategy.md,core/OCR_Engine.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-147-Perder-Un-Identificador-Cubierto-Es-Una-Regresion.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-157-El-Pool-De-OCR-Se-Da-De-Baja-Al-Terminar-Su-Etapa.md,adr/ADR-158-El-Raster-De-OCR-Viaja-Codificado.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md,adr/ADR-161-Una-Franja-Sin-Tinta-No-Se-Reconoce.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,tests/fixtures/README.md,tests/perf/README.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-166-El-Modelo-De-NER-Se-Libera-Al-Terminar-La-Deteccion.md,roadmap/Verificacion_Liberacion_NER_Medicion.md,roadmap/AB_Intercalado_Plan.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=roadmap-plan | dependencias=roadmap/H-10_Bitacora_De_Memoria.md,architecture/07_Performance_Strategy.md,core/OCR_Engine.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-147-Perder-Un-Identificador-Cubierto-Es-Una-Regresion.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-157-El-Pool-De-OCR-Se-Da-De-Baja-Al-Terminar-Su-Etapa.md,adr/ADR-158-El-Raster-De-OCR-Viaja-Codificado.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md,adr/ADR-161-Una-Franja-Sin-Tinta-No-Se-Reconoce.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,tests/fixtures/README.md,tests/perf/README.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-166-El-Modelo-De-NER-Se-Libera-Al-Terminar-La-Deteccion.md,roadmap/Verificacion_Liberacion_NER_Medicion.md,roadmap/AB_Intercalado_Plan.md,roadmap/AB_Intercalado_Medicion.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md | audiencia=humanos+IA | fase=11 -->
 
 # Optimización de memoria — plan de campaña
 
@@ -30,6 +30,12 @@
 > segundo documento) y **no pudo demostrar el beneficio de memoria**: la
 > comparación cruzó dos tandas con el banco en regímenes distintos. **T-8 abierta**
 > para medirlo con A/B intercalado en una sola sesión.
+>
+> **Cierre de T-8 (2026-09-18)**: medido con A/B intercalado en dos sesiones.
+> ADR-166 suelta ~450 MB durante ~70 s pero le cobra al documento siguiente ~1,2 s
+> y ~500-600 MB de pico. **ADR-167 lo reemplaza** por un temporizador propio de 15 s
+> para NER, y arregla de paso la recarga muda tras una liberación por temporizador.
+> ADR-167 está decidido y documentado; **falta implementarlo**.
 
 **Perfil de referencia**: P2 — 50 páginas escaneadas, OCR + NER reales, sobre el
 shell de Electron empaquetado.
@@ -694,12 +700,22 @@ comparaciones válidas son entre condiciones medidas en la misma sesión y con l
 presión registrada. No comparar contra tandas anteriores al 2026-09-17: no
 tienen ese dato.
 
-### T-8 — Verificar ADR-166 con A/B intercalado — **ABIERTA (2026-09-18)**
+### T-8 — Verificar ADR-166 con A/B intercalado — **CERRADA (2026-09-18)**
 
 **Dónde**: `tests/` únicamente. **ADR**: ninguno; no cambia producto — entrega el
 número con el que el humano decide si ADR-166 se conserva, se revierte o se
 reubica. **La desbloquea**: ADR-166 implementado (`6571a2e`, `18d4442`).
 **Plan detallado y protocolo**: [`AB_Intercalado_Plan.md`](AB_Intercalado_Plan.md).
+
+> **Cerrada con resultado** ([`AB_Intercalado_Medicion.md`](AB_Intercalado_Medicion.md),
+> dos sesiones, binarios idénticos por digest): la baja inmediata de ADR-166
+> suelta **~450 MB durante los primeros ~70 s** —no ~1 GB— y después A y B terminan
+> en el mismo lugar. Pero al encadenar documentos le cobra al siguiente **+1,2 s y
+> +485 / +636 MB de pico**. Un tercer brazo con temporizador propio de **15 s**
+> captura casi todo el beneficio sin ese costo. Midiéndolo apareció además que **la
+> recarga posterior a una liberación por temporizador es muda** —existe desde
+> ADR-080—. El humano eligió el temporizador de 15 s: **ADR-167**, que también
+> arregla la recarga muda.
 
 **Pregunta**: ¿la baja del modelo de NER al cerrar la detección baja el punto de
 reposo de la aplicación, lo sube, o no lo mueve?
@@ -827,12 +843,12 @@ estos levers importan.** No bloquea T-1 a T-4; sí bloquea dimensionar T-6.
    §7. No se reabre sin un `modelLoadMs` materialmente mayor o un banco menos
    ruidoso.
 
-5. **ADR-166 implementado, verificación pendiente.** La decisión del humano del
-   2026-09-17 —liberar el modelo de NER al terminar la detección, pagando ~1 s de
-   recarga a cambio de ~1 GB— está implementada. El costo quedó medido y
-   confirmado; el beneficio, no. **Hasta que T-8 cierre, no citar «recupera ~1 GB»
-   como número medido.** Los tres desenlaces y qué implica cada uno están escritos
-   en ADR-166, Enmienda (2026-09-18).
+5. **NER se libera a los 15 s de inactividad (ADR-167), decisión del humano del
+   2026-09-18** sobre los tres brazos de T-8: _«Sí, vamos por C»_. Reemplaza la baja
+   inmediata de ADR-166, que ahorraba ~450 MB (no ~1 GB) durante ~70 s pero le
+   cobraba ~1,2 s y ~500-600 MB de pico al documento siguiente. Su punto débil,
+   declarado: quien abre el siguiente documento entre 15 y 60 s paga una recarga
+   que con 60 s se ahorraba. **Pendiente: implementarlo.**
 6. **Banco de medición: macOS primero, Windows después.** Decisión del humano del
    2026-09-18. Se evaluó mover las mediciones a un escritorio con Windows 11 y
    16 GB buscando estabilidad; el análisis dice que **el sistema operativo no es

@@ -2,6 +2,15 @@
 
 # T-8 — A/B intercalado: medir dos versiones del código en la misma sesión
 
+> **Ejecutada el 2026-09-18, en dos sesiones.** Resultado y datos en
+> [`AB_Intercalado_Medicion.md`](AB_Intercalado_Medicion.md); la decisión que salió
+> de ahí es **ADR-167**. Dos cosas se agregaron sobre la marcha y no estaban en este
+> plan: un **tercer brazo C** (temporizador de 15 s solo para NER), pedido por el
+> humano después de la primera sesión, y una **espera de revisión configurable**
+> entre documentos (`ANONLY_AB_GAP_MS`), que fue la que destapó la recarga muda.
+> El Paso 0 (§2ter) salió negativo. Este plan queda como registro de lo que se
+> comprometió antes de medir.
+
 **Es una medición, no un cambio.** Todo el trabajo vive en `tests/`. No decide si
 ADR-166 se conserva o se revierte: produce el número que hoy falta para que esa
 decisión sea del humano y no de una corazonada.
@@ -340,7 +349,8 @@ Trabajo acotado a `tests/perf/`:
 - `ab-release-curve.spec.ts` — una corrida de P1/NER on por invocación, etiquetada
   por `ANONLY_AB_ARM`, reutilizando `measureHotBaselineCurve`.
 - `support/aggregateAbReports.ts` — comparación **pareada** según §6, con sus
-  tests (R-13).
+  tests (R-13). **Pendiente**: no se construyó en la ejecución del 2026-09-18; el
+  análisis se hizo aparte y está transcripto en `AB_Intercalado_Medicion.md`.
 - Entrada propia en `tests/perf/README.md`, al lado de «El método de comparar M2
   entre corridas separadas quedó retirado» — que es la página que había que leer
   antes de la tanda del 2026-09-18 y no se leyó. La entrada nueva dice qué hace

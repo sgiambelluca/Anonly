@@ -287,3 +287,9 @@ banco afecte por igual a las dos y la diferencia entre ellas quede limpia.
 
 Hasta que eso corra, ADR-166 queda implementado y con su beneficio **declarado
 pero no verificado** — así está anotado en el propio ADR.
+
+> **Corrió el 2026-09-18** ([`AB_Intercalado_Medicion.md`](AB_Intercalado_Medicion.md)).
+> La «regresión» de ~380 MB de §2 **no existe**: con A/B intercalado, los dos
+> brazos terminan en 864,8 y 866,6 MB. Era el banco. Lo que sí apareció es lo que
+> §5 anticipaba: el documento siguiente pica +485 / +636 MB más alto y tarda
+> ~1,2 s más. De eso salió ADR-167.
