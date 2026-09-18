@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-plan | dependencias=roadmap/H-10_Bitacora_De_Memoria.md,architecture/07_Performance_Strategy.md,core/OCR_Engine.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-147-Perder-Un-Identificador-Cubierto-Es-Una-Regresion.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-157-El-Pool-De-OCR-Se-Da-De-Baja-Al-Terminar-Su-Etapa.md,adr/ADR-158-El-Raster-De-OCR-Viaja-Codificado.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md,adr/ADR-161-Una-Franja-Sin-Tinta-No-Se-Reconoce.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,tests/fixtures/README.md,tests/perf/README.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=roadmap-plan | dependencias=roadmap/H-10_Bitacora_De_Memoria.md,architecture/07_Performance_Strategy.md,core/OCR_Engine.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-147-Perder-Un-Identificador-Cubierto-Es-Una-Regresion.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-157-El-Pool-De-OCR-Se-Da-De-Baja-Al-Terminar-Su-Etapa.md,adr/ADR-158-El-Raster-De-OCR-Viaja-Codificado.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md,adr/ADR-161-Una-Franja-Sin-Tinta-No-Se-Reconoce.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,tests/fixtures/README.md,tests/perf/README.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-166-El-Modelo-De-NER-Se-Libera-Al-Terminar-La-Deteccion.md,roadmap/Verificacion_Liberacion_NER_Medicion.md,roadmap/AB_Intercalado_Plan.md | audiencia=humanos+IA | fase=11 -->
 
 # Optimización de memoria — plan de campaña
 
@@ -22,6 +22,14 @@
 > un documento cumple el presupuesto (M1 de P2 = 204,8 MB contra 512) y el
 > exceso está en lo que la app retiene después de cerrarlo (base caliente de
 > 1,7–2,2 GB). **T-7 abierta** para atribuir esa base.
+>
+> **Estado (2026-09-18)**: **T-7 cerrada** — casi todo se libera solo, un minuto
+> tarde; el hueco de §1bis quedó disuelto. Sobre ese resultado el humano decidió
+> **ADR-166** (liberar el modelo de NER al terminar la detección), **implementado
+> y commiteado**. Su primera verificación confirmó el costo (+874 a +1127 ms en el
+> segundo documento) y **no pudo demostrar el beneficio de memoria**: la
+> comparación cruzó dos tandas con el banco en regímenes distintos. **T-8 abierta**
+> para medirlo con A/B intercalado en una sola sesión.
 
 **Perfil de referencia**: P2 — 50 páginas escaneadas, OCR + NER reales, sobre el
 shell de Electron empaquetado.
@@ -686,10 +694,34 @@ comparaciones válidas son entre condiciones medidas en la misma sesión y con l
 presión registrada. No comparar contra tandas anteriores al 2026-09-17: no
 tienen ese dato.
 
+### T-8 — Verificar ADR-166 con A/B intercalado — **ABIERTA (2026-09-18)**
+
+**Dónde**: `tests/` únicamente. **ADR**: ninguno; no cambia producto — entrega el
+número con el que el humano decide si ADR-166 se conserva, se revierte o se
+reubica. **La desbloquea**: ADR-166 implementado (`6571a2e`, `18d4442`).
+**Plan detallado y protocolo**: [`AB_Intercalado_Plan.md`](AB_Intercalado_Plan.md).
+
+**Pregunta**: ¿la baja del modelo de NER al cerrar la detección baja el punto de
+reposo de la aplicación, lo sube, o no lo mueve?
+
+La primera verificación
+([`Verificacion_Liberacion_NER_Medicion.md`](Verificacion_Liberacion_NER_Medicion.md))
+dejó el costo confirmado (**+874 a +1127 ms** en el segundo documento, con los
+942,94 ms declarados en el medio) y **el beneficio de memoria sin demostrar**: se
+comparó contra una tanda de otro día, con el banco en otro régimen de presión, y
+la dispersión intra-condición (255 MB) es del orden de la diferencia a explicar
+(~380 MB).
+
+**Cierra cuando** las dos versiones —idénticas salvo la invocación de la baja—
+hayan corrido alternadas en la misma sesión, con comparación **pareada** por par
+A/B, y el reporte diga si el efecto existe y con qué magnitud. Los tres
+desenlaces posibles están escritos en ADR-166, Enmienda: que no haya efecto
+detectable también decide.
+
 ## 2bis. Cómo se corre una medición sin arruinarla
 
-Reglas operativas aprendidas a costa de tandas perdidas el 2026-09-12. Ninguna es
-obvia y las tres costaron tiempo real.
+Reglas operativas aprendidas a costa de tandas perdidas. Ninguna es obvia y
+todas costaron tiempo real.
 
 1. **Una sola medición por vez.** Dos instancias de Electron haciendo OCR en
    paralelo se contaminan mutuamente y las dos quedan inservibles — pasó, y costó
@@ -718,6 +750,21 @@ obvia y las tres costaron tiempo real.
    que se sobrescribiera. **Antes de medir un "después", copiar los JSON del
    "antes" a otro nombre** — y, en cualquier caso, transcribir las cifras a un
    documento: `.measure/` está gitignoreado y no es un archivo histórico.
+7. **Un control solo controla si es sensible al confound.** El 2026-09-18 se dio
+   por válida una comparación entre tandas porque el brazo con NER apagado
+   reproducía dentro de 2-3 MB en los ocho checkpoints. La estabilidad era real y
+   el argumento inválido: ese brazo reserva ~300 MB y nunca entra en el régimen
+   donde el compresor de macOS cambia de comportamiento, así que no dice nada
+   sobre un brazo que reserva 1,5 GB. **Antes de usar un control, preguntarse si
+   la variable que se quiere descartar lo movería.** Si no lo movería, no es un
+   control.
+8. **Dos versiones del código se comparan intercaladas, nunca en tandas
+   separadas.** Los absolutos de RSS se mueven con la presión del sistema (ADR-146
+   §7ter), así que "medir antes, cambiar el código, medir después" no produce una
+   comparación: produce dos números de dos máquinas distintas que da la casualidad
+   de que son la misma. Se alternan A/B/A/B en una sola sesión y se comparan los
+   pares. Y los dos brazos difieren en **una sola cosa**: si el brazo B revierte
+   un commit entero, una diferencia no se puede atribuir al cambio que interesa.
 
 ## 3. Lo que no se vuelve a mirar
 
@@ -779,6 +826,34 @@ estos levers importan.** No bloquea T-1 a T-4; sí bloquea dimensionar T-6.
    [`Precalentamiento_NER_Durante_OCR_Medicion.md`](Precalentamiento_NER_Durante_OCR_Medicion.md)
    §7. No se reabre sin un `modelLoadMs` materialmente mayor o un banco menos
    ruidoso.
+
+5. **ADR-166 implementado, verificación pendiente.** La decisión del humano del
+   2026-09-17 —liberar el modelo de NER al terminar la detección, pagando ~1 s de
+   recarga a cambio de ~1 GB— está implementada. El costo quedó medido y
+   confirmado; el beneficio, no. **Hasta que T-8 cierre, no citar «recupera ~1 GB»
+   como número medido.** Los tres desenlaces y qué implica cada uno están escritos
+   en ADR-166, Enmienda (2026-09-18).
+6. **Banco de medición: macOS primero, Windows después.** Decisión del humano del
+   2026-09-18. Se evaluó mover las mediciones a un escritorio con Windows 11 y
+   16 GB buscando estabilidad; el análisis dice que **el sistema operativo no es
+   la palanca**: Windows tiene su propia compresión de memoria, su *working set*
+   es más volátil que el de macOS, y la dispersión entre corridas idénticas no
+   viene del OS sino de cuándo el asignador devuelve páginas. Lo que sí ganaría
+   esa máquina es **más RAM y dedicación exclusiva** — reproducibilidad, no
+   verdad. Se corre acá primero y el arnés se escribe portable
+   (`AB_Intercalado_Plan.md` §8).
+
+   Dos prerrequisitos para cualquier tanda en Windows, escritos antes de que
+   alguien los pise: `systemMemoryPressure.ts` **no tiene lector para `win32`**
+   (devuelve `available: false`, justo la variable que hay que controlar), y
+   **bajo WSL se lee `/proc/meminfo` de la máquina virtual, no del host** — números
+   creíbles y equivocados. El banco de Windows se monta con toolchain nativo o no
+   se monta.
+
+   Queda abierta como pregunta de producto, no de instrumento: si la aplicación se
+   distribuye a usuarios de Windows, los presupuestos de `00_Project_Vision.md` §7
+   tienen que medirse ahí en algún momento. Un número tomado en un M1 no dice qué
+   le pasa a una notebook Windows de 8 GB.
 
 ## 6. Trabajo posterior al hardening
 
