@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=workers | dependencias=03_Data_Model.md,04_Event_System.md,06_Pipeline.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-042-WorkerOutbound-Completed-Result-Unknown.md,adr/ADR-043-RenderEngine-Reparto-Host-Worker-Kernel.md,adr/ADR-045-OcrEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-046-NerEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-053-Pdfjs-Dentro-De-Un-Worker-Fuentes-Y-Cmaps.md,adr/ADR-055-Decodificacion-Del-Resultado-Que-Cruza-Un-Worker.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md | audiencia=IA+humanos | fase=1 (actualizado en fase 9/10: entrega por fases ADR-035; transporte, EVENT, payloads y ExportWorker por ADR-036; COMPLETED.result unknown por ADR-042; RenderWorker kernel, unload-document y re-priming por ADR-043; OcrWorker kernel por ADR-045; NerWorker kernel y enrutamiento de PROGRESS por ADR-046; invariante de decodificación en §2.2 por ADR-055 y regla transversal de pdf.js-en-Worker en §7 por ADR-053, ambos del cierre de fase 10); §2.2/§2.3/§7.3/§7.4 en fase 11 por ADR-158: el ráster de OCR viaja codificado (PNG) y se clona en vez de transferirse -->
+<!-- CONTEXT: scope=workers | dependencias=03_Data_Model.md,04_Event_System.md,06_Pipeline.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-042-WorkerOutbound-Completed-Result-Unknown.md,adr/ADR-043-RenderEngine-Reparto-Host-Worker-Kernel.md,adr/ADR-045-OcrEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-046-NerEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-053-Pdfjs-Dentro-De-Un-Worker-Fuentes-Y-Cmaps.md,adr/ADR-055-Decodificacion-Del-Resultado-Que-Cruza-Un-Worker.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md | audiencia=IA+humanos | fase=1 (actualizado en fase 9/10: entrega por fases ADR-035; transporte, EVENT, payloads y ExportWorker por ADR-036; COMPLETED.result unknown por ADR-042; RenderWorker kernel, unload-document y re-priming por ADR-043; OcrWorker kernel por ADR-045; NerWorker kernel y enrutamiento de PROGRESS por ADR-046; invariante de decodificación en §2.2 por ADR-055 y regla transversal de pdf.js-en-Worker en §7 por ADR-053, ambos del cierre de fase 10); §2.2/§2.3/§7.3/§7.4 en fase 11 por ADR-158: el ráster de OCR viaja codificado (PNG) y se clona en vez de transferirse -->
 
 # Anonly — Arquitectura de Workers (TAD bloque 8)
 
@@ -352,7 +352,7 @@ Ningún pool se crea al cargar la app. Se crea bajo demanda:
 
 ### 8.1 Liberación por inactividad (ADR-080)
 
-Cada pool libera **sus workers** tras `idleDisposeMs` de inactividad (`WorkerPoolConfig`, default 60 s). El temporizador vive en el propio `WorkerPool` —no en `WorkerPoolManager`, que solo administra el pool de `pdf` desde ADR-043/045/046/047—, porque es el único que puede evaluar la condición.
+Cada pool libera **sus workers** tras `idleDisposeMs` de inactividad (`WorkerPoolConfig`, default 60 s). **El pool de NER usa su propio valor**, `nerIdleDisposeMs` (default 15 s, ADR-167 §2): T-8 midió que soltar su modelo al terminar la detección le trasladaba ~1,2 s y ~500-600 MB de pico al documento siguiente, y que un temporizador corto captura casi todo el beneficio sin ese costo. El temporizador vive en el propio `WorkerPool` —no en `WorkerPoolManager`, que solo administra el pool de `pdf` desde ADR-043/045/046/047—, porque es el único que puede evaluar la condición.
 
 **Ocioso** son las cuatro condiciones a la vez:
 
@@ -365,6 +365,8 @@ Las dos últimas no son redundantes: un job remoto puede estar en vuelo sin cont
 El temporizador se **rearma al quedar ocioso** (no al acceder al pool) y se **cancela al entrar un job**: un job de diez minutos no dispara la liberación a los sesenta segundos.
 
 **`releaseIdleWorkers()` no es `dispose()`**: termina los `WorkerLike` vivos y limpia `remoteWorkers`, pero el pool **sigue usable** — el próximo `dispatch` reconstruye el worker por el camino perezoso de arriba y, si el pool tiene `onWorkerCreated`, lo re-primea antes del primer job. `dispose()` sigue siendo terminal. `idleDisposeMs: 0` desactiva el mecanismo (lo usan los tests, que no pueden depender de temporizadores reales).
+
+**Toda baja efectiva se notifica** (ADR-167 §3): `onWorkersReleased(listener)` registra un listener que el pool invoca cada vez que `releaseIdleWorkers()` devuelve `true`, **por cualquier camino** —el temporizador o una llamada explícita—, y devuelve la función de desuscripción. `true` significa que la guarda no frenó la baja y que al volver ningún worker del pool conserva estado cargado, incluido el caso de cero workers vivos (ADR-167 §4). Existe porque el temporizador liberaba sin avisarle a nadie: el motor de NER dejaba su flag de modelo cargado en `true` con los workers ya terminados, y la recarga siguiente salía **muda** —medido, ~2 s sin `NER_MODEL_READY`—. Con 60 s eso era un rincón; con los 15 s de NER habría sido el caso común.
 
 > La redacción anterior era *"cada pool puede destruirse tras `DOCUMENT_CLOSED` + idle > 60 s"*. El `DOCUMENT_CLOSED` se retira a propósito: el pool es infraestructura y **no escucha el bus**. La condición de arriba es más general y lo cubre — cerrar un documento deja de generar jobs, así que el pool cae en ocioso solo. Y cubre además el caso que la redacción vieja dejaba afuera: un documento abierto y quieto veinte minutos.
 
@@ -397,7 +399,8 @@ export interface WorkerPoolConfig {
   readonly baseRetryDelayMs: number;
   readonly maxRetryDelayMs: number;
   readonly cancelSlaMs: number;            // 200
-  readonly idleDisposeMs: number;          // 60000
+  readonly idleDisposeMs: number;          // 60000 — todos los pools menos NER
+  readonly nerIdleDisposeMs: number;       // 15000 — solo el pool de NER (ADR-167)
 }
 ```
 
