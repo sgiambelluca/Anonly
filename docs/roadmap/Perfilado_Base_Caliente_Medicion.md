@@ -16,6 +16,14 @@ en los 8 checkpoints de cada corrida — sin descartes.
 recomienda ni decide ningún lever — eso es del humano, con su propio ADR
 (ADR-154 §1/§5).
 
+> **Qué pasó después (2026-09-18).** Sobre este resultado el humano decidió
+> **ADR-166**: liberar el modelo de NER al terminar la detección, en vez de
+> esperar el minuto de `idleDisposeMs`. Está implementado. Su verificación
+> confirmó el costo y **no pudo demostrar el beneficio de memoria** —
+> [`Verificacion_Liberacion_NER_Medicion.md`](Verificacion_Liberacion_NER_Medicion.md) —,
+> así que los números de §2 de este informe siguen siendo la mejor descripción
+> disponible del comportamiento **anterior** a ADR-166, y solo de ese.
+
 ## 0. Veredicto, antes de los datos
 
 **La hipótesis del plan (§2) se confirma, y el hallazgo es más grande que un
