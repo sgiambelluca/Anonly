@@ -255,6 +255,7 @@ describe("PdfWorker entry-point (ADR-036 §3, ADR-041 §4)", () => {
         maxRetryDelayMs: 2000,
         cancelSlaMs: 200,
         idleDisposeMs: 60_000,
+        nerIdleDisposeMs: 15_000,
       },
       pdf: { maxPageCount: 1 }, // override: 1 sola página permitida
       ner: {

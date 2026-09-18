@@ -108,6 +108,9 @@ export interface WorkerPoolConfig {
   readonly maxRetryDelayMs: number;
   readonly cancelSlaMs: number;
   readonly idleDisposeMs: number;
+  // Como `idleDisposeMs`, pero solo para el pool de NER (ADR-167 §2).
+  // Default 15000.
+  readonly nerIdleDisposeMs: number;
 }
 
 // Rutas del runtime WASM de onnxruntime-web, inyectadas por el host (la app,

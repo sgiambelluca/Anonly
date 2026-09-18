@@ -92,6 +92,8 @@ export function buildDefaultEngineConfig(hints?: DeviceHints): EngineConfig {
       maxRetryDelayMs: 2000,
       cancelSlaMs: 200,
       idleDisposeMs: 60_000,
+      // ADR-167 §2: propio del pool de NER; los presets no lo modifican.
+      nerIdleDisposeMs: 15_000,
     },
     pdf: { maxPageCount: 10_000 },
     ner: {

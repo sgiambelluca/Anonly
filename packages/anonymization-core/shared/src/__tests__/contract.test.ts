@@ -1636,6 +1636,7 @@ describe("@anonly/shared — Contracts", () => {
           maxRetryDelayMs: 2000,
           cancelSlaMs: 200,
           idleDisposeMs: 60000,
+          nerIdleDisposeMs: 15000,
         },
         pdf: { maxPageCount: 10000 },
         ner: {

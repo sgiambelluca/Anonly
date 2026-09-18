@@ -114,6 +114,7 @@ function buildLocalDefaultConfig(): EngineConfig {
       maxRetryDelayMs: 2000,
       cancelSlaMs: 200,
       idleDisposeMs: 60_000,
+      nerIdleDisposeMs: 15_000,
     },
     pdf: { maxPageCount: 10_000 },
     ner: {
