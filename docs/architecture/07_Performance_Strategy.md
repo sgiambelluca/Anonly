@@ -255,6 +255,14 @@ Fixtures pesados (> 5 MB) vía Git LFS o descargados en `postinstall` con hash v
    > que se miden los gates de rendimiento (ADR-153). Antes de construir
    > `tests/leak/` hay que elegir otra fuente de bytes: el RSS por proceso que ya lee
    > `memorySampler.ts`, con su ruido declarado, o un instrumento nuevo.
+   >
+   > **Medido el 2026-09-18 (T-9, `roadmap/Ciclos_Y_Documentos_Reales_Medicion.md`):
+   > el RSS no sirve para este gate.** En diez ciclos idénticos, dentro de una misma
+   > instancia, el reposo se movió hasta ~250 MB de un ciclo al siguiente sin ninguna
+   > fuga. Las dos señales que dieron lecturas limpias en las tres corridas son **la
+   > cantidad de workers vivos** y **el heap de JS con GC forzado** (ADR-159,
+   > `tests/perf/support/cdpHeap.ts`); el instrumento de T-9 (`support/leakCycles.ts`)
+   > ya las lee.
 
 8. Cargar PDF sin NER activado → verificar que solo Regex detecta. **Desbloqueado por PR16.5** (ADR-048 §7 punto 2): hasta entonces no existía forma de desactivar NER antes de la primera importación (`App.tsx` llamaba `initCore()` sin derivar overrides de `settings.store`) y el spec estaba en `test.fixme` desde PR10. PR17 lo saca del `fixme`.
 9. Disparar un `reanalyze` (ADR-038) con documento abierto → verificar que reanaliza **preservando las ediciones previas del usuario**: un grupo que el usuario deshabilitó sigue deshabilitado, una regla creada sigue aplicando, un merge manual persiste. **Disparador (ADR-126)**: el escenario decía "activar NER en runtime", que era el disparador y no lo que mide; ese control se retiró —la detección de nombres está siempre activa— y con él la única forma de activarla en runtime. El disparador pasa a ser **Idiomas del documento**, el otro setting que abre la confirmación de reanálisis. La mitad "se descarga el modelo en runtime" ya no describe ningún camino de usuario: que el detector corre y llega a la UI lo cubre el escenario 5.
