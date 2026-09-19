@@ -1,6 +1,6 @@
-<!-- CONTEXT: scope=roadmap-medicion | tarea=T-9,T-10 | dependencias=roadmap/Ciclos_Y_Documentos_Reales_Plan.md,roadmap/Optimizacion_De_Memoria_Plan.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=roadmap-medicion | tarea=T-9,T-10,T-11,T-12,T-13 | dependencias=roadmap/Ciclos_Y_Documentos_Reales_Plan.md,roadmap/Optimizacion_De_Memoria_Plan.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 -->
 
-# T-9 y T-10 — Medición: ¿hay una fuga?, y dos documentos reales
+# T-9 a T-13 — Medición: fuga, documentos reales, memoria de WASM, configuración de NER y tiempos reales
 
 > Protocolo y criterio de lectura, fijados antes de medir:
 > [`Ciclos_Y_Documentos_Reales_Plan.md`](Ciclos_Y_Documentos_Reales_Plan.md).
@@ -43,7 +43,28 @@ Dos cosas que salen de acá y **no le corresponde decidirlas al planificador** (
    presupuesto se aplica así.
 2. Extrapolando por página, **diez páginas nativas reales rondarían los 8 s del
    objetivo contractual**. Es una extrapolación hecha bajo instrumento, no una
-   medición.
+   medición. **T-13 (§7) lo midió sin instrumento: el resultado se sostiene.**
+
+**T-11 (2026-09-19): la memoria de WASM, por fin medida.** Tesseract ocupa **148 MB
+por worker de OCR** y llega a ese techo hacia la página 5: no crece más en 200
+páginas. Cuando el modelo de NER se carga, **los workers de Tesseract ya no
+existen**. Y el modelo de NER, un archivo de 178,5 MB, ocupa **487 MB de memoria de
+WASM** una vez cargado, más ~100 MB de JS en su worker: **es el mayor consumidor de la
+app**. Dos palancas quedan descartadas con datos (reciclar Tesseract a mitad del
+documento y ordenar la baja del OCR antes de NER), y aparece una nueva: la memoria del
+modelo de NER (§5.5).
+
+**T-12 (2026-09-19): ninguna configuración de NER baja su memoria sin cambiar el
+modelo.** Se probaron tres, intercaladas sobre R1: una cambia lo que detecta, otra
+es un 45 % más lenta, y ninguna mueve los 487 MB. Lo único que queda sin tocar los
+pesos es **reempaquetar el mismo modelo** para que no se copie dos veces al cargar
+(§6.4). Y con el escaneo real, Tesseract llega a un techo más bajo que con el fixture:
+**90 MB por worker** en vez de 148 (§6.5).
+
+**T-13 (2026-09-19): los tiempos reales.** Sin ningún instrumento, R1 tarda **34-40 s**
+y R2 **47-49 s** de la importación a `Ready`, casi lo mismo que T-10: el instrumento
+no los inflaba. NER cuesta ~0,7 s por página de texto real, y a ese ritmo diez páginas
+nativas quedan **al límite del objetivo de 8 s** (§7).
 
 ---
 
@@ -306,7 +327,7 @@ fixtures de ~20 palabras por página, no ve el costo de NER sobre texto real**.
 
 ---
 
-## 3. Límites
+## 3. Límites (de T-9 y T-10)
 
 1. **Una sola máquina** (M1, 8 GB) y **bajo presión de memoria fuerte**: 50-700 MB
    libres, swap de hasta 1,1 GB. Es representativo de una notebook de 8 GB con otras
@@ -330,7 +351,395 @@ fixtures de ~20 palabras por página, no ve el costo de NER sobre texto real**.
 |---|---|---|
 | 1 | **El presupuesto de 512 MB con recarga de NER** (§2.3): ¿el M1 caliente de ADR-146 se aplica a un documento cuyo OCR dura más que el temporizador de NER? Si sí, un escaneo real no cumple; si no, hay que redefinir «caliente» para ese caso. | humano; después, enmienda de ADR-146 |
 | 2 | **El objetivo de 8 s con texto real** (§2.4): medirlo bien antes de discutirlo. Requiere un documento nativo real de ~10 páginas y `pipeline-timing.spec.ts`. | humano (el documento) |
-| 3 | **T-11, el instrumento de WASM** (plan §4). Ahora tiene un blanco preciso: el pico que cae en la recarga de NER justo después del OCR, y los ~350 MB de basura que quedan a los 6 s de cerrar un escaneado. | humano, ya anotado como siguiente paso |
+| 3 | ~~T-11, el instrumento de WASM~~ — **hecho** (§5). | — |
 | 4 | **El tiempo de NER sobre texto real** (§2.1). Es la mayor parte del tiempo de un documento nativo, y queda fuera de una campaña de memoria. Si se ataca, necesita plan propio y la guarda de recall de ADR-147. | humano |
 | 5 | **Los 0,1 MB por documento del heap de JS** (§1.4): dos heap snapshots dirían si es de la app o del arnés. Barato y de baja prioridad. | planificador, cuando haya lugar |
 | 6 | **El gate `test:leak`**: T-9 da con qué construirlo. Tiene que apoyarse en **workers vivos y heap de JS con GC forzado**, que dieron señales limpias en las tres corridas. El RSS no sirve para un gate en este banco: se movió ~250 MB entre dos ciclos idénticos de L3. | planificador, al construir `tests/leak/` |
+| 7 | **La memoria del modelo de NER** (§5.5 y §6): las opciones de sesión ya se midieron y ninguna sirve. Quedan reempaquetar el mismo modelo (§6.4, sin cambiar los pesos) o cambiar de modelo, que el humano no quiere por ahora. | humano |
+| 8 | ~~Confirmar el techo de Tesseract con texto real~~ — **hecho** (§6.5): 90 MB por worker. | — |
+
+---
+
+## 5. T-11 — la memoria de WASM por worker
+
+Protocolo: [`Ciclos_Y_Documentos_Reales_Plan.md`](Ciclos_Y_Documentos_Reales_Plan.md)
+§4. Medido el 2026-09-19 sobre `0ab098f`, con el mismo banco. Todo sobre fixtures,
+sin documentos reales.
+
+### 5.1 El instrumento, y dos sesiones descartadas
+
+Por CDP, en cada target (incluidos los workers de Tesseract anidados y los hilos de
+ONNX), `Runtime.queryObjects` sobre `WebAssembly.Memory.prototype` devuelve cada
+memoria lineal con su tamaño exacto, sin tocar el producto. El Paso 0 pasó con los
+números exactos: una memoria de prueba de **31.457.280 bytes** leída tal cual en el
+hilo principal y en un worker anidado, una compartida de **1.048.576 bytes** marcada
+como tal, y las tres desaparecen al soltarlas.
+
+Dos cosas del Paso 0 que condicionan la lectura:
+
+- **`queryObjects` fuerza una recolección** en el target que consulta. Con una
+  lectura por segundo, toda la corrida tiene un GC forzado por segundo en cada worker,
+  como `measureProfile` (ADR-159).
+- **Un worker ocupado no contesta.** Cada instante del reporte dice qué targets no
+  leyó y se marca **parcial** si falta alguno que no sea un hilo de ONNX, que nunca
+  contesta y comparte la memoria de su padre.
+
+La sesión válida es `.measure/wasm/20260919T043611Z/`. Hubo dos anteriores,
+**descartadas por defectos del instrumento**, no por sus números: la primera
+clasificaba mal a qué worker pertenecía cada memoria, y la segunda leía el heap «sin
+GC» de la pregunta 4 en paralelo con una consulta que fuerza GC, con el muestreo
+periódico todavía activo. El planificador encontró el segundo al revisar la entrega:
+su explicación del «no atribuido» durante la carga de NER era, en realidad, el worker
+de NER sin contestar.
+
+### 5.2 Cuánto ocupa cada uno
+
+Memoria lineal de WASM, idéntica en las cuatro corridas (tres de P2 y una de 200
+páginas):
+
+| dueño | memoria de WASM | cuándo existe |
+|---|---:|---|
+| Tesseract, cada worker de OCR (hay dos) | **148,0 MB** | solo durante el OCR |
+| OSD de orientación (ADR-164) | 56,4-67,6 MB | solo durante el OCR |
+| **NER (ONNX)** | **487,2 MB** | desde que carga el modelo hasta su baja (ADR-167) |
+| pdf.js y el resto de los workers | 0 | — |
+
+Además del WASM, el worker de NER retiene **93,8 MB de heap de JS**, vivo y no
+basura. El archivo del modelo pesa **178,5 MB** (`bert-base-multilingual-cased-ner-hrl`,
+`q8`): cargado, ocupa **2,7 veces** su tamaño en memoria de WASM.
+
+Es la primera medida de la campaña que **la presión del sistema no mueve**: es el
+tamaño de la memoria, no lo que el sistema tiene residente. Por eso se repite al byte
+entre corridas, algo que el RSS nunca hizo.
+
+### 5.3 Tesseract llega a un techo (pregunta 2)
+
+Cada worker de OCR arranca en 84,7-102,7 MB, llega a **148,0 MB dentro de las primeras
+cinco páginas** y **no crece más**: en P2-200p sigue en 148,0 MB en la página 199. El
+OSD de orientación queda en 56,4 MB, con un único salto a 67,6 MB en dos corridas.
+
+**Esto descarta reciclar los workers de Tesseract a mitad del documento** (alternativa
+B de la bitácora, en espera desde ADR-159 §3): la memoria alcanza su techo en las
+primeras páginas y reciclar solo haría pagar la carga otra vez.
+
+**Con una salvedad**: el fixture tiene ~20 palabras por página, y una página real, ~300
+(T-10 §2.1). Tesseract podría estabilizarse más arriba con texto denso. El techo existe;
+su altura con documentos reales no está medida (§4, punto 8).
+
+> **Medido después, en T-12 (§6.5)**: con el escaneo real, el techo es **más bajo**,
+> 90 MB por worker, alcanzado en las primeras páginas. El descarte queda firme.
+
+### 5.4 Qué está vivo en cada momento (preguntas 1 y 3)
+
+Memoria del proceso del renderer (Tab), contra lo que el instrumento atribuye. Una
+lectura **parcial** no se usa para concluir nada:
+
+| instante | Tab | WASM | heap de JS | sin atribuir | lectura |
+|---|---:|---:|---:|---:|---|
+| fin del OCR, P2 (run0 / run1) | 761 / 415 MB | 352 / 364 MB | 95 MB | 313 / −44 MB | completa |
+| carga del modelo de NER (4 de 4 corridas) | 1.111-1.404 MB | — | — | — | **parcial**: el worker de NER, ocupado |
+| `PIPELINE_READY` (4 de 4) | 1.109-1.251 MB | 487 MB | 138-178 MB | 443-626 MB | completa |
+
+- **Cuando NER carga el modelo, los workers de Tesseract ya no existen**: no figuran
+  entre los targets vivos, no es que no contesten. ADR-157 hace lo que promete.
+  **Ordenar la baja del pool de OCR antes de la carga de NER no ahorraría nada**: ya
+  pasa así.
+- **El pico de P2 cae en la carga del modelo** en dos de las tres corridas, con el
+  worker de NER ocupado y sin dejarse leer; en la tercera, apenas después, con los
+  487 MB ya visibles. Lo que sí se sabe es lo que queda
+  cuando termina de cargar (487 MB de WASM más ~100 MB de JS) y que el archivo pesa
+  178,5 MB. Es **compatible** con que el pico sea el modelo más una copia transitoria
+  del archivo durante la carga. **Plausible, no verificado**: ninguna lectura lo ve.
+- En P2-200p el pico cae en medio del OCR, con Tesseract a pleno (148 MB por worker más
+  el OSD).
+- **Después de NER quedan 443-626 MB del Tab sin atribuir**, en lecturas completas. No
+  son WASM ni heap de JS. Incluyen los ~135 MB del renderer recién abierto y el residuo
+  de ~170 MB que T-9 encontró. El resto es memoria nativa del renderer, que ningún
+  instrumento de esta campaña ve.
+
+### 5.5 La palanca nueva: la memoria del modelo de NER
+
+Con esto a la vista, el mayor consumidor de la app **no es Tesseract** (~350 MB, solo
+durante el OCR), sino **el modelo de NER**: 487 MB de WASM y 94 MB de JS mientras está
+cargado (~580 MB), y probablemente más durante la carga. ADR-167 ya acota cuánto tiempo vive.
+Lo que no se miró nunca es **cuánto ocupa**.
+
+Dos caminos, en orden de riesgo:
+
+1. **Opciones de sesión de ONNX que no cambian la salida** (la arena de memoria de CPU,
+   los patrones de memoria). Si bajan los 487 MB, es memoria gratis, sin tocar la
+   calidad. **No se sabe si transformers.js las deja pasar**: es lo primero a
+   verificar.
+2. **Un modelo más chico o una cuantización `q4`**: cambian la salida del detector, así
+   que necesitan la guarda de recall de ADR-147 y una decisión del humano.
+
+### 5.6 La basura de después de cerrar (pregunta 4) — sin respuesta útil
+
+Seis segundos después de cerrar, con el muestreo pausado y la lectura sin GC hecha
+primero, lo que un GC forzado libera en todos los targets es poco: en P2, ~6 MB de
+objetos, ~14 MB de heap comprometido y ~11 MB de *backing stores*; en P2-200p, 12, 29 y
+78 MB. **No reproduce los ~350 MB de T-9**, y no puede: durante el procesamiento este
+instrumento fuerza un GC por segundo, así que la basura no se acumula como en T-9.
+Contestarla pide una corrida sin muestreo periódico, con una sola lectura antes y
+después del GC a los 6 s. No es retención, y queda con prioridad baja.
+
+### 5.7 Límites
+
+1. **Solo fixtures**, con texto disperso. El techo de Tesseract y el pico de carga de NER
+   con documentos reales no están medidos.
+2. **Un GC forzado por segundo** durante toda la corrida (`queryObjects` lo fuerza). Los
+   tamaños de WASM no dependen de eso; el RSS y los tiempos, sí.
+3. **Un worker ocupado no se lee.** El instante más interesante, la carga del modelo, es
+   justamente el que el instrumento no ve por dentro.
+4. **El tamaño de una memoria de WASM no es memoria residente**: una página nunca tocada
+   cuenta en `byteLength` y no en el RSS. Es la demanda, no la ocupación.
+
+---
+
+## 6. T-12 — configurar el modelo de NER sin cambiarlo
+
+Protocolo: [`Ciclos_Y_Documentos_Reales_Plan.md`](Ciclos_Y_Documentos_Reales_Plan.md)
+§4bis. Sesión `.measure/ner-opciones/20260919T051758Z/`: cuatro brazos intercalados
+sobre R1, tres rondas, trece corridas `ok`, binarios distintos por digest y el árbol del
+producto limpio al terminar. Mismas reglas de confidencialidad que T-10: la huella de
+entidades es un hash calculado dentro de la app, y acá no se publica ni el hash ni la
+cantidad.
+
+### 6.1 Lo que se descartó leyendo el código, sin medir
+
+- **La arena de memoria y los patrones de memoria de ONNX ya están apagados.** ONNX
+  Runtime Web los pasa como `!!opción`, que da `false` si no se configuran. Apagarlos
+  no ahorra nada; prenderlos no tiene por qué.
+- **transformers.js no retiene el archivo del modelo en JS**: el worker de NER tiene
+  24 MB de *backing stores*, no 178.
+
+### 6.2 Los tres brazos
+
+| brazo | cambio | memoria de NER (3 rondas) | tiempo de NER (3 rondas) | ¿detecta lo mismo? |
+|---|---|---|---|---|
+| **A** | ninguno (control) | 487,2 / 487,2 / 487,2 MB | 39,8 / 48,7 / 48,7 s | referencia |
+| **B** | `graphOptimizationLevel: "basic"` | 487,2 / 487,2 / 487,2 MB | 43,5 / 49,6 / 47,8 s | **no**, en las tres rondas |
+| **C** | sin *prepacking* | 487,2 / 487,2 / 487,2 MB | 43,0 / 44,7 / 47,4 s | sí, idéntico |
+| **D** | dos hilos en vez de cuatro | 486,7 / 486,7 / 486,7 MB | **66,4 / 67,1 / 69,1 s** | sí, idéntico |
+
+- **B cambia lo que detecta.** Encuentra la misma cantidad de entidades, pero no las
+  mismas: cambian bordes o tipos, siempre igual en las tres rondas, y la suma de
+  confianzas baja. **Descartado** por el criterio fijado antes de medir, y además no
+  ahorra nada.
+- **C no ahorra nada visible** y detecta exactamente lo mismo. Su tiempo cae dentro del
+  ruido del control (39,8-48,7 s): no se reclama ni mejora ni empeoramiento.
+- **D ahorra medio MB y es ~45 % más lento.** Descartado.
+
+### 6.3 Lo que el instrumento puede y no puede ver acá
+
+**La memoria de WASM crece por escalones del 20 %**: los tamaños sucesivos de
+Tesseract en T-11 (84,7 → 102,7 → 123,3 → 148,0 MB) lo muestran exactamente. Un ahorro
+más chico que el escalón no cambia el tamaño visible. Con NER en 487,2 MB, el escalón
+anterior es de ~406 MB: **ningún brazo ahorró lo suficiente para bajar a ese escalón,
+unos 80 MB**. Un ahorro menor, de existir, no se ve.
+
+Lo mismo da, al revés, un dato nuevo: **la demanda real de NER está entre 406 y
+487 MB**, porque cruzó el escalón anterior.
+
+El umbral de 20 MB que fijó el plan (§4bis.4) era más fino de lo que el instrumento
+resuelve. Se declara acá en vez de ajustarlo en silencio.
+
+### 6.4 Lo que queda sin cambiar los pesos: reempaquetar el mismo modelo
+
+ONNX Runtime Web copia el archivo entero (178,5 MB) dentro de la memoria de WASM para
+crear la sesión, arma los pesos a partir de esa copia y la libera. La memoria de WASM
+no devuelve lo liberado, así que su máximo carga con las dos cosas. Es compatible con
+los 406-487 MB medidos. **Plausible, no verificado.**
+
+Dos formatos del **mismo modelo, con los mismos pesos**, evitan esa doble copia:
+
+- **Datos externos**: el grafo queda en un archivo chico y los pesos van aparte;
+  ONNX los lee directo a su lugar.
+- **Formato ORT**, con la opción de usar los pesos desde el propio buffer del modelo:
+  es el formato que ONNX Runtime recomienda para entornos con poca memoria.
+
+Los dos necesitan convertir el archivo con herramientas de Python fuera del repo, que
+serían una dependencia nueva (R-12), y **verificar con la huella de entidades que la
+salida sea idéntica**. El ahorro esperado, si la hipótesis de la doble copia es
+correcta, es del orden del tamaño del archivo: 100-180 MB. **Es la única palanca de
+memoria de NER que no cambia el modelo**, y la decisión es del humano.
+
+### 6.5 T-11 sobre el escaneo real (R2)
+
+Con el build de control, una corrida sobre R2:
+
+| dueño | memoria de WASM | trayectoria |
+|---|---:|---|
+| Tesseract, cada worker de OCR | **90,0 MB** | 75 MB en las primeras páginas, 90 MB desde la tercera, plano hasta la última |
+| OSD de orientación | 56,4 MB | plano |
+| NER | 487,2 MB | igual que con el fixture y que con R1 |
+
+- **El techo de Tesseract con texto real existe y es más bajo que con el fixture** (90
+  contra 148 MB). Es compatible con un ráster más chico: si el escaneo tiene menos de
+  300 DPI, la app rasteriza a su resolución (ADR-163), y T-10 ya había visto el pico
+  del OCR de R2 más bajo que el de P2. **Plausible, no verificado**: no se abre el
+  documento para comprobarlo. El descarte de reciclar Tesseract queda firme.
+- **NER ocupa lo mismo con texto real denso** (R1 y R2) que con el fixture. La
+  inferencia sobre páginas de ~300 palabras no hace crecer la memoria: cabe en el
+  espacio que dejó libre la copia del archivo.
+
+---
+
+## 7. T-13 — el tiempo real del producto
+
+Protocolo: [`Ciclos_Y_Documentos_Reales_Plan.md`](Ciclos_Y_Documentos_Reales_Plan.md)
+§4ter. Sesión `.measure/tiempos-reales/20260919T054313Z/`, doce importaciones `ok`,
+**sin ningún instrumento de memoria**: solo los eventos de fase de la app.
+
+### 7.1 Los números
+
+Segundos, de la importación a `Ready`, por ronda:
+
+| documento | primera importación (modelo en frío) | reapertura a los 5 s |
+|---|---|---|
+| **R1** — nativo, ~50 páginas | 33,7 / 40,3 / 40,3 | 35,1 / 37,9 / 38,0 |
+| **R2** — escaneado, 20 páginas | 46,8 / 47,8 / 49,2 | 46,5 / 46,9 / 47,9 |
+
+Por fase, rango de las seis importaciones de cada documento:
+
+| fase | R1 | R2 |
+|---|---|---|
+| lectura del PDF | 0,2-0,3 s | 0,3-0,4 s |
+| OCR | — | 30,7-32,5 s (**1,5-1,6 s por página**) |
+| carga del modelo de NER | 0,9-1,0 s, solo la primera vez | 0,8-0,9 s, **siempre** |
+| inferencia de NER | 32,4-39,1 s (**0,64-0,77 s por página**) | 14,4-15,3 s (**0,72-0,77 s por página**) |
+
+- **NER es casi todo el tiempo del documento nativo** (96-99 %) y un tercio del
+  escaneado, donde el OCR ocupa los otros dos tercios.
+- **La reapertura no ahorra casi nada.** En R1, el modelo ya está cargado, pero el
+  segundo que se ahorra es chico al lado de 35-39 s de inferencia. En R2 el modelo se
+  recarga igual, porque el OCR dura más que los 15 s de NER (ADR-167, T-10 §2.3).
+
+### 7.2 El instrumento no inflaba los tiempos
+
+Con los mismos documentos, T-10 midió 34,8-40,9 s para R1 y 46,8-49,8 s para R2 con un
+GC forzado por segundo. Sin instrumento dan 33,7-40,3 s y 46,8-49,2 s: **la diferencia
+cae dentro de la dispersión entre rondas**. Los tiempos de T-10 eran, en la práctica,
+los del producto.
+
+### 7.3 La primera corrida es la más rápida
+
+En esta sesión y en T-10, la primera importación de R1 es la más rápida (33,7 y
+34,8 s) y las siguientes quedan ~15-20 % más lentas. El banco es una **MacBook Air M1,
+sin ventilador**, que baja la velocidad del procesador bajo carga sostenida. Es
+compatible con eso. **Plausible, no verificado**: el sistema no registró avisos
+térmicos. Consecuencia para leer cualquier tiempo de este banco: una corrida aislada
+puede salir hasta un 20 % más rápida que en uso sostenido.
+
+### 7.4 Contra los objetivos del producto
+
+`07_Performance_Strategy.md` §1, extrapolando por página a partir de los tiempos
+reales (es una extrapolación: ninguno de los dos documentos tiene 10 páginas):
+
+| objetivo | a ritmo de R1 / R2 | lectura |
+|---|---|---|
+| 10 páginas con texto, **< 8 s** | ~7,4-9,0 s en frío, ~6,5-8,0 s reabriendo | **al límite**: con el procesador ya caliente, lo supera |
+| 10 páginas escaneadas, **< 60 s** | ~23-25 s | cumple con holgura |
+
+El objetivo de texto es el que está en riesgo, y el costo es la inferencia de NER sobre
+texto real. Con los fixtures del gate (~20 palabras por página) el mismo objetivo se
+cumple en 2,3 s, que es por qué nunca apareció.
+
+---
+
+## 8. Por qué no se midió antes sobre un documento real
+
+Pregunta del humano del 2026-09-19. La respuesta tiene una parte de política y una
+parte de error del planificador.
+
+**La política era correcta para lo que cubre.** Los fixtures del repo son sintéticos
+por regla (`tests/fixtures/README.md`: «sin datos reales», reproducibles,
+commiteables). Un gate tiene que poder correr en CI y dar lo mismo en cualquier
+máquina, y un documento con datos de personas no puede entrar al repo. Hasta T-10, el
+arnés de medición solo sabía abrir fixtures commiteados o generados: **no había forma
+de apuntarlo a un archivo privado sin copiarlo al repo**.
+
+**Pero la brecha estaba identificada y no se empujó.** El 2026-09-13 el plan de
+campaña (§4) ya decía que el fixture no era un escaneo y que hacía falta un perfil
+real. Tres cosas hicieron que quedara como pendiente siete tareas seguidas:
+
+1. **Se lo planteó como un documento *anonimizado*** que tenía que conseguir el
+   humano, y anonimizar un expediente real a mano es justamente el trabajo que la app
+   viene a hacer. La alternativa que se usó en T-10 —medir el documento real sin que
+   salga de la máquina ni entre al repo— no se pensó hasta que el humano ofreció los
+   archivos.
+2. **Se buscó la diferencia en el lugar equivocado.** El plan suponía que un escaneo
+   real pesaba 10-50× más que el fixture y lo trató como un problema de memoria que
+   solo bloqueaba dimensionar el DPI. La diferencia real es la **densidad de texto**
+   (~300 palabras por página contra ~20), y se paga en **tiempo**: nadie la estaba
+   buscando, así que nada la hacía urgente.
+3. **El planificador anotó el límite y siguió.** Cada tarea sobre el fixture era
+   válida en sí misma, y esa es la trampa: ninguna, sola, justificaba frenar. La señal
+   ya existía: un expediente real había encontrado un defecto de render que 57 tests
+   en verde no vieron (`tests/fixtures/README.md`).
+
+**Qué cambia**: queda como regla 9 del plan de campaña (§2bis): caracterizar con
+documentos reales desde el principio, con el mecanismo de T-10, y dejar los fixtures
+para los gates.
+
+---
+
+## 9. Dónde está el cuello de botella del OCR y de NER
+
+Preguntas del humano del 2026-09-19. Se contestan con los eventos de trabajo que T-10 ya
+había guardado (`WORKER_JOB_DISPATCHED` y su cierre, por tipo), sin medir nada nuevo. El
+OSD tiene un solo worker, así que sus duraciones son exactas; las del reconocimiento
+salen de la ocupación promedio de sus dos workers.
+
+### 9.1 La configuración con la que se midió todo
+
+La del producto, sin tocar: preset `auto` (`buildDefaultEngineConfig`) sobre un M1 de 8
+núcleos, 4 de rendimiento y 4 de eficiencia.
+
+| pool | tamaño efectivo | hilos adentro |
+|---|---:|---|
+| reconocimiento de OCR (Tesseract LSTM) | **2 workers en paralelo** | 1 cada uno (tesseract.js no usa hilos) |
+| orientación (OSD, ADR-164) | 1 compartido | 1 |
+| render (pdf.js) | 4 | 1 cada uno |
+| NER | **1 worker** | **4 hilos de ONNX** (el worker más 3 hilos que comparten su memoria) |
+
+### 9.2 El OSD no frena al OCR: el cuello de botella es el reconocimiento
+
+| | OSD por página | reconocimiento por página y worker | ocupación del OSD | ocupación de los 2 reconocedores |
+|---|---:|---:|---:|---:|
+| P2 (fixture) | 133-142 ms | 412-441 ms | 65 % | **95-96 %** |
+| **R2 (escaneo real)** | **255-274 ms** | **2.969-3.128 ms** | **18-19 %** | **98 %** |
+
+- **El OSD es entre 3 y 11 veces más rápido que el reconocimiento**: 3× con el fixture,
+  11,5× con el escaneo real.
+- **Los dos reconocedores están ocupados el 98 % de la etapa**; el OSD, el 18 %. El
+  OSD compartido nunca deja esperando a los reconocedores, así que **un OSD por
+  reconocedor no haría el OCR más rápido**: sumaría ~56 MB de WASM y otra carga de
+  Tesseract a cambio de nada. ADR-164 queda más justificado con el documento real que
+  con el fixture.
+- Para acortar el OCR, la palanca está en los reconocedores: más workers (cada uno
+  suma 90-148 MB de WASM) o menos trabajo por página. Hoy hay CPU libre durante el OCR:
+  los reconocedores ocupan dos núcleos de ocho, y el render y el OSD trabajan de a
+  ratos.
+
+### 9.3 NER: un worker, cuatro hilos, una inferencia a la vez
+
+- **El pool de NER crea un solo worker** (bitácora §5.4): `NerEngine` recorre las
+  páginas con un `for`/`await`, así que nunca hay dos trabajos de NER a la vez.
+- **Adentro de ese worker sí hay paralelismo real**: ONNX Runtime corre con cuatro
+  hilos (`min(4, núcleos/2)`) que reparten entre sí las multiplicaciones de matrices
+  de **cada** inferencia. Son los tres `thread-pool-worker-1/thread-*` que ve CDP.
+  transformers.js, además, encadena las inferencias de un mismo worker: nunca corre dos
+  a la vez.
+- **Los hilos trabajan**: con dos en vez de cuatro, NER tardó ~48 % más (T-12, brazo D).
+  La escala no es perfecta —duplicar los hilos no duplica la velocidad—, pero es real.
+
+Caminos para acortar NER sin cambiar el modelo, **ninguno medido todavía**:
+
+| camino | memoria | salida | qué se espera |
+|---|---|---|---|
+| más hilos de ONNX (6 u 8) | +~0,5 MB | idéntica (T-12 mostró que los hilos no la cambian) | **incierto**: los 4 núcleos que se sumarían son los de eficiencia |
+| varios fragmentos de texto por inferencia | similar | a verificar con la huella | mejor aprovechamiento de cada multiplicación; cambia el protocolo del worker (ADR) |
+| correr NER de una página mientras el OCR procesa las siguientes | **+400-500 MB de pico** (Tesseract y ONNX a la vez) | idéntica | hasta ~15 s menos en R2 (el tiempo de NER); la precarga ya se descartó por memoria (plan de campaña §5 punto 4) |
+| un segundo worker de NER | **+~580 MB** | idéntica | poco: los dos competirían por los mismos núcleos |
+

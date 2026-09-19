@@ -11,7 +11,8 @@
 >
 > **T-9 y T-10 ejecutadas el mismo día**, sin cambios de protocolo. Resultado en
 > [`Ciclos_Y_Documentos_Reales_Medicion.md`](Ciclos_Y_Documentos_Reales_Medicion.md).
-> T-11 sigue sin empezar; su sección (§4) se reescribió antes de delegarla.
+> T-11 ejecutada el 2026-09-19, con su sección (§4) reescrita antes de delegarla;
+> resultado en el mismo informe, §5.
 
 ---
 
@@ -405,6 +406,105 @@ y una diferencia de más del 10 % entre corridas en la misma memoria se señala.
 worker en tres corridas, con P2-200p para la trayectoria de Tesseract.
 
 ---
+
+## 4bis. T-12 — Configurar el modelo de NER sin cambiarlo
+
+> **Escrito el 2026-09-19, antes de medir.** Pedido del humano: buscar si alguna
+> configuración de NER baja su memoria **sin cambiar de modelo**, probarla sobre los
+> documentos reales y pasar el instrumento de T-11 por ellos.
+>
+> **Ejecutada el mismo día.** Resultado en
+> [`Ciclos_Y_Documentos_Reales_Medicion.md`](Ciclos_Y_Documentos_Reales_Medicion.md) §6.
+> Un desvío declarado: el umbral de 20 MB de §4bis.4 resultó más fino de lo que el
+> instrumento resuelve (la memoria de WASM crece de a 20 %).
+
+### 4bis.1 Lo que se encontró leyendo el código
+
+El worker de NER crea el pipeline con `dtype: "q8"` y nada más
+(`ner-engine/src/worker/kernel.ts`, `ensureClassifierLoaded`). Todo lo demás es el
+default de las dos librerías:
+
+- **transformers.js 4.2.0 deja pasar opciones a ONNX Runtime**:
+  `pipeline(..., { session_options })` llega intacto a `InferenceSession.create`
+  (`backends/onnx.js`, `createInferenceSession`).
+- **La arena de memoria y los patrones de memoria ya están apagados.** ONNX Runtime
+  Web pasa `!!enableCpuMemArena` y `!!enableMemPattern` a la sesión
+  (`lib/wasm/session-options.ts`), que dan `false` si no se configuran. Las dos
+  palancas clásicas no tienen nada que ahorrar acá.
+- **El modelo se copia entero dentro de la memoria de WASM para crear la sesión** y
+  se libera después (`copyFromExternalBuffer` y el `_free` del `finally` en
+  `lib/wasm/wasm-core-impl.ts`). La memoria de WASM nunca se achica, así que su máximo
+  incluye los 178,5 MB de esa copia aunque ya no se usen. Es la explicación más
+  probable de por qué 178,5 MB de archivo terminan en 487 MB: **plausible, no
+  verificado**.
+- **transformers.js no retiene el archivo en JS**: el worker de NER tiene 24 MB de
+  *backing stores*, no 178 (T-11, `wasm-p2-run0.json`).
+- **Hilos**: ONNX usa `min(4, núcleos/2)` = 4 en este banco (el worker más tres hilos).
+
+### 4bis.2 Los brazos
+
+Cada uno es un parche de una línea sobre el árbol limpio, como en T-8. Nunca se
+commitea al producto: el script lo aplica, construye y revierte.
+
+| brazo | cambio | por qué podría bajar la memoria | riesgo |
+|---|---|---|---|
+| **A** | ninguno | control | — |
+| **B** | `graphOptimizationLevel: "basic"` | las optimizaciones de grafo crean pesos fusionados mientras los originales siguen vivos | la inferencia puede ser más lenta |
+| **C** | `extra.session.disable_prepacking: "1"` | el *prepacking* hace copias reordenadas de los pesos | la inferencia puede ser más lenta |
+| **D** | `env.backends.onnx.wasm.numThreads = 2` | menos hilos, menos pilas y buffers por hilo | más lenta, casi seguro |
+
+**Queda afuera, y se reporta como candidato**: reempaquetar **el mismo modelo** en
+formato de datos externos o en formato ORT, para que los pesos no se copien dos veces
+al cargar. No cambia los pesos, pero necesita una herramienta de conversión fuera del
+repo (dependencia nueva, R-12) y una decisión del humano.
+
+### 4bis.3 Protocolo
+
+- **Documento**: R1, el nativo real, donde NER es casi todo el trabajo. Mismas reglas
+  de confidencialidad que §3.1.
+- **Qué se mide por corrida**, con el instrumento de T-11: la memoria de WASM de NER
+  después de cargar el modelo, el tiempo de NER, y una **huella de las entidades**.
+  La huella es un SHA-256 calculado dentro de la app sobre (página, tipo, caja
+  redondeada) de cada ocurrencia de NER, más su cantidad y la suma de sus
+  confianzas. El texto no sale de la app.
+- **Intercalado**: A B C D × 3 rondas en una sesión, con los `dist` construidos una
+  vez y verificados por digest (mecanismo de T-8).
+- **Además**, con el build de control: una corrida de T-11 sobre R2, para medir el
+  techo de Tesseract con texto real (§4, punto 8 del informe).
+
+### 4bis.4 Cómo se lee, fijado antes de medir
+
+- **Memoria**: el tamaño de la memoria de WASM no tiene ruido de presión. Una
+  diferencia de más de **20 MB** contra A, repetida en las tres rondas, es real.
+- **Salida**: un brazo que cambia la huella de entidades **queda descartado**, sin
+  importar cuánto ahorre: cambiar lo que detecta es cambiar el modelo, y eso no se
+  pidió. Si solo cambia la suma de confianzas, se reporta con el tamaño del cambio.
+- **Tiempo**: el tiempo de NER de R1 varió ~15 % entre rondas en T-10. Por debajo de
+  eso, no se reclama ninguna diferencia.
+
+## 4ter. T-13 — El tiempo real del producto sobre los documentos reales
+
+> **Escrito el 2026-09-19, antes de medir.** Pregunta del humano: ¿cuáles son los
+> tiempos reales de la aplicación sobre los dos documentos?
+>
+> **Ejecutada el mismo día.** Resultado en
+> [`Ciclos_Y_Documentos_Reales_Medicion.md`](Ciclos_Y_Documentos_Reales_Medicion.md) §7.
+
+Los tiempos de T-10 **no son los del producto**: `measureProfile` fuerza un GC por
+segundo en cada target (ADR-159), y T-10 §2.1 ya los rotuló «bajo instrumento». T-13
+mide sin ningún instrumento de memoria: ni sampler de RSS ni lecturas por CDP, solo
+los eventos de fase que la app ya emite (`tests/perf/real-docs-timing.spec.ts`).
+
+- **Por instancia nueva de la app**, dos importaciones del mismo documento: la
+  primera después de abrir la app (el modelo de NER se carga en frío) y una reapertura
+  a los 5 s de cerrarlo.
+- **R1 y R2, tres rondas**, orden alternado (`R1 R2 · R2 R1 · R1 R2`).
+- **Se reporta**: importación → `Ready`, y por fase: lectura del PDF, OCR, carga del
+  modelo de NER e inferencia de NER. Por ronda, sin promediar una corrida fallida.
+- **Cómo se lee**: se comparan contra los objetivos de `07_Performance_Strategy.md` §1
+  (10 páginas con texto < 8 s; 10 escaneadas < 60 s), extrapolando por página y
+  diciéndolo; y contra T-10, para saber cuánto agregaba el instrumento.
+- Mismas reglas de confidencialidad que §3.1.
 
 ## 5. Lo que este plan no hace
 

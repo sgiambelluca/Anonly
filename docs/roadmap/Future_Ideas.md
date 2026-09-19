@@ -140,6 +140,30 @@ nativo, ONNX Runtime en Rust), pero eso no es migrar el contenedor: es reescribi
 el Core y renunciar a la variante web. Es una decisión de producto distinta y no
 está propuesta acá.
 
+#### Lo que T-11 midió adentro del renderer (2026-09-19)
+
+Con la memoria de WASM ya medida por worker
+(`roadmap/Ciclos_Y_Documentos_Reales_Medicion.md` §5 y §6), el proceso del renderer
+se parte así después de cargar NER, en lecturas completas:
+
+| | tamaño | qué pasa con Tauri |
+|---|---:|---|
+| WASM del modelo de NER | 487 MB | **no cambia**: es la memoria lineal que pide ONNX, en cualquier motor |
+| WASM de Tesseract, durante el OCR | 90-148 MB por worker | **no cambia**, por la misma razón |
+| heap de JS de todos los targets | 138-178 MB | cambia de motor (JavaScriptCore en macOS), no desaparece |
+| **sin atribuir: ni WASM ni JS** | **443-626 MB** | **se mueve con la app**, no se elimina |
+
+Los 443-626 MB sin atribuir son memoria nativa del motor web **corriendo nuestro
+código**: el código WASM compilado (el binario de ONNX solo pesa 23,6 MB, y compilado
+ocupa varias veces eso), los lienzos donde se rasterizan las páginas, el DOM y las
+estructuras internas del motor, más los ~135 MB de un renderer recién abierto.
+**Tauri no los elimina**: ese trabajo pasa a hacerse en el proceso de contenido de
+WKWebView en macOS, que necesita memoria equivalente para lo mismo, más o menos según
+el motor. Cuánto, no se sabe sin medirlo ahí. En Windows, WebView2 es Chromium:
+casi lo mismo que hoy.
+
+Lo que Tauri sí elimina sigue siendo el costo fijo de Electron, los ~230 MB de arriba.
+
 #### El riesgo que ya tenemos cuantificado
 
 El multihilo de ONNX Runtime depende de `crossOriginIsolated` y

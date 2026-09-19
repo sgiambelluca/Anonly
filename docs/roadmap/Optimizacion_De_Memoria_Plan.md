@@ -48,6 +48,20 @@
 > **no hay fuga**, y los documentos reales cuestan en **tiempo**, no en memoria: una
 > página real tiene ~15 veces más palabras que una del fixture. Quedan dos preguntas
 > para el humano (§5 puntos 7 y 8). T-11 sigue como siguiente paso.
+>
+> **Cierre de T-11 (2026-09-19)**: la memoria de WASM, medida por worker. Tesseract
+> llega a un techo de 148 MB por worker y no convive con NER; el modelo de NER ocupa
+> 487 MB de WASM y es el mayor consumidor de la app. Nueva pregunta para el humano:
+> §5 punto 9.
+>
+> **Cierre de T-12 (2026-09-19)**: ninguna opción de sesión de ONNX baja la memoria de
+> NER sin cambiar su salida. Queda una sola palanca sin tocar los pesos: reempaquetar
+> el mismo modelo (§5 punto 9). Con el escaneo real, Tesseract llega a 90 MB por
+> worker, menos que con el fixture.
+>
+> **T-13 (2026-09-19), tiempos reales**: sin instrumento, R1 tarda 34-40 s y R2
+> 47-49 s. A ~0,7 s de NER por página de texto real, diez páginas nativas quedan al
+> límite del objetivo de 8 s (§5 punto 8).
 
 **Perfil de referencia**: P2 — 50 páginas escaneadas, OCR + NER reales, sobre el
 shell de Electron empaquetado.
@@ -790,7 +804,7 @@ documento**.
 > se recarga en cada documento (ADR-167): eso mueve el pico a la recarga y deja al M1
 > «caliente» de ADR-146 midiendo otra cosa (§5 punto 7).
 
-### T-11 — El instrumento de WASM por worker — **siguiente paso, sin empezar**
+### T-11 — El instrumento de WASM por worker — **CERRADA (2026-09-19)**
 
 **Dónde**: `tests/perf/` únicamente: lee cada `WebAssembly.Memory` de cada target por
 CDP (`Runtime.queryObjects`), sin tocar el producto. La vía original, un parche en
@@ -803,6 +817,25 @@ worker. Con eso se decide si vale la pena reciclar los workers de Tesseract a mi
 del documento (alternativa B, §5 punto 3), y dónde está una fuga que T-9 vea en el
 RSS pero no en el heap de JS. Decisión del humano del 2026-09-18: se hace **después**
 de ver T-9 y T-10.
+
+> **Cerrada** ([`Ciclos_Y_Documentos_Reales_Medicion.md`](Ciclos_Y_Documentos_Reales_Medicion.md)
+> §5). Tesseract ocupa 148 MB de WASM por worker de OCR y llega a ese techo en las
+> primeras cinco páginas; cuando NER carga, sus workers ya no existen. El modelo de
+> NER ocupa 487 MB de WASM más 94 MB de JS: es el mayor consumidor de la app. Quedan
+> descartadas dos palancas (§3) y aparece una nueva, la memoria del modelo de NER
+> (§5 punto 9).
+
+### T-12 — Configurar el modelo de NER sin cambiarlo — **CERRADA (2026-09-19)**
+
+**Dónde**: `tests/perf/` más tres parches de medición sobre
+`ner-engine/src/worker/kernel.ts` que el script aplica y revierte (mecanismo de T-8);
+nunca se commitean al producto. **Plan**: [`Ciclos_Y_Documentos_Reales_Plan.md`](Ciclos_Y_Documentos_Reales_Plan.md)
+§4bis. **Resultado**: [`Ciclos_Y_Documentos_Reales_Medicion.md`](Ciclos_Y_Documentos_Reales_Medicion.md) §6.
+
+> **Cerrada**: sobre R1, intercalado, tres rondas. Optimización de grafo básica
+> cambia lo que detecta; sin *prepacking* no ahorra nada visible; dos hilos es ~45 %
+> más lento. Ninguna baja los 487 MB un escalón de crecimiento (~80 MB). La memoria
+> de WASM crece de a 20 %, así que un ahorro menor no se ve con este instrumento.
 
 ## 2bis. Cómo se corre una medición sin arruinarla
 
@@ -852,6 +885,15 @@ todas costaron tiempo real.
    pares. Y los dos brazos difieren en **una sola cosa**: si el brazo B revierte
    un commit entero, una diferencia no se puede atribuir al cambio que interesa.
 
+9. **Caracterizar con documentos reales desde el principio; los fixtures son para
+   los gates.** Un fixture sintético es la única forma de tener un gate reproducible y
+   commiteable, pero no dice cuánto trabaja la app con un documento real. Esta campaña
+   midió siete tareas sobre fixtures de ~20 palabras por página antes de ver uno real,
+   que tiene ~300, y recién ahí apareció que NER pesa en tiempo tanto como el OCR.
+   Un documento real se puede medir **sin que entre al repo**: ruta por variable de
+   entorno, nombre neutro, sin capturar texto (`tests/perf/real-docs.spec.ts`). Ver
+   `Ciclos_Y_Documentos_Reales_Medicion.md` §7.
+
 ## 3. Lo que no se vuelve a mirar
 
 Descartado con medición o con código. Reabrir cualquiera de estos necesita
@@ -868,6 +910,12 @@ evidencia nueva, no una idea nueva.
 | `nerPoolSize` | bitácora §5.4: el segundo worker no existe |
 | Bajar el paralelismo en general | ADR-154 §1, decisión del humano |
 | El `angle` de `SetImageFile` para rotar | ADR-160 §4 del Contexto |
+| Reciclar los workers de Tesseract a mitad del documento | T-11: su memoria llega a 148 MB por worker en las primeras cinco páginas y no crece en 200. Medido sobre fixtures: falta confirmar el techo con texto real (`Ciclos_Y_Documentos_Reales_Medicion.md` §5.3) |
+| Dar de baja el pool de OCR antes de cargar NER | T-11: cuando NER carga, los workers de Tesseract ya no existen (ADR-157 ya lo hace) |
+| Arena y patrones de memoria de ONNX para NER | T-12: ONNX Runtime Web ya los crea apagados |
+| `graphOptimizationLevel` más bajo para NER | T-12: cambia lo que detecta, y no ahorra memoria |
+| Sin *prepacking* en NER | T-12: detecta lo mismo y no ahorra memoria visible |
+| Menos hilos para NER | T-12: medio MB menos y ~45 % más lento |
 
 ---
 
@@ -909,6 +957,9 @@ estos levers importan.** No bloquea T-1 a T-4; sí bloquea dimensionar T-6.
    del documento) **no se recomienda arrancar todavía**: apostaba entera a la
    hipótesis del heap, y ADR-159 §3 le sacó la mitad del peso. Se re-evalúa con
    lo que midan T-1 y T-2.
+   **Descartada con medición en T-11 (2026-09-19)**: la memoria de Tesseract llega
+   a su techo en las primeras páginas y no crece después (ver §3). Pendiente solo
+   de confirmar el techo con texto real.
 4. **Precargar NER durante el OCR: descartado el 2026-09-17, decisión tomada.**
    Era una idea de velocidad, pero el costo que midió fue de memoria: el disparo
    temprano subió el pico de RSS **144–422 MB en las tres rondas**, por encima
@@ -955,10 +1006,20 @@ estos levers importan.** No bloquea T-1 a T-4; sí bloquea dimensionar T-6.
    presupuesto se aplica así (y entonces un escaneo real no cumple) o si «caliente»
    se redefine para este caso. Cualquiera de las dos es una enmienda de ADR-146.
    Detalle: `Ciclos_Y_Documentos_Reales_Medicion.md` §2.3.
-8. **El objetivo de 8 s para diez páginas nativas, con texto real** (T-10, pendiente
-   del humano). Extrapolando los ~0,7 s de NER por página real, diez páginas darían
-   ~8-9 s en frío. Es una extrapolación bajo instrumento. Para medirlo hace falta un
-   documento nativo real de ~10 páginas. Detalle: mismo informe, §2.4.
+8. **El objetivo de 8 s para diez páginas nativas, con texto real** (T-10 y T-13,
+   pendiente del humano). Medido sin instrumento en T-13: NER cuesta 0,64-0,77 s por
+   página de texto real, así que diez páginas darían ~7,4-9,0 s en frío. Sigue siendo
+   una extrapolación por página; un documento nativo real de ~10 páginas la cerraría.
+   Detalle: `Ciclos_Y_Documentos_Reales_Medicion.md` §7.4.
+
+9. **La memoria del modelo de NER** (T-11 y T-12, pendiente del humano). Un archivo
+   de 178,5 MB ocupa 487 MB de WASM una vez cargado, más 94 MB de JS: es el mayor
+   consumidor de la app. Las opciones de sesión de ONNX ya se midieron (T-12) y
+   ninguna sirve. Quedan dos caminos: **reempaquetar el mismo modelo** (datos externos
+   o formato ORT) para que no se copie dos veces al cargar, que no cambia los pesos
+   pero necesita herramientas de conversión fuera del repo (R-12) y verificar que la
+   salida sea idéntica; o **cambiar de modelo**, que el humano no quiere por ahora
+   (2026-09-19). Detalle: `Ciclos_Y_Documentos_Reales_Medicion.md` §6.4.
 
 ## 6. Trabajo posterior al hardening
 
