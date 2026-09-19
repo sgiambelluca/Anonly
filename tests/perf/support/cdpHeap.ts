@@ -93,6 +93,23 @@ interface CdpGetHeapUsageResult {
   readonly backingStorageSize: number;
 }
 
+/**
+ * Subconjunto de `Runtime.RemoteObject` (T-11, plan §4.2): `objectId` cuando
+ * el resultado es una referencia viva (el caso de `WebAssembly.Memory.prototype`
+ * y del array que devuelve `queryObjects`), `value` cuando se pidió
+ * `returnByValue: true` (el array final de `{byteLength, shared}`).
+ */
+interface CdpRemoteObject {
+  readonly type: string;
+  readonly objectId?: string;
+  readonly value?: unknown;
+}
+
+interface CdpEvaluateResult {
+  readonly result: CdpRemoteObject;
+  readonly exceptionDetails?: { readonly text: string };
+}
+
 interface CdpMethodMap {
   readonly "Target.setAutoAttach": {
     readonly params: {
@@ -113,6 +130,45 @@ interface CdpMethodMap {
   readonly "Runtime.getHeapUsage": {
     readonly params: Record<string, never>;
     readonly result: CdpGetHeapUsageResult;
+  };
+  /**
+   * T-11 (plan §4.2, paso 1): `WebAssembly.Memory.prototype` en el target,
+   * para pasarle su `objectId` a `queryObjects`. También se usa para crear
+   * las memorias de prueba del Paso 0 (§4.3) — `expression` alcanza para
+   * ambos usos, no hace falta un método CDP distinto.
+   */
+  readonly "Runtime.evaluate": {
+    readonly params: {
+      readonly expression: string;
+      readonly objectGroup?: string;
+      readonly returnByValue?: boolean;
+      readonly awaitPromise?: boolean;
+    };
+    readonly result: CdpEvaluateResult;
+  };
+  /** T-11 (plan §4.2, paso 2): todas las instancias vivas de un prototipo dado, como un array remoto. */
+  readonly "Runtime.queryObjects": {
+    readonly params: { readonly prototypeObjectId: string; readonly objectGroup?: string };
+    readonly result: { readonly objects: CdpRemoteObject };
+  };
+  /** T-11 (plan §4.2, paso 3): mapea el array remoto a `{byteLength, shared}[]` por valor. */
+  readonly "Runtime.callFunctionOn": {
+    readonly params: {
+      readonly objectId: string;
+      readonly functionDeclaration: string;
+      readonly returnByValue?: boolean;
+      readonly objectGroup?: string;
+    };
+    readonly result: CdpEvaluateResult;
+  };
+  /**
+   * T-11 (plan §4.2, paso 4): **siempre** en un `finally`, incluso si algo
+   * falló arriba — sin esto el inspector retiene las memorias que alcanzó a
+   * leer y el instrumento se convierte en una fuga (ver `readWasmForTarget`).
+   */
+  readonly "Runtime.releaseObjectGroup": {
+    readonly params: { readonly objectGroup: string };
+    readonly result: Record<string, never>;
   };
 }
 
@@ -149,6 +205,19 @@ function isGetHeapUsageResult(value: unknown): value is CdpGetHeapUsageResult {
     typeof value.totalSize === "number" &&
     typeof value.embedderHeapUsedSize === "number" &&
     typeof value.backingStorageSize === "number"
+  );
+}
+
+/** La forma cruda que devuelve el `functionDeclaration` de `queryWasmMemories` — antes de mapear `byteLength` a `byteLengthBytes`. */
+function isWasmMemoryReadingList(
+  value: unknown,
+): value is ReadonlyArray<{ readonly byteLength: number; readonly shared: boolean }> {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (v: unknown) =>
+        isRecord(v) && typeof v.byteLength === "number" && typeof v.shared === "boolean",
+    )
   );
 }
 
@@ -270,17 +339,39 @@ interface LiveTarget {
  * más quiere ver— **no es visible con este mecanismo**. Reportado en el
  * mensaje final de la tarea como ambigüedad abierta, no resuelto acá.
  */
-export interface RawTargetHeapReading {
+/**
+ * Los cinco campos que identifican un target dentro de un snapshot, comunes
+ * a cualquier lectura que se le haga (heap, T-1; WASM, T-11) — extraído para
+ * que `classifyTargets` clasifique por estructura sin acoplarse a qué se
+ * leyó de cada uno.
+ */
+export interface TargetIdentity {
   readonly sessionId: string;
   readonly parentSessionId: string | undefined;
   readonly type: string;
   readonly url: string;
   readonly attachedAtMs: number;
+}
+
+export interface RawTargetHeapReading extends TargetIdentity {
   readonly usedSizeBytes: number | undefined;
   readonly totalSizeBytes: number | undefined;
   readonly embedderHeapUsedSizeBytes: number | undefined;
   readonly backingStorageSizeBytes: number | undefined;
   /** Motivo por el que no se pudo leer — `undefined` si la lectura salió bien. */
+  readonly readError: string | undefined;
+}
+
+/** Una instancia viva de `WebAssembly.Memory` en un target (T-11, plan §4.2). */
+export interface WasmMemoryReading {
+  readonly byteLengthBytes: number;
+  /** `buffer instanceof SharedArrayBuffer` — ONNX con hilos comparte una entre el worker de NER y cada uno de sus pthreads (plan §4.2). */
+  readonly shared: boolean;
+}
+
+export interface RawTargetWasmReading extends TargetIdentity {
+  /** Todas las `WebAssembly.Memory` vivas en este target. `undefined` si `readError` está seteado — nunca un array vacío por falta de lectura. */
+  readonly memories: ReadonlyArray<WasmMemoryReading> | undefined;
   readonly readError: string | undefined;
 }
 
@@ -292,6 +383,8 @@ class CdpBrowserConnection {
   >();
   private readonly targets = new Map<string, LiveTarget>();
   private readonly liveSessionIds = new Set<string>();
+  /** Sufijo único por lectura de WASM — cada una usa su propio `objectGroup` para no liberar de más entre lecturas concurrentes del mismo target. */
+  private nextWasmObjectGroupId = 0;
 
   private constructor(private readonly ws: WebSocket) {
     ws.addEventListener("message", (event: MessageEvent) => this.handleMessage(event));
@@ -415,15 +508,25 @@ class CdpBrowserConnection {
    * hilo ocupado en cómputo síncrono no es inspeccionable desde afuera sin
    * pausarlo), no un defecto de este instrumento en particular.
    */
-  async snapshotHeapByTarget(): Promise<ReadonlyArray<RawTargetHeapReading>> {
+  /**
+   * `forceGc` (default `true`, T-11 plan §4.4 punto 4): la corrida estándar
+   * (T-1, ADR-159 §2) siempre fuerza GC antes de leer — esta firma no cambia
+   * para ningún llamador existente. T-11 necesita además la lectura SIN
+   * forzar, para comparar "antes/después de GC" a los 6 s de cerrar (la
+   * corrida estándar solo tenía el "después").
+   */
+  async snapshotHeapByTarget(forceGc = true): Promise<ReadonlyArray<RawTargetHeapReading>> {
     const sessionIds = [...this.liveSessionIds];
     const readings = await Promise.all(
-      sessionIds.map((sessionId) => this.readOneTarget(sessionId)),
+      sessionIds.map((sessionId) => this.readOneTarget(sessionId, forceGc)),
     );
     return readings.filter((r): r is RawTargetHeapReading => r !== undefined);
   }
 
-  private async readOneTarget(sessionId: string): Promise<RawTargetHeapReading | undefined> {
+  private async readOneTarget(
+    sessionId: string,
+    forceGc: boolean,
+  ): Promise<RawTargetHeapReading | undefined> {
     const target = this.targets.get(sessionId);
     if (target === undefined) return undefined;
     const base = {
@@ -435,7 +538,7 @@ class CdpBrowserConnection {
     };
     try {
       const heap = await withTimeout(
-        this.readHeapUsage(sessionId),
+        this.readHeapUsage(sessionId, forceGc),
         HEAP_READ_TIMEOUT_MS,
         `sin respuesta de CDP en ${HEAP_READ_TIMEOUT_MS}ms — target probablemente ocupado en una llamada sincronica (WASM u otra)`,
       );
@@ -469,15 +572,144 @@ class CdpBrowserConnection {
     }
   }
 
-  private async readHeapUsage(sessionId: string): Promise<unknown> {
+  private async readHeapUsage(sessionId: string, forceGc: boolean): Promise<unknown> {
     await this.send("HeapProfiler.enable", {}, sessionId);
-    await this.send("HeapProfiler.collectGarbage", {}, sessionId);
+    if (forceGc) await this.send("HeapProfiler.collectGarbage", {}, sessionId);
     return this.send("Runtime.getHeapUsage", {}, sessionId);
+  }
+
+  /**
+   * T-11 (plan §4.2): `WebAssembly.Memory` vivas de cada target, mismo patrón
+   * que `snapshotHeapByTarget` (paralelo entre targets, tope por target) —
+   * reusa la MISMA conexión y el MISMO árbol de targets, nunca un segundo
+   * cliente CDP.
+   */
+  async snapshotWasmByTarget(): Promise<ReadonlyArray<RawTargetWasmReading>> {
+    const sessionIds = [...this.liveSessionIds];
+    const readings = await Promise.all(
+      sessionIds.map((sessionId) => this.readWasmForTarget(sessionId)),
+    );
+    return readings.filter((r): r is RawTargetWasmReading => r !== undefined);
+  }
+
+  private async readWasmForTarget(sessionId: string): Promise<RawTargetWasmReading | undefined> {
+    const target = this.targets.get(sessionId);
+    if (target === undefined) return undefined;
+    const base = {
+      sessionId,
+      parentSessionId: target.parentSessionId,
+      type: target.info.type,
+      url: target.info.url,
+      attachedAtMs: target.attachedAtMs,
+    };
+    const objectGroup = `anonly-wasm-probe-${sessionId}-${this.nextWasmObjectGroupId}`;
+    this.nextWasmObjectGroupId += 1;
+    try {
+      const memories = await withTimeout(
+        this.queryWasmMemories(sessionId, objectGroup),
+        HEAP_READ_TIMEOUT_MS,
+        `sin respuesta de CDP en ${HEAP_READ_TIMEOUT_MS}ms — target probablemente ocupado en una llamada sincronica (WASM u otra)`,
+      );
+      return { ...base, memories, readError: undefined };
+    } catch (err: unknown) {
+      return {
+        ...base,
+        memories: undefined,
+        readError: err instanceof Error ? err.message : String(err),
+      };
+    } finally {
+      // Plan §4.2 punto 4: SIEMPRE, incluso si algo de arriba falló o
+      // timeouteó. No se espera la confirmación con `await`: si el target
+      // sigue ocupado, el mensaje queda en su cola de CDP y se procesa en
+      // cuanto atiende de nuevo — bloquear acá con `await` reproduciría el
+      // mismo colgado que `HEAP_READ_TIMEOUT_MS` existe para evitar.
+      void this.send("Runtime.releaseObjectGroup", { objectGroup }, sessionId).catch(() => {
+        // Sesión ya desconectada u otro error de transporte: nada que
+        // liberar del lado del inspector si el target ya no existe.
+      });
+    }
+  }
+
+  private async queryWasmMemories(
+    sessionId: string,
+    objectGroup: string,
+  ): Promise<ReadonlyArray<WasmMemoryReading>> {
+    const proto = await this.send(
+      "Runtime.evaluate",
+      { expression: "WebAssembly.Memory.prototype", objectGroup, returnByValue: false },
+      sessionId,
+    );
+    if (proto.exceptionDetails !== undefined) {
+      throw new Error(`Runtime.evaluate fallo: ${proto.exceptionDetails.text}`);
+    }
+    const prototypeObjectId = proto.result.objectId;
+    if (prototypeObjectId === undefined) {
+      throw new Error(`Runtime.evaluate no devolvio objectId: ${JSON.stringify(proto.result)}`);
+    }
+
+    const queried = await this.send(
+      "Runtime.queryObjects",
+      { prototypeObjectId, objectGroup },
+      sessionId,
+    );
+    const arrayObjectId = queried.objects.objectId;
+    if (arrayObjectId === undefined) {
+      throw new Error(`Runtime.queryObjects no devolvio un array: ${JSON.stringify(queried)}`);
+    }
+
+    const listed = await this.send(
+      "Runtime.callFunctionOn",
+      {
+        objectId: arrayObjectId,
+        // `SharedArrayBuffer` puede no existir como global si el target no
+        // es cross-origin-isolated; `typeof` lo cubre sin arriesgar un
+        // ReferenceError dentro del target medido.
+        functionDeclaration:
+          "function () { " +
+          "return this.map(function (m) { " +
+          "return { byteLength: m.buffer.byteLength, " +
+          "shared: typeof SharedArrayBuffer !== 'undefined' && m.buffer instanceof SharedArrayBuffer }; " +
+          "}); }",
+        returnByValue: true,
+        objectGroup,
+      },
+      sessionId,
+    );
+    if (listed.exceptionDetails !== undefined) {
+      throw new Error(`Runtime.callFunctionOn fallo: ${listed.exceptionDetails.text}`);
+    }
+    const value = listed.result.value;
+    if (!isWasmMemoryReadingList(value)) {
+      throw new Error(
+        `Runtime.callFunctionOn devolvio una forma inesperada: ${JSON.stringify(value)}`,
+      );
+    }
+    return value.map((v) => ({ byteLengthBytes: v.byteLength, shared: v.shared }));
   }
 
   close(): void {
     this.ws.close();
   }
+}
+
+/**
+ * Superficie mínima que necesita un consumidor externo para leer heap y WASM
+ * sobre la MISMA conexión (T-11, plan §4.6: "extender cdpHeap.ts... no
+ * duplicar el cliente CDP"). `CdpBrowserConnection` la satisface tal cual —
+ * esto solo evita exportar la clase entera (y con ella `send`, el parseo de
+ * mensajes, etc.) a un módulo que no necesita tocar nada de eso.
+ */
+export interface CdpTargetSnapshotter {
+  snapshotHeapByTarget(forceGc?: boolean): Promise<ReadonlyArray<RawTargetHeapReading>>;
+  snapshotWasmByTarget(): Promise<ReadonlyArray<RawTargetWasmReading>>;
+  close(): void;
+}
+
+/** Abre una conexión nueva (mismo mecanismo que `startHeapSampling`) para un consumidor que orquesta su propio muestreo — hoy, `support/wasmMemory.ts`. */
+export async function connectCdpTargetSnapshotter(
+  userDataDir: string,
+): Promise<CdpTargetSnapshotter> {
+  return CdpBrowserConnection.connect(userDataDir);
 }
 
 /**
@@ -519,7 +751,13 @@ function withTimeout<T>(
 
 // ─── Clasificación estructural (pura, sin CDP — ver el docstring del archivo) ──
 
-export interface ClassifiedTargetHeapSample extends RawTargetHeapReading {
+/**
+ * Los cuatro campos que agrega la clasificación — separados de
+ * `ClassifiedTargetHeapSample` para que `classifyTargets` sea genérica sobre
+ * cualquier lectura que comparta `TargetIdentity` (T-11 la reusa para
+ * `RawTargetWasmReading`, sin reimplementar la estructura padre/hijos).
+ */
+export interface TargetClassification {
   /** Etiqueta estable dentro de un mismo snapshot: `"main"`, `"ocr-worker-1"`, `"ocr-worker-1/tesseract-lstm"`, `"thread-pool-worker-1"`, `"leaf-worker-2"`, etc. */
   readonly label: string;
   /** Por qué se le puso esa etiqueta — para que un reporte no la presente como más certeza de la que tiene. */
@@ -529,6 +767,11 @@ export interface ClassifiedTargetHeapSample extends RawTargetHeapReading {
   /** Role inferred from the factory chunk; unknown stays unknown rather than becoming LSTM. */
   readonly workerRole: "lstm" | "orientation" | "unknown";
 }
+
+export interface ClassifiedTargetHeapSample extends RawTargetHeapReading, TargetClassification {}
+
+/** T-11: misma clasificación estructural, aplicada a lecturas de WASM en vez de heap. */
+export interface ClassifiedTargetWasmSample extends RawTargetWasmReading, TargetClassification {}
 
 function factoryChunk(url: string): ClassifiedTargetHeapSample["factoryChunk"] {
   const configured = process.env.ANONLY_T5_FACTORY_CHUNKS;
@@ -557,10 +800,10 @@ function factoryChunk(url: string): ClassifiedTargetHeapSample["factoryChunk"] {
  * un hash de build sin significado estable entre corridas. Ver el docstring
  * del archivo para la evidencia medida detrás de cada regla.
  */
-export function classifyTargets(
-  readings: ReadonlyArray<RawTargetHeapReading>,
-): ReadonlyArray<ClassifiedTargetHeapSample> {
-  const byParent = new Map<string | undefined, RawTargetHeapReading[]>();
+export function classifyTargets<T extends TargetIdentity>(
+  readings: ReadonlyArray<T>,
+): ReadonlyArray<T & TargetClassification> {
+  const byParent = new Map<string | undefined, T[]>();
   for (const reading of readings) {
     const siblings = byParent.get(reading.parentSessionId) ?? [];
     siblings.push(reading);
