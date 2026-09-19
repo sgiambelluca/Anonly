@@ -254,6 +254,24 @@ ANONLY_REAL_DOC_R1=/ruta/nativo.pdf ANONLY_REAL_DOC_R2=/ruta/escaneado.pdf ./tes
 
 El banco es una MacBook Air M1 sin ventilador: la primera corrida de una sesión puede salir hasta un 20 % más rápida que las siguientes.
 
+## Comparativa externa — el repo contra un binario ya instalado
+
+`external-baseline.spec.ts` mide tiempo y memoria **sin `__anonlyCore`**: el tiempo, del texto del `[role="status"]` (con un `MutationObserver` que registra cada etapa); la memoria, con el mismo `startMemorySampling` de H-10. Por eso sirve para un build de producción —un release instalado—, que el colector de T-10/T-13 no puede medir. `run-comparativa-externa.sh` alterna el build del repo (`repo`) y el binario de `ANONLY_EXT_EXE` (`installed`) sobre R1 y R2, tres rondas. Resultados y lectura: `docs/roadmap/Banco_Windows_Comparativa_Medicion.md`.
+
+```
+ANONLY_REAL_DOC_R1=/ruta/nativo.pdf ANONLY_REAL_DOC_R2=/ruta/escaneado.pdf \
+  ANONLY_EXT_EXE=/ruta/al/Anonly.exe ./tests/perf/run-comparativa-externa.sh
+```
+
+En Windows corre desde Git Bash, con un toolchain **nativo** aparte del de WSL (un binario `.exe` instalado no se puede lanzar desde WSL):
+
+- Node 22 (`winget install OpenJS.NodeJS.22`) y pnpm por `corepack enable`, con su propio `node_modules`. Si la copia Windows del repo trae el `node_modules` de Linux, `pnpm install` falla con `EACCES` al purgarlo: borrarlo desde WSL con `rm -rf`, que no sigue symlinks.
+- El postinstall de Electron no corre: ejecutar a mano `node install.js` dentro de `node_modules/.pnpm/electron@<versión>/node_modules/electron`.
+- El perfil P2 de T-10 necesita `pnpm exec playwright install chromium` para generar su fixture.
+- `systemMemoryPressure.ts` no tiene lector para `win32`: las corridas de Windows salen sin el chequeo de "RSS confundido".
+
+Antes de comparar dos versiones, verificar con `git diff <viejo> <nuevo> -- apps/react-client/src/components/toolbar/` que la etiqueta de estado no cambió, y ojo con **dónde cae "Listo"**: hasta `19b4d13` la toolbar lo mostraba justo en `Ready`; desde el hardening la pantalla de escaneo retiene hasta 1 s más (`SCAN_ADVANCE_PREWARM_GRACE_MS`). Para comparar `Ready` contra `Ready`, leer la marca de etapa de cada versión (informe §3.1).
+
 ## T-5 — Comparación OSD compartido (ADR-164)
 
 Protocolo normativo: `docs/roadmap/T5_OSD_Compartido_Handoff.md` §3.
