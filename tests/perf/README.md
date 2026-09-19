@@ -217,6 +217,43 @@ ANONLY_REAL_DOC_R1=/ruta/al/nativo.pdf ANONLY_REAL_DOC_R2=/ruta/al/escaneado.pdf
 
 El colector corre con `captureOcrWords: false` en los cuatro perfiles: las palabras del OCR son el texto del documento, y no salen de la app. La spec verifica que no haya ninguna **antes** de escribir el reporte. `trace`, `screenshot` y `video` quedan en `off`.
 
+## T-11 — el heap de WASM por worker (ADR-159 §8)
+
+Plan: `docs/roadmap/Ciclos_Y_Documentos_Reales_Plan.md` §4. Convierte el "no atribuido (WASM + nativo)" que `memoryProfile.ts` reporta como una cota (ADR-159 §8) en una medición por worker: por CDP, en cada target, `Runtime.evaluate("WebAssembly.Memory.prototype")` → `Runtime.queryObjects` → `Runtime.callFunctionOn` (`returnByValue: true`, devuelve `{byteLength, shared}` por memoria) → `Runtime.releaseObjectGroup` **siempre**, en un `finally` — sin eso el inspector retiene las memorias que leyó y el instrumento se vuelve una fuga. `support/cdpHeap.ts` expone estos cuatro métodos nuevos en su `CdpMethodMap` y un `snapshotWasmByTarget()` sobre la MISMA conexión que ya usa el heap de JS (`connectCdpTargetSnapshotter`); `support/wasmMemory.ts` es todo lo demás: el sampler combinado (`startWasmHeapSampling`, WASM + heap de JS por target en la misma pasada, cada 1 s), el deduplicado de memoria compartida, la atribución por dueño y el Paso 0.
+
+**La memoria compartida se cuenta una vez.** ONNX con hilos comparte un `SharedArrayBuffer` entre el worker de NER y cada uno de sus pthreads — la firma estructural es la misma que ya distingue `cdpHeap.ts` (`thread-pool-worker-*`/`unclassified-worker-*`: hijos que REPITEN la misma url de blob). Dentro de ese grupo, una memoria `shared: true` del mismo tamaño se deduplica; fuera de él (p. ej. entre el Tesseract LSTM y OSD de un mismo `ocr-worker-*`, que nunca comparten) cada target cuenta por separado aunque coincidiera el tamaño. Ver el docstring de `wasmMemory.ts` y `computeWasmMemoryTotal`.
+
+**Paso 0 corre antes que cualquier corrida y es la condición de parada del plan** (`runWasmStep0`): crea una `WebAssembly.Memory({initial:480})` (31.457.280 bytes exactos) en el hilo principal y en un worker anidado de verdad (un worker cuyo único hijo es otro worker, armado con dos `Blob`/`Worker` sintéticos — no hay forma de tener un worker anidado propio de la app sin abrir un documento), una compartida `initial:16, maximum:16, shared:true` (1.048.576 bytes), verifica que las tres desaparezcan tras soltar la referencia + GC forzado, mide si `Runtime.queryObjects` por sí solo (sin llamar a `collectGarbage`) libera una sonda de ~20 MB ya dereferenciada, y por último abre un P2 real y confirma que algún target `tesseract-*` reporte memoria > 0. Si algo de esto falla, `run-wasm.sh` aborta antes de gastar tiempo en las cuatro corridas de la campaña.
+
+### Correr
+
+```
+./tests/perf/run-wasm.sh                          # Paso 0 + p2-run0 + p2-run1 + p2-run2 + p2-200p, en serie
+ANONLY_WASM_RUNS="p2-run0" ./tests/perf/run-wasm.sh  # Paso 0 + una sola corrida medida
+```
+
+Salida en `.measure/wasm/<sesión>/`: `wasm-step0.json`, `wasm-p2-run0.json`… `wasm-p2-200p.json`, más los logs de cada invocación de Playwright. Nunca pisa una sesión anterior (mismo criterio que `run-ciclos.sh`).
+
+## T-12 — opciones de sesión de NER sobre un documento real
+
+Plan: `docs/roadmap/Ciclos_Y_Documentos_Reales_Plan.md` §4bis. `run-ner-opciones.sh` usa el mecanismo de T-8: cada brazo es un parche de una línea sobre `ner-engine/src/worker/kernel.ts` (`support/ner-arm-*.patch`), se construye una vez, y el `dist` se intercambia verificando su digest. Mide con `wasm-attribution.spec.ts` (`ANONLY_WASM_RUN=r1|r2`, `ANONLY_WASM_LABEL` para el nombre del reporte), que además deja una **huella de lo que NER detectó**: un SHA-256 calculado dentro de la app sobre página, tipo y caja de cada ocurrencia. El texto no sale de la app.
+
+```
+ANONLY_REAL_DOC_R1=/ruta/nativo.pdf ANONLY_REAL_DOC_R2=/ruta/escaneado.pdf ./tests/perf/run-ner-opciones.sh
+```
+
+Ojo al leer la memoria de WASM: **crece por escalones del 20 %**, así que un ahorro más chico que el escalón no cambia el tamaño visible.
+
+## T-13 — tiempo real sobre documentos reales
+
+`real-docs-timing.spec.ts` mide importación → `Ready` por fase **sin ningún instrumento de memoria** (ni sampler de RSS ni CDP), dos veces por instancia: la primera importación y una reapertura a los 5 s. `run-tiempos-reales.sh` corre R1 y R2, tres rondas, orden alternado. Plan: `docs/roadmap/Ciclos_Y_Documentos_Reales_Plan.md` §4ter.
+
+```
+ANONLY_REAL_DOC_R1=/ruta/nativo.pdf ANONLY_REAL_DOC_R2=/ruta/escaneado.pdf ./tests/perf/run-tiempos-reales.sh
+```
+
+El banco es una MacBook Air M1 sin ventilador: la primera corrida de una sesión puede salir hasta un 20 % más rápida que las siguientes.
+
 ## T-5 — Comparación OSD compartido (ADR-164)
 
 Protocolo normativo: `docs/roadmap/T5_OSD_Compartido_Handoff.md` §3.
