@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-plan | dependencias=roadmap/H-10_Bitacora_De_Memoria.md,architecture/07_Performance_Strategy.md,core/OCR_Engine.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-147-Perder-Un-Identificador-Cubierto-Es-Una-Regresion.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-157-El-Pool-De-OCR-Se-Da-De-Baja-Al-Terminar-Su-Etapa.md,adr/ADR-158-El-Raster-De-OCR-Viaja-Codificado.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md,adr/ADR-161-Una-Franja-Sin-Tinta-No-Se-Reconoce.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,tests/fixtures/README.md,tests/perf/README.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-166-El-Modelo-De-NER-Se-Libera-Al-Terminar-La-Deteccion.md,roadmap/Verificacion_Liberacion_NER_Medicion.md,roadmap/AB_Intercalado_Plan.md,roadmap/AB_Intercalado_Medicion.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=roadmap-plan | dependencias=roadmap/H-10_Bitacora_De_Memoria.md,architecture/07_Performance_Strategy.md,core/OCR_Engine.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-147-Perder-Un-Identificador-Cubierto-Es-Una-Regresion.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-157-El-Pool-De-OCR-Se-Da-De-Baja-Al-Terminar-Su-Etapa.md,adr/ADR-158-El-Raster-De-OCR-Viaja-Codificado.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md,adr/ADR-161-Una-Franja-Sin-Tinta-No-Se-Reconoce.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,tests/fixtures/README.md,tests/perf/README.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-166-El-Modelo-De-NER-Se-Libera-Al-Terminar-La-Deteccion.md,roadmap/Verificacion_Liberacion_NER_Medicion.md,roadmap/AB_Intercalado_Plan.md,roadmap/AB_Intercalado_Medicion.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md,roadmap/Ciclos_Y_Documentos_Reales_Plan.md,roadmap/Ciclos_Y_Documentos_Reales_Medicion.md | audiencia=humanos+IA | fase=11 -->
 
 # Optimización de memoria — plan de campaña
 
@@ -37,6 +37,17 @@
 > para NER, y arregla de paso la recarga muda tras una liberación por temporizador.
 > ADR-167 está **implementado** (`c006059`, `1b09383`, `a9c0ac7`) y verificado de
 > punta a punta en la app empaquetada.
+>
+> **Abiertas el 2026-09-18**: **T-9** (¿hay una fuga? — el ciclo de 10 open/close),
+> **T-10** (dos documentos reales provistos por el humano, medidos sin abrirlos) y,
+> como paso siguiente ya decidido, **T-11** (el instrumento de WASM por worker).
+> Plan de las tres: [`Ciclos_Y_Documentos_Reales_Plan.md`](Ciclos_Y_Documentos_Reales_Plan.md).
+>
+> **Cierre de T-9 y T-10 (2026-09-18)**, datos en
+> [`Ciclos_Y_Documentos_Reales_Medicion.md`](Ciclos_Y_Documentos_Reales_Medicion.md):
+> **no hay fuga**, y los documentos reales cuestan en **tiempo**, no en memoria: una
+> página real tiene ~15 veces más palabras que una del fixture. Quedan dos preguntas
+> para el humano (§5 puntos 7 y 8). T-11 sigue como siguiente paso.
 
 **Perfil de referencia**: P2 — 50 páginas escaneadas, OCR + NER reales, sobre el
 shell de Electron empaquetado.
@@ -735,6 +746,64 @@ A/B, y el reporte diga si el efecto existe y con qué magnitud. Los tres
 desenlaces posibles están escritos en ADR-166, Enmienda: que no haya efecto
 detectable también decide.
 
+### T-9 — ¿Hay una fuga? El ciclo de 10 open/close — **CERRADA (2026-09-18)**
+
+**Dónde**: `tests/perf/` únicamente. **ADR**: ninguno; no cambia producto. Es el
+perfil P3 de ADR-146 §4, que nunca se midió. **No es el gate `test:leak`**: mide
+para que el umbral del gate se fije después sobre ruido real.
+**Plan y protocolo**: [`Ciclos_Y_Documentos_Reales_Plan.md`](Ciclos_Y_Documentos_Reales_Plan.md) §2.
+
+**Pregunta**: después del primer documento, ¿el reposo de la app sigue subiendo con
+cada documento nuevo? Tres corridas de diez ciclos, cada una en una sola instancia:
+P1 encadenado, P2 encadenado y P1 con 90 s de reposo entre documentos. El
+encadenado ve las fugas dentro de un worker que sobrevive; el reposo ve las de lo
+que se crea y se destruye con cada documento.
+
+**Cierra cuando** las tres corridas estén hechas y cada señal (workers vivos, heap
+de JS con GC forzado, RSS en reposo) tenga su pendiente leída contra el criterio del
+plan §2.5, escrito antes de medir.
+
+> **Cerrada: no hay fuga.** Workers constantes en las tres corridas, RSS en reposo sin
+> pendiente (5 ± 14 MB por ciclo en la única corrida sin confundir). El residuo tras
+> el primer documento es de ~170 MB, está en el renderer y no crece. El heap de JS
+> crece ~0,1 MB por documento en las tres corridas: real, y por debajo del umbral.
+
+### T-10 — Dos documentos reales — **CERRADA (2026-09-18)**
+
+**Dónde**: `tests/perf/` únicamente. **ADR**: ninguno. **La desbloquea**: el humano
+proveyó un documento real nativo de ~50 páginas (R1) y uno escaneado de 20 (R2).
+**Nadie los abre**, nada que los identifique entra al repo y el texto no sale de la
+app (plan §3.1). Es el perfil P4 que pedía §4 de este plan.
+
+**Pregunta**: ¿qué cuesta por página un escaneo real contra el fixture, y qué cuesta
+un documento nativo real y largo? Los cuatro perfiles (P1, P2, R1, R2) se intercalan
+en una sola sesión, tres rondas.
+
+**Ya se sabe sin medir**: R2 pesa ~30 KB por página, del mismo orden que el fixture
+(35 KB). La suposición de §4 —un escaneo real pesa 10-50× más— **no vale para este
+documento**.
+
+> **Cerrada.** El pico de memoria de los documentos reales no se distingue del de los
+> fixtures a la resolución declarada. Lo que cambia es el tiempo: ~300 palabras por
+> página contra ~20 del fixture, OCR ~7 veces más lento por página y NER entre 10 y
+> 15 veces más. Con un escaneo real el OCR dura más que los 15 s de NER, y el modelo
+> se recarga en cada documento (ADR-167): eso mueve el pico a la recarga y deja al M1
+> «caliente» de ADR-146 midiendo otra cosa (§5 punto 7).
+
+### T-11 — El instrumento de WASM por worker — **siguiente paso, sin empezar**
+
+**Dónde**: `tests/perf/` únicamente: lee cada `WebAssembly.Memory` de cada target por
+CDP (`Runtime.queryObjects`), sin tocar el producto. La vía original, un parche en
+`shared/src/worker-entry.ts`, se descartó antes de empezar: no ve a Tesseract, cuyos
+workers crea tesseract.js desde su propio script. **ADR**: ninguno para el
+instrumento. **Plan y entrega**: [`Ciclos_Y_Documentos_Reales_Plan.md`](Ciclos_Y_Documentos_Reales_Plan.md) §4.
+
+Convierte el «no atribuido (WASM + nativo): ~1,5 GB» del pico en una medición por
+worker. Con eso se decide si vale la pena reciclar los workers de Tesseract a mitad
+del documento (alternativa B, §5 punto 3), y dónde está una fuga que T-9 vea en el
+RSS pero no en el heap de JS. Decisión del humano del 2026-09-18: se hace **después**
+de ver T-9 y T-10.
+
 ## 2bis. Cómo se corre una medición sin arruinarla
 
 Reglas operativas aprendidas a costa de tandas perdidas. Ninguna es obvia y
@@ -817,6 +886,13 @@ pesa 10-50× más. Dos consecuencias:
 **Conseguir un PDF escaneado real anonimizado como perfil P4 cambia cuáles de
 estos levers importan.** No bloquea T-1 a T-4; sí bloquea dimensionar T-6.
 
+> **Medido en T-10 (2026-09-18)**: con el primer escaneo real, el supuesto de este
+> apartado no se cumplió. Pesa ~30 KB por página, como el fixture, y su pico no se
+> distingue del de P2. La diferencia real con el fixture es la **densidad de texto**
+> (~300 palabras por página contra ~20), y se paga en tiempo, no en memoria. Las
+> copias del PDF siguen siendo chicas para ese documento. Es **un** documento: otro
+> escaneo, en color o en grises, puede pesar lo que este apartado suponía.
+
 ---
 
 ## 5. Decisiones y pendientes del humano
@@ -871,6 +947,18 @@ estos levers importan.** No bloquea T-1 a T-4; sí bloquea dimensionar T-6.
    distribuye a usuarios de Windows, los presupuestos de `00_Project_Vision.md` §7
    tienen que medirse ahí en algún momento. Un número tomado en un M1 no dice qué
    le pasa a una notebook Windows de 8 GB.
+
+7. **El presupuesto de 512 MB cuando NER se recarga** (T-10, pendiente del humano).
+   Con un escaneo real, el OCR dura más que el temporizador de 15 s de NER, así que
+   la corrida «caliente» de ADR-146 recarga el modelo. Su M1 dio 627-803 MB, por
+   encima de los 512, pero con una carga del modelo adentro. Hay que decidir si el
+   presupuesto se aplica así (y entonces un escaneo real no cumple) o si «caliente»
+   se redefine para este caso. Cualquiera de las dos es una enmienda de ADR-146.
+   Detalle: `Ciclos_Y_Documentos_Reales_Medicion.md` §2.3.
+8. **El objetivo de 8 s para diez páginas nativas, con texto real** (T-10, pendiente
+   del humano). Extrapolando los ~0,7 s de NER por página real, diez páginas darían
+   ~8-9 s en frío. Es una extrapolación bajo instrumento. Para medirlo hace falta un
+   documento nativo real de ~10 páginas. Detalle: mismo informe, §2.4.
 
 ## 6. Trabajo posterior al hardening
 
