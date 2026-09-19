@@ -132,7 +132,8 @@ export interface OcrPageWords {
   readonly words: ReadonlyArray<Word>;
 }
 
-const PHASE_EVENTS: ReadonlyArray<readonly [string, string]> = [
+/** Exportada para T-9 (`support/leakCycles.ts`): el colector de ciclos escucha las mismas fases, no una copia. */
+export const PHASE_EVENTS: ReadonlyArray<readonly [string, string]> = [
   ["pipeline", "DOCUMENT_IMPORTED"],
   ["pdf", "DOCUMENT_PARSED"],
   ["ocr", "OCR_STARTED"],
@@ -162,9 +163,21 @@ const WORKER_TERMINAL_EVENTS: ReadonlyArray<string> = [
  * no una copia — dos implementaciones del mismo listener divergirían con el
  * tiempo.
  */
-export async function installRunCollector(page: Page): Promise<void> {
+export interface RunCollectorOptions {
+  /**
+   * `false` para documentos reales (T-10, `Ciclos_Y_Documentos_Reales_Plan.md`
+   * §3.1): las palabras del OCR son el texto del documento, y no tienen que
+   * salir de la app hacia el reporte.
+   */
+  readonly captureOcrWords: boolean;
+}
+
+export async function installRunCollector(
+  page: Page,
+  options: RunCollectorOptions = { captureOcrWords: true },
+): Promise<void> {
   await page.evaluate(
-    ({ phaseEvents, workerTerminalEvents }) => {
+    ({ phaseEvents, workerTerminalEvents, captureOcrWords }) => {
       const core = globalThis.__anonlyCore;
       if (core === undefined) throw new Error("__anonlyCore ausente: ¿VITE_E2E=1 en el build?");
       const coreWithOcr = core as typeof core & {
@@ -226,6 +239,7 @@ export async function installRunCollector(page: Page): Promise<void> {
           wordCount: page.wordCount,
           confidence: page.confidence,
         });
+        if (!captureOcrWords) return;
         // The public event deliberately carries a summary. For the T-5
         // quality gate, read the host cache immediately after that event so
         // the measured OCR path remains untouched and the complete Word[] is
@@ -296,7 +310,11 @@ export async function installRunCollector(page: Page): Promise<void> {
         });
       }
     },
-    { phaseEvents: PHASE_EVENTS, workerTerminalEvents: WORKER_TERMINAL_EVENTS },
+    {
+      phaseEvents: PHASE_EVENTS,
+      workerTerminalEvents: WORKER_TERMINAL_EVENTS,
+      captureOcrWords: options.captureOcrWords,
+    },
   );
 }
 
@@ -825,13 +843,14 @@ async function runImport(
   runTimeoutMs: number,
   extraCollectors: ReadonlyArray<(page: Page) => Promise<void>> = [],
   postRunCapture?: (page: Page, temperature: "cold" | "hot") => Promise<void>,
+  collectorOptions?: RunCollectorOptions,
 ): Promise<RunReport> {
   // Sincroniza con la fase "load" (`appPhase.ts`) antes de soltar el
   // archivo — necesario tras un `closeDocument()`, inocuo en la primera
   // corrida (ya arranca ahí).
   await page.getByRole("button", { name: "Elegir archivo" }).waitFor({ state: "visible" });
 
-  await installRunCollector(page);
+  await installRunCollector(page, collectorOptions);
   // `extraCollectors` (default vacío, no cambia el comportamiento de
   // `memory.spec.ts`/`memory-attribution.spec.ts`): un tercer consumidor —
   // `imagedata-profile.spec.ts` — necesita instalar SU colector con el mismo
@@ -1147,6 +1166,8 @@ export async function measureProfile(
   // propio `evaluate()` tiene un piso), por eso `PhaseSegment.measurable`
   // sigue siendo la defensa real, no la cadencia.
   sampleIntervalMs = SAMPLE_INTERVAL_MS,
+  // T-10: mismo criterio que `sampleIntervalMs`, al final para no mover a nadie.
+  collectorOptions?: RunCollectorOptions,
 ): Promise<ProfileReport> {
   const sampler = startMemorySampling(electronApp, sampleIntervalMs);
   // ADR-159 §2: heap por target, vía CDP — sampler aparte del de RSS de
@@ -1169,6 +1190,7 @@ export async function measureProfile(
       runTimeoutMs,
       extraCollectors,
       postRunCapture,
+      collectorOptions,
     );
 
     await closeDocument(page);
@@ -1192,6 +1214,7 @@ export async function measureProfile(
       runTimeoutMs,
       extraCollectors,
       postRunCapture,
+      collectorOptions,
     );
     const hot: RunReport = { ...hotRun, hotBaselineSettled };
     await closeDocument(page);
