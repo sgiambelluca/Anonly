@@ -189,6 +189,34 @@ La etapa 2 reusa los `dist` que construyó la etapa 1 en `<dir>`: reconstruirlos
 
 `wasm-heap-probe.spec.ts` registra el Paso 0 de T-8, que salió negativo: `performance.measureUserAgentSpecificMemory()` existe en este runtime pero lanza *«not available»*, pese a `crossOriginIsolated: true`. Junto con ADR-159 §8 —`Runtime.getHeapUsage` tampoco ve WASM—, son dos vías cerradas para leer el heap del modelo sin pasar por el RSS. La tercera, sin construir, está descripta en el informe.
 
+## T-9 — el ciclo de 10 open/close (¿hay una fuga?)
+
+Plan y criterio de lectura, escritos antes de medir: `docs/roadmap/Ciclos_Y_Documentos_Reales_Plan.md` §2. Es el perfil P3 de ADR-146 §4, **no el gate `test:leak`**: mide para que el umbral del gate se fije después.
+
+`leak-cycles.spec.ts` abre y cierra el mismo documento diez veces en una sola instancia y, en cada ciclo, registra tres señales que ven fugas distintas: **workers vivos** (CDP, con los hijos), **heap de JS del hilo principal con GC forzado** (la única que la presión del sistema no mueve) y **RSS en reposo**, como mediana de una ventana fija tras el cierre. El veredicto de plan §2.5 se calcula adentro del reporte (`judgeLeak`, con tests en `support/leakCycles.test.ts`), para que nadie lo reinterprete después de ver los números.
+
+```
+./tests/perf/run-ciclos.sh                       # L1, L2 y L3 en serie, ~30 min
+ANONLY_LEAK_RUNS="L1" ./tests/perf/run-ciclos.sh # una sola
+```
+
+Dos cosas que no son obvias:
+
+- **El colector se instala una vez.** `installRunCollector` se reinstala en cada import y sus listeners viejos retienen el reporte anterior: en diez ciclos, el instrumento mismo sería una fuga. `support/leakCycles.ts` tiene su propio colector, que escribe en el objeto vigente.
+- **El encadenado se verifica.** Cada ciclo registra si apareció `NER_MODEL_READY`. En L1 tiene que faltar del ciclo 2 en adelante: si aparece, el mismo worker no atendió los diez documentos.
+
+## T-10 — documentos reales
+
+Plan: `docs/roadmap/Ciclos_Y_Documentos_Reales_Plan.md` §3. `real-docs.spec.ts` corre P1, P2 y dos documentos reales (R1 nativo, R2 escaneado) intercalados, tres rondas, con `measureProfile`.
+
+**Los documentos reales no entran al repo, ni sus nombres, ni nada que los identifique.** Las rutas se pasan por entorno y la app los recibe con un nombre neutro:
+
+```
+ANONLY_REAL_DOC_R1=/ruta/al/nativo.pdf ANONLY_REAL_DOC_R2=/ruta/al/escaneado.pdf ./tests/perf/run-documentos-reales.sh
+```
+
+El colector corre con `captureOcrWords: false` en los cuatro perfiles: las palabras del OCR son el texto del documento, y no salen de la app. La spec verifica que no haya ninguna **antes** de escribir el reporte. `trace`, `screenshot` y `video` quedan en `off`.
+
 ## T-5 — Comparación OSD compartido (ADR-164)
 
 Protocolo normativo: `docs/roadmap/T5_OSD_Compartido_Handoff.md` §3.
