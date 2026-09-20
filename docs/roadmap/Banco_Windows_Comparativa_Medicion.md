@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-medicion | tarea=banco-windows | dependencias=roadmap/Ciclos_Y_Documentos_Reales_Medicion.md,roadmap/Ciclos_Y_Documentos_Reales_Plan.md,roadmap/Optimizacion_De_Memoria_Plan.md,architecture/07_Performance_Strategy.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-150-La-Pantalla-De-Escaneo-Dura-Lo-Que-Dura-El-Escaneo.md,adr/ADR-153-El-Gate-De-Tiempos-Se-Mide-Sobre-El-Producto.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=roadmap-medicion | tarea=banco-windows | dependencias=roadmap/Ciclos_Y_Documentos_Reales_Medicion.md,roadmap/Ciclos_Y_Documentos_Reales_Plan.md,roadmap/Optimizacion_De_Memoria_Plan.md,architecture/07_Performance_Strategy.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-150-La-Pantalla-De-Escaneo-Dura-Lo-Que-Dura-El-Escaneo.md,adr/ADR-153-El-Gate-De-Tiempos-Se-Mide-Sobre-El-Producto.md,tests/perf/README.md,adr/ADR-165-Una-Franja-Ya-Explicada-No-Se-Reconoce.md,roadmap/Margenes_Menos_Pixeles_Medicion_I1.md | audiencia=humanos+IA | fase=11 -->
 
 # Banco Windows — el hardening contra la versión anterior, y esta máquina contra el M1
 
@@ -174,10 +174,16 @@ menos dos causas candidatas y **esta medición no las separa**:
    OCR corre**, y la versión nueva se queda en la pantalla de escaneo;
 2. el trabajo de ImageData de la campaña (`ImageData_Perfilado_Resultados.md`).
 
-Lo que **no** es: el recorte de márgenes, cuyas palancas I-1/I-2/I-3 nunca se
-implementaron (`Margenes_Menos_Pixeles_Resultados.md` §0). Separar (1) de (2) pediría
-una corrida con el visor forzado a montarse temprano. **Decidido por el humano
-(2026-09-19): no hace falta.** Lo que importaba era que el pico bajara, no a cuál de
+**Corrección documental (2026-09-20): I-1 sí forma parte del hardening medido.**
+ADR-165 registra su implementación en `b76d18c` y su aceptación tras el A/B del
+2026-09-17: omite las pasadas de una franja cuya tinta ya está explicada por las
+palabras reconocidas. No recorta la franja. `Margenes_Menos_Pixeles_Resultados.md`
+§0 describe una etapa anterior a esa implementación; I-2 se evaluó después sin
+implementarse e I-3 tampoco se implementó. El A/B de I-1 demostró ahorro de tiempo
+en P2, **no ahorro RSS**, así que no permite atribuirle parte de los −1965 MB de R2.
+Separar (1) de (2) pediría una corrida con el visor forzado a montarse temprano.
+**Decidido por el humano (2026-09-19): no hace falta.** Lo que importaba era que
+el pico bajara, no a cuál de
 las dos causas atribuirlo.
 
 ### 3.2bis El residuo después de cerrar el documento
@@ -211,10 +217,13 @@ Los ~7 s que gana R2 salen del **OCR** (−18 %), no de NER. **No se atribuyen a
 cambio en particular.** El candidato obvio es ADR-164 (un OSD compartido por Core),
 pero su cierre (`T5_OSD_Compartido_Cierre_Final.md`) midió −24 % sobre P2 **antes** de
 restituir las pasadas rotadas —que devolvieron +5,9 s— y advierte que ese beneficio
-"no se extrapola" al régimen final: su número no sirve para confirmar este. Tampoco
-son los márgenes: `Margenes_Menos_Pixeles_Resultados.md` §0 deja escrito que
-I-1/I-2/I-3 nunca se implementaron. Igual que en §3.2, el humano decidió que la
-atribución no hace falta.
+"no se extrapola" al régimen final: su número no sirve para confirmar este.
+I-1 también está implementada (ADR-165, `b76d18c`): su A/B posterior midió
+**6,234 s de ahorro medio de OCR sobre P2**, al evitar 200 pasadas de margen
+con la misma huella de calidad (`Margenes_Menos_Pixeles_Medicion_I1.md`). Es una
+causa candidata del ahorro temporal, pero ese resultado **no se extrapola a R2**
+ni separa su contribución de los otros cambios. Igual que en §3.2, el humano
+decidió que la atribución del ahorro global no hace falta.
 
 ---
 
@@ -276,9 +285,20 @@ evicción. Que Windows dé más alto es lo esperable de una máquina de 16 GB en
 no necesariamente más memoria pedida. La comparación de memoria que **sí** se sostiene
 es la de §3.2: dos versiones, mismo SO, misma máquina, misma sesión.
 
-Contra el presupuesto contractual de `07_Performance_Strategy.md` §1 —**< 512 MB de
-pico para 50 páginas**—, los cuatro perfiles lo superan por un factor de 3 a 5 en los
-dos bancos. Es el mismo hallazgo que ya tenía el M1, sin novedad acá.
+**Corrección documental (2026-09-20): esta tabla muestra M2, no M1.** ADR-146
+§1/§7/§7ter define **M1** como el pico durante el procesamiento menos la base
+caliente, con presupuesto **< 512 MB para 50 páginas**, y **M2** como el pico total
+del árbol dentro de la ventana de fases, con presupuesto técnico **~1,6 GB con
+OCR/NER** (~870 MB sin ellos). El pico posterior a `Ready` se reporta aparte.
+Por lo tanto, no corresponde dividir los M2 de esta tabla por 512 MB ni afirmar
+que todos los perfiles incumplen ese límite por un factor de 3 a 5.
+
+P2 en Windows supera la referencia M2 de ~1,6 GB en frío y caliente (2204 y
+2763 MB); eso conserva el problema de presupuesto total, con su métrica correcta.
+Para M1 hace falta su propia medición: un valor menor que 512 MB **no demuestra
+cumplimiento**, porque es una cota inferior; uno mayor sí demuestra exceso bajo
+esa definición. T-10 dejó pendiente cómo tratar la recarga de NER durante la
+corrida caliente de R2 (`Ciclos_Y_Documentos_Reales_Medicion.md` §2.3).
 
 ---
 
@@ -346,9 +366,12 @@ ventilador que en un i5 de escritorio de 2022, y la VM agrega otro 24 %.
    cumple. En el M1 daba 7,4-9,0 s, al límite o por encima. **El objetivo pasa a
    depender del banco y el doc no dice sobre qué hardware se mide** — ese es el hueco
    a cerrar, no el número.
-2. **El presupuesto de 512 MB de pico.** Lo supera todo, en los dos bancos, por un
-   factor de 3 a 5 — el hardening lo bajó a la mitad en el escaneado y sigue lejos.
-   Hay que decidir si el número se corrige o se declara incumplido.
+2. **Los presupuestos M1 y M2 (ADR-146).** Los 512 MB corresponden a M1 para
+   50 páginas; no al pico total. M2 tiene una referencia de ~1,6 GB con OCR/NER,
+   superada por P2 en Windows (§4.3). Quedan por resolver la aceptación de esos
+   excesos y la definición de M1 caliente cuando NER se recarga. El pico global
+   de §3.2 y el pico de fases M2 tienen ventanas distintas: no se intercambian.
+   Este informe no modifica ninguno de los dos presupuestos.
 3. **El OCR es el cuello y no se compra con hardware.** Tesseract sobre WASM corre
    **más rápido en el M1 de 2020 sin ventilador** que en el i5 de escritorio de 2022
    (P2: 17,1-17,9 contra 18,9 s). Los 7 s que ganó R2 los puso el software (§3.3), no

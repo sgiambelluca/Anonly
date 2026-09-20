@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-plan | dependencias=roadmap/H-10_Bitacora_De_Memoria.md,architecture/07_Performance_Strategy.md,core/OCR_Engine.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-147-Perder-Un-Identificador-Cubierto-Es-Una-Regresion.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-157-El-Pool-De-OCR-Se-Da-De-Baja-Al-Terminar-Su-Etapa.md,adr/ADR-158-El-Raster-De-OCR-Viaja-Codificado.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md,adr/ADR-161-Una-Franja-Sin-Tinta-No-Se-Reconoce.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,tests/fixtures/README.md,tests/perf/README.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-166-El-Modelo-De-NER-Se-Libera-Al-Terminar-La-Deteccion.md,roadmap/Verificacion_Liberacion_NER_Medicion.md,roadmap/AB_Intercalado_Plan.md,roadmap/AB_Intercalado_Medicion.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md,roadmap/Ciclos_Y_Documentos_Reales_Plan.md,roadmap/Ciclos_Y_Documentos_Reales_Medicion.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=roadmap-plan | dependencias=roadmap/H-10_Bitacora_De_Memoria.md,architecture/07_Performance_Strategy.md,core/OCR_Engine.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-147-Perder-Un-Identificador-Cubierto-Es-Una-Regresion.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-157-El-Pool-De-OCR-Se-Da-De-Baja-Al-Terminar-Su-Etapa.md,adr/ADR-158-El-Raster-De-OCR-Viaja-Codificado.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md,adr/ADR-161-Una-Franja-Sin-Tinta-No-Se-Reconoce.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,tests/fixtures/README.md,tests/perf/README.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-166-El-Modelo-De-NER-Se-Libera-Al-Terminar-La-Deteccion.md,roadmap/Verificacion_Liberacion_NER_Medicion.md,roadmap/AB_Intercalado_Plan.md,roadmap/AB_Intercalado_Medicion.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md,roadmap/Ciclos_Y_Documentos_Reales_Plan.md,roadmap/Ciclos_Y_Documentos_Reales_Medicion.md,roadmap/Optimizacion_De_Rendimiento.md,roadmap/Banco_Windows_Comparativa_Medicion.md | audiencia=humanos+IA | fase=11 -->
 
 # Optimización de memoria — plan de campaña
 
@@ -62,6 +62,20 @@
 > **T-13 (2026-09-19), tiempos reales**: sin instrumento, R1 tarda 34-40 s y R2
 > 47-49 s. A ~0,7 s de NER por página de texto real, diez páginas nativas quedan al
 > límite del objetivo de 8 s (§5 punto 8).
+
+> **Siguiente etapa acordada (2026-09-20)**: tres objetivos de recursos, en el
+> orden **2 → 1 → 3** de la propuesta revisada: atribuir la memoria restante del
+> renderer → evaluar el empaquetado del mismo modelo NER → ampliar el banco a
+> PDFs pesados y exportación. Al terminar la atribución se revisa el plan antes
+> de atacar el empaquetado. Alcance y entregables en §2ter; todavía sin ejecutar.
+> El ahorro de memoria se evaluará junto con el tiempo: la posterior revisión
+> de perfiles podrá admitir mayor consumo a cambio de una mejora medida de
+> rendimiento (`Optimizacion_De_Rendimiento.md`, próximos objetivos).
+
+> **Lectura vigente de los presupuestos (ADR-146)**: las anotaciones históricas
+> de §1bis que dicen «cumple» por observar M1 < 512 MB no prueban cumplimiento.
+> M1 es una cota inferior; M2 tiene su presupuesto propio de ~1,6 GB con OCR/NER,
+> y el pico posterior a `Ready` se informa por separado. No comparar M2 con 512 MB.
 
 **Perfil de referencia**: P2 — 50 páginas escaneadas, OCR + NER reales, sobre el
 shell de Electron empaquetado.
@@ -894,6 +908,68 @@ todas costaron tiempo real.
    entorno, nombre neutro, sin capturar texto (`tests/perf/real-docs.spec.ts`). Ver
    `Ciclos_Y_Documentos_Reales_Medicion.md` §7.
 
+## 2ter. Siguientes objetivos de recursos — orden 2 → 1 → 3
+
+**Decisión del humano, 2026-09-20.** Se conserva la numeración de la propuesta
+para hacer explícito el orden. Es planificación de trabajo futuro: no cambia
+defaults, contratos ni presupuestos del producto. El primer trabajo es el punto 2.
+
+### 2 — Terminar de atribuir los recursos del renderer
+
+T-11 encontró **443–626 MB del renderer sin atribuir a WASM o heap JS** en
+lecturas completas después de cargar NER. Incluyen costos base y reservas del
+runtime; no son una fuga demostrada ni un ahorro íntegramente recuperable.
+
+- Separar, hasta la resolución que permita el instrumento, costo base, memoria
+  nativa/compilada de los motores, imágenes/canvas y recursos retenidos tras cerrar.
+- Observar arranque, OCR, carga e inferencia NER, `Ready`, apertura del panel y
+  cierre/reposo. Distinguir memoria viva, capacidad reservada y residencia del SO;
+  no restar WASM y heap del RSS como si fueran magnitudes equivalentes.
+- Reutilizar las mediciones existentes y agregar solo las sondas necesarias.
+  Registrar targets ocupados/no observables, costo del instrumento y lo que siga
+  sin atribución. En Windows falta completar el lector de presión del sistema.
+- Entregar un desglose por fase con evidencia, límites, candidatos de intervención
+  y costo/beneficio esperado. Mantener separados M1, M2 y el pico posterior a `Ready`.
+
+**Punto de revisión obligatorio del plan:** con ese informe, decidir si las
+prioridades o el alcance necesitan cambiar. No iniciar el empaquetado antes de
+esa revisión. Si queda una parte no observable, declararla y resolver cómo seguir
+en esa misma revisión; no convertir una hipótesis en una atribución confirmada.
+
+### 1 — Evaluar el empaquetado del mismo modelo NER
+
+Después de la revisión del punto 2, comparar la carga actual con alternativas
+como datos externos o formato ORT, **sin cambiar modelo, pesos, cuantización ni
+criterios de detección**. T-11/T-12 midieron 487 MB de WASM y ~94 MB de JS en NER
+para un archivo de 178,5 MB; la copia transitoria de carga es una hipótesis a
+verificar, no la explicación demostrada de todo ese consumo.
+
+- Comprobar primero compatibilidad con el cargador y el runtime usados por Anonly.
+- Documentar el ADR y las herramientas de conversión necesarias antes de implementar
+  (R-12/R-18); conservar hashes y reproducción de la conversión.
+- Comparar tiempo de carga y de pipeline, pico y memoria sostenida con controles
+  intercalados. La hipótesis previa de ahorro de 100–180 MB no es un objetivo aceptado.
+- Exigir igualdad de la huella de detección en el corpus medido y la guarda de
+  calidad de ADR-147. Conservar o revertir según evidencia de memoria, tiempo y salida.
+
+### 3 — Ampliar el banco a PDFs pesados y exportación
+
+Después del punto 1, caracterizar documentos con imágenes grandes, color/grises y
+mayor tamaño en bytes, además de la densidad de texto que ya ejercitan R1/R2.
+Incluir render completo y exportación: los perfiles de importación no cierran ese
+consumo. Usar fixtures reproducibles o el protocolo confidencial de T-10.
+
+- Medir copias del PDF, rásters vivos, buffers de ensamblado y salida, por fase.
+- Registrar tiempo, memoria, cancelación y calidad del PDF exportado; dimensionar
+  cualquier intervención a partir del costo observado, sin prometer ahorro previo.
+- Entregar los límites observados y las pruebas que podrían convertirse en gates.
+  Esta caracterización no modifica por sí sola los presupuestos contractuales.
+
+Los perfiles de rendimiento se planifican en `Optimizacion_De_Rendimiento.md`:
+después de medir hilos NER y workers OCR, los datos de esta atribución ayudarán a
+elegir niveles con distintos compromisos de consumo y velocidad. Los descartes
+de §3 no se incorporan a esta nueva etapa.
+
 ## 3. Lo que no se vuelve a mirar
 
 Descartado con medición o con código. Reabrir cualquiera de estos necesita
@@ -947,8 +1023,10 @@ estos levers importan.** No bloquea T-1 a T-4; sí bloquea dimensionar T-6.
 
 1. **T-6b en pausa**: se conserva la configuración de 300 DPI por preferencia
    del humano del 2026-09-17; no se propone bajarla sin reabrir la decisión.
-   La evaluación posterior de ImageData es un trabajo separado. Aumentar el
-   número de reconocedores también requiere su propia decisión.
+   La evaluación posterior de ImageData es un trabajo separado. El 2026-09-20
+   se agregó la medición de más reconocedores a los próximos objetivos de
+   `Optimizacion_De_Rendimiento.md`; sus resultados decidirán los futuros perfiles,
+   sin cambiar ahora la configuración del producto.
 2. **El presupuesto**: la alternativa A de la bitácora §7.1 (reemplazar los
    ~1600 MB estimados de `07_Performance_Strategy.md` §7 por componentes
    medidos) sigue disponible, pero **sobre números nuevos** — los de hoy salen
@@ -1012,14 +1090,16 @@ estos levers importan.** No bloquea T-1 a T-4; sí bloquea dimensionar T-6.
    una extrapolación por página; un documento nativo real de ~10 páginas la cerraría.
    Detalle: `Ciclos_Y_Documentos_Reales_Medicion.md` §7.4.
 
-9. **La memoria del modelo de NER** (T-11 y T-12, pendiente del humano). Un archivo
+9. **La memoria del modelo de NER** (T-11 y T-12; secuencia decidida el 2026-09-20,
+   §2ter). Primero atribuir los recursos restantes y revisar el plan; después,
+   evaluar el empaquetado del mismo modelo. Un archivo
    de 178,5 MB ocupa 487 MB de WASM una vez cargado, más 94 MB de JS: es el mayor
    consumidor de la app. Las opciones de sesión de ONNX ya se midieron (T-12) y
-   ninguna sirve. Quedan dos caminos: **reempaquetar el mismo modelo** (datos externos
-   o formato ORT) para que no se copie dos veces al cargar, que no cambia los pesos
-   pero necesita herramientas de conversión fuera del repo (R-12) y verificar que la
-   salida sea idéntica; o **cambiar de modelo**, que el humano no quiere por ahora
-   (2026-09-19). Detalle: `Ciclos_Y_Documentos_Reales_Medicion.md` §6.4.
+   ninguna sirve. Se planifica **reempaquetar el mismo modelo** (datos externos
+   o formato ORT) para evaluar si se reduce la copia de carga, sin cambiar los pesos.
+   Requiere herramientas de conversión fuera del repo (R-12) y verificar que la
+   salida sea idéntica. **Cambiar de modelo** sigue fuera de esta etapa por decisión
+   humana (2026-09-19). Detalle: `Ciclos_Y_Documentos_Reales_Medicion.md` §6.4.
 
 ## 6. Trabajo posterior al hardening
 

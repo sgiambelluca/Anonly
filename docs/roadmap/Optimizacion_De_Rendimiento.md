@@ -1,10 +1,17 @@
-<!-- CONTEXT: scope=roadmap | dependencias=architecture/07_Performance_Strategy.md,core/NER_Engine.md,core/OCR_Engine.md,core/Grouping_Engine.md,roadmap/Duplicacion_De_Logica.md | audiencia=humanos+IA | fase=por-planificar -->
+<!-- CONTEXT: scope=roadmap | dependencias=architecture/07_Performance_Strategy.md,core/NER_Engine.md,core/OCR_Engine.md,core/Grouping_Engine.md,roadmap/Duplicacion_De_Logica.md,roadmap/Optimizacion_De_Memoria_Plan.md,roadmap/Ciclos_Y_Documentos_Reales_Medicion.md,roadmap/Banco_Windows_Comparativa_Medicion.md,ui/React_Client.md | audiencia=humanos+IA | fase=11 (proximos objetivos acordados el 2026-09-20; sin implementar) -->
 
 # Optimización de rendimiento — hallazgos y plan
 
 > **Procedencia**: relevamiento del 2026-08-27 con cuatro agentes de investigación (carga/arranque, OCR por página, NER por página, duplicación+UI). **Cada número de este documento fue verificado a mano** contra el código o remedido; lo que no se pudo medir está marcado como tal.
 
 **Estado actual (2026-09-17)**: este relevamiento conserva las mediciones originales. El multihilo interno de ONNX Runtime para NER quedó habilitado en el producto (ADR-100/130/132); la segunda instancia de worker NER se midió y se revirtió. D1 y el OCR paralelo también se implementaron. Ver el estado por intervención en «Plan acordado».
+
+**Próximos objetivos acordados (2026-09-20)**: medir más hilos dentro del único
+worker NER, más reconocedores OCR, varios fragmentos por inferencia NER y los
+peores casos de Regex/Grouping. Después de las dos primeras mediciones, revisar
+los perfiles de rendimiento y la selección automática según recursos del equipo.
+El plan vigente está al final de este documento; las secciones previas conservan
+el relevamiento histórico y sus descartes. No hay cambios de producto con esta actualización.
 
 ## Los dos focos
 
@@ -153,7 +160,10 @@ Tres cambios chicos, **un motor cada uno** — encajan con R-1 sin fricción. Ri
 
 ---
 
-## Robustez: dos O(n²) reales, fuera del plan por ahora
+## Robustez: dos O(n²) reales — incorporados al siguiente plan el 2026-09-20
+
+Las mediciones siguientes son las del relevamiento original. El objetivo 4 del
+plan nuevo empieza por reproducirlas contra el código vigente.
 
 - **`email`** (`default-ar.ts:284`) se cuadra sobre texto sin `@` denso en dígitos y guiones (OCR corrupto, tabla mal separada). **Remedido a mano**: 7,4 ms (2 K chars) → 161 (10 K) → 639 (20 K) → **2539 (40 K)**. A 160 KB son decenas de segundos de hilo principal bloqueado, sin cancelación (Regex corre síncrono). Los patrones default **no** tienen el timeout que `Regex_Engine.md` §12 sí prevé para los custom.
 - **El pase difuso de Grouping** (`grouping.engine.ts:1895`): 2000 entidades distintas → 2,1 s. Es el peor caso adversarial; en un documento real la mayoría repite y resuelve por match exacto antes de llegar. **El caso típico no está medido.**
@@ -202,6 +212,11 @@ Las cinco que se pierden son **emails e IBAN** — cadenas alfanuméricas largas
 
 ## El agujero de fondo: no hay dónde apoyar el "antes y después"
 
+**Diagnóstico histórico del 2026-08-27.** Desde entonces existen `tests/perf/`,
+`tests/cancel/` y las campañas T-9..T-13; los instrumentos de memoria no equivalen
+todavía a gates de presupuesto. El texto siguiente explica el punto de partida,
+no el estado actual de la infraestructura.
+
 `package.json` define `test:perf`, `test:stress`, `test:leak` y `test:cancel` (líneas 31-34) y **los cuatro directorios no existen**. Ninguna métrica contractual de `07_Performance_Strategy.md` §1 tiene medición automatizada.
 
 Y `test:quality` corre **con NER apagado** (ADR-095 §5), así que hoy no hay forma de medir si un cambio en NER baja el recall. Cinco de los seis cambios de este plan tocan cosas cuya calidad no sabemos medir.
@@ -218,6 +233,126 @@ Y `test:quality` corre **con NER apagado** (ADR-095 §5), así que hoy no hay fo
 | ~~**3**~~ | ~~**A** (aislamiento para ONNX Runtime)~~ — **hecho**: ADR-100/130/132; medición inicial: −53,6 % de inferencia, calidad intacta | la ganancia más grande; verificación posterior en el shell |
 | ~~**4**~~ | ~~**B** (OCR en paralelo)~~ — **hecho**: ADR-101, −22 % a −27 % en documentos de dos páginas | limpio, sin riesgo de calidad |
 | ~~**5**~~ | ~~**C**~~ — **medido y REVERTIDO**: no aporta nada sobre A | tres cortes; revertir si A ya se llevó la ganancia |
-| — | **D2**, los dos O(n²) | **diferidos**, a rediscutir al cerrar lo anterior |
+| — | **D2** | **diferido** |
+| — | **Los dos O(n²)** | incorporados al objetivo 4 del plan del 2026-09-20 |
 
 La duplicación de lógica se apartó a [`Duplicacion_De_Logica.md`](./Duplicacion_De_Logica.md): no hace la herramienta más rápida y es una campaña propia.
+
+---
+
+## Próximos objetivos — tiempo, consumo y perfiles (2026-09-20)
+
+**Estado: planificado, sin ejecutar.** Decisión del humano: explorar el beneficio
+de hilos/workers y su costo de memoria, conservando la calidad. Un mayor consumo
+puede justificar una mejora de velocidad; el resultado debe permitir elegir ese
+compromiso por perfil. No se cambian presupuestos ni defaults con este plan.
+
+Base: `Ciclos_Y_Documentos_Reales_Medicion.md` §9 y
+`Banco_Windows_Comparativa_Medicion.md`. NER domina el documento nativo real;
+en R2 los dos reconocedores OCR estuvieron ocupados ~98 % de su etapa, frente al
+18–19 % del OSD compartido. La campaña de recursos conserva su orden propio
+**2 → revisión del plan → 1 → 3** (`Optimizacion_De_Memoria_Plan.md` §2ter).
+
+### 1. Aprovechar más hilos dentro del único worker NER
+
+- Comparar el control efectivo actual con **4, 6 y 8 hilos de ONNX**, donde el
+  hardware permita esas configuraciones. Registrar la cantidad efectiva, no solo
+  el valor solicitado; mantener un único worker/modelo NER.
+- Medir carga, inferencia, tiempo hasta `Ready` y panel visible, memoria y
+  comportamiento bajo carga sostenida en macOS y Windows nativo.
+- Verificar igualdad de detecciones; más hilos no se presupone más rápido.
+  Entregar la curva tiempo/consumo y el punto donde agregar hilos deja de compensar.
+
+### 2. Aprovechar más workers de reconocimiento OCR
+
+- Comparar **2, 3 y 4 reconocedores LSTM**, conservando el OSD compartido,
+  la configuración de 300 DPI y las reglas actuales de calidad.
+- Medir ocupación efectiva, preparación/cola y tiempo total. Los 90–148 MB de
+  WASM por reconocedor observados son una referencia, no su costo total ni un
+  valor garantizado para todo documento.
+- Mantener el presupuesto de imágenes vivas y registrar si limita la concurrencia.
+  Si impide ocupar los workers adicionales, documentar y evaluar por separado ese
+  cambio; no alterar a escondidas dos variables en la misma comparación.
+- Entregar tiempo ganado frente a memoria adicional, calidad y capacidad de
+  cancelación. La selección final será por perfil y capacidad del equipo.
+
+### 3. Varios fragmentos independientes por inferencia NER
+
+Evaluar soporte y costo de procesar varias entradas en un mismo lote, agrupando
+longitudes similares. Preservar los límites de tokens y el contexto independiente
+de cada fragmento; no concatenar páginas como una sola secuencia. Medir memoria
+temporal, tiempo por lote y total, huella de detección y orden de entrega a Grouping.
+Los cambios de protocolo o contrato requieren ADR y specs previos a la implementación.
+No hay ganancia cuantificada todavía.
+
+### 4. Acotar los peores casos de Regex y Grouping
+
+Retomar los dos casos cuadráticos del relevamiento: patrón de email sobre texto
+adverso y búsqueda difusa con muchas entidades distintas. Primero reproducirlos
+sobre el código vigente y un rango de tamaños; luego planificar cada módulo por
+separado. Comprobar tanto el caso patológico como documentos normales, preservar
+detecciones/agrupaciones y medir bloqueo del hilo principal y cancelación.
+Es un objetivo de robustez temporal; no se atribuye a estos casos el costo de R1/R2.
+
+### 5. Revisar perfiles con las curvas de hilos y workers ya medidas
+
+**Depende de los objetivos 1 y 2 y de revisar sus resultados.** Es el siguiente
+paso después de esas mediciones; no necesita esperar a que terminen 3 y 4. Si
+esos objetivos cambian después el costo, se vuelve a validar la matriz de perfiles.
+
+El producto actual tiene `auto`, `low` y `high`
+(`apps/react-client/src/core-adapter/settingsToEngineConfig.ts`): Bajo fija todos
+los pools en 1; Alto fija PDF/Render en 4 y OCR/NER en 2; Automático no envía
+override y utiliza `buildDefaultEngineConfig`. Estos valores configuran capacidad
+de pools, **no los hilos internos de ONNX**. El recorrido secuencial de NER usa
+un solo worker aunque el pool admita dos. El perfil futuro debe expresar el
+trabajo efectivo que se midió, no equiparar plazas configuradas con workers vivos.
+
+**Propuesta a concretar con los resultados:** Bajo, Intermedio, Alto y Automático.
+Automático selecciona uno de los tres niveles según los recursos detectados del
+equipo y una política derivada de las mediciones. Debe mostrar el nivel resuelto;
+ejemplo de comportamiento solicitado por el humano:
+
+> Selecciono Automático → aparece «Modo automático — consumo/rendimiento medio».
+
+«Medio» corresponde al nivel Intermedio. Es un ejemplo de presentación futura,
+no un texto ni un cuarto valor ya implementados en el producto.
+
+Entregables de esta revisión:
+
+- **Matriz por nivel:** hilos de ONNX, workers OCR y capacidad del resto de los
+  pools, con tiempo y memoria medidos. El nivel Alto podrá consumir más memoria
+  cuando la aceleración lo justifique; no se fijan cantidades ni umbrales antes
+  de medir, ni se relajan automáticamente los presupuestos de ADR-146.
+- **Política automática verificable:** considerar CPU/concurrencia y RAM con las
+  señales realmente disponibles en cada plataforma. Evaluar si hace falta memoria
+  disponible/presión del sistema además de capacidad instalada. Declarar reservas
+  para el SO, límites y comportamiento conservador ante información ausente.
+  Consultar hardware no demuestra por sí solo un «óptimo»: la asignación debe estar
+  respaldada por la curva medida. Si necesita datos del shell, especificar el
+  contrato seguro; el Core no consulta el SO directamente.
+- **Preferencia y resultado separados:** persistir que el usuario eligió Automático
+  y resolver su nivel para ese equipo; mostrar cuál está activo y conservar la
+  elección manual. Definir cuándo se recalcula y cuándo entra en vigor un cambio,
+  respetando el documento abierto y sus ediciones. No se presupone redimensionar
+  pools en caliente.
+- **Implementación posterior con ADR/specs:** cerrar nombres, tipos, migración de
+  settings existentes, configuración de hilos y mapeo UI/Core antes de tocar
+  código. Validar selección automática en equipos de distintas capacidades y
+  comprobar que el nivel mostrado corresponde a la configuración efectiva.
+
+### Método y alcance de la siguiente etapa
+
+Para cada experimento: control y variante intercalados, misma sesión/corpus/build
+identificable, una variable por vez y medición fría/caliente declarada. Usar
+fixtures y documentos reales con el protocolo de confidencialidad de T-10.
+Comparar cada plataforma contra su propio control y medir Windows nativo, no WSL.
+Registrar ruido, presión del sistema o su falta de observación, tiempo total,
+memoria por fase, M1/M2/pico posterior a `Ready`, calidad y cancelación.
+
+No aceptar una ganancia por un porcentaje aislado ni por la cantidad nominal de
+hilos/workers: entregar la curva de costo/beneficio y sus límites. Las corridas
+de tiempo deben controlar el efecto de los instrumentos de memoria. La revisión
+de perfiles usa esos resultados; no promete mejoras ni configura niveles nuevos
+antes de conocerlos. **Los experimentos ya descartados permanecen fuera de este
+plan**; sus registros anteriores se conservan como historial.

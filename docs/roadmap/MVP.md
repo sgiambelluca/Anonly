@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-mvp | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,adr/ADR-011-Grouping-First.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-138-Instalador-Universal-De-macOS.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md | audiencia=humanos+IA | fase=11.6 (Hitos 1–10 cerrados y mergeados a main; escritorio y verificación de actualizaciones en validación; instalador universal de macOS documentado por ADR-138) -->
+<!-- CONTEXT: scope=roadmap-mvp | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,adr/ADR-011-Grouping-First.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-138-Instalador-Universal-De-macOS.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,roadmap/Optimizacion_De_Memoria_Plan.md,roadmap/Optimizacion_De_Rendimiento.md | audiencia=humanos+IA | fase=11.6 (Hitos 1–10 cerrados y mergeados a main; escritorio y verificación de actualizaciones en validación; instalador universal de macOS documentado por ADR-138) -->
 
 # Anonly — Roadmap MVP
 
@@ -565,11 +565,12 @@ De las ~70: **~30 ya estaban cerradas** por hitos posteriores (ADR-053/054/056, 
   ahorro cero en P2 tras I-1, 147 ms medios en el único fixture con franjas
   activas y calidad conservada solo con padding suficiente
   (`Margenes_Menos_Pixeles_Medicion_I2.md`). Sin reabrir OSD/adelanto.
-  La campaña de optimización de tiempo del OCR se cierra por ahora con I-1.
+  La campaña de márgenes se cerró con I-1; los nuevos objetivos de concurrencia
+  del 2026-09-20 se registran por separado más abajo.
   El perfilado fuera de OCR M-0..M-3 atribuyó casi todo el tramo posterior al
   OCR de P2 al trabajo inclusivo de NER; Grouping medido ronda 1 ms
-  (`Perfilado_Tiempo_Fuera_OCR_Medicion_M0_M1.md`). El siguiente paso es
-  separar carga, despacho y trabajo por lote de NER: la campaña A1/B/A2 quedó
+  (`Perfilado_Tiempo_Fuera_OCR_Medicion_M0_M1.md`). El paso posterior separó
+  carga, despacho y trabajo por lote de NER: la campaña A1/B/A2 quedó
   cerrada y localizó el costo dominante en la llamada de clasificación,
   incluida la tokenización interna del modelo, sin optimización implementada
   (`Perfilado_NER_Interno_Plan.md`,
@@ -588,6 +589,21 @@ De las ~70: **~30 ya estaban cerradas** por hitos posteriores (ADR-053/054/056, 
   `Precalentamiento_NER_Durante_OCR_Medicion.md` §7, anotado como descarte
   medido en ADR-154 §2 lever 3 (`Precalentamiento_NER_Durante_OCR_Plan.md`;
   evidencia cruda en `.measure/ner-preload-ocr/20260917T163638Z/`).
+- **Próxima etapa de recursos (acordada el 2026-09-20, sin ejecutar):** orden
+  **2 → 1 → 3** de la propuesta: atribuir la memoria restante del renderer →
+  evaluar el empaquetado del mismo modelo NER → ampliar el banco a PDFs pesados
+  y exportación. Al cerrar la atribución se revisa el plan antes de iniciar el
+  empaquetado. Alcance canónico: `Optimizacion_De_Memoria_Plan.md` §2ter.
+- **Próximos objetivos de tiempo (2026-09-20, sin ejecutar):** medir más hilos
+  dentro del único worker NER, más workers de reconocimiento OCR, varios
+  fragmentos independientes por inferencia NER y acotar los peores casos de
+  Regex/Grouping. Después de medir hilos NER y workers OCR, revisar los perfiles
+  Bajo/Intermedio/Alto/Automático como propuesta, con Automático mostrando el
+  nivel resuelto según recursos del equipo y evidencia de costo/beneficio.
+  Los valores actuales no cambian con este plan; un perfil podrá consumir más
+  memoria si la mejora de tiempo lo justifica, con presupuestos explícitos.
+  Alcance y dependencias: `Optimizacion_De_Rendimiento.md`, «Próximos objetivos».
+  No se incorporan experimentos descartados ni se dan por cerrados los gates del hito.
 - Después del hardening: intención de migrar Electron a Tauri para evaluar
   menor costo del contenedor, como campaña separada (`Future_Ideas.md` §2.5).
 - Verificación de integridad en runtime de modelos/wasm (`crypto.subtle.digest` contra `assets.lock.json`, ADR-018 punto 3) en `ocr-engine` y `ner-engine`; hash mismatch → `OCR_MODEL_MISSING` / `NER_MODEL_LOAD_FAILED`. Incluye test de integridad: asset con hash alterado → error tipado, no se carga.
