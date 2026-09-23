@@ -40,6 +40,21 @@ export interface PipelineSlice {
    * motivó—. Vacío es el caso sano.
    */
   readonly failedJobs: FailedJobs;
+  /**
+   * ADR-168 §4: la última etapa observada antes de `Failed`, o `null` si el
+   * pipeline no falló. `Importing`/`Extracting` = fallo de importación: la UI
+   * cierra el documento y vuelve a `LoadScreen` con el error en la `DropZone`
+   * (`components/screens/importFailure.ts`). La registra el bridge al recibir
+   * `PIPELINE_FAILED`, con el `stage` que este store tenía en ese momento.
+   */
+  readonly failedAtStage: PipelineStage | null;
+  /**
+   * ADR-168 §5: las etapas que el pipeline atravesó en el documento vigente.
+   * Alimenta `ScanSteps` (`scanStepFlow.ts`): sin esto no hay forma de saber si
+   * el paso "Leer" se salteó porque el PDF ya tenía texto. Se vacía en cada
+   * `DOCUMENT_IMPORTED`.
+   */
+  readonly visitedStages: ReadonlySet<PipelineStage>;
   setState(patch: Partial<PipelineSlice>): void;
   reset(): void;
 }
@@ -59,6 +74,8 @@ const initialState: PipelineData = {
   exportResult: null,
   error: null,
   failedJobs: {},
+  failedAtStage: null,
+  visitedStages: new Set(),
 };
 
 export const usePipelineStore = create<PipelineSlice>((set) => ({

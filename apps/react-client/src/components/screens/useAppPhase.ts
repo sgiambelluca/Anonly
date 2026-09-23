@@ -6,17 +6,22 @@
  * que no se pueden testear en Node: leer los stores, medir el tiempo
  * transcurrido desde el import y desde `Ready`, y latchear el `documentId`
  * que ya soltó.
+ *
+ * ADR-168 §4: si la salida es un fallo de importación (`resolveScanExit` →
+ * `"load"`), en vez de latchear ②b cierra el documento y deja el error para
+ * la `DropZone` de ①.
  */
 
 import { PipelineStage } from "@anonly/anonymization-core";
 import { useEffect, useRef, useState } from "react";
 
+import { actions } from "../../core-adapter/actions.js";
 import { useDocumentStore } from "../../store/document.store.js";
 import { usePipelineStore } from "../../store/pipeline.store.js";
 import { useViewerStore } from "../../store/viewer.store.js";
 
 import { resolveAppPhase, type AppPhase } from "./appPhase.js";
-import { shouldAdvanceFromScan } from "./scanAdvance.js";
+import { describeImportFailure, recordImportFailure, resolveScanExit } from "./importFailure.js";
 
 /**
  * Cadencia del chequeo mientras la pantalla de escaneo está arriba.
@@ -34,7 +39,9 @@ const READY_STAGES: ReadonlySet<PipelineStage> = new Set([PipelineStage.Ready, P
 
 export function useAppPhase(): AppPhase {
   const documentId = useDocumentStore((state) => state.id);
+  const documentName = useDocumentStore((state) => state.name);
   const stage = usePipelineStore((state) => state.stage);
+  const failedAtStage = usePipelineStore((state) => state.failedAtStage);
   // ADR-151: la página 1 precalentada queda en el store haya o no visor
   // montado — leerla acá no depende de que ②b ya exista.
   const firstPagePreviewReady = useViewerStore((state) => state.previewByPage.original.has(0));
@@ -74,15 +81,29 @@ export function useAppPhase(): AppPhase {
       const readyAt = readyAtRef.current;
       const elapsedSinceReadyMs =
         readyAt !== null && readyAt.documentId === documentId ? Date.now() - readyAt.at : null;
-      if (shouldAdvanceFromScan({ stage, elapsedMs, firstPagePreviewReady, elapsedSinceReadyMs })) {
+      const exit = resolveScanExit({
+        stage,
+        elapsedMs,
+        firstPagePreviewReady,
+        elapsedSinceReadyMs,
+        failedAtStage,
+      });
+      if (exit === "work") {
         setAdvancedForDocumentId(documentId);
+      } else if (exit === "load") {
+        // ADR-168 §4: el fallo de importación vuelve a ① por el mismo camino
+        // que `CloseDocumentButton` (`DOCUMENT_CLOSED`), y la `DropZone` se
+        // monta en estado de error con el nombre del archivo y el motivo.
+        const pipeline = usePipelineStore.getState();
+        recordImportFailure(describeImportFailure(documentName, pipeline.error));
+        actions.closeDocument();
       }
     }
 
     check();
     const timer = window.setInterval(check, SCAN_TICK_MS);
     return () => window.clearInterval(timer);
-  }, [phase, documentId, stage, firstPagePreviewReady]);
+  }, [phase, documentId, stage, firstPagePreviewReady, failedAtStage, documentName]);
 
   return phase;
 }

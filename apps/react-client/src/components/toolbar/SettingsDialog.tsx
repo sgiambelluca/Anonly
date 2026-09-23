@@ -63,7 +63,6 @@ import { DARK_PREVIEW, LIGHT_PREVIEW, ThemePreview } from "../common/ThemePrevie
 import { computeReanalyzeRenderRequest } from "../viewer/reanalyzeRenderRequest.js";
 
 import { diffReanalyzeChange, planReanalyzePatches } from "./reanalyzePlan.js";
-import { THIRD_PARTY_CREDITS } from "./thirdPartyCredits.js";
 
 const LANGUAGE_OPTIONS: ReadonlyArray<SelectOption<Language>> = [
   { value: "es", label: "Español" },
@@ -415,7 +414,14 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
           ) : null}
         </div>
 
-        <AboutSection />
+        {/*
+          ADR-168 §3: "Acerca de" (créditos y código fuente) dejó este diálogo
+          y pasó al pie de la pantalla de inicio. Una línea dice dónde quedó,
+          para quien lo busque donde estaba.
+        */}
+        <p className="mt-4 border-t border-border pt-3 text-sm text-text-secondary">
+          Los créditos y el código fuente están en «Acerca de…», al pie de la pantalla de inicio.
+        </p>
 
         {/*
           Hasta ADR-125 `saveError` solo se renderizaba dentro del
@@ -456,76 +462,5 @@ function FormRow({ label, children }: { label: string; children: ReactNode }) {
       <span className="text-sm font-medium text-text-secondary">{label}</span>
       {children}
     </div>
-  );
-}
-
-// Bloque estático (ADR-070 §1): lee `THIRD_PARTY_CREDITS`, un módulo de
-// datos puro, nunca `settings.store`. No participa de `diffReanalyzeChange`
-// ni de `handleSave`/`handleConfirmReanalyze` — "Cancelar" y "Guardar" no lo
-// tocan porque no hay nada de él que aplicar o descartar.
-/**
- * El repo del proyecto. Constante y no un setting: es una propiedad del
- * producto, no algo que el usuario configure.
- */
-const REPOSITORY_URL = "https://github.com/sgiambelluca/Anonly";
-
-function AboutSection() {
-  return (
-    <>
-      <div className="my-4 border-t border-border" />
-      <section aria-label="Acerca de" className="flex flex-col gap-3">
-        <h3 className="text-sm font-medium text-text-secondary">Acerca de</h3>
-        {/*
-          Que el código sea auditable es parte de la promesa del producto, no
-          un dato de color: alguien que va a confiarle una pericia a esta
-          herramienta tiene que poder ir a mirar qué hace. El link va acá y no
-          escondido en un README.
-        */}
-        <p className="text-sm text-text-secondary">
-          Anonly es software libre.{" "}
-          <a
-            href={REPOSITORY_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-accent underline"
-          >
-            Ver el código fuente en GitHub
-          </a>
-          {" · "}
-          <a
-            href={`${REPOSITORY_URL}/issues/new`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-accent underline"
-          >
-            Reportar un problema
-          </a>
-        </p>
-        {THIRD_PARTY_CREDITS.map((credit) => (
-          <p key={credit.id} className="text-sm text-text-secondary">
-            <a
-              href={credit.sourceUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-accent underline"
-            >
-              {credit.title}
-            </a>
-            {" — "}
-            {credit.holder}. Licencia{" "}
-            <a
-              href={credit.licenseUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-accent underline"
-            >
-              {credit.license}
-            </a>
-            {". "}
-            {credit.changes} {credit.usedFor}
-          </p>
-        ))}
-      </section>
-    </>
   );
 }

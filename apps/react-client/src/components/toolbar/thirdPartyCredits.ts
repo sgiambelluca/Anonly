@@ -1,7 +1,7 @@
 /**
  * `thirdPartyCredits.ts` — atribución de datos de terceros, como datos (no
- * JSX) para la sección "Acerca de" de `SettingsDialog` (`ui/Components.md`
- * §2.6, ADR-070 §2).
+ * JSX) para `AboutDialog` (`ui/Components.md` §2.9, ADR-070 §2; antes una
+ * sección de `SettingsDialog`, mudada por ADR-168 §3).
  *
  * Separar los datos del componente es lo que permite testear el contenido
  * sin renderizar nada (`apps/react-client` corre sin jsdom) y lo que deja

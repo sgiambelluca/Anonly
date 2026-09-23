@@ -124,6 +124,42 @@
 }
 
 /*
+ * Estado quieto de las animaciones de la pantalla de carga y de escaneo
+ * (ADR-168 §1/§5). Es lo que se ve con `prefers-reduced-motion: reduce`: el
+ * documento de "Cómo funciona" con los datos marcados y el paso 2 resaltado
+ * —un cuadro que sigue diciendo lo mismo sin moverse—. Las animaciones de
+ * abajo parten de este estado.
+ */
+@layer components {
+  /* Fondo punteado de las cajas ilustradas (zona de carga, "Cómo funciona"). */
+  .anonly-dots {
+    background-image: radial-gradient(rgb(var(--color-text-primary) / 0.07) 1px, transparent 1px);
+    background-size: 16px 16px;
+  }
+  .anonly-hw-arrow,
+  .anonly-hw-bar,
+  .anonly-hw-check {
+    opacity: 0;
+  }
+  .anonly-hw-bar,
+  .anonly-hw-check {
+    transform-box: fill-box;
+  }
+  .anonly-hw-bar {
+    transform-origin: left center;
+  }
+  .anonly-hw-check {
+    transform-origin: center;
+  }
+  .anonly-hw-step {
+    opacity: 0;
+  }
+  .anonly-hw-step.anonly-hw-s2 {
+    opacity: 1;
+  }
+}
+
+/*
  * Animaciones (ADR-087 §4 de estilo; `UX_Guidelines.md` §9 "Reducción de
  * movimiento").
  *
@@ -248,5 +284,326 @@
   }
   .anonly-word-cycle {
     animation: anonly-word-cycle 2.4s ease-in-out both;
+  }
+
+  /* ─── Zona de carga (ADR-168 §2) ─── */
+
+  /* Reposo: el borde punteado avanza, como una selección. */
+  @keyframes anonly-dz-ants {
+    to {
+      stroke-dashoffset: -44;
+    }
+  }
+  .anonly-dz-ants {
+    animation: anonly-dz-ants 3s linear infinite;
+  }
+  @keyframes anonly-dz-bob {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-4px);
+    }
+  }
+  .anonly-dz-bob {
+    animation: anonly-dz-bob 2.4s ease-in-out infinite;
+  }
+  /* Un documento que cae en la zona: dice "soltalo acá" sin texto. */
+  @keyframes anonly-dz-ghost {
+    0% {
+      opacity: 0;
+      transform: translate(96px, -64px) rotate(10deg);
+    }
+    14% {
+      opacity: 1;
+    }
+    52% {
+      opacity: 1;
+      transform: translate(0, 0) rotate(0);
+    }
+    64%,
+    100% {
+      opacity: 0;
+      transform: translate(0, 6px) scale(0.85);
+    }
+  }
+  .anonly-dz-ghost {
+    animation: anonly-dz-ghost 4.8s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+  }
+  @keyframes anonly-dz-ring {
+    0%,
+    50% {
+      box-shadow: 0 0 0 0 rgb(var(--color-accent) / 0.35);
+    }
+    66%,
+    100% {
+      box-shadow: 0 0 0 10px transparent;
+    }
+  }
+  .anonly-dz-ring {
+    animation: anonly-dz-ring 4.8s ease-out infinite;
+  }
+  /* Arrastrando encima. */
+  @keyframes anonly-dz-float {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-6px);
+    }
+  }
+  .anonly-dz-float {
+    animation: anonly-dz-float 1.8s ease-in-out infinite;
+  }
+  @keyframes anonly-dz-halo {
+    0%,
+    100% {
+      opacity: 0.14;
+      transform: scale(0.9);
+    }
+    50% {
+      opacity: 0.32;
+      transform: scale(1.08);
+    }
+  }
+  .anonly-dz-halo {
+    animation: anonly-dz-halo 1.8s ease-in-out infinite;
+  }
+  /* Abriendo: el anillo que gira. */
+  @keyframes anonly-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  .anonly-spin {
+    animation: anonly-spin 900ms linear infinite;
+  }
+  /* Error: una sacudida, una sola vez. */
+  @keyframes anonly-dz-shake {
+    0%,
+    100% {
+      transform: translateX(0);
+    }
+    20% {
+      transform: translateX(-4px);
+    }
+    40% {
+      transform: translateX(4px);
+    }
+    60% {
+      transform: translateX(-2px);
+    }
+    80% {
+      transform: translateX(2px);
+    }
+  }
+  .anonly-dz-shake {
+    animation: anonly-dz-shake 420ms ease-in-out 1 both;
+  }
+
+  /*
+   * ─── "Cómo funciona" (ADR-168 §1) ───
+   * Tres fases en un ciclo de 9 s, sincronizadas con los tres pasos escritos:
+   * entra el documento (paso 1), la lupa marca los datos por tipo (paso 2),
+   * los datos se tapan y aparece el check (paso 3).
+   */
+  @keyframes anonly-hw-doc {
+    0% {
+      opacity: 0;
+      transform: translateY(-14px);
+    }
+    8%,
+    93% {
+      opacity: 1;
+      transform: none;
+    }
+    100% {
+      opacity: 0;
+      transform: none;
+    }
+  }
+  .anonly-hw-doc {
+    animation: anonly-hw-doc 9s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+  }
+  @keyframes anonly-hw-arrow {
+    0% {
+      opacity: 0;
+      transform: translateY(-26px);
+    }
+    8% {
+      opacity: 1;
+    }
+    22% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    30%,
+    100% {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+  }
+  .anonly-hw-arrow {
+    animation: anonly-hw-arrow 9s ease-out infinite;
+  }
+  @keyframes anonly-hw-lens {
+    0%,
+    33% {
+      opacity: 0;
+      transform: translateY(0);
+    }
+    37% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    62% {
+      opacity: 1;
+      transform: translateY(80px);
+    }
+    66%,
+    100% {
+      opacity: 0;
+      transform: translateY(80px);
+    }
+  }
+  .anonly-hw-lens {
+    animation: anonly-hw-lens 9s ease-in-out infinite;
+  }
+  @keyframes anonly-hw-hl {
+    0%,
+    38% {
+      opacity: 0;
+    }
+    42%,
+    70% {
+      opacity: 1;
+    }
+    74%,
+    100% {
+      opacity: 0;
+    }
+  }
+  .anonly-hw-hl {
+    animation: anonly-hw-hl 9s ease-in-out infinite both;
+  }
+  .anonly-hw-hl.anonly-hw-d2 {
+    animation-delay: 0.7s;
+  }
+  .anonly-hw-hl.anonly-hw-d3 {
+    animation-delay: 1.4s;
+  }
+  @keyframes anonly-hw-bar {
+    0%,
+    70% {
+      opacity: 0;
+      transform: scaleX(0);
+    }
+    71% {
+      opacity: 1;
+      transform: scaleX(0);
+    }
+    76%,
+    93% {
+      opacity: 1;
+      transform: scaleX(1);
+    }
+    100% {
+      opacity: 0;
+      transform: scaleX(1);
+    }
+  }
+  .anonly-hw-bar {
+    animation: anonly-hw-bar 9s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+  }
+  @keyframes anonly-hw-check {
+    0%,
+    77% {
+      opacity: 0;
+      transform: scale(0.5);
+    }
+    81% {
+      opacity: 1;
+      transform: scale(1.08);
+    }
+    84%,
+    93% {
+      opacity: 1;
+      transform: scale(1);
+    }
+    100% {
+      opacity: 0;
+      transform: scale(1);
+    }
+  }
+  .anonly-hw-check {
+    animation: anonly-hw-check 9s ease-out infinite;
+  }
+  /* El paso escrito que corresponde a la fase que se está viendo. */
+  @keyframes anonly-hw-step {
+    0%,
+    31% {
+      opacity: 1;
+    }
+    34%,
+    97% {
+      opacity: 0;
+    }
+    100% {
+      opacity: 1;
+    }
+  }
+  .anonly-hw-step {
+    animation: anonly-hw-step 9s ease-in-out infinite;
+  }
+  .anonly-hw-step.anonly-hw-s2 {
+    animation-delay: -6s;
+  }
+  .anonly-hw-step.anonly-hw-s3 {
+    animation-delay: -3s;
+  }
+
+  /* ─── Pasos de la pantalla de escaneo (ADR-168 §5) ─── */
+  @keyframes anonly-step-ring {
+    0% {
+      box-shadow: 0 0 0 0 rgb(var(--color-accent) / 0.4);
+    }
+    70%,
+    100% {
+      box-shadow: 0 0 0 8px transparent;
+    }
+  }
+  .anonly-step-ring {
+    animation: anonly-step-ring 1.8s ease-out infinite;
+  }
+  @keyframes anonly-link-flow {
+    from {
+      background-position: 0 0;
+    }
+    to {
+      background-position: 24px 0;
+    }
+  }
+  .anonly-link-flow {
+    background-image: repeating-linear-gradient(
+      90deg,
+      rgb(var(--color-accent)) 0 6px,
+      transparent 6px 12px
+    );
+    background-size: 24px 2px;
+    animation: anonly-link-flow 1.2s linear infinite;
+  }
+  @keyframes anonly-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.35;
+    }
+  }
+  .anonly-pulse {
+    animation: anonly-pulse 1.4s ease-in-out infinite;
   }
 }

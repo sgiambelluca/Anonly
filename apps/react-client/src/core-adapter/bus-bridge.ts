@@ -32,6 +32,7 @@ import {
   type WorkerJobType,
 } from "@anonly/anonymization-core";
 
+import { resolveFailedAtStage } from "../components/screens/importFailure.js";
 import { useDegradedStore } from "../store/degraded.store.js";
 import type { useDocumentStore } from "../store/document.store.js";
 import type { useEntitiesStore } from "../store/entities.store.js";
@@ -83,7 +84,9 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribe {
       // Documento nuevo, cuenta nueva: si no, el aviso de un análisis viejo
       // sobrevive al siguiente y acusa a un documento que no tuvo el problema.
       jobTypeById.clear();
-      stores.pipeline.setState({ failedJobs: {} });
+      // ADR-168 §4/§5: el mapa de pasos y la etapa del fallo son del
+      // documento que se abre, no del anterior.
+      stores.pipeline.setState({ failedJobs: {}, failedAtStage: null, visitedStages: new Set() });
     }),
   );
 
@@ -142,7 +145,16 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribe {
 
   unsubs.push(
     bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_STAGE_CHANGED, (payload) => {
-      stores.pipeline.setState({ stage: payload.stage, progress: payload.progress });
+      // ADR-168 §5: `ScanSteps` necesita saber por qué etapas se pasó (el paso
+      // "Leer" se marca terminado sin OCR si el pipeline saltó a `Detecting`).
+      const visited = stores.pipeline.getState().visitedStages;
+      stores.pipeline.setState({
+        stage: payload.stage,
+        progress: payload.progress,
+        ...(visited.has(payload.stage)
+          ? {}
+          : { visitedStages: new Set([...visited, payload.stage]) }),
+      });
     }),
   );
 
@@ -177,7 +189,16 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribe {
 
   unsubs.push(
     bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_FAILED, (payload) => {
-      stores.pipeline.setState({ stage: PipelineStage.Failed, error: payload.error });
+      // ADR-168 §4: el Orchestrator emite `PIPELINE_FAILED` sin un
+      // `PIPELINE_STAGE_CHANGED` a `Failed` antes, así que el `stage` del store
+      // en este momento es la última etapa observada. Se guarda para decidir
+      // si fue un fallo de importación (vuelve a ①) o no (banner en ②b).
+      const previous = stores.pipeline.getState();
+      stores.pipeline.setState({
+        stage: PipelineStage.Failed,
+        error: payload.error,
+        failedAtStage: resolveFailedAtStage(previous.stage, previous.failedAtStage),
+      });
     }),
   );
 

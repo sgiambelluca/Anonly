@@ -28,7 +28,17 @@ export interface DialogProps {
   readonly footer?: ReactNode;
   /** Oculta el botón `[x]` de cierre (p. ej. cuando el cierre solo debe pasar por botones explícitos). */
   readonly hideCloseButton?: boolean;
+  /**
+   * Ancho máximo. `md` es el de siempre; `lg` es para diálogos con contenido
+   * en columnas (`AboutDialog`, los diálogos de edición de ADR-169 §10).
+   */
+  readonly size?: "md" | "lg";
 }
+
+const SIZE_CLASS: Readonly<Record<NonNullable<DialogProps["size"]>, string>> = {
+  md: "max-w-md",
+  lg: "max-w-xl",
+};
 
 export function Dialog({
   open,
@@ -38,6 +48,7 @@ export function Dialog({
   children,
   footer,
   hideCloseButton = false,
+  size = "md",
 }: DialogProps) {
   return (
     <RadixDialog.Root
@@ -48,7 +59,9 @@ export function Dialog({
     >
       <RadixDialog.Portal>
         <RadixDialog.Overlay className="fixed inset-0 z-40 bg-black/40" />
-        <RadixDialog.Content className="fixed left-1/2 top-1/2 z-50 flex max-h-[85vh] w-full max-w-md -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg bg-bg-primary p-5 shadow-md focus:outline-none">
+        <RadixDialog.Content
+          className={`fixed left-1/2 top-1/2 z-50 flex max-h-[85vh] w-[calc(100%-2rem)] ${SIZE_CLASS[size]} -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg bg-bg-primary p-5 shadow-md focus:outline-none`}
+        >
           <div className="mb-3 flex shrink-0 items-start justify-between gap-4">
             <RadixDialog.Title className="text-sm font-semibold text-text-primary">
               {title}
