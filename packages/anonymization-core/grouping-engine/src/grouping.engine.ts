@@ -1129,10 +1129,13 @@ export class GroupingEngine implements IEngine {
     session.finished = false;
     session.regexFinished = !options.expectRegex;
     session.nerFinished = !options.expectNer;
-    // ADR-172 §1, caso 53: reabrir para una segunda pasada de detección
-    // invalida cualquier punto de restauración — restaurar a un estado
-    // anterior a una re-detección tiraría lo re-detectado.
-    this.checkpoints.delete(documentId);
+    // Errata (2026-09-23) del caso 53: reopenSession NO descarta los puntos
+    // de restauración. El descarte por re-análisis lo hace el Orchestrator
+    // en `reanalyze`, antes de llamar a este método (ADR-172 §1,
+    // `Orchestrator.md` §6). Descartar aquí rompía `addManualEntity`, que
+    // reabre la sesión (ADR-061 §6): agregar a mano borraba todo el
+    // historial de deshacer y el propio agregado quedaba sin poder
+    // deshacerse.
   }
 
   /**
@@ -2277,11 +2280,12 @@ export class GroupingEngine implements IEngine {
 
   /**
    * ADR-172 §1: borra todos los puntos de restauración del documento.
-   * También se invoca internamente desde `reopenSession` y `closeSession`
-   * (caso 53) — no solo la expone el Orchestrator para `reanalyze`/
-   * `closeDocument`/`dispose`. No-op silencioso si no había ninguno (el
-   * caso común: la mayoría de los documentos nunca llaman a
-   * `createCheckpoint`).
+   * También se invoca internamente desde `closeSession` (caso 53) — **no**
+   * desde `reopenSession` (errata 2026-09-23: el descarte por re-análisis lo
+   * hace el Orchestrator en `reanalyze`, antes de reabrir la sesión). El
+   * Orchestrator también la expone directo para `closeDocument`/`dispose`.
+   * No-op silencioso si no había ninguno (el caso común: la mayoría de los
+   * documentos nunca llaman a `createCheckpoint`).
    */
   discardCheckpoints(documentId: string): void {
     this.assertNotDisposed();

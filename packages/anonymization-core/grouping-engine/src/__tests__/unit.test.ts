@@ -4,7 +4,6 @@ import {
   EntityType,
   EventChannel,
   GENDER_LEXICON,
-  InvalidInputError,
   ReplacementMode,
   type EngineContext,
   type EntityGroupCreated,
@@ -1311,24 +1310,52 @@ describe("GroupingEngine — puntos de restauración (ADR-172)", () => {
     ).toBe(true);
   });
 
-  // Caso 53 (§13).
-  it("reopenSession and closeSession discard all checkpoints", async () => {
+  // Caso 53 (§13). Errata (2026-09-23): la redacción original decía que
+  // reopenSession también descartaba los puntos, contradiciendo ADR-172 —
+  // el descarte por re-análisis lo hace el Orchestrator en `reanalyze`,
+  // antes de llamar a `reopenSession` (Orchestrator.md §6). Este test
+  // reemplaza al que afirmaba lo contrario.
+  it("closeSession discards all checkpoints; reopenSession keeps them", async () => {
     ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
       documentId: "doc-1",
       occurrence: makeOccurrence({ value: "11111111", normalizedValue: "11111111" }),
     });
     const checkpointId = engine.createCheckpoint("doc-1");
+    const savedInternal = engine["checkpoints"].get("doc-1")?.get(checkpointId);
     expect(engine["checkpoints"].get("doc-1")?.size).toBe(1);
 
+    // reopenSession NO descarta: el mismo escenario que addManualEntity
+    // (ADR-061 §6) — reabrir la sesión, agregar una ocurrencia nueva y
+    // volver a cerrar con finishSession no debe tirar el punto.
     engine.reopenSession("doc-1", { expectRegex: true, expectNer: false });
-    expect(engine["checkpoints"].has("doc-1")).toBe(false);
-    await expect(engine.restoreCheckpoint("doc-1", checkpointId)).rejects.toThrow(
-      InvalidInputError,
-    );
-
-    engine.createCheckpoint("doc-1");
     expect(engine["checkpoints"].get("doc-1")?.size).toBe(1);
 
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "22222222", normalizedValue: "22222222" }),
+    });
+    await engine.finishSession("doc-1");
+    expect(engine.getSnapshot("doc-1").groups).toHaveLength(2);
+
+    // El punto sigue restaurando la sesión exacta de antes del reopen: la
+    // ocurrencia nueva desaparece.
+    await engine.restoreCheckpoint("doc-1", checkpointId);
+    const restoredInternal = engine["sessions"].get("doc-1");
+    expect(restoredInternal?.groups).toEqual(savedInternal?.groups);
+    expect(restoredInternal?.nextIndexByType).toEqual(savedInternal?.nextIndexByType);
+
+    const restored = engine.getSnapshot("doc-1").groups;
+    expect(restored).toHaveLength(1);
+    expect(restored[0]?.aliases).toContain("11111111");
+    expect(restored.some((g) => g.aliases.includes("22222222"))).toBe(false);
+
+    // restoreCheckpoint no toca el registro de puntos: el original sigue
+    // ahí, y uno nuevo se suma.
+    expect(engine["checkpoints"].get("doc-1")?.size).toBe(1);
+    engine.createCheckpoint("doc-1");
+    expect(engine["checkpoints"].get("doc-1")?.size).toBe(2);
+
+    // Ahora sí: closeSession descarta todo.
     await engine.closeSession("doc-1");
     expect(engine["checkpoints"].has("doc-1")).toBe(false);
   });
