@@ -931,4 +931,69 @@ describe("GroupingEngine — contract tests", () => {
     expect(after.groups.find((g) => g.id === group!.id)).toBeUndefined();
     expect(after.conflicts[0]?.resolved).toBe(true);
   });
+
+  // Caso 51 (§13, ADR-172 §1) — el test de que deshacer no miente: una
+  // secuencia por cada edición que §3.3b declaraba sin inversa (fusión,
+  // división, reclasificación, eliminación).
+  it("restoreCheckpoint returns the exact session, including internal state", async () => {
+    await engine.init(ctx);
+    engine.startSession("doc-1");
+
+    for (const value of ["11111111", "22222222", "33333333"]) {
+      ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: makeOccurrence({ value, normalizedValue: value }),
+      });
+    }
+    const [g1, g2, g3] = engine.getSnapshot("doc-1").groups;
+
+    const checkpointId = engine.createCheckpoint("doc-1");
+    // El checkpoint guardado es la referencia contra la que se compara
+    // después de restaurar — no la sesión viva, que las ediciones de abajo
+    // mutan en el lugar.
+    const savedInternal = engine["checkpoints"].get("doc-1")?.get(checkpointId);
+    expect(savedInternal).toBeDefined();
+
+    // Fusión.
+    const merged = await engine.applyGroupMerge({
+      documentId: "doc-1",
+      sourceGroupId: g1!.id,
+      targetGroupId: g2!.id,
+    });
+    // División.
+    const { created } = await engine.applyGroupSplit({
+      documentId: "doc-1",
+      groupId: merged.id,
+      occurrenceIds: [merged.members[0]!.occurrenceId],
+    });
+    // Reclasificación.
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: created.id,
+      patch: { type: EntityType.CUIT },
+    });
+    // Eliminación.
+    await engine.applyGroupRemove({ documentId: "doc-1", groupId: g3!.id });
+
+    // Confirma que de verdad cambió algo antes de restaurar.
+    expect(engine.getSnapshot("doc-1").groups).not.toEqual([g1, g2, g3]);
+
+    await engine.restoreCheckpoint("doc-1", checkpointId);
+
+    const restoredInternal = engine["sessions"].get("doc-1");
+    expect(restoredInternal?.groups).toEqual(savedInternal?.groups);
+    expect(restoredInternal?.nextIndexByType).toEqual(savedInternal?.nextIndexByType);
+    expect(restoredInternal?.recordedOccurrences).toEqual(savedInternal?.recordedOccurrences);
+    expect(restoredInternal?.typeCorrections).toEqual(savedInternal?.typeCorrections);
+    expect(restoredInternal?.removedValues).toEqual(savedInternal?.removedValues);
+
+    // Vía pública: mismos id, indexInType y replacementValue.
+    const restored = engine.getSnapshot("doc-1").groups;
+    expect(new Set(restored.map((g) => g.id))).toEqual(new Set([g1!.id, g2!.id, g3!.id]));
+    for (const original of [g1, g2, g3]) {
+      const match = restored.find((g) => g.id === original!.id);
+      expect(match?.indexInType).toBe(original!.indexInType);
+      expect(match?.replacementValue).toBe(original!.replacementValue);
+    }
+  });
 });

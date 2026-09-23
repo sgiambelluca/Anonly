@@ -167,6 +167,7 @@ import {
   EntityType,
   EventChannel,
   InvalidInputError,
+  MAX_EDIT_CHECKPOINTS,
   ReplacementMode,
   synthesize,
   type BoundingBox,
@@ -568,6 +569,43 @@ function toEditPreviewGroup(group: EntityGroup, asNew: boolean): EditPreviewGrou
   };
 }
 
+/**
+ * ADR-172 §1: qué claves de `EntityGroup` difieren entre dos proyecciones
+ * públicas DEL MISMO `id` — usado por `restoreCheckpoint` para emitir
+ * `ENTITY_GROUP_UPDATED` con `changes` exacto (caso 52). Comparación por
+ * valor (`JSON.stringify`): todos los campos de `EntityGroup` son datos
+ * planos (`string`/`number`/`boolean`/arrays y objetos anidados de esos), sin
+ * funciones ni `Date`/`Set`/`Map`, así que la serialización es una prueba de
+ * igualdad estructural válida acá — no se usa en ningún hot path (ADR-127 no
+ * aplica: esto no es geometría).
+ */
+function diffEntityGroup(
+  before: EntityGroup,
+  after: EntityGroup,
+): ReadonlyArray<keyof EntityGroup> {
+  const keys: ReadonlyArray<keyof EntityGroup> = [
+    "type",
+    "canonicalValue",
+    "members",
+    "replacementMode",
+    "replacementValue",
+    "indexInType",
+    "enabled",
+    "aliases",
+    "personGender",
+    "replacementValueUserSet",
+    "needsReview",
+    "replacementPreviews",
+    "createdAt",
+    "updatedAt",
+  ];
+  const changed: (keyof EntityGroup)[] = [];
+  for (const key of keys) {
+    if (JSON.stringify(before[key]) !== JSON.stringify(after[key])) changed.push(key);
+  }
+  return changed;
+}
+
 function toOccurrenceRef(occurrence: Occurrence): OccurrenceRef {
   return {
     occurrenceId: occurrence.id,
@@ -900,6 +938,16 @@ export class GroupingEngine implements IEngine {
   private disposed = false;
   private unsubscribes: Unsubscribe[] = [];
   private sessions = new Map<string, Session>();
+  /**
+   * ADR-172 §1: puntos de restauración por documento, insertados en orden
+   * (un `Map` de JS preserva orden de inserción — así el más viejo es
+   * siempre el primero al iterar `.keys()`, sin necesidad de una lista
+   * paralela). Hasta `MAX_EDIT_CHECKPOINTS` por documento; al pasarse, se
+   * descarta el más viejo. Cada valor es una copia estructural completa de
+   * la `Session` en ese momento (`cloneSession`, la misma función que usa
+   * `previewEdit`).
+   */
+  private checkpoints = new Map<string, Map<string, Session>>();
 
   private readonly handleEntityFound = (payload: EntityFound): void => {
     const session = this.sessions.get(payload.documentId);
@@ -1081,6 +1129,10 @@ export class GroupingEngine implements IEngine {
     session.finished = false;
     session.regexFinished = !options.expectRegex;
     session.nerFinished = !options.expectNer;
+    // ADR-172 §1, caso 53: reabrir para una segunda pasada de detección
+    // invalida cualquier punto de restauración — restaurar a un estado
+    // anterior a una re-detección tiraría lo re-detectado.
+    this.checkpoints.delete(documentId);
   }
 
   /**
@@ -2069,16 +2121,186 @@ export class GroupingEngine implements IEngine {
     }
   }
 
+  /**
+   * ADR-172 §1: copia estructural de la sesión completa (`cloneSession`, la
+   * misma función que usa `previewEdit`) bajo un id opaco. Hasta
+   * `MAX_EDIT_CHECKPOINTS` por documento — al pasarse, se descarta el más
+   * viejo. Sincrónico. Documento sin sesión → `InvalidInputError`: no hay
+   * forma de que este método, que siempre devuelve un `string`, señalice
+   * "no-op" — a diferencia de `reopenSession`/`dropOccurrences`, que
+   * devuelven `void`.
+   */
+  createCheckpoint(documentId: string): string {
+    this.assertNotDisposed();
+    this.assertInitialized();
+    const session = this.sessions.get(documentId);
+    if (!session) {
+      throw new InvalidInputError("createCheckpoint: documento sin sesión de grouping.", {
+        documentId,
+      });
+    }
+    let byDocument = this.checkpoints.get(documentId);
+    if (!byDocument) {
+      byDocument = new Map();
+      this.checkpoints.set(documentId, byDocument);
+    }
+    const checkpointId = crypto.randomUUID();
+    byDocument.set(checkpointId, cloneSession(session));
+    if (byDocument.size > MAX_EDIT_CHECKPOINTS) {
+      // `Map` preserva orden de inserción: la primera clave al iterar es la
+      // más vieja.
+      const oldestId = byDocument.keys().next().value;
+      if (oldestId !== undefined) byDocument.delete(oldestId);
+    }
+    return checkpointId;
+  }
+
+  /**
+   * ADR-172 §1: reemplaza el estado de la sesión por la copia del
+   * checkpoint (re-clonada, para que el punto guardado siga siendo
+   * restaurable más de una vez sin que las ediciones posteriores lo
+   * corrompan) y emite SOLO la diferencia — grupos idénticos no emiten
+   * nada; los que sobran → `ENTITY_GROUP_REMOVED`; los que faltan →
+   * `ENTITY_GROUP_CREATED`; los que cambiaron → `ENTITY_GROUP_UPDATED` con
+   * `changes` exacto (`diffEntityGroup`); conflictos →
+   * `CONFLICT_DETECTED`/`CONFLICT_RESOLVED` (caso 52). `checkpointId`
+   * desconocido, descartado o de otro documento → `InvalidInputError`
+   * (caso 53) — los checkpoints se guardan por documento, así que un id de
+   * otro documento ya cae en "desconocido" sin lógica extra.
+   */
+  restoreCheckpoint(documentId: string, checkpointId: string): Promise<void> {
+    try {
+      this.assertNotDisposed();
+      this.assertInitialized();
+      const target = this.checkpoints.get(documentId)?.get(checkpointId);
+      if (!target) {
+        throw new InvalidInputError("restoreCheckpoint: checkpointId desconocido.", {
+          documentId,
+          checkpointId,
+        });
+      }
+      const before = this.sessions.get(documentId);
+      if (!before) {
+        throw new InvalidInputError("restoreCheckpoint: documento sin sesión de grouping.", {
+          documentId,
+        });
+      }
+
+      const beforeGroups = before.groups;
+      const beforeConflicts = before.conflicts;
+
+      const after = cloneSession(target);
+      this.sessions.set(documentId, after);
+
+      // Grupos que sobran (estaban antes, no en el punto restaurado).
+      for (const id of beforeGroups.keys()) {
+        if (after.groups.has(id)) continue;
+        this.ctx?.bus.emit(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_REMOVED, {
+          documentId,
+          groupId: id,
+        });
+      }
+      // Grupos que faltan (están en el punto restaurado, no estaban antes).
+      for (const [id, group] of after.groups) {
+        if (beforeGroups.has(id)) continue;
+        this.emitGroupCreated(after, group);
+      }
+      // Grupos en los dos: diff exacto.
+      for (const [id, afterGroup] of after.groups) {
+        const beforeGroup = beforeGroups.get(id);
+        if (!beforeGroup) continue;
+        const beforePublic = toPublicGroup(
+          beforeGroup,
+          before.seed,
+          this.resolveMaskFormat(before, beforeGroup),
+        );
+        const afterPublic = toPublicGroup(
+          afterGroup,
+          after.seed,
+          this.resolveMaskFormat(after, afterGroup),
+        );
+        const changed = diffEntityGroup(beforePublic, afterPublic);
+        if (changed.length === 0) continue;
+        this.emitGroupUpdated(after, afterGroup, changed);
+      }
+
+      // Conflictos: mismo criterio de tres vías. En la práctica, un
+      // conflictId nunca desaparece del Map de una sesión (solo se muta
+      // resolved/resolvedType) — "sobra" significa que se creó DESPUÉS del
+      // checkpoint; se re-emite como CONFLICT_RESOLVED porque no existe un
+      // evento "removido" (mismo criterio que dropOccurrences con un grupo
+      // eliminado).
+      for (const [id, conflict] of beforeConflicts) {
+        if (after.conflicts.has(id)) continue;
+        const entityType = conflict.resolvedType ?? conflict.candidates[0]?.entityType;
+        if (entityType === undefined) continue;
+        this.ctx?.bus.emit(EventChannel.Grouping, EngineEvents.CONFLICT_RESOLVED, {
+          documentId,
+          conflictId: id,
+          entityType,
+        });
+      }
+      for (const [id, conflict] of after.conflicts) {
+        const previous = beforeConflicts.get(id);
+        if (!previous) {
+          this.ctx?.bus.emit(EventChannel.Grouping, EngineEvents.CONFLICT_DETECTED, {
+            documentId,
+            conflict,
+          });
+          continue;
+        }
+        if (
+          previous.resolved === conflict.resolved &&
+          previous.resolvedType === conflict.resolvedType
+        ) {
+          continue;
+        }
+        if (conflict.resolved && conflict.resolvedType !== undefined) {
+          this.ctx?.bus.emit(EventChannel.Grouping, EngineEvents.CONFLICT_RESOLVED, {
+            documentId,
+            conflictId: id,
+            entityType: conflict.resolvedType,
+          });
+        } else {
+          this.ctx?.bus.emit(EventChannel.Grouping, EngineEvents.CONFLICT_DETECTED, {
+            documentId,
+            conflict,
+          });
+        }
+      }
+
+      return Promise.resolve();
+    } catch (err: unknown) {
+      return Promise.reject(err instanceof Error ? err : new Error(String(err)));
+    }
+  }
+
+  /**
+   * ADR-172 §1: borra todos los puntos de restauración del documento.
+   * También se invoca internamente desde `reopenSession` y `closeSession`
+   * (caso 53) — no solo la expone el Orchestrator para `reanalyze`/
+   * `closeDocument`/`dispose`. No-op silencioso si no había ninguno (el
+   * caso común: la mayoría de los documentos nunca llaman a
+   * `createCheckpoint`).
+   */
+  discardCheckpoints(documentId: string): void {
+    this.assertNotDisposed();
+    this.assertInitialized();
+    this.checkpoints.delete(documentId);
+  }
+
   closeSession(documentId: string): Promise<void> {
     this.assertNotDisposed();
     this.assertInitialized();
     this.sessions.delete(documentId);
+    this.checkpoints.delete(documentId);
     return Promise.resolve();
   }
 
   dispose(): Promise<void> {
     this.teardownSubscriptions();
     this.sessions.clear();
+    this.checkpoints.clear();
     this.disposed = true;
     this.initialized = false;
     this.ctx = null;

@@ -6,6 +6,7 @@ import {
   EntityType,
   EventChannel,
   InvalidInputError,
+  MAX_EDIT_CHECKPOINTS,
   ReplacementMode,
   synthesize,
   type ConflictDetected,
@@ -3592,5 +3593,66 @@ describe("GroupingEngine — edge cases", () => {
     // El intento fallido no dejó rastro en la sesión real.
     const { groups } = engine.getSnapshot("doc-1");
     expect(groups).toHaveLength(1);
+  });
+
+  // Caso 51 (§13, ADR-172 §1).
+  it("after restore, the next new group gets the indexInType it would have got", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "11111111", normalizedValue: "11111111" }),
+    });
+    const checkpointId = engine.createCheckpoint("doc-1");
+
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "22222222", normalizedValue: "22222222" }),
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "33333333", normalizedValue: "33333333" }),
+    });
+    expect(engine.getSnapshot("doc-1").groups).toHaveLength(3);
+
+    await engine.restoreCheckpoint("doc-1", checkpointId);
+    expect(engine.getSnapshot("doc-1").groups).toHaveLength(1);
+
+    // Un grupo NUEVO tiene que recibir indexInType=2 (el que le habría
+    // tocado en el punto), no 4 (que sería si nextIndex hubiera quedado
+    // en 3 tras las dos creaciones descartadas por el restore).
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "44444444", normalizedValue: "44444444" }),
+    });
+    const newGroup = engine.getSnapshot("doc-1").groups.find((g) => g.aliases.includes("44444444"));
+    expect(newGroup?.indexInType).toBe(2);
+  });
+
+  // Caso 53 (§13, ADR-172 §1).
+  it("checkpoint limit evicts the oldest; unknown ids throw", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "11111111", normalizedValue: "11111111" }),
+    });
+
+    const ids: string[] = [];
+    for (let i = 0; i < MAX_EDIT_CHECKPOINTS + 1; i++) {
+      ids.push(engine.createCheckpoint("doc-1"));
+    }
+
+    const byDocument = engine["checkpoints"].get("doc-1");
+    expect(byDocument?.size).toBe(MAX_EDIT_CHECKPOINTS);
+    expect(byDocument?.has(ids[0]!)).toBe(false);
+    expect(byDocument?.has(ids[ids.length - 1]!)).toBe(true);
+
+    // Restaurar el descartado.
+    await expect(engine.restoreCheckpoint("doc-1", ids[0]!)).rejects.toThrow(InvalidInputError);
+    // Un id inventado.
+    await expect(engine.restoreCheckpoint("doc-1", "no-existe")).rejects.toThrow(InvalidInputError);
+    // Un id real, pero de OTRO documento (los checkpoints se guardan por
+    // documento, así que esto cae en "desconocido" sin lógica extra).
+    engine.startSession("doc-2");
+    await expect(engine.restoreCheckpoint("doc-2", ids[ids.length - 1]!)).rejects.toThrow(
+      InvalidInputError,
+    );
   });
 });

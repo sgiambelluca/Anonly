@@ -4,8 +4,12 @@ import {
   EntityType,
   EventChannel,
   GENDER_LEXICON,
+  InvalidInputError,
   ReplacementMode,
   type EngineContext,
+  type EntityGroupCreated,
+  type EntityGroupRemoved,
+  type EntityGroupUpdated,
   type GenderLexicon,
 } from "@anonly/shared";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
@@ -1219,5 +1223,113 @@ describe("GroupingEngine — eliminar una entidad (ADR-171)", () => {
     const { groups } = engine.getSnapshot("doc-1");
     expect(groups).toHaveLength(1);
     expect(groups[0]?.aliases).toContain("11111111");
+  });
+});
+
+describe("GroupingEngine — puntos de restauración (ADR-172)", () => {
+  let engine: GroupingEngine;
+  let ctx: EngineContext;
+
+  beforeEach(async () => {
+    engine = new GroupingEngine();
+    ctx = createEngineContext();
+    await engine.init(ctx);
+    engine.startSession("doc-1");
+  });
+
+  afterEach(async () => {
+    if (!engine["disposed"]) {
+      await engine.dispose();
+    }
+  });
+
+  // Caso 52 (§13).
+  it("restoreCheckpoint emits only the diff", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "11111111", normalizedValue: "11111111" }),
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "22222222", normalizedValue: "22222222" }),
+    });
+    const [g1, g2] = engine.getSnapshot("doc-1").groups;
+    const checkpointId = engine.createCheckpoint("doc-1");
+
+    // g1 no se toca. g2 se edita (UPDATED al restaurar). Un g3 nuevo aparece
+    // después del checkpoint (REMOVED al restaurar, porque ahí no existía).
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: g2!.id,
+      patch: { replacementMode: ReplacementMode.Mask },
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "33333333", normalizedValue: "33333333" }),
+    });
+    const g3 = engine.getSnapshot("doc-1").groups.find((g) => g.aliases.includes("33333333"));
+
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+    await engine.restoreCheckpoint("doc-1", checkpointId);
+
+    const groupEvents = busEmitSpy.mock.calls.filter(
+      ([channel]) => channel === EventChannel.Grouping,
+    );
+
+    // g1 idéntico: ni CREATED ni UPDATED ni REMOVED para su id.
+    expect(
+      groupEvents.some(([, event, payload]) => {
+        if (event === EngineEvents.ENTITY_GROUP_REMOVED) {
+          return (payload as EntityGroupRemoved).groupId === g1!.id;
+        }
+        if (
+          event === EngineEvents.ENTITY_GROUP_UPDATED ||
+          event === EngineEvents.ENTITY_GROUP_CREATED
+        ) {
+          return (payload as EntityGroupUpdated | EntityGroupCreated).group.id === g1!.id;
+        }
+        return false;
+      }),
+    ).toBe(false);
+
+    // g2 cambió: UPDATED con "replacementMode" en changes exacto.
+    const g2Updated = groupEvents.find(
+      ([, event, payload]) =>
+        event === EngineEvents.ENTITY_GROUP_UPDATED &&
+        (payload as EntityGroupUpdated).group.id === g2!.id,
+    );
+    expect(g2Updated).toBeDefined();
+    expect((g2Updated?.[2] as EntityGroupUpdated).changes).toContain("replacementMode");
+
+    // g3 sobra: REMOVED.
+    expect(
+      groupEvents.some(
+        ([, event, payload]) =>
+          event === EngineEvents.ENTITY_GROUP_REMOVED &&
+          (payload as EntityGroupRemoved).groupId === g3!.id,
+      ),
+    ).toBe(true);
+  });
+
+  // Caso 53 (§13).
+  it("reopenSession and closeSession discard all checkpoints", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "11111111", normalizedValue: "11111111" }),
+    });
+    const checkpointId = engine.createCheckpoint("doc-1");
+    expect(engine["checkpoints"].get("doc-1")?.size).toBe(1);
+
+    engine.reopenSession("doc-1", { expectRegex: true, expectNer: false });
+    expect(engine["checkpoints"].has("doc-1")).toBe(false);
+    await expect(engine.restoreCheckpoint("doc-1", checkpointId)).rejects.toThrow(
+      InvalidInputError,
+    );
+
+    engine.createCheckpoint("doc-1");
+    expect(engine["checkpoints"].get("doc-1")?.size).toBe(1);
+
+    await engine.closeSession("doc-1");
+    expect(engine["checkpoints"].has("doc-1")).toBe(false);
   });
 });
