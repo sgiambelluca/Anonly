@@ -927,6 +927,110 @@ describe("GroupingEngine — edge cases", () => {
     expect(indices).toEqual([1, 3]);
   });
 
+  // Caso 48 + caso 15 (§13, ADR-171 §2).
+  it("removed group leaves an indexInType hole until the next finishSession", async () => {
+    for (const value of ["11111111", "22222222", "33333333"]) {
+      ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: makeOccurrence({ value, normalizedValue: value }),
+      });
+    }
+    const before = engine.getSnapshot("doc-1").groups;
+    const g2 = byIndex(before, 2);
+
+    await engine.applyGroupRemove({ documentId: "doc-1", groupId: g2.id });
+
+    const after = engine.getSnapshot("doc-1").groups;
+    const indices = after.map((g) => g.indexInType).sort((a, b) => a - b);
+    expect(indices).toEqual([1, 3]);
+
+    await engine.finishSession("doc-1");
+    const compacted = engine.getSnapshot("doc-1").groups.map((g) => g.indexInType);
+    expect(compacted.sort((a, b) => a - b)).toEqual([1, 2]);
+  });
+
+  // Caso 48 (§13, ADR-171 §2).
+  it("applyGroupRemove on an unknown group warns and is a no-op", async () => {
+    await expect(
+      engine.applyGroupRemove({ documentId: "doc-1", groupId: "no-existe" }),
+    ).resolves.toBeUndefined();
+    expect(ctx.logger.warn).toHaveBeenCalled();
+    expect(engine.getSnapshot("doc-1").groups).toHaveLength(0);
+  });
+
+  // Caso 49 (§13, ADR-171 §3) — el test de que eliminar dura: sin él, un
+  // re-análisis devuelve la entidad sola.
+  it("a removed value is not regrouped after reopenSession + re-detection, from any source", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        value: "Banco Nación",
+        normalizedValue: "banco nacion",
+        entityType: EntityType.Organization,
+      }),
+    });
+    const [group] = engine.getSnapshot("doc-1").groups;
+    await engine.applyGroupRemove({ documentId: "doc-1", groupId: group!.id });
+    expect(engine.getSnapshot("doc-1").groups).toHaveLength(0);
+
+    engine.reopenSession("doc-1", { expectRegex: true, expectNer: true });
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+
+    // Regex vuelve a encontrarlo.
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        value: "Banco Nación",
+        normalizedValue: "banco nacion",
+        entityType: EntityType.Organization,
+        bbox: makeBBox(0, 500, 100, 12),
+      }),
+    });
+    // NER también lo encuentra, en otra parte de la página.
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        value: "Banco Nación",
+        normalizedValue: "banco nacion",
+        entityType: EntityType.Organization,
+        source: DetectionSource.NER,
+        bbox: makeBBox(0, 700, 100, 12),
+      }),
+    });
+    // Y hasta un agregado MANUAL del mismo valor (ADR-171 §3: "de cualquier
+    // fuente, incluida Manual" — la re-aplicación automática de literales
+    // retenidos del Orchestrator, ADR-061 §5, no llama a liftRemoval).
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        value: "Banco Nación",
+        normalizedValue: "banco nacion",
+        entityType: EntityType.Organization,
+        source: DetectionSource.Manual,
+        bbox: makeBBox(0, 900, 100, 12),
+      }),
+    });
+
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.REGEX_FINISHED, {
+      documentId: "doc-1",
+      occurrenceCount: 2,
+      durationMs: 1,
+    });
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.NER_FINISHED, {
+      documentId: "doc-1",
+      occurrenceCount: 1,
+      durationMs: 1,
+    });
+
+    expect(engine.getSnapshot("doc-1").groups).toHaveLength(0);
+    expect(
+      busEmitSpy.mock.calls.some(
+        ([channel, event]) =>
+          channel === EventChannel.Grouping && event === EngineEvents.ENTITY_GROUP_CREATED,
+      ),
+    ).toBe(false);
+  });
+
   // Caso 17 (§13)
   it("user edit preserved when new ENTITY_FOUND arrives", async () => {
     ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
@@ -3445,7 +3549,22 @@ describe("GroupingEngine — edge cases", () => {
     expect(gendered.replacementValue).toBe(masked.replacementValue);
     expect(gendered.replacementPreviews.placeholder).not.toBe(beforePreviews.placeholder);
     expect(gendered.replacementPreviews.placeholder).toContain("MUJER");
-    expect(gendered.replacementPreviews.synthetic).not.toBe(beforePreviews.synthetic);
+    // El sintetizador no siembra con personGender (ADR-071 §5: solo elige de
+    // qué pool sortea) — para un (groupId, seed) dado, el resultado CON
+    // género puede coincidir por azar con el resultado SIN género (los pools
+    // se solapan). Lo que sí es una garantía es que la vista previa usa el
+    // género vigente: coincide exactamente con `synthesize` invocado con
+    // `personGender: "f"`, no con una comparación de "cambió/no cambió".
+    const seed = engine["sessions"].get("doc-1")!.seed as string;
+    expect(gendered.replacementPreviews.synthetic).toBe(
+      synthesize({
+        type: EntityType.Person,
+        groupId: group!.id,
+        seed,
+        indexInType: group!.indexInType,
+        personGender: "f",
+      }),
+    );
   });
 
   // Caso 47 (§13, ADR-170 §2).

@@ -7,7 +7,7 @@
  * escucha `ENTITY_FOUND` en los canales `regex`/`ner`, `REGEX_FINISHED`/
  * `NER_FINISHED`, y los requests de UI en el canal `ui`
  * (`GROUP_UPDATE_REQUESTED`, `GROUP_MERGE_REQUESTED`, `GROUP_SPLIT_REQUESTED`,
- * `RULE_CREATED`, `RULE_UPDATED`, `RULE_DELETED`,
+ * `GROUP_REMOVE_REQUESTED`, `RULE_CREATED`, `RULE_UPDATED`, `RULE_DELETED`,
  * `CONFLICT_RESOLVE_REQUESTED`, `DOCUMENT_CLOSED`). Corre en el main thread
  * (spec §12): sin Worker, sin transferencia zero-copy.
  *
@@ -158,6 +158,7 @@ import {
   ConflictReason,
   DetectionSource,
   GENDER_LEXICON,
+  normalizeEntityValue,
   normalizeForComparison,
   EngineDisposedError,
   EngineEvents,
@@ -180,6 +181,7 @@ import {
   type EntityFound,
   type EntityGroup,
   type GroupMergeRequested,
+  type GroupRemoveRequested,
   type GroupSplitRequested,
   type GroupUpdateRequested,
   type IEngine,
@@ -225,6 +227,17 @@ const DEFAULT_SIMILARITY_THRESHOLD = 0.88;
  * constante nombrada justamente para que se pueda encontrar y mover.
  */
 const MIN_SUGGESTION_CONFIDENCE = 0.5;
+
+/**
+ * ADR-171 §3: sentinel de `SessionOccurrenceRecord.groupId` para una
+ * ocurrencia suprimida (paso 0 de Matching) — nunca se agrupa, así que no
+ * tiene un `groupId` real. `session.groups.get(SUPPRESSED_GROUP_ID)` da
+ * siempre `undefined`, exactamente como un `groupId` de un grupo eliminado
+ * (mismo patrón ya aceptado por `applyGroupRemove`, que deja `groupId`
+ * huérfanos en `recordedOccurrences` a propósito — caso 48 punto 5). Un
+ * `crypto.randomUUID()` real nunca produce `""`.
+ */
+const SUPPRESSED_GROUP_ID = "";
 
 /** ADR-073 §1: los tres tipos cuyo valor es texto libre. */
 const FUZZY_MATCHING_TYPES: ReadonlySet<EntityType> = new Set([
@@ -386,6 +399,19 @@ interface Session {
    * fuera de RAM).
    */
   readonly typeCorrections: Map<string, TypeCorrection>;
+  /**
+   * ADR-171 §2/§3: valores normalizados (`Occurrence.normalizedValue`, o sea
+   * ya pasados por `normalizeEntityValue`) que el usuario eliminó por
+   * `GROUP_REMOVE_REQUESTED` — SIN tipo: se suprime el valor, no el par
+   * valor+tipo. Se consulta en el paso 0 de Matching, después del dedup por
+   * identidad y antes de cualquier agrupación, para **toda** fuente
+   * (incluida `Manual`). Mismo patrón que `typeCorrections`: RAM, por
+   * documento, nunca se persiste (`08_Security_Model.md` §10.2). Sobrevive a
+   * `reopenSession` (no se toca), muere en `closeSession` y **no** sale en
+   * `GroupingEngineSnapshot` (mismo criterio que `typeCorrections`, ADR-085
+   * §8).
+   */
+  readonly removedValues: Set<string>;
   readonly seed: string;
   readonly startedAt: number;
   regexFinished: boolean;
@@ -432,6 +458,7 @@ function cloneSession(session: Session): Session {
     // cada registro necesita su propia copia, no solo el array contenedor.
     recordedOccurrences: session.recordedOccurrences.map((rec) => ({ ...rec })),
     typeCorrections: new Map(session.typeCorrections),
+    removedValues: new Set(session.removedValues),
     seed: session.seed,
     startedAt: session.startedAt,
     regexFinished: session.regexFinished,
@@ -919,6 +946,12 @@ export class GroupingEngine implements IEngine {
     });
   };
 
+  private readonly handleGroupRemoveRequested = (payload: GroupRemoveRequested): void => {
+    this.applyGroupRemove(payload).catch((err: unknown) => {
+      this.logUiError("GROUP_REMOVE_REQUESTED", err);
+    });
+  };
+
   private readonly handleRuleCreated = (payload: RuleCreated): void => {
     this.applyRuleCreated(payload).catch((err: unknown) => {
       this.logUiError("RULE_CREATED", err);
@@ -971,6 +1004,7 @@ export class GroupingEngine implements IEngine {
       conflicts: new Map(),
       recordedOccurrences: [],
       typeCorrections: new Map(),
+      removedValues: new Set(),
       seed: crypto.randomUUID(),
       startedAt: Date.now(),
       regexFinished: false,
@@ -1719,6 +1753,85 @@ export class GroupingEngine implements IEngine {
     };
   }
 
+  /**
+   * ADR-171 §2: el usuario elimina la entidad. Quita el grupo de la sesión y
+   * emite `ENTITY_GROUP_REMOVED`; descarta sus conflictos con
+   * `CONFLICT_RESOLVED` (mismo criterio que `dropOccurrences` cuando un
+   * grupo se queda sin members, caso 25); su `indexInType` queda como hueco
+   * hasta la próxima renumeración de `finishSession` (caso 15); cada alias
+   * normalizado entra a `Session.removedValues`; y — a diferencia de
+   * `dropOccurrences` — los registros de ocurrencias del grupo se
+   * **conservan** en `session.recordedOccurrences` (nunca se tocan), así el
+   * dedup por identidad (ADR-038 §3) los sigue reconociendo. Grupo
+   * inexistente (nunca existió, o pedirlo dos veces) → `warn` + no-op:
+   * idempotente por construcción.
+   */
+  applyGroupRemove(req: GroupRemoveRequested): Promise<void> {
+    try {
+      this.assertNotDisposed();
+      this.assertInitialized();
+      this.assertValidRequest(req);
+      const session = this.sessions.get(req.documentId);
+      const group = session?.groups.get(req.groupId);
+      if (!session || !group) {
+        this.ctx?.logger.warn("GROUP_REMOVE_REQUESTED con groupId desconocido; no-op.", {
+          documentId: req.documentId,
+          groupId: req.groupId,
+        });
+        return Promise.resolve();
+      }
+
+      session.groups.delete(req.groupId);
+      this.ctx?.bus.emit(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_REMOVED, {
+        documentId: req.documentId,
+        groupId: req.groupId,
+      });
+
+      for (const [conflictId, conflict] of session.conflicts) {
+        if (conflict.groupId !== req.groupId) continue;
+        session.conflicts.set(conflictId, {
+          ...conflict,
+          resolved: true,
+          resolvedType: group.type,
+        });
+        this.ctx?.bus.emit(EventChannel.Grouping, EngineEvents.CONFLICT_RESOLVED, {
+          documentId: req.documentId,
+          conflictId,
+          entityType: group.type,
+        });
+      }
+
+      for (const normalizedValue of group.normalizedValues) {
+        session.removedValues.add(normalizedValue);
+      }
+
+      return Promise.resolve();
+    } catch (err: unknown) {
+      return Promise.reject(err instanceof Error ? err : new Error(String(err)));
+    }
+  }
+
+  /**
+   * ADR-171 §4: quita `value` (normalizado con `normalizeEntityValue`, la
+   * misma normalización de `Occurrence.normalizedValue` — ADR-115 §1) de
+   * `Session.removedValues`. Solo lo invoca el Orchestrator en
+   * `addManualEntity` para un agregado manual NUEVO, antes de `reopenSession`
+   * — la re-aplicación automática de literales retenidos tras un
+   * `reanalyze` (ADR-061 §5) no la llama, así que sus ocurrencias de un
+   * valor eliminado se siguen descartando por el paso 0 de Matching. Sesión
+   * inexistente → `warn` + no-op.
+   */
+  liftRemoval(documentId: string, value: string): void {
+    this.assertNotDisposed();
+    this.assertInitialized();
+    const session = this.sessions.get(documentId);
+    if (!session) {
+      this.ctx?.logger.warn("liftRemoval() sin sesión activa.", { documentId });
+      return;
+    }
+    session.removedValues.delete(normalizeEntityValue(value));
+  }
+
   // No `async`: ver nota en applyGroupUpdate.
   applyRuleCreated(req: RuleCreated): Promise<void> {
     try {
@@ -1984,6 +2097,7 @@ export class GroupingEngine implements IEngine {
       bus.on(EventChannel.UI, EngineEvents.GROUP_UPDATE_REQUESTED, this.handleGroupUpdateRequested),
       bus.on(EventChannel.UI, EngineEvents.GROUP_MERGE_REQUESTED, this.handleGroupMergeRequested),
       bus.on(EventChannel.UI, EngineEvents.GROUP_SPLIT_REQUESTED, this.handleGroupSplitRequested),
+      bus.on(EventChannel.UI, EngineEvents.GROUP_REMOVE_REQUESTED, this.handleGroupRemoveRequested),
       bus.on(EventChannel.UI, EngineEvents.RULE_CREATED, this.handleRuleCreated),
       bus.on(EventChannel.UI, EngineEvents.RULE_UPDATED, this.handleRuleUpdated),
       bus.on(EventChannel.UI, EngineEvents.RULE_DELETED, this.handleRuleDeleted),
@@ -2031,6 +2145,35 @@ export class GroupingEngine implements IEngine {
           occurrenceId: occurrence.id,
           entityType: occurrence.entityType,
           pageIndex: occurrence.pageIndex,
+        },
+      );
+      return;
+    }
+
+    /*
+     * Paso 0 de Matching (ADR-171 §3): un valor que el usuario eliminó
+     * (`Session.removedValues`, poblado por `applyGroupRemove`) se descarta
+     * SIN agrupar — de CUALQUIER fuente, incluida `Manual` (el propio
+     * `addManualEntity` es quien decide levantar la supresión ANTES de
+     * re-detectar, vía `liftRemoval`; la re-aplicación automática de
+     * literales retenidos tras un `reanalyze`, ADR-061 §5, no la llama, así
+     * que sus ocurrencias de un valor eliminado caen acá). Va después del
+     * dedup por identidad y antes de TODO lo demás (contención ADR-117, baja
+     * confianza, conflictos de solapamiento, matching real): ninguno de esos
+     * caminos tiene sentido sobre un valor que el usuario ya dijo que no
+     * quiere ver. Se registra igual en `recordedOccurrences` (sin grupo real,
+     * `SUPPRESSED_GROUP_ID`) para que una repetición exacta de esta misma
+     * ocurrencia la atrape el dedup por identidad de arriba, no este paso de
+     * nuevo.
+     */
+    if (session.removedValues.has(occurrence.normalizedValue)) {
+      this.recordOccurrence(session, occurrence, SUPPRESSED_GROUP_ID);
+      this.ctx.logger.debug(
+        "ENTITY_FOUND con valor eliminado por el usuario; se descarta sin agrupar (ADR-171 §3).",
+        {
+          documentId: session.documentId,
+          occurrenceId: occurrence.id,
+          entityType: occurrence.entityType,
         },
       );
       return;

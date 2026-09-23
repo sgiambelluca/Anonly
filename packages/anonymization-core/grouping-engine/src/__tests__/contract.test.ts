@@ -9,8 +9,10 @@ import {
   EventChannel,
   ReplacementMode,
   type Conflict,
+  type ConflictResolved,
   type EngineContext,
   type EntityGroupCreated,
+  type EntityGroupRemoved,
   type EntityGroupUpdated,
   type GroupingFinished,
 } from "@anonly/shared";
@@ -873,5 +875,60 @@ describe("GroupingEngine — contract tests", () => {
     expect(busEmitSpy).not.toHaveBeenCalled();
     const after = engine.getSnapshot("doc-1");
     expect(after).toEqual(before);
+  });
+
+  // Caso 48 (§13, ADR-171 §2).
+  it("applyGroupRemove removes the group, resolves its conflicts and emits ENTITY_GROUP_REMOVED", async () => {
+    await engine.init(ctx);
+    engine.startSession("doc-1");
+
+    const existing = makeOccurrence({
+      entityType: EntityType.CreditCard,
+      source: DetectionSource.Regex,
+      confidence: 0.9,
+      bbox: makeBBox(0, 0, 100, 20),
+      value: "4111111111111111",
+      normalizedValue: "4111111111111111",
+    });
+    const incoming = makeOccurrence({
+      entityType: EntityType.IBAN,
+      source: DetectionSource.Regex,
+      confidence: 0.5,
+      bbox: makeBBox(0, 0, 100, 20),
+      value: "ES1234",
+      normalizedValue: "es1234",
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: existing,
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: incoming,
+    });
+    const [group] = engine.getSnapshot("doc-1").groups;
+    const { conflicts } = engine.getSnapshot("doc-1");
+    expect(conflicts).toHaveLength(1);
+
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+    await engine.applyGroupRemove({ documentId: "doc-1", groupId: group!.id });
+
+    const removedCalls = busEmitSpy.mock.calls.filter(
+      ([channel, event]) =>
+        channel === EventChannel.Grouping && event === EngineEvents.ENTITY_GROUP_REMOVED,
+    );
+    expect(removedCalls).toHaveLength(1);
+    expect((removedCalls[0]?.[2] as EntityGroupRemoved).groupId).toBe(group!.id);
+
+    const resolvedCalls = busEmitSpy.mock.calls.filter(
+      ([channel, event]) =>
+        channel === EventChannel.Grouping && event === EngineEvents.CONFLICT_RESOLVED,
+    );
+    expect(resolvedCalls).toHaveLength(1);
+    expect((resolvedCalls[0]?.[2] as ConflictResolved).conflictId).toBe(conflicts[0]?.id);
+
+    const after = engine.getSnapshot("doc-1");
+    expect(after.groups.find((g) => g.id === group!.id)).toBeUndefined();
+    expect(after.conflicts[0]?.resolved).toBe(true);
   });
 });

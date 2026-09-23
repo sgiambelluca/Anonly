@@ -1,4 +1,5 @@
 import {
+  DetectionSource,
   EngineEvents,
   EntityType,
   EventChannel,
@@ -1127,5 +1128,96 @@ describe("GroupingEngine — replacementPreviews (ADR-170 §1)", () => {
         replacementValue: created.replacementValue,
       });
     });
+  });
+});
+
+describe("GroupingEngine — eliminar una entidad (ADR-171)", () => {
+  let engine: GroupingEngine;
+  let ctx: EngineContext;
+
+  beforeEach(async () => {
+    engine = new GroupingEngine();
+    ctx = createEngineContext();
+    await engine.init(ctx);
+    engine.startSession("doc-1");
+  });
+
+  afterEach(async () => {
+    if (!engine["disposed"]) {
+      await engine.dispose();
+    }
+  });
+
+  // Caso 49 (§13).
+  it("merge and dropOccurrences do not register suppression", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "11111111", normalizedValue: "11111111" }),
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "22222222", normalizedValue: "22222222" }),
+    });
+    const [g1, g2] = engine.getSnapshot("doc-1").groups;
+
+    await engine.applyGroupMerge({
+      documentId: "doc-1",
+      sourceGroupId: g1!.id,
+      targetGroupId: g2!.id,
+    });
+    const afterMerge = engine["sessions"].get("doc-1");
+    expect(afterMerge?.removedValues.size).toBe(0);
+
+    engine.dropOccurrences("doc-1", { source: DetectionSource.Regex });
+    expect(engine.getSnapshot("doc-1").groups).toHaveLength(0);
+    const afterDrop = engine["sessions"].get("doc-1");
+    expect(afterDrop?.removedValues.size).toBe(0);
+  });
+
+  // Caso 49 (§13, ADR-085 §8: mismo criterio que typeCorrections).
+  it("removedValues is not in the snapshot and dies on closeSession", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "11111111", normalizedValue: "11111111" }),
+    });
+    const [group] = engine.getSnapshot("doc-1").groups;
+    await engine.applyGroupRemove({ documentId: "doc-1", groupId: group!.id });
+
+    const snapshot = engine.getSnapshot("doc-1");
+    expect(snapshot).not.toHaveProperty("removedValues");
+    expect(Object.keys(snapshot)).toEqual(["documentId", "groups", "conflicts", "rules"]);
+
+    const sessionBeforeClose = engine["sessions"].get("doc-1");
+    expect(sessionBeforeClose?.removedValues.has("11111111")).toBe(true);
+
+    await engine.closeSession("doc-1");
+    expect(engine["sessions"].get("doc-1")).toBeUndefined();
+  });
+
+  // Caso 50 (§13, ADR-171 §4).
+  it("liftRemoval lets the next manual occurrence of that value group normally", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "11111111", normalizedValue: "11111111" }),
+    });
+    const [group] = engine.getSnapshot("doc-1").groups;
+    await engine.applyGroupRemove({ documentId: "doc-1", groupId: group!.id });
+    expect(engine.getSnapshot("doc-1").groups).toHaveLength(0);
+
+    engine.liftRemoval("doc-1", "11111111");
+
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        value: "11111111",
+        normalizedValue: "11111111",
+        source: DetectionSource.Manual,
+        bbox: makeBBox(0, 500, 60, 12),
+      }),
+    });
+
+    const { groups } = engine.getSnapshot("doc-1");
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.aliases).toContain("11111111");
   });
 });
