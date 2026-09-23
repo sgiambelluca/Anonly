@@ -34,6 +34,8 @@ export interface MemorySample {
 
 export interface MemorySampler {
   readonly samples: ReadonlyArray<MemorySample>;
+  /** Wall time spent collecting each RSS sample, in milliseconds. */
+  readonly sampleDurationsMs: ReadonlyArray<number>;
   /**
    * `Date.now()` de cuando arrancó este sampler — mismo reloj de pared que
    * usan los timestamps de fase del renderer (`installRunCollector`,
@@ -62,11 +64,13 @@ export function startMemorySampling(
   intervalMs = 150,
 ): MemorySampler {
   const samples: MemorySample[] = [];
-  const startedAt = Date.now();
+  const sampleDurationsMs: number[] = [];
+  const samplerStartedAt = Date.now();
   let inFlight = false;
   let stopped = false;
 
   async function readOnce(): Promise<MemorySample> {
+    const sampleStartedAt = Date.now();
     const metrics = await electronApp.evaluate(({ app }) => app.getAppMetrics());
     const perProcess: ProcessMemorySample[] = metrics.map((m) => ({
       pid: m.pid,
@@ -74,7 +78,8 @@ export function startMemorySampling(
       workingSetSizeBytes: m.memory.workingSetSize * 1024,
     }));
     const sumWorkingSetSizeBytes = perProcess.reduce((acc, p) => acc + p.workingSetSizeBytes, 0);
-    return { atMs: Date.now() - startedAt, sumWorkingSetSizeBytes, perProcess };
+    sampleDurationsMs.push(Date.now() - sampleStartedAt);
+    return { atMs: Date.now() - samplerStartedAt, sumWorkingSetSizeBytes, perProcess };
   }
 
   async function tick(): Promise<void> {
@@ -93,7 +98,8 @@ export function startMemorySampling(
 
   return {
     samples,
-    startedAtMs: startedAt,
+    sampleDurationsMs,
+    startedAtMs: samplerStartedAt,
     async sampleOnce(): Promise<MemorySample> {
       const sample = await readOnce();
       if (!stopped) samples.push(sample);

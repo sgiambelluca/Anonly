@@ -144,6 +144,7 @@ export const PHASE_EVENTS: ReadonlyArray<readonly [string, string]> = [
   ["pdf", "DOCUMENT_PARSED"],
   ["ocr", "OCR_STARTED"],
   ["ocr", "OCR_FINISHED"],
+  ["ner", "NER_MODEL_LOADING"],
   ["ner", "NER_MODEL_READY"],
   ["ner", "NER_FINISHED"],
   ["grouping", "GROUPING_FINISHED"],

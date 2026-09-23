@@ -72,6 +72,8 @@ export interface WasmHeapSampleOnceOptions {
 
 export interface WasmHeapSampler {
   readonly samples: ReadonlyArray<WasmHeapSample>;
+  /** Wall time spent collecting each combined heap/WASM sample, in milliseconds. */
+  readonly sampleDurationsMs: ReadonlyArray<number>;
   readonly startedAtMs: number;
   sampleOnce(options?: WasmHeapSampleOnceOptions): Promise<WasmHeapSample>;
   /**
@@ -137,13 +139,17 @@ export async function startWasmHeapSampling(
 ): Promise<WasmHeapSampler> {
   const connection: CdpTargetSnapshotter = await connectCdpTargetSnapshotter(userDataDir);
   const samples: WasmHeapSample[] = [];
+  const sampleDurationsMs: number[] = [];
   const startedAt = Date.now();
   let inFlight = false;
   let stopped = false;
   let timer: ReturnType<typeof setInterval> | undefined;
 
-  function readOnce(forceGc: boolean): Promise<WasmHeapSample> {
-    return readWasmHeapSample(connection, forceGc, Date.now() - startedAt);
+  async function readOnce(forceGc: boolean): Promise<WasmHeapSample> {
+    const sampleStartedAt = Date.now();
+    const sample = await readWasmHeapSample(connection, forceGc, Date.now() - startedAt);
+    sampleDurationsMs.push(Date.now() - sampleStartedAt);
+    return sample;
   }
 
   async function tick(): Promise<void> {
@@ -166,6 +172,7 @@ export async function startWasmHeapSampling(
 
   return {
     samples,
+    sampleDurationsMs,
     startedAtMs: startedAt,
     async sampleOnce(options?: WasmHeapSampleOnceOptions): Promise<WasmHeapSample> {
       const sample = await readOnce(options?.forceGc ?? true);
@@ -921,6 +928,8 @@ export interface WasmAttributionReport {
     readonly totalMemBytes: number;
   };
   readonly capturedAt: string;
+  readonly rssSamplerStartedAtMs?: number;
+  readonly wasmSamplerStartedAtMs?: number;
   readonly ok: boolean;
   readonly totalMs: number | null;
   readonly groupCount: number;
@@ -936,6 +945,16 @@ export interface WasmAttributionReport {
   } | null;
   readonly rssSamples: ReadonlyArray<MemorySample>;
   readonly wasmSamples: ReadonlyArray<WasmHeapSample>;
+  /** Pre-import control point, before the fixture enters the application. */
+  readonly preImportRssSample?: MemorySample;
+  readonly preImportWasmSample?: WasmHeapSample;
+  /** Samples after the document is closed and the configured idle disposal window has elapsed. */
+  readonly postIdleDisposeRssSamples?: ReadonlyArray<MemorySample>;
+  readonly postIdleDisposeWasmSamples?: ReadonlyArray<WasmHeapSample>;
+  readonly probeDurationsMs?: {
+    readonly rss: ReadonlyArray<number>;
+    readonly wasmAndHeap: ReadonlyArray<number>;
+  };
 }
 
 const POST_CLOSE_GC_DELAY_MS = 6_000;
@@ -948,10 +967,14 @@ export async function runWasmAttribution(
   profile: string,
   file: E2eFilePayload,
   importTimeoutMs: number,
+  postReadyHoldMs = 0,
+  postCloseObserveMs = 0,
 ): Promise<WasmAttributionReport> {
   const rssSampler: MemorySampler = startMemorySampling(electronApp, 150);
   const wasmSampler = await startWasmHeapSampling(userDataDir, 1_000);
   try {
+    const preImportRssSample = await rssSampler.sampleOnce();
+    const preImportWasmSample = await wasmSampler.sampleOnce();
     await page.getByRole("button", { name: "Elegir archivo" }).waitFor({ state: "visible" });
     await installRunCollector(page, { captureOcrWords: false });
     await installOcrPageTimingCollector(page);
@@ -964,6 +987,12 @@ export async function runWasmAttribution(
     await page.waitForTimeout(SETTLE_GRACE_MS);
     await rssSampler.sampleOnce();
     await wasmSampler.sampleOnce();
+
+    if (postReadyHoldMs > 0) {
+      await page.waitForTimeout(postReadyHoldMs);
+      await rssSampler.sampleOnce();
+      await wasmSampler.sampleOnce();
+    }
 
     const run = await readRun(page);
     const durations = computeRunDurations(run.phasesEpochMs, rssSampler.startedAtMs);
@@ -1005,6 +1034,8 @@ export async function runWasmAttribution(
     // calculado — mismo criterio de "persistir la serie, no solo el máximo"
     // que el resto del arnés (ADR-146 §7 punto 3).
     const postCloseWasmSamples: WasmHeapSample[] = [];
+    let postIdleDisposeRssSamples: ReadonlyArray<MemorySample> = [];
+    let postIdleDisposeWasmSamples: ReadonlyArray<WasmHeapSample> = [];
     if (run.failedAt === undefined) {
       // Sin esto, el tick de cada segundo del sampler periódico sigue
       // corriendo durante los 6 s de espera de abajo y fuerza GC en cada
@@ -1021,6 +1052,16 @@ export async function runWasmAttribution(
         atMs: afterGc.atMs,
         deltaByTarget: computeHeapGcDelta(beforeGc.heapTargets, afterGc.heapTargets),
       };
+      if (postCloseObserveMs > 0) {
+        const postCloseRssAt = rssSampler.samples.at(-1)?.atMs ?? 0;
+        const postCloseWasmAt = wasmSampler.samples.at(-1)?.atMs ?? 0;
+        wasmSampler.resume();
+        await page.waitForTimeout(postCloseObserveMs);
+        await rssSampler.sampleOnce();
+        await wasmSampler.sampleOnce();
+        postIdleDisposeRssSamples = samplesSince(rssSampler.samples, postCloseRssAt);
+        postIdleDisposeWasmSamples = wasmHeapSamplesSince(wasmSampler.samples, postCloseWasmAt);
+      }
     }
 
     return {
@@ -1034,6 +1075,8 @@ export async function runWasmAttribution(
         totalMemBytes: os.totalmem(),
       },
       capturedAt: new Date().toISOString(),
+      rssSamplerStartedAtMs: rssSampler.startedAtMs,
+      wasmSamplerStartedAtMs: wasmSampler.startedAtMs,
       ok: run.failedAt === undefined,
       totalMs: durations.totalMs,
       groupCount: run.groupCount,
@@ -1043,6 +1086,14 @@ export async function runWasmAttribution(
       postCloseGc,
       rssSamples: runRssSamples,
       wasmSamples: [...runWasmSamples, ...postCloseWasmSamples],
+      preImportRssSample,
+      preImportWasmSample,
+      postIdleDisposeRssSamples,
+      postIdleDisposeWasmSamples,
+      probeDurationsMs: {
+        rss: rssSampler.sampleDurationsMs,
+        wasmAndHeap: wasmSampler.sampleDurationsMs,
+      },
     };
   } finally {
     rssSampler.stop();
