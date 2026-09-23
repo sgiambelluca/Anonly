@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-plan | dependencias=roadmap/H-10_Bitacora_De_Memoria.md,architecture/07_Performance_Strategy.md,core/OCR_Engine.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-147-Perder-Un-Identificador-Cubierto-Es-Una-Regresion.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-157-El-Pool-De-OCR-Se-Da-De-Baja-Al-Terminar-Su-Etapa.md,adr/ADR-158-El-Raster-De-OCR-Viaja-Codificado.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md,adr/ADR-161-Una-Franja-Sin-Tinta-No-Se-Reconoce.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,tests/fixtures/README.md,tests/perf/README.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-166-El-Modelo-De-NER-Se-Libera-Al-Terminar-La-Deteccion.md,roadmap/Verificacion_Liberacion_NER_Medicion.md,roadmap/AB_Intercalado_Plan.md,roadmap/AB_Intercalado_Medicion.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md,roadmap/Ciclos_Y_Documentos_Reales_Plan.md,roadmap/Ciclos_Y_Documentos_Reales_Medicion.md,roadmap/Optimizacion_De_Rendimiento.md,roadmap/Banco_Windows_Comparativa_Medicion.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=roadmap-plan | dependencias=roadmap/H-10_Bitacora_De_Memoria.md,architecture/07_Performance_Strategy.md,core/OCR_Engine.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-147-Perder-Un-Identificador-Cubierto-Es-Una-Regresion.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-157-El-Pool-De-OCR-Se-Da-De-Baja-Al-Terminar-Su-Etapa.md,adr/ADR-158-El-Raster-De-OCR-Viaja-Codificado.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md,adr/ADR-161-Una-Franja-Sin-Tinta-No-Se-Reconoce.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,tests/fixtures/README.md,tests/perf/README.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-166-El-Modelo-De-NER-Se-Libera-Al-Terminar-La-Deteccion.md,roadmap/Verificacion_Liberacion_NER_Medicion.md,roadmap/AB_Intercalado_Plan.md,roadmap/AB_Intercalado_Medicion.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md,adr/ADR-173-El-Empaquetado-De-NER-Se-Evalua-Sin-Cambiar-El-Modelo.md,roadmap/Empaquetado_NER_Medicion.md,roadmap/Ciclos_Y_Documentos_Reales_Plan.md,roadmap/Ciclos_Y_Documentos_Reales_Medicion.md,roadmap/Optimizacion_De_Rendimiento.md,roadmap/Banco_Windows_Comparativa_Medicion.md | audiencia=humanos+IA | fase=11 -->
 
 # Optimización de memoria — plan de campaña
 
@@ -68,8 +68,11 @@
 > renderer → evaluar el empaquetado del mismo modelo NER → ampliar el banco a
 > PDFs pesados y exportación. **Actualización 2026-09-23: punto 2 cerrado con el
 > alcance medido y revisión del plan completada**, con límites de observación y
-> seguimiento Windows separados. Los puntos 1 y 3 quedan sin iniciar para otra
-> sesión. Alcance y entregables en §2ter.
+> seguimiento Windows separados. El punto 1 se evaluó con el experimento
+> opt-in de ADR-173 y `NER_Engine.md` §12–§15: B redujo WASM, pero sin ventaja
+> RSS atribuible; se conserva A (`Empaquetado_NER_Medicion.md`). El punto 3
+> queda sin iniciar.
+> Alcance y entregables en §2ter.
 > El ahorro de memoria se evaluará junto con el tiempo: la posterior revisión
 > de perfiles podrá admitir mayor consumo a cambio de una mejora medida de
 > rendimiento (`Optimizacion_De_Rendimiento.md`, próximos objetivos).
@@ -959,9 +962,29 @@ en esa misma revisión; no convertir una hipótesis en una atribución confirmad
 
 ### 1 — Evaluar el empaquetado del mismo modelo NER
 
-Después de la revisión del punto 2, comparar la carga actual con alternativas
-como datos externos o formato ORT, **sin cambiar modelo, pesos, cuantización ni
-criterios de detección**. T-11/T-12 midieron 487 MB de WASM y ~94 MB de JS en NER
+**Evaluación cerrada el 2026-09-23; se conserva el brazo A.**
+ADR-173 fija un único brazo comparable: el ONNX Q8 actual frente al mismo
+grafo y pesos con un sidecar de datos externos. La conversión se reprodujo dos
+veces con los mismos hashes y cargó con la versión local de Transformers.js en
+Node, con salida idéntica en cuatro textos sintéticos. B pasó la compatibilidad
+en Electron/Chromium/WASM y la calidad exacta sobre 26 documentos. El formato
+ORT no entra en este brazo porque la ruta actual de
+`pipeline()` pide `.onnx`; evaluarlo requeriría otra arquitectura y otro ADR.
+La baseline de calidad de ADR-147, pendiente al comenzar, quedó promovida y
+versionada desde dos corridas idénticas de A sobre 26 documentos; el gate
+oficial dio verde. Tres pares P2 intercalados midieron 487 MB de WASM en A y
+233 MB en B, pero M1 fue mixto, el pico posterior a `Ready` aumentó con B y
+la deriva de M2 entre controles A fue mayor que la ventaja pareada. No se
+adopta B. Informe y límites: `Empaquetado_NER_Medicion.md`.
+`NER_Engine.md` §13 caso 32, §14 y §15 item 32 cierran el trabajo asignable al
+implementador. El experimento no cambió el default ni el lock de assets. Una
+evaluación futura favorable requeriría una enmienda previa de ADR-173 y del
+spec para distribuir el derivado.
+
+Después de la revisión del punto 2, comparar la carga actual con la alternativa
+de datos externos fijada por ADR-173, **sin cambiar modelo, pesos, cuantización ni
+criterios de detección**. El formato ORT queda fuera de este experimento por la
+compatibilidad del cargador actual. T-11/T-12 midieron 487 MB de WASM y ~94 MB de JS en NER
 para un archivo de 178,5 MB; la copia transitoria de carga es una hipótesis a
 verificar, no la explicación demostrada de todo ese consumo.
 

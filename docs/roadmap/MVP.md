@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-mvp | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,adr/ADR-011-Grouping-First.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-138-Instalador-Universal-De-macOS.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,roadmap/Optimizacion_De_Memoria_Plan.md,roadmap/Optimizacion_De_Rendimiento.md | audiencia=humanos+IA | fase=11.6 (Hitos 1–10 cerrados y mergeados a main; escritorio y verificación de actualizaciones en validación; instalador universal de macOS documentado por ADR-138) -->
+<!-- CONTEXT: scope=roadmap-mvp | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,adr/ADR-011-Grouping-First.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-138-Instalador-Universal-De-macOS.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-173-El-Empaquetado-De-NER-Se-Evalua-Sin-Cambiar-El-Modelo.md,roadmap/Optimizacion_De_Memoria_Plan.md,roadmap/Empaquetado_NER_Medicion.md,roadmap/Optimizacion_De_Rendimiento.md | audiencia=humanos+IA | fase=11.6 (Hitos 1–10 cerrados y mergeados a main; escritorio y verificación de actualizaciones en validación; instalador universal de macOS documentado por ADR-138) -->
 
 # Anonly — Roadmap MVP
 
@@ -595,8 +595,11 @@ De las ~70: **~30 ya estaban cerradas** por hitos posteriores (ADR-053/054/056, 
   de 443–626 MB no es una fuga ni un ahorro demostrados. Se conservan los límites
   de observación durante NER y el seguimiento separado de Windows nativo/lector
   de presión, todavía sin validar. Informe: `Atribucion_Recursos_Renderer_Medicion.md`.
-  El orden **2 → 1 → 3** queda con el punto 2 cerrado; **1 (empaquetado del mismo
-  NER) y 3 (PDFs pesados/exportación) quedan sin iniciar, para otra sesión**.
+  El orden **2 → 1 → 3** queda con los puntos 2 y 1 cerrados. **El punto 1
+  evaluó el empaquetado del mismo NER el 2026-09-23**: calidad idéntica y menor
+  memoria lineal WASM, pero RSS/M1 sin ventaja atribuible por sobre la deriva;
+  se conserva el modelo de producción A (ADR-173,
+  `Empaquetado_NER_Medicion.md`). El punto 3 (PDFs pesados/exportación) no empezó.
   Alcance canónico: `Optimizacion_De_Memoria_Plan.md` §2ter. No cierra el Hito 11.
 - **Próximos objetivos de tiempo (2026-09-20, sin ejecutar):** medir más hilos
   dentro del único worker NER, más workers de reconocimiento OCR, varios

@@ -366,3 +366,42 @@ ocr-orient usan telemetría WORKER_JOB_* existente. La huella de palabras/cajas
 se compara excluyendo ids/duraciones. M1 es solo contexto: ADR-157 libera OCR
 entre frío y caliente. Las cifras históricas aquí conservadas no son el control
 actual ni un ahorro prometido.
+
+## ADR-173 — empaquetado experimental de NER
+
+Opt-in. `ner-packaging.spec.ts` se omite en `pnpm test:perf` normal. El runner
+`run-ner-packaging.sh` valida y convierte el ONNX original en un entorno Python
+aislado, construye A y B y corre primero el gate de compatibilidad/calidad
+Chromium/WASM sobre el corpus de referencia. B usa el parche temporal
+`support/ner-external-data.patch`; el runner lo revierte y restaura `dist-A`
+incluso al fallar. No modifica `assets.lock.json` ni incorpora derivados al
+producto. Requiere Python 3.12; `PYTHON312` permite indicar su ejecutable si
+no está en `PATH`.
+
+```sh
+./tests/perf/run-ner-packaging.sh
+ANONLY_NER_PACKAGING_GATE_ONLY=1 ./tests/perf/run-ner-packaging.sh
+```
+
+El reporte de calidad de B se coteja con A por documento y entidad, con
+ocurrencias exactas; no le asigna la identidad de asset original que ADR-147
+reserva a A. El gate de calidad requiere que exista la baseline
+`tests/quality/baselines/reference-v1.json`. Solo una vez verdes los gates A y
+B se habilita una medición intercalada; no se atribuye memoria con un gate rojo.
+
+Cada `memory-<runId>.json` registra identidad real del dist y hashes servidos,
+`runWasmAttribution` con intervalos RSS/heap/WASM, pressure del sistema, costo
+observado de las sondas y una segunda medición `measureProfile` cold/hot. El
+M1 publicado es `officialMemoryProfile.hot.m1Bytes`, contra la línea base
+caliente asentada; el delta de la pasada fría se guarda por separado. La pasada
+WASM conserva cinco segundos de carga tras `Ready`, luego observa 20 s tras
+cerrar (15 s de `nerIdleDisposeMs` más margen). El perfil usa el fixture P2 de
+50 páginas. Las tres lecturas A son controles repetidos entre corridas
+intercaladas y sirven para estimar deriva; no son controles A/A pareados dentro
+de una misma sesión. R1 no estaba disponible en el host de la corrida.
+
+El M1/M2 oficial sale de `measureProfile`; la atribución WASM llega de la
+pasada complementaria en el mismo proceso de cada brazo. No sumar ni restar
+RSS, heap JS y WASM. Las sondas CDP WASM/heap pueden ocupar varios cientos de
+milisegundos por lectura; sus duraciones, targets no observables y `partial`
+quedan en el JSON para interpretar la resolución real.
