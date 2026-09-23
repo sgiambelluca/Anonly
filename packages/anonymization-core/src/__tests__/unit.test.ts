@@ -2547,26 +2547,38 @@ describe("Orchestrator — unit tests", () => {
     expect(engines.grouping.liftRemoval).not.toHaveBeenCalled();
   });
 
-  // Caso 39 (§13, ADR-172 §1), item 30 (§15).
+  // Caso 39 (§13, ADR-172 §1), item 30 (§15). Con el `GroupingEngine` real,
+  // no simulado (errata de `Grouping_Engine.md` §13 caso 53): el
+  // `wireHappyPathSpies` de arriba mockea `reopenSession`/`createCheckpoint`/
+  // `restoreCheckpoint` como no-ops, así que un test sobre ese setup nunca
+  // ejercita el bug real — pasaba aunque `reopenSession` descartara los
+  // puntos, porque nunca llamaba a la implementación real.
   it("restoring a checkpoint also restores the retained manual literals", async () => {
-    const bus = createRealBus();
-    const engines = createMockEngines();
-    const pdfOutput = createPdfEngineOutput({
-      document: createDocument({
-        pageCount: 1,
-        pages: [createPage({ index: 0, requiresOCR: true })],
-      }),
-      textlessPages: [0],
+    const document = createDocument({
+      pageCount: 1,
+      pages: [
+        createPage({
+          index: 0,
+          text: "Jose Perez y Ana Gomez",
+          requiresOCR: true,
+          words: [
+            createWord({ text: "Jose", bbox: { x: 0, y: 0, width: 30, height: 12 } }),
+            createWord({ text: "Perez", bbox: { x: 35, y: 0, width: 35, height: 12 } }),
+            createWord({ text: "y", bbox: { x: 75, y: 0, width: 10, height: 12 } }),
+            createWord({ text: "Ana", bbox: { x: 90, y: 0, width: 25, height: 12 } }),
+            createWord({ text: "Gomez", bbox: { x: 120, y: 0, width: 40, height: 12 } }),
+          ],
+        }),
+      ],
     });
-    wireHappyPathSpies(engines, bus, { pdfOutput });
-    const orchestrator = new PipelineOrchestrator({
-      bus,
-      logger: createMockLogger(),
-      cache: new LruCache(),
-      config: createEngineConfig(),
-      engines,
-    });
+    const { orchestrator, engines } = await makeOrchestratorWithRealDetection(
+      createPdfEngineOutput({ document, textlessPages: [0] }),
+    );
     await orchestrator.importDocument(createImportInput());
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    // Sin grupos todavía: "Jose Perez"/"Ana Gomez" no matchean ningún patrón
+    // de Regex, y NER está desactivado (config de la fixture).
+    expect(engines.grouping.getSnapshot("doc-1").groups).toHaveLength(0);
 
     await orchestrator.addManualEntity("doc-1", {
       value: "Jose Perez",
@@ -2577,17 +2589,23 @@ describe("Orchestrator — unit tests", () => {
       value: "Ana Gomez",
       entityType: EntityType.Person,
     });
+    expect(engines.grouping.getSnapshot("doc-1").groups.map((g) => g.canonicalValue)).toEqual(
+      expect.arrayContaining(["Jose Perez", "Ana Gomez"]),
+    );
 
     await orchestrator.restoreEditCheckpoint("doc-1", checkpointId);
 
-    (engines.regex.findLiteral as ReturnType<typeof vi.fn>).mockClear();
-    await orchestrator.reanalyze("doc-1", { ocr: { languages: ["eng"] } });
+    // El grupo de "Ana Gomez" ya no está: restaurar el punto también
+    // restauró la sesión de Grouping (no solo la copia de literales).
+    const afterRestore = engines.grouping.getSnapshot("doc-1").groups;
+    expect(afterRestore.map((g) => g.canonicalValue)).toEqual(["Jose Perez"]);
 
-    const searchedValues = (engines.regex.findLiteral as ReturnType<typeof vi.fn>).mock.calls.map(
-      (call) => (call[0] as { value: string }).value,
-    );
-    expect(searchedValues).toContain("Jose Perez");
-    expect(searchedValues).not.toContain("Ana Gomez");
+    // reanalyze (flujo OCR, el único que re-aplica literales retenidos,
+    // ADR-061 §5) no recrea "Ana Gomez": la lista de literales retenidos
+    // también volvió a como estaba en el punto.
+    await orchestrator.reanalyze("doc-1", { ocr: { languages: ["eng"] } });
+    const afterReanalyze = engines.grouping.getSnapshot("doc-1").groups;
+    expect(afterReanalyze.map((g) => g.canonicalValue)).toEqual(["Jose Perez"]);
   });
 });
 
