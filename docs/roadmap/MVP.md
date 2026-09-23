@@ -632,6 +632,34 @@ Insertado con la convención decimal del repo, sin renumerar Release. Adelantado
 - Docs finales, README del repo, demo.
 - Publicación de instaladores en GitHub Releases. ~~deploy a CDN estático~~ — no hay hosting: la app no se sirve, se descarga (ADR-130, ADR-131 §1).
 
+### Hito 12.5 — Rediseño desde las pruebas de usuario (ADR-168 a ADR-172)
+
+**Origen**: pruebas de usuario sobre la 0.9.2 y un lienzo de diseño iterado con el humano
+("Anonly — Nueva pantalla inicial", páginas *Inicio y carga*, *Pantalla de trabajo* y su versión
+oscura). Branch de campaña `redesign/ui-pruebas-de-usuario` (ADR-124: un commit = un módulo).
+
+**Docs** (hechos, uno por ADR): ADR-168 (carga y escaneo, "Acerca de" al pie del inicio, enlaces al
+repositorio regularizados, fallo de importación vuelve a ①, flujo de cuatro pasos), ADR-169 (pantalla
+de trabajo, UX-10 diseño estable), ADR-170 (vistas previas calculadas por el Core), ADR-171 (eliminar
+entidad con supresión por sesión), ADR-172 (deshacer y rehacer exactos por puntos de restauración).
+
+**Implementación, en este orden** — cada fila es un commit de un solo módulo:
+
+| # | Qué | Módulo | Depende de | Estado |
+|---|---|---|---|---|
+| 1 | Tipos: `ReplacementPreviews`, `EntityGroup.replacementPreviews`, `EditPreview*`, `GROUP_REMOVE_REQUESTED` + `GroupRemoveRequested` + `EventPayloadMap`, `MAX_EDIT_CHECKPOINTS` | `shared` | — | pendiente |
+| 2 | `replacementPreviews` (15r) y `previewEdit` | `grouping-engine` | 1 | pendiente |
+| 3 | `applyGroupRemove`, `removedValues`, `liftRemoval` (15s) | `grouping-engine` | 1 | pendiente |
+| 4 | `createCheckpoint`/`restoreCheckpoint`/`discardCheckpoints` (15t) | `grouping-engine` | 2, 3 | pendiente |
+| 5 | Façade: `previewEdit` (28), `liftRemoval` en `addManualEntity` (29), puntos de restauración con literales retenidos (30) | `anonymization-core/src` | 2-4 | pendiente |
+| 6 | ADR-168: `LoadScreen` en cajas, `DropZone` de cuatro estados, `HowItWorks`, `AboutDialog`, fallo de importación a ①, `ScanSteps` | `apps/react-client` | — | pendiente |
+| 7 | ADR-169: lista, avisos, `Tooltip`, franja, género con borde, visor (pellizco, separador), lupa, selección persistente, `EntityTypePicker`, `AddEntityDialog`, Configuración, tokens | `apps/react-client` | — | pendiente |
+| 8 | ADR-170: selector de modo exacto y diálogos Fusionar/Dividir/Editar reemplazo/Cambiar tipo con `previewEdit` | `apps/react-client` | 5, 7 | pendiente |
+| 9 | ADR-171/172: "Eliminar entidad", `history.store`, atajos, toasts con "Deshacer" | `apps/react-client` | 5, 7 | pendiente |
+
+**Reglas de este hito** (además de las de siempre): UX-10 —nada que aparezca desplaza el diseño— se
+revisa en cada PR de la app; los PR 6-9 se verifican en el browser con los dos temas.
+
 ---
 
 ## 5. Métricas de aceptación (contractuales)

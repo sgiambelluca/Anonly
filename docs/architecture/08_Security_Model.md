@@ -57,7 +57,7 @@
 - El Core **nunca** hace `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource` ni ningún API de red. Regla R-10 de `ai/AI_Development_Guide.md`.
 - **No hay CDN ni servidor.** Los assets estáticos —chunks, wasm, modelos— viajan adentro del instalador y los sirve el propio contenedor por el esquema `app://` (ADR-130). El renderer los pide a su propio origen y nada más: `connect-src 'self'`, sin excepciones.
 - **La única salida de red del producto es el actualizador**, y no vive en el renderer sino en el proceso **main**, donde la CSP no aplica y donde no hay documentos (ADR-132 §1). Consulta versiones y descarga actualizaciones firmadas con claves propias en las dos plataformas; nunca manda contenido, nombre ni metadato de un documento (ADR-131 §5, ADR-137).
-- Esa consulta le revela a GitHub la IP del usuario y la versión instalada. Se dice en la UI y en el README en vez de esperar a que alguien lo descubra, y el chequeo es desactivable.
+- Esa consulta le revela a GitHub la IP del usuario y la versión instalada. Se dice en la UI y en el README en vez de esperar a que alguien lo descubra, y el chequeo es desactivable. Desde el Hito 12.5 el texto de la UI lo presenta como lo que es —*"Como en cualquier conexión, GitHub ve desde dónde llega la consulta (tu IP) y qué versión tenés"*— sin dejar de decirlo (ADR-131 §5 intacto; `ui/Components.md` §2.6).
 
 ### 3.2 CSP verificada (ADR-039, Hito 10 PR10)
 
