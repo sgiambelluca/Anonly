@@ -329,6 +329,12 @@ export interface GroupSplitRequested {
   readonly groupId: string;
   readonly occurrenceIds: ReadonlyArray<string>;
 }
+// ADR-171 §1: el usuario elimina la entidad. Grouping la quita, emite
+// ENTITY_GROUP_REMOVED y suprime sus valores para que un re-análisis no la traiga.
+export interface GroupRemoveRequested {
+  readonly documentId: string;
+  readonly groupId: string;
+}
 export interface RuleCreated {
   readonly documentId: string;
   readonly rule: Rule;
@@ -416,6 +422,7 @@ export type EventPayloadMap = {
   [EngineEvents.GROUP_UPDATE_REQUESTED]: GroupUpdateRequested;
   [EngineEvents.GROUP_MERGE_REQUESTED]: GroupMergeRequested;
   [EngineEvents.GROUP_SPLIT_REQUESTED]: GroupSplitRequested;
+  [EngineEvents.GROUP_REMOVE_REQUESTED]: GroupRemoveRequested;
   [EngineEvents.RULE_CREATED]: RuleCreated;
   [EngineEvents.RULE_UPDATED]: RuleUpdated;
   [EngineEvents.RULE_DELETED]: RuleDeleted;

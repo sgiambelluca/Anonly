@@ -95,6 +95,9 @@ export enum EngineEvents {
   GROUP_UPDATE_REQUESTED = "GROUP_UPDATE_REQUESTED",
   GROUP_MERGE_REQUESTED = "GROUP_MERGE_REQUESTED",
   GROUP_SPLIT_REQUESTED = "GROUP_SPLIT_REQUESTED",
+  // ADR-171 §1: el usuario elimina la entidad. Grouping la quita, emite
+  // ENTITY_GROUP_REMOVED y suprime sus valores para que un re-análisis no la traiga.
+  GROUP_REMOVE_REQUESTED = "GROUP_REMOVE_REQUESTED",
   RULE_CREATED = "RULE_CREATED",
   RULE_UPDATED = "RULE_UPDATED",
   RULE_DELETED = "RULE_DELETED",

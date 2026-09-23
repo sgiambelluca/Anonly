@@ -19,6 +19,12 @@ function makeGroup(overrides: Partial<EntityGroup> = {}): EntityGroup {
     enabled: true,
     aliases: ["Juan Pérez"],
     replacementValueUserSet: false,
+    replacementPreviews: {
+      placeholder: "[PERSONA 01]",
+      mask: "[PERSONA 01]",
+      synthetic: "[PERSONA 01]",
+      placeholderLadder: ["[PERSONA 01]"],
+    },
     needsReview: false,
     createdAt: 0,
     updatedAt: 0,

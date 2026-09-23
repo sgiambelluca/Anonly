@@ -200,6 +200,21 @@ export interface OccurrenceRef {
   readonly context?: OccurrenceContext;
 }
 
+/**
+ * ADR-170 §1: lo que valdría `EntityGroup.replacementValue` si el grupo
+ * pasara a cada modo, calculado por Grouping con la misma función
+ * (`computeReplacementValue`) e ignorando `replacementValueUserSet` (cambiar
+ * el modo recalcula, ADR-076 §3). `redact` no tiene entrada: su valor es
+ * siempre `""`. Campo requerido de `EntityGroup` (`03_Data_Model.md` §9).
+ */
+export interface ReplacementPreviews {
+  readonly placeholder: string;
+  readonly mask: string;
+  readonly synthetic: string;
+  /** Niveles distintos de la escalera de ADR-057, del más largo al más corto; incluye `placeholder`. */
+  readonly placeholderLadder: ReadonlyArray<string>;
+}
+
 export interface EntityGroup {
   readonly id: string;
   readonly type: EntityType;
@@ -246,6 +261,13 @@ export interface EntityGroup {
    * detección confiable posterior y se quedaría apagado.
    */
   readonly needsReview: boolean;
+  /**
+   * ADR-170 §1: el valor que tendría el grupo en cada modo (ver
+   * `ReplacementPreviews`). Requerido. Lo calcula Grouping con la misma
+   * función que `replacementValue`; la UI lo muestra en el selector de modo y
+   * en "Editar reemplazo". No lo leen Render ni Export.
+   */
+  readonly replacementPreviews: ReplacementPreviews;
   readonly createdAt: number;
   readonly updatedAt: number;
 }
@@ -305,6 +327,40 @@ export interface TextMatch {
   readonly bbox: BoundingBox;
   readonly text: string;
   readonly wordSpan: WordSpan;
+}
+
+// ─── Vistas previas de edición (ADR-170 §2, Contracts.md §3.5) ───
+// Operaciones hipotéticas que la UI muestra antes de confirmar
+// (ui/React_Client.md ADR-169 §10). Los valores salen del mismo código que el
+// pedido real sobre una copia de la sesión; la UI no los reimplementa (U-3).
+export type EditPreviewRequest =
+  | { readonly kind: "type"; readonly groupId: string; readonly type: EntityType }
+  | {
+      readonly kind: "merge";
+      readonly sourceGroupId: string;
+      readonly targetGroupIds: ReadonlyArray<string>;
+    }
+  | {
+      readonly kind: "split";
+      readonly groupId: string;
+      readonly occurrenceIds: ReadonlyArray<string>;
+    };
+
+export interface EditPreviewGroup {
+  /** `null` = el grupo que la operación crearía (la parte nueva de un split). */
+  readonly groupId: string | null;
+  readonly type: EntityType;
+  readonly indexInType: number;
+  readonly canonicalValue: string;
+  readonly memberCount: number;
+  readonly replacementMode: ReplacementMode;
+  readonly replacementValue: string;
+}
+
+export interface EditPreview {
+  // type -> 1 grupo (el reclasificado); merge -> 1 (el sobreviviente);
+  // split -> 2 (el original y el nuevo, en ese orden).
+  readonly groups: ReadonlyArray<EditPreviewGroup>;
 }
 
 export interface RuleTarget {

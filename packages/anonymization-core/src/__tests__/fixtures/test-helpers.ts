@@ -224,6 +224,12 @@ export function createEntityGroup(overrides?: Partial<EntityGroup>): EntityGroup
     enabled: true,
     aliases: [],
     replacementValueUserSet: false,
+    replacementPreviews: {
+      placeholder: "[DNI 01]",
+      mask: "[DNI 01]",
+      synthetic: "[DNI 01]",
+      placeholderLadder: ["[DNI 01]"],
+    },
     needsReview: false,
     createdAt: Date.now(),
     updatedAt: Date.now(),

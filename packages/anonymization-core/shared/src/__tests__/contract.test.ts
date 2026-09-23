@@ -29,6 +29,7 @@ import {
   isEngineErrorCode,
   WorkerCrashedError,
   makeTransferable,
+  MAX_EDIT_CHECKPOINTS,
   MAX_RENDER_SCALE,
   normalizeForComparison,
   PREVIEW_CACHE_MAX_BYTES,
@@ -44,6 +45,9 @@ import type {
   BoundingBox,
   CoreRuntimeOptions,
   Document,
+  EditPreview,
+  EditPreviewGroup,
+  EditPreviewRequest,
   EncodedPageImage,
   EngineConfig,
   EngineContext,
@@ -52,6 +56,7 @@ import type {
   ExportOptions,
   ExportRequested,
   ExportSavePayload,
+  GroupRemoveRequested,
   GroupUpdateRequested,
   ICache,
   IEngine,
@@ -75,6 +80,7 @@ import type {
   RenderPagePayload,
   RenderRequested,
   Replacement,
+  ReplacementPreviews,
   TextMatch,
   Word,
   WorkerFactory,
@@ -250,10 +256,11 @@ describe("@anonly/shared — Contracts", () => {
         "WORKER_JOB_CANCELLED",
         "WORKER_JOB_TIMEOUT",
         "WORKER_POOL_SATURATED",
-        // UI (8)
+        // UI (9)
         "GROUP_UPDATE_REQUESTED",
         "GROUP_MERGE_REQUESTED",
         "GROUP_SPLIT_REQUESTED",
+        "GROUP_REMOVE_REQUESTED", // ADR-171 §1
         "RULE_CREATED",
         "RULE_UPDATED",
         "RULE_DELETED",
@@ -424,6 +431,12 @@ describe("@anonly/shared — Contracts", () => {
         enabled: true,
         aliases: ["34.567.891", "34567891"],
         replacementValueUserSet: false,
+        replacementPreviews: {
+          placeholder: "[DNI 01]",
+          mask: "[DNI 01]",
+          synthetic: "[DNI 01]",
+          placeholderLadder: ["[DNI 01]"],
+        },
         needsReview: false,
         createdAt: 0,
         updatedAt: 0,
@@ -500,6 +513,12 @@ describe("@anonly/shared — Contracts", () => {
       enabled: true,
       aliases: ["Juan Pérez"],
       replacementValueUserSet: false,
+      replacementPreviews: {
+        placeholder: "[PERSONA 01]",
+        mask: "[PERSONA 01]",
+        synthetic: "[PERSONA 01]",
+        placeholderLadder: ["[PERSONA 01]"],
+      },
       needsReview: false,
       createdAt: 0,
       updatedAt: 0,
@@ -546,6 +565,187 @@ describe("@anonly/shared — Contracts", () => {
         personGender: "neutral",
       });
       void group;
+    });
+  });
+
+  describe("EntityGroup.replacementPreviews (ADR-170 §1)", () => {
+    const previews: ReplacementPreviews = {
+      placeholder: "[PERSONA 01]",
+      mask: "XX.XXX.XXX",
+      synthetic: "María Gómez",
+      placeholderLadder: ["[PERSONA 01]", "[PERS 01]", "[PRS-01]"],
+    };
+
+    const baseGroup: EntityGroup = {
+      id: "g1",
+      type: EntityType.Person,
+      canonicalValue: "Juan Pérez",
+      members: [],
+      replacementMode: ReplacementMode.Placeholder,
+      replacementValue: "[PERSONA 01]",
+      indexInType: 1,
+      enabled: true,
+      aliases: ["Juan Pérez"],
+      replacementValueUserSet: false,
+      replacementPreviews: previews,
+      needsReview: false,
+      createdAt: 0,
+      updatedAt: 0,
+    };
+
+    it("es un campo requerido: no se puede omitir (compile-time)", () => {
+      const missingPreviews = (): EntityGroup =>
+        // @ts-expect-error — replacementPreviews es requerido (ADR-170 §1); assert de compile-time
+        ({
+          id: "g1",
+          type: EntityType.Person,
+          canonicalValue: "Juan Pérez",
+          members: [],
+          replacementMode: ReplacementMode.Placeholder,
+          replacementValue: "[PERSONA 01]",
+          indexInType: 1,
+          enabled: true,
+          aliases: ["Juan Pérez"],
+          replacementValueUserSet: false,
+          needsReview: false,
+          createdAt: 0,
+          updatedAt: 0,
+        });
+      void missingPreviews;
+    });
+
+    it("tipa placeholder/mask/synthetic/placeholderLadder", () => {
+      expect(baseGroup.replacementPreviews.placeholder).toBe("[PERSONA 01]");
+      expect(baseGroup.replacementPreviews.mask).toBe("XX.XXX.XXX");
+      expect(baseGroup.replacementPreviews.synthetic).toBe("María Gómez");
+      expect(baseGroup.replacementPreviews.placeholderLadder).toEqual([
+        "[PERSONA 01]",
+        "[PERS 01]",
+        "[PRS-01]",
+      ]);
+    });
+
+    it("no tiene entrada para redact: solo placeholder/mask/synthetic/placeholderLadder", () => {
+      expect(Object.keys(baseGroup.replacementPreviews).sort()).toEqual([
+        "mask",
+        "placeholder",
+        "placeholderLadder",
+        "synthetic",
+      ]);
+    });
+
+    it("es readonly (compile-time, ADR-008)", () => {
+      const mutate = (): void => {
+        // @ts-expect-error — placeholder es readonly (ADR-008); assert de compile-time
+        baseGroup.replacementPreviews.placeholder = "x";
+      };
+      void mutate;
+      expect(baseGroup.replacementPreviews.placeholder).toBe("[PERSONA 01]");
+    });
+
+    it("placeholderLadder es ReadonlyArray (compile-time, ADR-008)", () => {
+      const mutate = (): void => {
+        // @ts-expect-error — ReadonlyArray<string> no expone push (ADR-008)
+        baseGroup.replacementPreviews.placeholderLadder.push("x");
+      };
+      void mutate;
+      expect(baseGroup.replacementPreviews.placeholderLadder).toHaveLength(3);
+    });
+
+    it("invariante: con replacementValueUserSet=false, replacementPreviews[replacementMode] === replacementValue para placeholder/mask/synthetic", () => {
+      const placeholderGroup: EntityGroup = {
+        ...baseGroup,
+        replacementMode: ReplacementMode.Placeholder,
+        replacementValue: previews.placeholder,
+      };
+      expect(placeholderGroup.replacementPreviews.placeholder).toBe(
+        placeholderGroup.replacementValue,
+      );
+
+      const maskGroup: EntityGroup = {
+        ...baseGroup,
+        replacementMode: ReplacementMode.Mask,
+        replacementValue: previews.mask,
+      };
+      expect(maskGroup.replacementPreviews.mask).toBe(maskGroup.replacementValue);
+
+      const syntheticGroup: EntityGroup = {
+        ...baseGroup,
+        replacementMode: ReplacementMode.Synthetic,
+        replacementValue: previews.synthetic,
+      };
+      expect(syntheticGroup.replacementPreviews.synthetic).toBe(syntheticGroup.replacementValue);
+    });
+  });
+
+  describe("EditPreviewRequest / EditPreviewGroup / EditPreview (ADR-170 §2)", () => {
+    it("EditPreviewRequest discrimina por kind: type/merge/split", () => {
+      const typeReq: EditPreviewRequest = { kind: "type", groupId: "g1", type: EntityType.DNI };
+      const mergeReq: EditPreviewRequest = {
+        kind: "merge",
+        sourceGroupId: "g1",
+        targetGroupIds: ["g2", "g3"],
+      };
+      const splitReq: EditPreviewRequest = {
+        kind: "split",
+        groupId: "g1",
+        occurrenceIds: ["occ-1"],
+      };
+      expect(typeReq.kind).toBe("type");
+      expect(mergeReq.kind).toBe("merge");
+      expect(splitReq.kind).toBe("split");
+    });
+
+    it("EditPreviewGroup.groupId acepta string o null (null = grupo nuevo de un split)", () => {
+      const existing: EditPreviewGroup = {
+        groupId: "g1",
+        type: EntityType.Person,
+        indexInType: 1,
+        canonicalValue: "Juan Pérez",
+        memberCount: 2,
+        replacementMode: ReplacementMode.Placeholder,
+        replacementValue: "[PERSONA 01]",
+      };
+      const created: EditPreviewGroup = { ...existing, groupId: null, indexInType: 2 };
+      expect(existing.groupId).toBe("g1");
+      expect(created.groupId).toBeNull();
+    });
+
+    it("EditPreview.groups es un ReadonlyArray<EditPreviewGroup>", () => {
+      const group: EditPreviewGroup = {
+        groupId: "g1",
+        type: EntityType.DNI,
+        indexInType: 1,
+        canonicalValue: "34.567.891",
+        memberCount: 1,
+        replacementMode: ReplacementMode.Placeholder,
+        replacementValue: "[DNI 01]",
+      };
+      const preview: EditPreview = { groups: [group] };
+      expect(preview.groups).toHaveLength(1);
+      const mutate = (): void => {
+        // @ts-expect-error — ReadonlyArray<EditPreviewGroup> no expone push (ADR-008)
+        preview.groups.push(group);
+      };
+      void mutate;
+    });
+
+    it("es readonly (compile-time, ADR-008)", () => {
+      const group: EditPreviewGroup = {
+        groupId: "g1",
+        type: EntityType.DNI,
+        indexInType: 1,
+        canonicalValue: "34.567.891",
+        memberCount: 1,
+        replacementMode: ReplacementMode.Placeholder,
+        replacementValue: "[DNI 01]",
+      };
+      const mutate = (): void => {
+        // @ts-expect-error — indexInType es readonly (ADR-008); assert de compile-time
+        group.indexInType = 2;
+      };
+      void mutate;
+      expect(group.indexInType).toBe(1);
     });
   });
 
@@ -623,6 +823,12 @@ describe("@anonly/shared — Contracts", () => {
         enabled: true,
         aliases: ["Juan"],
         replacementValueUserSet: false,
+        replacementPreviews: {
+          placeholder: "[PERSONA 01]",
+          mask: "[PERSONA 01]",
+          synthetic: "[PERSONA 01]",
+          placeholderLadder: ["[PERSONA 01]"],
+        },
         needsReview: false,
         createdAt: 0,
         updatedAt: 0,
@@ -694,6 +900,24 @@ describe("@anonly/shared — Contracts", () => {
       expect(payload.options.includeOriginalMetadata).toBe(false);
       // `includeOriginalMetadata: false` es literal por tipo. Verificado por typecheck.
     });
+
+    it("GroupRemoveRequested tipa documentId/groupId (ADR-171 §1)", () => {
+      const payload: GroupRemoveRequested = { documentId: "d1", groupId: "g1" };
+      expect(payload.documentId).toBe("d1");
+      expect(payload.groupId).toBe("g1");
+      const mutate = (): void => {
+        // @ts-expect-error — groupId es readonly (ADR-008); assert de compile-time
+        payload.groupId = "g2";
+      };
+      void mutate;
+    });
+
+    it("EventPayloadMap tiene entrada para GROUP_REMOVE_REQUESTED (ADR-171 §1)", () => {
+      const handler = (payload: GroupRemoveRequested): void => {
+        expect(payload.groupId).toBe("g1");
+      };
+      handler({ documentId: "d1", groupId: "g1" });
+    });
   });
 
   describe("Transferable", () => {
@@ -734,6 +958,12 @@ describe("@anonly/shared — Contracts", () => {
 
     it("PREVIEW_CACHE_MAX_BYTES es 200 MB (Contracts.md §6)", () => {
       expect(PREVIEW_CACHE_MAX_BYTES).toBe(200 * 1024 * 1024);
+    });
+  });
+
+  describe("MAX_EDIT_CHECKPOINTS (ADR-172 §1)", () => {
+    it("es 50 (Contracts.md §6)", () => {
+      expect(MAX_EDIT_CHECKPOINTS).toBe(50);
     });
   });
 
