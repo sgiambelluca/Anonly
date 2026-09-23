@@ -41,9 +41,6 @@ import {
 import { ModeSelectMenu } from "./ModeSelectMenu.js";
 import { REPLACEMENT_MODE_LABEL } from "./replacementModeOptions.js";
 
-/** Ejemplo genérico: en este nivel no hay un grupo concreto al que referirse. */
-const SAMPLE = "Cada dato";
-
 export function DocumentModeSelect() {
   const rules = useRulesStore((state) => state.rules);
   const groupsByType = useEntitiesStore((state) => state.groupsByType);
@@ -88,7 +85,7 @@ export function DocumentModeSelect() {
           <span className="text-sm font-semibold text-text-primary">Todo el documento</span>
           <ModeSelectMenu
             current={current}
-            example={{ sample: SAMPLE }}
+            previews={null}
             onSelect={handleSelect}
             subject="todo el documento"
             align="right"

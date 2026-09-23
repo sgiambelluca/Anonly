@@ -83,11 +83,10 @@ test("un reanalyze preserva las ediciones previas del usuario", async ({ page })
     .getByRole("group", { name: "Acciones del grupo" })
     .getByRole("button", { name: "Fusionar con…" })
     .click();
-  const mergeDialog = page.getByRole("dialog", { name: "Fusionar grupo" });
+  const mergeDialog = page.getByRole("dialog", { name: "Fusionar entidades" });
   await expect(mergeDialog).toBeVisible();
-  await mergeDialog.getByRole("combobox", { name: "Grupo destino 1" }).click();
-  await page.getByRole("option", { name: /18\.445\.212/ }).click();
-  await mergeDialog.getByRole("button", { name: "Fusionar" }).click();
+  await mergeDialog.getByRole("checkbox", { name: /18\.445\.212/ }).click();
+  await mergeDialog.getByRole("button", { name: "Fusionar 2 entidades" }).click();
   await expect(mergeDialog).toHaveCount(0);
   await expect(dni3).toHaveCount(0);
   await expect(dni2).toHaveAccessibleName(/, 2 ocurrencias?,/);

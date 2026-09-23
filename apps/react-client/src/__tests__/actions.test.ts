@@ -22,6 +22,7 @@ const addManualEntity = vi.fn();
 const getPageWords = vi.fn();
 const getPageSize = vi.fn();
 const findText = vi.fn();
+const previewEdit = vi.fn();
 
 vi.mock("../core-adapter/index.js", () => ({
   getCore: () => ({
@@ -34,6 +35,7 @@ vi.mock("../core-adapter/index.js", () => ({
       getPageWords,
       getPageSize,
       findText,
+      previewEdit,
       cancel: vi.fn(),
       closeDocument: vi.fn(),
       getState: vi.fn(),
@@ -365,5 +367,34 @@ describe("actions", () => {
       expect(useEntitiesStore.getState().conflicts).toEqual([]);
       expect(usePipelineStore.getState().groupCount).toBe(0);
     });
+  });
+});
+
+describe("actions.previewEdit (ADR-170 §2)", () => {
+  beforeEach(() => {
+    previewEdit.mockReset();
+    useDocumentStore.getState().reset();
+  });
+
+  it("sin documento no consulta y devuelve null", () => {
+    expect(actions.previewEdit({ kind: "type", groupId: "g", type: EntityType.DNI })).toBeNull();
+    expect(previewEdit).not.toHaveBeenCalled();
+  });
+
+  it("delega en el orchestrator con el documento activo", () => {
+    useDocumentStore.setState({ id: "doc-1" });
+    const preview = { groups: [] };
+    previewEdit.mockReturnValue(preview);
+    const request = { kind: "merge", sourceGroupId: "a", targetGroupIds: ["b"] } as const;
+    expect(actions.previewEdit(request)).toBe(preview);
+    expect(previewEdit).toHaveBeenCalledWith("doc-1", request);
+  });
+
+  it("un pedido que el Core rechaza (InvalidInputError) no rompe el diálogo: null", () => {
+    useDocumentStore.setState({ id: "doc-1" });
+    previewEdit.mockImplementation(() => {
+      throw new Error("InvalidInputError");
+    });
+    expect(actions.previewEdit({ kind: "split", groupId: "g", occurrenceIds: ["o"] })).toBeNull();
   });
 });

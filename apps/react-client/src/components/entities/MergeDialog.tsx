@@ -1,44 +1,47 @@
 /**
- * `MergeDialog` (`ui/Components.md` §3.6).
+ * `MergeDialog` — "Fusionar entidades" (`ui/Components.md` §3.6, rediseñado
+ * por ADR-169 §10 con vistas previas de ADR-170).
  *
- * Props del catálogo: `sourceGroupId`. `open`/`onClose` se agregan siguiendo
- * el mismo patrón que el resto de los diálogos ya existentes en el repo
- * (`SettingsDialog`, `PasswordDialog`: estado de apertura levantado al
- * llamador, acá `EntityGroupItem`).
+ * - La entidad de origen arriba.
+ * - Una lista **de alto fijo** con filtro y casillas: se eligen **una o
+ *   varias** entidades del mismo tipo de una vez (reemplaza a las filas de
+ *   `Select` con "+ Agregar otro grupo").
+ * - Una caja **"Resultado"** de alto fijo con nombre, N.º, apariciones y token
+ *   del grupo que queda, calculada por el Core (`previewEdit({ kind: "merge"
+ *   })`); sin selección, un texto neutro en la misma caja (UX-10).
+ * - El botón dice cuántas quedan en una ("Fusionar 3 entidades"), con ancho
+ *   mínimo fijo.
  *
- * Autocomplete de destino filtrado por mismo `EntityType`
- * (`mergeValidation.ts`). Acción: `actions.mergeGroups(sourceGroupId,
- * targetGroupId)` → `GROUP_MERGE_REQUESTED`. El feedback de toast ("Grupos
- * fusionados. Índice conservado: 01.") queda fuera de este PR: no hay
- * componente `Toast`/`Sonner` implementado todavía (`ui/Components.md` §8.6 lo
- * documenta pero ningún PR anterior lo construyó) y agregarlo no está en el
- * pedido concreto de este PR.
- *
- * **Varios destinos a la vez**: `UX_Guidelines.md` §3.2 pide "2+ grupos del
- * mismo tipo" desde siempre, y el diálogo resolvía uno solo — cuatro grupos de
- * la misma persona eran tres pasadas por este mismo modal, cada una con su
- * confirmación. El botón "+" agrega una fila de destino; la fusión sale como
- * los N-1 `GROUP_MERGE_REQUESTED` que arma `mergePlan` (ahí está por qué es
- * seguro emitirlos en fila). El Core no cambia.
+ * **El contrato no cambia**: `GROUP_MERGE_REQUESTED` sigue siendo 1→1 y la UI
+ * emite los pasos de `mergePlan`. La UI pone primero al elegido de menor
+ * `indexInType`: el sobreviviente conserva el `id` del primero y el menor
+ * número de todos (ADR-170 §2), así que el `id` que queda es el del número
+ * que queda. Es seguro en fila porque `applyGroupMerge` corre síncrono.
  */
 
-import { PlusIcon, XIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import type { EntityGroup } from "@anonly/anonymization-core";
+import { SearchIcon } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 
 import { actions } from "../../core-adapter/actions.js";
 import { useEntitiesStore } from "../../store/entities.store.js";
 import { Button } from "../common/Button.js";
+import { Checkbox } from "../common/Checkbox.js";
 import { Dialog } from "../common/Dialog.js";
-import { Select } from "../common/Select.js";
+import { showToast } from "../common/toast.js";
 
-import { findGroupById } from "./entityTree.js";
-import { ENTITY_TYPE_LABEL } from "./entityTypeLabels.js";
 import {
-  availableTargetOptions,
-  mergePlan,
-  mergeTargetOptions,
-  validateMultiMerge,
-} from "./mergeValidation.js";
+  displayReplacement,
+  mergeButtonLabel,
+  mergePreviewRequest,
+  mergeResult,
+  mergeToastText,
+  orderMergeTargets,
+} from "./editPreviews.js";
+import { EntityLine } from "./EntityLine.js";
+import { filterGroups, findGroupById } from "./entityTree.js";
+import { ENTITY_TYPE_LABEL, formatIndexInType } from "./entityTypeLabels.js";
+import { mergePlan, mergeTargetOptions, validateMultiMerge } from "./mergeValidation.js";
 
 export interface MergeDialogProps {
   readonly sourceGroupId: string;
@@ -49,157 +52,192 @@ export interface MergeDialogProps {
 export function MergeDialog({ sourceGroupId, open, onClose }: MergeDialogProps) {
   const groupsByType = useEntitiesStore((state) => state.groupsByType);
   const sourceGroup = findGroupById(groupsByType, sourceGroupId);
-  const targetOptions = sourceGroup
-    ? mergeTargetOptions(sourceGroup, groupsByType.get(sourceGroup.type) ?? [])
-    : [];
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
+  const [filter, setFilter] = useState("");
 
-  // Una entrada por fila de destino. La primera es la que sobrevive a la
-  // fusión (`mergePlan`), y por eso el orden importa y no se reordena.
-  const [targetGroupIds, setTargetGroupIds] = useState<ReadonlyArray<string>>(() =>
-    targetOptions[0] ? [targetOptions[0].id] : [],
-  );
-
-  // Reinicia la selección cada vez que se abre (mismo criterio que
-  // `SettingsDialog`: "re-sincroniza el formulario ... cada vez que se abre").
+  // Reinicia la selección cada vez que se abre.
   useEffect(() => {
     if (!open) return;
-    setTargetGroupIds(targetOptions[0] ? [targetOptions[0].id] : []);
-    // Deps acotadas a propósito a `[open, sourceGroupId]` (sin `targetOptions`,
-    // que es un array nuevo en cada render): mismo criterio que
-    // `viewer/PdfViewer.tsx` — el repo no tiene `eslint-plugin-react-hooks`
-    // que exija la lista exhaustiva.
+    setSelectedIds(new Set());
+    setFilter("");
   }, [open, sourceGroupId]);
 
-  /*
-   * Siembra la primera fila si los grupos hermanos aparecen **con el diálogo ya
-   * abierto**.
-   *
-   * Sin esto, abrir "Fusionar con…" sobre el primer `Person` que encuentra NER
-   * —mientras el resto todavía está llegando— deja el modal diciendo "no hay
-   * otros grupos para fusionar" hasta cerrarlo y volver a abrirlo, aunque
-   * atrás el árbol ya muestre tres. Es el efecto de arriba, que solo corre al
-   * abrir: con un análisis en curso esa foto dura poco. Comportamiento
-   * heredado (el diálogo de un solo destino hacía exactamente lo mismo), no
-   * una regresión de la fusión múltiple.
-   *
-   * Solo rellena cuando está vacío: nunca pisa lo que el usuario eligió.
-   */
-  useEffect(() => {
-    if (!open) return;
-    setTargetGroupIds((current) =>
-      current.length > 0 || targetOptions[0] === undefined ? current : [targetOptions[0].id],
-    );
-  }, [open, targetOptions.length]);
+  const candidates: ReadonlyArray<EntityGroup> = useMemo(
+    () =>
+      sourceGroup === undefined
+        ? []
+        : [...mergeTargetOptions(sourceGroup, groupsByType.get(sourceGroup.type) ?? [])].sort(
+            (a, b) => a.indexInType - b.indexInType,
+          ),
+    [sourceGroup, groupsByType],
+  );
+  const selected = candidates.filter((group) => selectedIds.has(group.id));
+  const visible = filterGroups(candidates, filter);
+
+  // ADR-170 §2: la vista previa se pide al cambiar la selección (sincrónica).
+  const preview = useMemo(() => {
+    if (!open || sourceGroup === undefined) return null;
+    const request = mergePreviewRequest(sourceGroup.id, selected);
+    return request === null ? null : actions.previewEdit(request);
+    // `selected` se deriva de `selectedIds` y `candidates`.
+  }, [open, sourceGroup, selectedIds, candidates]);
+  const result = mergeResult(preview);
 
   if (sourceGroup === undefined) {
     return (
-      <Dialog open={open} onClose={onClose} title="Fusionar grupo">
-        <p className="text-sm text-text-secondary">Este grupo ya no está disponible.</p>
+      <Dialog open={open} onClose={onClose} title="Fusionar entidades">
+        <p className="text-sm text-text-secondary">Esta entidad ya no está disponible.</p>
       </Dialog>
     );
   }
 
-  const selectedGroups = targetGroupIds.map((id) => targetOptions.find((group) => group.id === id));
-  const validation = validateMultiMerge(sourceGroup, selectedGroups);
-  const remaining = availableTargetOptions(sourceGroup, targetOptions, targetGroupIds);
+  const validation = validateMultiMerge(sourceGroup, selected);
+  // "personas", pero "DNI" y "CUIT" quedan en mayúsculas.
+  const plural = ENTITY_TYPE_LABEL[sourceGroup.type];
+  const typeLabel = plural === plural.toUpperCase() ? plural : plural.toLowerCase();
 
-  const setRow = (index: number, value: string): void => {
-    setTargetGroupIds((current) => current.map((id, i) => (i === index ? value : id)));
-  };
+  function toggle(groupId: string, checked: boolean): void {
+    setSelectedIds((previous) => {
+      const next = new Set(previous);
+      if (checked) next.add(groupId);
+      else next.delete(groupId);
+      return next;
+    });
+  }
 
-  const addRow = (): void => {
-    const next = remaining[0];
-    if (next === undefined) return;
-    setTargetGroupIds((current) => [...current, next.id]);
-  };
-
-  const removeRow = (index: number): void => {
-    setTargetGroupIds((current) => current.filter((_, i) => i !== index));
-  };
-
-  // Arrow function (no `function` declaration): TypeScript solo preserva el
-  // narrowing de `sourceGroup` (por el `if` de arriba) dentro de expresiones de
-  // función definidas en el mismo scope, no de declaraciones `function`
-  // (hoisting — mismo motivo en `SplitDialog.tsx`/`ConflictDialog.tsx`).
+  // Arrow function: TypeScript preserva el narrowing de `sourceGroup` solo en
+  // expresiones de función del mismo scope (mismo motivo en `SplitDialog`).
   const handleConfirm = (): void => {
     if (!validation.valid) return;
-    for (const step of mergePlan(sourceGroup.id, targetGroupIds)) {
+    const targets = orderMergeTargets(selected);
+    const entityCount = selected.length + 1;
+    const finalResult = result;
+    for (const step of mergePlan(sourceGroup.id, targets)) {
       actions.mergeGroups(step.sourceGroupId, step.targetGroupId);
     }
     onClose();
+    if (finalResult !== null) showToast(mergeToastText(entityCount, finalResult));
   };
 
   return (
-    <Dialog open={open} onClose={onClose} title="Fusionar grupo">
-      <div className="flex flex-col gap-3 text-sm">
-        <p className="text-text-secondary">
-          Fusionar{" "}
-          <span className="font-medium text-text-primary">{sourceGroup.canonicalValue}</span> con{" "}
-          {targetGroupIds.length > 1 ? `${String(targetGroupIds.length)} grupos` : "otro grupo"} de
-          tipo {ENTITY_TYPE_LABEL[sourceGroup.type]}. Queda un solo grupo, y conserva el menor
-          índice.
-        </p>
-        {targetOptions.length === 0 || targetGroupIds.length === 0 ? (
-          <p role="alert" className="text-sm text-error">
-            No hay otros grupos de tipo {ENTITY_TYPE_LABEL[sourceGroup.type]} para fusionar.
-          </p>
-        ) : (
-          <>
-            {targetGroupIds.map((id, index) => (
-              <div key={id} className="flex items-center gap-2">
-                <Select
-                  value={id}
-                  onChange={(value) => setRow(index, value)}
-                  options={availableTargetOptions(
-                    sourceGroup,
-                    targetOptions,
-                    targetGroupIds,
-                    id,
-                  ).map((group) => ({
-                    value: group.id,
-                    label: `${group.canonicalValue} (${group.members.length})`,
-                  }))}
-                  aria-label={`Grupo destino ${index + 1}`}
-                />
-                {/*
-                  La primera fila no se puede quitar: es el grupo que sobrevive
-                  a la fusión, y sin ella no hay nada contra qué fusionar.
-                */}
-                {index > 0 && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    aria-label={`Quitar grupo destino ${index + 1}`}
-                    onClick={() => removeRow(index)}
-                  >
-                    <XIcon className="h-4 w-4" aria-hidden />
-                  </Button>
-                )}
-              </div>
-            ))}
-            <div>
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={remaining.length === 0}
-                onClick={addRow}
-              >
-                <span className="inline-flex items-center gap-1">
-                  <PlusIcon className="h-4 w-4" aria-hidden />
-                  Agregar otro grupo
-                </span>
-              </Button>
-            </div>
-          </>
-        )}
-      </div>
-      <div className="mt-4 flex justify-end gap-2">
-        <Button variant="secondary" onClick={onClose}>
-          Cancelar
-        </Button>
-        <Button variant="primary" disabled={!validation.valid} onClick={handleConfirm}>
-          Fusionar
-        </Button>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title="Fusionar entidades"
+      description="Juntá en una sola las entidades que son la misma persona o el mismo dato."
+      size="lg"
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={onClose}>
+            Cancelar
+          </Button>
+          <Button
+            variant="primary"
+            className="min-w-[11rem]"
+            disabled={!validation.valid}
+            onClick={handleConfirm}
+          >
+            {mergeButtonLabel(selected.length)}
+          </Button>
+        </div>
+      }
+    >
+      <div className="flex flex-col gap-4 text-sm">
+        <div className="flex flex-col gap-1.5">
+          <span className="font-semibold text-text-secondary">Entidad</span>
+          <EntityLine
+            group={{
+              type: sourceGroup.type,
+              canonicalValue: sourceGroup.canonicalValue,
+              indexInType: sourceGroup.indexInType,
+              memberCount: sourceGroup.members.length,
+            }}
+          />
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center justify-between gap-3">
+            <span id="merge-with" className="font-semibold text-text-secondary">
+              ¿Con cuál o cuáles la fusionás?
+            </span>
+            <label className="flex h-8 w-48 items-center gap-2 rounded-md border border-border bg-bg-primary px-2 focus-within:ring-2 focus-within:ring-accent">
+              <SearchIcon className="h-3.5 w-3.5 shrink-0 text-text-secondary" aria-hidden />
+              <input
+                type="search"
+                value={filter}
+                onChange={(event) => setFilter(event.target.value)}
+                placeholder={`Filtrar ${typeLabel}…`}
+                aria-label={`Filtrar ${typeLabel}`}
+                className="min-w-0 flex-1 border-0 bg-transparent text-sm text-text-primary outline-none"
+              />
+            </label>
+          </div>
+          {/* Lista de alto fijo (UX-10). */}
+          <div
+            role="group"
+            aria-labelledby="merge-with"
+            className="flex h-48 flex-col gap-0.5 overflow-y-auto rounded-lg border border-border bg-bg-secondary p-1"
+          >
+            {candidates.length === 0 ? (
+              <p className="p-2 text-text-secondary">
+                No hay otras entidades de tipo {ENTITY_TYPE_LABEL[sourceGroup.type]} para fusionar.
+              </p>
+            ) : visible.length === 0 ? (
+              <p className="p-2 text-text-secondary">Ninguna coincide con el filtro.</p>
+            ) : (
+              visible.map((group) => (
+                <div
+                  key={group.id}
+                  className={`rounded-md px-2 py-1.5 ${
+                    selectedIds.has(group.id) ? "bg-accent/10" : "hover:bg-bg-primary"
+                  }`}
+                >
+                  <Checkbox
+                    id={`merge-${group.id}`}
+                    checked={selectedIds.has(group.id)}
+                    onCheckedChange={(checked) => toggle(group.id, checked)}
+                    label={
+                      <span className="flex min-w-0 flex-1 items-center gap-2.5">
+                        <span className="w-6 shrink-0 tabular-nums text-text-secondary">
+                          {formatIndexInType(group.indexInType)}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-text-primary">
+                          {group.canonicalValue}
+                        </span>
+                        <span className="shrink-0 text-text-secondary">
+                          {group.members.length === 1
+                            ? "1 aparición"
+                            : `${group.members.length} apariciones`}
+                        </span>
+                      </span>
+                    }
+                  />
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Caja "Resultado" de alto fijo (UX-10). */}
+        <div
+          aria-live="polite"
+          className="flex h-[8.5rem] flex-col gap-2 rounded-lg border border-accent/35 bg-accent/5 px-3.5 py-3"
+        >
+          <span className="font-semibold text-text-primary">Resultado</span>
+          {result !== null ? (
+            <>
+              <EntityLine group={result} token={displayReplacement(result)} />
+              <span className="line-clamp-2 text-text-secondary">
+                Se queda con el número más bajo y con el nombre que más se repite. Si te equivocás,
+                podés dividirla después.
+              </span>
+            </>
+          ) : (
+            <span className="text-text-secondary">
+              Elegí al menos una entidad para ver cómo queda.
+            </span>
+          )}
+        </div>
       </div>
     </Dialog>
   );

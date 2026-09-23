@@ -57,6 +57,56 @@ function tightestBox(
 }
 
 /**
+ * ADR-169 §10: la aparición más apretada del grupo, con su caja — la que
+ * `EditReplacementDialog` usa para la vista previa "Así queda en el
+ * documento" (el peor caso manda, igual que el medidor). `null` sin cajas.
+ */
+export function tightestMember(
+  members: ReadonlyArray<OccurrenceRef>,
+): { readonly member: OccurrenceRef; readonly width: number } | null {
+  let tightest: { readonly member: OccurrenceRef; readonly width: number } | null = null;
+  for (const member of members) {
+    for (const box of member.fragments ?? [member.bbox]) {
+      if (box.height <= 0 || box.width <= 0) continue;
+      if (tightest === null || box.width < tightest.width) {
+        tightest = { member, width: box.width };
+      }
+    }
+  }
+  return tightest;
+}
+
+/** ADR-169 §10: el medidor de ancho fijo junto al campo. */
+export const FIT_LABEL: Readonly<Record<ReplacementFit, string>> = {
+  fits: "Entra bien",
+  tight: "Queda justo",
+  overflows: "No entra",
+  unknown: "Sin medida",
+};
+
+/** El texto que explica el medidor (dos renglones reservados, UX-10). */
+export const FIT_EXPLANATION: Readonly<Record<ReplacementFit, string>> = {
+  fits: "Entra en todas sus apariciones sin achicarse.",
+  tight: "Puede quedar justo en la aparición más chica.",
+  overflows: "No entra en la aparición más chica: se va a ver achicado.",
+  unknown: "No hay una aparición con la que medirlo.",
+};
+
+/**
+ * ADR-169 §10 + ADR-170 §1: sugerencias más cortas — los niveles de la
+ * escalera de ADR-057 que calcula el Core (`placeholderLadder`), sin repetir
+ * lo que ya está escrito ni el valor vigente.
+ */
+export function replacementSuggestions(
+  ladder: ReadonlyArray<string>,
+  currentValue: string,
+  input: string,
+): ReadonlyArray<string> {
+  const typed = input.trim();
+  return ladder.filter((level) => level !== currentValue && level !== typed);
+}
+
+/**
  * `unknown` cuando el grupo no tiene ninguna caja utilizable (sin members, o
  * con geometría degenerada): no se inventa un veredicto, se calla.
  */

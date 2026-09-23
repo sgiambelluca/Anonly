@@ -84,15 +84,7 @@ export function TypeModeSelect({ type, groups, onOpenChange }: TypeModeSelectPro
     <>
       <ModeSelectMenu
         current={current}
-        example={{
-          sample: sampleGroup?.canonicalValue ?? ENTITY_TYPE_LABEL[type],
-          ...(sampleGroup !== undefined
-            ? {
-                currentMode: sampleGroup.replacementMode,
-                currentValue: sampleGroup.replacementValue,
-              }
-            : {}),
-        }}
+        previews={sampleGroup?.replacementPreviews ?? null}
         onSelect={handleSelect}
         subject={ENTITY_TYPE_LABEL[type]}
         {...(onOpenChange !== undefined ? { onOpenChange } : {})}

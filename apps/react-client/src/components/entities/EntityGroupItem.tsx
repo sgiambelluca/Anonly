@@ -196,9 +196,7 @@ function EntityGroupItemImpl({ group, nodeId, activeNodeId }: EntityGroupItemPro
         onClose={() => setEditReplacementOpen(false)}
       />
       <ChangeTypeDialog
-        groupId={group.id}
-        currentType={group.type}
-        canonicalValue={group.canonicalValue}
+        group={group}
         open={changeTypeOpen}
         onClose={() => setChangeTypeOpen(false)}
       />

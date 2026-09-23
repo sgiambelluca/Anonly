@@ -16,6 +16,8 @@
 import {
   EngineEvents,
   EventChannel,
+  type EditPreview,
+  type EditPreviewRequest,
   type EntityGroup,
   type EntityType,
   type ExportOptions,
@@ -213,6 +215,26 @@ export const actions = {
     const documentId = activeDocumentId();
     if (documentId === null) return [];
     return getCore().orchestrator.findText(documentId, query);
+  },
+
+  /**
+   * ADR-170 §2: cómo quedarían los grupos si se aplicara la operación
+   * (fusionar, dividir, cambiar tipo). Consulta sincrónica y de solo lectura:
+   * el Grouping Engine la simula sobre una copia de la sesión con el mismo
+   * código que el pedido real, así que la vista previa no puede discrepar del
+   * resultado. Los diálogos validan antes de pedir (`validateMultiMerge`,
+   * `validateSplit`); si igual llega un pedido que el real rechazaría, el Core
+   * lanza `InvalidInputError` y acá se devuelve `null` — el diálogo muestra su
+   * texto neutro en vez de romper el render.
+   */
+  previewEdit(request: EditPreviewRequest): EditPreview | null {
+    const documentId = activeDocumentId();
+    if (documentId === null) return null;
+    try {
+      return getCore().orchestrator.previewEdit(documentId, request);
+    } catch {
+      return null;
+    }
   },
 
   // PDF_PASSWORD_REQUIRED → PasswordDialog → esta acción. La UI NUNCA llama a

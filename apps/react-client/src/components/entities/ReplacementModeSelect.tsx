@@ -81,11 +81,8 @@ export function ReplacementModeSelect({ group, onOpenChange }: ReplacementModeSe
   return (
     <ModeSelectMenu
       current={current}
-      example={{
-        sample: group.canonicalValue,
-        currentMode: current,
-        currentValue: group.replacementValue,
-      }}
+      // ADR-170 §1: las cuatro vistas previas exactas de esta entidad.
+      previews={group.replacementPreviews}
       onSelect={handleSelect}
       subject={group.canonicalValue}
       {...(onOpenChange !== undefined ? { onOpenChange } : {})}
