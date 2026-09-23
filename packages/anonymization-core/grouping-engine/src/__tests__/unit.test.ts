@@ -931,3 +931,201 @@ describe("levenshtein / levenshteinNormalized", () => {
     expect(levenshtein("kitten", "sitting")).toBe(3);
   });
 });
+
+describe("GroupingEngine — replacementPreviews (ADR-170 §1)", () => {
+  let engine: GroupingEngine;
+  let ctx: EngineContext;
+
+  beforeEach(async () => {
+    engine = new GroupingEngine();
+    ctx = createEngineContext();
+    await engine.init(ctx);
+    engine.startSession("doc-1");
+  });
+
+  afterEach(async () => {
+    if (!engine["disposed"]) {
+      await engine.dispose();
+    }
+  });
+
+  // Caso 46 (§13).
+  it("replacementPreviews ignore replacementValueUserSet", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "11111111", normalizedValue: "11111111" }),
+    });
+    const [group] = engine.getSnapshot("doc-1").groups;
+    const computedPlaceholder = group!.replacementPreviews.placeholder;
+
+    const edited = await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group!.id,
+      patch: { replacementValue: "[P1]" },
+    });
+    expect(edited.replacementValueUserSet).toBe(true);
+    expect(edited.replacementValue).toBe("[P1]");
+    // La vista previa sigue mostrando lo que valdría CALCULADO, no lo que el
+    // usuario escribió a mano — es "lo que quedaría al cambiar de modo".
+    expect(edited.replacementPreviews.placeholder).toBe(computedPlaceholder);
+    expect(edited.replacementPreviews.placeholder).not.toBe(edited.replacementValue);
+  });
+
+  // Caso 46 (§13, ADR-057).
+  it("placeholderLadder lists distinct ladder tokens, longest first, including placeholder", () => {
+    // Organization (no Person: sin inferencia de género que confunda el
+    // ejemplo) — ORGANIZACION(12) > ORGA(4) > ORG(3), los tres niveles
+    // distintos.
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Organization,
+        value: "Empresa S.A.",
+        normalizedValue: "empresa s.a.",
+      }),
+    });
+    const [group] = engine.getSnapshot("doc-1").groups;
+    const ladder = group!.replacementPreviews.placeholderLadder;
+
+    expect(ladder).toEqual([
+      `[ORGANIZACION ${String(group!.indexInType).padStart(2, "0")}]`,
+      `[ORGA ${String(group!.indexInType).padStart(2, "0")}]`,
+      `[ORG-${String(group!.indexInType).padStart(2, "0")}]`,
+    ]);
+    expect(ladder).toContain(group!.replacementPreviews.placeholder);
+    // Sin repetidos.
+    expect(new Set(ladder).size).toBe(ladder.length);
+  });
+
+  describe("previewEdit reuses the real request (ADR-170 §2)", () => {
+    // Caso 47 (§13) — un test por kind.
+    it("previewEdit(type) equals the group emitted by the real request", async () => {
+      ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: makeOccurrence({ value: "11111111", normalizedValue: "11111111" }),
+      });
+      const [group] = engine.getSnapshot("doc-1").groups;
+
+      const preview = engine.previewEdit("doc-1", {
+        kind: "type",
+        groupId: group!.id,
+        type: EntityType.CUIT,
+      });
+      expect(preview.groups).toHaveLength(1);
+
+      const real = await engine.applyGroupUpdate({
+        documentId: "doc-1",
+        groupId: group!.id,
+        patch: { type: EntityType.CUIT },
+      });
+
+      expect(preview.groups[0]).toEqual({
+        groupId: real.id,
+        type: real.type,
+        indexInType: real.indexInType,
+        canonicalValue: real.canonicalValue,
+        memberCount: real.members.length,
+        replacementMode: real.replacementMode,
+        replacementValue: real.replacementValue,
+      });
+    });
+
+    it("previewEdit(merge) equals the group emitted by the real request", async () => {
+      for (const value of ["11111111", "22222222", "33333333"]) {
+        ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+          documentId: "doc-1",
+          occurrence: makeOccurrence({ value, normalizedValue: value }),
+        });
+      }
+      const before = engine.getSnapshot("doc-1").groups;
+      const [g1, g2, g3] = before;
+
+      // Fusión múltiple: source -> targetGroupIds[0], después
+      // targetGroupIds[1] -> targetGroupIds[0] (ADR-170 §2).
+      const preview = engine.previewEdit("doc-1", {
+        kind: "merge",
+        sourceGroupId: g1!.id,
+        targetGroupIds: [g2!.id, g3!.id],
+      });
+      expect(preview.groups).toHaveLength(1);
+
+      const step1 = await engine.applyGroupMerge({
+        documentId: "doc-1",
+        sourceGroupId: g1!.id,
+        targetGroupId: g2!.id,
+      });
+      const step2 = await engine.applyGroupMerge({
+        documentId: "doc-1",
+        sourceGroupId: g3!.id,
+        targetGroupId: g2!.id,
+      });
+
+      expect(step1.id).toBe(g2!.id);
+      expect(preview.groups[0]).toEqual({
+        groupId: step2.id,
+        type: step2.type,
+        indexInType: step2.indexInType,
+        canonicalValue: step2.canonicalValue,
+        memberCount: step2.members.length,
+        replacementMode: step2.replacementMode,
+        replacementValue: step2.replacementValue,
+      });
+    });
+
+    it("previewEdit(split) equals the group emitted by the real request", async () => {
+      const occA = makeOccurrence({
+        entityType: EntityType.Person,
+        value: "Juan Pérez",
+        normalizedValue: "juan perez",
+      });
+      const occB = makeOccurrence({
+        entityType: EntityType.Person,
+        value: "J. Pérez",
+        normalizedValue: "juan perez",
+      });
+      ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: occA,
+      });
+      ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: occB,
+      });
+      const [group] = engine.getSnapshot("doc-1").groups;
+
+      const preview = engine.previewEdit("doc-1", {
+        kind: "split",
+        groupId: group!.id,
+        occurrenceIds: [occB.id],
+      });
+      expect(preview.groups).toHaveLength(2);
+      expect(preview.groups[0]?.groupId).toBe(group!.id);
+      expect(preview.groups[1]?.groupId).toBeNull();
+
+      const { merged, created } = await engine.applyGroupSplit({
+        documentId: "doc-1",
+        groupId: group!.id,
+        occurrenceIds: [occB.id],
+      });
+
+      expect(preview.groups[0]).toEqual({
+        groupId: merged.id,
+        type: merged.type,
+        indexInType: merged.indexInType,
+        canonicalValue: merged.canonicalValue,
+        memberCount: merged.members.length,
+        replacementMode: merged.replacementMode,
+        replacementValue: merged.replacementValue,
+      });
+      expect(preview.groups[1]).toEqual({
+        groupId: null,
+        type: created.type,
+        indexInType: created.indexInType,
+        canonicalValue: created.canonicalValue,
+        memberCount: created.members.length,
+        replacementMode: created.replacementMode,
+        replacementValue: created.replacementValue,
+      });
+    });
+  });
+});

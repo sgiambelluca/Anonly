@@ -173,6 +173,9 @@ import {
   type ConflictCandidate,
   type ConflictResolveRequested,
   type DocumentClosed,
+  type EditPreview,
+  type EditPreviewGroup,
+  type EditPreviewRequest,
   type EngineContext,
   type EntityFound,
   type EntityGroup,
@@ -180,11 +183,13 @@ import {
   type GroupSplitRequested,
   type GroupUpdateRequested,
   type IEngine,
+  type IEventBus,
   type NerFinished,
   type Occurrence,
   type OccurrenceRef,
   type PersonGender,
   type RegexFinished,
+  type ReplacementPreviews,
   type Rule,
   type RuleCreated,
   type RuleDeleted,
@@ -199,7 +204,12 @@ import type {
   GroupingEngineSnapshot,
   ReopenSessionOptions,
 } from "./grouping.types.js";
-import { buildPlaceholderValue, MASK_FORMAT_BY_TYPE } from "./labels.js";
+import {
+  buildPlaceholderLadder,
+  buildPlaceholderValue,
+  MASK_FORMAT_BY_TYPE,
+  type PlaceholderValueInput,
+} from "./labels.js";
 import { levenshteinNormalized } from "./levenshtein.js";
 
 const DEFAULT_SIMILARITY_THRESHOLD = 0.88;
@@ -222,6 +232,21 @@ const FUZZY_MATCHING_TYPES: ReadonlySet<EntityType> = new Set([
   EntityType.Organization,
   EntityType.Address,
 ]);
+
+/**
+ * ADR-170 §2: bus mudo para el "ctx" del simulacro de `previewEdit` — la
+ * copia descartable de la sesión corre exactamente el mismo código de
+ * mutación que el pedido real, pero con este bus en vez del real no emite
+ * nada observable. `on`/`once` devuelven un `Unsubscribe` no-op porque nada
+ * dentro del simulacro se suscribe, pero la forma tiene que ser válida.
+ */
+const NOOP_BUS: IEventBus = {
+  on: () => () => {},
+  once: () => () => {},
+  off: () => {},
+  emit: () => {},
+  emitAsync: () => Promise.resolve(),
+};
 
 const PATCH_ALLOWED_KEYS: ReadonlySet<string> = new Set([
   "type", // ADR-082 §1
@@ -368,7 +393,107 @@ interface Session {
   finished: boolean;
 }
 
-function toPublicGroup(group: InternalGroup): EntityGroup {
+/**
+ * ADR-172 §1: "copia estructural" — lo inmutable se comparte entre copias,
+ * lo mutable se copia. Un `OccurrenceRef`/`Conflict`/`Rule` nunca se muta en
+ * el lugar en este motor (siempre se reemplaza por una referencia nueva), así
+ * que compartirlos entre la sesión original y la copia es seguro. Lo que sí
+ * se muta en el lugar —los `Set`/`Map` de bookkeeping de un `InternalGroup`,
+ * el array `members`, y `SessionOccurrenceRecord.groupId`— necesita una
+ * instancia propia por copia.
+ */
+function cloneInternalGroup(group: InternalGroup): InternalGroup {
+  return {
+    ...group,
+    members: [...group.members],
+    aliases: [...group.aliases],
+    normalizedValues: new Set(group.normalizedValues),
+    aliasFrequency: new Map(group.aliasFrequency),
+    aliasFirstSeen: new Map(group.aliasFirstSeen),
+    absorbedTypes: new Set(group.absorbedTypes),
+  };
+}
+
+/**
+ * ADR-170 §2 / ADR-172 §1: la misma función de copia para el simulacro de
+ * `previewEdit` y para los puntos de restauración de `createCheckpoint`. Una
+ * copia por documento; no clona otras sesiones.
+ */
+function cloneSession(session: Session): Session {
+  const groups = new Map<string, InternalGroup>();
+  for (const [id, group] of session.groups) groups.set(id, cloneInternalGroup(group));
+  return {
+    documentId: session.documentId,
+    groups,
+    nextIndexByType: new Map(session.nextIndexByType),
+    rules: [...session.rules],
+    conflicts: new Map(session.conflicts),
+    // SessionOccurrenceRecord.groupId se muta en el lugar (fusión, división):
+    // cada registro necesita su propia copia, no solo el array contenedor.
+    recordedOccurrences: session.recordedOccurrences.map((rec) => ({ ...rec })),
+    typeCorrections: new Map(session.typeCorrections),
+    seed: session.seed,
+    startedAt: session.startedAt,
+    regexFinished: session.regexFinished,
+    nerFinished: session.nerFinished,
+    finished: session.finished,
+  };
+}
+
+/**
+ * ADR-170 §1: `replacementPreviews[modo]` para `placeholder`/`mask`/
+ * `synthetic` es EXACTAMENTE lo que `computeReplacementValue` produciría con
+ * ese modo sobre el grupo en su estado actual — se llama directo a las
+ * mismas funciones puras (`buildPlaceholderValue`, `synthesize`, el
+ * `maskFormat` ya resuelto) en vez de mutar una copia del grupo por modo.
+ * `redact` no tiene entrada (`Contracts.md` §5: su valor es siempre `""`).
+ * Ignora `replacementValueUserSet` a propósito: no es un parámetro de esta
+ * función, así que no hay forma de que lo mire.
+ */
+function computeReplacementPreviews(
+  group: PlaceholderValueInput & Pick<EntityGroup, "id">,
+  seed: string,
+  maskFormat: string,
+): ReplacementPreviews {
+  return {
+    placeholder: buildPlaceholderValue(group),
+    mask: maskFormat,
+    synthetic: synthesize({
+      type: group.type,
+      groupId: group.id,
+      seed,
+      indexInType: group.indexInType,
+      ...(group.personGender !== undefined ? { personGender: group.personGender } : {}),
+    }),
+    placeholderLadder: buildPlaceholderLadder(group),
+  };
+}
+
+/**
+ * ADR-170 §1: las claves de `EntityGroup` de las que depende
+ * `replacementPreviews` — todas independientes del `replacementMode`/
+ * `replacementValue` vigentes, que es justamente lo que las vistas previas
+ * muestran para los OTROS modos. `members` cubre también "la escalera",
+ * porque el nivel de abreviatura se elige por los bbox de los members.
+ */
+const PREVIEW_AFFECTING_KEYS: ReadonlySet<keyof EntityGroup> = new Set<keyof EntityGroup>([
+  "type",
+  "indexInType",
+  "personGender",
+  "members",
+]);
+
+/** Agrega `"replacementPreviews"` a `changed` si alguna clave presente lo afecta (ADR-170 §1). */
+function addReplacementPreviewsIfAffected(
+  changed: ReadonlyArray<keyof EntityGroup>,
+): ReadonlyArray<keyof EntityGroup> {
+  if (changed.includes("replacementPreviews")) return changed;
+  return changed.some((key) => PREVIEW_AFFECTING_KEYS.has(key))
+    ? [...changed, "replacementPreviews"]
+    : changed;
+}
+
+function toPublicGroup(group: InternalGroup, seed: string, maskFormat: string): EntityGroup {
   return {
     id: group.id,
     type: group.type,
@@ -389,8 +514,30 @@ function toPublicGroup(group: InternalGroup): EntityGroup {
     // `UX_Guidelines.md` §3.3 ni ofrecer "restaurar valor calculado".
     // `personGenderUserSet` sigue interno por la razón inversa (ADR-078 §2).
     replacementValueUserSet: group.replacementValueUserSet,
+    // ADR-170 §1: recalculado en el mismo punto que produce la copia pública
+    // — es lo que hace que "cada vez que el motor emite ENTITY_GROUP_CREATED
+    // o ENTITY_GROUP_UPDATED, el grupo sale con sus vistas previas al día".
+    replacementPreviews: computeReplacementPreviews(group, seed, maskFormat),
     createdAt: group.createdAt,
     updatedAt: group.updatedAt,
+  };
+}
+
+/**
+ * ADR-170 §2: proyección de `EntityGroup` a `EditPreviewGroup` para
+ * `previewEdit`. `asNew` marca la mitad nueva de un split (`groupId: null`
+ * — "el grupo que la operación crearía"); en `type`/`merge` y en la mitad
+ * ORIGINAL de un split, `groupId` es el `id` real del grupo existente.
+ */
+function toEditPreviewGroup(group: EntityGroup, asNew: boolean): EditPreviewGroup {
+  return {
+    groupId: asNew ? null : group.id,
+    type: group.type,
+    indexInType: group.indexInType,
+    canonicalValue: group.canonicalValue,
+    memberCount: group.members.length,
+    replacementMode: group.replacementMode,
+    replacementValue: group.replacementValue,
   };
 }
 
@@ -613,15 +760,26 @@ function topPriority(rules: ReadonlyArray<Rule>): Rule {
 
 /**
  * `group` es siempre un `InternalGroup` en runtime, estructuralmente
- * compatible con `EntityGroup` (tiene todos sus campos más bookkeeping
- * interno) — sin conversión explícita, `Code_Standards.md`. Se le pide el
- * grupo completo (no `type`/`mode`/`indexInType` sueltos) porque el modo
- * `placeholder` (ADR-057) necesita además `group.members` para elegir el
- * nivel de abreviatura por el peor caso de sus bbox; en todos los call
- * sites, `group.replacementMode`/`indexInType`/`members` ya reflejan el
+ * compatible con este `Pick<EntityGroup, ...>` (tiene todos estos campos más
+ * bookkeeping interno) — sin conversión explícita, `Code_Standards.md`. Se
+ * le pide el grupo completo (no `type`/`mode`/`indexInType` sueltos) porque
+ * el modo `placeholder` (ADR-057) necesita además `group.members` para
+ * elegir el nivel de abreviatura por el peor caso de sus bbox; en todos los
+ * call sites, `group.replacementMode`/`indexInType`/`members` ya reflejan el
  * valor final deseado en el momento de llamar.
+ *
+ * ADR-170 §1: el parámetro es un `Pick`, no `EntityGroup` completo —
+ * `EntityGroup` ganó el campo requerido `replacementPreviews`, que
+ * `InternalGroup` no tiene (solo `toPublicGroup()` lo produce, y esta misma
+ * función es una de las piezas que ese cómputo usa).
  */
-function computeReplacementValue(group: EntityGroup, seed: string, maskFormat: string): string {
+type ReplacementValueInput = PlaceholderValueInput & Pick<EntityGroup, "id" | "replacementMode">;
+
+function computeReplacementValue(
+  group: ReplacementValueInput,
+  seed: string,
+  maskFormat: string,
+): string {
   switch (group.replacementMode) {
     case ReplacementMode.Mask:
       return maskFormat;
@@ -830,7 +988,9 @@ export class GroupingEngine implements IEngine {
     }
     return {
       documentId,
-      groups: [...session.groups.values()].map(toPublicGroup),
+      groups: [...session.groups.values()].map((group) =>
+        toPublicGroup(group, session.seed, this.resolveMaskFormat(session, group)),
+      ),
       conflicts: [...session.conflicts.values()],
       rules: [...session.rules],
     };
@@ -1173,6 +1333,21 @@ export class GroupingEngine implements IEngine {
    */
   applyGroupUpdate(req: GroupUpdateRequested): Promise<EntityGroup> {
     try {
+      return Promise.resolve(this.doApplyGroupUpdate(req));
+    } catch (err: unknown) {
+      return Promise.reject(err instanceof Error ? err : new Error(String(err)));
+    }
+  }
+
+  /**
+   * ADR-170 §2: cuerpo síncrono de `applyGroupUpdate`, extraído para que
+   * `previewEdit` pueda reusarlo directo (sin pasar por una `Promise`, que
+   * no se puede desenvolver síncronamente aunque ya esté resuelta — los
+   * callbacks de `.then` siempre van a la cola de microtareas). Mismo patrón
+   * que `applyGroupSplit`/`doApplyGroupSplit`, que ya lo hacía.
+   */
+  private doApplyGroupUpdate(req: GroupUpdateRequested): EntityGroup {
+    {
       this.assertNotDisposed();
       this.assertInitialized();
       this.assertValidRequest(req);
@@ -1295,7 +1470,7 @@ export class GroupingEngine implements IEngine {
       }
 
       if (changed.size === 0) {
-        return Promise.resolve(toPublicGroup(group));
+        return toPublicGroup(group, session.seed, this.resolveMaskFormat(session, group));
       }
 
       group.updatedAt = Date.now();
@@ -1310,15 +1485,22 @@ export class GroupingEngine implements IEngine {
         });
       }
 
-      return Promise.resolve(toPublicGroup(group));
-    } catch (err: unknown) {
-      return Promise.reject(err instanceof Error ? err : new Error(String(err)));
+      return toPublicGroup(group, session.seed, this.resolveMaskFormat(session, group));
     }
   }
 
   // No `async`: ver nota en applyGroupUpdate.
   applyGroupMerge(req: GroupMergeRequested): Promise<EntityGroup> {
     try {
+      return Promise.resolve(this.doApplyGroupMerge(req));
+    } catch (err: unknown) {
+      return Promise.reject(err instanceof Error ? err : new Error(String(err)));
+    }
+  }
+
+  /** ADR-170 §2: ídem `doApplyGroupUpdate`, cuerpo síncrono para que `previewEdit` lo reuse. */
+  private doApplyGroupMerge(req: GroupMergeRequested): EntityGroup {
+    {
       this.assertNotDisposed();
       this.assertInitialized();
       this.assertValidRequest(req);
@@ -1403,9 +1585,7 @@ export class GroupingEngine implements IEngine {
         groupId: sourceGroupId,
       });
 
-      return Promise.resolve(toPublicGroup(target));
-    } catch (err: unknown) {
-      return Promise.reject(err instanceof Error ? err : new Error(String(err)));
+      return toPublicGroup(target, session.seed, this.resolveMaskFormat(session, target));
     }
   }
 
@@ -1484,13 +1664,10 @@ export class GroupingEngine implements IEngine {
     created.replacementMode = createdMode;
     // ADR-057: created.members ya es movedMembers (arriba) — la escalera ve
     // exactamente los members del grupo nuevo.
-    created.replacementValue = computeReplacementValue(
-      created,
-      session.seed,
-      // movedRecords, no session.recordedOccurrences: la reasignación de
-      // groupId a `created.id` recién pasa más abajo.
-      resolveMaskFormatFromRecords(movedRecords, created.type),
-    );
+    // movedRecords, no session.recordedOccurrences: la reasignación de
+    // groupId a `created.id` recién pasa más abajo.
+    const movedMaskFormat = resolveMaskFormatFromRecords(movedRecords, created.type);
+    created.replacementValue = computeReplacementValue(created, session.seed, movedMaskFormat);
     session.groups.set(created.id, created);
 
     // El grupo original preserva canonicalValue si fue fijado manualmente
@@ -1516,12 +1693,9 @@ export class GroupingEngine implements IEngine {
     // ADR-057 ve el grupo original ya reducido. ADR-076 §4 fila 8: `group`
     // es el mismo grupo de antes, con menos members — su valor manual, si
     // tiene uno, se respeta igual que el de `dropOccurrences` (fila 9).
+    const remainingMaskFormat = resolveMaskFormatFromRecords(remainingRecords, group.type);
     if (!group.replacementValueUserSet) {
-      group.replacementValue = computeReplacementValue(
-        group,
-        session.seed,
-        resolveMaskFormatFromRecords(remainingRecords, group.type),
-      );
+      group.replacementValue = computeReplacementValue(group, session.seed, remainingMaskFormat);
     }
     group.updatedAt = now;
 
@@ -1539,7 +1713,10 @@ export class GroupingEngine implements IEngine {
     this.emitGroupUpdated(session, group, changed);
     this.emitGroupCreated(session, created);
 
-    return { merged: toPublicGroup(group), created: toPublicGroup(created) };
+    return {
+      merged: toPublicGroup(group, session.seed, remainingMaskFormat),
+      created: toPublicGroup(created, session.seed, movedMaskFormat),
+    };
   }
 
   // No `async`: ver nota en applyGroupUpdate.
@@ -1678,6 +1855,104 @@ export class GroupingEngine implements IEngine {
       return Promise.resolve(resolved);
     } catch (err: unknown) {
       return Promise.reject(err instanceof Error ? err : new Error(String(err)));
+    }
+  }
+
+  /**
+   * ADR-170 §2: simulacro de una operación de edición sobre una copia
+   * descartable de la sesión, con el mismo código que el pedido real
+   * (`doApplyGroupUpdate`/`doApplyGroupMerge`/`doApplyGroupSplit`) — nunca
+   * muta la sesión real ni emite nada. Sincrónico, como `findText`
+   * (ADR-061 §8 errata). Documento sin sesión, o un pedido que el real
+   * rechazaría (`GroupingGroupNotFoundError`, etc.) -> `InvalidInputError`
+   * (Contracts.md §3.5): el simulacro normaliza cualquier rechazo del real a
+   * ese único código, para que el caller no tenga que discriminar el motivo.
+   */
+  previewEdit(documentId: string, request: EditPreviewRequest): EditPreview {
+    this.assertNotDisposed();
+    this.assertInitialized();
+    const groups = this.runInSandbox(documentId, () => {
+      switch (request.kind) {
+        case "type": {
+          const updated = this.doApplyGroupUpdate({
+            documentId,
+            groupId: request.groupId,
+            patch: { type: request.type },
+          });
+          return [toEditPreviewGroup(updated, false)];
+        }
+        case "merge": {
+          const [survivorId, ...restIds] = request.targetGroupIds;
+          if (survivorId === undefined) {
+            throw new InvalidInputError("previewEdit: merge sin targetGroupIds.", { documentId });
+          }
+          // ADR-170 §2: mismo orden que `mergePlan` en la UI — primero
+          // source -> targetGroupIds[0], después cada targetGroupIds[i] ->
+          // targetGroupIds[0]. El sobreviviente conserva el id de
+          // targetGroupIds[0] y el MENOR indexInType de todos, porque cada
+          // fusión sucesiva toma min(sobreviviente, entrante).
+          let survivor = this.doApplyGroupMerge({
+            documentId,
+            sourceGroupId: request.sourceGroupId,
+            targetGroupId: survivorId,
+          });
+          for (const nextSourceId of restIds) {
+            survivor = this.doApplyGroupMerge({
+              documentId,
+              sourceGroupId: nextSourceId,
+              targetGroupId: survivorId,
+            });
+          }
+          return [toEditPreviewGroup(survivor, false)];
+        }
+        case "split": {
+          const { merged, created } = this.doApplyGroupSplit({
+            documentId,
+            groupId: request.groupId,
+            occurrenceIds: request.occurrenceIds,
+          });
+          return [toEditPreviewGroup(merged, false), toEditPreviewGroup(created, true)];
+        }
+      }
+    });
+    return { groups };
+  }
+
+  /**
+   * ADR-170 §2 / ADR-172 §1: corre `fn` con `this.sessions`/`this.ctx`
+   * apuntando a una COPIA descartable de la sesión de `documentId` y a un
+   * `ctx` idéntico salvo por el bus, que se reemplaza por uno mudo
+   * (`NOOP_BUS`) — así `fn` puede invocar el mismo código que el pedido real
+   * (que emite incondicionalmente vía `this.ctx?.bus.emit`) sin que nada
+   * salga observable. Restaura los dos en un `finally`, incluso si `fn`
+   * lanza. Cualquier error que `fn` lance —el que sea— se normaliza a
+   * `InvalidInputError` (Contracts.md §3.5, ADR-170 §2): es un simulacro de
+   * solo lectura, así que el único contrato de error que promete es "esto no
+   * se puede".
+   */
+  private runInSandbox<T>(documentId: string, fn: () => T): T {
+    const realSession = this.sessions.get(documentId);
+    if (!realSession) {
+      throw new InvalidInputError("previewEdit: documento sin sesión de grouping.", {
+        documentId,
+      });
+    }
+    const realCtx = this.ctx;
+    if (!realCtx) {
+      throw new EngineNotInitializedError(EngineId.Grouping);
+    }
+    this.sessions.set(documentId, cloneSession(realSession));
+    this.ctx = { ...realCtx, bus: NOOP_BUS };
+    try {
+      return fn();
+    } catch (err: unknown) {
+      if (err instanceof InvalidInputError) throw err;
+      throw new InvalidInputError(err instanceof Error ? err.message : String(err), {
+        documentId,
+      });
+    } finally {
+      this.sessions.set(documentId, realSession);
+      this.ctx = realCtx;
     }
   }
 
@@ -2458,7 +2733,7 @@ export class GroupingEngine implements IEngine {
   private emitGroupCreated(session: Session, group: InternalGroup): void {
     this.ctx?.bus.emit(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_CREATED, {
       documentId: session.documentId,
-      group: toPublicGroup(group),
+      group: toPublicGroup(group, session.seed, this.resolveMaskFormat(session, group)),
     });
   }
 
@@ -2470,8 +2745,13 @@ export class GroupingEngine implements IEngine {
     if (changes.length === 0) return;
     this.ctx?.bus.emit(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_UPDATED, {
       documentId: session.documentId,
-      group: toPublicGroup(group),
-      changes,
+      group: toPublicGroup(group, session.seed, this.resolveMaskFormat(session, group)),
+      // ADR-170 §1: "replacementPreviews" entra a `changes` cuando cambió
+      // algo de lo que depende — índice, tipo, género o members (que incluye
+      // la escalera: el nivel se elige por los bbox de los members). El modo/
+      // valor vigentes NO lo afectan: las tres vistas previas son
+      // independientes del `replacementMode` actual del grupo.
+      changes: addReplacementPreviewsIfAffected(changes),
     });
   }
 

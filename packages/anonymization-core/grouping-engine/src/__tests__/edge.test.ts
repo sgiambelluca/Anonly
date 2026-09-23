@@ -3408,4 +3408,70 @@ describe("GroupingEngine — edge cases", () => {
       }),
     );
   });
+
+  // Caso 46 (§13, ADR-170 §1).
+  it("changing personGender updates placeholder and synthetic previews even in mask mode", async () => {
+    // "P. Gómez": iniciales nunca se consultan (ADR-069 §3), así que
+    // personGender arranca sin determinar y no por accidente de la
+    // inferencia automática — el cambio de abajo es el único origen posible.
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: "P. Gómez",
+        normalizedValue: "p. gomez",
+      }),
+    });
+    const [group] = engine.getSnapshot("doc-1").groups;
+    expect(group?.personGender).toBeUndefined();
+
+    const masked = await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group!.id,
+      patch: { replacementMode: ReplacementMode.Mask },
+    });
+    expect(masked.replacementMode).toBe(ReplacementMode.Mask);
+    const beforePreviews = masked.replacementPreviews;
+
+    const gendered = await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group!.id,
+      patch: { personGender: "f" },
+    });
+
+    // El modo vigente (mask) y su replacementValue NO se tocan — solo las
+    // vistas previas de los otros modos.
+    expect(gendered.replacementMode).toBe(ReplacementMode.Mask);
+    expect(gendered.replacementValue).toBe(masked.replacementValue);
+    expect(gendered.replacementPreviews.placeholder).not.toBe(beforePreviews.placeholder);
+    expect(gendered.replacementPreviews.placeholder).toContain("MUJER");
+    expect(gendered.replacementPreviews.synthetic).not.toBe(beforePreviews.synthetic);
+  });
+
+  // Caso 47 (§13, ADR-170 §2).
+  it("previewEdit rejects what the real request rejects", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "11111111", normalizedValue: "11111111" }),
+    });
+
+    // Grupo inexistente: el pedido real (applyGroupUpdate) lanza
+    // GroupingGroupNotFoundError; previewEdit lo normaliza a InvalidInputError.
+    expect(() =>
+      engine.previewEdit("doc-1", { kind: "type", groupId: "no-existe", type: EntityType.DNI }),
+    ).toThrow(InvalidInputError);
+
+    // Documento sin sesión de grouping.
+    expect(() =>
+      engine.previewEdit("doc-sin-sesion", {
+        kind: "type",
+        groupId: "no-existe",
+        type: EntityType.DNI,
+      }),
+    ).toThrow(InvalidInputError);
+
+    // El intento fallido no dejó rastro en la sesión real.
+    const { groups } = engine.getSnapshot("doc-1");
+    expect(groups).toHaveLength(1);
+  });
 });

@@ -825,4 +825,53 @@ describe("GroupingEngine — contract tests", () => {
     expect(restored.replacementValueUserSet).toBe(false);
     expect(restored.replacementValue).toBe(computed);
   });
+
+  // Caso 46 (§13, ADR-170 §1) — invariante.
+  it("every emitted group carries replacementPreviews consistent with replacementValue", async () => {
+    await engine.init(ctx);
+    engine.startSession("doc-1");
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "11111111", normalizedValue: "11111111" }),
+    });
+
+    const createdCalls = busEmitSpy.mock.calls.filter(
+      ([channel, event]) =>
+        channel === EventChannel.Grouping && event === EngineEvents.ENTITY_GROUP_CREATED,
+    );
+    expect(createdCalls).toHaveLength(1);
+    const { group } = createdCalls[0]?.[2] as EntityGroupCreated;
+    // replacementValueUserSet===false y modo vigente placeholder: la
+    // invariante de `03_Data_Model.md` §9 exige que coincidan exactamente.
+    expect(group.replacementValueUserSet).toBe(false);
+    expect(group.replacementMode).toBe(ReplacementMode.Placeholder);
+    expect(group.replacementPreviews.placeholder).toBe(group.replacementValue);
+  });
+
+  // Caso 47 (§13, ADR-170 §2).
+  it("previewEdit does not mutate the session nor emit", async () => {
+    await engine.init(ctx);
+    engine.startSession("doc-1");
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "11111111", normalizedValue: "11111111" }),
+    });
+    const [group] = engine.getSnapshot("doc-1").groups;
+    const before = engine.getSnapshot("doc-1");
+
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+    const preview = engine.previewEdit("doc-1", {
+      kind: "type",
+      groupId: group!.id,
+      type: EntityType.CUIT,
+    });
+    expect(preview.groups).toHaveLength(1);
+    expect(preview.groups[0]?.type).toBe(EntityType.CUIT);
+
+    expect(busEmitSpy).not.toHaveBeenCalled();
+    const after = engine.getSnapshot("doc-1");
+    expect(after).toEqual(before);
+  });
 });
