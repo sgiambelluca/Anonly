@@ -135,6 +135,15 @@ Anonly **nunca** redacta in-place sobre el PDF original (ADR-004). Redactar in-p
 
 ---
 
+### 4.5 Una entidad eliminada queda a la vista (ADR-171)
+
+Eliminar una entidad (menú ⋯ → "Eliminar entidad") tiene en el PDF exportado el **mismo efecto que
+deshabilitarla**: su texto queda sin anonimizar. La diferencia es que ya no aparece en la lista para
+recordarlo, y que su valor queda suprimido por sesión para que un re-análisis no lo vuelva a detectar.
+Por eso la confirmación lo dice con esas palabras, la acción se puede deshacer (ADR-172) y el
+pre-flight del export no cambia. No es una fuga: es la decisión explícita del usuario de que ese texto
+no es un dato personal.
+
 ## 5. Metadatos sensibles
 
 ### 5.1 Strip en el PDF Engine

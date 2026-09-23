@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=grouping-engine | dependencias=core/Contracts.md,architecture/03_Data_Model.md,architecture/04_Event_System.md,ADR-011-Grouping-First.md,ADR-012-Replacement-Modes.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-073-Difuso-Solo-Para-Tipos-De-Texto-Libre.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-076-La-Edicion-Manual-Del-Valor-De-Reemplazo-Gana.md | audiencia=IA-implementador | fase=3 (fase 10.9: §2/§13 caso 40/§14/§15 15m y el pseudocódigo de Matching por ADR-073 —el pase difuso solo para Person/Organization/Address—; §13 casos 41-42/§14/§15 15n y la línea "la edición manual gana siempre" de la escalera por ADR-076 —`replacementValueUserSet` y la precedencia completa del campo en los once puntos de recálculo—; §13 caso 43/§14/§15 15o y la fórmula de selección de nivel por ADR-074 §7 —`OccurrenceRef.fragments` y la escalera midiendo por fragmento—; §13 caso 36 en fase 10.7: ocurrencia manual, ADR-061; §2/§6/§7/§13 actualizados en fase 10: reopenSession/dropOccurrences/dedup por identidad/finishSession re-ejecutable, ADR-038 §2-§4; fase 10.5: escalera de abreviaturas del placeholder + resolveLabelSet por grupo, ADR-057; fase 10.6: §"replacementValue por modo"/§13 casos 38-39/§14/§15 15i-15k por ADR-072 —la semilla del sintetizador pasa de indexInType a EntityGroup.id— y ADR-071 —el modo synthetic respeta personGender, y dos guardas de recálculo se abren a placeholder|synthetic—; personGender e inferencia por léxico, ADR-060, y §8/§13 caso 32/34/37 + §14/§15 por fuente única, canal del usuario y disparo de la inferencia, ADR-069),adr/ADR-094-Lo-Que-El-Detector-Duda-No-Se-Tira-En-Silencio.md,adr/ADR-116-Un-Valor-Que-El-Documento-Ya-Confirmo-No-Se-Descarta.md,adr/ADR-117-Una-Ocurrencia-Contenida-No-Aporta-Tinta.md -->
+<!-- CONTEXT: scope=grouping-engine | dependencias=core/Contracts.md,architecture/03_Data_Model.md,architecture/04_Event_System.md,ADR-011-Grouping-First.md,ADR-012-Replacement-Modes.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-073-Difuso-Solo-Para-Tipos-De-Texto-Libre.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-076-La-Edicion-Manual-Del-Valor-De-Reemplazo-Gana.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md | audiencia=IA-implementador | fase=3 (fase 10.9: §2/§13 caso 40/§14/§15 15m y el pseudocódigo de Matching por ADR-073 —el pase difuso solo para Person/Organization/Address—; §13 casos 41-42/§14/§15 15n y la línea "la edición manual gana siempre" de la escalera por ADR-076 —`replacementValueUserSet` y la precedencia completa del campo en los once puntos de recálculo—; §13 caso 43/§14/§15 15o y la fórmula de selección de nivel por ADR-074 §7 —`OccurrenceRef.fragments` y la escalera midiendo por fragmento—; §13 caso 36 en fase 10.7: ocurrencia manual, ADR-061; §2/§6/§7/§13 actualizados en fase 10: reopenSession/dropOccurrences/dedup por identidad/finishSession re-ejecutable, ADR-038 §2-§4; fase 10.5: escalera de abreviaturas del placeholder + resolveLabelSet por grupo, ADR-057; fase 10.6: §"replacementValue por modo"/§13 casos 38-39/§14/§15 15i-15k por ADR-072 —la semilla del sintetizador pasa de indexInType a EntityGroup.id— y ADR-071 —el modo synthetic respeta personGender, y dos guardas de recálculo se abren a placeholder|synthetic—; personGender e inferencia por léxico, ADR-060, y §8/§13 caso 32/34/37 + §14/§15 por fuente única, canal del usuario y disparo de la inferencia, ADR-069),adr/ADR-094-Lo-Que-El-Detector-Duda-No-Se-Tira-En-Silencio.md,adr/ADR-116-Un-Valor-Que-El-Documento-Ya-Confirmo-No-Se-Descarta.md,adr/ADR-117-Una-Ocurrencia-Contenida-No-Aporta-Tinta.md (fase 12.5: §6 `applyGroupRemove`/`liftRemoval`, §7/§8, Matching (paso 0: supresión), §13 casos 48-50, §14 y 15s —ADR-171: el usuario elimina una entidad, y su valor queda suprimido por sesión como `typeCorrections`—) -->
 
 # Grouping Engine — Spec de Motor
 
@@ -154,6 +154,13 @@ export class GroupingEngine implements IEngine {
   applyGroupUpdate(req: GroupUpdateRequested): Promise<EntityGroup>;
   applyGroupMerge(req: GroupMergeRequested): Promise<EntityGroup>;
   applyGroupSplit(req: GroupSplitRequested): Promise<{ merged: EntityGroup; created: EntityGroup }>;
+  // ADR-171 §2: quita el grupo (ENTITY_GROUP_REMOVED), descarta sus conflictos
+  // (CONFLICT_RESOLVED) y agrega cada alias normalizado a Session.removedValues.
+  // Grupo inexistente -> warn + no-op.
+  applyGroupRemove(req: GroupRemoveRequested): Promise<void>;
+  // ADR-171 §4: quita un valor de removedValues. Solo lo llama el Orchestrator en
+  // addManualEntity (agregado manual NUEVO). Sesión inexistente -> warn + no-op.
+  liftRemoval(documentId: string, value: string): void;
   applyRuleCreated(req: RuleCreated): Promise<void>;
   applyRuleUpdated(req: RuleUpdated): Promise<void>;
   applyRuleDeleted(req: RuleDeleted): Promise<void>;
@@ -175,7 +182,7 @@ export class GroupingEngine implements IEngine {
 |---|---|---|---|---|
 | `ENTITY_GROUP_CREATED` | al crear un grupo nuevo | `EntityGroupCreated` | async | no |
 | `ENTITY_GROUP_UPDATED` | al mutar un grupo por patch, fusión o regla | `EntityGroupUpdated` | async | sí |
-| `ENTITY_GROUP_REMOVED` | al eliminar un grupo (fusión, cierre, o `dropOccurrences` que deja un grupo sin members) | `EntityGroupRemoved` | async | sí |
+| `ENTITY_GROUP_REMOVED` | al eliminar un grupo (fusión, cierre, `dropOccurrences` que deja un grupo sin members, o **pedido del usuario** por `GROUP_REMOVE_REQUESTED`, ADR-171) | `EntityGroupRemoved` | async | sí |
 | `GROUP_REPLACEMENT_CHANGED` | cuando `replacementMode` o `replacementValue` cambian | `GroupReplacementChanged` | async | sí |
 | `GROUP_TOGGLED` | cuando `enabled` cambia | `GroupToggled` | async | sí |
 | `CONFLICT_DETECTED` | al detectar un conflicto | `ConflictDetected` | async | sí |
@@ -196,6 +203,7 @@ Canal: `EventChannel.Grouping`.
 | `GROUP_UPDATE_REQUESTED` (canal `ui`) | usuario edita grupo | `applyGroupUpdate`. Con `patch.personGender` (ADR-069 §4): `"f"`/`"m"` escriben el campo, `"neutral"` lo borra, y en los tres casos se marca la elección como del humano para que ninguna inferencia posterior la pise (§13 caso 34). Sobre un grupo de `type` distinto de `Person`, se ignora con `warn` |
 | `GROUP_MERGE_REQUESTED` (canal `ui`) | usuario fusiona | `applyGroupMerge` |
 | `GROUP_SPLIT_REQUESTED` (canal `ui`) | usuario divide | `applyGroupSplit` |
+| `GROUP_REMOVE_REQUESTED` (canal `ui`) | usuario elimina la entidad (ADR-171) | `applyGroupRemove` |
 | `RULE_CREATED` (canal `ui`) | usuario crea regla | `applyRuleCreated` + recompute modos |
 | `RULE_UPDATED` (canal `ui`) | usuario edita regla | `applyRuleUpdated` + recompute |
 | `RULE_DELETED` (canal `ui`) | usuario borra regla | `applyRuleDeleted` + recompute |
@@ -331,6 +339,9 @@ Grouping es determinista dadas las ocurrencias y reglas; sin errores de runtime 
 45. **Resolver un conflicto elige el tipo, no el modo (ADR-083)**: `applyConflictResolve` aplica el `entityType` elegido por la **misma vía** que el caso 44 y marca el conflicto `resolved` con `resolvedType`. Sin `entityType` en la request, gana el candidato de mayor `confidence` (empate a `regex`) — que con el `confidence: 1.0` que emite `regex-engine` coincide con la resolución automática que el motor ya tomó al crear el conflicto, o sea que **confirmar es un no-op sobre los datos**. Si el tipo elegido es el vigente, no se emite `ENTITY_GROUP_UPDATED`. `applyConflictResolve` **dejó de tocar el `replacementMode`**, así que salió de la lista de disparadores del caso 41.
 46. **Las vistas previas acompañan al grupo (ADR-170 §1)**: todo `EntityGroup` emitido lleva `replacementPreviews` al día. Con `replacementValueUserSet === false`, `replacementPreviews[replacementMode] === replacementValue` para `placeholder`, `mask` y `synthetic`. Con el valor escrito a mano, las vistas previas siguen mostrando lo calculado — es lo que quedaría al cambiar de modo. Cambiar el género de una `Person` mueve `placeholder` y `synthetic` aunque el modo vigente sea `mask`.
 47. **`previewEdit` no cambia nada (ADR-170 §2)**: el snapshot antes y después de cualquier `previewEdit` es idéntico y no se emite ningún evento. Su resultado coincide con el grupo que emite el pedido real inmediatamente después: `type` → `indexInType = nextIndex` del tipo destino y el token con el label nuevo; `merge` → menor `indexInType`, `canonicalValue` por frecuencia, members sumados; `split` → original + nuevo (`groupId: null`, `nextIndex`, modo heredado). Pedidos inválidos lanzan `InvalidInputError` igual que el real.
+48. **Eliminar una entidad (ADR-171 §2)**: `applyGroupRemove` quita el grupo y emite `ENTITY_GROUP_REMOVED`; los conflictos de ese grupo se descartan con `CONFLICT_RESOLVED` (como en el caso 25); su `indexInType` queda como hueco (caso 15) hasta la próxima renumeración de `finishSession`; cada alias normalizado entra a `Session.removedValues`; los registros de ocurrencias se conservan para el dedup. Grupo inexistente → `warn` + no-op. Pedirlo dos veces es idempotente.
+49. **Un valor eliminado no vuelve (ADR-171 §3)**: tras `reopenSession` + re-detección, una ocurrencia de **cualquier** fuente cuyo `normalizedValue` está en `removedValues` se descarta sin crear ni engordar grupos. Tampoco por la re-aplicación de literales manuales del Orchestrator (ADR-061 §5). `removedValues` sobrevive a `reopenSession`, muere en `closeSession` y **no** sale en el snapshot. La fusión y `dropOccurrences` emiten `ENTITY_GROUP_REMOVED` **sin** registrar supresión.
+50. **Un agregado manual nuevo revierte la eliminación (ADR-171 §4)**: `liftRemoval(documentId, value)` quita el valor normalizado de `removedValues`; la ocurrencia manual que sigue se agrupa normal. Sesión inexistente → `warn` + no-op.
 
 ---
 
@@ -338,6 +349,13 @@ Grouping es determinista dadas las ocurrencias y reglas; sin errores de runtime 
 
 | Test | Archivo | Tipo | Descripción |
 |---|---|---|---|
+| `applyGroupRemove removes the group, resolves its conflicts and emits ENTITY_GROUP_REMOVED` | `contract.test.ts` | contract | caso 48 (ADR-171 §2) |
+| `removed group leaves an indexInType hole until the next finishSession` | `edge.test.ts` | edge | caso 48 + caso 15 |
+| `applyGroupRemove on an unknown group warns and is a no-op` | `edge.test.ts` | edge | caso 48 |
+| **`a removed value is not regrouped after reopenSession + re-detection, from any source`** | `edge.test.ts` | edge | caso 49 — **el test de que eliminar dura**: sin él, un re-análisis devuelve la entidad sola |
+| `merge and dropOccurrences do not register suppression` | `unit.test.ts` | unit | caso 49 |
+| `removedValues is not in the snapshot and dies on closeSession` | `unit.test.ts` | unit | caso 49 (mismo criterio que ADR-085 §8) |
+| `liftRemoval lets the next manual occurrence of that value group normally` | `unit.test.ts` | unit | caso 50 (ADR-171 §4) |
 | `every emitted group carries replacementPreviews consistent with replacementValue` | `contract.test.ts` | contract | caso 46 (ADR-170 §1) — invariante |
 | `replacementPreviews ignore replacementValueUserSet` | `unit.test.ts` | unit | caso 46 |
 | `placeholderLadder lists distinct ladder tokens, longest first, including placeholder` | `unit.test.ts` | unit | caso 46 (ADR-057) |
@@ -501,6 +519,7 @@ Fixtures: `tests/fixtures/text-10p.pdf` con entidades conocidas que generan grup
 - [x] 15p. (Hito 10.10 — ADR-082 §1-§5) `patch.type` en `GroupUpdateRequested`; `changeGroupType` con sus cinco recálculos **en el orden correcto** (índice → modo efectivo → **género** → valor), devolviendo los campos cambiados para que el caller los ponga en `ENTITY_GROUP_UPDATED.changes` — `personGender` incluido, que es el que se escapaba. Los `recordedOccurrences` **NO** siguen al grupo (§3): conservan el tipo del detector, o cada `reanalyze` produce un conflicto espurio del grupo consigo mismo. `applyConflictResolve` (ADR-083 §2) delega en el mismo método en vez de abrir un segundo camino. Casos nuevos en §13, siete filas en §14.
 - [x] 15q. (Hito 10.10 — ADR-085 §1-§7) `InternalGroup.absorbedTypes` (consultado en el filtro de candidatos de `findMatchingGroup`, por ocurrencia) + `Session.typeCorrections` (consultado **solo** en `createGroup`, o sea una vez por grupo creado). `createGroup` siembra `absorbedTypes` con los dos tipos, así el mapa no se vuelve a tocar para ese valor. El guard difuso es **simétrico**: mira `occurrence.entityType` **y** el `detectorType` guardado en la corrección — una corrección sobre un valor estructurado no se hereda por parecido a un nombre. Ninguna de las dos piezas se expone. **Dónde NO se consulta** (§6, la parte que se puede hacer mal): ni en `isDuplicateIdentity`, ni en `findOverlapConflict`, ni en `recordOccurrence`. Cinco filas en §14.
 - [ ] 15r. (Hito 12.5 — ADR-170) `replacementPreviews` calculado con `computeReplacementValue` por modo, ignorando `replacementValueUserSet`, antes de toda emisión de `ENTITY_GROUP_CREATED`/`ENTITY_GROUP_UPDATED` (con `"replacementPreviews"` en `changes` cuando cambió). `previewEdit` como simulacro sobre una copia de la sesión con la emisión desactivada, reusando `applyGroupUpdate`/`applyGroupMerge`/`applyGroupSplit`. Casos 46-47, siete filas en §14.
+- [ ] 15s. (Hito 12.5 — ADR-171) `applyGroupRemove` (escucha `GROUP_REMOVE_REQUESTED` en el canal `ui`), `Session.removedValues` interno y fuera del snapshot, paso 0 de Matching para toda fuente, `liftRemoval` público para el Orchestrator. Casos 48-50, siete filas en §14.
 - [ ] 16. Escribir `contract.test.ts` con todos los tests contractuales.
 - [ ] 17. Escribir `unit.test.ts` con cobertura ≥ 85%.
 - [ ] 18. Escribir `edge.test.ts` con todos los casos límite.
@@ -517,6 +536,12 @@ Fixtures: `tests/fixtures/text-10p.pdf` con entidades conocidas que generan grup
 
 ```text
 para cada Occurrence entrante:
+  // 0. supresión (ADR-171 §3) — después del dedup por identidad, antes del
+  //    matching, para TODA fuente (incluida Manual): un valor que el usuario
+  //    eliminó se registra (para el dedup) y se descarta sin agrupar.
+  //    Clave exacta normalizada, sin tipo y sin pase difuso.
+  if occurrence.normalizedValue in session.removedValues:
+    registrar identidad, return
   // candidatos = grupos del mismo entityType, MÁS los que absorbieron ese
   // tipo por una reclasificación del usuario (ADR-085 §1a)
   candidatos = grupos g donde g.type == occurrence.entityType

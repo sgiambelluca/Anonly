@@ -182,6 +182,17 @@ export const actions = {
     getCore().bus.emit(EventChannel.UI, EngineEvents.GROUP_SPLIT_REQUESTED, { documentId, groupId, occurrenceIds });
   },
 
+  // ADR-171 §5: si la fila tenía una Rule de scope group, se borra primero
+  // (RULE_DELETED): una regla huérfana contaría en la franja "Todo el documento".
+  // Los dos pasos entran en un mismo punto de deshacer (ADR-172).
+  removeGroup(groupId: string): void {
+    const documentId = stores.document.getState().id;
+    if (!documentId) return;
+    const groupRule = stores.rules.getState().rules.find((r) => r.scope === "group" && r.target.groupId === groupId);
+    if (groupRule) getCore().bus.emit(EventChannel.UI, EngineEvents.RULE_DELETED, { documentId, ruleId: groupRule.id });
+    getCore().bus.emit(EventChannel.UI, EngineEvents.GROUP_REMOVE_REQUESTED, { documentId, groupId });
+  },
+
   createRule(rule: Rule): void {
     const documentId = stores.document.getState().id;
     if (!documentId) return;
