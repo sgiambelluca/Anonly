@@ -8,10 +8,15 @@
  * cuyo `groupId` coincida con el grupo) y le pasa el `conflictId`.
  */
 
-import { AlertTriangleIcon } from "lucide-react";
 import { useState } from "react";
 
 import { Tooltip } from "../common/Tooltip.js";
+import { WARNING_TOOLTIP } from "../entities/needsReviewBadgeCopy.js";
+import {
+  CONFLICT_BADGE_CLASS,
+  ConflictSymbol,
+  WarningTooltipText,
+} from "../entities/warningSymbols.js";
 
 import { ConflictDialog } from "./ConflictDialog.js";
 
@@ -24,14 +29,18 @@ export function ConflictBadge({ conflictId }: ConflictBadgeProps) {
 
   return (
     <>
-      <Tooltip content="Conflicto">
+      {/*
+        ADR-169 §3: una Y que se abre en dos, en rojo, sobre el token de error
+        con opacidad — ya no `hover:bg-red-50`, que en oscuro era un fondo claro.
+      */}
+      <Tooltip content={<WarningTooltipText {...WARNING_TOOLTIP.conflict} />}>
         <button
           type="button"
           aria-label="Conflicto sin resolver"
           onClick={() => setOpen(true)}
-          className="rounded-md p-0.5 text-error hover:bg-red-50"
+          className={CONFLICT_BADGE_CLASS}
         >
-          <AlertTriangleIcon className="h-4 w-4" aria-hidden />
+          <ConflictSymbol />
         </button>
       </Tooltip>
       <ConflictDialog conflictId={conflictId} open={open} onClose={() => setOpen(false)} />

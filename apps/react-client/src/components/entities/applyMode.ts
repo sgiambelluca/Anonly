@@ -78,9 +78,9 @@ export function applyModeAtLevel(input: ApplyModeInput): void {
     actions.updateRule(plan.updateRuleId, { mode: input.mode, updatedAt: Date.now() });
   }
 
-  showToast(input.toastText, {
-    label: "Deshacer",
-    run: () => undoApply(plan, createdRuleId),
+  showToast({
+    title: input.toastText,
+    actions: [{ label: "Deshacer", run: () => undoApply(plan, createdRuleId) }],
   });
 }
 

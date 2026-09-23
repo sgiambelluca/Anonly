@@ -31,3 +31,24 @@ export const ENTITY_TYPE_COLOR: Readonly<Record<EntityType, string>> = {
   [EntityType.Plate]: "#a855f7",
   [EntityType.Custom]: "#64748b",
 };
+
+/** `"#10b981"` → `"16 185 129"`: canales para componer `rgb(… / alpha)`. */
+export function hexToRgbChannels(hex: string): string {
+  const value = hex.replace("#", "");
+  const r = Number.parseInt(value.slice(0, 2), 16);
+  const g = Number.parseInt(value.slice(2, 4), 16);
+  const b = Number.parseInt(value.slice(4, 6), 16);
+  return `${r} ${g} ${b}`;
+}
+
+/**
+ * ADR-169 §2: el fondo de la franja de tipo — el gris de `bg-tertiary` con
+ * apenas el color del tipo encima. La opacidad la pone el tema
+ * (`--anonly-band-tint`, `index.css`: 6 % en claro, 7 % en oscuro), así que
+ * esto no necesita saber qué tema está activo.
+ */
+export function typeBandTint(type: EntityType): string {
+  const channels = hexToRgbChannels(ENTITY_TYPE_COLOR[type]);
+  const tint = `rgb(${channels} / var(--anonly-band-tint))`;
+  return `linear-gradient(${tint}, ${tint})`;
+}

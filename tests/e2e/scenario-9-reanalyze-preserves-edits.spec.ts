@@ -90,7 +90,7 @@ test("un reanalyze preserva las ediciones previas del usuario", async ({ page })
   await mergeDialog.getByRole("button", { name: "Fusionar" }).click();
   await expect(mergeDialog).toHaveCount(0);
   await expect(dni3).toHaveCount(0);
-  await expect(dni2).toContainText("(2)");
+  await expect(dni2).toHaveAccessibleName(/, 2 ocurrencias?,/);
 
   // Edición 3: decisión "por tipo" sobre DNI — debe seguir aplicando tras el
   // reanalyze.
@@ -150,7 +150,7 @@ test("un reanalyze preserva las ediciones previas del usuario", async ({ page })
   await expect(dni1.getByRole("button", { name: /^Modo de reemplazo de / })).toHaveAccessibleName(
     /Ocultar parcialmente/,
   );
-  await expect(dni2).toContainText("(2)");
+  await expect(dni2).toHaveAccessibleName(/, 2 ocurrencias?,/);
   await expect(dni2.getByRole("button", { name: /^Modo de reemplazo de / })).toHaveAccessibleName(
     /Ocultar parcialmente/,
   );

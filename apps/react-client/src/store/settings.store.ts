@@ -75,8 +75,44 @@ export interface SettingsSlice {
    */
   readonly autoUpdate: boolean;
   readonly theme: Theme;
+  /**
+   * ADR-169 §7: avisos de descubrimiento que el usuario cerró
+   * (`"selection-hint"` = la tarjeta sobre el visor; `"panel-footer-hint"` =
+   * la nota al pie del panel). **Persistido**: cerrado una vez, no vuelve.
+   */
+  readonly dismissedHints: ReadonlyArray<DismissibleHint>;
   persist(): void;
   load(): void;
+}
+
+export type DismissibleHint = "selection-hint" | "panel-footer-hint";
+
+const DISMISSIBLE_HINTS: ReadonlySet<string> = new Set<DismissibleHint>([
+  "selection-hint",
+  "panel-footer-hint",
+]);
+
+function isDismissibleHint(value: unknown): value is DismissibleHint {
+  return typeof value === "string" && DISMISSIBLE_HINTS.has(value);
+}
+
+/**
+ * La lista con `hint` agregado, sin repetidos. Una clave desconocida que haya
+ * quedado en `localStorage` se descarta al leer (`load`), así que la lista
+ * solo contiene avisos que existen.
+ */
+export function withDismissedHint(
+  hints: ReadonlyArray<DismissibleHint>,
+  hint: DismissibleHint,
+): ReadonlyArray<DismissibleHint> {
+  return hints.includes(hint) ? hints : [...hints, hint];
+}
+
+/** Cierra un aviso de descubrimiento y lo persiste (ADR-169 §7). */
+export function dismissHint(hint: DismissibleHint): void {
+  const state = useSettingsStore.getState();
+  useSettingsStore.setState({ dismissedHints: withDismissedHint(state.dismissedHints, hint) });
+  useSettingsStore.getState().persist();
 }
 
 const STORAGE_KEY = "anonly:settings";
@@ -90,6 +126,7 @@ type SettingsData = Pick<
   | "ocrLanguages"
   | "autoUpdate"
   | "theme"
+  | "dismissedHints"
 >;
 
 const DEFAULT_SETTINGS: SettingsData = {
@@ -100,6 +137,7 @@ const DEFAULT_SETTINGS: SettingsData = {
   ocrLanguages: ["spa", "eng"],
   autoUpdate: false,
   theme: "system",
+  dismissedHints: [],
 };
 
 type PersistedSettings = Partial<SettingsData>;
@@ -119,6 +157,7 @@ export const useSettingsStore = create<SettingsSlice>((set, get) => ({
       ocrLanguages: state.ocrLanguages,
       autoUpdate: state.autoUpdate,
       theme: state.theme,
+      dismissedHints: state.dismissedHints,
     };
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(toStore));
@@ -159,6 +198,11 @@ export const useSettingsStore = create<SettingsSlice>((set, get) => ({
       ...(parsed.ocrLanguages !== undefined ? { ocrLanguages: parsed.ocrLanguages } : {}),
       ...(parsed.autoUpdate !== undefined ? { autoUpdate: parsed.autoUpdate } : {}),
       ...(parsed.theme !== undefined ? { theme: parsed.theme } : {}),
+      // Se filtra contra los avisos que existen: una clave vieja o corrupta no
+      // puede esconder un aviso nuevo.
+      ...(Array.isArray(parsed.dismissedHints)
+        ? { dismissedHints: parsed.dismissedHints.filter(isDismissibleHint) }
+        : {}),
     });
   },
 }));

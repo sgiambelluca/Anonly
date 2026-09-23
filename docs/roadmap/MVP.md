@@ -653,7 +653,7 @@ entidad con supresión por sesión), ADR-172 (deshacer y rehacer exactos por pun
 | 4 | `createCheckpoint`/`restoreCheckpoint`/`discardCheckpoints` (15t) | `grouping-engine` | 2, 3 | pendiente |
 | 5 | Façade: `previewEdit` (28), `liftRemoval` en `addManualEntity` (29), puntos de restauración con literales retenidos (30) | `anonymization-core/src` | 2-4 | pendiente |
 | 6 | ADR-168: `LoadScreen` en cajas, `DropZone` de cuatro estados, `HowItWorks`, `AboutDialog`, fallo de importación a ①, `ScanSteps` | `apps/react-client` | — | hecho |
-| 7 | ADR-169: lista, avisos, `Tooltip`, franja, género con borde, visor (pellizco, separador), lupa, selección persistente, `EntityTypePicker`, `AddEntityDialog`, Configuración, tokens | `apps/react-client` | — | pendiente |
+| 7 | ADR-169: lista, avisos, `Tooltip`, franja, género con borde, visor (pellizco, separador), lupa, selección persistente, `EntityTypePicker`, `AddEntityDialog`, Configuración, tokens | `apps/react-client` | — | hecho |
 | 8 | ADR-170: selector de modo exacto y diálogos Fusionar/Dividir/Editar reemplazo/Cambiar tipo con `previewEdit` | `apps/react-client` | 5, 7 | pendiente |
 | 9 | ADR-171/172: "Eliminar entidad", `history.store`, atajos, toasts con "Deshacer" | `apps/react-client` | 5, 7 | pendiente |
 

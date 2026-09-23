@@ -1,27 +1,26 @@
 /**
  * `ToastHost` (`ui/Components.md` §8.6) — el único consumidor de `toast.ts`.
  *
- * Se monta una sola vez, en `App`. Muestra el último toast emitido durante
- * `TOAST_DURATION_MS` (5 s, `UX_Guidelines.md` §8 "auto-dismiss en 3-5 s").
+ * **Abajo a la derecha y flotante** (ADR-169, UX-10): no desplaza nada.
+ * Tarjeta con ícono, título, una línea de detalle, hasta dos acciones y un
+ * botón para cerrarla. Dura `TOAST_DURATION_MS`.
  *
  * **No roba el foco**: `role="status"` + `aria-live="polite"` sobre el
  * viewport (lo que Radix ya hace) anuncia el texto sin interrumpir lo que el
- * usuario está haciendo. Un toast que capturara el foco para ofrecer
- * "Deshacer" sería peor que no ofrecerlo — el usuario acaba de aplicar un
- * modo y está mirando el árbol, no el toast.
+ * usuario está haciendo.
  *
- * Un solo toast a la vez: aplicar dos modos seguidos reemplaza el aviso en
- * vez de apilarlos. Apilar tendría sentido si cada uno describiera una acción
- * independiente, pero acá el segundo cambio hace obsoleto el "Deshacer" del
- * primero — mostrarlos juntos ofrecería deshacer algo que ya no está vigente.
+ * Un solo toast a la vez: una acción nueva reemplaza al aviso anterior en vez
+ * de apilarlos — el "Deshacer" de un toast viejo ofrecería deshacer algo que
+ * ya no es lo último (ADR-172 §3).
  */
 
 import * as RadixToast from "@radix-ui/react-toast";
+import { CheckIcon, InfoIcon, XIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { subscribeToToasts, type ToastMessage } from "./toast.js";
 
-const TOAST_DURATION_MS = 5000;
+const TOAST_DURATION_MS = 6000;
 
 export function ToastHost() {
   const [toast, setToast] = useState<ToastMessage | null>(null);
@@ -36,26 +35,65 @@ export function ToastHost() {
           // mismo nodo y el temporizador del primero sigue corriendo, así que
           // el segundo se cierra antes de tiempo.
           key={toast.id}
-          className="flex items-center gap-4 rounded-md border border-border bg-bg-primary px-4 py-3 shadow-md"
+          className="anonly-toast-in flex w-[23.75rem] max-w-[calc(100vw-2rem)] items-start gap-3 rounded-xl border border-border bg-bg-primary py-3 pl-3.5 pr-3 shadow-md"
           onOpenChange={(open) => {
             if (!open) setToast(null);
           }}
         >
-          <RadixToast.Description className="text-sm text-text-primary">
-            {toast.text}
-          </RadixToast.Description>
-          {toast.action !== undefined ? (
-            <RadixToast.Action
-              altText={toast.action.label}
-              onClick={toast.action.run}
-              className="shrink-0 rounded px-2 py-1 text-sm font-medium text-accent hover:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-            >
-              {toast.action.label}
-            </RadixToast.Action>
-          ) : null}
+          <span
+            aria-hidden
+            className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${
+              toast.tone === "success"
+                ? "bg-success/15 text-text-primary"
+                : "bg-bg-tertiary text-text-secondary"
+            }`}
+          >
+            {toast.tone === "success" ? (
+              <CheckIcon className="h-4 w-4" />
+            ) : (
+              <InfoIcon className="h-4 w-4" />
+            )}
+          </span>
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <RadixToast.Title className="text-sm font-semibold text-text-primary">
+              {toast.title}
+            </RadixToast.Title>
+            {toast.description !== undefined ? (
+              <RadixToast.Description className="text-sm text-text-secondary">
+                {toast.description}
+              </RadixToast.Description>
+            ) : null}
+            {toast.actions !== undefined && toast.actions.length > 0 ? (
+              <div className="mt-1.5 flex flex-wrap gap-2">
+                {toast.actions.map((action) => (
+                  <RadixToast.Action
+                    key={action.label}
+                    altText={
+                      action.shortcut ? `${action.label} (${action.shortcut})` : action.label
+                    }
+                    onClick={action.run}
+                    className="inline-flex h-8 items-center gap-2 rounded-md bg-accent/10 px-2.5 text-sm font-semibold text-accent hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  >
+                    {action.label}
+                    {action.shortcut !== undefined ? (
+                      <kbd className="rounded border border-current px-1 font-sans text-sm font-medium opacity-75">
+                        {action.shortcut}
+                      </kbd>
+                    ) : null}
+                  </RadixToast.Action>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          <RadixToast.Close
+            aria-label="Cerrar aviso"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-text-secondary hover:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          >
+            <XIcon className="h-4 w-4" aria-hidden />
+          </RadixToast.Close>
         </RadixToast.Root>
       ) : null}
-      <RadixToast.Viewport className="fixed bottom-4 left-1/2 z-[100] w-max max-w-[90vw] -translate-x-1/2" />
+      <RadixToast.Viewport className="fixed bottom-5 right-5 z-[100] flex max-w-[calc(100vw-2.5rem)] flex-col outline-none" />
     </RadixToast.Provider>
   );
 }

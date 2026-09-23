@@ -52,8 +52,8 @@ test("fusionar y dividir grupos actualiza índices y reemplazos", async ({ page 
   const dni2 = page.getByRole("treeitem", { name: "18.445.212" }); // pág. 2
   await expect(dni1).toBeVisible();
   await expect(dni2).toBeVisible();
-  await expect(dni1).toContainText("(1)");
-  await expect(dni2).toContainText("(1)");
+  await expect(dni1).toHaveAccessibleName(/, 1 ocurrencias?,/);
+  await expect(dni2).toHaveAccessibleName(/, 1 ocurrencias?,/);
 
   // Fusionar: dni2 (origen) dentro de dni1 (destino) — dni1 sobrevive con su
   // propia identidad y conserva su canonicalValue (único alias en el
@@ -73,7 +73,7 @@ test("fusionar y dividir grupos actualiza índices y reemplazos", async ({ page 
   // dni2 desapareció; dni1 conserva su identidad con 2 ocurrencias.
   await expect(dni2).toHaveCount(0);
   await expect(dni1).toBeVisible();
-  await expect(dni1).toContainText("(2)");
+  await expect(dni1).toHaveAccessibleName(/, 2 ocurrencias?,/);
 
   // El reemplazo se recalcula sobre los members fusionados (ADR-029) pero el
   // modo sigue siendo el default (nadie lo tocó todavía).
@@ -102,10 +102,10 @@ test("fusionar y dividir grupos actualiza índices y reemplazos", async ({ page 
   // Vuelven a existir dos grupos DNI de 1 ocurrencia cada uno: el original
   // (recalculó su canónico sobre el único member que le queda) y uno nuevo
   // con el valor de la ocurrencia dividida.
-  await expect(dni1).toContainText("(1)");
+  await expect(dni1).toHaveAccessibleName(/, 1 ocurrencias?,/);
   const splitOffGroup = page.getByRole("treeitem", { name: "18.445.212" });
   await expect(splitOffGroup).toBeVisible();
-  await expect(splitOffGroup).toContainText("(1)");
+  await expect(splitOffGroup).toHaveAccessibleName(/, 1 ocurrencias?,/);
 });
 
 /*
@@ -131,7 +131,7 @@ test("fusionar tres grupos en una sola pasada deja un solo grupo", async ({ page
   const dni2 = page.getByRole("treeitem", { name: "18.445.212" });
   const dni3 = page.getByRole("treeitem", { name: "42.998.103" });
   for (const group of [dni1, dni2, dni3]) {
-    await expect(group).toContainText("(1)");
+    await expect(group).toHaveAccessibleName(/, 1 ocurrencias?,/);
   }
 
   // Origen: dni3. Destinos: dni1 (el primero, que es el que sobrevive) y dni2.
@@ -161,7 +161,7 @@ test("fusionar tres grupos en una sola pasada deja un solo grupo", async ({ page
   await expect(mergeDialog).toHaveCount(0);
 
   // Un solo grupo con las tres ocurrencias: el destino de la primera fila.
-  await expect(dni1).toContainText("(3)");
+  await expect(dni1).toHaveAccessibleName(/, 3 ocurrencias?,/);
   await expect(dni2).toHaveCount(0);
   await expect(dni3).toHaveCount(0);
 });

@@ -36,6 +36,16 @@
  * formulario queda abierto para seguir editando.
  */
 
+import {
+  CheckIcon,
+  GaugeIcon,
+  GlobeIcon,
+  InfoIcon,
+  LanguagesIcon,
+  RefreshCwIcon,
+  SunMoonIcon,
+  TriangleAlertIcon,
+} from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { actions } from "../../core-adapter/actions.js";
@@ -59,10 +69,25 @@ import { Checkbox } from "../common/Checkbox.js";
 import { ConfirmDialog } from "../common/ConfirmDialog.js";
 import { Dialog } from "../common/Dialog.js";
 import { Select, type SelectOption } from "../common/Select.js";
-import { DARK_PREVIEW, LIGHT_PREVIEW, ThemePreview } from "../common/ThemePreview.js";
+import {
+  DARK_PREVIEW,
+  LIGHT_PREVIEW,
+  SystemThemePreview,
+  ThemePreview,
+} from "../common/ThemePreview.js";
 import { computeReanalyzeRenderRequest } from "../viewer/reanalyzeRenderRequest.js";
 
 import { diffReanalyzeChange, planReanalyzePatches } from "./reanalyzePlan.js";
+import {
+  describeTheme,
+  OCR_LANGUAGES_SLOT_TEXT,
+  PERFORMANCE_PRESET_DESCRIPTION,
+  resolveOcrLanguagesSlot,
+  THEME_LABEL,
+  THEME_ORDER,
+  UPDATE_NETWORK_NOTICE,
+  UPDATE_NETWORK_NOTICE_EMPHASIS,
+} from "./settingsCopy.js";
 
 const LANGUAGE_OPTIONS: ReadonlyArray<SelectOption<Language>> = [
   { value: "es", label: "Español" },
@@ -253,6 +278,11 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
   }
 
   const ocrLanguagesEmpty = ocrLanguages.length === 0;
+  const ocrSlot = resolveOcrLanguagesSlot({
+    selected: ocrLanguages,
+    saved: useSettingsStore.getState().ocrLanguages,
+    documentOpen: documentId !== null,
+  });
 
   return (
     <>
@@ -260,18 +290,30 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
         open={open}
         onClose={onClose}
         title="Configuración"
+        description="Cómo se analiza el documento y cómo se ve Anonly."
+        size="lg"
         footer={
-          <div className="flex justify-end gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {/*
+              ADR-168 §3: "Acerca de" (créditos y código fuente) dejó este
+              diálogo y pasó al pie de la pantalla de inicio. Una línea dice
+              dónde quedó, para quien lo busque donde estaba.
+            */}
+            <span className="inline-flex flex-1 items-center gap-1.5 text-sm text-text-secondary">
+              <InfoIcon className="h-4 w-4 shrink-0" aria-hidden />
+              Créditos y licencias: en «Acerca de…», al pie del inicio.
+            </span>
             <Button variant="secondary" onClick={onClose}>
               Cancelar
             </Button>
             {/*
               `loading` (no solo `disabled`): guardar puede recrear el core sin
               documento abierto (ADR-125 §2) y eso tarda lo que tardan cinco
-              workers.
+              workers. Ancho mínimo: el texto no cambia de ancho (UX-10).
             */}
             <Button
               variant="primary"
+              className="min-w-[6rem]"
               disabled={ocrLanguagesEmpty}
               loading={saving}
               onClick={() => {
@@ -283,99 +325,152 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
           </div>
         }
       >
-        <div className="flex flex-col gap-4">
-          <FormRow label="Idioma">
-            <Select
-              value={language}
-              onChange={setLanguage}
-              options={LANGUAGE_OPTIONS}
-              aria-label="Idioma"
-            />
-          </FormRow>
-
-          <FormRow label="Rendimiento">
-            <Select
-              value={performancePreset}
-              onChange={setPerformancePreset}
-              options={PERFORMANCE_PRESET_OPTIONS}
-              aria-label="Preset de rendimiento"
-            />
-            {documentId !== null ? (
-              <p className="mt-1 text-sm text-text-secondary">
-                Se aplica al próximo documento; no afecta al que está abierto.
-              </p>
-            ) : null}
-          </FormRow>
-
-          <FormRow label="Idiomas del documento">
-            <div className="flex flex-col gap-1.5">
-              {OCR_LANGUAGE_OPTIONS.map((option) => (
-                <Checkbox
-                  key={option.code}
-                  id={`settings-ocr-${option.code}`}
-                  checked={ocrLanguages.includes(option.code)}
-                  onCheckedChange={(checked) =>
-                    setOcrLanguages(toggleLanguage(ocrLanguages, option.code, checked))
-                  }
-                  label={option.label}
+        <div className="flex flex-col gap-3.5">
+          <Section
+            icon={<LanguagesIcon className="h-5 w-5" aria-hidden />}
+            title="Idioma de la interfaz"
+            subtitle="Los textos de la app. No cambia el idioma del documento."
+            aside={
+              <div className="w-40">
+                <Select
+                  value={language}
+                  onChange={setLanguage}
+                  options={LANGUAGE_OPTIONS}
+                  aria-label="Idioma"
                 />
-              ))}
-            </div>
-            {ocrLanguagesEmpty ? (
-              <p role="alert" className="mt-1 text-sm text-error">
-                Elegí al menos un idioma.
-              </p>
-            ) : null}
-          </FormRow>
+              </div>
+            }
+          />
 
-          <FormRow label="Apariencia">
-            <Checkbox
-              id="settings-theme-system"
-              checked={theme === "system"}
-              onCheckedChange={(checked) => setTheme(checked ? "system" : "light")}
-              label="Seguir la configuración del sistema"
-            />
+          <Section
+            icon={<GaugeIcon className="h-5 w-5" aria-hidden />}
+            title="Análisis"
+            subtitle="Cómo trabaja Anonly al revisar un documento."
+          >
+            <div className="flex flex-col gap-2">
+              <span className="text-sm font-semibold text-text-primary">Rendimiento</span>
+              <div className="w-56">
+                <Select
+                  value={performancePreset}
+                  onChange={setPerformancePreset}
+                  options={PERFORMANCE_PRESET_OPTIONS}
+                  aria-label="Preset de rendimiento"
+                />
+              </div>
+              {/* Un renglón fijo para los tres perfiles (UX-10). */}
+              <p className="h-5 truncate text-sm text-text-secondary">
+                {PERFORMANCE_PRESET_DESCRIPTION[performancePreset]}
+              </p>
+              {/* Ranura reservada aunque no haya documento: no cambia el alto. */}
+              <p
+                className={`flex h-5 items-center gap-1.5 text-sm text-text-secondary ${
+                  documentId === null ? "invisible" : ""
+                }`}
+              >
+                <InfoIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                Se aplica al próximo documento; no cambia el que está abierto.
+              </p>
+            </div>
+            <div className="h-px bg-border" />
+            <div className="flex flex-col gap-2">
+              <span className="text-sm font-semibold text-text-primary">Idiomas del documento</span>
+              <span className="text-sm text-text-secondary">
+                Se usan para leer las páginas escaneadas.
+              </span>
+              <div className="flex gap-4">
+                {OCR_LANGUAGE_OPTIONS.map((option) => (
+                  <Checkbox
+                    key={option.code}
+                    id={`settings-ocr-${option.code}`}
+                    checked={ocrLanguages.includes(option.code)}
+                    onCheckedChange={(checked) =>
+                      setOcrLanguages(toggleLanguage(ocrLanguages, option.code, checked))
+                    }
+                    label={option.label}
+                  />
+                ))}
+              </div>
+              {/*
+                Ranura de alto fijo (UX-10): el texto neutro, el error y el
+                aviso de re-análisis ocupan el mismo lugar.
+              */}
+              <div
+                role={ocrSlot === "empty" ? "alert" : undefined}
+                aria-live="polite"
+                className={`flex h-14 items-start gap-2 rounded-lg border px-3 py-2 text-sm leading-snug ${
+                  ocrSlot === "empty"
+                    ? "border-error bg-error/10 font-medium text-error"
+                    : ocrSlot === "reanalyze"
+                      ? "border-warning-strong bg-warning/15 text-text-primary"
+                      : "border-border bg-bg-secondary text-text-secondary"
+                }`}
+              >
+                {ocrSlot === "idle" ? (
+                  <InfoIcon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                ) : (
+                  <TriangleAlertIcon
+                    className={`mt-0.5 h-4 w-4 shrink-0 ${
+                      ocrSlot === "reanalyze" ? "text-warning-strong" : ""
+                    }`}
+                    aria-hidden
+                  />
+                )}
+                <span className="line-clamp-2">{OCR_LANGUAGES_SLOT_TEXT[ocrSlot]}</span>
+              </div>
+            </div>
+          </Section>
+
+          <Section
+            icon={<SunMoonIcon className="h-5 w-5" aria-hidden />}
+            title="Apariencia"
+            subtitle={describeTheme(theme)}
+          >
             {/*
-              Las miniaturas son el control, no una ilustración al lado del
-              control: elegir un tema mirando su nombre es adivinar, y elegirlo
-              mirando cómo queda es decidir.
+              ADR-169 §8: tres opciones con miniatura en vez del checkbox
+              "Seguir la configuración del sistema" más dos miniaturas. Las
+              miniaturas son el control: elegir un tema mirando cómo queda es
+              decidir, no adivinar.
             */}
-            <div className="mt-3 grid grid-cols-2 gap-3">
-              {(
-                [
-                  { value: "light", label: "Modo claro", palette: LIGHT_PREVIEW },
-                  { value: "dark", label: "Modo oscuro", palette: DARK_PREVIEW },
-                ] as const
-              ).map((option) => (
+            <div role="radiogroup" aria-label="Apariencia" className="grid grid-cols-3 gap-2.5">
+              {THEME_ORDER.map((option) => (
                 <button
-                  key={option.value}
+                  key={option}
                   type="button"
-                  aria-pressed={theme === option.value}
-                  onClick={() => setTheme(option.value)}
-                  className={`flex flex-col gap-1.5 rounded-md border p-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
-                    theme === option.value
-                      ? "border-accent ring-1 ring-accent"
+                  role="radio"
+                  aria-checked={theme === option}
+                  onClick={() => setTheme(option)}
+                  className={`flex flex-col gap-2 rounded-lg border p-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                    theme === option
+                      ? "border-accent ring-2 ring-accent/20"
                       : "border-border hover:border-text-secondary"
-                  } ${theme === "system" ? "opacity-60" : ""}`}
+                  }`}
                 >
-                  <ThemePreview palette={option.palette} />
-                  <span className="px-0.5 text-sm text-text-primary">{option.label}</span>
+                  {option === "system" ? (
+                    <SystemThemePreview />
+                  ) : (
+                    <ThemePreview palette={option === "light" ? LIGHT_PREVIEW : DARK_PREVIEW} />
+                  )}
+                  <span className="flex items-center justify-between px-0.5 text-sm font-semibold text-text-primary">
+                    {THEME_LABEL[option]}
+                    {theme === option ? (
+                      <CheckIcon className="h-4 w-4 text-accent" aria-hidden />
+                    ) : null}
+                  </span>
                 </button>
               ))}
             </div>
-            {theme === "system" ? (
-              <p className="mt-1 text-sm text-text-secondary">
-                Anonly usa el tema de tu sistema y lo acompaña si lo cambiás.
-              </p>
-            ) : null}
-          </FormRow>
+          </Section>
 
           {/*
             Solo dentro del contenedor de escritorio: en un navegador no hay
             actualizador y mostrar el control sería ofrecer algo que no existe.
           */}
           {shellUpdater !== null ? (
-            <FormRow label="Actualizaciones">
+            <Section
+              icon={<RefreshCwIcon className="h-5 w-5" aria-hidden />}
+              title="Actualizaciones"
+              subtitle="Activado, las versiones nuevas se instalan solas al reiniciar. Desactivado, te avisamos y vos decidís cuándo."
+            >
               <Checkbox
                 id="settings-auto-update"
                 checked={autoUpdate}
@@ -383,45 +478,32 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                 label="Actualizar automáticamente"
               />
               {/*
-                Texto único que describe LOS DOS estados, no el estado actual.
-                La versión anterior decía "Te vamos a avisar..." cuando estaba
-                apagado, y pegada debajo de un checkbox sin marcar se leía como
-                lo que iba a pasar **si lo activabas** — o sea, exactamente al
-                revés. Un texto que cambia con el toggle es ambiguo por
-                posición aunque sea correcto por contenido.
+                ADR-131 §5: buscar actualizaciones es la **única** salida de
+                red del producto, y el usuario tiene que enterarse por la app.
+                Texto de `Components.md` §2.6: sigue diciendo que GitHub ve la
+                IP y la versión.
               */}
-              <p className="mt-1 text-sm text-text-secondary">
-                Activado, las versiones nuevas se instalan solas al reiniciar la app. Desactivado,
-                te avisamos y vos decidís cuándo instalarlas.
-              </p>
-              {/*
-                ADR-131 §5 obliga a decirlo acá y no solo en el README: buscar
-                actualizaciones es la **única** salida de red del producto, y el
-                usuario tiene que enterarse por la app y no descubriéndolo.
-              */}
-              <p className="mt-1 text-sm text-text-secondary">
-                Para buscarlas, Anonly le consulta a GitHub. Esa consulta revela tu IP y la versión
-                instalada, y nada más: nunca el contenido ni el nombre de un documento.
-              </p>
-              <button
-                type="button"
-                onClick={() => shellUpdater.check()}
-                className="mt-2 text-sm text-accent underline"
-              >
-                Buscar actualizaciones ahora
-              </button>
-            </FormRow>
+              <div className="flex gap-2.5 rounded-lg bg-bg-tertiary px-3 py-2.5 text-sm leading-snug text-text-secondary">
+                <GlobeIcon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                <span>
+                  {UPDATE_NETWORK_NOTICE}{" "}
+                  <b className="font-semibold text-text-primary">
+                    {UPDATE_NETWORK_NOTICE_EMPHASIS}
+                  </b>
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm text-text-secondary">
+                  Versión instalada:{" "}
+                  <b className="font-semibold text-text-primary">{__ANONLY_VERSION__}</b>
+                </span>
+                <Button variant="secondary" onClick={() => shellUpdater.check()}>
+                  Buscar actualizaciones ahora
+                </Button>
+              </div>
+            </Section>
           ) : null}
         </div>
-
-        {/*
-          ADR-168 §3: "Acerca de" (créditos y código fuente) dejó este diálogo
-          y pasó al pie de la pantalla de inicio. Una línea dice dónde quedó,
-          para quien lo busque donde estaba.
-        */}
-        <p className="mt-4 border-t border-border pt-3 text-sm text-text-secondary">
-          Los créditos y el código fuente están en «Acerca de…», al pie de la pantalla de inicio.
-        </p>
 
         {/*
           Hasta ADR-125 `saveError` solo se renderizaba dentro del
@@ -456,11 +538,38 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
   );
 }
 
-function FormRow({ label, children }: { label: string; children: ReactNode }) {
+/**
+ * Una sección del diálogo (ADR-169 §8): ícono, título y bajada, y su
+ * contenido debajo — o un control al costado (`aside`) cuando es uno solo.
+ */
+function Section({
+  icon,
+  title,
+  subtitle,
+  aside,
+  children,
+}: {
+  readonly icon: ReactNode;
+  readonly title: string;
+  readonly subtitle: string;
+  readonly aside?: ReactNode;
+  readonly children?: ReactNode;
+}) {
   return (
-    <div className="flex flex-col gap-1.5">
-      <span className="text-sm font-medium text-text-secondary">{label}</span>
+    <section className="flex flex-col gap-3.5 rounded-xl border border-border bg-bg-primary p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-bg-tertiary text-text-secondary">
+            {icon}
+          </span>
+          <div className="flex min-w-0 flex-col">
+            <h3 className="text-sm font-semibold text-text-primary">{title}</h3>
+            <p className="text-sm text-text-secondary">{subtitle}</p>
+          </div>
+        </div>
+        {aside}
+      </div>
       {children}
-    </div>
+    </section>
   );
 }

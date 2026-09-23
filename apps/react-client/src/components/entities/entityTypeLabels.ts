@@ -44,3 +44,44 @@ export const ENTITY_TYPE_OPTIONS: ReadonlyArray<SelectOption<EntityType>> = [
   EntityType.Plate,
   EntityType.Custom,
 ].map((type) => ({ value: type, label: ENTITY_TYPE_LABEL[type] }));
+
+/**
+ * ADR-169 §7: nombre de **una** entidad del tipo — el que usan el selector de
+ * tipo (`EntityTypePicker`), la lupa ("oculto como Persona N.º 02") y los
+ * toasts ("Persona N.º 06"). `ENTITY_TYPE_LABEL` sigue siendo el plural de las
+ * franjas del árbol.
+ */
+export const ENTITY_TYPE_SINGULAR: Readonly<Record<EntityType, string>> = {
+  [EntityType.Person]: "Persona",
+  [EntityType.Organization]: "Organización",
+  [EntityType.Address]: "Dirección",
+  [EntityType.DNI]: "DNI",
+  [EntityType.CUIT]: "CUIT",
+  [EntityType.Phone]: "Teléfono",
+  [EntityType.Email]: "Email",
+  [EntityType.IBAN]: "IBAN",
+  [EntityType.CreditCard]: "Tarjeta de crédito",
+  [EntityType.Date]: "Fecha",
+  [EntityType.License]: "Matrícula",
+  [EntityType.Plate]: "Patente",
+  [EntityType.Custom]: "Otro",
+};
+
+/** Los 13 tipos en el orden fijo de `Components.md` §3.1. */
+export const ENTITY_TYPE_ORDER: ReadonlyArray<EntityType> = ENTITY_TYPE_OPTIONS.map(
+  (option) => option.value,
+);
+
+/**
+ * ADR-169 §2: el N.º de la lista es `indexInType` con dos dígitos (`04`), el
+ * mismo número del token (`[PERSONA 04]`). Con tres o más dígitos se muestra
+ * tal cual.
+ */
+export function formatIndexInType(indexInType: number): string {
+  return String(indexInType).padStart(2, "0");
+}
+
+/** "Persona N.º 06": cómo se nombra una entidad concreta fuera de la fila. */
+export function describeEntityNumber(type: EntityType, indexInType: number): string {
+  return `${ENTITY_TYPE_SINGULAR[type]} N.º ${formatIndexInType(indexInType)}`;
+}

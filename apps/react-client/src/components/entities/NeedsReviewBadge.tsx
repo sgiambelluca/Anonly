@@ -23,15 +23,15 @@
  */
 
 import type { EntityGroup } from "@anonly/anonymization-core";
-import { HelpCircleIcon } from "lucide-react";
 
 import { Tooltip } from "../common/Tooltip.js";
 
 import {
   buildNeedsReviewAriaLabel,
   isNeedsReviewBadgeVisible,
-  NEEDS_REVIEW_TOOLTIP,
+  WARNING_TOOLTIP,
 } from "./needsReviewBadgeCopy.js";
+import { REVIEW_BADGE_CLASS, ReviewSymbol, WarningTooltipText } from "./warningSymbols.js";
 
 export interface NeedsReviewBadgeProps {
   readonly group: EntityGroup;
@@ -41,13 +41,19 @@ export function NeedsReviewBadge({ group }: NeedsReviewBadgeProps) {
   if (!isNeedsReviewBadgeVisible(group)) return null;
 
   return (
-    <Tooltip content={NEEDS_REVIEW_TOOLTIP}>
+    <Tooltip content={<WarningTooltipText {...WARNING_TOOLTIP.review} />}>
+      {/*
+        ADR-169 §3: caja de 22 px con el `?` en ámbar fuerte. Foco propio
+        (`tabIndex`) para que el tooltip también se lea con teclado; no tiene
+        acción al clic —la acción ya existe: la casilla de la fila—.
+      */}
       <span
         role="img"
+        tabIndex={0}
         aria-label={buildNeedsReviewAriaLabel(group.canonicalValue)}
-        className="rounded-md p-0.5 text-warning"
+        className={REVIEW_BADGE_CLASS}
       >
-        <HelpCircleIcon className="h-4 w-4" aria-hidden />
+        <ReviewSymbol />
       </span>
     </Tooltip>
   );

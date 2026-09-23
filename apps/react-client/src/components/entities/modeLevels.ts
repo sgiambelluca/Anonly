@@ -195,6 +195,29 @@ export function needsConfirmation(counts: OverrideCounts): boolean {
 }
 
 /**
+ * ADR-169 §5: cuántas entidades **no** siguen hoy a la franja "Todo el
+ * documento" — las de un tipo con regla propia más las que tienen regla de
+ * grupo (sin contar dos veces). Es el N de *"N entidades tienen modo propio:
+ * cambiar este modo las pisa."*, o sea exactamente las filas que el barrido
+ * del documento va a tocar.
+ */
+export function countEntitiesWithOwnMode(
+  rules: ReadonlyArray<Rule>,
+  groups: ReadonlyArray<{ readonly id: string; readonly type: EntityType }>,
+): number {
+  return groups.filter(
+    (group) => hasOwnDecision(rules, group.id) || findTypeRule(rules, group.type) !== undefined,
+  ).length;
+}
+
+/** La segunda línea de la franja "Todo el documento" (ADR-169 §5), siempre presente. */
+export function describeDocumentBandNote(entitiesWithOwnMode: number): string {
+  if (entitiesWithOwnMode === 0) return "Se aplica a todas las entidades.";
+  if (entitiesWithOwnMode === 1) return "1 entidad tiene modo propio: cambiar este modo la pisa.";
+  return `${entitiesWithOwnMode} entidades tienen modo propio: cambiar este modo las pisa.`;
+}
+
+/**
  * Frase del diálogo y del acento de precaución. Nombra **lo que se va a
  * romper** en vez de advertir en abstracto: "vas a reemplazar los ajustes de
  * N categorías y M entidades" es accionable; "esta acción es destructiva" no.

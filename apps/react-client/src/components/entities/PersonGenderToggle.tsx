@@ -57,10 +57,14 @@ export function PersonGenderToggle({ groupId, currentGender }: PersonGenderToggl
           next
         ].toLowerCase()}.`}
         onClick={() => actions.updateGroup(groupId, { personGender: next })}
-        className={`rounded-md p-0.5 hover:bg-bg-tertiary ${
-          // El neutro va atenuado: es el estado "sin fijar", y ese contraste
-          // es lo que lo hace legible como marca de dato faltante.
-          current === "neutral" ? "text-text-secondary" : "text-text-primary"
+        // ADR-169 §4: con borde para que se lea como botón — punteado en el
+        // neutro, que va atenuado: es el estado "sin fijar", y ese contraste
+        // es lo que lo hace legible como marca de dato faltante. La
+        // visibilidad sigue siendo la de ADR-071; la ranura la reserva la fila.
+        className={`flex h-[26px] w-[26px] items-center justify-center rounded-md border bg-bg-primary hover:bg-bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+          current === "neutral"
+            ? "border-dashed border-text-secondary text-text-secondary"
+            : "border-border text-text-primary hover:border-text-secondary"
         }`}
       >
         <Symbol />

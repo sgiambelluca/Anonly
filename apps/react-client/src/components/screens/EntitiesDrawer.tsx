@@ -61,7 +61,7 @@ export function EntitiesDrawer({ open, onOpenChange, children }: EntitiesDrawerP
         aria-modal="true"
         aria-label="Entidades"
         tabIndex={-1}
-        className="absolute inset-y-0 left-0 z-50 flex w-[min(22rem,90vw)] flex-col border-r border-border bg-bg-primary shadow-md focus:outline-none"
+        className="absolute inset-y-0 left-0 z-50 flex w-[min(28rem,94vw)] flex-col border-r border-border bg-bg-primary shadow-md focus:outline-none"
       >
         {/*
           Sin título propio: `EntitiesPanel` ya renderiza su encabezado

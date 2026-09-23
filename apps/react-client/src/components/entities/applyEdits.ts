@@ -31,24 +31,27 @@ export function applyEnabled(params: {
     actions.updateGroup(entry.groupId, { enabled: params.next });
   }
 
-  showToast(
-    enabledToastText({
+  showToast({
+    title: enabledToastText({
       count: snapshot.length,
       label: params.label,
       isType: params.isType,
       next: params.next,
     }),
-    {
-      label: "Deshacer",
-      run: () => {
-        // Se restituye grupo por grupo su valor anterior, no un `next` global:
-        // en una cascada la mitad de las filas podía estar ya en ese estado.
-        for (const entry of snapshot) {
-          actions.updateGroup(entry.groupId, { enabled: entry.enabled });
-        }
+    actions: [
+      {
+        label: "Deshacer",
+        run: () => {
+          // Se restituye grupo por grupo su valor anterior, no un `next`
+          // global: en una cascada la mitad de las filas podía estar ya en ese
+          // estado.
+          for (const entry of snapshot) {
+            actions.updateGroup(entry.groupId, { enabled: entry.enabled });
+          }
+        },
       },
-    },
-  );
+    ],
+  });
 }
 
 /**
@@ -71,14 +74,19 @@ export function applyReplacementValue(params: {
 
   actions.updateGroup(group.id, { replacementValue: value });
 
-  showToast(`«${group.canonicalValue}» se reemplaza por «${value}»`, {
-    label: "Deshacer",
-    run: () => {
-      if (wasUserSet && previousValue !== undefined) {
-        actions.updateGroup(group.id, { replacementValue: previousValue });
-        return;
-      }
-      actions.updateGroup(group.id, { replacementMode: group.replacementMode });
-    },
+  showToast({
+    title: `«${group.canonicalValue}» se reemplaza por «${value}»`,
+    actions: [
+      {
+        label: "Deshacer",
+        run: () => {
+          if (wasUserSet && previousValue !== undefined) {
+            actions.updateGroup(group.id, { replacementValue: previousValue });
+            return;
+          }
+          actions.updateGroup(group.id, { replacementMode: group.replacementMode });
+        },
+      },
+    ],
   });
 }
