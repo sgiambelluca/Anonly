@@ -143,12 +143,10 @@ apps/react-client/src/components/
 - **Form** (`MVP.md` §2.3): idioma (`es` default), performance preset (`auto`/`low`/`high`), idiomas del documento. **Sin toggle de detección de nombres** (ADR-126).
 - **Acción**: muta `settings.store` + `settings.persist()`. Si el cambio es `ocrLanguages` y hay documento abierto: `ConfirmDialog` "¿Reanalizar el documento con la nueva configuración? Tus ediciones se conservan." → `actions.reanalyze(patch)` (ADR-038 §7, `React_Client.md` §3.7 — **no** recrea el core). Si es `performancePreset` con documento abierto: se persiste y aplica al próximo documento, sin diálogo de confirmación (ADR-038 §7 Q3).
 - **ARIA**: `aria-label="Configuración"`.
-- **Sección "Acerca de"** (ADR-070): bloque **estático** al pie del diálogo, separado del formulario por un divisor, con la atribución de datos de terceros. Es obligación de licencia CC-BY (ADR-060 §11), no una cortesía.
-  - **Contenido**: una entrada por cada elemento de `THIRD_PARTY_CREDITS` (`toolbar/thirdPartyCredits.ts`, ADR-070 §2), con título de la obra, titular, licencia, indicación de cambios y para qué la usa Anonly. Hoy hay **una**: el léxico de nombres de Buenos Aires Data (CC-BY-2.5-AR).
-  - **Enlaces**: el título enlaza a `sourceUrl` y el nombre de la licencia a `licenseUrl`, ambos `target="_blank" rel="noopener noreferrer"`. Son las **únicas** URLs externas navegables del producto: agregar otra requiere ADR (ADR-070 §3). No son requests de la app — `connect-src 'self'` sigue sin excepciones (`08_Security_Model.md` §3.2).
-  - **Fuera del guardado atómico**: no lee ni escribe `settings.store`, no entra en `diffReanalyzeChange`, y "Cancelar"/"Guardar" no lo afectan. La garantía de §2.6 —si el usuario cancela, ningún campo se aplica— no admite excepciones.
-  - **ARIA**: `<section aria-label="Acerca de">` con encabezado visible; los enlaces son `<a>` nativos (accesibles por teclado sin wrapper).
-  - **Sincronización**: el contenido de la entrada del léxico coincide con `gender-lexicon.provenance.json` y con `NOTICE`, y un test lo verifica (ADR-070 §5) — no se sostiene por disciplina.
+- **Sin sección "Acerca de"** (ADR-168 §3, reemplaza ADR-070 §1): los créditos y el código fuente pasan a `AboutDialog` (§2.9). Al pie del formulario queda **una línea** que dice dónde están ahora, para quien los busque acá.
+- **Actualizaciones** (solo en el contenedor de escritorio): interruptor "Actualizar automáticamente", el texto que describe los dos estados, y el aviso de la salida de red de ADR-131 §5 con este texto: *"Es la única conexión de Anonly a internet: le pregunta a GitHub si hay una versión nueva. Como en cualquier conexión, GitHub ve desde dónde llega la consulta (tu IP) y qué versión tenés. Nunca se envía el contenido ni el nombre de un documento."* Debajo, la versión instalada y "Buscar actualizaciones ahora".
+- **Apariencia**: tres opciones con miniatura —*Como el sistema*, *Claro*, *Oscuro*— en vez del checkbox "Seguir la configuración del sistema" más dos miniaturas (ADR-169 §8).
+- **Diseño estable** (ADR-169 §1): la descripción del perfil de rendimiento ocupa siempre el mismo renglón para los tres perfiles, y el error "Elegí al menos un idioma" y el aviso de re-análisis comparten una ranura de alto fijo con un texto neutro cuando no hay nada que avisar. Cambiar una opción no cambia el alto del diálogo.
 
 ### 2.7 `PasswordDialog` (ADR-036 §7)
 
@@ -184,6 +182,22 @@ apps/react-client/src/components/
   ser cargar un PDF primero, que es lo contrario de lo que hace falta para elegir con qué
   analizarlo.
 - **Acción**: `actions.importDocument(file)`, por drop o por el botón.
+- **Organización en cajas** (ADR-168 §1): barra superior (logo, nombre, `SettingsButton`), caja
+  principal con la `DropZone`, caja `HowItWorks` (animación de tres fases + tres pasos), tres
+  tarjetas de rasgos y un pie con versión, licencia, "Acerca de…" y "Reportar un problema".
+- **`DropZone`** (ADR-168 §2): cuatro estados —reposo, arrastrando encima, abriendo, error— en el
+  mismo recuadro de tamaño fijo. El de error se usa para el archivo que no es PDF y para el fallo de
+  importación que vuelve desde `ScanScreen` (§2.10); muestra el nombre del archivo y el mensaje de
+  `pipelineErrorPresentation.ts`.
+- **`AboutDialog`** (ADR-168 §3, antes sección de `SettingsDialog` por ADR-070 §1): código
+  fuente (enlace al repositorio) y "Datos de terceros", una entrada por `THIRD_PARTY_CREDITS` con
+  título, titular, licencia, para qué se usa y cambios. `<section>` con encabezado visible por
+  bloque; enlaces `<a>` nativos `target="_blank" rel="noopener noreferrer"`. El test de
+  sincronización con `NOTICE` y el provenance (ADR-070 §5) **no cambia**.
+- **URLs externas navegables** (ADR-070 §3 extendido por ADR-168 §3): las dos del crédito
+  (`sourceUrl`, `licenseUrl`) más `https://github.com/sgiambelluca/Anonly` (código fuente) y
+  `https://github.com/sgiambelluca/Anonly/issues/new` ("Reportar un problema", en el pie y en
+  `AboutDialog`). Son las **únicas**; cualquier otra necesita ADR.
 
 ### 2.10 `ScanScreen` (ADR-087 §1/§6, momento ②a)
 
@@ -209,7 +223,13 @@ apps/react-client/src/components/
   `stage` sea terminal. `Ready`/`Done` ⇒ pasa cuando pasaron `SCAN_ADVANCE_MIN_MS` (1200 ms) desde
   el import **y** la página 1 ya está dibujada (precalentada en `Ready`, ADR-151) o vencieron
   `SCAN_ADVANCE_PREWARM_GRACE_MS` (1000 ms) desde `Ready`. `Failed`/`Cancelled` ⇒ pasa de
-  inmediato, sin piso y sin esperar preview.
+  inmediato, sin piso y sin esperar preview. **Un `Failed` de importación** (última etapa
+  `Importing`/`Extracting`, ADR-168 §4) no pasa a ②b: la UI cierra el documento y vuelve a
+  `LoadScreen` con la `DropZone` en estado de error.
+- **Flujo de cuatro pasos** (ADR-168 §5): componente `ScanSteps`, derivado solo de
+  `pipeline.store.stage` (y de si hubo `OCRing`). Cuatro pasos fijos —Abrir, Leer, Escanear,
+  Ordenar—; el de Leer se marca terminado con "El PDF ya tenía texto" si no hubo OCR. Va en su propia
+  caja; la animación y la barra de progreso con `Cancelar` (+ `Ctrl+.`) van en otras dos.
 
   > **Sin techo ni umbral de páginas** (retirados por ADR-150: `SCAN_ADVANCE_MAX_MS` y
   > `SCAN_ADVANCE_PAGE_RATIO` ya no existen). ②a dura lo que dure el escaneo — lo que lo hace
@@ -228,13 +248,22 @@ apps/react-client/src/components/
 - **Stores**: `entities`, `pipeline`.
 - **Comportamiento**: lista `groupsByType` ordenada por `EntityType` (orden fijo: Person, Organization, Address, DNI, CUIT, Phone, Email, IBAN, CreditCard, Date, License, Plate, Custom).
 - **Sub-componentes**: `EntityTypeGroup` por tipo.
-- **Header**: "Entidades" + input de búsqueda + "Colapsar todo" / "Expandir todo".
+- **Header** (ADR-169 §2): "Entidades" con el resumen ("N entidades en M tipos"), botón **primario**
+  "Agregar entidad", input de filtro, control segmentado **Aparición | A–Z** (`entities.store.sortOrder`,
+  solo presentación) y la franja de `DocumentModeSelect` (§3.9). Debajo, el **encabezado de columnas**
+  fijo: N.º · Entidad · Avisos · Apar. · Reemplazo.
+- **Orden de las filas**: `sortOrder === "appearance"` → `indexInType` ascendente; `"alpha"` →
+  `canonicalValue` con `localeCompare(…, "es")`. No cambia `indexInType` ni emite nada.
+- **Nota al pie** "¿Falta algo?…" con botón de cerrar (`settings.store.dismissedHints`).
 - **Estado vacío**: ver `UX_Guidelines.md` §11.
 
 ### 3.2 `EntityTypeGroup`
 
 - **Props**: `type: EntityType`, `groups: ReadonlyArray<EntityGroup>`.
-- **Render**: cabecera expandible con checkbox cascade + lista de `EntityGroupItem`.
+- **Render** (ADR-169 §2): **franja** expandible —fondo `bg-tertiary` con el color del tipo al 6 %
+  (7 % en oscuro), bordes superior e inferior de 1,5 px en `--color-border-strong`, `position: sticky`—
+  con checkbox cascade, punto de color, nombre en mayúsculas, contador en pastilla y `TypeModeSelect`;
+  debajo, la lista de `EntityGroupItem`.
 - **Eventos**:
   - Click cabecera → toggle expand.
   - Checkbox cabecera → `actions.updateGroup(g.id, { enabled: value })` para todos los grupos del tipo.
@@ -243,10 +272,16 @@ apps/react-client/src/components/
 ### 3.3 `EntityGroupItem`
 
 - **Props**: `group: EntityGroup`.
-- **Render**: checkbox + canonicalValue + badge ocurrencias + `ReplacementModeSelect` + `[⋯]` (`GroupContextMenu` trigger).
+- **Render** (ADR-169 §2): grilla de **columnas de ancho fijo** —checkbox · N.º (`indexInType` con dos
+  dígitos) · `canonicalValue` (la única que encoge) · avisos (52 px) · apariciones · ranura de género ·
+  `ReplacementModeSelect` · `[⋯]` (`GroupContextMenu`)—. Borde inferior fino (`--color-border`),
+  salvo la última fila del tipo. **Con un menú abierto** (modo o ⋯) la fila lleva fondo y contorno de
+  acento. Nada que aparezca en la fila puede correr a otra columna (UX-10).
 - **Estados**:
   - habilitado / deshabilitado.
-  - con conflicto (icono ⚠).
+  - **avisos** (ADR-169 §3, `UX_Guidelines.md` §3.3): tres botones con forma y color propios —sugerida
+    `?` ámbar (`NeedsReviewBadge`), conflicto con una Y que se abre en dos, en rojo (`ConflictBadge`),
+    espacio justo `]↔[` naranja de 26×22 (`DegradedBadge`)—, en la columna de avisos.
   - editado manualmente (punto azul).
   - **reemplazo degradado** (ADR-058 §7, canal por ADR-062): alguna ocurrencia del grupo recibió `AnnotationKind.Degraded` — el texto de reemplazo quedó más angosto que `DEGRADED_FONT_RATIO` de su ancho natural (ADR-086 §1) y esos píxeles quedaron comprometidos. Es una marca **accionable**, no informativa: existe porque la palanca para arreglarlo ya existía y era invisible. Al abrirla, ofrece las tres salidas —editar el `replacementValue` a mano, cambiar el modo a `redact` (que no tiene problema de espacio) o deshabilitar el grupo—. **No** aparece cada vez que el repintado de línea no se activó: solo bajo el umbral, para que la señal signifique algo.
 
@@ -260,8 +295,7 @@ apps/react-client/src/components/
   - **género sin determinar** (ADR-060 §5, **fusionado con el control por ADR-071 §4**): ya **no** es un badge propio. Es el **estado neutro del `PersonGenderToggle` de §3.4b**, con trazo atenuado, y por lo tanto aparece exactamente donde aparece el control: grupos `Person` en modo `placeholder` o `synthetic`. Sigue siendo una **afordancia de UI sobre información faltante**, distinta de la marca de degradación —el grupo se renderiza perfecto, lo que falta es un dato—, así que **no** usa `AnnotationKind.Degraded` ni se pinta en el canvas. Lo que se retira es la duplicación: antes había un badge `?` **más** el selector, los dos sobre el mismo campo.
 - **Eventos**:
   - Checkbox → `actions.updateGroup(group.id, { enabled: value })`.
-  - Click canonicalValue → popover con aliases y "Editar valor canónico".
-  - Click ⚠ → `ConflictDialog`.
+  - Click en el aviso de conflicto → `ConflictDialog`.
 - **ARIA**: `role="treeitem"`, `aria-checked`, `aria-label` con tipo + count + estado.
 
 ### 3.4 `ReplacementModeSelect`
@@ -274,14 +308,22 @@ apps/react-client/src/components/
 - **Cada opción trae un ejemplo construido con el grupo real de esa fila**, no un valor genérico: la
   pregunta del usuario es qué le pasa *a su dato*.
 
-  > **El único valor exacto que la UI puede mostrar es el del modo vigente** (`replacementValue`, ya
-  > resuelto por Grouping). Los otros tres se describen de forma esquemática y **no se inventan**: el
-  > token de `placeholder` sale de la escalera de ADR-057 y del género de ADR-060, el formato de
-  > `mask` de `MASK_FORMAT_BY_TYPE` —que vive en `grouping-engine`, un motor que la UI no puede
-  > importar (P-1)—, y el de `synthetic` del sintetizador sembrado con el `id` (ADR-072 §1).
-  > Reimplementarlos violaría `React_Client.md` U-3, y un ejemplo *casi* correcto es peor que uno
-  > declaradamente esquemático: la primera versión mostraba `[PERSONA 01]` para **todos** los tipos,
-  > así que un DNI previsualizaba como si fuera una persona.
+- **Cada opción es: título + descripción fija + vista previa exacta** (ADR-169 §6), y **elegir otra
+  opción solo mueve el tilde** — ningún texto del menú cambia. Encabezado: *"Cómo reemplazar «X»"*.
+
+  | Modo | Descripción fija | Vista previa |
+  |---|---|---|
+  | Etiquetar | Tipo y número, para seguir quién es quién | `group.replacementPreviews.placeholder` |
+  | Ocultar parcialmente | Tapa cada letra y conserva la forma | `group.replacementPreviews.mask` |
+  | Reemplazar por dato falso | Un dato inventado del mismo tipo | `group.replacementPreviews.synthetic` |
+  | Tapar con negro | Un bloque negro sobre el texto | un bloque negro dibujado (`redact` no tiene texto) |
+
+  > **Las cuatro vistas previas las calcula el Core** (ADR-170): `EntityGroup.replacementPreviews`.
+  > Hasta ADR-170 la UI solo podía mostrar exacto el modo vigente, porque los formatos viven en
+  > `grouping-engine` y la UI no puede importar motores (P-1); los otros tres se describían de forma
+  > esquemática, y el menú se reescribía entero al elegir. **La UI no reimplementa ninguno**
+  > (`React_Client.md` U-3): un ejemplo *casi* correcto es peor que ninguno — la primera versión
+  > mostraba `[PERSONA 01]` para todos los tipos.
 - **Acción**: crea/actualiza una **`Rule` de scope `group`** para ese grupo (ADR-087 §3.1a). **Esto cambia** respecto de la implementación vigente, que emitía `GROUP_UPDATE_REQUESTED` con `patch.replacementMode`.
 
   > **Por qué cambia**: `resolveMode` chequea las reglas **antes** que `group.replacementMode`, y `grouping.engine.ts:1150-1151` lo hace literal — asigna lo que el usuario eligió y una línea después lo pisa con el resultado de `resolveMode`. Con una regla de tipo vigente, el selector de la fila **es inerte**. Hoy casi no se nota porque el panel de Reglas no se usa; con §3.9/§3.10 creando reglas de rutina, pasaría a ser el comportamiento normal.
@@ -295,7 +337,7 @@ apps/react-client/src/components/
 - **Etiqueta corta en el disparador, larga en el menú y en el nombre accesible**: el disparador de
   la fila mide 11 rem y "Ocultar parcialmente" se cortaba en "Ocultar parcialme…". El menú —donde
   el usuario lee qué hace cada modo— muestra siempre la forma larga.
-- **Nota (ADR-057)**: el preview es `group.replacementValue`, ya resuelto por el Grouping Engine — así que **muestra el token abreviado sin ningún cambio en este componente**. Un grupo apretado va a previsualizar `[PRS-01]` y no `[PERSONA 01]`, y eso es correcto: es exactamente lo que va a salir en el documento.
+- **Nota (ADR-057)**: las vistas previas vienen ya resueltas por el Grouping Engine —`replacementPreviews.placeholder` sale de la misma escalera que `replacementValue`— así que **muestran el token abreviado sin ningún cambio en este componente**. Un grupo apretado va a previsualizar `[PRS-01]` y no `[PERSONA 01]`, y eso es correcto: es exactamente lo que va a salir en el documento.
 
 ### 3.4b `PersonGenderToggle` (ADR-060 §6, forma y visibilidad por ADR-071 §1-§3, wire por ADR-069 §4)
 
@@ -304,6 +346,7 @@ apps/react-client/src/components/
 - **Props**: `groupId`, `currentGender: PersonGender | undefined` — el valor **almacenado** en el grupo (`EntityGroup.personGender` no cambió de forma, ADR-069 §4).
 - **Visibilidad**: `type === EntityType.Person` **y** `replacementMode ∈ { placeholder, synthetic }` — los dos únicos modos cuyo valor depende de `personGender`. En `mask` y `redact` el control sería una palanca sin nada del otro lado. La condición vive en `isPersonGenderToggleVisible(group)` (`personGenderVisibility.ts`), función pura, y **reemplaza a las dos anteriores** (`isPersonGenderSelectVisible` + `isPersonGenderUndeterminedMarkVisible`).
   - Leer `group.replacementMode` es correcto: el motor le escribe encima el resultado de `resolveMode()` en cada mutación, así que ese campo **siempre lleva el modo efectivo**, ya resuelto contra las reglas de grupo/tipo/globales. La UI no replica la escalera de prioridades y no puede desincronizarse de ella.
+- **Borde y ranura** (ADR-169 §4): el botón lleva **borde** (punteado en el estado neutro) para que se lea como botón, y ocupa una **ranura de ancho fijo siempre reservada** en la fila: cuando la visibilidad de arriba es falsa, la ranura queda vacía y nada se corre (UX-10). La visibilidad **no cambia**: sigue siendo la de ADR-071.
 - **Forma**: un `<button>` del ancho de un icono que muestra el estado actual y **cicla** al siguiente con un click: `neutral → f → m → neutral`. El neutro es el estado de reposo de un grupo sin resolver, y ♀ antes que ♂ es el orden en que se conocen los símbolos.
 - **Símbolos**: SVG **first-party**, los tres sobre la misma grilla de 16×16 para que el botón no salte al ciclar — `lucide-react@0.451.0` no tiene `Venus`/`Mars`, y el glifo Unicode del neutro (`U+26B2`) tiene cobertura de fuente irregular.
 
@@ -324,8 +367,20 @@ apps/react-client/src/components/
 
 ### 3.4c `AddEntityButton` + `AddEntityDialog` (ADR-061 §3, ruta A)
 
-- **Ubicación**: sobre el árbol de entidades, encima de las coincidencias ya encontradas.
-- **Render del diálogo**: selector de `EntityType` + campo de texto para el valor + confirmar.
+- **Ubicación** (ADR-169 §2): **botón primario** "Agregar entidad" en la cabecera del panel (§3.1).
+- **Render del diálogo** (ADR-169 §7), en dos pasos numerados:
+  1. *¿Qué texto querés ocultar?* — campo de texto. Mientras se escribe (con debounce), una caja de
+     **alto fijo** con scroll interno muestra dónde aparece: `findText(documentId, value)` → por
+     cada `TextMatch`, la página y la frase alrededor (armada con `getPageWords` y el `wordSpan`)
+     con el texto resaltado. Sin coincidencias, la misma caja dice *"No aparece en el documento"*
+     **antes** de confirmar. Vacío (< 2 caracteres), un texto neutro.
+  2. *¿Qué es?* — `EntityTypePicker` (§8.10) con los 13 tipos, en su caja gris.
+  Debajo, en una caja azul distinta, la advertencia de alcance (ver abajo). Pie: *"También podés
+  seleccionarlo en el PDF original"*, "Cancelar" y el botón **"Agregar N apariciones"** con ancho
+  mínimo fijo, deshabilitado sin coincidencias.
+- **Tras agregar**: se cierra y muestra el toast de ADR-169 §7 (*"Agregaste «X» · Persona N.º 06 · N
+  apariciones ocultas"*, "Ver en la lista", "Deshacer"). El N.º se lee del grupo **después** de
+  `finishSession`.
 - **Acción**: `actions.addManualEntity({ value, entityType })` → `ManualEntityResult` con `occurrenceCount` (errata de ADR-061 §6). El adaptador devuelve `ManualEntityResult | null`: `null` **solo** cuando no hay documento activo —un estado en el que el diálogo no puede estar abierto— y el diálogo lo trata como "no hacer nada", **nunca** como "no se encontró".
 - **Sin coincidencias**: `occurrenceCount === 0` → **no se creó grupo** y el diálogo lo informa ("no se encontró ese texto en el documento"), sin cerrarse, para que el usuario corrija un typo y reintente. **No es un error y no llega por excepción**: es el valor de retorno (ADR-061 §6 y su errata). Un `try/catch` acá sería para los `InvalidInputError` reales (documento inexistente, stage inválido), que son otra cosa.
 - **Con coincidencias**: `occurrenceCount > 0` → se cierra e informa éxito. El número son **apariciones del valor en el documento**, antes del dedup; no es "cuántos grupos se crearon" ni "cuántas ocurrencias se sumaron". Si el copy muestra el número, tiene que decir "se encontraron N apariciones" — decir "se agregaron N" mentiría en el caso de fusión.
@@ -337,7 +392,7 @@ apps/react-client/src/components/
 Marca los grupos que **el detector sugirió sin estar seguro**: nacen con `enabled: false` y `needsReview: true`, así que están a la vista y **no tapan nada** hasta que el usuario decida.
 
 - **Props**: `group: EntityGroup`. No renderiza nada si `group.needsReview` es `false`.
-- **Forma**: un badge con icono + `Tooltip`, mismo patrón que `DegradedBadge` (§3.3). **Sin diálogo**: no hay nada que explicar más allá de una frase y la acción ya existe — la casilla de la fila.
+- **Forma** (ADR-169 §3): botón de 22 px con un `?` de ~20 px, en `--color-warning-strong` sobre fondo ámbar al ~15 %, + `Tooltip` (*"Sugerida."* + la frase de abajo). Mismo patrón que `DegradedBadge` (§3.3). **Sin diálogo**: no hay nada que explicar más allá de una frase y la acción ya existe — la casilla de la fila.
 - **Dónde**: en `EntityGroupItem`, junto a las otras marcas.
 
 **El copy no lleva jerga, y no muestra el número.** El usuario no tiene que ver "0,59" ni saber qué es un umbral de confianza: tiene que saber que **esa fila merece una mirada más que las otras**. Mismo criterio que §3.3 ya fija para el aviso de degradado.
@@ -351,18 +406,46 @@ Marca los grupos que **el detector sugirió sin estar seguro**: nacen con `enabl
 
 **La marca se apaga sola con la decisión del usuario** (ADR-094 §4): tildar o destildar la casilla limpia `needsReview` en el motor, en los dos sentidos — habilitar es aceptar la sugerencia, deshabilitar es rechazarla. La UI no hace nada especial para eso: recibe el `ENTITY_GROUP_UPDATED` y re-renderiza.
 
+### 3.4e `EditReplacementDialog` (ADR-076, ADR-078; rediseño por ADR-169 §10)
+
+- **Props**: `group: EntityGroup`.
+- **Render**: la entidad arriba (con el aviso de espacio justo si lo tiene); el campo *"Texto de
+  reemplazo"* con un **medidor de ancho fijo** a la derecha —**Entra bien / Queda justo / No entra**—
+  calculado con `estimateReplacementFit(value, group.members)` (función de la UI sobre
+  `estimateTokenWidth` de `@anonly/shared`, ya existente); debajo, **sugerencias más cortas** como
+  botones: los niveles de la escalera de ADR-057 que vienen en
+  `group.replacementPreviews.placeholderLadder` (ADR-170), sin repetir el valor vigente; y una vista
+  previa *"Así queda en el documento"*: la frase de la aparición más apretada, original arriba y con el
+  cambio abajo, con el reemplazo dibujado dentro del ancho del original (se achica si no entra). El
+  texto que explica el medidor ocupa **dos renglones reservados** (UX-10).
+- **Pie**: "Volver al calculado" a la izquierda (solo habilitado si el valor difiere del calculado;
+  despacha el mismo modo, ADR-078 §3), "Cancelar" y "Guardar".
+- **Acción**: `applyReplacementValue({ group, value })` (sin cambios). Confirmar cierra y muestra el
+  toast *"Cambiaste el reemplazo de «X» · Ahora dice …"* con "Deshacer" (ADR-172).
+- **Aviso**: *"Si después cambiás el modo de reemplazo, este texto vuelve al calculado"* (ADR-076 §3),
+  fijo.
+
 ### 3.5 `GroupContextMenu`
 
 - **Trigger**: botón `[⋯]` en `EntityGroupItem`.
-- **Opciones**:
+- **Opciones, en este orden** (ADR-169 §10): Ver apariciones · Editar reemplazo… · Cambiar tipo… ·
+  Fusionar con… · Dividir… · separador · **Eliminar entidad** (en rojo). "Restaurar valor calculado"
+  aparece solo si `group.replacementValueUserSet`. **La fila que abrió el menú queda resaltada**
+  mientras está abierto, y el panel es flotante. Toda acción confirmada muestra un toast con
+  "Deshacer" (UX-11, ADR-172).
+  - "Editar reemplazo…" → `EditReplacementDialog` (§3.4e). No aparece en modo `redact`.
   - "Fusionar con…" → `MergeDialog`.
   - "Dividir…" → `SplitDialog`.
+  - **"Eliminar entidad"** (ADR-171) → `ConfirmDialog` que nombra la entidad y aclara que su dato
+    queda **a la vista** en el documento → `actions.removeGroup(groupId)` (`GROUP_REMOVE_REQUESTED`).
+    Toast *"Eliminaste «X» · Ya no está en la lista ni se va a ocultar"* con "Deshacer".
   - **"Ver ocurrencias"** (ADR-084 §2) → escribe `group.canonicalValue` en `viewer.store.searchQuery`. El `DocumentSearchBox` (§5.4c) reacciona solo: busca, cuenta y deja anterior/siguiente listos para recorrer el documento resaltando cada aparición. **No se construye un popover propio**: el buscador ya scrollea, resalta y navega — el popover de la redacción anterior (que además pedía un `value` por ocurrencia, que en ese momento `OccurrenceRef` no tenía — ADR-104 se lo agregó después, por otro motivo) habría sido una segunda UI de navegación, peor que la que existe.
     - **El contador del buscador puede no coincidir con el `(N)` del grupo**, y está bien (ADR-084 §3): `findText` busca el literal, `members` son las ocurrencias agrupadas. Un grupo con aliases tiene members que la búsqueda del canónico no encuentra; y la búsqueda puede encontrar apariciones que el detector no agrupó — que es justamente el recall que ADR-061 cubre, con el "Agregar como…" de cada resultado a mano.
-  - **"Cambiar categoría"** (ADR-082 §6) → `ChangeTypeDialog` (§3.8): `Select` con todos los `EntityType`, preseleccionado en el actual → `actions.updateGroup(groupId, { type })`. Sin `ConfirmDialog`: es reversible volviendo a elegir el tipo anterior.
+  - **"Cambiar tipo…"** (ADR-082 §6, rótulo por ADR-169 §10) → `ChangeTypeDialog` (§3.8) → `actions.updateGroup(groupId, { type })`.
   - **"Restaurar valor calculado"** (ADR-078 §4) → **solo** si `group.replacementValueUserSet`; despacha `actions.updateGroup(groupId, { replacementMode: <el mismo modo> })`, que recalcula el valor y apaga el flag sin API nueva.
-  - "Editar valor canónico" → input inline.
-  - "Eliminar grupo" → `ConfirmDialog` → `actions.updateGroup(groupId, { enabled: false })` (no se elimina, se deshabilita; en MVP no se elimina completamente).
+  > La redacción anterior listaba "Editar valor canónico" (input inline) y "Eliminar grupo" como
+  > deshabilitar. Ninguno se implementó así: el primero nunca existió, y el segundo lo reemplaza
+  > "Eliminar entidad" de ADR-171, que sí elimina.
 
 > **Accesibilidad**: el menú es un disclosure hecho a mano (trigger con `aria-expanded` + panel `role="group"` con botones, cierre por click-fuera/Escape/selección), sin `@radix-ui/react-dropdown-menu` — agregar esa dependencia requiere ADR (P-9/R-12). Los items se recorren con **Tab**, no con flechas.
 >
@@ -373,31 +456,40 @@ Marca los grupos que **el detector sugirió sin estar seguro**: nacen con `enabl
 ### 3.8 `ChangeTypeDialog` (ADR-082 §6)
 
 - **Props**: `groupId`, `currentType`, `canonicalValue`.
-- **Acción**: `actions.updateGroup(groupId, { type })`. Un tipo igual al vigente es no-op (el motor no emite nada, ADR-082 §1) y el diálogo además se ahorra el viaje.
+- **Render** (ADR-169 §10): la entidad arriba (punto de color, nombre, "Persona N.º 06 · N apariciones"); `EntityTypePicker` (§8.10) con el tipo actual marcado "Actual" y no seleccionable; una caja **"Cómo queda"** de alto fijo con el token antes → después (**`[PERSONA 06]` → `[ORGANIZACION 03]`**, calculado por el Core con `previewEdit({ kind: "type", … })`, ADR-170) y, si deja de ser `Person`, *"El género se borra: solo se usa para personas"*. Botón "Cambiar tipo" (ancho fijo).
+- **Acción**: `actions.updateGroup(groupId, { type })`. Un tipo igual al vigente es no-op (el motor no emite nada, ADR-082 §1) y el diálogo además se ahorra el viaje. Confirmar cierra y muestra toast con "Deshacer" (ADR-172).
 - **Por qué existe**: el tipo no es una etiqueta suelta — gobierna el token del documento anonimizado, su numeración por tipo, qué regla de scope `type` aplica y de qué pool sortea el sintetizador. Un tipo equivocado produce un documento que **afirma algo falso** sobre el dato que ocultó.
 
 ### 3.6 `MergeDialog`
 
 - **Props**: `sourceGroupId`.
-- **Comportamiento**: autocomplete para elegir `targetGroupId` (filtrado por mismo `EntityType`).
-  **Varios destinos a la vez** (`UX_Guidelines.md` §3.2, "2+ grupos del mismo tipo"): el botón
-  **"+ Agregar otro grupo"** suma una fila de destino, y cada fila ofrece solo los grupos que
-  ninguna otra tomó. La **primera fila es el grupo que sobrevive** —conserva su `id`, su modo y su
-  identidad— y por eso no se puede quitar; las demás tienen su botón de quitar.
+- **Comportamiento** (ADR-169 §10): la entidad de origen arriba; debajo, una lista de **alto fijo** con
+  scroll y un filtro, con las demás entidades del mismo `EntityType` (N.º, nombre, apariciones) y una
+  casilla cada una — se eligen **una o varias** de una vez (reemplaza a las filas de `Select` con
+  "+ Agregar otro grupo"). Una caja **"Resultado"** de alto fijo muestra cómo queda —nombre, N.º,
+  apariciones y token— calculado por el Core con `previewEdit({ kind: "merge", … })` (ADR-170); sin
+  selección, un texto neutro en la misma caja. El grupo que sobrevive es el de menor `indexInType`
+  entre los elegidos y el origen.
 - **Acción**: `actions.mergeGroups(sourceGroupId, targetGroupId)`, una vez por cada paso de
   `mergePlan(sourceGroupId, targetGroupIds)`. **El contrato no cambia**: `GROUP_MERGE_REQUESTED`
   sigue siendo 1→1 (`Contracts.md`) y la UI emite N-1 requests contra el mismo destino. Es seguro
   en fila porque `applyGroupMerge` corre síncrono (no hay `await` en su cuerpo) y porque el grupo
   que sobrevive es el `target`, que conserva su `id` — el destino de los pasos siguientes existe
   todavía. Cada paso se queda con `min(index)`, así que el resultado conserva el menor de todos.
-- **Feedback**: toast "Grupos fusionados. Índice conservado: 01."
+- **Feedback**: el diálogo se cierra y muestra el toast *"Fusionaste N entidades en «X» · Persona N.º 01 · M apariciones"* con "Deshacer" (ADR-172). Botón "Fusionar N entidades" con ancho mínimo fijo.
 
 ### 3.7 `SplitDialog`
 
 - **Props**: `groupId`.
-- **Comportamiento**: lista de `members` con checkbox. Muestra bbox miniatura por ocurrencia.
+- **Comportamiento** (ADR-169 §10): lista de `members` con casilla; por cada una, la página, la frase
+  alrededor con el valor tal como aparece (ADR-104, ADR-105) y su origen (*Detectado / Agregado por
+  vos*). Debajo, dos tarjetas: **"Se quedan en N.º 02"** → **"Pasan a una nueva: Persona N.º NN"**, con
+  los conteos al día; el N.º nuevo sale de `previewEdit({ kind: "split", … })` (ADR-170). Una ranura de
+  alto fijo muestra la nota *"La entidad nueva toma el próximo número libre y mantiene el modo de
+  reemplazo de la original"* o, si se marcaron todas, el error *"Tiene que quedar al menos una
+  aparición en N.º 02"* (UX-10).
 - **Acción**: `actions.splitGroup(groupId, selectedOccurrenceIds)`.
-- **Feedback**: toast "Grupo dividido. Nuevo grupo: <type> <NN>."
+- **Feedback**: se cierra y muestra el toast *"Dividiste «X» · N apariciones pasaron a Persona N.º NN"* con "Deshacer" (ADR-172).
 
 ---
 
@@ -410,10 +502,12 @@ Marca los grupos que **el detector sugirió sin estar seguro**: nacen con `enabl
 - **Tratamiento visual** (ADR-087 §3.1): **borde sólido + label explícito**. Es el control de mayor
   alcance, así que es el que más deliberado tiene que verse accionar. Estar fuera del árbol es
   parte del tratamiento: no puede confundirse con una fila.
-- **Estado de precaución** (ADR-087 §3.3a): **neutro por defecto**; con alguna `Rule` de scope
-  `type` o `group` vigente, gana **acento ámbar + resumen** (`⚠ 5 categorías y 12 entidades con
-  ajustes propios`). El color aparece cuando significa algo, y el resumen entera del riesgo antes
-  de abrir el menú. **Nunca señala solo con color**: ícono + texto además del acento.
+- **Estado de precaución** (ADR-087 §3.3a, forma por ADR-169 §5): la franja tiene **siempre dos
+  líneas** (UX-10). Neutra: la segunda dice *"Se aplica a todas las entidades."* en gris, con ícono
+  de información. Con alguna `Rule` de scope `type` o `group` vigente, **la caja entera** pasa a
+  ámbar (fondo `warning` al ~15 %, borde `warning-strong`) y la línea dice *"N entidades tienen modo
+  propio: cambiar este modo las pisa."*, con ícono de advertencia. Reemplaza al borde izquierdo de
+  acento con una línea que aparecía. **Nunca señala solo con color**: ícono + texto además del acento.
   - Usa **`--color-warning-strong`** (§10), **no** `--color-warning`, que no llega al contraste
     mínimo de elementos no textuales.
   - **Ámbar y no rojo**: la acción es reversible y no toca el documento, solo los ajustes.
@@ -559,26 +653,30 @@ existen. Lo que se retira es la superficie de UI, no el modelo.
 ### 5.4b `WordSelectionOverlay` (ADR-061 §3/§4, ruta B)
 
 - **Solo sobre el panel `original`.** En el `anonymized` el texto visible puede ser un reemplazo, y señalarlo no significaría nada.
-- **Interacción**: click sobre una palabra, o arrastre de un recuadro sobre varias. Al soltar, aparece "Agregar entidad como…" con el selector de `EntityType`.
+- **Interacción**: click sobre una palabra, o arrastre de un recuadro sobre varias. Al soltar, aparece el globo flotante "Agregar «X» como…" con `EntityTypePicker` (§8.10), el conteo de apariciones y "Cancelar" / "Agregar".
+- **La selección persiste** (ADR-169 §7): el recuadro de lo señalado se dibuja con **borde punteado de acento animado** (`prefers-reduced-motion`: borde quieto) y **no desaparece** hasta que se agrega la entidad, se cancela, se hace otra selección, se presiona Escape, se conmuta a Anonimizado o se cierra el documento.
+- **Descubrimiento** (ADR-169 §7): `SelectionHintCard`, tarjeta flotante sobre el visor —solo con el toggle en Original— con una animación del gesto de clic y arrastre, *"Agregá entidades desde el documento"* y "Entendido". Al cerrarla no vuelve (`settings.store.dismissedHints`, persistido).
 - **Cómo resuelve qué se señaló**: **hit-test contra `Page.words`, no selección de texto**. El overlay traduce coordenadas de pantalla a coordenadas de página y aplica `wordsInRect(words, rect)` (función pura de `@anonly/shared`). Los datos salen de `actions.getPageWords(pageIndex)` — el adaptador (`actions.ts`) resuelve el documento activo por su cuenta, mismo criterio que el resto de `actions.*` (§3.4c).
 - **Por qué no una capa de texto de pdf.js**: en un PDF escaneado **no hay texto** — es una foto —, y es justo donde más falta hace corregir a mano. Las palabras de OCR tienen bbox igual que las de PDF, así que el hit-test no distingue el origen y no hay una rama por tipo de documento. Además evita meter pdf.js en el cliente y una copia del texto original en el DOM (ADR-061 §4).
 - **Coordenadas**: usa `getPageSize` para el mapeo, **no** la estimación de `pageLayout.ts`. Con zoom, el factor de escala del visor entra en la misma transformación.
 - **La selección se recorta a UN renglón** (ADR-114 §1): de las palabras que el rectángulo tocó se conserva la corrida con más **área seleccionada**, y una corrida se corta cuando aparece una palabra no señalada o cuando la `x` **retrocede** (el retorno de carro). El renglón no se re-deriva acá: `Page.words` ya viene agrupado por renglón (ADR-110/ADR-113), y las dos condiciones hacen falta porque dos renglones seguidos de la misma columna son contiguos en ese array. **El desempate es por área, no por cantidad de palabras**: dos renglones de cuatro palabras empatan, y el que el usuario cubrió es el que vale.
   - **Por qué**: el valor se arma con `join(" ")` y `findLiteral` exige sub-tokens consecutivos de una misma línea (ADR-089 §1), así que un valor de dos renglones **no puede matchear nunca**. Medido sobre el sello de un fallo escaneado, donde los renglones están a 4–6 pt: con el rectángulo justo la frase se encuentra en 18/18 páginas; con 4 pt de holgura, en 0/18.
 - **Acción**: `actions.addManualEntity({ value, entityType })` con el texto de las palabras señaladas. **Se espera el resultado** y se pasa por `manualEntityFeedback` —el mismo helper de §3.4c—: con `not-found` el popover queda abierto con "No se encontró ese valor en el documento"; con `added` se cierra (ADR-114 §2). Antes era una promesa suelta, así que encontrar 18 apariciones y no encontrar ninguna se veían igual.
+- **Tras agregar**: el toast de ADR-169 §7 (*"Agregaste «X» · Persona N.º NN · N apariciones ocultas"*, "Ver en la lista", "Deshacer"). El recuadro punteado se retira recién ahí.
 
 ### 5.4c `DocumentSearchBox` (ADR-061 §8)
 
-- **Ubicación**: junto al encabezado "PDF ORIGINAL", con icono de lupa (punto 4 de `Cambios para hacer.txt`).
+- **Ubicación** (ADR-169 §7): a la izquierda de la barra del visor, **siempre visible y habilitada, en Original y en Anonimizado** — antes aparecía y desaparecía al conmutar. Campo *"Buscar un texto en el documento…"*, un contador en **ranura de ancho fijo** y un botón **"+ Agregar"** aparte, habilitado cuando hay resultados.
 - **La consulta vive en `viewer.store.searchQuery`** (ADR-084 §1), no en el estado local del componente: "Ver ocurrencias" del panel de entidades (§3.5) la escribe desde el otro extremo del árbol. **No es por panel** —a diferencia de `currentPageIndex`/`visibleRange` desde ADR-054 §1— porque el buscador existe una sola vez, sobre el `original`. El resto de su estado (matches, `activeIndex`, el tipo del "Agregar como…") **sigue siendo local**: es trabajo interno suyo.
 - **Acción**: `actions.findText(query)` → `TextMatch[]` con bbox por coincidencia (el adaptador resuelve el documento activo por su cuenta, igual que `getPageWords`/`getPageSize`). Consulta **sincrónica** y de solo lectura: buscar no crea grupos ni modifica la sesión (errata de ADR-061 §8).
 - **El debounce es de este componente**: `findText` es sincrónica y recorre todas las palabras del documento en el main thread, así que una llamada por tecla se nota en documentos largos. El Core no amortigua —es una función de consulta, sin estado ni cache (`Regex_Engine.md` §12)—, así que la caja de búsqueda debe hacerlo, mismo criterio que el re-render del zoom (§5.5). Los resultados vienen en orden documental, así que "anterior/siguiente" navega el array tal cual, sin re-ordenar.
-- **Render**: contador de resultados, navegación anterior/siguiente con scroll a la página, y resaltado del match activo sobre el canvas (reusa el mismo overlay de §5.4b).
-- **Tercera vía de agregado**: cada resultado ofrece "agregar como entidad", que abre el selector de tipo y llama a `addManualEntity`. Es la misma búsqueda literal que alimenta el agregado manual (ADR-061 §8), con **una** diferencia deliberada desde ADR-089 §2: la lupa acepta que el último sub-token de la consulta sea un **prefijo** (`Eta` resalta `Anabella`), y `addManualEntity` **no**. **Agrega todas las apariciones del valor, no solo el resultado clickeado** — `addManualEntity` recorre el documento entero, que es el comportamiento correcto para una entidad manual; el copy debe decirlo para que no se lea como que anonimiza solo esa coincidencia. Esas dos frases juntas son la razón de la asimetría: con prefijo en las dos, agregar `Eta` taparía cada `Anabella` del expediente. **Consecuencia visible**: un resultado resaltado por prefijo puede no ser agregable con ese mismo texto — el usuario tiene que agregar la palabra completa.
+- **Render**: contador de resultados, navegación anterior/siguiente con scroll a la página, y resaltado del match activo sobre el canvas (reusa el mismo overlay de §5.4b). **La lista de resultados** (ADR-169 §7) muestra por cada uno la página, la frase alrededor (`getPageWords` + `TextMatch.wordSpan`) con la coincidencia resaltada y su estado: **oculto como <Tipo> N.º NN** —el match cae sobre un miembro de un grupo; se compara contra `OccurrenceRef.fragments` cuando existen (ADR-074), nunca contra la envolvente— o **Sin ocultar**. El encabezado resume "N ocultos · M sin ocultar", ambos siempre presentes.
+- **Tercera vía de agregado**: cada resultado **sin ocultar** ofrece "Agregar como…", que abre `EntityTypePicker` en un **globo flotante** (no expande la fila, UX-10) y llama a `addManualEntity`; al terminar, el toast de ADR-169 §7. Es la misma búsqueda literal que alimenta el agregado manual (ADR-061 §8), con **una** diferencia deliberada desde ADR-089 §2: la lupa acepta que el último sub-token de la consulta sea un **prefijo** (`Eta` resalta `Anabella`), y `addManualEntity` **no**. **Agrega todas las apariciones del valor, no solo el resultado clickeado** — `addManualEntity` recorre el documento entero, que es el comportamiento correcto para una entidad manual; el copy debe decirlo para que no se lea como que anonimiza solo esa coincidencia. Esas dos frases juntas son la razón de la asimetría: con prefijo en las dos, agregar `Eta` taparía cada `Anabella` del expediente. **Consecuencia visible**: un resultado resaltado por prefijo puede no ser agregable con ese mismo texto — el usuario tiene que agregar la palabra completa.
 
 ### 5.5 `ZoomControls`
 
-- **Botones**: `+`, `-`, `Reset`.
+- **Botones** (ADR-169 §9): `−`, el porcentaje (ancho fijo) y `+`. **Sin botón de restablecer**: lo hace `Cmd/Ctrl+0`.
+- **Pellizco del trackpad y `Ctrl + rueda`**: el `PdfViewer` registra `wheel` con `{ passive: false }` (React no lo permite en `onWheel`: va por `addEventListener` en un efecto) y, si `event.ctrlKey`, hace `preventDefault()` y ajusta el zoom proporcional a `deltaY`, dentro de los mismos límites que los botones. Pasa por el mismo `viewer.setZoom` y el mismo debounce de re-render.
 - **Atajos**: `Cmd/Ctrl++`, `Cmd/Ctrl+-`, `Cmd/Ctrl+0`.
 - **Acción**: `viewer.setZoom(newZoom)` (aplica el escalado CSS inmediato vía `PdfViewer` §5.2); el re-render real se dispara con debounce, no en cada click/atajo individual (`ZOOM_RERENDER_DEBOUNCE_MS = 150 ms`, ADR-037 §5).
 
@@ -720,11 +818,14 @@ hay nada que sincronizar: se retira junto con `SideBySideViewer` y `scrollSyncCo
 ### 8.5 `Tooltip`
 
 - Wrapper sobre Radix `Tooltip` con delay corto.
+- **Colores que se invierten con el tema** (ADR-169 §3): fondo `bg-text-primary`, texto `text-bg-primary`, flecha `fill-text-primary`. **Nunca `text-white`**: en oscuro `text-primary` es casi blanco y el texto quedaba blanco sobre blanco (reporte de las pruebas de usuario). Mismo criterio para cualquier superficie invertida.
 
 ### 8.6 `Toast`
 
 - Wrapper sobre Radix `Toast` (o `sonner` si se agrega con ADR).
 - Tipos: `info`, `success`, `warning`, `error`.
+- **Posición**: abajo a la derecha, flotante — no desplaza nada (UX-10).
+- **Acción de deshacer** (ADR-172): los toasts de edición llevan **"Deshacer"** con la pista `Ctrl+Z`; deshacer desde el toast y desde el atajo es lo mismo (`history.store.undo()`). Los de agregado llevan además "Ver en la lista".
 
 ### 8.7 `Banner`
 
@@ -738,6 +839,17 @@ hay nada que sincronizar: se retira junto con `SideBySideViewer` y `scrollSyncCo
 - Props: `width`, `height`.
 
 ---
+
+### 8.10 `EntityTypePicker` (ADR-169 §7)
+
+- **Qué es**: el selector de `EntityType` único de la app. Reemplaza al `Select` de tipo y a los chips
+  sueltos en cuatro lugares: la selección sobre el original (§5.4b), la lupa (§5.4c), `AddEntityDialog`
+  (§3.4c) y `ChangeTypeDialog` (§3.8).
+- **Render**: los **13 tipos** en una grilla (dos columnas en globos, tres en diálogos) dentro de una
+  **caja gris** (`bg-tertiary` con borde), cada uno con su punto de color (§9), su nombre y un botón de
+  opción. `role="radiogroup"` + `role="radio"` con `aria-checked`.
+- **Props**: `value`, `onChange`, `current?` (se muestra marcado "Actual" y no seleccionable —
+  `ChangeTypeDialog`), `columns`.
 
 ## 9. Paleta de colores (highlights por tipo)
 
@@ -787,6 +899,8 @@ sale sólido y nada avisa.
 --color-success: #10b981;
 --color-warning: #f59e0b;        /* solo relleno decorativo — ver nota */
 --color-warning-strong: #b45309; /* ADR-087 §3.1: bordes, iconos y texto de precaución */
+--color-border-strong: #374151;  /* ADR-169 §11: bordes de la franja de tipo */
+--color-space: #c2410c;          /* ADR-169 §11: aviso "espacio justo" — 5.18:1 sobre blanco */
 --color-error: #dc2626;      /* 4.83:1 — era #ef4444, que fallaba en sus tres usos */
 --radius-sm: 4px;
 --radius-md: 8px;
@@ -814,6 +928,8 @@ dark` cuando el usuario no eligió explícitamente. La preferencia vive en
 --color-accent-foreground: #111827; /* 6.98:1 sobre el relleno accent */
 --color-success: #34d399;           /* 7.64:1 */
 --color-warning: #fbbf24;
+--color-border-strong: #9ca3af;     /* ADR-169 §11: bordes de la franja de tipo */
+--color-space: #fb923c;             /* ADR-169 §11: aviso "espacio justo" — 6.49:1 sobre la superficie */
 --color-warning-strong: #fbbf24;    /* 8.79:1 */
 --color-error: #f87171;             /* 5.31:1 como texto */
 --color-error-foreground: #111827;  /* 6.41:1 sobre el relleno error */
@@ -869,6 +985,10 @@ Modo oscuro: en v1.0. MVP es solo claro.
 - Iconos: `lucide-react` (open source, consistente, tree-shakeable).
 - Tamaños: 16 px (inline), 20 px (botones), 24 px (toolbar), 32 px (hero).
 - `aria-label` siempre que el icono sea interactivo.
+- **SVG first-party** donde `lucide-react@0.451.0` no tiene el glifo o el glifo no se lee chico
+  (ADR-169 §3): el aviso de **conflicto** (una Y que se abre en dos, con puntas de flecha) y el de
+  **espacio justo** (`]↔[`: dos corchetes y una flecha doble entre ellos, sobre una grilla de 22×16).
+  Mismo criterio que los símbolos de género de §3.4b.
 
 ---
 

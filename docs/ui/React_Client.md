@@ -316,6 +316,14 @@ interface EntitiesSlice {
   updateReplacement(groupId: string, mode: ReplacementMode, value: string): void;
   addConflict(conflict: Conflict): void;
   resolveConflict(conflictId: string): void;
+  /**
+   * ADR-169 §2: orden de presentación de las filas. Solo UI: no cambia
+   * `indexInType` ni emite nada. Vale para todos los tipos; no persiste.
+   */
+  readonly sortOrder: "appearance" | "alpha";
+  setSortOrder(order: "appearance" | "alpha"): void;
+  /** ADR-169 §7: grupo a resaltar un momento ("Ver en la lista" del toast). */
+  readonly flashGroupId: string | null;
   reset(): void;
 }
 ```
@@ -346,6 +354,14 @@ interface PipelineSlice {
   readonly exportProgress: { current: number; total: number } | null;
   readonly exportResult: { blobUrl: string; sizeBytes: number } | null;
   readonly error: SerializedEngineError | null;
+  /**
+   * ADR-168 §4: la última etapa observada antes de `Failed`. `null` si no falló.
+   * `Importing`/`Extracting` = fallo de importación → la UI cierra el documento
+   * y vuelve a `LoadScreen` con el error en la `DropZone`.
+   */
+  readonly failedAtStage: PipelineStage | null;
+  /** Etapas atravesadas por el pipeline en el documento vigente (para `ScanSteps`, ADR-168 §5). */
+  readonly visitedStages: ReadonlySet<PipelineStage>;
   /** Jobs que fallaron sin tumbar el pipeline, por `WorkerJobType`. `{}` es el caso sano. */
   readonly failedJobs: Readonly<Partial<Record<WorkerJobType, number>>>;
   setState(patch: Partial<PipelineSlice>): void;
@@ -410,6 +426,14 @@ interface SettingsSlice {
   readonly ocrLanguages: ReadonlyArray<string>;
   // `scrollSyncEnabled` retirado por ADR-087 §2: sin lado a lado no hay dos
   // scrolls que sincronizar.
+  readonly theme: "system" | "light" | "dark";
+  readonly autoUpdate: boolean;
+  /**
+   * ADR-169 §7: avisos de descubrimiento que el usuario cerró
+   * ("selection-hint" = tarjeta sobre el visor, "panel-footer-hint" = nota al
+   * pie del panel). Persistido: cerrado una vez, no vuelve.
+   */
+  readonly dismissedHints: ReadonlyArray<"selection-hint" | "panel-footer-hint">;
   persist(): void;   // guarda en localStorage (solo settings, nunca documentos)
   load(): void;
 }
