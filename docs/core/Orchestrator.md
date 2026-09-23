@@ -466,9 +466,9 @@ Los tests de contract/unit/edge mockean los motores (interfaces de `Contracts.md
 - [x] 26. (Hito 11, ADR-151) `prewarmFirstPagePreview(documentId)`: invocación directa de `renderPage({pageIndex: 0, kind: "original", mode: "preview"}, mediatedPreviewCtx(documentId))`, disparada desde `handleGroupingFinished` en el mismo turno que `PIPELINE_READY`, después del early return de `cancelRequested`. Best-effort (catch + `logger.warn`, nunca `PIPELINE_FAILED`). Sin cambios en `Contracts.md`, el visor ni el store — `bus-bridge.ts` ya deja todo `PREVIEW_UPDATED` en `viewer.store.previewByPage`. Los tres tests de §14 (caso 32).
 
 - [x] 27. (ADR-163, T-6a) `runOcrStage`: helper puro para el DPI efectivo de página completa; construir cada `OcrPageRequest` con su `dpi` y su `estimatedBytes` derivados de la misma escala. El `OcrImageProducer` usa `request.dpi / 72`, nunca una variable global. Regiones conservan `ctx.config.ocr.dpi`. No tocar `OcrConfig`, Render, OCR, eventos, fusión ni progreso. Tests de casos 34-36 y no-regresión cuando el campo falta.
-- [ ] 28. (Hito 12.5 — ADR-170 §2) `previewEdit(documentId, request)` en `IPipelineOrchestrator`: delegación en `GroupingEngine.previewEdit`, sincrónica, sin estado ni eventos. Un test en §14.
-- [ ] 29. (Hito 12.5 — ADR-171 §4) `addManualEntity` llama a `grouping.liftRemoval` antes de `reopenSession`; la re-aplicación de literales retenidos no. Caso 38 y su test.
-- [ ] 30. (Hito 12.5 — ADR-172 §1) `createEditCheckpoint`/`restoreEditCheckpoint`/`discardEditCheckpoints`: delegación en Grouping + copia de los literales retenidos bajo el mismo id; descarte en `reanalyze` (antes de `reopenSession`), `closeDocument` y `dispose`; precondición de etapa. Casos 39-40.
+- [x] 28. (Hito 12.5 — ADR-170 §2) `previewEdit(documentId, request)` en `IPipelineOrchestrator`: delegación en `GroupingEngine.previewEdit`, sincrónica, sin estado ni eventos. Un test en §14.
+- [x] 29. (Hito 12.5 — ADR-171 §4) `addManualEntity` llama a `grouping.liftRemoval` antes de `reopenSession`; la re-aplicación de literales retenidos no. Caso 38 y su test.
+- [x] 30. (Hito 12.5 — ADR-172 §1) `createEditCheckpoint`/`restoreEditCheckpoint`/`discardEditCheckpoints`: delegación en Grouping + copia de los literales retenidos bajo el mismo id; descarte en `reanalyze` (antes de `reopenSession`), `closeDocument` y `dispose`; precondición de etapa. Casos 39-40.
 
 ---
 

@@ -1274,6 +1274,38 @@ describe("Orchestrator — edge cases", () => {
       );
     });
 
+    // Caso 40 (§13, ADR-172 §1), item 30 (§15).
+    it("reanalyze discards edit checkpoints; checkpoints are refused during a detection pass", async () => {
+      // Parte 1: reanalyze descarta todos los checkpoints existentes ANTES
+      // de reabrir la sesión.
+      const first = makeOrchestrator();
+      await first.orchestrator.importDocument(createImportInput());
+      first.orchestrator.createEditCheckpoint("doc-1");
+      expect(first.engines.grouping.discardCheckpoints).not.toHaveBeenCalled();
+
+      await first.orchestrator.reanalyze("doc-1", { ner: { enabled: false } });
+      expect(first.engines.grouping.discardCheckpoints).toHaveBeenCalledWith("doc-1");
+
+      // Parte 2: durante una pasada de detección en curso (acá, `Extracting`
+      // a mitad de `importDocument` — una de las cinco etapas bloqueadas) el
+      // façade rechaza ANTES de llegar al motor.
+      const second = makeOrchestrator();
+      const deferred = createDeferred<never>();
+      (second.engines.pdf.process as ReturnType<typeof vi.fn>).mockReturnValue(deferred.promise);
+      const importPromise = second.orchestrator.importDocument(createImportInput());
+      await Promise.resolve();
+
+      expect(() => second.orchestrator.createEditCheckpoint("doc-1")).toThrow(InvalidInputError);
+      await expect(second.orchestrator.restoreEditCheckpoint("doc-1", "any-id")).rejects.toThrow(
+        InvalidInputError,
+      );
+      expect(second.engines.grouping.createCheckpoint).not.toHaveBeenCalled();
+      expect(second.engines.grouping.restoreCheckpoint).not.toHaveBeenCalled();
+
+      deferred.reject(new Error("cleanup"));
+      await importPromise.catch(() => undefined);
+    });
+
     it("reanalyze with both ner and ocr in one patch is rejected without side effects", async () => {
       const { bus, engines, orchestrator } = makeOrchestrator();
       await orchestrator.importDocument(createImportInput());

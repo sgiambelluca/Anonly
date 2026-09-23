@@ -14,6 +14,8 @@ import type { PdfEngine } from "@anonly/pdf-engine";
 import type { RegexEngine } from "@anonly/regex-engine";
 import type { RenderEngine } from "@anonly/render-engine";
 import type {
+  EditPreview,
+  EditPreviewRequest,
   IEventBus,
   ManualEntityRequest,
   PipelineState,
@@ -82,6 +84,29 @@ export interface IPipelineOrchestrator {
    * emitir nada: buscar no es agregar.
    */
   findText(documentId: string, query: string): ReadonlyArray<TextMatch>;
+  /**
+   * ADR-170 §2: delegación pura en `GroupingEngine.previewEdit`, sin estado
+   * propio, sin emitir y sin pasar por `reopenSession`. Sincrónico, como
+   * `findText`. `documentId` sin sesión de grouping -> `InvalidInputError`
+   * (lo lanza el motor).
+   */
+  previewEdit(documentId: string, request: EditPreviewRequest): EditPreview;
+  /**
+   * ADR-172 §1: puntos de restauración del ESTADO DE EDICIÓN del documento
+   * (sesión de Grouping completa + literales manuales retenidos, ADR-061
+   * §5). `createEditCheckpoint` es sincrónico y devuelve un id opaco, hasta
+   * `MAX_EDIT_CHECKPOINTS` (se descarta el más viejo). `restoreEditCheckpoint`
+   * reemplaza el estado y emite la diferencia con los eventos de Grouping de
+   * siempre (vía `GroupingEngine.restoreCheckpoint`); id desconocido o
+   * descartado -> `InvalidInputError`. `reanalyze`, `closeDocument` y
+   * `dispose` los descartan todos. Precondición de create/restore: sesión
+   * existente y `stage` fuera de
+   * `{Importing, Extracting, OCRing, Detecting, Grouping}`; si no,
+   * `InvalidInputError`.
+   */
+  createEditCheckpoint(documentId: string): string;
+  restoreEditCheckpoint(documentId: string, checkpointId: string): Promise<void>;
+  discardEditCheckpoints(documentId: string): void;
   /** ADR-061 §4: habilitan el hit-test de selección sobre el canvas del original. */
   getPageWords(documentId: string, pageIndex: number): ReadonlyArray<Word>;
   getPageSize(

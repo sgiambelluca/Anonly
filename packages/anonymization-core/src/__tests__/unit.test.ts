@@ -2471,6 +2471,124 @@ describe("Orchestrator — unit tests", () => {
 
     expect(engines.regex.findLiteral).not.toHaveBeenCalled();
   });
+
+  // Item 28 (§15, ADR-170 §2).
+  it("previewEdit delegates to grouping.previewEdit and does not alter the snapshot", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    wireHappyPathSpies(engines, bus);
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+    await orchestrator.importDocument(createImportInput());
+
+    const expectedPreview = {
+      groups: [
+        {
+          groupId: "g1",
+          type: EntityType.DNI,
+          indexInType: 1,
+          canonicalValue: "34.567.891",
+          memberCount: 1,
+          replacementMode: ReplacementMode.Placeholder,
+          replacementValue: "[DNI 01]",
+        },
+      ],
+    };
+    (engines.grouping.previewEdit as ReturnType<typeof vi.fn>).mockReturnValue(expectedPreview);
+    (engines.grouping.getSnapshot as ReturnType<typeof vi.fn>).mockClear();
+
+    const request = { kind: "type" as const, groupId: "g1", type: EntityType.CUIT };
+    const result = orchestrator.previewEdit("doc-1", request);
+
+    expect(engines.grouping.previewEdit).toHaveBeenCalledWith("doc-1", request);
+    expect(result).toBe(expectedPreview);
+    // Sin estado propio: la delegación es pura, no toca el snapshot.
+    expect(engines.grouping.getSnapshot).not.toHaveBeenCalled();
+  });
+
+  // Caso 38 (§13, ADR-171 §4), item 29 (§15).
+  it("addManualEntity lifts a previous removal; the reanalyze re-application does not", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({
+        pageCount: 1,
+        pages: [createPage({ index: 0, requiresOCR: true })],
+      }),
+      textlessPages: [0],
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+    await orchestrator.importDocument(createImportInput());
+
+    await orchestrator.addManualEntity("doc-1", {
+      value: "Jose Perez",
+      entityType: EntityType.Person,
+    });
+    expect(engines.grouping.liftRemoval).toHaveBeenCalledWith("doc-1", "Jose Perez");
+
+    (engines.grouping.liftRemoval as ReturnType<typeof vi.fn>).mockClear();
+
+    // La re-aplicación automática de literales retenidos tras un reanalyze
+    // de OCR (ADR-061 §5) NO llama a liftRemoval — si el usuario había
+    // eliminado el valor, esta re-aplicación no tiene que revivirlo.
+    await orchestrator.reanalyze("doc-1", { ocr: { languages: ["eng"] } });
+    expect(engines.grouping.liftRemoval).not.toHaveBeenCalled();
+  });
+
+  // Caso 39 (§13, ADR-172 §1), item 30 (§15).
+  it("restoring a checkpoint also restores the retained manual literals", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({
+        pageCount: 1,
+        pages: [createPage({ index: 0, requiresOCR: true })],
+      }),
+      textlessPages: [0],
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+    await orchestrator.importDocument(createImportInput());
+
+    await orchestrator.addManualEntity("doc-1", {
+      value: "Jose Perez",
+      entityType: EntityType.Person,
+    });
+    const checkpointId = orchestrator.createEditCheckpoint("doc-1");
+    await orchestrator.addManualEntity("doc-1", {
+      value: "Ana Gomez",
+      entityType: EntityType.Person,
+    });
+
+    await orchestrator.restoreEditCheckpoint("doc-1", checkpointId);
+
+    (engines.regex.findLiteral as ReturnType<typeof vi.fn>).mockClear();
+    await orchestrator.reanalyze("doc-1", { ocr: { languages: ["eng"] } });
+
+    const searchedValues = (engines.regex.findLiteral as ReturnType<typeof vi.fn>).mock.calls.map(
+      (call) => (call[0] as { value: string }).value,
+    );
+    expect(searchedValues).toContain("Jose Perez");
+    expect(searchedValues).not.toContain("Ana Gomez");
+  });
 });
 
 describe("PIPELINE_PROGRESS (Orchestrator.md §8, ADR-034 §4)", () => {
