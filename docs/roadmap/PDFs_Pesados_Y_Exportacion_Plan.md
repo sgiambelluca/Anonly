@@ -1,9 +1,11 @@
-<!-- CONTEXT: scope=roadmap-plan | dependencias=roadmap/Optimizacion_De_Memoria_Plan.md,adr/ADR-174-Los-PDFs-Pesados-Se-Miden-Hasta-El-Archivo-Exportado.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-148-Un-Export-Se-Verifica-Leyendo-El-PDF-Exportado.md,core/Contracts.md,core/Render_Engine.md,core/Export_Engine.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=roadmap-plan | dependencias=roadmap/Optimizacion_De_Memoria_Plan.md,adr/ADR-174-Los-PDFs-Pesados-Se-Miden-Hasta-El-Archivo-Exportado.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-148-Un-Export-Se-Verifica-Leyendo-El-PDF-Exportado.md,core/Contracts.md,core/Render_Engine.md,core/Export_Engine.md,roadmap/PDFs_Pesados_Y_Exportacion_Medicion.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 -->
 
 # Punto 3 — Banco de PDFs pesados, render y exportación
 
-**Estado (2026-09-23): cerrado para implementación; medición pendiente.**
+**Estado (2026-09-23): banco implementado y medido localmente; código pendiente de commit.**
 Este plan implementa el punto 3 de `Optimizacion_De_Memoria_Plan.md` §2ter y la decisión de ADR-174. La entrega es un banco opt-in y un informe de corridas, no una optimización del producto.
+
+La ejecución de nueve corridas intercaladas, cancelación y gates está en `PDFs_Pesados_Y_Exportacion_Medicion.md`. Los rangos observados no alcanzan para atribuir el exceso a una copia concreta ni a color/códec por separado. Este plan conserva el protocolo para reproducir o ampliar la medición.
 
 ## 1. Perfiles y generación
 

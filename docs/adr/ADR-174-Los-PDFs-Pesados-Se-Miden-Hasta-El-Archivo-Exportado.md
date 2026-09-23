@@ -1,8 +1,8 @@
-<!-- CONTEXT: scope=adr | dependencias=roadmap/Optimizacion_De_Memoria_Plan.md,roadmap/PDFs_Pesados_Y_Exportacion_Plan.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-148-Un-Export-Se-Verifica-Leyendo-El-PDF-Exportado.md,core/Contracts.md,core/Render_Engine.md,core/Export_Engine.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=roadmap/Optimizacion_De_Memoria_Plan.md,roadmap/PDFs_Pesados_Y_Exportacion_Plan.md,roadmap/PDFs_Pesados_Y_Exportacion_Medicion.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-148-Un-Export-Se-Verifica-Leyendo-El-PDF-Exportado.md,core/Contracts.md,core/Render_Engine.md,core/Export_Engine.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-174 — Los PDFs pesados se miden hasta el archivo exportado
 
-- **Estado**: Accepted para implementar el banco opt-in; la caracterización todavía no se ejecutó.
+- **Estado**: Accepted; banco opt-in implementado y caracterización local completada el 2026-09-23. El código del banco aún no tiene commit.
 - **Fecha**: 2026-09-23.
 - **Decidido por**: El planificador, para el punto 3 de `roadmap/Optimizacion_De_Memoria_Plan.md` §2ter.
 - **Numeración**: ADR-168 a ADR-172 están reservados para otra rama de UI. ADR-174 no ocupa ese rango; en los refs locales y remotos visibles no existe otro ADR-174. Antes de integrar otra rama, resolver cualquier colisión aparecida fuera de los refs visibles.
@@ -27,6 +27,8 @@ El renderer, los workers y pdf-lib pueden mantener copias y rásters que las API
 ## Condición de implementación
 
 `roadmap/PDFs_Pesados_Y_Exportacion_Plan.md` fija perfiles, fases, campos y aceptación del banco. El implementador puede construir el instrumento y entregar datos, pero no modificar specs de motores ni convertir un hallazgo en cambio de contrato o presupuesto. Si falta una API pública para una medición exacta, informa el límite como “no observable”; no agrega instrumentación de producto por inferencia.
+
+La ejecución local y sus límites están en `roadmap/PDFs_Pesados_Y_Exportacion_Medicion.md`: nueve corridas intercaladas y una cancelación ejercitada, con calidad estructural/visual del export verificada. No se derivó un cambio de presupuesto ni una optimización del producto.
 
 ## Consecuencias
 

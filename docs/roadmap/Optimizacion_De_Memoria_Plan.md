@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-plan | dependencias=roadmap/H-10_Bitacora_De_Memoria.md,architecture/07_Performance_Strategy.md,core/OCR_Engine.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-147-Perder-Un-Identificador-Cubierto-Es-Una-Regresion.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-157-El-Pool-De-OCR-Se-Da-De-Baja-Al-Terminar-Su-Etapa.md,adr/ADR-158-El-Raster-De-OCR-Viaja-Codificado.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md,adr/ADR-161-Una-Franja-Sin-Tinta-No-Se-Reconoce.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,tests/fixtures/README.md,tests/perf/README.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-166-El-Modelo-De-NER-Se-Libera-Al-Terminar-La-Deteccion.md,roadmap/Verificacion_Liberacion_NER_Medicion.md,roadmap/AB_Intercalado_Plan.md,roadmap/AB_Intercalado_Medicion.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md,adr/ADR-173-El-Empaquetado-De-NER-Se-Evalua-Sin-Cambiar-El-Modelo.md,adr/ADR-174-Los-PDFs-Pesados-Se-Miden-Hasta-El-Archivo-Exportado.md,roadmap/Empaquetado_NER_Medicion.md,roadmap/PDFs_Pesados_Y_Exportacion_Plan.md,roadmap/Ciclos_Y_Documentos_Reales_Plan.md,roadmap/Ciclos_Y_Documentos_Reales_Medicion.md,roadmap/Optimizacion_De_Rendimiento.md,roadmap/Banco_Windows_Comparativa_Medicion.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=roadmap-plan | dependencias=roadmap/H-10_Bitacora_De_Memoria.md,architecture/07_Performance_Strategy.md,core/OCR_Engine.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-147-Perder-Un-Identificador-Cubierto-Es-Una-Regresion.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-157-El-Pool-De-OCR-Se-Da-De-Baja-Al-Terminar-Su-Etapa.md,adr/ADR-158-El-Raster-De-OCR-Viaja-Codificado.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md,adr/ADR-161-Una-Franja-Sin-Tinta-No-Se-Reconoce.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,tests/fixtures/README.md,tests/perf/README.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-166-El-Modelo-De-NER-Se-Libera-Al-Terminar-La-Deteccion.md,roadmap/Verificacion_Liberacion_NER_Medicion.md,roadmap/AB_Intercalado_Plan.md,roadmap/AB_Intercalado_Medicion.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md,adr/ADR-173-El-Empaquetado-De-NER-Se-Evalua-Sin-Cambiar-El-Modelo.md,adr/ADR-174-Los-PDFs-Pesados-Se-Miden-Hasta-El-Archivo-Exportado.md,roadmap/Empaquetado_NER_Medicion.md,roadmap/PDFs_Pesados_Y_Exportacion_Plan.md,roadmap/PDFs_Pesados_Y_Exportacion_Medicion.md,roadmap/Ciclos_Y_Documentos_Reales_Plan.md,roadmap/Ciclos_Y_Documentos_Reales_Medicion.md,roadmap/Optimizacion_De_Rendimiento.md,roadmap/Banco_Windows_Comparativa_Medicion.md | audiencia=humanos+IA | fase=11 -->
 
 # Optimización de memoria — plan de campaña
 
@@ -72,7 +72,9 @@
 > opt-in de ADR-173 y `NER_Engine.md` §12–§15: B redujo WASM, pero sin ventaja
 > RSS atribuible; se conserva A (`Empaquetado_NER_Medicion.md`). El punto 3
 > tiene documentación cerrada por ADR-174 y
-> `PDFs_Pesados_Y_Exportacion_Plan.md`; su implementación está pendiente.
+> `PDFs_Pesados_Y_Exportacion_Plan.md`. El banco opt-in y la medición de
+> H1/H2/C0 se completaron localmente (`PDFs_Pesados_Y_Exportacion_Medicion.md`);
+> el código del banco queda pendiente de commit.
 > Alcance y entregables en §2ter.
 > El ahorro de memoria se evaluará junto con el tiempo: la posterior revisión
 > de perfiles podrá admitir mayor consumo a cambio de una mejora medida de
@@ -917,14 +919,15 @@ todas costaron tiempo real.
 ## 2ter. Siguientes objetivos de recursos — orden 2 → 1 → 3
 
 **Decisión del humano, 2026-09-20.** Se conserva la numeración de la propuesta
-para hacer explícito el orden. Es planificación de trabajo futuro: no cambia
-defaults, contratos ni presupuestos del producto. El primer trabajo fue el punto 2.
+para hacer explícito el orden. Esta secuencia no cambia defaults, contratos ni
+presupuestos del producto. El primer trabajo fue el punto 2.
 
 ### 2 — Terminar de atribuir los recursos del renderer
 
 **Cerrado con alcance medido, 2026-09-23.** Investigación, instrumentación,
 campaña macOS y revisión del plan completadas; límites y seguimiento Windows
-documentados. Los puntos 1 y 3 quedan para otra sesión, sin iniciar.
+documentados. Los puntos 1 y 3 se evaluaron después, también el 2026-09-23;
+sus resultados se registran en sus secciones e informes propios.
 
 T-11 obtuvo un **residuo contable de 443–626 MB** al comparar RSS del renderer
 con WASM y heap JS después de cargar NER. No es una cantidad demostrada de memoria
@@ -1000,7 +1003,8 @@ verificar, no la explicación demostrada de todo ese consumo.
 ### 3 — Ampliar el banco a PDFs pesados y exportación
 
 **Documentación cerrada para implementar el banco el 2026-09-23** (ADR-174 y
-`PDFs_Pesados_Y_Exportacion_Plan.md`); resultados aún pendientes. El plan
+`PDFs_Pesados_Y_Exportacion_Plan.md`); medición local completada en
+`PDFs_Pesados_Y_Exportacion_Medicion.md`, código aún sin commit. El plan
 específico fija perfiles, generación, fases, observabilidad, verificación de
 descarga, cancelación y entregables. Las viñetas siguientes expresan el objetivo
 de la etapa y se leen con ese protocolo.
