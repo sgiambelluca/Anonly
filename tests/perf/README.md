@@ -405,3 +405,39 @@ pasada complementaria en el mismo proceso de cada brazo. No sumar ni restar
 RSS, heap JS y WASM. Las sondas CDP WASM/heap pueden ocupar varios cientos de
 milisegundos por lectura; sus duraciones, targets no observables y `partial`
 quedan en el JSON para interpretar la resolución real.
+
+## ADR-174 — PDFs pesados, render completo y exportación
+
+Banco de caracterización opt-in del punto 3 de
+`docs/roadmap/PDFs_Pesados_Y_Exportacion_Plan.md`. No forma parte de `pnpm
+test:perf` cotidiano. Requiere los assets de modelo locales fijados en
+`assets.lock.json`; antes del build, `pnpm assets:mirror` debe completar con
+hashes válidos. Los perfiles H1/H2 generan PDFs de 6 páginas A4 con imágenes
+1800×2544 px y fuente ≥8 MiB; C0 reutiliza el fixture existente de texto de
+10 páginas. Hay que reservar espacio para los PDFs/exportaciones en
+`.measure/fixtures/` y `.measure/heavy-export/`.
+
+```sh
+ANONLY_HEAVY_EXPORT=1 ./tests/perf/run-heavy-export.sh
+```
+
+La regeneración completa opcional verifica que los hashes H1/H2 publicados
+pueden reproducirse fuera de la caché, sin modificar los archivos medidos:
+
+```sh
+ANONLY_VERIFY_HEAVY_FIXTURES=1 pnpm exec vitest run \
+  tests/perf/support/heavyPdfFixtures.test.ts --testNamePattern "reproduce los hashes publicados"
+```
+
+El runner construye React/Electron y solo ejecuta
+`heavy-export-memory.spec.ts`. Cada repetición usa una instancia nueva de
+Electron y la secuencia intercalada H1, C0, H2; corre tres repeticiones por
+perfil, más una prueba adicional de cancelación H1. Los JSON, PDFs descargados
+y manifests de fixture quedan en `.measure/`; no se versionan. La comparación
+visual PDF.js usa la misma escala y regiones de control del original y el
+descargado, incluye un PDF blanco artificial como negativo, y comprueba
+también marcadores/texto de fuente conocidos. M1 se rotula como ciclo de
+exportación: su línea base fría incluye render/export/cierre y no se compara
+numéricamente con M1 histórico de importación sola. Las sondas CDP heap/WASM
+que fuerzan GC no corren dentro de las ventanas; el JSON lo marca como no
+observado. RSS nativo y presión del sistema se conservan con sus límites.
