@@ -2,7 +2,7 @@
 
 # Punto 3 — Banco de PDFs pesados, render y exportación
 
-**Estado (2026-09-23): banco implementado y medido localmente; código pendiente de commit.**
+**Estado (2026-09-23): punto 3 cerrado como caracterización; banco implementado, medido y versionado en `8f0d7f0`.**
 Este plan implementa el punto 3 de `Optimizacion_De_Memoria_Plan.md` §2ter y la decisión de ADR-174. La entrega es un banco opt-in y un informe de corridas, no una optimización del producto.
 
 La ejecución de nueve corridas intercaladas, cancelación y gates está en `PDFs_Pesados_Y_Exportacion_Medicion.md`. Los rangos observados no alcanzan para atribuir el exceso a una copia concreta ni a color/códec por separado. Este plan conserva el protocolo para reproducir o ampliar la medición.
@@ -15,7 +15,7 @@ Versionar un generador determinista en `tests/perf/support/`. Usar dependencias 
 | --- | --- | --- |
 | C0, control | P1 de 10 páginas de texto nativo existente | deriva entre corridas |
 | H1, color | al menos 6 páginas A4, imagen RGB de al menos 1800 × 2400 px por página, codificada JPEG, PDF fuente ≥ 8 MiB | bytes comprimidos grandes y decodificación color |
-| H2, grises | mismas páginas, geometría y patrón base que H1, escala de grises codificada PNG sin pérdida, PDF fuente ≥ 8 MiB | representación de imagen sin cambiar cantidad/geometría de páginas |
+| H2, grises | mismas páginas, geometría y patrón base que H1, píxeles visualmente grises (R=G=B) en PNG sin pérdida, PDF fuente ≥ 8 MiB; Chromium los codificó como RGB PNG | representación de imagen sin cambiar cantidad/geometría de páginas |
 
 H1/H2 usan semilla fija, patrón con entropía suficiente para alcanzar el piso de bytes y una franja de control de alto contraste por página con número de página y texto vecino ficticio. Registrar por corrida versión/semilla, número y dimensiones de páginas, modo/color, codec, tamaño y SHA-256 del PDF. Fallar si tamaño o geometría incumplen; un fixture vacío o casi uniforme no representa esta clase. El generador debe tener un test pequeño de determinismo/estructura que no inicie Electron ni procese el PDF pesado entero. Mantener **la misma salida binaria** durante toda la tanda; una variación de hash invalida la comparación. El corpus es sintético: se puede conservar el PDF y el export en `.measure/` para inspección local, nunca en Git.
 

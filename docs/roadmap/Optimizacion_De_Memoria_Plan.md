@@ -74,7 +74,8 @@
 > tiene documentación cerrada por ADR-174 y
 > `PDFs_Pesados_Y_Exportacion_Plan.md`. El banco opt-in y la medición de
 > H1/H2/C0 se completaron localmente (`PDFs_Pesados_Y_Exportacion_Medicion.md`);
-> el código del banco queda pendiente de commit.
+> el banco quedó versionado en `8f0d7f0`. El punto 3 se cierra como
+> caracterización, sin cambios de producto ni de presupuestos.
 > Alcance y entregables en §2ter.
 > El ahorro de memoria se evaluará junto con el tiempo: la posterior revisión
 > de perfiles podrá admitir mayor consumo a cambio de una mejora medida de
@@ -1004,7 +1005,8 @@ verificar, no la explicación demostrada de todo ese consumo.
 
 **Documentación cerrada para implementar el banco el 2026-09-23** (ADR-174 y
 `PDFs_Pesados_Y_Exportacion_Plan.md`); medición local completada en
-`PDFs_Pesados_Y_Exportacion_Medicion.md`, código aún sin commit. El plan
+`PDFs_Pesados_Y_Exportacion_Medicion.md`, con banco versionado en `8f0d7f0`.
+El punto 3 queda cerrado como caracterización. El plan
 específico fija perfiles, generación, fases, observabilidad, verificación de
 descarga, cancelación y entregables. Las viñetas siguientes expresan el objetivo
 de la etapa y se leen con ese protocolo.

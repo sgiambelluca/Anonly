@@ -2,7 +2,7 @@
 
 # Punto 3 — Medición de PDFs pesados y exportación
 
-**Corrida final v3:** 2026-09-23, implementación de `ba357a0` (`ba357a0f10feb013b07acdc9ab145926ed0b1802`), renderer dist `da9a154286252a18ed2bc042f9e1eeb9d6267ca84890e15e6eb2a49a936e803d`. **Estado:** 3/3 repeticiones por perfil terminadas; control de cancelación H1 de la tanda anterior conservado (la lógica no cambió). Es una caracterización de este build y host, no un gate ni una promesa de memoria.
+**Corrida final v3:** 2026-09-23, implementación de `ba357a0` (`ba357a0f10feb013b07acdc9ab145926ed0b1802`), renderer dist `da9a154286252a18ed2bc042f9e1eeb9d6267ca84890e15e6eb2a49a936e803d`. **Estado:** 3/3 repeticiones por perfil terminadas; control de cancelación H1 de la tanda anterior conservado (la lógica no cambió). El banco quedó versionado después de la corrida en `8f0d7f0`. Es una caracterización de este build y host, no un gate ni una promesa de memoria.
 
 ## Diseño y entorno
 

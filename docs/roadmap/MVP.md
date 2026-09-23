@@ -602,8 +602,9 @@ De las ~70: **~30 ya estaban cerradas** por hitos posteriores (ADR-053/054/056, 
   `Empaquetado_NER_Medicion.md`). El punto 3 (PDFs pesados/exportación) tiene
   ADR-174 y `PDFs_Pesados_Y_Exportacion_Plan.md` cerrados; el banco opt-in
   completó nueve corridas y cancelación localmente, con informe en
-  `PDFs_Pesados_Y_Exportacion_Medicion.md`. El código del banco está pendiente
-  de commit; no se modificaron presupuestos ni motores.
+  `PDFs_Pesados_Y_Exportacion_Medicion.md`. El banco quedó versionado en
+  `8f0d7f0`; el punto 3 se cierra como caracterización, sin modificar
+  presupuestos ni motores.
   Alcance canónico: `Optimizacion_De_Memoria_Plan.md` §2ter. No cierra el Hito 11.
 - **Próximos objetivos de tiempo (2026-09-20, sin ejecutar):** medir más hilos
   dentro del único worker NER, más workers de reconocimiento OCR, varios
