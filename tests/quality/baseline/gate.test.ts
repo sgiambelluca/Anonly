@@ -5,7 +5,7 @@
  * temporal: uno idéntico a la baseline (verde) y uno alterado a propósito
  * para introducir una regresión conocida (rojo, código de salida != 0).
  */
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -141,17 +141,12 @@ describe("runGate — extremo a extremo (ADR-147 §9)", () => {
   });
 
   it("usa tests/quality/baselines/reference-v1.json como baseline por defecto", async () => {
-    // No se llama sin segundo argumento en este test porque ese archivo no
-    // existe todavía (ADR-147: la primera baseline real queda pendiente de
-    // una corrida de Playwright fuera de esta tarea) — se verifica solo que
-    // el default APUNTA al lugar documentado, leyendo el candidato contra sí
-    // mismo pasado explícitamente como baseline no prueba el default. En vez
-    // de inventar un candidato de humo, este test confirma el comportamiento
-    // observable: sin baseline en disco, `runGate` rechaza con el error de
-    // lectura de archivo (ENOENT), no con un default silencioso a otra ruta.
+    // La referencia Chromium/WASM de ADR-147 ya está versionada. Al pasarla
+    // como candidato sin segundo argumento se ejerce la ruta por defecto.
     const candidatePath = join(dir, "candidate.json");
-    await writeFile(candidatePath, JSON.stringify(makeBaseline(), null, 2));
+    const reference = await readFile(new URL("../baselines/reference-v1.json", import.meta.url));
+    await writeFile(candidatePath, reference);
 
-    await expect(runGate(candidatePath)).rejects.toThrow(/ENOENT|no such file/i);
+    expect(await runGate(candidatePath)).toBe(0);
   });
 });
