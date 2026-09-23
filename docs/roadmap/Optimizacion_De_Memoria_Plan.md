@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-plan | dependencias=roadmap/H-10_Bitacora_De_Memoria.md,architecture/07_Performance_Strategy.md,core/OCR_Engine.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-147-Perder-Un-Identificador-Cubierto-Es-Una-Regresion.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-157-El-Pool-De-OCR-Se-Da-De-Baja-Al-Terminar-Su-Etapa.md,adr/ADR-158-El-Raster-De-OCR-Viaja-Codificado.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md,adr/ADR-161-Una-Franja-Sin-Tinta-No-Se-Reconoce.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,tests/fixtures/README.md,tests/perf/README.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-166-El-Modelo-De-NER-Se-Libera-Al-Terminar-La-Deteccion.md,roadmap/Verificacion_Liberacion_NER_Medicion.md,roadmap/AB_Intercalado_Plan.md,roadmap/AB_Intercalado_Medicion.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md,adr/ADR-173-El-Empaquetado-De-NER-Se-Evalua-Sin-Cambiar-El-Modelo.md,roadmap/Empaquetado_NER_Medicion.md,roadmap/Ciclos_Y_Documentos_Reales_Plan.md,roadmap/Ciclos_Y_Documentos_Reales_Medicion.md,roadmap/Optimizacion_De_Rendimiento.md,roadmap/Banco_Windows_Comparativa_Medicion.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=roadmap-plan | dependencias=roadmap/H-10_Bitacora_De_Memoria.md,architecture/07_Performance_Strategy.md,core/OCR_Engine.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-147-Perder-Un-Identificador-Cubierto-Es-Una-Regresion.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-157-El-Pool-De-OCR-Se-Da-De-Baja-Al-Terminar-Su-Etapa.md,adr/ADR-158-El-Raster-De-OCR-Viaja-Codificado.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md,adr/ADR-161-Una-Franja-Sin-Tinta-No-Se-Reconoce.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,tests/fixtures/README.md,tests/perf/README.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-166-El-Modelo-De-NER-Se-Libera-Al-Terminar-La-Deteccion.md,roadmap/Verificacion_Liberacion_NER_Medicion.md,roadmap/AB_Intercalado_Plan.md,roadmap/AB_Intercalado_Medicion.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md,adr/ADR-173-El-Empaquetado-De-NER-Se-Evalua-Sin-Cambiar-El-Modelo.md,adr/ADR-174-Los-PDFs-Pesados-Se-Miden-Hasta-El-Archivo-Exportado.md,roadmap/Empaquetado_NER_Medicion.md,roadmap/PDFs_Pesados_Y_Exportacion_Plan.md,roadmap/Ciclos_Y_Documentos_Reales_Plan.md,roadmap/Ciclos_Y_Documentos_Reales_Medicion.md,roadmap/Optimizacion_De_Rendimiento.md,roadmap/Banco_Windows_Comparativa_Medicion.md | audiencia=humanos+IA | fase=11 -->
 
 # Optimización de memoria — plan de campaña
 
@@ -71,7 +71,8 @@
 > seguimiento Windows separados. El punto 1 se evaluó con el experimento
 > opt-in de ADR-173 y `NER_Engine.md` §12–§15: B redujo WASM, pero sin ventaja
 > RSS atribuible; se conserva A (`Empaquetado_NER_Medicion.md`). El punto 3
-> queda sin iniciar.
+> tiene documentación cerrada por ADR-174 y
+> `PDFs_Pesados_Y_Exportacion_Plan.md`; su implementación está pendiente.
 > Alcance y entregables en §2ter.
 > El ahorro de memoria se evaluará junto con el tiempo: la posterior revisión
 > de perfiles podrá admitir mayor consumo a cambio de una mejora medida de
@@ -997,6 +998,12 @@ verificar, no la explicación demostrada de todo ese consumo.
   calidad de ADR-147. Conservar o revertir según evidencia de memoria, tiempo y salida.
 
 ### 3 — Ampliar el banco a PDFs pesados y exportación
+
+**Documentación cerrada para implementar el banco el 2026-09-23** (ADR-174 y
+`PDFs_Pesados_Y_Exportacion_Plan.md`); resultados aún pendientes. El plan
+específico fija perfiles, generación, fases, observabilidad, verificación de
+descarga, cancelación y entregables. Las viñetas siguientes expresan el objetivo
+de la etapa y se leen con ese protocolo.
 
 Después del punto 1, caracterizar documentos con imágenes grandes, color/grises y
 mayor tamaño en bytes, además de la densidad de texto que ya ejercitan R1/R2.
