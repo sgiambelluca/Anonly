@@ -15,6 +15,12 @@
   (re-análisis), ADR-061 §5 (literales manuales retenidos), ADR-044 (re-render por eventos de Grouping).
 - **Parte de**: Hito 12.5 — Rediseño desde las pruebas de usuario
 
+> **Errata de spec (2026-09-23), sin cambio de decisión.** `Grouping_Engine.md` §13 caso 53 agregó que
+> `reopenSession` descartaba los puntos, cosa que este ADR no dice: acá el descarte por re-análisis lo
+> hace el Orchestrator en `reanalyze`. Como `addManualEntity` reabre la sesión, esa línea hacía que
+> agregar a mano borrara todo el historial y no se pudiera deshacer. Se corrigió el spec del motor;
+> este ADR queda igual.
+
 ## Contexto
 
 ### 1. Por qué hoy no se puede deshacer todo

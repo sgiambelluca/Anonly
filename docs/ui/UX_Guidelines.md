@@ -415,13 +415,13 @@ hace cada modo— y el **nombre accesible** usan siempre la forma larga.
 que el usuario tiene es qué le va a pasar *a su dato*. En el selector de nivel tipo usa el primer
 grupo del tipo; en el de nivel documento es genérico.
 
-> **Solo el modo vigente muestra un valor exacto** (`replacementValue`, ya resuelto por Grouping).
-> Los otros tres se describen de forma esquemática y **no se inventan**: el token de `placeholder`
-> sale de la escalera de ADR-057 y del género de ADR-060, el formato de `mask` de
-> `MASK_FORMAT_BY_TYPE` —que vive en un motor, y la UI no puede importar motores (P-1)—, y el de
-> `synthetic` del sintetizador de ADR-072 §1. Un ejemplo *casi* correcto es peor que uno
-> declaradamente esquemático: la primera implementación mostraba `[PERSONA 01]` para **todos** los
-> tipos, así que un DNI previsualizaba como si fuera una persona.
+> **Los cuatro modos muestran su valor exacto** (ADR-170): vienen calculados por Grouping en
+> `EntityGroup.replacementPreviews`, con la misma función que `replacementValue`. Hasta ADR-170 solo
+> el modo vigente era exacto y los otros tres se describían de forma esquemática, porque sus formatos
+> viven en un motor y la UI no puede importar motores (P-1) ni reimplementarlos (U-3): un ejemplo
+> *casi* correcto es peor que ninguno — la primera implementación mostraba `[PERSONA 01]` para
+> **todos** los tipos. Cada opción lleva además una descripción fija, y elegir otra solo mueve el
+> tilde (ADR-169 §6).
 
 ---
 

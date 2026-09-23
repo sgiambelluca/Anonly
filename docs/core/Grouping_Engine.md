@@ -177,7 +177,7 @@ export class GroupingEngine implements IEngine {
   // _CREATED / _UPDATED (changes = claves que difieren), CONFLICT_DETECTED /
   // _RESOLVED. Id desconocido -> InvalidInputError.
   restoreCheckpoint(documentId: string, checkpointId: string): Promise<void>;
-  discardCheckpoints(documentId: string): void;   // también en reopenSession y closeSession
+  discardCheckpoints(documentId: string): void;   // también en closeSession; NO en reopenSession (errata ADR-172)
   closeSession(documentId: string): Promise<void>;
   dispose(): Promise<void>;
 }
@@ -353,7 +353,9 @@ Grouping es determinista dadas las ocurrencias y reglas; sin errores de runtime 
 50. **Un agregado manual nuevo revierte la eliminación (ADR-171 §4)**: `liftRemoval(documentId, value)` quita el valor normalizado de `removedValues`; la ocurrencia manual que sigue se agrupa normal. Sesión inexistente → `warn` + no-op.
 51. **Restaurar es exacto (ADR-172 §1)**: tras `createCheckpoint` → cualquier secuencia de ediciones (fusión múltiple, división, reclasificación, eliminación, patch de género, reglas) → `restoreCheckpoint`, el snapshot **y el estado interno** (`absorbedTypes`, `personGenderUserSet`, `replacementValueUserSet`, `typeCorrections`, `removedValues`, `nextIndex`) son idénticos a los del punto: mismos `id`, `indexInType` y `replacementValue`. La siguiente ocurrencia nueva recibe el mismo `indexInType` que habría recibido en el punto.
 52. **Restaurar emite solo la diferencia (ADR-172 §1)**: grupos idénticos no emiten nada; los que sobran → `ENTITY_GROUP_REMOVED`; los que faltan → `ENTITY_GROUP_CREATED`; los que cambiaron → `ENTITY_GROUP_UPDATED` con `changes` exacto; conflictos → `CONFLICT_DETECTED`/`CONFLICT_RESOLVED`.
-53. **Límites de los puntos (ADR-172 §1)**: el `MAX_EDIT_CHECKPOINTS + 1`-ésimo descarta el más viejo; restaurar uno descartado, uno de otro documento o uno inventado → `InvalidInputError`; `reopenSession` y `closeSession` los descartan todos. Una copia comparte los objetos inmutables con la sesión (no los clona).
+53. **Límites de los puntos (ADR-172 §1)**: el `MAX_EDIT_CHECKPOINTS + 1`-ésimo descarta el más viejo; restaurar uno descartado, uno de otro documento o uno inventado → `InvalidInputError`; `closeSession` los descarta todos; **`reopenSession` NO** (errata 2026-09-23, ver abajo). Una copia comparte los objetos inmutables con la sesión (no los clona).
+
+    > **Errata (2026-09-23).** La primera redacción decía que `reopenSession` también los descartaba. Eso contradice ADR-172: `addManualEntity` reabre la sesión (ADR-061 §6), así que agregar a mano borraba todo el historial y el propio agregado no se podía deshacer — confirmado con el Core real en el browser; el test del Orchestrator (caso 39) pasaba solo porque usaba un Grouping simulado. El descarte por re-análisis que ADR-172 §1 pide lo hace el **Orchestrator** en `reanalyze`, **antes** de `reopenSession` (`Orchestrator.md` §6); el motor no necesita hacerlo. Restaurar un punto tomado antes de un agregado manual es exacto: el punto guarda la sesión completa, contadores de `nextIndex` incluidos.
 
 ---
 
@@ -365,7 +367,7 @@ Grouping es determinista dadas las ocurrencias y reglas; sin errores de runtime 
 | `after restore, the next new group gets the indexInType it would have got` | `edge.test.ts` | edge | caso 51 (`nextIndex` restaurado) |
 | `restoreCheckpoint emits only the diff` | `unit.test.ts` | unit | caso 52 |
 | `checkpoint limit evicts the oldest; unknown ids throw` | `edge.test.ts` | edge | caso 53 |
-| `reopenSession and closeSession discard all checkpoints` | `unit.test.ts` | unit | caso 53 |
+| `closeSession discards all checkpoints; reopenSession keeps them` | `unit.test.ts` | unit | caso 53 (con la errata: el que existía afirmaba lo contrario y se reescribe) |
 | `applyGroupRemove removes the group, resolves its conflicts and emits ENTITY_GROUP_REMOVED` | `contract.test.ts` | contract | caso 48 (ADR-171 §2) |
 | `removed group leaves an indexInType hole until the next finishSession` | `edge.test.ts` | edge | caso 48 + caso 15 |
 | `applyGroupRemove on an unknown group warns and is a no-op` | `edge.test.ts` | edge | caso 48 |
@@ -537,7 +539,7 @@ Fixtures: `tests/fixtures/text-10p.pdf` con entidades conocidas que generan grup
 - [x] 15q. (Hito 10.10 — ADR-085 §1-§7) `InternalGroup.absorbedTypes` (consultado en el filtro de candidatos de `findMatchingGroup`, por ocurrencia) + `Session.typeCorrections` (consultado **solo** en `createGroup`, o sea una vez por grupo creado). `createGroup` siembra `absorbedTypes` con los dos tipos, así el mapa no se vuelve a tocar para ese valor. El guard difuso es **simétrico**: mira `occurrence.entityType` **y** el `detectorType` guardado en la corrección — una corrección sobre un valor estructurado no se hereda por parecido a un nombre. Ninguna de las dos piezas se expone. **Dónde NO se consulta** (§6, la parte que se puede hacer mal): ni en `isDuplicateIdentity`, ni en `findOverlapConflict`, ni en `recordOccurrence`. Cinco filas en §14.
 - [x] 15r. (Hito 12.5 — ADR-170) `replacementPreviews` calculado con `computeReplacementValue` por modo, ignorando `replacementValueUserSet`, antes de toda emisión de `ENTITY_GROUP_CREATED`/`ENTITY_GROUP_UPDATED` (con `"replacementPreviews"` en `changes` cuando cambió). `previewEdit` como simulacro sobre una copia de la sesión con la emisión desactivada, reusando `applyGroupUpdate`/`applyGroupMerge`/`applyGroupSplit`. Casos 46-47, siete filas en §14.
 - [x] 15s. (Hito 12.5 — ADR-171) `applyGroupRemove` (escucha `GROUP_REMOVE_REQUESTED` en el canal `ui`), `Session.removedValues` interno y fuera del snapshot, paso 0 de Matching para toda fuente, `liftRemoval` público para el Orchestrator. Casos 48-50, siete filas en §14.
-- [x] 15t. (Hito 12.5 — ADR-172) `createCheckpoint`/`restoreCheckpoint`/`discardCheckpoints` con copia estructural de la sesión (misma función de copia que `previewEdit`), límite `MAX_EDIT_CHECKPOINTS`, descarte en `reopenSession`/`closeSession`, restauración que emite solo la diferencia. Casos 51-53, cinco filas en §14.
+- [ ] 15t. (Hito 12.5 — ADR-172; **reabierto por la errata del caso 53**) `createCheckpoint`/`restoreCheckpoint`/`discardCheckpoints` con copia estructural de la sesión (misma función de copia que `previewEdit`), límite `MAX_EDIT_CHECKPOINTS`, descarte en `closeSession` (**no** en `reopenSession`), restauración que emite solo la diferencia. Casos 51-53, cinco filas en §14.
 - [ ] 16. Escribir `contract.test.ts` con todos los tests contractuales.
 - [ ] 17. Escribir `unit.test.ts` con cobertura ≥ 85%.
 - [ ] 18. Escribir `edge.test.ts` con todos los casos límite.

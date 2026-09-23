@@ -334,7 +334,7 @@ la nueva clave. Fakes remotos resuelven el sobre real, no ejecutan run().
 
 | Test | Archivo | Tipo | Descripción |
 |---|---|---|---|
-| `restoring a checkpoint also restores the retained manual literals` | `unit.test.ts` | unit | caso 39 (ADR-172) |
+| `restoring a checkpoint also restores the retained manual literals` | `unit.test.ts` | unit | caso 39 (ADR-172) — **con el `GroupingEngine` real, no simulado**: el simulado ocultó que `reopenSession` descartaba los puntos (errata de `Grouping_Engine.md` §13 caso 53) |
 | `reanalyze discards edit checkpoints; checkpoints are refused during a detection pass` | `edge.test.ts` | edge | caso 40 |
 | `addManualEntity lifts a previous removal; the reanalyze re-application does not` | `unit.test.ts` | unit | caso 38 (ADR-171 §4) |
 | `previewEdit delegates to grouping.previewEdit and does not alter the snapshot` | `unit.test.ts` | unit | ADR-170 §2 |
