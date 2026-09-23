@@ -334,45 +334,30 @@ y 12 entidades que modificaste a mano.
 **El undo lleva snapshot**: deshacer un barrido tiene que **restaurar las reglas que borró**, no
 solo quitar la que creó.
 
-### 3.3b Qué más lleva "Deshacer"
+### 3.3b Deshacer: toda edición, exacto (ADR-172)
 
-El criterio de arriba —*una acción de un click que cambia muchas filas, o que pisa algo que el
-usuario escribió, necesita una salida de un click*— no aplica solo al modo de reemplazo. Las
-demás ediciones del árbol que lo cumplen también llevan toast con "Deshacer":
+**Toda edición de entidades se deshace**, con `Ctrl/Cmd+Z` y se rehace con `Ctrl/Cmd+Y` (o
+`Ctrl/Cmd+Shift+Z`): habilitar/deshabilitar, el modo en sus tres niveles, el género, editar el valor de
+reemplazo, restaurar el calculado, cambiar tipo, fusionar, dividir, eliminar, agregar (por las tres
+vías) y resolver un conflicto. Una acción del usuario es **un** paso, aunque por dentro emita varios
+pedidos.
 
-| Acción | Por qué lo lleva |
-|---|---|
-| Habilitar/deshabilitar una fila | decide si ese dato se anonimiza o queda a la vista; se hace de a muchas y en cadena |
-| Habilitar/deshabilitar un tipo (cascada, o `Space` sobre la cabecera) | un click apaga decenas de grupos, y por teclado ni siquiera hay un diálogo de por medio |
-| Editar el valor de reemplazo a mano | pisa el valor anterior, escrito o calculado |
+**Es exacto porque no se construye con la operación contraria.** Hasta ADR-172 esta sección explicaba
+por qué fusionar, dividir, reclasificar y agregar a mano no se podían deshacer: la inversa devolvía un
+grupo con otro `id` y otro número, o sea algo parecido y no lo mismo, y un "Deshacer" así miente. Esa
+razón sigue siendo cierta, y por eso el deshacer **no invierte operaciones**: vuelve a un **punto de
+restauración** del estado que guarda el Core antes de cada edición. El grupo vuelve con el mismo `id`,
+el mismo número y el mismo token.
 
-El undo de la cascada **restituye grupo por grupo su valor anterior**, no un valor global: la
-mitad de las filas podía estar ya en ese estado, y devolverlas a todas al mismo lado cambiaría
-cosas que el usuario no tocó. Por la misma razón el contador del toast cuenta solo los grupos que
-de verdad cambiaron.
+**Toasts con "Deshacer"**: toda acción del menú ⋯ y todo agregado muestran uno, con la pista `Ctrl+Z`
+(UX-11). Los barridos de modo de tipo y documento y el cambio de habilitado ya lo tenían y lo
+conservan. **La fila sigue sin toast al cambiar de modo** (§3.4d: es la acción más frecuente y es
+autoevidente), pero ese cambio también se deshace con `Ctrl+Z`. Hay un solo toast de edición a la vez:
+el botón deshace la última edición, que es siempre la que el toast nombra.
 
-Cuando el valor de reemplazo anterior era el **calculado** por el Core, el undo no lo reescribe:
-re-aplica el modo vigente, que es lo que lo recalcula. Reescribirlo lo dejaría marcado como
-escrito a mano (ADR-078), y el punto de la fila mentiría desde ahí en adelante.
-
-**Cuatro acciones siguen sin deshacer, y no por olvido.** Las cuatro comparten la misma razón de
-fondo: el Core no tiene una inversa exacta, y un "Deshacer" que devuelve algo parecido y no lo
-mismo miente.
-
-- **Agregar una entidad a mano** necesitaría borrar el grupo, y no existe pedido de borrado en
-  `core/Contracts.md`: `ENTITY_GROUP_REMOVED` lo emite el Grouping Engine por su cuenta (fusión,
-  `dropOccurrences`), nunca a pedido de la UI. Agregarlo es cambio de contrato — ADR primero.
-- **Fusionar** y **dividir** se invertirían con la operación contraria, pero eso no restituye el
-  estado anterior: el grupo que reaparece es uno nuevo, con otro `id` y otro `indexInType`
-  (`core/Grouping_Engine.md` §13 caso 5). El usuario recuperaría las ocurrencias separadas con
-  otro número de token.
-- **Reclasificar** parece el caso trivial —volver al tipo anterior— y es el que más engaña.
-  `changeGroupType` renumera con `nextIndex`, que es monótono, así que el grupo vuelve con otro
-  número de token y con él cambia el `replacementValue` de `placeholder`/`synthetic`; re-escribe
-  `typeCorrections` (ADR-085 §1b) en vez de borrar la entrada que antes no existía; deja
-  `absorbedTypes` con los dos tipos para siempre; y al salir de `Person` apaga
-  `personGenderUserSet`, así que el "undo" reemplazaría **en silencio** una elección explícita de
-  género por una inferida. Su fricción es el diálogo, no un toast.
+**Qué no se deshace**: ordenar o filtrar la lista, el zoom, la vista, Configuración y exportar — no son
+ediciones del documento. **La pila no cruza un re-análisis**: cambiar los idiomas de OCR con un
+documento abierto la vacía, y el diálogo de re-análisis lo dice.
 
 **La franja de documento se enciende cuando tiene algo que destruir, sin crecer** (forma
 reemplazada por ADR-169 §5 — antes era un borde izquierdo de acento más una línea que aparecía, y esa

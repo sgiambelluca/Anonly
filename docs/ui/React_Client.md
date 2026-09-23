@@ -182,6 +182,11 @@ export const actions = {
     getCore().bus.emit(EventChannel.UI, EngineEvents.GROUP_SPLIT_REQUESTED, { documentId, groupId, occurrenceIds });
   },
 
+  // ADR-172 §2: TODA acción de edición llama a stores.history.getState().record(label)
+  // ANTES de emitir sus pedidos (un punto de restauración del estado previo). Una
+  // acción del usuario = un record, aunque emita varios pedidos (mergePlan, el
+  // barrido de un modo, eliminar = RULE_DELETED + GROUP_REMOVE_REQUESTED).
+
   // ADR-171 §5: si la fila tenía una Rule de scope group, se borra primero
   // (RULE_DELETED): una regla huérfana contaría en la franja "Todo el documento".
   // Los dos pasos entran en un mismo punto de deshacer (ADR-172).
@@ -452,6 +457,35 @@ interface SettingsSlice {
 
 No todo lo de este slice alimenta `EngineConfig`: `language` y `defaultReplacementMode` son preferencias de la app que `settingsToEngineConfig` no mapea (§3.7).
 
+### 3.6c `history.store.ts` (ADR-172 §2)
+
+```ts
+interface HistoryEntry { readonly checkpointId: string; readonly label: string; }
+interface HistorySlice {
+  readonly past: ReadonlyArray<HistoryEntry>;     // se deshace el último
+  readonly future: ReadonlyArray<HistoryEntry>;   // se rehace el último
+  record(label: string): void;   // orchestrator.createEditCheckpoint ANTES de editar; vacía future
+  undo(): Promise<void>;         // checkpoint del actual -> future; restore del último de past
+  redo(): Promise<void>;         // simétrico
+  clear(): void;                 // + orchestrator.discardEditCheckpoints
+}
+```
+
+- **Qué entra**: habilitar/deshabilitar (fila y cascada), el modo en sus tres niveles, el género, editar
+  el valor de reemplazo, "Restaurar valor calculado", cambiar tipo, fusionar, dividir, eliminar,
+  agregar una entidad (tres vías) y resolver un conflicto. **No** entran orden, filtro, zoom, vista,
+  Configuración ni exportar.
+- **Después de `undo`/`redo`**: la UI rehidrata `rules.store` desde
+  `grouping.getSnapshot(documentId).rules` (U-6). Grupos y conflictos llegan solos por los eventos.
+- **Se vacía** (`clear`) al cerrar el documento, al importar otro y al re-analizar.
+- **Atajos** (ADR-172 §3): un listener en `WorkLayout` —solo en ②b—: `Ctrl/Cmd+Z` → `undo`;
+  `Ctrl/Cmd+Y` y `Ctrl/Cmd+Shift+Z` → `redo`. No actúa con el foco en `input`/`textarea`/
+  `contenteditable`, con un diálogo abierto, durante una pasada de detección ni durante un export.
+- **Toasts**: el "Deshacer" de todo toast de edición llama a `undo()`. Un solo toast de edición a la
+  vez; una edición nueva lo reemplaza y un undo/redo por atajo lo cierra.
+- **Reemplaza** al snapshot de reglas del toast de los barridos (`Components.md` §3.11) y a la
+  restitución grupo por grupo de `components/entities/undoableEdits.ts`.
+
 ### 3.6b `degraded.store.ts` (ADR-062 §3)
 
 > Numerado `3.6b` y no `3.7` a propósito: `§3.7` (el mapeo settings → `EngineConfig`) está citado por nombre desde `Components.md` y desde cuatro ADRs ya aceptados —ADR-036, ADR-038, ADR-048, ADR-081—, y correrlo dejaría veinte punteros muertos o obligaría a reescribir ADRs que no se reescriben. Es la misma convención de inserción que `Components.md` §3.4b/§5.4b y que PR16.5.
@@ -547,7 +581,9 @@ export async function createCore(
 ```
 
 **Consultas de solo lectura del adapter** (todas en `IPipelineOrchestrator`, `Contracts.md` §3.5):
-`findText`, `getPageWords`, `getPageSize` (ADR-061) y **`previewEdit`** (ADR-170 §2), que los
+`findText`, `getPageWords`, `getPageSize` (ADR-061), **`previewEdit`** (ADR-170 §2) y los puntos de
+restauración `createEditCheckpoint`/`restoreEditCheckpoint`/`discardEditCheckpoints` (ADR-172, usados
+solo por `history.store`), que los
 diálogos de Fusionar, Dividir y Cambiar tipo llaman al cambiar su selección (`actions.previewEdit`).
 Las vistas previas del selector de modo no se piden: vienen en `EntityGroup.replacementPreviews`.
 

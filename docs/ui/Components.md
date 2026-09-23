@@ -141,7 +141,7 @@ apps/react-client/src/components/
 - **Trigger**: icono de engranaje en el Toolbar (siempre visible; `UX_Guidelines.md` §2).
 - **Stores**: `settings`, `document` (para saber si hay documento abierto).
 - **Form** (`MVP.md` §2.3): idioma (`es` default), performance preset (`auto`/`low`/`high`), idiomas del documento. **Sin toggle de detección de nombres** (ADR-126).
-- **Acción**: muta `settings.store` + `settings.persist()`. Si el cambio es `ocrLanguages` y hay documento abierto: `ConfirmDialog` "¿Reanalizar el documento con la nueva configuración? Tus ediciones se conservan." → `actions.reanalyze(patch)` (ADR-038 §7, `React_Client.md` §3.7 — **no** recrea el core). Si es `performancePreset` con documento abierto: se persiste y aplica al próximo documento, sin diálogo de confirmación (ADR-038 §7 Q3).
+- **Acción**: muta `settings.store` + `settings.persist()`. Si el cambio es `ocrLanguages` y hay documento abierto: `ConfirmDialog` "¿Reanalizar el documento con la nueva configuración? Tus ediciones se conservan, pero lo hecho hasta acá ya no se va a poder deshacer." (la segunda mitad por ADR-172 §1: los puntos de restauración no cruzan un re-análisis) → `actions.reanalyze(patch)` (ADR-038 §7, `React_Client.md` §3.7 — **no** recrea el core). Si es `performancePreset` con documento abierto: se persiste y aplica al próximo documento, sin diálogo de confirmación (ADR-038 §7 Q3).
 - **ARIA**: `aria-label="Configuración"`.
 - **Sin sección "Acerca de"** (ADR-168 §3, reemplaza ADR-070 §1): los créditos y el código fuente pasan a `AboutDialog` (§2.9). Al pie del formulario queda **una línea** que dice dónde están ahora, para quien los busque acá.
 - **Actualizaciones** (solo en el contenedor de escritorio): interruptor "Actualizar automáticamente", el texto que describe los dos estados, y el aviso de la salida de red de ADR-131 §5 con este texto: *"Es la única conexión de Anonly a internet: le pregunta a GitHub si hay una versión nueva. Como en cualquier conexión, GitHub ve desde dónde llega la consulta (tu IP) y qué versión tenés. Nunca se envía el contenido ni el nombre de un documento."* Debajo, la versión instalada y "Buscar actualizaciones ahora".
@@ -548,25 +548,27 @@ Marca los grupos que **el detector sugirió sin estar seguro**: nacen con `enabl
 - **Confirmación**: solo si algún grupo del tipo tiene `Rule` de scope `group`.
 - **Undo** (§3.11): toast de 5 s, **con snapshot** de las reglas borradas.
 
-### 3.11 Undo de los cambios de modo (ADR-087 §3.3)
+### 3.11 Deshacer (ADR-087 §3.3, mecanismo por ADR-172)
 
 **La fricción escala con lo que hay en juego.** Ningún nivel confirma cuando no hay nada que romper:
 
-| Nivel | Confirmación | Toast "Deshacer" (5 s) |
-|---|---|---|
-| `ReplacementModeSelect` (§3.4) | nunca | solo si `replacementValueUserSet === true` |
-| `TypeModeSelect` (§3.10) | solo si el tipo tiene reglas de grupo | siempre |
-| `DocumentModeSelect` (§3.9) | solo si hay reglas de tipo o de grupo | siempre |
+| Nivel | Confirmación | Toast "Deshacer" (5 s) | `Ctrl+Z` |
+|---|---|---|---|
+| `ReplacementModeSelect` (§3.4) | nunca | solo si `replacementValueUserSet === true` | sí |
+| `TypeModeSelect` (§3.10) | solo si el tipo tiene reglas de grupo | siempre | sí |
+| `DocumentModeSelect` (§3.9) | solo si hay reglas de tipo o de grupo | siempre | sí |
+| Menú ⋯ (§3.5) y agregados (§3.4c, §5.4b, §5.4c) | solo "Eliminar entidad" | siempre | sí |
 
-- **El toast lleva snapshot, no un id**: deshacer un barrido tiene que **recrear las `Rule` que
-  borró** (§3.9/§3.10), no solo eliminar la que creó. Sigue sin necesitar infraestructura de undo
-  general — es guardar la lista y recrearla — pero el `Toast` (§8.6) carga esa lista.
+- **Un solo mecanismo** (ADR-172): `history.store` (`React_Client.md` §3.6c). Toda acción de edición
+  llama a `record(label)` antes de emitir; el "Deshacer" del toast y `Ctrl+Z` llaman a `undo()`. El
+  toast ya **no** carga un snapshot de reglas: el punto de restauración del Core incluye las reglas, y
+  deshacer un barrido las recrea todas.
 - **Toast y no `ConfirmDialog` como mecanismo principal**: una confirmación por cada cambio de modo
-  se vuelve ruido que se aprende a saltear. La confirmación queda para los dos barridos, y solo
-  cuando barren algo.
+  se vuelve ruido que se aprende a saltear. La confirmación queda para los dos barridos (cuando barren
+  algo) y para eliminar.
 - **Por qué la fila normalmente no lleva toast**: es la acción más frecuente de la app, y es
   autoevidente y autorreversible con el mismo control. Un toast por cada una arrastra consigo la
-  credibilidad de los toasts de los otros dos niveles.
+  credibilidad de los otros. Se deshace igual con `Ctrl+Z`.
 
 ---
 
