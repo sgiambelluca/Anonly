@@ -175,6 +175,8 @@ export interface IPipelineOrchestrator {
   importDocument(input: ImportDocumentInput): Promise<void>;   // dispara etapas 0..7 (hasta Ready)
   retryWithPassword(documentId: string, password: string): Promise<void>;
   reanalyze(documentId: string, patch: ReanalyzeConfigPatch): Promise<void>;
+  // addManualEntity / findText / getPageWords / getPageSize: ver Contracts.md §3.5 (ADR-061).
+  previewEdit(documentId: string, request: EditPreviewRequest): EditPreview;   // ADR-170 §2
   cancel(documentId: string, jobId?: string): Promise<void>;
   closeDocument(documentId: string): Promise<void>;
   getState(documentId: string): PipelineState;
@@ -191,6 +193,7 @@ Notas:
 - `config` se mergea con los defaults de `core/Contracts.md` §6.
 - `reanalyze(documentId, patch)` (ADR-038 §1): precondición `stage ∈ {Ready, Failed}`, si no `InvalidInputError`. Actualiza la config efectiva del documento mergeando `patch`, reabre la sesión de Grouping (`reopenSession`) y re-despacha únicamente lo que el patch afecta — ver §13.18-§13.21 para el detalle por combinación de campos. Resuelve cuando el pipeline vuelve a `Ready` (o rechaza si termina en `Failed`); no crea un documento nuevo ni descarta ediciones. Patch vacío, con campos no soportados, o idéntico a la config efectiva → ver §13.21. **Un patch con `ner` y `ocr` a la vez se rechaza** con `InvalidInputError` (ADR-081): la equivalencia que ADR-038 §5 regla 4 prometía nunca se implementó, así que en vez de producir un resultado silenciosamente incorrecto se pide componer dos llamadas, **OCR primero** — ver §13.30.
 - `runtime?: CoreRuntimeOptions` (ADR-036 §2): factories de `Worker` por motor: ver `Contracts.md` §3.5. Sin factory para un kind, ese pool despacha in-process (comportamiento de Hito 9).
+- `previewEdit(documentId, request)` (ADR-170 §2): **delegación pura** en `GroupingEngine.previewEdit`, sin estado propio, sin emitir y sin pasar por `reopenSession`. Sincrónico. `documentId` sin sesión → `InvalidInputError` (lo lanza el motor). Mismo patrón que `findText` (ADR-061 §8 errata).
 
 ---
 
@@ -323,6 +326,7 @@ la nueva clave. Fakes remotos resuelven el sobre real, no ejecutan run().
 
 | Test | Archivo | Tipo | Descripción |
 |---|---|---|---|
+| `previewEdit delegates to grouping.previewEdit and does not alter the snapshot` | `unit.test.ts` | unit | ADR-170 §2 |
 | `los jobs en vuelo no resucitan el stage ni emiten progreso` | `edge.test.ts` | edge | ADR-134: se cancela con un job de PDF colgado y se lo libera **después**; el stage sigue en `Cancelled` y no se emite `PIPELINE_PROGRESS`. Verificado que falla sin la guarda (`Expected "cancelled"`, `Received "detecting"`) |
 | `createCore returns wired IAnonymizationCore` | `contract.test.ts` | contract | bus, engines, orchestrator poblados |
 | `importDocument emits DOCUMENT_IMPORTED then PIPELINE_STAGE_CHANGED` | `contract.test.ts` | contract | orden de eventos |
@@ -451,6 +455,7 @@ Los tests de contract/unit/edge mockean los motores (interfaces de `Contracts.md
 - [x] 26. (Hito 11, ADR-151) `prewarmFirstPagePreview(documentId)`: invocación directa de `renderPage({pageIndex: 0, kind: "original", mode: "preview"}, mediatedPreviewCtx(documentId))`, disparada desde `handleGroupingFinished` en el mismo turno que `PIPELINE_READY`, después del early return de `cancelRequested`. Best-effort (catch + `logger.warn`, nunca `PIPELINE_FAILED`). Sin cambios en `Contracts.md`, el visor ni el store — `bus-bridge.ts` ya deja todo `PREVIEW_UPDATED` en `viewer.store.previewByPage`. Los tres tests de §14 (caso 32).
 
 - [x] 27. (ADR-163, T-6a) `runOcrStage`: helper puro para el DPI efectivo de página completa; construir cada `OcrPageRequest` con su `dpi` y su `estimatedBytes` derivados de la misma escala. El `OcrImageProducer` usa `request.dpi / 72`, nunca una variable global. Regiones conservan `ctx.config.ocr.dpi`. No tocar `OcrConfig`, Render, OCR, eventos, fusión ni progreso. Tests de casos 34-36 y no-regresión cuando el campo falta.
+- [ ] 28. (Hito 12.5 — ADR-170 §2) `previewEdit(documentId, request)` en `IPipelineOrchestrator`: delegación en `GroupingEngine.previewEdit`, sincrónica, sin estado ni eventos. Un test en §14.
 
 ---
 

@@ -468,8 +468,9 @@ Marca los grupos que **el detector sugirió sin estar seguro**: nacen con `enabl
   casilla cada una — se eligen **una o varias** de una vez (reemplaza a las filas de `Select` con
   "+ Agregar otro grupo"). Una caja **"Resultado"** de alto fijo muestra cómo queda —nombre, N.º,
   apariciones y token— calculado por el Core con `previewEdit({ kind: "merge", … })` (ADR-170); sin
-  selección, un texto neutro en la misma caja. El grupo que sobrevive es el de menor `indexInType`
-  entre los elegidos y el origen.
+  selección, un texto neutro en la misma caja. La UI pone primero en `targetGroupIds` al elegido de
+  menor `indexInType`: el sobreviviente conserva el `id` del primero y el menor número de todos
+  (ADR-170 §2), así que el `id` que queda es el del número que queda.
 - **Acción**: `actions.mergeGroups(sourceGroupId, targetGroupId)`, una vez por cada paso de
   `mergePlan(sourceGroupId, targetGroupIds)`. **El contrato no cambia**: `GROUP_MERGE_REQUESTED`
   sigue siendo 1→1 (`Contracts.md`) y la UI emite N-1 requests contra el mismo destino. Es seguro

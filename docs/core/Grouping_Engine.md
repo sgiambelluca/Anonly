@@ -158,6 +158,10 @@ export class GroupingEngine implements IEngine {
   applyRuleUpdated(req: RuleUpdated): Promise<void>;
   applyRuleDeleted(req: RuleDeleted): Promise<void>;
   applyConflictResolve(req: ConflictResolveRequested): Promise<Conflict>;
+  // ADR-170 §2: simulacro sobre una copia descartable de la sesión, con el mismo
+  // código que el pedido real. No muta ni emite. Sincrónico. Pedido que el real
+  // rechazaría, o sesión inexistente -> InvalidInputError.
+  previewEdit(documentId: string, request: EditPreviewRequest): EditPreview;
   closeSession(documentId: string): Promise<void>;
   dispose(): Promise<void>;
 }
@@ -325,6 +329,8 @@ Grouping es determinista dadas las ocurrencias y reglas; sin errores de runtime 
 
 44. **El usuario reclasifica un grupo (`patch.type`, ADR-082)**: el tipo gobierna el label del token, la secuencia `indexInType`, qué regla de scope `type` aplica y de qué pool sortea el sintetizador, así que el cambio recalcula en este orden: índice nuevo del tipo destino (el viejo queda como hueco a propósito — lo compacta `renumberGroupsCanonically` en el próximo `finishSession`, ADR-028); modo efectivo re-resuelto contra las reglas; `replacementValue` con el label set nuevo, **salvo** `replacementValueUserSet` (ADR-076 §3, ratificado por ADR-082 §4 — con la salvedad de que si el modo efectivo cambió aplica la fila 4 y el valor se recalcula apagando el flag); y `personGender` borrado al salir de `Person` / re-inferido al entrar. Tipo igual al vigente = no-op sin eventos. **Los `SessionOccurrenceRecord` NO siguen al grupo** (ADR-082 §3): conservan el tipo del **detector**, porque es contra lo que el detector vuelve a emitir en un `reanalyze` — si siguieran al grupo, el dedup por identidad (que corre antes que la detección de conflictos) dejaría de reconocer la ocurrencia re-emitida y esta caería en `findOverlapConflict` contra su propio grupo. Consecuencia conocida: `findMatchingGroup` empareja por tipo, así que una ocurrencia **nueva** del mismo valor que el detector siga emitiendo con el tipo original crea un grupo nuevo en vez de caer en el reclasificado.
 45. **Resolver un conflicto elige el tipo, no el modo (ADR-083)**: `applyConflictResolve` aplica el `entityType` elegido por la **misma vía** que el caso 44 y marca el conflicto `resolved` con `resolvedType`. Sin `entityType` en la request, gana el candidato de mayor `confidence` (empate a `regex`) — que con el `confidence: 1.0` que emite `regex-engine` coincide con la resolución automática que el motor ya tomó al crear el conflicto, o sea que **confirmar es un no-op sobre los datos**. Si el tipo elegido es el vigente, no se emite `ENTITY_GROUP_UPDATED`. `applyConflictResolve` **dejó de tocar el `replacementMode`**, así que salió de la lista de disparadores del caso 41.
+46. **Las vistas previas acompañan al grupo (ADR-170 §1)**: todo `EntityGroup` emitido lleva `replacementPreviews` al día. Con `replacementValueUserSet === false`, `replacementPreviews[replacementMode] === replacementValue` para `placeholder`, `mask` y `synthetic`. Con el valor escrito a mano, las vistas previas siguen mostrando lo calculado — es lo que quedaría al cambiar de modo. Cambiar el género de una `Person` mueve `placeholder` y `synthetic` aunque el modo vigente sea `mask`.
+47. **`previewEdit` no cambia nada (ADR-170 §2)**: el snapshot antes y después de cualquier `previewEdit` es idéntico y no se emite ningún evento. Su resultado coincide con el grupo que emite el pedido real inmediatamente después: `type` → `indexInType = nextIndex` del tipo destino y el token con el label nuevo; `merge` → menor `indexInType`, `canonicalValue` por frecuencia, members sumados; `split` → original + nuevo (`groupId: null`, `nextIndex`, modo heredado). Pedidos inválidos lanzan `InvalidInputError` igual que el real.
 
 ---
 
@@ -332,6 +338,13 @@ Grouping es determinista dadas las ocurrencias y reglas; sin errores de runtime 
 
 | Test | Archivo | Tipo | Descripción |
 |---|---|---|---|
+| `every emitted group carries replacementPreviews consistent with replacementValue` | `contract.test.ts` | contract | caso 46 (ADR-170 §1) — invariante |
+| `replacementPreviews ignore replacementValueUserSet` | `unit.test.ts` | unit | caso 46 |
+| `placeholderLadder lists distinct ladder tokens, longest first, including placeholder` | `unit.test.ts` | unit | caso 46 (ADR-057) |
+| `changing personGender updates placeholder and synthetic previews even in mask mode` | `edge.test.ts` | edge | caso 46 |
+| `previewEdit does not mutate the session nor emit` | `contract.test.ts` | contract | caso 47 (ADR-170 §2) |
+| `previewEdit(type/merge/split) equals the group emitted by the real request` | `unit.test.ts` | unit | caso 47 — un test por kind |
+| `previewEdit rejects what the real request rejects` | `edge.test.ts` | edge | caso 47 |
 | `emits ENTITY_GROUP_CREATED on first occurrence of a value` | `contract.test.ts` | contract | invariante |
 | `emits ENTITY_GROUP_UPDATED on second occurrence of same value` | `contract.test.ts` | contract | invariante |
 | `emits GROUPING_FINISHED after REGEX_FINISHED + NER_FINISHED` | `contract.test.ts` | contract | invariante |
@@ -487,6 +500,7 @@ Fixtures: `tests/fixtures/text-10p.pdf` con entidades conocidas que generan grup
 - [x] 15o. (Hito 10.9, PR 7 — ADR-074 §1/§7) `toOccurrenceRef` propaga `fragments` de la `Occurrence` al `OccurrenceRef`; `buildPlaceholderValue`/la selección de nivel de ADR-057 §4 evalúan el peor caso sobre `fragments ?? [bbox]` de cada member. **No** agregar disparadores de recálculo (ADR-057 §7) ni tocar `bbox`. El PR de `shared` que declara el campo (Hito 10.9 PR 4) es precondición. Caso 43 en §13, dos filas en §14.
 - [x] 15p. (Hito 10.10 — ADR-082 §1-§5) `patch.type` en `GroupUpdateRequested`; `changeGroupType` con sus cinco recálculos **en el orden correcto** (índice → modo efectivo → **género** → valor), devolviendo los campos cambiados para que el caller los ponga en `ENTITY_GROUP_UPDATED.changes` — `personGender` incluido, que es el que se escapaba. Los `recordedOccurrences` **NO** siguen al grupo (§3): conservan el tipo del detector, o cada `reanalyze` produce un conflicto espurio del grupo consigo mismo. `applyConflictResolve` (ADR-083 §2) delega en el mismo método en vez de abrir un segundo camino. Casos nuevos en §13, siete filas en §14.
 - [x] 15q. (Hito 10.10 — ADR-085 §1-§7) `InternalGroup.absorbedTypes` (consultado en el filtro de candidatos de `findMatchingGroup`, por ocurrencia) + `Session.typeCorrections` (consultado **solo** en `createGroup`, o sea una vez por grupo creado). `createGroup` siembra `absorbedTypes` con los dos tipos, así el mapa no se vuelve a tocar para ese valor. El guard difuso es **simétrico**: mira `occurrence.entityType` **y** el `detectorType` guardado en la corrección — una corrección sobre un valor estructurado no se hereda por parecido a un nombre. Ninguna de las dos piezas se expone. **Dónde NO se consulta** (§6, la parte que se puede hacer mal): ni en `isDuplicateIdentity`, ni en `findOverlapConflict`, ni en `recordOccurrence`. Cinco filas en §14.
+- [ ] 15r. (Hito 12.5 — ADR-170) `replacementPreviews` calculado con `computeReplacementValue` por modo, ignorando `replacementValueUserSet`, antes de toda emisión de `ENTITY_GROUP_CREATED`/`ENTITY_GROUP_UPDATED` (con `"replacementPreviews"` en `changes` cuando cambió). `previewEdit` como simulacro sobre una copia de la sesión con la emisión desactivada, reusando `applyGroupUpdate`/`applyGroupMerge`/`applyGroupSplit`. Casos 46-47, siete filas en §14.
 - [ ] 16. Escribir `contract.test.ts` con todos los tests contractuales.
 - [ ] 17. Escribir `unit.test.ts` con cobertura ≥ 85%.
 - [ ] 18. Escribir `edge.test.ts` con todos los casos límite.
@@ -616,6 +630,23 @@ El sintetizador está en `shared/synthesizer.ts`, exportado desde `@anonly/share
 `indexInType` sigue siendo entrada, pero **solo lo leen los tipos cuyo valor lo interpola** — `Custom` (`custom-3`) y el fallback. Ésos siguen dependiendo del número, con la contracara de que un `Custom` renumerado en modo `synthetic` conserva el valor viejo (ADR-072 §3, anotado en `roadmap/Future_Ideas.md`).
 
 **El género no entra a la semilla** (ADR-071 §5): solo elige el array del que sortea `pick`. Por eso un grupo sin género resuelto produce **el mismo valor** que produciría sin el campo, y ningún tipo distinto de `Person` se entera.
+
+### Vistas previas (ADR-170)
+
+**`replacementPreviews`** (ADR-170 §1) se calcula con la **misma** `computeReplacementValue` de la tabla
+de arriba, una vez por modo (`placeholder`, `mask`, `synthetic`), sobre el estado actual del grupo
+e **ignorando `replacementValueUserSet`** —cambiar el modo recalcula y apaga el flag (ADR-076 §3), así
+que el valor calculado es lo que el usuario vería—. `placeholderLadder` son los tokens de los tres
+niveles de la escalera para ese grupo, sin repetidos, del más largo al más corto. Se recalcula antes de
+**toda** emisión de `ENTITY_GROUP_CREATED`/`ENTITY_GROUP_UPDATED` (cualquier cambio de tipo, índice,
+género, members, nivel de escalera o `maskFormat` puede moverlo), y `changes` incluye
+`"replacementPreviews"` cuando cambió. No depende de las reglas: describe cada modo, no el vigente.
+
+**`previewEdit`** (ADR-170 §2) clona la sesión (grupos, registros de ocurrencias, reglas, correcciones
+de tipo y supresiones de ADR-171), aplica la operación con los mismos `applyGroupUpdate` /
+`applyGroupMerge` / `applyGroupSplit` con la emisión **desactivada**, y devuelve los grupos tocados
+como `EditPreviewGroup`. Fusión múltiple: `source → targetGroupIds[0]` y después cada
+`targetGroupIds[i] → targetGroupIds[0]`. Nunca toca la sesión real.
 
 ### Escalera de abreviaturas del `placeholder` (ADR-057)
 

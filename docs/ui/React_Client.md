@@ -535,6 +535,11 @@ export async function createCore(
 ): Promise<IAnonymizationCore>;
 ```
 
+**Consultas de solo lectura del adapter** (todas en `IPipelineOrchestrator`, `Contracts.md` §3.5):
+`findText`, `getPageWords`, `getPageSize` (ADR-061) y **`previewEdit`** (ADR-170 §2), que los
+diálogos de Fusionar, Dividir y Cambiar tipo llaman al cambiar su selección (`actions.previewEdit`).
+Las vistas previas del selector de modo no se piden: vienen en `EntityGroup.replacementPreviews`.
+
 El adapter **solo** usa esta API. Nunca accede a `pdf.engine.ts` ni a internals. `snapshots.ts` usa `core.engines.grouping.getSnapshot(documentId)` (U-6) como **hidratación puntual** (p. ej. montar un panel tarde); la fuente reactiva son los eventos del bus.
 
 ---

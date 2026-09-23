@@ -269,6 +269,10 @@ export interface EntityGroup {
   // lectura — no entra en `GroupUpdatePatch`; para volver al valor calculado
   // se re-aplica el mismo `replacementMode` (ADR-078 §3).
   readonly replacementValueUserSet: boolean;
+  // ADR-170 §1: el valor que tendría el grupo en cada modo (ver ReplacementPreviews,
+  // Contracts.md §5). Requerido. Lo calcula Grouping con la misma función que
+  // replacementValue; la UI lo muestra en el selector de modo y en "Editar reemplazo".
+  readonly replacementPreviews: ReplacementPreviews;
   readonly createdAt: number;
   readonly updatedAt: number;
 }
@@ -291,6 +295,7 @@ export type PersonGender = "f" | "m";
 | `aliases` | Variantes de valor unificadas (ej. `"J. Pérez"` y `"Juan Pérez"` en el mismo grupo). |
 | `replacementValueUserSet` | `true` si el `replacementValue` lo escribió el usuario. Es lo que hace visible en la UI (`ui/UX_Guidelines.md` §3.3) una edición manual que, de otro modo, es indistinguible de un valor calculado — el caso que **no** aplica a `personGender`, cuyo valor sí delata su procedencia, y por eso `personGenderUserSet` sigue siendo interno (ADR-078 §2). |
 | `personGender` | Solo `type === Person` (ADR-060 §2). `"f"`/`"m"` cambian el label resuelto del `placeholder` (`MUJER`/`HOMBRE` en vez de `PERSONA`); ausente = sin determinar → label neutro y marca en el árbol de entidades. Inferido de un léxico first-party (ADR-069 §6: al asignar/cambiar `canonicalValue` y en `finishSession`) o puesto por el usuario, que gana siempre. **La ausencia tiene dos orígenes que el dato público no distingue** —nunca se infirió, o el usuario eligió `"neutral"` (ADR-069 §4)— y el motor los separa con bookkeeping interno (`personGenderUserSet`, `Grouping_Engine.md` §13 caso 34) para que una re-inferencia no pise la elección. Ese flag **no** es parte de `EntityGroup` ni de ningún evento. |
+| `replacementPreviews` | ADR-170 §1: lo que valdría `replacementValue` en `placeholder`, `mask` y `synthetic` (y los niveles de la escalera de ADR-057), calculado por Grouping con la misma función e ignorando `replacementValueUserSet`. Existe para que la UI muestre valores exactos sin reimplementar la lógica del motor (P-1, U-3). No lo leen Render ni Export. |
 | `createdAt`, `updatedAt` | Epoch ms. Para UX y merge de ediciones. |
 
 **Invariantes**
@@ -301,6 +306,8 @@ export type PersonGender = "f" | "m";
 - Si `enabled === false`, `replacementValue` no se aplica pero se conserva el último valor para re-activación.
 - **Todas** las `Replacement` derivadas de un mismo grupo comparten `replacementValue` (ADR-012, re-asertado por ADR-057 §4: el nivel de abreviatura se elige por grupo con la ocurrencia más apretada y se aplica a todas — nunca por ocurrencia).
 - `personGender` solo puede estar presente si `type === EntityType.Person` (ADR-060 §2).
+- Si `replacementMode ∈ {placeholder, mask, synthetic}` y `replacementValueUserSet === false`, entonces `replacementPreviews[replacementMode] === replacementValue` (ADR-170 §1).
+- `replacementPreviews.placeholderLadder` contiene a `replacementPreviews.placeholder` y no tiene repetidos.
 
 ---
 
