@@ -589,11 +589,15 @@ De las ~70: **~30 ya estaban cerradas** por hitos posteriores (ADR-053/054/056, 
   `Precalentamiento_NER_Durante_OCR_Medicion.md` §7, anotado como descarte
   medido en ADR-154 §2 lever 3 (`Precalentamiento_NER_Durante_OCR_Plan.md`;
   evidencia cruda en `.measure/ner-preload-ocr/20260917T163638Z/`).
-- **Próxima etapa de recursos (acordada el 2026-09-20, sin ejecutar):** orden
-  **2 → 1 → 3** de la propuesta: atribuir la memoria restante del renderer →
-  evaluar el empaquetado del mismo modelo NER → ampliar el banco a PDFs pesados
-  y exportación. Al cerrar la atribución se revisa el plan antes de iniciar el
-  empaquetado. Alcance canónico: `Optimizacion_De_Memoria_Plan.md` §2ter.
+- **Recursos — punto 2 cerrado con alcance medido (2026-09-23):** investigación,
+  instrumentación, 14 corridas P1/P2 en macOS y revisión del plan completadas.
+  Los buffers observados vuelven a cero después del cierre; el residuo histórico
+  de 443–626 MB no es una fuga ni un ahorro demostrados. Se conservan los límites
+  de observación durante NER y el seguimiento separado de Windows nativo/lector
+  de presión, todavía sin validar. Informe: `Atribucion_Recursos_Renderer_Medicion.md`.
+  El orden **2 → 1 → 3** queda con el punto 2 cerrado; **1 (empaquetado del mismo
+  NER) y 3 (PDFs pesados/exportación) quedan sin iniciar, para otra sesión**.
+  Alcance canónico: `Optimizacion_De_Memoria_Plan.md` §2ter. No cierra el Hito 11.
 - **Próximos objetivos de tiempo (2026-09-20, sin ejecutar):** medir más hilos
   dentro del único worker NER, más workers de reconocimiento OCR, varios
   fragmentos independientes por inferencia NER y acotar los peores casos de

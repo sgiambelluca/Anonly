@@ -66,8 +66,10 @@
 > **Siguiente etapa acordada (2026-09-20)**: tres objetivos de recursos, en el
 > orden **2 → 1 → 3** de la propuesta revisada: atribuir la memoria restante del
 > renderer → evaluar el empaquetado del mismo modelo NER → ampliar el banco a
-> PDFs pesados y exportación. Al terminar la atribución se revisa el plan antes
-> de atacar el empaquetado. Alcance y entregables en §2ter; todavía sin ejecutar.
+> PDFs pesados y exportación. **Actualización 2026-09-23: punto 2 cerrado con el
+> alcance medido y revisión del plan completada**, con límites de observación y
+> seguimiento Windows separados. Los puntos 1 y 3 quedan sin iniciar para otra
+> sesión. Alcance y entregables en §2ter.
 > El ahorro de memoria se evaluará junto con el tiempo: la posterior revisión
 > de perfiles podrá admitir mayor consumo a cambio de una mejora medida de
 > rendimiento (`Optimizacion_De_Rendimiento.md`, próximos objetivos).
@@ -912,13 +914,32 @@ todas costaron tiempo real.
 
 **Decisión del humano, 2026-09-20.** Se conserva la numeración de la propuesta
 para hacer explícito el orden. Es planificación de trabajo futuro: no cambia
-defaults, contratos ni presupuestos del producto. El primer trabajo es el punto 2.
+defaults, contratos ni presupuestos del producto. El primer trabajo fue el punto 2.
 
 ### 2 — Terminar de atribuir los recursos del renderer
 
-T-11 encontró **443–626 MB del renderer sin atribuir a WASM o heap JS** en
-lecturas completas después de cargar NER. Incluyen costos base y reservas del
-runtime; no son una fuga demostrada ni un ahorro íntegramente recuperable.
+**Cerrado con alcance medido, 2026-09-23.** Investigación, instrumentación,
+campaña macOS y revisión del plan completadas; límites y seguimiento Windows
+documentados. Los puntos 1 y 3 quedan para otra sesión, sin iniciar.
+
+T-11 obtuvo un **residuo contable de 443–626 MB** al comparar RSS del renderer
+con WASM y heap JS después de cargar NER. No es una cantidad demostrada de memoria
+nativa: las magnitudes no forman un balance exacto. Tampoco es una fuga ni un
+ahorro recuperable, y no se corrige restando el ruido entre tandas.
+
+**Revisión local completada, 2026-09-23:** la viabilidad y la campaña MemoryInfra
+están terminadas en macOS: 14 corridas, controles del instrumento y reposo hasta
+120 s. Se observaron buffers transitorios que vuelven a cero y categorías del
+runtime que decaen; parte de NER sigue no observable por timeout. No se identificó
+una fuga ni un ahorro equivalente al residuo. El
+[informe de atribución y revisión](Atribucion_Recursos_Renderer_Medicion.md)
+cierra la caracterización local hasta esa resolución y conserva como siguiente
+intervención la evaluación de compatibilidad del empaquetado del mismo NER.
+**Seguimiento separado, no validado: Windows nativo y su lector de presión.**
+El cierre del punto 2 acredita el banco macOS y no se extrapola a Windows.
+No quedan corridas locales requeridas para esa revisión.
+El [informe de viabilidad](Memory_Infra_Viabilidad.md) conserva el diseño y
+criterios del experimento, sin exigir una suma que cierre contra RSS.
 
 - Separar, hasta la resolución que permita el instrumento, costo base, memoria
   nativa/compilada de los motores, imágenes/canvas y recursos retenidos tras cerrar.

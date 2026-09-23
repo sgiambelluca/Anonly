@@ -8,6 +8,83 @@ Dos instrumentos, un mismo arnés (`tests/e2e/support/electronApp.ts`): `pipelin
 
 `test:perf` corría antes contra `vite preview`. ADR-153 midió, intercalando corridas en la misma máquina: shell de Electron empaquetado 2258-2917 ms, `vite preview` 8625-9715 ms — un sobrecosto de ~5 s **sin causa identificada** (se descartaron compresión, MIME, aislamiento, headers de caché, `Content-Length` y tamaño de chunk). El producto no se sirve por HTTP (ADR-130): un gate de tiempos o de memoria tiene que medir el artefacto que se instala, no un servidor que ningún usuario ejecuta.
 
+### Atribución física del renderer — instrumentos opt-in
+
+`native-memory-probe.spec.ts` valida la capacidad de `/usr/bin/footprint -f
+bytes` sobre un Tab/GPU de macOS con asignaciones sintéticas separadas. Se
+ejecuta solo con `ANONLY_NATIVE_MEMORY_PROBE=1`; no forma parte de la corrida
+perf cotidiana y se omite en plataformas que no son macOS.
+
+`renderer-resource-pilot.spec.ts` toma una serie de huella física por PID cada
+1 s, conserva los tiempos de pared y observa 120 s después del cierre. Es un
+piloto de atribución, no un gate. `renderer-resource-overhead.spec.ts` corre el
+control serial AB/BA con instancias frescas, footprint encendido y apagado, sin
+reposo posterior; mide overhead de observación y no retención. Ambos requieren
+una guarda explícita:
+
+```bash
+ANONLY_NATIVE_MEMORY_PROBE=1 pnpm exec playwright test --config=playwright.perf.config.ts tests/perf/native-memory-probe.spec.ts
+ANONLY_NATIVE_MEMORY_PILOT=1 pnpm exec playwright test --config=playwright.perf.config.ts tests/perf/renderer-resource-pilot.spec.ts
+ANONLY_NATIVE_MEMORY_OVERHEAD=1 pnpm exec playwright test --config=playwright.perf.config.ts tests/perf/renderer-resource-overhead.spec.ts
+```
+
+La huella física de `footprint` es una magnitud del SO por proceso. No es RSS,
+PSS ni una medida exacta de memoria de un motor y no se resta contra WASM o heap
+JS. Las categorías macOS pueden ser anónimas; los reportes dejan explícito cuando
+un target o una fase no son observables. Las sesiones escriben un manifest y
+resultados sanitizados en `.measure/`.
+
+### MemoryInfra — control sintético opt-in
+
+`memory-infra-control.spec.ts` valida la sonda CDP de
+`support/memoryInfra.ts` con un control acumulativo baseline → buffer32MiB →
+canvas4096 → ImageData64MiB → WASM64MiB → release+GC. El parser conserva los campos hexadecimales por separado y el
+correlador usa ventanas `clock_sync` más PID; no usa el GUID de respuesta como
+identidad del dump. La prueba espera `Tracing.tracingComplete` antes de analizar
+los eventos y solo fuerza GC en la etapa explícita de release. Escribe manifest,
+requests, trace y summary en una sesión única bajo `.measure/memory-infra-control/`.
+
+```bash
+ANONLY_MEMORY_INFRA_CONTROL=1 pnpm exec playwright test --config=playwright.perf.config.ts tests/perf/memory-infra-control.spec.ts
+```
+
+Es una verificación de capacidad sobre fixtures sintéticos. No clasifica por
+motor, no convierte `private_footprint_bytes` en RSS/PSS y no atribuye el
+residuo histórico. Los artefactos crudos de una exploración quedan fuera del
+repo, en una sesión única bajo `.measure/`.
+
+### MemoryInfra — pipeline y reposo opt-in
+
+`memory-infra-pipeline.spec.ts` ejecuta P1/P2 sobre tres condiciones (sin tracing,
+tracing sin pedidos y tracing con pedidos) en orden directo e inverso, y dos
+casos frío/caliente con reposo hasta 120 s. Cada test usa una instancia nueva.
+No ejecuta footprint, heap sampler, `queryObjects` ni GC explícito. Conserva
+fase al inicio y fin del pedido: un volcado que cruza fases no se atribuye a una.
+
+```bash
+VITE_E2E=1 pnpm --filter @anonly/react-client build
+pnpm --filter @anonly/desktop-shell build
+ANONLY_MEMORY_INFRA_PIPELINE=1 pnpm exec playwright test --config=playwright.perf.config.ts tests/perf/memory-infra-pipeline.spec.ts
+```
+
+Duración local observada: unos 7 minutos, 14 casos, seriales. No ejecutar otros
+benchmarks o gates en paralelo. Reportes, traza y categorías quedan en
+`.measure/memory-infra-pipeline/<sesión>/`, con hashes de build/instrumento,
+fixture, runtime, presión y estado de truncamiento. Es caracterización, no un
+gate de presupuestos ni una calibración estadística del instrumento.
+
+El timeout de un proveedor de MemoryInfra se registra como no observable y
+suspende pedidos durante el pipeline, conservando la ejecución del producto.
+Se vuelve a intentar después del cierre a 15/60/120 s; no se sustituye un error
+por cero. «Test pasado» exige pipeline completo y artefactos no truncados, no
+disponibilidad de todas las fases. El banco macOS recuperó la lectura a 60 s.
+El reporte conserva los fragmentos parciales crudos para diagnóstico.
+
+Resultado y revisión: `docs/roadmap/Atribucion_Recursos_Renderer_Medicion.md`.
+La ejecución nativa Windows necesita su banco/toolchain y un launcher validado
+para ese SO; este comando POSIX y el lector de presión actual no acreditan esa
+validación. Ver también `docs/roadmap/Banco_Windows_Comparativa_Medicion.md` §7.
+
 ## `memory.spec.ts` — el instrumento de H-10 (ADR-146)
 
 **No es un gate**: no afirma umbrales, mide y reporta a `.measure/` (gitignoreado). ADR-146 §6/ADR-149 §5: fijar un número mirando una corrida sola es exactamente lo que esto evita — primero se mide, después se decide el presupuesto (o se descubre que no hace falta tocarlo).

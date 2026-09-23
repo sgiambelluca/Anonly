@@ -431,6 +431,14 @@ su altura con documentos reales no está medida (§4, punto 8).
 
 ### 5.4 Qué está vivo en cada momento (preguntas 1 y 3)
 
+> **Corrección de interpretación, 2026-09-22:** la columna histórica «sin
+> atribuir» es una resta entre magnitudes diferentes, no una medición directa
+> de memoria nativa. Su valor negativo en OCR muestra el límite del balance.
+> Las afirmaciones de atribución del texto original debajo no deben usarse para
+> prometer ahorro ni descartar efectos de medición. Se conservan datos y lectura
+> histórica; el criterio vigente está en
+> [MemoryInfra: corrección de la premisa](Memory_Infra_Viabilidad.md).
+
 Memoria del proceso del renderer (Tab), contra lo que el instrumento atribuye. Una
 lectura **parcial** no se usa para concluir nada:
 
@@ -742,4 +750,3 @@ Caminos para acortar NER sin cambiar el modelo, **ninguno medido todavía**:
 | varios fragmentos de texto por inferencia | similar | a verificar con la huella | mejor aprovechamiento de cada multiplicación; cambia el protocolo del worker (ADR) |
 | correr NER de una página mientras el OCR procesa las siguientes | **+400-500 MB de pico** (Tesseract y ONNX a la vez) | idéntica | hasta ~15 s menos en R2 (el tiempo de NER); la precarga ya se descartó por memoria (plan de campaña §5 punto 4) |
 | un segundo worker de NER | **+~580 MB** | idéntica | poco: los dos competirían por los mismos núcleos |
-

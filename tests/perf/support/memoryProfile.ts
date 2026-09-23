@@ -38,6 +38,12 @@ import {
   type MemorySampler,
 } from "./memorySampler.js";
 import {
+  startNativeMemorySampling,
+  type NativeMemorySample,
+  type NativeMemorySampler,
+  type NativeMemorySamplerError,
+} from "./nativeMemorySampler.js";
+import {
   formatSystemMemoryPressure,
   readSystemMemoryPressure,
   type SystemMemoryPressureSample,
@@ -733,6 +739,8 @@ export interface RunReport {
   readonly ocrFinishedAtMs?: number | null;
   readonly ocrDurationMs?: number | null;
   readonly readyDurationMs?: number | null;
+  /** The visible close button is a stable observable proxy for the work panel. */
+  readonly panelVisible?: boolean;
   readonly rssPeakDuringOcrBytes?: number | null;
   /**
    * El pico global del run, SIN acotar a la ventana de fases — a diferencia
@@ -869,6 +877,7 @@ async function runImport(
 
   await page.locator('input[type="file"]').setInputFiles(file);
   await waitForRunSettled(page, runTimeoutMs);
+  await page.getByRole("button", { name: "Cerrar documento" }).waitFor({ state: "visible" });
   await page.waitForTimeout(SETTLE_GRACE_MS);
   await sampler.sampleOnce();
   // Heap-por-target al asentar (ADR-159 §2) — igual que el `sampleOnce()` de
@@ -961,6 +970,7 @@ async function runImport(
     ocrDurationMs:
       ocrStartedAtMs === null || ocrFinishedAtMs === null ? null : ocrFinishedAtMs - ocrStartedAtMs,
     readyDurationMs: durations.readyDurationMs,
+    panelVisible: true,
     rssPeakDuringOcrBytes: ocrSamples.length === 0 ? null : peakSumBytes(ocrSamples),
     rssPeakGlobalBytes: globalPeakBytes,
     processPeakRssBytes,
@@ -1086,6 +1096,14 @@ export interface ProfileReport {
   readonly cold: RunReport;
   readonly hot: RunReport;
   readonly capturedAt: string;
+  /** Opt-in macOS physical-footprint series; absent in the historical RSS-only profiles. */
+  readonly nativeMemorySamples?: ReadonlyArray<NativeMemorySample>;
+  readonly nativeMemoryErrors?: ReadonlyArray<NativeMemorySamplerError>;
+  /** Epoch origins make the low-cadence native series alignable with phase boundaries. */
+  readonly nativeMemoryStartedAtMs?: number;
+  readonly rssSamplerStartedAtMs?: number;
+  readonly nativeRestStartedAtMs?: number;
+  readonly nativeRestDurationMs?: number;
 }
 
 /**
@@ -1168,15 +1186,27 @@ export async function measureProfile(
   sampleIntervalMs = SAMPLE_INTERVAL_MS,
   // T-10: mismo criterio que `sampleIntervalMs`, al final para no mover a nadie.
   collectorOptions?: RunCollectorOptions,
+  /** Opt-in native footprint sampler. It is intentionally low cadence because each probe invokes the OS. */
+  nativeMemoryIntervalMs?: number,
+  /** Opt-in post-close observation window, used to cover the 15/60s idle policies. */
+  nativeRestDurationMs = 0,
 ): Promise<ProfileReport> {
   const sampler = startMemorySampling(electronApp, sampleIntervalMs);
+  let nativeSampler: NativeMemorySampler | undefined;
+  let heapSampler: HeapSampler | undefined;
   // ADR-159 §2: heap por target, vía CDP — sampler aparte del de RSS de
   // arriba, misma vida útil (frío + caliente de la misma instancia).
   // `userDataDir` es de dónde `cdpHeap.ts` descubre el puerto de CDP
   // (`--remote-debugging-port=0` en `electronApp.ts` hace que Chromium
   // escriba `DevToolsActivePort` ahí).
-  const heapSampler = await startHeapSampling(userDataDir);
   try {
+    heapSampler = await startHeapSampling(userDataDir);
+    nativeSampler =
+      nativeMemoryIntervalMs === undefined
+        ? undefined
+        : startNativeMemorySampling(electronApp, nativeMemoryIntervalMs);
+    const activeHeapSampler = heapSampler;
+    if (activeHeapSampler === undefined) throw new Error("heap sampler unavailable");
     // Línea de base FRÍA: recién arrancado, sin modelos, sin documento.
     const coldBaseline = await sampler.sampleOnce();
 
@@ -1184,7 +1214,7 @@ export async function measureProfile(
       page,
       file,
       sampler,
-      heapSampler,
+      activeHeapSampler,
       "cold",
       coldBaseline.sumWorkingSetSizeBytes,
       runTimeoutMs,
@@ -1208,7 +1238,7 @@ export async function measureProfile(
       page,
       file,
       sampler,
-      heapSampler,
+      activeHeapSampler,
       "hot",
       hotBaselineBytes,
       runTimeoutMs,
@@ -1218,8 +1248,13 @@ export async function measureProfile(
     );
     const hot: RunReport = { ...hotRun, hotBaselineSettled };
     await closeDocument(page);
+    const nativeRestStartedAtMs = nativeSampler === undefined ? undefined : Date.now();
+    if (nativeSampler !== undefined) {
+      if (nativeRestDurationMs > 0) await page.waitForTimeout(nativeRestDurationMs);
+      await nativeSampler.sampleOnce();
+    }
 
-    return {
+    const profileReport: ProfileReport = {
       profile,
       identity: {
         commit: process.env.GITHUB_SHA,
@@ -1233,9 +1268,23 @@ export async function measureProfile(
       hot,
       capturedAt: new Date().toISOString(),
     };
+    if (nativeSampler !== undefined) {
+      return {
+        ...profileReport,
+        nativeMemorySamples: nativeSampler.samples,
+        nativeMemoryErrors: nativeSampler.errors,
+        nativeMemoryStartedAtMs: nativeSampler.startedAtMs,
+        rssSamplerStartedAtMs: sampler.startedAtMs,
+        ...(nativeRestStartedAtMs === undefined
+          ? {}
+          : { nativeRestStartedAtMs, nativeRestDurationMs }),
+      };
+    }
+    return profileReport;
   } finally {
     sampler.stop();
-    heapSampler.stop();
+    heapSampler?.stop();
+    await nativeSampler?.stop();
   }
 }
 
