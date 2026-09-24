@@ -1360,6 +1360,149 @@ describe("GroupingEngine — edge cases", () => {
     expect(engine["sessions"].get("doc-1")).toBeUndefined();
   });
 
+  // Caso 69 (§13, ADR-178 §2, O6-1 de la revisión 6): el re-proceso puede
+  // chocar y perder -- lo guardado no siempre vuelve a agruparse solo, a
+  // veces queda RETENIDO en un conflicto nuevo (ADR-174 §1), nunca perdido.
+  it("removing a container can hold a kept occurrence in a new conflict", async () => {
+    function assertHeldManualInvariant(): void {
+      // Mismo chequeo del caso 61 (`no path leaves a resolved conflict with
+      // heldManual`): no accesible desde acá (función local de otro `it`),
+      // así que se repite inline.
+      const snapshot = engine.getSnapshot("doc-1");
+      for (const conflict of snapshot.conflicts) {
+        if (conflict.heldManual === true) expect(conflict.resolved).toBe(false);
+        if (!conflict.resolved) {
+          expect(snapshot.groups.some((g) => g.id === conflict.groupId)).toBe(true);
+        }
+      }
+      const unresolvedHeldIds = new Set(
+        snapshot.conflicts.filter((c) => c.heldManual === true && !c.resolved).map((c) => c.id),
+      );
+      const session = engine["sessions"].get("doc-1");
+      expect(new Set(session?.heldManualOccurrences.keys())).toEqual(unresolvedHeldIds);
+    }
+
+    // «Juan Perez» (Persona, NER) y «Perez SA» (Organización, Regex),
+    // superpuestas en la posición de «Perez». Fuentes distintas → Disagree:
+    // Perez SA (Regex) gana contra Juan Perez y forma su propio grupo
+    // (caso 8) sin tocar el grupo de Juan Perez.
+    const containerBbox = makeBBox(100, 200, 120, 12); // 100-220: «Juan Perez»
+    const orgBbox = makeBBox(150, 200, 60, 12); // 150-210: «Perez SA»
+    const manualBbox = makeBBox(160, 200, 45, 12); // 160-205: «Perez» manual
+
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        source: DetectionSource.NER,
+        confidence: 0.99,
+        value: "Juan Perez",
+        normalizedValue: "juan perez",
+        bbox: containerBbox,
+      }),
+    });
+    const containerGroup = engine
+      .getSnapshot("doc-1")
+      .groups.find((g) => g.canonicalValue === "Juan Perez");
+    if (!containerGroup) throw new Error("expected the container group");
+
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Organization,
+        source: DetectionSource.Regex,
+        confidence: 1,
+        value: "Perez SA",
+        normalizedValue: "perez sa",
+        bbox: orgBbox,
+      }),
+    });
+    const orgGroup = engine
+      .getSnapshot("doc-1")
+      .groups.find((g) => g.canonicalValue === "Perez SA");
+    if (!orgGroup) throw new Error("expected the Perez SA group (it has to win its Disagree)");
+    assertHeldManualInvariant();
+
+    // Manual «Perez» (Persona), contenida (estricta, mismo tipo) en «Juan
+    // Perez»: queda GUARDADA -- sin grupo propio, sin registrar, sin chocar
+    // contra «Perez SA» todavía (ADR-178 §1, la contención se resuelve antes
+    // que la superposición).
+    const manual = makeOccurrence({
+      entityType: EntityType.Person,
+      source: DetectionSource.Manual,
+      confidence: 1,
+      value: "Perez",
+      normalizedValue: "perez",
+      bbox: manualBbox,
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: manual,
+    });
+    expect(engine.getSnapshot("doc-1").groups.some((g) => g.canonicalValue === "Perez")).toBe(
+      false,
+    );
+    const containerOccurrenceId = containerGroup.members[0]?.occurrenceId;
+    if (!containerOccurrenceId) throw new Error("expected the container's member occurrenceId");
+    expect(
+      engine["sessions"].get("doc-1")?.containedManualOccurrences.get(containerOccurrenceId),
+    ).toHaveLength(1);
+    assertHeldManualInvariant();
+
+    // Punto de restauración ANTES de la eliminación.
+    const checkpointId = engine.createCheckpoint("doc-1");
+
+    // Elimino «Juan Perez»: el re-proceso de lo guardado choca contra
+    // «Perez SA» (Disagree, Manual pierde) -- queda RETENIDO, no agrupado
+    // ni perdido.
+    await engine.applyGroupRemove({ documentId: "doc-1", groupId: containerGroup.id });
+    expect(engine.getSnapshot("doc-1").groups.some((g) => g.canonicalValue === "Perez")).toBe(
+      false,
+    );
+    expect(engine["sessions"].get("doc-1")?.containedManualOccurrences.size).toBe(0);
+    const heldConflict = engine
+      .getSnapshot("doc-1")
+      .conflicts.find((c) => c.heldManual === true && !c.resolved);
+    if (!heldConflict) throw new Error("expected a new held conflict against Perez SA's group");
+    expect(heldConflict.groupId).toBe(orgGroup.id);
+    assertHeldManualInvariant();
+
+    // restoreCheckpoint a antes de la eliminación: el conflicto nuevo deja
+    // de existir y lo guardado vuelve a su contenedor.
+    await engine.restoreCheckpoint("doc-1", checkpointId);
+    expect(engine.getSnapshot("doc-1").conflicts.some((c) => c.id === heldConflict.id)).toBe(false);
+    expect(
+      engine["sessions"].get("doc-1")?.containedManualOccurrences.get(containerOccurrenceId),
+    ).toHaveLength(1);
+    expect(engine.getSnapshot("doc-1").groups.some((g) => g.canonicalValue === "Juan Perez")).toBe(
+      true,
+    );
+    assertHeldManualInvariant();
+
+    // Re-eliminar reproduce el mismo conflicto retenido.
+    await engine.applyGroupRemove({ documentId: "doc-1", groupId: containerGroup.id });
+    const heldConflictAgain = engine
+      .getSnapshot("doc-1")
+      .conflicts.find((c) => c.heldManual === true && !c.resolved);
+    if (!heldConflictAgain) throw new Error("expected the held conflict to reappear");
+    expect(heldConflictAgain.groupId).toBe(orgGroup.id);
+    assertHeldManualInvariant();
+
+    // winner: "manual" lo agrupa, como en el caso 57.
+    const resolved = await engine.applyConflictResolve({
+      documentId: "doc-1",
+      conflictId: heldConflictAgain.id,
+      winner: "manual",
+    });
+    expect(resolved.resolved).toBe(true);
+    expect(resolved.resolvedType).toBe(EntityType.Person);
+    expect(resolved.heldManual).toBeUndefined();
+    const perezGroup = engine.getSnapshot("doc-1").groups.find((g) => g.canonicalValue === "Perez");
+    if (!perezGroup) throw new Error("expected the Perez group after winner: manual");
+    expect(perezGroup.members).toHaveLength(1);
+    assertHeldManualInvariant();
+  });
+
   // Caso 10 (§13)
   it("ambiguous_canonical conflict emitted", () => {
     ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
