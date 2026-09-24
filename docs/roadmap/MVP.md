@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-mvp | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,adr/ADR-011-Grouping-First.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-138-Instalador-Universal-De-macOS.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md | audiencia=humanos+IA | fase=11.6 (Hitos 1–10 cerrados y mergeados a main; escritorio y verificación de actualizaciones en validación; instalador universal de macOS documentado por ADR-138) -->
+<!-- CONTEXT: scope=roadmap-mvp | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,adr/ADR-011-Grouping-First.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-138-Instalador-Universal-De-macOS.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-168-Pantallas-De-Carga-Y-Escaneo-Tras-Pruebas-De-Usuario.md,adr/ADR-169-La-Pantalla-De-Trabajo-Tras-Pruebas-De-Usuario.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-173-El-Motor-Rechaza-Fusiones-Y-Divisiones-Invalidas.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md | audiencia=humanos+IA | fase=11.6 (Hitos 1–10 cerrados y mergeados a main; escritorio y verificación de actualizaciones en validación; instalador universal de macOS documentado por ADR-138) -->
 
 # Anonly — Roadmap MVP
 
@@ -656,6 +656,13 @@ entidad con supresión por sesión), ADR-172 (deshacer y rehacer exactos por pun
 | 7 | ADR-169: lista, avisos, `Tooltip`, franja, género con borde, visor (pellizco, separador), lupa, selección persistente, `EntityTypePicker`, `AddEntityDialog`, Configuración, tokens | `apps/react-client` | — | hecho |
 | 8 | ADR-170: selector de modo exacto y diálogos Fusionar/Dividir/Editar reemplazo/Cambiar tipo con `previewEdit` | `apps/react-client` | 5, 7 | hecho |
 | 9 | ADR-171/172: "Eliminar entidad", `history.store`, atajos, toasts con "Deshacer" | `apps/react-client` | 5, 7 | hecho |
+| 10 | B-1: `replacementPreviews` en los fixtures de `tests/invariants` y `tests/security` | `tests/` | 1 | pendiente |
+| 11 | ADR-173 (15u) y ADR-174 (15v): rechazos de fusión/división y ocurrencia manual retenida | `grouping-engine` | 4 | pendiente |
+| 12 | Tipos de ADR-174: `Conflict.heldManual`, `ManualEntityResult.heldConflictIds`, `ConflictResolveRequested.winner` | `shared` | — | pendiente |
+| 13 | ADR-174 §2 y N-4 del revisor (Orchestrator 31) | `anonymization-core/src` | 11, 12 | pendiente |
+| 14 | ADR-174 §4 (`ManualOverlapDialog`, toast honesto, entrada de deshacer retirada), N-5 (ranura del error de `SettingsDialog`) y N-2 (tests de los `.ts` sin cobertura) | `apps/react-client` | 13 | pendiente |
+
+**Revisión 1 (2026-09-24): REJECTED** con tres bloqueantes — B-1 (typecheck rojo en `tests/`), B-2 (ADR-170 enumeraba rechazos que el motor no hacía → ADR-173), B-3 (el toast de alta podía mentir → ADR-174) — y no bloqueantes N-1 a N-8. Las filas 10-14 los cierran. N-8 (`scenario-2`/`scenario-5` de E2E) es anterior a esta branch: va en un commit aparte sobre `hardening/plan-2026-09`.
 
 **Reglas de este hito** (además de las de siempre): UX-10 —nada que aparezca desplaza el diseño— se
 revisa en cada PR de la app; los PR 6-9 se verifican en el browser con los dos temas.

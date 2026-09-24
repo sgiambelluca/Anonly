@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=seguridad | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,06_Pipeline.md,adr/ADR-130-El-Contenedor-De-Escritorio-Fija-El-Motor.md,adr/ADR-131-El-Actualizador-Es-La-Primera-Salida-De-Red.md,adr/ADR-132-El-Shell-Tiene-Su-Propio-Modelo-De-Seguridad.md,adr/ADR-137-Windows-Verifica-Actualizaciones-Con-Clave-Ed25519-Propia.md | audiencia=IA+humanos | fase=11.6 -->
+<!-- CONTEXT: scope=seguridad | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,06_Pipeline.md,adr/ADR-130-El-Contenedor-De-Escritorio-Fija-El-Motor.md,adr/ADR-131-El-Actualizador-Es-La-Primera-Salida-De-Red.md,adr/ADR-132-El-Shell-Tiene-Su-Propio-Modelo-De-Seguridad.md,adr/ADR-137-Windows-Verifica-Actualizaciones-Con-Clave-Ed25519-Propia.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md | audiencia=IA+humanos | fase=11.6 -->
 
 # Anonly — Modelo de Seguridad
 

@@ -58,7 +58,7 @@ export interface GroupRemoveRequested { readonly documentId: string; readonly gr
 3. Su `indexInType` queda como **hueco** (caso 15); la renumeración canónica del próximo
    `finishSession` lo compacta (ADR-028), como cualquier hueco.
 4. **Registra la supresión**: agrega a `Session.removedValues` (interno, mismo patrón que
-   `Session.typeCorrections` de ADR-085) el valor normalizado (`normalizeForComparison`) de **cada
+   `Session.typeCorrections` de ADR-085) el valor normalizado (`normalizeEntityValue`, la misma normalización de `Occurrence.normalizedValue`, ADR-115 — errata 2026-09-24: decía `normalizeForComparison`, hallazgo N-6 del revisor) de **cada
    alias** del grupo. **Sin tipo**: se suprime el valor, no el par valor+tipo, porque lo que el usuario
    dijo es "esto no es un dato", no "esto no es una persona" (para eso está "Cambiar tipo").
 5. Los registros de ocurrencias del grupo se **conservan** en la sesión, así el dedup por identidad
