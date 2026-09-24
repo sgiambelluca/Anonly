@@ -521,7 +521,8 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
       <ConfirmDialog
         open={confirmOpen}
         title="Reanalizar documento"
-        message="¿Reanalizar el documento con la nueva configuración? Tus ediciones se conservan."
+        // ADR-172 §2: la pila de deshacer no cruza un re-análisis.
+        message="¿Reanalizar el documento con la nueva configuración? Tus ediciones se conservan, pero lo hecho hasta acá ya no se va a poder deshacer."
         confirmLabel="Reanalizar"
         cancelLabel="Cancelar"
         busy={saving}

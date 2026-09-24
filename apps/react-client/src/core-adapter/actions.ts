@@ -37,6 +37,8 @@ import { usePipelineStore } from "../store/pipeline.store.js";
 import { useRulesStore } from "../store/rules.store.js";
 import { useViewerStore, type ViewerKind } from "../store/viewer.store.js";
 
+import { useHistoryStore } from "./history.js";
+
 import { getCore } from "./index.js";
 
 /** `null` si no hay documento activo; las acciones que lo requieren no-opean en ese caso. */
@@ -46,6 +48,8 @@ function activeDocumentId(): string | null {
 
 export const actions = {
   async importDocument(file: File): Promise<void> {
+    // ADR-172 §2: la pila de deshacer es del documento anterior.
+    useHistoryStore.getState().clear();
     const documentId = crypto.randomUUID();
     const buffer = await file.arrayBuffer();
     // DOCUMENT_IMPORTED lo emite el Orchestrator; la UI nunca invoca motores
@@ -91,6 +95,33 @@ export const actions = {
       documentId,
       groupId,
       occurrenceIds,
+    });
+  },
+
+  /**
+   * ADR-171 §5: eliminar una entidad. Si la fila tenía una `Rule` de scope
+   * `group`, se borra primero (`RULE_DELETED`): una regla huérfana contaría en
+   * la franja "Todo el documento". Después, `GROUP_REMOVE_REQUESTED`; el
+   * Grouping Engine responde con `ENTITY_GROUP_REMOVED` y `bus-bridge` saca
+   * la fila. Los dos pasos entran en un mismo punto de deshacer: el
+   * `record` lo hace quien llama, una vez, antes (ADR-172 §2).
+   */
+  removeGroup(groupId: string): void {
+    const documentId = activeDocumentId();
+    if (documentId === null) return;
+    const groupRule = useRulesStore
+      .getState()
+      .rules.find((rule) => rule.scope === "group" && rule.target.groupId === groupId);
+    if (groupRule !== undefined) {
+      getCore().bus.emit(EventChannel.UI, EngineEvents.RULE_DELETED, {
+        documentId,
+        ruleId: groupRule.id,
+      });
+      useRulesStore.getState().removeRule(groupRule.id);
+    }
+    getCore().bus.emit(EventChannel.UI, EngineEvents.GROUP_REMOVE_REQUESTED, {
+      documentId,
+      groupId,
     });
   },
 
@@ -178,6 +209,9 @@ export const actions = {
   async reanalyze(patch: ReanalyzeConfigPatch): Promise<void> {
     const documentId = activeDocumentId();
     if (documentId === null) return;
+    // ADR-172 §1-§2: la pila no cruza un re-análisis (el Core descarta sus
+    // puntos al reabrir la sesión).
+    useHistoryStore.getState().clear();
     await getCore().orchestrator.reanalyze(documentId, patch);
   },
 
@@ -262,6 +296,9 @@ export const actions = {
   closeDocument(): void {
     const documentId = activeDocumentId();
     if (documentId === null) return;
+    // Antes de resetear `document.store`: `clear` descarta los puntos del
+    // documento activo.
+    useHistoryStore.getState().clear();
     getCore().bus.emit(EventChannel.UI, EngineEvents.DOCUMENT_CLOSED, { documentId });
     useDocumentStore.getState().reset();
     useEntitiesStore.getState().reset();

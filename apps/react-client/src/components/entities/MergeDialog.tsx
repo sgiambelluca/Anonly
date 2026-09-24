@@ -28,8 +28,8 @@ import { useEntitiesStore } from "../../store/entities.store.js";
 import { Button } from "../common/Button.js";
 import { Checkbox } from "../common/Checkbox.js";
 import { Dialog } from "../common/Dialog.js";
-import { showToast } from "../common/toast.js";
 
+import { applyMerge } from "./applyEdits.js";
 import {
   displayReplacement,
   mergeButtonLabel,
@@ -111,12 +111,14 @@ export function MergeDialog({ sourceGroupId, open, onClose }: MergeDialogProps) 
     if (!validation.valid) return;
     const targets = orderMergeTargets(selected);
     const entityCount = selected.length + 1;
-    const finalResult = result;
-    for (const step of mergePlan(sourceGroup.id, targets)) {
-      actions.mergeGroups(step.sourceGroupId, step.targetGroupId);
-    }
+    const toast = result !== null ? mergeToastText(entityCount, result) : null;
+    // Los N pedidos de `mergePlan` son una sola entrada de la pila (ADR-172 §2).
+    applyMerge({
+      steps: mergePlan(sourceGroup.id, targets),
+      toast,
+      historyLabel: toast?.title ?? `Fusionaste ${entityCount} entidades`,
+    });
     onClose();
-    if (finalResult !== null) showToast(mergeToastText(entityCount, finalResult));
   };
 
   return (

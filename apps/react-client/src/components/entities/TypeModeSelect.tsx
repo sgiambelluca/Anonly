@@ -66,6 +66,7 @@ export function TypeModeSelect({ type, groups, onOpenChange }: TypeModeSelectPro
       scope: "type",
       mode,
       entityType: type,
+      historyLabel: `${ENTITY_TYPE_LABEL[type]} → ${REPLACEMENT_MODE_LABEL[mode]}`,
       toastText: `${ENTITY_TYPE_LABEL[type]} → ${REPLACEMENT_MODE_LABEL[mode]}`,
     });
   }

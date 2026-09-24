@@ -42,6 +42,7 @@ import { LoadScreen } from "./components/screens/LoadScreen.js";
 import { ScanScreen } from "./components/screens/ScanScreen.js";
 import { TooNarrowScreen } from "./components/screens/TooNarrowScreen.js";
 import { useAppPhase } from "./components/screens/useAppPhase.js";
+import { useHistoryShortcuts } from "./components/screens/useHistoryShortcuts.js";
 import { useLayoutMode } from "./components/screens/useLayoutMode.js";
 import { PasswordDialog } from "./components/toolbar/PasswordDialog.js";
 import { Toolbar } from "./components/toolbar/Toolbar.js";
@@ -135,6 +136,9 @@ function renderPhase(phase: AppPhase): ReactNode {
  */
 function WorkLayout() {
   const layout = useLayoutMode();
+  // ADR-172 §3: `Ctrl/Cmd+Z` y `Ctrl/Cmd+Y` recorren la pila de deshacer.
+  // Un solo listener, acá: solo existe mientras se ve la pantalla de trabajo.
+  useHistoryShortcuts();
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   useEffect(() => {

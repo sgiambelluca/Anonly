@@ -25,12 +25,12 @@
 import { ReplacementMode, type EntityGroup } from "@anonly/anonymization-core";
 import { useState } from "react";
 
-import { actions } from "../../core-adapter/actions.js";
 import { selectDegradedPages, useDegradedStore } from "../../store/degraded.store.js";
 import { Button } from "../common/Button.js";
 import { Dialog } from "../common/Dialog.js";
 import { Tooltip } from "../common/Tooltip.js";
 
+import { applyGroupMode, applyLeaveVisible } from "./applyEdits.js";
 import { describePages } from "./degradedMessage.js";
 import { WARNING_TOOLTIP } from "./needsReviewBadgeCopy.js";
 import { TIGHT_SPACE_BADGE_CLASS, TightSpaceSymbol, WarningTooltipText } from "./warningSymbols.js";
@@ -94,7 +94,7 @@ export function DegradedBadge({ group, onEditReplacement }: DegradedBadgeProps) 
               <Button
                 variant="secondary"
                 onClick={() => {
-                  actions.updateGroup(group.id, { replacementMode: ReplacementMode.Redact });
+                  applyGroupMode(group, ReplacementMode.Redact);
                   setOpen(false);
                 }}
               >
@@ -104,7 +104,7 @@ export function DegradedBadge({ group, onEditReplacement }: DegradedBadgeProps) 
             <Button
               variant="secondary"
               onClick={() => {
-                actions.updateGroup(group.id, { enabled: false });
+                applyLeaveVisible(group);
                 setOpen(false);
               }}
             >

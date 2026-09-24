@@ -3,10 +3,10 @@
  * orden y rótulos por ADR-169 §10).
  *
  * **Orden**: Ver apariciones · Editar reemplazo… · Cambiar tipo… · Fusionar
- * con… · Dividir…. "Restaurar valor calculado" aparece solo cuando el grupo
- * tiene el valor escrito a mano (ADR-078 §4); "Editar reemplazo…" no aparece
- * en `redact` (ADR-012: un bloque negro tiene una sola forma). "Eliminar
- * entidad" (ADR-171) va al final, tras un separador, cuando llega su acción.
+ * con… · Dividir… · separador · **Eliminar entidad** (en rojo, ADR-171).
+ * "Restaurar valor calculado" aparece solo cuando el grupo tiene el valor
+ * escrito a mano (ADR-078 §4); "Editar reemplazo…" no aparece en `redact`
+ * (ADR-012: un bloque negro tiene una sola forma).
  *
  * **La fila que abrió el menú queda resaltada** mientras está abierto
  * (`onOpenChange`, ADR-169 §2) y el panel es flotante: no empuja nada (UX-10).
@@ -33,6 +33,7 @@ import {
   RotateCcwIcon,
   SplitIcon,
   TagIcon,
+  Trash2Icon,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
@@ -47,6 +48,8 @@ export interface GroupContextMenuProps {
   readonly onChangeType: () => void;
   /** ADR-078 §4: presente **solo** si el grupo tiene `replacementValueUserSet === true`. */
   readonly onRestoreComputedValue?: () => void;
+  /** ADR-171 §5: abre la confirmación de "Eliminar entidad". */
+  readonly onRemove: () => void;
   /** ADR-169 §2: la fila se resalta mientras el menú está abierto. */
   readonly onOpenChange?: (open: boolean) => void;
 }
@@ -58,6 +61,7 @@ export function GroupContextMenu({
   onViewOccurrences,
   onChangeType,
   onRestoreComputedValue,
+  onRemove,
   onOpenChange,
 }: GroupContextMenuProps) {
   const [open, setOpenState] = useState(false);
@@ -153,6 +157,14 @@ export function GroupContextMenu({
           </MenuItem>
           <MenuItem icon={<SplitIcon className="h-4 w-4" aria-hidden />} onClick={run(onSplit)}>
             Dividir…
+          </MenuItem>
+          <div role="separator" className="my-1.5 h-px bg-border" />
+          <MenuItem
+            danger
+            icon={<Trash2Icon className="h-4 w-4" aria-hidden />}
+            onClick={run(onRemove)}
+          >
+            Eliminar entidad
           </MenuItem>
         </div>
       ) : null}

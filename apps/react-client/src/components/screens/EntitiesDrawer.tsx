@@ -59,6 +59,9 @@ export function EntitiesDrawer({ open, onOpenChange, children }: EntitiesDrawerP
         ref={panelRef}
         role="dialog"
         aria-modal="true"
+        // `useHistoryShortcuts`: el cajón es la lista misma, no un diálogo
+        // que tape la edición — ahí `Ctrl+Z` sí deshace.
+        data-entities-drawer
         aria-label="Entidades"
         tabIndex={-1}
         className="absolute inset-y-0 left-0 z-50 flex w-[min(28rem,94vw)] flex-col border-r border-border bg-bg-primary shadow-md focus:outline-none"

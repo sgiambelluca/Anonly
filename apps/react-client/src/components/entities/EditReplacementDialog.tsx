@@ -25,13 +25,11 @@ import type { EntityGroup } from "@anonly/anonymization-core";
 import { InfoIcon } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { actions } from "../../core-adapter/actions.js";
 import { selectDegradedPages, useDegradedStore } from "../../store/degraded.store.js";
 import { Button } from "../common/Button.js";
 import { Dialog } from "../common/Dialog.js";
-import { showToast } from "../common/toast.js";
 
-import { applyReplacementValue } from "./applyEdits.js";
+import { applyReplacementValue, restoreComputedValue } from "./applyEdits.js";
 import { EntityLine } from "./EntityLine.js";
 import {
   estimateReplacementFit,
@@ -79,9 +77,8 @@ export function EditReplacementDialog({ group, open, onClose }: EditReplacementD
 
   function handleRestore(): void {
     // ADR-078 §3: re-aplicar el MISMO modo recalcula el valor y apaga el flag.
-    actions.updateGroup(group.id, { replacementMode: group.replacementMode });
+    restoreComputedValue(group);
     onClose();
-    showToast({ title: `«${group.canonicalValue}» volvió al reemplazo calculado` });
   }
 
   return (

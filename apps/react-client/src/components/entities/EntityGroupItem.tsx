@@ -30,14 +30,14 @@
 import { ReplacementMode, type EntityGroup } from "@anonly/anonymization-core";
 import { memo, useEffect, useRef, useState } from "react";
 
-import { actions } from "../../core-adapter/actions.js";
 import { useEntitiesStore } from "../../store/entities.store.js";
 import { usePipelineStore } from "../../store/pipeline.store.js";
 import { useViewerStore } from "../../store/viewer.store.js";
 import { Checkbox } from "../common/Checkbox.js";
+import { ConfirmDialog } from "../common/ConfirmDialog.js";
 import { ConflictBadge } from "../conflicts/ConflictBadge.js";
 
-import { applyEnabled } from "./applyEdits.js";
+import { applyEnabled, applyRemove, restoreComputedValue } from "./applyEdits.js";
 import { ChangeTypeDialog } from "./ChangeTypeDialog.js";
 import { DegradedBadge } from "./DegradedBadge.js";
 import { EditReplacementDialog } from "./EditReplacementDialog.js";
@@ -52,6 +52,7 @@ import { PersonGenderToggle } from "./PersonGenderToggle.js";
 import { isPersonGenderToggleVisible } from "./personGenderVisibility.js";
 import { ReplacementModeSelect } from "./ReplacementModeSelect.js";
 import { SplitDialog } from "./SplitDialog.js";
+import { removeConfirmMessage } from "./undoableEdits.js";
 
 /** Cuánto dura el resaltado de "Ver en la lista". */
 const FLASH_MS = 1600;
@@ -73,6 +74,7 @@ function EntityGroupItemImpl({ group, nodeId, activeNodeId }: EntityGroupItemPro
   const [splitOpen, setSplitOpen] = useState(false);
   const [changeTypeOpen, setChangeTypeOpen] = useState(false);
   const [editReplacementOpen, setEditReplacementOpen] = useState(false);
+  const [removeOpen, setRemoveOpen] = useState(false);
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
   const rowRef = useRef<HTMLDivElement>(null);
@@ -158,7 +160,11 @@ function EntityGroupItemImpl({ group, nodeId, activeNodeId }: EntityGroupItemPro
       {/* Ranura de género siempre reservada (ADR-169 §4). */}
       <span className={`flex justify-center ${dim}`}>
         {isPersonGenderToggleVisible(group) ? (
-          <PersonGenderToggle groupId={group.id} currentGender={group.personGender} />
+          <PersonGenderToggle
+            groupId={group.id}
+            label={group.canonicalValue}
+            currentGender={group.personGender}
+          />
         ) : null}
       </span>
       <ReplacementModeSelect group={group} onOpenChange={setModeMenuOpen} />
@@ -182,11 +188,10 @@ function EntityGroupItemImpl({ group, nodeId, activeNodeId }: EntityGroupItemPro
           ? {
               // ADR-078 §3: re-aplicar el MISMO `replacementMode` recalcula el
               // valor y apaga el flag (ADR-076 §4 fila 4). Sin API nueva.
-              onRestoreComputedValue: () => {
-                actions.updateGroup(group.id, { replacementMode: group.replacementMode });
-              },
+              onRestoreComputedValue: () => restoreComputedValue(group),
             }
           : {})}
+        onRemove={() => setRemoveOpen(true)}
       />
       <MergeDialog sourceGroupId={group.id} open={mergeOpen} onClose={() => setMergeOpen(false)} />
       <SplitDialog groupId={group.id} open={splitOpen} onClose={() => setSplitOpen(false)} />
@@ -199,6 +204,19 @@ function EntityGroupItemImpl({ group, nodeId, activeNodeId }: EntityGroupItemPro
         group={group}
         open={changeTypeOpen}
         onClose={() => setChangeTypeOpen(false)}
+      />
+      {/* ADR-171 §5: la única acción del menú que confirma (Components.md §3.11). */}
+      <ConfirmDialog
+        open={removeOpen}
+        title="Eliminar entidad"
+        message={removeConfirmMessage(group.canonicalValue)}
+        confirmLabel="Eliminar"
+        variant="danger"
+        onConfirm={() => {
+          setRemoveOpen(false);
+          applyRemove(group);
+        }}
+        onCancel={() => setRemoveOpen(false)}
       />
     </div>
   );

@@ -39,7 +39,6 @@ import type { EntityGroup, ReplacementMode } from "@anonly/anonymization-core";
 import { ChevronDownIcon } from "lucide-react";
 
 import { useRulesStore } from "../../store/rules.store.js";
-import { showToast } from "../common/toast.js";
 
 import { applyModeAtLevel } from "./applyMode.js";
 import { hasOwnDecision, planApplyGroupMode } from "./modeLevels.js";
@@ -65,17 +64,15 @@ export function ReplacementModeSelect({ group, onOpenChange }: ReplacementModeSe
       scope: "group",
       mode,
       groupId: group.id,
-      toastText: `${group.canonicalValue} → ${REPLACEMENT_MODE_LABEL[mode]}`,
+      historyLabel: `${group.canonicalValue} → ${REPLACEMENT_MODE_LABEL[mode]}`,
+      // `Components.md` §3.4d/§3.11: la fila no lleva toast —es la acción más
+      // frecuente y es autoevidente—, salvo el único caso donde se pierde algo
+      // de verdad: cambiar el modo recalcula `replacementValue` y descarta el
+      // texto escrito a mano. Con o sin toast, entra a la pila (ADR-172 §3).
+      toastText: group.replacementValueUserSet
+        ? `Se descartó el texto que habías escrito para ${group.canonicalValue}.`
+        : null,
     });
-
-    // ADR-087 §3.3: el único caso del nivel fila donde se pierde algo de
-    // verdad. `grouping.engine.ts` recalcula `replacementValue` y apaga
-    // `replacementValueUserSet` al cambiar el modo, y el texto que el usuario
-    // tipeó no queda guardado en ningún lado — la vía documentada para
-    // "volver" (cambiar el modo y volver al anterior) devuelve el valor
-    // automático, no lo escrito.
-    if (!group.replacementValueUserSet) return;
-    showToast({ title: `Se descartó el texto que habías escrito para ${group.canonicalValue}.` });
   }
 
   return (

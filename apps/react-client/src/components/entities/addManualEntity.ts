@@ -9,6 +9,10 @@
  * resalta (`entities.store.flashGroupId`). Hasta ADR-169 ninguna de las tres
  * vías confirmaba nada: el usuario no sabía si se había agregado.
  *
+ * Toma el punto de deshacer **antes** de agregar (ADR-172 §2): un agregado,
+ * por cualquiera de las tres vías, es una entrada de la pila, y su toast
+ * lleva "Deshacer" junto a "Ver en la lista".
+ *
  * La decisión y el texto son puros (`manualEntityFeedback.ts`); acá solo se
  * emite y se muestra.
  */
@@ -19,6 +23,7 @@ import { actions } from "../../core-adapter/actions.js";
 import { useEntitiesStore } from "../../store/entities.store.js";
 import { showToast } from "../common/toast.js";
 
+import { editToast, recordEdit } from "./editHistory.js";
 import {
   describeManualAdd,
   findAddedGroup,
@@ -29,6 +34,7 @@ import {
 export async function addManualEntityWithFeedback(
   request: ManualEntityRequest,
 ): Promise<ManualEntityFeedback> {
+  const recorded = recordEdit(`Agregaste «${request.value}»`);
   const result = await actions.addManualEntity(request);
   const feedback = manualEntityFeedback(result);
   if (feedback !== "added" || result === null) return feedback;
@@ -44,19 +50,24 @@ export async function addManualEntityWithFeedback(
     occurrenceCount: result.occurrenceCount,
     group,
   });
-  showToast({
-    ...text,
-    tone: "success",
-    ...(group !== undefined
-      ? {
-          actions: [
-            {
-              label: "Ver en la lista",
-              run: () => useEntitiesStore.getState().setFlashGroupId(group.id),
-            },
-          ],
-        }
-      : {}),
-  });
+  showToast(
+    editToast(
+      {
+        ...text,
+        tone: "success",
+        ...(group !== undefined
+          ? {
+              actions: [
+                {
+                  label: "Ver en la lista",
+                  run: () => useEntitiesStore.getState().setFlashGroupId(group.id),
+                },
+              ],
+            }
+          : {}),
+      },
+      recorded,
+    ),
+  );
   return feedback;
 }

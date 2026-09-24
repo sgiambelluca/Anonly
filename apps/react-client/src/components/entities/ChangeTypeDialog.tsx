@@ -27,9 +27,9 @@ import { useEffect, useMemo, useState } from "react";
 import { actions } from "../../core-adapter/actions.js";
 import { Button } from "../common/Button.js";
 import { Dialog } from "../common/Dialog.js";
-import { showToast } from "../common/toast.js";
 
-import { summarizeTypeChange, typeChangeToastText, typePreviewRequest } from "./editPreviews.js";
+import { applyTypeChange } from "./applyEdits.js";
+import { summarizeTypeChange, typePreviewRequest } from "./editPreviews.js";
 import { EntityLine } from "./EntityLine.js";
 import { EntityTypePicker } from "./EntityTypePicker.js";
 
@@ -57,10 +57,8 @@ export function ChangeTypeDialog({ group, open, onClose }: ChangeTypeDialogProps
 
   function handleApply(): void {
     if (nextType === group.type) return;
-    const next = preview?.groups[0];
-    actions.updateGroup(group.id, { type: nextType });
+    applyTypeChange(group, nextType, preview?.groups[0]);
     onClose();
-    showToast(typeChangeToastText(group.canonicalValue, next));
   }
 
   return (

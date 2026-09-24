@@ -655,7 +655,7 @@ entidad con supresión por sesión), ADR-172 (deshacer y rehacer exactos por pun
 | 6 | ADR-168: `LoadScreen` en cajas, `DropZone` de cuatro estados, `HowItWorks`, `AboutDialog`, fallo de importación a ①, `ScanSteps` | `apps/react-client` | — | hecho |
 | 7 | ADR-169: lista, avisos, `Tooltip`, franja, género con borde, visor (pellizco, separador), lupa, selección persistente, `EntityTypePicker`, `AddEntityDialog`, Configuración, tokens | `apps/react-client` | — | hecho |
 | 8 | ADR-170: selector de modo exacto y diálogos Fusionar/Dividir/Editar reemplazo/Cambiar tipo con `previewEdit` | `apps/react-client` | 5, 7 | hecho |
-| 9 | ADR-171/172: "Eliminar entidad", `history.store`, atajos, toasts con "Deshacer" | `apps/react-client` | 5, 7 | pendiente |
+| 9 | ADR-171/172: "Eliminar entidad", `history.store`, atajos, toasts con "Deshacer" | `apps/react-client` | 5, 7 | hecho |
 
 **Reglas de este hito** (además de las de siempre): UX-10 —nada que aparezca desplaza el diseño— se
 revisa en cada PR de la app; los PR 6-9 se verifican en el browser con los dos temas.

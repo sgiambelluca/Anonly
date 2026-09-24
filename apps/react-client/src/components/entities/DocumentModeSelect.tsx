@@ -62,6 +62,7 @@ export function DocumentModeSelect() {
       plan: planApplyDocumentMode(rules),
       scope: "global",
       mode,
+      historyLabel: `Todo el documento → ${REPLACEMENT_MODE_LABEL[mode]}`,
       toastText: `Todo el documento → ${REPLACEMENT_MODE_LABEL[mode]}`,
     });
   }

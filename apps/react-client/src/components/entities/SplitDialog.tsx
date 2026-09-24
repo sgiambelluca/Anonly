@@ -13,7 +13,7 @@
  *   "Tiene que quedar al menos una aparición en N.º 02" en el mismo lugar
  *   (UX-10).
  *
- * Acción: `actions.splitGroup(groupId, selectedOccurrenceIds)` →
+ * Acción: `applySplit` → `actions.splitGroup(groupId, selectedOccurrenceIds)` →
  * `GROUP_SPLIT_REQUESTED`.
  */
 
@@ -26,9 +26,9 @@ import { useEntitiesStore } from "../../store/entities.store.js";
 import { Button } from "../common/Button.js";
 import { Checkbox } from "../common/Checkbox.js";
 import { Dialog } from "../common/Dialog.js";
-import { showToast } from "../common/toast.js";
 import { DETECTION_SOURCE_LABEL } from "../conflicts/conflictLabels.js";
 
+import { applySplit } from "./applyEdits.js";
 import {
   splitPreviewRequest,
   splitSlotMessage,
@@ -91,9 +91,12 @@ export function SplitDialog({ groupId, open, onClose }: SplitDialogProps) {
     if (!validation.valid) return;
     const created = preview?.groups.find((candidate) => candidate.groupId === null);
     const moved = selectedIds.length;
-    actions.splitGroup(group.id, selectedIds);
+    applySplit({
+      group,
+      occurrenceIds: selectedIds,
+      toast: splitToastText(group.canonicalValue, moved, created),
+    });
     onClose();
-    showToast(splitToastText(group.canonicalValue, moved, created));
   };
 
   return (

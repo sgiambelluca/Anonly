@@ -23,6 +23,10 @@ const getPageWords = vi.fn();
 const getPageSize = vi.fn();
 const findText = vi.fn();
 const previewEdit = vi.fn();
+const createEditCheckpoint = vi.fn();
+const restoreEditCheckpoint = vi.fn();
+const discardEditCheckpoints = vi.fn();
+const getSnapshot = vi.fn();
 
 vi.mock("../core-adapter/index.js", () => ({
   getCore: () => ({
@@ -36,15 +40,20 @@ vi.mock("../core-adapter/index.js", () => ({
       getPageSize,
       findText,
       previewEdit,
+      createEditCheckpoint,
+      restoreEditCheckpoint,
+      discardEditCheckpoints,
       cancel: vi.fn(),
       closeDocument: vi.fn(),
       getState: vi.fn(),
       dispose: vi.fn(),
     },
+    engines: { grouping: { getSnapshot } },
   }),
 }));
 
 const { actions } = await import("../core-adapter/actions.js");
+const { useHistoryStore } = await import("../core-adapter/history.js");
 
 function makeRule(overrides: Partial<Rule> = {}): Rule {
   return {
@@ -396,5 +405,115 @@ describe("actions.previewEdit (ADR-170 §2)", () => {
       throw new Error("InvalidInputError");
     });
     expect(actions.previewEdit({ kind: "split", groupId: "g", occurrenceIds: ["o"] })).toBeNull();
+  });
+});
+
+describe("actions.removeGroup (ADR-171 §5)", () => {
+  beforeEach(() => {
+    emit.mockClear();
+    useDocumentStore.getState().reset();
+    useRulesStore.getState().reset();
+  });
+
+  it("sin documento no emite nada", () => {
+    actions.removeGroup("g1");
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("sin regla de grupo, solo pide la eliminación", () => {
+    useDocumentStore.setState({ id: "doc-1" });
+    useRulesStore.getState().addRule(makeRule({ id: "r-type", scope: "type" }));
+    actions.removeGroup("g1");
+    expect(emit.mock.calls).toEqual([
+      [
+        EventChannel.UI,
+        EngineEvents.GROUP_REMOVE_REQUESTED,
+        { documentId: "doc-1", groupId: "g1" },
+      ],
+    ]);
+    expect(useRulesStore.getState().rules.map((rule) => rule.id)).toEqual(["r-type"]);
+  });
+
+  it("borra primero la regla de grupo (no queda huérfana) y después pide la eliminación", () => {
+    useDocumentStore.setState({ id: "doc-1" });
+    useRulesStore
+      .getState()
+      .addRule(makeRule({ id: "r-g1", scope: "group", target: { kind: "group", groupId: "g1" } }));
+    useRulesStore
+      .getState()
+      .addRule(makeRule({ id: "r-g2", scope: "group", target: { kind: "group", groupId: "g2" } }));
+    actions.removeGroup("g1");
+    expect(emit.mock.calls).toEqual([
+      [EventChannel.UI, EngineEvents.RULE_DELETED, { documentId: "doc-1", ruleId: "r-g1" }],
+      [
+        EventChannel.UI,
+        EngineEvents.GROUP_REMOVE_REQUESTED,
+        { documentId: "doc-1", groupId: "g1" },
+      ],
+    ]);
+    expect(useRulesStore.getState().rules.map((rule) => rule.id)).toEqual(["r-g2"]);
+  });
+});
+
+describe("pila de deshacer conectada al Core (ADR-172)", () => {
+  beforeEach(() => {
+    useDocumentStore.getState().reset();
+    useRulesStore.getState().reset();
+    useHistoryStore.setState({ past: [], future: [], live: [], busy: false });
+    createEditCheckpoint.mockClear();
+    restoreEditCheckpoint.mockClear();
+    discardEditCheckpoints.mockClear();
+    getSnapshot.mockClear();
+  });
+
+  it("toma y restaura puntos del documento activo, y rehidrata las reglas del snapshot", async () => {
+    useDocumentStore.setState({ id: "doc-1" });
+    createEditCheckpoint.mockReturnValueOnce("cp-before").mockReturnValueOnce("cp-now");
+    restoreEditCheckpoint.mockResolvedValue(undefined);
+    const restored = makeRule({ id: "r-restored" });
+    getSnapshot.mockReturnValue({
+      documentId: "doc-1",
+      groups: [],
+      conflicts: [],
+      rules: [restored],
+    });
+
+    expect(useHistoryStore.getState().record("Fusionar")).toBe(true);
+    expect(createEditCheckpoint).toHaveBeenCalledWith("doc-1");
+
+    expect(await useHistoryStore.getState().undo()).toBe(true);
+    expect(restoreEditCheckpoint).toHaveBeenCalledWith("doc-1", "cp-before");
+    expect(getSnapshot).toHaveBeenCalledWith("doc-1");
+    expect(useRulesStore.getState().rules).toEqual([restored]);
+    expect(useHistoryStore.getState().future).toEqual([
+      { checkpointId: "cp-now", label: "Fusionar" },
+    ]);
+  });
+
+  it("sin documento no hay punto: la edición no entra a la pila", () => {
+    expect(useHistoryStore.getState().record("X")).toBe(false);
+    expect(createEditCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it("cerrar el documento vacía la pila y descarta sus puntos", () => {
+    useDocumentStore.setState({ id: "doc-1" });
+    createEditCheckpoint.mockReturnValue("cp-1");
+    useHistoryStore.getState().record("A");
+
+    actions.closeDocument();
+
+    expect(discardEditCheckpoints).toHaveBeenCalledWith("doc-1");
+    expect(useHistoryStore.getState().past).toEqual([]);
+  });
+
+  it("re-analizar vacía la pila (no cruza un re-análisis)", async () => {
+    useDocumentStore.setState({ id: "doc-1" });
+    createEditCheckpoint.mockReturnValue("cp-1");
+    useHistoryStore.getState().record("A");
+
+    await actions.reanalyze({ ocr: { languages: ["spa"] } });
+
+    expect(useHistoryStore.getState().past).toEqual([]);
+    expect(reanalyze).toHaveBeenCalled();
   });
 });
