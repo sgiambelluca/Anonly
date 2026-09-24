@@ -71,13 +71,23 @@ export interface ManualEntityResult {
 }
 ```
 
-El Orchestrator junta el `normalizedValue` de cada ocurrencia `Manual` que `findLiteral` emite en este
-agregado —escuchando `ENTITY_FOUND` del documento mientras dura la búsqueda— y con ese conjunto calcula, del
+El Orchestrator junta el `id` y el `normalizedValue` de cada ocurrencia `Manual` que `findLiteral` emite en
+este agregado —escuchando `ENTITY_FOUND` del documento mientras dura la búsqueda— y con eso calcula, del
 snapshot tras `finishSession`:
 
-- `heldConflictIds`: los conflictos sin resolver con `heldManual` cuyo candidato `Manual` tiene un valor que,
-  pasado por `normalizeEntityValue`, está en el conjunto. Reemplaza la comparación exacta de ADR-174 §2.
-- `groupIds`: los grupos con algún member cuyo valor, pasado por `normalizeEntityValue`, está en el conjunto.
+- `heldConflictIds`: los conflictos sin resolver con `heldManual` cuyo candidato `Manual` es **del tipo
+  pedido** y tiene un valor que, pasado por `normalizeEntityValue`, está en el conjunto. Reemplaza la
+  comparación exacta de ADR-174 §2.
+- `groupIds`: los grupos que cumplen **alguna** de dos condiciones:
+  (a) tienen un member cuyo `occurrenceId` es de una ocurrencia emitida, lo que cubre un grupo nuevo aunque
+  la memoria de reclasificación (ADR-085) le haya cambiado el tipo;
+  (b) son **del tipo pedido** y tienen un member cuyo valor, pasado por `normalizeEntityValue`, está en el
+  conjunto, lo que cubre el valor que ya estaba en un grupo y el dedup descartó.
+
+  **Errata 2026-09-24** (el implementador lo detuvo con un test real): la primera redacción no exigía el tipo.
+  Un grupo **de otro tipo** detectado sobre el mismo texto —DNI sobre «34567891.» cuando se agrega
+  `34567891` como Teléfono— entraba en `groupIds` y hacía pasar por éxito un agregado que quedó retenido.
+  Contradecía el caso 43 de `Orchestrator.md`.
 
 Como `normalizedValue = normalizeEntityValue(match.text)` y `candidate.value = match.text` (ADR-115), la
 correspondencia es exacta aunque el documento tenga puntuación pegada o el valor ya estuviera retenido de
