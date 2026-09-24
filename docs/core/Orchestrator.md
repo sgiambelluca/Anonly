@@ -480,7 +480,7 @@ Los tests de contract/unit/edge mockean los motores (interfaces de `Contracts.md
 - [x] 29. (Hito 12.5 — ADR-171 §4) `addManualEntity` llama a `grouping.liftRemoval` antes de `reopenSession`; la re-aplicación de literales retenidos no. Caso 38 y su test.
 - [x] 30. (Hito 12.5 — ADR-172 §1) `createEditCheckpoint`/`restoreEditCheckpoint`/`discardEditCheckpoints`: delegación en Grouping + copia de los literales retenidos bajo el mismo id; descarte en `reanalyze` (antes de `reopenSession`), `closeDocument` y `dispose`; precondición de etapa. Casos 39-40.
 - [x] 31. (Hito 12.5 — ADR-174 §2, N-4) `ManualEntityResult.heldConflictIds` desde el snapshot tras `finishSession`; descarte de la copia de literales al desalojarse un punto. Casos 41-42.
-- [ ] 32. (Hito 12.5 — ADR-175 §3) `heldConflictIds` y `groupIds` por el `normalizedValue` de las ocurrencias emitidas en el agregado. Casos 43-44.
+- [x] 32. (Hito 12.5 — ADR-175 §3) `heldConflictIds` y `groupIds` por el `normalizedValue` de las ocurrencias emitidas en el agregado. Casos 43-44.
 
 ---
 

@@ -661,9 +661,9 @@ entidad con supresión por sesión), ADR-172 (deshacer y rehacer exactos por pun
 | 12 | Tipos de ADR-174: `Conflict.heldManual`, `ManualEntityResult.heldConflictIds`, `ConflictResolveRequested.winner` | `shared` (y `anonymization-core/src/types.ts` para `ManualEntityResult`, que vive en el façade, `Contracts.md` §3.5) | — | **hecho** (`4bfb35c`) |
 | 13 | ADR-174 §2 y N-4 del revisor (Orchestrator 31) | `anonymization-core/src` | 11, 12 | **hecho** (`f5148c7`) |
 | 14 | ADR-174 §4 (`ManualOverlapDialog`, toast honesto, entrada de deshacer retirada), N-5 (ranura del error de `SettingsDialog`) y N-2 (tests de los `.ts` sin cobertura) | `apps/react-client` | 13 | **hecho** (`8e27858`, `29c2126`) |
-| 15 | ADR-175 (15w): invariante de `heldManual`, retenida que se oculta sola, `liftRemoval` reabre la decisión | `grouping-engine` | — | pendiente |
-| 16 | Tipo de ADR-175: `ManualEntityResult.groupIds` | `anonymization-core/src/types.ts` | — | pendiente |
-| 17 | ADR-175 §3 (Orchestrator 32) | `anonymization-core/src` | 15, 16 | pendiente |
+| 15 | ADR-175 (15w): invariante de `heldManual`, retenida que se oculta sola, `liftRemoval` reabre la decisión | `grouping-engine` | — | **hecho** (`cae65b2`) |
+| 16 | Tipo de ADR-175: `ManualEntityResult.groupIds` | `anonymization-core/src/types.ts` | — | **hecho** (`f0a0db1`) |
+| 17 | ADR-175 §3 (Orchestrator 32) | `anonymization-core/src` | 15, 16 | **hecho** (`93ed554`) |
 | 18 | ADR-175 §1, §3-§5 en la UI, y los no bloqueantes 3, 5 y 7 de la revisión 2 | `apps/react-client` | 17 | pendiente |
 
 **Revisión 1 (2026-09-24): REJECTED** con tres bloqueantes — B-1 (typecheck rojo en `tests/`), B-2 (ADR-170 enumeraba rechazos que el motor no hacía → ADR-173), B-3 (el toast de alta podía mentir → ADR-174) — y no bloqueantes N-1 a N-8. Las filas 10-14 los cierran. N-8 (`scenario-2`/`scenario-5` de E2E) es anterior a esta branch: va en un commit aparte sobre `hardening/plan-2026-09`.
