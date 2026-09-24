@@ -105,7 +105,7 @@ def convert(source_path: Path, output_dir: Path) -> tuple[Path, Path]:
     if not source_path.is_file():
         raise ConversionError(f"Source model does not exist: {source_path}.")
     if sha256(source_path) != SOURCE_SHA256:
-        raise ConversionError("Source ONNX SHA-256 does not match ADR-173; no output was written.")
+        raise ConversionError("Source ONNX SHA-256 does not match ADR-179; no output was written.")
     model_path = output_dir / "model_quantized.onnx"
     sidecar_path = output_dir / SIDECAR_NAME
     if source_path in (model_path.resolve(), sidecar_path.resolve()):
@@ -133,7 +133,7 @@ def convert(source_path: Path, output_dir: Path) -> tuple[Path, Path]:
         if not path.is_file():
             raise ConversionError(f"Expected output file is missing: {path.name}.")
         if path.stat().st_size != expected_bytes or sha256(path) != expected_digest:
-            raise ConversionError(f"Output {path.name} size or SHA-256 differs from ADR-173.")
+            raise ConversionError(f"Output {path.name} size or SHA-256 differs from ADR-179.")
     return model_path, sidecar_path
 
 

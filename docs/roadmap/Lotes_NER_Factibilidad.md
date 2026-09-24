@@ -102,4 +102,4 @@ por qué cambian las etiquetas y los spans bajo batch. Solo si se conserva la
 salida semántica, diseñar el batching de sublotes de un mismo job y medir
 `Ready`, orden hacia Grouping, cancelación y memoria temporal. Agrupar jobs de
 distintas páginas exigiría antes un ADR, contrato y spec de protocolo. Los ADR
-168–172 están reservados por otra tarea y no se usarán aquí.
+168–178 están reservados por otra tarea y no se usarán aquí.

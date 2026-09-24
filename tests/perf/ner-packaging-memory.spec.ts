@@ -39,7 +39,7 @@ function nearest<T>(values: ReadonlyArray<T>, at: (value: T) => number, target: 
   return found;
 }
 
-test("ADR-173 — medición NER P2 por brazo", async ({ page, electronApp, electronUserDataDir }) => {
+test("ADR-179 — medición NER P2 por brazo", async ({ page, electronApp, electronUserDataDir }) => {
   test.skip(
     process.env.ANONLY_NER_PACKAGING_MEASURE_RUN === undefined,
     "experimento opt-in; ejecutar tests/perf/run-ner-packaging.sh",

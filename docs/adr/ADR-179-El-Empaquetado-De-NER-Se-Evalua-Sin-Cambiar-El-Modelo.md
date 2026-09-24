@@ -1,11 +1,11 @@
 <!-- CONTEXT: scope=adr | dependencias=roadmap/Optimizacion_De_Memoria_Plan.md,roadmap/Atribucion_Recursos_Renderer_Medicion.md,core/NER_Engine.md,adr/ADR-018-First-Party-Assets.md,adr/ADR-023-NER-Config-Canonical-Model-Multilingue.md,adr/ADR-147-Perder-Un-Identificador-Cubierto-Es-Una-Regresion.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md | audiencia=humanos+IA | fase=11 -->
 
-# ADR-173 — El empaquetado de NER se evalúa sin cambiar el modelo
+# ADR-179 — El empaquetado de NER se evalúa sin cambiar el modelo
 
 - **Estado**: Accepted para el experimento; evaluación completada el 2026-09-23, con A conservado según `roadmap/Empaquetado_NER_Medicion.md`.
 - **Fecha**: 2026-09-23.
 - **Decidido por**: El planificador, ejecutando el punto 1 de `roadmap/Optimizacion_De_Memoria_Plan.md` §2ter tras el cierre y la revisión del punto 2.
-- **Numeración**: ADR-168 a ADR-172 están reservados para el trabajo simultáneo de UI. La auditoría local de `docs/adr/` encontró ADR-001 a ADR-167 y este ADR-173, todos con número único; en las ramas locales/remotas visibles tampoco existía otro ADR-173 al redactar este documento. Este ADR no reemplaza ni modifica los ADR-168–172.
+- **Numeración**: ADR-168 a ADR-178 pertenecen al trabajo simultáneo de UI. Los ADR de esta campaña comienzan en 179; este ADR no reemplaza ni modifica los de UI.
 - **Relacionado con**: ADR-018 (assets first-party), ADR-023 (modelo fijado), ADR-147 (regresión por entidad), ADR-154 (memoria y paralelismo), ADR-167 (ciclo de vida de NER).
 - **Parte de**: Hito 11 — recursos, punto 1 de la secuencia 2 → 1 → 3.
 

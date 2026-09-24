@@ -1,10 +1,10 @@
-<!-- CONTEXT: scope=roadmap-medicion | tarea=punto-1-memoria | dependencias=roadmap/Optimizacion_De_Memoria_Plan.md,adr/ADR-173-El-Empaquetado-De-NER-Se-Evalua-Sin-Cambiar-El-Modelo.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-147-Perder-Un-Identificador-Cubierto-Es-Una-Regresion.md,tests/perf/README.md | audiencia=planificador+humano | fase=11 -->
+<!-- CONTEXT: scope=roadmap-medicion | tarea=punto-1-memoria | dependencias=roadmap/Optimizacion_De_Memoria_Plan.md,adr/ADR-179-El-Empaquetado-De-NER-Se-Evalua-Sin-Cambiar-El-Modelo.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-147-Perder-Un-Identificador-Cubierto-Es-Una-Regresion.md,tests/perf/README.md | audiencia=planificador+humano | fase=11 -->
 
 # Punto 1 de memoria — evaluación del empaquetado de NER
 
 Ejecutada el 2026-09-23 sobre el commit `3aac21fa609fe7cdb4dcdf35eea6e1d78ffc51ea`.
 El brazo A sirvió el ONNX Q8 fijado; B sirvió el mismo grafo y pesos con datos
-externos según ADR-173. El parche de carga de B se aplicó solo al build
+externos según ADR-179. El parche de carga de B se aplicó solo al build
 experimental y se revirtió; el producto y `assets.lock.json` permanecen en A.
 
 Datos crudos de la tanda decisiva: `.measure/ner-packaging-adr173/runs/20260923T150732Z/`.
@@ -19,7 +19,7 @@ oficial.
 **Se conserva A.** B redujo la memoria lineal WASM observada del pool NER en
 los tres pares, pero no demostró una reducción de RSS mayor que la deriva de
 los controles A repetidos. El M1 caliente cambió de signo entre parejas y el
-pico posterior a `Ready` fue mayor en B en las tres. ADR-173 §5 exige una señal
+pico posterior a `Ready` fue mayor en B en las tres. ADR-179 §5 exige una señal
 consistente y mayor que la dispersión antes de adoptar el candidato. El banco
 queda disponible para repetir la evaluación bajo menor presión de memoria y
 con R1 si se dispone de él; esa repetición sería una nueva decisión, no una
