@@ -1,11 +1,13 @@
 import { PdfInvalidError, PdfPasswordRequiredError } from "@anonly/pdf-engine";
 import {
   CancelledError,
+  ConflictReason,
   DetectionSource,
   EngineError,
   EngineErrorCode,
   EngineEvents,
   EngineId,
+  EntityType,
   EventChannel,
   InvalidInputError,
   PipelineStage,
@@ -675,6 +677,96 @@ describe("Orchestrator — edge cases", () => {
 
     expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Failed);
     expect(engines.export.export).not.toHaveBeenCalled();
+  });
+
+  // Caso 46 (§13, ADR-176 §1): un conflicto sin resolver bloquea el export
+  // también en el Core -- la red de seguridad para cualquier llamador que no
+  // pase por la UI, que ya deja el botón deshabilitado.
+  it("export is refused while a conflict is unresolved", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    wireHappyPathSpies(engines, bus);
+    const logger = createMockLogger();
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger,
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+    await orchestrator.importDocument(createImportInput());
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+
+    (engines.grouping.getSnapshot as ReturnType<typeof vi.fn>).mockReturnValue({
+      documentId: "doc-1",
+      groups: [],
+      conflicts: [
+        {
+          id: "conflict-1",
+          groupId: "group-1",
+          reason: ConflictReason.Overlap,
+          candidates: [
+            {
+              source: DetectionSource.Regex,
+              entityType: EntityType.Email,
+              confidence: 1,
+              value: "x",
+            },
+            {
+              source: DetectionSource.Manual,
+              entityType: EntityType.Person,
+              confidence: 1,
+              value: "y",
+            },
+          ],
+          resolved: false,
+        },
+      ],
+      rules: [],
+    });
+
+    const stageChanges: unknown[] = [];
+    bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_STAGE_CHANGED, (p) => stageChanges.push(p));
+    const startedSpy = vi.fn();
+    bus.on(EventChannel.Export, EngineEvents.EXPORT_STARTED, startedSpy);
+    const failedSpy = vi.fn();
+    bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_FAILED, failedSpy);
+
+    const options = {
+      imageFormat: "jpeg" as const,
+      jpegQuality: 0.85,
+      dpi: 150,
+      includeOriginalMetadata: false as const,
+      includeMarkerLegend: false,
+      filename: "out.pdf",
+    };
+    bus.emit(EventChannel.UI, EngineEvents.EXPORT_REQUESTED, { documentId: "doc-1", options });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(engines.export.export).not.toHaveBeenCalled();
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    expect(stageChanges).toEqual([]);
+    expect(startedSpy).not.toHaveBeenCalled();
+    expect(failedSpy).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        documentId: "doc-1",
+        code: EngineErrorCode.EXPORT_UNRESOLVED_CONFLICTS,
+        unresolvedConflicts: 1,
+      }),
+    );
+
+    // Resuelto el conflicto, el mismo pedido exporta.
+    (engines.grouping.getSnapshot as ReturnType<typeof vi.fn>).mockReturnValue({
+      documentId: "doc-1",
+      groups: [],
+      conflicts: [],
+      rules: [],
+    });
+    bus.emit(EventChannel.UI, EngineEvents.EXPORT_REQUESTED, { documentId: "doc-1", options });
+    await vi.waitFor(() => expect(engines.export.export).toHaveBeenCalled());
   });
 
   it("EXPORT_REQUESTED handler never produces unhandled rejection (caso 24, seatbelt .catch)", async () => {

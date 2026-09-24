@@ -2862,6 +2862,49 @@ describe("Orchestrator — unit tests", () => {
     expect(finalGroup?.members).toHaveLength(2);
   });
 
+  // Caso 45 (§13, ADR-176 §3). Con el `GroupingEngine` y el `RegexEngine`
+  // reales: agregar un valor que queda CONTENIDO (ADR-117) dentro de una
+  // detección automática del mismo tipo reporta el grupo contenedor -- antes
+  // de manualOutcome, ni el criterio por normalizedValue/tipo (ADR-175 §3)
+  // ni el de occurrenceId (ADR-176 §3 rama a, sin manualOutcome) lo
+  // encontraban, porque una ocurrencia contenida no se registra (ADR-117) y
+  // el Orchestrator no tenía forma de reconstruir esa decisión desde afuera.
+  it("addManualEntity reports the container group of a contained occurrence", async () => {
+    const words = ["Tel:", "11", "4567-8901"];
+    let x = 0;
+    const ws = words.map((t) => {
+      const w = createWord({ text: t, bbox: { x, y: 0, width: t.length * 6, height: 12 } });
+      x += t.length * 6 + 4;
+      return w;
+    });
+    const document = createDocument({
+      pageCount: 1,
+      pages: [createPage({ index: 0, text: words.join(" "), words: ws })],
+    });
+    const { orchestrator, engines } = await makeOrchestratorWithRealDetection(
+      createPdfEngineOutput({ document }),
+    );
+    await orchestrator.importDocument(createImportInput());
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    const containerGroup = engines.grouping
+      .getSnapshot("doc-1")
+      .groups.find((g) => g.type === EntityType.Phone);
+    if (!containerGroup) throw new Error("expected the automatically detected Phone group");
+
+    const result = await orchestrator.addManualEntity("doc-1", {
+      value: "4567-8901",
+      entityType: EntityType.Phone,
+    });
+
+    expect(result.occurrenceCount).toBe(1);
+    expect(result.heldConflictIds).toEqual([]);
+    expect(result.groupIds).toEqual([containerGroup.id]);
+    // No creó un grupo Phone paralelo: la contenida no se registró (ADR-117).
+    expect(
+      engines.grouping.getSnapshot("doc-1").groups.filter((g) => g.type === EntityType.Phone),
+    ).toHaveLength(1);
+  });
+
   // Caso 42 (§13, ADR-172 §1, hallazgo N-4 del revisor).
   it("evicting the oldest checkpoint also drops its retained-literals copy", async () => {
     const bus = createRealBus();

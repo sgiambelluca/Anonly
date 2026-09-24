@@ -35,7 +35,6 @@ import {
   InvalidInputError,
   isEngineErrorCode,
   MAX_EDIT_CHECKPOINTS,
-  normalizeEntityValue,
   PipelineStage,
   type CancelRequested,
   type CoreRuntimeOptions,
@@ -540,26 +539,20 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     // el árbol de grupos: un valor ya cubierto que se fusiona entero sigue
     // devolviendo N > 0, nunca "grupos nuevos".
     //
-    // ADR-175 §3 (errata 2026-09-24): mientras dura `findLiteral`, juntamos
-    // el `normalizedValue` Y el `id` de cada ocurrencia `source: Manual` que
-    // EMITE este agregado (nunca igualdad exacta contra `request.value`: el
-    // documento trae la puntuación pegada al lado, ADR-115). Es el mismo
-    // `normalizeEntityValue` que ya produjo `Occurrence.normalizedValue` --
-    // comparar los dos lados con esa función es lo que hace que la
-    // correspondencia sea exacta pase lo que pase con la puntuación del
-    // documento. El `id` es lo que distingue (b) de (a) abajo: cubre el
-    // grupo NUEVO aunque ADR-085 le haya cambiado el tipo, sin depender de
-    // que el tipo del member siga siendo el pedido.
-    const manualNormalizedValues = new Set<string>();
-    const manualOccurrenceIds = new Set<string>();
+    // ADR-176 §3: mientras dura `findLiteral`, juntamos el `id` de cada
+    // ocurrencia `source: Manual` que EMITE este agregado. Ya no comparamos
+    // ningún valor ni tipo (eso reemplazaba el criterio de ADR-175 §3, que
+    // este ADR retira): Grouping es quien sabe en qué terminó cada una
+    // (agrupada, deduplicada, contenida por ADR-117 o retenida) porque es
+    // quien la procesó -- `manualOutcome` lee esa anotación.
+    const manualOccurrenceIds: string[] = [];
     const unsubscribeEntityFound = this.bus.on(
       EventChannel.Regex,
       EngineEvents.ENTITY_FOUND,
       (payload: EntityFound) => {
         if (payload.documentId !== documentId) return;
         if (payload.occurrence.source !== DetectionSource.Manual) return;
-        manualNormalizedValues.add(payload.occurrence.normalizedValue);
-        manualOccurrenceIds.add(payload.occurrence.id);
+        manualOccurrenceIds.push(payload.occurrence.id);
       },
     );
     let result;
@@ -572,56 +565,16 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       unsubscribeEntityFound();
     }
     await this.engines.grouping.finishSession(documentId);
-    /*
-     * ADR-174 §2, ADR-175 §3 (errata 2026-09-24): del snapshot de Grouping
-     * tras finishSession.
-     *
-     * `heldConflictIds`: conflictos SIN RESOLVER con heldManual cuyo
-     * candidato Manual es del entityType PEDIDO y tiene un valor que, pasado
-     * por normalizeEntityValue, está en el conjunto -- cada uno es una
-     * ocurrencia manual que perdió una superposición y quedó retenida en vez
-     * de agruparse. occurrenceCount > 0 con heldConflictIds no vacío NO es
-     * un agregado exitoso (Contracts.md §3.5): la UI abre el diálogo de
-     * choque en vez del toast de alta.
-     *
-     * `groupIds`: grupos que cumplen (a) o (b) --
-     *   (a) tienen un member cuyo occurrenceId es de una ocurrencia emitida
-     *       por ESTE agregado. Cubre el grupo nuevo aunque ADR-085 le haya
-     *       cambiado el tipo después de crearlo.
-     *   (b) group.type === entityType pedido y tienen un member cuyo valor,
-     *       pasado por la misma normalización, está en el conjunto. Cubre el
-     *       dedup contra un grupo que ya existía (p. ej. por detección
-     *       automática previa del mismo valor y tipo).
-     * Un grupo de OTRO tipo sobre el mismo texto (el DNI del caso 43, agregar
-     * el mismo valor como Phone) no entra por (b) -- ni por (a), porque su
-     * member no es una ocurrencia que ESTE agregado haya emitido.
-     *
-     * Invariante: occurrenceCount > 0 => heldConflictIds o groupIds no vacío.
-     */
-    const snapshot = this.engines.grouping.getSnapshot(documentId);
-    const heldConflictIds = snapshot.conflicts
-      .filter(
-        (conflict) =>
-          conflict.heldManual === true &&
-          !conflict.resolved &&
-          conflict.candidates.some(
-            (candidate) =>
-              candidate.source === DetectionSource.Manual &&
-              candidate.entityType === request.entityType &&
-              manualNormalizedValues.has(normalizeEntityValue(candidate.value)),
-          ),
-      )
-      .map((conflict) => conflict.id);
-    const groupIds = snapshot.groups
-      .filter(
-        (group) =>
-          group.members.some((member) => manualOccurrenceIds.has(member.occurrenceId)) ||
-          (group.type === request.entityType &&
-            group.members.some((member) =>
-              manualNormalizedValues.has(normalizeEntityValue(member.value)),
-            )),
-      )
-      .map((group) => group.id);
+    // ADR-174 §2, ADR-176 §3: heldConflictIds/groupIds salen tal cual de
+    // manualOutcome -- occurrenceCount > 0 con heldConflictIds no vacío NO es
+    // un agregado exitoso (Contracts.md §3.5): la UI abre el diálogo de
+    // choque en vez del toast de alta. El invariante (occurrenceCount > 0 =>
+    // alguna lista no vacía) se cumple por construcción: toda ocurrencia
+    // emitida termina agrupada, deduplicada, contenida o retenida.
+    const { groupIds, heldConflictIds } = this.engines.grouping.manualOutcome(
+      documentId,
+      manualOccurrenceIds,
+    );
     return { occurrenceCount: result.occurrenceCount, heldConflictIds, groupIds };
   }
 
@@ -1465,7 +1418,10 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     const ctx = this.ctxFor(controller.signal, documentId);
 
     // v1.2.1 (bug #6, caso 24): toda la preparación del export (incluido
-    // `ensureRenderDocumentLoaded`) vive dentro del try/catch → `failPipeline`.
+    // `ensureRenderDocumentLoaded` y, desde ADR-176 §1, el guard de
+    // conflictos de abajo) vive dentro del try/catch → `failPipeline`. Un
+    // fallo de `getSnapshot` acá sigue el mismo camino que cualquier otro
+    // fallo de preparación (caso 24, el seatbelt de `handleExportRequested`).
     // El guard de buffer retenido ausente pasa de warn+return silencioso a
     // lanzar InvalidInputError — antes el `EXPORT_REQUESTED` no atendido
     // dejaba el pipeline congelado en `Ready` sin ningún evento; ahora
@@ -1476,9 +1432,28 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     // documento sigue presente, o flujos que lleguen a export sin haber
     // pasado por `runPipelineFrom`/`runOcrStage`).
     try {
+      // ADR-176 §1: un conflicto sin resolver bloquea el export también en
+      // el Core -- la red de seguridad para cualquier llamador que no pase
+      // por la UI (el botón ya queda deshabilitado ahí, ADR-176 §1 UI). Mira
+      // los conflictos ANTES de cambiar de etapa: si hay alguno sin
+      // resolver, no llama a `export()`, no cambia de etapa (sigue
+      // `Ready`), no emite nada y loguea `warn` -- mismo patrón que
+      // `EXPORT_NO_ENABLED_GROUPS` (ADR-032 §3): un `code` en la metadata de
+      // un warn, sin clase de error ni evento. Solo la CANTIDAD en la
+      // metadata, nunca los valores (R-8, `08_Security_Model.md`).
+      const snapshot = this.engines.grouping.getSnapshot(documentId);
+      const unresolvedConflicts = snapshot.conflicts.filter((c) => !c.resolved).length;
+      if (unresolvedConflicts > 0) {
+        this.logger.warn("Hay conflictos sin resolver; el export no se ejecuta.", {
+          documentId,
+          code: EngineErrorCode.EXPORT_UNRESOLVED_CONFLICTS,
+          unresolvedConflicts,
+        });
+        return;
+      }
+
       await this.ensureRenderDocumentLoaded(documentId);
 
-      const snapshot = this.engines.grouping.getSnapshot(documentId);
       const provider = this.makeRenderPageProvider(documentId, options, ctx);
 
       const exportInput: ExportEngineInput = {
