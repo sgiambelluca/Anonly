@@ -364,6 +364,15 @@ export interface ConflictResolveRequested {
    * y no cambia ningún dato.
    */
   readonly entityType?: EntityType;
+  /**
+   * ADR-174 §3: solo en conflictos con `heldManual`. `"manual"` agrupa la
+   * ocurrencia manual retenida (por el mismo camino que si hubiera ganado);
+   * `"detected"` la descarta (su identidad sigue registrada). Ausente =
+   * `"detected"`, para que un `CONFLICT_RESOLVE_REQUESTED` sin el campo siga
+   * siendo compatible. En un conflicto sin `heldManual` →
+   * `GroupingInvalidPatchError` (rechazo con warn).
+   */
+  readonly winner?: "manual" | "detected";
 }
 export interface DocumentClosed {
   readonly documentId: string;

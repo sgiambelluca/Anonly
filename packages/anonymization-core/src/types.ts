@@ -54,6 +54,11 @@ export interface ImportDocumentInput {
 // el retorno de un método de `IPipelineOrchestrator` (errata de §6, punto 5).
 export interface ManualEntityResult {
   readonly occurrenceCount: number; // apariciones del valor en el documento; 0 = no está
+  // ADR-174 §2: conflictos sin resolver con `heldManual` que dejó este
+  // agregado (la ocurrencia manual perdió una superposición y quedó
+  // retenida). [] = ninguno. occurrenceCount > 0 con heldConflictIds no
+  // vacío NO es un agregado exitoso.
+  readonly heldConflictIds: ReadonlyArray<string>;
 }
 
 export interface IPipelineOrchestrator {

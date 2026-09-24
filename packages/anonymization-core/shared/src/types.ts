@@ -408,6 +408,11 @@ export interface Conflict {
    * entidad; el modo de reemplazo se elige en la fila del grupo).
    */
   readonly resolvedType?: EntityType;
+  /**
+   * ADR-174 §1: hay una ocurrencia manual retenida esperando que el usuario
+   * decida quién gana (`ConflictResolveRequested.winner`).
+   */
+  readonly heldManual?: true;
 }
 
 export interface PipelineError {
