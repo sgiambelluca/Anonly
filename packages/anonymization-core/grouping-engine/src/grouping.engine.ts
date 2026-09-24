@@ -442,6 +442,22 @@ interface Session {
    */
   readonly heldManualOccurrences: Map<string, Occurrence>;
   /**
+   * ADR-178 §1/§3: ocurrencias `source: Manual` que cayeron contenidas
+   * (ADR-117) en un registro VIVO (ADR-177 §1), indexadas por el
+   * `occurrenceId` del CONTENEDOR. No se registran en `recordedOccurrences`
+   * ni forman grupo — la tinta ya la tapa el contenedor —, así que
+   * `manualOutcome` sigue apuntando al contenedor (ADR-176 §3, sin cambios).
+   * Cuando el contenedor deja de estar vivo (`applyGroupRemove`,
+   * `dropOccurrences`), sus entradas se sacan del Map y se re-procesan por
+   * `processOccurrence` como si llegaran en ese momento (ADR-178 §2): nunca
+   * se pierden en silencio. Mismo tratamiento de vida que
+   * `heldManualOccurrences`: viaja en los puntos de restauración
+   * (`cloneSession`), sobrevive a `reopenSession`, muere en `closeSession`,
+   * no sale en el snapshot. Los arrays NUNCA se mutan en el lugar (siempre
+   * se reemplazan con `.set`), así que una copia superficial del Map basta.
+   */
+  readonly containedManualOccurrences: Map<string, Occurrence[]>;
+  /**
    * ADR-176 §3: qué registro absorbió cada ocurrencia `source: Manual`
    * procesada desde el último `reopenSession`, indexada por su propio
    * `occurrenceId`. Se resuelve al LEER (`manualOutcome`), nunca al
@@ -505,6 +521,10 @@ function cloneSession(session: Session): Session {
     // (`Occurrence`, nunca se muta en el lugar), así que una copia superficial
     // del Map alcanza — mismo criterio que `typeCorrections`.
     heldManualOccurrences: new Map(session.heldManualOccurrences),
+    // ADR-178 §3: mismo criterio que heldManualOccurrences -- viaja en los
+    // puntos de restauración. Copia superficial: los arrays nunca se mutan
+    // en el lugar (ver el comentario del campo en `Session`).
+    containedManualOccurrences: new Map(session.containedManualOccurrences),
     // ADR-176 §3: nunca viaja en una copia — ni al simulacro de `previewEdit`
     // ni a un punto de restauración. "Dura lo que dura un agregado", así que
     // toda copia arranca vacía; `restoreCheckpoint` reemplaza la sesión
@@ -1106,6 +1126,7 @@ export class GroupingEngine implements IEngine {
       typeCorrections: new Map(),
       removedValues: new Set(),
       heldManualOccurrences: new Map(),
+      containedManualOccurrences: new Map(),
       manualOutcomes: new Map(),
       seed: crypto.randomUUID(),
       startedAt: Date.now(),
@@ -1208,6 +1229,16 @@ export class GroupingEngine implements IEngine {
    * `CONFLICT_RESOLVED` (mode = modo efectivo del grupo antes de eliminarlo;
    * ver nota 10 del header sobre el alcance exacto de esta condición). No
    * renumera `indexInType` (eso ocurre en el próximo `finishSession`).
+   *
+   * ADR-178 §2: también reconcilia `containedManualOccurrences` —
+   * `reconcileContainedOccurrencesForDrop`, al final— con dos reglas
+   * independientes de qué registros se borran: una guardada que el filtro
+   * alcanza (misma página o misma fuente que ella) sale SIN re-procesar,
+   * tenga o no su contenedor entre los borrados (la re-aplicación de
+   * literales tras el re-análisis la trae de vuelta, ADR-061 §5); una
+   * guardada que el filtro no alcanza pero cuyo contenedor SÍ se borra se
+   * re-procesa por `processOccurrence` completo, en el mismo punto de
+   * deshacer que el drop (ADR-172).
    */
   dropOccurrences(documentId: string, filter: DropOccurrencesFilter): void {
     this.assertNotDisposed();
@@ -1229,6 +1260,11 @@ export class GroupingEngine implements IEngine {
   private doDropOccurrences(session: Session, filter: DropOccurrencesFilter): void {
     const documentId = session.documentId;
     const toDrop = session.recordedOccurrences.filter((rec) => matchesDropFilter(rec, filter));
+    // Calculado ANTES del early-return: `reconcileContainedOccurrencesForDrop`
+    // (ADR-178 §2) lo necesita en los dos caminos, y un `toDrop` vacío es un
+    // Set vacío legítimo (ningún contenedor se borra, pero una guardada
+    // puede seguir cayendo en el filtro por su propia página/fuente).
+    const droppedIds = new Set(toDrop.map((rec) => rec.occurrenceId));
     // ADR-175 §1 (casos 59-60): a diferencia del resto de este método, una
     // ocurrencia manual retenida NUNCA vive en `recordedOccurrences` (nota 9
     // del header) — así que el barrido de conflictos `heldManual` no puede
@@ -1236,10 +1272,10 @@ export class GroupingEngine implements IEngine {
     // ningún `SessionOccurrenceRecord`.
     if (toDrop.length === 0) {
       this.resolveHeldManualConflictsForDrop(session, filter, new Set(), new Map());
+      this.reconcileContainedOccurrencesForDrop(session, filter, droppedIds);
       return;
     }
 
-    const droppedIds = new Set(toDrop.map((rec) => rec.occurrenceId));
     const keptRecords = session.recordedOccurrences.filter(
       (rec) => !droppedIds.has(rec.occurrenceId),
     );
@@ -1359,6 +1395,46 @@ export class GroupingEngine implements IEngine {
         entityType,
       });
     }
+
+    // ADR-178 §2: al final, para que el re-proceso vea la sesión ya
+    // consistente (registros recortados, grupos y conflictos resueltos).
+    this.reconcileContainedOccurrencesForDrop(session, filter, droppedIds);
+  }
+
+  /**
+   * ADR-178 §2: reconcilia `containedManualOccurrences` contra un
+   * `dropOccurrences`. Para cada contenedor guardado (haya sido borrado en
+   * esta llamada o no), separa sus ocurrencias guardadas en dos grupos:
+   * las que el filtro alcanza por su PROPIA página/fuente salen sin
+   * re-procesar (la re-aplicación de literales tras el re-análisis las trae
+   * de vuelta, ADR-061 §5) — pase lo que pase con el contenedor; las que el
+   * filtro no alcanza se re-procesan por `processOccurrence`, pero SOLO si
+   * su contenedor fue uno de los registros borrados (`droppedContainerIds`)
+   * — si el contenedor sigue vivo, siguen guardadas tal cual.
+   */
+  private reconcileContainedOccurrencesForDrop(
+    session: Session,
+    filter: DropOccurrencesFilter,
+    droppedContainerIds: ReadonlySet<string>,
+  ): void {
+    const toReprocess: Occurrence[] = [];
+    for (const containerId of [...session.containedManualOccurrences.keys()]) {
+      const saved = session.containedManualOccurrences.get(containerId);
+      if (!saved) continue;
+      const containerDropped = droppedContainerIds.has(containerId);
+      const kept: Occurrence[] = [];
+      for (const occurrence of saved) {
+        if (matchesDropFilter(occurrence, filter)) continue; // descartada, sin re-procesar
+        if (containerDropped) toReprocess.push(occurrence);
+        else kept.push(occurrence);
+      }
+      if (containerDropped || kept.length === 0) {
+        session.containedManualOccurrences.delete(containerId);
+      } else if (kept.length !== saved.length) {
+        session.containedManualOccurrences.set(containerId, kept);
+      }
+    }
+    for (const occurrence of toReprocess) this.processOccurrence(session, occurrence);
   }
 
   /**
@@ -2051,6 +2127,16 @@ export class GroupingEngine implements IEngine {
    * `removedValues` por el barrido de `group.normalizedValues` de abajo, se
    * quita: lo que el usuario marcó a mano gana sobre la supresión de la
    * detección que acaba de desaparecer.
+   *
+   * ADR-178 §2: al final, por cada registro del grupo eliminado (en el
+   * orden de `recordedOccurrences`), lo que quedó guardado a su nombre
+   * (ocurrencias manuales contenidas, ADR-178 §1) se saca de
+   * `containedManualOccurrences` y se re-procesa por `processOccurrence`
+   * COMPLETO — dedup, paso 0, contención, superposición, matching — como si
+   * llegara en este momento. Corre DESPUÉS de poblar `removedValues`
+   * arriba a propósito: si el valor contenido estaba entre los alias
+   * eliminados, el paso 0 lo suprime, que es lo correcto (B5-1 de la
+   * revisión 5).
    */
   applyGroupRemove(req: GroupRemoveRequested): Promise<void> {
     try {
@@ -2099,6 +2185,21 @@ export class GroupingEngine implements IEngine {
       }
       for (const normalizedValue of revivedNormalizedValues) {
         session.removedValues.delete(normalizedValue);
+      }
+
+      // ADR-178 §2: el grupo eliminado deja de tapar lo que quedó guardado a
+      // nombre de sus registros. Orden determinista: por contenedor en el
+      // orden de `recordedOccurrences` (nunca se tocan por un
+      // `applyGroupRemove`, así que siguen apuntando a `req.groupId`), y
+      // dentro de cada contenedor en orden de llegada (orden del array).
+      for (const containerRecord of session.recordedOccurrences) {
+        if (containerRecord.groupId !== req.groupId) continue;
+        const saved = session.containedManualOccurrences.get(containerRecord.occurrenceId);
+        if (!saved) continue;
+        session.containedManualOccurrences.delete(containerRecord.occurrenceId);
+        for (const occurrence of saved) {
+          this.processOccurrence(session, occurrence);
+        }
       }
 
       return Promise.resolve();
@@ -2826,9 +2927,21 @@ export class GroupingEngine implements IEngine {
      * registrado. Agregar a mano un valor LARGO sobre una detección corta ya
      * registrada deja el duplicado, igual que antes de este ADR — no empeora,
      * pero tampoco lo cierra.
+     *
+     * ADR-178 §1: una ocurrencia `source: Manual` contenida NO se descarta
+     * sin dejar rastro — queda GUARDADA a nombre del contenedor
+     * (`Session.containedManualOccurrences`), porque B5-1 (revisión 5) mostró
+     * que "descartar en silencio" es correcto solo MIENTRAS el contenedor
+     * sigue vivo: si después se elimina, lo contenido tiene que aparecer, y
+     * `applyGroupRemove`/`dropOccurrences` son quienes la sacan del Map y la
+     * re-procesan. Una detección contenida sigue descartándose sin guardar
+     * (es artefacto del barrido literal, no algo que el usuario pidió).
      */
     const container = this.findContainingRecord(session, occurrence);
     if (container) {
+      if (occurrence.source === DetectionSource.Manual) {
+        this.saveContainedManualOccurrence(session, container.occurrenceId, occurrence);
+      }
       this.recordManualOutcome(session, occurrence, {
         kind: "record",
         occurrenceId: container.occurrenceId,
@@ -3565,6 +3678,29 @@ export class GroupingEngine implements IEngine {
       // nada viaja por una copia de campos.
       ...(occurrence.fragments !== undefined ? { fragments: occurrence.fragments } : {}),
     });
+  }
+
+  /**
+   * ADR-178 §1: guarda una ocurrencia `source: Manual` contenida a nombre de
+   * su contenedor, sin duplicar por identidad (mismo criterio que el dedup
+   * de `findDuplicateAnnotation`: `entityType`, `pageIndex`, `bbox`,
+   * `normalizedValue`). Reemplaza el array con `.set` en vez de mutarlo en
+   * el lugar -- lo que hace segura la copia superficial de `cloneSession`
+   * (comentario del campo en `Session`).
+   */
+  private saveContainedManualOccurrence(
+    session: Session,
+    containerOccurrenceId: string,
+    occurrence: Occurrence,
+  ): void {
+    const existing = session.containedManualOccurrences.get(containerOccurrenceId) ?? [];
+    const sameIdentity = (saved: Occurrence): boolean =>
+      saved.entityType === occurrence.entityType &&
+      saved.pageIndex === occurrence.pageIndex &&
+      saved.normalizedValue === occurrence.normalizedValue &&
+      bboxEquals(saved.bbox, occurrence.bbox);
+    if (existing.some(sameIdentity)) return;
+    session.containedManualOccurrences.set(containerOccurrenceId, [...existing, occurrence]);
   }
 
   private buildConflict(

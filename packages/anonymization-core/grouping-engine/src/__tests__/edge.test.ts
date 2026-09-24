@@ -1051,6 +1051,315 @@ describe("GroupingEngine — edge cases", () => {
     expect(groupEvents).toHaveLength(0);
   });
 
+  // Caso 67 (§13, ADR-178 §4): el orden no cambia el resultado -- "agrego y
+  // elimino" (guardado + re-proceso, ADR-178 §1-§2) termina igual que
+  // "elimino y agrego" (ADR-177 §1, caso 65), y un re-análisis posterior
+  // converge al mismo estado sin `liftRemoval`.
+  it("removal order does not change what is hidden", async () => {
+    const containerBbox = makeBBox(100, 200, 120, 12);
+    const insideBbox = makeBBox(160, 200, 45, 12);
+    const looseBbox = makeBBox(400, 200, 45, 12);
+
+    function detectContainer(docId: string): void {
+      ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+        documentId: docId,
+        occurrence: makeOccurrence({
+          entityType: EntityType.Person,
+          source: DetectionSource.NER,
+          confidence: 0.99,
+          value: "Juan Perez",
+          normalizedValue: "juan perez",
+          pageIndex: 0,
+          bbox: containerBbox,
+        }),
+      });
+    }
+    function addManualPerez(docId: string, bbox: ReturnType<typeof makeBBox>): void {
+      ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+        documentId: docId,
+        occurrence: makeOccurrence({
+          entityType: EntityType.Person,
+          source: DetectionSource.Manual,
+          confidence: 1.0,
+          value: "Perez",
+          normalizedValue: "perez",
+          pageIndex: 0,
+          bbox,
+        }),
+      });
+    }
+    function finalMemberBboxes(docId: string): ReturnType<typeof makeBBox>[] {
+      const perezGroup = engine.getSnapshot(docId).groups.find((g) => g.canonicalValue === "Perez");
+      if (!perezGroup) throw new Error(`expected a Perez group in ${docId}`);
+      return [...perezGroup.members.map((m) => m.bbox)].sort((a, b) => a.x - b.x);
+    }
+
+    // Orden A: agrego (contenida + suelta) y DESPUÉS elimino.
+    detectContainer("doc-1");
+    addManualPerez("doc-1", insideBbox);
+    addManualPerez("doc-1", looseBbox);
+    const containerA = engine
+      .getSnapshot("doc-1")
+      .groups.find((g) => g.canonicalValue === "Juan Perez");
+    if (!containerA) throw new Error("expected the container group (order A)");
+    await engine.applyGroupRemove({ documentId: "doc-1", groupId: containerA.id });
+    const membersA = finalMemberBboxes("doc-1");
+    expect(membersA).toHaveLength(2);
+
+    // Orden B: elimino y DESPUÉS agrego (ADR-177 §1, caso 65).
+    engine.startSession("doc-2");
+    detectContainer("doc-2");
+    const containerB = engine
+      .getSnapshot("doc-2")
+      .groups.find((g) => g.canonicalValue === "Juan Perez");
+    if (!containerB) throw new Error("expected the container group (order B)");
+    await engine.applyGroupRemove({ documentId: "doc-2", groupId: containerB.id });
+    addManualPerez("doc-2", insideBbox);
+    addManualPerez("doc-2", looseBbox);
+    const membersB = finalMemberBboxes("doc-2");
+
+    expect(membersB).toEqual(membersA);
+
+    // Re-análisis posterior de la página (doc-1), SIN liftRemoval: "juan
+    // perez" sigue en removedValues, así que la re-detección se suprime
+    // (paso 0 de Matching) en vez de revivir el contenedor, y las manuales
+    // re-aplicadas se agrupan directo (ADR-177 §1, caso 66) -- mismos
+    // members que antes del re-análisis.
+    engine.dropOccurrences("doc-1", { pageIndices: [0] });
+    expect(engine.getSnapshot("doc-1").groups).toHaveLength(0);
+    detectContainer("doc-1");
+    expect(engine.getSnapshot("doc-1").groups).toHaveLength(0);
+    addManualPerez("doc-1", insideBbox);
+    addManualPerez("doc-1", looseBbox);
+    const membersAfterReanalysis = finalMemberBboxes("doc-1");
+    expect(membersAfterReanalysis).toEqual(membersA);
+  });
+
+  // Caso 67 (§13, ADR-178 §1): solo se guarda lo MANUAL -- una detección
+  // contenida se sigue descartando sin guardar -- y sin duplicar por
+  // identidad.
+  it("a detected contained occurrence is not kept", async () => {
+    const containerBbox = makeBBox(100, 200, 120, 12);
+    const insideBbox = makeBBox(160, 200, 45, 12);
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        source: DetectionSource.NER,
+        confidence: 0.99,
+        value: "Juan Perez",
+        normalizedValue: "juan perez",
+        bbox: containerBbox,
+      }),
+    });
+    const container = engine.getSnapshot("doc-1").groups[0];
+    if (!container) throw new Error("expected the container group");
+
+    // Detección (NER) contenida: se descarta como siempre, SIN guardar.
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        source: DetectionSource.NER,
+        confidence: 0.9,
+        value: "Perez",
+        normalizedValue: "perez",
+        bbox: insideBbox,
+      }),
+    });
+    expect(engine["sessions"].get("doc-1")?.containedManualOccurrences.size).toBe(0);
+
+    await engine.applyGroupRemove({ documentId: "doc-1", groupId: container.id });
+    // Nada reaparece: la detección contenida se perdió, como siempre pasaba.
+    expect(engine.getSnapshot("doc-1").groups).toHaveLength(0);
+
+    // --- Una Manual contenida no se guarda dos veces. ---
+    const container2Bbox = makeBBox(100, 300, 120, 12);
+    const inside2Bbox = makeBBox(160, 300, 45, 12);
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        source: DetectionSource.NER,
+        confidence: 0.99,
+        value: "Ana Gomez",
+        normalizedValue: "ana gomez",
+        bbox: container2Bbox,
+      }),
+    });
+    const container2 = engine
+      .getSnapshot("doc-1")
+      .groups.find((g) => g.canonicalValue === "Ana Gomez");
+    if (!container2) throw new Error("expected the second container group");
+    const container2OccurrenceId = container2.members[0]?.occurrenceId;
+    if (!container2OccurrenceId) throw new Error("expected the container's member occurrenceId");
+
+    const contained = makeOccurrence({
+      entityType: EntityType.Person,
+      source: DetectionSource.Manual,
+      confidence: 1.0,
+      value: "Gomez",
+      normalizedValue: "gomez",
+      bbox: inside2Bbox,
+    });
+    // Se re-emite la MISMA ocurrencia (misma identidad) dos veces.
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: contained,
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: contained,
+    });
+    const saved = engine["sessions"]
+      .get("doc-1")
+      ?.containedManualOccurrences.get(container2OccurrenceId);
+    expect(saved).toHaveLength(1);
+
+    await engine.applyGroupRemove({ documentId: "doc-1", groupId: container2.id });
+    const gomezGroup = engine.getSnapshot("doc-1").groups.find((g) => g.canonicalValue === "Gomez");
+    if (!gomezGroup) throw new Error("expected the Gomez group after removal");
+    expect(gomezGroup.members).toHaveLength(1);
+  });
+
+  // Caso 68 (§13, ADR-178 §2-§3): vida de lo guardado frente a
+  // `dropOccurrences` y a los puntos de restauración.
+  it("kept contained occurrences follow dropOccurrences and checkpoints", async () => {
+    // --- A: drop por página que ALCANZA a la guardada -- se descarta. ---
+    const containerABbox = makeBBox(100, 200, 120, 12);
+    const insideABbox = makeBBox(160, 200, 45, 12);
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        source: DetectionSource.NER,
+        confidence: 0.99,
+        value: "Juan Perez",
+        normalizedValue: "juan perez",
+        pageIndex: 0,
+        bbox: containerABbox,
+      }),
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        source: DetectionSource.Manual,
+        confidence: 1.0,
+        value: "Perez",
+        normalizedValue: "perez",
+        pageIndex: 0,
+        bbox: insideABbox,
+      }),
+    });
+    expect(engine["sessions"].get("doc-1")?.containedManualOccurrences.size).toBe(1);
+
+    engine.dropOccurrences("doc-1", { pageIndices: [0] });
+    expect(engine.getSnapshot("doc-1").groups.some((g) => g.canonicalValue === "Perez")).toBe(
+      false,
+    );
+    expect(engine["sessions"].get("doc-1")?.containedManualOccurrences.size).toBe(0);
+
+    // --- B: drop por fuente NER que borra el contenedor y NO alcanza a la
+    // Manual -- se re-procesa y se agrupa. ---
+    const containerBBbox = makeBBox(100, 200, 120, 12);
+    const insideBBbox = makeBBox(160, 200, 45, 12);
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        source: DetectionSource.NER,
+        confidence: 0.99,
+        value: "Juan Lopez",
+        normalizedValue: "juan lopez",
+        pageIndex: 1,
+        bbox: containerBBbox,
+      }),
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        source: DetectionSource.Manual,
+        confidence: 1.0,
+        value: "Lopez",
+        normalizedValue: "lopez",
+        pageIndex: 1,
+        bbox: insideBBbox,
+      }),
+    });
+    expect(engine["sessions"].get("doc-1")?.containedManualOccurrences.size).toBe(1);
+
+    engine.dropOccurrences("doc-1", { source: DetectionSource.NER });
+    const lopezGroup = engine.getSnapshot("doc-1").groups.find((g) => g.canonicalValue === "Lopez");
+    if (!lopezGroup) throw new Error("expected the Lopez group after the NER drop");
+    expect(lopezGroup.members).toHaveLength(1);
+    expect(engine["sessions"].get("doc-1")?.containedManualOccurrences.size).toBe(0);
+
+    // --- C: checkpoint -- eliminar -- restaurar devuelve la guardada (sin
+    // agrupar, Map restaurado) -- re-eliminar la agrupa. ---
+    const containerCBbox = makeBBox(100, 200, 120, 12);
+    const insideCBbox = makeBBox(160, 200, 45, 12);
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        source: DetectionSource.NER,
+        confidence: 0.99,
+        value: "Marta Diaz",
+        normalizedValue: "marta diaz",
+        pageIndex: 2,
+        bbox: containerCBbox,
+      }),
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        source: DetectionSource.Manual,
+        confidence: 1.0,
+        value: "Diaz",
+        normalizedValue: "diaz",
+        pageIndex: 2,
+        bbox: insideCBbox,
+      }),
+    });
+    const containerC = engine
+      .getSnapshot("doc-1")
+      .groups.find((g) => g.canonicalValue === "Marta Diaz");
+    if (!containerC) throw new Error("expected the container group C");
+
+    const checkpointId = engine.createCheckpoint("doc-1");
+    await engine.applyGroupRemove({ documentId: "doc-1", groupId: containerC.id });
+    expect(engine.getSnapshot("doc-1").groups.some((g) => g.canonicalValue === "Diaz")).toBe(true);
+    expect(engine["sessions"].get("doc-1")?.containedManualOccurrences.size).toBe(0);
+
+    await engine.restoreCheckpoint("doc-1", checkpointId);
+    // La guardada vuelve tal cual: sin agrupar, y el contenedor sigue vivo.
+    expect(engine.getSnapshot("doc-1").groups.some((g) => g.canonicalValue === "Diaz")).toBe(false);
+    expect(engine.getSnapshot("doc-1").groups.some((g) => g.canonicalValue === "Marta Diaz")).toBe(
+      true,
+    );
+    expect(engine["sessions"].get("doc-1")?.containedManualOccurrences.size).toBe(1);
+
+    const restoredContainer = engine
+      .getSnapshot("doc-1")
+      .groups.find((g) => g.canonicalValue === "Marta Diaz");
+    if (!restoredContainer) throw new Error("expected the restored container group");
+    await engine.applyGroupRemove({ documentId: "doc-1", groupId: restoredContainer.id });
+    const diazGroup = engine.getSnapshot("doc-1").groups.find((g) => g.canonicalValue === "Diaz");
+    if (!diazGroup) throw new Error("expected the Diaz group after re-removal");
+    expect(diazGroup.members).toHaveLength(1);
+
+    // --- D: no sale en el snapshot; closeSession la descarta. ---
+    const snapshot = engine.getSnapshot("doc-1");
+    expect(Object.keys(snapshot).sort()).toEqual(
+      ["conflicts", "documentId", "groups", "rules"].sort(),
+    );
+    await engine.closeSession("doc-1");
+    expect(engine["sessions"].get("doc-1")).toBeUndefined();
+  });
+
   // Caso 10 (§13)
   it("ambiguous_canonical conflict emitted", () => {
     ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {

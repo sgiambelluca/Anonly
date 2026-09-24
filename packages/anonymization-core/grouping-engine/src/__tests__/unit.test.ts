@@ -1993,4 +1993,81 @@ describe("GroupingEngine — un choque pendiente bloquea el export (ADR-176)", (
     expect(liveRecordAfter).toEqual(liveRecordBefore);
     expect(engine.getSnapshot("doc-1").groups).toEqual([newGroup]);
   });
+
+  // Caso 67 (§13, ADR-178 §1-§2): el probe de B5-1 de la revisión 5 -- una
+  // ocurrencia manual contenida queda guardada a nombre de su contenedor y
+  // se agrupa recién cuando el contenedor se elimina.
+  it("a manual occurrence contained in a removed entity is grouped on removal", async () => {
+    const containerBbox = makeBBox(100, 200, 120, 12);
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        source: DetectionSource.NER,
+        confidence: 0.99,
+        value: "Juan Perez",
+        normalizedValue: "juan perez",
+        bbox: containerBbox,
+      }),
+    });
+    const containerGroup = engine.getSnapshot("doc-1").groups[0];
+    if (!containerGroup) throw new Error("expected the container group");
+
+    const contained = makeOccurrence({
+      entityType: EntityType.Person,
+      source: DetectionSource.Manual,
+      confidence: 1.0,
+      value: "Perez",
+      normalizedValue: "perez",
+      bbox: makeBBox(160, 200, 45, 12), // adentro del contenedor
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: contained,
+    });
+    // Contenida: no crea grupo, no se registra.
+    expect(engine.getSnapshot("doc-1").groups).toHaveLength(1);
+
+    const loose = makeOccurrence({
+      entityType: EntityType.Person,
+      source: DetectionSource.Manual,
+      confidence: 1.0,
+      value: "Perez",
+      normalizedValue: "perez",
+      bbox: makeBBox(400, 200, 45, 12), // suelta
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: loose,
+    });
+    const groupsBeforeRemoval = engine.getSnapshot("doc-1").groups;
+    expect(groupsBeforeRemoval).toHaveLength(2);
+    const perezGroup = groupsBeforeRemoval.find((g) => g.canonicalValue === "Perez");
+    if (!perezGroup) throw new Error("expected the loose Perez group");
+    expect(perezGroup.members).toHaveLength(1);
+
+    // manualOutcome ANTES de eliminar: la contenida sigue apuntando al
+    // contenedor (ADR-176 §3, sin cambios); la suelta, a su propio grupo.
+    const outcomeBefore = engine.manualOutcome("doc-1", [contained.id, loose.id]);
+    expect(new Set(outcomeBefore.groupIds)).toEqual(new Set([containerGroup.id, perezGroup.id]));
+
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+    await engine.applyGroupRemove({ documentId: "doc-1", groupId: containerGroup.id });
+
+    const groupsAfter = engine.getSnapshot("doc-1").groups;
+    expect(groupsAfter).toHaveLength(1);
+    const finalPerez = groupsAfter[0];
+    if (!finalPerez) throw new Error("expected the surviving Perez group");
+    expect(finalPerez.id).toBe(perezGroup.id);
+    expect(finalPerez.members).toHaveLength(2);
+    expect(new Set(finalPerez.members.map((m) => m.occurrenceId))).toEqual(
+      new Set([contained.id, loose.id]),
+    );
+
+    const updateCalls = busEmitSpy.mock.calls.filter(
+      ([channel, event]) =>
+        channel === EventChannel.Grouping && event === EngineEvents.ENTITY_GROUP_UPDATED,
+    );
+    expect(updateCalls.length).toBeGreaterThan(0);
+  });
 });
