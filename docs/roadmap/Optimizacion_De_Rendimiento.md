@@ -324,13 +324,13 @@ No hay ganancia cuantificada todavía.
 **Regex, línea base cerrada en macOS:**
 [`Patron_Email_Regex_Medicion.md`](Patron_Email_Regex_Medicion.md) registra la
 curva cuadrática de email hasta 160 KiB y el control rápido de R1/R2 reales.
-El arreglo lineal quedó decidido en ADR-175 y `Regex_Engine.md` v1.14.0;
+El arreglo lineal quedó decidido en ADR-181 y `Regex_Engine.md` v1.14.0;
 se implementó y repitió la curva adversa y R1/R2 sin cambios de detección.
 
 **Grouping, línea base cerrada en macOS:**
 [`Agrupacion_Difusa_Medicion.md`](Agrupacion_Difusa_Medicion.md) registra la
 curva de 250–2000 valores distintos, el control repetido y R1/R2 reales.
-El primer arreglo quedó especificado en ADR-176 y `Grouping_Engine.md`
+El primer arreglo quedó especificado en ADR-182 y `Grouping_Engine.md`
 v1.11.0, se implementó y conservó huellas y orden en 30 controles. El peor
 caso de 2.000 valores distintos bajó de 14,53 a 3,26 s, pero el bloqueo de
 varios segundos persiste; un índice de candidatos requiere otro ADR.
@@ -338,7 +338,7 @@ Un filtro exacto por trigramas se descartó tras una sonda: no eliminó ninguna
 de las 1.999.000 comparaciones del adverso y añadió costo. El informe registra
 esa prueba y su alcance.
 Una segunda fase de recorte exacto de afijos comunes se especificó en
-ADR-177 y `Grouping_Engine.md` v1.12.0. Ya implementada y medida en motor y
+ADR-183 y `Grouping_Engine.md` v1.12.0. Ya implementada y medida en motor y
 R1/R2, bajó el peor caso de 3,26 a 1,50 s con huellas idénticas. El bloqueo
 residual y la curva cuadrática siguen documentados; Windows nativo pendiente.
 

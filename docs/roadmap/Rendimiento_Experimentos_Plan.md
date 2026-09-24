@@ -7,7 +7,7 @@ Este documento concreta los «Próximos objetivos» de
 **medición**, no una autorización para cambiar defaults, presupuestos, contratos
 o perfiles. Cada brazo vuelve a la configuración de producto al terminar. La
 decisión de incorporar una variante corresponde al humano después de leer la
-curva de tiempo, memoria y calidad. ADR-168 a ADR-172 están reservados en otra
+curva de tiempo, memoria y calidad. ADR-168 a ADR-178 están reservados en otra
 tarea: no se usan en esta campaña.
 
 ## Orden y entregas

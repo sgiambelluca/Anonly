@@ -301,7 +301,7 @@ ANONLY_REAL_DOC_R1=/ruta/neutral/R1.pdf ANONLY_REAL_DOC_R2=/ruta/neutral/R2.pdf 
 
 `grouping-trigram-feasibility.ts` y `grouping-common-affix-feasibility.ts` son
 sondas sintéticas separadas del motor: la primera descartó el filtro por
-trigramas; la segunda precedió ADR-177. Ninguna sustituye la curva del motor
+trigramas; la segunda precedió ADR-183. Ninguna sustituye la curva del motor
 ni las corridas reales. En todos estos bancos, las rutas, nombres, texto y PDF
 reales permanecen fuera del repo y de `.measure/`; los reportes llevan IDs
 neutros, agregados numéricos y huellas. Una suspensión invalida la tanda
@@ -590,7 +590,7 @@ se compara excluyendo ids/duraciones. M1 es solo contexto: ADR-157 libera OCR
 entre frío y caliente. Las cifras históricas aquí conservadas no son el control
 actual ni un ahorro prometido.
 
-## ADR-173 — empaquetado experimental de NER
+## ADR-179 — empaquetado experimental de NER
 
 Opt-in. `ner-packaging.spec.ts` se omite en `pnpm test:perf` normal. El runner
 `run-ner-packaging.sh` valida y convierte el ONNX original en un entorno Python
@@ -629,7 +629,7 @@ RSS, heap JS y WASM. Las sondas CDP WASM/heap pueden ocupar varios cientos de
 milisegundos por lectura; sus duraciones, targets no observables y `partial`
 quedan en el JSON para interpretar la resolución real.
 
-## ADR-174 — PDFs pesados, render completo y exportación
+## ADR-180 — PDFs pesados, render completo y exportación
 
 Banco de caracterización opt-in del punto 3 de
 `docs/roadmap/PDFs_Pesados_Y_Exportacion_Plan.md`. No forma parte de `pnpm

@@ -101,5 +101,5 @@ La puerta para ese ADR y el código de producto es:
    Mac de 8 GiB y Windows. Definir reserva de SO y reglas cuando falta RAM.
 4. Presentar al humano la matriz final, la política automática y la migración.
    Después de su decisión, redactar ADR y actualizar `Contracts.md`, specs de
-   motores/UI y tests antes de tocar implementación. ADR-168 a ADR-172 están
+   motores/UI y tests antes de tocar implementación. ADR-168 a ADR-178 están
    ocupados por otra tarea y no se usarán.
