@@ -34,6 +34,7 @@ import {
   EventChannel,
   InvalidInputError,
   isEngineErrorCode,
+  MAX_EDIT_CHECKPOINTS,
   PipelineStage,
   type CancelRequested,
   type CoreRuntimeOptions,
@@ -541,7 +542,28 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       ctx,
     );
     await this.engines.grouping.finishSession(documentId);
-    return { occurrenceCount: result.occurrenceCount };
+    /*
+     * ADR-174 §2: del snapshot de Grouping tras finishSession, los
+     * conflictos SIN RESOLVER con heldManual cuyo candidato Manual tiene el
+     * valor que acabamos de agregar — cada uno es una ocurrencia manual que
+     * perdió una superposición y quedó retenida en vez de agruparse.
+     * occurrenceCount > 0 con heldConflictIds no vacío NO es un agregado
+     * exitoso (Contracts.md §3.5): la UI abre el diálogo de choque en vez
+     * del toast de alta.
+     */
+    const heldConflictIds = this.engines.grouping
+      .getSnapshot(documentId)
+      .conflicts.filter(
+        (conflict) =>
+          conflict.heldManual === true &&
+          !conflict.resolved &&
+          conflict.candidates.some(
+            (candidate) =>
+              candidate.source === DetectionSource.Manual && candidate.value === request.value,
+          ),
+      )
+      .map((conflict) => conflict.id);
+    return { occurrenceCount: result.occurrenceCount, heldConflictIds };
   }
 
   /**
@@ -604,6 +626,20 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       this.checkpointedLiteralsByDocument.set(documentId, byDocument);
     }
     byDocument.set(checkpointId, [...literals]);
+    /*
+     * ADR-172 §1, hallazgo N-4 del revisor: `grouping.createCheckpoint`
+     * desaloja el punto más viejo al pasar `MAX_EDIT_CHECKPOINTS` (mismo
+     * criterio de "Map preserva orden de inserción, el primero es el más
+     * viejo"). Este mapa crece en lockstep con el de Grouping —una entrada
+     * por cada `createEditCheckpoint` exitoso, bajo el mismo id, nunca de
+     * otra forma—, así que aplicar la MISMA regla acá desaloja exactamente
+     * el mismo id, sin que Grouping tenga que exponer cuál desalojó. Nunca
+     * se guardan más copias de literales que puntos vivos tiene Grouping.
+     */
+    if (byDocument.size > MAX_EDIT_CHECKPOINTS) {
+      const oldestId = byDocument.keys().next().value;
+      if (oldestId !== undefined) byDocument.delete(oldestId);
+    }
     return checkpointId;
   }
 

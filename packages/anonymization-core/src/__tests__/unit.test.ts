@@ -12,6 +12,7 @@ import {
   EntityType,
   EventChannel,
   InvalidInputError,
+  MAX_EDIT_CHECKPOINTS,
   PipelineStage,
   ReplacementMode,
   WorkerCrashedError,
@@ -2411,7 +2412,7 @@ describe("Orchestrator — unit tests", () => {
       value: "Jose Perez",
       entityType: EntityType.Person,
     });
-    expect(result).toEqual({ occurrenceCount: 0 });
+    expect(result).toEqual({ occurrenceCount: 0, heldConflictIds: [] });
 
     (engines.regex.findLiteral as ReturnType<typeof vi.fn>).mockClear();
     // Simula que el idioma de OCR nuevo sí lee el nombre.
@@ -2606,6 +2607,130 @@ describe("Orchestrator — unit tests", () => {
     await orchestrator.reanalyze("doc-1", { ocr: { languages: ["eng"] } });
     const afterReanalyze = engines.grouping.getSnapshot("doc-1").groups;
     expect(afterReanalyze.map((g) => g.canonicalValue)).toEqual(["Jose Perez"]);
+  });
+
+  // Caso 41 (§13, ADR-174 §2). Con el `GroupingEngine` y el `RegexEngine`
+  // reales: un mock canned no puede reproducir el conflicto de superposición
+  // sin reimplementarlo.
+  it("addManualEntity reports held conflicts when the manual value loses an overlap", async () => {
+    const document = createDocument({
+      pageCount: 1,
+      pages: [
+        createPage({
+          index: 0,
+          text: "34567891",
+          words: [createWord({ text: "34567891", bbox: { x: 0, y: 0, width: 60, height: 12 } })],
+        }),
+      ],
+    });
+    const { orchestrator, engines } = await makeOrchestratorWithRealDetection(
+      createPdfEngineOutput({ document }),
+    );
+    await orchestrator.importDocument(createImportInput());
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    // Regex ya detectó el DNI real sobre el mismo texto.
+    expect(
+      engines.grouping.getSnapshot("doc-1").groups.some((g) => g.type === EntityType.DNI),
+    ).toBe(true);
+
+    // El mismo literal, forzado a OTRO tipo: se superpone exactamente con el
+    // DNI ya detectado (mismo bbox, misma palabra) y pierde el conflicto
+    // (empate de confidence 1.0 contra Regex).
+    const result = await orchestrator.addManualEntity("doc-1", {
+      value: "34567891",
+      entityType: EntityType.Phone,
+    });
+
+    expect(result.occurrenceCount).toBeGreaterThan(0);
+    expect(result.heldConflictIds).toHaveLength(1);
+
+    const snapshot = engines.grouping.getSnapshot("doc-1");
+    const conflict = snapshot.conflicts.find((c) => c.id === result.heldConflictIds[0]);
+    expect(conflict?.heldManual).toBe(true);
+    expect(conflict?.resolved).toBe(false);
+    // La ocurrencia manual quedó retenida, no agrupada.
+    expect(snapshot.groups.some((g) => g.type === EntityType.Phone)).toBe(false);
+  });
+
+  // Caso 41 (§13, ADR-174 §2) — el otro extremo: sin choque, heldConflictIds
+  // vacío, como cualquier agregado exitoso de siempre.
+  it("addManualEntity without an overlap returns an empty heldConflictIds", async () => {
+    const { orchestrator } = await makeOrchestratorWithRealDetection(
+      createPdfEngineOutput({
+        document: createDocument({
+          pageCount: 1,
+          pages: [
+            createPage({
+              index: 0,
+              text: "Jose Perez",
+              words: [
+                createWord({ text: "Jose", bbox: { x: 0, y: 0, width: 30, height: 12 } }),
+                createWord({ text: "Perez", bbox: { x: 35, y: 0, width: 35, height: 12 } }),
+              ],
+            }),
+          ],
+        }),
+      }),
+    );
+    await orchestrator.importDocument(createImportInput());
+
+    const result = await orchestrator.addManualEntity("doc-1", {
+      value: "Jose Perez",
+      entityType: EntityType.Person,
+    });
+
+    expect(result.occurrenceCount).toBeGreaterThan(0);
+    expect(result.heldConflictIds).toEqual([]);
+  });
+
+  // Caso 42 (§13, ADR-172 §1, hallazgo N-4 del revisor).
+  it("evicting the oldest checkpoint also drops its retained-literals copy", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({
+        pageCount: 1,
+        pages: [createPage({ index: 0, requiresOCR: true })],
+      }),
+      textlessPages: [0],
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+    let checkpointSeq = 0;
+    (engines.grouping.createCheckpoint as ReturnType<typeof vi.fn>).mockImplementation(
+      () => `cp-${++checkpointSeq}`,
+    );
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+    await orchestrator.importDocument(createImportInput());
+
+    // Un literal retenido real, para que la copia que se pierde no esté vacía.
+    await orchestrator.addManualEntity("doc-1", {
+      value: "Jose Perez",
+      entityType: EntityType.Person,
+    });
+
+    const ids: string[] = [];
+    for (let i = 0; i < MAX_EDIT_CHECKPOINTS; i++) {
+      ids.push(orchestrator.createEditCheckpoint("doc-1"));
+    }
+    const byDocument = orchestrator["checkpointedLiteralsByDocument"].get("doc-1");
+    expect(byDocument?.size).toBe(MAX_EDIT_CHECKPOINTS);
+    expect(byDocument?.has(ids[0]!)).toBe(true);
+    expect(byDocument?.get(ids[0]!)).toEqual([
+      { value: "Jose Perez", entityType: EntityType.Person },
+    ]);
+
+    // El punto MAX_EDIT_CHECKPOINTS + 1: Grouping desaloja `ids[0]`, y el
+    // Orchestrator tiene que desalojar su copia de literales bajo el mismo id.
+    const oneMore = orchestrator.createEditCheckpoint("doc-1");
+    expect(byDocument?.size).toBe(MAX_EDIT_CHECKPOINTS);
+    expect(byDocument?.has(ids[0]!)).toBe(false);
+    expect(byDocument?.has(oneMore)).toBe(true);
   });
 });
 

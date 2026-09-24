@@ -1264,7 +1264,7 @@ describe("Orchestrator — contract tests", () => {
       entityType: EntityType.Person,
     });
 
-    expect(result).toEqual({ occurrenceCount: 0 });
+    expect(result).toEqual({ occurrenceCount: 0, heldConflictIds: [] });
     expect(engines.grouping.getSnapshot("doc-1").groups).toHaveLength(0);
   });
 
@@ -1325,7 +1325,7 @@ describe("Orchestrator — contract tests", () => {
       value: "Jose Perez",
       entityType: EntityType.Person,
     });
-    expect(first).toEqual({ occurrenceCount: 3 });
+    expect(first).toEqual({ occurrenceCount: 3, heldConflictIds: [] });
 
     const before = engines.grouping.getSnapshot("doc-1");
     expect(before.groups).toHaveLength(1);
@@ -1339,7 +1339,7 @@ describe("Orchestrator — contract tests", () => {
       value: "Jose Perez",
       entityType: EntityType.Person,
     });
-    expect(second).toEqual({ occurrenceCount: 3 });
+    expect(second).toEqual({ occurrenceCount: 3, heldConflictIds: [] });
 
     const after = engines.grouping.getSnapshot("doc-1");
     expect(after).toEqual(before);
