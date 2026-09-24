@@ -208,10 +208,15 @@ export const actions = {
     getCore().bus.emit(EventChannel.UI, EngineEvents.RULE_CREATED, { documentId, rule });
   },
 
-  resolveConflict(conflictId: string, mode: ReplacementMode): void {
+  // ADR-083 §1 (entityType) y ADR-174 §3 (winner). Errata 2026-09-24: el snippet
+  // seguía con el `mode: ReplacementMode` anterior a ADR-083.
+  resolveConflict(
+    conflictId: string,
+    choice: { readonly entityType?: EntityType; readonly winner?: "manual" | "detected" } = {},
+  ): void {
     const documentId = stores.document.getState().id;
     if (!documentId) return;
-    getCore().bus.emit(EventChannel.UI, EngineEvents.CONFLICT_RESOLVE_REQUESTED, { documentId, conflictId, mode });
+    getCore().bus.emit(EventChannel.UI, EngineEvents.CONFLICT_RESOLVE_REQUESTED, { documentId, conflictId, ...choice });
   },
 
   // Acciones agregadas por ADR-036 §5 (Components.md ya las invocaba):

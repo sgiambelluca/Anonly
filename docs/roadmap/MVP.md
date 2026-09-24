@@ -660,7 +660,7 @@ entidad con supresión por sesión), ADR-172 (deshacer y rehacer exactos por pun
 | 11 | ADR-173 (15u) y ADR-174 (15v): rechazos de fusión/división y ocurrencia manual retenida | `grouping-engine` | 4 | **hecho** (`356865c`) |
 | 12 | Tipos de ADR-174: `Conflict.heldManual`, `ManualEntityResult.heldConflictIds`, `ConflictResolveRequested.winner` | `shared` (y `anonymization-core/src/types.ts` para `ManualEntityResult`, que vive en el façade, `Contracts.md` §3.5) | — | **hecho** (`4bfb35c`) |
 | 13 | ADR-174 §2 y N-4 del revisor (Orchestrator 31) | `anonymization-core/src` | 11, 12 | **hecho** (`f5148c7`) |
-| 14 | ADR-174 §4 (`ManualOverlapDialog`, toast honesto, entrada de deshacer retirada), N-5 (ranura del error de `SettingsDialog`) y N-2 (tests de los `.ts` sin cobertura) | `apps/react-client` | 13 | pendiente |
+| 14 | ADR-174 §4 (`ManualOverlapDialog`, toast honesto, entrada de deshacer retirada), N-5 (ranura del error de `SettingsDialog`) y N-2 (tests de los `.ts` sin cobertura) | `apps/react-client` | 13 | **hecho** (`8e27858`, `29c2126`) |
 
 **Revisión 1 (2026-09-24): REJECTED** con tres bloqueantes — B-1 (typecheck rojo en `tests/`), B-2 (ADR-170 enumeraba rechazos que el motor no hacía → ADR-173), B-3 (el toast de alta podía mentir → ADR-174) — y no bloqueantes N-1 a N-8. Las filas 10-14 los cierran. N-8 (`scenario-2`/`scenario-5` de E2E) es anterior a esta branch: va en un commit aparte sobre `hardening/plan-2026-09`.
 
