@@ -21,7 +21,7 @@ import { useEntitiesStore } from "../../store/entities.store.js";
 import { dismissToast, showToast, subscribeToToasts, type ToastMessage } from "../common/toast.js";
 
 import {
-  openManualOverlapDialog,
+  openFirstPendingManualOverlap,
   subscribeToManualOverlapDialog,
 } from "./manualOverlapController.js";
 import { ManualOverlapDialog } from "./ManualOverlapDialog.js";
@@ -69,7 +69,7 @@ export function ManualOverlapDialogHost() {
       description: "El export está bloqueado hasta que elijas.",
       tone: "warning",
       persistent: true,
-      actions: [{ label: "Resolver", run: () => openManualOverlapDialog(warning.conflictIds) }],
+      actions: [{ label: "Resolver", run: openFirstPendingManualOverlap }],
     });
     avisoIdRef.current = shown.id;
   }, [conflicts, groupsByType, sortOrder, conflictIds, toast]);
