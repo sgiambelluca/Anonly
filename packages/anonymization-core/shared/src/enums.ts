@@ -232,6 +232,10 @@ export enum EngineErrorCode {
   EXPORT_FAILED = "EXPORT_FAILED",
   EXPORT_NO_ENABLED_GROUPS = "EXPORT_NO_ENABLED_GROUPS",
   EXPORT_TIMEOUT = "EXPORT_TIMEOUT",
+  // ADR-176 §1: runExport con conflictos sin resolver. Solo viaja en la
+  // metadata de un warn (mismo patrón que EXPORT_NO_ENABLED_GROUPS, ADR-032
+  // §3): sin clase de error ni evento.
+  EXPORT_UNRESOLVED_CONFLICTS = "EXPORT_UNRESOLVED_CONFLICTS",
   // Generic
   ENGINE_NOT_INITIALIZED = "ENGINE_NOT_INITIALIZED",
   ENGINE_DISPOSED = "ENGINE_DISPOSED",

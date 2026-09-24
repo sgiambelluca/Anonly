@@ -300,10 +300,11 @@ describe("@anonly/shared — Contracts", () => {
         "RENDER_PAGE_FAILED",
         "RENDER_TIMEOUT",
         "RENDER_FAILED", // fatal de batch (ADR-031)
-        // Export (3)
+        // Export (4)
         "EXPORT_FAILED",
         "EXPORT_NO_ENABLED_GROUPS",
         "EXPORT_TIMEOUT",
+        "EXPORT_UNRESOLVED_CONFLICTS", // ADR-176 §1
         // Generic (5)
         "ENGINE_NOT_INITIALIZED",
         "ENGINE_DISPOSED",
