@@ -668,7 +668,7 @@ entidad con supresión por sesión), ADR-172 (deshacer y rehacer exactos por pun
 | 19 | `EngineErrorCode.EXPORT_UNRESOLVED_CONFLICTS` (`manualOutcome` es un método de `GroupingEngine` y va en la fila 20) | `shared` | — | **hecho** (`80ab79e`) |
 | 20 | ADR-176 §2-§4 (15x): reapuntar conflictos, `manualOutcome`, `liftRemoval` | `grouping-engine` | 19 | **hecho** (`9e1957a`) |
 | 21 | ADR-176 §1 y §3 (Orchestrator 33) | `anonymization-core/src` | 20 | **hecho** (`50f7edc`) |
-| 22 | ADR-176 §1 en la UI: `ExportButton` bloqueado con motivo y "Resolver" | `apps/react-client` | 21 | pendiente |
+| 22 | ADR-176 §1 en la UI: `ExportButton` bloqueado con motivo y "Resolver" | `apps/react-client` | 21 | **hecho** (`edc223b`, `f9fb9c9`) |
 
 **Revisión 1 (2026-09-24): REJECTED** con tres bloqueantes — B-1 (typecheck rojo en `tests/`), B-2 (ADR-170 enumeraba rechazos que el motor no hacía → ADR-173), B-3 (el toast de alta podía mentir → ADR-174) — y no bloqueantes N-1 a N-8. Las filas 10-14 los cierran. N-8 (`scenario-2`/`scenario-5` de E2E) es anterior a esta branch: va en un commit aparte sobre `hardening/plan-2026-09`.
 
