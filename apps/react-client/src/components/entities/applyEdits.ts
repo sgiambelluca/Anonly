@@ -171,5 +171,39 @@ export function applyConflictResolution(params: {
   if (params.spelling !== null) {
     actions.updateGroup(params.groupId, { canonicalValue: params.spelling });
   }
-  actions.resolveConflict(params.conflictId, params.entityType);
+  actions.resolveConflict(
+    params.conflictId,
+    params.entityType !== undefined ? { entityType: params.entityType } : undefined,
+  );
+}
+
+/**
+ * `ManualOverlapDialog` (ADR-174 §3-§4, `Components.md` §6.3): el usuario
+ * elige quién gana un choque entre lo que marcó a mano y una detección ya
+ * agrupada. Una sola decisión, una entrada de la pila; el toast de
+ * confirmación lleva "Deshacer" (ADR-172).
+ */
+export function applyManualOverlapResolution(params: {
+  readonly conflictId: string;
+  readonly winner: "manual" | "detected";
+  readonly value: string;
+}): void {
+  const recorded = recordEdit(`Resolviste el choque de «${params.value}»`);
+  actions.resolveConflict(params.conflictId, { winner: params.winner });
+  showToast(
+    editToast(
+      {
+        title:
+          params.winner === "manual"
+            ? `Ocultaste «${params.value}»`
+            : `Dejaste «${params.value}» sin ocultar`,
+        description:
+          params.winner === "manual"
+            ? "Se ocultó lo que marcaste; la detección que ya estaba se dejó como estaba."
+            : "Se dejó la detección que ya estaba; lo que marcaste no se oculta.",
+        tone: "success",
+      },
+      recorded,
+    ),
+  );
 }

@@ -34,6 +34,7 @@ import { useEffect, useState } from "react";
 
 import { ToastHost } from "./components/common/ToastHost.js";
 import { UpdateNotice } from "./components/common/UpdateNotice.js";
+import { ManualOverlapDialogHost } from "./components/conflicts/ManualOverlapDialogHost.js";
 import { EntitiesPanel } from "./components/entities/EntitiesPanel.js";
 import { hasAnyGroup } from "./components/entities/entityTree.js";
 import type { AppPhase } from "./components/screens/appPhase.js";
@@ -176,6 +177,7 @@ function WorkLayout() {
           </EntitiesDrawer>
         </div>
         <ToastHost />
+        <ManualOverlapDialogHost />
       </div>
     );
   }
@@ -188,6 +190,7 @@ function WorkLayout() {
         <RightPanel />
       </div>
       <ToastHost />
+      <ManualOverlapDialogHost />
     </div>
   );
 }

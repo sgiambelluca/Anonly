@@ -66,6 +66,17 @@ export interface HistorySlice {
   undo(): Promise<boolean>;
   /** Devuelve si rehizo algo. */
   redo(): Promise<boolean>;
+  /**
+   * ADR-174 §4 / hallazgo N-3: retira de `past` la última entrada, sin tocar
+   * el punto que ya quedó vivo en el Core (`live` no cambia: el checkpoint
+   * sigue contando para el tope de `MAX_EDIT_CHECKPOINTS`, simplemente ya no
+   * tiene una entrada de la pila que apunte a él). Para un agregado manual
+   * que resultó `not-found` o `no-op`: nada cambió, así que su punto de
+   * restauración deshace al mismo estado — un "Deshacer" que no deshace
+   * nada. Solo tiene sentido llamarlo inmediatamente después de un
+   * `record()` propio que devolvió `true`, antes de cualquier otra edición.
+   */
+  discardLast(): void;
   clear(): void;
 }
 
@@ -173,6 +184,9 @@ export function createHistoryStore(
       },
       undo: () => move("undo"),
       redo: () => move("redo"),
+      discardLast() {
+        set((previous) => ({ past: previous.past.slice(0, -1) }));
+      },
       clear() {
         try {
           port.discard();

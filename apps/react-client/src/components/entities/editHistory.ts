@@ -30,6 +30,15 @@ export function undoLastEdit(): void {
   void useHistoryStore.getState().undo();
 }
 
+/**
+ * ADR-174 §4 / N-3: retira la entrada que `recordEdit` acaba de registrar,
+ * cuando la acción que la motivó terminó sin cambiar nada (un agregado
+ * manual `not-found` o `no-op`). Ver `history.store.ts#discardLast`.
+ */
+export function discardLastEdit(): void {
+  useHistoryStore.getState().discardLast();
+}
+
 /** Agrega "Deshacer" al final de las acciones del toast, si hay algo que deshacer. */
 export function withUndoAction(input: ToastInput, recorded: boolean, undo: () => void): ToastInput {
   if (!recorded) return input;

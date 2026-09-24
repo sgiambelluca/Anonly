@@ -13,6 +13,18 @@
  * por cualquiera de las tres vías, es una entrada de la pila, y su toast
  * lleva "Deshacer" junto a "Ver en la lista".
  *
+ * **ADR-174 §4**: si el resultado trae `heldConflictIds`, no hay toast — se
+ * abre `ManualOverlapDialog` (vía `manualOverlapController.ts`, porque este
+ * módulo no renderiza nada) para el primer conflicto retenido. Si el agregado
+ * quedó en más de un conflicto a la vez (varias apariciones del mismo valor
+ * chocando con detecciones distintas), los demás siguen visibles como el
+ * aviso ⚠ de sus propias filas (`ConflictBadge`) y se resuelven desde ahí —
+ * no está en el spec abrir varios diálogos en cadena.
+ *
+ * **N-3**: si no encontró nada o no cambió nada (`not-found`/`no-op`), la
+ * entrada de deshacer que se registró antes de agregar se retira
+ * (`discardLastEdit`): no hay nada que deshacer.
+ *
  * La decisión y el texto son puros (`manualEntityFeedback.ts`); acá solo se
  * emite y se muestra.
  */
@@ -22,8 +34,9 @@ import type { ManualEntityRequest } from "@anonly/anonymization-core";
 import { actions } from "../../core-adapter/actions.js";
 import { useEntitiesStore } from "../../store/entities.store.js";
 import { showToast } from "../common/toast.js";
+import { openManualOverlapDialog } from "../conflicts/manualOverlapController.js";
 
-import { editToast, recordEdit } from "./editHistory.js";
+import { discardLastEdit, editToast, recordEdit } from "./editHistory.js";
 import {
   describeManualAdd,
   findAddedGroup,
@@ -36,14 +49,31 @@ export async function addManualEntityWithFeedback(
 ): Promise<ManualEntityFeedback> {
   const recorded = recordEdit(`Agregaste «${request.value}»`);
   const result = await actions.addManualEntity(request);
-  const feedback = manualEntityFeedback(result);
-  if (feedback !== "added" || result === null) return feedback;
 
-  const group = findAddedGroup(
-    useEntitiesStore.getState().groupsByType,
-    request.value,
-    request.entityType,
-  );
+  const group =
+    result === null
+      ? undefined
+      : findAddedGroup(useEntitiesStore.getState().groupsByType, request.value, request.entityType);
+
+  const feedback = manualEntityFeedback(result, group !== undefined);
+
+  // `result !== null` acá siempre es cierto cuando `feedback === "held"`
+  // (`manualEntityFeedback` solo lo devuelve tras leer
+  // `result.heldConflictIds`), pero el narrowing es del `if`, no de la
+  // llamada — se repite la guarda para no necesitar una aserción no-nula.
+  if (feedback === "held" && result !== null) {
+    const [firstHeldConflictId] = result.heldConflictIds;
+    if (firstHeldConflictId !== undefined) openManualOverlapDialog(firstHeldConflictId);
+    return feedback;
+  }
+
+  if (feedback !== "added" || result === null) {
+    // "not-found" / "no-op" (o, defensivamente, "held" sin resultado): nada
+    // cambió, la entrada que se registró arriba no tiene qué deshacer (N-3).
+    if (recorded) discardLastEdit();
+    return feedback;
+  }
+
   const text = describeManualAdd({
     value: request.value,
     entityType: request.entityType,

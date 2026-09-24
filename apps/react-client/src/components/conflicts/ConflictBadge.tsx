@@ -3,13 +3,17 @@
  * "Grupo con conflicto: icono ⚠ al lado del nombre. Click abre el
  * conflicto.").
  *
- * Render: icono ⚠ con tooltip "Conflicto". Click: abre `ConflictDialog`.
- * `EntityGroupItem` decide cuándo montarlo (busca un `Conflict` no resuelto
- * cuyo `groupId` coincida con el grupo) y le pasa el `conflictId`.
+ * Render: icono ⚠ con tooltip "Conflicto". Click: abre `ConflictDialog` —
+ * o, si el conflicto tiene `heldManual` (ADR-174 §1: una ocurrencia manual
+ * perdió una superposición y quedó retenida), `ManualOverlapDialog`
+ * (`Components.md` §6.3) en su lugar. `EntityGroupItem` decide cuándo
+ * montarlo (busca un `Conflict` no resuelto cuyo `groupId` coincida con el
+ * grupo) y le pasa el `conflictId`.
  */
 
 import { useState } from "react";
 
+import { useEntitiesStore } from "../../store/entities.store.js";
 import { Tooltip } from "../common/Tooltip.js";
 import { WARNING_TOOLTIP } from "../entities/needsReviewBadgeCopy.js";
 import {
@@ -19,6 +23,7 @@ import {
 } from "../entities/warningSymbols.js";
 
 import { ConflictDialog } from "./ConflictDialog.js";
+import { ManualOverlapDialog } from "./ManualOverlapDialog.js";
 
 export interface ConflictBadgeProps {
   readonly conflictId: string;
@@ -26,6 +31,9 @@ export interface ConflictBadgeProps {
 
 export function ConflictBadge({ conflictId }: ConflictBadgeProps) {
   const [open, setOpen] = useState(false);
+  const heldManual = useEntitiesStore(
+    (state) => state.conflicts.find((candidate) => candidate.id === conflictId)?.heldManual,
+  );
 
   return (
     <>
@@ -43,7 +51,11 @@ export function ConflictBadge({ conflictId }: ConflictBadgeProps) {
           <ConflictSymbol />
         </button>
       </Tooltip>
-      <ConflictDialog conflictId={conflictId} open={open} onClose={() => setOpen(false)} />
+      {heldManual === true ? (
+        <ManualOverlapDialog conflictId={conflictId} open={open} onClose={() => setOpen(false)} />
+      ) : (
+        <ConflictDialog conflictId={conflictId} open={open} onClose={() => setOpen(false)} />
+      )}
     </>
   );
 }

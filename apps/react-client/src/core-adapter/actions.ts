@@ -151,14 +151,24 @@ export const actions = {
    * reemplazo. `entityType` ausente = aceptar el default del motor (el
    * candidato de mayor confidence), que coincide con la clasificación ya
    * vigente — o sea que confirmar no cambia datos.
+   *
+   * ADR-174 §3: `winner` solo viaja en conflictos con `Conflict.heldManual`
+   * (`ManualOverlapDialog`, `Components.md` §6.3): `"manual"` agrupa la
+   * ocurrencia retenida, `"detected"` la descarta. En cualquier otro
+   * conflicto el motor lo rechaza con `warn` (`GroupingInvalidPatchError`),
+   * así que `ConflictDialog` nunca lo manda.
    */
-  resolveConflict(conflictId: string, entityType?: EntityType): void {
+  resolveConflict(
+    conflictId: string,
+    options?: { readonly entityType?: EntityType; readonly winner?: "manual" | "detected" },
+  ): void {
     const documentId = activeDocumentId();
     if (documentId === null) return;
     getCore().bus.emit(EventChannel.UI, EngineEvents.CONFLICT_RESOLVE_REQUESTED, {
       documentId,
       conflictId,
-      ...(entityType !== undefined ? { entityType } : {}),
+      ...(options?.entityType !== undefined ? { entityType: options.entityType } : {}),
+      ...(options?.winner !== undefined ? { winner: options.winner } : {}),
     });
   },
 

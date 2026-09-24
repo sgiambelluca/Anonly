@@ -8,17 +8,39 @@
  * *"Agregaste «X» · Persona N.º 06 · 2 apariciones ocultas"*. El N.º es el que
  * quedó **después** de la renumeración de `finishSession`, así que se lee del
  * grupo tal como está en el store cuando `addManualEntity` resolvió.
+ *
+ * ADR-174 §4 / `Components.md` §3.4c: el toast de éxito exige DOS
+ * condiciones, no una — `heldConflictIds.length === 0` **y** que el valor
+ * haya quedado en un grupo. `occurrenceCount > 0` por sí solo no alcanza: lo
+ * cuenta el Core **antes** de agrupar (ADR-061 §6 errata), así que un
+ * agregado que chocó entero contra una detección de otro tipo también
+ * informa `occurrenceCount > 0` sin que exista ningún grupo con el valor.
  */
 
 import type { EntityGroup, EntityType, ManualEntityResult } from "@anonly/anonymization-core";
 
 import { describeEntityNumber, ENTITY_TYPE_SINGULAR } from "./entityTypeLabels.js";
 
-export type ManualEntityFeedback = "added" | "not-found" | "no-op";
+export type ManualEntityFeedback = "added" | "not-found" | "no-op" | "held";
 
-export function manualEntityFeedback(result: ManualEntityResult | null): ManualEntityFeedback {
+/**
+ * @param result `null` = sin documento activo (`no-op`, ADR-061 §6 errata).
+ * @param groupFound si el valor agregado quedó en algún grupo del store
+ *   (`findAddedGroup(...) !== undefined`) — el llamador ya lo necesita para
+ *   armar el toast, así que se lo pasa en vez de que esta función dependa
+ *   del store.
+ */
+export function manualEntityFeedback(
+  result: ManualEntityResult | null,
+  groupFound: boolean,
+): ManualEntityFeedback {
   if (result === null) return "no-op";
-  return result.occurrenceCount === 0 ? "not-found" : "added";
+  // ADR-174 §4: un choque sin resolver manda por sobre cualquier otra
+  // lectura del resultado — ni éxito ni "no se encontró", el diálogo de
+  // superposición decide.
+  if (result.heldConflictIds.length > 0) return "held";
+  if (result.occurrenceCount === 0) return "not-found";
+  return groupFound ? "added" : "not-found";
 }
 
 /**

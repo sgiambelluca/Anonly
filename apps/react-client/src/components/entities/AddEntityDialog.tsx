@@ -109,7 +109,9 @@ export function AddEntityDialog({ open, onClose }: AddEntityDialogProps) {
     setNotFound(false);
     const feedback = await addManualEntityWithFeedback({ value: trimmed, entityType });
     setSubmitting(false);
-    if (feedback === "added") onClose();
+    // ADR-174 §4: "held" cierra este diálogo igual que "added" — lo que
+    // sigue es `ManualOverlapDialog`, abierto por `manualOverlapController.ts`.
+    if (feedback === "added" || feedback === "held") onClose();
     else if (feedback === "not-found") setNotFound(true);
   }
 

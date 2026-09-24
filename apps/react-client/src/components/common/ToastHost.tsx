@@ -15,7 +15,7 @@
  */
 
 import * as RadixToast from "@radix-ui/react-toast";
-import { CheckIcon, InfoIcon, XIcon } from "lucide-react";
+import { CheckIcon, InfoIcon, TriangleAlertIcon, XIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { subscribeToToasts, type ToastMessage } from "./toast.js";
@@ -35,6 +35,11 @@ export function ToastHost() {
           // mismo nodo y el temporizador del primero sigue corriendo, así que
           // el segundo se cierra antes de tiempo.
           key={toast.id}
+          // ADR-174 §4: un toast persistente no expira solo (`Infinity`
+          // desactiva el temporizador de Radix); el resto sigue con el de la
+          // `Provider` (`TOAST_DURATION_MS`), así que la prop `duration` ni se
+          // pasa — `exactOptionalPropertyTypes` no deja pasarla en `undefined`.
+          {...(toast.persistent === true ? { duration: Infinity } : {})}
           className="anonly-toast-in flex w-[23.75rem] max-w-[calc(100vw-2rem)] items-start gap-3 rounded-xl border border-border bg-bg-primary py-3 pl-3.5 pr-3 shadow-md"
           onOpenChange={(open) => {
             if (!open) setToast(null);
@@ -45,11 +50,15 @@ export function ToastHost() {
             className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${
               toast.tone === "success"
                 ? "bg-success/15 text-text-primary"
-                : "bg-bg-tertiary text-text-secondary"
+                : toast.tone === "warning"
+                  ? "bg-warning/15 text-warning-strong"
+                  : "bg-bg-tertiary text-text-secondary"
             }`}
           >
             {toast.tone === "success" ? (
               <CheckIcon className="h-4 w-4" />
+            ) : toast.tone === "warning" ? (
+              <TriangleAlertIcon className="h-4 w-4" />
             ) : (
               <InfoIcon className="h-4 w-4" />
             )}

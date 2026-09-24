@@ -21,7 +21,12 @@ export interface ToastAction {
   readonly shortcut?: string;
 }
 
-export type ToastTone = "success" | "neutral";
+// `Components.md` §8.6 documenta cuatro tonos (`info`, `success`, `warning`,
+// `error`); la implementación fue sumándolos según hizo falta uno nuevo.
+// `warning` lo suma ADR-174 §4: el toast persistente de un choque sin
+// resolver ("Quedó un choque sin resolver en «X»…") no es ni un éxito
+// (`success`) ni informativo de lo de siempre (`neutral`/`info`).
+export type ToastTone = "success" | "neutral" | "warning";
 
 export interface ToastInput {
   readonly title: string;
@@ -30,6 +35,13 @@ export interface ToastInput {
   /** `success` para un agregado (ícono de check); `neutral` para el resto. */
   readonly tone?: ToastTone;
   readonly actions?: ReadonlyArray<ToastAction>;
+  /**
+   * ADR-174 §4: el toast de un choque sin resolver no se va solo — sigue
+   * hasta que el usuario elige en `ManualOverlapDialog` (o lo cierra a
+   * mano). El resto de los toasts sigue expirando a los
+   * `TOAST_DURATION_MS` de siempre (`ToastHost`).
+   */
+  readonly persistent?: boolean;
 }
 
 export interface ToastMessage extends ToastInput {

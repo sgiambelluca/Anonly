@@ -84,3 +84,28 @@ export function candidateTypes(conflict: Conflict): ReadonlyArray<EntityType> {
 export function spellingChoices(conflict: Conflict): ReadonlyArray<string> {
   return [...new Set(conflict.candidates.map((candidate) => candidate.value))];
 }
+
+export interface ManualOverlapCandidates {
+  readonly manual: ConflictCandidate;
+  readonly detected: ConflictCandidate;
+}
+
+/**
+ * ADR-174 §4 / `Components.md` §6.3: los dos candidatos que
+ * `ManualOverlapDialog` muestra — la ocurrencia manual retenida
+ * (`DetectionSource.Manual`, "lo que marcaste") contra la detección con la
+ * que chocó ("lo que ya estaba detectado"). Solo tiene sentido en un
+ * conflicto con `Conflict.heldManual` (`03_Data_Model.md` §15); en cualquier
+ * otro no hay por qué haber un candidato `Manual`, y se devuelve `null` en
+ * vez de asumir una forma que el conflicto no tiene.
+ */
+export function manualOverlapCandidates(conflict: Conflict): ManualOverlapCandidates | null {
+  const manual = conflict.candidates.find(
+    (candidate) => candidate.source === DetectionSource.Manual,
+  );
+  const detected = conflict.candidates.find(
+    (candidate) => candidate.source !== DetectionSource.Manual,
+  );
+  if (manual === undefined || detected === undefined) return null;
+  return { manual, detected };
+}

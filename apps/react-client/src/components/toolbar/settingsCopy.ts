@@ -65,3 +65,21 @@ export const OCR_LANGUAGES_SLOT_TEXT: Readonly<Record<OcrLanguagesSlot, string>>
   reanalyze:
     "Al guardar, el documento abierto se vuelve a analizar con estos idiomas. Tus ediciones se conservan.",
 };
+
+/**
+ * N-5 / UX-10: la ranura de `saveError`, bajo el pie del diálogo, tiene alto
+ * fijo — hasta este hallazgo del revisor solo se montaba con error, y
+ * aparecer/desaparecer corría el pie. Queda siempre montada (`SettingsDialog`
+ * le pone `h-5 truncate`) y esta función decide si en ese momento tiene algo
+ * que mostrar.
+ *
+ * Con `confirmOpen` el error ya se muestra dentro del `ConfirmDialog`
+ * (`errorMessage`, ADR-125): mostrarlo también acá lo duplicaría.
+ */
+export function resolveSaveErrorSlot(params: {
+  readonly saveError: string | null;
+  readonly confirmOpen: boolean;
+}): { readonly visible: boolean; readonly text: string } {
+  if (params.saveError === null || params.confirmOpen) return { visible: false, text: "—" };
+  return { visible: true, text: params.saveError };
+}

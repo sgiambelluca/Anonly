@@ -83,6 +83,7 @@ import {
   OCR_LANGUAGES_SLOT_TEXT,
   PERFORMANCE_PRESET_DESCRIPTION,
   resolveOcrLanguagesSlot,
+  resolveSaveErrorSlot,
   THEME_LABEL,
   THEME_ORDER,
   UPDATE_NETWORK_NOTICE,
@@ -283,6 +284,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     saved: useSettingsStore.getState().ocrLanguages,
     documentOpen: documentId !== null,
   });
+  const saveErrorSlot = resolveSaveErrorSlot({ saveError, confirmOpen });
 
   return (
     <>
@@ -510,12 +512,22 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
           `ConfirmDialog`, que es el camino con documento abierto. El camino
           sin documento no abre ninguna confirmación, así que un fallo al
           recrear el core no tenía dónde aparecer.
+
+          N-5 / UX-10: ranura de **alto fijo** — antes este párrafo solo se
+          montaba con error, y aparecer/desaparecer corría el pie del
+          diálogo. Ahora queda siempre montado (`h-5`, una línea con
+          `truncate`) y solo cambia su texto, igual que la segunda línea de
+          `PipelineStatus` (`UX_Guidelines.md` §7.1).
         */}
-        {saveError !== null && !confirmOpen ? (
-          <p role="alert" className="mt-4 text-sm text-error">
-            {saveError}
-          </p>
-        ) : null}
+        <p
+          role={saveErrorSlot.visible ? "alert" : undefined}
+          aria-live="polite"
+          className={`mt-4 h-5 truncate text-sm text-error ${
+            saveErrorSlot.visible ? "" : "invisible"
+          }`}
+        >
+          {saveErrorSlot.text}
+        </p>
       </Dialog>
 
       <ConfirmDialog
