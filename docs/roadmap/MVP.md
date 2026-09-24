@@ -650,7 +650,7 @@ entidad con supresión por sesión), ADR-172 (deshacer y rehacer exactos por pun
 | 1 | Tipos: `ReplacementPreviews`, `EntityGroup.replacementPreviews`, `EditPreview*`, `GROUP_REMOVE_REQUESTED` + `GroupRemoveRequested` + `EventPayloadMap`, `MAX_EDIT_CHECKPOINTS` | `shared` | — | hecho (`dca2260`) |
 | 2 | `replacementPreviews` (15r) y `previewEdit` | `grouping-engine` | 1 | hecho (`893c4fa`) |
 | 3 | `applyGroupRemove`, `removedValues`, `liftRemoval` (15s) | `grouping-engine` | 1 | hecho (`5079784`) |
-| 4 | `createCheckpoint`/`restoreCheckpoint`/`discardCheckpoints` (15t) | `grouping-engine` | 2, 3 | `8f82315` + errata del caso 53 (pendiente) |
+| 4 | `createCheckpoint`/`restoreCheckpoint`/`discardCheckpoints` (15t) | `grouping-engine` | 2, 3 | hecho (`8f82315` + errata `cd8c759`) |
 | 5 | Façade: `previewEdit` (28), `liftRemoval` en `addManualEntity` (29), puntos de restauración con literales retenidos (30) | `anonymization-core/src` | 2-4 | hecho (`6800470`) |
 | 6 | ADR-168: `LoadScreen` en cajas, `DropZone` de cuatro estados, `HowItWorks`, `AboutDialog`, fallo de importación a ①, `ScanSteps` | `apps/react-client` | — | hecho |
 | 7 | ADR-169: lista, avisos, `Tooltip`, franja, género con borde, visor (pellizco, separador), lupa, selección persistente, `EntityTypePicker`, `AddEntityDialog`, Configuración, tokens | `apps/react-client` | — | hecho |
