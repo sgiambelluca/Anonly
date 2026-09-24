@@ -1,18 +1,15 @@
-import {
-  DetectionSource,
-  EntityType,
-  ReplacementMode,
-  type EntityGroup,
-} from "@anonly/anonymization-core";
+import { EntityType, ReplacementMode, type EntityGroup } from "@anonly/anonymization-core";
 import { describe, expect, it } from "vitest";
 
 import {
   describeManualAdd,
-  findAddedGroup,
-  foldForLookup,
+  resolveAddedGroup,
 } from "../components/entities/manualEntityFeedback.js";
 
-// ADR-169 §7: el toast de las tres vías de agregado.
+// ADR-169 §7: el toast de las tres vías de agregado. ADR-175 §3: el grupo a
+// nombrar se resuelve por `groupIds` (los ids que trae el resultado del
+// Core), nunca buscando por texto — `findAddedGroup`/`foldForLookup` se
+// retiraron (U-3).
 
 function group(overrides: Partial<EntityGroup>): EntityGroup {
   return {
@@ -39,53 +36,36 @@ function group(overrides: Partial<EntityGroup>): EntityGroup {
   };
 }
 
-describe("foldForLookup", () => {
-  it("sin mayúsculas, sin tildes, espacios colapsados", () => {
-    expect(foldForLookup("  JOSÉ   Pérez ")).toBe("jose perez");
-  });
-});
-
-describe("findAddedGroup", () => {
+describe("resolveAddedGroup (ADR-175 §3)", () => {
   const person = group({ id: "p6", canonicalValue: "Lucía Ferreyra" });
-  const org = group({
-    id: "o1",
-    type: EntityType.Organization,
-    canonicalValue: "Banco Nación",
-    aliases: ["BANCO NACION"],
-  });
-  const withMember = group({
-    id: "p2",
-    canonicalValue: "María Laura Fernández",
-    members: [
-      {
-        occurrenceId: "o",
-        value: "Fernández",
-        pageIndex: 0,
-        bbox: { x: 0, y: 0, width: 1, height: 1 },
-        source: DetectionSource.Manual,
-      },
-    ],
-  });
+  const org = group({ id: "o1", type: EntityType.Organization, canonicalValue: "Banco Nación" });
   const byType = new Map([
-    [EntityType.Person, [person, withMember]],
+    [EntityType.Person, [person]],
     [EntityType.Organization, [org]],
   ]);
 
-  it("encuentra por canónico en el tipo elegido", () => {
-    expect(findAddedGroup(byType, "lucia ferreyra", EntityType.Person)?.id).toBe("p6");
+  it("resuelve el único id de groupIds", () => {
+    expect(resolveAddedGroup(byType, ["p6"], EntityType.Person)?.id).toBe("p6");
   });
 
-  it("encuentra por alias o por el valor de un miembro", () => {
-    expect(findAddedGroup(byType, "Banco Nación", EntityType.Organization)?.id).toBe("o1");
-    expect(findAddedGroup(byType, "Fernández", EntityType.Person)?.id).toBe("p2");
+  it("con varios ids, prefiere el primero del tipo pedido", () => {
+    expect(resolveAddedGroup(byType, ["o1", "p6"], EntityType.Person)?.id).toBe("p6");
   });
 
-  it("si el dedup lo sumó a un grupo de otro tipo, lo encuentra igual", () => {
-    expect(findAddedGroup(byType, "Banco Nacion", EntityType.Custom)?.id).toBe("o1");
+  it("sin ninguno del tipo pedido, el primero de todos", () => {
+    // El dedup del Core sumó el agregado a un grupo de otro tipo (ADR-175
+    // §3 errata: el `groupIds` ya viene filtrado por tipo desde el Core en
+    // el caso general, pero la UI no vuelve a filtrar — nombra lo que le
+    // dieron, en el orden que le dieron).
+    expect(resolveAddedGroup(byType, ["o1"], EntityType.Custom)?.id).toBe("o1");
   });
 
-  it("sin grupo: undefined", () => {
-    expect(findAddedGroup(byType, "nadie", EntityType.Person)).toBeUndefined();
+  it("un id que ya no está en el store se ignora, sin romper", () => {
+    expect(resolveAddedGroup(byType, ["desaparecido", "p6"], EntityType.Person)?.id).toBe("p6");
+  });
+
+  it("groupIds vacío: undefined", () => {
+    expect(resolveAddedGroup(byType, [], EntityType.Person)).toBeUndefined();
   });
 });
 

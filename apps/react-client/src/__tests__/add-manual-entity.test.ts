@@ -1,7 +1,7 @@
 /**
- * `addManualEntity.ts` (ADR-061 §3/§6, ADR-169 §7, ADR-174 §4) — el camino
- * común de las tres vías de agregado manual. Mismo criterio de mock que
- * `actions.test.ts`: se reemplaza `core-adapter/index.js`.
+ * `addManualEntity.ts` (ADR-061 §3/§6, ADR-169 §7, ADR-174 §4, ADR-175 §3-§4)
+ * — el camino común de las tres vías de agregado manual. Mismo criterio de
+ * mock que `actions.test.ts`: se reemplaza `core-adapter/index.js`.
  */
 
 import {
@@ -75,14 +75,19 @@ function captureLastToast() {
 }
 
 function captureLastOpenedOverlap() {
-  let last: string | null = null;
-  const unsubscribe = subscribeToManualOverlapDialog((conflictId) => {
-    last = conflictId;
+  let last: ReadonlyArray<string> | null = null;
+  const unsubscribe = subscribeToManualOverlapDialog((conflictIds) => {
+    last = conflictIds;
   });
-  return { get: (): string | null => last, unsubscribe };
+  return { get: (): ReadonlyArray<string> | null => last, unsubscribe };
 }
 
-describe("addManualEntityWithFeedback (ADR-174 §4, N-3)", () => {
+/** Silencia `console.error` del caso "error" (ADR-175 §3) sin perder la aserción de que se llamó. */
+function captureConsoleError() {
+  return vi.spyOn(console, "error").mockImplementation(() => undefined);
+}
+
+describe("addManualEntityWithFeedback (ADR-174 §4, ADR-175 §3-§4, N-3)", () => {
   beforeEach(() => {
     addManualEntity.mockReset();
     createEditCheckpoint.mockReset();
@@ -106,7 +111,7 @@ describe("addManualEntityWithFeedback (ADR-174 §4, N-3)", () => {
   });
 
   it("occurrenceCount 0: not-found, y la entrada de deshacer registrada se retira (N-3)", async () => {
-    addManualEntity.mockResolvedValue({ occurrenceCount: 0, heldConflictIds: [] });
+    addManualEntity.mockResolvedValue({ occurrenceCount: 0, heldConflictIds: [], groupIds: [] });
     const toasts = captureLastToast();
 
     const feedback = await addManualEntityWithFeedback({
@@ -122,22 +127,13 @@ describe("addManualEntityWithFeedback (ADR-174 §4, N-3)", () => {
     toasts.unsubscribe();
   });
 
-  it("occurrenceCount > 0 pero ningún grupo tiene el valor: not-found, entrada retirada (N-3)", async () => {
-    // ADR-174 §4 / Components.md §3.4c: occurrenceCount > 0 solo no alcanza.
-    addManualEntity.mockResolvedValue({ occurrenceCount: 2, heldConflictIds: [] });
-
-    const feedback = await addManualEntityWithFeedback({
-      value: "José Pérez",
-      entityType: EntityType.Person,
-    });
-
-    expect(feedback).toBe("not-found");
-    expect(useHistoryStore.getState().past).toEqual([]);
-  });
-
-  it("agregado exitoso: toast con Ver en la lista y Deshacer, la entrada queda en la pila", async () => {
+  it("agregado exitoso: nombra el primer grupo de groupIds, toast con Ver en la lista y Deshacer", async () => {
     useEntitiesStore.getState().addGroup(group());
-    addManualEntity.mockResolvedValue({ occurrenceCount: 2, heldConflictIds: [] });
+    addManualEntity.mockResolvedValue({
+      occurrenceCount: 2,
+      heldConflictIds: [],
+      groupIds: ["g1"],
+    });
     const toasts = captureLastToast();
 
     const feedback = await addManualEntityWithFeedback({
@@ -156,13 +152,38 @@ describe("addManualEntityWithFeedback (ADR-174 §4, N-3)", () => {
     toasts.unsubscribe();
   });
 
-  // ADR-174 §4: un choque no es ni éxito ni "no se encontró" — abre
-  // ManualOverlapDialog y no toca la pila (el literal quedó retenido, no es
-  // un no-op).
-  it("heldConflictIds no vacío: 'held', abre el diálogo con el primer conflicto, sin toast", async () => {
+  it("agregado exitoso con un groupId que ya no resuelve en el store: toast sin 'Ver en la lista'", async () => {
+    // Defensivo: `groupIds` viene del Core, pero para cuando la UI lo lee el
+    // store podría no tener ese id (no debería pasar, pero no tiene que
+    // romper).
+    addManualEntity.mockResolvedValue({
+      occurrenceCount: 1,
+      heldConflictIds: [],
+      groupIds: ["fantasma"],
+    });
+    const toasts = captureLastToast();
+
+    const feedback = await addManualEntityWithFeedback({
+      value: "Juan Pérez",
+      entityType: EntityType.Person,
+    });
+
+    expect(feedback).toBe("added");
+    expect(toasts.get()?.description).toBe("Persona · 1 aparición oculta");
+    // Sin grupo resuelto no hay "Ver en la lista" — nada a donde llevar al
+    // usuario —, pero "Deshacer" sigue (la edición sí quedó registrada).
+    expect(toasts.get()?.actions?.map((action) => action.label)).toEqual(["Deshacer"]);
+    toasts.unsubscribe();
+  });
+
+  // ADR-174 §4 / ADR-175 §4: un choque no es ni éxito ni "no se encontró" —
+  // abre ManualOverlapDialog con TODOS los heldConflictIds, y no toca la
+  // pila (el literal quedó retenido, no es un no-op).
+  it("heldConflictIds no vacío: 'held', abre el diálogo con TODOS los ids, sin toast", async () => {
     addManualEntity.mockResolvedValue({
       occurrenceCount: 1,
       heldConflictIds: ["conflict-1", "conflict-2"],
+      groupIds: [],
     });
     const toasts = captureLastToast();
     const overlap = captureLastOpenedOverlap();
@@ -173,16 +194,20 @@ describe("addManualEntityWithFeedback (ADR-174 §4, N-3)", () => {
     });
 
     expect(feedback).toBe("held");
-    expect(overlap.get()).toBe("conflict-1");
+    expect(overlap.get()).toEqual(["conflict-1", "conflict-2"]);
     expect(toasts.get()).toBeNull();
     expect(useHistoryStore.getState().past).toHaveLength(1);
     toasts.unsubscribe();
     overlap.unsubscribe();
   });
 
-  it("heldConflictIds manda por sobre un grupo que sí se haya formado con otra aparición", async () => {
+  it("heldConflictIds manda por sobre groupIds no vacío", async () => {
     useEntitiesStore.getState().addGroup(group());
-    addManualEntity.mockResolvedValue({ occurrenceCount: 3, heldConflictIds: ["conflict-1"] });
+    addManualEntity.mockResolvedValue({
+      occurrenceCount: 3,
+      heldConflictIds: ["conflict-1"],
+      groupIds: ["g1"],
+    });
     const toasts = captureLastToast();
 
     const feedback = await addManualEntityWithFeedback({
@@ -193,5 +218,27 @@ describe("addManualEntityWithFeedback (ADR-174 §4, N-3)", () => {
     expect(feedback).toBe("held");
     expect(toasts.get()).toBeNull();
     toasts.unsubscribe();
+  });
+
+  // ADR-175 §3: occurrenceCount > 0 sin heldConflictIds ni groupIds rompe el
+  // invariante del Core — nunca se dice "no se encontró" sobre algo que el
+  // Core sí encontró.
+  it("invariante roto: 'error', toast de error, entrada retirada y logueado", async () => {
+    const consoleError = captureConsoleError();
+    addManualEntity.mockResolvedValue({ occurrenceCount: 3, heldConflictIds: [], groupIds: [] });
+    const toasts = captureLastToast();
+
+    const feedback = await addManualEntityWithFeedback({
+      value: "Juan Pérez",
+      entityType: EntityType.Person,
+    });
+
+    expect(feedback).toBe("error");
+    expect(useHistoryStore.getState().past).toEqual([]);
+    expect(toasts.get()?.title).toBe("No se pudo agregar «Juan Pérez».");
+    expect(toasts.get()?.tone).toBe("error");
+    expect(consoleError).toHaveBeenCalledTimes(1);
+    toasts.unsubscribe();
+    consoleError.mockRestore();
   });
 });

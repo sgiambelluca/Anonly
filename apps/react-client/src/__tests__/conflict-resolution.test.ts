@@ -10,7 +10,9 @@ import { describe, expect, it } from "vitest";
 import {
   candidateTypes,
   defaultCandidate,
+  heldManualConflictIdsForGroup,
   manualOverlapCandidates,
+  removedGroupOverlapReveal,
   spellingChoices,
 } from "../components/conflicts/conflictResolution.js";
 
@@ -215,5 +217,81 @@ describe("manualOverlapCandidates (ADR-174 §4, Components.md §6.3)", () => {
     });
 
     expect(manualOverlapCandidates(conflict)).toBeNull();
+  });
+});
+
+describe("heldManualConflictIdsForGroup (ADR-175 §4)", () => {
+  it("los heldManual sin resolver de ese groupId, en el orden en que están", () => {
+    const conflicts = [
+      makeConflict({ id: "c1", groupId: "g1", heldManual: true, resolved: false }),
+      makeConflict({ id: "c2", groupId: "g1", heldManual: true, resolved: false }),
+      makeConflict({ id: "c3", groupId: "g2", heldManual: true, resolved: false }),
+    ];
+    expect(heldManualConflictIdsForGroup(conflicts, "g1")).toEqual(["c1", "c2"]);
+  });
+
+  it("descarta los resueltos y los que no son heldManual", () => {
+    const conflicts = [
+      makeConflict({ id: "c1", groupId: "g1", heldManual: true, resolved: true }),
+      makeConflict({ id: "c2", groupId: "g1", resolved: false }),
+      makeConflict({ id: "c3", groupId: "g1", heldManual: true, resolved: false }),
+    ];
+    expect(heldManualConflictIdsForGroup(conflicts, "g1")).toEqual(["c3"]);
+  });
+
+  it("sin ninguno: []", () => {
+    expect(heldManualConflictIdsForGroup([], "g1")).toEqual([]);
+  });
+});
+
+describe("removedGroupOverlapReveal (ADR-175 §1)", () => {
+  const held = makeConflict({
+    id: "c1",
+    groupId: "g1",
+    heldManual: true,
+    resolved: false,
+    candidates: [
+      makeCandidate({ source: DetectionSource.Manual, value: "34567891" }),
+      makeCandidate({ source: DetectionSource.Regex, value: "34567891." }),
+    ],
+  });
+
+  it("el conflicto heldManual del grupo pasó a resuelto: devuelve el valor manual", () => {
+    const before = [held];
+    const after = [{ ...held, resolved: true }];
+    expect(
+      removedGroupOverlapReveal({ conflictsBefore: before, conflictsAfter: after, groupId: "g1" }),
+    ).toEqual({
+      value: "34567891",
+    });
+  });
+
+  it("sin heldManual antes: null", () => {
+    expect(
+      removedGroupOverlapReveal({ conflictsBefore: [], conflictsAfter: [], groupId: "g1" }),
+    ).toBeNull();
+  });
+
+  it("el heldManual sigue sin resolver después: null", () => {
+    expect(
+      removedGroupOverlapReveal({ conflictsBefore: [held], conflictsAfter: [held], groupId: "g1" }),
+    ).toBeNull();
+  });
+
+  it("el conflicto desapareció del todo (no debería pasar, pero no rompe): null", () => {
+    expect(
+      removedGroupOverlapReveal({ conflictsBefore: [held], conflictsAfter: [], groupId: "g1" }),
+    ).toBeNull();
+  });
+
+  it("es de otro grupo: null", () => {
+    const after = [{ ...held, resolved: true }];
+    expect(
+      removedGroupOverlapReveal({
+        conflictsBefore: [held],
+        conflictsAfter: after,
+        groupId: "otro",
+      }),
+    ).toBeNull();
   });
 });

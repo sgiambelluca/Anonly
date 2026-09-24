@@ -7,16 +7,20 @@
  */
 
 import {
+  ConflictReason,
+  DetectionSource,
   EntityType,
   EngineEvents,
   EventChannel,
   ReplacementMode,
+  type Conflict,
   type EntityGroup,
 } from "@anonly/anonymization-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ToastMessage } from "../components/common/toast.js";
 import { useDocumentStore } from "../store/document.store.js";
+import { useEntitiesStore } from "../store/entities.store.js";
 
 const emit = vi.fn();
 const createEditCheckpoint = vi.fn();
@@ -65,6 +69,21 @@ function group(overrides: Partial<EntityGroup> = {}): EntityGroup {
   };
 }
 
+function heldConflict(overrides: Partial<Conflict> = {}): Conflict {
+  return {
+    id: "conflict-1",
+    groupId: "g1",
+    reason: ConflictReason.Overlap,
+    candidates: [
+      { source: DetectionSource.Manual, entityType: EntityType.Person, confidence: 1, value: "X" },
+      { source: DetectionSource.Regex, entityType: EntityType.DNI, confidence: 1, value: "X" },
+    ],
+    resolved: false,
+    heldManual: true,
+    ...overrides,
+  };
+}
+
 /** Recolecta el último toast mostrado (o `null` si ninguno). */
 function captureLastToast() {
   let last: ToastMessage | null = null;
@@ -82,12 +101,14 @@ function captureLastToast() {
 describe("applyEdits", () => {
   beforeEach(() => {
     emit.mockClear();
+    emit.mockImplementation(() => undefined);
     createEditCheckpoint.mockReset();
     restoreEditCheckpoint.mockReset();
     discardEditCheckpoints.mockReset();
     createEditCheckpoint.mockReturnValue("cp-1");
     useDocumentStore.setState({ id: "doc-1", name: "a.pdf" });
     useHistoryStore.setState({ past: [], future: [], live: [], busy: false });
+    useEntitiesStore.getState().reset();
   });
 
   it("applyEnabled no hace nada si ningún grupo cambia de estado", () => {
@@ -249,6 +270,49 @@ describe("applyEdits", () => {
       groupId: "g1",
     });
     expect(toasts.get()?.title).toBe("Eliminaste «Juan Pérez»");
+    expect(toasts.get()?.description).toBe("Ya no está en la lista ni se va a ocultar");
+    toasts.unsubscribe();
+  });
+
+  // ADR-175 §1: eliminar la detección de un choque `heldManual` lo resuelve
+  // solo — lo marcado pasa a ocultarse. `GROUP_REMOVE_REQUESTED` es sync
+  // (`04_Event_System.md` §10), así que en producción `entities.store` ya
+  // refleja la resolución cuando `actions.removeGroup` vuelve; acá se
+  // simula con `emit.mockImplementation` (el mock no dispatchea de verdad).
+  it("applyRemove dice 'ahora se oculta' si la eliminación resolvió un heldManual de ese grupo", () => {
+    useEntitiesStore.getState().addConflict(heldConflict({ groupId: "g1" }));
+    emit.mockImplementation((_channel, event) => {
+      if (event === EngineEvents.GROUP_REMOVE_REQUESTED) {
+        useEntitiesStore.getState().resolveConflict("conflict-1", EntityType.Person);
+      }
+    });
+    const toasts = captureLastToast();
+
+    applyEdits.applyRemove(group({ canonicalValue: "Fiscalía de Quilmes" }));
+
+    expect(toasts.get()?.title).toBe("Eliminaste «Fiscalía de Quilmes»");
+    expect(toasts.get()?.description).toBe("Lo que marcaste («X») ahora se oculta");
+    toasts.unsubscribe();
+  });
+
+  it("applyRemove no dice nada especial si no había ningún heldManual de ese grupo", () => {
+    useEntitiesStore.getState().addConflict(heldConflict({ groupId: "otro-grupo" }));
+    const toasts = captureLastToast();
+
+    applyEdits.applyRemove(group());
+
+    expect(toasts.get()?.description).toBe("Ya no está en la lista ni se va a ocultar");
+    toasts.unsubscribe();
+  });
+
+  it("applyRemove no dice nada especial si el heldManual de ese grupo sigue sin resolver", () => {
+    useEntitiesStore.getState().addConflict(heldConflict({ groupId: "g1" }));
+    // Sin `emit.mockImplementation`: nada resuelve el conflicto.
+    const toasts = captureLastToast();
+
+    applyEdits.applyRemove(group());
+
+    expect(toasts.get()?.description).toBe("Ya no está en la lista ni se va a ocultar");
     toasts.unsubscribe();
   });
 
@@ -292,12 +356,13 @@ describe("applyEdits", () => {
     });
   });
 
-  // ADR-174 §3-§4: ManualOverlapDialog.
+  // ADR-174 §3-§4 / ADR-175 §4: ManualOverlapDialog, una decisión para
+  // todos los conflictos del diálogo.
   describe("applyManualOverlapResolution", () => {
-    it("winner: manual manda el winner y confirma con un toast de éxito con Deshacer", () => {
+    it("con un solo conflicto: winner manual, toast singular con Deshacer", () => {
       const toasts = captureLastToast();
       applyEdits.applyManualOverlapResolution({
-        conflictId: "conflict-1",
+        conflictIds: ["conflict-1"],
         winner: "manual",
         value: "Juan Pérez",
       });
@@ -306,6 +371,7 @@ describe("applyEdits", () => {
         conflictId: "conflict-1",
         winner: "manual",
       });
+      expect(emit).toHaveBeenCalledTimes(1);
       expect(toasts.get()?.title).toBe("Ocultaste «Juan Pérez»");
       expect(toasts.get()?.tone).toBe("success");
       expect(toasts.get()?.actions?.some((action) => action.label === "Deshacer")).toBe(true);
@@ -313,10 +379,10 @@ describe("applyEdits", () => {
       toasts.unsubscribe();
     });
 
-    it("winner: detected manda el winner y un toast distinto", () => {
+    it("con un solo conflicto: winner detected, copy exacto sin valor", () => {
       const toasts = captureLastToast();
       applyEdits.applyManualOverlapResolution({
-        conflictId: "conflict-1",
+        conflictIds: ["conflict-1"],
         winner: "detected",
         value: "Juan Pérez",
       });
@@ -325,7 +391,64 @@ describe("applyEdits", () => {
         conflictId: "conflict-1",
         winner: "detected",
       });
-      expect(toasts.get()?.title).toBe("Dejaste «Juan Pérez» sin ocultar");
+      // Copy literal de `Components.md` §6.3: "Dejaste lo que ya estaba
+      // detectado" — sin el valor, a diferencia del caso "manual".
+      expect(toasts.get()?.title).toBe("Dejaste lo que ya estaba detectado");
+      toasts.unsubscribe();
+    });
+
+    it("con varios conflictos: un resolveConflict por cada uno, una sola entrada de deshacer", () => {
+      const toasts = captureLastToast();
+      applyEdits.applyManualOverlapResolution({
+        conflictIds: ["conflict-1", "conflict-2", "conflict-3"],
+        winner: "manual",
+        value: "34567891",
+      });
+      expect(emit).toHaveBeenNthCalledWith(
+        1,
+        EventChannel.UI,
+        EngineEvents.CONFLICT_RESOLVE_REQUESTED,
+        {
+          documentId: "doc-1",
+          conflictId: "conflict-1",
+          winner: "manual",
+        },
+      );
+      expect(emit).toHaveBeenNthCalledWith(
+        2,
+        EventChannel.UI,
+        EngineEvents.CONFLICT_RESOLVE_REQUESTED,
+        {
+          documentId: "doc-1",
+          conflictId: "conflict-2",
+          winner: "manual",
+        },
+      );
+      expect(emit).toHaveBeenNthCalledWith(
+        3,
+        EventChannel.UI,
+        EngineEvents.CONFLICT_RESOLVE_REQUESTED,
+        {
+          documentId: "doc-1",
+          conflictId: "conflict-3",
+          winner: "manual",
+        },
+      );
+      expect(emit).toHaveBeenCalledTimes(3);
+      expect(useHistoryStore.getState().past).toHaveLength(1);
+      // Copy literal de ADR-175 §4: "… en N lugares" solo con N > 1.
+      expect(toasts.get()?.title).toBe("Ocultaste «34567891» en 3 lugares");
+      toasts.unsubscribe();
+    });
+
+    it("con varios conflictos y winner detected, el sufijo también aplica", () => {
+      const toasts = captureLastToast();
+      applyEdits.applyManualOverlapResolution({
+        conflictIds: ["conflict-1", "conflict-2"],
+        winner: "detected",
+        value: "34567891",
+      });
+      expect(toasts.get()?.title).toBe("Dejaste lo que ya estaba detectado en 2 lugares");
       toasts.unsubscribe();
     });
   });

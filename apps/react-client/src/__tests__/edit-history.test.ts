@@ -193,6 +193,31 @@ describe("history.store (ADR-172 §2)", () => {
     expect(history.getState().past).toEqual([]);
   });
 
+  // ADR-175, no bloqueante 5 de la revisión 2: `record()` vacía `future`
+  // como CUALQUIER edición nueva (ADR-172 §2) — pero una edición especulativa
+  // que termina descartándose (`discardLast`) no debería haberse llevado
+  // puesta la pila de rehacer que el usuario ya tenía.
+  it("discardLast restaura future al valor que tenía antes del record que lo vació", async () => {
+    const core = fakeCore();
+    const history = createHistoryStore(core.port);
+    history.getState().record("A");
+    core.edit(1);
+    expect(await history.getState().undo()).toBe(true);
+    // El undo dejó algo para rehacer.
+    expect(history.getState().future).toHaveLength(1);
+
+    // Una edición especulativa (p. ej. un agregado `not-found`): `record()`
+    // vacía `future` igual que cualquier edición nueva...
+    history.getState().record("Agregaste «X»");
+    expect(history.getState().future).toEqual([]);
+
+    // ...pero como no cambió nada, se descarta y `future` vuelve a estar.
+    history.getState().discardLast();
+    expect(history.getState().past).toEqual([]);
+    expect(history.getState().future).toHaveLength(1);
+    expect(history.getState().future[0]?.label).toBe("A");
+  });
+
   it("clear vacía las dos pilas y descarta los puntos del Core", async () => {
     const core = fakeCore();
     const history = createHistoryStore(core.port);
