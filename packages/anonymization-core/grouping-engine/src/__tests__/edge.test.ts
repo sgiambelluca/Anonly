@@ -3947,4 +3947,207 @@ describe("GroupingEngine — edge cases", () => {
       InvalidInputError,
     );
   });
+
+  // Caso 59 (§13, ADR-175 §1): dropOccurrences por SOURCE deja sin members
+  // al grupo detectado de un conflicto heldManual, y la retenida (source:
+  // Manual, no cae en el filtro de Regex) se oculta sola.
+  it("dropOccurrences by source that empties the detected group groups the held occurrence", () => {
+    const detected = makeOccurrence({
+      entityType: EntityType.Email,
+      source: DetectionSource.Regex,
+      confidence: 1,
+      bbox: makeBBox(10, 100, 100, 12),
+      pageIndex: 0,
+      value: "juan@x.com",
+      normalizedValue: "juan@x.com",
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: detected,
+    });
+    const manual = makeOccurrence({
+      entityType: EntityType.Person,
+      source: DetectionSource.Manual,
+      confidence: 1,
+      bbox: makeBBox(0, 100, 130, 12),
+      pageIndex: 0,
+      value: "email juan@x.com.",
+      normalizedValue: "email juan@x.com.",
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: manual,
+    });
+    const held = engine.getSnapshot("doc-1").conflicts.find((c) => c.heldManual === true);
+    if (!held) throw new Error("expected a held conflict");
+
+    engine.dropOccurrences("doc-1", { source: DetectionSource.Regex });
+
+    const snapshot = engine.getSnapshot("doc-1");
+    const resolved = snapshot.conflicts.find((c) => c.id === held.id);
+    expect(resolved?.resolved).toBe(true);
+    expect(resolved?.heldManual).toBeUndefined();
+    expect(resolved?.resolvedType).toBe(EntityType.Person);
+    expect(snapshot.groups.some((g) => g.type === EntityType.Person)).toBe(true);
+    expect(snapshot.groups.some((g) => g.type === EntityType.Email)).toBe(false);
+  });
+
+  // Caso 60 (§13, ADR-175 §1): dropOccurrences por PÁGINAS se lleva a la
+  // retenida misma — cierra el conflicto sin heldManual y sin dejar
+  // identidad registrada, así que re-emitir el literal (sin la detección,
+  // que se fue con la misma página) se agrupa normal.
+  it("dropOccurrences by page takes the held occurrence and closes the conflict without heldManual", () => {
+    const detected = makeOccurrence({
+      entityType: EntityType.CreditCard,
+      source: DetectionSource.Regex,
+      confidence: 1,
+      bbox: makeBBox(0, 0, 100, 20),
+      pageIndex: 0,
+      value: "4111111111111111",
+      normalizedValue: "4111111111111111",
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: detected,
+    });
+    const manual = makeOccurrence({
+      entityType: EntityType.IBAN,
+      source: DetectionSource.Manual,
+      confidence: 1,
+      bbox: makeBBox(0, 0, 100, 20),
+      pageIndex: 0,
+      value: "ES1234",
+      normalizedValue: "es1234",
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: manual,
+    });
+    const held = engine.getSnapshot("doc-1").conflicts.find((c) => c.heldManual === true);
+    if (!held) throw new Error("expected a held conflict");
+
+    engine.dropOccurrences("doc-1", { pageIndices: [0] });
+
+    const afterDrop = engine.getSnapshot("doc-1").conflicts.find((c) => c.id === held.id);
+    expect(afterDrop?.resolved).toBe(true);
+    expect(afterDrop?.heldManual).toBeUndefined();
+    expect(afterDrop?.resolvedType).toBe(EntityType.CreditCard);
+    expect(engine.getSnapshot("doc-1").groups).toHaveLength(0);
+
+    // Sin la detección (se fue con la misma página) y sin identidad
+    // retenida: re-emitir el mismo literal se agrupa normal, sin crear un
+    // conflicto nuevo.
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: manual,
+    });
+    const conflictCalls = busEmitSpy.mock.calls.filter(
+      ([channel, event]) =>
+        channel === EventChannel.Grouping && event === EngineEvents.CONFLICT_DETECTED,
+    );
+    expect(conflictCalls).toHaveLength(0);
+    expect(engine.getSnapshot("doc-1").groups.some((g) => g.type === EntityType.IBAN)).toBe(true);
+  });
+
+  // Caso 61 (§13, ADR-175 §1): el invariante de heldManual — ningún
+  // conflicto queda resolved: true con heldManual, y heldManualOccurrences
+  // tiene exactamente los ids de los conflictos heldManual sin resolver —
+  // se sostiene después de CADA operación de la secuencia.
+  it("no path leaves a resolved conflict with heldManual", async () => {
+    function assertHeldManualInvariant(): void {
+      const snapshot = engine.getSnapshot("doc-1");
+      for (const conflict of snapshot.conflicts) {
+        if (conflict.heldManual === true) expect(conflict.resolved).toBe(false);
+      }
+      const unresolvedHeldIds = new Set(
+        snapshot.conflicts.filter((c) => c.heldManual === true && !c.resolved).map((c) => c.id),
+      );
+      const session = engine["sessions"].get("doc-1");
+      expect(new Set(session?.heldManualOccurrences.keys())).toEqual(unresolvedHeldIds);
+    }
+
+    function emitPair(
+      detectedType: EntityType,
+      manualType: EntityType,
+      pageIndex: number,
+      detectedValue: string,
+      manualValue: string,
+    ): void {
+      ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: makeOccurrence({
+          entityType: detectedType,
+          source: DetectionSource.Regex,
+          confidence: 1,
+          bbox: makeBBox(0, 0, 100, 20),
+          pageIndex,
+          value: detectedValue,
+          normalizedValue: detectedValue.toLowerCase(),
+        }),
+      });
+      ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: makeOccurrence({
+          entityType: manualType,
+          source: DetectionSource.Manual,
+          confidence: 1,
+          bbox: makeBBox(0, 0, 100, 20),
+          pageIndex,
+          value: manualValue,
+          normalizedValue: manualValue.toLowerCase(),
+        }),
+      });
+    }
+
+    assertHeldManualInvariant();
+
+    // Par 1 (página 0): reclasificar y un dropOccurrences ajeno dejan el
+    // choque pendiente (caso 61, "reclasificar... deja el choque
+    // pendiente"); applyGroupRemove recién lo cierra (caso 59).
+    emitPair(EntityType.CreditCard, EntityType.IBAN, 0, "4111111111111111", "ES1111");
+    assertHeldManualInvariant();
+    const group1 = engine.getSnapshot("doc-1").groups.find((g) => g.type === EntityType.CreditCard);
+    if (!group1) throw new Error("expected the detected group of pair 1");
+
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group1.id,
+      patch: { type: EntityType.DNI },
+    });
+    assertHeldManualInvariant();
+
+    engine.dropOccurrences("doc-1", { pageIndices: [99] });
+    assertHeldManualInvariant();
+
+    await engine.applyGroupRemove({ documentId: "doc-1", groupId: group1.id });
+    assertHeldManualInvariant();
+
+    // Par 2 (página 1): resolución explícita winner: "detected".
+    emitPair(EntityType.Email, EntityType.Phone, 1, "a@b.com", "5551234");
+    assertHeldManualInvariant();
+    const held2 = engine.getSnapshot("doc-1").conflicts.find((c) => c.heldManual === true);
+    if (!held2) throw new Error("expected the held conflict of pair 2");
+    await engine.applyConflictResolve({
+      documentId: "doc-1",
+      conflictId: held2.id,
+      winner: "detected",
+    });
+    assertHeldManualInvariant();
+
+    // Par 3 (página 2): creado después de un checkpoint y deshecho con
+    // restoreCheckpoint.
+    const checkpointId = engine.createCheckpoint("doc-1");
+    emitPair(EntityType.License, EntityType.Plate, 2, "AB123CD", "ZZ999YY");
+    assertHeldManualInvariant();
+    await engine.restoreCheckpoint("doc-1", checkpointId);
+    assertHeldManualInvariant();
+
+    // Par 4 (página 3): dropOccurrences por páginas se lleva la retenida
+    // (caso 60).
+    emitPair(EntityType.Date, EntityType.Custom, 3, "01/01/2026", "custom-value");
+    assertHeldManualInvariant();
+    engine.dropOccurrences("doc-1", { pageIndices: [3] });
+    assertHeldManualInvariant();
+  });
 });

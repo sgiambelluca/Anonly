@@ -1496,3 +1496,193 @@ describe("GroupingEngine — agregado manual que choca (ADR-174)", () => {
     expect(afterDetected.filter((g) => g.type === EntityType.IBAN)).toHaveLength(1); // solo la de heldA
   });
 });
+
+describe("GroupingEngine — un choque manual no queda colgado (ADR-175)", () => {
+  let engine: GroupingEngine;
+  let ctx: EngineContext;
+
+  beforeEach(async () => {
+    engine = new GroupingEngine();
+    ctx = createEngineContext();
+    await engine.init(ctx);
+    engine.startSession("doc-1");
+  });
+
+  afterEach(async () => {
+    if (!engine["disposed"]) {
+      await engine.dispose();
+    }
+  });
+
+  // Caso 58, segunda cláusula (§13, ADR-172 + ADR-174 §3): un punto de
+  // restauración tomado ANTES de resolver un heldManual trae de vuelta la
+  // retención, y winner: "manual" sigue funcionando sobre el conflicto
+  // restaurado.
+  it("restoring a checkpoint brings back the held manual occurrence and winner manual groups it", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.CreditCard,
+        source: DetectionSource.Regex,
+        confidence: 1,
+        bbox: makeBBox(0, 0, 100, 20),
+        value: "4111111111111111",
+        normalizedValue: "4111111111111111",
+      }),
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.IBAN,
+        source: DetectionSource.Manual,
+        confidence: 1,
+        bbox: makeBBox(0, 0, 100, 20),
+        value: "ES1234",
+        normalizedValue: "es1234",
+      }),
+    });
+    const held = engine.getSnapshot("doc-1").conflicts.find((c) => c.heldManual === true);
+    if (!held) throw new Error("expected a held conflict");
+
+    const checkpointId = engine.createCheckpoint("doc-1");
+
+    await engine.applyConflictResolve({
+      documentId: "doc-1",
+      conflictId: held.id,
+      winner: "detected",
+    });
+    const afterDetected = engine.getSnapshot("doc-1").conflicts.find((c) => c.id === held.id);
+    expect(afterDetected?.resolved).toBe(true);
+    expect(afterDetected?.heldManual).toBeUndefined();
+
+    await engine.restoreCheckpoint("doc-1", checkpointId);
+    const restored = engine.getSnapshot("doc-1").conflicts.find((c) => c.id === held.id);
+    expect(restored?.resolved).toBe(false);
+    expect(restored?.heldManual).toBe(true);
+
+    const resolvedManual = await engine.applyConflictResolve({
+      documentId: "doc-1",
+      conflictId: held.id,
+      winner: "manual",
+    });
+    expect(resolvedManual.resolvedType).toBe(EntityType.IBAN);
+    expect(engine.getSnapshot("doc-1").groups.some((g) => g.type === EntityType.IBAN)).toBe(true);
+  });
+
+  // Caso 59 (§13, ADR-175 §1): applyGroupRemove del grupo detectado oculta
+  // sola la retenida — se agrupa por el camino de winner: "manual" y, si su
+  // valor normalizado coincidía con un alias del grupo eliminado, la
+  // supresión que ese mismo pedido acaba de agregar se revierte para ese
+  // valor.
+  it("removing the detected group of a held conflict groups the held occurrence", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Email,
+        source: DetectionSource.Regex,
+        confidence: 1,
+        bbox: makeBBox(0, 0, 100, 20),
+        value: "34567891",
+        normalizedValue: "34567891",
+      }),
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Phone,
+        source: DetectionSource.Manual,
+        confidence: 1,
+        bbox: makeBBox(0, 0, 100, 20),
+        value: "34567891",
+        normalizedValue: "34567891",
+      }),
+    });
+    const held = engine.getSnapshot("doc-1").conflicts.find((c) => c.heldManual === true);
+    if (!held) throw new Error("expected a held conflict");
+    const detectedGroup = engine
+      .getSnapshot("doc-1")
+      .groups.find((g) => g.type === EntityType.Email);
+    if (!detectedGroup) throw new Error("expected the detected group");
+
+    await engine.applyGroupRemove({ documentId: "doc-1", groupId: detectedGroup.id });
+
+    const snapshot = engine.getSnapshot("doc-1");
+    const resolved = snapshot.conflicts.find((c) => c.id === held.id);
+    expect(resolved?.resolved).toBe(true);
+    expect(resolved?.heldManual).toBeUndefined();
+    expect(resolved?.resolvedType).toBe(EntityType.Phone);
+
+    const phoneGroup = snapshot.groups.find((g) => g.type === EntityType.Phone);
+    expect(phoneGroup?.members).toHaveLength(1);
+    expect(snapshot.groups.some((g) => g.type === EntityType.Email)).toBe(false);
+
+    // El valor normalizado ("34567891") es el mismo en los dos candidatos:
+    // applyGroupRemove lo agrega a removedValues al barrer los aliases del
+    // grupo Email eliminado, y el camino de arriba lo tiene que revertir —
+    // lo que el usuario marcó a mano gana sobre esa supresión.
+    expect(engine["sessions"].get("doc-1")?.removedValues.has("34567891")).toBe(false);
+  });
+
+  // Caso 62 (§13, ADR-175 §2): un agregado nuevo reabre una decisión
+  // "detected" anterior — liftRemoval olvida la identidad suprimida y una
+  // re-emisión del mismo literal vuelve a crear un conflicto heldManual.
+  it("liftRemoval reopens a choice resolved as detected", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.CreditCard,
+        source: DetectionSource.Regex,
+        confidence: 1,
+        bbox: makeBBox(0, 0, 100, 20),
+        value: "4111111111111111",
+        normalizedValue: "4111111111111111",
+      }),
+    });
+    const manual = makeOccurrence({
+      entityType: EntityType.IBAN,
+      source: DetectionSource.Manual,
+      confidence: 1,
+      bbox: makeBBox(0, 0, 100, 20),
+      value: "ES1234",
+      normalizedValue: "es1234",
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: manual,
+    });
+    const held = engine.getSnapshot("doc-1").conflicts.find((c) => c.heldManual === true);
+    if (!held) throw new Error("expected a held conflict");
+
+    await engine.applyConflictResolve({
+      documentId: "doc-1",
+      conflictId: held.id,
+      winner: "detected",
+    });
+
+    // Re-emitir la misma ocurrencia manual TODAVÍA suprimida: el dedup por
+    // identidad la descarta, sin conflicto nuevo (caso 58).
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: manual,
+    });
+    expect(engine.getSnapshot("doc-1").conflicts.filter((c) => c.heldManual === true)).toHaveLength(
+      0,
+    );
+
+    engine.liftRemoval("doc-1", "ES1234");
+
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: manual,
+    });
+    const conflictCalls = busEmitSpy.mock.calls.filter(
+      ([channel, event]) =>
+        channel === EventChannel.Grouping && event === EngineEvents.CONFLICT_DETECTED,
+    );
+    expect(conflictCalls).toHaveLength(1);
+    const reopened = (conflictCalls[0]?.[2] as ConflictDetected).conflict;
+    expect(reopened.heldManual).toBe(true);
+    expect(reopened.resolved).toBe(false);
+  });
+});

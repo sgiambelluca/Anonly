@@ -1190,7 +1190,15 @@ export class GroupingEngine implements IEngine {
   private doDropOccurrences(session: Session, filter: DropOccurrencesFilter): void {
     const documentId = session.documentId;
     const toDrop = session.recordedOccurrences.filter((rec) => matchesDropFilter(rec, filter));
-    if (toDrop.length === 0) return;
+    // ADR-175 §1 (casos 59-60): a diferencia del resto de este método, una
+    // ocurrencia manual retenida NUNCA vive en `recordedOccurrences` (nota 9
+    // del header) — así que el barrido de conflictos `heldManual` no puede
+    // depender de `toDrop`. Corre siempre, incluso cuando el filtro no toca
+    // ningún `SessionOccurrenceRecord`.
+    if (toDrop.length === 0) {
+      this.resolveHeldManualConflictsForDrop(session, filter, new Set(), new Map());
+      return;
+    }
 
     const droppedIds = new Set(toDrop.map((rec) => rec.occurrenceId));
     const keptRecords = session.recordedOccurrences.filter(
@@ -1281,12 +1289,26 @@ export class GroupingEngine implements IEngine {
     // evento CONFLICT_REMOVED (ADR-038 §2): se re-emite CONFLICT_RESOLVED,
     // sobrescribiendo el `resolvedType` anterior.
     //
+    // ADR-175 §1 (casos 59-60): barre los conflictos `heldManual` ANTES del
+    // barrido genérico de abajo, que no distingue "se oculta sola" (caso 59)
+    // de "se descarta con su página, sin identidad" (caso 60) y dejaría
+    // `resolved: true` con `heldManual` todavía puesto (el invariante que
+    // ADR-175 prohíbe). Devuelve los ids que ya resolvió, para que el
+    // barrido genérico no los vuelva a tocar.
+    const handledConflictIds = this.resolveHeldManualConflictsForDrop(
+      session,
+      filter,
+      removedGroupIds,
+      typeBeforeRemoval,
+    );
+
     // Solo se barren los conflictos cuyo GRUPO desapareció. Un conflicto cuyo
     // grupo sobrevive pero cuyos candidatos describían una ocurrencia borrada
     // NO es detectable —`ConflictCandidate` no tiene `occurrenceId` ni
     // `bbox`— y queda stale: ruido de UI inofensivo, sin corrupción ni fuga.
     // Errata de spec 2026-08-19 (`Grouping_Engine.md` §13 caso 25).
     for (const [conflictId, conflict] of session.conflicts) {
+      if (handledConflictIds.has(conflictId)) continue;
       if (!removedGroupIds.has(conflict.groupId)) continue;
       const entityType =
         typeBeforeRemoval.get(conflict.groupId) ?? conflict.candidates[0]?.entityType;
@@ -1298,6 +1320,63 @@ export class GroupingEngine implements IEngine {
         entityType,
       });
     }
+  }
+
+  /**
+   * ADR-175 §1 (casos 59-60): barre los conflictos `heldManual` de la sesión
+   * antes de que `doDropOccurrences` los toque genéricamente — una ocurrencia
+   * retenida no vive en `recordedOccurrences` (nota 9 del header), así que el
+   * barrido por `removedGroupIds` no la ve. Dos caminos, mutuamente
+   * excluyentes por conflicto:
+   *
+   *  - la retenida misma cae en el filtro (`matchesDropFilter` sobre su
+   *    propio `source`/`pageIndex`) -> sale de `heldManualOccurrences` SIN
+   *    dejar identidad registrada (a diferencia de `winner: "detected"`, que
+   *    sí la registra) y el conflicto cierra `resolved: true` SIN
+   *    `heldManual`, con el tipo detectado vigente (caso 60);
+   *  - si no, pero el grupo detectado del conflicto queda sin members EN
+   *    ESTA llamada (`emptiedGroupIds`) -> se oculta sola por el mismo
+   *    camino que `winner: "manual"` (caso 59).
+   *
+   * Un conflicto cuya retenida no cae en el filtro y cuyo grupo detectado
+   * sobrevive no se toca: el choque sigue pendiente. Devuelve los ids que
+   * resolvió, para que el caller no los reprocese.
+   */
+  private resolveHeldManualConflictsForDrop(
+    session: Session,
+    filter: DropOccurrencesFilter,
+    emptiedGroupIds: ReadonlySet<string>,
+    typeBeforeRemoval: ReadonlyMap<string, EntityType>,
+  ): Set<string> {
+    const handled = new Set<string>();
+    for (const [conflictId, heldOccurrence] of session.heldManualOccurrences) {
+      const conflict = session.conflicts.get(conflictId);
+      if (!conflict || conflict.heldManual !== true) continue;
+
+      if (matchesDropFilter(heldOccurrence, filter)) {
+        session.heldManualOccurrences.delete(conflictId);
+        const resolvedType =
+          typeBeforeRemoval.get(conflict.groupId) ??
+          session.groups.get(conflict.groupId)?.type ??
+          conflict.candidates[0]?.entityType;
+        if (resolvedType === undefined) continue; // invariante roto: no debería pasar (candidates.length >= 2)
+        const { heldManual: _heldManual, ...rest } = conflict;
+        session.conflicts.set(conflictId, { ...rest, resolved: true, resolvedType });
+        handled.add(conflictId);
+        this.ctx?.bus.emit(EventChannel.Grouping, EngineEvents.CONFLICT_RESOLVED, {
+          documentId: session.documentId,
+          conflictId,
+          entityType: resolvedType,
+        });
+        continue;
+      }
+
+      if (emptiedGroupIds.has(conflict.groupId)) {
+        this.resolveHeldManualConflict(session, conflict, "manual");
+        handled.add(conflictId);
+      }
+    }
+    return handled;
   }
 
   /**
@@ -1881,6 +1960,15 @@ export class GroupingEngine implements IEngine {
    * dedup por identidad (ADR-038 §3) los sigue reconociendo. Grupo
    * inexistente (nunca existió, o pedirlo dos veces) → `warn` + no-op:
    * idempotente por construcción.
+   *
+   * ADR-175 §1 (caso 59): un conflicto `heldManual` de este grupo NO se
+   * resuelve como los demás — el invariante de `Conflict.heldManual`
+   * prohíbe `resolved: true` con `heldManual` todavía puesto. Se oculta
+   * sola por el mismo camino que `winner: "manual"`
+   * (`resolveHeldManualConflict`), y si su valor normalizado quedó en
+   * `removedValues` por el barrido de `group.normalizedValues` de abajo, se
+   * quita: lo que el usuario marcó a mano gana sobre la supresión de la
+   * detección que acaba de desaparecer.
    */
   applyGroupRemove(req: GroupRemoveRequested): Promise<void> {
     try {
@@ -1903,8 +1991,15 @@ export class GroupingEngine implements IEngine {
         groupId: req.groupId,
       });
 
+      const revivedNormalizedValues: string[] = [];
       for (const [conflictId, conflict] of session.conflicts) {
         if (conflict.groupId !== req.groupId) continue;
+        if (conflict.heldManual === true) {
+          const heldOccurrence = session.heldManualOccurrences.get(conflictId);
+          this.resolveHeldManualConflict(session, conflict, "manual");
+          if (heldOccurrence) revivedNormalizedValues.push(heldOccurrence.normalizedValue);
+          continue;
+        }
         session.conflicts.set(conflictId, {
           ...conflict,
           resolved: true,
@@ -1919,6 +2014,9 @@ export class GroupingEngine implements IEngine {
 
       for (const normalizedValue of group.normalizedValues) {
         session.removedValues.add(normalizedValue);
+      }
+      for (const normalizedValue of revivedNormalizedValues) {
+        session.removedValues.delete(normalizedValue);
       }
 
       return Promise.resolve();
@@ -1936,6 +2034,14 @@ export class GroupingEngine implements IEngine {
    * `reanalyze` (ADR-061 §5) no la llama, así que sus ocurrencias de un
    * valor eliminado se siguen descartando por el paso 0 de Matching. Sesión
    * inexistente → `warn` + no-op.
+   *
+   * ADR-175 §2 (caso 62): también olvida la identidad de cualquier
+   * ocurrencia suprimida (`SUPPRESSED_GROUP_ID`) con este valor normalizado
+   * — en particular la que dejó un `winner: "detected"` sobre un conflicto
+   * `heldManual` (`resolveHeldManualConflict`). Sin esto, `isDuplicateIdentity`
+   * la sigue viendo y un agregado manual nuevo del mismo valor se descarta
+   * en silencio en vez de reabrir la decisión que el usuario acaba de pedir
+   * revisar.
    */
   liftRemoval(documentId: string, value: string): void {
     this.assertNotDisposed();
@@ -1945,7 +2051,12 @@ export class GroupingEngine implements IEngine {
       this.ctx?.logger.warn("liftRemoval() sin sesión activa.", { documentId });
       return;
     }
-    session.removedValues.delete(normalizeEntityValue(value));
+    const normalizedValue = normalizeEntityValue(value);
+    session.removedValues.delete(normalizedValue);
+    const kept = session.recordedOccurrences.filter(
+      (rec) => !(rec.groupId === SUPPRESSED_GROUP_ID && rec.normalizedValue === normalizedValue),
+    );
+    session.recordedOccurrences.splice(0, session.recordedOccurrences.length, ...kept);
   }
 
   // No `async`: ver nota en applyGroupUpdate.
@@ -2038,16 +2149,18 @@ export class GroupingEngine implements IEngine {
       }
 
       // ADR-174 §3: `winner` solo tiene sentido sobre un conflicto con
-      // `heldManual` — sobre cualquier otro, rechazado con warn.
+      // `heldManual` — sobre cualquier otro, rechazado. Un solo `warn`
+      // (ADR-175 §2, hallazgo de la revisión 2): el propio throw alcanza,
+      // igual que el resto de los rechazos de este motor (`validatePatch`,
+      // `applyGroupMerge`/`applyGroupSplit`) — el handler del bus
+      // (`logUiError`) es quien loguea cuando el pedido llega por
+      // `CONFLICT_RESOLVE_REQUESTED`; loguear acá ADEMÁS producía dos warns
+      // para el mismo rechazo.
       if (req.winner !== undefined && conflict.heldManual !== true) {
-        this.ctx?.logger.warn("winner en un conflicto sin heldManual; rechazado.", {
-          documentId: req.documentId,
-          conflictId: req.conflictId,
-          winner: req.winner,
-        });
         throw new GroupingInvalidPatchError("winner solo aplica a un conflicto con heldManual.", {
           documentId: req.documentId,
           conflictId: req.conflictId,
+          winner: req.winner,
         });
       }
       if (conflict.heldManual === true) {
