@@ -1264,7 +1264,7 @@ describe("Orchestrator — contract tests", () => {
       entityType: EntityType.Person,
     });
 
-    expect(result).toEqual({ occurrenceCount: 0, heldConflictIds: [] });
+    expect(result).toEqual({ occurrenceCount: 0, heldConflictIds: [], groupIds: [] });
     expect(engines.grouping.getSnapshot("doc-1").groups).toHaveLength(0);
   });
 
@@ -1325,11 +1325,15 @@ describe("Orchestrator — contract tests", () => {
       value: "Jose Perez",
       entityType: EntityType.Person,
     });
-    expect(first).toEqual({ occurrenceCount: 3, heldConflictIds: [] });
 
     const before = engines.grouping.getSnapshot("doc-1");
     expect(before.groups).toHaveLength(1);
     expect(before.groups[0]?.members).toHaveLength(3);
+    expect(first).toEqual({
+      occurrenceCount: 3,
+      heldConflictIds: [],
+      groupIds: [before.groups[0]!.id],
+    });
 
     // Repetir el mismo agregado: findLiteral vuelve a encontrar las 3
     // apariciones (occurrenceCount 3), pero el dedup por identidad de
@@ -1339,7 +1343,11 @@ describe("Orchestrator — contract tests", () => {
       value: "Jose Perez",
       entityType: EntityType.Person,
     });
-    expect(second).toEqual({ occurrenceCount: 3, heldConflictIds: [] });
+    expect(second).toEqual({
+      occurrenceCount: 3,
+      heldConflictIds: [],
+      groupIds: [before.groups[0]!.id],
+    });
 
     const after = engines.grouping.getSnapshot("doc-1");
     expect(after).toEqual(before);

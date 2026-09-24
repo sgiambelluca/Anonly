@@ -35,6 +35,7 @@ import {
   InvalidInputError,
   isEngineErrorCode,
   MAX_EDIT_CHECKPOINTS,
+  normalizeEntityValue,
   PipelineStage,
   type CancelRequested,
   type CoreRuntimeOptions,
@@ -45,6 +46,7 @@ import {
   type EditPreviewRequest,
   type EngineConfig,
   type EngineContext,
+  type EntityFound,
   type EntityGroup,
   type EntityGroupCreated,
   type EntityGroupRemoved,
@@ -537,33 +539,90 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     // dedup de Grouping (ADR-061 §6 errata, punto 3). No se recalcula contra
     // el árbol de grupos: un valor ya cubierto que se fusiona entero sigue
     // devolviendo N > 0, nunca "grupos nuevos".
-    const result = await this.engines.regex.findLiteral(
-      { document, value: request.value, entityType: request.entityType },
-      ctx,
+    //
+    // ADR-175 §3 (errata 2026-09-24): mientras dura `findLiteral`, juntamos
+    // el `normalizedValue` Y el `id` de cada ocurrencia `source: Manual` que
+    // EMITE este agregado (nunca igualdad exacta contra `request.value`: el
+    // documento trae la puntuación pegada al lado, ADR-115). Es el mismo
+    // `normalizeEntityValue` que ya produjo `Occurrence.normalizedValue` --
+    // comparar los dos lados con esa función es lo que hace que la
+    // correspondencia sea exacta pase lo que pase con la puntuación del
+    // documento. El `id` es lo que distingue (b) de (a) abajo: cubre el
+    // grupo NUEVO aunque ADR-085 le haya cambiado el tipo, sin depender de
+    // que el tipo del member siga siendo el pedido.
+    const manualNormalizedValues = new Set<string>();
+    const manualOccurrenceIds = new Set<string>();
+    const unsubscribeEntityFound = this.bus.on(
+      EventChannel.Regex,
+      EngineEvents.ENTITY_FOUND,
+      (payload: EntityFound) => {
+        if (payload.documentId !== documentId) return;
+        if (payload.occurrence.source !== DetectionSource.Manual) return;
+        manualNormalizedValues.add(payload.occurrence.normalizedValue);
+        manualOccurrenceIds.add(payload.occurrence.id);
+      },
     );
+    let result;
+    try {
+      result = await this.engines.regex.findLiteral(
+        { document, value: request.value, entityType: request.entityType },
+        ctx,
+      );
+    } finally {
+      unsubscribeEntityFound();
+    }
     await this.engines.grouping.finishSession(documentId);
     /*
-     * ADR-174 §2: del snapshot de Grouping tras finishSession, los
-     * conflictos SIN RESOLVER con heldManual cuyo candidato Manual tiene el
-     * valor que acabamos de agregar — cada uno es una ocurrencia manual que
-     * perdió una superposición y quedó retenida en vez de agruparse.
-     * occurrenceCount > 0 con heldConflictIds no vacío NO es un agregado
-     * exitoso (Contracts.md §3.5): la UI abre el diálogo de choque en vez
-     * del toast de alta.
+     * ADR-174 §2, ADR-175 §3 (errata 2026-09-24): del snapshot de Grouping
+     * tras finishSession.
+     *
+     * `heldConflictIds`: conflictos SIN RESOLVER con heldManual cuyo
+     * candidato Manual es del entityType PEDIDO y tiene un valor que, pasado
+     * por normalizeEntityValue, está en el conjunto -- cada uno es una
+     * ocurrencia manual que perdió una superposición y quedó retenida en vez
+     * de agruparse. occurrenceCount > 0 con heldConflictIds no vacío NO es
+     * un agregado exitoso (Contracts.md §3.5): la UI abre el diálogo de
+     * choque en vez del toast de alta.
+     *
+     * `groupIds`: grupos que cumplen (a) o (b) --
+     *   (a) tienen un member cuyo occurrenceId es de una ocurrencia emitida
+     *       por ESTE agregado. Cubre el grupo nuevo aunque ADR-085 le haya
+     *       cambiado el tipo después de crearlo.
+     *   (b) group.type === entityType pedido y tienen un member cuyo valor,
+     *       pasado por la misma normalización, está en el conjunto. Cubre el
+     *       dedup contra un grupo que ya existía (p. ej. por detección
+     *       automática previa del mismo valor y tipo).
+     * Un grupo de OTRO tipo sobre el mismo texto (el DNI del caso 43, agregar
+     * el mismo valor como Phone) no entra por (b) -- ni por (a), porque su
+     * member no es una ocurrencia que ESTE agregado haya emitido.
+     *
+     * Invariante: occurrenceCount > 0 => heldConflictIds o groupIds no vacío.
      */
-    const heldConflictIds = this.engines.grouping
-      .getSnapshot(documentId)
-      .conflicts.filter(
+    const snapshot = this.engines.grouping.getSnapshot(documentId);
+    const heldConflictIds = snapshot.conflicts
+      .filter(
         (conflict) =>
           conflict.heldManual === true &&
           !conflict.resolved &&
           conflict.candidates.some(
             (candidate) =>
-              candidate.source === DetectionSource.Manual && candidate.value === request.value,
+              candidate.source === DetectionSource.Manual &&
+              candidate.entityType === request.entityType &&
+              manualNormalizedValues.has(normalizeEntityValue(candidate.value)),
           ),
       )
       .map((conflict) => conflict.id);
-    return { occurrenceCount: result.occurrenceCount, heldConflictIds };
+    const groupIds = snapshot.groups
+      .filter(
+        (group) =>
+          group.members.some((member) => manualOccurrenceIds.has(member.occurrenceId)) ||
+          (group.type === request.entityType &&
+            group.members.some((member) =>
+              manualNormalizedValues.has(normalizeEntityValue(member.value)),
+            )),
+      )
+      .map((group) => group.id);
+    return { occurrenceCount: result.occurrenceCount, heldConflictIds, groupIds };
   }
 
   /**
