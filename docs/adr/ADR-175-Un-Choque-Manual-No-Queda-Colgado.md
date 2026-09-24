@@ -2,7 +2,7 @@
 
 # ADR-175 — Un choque manual no queda colgado
 
-- **Estado**: Accepted
+- **Estado**: Accepted — **modificado por ADR-176** (§3: el resultado de un agregado lo calcula Grouping con `manualOutcome`; §2: `liftRemoval` olvida toda supresión del valor)
 - **Fecha**: 2026-09-24
 - **Decidido por**: El humano, ante la revisión 2 del Hito 12.5 (REJECTED). Eligió que lo marcado
   **se oculte solo** si desaparece la detección con la que chocó, **una decisión para todos** los choques
