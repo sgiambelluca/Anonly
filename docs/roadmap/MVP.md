@@ -676,6 +676,8 @@ entidad con supresión por sesión), ADR-172 (deshacer y rehacer exactos por pun
 
 **Revisión 3 (2026-09-24): REJECTED**: los dos bloqueantes de la revisión 2 cerrados; tres nuevos —nada bloqueaba el export con un conflicto sin resolver, fusionar/dividir la detección dejaba el choque inalcanzable, y un agregado contenido (ADR-117) rompía el invariante de `groupIds`—. ADR-176 los cierra (filas 19-22).
 
+**Revisión 4 (2026-09-24): REJECTED** — los bloqueantes de la revisión 3 cerrados; quedan dos por entidades eliminadas que siguen ocupando lugar (contención y superposición) y la ranura del motivo de `ExportButton`. Reporte completo y decisiones pendientes (D1, D2): `roadmap/Hito12.5_Revision_R4_Handoff.md`.
+
 **Reglas de este hito** (además de las de siempre): UX-10 —nada que aparezca desplaza el diseño— se
 revisa en cada PR de la app; los PR 6-9 se verifican en el browser con los dos temas.
 
