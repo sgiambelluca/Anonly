@@ -23,6 +23,7 @@ import {
   type WordSpan,
 } from "@anonly/shared";
 
+import { scanEmailDefault } from "./email-scanner.js";
 import { DEFAULT_PATTERNS_AR } from "./patterns/default-ar.js";
 import { RegexInvalidPatternError } from "./regex.errors.js";
 import type {
@@ -42,6 +43,7 @@ import type {
  * Worker). Igual cumple el contrato: descarta el patrón con warning y no
  * bloquea a los demás. */
 const CUSTOM_PATTERN_BUDGET_MS = 1000;
+const DEFAULT_EMAIL_PATTERN = DEFAULT_PATTERNS_AR.find((pattern) => pattern.id === "email");
 
 interface RawMatch {
   readonly patternId: string;
@@ -206,6 +208,21 @@ function passesRunGuard(text: string, match: RawMatch): boolean {
  * un separador de corrida válido (ADR-075 §2), así que el recorte no cambia
  * qué se detecta: solo qué dice el valor.
  */
+function buildRawMatch(pattern: RegexPattern, rawValue: string, startIndex: number): RawMatch {
+  const normalizedValue = pattern.normalizer(rawValue);
+  const checksumPassed = pattern.checksum ? pattern.checksum(normalizedValue) : true;
+  return {
+    patternId: pattern.id,
+    entityType: pattern.entityType,
+    startIndex,
+    endIndexExclusive: startIndex + rawValue.length,
+    rawValue,
+    normalizedValue,
+    checksumPassed,
+    maskFormat: pattern.maskFormat,
+  };
+}
+
 function runPattern(pattern: RegexPattern, text: string): RawMatch[] {
   const scanRegex = withGlobalFlag(pattern.pattern);
   scanRegex.lastIndex = 0;
@@ -224,21 +241,17 @@ function runPattern(pattern: RegexPattern, text: string): RawMatch[] {
     if (rawValue.length === 0) continue;
 
     const startIndex = match.index + leadingSpaces;
-    const normalizedValue = pattern.normalizer(rawValue);
-    const checksumPassed = pattern.checksum ? pattern.checksum(normalizedValue) : true;
-    results.push({
-      patternId: pattern.id,
-      entityType: pattern.entityType,
-      startIndex,
-      endIndexExclusive: startIndex + rawValue.length,
-      rawValue,
-      normalizedValue,
-      checksumPassed,
-      maskFormat: pattern.maskFormat,
-    });
+    results.push(buildRawMatch(pattern, rawValue, startIndex));
   }
 
   return results;
+}
+
+function runEmailDefaultPattern(pattern: RegexPattern, text: string): RawMatch[] {
+  return scanEmailDefault(text).map(({ startIndex, endIndexExclusive }) => {
+    const rawValue = text.slice(startIndex, endIndexExclusive);
+    return buildRawMatch(pattern, rawValue, startIndex);
+  });
 }
 
 /*
@@ -742,10 +755,13 @@ export class RegexEngine implements IEngine {
 
         const rawMatches: RawMatch[] = [];
         for (const pattern of this.activePatterns) {
-          const isCustom = this.customPatternIds.has(pattern.id);
+          const isEmailDefault = pattern === DEFAULT_EMAIL_PATTERN;
+          const isCustom = this.customPatternIds.has(pattern.id) && !isEmailDefault;
           const patternMatches = isCustom
             ? runCustomPatternWithBudget(pattern, page.text, CUSTOM_PATTERN_BUDGET_MS, ctx.logger)
-            : runPattern(pattern, page.text);
+            : isEmailDefault
+              ? runEmailDefaultPattern(pattern, page.text)
+              : runPattern(pattern, page.text);
           rawMatches.push(...patternMatches);
         }
 

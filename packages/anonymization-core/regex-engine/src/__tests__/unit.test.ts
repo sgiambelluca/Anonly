@@ -8,6 +8,7 @@ import {
 } from "@anonly/shared";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+import { scanEmailDefault } from "../email-scanner.js";
 import { DEFAULT_PATTERNS_AR } from "../patterns/default-ar.js";
 import { RegexEngine } from "../regex.engine.js";
 
@@ -365,10 +366,89 @@ describe("RegexEngine — unit tests", () => {
   });
 
   describe("Email", () => {
+    it("default email scanner matches the reference regex spans and values", () => {
+      const alphabet = "abcXYZ019._%+-@! /\né_";
+      let seed = 0x175;
+      const generated: string[] = [];
+      for (let sample = 0; sample < 160; sample++) {
+        seed = (seed * 48271) % 0x7fffffff;
+        const length = seed % 96;
+        let text = "";
+        for (let index = 0; index < length; index++) {
+          seed = (seed * 48271) % 0x7fffffff;
+          text += alphabet[seed % alphabet.length] ?? "x";
+        }
+        generated.push(text);
+      }
+
+      const corpus = [
+        "no address here 1234-5678",
+        `${"1-".repeat(1024)}@x.co`,
+        "first@middle@last.example.com",
+        "user.name+tag%part@example-domain.co.uk",
+        "local@domain..com",
+        "local@domain.c",
+        "local@domain.com1",
+        "local@domain.com_",
+        "local@domain.com-",
+        "local@domain.com.",
+        "éuser@example.com end@domain.coé",
+        "a@b.co.x@y.de",
+        "a@b.co.x.y@z.example",
+        "!a@example.com, (b@example.org)!",
+        "a@b.aa..cc",
+        ...generated,
+      ];
+      const reference = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
+
+      for (const text of corpus) {
+        reference.lastIndex = 0;
+        const expected: Array<{
+          readonly startIndex: number;
+          readonly endIndexExclusive: number;
+          readonly value: string;
+        }> = [];
+        let match: RegExpExecArray | null;
+        while ((match = reference.exec(text)) !== null) {
+          expected.push({
+            startIndex: match.index,
+            endIndexExclusive: match.index + match[0].length,
+            value: match[0],
+          });
+        }
+        const actual = scanEmailDefault(text).map((span) => ({
+          ...span,
+          value: text.slice(span.startIndex, span.endIndexExclusive),
+        }));
+        expect(actual, `input length ${text.length}`).toEqual(expected);
+      }
+    });
+
     it("valid email matches and normalizes to lowercase", async () => {
       const occurrence = await firstOccurrence(engine, ctx, ["Juan.Perez@Example.COM"]);
       expect(occurrence?.entityType).toBe(EntityType.Email);
       expect(occurrence?.normalizedValue).toBe("juan.perez@example.com");
+    });
+
+    it("scanner output reaches the same occurrence and event mapping", async () => {
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      const document = makeSinglePageDocument("doc-email-mapping", ["Juan.Perez@Example.COM"]);
+      await engine.process({ document }, ctx);
+      const entityFoundCall = busEmitSpy.mock.calls.find(
+        ([, event]) => event === EngineEvents.ENTITY_FOUND,
+      );
+      const occurrence = (entityFoundCall?.[2] as EntityFound | undefined)?.occurrence;
+      expect(occurrence).toMatchObject({
+        value: "Juan.Perez@Example.COM",
+        normalizedValue: "juan.perez@example.com",
+        entityType: EntityType.Email,
+        pageIndex: 0,
+        source: "regex",
+        confidence: 1,
+        bbox: { x: 10, y: 100, width: "Juan.Perez@Example.COM".length * 6, height: 12 },
+        wordSpan: { startIndex: 0, endIndexExclusive: 1 },
+      });
+      expect(entityFoundCall).toBeDefined();
     });
   });
 

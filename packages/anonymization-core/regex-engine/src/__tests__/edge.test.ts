@@ -107,6 +107,52 @@ describe("RegexEngine — edge case tests", () => {
     });
   });
 
+  describe("ADR-175: los patrones custom no se especializan por id", () => {
+    it("custom pattern with id email remains on the custom regexp path", async () => {
+      engine.addPattern({
+        id: "email",
+        entityType: EntityType.Custom,
+        pattern: /\bCUSTOM-[A-Z]+\b/g,
+        normalizer: (value: string) => value.toLowerCase(),
+        maskFormat: "CUSTOM-XXXX",
+      });
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      const document = makeSinglePageDocument("doc-custom-email-id", [
+        "CUSTOM-ALPHA",
+        "user@example.com",
+      ]);
+
+      const output = await engine.process({ document }, ctx);
+      const occurrences = busEmitSpy.mock.calls
+        .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
+        .map(([, , payload]) => (payload as EntityFound).occurrence);
+
+      expect(output.occurrenceCount).toBe(2);
+      expect(occurrences).toHaveLength(2);
+      expect(
+        occurrences.map(({ value, normalizedValue, entityType, maskFormat }) => ({
+          value,
+          normalizedValue,
+          entityType,
+          maskFormat,
+        })),
+      ).toEqual([
+        {
+          value: "CUSTOM-ALPHA",
+          normalizedValue: "custom-alpha",
+          entityType: EntityType.Custom,
+          maskFormat: "CUSTOM-XXXX",
+        },
+        {
+          value: "user@example.com",
+          normalizedValue: "user@example.com",
+          entityType: EntityType.Email,
+          maskFormat: "xxxx@xxxx.xx",
+        },
+      ]);
+    });
+  });
+
   // Caso 7 (§13): patente vieja vs Mercosur.
   describe("Caso 7: patente AR vieja vs Mercosur", () => {
     it("AR plate vieja and Mercosur both match as Plate", async () => {
