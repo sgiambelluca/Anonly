@@ -107,7 +107,7 @@ describe("RegexEngine — edge case tests", () => {
     });
   });
 
-  describe("ADR-175: los patrones custom no se especializan por id", () => {
+  describe("ADR-181: los patrones custom no se especializan por id", () => {
     it("custom pattern with id email remains on the custom regexp path", async () => {
       engine.addPattern({
         id: "email",

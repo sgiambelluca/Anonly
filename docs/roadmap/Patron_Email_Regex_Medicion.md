@@ -12,7 +12,7 @@ documentos reales R1/R2 fueron rápidos, pero esta tanda no clasificó si
 contenían la forma adversa. La corrección se motiva por **robustez del peor
 caso**, sin atribuirle el tiempo de importación observado en R1/R2.
 
-El escáner lineal de ADR-175 eliminó ese bloqueo en la repetición: los 160 KiB
+El escáner lineal de ADR-181 eliminó ese bloqueo en la repetición: los 160 KiB
 sin `@` bajaron de **42.533 ms a 9,05 ms** para `RegexEngine.process`; con
 `@` tardía y sufijo inválido tardaron **10,32 ms**. Las huellas de detección
 del corpus normal y de R1/R2 permanecieron iguales. Esta mejora corresponde
@@ -103,7 +103,7 @@ eso sus tiempos no refutan la curva sintética.
 ## Decisión de planificación
 
 La documentación anterior fijaba el patrón de email y la salida determinista,
-pero no cómo evitar su backtracking cuadrático. El planificador cerró ADR-175
+pero no cómo evitar su backtracking cuadrático. El planificador cerró ADR-181
 y `Regex_Engine.md` v1.14.0 antes de pedir código, conforme a R-18/R-21 de
 `AI_Development_Guide.md`. El cambio se limitó al email default, con búsqueda
 lineal por `@` y paridad diferencial de spans, normalización, orden y

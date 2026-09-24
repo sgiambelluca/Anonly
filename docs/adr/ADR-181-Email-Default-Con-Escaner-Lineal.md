@@ -1,11 +1,11 @@
 <!-- CONTEXT: scope=adr | dependencias=roadmap/Patron_Email_Regex_Medicion.md,roadmap/Rendimiento_Experimentos_Plan.md,core/Regex_Engine.md,core/Contracts.md,ai/AI_Development_Guide.md | audiencia=humanos+IA | fase=11 -->
 
-# ADR-175 — El email default se busca con un escáner lineal
+# ADR-181 — El email default se busca con un escáner lineal
 
 - **Estado**: Accepted; implementación y benchmark macOS completados el 2026-09-24, repetición en Windows nativo pendiente.
 - **Fecha**: 2026-09-24.
 - **Decidido por**: planificador de la campaña de rendimiento.
-- **Numeración**: ADR-168 a ADR-172 están reservados en otra tarea. ADR-173/174 ya existen en este checkout; se usa 175 sin ocupar aquel rango. Resolver una eventual colisión de otra máquina antes de integrar.
+- **Numeración**: ADR-168 a ADR-178 pertenecen a la otra tarea. ADR-179 y ADR-180 preceden a esta decisión en la campaña; este ADR usa 181.
 - **Relacionado con**: `Regex_Engine.md` §§6, 12–15 y `roadmap/Patron_Email_Regex_Medicion.md`.
 
 ## Contexto
