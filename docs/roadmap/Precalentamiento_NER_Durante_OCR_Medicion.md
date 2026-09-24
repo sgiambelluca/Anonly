@@ -71,7 +71,7 @@ Las huellas del corpus congelado demuestran igualdad entre condiciones medidas; 
 
 ## 5. Evidencia, restauración y gates
 
-La evidencia principal está en `.measure/ner-preload-ocr/20260917T163638Z/`: `summary.json`, `quality-summary.json`, JSON crudos por fase/temperatura, muestras RSS, logs, hashes y manifiesto del build. El smoke v2 está en `.measure/ner-preload-ocr/20260917T163243Z/`. El [runner](/Users/maratorres/Anonly/Anonly/tests/perf/run-ner-preload-ocr.sh) y el [patch temporal](/Users/maratorres/Anonly/Anonly/tests/perf/support/ner-preload-ocr.patch) reproducen el instrumento.
+La evidencia principal está en `.measure/ner-preload-ocr/20260917T163638Z/`: `summary.json`, `quality-summary.json`, JSON crudos por fase/temperatura, muestras RSS, logs, hashes y manifiesto del build. El smoke v2 está en `.measure/ner-preload-ocr/20260917T163243Z/`. El [runner](../../tests/perf/run-ner-preload-ocr.sh) y el [patch temporal](../../tests/perf/support/ner-preload-ocr.patch) reproducen el instrumento.
 
 El runner guardó `orchestrator.ts` y `ner.engine.ts`, comprobó aplicabilidad del patch y restauró ambos byte a byte. `source-before.sha256` y `source-restored.sha256` son idénticos; el build normal se reconstruyó después. No quedan cambios de producto por este experimento.
 

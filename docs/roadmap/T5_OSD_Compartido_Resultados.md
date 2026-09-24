@@ -12,7 +12,7 @@ El instrumento captura la serie RSS y heap por target, eventos crudos, Word[] co
 
 ## Fuentes y protocolo
 
-- Control detached: `/Users/maratorres/Anonly/Anonly-t5-before`, HEAD `48961510e004c62f39669de7760a41d8361ef49f`.
+- Control detached: checkout de comparación, HEAD `48961510e004c62f39669de7760a41d8361ef49f`.
 - Fixture congelado: [`p2-scanned-50p.pdf`](../../.measure/t5-osd/t5-20260913-351fc4d3-r4/fixture/p2-scanned-50p.pdf), 1,714,563 bytes, SHA-256 `26f7f910b7af53a085d6d307c5835b85bff9150a870755cea63e21742cc2b08f`.
 - Campaña válida: `.measure/t5-osd/t5-20260913-351fc4d3-r4/`; pares en orden A1/B1, B2/A2 y A3/B3. Cada condición tuvo build fresco, un Electron, sesión fría, cierre y sesión caliente, `ocrPoolSize: 2`, sin retries operativos y sin procesos de test/build concurrentes.
 - La primera A1 de r3 se conserva como inválida porque el build no tenía `VITE_E2E=1`; la primera r3 también conserva una clasificación CDP antigua. No se mezclan con r4.
