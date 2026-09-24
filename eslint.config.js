@@ -55,7 +55,7 @@ export default tseslint.config(
     languageOptions: {
       parserOptions: {
         projectService: {
-          maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 9,
+          maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 12,
           allowDefaultProject: [
             "eslint.config.js",
             "commitlint.config.js",
@@ -66,6 +66,9 @@ export default tseslint.config(
             "playwright.perf.config.ts",
             "apps/react-client/postcss.config.js",
             "apps/react-client/tailwind.config.js",
+            "tests/perf/ner-batch-feasibility.mjs",
+            "tests/perf/ner-batch-real.mjs",
+            "tests/perf/support/summarize-ocr-pool.mjs",
           ],
         },
         tsconfigRootDir: import.meta.dirname,
@@ -75,6 +78,17 @@ export default tseslint.config(
       // no-unnecessary-type-assertion conflicta con noUncheckedIndexedAccess
       // (no detecta que arr[i] es T | undefined). Preferimos noUncheckedIndexedAccess.
       "@typescript-eslint/no-unnecessary-type-assertion": "off",
+    },
+  },
+  {
+    files: ["tests/perf/*.mjs", "tests/perf/support/*.mjs"],
+    languageOptions: {
+      globals: {
+        process: "readonly",
+        document: "readonly",
+        crossOriginIsolated: "readonly",
+        NerBatchProbe: "readonly",
+      },
     },
   },
   {
