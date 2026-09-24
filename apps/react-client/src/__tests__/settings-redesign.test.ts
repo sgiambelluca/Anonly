@@ -5,6 +5,7 @@ import {
   OCR_LANGUAGES_SLOT_TEXT,
   PERFORMANCE_PRESET_DESCRIPTION,
   resolveOcrLanguagesSlot,
+  resolveSaveErrorSlot,
   THEME_LABEL,
   THEME_ORDER,
   UPDATE_NETWORK_NOTICE,
@@ -61,6 +62,37 @@ describe("Configuración (ADR-169 §8)", () => {
 
     it("los tres estados tienen texto", () => {
       expect(Object.values(OCR_LANGUAGES_SLOT_TEXT).every((text) => text.length > 0)).toBe(true);
+    });
+  });
+
+  // N-5 / UX-10: el revisor encontró que `saveError` solo se montaba con
+  // error, y aparecer/desaparecer corría el pie del diálogo.
+  describe("ranura de saveError (alto fijo, N-5 / UX-10)", () => {
+    it("sin error: invisible, con el texto neutro de la ranura", () => {
+      expect(resolveSaveErrorSlot({ saveError: null, confirmOpen: false })).toEqual({
+        visible: false,
+        text: "—",
+      });
+    });
+
+    it("con error y el ConfirmDialog cerrado: visible, con el mensaje", () => {
+      expect(
+        resolveSaveErrorSlot({
+          saveError: "No se pudo aplicar la configuración.",
+          confirmOpen: false,
+        }),
+      ).toEqual({ visible: true, text: "No se pudo aplicar la configuración." });
+    });
+
+    // ADR-125: con el ConfirmDialog abierto, el error ya se muestra en su
+    // `errorMessage` — mostrarlo también acá lo duplicaría.
+    it("con error pero el ConfirmDialog abierto: invisible (no se duplica)", () => {
+      expect(
+        resolveSaveErrorSlot({
+          saveError: "No se pudo reanalizar el documento.",
+          confirmOpen: true,
+        }),
+      ).toEqual({ visible: false, text: "—" });
     });
   });
 });

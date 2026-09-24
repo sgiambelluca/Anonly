@@ -114,7 +114,7 @@ describe("actions", () => {
     actions.createRule(makeRule());
     actions.updateRule("rule-1", { enabled: false });
     actions.deleteRule("rule-1");
-    actions.resolveConflict("conflict-1", EntityType.Organization);
+    actions.resolveConflict("conflict-1", { entityType: EntityType.Organization });
     actions.requestRender([0, 1], "original");
     actions.requestExport({
       imageFormat: "png",
@@ -248,7 +248,7 @@ describe("actions", () => {
     });
 
     it("resolveConflict emits CONFLICT_RESOLVE_REQUESTED con el tipo elegido", () => {
-      actions.resolveConflict("conflict-1", EntityType.Organization);
+      actions.resolveConflict("conflict-1", { entityType: EntityType.Organization });
       expect(emit).toHaveBeenCalledWith(EventChannel.UI, EngineEvents.CONFLICT_RESOLVE_REQUESTED, {
         documentId: "doc-1",
         conflictId: "conflict-1",
@@ -263,6 +263,32 @@ describe("actions", () => {
       expect(emit).toHaveBeenCalledWith(EventChannel.UI, EngineEvents.CONFLICT_RESOLVE_REQUESTED, {
         documentId: "doc-1",
         conflictId: "conflict-1",
+      });
+    });
+
+    // ADR-174 §3: `winner` solo tiene sentido en un conflicto con
+    // `heldManual` (`ManualOverlapDialog`), pero `actions.resolveConflict` no
+    // lo valida — eso es responsabilidad del motor (rechazo con `warn`). Acá
+    // solo se prueba que el campo viaja cuando se pasa.
+    it("resolveConflict con winner lo incluye en el payload", () => {
+      actions.resolveConflict("conflict-1", { winner: "manual" });
+      expect(emit).toHaveBeenCalledWith(EventChannel.UI, EngineEvents.CONFLICT_RESOLVE_REQUESTED, {
+        documentId: "doc-1",
+        conflictId: "conflict-1",
+        winner: "manual",
+      });
+    });
+
+    it("resolveConflict con entityType y winner manda los dos", () => {
+      actions.resolveConflict("conflict-1", {
+        entityType: EntityType.Person,
+        winner: "detected",
+      });
+      expect(emit).toHaveBeenCalledWith(EventChannel.UI, EngineEvents.CONFLICT_RESOLVE_REQUESTED, {
+        documentId: "doc-1",
+        conflictId: "conflict-1",
+        entityType: EntityType.Person,
+        winner: "detected",
       });
     });
 

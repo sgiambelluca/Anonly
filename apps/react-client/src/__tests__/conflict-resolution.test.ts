@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import {
   candidateTypes,
   defaultCandidate,
+  manualOverlapCandidates,
   spellingChoices,
 } from "../components/conflicts/conflictResolution.js";
 
@@ -150,5 +151,69 @@ describe("spellingChoices (ADR-106)", () => {
     });
 
     expect(spellingChoices(conflict)).toHaveLength(1);
+  });
+});
+
+describe("manualOverlapCandidates (ADR-174 §4, Components.md §6.3)", () => {
+  it("separa el candidato Manual del que chocó con él", () => {
+    const conflict = makeConflict({
+      candidates: [
+        makeCandidate({
+          source: DetectionSource.Manual,
+          entityType: EntityType.Person,
+          confidence: 1,
+          value: "juan.perez@example.com.",
+        }),
+        makeCandidate({
+          source: DetectionSource.Regex,
+          entityType: EntityType.Email,
+          confidence: 1,
+          value: "juan.perez@example.com",
+        }),
+      ],
+    });
+
+    const result = manualOverlapCandidates(conflict);
+    expect(result?.manual).toEqual(
+      expect.objectContaining({ source: DetectionSource.Manual, value: "juan.perez@example.com." }),
+    );
+    expect(result?.detected).toEqual(
+      expect.objectContaining({ source: DetectionSource.Regex, value: "juan.perez@example.com" }),
+    );
+  });
+
+  it("no importa el orden de los candidatos", () => {
+    const conflict = makeConflict({
+      candidates: [
+        makeCandidate({ source: DetectionSource.NER, entityType: EntityType.Person }),
+        makeCandidate({ source: DetectionSource.Manual, entityType: EntityType.Organization }),
+      ],
+    });
+
+    const result = manualOverlapCandidates(conflict);
+    expect(result?.manual.source).toBe(DetectionSource.Manual);
+    expect(result?.detected.source).toBe(DetectionSource.NER);
+  });
+
+  it("devuelve null sin un candidato Manual (no es un conflicto de ADR-174)", () => {
+    const conflict = makeConflict({
+      candidates: [
+        makeCandidate({ source: DetectionSource.Regex }),
+        makeCandidate({ source: DetectionSource.NER }),
+      ],
+    });
+
+    expect(manualOverlapCandidates(conflict)).toBeNull();
+  });
+
+  it("devuelve null si TODOS los candidatos son Manual (no hay con qué chocar)", () => {
+    const conflict = makeConflict({
+      candidates: [
+        makeCandidate({ source: DetectionSource.Manual }),
+        makeCandidate({ source: DetectionSource.Manual }),
+      ],
+    });
+
+    expect(manualOverlapCandidates(conflict)).toBeNull();
   });
 });

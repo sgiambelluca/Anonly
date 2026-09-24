@@ -12,10 +12,11 @@ import { createHistoryStore, type EditCheckpointPort } from "../store/history.st
 // prueba su parte pura (`withUndoAction`), así que el Core se reemplaza.
 vi.mock("../core-adapter/index.js", () => ({ getCore: () => ({}) }));
 
-const { UNDO_SHORTCUT_HINT, withUndoAction } =
+const { discardLastEdit, UNDO_SHORTCUT_HINT, withUndoAction } =
   await import("../components/entities/editHistory.js");
 const { removeConfirmMessage, removedToastText } =
   await import("../components/entities/undoableEdits.js");
+const { useHistoryStore } = await import("../core-adapter/history.js");
 
 /**
  * Un Core de mentira: el "estado" es un número, y cada punto guarda el valor
@@ -155,6 +156,43 @@ describe("history.store (ADR-172 §2)", () => {
     expect(history.getState().future).toEqual([]);
   });
 
+  // ADR-174 §4 / N-3: un agregado manual que resultó `not-found`/`no-op`
+  // registró un punto antes de intentar, pero no cambió nada. `discardLast`
+  // retira esa entrada fantasma sin pedirle nada al Core.
+  it("discardLast retira la última entrada de past sin tocar el Core", () => {
+    const core = fakeCore();
+    const history = createHistoryStore(core.port);
+    history.getState().record("Agregaste «X»");
+    core.edit(1);
+
+    history.getState().discardLast();
+
+    expect(history.getState().past).toEqual([]);
+    // El punto sigue vivo en el Core (nunca se llamó a `discard`): solo se
+    // retiró la entrada de la pila, no el checkpoint.
+    expect(core.pointCount).toBe(1);
+  });
+
+  it("discardLast solo toca la última entrada de past, no future ni entradas previas", () => {
+    const core = fakeCore();
+    const history = createHistoryStore(core.port);
+    history.getState().record("A");
+    core.edit(1);
+    history.getState().record("B");
+    core.edit(2);
+
+    history.getState().discardLast();
+
+    expect(history.getState().past.map((entry) => entry.label)).toEqual(["A"]);
+    expect(history.getState().future).toEqual([]);
+  });
+
+  it("discardLast con la pila vacía no rompe nada", () => {
+    const history = createHistoryStore(fakeCore().port);
+    history.getState().discardLast();
+    expect(history.getState().past).toEqual([]);
+  });
+
   it("clear vacía las dos pilas y descarta los puntos del Core", async () => {
     const core = fakeCore();
     const history = createHistoryStore(core.port);
@@ -191,6 +229,30 @@ describe("history.store (ADR-172 §2)", () => {
     release();
     expect(await first).toBe(true);
     expect(core.state).toBe(1);
+  });
+});
+
+describe("discardLastEdit (ADR-174 §4 / N-3)", () => {
+  it("retira la última entrada de past del store real, sin tocar el Core", () => {
+    useHistoryStore.setState({
+      past: [{ checkpointId: "cp1", label: "Agregaste «X»" }],
+      future: [],
+      live: ["cp1"],
+      busy: false,
+    });
+
+    discardLastEdit();
+
+    expect(useHistoryStore.getState().past).toEqual([]);
+    // `live` no cambia: `discardLast` no le pide nada al Core, solo saca la
+    // entrada de la pila (ver history.store.ts#discardLast).
+    expect(useHistoryStore.getState().live).toEqual(["cp1"]);
+  });
+
+  it("con la pila vacía no rompe nada", () => {
+    useHistoryStore.setState({ past: [], future: [], live: [], busy: false });
+    discardLastEdit();
+    expect(useHistoryStore.getState().past).toEqual([]);
   });
 });
 
