@@ -22,7 +22,9 @@ import type {
 } from "@anonly/anonymization-core";
 
 import { actions } from "../../core-adapter/actions.js";
+import { useEntitiesStore } from "../../store/entities.store.js";
 import { showToast } from "../common/toast.js";
+import { removedGroupOverlapReveal } from "../conflicts/conflictResolution.js";
 
 import { editToast, recordEdit } from "./editHistory.js";
 import { typeChangeToastText } from "./editPreviews.js";
@@ -148,11 +150,30 @@ export function applySplit(params: {
 /**
  * "Eliminar entidad" (ADR-171 §5): borrar la regla de grupo y pedir la
  * eliminación son **un** punto de deshacer.
+ *
+ * **ADR-175 §1**: si este mismo pedido resuelve solo un conflicto
+ * `heldManual` de este grupo —la detección que chocaba con algo marcado a
+ * mano desaparece, así que lo marcado deja de estar retenido y se oculta—,
+ * el toast lo dice en vez del de siempre. `actions.removeGroup` emite
+ * `GROUP_REMOVE_REQUESTED` **sync** (`04_Event_System.md` §10): para cuando
+ * la llamada vuelve, `entities.store.conflicts` ya refleja la resolución, si
+ * la hubo — comparar el snapshot de antes contra el de después alcanza, sin
+ * esperar ningún evento por separado.
  */
 export function applyRemove(group: EntityGroup): void {
-  const text = removedToastText(group.canonicalValue);
-  const recorded = recordEdit(text.title);
+  const conflictsBefore = useEntitiesStore.getState().conflicts;
+  const recorded = recordEdit(`Eliminaste «${group.canonicalValue}»`);
   actions.removeGroup(group.id);
+  const conflictsAfter = useEntitiesStore.getState().conflicts;
+
+  const reveal = removedGroupOverlapReveal({ conflictsBefore, conflictsAfter, groupId: group.id });
+  const text =
+    reveal !== null
+      ? {
+          title: `Eliminaste «${group.canonicalValue}»`,
+          description: `Lo que marcaste («${reveal.value}») ahora se oculta`,
+        }
+      : removedToastText(group.canonicalValue);
   showToast(editToast(text, recorded));
 }
 
@@ -178,29 +199,35 @@ export function applyConflictResolution(params: {
 }
 
 /**
- * `ManualOverlapDialog` (ADR-174 §3-§4, `Components.md` §6.3): el usuario
- * elige quién gana un choque entre lo que marcó a mano y una detección ya
- * agrupada. Una sola decisión, una entrada de la pila; el toast de
- * confirmación lleva "Deshacer" (ADR-172).
+ * `ManualOverlapDialog` (ADR-174 §3-§4, ADR-175 §4, `Components.md` §6.3):
+ * el usuario elige quién gana, y esa elección vale para **todos** los
+ * `conflictIds` del diálogo — un `resolveConflict` por conflicto, con el
+ * mismo `winner`, dentro de **una sola** entrada de deshacer.
  */
 export function applyManualOverlapResolution(params: {
-  readonly conflictId: string;
+  readonly conflictIds: ReadonlyArray<string>;
   readonly winner: "manual" | "detected";
   readonly value: string;
 }): void {
-  const recorded = recordEdit(`Resolviste el choque de «${params.value}»`);
-  actions.resolveConflict(params.conflictId, { winner: params.winner });
+  const count = params.conflictIds.length;
+  const recorded = recordEdit(
+    count === 1
+      ? `Resolviste el choque de «${params.value}»`
+      : `Resolviste ${count} choques de «${params.value}»`,
+  );
+  for (const conflictId of params.conflictIds) {
+    actions.resolveConflict(conflictId, { winner: params.winner });
+  }
+  // Copy literal de ADR-175 §4 / `Components.md` §6.3: "Ocultaste «X»" /
+  // "Dejaste lo que ya estaba detectado", con " en N lugares" solo si N > 1.
+  const suffix = count > 1 ? ` en ${count} lugares` : "";
   showToast(
     editToast(
       {
         title:
           params.winner === "manual"
-            ? `Ocultaste «${params.value}»`
-            : `Dejaste «${params.value}» sin ocultar`,
-        description:
-          params.winner === "manual"
-            ? "Se ocultó lo que marcaste; la detección que ya estaba se dejó como estaba."
-            : "Se dejó la detección que ya estaba; lo que marcaste no se oculta.",
+            ? `Ocultaste «${params.value}»${suffix}`
+            : `Dejaste lo que ya estaba detectado${suffix}`,
         tone: "success",
       },
       recorded,

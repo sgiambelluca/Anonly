@@ -75,6 +75,12 @@ export interface HistorySlice {
    * restauración deshace al mismo estado — un "Deshacer" que no deshace
    * nada. Solo tiene sentido llamarlo inmediatamente después de un
    * `record()` propio que devolvió `true`, antes de cualquier otra edición.
+   *
+   * ADR-175 (no bloqueante 5 de la revisión 2): además restaura `future` al
+   * valor que tenía **antes** de ese `record()` — que lo vació, como
+   * cualquier edición nueva (ADR-172 §2). Si la especulativa no cambió nada,
+   * tampoco tiene por qué haberse llevado puesta la pila de rehacer que el
+   * usuario ya tenía.
    */
   discardLast(): void;
   clear(): void;
@@ -113,6 +119,14 @@ export function createHistoryStore(
   }
 
   return create<HistorySlice>()((set, get) => {
+    // ADR-175 (no bloqueante 5): lo que `future` valía justo antes del
+    // último `record()`, para que `discardLast()` lo pueda restaurar. Vive
+    // fuera del estado de Zustand a propósito — es un dato de comunicación
+    // entre dos llamadas consecutivas de un mismo caller (`addManualEntity.ts`),
+    // no algo que ningún componente necesite leer ni que sobreviva un
+    // `clear()`.
+    let preRecordFuture: ReadonlyArray<HistoryEntry> | null = null;
+
     /**
      * Undo y redo son el mismo movimiento entre dos pilas: sacar la última
      * entrada de `from`, guardar el estado actual en `to` con la misma
@@ -174,6 +188,7 @@ export function createHistoryStore(
         if (checkpointId === null) return false;
         set((previous) => {
           const next = withCheckpoint(previous, checkpointId, limit);
+          preRecordFuture = next.future;
           return {
             ...next,
             past: [...next.past, { checkpointId, label }],
@@ -185,9 +200,14 @@ export function createHistoryStore(
       undo: () => move("undo"),
       redo: () => move("redo"),
       discardLast() {
-        set((previous) => ({ past: previous.past.slice(0, -1) }));
+        set((previous) => ({
+          past: previous.past.slice(0, -1),
+          future: preRecordFuture ?? previous.future,
+        }));
+        preRecordFuture = null;
       },
       clear() {
+        preRecordFuture = null;
         try {
           port.discard();
         } catch {

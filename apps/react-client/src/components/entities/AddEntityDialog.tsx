@@ -109,9 +109,11 @@ export function AddEntityDialog({ open, onClose }: AddEntityDialogProps) {
     setNotFound(false);
     const feedback = await addManualEntityWithFeedback({ value: trimmed, entityType });
     setSubmitting(false);
-    // ADR-174 §4: "held" cierra este diálogo igual que "added" — lo que
-    // sigue es `ManualOverlapDialog`, abierto por `manualOverlapController.ts`.
-    if (feedback === "added" || feedback === "held") onClose();
+    // ADR-174 §4 / ADR-175 §3: "held" cierra este diálogo igual que "added"
+    // — lo que sigue es `ManualOverlapDialog`. "error" también cierra: el
+    // toast de error ya lo dice, y reintentar acá no tiene sentido (el Core
+    // rompió su propio invariante, no es un typo del usuario).
+    if (feedback === "added" || feedback === "held" || feedback === "error") onClose();
     else if (feedback === "not-found") setNotFound(true);
   }
 

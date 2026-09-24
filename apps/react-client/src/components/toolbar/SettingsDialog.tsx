@@ -518,10 +518,16 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
           diálogo. Ahora queda siempre montado (`h-5`, una línea con
           `truncate`) y solo cambia su texto, igual que la segunda línea de
           `PipelineStatus` (`UX_Guidelines.md` §7.1).
+
+          No bloqueante 7 de la revisión 2: `truncate` puede cortar el
+          mensaje a la mitad de una palabra — `title` lleva el texto
+          completo, así que un hover (o un lector de pantalla que lo
+          exponga) siempre puede leerlo entero.
         */}
         <p
           role={saveErrorSlot.visible ? "alert" : undefined}
           aria-live="polite"
+          title={saveErrorSlot.visible ? saveErrorSlot.text : undefined}
           className={`mt-4 h-5 truncate text-sm text-error ${
             saveErrorSlot.visible ? "" : "invisible"
           }`}

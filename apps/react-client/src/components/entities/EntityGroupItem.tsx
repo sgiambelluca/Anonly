@@ -142,7 +142,7 @@ function EntityGroupItemImpl({ group, nodeId, activeNodeId }: EntityGroupItemPro
       </span>
       {/* Avisos: columna de 52 px; dos juntos entran sin correr nada (UX-10). */}
       <span className="flex min-w-0 items-center gap-1">
-        {conflict !== undefined ? <ConflictBadge conflictId={conflict.id} /> : null}
+        {conflict !== undefined ? <ConflictBadge groupId={group.id} /> : null}
         {/*
           ADR-094 §4 y ADR-062: los dos se montan siempre y deciden solos si
           hay algo que mostrar (sugerida por `needsReview`, espacio justo por

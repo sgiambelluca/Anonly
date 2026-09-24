@@ -25,8 +25,12 @@ export interface ToastAction {
 // `error`); la implementación fue sumándolos según hizo falta uno nuevo.
 // `warning` lo suma ADR-174 §4: el toast persistente de un choque sin
 // resolver ("Quedó un choque sin resolver en «X»…") no es ni un éxito
-// (`success`) ni informativo de lo de siempre (`neutral`/`info`).
-export type ToastTone = "success" | "neutral" | "warning";
+// (`success`) ni informativo de lo de siempre (`neutral`/`info`). `error` lo
+// suma ADR-175 §3: el caso que rompe el invariante del Core
+// (`occurrenceCount > 0` sin `heldConflictIds` ni `groupIds`) — *"No se pudo
+// agregar «X»."* — no es una advertencia que el usuario tenga que resolver,
+// es una falla.
+export type ToastTone = "success" | "neutral" | "warning" | "error";
 
 export interface ToastInput {
   readonly title: string;
@@ -59,11 +63,18 @@ export function subscribeToToasts(listener: Listener): () => void {
   return () => listeners.delete(listener);
 }
 
-/** Muestra un toast, reemplazando al que hubiera. */
-export function showToast(input: ToastInput): void {
+/**
+ * Muestra un toast, reemplazando al que hubiera. Devuelve el mensaje armado
+ * (con su `id`) para quien necesite saber, más tarde, si el toast que ve en
+ * pantalla sigue siendo el que mostró — `ManualOverlapDialogHost` lo usa para
+ * el aviso persistente de ADR-175 §5: no lo vuelve a mostrar mientras siga
+ * siendo el vigente, y lo retira si deja de corresponder.
+ */
+export function showToast(input: ToastInput): ToastMessage {
   nextId += 1;
   const toast: ToastMessage = { id: nextId, ...input };
   for (const listener of listeners) listener(toast);
+  return toast;
 }
 
 /** Cierra el toast vigente, si hay uno. */

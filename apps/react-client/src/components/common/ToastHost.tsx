@@ -15,10 +15,10 @@
  */
 
 import * as RadixToast from "@radix-ui/react-toast";
-import { CheckIcon, InfoIcon, TriangleAlertIcon, XIcon } from "lucide-react";
+import { CheckIcon, InfoIcon, TriangleAlertIcon, XCircleIcon, XIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { subscribeToToasts, type ToastMessage } from "./toast.js";
+import { dismissToast, subscribeToToasts, type ToastMessage } from "./toast.js";
 
 const TOAST_DURATION_MS = 6000;
 
@@ -42,7 +42,13 @@ export function ToastHost() {
           {...(toast.persistent === true ? { duration: Infinity } : {})}
           className="anonly-toast-in flex w-[23.75rem] max-w-[calc(100vw-2rem)] items-start gap-3 rounded-xl border border-border bg-bg-primary py-3 pl-3.5 pr-3 shadow-md"
           onOpenChange={(open) => {
-            if (!open) setToast(null);
+            // `dismissToast()`, no `setToast(null)`: cuando el toast se va
+            // solo (por tiempo, swipe o el botón de cerrar) hay que avisarle
+            // a TODOS los suscriptores de `toast.ts`, no solo a este
+            // componente — `ManualOverlapDialogHost` (ADR-175 §5) necesita
+            // saber que la ranura quedó libre para volver a mostrar su
+            // aviso persistente.
+            if (!open) dismissToast();
           }}
         >
           <span
@@ -52,13 +58,17 @@ export function ToastHost() {
                 ? "bg-success/15 text-text-primary"
                 : toast.tone === "warning"
                   ? "bg-warning/15 text-warning-strong"
-                  : "bg-bg-tertiary text-text-secondary"
+                  : toast.tone === "error"
+                    ? "bg-error/10 text-error"
+                    : "bg-bg-tertiary text-text-secondary"
             }`}
           >
             {toast.tone === "success" ? (
               <CheckIcon className="h-4 w-4" />
             ) : toast.tone === "warning" ? (
               <TriangleAlertIcon className="h-4 w-4" />
+            ) : toast.tone === "error" ? (
+              <XCircleIcon className="h-4 w-4" />
             ) : (
               <InfoIcon className="h-4 w-4" />
             )}

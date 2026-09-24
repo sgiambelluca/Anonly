@@ -233,9 +233,10 @@ function SelectionPopover({
       setNotFound(true);
       return;
     }
-    // ADR-174 §4: "held" cierra este globo igual que "added" — lo que sigue
-    // es `ManualOverlapDialog`, abierto por `manualOverlapController.ts`.
-    if (feedback === "added" || feedback === "held") onClose();
+    // ADR-174 §4 / ADR-175 §3: "held" cierra este globo igual que "added" —
+    // lo que sigue es `ManualOverlapDialog`. "error" también cierra: el
+    // toast de error ya lo dice.
+    if (feedback === "added" || feedback === "held" || feedback === "error") onClose();
   }
 
   return (
