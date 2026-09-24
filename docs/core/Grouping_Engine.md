@@ -578,7 +578,7 @@ Fixtures: `tests/fixtures/text-10p.pdf` con entidades conocidas que generan grup
 - [x] 15u. (Hito 12.5 — ADR-173) Rechazos de `applyGroupMerge` (tipos distintos, mismo grupo) y `applyGroupSplit` (vacío, ajeno, todos) con `GroupingInvalidPatchError` sin mutar; `previewEdit` los hereda. Casos 54-55, tres filas en §14.
 - [x] 15v. (Hito 12.5 — ADR-174) Ocurrencia manual perdedora retenida en el conflicto (`heldManual`), resolución con `winner`, retención incluida en los puntos de restauración. Casos 56-58, cuatro filas en §14.
 - [x] 15w. (Hito 12.5 — ADR-175) Invariante de `heldManual`: la retenida se oculta sola si su detección desaparece (`applyGroupRemove`, `dropOccurrences` por fuente), sale con su página en `dropOccurrences` por páginas sin dejar identidad, `liftRemoval` olvida la supresión de un `"detected"`; un solo `warn` al rechazar `winner`. Casos 59-62, seis filas en §14.
-- [ ] 15x. (Hito 12.5 — ADR-176 §2-§4) La fusión y la división reapuntan los conflictos sin resolver; `manualOutcome` con su anotación por sesión; `liftRemoval` olvida toda supresión del valor. Caso 61 ampliado, casos 63-64, cinco filas en §14.
+- [x] 15x. (Hito 12.5 — ADR-176 §2-§4) La fusión y la división reapuntan los conflictos sin resolver; `manualOutcome` con su anotación por sesión; `liftRemoval` olvida toda supresión del valor. Caso 61 ampliado, casos 63-64, cinco filas en §14.
 - [ ] 16. Escribir `contract.test.ts` con todos los tests contractuales.
 - [ ] 17. Escribir `unit.test.ts` con cobertura ≥ 85%.
 - [ ] 18. Escribir `edge.test.ts` con todos los casos límite.
