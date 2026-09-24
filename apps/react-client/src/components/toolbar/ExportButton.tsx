@@ -17,12 +17,16 @@
  *
  * **Bloqueo por conflicto sin resolver** (ADR-176 §1, `ui/UX_Guidelines.md`
  * §8.1/§8.4): `exportBlockReason(conflicts)` decide si hay motivo. Con
- * motivo, el botón queda deshabilitado, el atajo no abre el diálogo, y una
- * ranura fija y flotante debajo del botón (UX-10: alto reservado siempre,
- * no desplaza el toolbar) muestra el motivo con "Resolver". El bloqueo
- * condiciona el BOTÓN, no la vida de un `ExportDialog` que ya estuviera
- * abierto (`Components.md` §2.5, §9) — no hay ningún efecto acá que lo
- * cierre.
+ * motivo, el botón queda deshabilitado, el atajo no abre el diálogo, y un
+ * **globo flotante** debajo del botón (ADR-177 §4, reemplaza la "ranura fija
+ * con alto reservado" de ADR-176 §1 — UX-10: un globo es flotante, no una
+ * ranura) muestra el motivo con "Resolver". El globo está siempre montado e
+ * invisible sin motivo, así que aparecer no mueve nada; se ancla al borde
+ * **derecho** del botón (`right-0`) para crecer hacia la izquierda, con un
+ * ancho máximo que entra en la ventana más angosta soportada y el texto en
+ * hasta dos renglones. El bloqueo condiciona el BOTÓN, no la vida de un
+ * `ExportDialog` que ya estuviera abierto (`Components.md` §2.5, §9) — no
+ * hay ningún efecto acá que lo cierre.
  */
 
 import { useEffect, useState } from "react";
@@ -84,15 +88,24 @@ export function ExportButton() {
             Exportar
           </Button>
           {/*
-            Ranura fija y flotante (UX-10, ADR-176 §1): siempre montada, con
-            alto reservado (`h-5`), para que aparecer/desaparecer no corra
-            nada del toolbar. `absolute` la saca del flujo, así tampoco hace
-            crecer la cabecera de `h-14`.
+            Globo flotante (UX-10, ADR-177 §4): siempre montado e invisible
+            sin motivo, así que aparecer no mueve nada. Anclado al borde
+            DERECHO del botón (`right-0`) para crecer hacia la izquierda,
+            donde hay lugar -- la raíz es `h-screen overflow-hidden` y
+            anclar a la izquierda lo cortaba (B4-3). Ancho máximo que entra
+            en la ventana más angosta soportada, texto en hasta dos
+            renglones. Mismos tokens de superficie que `GroupContextMenu`
+            (`entities/GroupContextMenu.tsx`): fondo, borde y sombra para
+            leerse sobre el contenido de abajo en los dos temas.
+            `z-[35]`: por encima de la barra del visor (`relative z-30`),
+            que si no lo tapa con un choque pendiente; por debajo del
+            overlay de `Dialog.tsx` (`z-40`), porque "Resolver" abre un
+            diálogo y el globo no tiene que atravesar su overlay.
           */}
           <div
             role={blockReason !== null ? "alert" : undefined}
             aria-live="polite"
-            className={`absolute left-0 top-full z-10 mt-1 flex h-5 items-center gap-1.5 whitespace-nowrap text-xs ${
+            className={`absolute right-0 top-full z-[35] mt-1 flex w-max max-w-[min(20rem,calc(100vw-2rem))] items-start gap-1.5 rounded-xl border border-border bg-bg-primary p-2 text-xs shadow-md ${
               blockReason !== null ? "" : "invisible"
             }`}
           >
@@ -100,7 +113,7 @@ export function ExportButton() {
             <button
               type="button"
               onClick={handleResolve}
-              className="font-semibold text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              className="shrink-0 font-semibold text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
               Resolver
             </button>
