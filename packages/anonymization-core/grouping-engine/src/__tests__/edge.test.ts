@@ -287,6 +287,114 @@ describe("GroupingEngine — edge cases", () => {
     expect(created.members[0]?.occurrenceId).toBe(occB.id);
   });
 
+  // Caso 54 (§13, ADR-173 §1).
+  it("applyGroupMerge rejects different types and self-merge without mutating", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.DNI,
+        value: "11111111",
+        normalizedValue: "11111111",
+      }),
+    });
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        source: DetectionSource.NER,
+        confidence: 1,
+        value: "Juan Pérez",
+        normalizedValue: "juan pérez",
+      }),
+    });
+    const before = engine.getSnapshot("doc-1");
+    const [dni] = before.groups.filter((g) => g.type === EntityType.DNI);
+    const [person] = before.groups.filter((g) => g.type === EntityType.Person);
+
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+
+    await expect(
+      engine.applyGroupMerge({
+        documentId: "doc-1",
+        sourceGroupId: dni!.id,
+        targetGroupId: person!.id,
+      }),
+    ).rejects.toThrow(GroupingInvalidPatchError);
+
+    await expect(
+      engine.applyGroupMerge({
+        documentId: "doc-1",
+        sourceGroupId: dni!.id,
+        targetGroupId: dni!.id,
+      }),
+    ).rejects.toThrow(GroupingInvalidPatchError);
+
+    // Ni evento ni mutación: ninguno de los dos grupos cambió.
+    const groupEvents = busEmitSpy.mock.calls.filter(
+      ([channel]) => channel === EventChannel.Grouping,
+    );
+    expect(groupEvents).toHaveLength(0);
+    expect(engine.getSnapshot("doc-1")).toEqual(before);
+  });
+
+  // Caso 55 (§13, ADR-173 §2).
+  it("applyGroupSplit rejects empty, foreign and all-members occurrenceIds without mutating", async () => {
+    const occA = makeOccurrence({
+      entityType: EntityType.DNI,
+      value: "11111111",
+      normalizedValue: "11111111",
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: occA,
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.DNI,
+        value: "22222222",
+        normalizedValue: "22222222",
+      }),
+    });
+    const before = engine.getSnapshot("doc-1");
+    const [groupA, groupB] = before.groups;
+
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+
+    // occurrenceIds vacío.
+    await expect(
+      engine.applyGroupSplit({ documentId: "doc-1", groupId: groupA!.id, occurrenceIds: [] }),
+    ).rejects.toThrow(GroupingInvalidPatchError);
+
+    // Id ajeno al grupo (member de OTRO grupo).
+    await expect(
+      engine.applyGroupSplit({
+        documentId: "doc-1",
+        groupId: groupA!.id,
+        occurrenceIds: [groupB!.members[0]!.occurrenceId],
+      }),
+    ).rejects.toThrow(GroupingInvalidPatchError);
+
+    // Todos los members del grupo: dejaría el original sin members.
+    await expect(
+      engine.applyGroupSplit({
+        documentId: "doc-1",
+        groupId: groupA!.id,
+        occurrenceIds: groupA!.members.map((m) => m.occurrenceId),
+      }),
+    ).rejects.toThrow(GroupingInvalidPatchError);
+
+    const groupEvents = busEmitSpy.mock.calls.filter(
+      ([channel]) => channel === EventChannel.Grouping,
+    );
+    expect(groupEvents).toHaveLength(0);
+    expect(engine.getSnapshot("doc-1")).toEqual(before);
+    // El invariante que esto protege: ningún grupo se queda sin members.
+    for (const group of engine.getSnapshot("doc-1").groups) {
+      expect(group.members.length).toBeGreaterThanOrEqual(1);
+    }
+  });
+
   /*
    * ADR-107: el solapamiento se mide sobre los pedazos REALES.
    *
@@ -1278,6 +1386,110 @@ describe("GroupingEngine — edge cases", () => {
         entityType: EntityType.Person,
       }),
     ).rejects.toThrow(GroupingGroupNotFoundError);
+  });
+
+  // Caso 57 (§13, ADR-174 §3): `winner` solo aplica a un conflicto heldManual.
+  it("winner on a conflict without heldManual is rejected", async () => {
+    // Overlap "normal" entre dos detecciones automáticas: no hay ocurrencia
+    // Manual de por medio, así que el conflicto no sale heldManual.
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.CreditCard,
+        source: DetectionSource.Regex,
+        confidence: 0.9,
+        bbox: makeBBox(0, 0, 100, 20),
+        value: "4111111111111111",
+        normalizedValue: "4111111111111111",
+      }),
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.IBAN,
+        source: DetectionSource.Regex,
+        confidence: 0.5,
+        bbox: makeBBox(0, 0, 100, 20),
+        value: "ES1234",
+        normalizedValue: "es1234",
+      }),
+    });
+    const [conflict] = engine.getSnapshot("doc-1").conflicts;
+    expect(conflict?.heldManual).toBeUndefined();
+
+    await expect(
+      engine.applyConflictResolve({
+        documentId: "doc-1",
+        conflictId: conflict!.id,
+        winner: "manual",
+      }),
+    ).rejects.toThrow(GroupingInvalidPatchError);
+
+    // El conflicto sigue exactamente como estaba (la resolución automática
+    // de siempre, no la del intento rechazado).
+    const [after] = engine.getSnapshot("doc-1").conflicts;
+    expect(after).toEqual(conflict);
+  });
+
+  // Caso 58 (§13, ADR-174 §1/§3): la retención sobrevive y no se duplica.
+  it("re-emitting a discarded held manual occurrence does not recreate the conflict", async () => {
+    const detected = makeOccurrence({
+      entityType: EntityType.CreditCard,
+      source: DetectionSource.Regex,
+      confidence: 1,
+      bbox: makeBBox(0, 0, 100, 20),
+      value: "4111111111111111",
+      normalizedValue: "4111111111111111",
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: detected,
+    });
+    const manual = makeOccurrence({
+      entityType: EntityType.IBAN,
+      source: DetectionSource.Manual,
+      confidence: 1,
+      bbox: makeBBox(0, 0, 100, 20),
+      value: "ES1234",
+      normalizedValue: "es1234",
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: manual,
+    });
+
+    const [held] = engine.getSnapshot("doc-1").conflicts;
+    expect(held?.heldManual).toBe(true);
+
+    // Re-emitir la MISMA ocurrencia manual MIENTRAS sigue sin resolver: el
+    // dedup por identidad la descarta sin crear un segundo conflicto.
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: manual,
+    });
+    expect(engine.getSnapshot("doc-1").conflicts).toHaveLength(1);
+
+    await engine.applyConflictResolve({
+      documentId: "doc-1",
+      conflictId: held!.id,
+      winner: "detected",
+    });
+
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+    // Re-aplicación del literal (ADR-061 §5) tras un re-análisis: misma
+    // identidad, otra vez.
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: manual,
+    });
+
+    const conflictCalls = busEmitSpy.mock.calls.filter(
+      ([channel, event]) =>
+        channel === EventChannel.Grouping && event === EngineEvents.CONFLICT_DETECTED,
+    );
+    expect(conflictCalls).toHaveLength(0);
+    expect(engine.getSnapshot("doc-1").conflicts).toHaveLength(1);
+    expect(engine.getSnapshot("doc-1").groups.some((g) => g.type === EntityType.IBAN)).toBe(false);
   });
 
   // Caso 18 (§13), combinado con caso 6: split preserva un canonicalValue
@@ -3568,7 +3780,7 @@ describe("GroupingEngine — edge cases", () => {
     );
   });
 
-  // Caso 47 (§13, ADR-170 §2).
+  // Caso 47 (§13, ADR-170 §2). Grupo inexistente / documento sin sesión.
   it("previewEdit rejects what the real request rejects", async () => {
     ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
       documentId: "doc-1",
@@ -3593,6 +3805,86 @@ describe("GroupingEngine — edge cases", () => {
     // El intento fallido no dejó rastro en la sesión real.
     const { groups } = engine.getSnapshot("doc-1");
     expect(groups).toHaveLength(1);
+  });
+
+  // Casos 54-55 (§13, ADR-173 §1/§2) + ADR-170 §2 — reemplaza al test que
+  // solo probaba grupo inexistente: previewEdit hereda LOS MISMOS rechazos
+  // que el pedido real, normalizados a InvalidInputError, y sin dejar
+  // rastro en la sesión real (corre sobre una copia descartable).
+  it("previewEdit rejects the invalid merges and splits the real request rejects", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.DNI,
+        value: "11111111",
+        normalizedValue: "11111111",
+      }),
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.DNI,
+        value: "22222222",
+        normalizedValue: "22222222",
+      }),
+    });
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        source: DetectionSource.NER,
+        confidence: 1,
+        value: "Juan Pérez",
+        normalizedValue: "juan pérez",
+      }),
+    });
+    const before = engine.getSnapshot("doc-1");
+    const [dniA, dniB] = before.groups.filter((g) => g.type === EntityType.DNI);
+    const [person] = before.groups.filter((g) => g.type === EntityType.Person);
+
+    // Caso 54: tipos distintos.
+    expect(() =>
+      engine.previewEdit("doc-1", {
+        kind: "merge",
+        sourceGroupId: dniA!.id,
+        targetGroupIds: [person!.id],
+      }),
+    ).toThrow(InvalidInputError);
+
+    // Caso 54: mismo grupo.
+    expect(() =>
+      engine.previewEdit("doc-1", {
+        kind: "merge",
+        sourceGroupId: dniA!.id,
+        targetGroupIds: [dniA!.id],
+      }),
+    ).toThrow(InvalidInputError);
+
+    // Caso 55: occurrenceIds vacío.
+    expect(() =>
+      engine.previewEdit("doc-1", { kind: "split", groupId: dniA!.id, occurrenceIds: [] }),
+    ).toThrow(InvalidInputError);
+
+    // Caso 55: id ajeno al grupo.
+    expect(() =>
+      engine.previewEdit("doc-1", {
+        kind: "split",
+        groupId: dniA!.id,
+        occurrenceIds: [dniB!.members[0]!.occurrenceId],
+      }),
+    ).toThrow(InvalidInputError);
+
+    // Caso 55: todos los members.
+    expect(() =>
+      engine.previewEdit("doc-1", {
+        kind: "split",
+        groupId: dniA!.id,
+        occurrenceIds: dniA!.members.map((m) => m.occurrenceId),
+      }),
+    ).toThrow(InvalidInputError);
+
+    // Ninguno de los cinco intentos dejó rastro en la sesión real.
+    expect(engine.getSnapshot("doc-1")).toEqual(before);
   });
 
   // Caso 51 (§13, ADR-172 §1).

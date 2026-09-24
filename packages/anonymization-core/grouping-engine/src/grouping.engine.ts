@@ -413,6 +413,20 @@ interface Session {
    * §8).
    */
   readonly removedValues: Set<string>;
+  /**
+   * ADR-174 §1: ocurrencias `source: Manual` que perdieron una superposición
+   * contra otra de otro tipo y quedaron retenidas — indexadas por el `id`
+   * del `Conflict` (`heldManual: true`) que las señala. `applyConflictResolve`
+   * las consulta por `winner`: `"manual"` las agrupa (`groupOccurrence`) y
+   * `"detected"` las descarta. El dedup por identidad (`isDuplicateIdentity`)
+   * también las consulta mientras siguen acá, para que una re-emisión de la
+   * misma ocurrencia no cree un segundo conflicto mientras el primero sigue
+   * sin resolver. La entrada se borra al resolver, por cualquiera de los dos
+   * caminos (ADR-174 §3). Sobrevive a `reopenSession` (no se toca) y a los
+   * puntos de restauración de ADR-172 (viaja en `cloneSession`, caso 58);
+   * muere en `closeSession`.
+   */
+  readonly heldManualOccurrences: Map<string, Occurrence>;
   readonly seed: string;
   readonly startedAt: number;
   regexFinished: boolean;
@@ -460,6 +474,10 @@ function cloneSession(session: Session): Session {
     recordedOccurrences: session.recordedOccurrences.map((rec) => ({ ...rec })),
     typeCorrections: new Map(session.typeCorrections),
     removedValues: new Set(session.removedValues),
+    // ADR-174 §1/ADR-172 §1 (caso 58): las ocurrencias en sí son inmutables
+    // (`Occurrence`, nunca se muta en el lugar), así que una copia superficial
+    // del Map alcanza — mismo criterio que `typeCorrections`.
+    heldManualOccurrences: new Map(session.heldManualOccurrences),
     seed: session.seed,
     startedAt: session.startedAt,
     regexFinished: session.regexFinished,
@@ -1053,6 +1071,7 @@ export class GroupingEngine implements IEngine {
       recordedOccurrences: [],
       typeCorrections: new Map(),
       removedValues: new Set(),
+      heldManualOccurrences: new Map(),
       seed: crypto.randomUUID(),
       startedAt: Date.now(),
       regexFinished: false,
@@ -1600,6 +1619,27 @@ export class GroupingEngine implements IEngine {
       if (!session || !source) throw new GroupingGroupNotFoundError(documentId, sourceGroupId);
       if (!target) throw new GroupingGroupNotFoundError(documentId, targetGroupId);
 
+      // Caso 54 (§13, ADR-173 §1): rechazar SIN mutar nada — mismo grupo, o
+      // tipos distintos (un grupo tiene un solo `replacementValue`; fusionar
+      // tipos distintos haría que el documento afirmara que dos entidades de
+      // tipos distintos son la misma).
+      if (sourceGroupId === targetGroupId) {
+        throw new GroupingInvalidPatchError("sourceGroupId y targetGroupId son el mismo grupo.", {
+          documentId,
+          sourceGroupId,
+          targetGroupId,
+        });
+      }
+      if (source.type !== target.type) {
+        throw new GroupingInvalidPatchError("los grupos a fusionar son de tipos distintos.", {
+          documentId,
+          sourceGroupId,
+          targetGroupId,
+          sourceType: source.type,
+          targetType: target.type,
+        });
+      }
+
       // "Algoritmos clave" > indexInType: fusionar A(source) en B(target) ->
       // B conserva min(A.index, B.index); A se elimina.
       const newIndex = Math.min(source.indexInType, target.indexInType);
@@ -1702,6 +1742,27 @@ export class GroupingEngine implements IEngine {
     const idsToMove = new Set(occurrenceIds);
     const movedMembers = group.members.filter((m) => idsToMove.has(m.occurrenceId));
     const remainingMembers = group.members.filter((m) => !idsToMove.has(m.occurrenceId));
+
+    // Caso 55 (§13, ADR-173 §2): rechazar SIN mutar nada — vacío, un id que
+    // no es member del grupo, o todos los members (dejaría el grupo original
+    // sin members, violando el invariante `members.length >= 1` de
+    // `03_Data_Model.md` §9).
+    if (occurrenceIds.length === 0) {
+      throw new GroupingInvalidPatchError("occurrenceIds vacío.", { documentId, groupId });
+    }
+    if (movedMembers.length !== idsToMove.size) {
+      throw new GroupingInvalidPatchError(
+        "occurrenceIds contiene un id que no es member del grupo.",
+        { documentId, groupId, occurrenceIds },
+      );
+    }
+    if (remainingMembers.length === 0) {
+      throw new GroupingInvalidPatchError("occurrenceIds contiene todos los members del grupo.", {
+        documentId,
+        groupId,
+        occurrenceIds,
+      });
+    }
 
     const recordsById = new Map(session.recordedOccurrences.map((r) => [r.occurrenceId, r]));
     const movedRecords = movedMembers
@@ -1976,6 +2037,28 @@ export class GroupingEngine implements IEngine {
         throw new GroupingGroupNotFoundError(req.documentId, req.conflictId, { kind: "conflict" });
       }
 
+      // ADR-174 §3: `winner` solo tiene sentido sobre un conflicto con
+      // `heldManual` — sobre cualquier otro, rechazado con warn.
+      if (req.winner !== undefined && conflict.heldManual !== true) {
+        this.ctx?.logger.warn("winner en un conflicto sin heldManual; rechazado.", {
+          documentId: req.documentId,
+          conflictId: req.conflictId,
+          winner: req.winner,
+        });
+        throw new GroupingInvalidPatchError("winner solo aplica a un conflicto con heldManual.", {
+          documentId: req.documentId,
+          conflictId: req.conflictId,
+        });
+      }
+      if (conflict.heldManual === true) {
+        const resolved = this.resolveHeldManualConflict(
+          session,
+          conflict,
+          req.winner ?? "detected",
+        );
+        return Promise.resolve(resolved);
+      }
+
       // ADR-083 §1/§4: el usuario elige el TIPO. Ausente = el default, que es
       // el candidato de mayor confidence (empate a favor de Regex). Como
       // `regex-engine` emite siempre `confidence: 1.0`, ese default coincide
@@ -2024,6 +2107,61 @@ export class GroupingEngine implements IEngine {
     } catch (err: unknown) {
       return Promise.reject(err instanceof Error ? err : new Error(String(err)));
     }
+  }
+
+  /**
+   * Caso 57 (§13, ADR-174 §3): resuelve un conflicto `heldManual`.
+   * `"manual"` agrupa la ocurrencia retenida por el mismo camino que si
+   * hubiera ganado (`groupOccurrence`: se une a un grupo de su valor y tipo,
+   * o crea uno) sin tocar la detección existente — `resolvedType` es el tipo
+   * del candidato manual. `"detected"` la descarta; su identidad se
+   * re-registra con el sentinel de "suprimida sin agrupar" (mismo patrón que
+   * el paso 0 de Matching, ADR-171 §3) para que una re-aplicación del
+   * literal (ADR-061 §5, caso 58) no vuelva a crear el conflicto —
+   * `resolvedType` es el tipo ya vigente del grupo detectado, que este
+   * camino no toca. `heldManualOccurrences` se limpia en los dos casos: ya
+   * no hay nada retenido una vez decidido.
+   */
+  private resolveHeldManualConflict(
+    session: Session,
+    conflict: Conflict,
+    winner: "manual" | "detected",
+  ): Conflict {
+    const heldOccurrence = session.heldManualOccurrences.get(conflict.id);
+    session.heldManualOccurrences.delete(conflict.id);
+
+    let resolvedType: EntityType | undefined;
+    if (winner === "manual" && heldOccurrence) {
+      const group = this.groupOccurrence(session, heldOccurrence);
+      resolvedType = group.type;
+    } else {
+      if (heldOccurrence) this.recordOccurrence(session, heldOccurrence, SUPPRESSED_GROUP_ID);
+      resolvedType = session.groups.get(conflict.groupId)?.type ?? defaultCandidateType(conflict);
+    }
+    if (resolvedType === undefined) {
+      // No debería ocurrir: `emitHeldManualConflict` siempre construye el
+      // conflicto sobre un `existing.groupId` real y con >= 2 candidates
+      // (invariante de `03_Data_Model.md` §15) — un `resolvedType` inventado
+      // sería peor que rechazar, mismo criterio que la rama ADR-083 de arriba.
+      throw new GroupingInvalidPatchError("El conflicto heldManual no tiene un tipo resoluble.", {
+        documentId: session.documentId,
+        conflictId: conflict.id,
+      });
+    }
+
+    // `heldManual` no viaja al conflicto resuelto: ya no queda nada retenido
+    // (exactOptionalPropertyTypes exige omitir la clave, no `undefined`).
+    const { heldManual: _heldManual, ...rest } = conflict;
+    const resolved: Conflict = { ...rest, resolved: true, resolvedType };
+    session.conflicts.set(conflict.id, resolved);
+
+    this.ctx?.bus.emit(EventChannel.Grouping, EngineEvents.CONFLICT_RESOLVED, {
+      documentId: session.documentId,
+      conflictId: conflict.id,
+      entityType: resolvedType,
+    });
+
+    return resolved;
   }
 
   /**
@@ -2464,6 +2602,17 @@ export class GroupingEngine implements IEngine {
     if (conflictMatch) {
       const { existing, reason } = conflictMatch;
       const newWins = this.conflictWinnerIsNew(existing, occurrence, reason);
+      /*
+       * Caso 56 (§13, ADR-174 §1): una ocurrencia MANUAL que pierde no se
+       * descarta como cualquier otra perdedora — queda retenida, adjunta al
+       * conflicto, esperando que el usuario decida (`winner`,
+       * `applyConflictResolve`). Una ocurrencia manual que gana sigue el
+       * camino de siempre (agruparse, sin retención) — no entra acá.
+       */
+      if (!newWins && occurrence.source === DetectionSource.Manual) {
+        this.emitHeldManualConflict(session, existing, occurrence, reason);
+        return;
+      }
       this.emitOverlapOrDisagreeConflict(session, existing, occurrence, reason);
       if (!newWins) return;
     }
@@ -2570,13 +2719,24 @@ export class GroupingEngine implements IEngine {
    * así que un duplicado de esas vuelve a pasar por ese mismo camino.
    */
   private isDuplicateIdentity(session: Session, occurrence: Occurrence): boolean {
-    return session.recordedOccurrences.some(
-      (rec) =>
-        rec.entityType === occurrence.entityType &&
-        rec.pageIndex === occurrence.pageIndex &&
-        rec.normalizedValue === occurrence.normalizedValue &&
-        bboxEquals(rec.bbox, occurrence.bbox),
-    );
+    const sameIdentity = (rec: {
+      readonly entityType: EntityType;
+      readonly pageIndex: number;
+      readonly normalizedValue: string;
+      readonly bbox: BoundingBox;
+    }): boolean =>
+      rec.entityType === occurrence.entityType &&
+      rec.pageIndex === occurrence.pageIndex &&
+      rec.normalizedValue === occurrence.normalizedValue &&
+      bboxEquals(rec.bbox, occurrence.bbox);
+    if (session.recordedOccurrences.some(sameIdentity)) return true;
+    // ADR-174 §1: una ocurrencia manual retenida (sin resolver todavía) no
+    // vive en `recordedOccurrences` — se consulta acá para que re-emitirla
+    // mientras el conflicto sigue abierto no cree un segundo conflicto.
+    for (const held of session.heldManualOccurrences.values()) {
+      if (sameIdentity(held)) return true;
+    }
+    return false;
   }
 
   /**
@@ -2662,6 +2822,40 @@ export class GroupingEngine implements IEngine {
       true,
       group?.type,
     );
+    this.emitConflictDetected(session, conflict);
+  }
+
+  /**
+   * Caso 56 (§13, ADR-174 §1): una ocurrencia `source: Manual` que pierde
+   * queda retenida en vez de descartada — se registra en
+   * `Session.heldManualOccurrences` bajo el id del conflicto nuevo, que sale
+   * `resolved: false` (sin `resolvedType`: nadie decidió todavía) y
+   * `heldManual: true`. La detección que ya estaba (`existing`) no se toca.
+   * `applyConflictResolve` con `winner` es quien la agrupa o la descarta
+   * (ADR-174 §3).
+   */
+  private emitHeldManualConflict(
+    session: Session,
+    existing: SessionOccurrenceRecord,
+    occurrence: Occurrence,
+    reason: ConflictReason,
+  ): void {
+    const existingCandidate: ConflictCandidate = {
+      source: existing.source,
+      entityType: existing.entityType,
+      confidence: existing.confidence,
+      value: existing.value,
+    };
+    const conflict: Conflict = {
+      id: crypto.randomUUID(),
+      groupId: existing.groupId,
+      reason,
+      candidates: [existingCandidate, occurrenceAsCandidate(occurrence)],
+      resolved: false,
+      heldManual: true,
+    };
+    session.conflicts.set(conflict.id, conflict);
+    session.heldManualOccurrences.set(conflict.id, occurrence);
     this.emitConflictDetected(session, conflict);
   }
 

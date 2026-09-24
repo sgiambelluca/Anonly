@@ -5,6 +5,7 @@ import {
   EventChannel,
   GENDER_LEXICON,
   ReplacementMode,
+  type ConflictDetected,
   type EngineContext,
   type EntityGroupCreated,
   type EntityGroupRemoved,
@@ -1358,5 +1359,140 @@ describe("GroupingEngine — puntos de restauración (ADR-172)", () => {
     // Ahora sí: closeSession descarta todo.
     await engine.closeSession("doc-1");
     expect(engine["checkpoints"].has("doc-1")).toBe(false);
+  });
+});
+
+describe("GroupingEngine — agregado manual que choca (ADR-174)", () => {
+  let engine: GroupingEngine;
+  let ctx: EngineContext;
+
+  beforeEach(async () => {
+    engine = new GroupingEngine();
+    ctx = createEngineContext();
+    await engine.init(ctx);
+    engine.startSession("doc-1");
+  });
+
+  afterEach(async () => {
+    if (!engine["disposed"]) {
+      await engine.dispose();
+    }
+  });
+
+  // Caso 56 (§13, ADR-174 §1).
+  it("a losing manual occurrence is held, not grouped, and marks the conflict heldManual", () => {
+    const detected = makeOccurrence({
+      entityType: EntityType.CreditCard,
+      source: DetectionSource.Regex,
+      confidence: 1,
+      bbox: makeBBox(0, 0, 100, 20),
+      value: "4111111111111111",
+      normalizedValue: "4111111111111111",
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: detected,
+    });
+    const manual = makeOccurrence({
+      entityType: EntityType.IBAN,
+      source: DetectionSource.Manual,
+      confidence: 1,
+      bbox: makeBBox(0, 0, 100, 20),
+      value: "ES1234",
+      normalizedValue: "es1234",
+    });
+
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: manual,
+    });
+
+    // Se emite el conflicto, pero NINGÚN evento de grupo para el IBAN: no se
+    // agrupa ni se descarta en silencio.
+    const conflictCalls = busEmitSpy.mock.calls.filter(
+      ([channel, event]) =>
+        channel === EventChannel.Grouping && event === EngineEvents.CONFLICT_DETECTED,
+    );
+    expect(conflictCalls).toHaveLength(1);
+    const conflict = (conflictCalls[0]?.[2] as ConflictDetected).conflict;
+    expect(conflict.heldManual).toBe(true);
+    expect(conflict.resolved).toBe(false);
+    expect(conflict.resolvedType).toBeUndefined();
+
+    const groupEvents = busEmitSpy.mock.calls.filter(
+      ([channel, event]) =>
+        channel === EventChannel.Grouping &&
+        (event === EngineEvents.ENTITY_GROUP_CREATED ||
+          event === EngineEvents.ENTITY_GROUP_UPDATED),
+    );
+    expect(groupEvents).toHaveLength(0);
+
+    const { groups } = engine.getSnapshot("doc-1");
+    expect(groups.some((g) => g.type === EntityType.IBAN)).toBe(false);
+    // La detección que ya estaba no se toca.
+    const creditCardGroup = groups.find((g) => g.type === EntityType.CreditCard);
+    expect(creditCardGroup?.members).toHaveLength(1);
+  });
+
+  // Caso 57 (§13, ADR-174 §3).
+  it("resolve winner manual groups the held occurrence; detected discards it", async () => {
+    function buildHeldConflict(ibanValue: string, ibanNormalized: string) {
+      ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: makeOccurrence({
+          entityType: EntityType.CreditCard,
+          source: DetectionSource.Regex,
+          confidence: 1,
+          bbox: makeBBox(0, 0, 100, 20),
+          value: "4111111111111111",
+          normalizedValue: "4111111111111111",
+        }),
+      });
+      ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: makeOccurrence({
+          entityType: EntityType.IBAN,
+          source: DetectionSource.Manual,
+          confidence: 1,
+          bbox: makeBBox(0, 0, 100, 20),
+          value: ibanValue,
+          normalizedValue: ibanNormalized,
+        }),
+      });
+      // El snapshot acumula conflictos de llamadas anteriores (ya resueltos,
+      // sin heldManual): el nuevo retenido es el que todavía lo tiene.
+      const conflict = engine.getSnapshot("doc-1").conflicts.find((c) => c.heldManual === true);
+      if (!conflict) throw new Error("expected a held conflict");
+      return conflict;
+    }
+
+    // winner: "manual" agrupa la retenida, sin tocar la detección existente.
+    const heldA = buildHeldConflict("ES1111", "es1111");
+    const resolvedManual = await engine.applyConflictResolve({
+      documentId: "doc-1",
+      conflictId: heldA.id,
+      winner: "manual",
+    });
+    expect(resolvedManual.resolved).toBe(true);
+    expect(resolvedManual.resolvedType).toBe(EntityType.IBAN);
+    expect(resolvedManual.heldManual).toBeUndefined();
+    const afterManual = engine.getSnapshot("doc-1").groups;
+    expect(afterManual.some((g) => g.type === EntityType.IBAN)).toBe(true);
+    expect(afterManual.find((g) => g.type === EntityType.CreditCard)?.members).toHaveLength(1);
+
+    // winner: "detected" descarta la retenida — se resuelve por el tipo YA
+    // vigente de la detección, que este camino no toca.
+    const heldB = buildHeldConflict("ES2222", "es2222");
+    const resolvedDetected = await engine.applyConflictResolve({
+      documentId: "doc-1",
+      conflictId: heldB.id,
+      winner: "detected",
+    });
+    expect(resolvedDetected.resolved).toBe(true);
+    expect(resolvedDetected.resolvedType).toBe(EntityType.CreditCard);
+    expect(resolvedDetected.heldManual).toBeUndefined();
+    const afterDetected = engine.getSnapshot("doc-1").groups;
+    expect(afterDetected.filter((g) => g.type === EntityType.IBAN)).toHaveLength(1); // solo la de heldA
   });
 });
