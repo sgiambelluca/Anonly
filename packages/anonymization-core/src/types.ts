@@ -58,7 +58,16 @@ export interface ManualEntityResult {
   // agregado (la ocurrencia manual perdió una superposición y quedó
   // retenida). [] = ninguno. occurrenceCount > 0 con heldConflictIds no
   // vacío NO es un agregado exitoso.
+  // ADR-175 §3: se identifican por el normalizedValue de las ocurrencias
+  // Manual que emitió ESTE agregado, comparado con
+  // normalizeEntityValue(candidate.value) — nunca por igualdad exacta de
+  // texto (la puntuación pegada del documento, ADR-115).
   readonly heldConflictIds: ReadonlyArray<string>;
+  // ADR-175 §3: grupos en los que quedaron las ocurrencias de este agregado,
+  // incluidos los que ya existían (mismo criterio de normalizedValue contra
+  // normalizeEntityValue(member.value)). [] = ninguno.
+  // Invariante: occurrenceCount > 0 => heldConflictIds o groupIds no vacío.
+  readonly groupIds: ReadonlyArray<string>;
 }
 
 export interface IPipelineOrchestrator {
