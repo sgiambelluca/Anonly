@@ -656,10 +656,10 @@ entidad con supresión por sesión), ADR-172 (deshacer y rehacer exactos por pun
 | 7 | ADR-169: lista, avisos, `Tooltip`, franja, género con borde, visor (pellizco, separador), lupa, selección persistente, `EntityTypePicker`, `AddEntityDialog`, Configuración, tokens | `apps/react-client` | — | hecho |
 | 8 | ADR-170: selector de modo exacto y diálogos Fusionar/Dividir/Editar reemplazo/Cambiar tipo con `previewEdit` | `apps/react-client` | 5, 7 | hecho |
 | 9 | ADR-171/172: "Eliminar entidad", `history.store`, atajos, toasts con "Deshacer" | `apps/react-client` | 5, 7 | hecho |
-| 10 | B-1: `replacementPreviews` en los fixtures de `tests/invariants` y `tests/security` | `tests/` | 1 | pendiente |
-| 11 | ADR-173 (15u) y ADR-174 (15v): rechazos de fusión/división y ocurrencia manual retenida | `grouping-engine` | 4 | pendiente |
-| 12 | Tipos de ADR-174: `Conflict.heldManual`, `ManualEntityResult.heldConflictIds`, `ConflictResolveRequested.winner` | `shared` | — | pendiente |
-| 13 | ADR-174 §2 y N-4 del revisor (Orchestrator 31) | `anonymization-core/src` | 11, 12 | pendiente |
+| 10 | B-1: `replacementPreviews` en los fixtures de `tests/invariants` y `tests/security` | `tests/` | 1 | **hecho** (`029ba67`) |
+| 11 | ADR-173 (15u) y ADR-174 (15v): rechazos de fusión/división y ocurrencia manual retenida | `grouping-engine` | 4 | **hecho** (`356865c`) |
+| 12 | Tipos de ADR-174: `Conflict.heldManual`, `ManualEntityResult.heldConflictIds`, `ConflictResolveRequested.winner` | `shared` (y `anonymization-core/src/types.ts` para `ManualEntityResult`, que vive en el façade, `Contracts.md` §3.5) | — | **hecho** (`4bfb35c`) |
+| 13 | ADR-174 §2 y N-4 del revisor (Orchestrator 31) | `anonymization-core/src` | 11, 12 | **hecho** (`f5148c7`) |
 | 14 | ADR-174 §4 (`ManualOverlapDialog`, toast honesto, entrada de deshacer retirada), N-5 (ranura del error de `SettingsDialog`) y N-2 (tests de los `.ts` sin cobertura) | `apps/react-client` | 13 | pendiente |
 
 **Revisión 1 (2026-09-24): REJECTED** con tres bloqueantes — B-1 (typecheck rojo en `tests/`), B-2 (ADR-170 enumeraba rechazos que el motor no hacía → ADR-173), B-3 (el toast de alta podía mentir → ADR-174) — y no bloqueantes N-1 a N-8. Las filas 10-14 los cierran. N-8 (`scenario-2`/`scenario-5` de E2E) es anterior a esta branch: va en un commit aparte sobre `hardening/plan-2026-09`.
