@@ -1,11 +1,11 @@
 <!-- CONTEXT: scope=adr | dependencias=roadmap/Optimizacion_De_Memoria_Plan.md,roadmap/PDFs_Pesados_Y_Exportacion_Plan.md,roadmap/PDFs_Pesados_Y_Exportacion_Medicion.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-148-Un-Export-Se-Verifica-Leyendo-El-PDF-Exportado.md,core/Contracts.md,core/Render_Engine.md,core/Export_Engine.md | audiencia=humanos+IA | fase=11 -->
 
-# ADR-174 — Los PDFs pesados se miden hasta el archivo exportado
+# ADR-180 — Los PDFs pesados se miden hasta el archivo exportado
 
-- **Estado**: Accepted; banco opt-in implementado y caracterización local completada el 2026-09-23. El código del banco aún no tiene commit.
+- **Estado**: Accepted; banco opt-in implementado y caracterización local completada el 2026-09-23.
 - **Fecha**: 2026-09-23.
 - **Decidido por**: El planificador, para el punto 3 de `roadmap/Optimizacion_De_Memoria_Plan.md` §2ter.
-- **Numeración**: ADR-168 a ADR-172 están reservados para otra rama de UI. ADR-174 no ocupa ese rango; en los refs locales y remotos visibles no existe otro ADR-174. Antes de integrar otra rama, resolver cualquier colisión aparecida fuera de los refs visibles.
+- **Numeración**: ADR-168 a ADR-178 pertenecen a la otra rama de UI. Este ADR continúa la numeración de esta campaña desde ADR-179.
 - **Relacionado con**: ADR-146 (M1/M2), ADR-148 (verificación del export), ADR-153 (Electron empaquetado), ADR-159 (retención del renderer).
 
 ## Contexto
