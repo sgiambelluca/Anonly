@@ -1,16 +1,16 @@
-<!-- CONTEXT: scope=adr | dependencias=adr/ADR-176-Distancia-Acotada-Para-Grouping.md,core/Grouping_Engine.md,roadmap/Agrupacion_Difusa_Medicion.md,core/Contracts.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=adr/ADR-182-Distancia-Acotada-Para-Grouping.md,core/Grouping_Engine.md,roadmap/Agrupacion_Difusa_Medicion.md,core/Contracts.md | audiencia=humanos+IA | fase=11 -->
 
-# ADR-177 — Recortar afijos comunes antes de calcular la distancia acotada
+# ADR-183 — Recortar afijos comunes antes de calcular la distancia acotada
 
 - **Estado**: Implementado y medido en macOS; paridad verificada, peor caso residual pendiente.
 - **Fecha**: 2026-09-24.
 - **Decidido por**: planificador de la campaña de rendimiento.
-- **Numeración**: ADR-168 a ADR-172 están reservados en otra tarea; ADR-173 a ADR-176 ya existen en este checkout. Resolver una eventual colisión externa antes de integrar.
-- **Relacionado con**: ADR-176 y `roadmap/Agrupacion_Difusa_Medicion.md`.
+- **Numeración**: ADR-168 a ADR-178 pertenecen a la otra tarea; esta campaña ya usa ADR-179 a ADR-182.
+- **Relacionado con**: ADR-182 y `roadmap/Agrupacion_Difusa_Medicion.md`.
 
 ## Contexto
 
-La banda y el corte temprano de ADR-176 redujeron el caso adverso de 2.000
+La banda y el corte temprano de ADR-182 redujeron el caso adverso de 2.000
 valores `Person` distintos de 14,53 a 3,26 s, con salidas idénticas. Ese corpus
 comparte un prefijo largo; la DP sigue recorriendo caracteres que coinciden en
 casi todos los candidatos. Una sonda separada recortó afijos comunes en UTF-16
@@ -24,7 +24,7 @@ descartó cero pares del adverso y agregó costo; no se adopta.
 
 1. En el predicado **interno** `levenshteinNormalizedAtLeast`, para strings no
    vacíos y umbral finito `0 < t < 1`, conservar la cota conservadora `k` de
-   ADR-176 calculada con `L = max(a.length,b.length)` **original**. Conservar
+   ADR-182 calculada con `L = max(a.length,b.length)` **original**. Conservar
    también su rechazo por diferencia de longitudes y la ruta completa si
    `k >= L`. No modificar `levenshtein` ni `levenshteinNormalized`.
 2. Antes de la DP con banda, recortar el máximo prefijo común y luego el
@@ -33,7 +33,7 @@ descartó cero pares del adverso y agregó costo; no se adopta.
    los originales. Si uno de los restos queda vacío, la distancia es la
    longitud del otro; si ambos quedan vacíos, es cero. La decisión final usa
    **siempre** `1 - distance / L >= t`, con el `L` original y la misma expresión
-   flotante de ADR-176. No renormalizar por las longitudes recortadas.
+   flotante de ADR-182. No renormalizar por las longitudes recortadas.
 3. La banda `|i-j| <= k`, el centinela y el corte de fila se aplican a los
    restos con el mismo radio original. Para strings vacíos, umbrales 0/1,
    fuera de rango, no finitos y `NaN`, conservar la delegación exacta al helper

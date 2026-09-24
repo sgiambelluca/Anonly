@@ -1,11 +1,11 @@
 <!-- CONTEXT: scope=adr | dependencias=roadmap/Agrupacion_Difusa_Medicion.md,roadmap/Rendimiento_Experimentos_Plan.md,core/Grouping_Engine.md,core/Contracts.md,adr/ADR-073-Difuso-Solo-Para-Tipos-De-Texto-Libre.md,adr/ADR-085-Un-Cambio-De-Tipo-Se-Recuerda-Por-Valor.md | audiencia=humanos+IA | fase=11 -->
 
-# ADR-176 — Descartar distancias imposibles antes de completar Levenshtein
+# ADR-182 — Descartar distancias imposibles antes de completar Levenshtein
 
 - **Estado**: Implementado y medido en macOS; paridad verificada, peor caso residual pendiente.
 - **Fecha**: 2026-09-24.
 - **Decidido por**: planificador de la campaña de rendimiento.
-- **Numeración**: ADR-168 a ADR-172 están reservados en otra tarea; ADR-173/174/175 ya existen en este checkout. Resolver una eventual colisión externa antes de integrar.
+- **Numeración**: ADR-168 a ADR-178 pertenecen a la otra tarea; esta campaña ya usa ADR-179 a ADR-181.
 - **Relacionado con**: ADR-073 (tipos elegibles), ADR-085 (correcciones de tipo) y `roadmap/Agrupacion_Difusa_Medicion.md`.
 
 ## Contexto

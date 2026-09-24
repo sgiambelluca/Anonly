@@ -13,8 +13,8 @@ pequeños en trabajo efectivo de Grouping. El problema medido es el peor caso de
 muchos alias nuevos de texto libre; no se le atribuye la duración del pipeline
 de los documentos reales.
 
-La distancia acotada de ADR-176 redujo el caso de 2.000 distintos de **14,53
-a 3,26 s**. El recorte exacto de afijos de ADR-177 lo redujo de nuevo a
+La distancia acotada de ADR-182 redujo el caso de 2.000 distintos de **14,53
+a 3,26 s**. El recorte exacto de afijos de ADR-183 lo redujo de nuevo a
 **1,50 s**. Ambas fases conservaron fingerprints y orden en los 30 controles
 de cada banco y en R1/R2 reales. El control repetido quedó prácticamente
 igual. **Todavía hay 1,50 s de bloqueo** al entregar 2.000 entidades
@@ -39,13 +39,13 @@ verificar `n` grupos/alias/miembros, y el control mantuvo 24 grupos/alias con
 Resultados numéricos finales ignorados por Git:
 `.measure/grouping-worst-case/20260924T-corrected/`.
 
-La repetición posterior a ADR-176 completó también 30 archivos numéricos en
+La repetición posterior a ADR-182 completó también 30 archivos numéricos en
 `.measure/grouping-worst-case/20260924T060210Z/`. Todos los tamaños y rondas
 conservaron conteos, huella de grupos y huella de orden frente al control
 válido. No se observó suspensión; se ejecutó en serie. Las medianas
 post-cambio se indican más abajo; son de la misma Mac, no una cota portable.
 
-La segunda repetición, después de ADR-177, quedó en
+La segunda repetición, después de ADR-183, quedó en
 `.measure/grouping-worst-case/20260924T-affix-post-2/` (24 controles sintéticos)
 y `.measure/grouping-worst-case/20260924T-affix-real-post/` (seis corridas
 reales). Las 30 huellas, formas y órdenes igualaron sus baselines. Dos
@@ -76,7 +76,7 @@ reales con sonda de `processOccurrence`.
 | 1.000 | 824,68 / 787,63 ms | 26,85 / 2,88 ms | 4,38× |
 | 2.000 | 3.257,50 / 3.141,29 ms | 74,81 / 3,83 ms | 4,46× |
 
-| Ocurrencias | Distintas ADR-177: proceso / lookup inclusivo | Repetidas ADR-177: proceso / lookup inclusivo | Factor frente a ADR-176 |
+| Ocurrencias | Distintas ADR-183: proceso / lookup inclusivo | Repetidas ADR-183: proceso / lookup inclusivo | Factor frente a ADR-182 |
 |---:|---:|---:|---:|
 | 250 | 34,74 / 27,54 ms | 8,73 / 1,78 ms | 1,76× |
 | 500 | 109,87 / 95,30 ms | 13,17 / 2,18 ms | 1,97× |
@@ -110,7 +110,7 @@ rondas de cada documento. Los máximos huecos del event loop post fueron
 11,82/25,75/13,12 ms en R1 y 12,85/11,84/13,10 ms en R2: la variación de
 R1 impide atribuir una mejora del event loop real a este cambio.
 
-Tras ADR-177, `processOccurrence` fue 12,26/13,42/14,25 ms en R1 y
+Tras ADR-183, `processOccurrence` fue 12,26/13,42/14,25 ms en R1 y
 6,88/6,70/6,93 ms en R2; el lookup elegible fue 3,86/4,40/4,41 ms y
 1,57/1,58/1,61 ms, respectivamente. Los máximos huecos del event loop fueron
 11,76/11,94/11,94 ms y 12,30/12,98/11,91 ms. R1 conservó 308 ocurrencias,
@@ -131,8 +131,8 @@ que recibe Grouping.
 
 ## Decisión de planificación
 
-ADR-176 especificó la distancia Levenshtein con banda y corte temprano;
-ADR-177, el recorte exacto de afijos antes de esa banda. Ambos conservan la
+ADR-182 especificó la distancia Levenshtein con banda y corte temprano;
+ADR-183, el recorte exacto de afijos antes de esa banda. Ambos conservan la
 comparación normalizada final y la **primera coincidencia elegible**. Las
 30 huellas y la mejora total de 9,70× a 2.000 distintos respaldan estas dos
 fases. El algoritmo aún revisa todos los grupos candidatos: la curva de
@@ -168,7 +168,7 @@ distintos fueron **51/211/861/3471 ms** con el predicado actual y
 **20/81/324/1313 ms** con el recorte: 60,5–62,3 % menos tiempo según tamaño.
 El control repetido cambió menos de 1 ms en valor absoluto. Esta sonda no
 ejecutó el `GroupingEngine` ni R1/R2; sus datos quedan en
-`.measure/grouping-common-affix-feasibility/`. ADR-177 y el spec v1.12.0
+`.measure/grouping-common-affix-feasibility/`. ADR-183 y el spec v1.12.0
 definieron la segunda implementación interna. El banco completo confirmó una
 reducción adicional de 54 % a 2.000 valores, hasta 1,50 s, sin cambiar R1/R2.
 El costo sigue cuadrático y todavía supera un segundo.
