@@ -1925,4 +1925,72 @@ describe("GroupingEngine — un choque pendiente bloquea el export (ADR-176)", (
     expect(afterLift).toHaveLength(1);
     expect(afterLift[0]?.type).toBe(EntityType.DNI);
   });
+
+  // Caso 64 (§13, ADR-177 §2 -- reemplaza ADR-176 §4). B4-0 de la revisión 4:
+  // liftRemoval solo olvidaba SUPPRESSED_GROUP_ID; los registros del grupo
+  // ELIMINADO conservaban su groupId original y el dedup los seguía
+  // encontrando, así que re-agregar en la MISMA posición no creaba nada.
+  it("re-adding a removed value at the same position creates a new group", async () => {
+    const samePageIndex = 0;
+    const sameBbox = makeBBox(100, 200, 120, 12);
+    const detected = makeOccurrence({
+      entityType: EntityType.Person,
+      source: DetectionSource.NER,
+      confidence: 0.99,
+      value: "Juan Perez",
+      normalizedValue: "juan perez",
+      pageIndex: samePageIndex,
+      bbox: sameBbox,
+    });
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: detected,
+    });
+    const removedGroup = engine.getSnapshot("doc-1").groups[0];
+    if (!removedGroup) throw new Error("expected a group");
+    await engine.applyGroupRemove({ documentId: "doc-1", groupId: removedGroup.id });
+    expect(engine.getSnapshot("doc-1").groups).toHaveLength(0);
+
+    engine.liftRemoval("doc-1", "juan perez");
+
+    // Re-emitir Manual en la MISMA posición que el member eliminado: nuevo
+    // grupo, no lo descarta el dedup contra el registro del grupo eliminado.
+    const manual = makeOccurrence({
+      entityType: EntityType.Person,
+      source: DetectionSource.Manual,
+      confidence: 1.0,
+      value: "Juan Perez",
+      normalizedValue: "juan perez",
+      pageIndex: samePageIndex,
+      bbox: sameBbox,
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: manual,
+    });
+
+    const groups = engine.getSnapshot("doc-1").groups;
+    expect(groups).toHaveLength(1);
+    const newGroup = groups[0];
+    if (!newGroup) throw new Error("expected a new group");
+    expect(newGroup.id).not.toBe(removedGroup.id);
+    expect(engine.manualOutcome("doc-1", [manual.id]).groupIds).toEqual([newGroup.id]);
+
+    // Los registros VIVOS no se tocan: llamar liftRemoval OTRA vez con el
+    // mismo valor (p. ej. desde un segundo agregado manual) no borra el
+    // registro del grupo recién creado, que sigue vivo.
+    const liveRecordBefore = engine["sessions"]
+      .get("doc-1")
+      ?.recordedOccurrences.find((rec) => rec.occurrenceId === manual.id);
+    expect(liveRecordBefore).toBeDefined();
+    expect(liveRecordBefore?.groupId).toBe(newGroup.id);
+
+    engine.liftRemoval("doc-1", "juan perez");
+
+    const liveRecordAfter = engine["sessions"]
+      .get("doc-1")
+      ?.recordedOccurrences.find((rec) => rec.occurrenceId === manual.id);
+    expect(liveRecordAfter).toEqual(liveRecordBefore);
+    expect(engine.getSnapshot("doc-1").groups).toEqual([newGroup]);
+  });
 });

@@ -236,7 +236,10 @@ const MIN_SUGGESTION_CONFIDENCE = 0.5;
  * siempre `undefined`, exactamente como un `groupId` de un grupo eliminado
  * (mismo patrón ya aceptado por `applyGroupRemove`, que deja `groupId`
  * huérfanos en `recordedOccurrences` a propósito — caso 48 punto 5). Un
- * `crypto.randomUUID()` real nunca produce `""`.
+ * `crypto.randomUUID()` real nunca produce `""`. Por eso `session.groups.has(rec.groupId)`
+ * (el criterio de "registro vivo", ADR-177 §1) ya cubre los dos sentinels
+ * sin distinguirlos: ni un `groupId` de grupo eliminado ni `""` están en
+ * `session.groups`.
  */
 const SUPPRESSED_GROUP_ID = "";
 
@@ -2032,10 +2035,13 @@ export class GroupingEngine implements IEngine {
    * hasta la próxima renumeración de `finishSession` (caso 15); cada alias
    * normalizado entra a `Session.removedValues`; y — a diferencia de
    * `dropOccurrences` — los registros de ocurrencias del grupo se
-   * **conservan** en `session.recordedOccurrences` (nunca se tocan), así el
-   * dedup por identidad (ADR-038 §3) los sigue reconociendo. Grupo
-   * inexistente (nunca existió, o pedirlo dos veces) → `warn` + no-op:
-   * idempotente por construcción.
+   * **conservan** en `session.recordedOccurrences` (nunca se tocan acá), así
+   * el dedup por identidad (ADR-038 §3) los sigue reconociendo. Sin grupo
+   * vivo (`session.groups.has(rec.groupId)` da `false` tras el `delete` de
+   * arriba), esos registros dejan de ocupar lugar para contención y
+   * superposición (ADR-177 §1) — ver `findContainingRecord`/
+   * `findOverlapConflict`. Grupo inexistente (nunca existió, o pedirlo dos
+   * veces) → `warn` + no-op: idempotente por construcción.
    *
    * ADR-175 §1 (caso 59): un conflicto `heldManual` de este grupo NO se
    * resuelve como los demás — el invariante de `Conflict.heldManual`
@@ -2111,14 +2117,15 @@ export class GroupingEngine implements IEngine {
    * valor eliminado se siguen descartando por el paso 0 de Matching. Sesión
    * inexistente → `warn` + no-op.
    *
-   * ADR-175 §2 (caso 62), generalizado por ADR-176 §4: también olvida
-   * TODA identidad suprimida (`SUPPRESSED_GROUP_ID`) con este valor
-   * normalizado, sin importar qué la suprimió — una eliminación (ADR-171 §2,
-   * paso 5) o un `winner: "detected"` sobre un conflicto `heldManual`
-   * (`resolveHeldManualConflict`, ADR-175 §2). Sin esto, `findDuplicateAnnotation`
-   * la sigue viendo y un agregado manual nuevo del mismo valor se descarta
-   * en silencio en vez de agruparse o de reabrir la decisión que el usuario
-   * acaba de pedir revisar.
+   * ADR-175 §2 (caso 62), reemplazado por ADR-177 §2: también olvida TODO
+   * registro NO VIVO (`!session.groups.has(rec.groupId)`) con este valor
+   * normalizado, sea del grupo eliminado o `SUPPRESSED_GROUP_ID`, sin
+   * importar qué lo dejó no vivo — una eliminación (ADR-171 §2, paso 5) o un
+   * `winner: "detected"` sobre un conflicto `heldManual`
+   * (`resolveHeldManualConflict`, ADR-175 §2). Los registros VIVOS no se
+   * tocan. Sin esto, `findDuplicateAnnotation` sigue viendo el registro no
+   * vivo y un agregado manual nuevo del mismo valor, en la misma posición,
+   * se descarta en silencio en vez de agruparse como entidad nueva (caso 64).
    */
   liftRemoval(documentId: string, value: string): void {
     this.assertNotDisposed();
@@ -2131,7 +2138,7 @@ export class GroupingEngine implements IEngine {
     const normalizedValue = normalizeEntityValue(value);
     session.removedValues.delete(normalizedValue);
     const kept = session.recordedOccurrences.filter(
-      (rec) => !(rec.groupId === SUPPRESSED_GROUP_ID && rec.normalizedValue === normalizedValue),
+      (rec) => !(!session.groups.has(rec.groupId) && rec.normalizedValue === normalizedValue),
     );
     session.recordedOccurrences.splice(0, session.recordedOccurrences.length, ...kept);
   }
@@ -2787,9 +2794,12 @@ export class GroupingEngine implements IEngine {
 
     /*
      * ADR-117: una ocurrencia contenida ENTERA dentro de otra del mismo tipo
-     * ya registrada no aporta tinta nueva. Va antes que todo lo demás —
-     * incluida la rama de baja confianza— porque no es una decisión sobre
-     * cuál entidad es la buena: es que no hay entidad nueva que decidir.
+     * ya registrada y VIVA (ADR-177 §1: `session.groups.has(rec.groupId)`)
+     * no aporta tinta nueva. Va antes que todo lo demás — incluida la rama
+     * de baja confianza— porque no es una decisión sobre cuál entidad es la
+     * buena: es que no hay entidad nueva que decidir. Un contenedor
+     * eliminado o suprimido no tapa nada (caso 65): esa tinta ya no está
+     * oculta, así que la ocurrencia nueva tiene que agruparse.
      *
      * El caso que lo motiva: "Agregar como…" tokeniza la consulta en
      * sub-tokens y barre el documento entero, así que agregar un apellido
@@ -3037,6 +3047,9 @@ export class GroupingEngine implements IEngine {
     occurrence: Occurrence,
   ): SessionOccurrenceRecord | undefined {
     return session.recordedOccurrences.find((rec) => {
+      // ADR-177 §1: un contenedor no vivo (grupo eliminado o SUPPRESSED_GROUP_ID)
+      // no tapa nada -- caso 65.
+      if (!session.groups.has(rec.groupId)) return false;
       if (rec.pageIndex !== occurrence.pageIndex) return false;
       if (rec.entityType !== occurrence.entityType) return false;
       if (bboxEquals(rec.bbox, occurrence.bbox)) return false;
@@ -3049,6 +3062,8 @@ export class GroupingEngine implements IEngine {
     occurrence: Occurrence,
   ): { existing: SessionOccurrenceRecord; reason: ConflictReason } | null {
     for (const rec of session.recordedOccurrences) {
+      // ADR-177 §1: un registro no vivo no puede chocar -- caso 66.
+      if (!session.groups.has(rec.groupId)) continue;
       if (rec.pageIndex !== occurrence.pageIndex) continue;
       if (rec.entityType === occurrence.entityType) continue;
       const ratio = maxFragmentIntersectionRatio(

@@ -852,6 +852,203 @@ describe("GroupingEngine — edge cases", () => {
 
       expect(engine.getSnapshot("doc-1").groups).toHaveLength(2);
     });
+
+    // Caso 65 (§13, ADR-177 §1): un contenedor no vivo (grupo eliminado) no
+    // tapa nada -- la contención de ADR-117 exige un contenedor VIVO.
+    it("an occurrence inside a removed entity is grouped, not discarded as contained", async () => {
+      emitir(
+        makeOccurrence({
+          entityType: EntityType.Person,
+          source: DetectionSource.NER,
+          confidence: 0.99,
+          value: "Juan Perez",
+          normalizedValue: "juan perez",
+          bbox: nombreCompleto,
+        }),
+      );
+      const containerGroup = engine.getSnapshot("doc-1").groups[0];
+      if (!containerGroup) throw new Error("expected a group");
+      await engine.applyGroupRemove({ documentId: "doc-1", groupId: containerGroup.id });
+      expect(engine.getSnapshot("doc-1").groups).toHaveLength(0);
+
+      // Fuente Manual: manualOutcome tiene que reportar el grupo nuevo.
+      const manual = makeOccurrence({
+        entityType: EntityType.Person,
+        source: DetectionSource.Manual,
+        confidence: 1.0,
+        value: "Perez",
+        normalizedValue: "perez",
+        bbox: apellidoAdentro,
+      });
+      ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: manual,
+      });
+      const afterManual = engine.getSnapshot("doc-1").groups;
+      expect(afterManual).toHaveLength(1);
+      expect(afterManual[0]?.canonicalValue).toBe("Perez");
+      expect(engine.manualOutcome("doc-1", [manual.id]).groupIds).toEqual([afterManual[0]?.id]);
+
+      // Fuente detección (NER): también se agrupa, no se descarta.
+      emitir(
+        makeOccurrence({
+          entityType: EntityType.Person,
+          source: DetectionSource.NER,
+          confidence: 0.95,
+          value: "Perez",
+          normalizedValue: "perez",
+          bbox: { x: 300, y: 400, width: 45, height: 12 },
+        }),
+      );
+      expect(engine.getSnapshot("doc-1").groups).toHaveLength(1);
+      expect(engine.getSnapshot("doc-1").groups[0]?.members).toHaveLength(2);
+    });
+  });
+
+  // Caso 66 (§13, ADR-177 §1): un registro no vivo no puede chocar --
+  // eliminado o suprimido, la superposición deja de plantear conflicto.
+  describe("una entidad eliminada o suprimida no choca (ADR-177 §1)", () => {
+    it("an occurrence overlapping a removed or suppressed record raises no conflict", async () => {
+      // Rama 1: Email detectado y eliminado; Persona Manual superpuesta.
+      const email = makeOccurrence({
+        entityType: EntityType.Email,
+        source: DetectionSource.Regex,
+        confidence: 1.0,
+        value: "juan@x.com",
+        normalizedValue: "juan@x.com",
+        bbox: makeBBox(100, 200, 100, 12),
+      });
+      ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: email,
+      });
+      const emailGroup = engine.getSnapshot("doc-1").groups[0];
+      if (!emailGroup) throw new Error("expected a group");
+      await engine.applyGroupRemove({ documentId: "doc-1", groupId: emailGroup.id });
+      expect(engine.getSnapshot("doc-1").groups).toHaveLength(0);
+
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      const overlappingManual = makeOccurrence({
+        entityType: EntityType.Person,
+        source: DetectionSource.Manual,
+        confidence: 1.0,
+        value: "email juan@x.com.",
+        normalizedValue: "email juan@x.com.",
+        bbox: makeBBox(100, 200, 100, 12), // mismo rectángulo: ratio 1 > 0.5
+      });
+      ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: overlappingManual,
+      });
+
+      const afterOverlap = engine.getSnapshot("doc-1").groups;
+      expect(afterOverlap).toHaveLength(1);
+      expect(afterOverlap[0]?.type).toBe(EntityType.Person);
+      const conflictCalls = busEmitSpy.mock.calls.filter(
+        ([channel, event]) =>
+          channel === EventChannel.Grouping && event === EngineEvents.CONFLICT_DETECTED,
+      );
+      expect(conflictCalls).toHaveLength(0);
+      expect(engine.getSnapshot("doc-1").conflicts.some((c) => !c.resolved)).toBe(false);
+
+      // Rama 2: mismo caso contra un registro SUPRIMIDO (SUPPRESSED_GROUP_ID),
+      // en vez de un grupo eliminado -- un DNI cuyo valor está en removedValues
+      // (por la eliminación de un primer DNI del mismo valor) se registra bajo
+      // SUPPRESSED_GROUP_ID al llegar por el paso 0 de Matching (ADR-171 §3).
+      const firstDni = makeOccurrence({
+        entityType: EntityType.DNI,
+        source: DetectionSource.Regex,
+        confidence: 1.0,
+        value: "22222222",
+        normalizedValue: "22222222",
+        bbox: makeBBox(500, 600, 60, 12),
+      });
+      ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: firstDni,
+      });
+      const dniGroup = engine.getSnapshot("doc-1").groups.find((g) => g.type === EntityType.DNI);
+      if (!dniGroup) throw new Error("expected a DNI group");
+      await engine.applyGroupRemove({ documentId: "doc-1", groupId: dniGroup.id });
+
+      // Segunda aparición del mismo valor, en OTRA posición: identidad
+      // distinta, cae por el paso 0 de Matching y se registra suprimida
+      // (SUPPRESSED_GROUP_ID) en ESTA posición.
+      const suppressedDni = makeOccurrence({
+        entityType: EntityType.DNI,
+        source: DetectionSource.Regex,
+        confidence: 1.0,
+        value: "22222222",
+        normalizedValue: "22222222",
+        bbox: makeBBox(200, 300, 60, 12),
+      });
+      ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: suppressedDni,
+      });
+      expect(engine.getSnapshot("doc-1").groups.some((g) => g.type === EntityType.DNI)).toBe(false);
+
+      const busEmitSpy2 = vi.spyOn(ctx.bus, "emit");
+      const overlappingOnSuppressed = makeOccurrence({
+        entityType: EntityType.Person,
+        source: DetectionSource.Manual,
+        confidence: 1.0,
+        value: "DNI 22222222 de Juan",
+        normalizedValue: "dni 22222222 de juan",
+        bbox: makeBBox(200, 300, 60, 12), // mismo rectángulo que el DNI suprimido
+      });
+      ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: overlappingOnSuppressed,
+      });
+      const conflictCalls2 = busEmitSpy2.mock.calls.filter(
+        ([channel, event]) =>
+          channel === EventChannel.Grouping && event === EngineEvents.CONFLICT_DETECTED,
+      );
+      expect(conflictCalls2).toHaveLength(0);
+      expect(
+        engine
+          .getSnapshot("doc-1")
+          .groups.some((g) => g.canonicalValue === overlappingOnSuppressed.value),
+      ).toBe(true);
+    });
+  });
+
+  // Caso 66 (§13, ADR-177 §1): el dedup por identidad NO cambia -- sigue
+  // mirando todos los registros, vivos o no.
+  it("identity dedup still sees removed records without liftRemoval", async () => {
+    const original = makeOccurrence({
+      entityType: EntityType.Person,
+      source: DetectionSource.NER,
+      confidence: 0.99,
+      value: "Juan Perez",
+      normalizedValue: "juan perez",
+      bbox: makeBBox(100, 200, 120, 12),
+    });
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: original,
+    });
+    const group = engine.getSnapshot("doc-1").groups[0];
+    if (!group) throw new Error("expected a group");
+    await engine.applyGroupRemove({ documentId: "doc-1", groupId: group.id });
+    expect(engine.getSnapshot("doc-1").groups).toHaveLength(0);
+
+    // Re-emitir la ocurrencia EXACTA eliminada, sin liftRemoval: el dedup
+    // por identidad la descarta -- ningún grupo nuevo.
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: { ...original, id: "retry-exact-identity" },
+    });
+    expect(engine.getSnapshot("doc-1").groups).toHaveLength(0);
+    const groupEvents = busEmitSpy.mock.calls.filter(
+      ([channel, event]) =>
+        channel === EventChannel.Grouping &&
+        (event === EngineEvents.ENTITY_GROUP_CREATED ||
+          event === EngineEvents.ENTITY_GROUP_UPDATED),
+    );
+    expect(groupEvents).toHaveLength(0);
   });
 
   // Caso 10 (§13)
@@ -4251,6 +4448,52 @@ describe("GroupingEngine — edge cases", () => {
     expect(engine.getSnapshot("doc-1").conflicts.find((c) => c.id === held6.id)?.groupId).toBe(
       created6.id,
     );
+
+    // Par 7 (página 7, ADR-177 §1, caso 66, B4-2 de la revisión 4): una
+    // eliminación seguida de un agregado manual SUPERPUESTO a lo eliminado
+    // no puede dejar un conflicto sin resolver apuntando a un grupo que ya
+    // no existe -- el registro no vivo del Email eliminado no choca.
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Email,
+        source: DetectionSource.Regex,
+        confidence: 1,
+        bbox: makeBBox(0, 0, 100, 20),
+        pageIndex: 7,
+        value: "juan@x.com",
+        normalizedValue: "juan@x.com",
+      }),
+    });
+    const group7 = engine
+      .getSnapshot("doc-1")
+      .groups.find((g) => g.canonicalValue === "juan@x.com");
+    if (!group7) throw new Error("expected the detected group of pair 7");
+    await engine.applyGroupRemove({ documentId: "doc-1", groupId: group7.id });
+    assertHeldManualInvariant();
+
+    const busEmitSpy7 = vi.spyOn(ctx.bus, "emit");
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        source: DetectionSource.Manual,
+        confidence: 1,
+        bbox: makeBBox(0, 0, 100, 20), // mismo rectángulo que el Email eliminado
+        pageIndex: 7,
+        value: "email juan@x.com.",
+        normalizedValue: "email juan@x.com.",
+      }),
+    });
+    assertHeldManualInvariant();
+    const conflictCalls7 = busEmitSpy7.mock.calls.filter(
+      ([channel, event]) =>
+        channel === EventChannel.Grouping && event === EngineEvents.CONFLICT_DETECTED,
+    );
+    expect(conflictCalls7).toHaveLength(0);
+    expect(
+      engine.getSnapshot("doc-1").groups.some((g) => g.canonicalValue === "email juan@x.com."),
+    ).toBe(true);
   });
 
   // Caso 61 (§13, ADR-176 §2): fusión y división reapuntan un conflicto
