@@ -1,0 +1,10 @@
+diff --git a/packages/anonymization-core/ner-engine/src/worker/kernel.ts b/packages/anonymization-core/ner-engine/src/worker/kernel.ts
+index 64ab2e7..d1d1ba0 100644
+--- a/packages/anonymization-core/ner-engine/src/worker/kernel.ts
++++ b/packages/anonymization-core/ner-engine/src/worker/kernel.ts
+@@ -279,3 +279,4 @@
+   if (env.backends.onnx.wasm) {
+     env.backends.onnx.wasm.wasmPaths = wasmPaths ?? NER_WASM_PATH;
++    env.backends.onnx.wasm.numThreads = 8;
+   }
+ }
