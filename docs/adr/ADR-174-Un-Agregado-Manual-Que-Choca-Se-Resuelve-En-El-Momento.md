@@ -1,8 +1,8 @@
-<!-- CONTEXT: scope=adr | dependencias=core/Contracts.md,architecture/03_Data_Model.md,architecture/04_Event_System.md,core/Grouping_Engine.md,core/Orchestrator.md,ui/UX_Guidelines.md,ui/Components.md,ui/React_Client.md,adr/ADR-061-Agregado-Manual-De-Entidades.md,adr/ADR-083-El-Panel-De-Conflicto-Elige-Tipo-No-Modo.md,adr/ADR-169-La-Pantalla-De-Trabajo-Tras-Pruebas-De-Usuario.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md | audiencia=humanos+IA | fase=12.5 -->
+<!-- CONTEXT: scope=adr | dependencias=core/Contracts.md,architecture/03_Data_Model.md,architecture/04_Event_System.md,core/Grouping_Engine.md,core/Orchestrator.md,ui/UX_Guidelines.md,ui/Components.md,ui/React_Client.md,adr/ADR-061-Agregado-Manual-De-Entidades.md,adr/ADR-083-El-Panel-De-Conflicto-Elige-Tipo-No-Modo.md,adr/ADR-169-La-Pantalla-De-Trabajo-Tras-Pruebas-De-Usuario.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-175-Un-Choque-Manual-No-Queda-Colgado.md | audiencia=humanos+IA | fase=12.5 -->
 
 # ADR-174 — Un agregado manual que choca con una detección se resuelve en el momento
 
-- **Estado**: Accepted
+- **Estado**: Accepted — **modificado por ADR-175** (§1: una retenida nunca queda colgada; §2: el criterio de `heldConflictIds`; §4: varios choques y el aviso que vuelve)
 - **Fecha**: 2026-09-24
 - **Decidido por**: El humano, ante el hallazgo B-3 del revisor del Hito 12.5: *"El mensaje de aviso tiene
   que estar sí o sí, no puede haber un error el cual el usuario se lo pase por encima [...] ¿No podríamos
