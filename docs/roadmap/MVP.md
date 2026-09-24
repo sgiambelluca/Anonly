@@ -664,7 +664,7 @@ entidad con supresión por sesión), ADR-172 (deshacer y rehacer exactos por pun
 | 15 | ADR-175 (15w): invariante de `heldManual`, retenida que se oculta sola, `liftRemoval` reabre la decisión | `grouping-engine` | — | **hecho** (`cae65b2`) |
 | 16 | Tipo de ADR-175: `ManualEntityResult.groupIds` | `anonymization-core/src/types.ts` | — | **hecho** (`f0a0db1`) |
 | 17 | ADR-175 §3 (Orchestrator 32) | `anonymization-core/src` | 15, 16 | **hecho** (`93ed554`) |
-| 18 | ADR-175 §1, §3-§5 en la UI, y los no bloqueantes 3, 5 y 7 de la revisión 2 | `apps/react-client` | 17 | pendiente |
+| 18 | ADR-175 §1, §3-§5 en la UI, y los no bloqueantes 3, 5 y 7 de la revisión 2 | `apps/react-client` | 17 | **hecho** (`e7380d1`, `e2c6577`) |
 
 **Revisión 1 (2026-09-24): REJECTED** con tres bloqueantes — B-1 (typecheck rojo en `tests/`), B-2 (ADR-170 enumeraba rechazos que el motor no hacía → ADR-173), B-3 (el toast de alta podía mentir → ADR-174) — y no bloqueantes N-1 a N-8. Las filas 10-14 los cierran. N-8 (`scenario-2`/`scenario-5` de E2E) es anterior a esta branch: va en un commit aparte sobre `hardening/plan-2026-09`.
 
