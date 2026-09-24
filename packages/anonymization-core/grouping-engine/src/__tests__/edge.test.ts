@@ -4050,15 +4050,22 @@ describe("GroupingEngine — edge cases", () => {
     expect(engine.getSnapshot("doc-1").groups.some((g) => g.type === EntityType.IBAN)).toBe(true);
   });
 
-  // Caso 61 (§13, ADR-175 §1): el invariante de heldManual — ningún
-  // conflicto queda resolved: true con heldManual, y heldManualOccurrences
-  // tiene exactamente los ids de los conflictos heldManual sin resolver —
-  // se sostiene después de CADA operación de la secuencia.
+  // Caso 61 (§13, ADR-175 §1, ampliado por ADR-176 §2): el invariante de
+  // heldManual — ningún conflicto queda resolved: true con heldManual,
+  // heldManualOccurrences tiene exactamente los ids de los conflictos
+  // heldManual sin resolver, y todo conflicto SIN RESOLVER apunta a un grupo
+  // que existe — se sostiene después de CADA operación de la secuencia,
+  // fusión y división incluidas.
   it("no path leaves a resolved conflict with heldManual", async () => {
     function assertHeldManualInvariant(): void {
       const snapshot = engine.getSnapshot("doc-1");
       for (const conflict of snapshot.conflicts) {
         if (conflict.heldManual === true) expect(conflict.resolved).toBe(false);
+        // ADR-176 §2: todo conflicto SIN RESOLVER apunta a un grupo vivo —
+        // la fusión y la división lo reapuntan para que esto se sostenga.
+        if (!conflict.resolved) {
+          expect(snapshot.groups.some((g) => g.id === conflict.groupId)).toBe(true);
+        }
       }
       const unresolvedHeldIds = new Set(
         snapshot.conflicts.filter((c) => c.heldManual === true && !c.resolved).map((c) => c.id),
@@ -4149,5 +4156,301 @@ describe("GroupingEngine — edge cases", () => {
     assertHeldManualInvariant();
     engine.dropOccurrences("doc-1", { pageIndices: [3] });
     assertHeldManualInvariant();
+
+    // Par 5 (página 4): fusionar el grupo detectado (como source) en otro
+    // grupo del mismo tipo -- el conflicto sin resolver lo sigue a `target`
+    // (ADR-176 §2).
+    emitPair(EntityType.Address, EntityType.Person, 4, "Calle 1", "Juan Perez");
+    assertHeldManualInvariant();
+    const held5 = engine.getSnapshot("doc-1").conflicts.find((c) => c.heldManual === true);
+    if (!held5) throw new Error("expected the held conflict of pair 5");
+    const sourceGroup5 = engine.getSnapshot("doc-1").groups.find((g) => g.id === held5.groupId);
+    if (!sourceGroup5) throw new Error("expected the detected group of pair 5");
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Address,
+        source: DetectionSource.Regex,
+        confidence: 1,
+        bbox: makeBBox(0, 0, 100, 20),
+        pageIndex: 40,
+        value: "Calle 2",
+        normalizedValue: "calle 2",
+      }),
+    });
+    const targetGroup5 = engine
+      .getSnapshot("doc-1")
+      .groups.find((g) => g.type === EntityType.Address && g.id !== sourceGroup5.id);
+    if (!targetGroup5) throw new Error("expected a second Address group to merge into");
+    await engine.applyGroupMerge({
+      documentId: "doc-1",
+      sourceGroupId: sourceGroup5.id,
+      targetGroupId: targetGroup5.id,
+    });
+    assertHeldManualInvariant();
+    expect(engine.getSnapshot("doc-1").conflicts.find((c) => c.id === held5.id)?.groupId).toBe(
+      targetGroup5.id,
+    );
+
+    // Par 6 (página 5): el grupo detectado tiene DOS members (páginas 5 y 6);
+    // la retenida se superpone solo con el de la página 6. Dividir moviendo
+    // ESE member a un grupo nuevo tiene que llevarse el conflicto con él
+    // (ADR-176 §2, criterio de ADR-107).
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Organization,
+        source: DetectionSource.Regex,
+        confidence: 1,
+        bbox: makeBBox(0, 0, 100, 20),
+        pageIndex: 5,
+        value: "Acme SA",
+        normalizedValue: "acme sa",
+      }),
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Organization,
+        source: DetectionSource.Regex,
+        confidence: 1,
+        bbox: makeBBox(0, 0, 100, 20),
+        pageIndex: 6,
+        value: "Acme SA",
+        normalizedValue: "acme sa",
+      }),
+    });
+    const group6 = engine.getSnapshot("doc-1").groups.find((g) => g.canonicalValue === "Acme SA");
+    if (!group6) throw new Error("expected the two-member Organization group of pair 6");
+    expect(group6.members).toHaveLength(2);
+    const memberOnPage6 = group6.members.find((m) => m.pageIndex === 6);
+    if (!memberOnPage6) throw new Error("expected a member on page 6");
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        source: DetectionSource.Manual,
+        confidence: 1,
+        bbox: makeBBox(0, 0, 100, 20),
+        pageIndex: 6,
+        value: "Acme SA",
+        normalizedValue: "acme sa",
+      }),
+    });
+    assertHeldManualInvariant();
+    const held6 = engine
+      .getSnapshot("doc-1")
+      .conflicts.find((c) => c.heldManual === true && c.groupId === group6.id);
+    if (!held6) throw new Error("expected the held conflict of pair 6");
+    const { created: created6 } = await engine.applyGroupSplit({
+      documentId: "doc-1",
+      groupId: group6.id,
+      occurrenceIds: [memberOnPage6.occurrenceId],
+    });
+    assertHeldManualInvariant();
+    expect(engine.getSnapshot("doc-1").conflicts.find((c) => c.id === held6.id)?.groupId).toBe(
+      created6.id,
+    );
+  });
+
+  // Caso 61 (§13, ADR-176 §2): fusión y división reapuntan un conflicto
+  // heldManual sin resolver, cada una con su propio criterio (fusión: TODO
+  // conflicto pendiente del source; división: el que se superpone al member
+  // que se mueve, ADR-107).
+  it("merge and split keep a pending conflict pointing to an existing group", async () => {
+    // Fusión: el grupo detectado (source) se fusiona en otro del mismo tipo.
+    const detected = makeOccurrence({
+      entityType: EntityType.Email,
+      source: DetectionSource.Regex,
+      confidence: 1,
+      bbox: makeBBox(0, 0, 100, 20),
+      pageIndex: 0,
+      value: "juan@x.com",
+      normalizedValue: "juan@x.com",
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: detected,
+    });
+    const manual = makeOccurrence({
+      entityType: EntityType.Person,
+      source: DetectionSource.Manual,
+      confidence: 1,
+      bbox: makeBBox(0, 0, 100, 20),
+      pageIndex: 0,
+      value: "email juan@x.com.",
+      normalizedValue: "email juan@x.com.",
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: manual,
+    });
+    const held = engine.getSnapshot("doc-1").conflicts.find((c) => c.heldManual === true);
+    if (!held) throw new Error("expected a held conflict");
+    const source = engine.getSnapshot("doc-1").groups.find((g) => g.id === held.groupId);
+    if (!source) throw new Error("expected the detected (source) group");
+
+    const other = makeOccurrence({
+      entityType: EntityType.Email,
+      source: DetectionSource.Regex,
+      confidence: 1,
+      bbox: makeBBox(10, 300, 100, 12),
+      pageIndex: 1,
+      value: "otro@x.com",
+      normalizedValue: "otro@x.com",
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: other,
+    });
+    const target = engine
+      .getSnapshot("doc-1")
+      .groups.find((g) => g.type === EntityType.Email && g.id !== source.id);
+    if (!target) throw new Error("expected a second Email group");
+
+    await engine.applyGroupMerge({
+      documentId: "doc-1",
+      sourceGroupId: source.id,
+      targetGroupId: target.id,
+    });
+    const afterMerge = engine.getSnapshot("doc-1");
+    const conflictAfterMerge = afterMerge.conflicts.find((c) => c.id === held.id);
+    expect(conflictAfterMerge?.resolved).toBe(false);
+    expect(conflictAfterMerge?.heldManual).toBe(true);
+    expect(conflictAfterMerge?.groupId).toBe(target.id);
+    expect(afterMerge.groups.some((g) => g.id === conflictAfterMerge?.groupId)).toBe(true);
+
+    // División: un grupo con dos members en páginas distintas; la retenida
+    // se superpone solo con el de la segunda. Dividir moviendo ese member
+    // a un grupo nuevo se lleva el conflicto con él.
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.CreditCard,
+        source: DetectionSource.Regex,
+        confidence: 1,
+        bbox: makeBBox(0, 0, 100, 20),
+        pageIndex: 2,
+        value: "4111111111111111",
+        normalizedValue: "4111111111111111",
+      }),
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.CreditCard,
+        source: DetectionSource.Regex,
+        confidence: 1,
+        bbox: makeBBox(0, 0, 100, 20),
+        pageIndex: 3,
+        value: "4111111111111111",
+        normalizedValue: "4111111111111111",
+      }),
+    });
+    const ccGroup = engine
+      .getSnapshot("doc-1")
+      .groups.find((g) => g.type === EntityType.CreditCard);
+    if (!ccGroup) throw new Error("expected the two-member CreditCard group");
+    expect(ccGroup.members).toHaveLength(2);
+    const memberOnPage3 = ccGroup.members.find((m) => m.pageIndex === 3);
+    if (!memberOnPage3) throw new Error("expected a member on page 3");
+
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.IBAN,
+        source: DetectionSource.Manual,
+        confidence: 1,
+        bbox: makeBBox(0, 0, 100, 20),
+        pageIndex: 3,
+        value: "ES9999",
+        normalizedValue: "es9999",
+      }),
+    });
+    const heldSplit = engine
+      .getSnapshot("doc-1")
+      .conflicts.find((c) => c.heldManual === true && c.groupId === ccGroup.id);
+    if (!heldSplit) throw new Error("expected the held conflict on the CreditCard group");
+
+    const { created } = await engine.applyGroupSplit({
+      documentId: "doc-1",
+      groupId: ccGroup.id,
+      occurrenceIds: [memberOnPage3.occurrenceId],
+    });
+    const afterSplit = engine.getSnapshot("doc-1");
+    const conflictAfterSplit = afterSplit.conflicts.find((c) => c.id === heldSplit.id);
+    expect(conflictAfterSplit?.resolved).toBe(false);
+    expect(conflictAfterSplit?.groupId).toBe(created.id);
+    expect(afterSplit.groups.some((g) => g.id === conflictAfterSplit?.groupId)).toBe(true);
+  });
+
+  // Caso 61 (§13, ADR-176 §2): eliminar el grupo DESTINO de una fusión que
+  // se llevó un conflicto heldManual pendiente -- la retenida se oculta
+  // sola (caso 59), por el mismo camino que si nunca se hubiera fusionado.
+  it("removing the merge target of a held conflict groups the held occurrence", async () => {
+    const detected = makeOccurrence({
+      entityType: EntityType.Email,
+      source: DetectionSource.Regex,
+      confidence: 1,
+      bbox: makeBBox(0, 0, 100, 20),
+      pageIndex: 0,
+      value: "juan@x.com",
+      normalizedValue: "juan@x.com",
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: detected,
+    });
+    const manual = makeOccurrence({
+      entityType: EntityType.Person,
+      source: DetectionSource.Manual,
+      confidence: 1,
+      bbox: makeBBox(0, 0, 100, 20),
+      pageIndex: 0,
+      value: "email juan@x.com.",
+      normalizedValue: "email juan@x.com.",
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: manual,
+    });
+    const held = engine.getSnapshot("doc-1").conflicts.find((c) => c.heldManual === true);
+    if (!held) throw new Error("expected a held conflict");
+    const source = engine.getSnapshot("doc-1").groups.find((g) => g.id === held.groupId);
+    if (!source) throw new Error("expected the detected (source) group");
+
+    const other = makeOccurrence({
+      entityType: EntityType.Email,
+      source: DetectionSource.Regex,
+      confidence: 1,
+      bbox: makeBBox(10, 300, 100, 12),
+      pageIndex: 1,
+      value: "otro@x.com",
+      normalizedValue: "otro@x.com",
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: other,
+    });
+    const target = engine
+      .getSnapshot("doc-1")
+      .groups.find((g) => g.type === EntityType.Email && g.id !== source.id);
+    if (!target) throw new Error("expected a second Email group");
+
+    await engine.applyGroupMerge({
+      documentId: "doc-1",
+      sourceGroupId: source.id,
+      targetGroupId: target.id,
+    });
+
+    await engine.applyGroupRemove({ documentId: "doc-1", groupId: target.id });
+
+    const snapshot = engine.getSnapshot("doc-1");
+    const resolved = snapshot.conflicts.find((c) => c.id === held.id);
+    expect(resolved?.resolved).toBe(true);
+    expect(resolved?.heldManual).toBeUndefined();
+    expect(resolved?.resolvedType).toBe(EntityType.Person);
+    expect(snapshot.groups.some((g) => g.type === EntityType.Person)).toBe(true);
+    expect(snapshot.groups.some((g) => g.type === EntityType.Email)).toBe(false);
   });
 });

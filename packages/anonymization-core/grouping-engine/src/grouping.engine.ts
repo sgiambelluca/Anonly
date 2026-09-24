@@ -376,6 +376,17 @@ interface TypeCorrection {
   readonly detectorType: EntityType;
 }
 
+/**
+ * ADR-176 §3: qué le pasó a una ocurrencia `source: Manual` — el registro
+ * que la absorbió (la suya propia si se agrupó; el que ya estaba si el
+ * dedup la descartó; el contenedor si quedó contenida, ADR-117) o el
+ * conflicto que la retiene (quedó retenida, o el dedup la descartó contra
+ * una retenida pendiente). Sin entrada = suprimida (ADR-171) — "nada".
+ */
+type ManualOutcomeAnnotation =
+  | { readonly kind: "record"; readonly occurrenceId: string }
+  | { readonly kind: "conflict"; readonly conflictId: string };
+
 interface Session {
   readonly documentId: string;
   readonly groups: Map<string, InternalGroup>;
@@ -427,6 +438,19 @@ interface Session {
    * muere en `closeSession`.
    */
   readonly heldManualOccurrences: Map<string, Occurrence>;
+  /**
+   * ADR-176 §3: qué registro absorbió cada ocurrencia `source: Manual`
+   * procesada desde el último `reopenSession`, indexada por su propio
+   * `occurrenceId`. Se resuelve al LEER (`manualOutcome`), nunca al
+   * escribir: una fusión o división posterior que reapunta `groupId` (de un
+   * `SessionOccurrenceRecord` o de un `Conflict`) ya es visible a través de
+   * la referencia guardada acá, sin que este mapa tenga que actualizarse.
+   * Se vacía en `reopenSession` y muere con la sesión en `closeSession`; no
+   * sale en el snapshot y no entra en los puntos de restauración
+   * (`cloneSession` siempre la arranca vacía) — dura lo que dura un
+   * agregado.
+   */
+  readonly manualOutcomes: Map<string, ManualOutcomeAnnotation>;
   readonly seed: string;
   readonly startedAt: number;
   regexFinished: boolean;
@@ -478,6 +502,13 @@ function cloneSession(session: Session): Session {
     // (`Occurrence`, nunca se muta en el lugar), así que una copia superficial
     // del Map alcanza — mismo criterio que `typeCorrections`.
     heldManualOccurrences: new Map(session.heldManualOccurrences),
+    // ADR-176 §3: nunca viaja en una copia — ni al simulacro de `previewEdit`
+    // ni a un punto de restauración. "Dura lo que dura un agregado", así que
+    // toda copia arranca vacía; `restoreCheckpoint` reemplaza la sesión
+    // entera por esta copia, y una anotación vieja sería, en el mejor caso,
+    // basura (el agregado que la escribió ya devolvió su resultado) y en el
+    // peor, un grupo/conflicto que el punto restaurado no tiene más.
+    manualOutcomes: new Map(),
     seed: session.seed,
     startedAt: session.startedAt,
     regexFinished: session.regexFinished,
@@ -1072,6 +1103,7 @@ export class GroupingEngine implements IEngine {
       typeCorrections: new Map(),
       removedValues: new Set(),
       heldManualOccurrences: new Map(),
+      manualOutcomes: new Map(),
       seed: crypto.randomUUID(),
       startedAt: Date.now(),
       regexFinished: false,
@@ -1148,6 +1180,10 @@ export class GroupingEngine implements IEngine {
     session.finished = false;
     session.regexFinished = !options.expectRegex;
     session.nerFinished = !options.expectNer;
+    // ADR-176 §3: la anotación de manualOutcome se vacía en cada
+    // reopenSession — "desde cada reopenSession" es literal, así que una
+    // pasada anterior no contamina la que sigue.
+    session.manualOutcomes.clear();
     // Errata (2026-09-23) del caso 53: reopenSession NO descarta los puntos
     // de restauración. El descarte por re-análisis lo hace el Orchestrator
     // en `reanalyze`, antes de llamar a este método (ADR-172 §1,
@@ -1746,6 +1782,19 @@ export class GroupingEngine implements IEngine {
         if (rec.groupId === sourceGroupId) rec.groupId = targetGroupId;
       }
 
+      // ADR-176 §2: todo conflicto SIN RESOLVER de `source` pasa a apuntar a
+      // `target` -- `source` desaparece abajo, y un conflicto que siguiera
+      // apuntando a él quedaría inalcanzable (caso 61, el invariante "todo
+      // conflicto sin resolver apunta a un grupo que existe"). A diferencia
+      // de la división, acá no hace falta el criterio geométrico: el grupo
+      // entero se va, así que TODO conflicto pendiente lo sigue, sea o no
+      // `heldManual`.
+      for (const [conflictId, c] of session.conflicts) {
+        if (c.resolved) continue;
+        if (c.groupId !== sourceGroupId) continue;
+        session.conflicts.set(conflictId, { ...c, groupId: targetGroupId });
+      }
+
       const beforeCanonical = target.canonicalValue;
       if (target.aliases.includes(target.canonicalValue)) {
         this.recomputeCanonicalValue(session, target);
@@ -1932,6 +1981,33 @@ export class GroupingEngine implements IEngine {
       if (idsToMove.has(rec.occurrenceId)) rec.groupId = created.id;
     }
 
+    // ADR-176 §2: un conflicto `heldManual` SIN RESOLVER del grupo dividido
+    // pasa al grupo -- original o nuevo -- que se queda con el member que se
+    // superpone a la ocurrencia retenida. Mismo criterio con el que nació el
+    // conflicto (`findOverlapConflict`: fragmentos, ADR-107, ratio > 0.5). A
+    // diferencia de la fusión, acá NO se reapuntan los conflictos genéricos:
+    // el grupo original sigue existiendo, así que uno sin `heldManual` (sin
+    // `occurrenceId`/`bbox` en sus candidatos, caso 25 errata) no tiene con
+    // qué decidir si se fue con el nuevo o se quedó, y por default se queda
+    // -- ya apunta a `groupId`, que no cambió.
+    for (const [conflictId, c] of session.conflicts) {
+      if (c.resolved || c.heldManual !== true || c.groupId !== groupId) continue;
+      const heldOccurrence = session.heldManualOccurrences.get(conflictId);
+      if (!heldOccurrence) continue;
+      const wentWithCreated = movedRecords.some(
+        (rec) =>
+          maxFragmentIntersectionRatio(
+            rec.bbox,
+            rec.fragments,
+            heldOccurrence.bbox,
+            heldOccurrence.fragments,
+          ) > 0.5,
+      );
+      if (wentWithCreated) {
+        session.conflicts.set(conflictId, { ...c, groupId: created.id });
+      }
+    }
+
     const changed: (keyof EntityGroup)[] = [
       "members",
       "aliases",
@@ -2035,13 +2111,14 @@ export class GroupingEngine implements IEngine {
    * valor eliminado se siguen descartando por el paso 0 de Matching. Sesión
    * inexistente → `warn` + no-op.
    *
-   * ADR-175 §2 (caso 62): también olvida la identidad de cualquier
-   * ocurrencia suprimida (`SUPPRESSED_GROUP_ID`) con este valor normalizado
-   * — en particular la que dejó un `winner: "detected"` sobre un conflicto
-   * `heldManual` (`resolveHeldManualConflict`). Sin esto, `isDuplicateIdentity`
+   * ADR-175 §2 (caso 62), generalizado por ADR-176 §4: también olvida
+   * TODA identidad suprimida (`SUPPRESSED_GROUP_ID`) con este valor
+   * normalizado, sin importar qué la suprimió — una eliminación (ADR-171 §2,
+   * paso 5) o un `winner: "detected"` sobre un conflicto `heldManual`
+   * (`resolveHeldManualConflict`, ADR-175 §2). Sin esto, `findDuplicateAnnotation`
    * la sigue viendo y un agregado manual nuevo del mismo valor se descarta
-   * en silencio en vez de reabrir la decisión que el usuario acaba de pedir
-   * revisar.
+   * en silencio en vez de agruparse o de reabrir la decisión que el usuario
+   * acaba de pedir revisar.
    */
   liftRemoval(documentId: string, value: string): void {
     this.assertNotDisposed();
@@ -2057,6 +2134,56 @@ export class GroupingEngine implements IEngine {
       (rec) => !(rec.groupId === SUPPRESSED_GROUP_ID && rec.normalizedValue === normalizedValue),
     );
     session.recordedOccurrences.splice(0, session.recordedOccurrences.length, ...kept);
+  }
+
+  /**
+   * ADR-176 §3: qué pasó con cada ocurrencia `source: Manual` de
+   * `occurrenceIds`, procesada desde el último `reopenSession`. Solo lo
+   * llama el façade (`addManualEntity`). Reemplaza el cálculo por
+   * `normalizedValue`/tipo de ADR-175 §3 y su errata: acá no se compara
+   * ningún valor, se lee la anotación que dejó `processOccurrence`.
+   *
+   * `groupIds`: los grupos ACTUALES (`session.groups`, así que una fusión o
+   * división posterior ya se refleja) de los registros anotados, sin
+   * repetir. Un registro cuyo grupo desapareció (fusión no debería dejar
+   * huérfanos; por las dudas, se filtra) no aporta nada.
+   * `heldConflictIds`: los conflictos anotados que siguen `heldManual` sin
+   * resolver -- uno ya resuelto no cuenta más.
+   * Ocurrencia sin anotación (id desconocido, o suprimida por ADR-171 §3) no
+   * aporta a ninguna lista.
+   * Sesión inexistente → listas vacías + `warn`.
+   */
+  manualOutcome(
+    documentId: string,
+    occurrenceIds: ReadonlyArray<string>,
+  ): { readonly groupIds: ReadonlyArray<string>; readonly heldConflictIds: ReadonlyArray<string> } {
+    this.assertNotDisposed();
+    this.assertInitialized();
+    const session = this.sessions.get(documentId);
+    if (!session) {
+      this.ctx?.logger.warn("manualOutcome() sin sesión activa.", { documentId });
+      return { groupIds: [], heldConflictIds: [] };
+    }
+    const groupIds = new Set<string>();
+    const heldConflictIds = new Set<string>();
+    for (const occurrenceId of occurrenceIds) {
+      const annotation = session.manualOutcomes.get(occurrenceId);
+      if (!annotation) continue;
+      if (annotation.kind === "conflict") {
+        const conflict = session.conflicts.get(annotation.conflictId);
+        if (conflict?.heldManual === true && !conflict.resolved) {
+          heldConflictIds.add(annotation.conflictId);
+        }
+        continue;
+      }
+      const record = session.recordedOccurrences.find(
+        (rec) => rec.occurrenceId === annotation.occurrenceId,
+      );
+      if (record && record.groupId !== SUPPRESSED_GROUP_ID && session.groups.has(record.groupId)) {
+        groupIds.add(record.groupId);
+      }
+    }
+    return { groupIds: [...groupIds], heldConflictIds: [...heldConflictIds] };
   }
 
   // No `async`: ver nota en applyGroupUpdate.
@@ -2614,7 +2741,9 @@ export class GroupingEngine implements IEngine {
     // identidad — no exclusivo de sesiones reabiertas. Se descarta en
     // silencio (sin eventos, sin tocar frecuencias/aliases) toda ocurrencia
     // cuya (entityType, pageIndex, bbox, normalizedValue) ya está registrada.
-    if (this.isDuplicateIdentity(session, occurrence)) {
+    const duplicateAnnotation = this.findDuplicateAnnotation(session, occurrence);
+    if (duplicateAnnotation) {
+      this.recordManualOutcome(session, occurrence, duplicateAnnotation);
       this.ctx.logger.debug(
         "ENTITY_FOUND con identidad duplicada; se descarta en silencio (ADR-038 §3).",
         {
@@ -2688,7 +2817,12 @@ export class GroupingEngine implements IEngine {
      * registrada deja el duplicado, igual que antes de este ADR — no empeora,
      * pero tampoco lo cierra.
      */
-    if (this.isContainedInRecorded(session, occurrence)) {
+    const container = this.findContainingRecord(session, occurrence);
+    if (container) {
+      this.recordManualOutcome(session, occurrence, {
+        kind: "record",
+        occurrenceId: container.occurrenceId,
+      });
       this.ctx.logger.debug(
         "ENTITY_FOUND contenida entera en otra ocurrencia del mismo tipo; se descarta (ADR-117).",
         {
@@ -2731,6 +2865,25 @@ export class GroupingEngine implements IEngine {
     }
 
     this.groupOccurrence(session, occurrence);
+    // ADR-176 §3: se agrupó -- su propio registro (recordOccurrence, adentro
+    // de groupOccurrence, ya lo dejó en recordedOccurrences bajo occurrence.id
+    // en los dos casos: match existente o grupo nuevo).
+    this.recordManualOutcome(session, occurrence, { kind: "record", occurrenceId: occurrence.id });
+  }
+
+  /**
+   * ADR-176 §3: anota en `Session.manualOutcomes` qué absorbió una
+   * ocurrencia `source: Manual` (no-op para cualquier otra fuente). Se
+   * consulta desde `manualOutcome`, nunca desde acá — este método solo
+   * escribe.
+   */
+  private recordManualOutcome(
+    session: Session,
+    occurrence: Occurrence,
+    annotation: ManualOutcomeAnnotation,
+  ): void {
+    if (occurrence.source !== DetectionSource.Manual) return;
+    session.manualOutcomes.set(occurrence.id, annotation);
   }
 
   /*
@@ -2830,8 +2983,17 @@ export class GroupingEngine implements IEngine {
    * (`recordedOccurrences`); las descartadas por low_confidence o por perder
    * un conflicto overlap/disagree nunca se registran (nota 6/7 del header),
    * así que un duplicado de esas vuelve a pasar por ese mismo camino.
+   *
+   * ADR-176 §3: devuelve la anotación de `manualOutcome` en vez de un
+   * booleano — el registro que ya estaba (dedup contra `recordedOccurrences`)
+   * o el conflicto de la retenida pendiente (dedup contra
+   * `heldManualOccurrences`, ADR-174 §1) — para que `processOccurrence` la
+   * escriba sin repetir la búsqueda. `null` = no hay duplicado.
    */
-  private isDuplicateIdentity(session: Session, occurrence: Occurrence): boolean {
+  private findDuplicateAnnotation(
+    session: Session,
+    occurrence: Occurrence,
+  ): ManualOutcomeAnnotation | null {
     const sameIdentity = (rec: {
       readonly entityType: EntityType;
       readonly pageIndex: number;
@@ -2842,14 +3004,15 @@ export class GroupingEngine implements IEngine {
       rec.pageIndex === occurrence.pageIndex &&
       rec.normalizedValue === occurrence.normalizedValue &&
       bboxEquals(rec.bbox, occurrence.bbox);
-    if (session.recordedOccurrences.some(sameIdentity)) return true;
+    const existingRecord = session.recordedOccurrences.find(sameIdentity);
+    if (existingRecord) return { kind: "record", occurrenceId: existingRecord.occurrenceId };
     // ADR-174 §1: una ocurrencia manual retenida (sin resolver todavía) no
     // vive en `recordedOccurrences` — se consulta acá para que re-emitirla
     // mientras el conflicto sigue abierto no cree un segundo conflicto.
-    for (const held of session.heldManualOccurrences.values()) {
-      if (sameIdentity(held)) return true;
+    for (const [conflictId, held] of session.heldManualOccurrences) {
+      if (sameIdentity(held)) return { kind: "conflict", conflictId };
     }
-    return false;
+    return null;
   }
 
   /**
@@ -2865,9 +3028,15 @@ export class GroupingEngine implements IEngine {
    * El tipo tiene que coincidir. Dos entidades de tipos distintos sobre la
    * misma tinta son un desacuerdo entre detectores, y eso ya lo resuelve
    * `findOverlapConflict` con su propia regla (casos 7-8 de §13).
+   *
+   * ADR-176 §3: devuelve el registro contenedor (no un booleano) — es lo que
+   * `manualOutcome` anota para una ocurrencia Manual contenida.
    */
-  private isContainedInRecorded(session: Session, occurrence: Occurrence): boolean {
-    return session.recordedOccurrences.some((rec) => {
+  private findContainingRecord(
+    session: Session,
+    occurrence: Occurrence,
+  ): SessionOccurrenceRecord | undefined {
+    return session.recordedOccurrences.find((rec) => {
       if (rec.pageIndex !== occurrence.pageIndex) return false;
       if (rec.entityType !== occurrence.entityType) return false;
       if (bboxEquals(rec.bbox, occurrence.bbox)) return false;
@@ -2970,6 +3139,8 @@ export class GroupingEngine implements IEngine {
     session.conflicts.set(conflict.id, conflict);
     session.heldManualOccurrences.set(conflict.id, occurrence);
     this.emitConflictDetected(session, conflict);
+    // ADR-176 §3: quedó retenida -- se anota el id del conflicto.
+    this.recordManualOutcome(session, occurrence, { kind: "conflict", conflictId: conflict.id });
   }
 
   private groupOccurrence(session: Session, occurrence: Occurrence): InternalGroup {
