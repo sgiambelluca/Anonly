@@ -671,6 +671,7 @@ entidad con supresión por sesión), ADR-172 (deshacer y rehacer exactos por pun
 | 22 | ADR-176 §1 en la UI: `ExportButton` bloqueado con motivo y "Resolver" | `apps/react-client` | 21 | **hecho** (`edc223b`, `f9fb9c9`) |
 | 23 | ADR-177 §1-§2 (15y): una entidad eliminada no ocupa lugar; `liftRemoval` olvida los registros no vivos del valor | `grouping-engine` | — | **hecho** (`8fa1794`) |
 | 24 | ADR-177 §4: el motivo de `ExportButton` flota anclado a la derecha | `apps/react-client` | — | **hecho** (`cbb466b`) |
+| 25 | ADR-178 (15z): lo manual contenido queda guardado y se oculta solo si su contenedor se elimina | `grouping-engine` | 23 | pendiente |
 
 **Revisión 1 (2026-09-24): REJECTED** con tres bloqueantes — B-1 (typecheck rojo en `tests/`), B-2 (ADR-170 enumeraba rechazos que el motor no hacía → ADR-173), B-3 (el toast de alta podía mentir → ADR-174) — y no bloqueantes N-1 a N-8. Las filas 10-14 los cierran. N-8 (`scenario-2`/`scenario-5` de E2E) es anterior a esta branch: va en un commit aparte sobre `hardening/plan-2026-09`.
 
@@ -679,6 +680,8 @@ entidad con supresión por sesión), ADR-172 (deshacer y rehacer exactos por pun
 **Revisión 3 (2026-09-24): REJECTED**: los dos bloqueantes de la revisión 2 cerrados; tres nuevos —nada bloqueaba el export con un conflicto sin resolver, fusionar/dividir la detección dejaba el choque inalcanzable, y un agregado contenido (ADR-117) rompía el invariante de `groupIds`—. ADR-176 los cierra (filas 19-22).
 
 **Revisión 4 (2026-09-24): REJECTED** — los bloqueantes de la revisión 3 cerrados; quedan dos por entidades eliminadas que siguen ocupando lugar (contención y superposición) y la ranura del motivo de `ExportButton`. Reporte completo: `roadmap/Hito12.5_Revision_R4_Handoff.md`. El humano decidió D1 = A (una entidad eliminada no ocupa lugar, y un agregado manual del valor la vuelve a traer) y D2 = A (motivo flotante a la derecha). ADR-177 los cierra (filas 23-24), junto con B4-0, que encontró el planificador: re-agregar en la misma posición lo eliminado lo descartaba el dedup.
+
+**Revisión 5 (2026-09-24): REJECTED**: B4-0 a B4-3 y N4-1 cerrados; queda B5-1 —con «Perez» agregado a mano antes de eliminar «Juan Perez», la aparición contenida quedaba a la vista y un re-análisis la volvía a ocultar— y N5-1 (15y sin marcar). El humano eligió que lo contenido se oculte solo (opción C): ADR-178 lo cierra (fila 25).
 
 **Reglas de este hito** (además de las de siempre): UX-10 —nada que aparezca desplaza el diseño— se
 revisa en cada PR de la app; los PR 6-9 se verifican en el browser con los dos temas.
