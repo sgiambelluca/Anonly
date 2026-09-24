@@ -2,7 +2,7 @@
 
 # ADR-171 — El usuario puede eliminar una entidad
 
-- **Estado**: Accepted
+- **Estado**: Accepted — **modificado por ADR-177** (§2 paso 5: los registros conservados sirven solo para el dedup y no ocupan lugar)
 - **Fecha**: 2026-09-23
 - **Decidido por**: El humano, sobre las pruebas de usuario ("en los tres puntitos, agregar una opción
   que sea «Eliminar entidad» y lo borre completamente de la lista") y, ante la pregunta de qué pasa si
@@ -63,6 +63,8 @@ export interface GroupRemoveRequested { readonly documentId: string; readonly gr
    dijo es "esto no es un dato", no "esto no es una persona" (para eso está "Cambiar tipo").
 5. Los registros de ocurrencias del grupo se **conservan** en la sesión, así el dedup por identidad
    (ADR-038 §3) sigue reconociéndolas.
+   **ADR-177 §1:** sirven **solo** para eso. Sin grupo vivo, no participan en la contención (ADR-117)
+   ni en la superposición, y un agregado manual del valor los olvida (ADR-177 §2).
 
 ### 3. La supresión sobrevive al re-análisis
 

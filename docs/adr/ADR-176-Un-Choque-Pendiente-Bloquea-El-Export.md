@@ -2,7 +2,7 @@
 
 # ADR-176 — Un choque pendiente bloquea el export
 
-- **Estado**: Accepted
+- **Estado**: Accepted — **modificado por ADR-177** (§4: `liftRemoval` olvida todo registro no vivo del valor; §1: el motivo del export es un globo flotante anclado a la derecha, no una ranura con alto reservado)
 - **Fecha**: 2026-09-24
 - **Decidido por**: El humano, ante la revisión 3 del Hito 12.5 (REJECTED). Sobre quién bloquea el export
   con un choque sin resolver, eligió **"UI y Core"**. Lo demás de este ADR son consecuencias técnicas de
