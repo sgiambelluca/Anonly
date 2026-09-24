@@ -12,7 +12,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { inferPersonGender } from "../gender.js";
 import { GroupingEngine } from "../grouping.engine.js";
 import { buildPlaceholderValue } from "../labels.js";
-import { levenshtein, levenshteinNormalized } from "../levenshtein.js";
+import {
+  levenshtein,
+  levenshteinNormalized,
+  levenshteinNormalizedAtLeast,
+} from "../levenshtein.js";
 
 import {
   createEngineContext,
@@ -36,6 +40,139 @@ describe("GroupingEngine — unit tests", () => {
     if (!engine["disposed"]) {
       await engine.dispose();
     }
+  });
+
+  it("bounded similarity predicate equals the full normalized comparator", () => {
+    let seed = 0x176;
+    const random = (max: number): number => {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      return seed % max;
+    };
+    const alphabet = ["a", "b", "c", "ñ", "🙂"];
+    const values = ["", "a", "aa", "abcdefghij", "xbcdefghij", "🙂ñ🙂"];
+    for (let index = 0; index < 300; index++) {
+      const length = random(24);
+      values.push(Array.from({ length }, () => alphabet[random(alphabet.length)] ?? "a").join(""));
+    }
+    const thresholds = [
+      Number.NaN,
+      Number.NEGATIVE_INFINITY,
+      -1,
+      0,
+      0.01,
+      0.5,
+      0.88,
+      0.9,
+      1,
+      2,
+      Number.POSITIVE_INFINITY,
+    ];
+    for (const left of values) {
+      for (let attempt = 0; attempt < 18; attempt++) {
+        const right = values[random(values.length)] ?? "";
+        const threshold = thresholds[random(thresholds.length)] ?? 0.88;
+        expect(levenshteinNormalizedAtLeast(left, right, threshold)).toBe(
+          levenshteinNormalized(left, right) >= threshold,
+        );
+      }
+    }
+    for (const left of ["abcdefghij", "abcdefghij", "abcdefghij"]) {
+      for (const threshold of [0.8, 0.9, 0.91, 0.88]) {
+        const distance = Math.floor((1 - threshold) * left.length);
+        const right = `${"x".repeat(distance)}${left.slice(distance)}`;
+        expect(levenshteinNormalizedAtLeast(left, right, threshold)).toBe(
+          levenshteinNormalized(left, right) >= threshold,
+        );
+      }
+    }
+  });
+
+  it("common affix trimming preserves normalized comparator", () => {
+    let seed = 0x177;
+    const random = (max: number): number => {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      return seed % max;
+    };
+    const alphabet = ["a", "b", "c", "ñ", "漢", "🙂", "𝄞"];
+    const thresholds = [
+      Number.NaN,
+      Number.NEGATIVE_INFINITY,
+      -1,
+      0,
+      Number.MIN_VALUE,
+      0.5,
+      0.88,
+      0.9,
+      1,
+      2,
+      Number.POSITIVE_INFINITY,
+    ];
+    const pairs: Array<readonly [string, string]> = [
+      ["", ""],
+      ["", "x"],
+      ["prefix-middle-suffix", "prefix-middlx-suffix"],
+      ["prefix-common-tail-left", "prefix-common-tail-right"],
+      ["aaaaabbbbbccccc", "aaaaaxbbbbbccccc"],
+      ["same", "same"],
+      ["🙂🙂🙂abc𝄞𝄞", "🙂🙂🙂axc𝄞𝄞"],
+      ["𝄞abc", "𝄞xbc"],
+      ["abca", "xabcax"],
+    ];
+    for (let index = 0; index < 1800; index += 1) {
+      let base = "";
+      const length = random(65);
+      while (base.length < length) base += alphabet[random(alphabet.length)] ?? "a";
+      base = base.slice(0, length);
+      const editAt = random(base.length + 1);
+      const replacement = alphabet[random(alphabet.length)] ?? "x";
+      const mutation = random(3);
+      let changed = base;
+      if (mutation === 0 && base.length > 0) {
+        changed = `${base.slice(0, editAt)}${base.slice(Math.min(base.length, editAt + 1))}`;
+      } else if (mutation === 1) {
+        changed = `${base.slice(0, editAt)}${replacement}${base.slice(editAt)}`;
+      } else if (base.length > 0) {
+        changed = `${base.slice(0, editAt)}${replacement}${base.slice(Math.min(base.length, editAt + 1))}`;
+      }
+      pairs.push([base, changed]);
+    }
+
+    for (const [left, right] of pairs) {
+      const similarity = levenshteinNormalized(left, right);
+      const boundaryDelta = Number.EPSILON * Math.max(1, Math.abs(similarity));
+      const candidates = [
+        ...thresholds,
+        similarity,
+        Math.min(1, similarity + boundaryDelta),
+        Math.max(0, similarity - boundaryDelta),
+      ];
+      for (const threshold of candidates) {
+        expect(levenshteinNormalizedAtLeast(left, right, threshold)).toBe(similarity >= threshold);
+      }
+    }
+  });
+
+  it("fuzzy matching preserves first eligible group and alias order", () => {
+    const values = ["abcdefghij", "xbcdefghiX", "xbcdefghij"];
+    for (const normalizedValue of values) {
+      ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: makeOccurrence({
+          entityType: EntityType.Person,
+          value: normalizedValue,
+          normalizedValue,
+        }),
+      });
+    }
+    const groups = engine.getSnapshot("doc-1").groups;
+    expect(groups).toHaveLength(2);
+    expect(groups[0]?.aliases).toEqual(["abcdefghij", "xbcdefghij"]);
+    expect(groups[0]?.members).toHaveLength(2);
+    expect(groups[1]?.aliases).toEqual(["xbcdefghiX"]);
+    // A~B and B~C, but A!~C: the second group stays separate, and B joins
+    // the first eligible group encountered rather than a best-scoring one.
+    expect(levenshteinNormalized("abcdefghij", "xbcdefghiX")).toBeLessThan(0.88);
+    expect(levenshteinNormalized("xbcdefghiX", "xbcdefghij")).toBeGreaterThanOrEqual(0.88);
   });
 
   it("canonicalValue ∈ aliases", () => {
@@ -696,7 +833,7 @@ describe("GroupingEngine — cambio de tipo del grupo (ADR-082)", () => {
   });
 
   // ADR-085 §3: el guard difuso va sobre el tipo que emite el DETECTOR.
-  it("el difuso hereda la corrección en un tipo de texto libre", async () => {
+  it("type correction fuzzy pass keeps the same destination", async () => {
     await reclassify(EntityType.Address, EntityType.Organization);
     engine.dropOccurrences("doc-1", { pageIndices: [0] });
 

@@ -200,7 +200,7 @@ import type {
   ReopenSessionOptions,
 } from "./grouping.types.js";
 import { buildPlaceholderValue, MASK_FORMAT_BY_TYPE } from "./labels.js";
-import { levenshteinNormalized } from "./levenshtein.js";
+import { levenshteinNormalizedAtLeast } from "./levenshtein.js";
 
 const DEFAULT_SIMILARITY_THRESHOLD = 0.88;
 
@@ -2072,7 +2072,7 @@ export class GroupingEngine implements IEngine {
     if (!FUZZY_MATCHING_TYPES.has(occurrence.entityType)) return null;
     for (const group of candidates) {
       for (const normalizedAlias of group.normalizedValues) {
-        if (levenshteinNormalized(occurrence.normalizedValue, normalizedAlias) >= threshold) {
+        if (levenshteinNormalizedAtLeast(occurrence.normalizedValue, normalizedAlias, threshold)) {
           return group;
         }
       }
@@ -2106,7 +2106,7 @@ export class GroupingEngine implements IEngine {
       // un nombre — es la misma razón de ADR-073, aplicada a los dos lados de
       // la comparación.
       if (!FUZZY_MATCHING_TYPES.has(correction.detectorType)) continue;
-      if (levenshteinNormalized(occurrence.normalizedValue, normalizedValue) >= threshold) {
+      if (levenshteinNormalizedAtLeast(occurrence.normalizedValue, normalizedValue, threshold)) {
         return correction.correctedType;
       }
     }

@@ -146,6 +146,33 @@ describe("GroupingEngine — contract tests", () => {
     expect(createdCalls).toHaveLength(0);
   });
 
+  it("bounded fuzzy matching keeps the existing group update contract", async () => {
+    await engine.init(ctx);
+    engine.startSession("doc-1");
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+    for (const normalizedValue of ["maria fernandez", "maria fernandes"]) {
+      ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: makeOccurrence({
+          entityType: EntityType.Person,
+          value: normalizedValue,
+          normalizedValue,
+        }),
+      });
+    }
+    const groups = engine.getSnapshot("doc-1").groups;
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.aliases).toEqual(["maria fernandez", "maria fernandes"]);
+    const updates = busEmitSpy.mock.calls.filter(
+      ([channel, event]) =>
+        channel === EventChannel.Grouping && event === EngineEvents.ENTITY_GROUP_UPDATED,
+    );
+    expect(updates).toHaveLength(1);
+    const payload = updates[0]?.[2] as EntityGroupUpdated;
+    expect(payload.group.members).toHaveLength(2);
+    expect(payload.changes).toContain("members");
+  });
+
   it("emits GROUPING_FINISHED after REGEX_FINISHED + NER_FINISHED", async () => {
     await engine.init(ctx);
     engine.startSession("doc-1");
