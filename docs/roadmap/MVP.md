@@ -683,7 +683,7 @@ entidad con supresión por sesión), ADR-172 (deshacer y rehacer exactos por pun
 
 **Revisión 5 (2026-09-24): REJECTED**: B4-0 a B4-3 y N4-1 cerrados; queda B5-1 —con «Perez» agregado a mano antes de eliminar «Juan Perez», la aparición contenida quedaba a la vista y un re-análisis la volvía a ocultar— y N5-1 (15y sin marcar). El humano eligió que lo contenido se oculte solo (opción C): ADR-178 lo cierra (fila 25).
 
-**Revisión 6 (2026-09-24): APPROVED**: B5-1 y N5-1 cerrados. Quedan dos observaciones no bloqueantes: O6-1 (eliminar una entidad puede abrir un choque si lo re-procesado choca con otra; ADR-178 §2 lo contempla, pero falta el caso y su test) y O6-2 (el límite conocido de ADR-117, que es previo). El PR va contra `hardening/plan-2026-09`.
+**Revisión 6 (2026-09-24): APPROVED**: B5-1 y N5-1 cerrados. Quedan dos observaciones no bloqueantes: O6-1 (eliminar una entidad puede abrir un choque si lo re-procesado choca con otra), **cerrada** con el caso 69 y su test, y O6-2 (el límite conocido de ADR-117, que es previo). El PR va contra `hardening/plan-2026-09`.
 
 **Reglas de este hito** (además de las de siempre): UX-10 —nada que aparezca desplaza el diseño— se
 revisa en cada PR de la app; los PR 6-9 se verifican en el browser con los dos temas.
