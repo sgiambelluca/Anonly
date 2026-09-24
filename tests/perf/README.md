@@ -85,6 +85,229 @@ La ejecución nativa Windows necesita su banco/toolchain y un launcher validado
 para ese SO; este comando POSIX y el lector de presión actual no acreditan esa
 validación. Ver también `docs/roadmap/Banco_Windows_Comparativa_Medicion.md` §7.
 
+## Campaña opt-in NER: hilos internos de ONNX
+
+`run-ner-threads.sh` compara el control automático vigente con `numThreads=4/6/8`
+en builds experimentales del shell Electron empaquetado. Los parches de una línea
+solo cambian `env.backends.onnx.wasm.numThreads` y se revierten antes de terminar;
+no se altera la configuración pública ni el default. El protocolo y los límites
+están en `docs/roadmap/Rendimiento_Experimentos_Plan.md` §1.
+
+La campaña acepta P1 nativo, P2 escaneado y R1/R2 reales mediante
+`ANONLY_REAL_DOC_R1` y `ANONLY_REAL_DOC_R2`. Las rutas deben ser absolutas y
+legibles. El runner lee los PDF directamente en memoria y usa nombres neutros;
+no guarda rutas, nombres ni contenido en los reportes. R1/R2 requieren ambos
+perfiles explícitos: `ANONLY_NER_THREADS_PROFILES='R1 R2' bash
+tests/perf/run-ner-threads.sh`. Corre tres órdenes intercalados por perfil, una
+instancia nueva de Electron por corrida, y a continuación de cada medición de
+memoria hace otra de tiempo sin sondas RSS/WASM. Cada brazo también tiene una corrida
+separada por perfil para ejercitar cancelación tras `NER_MODEL_READY`. El reporte calcula
+la huella de las ocurrencias y grupos dentro del renderer y guarda solo cantidad
+y SHA-256. El número de hilos se toma de los pthread targets ONNX detectados por
+CDP; cuando no aparecen, queda `not observable`. La heurística identifica el
+pool por la firma de URLs blob compartidas que usa `support/cdpHeap.ts`, así que
+el informe debe conservar la URL propietaria y no llamar efectiva a una cifra
+que no pueda vincular a ese pool.
+
+```bash
+bash tests/perf/run-ner-threads.sh
+```
+
+La salida es única por sesión en `.measure/ner-threads/<UTC>/`; no se pisan
+resultados previos. Requiere macOS con al menos ocho CPUs visibles. P1/P2 son
+fixtures sintéticos; las conclusiones de producto deben incorporar R1/R2, dado
+que ya se observó que los resultados pueden diferir entre corpus. La validación
+nativa de Windows queda pendiente. Esta campaña no adopta un perfil ni cambia
+defaults.
+
+## Factibilidad NER: lotes de entradas (solo arnés)
+
+`run-ner-batch-feasibility.sh` carga el kernel actual y el modelo local en el
+Chromium/Electron empaquetado, sin editar el producto. Compara llamadas
+individuales con lotes de 2 y 4 textos sintéticos de longitudes semejantes y
+dispares, con tres pares intercalados. Conserva solo métricas numéricas en
+`.measure/ner-batch/<UTC>/synthetic.json`. El caso ADR-098 usa un texto mayor
+al límite del tokenizer, exige correspondencia por elemento después del corte
+real y comprueba que la cola esté en el último fragmento; también registra el
+resultado truncado al omitir el corte.
+
+```bash
+caffeinate -dimsu tests/perf/run-ner-batch-feasibility.sh
+```
+
+Este banco mide tiempo de inferencia y padding/tokenización; no atribuye bytes
+temporales de WASM por llamada. Informa heap JS antes/después solo si Chromium
+lo expone; no lo presenta como memoria temporal de WASM. La salida reporta
+deltas de score por token y no presume igualdad de calidad ni equivalencia
+posterior de Grouping.
+
+La campaña integrada real requiere rutas absolutas en variables de entorno,
+mantiene los textos en memoria del renderer y deja solo números en el reporte.
+Los jobs comparados entre páginas se limitan a ≤508 tokens para evitar que la
+sonda sortee el corte ADR-098 del kernel. El JSON registra también cuántos
+jobs, tokens y caracteres quedaron fuera; el resultado entre páginas es un
+subconjunto condicionado por longitud, no representa los jobs sobre el límite.
+El script espera la liberación del
+worker por idle dispose (15 s); si no la confirma, aborta antes de cargar otra
+copia del modelo. El runner valida que no haya strings de contenido ni rutas
+en el JSON y borra el reporte si aparece uno.
+
+```bash
+ANONLY_REAL_DOC_R1=/ruta/absoluta/R1.pdf ANONLY_REAL_DOC_R2=/ruta/absoluta/R2.pdf \
+ANONLY_NER_BATCH_NO_BUILD=1 caffeinate -dimsu tests/perf/run-ner-batch-real.sh
+```
+
+`ANONLY_NER_BATCH_NO_BUILD=1` usa las dos mitades ya compiladas del shell
+empaquetado. La campaña no recompila ni altera defaults. Windows nativo
+ventilado sigue pendiente.
+
+### Resultado macOS 2026-09-24 — R1/R2
+
+Artefacto exclusivamente numérico: `.measure/ner-batch/real-20260924T-final/real.json`.
+El verificador recorre recursivamente los valores antes de escribirlo y permite
+solo los IDs neutros `R1`/`R2`, nombres de brazo y números; un valor de texto
+fuera de esa lista borra el reporte. El interceptor guarda `NerPagePayload.text`
+en una variable del renderer, la borra en `finally` y elimina el perfil temporal
+de Electron al cerrar. No se exportaron palabras ni rutas.
+
+Se procesaron R1→R2, una instancia por documento. Para cada escenario se hicieron
+tres pares alternados I→B, B→I, I→B. Las muestras de cuatro páginas fueron las
+cuatro más cercanas por caracteres disponibles (`≤508` tokens); las dispares
+fueron mínimo, tercios y máximo por caracteres. **No** se midió un control I→I,
+así que las diferencias que siguen son observadas entre brazos y no prueban por
+sí solas que el batching las causó. No se inyectó salida a Grouping.
+
+| Perfil | Jobs | Caracteres (mediana / P90 / máximo) | Tokens tokenizer (mediana / P90 / máximo) | Jobs excluidos `>508` |
+| --- | ---: | ---: | ---: | ---: |
+| R1 | 87 | 1.316 / 1.613 / 1.694 | 374 / 430 / 503 | 0 |
+| R2 | 36 | 743 / 1.602 / 1.635 | 198 / 413 / 426 | 0 |
+
+Medianas de los tres pares, milisegundos de inferencia individual vs lote:
+
+| Perfil | Escenario | Individual | Lote | Tokens por muestra | Padding del lote | Mismatches tokens / spans | Flips `<0,7` |
+| --- | --- | ---: | ---: | --- | ---: | ---: | ---: |
+| R1 | dos más cercanas | 1.170 | 1.168 | 402, 392 | 10 | 0 / 0 | 0 |
+| R1 | cuatro más cercanas | 2.080 | 2.160 | 402, 392, 396, 368 | 50 | 2 / 1 | 1 |
+| R1 | dos dispares | 654 | 1.288 | 3, 433 | 430 | 1 / 1 | 1 |
+| R1 | cuatro dispares | 1.274 | 2.461 | 3, 96, 367, 433 | 833 | 1 / 1 | 1 |
+| R2 | dos más cercanas | 503 | 571 | 153, 198 | 45 | 0 / 0 | 0 |
+| R2 | cuatro más cercanas | 1.413 | 2.569 | 153, 198, 303, 375 | 471 | 12 / 9 | 1 |
+| R2 | dos dispares | 681 | 1.262 | 24, 416 | 392 | 0 / 0 | 0 |
+| R2 | cuatro dispares | 1.669 | 2.543 | 24, 121, 426, 416 | 717 | 1 / 1 | 0 |
+
+El mismatch se calcula comparando, en orden, `entity`/`word`/`index` de cada
+token y después tipo, valor, valor normalizado e inicio/fin del span producido
+por el mapeo actual del kernel. La confianza se compara aparte; el flip cuenta
+si cruza el umbral contractual `0,7`. Se observaron mismatches geométricos y
+flips en R1 y R2, lo que bloquea adoptar lotes por ahora. Como no se midió
+control I→I ni se ejecutó Grouping con el candidato, no se atribuye causalidad
+exclusiva al lote ni se afirma una diferencia downstream demostrada.
+
+Todos los jobs reales quedaron bajo 508 tokens, de modo que `internalSplit` es
+no aplicable en R1/R2; el caso adverso sintético confirma el corte ADR-098
+(1725 tokens → 508/508/508/207; sin corte la cola se trunca a 511 tokens).
+El heap JS solo se leyó antes/después de la tanda; bytes temporales WASM no son
+observables en este arnés. Smoke P1/P2 completado con captura, idle dispose y
+allowlist antes de la medición real. Windows nativo ventilado queda pendiente.
+
+## Campaña opt-in OCR: reconocedores LSTM
+
+`run-ocr-pool.sh` compara el pool automático de 2 reconocedores con los brazos
+3 y 4 mediante el override de arnés ADR-155. El brazo 2 no se fuerza: el test
+comprueba que el valor automático efectivo sea 2. Los demás campos de
+configuración se conservan; `maxLiveImageBytes` se verifica en 128 MiB y el
+pool OSD mantiene un único job activo como máximo.
+
+La campaña corre tres rondas intercaladas de tiempo en P1/P2/R1/R2; R1/P1
+sirven como controles sin OCR. Repite tres perfiles de memoria por brazo solo
+en P2/R2, más una cancelación OCR activa por brazo en ambos escaneos. La
+ocupación LSTM se cuenta directamente desde `WORKER_JOB_DISPATCHED` hasta su
+evento terminal. El límite de requests simultáneos sale del contrato de
+`processSession` (2 → 3 por adelanto; 3 → 3; 4 → 4), no es un contador de
+requests publicado por el Core. La cola observable se registra desde
+`WORKER_POOL_SATURATED`.
+
+Por página guarda solo wordCount, suma de `word.text.length`, confianza,
+percentiles y reserva RGBA estimada desde tamaño de página y DPI configurado.
+La ventana potencial se contrasta con 128 MiB. `LiveImageBudget` no expone
+evento ni getter de espera: cualquier espera por ese presupuesto queda marcada
+como no observable, y el exceso calculado de la ventana no se presenta como
+una espera medida. Si `estimatedBytes` no llega en una página, la reserva RGBA
+de esa corrida se reporta como desconocida; cero no representa una reserva
+medida. En documentos reales el colector estándar usa
+`captureOcrWords: false`; el colector local reduce palabras a conteos y hashes
+de calidad dentro del renderer, sin persistir el texto.
+
+```bash
+ANONLY_REAL_DOC_R1=/ruta/neutral/R1.pdf ANONLY_REAL_DOC_R2=/ruta/neutral/R2.pdf \
+  ./tests/perf/run-ocr-pool.sh
+```
+
+Los PDF reales solo se pasan por variables de entorno, reciben nombres neutros
+dentro de la app y no se copian a `.measure/`. La salida por sesión incluye
+cada corrida ordenada, series de memoria, presión del sistema, distribuciones
+numéricas por página y `summary.json`. Corre serial en macOS; Windows nativo
+ventilado queda pendiente al cierre de toda la campaña Mac. El banco no cambia
+defaults ni presets.
+
+Si una suspensión invalida únicamente R2, la tanda previa conserva sus
+artefactos y `validity.json` enumera los run IDs excluidos. Repetir solo los
+tiempos R2 en una carpeta nueva y luego continuar memoria/cancelación en esa
+misma carpeta:
+
+```bash
+ANONLY_OCR_POOL_PHASE=r2-time ANONLY_OCR_POOL_OUTPUT_DIR=.measure/ocr-pool/<nueva> \
+  ANONLY_REAL_DOC_R1=/ruta/neutral/R1.pdf ANONLY_REAL_DOC_R2=/ruta/neutral/R2.pdf \
+  caffeinate -dimsu ./tests/perf/run-ocr-pool.sh
+ANONLY_OCR_POOL_PHASE=memory-cancel ANONLY_OCR_POOL_APPEND=1 \
+  ANONLY_OCR_POOL_PRIOR_DIR=.measure/ocr-pool/<tanda-previa> \
+  ANONLY_OCR_POOL_OUTPUT_DIR=.measure/ocr-pool/<nueva> \
+  ANONLY_REAL_DOC_R1=/ruta/neutral/R1.pdf ANONLY_REAL_DOC_R2=/ruta/neutral/R2.pdf \
+  caffeinate -dimsu ./tests/perf/run-ocr-pool.sh
+```
+
+`caffeinate -dimsu` evita la suspensión por inactividad, pero no bloquea el
+cierre de tapa. `summarize-ocr-pool.mjs` combina carpetas en orden de prioridad,
+filtra run IDs listados como invalidados y valida que estén todos los pares de
+tiempo, memoria y cancelación antes de marcar `summary.json` como completo.
+
+## Campaña opt-in Regex y Grouping: peores casos
+
+`regex-worst-case.ts` mide el patrón de email en textos sintéticos de 2–160 KiB,
+incluido un `@` tardío y un control normal. Cada caso corre en un proceso con
+timeout; su salida numérica queda bajo `.measure/regex-worst-case/`. El control
+R1/R2 usa Electron y `run-regex-real-docs.sh`, que requiere rutas solo mediante
+variables de entorno. El informe es `docs/roadmap/Patron_Email_Regex_Medicion.md`.
+
+```bash
+caffeinate -dimsu pnpm exec tsx --tsconfig tests/tsconfig.json tests/perf/regex-worst-case.ts
+ANONLY_REAL_DOC_R1=/ruta/neutral/R1.pdf ANONLY_REAL_DOC_R2=/ruta/neutral/R2.pdf \
+  caffeinate -dimsu ./tests/perf/run-regex-real-docs.sh
+```
+
+`run-grouping-worst-case.sh` ejecuta tres rondas intercaladas de 250–2000
+valores distintos y un control de 24 valores repetidos, seguidas de R1/R2 en
+Electron. Registra tiempos de `processOccurrence`, lookup inclusivo, retraso
+del timer, grupos, alias, miembros y huellas/orden. El runner construye el
+cliente y shell, restaura `dist`, impide carpetas de salida existentes y
+requiere macOS, `caffeinate` y las dos rutas reales. Para repetir únicamente
+R1/R2 después de un banco sintético, usar `ANONLY_GROUPING_REAL_ONLY=1` y
+otra carpeta de salida. El informe es `docs/roadmap/Agrupacion_Difusa_Medicion.md`.
+
+```bash
+ANONLY_REAL_DOC_R1=/ruta/neutral/R1.pdf ANONLY_REAL_DOC_R2=/ruta/neutral/R2.pdf \
+  caffeinate -dimsu ./tests/perf/run-grouping-worst-case.sh
+```
+
+`grouping-trigram-feasibility.ts` y `grouping-common-affix-feasibility.ts` son
+sondas sintéticas separadas del motor: la primera descartó el filtro por
+trigramas; la segunda precedió ADR-177. Ninguna sustituye la curva del motor
+ni las corridas reales. En todos estos bancos, las rutas, nombres, texto y PDF
+reales permanecen fuera del repo y de `.measure/`; los reportes llevan IDs
+neutros, agregados numéricos y huellas. Una suspensión invalida la tanda
+afectada, que se conserva por separado y se repite. Windows nativo ventilado
+queda pendiente; estos runners corresponden a la campaña Mac.
+
 ## `memory.spec.ts` — el instrumento de H-10 (ADR-146)
 
 **No es un gate**: no afirma umbrales, mide y reporta a `.measure/` (gitignoreado). ADR-146 §6/ADR-149 §5: fijar un número mirando una corrida sola es exactamente lo que esto evita — primero se mide, después se decide el presupuesto (o se descubre que no hace falta tocarlo).

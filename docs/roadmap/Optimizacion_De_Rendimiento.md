@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap | dependencias=architecture/07_Performance_Strategy.md,core/NER_Engine.md,core/OCR_Engine.md,core/Grouping_Engine.md,roadmap/Duplicacion_De_Logica.md,roadmap/Optimizacion_De_Memoria_Plan.md,roadmap/Ciclos_Y_Documentos_Reales_Medicion.md,roadmap/Banco_Windows_Comparativa_Medicion.md,ui/React_Client.md | audiencia=humanos+IA | fase=11 (proximos objetivos acordados el 2026-09-20; sin implementar) -->
+<!-- CONTEXT: scope=roadmap | dependencias=architecture/07_Performance_Strategy.md,core/NER_Engine.md,core/OCR_Engine.md,core/Grouping_Engine.md,roadmap/Duplicacion_De_Logica.md,roadmap/Optimizacion_De_Memoria_Plan.md,roadmap/Ciclos_Y_Documentos_Reales_Medicion.md,roadmap/Banco_Windows_Comparativa_Medicion.md,ui/React_Client.md | audiencia=humanos+IA | fase=11 (campaña macOS medida el 2026-09-24; Windows nativo pendiente) -->
 
 # Optimización de rendimiento — hallazgos y plan
 
@@ -11,7 +11,11 @@ worker NER, más reconocedores OCR, varios fragmentos por inferencia NER y los
 peores casos de Regex/Grouping. Después de las dos primeras mediciones, revisar
 los perfiles de rendimiento y la selección automática según recursos del equipo.
 El plan vigente está al final de este documento; las secciones previas conservan
-el relevamiento histórico y sus descartes. No hay cambios de producto con esta actualización.
+el relevamiento histórico y sus descartes. Los cinco puntos ya tienen resultados
+en macOS; el lote NER quedó en factibilidad sin adopción, y Regex/Grouping
+recibieron cambios internos medidos. No se cambiaron defaults, presets ni
+contratos. La repetición en Windows nativo y la decisión de perfiles están
+pendientes.
 
 ## Los dos focos
 
@@ -242,10 +246,16 @@ La duplicación de lógica se apartó a [`Duplicacion_De_Logica.md`](./Duplicaci
 
 ## Próximos objetivos — tiempo, consumo y perfiles (2026-09-20)
 
-**Estado: planificado, sin ejecutar.** Decisión del humano: explorar el beneficio
+**Estado: los cinco puntos tienen resultados en macOS; Windows nativo sigue pendiente.** Decisión del humano: explorar el beneficio
 de hilos/workers y su costo de memoria, conservando la calidad. Un mayor consumo
 puede justificar una mejora de velocidad; el resultado debe permitir elegir ese
 compromiso por perfil. No se cambian presupuestos ni defaults con este plan.
+
+**Protocolo de ejecución (2026-09-23):**
+[`Rendimiento_Experimentos_Plan.md`](Rendimiento_Experimentos_Plan.md) fija brazos,
+controles, corpus, métricas y condiciones de avance. Esta sesión dispone solo
+de macOS; la validación en Windows nativo queda pendiente y no se sustituye
+con WSL ni se extrapola desde Mac.
 
 Base: `Ciclos_Y_Documentos_Reales_Medicion.md` §9 y
 `Banco_Windows_Comparativa_Medicion.md`. NER domina el documento nativo real;
@@ -254,6 +264,14 @@ en R2 los dos reconocedores OCR estuvieron ocupados ~98 % de su etapa, frente al
 **2 → revisión del plan → 1 → 3** (`Optimizacion_De_Memoria_Plan.md` §2ter).
 
 ### 1. Aprovechar más hilos dentro del único worker NER
+
+**Curva principal macOS medida (2026-09-23/24):** control automático efectivo de
+4 hilos; 4 solicitado indistinguible, 6 y 8 más lentos sobre R1/R2 reales, con
+calidad idéntica y cancelación ejercitada. Ver
+[`Hilos_NER_Medicion.md`](Hilos_NER_Medicion.md) para pares y límites. No se
+adoptó configuración nueva; se repetirá en Windows nativo ventilado después
+de completar la campaña Mac. Carga por brazo, panel y estrés sostenido no quedaron
+separados en esta tanda (límite detallado en el informe).
 
 - Comparar el control efectivo actual con **4, 6 y 8 hilos de ONNX**, donde el
   hardware permita esas configuraciones. Registrar la cantidad efectiva, no solo
@@ -264,6 +282,14 @@ en R2 los dos reconocedores OCR estuvieron ocupados ~98 % de su etapa, frente al
   Entregar la curva tiempo/consumo y el punto donde agregar hilos deja de compensar.
 
 ### 2. Aprovechar más workers de reconocimiento OCR
+
+**Curva macOS medida (2026-09-24):** R2 real llegó a `Ready` en medianas de
+48,0 / 41,4 / 37,9 s con 2/3/4 reconocedores, con salida idéntica y ocupación
+efectiva. P2 sintético respondió de otra manera; el informe
+[`Reconocedores_OCR_Medicion.md`](Reconocedores_OCR_Medicion.md) registra la densidad
+de caracteres, memoria, una tanda excluida por suspensión y los límites del
+banco. No se adoptó configuración nueva; Windows nativo ventilado sigue
+pendiente.
 
 - Comparar **2, 3 y 4 reconocedores LSTM**, conservando el OSD compartido,
   la configuración de 300 DPI y las reglas actuales de calidad.
@@ -278,6 +304,14 @@ en R2 los dos reconocedores OCR estuvieron ocupados ~98 % de su etapa, frente al
 
 ### 3. Varios fragmentos independientes por inferencia NER
 
+**Factibilidad macOS cerrada, adopción bloqueada:**
+[`Lotes_NER_Factibilidad.md`](Lotes_NER_Factibilidad.md) registra la prueba
+en Chromium/WASM y las muestras de R1/R2. Hubo diferencias de entidades y
+cruces del umbral de confianza frente a inferencias individuales; los lotes
+de cuatro no mejoraron la mediana de ninguna muestra real. No se cambió el
+producto. Se investigaría primero la equivalencia de salida y después el
+costo de una importación completa, si este enfoque se retomara.
+
 Evaluar soporte y costo de procesar varias entradas en un mismo lote, agrupando
 longitudes similares. Preservar los límites de tokens y el contexto independiente
 de cada fragmento; no concatenar páginas como una sola secuencia. Medir memoria
@@ -287,6 +321,27 @@ No hay ganancia cuantificada todavía.
 
 ### 4. Acotar los peores casos de Regex y Grouping
 
+**Regex, línea base cerrada en macOS:**
+[`Patron_Email_Regex_Medicion.md`](Patron_Email_Regex_Medicion.md) registra la
+curva cuadrática de email hasta 160 KiB y el control rápido de R1/R2 reales.
+El arreglo lineal quedó decidido en ADR-175 y `Regex_Engine.md` v1.14.0;
+se implementó y repitió la curva adversa y R1/R2 sin cambios de detección.
+
+**Grouping, línea base cerrada en macOS:**
+[`Agrupacion_Difusa_Medicion.md`](Agrupacion_Difusa_Medicion.md) registra la
+curva de 250–2000 valores distintos, el control repetido y R1/R2 reales.
+El primer arreglo quedó especificado en ADR-176 y `Grouping_Engine.md`
+v1.11.0, se implementó y conservó huellas y orden en 30 controles. El peor
+caso de 2.000 valores distintos bajó de 14,53 a 3,26 s, pero el bloqueo de
+varios segundos persiste; un índice de candidatos requiere otro ADR.
+Un filtro exacto por trigramas se descartó tras una sonda: no eliminó ninguna
+de las 1.999.000 comparaciones del adverso y añadió costo. El informe registra
+esa prueba y su alcance.
+Una segunda fase de recorte exacto de afijos comunes se especificó en
+ADR-177 y `Grouping_Engine.md` v1.12.0. Ya implementada y medida en motor y
+R1/R2, bajó el peor caso de 3,26 a 1,50 s con huellas idénticas. El bloqueo
+residual y la curva cuadrática siguen documentados; Windows nativo pendiente.
+
 Retomar los dos casos cuadráticos del relevamiento: patrón de email sobre texto
 adverso y búsqueda difusa con muchas entidades distintas. Primero reproducirlos
 sobre el código vigente y un rango de tamaños; luego planificar cada módulo por
@@ -295,6 +350,11 @@ detecciones/agrupaciones y medir bloqueo del hilo principal y cancelación.
 Es un objetivo de robustez temporal; no se atribuye a estos casos el costo de R1/R2.
 
 ### 5. Revisar perfiles con las curvas de hilos y workers ya medidas
+
+**Revisión documental macOS disponible:**
+[`Perfiles_Rendimiento_Revision.md`](Perfiles_Rendimiento_Revision.md) organiza la
+matriz candidata, señales, migración y condiciones pendientes. La política no
+está validada para Windows ni cambió los settings del producto.
 
 **Depende de los objetivos 1 y 2 y de revisar sus resultados.** Es el siguiente
 paso después de esas mediciones; no necesita esperar a que terminen 3 y 4. Si
