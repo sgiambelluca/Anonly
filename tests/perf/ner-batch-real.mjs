@@ -17,7 +17,7 @@ const esbuild = createRequire(clientRequire.resolve("vite"))("esbuild");
 const { _electron: electron } = appRequire("@playwright/test");
 const sourcePath = resolve(root, "tests/perf/ner-batch-feasibility.mjs");
 const source = readFileSync(sourcePath, "utf8");
-const probe = source.match(/const probe = `([\s\S]*?)`;\nconst build/);
+const probe = source.match(/const probe = `([\s\S]*?)`;\r?\nconst build/);
 if (!probe) throw new Error("Synthetic browser probe source not found");
 const kernelPath = resolve(root, "packages/anonymization-core/ner-engine/src/worker/kernel.ts");
 const kernel = readFileSync(kernelPath, "utf8");
