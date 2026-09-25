@@ -1,6 +1,6 @@
-<!-- CONTEXT: scope=roadmap-medicion | dependencias=roadmap/Rendimiento_Experimentos_Plan.md,roadmap/Optimizacion_De_Rendimiento.md,core/Regex_Engine.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 (punto 4a, línea base macOS 2026-09-24; Windows pendiente) -->
+<!-- CONTEXT: scope=roadmap-medicion | dependencias=roadmap/Rendimiento_Experimentos_Plan.md,roadmap/Optimizacion_De_Rendimiento.md,core/Regex_Engine.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 (punto 4a, línea base macOS 2026-09-24 y confirmación Windows 2026-09-25; cerrado) -->
 
-# Patrón email de Regex — antes y después en macOS
+# Patrón email de Regex — antes y después en macOS, confirmado en Windows
 
 ## Hallazgo
 
@@ -110,8 +110,82 @@ lineal por `@` y paridad diferencial de spans, normalización, orden y
 detecciones; los patrones custom conservaron su ruta. Un simple chequeo
 `text.includes("@")` no habría cubierto el prefijo con `@` tardía.
 
-El banco ya se repitió en la Mac sobre todos los tamaños y R1/R2. La campaña
-completa todavía debe repetirse en Windows nativo ventilado cuando ese equipo
-esté disponible; hasta entonces los tiempos y cualquier criterio de perfil son
-locales. La aceptación de código además requiere cobertura y los gates del
-monorepo.
+El banco ya se repitió en la Mac sobre todos los tamaños y R1/R2. La aceptación
+de código además requiere cobertura y los gates del monorepo.
+
+---
+
+## Repetición Windows nativo (2026-09-25)
+
+> Commit `ee5eeba` (`hardening/plan-2026-09`), Windows 11 Pro build 26200,
+> i5-12400, 16,9 GB RAM, nativo (Git Bash, no WSL).
+
+Primera tanda (mismo día): solo R1/R2. Segunda tanda, más tarde el mismo día:
+el barrido sintético adverso de 2.048–163.840 caracteres, que había quedado
+pendiente.
+
+### R1/R2 reales
+
+Control de documentos reales
+(`tests/perf/run-regex-real-docs.sh`, que no tiene gate de plataforma y corrió
+sin modificar — solo se sustituyó `python3 tests/perf/support/timeout-command.py`
+por el `timeout` de GNU coreutils que trae Git Bash, y se retiró la guarda
+`pgrep` por las mismas razones documentadas en `Hilos_NER_Medicion.md`).
+
+Tres rondas intercaladas por documento, **6/6 corridas válidas, 0 fallidas**,
+huellas de detección idénticas en las tres rondas de cada documento (mismo
+criterio que macOS).
+
+| Documento | Páginas | Caracteres de entrada Regex | Máximo por página | Regex total por ronda | Detecciones |
+|---|---:|---:|---:|---:|---:|
+| R1 nativo | 51 | 83.722 | 1.833 | 5 / 5 / 7 ms | 10 |
+| R2 escaneado | 20 | 33.655 | 2.189 | 17 / 14 / 13 ms | 30 |
+
+Mismo orden de magnitud que la Mac post-ADR-181 (R1: 4/4/4 ms; R2: 10/10/9 ms)
+— algo más lento en milisegundos absolutos aquí, pero la diferencia es del
+orden de unidades de milisegundo sobre un total de una o dos decenas: ruido de
+banco, no una regresión. El patrón email ya no tiene un costo por invocación
+propio desde ADR-181 (el escáner lineal no llama a `RegExp.exec` por email),
+así que `perPatternMs` no incluye esa clave en ninguna plataforma — es
+correcto, no un dato faltante. El `maxMainThreadGapMs` (25,98 / 17,93 / 19,74 ms
+en R1; 41,68 / 28,83 / 25,33 ms en R2) confirma que el motor sigue sin bloquear
+el hilo principal de forma perceptible en documentos reales, igual que en la
+Mac.
+
+**Conclusión**: la corrección de ADR-181 se sostiene en una segunda
+plataforma para los documentos reales.
+
+### Barrido sintético adverso (2.048–163.840 caracteres)
+
+Corrido directo con `pnpm exec tsx tests/perf/regex-worst-case.ts`, sin
+`caffeinate` (sin equivalente en Windows) y sin modificar el script — no
+tiene gate de plataforma ni dependencias de shell, cada caso ya trae su
+propio watchdog interno de 65 s. **66 corridas, 0 censuradas, 0
+inconsistencias de referencia** (`.measure/regex-worst-case/20260925T221744723Z/`).
+
+| Caracteres | Sin `@` (mediana) | `@` tardía, sufijo inválido (mediana) | Normal (mediana) |
+|---:|---:|---:|---:|
+| 2.048 | 1,83 ms | 2,08 ms | 3,73 ms |
+| 10.240 | 2,55 ms | 3,54 ms | 4,69 ms |
+| 20.480 | 3,36 ms | 4,93 ms | 7,27 ms |
+| 40.960 | 5,15 ms | 7,47 ms | 10,43 ms |
+| 81.920 | 7,88 ms | 10,67 ms | 16,15 ms |
+| 163.840 | 13,26 ms | 15,82 ms | 30,63 ms |
+
+**Confirma lo mismo que macOS: no hay bloqueo cuadrático en ninguna
+plataforma.** Los 163.840 caracteres, que antes de ADR-181 bloqueaban 42,5 s
+en la Mac, tardan **13–31 ms** acá — cuatro órdenes de magnitud menos, igual
+que en macOS (9–25 ms). `emailScannerMs`, medido en la pasada por patrón,
+fue de **0,002–0,009 ms** para el caso sin `@` y de **5,66 ms** para `@`
+tardía a 163.840 caracteres — sigue siendo el costo dominante entre los
+patrones custom (`caratula-ar` fue el segundo más caro, ~2,05 ms a ese
+tamaño), pero de milisegundos, no de decenas de segundos.
+
+Los números absolutos **no coinciden** entre plataformas — a diferencia y en
+la misma dirección que lo observado en Grouping (`Agrupacion_Difusa_Medicion.md`):
+en tamaños chicos Windows es más rápido que la Mac (2.048: 1,83/2,08/3,73 ms
+contra 2,75/3,06/3,70 ms), pero en tamaños grandes es más lento (163.840:
+13,26/15,82/30,63 ms contra 9,05/10,32/25,20 ms). El patrón se repite en
+varias mediciones de esta campaña Windows para código con bucles ajustados
+sobre cadenas — no se investigó la causa, y no cambia la conclusión: **el
+bug cuadrático original está cerrado en las dos plataformas.**

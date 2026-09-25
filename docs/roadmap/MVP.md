@@ -588,12 +588,17 @@ De las ~70: **~30 ya estaban cerradas** por hitos posteriores (ADR-053/054/056, 
   `Precalentamiento_NER_Durante_OCR_Medicion.md` §7, anotado como descarte
   medido en ADR-154 §2 lever 3 (`Precalentamiento_NER_Durante_OCR_Plan.md`;
   evidencia cruda en `.measure/ner-preload-ocr/20260917T163638Z/`).
-- **Recursos — punto 2 cerrado con alcance medido (2026-09-23):** investigación,
-  instrumentación, 14 corridas P1/P2 en macOS y revisión del plan completadas.
-  Los buffers observados vuelven a cero después del cierre; el residuo histórico
-  de 443–626 MB no es una fuga ni un ahorro demostrados. Se conservan los límites
-  de observación durante NER y el seguimiento separado de Windows nativo/lector
-  de presión, todavía sin validar. Informe: `Atribucion_Recursos_Renderer_Medicion.md`.
+- **Recursos — punto 2 cerrado con alcance medido (2026-09-23; repetido en
+  Windows nativo 2026-09-25):** investigación, instrumentación, 14 corridas
+  P1/P2 en macOS y revisión del plan completadas. Los buffers observados
+  vuelven a cero después del cierre; el residuo histórico de 443–626 MB no es
+  una fuga ni un ahorro demostrados. Se conservan los límites de observación
+  durante NER. La repetición Windows nativa (14/14 corridas, ~7,7 min, mismo
+  tiempo que macOS) confirma que el instrumento es portable y el efecto de la
+  sonda es igual de chico; el lector de presión de `win32` sigue sin existir
+  (no era el objetivo de esta medición), y el proveedor CDP tarda más en
+  recuperarse tras NER que en macOS (recupera a los 120 s, no a los 60 s).
+  Informe: `Atribucion_Recursos_Renderer_Medicion.md`.
   El orden **2 → 1 → 3** queda con los puntos 2 y 1 cerrados. **El punto 1
   evaluó el empaquetado del mismo NER el 2026-09-23**: calidad idéntica y menor
   memoria lineal WASM, pero RSS/M1 sin ventaja atribuible por sobre la deriva;
@@ -605,12 +610,26 @@ De las ~70: **~30 ya estaban cerradas** por hitos posteriores (ADR-053/054/056, 
   `8f0d7f0`; el punto 3 se cierra como caracterización, sin modificar
   presupuestos ni motores.
   Alcance canónico: `Optimizacion_De_Memoria_Plan.md` §2ter. No cierra el Hito 11.
-- **Próximos objetivos de tiempo (2026-09-20, sin ejecutar):** medir más hilos
-  dentro del único worker NER, más workers de reconocimiento OCR, varios
-  fragmentos independientes por inferencia NER y acotar los peores casos de
-  Regex/Grouping. Después de medir hilos NER y workers OCR, revisar los perfiles
+- **Próximos objetivos de tiempo (2026-09-20, planteado; ejecutado en macOS
+  2026-09-23/24 y en Windows nativo 2026-09-25 — la decisión de perfiles sigue
+  sin tomarse):** medir más hilos dentro del único worker NER, más workers de
+  reconocimiento OCR, varios fragmentos independientes por inferencia NER y
+  acotar los peores casos de Regex/Grouping. Las cuatro mediciones están
+  hechas en las dos plataformas: `Hilos_NER_Medicion.md` (hilos ONNX — en
+  macOS más hilos empeora, en Windows mejora; depende del hardware),
+  `Reconocedores_OCR_Medicion.md` (pool OCR — mejora en las dos plataformas,
+  más en Windows), `Lotes_NER_Factibilidad.md` (lotes NER — bloqueado en las
+  dos plataformas por diferencias de calidad, no se adopta),
+  `Patron_Email_Regex_Medicion.md` y `Agrupacion_Difusa_Medicion.md` (Regex ya
+  corregido por ADR-181, confirmado en Windows; Grouping con ADR-182/183 ya
+  aplicados, pero el peor caso sintético resultó **más lento** en Windows que
+  en macOS — 2,60 s contra 1,50 s a 2.000 entidades — sin causa investigada).
+  Después de medir hilos NER y workers OCR, revisar los perfiles
   Bajo/Intermedio/Alto/Automático como propuesta, con Automático mostrando el
   nivel resuelto según recursos del equipo y evidencia de costo/beneficio.
+  **Esa revisión de perfiles sigue sin hacerse**: los datos de las dos
+  plataformas están, pero decidir un perfil o cambiar cualquier default
+  requiere ADR propio del planificador, no se infiere de esta medición.
   Los valores actuales no cambian con este plan; un perfil podrá consumir más
   memoria si la mejora de tiempo lo justifica, con presupuestos explícitos.
   Alcance y dependencias: `Optimizacion_De_Rendimiento.md`, «Próximos objetivos».

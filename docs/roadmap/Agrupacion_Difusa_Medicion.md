@@ -1,6 +1,6 @@
-<!-- CONTEXT: scope=roadmap-medicion | dependencias=roadmap/Rendimiento_Experimentos_Plan.md,roadmap/Optimizacion_De_Rendimiento.md,core/Grouping_Engine.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 (punto 4b, antes/después macOS 2026-09-24; Windows pendiente) -->
+<!-- CONTEXT: scope=roadmap-medicion | dependencias=roadmap/Rendimiento_Experimentos_Plan.md,roadmap/Optimizacion_De_Rendimiento.md,core/Grouping_Engine.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 (punto 4b, antes/después macOS 2026-09-24 y repetición Windows 2026-09-25; cerrado) -->
 
-# Búsqueda difusa de Grouping — antes y después en macOS
+# Búsqueda difusa de Grouping — antes y después en macOS, repetido en Windows
 
 ## Hallazgo
 
@@ -172,3 +172,83 @@ ejecutó el `GroupingEngine` ni R1/R2; sus datos quedan en
 definieron la segunda implementación interna. El banco completo confirmó una
 reducción adicional de 54 % a 2.000 valores, hasta 1,50 s, sin cambiar R1/R2.
 El costo sigue cuadrático y todavía supera un segundo.
+
+---
+
+## Repetición Windows nativo (2026-09-25)
+
+> Commit `ee5eeba` (`hardening/plan-2026-09`) — el código YA incluye ADR-182
+> y ADR-183, así que esta corrida mide el estado final, no un antes/después.
+> Windows 11 Pro build 26200, i5-12400, 16,9 GB RAM, nativo (Git Bash, no
+> WSL). Puerto del arnés: mismas tres diferencias de instrumentación que el
+> resto de la campaña Windows de este equipo (gate `Darwin` retirado,
+> `caffeinate` omitido —sin equivalente en Windows; no se observó suspensión
+> en esta corrida de ~15 min sobre un equipo de escritorio conectado a
+> corriente, pero a diferencia de macOS **no está activamente prevenida**—,
+> guarda `pgrep` retirada). 30 casos sintéticos + 6 corridas reales, **0
+> fallidas**, huellas y orden idénticos entre las tres rondas de cada caso.
+
+### Hallazgo 1 — el peor caso sintético es más lento en Windows, no más rápido
+
+Con el mismo código (ADR-182+183 ya aplicados en las dos plataformas), el
+caso adverso de 2.000 entidades distintas de 36 caracteres tardó **2.595 ms**
+en esta máquina contra **1.499 ms** en la Mac — **~1,73× más lento**, pese a
+que esta CPU es más rápida que el M1 para inferencia ONNX (`Hilos_NER_Medicion.md`).
+El patrón se repite en los cuatro tamaños y en el corpus repetido:
+
+| Ocurrencias sintéticas | Windows distintas (proceso / lookup) | macOS distintas (proceso / lookup, ADR-183) | Windows repetidas (proceso / lookup) | macOS repetidas (proceso / lookup) |
+|---:|---:|---:|---:|---:|
+| 250 | 70,66 / 51,93 ms | 34,74 / 27,54 ms | 20,43 / 4,67 ms | 8,73 / 1,78 ms |
+| 500 | 191,10 / 156,29 ms | 109,87 / 95,30 ms | 32,10 / 5,38 ms | 13,17 / 2,18 ms |
+| 1.000 | 691,28 / 598,25 ms | 390,36 / 357,38 ms | 59,26 / 5,39 ms | 26,65 / 2,50 ms |
+| 2.000 | 2.595,05 / 2.287,55 ms | 1.499,05 / 1.394,30 ms | 162,45 / 6,63 ms | 75,31 / 3,66 ms |
+
+**No se investigó la causa** — puede ser el motor JS de esta build de
+Electron/V8 sobre Windows, diferencias de normalización de cadena, o algo
+específico de esta máquina; esta campaña no lo aísla. Lo que sí queda
+establecido: el costo cuadrático de ADR-182/183 **no es una cota portable**,
+y "1,50 s de bloqueo a 2.000 distintos" (la cifra que cerraba la Mac) **no es
+el número de Windows** — acá son 2,60 s. La curva sigue siendo
+aproximadamente 4× por duplicación en las dos plataformas (factor Windows
+2000→1000: 2595/691=3,75×; 1000→500: 691/191=3,62×; 500→250: 191/71=2,70×),
+así que el problema estructural (revisar todos los grupos candidatos) es el
+mismo; solo la constante cambia, y en la dirección contraria a lo que
+sugeriría "esta máquina es más rápida".
+
+### Hallazgo 2 — R2 detectó 4 ocurrencias más que en macOS
+
+| Documento | Ocurrencias | Grupos / alias / miembros | `processOccurrence` mediana | Lookup elegible mediana |
+|---|---:|---:|---:|---:|
+| R1 nativo | 308 (igual a macOS) | 123 / 126 / 304 (igual) | 21,34 ms (macOS: 13,42 ms) | 5,34 ms (macOS: 4,40 ms) |
+| **R2 escaneado** | **227** (macOS: 223) | **76 / 83 / 182** (macOS: 72/82/179) | 15,83 ms (macOS: 6,70 ms) | 2,49 ms (macOS: 1,58 ms) |
+
+R1 (texto nativo embebido en el PDF, sin OCR) da **exactamente** el mismo
+conteo de ocurrencias y grupos en las dos plataformas — esperable, Regex/NER
+corren sobre el mismo texto extraído determinísticamente. **R2 (escaneado,
+pasa por OCR) no**: 4 ocurrencias y 4 grupos más en Windows. No se investigó
+la causa en esta campaña — candidatos plausibles sin verificar son
+diferencias de anti-aliasing/rasterizado entre plataformas antes del OCR, o
+el propio Tesseract WASM comportándose distinto bajo builds de V8 distintas.
+Esto es una diferencia real de **qué detecta el pipeline completo**, no solo
+de tiempo, y no estaba cubierta por el alcance de esta campaña de Grouping en
+particular — la nota queda acá porque es donde se observó, pero pertenece
+más al motor OCR/NER que al de Grouping. Vale una investigación aparte si se
+necesita reproducibilidad exacta de detecciones entre plataformas.
+
+`processOccurrence` y el lookup elegible también salen más lentos en Windows
+en términos absolutos para los documentos reales (R1: 21,34 ms contra
+13,42 ms; R2: 15,83 ms contra 6,70 ms) — coherente con el Hallazgo 1: el
+mismo motor de Grouping, con más candidatos que revisar en R2 (76 grupos
+contra 72), tarda más en ambos sentidos.
+
+### Conclusión
+
+La robustez temporal del peor caso de Grouping **no está cerrada en ninguna
+plataforma**, y en esta máquina el número absoluto es peor que en la Mac
+(2,60 s contra 1,50 s a 2.000 entidades distintas), no mejor. La calidad
+(huellas, orden, conteos) es estable dentro de cada plataforma entre rondas,
+pero R2 mostró una diferencia real de conteo de ocurrencias entre
+plataformas que no se investigó acá. Ninguna de las dos observaciones cambia
+la decisión ya tomada en ADR-182/183; ambas son datos nuevos para quien
+decida si hace falta un índice de candidatos de recall completo (la mejora
+pendiente que ya señalaba la sección de macOS).

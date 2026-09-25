@@ -81,9 +81,11 @@ disponibilidad de todas las fases. El banco macOS recuperó la lectura a 60 s.
 El reporte conserva los fragmentos parciales crudos para diagnóstico.
 
 Resultado y revisión: `docs/roadmap/Atribucion_Recursos_Renderer_Medicion.md`.
-La ejecución nativa Windows necesita su banco/toolchain y un launcher validado
-para ese SO; este comando POSIX y el lector de presión actual no acreditan esa
-validación. Ver también `docs/roadmap/Banco_Windows_Comparativa_Medicion.md` §7.
+Corrido también en Windows nativo el 2026-09-25, con el mismo comando y sin
+parches: 14/14 corridas, ~7,7 min — igual de rápido que macOS. El lector de
+presión de `win32` sigue sin implementarse (`systemMemoryPressure.ts`
+confirma `available: false`); eso no bloqueó la campaña, solo deja ese campo
+vacío en los reportes. Ver también `docs/roadmap/Banco_Windows_Comparativa_Medicion.md` §7.
 
 ## Campaña opt-in NER: hilos internos de ONNX
 
@@ -114,11 +116,14 @@ bash tests/perf/run-ner-threads.sh
 ```
 
 La salida es única por sesión en `.measure/ner-threads/<UTC>/`; no se pisan
-resultados previos. Requiere macOS con al menos ocho CPUs visibles. P1/P2 son
-fixtures sintéticos; las conclusiones de producto deben incorporar R1/R2, dado
-que ya se observó que los resultados pueden diferir entre corpus. La validación
-nativa de Windows queda pendiente. Esta campaña no adopta un perfil ni cambia
-defaults.
+resultados previos. Requiere macOS con al menos ocho CPUs visibles — o, en
+Windows nativo, un puerto ad hoc del mismo protocolo (no commiteado; ver
+`docs/roadmap/Hilos_NER_Medicion.md` §"Repetición Windows nativo", corrida el
+2026-09-25). P1/P2 son fixtures sintéticos; las conclusiones de producto deben
+incorporar R1/R2, dado que ya se observó que los resultados pueden diferir
+entre corpus. La validación nativa de Windows ya se hizo y dio la dirección
+**contraria** a macOS (más hilos ayuda en una máquina con más núcleos reales
+libres). Esta campaña no adopta un perfil ni cambia defaults.
 
 ## Factibilidad NER: lotes de entradas (solo arnés)
 
@@ -158,8 +163,12 @@ ANONLY_NER_BATCH_NO_BUILD=1 caffeinate -dimsu tests/perf/run-ner-batch-real.sh
 ```
 
 `ANONLY_NER_BATCH_NO_BUILD=1` usa las dos mitades ya compiladas del shell
-empaquetado. La campaña no recompila ni altera defaults. Windows nativo
-ventilado sigue pendiente.
+empaquetado. La campaña no recompila ni altera defaults. Repetido en Windows
+nativo el 2026-09-25 (ver `docs/roadmap/Lotes_NER_Factibilidad.md`
+§"Repetición Windows nativo"): mismo bloqueo de adopción. Ese arnés
+(`tests/perf/ner-batch-real.mjs`) tenía un bug de portabilidad — un regex
+sensible a CRLF que rompía en un checkout Windows — corregido localmente
+(no commiteado todavía).
 
 ### Resultado macOS 2026-09-24 — R1/R2
 
@@ -246,9 +255,10 @@ ANONLY_REAL_DOC_R1=/ruta/neutral/R1.pdf ANONLY_REAL_DOC_R2=/ruta/neutral/R2.pdf 
 Los PDF reales solo se pasan por variables de entorno, reciben nombres neutros
 dentro de la app y no se copian a `.measure/`. La salida por sesión incluye
 cada corrida ordenada, series de memoria, presión del sistema, distribuciones
-numéricas por página y `summary.json`. Corre serial en macOS; Windows nativo
-ventilado queda pendiente al cierre de toda la campaña Mac. El banco no cambia
-defaults ni presets.
+numéricas por página y `summary.json`. Corre serial en macOS, o con un puerto
+ad hoc en Windows nativo (no commiteado; corrido el 2026-09-25, ver
+`docs/roadmap/Reconocedores_OCR_Medicion.md` §"Repetición Windows nativo").
+El banco no cambia defaults ni presets.
 
 Si una suspensión invalida únicamente R2, la tanda previa conserva sus
 artefactos y `validity.json` enumera los run IDs excluidos. Repetir solo los
@@ -305,8 +315,15 @@ trigramas; la segunda precedió ADR-183. Ninguna sustituye la curva del motor
 ni las corridas reales. En todos estos bancos, las rutas, nombres, texto y PDF
 reales permanecen fuera del repo y de `.measure/`; los reportes llevan IDs
 neutros, agregados numéricos y huellas. Una suspensión invalida la tanda
-afectada, que se conserva por separado y se repite. Windows nativo ventilado
-queda pendiente; estos runners corresponden a la campaña Mac.
+afectada, que se conserva por separado y se repite. Estos runners
+corresponden a la campaña Mac; Regex (R1/R2 y el barrido sintético adverso) y
+Grouping se repitieron en Windows nativo el 2026-09-25 — Grouping con un
+puerto ad hoc (no commiteado) por su gate de plataforma y su dependencia de
+`caffeinate`; Regex sin cambios, porque ni `run-regex-real-docs.sh` ni
+`regex-worst-case.ts` tenían gate de plataforma. Ver
+`docs/roadmap/Patron_Email_Regex_Medicion.md` y
+`docs/roadmap/Agrupacion_Difusa_Medicion.md`, secciones "Repetición Windows
+nativo".
 
 ## `memory.spec.ts` — el instrumento de H-10 (ADR-146)
 

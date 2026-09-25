@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-medicion | tarea=Optimizacion_De_Memoria_Plan.md §2ter punto 2 | dependencias=adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=roadmap-medicion | tarea=Optimizacion_De_Memoria_Plan.md §2ter punto 2 | dependencias=adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 (macOS 2026-09-22/23 y Windows nativo 2026-09-25; ambas cerradas) -->
 
 # Atribución de recursos del renderer — medición
 
@@ -16,9 +16,13 @@ los controles sintéticos de MemoryInfra.
 
 **Revisión 2026-09-23:** la campaña MemoryInfra de pipeline ya terminó: 14/14
 corridas completadas. **Punto 2 cerrado con alcance medido y límites explícitos.**
-La validación nativa Windows y su lector de presión quedan como seguimiento
-separado, sin dar por probada esa plataforma.
 Ver «Campaña de pipeline y revisión del plan» más abajo. No hay cambios de producto.
+
+**Revisión 2026-09-25:** la validación nativa Windows (el punto 4 de la
+decisión del planificador, más abajo) ya se corrió — ver «Repetición Windows
+nativo» al final del documento. El lector de presión de Windows sigue sin
+existir (`systemMemoryPressure.ts` no tiene rama `win32`); eso **no** cambió
+con esta corrida, se confirma otra vez.
 
 ## Qué se agregó
 
@@ -298,10 +302,10 @@ entidades para P1 y 11/13 para P2; eso no sustituye la guarda completa de calida
    los ~580 MB WASM+JS ya conocidos, sin prometer recuperar el residuo ni atribuir
    los 556 MB de ArrayBuffer al modelo. Los puntos **1 y 3 quedan para otra sesión**;
    no se implementa empaquetado ni se amplía el banco en esta entrega.
-4. **Seguimiento separado: Windows nativo.** Repetir controles/campaña en ese
-   banco y completar su lector de presión. El punto 2 se cierra con evidencia
-   macOS; Windows no se declara validado ni se infiere su comportamiento.
-   No quedan pruebas locales adicionales necesarias para esta conclusión.
+4. ~~Seguimiento separado: Windows nativo...~~ **Hecho, ver «Repetición
+   Windows nativo» al final.** El lector de presión sigue sin implementarse
+   para `win32` — eso no era responsabilidad de esta campaña, es un cambio de
+   producto que necesitaría su propio ADR si se decide construirlo.
 
 ## Límites y siguiente decisión
 
@@ -335,3 +339,102 @@ Electron 1/1, `pnpm lint`, `pnpm typecheck`, `pnpm test` (2385 tests) y
 modelos, perfiles de rendimiento ni presupuestos M1/M2. Los artefactos crudos de
 medición permanecen en `.measure/`, fuera de Git; el instrumento reproducible y
 los resultados/limitaciones de este informe sí se versionan.
+
+---
+
+## Repetición Windows nativo (2026-09-25)
+
+> Commit `ee5eeba` (`hardening/plan-2026-09`), Windows 11 Pro build 26200,
+> i5-12400, 16,9 GB RAM, nativo (Git Bash, no WSL). Build fresco con
+> `VITE_E2E=1` para el cliente y build normal del shell, igual que exige
+> `tests/perf/README.md`.
+
+**Alcance**: solo la campaña MemoryInfra por CDP (`memory-infra-pipeline.spec.ts`,
+`ANONLY_MEMORY_INFRA_PIPELINE=1`). Es el instrumento portable de esta familia
+— usa `Tracing.requestMemoryDump` por CDP, sin `footprint` (exclusivo de
+macOS, `/usr/bin/footprint` no existe en Windows y nunca se intentó portar).
+El comando de invocación es idéntico al de macOS, sin gate de plataforma que
+levantar ni parche que aplicar. **14/14 corridas terminaron el pipeline sin
+truncamiento, en 7,7 minutos** — prácticamente el mismo tiempo que en macOS.
+
+### Efecto del instrumento (off/trace/dumps)
+
+n=2 por celda, mismo criterio que macOS (sin intervalo estadístico).
+
+| perfil | condición | import → Ready | M2 |
+|---|---|---:|---:|
+| P1 | off | 1885 / 1872 ms | 1660 / 1629 MB |
+| P1 | trace | 1889 / 1853 ms | 1723 / 1730 MB |
+| P1 | dumps | 1911 / 1876 ms | 1769 / 1764 MB |
+| P2 | off | 18.628 / 18.578 ms | 2825 / 2815 MB |
+| P2 | trace | 18.707 / 18.660 ms | 2455 / 3067 MB |
+| P2 | dumps | 18.774 / 18.611 ms | 2970 / 2868 MB |
+
+A diferencia de macOS (donde el delta dumps−off cambiaba de signo en P1), acá
+**dumps queda por encima de off en las dos parejas y en los dos perfiles** —
+P1 +121 MB promedio, P2 +99 MB promedio. Es una señal más limpia que la de
+macOS, pero sigue siendo n=2: no se calibra un overhead fijo con esto, solo
+se registra que el instrumento cuesta memoria de forma consistente en esta
+plataforma. Los tiempos import→Ready no muestran costo perceptible de la
+sonda (P1: 1872-1911 ms en las tres condiciones; P2: 18.578-18.774 ms) — igual
+conclusión que macOS.
+
+`pressureStart`/`pressureEnd` devolvieron `{"available": false, "reason":
+"plataforma \"win32\" sin lector de presión de memoria implementado"}` en
+todas las corridas, tal como anticipaba `systemMemoryPressure.ts` y como ya
+se sabía por `Banco_Windows_Comparativa_Medicion.md` §1. Confirmado, no
+resuelto — sigue pendiente si algún día se decide construir ese lector.
+
+### Retención (frío → caliente → cierre, observaciones a 0/15/60/120 s)
+
+| perfil | frío: total / M2 | caliente: total / M2 |
+|---|---:|---:|
+| P1 | 1862 ms / 1737 MB | 359 ms / 1677 MB |
+| P2 | 18.395 ms / 2941 MB | 17.648 ms / 3692 MB |
+
+P1 caliente es drásticamente más rápido que frío (359 ms contra 1862 ms) por
+reapertura con modelo ya cargado — esperado. **P2 caliente subió de M2 en vez
+de bajar** (3692 contra 2941 MB) — lo opuesto al patrón típico de "caliente
+más liviano". No se investigó la causa; es una observación aislada (n=1 por
+celda en este banco) y no se generaliza sin repetición.
+
+**Mismo bloqueo del proveedor CDP que en macOS, pero se recupera más tarde.**
+En las dos plataformas, los pedidos de volcado durante NER (`cold:ner-load`)
+y varios posteriores fallan con `Tracing.requestMemoryDump timeout 3000ms` o
+se marcan `previous-dump-unavailable` en cascada. macOS recuperó la lectura a
+los 60 s del cierre; **en esta corrida de Windows, `closed:15s` y
+`closed:60s` fallaron los dos, y solo `closed:120s` se recuperó** — en las
+dos secuencias, P1 y P2. Es una diferencia real de cuánto tarda el proveedor
+en volver a responder, no solo un dato que falta.
+
+**El reposo a 120 s no tiene desglose de categorías, a diferencia de
+macOS.** La solicitud `closed:120s` completó a nivel de tiempos (aparece en
+`observations`, no en `errors`), pero su volcado no dejó ningún fragmento
+correlacionable en `categories.json` (`rawMemoryFragmentCount` cuenta 74
+fragmentos en toda la sesión, ninguno con ese `dumpGuid`). Solo se pudo leer
+`ArrayBuffer`/`malloc`/`V8`/footprint del Tab en la línea de base:
+
+| perfil / instante | ArrayBuffer | malloc | V8 | Tab footprint |
+|---|---:|---:|---:|---:|
+| P1 base | 0,01 MB | 23,6 MB | 13,5 MB | 63,7 MB |
+| P1 cierre +120 s | no disponible (correlación falló) | — | — | — |
+| P2 base | 4,63 MB | 22,8 MB | 53,4 MB | 114,9 MB |
+| P2 cierre +120 s | no disponible (correlación falló) | — | — | — |
+
+No se afirma que la memoria se retuvo ni que se liberó a los 120 s en esta
+plataforma — simplemente no hay dato. La causa más probable, sin verificar,
+es que el correlador `window-and-pid` (el mismo mecanismo que en macOS
+distingue targets) no encuentra ventana viva para atar ese volcado, mucho
+después de `closeDocument()`; no se investigó más allá de esta observación.
+
+### Conclusión
+
+El punto 2 sigue cerrado con la caracterización macOS — esta repetición no
+reabre esa decisión ni cambia ningún presupuesto. Lo que aporta: el
+instrumento **es portable** (corre igual de rápido, sin parches), el efecto
+del instrumento es igual de pequeño y no bloqueante para el tiempo de import,
+y el lector de presión de Windows sigue sin existir. La diferencia nueva —
+que el proveedor CDP tarda más en recuperarse tras el bloqueo de NER, y que
+el reposo a 120 s no deja categorías legibles en esta plataforma — queda
+documentada como límite de esta plataforma, no como hallazgo que cambie
+producto.
