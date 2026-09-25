@@ -84,3 +84,72 @@ export function candidateTypes(conflict: Conflict): ReadonlyArray<EntityType> {
 export function spellingChoices(conflict: Conflict): ReadonlyArray<string> {
   return [...new Set(conflict.candidates.map((candidate) => candidate.value))];
 }
+
+export interface ManualOverlapCandidates {
+  readonly manual: ConflictCandidate;
+  readonly detected: ConflictCandidate;
+}
+
+/**
+ * ADR-174 §4 / `Components.md` §6.3: los dos candidatos que
+ * `ManualOverlapDialog` muestra — la ocurrencia manual retenida
+ * (`DetectionSource.Manual`, "lo que marcaste") contra la detección con la
+ * que chocó ("lo que ya estaba detectado"). Solo tiene sentido en un
+ * conflicto con `Conflict.heldManual` (`03_Data_Model.md` §15); en cualquier
+ * otro no hay por qué haber un candidato `Manual`, y se devuelve `null` en
+ * vez de asumir una forma que el conflicto no tiene.
+ */
+export function manualOverlapCandidates(conflict: Conflict): ManualOverlapCandidates | null {
+  const manual = conflict.candidates.find(
+    (candidate) => candidate.source === DetectionSource.Manual,
+  );
+  const detected = conflict.candidates.find(
+    (candidate) => candidate.source !== DetectionSource.Manual,
+  );
+  if (manual === undefined || detected === undefined) return null;
+  return { manual, detected };
+}
+
+/**
+ * ADR-175 §4: los conflictos `heldManual` sin resolver de **una** fila
+ * (`groupId`), en el orden en que aparecen en `conflicts` — un mismo grupo
+ * detectado puede chocar con más de un agregado manual a la vez. `ConflictBadge`
+ * los usa para decidir si abre `ManualOverlapDialog` (con todos) en vez de
+ * `ConflictDialog`.
+ */
+export function heldManualConflictIdsForGroup(
+  conflicts: ReadonlyArray<Conflict>,
+  groupId: string,
+): ReadonlyArray<string> {
+  return conflicts
+    .filter(
+      (conflict) =>
+        conflict.groupId === groupId && conflict.heldManual === true && !conflict.resolved,
+    )
+    .map((conflict) => conflict.id);
+}
+
+/**
+ * ADR-175 §1 / `Components.md` §3.5 (menú ⋯, "Eliminar entidad"): si eliminar
+ * el grupo **detectado** de un conflicto `heldManual` lo resuelve solo —se
+ * oculta la ocurrencia retenida en vez de quedar colgada—, el toast de
+ * "Eliminar entidad" lo dice. Puro: compara el conflicto retenido de ese
+ * grupo antes del pedido contra el mismo id después; si pasó a `resolved`,
+ * devuelve el valor de lo que el usuario había marcado.
+ */
+export function removedGroupOverlapReveal(params: {
+  readonly conflictsBefore: ReadonlyArray<Conflict>;
+  readonly conflictsAfter: ReadonlyArray<Conflict>;
+  readonly groupId: string;
+}): { readonly value: string } | null {
+  const before = params.conflictsBefore.find(
+    (conflict) =>
+      conflict.groupId === params.groupId && conflict.heldManual === true && !conflict.resolved,
+  );
+  if (before === undefined) return null;
+  const after = params.conflictsAfter.find((conflict) => conflict.id === before.id);
+  if (after === undefined || !after.resolved) return null;
+  const candidates = manualOverlapCandidates(before);
+  if (candidates === null) return null;
+  return { value: candidates.manual.value };
+}

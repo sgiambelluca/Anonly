@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=ux | dependencias=00_Project_Vision.md,ui/React_Client.md,ADR-011-Grouping-First.md,ADR-012-Replacement-Modes.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-150-La-Pantalla-De-Escaneo-Dura-Lo-Que-Dura-El-Escaneo.md,adr/ADR-151-La-Primera-Pagina-Ya-Esta-Dibujada-Cuando-Se-Abre-El-Panel.md,adr/ADR-152-La-Pantalla-De-Escaneo-Dice-En-Que-Pagina-Va.md | audiencia=IA-implementador-ui+humanos | fase=4 (§3.1 aclarado en fase 10, ADR-036 §9; §3.3/§5.4 en fase 10.5 por ADR-057 —tokens abreviados— y ADR-058 —el reemplazo no se derrama, marca de degradado—, §8.2 por ADR-059 —checkbox de referencia de marcadores—; §3.3/§5.4 en fase 10.6 por ADR-060 —género— y por ADR-071/ADR-072 —el control de género pasa a ser un botón de tres estados visible solo en `placeholder`/`synthetic`, con la marca de "sin determinar" fusionada adentro, y el sintético respeta el género y deja de cambiar solo—; §5.4b en fase 10.7 por ADR-061 —agregado manual de entidades—; §5.4 en fase 10.9 por ADR-076 —un texto de reemplazo escrito a mano se conserva, qué lo reemplaza y cómo se vuelve al automático— y ADR-074 §6 —la marca de degradado se enciende más seguido porque ahora mide contra el rectángulo real—; §1/§2/§3/§4/§5/§7/§8/§11 reescritos en el rediseño post-10.9 por **ADR-087** —tres momentos en vez de cuatro paneles: un solo visor con toggle, el modo de reemplazo en tres niveles del árbol, el panel de Reglas retirado, el export sin controles técnicos, y la pantalla de escaneo con piso y techo—; §7.2/§7.3 en fase 11 por ADR-150/ADR-151/ADR-152 — la pantalla de escaneo pierde el techo y suelta cuando el stage es terminal, precalienta la página 1 para no entrar a un panel vacío, y muestra progreso real por etapa incluido el OCR) -->
+<!-- CONTEXT: scope=ux | dependencias=00_Project_Vision.md,ui/React_Client.md,ADR-011-Grouping-First.md,ADR-012-Replacement-Modes.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-150-La-Pantalla-De-Escaneo-Dura-Lo-Que-Dura-El-Escaneo.md,adr/ADR-151-La-Primera-Pagina-Ya-Esta-Dibujada-Cuando-Se-Abre-El-Panel.md,adr/ADR-152-La-Pantalla-De-Escaneo-Dice-En-Que-Pagina-Va.md,adr/ADR-168-Pantallas-De-Carga-Y-Escaneo-Tras-Pruebas-De-Usuario.md,adr/ADR-169-La-Pantalla-De-Trabajo-Tras-Pruebas-De-Usuario.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,adr/ADR-175-Un-Choque-Manual-No-Queda-Colgado.md,adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md,adr/ADR-177-Una-Entidad-Eliminada-No-Ocupa-Lugar.md,adr/ADR-178-Lo-Contenido-Se-Oculta-Solo-Si-Su-Contenedor-Se-Elimina.md | audiencia=IA-implementador-ui+humanos | fase=4 (§3.1 aclarado en fase 10, ADR-036 §9; §3.3/§5.4 en fase 10.5 por ADR-057 —tokens abreviados— y ADR-058 —el reemplazo no se derrama, marca de degradado—, §8.2 por ADR-059 —checkbox de referencia de marcadores—; §3.3/§5.4 en fase 10.6 por ADR-060 —género— y por ADR-071/ADR-072 —el control de género pasa a ser un botón de tres estados visible solo en `placeholder`/`synthetic`, con la marca de "sin determinar" fusionada adentro, y el sintético respeta el género y deja de cambiar solo—; §5.4b en fase 10.7 por ADR-061 —agregado manual de entidades—; §5.4 en fase 10.9 por ADR-076 —un texto de reemplazo escrito a mano se conserva, qué lo reemplaza y cómo se vuelve al automático— y ADR-074 §6 —la marca de degradado se enciende más seguido porque ahora mide contra el rectángulo real—; §1/§2/§3/§4/§5/§7/§8/§11 reescritos en el rediseño post-10.9 por **ADR-087** —tres momentos en vez de cuatro paneles: un solo visor con toggle, el modo de reemplazo en tres niveles del árbol, el panel de Reglas retirado, el export sin controles técnicos, y la pantalla de escaneo con piso y techo—; §7.2/§7.3 en fase 11 por ADR-150/ADR-151/ADR-152 — la pantalla de escaneo pierde el techo y suelta cuando el stage es terminal, precalienta la página 1 para no entrar a un panel vacío, y muestra progreso real por etapa incluido el OCR) -->
 
 # Anonly — UX Guidelines
 
@@ -20,6 +20,8 @@
 | UX-7 | **Defaults seguros**: `placeholder` por defecto (más informativo), `enabled = true` por defecto. |
 | UX-8 | **Sin sorpresas en el export**: pre-flight check muestra cuántos grupos se anonimizarán y cuántas páginas. (El "tamaño estimado" que pedía la redacción anterior nunca se implementó: no hay fórmula documentada para estimarlo — `core/Export_Engine.md` §12 solo da un rango para una combinación fija.) |
 | UX-9 | **Accesibilidad desde el inicio**: teclado, ARIA, contraste, focus visible. |
+| UX-10 | **Diseño estable** (ADR-169 §1): ningún texto, aviso, error, globo ni control que aparezca o desaparezca agrega alto o ancho a un campo ni empuja a sus vecinos. Los mensajes que van y vienen tienen una **ranura de alto fijo** con el espacio de su estado más largo (texto neutro o vacía cuando no hay nada que decir); menús, selectores y globos son **flotantes**; los botones cuyo texto cambia tienen **ancho mínimo fijo**; contadores y columnas de la lista tienen **ancho fijo**; un recuadro con varios estados no cambia de tamaño entre ellos. Se revisa en cada PR de `apps/react-client`. |
+| UX-11 | **Toda edición se deshace** (ADR-172): cada edición de entidades entra a una pila de deshacer/rehacer exacta, recorrida con `Ctrl/Cmd+Z` y `Ctrl/Cmd+Y` (`Ctrl/Cmd+Shift+Z`). Las acciones del menú ⋯ y los agregados además confirman con un toast con **"Deshacer"**. Lleva UX-4 de "reversible" a "reversible en un paso". |
 
 ---
 
@@ -43,11 +45,27 @@ sino para que los otros tres momentos dejen de robarle espacio.
 
 ### 2.1 ① Cargar
 
-Pantalla completa. Sin panel de entidades ni de reglas montados.
+Pantalla completa. Sin panel de entidades ni de reglas montados. **Organizada en cajas**
+(ADR-168 §1), porque sin contenedores la pantalla se leía vacía:
 
-- Logo y una frase de qué hace la herramienta.
-- **Zona de carga funcional**: drop de archivo **y** botón. Los dos operativos.
-- Tres features breves (100 % local / detección automática / export no recuperable).
+- **Barra superior**: logo, nombre y el acceso a Configuración (ADR-125 §1).
+- **Caja principal**: una frase de qué hace la herramienta y la **zona de carga funcional**: drop de
+  archivo **y** botón, los dos operativos, con cuatro estados en el mismo recuadro (ADR-168 §2):
+
+  | Estado | Cuándo | Qué dice |
+  |---|---|---|
+  | Reposo | sin archivo | "Arrastrá un PDF acá" · "Elegir archivo" · "Solo archivos PDF" (borde punteado animado) |
+  | Arrastrando encima | `dragover` | "Soltá el archivo para abrirlo" · "Se abre acá mismo, no se sube a ningún lado" |
+  | Abriendo | entre el drop y `DOCUMENT_IMPORTED` | "Abriendo el documento…" y el nombre del archivo; "Elegir archivo" deshabilitado |
+  | Error | archivo rechazado o fallo de importación (§7.5) | "No se pudo abrir el archivo", el motivo y "Elegir otro archivo" |
+
+  El recuadro **no cambia de tamaño** entre estados (§1, diseño estable).
+- **Caja "Cómo funciona"**: animación en tres fases sincronizada con tres pasos (*Cargá el PDF ·
+  Revisá lo detectado · Exportá la copia*).
+- **Tres tarjetas** (todo local / detección automática / no se puede deshacer). Dicen **qué
+  garantiza** la herramienta; no repiten los pasos de "Cómo funciona", que dicen qué hace el usuario.
+- **Pie de página**: versión y licencia, "Acerca de…" (créditos y código fuente, ADR-168 §3) y
+  "Reportar un problema".
 
 > La versión anterior mostraba esta pantalla como "Hero" **dentro** del panel derecho, con el
 > árbol de entidades vacío a la izquierda ocupando un tercio del ancho. Además su dropzone no
@@ -118,42 +136,78 @@ ensanchar se vuelve sola al panel de trabajo, con el documento y las ediciones i
 ## 3. Árbol de entidades
 
 ```
-┌────────────────────────────────────────────────────────────────┐
-│  Todo el documento          [ Etiquetar                    ▾ ] │  ← §3.4 nivel documento
-└────────────────────────────────────────────────────────────────┘
-  ▾ ☑ Personas (3)             ( Etiquetar                   ▾ )   ← §3.4 nivel tipo
-      ☑ Juan Pérez (14)   ♂      Etiquetar                         ← heredado, sin control
-      ☑ María Gómez (6)   ○      Etiquetar
-      ☑ Carlos López (2)  ♂      Tapar con negro             ▾     ← §3.4 nivel fila
-  ▾ ☑ DNI (3)                  ( Varios                      ▾ )   ← §3.4b estado mixto
-      ☑ 34.567.891               Ocultar parcialmente
-      ☑ 18.445.212               Ocultar parcialmente
-      ☑ 42.998.103               Tapar con negro             ▾
+┌────────────────────────────────────────────────────────────────────────┐
+│  Todo el documento                               [ Etiquetar      ▾ ]  │  ← §3.4 nivel documento
+│  ⓘ Se aplica a todas las entidades.                                    │     (segunda línea fija, §3.4d)
+└────────────────────────────────────────────────────────────────────────┘
+   N.º  ENTIDAD                    AVISOS  APAR.        REEMPLAZO           ← encabezado de columnas
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ ▾ ☑ • PERSONAS  (5)                                     ( Etiquetar ▾ )    ← §3.4 nivel tipo (franja)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   ☐ 01  Pablo Roman               [?]       3   [♂]    Etiquetar ▾   ⋯   ← sugerida, apagada
+   ☑ 02  María Laura Fernández               4   [♀]    Etiquetar ▾   ⋯
+   ☑ 04  Carlos Gómez              [?][]↔[]  2          Tapar negro ▾ ⋯   ← ranura de género vacía (§3.3)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ ▾ ☑ • DNI  (2)                                          ( Varios    ▾ )    ← §3.4b estado mixto
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   ☑ 01  30.456.789                          1          Ocultar parcial ▾ ⋯
 ```
+
+> **Rediseñado por ADR-169 §2** tras las pruebas de usuario de la 0.9.2: los tipos no se distinguían
+> de sus filas, las filas no se distinguían entre sí (el usuario cambiaba el modo de la fila
+> equivocada) y el número de cada entidad no aparecía en ningún lado.
 
 ### 3.1 Elementos del árbol
 
-- **Cabecera de tipo**: `▶ <Tipo> (<n grupos>)`. Expandible/colapsable. Click en la cabecera expande/colapsa. Un checkbox en la cabecera habilita/deshabilita todos los grupos del tipo (cascade).
-- **Grupo**: `☑ <canonicalValue> (<n ocurrencias>) [modo ▾] [⋯]`.
+- **Encabezado de columnas**: **N.º · Entidad · Avisos · Apar. · Reemplazo**, fijo arriba del árbol.
+  Existe para que el N.º no se confunda con el contador de apariciones.
+- **Orden**: control segmentado **Aparición | A–Z** junto al filtro (ADR-169 §2). Aparición =
+  `indexInType` ascendente; A–Z = `canonicalValue` con `localeCompare(…, "es")`. **Solo
+  presentación**: no cambia `indexInType` ni emite nada al Core.
+- **Franja de tipo**: `▾ <TIPO> (<n grupos>)`. Fondo gris con apenas el color del tipo (6 % en claro,
+  7 % en oscuro) y **bordes superior e inferior gruesos** (`--color-border-strong`); queda fija arriba
+  mientras se recorren sus filas. Click en la franja expande/colapsa. Un checkbox en la franja
+  habilita/deshabilita todos los grupos del tipo (cascade).
+- **Grupo** (fila): `☑ N.º <canonicalValue> [avisos] <n> [género] [modo ▾] [⋯]`, separada de la
+  siguiente por un borde fino. **Todas las columnas tienen ancho fijo** salvo el nombre (UX-10). **La
+  fila con un menú abierto se resalta** con fondo y contorno de acento.
   - Checkbox: habilita/deshabilita el grupo. La UI emite `GROUP_UPDATE_REQUESTED` con `patch.enabled` (canal `ui`); `GROUP_TOGGLED` es el evento que **Grouping** emite como respuesta (`04_Event_System.md` §6/§10 — aclaración ADR-036 §9).
-  - `<canonicalValue>`: el valor representativo del grupo. Click abre un popover con aliases, ocurrencias por página y opción de editar `canonicalValue`.
-  - `(<n ocurrencias>)`: badge con `members.length`. No es editable.
-  - `[modo ▾]`: selector de `ReplacementMode`, con las etiquetas de §3.5. Cambio emite `GROUP_UPDATE_REQUESTED` con `patch.replacementMode`. **Presentación ghost** (ADR-087 §3.1): sin borde ni fondo hasta el hover, mostrando en gris el modo heredado del tipo. Gana borde **solo** cuando la fila fue puesta a mano — ahí el borde *es* la señal de excepción.
-  - `[⋯]`: menú contextual con: Fusionar con…, Dividir, Ver ocurrencias, Editar valor canónico, Eliminar grupo.
-  - **El token de reemplazo (`[PERSONA 01]`) no se muestra hasta `stage === Ready`** (ADR-087 §6.1): durante el escaneo cada entidad nueva renumera los índices, y el token sería el único lugar donde esa renumeración quedaría visible.
+  - **N.º**: `indexInType` con dos dígitos (`04`), en gris chico. Es el número del token
+    (`[PERSONA 04]`), así que puede cambiar cuando el Core renumera (§5.4b); se muestra el vigente.
+  - `<canonicalValue>`: el valor representativo del grupo; absorbe el encogido.
+  - **Avisos** (§3.3): columna de ancho fijo; dos avisos juntos entran sin correr nada.
+  - `<n>`: `members.length`, alineado a la derecha. No es editable.
+  - **Género** (§3.3): ranura siempre reservada; el botón aparece solo donde ADR-071 lo dice.
+  - `[modo ▾]`: selector de `ReplacementMode` (§3.4, §3.5). Cada opción muestra título, una descripción fija y la **vista previa exacta** del resultado (`EntityGroup.replacementPreviews`, ADR-170); elegir otra solo mueve el tilde (ADR-169 §6). **Presentación ghost** (ADR-087 §3.1): sin borde ni fondo hasta el hover, mostrando en gris el modo heredado del tipo. Gana borde **solo** cuando la fila fue puesta a mano — ahí el borde *es* la señal de excepción.
+  - `[⋯]` (ADR-169 §10): **Ver apariciones · Editar reemplazo… · Cambiar tipo… · Fusionar con… · Dividir… · (separador) · Eliminar entidad** (en rojo, ADR-171). "Restaurar valor calculado" aparece solo si `replacementValueUserSet` (ADR-078). Toda acción confirmada muestra un toast con "Deshacer" (UX-11).
+  - **El token de reemplazo (`[PERSONA 01]`) y el N.º no se muestran hasta `stage === Ready`** (ADR-087 §6.1): durante el escaneo cada entidad nueva renumera los índices, y el token sería el único lugar donde esa renumeración quedaría visible.
+- **Botón "Agregar entidad"**: primario, en la cabecera del panel (ADR-169 §2).
+- **Nota al pie del panel**: *"¿Falta algo? Seleccioná el texto con clic y arrastre en el PDF
+  original, o buscalo con la lupa"*, con **X** para cerrarla (persistido en `settings.store`).
 
 ### 3.2 Interacciones
 
-- **Fusionar**: el usuario selecciona 2+ grupos del mismo tipo (via checkboxes auxiliares o drag) y click "Fusionar" → `GROUP_MERGE_REQUESTED`. El resultante conserva el menor `indexInType`.
-- **Dividir**: click en un grupo → "Dividir" → modal con lista de ocurrencias (con bbox y página) → selecciona un subconjunto → `GROUP_SPLIT_REQUESTED`. Las seleccionadas van a un grupo nuevo.
-- **Buscar**: input de búsqueda filtra grupos por `canonicalValue` o `aliases`. Atajo `Cmd/Ctrl+F`.
+- **Fusionar** (ADR-169 §10): ⋯ → "Fusionar con…" → diálogo con la entidad de origen, una lista de **alto fijo** con filtro y casillas para elegir **una o varias** del mismo tipo, y una caja **"Resultado"** (nombre, N.º, apariciones y token, calculados por el Core con `previewEdit`, ADR-170). Confirmar emite un `GROUP_MERGE_REQUESTED` por cada una (`mergePlan`). El resultante conserva el menor `indexInType` y el nombre más frecuente.
+- **Dividir** (ADR-169 §10): ⋯ → "Dividir…" → diálogo con cada aparición (página, la frase alrededor, origen *Detectado / Agregado por vos*) → se marcan las que van a una entidad nueva → dos tarjetas "Se quedan en N.º 02" → "Pasan a una nueva: Persona N.º NN" (N.º por `previewEdit`) → `GROUP_SPLIT_REQUESTED`. Si se marcan todas, el error ocupa la ranura de la nota informativa (UX-10).
+- **Editar reemplazo** y **Cambiar tipo**: ver `Components.md` §3.4e y §3.8. Todas estas acciones confirman con un toast con "Deshacer" (UX-11).
+- **Filtrar**: input que filtra grupos por `canonicalValue` o `aliases`. Atajo `Cmd/Ctrl+F`. Junto a él, el orden **Aparición | A–Z** (§3.1).
 - **Colapsar todo / expandir todo**: botones en la cabecera del panel.
 
 ### 3.3 Estados
 
 - **Grupo habilitado**: checkbox marcado, texto normal.
 - **Grupo deshabilitado**: checkbox desmarcado, texto atenuado.
-- **Grupo con conflicto**: icono ⚠ al lado del nombre. Click abre el conflicto.
+- **Los avisos** (ADR-169 §3) van en la columna de avisos, de ancho fijo, cada uno con **forma y color propios** — antes había dos "!" que significaban cosas distintas:
+
+  | Aviso | Forma | Color | Significado |
+  |---|---|---|---|
+  | Sugerida (ADR-094) | `?` | ámbar (`--color-warning-strong`) | el detector no está seguro de que sea un dato personal |
+  | Conflicto | una **Y que se abre en dos** | rojo (`--color-error`) | hay dos lecturas posibles del dato |
+  | Espacio justo (ADR-062) | **`]↔[`**, flecha doble contra dos paredes | naranja (`--color-space`) | el reemplazo no entra y se achicó |
+
+  Botones de 22 px con el fondo de su color al ~12 %; "espacio justo" mide **26×22** para que la
+  flecha se lea. Cada uno abre su `Tooltip` (título + frase) y, al hacer clic, su acción.
+- **Grupo con conflicto**: el aviso de conflicto de la tabla. Click abre el conflicto.
 - **Grupo con el valor de reemplazo editado a mano** (ADR-078): punto azul al lado del nombre cuando `EntityGroup.replacementValueUserSet === true`, con `title` "Valor de reemplazo editado manualmente". El menú contextual del grupo ofrece **"Restaurar valor calculado"** solo en ese estado. Existe porque un `replacementValue` escrito a mano es **indistinguible** de uno calculado —`[P1]` es `[P1]`—, y desde ADR-076 sobrevive a todo recálculo automático: sin el punto, el usuario no puede revisar ni deshacer lo que editó antes de exportar. Es además el remedio que ADR-058 §4 y ADR-062 le ofrecen ante un reemplazo degradado, así que se usa de rutina.
 - **Grupo con el `replacementMode` distinto del default de las reglas**: **no implementado**, y no lo estará sin un dato nuevo. Calcularlo exige `resolveMode(group, rules)`, que es la resolución de reglas de Grouping: la UI tendría que reimplementarla, que es fuera de su rol (`React_Client.md` U-3). Nota: esta señal era el paréntesis del estado "Grupo editado manualmente" en la redacción anterior, que **conflacionaba** dos cosas distintas — la de arriba (el valor lo escribió el usuario) y esta (el modo difiere del default). ADR-078 §Contexto 1 las separa. Esta es además la menos urgente de las dos: el modo ya se ve, en el `Select` de la propia fila.
 - **Grupo con reemplazo degradado** (ADR-058 §7): marca al lado del nombre cuando alguna de sus ocurrencias quedó por debajo del umbral de legibilidad — el token no entraba, no se pudo repintar la línea y hubo que encogerlo. Click ofrece las tres salidas: editar el texto de reemplazo a mano, pasar el grupo a `redact` (que nunca tiene problema de espacio) o deshabilitarlo. **La marca existe para que el usuario sepa dónde mirar**: sin ella, el token quedó chico en la página 7 y solo se descubre haciendo zoom página por página. Por eso mismo tiene umbral y no aparece en cada fallback — una señal que aparece siempre no es una señal.
@@ -162,7 +216,7 @@ ensanchar se vuelve sola al panel de trabajo, con el documento y las ediciones i
 
 - **Un texto de reemplazo escrito a mano se conserva** (ADR-076): es la primera salida que ofrece la marca de degradado, y desde ADR-076 es confiable — no lo pisa la renumeración de los grupos al terminar el análisis, ni la inferencia de género, ni agregar entidades a mano, ni un re-análisis. **Lo único que lo reemplaza es cambiar el modo de reemplazo de ese grupo**, porque el texto que el usuario escribió lo escribió para un modo: un grupo en `mask` mostrando `[P1]` diría algo que nadie pidió. Eso incluye una **regla** de tipo o global que cambie el modo efectivo del grupo, que es el único caso en que el texto se pierde sin que el usuario haya tocado ese grupo.
   **Cómo se vuelve al texto automático**: cambiando el modo y volviendo al anterior. No hay un botón de "restaurar" y es deliberado — sería un control permanente más en la fila más común del árbol, para algo que se hace con el selector que ya está ahí (ADR-076 §5). Si el uso real muestra que hace falta, es una afordancia de UI que no toca el Core.
-- **Grupo `Person` y su género** (ADR-060 §5-§6, rediseñado por ADR-071 §1-§4): un **botón chico de tres estados** —♀ / ♂ / círculo sin apéndice— que aparece **solo cuando el modo es `placeholder` o `synthetic`**, que son los únicos en los que el género cambia lo que se imprime. En `mask` y `redact` no aparece: sería una palanca sin nada del otro lado.
+- **Grupo `Person` y su género** (ADR-060 §5-§6, rediseñado por ADR-071 §1-§4; forma por ADR-169 §4): un **botón chico de tres estados, con borde** (punteado en el neutro), en una **ranura siempre reservada** —si el modo no lo usa, la ranura queda vacía y nada se corre— —♀ / ♂ / círculo sin apéndice— que aparece **solo cuando el modo es `placeholder` o `synthetic`**, que son los únicos en los que el género cambia lo que se imprime. En `mask` y `redact` no aparece: sería una palanca sin nada del otro lado.
   - Muestra desde el arranque el género que el sistema infirió, sin que el usuario haga nada. Un click cicla al siguiente estado.
   - **El estado neutro es la marca de "género sin determinar"**, atenuado. No hay un segundo icono al lado: la marca y el control son la misma cosa, y por eso "click abre el selector" pasa a ser simplemente "click cambia el valor". **No comparte tratamiento visual con la marca de degradación**: aquélla dice "esto se ve mal", ésta dice "falta un dato y el documento se entendería mejor con él". El grupo se renderiza perfecto.
   - **El neutro no es un símbolo de identidad de género.** Significa "sin determinar" —falta el dato, o el nombre no lo determina—, que es una propiedad del nombre y no de la persona (ADR-060 §9).
@@ -280,66 +334,56 @@ y 12 entidades que modificaste a mano.
 **El undo lleva snapshot**: deshacer un barrido tiene que **restaurar las reglas que borró**, no
 solo quitar la que creó.
 
-### 3.3b Qué más lleva "Deshacer"
+### 3.3b Deshacer: toda edición, exacto (ADR-172)
 
-El criterio de arriba —*una acción de un click que cambia muchas filas, o que pisa algo que el
-usuario escribió, necesita una salida de un click*— no aplica solo al modo de reemplazo. Las
-demás ediciones del árbol que lo cumplen también llevan toast con "Deshacer":
+**Toda edición de entidades se deshace**, con `Ctrl/Cmd+Z` y se rehace con `Ctrl/Cmd+Y` (o
+`Ctrl/Cmd+Shift+Z`): habilitar/deshabilitar, el modo en sus tres niveles, el género, editar el valor de
+reemplazo, restaurar el calculado, cambiar tipo, fusionar, dividir, eliminar, agregar (por las tres
+vías) y resolver un conflicto. Una acción del usuario es **un** paso, aunque por dentro emita varios
+pedidos.
 
-| Acción | Por qué lo lleva |
-|---|---|
-| Habilitar/deshabilitar una fila | decide si ese dato se anonimiza o queda a la vista; se hace de a muchas y en cadena |
-| Habilitar/deshabilitar un tipo (cascada, o `Space` sobre la cabecera) | un click apaga decenas de grupos, y por teclado ni siquiera hay un diálogo de por medio |
-| Editar el valor de reemplazo a mano | pisa el valor anterior, escrito o calculado |
+**Es exacto porque no se construye con la operación contraria.** Hasta ADR-172 esta sección explicaba
+por qué fusionar, dividir, reclasificar y agregar a mano no se podían deshacer: la inversa devolvía un
+grupo con otro `id` y otro número, o sea algo parecido y no lo mismo, y un "Deshacer" así miente. Esa
+razón sigue siendo cierta, y por eso el deshacer **no invierte operaciones**: vuelve a un **punto de
+restauración** del estado que guarda el Core antes de cada edición. El grupo vuelve con el mismo `id`,
+el mismo número y el mismo token.
 
-El undo de la cascada **restituye grupo por grupo su valor anterior**, no un valor global: la
-mitad de las filas podía estar ya en ese estado, y devolverlas a todas al mismo lado cambiaría
-cosas que el usuario no tocó. Por la misma razón el contador del toast cuenta solo los grupos que
-de verdad cambiaron.
+**Toasts con "Deshacer"**: toda acción del menú ⋯ y todo agregado muestran uno, con la pista `Ctrl+Z`
+(UX-11). Los barridos de modo de tipo y documento y el cambio de habilitado ya lo tenían y lo
+conservan. **La fila sigue sin toast al cambiar de modo** (§3.4d: es la acción más frecuente y es
+autoevidente), pero ese cambio también se deshace con `Ctrl+Z`. Hay un solo toast de edición a la vez:
+el botón deshace la última edición, que es siempre la que el toast nombra.
 
-Cuando el valor de reemplazo anterior era el **calculado** por el Core, el undo no lo reescribe:
-re-aplica el modo vigente, que es lo que lo recalcula. Reescribirlo lo dejaría marcado como
-escrito a mano (ADR-078), y el punto de la fila mentiría desde ahí en adelante.
+**Qué no se deshace**: ordenar o filtrar la lista, el zoom, la vista, Configuración y exportar — no son
+ediciones del documento. **La pila no cruza un re-análisis**: cambiar los idiomas de OCR con un
+documento abierto la vacía, y el diálogo de re-análisis lo dice.
 
-**Cuatro acciones siguen sin deshacer, y no por olvido.** Las cuatro comparten la misma razón de
-fondo: el Core no tiene una inversa exacta, y un "Deshacer" que devuelve algo parecido y no lo
-mismo miente.
-
-- **Agregar una entidad a mano** necesitaría borrar el grupo, y no existe pedido de borrado en
-  `core/Contracts.md`: `ENTITY_GROUP_REMOVED` lo emite el Grouping Engine por su cuenta (fusión,
-  `dropOccurrences`), nunca a pedido de la UI. Agregarlo es cambio de contrato — ADR primero.
-- **Fusionar** y **dividir** se invertirían con la operación contraria, pero eso no restituye el
-  estado anterior: el grupo que reaparece es uno nuevo, con otro `id` y otro `indexInType`
-  (`core/Grouping_Engine.md` §13 caso 5). El usuario recuperaría las ocurrencias separadas con
-  otro número de token.
-- **Reclasificar** parece el caso trivial —volver al tipo anterior— y es el que más engaña.
-  `changeGroupType` renumera con `nextIndex`, que es monótono, así que el grupo vuelve con otro
-  número de token y con él cambia el `replacementValue` de `placeholder`/`synthetic`; re-escribe
-  `typeCorrections` (ADR-085 §1b) en vez de borrar la entrada que antes no existía; deja
-  `absorbedTypes` con los dos tipos para siempre; y al salir de `Person` apaga
-  `personGenderUserSet`, así que el "undo" reemplazaría **en silencio** una elección explícita de
-  género por una inferida. Su fricción es el diálogo, no un toast.
-
-**La franja de documento se enciende cuando tiene algo que destruir**:
+**La franja de documento se enciende cuando tiene algo que destruir, sin crecer** (forma
+reemplazada por ADR-169 §5 — antes era un borde izquierdo de acento más una línea que aparecía, y esa
+línea empujaba el árbol hacia abajo):
 
 ```
 sin ajustes previos:
 ┌────────────────────────────────────────────────────────┐
-│   Todo el documento    [ Etiquetar              ▾ ]    │
+│  Todo el documento          [ Etiquetar         ▾ ]    │
+│  ⓘ Se aplica a todas las entidades.                    │
 └────────────────────────────────────────────────────────┘
 
-con ajustes propios:
+con ajustes propios (caja entera en ámbar):
 ┌────────────────────────────────────────────────────────┐
-│ ▌ Todo el documento    [ Etiquetar              ▾ ]    │
-│   ⚠ 5 categorías y 12 entidades con ajustes propios    │
+│  Todo el documento          [ Etiquetar         ▾ ]    │
+│  ⚠ 12 entidades tienen modo propio: cambiar este modo  │
+│    las pisa.                                           │
 └────────────────────────────────────────────────────────┘
 ```
 
-El color aparece cuando significa algo, y el resumen entera del riesgo **antes** de abrir el menú.
-**No se señala solo con color** (ícono + texto además del acento). **Ámbar y no rojo**: la acción
-es reversible y no toca el documento, solo los ajustes; el rojo queda para errores y confirmaciones
-irreversibles. Usa `--color-warning-strong` (`Components.md` §10), **no** `--color-warning`, que no
-llega al contraste mínimo.
+La segunda línea **está siempre** (UX-10) y solo cambia su texto y color. El color aparece cuando
+significa algo, y el resumen entera del riesgo **antes** de abrir el menú. **No se señala solo con
+color** (ícono + texto además del acento). **Ámbar y no rojo**: la acción es reversible y no toca el
+documento, solo los ajustes; el rojo queda para errores y confirmaciones irreversibles. El texto usa
+`--color-warning-strong` (`Components.md` §10), **no** `--color-warning`, que no llega al contraste
+mínimo.
 
 ### 3.5 Cómo se nombran los modos, y el resto del vocabulario
 
@@ -371,13 +415,13 @@ hace cada modo— y el **nombre accesible** usan siempre la forma larga.
 que el usuario tiene es qué le va a pasar *a su dato*. En el selector de nivel tipo usa el primer
 grupo del tipo; en el de nivel documento es genérico.
 
-> **Solo el modo vigente muestra un valor exacto** (`replacementValue`, ya resuelto por Grouping).
-> Los otros tres se describen de forma esquemática y **no se inventan**: el token de `placeholder`
-> sale de la escalera de ADR-057 y del género de ADR-060, el formato de `mask` de
-> `MASK_FORMAT_BY_TYPE` —que vive en un motor, y la UI no puede importar motores (P-1)—, y el de
-> `synthetic` del sintetizador de ADR-072 §1. Un ejemplo *casi* correcto es peor que uno
-> declaradamente esquemático: la primera implementación mostraba `[PERSONA 01]` para **todos** los
-> tipos, así que un DNI previsualizaba como si fuera una persona.
+> **Los cuatro modos muestran su valor exacto** (ADR-170): vienen calculados por Grouping en
+> `EntityGroup.replacementPreviews`, con la misma función que `replacementValue`. Hasta ADR-170 solo
+> el modo vigente era exacto y los otros tres se describían de forma esquemática, porque sus formatos
+> viven en un motor y la UI no puede importar motores (P-1) ni reimplementarlos (U-3): un ejemplo
+> *casi* correcto es peor que ninguno — la primera implementación mostraba `[PERSONA 01]` para
+> **todos** los tipos. Cada opción lleva además una descripción fija, y elegir otra solo mueve el
+> tilde (ADR-169 §6).
 
 ---
 
@@ -430,7 +474,14 @@ layout en vez de explicarse en un tooltip.
 - Cada página se renderiza en un `<canvas>` reciclado por el `PageVirtualizer` (sin cambios).
 - Phantom de cada página (dimensiones + placeholder gris) siempre presente para scroll height
   correcto (sin cambios).
-- Zoom: botones +/- y atajos `Cmd/Ctrl + +`, `Cmd/Ctrl + -`, `Cmd/Ctrl + 0` (sin cambios).
+- Zoom (ADR-169 §9): botones `−` / `+` con el porcentaje entre ambos, **sin botón de restablecer**;
+  atajos `Cmd/Ctrl + +`, `Cmd/Ctrl + -`, `Cmd/Ctrl + 0` (este último restablece). **Pellizco del
+  trackpad y `Ctrl + rueda`**: el visor escucha `wheel` con `ctrlKey` en un listener
+  `{ passive: false }` y hace `preventDefault()`, así el pellizco hace zoom del documento y no de la
+  ventana. No hay texto que lo explique: es un comportamiento esperado, no una función a descubrir.
+- **Separador entre páginas** (ADR-169 §9): un espacio con una línea punteada y la etiqueta
+  *"Página N de M"* centrada, para que se note el paso de una página a otra al hacer scroll.
+- **La barra del visor no cambia al conmutar**: la lupa (§5.4b) está siempre, en las dos vistas.
 
 **El toggle "Anonimizado" está deshabilitado hasta `stage === Ready`** (UX-3b), con el texto
 *"Disponible cuando termine el análisis"*. Antes de `Ready` los `replacements` no existen y el
@@ -479,6 +530,49 @@ Hay **tres vías**, y todas terminan en lo mismo — cambia de dónde sale el va
 **Solo se puede señalar con el toggle en Original.** En la vista anonimizada lo que se ve puede ser un reemplazo, y señalarlo no tendría sentido: la herramienta de señalar queda deshabilitada ahí.
 
 **La selección no es selección de texto**, aunque se sienta parecida: el visor resuelve qué palabras caen bajo el cursor o el recuadro. Es lo que hace que funcione igual en un PDF escaneado, donde no hay texto que seleccionar y es justamente donde más se necesita corregir lo que el OCR se comió.
+
+**Cómo se ve cada vía** (ADR-169 §7):
+
+- **Botón "Agregar entidad"** (vía 1): primario, en la cabecera del panel. Abre un diálogo en dos
+  pasos: *¿Qué texto querés ocultar?* —mientras se escribe, una caja de **alto fijo** muestra dónde
+  aparece (página + frase con el texto resaltado, vía `findText`) o *"No aparece en el documento"*
+  **antes** de confirmar— y *¿Qué es?* —el selector de tipos (`EntityTypePicker`: los 13 tipos en una
+  caja gris, con punto de color y botón de opción). El botón dice cuántas apariciones va a ocultar.
+- **Selección en el original** (vía 2): el recuadro se dibuja con **borde punteado de acento animado
+  y no desaparece** hasta que se agrega, se cancela, se hace otra selección, se presiona Escape, se
+  conmuta a Anonimizado o se cierra el documento. El globo "Agregar «X» como…" es flotante y usa el
+  mismo `EntityTypePicker`.
+- **Lupa** (vía 3): **siempre visible y habilitada, en las dos vistas**. Campo *"Buscar un texto en el
+  documento…"*, contador en ranura fija y un botón **"+ Agregar"** aparte, habilitado con resultados.
+  Cada resultado muestra página, la frase alrededor (`getPageWords` + `wordSpan`) y su estado:
+  **oculto como Persona N.º 02** (cae sobre un miembro de un grupo, comparando contra
+  `fragments` cuando los hay, ADR-074) o **Sin ocultar** con "Agregar como…" en globo flotante. El
+  encabezado resume "N ocultos · M sin ocultar". "Ver apariciones" del menú ⋯ abre la lupa con el valor.
+- **Toast al agregar**, por cualquiera de las tres vías: *"Agregaste «X» · Persona N.º 06 · 2
+  apariciones ocultas"*, con **"Ver en la lista"** (lleva la fila a la vista y la resalta) y
+  **"Deshacer"** (UX-11). El N.º es el que quedó **después** de la renumeración. **Solo si lo agregado
+  quedó en un grupo**: el toast no puede afirmar algo que no pasó.
+- **Si lo agregado choca con un dato ya detectado** (ADR-174): se superpone con una detección de otro
+  tipo y el Core no lo agrupa. En vez del toast se abre un diálogo que lo dice y obliga a elegir —
+  *"Lo que marcaste se superpone con un dato ya detectado. ¿Qué querés ocultar?"*, con los dos textos
+  y sus tipos: **"Ocultar lo que marqué"** o **"Dejar lo que ya estaba detectado"**—. Cerrarlo sin
+  elegir deja un toast de advertencia persistente con **"Resolver"**, y el export queda bloqueado por
+  el conflicto hasta que se elija. Las dos opciones se deshacen con `Ctrl+Z`.
+  - **Varios lugares** (ADR-175 §4): si choca en más de un lugar, una sola pregunta —*"…se superpone
+    con datos ya detectados en N lugares…"*— y la elección vale para todos, con un solo `Ctrl+Z`.
+  - **El aviso vuelve** (ADR-175 §5): mientras quede un choque sin resolver y el diálogo esté cerrado, el
+    aviso ocupa la ranura de toast; si otro toast lo tapa, vuelve cuando ese se va. No reserva espacio
+    propio.
+  - **Si la detección desaparece** (ADR-175 §1): eliminar la entidad detectada oculta lo marcado, y el
+    toast de eliminar lo dice: *"Eliminaste «Y» · Lo que marcaste («X») ahora se oculta"*.
+  - **Si eliminar abre un choque** (ADR-178 §2): lo marcado que la entidad eliminada tapaba puede pisar
+    otra entidad. El toast de eliminar no cambia y no se abre ningún diálogo: aparecen el aviso de arriba
+    y el ⚠ de la fila, y Exportar queda bloqueado hasta resolverlo.
+  - La pantalla nunca dice "no se encontró" sobre algo que el Core encontró: decide con
+    `heldConflictIds` y `groupIds` del resultado, no buscando el grupo por su cuenta.
+- **Descubrimiento**: en Original, una tarjeta sobre el visor con la animación del gesto de clic y
+  arrastre — *"Agregá entidades desde el documento"* — que se cierra con "Entendido" y no vuelve
+  (persistido). Se suma a la nota al pie del panel (§3.1).
 
 **Qué esperar de la búsqueda, y hay que decirlo en la UI**: encuentra el valor **exacto**, sin distinguir mayúsculas ni acentos — "JOSE PEREZ" encuentra "José Pérez". **No** encuentra "J. Pérez". Si el documento nombra a la misma persona de dos formas, hay que agregar las dos; una vez agregadas, la app las agrupa sola. Decirlo por adelantado en el diálogo evita que el usuario crea que falló.
 
@@ -579,6 +673,8 @@ La única condición de pase es que el `stage` sea terminal:
   panel se llena como antes de ADR-151.
 - **`Failed`/`Cancelled`** ⇒ se pasa **de inmediato**, sin piso y sin esperar ningún preview: no
   hay panel que llenar, y retener al usuario frente a un error sería retenerlo sobre el error.
+  **Adónde** (ADR-168 §4): un `Failed` de importación —última etapa `Importing`/`Extracting`—
+  vuelve a ① con el error en la zona de carga; cualquier otro `Failed` y todo `Cancelled` pasan a ②b.
 - Cualquier otro stage ⇒ se queda.
 
 | Constante | Valor | Rol |
@@ -620,7 +716,24 @@ de montaje) y la página 1 ya dibujada.
   | `Detecting`, detectando | "Escaneando el documento…", **página X de Y** | determinado — `X = current`, `Y = pageCount` |
   | `Grouping` | "Ordenando los resultados…" | indeterminado |
 
-- `Cancelar`, visible y efectivo mientras el escaneo corre (ADR-152 §5).
+- `Cancelar`, visible y efectivo mientras el escaneo corre (ADR-152 §5), con el atajo `Ctrl+.`
+  escrito al lado.
+- **El flujo de cuatro pasos** (ADR-168 §5), en su propia caja entre la animación y el progreso.
+  Es el mapa que le faltaba al usuario para no leer "Leyendo… 3 de 12" seguido de "Escaneando… 1 de
+  12" como que el análisis volvió a empezar:
+
+  | Paso | Etapas | Rótulo en curso → terminado | Qué hace |
+  |---|---|---|---|
+  | 1 | `Importing`, `Extracting` | Abriendo → Abierto | Carga el archivo |
+  | 2 | `OCRing` | Leyendo → Leído | Saca el texto de cada página |
+  | 3 | `Detecting` (incluye la carga del modelo) | Escaneando → Escaneado | Busca datos sensibles |
+  | 4 | `Grouping` | Ordenando → Ordenado | Agrupa lo encontrado |
+
+  **Los cuatro pasos están siempre.** Si el pipeline llega a `Detecting` sin pasar por `OCRing`, el
+  paso 2 se muestra terminado con *"El PDF ya tenía texto"*. Nunca se muestran tres pasos: una UI
+  que cambia de forma según el documento cambia mientras el usuario la mira.
+
+La animación y el archivo van en una caja; la barra de progreso y `Cancelar`, en otra.
 
 > **Regla dura: el total que se muestra es siempre `document.store.pageCount`**, en las dos etapas
 > con contador (ADR-152 §2). En un documento mixto (20 páginas, 8 escaneadas) mostrar "3 de 8"
@@ -664,6 +777,15 @@ documento quieto con la lupa apoyada y la frase sin fundido, que siguen diciendo
 
 ### 7.5 Error
 
+**Un fallo de importación vuelve a la zona de carga** (ADR-168 §4). Si `PIPELINE_FAILED` llega
+cuando la última etapa fue `Importing` o `Extracting` —el documento todavía no tiene nada que
+revisar, por ejemplo `PDF_INVALID`—, la UI cierra el documento y vuelve a ①, con la zona de carga en
+estado **Error**, el nombre del archivo y el motivo. Antes pasaba a ②b con un banner cuya única
+salida era cerrar: dos pasos para volver al lugar donde se corrige.
+
+Cualquier otro fallo —en `OCRing`, `Detecting` o `Grouping`, cuando ya hay documento— sigue
+mostrándose en ②b:
+
 Banner con el mensaje y las salidas disponibles: **"Cerrar documento", siempre**.
 
 `NER_MODEL_MISSING` ofrecía además "Desactivar NER y reanalizar", y **ADR-126 §2 lo retira**. Ese
@@ -680,6 +802,9 @@ resultado equivocado con cara de éxito. La salida de ese error es reintentar, y
 
 - Visible cuando `stage ∈ {Ready, Done}`.
 - Click → diálogo de export (§8.2).
+- **Bloqueado con un conflicto sin resolver** (ADR-176 §1): deshabilitado, con el motivo en un globo
+  flotante debajo, anclado a la derecha (ADR-177 §4) —*"Hay un choque sin resolver. Resolvelo para exportar."* y **"Resolver"**, igual al del
+  aviso de ADR-175 §5—. `Cmd/Ctrl+E` tampoco abre el diálogo. El Core además rechaza el export.
 
 ### 8.2 Diálogo de export (ADR-087 §5)
 
@@ -757,6 +882,8 @@ dato existe de verdad.
 
 Si `enabledGroups = 0`: confirmación *"No hay grupos habilitados. El export será idéntico al
 original. ¿Continuar?"*.
+
+Un conflicto sin resolver **no** es una confirmación: bloquea antes de llegar acá (§8.1, ADR-176 §1).
 
 ---
 

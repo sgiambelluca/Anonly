@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=ui-contract | dependencias=01_Technical_Architecture_Document.md,03_Data_Model.md,04_Event_System.md,ADR-005-State-Management.md,adr/ADR-034-Auditoria-Pre-Hito9-Orchestrator.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-054-Scroll-Independiente-Por-Panel.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-069-Lexico-De-Genero-Fuente-Unica-Y-Canal-Del-Usuario.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md | audiencia=IA-implementador-ui | fase=4 (reconciliado en fase 10 por ADR-036: acciones completas §2.3, workers §2.4, settings §3.7, zoom §7, errores §8; §2.3/§3.7/§7 reescritos por ADR-037 —zoom con re-render real— y ADR-038 —reanalyze preservando ediciones, supersede el flujo "recrear el core"; §2.3/§7 en fase 11 por ADR-056 —requestRender con kind requerido, cada panel pide lo suyo—; §2.3 en fase 10.6 por ADR-069 §4 —`updateGroup.patch` gana `personGender?: PersonGenderChoice`, para el control de género del PR 12, que ADR-071 rebautiza `PersonGenderToggle` sin tocar este contrato—; post-Hito 10.10: §2.2 y §3.6b nuevas por ADR-062 —`degraded.store`, el séptimo slice: convierte el veredicto por página que trae `PREVIEW_UPDATED.degraded` en la marca por grupo del árbol, con sus tres reglas de consumo—; §3.5 pierde `sideBySide`, que estaba declarado sin setter ni consumidor desde PR7); §3.5/§3.6/§6 reescritos en el rediseño post-10.9 por **ADR-087** —un solo visor con toggle: `viewer.currentPageIndex`/`visibleRange` dejan de ser por `kind` y aparece `viewer.mode`; `settings.scrollSyncEnabled` se retira; el recap de layout pasa a los tres momentos— -->
+<!-- CONTEXT: scope=ui-contract | dependencias=01_Technical_Architecture_Document.md,03_Data_Model.md,04_Event_System.md,ADR-005-State-Management.md,adr/ADR-034-Auditoria-Pre-Hito9-Orchestrator.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-054-Scroll-Independiente-Por-Panel.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-069-Lexico-De-Genero-Fuente-Unica-Y-Canal-Del-Usuario.md,adr/ADR-134-Cancelled-Es-Terminal.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-168-Pantallas-De-Carga-Y-Escaneo-Tras-Pruebas-De-Usuario.md,adr/ADR-169-La-Pantalla-De-Trabajo-Tras-Pruebas-De-Usuario.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md | audiencia=IA-implementador-ui | fase=4 (reconciliado en fase 10 por ADR-036: acciones completas §2.3, workers §2.4, settings §3.7, zoom §7, errores §8; §2.3/§3.7/§7 reescritos por ADR-037 —zoom con re-render real— y ADR-038 —reanalyze preservando ediciones, supersede el flujo "recrear el core"; §2.3/§7 en fase 11 por ADR-056 —requestRender con kind requerido, cada panel pide lo suyo—; §2.3 en fase 10.6 por ADR-069 §4 —`updateGroup.patch` gana `personGender?: PersonGenderChoice`, para el control de género del PR 12, que ADR-071 rebautiza `PersonGenderToggle` sin tocar este contrato—; post-Hito 10.10: §2.2 y §3.6b nuevas por ADR-062 —`degraded.store`, el séptimo slice: convierte el veredicto por página que trae `PREVIEW_UPDATED.degraded` en la marca por grupo del árbol, con sus tres reglas de consumo—; §3.5 pierde `sideBySide`, que estaba declarado sin setter ni consumidor desde PR7); §3.5/§3.6/§6 reescritos en el rediseño post-10.9 por **ADR-087** —un solo visor con toggle: `viewer.currentPageIndex`/`visibleRange` dejan de ser por `kind` y aparece `viewer.mode`; `settings.scrollSyncEnabled` se retira; el recap de layout pasa a los tres momentos—; §2.2 ignora carga NER tardía después de Cancelled por ADR-134 -->
 
 # Anonly — React Client (UI Contract, TAD bloque 9)
 
@@ -128,6 +128,9 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribes {
   }));
 
   unsubs.push(bus.on(EventChannel.Ner, EngineEvents.NER_MODEL_LOADING, (p) => {
+    // ADR-134: la carga puede avisar después de PIPELINE_CANCELLED. El texto
+    // de carga tiene prioridad visual sobre el stage; Cancelled es terminal.
+    if (stores.pipeline.getState().stage === PipelineStage.Cancelled) return;
     stores.pipeline.setState({ modelLoading: { modelId: p.modelId, progress: p.progress } });
   }));
 
@@ -182,16 +185,41 @@ export const actions = {
     getCore().bus.emit(EventChannel.UI, EngineEvents.GROUP_SPLIT_REQUESTED, { documentId, groupId, occurrenceIds });
   },
 
+  // ADR-172 §2: TODA acción de edición llama a stores.history.getState().record(label)
+  // ANTES de emitir sus pedidos (un punto de restauración del estado previo). Una
+  // acción del usuario = un record, aunque emita varios pedidos (mergePlan, el
+  // barrido de un modo, eliminar = RULE_DELETED + GROUP_REMOVE_REQUESTED).
+
+  // ADR-174: resolveConflict acepta { entityType?, winner? }; winner solo en
+  // conflictos con heldManual (ManualOverlapDialog). addManualEntity devuelve
+  // heldConflictIds: si no está vacío, el llamador abre el diálogo en vez del toast.
+
+  // ADR-171 §5: si la fila tenía una Rule de scope group, se borra primero
+  // (RULE_DELETED): una regla huérfana contaría en la franja "Todo el documento".
+  // Los dos pasos entran en un mismo punto de deshacer (ADR-172).
+  removeGroup(groupId: string): void {
+    const documentId = stores.document.getState().id;
+    if (!documentId) return;
+    const groupRule = stores.rules.getState().rules.find((r) => r.scope === "group" && r.target.groupId === groupId);
+    if (groupRule) getCore().bus.emit(EventChannel.UI, EngineEvents.RULE_DELETED, { documentId, ruleId: groupRule.id });
+    getCore().bus.emit(EventChannel.UI, EngineEvents.GROUP_REMOVE_REQUESTED, { documentId, groupId });
+  },
+
   createRule(rule: Rule): void {
     const documentId = stores.document.getState().id;
     if (!documentId) return;
     getCore().bus.emit(EventChannel.UI, EngineEvents.RULE_CREATED, { documentId, rule });
   },
 
-  resolveConflict(conflictId: string, mode: ReplacementMode): void {
+  // ADR-083 §1 (entityType) y ADR-174 §3 (winner). Errata 2026-09-24: el snippet
+  // seguía con el `mode: ReplacementMode` anterior a ADR-083.
+  resolveConflict(
+    conflictId: string,
+    choice: { readonly entityType?: EntityType; readonly winner?: "manual" | "detected" } = {},
+  ): void {
     const documentId = stores.document.getState().id;
     if (!documentId) return;
-    getCore().bus.emit(EventChannel.UI, EngineEvents.CONFLICT_RESOLVE_REQUESTED, { documentId, conflictId, mode });
+    getCore().bus.emit(EventChannel.UI, EngineEvents.CONFLICT_RESOLVE_REQUESTED, { documentId, conflictId, ...choice });
   },
 
   // Acciones agregadas por ADR-036 §5 (Components.md ya las invocaba):
@@ -316,6 +344,14 @@ interface EntitiesSlice {
   updateReplacement(groupId: string, mode: ReplacementMode, value: string): void;
   addConflict(conflict: Conflict): void;
   resolveConflict(conflictId: string): void;
+  /**
+   * ADR-169 §2: orden de presentación de las filas. Solo UI: no cambia
+   * `indexInType` ni emite nada. Vale para todos los tipos; no persiste.
+   */
+  readonly sortOrder: "appearance" | "alpha";
+  setSortOrder(order: "appearance" | "alpha"): void;
+  /** ADR-169 §7: grupo a resaltar un momento ("Ver en la lista" del toast). */
+  readonly flashGroupId: string | null;
   reset(): void;
 }
 ```
@@ -346,6 +382,14 @@ interface PipelineSlice {
   readonly exportProgress: { current: number; total: number } | null;
   readonly exportResult: { blobUrl: string; sizeBytes: number } | null;
   readonly error: SerializedEngineError | null;
+  /**
+   * ADR-168 §4: la última etapa observada antes de `Failed`. `null` si no falló.
+   * `Importing`/`Extracting` = fallo de importación → la UI cierra el documento
+   * y vuelve a `LoadScreen` con el error en la `DropZone`.
+   */
+  readonly failedAtStage: PipelineStage | null;
+  /** Etapas atravesadas por el pipeline en el documento vigente (para `ScanSteps`, ADR-168 §5). */
+  readonly visitedStages: ReadonlySet<PipelineStage>;
   /** Jobs que fallaron sin tumbar el pipeline, por `WorkerJobType`. `{}` es el caso sano. */
   readonly failedJobs: Readonly<Partial<Record<WorkerJobType, number>>>;
   setState(patch: Partial<PipelineSlice>): void;
@@ -410,12 +454,49 @@ interface SettingsSlice {
   readonly ocrLanguages: ReadonlyArray<string>;
   // `scrollSyncEnabled` retirado por ADR-087 §2: sin lado a lado no hay dos
   // scrolls que sincronizar.
+  readonly theme: "system" | "light" | "dark";
+  readonly autoUpdate: boolean;
+  /**
+   * ADR-169 §7: avisos de descubrimiento que el usuario cerró
+   * ("selection-hint" = tarjeta sobre el visor, "panel-footer-hint" = nota al
+   * pie del panel). Persistido: cerrado una vez, no vuelve.
+   */
+  readonly dismissedHints: ReadonlyArray<"selection-hint" | "panel-footer-hint">;
   persist(): void;   // guarda en localStorage (solo settings, nunca documentos)
   load(): void;
 }
 ```
 
 No todo lo de este slice alimenta `EngineConfig`: `language` y `defaultReplacementMode` son preferencias de la app que `settingsToEngineConfig` no mapea (§3.7).
+
+### 3.6c `history.store.ts` (ADR-172 §2)
+
+```ts
+interface HistoryEntry { readonly checkpointId: string; readonly label: string; }
+interface HistorySlice {
+  readonly past: ReadonlyArray<HistoryEntry>;     // se deshace el último
+  readonly future: ReadonlyArray<HistoryEntry>;   // se rehace el último
+  record(label: string): void;   // orchestrator.createEditCheckpoint ANTES de editar; vacía future
+  undo(): Promise<void>;         // checkpoint del actual -> future; restore del último de past
+  redo(): Promise<void>;         // simétrico
+  clear(): void;                 // + orchestrator.discardEditCheckpoints
+}
+```
+
+- **Qué entra**: habilitar/deshabilitar (fila y cascada), el modo en sus tres niveles, el género, editar
+  el valor de reemplazo, "Restaurar valor calculado", cambiar tipo, fusionar, dividir, eliminar,
+  agregar una entidad (tres vías) y resolver un conflicto. **No** entran orden, filtro, zoom, vista,
+  Configuración ni exportar.
+- **Después de `undo`/`redo`**: la UI rehidrata `rules.store` desde
+  `grouping.getSnapshot(documentId).rules` (U-6). Grupos y conflictos llegan solos por los eventos.
+- **Se vacía** (`clear`) al cerrar el documento, al importar otro y al re-analizar.
+- **Atajos** (ADR-172 §3): un listener en `WorkLayout` —solo en ②b—: `Ctrl/Cmd+Z` → `undo`;
+  `Ctrl/Cmd+Y` y `Ctrl/Cmd+Shift+Z` → `redo`. No actúa con el foco en `input`/`textarea`/
+  `contenteditable`, con un diálogo abierto, durante una pasada de detección ni durante un export.
+- **Toasts**: el "Deshacer" de todo toast de edición llama a `undo()`. Un solo toast de edición a la
+  vez; una edición nueva lo reemplaza y un undo/redo por atajo lo cierra.
+- **Reemplaza** al snapshot de reglas del toast de los barridos (`Components.md` §3.11) y a la
+  restitución grupo por grupo de `components/entities/undoableEdits.ts`.
 
 ### 3.6b `degraded.store.ts` (ADR-062 §3)
 
@@ -510,6 +591,13 @@ export async function createCore(
   runtime?: CoreRuntimeOptions   // factories de Workers reales (ADR-036 §2, Contracts.md §3.5)
 ): Promise<IAnonymizationCore>;
 ```
+
+**Consultas de solo lectura del adapter** (todas en `IPipelineOrchestrator`, `Contracts.md` §3.5):
+`findText`, `getPageWords`, `getPageSize` (ADR-061), **`previewEdit`** (ADR-170 §2) y los puntos de
+restauración `createEditCheckpoint`/`restoreEditCheckpoint`/`discardEditCheckpoints` (ADR-172, usados
+solo por `history.store`), que los
+diálogos de Fusionar, Dividir y Cambiar tipo llaman al cambiar su selección (`actions.previewEdit`).
+Las vistas previas del selector de modo no se piden: vienen en `EntityGroup.replacementPreviews`.
 
 El adapter **solo** usa esta API. Nunca accede a `pdf.engine.ts` ni a internals. `snapshots.ts` usa `core.engines.grouping.getSnapshot(documentId)` (U-6) como **hidratación puntual** (p. ej. montar un panel tarde); la fuente reactiva son los eventos del bus.
 

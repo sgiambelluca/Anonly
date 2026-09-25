@@ -1,81 +1,81 @@
 /**
- * `EntitiesPanel` (`ui/Components.md` §3.1).
+ * `EntitiesPanel` (`ui/Components.md` §3.1, rediseñado por ADR-169 §2/§7).
  *
- * Lista `groupsByType` ordenada por `EntityType` (orden fijo de
- * `entities.store.ts`/`ui/Components.md` §3.1, ya preservado por
- * `visibleTypeEntries`). Header: "Entidades" + input de búsqueda + "Colapsar
- * todo"/"Expandir todo" (`ui/UX_Guidelines.md` §3.2).
+ * **Cabecera**: "Entidades" con el resumen ("N entidades en M tipos"), el
+ * botón **primario** "Agregar entidad" (antes un enlace de texto casi
+ * invisible), el filtro, el orden **Aparición | A–Z** (`entities.store.
+ * sortOrder`, solo presentación) y la franja "Todo el documento"
+ * (`DocumentModeSelect`). Debajo, el **encabezado de columnas** fijo —N.º ·
+ * Entidad · Avisos · Apar. · Reemplazo—, que existe para que el N.º no se
+ * confunda con el contador de apariciones.
+ *
+ * **Nota al pie** "¿Falta algo?…" con su X (`settings.store.dismissedHints`,
+ * persistido): el descubrimiento de que se puede seleccionar texto en el
+ * original o buscarlo con la lupa (ADR-169 §7).
  *
  * `App.tsx` solo monta este componente cuando `groupsByType` tiene contenido
- * (`hasAnyGroup`); el estado vacío "sin documento"/"sin entidades" vive ahí
- * (`ui/UX_Guidelines.md` §11).
+ * (`hasAnyGroup`); el estado vacío vive ahí (`UX_Guidelines.md` §11).
  *
- * Expansión por tipo: se trackea el conjunto de tipos **colapsados** (no los
- * expandidos) para que un tipo nuevo que recién aparece (`ENTITY_GROUP_CREATED`
- * incremental, UX-6) arranque expandido por default sin lógica adicional.
+ * Expansión por tipo: se trackea el conjunto de tipos **colapsados** para que
+ * un tipo nuevo (`ENTITY_GROUP_CREATED` incremental, UX-6) arranque expandido.
  *
  * **Teclado del árbol** (`UX_Guidelines.md` §9): este componente es el dueño
- * del nodo activo. Qué hace cada tecla lo decide `treeNavigation.ts`; acá solo
- * se ejecuta el comando. El foco se aplica por `data-tree-node-id` en vez de
- * con un `ref` por fila: la lista es virtual en la práctica (cientos de filas)
- * y mantener un mapa de refs vivo sería más estado para el mismo resultado.
+ * del nodo activo; qué hace cada tecla lo decide `treeNavigation.ts`. El
+ * roving tabindex es sobre los `treeitem`, no sobre toda la fila: cada fila
+ * tiene además su casilla, su selector de modo, su género y su menú, con tab
+ * stop propio — desvío conocido del patrón WAI-ARIA de tree, anotado en
+ * `roadmap/Post_Hito10.8_Pendientes.md` §22 con `treegrid` como destino.
  *
- * **El roving tabindex es sobre los `treeitem`, NO sobre toda la fila.** Un
- * comentario anterior acá decía "exactamente un `tabIndex=0`, así `Tab` entra
- * y sale del árbol de una", y era falso: cada fila tiene además su checkbox,
- * su selector de modo, su toggle de género y su menú, todos botones con tab
- * stop propio. Son ~5 tab stops por fila visible, y así se queda **por alcance,
- * no porque esté bien**.
+ * Dos reglas que arreglan bugs medidos:
  *
- * El patrón WAI-ARIA de tree pide un solo tab stop, y el rol correcto para
- * filas con controles es `role="treegrid"`: ahí las flechas navegan filas *y*
- * celdas, así que los controles se alcanzan con flechas y el árbol conserva su
- * tab stop único. O sea que **no hay disyuntiva** entre cumplir el patrón y que
- * el selector de modo siga alcanzable — solo la hay si uno se queda en
- * `role="tree"`, que es lo que pasa acá. Migrar es un cambio grande y no es lo
- * que ADR-087 vino a hacer; el desvío está anotado en
- * `roadmap/Post_Hito10.8_Pendientes.md` §22, junto con la tensión que deja
- * contra el precedente de `role="menu"` (`ui/Components.md` §3.4).
- *
- * Lo que sí aporta el `tabIndex` alternado, mientras tanto, es que el
- * CONTENEDOR de cada nodo sea un solo tab stop en vez de uno por fila, y que
- * las flechas naveguen desde él.
- *
- * De esa convivencia salen las dos reglas de abajo, y las dos arreglan bugs
- * medidos:
- *
- * 1. **El foco se escucha en el contenedor del árbol**, no en cada nodo, y el
- *    nodo se deduce con `closest`. Antes cada nodo tenía su `onFocus`, y como
- *    el `onFocus` de React es `focusin` y burbujea, enfocar una fila disparaba
- *    también el de su cabecera de tipo. La guarda
- *    `event.target === event.currentTarget` tapaba eso pero abría otro
- *    agujero: tabular hasta el checkbox de una fila ya no actualizaba el nodo
- *    activo, que quedaba apuntando a otra fila. `closest` resuelve las dos
- *    cosas — gana el nodo más cercano al foco, esté el foco en el contenedor o
- *    en un control de adentro.
+ * 1. **El foco se escucha en el contenedor del árbol** y el nodo se deduce con
+ *    `closest`: el `onFocus` de React burbujea, y con un listener por nodo
+ *    enfocar una fila disparaba también el de su cabecera de tipo.
  * 2. **El árbol solo atiende teclas cuando el foco está en el `treeitem`
  *    mismo.** Con el foco en un control de adentro, `Space` burbujeaba hasta
- *    acá, se comía el `preventDefault` (cancelando la activación nativa del
- *    botón) y ejecutaba `toggleEnabled` sobre el nodo activo. Ahora esas
- *    teclas son del control.
+ *    acá, cancelaba la activación nativa del botón y cambiaba otra fila.
  */
 
 import type { EntityGroup, EntityType } from "@anonly/anonymization-core";
-import { PlusIcon, SearchIcon } from "lucide-react";
+import {
+  ChevronsDownUpIcon,
+  ChevronsUpDownIcon,
+  MousePointerClickIcon,
+  PlusIcon,
+  SearchIcon,
+  XIcon,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { useEntitiesStore } from "../../store/entities.store.js";
+import { useEntitiesStore, type EntitySortOrder } from "../../store/entities.store.js";
+import { dismissHint, useSettingsStore } from "../../store/settings.store.js";
 
 import { AddEntityDialog } from "./AddEntityDialog.js";
 import { applyEnabled } from "./applyEdits.js";
 import { DocumentModeSelect } from "./DocumentModeSelect.js";
-import { filterGroups, visibleTypeEntries } from "./entityTree.js";
+import { ENTITY_ROW_GRID, ENTITY_ROW_PADDING } from "./entityRowLayout.js";
+import {
+  filterGroups,
+  findGroupById,
+  summarizeEntities,
+  visibleTypeEntries,
+} from "./entityTree.js";
 import { EntityTypeGroup } from "./EntityTypeGroup.js";
 import { ENTITY_TYPE_LABEL } from "./entityTypeLabels.js";
 import { groupNodeId, resolveTreeKey, typeNodeId, type TreeNode } from "./treeNavigation.js";
 
+const SORT_OPTIONS: ReadonlyArray<{ readonly value: EntitySortOrder; readonly label: string }> = [
+  { value: "appearance", label: "Aparición" },
+  { value: "alpha", label: "A–Z" },
+];
+
 export function EntitiesPanel() {
   const groupsByType = useEntitiesStore((state) => state.groupsByType);
+  const sortOrder = useEntitiesStore((state) => state.sortOrder);
+  const flashGroupId = useEntitiesStore((state) => state.flashGroupId);
+  const footerHintDismissed = useSettingsStore((state) =>
+    state.dismissedHints.includes("panel-footer-hint"),
+  );
   const [query, setQuery] = useState("");
   const [collapsedTypes, setCollapsedTypes] = useState<ReadonlySet<EntityType>>(new Set());
   const [addEntityOpen, setAddEntityOpen] = useState(false);
@@ -90,9 +90,6 @@ export function EntitiesPanel() {
   const focusPending = useRef(false);
 
   // `Cmd/Ctrl+F`: la tabla de atajos de `UX_Guidelines.md` §9 ya lo prometía.
-  // Se toma el atajo del navegador a propósito — dentro del documento buscar
-  // es esto, y el buscador nativo del navegador sobre un visor de canvas no
-  // encuentra nada.
   useEffect(() => {
     function onKeydown(event: KeyboardEvent): void {
       if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "f") return;
@@ -104,7 +101,22 @@ export function EntitiesPanel() {
     return () => window.removeEventListener("keydown", onKeydown);
   }, []);
 
-  const entries = visibleTypeEntries(groupsByType);
+  // "Ver en la lista" (ADR-169 §7): la fila tiene que estar a la vista, así
+  // que se expande su tipo y, si el filtro la esconde, se limpia el filtro.
+  useEffect(() => {
+    if (flashGroupId === null) return;
+    const group = findGroupById(groupsByType, flashGroupId);
+    if (group === undefined) return;
+    setCollapsedTypes((previous) => {
+      if (!previous.has(group.type)) return previous;
+      const next = new Set(previous);
+      next.delete(group.type);
+      return next;
+    });
+    setQuery((previous) => (filterGroups([group], previous).length === 0 ? "" : previous));
+  }, [flashGroupId]);
+
+  const entries = visibleTypeEntries(groupsByType, sortOrder);
   const filteredEntries = entries
     .map(([type, groups]) => [type, filterGroups(groups, query)] as const)
     .filter(([, groups]) => groups.length > 0);
@@ -147,8 +159,7 @@ export function EntitiesPanel() {
 
   /**
    * Sin nodo activo todavía, el `tabIndex=0` lo lleva el primero: si no,
-   * ningún nodo sería tabulable y `Tab` saltearía el árbol entero en vez de
-   * entrar en él.
+   * ningún nodo sería tabulable y `Tab` saltearía el árbol entero.
    */
   const effectiveActiveId = activeId ?? nodes[0]?.id ?? null;
 
@@ -190,11 +201,7 @@ export function EntitiesPanel() {
 
   function handleTreeKeyDown(event: React.KeyboardEvent<HTMLDivElement>): void {
     // Regla 2 de la cabecera: el árbol atiende una tecla solo si el foco está
-    // en el contenedor `treeitem`. Con el foco en un checkbox, un dropdown o
-    // un input de adentro, esas teclas son del control — el guard anterior
-    // enumeraba selectores (`input, textarea, [role='menu']…`) y se le
-    // escapaba el `<button role="checkbox">` que renderiza Radix, que es
-    // justo el control donde `Space` importa.
+    // en el contenedor `treeitem`.
     const target = event.target;
     if (!(target instanceof HTMLElement) || !target.hasAttribute("data-tree-node-id")) return;
 
@@ -214,9 +221,7 @@ export function EntitiesPanel() {
         return;
       }
       case "toggleEnabled": {
-        // Mismo camino que los checkboxes del árbol, incluido el "Deshacer":
-        // `Space` sobre una cabecera apaga decenas de grupos sin siquiera un
-        // diálogo de por medio, así que es el caso que MÁS lo necesita.
+        // Mismo camino que los checkboxes del árbol, incluido el "Deshacer".
         const group = groupById(command.nodeId);
         if (group !== undefined) {
           applyEnabled({
@@ -227,8 +232,6 @@ export function EntitiesPanel() {
           });
           return;
         }
-        // Cabecera de tipo: mismo criterio que su checkbox cascade — si hay
-        // alguno habilitado, apaga todos; si no, prende todos.
         const entry = typeEntryById(command.nodeId);
         if (entry === undefined) return;
         applyEnabled({
@@ -240,9 +243,8 @@ export function EntitiesPanel() {
         return;
       }
       case "openMenu": {
-        // El menú lo monta `EntityGroupItem`; abrirlo desde acá sería mover su
-        // estado al panel. Se le da un click a su disparador, que es lo mismo
-        // que hace el mouse.
+        // El menú lo monta `EntityGroupItem`: se le da un click a su
+        // disparador, que es lo mismo que hace el mouse.
         treeRef.current
           ?.querySelector<HTMLElement>(
             `[data-tree-node-id="${CSS.escape(command.nodeId)}"] [data-tree-menu-trigger]`,
@@ -255,74 +257,114 @@ export function EntitiesPanel() {
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      <div className="flex flex-col gap-2 border-b border-border px-3 py-2">
-        {/*
-          Título y acciones en dos filas, no en una. Con la escala tipográfica
-          en 14 px mínimo (`UX_Guidelines.md` §9) los tres links no entraban al
-          lado del título en la barra lateral y se partían en dos líneas cada
-          uno — "Agregar / entidad", "Expandir / todo". Apilarlos es más
-          barato que abreviar las etiquetas hasta que dejen de decir qué hacen.
-        */}
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-text-secondary">
-          Entidades
-        </h2>
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 text-sm">
-            <button
-              type="button"
-              onClick={() => setAddEntityOpen(true)}
-              className="flex items-center gap-1 font-medium text-accent hover:underline"
-            >
-              <PlusIcon className="h-3.5 w-3.5" aria-hidden />
-              Agregar entidad
-            </button>
-            <span className="text-text-secondary">·</span>
-            <button type="button" onClick={expandAll} className="text-accent hover:underline">
-              Expandir todo
-            </button>
-            <span className="text-text-secondary">·</span>
-            <button type="button" onClick={collapseAll} className="text-accent hover:underline">
-              Colapsar todo
-            </button>
+      <div className="flex flex-col gap-3 px-4 pb-3 pt-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-col">
+            <h2 className="text-base font-semibold text-text-primary">Entidades</h2>
+            <span className="truncate text-sm text-text-secondary">
+              {summarizeEntities(entries)}
+            </span>
           </div>
+          <button
+            type="button"
+            onClick={() => setAddEntityOpen(true)}
+            className="anonly-button-primary h-9 shrink-0 px-3.5"
+          >
+            <PlusIcon className="h-4 w-4" aria-hidden />
+            Agregar entidad
+          </button>
         </div>
-        <div className="relative">
-          <SearchIcon
-            className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text-secondary"
-            aria-hidden
-          />
-          <input
-            ref={searchRef}
-            type="search"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Buscar entidades…"
-            aria-label="Buscar entidades"
-            // `bg-bg-primary` explícito: un input que declara color de texto tiene que
-            // declarar su fondo. Sin él dependía del default del navegador, que con
-            // `color-scheme: dark` ya sería oscuro — pero apoyarse en eso deja el
-            // contraste a merced de una propiedad que vive en otro archivo.
-            className="w-full rounded-md border border-border bg-bg-primary py-1 pl-7 pr-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent"
-          />
+        <div className="flex items-center gap-2">
+          <div className="relative min-w-0 flex-1">
+            <SearchIcon
+              className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text-secondary"
+              aria-hidden
+            />
+            <input
+              ref={searchRef}
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Filtrar la lista…"
+              aria-label="Buscar entidades"
+              // `bg-bg-primary` explícito: un input que declara color de texto
+              // tiene que declarar su fondo (`dark-mode-contrast.spec.ts`).
+              className="h-8 w-full rounded-md border border-border bg-bg-primary pl-8 pr-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent"
+            />
+          </div>
+          <div
+            role="group"
+            aria-label="Ordenar entidades"
+            className="flex shrink-0 rounded-md bg-bg-tertiary p-0.5"
+          >
+            {SORT_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                aria-pressed={sortOrder === option.value}
+                onClick={() => useEntitiesStore.getState().setSortOrder(option.value)}
+                className={`h-7 rounded px-2.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                  sortOrder === option.value
+                    ? "bg-bg-primary font-semibold text-text-primary shadow-sm"
+                    : "text-text-secondary hover:text-text-primary"
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={expandAll}
+            aria-label="Expandir todo"
+            title="Expandir todo"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-text-secondary hover:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          >
+            <ChevronsUpDownIcon className="h-4 w-4" aria-hidden />
+          </button>
+          <button
+            type="button"
+            onClick={collapseAll}
+            aria-label="Colapsar todo"
+            title="Colapsar todo"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-text-secondary hover:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          >
+            <ChevronsDownUpIcon className="h-4 w-4" aria-hidden />
+          </button>
         </div>
+        {/*
+          Nivel documento (ADR-087 §3.9): fuera del árbol y arriba de él.
+          Estar entre las filas es exactamente lo que el tratamiento visual
+          tiene que evitar — es el control de mayor alcance de los tres.
+        */}
+        <DocumentModeSelect />
       </div>
-      {/*
-        Nivel documento (ADR-087 §3.9): fuera del árbol y arriba de él. Estar
-        entre las filas es exactamente lo que el tratamiento visual tiene que
-        evitar — es el control de mayor alcance de los tres.
-      */}
-      <DocumentModeSelect />
+
+      {/* Encabezado de columnas (ADR-169 §2): misma grilla que las filas. */}
+      <div
+        aria-hidden
+        className={`h-[30px] shrink-0 border-y border-border bg-bg-secondary text-sm font-semibold uppercase tracking-wide text-text-secondary ${ENTITY_ROW_GRID} ${ENTITY_ROW_PADDING}`}
+      >
+        <span />
+        <span>N.º</span>
+        <span>Entidad{sortOrder === "alpha" ? " ↓" : ""}</span>
+        <span>Avisos</span>
+        <span className="text-right" title="Apariciones en el documento">
+          Apar.
+        </span>
+        <span />
+        <span>Reemplazo</span>
+        <span />
+      </div>
+
       <div
         ref={treeRef}
         role="tree"
         aria-label="Entidades detectadas"
         onKeyDown={handleTreeKeyDown}
-        // Regla 1 de la cabecera: un solo listener acá, y el nodo sale del
-        // `closest` del elemento enfocado. `onFocus` de React es `focusin`, que
-        // burbuja, así que llega tanto si el foco cayó en el contenedor del
-        // nodo como en un control de adentro.
+        // Regla 1 de la cabecera: un solo listener acá.
         onFocus={handleTreeFocus}
-        className="flex-1 overflow-y-auto"
+        className="min-h-0 flex-1 overflow-y-auto pb-3"
       >
         {noSearchResults ? (
           <p className="p-4 text-center text-sm text-text-secondary">
@@ -342,6 +384,29 @@ export function EntitiesPanel() {
           ))
         )}
       </div>
+
+      {footerHintDismissed ? null : (
+        // ADR-169 §7: la nota al pie con su X. Cerrada una vez, no vuelve.
+        <div
+          role="note"
+          className="mx-3 mb-3 flex shrink-0 items-start gap-2.5 rounded-lg border border-dashed border-accent/40 bg-accent/10 py-2.5 pl-3 pr-1.5"
+        >
+          <MousePointerClickIcon className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden />
+          <p className="flex-1 text-sm leading-snug text-text-primary">
+            <b className="font-semibold">¿Falta algo?</b> Seleccioná el texto con clic y arrastre en
+            el PDF original, o buscalo con la lupa de arriba del documento.
+          </p>
+          <button
+            type="button"
+            aria-label="Cerrar sugerencia"
+            onClick={() => dismissHint("panel-footer-hint")}
+            className="-mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-text-secondary hover:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          >
+            <XIcon className="h-3.5 w-3.5" aria-hidden />
+          </button>
+        </div>
+      )}
+
       <AddEntityDialog open={addEntityOpen} onClose={() => setAddEntityOpen(false)} />
     </div>
   );

@@ -22,10 +22,10 @@
 import { ConflictReason, type EntityType } from "@anonly/anonymization-core";
 import { useEffect, useState } from "react";
 
-import { actions } from "../../core-adapter/actions.js";
 import { useEntitiesStore } from "../../store/entities.store.js";
 import { Button } from "../common/Button.js";
 import { Dialog } from "../common/Dialog.js";
+import { applyConflictResolution } from "../entities/applyEdits.js";
 import { ENTITY_TYPE_LABEL } from "../entities/entityTypeLabels.js";
 
 import { CONFLICT_REASON_LABEL } from "./conflictLabels.js";
@@ -102,12 +102,17 @@ export function ConflictDialog({ conflictId, open, onClose }: ConflictDialogProp
   // `conflict` (por el `if` de arriba) — ver la nota equivalente en
   // `entities/MergeDialog.tsx`.
   const handleApply = (): void => {
-    if (hasSpellingChoice && selectedSpelling !== null) {
-      // El mecanismo ya existía: `canonicalValue` está en
-      // `GroupUpdateRequested.patch` desde siempre (ADR-106 §2).
-      actions.updateGroup(conflict.groupId, { canonicalValue: selectedSpelling });
-    }
-    actions.resolveConflict(conflict.id, selectedType ?? undefined);
+    // Elegir la grafía y el tipo es una sola decisión: una entrada de la
+    // pila de deshacer (ADR-172 §2). La grafía viaja por
+    // `GroupUpdateRequested.patch.canonicalValue`, que existe desde siempre
+    // (ADR-106 §2).
+    applyConflictResolution({
+      conflictId: conflict.id,
+      groupId: conflict.groupId,
+      spelling: hasSpellingChoice ? selectedSpelling : null,
+      entityType: selectedType ?? undefined,
+      label: value,
+    });
     onClose();
   };
 

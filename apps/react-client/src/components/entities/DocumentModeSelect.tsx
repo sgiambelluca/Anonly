@@ -10,24 +10,29 @@
  * los tres niveles — confirmación cuando hay algo que romper, y toast con
  * "Deshacer" siempre.
  *
- * **Estado de precaución** (§3.3a): neutro por defecto, con acento ámbar y un
- * resumen cuando existe alguna regla de tipo o de grupo. El color aparece
- * cuando significa algo — un control permanentemente en alarma estaría
- * gritando el 90 % de las veces en que la acción es inofensiva, y
- * `UX_Guidelines.md` §3.3 ya dice qué pasa con eso: "una señal que aparece
- * siempre no es una señal".
+ * **La franja avisa sin crecer** (ADR-169 §5, reemplaza la forma de §3.4d):
+ * tiene **siempre dos líneas**. Sin ajustes propios, la segunda dice *"Se
+ * aplica a todas las entidades."* en gris; con ajustes, la caja entera pasa a
+ * ámbar y la línea dice cuántas entidades tienen modo propio. Antes era un
+ * borde izquierdo más una línea que aparecía y empujaba el árbol hacia abajo
+ * (UX-10). La lógica de cuándo se enciende, la confirmación y el toast no
+ * cambian. Nunca se señala solo con color: ícono + texto además del acento, y
+ * el texto en `warning-strong` (contraste AA), no en `warning`.
  */
 
 import type { ReplacementMode } from "@anonly/anonymization-core";
-import { ChevronDownIcon, TriangleAlertIcon } from "lucide-react";
+import { ChevronDownIcon, InfoIcon, TriangleAlertIcon } from "lucide-react";
 import { useState } from "react";
 
+import { useEntitiesStore } from "../../store/entities.store.js";
 import { useRulesStore } from "../../store/rules.store.js";
 import { ConfirmDialog } from "../common/ConfirmDialog.js";
 
 import { applyModeAtLevel } from "./applyMode.js";
 import {
+  countEntitiesWithOwnMode,
   countOverrides,
+  describeDocumentBandNote,
   describeOverrides,
   needsConfirmation,
   planApplyDocumentMode,
@@ -36,22 +41,28 @@ import {
 import { ModeSelectMenu } from "./ModeSelectMenu.js";
 import { REPLACEMENT_MODE_LABEL } from "./replacementModeOptions.js";
 
-/** Ejemplo genérico: en este nivel no hay un grupo concreto al que referirse. */
-const SAMPLE = "Cada dato";
-
 export function DocumentModeSelect() {
   const rules = useRulesStore((state) => state.rules);
+  const groupsByType = useEntitiesStore((state) => state.groupsByType);
   const [pendingMode, setPendingMode] = useState<ReplacementMode | null>(null);
 
   const current = resolveDocumentMode(rules);
   const counts = countOverrides(rules);
   const atRisk = needsConfirmation(counts);
+  const withOwnMode = countEntitiesWithOwnMode(rules, Array.from(groupsByType.values()).flat());
+  // Con reglas que hoy no tocan a ninguna fila (un tipo que se quedó sin
+  // entidades), la caja igual se enciende: el barrido las borra.
+  const note =
+    atRisk && withOwnMode === 0
+      ? "Hay ajustes propios: cambiar este modo los pisa."
+      : describeDocumentBandNote(withOwnMode);
 
   function apply(mode: ReplacementMode): void {
     applyModeAtLevel({
       plan: planApplyDocumentMode(rules),
       scope: "global",
       mode,
+      historyLabel: `Todo el documento → ${REPLACEMENT_MODE_LABEL[mode]}`,
       toastText: `Todo el documento → ${REPLACEMENT_MODE_LABEL[mode]}`,
     });
   }
@@ -67,18 +78,17 @@ export function DocumentModeSelect() {
   return (
     <>
       <div
-        className={`flex flex-col gap-1 border-b px-3 py-2 ${
-          atRisk
-            ? "border-l-2 border-l-warning-strong border-b-border bg-bg-secondary"
-            : "border-border bg-bg-secondary"
+        className={`flex flex-col gap-1.5 rounded-lg border py-2 pl-3 pr-1.5 transition-colors ${
+          atRisk ? "border-warning-strong bg-warning/15" : "border-border bg-bg-secondary"
         }`}
       >
         <div className="flex items-center justify-between gap-2">
-          <span className="text-sm font-medium text-text-primary">Todo el documento</span>
+          <span className="text-sm font-semibold text-text-primary">Todo el documento</span>
           <ModeSelectMenu
             current={current}
-            example={{ sample: SAMPLE }}
+            previews={null}
             onSelect={handleSelect}
+            subject="todo el documento"
             align="right"
           >
             {({ open, toggle }) => (
@@ -87,23 +97,32 @@ export function DocumentModeSelect() {
                 onClick={toggle}
                 aria-expanded={open}
                 aria-label={`Modo de reemplazo de todo el documento: ${REPLACEMENT_MODE_LABEL[current]}`}
-                className="flex items-center gap-1.5 rounded-md border border-border bg-bg-primary px-3 py-1.5 text-sm text-text-primary hover:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                className="flex h-8 w-[10.5rem] items-center justify-between gap-1.5 rounded-md border border-border bg-bg-primary px-2.5 text-sm text-text-primary hover:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
               >
-                {REPLACEMENT_MODE_LABEL[current]}
-                <ChevronDownIcon className="h-4 w-4 text-text-secondary" aria-hidden />
+                <span className="truncate">{REPLACEMENT_MODE_LABEL[current]}</span>
+                <ChevronDownIcon className="h-4 w-4 shrink-0 text-text-secondary" aria-hidden />
               </button>
             )}
           </ModeSelectMenu>
         </div>
-        {atRisk ? (
-          // El resumen entera del riesgo ANTES de abrir el menú, no recién en
-          // el diálogo. Ícono + texto además del acento: no se señala solo con
-          // color (WCAG 1.4.1).
-          <p className="flex items-center gap-1.5 text-sm text-warning-strong">
-            <TriangleAlertIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
-            {describeOverrides(counts)} con ajustes propios
-          </p>
-        ) : null}
+        {/*
+          Segunda línea fija (UX-10): cambia el texto y el color, nunca el
+          alto. Reserva dos renglones — el del aviso ámbar, que es el estado
+          más largo, puede partirse en una barra lateral angosta.
+        */}
+        <p
+          aria-live="polite"
+          className={`flex h-10 items-start gap-1.5 pr-1.5 text-sm leading-5 ${
+            atRisk ? "font-medium text-warning-strong" : "text-text-secondary"
+          }`}
+        >
+          {atRisk ? (
+            <TriangleAlertIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+          ) : (
+            <InfoIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+          )}
+          <span className="line-clamp-2">{note}</span>
+        </p>
       </div>
 
       <ConfirmDialog

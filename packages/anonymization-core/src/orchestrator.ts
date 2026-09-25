@@ -34,14 +34,18 @@ import {
   EventChannel,
   InvalidInputError,
   isEngineErrorCode,
+  MAX_EDIT_CHECKPOINTS,
   PipelineStage,
   type CancelRequested,
   type CoreRuntimeOptions,
   type Document,
   type DocumentClosed,
   type DocumentParsed,
+  type EditPreview,
+  type EditPreviewRequest,
   type EngineConfig,
   type EngineContext,
+  type EntityFound,
   type EntityGroup,
   type EntityGroupCreated,
   type EntityGroupRemoved,
@@ -207,6 +211,21 @@ const PRE_READY_STAGES: ReadonlySet<PipelineStage> = new Set([
   PipelineStage.Grouping,
 ]);
 
+/**
+ * ADR-172 §1: precondición de `createEditCheckpoint`/`restoreEditCheckpoint`
+ * — "sesión existente y stage fuera de {Importing, Extracting, OCRing,
+ * Detecting, Grouping}". Literal de `Contracts.md` §3.5: NO incluye `Idle`
+ * (a diferencia de `PRE_READY_STAGES` de arriba, que sí, y que sirve a otro
+ * propósito — la mediación del preview).
+ */
+const CHECKPOINT_BLOCKED_STAGES: ReadonlySet<PipelineStage> = new Set([
+  PipelineStage.Importing,
+  PipelineStage.Extracting,
+  PipelineStage.OCRing,
+  PipelineStage.Detecting,
+  PipelineStage.Grouping,
+]);
+
 export interface PipelineOrchestratorOptions {
   readonly bus: IEventBus;
   readonly logger: ILogger;
@@ -270,6 +289,18 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
   // que ADR-061 existe para cerrar). Se descarta en closeDocument/dispose,
   // mismo patrón que el resto del estado por documento.
   private readonly manualLiteralsByDocument = new Map<string, ManualEntityRequest[]>();
+  // ADR-172 §1: copia de `manualLiteralsByDocument` en el momento de
+  // `createEditCheckpoint`, bajo EL MISMO id que devuelve
+  // `grouping.createCheckpoint` — sin esto, deshacer un agregado manual
+  // dejaría el literal retenido y el próximo re-análisis lo recrearía. Vive
+  // acá (no en GroupingEngine) porque los literales retenidos son estado del
+  // Orchestrator, no de la sesión de Grouping. Mismo ciclo de vida que el
+  // checkpoint de Grouping: se descarta junto con él en `reanalyze` (antes
+  // de reabrir la sesión), `closeDocument` y `dispose`.
+  private readonly checkpointedLiteralsByDocument = new Map<
+    string,
+    Map<string, ReadonlyArray<ManualEntityRequest>>
+  >();
   // ─── Mediación grupos→Render del preview (ADR-044) ───
   // Por documento: groupId → páginas conocidas (members actuales de la última
   // vez que se vio el grupo). Necesario para ENTITY_GROUP_REMOVED (el payload
@@ -416,6 +447,10 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     }
 
     this.effectiveConfigByDocument.set(documentId, nextEffective);
+    // ADR-172 §1: descarta todos los puntos de restauración ANTES de reabrir
+    // la sesión — restaurar a un estado anterior a esta re-detección tiraría
+    // lo re-detectado.
+    this.discardEditCheckpoints(documentId);
 
     const controller = this.abortRegistry.get(documentId) ?? this.abortRegistry.create(documentId);
     const ctx = this.ctxFor(controller.signal, documentId);
@@ -492,17 +527,55 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     const ctx = this.ctxFor(controller.signal, documentId);
 
     this.setStage(documentId, PipelineStage.Grouping);
+    // ADR-171 §4: un agregado manual es una decisión NUEVA del usuario y
+    // revierte una eliminación previa de ese valor — antes de reopenSession,
+    // así que la sesión reabierta ya no lo suprime al re-buscarlo. La
+    // re-aplicación automática de literales retenidos (reapplyManualLiterals,
+    // ADR-061 §5) deliberadamente NO llama a esto.
+    this.engines.grouping.liftRemoval(documentId, request.value);
     this.engines.grouping.reopenSession(documentId, { expectRegex: false, expectNer: false });
     // occurrenceCount es el de findLiteral tal cual -- apariciones ANTES del
     // dedup de Grouping (ADR-061 §6 errata, punto 3). No se recalcula contra
     // el árbol de grupos: un valor ya cubierto que se fusiona entero sigue
     // devolviendo N > 0, nunca "grupos nuevos".
-    const result = await this.engines.regex.findLiteral(
-      { document, value: request.value, entityType: request.entityType },
-      ctx,
+    //
+    // ADR-176 §3: mientras dura `findLiteral`, juntamos el `id` de cada
+    // ocurrencia `source: Manual` que EMITE este agregado. Ya no comparamos
+    // ningún valor ni tipo (eso reemplazaba el criterio de ADR-175 §3, que
+    // este ADR retira): Grouping es quien sabe en qué terminó cada una
+    // (agrupada, deduplicada, contenida por ADR-117 o retenida) porque es
+    // quien la procesó -- `manualOutcome` lee esa anotación.
+    const manualOccurrenceIds: string[] = [];
+    const unsubscribeEntityFound = this.bus.on(
+      EventChannel.Regex,
+      EngineEvents.ENTITY_FOUND,
+      (payload: EntityFound) => {
+        if (payload.documentId !== documentId) return;
+        if (payload.occurrence.source !== DetectionSource.Manual) return;
+        manualOccurrenceIds.push(payload.occurrence.id);
+      },
     );
+    let result;
+    try {
+      result = await this.engines.regex.findLiteral(
+        { document, value: request.value, entityType: request.entityType },
+        ctx,
+      );
+    } finally {
+      unsubscribeEntityFound();
+    }
     await this.engines.grouping.finishSession(documentId);
-    return { occurrenceCount: result.occurrenceCount };
+    // ADR-174 §2, ADR-176 §3: heldConflictIds/groupIds salen tal cual de
+    // manualOutcome -- occurrenceCount > 0 con heldConflictIds no vacío NO es
+    // un agregado exitoso (Contracts.md §3.5): la UI abre el diálogo de
+    // choque en vez del toast de alta. El invariante (occurrenceCount > 0 =>
+    // alguna lista no vacía) se cumple por construcción: toda ocurrencia
+    // emitida termina agrupada, deduplicada, contenida o retenida.
+    const { groupIds, heldConflictIds } = this.engines.grouping.manualOutcome(
+      documentId,
+      manualOccurrenceIds,
+    );
+    return { occurrenceCount: result.occurrenceCount, heldConflictIds, groupIds };
   }
 
   /**
@@ -518,6 +591,98 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       });
     }
     return this.engines.regex.searchText({ document, query });
+  }
+
+  /**
+   * ADR-170 §2: delegación pura. Sin estado propio, sin emitir, sin pasar
+   * por `reopenSession` — es exactamente `GroupingEngine.previewEdit`, que
+   * ya hace todo eso (simulacro sobre una copia descartable de la sesión).
+   * `documentId` sin sesión -> `InvalidInputError`, lanzado por el motor.
+   */
+  previewEdit(documentId: string, request: EditPreviewRequest): EditPreview {
+    this.assertNotDisposed();
+    return this.engines.grouping.previewEdit(documentId, request);
+  }
+
+  /**
+   * ADR-172 §1: precondición común de `createEditCheckpoint`/
+   * `restoreEditCheckpoint` — sesión existente (aproximado acá por
+   * `PipelineState` existente: sin documento importado no hay sesión de
+   * Grouping tampoco) y `stage` fuera de las etapas de una pasada de
+   * detección en curso.
+   */
+  private assertCheckpointableStage(documentId: string, method: string): void {
+    const state = this.state.get(documentId);
+    if (state === undefined || CHECKPOINT_BLOCKED_STAGES.has(state.stage)) {
+      throw new InvalidInputError(
+        `${method} requiere una sesión fuera de una pasada de detección para ${documentId} (actual: ${state?.stage ?? "inexistente"}).`,
+        { documentId, stage: state?.stage },
+      );
+    }
+  }
+
+  /**
+   * ADR-172 §1: delega en `grouping.createCheckpoint` y guarda, bajo el
+   * MISMO id, una copia de los literales manuales retenidos (ADR-061 §5) —
+   * sin ellos, deshacer un agregado manual dejaría el literal retenido y el
+   * próximo re-análisis lo recrearía.
+   */
+  createEditCheckpoint(documentId: string): string {
+    this.assertNotDisposed();
+    this.assertCheckpointableStage(documentId, "createEditCheckpoint");
+    const checkpointId = this.engines.grouping.createCheckpoint(documentId);
+    const literals = this.manualLiteralsByDocument.get(documentId) ?? [];
+    let byDocument = this.checkpointedLiteralsByDocument.get(documentId);
+    if (!byDocument) {
+      byDocument = new Map();
+      this.checkpointedLiteralsByDocument.set(documentId, byDocument);
+    }
+    byDocument.set(checkpointId, [...literals]);
+    /*
+     * ADR-172 §1, hallazgo N-4 del revisor: `grouping.createCheckpoint`
+     * desaloja el punto más viejo al pasar `MAX_EDIT_CHECKPOINTS` (mismo
+     * criterio de "Map preserva orden de inserción, el primero es el más
+     * viejo"). Este mapa crece en lockstep con el de Grouping —una entrada
+     * por cada `createEditCheckpoint` exitoso, bajo el mismo id, nunca de
+     * otra forma—, así que aplicar la MISMA regla acá desaloja exactamente
+     * el mismo id, sin que Grouping tenga que exponer cuál desalojó. Nunca
+     * se guardan más copias de literales que puntos vivos tiene Grouping.
+     */
+    if (byDocument.size > MAX_EDIT_CHECKPOINTS) {
+      const oldestId = byDocument.keys().next().value;
+      if (oldestId !== undefined) byDocument.delete(oldestId);
+    }
+    return checkpointId;
+  }
+
+  /**
+   * ADR-172 §1: delega en `grouping.restoreCheckpoint` (que reemplaza la
+   * sesión y emite la diferencia con los eventos de Grouping de siempre —
+   * el re-render sale solo, por las suscripciones de ADR-044) y restaura los
+   * literales manuales retenidos guardados bajo el mismo id.
+   * `checkpointId` desconocido o descartado -> `InvalidInputError`, lanzado
+   * por el motor.
+   */
+  async restoreEditCheckpoint(documentId: string, checkpointId: string): Promise<void> {
+    this.assertNotDisposed();
+    this.assertCheckpointableStage(documentId, "restoreEditCheckpoint");
+    await this.engines.grouping.restoreCheckpoint(documentId, checkpointId);
+    const literals = this.checkpointedLiteralsByDocument.get(documentId)?.get(checkpointId) ?? [];
+    this.manualLiteralsByDocument.set(documentId, [...literals]);
+  }
+
+  /**
+   * ADR-172 §1: descarta todos los puntos de restauración del documento —
+   * los del propio `GroupingEngine` y la copia de literales retenidos de
+   * este componente. Además de exponerse para que el caller la invoque
+   * (mismo patrón que `cancel`/`closeDocument`), este componente la llama
+   * internamente desde `reanalyze` (antes de reabrir la sesión),
+   * `closeDocument` y `dispose`.
+   */
+  discardEditCheckpoints(documentId: string): void {
+    this.assertNotDisposed();
+    this.engines.grouping.discardCheckpoints(documentId);
+    this.checkpointedLiteralsByDocument.delete(documentId);
   }
 
   /**
@@ -802,6 +967,9 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     this.reanalyzeInFlight.delete(documentId);
     // ADR-061 §5: mismo patrón que el resto del estado por documento.
     this.manualLiteralsByDocument.delete(documentId);
+    // ADR-172 §1: ídem — los puntos de restauración (los de Grouping y esta
+    // copia de literales) no sobreviven al cierre.
+    this.checkpointedLiteralsByDocument.delete(documentId);
     this.groupPagesByDocument.delete(documentId);
     this.dirtyPagesByDocument.delete(documentId);
     this.flushScheduledDocuments.delete(documentId);
@@ -840,6 +1008,10 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     this.effectiveConfigByDocument.clear();
     this.reanalyzeInFlight.clear();
     this.manualLiteralsByDocument.clear();
+    // ADR-172 §1: ídem closeDocument — los checkpoints de Grouping ya se
+    // limpian solos vía `this.engines.grouping.dispose()` más abajo; esta
+    // copia de literales retenidos es estado propio de este componente.
+    this.checkpointedLiteralsByDocument.clear();
     this.groupPagesByDocument.clear();
     this.dirtyPagesByDocument.clear();
     this.flushScheduledDocuments.clear();
@@ -1246,7 +1418,10 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     const ctx = this.ctxFor(controller.signal, documentId);
 
     // v1.2.1 (bug #6, caso 24): toda la preparación del export (incluido
-    // `ensureRenderDocumentLoaded`) vive dentro del try/catch → `failPipeline`.
+    // `ensureRenderDocumentLoaded` y, desde ADR-176 §1, el guard de
+    // conflictos de abajo) vive dentro del try/catch → `failPipeline`. Un
+    // fallo de `getSnapshot` acá sigue el mismo camino que cualquier otro
+    // fallo de preparación (caso 24, el seatbelt de `handleExportRequested`).
     // El guard de buffer retenido ausente pasa de warn+return silencioso a
     // lanzar InvalidInputError — antes el `EXPORT_REQUESTED` no atendido
     // dejaba el pipeline congelado en `Ready` sin ningún evento; ahora
@@ -1257,9 +1432,28 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     // documento sigue presente, o flujos que lleguen a export sin haber
     // pasado por `runPipelineFrom`/`runOcrStage`).
     try {
+      // ADR-176 §1: un conflicto sin resolver bloquea el export también en
+      // el Core -- la red de seguridad para cualquier llamador que no pase
+      // por la UI (el botón ya queda deshabilitado ahí, ADR-176 §1 UI). Mira
+      // los conflictos ANTES de cambiar de etapa: si hay alguno sin
+      // resolver, no llama a `export()`, no cambia de etapa (sigue
+      // `Ready`), no emite nada y loguea `warn` -- mismo patrón que
+      // `EXPORT_NO_ENABLED_GROUPS` (ADR-032 §3): un `code` en la metadata de
+      // un warn, sin clase de error ni evento. Solo la CANTIDAD en la
+      // metadata, nunca los valores (R-8, `08_Security_Model.md`).
+      const snapshot = this.engines.grouping.getSnapshot(documentId);
+      const unresolvedConflicts = snapshot.conflicts.filter((c) => !c.resolved).length;
+      if (unresolvedConflicts > 0) {
+        this.logger.warn("Hay conflictos sin resolver; el export no se ejecuta.", {
+          documentId,
+          code: EngineErrorCode.EXPORT_UNRESOLVED_CONFLICTS,
+          unresolvedConflicts,
+        });
+        return;
+      }
+
       await this.ensureRenderDocumentLoaded(documentId);
 
-      const snapshot = this.engines.grouping.getSnapshot(documentId);
       const provider = this.makeRenderPageProvider(documentId, options, ctx);
 
       const exportInput: ExportEngineInput = {

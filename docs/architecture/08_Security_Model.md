@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=seguridad | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,06_Pipeline.md,adr/ADR-130-El-Contenedor-De-Escritorio-Fija-El-Motor.md,adr/ADR-131-El-Actualizador-Es-La-Primera-Salida-De-Red.md,adr/ADR-132-El-Shell-Tiene-Su-Propio-Modelo-De-Seguridad.md,adr/ADR-137-Windows-Verifica-Actualizaciones-Con-Clave-Ed25519-Propia.md | audiencia=IA+humanos | fase=11.6 -->
+<!-- CONTEXT: scope=seguridad | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,06_Pipeline.md,adr/ADR-130-El-Contenedor-De-Escritorio-Fija-El-Motor.md,adr/ADR-131-El-Actualizador-Es-La-Primera-Salida-De-Red.md,adr/ADR-132-El-Shell-Tiene-Su-Propio-Modelo-De-Seguridad.md,adr/ADR-137-Windows-Verifica-Actualizaciones-Con-Clave-Ed25519-Propia.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md | audiencia=IA+humanos | fase=11.6 -->
 
 # Anonly — Modelo de Seguridad
 
@@ -57,7 +57,7 @@
 - El Core **nunca** hace `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource` ni ningún API de red. Regla R-10 de `ai/AI_Development_Guide.md`.
 - **No hay CDN ni servidor.** Los assets estáticos —chunks, wasm, modelos— viajan adentro del instalador y los sirve el propio contenedor por el esquema `app://` (ADR-130). El renderer los pide a su propio origen y nada más: `connect-src 'self'`, sin excepciones.
 - **La única salida de red del producto es el actualizador**, y no vive en el renderer sino en el proceso **main**, donde la CSP no aplica y donde no hay documentos (ADR-132 §1). Consulta versiones y descarga actualizaciones firmadas con claves propias en las dos plataformas; nunca manda contenido, nombre ni metadato de un documento (ADR-131 §5, ADR-137).
-- Esa consulta le revela a GitHub la IP del usuario y la versión instalada. Se dice en la UI y en el README en vez de esperar a que alguien lo descubra, y el chequeo es desactivable.
+- Esa consulta le revela a GitHub la IP del usuario y la versión instalada. Se dice en la UI y en el README en vez de esperar a que alguien lo descubra, y el chequeo es desactivable. Desde el Hito 12.5 el texto de la UI lo presenta como lo que es —*"Como en cualquier conexión, GitHub ve desde dónde llega la consulta (tu IP) y qué versión tenés"*— sin dejar de decirlo (ADR-131 §5 intacto; `ui/Components.md` §2.6).
 
 ### 3.2 CSP verificada (ADR-039, Hito 10 PR10)
 
@@ -134,6 +134,15 @@ Cualquier regex que matche un DNI/nombre original en el export = fallo de gate.
 Anonly **nunca** redacta in-place sobre el PDF original (ADR-004). Redactar in-place deja el texto debajo del bloque negro, recuperable quitando el bloque. Por eso se reconstruye desde cero.
 
 ---
+
+### 4.5 Una entidad eliminada queda a la vista (ADR-171)
+
+Eliminar una entidad (menú ⋯ → "Eliminar entidad") tiene en el PDF exportado el **mismo efecto que
+deshabilitarla**: su texto queda sin anonimizar. La diferencia es que ya no aparece en la lista para
+recordarlo, y que su valor queda suprimido por sesión para que un re-análisis no lo vuelva a detectar.
+Por eso la confirmación lo dice con esas palabras, la acción se puede deshacer (ADR-172) y el
+pre-flight del export no cambia. No es una fuga: es la decisión explícita del usuario de que ese texto
+no es un dato personal.
 
 ## 5. Metadatos sensibles
 

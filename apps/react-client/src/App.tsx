@@ -27,12 +27,14 @@
  * pedir nada. Lo encontró el Escenario 3 de E2E.
  */
 
+import type { TextMatch } from "@anonly/anonymization-core";
 import { FileTextIcon, PanelLeftIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 
 import { ToastHost } from "./components/common/ToastHost.js";
 import { UpdateNotice } from "./components/common/UpdateNotice.js";
+import { ManualOverlapDialogHost } from "./components/conflicts/ManualOverlapDialogHost.js";
 import { EntitiesPanel } from "./components/entities/EntitiesPanel.js";
 import { hasAnyGroup } from "./components/entities/entityTree.js";
 import type { AppPhase } from "./components/screens/appPhase.js";
@@ -41,10 +43,13 @@ import { LoadScreen } from "./components/screens/LoadScreen.js";
 import { ScanScreen } from "./components/screens/ScanScreen.js";
 import { TooNarrowScreen } from "./components/screens/TooNarrowScreen.js";
 import { useAppPhase } from "./components/screens/useAppPhase.js";
+import { useHistoryShortcuts } from "./components/screens/useHistoryShortcuts.js";
 import { useLayoutMode } from "./components/screens/useLayoutMode.js";
 import { PasswordDialog } from "./components/toolbar/PasswordDialog.js";
 import { Toolbar } from "./components/toolbar/Toolbar.js";
+import { DocumentSearchBox } from "./components/viewer/DocumentSearchBox.js";
 import { PdfViewer } from "./components/viewer/PdfViewer.js";
+import { SelectionHintCard } from "./components/viewer/SelectionHintCard.js";
 import { ViewerModeToggle } from "./components/viewer/ViewerModeToggle.js";
 import { ZoomControls } from "./components/viewer/ZoomControls.js";
 import { initCore } from "./core-adapter/index.js";
@@ -132,6 +137,9 @@ function renderPhase(phase: AppPhase): ReactNode {
  */
 function WorkLayout() {
   const layout = useLayoutMode();
+  // ADR-172 §3: `Ctrl/Cmd+Z` y `Ctrl/Cmd+Y` recorren la pila de deshacer.
+  // Un solo listener, acá: solo existe mientras se ve la pantalla de trabajo.
+  useHistoryShortcuts();
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   useEffect(() => {
@@ -169,6 +177,7 @@ function WorkLayout() {
           </EntitiesDrawer>
         </div>
         <ToastHost />
+        <ManualOverlapDialogHost />
       </div>
     );
   }
@@ -181,6 +190,7 @@ function WorkLayout() {
         <RightPanel />
       </div>
       <ToastHost />
+      <ManualOverlapDialogHost />
     </div>
   );
 }
@@ -192,7 +202,10 @@ function LeftPanel() {
     // el que se cortaba era el nombre — el dato con el que el usuario decide.
     // Ese mismo mínimo es lo que rompía el layout por debajo de 1024 px, y por
     // eso ahí el ancho lo resuelve el cajón en vez de esta columna.
-    <aside className="flex w-1/3 min-w-[340px] max-w-[480px] flex-col border-r border-border bg-bg-primary">
+    // ADR-169 §2: la lista pasó a tener columnas de ancho fijo (N.º, avisos,
+    // apariciones, género, reemplazo, ⋯); con menos de 440 px el nombre —la
+    // única columna que encoge— quedaba en unas pocas letras.
+    <aside className="flex w-[38%] min-w-[440px] max-w-[520px] flex-col border-r border-border bg-bg-primary">
       <SidebarContent />
     </aside>
   );
@@ -225,21 +238,35 @@ function SidebarContent() {
 }
 
 function RightPanel() {
+  // El resultado activo de la lupa: lo elige la lupa (en la barra) y lo
+  // muestra el visor (debajo). `scrollNonce` fuerza el salto aunque dos
+  // resultados caigan en la misma página.
+  const [activeMatch, setActiveMatch] = useState<TextMatch | null>(null);
+  const [scrollNonce, setScrollNonce] = useState(0);
+
+  function handleActiveMatchChange(match: TextMatch | null): void {
+    setActiveMatch(match);
+    if (match !== null) setScrollNonce((nonce) => nonce + 1);
+  }
+
   return (
     <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
       {/*
-        El toggle va centrado y el zoom a la derecha (ADR-087 §2): el toggle
-        rotula qué se está mirando, así que compite mal contra el borde junto
-        a controles secundarios.
+        La lupa a la izquierda (ADR-169 §7: siempre visible, en las dos
+        vistas), el toggle centrado y el zoom a la derecha (ADR-087 §2). La
+        barra no cambia al conmutar.
       */}
-      <div className="grid h-11 shrink-0 grid-cols-[1fr_auto_1fr] items-center border-b border-border bg-bg-primary px-3">
-        <div />
+      <div className="relative z-30 grid h-[52px] shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4 border-b border-border bg-bg-primary px-4">
+        <DocumentSearchBox onActiveMatchChange={handleActiveMatchChange} />
         <ViewerModeToggle />
         <div className="flex justify-end">
           <ZoomControls />
         </div>
       </div>
-      <PdfViewer />
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+        <PdfViewer activeMatch={activeMatch} scrollNonce={scrollNonce} />
+        <SelectionHintCard />
+      </div>
     </main>
   );
 }

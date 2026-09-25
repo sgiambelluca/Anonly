@@ -224,6 +224,12 @@ export function createEntityGroup(overrides?: Partial<EntityGroup>): EntityGroup
     enabled: true,
     aliases: [],
     replacementValueUserSet: false,
+    replacementPreviews: {
+      placeholder: "[DNI 01]",
+      mask: "[DNI 01]",
+      synthetic: "[DNI 01]",
+      placeholderLadder: ["[DNI 01]"],
+    },
     needsReview: false,
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -344,6 +350,26 @@ export function wireHappyPathSpies(
     conflicts: [],
     rules: [],
   }));
+  // ADR-171 §4: no-op por defecto, mismo criterio que reopenSession/
+  // dropOccurrences — los tests de addManualEntity que necesitan verificar
+  // la llamada la assertan directo sobre el spy.
+  vi.spyOn(engines.grouping, "liftRemoval").mockImplementation(() => undefined);
+  // ADR-176 §3: listas vacías por defecto, mismo criterio que getSnapshot —
+  // los tests que necesitan un resultado puntual de addManualEntity
+  // sobreescriben este mock (los que ejercitan heldConflictIds/groupIds de
+  // verdad usan makeOrchestratorWithRealDetection, con GroupingEngine real).
+  vi.spyOn(engines.grouping, "manualOutcome").mockImplementation(() => ({
+    groupIds: [],
+    heldConflictIds: [],
+  }));
+  // ADR-170 §2: delegación pura por defecto — los tests de previewEdit
+  // sobreescriben el resultado según lo que necesiten verificar.
+  vi.spyOn(engines.grouping, "previewEdit").mockImplementation(() => ({ groups: [] }));
+  // ADR-172 §1: no-op / valores canned por defecto, mismo criterio que el
+  // resto de los métodos de sesión de Grouping en este setup.
+  vi.spyOn(engines.grouping, "createCheckpoint").mockImplementation(() => "mock-checkpoint-id");
+  vi.spyOn(engines.grouping, "restoreCheckpoint").mockResolvedValue(undefined);
+  vi.spyOn(engines.grouping, "discardCheckpoints").mockImplementation(() => undefined);
   vi.spyOn(engines.grouping, "dispose").mockResolvedValue(undefined);
 
   vi.spyOn(engines.render, "loadDocument").mockResolvedValue(undefined);

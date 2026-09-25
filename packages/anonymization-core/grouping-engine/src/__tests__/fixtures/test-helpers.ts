@@ -102,6 +102,12 @@ export function makeEntityGroup(overrides?: Partial<EntityGroup>): EntityGroup {
     enabled: true,
     aliases: ["Julia Gomez"],
     replacementValueUserSet: false,
+    replacementPreviews: {
+      placeholder: "",
+      mask: "",
+      synthetic: "",
+      placeholderLadder: [""],
+    },
     createdAt: now,
     updatedAt: now,
     ...overrides,

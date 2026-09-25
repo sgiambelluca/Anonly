@@ -1,5 +1,4 @@
-<!-- CONTEXT: scope=roadmap-mvp | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,adr/ADR-011-Grouping-First.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-138-Instalador-Universal-De-macOS.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-179-El-Empaquetado-De-NER-Se-Evalua-Sin-Cambiar-El-Modelo.md,adr/ADR-180-Los-PDFs-Pesados-Se-Miden-Hasta-El-Archivo-Exportado.md,roadmap/Optimizacion_De_Memoria_Plan.md,roadmap/PDFs_Pesados_Y_Exportacion_Plan.md,roadmap/PDFs_Pesados_Y_Exportacion_Medicion.md,roadmap/Empaquetado_NER_Medicion.md,roadmap/Optimizacion_De_Rendimiento.md | audiencia=humanos+IA | fase=11.6 (Hitos 1–10 cerrados y mergeados a main; escritorio y verificación de actualizaciones en validación; instalador universal de macOS documentado por ADR-138) -->
-
+<!-- CONTEXT: scope=roadmap-mvp | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,adr/ADR-011-Grouping-First.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-138-Instalador-Universal-De-macOS.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-168-Pantallas-De-Carga-Y-Escaneo-Tras-Pruebas-De-Usuario.md,adr/ADR-169-La-Pantalla-De-Trabajo-Tras-Pruebas-De-Usuario.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-173-El-Motor-Rechaza-Fusiones-Y-Divisiones-Invalidas.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,adr/ADR-175-Un-Choque-Manual-No-Queda-Colgado.md,adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md,adr/ADR-177-Una-Entidad-Eliminada-No-Ocupa-Lugar.md,adr/ADR-178-Lo-Contenido-Se-Oculta-Solo-Si-Su-Contenedor-Se-Elimina.md,adr/ADR-179-El-Empaquetado-De-NER-Se-Evalua-Sin-Cambiar-El-Modelo.md,adr/ADR-180-Los-PDFs-Pesados-Se-Miden-Hasta-El-Archivo-Exportado.md,roadmap/Optimizacion_De_Memoria_Plan.md,roadmap/PDFs_Pesados_Y_Exportacion_Plan.md,roadmap/PDFs_Pesados_Y_Exportacion_Medicion.md,roadmap/Empaquetado_NER_Medicion.md,roadmap/Optimizacion_De_Rendimiento.md | audiencia=humanos+IA | fase=11.6 (Hitos 1–10 cerrados; Hito 12.5 de UI y campaña de rendimiento documentados; escritorio y verificación de actualizaciones en validación) -->
 # Anonly — Roadmap MVP
 
 > Define el alcance exacto del primer release. Cualquier cosa fuera de esta lista **no** entra en MVP. v1.0 y v2.0 viven en sus propios docs.
@@ -659,6 +658,62 @@ Insertado con la convención decimal del repo, sin renumerar Release. Adelantado
 ### Hito 12 — Release 0.9.0
 - Docs finales, README del repo, demo.
 - Publicación de instaladores en GitHub Releases. ~~deploy a CDN estático~~ — no hay hosting: la app no se sirve, se descarga (ADR-130, ADR-131 §1).
+
+### Hito 12.5 — Rediseño desde las pruebas de usuario (ADR-168 a ADR-172)
+
+**Origen**: pruebas de usuario sobre la 0.9.2 y un lienzo de diseño iterado con el humano
+("Anonly — Nueva pantalla inicial", páginas *Inicio y carga*, *Pantalla de trabajo* y su versión
+oscura). Branch de campaña `redesign/ui-pruebas-de-usuario` (ADR-124: un commit = un módulo).
+
+**Docs** (hechos, uno por ADR): ADR-168 (carga y escaneo, "Acerca de" al pie del inicio, enlaces al
+repositorio regularizados, fallo de importación vuelve a ①, flujo de cuatro pasos), ADR-169 (pantalla
+de trabajo, UX-10 diseño estable), ADR-170 (vistas previas calculadas por el Core), ADR-171 (eliminar
+entidad con supresión por sesión), ADR-172 (deshacer y rehacer exactos por puntos de restauración).
+
+**Implementación, en este orden** — cada fila es un commit de un solo módulo:
+
+| # | Qué | Módulo | Depende de | Estado |
+|---|---|---|---|---|
+| 1 | Tipos: `ReplacementPreviews`, `EntityGroup.replacementPreviews`, `EditPreview*`, `GROUP_REMOVE_REQUESTED` + `GroupRemoveRequested` + `EventPayloadMap`, `MAX_EDIT_CHECKPOINTS` | `shared` | — | hecho (`dca2260`) |
+| 2 | `replacementPreviews` (15r) y `previewEdit` | `grouping-engine` | 1 | hecho (`893c4fa`) |
+| 3 | `applyGroupRemove`, `removedValues`, `liftRemoval` (15s) | `grouping-engine` | 1 | hecho (`5079784`) |
+| 4 | `createCheckpoint`/`restoreCheckpoint`/`discardCheckpoints` (15t) | `grouping-engine` | 2, 3 | hecho (`8f82315` + errata `cd8c759`) |
+| 5 | Façade: `previewEdit` (28), `liftRemoval` en `addManualEntity` (29), puntos de restauración con literales retenidos (30) | `anonymization-core/src` | 2-4 | hecho (`6800470`) |
+| 6 | ADR-168: `LoadScreen` en cajas, `DropZone` de cuatro estados, `HowItWorks`, `AboutDialog`, fallo de importación a ①, `ScanSteps` | `apps/react-client` | — | hecho |
+| 7 | ADR-169: lista, avisos, `Tooltip`, franja, género con borde, visor (pellizco, separador), lupa, selección persistente, `EntityTypePicker`, `AddEntityDialog`, Configuración, tokens | `apps/react-client` | — | hecho |
+| 8 | ADR-170: selector de modo exacto y diálogos Fusionar/Dividir/Editar reemplazo/Cambiar tipo con `previewEdit` | `apps/react-client` | 5, 7 | hecho |
+| 9 | ADR-171/172: "Eliminar entidad", `history.store`, atajos, toasts con "Deshacer" | `apps/react-client` | 5, 7 | hecho |
+| 10 | B-1: `replacementPreviews` en los fixtures de `tests/invariants` y `tests/security` | `tests/` | 1 | **hecho** (`029ba67`) |
+| 11 | ADR-173 (15u) y ADR-174 (15v): rechazos de fusión/división y ocurrencia manual retenida | `grouping-engine` | 4 | **hecho** (`356865c`) |
+| 12 | Tipos de ADR-174: `Conflict.heldManual`, `ManualEntityResult.heldConflictIds`, `ConflictResolveRequested.winner` | `shared` (y `anonymization-core/src/types.ts` para `ManualEntityResult`, que vive en el façade, `Contracts.md` §3.5) | — | **hecho** (`4bfb35c`) |
+| 13 | ADR-174 §2 y N-4 del revisor (Orchestrator 31) | `anonymization-core/src` | 11, 12 | **hecho** (`f5148c7`) |
+| 14 | ADR-174 §4 (`ManualOverlapDialog`, toast honesto, entrada de deshacer retirada), N-5 (ranura del error de `SettingsDialog`) y N-2 (tests de los `.ts` sin cobertura) | `apps/react-client` | 13 | **hecho** (`8e27858`, `29c2126`) |
+| 15 | ADR-175 (15w): invariante de `heldManual`, retenida que se oculta sola, `liftRemoval` reabre la decisión | `grouping-engine` | — | **hecho** (`cae65b2`) |
+| 16 | Tipo de ADR-175: `ManualEntityResult.groupIds` | `anonymization-core/src/types.ts` | — | **hecho** (`f0a0db1`) |
+| 17 | ADR-175 §3 (Orchestrator 32) | `anonymization-core/src` | 15, 16 | **hecho** (`93ed554`) |
+| 18 | ADR-175 §1, §3-§5 en la UI, y los no bloqueantes 3, 5 y 7 de la revisión 2 | `apps/react-client` | 17 | **hecho** (`e7380d1`, `e2c6577`) |
+| 19 | `EngineErrorCode.EXPORT_UNRESOLVED_CONFLICTS` (`manualOutcome` es un método de `GroupingEngine` y va en la fila 20) | `shared` | — | **hecho** (`80ab79e`) |
+| 20 | ADR-176 §2-§4 (15x): reapuntar conflictos, `manualOutcome`, `liftRemoval` | `grouping-engine` | 19 | **hecho** (`9e1957a`) |
+| 21 | ADR-176 §1 y §3 (Orchestrator 33) | `anonymization-core/src` | 20 | **hecho** (`50f7edc`) |
+| 22 | ADR-176 §1 en la UI: `ExportButton` bloqueado con motivo y "Resolver" | `apps/react-client` | 21 | **hecho** (`edc223b`, `f9fb9c9`) |
+| 23 | ADR-177 §1-§2 (15y): una entidad eliminada no ocupa lugar; `liftRemoval` olvida los registros no vivos del valor | `grouping-engine` | — | **hecho** (`8fa1794`) |
+| 24 | ADR-177 §4: el motivo de `ExportButton` flota anclado a la derecha | `apps/react-client` | — | **hecho** (`cbb466b`) |
+| 25 | ADR-178 (15z): lo manual contenido queda guardado y se oculta solo si su contenedor se elimina | `grouping-engine` | 23 | **hecho** (`17d4501`) |
+
+**Revisión 1 (2026-09-24): REJECTED** con tres bloqueantes — B-1 (typecheck rojo en `tests/`), B-2 (ADR-170 enumeraba rechazos que el motor no hacía → ADR-173), B-3 (el toast de alta podía mentir → ADR-174) — y no bloqueantes N-1 a N-8. Las filas 10-14 los cierran. N-8 (`scenario-2`/`scenario-5` de E2E) es anterior a esta branch: va en un commit aparte sobre `hardening/plan-2026-09`.
+
+**Revisión 2 (2026-09-24): REJECTED**: B-1 y B-2 cerrados; B-3 abierto por dos caminos —un choque que se "resolvía" solo al desaparecer la detección, y `heldConflictIds` por igualdad exacta de texto—. ADR-175 los cierra (filas 15-18). También cae ahí `mac-packaging.test.ts` de `apps/desktop-shell`: falla fuera de esta branch por los CRLF de `electron-builder.yml` con `core.autocrlf=true`, igual que N-8.
+
+**Revisión 3 (2026-09-24): REJECTED**: los dos bloqueantes de la revisión 2 cerrados; tres nuevos —nada bloqueaba el export con un conflicto sin resolver, fusionar/dividir la detección dejaba el choque inalcanzable, y un agregado contenido (ADR-117) rompía el invariante de `groupIds`—. ADR-176 los cierra (filas 19-22).
+
+**Revisión 4 (2026-09-24): REJECTED** — los bloqueantes de la revisión 3 cerrados; quedan dos por entidades eliminadas que siguen ocupando lugar (contención y superposición) y la ranura del motivo de `ExportButton`. Reporte completo: `roadmap/Hito12.5_Revision_R4_Handoff.md`. El humano decidió D1 = A (una entidad eliminada no ocupa lugar, y un agregado manual del valor la vuelve a traer) y D2 = A (motivo flotante a la derecha). ADR-177 los cierra (filas 23-24), junto con B4-0, que encontró el planificador: re-agregar en la misma posición lo eliminado lo descartaba el dedup.
+
+**Revisión 5 (2026-09-24): REJECTED**: B4-0 a B4-3 y N4-1 cerrados; queda B5-1 —con «Perez» agregado a mano antes de eliminar «Juan Perez», la aparición contenida quedaba a la vista y un re-análisis la volvía a ocultar— y N5-1 (15y sin marcar). El humano eligió que lo contenido se oculte solo (opción C): ADR-178 lo cierra (fila 25).
+
+**Revisión 6 (2026-09-24): APPROVED**: B5-1 y N5-1 cerrados. Quedan dos observaciones no bloqueantes: O6-1 (eliminar una entidad puede abrir un choque si lo re-procesado choca con otra), **cerrada** con el caso 69 y su test, y O6-2 (el límite conocido de ADR-117, que es previo). El PR va contra `hardening/plan-2026-09`.
+
+**Reglas de este hito** (además de las de siempre): UX-10 —nada que aparezca desplaza el diseño— se
+revisa en cada PR de la app; los PR 6-9 se verifican en el browser con los dos temas.
 
 ---
 

@@ -14,6 +14,7 @@ export {
   REPLACEMENT_FONT_HEIGHT_RATIO,
   AVG_GLYPH_ADVANCE_RATIO,
   DEGRADED_FONT_RATIO,
+  MAX_EDIT_CHECKPOINTS,
 } from "./constants.js";
 
 // Estimación de ancho de token de la escalera de abreviaturas (ADR-057 §5)
@@ -74,10 +75,14 @@ export type {
   OccurrenceContext,
   OccurrenceRef,
   EntityGroup,
+  ReplacementPreviews,
   SyntheticRequest,
   Replacement,
   ManualEntityRequest,
   TextMatch,
+  EditPreviewRequest,
+  EditPreviewGroup,
+  EditPreview,
   RuleTarget,
   Rule,
   Annotation,
@@ -214,6 +219,7 @@ export type {
   GroupUpdateRequested,
   GroupMergeRequested,
   GroupSplitRequested,
+  GroupRemoveRequested,
   RuleCreated,
   RuleUpdated,
   RuleDeleted,

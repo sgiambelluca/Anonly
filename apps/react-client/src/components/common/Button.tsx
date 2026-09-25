@@ -23,6 +23,20 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   readonly children?: ReactNode;
 }
 
+/**
+ * Nombres **literales**: Tailwind solo emite las clases de `@layer components`
+ * que encuentra escritas en el código. Armadas con un template
+ * (`anonly-button-${variant}`), la de `danger` no aparecía en ningún lado y
+ * el botón salía sin fondo (lo encontró la confirmación de "Eliminar
+ * entidad", ADR-171).
+ */
+const VARIANT_CLASSES: Readonly<Record<ButtonVariant, string>> = {
+  primary: "anonly-button-primary",
+  secondary: "anonly-button-secondary",
+  ghost: "anonly-button-ghost",
+  danger: "anonly-button-danger",
+};
+
 export function Button({
   variant = "primary",
   size = "md",
@@ -33,7 +47,7 @@ export function Button({
   type = "button",
   ...rest
 }: ButtonProps) {
-  const variantClass = `anonly-button-${variant}`;
+  const variantClass = VARIANT_CLASSES[variant];
   const classes = [variantClass, SIZE_CLASSES[size], className].filter(Boolean).join(" ");
 
   return (

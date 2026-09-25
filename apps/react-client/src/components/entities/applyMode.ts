@@ -1,15 +1,11 @@
 /**
- * `applyMode.ts` — ejecuta un `ApplyModePlan` (ADR-087 §3.1b) y arma su undo.
+ * `applyMode.ts` — ejecuta un `ApplyModePlan` (ADR-087 §3.1b) como una sola
+ * entrada de la pila de deshacer (ADR-172).
  *
  * `modeLevels.ts` decide **qué** hay que borrar y crear; esto lo **hace**,
  * emitiendo las acciones de reglas que ya existían (`createRule`,
  * `updateRule`, `deleteRule`). No hay API nueva del Core: los tres niveles del
  * árbol escriben las mismas `Rule` de siempre.
- *
- * El undo recrea las reglas barridas **con su id original**. Eso importa: si
- * se recrearan con ids nuevos, un segundo undo (o un `restore` guardado por
- * otro toast) apuntaría a reglas que ya no existen. `createRule` acepta la
- * `Rule` completa, así que conservar el id es gratis.
  */
 
 import {
@@ -22,6 +18,7 @@ import {
 import { actions } from "../../core-adapter/actions.js";
 import { showToast } from "../common/toast.js";
 
+import { editToast, recordEdit } from "./editHistory.js";
 import { UI_RULE_PRIORITY, type ApplyModePlan } from "./modeLevels.js";
 
 export interface ApplyModeInput {
@@ -32,8 +29,15 @@ export interface ApplyModeInput {
   readonly entityType?: EntityType;
   /** Presente en `scope: "group"`. */
   readonly groupId?: string;
-  /** Texto del toast, ya en lenguaje del usuario ("Todo el documento → Etiquetar"). */
-  readonly toastText: string;
+  /** Qué se hizo, para la pila de deshacer (ADR-172 §2). */
+  readonly historyLabel: string;
+  /**
+   * Texto del toast, ya en lenguaje del usuario ("Todo el documento →
+   * Etiquetar"). `null` = sin toast: el cambio de modo de una fila no lo
+   * lleva (`Components.md` §3.4d), pero igual entra a la pila y se deshace
+   * con `Ctrl+Z` (ADR-172 §3).
+   */
+  readonly toastText: string | null;
 }
 
 function buildRule(input: ApplyModeInput): Rule {
@@ -55,7 +59,13 @@ function buildRule(input: ApplyModeInput): Rule {
 }
 
 /**
- * Aplica el plan y muestra el toast con "Deshacer".
+ * Aplica el plan y, si corresponde, muestra el toast con "Deshacer".
+ *
+ * Antes de emitir nada toma el punto de restauración (ADR-172 §2): un
+ * barrido borra reglas y crea la nueva, y todo eso es **una** entrada de la
+ * pila. Deshacer vuelve al punto —reglas incluidas— en vez de recrear a mano
+ * las barridas, como hacía el snapshot de reglas que llevaba el toast
+ * (`Components.md` §3.11, retirado por ADR-172 §4).
  *
  * Orden: **primero el barrido, después la regla del nivel**. Al revés, existe
  * una ventana en la que conviven la regla nueva y las que va a reemplazar, y
@@ -64,48 +74,18 @@ function buildRule(input: ApplyModeInput): Rule {
  */
 export function applyModeAtLevel(input: ApplyModeInput): void {
   const { plan } = input;
+  const recorded = recordEdit(input.historyLabel);
 
   for (const ruleId of plan.deleteRuleIds) {
     actions.deleteRule(ruleId);
   }
 
-  let createdRuleId: string | undefined;
   if (plan.updateRuleId === undefined) {
-    const rule = buildRule(input);
-    actions.createRule(rule);
-    createdRuleId = rule.id;
+    actions.createRule(buildRule(input));
   } else {
     actions.updateRule(plan.updateRuleId, { mode: input.mode, updatedAt: Date.now() });
   }
 
-  showToast(input.toastText, {
-    label: "Deshacer",
-    run: () => undoApply(plan, createdRuleId),
-  });
-}
-
-/**
- * Deshacer (ADR-087 §3.3). Las dos mitades se deshacen distinto, y por eso el
- * plan las separa:
- *
- * - Las reglas **barridas** se borraron ⇒ se recrean, **con su id original**.
- *   Si se recrearan con ids nuevos, el snapshot de otro toast quedaría
- *   apuntando a reglas inexistentes.
- * - La regla **del propio nivel**, si ya existía, se actualizó ⇒ se le
- *   devuelve su `previousMode`. Recrearla sería un error: `rules.store.addRule`
- *   agrega sin deduplicar por id y quedaría duplicada.
- *
- * Un undo que solo borrara la regla nueva dejaría al usuario sin los ajustes
- * por tipo y por fila que tenía antes: el barrido es la parte destructiva.
- */
-function undoApply(plan: ApplyModePlan, createdRuleId: string | undefined): void {
-  if (createdRuleId !== undefined) {
-    actions.deleteRule(createdRuleId);
-  } else if (plan.updateRuleId !== undefined && plan.previousMode !== undefined) {
-    actions.updateRule(plan.updateRuleId, { mode: plan.previousMode, updatedAt: Date.now() });
-  }
-
-  for (const rule of plan.sweptRules) {
-    actions.createRule(rule);
-  }
+  if (input.toastText === null) return;
+  showToast(editToast({ title: input.toastText }, recorded));
 }

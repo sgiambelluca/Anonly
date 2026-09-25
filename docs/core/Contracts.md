@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=contratos-base | dependencias=03_Data_Model.md,04_Event_System.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-049-Errores-Cruzando-Worker-Discriminacion-Por-Code.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-061-Agregado-Manual-De-Entidades.md,adr/ADR-065-OCR-Por-Region.md,adr/ADR-066-Texto-De-Anotaciones-Y-Reemplazo-Rotado.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-062-Veredicto-De-Degradacion-Hasta-La-UI.md,adr/ADR-086-El-Detector-De-Degradacion-Mide-El-Ancho.md,adr/ADR-109-La-Caja-De-Una-Palabra-Es-Su-Caja-De-Tinta.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md | audiencia=IA-implementador | fase=3 (fase 10.9: §5 nota de `fragments` junto a `BoundingBox` — el campo va en `Occurrence`/`OccurrenceRef`/`Replacement`, no adentro del rectángulo, ADR-074 §1; §3.5 actualizado en fase 10: CoreRuntimeOptions/WorkerLike/WorkerFactory para transporte de workers —ADR-036 §2—, IPipelineOrchestrator.reanalyze/ReanalyzeConfigPatch —ADR-038 §1—; §6 gana MAX_RENDER_SCALE/PREVIEW_CACHE_MAX_BYTES —ADR-037 §2-3—; §8 RenderRequested.scale —ADR-037 §1—; §4 precisa qué garantiza deserialize() al cruzar el boundary, sin cambio de shape —ADR-049 §2—; fase 11: §8 RenderRequested.kind requerido —ADR-056 §1—; fase 10.5/10.6: §5 AnnotationKind.Degraded —ADR-058 §7— y PersonGender —ADR-060 §2—, §6 REPLACEMENT_FONT_HEIGHT_RATIO/AVG_GLYPH_ADVANCE_RATIO/estimateTokenWidth —ADR-057 §5— y DEGRADED_FONT_RATIO —ADR-058 §7—; fase 10.8: §5 gana los primeros tipos públicos que §10 regla 1 obliga a declarar acá antes que en `shared/src/types.ts` — `BoundingBox.rotation` —ADR-066 §6— y `OcrRegion` —ADR-065 §4—; fase 10.6: §5 `PersonGenderChoice` y §8 `GroupUpdateRequested.patch.personGender` —ADR-069 §4—, §5 `SyntheticRequest` y §6 la declaración de `synthesize` —ADR-072 §2, que la trae al contrato: se exportaba desde `shared` sin estar acá, contra §10 regla 1—; fase 10.7: §6 gana `sharesVerticalBand` y `normalizeForComparison` —ADR-061 §2 errata: dos primitivas que ya estaban duplicadas dentro de motores y façade por no tener lugar donde vivir—, y §3.5 gana `ManualEntityResult` con `addManualEntity` devolviéndolo en vez de `void` —ADR-061 §6 errata: sin eso la UI no puede distinguir "no se encontró" de "agregado"—; post-Hito 10.10: §8 `PreviewUpdated.degraded` —ADR-062, el veredicto de legibilidad sale de Render por acá— y §6 `DEGRADED_FONT_RATIO` con **criterio y valor nuevos** —ADR-086: pasa a medir la razón de ANCHOS y baja a 0,5, porque el cociente de tamaños era estructuralmente inalcanzable en cuerpo de texto—; fase 11: §5 la caja de una palabra pasa a ser su caja de tinta —del descenso al ascenso de su fuente, no de la línea de base hacia arriba por un cuerpo— y §6 `REPLACEMENT_FONT_HEIGHT_RATIO` se recalibra de 0,7 a 0,64 para que el token siga dibujándose igual —ADR-109 §1/§4—; fase 11 (plan de campaña, H-01A): §4 gana `EngineErrorCode.PDF_PAGE_ROTATED` —ADR-140: página con `/Rotate` heredado y texto nativo, rechazo tipado en vez de una geometría equivocada con cara de éxito; retirado por ángulo cuando ADR-141 lo verifique de punta a punta—; fase 11 (plan de campaña, H-09D3-b): §7.1 declara por primera vez `OcrPagePayload` —que se exportaba desde `shared` sin estar acá, contra §10 regla 1— y lo cambia: la imagen del job `ocr-page` viaja **codificada** (PNG) en vez de `ImageData` crudo, ADR-158 §2) -->
+<!-- CONTEXT: scope=contratos-base | dependencias=03_Data_Model.md,04_Event_System.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-049-Errores-Cruzando-Worker-Discriminacion-Por-Code.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-061-Agregado-Manual-De-Entidades.md,adr/ADR-065-OCR-Por-Region.md,adr/ADR-066-Texto-De-Anotaciones-Y-Reemplazo-Rotado.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-062-Veredicto-De-Degradacion-Hasta-La-UI.md,adr/ADR-086-El-Detector-De-Degradacion-Mide-El-Ancho.md,adr/ADR-109-La-Caja-De-Una-Palabra-Es-Su-Caja-De-Tinta.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-173-El-Motor-Rechaza-Fusiones-Y-Divisiones-Invalidas.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,adr/ADR-175-Un-Choque-Manual-No-Queda-Colgado.md,adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md | audiencia=IA-implementador | fase=3 (fase 10.9: §5 nota de `fragments` junto a `BoundingBox` — el campo va en `Occurrence`/`OccurrenceRef`/`Replacement`, no adentro del rectángulo, ADR-074 §1; §3.5 actualizado en fase 10: CoreRuntimeOptions/WorkerLike/WorkerFactory para transporte de workers —ADR-036 §2—, IPipelineOrchestrator.reanalyze/ReanalyzeConfigPatch —ADR-038 §1—; §6 gana MAX_RENDER_SCALE/PREVIEW_CACHE_MAX_BYTES —ADR-037 §2-3—; §8 RenderRequested.scale —ADR-037 §1—; §4 precisa qué garantiza deserialize() al cruzar el boundary, sin cambio de shape —ADR-049 §2—; fase 11: §8 RenderRequested.kind requerido —ADR-056 §1—; fase 10.5/10.6: §5 AnnotationKind.Degraded —ADR-058 §7— y PersonGender —ADR-060 §2—, §6 REPLACEMENT_FONT_HEIGHT_RATIO/AVG_GLYPH_ADVANCE_RATIO/estimateTokenWidth —ADR-057 §5— y DEGRADED_FONT_RATIO —ADR-058 §7—; fase 10.8: §5 gana los primeros tipos públicos que §10 regla 1 obliga a declarar acá antes que en `shared/src/types.ts` — `BoundingBox.rotation` —ADR-066 §6— y `OcrRegion` —ADR-065 §4—; fase 10.6: §5 `PersonGenderChoice` y §8 `GroupUpdateRequested.patch.personGender` —ADR-069 §4—, §5 `SyntheticRequest` y §6 la declaración de `synthesize` —ADR-072 §2, que la trae al contrato: se exportaba desde `shared` sin estar acá, contra §10 regla 1—; fase 10.7: §6 gana `sharesVerticalBand` y `normalizeForComparison` —ADR-061 §2 errata: dos primitivas que ya estaban duplicadas dentro de motores y façade por no tener lugar donde vivir—, y §3.5 gana `ManualEntityResult` con `addManualEntity` devolviéndolo en vez de `void` —ADR-061 §6 errata: sin eso la UI no puede distinguir "no se encontró" de "agregado"—; post-Hito 10.10: §8 `PreviewUpdated.degraded` —ADR-062, el veredicto de legibilidad sale de Render por acá— y §6 `DEGRADED_FONT_RATIO` con **criterio y valor nuevos** —ADR-086: pasa a medir la razón de ANCHOS y baja a 0,5, porque el cociente de tamaños era estructuralmente inalcanzable en cuerpo de texto—; fase 11: §5 la caja de una palabra pasa a ser su caja de tinta —del descenso al ascenso de su fuente, no de la línea de base hacia arriba por un cuerpo— y §6 `REPLACEMENT_FONT_HEIGHT_RATIO` se recalibra de 0,7 a 0,64 para que el token siga dibujándose igual —ADR-109 §1/§4—; fase 11 (plan de campaña, H-01A): §4 gana `EngineErrorCode.PDF_PAGE_ROTATED` —ADR-140: página con `/Rotate` heredado y texto nativo, rechazo tipado en vez de una geometría equivocada con cara de éxito; retirado por ángulo cuando ADR-141 lo verifique de punta a punta—; fase 11 (plan de campaña, H-09D3-b): §7.1 declara por primera vez `OcrPagePayload` —que se exportaba desde `shared` sin estar acá, contra §10 regla 1— y lo cambia: la imagen del job `ocr-page` viaja **codificada** (PNG) en vez de `ImageData` crudo, ADR-158 §2; fase 12.5 (Hito 12.5): §3.5 gana `previewEdit` con `EditPreviewRequest`/`EditPreview`/`EditPreviewGroup` y §5 `ReplacementPreviews`, nuevo campo requerido de `EntityGroup` —ADR-170: la UI muestra valores exactos antes de aplicar sin reimplementar el motor—; fase 12.5: §2/§8 `GROUP_REMOVE_REQUESTED` + `GroupRemoveRequested`, y §3.5 `addManualEntity` levanta la supresión de un valor eliminado —ADR-171: el usuario elimina una entidad y no vuelve tras un re-análisis—; fase 12.5: §3.5 `createEditCheckpoint`/`restoreEditCheckpoint`/`discardEditCheckpoints` y §6 `MAX_EDIT_CHECKPOINTS` —ADR-172: deshacer exacto por puntos de restauración que guarda el Core—) -->
 
 # Anonly — Contratos Base (`@anonly/shared`)
 
@@ -111,6 +111,7 @@ export enum EngineEvents {
   GROUP_UPDATE_REQUESTED = "GROUP_UPDATE_REQUESTED",
   GROUP_MERGE_REQUESTED = "GROUP_MERGE_REQUESTED",
   GROUP_SPLIT_REQUESTED = "GROUP_SPLIT_REQUESTED",
+  GROUP_REMOVE_REQUESTED = "GROUP_REMOVE_REQUESTED",   // ADR-171 §1
   RULE_CREATED = "RULE_CREATED",
   RULE_UPDATED = "RULE_UPDATED",
   RULE_DELETED = "RULE_DELETED",
@@ -251,6 +252,17 @@ export interface ImportDocumentInput {
 // Objeto y no `number` pelado para poder crecer sin romper firmas.
 export interface ManualEntityResult {
   readonly occurrenceCount: number;   // apariciones del valor en el documento; 0 = no está
+  // ADR-174 §2: conflictos sin resolver con `heldManual` que dejó este agregado
+  // (la ocurrencia manual perdió una superposición y quedó retenida). [] = ninguno.
+  // occurrenceCount > 0 con heldConflictIds no vacío NO es un agregado exitoso.
+  // ADR-176 §3 (reemplaza el criterio de ADR-175 §3 y su errata): los calcula
+  // Grouping con manualOutcome(documentId, idsDeLasOcurrenciasManualEmitidas):
+  // conflictos heldManual sin resolver donde quedaron retenidas.
+  readonly heldConflictIds: ReadonlyArray<string>;
+  // ADR-176 §3: grupos actuales de los registros que absorbieron las ocurrencias
+  // de este agregado (agrupadas, deduplicadas o contenidas, ADR-117). [] = ninguno.
+  // Invariante, por construcción: occurrenceCount > 0 => heldConflictIds o groupIds no vacío.
+  readonly groupIds: ReadonlyArray<string>;
 }
 
 export interface IPipelineOrchestrator {
@@ -268,10 +280,33 @@ export interface IPipelineOrchestrator {
    * occurrenceCount 0. Es el único modo en que el caller lo distingue de un
    * agregado exitoso (ADR-061 §6 errata) -- 0 NO lanza.
    * Precondición: stage in {Ready, Failed} (si no, InvalidInputError).
+   * ADR-171 §4: antes de reopenSession llama a grouping.liftRemoval(value): un
+   * agregado manual NUEVO revierte la eliminación de ese valor. La re-aplicación
+   * automática de literales tras un re-análisis (ADR-061 §5) NO la llama.
    */
   addManualEntity(documentId: string, request: ManualEntityRequest): Promise<ManualEntityResult>;
   /** ADR-061 §8: misma búsqueda literal, salida para el buscador del visor. */
   findText(documentId: string, query: string): ReadonlyArray<TextMatch>;
+  /**
+   * ADR-170 §2: cómo quedarían los grupos si se aplicara la operación. Simulacro
+   * sobre una copia descartable de la sesión de Grouping, con el mismo código que
+   * el pedido real: no muta, no emite, sincrónico. Pedido que el real rechazaría,
+   * o documento sin sesión -> InvalidInputError.
+   */
+  previewEdit(documentId: string, request: EditPreviewRequest): EditPreview;
+  /**
+   * ADR-172 §1: puntos de restauración del ESTADO DE EDICIÓN del documento (sesión
+   * de Grouping completa con sus campos internos + literales manuales retenidos).
+   * create: sincrónico, id opaco, hasta MAX_EDIT_CHECKPOINTS (se descarta el más
+   * viejo). restore: reemplaza el estado y emite la diferencia con los eventos de
+   * Grouping de siempre; id desconocido o descartado -> InvalidInputError.
+   * reanalyze, closeDocument y dispose los descartan todos. Precondición de
+   * create/restore: sesión existente y stage fuera de {Importing, Extracting,
+   * OCRing, Detecting, Grouping}; si no, InvalidInputError.
+   */
+  createEditCheckpoint(documentId: string): string;
+  restoreEditCheckpoint(documentId: string, checkpointId: string): Promise<void>;
+  discardEditCheckpoints(documentId: string): void;
   /** ADR-061 §4: habilitan el hit-test de selección sobre el canvas del original. */
   getPageWords(documentId: string, pageIndex: number): ReadonlyArray<Word>;
   getPageSize(documentId: string, pageIndex: number): { readonly width: number; readonly height: number };
@@ -279,6 +314,31 @@ export interface IPipelineOrchestrator {
   closeDocument(documentId: string): Promise<void>;
   getState(documentId: string): PipelineState;
   dispose(): Promise<void>;
+}
+
+// ─── Vistas previas de edición (ADR-170 §2) ───
+// Operaciones hipotéticas que la UI muestra antes de confirmar (ADR-169 §10).
+// Los valores salen del mismo código que el pedido real sobre una copia de la
+// sesión; la UI no los reimplementa (U-3).
+export type EditPreviewRequest =
+  | { readonly kind: "type"; readonly groupId: string; readonly type: EntityType }
+  | { readonly kind: "merge"; readonly sourceGroupId: string; readonly targetGroupIds: ReadonlyArray<string> }
+  | { readonly kind: "split"; readonly groupId: string; readonly occurrenceIds: ReadonlyArray<string> };
+
+export interface EditPreviewGroup {
+  readonly groupId: string | null;   // null = el grupo que la operación crearía (parte nueva de un split)
+  readonly type: EntityType;
+  readonly indexInType: number;
+  readonly canonicalValue: string;
+  readonly memberCount: number;
+  readonly replacementMode: ReplacementMode;
+  readonly replacementValue: string;
+}
+
+export interface EditPreview {
+  // type -> 1 grupo (el reclasificado); merge -> 1 (el sobreviviente);
+  // split -> 2 (el original y el nuevo, en ese orden).
+  readonly groups: ReadonlyArray<EditPreviewGroup>;
 }
 
 // ─── Re-análisis parcial preservando ediciones (Hito 10, ADR-038 §1) ───
@@ -370,6 +430,9 @@ export enum EngineErrorCode {
   EXPORT_FAILED = "EXPORT_FAILED",
   EXPORT_NO_ENABLED_GROUPS = "EXPORT_NO_ENABLED_GROUPS",
   EXPORT_TIMEOUT = "EXPORT_TIMEOUT",
+  // ADR-176 §1: runExport con conflictos sin resolver. Solo viaja en la metadata
+  // de un warn (patrón de EXPORT_NO_ENABLED_GROUPS): sin clase ni evento.
+  EXPORT_UNRESOLVED_CONFLICTS = "EXPORT_UNRESOLVED_CONFLICTS",
   // Generic
   ENGINE_NOT_INITIALIZED = "ENGINE_NOT_INITIALIZED",
   ENGINE_DISPOSED = "ENGINE_DISPOSED",
@@ -444,6 +507,21 @@ Cada motor define sus subclases concretas en su `<engine>.errors.ts`. Toda subcl
 Los tipos completos están en `03_Data_Model.md`. Aquí solo los enums referenciados en contratos, más los tipos públicos que §10 regla 1 obliga a declarar acá primero.
 
 ```ts
+/**
+ * ADR-170 §1: lo que valdría `EntityGroup.replacementValue` si el grupo pasara a
+ * cada modo, calculado por Grouping con la misma función (`computeReplacementValue`)
+ * e ignorando `replacementValueUserSet` (cambiar el modo recalcula, ADR-076 §3).
+ * `redact` no tiene entrada: su valor es siempre "". Campo requerido de
+ * `EntityGroup` (`03_Data_Model.md` §9).
+ */
+export interface ReplacementPreviews {
+  readonly placeholder: string;
+  readonly mask: string;
+  readonly synthetic: string;
+  /** Niveles distintos de la escalera de ADR-057, del más largo al más corto; incluye `placeholder`. */
+  readonly placeholderLadder: ReadonlyArray<string>;
+}
+
 /**
  * ADR-163: límite opcional y conservador para rasterizar OCR. Solo existe
  * cuando pdf-engine demostró que la página sin texto es un único ráster con
@@ -775,6 +853,7 @@ export interface ExportConfig {
 | `PREVIEW_CACHE_MAX_BYTES` | `200 MB` | Límite por bytes del cache LRU de previews, además de `PREVIEW_CACHE_PAGES` (ADR-037 §3) |
 | `REPLACEMENT_FONT_HEIGHT_RATIO` | `0.64` | Fracción de `bbox.height` que el render usa como tamaño de fuente del reemplazo. Deja de ser número mágico de `fontForMode` (ADR-057 §5; **valor recalibrado por ADR-109 §4**, de `0.7`) |
 | `AVG_GLYPH_ADVANCE_RATIO` | `0.6` | Avance medio de glifo como fracción del tamaño de fuente, para estimar ancho sin canvas (ADR-057 §5) |
+| `MAX_EDIT_CHECKPOINTS` | `50` | Puntos de restauración de edición por documento; al pasarse se descarta el más viejo (ADR-172 §1) |
 | `DEGRADED_FONT_RATIO` | `0.5` | Umbral del aviso de degradación: se marca cuando **`anchoDisponible / anchoNatural`** cae por debajo, donde `anchoNatural` es lo que el texto mediría a `boxHeight × REPLACEMENT_FONT_HEIGHT_RATIO` (ADR-058 §7, **criterio y valor reemplazados por ADR-086**) |
 
 > **Por qué `REPLACEMENT_FONT_HEIGHT_RATIO` bajó de 0,7 a 0,64** (ADR-109 §4). La constante no cambió de significado ni de intención: sigue siendo "qué fracción del alto de la caja mide la fuente del reemplazo". Lo que cambió es **la caja**. Hasta ADR-109, `bbox.height` de una palabra de PDF era el **cuerpo** de la fuente; desde ADR-109 es su **alto de tinta**, `(ascent + |descent|) × cuerpo`, que sobre el corpus relevado —10 documentos, 4266 items— vale **1,101** pesado por items. Entonces `0,70 / 1,101 = 0,636 → 0,64` es la recalibración que deja **todo igual a la vista**: el token se dibuja del mismo tamaño y el detector de degradación mide contra la misma referencia. No es una decisión tipográfica.
@@ -1007,10 +1086,21 @@ export interface GroupUpdateRequested {
 }
 export interface GroupMergeRequested { readonly documentId: string; readonly sourceGroupId: string; readonly targetGroupId: string; }
 export interface GroupSplitRequested { readonly documentId: string; readonly groupId: string; readonly occurrenceIds: ReadonlyArray<string>; }
+// ADR-171 §1: el usuario elimina la entidad. Grouping la quita, emite
+// ENTITY_GROUP_REMOVED y suprime sus valores para que un re-análisis no la traiga.
+export interface GroupRemoveRequested { readonly documentId: string; readonly groupId: string; }
 export interface RuleCreated { readonly documentId: string; readonly rule: Rule; }
 export interface RuleUpdated { readonly documentId: string; readonly ruleId: string; readonly patch: Partial<Rule>; }
 export interface RuleDeleted { readonly documentId: string; readonly ruleId: string; }
-export interface ConflictResolveRequested { readonly documentId: string; readonly conflictId: string; readonly entityType?: EntityType; } // ADR-083 §1: el usuario elige el TIPO; ausente = default (mayor confidence)
+export interface ConflictResolveRequested {
+  readonly documentId: string;
+  readonly conflictId: string;
+  readonly entityType?: EntityType;              // ADR-083 §1: el usuario elige el TIPO; ausente = default (mayor confidence)
+  // ADR-174 §3: solo en conflictos con `heldManual`. "manual" agrupa la ocurrencia
+  // manual retenida; "detected" la descarta. Ausente = "detected". En un conflicto
+  // sin heldManual -> GroupingInvalidPatchError (rechazo con warn).
+  readonly winner?: "manual" | "detected";
+}
 export interface DocumentClosed { readonly documentId: string; }
 
 // Type map: EngineEvents → payload type. Reemplaza al namespace EventPayloads;
@@ -1066,6 +1156,7 @@ export type EventPayloadMap = {
   [EngineEvents.GROUP_UPDATE_REQUESTED]: GroupUpdateRequested;
   [EngineEvents.GROUP_MERGE_REQUESTED]: GroupMergeRequested;
   [EngineEvents.GROUP_SPLIT_REQUESTED]: GroupSplitRequested;
+  [EngineEvents.GROUP_REMOVE_REQUESTED]: GroupRemoveRequested;
   [EngineEvents.RULE_CREATED]: RuleCreated;
   [EngineEvents.RULE_UPDATED]: RuleUpdated;
   [EngineEvents.RULE_DELETED]: RuleDeleted;

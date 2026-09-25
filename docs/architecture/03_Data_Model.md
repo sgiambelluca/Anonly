@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=modelo-de-datos | dependencias=01_Technical_Architecture_Document.md,core/Contracts.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-043-RenderEngine-Reparto-Host-Worker-Kernel.md,adr/ADR-046-NerEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-064-Palabras-De-OCR-En-Puntos.md,adr/ADR-065-OCR-Por-Region.md,adr/ADR-066-Texto-De-Anotaciones-Y-Reemplazo-Rotado.md,adr/ADR-067-Orden-De-Lectura-Por-Runs-Rotados.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-109-La-Caja-De-Una-Palabra-Es-Su-Caja-De-Tinta.md,adr/ADR-110-El-Renglon-Es-Un-Grupo-No-Una-Coordenada.md,adr/ADR-141-La-Geometria-Se-Entrega-En-La-Pagina-Que-Se-Ve.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md | audiencia=IA+humanos | fase=1 (fase 11: §6 gana la definición normativa del marco de coordenadas de `BoundingBox` — el de la página presentada, no el crudo de PDF — ADR-141 §1; fase 10.9: §7/§8/§12 `fragments` —la descomposición por línea de una ocurrencia que cruza un salto de renglón, ADR-074 §1—; §18 actualizado en fase 10: OcrPagePayload.imageData→ImageData y payloads de transporte LoadDocument/RasterizePage/ExportSave, ADR-036 §4; UnloadDocumentPayload, ADR-043 §4; NerPagePayload por batch + NerKernelSpan/NerKernelProgress, ADR-046; fase 10.5/10.6: §9 EntityGroup.personGender + PersonGender —ADR-060 §2—, §11 escalera de abreviaturas del placeholder —ADR-057 §1—, §18 RenderPagePayload.lineWords —ADR-058 §5—, ExportSavePayload.legendImage + MarkerLegendEntry/MarkerLegendRow + RenderLegendPayload —ADR-059 §3/§5/§6—, §19 ExportOptions.includeMarkerLegend —ADR-059 §1—; fase 10.8: §4 invariante de orden de lectura por runs rotados —ADR-067— y `ocrCompleted` relajado a `requiresOCR === false` con región —ADR-065 §7—, §4.1 `OcrRegion` nueva —ADR-065 §4—, §5 `Word.bbox.rotation` y aclaración de puntos de página para `source: "ocr"` —ADR-066 §6, ADR-064—, §6 `BoundingBox.rotation` —ADR-066 §6—, §18 `RasterizePagePayload.region` —ADR-065 §5—; fase 10.6: §9 `EntityGroup.personGender` —ADR-060 §2—, reescrita por ADR-069 §4/§6 —quién lo escribe, qué significa la ausencia, y que la elección del humano se recuerda aparte en `personGenderUserSet`, interno—; fase 11: §4 la clave de orden de lectura pasa a la línea de base, §5 `Word.bbox` es la caja de tinta también para `source: "pdf"` y §6 gana el invariante de que `y + height` es la línea de base —ADR-109 §1/§3—; §4 vuelve a cambiar: el orden de lectura deja de tener clave escalar y pasa a agrupar renglones —ADR-110 §1, supersede ADR-109 §3—); §18 `OcrPagePayload` lleva la imagen codificada y clonada en vez de `ImageData` transferida, fase 11 por ADR-158 §2/§5 -->
+<!-- CONTEXT: scope=modelo-de-datos | dependencias=01_Technical_Architecture_Document.md,core/Contracts.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-043-RenderEngine-Reparto-Host-Worker-Kernel.md,adr/ADR-046-NerEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-064-Palabras-De-OCR-En-Puntos.md,adr/ADR-065-OCR-Por-Region.md,adr/ADR-066-Texto-De-Anotaciones-Y-Reemplazo-Rotado.md,adr/ADR-067-Orden-De-Lectura-Por-Runs-Rotados.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-109-La-Caja-De-Una-Palabra-Es-Su-Caja-De-Tinta.md,adr/ADR-110-El-Renglon-Es-Un-Grupo-No-Una-Coordenada.md,adr/ADR-141-La-Geometria-Se-Entrega-En-La-Pagina-Que-Se-Ve.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,adr/ADR-175-Un-Choque-Manual-No-Queda-Colgado.md,adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md | audiencia=IA+humanos | fase=1 (fase 11: §6 gana la definición normativa del marco de coordenadas de `BoundingBox` — el de la página presentada, no el crudo de PDF — ADR-141 §1; fase 10.9: §7/§8/§12 `fragments` —la descomposición por línea de una ocurrencia que cruza un salto de renglón, ADR-074 §1—; §18 actualizado en fase 10: OcrPagePayload.imageData→ImageData y payloads de transporte LoadDocument/RasterizePage/ExportSave, ADR-036 §4; UnloadDocumentPayload, ADR-043 §4; NerPagePayload por batch + NerKernelSpan/NerKernelProgress, ADR-046; fase 10.5/10.6: §9 EntityGroup.personGender + PersonGender —ADR-060 §2—, §11 escalera de abreviaturas del placeholder —ADR-057 §1—, §18 RenderPagePayload.lineWords —ADR-058 §5—, ExportSavePayload.legendImage + MarkerLegendEntry/MarkerLegendRow + RenderLegendPayload —ADR-059 §3/§5/§6—, §19 ExportOptions.includeMarkerLegend —ADR-059 §1—; fase 10.8: §4 invariante de orden de lectura por runs rotados —ADR-067— y `ocrCompleted` relajado a `requiresOCR === false` con región —ADR-065 §7—, §4.1 `OcrRegion` nueva —ADR-065 §4—, §5 `Word.bbox.rotation` y aclaración de puntos de página para `source: "ocr"` —ADR-066 §6, ADR-064—, §6 `BoundingBox.rotation` —ADR-066 §6—, §18 `RasterizePagePayload.region` —ADR-065 §5—; fase 10.6: §9 `EntityGroup.personGender` —ADR-060 §2—, reescrita por ADR-069 §4/§6 —quién lo escribe, qué significa la ausencia, y que la elección del humano se recuerda aparte en `personGenderUserSet`, interno—; fase 11: §4 la clave de orden de lectura pasa a la línea de base, §5 `Word.bbox` es la caja de tinta también para `source: "pdf"` y §6 gana el invariante de que `y + height` es la línea de base —ADR-109 §1/§3—; §4 vuelve a cambiar: el orden de lectura deja de tener clave escalar y pasa a agrupar renglones —ADR-110 §1, supersede ADR-109 §3—); §18 `OcrPagePayload` lleva la imagen codificada y clonada en vez de `ImageData` transferida, fase 11 por ADR-158 §2/§5 -->
 
 # Anonly — Modelo de Datos (TAD bloque 5)
 
@@ -269,6 +269,10 @@ export interface EntityGroup {
   // lectura — no entra en `GroupUpdatePatch`; para volver al valor calculado
   // se re-aplica el mismo `replacementMode` (ADR-078 §3).
   readonly replacementValueUserSet: boolean;
+  // ADR-170 §1: el valor que tendría el grupo en cada modo (ver ReplacementPreviews,
+  // Contracts.md §5). Requerido. Lo calcula Grouping con la misma función que
+  // replacementValue; la UI lo muestra en el selector de modo y en "Editar reemplazo".
+  readonly replacementPreviews: ReplacementPreviews;
   readonly createdAt: number;
   readonly updatedAt: number;
 }
@@ -291,6 +295,7 @@ export type PersonGender = "f" | "m";
 | `aliases` | Variantes de valor unificadas (ej. `"J. Pérez"` y `"Juan Pérez"` en el mismo grupo). |
 | `replacementValueUserSet` | `true` si el `replacementValue` lo escribió el usuario. Es lo que hace visible en la UI (`ui/UX_Guidelines.md` §3.3) una edición manual que, de otro modo, es indistinguible de un valor calculado — el caso que **no** aplica a `personGender`, cuyo valor sí delata su procedencia, y por eso `personGenderUserSet` sigue siendo interno (ADR-078 §2). |
 | `personGender` | Solo `type === Person` (ADR-060 §2). `"f"`/`"m"` cambian el label resuelto del `placeholder` (`MUJER`/`HOMBRE` en vez de `PERSONA`); ausente = sin determinar → label neutro y marca en el árbol de entidades. Inferido de un léxico first-party (ADR-069 §6: al asignar/cambiar `canonicalValue` y en `finishSession`) o puesto por el usuario, que gana siempre. **La ausencia tiene dos orígenes que el dato público no distingue** —nunca se infirió, o el usuario eligió `"neutral"` (ADR-069 §4)— y el motor los separa con bookkeeping interno (`personGenderUserSet`, `Grouping_Engine.md` §13 caso 34) para que una re-inferencia no pise la elección. Ese flag **no** es parte de `EntityGroup` ni de ningún evento. |
+| `replacementPreviews` | ADR-170 §1: lo que valdría `replacementValue` en `placeholder`, `mask` y `synthetic` (y los niveles de la escalera de ADR-057), calculado por Grouping con la misma función e ignorando `replacementValueUserSet`. Existe para que la UI muestre valores exactos sin reimplementar la lógica del motor (P-1, U-3). No lo leen Render ni Export. |
 | `createdAt`, `updatedAt` | Epoch ms. Para UX y merge de ediciones. |
 
 **Invariantes**
@@ -301,6 +306,8 @@ export type PersonGender = "f" | "m";
 - Si `enabled === false`, `replacementValue` no se aplica pero se conserva el último valor para re-activación.
 - **Todas** las `Replacement` derivadas de un mismo grupo comparten `replacementValue` (ADR-012, re-asertado por ADR-057 §4: el nivel de abreviatura se elige por grupo con la ocurrencia más apretada y se aplica a todas — nunca por ocurrencia).
 - `personGender` solo puede estar presente si `type === EntityType.Person` (ADR-060 §2).
+- Si `replacementMode ∈ {placeholder, mask, synthetic}` y `replacementValueUserSet === false`, entonces `replacementPreviews[replacementMode] === replacementValue` (ADR-170 §1).
+- `replacementPreviews.placeholderLadder` contiene a `replacementPreviews.placeholder` y no tiene repetidos.
 
 ---
 
@@ -459,6 +466,11 @@ export interface Conflict {
   readonly candidates: ReadonlyArray<ConflictCandidate>;
   readonly resolved: boolean;
   readonly resolvedType?: EntityType;   // ADR-083 §3: el tipo con el que quedó clasificado el grupo (antes: resolvedMode)
+  // ADR-174 §1: una ocurrencia manual perdió esta superposición y quedó retenida,
+  // esperando que el usuario elija quién gana (ConflictResolveRequested.winner).
+  // ADR-175 §1, invariante: heldManual => resolved === false y hay exactamente una
+  // ocurrencia retenida. Ningún camino deja resolved: true con heldManual.
+  readonly heldManual?: true;
 }
 
 export enum ConflictReason {
@@ -479,7 +491,8 @@ export interface ConflictCandidate {
 **Invariantes**
 - `candidates.length ≥ 2`.
 - Si `resolved === true`, `resolvedType` es obligatorio (ADR-083 §3).
-- Un conflicto bloquea el export hasta ser resuelto o ignorado explícitamente.
+- Un conflicto sin resolver bloquea el export hasta ser resuelto, en la UI y en el Core (ADR-176 §1). La redacción anterior decía "o ignorado explícitamente": no existe mecanismo para ignorar un conflicto, y se retira.
+- Todo conflicto sin resolver apunta a un grupo que existe: la fusión y la división lo reapuntan (ADR-176 §2).
 
 ---
 

@@ -1,65 +1,57 @@
 /**
- * `GroupContextMenu` (`ui/Components.md` §3.5).
+ * `GroupContextMenu` — el menú ⋯ de cada fila (`ui/Components.md` §3.5,
+ * orden y rótulos por ADR-169 §10).
  *
- * Alcance reducido al pedido explícito de este PR (prompt del Hito 10 PR8:
- * "acceso a fusionar/dividir" en cada grupo del árbol): expone "Fusionar con…"
- * y "Dividir…", "Ver ocurrencias" (ADR-084 §2, escribe el valor en el
- * buscador del visor), "Cambiar categoría" (ADR-082 §6) y "Restaurar valor
- * calculado" cuando el grupo tiene el `replacementValue` editado a mano
- * (ADR-078 §4). El catálogo completo de §3.5 agrega "Ver
- * ocurrencias", "Editar valor canónico" y "Eliminar grupo" — no incluidos acá
- * (ver reporte de este PR: "Ver ocurrencias" depende de un campo `value` que
- * `OccurrenceRef` no tiene, `03_Data_Model.md` §8; "Eliminar grupo" ya queda
- * cubierto funcionalmente por el checkbox de habilitar/deshabilitar del propio
- * `EntityGroupItem`; "Editar valor canónico" no está en el pedido concreto de
- * este PR).
+ * **Orden**: Ver apariciones · Editar reemplazo… · Cambiar tipo… · Fusionar
+ * con… · Dividir… · separador · **Eliminar entidad** (en rojo, ADR-171).
+ * "Restaurar valor calculado" aparece solo cuando el grupo tiene el valor
+ * escrito a mano (ADR-078 §4); "Editar reemplazo…" no aparece en `redact`
+ * (ADR-012: un bloque negro tiene una sola forma).
  *
- * Sin `@radix-ui/react-dropdown-menu` en el proyecto (no está en
- * `package.json`, agregarlo requeriría ADR — `ai/Code_Standards.md` P-9): este
- * menú es un disclosure accesible hecho a mano (trigger + panel de botones,
- * cierre por click-fuera/Escape/selección), sin dependencias nuevas.
+ * **La fila que abrió el menú queda resaltada** mientras está abierto
+ * (`onOpenChange`, ADR-169 §2) y el panel es flotante: no empuja nada (UX-10).
  *
- * **A propósito NO usa `role="menu"`/`role="menuitem"`.** Ese rol es un
- * contrato con el lector de pantalla: promete navegación por flechas,
- * Home/End y foco gestionado (un solo tab stop), y nada de eso está
- * implementado acá — los items se recorren con Tab. Un rol prometido y no
- * cumplido deja al usuario de teclado apretando flechas contra un panel que no
- * responde, que es peor que no anunciar nada: sin el rol son botones dentro de
- * un grupo etiquetado, y se comportan exactamente como el lector espera. Si
- * algún día entra `@radix-ui/react-dropdown-menu` (requiere ADR, P-9), trae el
- * rol y el manejo de foco juntos, que es la única forma correcta de tenerlos.
+ * Sin `@radix-ui/react-dropdown-menu` en el proyecto (agregarlo requeriría
+ * ADR — `ai/Code_Standards.md` P-9): es un disclosure hecho a mano (trigger +
+ * panel de botones, cierre por click-fuera/Escape/selección).
  *
- * Tampoco lleva `aria-haspopup`. En WAI-ARIA 1.1+ el valor `true` está
- * definido como sinónimo de `menu`, así que dejarlo puesto anunciaba
- * exactamente el menú que se acaba de retirar — el lector de pantalla seguía
- * diciendo "botón, menú emergente" y el usuario de teclado seguía apretando
- * flechas. Encima el popup es `role="group"`, que no es ninguno de los
- * valores válidos de `aria-haspopup`. Un disclosure se anuncia con
- * `aria-expanded` y nada más.
+ * **A propósito NO usa `role="menu"`/`role="menuitem"` ni `aria-haspopup`.**
+ * Ese rol es un contrato con el lector de pantalla: promete navegación por
+ * flechas, Home/End y foco gestionado, y nada de eso está implementado — los
+ * items se recorren con Tab. Sin el rol son botones dentro de un grupo
+ * etiquetado, y se comportan como el lector espera. `aria-haspopup="true"` es
+ * sinónimo de `menu` en WAI-ARIA 1.1+, así que tampoco. **Los roles y nombres
+ * de este menú son API de los E2E** (`scenario-9`, `scenario-10`): "Más
+ * acciones", "Acciones del grupo", "Fusionar con…", "Dividir…".
  */
 
-import { MoreHorizontalIcon } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import {
+  EyeIcon,
+  MergeIcon,
+  MoreHorizontalIcon,
+  PencilIcon,
+  RotateCcwIcon,
+  SplitIcon,
+  TagIcon,
+  Trash2Icon,
+} from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 export interface GroupContextMenuProps {
   readonly onMerge: () => void;
   readonly onSplit: () => void;
-  /** ADR-084 §2: escribe el `canonicalValue` del grupo en el buscador del visor. */
+  /** ADR-084 §2: escribe el `canonicalValue` del grupo en la lupa del visor. */
   readonly onViewOccurrences: () => void;
-  /**
-   * ADR-076 §2: abre el `EditReplacementDialog`. **Ausente en modo `redact`**
-   * (ADR-012): ahí el valor es `""` y la censura es visual — un bloque negro
-   * tiene una sola forma, así que no hay texto que elegir.
-   */
+  /** ADR-076 §2: abre el `EditReplacementDialog`. **Ausente en modo `redact`**. */
   readonly onEditReplacement?: () => void;
-  /** ADR-082 §6: abre el `ChangeTypeDialog` para corregir la clasificación. */
+  /** ADR-082 §6: abre el `ChangeTypeDialog`. */
   readonly onChangeType: () => void;
-  /**
-   * ADR-078 §4: presente **solo** si el grupo tiene
-   * `replacementValueUserSet === true`. Ausente ⇒ la entrada no se renderiza:
-   * ofrecer "restaurar" sobre un valor que nadie editó no significa nada.
-   */
+  /** ADR-078 §4: presente **solo** si el grupo tiene `replacementValueUserSet === true`. */
   readonly onRestoreComputedValue?: () => void;
+  /** ADR-171 §5: abre la confirmación de "Eliminar entidad". */
+  readonly onRemove: () => void;
+  /** ADR-169 §2: la fila se resalta mientras el menú está abierto. */
+  readonly onOpenChange?: (open: boolean) => void;
 }
 
 export function GroupContextMenu({
@@ -69,9 +61,18 @@ export function GroupContextMenu({
   onViewOccurrences,
   onChangeType,
   onRestoreComputedValue,
+  onRemove,
+  onOpenChange,
 }: GroupContextMenuProps) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpenState] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const onOpenChangeRef = useRef(onOpenChange);
+  onOpenChangeRef.current = onOpenChange;
+
+  function setOpen(next: boolean): void {
+    setOpenState(next);
+    onOpenChangeRef.current?.(next);
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -97,11 +98,15 @@ export function GroupContextMenu({
     };
   }, [open]);
 
+  function run(action: () => void): () => void {
+    return () => {
+      setOpen(false);
+      action();
+    };
+  }
+
   return (
-    // `shrink-0`: la fila reparte su ancho entre el nombre y el selector de
-    // modo (`EntityGroupItem`), y sin esto el menú también entraba al reparto
-    // y su icono quedaba aplastado contra el caret del selector.
-    <div ref={containerRef} className="relative shrink-0">
+    <div ref={containerRef} className="relative flex justify-center">
       <button
         type="button"
         aria-label="Más acciones"
@@ -109,8 +114,10 @@ export function GroupContextMenu({
         // Lo busca el `Enter` del árbol (`EntitiesPanel`): abrir el menú desde
         // el panel exigiría subirle este estado al panel.
         data-tree-menu-trigger
-        onClick={() => setOpen((prev) => !prev)}
-        className="rounded-md p-1 text-text-secondary hover:bg-bg-tertiary"
+        onClick={() => setOpen(!open)}
+        className={`flex h-7 w-7 items-center justify-center rounded-md text-text-secondary hover:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+          open ? "bg-bg-tertiary text-text-primary" : ""
+        }`}
       >
         <MoreHorizontalIcon className="h-4 w-4" aria-hidden />
       </button>
@@ -118,74 +125,74 @@ export function GroupContextMenu({
         <div
           role="group"
           aria-label="Acciones del grupo"
-          className="absolute right-0 z-50 mt-1 w-40 rounded-md border border-border bg-bg-primary py-1 shadow-md"
+          className="absolute right-0 top-full z-50 mt-1 w-60 rounded-xl border border-border bg-bg-primary p-1.5 shadow-md"
         >
-          <button
-            type="button"
-            onClick={() => {
-              setOpen(false);
-              onMerge();
-            }}
-            className="block w-full px-3 py-1.5 text-left text-sm text-text-primary hover:bg-bg-tertiary"
+          <MenuItem
+            icon={<EyeIcon className="h-4 w-4" aria-hidden />}
+            onClick={run(onViewOccurrences)}
           >
-            Fusionar con…
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setOpen(false);
-              onSplit();
-            }}
-            className="block w-full px-3 py-1.5 text-left text-sm text-text-primary hover:bg-bg-tertiary"
-          >
-            Dividir…
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setOpen(false);
-              onViewOccurrences();
-            }}
-            className="block w-full px-3 py-1.5 text-left text-sm text-text-primary hover:bg-bg-tertiary"
-          >
-            Ver ocurrencias
-          </button>
+            Ver apariciones
+          </MenuItem>
           {onEditReplacement !== undefined ? (
-            <button
-              type="button"
-              onClick={() => {
-                setOpen(false);
-                onEditReplacement();
-              }}
-              className="block w-full px-3 py-1.5 text-left text-sm text-text-primary hover:bg-bg-tertiary"
+            <MenuItem
+              icon={<PencilIcon className="h-4 w-4" aria-hidden />}
+              onClick={run(onEditReplacement)}
             >
-              Editar reemplazo
-            </button>
+              Editar reemplazo…
+            </MenuItem>
           ) : null}
-          <button
-            type="button"
-            onClick={() => {
-              setOpen(false);
-              onChangeType();
-            }}
-            className="block w-full px-3 py-1.5 text-left text-sm text-text-primary hover:bg-bg-tertiary"
-          >
-            Cambiar categoría
-          </button>
           {onRestoreComputedValue !== undefined ? (
-            <button
-              type="button"
-              onClick={() => {
-                setOpen(false);
-                onRestoreComputedValue();
-              }}
-              className="block w-full px-3 py-1.5 text-left text-sm text-text-primary hover:bg-bg-tertiary"
+            <MenuItem
+              icon={<RotateCcwIcon className="h-4 w-4" aria-hidden />}
+              onClick={run(onRestoreComputedValue)}
             >
               Restaurar valor calculado
-            </button>
+            </MenuItem>
           ) : null}
+          <MenuItem icon={<TagIcon className="h-4 w-4" aria-hidden />} onClick={run(onChangeType)}>
+            Cambiar tipo…
+          </MenuItem>
+          <MenuItem icon={<MergeIcon className="h-4 w-4" aria-hidden />} onClick={run(onMerge)}>
+            Fusionar con…
+          </MenuItem>
+          <MenuItem icon={<SplitIcon className="h-4 w-4" aria-hidden />} onClick={run(onSplit)}>
+            Dividir…
+          </MenuItem>
+          <div role="separator" className="my-1.5 h-px bg-border" />
+          <MenuItem
+            danger
+            icon={<Trash2Icon className="h-4 w-4" aria-hidden />}
+            onClick={run(onRemove)}
+          >
+            Eliminar entidad
+          </MenuItem>
         </div>
       ) : null}
     </div>
+  );
+}
+
+function MenuItem({
+  icon,
+  onClick,
+  children,
+  danger = false,
+}: {
+  readonly icon: ReactNode;
+  readonly onClick: () => void;
+  readonly children: ReactNode;
+  readonly danger?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+        danger ? "text-error hover:bg-error/10" : "text-text-primary hover:bg-bg-secondary"
+      }`}
+    >
+      <span className={danger ? "" : "text-text-secondary"}>{icon}</span>
+      {children}
+    </button>
   );
 }

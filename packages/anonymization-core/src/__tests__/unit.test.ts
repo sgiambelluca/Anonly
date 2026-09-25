@@ -12,6 +12,7 @@ import {
   EntityType,
   EventChannel,
   InvalidInputError,
+  MAX_EDIT_CHECKPOINTS,
   PipelineStage,
   ReplacementMode,
   WorkerCrashedError,
@@ -2411,7 +2412,7 @@ describe("Orchestrator — unit tests", () => {
       value: "Jose Perez",
       entityType: EntityType.Person,
     });
-    expect(result).toEqual({ occurrenceCount: 0 });
+    expect(result).toEqual({ occurrenceCount: 0, heldConflictIds: [], groupIds: [] });
 
     (engines.regex.findLiteral as ReturnType<typeof vi.fn>).mockClear();
     // Simula que el idioma de OCR nuevo sí lee el nombre.
@@ -2470,6 +2471,488 @@ describe("Orchestrator — unit tests", () => {
     await orchestrator.reanalyze("doc-1", { ocr: { languages: ["eng"] } });
 
     expect(engines.regex.findLiteral).not.toHaveBeenCalled();
+  });
+
+  // Item 28 (§15, ADR-170 §2).
+  it("previewEdit delegates to grouping.previewEdit and does not alter the snapshot", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    wireHappyPathSpies(engines, bus);
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+    await orchestrator.importDocument(createImportInput());
+
+    const expectedPreview = {
+      groups: [
+        {
+          groupId: "g1",
+          type: EntityType.DNI,
+          indexInType: 1,
+          canonicalValue: "34.567.891",
+          memberCount: 1,
+          replacementMode: ReplacementMode.Placeholder,
+          replacementValue: "[DNI 01]",
+        },
+      ],
+    };
+    (engines.grouping.previewEdit as ReturnType<typeof vi.fn>).mockReturnValue(expectedPreview);
+    (engines.grouping.getSnapshot as ReturnType<typeof vi.fn>).mockClear();
+
+    const request = { kind: "type" as const, groupId: "g1", type: EntityType.CUIT };
+    const result = orchestrator.previewEdit("doc-1", request);
+
+    expect(engines.grouping.previewEdit).toHaveBeenCalledWith("doc-1", request);
+    expect(result).toBe(expectedPreview);
+    // Sin estado propio: la delegación es pura, no toca el snapshot.
+    expect(engines.grouping.getSnapshot).not.toHaveBeenCalled();
+  });
+
+  // Caso 38 (§13, ADR-171 §4), item 29 (§15).
+  it("addManualEntity lifts a previous removal; the reanalyze re-application does not", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({
+        pageCount: 1,
+        pages: [createPage({ index: 0, requiresOCR: true })],
+      }),
+      textlessPages: [0],
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+    await orchestrator.importDocument(createImportInput());
+
+    await orchestrator.addManualEntity("doc-1", {
+      value: "Jose Perez",
+      entityType: EntityType.Person,
+    });
+    expect(engines.grouping.liftRemoval).toHaveBeenCalledWith("doc-1", "Jose Perez");
+
+    (engines.grouping.liftRemoval as ReturnType<typeof vi.fn>).mockClear();
+
+    // La re-aplicación automática de literales retenidos tras un reanalyze
+    // de OCR (ADR-061 §5) NO llama a liftRemoval — si el usuario había
+    // eliminado el valor, esta re-aplicación no tiene que revivirlo.
+    await orchestrator.reanalyze("doc-1", { ocr: { languages: ["eng"] } });
+    expect(engines.grouping.liftRemoval).not.toHaveBeenCalled();
+  });
+
+  // Caso 39 (§13, ADR-172 §1), item 30 (§15). Con el `GroupingEngine` real,
+  // no simulado (errata de `Grouping_Engine.md` §13 caso 53): el
+  // `wireHappyPathSpies` de arriba mockea `reopenSession`/`createCheckpoint`/
+  // `restoreCheckpoint` como no-ops, así que un test sobre ese setup nunca
+  // ejercita el bug real — pasaba aunque `reopenSession` descartara los
+  // puntos, porque nunca llamaba a la implementación real.
+  it("restoring a checkpoint also restores the retained manual literals", async () => {
+    const document = createDocument({
+      pageCount: 1,
+      pages: [
+        createPage({
+          index: 0,
+          text: "Jose Perez y Ana Gomez",
+          requiresOCR: true,
+          words: [
+            createWord({ text: "Jose", bbox: { x: 0, y: 0, width: 30, height: 12 } }),
+            createWord({ text: "Perez", bbox: { x: 35, y: 0, width: 35, height: 12 } }),
+            createWord({ text: "y", bbox: { x: 75, y: 0, width: 10, height: 12 } }),
+            createWord({ text: "Ana", bbox: { x: 90, y: 0, width: 25, height: 12 } }),
+            createWord({ text: "Gomez", bbox: { x: 120, y: 0, width: 40, height: 12 } }),
+          ],
+        }),
+      ],
+    });
+    const { orchestrator, engines } = await makeOrchestratorWithRealDetection(
+      createPdfEngineOutput({ document, textlessPages: [0] }),
+    );
+    await orchestrator.importDocument(createImportInput());
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    // Sin grupos todavía: "Jose Perez"/"Ana Gomez" no matchean ningún patrón
+    // de Regex, y NER está desactivado (config de la fixture).
+    expect(engines.grouping.getSnapshot("doc-1").groups).toHaveLength(0);
+
+    await orchestrator.addManualEntity("doc-1", {
+      value: "Jose Perez",
+      entityType: EntityType.Person,
+    });
+    const checkpointId = orchestrator.createEditCheckpoint("doc-1");
+    await orchestrator.addManualEntity("doc-1", {
+      value: "Ana Gomez",
+      entityType: EntityType.Person,
+    });
+    expect(engines.grouping.getSnapshot("doc-1").groups.map((g) => g.canonicalValue)).toEqual(
+      expect.arrayContaining(["Jose Perez", "Ana Gomez"]),
+    );
+
+    await orchestrator.restoreEditCheckpoint("doc-1", checkpointId);
+
+    // El grupo de "Ana Gomez" ya no está: restaurar el punto también
+    // restauró la sesión de Grouping (no solo la copia de literales).
+    const afterRestore = engines.grouping.getSnapshot("doc-1").groups;
+    expect(afterRestore.map((g) => g.canonicalValue)).toEqual(["Jose Perez"]);
+
+    // reanalyze (flujo OCR, el único que re-aplica literales retenidos,
+    // ADR-061 §5) no recrea "Ana Gomez": la lista de literales retenidos
+    // también volvió a como estaba en el punto.
+    await orchestrator.reanalyze("doc-1", { ocr: { languages: ["eng"] } });
+    const afterReanalyze = engines.grouping.getSnapshot("doc-1").groups;
+    expect(afterReanalyze.map((g) => g.canonicalValue)).toEqual(["Jose Perez"]);
+  });
+
+  // Caso 41 (§13, ADR-174 §2). Con el `GroupingEngine` y el `RegexEngine`
+  // reales: un mock canned no puede reproducir el conflicto de superposición
+  // sin reimplementarlo.
+  it("addManualEntity reports held conflicts when the manual value loses an overlap", async () => {
+    const document = createDocument({
+      pageCount: 1,
+      pages: [
+        createPage({
+          index: 0,
+          text: "34567891",
+          words: [createWord({ text: "34567891", bbox: { x: 0, y: 0, width: 60, height: 12 } })],
+        }),
+      ],
+    });
+    const { orchestrator, engines } = await makeOrchestratorWithRealDetection(
+      createPdfEngineOutput({ document }),
+    );
+    await orchestrator.importDocument(createImportInput());
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    // Regex ya detectó el DNI real sobre el mismo texto.
+    expect(
+      engines.grouping.getSnapshot("doc-1").groups.some((g) => g.type === EntityType.DNI),
+    ).toBe(true);
+
+    // El mismo literal, forzado a OTRO tipo: se superpone exactamente con el
+    // DNI ya detectado (mismo bbox, misma palabra) y pierde el conflicto
+    // (empate de confidence 1.0 contra Regex).
+    const result = await orchestrator.addManualEntity("doc-1", {
+      value: "34567891",
+      entityType: EntityType.Phone,
+    });
+
+    expect(result.occurrenceCount).toBeGreaterThan(0);
+    expect(result.heldConflictIds).toHaveLength(1);
+
+    const snapshot = engines.grouping.getSnapshot("doc-1");
+    const conflict = snapshot.conflicts.find((c) => c.id === result.heldConflictIds[0]);
+    expect(conflict?.heldManual).toBe(true);
+    expect(conflict?.resolved).toBe(false);
+    // La ocurrencia manual quedó retenida, no agrupada.
+    expect(snapshot.groups.some((g) => g.type === EntityType.Phone)).toBe(false);
+  });
+
+  // Caso 41 (§13, ADR-174 §2) — el otro extremo: sin choque, heldConflictIds
+  // vacío, como cualquier agregado exitoso de siempre.
+  it("addManualEntity without an overlap returns an empty heldConflictIds", async () => {
+    const { orchestrator } = await makeOrchestratorWithRealDetection(
+      createPdfEngineOutput({
+        document: createDocument({
+          pageCount: 1,
+          pages: [
+            createPage({
+              index: 0,
+              text: "Jose Perez",
+              words: [
+                createWord({ text: "Jose", bbox: { x: 0, y: 0, width: 30, height: 12 } }),
+                createWord({ text: "Perez", bbox: { x: 35, y: 0, width: 35, height: 12 } }),
+              ],
+            }),
+          ],
+        }),
+      }),
+    );
+    await orchestrator.importDocument(createImportInput());
+
+    const result = await orchestrator.addManualEntity("doc-1", {
+      value: "Jose Perez",
+      entityType: EntityType.Person,
+    });
+
+    expect(result.occurrenceCount).toBeGreaterThan(0);
+    expect(result.heldConflictIds).toEqual([]);
+  });
+
+  // Caso 43 (§13, ADR-175 §3). Con el `GroupingEngine` y el `RegexEngine`
+  // reales: el documento trae la palabra con un punto pegado al lado
+  // ("34567891."), y `addManualEntity` se pide sin él. La comparación exacta
+  // de ADR-174 §2 dejaba esto afuera; `normalizeEntityValue` de los dos
+  // lados lo encuentra.
+  it("addManualEntity finds the held conflict despite attached punctuation", async () => {
+    const document = createDocument({
+      pageCount: 1,
+      pages: [
+        createPage({
+          index: 0,
+          text: "34567891.",
+          words: [createWord({ text: "34567891.", bbox: { x: 0, y: 0, width: 60, height: 12 } })],
+        }),
+      ],
+    });
+    const { orchestrator, engines } = await makeOrchestratorWithRealDetection(
+      createPdfEngineOutput({ document }),
+    );
+    await orchestrator.importDocument(createImportInput());
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    // Regex ya detectó el DNI real sobre "34567891." (ADR-115: la
+    // puntuación pegada no entra al normalizedValue).
+    expect(
+      engines.grouping.getSnapshot("doc-1").groups.some((g) => g.type === EntityType.DNI),
+    ).toBe(true);
+
+    const result = await orchestrator.addManualEntity("doc-1", {
+      value: "34567891",
+      entityType: EntityType.Phone,
+    });
+
+    expect(result.heldConflictIds).toHaveLength(1);
+    expect(result.groupIds).toEqual([]);
+
+    const snapshot = engines.grouping.getSnapshot("doc-1");
+    const conflict = snapshot.conflicts.find((c) => c.id === result.heldConflictIds[0]);
+    expect(conflict?.heldManual).toBe(true);
+    expect(conflict?.resolved).toBe(false);
+    // Re-agregar el mismo valor con el choque todavía pendiente devuelve el
+    // mismo id (dedup por identidad; Orchestrator.md §13 caso 43).
+    const again = await orchestrator.addManualEntity("doc-1", {
+      value: "34567891",
+      entityType: EntityType.Phone,
+    });
+    expect(again.heldConflictIds).toEqual(result.heldConflictIds);
+  });
+
+  // Caso 44 (§13, ADR-175 §3): groupIds en los tres desenlaces posibles de
+  // addManualEntity.
+  it("addManualEntity reports the groupIds its occurrences landed in", async () => {
+    const document = createDocument({
+      pageCount: 1,
+      pages: [
+        createPage({
+          index: 0,
+          text: "Jose Perez",
+          words: [
+            createWord({ text: "Jose", bbox: { x: 0, y: 0, width: 30, height: 12 } }),
+            createWord({ text: "Perez", bbox: { x: 35, y: 0, width: 35, height: 12 } }),
+          ],
+        }),
+      ],
+    });
+    const { orchestrator, engines } = await makeOrchestratorWithRealDetection(
+      createPdfEngineOutput({ document }),
+    );
+    await orchestrator.importDocument(createImportInput());
+
+    // Sin choque: groupIds con el grupo donde quedó.
+    const first = await orchestrator.addManualEntity("doc-1", {
+      value: "Jose Perez",
+      entityType: EntityType.Person,
+    });
+    expect(first.occurrenceCount).toBeGreaterThan(0);
+    expect(first.heldConflictIds).toEqual([]);
+    expect(first.groupIds).toHaveLength(1);
+    const groupId = engines.grouping
+      .getSnapshot("doc-1")
+      .groups.find((g) => g.canonicalValue === "Jose Perez")?.id;
+    expect(first.groupIds).toEqual([groupId]);
+
+    // Ya estaba en un grupo (dedup): groupIds con ESE mismo grupo.
+    const dedup = await orchestrator.addManualEntity("doc-1", {
+      value: "Jose Perez",
+      entityType: EntityType.Person,
+    });
+    expect(dedup.groupIds).toEqual([groupId]);
+
+    // Valor ausente del documento: occurrenceCount 0 y las dos listas
+    // vacías (invariante: occurrenceCount > 0 => heldConflictIds o
+    // groupIds no vacío -- acá occurrenceCount es 0, así que las dos
+    // pueden estarlo).
+    const absent = await orchestrator.addManualEntity("doc-1", {
+      value: "Nadie Existe",
+      entityType: EntityType.Person,
+    });
+    expect(absent.occurrenceCount).toBe(0);
+    expect(absent.heldConflictIds).toEqual([]);
+    expect(absent.groupIds).toEqual([]);
+  });
+
+  // Caso 44, rama (a) (ADR-175 §3, errata 2026-09-24): la ocurrencia de este
+  // agregado se absorbe en un grupo YA reclasificado a otro tipo
+  // (`absorbedTypes`, ADR-085 §1(a)) -- la rama (b) (group.type ===
+  // entityType pedido) no lo encontraría, porque el grupo quedó con OTRO
+  // tipo. Solo la rama (a) (occurrenceId del member) lo cubre.
+  it("addManualEntity reports a group found via absorbedTypes after a type correction (branch a)", async () => {
+    const document = createDocument({
+      pageCount: 1,
+      pages: [
+        createPage({
+          index: 0,
+          text: "Diego Ramos",
+          words: [
+            createWord({ text: "Diego", bbox: { x: 0, y: 0, width: 30, height: 12 } }),
+            createWord({ text: "Ramos", bbox: { x: 35, y: 0, width: 35, height: 12 } }),
+          ],
+        }),
+      ],
+    });
+    const { orchestrator, engines, bus } = await makeOrchestratorWithRealDetection(
+      createPdfEngineOutput({ document }),
+    );
+    await orchestrator.importDocument(createImportInput());
+
+    // Detección automática previa de "Diego Ramos" como Person, en una
+    // página que la búsqueda literal de más abajo no toca -- para que la
+    // ocurrencia MANUAL de este agregado sea una identidad nueva, no un
+    // duplicado de ésta.
+    bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: {
+        id: "ner-occ-diego-ramos",
+        value: "Diego Ramos",
+        normalizedValue: "diego ramos",
+        bbox: { x: 0, y: 0, width: 70, height: 12 },
+        pageIndex: 1,
+        source: DetectionSource.NER,
+        confidence: 0.9,
+        entityType: EntityType.Person,
+      },
+    });
+    const detectedGroup = engines.grouping
+      .getSnapshot("doc-1")
+      .groups.find((g) => g.canonicalValue === "Diego Ramos");
+    if (!detectedGroup) throw new Error("expected the auto-detected group");
+
+    // El usuario corrige el tipo del grupo detectado (ADR-082/ADR-085): el
+    // grupo queda con OTRO tipo, pero sigue aceptando Person vía
+    // absorbedTypes.
+    await engines.grouping.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: detectedGroup.id,
+      patch: { type: EntityType.Organization },
+    });
+    expect(
+      engines.grouping.getSnapshot("doc-1").groups.find((g) => g.id === detectedGroup.id)?.type,
+    ).toBe(EntityType.Organization);
+
+    // El agregado manual encuentra la MISMA frase en el documento real
+    // (página 0, identidad nueva) y se absorbe en el grupo ya reclasificado.
+    const result = await orchestrator.addManualEntity("doc-1", {
+      value: "Diego Ramos",
+      entityType: EntityType.Person,
+    });
+    expect(result.occurrenceCount).toBeGreaterThan(0);
+    expect(result.heldConflictIds).toEqual([]);
+    expect(result.groupIds).toEqual([detectedGroup.id]);
+
+    const finalGroup = engines.grouping
+      .getSnapshot("doc-1")
+      .groups.find((g) => g.id === detectedGroup.id);
+    // La rama (b) sola NO habría encontrado este grupo: sigue siendo
+    // Organization, no Person (el tipo pedido).
+    expect(finalGroup?.type).toBe(EntityType.Organization);
+    expect(finalGroup?.members).toHaveLength(2);
+  });
+
+  // Caso 45 (§13, ADR-176 §3). Con el `GroupingEngine` y el `RegexEngine`
+  // reales: agregar un valor que queda CONTENIDO (ADR-117) dentro de una
+  // detección automática del mismo tipo reporta el grupo contenedor -- antes
+  // de manualOutcome, ni el criterio por normalizedValue/tipo (ADR-175 §3)
+  // ni el de occurrenceId (ADR-176 §3 rama a, sin manualOutcome) lo
+  // encontraban, porque una ocurrencia contenida no se registra (ADR-117) y
+  // el Orchestrator no tenía forma de reconstruir esa decisión desde afuera.
+  it("addManualEntity reports the container group of a contained occurrence", async () => {
+    const words = ["Tel:", "11", "4567-8901"];
+    let x = 0;
+    const ws = words.map((t) => {
+      const w = createWord({ text: t, bbox: { x, y: 0, width: t.length * 6, height: 12 } });
+      x += t.length * 6 + 4;
+      return w;
+    });
+    const document = createDocument({
+      pageCount: 1,
+      pages: [createPage({ index: 0, text: words.join(" "), words: ws })],
+    });
+    const { orchestrator, engines } = await makeOrchestratorWithRealDetection(
+      createPdfEngineOutput({ document }),
+    );
+    await orchestrator.importDocument(createImportInput());
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    const containerGroup = engines.grouping
+      .getSnapshot("doc-1")
+      .groups.find((g) => g.type === EntityType.Phone);
+    if (!containerGroup) throw new Error("expected the automatically detected Phone group");
+
+    const result = await orchestrator.addManualEntity("doc-1", {
+      value: "4567-8901",
+      entityType: EntityType.Phone,
+    });
+
+    expect(result.occurrenceCount).toBe(1);
+    expect(result.heldConflictIds).toEqual([]);
+    expect(result.groupIds).toEqual([containerGroup.id]);
+    // No creó un grupo Phone paralelo: la contenida no se registró (ADR-117).
+    expect(
+      engines.grouping.getSnapshot("doc-1").groups.filter((g) => g.type === EntityType.Phone),
+    ).toHaveLength(1);
+  });
+
+  // Caso 42 (§13, ADR-172 §1, hallazgo N-4 del revisor).
+  it("evicting the oldest checkpoint also drops its retained-literals copy", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({
+        pageCount: 1,
+        pages: [createPage({ index: 0, requiresOCR: true })],
+      }),
+      textlessPages: [0],
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+    let checkpointSeq = 0;
+    (engines.grouping.createCheckpoint as ReturnType<typeof vi.fn>).mockImplementation(
+      () => `cp-${++checkpointSeq}`,
+    );
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+    await orchestrator.importDocument(createImportInput());
+
+    // Un literal retenido real, para que la copia que se pierde no esté vacía.
+    await orchestrator.addManualEntity("doc-1", {
+      value: "Jose Perez",
+      entityType: EntityType.Person,
+    });
+
+    const ids: string[] = [];
+    for (let i = 0; i < MAX_EDIT_CHECKPOINTS; i++) {
+      ids.push(orchestrator.createEditCheckpoint("doc-1"));
+    }
+    const byDocument = orchestrator["checkpointedLiteralsByDocument"].get("doc-1");
+    expect(byDocument?.size).toBe(MAX_EDIT_CHECKPOINTS);
+    expect(byDocument?.has(ids[0]!)).toBe(true);
+    expect(byDocument?.get(ids[0]!)).toEqual([
+      { value: "Jose Perez", entityType: EntityType.Person },
+    ]);
+
+    // El punto MAX_EDIT_CHECKPOINTS + 1: Grouping desaloja `ids[0]`, y el
+    // Orchestrator tiene que desalojar su copia de literales bajo el mismo id.
+    const oneMore = orchestrator.createEditCheckpoint("doc-1");
+    expect(byDocument?.size).toBe(MAX_EDIT_CHECKPOINTS);
+    expect(byDocument?.has(ids[0]!)).toBe(false);
+    expect(byDocument?.has(oneMore)).toBe(true);
   });
 });
 

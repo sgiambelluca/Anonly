@@ -9,8 +9,10 @@ import {
   EventChannel,
   ReplacementMode,
   type Conflict,
+  type ConflictResolved,
   type EngineContext,
   type EntityGroupCreated,
+  type EntityGroupRemoved,
   type EntityGroupUpdated,
   type GroupingFinished,
 } from "@anonly/shared";
@@ -851,5 +853,174 @@ describe("GroupingEngine — contract tests", () => {
     });
     expect(restored.replacementValueUserSet).toBe(false);
     expect(restored.replacementValue).toBe(computed);
+  });
+
+  // Caso 46 (§13, ADR-170 §1) — invariante.
+  it("every emitted group carries replacementPreviews consistent with replacementValue", async () => {
+    await engine.init(ctx);
+    engine.startSession("doc-1");
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "11111111", normalizedValue: "11111111" }),
+    });
+
+    const createdCalls = busEmitSpy.mock.calls.filter(
+      ([channel, event]) =>
+        channel === EventChannel.Grouping && event === EngineEvents.ENTITY_GROUP_CREATED,
+    );
+    expect(createdCalls).toHaveLength(1);
+    const { group } = createdCalls[0]?.[2] as EntityGroupCreated;
+    // replacementValueUserSet===false y modo vigente placeholder: la
+    // invariante de `03_Data_Model.md` §9 exige que coincidan exactamente.
+    expect(group.replacementValueUserSet).toBe(false);
+    expect(group.replacementMode).toBe(ReplacementMode.Placeholder);
+    expect(group.replacementPreviews.placeholder).toBe(group.replacementValue);
+  });
+
+  // Caso 47 (§13, ADR-170 §2).
+  it("previewEdit does not mutate the session nor emit", async () => {
+    await engine.init(ctx);
+    engine.startSession("doc-1");
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "11111111", normalizedValue: "11111111" }),
+    });
+    const [group] = engine.getSnapshot("doc-1").groups;
+    const before = engine.getSnapshot("doc-1");
+
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+    const preview = engine.previewEdit("doc-1", {
+      kind: "type",
+      groupId: group!.id,
+      type: EntityType.CUIT,
+    });
+    expect(preview.groups).toHaveLength(1);
+    expect(preview.groups[0]?.type).toBe(EntityType.CUIT);
+
+    expect(busEmitSpy).not.toHaveBeenCalled();
+    const after = engine.getSnapshot("doc-1");
+    expect(after).toEqual(before);
+  });
+
+  // Caso 48 (§13, ADR-171 §2).
+  it("applyGroupRemove removes the group, resolves its conflicts and emits ENTITY_GROUP_REMOVED", async () => {
+    await engine.init(ctx);
+    engine.startSession("doc-1");
+
+    const existing = makeOccurrence({
+      entityType: EntityType.CreditCard,
+      source: DetectionSource.Regex,
+      confidence: 0.9,
+      bbox: makeBBox(0, 0, 100, 20),
+      value: "4111111111111111",
+      normalizedValue: "4111111111111111",
+    });
+    const incoming = makeOccurrence({
+      entityType: EntityType.IBAN,
+      source: DetectionSource.Regex,
+      confidence: 0.5,
+      bbox: makeBBox(0, 0, 100, 20),
+      value: "ES1234",
+      normalizedValue: "es1234",
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: existing,
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: incoming,
+    });
+    const [group] = engine.getSnapshot("doc-1").groups;
+    const { conflicts } = engine.getSnapshot("doc-1");
+    expect(conflicts).toHaveLength(1);
+
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+    await engine.applyGroupRemove({ documentId: "doc-1", groupId: group!.id });
+
+    const removedCalls = busEmitSpy.mock.calls.filter(
+      ([channel, event]) =>
+        channel === EventChannel.Grouping && event === EngineEvents.ENTITY_GROUP_REMOVED,
+    );
+    expect(removedCalls).toHaveLength(1);
+    expect((removedCalls[0]?.[2] as EntityGroupRemoved).groupId).toBe(group!.id);
+
+    const resolvedCalls = busEmitSpy.mock.calls.filter(
+      ([channel, event]) =>
+        channel === EventChannel.Grouping && event === EngineEvents.CONFLICT_RESOLVED,
+    );
+    expect(resolvedCalls).toHaveLength(1);
+    expect((resolvedCalls[0]?.[2] as ConflictResolved).conflictId).toBe(conflicts[0]?.id);
+
+    const after = engine.getSnapshot("doc-1");
+    expect(after.groups.find((g) => g.id === group!.id)).toBeUndefined();
+    expect(after.conflicts[0]?.resolved).toBe(true);
+  });
+
+  // Caso 51 (§13, ADR-172 §1) — el test de que deshacer no miente: una
+  // secuencia por cada edición que §3.3b declaraba sin inversa (fusión,
+  // división, reclasificación, eliminación).
+  it("restoreCheckpoint returns the exact session, including internal state", async () => {
+    await engine.init(ctx);
+    engine.startSession("doc-1");
+
+    for (const value of ["11111111", "22222222", "33333333"]) {
+      ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: makeOccurrence({ value, normalizedValue: value }),
+      });
+    }
+    const [g1, g2, g3] = engine.getSnapshot("doc-1").groups;
+
+    const checkpointId = engine.createCheckpoint("doc-1");
+    // El checkpoint guardado es la referencia contra la que se compara
+    // después de restaurar — no la sesión viva, que las ediciones de abajo
+    // mutan en el lugar.
+    const savedInternal = engine["checkpoints"].get("doc-1")?.get(checkpointId);
+    expect(savedInternal).toBeDefined();
+
+    // Fusión.
+    const merged = await engine.applyGroupMerge({
+      documentId: "doc-1",
+      sourceGroupId: g1!.id,
+      targetGroupId: g2!.id,
+    });
+    // División.
+    const { created } = await engine.applyGroupSplit({
+      documentId: "doc-1",
+      groupId: merged.id,
+      occurrenceIds: [merged.members[0]!.occurrenceId],
+    });
+    // Reclasificación.
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: created.id,
+      patch: { type: EntityType.CUIT },
+    });
+    // Eliminación.
+    await engine.applyGroupRemove({ documentId: "doc-1", groupId: g3!.id });
+
+    // Confirma que de verdad cambió algo antes de restaurar.
+    expect(engine.getSnapshot("doc-1").groups).not.toEqual([g1, g2, g3]);
+
+    await engine.restoreCheckpoint("doc-1", checkpointId);
+
+    const restoredInternal = engine["sessions"].get("doc-1");
+    expect(restoredInternal?.groups).toEqual(savedInternal?.groups);
+    expect(restoredInternal?.nextIndexByType).toEqual(savedInternal?.nextIndexByType);
+    expect(restoredInternal?.recordedOccurrences).toEqual(savedInternal?.recordedOccurrences);
+    expect(restoredInternal?.typeCorrections).toEqual(savedInternal?.typeCorrections);
+    expect(restoredInternal?.removedValues).toEqual(savedInternal?.removedValues);
+
+    // Vía pública: mismos id, indexInType y replacementValue.
+    const restored = engine.getSnapshot("doc-1").groups;
+    expect(new Set(restored.map((g) => g.id))).toEqual(new Set([g1!.id, g2!.id, g3!.id]));
+    for (const original of [g1, g2, g3]) {
+      const match = restored.find((g) => g.id === original!.id);
+      expect(match?.indexInType).toBe(original!.indexInType);
+      expect(match?.replacementValue).toBe(original!.replacementValue);
+    }
   });
 });

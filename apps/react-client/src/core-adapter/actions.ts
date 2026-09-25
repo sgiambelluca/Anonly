@@ -16,6 +16,8 @@
 import {
   EngineEvents,
   EventChannel,
+  type EditPreview,
+  type EditPreviewRequest,
   type EntityGroup,
   type EntityType,
   type ExportOptions,
@@ -35,6 +37,8 @@ import { usePipelineStore } from "../store/pipeline.store.js";
 import { useRulesStore } from "../store/rules.store.js";
 import { useViewerStore, type ViewerKind } from "../store/viewer.store.js";
 
+import { useHistoryStore } from "./history.js";
+
 import { getCore } from "./index.js";
 
 /** `null` si no hay documento activo; las acciones que lo requieren no-opean en ese caso. */
@@ -44,6 +48,8 @@ function activeDocumentId(): string | null {
 
 export const actions = {
   async importDocument(file: File): Promise<void> {
+    // ADR-172 §2: la pila de deshacer es del documento anterior.
+    useHistoryStore.getState().clear();
     const documentId = crypto.randomUUID();
     const buffer = await file.arrayBuffer();
     // DOCUMENT_IMPORTED lo emite el Orchestrator; la UI nunca invoca motores
@@ -92,6 +98,33 @@ export const actions = {
     });
   },
 
+  /**
+   * ADR-171 §5: eliminar una entidad. Si la fila tenía una `Rule` de scope
+   * `group`, se borra primero (`RULE_DELETED`): una regla huérfana contaría en
+   * la franja "Todo el documento". Después, `GROUP_REMOVE_REQUESTED`; el
+   * Grouping Engine responde con `ENTITY_GROUP_REMOVED` y `bus-bridge` saca
+   * la fila. Los dos pasos entran en un mismo punto de deshacer: el
+   * `record` lo hace quien llama, una vez, antes (ADR-172 §2).
+   */
+  removeGroup(groupId: string): void {
+    const documentId = activeDocumentId();
+    if (documentId === null) return;
+    const groupRule = useRulesStore
+      .getState()
+      .rules.find((rule) => rule.scope === "group" && rule.target.groupId === groupId);
+    if (groupRule !== undefined) {
+      getCore().bus.emit(EventChannel.UI, EngineEvents.RULE_DELETED, {
+        documentId,
+        ruleId: groupRule.id,
+      });
+      useRulesStore.getState().removeRule(groupRule.id);
+    }
+    getCore().bus.emit(EventChannel.UI, EngineEvents.GROUP_REMOVE_REQUESTED, {
+      documentId,
+      groupId,
+    });
+  },
+
   // `rules.store` no tiene ningún evento Core→UI que lo alimente (a
   // diferencia de `entities.store`, poblado vía `ENTITY_GROUP_*`):
   // RULE_CREATED/RULE_UPDATED/RULE_DELETED son estrictamente UI→Grouping
@@ -118,14 +151,24 @@ export const actions = {
    * reemplazo. `entityType` ausente = aceptar el default del motor (el
    * candidato de mayor confidence), que coincide con la clasificación ya
    * vigente — o sea que confirmar no cambia datos.
+   *
+   * ADR-174 §3: `winner` solo viaja en conflictos con `Conflict.heldManual`
+   * (`ManualOverlapDialog`, `Components.md` §6.3): `"manual"` agrupa la
+   * ocurrencia retenida, `"detected"` la descarta. En cualquier otro
+   * conflicto el motor lo rechaza con `warn` (`GroupingInvalidPatchError`),
+   * así que `ConflictDialog` nunca lo manda.
    */
-  resolveConflict(conflictId: string, entityType?: EntityType): void {
+  resolveConflict(
+    conflictId: string,
+    options?: { readonly entityType?: EntityType; readonly winner?: "manual" | "detected" },
+  ): void {
     const documentId = activeDocumentId();
     if (documentId === null) return;
     getCore().bus.emit(EventChannel.UI, EngineEvents.CONFLICT_RESOLVE_REQUESTED, {
       documentId,
       conflictId,
-      ...(entityType !== undefined ? { entityType } : {}),
+      ...(options?.entityType !== undefined ? { entityType: options.entityType } : {}),
+      ...(options?.winner !== undefined ? { winner: options.winner } : {}),
     });
   },
 
@@ -176,6 +219,9 @@ export const actions = {
   async reanalyze(patch: ReanalyzeConfigPatch): Promise<void> {
     const documentId = activeDocumentId();
     if (documentId === null) return;
+    // ADR-172 §1-§2: la pila no cruza un re-análisis (el Core descarta sus
+    // puntos al reabrir la sesión).
+    useHistoryStore.getState().clear();
     await getCore().orchestrator.reanalyze(documentId, patch);
   },
 
@@ -215,6 +261,26 @@ export const actions = {
     return getCore().orchestrator.findText(documentId, query);
   },
 
+  /**
+   * ADR-170 §2: cómo quedarían los grupos si se aplicara la operación
+   * (fusionar, dividir, cambiar tipo). Consulta sincrónica y de solo lectura:
+   * el Grouping Engine la simula sobre una copia de la sesión con el mismo
+   * código que el pedido real, así que la vista previa no puede discrepar del
+   * resultado. Los diálogos validan antes de pedir (`validateMultiMerge`,
+   * `validateSplit`); si igual llega un pedido que el real rechazaría, el Core
+   * lanza `InvalidInputError` y acá se devuelve `null` — el diálogo muestra su
+   * texto neutro en vez de romper el render.
+   */
+  previewEdit(request: EditPreviewRequest): EditPreview | null {
+    const documentId = activeDocumentId();
+    if (documentId === null) return null;
+    try {
+      return getCore().orchestrator.previewEdit(documentId, request);
+    } catch {
+      return null;
+    }
+  },
+
   // PDF_PASSWORD_REQUIRED → PasswordDialog → esta acción. La UI NUNCA llama a
   // engines.pdf.process (Orchestrator.md §6; errata corregida, ADR-036 §5).
   async retryWithPassword(password: string): Promise<void> {
@@ -240,6 +306,9 @@ export const actions = {
   closeDocument(): void {
     const documentId = activeDocumentId();
     if (documentId === null) return;
+    // Antes de resetear `document.store`: `clear` descarta los puntos del
+    // documento activo.
+    useHistoryStore.getState().clear();
     getCore().bus.emit(EventChannel.UI, EngineEvents.DOCUMENT_CLOSED, { documentId });
     useDocumentStore.getState().reset();
     useEntitiesStore.getState().reset();

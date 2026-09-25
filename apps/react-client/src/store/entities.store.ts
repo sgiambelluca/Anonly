@@ -27,8 +27,25 @@ export interface EntitiesSlice {
   addConflict(conflict: Conflict): void;
   /** `resolvedType` (ADR-083 §3): el tipo con el que quedó clasificado el grupo. */
   resolveConflict(conflictId: string, resolvedType?: EntityType): void;
+  /**
+   * ADR-169 §2: orden de presentación de las filas. **Solo UI**: no cambia
+   * `indexInType` ni emite nada al Core. Vale para todos los tipos y se
+   * recuerda mientras la app está abierta — `reset()` (cerrar el documento) no
+   * lo toca, y no persiste.
+   */
+  readonly sortOrder: EntitySortOrder;
+  setSortOrder(order: EntitySortOrder): void;
+  /**
+   * ADR-169 §7: grupo a llevar a la vista y resaltar un momento ("Ver en la
+   * lista" del toast de un agregado). `null` cuando no hay nada que resaltar.
+   */
+  readonly flashGroupId: string | null;
+  setFlashGroupId(groupId: string | null): void;
   reset(): void;
 }
+
+/** `"appearance"` = `indexInType` ascendente; `"alpha"` = `canonicalValue` A–Z (ADR-169 §2). */
+export type EntitySortOrder = "appearance" | "alpha";
 
 // Orden fijo de ui/Components.md §3.1.
 const ENTITY_TYPE_ORDER: ReadonlyArray<EntityType> = [
@@ -62,11 +79,16 @@ function findGroupType(
   return undefined;
 }
 
-type EntitiesData = Pick<EntitiesSlice, "groupsByType" | "conflicts">;
+type EntitiesData = Pick<
+  EntitiesSlice,
+  "groupsByType" | "conflicts" | "sortOrder" | "flashGroupId"
+>;
 
 const initialState: EntitiesData = {
   groupsByType: emptyGroupsByType(),
   conflicts: [],
+  sortOrder: "appearance",
+  flashGroupId: null,
 };
 
 export const useEntitiesStore = create<EntitiesSlice>((set) => ({
@@ -155,7 +177,15 @@ export const useEntitiesStore = create<EntitiesSlice>((set) => ({
       ),
     }));
   },
+  setSortOrder(order) {
+    set({ sortOrder: order });
+  },
+  setFlashGroupId(groupId) {
+    set({ flashGroupId: groupId });
+  },
   reset() {
-    set({ groupsByType: emptyGroupsByType(), conflicts: [] });
+    // `sortOrder` se conserva: es una preferencia de la sesión de la app, no
+    // del documento (ADR-169 §2).
+    set({ groupsByType: emptyGroupsByType(), conflicts: [], flashGroupId: null });
   },
 }));

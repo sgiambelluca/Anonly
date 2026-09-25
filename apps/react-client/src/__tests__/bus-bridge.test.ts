@@ -56,6 +56,12 @@ function makeGroup(overrides: Partial<EntityGroup> = {}): EntityGroup {
     enabled: true,
     aliases: ["Juan Pérez"],
     replacementValueUserSet: false,
+    replacementPreviews: {
+      placeholder: "[PERSON 01]",
+      mask: "[PERSON 01]",
+      synthetic: "[PERSON 01]",
+      placeholderLadder: ["[PERSON 01]"],
+    },
     needsReview: false,
     createdAt: 0,
     updatedAt: 0,
@@ -194,7 +200,7 @@ describe("bus-bridge", () => {
     unsubscribe();
   });
 
-  it("PIPELINE_CANCELLED sets stage Cancelled", () => {
+  it("PIPELINE_CANCELLED keeps Cancelled visible despite a late NER loading event", () => {
     const bus = createEventBus({ logger: createTestLogger() });
     const unsubscribe = subscribe(bus, stores);
 
@@ -203,6 +209,12 @@ describe("bus-bridge", () => {
       reason: "user requested",
     });
 
+    expect(usePipelineStore.getState().stage).toBe(PipelineStage.Cancelled);
+    bus.emit(EventChannel.Ner, EngineEvents.NER_MODEL_LOADING, {
+      modelId: "test-model",
+      progress: 0.5,
+    });
+    expect(usePipelineStore.getState().modelLoading).toBeNull();
     expect(usePipelineStore.getState().stage).toBe(PipelineStage.Cancelled);
 
     unsubscribe();

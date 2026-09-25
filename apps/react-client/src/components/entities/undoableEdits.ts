@@ -1,48 +1,21 @@
 /**
- * `undoableEdits.ts` — deshacer para las ediciones del árbol que antes no lo
- * tenían (ADR-087, "Fuera del alcance" §6).
+ * `undoableEdits.ts` — los textos y la selección de las ediciones del árbol
+ * que avisan con un toast (`applyEdits.ts` las ejecuta).
  *
- * §3.3 le dio "Deshacer" a los dos barridos de modo y al único caso de fila
- * que destruye texto escrito a mano, por el mismo criterio que se aplica acá:
- * **una acción de un click que cambia muchas filas, o que pisa algo que el
- * usuario escribió, necesita una salida de un click**. Lo que quedó afuera
- * entonces —habilitar/deshabilitar y editar el valor de reemplazo— cumple ese
- * criterio igual: la cascada de un tipo apaga decenas de grupos de una, y
- * `Space` sobre una cabecera hace lo mismo sin siquiera un diálogo de por
- * medio.
- *
- * **Qué NO está acá, y por qué.** Fusionar, dividir, reclasificar y agregar
- * una entidad a mano siguen sin deshacer, y no es una omisión de este módulo.
- * Las cuatro comparten una misma razón de fondo: **el Core no tiene una
- * inversa exacta**, y un "Deshacer" que devuelve algo parecido y no lo mismo
- * miente — es peor que no ofrecerlo.
- *
- * - Deshacer un **agregado manual** necesita borrar el grupo, y no existe
- *   pedido de borrado en `Contracts.md` — `ENTITY_GROUP_REMOVED` lo emite el
- *   Grouping Engine por su cuenta (fusión, `dropOccurrences`), no a pedido de
- *   la UI. Agregarlo es cambio de contrato: ADR primero (R-19).
- * - Deshacer una **fusión** sería dividir de vuelta, y deshacer una **división**
- *   sería fusionar de vuelta, pero ninguna de las dos restituye el estado
- *   anterior: el grupo que reaparece es uno nuevo, con otro `id` y otro
- *   `indexInType` (`Grouping_Engine.md` §13 caso 5 — la fusión conserva el
- *   menor índice y el resultante renumera).
- * - Deshacer una **reclasificación** parece trivial —volver al tipo anterior—
- *   y no lo es. `changeGroupType` renumera con `nextIndex`, que es monótono,
- *   así que el grupo vuelve con otro número de token; re-escribe
- *   `typeCorrections` (ADR-085 §1b) en vez de borrar la entrada que no
- *   existía; deja `absorbedTypes` con los dos tipos para siempre; y al salir
- *   de `Person` destruye `personGenderUserSet`, de modo que el "undo"
- *   reemplazaría en silencio una elección explícita del usuario por una
- *   inferida (ADR-082 §2 paso 4). Este módulo **llegó a ofrecer ese undo** y
- *   se retiró al medirlo: es el mismo defecto que hace un párrafo se usa para
- *   descartar fusionar y dividir.
+ * Hasta ADR-172 este módulo también armaba el **undo** de cada una con la
+ * operación contraria (restituir el `enabled` de cada grupo, reescribir el
+ * valor anterior) y explicaba por qué fusionar, dividir, reclasificar y
+ * agregar no podían tenerlo: el Core no tenía una inversa exacta. Esa razón
+ * sigue siendo cierta, y por eso el deshacer ya no invierte operaciones:
+ * vuelve a un punto de restauración que guarda el Core (`history.store`,
+ * ADR-172 §1-§2), exacto para todas. Lo que queda acá es puro texto.
  *
  * Módulo puro: los tests de `apps/react-client` corren en Node sin jsdom.
  */
 
 export interface EnabledSnapshot {
   readonly groupId: string;
-  /** El valor que tenía ANTES del cambio — es lo que restituye el undo. */
+  /** El valor que tenía ANTES del cambio. */
   readonly enabled: boolean;
 }
 
@@ -54,8 +27,7 @@ interface ToggleCandidate {
 /**
  * Los grupos que de verdad cambian de estado. Los que ya estaban en `next` se
  * excluyen: incluirlos inflaría el contador del toast ("12 grupos" cuando el
- * usuario cambió 3) y haría que el undo emitiera escrituras que no deshacen
- * nada.
+ * usuario cambió 3) y emitiría escrituras que no cambian nada.
  */
 export function groupsToToggle(
   groups: ReadonlyArray<ToggleCandidate>,
@@ -84,4 +56,24 @@ export function enabledToastText(params: {
   const verbPlural = next ? "se anonimizan" : "no se anonimizan";
   if (!isType) return `«${label}» ${verb}`;
   return `${label}: ${count} ${count === 1 ? "grupo" : "grupos"} ${count === 1 ? verb : verbPlural}`;
+}
+
+/**
+ * Toast de "Eliminar entidad" (ADR-171 §5): dice que el dato deja la lista y
+ * que **no se va a ocultar** — la diferencia con deshabilitar es de lista, no
+ * de documento.
+ */
+export function removedToastText(canonicalValue: string): {
+  readonly title: string;
+  readonly description: string;
+} {
+  return {
+    title: `Eliminaste «${canonicalValue}»`,
+    description: "Ya no está en la lista ni se va a ocultar",
+  };
+}
+
+/** El texto del `ConfirmDialog` de "Eliminar entidad" (ADR-171 §5). */
+export function removeConfirmMessage(canonicalValue: string): string {
+  return `«${canonicalValue}» sale de la lista y su texto queda a la vista en el documento exportado. Si un nuevo análisis lo vuelve a encontrar, sigue eliminada.`;
 }

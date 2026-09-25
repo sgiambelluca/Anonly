@@ -1,10 +1,15 @@
 import {
+  DetectionSource,
   EngineEvents,
   EntityType,
   EventChannel,
   GENDER_LEXICON,
   ReplacementMode,
+  type ConflictDetected,
   type EngineContext,
+  type EntityGroupCreated,
+  type EntityGroupRemoved,
+  type EntityGroupUpdated,
   type GenderLexicon,
 } from "@anonly/shared";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
@@ -1066,5 +1071,1140 @@ describe("levenshtein / levenshteinNormalized", () => {
 
   it("computes edit distance between differing non-empty strings", () => {
     expect(levenshtein("kitten", "sitting")).toBe(3);
+  });
+});
+
+describe("GroupingEngine — replacementPreviews (ADR-170 §1)", () => {
+  let engine: GroupingEngine;
+  let ctx: EngineContext;
+
+  beforeEach(async () => {
+    engine = new GroupingEngine();
+    ctx = createEngineContext();
+    await engine.init(ctx);
+    engine.startSession("doc-1");
+  });
+
+  afterEach(async () => {
+    if (!engine["disposed"]) {
+      await engine.dispose();
+    }
+  });
+
+  // Caso 46 (§13).
+  it("replacementPreviews ignore replacementValueUserSet", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "11111111", normalizedValue: "11111111" }),
+    });
+    const [group] = engine.getSnapshot("doc-1").groups;
+    const computedPlaceholder = group!.replacementPreviews.placeholder;
+
+    const edited = await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group!.id,
+      patch: { replacementValue: "[P1]" },
+    });
+    expect(edited.replacementValueUserSet).toBe(true);
+    expect(edited.replacementValue).toBe("[P1]");
+    // La vista previa sigue mostrando lo que valdría CALCULADO, no lo que el
+    // usuario escribió a mano — es "lo que quedaría al cambiar de modo".
+    expect(edited.replacementPreviews.placeholder).toBe(computedPlaceholder);
+    expect(edited.replacementPreviews.placeholder).not.toBe(edited.replacementValue);
+  });
+
+  // Caso 46 (§13, ADR-057).
+  it("placeholderLadder lists distinct ladder tokens, longest first, including placeholder", () => {
+    // Organization (no Person: sin inferencia de género que confunda el
+    // ejemplo) — ORGANIZACION(12) > ORGA(4) > ORG(3), los tres niveles
+    // distintos.
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Organization,
+        value: "Empresa S.A.",
+        normalizedValue: "empresa s.a.",
+      }),
+    });
+    const [group] = engine.getSnapshot("doc-1").groups;
+    const ladder = group!.replacementPreviews.placeholderLadder;
+
+    expect(ladder).toEqual([
+      `[ORGANIZACION ${String(group!.indexInType).padStart(2, "0")}]`,
+      `[ORGA ${String(group!.indexInType).padStart(2, "0")}]`,
+      `[ORG-${String(group!.indexInType).padStart(2, "0")}]`,
+    ]);
+    expect(ladder).toContain(group!.replacementPreviews.placeholder);
+    // Sin repetidos.
+    expect(new Set(ladder).size).toBe(ladder.length);
+  });
+
+  describe("previewEdit reuses the real request (ADR-170 §2)", () => {
+    // Caso 47 (§13) — un test por kind.
+    it("previewEdit(type) equals the group emitted by the real request", async () => {
+      ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: makeOccurrence({ value: "11111111", normalizedValue: "11111111" }),
+      });
+      const [group] = engine.getSnapshot("doc-1").groups;
+
+      const preview = engine.previewEdit("doc-1", {
+        kind: "type",
+        groupId: group!.id,
+        type: EntityType.CUIT,
+      });
+      expect(preview.groups).toHaveLength(1);
+
+      const real = await engine.applyGroupUpdate({
+        documentId: "doc-1",
+        groupId: group!.id,
+        patch: { type: EntityType.CUIT },
+      });
+
+      expect(preview.groups[0]).toEqual({
+        groupId: real.id,
+        type: real.type,
+        indexInType: real.indexInType,
+        canonicalValue: real.canonicalValue,
+        memberCount: real.members.length,
+        replacementMode: real.replacementMode,
+        replacementValue: real.replacementValue,
+      });
+    });
+
+    it("previewEdit(merge) equals the group emitted by the real request", async () => {
+      for (const value of ["11111111", "22222222", "33333333"]) {
+        ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+          documentId: "doc-1",
+          occurrence: makeOccurrence({ value, normalizedValue: value }),
+        });
+      }
+      const before = engine.getSnapshot("doc-1").groups;
+      const [g1, g2, g3] = before;
+
+      // Fusión múltiple: source -> targetGroupIds[0], después
+      // targetGroupIds[1] -> targetGroupIds[0] (ADR-170 §2).
+      const preview = engine.previewEdit("doc-1", {
+        kind: "merge",
+        sourceGroupId: g1!.id,
+        targetGroupIds: [g2!.id, g3!.id],
+      });
+      expect(preview.groups).toHaveLength(1);
+
+      const step1 = await engine.applyGroupMerge({
+        documentId: "doc-1",
+        sourceGroupId: g1!.id,
+        targetGroupId: g2!.id,
+      });
+      const step2 = await engine.applyGroupMerge({
+        documentId: "doc-1",
+        sourceGroupId: g3!.id,
+        targetGroupId: g2!.id,
+      });
+
+      expect(step1.id).toBe(g2!.id);
+      expect(preview.groups[0]).toEqual({
+        groupId: step2.id,
+        type: step2.type,
+        indexInType: step2.indexInType,
+        canonicalValue: step2.canonicalValue,
+        memberCount: step2.members.length,
+        replacementMode: step2.replacementMode,
+        replacementValue: step2.replacementValue,
+      });
+    });
+
+    it("previewEdit(split) equals the group emitted by the real request", async () => {
+      const occA = makeOccurrence({
+        entityType: EntityType.Person,
+        value: "Juan Pérez",
+        normalizedValue: "juan perez",
+      });
+      const occB = makeOccurrence({
+        entityType: EntityType.Person,
+        value: "J. Pérez",
+        normalizedValue: "juan perez",
+      });
+      ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: occA,
+      });
+      ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: occB,
+      });
+      const [group] = engine.getSnapshot("doc-1").groups;
+
+      const preview = engine.previewEdit("doc-1", {
+        kind: "split",
+        groupId: group!.id,
+        occurrenceIds: [occB.id],
+      });
+      expect(preview.groups).toHaveLength(2);
+      expect(preview.groups[0]?.groupId).toBe(group!.id);
+      expect(preview.groups[1]?.groupId).toBeNull();
+
+      const { merged, created } = await engine.applyGroupSplit({
+        documentId: "doc-1",
+        groupId: group!.id,
+        occurrenceIds: [occB.id],
+      });
+
+      expect(preview.groups[0]).toEqual({
+        groupId: merged.id,
+        type: merged.type,
+        indexInType: merged.indexInType,
+        canonicalValue: merged.canonicalValue,
+        memberCount: merged.members.length,
+        replacementMode: merged.replacementMode,
+        replacementValue: merged.replacementValue,
+      });
+      expect(preview.groups[1]).toEqual({
+        groupId: null,
+        type: created.type,
+        indexInType: created.indexInType,
+        canonicalValue: created.canonicalValue,
+        memberCount: created.members.length,
+        replacementMode: created.replacementMode,
+        replacementValue: created.replacementValue,
+      });
+    });
+  });
+});
+
+describe("GroupingEngine — eliminar una entidad (ADR-171)", () => {
+  let engine: GroupingEngine;
+  let ctx: EngineContext;
+
+  beforeEach(async () => {
+    engine = new GroupingEngine();
+    ctx = createEngineContext();
+    await engine.init(ctx);
+    engine.startSession("doc-1");
+  });
+
+  afterEach(async () => {
+    if (!engine["disposed"]) {
+      await engine.dispose();
+    }
+  });
+
+  // Caso 49 (§13).
+  it("merge and dropOccurrences do not register suppression", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "11111111", normalizedValue: "11111111" }),
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "22222222", normalizedValue: "22222222" }),
+    });
+    const [g1, g2] = engine.getSnapshot("doc-1").groups;
+
+    await engine.applyGroupMerge({
+      documentId: "doc-1",
+      sourceGroupId: g1!.id,
+      targetGroupId: g2!.id,
+    });
+    const afterMerge = engine["sessions"].get("doc-1");
+    expect(afterMerge?.removedValues.size).toBe(0);
+
+    engine.dropOccurrences("doc-1", { source: DetectionSource.Regex });
+    expect(engine.getSnapshot("doc-1").groups).toHaveLength(0);
+    const afterDrop = engine["sessions"].get("doc-1");
+    expect(afterDrop?.removedValues.size).toBe(0);
+  });
+
+  // Caso 49 (§13, ADR-085 §8: mismo criterio que typeCorrections).
+  it("removedValues is not in the snapshot and dies on closeSession", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "11111111", normalizedValue: "11111111" }),
+    });
+    const [group] = engine.getSnapshot("doc-1").groups;
+    await engine.applyGroupRemove({ documentId: "doc-1", groupId: group!.id });
+
+    const snapshot = engine.getSnapshot("doc-1");
+    expect(snapshot).not.toHaveProperty("removedValues");
+    expect(Object.keys(snapshot)).toEqual(["documentId", "groups", "conflicts", "rules"]);
+
+    const sessionBeforeClose = engine["sessions"].get("doc-1");
+    expect(sessionBeforeClose?.removedValues.has("11111111")).toBe(true);
+
+    await engine.closeSession("doc-1");
+    expect(engine["sessions"].get("doc-1")).toBeUndefined();
+  });
+
+  // Caso 50 (§13, ADR-171 §4).
+  it("liftRemoval lets the next manual occurrence of that value group normally", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "11111111", normalizedValue: "11111111" }),
+    });
+    const [group] = engine.getSnapshot("doc-1").groups;
+    await engine.applyGroupRemove({ documentId: "doc-1", groupId: group!.id });
+    expect(engine.getSnapshot("doc-1").groups).toHaveLength(0);
+
+    engine.liftRemoval("doc-1", "11111111");
+
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        value: "11111111",
+        normalizedValue: "11111111",
+        source: DetectionSource.Manual,
+        bbox: makeBBox(0, 500, 60, 12),
+      }),
+    });
+
+    const { groups } = engine.getSnapshot("doc-1");
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.aliases).toContain("11111111");
+  });
+});
+
+describe("GroupingEngine — puntos de restauración (ADR-172)", () => {
+  let engine: GroupingEngine;
+  let ctx: EngineContext;
+
+  beforeEach(async () => {
+    engine = new GroupingEngine();
+    ctx = createEngineContext();
+    await engine.init(ctx);
+    engine.startSession("doc-1");
+  });
+
+  afterEach(async () => {
+    if (!engine["disposed"]) {
+      await engine.dispose();
+    }
+  });
+
+  // Caso 52 (§13).
+  it("restoreCheckpoint emits only the diff", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "11111111", normalizedValue: "11111111" }),
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "22222222", normalizedValue: "22222222" }),
+    });
+    const [g1, g2] = engine.getSnapshot("doc-1").groups;
+    const checkpointId = engine.createCheckpoint("doc-1");
+
+    // g1 no se toca. g2 se edita (UPDATED al restaurar). Un g3 nuevo aparece
+    // después del checkpoint (REMOVED al restaurar, porque ahí no existía).
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: g2!.id,
+      patch: { replacementMode: ReplacementMode.Mask },
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "33333333", normalizedValue: "33333333" }),
+    });
+    const g3 = engine.getSnapshot("doc-1").groups.find((g) => g.aliases.includes("33333333"));
+
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+    await engine.restoreCheckpoint("doc-1", checkpointId);
+
+    const groupEvents = busEmitSpy.mock.calls.filter(
+      ([channel]) => channel === EventChannel.Grouping,
+    );
+
+    // g1 idéntico: ni CREATED ni UPDATED ni REMOVED para su id.
+    expect(
+      groupEvents.some(([, event, payload]) => {
+        if (event === EngineEvents.ENTITY_GROUP_REMOVED) {
+          return (payload as EntityGroupRemoved).groupId === g1!.id;
+        }
+        if (
+          event === EngineEvents.ENTITY_GROUP_UPDATED ||
+          event === EngineEvents.ENTITY_GROUP_CREATED
+        ) {
+          return (payload as EntityGroupUpdated | EntityGroupCreated).group.id === g1!.id;
+        }
+        return false;
+      }),
+    ).toBe(false);
+
+    // g2 cambió: UPDATED con "replacementMode" en changes exacto.
+    const g2Updated = groupEvents.find(
+      ([, event, payload]) =>
+        event === EngineEvents.ENTITY_GROUP_UPDATED &&
+        (payload as EntityGroupUpdated).group.id === g2!.id,
+    );
+    expect(g2Updated).toBeDefined();
+    expect((g2Updated?.[2] as EntityGroupUpdated).changes).toContain("replacementMode");
+
+    // g3 sobra: REMOVED.
+    expect(
+      groupEvents.some(
+        ([, event, payload]) =>
+          event === EngineEvents.ENTITY_GROUP_REMOVED &&
+          (payload as EntityGroupRemoved).groupId === g3!.id,
+      ),
+    ).toBe(true);
+  });
+
+  // Caso 53 (§13). Errata (2026-09-23): la redacción original decía que
+  // reopenSession también descartaba los puntos, contradiciendo ADR-172 —
+  // el descarte por re-análisis lo hace el Orchestrator en `reanalyze`,
+  // antes de llamar a `reopenSession` (Orchestrator.md §6). Este test
+  // reemplaza al que afirmaba lo contrario.
+  it("closeSession discards all checkpoints; reopenSession keeps them", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "11111111", normalizedValue: "11111111" }),
+    });
+    const checkpointId = engine.createCheckpoint("doc-1");
+    const savedInternal = engine["checkpoints"].get("doc-1")?.get(checkpointId);
+    expect(engine["checkpoints"].get("doc-1")?.size).toBe(1);
+
+    // reopenSession NO descarta: el mismo escenario que addManualEntity
+    // (ADR-061 §6) — reabrir la sesión, agregar una ocurrencia nueva y
+    // volver a cerrar con finishSession no debe tirar el punto.
+    engine.reopenSession("doc-1", { expectRegex: true, expectNer: false });
+    expect(engine["checkpoints"].get("doc-1")?.size).toBe(1);
+
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({ value: "22222222", normalizedValue: "22222222" }),
+    });
+    await engine.finishSession("doc-1");
+    expect(engine.getSnapshot("doc-1").groups).toHaveLength(2);
+
+    // El punto sigue restaurando la sesión exacta de antes del reopen: la
+    // ocurrencia nueva desaparece.
+    await engine.restoreCheckpoint("doc-1", checkpointId);
+    const restoredInternal = engine["sessions"].get("doc-1");
+    expect(restoredInternal?.groups).toEqual(savedInternal?.groups);
+    expect(restoredInternal?.nextIndexByType).toEqual(savedInternal?.nextIndexByType);
+
+    const restored = engine.getSnapshot("doc-1").groups;
+    expect(restored).toHaveLength(1);
+    expect(restored[0]?.aliases).toContain("11111111");
+    expect(restored.some((g) => g.aliases.includes("22222222"))).toBe(false);
+
+    // restoreCheckpoint no toca el registro de puntos: el original sigue
+    // ahí, y uno nuevo se suma.
+    expect(engine["checkpoints"].get("doc-1")?.size).toBe(1);
+    engine.createCheckpoint("doc-1");
+    expect(engine["checkpoints"].get("doc-1")?.size).toBe(2);
+
+    // Ahora sí: closeSession descarta todo.
+    await engine.closeSession("doc-1");
+    expect(engine["checkpoints"].has("doc-1")).toBe(false);
+  });
+});
+
+describe("GroupingEngine — agregado manual que choca (ADR-174)", () => {
+  let engine: GroupingEngine;
+  let ctx: EngineContext;
+
+  beforeEach(async () => {
+    engine = new GroupingEngine();
+    ctx = createEngineContext();
+    await engine.init(ctx);
+    engine.startSession("doc-1");
+  });
+
+  afterEach(async () => {
+    if (!engine["disposed"]) {
+      await engine.dispose();
+    }
+  });
+
+  // Caso 56 (§13, ADR-174 §1).
+  it("a losing manual occurrence is held, not grouped, and marks the conflict heldManual", () => {
+    const detected = makeOccurrence({
+      entityType: EntityType.CreditCard,
+      source: DetectionSource.Regex,
+      confidence: 1,
+      bbox: makeBBox(0, 0, 100, 20),
+      value: "4111111111111111",
+      normalizedValue: "4111111111111111",
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: detected,
+    });
+    const manual = makeOccurrence({
+      entityType: EntityType.IBAN,
+      source: DetectionSource.Manual,
+      confidence: 1,
+      bbox: makeBBox(0, 0, 100, 20),
+      value: "ES1234",
+      normalizedValue: "es1234",
+    });
+
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: manual,
+    });
+
+    // Se emite el conflicto, pero NINGÚN evento de grupo para el IBAN: no se
+    // agrupa ni se descarta en silencio.
+    const conflictCalls = busEmitSpy.mock.calls.filter(
+      ([channel, event]) =>
+        channel === EventChannel.Grouping && event === EngineEvents.CONFLICT_DETECTED,
+    );
+    expect(conflictCalls).toHaveLength(1);
+    const conflict = (conflictCalls[0]?.[2] as ConflictDetected).conflict;
+    expect(conflict.heldManual).toBe(true);
+    expect(conflict.resolved).toBe(false);
+    expect(conflict.resolvedType).toBeUndefined();
+
+    const groupEvents = busEmitSpy.mock.calls.filter(
+      ([channel, event]) =>
+        channel === EventChannel.Grouping &&
+        (event === EngineEvents.ENTITY_GROUP_CREATED ||
+          event === EngineEvents.ENTITY_GROUP_UPDATED),
+    );
+    expect(groupEvents).toHaveLength(0);
+
+    const { groups } = engine.getSnapshot("doc-1");
+    expect(groups.some((g) => g.type === EntityType.IBAN)).toBe(false);
+    // La detección que ya estaba no se toca.
+    const creditCardGroup = groups.find((g) => g.type === EntityType.CreditCard);
+    expect(creditCardGroup?.members).toHaveLength(1);
+  });
+
+  // Caso 57 (§13, ADR-174 §3).
+  it("resolve winner manual groups the held occurrence; detected discards it", async () => {
+    function buildHeldConflict(ibanValue: string, ibanNormalized: string) {
+      ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: makeOccurrence({
+          entityType: EntityType.CreditCard,
+          source: DetectionSource.Regex,
+          confidence: 1,
+          bbox: makeBBox(0, 0, 100, 20),
+          value: "4111111111111111",
+          normalizedValue: "4111111111111111",
+        }),
+      });
+      ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: makeOccurrence({
+          entityType: EntityType.IBAN,
+          source: DetectionSource.Manual,
+          confidence: 1,
+          bbox: makeBBox(0, 0, 100, 20),
+          value: ibanValue,
+          normalizedValue: ibanNormalized,
+        }),
+      });
+      // El snapshot acumula conflictos de llamadas anteriores (ya resueltos,
+      // sin heldManual): el nuevo retenido es el que todavía lo tiene.
+      const conflict = engine.getSnapshot("doc-1").conflicts.find((c) => c.heldManual === true);
+      if (!conflict) throw new Error("expected a held conflict");
+      return conflict;
+    }
+
+    // winner: "manual" agrupa la retenida, sin tocar la detección existente.
+    const heldA = buildHeldConflict("ES1111", "es1111");
+    const resolvedManual = await engine.applyConflictResolve({
+      documentId: "doc-1",
+      conflictId: heldA.id,
+      winner: "manual",
+    });
+    expect(resolvedManual.resolved).toBe(true);
+    expect(resolvedManual.resolvedType).toBe(EntityType.IBAN);
+    expect(resolvedManual.heldManual).toBeUndefined();
+    const afterManual = engine.getSnapshot("doc-1").groups;
+    expect(afterManual.some((g) => g.type === EntityType.IBAN)).toBe(true);
+    expect(afterManual.find((g) => g.type === EntityType.CreditCard)?.members).toHaveLength(1);
+
+    // winner: "detected" descarta la retenida — se resuelve por el tipo YA
+    // vigente de la detección, que este camino no toca.
+    const heldB = buildHeldConflict("ES2222", "es2222");
+    const resolvedDetected = await engine.applyConflictResolve({
+      documentId: "doc-1",
+      conflictId: heldB.id,
+      winner: "detected",
+    });
+    expect(resolvedDetected.resolved).toBe(true);
+    expect(resolvedDetected.resolvedType).toBe(EntityType.CreditCard);
+    expect(resolvedDetected.heldManual).toBeUndefined();
+    const afterDetected = engine.getSnapshot("doc-1").groups;
+    expect(afterDetected.filter((g) => g.type === EntityType.IBAN)).toHaveLength(1); // solo la de heldA
+  });
+});
+
+describe("GroupingEngine — un choque manual no queda colgado (ADR-175)", () => {
+  let engine: GroupingEngine;
+  let ctx: EngineContext;
+
+  beforeEach(async () => {
+    engine = new GroupingEngine();
+    ctx = createEngineContext();
+    await engine.init(ctx);
+    engine.startSession("doc-1");
+  });
+
+  afterEach(async () => {
+    if (!engine["disposed"]) {
+      await engine.dispose();
+    }
+  });
+
+  // Caso 58, segunda cláusula (§13, ADR-172 + ADR-174 §3): un punto de
+  // restauración tomado ANTES de resolver un heldManual trae de vuelta la
+  // retención, y winner: "manual" sigue funcionando sobre el conflicto
+  // restaurado.
+  it("restoring a checkpoint brings back the held manual occurrence and winner manual groups it", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.CreditCard,
+        source: DetectionSource.Regex,
+        confidence: 1,
+        bbox: makeBBox(0, 0, 100, 20),
+        value: "4111111111111111",
+        normalizedValue: "4111111111111111",
+      }),
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.IBAN,
+        source: DetectionSource.Manual,
+        confidence: 1,
+        bbox: makeBBox(0, 0, 100, 20),
+        value: "ES1234",
+        normalizedValue: "es1234",
+      }),
+    });
+    const held = engine.getSnapshot("doc-1").conflicts.find((c) => c.heldManual === true);
+    if (!held) throw new Error("expected a held conflict");
+
+    const checkpointId = engine.createCheckpoint("doc-1");
+
+    await engine.applyConflictResolve({
+      documentId: "doc-1",
+      conflictId: held.id,
+      winner: "detected",
+    });
+    const afterDetected = engine.getSnapshot("doc-1").conflicts.find((c) => c.id === held.id);
+    expect(afterDetected?.resolved).toBe(true);
+    expect(afterDetected?.heldManual).toBeUndefined();
+
+    await engine.restoreCheckpoint("doc-1", checkpointId);
+    const restored = engine.getSnapshot("doc-1").conflicts.find((c) => c.id === held.id);
+    expect(restored?.resolved).toBe(false);
+    expect(restored?.heldManual).toBe(true);
+
+    const resolvedManual = await engine.applyConflictResolve({
+      documentId: "doc-1",
+      conflictId: held.id,
+      winner: "manual",
+    });
+    expect(resolvedManual.resolvedType).toBe(EntityType.IBAN);
+    expect(engine.getSnapshot("doc-1").groups.some((g) => g.type === EntityType.IBAN)).toBe(true);
+  });
+
+  // Caso 59 (§13, ADR-175 §1): applyGroupRemove del grupo detectado oculta
+  // sola la retenida — se agrupa por el camino de winner: "manual" y, si su
+  // valor normalizado coincidía con un alias del grupo eliminado, la
+  // supresión que ese mismo pedido acaba de agregar se revierte para ese
+  // valor.
+  it("removing the detected group of a held conflict groups the held occurrence", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Email,
+        source: DetectionSource.Regex,
+        confidence: 1,
+        bbox: makeBBox(0, 0, 100, 20),
+        value: "34567891",
+        normalizedValue: "34567891",
+      }),
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Phone,
+        source: DetectionSource.Manual,
+        confidence: 1,
+        bbox: makeBBox(0, 0, 100, 20),
+        value: "34567891",
+        normalizedValue: "34567891",
+      }),
+    });
+    const held = engine.getSnapshot("doc-1").conflicts.find((c) => c.heldManual === true);
+    if (!held) throw new Error("expected a held conflict");
+    const detectedGroup = engine
+      .getSnapshot("doc-1")
+      .groups.find((g) => g.type === EntityType.Email);
+    if (!detectedGroup) throw new Error("expected the detected group");
+
+    await engine.applyGroupRemove({ documentId: "doc-1", groupId: detectedGroup.id });
+
+    const snapshot = engine.getSnapshot("doc-1");
+    const resolved = snapshot.conflicts.find((c) => c.id === held.id);
+    expect(resolved?.resolved).toBe(true);
+    expect(resolved?.heldManual).toBeUndefined();
+    expect(resolved?.resolvedType).toBe(EntityType.Phone);
+
+    const phoneGroup = snapshot.groups.find((g) => g.type === EntityType.Phone);
+    expect(phoneGroup?.members).toHaveLength(1);
+    expect(snapshot.groups.some((g) => g.type === EntityType.Email)).toBe(false);
+
+    // El valor normalizado ("34567891") es el mismo en los dos candidatos:
+    // applyGroupRemove lo agrega a removedValues al barrer los aliases del
+    // grupo Email eliminado, y el camino de arriba lo tiene que revertir —
+    // lo que el usuario marcó a mano gana sobre esa supresión.
+    expect(engine["sessions"].get("doc-1")?.removedValues.has("34567891")).toBe(false);
+  });
+
+  // Caso 62 (§13, ADR-175 §2): un agregado nuevo reabre una decisión
+  // "detected" anterior — liftRemoval olvida la identidad suprimida y una
+  // re-emisión del mismo literal vuelve a crear un conflicto heldManual.
+  it("liftRemoval reopens a choice resolved as detected", async () => {
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.CreditCard,
+        source: DetectionSource.Regex,
+        confidence: 1,
+        bbox: makeBBox(0, 0, 100, 20),
+        value: "4111111111111111",
+        normalizedValue: "4111111111111111",
+      }),
+    });
+    const manual = makeOccurrence({
+      entityType: EntityType.IBAN,
+      source: DetectionSource.Manual,
+      confidence: 1,
+      bbox: makeBBox(0, 0, 100, 20),
+      value: "ES1234",
+      normalizedValue: "es1234",
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: manual,
+    });
+    const held = engine.getSnapshot("doc-1").conflicts.find((c) => c.heldManual === true);
+    if (!held) throw new Error("expected a held conflict");
+
+    await engine.applyConflictResolve({
+      documentId: "doc-1",
+      conflictId: held.id,
+      winner: "detected",
+    });
+
+    // Re-emitir la misma ocurrencia manual TODAVÍA suprimida: el dedup por
+    // identidad la descarta, sin conflicto nuevo (caso 58).
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: manual,
+    });
+    expect(engine.getSnapshot("doc-1").conflicts.filter((c) => c.heldManual === true)).toHaveLength(
+      0,
+    );
+
+    engine.liftRemoval("doc-1", "ES1234");
+
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: manual,
+    });
+    const conflictCalls = busEmitSpy.mock.calls.filter(
+      ([channel, event]) =>
+        channel === EventChannel.Grouping && event === EngineEvents.CONFLICT_DETECTED,
+    );
+    expect(conflictCalls).toHaveLength(1);
+    const reopened = (conflictCalls[0]?.[2] as ConflictDetected).conflict;
+    expect(reopened.heldManual).toBe(true);
+    expect(reopened.resolved).toBe(false);
+  });
+});
+
+describe("GroupingEngine — un choque pendiente bloquea el export (ADR-176)", () => {
+  let engine: GroupingEngine;
+  let ctx: EngineContext;
+
+  beforeEach(async () => {
+    engine = new GroupingEngine();
+    ctx = createEngineContext();
+    await engine.init(ctx);
+    engine.startSession("doc-1");
+  });
+
+  afterEach(async () => {
+    if (!engine["disposed"]) {
+      await engine.dispose();
+    }
+  });
+
+  // Caso 63 (§13, ADR-176 §3): manualOutcome resuelve los cuatro desenlaces
+  // de una ocurrencia Manual -- agrupada, deduplicada contra un registro
+  // existente, contenida (ADR-117) y retenida (ADR-174) -- sin comparar
+  // ningún valor: solo lee la anotación que dejó processOccurrence.
+  it("manualOutcome reports grouped, deduped, contained and held occurrences", () => {
+    // (1) Agrupada: valor nuevo, sin choque -- crea grupo, su propio registro.
+    const grouped = makeOccurrence({
+      entityType: EntityType.DNI,
+      source: DetectionSource.Manual,
+      confidence: 1,
+      bbox: makeBBox(0, 0, 60, 12),
+      pageIndex: 0,
+      value: "11111111",
+      normalizedValue: "11111111",
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: grouped,
+    });
+    const groupedGroup = engine.getSnapshot("doc-1").groups.find((g) => g.type === EntityType.DNI);
+    if (!groupedGroup) throw new Error("expected the group created for 'grouped'");
+
+    // (2) Deduplicada: MISMA identidad que una detección Regex ya registrada.
+    const detected = makeOccurrence({
+      entityType: EntityType.DNI,
+      source: DetectionSource.Regex,
+      confidence: 1,
+      bbox: makeBBox(0, 0, 60, 12),
+      pageIndex: 1,
+      value: "22222222",
+      normalizedValue: "22222222",
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: detected,
+    });
+    const deduped = makeOccurrence({
+      id: "man-dedup",
+      entityType: EntityType.DNI,
+      source: DetectionSource.Manual,
+      confidence: 1,
+      bbox: makeBBox(0, 0, 60, 12), // misma bbox que `detected`
+      pageIndex: 1, // misma página que `detected`
+      value: "22222222",
+      normalizedValue: "22222222",
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: deduped,
+    });
+    const dedupedGroup = engine
+      .getSnapshot("doc-1")
+      .groups.find((g) => g.canonicalValue === "22222222");
+    if (!dedupedGroup) throw new Error("expected the group of the deduped-against record");
+
+    // (3) Contenida (ADR-117): entera adentro de una detección del mismo tipo.
+    const container = makeOccurrence({
+      entityType: EntityType.Phone,
+      source: DetectionSource.Regex,
+      confidence: 1,
+      bbox: makeBBox(0, 0, 100, 12),
+      pageIndex: 2,
+      value: "11 4567-8901",
+      normalizedValue: "11 4567-8901",
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: container,
+    });
+    const contained = makeOccurrence({
+      id: "man-contained",
+      entityType: EntityType.Phone,
+      source: DetectionSource.Manual,
+      confidence: 1,
+      bbox: makeBBox(20, 0, 40, 12), // estrictamente adentro de `container`
+      pageIndex: 2,
+      value: "4567-8901",
+      normalizedValue: "4567-8901",
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: contained,
+    });
+    const containerGroup = engine
+      .getSnapshot("doc-1")
+      .groups.find((g) => g.type === EntityType.Phone);
+    if (!containerGroup) throw new Error("expected the container's group");
+
+    // (4) Retenida (ADR-174): pierde una superposición contra otro tipo.
+    const heldDetected = makeOccurrence({
+      entityType: EntityType.Email,
+      source: DetectionSource.Regex,
+      confidence: 1,
+      bbox: makeBBox(0, 0, 100, 12),
+      pageIndex: 3,
+      value: "a@b.com",
+      normalizedValue: "a@b.com",
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: heldDetected,
+    });
+    const held = makeOccurrence({
+      id: "man-held",
+      entityType: EntityType.Person,
+      source: DetectionSource.Manual,
+      confidence: 1,
+      bbox: makeBBox(0, 0, 100, 12),
+      pageIndex: 3,
+      value: "email a@b.com.",
+      normalizedValue: "email a@b.com.",
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: held,
+    });
+    const heldConflict = engine.getSnapshot("doc-1").conflicts.find((c) => c.heldManual === true);
+    if (!heldConflict) throw new Error("expected a held conflict");
+
+    const outcome = engine.manualOutcome("doc-1", [grouped.id, deduped.id, contained.id, held.id]);
+
+    expect(new Set(outcome.groupIds)).toEqual(
+      new Set([groupedGroup.id, dedupedGroup.id, containerGroup.id]),
+    );
+    expect(outcome.heldConflictIds).toEqual([heldConflict.id]);
+  });
+
+  // Caso 63 (§13, ADR-176 §3): manualOutcome se vacía en reopenSession y
+  // nunca sale por getSnapshot.
+  it("manualOutcome is cleared on reopenSession and absent from the snapshot", () => {
+    const manual = makeOccurrence({
+      entityType: EntityType.DNI,
+      source: DetectionSource.Manual,
+      confidence: 1,
+      bbox: makeBBox(0, 0, 60, 12),
+      pageIndex: 0,
+      value: "11111111",
+      normalizedValue: "11111111",
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: manual,
+    });
+    expect(engine.manualOutcome("doc-1", [manual.id]).groupIds).toHaveLength(1);
+
+    // No sale en getSnapshot: GroupingEngineSnapshot no tiene ningún campo
+    // que lo exponga (chequeo estructural: las claves conocidas y nada más).
+    const snapshot = engine.getSnapshot("doc-1");
+    expect(Object.keys(snapshot).sort()).toEqual(
+      ["conflicts", "documentId", "groups", "rules"].sort(),
+    );
+
+    engine.reopenSession("doc-1", { expectRegex: true, expectNer: false });
+    expect(engine.manualOutcome("doc-1", [manual.id]).groupIds).toEqual([]);
+  });
+
+  // Caso 64 (§13, ADR-176 §4): liftRemoval olvida TODA identidad suprimida
+  // con ese valor -- también la que dejó una eliminación (ADR-171 §2), no
+  // solo la de un winner: "detected" (ADR-175 §2, caso 62).
+  it("liftRemoval forgets removal-suppressed identities of the value", async () => {
+    const original = makeOccurrence({
+      entityType: EntityType.DNI,
+      source: DetectionSource.Regex,
+      confidence: 1,
+      bbox: makeBBox(0, 0, 60, 12),
+      pageIndex: 0,
+      value: "11111111",
+      normalizedValue: "11111111",
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: original,
+    });
+    const group = engine.getSnapshot("doc-1").groups[0];
+    if (!group) throw new Error("expected a group");
+
+    await engine.applyGroupRemove({ documentId: "doc-1", groupId: group.id });
+    expect(engine.getSnapshot("doc-1").groups).toHaveLength(0);
+
+    // Una ocurrencia NUEVA (identidad distinta: otra página/bbox) del mismo
+    // valor cae en el paso 0 de Matching y queda registrada como suprimida.
+    const newPosition = makeOccurrence({
+      entityType: EntityType.DNI,
+      source: DetectionSource.Manual,
+      confidence: 1,
+      bbox: makeBBox(0, 100, 60, 12),
+      pageIndex: 1,
+      value: "11111111",
+      normalizedValue: "11111111",
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: newPosition,
+    });
+    expect(engine.getSnapshot("doc-1").groups).toHaveLength(0);
+
+    // Sin liftRemoval, re-emitirla otra vez no crea grupo: el dedup por
+    // identidad la sigue descartando contra el registro suprimido.
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: { ...newPosition, id: "retry-still-suppressed" },
+    });
+    expect(engine.getSnapshot("doc-1").groups).toHaveLength(0);
+    const groupEventsBeforeLift = busEmitSpy.mock.calls.filter(
+      ([channel, event]) =>
+        channel === EventChannel.Grouping &&
+        (event === EngineEvents.ENTITY_GROUP_CREATED ||
+          event === EngineEvents.ENTITY_GROUP_UPDATED),
+    );
+    expect(groupEventsBeforeLift).toHaveLength(0);
+
+    engine.liftRemoval("doc-1", "11111111");
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: { ...newPosition, id: "retry-after-lift" },
+    });
+    const afterLift = engine.getSnapshot("doc-1").groups;
+    expect(afterLift).toHaveLength(1);
+    expect(afterLift[0]?.type).toBe(EntityType.DNI);
+  });
+
+  // Caso 64 (§13, ADR-177 §2 -- reemplaza ADR-176 §4). B4-0 de la revisión 4:
+  // liftRemoval solo olvidaba SUPPRESSED_GROUP_ID; los registros del grupo
+  // ELIMINADO conservaban su groupId original y el dedup los seguía
+  // encontrando, así que re-agregar en la MISMA posición no creaba nada.
+  it("re-adding a removed value at the same position creates a new group", async () => {
+    const samePageIndex = 0;
+    const sameBbox = makeBBox(100, 200, 120, 12);
+    const detected = makeOccurrence({
+      entityType: EntityType.Person,
+      source: DetectionSource.NER,
+      confidence: 0.99,
+      value: "Juan Perez",
+      normalizedValue: "juan perez",
+      pageIndex: samePageIndex,
+      bbox: sameBbox,
+    });
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: detected,
+    });
+    const removedGroup = engine.getSnapshot("doc-1").groups[0];
+    if (!removedGroup) throw new Error("expected a group");
+    await engine.applyGroupRemove({ documentId: "doc-1", groupId: removedGroup.id });
+    expect(engine.getSnapshot("doc-1").groups).toHaveLength(0);
+
+    engine.liftRemoval("doc-1", "juan perez");
+
+    // Re-emitir Manual en la MISMA posición que el member eliminado: nuevo
+    // grupo, no lo descarta el dedup contra el registro del grupo eliminado.
+    const manual = makeOccurrence({
+      entityType: EntityType.Person,
+      source: DetectionSource.Manual,
+      confidence: 1.0,
+      value: "Juan Perez",
+      normalizedValue: "juan perez",
+      pageIndex: samePageIndex,
+      bbox: sameBbox,
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: manual,
+    });
+
+    const groups = engine.getSnapshot("doc-1").groups;
+    expect(groups).toHaveLength(1);
+    const newGroup = groups[0];
+    if (!newGroup) throw new Error("expected a new group");
+    expect(newGroup.id).not.toBe(removedGroup.id);
+    expect(engine.manualOutcome("doc-1", [manual.id]).groupIds).toEqual([newGroup.id]);
+
+    // Los registros VIVOS no se tocan: llamar liftRemoval OTRA vez con el
+    // mismo valor (p. ej. desde un segundo agregado manual) no borra el
+    // registro del grupo recién creado, que sigue vivo.
+    const liveRecordBefore = engine["sessions"]
+      .get("doc-1")
+      ?.recordedOccurrences.find((rec) => rec.occurrenceId === manual.id);
+    expect(liveRecordBefore).toBeDefined();
+    expect(liveRecordBefore?.groupId).toBe(newGroup.id);
+
+    engine.liftRemoval("doc-1", "juan perez");
+
+    const liveRecordAfter = engine["sessions"]
+      .get("doc-1")
+      ?.recordedOccurrences.find((rec) => rec.occurrenceId === manual.id);
+    expect(liveRecordAfter).toEqual(liveRecordBefore);
+    expect(engine.getSnapshot("doc-1").groups).toEqual([newGroup]);
+  });
+
+  // Caso 67 (§13, ADR-178 §1-§2): el probe de B5-1 de la revisión 5 -- una
+  // ocurrencia manual contenida queda guardada a nombre de su contenedor y
+  // se agrupa recién cuando el contenedor se elimina.
+  it("a manual occurrence contained in a removed entity is grouped on removal", async () => {
+    const containerBbox = makeBBox(100, 200, 120, 12);
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        source: DetectionSource.NER,
+        confidence: 0.99,
+        value: "Juan Perez",
+        normalizedValue: "juan perez",
+        bbox: containerBbox,
+      }),
+    });
+    const containerGroup = engine.getSnapshot("doc-1").groups[0];
+    if (!containerGroup) throw new Error("expected the container group");
+
+    const contained = makeOccurrence({
+      entityType: EntityType.Person,
+      source: DetectionSource.Manual,
+      confidence: 1.0,
+      value: "Perez",
+      normalizedValue: "perez",
+      bbox: makeBBox(160, 200, 45, 12), // adentro del contenedor
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: contained,
+    });
+    // Contenida: no crea grupo, no se registra.
+    expect(engine.getSnapshot("doc-1").groups).toHaveLength(1);
+
+    const loose = makeOccurrence({
+      entityType: EntityType.Person,
+      source: DetectionSource.Manual,
+      confidence: 1.0,
+      value: "Perez",
+      normalizedValue: "perez",
+      bbox: makeBBox(400, 200, 45, 12), // suelta
+    });
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: loose,
+    });
+    const groupsBeforeRemoval = engine.getSnapshot("doc-1").groups;
+    expect(groupsBeforeRemoval).toHaveLength(2);
+    const perezGroup = groupsBeforeRemoval.find((g) => g.canonicalValue === "Perez");
+    if (!perezGroup) throw new Error("expected the loose Perez group");
+    expect(perezGroup.members).toHaveLength(1);
+
+    // manualOutcome ANTES de eliminar: la contenida sigue apuntando al
+    // contenedor (ADR-176 §3, sin cambios); la suelta, a su propio grupo.
+    const outcomeBefore = engine.manualOutcome("doc-1", [contained.id, loose.id]);
+    expect(new Set(outcomeBefore.groupIds)).toEqual(new Set([containerGroup.id, perezGroup.id]));
+
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+    await engine.applyGroupRemove({ documentId: "doc-1", groupId: containerGroup.id });
+
+    const groupsAfter = engine.getSnapshot("doc-1").groups;
+    expect(groupsAfter).toHaveLength(1);
+    const finalPerez = groupsAfter[0];
+    if (!finalPerez) throw new Error("expected the surviving Perez group");
+    expect(finalPerez.id).toBe(perezGroup.id);
+    expect(finalPerez.members).toHaveLength(2);
+    expect(new Set(finalPerez.members.map((m) => m.occurrenceId))).toEqual(
+      new Set([contained.id, loose.id]),
+    );
+
+    const updateCalls = busEmitSpy.mock.calls.filter(
+      ([channel, event]) =>
+        channel === EventChannel.Grouping && event === EngineEvents.ENTITY_GROUP_UPDATED,
+    );
+    expect(updateCalls.length).toBeGreaterThan(0);
   });
 });

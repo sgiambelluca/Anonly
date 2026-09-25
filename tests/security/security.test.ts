@@ -114,6 +114,13 @@ function buildSensitiveGroups(): ReadonlyArray<EntityGroup> {
       aliases: [],
       replacementValueUserSet: false,
       needsReview: false,
+      // ADR-170 §1: requerido en EntityGroup; coherente con replacementValue.
+      replacementPreviews: {
+        placeholder: "[DNI 01]",
+        mask: "",
+        synthetic: "",
+        placeholderLadder: ["[DNI 01]"],
+      },
       createdAt: Date.now(),
       updatedAt: Date.now(),
     },
@@ -137,6 +144,13 @@ function buildSensitiveGroups(): ReadonlyArray<EntityGroup> {
       aliases: [],
       replacementValueUserSet: false,
       needsReview: false,
+      // ADR-170 §1: requerido en EntityGroup; coherente con replacementValue.
+      replacementPreviews: {
+        placeholder: "[PERSON 01]",
+        mask: "",
+        synthetic: "",
+        placeholderLadder: ["[PERSON 01]"],
+      },
       createdAt: Date.now(),
       updatedAt: Date.now(),
     },

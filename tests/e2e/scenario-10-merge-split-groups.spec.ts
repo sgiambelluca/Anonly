@@ -52,8 +52,8 @@ test("fusionar y dividir grupos actualiza índices y reemplazos", async ({ page 
   const dni2 = page.getByRole("treeitem", { name: "18.445.212" }); // pág. 2
   await expect(dni1).toBeVisible();
   await expect(dni2).toBeVisible();
-  await expect(dni1).toContainText("(1)");
-  await expect(dni2).toContainText("(1)");
+  await expect(dni1).toHaveAccessibleName(/, 1 ocurrencias?,/);
+  await expect(dni2).toHaveAccessibleName(/, 1 ocurrencias?,/);
 
   // Fusionar: dni2 (origen) dentro de dni1 (destino) — dni1 sobrevive con su
   // propia identidad y conserva su canonicalValue (único alias en el
@@ -63,17 +63,17 @@ test("fusionar y dividir grupos actualiza índices y reemplazos", async ({ page 
     .getByRole("group", { name: "Acciones del grupo" })
     .getByRole("button", { name: "Fusionar con…" })
     .click();
-  const mergeDialog = page.getByRole("dialog", { name: "Fusionar grupo" });
+  const mergeDialog = page.getByRole("dialog", { name: "Fusionar entidades" });
   await expect(mergeDialog).toBeVisible();
-  await mergeDialog.getByRole("combobox", { name: "Grupo destino 1" }).click();
-  await page.getByRole("option", { name: /34\.567\.891/ }).click();
-  await mergeDialog.getByRole("button", { name: "Fusionar" }).click();
+  // ADR-169 §10: una lista con casillas en vez de filas de `Select`.
+  await mergeDialog.getByRole("checkbox", { name: /34\.567\.891/ }).click();
+  await mergeDialog.getByRole("button", { name: "Fusionar 2 entidades" }).click();
   await expect(mergeDialog).toHaveCount(0);
 
   // dni2 desapareció; dni1 conserva su identidad con 2 ocurrencias.
   await expect(dni2).toHaveCount(0);
   await expect(dni1).toBeVisible();
-  await expect(dni1).toContainText("(2)");
+  await expect(dni1).toHaveAccessibleName(/, 2 ocurrencias?,/);
 
   // El reemplazo se recalcula sobre los members fusionados (ADR-029) pero el
   // modo sigue siendo el default (nadie lo tocó todavía).
@@ -93,7 +93,7 @@ test("fusionar y dividir grupos actualiza índices y reemplazos", async ({ page 
     .getByRole("group", { name: "Acciones del grupo" })
     .getByRole("button", { name: "Dividir…" })
     .click();
-  const splitDialog = page.getByRole("dialog", { name: "Dividir grupo" });
+  const splitDialog = page.getByRole("dialog", { name: "Dividir entidad" });
   await expect(splitDialog).toBeVisible();
   await splitDialog.getByRole("checkbox", { name: /Página 2 — Detectado automáticamente/ }).click();
   await splitDialog.getByRole("button", { name: "Dividir" }).click();
@@ -102,10 +102,10 @@ test("fusionar y dividir grupos actualiza índices y reemplazos", async ({ page 
   // Vuelven a existir dos grupos DNI de 1 ocurrencia cada uno: el original
   // (recalculó su canónico sobre el único member que le queda) y uno nuevo
   // con el valor de la ocurrencia dividida.
-  await expect(dni1).toContainText("(1)");
+  await expect(dni1).toHaveAccessibleName(/, 1 ocurrencias?,/);
   const splitOffGroup = page.getByRole("treeitem", { name: "18.445.212" });
   await expect(splitOffGroup).toBeVisible();
-  await expect(splitOffGroup).toContainText("(1)");
+  await expect(splitOffGroup).toHaveAccessibleName(/, 1 ocurrencias?,/);
 });
 
 /*
@@ -131,7 +131,7 @@ test("fusionar tres grupos en una sola pasada deja un solo grupo", async ({ page
   const dni2 = page.getByRole("treeitem", { name: "18.445.212" });
   const dni3 = page.getByRole("treeitem", { name: "42.998.103" });
   for (const group of [dni1, dni2, dni3]) {
-    await expect(group).toContainText("(1)");
+    await expect(group).toHaveAccessibleName(/, 1 ocurrencias?,/);
   }
 
   // Origen: dni3. Destinos: dni1 (el primero, que es el que sobrevive) y dni2.
@@ -140,28 +140,23 @@ test("fusionar tres grupos en una sola pasada deja un solo grupo", async ({ page
     .getByRole("group", { name: "Acciones del grupo" })
     .getByRole("button", { name: "Fusionar con…" })
     .click();
-  const mergeDialog = page.getByRole("dialog", { name: "Fusionar grupo" });
+  const mergeDialog = page.getByRole("dialog", { name: "Fusionar entidades" });
   await expect(mergeDialog).toBeVisible();
 
-  await mergeDialog.getByRole("combobox", { name: "Grupo destino 1" }).click();
-  await page.getByRole("option", { name: /34\.567\.891/ }).click();
+  // ADR-169 §10: se eligen varias de una vez, con casillas. La UI pone
+  // primero al de menor número (ADR-170 §2), así que sobrevive dni1.
+  await mergeDialog.getByRole("checkbox", { name: /18\.445\.212/ }).click();
+  await mergeDialog.getByRole("checkbox", { name: /34\.567\.891/ }).click();
 
-  // El botón "+" agrega la segunda fila, que arranca en el único grupo que
-  // queda sin tomar.
-  await mergeDialog.getByRole("button", { name: "Agregar otro grupo" }).click();
-  const secondRow = mergeDialog.getByRole("combobox", { name: "Grupo destino 2" });
-  await expect(secondRow).toBeVisible();
-  await expect(secondRow).toContainText("18.445.212");
+  // La caja "Resultado" la calcula el Core (`previewEdit`): el número que
+  // queda es el menor.
+  await expect(mergeDialog.getByText("DNI N.º 01 · 3 apariciones")).toBeVisible();
 
-  // Sin más grupos del tipo para ofrecer, el "+" queda deshabilitado: no hay
-  // forma de agregar una fila que no tenga nada que elegir.
-  await expect(mergeDialog.getByRole("button", { name: "Agregar otro grupo" })).toBeDisabled();
-
-  await mergeDialog.getByRole("button", { name: "Fusionar" }).click();
+  await mergeDialog.getByRole("button", { name: "Fusionar 3 entidades" }).click();
   await expect(mergeDialog).toHaveCount(0);
 
   // Un solo grupo con las tres ocurrencias: el destino de la primera fila.
-  await expect(dni1).toContainText("(3)");
+  await expect(dni1).toHaveAccessibleName(/, 3 ocurrencias?,/);
   await expect(dni2).toHaveCount(0);
   await expect(dni3).toHaveCount(0);
 });

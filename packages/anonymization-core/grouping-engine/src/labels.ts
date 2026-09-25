@@ -122,7 +122,16 @@ export function pad2(n: number): string {
  * siempre — `EntityGroup.personGender` fuera de `Person` se ignora por
  * invariante (`03_Data_Model.md` §9), y acá simplemente nunca se lee.
  */
-export function resolveLabelSet(group: EntityGroup): PlaceholderLabelSet {
+/**
+ * ADR-170 §1 (Hito 12.5): toma un `Pick<EntityGroup, ...>` de solo los
+ * campos que lee, no `EntityGroup` completo — desde que `EntityGroup` ganó
+ * el campo requerido `replacementPreviews`, el `InternalGroup` de
+ * `grouping.engine.ts` (que no lo tiene: solo `toPublicGroup()` lo produce)
+ * dejaría de ser estructuralmente compatible con `EntityGroup` completo.
+ */
+export type LabelSetInput = Pick<EntityGroup, "type" | "personGender">;
+
+export function resolveLabelSet(group: LabelSetInput): PlaceholderLabelSet {
   if (group.type === EntityType.Person && group.personGender !== undefined) {
     return GENDERED_PERSON_LABELS[group.personGender];
   }
@@ -176,6 +185,9 @@ function selectAbbreviationLevel(
   return 2;
 }
 
+/** ADR-170 §1: ídem `LabelSetInput`, con los campos extra que la escalera necesita. */
+export type PlaceholderValueInput = LabelSetInput & Pick<EntityGroup, "indexInType" | "members">;
+
 /**
  * `replacementValue` del modo `placeholder` para un grupo, en el nivel de
  * abreviatura que corresponda a sus `members` (ADR-057). Lee `type`,
@@ -183,8 +195,25 @@ function selectAbbreviationLevel(
  * `InternalGroup`, estructuralmente compatible con `EntityGroup`) ya tiene
  * esos tres campos actualizados en el momento de llamar.
  */
-export function buildPlaceholderValue(group: EntityGroup): string {
+export function buildPlaceholderValue(group: PlaceholderValueInput): string {
   const labels = resolveLabelSet(group);
   const level = selectAbbreviationLevel(labels, group.indexInType, group.members);
   return tokenForLevel(labels, level, group.indexInType);
+}
+
+/**
+ * ADR-170 §1: los niveles DISTINTOS de la escalera para este grupo, del más
+ * largo al más corto (`[HOMBRE 04]`, `[HOMB 04]`, `[HOM-04]`), sin repetidos.
+ * `buildPlaceholderValue` es uno de ellos: el que la escalera elige hoy. El
+ * orden [nivel0, nivel1, nivel2] ya es "más largo a más corto" por
+ * construcción de `LADDER_LABELS`/`GENDERED_PERSON_LABELS` (cada nivel mide
+ * igual o menos que el anterior), así que deduplicar con `Set` preservando
+ * el orden de inserción alcanza — no hace falta ordenar por longitud.
+ */
+export function buildPlaceholderLadder(group: PlaceholderValueInput): ReadonlyArray<string> {
+  const labels = resolveLabelSet(group);
+  const tokens = ([0, 1, 2] as const).map((level) =>
+    tokenForLevel(labels, level, group.indexInType),
+  );
+  return [...new Set(tokens)];
 }
