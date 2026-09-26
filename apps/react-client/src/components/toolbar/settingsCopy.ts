@@ -43,6 +43,25 @@ export const UPDATE_NETWORK_NOTICE =
   "Es la única conexión de Anonly a internet: le pregunta a GitHub si hay una versión nueva. Como en cualquier conexión, GitHub ve desde dónde llega la consulta (tu IP) y qué versión tenés.";
 export const UPDATE_NETWORK_NOTICE_EMPHASIS =
   "Nunca se envía el contenido ni el nombre de un documento.";
+/**
+ * ADR-188 §5: oración agregada al final del aviso de red. Con la búsqueda
+ * automática apagada, la única conexión de la app queda del todo bajo control
+ * del usuario.
+ */
+export const UPDATE_NETWORK_NOTICE_CHECK_OFF =
+  'Si desactivás la búsqueda automática, Anonly no se conecta a internet salvo que toques "Buscar actualizaciones ahora".';
+
+/** ADR-188 §5: subtítulo de la sección «Actualizaciones», con los dos controles. */
+export const UPDATE_SECTION_SUBTITLE =
+  "Elegí si Anonly busca versiones nuevas por su cuenta y si las instala sola al reiniciar o te avisa.";
+
+/**
+ * ADR-188 §5: label del interruptor nuevo. Es una constante y no un literal
+ * en el JSX de `SettingsDialog` para que el test estático de esa sección
+ * (`settings-dialog-updates-section.test.ts`) pueda afirmar que el control
+ * usa este texto exacto sin depender de que el JSX no cambie de forma.
+ */
+export const UPDATE_CHECK_LABEL = "Buscar actualizaciones automáticamente";
 
 /** Qué muestra la ranura fija bajo "Idiomas del documento". */
 export type OcrLanguagesSlot = "idle" | "empty" | "reanalyze";

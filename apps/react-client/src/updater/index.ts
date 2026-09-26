@@ -12,9 +12,13 @@
  * Nada de lo que viaja por acá toca un documento: solo el ciclo de vida de la
  * actualización (ADR-131 §5).
  *
- * **No expone `setAutomatic`.** El shell chequea siempre; que el usuario
- * prefiera que le pregunten o que se instale solo se resuelve acá, con el
- * setting que ya está en `localStorage`, sin cruzar el IPC (ADR-132 §3).
+ * **`setAutomaticChecks` (ADR-188) no es el `setAutomatic` retirado en
+ * ADR-132 §3.** Aquel colgaba del toggle de instalar y confundía buscar con
+ * instalar; se sacó y el shell pasó a buscar siempre, lo que dejó sin cumplir
+ * ADR-131 §5 ("el chequeo es desactivable"). Este mensaje cuelga de una
+ * preferencia propia, `checkUpdates`, que vive en `settings.store.ts` igual
+ * que `autoUpdate` y significa lo mismo que la propiedad de Sparkle: buscar,
+ * no instalar. El shell no busca nada hasta que se lo llama.
  */
 
 export interface UpdateEvent {
@@ -27,6 +31,8 @@ export interface ShellUpdater {
   onEvent(listener: (event: UpdateEvent) => void): void;
   check(): void;
   install(): void;
+  /** ADR-188 §2: informa si el usuario quiere que la app busque sola. */
+  setAutomaticChecks(enabled: boolean): void;
 }
 
 /*
@@ -50,7 +56,8 @@ function isShellUpdater(value: unknown): value is ShellUpdater {
   return (
     typeof candidate["onEvent"] === "function" &&
     typeof candidate["check"] === "function" &&
-    typeof candidate["install"] === "function"
+    typeof candidate["install"] === "function" &&
+    typeof candidate["setAutomaticChecks"] === "function"
   );
 }
 
@@ -66,4 +73,17 @@ export function getShellUpdater(): ShellUpdater | null {
   if (typeof window === "undefined") return null;
   const candidate = window.anonlyUpdater;
   return isShellUpdater(candidate) ? candidate : null;
+}
+
+/**
+ * Envía la preferencia de búsqueda automática al shell (ADR-188 §2). Se llama
+ * una vez al iniciar la app, después de leer la configuración persistida
+ * (`App.tsx`), y cada vez que se guarda un cambio en Configuración
+ * (`SettingsDialog.applyToStore`).
+ *
+ * Sin contenedor no hace nada: `getShellUpdater()` da `null` y no hay a quién
+ * avisarle. Es el mismo `null` defensivo del resto de este módulo.
+ */
+export function sendAutomaticChecksPreference(enabled: boolean): void {
+  getShellUpdater()?.setAutomaticChecks(enabled);
 }

@@ -100,7 +100,12 @@ describe("settings.store persistence", () => {
 
 describe("autoUpdate", () => {
   beforeEach(() => {
-    useSettingsStore.setState({ autoUpdate: false });
+    // Reconstruye el estado desde el default REAL del módulo
+    // (`useSettingsStore.getInitialState()`, Zustand v5) en vez de forzar
+    // `{ autoUpdate: false }` a mano: forzar el valor esperado hace que
+    // "arranca en false" compare ese valor contra sí mismo y nunca pueda
+    // fallar, ni siquiera si `DEFAULT_SETTINGS.autoUpdate` cambiara a `true`.
+    useSettingsStore.setState(useSettingsStore.getInitialState());
   });
 
   afterEach(() => {
@@ -111,7 +116,11 @@ describe("autoUpdate", () => {
     // No es una comodidad: reemplazarle la app en silencio a alguien que está
     // anonimizando pericias es lo que erosiona la confianza en una herramienta
     // que se vende como local (ADR-131 §3). El default es preguntar.
-    expect(useSettingsStore.getState().autoUpdate).toBe(false);
+    //
+    // Contra `getInitialState()` y no contra `getState()`: con el `beforeEach`
+    // de arriba dan lo mismo ACÁ, pero esta aserción sigue siendo la que
+    // importa aunque alguien saque ese `beforeEach` más adelante.
+    expect(useSettingsStore.getInitialState().autoUpdate).toBe(false);
   });
 
   it("se persiste y sobrevive a una sesión nueva", () => {
@@ -122,7 +131,7 @@ describe("autoUpdate", () => {
     expect(JSON.parse(storage.written() ?? "{}")).toHaveProperty("autoUpdate", true);
 
     // Simula el arranque siguiente: estado limpio, se hidrata de localStorage.
-    useSettingsStore.setState({ autoUpdate: false });
+    useSettingsStore.setState(useSettingsStore.getInitialState());
     useSettingsStore.getState().load();
 
     expect(useSettingsStore.getState().autoUpdate).toBe(true);
@@ -131,10 +140,60 @@ describe("autoUpdate", () => {
   it("una preferencia ausente no pisa el default", () => {
     // Alguien que actualiza desde una versión sin este setting no debería
     // encontrarse con que la app se actualiza sola sin habérselo pedido.
+    // Comparado contra `getInitialState()`, no contra un `false` literal: si
+    // el default cambiara, este test tiene que fallar junto con el de arriba,
+    // no quedarse en verde porque el literal coincide por casualidad.
     stubLocalStorage(JSON.stringify({ language: "en" }));
     useSettingsStore.getState().load();
 
-    expect(useSettingsStore.getState().autoUpdate).toBe(false);
+    expect(useSettingsStore.getState().autoUpdate).toBe(
+      useSettingsStore.getInitialState().autoUpdate,
+    );
+  });
+});
+
+describe("checkUpdates (ADR-188)", () => {
+  beforeEach(() => {
+    // Mismo criterio que `autoUpdate` arriba: reconstruir desde el default
+    // real, no forzar el literal que se espera.
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("arranca en true: las actualizaciones llevan correcciones", () => {
+    expect(useSettingsStore.getInitialState().checkUpdates).toBe(true);
+  });
+
+  it("se persiste y sobrevive a una sesión nueva", () => {
+    const storage = stubLocalStorage();
+    useSettingsStore.setState({ checkUpdates: false });
+    useSettingsStore.getState().persist();
+
+    expect(JSON.parse(storage.written() ?? "{}")).toHaveProperty("checkUpdates", false);
+
+    // Simula el arranque siguiente: estado limpio, se hidrata de localStorage.
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+    useSettingsStore.getState().load();
+
+    expect(useSettingsStore.getState().checkUpdates).toBe(false);
+  });
+
+  it("una configuración persistida sin la clave se lee como el default", () => {
+    // Instalaciones existentes, de antes de ADR-188: tienen que seguir
+    // buscando actualizaciones igual que hoy, sin que nadie se los pida. El
+    // `beforeEach` reconstruye el estado desde `getInitialState()`; acá se
+    // confirma que un `load()` con otras claves presentes pero sin
+    // `checkUpdates` no lo mueve del default real.
+    stubLocalStorage(JSON.stringify({ language: "en" }));
+
+    useSettingsStore.getState().load();
+
+    expect(useSettingsStore.getState().checkUpdates).toBe(
+      useSettingsStore.getInitialState().checkUpdates,
+    );
   });
 });
 

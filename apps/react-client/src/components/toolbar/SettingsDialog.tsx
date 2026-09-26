@@ -63,7 +63,7 @@ import {
 } from "../../store/settings.store.js";
 import { useViewerStore } from "../../store/viewer.store.js";
 import { applyTheme } from "../../theme.js";
-import { getShellUpdater } from "../../updater/index.js";
+import { getShellUpdater, sendAutomaticChecksPreference } from "../../updater/index.js";
 import { Button } from "../common/Button.js";
 import { Checkbox } from "../common/Checkbox.js";
 import { ConfirmDialog } from "../common/ConfirmDialog.js";
@@ -86,9 +86,13 @@ import {
   resolveSaveErrorSlot,
   THEME_LABEL,
   THEME_ORDER,
+  UPDATE_CHECK_LABEL,
   UPDATE_NETWORK_NOTICE,
+  UPDATE_NETWORK_NOTICE_CHECK_OFF,
   UPDATE_NETWORK_NOTICE_EMPHASIS,
+  UPDATE_SECTION_SUBTITLE,
 } from "./settingsCopy.js";
+import { syncAutomaticChecksPreference } from "./updatePreferenceSync.js";
 
 const LANGUAGE_OPTIONS: ReadonlyArray<SelectOption<Language>> = [
   { value: "es", label: "Español" },
@@ -148,6 +152,9 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
   const [autoUpdate, setAutoUpdate] = useState<boolean>(
     () => useSettingsStore.getState().autoUpdate,
   );
+  const [checkUpdates, setCheckUpdates] = useState<boolean>(
+    () => useSettingsStore.getState().checkUpdates,
+  );
   /*
    * `null` fuera del contenedor de escritorio: en un navegador no hay
    * actualizador y la sección entera no se muestra. Se resuelve una vez y no
@@ -167,6 +174,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     setPerformancePreset(current.performancePreset);
     setOcrLanguages(current.ocrLanguages);
     setAutoUpdate(current.autoUpdate);
+    setCheckUpdates(current.checkUpdates);
     setTheme(current.theme);
     setSaveError(null);
   }, [open]);
@@ -177,10 +185,24 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     nerEnabled: boolean;
     ocrLanguages: ReadonlyArray<string>;
     autoUpdate: boolean;
+    checkUpdates: boolean;
     theme: Theme;
   }): void {
+    const previousCheckUpdates = useSettingsStore.getState().checkUpdates;
     useSettingsStore.setState(next);
-    useSettingsStore.getState().persist();
+    /*
+     * ADR-188 §2: el otro de los dos momentos en que el renderer avisa la
+     * preferencia (el otro es el arranque, en `App.tsx`, vía
+     * `appStartup.ts`). Sale a `syncAutomaticChecksPreference` —misma razón
+     * que esa función: probar sin jsdom que se persiste ANTES de avisar, y
+     * que se avisa SOLO si `checkUpdates` cambió (ADR-188 §2 dice "guarda un
+     * CAMBIO de checkUpdates", no "guarda", a secas). Sin contenedor,
+     * `sendAutomaticChecksPreference` no hace nada.
+     */
+    syncAutomaticChecksPreference(previousCheckUpdates, next.checkUpdates, {
+      persist: () => useSettingsStore.getState().persist(),
+      send: sendAutomaticChecksPreference,
+    });
     // El tema se aplica al guardar y no al elegir: el diálogo es atómico, y si
     // el usuario cancela nada tiene que haber cambiado. La vista previa es lo
     // que da la devolución inmediata, que es para lo que existe.
@@ -189,7 +211,15 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
 
   async function handleSave(): Promise<void> {
     const previous = useSettingsStore.getState();
-    const next = { language, performancePreset, nerEnabled, ocrLanguages, autoUpdate, theme };
+    const next = {
+      language,
+      performancePreset,
+      nerEnabled,
+      ocrLanguages,
+      autoUpdate,
+      checkUpdates,
+      theme,
+    };
     const change = diffReanalyzeChange(previous, next);
     const needsReanalyze =
       (change.ner !== undefined || change.ocr !== undefined) && documentId !== null;
@@ -239,7 +269,15 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
 
   async function handleConfirmReanalyze(): Promise<void> {
     const previous = useSettingsStore.getState();
-    const next = { language, performancePreset, nerEnabled, ocrLanguages, autoUpdate, theme };
+    const next = {
+      language,
+      performancePreset,
+      nerEnabled,
+      ocrLanguages,
+      autoUpdate,
+      checkUpdates,
+      theme,
+    };
     const change = diffReanalyzeChange(previous, next);
     const patches = planReanalyzePatches(change);
 
@@ -471,8 +509,20 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
             <Section
               icon={<RefreshCwIcon className="h-5 w-5" aria-hidden />}
               title="Actualizaciones"
-              subtitle="Activado, las versiones nuevas se instalan solas al reiniciar. Desactivado, te avisamos y vos decidís cuándo."
+              subtitle={UPDATE_SECTION_SUBTITLE}
             >
+              {/*
+                ADR-188 §5: dos interruptores, en este orden. El primero decide
+                si se busca; el segundo (ya existía) qué hacer con lo que se
+                encuentra. Son independientes: apagar uno no oculta el otro
+                (diseño estático, UX-10).
+              */}
+              <Checkbox
+                id="settings-check-updates"
+                checked={checkUpdates}
+                onCheckedChange={setCheckUpdates}
+                label={UPDATE_CHECK_LABEL}
+              />
               <Checkbox
                 id="settings-auto-update"
                 checked={autoUpdate}
@@ -483,7 +533,8 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                 ADR-131 §5: buscar actualizaciones es la **única** salida de
                 red del producto, y el usuario tiene que enterarse por la app.
                 Texto de `Components.md` §2.6: sigue diciendo que GitHub ve la
-                IP y la versión.
+                IP y la versión, y ADR-188 §5 agrega la oración sobre apagar la
+                búsqueda automática.
               */}
               <div className="flex gap-2.5 rounded-lg bg-bg-tertiary px-3 py-2.5 text-sm leading-snug text-text-secondary">
                 <GlobeIcon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
@@ -491,7 +542,8 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                   {UPDATE_NETWORK_NOTICE}{" "}
                   <b className="font-semibold text-text-primary">
                     {UPDATE_NETWORK_NOTICE_EMPHASIS}
-                  </b>
+                  </b>{" "}
+                  {UPDATE_NETWORK_NOTICE_CHECK_OFF}
                 </span>
               </div>
               <div className="flex items-center justify-between gap-3">

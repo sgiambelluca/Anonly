@@ -8,7 +8,10 @@ import {
   resolveSaveErrorSlot,
   THEME_LABEL,
   THEME_ORDER,
+  UPDATE_CHECK_LABEL,
   UPDATE_NETWORK_NOTICE,
+  UPDATE_NETWORK_NOTICE_CHECK_OFF,
+  UPDATE_SECTION_SUBTITLE,
 } from "../components/toolbar/settingsCopy.js";
 import { dismissHint, useSettingsStore, withDismissedHint } from "../store/settings.store.js";
 
@@ -36,6 +39,20 @@ describe("Configuración (ADR-169 §8)", () => {
     expect(UPDATE_NETWORK_NOTICE).toContain("GitHub");
     expect(UPDATE_NETWORK_NOTICE).toContain("IP");
     expect(UPDATE_NETWORK_NOTICE).toContain("versión");
+  });
+
+  it("el aviso de red suma la oración sobre apagar la búsqueda automática (ADR-188 §5)", () => {
+    expect(UPDATE_NETWORK_NOTICE_CHECK_OFF).toContain("desactivás la búsqueda automática");
+    expect(UPDATE_NETWORK_NOTICE_CHECK_OFF).toContain("Buscar actualizaciones ahora");
+  });
+
+  it("el subtítulo de Actualizaciones describe los dos controles (ADR-188 §5)", () => {
+    expect(UPDATE_SECTION_SUBTITLE).toContain("busca versiones nuevas por su cuenta");
+    expect(UPDATE_SECTION_SUBTITLE).toContain("instala sola al reiniciar");
+  });
+
+  it("el label del interruptor nuevo es exactamente el de Components.md §2.6 (ADR-188 §5)", () => {
+    expect(UPDATE_CHECK_LABEL).toBe("Buscar actualizaciones automáticamente");
   });
 
   describe("ranura de idiomas (alto fijo, UX-10)", () => {

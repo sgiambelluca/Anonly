@@ -32,6 +32,7 @@ import { FileTextIcon, PanelLeftIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 
+import { bootstrapAutomaticChecksPreference } from "./appStartup.js";
 import { ToastHost } from "./components/common/ToastHost.js";
 import { UpdateNotice } from "./components/common/UpdateNotice.js";
 import { ManualOverlapDialogHost } from "./components/conflicts/ManualOverlapDialogHost.js";
@@ -57,6 +58,7 @@ import { deriveEngineConfigOverrides } from "./core-adapter/settingsToEngineConf
 import { useEntitiesStore } from "./store/entities.store.js";
 import { useSettingsStore } from "./store/settings.store.js";
 import { applyTheme } from "./theme.js";
+import { sendAutomaticChecksPreference } from "./updater/index.js";
 
 export function App() {
   useEffect(() => {
@@ -65,7 +67,20 @@ export function App() {
     // nerEnabled/ocrLanguages/performancePreset guardados en una sesión
     // previa tengan efecto real en el próximo createCore, no solo en
     // reanalyze con documento abierto.
-    useSettingsStore.getState().load();
+    //
+    // `bootstrapAutomaticChecksPreference` (ADR-188 §2, `appStartup.ts`) hace
+    // ese `load()` y, inmediatamente después, avisa al shell la preferencia
+    // de búsqueda automática persistida — el primero de los dos momentos en
+    // que el renderer manda ese mensaje (el otro es guardar un cambio en
+    // `SettingsDialog.applyToStore`). Sale a una función aparte, con sus
+    // dependencias inyectadas, porque este componente no tiene tests de
+    // render (sin jsdom/testing-library, R-12) y el ORDEN —cargar antes de
+    // leer y enviar `checkUpdates`— es justo lo que hay que probar.
+    bootstrapAutomaticChecksPreference({
+      load: () => useSettingsStore.getState().load(),
+      getCheckUpdates: () => useSettingsStore.getState().checkUpdates,
+      sendAutomaticChecksPreference,
+    });
     // Después de hidratar y antes del primer render con contenido: si se
     // aplicara más tarde, la app parpadearía en claro antes de pasar a oscuro.
     applyTheme(useSettingsStore.getState().theme);

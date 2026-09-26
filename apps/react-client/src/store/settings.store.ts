@@ -74,6 +74,19 @@ export interface SettingsSlice {
    * navegador no hay actualizador y el control no se muestra.
    */
   readonly autoUpdate: boolean;
+  /**
+   * Si Anonly consulta a GitHub por su cuenta, sin que el usuario toque
+   * "Buscar actualizaciones ahora" (ADR-188). Independiente de `autoUpdate`,
+   * que decide qué hacer con una actualización ya descargada: este control
+   * decide si se busca.
+   *
+   * Default `true` — las actualizaciones llevan correcciones, y así una
+   * configuración persistida sin esta clave (instalaciones existentes) se
+   * comporta igual que hoy. Solo tiene efecto dentro del contenedor de
+   * escritorio: en un navegador no hay actualizador y el control no se
+   * muestra.
+   */
+  readonly checkUpdates: boolean;
   readonly theme: Theme;
   /**
    * ADR-169 §7: avisos de descubrimiento que el usuario cerró
@@ -125,6 +138,7 @@ type SettingsData = Pick<
   | "nerEnabled"
   | "ocrLanguages"
   | "autoUpdate"
+  | "checkUpdates"
   | "theme"
   | "dismissedHints"
 >;
@@ -136,6 +150,7 @@ const DEFAULT_SETTINGS: SettingsData = {
   nerEnabled: true,
   ocrLanguages: ["spa", "eng"],
   autoUpdate: false,
+  checkUpdates: true,
   theme: "system",
   dismissedHints: [],
 };
@@ -156,6 +171,7 @@ export const useSettingsStore = create<SettingsSlice>((set, get) => ({
       defaultReplacementMode: state.defaultReplacementMode,
       ocrLanguages: state.ocrLanguages,
       autoUpdate: state.autoUpdate,
+      checkUpdates: state.checkUpdates,
       theme: state.theme,
       dismissedHints: state.dismissedHints,
     };
@@ -197,6 +213,7 @@ export const useSettingsStore = create<SettingsSlice>((set, get) => ({
       ...(parsed.nerEnabled !== undefined ? { nerEnabled: parsed.nerEnabled } : {}),
       ...(parsed.ocrLanguages !== undefined ? { ocrLanguages: parsed.ocrLanguages } : {}),
       ...(parsed.autoUpdate !== undefined ? { autoUpdate: parsed.autoUpdate } : {}),
+      ...(parsed.checkUpdates !== undefined ? { checkUpdates: parsed.checkUpdates } : {}),
       ...(parsed.theme !== undefined ? { theme: parsed.theme } : {}),
       // Se filtra contra los avisos que existen: una clave vieja o corrupta no
       // puede esconder un aviso nuevo.
