@@ -94,6 +94,10 @@ declare global {
          */
         phasesEpochMs: Record<string, number>;
         groupCount: number;
+        /** Unique source-page indexes represented by members of created groups. */
+        groupPageIndices?: number[];
+        /** False if any group/member event lacked a valid page index. */
+        groupPageIndicesComplete?: boolean;
         entityCount: number;
         ocrPages: Array<OcrPageSummary>;
         ocrWords: Array<OcrPageWords>;
@@ -203,6 +207,8 @@ export async function installRunCollector(
         phases: {},
         phasesEpochMs: {},
         groupCount: 0,
+        groupPageIndices: [],
+        groupPageIndicesComplete: true,
         entityCount: 0,
         ocrPages: [],
         ocrWords: [],
@@ -223,8 +229,42 @@ export async function installRunCollector(
           if (event === "PIPELINE_FAILED") run.failedAt = performance.now();
         });
       }
-      core.bus.on("grouping", "ENTITY_GROUP_CREATED", () => {
+      core.bus.on("grouping", "ENTITY_GROUP_CREATED", (payload: unknown) => {
         run.groupCount += 1;
+        const markPageIndicesIncomplete = (): void => {
+          run.groupPageIndicesComplete = false;
+        };
+        if (typeof payload !== "object" || payload === null) {
+          markPageIndicesIncomplete();
+          return;
+        }
+        const group = (payload as { readonly group?: unknown }).group;
+        if (typeof group !== "object" || group === null) {
+          markPageIndicesIncomplete();
+          return;
+        }
+        const members = (group as { readonly members?: unknown }).members;
+        if (!Array.isArray(members)) {
+          markPageIndicesIncomplete();
+          return;
+        }
+        const groupPageIndices = run.groupPageIndices;
+        if (groupPageIndices === undefined) {
+          markPageIndicesIncomplete();
+          return;
+        }
+        for (const member of members) {
+          if (typeof member !== "object" || member === null) {
+            markPageIndicesIncomplete();
+            return;
+          }
+          const pageIndex = (member as { readonly pageIndex?: unknown }).pageIndex;
+          if (typeof pageIndex !== "number" || !Number.isInteger(pageIndex) || pageIndex < 0) {
+            markPageIndicesIncomplete();
+            return;
+          }
+          groupPageIndices.push(pageIndex);
+        }
       });
       core.bus.on("regex", "ENTITY_FOUND", () => {
         run.entityCount += 1;
@@ -732,6 +772,10 @@ export interface RunReport {
   readonly readyAtMs: number | null;
   readonly totalMs: number | null;
   readonly groupCount: number;
+  /** Sorted unique page indexes represented by members of created groups. */
+  readonly groupPageIndices?: ReadonlyArray<number>;
+  /** False if the group-created collector could not read every member page index. Missing is fail-closed. */
+  readonly groupPageIndicesComplete?: boolean;
   readonly entityCount: number;
   readonly ocrPages?: ReadonlyArray<OcrPageSummary>;
   /** Full cached Word[] captured after OCR events, outside the measured window. */
@@ -963,6 +1007,8 @@ async function runImport(
     hotBaselineSettled: null,
     totalMs: durations.totalMs,
     groupCount: run.groupCount,
+    groupPageIndices: [...new Set(run.groupPageIndices ?? [])].sort((a, b) => a - b),
+    groupPageIndicesComplete: run.groupPageIndicesComplete === true,
     entityCount: run.entityCount,
     ocrPages: run.ocrPages,
     ocrWords: run.ocrWords,

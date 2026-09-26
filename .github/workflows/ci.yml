@@ -289,7 +289,8 @@ jobs:
   test-leak:
     name: Memory leak
     needs: install
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -297,7 +298,7 @@ jobs:
       - name: Check if leak tests exist
         id: check_leak
         run: |
-          if [ -d "tests/leak" ] && [ -n "$(find tests/leak -name '*.test.ts' -type f 2>/dev/null)" ]; then
+          if [ -d "tests/leak" ] && [ -n "$(find tests/leak -name '*.spec.ts' -type f 2>/dev/null)" ]; then
             echo "has_tests=true" >> "$GITHUB_OUTPUT"
           else
             echo "has_tests=false" >> "$GITHUB_OUTPUT"
@@ -309,6 +310,21 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Cache first-party assets (wasm/models)
+        if: steps.check_leak.outputs.has_tests == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            apps/react-client/public/wasm
+            apps/react-client/public/models
+            apps/react-client/src/assets/onnxruntime
+          key: assets-mirror-${{ hashFiles('assets.lock.json') }}
+      - name: Mirror first-party assets
+        if: steps.check_leak.outputs.has_tests == 'true'
+        run: pnpm assets:mirror
+      - name: Install Playwright Chromium
+        if: steps.check_leak.outputs.has_tests == 'true'
+        run: pnpm exec playwright install chromium
       - name: Run leak tests
         if: steps.check_leak.outputs.has_tests == 'true'
         run: pnpm test:leak
@@ -343,7 +359,8 @@ jobs:
   test-stress:
     name: Stress
     needs: install
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -351,7 +368,7 @@ jobs:
       - name: Check if stress tests exist
         id: check_stress
         run: |
-          if [ -d "tests/stress" ] && [ -n "$(find tests/stress -name '*.test.ts' -type f 2>/dev/null)" ]; then
+          if [ -d "tests/stress" ] && [ -n "$(find tests/stress -name '*.spec.ts' -type f 2>/dev/null)" ]; then
             echo "has_tests=true" >> "$GITHUB_OUTPUT"
           else
             echo "has_tests=false" >> "$GITHUB_OUTPUT"
@@ -363,6 +380,21 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Cache first-party assets (wasm/models)
+        if: steps.check_stress.outputs.has_tests == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            apps/react-client/public/wasm
+            apps/react-client/public/models
+            apps/react-client/src/assets/onnxruntime
+          key: assets-mirror-${{ hashFiles('assets.lock.json') }}
+      - name: Mirror first-party assets
+        if: steps.check_stress.outputs.has_tests == 'true'
+        run: pnpm assets:mirror
+      - name: Install Playwright Chromium
+        if: steps.check_stress.outputs.has_tests == 'true'
+        run: pnpm exec playwright install chromium
       - name: Run stress tests
         if: steps.check_stress.outputs.has_tests == 'true'
         run: pnpm test:stress

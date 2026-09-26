@@ -22,5 +22,5 @@
     }
   },
   "include": ["**/*.ts"],
-  "exclude": ["**/node_modules/**", "e2e/**", "leak/**"]
+  "exclude": ["**/node_modules/**", "e2e/**"]
 }
