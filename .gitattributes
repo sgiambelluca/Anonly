@@ -1,5 +1,8 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+# Auto detect text files and perform LF normalization. `eol=lf` también fija
+# LF en la copia de trabajo, aunque Windows tenga `core.autocrlf=true`: los
+# tests y scripts que comparan texto multilínea con `\n` fallaban en Windows
+# por el CRLF (mac-packaging.test.ts, snapshots, regex de ner-batch-real.mjs).
+* text=auto eol=lf
 
 # Artefactos generados por un script commiteado: GitHub los pliega en el diff
 # del PR y los excluye de las estadísticas de lenguaje y de la búsqueda de
