@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-medicion | dependencias=roadmap/Rendimiento_Experimentos_Plan.md,roadmap/Optimizacion_De_Rendimiento.md,roadmap/Ciclos_Y_Documentos_Reales_Plan.md,core/NER_Engine.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 (punto 1, curvas macOS 2026-09-23/24 y Windows nativo 2026-09-25 cerradas; ampliación macOS de carga/panel/secuencia cerrada 2026-09-26) -->
+<!-- CONTEXT: scope=roadmap-medicion | dependencias=roadmap/Rendimiento_Experimentos_Plan.md,roadmap/Optimizacion_De_Rendimiento.md,roadmap/Ciclos_Y_Documentos_Reales_Plan.md,core/NER_Engine.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 (punto 1, curvas macOS 2026-09-23/24 y Windows nativo 2026-09-25 cerradas; ampliación de carga/panel/secuencia cerrada en macOS y Windows 2026-09-26) -->
 
 # Hilos internos de ONNX para NER — medición macOS y Windows nativo
 
@@ -451,8 +451,87 @@ exacta. Se confirma la dirección de la curva local: pedir 6/8 empeora y 4
 no sostiene ventaja sobre automático. **No cambia ningún default, contrato,
 modelo, temporizador ni perfil de producto.**
 
-Siguen separados: complemento equivalente en Windows, carga/panel/secuencia
+Siguen separados: complemento equivalente en Windows (hecho el 2026-09-26,
+sección siguiente), carga/panel/secuencia
 de A/1/2 si se requiere para perfilar Bajo, atribución de memoria a la carga,
 estrés de horas y decisión humana de perfiles. La medición del objetivo
 sobre un **PDF real nativo de diez páginas** sigue pendiente de disponer del
 corpus; P1 sintético y extrapolar desde R1 no la sustituyen.
+
+## Complemento Windows nativo — carga, panel y secuencia (2026-09-26)
+
+Misma campaña (`run-ner-gaps.sh`, brazos A/4/6/8, tres bloques de cuatro
+importaciones R1→R1→R2→R2 por instancia) corrida en Windows 11 x64
+(i5-12400, 12 hilos, 16,9 GB) sobre el commit `32d8346`, con un puerto ad hoc
+del runner no commiteado: gate `Darwin` y guarda `pgrep` retirados, presión
+del sistema reemplazada por un snapshot de memoria de PowerShell, y
+detección de suspensión por los eventos de suspensión/reanudación del log
+del sistema (no hubo ninguno). Salida:
+`.measure/ner-gaps/20260926T145008Z-win/`. **48 importaciones válidas, 0
+inválidas**, y huellas de NER y Grouping idénticas entre brazos y posiciones
+en cada documento. CDP identificó los hilos efectivos de los cuatro brazos:
+**4 / 4 / 6 / 8** (Automático resuelve 4, igual que en la Mac).
+
+### Tiempo por brazo y posición (mediana de tres bloques, segundos)
+
+| brazo | posición | import→Ready | NER | carga | Ready→panel |
+|---|---|---:|---:|---:|---:|
+| A | R1 1 | 24,51 | 23,98 | 1,23 | 0,77 |
+| A | R1 2 | 21,12 | 20,88 | — | 0,59 |
+| A | R2 1 | 40,10 | 9,10 | 1,09 | 0,52 |
+| A | R2 2 | 40,06 | 8,85 | 1,07 | 0,51 |
+| 4 | R1 1 | 24,94 | 24,49 | 1,09 | 1,13 |
+| 4 | R1 2 | 24,04 | 23,79 | — | 0,56 |
+| 4 | R2 1 | 42,22 | 10,21 | 1,06 | 0,53 |
+| 4 | R2 2 | 40,04 | 8,69 | 1,06 | 0,51 |
+| 6 | R1 1 | 17,50 | 17,01 | 1,12 | 0,75 |
+| 6 | R1 2 | 16,42 | 16,14 | — | 0,55 |
+| 6 | R2 1 | 38,26 | 7,40 | 1,06 | 0,53 |
+| 6 | R2 2 | 38,32 | 7,35 | 1,06 | 0,49 |
+| 8 | R1 1 | 20,25 | 19,78 | 1,10 | 1,13 |
+| 8 | R1 2 | 18,42 | 18,15 | — | 0,59 |
+| 8 | R2 1 | 40,51 | 8,22 | 1,08 | 0,56 |
+| 8 | R2 2 | 38,78 | 8,15 | 1,07 | 0,49 |
+
+### Carga, reutilización y panel
+
+Hubo **36 cargas observadas, entre 1.035 y 1.376 ms** (Mac: 798–1.028 ms).
+El mismo patrón que en macOS: la primera R1 de cada secuencia carga, las
+doce segundas R1 reutilizan el modelo, y **las 24 importaciones de R2
+recargan**, incluida su repetición inmediata, compatible con el temporizador
+de 15 s de NER (ADR-167) frente a un OCR previo más largo. Ready→panel DOM:
+mediana **556 ms**, rango **224–1.137 ms** (Mac: 473 ms, 171–641 ms).
+
+### Pares contra A (Δ NER por bloque, segundos; negativo = más rápido)
+
+| brazo | posición | bloques 1 / 2 / 3 |
+|---|---|---:|
+| 4 | R1 1 | 4,07 / −3,53 / 0,51 |
+| 4 | R1 2 | 4,31 / −0,87 / 2,27 |
+| 4 | R2 1 | 1,38 / −0,19 / −0,33 |
+| 4 | R2 2 | −0,18 / −0,09 / 1,15 |
+| 6 | R1 1 | −3,81 / −7,70 / −2,26 |
+| 6 | R1 2 | −3,62 / −4,73 / −5,77 |
+| 6 | R2 1 | −1,55 / −1,60 / −3,19 |
+| 6 | R2 2 | −1,50 / −1,28 / −1,80 |
+| 8 | R1 1 | −0,92 / −4,87 / −4,80 |
+| 8 | R1 2 | −1,14 / −2,73 / −4,29 |
+| 8 | R2 1 | −0,62 / −0,88 / −2,29 |
+| 8 | R2 2 | −0,80 / −0,52 / −0,92 |
+
+**Los 24 pares de 6 y los 24 de 8 son negativos**: en esta máquina pedir más
+hilos acelera también al reutilizar el modelo y en R2, lo contrario que en
+la Mac (24 de 24 positivos). 4 cambia de signo según el bloque y no sostiene
+diferencia con A, como en la Mac. Entre 6 y 8, **esta tanda favoreció a 6**
+(R1 16–17 s contra 18–20 s), mientras que la repetición del 2026-09-25 había
+favorecido a 8: el orden entre los dos no es estable; lo estable es que
+ambos superan a Automático. El control A de la primera R1 osciló **20,82 /
+24,66 / 23,98 s** entre bloques, una deriva de 3,8 s que no se atribuye; los
+pares de 6/8 siguen negativos en los tres bloques pese a ella.
+
+### Cierre
+
+El complemento Windows de carga, panel y secuencia queda **cerrado**, con
+calidad exacta y sin cambios de producto. Siguen separados, igual que en la
+Mac: carga/panel/secuencia de A/1/2 si hiciera falta para Bajo, atribución de
+memoria a la carga, estrés de horas y la decisión humana de perfiles.

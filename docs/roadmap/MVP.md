@@ -647,9 +647,11 @@ workflow en CI sigue pendiente.
   plataformas sigue sin referencia real compartida. El complemento NER
   separó carga, panel DOM y cuatro documentos consecutivos por instancia:
   **48 importaciones válidas**, calidad exacta y 6/8 hilos más lentos que A
-  también al reutilizar el modelo. Ese complemento Windows sigue pendiente;
-  no atribuye memoria ni sustituye una prueba de horas. Ver la sección final
-  de `Hilos_NER_Medicion.md`. No cambia defaults ni cierra los gates del hito.
+  también al reutilizar el modelo. El complemento Windows (mismo día, 48
+  importaciones válidas) dio lo contrario para los hilos: 6/8 más rápidos que
+  A en los 48 pares, con la misma reutilización y recarga del modelo. No
+  atribuye memoria ni sustituye una prueba de horas. Ver las dos secciones
+  finales de `Hilos_NER_Medicion.md`. No cambia defaults ni cierra los gates del hito.
   Después de medir hilos NER y workers OCR, revisar los perfiles
   Bajo/Intermedio/Alto/Automático como propuesta, con Automático mostrando el
   nivel resuelto según recursos del equipo y evidencia de costo/beneficio.
@@ -698,14 +700,14 @@ Insertado con la convención decimal del repo, sin renumerar Release. Adelantado
   Verificación local ya corrida: 50/50 tests del shell; 1962/1962 tests globales; 96,64% de líneas del módulo criptográfico; 24/24 E2E; empaquetado NSIS exitoso y `app-update.yml` inspeccionado con el `publisherName` reservado. Falta cargar/probar el secret real mediante `workflow_dispatch`; ese flujo firma pero no publica, y es el gate final para cerrar el hito antes del tag.
 
 - **ABIERTO, con cobertura parcial resuelta por ADR-137** — El shell completo sigue sin un threshold plano porque `main.ts`, `preload.ts` y `windows-updater.ts` necesitan Electron y los cubren E2E y tests estáticos que no reportan cobertura v8. La superficie criptográfica nueva sí fue aislada como módulo puro, quedó incluida en `vitest.config.ts` con threshold propio ≥85% y mide 96,64% de líneas. Resolver el resto sin exclusiones engañosas sigue siendo política de proyecto y pide su ADR (R-18).
+- **NO SE HACE — riesgo aceptado (2026-09-26)** — Firma Developer ID y notarización de macOS. No hay vía gratuita: solo las emite Apple con el Apple Developer Program pago, y su exención de cuota excluye a individuos. La app sigue con firma ad-hoc; qué queda sin cubrir y qué sí, en `08_Security_Model.md` §2.3.
 - **ABIERTO** — Firma de código Windows vía SignPath Foundation (gratis para OSS; requiere el `LICENSE` de la raíz). Complementa ADR-137: autentica la **primera instalación**, da identidad de editor a Windows y permite construir reputación ante SmartScreen. Al integrarlo hay que reemplazar `win.signtoolOptions.publisherName: "__ANONLY_ED25519_ONLY__"` por el CN/DN real del certificado. El callback compuesto ya conserva el verificador Authenticode original y exigirá las dos comprobaciones: Ed25519 primero, Authenticode después.
 
-- **NO SE HACE — riesgo aceptado (2026-09-26)** — Firma Developer ID y notarización de macOS. No hay vía gratuita: solo las emite Apple con el Apple Developer Program pago, y su exención de cuota excluye a individuos. La app sigue con firma ad-hoc; qué queda sin cubrir y qué sí, en `08_Security_Model.md` §2.3.
 ### Hito 12 — Release 0.9.0
 - Docs finales, README del repo, demo.
+- README: guía del primer arranque en macOS. La app no está notarizada (`08_Security_Model.md` §2.3), así que Gatekeeper la bloquea la primera vez y el usuario tiene que permitirla desde Ajustes → Privacidad y seguridad.
 - Publicación de instaladores en GitHub Releases. ~~deploy a CDN estático~~ — no hay hosting: la app no se sirve, se descarga (ADR-130, ADR-131 §1).
 
-- README: guía del primer arranque en macOS. La app no está notarizada (`08_Security_Model.md` §2.3), así que Gatekeeper la bloquea la primera vez y el usuario tiene que permitirla desde Ajustes → Privacidad y seguridad.
 ### Hito 12.5 — Rediseño desde las pruebas de usuario (ADR-168 a ADR-172)
 
 **Origen**: pruebas de usuario sobre la 0.9.2 y un lienzo de diseño iterado con el humano

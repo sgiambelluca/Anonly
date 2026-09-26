@@ -276,8 +276,10 @@ el efecto depende del hardware. **Ampliación macOS (2026-09-26):** 48
 importaciones válidas separaron carga observable (0,80–1,03 s), panel DOM
 (0,17–0,64 s después de Ready) y secuencia R1→R1→R2→R2. Se observó
 reutilización en la segunda R1 y recarga en ambas R2; 6/8 siguieron más
-lentos con calidad exacta. El complemento equivalente en Windows, memoria
-atribuible a la carga y estrés de horas siguen pendientes. La tanda local de
+lentos con calidad exacta. El complemento equivalente en Windows (mismo día)
+dio carga de 1,04–1,38 s, el mismo patrón de reutilización y recarga, y 6/8
+más rápidos que A en los 48 pares. Memoria atribuible a la carga y estrés de
+horas siguen pendientes. La tanda local de
 cuatro documentos no cierra esos alcances.
 
 - Comparar el control efectivo actual con **4, 6 y 8 hilos de ONNX**, donde el
