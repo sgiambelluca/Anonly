@@ -13,8 +13,10 @@ const rootDir = fileURLToPath(new URL(".", import.meta.url));
  * - tests: *.test.ts (tests globales: integration, perf, leak, cancel, security, stress)
  * - apps: src/__tests__/*.test.ts (tests de apps, p. ej. react-client/core-adapter,
  *   Hito 10 PR5 — mismo patrón que packages). El verificador criptográfico
- *   puro de Windows tiene threshold propio desde ADR-137; el resto del shell
- *   conserva la deuda de política registrada en MVP.md §Hito 11.5.
+ *   puro de Windows tiene threshold propio desde ADR-137, y la política pura
+ *   de cuándo buscar actualizaciones (`update-check-policy.ts`) desde
+ *   ADR-188; el resto del shell conserva la deuda de política registrada en
+ *   MVP.md §Hito 11.5.
  *
  * Environment: node (los tests del Core no necesitan DOM; los de
  * apps/react-client/core-adapter tampoco: ejercitan Zustand + un IEventBus
@@ -200,7 +202,11 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "json", "html"],
       reportsDirectory: "./coverage",
-      include: ["packages/**/src/**/*.ts", "apps/desktop-shell/src/windows-update-signature.ts"],
+      include: [
+        "packages/**/src/**/*.ts",
+        "apps/desktop-shell/src/windows-update-signature.ts",
+        "apps/desktop-shell/src/update-check-policy.ts",
+      ],
       exclude: [
         "packages/**/src/**/__tests__/**",
         "packages/**/src/index.ts",
@@ -280,6 +286,12 @@ export default defineConfig({
           functions: 80,
         },
         "apps/desktop-shell/src/windows-update-signature.ts": {
+          lines: 85,
+          statements: 85,
+          branches: 80,
+          functions: 80,
+        },
+        "apps/desktop-shell/src/update-check-policy.ts": {
           lines: 85,
           statements: 85,
           branches: 80,
