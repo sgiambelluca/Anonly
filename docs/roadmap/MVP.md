@@ -711,6 +711,7 @@ Insertado con la convención decimal del repo, sin renumerar Release. Adelantado
 - **ABIERTO, postulación preparada (2026-09-26)** — Firma de código Windows vía SignPath Foundation (gratis para OSS; requiere el `LICENSE` de la raíz). `CODE_SIGNING.md` y `PRIVACY.md` están listos. Requisitos, borrador del formulario, pasos pendientes del humano (2FA, llevar los documentos a `main`) y plan de integración: `SignPath_Postulacion.md`. Complementa ADR-137: autentica la **primera instalación**, da identidad de editor a Windows y permite construir reputación ante SmartScreen. Al integrarlo hay que reemplazar `win.signtoolOptions.publisherName: "__ANONLY_ED25519_ONLY__"` por el CN/DN real del certificado. El callback compuesto ya conserva el verificador Authenticode original y exigirá las dos comprobaciones: Ed25519 primero, Authenticode después.
 
 ### Hito 12 — Release 0.9.0
+- Revisión de `hardening/plan-2026-09` antes del merge a `main`, por bloques y con un revisor por bloque: `Revision_Por_Bloques_Hardening.md` (plan, orden, seguimiento y commits de cada bloque).
 - Docs finales, README del repo, demo.
 - README: guía del primer arranque en macOS. La app no está notarizada (`08_Security_Model.md` §2.3), así que Gatekeeper la bloquea la primera vez y el usuario tiene que permitirla desde Ajustes → Privacidad y seguridad.
 - Publicación de instaladores en GitHub Releases. ~~deploy a CDN estático~~ — no hay hosting: la app no se sirve, se descarga (ADR-130, ADR-131 §1).
