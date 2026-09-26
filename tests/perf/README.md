@@ -263,6 +263,34 @@ ANONLY_OCR_PROBE_DOC=<dir>/syn-1bpc-200dpi.pdf ANONLY_OCR_PROBE_ID=S1 ANONLY_OCR
 
 Resultado: `docs/roadmap/OCR_Entre_Plataformas_Medicion.md`. Los conteos y
 huellas de documentos escaneados no se comparan entre plataformas.
+La ampliación macOS del 2026-09-26 completó R2 GPU/software y los mismos
+sintéticos Windows/WSL, incluidos PNG fijados: software y raster 1:1 convergen;
+GPU con reescalado cambia los píxeles. Es un banco de reproducibilidad, no de
+rendimiento. Los artefactos de referencia deben copiarse, nunca regenerarse
+en cada plataforma.
+
+## Complemento opt-in NER: carga, panel e importaciones consecutivas
+
+`run-ner-gaps.sh` ejecuta el protocolo de
+`docs/roadmap/Rendimiento_Experimentos_Plan.md` §1.1. Compara A/4/6/8 en
+tres bloques intercalados; cada instancia de Electron importa R1→R1→R2→R2.
+Antes corre controles P1/P2 y confirma hilos en una pasada separada. La
+selección automática del producto se conserva y los parches/builds se restauran.
+
+```bash
+ANONLY_REAL_DOC_R1=/ruta/neutral/R1.pdf \
+ANONLY_REAL_DOC_R2=/ruta/neutral/R2.pdf \
+  caffeinate -dimsu bash tests/perf/run-ner-gaps.sh
+```
+
+Salida nueva bajo `.measure/ner-gaps/`, sin sobrescribir una campaña previa.
+Se registran primer `NER_MODEL_LOADING`→`NER_MODEL_READY`, etapa NER,
+`import→Ready`, panel DOM visible por `MutationObserver` e intervalo entre
+documentos. La falta del par de eventos de carga se informa como reutilización
+cuando ambos están ausentes. Las huellas se calculan en el renderer: texto,
+palabras y firmas de documentos reales no cruzan a Node ni se guardan.
+Suspensión, salida distinta, pipeline fallado, panel o marcas incompletas
+invalidan el bloque. No lleva sonda CDP/heap/GC durante la tanda de tiempo.
 
 ## Campaña opt-in OCR: reconocedores LSTM
 

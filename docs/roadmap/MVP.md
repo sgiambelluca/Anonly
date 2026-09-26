@@ -640,6 +640,16 @@ workflow en CI sigue pendiente.
   distintos por plataforma, porque el ráster que llega al OCR cambia con la
   aceleración por GPU del canvas: no se comparan entre plataformas
   (`OCR_Entre_Plataformas_Medicion.md`).
+  **Ampliación macOS cerrada el 2026-09-26:** catorce casos OCR, con los
+  sintéticos originales y PNG Windows/WSL fijados, confirmaron que la
+  divergencia entra al rasterizar/reescalar con GPU; ante los mismos píxeles
+  Tesseract coincide. La comparación directa de hashes de R2 entre las tres
+  plataformas sigue sin referencia real compartida. El complemento NER
+  separó carga, panel DOM y cuatro documentos consecutivos por instancia:
+  **48 importaciones válidas**, calidad exacta y 6/8 hilos más lentos que A
+  también al reutilizar el modelo. Ese complemento Windows sigue pendiente;
+  no atribuye memoria ni sustituye una prueba de horas. Ver la sección final
+  de `Hilos_NER_Medicion.md`. No cambia defaults ni cierra los gates del hito.
   Después de medir hilos NER y workers OCR, revisar los perfiles
   Bajo/Intermedio/Alto/Automático como propuesta, con Automático mostrando el
   nivel resuelto según recursos del equipo y evidencia de costo/beneficio.
