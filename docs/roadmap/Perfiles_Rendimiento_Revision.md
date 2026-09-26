@@ -4,13 +4,15 @@
 
 ## Estado de la decisión
 
-Las dos primeras curvas permiten **descartar como mejora local** fijar 6 u 8
-hilos ONNX para NER en la Mac medida, y muestran que 3/4 reconocedores OCR
-aceleran R2 real sin cambiar detecciones. **No alcanzan para publicar perfiles
-nuevos**: falta repetir ambas curvas en Windows nativo ventilado y medir memoria
-WASM/native por reconocedor para cuantificar el costo incremental. Esta revisión
-propone la forma de la decisión y explicita los huecos; no cambia settings,
-contratos, presupuesto ni código de producto.
+Las curvas permiten **descartar como mejora local** fijar 6 u 8 hilos ONNX
+para NER en la Mac medida, y muestran que 3/4 reconocedores OCR aceleran R2
+real sin cambiar detecciones. **No alcanzan para publicar perfiles nuevos**:
+falta repetirlas en Windows nativo ventilado y obtener una atribución
+concluyente de memoria WASM/native de los brazos OCR 2/3/4. La campaña local
+adicional midió tiempo y RSS, pero su cobertura CDP parcial no permite
+cuantificar el costo incremental por reconocedor. Esta revisión propone la
+forma de la decisión y explicita los huecos; no cambia settings, contratos,
+presupuesto ni código de producto.
 
 ## Qué configura hoy cada preferencia
 
@@ -38,15 +40,23 @@ permite atribuirle el resultado del brazo ONNX 8.
 
 | nivel futuro | ONNX NER | reconocedores OCR | otros pools | evidencia y decisión pendiente |
 |---|---|---|---|---|
-| Bajo | sin valor nuevo decidido | 1 actual | 1 actual | No se midió 1–2 hilos internos ni OCR1 en esta campaña; comprobar calidad, tiempo y memoria antes de redefinirlo. |
+| Bajo | sin valor nuevo decidido | 1 actual | 1 actual | OCR1 y NER A/1/2 ya tienen curva local; faltan atribución de memoria OCR y validación Windows antes de redefinirlo. |
 | Intermedio | automático del runtime | 2 | PDF/Render actuales por capacidad | Ancla existente; en la Mac, NER automático efectivo 4 y OCR2 control. |
-| Alto | automático del runtime en la Mac; 6/8 no aportaron | 3 o 4, candidato | sin cambio decidido | En R2 Mac, 3 bajó `Ready` 13,7 % y 4 21,0 %; falta costo WASM/native y curva Windows. |
+| Alto | automático del runtime en la Mac; 6/8 no aportaron | 3 o 4, candidato | sin cambio decidido | En R2 Mac, 3 bajó `Ready` 13,7 % y 4 21,0 % en la primera curva; la nueva tanda confirmó la dirección. Falta costo WASM/native atribuible y curva Windows. |
 | Automático | resolver a uno de los tres niveles anteriores | valor del nivel resuelto | valor del nivel resuelto | Umbrales y señales por plataforma aún sin validar; no usar cantidad de páginas como señal de carga. |
 
 La matriz es **una propuesta de experimentación**, no valores aprobados. La
 Mac sin ventilador puede perder frecuencia; los pares intercalados contienen
 la deriva, pero no establecen qué hacer en Windows ni en equipos de 4/16/32
 GiB. Los picos de RSS total del OCR tampoco se convierten en «MB por worker».
+T-11/T-12 ya midieron **148 MB de WASM por worker** en P2 y **90 MB** en R2
+con dos reconocedores (`Ciclos_Y_Documentos_Reales_Medicion.md` §5.2/§6.5).
+Esa es una base útil, pero no una curva 2/3/4: no muestra el pico simultáneo
+de WASM, heap y otros targets al agregar plazas, ni prueba que el tercer y
+cuarto reconocedor sigan en el mismo escalón de memoria. El banco nuevo debe
+medirlos por target con CDP, junto con el total de la instancia, mientras
+los trabajos están activos; la cifra de 90 MB no se multiplica por cuatro
+para aprobar Alto.
 Un nivel Alto podría justificar más memoria por una reducción material de
 tiempo, siempre que el costo medido, los presupuestos vigentes y la calidad lo
 permitan. El presupuesto de imágenes vivas sigue en 128 MiB hasta una campaña
@@ -103,3 +113,123 @@ La puerta para ese ADR y el código de producto es:
    Después de su decisión, redactar ADR y actualizar `Contracts.md`, specs de
    motores/UI y tests antes de tocar implementación. ADR-168 a ADR-178 están
    ocupados por otra tarea y no se usarán.
+
+## Cierre de evidencia macOS antes de la pausa por Windows (2026-09-25)
+
+El humano decidió **mantener los perfiles y defaults actuales** mientras falta
+Windows nativo. Esta revisión queda **pendiente**, aun si se terminan las
+mediciones locales siguientes. No se agregan niveles, clave de settings,
+umbrales de Automático ni canal del SO en esta etapa.
+
+El implementador solo puede ampliar el arnés opt-in de `tests/perf/`, sin
+cambiar `apps/`, `packages/`, `Contracts.md` ni los specs de producto:
+
+1. **Costo OCR por plaza en esta Mac.** Sobre P2 y R2, medir 2/3/4
+   reconocedores con la misma build de Electron y `maxLiveImageBytes=128 MiB`.
+   Usar el override de ADR-155 antes del bootstrap y el instrumento CDP de
+   T-11 (`support/wasmMemory.ts`), con Paso 0 de validación. Hacer tres rondas
+   intercaladas por perfil, una instancia fría por corrida. Registrar por
+   target memoria lineal WASM, heap JS, RSS del árbol, cantidad de workers
+   OCR observados, pico simultáneo durante OCR y cobertura de targets. Una
+   muestra parcial se informa como tal y no se convierte en cero. Medir tiempo
+   sin sonda en un brazo control de la misma tanda o usar los pares ya válidos
+   de `Reconocedores_OCR_Medicion.md`, siempre separando ambas campañas. No
+   dividir un delta de RSS total por el número de workers.
+2. **Variante Bajo OCR.** Añadir brazo OCR1 contra OCR2 en P2 y R2, tres
+   rondas intercaladas sin sonda para OCR/`Ready`, calidad exacta y ocupación,
+   y tres de memoria con el mismo instrumento para costo de WASM. Ejercitar
+   cancelación con trabajo activo al menos una vez por brazo en R2. El resto
+   de pools permanece igual para aislar `ocrPoolSize`; el perfil `low` completo
+   se evalúa por separado y no se confunde con este brazo.
+3. **Variante Bajo NER.** En R1/R2, comparar el runtime automático efectivo
+   con `numThreads=1` y `2`, manteniendo un solo worker/modelo y todo lo demás
+   fijo. Tres rondas intercaladas sin sonda de memoria para NER/`Ready`, y una
+   sonda por brazo para hilos efectivos, WASM/heap, calidad exacta y
+   cancelación durante inferencia. Reusar el mecanismo de builds experimentales
+   y parches reversibles de `run-ner-threads.sh`; cada brazo se identifica por
+   digest de build, el árbol de producto se restaura y las mediciones con
+   sonda no se mezclan con las de tiempo.
+
+Los PDF reales entran solo por `ANONLY_REAL_DOC_R1/R2`, con nombres neutros;
+reportes y logs conservan únicamente agregados, huellas y datos de máquina,
+nunca contenido, rutas ni texto. Cada runner serializa las corridas, marca
+suspensión/errores como inválidos, conserva salidas parciales y restaura `dist`.
+El informe debe distinguir memoria **lineal reservada** de WASM, heap JS,
+RSS residente y memoria nativa no atribuible. Un costo de sonda o muestra
+faltante queda declarado. La matriz se completa solo para esta Mac de 8 GiB;
+rangos de 4/16/32 GiB, reserva para el SO, umbrales de Automático, migración
+de settings y publicación de perfiles quedan pendientes de Windows y de una
+nueva decisión humana.
+
+### Resultado OCR local
+
+Campaña `tests/perf/run-ocr-pool.sh` con fase `profiles-gap`, salida neutral
+`.measure/ocr-pool/profiles-gap-20260925/summary.json`, mismo HEAD y tres
+rondas por brazo y corpus. Fueron válidas las 56 corridas; no hubo suspensiones
+ni salidas faltantes. Los cuatro brazos conservaron exactamente las huellas de
+OCR/NER/Grouping en cada corpus y alcanzaron ocupación OCR de 1/2/3/4,
+respectivamente. La cancelación con trabajo activo quedó dentro del SLA en
+los ocho pares (0–1 ms medidos).
+
+| corpus | OCR1 `Ready` / OCR | OCR2 | OCR3 | OCR4 |
+|---|---:|---:|---:|---:|
+| P2, medianas sin sonda | 32,38 / 26,73 s | 16,93 / 11,21 s | 17,00 / 11,40 s | 15,33 / 9,49 s |
+| R2, medianas sin sonda | 78,60 / 62,90 s | 48,56 / 31,78 s | 42,75 / 25,56 s | 39,68 / 22,45 s |
+| P2, mediana pico RSS del árbol durante OCR | 1388 MiB | 1500 MiB | 1610 MiB | 1750 MiB |
+| R2, mediana pico RSS del árbol durante OCR | 1133 MiB | 1249 MiB | 1423 MiB | 1399 MiB |
+
+Los tiempos provienen de corridas sin sonda; las filas de RSS provienen de
+tres instancias frías instrumentadas por brazo. En P2, OCR4 redujo `Ready`
+aproximadamente 9,4 % respecto de OCR2 de esta tanda, con unos 250 MiB más
+de pico RSS total. En R2, la reducción fue 18,3 %; el RSS de OCR4 quedó por
+debajo del de OCR3 en esta muestra, por lo que no se infiere una curva de
+memoria monótona ni un costo por reconocedor a partir de esos deltas.
+
+La sonda CDP obtuvo cobertura parcial de targets WASM en 23 de 24 corridas de
+memoria. También observó raíces de workers con aspecto OCR sin poder
+atribuirles formalmente el rol; los picos completos de WASM/heap y el costo
+incremental **por reconocedor** siguen sin demostrarse. Las muestras completas
+puntuales sirven como cotas observadas, no como pico real simultáneo. La
+memoria nativa no atribuible tampoco se calcula restando muestras de RSS y
+WASM tomadas en instantes distintos. Se conserva el resultado de tiempo y
+RSS con estas limitaciones; la puerta de publicación de perfiles sigue
+**pendiente de Windows nativo y de la decisión humana**.
+
+### Resultado NER Bajo local
+
+La fase `low` de `tests/perf/run-ner-threads.sh` completó sobre R1/R2 una
+muestra CDP fría y tres corridas sin sonda por brazo A (automático), 1 y 2,
+con builds separados y órdenes intercalados. Salida neutral:
+`.measure/ner-threads/low-20260925-complete/`. La primera tanda
+`low-20260925/` se interrumpió durante el preflight porque el modo `quality`
+todavía no activaba CDP; no se mezcla con esta tanda. En la completa, los seis
+preflights conservaron exactamente conteos y huellas de ocurrencias y grupos,
+ninguna corrida falló o se invalidó, y las seis cancelaciones durante inferencia
+activa cumplieron el SLA (0–1 ms observados).
+
+El primer clasificador de hilos contó por error un hijo de OCR como NER en R2.
+Los JSON crudos se conservan; `thread-reanalysis.json` en la misma salida
+recalcula los seis valores con la regla corregida de memoria WASM compartida
+observable en la raíz del worker y luego conteo de hijos de esa raíz.
+
+| corpus | Automático `Ready` / NER | 1 hilo solicitado | 2 hilos solicitados |
+|---|---:|---:|---:|
+| R1, medianas sin sonda | 39,16 / 38,76 s | 113,31 / 112,91 s | 59,15 / 58,74 s |
+| R2, medianas sin sonda | 49,46 / 16,41 s | 78,19 / 44,01 s | 56,19 / 24,14 s |
+| Hilos ONNX identificados por CDP en la muestra fría | 4 en R1/R2 | no observable | 2 en R1/R2 |
+| Memoria lineal máxima observada del target NER | 464,6 MiB | 463,8 MiB | 464,1 MiB |
+
+La cifra WASM es **una muestra por brazo y corpus**, no un costo incremental
+total de la instancia ni una curva con dispersión. El modelo ocupa
+prácticamente la misma memoria lineal con los tres valores. La sonda tuvo
+targets ilegibles en parte de las muestras y no permite afirmar un pico
+simultáneo completo de WASM/heap/nativo. En el brazo 1 no aparecieron pthreads
+que permitan confirmar el número efectivo mediante CDP, aunque la configuración
+solicitada y el tiempo sí identifican el experimento. En R2 se separan los
+workers Tesseract de los de ONNX al contar hilos: un hijo OCR no prueba un hilo
+NER. La nueva curva local no favorece reducir los hilos internos para Bajo en
+esta Mac; no fija el comportamiento de otros equipos.
+
+**Estado del punto 4:** mediciones locales cerradas; documentación y decisión
+de perfiles **pendientes de Windows nativo ventilado** y de la elección humana.
+Se mantienen `auto`/`low`/`high`, sus defaults y los presupuestos vigentes.

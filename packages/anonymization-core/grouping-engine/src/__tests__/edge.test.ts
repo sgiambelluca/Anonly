@@ -57,6 +57,176 @@ describe("GroupingEngine — edge cases", () => {
     }
   });
 
+  it("index remains correct after edits and restore", async () => {
+    const values = ["northnorthnorth", "southsouthsouth"];
+    for (const value of values) {
+      ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: makeOccurrence({
+          entityType: EntityType.Person,
+          value,
+          normalizedValue: value,
+        }),
+      });
+    }
+    let groups = engine.getSnapshot("doc-1").groups;
+    expect(groups).toHaveLength(2);
+
+    await engine.applyGroupMerge({
+      documentId: "doc-1",
+      sourceGroupId: groups[1]?.id ?? "missing",
+      targetGroupId: groups[0]?.id ?? "missing",
+    });
+    const checkpointId = engine.createCheckpoint("doc-1");
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: "westwestwest",
+        normalizedValue: "westwestwest",
+      }),
+    });
+    expect(engine.getSnapshot("doc-1").groups).toHaveLength(2);
+
+    await engine.restoreCheckpoint("doc-1", checkpointId);
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: values[1] ?? "",
+        normalizedValue: values[1] ?? "",
+      }),
+    });
+    groups = engine.getSnapshot("doc-1").groups;
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.aliases).toEqual(values);
+    expect(groups[0]?.members).toHaveLength(3);
+
+    const target = groups[0];
+    if (!target) throw new Error("No se encontró el grupo fusionado.");
+    const beforePreview = engine.getSnapshot("doc-1");
+    const previewSpy = vi.spyOn(ctx.bus, "emit");
+    const preview = engine.previewEdit("doc-1", {
+      kind: "type",
+      groupId: target.id,
+      type: EntityType.Organization,
+    });
+    expect(preview.groups[0]?.type).toBe(EntityType.Organization);
+    expect(engine.getSnapshot("doc-1")).toEqual(beforePreview);
+    expect(
+      previewSpy.mock.calls.filter(([channel]) => channel === EventChannel.Grouping),
+    ).toHaveLength(0);
+
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: target.id,
+      patch: { type: EntityType.Organization },
+    });
+    engine.reopenSession("doc-1", { expectRegex: false, expectNer: true });
+    const fuzzyValue = `${values[0] ?? ""}x`;
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: fuzzyValue,
+        normalizedValue: fuzzyValue,
+        pageIndex: 2,
+      }),
+    });
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.NER_FINISHED, {
+      documentId: "doc-1",
+      occurrenceCount: 1,
+      durationMs: 1,
+    });
+    groups = engine.getSnapshot("doc-1").groups;
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.id).toBe(target.id);
+    expect(groups[0]?.type).toBe(EntityType.Organization);
+    expect(groups[0]?.aliases).toContain(fuzzyValue);
+    expect(groups[0]?.members).toHaveLength(4);
+  });
+
+  it("index remains correct after split, drop and removal with a late alias", async () => {
+    const first = "abcdefghij";
+    const laterGroup = "xbcdefghiX";
+    const lateAlias = "xbcdefghij";
+    for (const value of [first, laterGroup]) {
+      ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: makeOccurrence({
+          entityType: EntityType.Person,
+          value,
+          normalizedValue: value,
+        }),
+      });
+    }
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: lateAlias,
+        normalizedValue: lateAlias,
+        pageIndex: 1,
+      }),
+    });
+    let groups = engine.getSnapshot("doc-1").groups;
+    expect(groups).toHaveLength(2);
+    expect(groups[0]?.aliases).toEqual([first, lateAlias]);
+
+    const lateOccurrenceId = groups[0]?.members.find(
+      (member) => member.value === lateAlias,
+    )?.occurrenceId;
+    if (!lateOccurrenceId) throw new Error("No se encontró el alias agregado tardíamente.");
+    await engine.applyGroupSplit({
+      documentId: "doc-1",
+      groupId: groups[0]?.id ?? "missing",
+      occurrenceIds: [lateOccurrenceId],
+    });
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: lateAlias,
+        normalizedValue: lateAlias,
+        pageIndex: 1,
+      }),
+    });
+    expect(
+      engine
+        .getSnapshot("doc-1")
+        .groups.find((group) => group.aliases.includes(lateAlias) && group.aliases.length === 1)
+        ?.members,
+    ).toHaveLength(2);
+
+    engine.dropOccurrences("doc-1", { pageIndices: [1] });
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: lateAlias,
+        normalizedValue: lateAlias,
+      }),
+    });
+    groups = engine.getSnapshot("doc-1").groups;
+    expect(groups).toHaveLength(2);
+    expect(groups[0]?.aliases).toEqual([first, lateAlias]);
+    expect(groups[0]?.members).toHaveLength(2);
+
+    await engine.applyGroupRemove({ documentId: "doc-1", groupId: groups[1]?.id ?? "missing" });
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: lateAlias,
+        normalizedValue: lateAlias,
+      }),
+    });
+    groups = engine.getSnapshot("doc-1").groups;
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.aliases).toEqual([first, lateAlias]);
+    expect(groups[0]?.members).toHaveLength(3);
+  });
+
   // Caso 1 (§13)
   it("empty document emits GROUPING_FINISHED with 0 groups", () => {
     const busEmitSpy = vi.spyOn(ctx.bus, "emit");

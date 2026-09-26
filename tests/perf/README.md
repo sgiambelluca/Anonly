@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=tests-perf | dependencias=adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-149-Un-Gate-Que-No-Ejecuta-Nada-Es-Rojo.md,adr/ADR-153-El-Gate-De-Tiempos-Se-Mide-Sobre-El-Producto.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,roadmap/Optimizacion_De_Memoria_Plan.md,tests/e2e/README.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=tests-perf | dependencias=adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-149-Un-Gate-Que-No-Ejecuta-Nada-Es-Rojo.md,adr/ADR-153-El-Gate-De-Tiempos-Se-Mide-Sobre-El-Producto.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,roadmap/Optimizacion_De_Memoria_Plan.md,tests/e2e/README.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-185-Gates-De-Leak-Y-Stress-En-Electron.md | audiencia=humanos+IA | fase=11 (gates Leak/Stress de ADR-185 implementados; CI pendiente) -->
 
 # `tests/perf/` — tiempos y memoria sobre el producto real
 
@@ -115,15 +115,32 @@ que no pueda vincular a ese pool.
 bash tests/perf/run-ner-threads.sh
 ```
 
+La fase opt-in `ANONLY_NER_THREADS_PHASE=low` compara Automático con 1 y 2
+hilos internos sobre R1/R2 para el cierre local de
+`Perfiles_Rendimiento_Revision.md`. Usa builds experimentales separados,
+preflight de huella exacta y memoria WASM/heap, tres órdenes de tiempo **sin
+sonda** y cancelación con inferencia activa por brazo. Si CDP no vincula los
+pthreads del brazo 1, los hilos efectivos quedan como «no observables»; no se
+infieren del valor solicitado. Los parches se revierten y el producto no
+cambia defaults.
+
+```bash
+ANONLY_NER_THREADS_PHASE=low \
+  ANONLY_REAL_DOC_R1=/ruta/neutral/R1.pdf \
+  ANONLY_REAL_DOC_R2=/ruta/neutral/R2.pdf \
+  caffeinate -dimsu bash tests/perf/run-ner-threads.sh
+```
+
 La salida es única por sesión en `.measure/ner-threads/<UTC>/`; no se pisan
-resultados previos. Requiere macOS con al menos ocho CPUs visibles — o, en
-Windows nativo, un puerto ad hoc del mismo protocolo (no commiteado; ver
-`docs/roadmap/Hilos_NER_Medicion.md` §"Repetición Windows nativo", corrida el
-2026-09-25). P1/P2 son fixtures sintéticos; las conclusiones de producto deben
-incorporar R1/R2, dado que ya se observó que los resultados pueden diferir
-entre corpus. La validación nativa de Windows ya se hizo y dio la dirección
-**contraria** a macOS (más hilos ayuda en una máquina con más núcleos reales
-libres). Esta campaña no adopta un perfil ni cambia defaults.
+resultados previos. Requiere macOS; la fase histórica A/4/6/8 requiere al
+menos ocho CPUs visibles. En Windows nativo la fase A/4/6/8 se corrió el
+2026-09-25 con un puerto ad hoc del mismo protocolo (no commiteado; ver
+`docs/roadmap/Hilos_NER_Medicion.md` §"Repetición Windows nativo") y dio la
+dirección **contraria** a macOS: más hilos ayuda en una máquina con más
+núcleos reales libres. La fase `low` no se repitió en Windows. P1/P2 son
+fixtures sintéticos; las conclusiones de producto deben incorporar R1/R2, dado
+que ya se observó que los resultados pueden diferir entre corpus. Esta campaña
+no adopta un perfil ni cambia defaults.
 
 ## Factibilidad NER: lotes de entradas (solo arnés)
 
@@ -254,6 +271,23 @@ huellas de documentos escaneados no se comparan entre plataformas.
 comprueba que el valor automático efectivo sea 2. Los demás campos de
 configuración se conservan; `maxLiveImageBytes` se verifica en 128 MiB y el
 pool OSD mantiene un único job activo como máximo.
+
+La fase independiente `ANONLY_OCR_POOL_PHASE=profiles-gap` agrega OCR1 y repite
+1/2/3/4 sobre P2 y R2 para completar la evidencia macOS de
+`Perfiles_Rendimiento_Revision.md`. Conserva las fases históricas del runner.
+Tras el Paso 0 de T-11, cada corrida de memoria hace **una importación fría**
+con una sola sonda CDP combinada de WASM, heap y RSS; las de tiempo no llevan
+esa sonda. El informe distingue workers OCR confirmados de raíces compatibles
+con OCR pero sin factory identificable, y marca cobertura parcial o ausencia
+de muestras. Las raíces sin clasificar no se presentan como costo exacto por
+reconocedor. La salida queda bajo `.measure/ocr-pool/` y solo contiene datos
+numéricos y huellas. Este banco no altera defaults ni publica perfiles.
+
+```bash
+ANONLY_OCR_POOL_PHASE=profiles-gap \
+  ANONLY_REAL_DOC_R2=/ruta/neutral/R2.pdf \
+  ./tests/perf/run-ocr-pool.sh
+```
 
 La campaña corre tres rondas intercaladas de tiempo en P1/P2/R1/R2; R1/P1
 sirven como controles sin OCR. Repite tres perfiles de memoria por brazo solo
@@ -709,3 +743,32 @@ exportación: su línea base fría incluye render/export/cierre y no se compara
 numéricamente con M1 histórico de importación sola. Las sondas CDP heap/WASM
 que fuerzan GC no corren dentro de las ventanas; el JSON lo marca como no
 observado. RSS nativo y presión del sistema se conservan con sus límites.
+
+## ADR-185 — Gates `test:leak` y `test:stress`
+
+Los gates corren sobre el shell Electron empaquetado, con `VITE_E2E=1`, build
+fresco y assets first-party de `assets.lock.json` espejados. En CI usan jobs
+macOS seriales separados; localmente se lanzan con:
+
+```sh
+pnpm test:leak
+pnpm test:stress
+```
+
+`test:leak` ejecuta L1 (diez P1 encadenados), L2 (diez P2 escaneados de 50
+páginas) y L3 (diez P1 con 90 s de reposo). Cada régimen abre su propia
+instancia. Los informes JSON se escriben bajo `.measure/leak/`. El veredicto
+solo bloquea por crecimiento de workers o heap principal con GC según T-9;
+RSS queda diagnóstico. `heap.unreadableCount` también queda en el informe:
+pthreads ONNX pueden ser ilegibles por CDP aunque el inventario de workers y
+el heap principal estén completos.
+
+`test:stress` mide P2 escaneados de 50 y 200 páginas, cada uno en una instancia
+propia con ciclo frío y caliente. Comprueba calidad de las cuatro
+importaciones, incluidos grupos en todas las páginas centinela (hasta la 40
+y la 190), y compara por temperatura M2 (≤3×) y tiempo (≤8×). El resumen
+numérico queda en el log y bajo `.measure/stress/`, sin el contenido de los
+perfiles. Los umbrales son
+centinelas relativos del host de la corrida, no el presupuesto contractual de
+memoria de §1. Los gates pueden tomar decenas de minutos y CI no conserva PDFs,
+trazas ni artefactos de contenido.

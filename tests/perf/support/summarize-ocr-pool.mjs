@@ -31,8 +31,9 @@ function readRun(kind, arm, profile, round) {
   return null;
 }
 
-const arms = ["2", "3", "4"];
-const profiles = ["P1", "P2", "R1", "R2"];
+const profilesGap = process.env.ANONLY_OCR_POOL_PHASE === "profiles-gap";
+const arms = profilesGap ? ["1", "2", "3", "4"] : ["2", "3", "4"];
+const profiles = profilesGap ? ["P2", "R2"] : ["P1", "P2", "R1", "R2"];
 const summary = {
   generatedAtUtc: new Date().toISOString(),
   sources: sources.map((dir) => basename(dir)),
@@ -43,6 +44,8 @@ const summary = {
     ...new Set([...invalidBySource.values()].flatMap((set) => [...set])),
   ].sort(),
   missingRuns: [],
+  ...(profilesGap ? { partialWasmRuns: [] } : {}),
+  ...(profilesGap ? { perRecognizerAttribution: {} } : {}),
 };
 let exact = true;
 const median = (values) => {
@@ -125,7 +128,7 @@ for (const profile of profiles) {
     };
   }
 
-  for (const arm of ["3", "4"]) {
+  for (const arm of profilesGap ? ["1", "3", "4"] : ["3", "4"]) {
     for (let round = 0; round < 3; round += 1) {
       const base = byArm.get("2")?.[round]?.data.probe;
       const candidate = byArm.get(arm)?.[round]?.data.probe;
@@ -154,34 +157,71 @@ for (const profile of ["P2", "R2"]) {
         runId: data.runId,
         source,
         startedAtUtc: data.startedAtUtc,
-        cold: {
-          totalMs: data.report?.cold?.totalMs,
-          ocrMs: data.report?.cold?.ocrDurationMs,
-          phasePeakSumBytes: data.report?.cold?.peakSumBytes,
-          baselineBytes: data.report?.cold?.baselineBytes,
-          postReadyPeakBytes: data.report?.cold?.postReadyPeakBytes,
-          rssPeakDuringOcrBytes: data.report?.cold?.rssPeakDuringOcrBytes,
-          m1Bytes: data.report?.cold?.m1Bytes,
-          workerPeakByType: data.report?.cold?.workerPeakByType,
-          busyRecognizerPeak: data.memoryRuns.find((run) => run.temperature === "cold")?.probe
-            .effectiveBusyRecognizersPeak,
-        },
-        hot: {
-          totalMs: data.report?.hot?.totalMs,
-          ocrMs: data.report?.hot?.ocrDurationMs,
-          phasePeakSumBytes: data.report?.hot?.peakSumBytes,
-          baselineBytes: data.report?.hot?.baselineBytes,
-          postReadyPeakBytes: data.report?.hot?.postReadyPeakBytes,
-          rssPeakDuringOcrBytes: data.report?.hot?.rssPeakDuringOcrBytes,
-          m1Bytes: data.report?.hot?.m1Bytes,
-          workerPeakByType: data.report?.hot?.workerPeakByType,
-          busyRecognizerPeak: data.memoryRuns.find((run) => run.temperature === "hot")?.probe
-            .effectiveBusyRecognizersPeak,
-        },
+        cold: profilesGap
+          ? {
+              totalMs: data.wasmSampler?.coldTotalMs,
+              ocrMs: (() => {
+                const probe = data.memoryRuns.find((run) => run.temperature === "cold")?.probe;
+                return typeof probe?.startedAt === "number" && typeof probe.finishedAt === "number"
+                  ? probe.finishedAt - probe.startedAt
+                  : null;
+              })(),
+              rssPeakDuringOcrBytes: data.wasmSampler?.rssPeakDuringOcrBytes,
+              busyRecognizerPeak: data.memoryRuns.find((run) => run.temperature === "cold")?.probe
+                .effectiveBusyRecognizersPeak,
+            }
+          : {
+              totalMs: data.report?.cold?.totalMs,
+              ocrMs: data.report?.cold?.ocrDurationMs,
+              phasePeakSumBytes: data.report?.cold?.peakSumBytes,
+              baselineBytes: data.report?.cold?.baselineBytes,
+              postReadyPeakBytes: data.report?.cold?.postReadyPeakBytes,
+              rssPeakDuringOcrBytes: data.report?.cold?.rssPeakDuringOcrBytes,
+              m1Bytes: data.report?.cold?.m1Bytes,
+              workerPeakByType: data.report?.cold?.workerPeakByType,
+              busyRecognizerPeak: data.memoryRuns.find((run) => run.temperature === "cold")?.probe
+                .effectiveBusyRecognizersPeak,
+            },
+        ...(profilesGap
+          ? { wasmSampler: data.wasmSampler }
+          : {
+              hot: {
+                totalMs: data.report?.hot?.totalMs,
+                ocrMs: data.report?.hot?.ocrDurationMs,
+                phasePeakSumBytes: data.report?.hot?.peakSumBytes,
+                baselineBytes: data.report?.hot?.baselineBytes,
+                postReadyPeakBytes: data.report?.hot?.postReadyPeakBytes,
+                rssPeakDuringOcrBytes: data.report?.hot?.rssPeakDuringOcrBytes,
+                m1Bytes: data.report?.hot?.m1Bytes,
+                workerPeakByType: data.report?.hot?.workerPeakByType,
+                busyRecognizerPeak: data.memoryRuns.find((run) => run.temperature === "hot")?.probe
+                  .effectiveBusyRecognizersPeak,
+              },
+            }),
       }));
+    if (profilesGap) {
+      for (const run of runs) {
+        if (run === null) continue;
+        const windows = run.data.wasmSampler?.samples ?? [];
+        const inconclusive =
+          windows.length === 0 ||
+          windows.some(
+            (window) =>
+              window.missingSample ||
+              window.samples.length === 0 ||
+              window.samples.some((sample) => sample.partial),
+          );
+        if (inconclusive) {
+          summary.partialWasmRuns.push(`${run.data.runId}: missing or partial target coverage`);
+        }
+        summary.perRecognizerAttribution[run.data.runId] =
+          windows.length > 0 &&
+          windows.every((window) => window.perRecognizerAttributionConclusive);
+      }
+    }
   }
 
-  for (const arm of ["3", "4"]) {
+  for (const arm of profilesGap ? ["1", "3", "4"] : ["3", "4"]) {
     for (let round = 0; round < 3; round += 1) {
       const base = byArm.get("2")?.[round]?.data.memoryRuns;
       const candidate = byArm.get(arm)?.[round]?.data.memoryRuns;
@@ -189,11 +229,15 @@ for (const profile of ["P2", "R2"]) {
         exact = false;
         continue;
       }
-      for (const temperature of ["cold", "hot"]) {
+      for (const temperature of profilesGap ? ["cold"] : ["cold", "hot"]) {
         const baseProbe = base.find((run) => run.temperature === temperature)?.probe;
         const comparedProbe = candidate.find((run) => run.temperature === temperature)?.probe;
+        if (baseProbe === undefined || comparedProbe === undefined) {
+          exact = false;
+          continue;
+        }
         for (const key of ["ocrQualitySha256", "occurrenceSha256", "groupSha256"]) {
-          if (baseProbe?.[key] !== comparedProbe?.[key]) exact = false;
+          if (baseProbe[key] !== comparedProbe[key]) exact = false;
         }
       }
     }
@@ -217,10 +261,16 @@ for (const profile of ["P2", "R2"]) {
 }
 
 summary.qualityExactAcrossArms = exact;
+if (profilesGap) {
+  summary.wasmAttributionConclusive = summary.partialWasmRuns.length === 0;
+  summary.perRecognizerAttributionConclusive =
+    Object.values(summary.perRecognizerAttribution).length > 0 &&
+    Object.values(summary.perRecognizerAttribution).every(Boolean);
+}
 summary.complete = summary.missingRuns.length === 0 && exact;
 const outputFile = join(outputDir, "summary.json");
 writeFileSync(outputFile, `${JSON.stringify(summary, null, 2)}\n`);
 process.stdout.write(
-  `${JSON.stringify({ summaryPath: outputFile, complete: summary.complete, missingRuns: summary.missingRuns.length, qualityExactAcrossArms: exact }, null, 2)}\n`,
+  `${JSON.stringify({ summaryPath: outputFile, complete: summary.complete, wasmAttributionConclusive: summary.wasmAttributionConclusive, partialWasmRuns: summary.partialWasmRuns?.length ?? 0, missingRuns: summary.missingRuns.length, qualityExactAcrossArms: exact }, null, 2)}\n`,
 );
 if (!summary.complete) process.exitCode = 1;

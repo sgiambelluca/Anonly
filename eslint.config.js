@@ -55,7 +55,7 @@ export default tseslint.config(
     languageOptions: {
       parserOptions: {
         projectService: {
-          maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 14,
+          maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 16,
           allowDefaultProject: [
             "eslint.config.js",
             "commitlint.config.js",
@@ -64,6 +64,8 @@ export default tseslint.config(
             "playwright.measure.config.ts",
             "playwright.electron.config.ts",
             "playwright.perf.config.ts",
+            "playwright.leak.config.ts",
+            "playwright.stress.config.ts",
             "apps/react-client/postcss.config.js",
             "apps/react-client/tailwind.config.js",
             "tests/perf/ner-batch-feasibility.mjs",

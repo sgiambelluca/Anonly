@@ -1,11 +1,13 @@
-<!-- CONTEXT: scope=grouping-engine | dependencias=core/Contracts.md,architecture/03_Data_Model.md,architecture/04_Event_System.md,adr/ADR-011-Grouping-First.md,adr/ADR-012-Replacement-Modes.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-073-Difuso-Solo-Para-Tipos-De-Texto-Libre.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-076-La-Edicion-Manual-Del-Valor-De-Reemplazo-Gana.md,adr/ADR-094-Lo-Que-El-Detector-Duda-No-Se-Tira-En-Silencio.md,adr/ADR-116-Un-Valor-Que-El-Documento-Ya-Confirmo-No-Se-Descarta.md,adr/ADR-117-Una-Ocurrencia-Contenida-No-Aporta-Tinta.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-173-El-Motor-Rechaza-Fusiones-Y-Divisiones-Invalidas.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,adr/ADR-175-Un-Choque-Manual-No-Queda-Colgado.md,adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md,adr/ADR-177-Una-Entidad-Eliminada-No-Ocupa-Lugar.md,adr/ADR-178-Lo-Contenido-Se-Oculta-Solo-Si-Su-Contenedor-Se-Elimina.md,adr/ADR-182-Distancia-Acotada-Para-Grouping.md,adr/ADR-183-Recortar-Afijos-Comunes-En-Distancia-Acotada.md | audiencia=IA-implementador | fase=3 (Hito 12.5: §13 casos 46-69 y §15 15r-15z; Hito 11: §13 casos 70-71 y §15 15aa-15ab; ADR-117: §13 caso 72) -->
+<!-- CONTEXT: scope=grouping-engine | dependencias=core/Contracts.md,architecture/03_Data_Model.md,architecture/04_Event_System.md,adr/ADR-011-Grouping-First.md,adr/ADR-012-Replacement-Modes.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-073-Difuso-Solo-Para-Tipos-De-Texto-Libre.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-076-La-Edicion-Manual-Del-Valor-De-Reemplazo-Gana.md,adr/ADR-094-Lo-Que-El-Detector-Duda-No-Se-Tira-En-Silencio.md,adr/ADR-116-Un-Valor-Que-El-Documento-Ya-Confirmo-No-Se-Descarta.md,adr/ADR-117-Una-Ocurrencia-Contenida-No-Aporta-Tinta.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-173-El-Motor-Rechaza-Fusiones-Y-Divisiones-Invalidas.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,adr/ADR-175-Un-Choque-Manual-No-Queda-Colgado.md,adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md,adr/ADR-177-Una-Entidad-Eliminada-No-Ocupa-Lugar.md,adr/ADR-178-Lo-Contenido-Se-Oculta-Solo-Si-Su-Contenedor-Se-Elimina.md,adr/ADR-182-Distancia-Acotada-Para-Grouping.md,adr/ADR-183-Recortar-Afijos-Comunes-En-Distancia-Acotada.md,adr/ADR-184-Indice-Exacto-De-Candidatos-Para-Grouping.md | audiencia=IA-implementador | fase=3 (Hito 12.5: §13 casos 46-69 y §15 15r-15z; Hito 11: §13 casos 70-73 y §15 15aa-15ac) -->
 # Grouping Engine — Spec de Motor
 
 > Agrupa las `Occurrence` emitidas por Regex y NER en `EntityGroup` por tipo y valor canónico. Detecta conflictos. Expone grupos a la UI (la unidad de operación). Resuelve reemplazos según `ReplacementMode` y `Rule`.
 
 **EngineId**: `grouping`
-**Versión del spec**: 1.13.0
-**Última actualización**: 2026-09-24
+**Versión del spec**: 1.14.0
+**Última actualización**: 2026-09-25
+
+> **Nota (v1.14.0, ADR-184, 2026-09-25 — índice de candidatos)**: un índice interno por sesión acelera el pase exacto y restringe los candidatos del difuso mediante una condición necesaria de trigramas UTF-16. La DP y la primera coincidencia conservan su semántica. Las ediciones que reconstruyen grupos o alias invalidan el índice; ver §12, §13 caso 73 y §15 ítem 15ac. No añade contrato público.
 
 > **Nota (v1.13.0, integración UI + rendimiento, 2026-09-24)**: los casos 46-69 y los ítems 15r-15z corresponden a las decisiones de UI (ADR-170 a ADR-178). La distancia acotada y el recorte de afijos de ADR-182/183 pasan a los casos 70-71 y a los ítems 15aa-15ab; no cambian sus contratos ni su semántica. El caso de contención de ADR-117, que duplicaba el número 24, queda como caso 72.
 
@@ -289,10 +291,10 @@ Grouping es determinista dadas las ocurrencias y reglas; sin errores de runtime 
 ## 12. Consideraciones de rendimiento
 
 - **Corre en main thread** (no en Worker). En R1/R2 medidos fue ligero, pero 2.000 valores distintos de 36 caracteres bloquearon 14,53 s antes de ADR-182; < 5% del pipeline no es una garantía.
-- Costo: depende del número de grupos/alias candidatos y de la longitud de valores. El pase difuso usa distancia acotada con banda y corte temprano para rechazos imposibles (ADR-182), y recorta afijos comunes antes de la DP (ADR-183), sin cambiar la primera coincidencia.
-- Memoria: 1–10 MB por documento activo (grupos + refs + reglas + conflictos).
+- Costo: depende del número de grupos/alias candidatos y de la longitud de valores. El pase difuso usa distancia acotada con banda y corte temprano para rechazos imposibles (ADR-182), recorta afijos comunes antes de la DP (ADR-183) y filtra candidatos con el índice exacto de ADR-184. La primera coincidencia no cambia.
+- Memoria: la estimación previa de 1–10 MB por documento activo (grupos + refs + reglas + conflictos) **no incluye** el índice nuevo; medir su costo incremental antes de adoptarlo.
 - Sin transferencia zero-copy (trabaja sobre estructuras en memoria).
-- Para fuzzy matching: Levenshtein se aplica solo cuando no hay match exacto y solo a candidatos del tipo o tipo absorbido según ADR-085. La banda reduce trabajo por rechazo, **no** el número potencialmente cuadrático de comparaciones entre entidades distintas; un índice de candidatos requiere ADR propio si la curva posterior sigue bloqueando.
+- Para fuzzy matching: Levenshtein se aplica solo cuando no hay match exacto y solo a candidatos del tipo o tipo absorbido según ADR-085. El índice de ADR-184 descarta únicamente entradas que **no pueden** satisfacer el umbral; si no puede podar con seguridad, recorre el bucket completo. No garantiza cota subcuadrática para todo corpus.
 - Cancelación: entre procesamientos de `ENTITY_FOUND`. SLA < 50 ms (no requiere Worker).
 - Snapshot inmutable: `getSnapshot` retorna una copia defensiva para que la UI no mute el estado interno.
 
@@ -392,6 +394,8 @@ Grouping es determinista dadas las ocurrencias y reglas; sin errores de runtime 
 
 72. **Una ocurrencia contenida entera en otra del mismo tipo** (ADR-117): no se registra, en silencio (`debug`, mismo criterio que el dedup por identidad de ADR-038 §3) — no emite `CONFLICT_DETECTED`, porque no hay conflicto: la tinta ya está tapada por la entidad que la contiene. La contención es **estricta** (todos los fragmentos de la nueva adentro de algún fragmento de la vieja, y bboxes no idénticos); un solapamiento **parcial** del mismo tipo **sí** se registra, y una contención de tipo **distinto** sigue yendo a los casos 7-8. Se mide sobre los **fragmentos** y no sobre la envolvente (ADR-107): contra la envolvente de una entidad multi-línea, cualquier vecina de esas dos líneas parecería contenida. **Límite**: protege cuando el contenedor ya está registrado; agregar a mano un valor largo sobre una detección corta ya registrada deja el duplicado. **Solo cuenta un contenedor vivo** (ADR-177 §1): uno de un grupo eliminado o suprimido no tapa nada (caso 65). **ADR-178 §1:** una ocurrencia `source: Manual` contenida no se descarta: queda guardada a nombre del contenedor en `Session.containedManualOccurrences` y se re-procesa si el contenedor deja de estar vivo (casos 67-68).
 
+73. **Índice exacto de candidatos (ADR-184)**: el resultado de `findMatchingGroup` es idéntico al recorrido previo sobre los grupos vivos: primero el primer match exacto por `normalizedValue`; si no lo hay y el tipo permite difuso, el primer grupo y alias elegibles que satisfacen `levenshteinNormalizedAtLeast` en orden de inserción. El índice guarda entradas `(groupId, normalizedValue)` y postings de trigramas UTF-16 por longitud; para umbral finito `0<t<1` usa como radio de filtrado la **máxima distancia entera aceptada** por `1-d/L>=t`, no el radio conservador de la DP. El piso necesario de trigramas comunes con multiplicidad es `F=max(0,max(m-2,n-2)-3d)`. Los trigramas con posting de más del 20 % del bucket se pueden omitir del recorrido solo restando de `F` la cota superior `U` de su contribución. Si `F-U<=0`, o la entrada/umbral no admite esa prueba, se recorre el bucket completo. Los candidatos restantes se ordenan como el `Map` de grupos y el `Set` de alias, se vuelven a filtrar por tipo/`absorbedTypes` y pasan por el predicado de ADR-182/183. Un alias agregado después a un grupo temprano puede ganar frente a grupos posteriores. Fusión, división, eliminación, `dropOccurrences`, recomputación de alias y restauración invalidan el índice; creación y alias nuevo lo actualizan; `previewEdit` reconstruye sobre su copia. No se indexa `typeCorrections`, no cambian eventos, snapshots ni contratos. Si el benchmark no demuestra beneficio sin costo material, se revierte el código de este caso.
+
 ---
 
 ## 14. Casos de prueba
@@ -452,6 +456,10 @@ Grouping es determinista dadas las ocurrencias y reglas; sin errores de runtime 
 | `bounded similarity predicate equals full normalized comparator` | `unit.test.ts` | unit | caso 70, ADR-182: diferencial con semilla fija, umbrales en/afuera del borde, longitudes distintas, vacíos, Unicode UTF-16 y umbrales especiales |
 | `common affix trimming preserves normalized comparator` | `unit.test.ts` | unit | caso 71, ADR-183: diferencial con afijos comunes y desiguales, distancia exacta, bordes flotantes, Unicode UTF-16 y ruta especial |
 | `fuzzy matching preserves first eligible group and alias order` | `unit.test.ts` | unit | caso 70, ADR-182: cadena no transitiva y grupos con varios alias; comparar grupos, miembros y orden |
+| `indexed candidate filter has no false negatives` | `unit.test.ts` | unit | caso 73, ADR-184: diferencial de trigramas con multiplicidad, longitudes 0–80, operaciones de edición, UTF-16, umbrales especiales y flotantes; comparar contra recorrido completo |
+| `indexed lookup preserves exact pass and first eligible alias` | `unit.test.ts` | unit | caso 73: exacto gana al difuso, grupos con varios alias, cadena no transitiva, alias tardío en grupo temprano y tipos absorbidos; comparar primer `groupId`, snapshot y eventos |
+| `index remains correct after edits and restore` | `edge.test.ts` | edge | caso 73: merge/split/remove, `dropOccurrences`, `reopenSession`, `previewEdit`, `restoreCheckpoint`, reclasificación y reconstrucción de `normalizedValues` |
+| `indexed adversarial curve preserves fingerprints and records memory` | `tests/perf/grouping-worst-case.ts` | perf opt-in | caso 73: 250–2000 distintos + control repetido, lookup inclusivo, retraso del timer y memoria incremental; R1/R2 por arnés confidencial |
 | `type correction fuzzy pass keeps the same destination` | `edge.test.ts` | edge | caso 70, ADR-182: los dos call sites comparten el predicado; no cambia ADR-085 |
 | `distinct and repeated grouping curves keep fingerprints` | `tests/perf/grouping-worst-case.ts` | perf opt-in | caso 70, ADR-182: 250–2000 valores; tiempo por motor y lookup inclusivo, sin SLA absoluto como gate |
 | `members.length ≥ 1` | `unit.test.ts` | unit | invariante |
@@ -615,6 +623,7 @@ Fixtures: `tests/fixtures/text-10p.pdf` con entidades conocidas que generan grup
 - [x] 15z. (Hito 12.5 — ADR-178) `Session.containedManualOccurrences` interno (contenedor → ocurrencias manuales contenidas): se llena en la rama de contención de `processOccurrence` solo para `source: Manual`, sin duplicar; se re-procesa por `processOccurrence` cuando el contenedor deja de estar vivo (`applyGroupRemove`, `dropOccurrences` que no alcanza a la guardada) y se descarta con él si el filtro la alcanza; entra en los puntos de restauración, sobrevive a `reopenSession`, muere en `closeSession`, fuera del snapshot. Casos 67-68, cuatro filas en §14. Caso 69 y su fila por O6-1 de la revisión 6.
 - [x] 15aa. (Hito 11, ADR-182) Agregar predicado de distancia acotada en `levenshtein.ts` sin alterar `levenshteinNormalized`; usarlo en los dos pases difusos de `grouping.engine.ts`. Preservar orden y primera coincidencia. Añadir diferencial del caso 70, tests de grupo/corrección y repetir el banco opt-in más R1/R2. Si la curva sigue bloqueando varios segundos, informar el límite antes de proponer un índice.
 - [x] 15ab. (Hito 11, ADR-183) Recortar prefijo/sufijo comunes dentro del predicado acotado, con radio y denominador originales; mantener rutas especiales y primera coincidencia. Añadir diferencial del caso 71 y repetir banco del motor más R1/R2, con huellas exactas y tiempo residual declarado.
+- [x] 15ac. (Hito 11, ADR-184) Implementar en `grouping-engine` el índice interno por sesión para exactos y candidatos difusos, con cota de trigramas, recorrido completo cuando la poda no es segura, orden de primera coincidencia y mantenimiento/invalidez en todas las mutaciones del caso 73. Añadir las cuatro filas de §14; ejecutar gates scoped y medir antes/después en el banco opt-in y R1/R2. Informar paridad, memoria, tiempo y bloqueo residual antes de conservar el cambio. Evidencia macOS en `roadmap/Agrupacion_Difusa_Medicion.md`; Windows nativo pendiente.
 - [ ] 16. Escribir `contract.test.ts` con todos los tests contractuales.
 - [ ] 17. Escribir `unit.test.ts` con cobertura ≥ 85%.
 - [ ] 18. Escribir `edge.test.ts` con todos los casos límite.
@@ -628,6 +637,15 @@ Fixtures: `tests/fixtures/text-10p.pdf` con entidades conocidas que generan grup
 ## Algoritmos clave (resumen)
 
 ### Matching
+
+**Implementación de las dos búsquedas (ADR-184)**: el pseudocódigo siguiente
+define la **prioridad semántica**, no obliga a visitar todos los candidatos.
+`findMatchingGroup` consulta primero el mapa exacto del índice por sesión. Solo
+si falla, reúne por longitud las entradas que pasan la condición necesaria de
+trigramas del caso 73, las ordena por grupo/alias como el recorrido escrito
+abajo y confirma cada una con `levenshteinNormalizedAtLeast`. Un bucket sin
+poda segura se recorre completo. El índice se mantiene o invalida en los
+puntos del caso 73; nunca altera el pase de `typeCorrections`.
 
 ```text
 para cada Occurrence entrante:

@@ -393,6 +393,8 @@ type ManualOutcomeAnnotation =
 interface Session {
   readonly documentId: string;
   readonly groups: Map<string, InternalGroup>;
+  /** ADR-184: derived candidate index; omitted from snapshots and checkpoints. */
+  candidateIndex: GroupCandidateIndex | undefined;
   readonly nextIndexByType: Map<EntityType, number>;
   rules: Rule[];
   readonly conflicts: Map<string, Conflict>;
@@ -477,6 +479,176 @@ interface Session {
   finished: boolean;
 }
 
+interface IndexedAlias {
+  readonly groupId: string;
+  readonly value: string;
+  readonly groupOrder: number;
+  readonly aliasOrder: number;
+  readonly trigrams: ReadonlyMap<string, number>;
+}
+
+/** Per-session exact and multiset-trigram lookup. All ordering mirrors Map/Set insertion order. */
+class GroupCandidateIndex {
+  readonly exact = new Map<string, IndexedAlias[]>();
+  readonly byLength = new Map<number, IndexedAlias[]>();
+  readonly postings = new Map<number, Map<string, IndexedAlias[]>>();
+  readonly trigramFrequency = new Map<number, Map<string, number>>();
+  readonly groupOrders = new Map<string, number>();
+  readonly aliasOrders = new Map<string, Map<string, number>>();
+
+  constructor(groups: ReadonlyMap<string, InternalGroup>) {
+    let groupOrder = 0;
+    for (const group of groups.values()) {
+      this.groupOrders.set(group.id, groupOrder++);
+      const aliasOrders = new Map<string, number>();
+      this.aliasOrders.set(group.id, aliasOrders);
+      let aliasOrder = 0;
+      for (const value of group.normalizedValues) {
+        aliasOrders.set(value, aliasOrder++);
+        this.addAlias(group.id, value);
+      }
+    }
+  }
+
+  addGroup(group: InternalGroup): void {
+    const groupOrder = this.groupOrders.size;
+    this.groupOrders.set(group.id, groupOrder);
+    const aliasOrders = new Map<string, number>();
+    this.aliasOrders.set(group.id, aliasOrders);
+    for (const value of group.normalizedValues) {
+      aliasOrders.set(value, aliasOrders.size);
+      this.addAlias(group.id, value);
+    }
+  }
+
+  addAlias(groupId: string, value: string): void {
+    const groupOrder = this.groupOrders.get(groupId);
+    if (groupOrder === undefined) return;
+    let aliasOrders = this.aliasOrders.get(groupId);
+    if (!aliasOrders) {
+      aliasOrders = new Map();
+      this.aliasOrders.set(groupId, aliasOrders);
+    }
+    if (!aliasOrders.has(value)) aliasOrders.set(value, aliasOrders.size);
+    const aliasOrder = aliasOrders.get(value);
+    if (aliasOrder === undefined) return;
+    const trigrams = countTrigrams(value);
+    const entry: IndexedAlias = { groupId, value, groupOrder, aliasOrder, trigrams };
+    const exactEntries = this.exact.get(value) ?? [];
+    exactEntries.push(entry);
+    this.exact.set(value, exactEntries);
+    const bucket = this.byLength.get(value.length) ?? [];
+    bucket.push(entry);
+    this.byLength.set(value.length, bucket);
+    const bucketPostings = this.postings.get(value.length) ?? new Map<string, IndexedAlias[]>();
+    const frequencies = this.trigramFrequency.get(value.length) ?? new Map<string, number>();
+    for (const [trigram] of trigrams) {
+      const posting = bucketPostings.get(trigram) ?? [];
+      posting.push(entry);
+      bucketPostings.set(trigram, posting);
+      frequencies.set(trigram, (frequencies.get(trigram) ?? 0) + 1);
+    }
+    this.postings.set(value.length, bucketPostings);
+    this.trigramFrequency.set(value.length, frequencies);
+  }
+
+  fuzzyCandidates(query: string, threshold: number): ReadonlyArray<IndexedAlias> {
+    if (query.length < 3 || !Number.isFinite(threshold) || threshold <= 0 || threshold >= 1) {
+      return [...this.byLength.values()]
+        .flat()
+        .sort(
+          (left, right) => left.groupOrder - right.groupOrder || left.aliasOrder - right.aliasOrder,
+        );
+    }
+    const queryTrigrams = countTrigrams(query);
+    const matching = new Map<IndexedAlias, number>();
+    const candidates = new Set<IndexedAlias>();
+    for (const [length, bucket] of this.byLength) {
+      const denominator = Math.max(query.length, length);
+      const radius = maxAcceptedDistance(denominator, threshold);
+      if (radius === undefined || Math.abs(query.length - length) > radius) continue;
+      const minimum = Math.max(0, Math.max(query.length - 2, length - 2) - 3 * radius);
+      if (minimum === 0) {
+        for (const entry of bucket) candidates.add(entry);
+        continue;
+      }
+      const frequencies = this.trigramFrequency.get(length);
+      const postings = this.postings.get(length);
+      if (!frequencies || !postings) {
+        for (const entry of bucket) candidates.add(entry);
+        continue;
+      }
+      const frequent = new Set<string>();
+      let omittedUpperBound = 0;
+      for (const [trigram, count] of queryTrigrams) {
+        if ((frequencies.get(trigram) ?? 0) / bucket.length > 0.2) {
+          frequent.add(trigram);
+          omittedUpperBound += count;
+        }
+      }
+      const required = minimum - omittedUpperBound;
+      if (required <= 0) {
+        for (const entry of bucket) candidates.add(entry);
+        continue;
+      }
+      for (const [trigram, queryCount] of queryTrigrams) {
+        if (frequent.has(trigram)) continue;
+        for (const entry of postings.get(trigram) ?? []) {
+          const shared = Math.min(queryCount, entry.trigrams.get(trigram) ?? 0);
+          matching.set(entry, (matching.get(entry) ?? 0) + shared);
+          if ((matching.get(entry) ?? 0) >= required) candidates.add(entry);
+        }
+      }
+    }
+    return [...candidates].sort(
+      (left, right) => left.groupOrder - right.groupOrder || left.aliasOrder - right.aliasOrder,
+    );
+  }
+}
+
+function countTrigrams(value: string): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (let i = 0; i + 3 <= value.length; i += 1) {
+    const trigram = value.slice(i, i + 3);
+    counts.set(trigram, (counts.get(trigram) ?? 0) + 1);
+  }
+  return counts;
+}
+
+/** Necessary multiset-trigram condition from ADR-184, kept internal to this module. */
+export function passesNecessaryTrigramCondition(
+  query: string,
+  candidate: string,
+  threshold: number,
+): boolean {
+  if (
+    query.length < 3 ||
+    candidate.length < 3 ||
+    !Number.isFinite(threshold) ||
+    threshold <= 0 ||
+    threshold >= 1
+  ) {
+    return true;
+  }
+  const denominator = Math.max(query.length, candidate.length);
+  const radius = maxAcceptedDistance(denominator, threshold);
+  if (radius === undefined || Math.abs(query.length - candidate.length) > radius) return false;
+  const floor = Math.max(0, Math.max(query.length - 2, candidate.length - 2) - 3 * radius);
+  let common = 0;
+  const candidateTrigrams = countTrigrams(candidate);
+  for (const [trigram, queryCount] of countTrigrams(query)) {
+    common += Math.min(queryCount, candidateTrigrams.get(trigram) ?? 0);
+  }
+  return common >= floor;
+}
+
+function maxAcceptedDistance(length: number, threshold: number): number | undefined {
+  if (length <= 0) return undefined;
+  let distance = Math.min(length, Math.ceil((1 - threshold) * length) + 1);
+  while (distance >= 0 && 1 - distance / length < threshold) distance -= 1;
+  return distance < 0 ? undefined : distance;
+}
+
 /**
  * ADR-172 §1: "copia estructural" — lo inmutable se comparte entre copias,
  * lo mutable se copia. Un `OccurrenceRef`/`Conflict`/`Rule` nunca se muta en
@@ -509,6 +681,7 @@ function cloneSession(session: Session): Session {
   return {
     documentId: session.documentId,
     groups,
+    candidateIndex: undefined,
     nextIndexByType: new Map(session.nextIndexByType),
     rules: [...session.rules],
     conflicts: new Map(session.conflicts),
@@ -1119,6 +1292,7 @@ export class GroupingEngine implements IEngine {
     this.sessions.set(documentId, {
       documentId,
       groups: new Map(),
+      candidateIndex: undefined,
       nextIndexByType: new Map(),
       rules: [],
       conflicts: new Map(),
@@ -1265,6 +1439,7 @@ export class GroupingEngine implements IEngine {
     // Set vacío legítimo (ningún contenedor se borra, pero una guardada
     // puede seguir cayendo en el filtro por su propia página/fuente).
     const droppedIds = new Set(toDrop.map((rec) => rec.occurrenceId));
+    if (toDrop.length > 0) session.candidateIndex = undefined;
     // ADR-175 §1 (casos 59-60): a diferencia del resto de este método, una
     // ocurrencia manual retenida NUNCA vive en `recordedOccurrences` (nota 9
     // del header) — así que el barrido de conflictos `heldManual` no puede
@@ -1833,6 +2008,7 @@ export class GroupingEngine implements IEngine {
           targetType: target.type,
         });
       }
+      session.candidateIndex = undefined;
 
       // "Algoritmos clave" > indexInType: fusionar A(source) en B(target) ->
       // B conserva min(A.index, B.index); A se elimina.
@@ -1970,6 +2146,8 @@ export class GroupingEngine implements IEngine {
         occurrenceIds,
       });
     }
+
+    session.candidateIndex = undefined;
 
     const recordsById = new Map(session.recordedOccurrences.map((r) => [r.occurrenceId, r]));
     const movedRecords = movedMembers
@@ -2153,6 +2331,7 @@ export class GroupingEngine implements IEngine {
         return Promise.resolve();
       }
 
+      session.candidateIndex = undefined;
       session.groups.delete(req.groupId);
       this.ctx?.bus.emit(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_REMOVED, {
         documentId: req.documentId,
@@ -3302,32 +3481,40 @@ export class GroupingEngine implements IEngine {
 
   private findMatchingGroup(session: Session, occurrence: Occurrence): InternalGroup | null {
     const threshold = this.ctx?.config.grouping.similarityThreshold ?? DEFAULT_SIMILARITY_THRESHOLD;
-    const candidates: InternalGroup[] = [];
-    for (const group of session.groups.values()) {
-      // ADR-085 §1(a): un grupo reclasificado sigue aceptando el tipo con el
-      // que el detector lo emite — que no aprende y va a seguir diciendo el
-      // original en cada `reanalyze`. Sin esto, la ocurrencia nueva del mismo
-      // valor crea un grupo paralelo y el mismo texto sale del export con dos
-      // tokens distintos (escenario B de ADR-082, Consecuencias).
-      //
-      // El `||` cortocircuita: el `Set.has` solo corre para los grupos cuyo
-      // tipo no matcheó. Medido en 0,19 ms sobre 5000 ocurrencias × 50 grupos.
-      if (group.type === occurrence.entityType || group.absorbedTypes.has(occurrence.entityType)) {
-        candidates.push(group);
+    const index = this.getCandidateIndex(session);
+    const exact = [...(index.exact.get(occurrence.normalizedValue) ?? [])].sort(
+      (left, right) => left.groupOrder - right.groupOrder || left.aliasOrder - right.aliasOrder,
+    );
+    for (const entry of exact) {
+      const group = session.groups.get(entry.groupId);
+      if (
+        group &&
+        group.normalizedValues.has(occurrence.normalizedValue) &&
+        (group.type === occurrence.entityType || group.absorbedTypes.has(occurrence.entityType))
+      ) {
+        return group;
       }
     }
-    for (const group of candidates) {
-      if (group.normalizedValues.has(occurrence.normalizedValue)) return group;
-    }
     if (!FUZZY_MATCHING_TYPES.has(occurrence.entityType)) return null;
-    for (const group of candidates) {
-      for (const normalizedAlias of group.normalizedValues) {
-        if (levenshteinNormalizedAtLeast(occurrence.normalizedValue, normalizedAlias, threshold)) {
-          return group;
-        }
+    for (const entry of index.fuzzyCandidates(occurrence.normalizedValue, threshold)) {
+      const group = session.groups.get(entry.groupId);
+      if (
+        !group ||
+        !group.normalizedValues.has(entry.value) ||
+        (group.type !== occurrence.entityType && !group.absorbedTypes.has(occurrence.entityType))
+      ) {
+        continue;
+      }
+      if (levenshteinNormalizedAtLeast(occurrence.normalizedValue, entry.value, threshold)) {
+        return group;
       }
     }
     return null;
+  }
+
+  private getCandidateIndex(session: Session): GroupCandidateIndex {
+    session.candidateIndex ??= new GroupCandidateIndex(session.groups);
+    return session.candidateIndex;
   }
 
   /**
@@ -3418,6 +3605,7 @@ export class GroupingEngine implements IEngine {
       occurrence.maskFormat ?? MASK_FORMAT_BY_TYPE[occurrence.entityType],
     );
     session.groups.set(group.id, group);
+    session.candidateIndex?.addGroup(group);
     return group;
   }
 
@@ -3428,7 +3616,9 @@ export class GroupingEngine implements IEngine {
   ): ReadonlyArray<keyof EntityGroup> {
     const changed = new Set<keyof EntityGroup>(["members", "updatedAt"]);
     group.members.push(toOccurrenceRef(occurrence));
+    const hadNormalizedValue = group.normalizedValues.has(occurrence.normalizedValue);
     group.normalizedValues.add(occurrence.normalizedValue);
+    if (!hadNormalizedValue) session.candidateIndex?.addAlias(group.id, occurrence.normalizedValue);
 
     const isNewAlias = !group.aliasFrequency.has(occurrence.value);
     if (isNewAlias) {

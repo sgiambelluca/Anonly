@@ -332,15 +332,21 @@ se implementó y repitió la curva adversa y R1/R2 sin cambios de detección.
 curva de 250–2000 valores distintos, el control repetido y R1/R2 reales.
 El primer arreglo quedó especificado en ADR-182 y `Grouping_Engine.md`
 v1.11.0, se implementó y conservó huellas y orden en 30 controles. El peor
-caso de 2.000 valores distintos bajó de 14,53 a 3,26 s, pero el bloqueo de
-varios segundos persiste; un índice de candidatos requiere otro ADR.
+caso de 2.000 valores distintos bajó de 14,53 a 3,26 s, aunque entonces
+persistía un bloqueo de varios segundos.
 Un filtro exacto por trigramas se descartó tras una sonda: no eliminó ninguna
 de las 1.999.000 comparaciones del adverso y añadió costo. El informe registra
 esa prueba y su alcance.
 Una segunda fase de recorte exacto de afijos comunes se especificó en
 ADR-183 y `Grouping_Engine.md` v1.12.0. Ya implementada y medida en motor y
 R1/R2, bajó el peor caso de 3,26 a 1,50 s con huellas idénticas. El bloqueo
-residual y la curva cuadrática siguen documentados; Windows nativo pendiente.
+residual motivó ADR-184: el índice interno de candidatos bajó el adverso de
+2.000 valores de 1.610,85 a 263,64 ms en comparación pareada macOS, con
+huellas idénticas en el banco sintético y en seis corridas R1/R2. El control
+repetido y los tiempos de proceso reales no mostraron regresión material. El
+índice retuvo unos 4,59 MiB adicionales en 2.000 alias; la curva puede seguir
+siendo cuadrática en corpus sin poda. Evidencia en
+`Agrupacion_Difusa_Medicion.md`; Windows nativo pendiente.
 
 Retomar los dos casos cuadráticos del relevamiento: patrón de email sobre texto
 adverso y búsqueda difusa con muchas entidades distintas. Primero reproducirlos
@@ -354,7 +360,11 @@ Es un objetivo de robustez temporal; no se atribuye a estos casos el costo de R1
 **Revisión documental macOS disponible:**
 [`Perfiles_Rendimiento_Revision.md`](Perfiles_Rendimiento_Revision.md) organiza la
 matriz candidata, señales, migración y condiciones pendientes. La política no
-está validada para Windows ni cambió los settings del producto.
+está validada para Windows ni cambió los settings del producto. La tanda local
+adicional OCR1/2/3/4 y NER Automático/1/2 cerró el 2026-09-25 con calidad y
+cancelación conservadas. Los tiempos, el RSS observado y las limitaciones de
+atribución WASM están en ese informe. **El punto queda pendiente de Windows
+nativo y de la decisión humana**; no se adoptaron perfiles ni defaults nuevos.
 
 **Depende de los objetivos 1 y 2 y de revisar sus resultados.** Es el siguiente
 paso después de esas mediciones; no necesita esperar a que terminen 3 y 4. Si
