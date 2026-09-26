@@ -55,7 +55,7 @@ export default tseslint.config(
     languageOptions: {
       parserOptions: {
         projectService: {
-          maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 12,
+          maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 14,
           allowDefaultProject: [
             "eslint.config.js",
             "commitlint.config.js",
@@ -68,6 +68,8 @@ export default tseslint.config(
             "apps/react-client/tailwind.config.js",
             "tests/perf/ner-batch-feasibility.mjs",
             "tests/perf/ner-batch-real.mjs",
+            "tests/perf/ocr-platform-probe.mjs",
+            "tests/perf/ocr-platform-synthetic.mjs",
             "tests/perf/support/summarize-ocr-pool.mjs",
           ],
         },
