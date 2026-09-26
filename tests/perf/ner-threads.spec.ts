@@ -1,5 +1,6 @@
 /**
- * Opt-in NER ONNX thread-count campaign, from Rendimiento_Experimentos_Plan.md §1.
+ * Opt-in NER ONNX thread-count campaign. Historical arms 4/6/8 and low-profile arms 1/2
+ * run in separate serial phases; each measured run creates one Electron instance.
  * A single Electron instance, document and NER worker are measured per run.
  * Real-document paths are read only into memory and never included in reports.
  */
@@ -12,6 +13,7 @@ import { expect, openApp, test } from "../e2e/support/electronApp.js";
 import { textTenPagesFile, type E2eFilePayload } from "../e2e/support/fixtures.js";
 import { generateText50p } from "../fixtures/generate.js";
 
+import { observedNerThreadCount } from "./support/nerThreadAttribution.js";
 import { getOrGenerateScannedFixture } from "./support/scannedFixtureCache.js";
 import { hostIdentity, runTimedImport } from "./support/timeProfile.js";
 import { runWasmAttribution, type WasmAttributionReport } from "./support/wasmMemory.js";
@@ -33,6 +35,7 @@ declare global {
 
 const RUN_ID = process.env.ANONLY_NER_THREADS_RUN;
 const OUTPUT_DIR = process.env.ANONLY_NER_THREADS_OUTPUT_DIR;
+const PHASE = process.env.ANONLY_NER_THREADS_PHASE ?? "threads";
 const CANCEL_SLA_MS = 200;
 type Profile = "P1" | "P2" | "R1" | "R2";
 
@@ -217,43 +220,17 @@ async function readProbe(page: Page): Promise<{
   });
 }
 
-function observedThreadCount(report: WasmAttributionReport): {
-  readonly effectiveThreads: number;
-  readonly ownerUrls: ReadonlyArray<string>;
-} | null {
-  let max = 0;
-  const ownerUrls = new Set<string>();
-  for (const sample of report.wasmSamples) {
-    const owners = sample.wasmTargets.filter((target) =>
-      /^(?:thread-pool-worker|unclassified-worker)-\d+$/.test(target.label),
-    );
-    for (const owner of owners) {
-      const children = sample.wasmTargets.filter((target) =>
-        new RegExp(`^${owner.label}/(?:thread|child)-\\d+$`).test(target.label),
-      );
-      const effectiveThreads = children.length + 1;
-      if (children.length > 0 && effectiveThreads > max) {
-        max = effectiveThreads;
-        ownerUrls.clear();
-        ownerUrls.add(owner.url);
-      } else if (children.length > 0 && effectiveThreads === max) {
-        ownerUrls.add(owner.url);
-      }
-    }
-  }
-  return max === 0 ? null : { effectiveThreads: max, ownerUrls: [...ownerUrls].sort() };
-}
-
 test("NER ONNX thread-count campaign — selected run", async ({
   page,
   electronApp,
   electronUserDataDir,
 }) => {
   if (RUN_ID === undefined || RUN_ID === "") throw new Error("ANONLY_NER_THREADS_RUN no definido.");
-  const match = /^(A|4|6|8)-(P1|P2|R1|R2)-r([0-2])$/.exec(RUN_ID);
-  const timingMatch = /^time-(A|4|6|8)-(P1|P2|R1|R2)-r([0-2])$/.exec(RUN_ID);
-  const qualityMatch = /^quality-(A|4|6|8)-(P1|P2|R1|R2)$/.exec(RUN_ID);
-  const cancelMatch = /^cancel-(A|4|6|8)-(P1|P2|R1|R2)$/.exec(RUN_ID);
+  const armsPattern = PHASE === "low" ? "A|1|2" : "A|4|6|8";
+  const match = new RegExp(`^(${armsPattern})-(P1|P2|R1|R2)-r([0-2])$`).exec(RUN_ID);
+  const timingMatch = new RegExp(`^time-(${armsPattern})-(P1|P2|R1|R2)-r([0-2])$`).exec(RUN_ID);
+  const qualityMatch = new RegExp(`^quality-(${armsPattern})-(P1|P2|R1|R2)$`).exec(RUN_ID);
+  const cancelMatch = new RegExp(`^cancel-(${armsPattern})-(P1|P2|R1|R2)$`).exec(RUN_ID);
   if (match === null && timingMatch === null && qualityMatch === null && cancelMatch === null)
     throw new Error(`Corrida desconocida: ${RUN_ID}`);
   const profile = (match?.[2] ??
@@ -261,7 +238,7 @@ test("NER ONNX thread-count campaign — selected run", async ({
     qualityMatch?.[2] ??
     cancelMatch?.[2] ??
     "P2") as Profile;
-  const isTimingOnly = timingMatch !== null || qualityMatch !== null;
+  const isTimingOnly = timingMatch !== null || (qualityMatch !== null && PHASE !== "low");
   const isCancel = cancelMatch !== null;
   const longProfile = profile === "P2" || profile === "R2";
   test.setTimeout(isCancel ? 300_000 : longProfile ? 1_800_000 : 600_000);
@@ -294,9 +271,10 @@ test("NER ONNX thread-count campaign — selected run", async ({
   }
 
   const probe = await readProbe(page);
-  const observedThreads = report === undefined ? null : observedThreadCount(report);
+  const observedThreads = report === undefined ? null : observedNerThreadCount(report.wasmSamples);
   const payload = {
     runId: RUN_ID,
+    phase: PHASE,
     profile,
     requestedThreads:
       (match?.[1] ?? timingMatch?.[1] ?? qualityMatch?.[1] ?? cancelMatch?.[1]) === "A"
@@ -321,6 +299,7 @@ test("NER ONNX thread-count campaign — selected run", async ({
   expect(probe.environment.sharedArrayBuffer).toBe(true);
   expect(probe.peakNerJobs).toBeLessThanOrEqual(1);
   if (isCancel) {
+    expect(probe.peakNerJobs, "la cancelación se pidió con un job NER activo").toBeGreaterThan(0);
     expect(
       probe.cancelLatencyMs,
       "se canceló NER con trabajo activo dentro del SLA contractual",

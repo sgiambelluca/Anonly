@@ -13,6 +13,13 @@ import { installEngineOverrides } from "./support/engineOverrides.js";
 import { measureProfile, type ProfileReport } from "./support/memoryProfile.js";
 import { getOrGenerateScannedFixture } from "./support/scannedFixtureCache.js";
 import { hostIdentity, type TimeRun } from "./support/timeProfile.js";
+import {
+  attributeWasmMemoryByOwner,
+  computeWasmMemoryTotal,
+  runWasmAttribution,
+  type WasmAttributionReport,
+  type WasmHeapSample,
+} from "./support/wasmMemory.js";
 
 declare global {
   var __anonlyOcrPoolProbe:
@@ -65,7 +72,7 @@ const RUN_ID = process.env.ANONLY_OCR_POOL_RUN;
 const OUTPUT_DIR = process.env.ANONLY_OCR_POOL_OUTPUT_DIR;
 const CANCELLATION_SLA_MS = 200;
 type Profile = "P1" | "P2" | "R1" | "R2";
-type Arm = 2 | 3 | 4;
+type Arm = 1 | 2 | 3 | 4;
 type RunKind = "memory" | "time" | "cancel";
 type MemoryProbeRun = { readonly temperature: string; readonly probe: Record<string, unknown> };
 let memoryRuns: MemoryProbeRun[] = [];
@@ -117,7 +124,7 @@ function parseRunId(): {
   readonly kind: RunKind;
 } {
   if (RUN_ID === undefined || RUN_ID === "") throw new Error("ANONLY_OCR_POOL_RUN no definido.");
-  const match = /^(memory|time|cancel)-(2|3|4)-(P1|P2|R1|R2)-r([0-2])$/.exec(RUN_ID);
+  const match = /^(memory|time|cancel)-(1|2|3|4)-(P1|P2|R1|R2)-r([0-2])$/.exec(RUN_ID);
   if (match === null) throw new Error(`Corrida desconocida: ${RUN_ID}`);
   return {
     kind: match[1] as RunKind,
@@ -615,21 +622,42 @@ test("OCR recognizer pool campaign — selected run", async ({
 
   let report: ProfileReport | undefined;
   let timed: TimeRun | undefined;
+  let wasmAttribution: WasmAttributionReport | undefined;
+  let wasmSamples: ReadonlyArray<WasmHeapSample> = [];
+  let wasmSamplerStartedAtMs: number | null = null;
+  let wasmProbeDurationsMs: ReadonlyArray<number> = [];
   if (run.kind === "memory") {
-    report = await measureProfile(
-      page,
-      electronApp,
-      electronUserDataDir,
-      `ocr-pool-${run.profile}-${run.arm}-r${run.round}`,
-      file,
-      run.profile === "P2" || run.profile === "R2" ? 600_000 : 300_000,
-      [async (currentPage) => installProbe(currentPage, { ...run, runId: RUN_ID ?? "" })],
-      async (currentPage, temperature) => {
-        memoryRuns.push({ temperature, probe: await readProbe(currentPage) });
-      },
-      150,
-      { captureOcrWords: false },
-    );
+    if (process.env.ANONLY_OCR_POOL_PHASE === "profiles-gap") {
+      await installProbe(page, { ...run, runId: RUN_ID ?? "" });
+      wasmAttribution = await runWasmAttribution(
+        page,
+        electronApp,
+        electronUserDataDir,
+        `ocr-pool-${run.profile}-${run.arm}-r${run.round}`,
+        run.profile,
+        file,
+        run.profile === "P2" || run.profile === "R2" ? 600_000 : 300_000,
+      );
+      wasmSamples = wasmAttribution.wasmSamples;
+      wasmSamplerStartedAtMs = wasmAttribution.wasmSamplerStartedAtMs ?? null;
+      wasmProbeDurationsMs = wasmAttribution.probeDurationsMs?.wasmAndHeap ?? [];
+      memoryRuns.push({ temperature: "cold", probe: await readProbe(page) });
+    } else {
+      report = await measureProfile(
+        page,
+        electronApp,
+        electronUserDataDir,
+        `ocr-pool-${run.profile}-${run.arm}-r${run.round}`,
+        file,
+        run.profile === "P2" || run.profile === "R2" ? 600_000 : 300_000,
+        [async (currentPage) => installProbe(currentPage, { ...run, runId: RUN_ID ?? "" })],
+        async (currentPage, temperature) => {
+          memoryRuns.push({ temperature, probe: await readProbe(currentPage) });
+        },
+        150,
+        { captureOcrWords: false },
+      );
+    }
   } else if (run.kind === "time") {
     timed = await runTimed(
       page,
@@ -646,6 +674,214 @@ test("OCR recognizer pool campaign — selected run", async ({
   }
 
   const probe = await readProbe(page);
+  const rssSamplesDuringOcr = (() => {
+    const attribution = wasmAttribution;
+    const rssSamplerStartedAtMs = attribution?.rssSamplerStartedAtMs;
+    const ocrStartedAt = probe.startedAt;
+    const ocrFinishedAt = probe.finishedAt;
+    if (
+      attribution === undefined ||
+      typeof ocrStartedAt !== "number" ||
+      typeof ocrFinishedAt !== "number" ||
+      typeof rssSamplerStartedAtMs !== "number"
+    )
+      return [];
+    const samples = attribution.rssSamples.filter((sample) => {
+      const at = sample.atMs + rssSamplerStartedAtMs;
+      return at >= ocrStartedAt && at <= ocrFinishedAt;
+    });
+    return samples.map((sample) => ({
+      atMs: sample.atMs,
+      sumWorkingSetSizeBytes: sample.sumWorkingSetSizeBytes,
+      processes: sample.perProcess.map((process) => ({
+        type: process.type,
+        workingSetSizeBytes: process.workingSetSizeBytes,
+      })),
+    }));
+  })();
+  const coldRssPeakDuringOcrBytes =
+    rssSamplesDuringOcr.length === 0
+      ? null
+      : Math.max(...rssSamplesDuringOcr.map((sample) => sample.sumWorkingSetSizeBytes));
+  const wasmByOcrWindow = memoryRuns.map(({ temperature, probe: memoryProbe }) => {
+    const startedAt = memoryProbe.startedAt;
+    const finishedAt = memoryProbe.finishedAt;
+    const windowSamples =
+      typeof startedAt === "number" && typeof finishedAt === "number"
+        ? wasmSamples.filter(
+            (sample) =>
+              wasmSamplerStartedAtMs !== null &&
+              sample.atMs + wasmSamplerStartedAtMs >= startedAt &&
+              sample.atMs + wasmSamplerStartedAtMs <= finishedAt,
+          )
+        : [];
+    const mappedSamples = windowSamples.map((sample) => {
+      const wasm = computeWasmMemoryTotal(sample.wasmTargets);
+      const heapReadableBytes = sample.heapTargets
+        .filter((target) => target.readError === undefined)
+        .map((target) => target.usedSizeBytes)
+        .filter((bytes): bytes is number => bytes !== undefined);
+      const wasmReadable = sample.wasmTargets.filter(
+        (target) => target.readError === undefined && target.memories !== undefined,
+      );
+      const heapReadable = sample.heapTargets.filter(
+        (target) => target.readError === undefined && target.usedSizeBytes !== undefined,
+      );
+      const ocrRoots = new Set(
+        sample.wasmTargets
+          .filter((target) => target.label.startsWith("ocr-worker-"))
+          .map((target) => target.label.split("/")[0] ?? target.label),
+      );
+      const unclassifiedRoots = new Set(
+        sample.wasmTargets
+          .filter((target) => target.label.startsWith("unclassified-worker-"))
+          .map((target) => target.label.split("/")[0] ?? target.label),
+      );
+      const knownWasmBytes = wasm.totalBytes;
+      const knownHeapBytes = heapReadableBytes.reduce((sum, bytes) => sum + bytes, 0);
+      const sampleEpochMs =
+        wasmSamplerStartedAtMs === null ? null : wasmSamplerStartedAtMs + sample.atMs;
+      const rssCandidates =
+        wasmAttribution === undefined ||
+        sampleEpochMs === null ||
+        typeof startedAt !== "number" ||
+        typeof finishedAt !== "number" ||
+        wasmAttribution.rssSamplerStartedAtMs === undefined
+          ? []
+          : wasmAttribution.rssSamples
+              .filter((rssSample) => {
+                const at = rssSample.atMs + (wasmAttribution?.rssSamplerStartedAtMs ?? 0);
+                return at >= startedAt && at <= finishedAt;
+              })
+              .map((rssSample) => ({
+                rssSample,
+                epochMs: rssSample.atMs + (wasmAttribution?.rssSamplerStartedAtMs ?? 0),
+              }))
+              .sort(
+                (left, right) =>
+                  Math.abs(left.epochMs - sampleEpochMs) - Math.abs(right.epochMs - sampleEpochMs),
+              );
+      const nearestRss = rssCandidates[0];
+      return {
+        atMs: sample.atMs,
+        wasmLinearReservedBytes:
+          wasmReadable.length === sample.wasmTargets.length && sample.wasmTargets.length > 0
+            ? knownWasmBytes
+            : null,
+        wasmKnownReadableBytes: wasmReadable.length === 0 ? null : knownWasmBytes,
+        wasmTargets: sample.wasmTargets.map((target) => ({
+          label: target.label,
+          readable: target.readError === undefined && target.memories !== undefined,
+          memories:
+            target.memories?.map((memory) => ({
+              byteLengthBytes: memory.byteLengthBytes,
+              shared: memory.shared,
+            })) ?? null,
+        })),
+        heapTargets: sample.heapTargets.map((target) => ({
+          label: target.label,
+          usedSizeBytes: target.usedSizeBytes ?? null,
+          readable: target.readError === undefined && target.usedSizeBytes !== undefined,
+        })),
+        wasmByOwner: attributeWasmMemoryByOwner(sample.wasmTargets),
+        wasmByOwnerCoverageComplete: wasmReadable.length === sample.wasmTargets.length,
+        heapJsUsedBytes:
+          heapReadable.length === sample.heapTargets.length && sample.heapTargets.length > 0
+            ? knownHeapBytes
+            : null,
+        heapJsKnownReadableBytes: heapReadable.length === 0 ? null : knownHeapBytes,
+        ocrWorkerTargetsObserved: [...ocrRoots].sort(),
+        ocrWorkerCountConfirmed: ocrRoots.size > 0 ? ocrRoots.size : null,
+        ocrLikeUnclassifiedRootsObserved: [...unclassifiedRoots].sort(),
+        rssTreeBytes: nearestRss?.rssSample.sumWorkingSetSizeBytes ?? null,
+        rssSampleLagMs:
+          nearestRss === undefined || sampleEpochMs === null
+            ? null
+            : nearestRss.epochMs - sampleEpochMs,
+        wasmTargetCoverage: {
+          total: sample.wasmTargets.length,
+          readable: wasmReadable.length,
+          unreadable: sample.wasmTargets.length - wasmReadable.length,
+        },
+        heapTargetCoverage: {
+          total: sample.heapTargets.length,
+          readable: heapReadable.length,
+          unreadable: sample.heapTargets.length - heapReadable.length,
+        },
+        partial:
+          wasmReadable.length !== sample.wasmTargets.length ||
+          heapReadable.length !== sample.heapTargets.length ||
+          nearestRss === undefined,
+      };
+    });
+    return {
+      temperature,
+      startedAt,
+      finishedAt,
+      samples: mappedSamples,
+      ocrWorkerRootsConfirmed: [
+        ...new Set(mappedSamples.flatMap((sample) => sample.ocrWorkerTargetsObserved)),
+      ].sort(),
+      ocrLikeUnclassifiedRootsObserved: [
+        ...new Set(mappedSamples.flatMap((sample) => sample.ocrLikeUnclassifiedRootsObserved)),
+      ].sort(),
+      perRecognizerAttributionConclusive:
+        mappedSamples.length > 0 &&
+        mappedSamples.every(
+          (sample) =>
+            sample.ocrWorkerTargetsObserved.length > 0 &&
+            sample.ocrLikeUnclassifiedRootsObserved.length === 0,
+        ),
+      peakWasmLinearReservedBytes:
+        mappedSamples.length === 0 ||
+        mappedSamples.some((sample) => sample.partial) ||
+        !mappedSamples.some((sample) => sample.wasmLinearReservedBytes !== null)
+          ? null
+          : Math.max(
+              ...mappedSamples
+                .map((sample) => sample.wasmLinearReservedBytes)
+                .filter((bytes): bytes is number => bytes !== null),
+            ),
+      peakHeapJsUsedBytes:
+        mappedSamples.length === 0 ||
+        mappedSamples.some((sample) => sample.partial) ||
+        !mappedSamples.some((sample) => sample.heapJsUsedBytes !== null)
+          ? null
+          : Math.max(
+              ...mappedSamples
+                .map((sample) => sample.heapJsUsedBytes)
+                .filter((bytes): bytes is number => bytes !== null),
+            ),
+      peakSimultaneousSample:
+        mappedSamples.length === 0 || mappedSamples.some((sample) => sample.partial)
+          ? null
+          : (mappedSamples
+              .filter(
+                (sample) =>
+                  sample.wasmLinearReservedBytes !== null &&
+                  sample.heapJsUsedBytes !== null &&
+                  sample.rssTreeBytes !== null,
+              )
+              .sort(
+                (left, right) =>
+                  (right.wasmLinearReservedBytes ?? 0) - (left.wasmLinearReservedBytes ?? 0),
+              )[0] ?? null),
+      maxCompleteObservedSimultaneousSample:
+        mappedSamples
+          .filter(
+            (sample) =>
+              sample.wasmLinearReservedBytes !== null &&
+              sample.heapJsUsedBytes !== null &&
+              sample.rssTreeBytes !== null,
+          )
+          .sort(
+            (left, right) =>
+              (right.wasmLinearReservedBytes ?? 0) - (left.wasmLinearReservedBytes ?? 0),
+          )[0] ?? null,
+      nativeMemoryUnattributedBytes: null,
+      missingSample: mappedSamples.length === 0,
+    };
+  });
   const payload = {
     runId: RUN_ID,
     arm: run.arm,
@@ -659,6 +895,25 @@ test("OCR recognizer pool campaign — selected run", async ({
     report,
     timed,
     memoryRuns,
+    ...(process.env.ANONLY_OCR_POOL_PHASE === "profiles-gap" && run.kind === "memory"
+      ? {
+          wasmSampler: {
+            intervalMs: 1_000,
+            startedAtMs: wasmSamplerStartedAtMs,
+            samples: wasmByOcrWindow,
+            missingSamples: wasmByOcrWindow
+              .filter((sample) => sample.missingSample)
+              .map((sample) => sample.temperature),
+            rssPeakDuringOcrBytes: coldRssPeakDuringOcrBytes,
+            rssSamplesDuringOcr,
+            rssMissingSample: rssSamplesDuringOcr.length === 0,
+            nativeMemoryUnattributedBytes: null,
+            nativeMemoryUnattributed: "not measured; no subtraction from independently sampled RSS",
+            coldTotalMs: wasmAttribution?.totalMs ?? null,
+            probeDurationsMs: wasmProbeDurationsMs,
+          },
+        }
+      : {}),
   };
   await mkdir(outputDir(), { recursive: true });
   await writeFile(
@@ -680,7 +935,7 @@ test("OCR recognizer pool campaign — selected run", async ({
     expect(probe.effectiveBusyOsdPeak).toBeLessThanOrEqual(1);
     expect(probe.effectiveConfiguredRecognizerPoolSize).toBe(run.arm);
     if (run.profile === "P2" || run.profile === "R2") {
-      if (run.arm === 2) expect(probe.effectiveBusyRecognizersPeak).toBe(2);
+      expect(probe.effectiveBusyRecognizersPeak).toBe(run.arm);
       expect(report?.cold.ocrWords ?? []).toEqual([]);
       expect(report?.hot.ocrWords ?? []).toEqual([]);
     }

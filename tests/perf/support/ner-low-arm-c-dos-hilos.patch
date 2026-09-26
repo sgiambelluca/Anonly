@@ -1,0 +1,10 @@
+diff --git a/packages/anonymization-core/ner-engine/src/worker/kernel.ts b/packages/anonymization-core/ner-engine/src/worker/kernel.ts
+index 64ab2e7..30db52a 100644
+--- a/packages/anonymization-core/ner-engine/src/worker/kernel.ts
++++ b/packages/anonymization-core/ner-engine/src/worker/kernel.ts
+@@ -277,4 +277,5 @@ function configureTransformersEnv(wasmPaths: string | NerWasmPaths | undefined):
+   if (env.backends.onnx.wasm) {
+     env.backends.onnx.wasm.wasmPaths = wasmPaths ?? NER_WASM_PATH;
++    env.backends.onnx.wasm.numThreads = 2;
+   }
+ }
