@@ -463,7 +463,7 @@ Nada de esto lo frena hoy el umbral de sugerencia de ADR-094 (`MIN_SUGGESTION_CO
 - [ ] 16. Verificar `index.ts` exporta solo `NerEngine`, tipos, errores.
 - [ ] 17. Verificar imports sin dependencias prohibidas (`grep -r 'react\|pdfjs\|pdf-lib\|tesseract' src/`).
 - [ ] 18. Verificar test de cancelación < 200 ms.
-- [ ] 19. Validar integrity del modelo al cargar (hash de `assets.lock.json`, ver `08_Security_Model.md` §8.3 y ADR-018) y configurar Transformers.js/onnxruntime-web contra el origen propio (`env.localModelPath`, `env.wasm.wasmPaths`).
+- [ ] 19. ~~Validar integrity del modelo al cargar (hash de `assets.lock.json`, ver `08_Security_Model.md` §8.3 y ADR-018)~~ (retirado por ADR-187: no hay verificación de hash en runtime) y configurar Transformers.js/onnxruntime-web contra el origen propio (`env.localModelPath`, `env.wasm.wasmPaths`).
 
 ### PR15 — NerWorker (ADR-046)
 

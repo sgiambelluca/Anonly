@@ -111,7 +111,7 @@ Orden sugerido (cada hito = un set de PRs):
 - ~~Assets de Tesseract servidos first-party: script `scripts/mirror-assets.ts` + `assets.lock.json` (ver ADR-018).~~ **CERRADO** (PR #11).
 - ~~Integración con PDF Engine (`fuseOcrPage`).~~ **CERRADO** (PR #10).
 - ~~Tests completos.~~ **CERRADO** — `contract.test.ts`, `unit.test.ts`, `edge.test.ts` commiteados en `packages/anonymization-core/ocr-engine/src/__tests__/`.
-- Pendiente: verificación de integridad en runtime de assets (ADR-018 punto 3) → Hito 11.
+- ~~Pendiente: verificación de integridad en runtime de assets (ADR-018 punto 3) → Hito 11.~~ Retirado por ADR-187.
 
 ### Hito 4 — Regex Engine
 - ~~Implementar `regex-engine` con `DEFAULT_PATTERNS_AR`.~~ **CERRADO** (PR #13).
@@ -126,7 +126,7 @@ Orden sugerido (cada hito = un set de PRs):
 - Tests: `contract.test.ts`, `unit.test.ts`, `edge.test.ts`, `snapshot.test.ts`, `cancel.test.ts` commiteados en `packages/anonymization-core/ner-engine/src/__tests__/` (56 tests), cobertura 97.77% líneas. Pendientes: `stress.test.ts` (OOM/pool) → Hito 11 (junto con la infra `tests/stress/`; corregido de "Hito 9" por ADR-034 §6); `perf.test.ts` (recall ≥ 85% / precision ≥ 90%, informativas en MVP, §6) → Hito 11.
 - Correcciones de contrato del hito: mapeo `DATE → Date` y contrato de salida de NER ampliado a cuatro tipos (ADR-023 §2); `NerStarted.modelLoading?` y `batchSize` en palabras (ADR-024).
 - Los tests de integración con Regex (ambos emiten `ENTITY_FOUND`) viven en `tests/integration/` y son Hito 9 (Orchestrator) (ADR-010, `core/Orchestrator.md:239`, precedente `core/OCR_Engine.md:225`).
-- Pendiente: verificación de integridad en runtime del modelo (ADR-018 punto 3, `core/NER_Engine.md` §15.19) → Hito 11.
+- ~~Pendiente: verificación de integridad en runtime del modelo (ADR-018 punto 3, `core/NER_Engine.md` §15.19) → Hito 11.~~ Retirado por ADR-187.
 
 ### Hito 6 — Grouping Engine
 - ~~Implementar `grouping-engine` con matching, conflictos, reglas, fusión/división.~~ **CERRADO** (PR #16).
@@ -662,7 +662,7 @@ workflow en CI sigue pendiente.
   No se incorporan experimentos descartados ni se dan por cerrados los gates del hito.
 - Después del hardening: intención de migrar Electron a Tauri para evaluar
   menor costo del contenedor, como campaña separada (`Future_Ideas.md` §2.5).
-- Verificación de integridad en runtime de modelos/wasm (`crypto.subtle.digest` contra `assets.lock.json`, ADR-018 punto 3) en `ocr-engine` y `ner-engine`; hash mismatch → `OCR_MODEL_MISSING` / `NER_MODEL_LOAD_FAILED`. Incluye test de integridad: asset con hash alterado → error tipado, no se carga.
+- ~~Verificación de integridad en runtime de modelos/wasm (`crypto.subtle.digest` contra `assets.lock.json`, ADR-018 punto 3) en `ocr-engine` y `ner-engine`; hash mismatch → `OCR_MODEL_MISSING` / `NER_MODEL_LOAD_FAILED`. Incluye test de integridad: asset con hash alterado → error tipado, no se carga.~~ **Retirado por ADR-187 (2026-09-26)**: el verificador vive junto a los assets, fuera del `asar`, así que no cubre la manipulación después de instalar; exigiría además `fetch` desde el Core y una copia transitoria del modelo de NER. Esa amenaza la cubre la firma de código del instalador (Hito 11.5).
 - Audit `pnpm audit`.
 - Bundle size check.
 
@@ -700,10 +700,12 @@ Insertado con la convención decimal del repo, sin renumerar Release. Adelantado
 - **ABIERTO, con cobertura parcial resuelta por ADR-137** — El shell completo sigue sin un threshold plano porque `main.ts`, `preload.ts` y `windows-updater.ts` necesitan Electron y los cubren E2E y tests estáticos que no reportan cobertura v8. La superficie criptográfica nueva sí fue aislada como módulo puro, quedó incluida en `vitest.config.ts` con threshold propio ≥85% y mide 96,64% de líneas. Resolver el resto sin exclusiones engañosas sigue siendo política de proyecto y pide su ADR (R-18).
 - **ABIERTO** — Firma de código Windows vía SignPath Foundation (gratis para OSS; requiere el `LICENSE` de la raíz). Complementa ADR-137: autentica la **primera instalación**, da identidad de editor a Windows y permite construir reputación ante SmartScreen. Al integrarlo hay que reemplazar `win.signtoolOptions.publisherName: "__ANONLY_ED25519_ONLY__"` por el CN/DN real del certificado. El callback compuesto ya conserva el verificador Authenticode original y exigirá las dos comprobaciones: Ed25519 primero, Authenticode después.
 
+- **NO SE HACE — riesgo aceptado (2026-09-26)** — Firma Developer ID y notarización de macOS. No hay vía gratuita: solo las emite Apple con el Apple Developer Program pago, y su exención de cuota excluye a individuos. La app sigue con firma ad-hoc; qué queda sin cubrir y qué sí, en `08_Security_Model.md` §2.3.
 ### Hito 12 — Release 0.9.0
 - Docs finales, README del repo, demo.
 - Publicación de instaladores en GitHub Releases. ~~deploy a CDN estático~~ — no hay hosting: la app no se sirve, se descarga (ADR-130, ADR-131 §1).
 
+- README: guía del primer arranque en macOS. La app no está notarizada (`08_Security_Model.md` §2.3), así que Gatekeeper la bloquea la primera vez y el usuario tiene que permitirla desde Ajustes → Privacidad y seguridad.
 ### Hito 12.5 — Rediseño desde las pruebas de usuario (ADR-168 a ADR-172)
 
 **Origen**: pruebas de usuario sobre la 0.9.2 y un lienzo de diseño iterado con el humano
