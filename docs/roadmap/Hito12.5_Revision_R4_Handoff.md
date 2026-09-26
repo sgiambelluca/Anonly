@@ -24,6 +24,7 @@ computadora.
   - con la revisión 4, el typecheck pasa en cada commit de la ronda.
 - Fallas previas a esta branch: `mac-packaging.test.ts` y los E2E `scenario-2` y `scenario-5` (N-8). Van en un commit aparte sobre `hardening/plan-2026-09`, no en esta branch.
 - Tres `.snap` de ner, ocr y regex-engine aparecen modificados en el working tree de Windows. Solo difieren en los finales de línea: **no se commitean**.
+- **Actualización (2026-09-26):** la falla de `mac-packaging.test.ts` y los `.snap` modificados tenían la misma causa: CRLF en la copia de trabajo de Windows. `.gitattributes` ahora fija `eol=lf` (commit `1f99058`); con eso `pnpm test` pasa completo en Windows y los `.snap` ya no aparecen modificados. Siguen abiertos los E2E `scenario-2` y `scenario-5` (N-8).
 
 ## 2. Reporte de la revisión 4 (revisor, Opus)
 
@@ -151,4 +152,4 @@ Con **A**, el trabajo es:
    Un commit por módulo, typecheck en cada commit, y los cuatro gates antes de dar la tarea por lista.
 4. Revisión 5 con el `revisor` (Opus), sobre `git diff hardening/plan-2026-09...redesign/ui-pruebas-de-usuario`.
 5. Con APPROVED: el PR va contra `hardening/plan-2026-09`, **no** contra `main`.
-6. Aparte, sobre `hardening/plan-2026-09`: arreglar `mac-packaging.test.ts` (CRLF) y los E2E `scenario-2` y `scenario-5`.
+6. Aparte, sobre `hardening/plan-2026-09`: ~~arreglar `mac-packaging.test.ts` (CRLF)~~ (resuelto el 2026-09-26 por `.gitattributes` `eol=lf`) y los E2E `scenario-2` y `scenario-5`.

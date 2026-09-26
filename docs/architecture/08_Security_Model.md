@@ -48,6 +48,20 @@
 - Protección contra un usuario malicioso con acceso al dispositivo del otro: fuera de alcance (es un producto local).
 - Anonimización criptográficamente garantizada (k-anonimidad probada): el producto hace anonimización operacional, no criptográfica. Ver `roadmap/Future_Ideas.md` para futuras garantías.
 
+### 2.3 Riesgos residuales aceptados
+
+**La app de macOS no se firma con Developer ID ni se notariza** (decisión del humano, 2026-09-26). Se distribuye con firma ad-hoc (ADR-138). No hay forma gratuita de hacerlo: el certificado Developer ID y la notarización solo los emite Apple, dentro del Apple Developer Program, que es pago (USD 99 por año). La exención de cuota de Apple excluye expresamente a individuos y empresas unipersonales: solo aplica a personas jurídicas sin fines de lucro, instituciones educativas acreditadas y entes de gobierno. El proyecto no invierte dinero en esto.
+
+Lo que queda sin cubrir:
+
+- **Primera instalación.** macOS bloquea la app con Gatekeeper, y el usuario tiene que permitirla a mano (en versiones recientes, Ajustes → Privacidad y seguridad → «Abrir igualmente»). Es fricción real para un público no técnico; el README tiene que explicar el paso (Hito 12).
+- **Manipulación de los archivos después de instalar.** Sin una firma Developer ID verificable, el sistema operativo no garantiza que los archivos instalados no se hayan modificado, y desde ADR-187 la app tampoco lo verifica por dentro (§8.2). En macOS esta amenaza queda sin mitigación.
+- **Distribución por Homebrew.** Desde septiembre de 2026 el repositorio oficial de casks exige apps notarizadas; solo quedaría un repositorio propio (tap), con el mismo bloqueo de Gatekeeper.
+
+Lo que sigue cubierto: la **descarga** se puede verificar con `SHA256SUMS.txt` y la atestación de procedencia del release (ADR-132 §6), y cada **actualización** se valida con la clave Ed25519 propia de Sparkle (ADR-131 §4).
+
+Se revisa si el proyecto pasa a tener una persona jurídica elegible para la exención, o financiamiento para la cuota. Windows no está en esta situación: la firma de SignPath es gratuita para proyectos open source y sigue pendiente en el Hito 11.5.
+
 ---
 
 ## 3. Procesamiento 100% local
@@ -245,12 +259,12 @@ Lo que la reemplaza son dos verificaciones que sí muerden:
 - **sha256 por asset en `assets.lock.json`** (ADR-018). Es la única vía por la que bytes de terceros —modelos, wasm de Tesseract y de onnxruntime— entran al build: `pnpm assets:mirror` descarga, compara contra el pin y **no escribe el archivo** si el hash no coincide. Corre en CI antes de empaquetar.
 - **Procedencia del binario publicado** (ADR-132 §6): el workflow de release publica un `SHA256SUMS.txt` y una atestación de `attest-build-provenance`, que ata criptográficamente cada instalador a este commit y a este workflow. Sin certificado de Apple, esto **es** el argumento de confianza, no un extra.
 
-Pendiente de Hito 11: verificación de integridad en runtime del modelo y el wasm (`crypto.subtle.digest` contra `assets.lock.json`, ADR-018 punto 3), que cubre la manipulación del archivo **después** de instalado.
+**No hay verificación de integridad en runtime (ADR-187).** ADR-018 punto 3 la pedía para cubrir la manipulación de un archivo **después** de instalado, pero dentro de la app no puede cumplirlo: los modelos y el JavaScript que los verificaría viven juntos, como archivos sueltos fuera del `asar`, y quien reemplaza uno puede reemplazar el otro. Contra esa amenaza la defensa es la firma de código del instalador (ver el Hito 11.5), no un chequeo interno. En macOS esa firma no existe: es un riesgo aceptado (§2.3). La integridad de los assets se garantiza al construir (mirror contra el pin, arriba) y al distribuir (procedencia del binario).
 
 ### 8.3 Modelos IA
 
 - **Todos los modelos y wasm se sirven first-party**: viajan adentro del instalador y los entrega el protocolo `app://` del propio contenedor (ADR-130). Nunca desde HuggingFace ni jsDelivr en runtime (ADR-018).
-- El mirror se construye en build con `assets.lock.json` (URL de origen + revisión + `sha256` pinneados, verificados al descargar y al cargar en runtime).
+- El mirror se construye en build con `assets.lock.json` (URL de origen + revisión + `sha256` pinneados, verificados al descargar; no se re-verifican al cargar en runtime, ADR-187).
 - HuggingFace es solo la **fuente** del mirror (pinneada por commit hash), no un origen de runtime.
 - No se cargan modelos desde URLs arbitrarias o configurables por el usuario en MVP.
 

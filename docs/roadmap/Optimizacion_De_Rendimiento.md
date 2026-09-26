@@ -246,7 +246,7 @@ La duplicación de lógica se apartó a [`Duplicacion_De_Logica.md`](./Duplicaci
 
 ## Próximos objetivos — tiempo, consumo y perfiles (2026-09-20)
 
-**Estado: los cinco puntos tienen resultados en macOS. Windows nativo se midió el 2026-09-25 para los puntos 1–4 con el código previo a ADR-184; faltan en Windows ADR-184 y los brazos de Bajo del punto 5.** Decisión del humano: explorar el beneficio
+**Estado: los cinco puntos tienen resultados en macOS. Windows nativo se midió el 2026-09-25 para los puntos 1–4 y el 2026-09-26 para ADR-184 y los brazos de Bajo del punto 5: las cinco curvas están en las dos plataformas.** Decisión del humano: explorar el beneficio
 de hilos/workers y su costo de memoria, conservando la calidad. Un mayor consumo
 puede justificar una mejora de velocidad; el resultado debe permitir elegir ese
 compromiso por perfil. No se cambian presupuestos ni defaults con este plan.
@@ -276,8 +276,10 @@ el efecto depende del hardware. **Ampliación macOS (2026-09-26):** 48
 importaciones válidas separaron carga observable (0,80–1,03 s), panel DOM
 (0,17–0,64 s después de Ready) y secuencia R1→R1→R2→R2. Se observó
 reutilización en la segunda R1 y recarga en ambas R2; 6/8 siguieron más
-lentos con calidad exacta. El complemento equivalente en Windows, memoria
-atribuible a la carga y estrés de horas siguen pendientes. La tanda local de
+lentos con calidad exacta. El complemento equivalente en Windows (mismo día)
+dio carga de 1,04–1,38 s, el mismo patrón de reutilización y recarga, y 6/8
+más rápidos que A en los 48 pares. Memoria atribuible a la carga y estrés de
+horas siguen pendientes. La tanda local de
 cuatro documentos no cierra esos alcances.
 
 - Comparar el control efectivo actual con **4, 6 y 8 hilos de ONNX**, donde el
@@ -361,9 +363,12 @@ huellas idénticas en el banco sintético y en seis corridas R1/R2. El control
 repetido y los tiempos de proceso reales no mostraron regresión material. El
 índice retuvo unos 4,59 MiB adicionales en 2.000 alias; la curva puede seguir
 siendo cuadrática en corpus sin poda. Evidencia en
-`Agrupacion_Difusa_Medicion.md`. La repetición Windows del 2026-09-25 corrió
-sobre el código **previo** a ADR-184 (2,40 s a 2.000 distintos, ~1,6× la
-Mac con el mismo código); **ADR-184 en Windows sigue pendiente**.
+`Agrupacion_Difusa_Medicion.md`. **Windows nativo (2026-09-26):** el A/B de
+ADR-184 bajó el adverso de 2.000 de 2.660 a 382 ms (7,0×) con huellas
+idénticas y sin regresión en el control ni en R1/R2. El 1,6× que parecía
+separar Windows de la Mac era del motor JavaScript con que corre el banco
+sintético (Node 22 en Windows, Node 26 en la Mac): con el V8 de Electron, el
+del producto, Windows baja a 202 ms, por debajo de la Mac.
 
 Retomar los dos casos cuadráticos del relevamiento: patrón de email sobre texto
 adverso y búsqueda difusa con muchas entidades distintas. Primero reproducirlos
@@ -381,8 +386,10 @@ está validada para Windows ni cambió los settings del producto. La tanda local
 adicional OCR1/2/3/4 y NER Automático/1/2 cerró el 2026-09-25 con calidad y
 cancelación conservadas. Los tiempos, el RSS observado y las limitaciones de
 atribución WASM están en ese informe. Las curvas Windows de NER A/4/6/8 y
-OCR 2/3/4 ya están incorporadas a la revisión. **El punto queda pendiente de
-los brazos de Bajo y de la atribución de memoria en Windows y de la decisión
+OCR 2/3/4 ya están incorporadas a la revisión, y los brazos de Bajo se
+midieron en Windows el 2026-09-26 (misma conclusión que en la Mac: reducir
+hilos NER no conviene; Automático usa 4 hilos efectivos en las dos). **El
+punto queda pendiente de la atribución de memoria en Windows y de la decisión
 humana**. La curva WASM por reconocedor en macOS cerró el 2026-09-26;
 no se adoptaron perfiles ni defaults nuevos.
 

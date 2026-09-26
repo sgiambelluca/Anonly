@@ -53,6 +53,7 @@ agrega a `assets.lock.json` y se materializa con `pnpm assets:mirror` durante el
 paso que OCR hizo en PR #11. Este ADR fija la **decisión** del modelo; el pin concreto (hash) lo
 produce ese paso de mirror y se revisa en el PR, no se inventa acá. La verificación de integridad en
 runtime del modelo cargado sigue diferida a Hito 11 (ADR-018 punto 3, `NER_Engine.md` §15.19).
+**Retirada por ADR-187 (2026-09-26)**: no se implementa.
 
 **Corrección de tamaño.** mBERT tiene un vocabulario de ~119k tokens; su Q8 pesa **~150–180 MB**,
 no los ~50–80 MB que `ADR-006` §Consecuencias, `NER_Engine.md` §12 y `07_Performance_Strategy.md`

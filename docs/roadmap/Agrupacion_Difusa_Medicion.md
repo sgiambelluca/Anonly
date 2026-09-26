@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-medicion | dependencias=roadmap/Rendimiento_Experimentos_Plan.md,roadmap/Optimizacion_De_Rendimiento.md,core/Grouping_Engine.md,adr/ADR-184-Indice-Exacto-De-Candidatos-Para-Grouping.md,tests/perf/README.md,roadmap/OCR_Entre_Plataformas_Medicion.md | audiencia=humanos+IA | fase=11 (punto 4b, antes/después macOS 2026-09-24; ADR-184 sintético y R1/R2 medidos en macOS 2026-09-25; repetición Windows 2026-09-25 sobre el código previo a ADR-184 — ADR-184 en Windows pendiente) -->
+<!-- CONTEXT: scope=roadmap-medicion | dependencias=roadmap/Rendimiento_Experimentos_Plan.md,roadmap/Optimizacion_De_Rendimiento.md,core/Grouping_Engine.md,adr/ADR-184-Indice-Exacto-De-Candidatos-Para-Grouping.md,tests/perf/README.md,roadmap/OCR_Entre_Plataformas_Medicion.md | audiencia=humanos+IA | fase=11 (punto 4b, antes/después macOS 2026-09-24; ADR-184 sintético y R1/R2 medidos en macOS 2026-09-25; repetición Windows 2026-09-25; ADR-184 y causa del 1,6× (motor JS) medidos en Windows 2026-09-26) -->
 
 # Búsqueda difusa de Grouping — antes y después en macOS, repetido en Windows
 
@@ -257,6 +257,14 @@ El costo sigue cuadrático y todavía supera un segundo.
 
 ### Hallazgo 1 — el peor caso sintético es más lento en Windows, no más rápido
 
+> **Corregido el 2026-09-26: no es la máquina, es el motor JavaScript.** El
+> banco sintético corre en el Node del sistema vía `tsx`, no dentro de la app:
+> la Mac usó Node 26.5.1 y Windows Node 22.23.2 (V8 12.4). En esta misma
+> máquina, con el mismo código, el V8 15.2 de Electron —el que usa el
+> producto— tarda 1.362 ms contra los 2.446 ms de Node 22, y ya queda por
+> **debajo** de la Mac. Ver «ADR-184 en Windows y la causa del 1,6×» al final
+> de esta sección. Los párrafos siguientes quedan como historia.
+
 Con ADR-182+183 aplicados en las dos plataformas, el caso adverso de 2.000
 entidades distintas de 36 caracteres tardó **2.595 ms** en esta máquina
 contra **1.499 ms** en la Mac — **~1,73× más lento**, pese a que esta CPU es
@@ -324,15 +332,58 @@ contra 13,42 ms; una sola ronda en `defa7a2`), y los commits posteriores
 suman otro ~34 % (21,34 ms). En R2 la comparación además arrastra 4 grupos
 más en Windows, así que no se separa limpio.
 
+### ADR-184 en Windows y la causa del 1,6× (2026-09-26)
+
+**A/B de ADR-184.** Mismo protocolo que en la Mac: worktree baseline `ee5eeba`
+contra el índice (`bd6bd92`), mismo arnés en los dos brazos, tres rondas con
+orden A/B alternado por celda, y R1/R2 reales tres rondas por brazo. Node del
+sistema 22.23.2. 30 archivos por brazo, 0 fallas, huellas de grupos y orden
+**idénticas entre brazos** en todos los tamaños y en R1/R2. Salida:
+`.measure/grouping-adr184-win/20260926T045927Z/`.
+
+| Ocurrencias distintas | Proceso baseline → índice | Lookup inclusivo baseline → índice |
+|---:|---:|---:|
+| 250 | 64,68 → 29,84 ms | 47,21 → 6,98 ms |
+| 500 | 196,90 → 53,97 ms | 158,84 → 14,50 ms |
+| 1.000 | 707,88 → 119,80 ms | 604,93 → 27,23 ms |
+| 2.000 | 2.659,82 → 382,07 ms | 2.337,68 → 86,90 ms |
+
+El control repetido de 2.000 dio 166,49 → 155,38 ms: sin regresión. En R1,
+`processOccurrence` 21,28 → 20,40 ms y lookup 5,26 → 3,06 ms; en R2, 15,72 →
+15,45 ms y 2,36 → 2,43 ms. **ADR-184 queda confirmado en Windows**: 7,0× en
+el adverso de 2.000, con paridad completa.
+
+**La causa del 1,6×.** El banco sintético se ejecuta con el Node del sistema,
+así que compara motores distintos entre máquinas. Corrido en esta máquina con
+el Node embebido de Electron (`ELECTRON_RUN_AS_NODE=1`, Node 24.20.0, V8 15.2,
+el mismo motor del producto en las dos plataformas) contra Node 22 (V8 12.4),
+intercalado, tres rondas y huellas idénticas:
+
+| código | distintas | Node 22 / V8 12.4 | Electron / V8 15.2 | razón |
+|---|---:|---:|---:|---:|
+| `ee5eeba` (sin índice) | 1.000 | 638,5 ms | 359,7 ms | 1,78× |
+| `ee5eeba` (sin índice) | 2.000 | 2.445,7 ms | 1.361,8 ms | 1,80× |
+| `bd6bd92` (índice) | 1.000 | 111,1 ms | 73,3 ms | 1,52× |
+| `bd6bd92` (índice) | 2.000 | 336,7 ms | 201,8 ms | 1,67× |
+
+Con V8 15.2, Windows queda **por debajo** de la Mac en los dos estados del
+código: 1.362 contra 1.611 ms sin índice, 202 contra 264 ms con índice. La
+Mac no se corrió con el Node de Electron, así que la comparación exacta entre
+máquinas sigue sin estar hecha; lo que queda establecido es que el 1,6×
+venía de la versión del motor, no del hardware ni del SO. Artefactos:
+`.measure/grouping-v8-engine-win/20260926/`.
+
+**Consecuencia para el método.** Los bancos sintéticos que corren con `tsx`
+(Grouping y Regex) dependen de la versión de Node de cada máquina, y el JSON
+de Grouping no la registra. Comparar plataformas exige el mismo motor
+—idealmente el de Electron, que es el del producto— o al menos registrar la
+versión. Cambiar el arnés es trabajo del planificador; no se modificó.
+
 ### Conclusión
 
-La robustez temporal del peor caso de Grouping **no está cerrada en ninguna
-plataforma**, y en esta máquina el número absoluto es peor que en la Mac, no
-mejor: 2,40 s contra 1,50 s a 2.000 entidades distintas con el mismo código
-(2,60 s con el código de `ee5eeba`). La calidad (huellas, orden, conteos) es
-estable dentro de cada plataforma entre rondas. La diferencia de conteo de R2
-entre plataformas viene del OCR, no de Grouping
-(`OCR_Entre_Plataformas_Medicion.md`). Ninguna de las dos observaciones cambia
-la decisión ya tomada en ADR-182/183; ambas son datos nuevos para quien
-decida si hace falta un índice de candidatos de recall completo (la mejora
-pendiente que ya señalaba la sección de macOS).
+Con ADR-184, el peor caso sintético de 2.000 distintas bloquea ~382 ms con el
+Node del sistema y ~202 ms con el motor del producto en esta máquina, y la
+calidad (huellas, orden, conteos) queda idéntica entre brazos. La brecha con
+la Mac que mostraban las secciones anteriores era de motor JavaScript, no de
+plataforma. La diferencia de conteo de R2 entre plataformas viene del OCR, no
+de Grouping (`OCR_Entre_Plataformas_Medicion.md`).

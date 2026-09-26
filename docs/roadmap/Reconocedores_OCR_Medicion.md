@@ -221,7 +221,8 @@ reservada al planificador con su propio ADR** — este informe no la toma.
 snapshots completos. P2 sintético de 50 páginas y R2 real de 20; tres rondas
 intercaladas por corpus (`2/3/4`, `4/3/2`, `2/4/3`), cada brazo con una
 corrida de RSS natural y otra de atribución. Una instancia Electron nueva
-por corrida, un mismo build, M1 arm64 de 8 GiB, Node 22. Sin cambios de
+por corrida, un mismo build, M1 arm64 de 8 GiB, Node 26.5.1 en el arnés
+(versión registrada en `host.json`). Sin cambios de
 producto, defaults, DPI, modelo, presupuesto de imágenes ni contratos.
 
 Protocolo cerrado antes de medir:

@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-mvp | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,adr/ADR-011-Grouping-First.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-138-Instalador-Universal-De-macOS.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-168-Pantallas-De-Carga-Y-Escaneo-Tras-Pruebas-De-Usuario.md,adr/ADR-169-La-Pantalla-De-Trabajo-Tras-Pruebas-De-Usuario.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-173-El-Motor-Rechaza-Fusiones-Y-Divisiones-Invalidas.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,adr/ADR-175-Un-Choque-Manual-No-Queda-Colgado.md,adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md,adr/ADR-177-Una-Entidad-Eliminada-No-Ocupa-Lugar.md,adr/ADR-178-Lo-Contenido-Se-Oculta-Solo-Si-Su-Contenedor-Se-Elimina.md,adr/ADR-179-El-Empaquetado-De-NER-Se-Evalua-Sin-Cambiar-El-Modelo.md,adr/ADR-180-Los-PDFs-Pesados-Se-Miden-Hasta-El-Archivo-Exportado.md,adr/ADR-184-Indice-Exacto-De-Candidatos-Para-Grouping.md,adr/ADR-185-Gates-De-Leak-Y-Stress-En-Electron.md,roadmap/Optimizacion_De_Memoria_Plan.md,roadmap/PDFs_Pesados_Y_Exportacion_Plan.md,roadmap/PDFs_Pesados_Y_Exportacion_Medicion.md,roadmap/Empaquetado_NER_Medicion.md,roadmap/Optimizacion_De_Rendimiento.md | audiencia=humanos+IA | fase=11.6 (Hitos 1–10 cerrados; Hito 12.5 de UI y campaña de rendimiento documentados; escritorio y verificación de actualizaciones en validación; Grouping ADR-184 y gates Leak/Stress ADR-185 implementados localmente, Windows/CI pendientes) -->
+<!-- CONTEXT: scope=roadmap-mvp | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,adr/ADR-011-Grouping-First.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-138-Instalador-Universal-De-macOS.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-168-Pantallas-De-Carga-Y-Escaneo-Tras-Pruebas-De-Usuario.md,adr/ADR-169-La-Pantalla-De-Trabajo-Tras-Pruebas-De-Usuario.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-173-El-Motor-Rechaza-Fusiones-Y-Divisiones-Invalidas.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,adr/ADR-175-Un-Choque-Manual-No-Queda-Colgado.md,adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md,adr/ADR-177-Una-Entidad-Eliminada-No-Ocupa-Lugar.md,adr/ADR-178-Lo-Contenido-Se-Oculta-Solo-Si-Su-Contenedor-Se-Elimina.md,adr/ADR-179-El-Empaquetado-De-NER-Se-Evalua-Sin-Cambiar-El-Modelo.md,adr/ADR-180-Los-PDFs-Pesados-Se-Miden-Hasta-El-Archivo-Exportado.md,adr/ADR-184-Indice-Exacto-De-Candidatos-Para-Grouping.md,adr/ADR-185-Gates-De-Leak-Y-Stress-En-Electron.md,roadmap/Optimizacion_De_Memoria_Plan.md,roadmap/PDFs_Pesados_Y_Exportacion_Plan.md,roadmap/PDFs_Pesados_Y_Exportacion_Medicion.md,roadmap/Empaquetado_NER_Medicion.md,roadmap/Optimizacion_De_Rendimiento.md | audiencia=humanos+IA | fase=11.6 (Hitos 1–10 cerrados; Hito 12.5 de UI y campaña de rendimiento documentados; escritorio y verificación de actualizaciones en validación; Grouping ADR-184 y gates Leak/Stress ADR-185 implementados y validados en macOS y Windows; CI pendiente) -->
 # Anonly — Roadmap MVP
 
 > Define el alcance exacto del primer release. Cualquier cosa fuera de esta lista **no** entra en MVP. v1.0 y v2.0 viven en sus propios docs.
@@ -111,7 +111,7 @@ Orden sugerido (cada hito = un set de PRs):
 - ~~Assets de Tesseract servidos first-party: script `scripts/mirror-assets.ts` + `assets.lock.json` (ver ADR-018).~~ **CERRADO** (PR #11).
 - ~~Integración con PDF Engine (`fuseOcrPage`).~~ **CERRADO** (PR #10).
 - ~~Tests completos.~~ **CERRADO** — `contract.test.ts`, `unit.test.ts`, `edge.test.ts` commiteados en `packages/anonymization-core/ocr-engine/src/__tests__/`.
-- Pendiente: verificación de integridad en runtime de assets (ADR-018 punto 3) → Hito 11.
+- ~~Pendiente: verificación de integridad en runtime de assets (ADR-018 punto 3) → Hito 11.~~ Retirado por ADR-187.
 
 ### Hito 4 — Regex Engine
 - ~~Implementar `regex-engine` con `DEFAULT_PATTERNS_AR`.~~ **CERRADO** (PR #13).
@@ -126,7 +126,7 @@ Orden sugerido (cada hito = un set de PRs):
 - Tests: `contract.test.ts`, `unit.test.ts`, `edge.test.ts`, `snapshot.test.ts`, `cancel.test.ts` commiteados en `packages/anonymization-core/ner-engine/src/__tests__/` (56 tests), cobertura 97.77% líneas. Pendientes: `stress.test.ts` (OOM/pool) → Hito 11 (junto con la infra `tests/stress/`; corregido de "Hito 9" por ADR-034 §6); `perf.test.ts` (recall ≥ 85% / precision ≥ 90%, informativas en MVP, §6) → Hito 11.
 - Correcciones de contrato del hito: mapeo `DATE → Date` y contrato de salida de NER ampliado a cuatro tipos (ADR-023 §2); `NerStarted.modelLoading?` y `batchSize` en palabras (ADR-024).
 - Los tests de integración con Regex (ambos emiten `ENTITY_FOUND`) viven en `tests/integration/` y son Hito 9 (Orchestrator) (ADR-010, `core/Orchestrator.md:239`, precedente `core/OCR_Engine.md:225`).
-- Pendiente: verificación de integridad en runtime del modelo (ADR-018 punto 3, `core/NER_Engine.md` §15.19) → Hito 11.
+- ~~Pendiente: verificación de integridad en runtime del modelo (ADR-018 punto 3, `core/NER_Engine.md` §15.19) → Hito 11.~~ Retirado por ADR-187.
 
 ### Hito 6 — Grouping Engine
 - ~~Implementar `grouping-engine` con matching, conflictos, reglas, fusión/división.~~ **CERRADO** (PR #16).
@@ -551,8 +551,12 @@ De las ~70: **~30 ya estaban cerradas** por hitos posteriores (ADR-053/054/056, 
 `test:leak` bloquea por workers/heap JS con GC, sin usar RSS como veredicto;
 `test:stress` es un centinela relativo 50/200 páginas, sin alterar los
 presupuestos contractuales. Ambos están implementados y pasaron localmente en
-macOS arm64 (Leak L1/L2/L3: 10/10 ciclos cada uno; Stress: 3/3 casos). La
-ejecución real del workflow en CI sigue pendiente.
+macOS arm64 (Leak L1/L2/L3: 10/10 ciclos cada uno; Stress: 3/3 casos) y en
+Windows x64 el 2026-09-26 con los mismos resultados. Esa corrida destapó que
+`test:e2e`, `test:perf`, `test:stress` y `test:leak` no arrancaban en Windows
+(prefijo `VITE_E2E=1` POSIX bajo `cmd.exe`); ADR-186 lo resuelve con
+`cross-env`, `devDependency` sin efecto en el producto. La ejecución real del
+workflow en CI sigue pendiente.
 - Campaña de memoria H-10: T-1/T-2 cerradas, T-3 cerrada inconclusa con la
   extrapolación lineal descartada; T-4 cerrada como compuerta exacta de franjas
   blancas (ADR-162), con 137/137 tests scoped verdes. La heurística calibrada para márgenes
@@ -629,10 +633,10 @@ ejecución real del workflow en CI sigue pendiente.
   más en Windows), `Lotes_NER_Factibilidad.md` (lotes NER — bloqueado en las
   dos plataformas por diferencias de calidad, no se adopta),
   `Patron_Email_Regex_Medicion.md` y `Agrupacion_Difusa_Medicion.md` (Regex ya
-  corregido por ADR-181, confirmado en Windows; Grouping: con ADR-182/183 el
-  peor caso sintético fue **más lento** en Windows que en macOS —2,40 s contra
-  1,50 s a 2.000 entidades con el mismo código, sin causa investigada—, y
-  después ADR-184 lo bajó en macOS a ~264 ms; ADR-184 en Windows pendiente). Los documentos escaneados dan conteos de detección
+  corregido por ADR-181, confirmado en Windows; Grouping: ADR-184 bajó el peor
+  caso de 2.000 entidades a ~264 ms en macOS y a ~382 ms en Windows, 7,0×, con
+  huellas idénticas. La brecha aparente entre plataformas era del motor
+  JavaScript del banco sintético: con el V8 de Electron, Windows da ~202 ms). Los documentos escaneados dan conteos de detección
   distintos por plataforma, porque el ráster que llega al OCR cambia con la
   aceleración por GPU del canvas: no se comparan entre plataformas
   (`OCR_Entre_Plataformas_Medicion.md`).
@@ -643,9 +647,11 @@ ejecución real del workflow en CI sigue pendiente.
   plataformas sigue sin referencia real compartida. El complemento NER
   separó carga, panel DOM y cuatro documentos consecutivos por instancia:
   **48 importaciones válidas**, calidad exacta y 6/8 hilos más lentos que A
-  también al reutilizar el modelo. Ese complemento Windows sigue pendiente;
-  no atribuye memoria ni sustituye una prueba de horas. Ver la sección final
-  de `Hilos_NER_Medicion.md`. No cambia defaults ni cierra los gates del hito.
+  también al reutilizar el modelo. El complemento Windows (mismo día, 48
+  importaciones válidas) dio lo contrario para los hilos: 6/8 más rápidos que
+  A en los 48 pares, con la misma reutilización y recarga del modelo. No
+  atribuye memoria ni sustituye una prueba de horas. Ver las dos secciones
+  finales de `Hilos_NER_Medicion.md`. No cambia defaults ni cierra los gates del hito.
   La curva de **memoria WASM OCR 2/3/4 en macOS cerró el 2026-09-26**:
   36 corridas válidas, 54 snapshots completos y calidad exacta. Incrementos
   medianos de 141,125 MiB en P2 y 85,8125 MiB en R2; RSS total sin crecimiento
@@ -664,7 +670,7 @@ ejecución real del workflow en CI sigue pendiente.
   No se incorporan experimentos descartados ni se dan por cerrados los gates del hito.
 - Después del hardening: intención de migrar Electron a Tauri para evaluar
   menor costo del contenedor, como campaña separada (`Future_Ideas.md` §2.5).
-- Verificación de integridad en runtime de modelos/wasm (`crypto.subtle.digest` contra `assets.lock.json`, ADR-018 punto 3) en `ocr-engine` y `ner-engine`; hash mismatch → `OCR_MODEL_MISSING` / `NER_MODEL_LOAD_FAILED`. Incluye test de integridad: asset con hash alterado → error tipado, no se carga.
+- ~~Verificación de integridad en runtime de modelos/wasm (`crypto.subtle.digest` contra `assets.lock.json`, ADR-018 punto 3) en `ocr-engine` y `ner-engine`; hash mismatch → `OCR_MODEL_MISSING` / `NER_MODEL_LOAD_FAILED`. Incluye test de integridad: asset con hash alterado → error tipado, no se carga.~~ **Retirado por ADR-187 (2026-09-26)**: el verificador vive junto a los assets, fuera del `asar`, así que no cubre la manipulación después de instalar; exigiría además `fetch` desde el Core y una copia transitoria del modelo de NER. Esa amenaza la cubre la firma de código del instalador (Hito 11.5).
 - Audit `pnpm audit`.
 - Bundle size check.
 
@@ -700,10 +706,12 @@ Insertado con la convención decimal del repo, sin renumerar Release. Adelantado
   Verificación local ya corrida: 50/50 tests del shell; 1962/1962 tests globales; 96,64% de líneas del módulo criptográfico; 24/24 E2E; empaquetado NSIS exitoso y `app-update.yml` inspeccionado con el `publisherName` reservado. Falta cargar/probar el secret real mediante `workflow_dispatch`; ese flujo firma pero no publica, y es el gate final para cerrar el hito antes del tag.
 
 - **ABIERTO, con cobertura parcial resuelta por ADR-137** — El shell completo sigue sin un threshold plano porque `main.ts`, `preload.ts` y `windows-updater.ts` necesitan Electron y los cubren E2E y tests estáticos que no reportan cobertura v8. La superficie criptográfica nueva sí fue aislada como módulo puro, quedó incluida en `vitest.config.ts` con threshold propio ≥85% y mide 96,64% de líneas. Resolver el resto sin exclusiones engañosas sigue siendo política de proyecto y pide su ADR (R-18).
+- **NO SE HACE — riesgo aceptado (2026-09-26)** — Firma Developer ID y notarización de macOS. No hay vía gratuita: solo las emite Apple con el Apple Developer Program pago, y su exención de cuota excluye a individuos. La app sigue con firma ad-hoc; qué queda sin cubrir y qué sí, en `08_Security_Model.md` §2.3.
 - **ABIERTO** — Firma de código Windows vía SignPath Foundation (gratis para OSS; requiere el `LICENSE` de la raíz). Complementa ADR-137: autentica la **primera instalación**, da identidad de editor a Windows y permite construir reputación ante SmartScreen. Al integrarlo hay que reemplazar `win.signtoolOptions.publisherName: "__ANONLY_ED25519_ONLY__"` por el CN/DN real del certificado. El callback compuesto ya conserva el verificador Authenticode original y exigirá las dos comprobaciones: Ed25519 primero, Authenticode después.
 
 ### Hito 12 — Release 0.9.0
 - Docs finales, README del repo, demo.
+- README: guía del primer arranque en macOS. La app no está notarizada (`08_Security_Model.md` §2.3), así que Gatekeeper la bloquea la primera vez y el usuario tiene que permitirla desde Ajustes → Privacidad y seguridad.
 - Publicación de instaladores en GitHub Releases. ~~deploy a CDN estático~~ — no hay hosting: la app no se sirve, se descarga (ADR-130, ADR-131 §1).
 
 ### Hito 12.5 — Rediseño desde las pruebas de usuario (ADR-168 a ADR-172)
@@ -749,7 +757,7 @@ entidad con supresión por sesión), ADR-172 (deshacer y rehacer exactos por pun
 
 **Revisión 1 (2026-09-24): REJECTED** con tres bloqueantes — B-1 (typecheck rojo en `tests/`), B-2 (ADR-170 enumeraba rechazos que el motor no hacía → ADR-173), B-3 (el toast de alta podía mentir → ADR-174) — y no bloqueantes N-1 a N-8. Las filas 10-14 los cierran. N-8 (`scenario-2`/`scenario-5` de E2E) es anterior a esta branch: va en un commit aparte sobre `hardening/plan-2026-09`.
 
-**Revisión 2 (2026-09-24): REJECTED**: B-1 y B-2 cerrados; B-3 abierto por dos caminos —un choque que se "resolvía" solo al desaparecer la detección, y `heldConflictIds` por igualdad exacta de texto—. ADR-175 los cierra (filas 15-18). También cae ahí `mac-packaging.test.ts` de `apps/desktop-shell`: falla fuera de esta branch por los CRLF de `electron-builder.yml` con `core.autocrlf=true`, igual que N-8.
+**Revisión 2 (2026-09-24): REJECTED**: B-1 y B-2 cerrados; B-3 abierto por dos caminos —un choque que se "resolvía" solo al desaparecer la detección, y `heldConflictIds` por igualdad exacta de texto—. ADR-175 los cierra (filas 15-18). También cae ahí `mac-packaging.test.ts` de `apps/desktop-shell`: falla fuera de esta branch por los CRLF de `electron-builder.yml` con `core.autocrlf=true`, igual que N-8 (resuelto el 2026-09-26: `.gitattributes` fija `eol=lf`).
 
 **Revisión 3 (2026-09-24): REJECTED**: los dos bloqueantes de la revisión 2 cerrados; tres nuevos —nada bloqueaba el export con un conflicto sin resolver, fusionar/dividir la detección dejaba el choque inalcanzable, y un agregado contenido (ADR-117) rompía el invariante de `groupIds`—. ADR-176 los cierra (filas 19-22).
 

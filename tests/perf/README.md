@@ -184,8 +184,9 @@ empaquetado. La campaña no recompila ni altera defaults. Repetido en Windows
 nativo el 2026-09-25 (ver `docs/roadmap/Lotes_NER_Factibilidad.md`
 §"Repetición Windows nativo"): mismo bloqueo de adopción. Ese arnés
 (`tests/perf/ner-batch-real.mjs`) tenía un bug de portabilidad — un regex
-sensible a CRLF que rompía en un checkout Windows — corregido localmente
-(no commiteado todavía).
+sensible a CRLF que rompía en un checkout Windows —, corregido en `45d07fd`.
+La causa de fondo, los CRLF de la copia de trabajo, la elimina `.gitattributes`
+con `eol=lf` (ver «Comparativa externa»).
 
 ### Resultado macOS 2026-09-24 — R1/R2
 
@@ -676,6 +677,8 @@ En Windows corre desde Git Bash, con un toolchain **nativo** aparte del de WSL (
 - El postinstall de Electron no corre: ejecutar a mano `node install.js` dentro de `node_modules/.pnpm/electron@<versión>/node_modules/electron`.
 - El perfil P2 de T-10 necesita `pnpm exec playwright install chromium` para generar su fixture.
 - `systemMemoryPressure.ts` no tiene lector para `win32`: las corridas de Windows salen sin el chequeo de "RSS confundido".
+- Finales de línea: desde 2026-09-26 `.gitattributes` fija `eol=lf`, así que una copia de Windows con `core.autocrlf=true` escribe los archivos con LF igual que macOS/Linux. Antes quedaban con CRLF y rompían todo lo que compara texto multilínea con `\n`: `mac-packaging.test.ts`, los `.snap` que aparecían modificados sin cambios, y el regex de `ner-batch-real.mjs`. Una copia de Windows anterior a ese cambio se reescribe una sola vez, con el árbol limpio: `git rm --cached -r . && git reset --hard`.
+- Scripts con variables de entorno: desde ADR-186 `test:e2e`, `test:perf`, `test:stress` y `test:leak` usan `cross-env`, y corren también desde PowerShell o `cmd.exe`. Un script nuevo que necesite una variable de entorno usa `cross-env`, no el prefijo POSIX `VAR=valor`.
 
 Antes de comparar dos versiones, verificar con `git diff <viejo> <nuevo> -- apps/react-client/src/components/toolbar/` que la etiqueta de estado no cambió, y ojo con **dónde cae "Listo"**: hasta `19b4d13` la toolbar lo mostraba justo en `Ready`; desde el hardening la pantalla de escaneo retiene hasta 1 s más (`SCAN_ADVANCE_PREWARM_GRACE_MS`). Para comparar `Ready` contra `Ready`, leer la marca de etapa de cada versión (informe §3.1).
 
