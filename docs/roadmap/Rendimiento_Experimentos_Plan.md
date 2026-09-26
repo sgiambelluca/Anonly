@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-plan | dependencias=roadmap/Optimizacion_De_Rendimiento.md,roadmap/Optimizacion_De_Memoria_Plan.md,roadmap/Ciclos_Y_Documentos_Reales_Medicion.md,roadmap/Banco_Windows_Comparativa_Medicion.md,core/NER_Engine.md,core/OCR_Engine.md,core/Regex_Engine.md,core/Grouping_Engine.md,core/Contracts.md,adr/ADR-147-Perder-Un-Identificador-Cubierto-Es-Una-Regresion.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 (protocolo para la campaña de rendimiento; 2026-09-23) -->
+<!-- CONTEXT: scope=roadmap-plan | dependencias=roadmap/Optimizacion_De_Rendimiento.md,roadmap/Optimizacion_De_Memoria_Plan.md,roadmap/Ciclos_Y_Documentos_Reales_Medicion.md,roadmap/Banco_Windows_Comparativa_Medicion.md,core/NER_Engine.md,core/OCR_Engine.md,core/Regex_Engine.md,core/Grouping_Engine.md,core/Contracts.md,adr/ADR-147-Perder-Un-Identificador-Cubierto-Es-Una-Regresion.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 (protocolo para la campaña de rendimiento 2026-09-23; ampliación macOS de carga/panel/secuencia 2026-09-26) -->
 
 # Campaña de rendimiento — protocolo y condiciones de avance
 
@@ -116,6 +116,84 @@ El informe muestra por brazo y documento: hilos efectivos, carga, inferencia,
 Presenta curva de ganancia incremental frente al costo de memoria y la deriva
 del control; no fija un ganador por el menor tiempo de una corrida. El brazo
 del producto sigue en automático hasta decisión posterior y su ADR.
+
+### 1.1 Ampliación macOS: carga, panel e importaciones consecutivas (2026-09-26)
+
+El humano autorizó cerrar estos tres huecos mientras se ejecutan otras campañas
+en Windows. Esta ampliación usa el producto vigente, sin cambiar defaults ni
+contratos, y se ejecuta después de la sonda OCR, sin otro banco concurrente.
+
+- Construir A/4/6/8 desde la misma revisión, con los parches reversibles del
+  banco anterior. Registrar hashes de builds/modelo, estado del árbol y host;
+  restaurar fuente y build A al terminar, incluso ante un fallo.
+  El agregador decodifica todo el esquema y coteja filename/ID con fase,
+  brazo, bloque y corpus esperados; host, versiones y commit coinciden entre
+  reportes y el valor solicitado corresponde al brazo. La sonda pthread
+  corresponde a `ARM-P1-r0`, fase `threads`, corpus P1 y el mismo solicitado,
+  con efectivo entero positivo. No inferir identidad a partir del filename ni
+  usar un cast para aceptar JSON no validado. Node del runner y Node de Electron
+  son versiones distintas: registrarlas y no compararlas como el mismo proceso.
+- Control sintético P1/P2: una importación por brazo para verificar ejecución y
+  huellas exactas antes del banco real. Verificar los hilos mediante una pasada
+  separada con la sonda existente; no atribuir un número efectivo si no se ve.
+- Tres bloques intercalados A→4→6→8, 8→6→4→A y A→6→8→4. Cada combinación
+  bloque/brazo abre una instancia nueva de Electron y procesa **R1→R1→R2→R2**
+  en esa misma instancia. Son 48 importaciones reales. Cerrar cada documento
+  mediante la UI y empezar el siguiente apenas vuelve el selector, sin pausa
+  artificial. Registrar el intervalo real entre documentos. Es una tanda
+  interactiva de cuatro documentos, no una prueba de horas ni un ensayo térmico.
+- Registrar por importación `NER_STARTED`, primer `NER_MODEL_LOADING`,
+  `NER_MODEL_READY`, `NER_FINISHED`, `DOCUMENT_IMPORTED` y `PIPELINE_READY`
+  con reloj monotónico **al entrar a `bus.emit`**, antes de sus consumidores:
+  el bus despacha síncrono y un consumidor de `NER_FINISHED` puede emitir
+  `PIPELINE_READY` antes de que un listener tardío observe `NER_FINISHED`.
+  El piloto P1 lo mostró (Ready observado 0,05 ms antes). El arnés envuelve
+  `emit` en la instancia de prueba, conserva receptor/argumentos/resultado y
+  delega al método original; no modifica payloads, orden ni código del bus.
+  Los listeners siguen recolectando datos, pero no fijan esas marcas. Una
+  inversión real en estas marcas de emisión invalida el caso; no se relaja
+  el gate con una tolerancia arbitraria. **Carga observable** es primer `MODEL_LOADING`→
+  `MODEL_READY`; el viejo `loadMs` (`NER_STARTED`→`MODEL_READY`) incluye trabajo
+  previo y no sustituye esa medida. Si se reutiliza el modelo, ambos eventos
+  están ausentes y la carga se informa como no ejercitada, sin inventar cero.
+  Registrar aparte `NER_STARTED`→`NER_FINISHED` y `MODEL_READY`→`NER_FINISHED`;
+  este último incluye el trabajo host posterior y no es tiempo puro de ONNX.
+- Medir panel visible con `MutationObserver` y verificación de visibilidad del
+  botón «Exportar», instalado antes de importar. Informar selección de archivo→
+  panel, `DOCUMENT_IMPORTED`→panel y `PIPELINE_READY`→panel; una lectura tardía
+  desde Node después de esperar `Ready` solo da una cota de observación. Nunca
+  confundir visibilidad DOM con presentación física de un frame en pantalla.
+- Sondas de tiempo sin CDP/heap/snapshots/GC durante la tanda. Recolectar solo
+  conteos de palabras/caracteres por página, jobs NER y huellas exactas de NER,
+  OCR y Grouping. Texto, palabras, tokens y firmas intermedias permanecen en el
+  renderer; Node recibe números y digestos. Archivos reales solo por variables
+  de entorno, nombres neutros, sin PDF, rutas ni nombres reales en artefactos.
+  Usar `PLAYWRIGHT_NO_COPY_PROMPT=1` en runner y spec: Playwright 1.61 captura
+  un snapshot ARIA del DOM ante fallos incluso con trace/screenshot/video
+  apagados; ese flag evita que el contenido real salga al contexto de error.
+- Fallo de pipeline, panel ausente, marcas incompletas/invertidas, salida vacía,
+  huella distinta, jobs NER simultáneos >1 o suspensión invalidan el bloque.
+  Cada duración obligatoria debe ser finita, no negativa y exactamente la
+  resta de sus dos marcas; no descartar null/NaN para declarar válido un
+  agregado incompleto. Solo carga y `MODEL_READY`→`NER_FINISHED` admiten null
+  cuando ambos eventos de carga están ausentes. Reservar también el archivo
+  inicial del spec con creación exclusiva, antes de cualquier catch que
+  persista parciales: una ejecución manual repetida no puede sobrescribirlo.
+  Conservar parciales en salida nueva sin sobrescribir y repetir el bloque
+  completo afectado. Registrar presión antes/después y cada corrida cronológica.
+- Agregar medianas/rangos por brazo, corpus y posición; comparar pares dentro
+  del bloque, deriva de A y primera/segunda importación de cada corpus. No
+  llamar caliente a una repetición si sus eventos muestran recarga. La curva
+  previa de memoria sigue como referencia; este complemento no atribuye RSS a
+  la carga ni reemplaza la campaña de memoria. A/1/2 ya tiene tiempos locales:
+  su ampliación de carga/secuencia queda separada de esta campaña A/4/6/8.
+
+**Ejecución cerrada el 2026-09-26:** ocho preflights sintéticos válidos,
+cuatro sondas pthread separadas (A/4/6/8 = 4/4/6/8 efectivos) y 48
+importaciones reales válidas en doce secuencias, sin suspensión. Resultados
+y límites en `Hilos_NER_Medicion.md`, sección final. Este cierre cubre la
+carga observable, panel DOM y tanda de cuatro documentos en macOS; no cierra
+su repetición Windows, una prueba de horas ni la atribución de memoria.
 
 ## 2. Brazo OCR: reconocedores LSTM
 

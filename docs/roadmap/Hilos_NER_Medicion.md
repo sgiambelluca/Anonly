@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-medicion | dependencias=roadmap/Rendimiento_Experimentos_Plan.md,roadmap/Optimizacion_De_Rendimiento.md,roadmap/Ciclos_Y_Documentos_Reales_Plan.md,core/NER_Engine.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 (punto 1, medición macOS 2026-09-23/24 y Windows nativo 2026-09-25; ambas cerradas) -->
+<!-- CONTEXT: scope=roadmap-medicion | dependencias=roadmap/Rendimiento_Experimentos_Plan.md,roadmap/Optimizacion_De_Rendimiento.md,roadmap/Ciclos_Y_Documentos_Reales_Plan.md,core/NER_Engine.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 (punto 1, curvas macOS 2026-09-23/24 y Windows nativo 2026-09-25 cerradas; ampliación macOS de carga/panel/secuencia cerrada 2026-09-26) -->
 
 # Hilos internos de ONNX para NER — medición macOS y Windows nativo
 
@@ -95,10 +95,19 @@ independiente de cese físico de CPU. El banco terminó sin fallos y dejó el
 El arnés de esta tanda no separó carga del modelo para cada brazo ni midió el
 momento de aparición del panel o una secuencia sostenida de importaciones en la
 misma instancia. `Ready` incluye esos costos, pero no permite atribuirlos a la
-carga o al panel. Esas tres mediciones del plan original siguen pendientes y
-deben añadirse en la repetición de Windows o en una ampliación controlada del
-banco; la conclusión local se limita a inferencia, `Ready`, pico RSS, calidad y
-cancelación.
+carga o al panel. Esas tres mediciones no quedaron cerradas por esta tanda;
+la conclusión histórica se limita a inferencia, `Ready`, pico RSS, calidad y
+cancelación. La ampliación macOS del 2026-09-26 las separa con el alcance
+descrito al final de este informe; el complemento equivalente en Windows
+sigue pendiente.
+
+**Ampliación macOS autorizada el 2026-09-26:**
+`Rendimiento_Experimentos_Plan.md` §1.1 define carga observable, panel DOM y
+tres bloques A/4/6/8 con R1→R1→R2→R2 en una misma instancia. La sonda OCR
+entre plataformas ya completó su ampliación macOS
+(`OCR_Entre_Plataformas_Medicion.md`, sección final). El complemento NER
+completó **48 importaciones válidas en 12 secuencias**; ver la sección final.
+Sus resultados no se mezclan con la tabla histórica anterior.
 
 ## Pendiente antes de adoptar (histórico, cerrado por la repetición Windows de abajo)
 
@@ -251,3 +260,192 @@ nunca matchea `\r\n`, así que la extracción fallaba antes de abrir Electron.
 Se corrigió a `` \r?\n `` localmente (sin commitear todavía; ver el cierre de
 la sesión para pedir autorización de commit). No afecta a esta campaña de
 hilos: `ner-threads.spec.ts` no usa esa extracción por regex.
+
+
+---
+
+## Ampliación macOS — carga, panel y secuencia (2026-09-26)
+
+**Cerrada con el alcance del protocolo §1.1:** ocho preflights P1/P2,
+cuatro observaciones pthread separadas y **48 importaciones reales válidas
+en doce secuencias**, cero fallos o bloques invalidados por suspensión.
+La selección automática conserva cuatro hilos efectivos; solicitar 4/6/8
+produjo 4/6/8 observables. El agregado validó esquema, identidad, host,
+revisión, modelo y hashes de fuente/build por brazo.
+
+### Banco y procedencia
+
+- Producto `bd6bd92`, MacBook Air M1, arm64, 8 GiB, ocho CPU visibles,
+  Electron 44.2.0. Node del runner: 26.5.1; el Node integrado de Electron se
+  registra aparte en cada reporte. Mismo modelo Q8 y un único worker NER.
+- `tests/perf/run-ner-gaps.sh` y `tests/perf/ner-gaps.spec.ts`;
+  tres bloques A→4→6→8, 8→6→4→A y A→6→8→4. Cada brazo/bloque abre
+  Electron nuevo y procesa **R1→R1→R2→R2** dentro de esa instancia.
+  Son cuatro documentos consecutivos por instancia, no una prueba de horas.
+  Sin pausas artificiales: intervalo desde el Ready anterior hasta la
+  siguiente selección, mediana **664,79 ms**, rango **385,19–837,95 ms**.
+- Tiempo sin CDP/heap/GC ni campañas simultáneas. Marcas tomadas al entrar a
+  `bus.emit`, antes de consumidores que pueden emitir eventos anidados;
+  el wrapper conserva receptor, argumentos y resultado. Panel observado con
+  `MutationObserver` y visibilidad del botón «Exportar»; es visibilidad DOM,
+  **no presentación física de un frame**.
+- Evidencia ignorada: `.measure/ner-gaps/20260926-macos`:
+  reportes por corrida, `ner-gaps-aggregate.json`, `analysis-root.json`,
+  cronología, presión, digests y copia exacta del arnés medido en
+  `harness-source` con `harness-sha256.json`. El ajuste posterior de Prettier
+  modifica solo formato; la copia medible y sus hashes permanecen intactos.
+  Los pilotos se conservaron aparte y se excluyeron de este agregado.
+  Contenido real, palabras y firmas intermedias permanecen en el renderer;
+  los archivos reales se reciben por entorno, con alias R1/R2. Sin nombres,
+  rutas, texto ni hashes de PDF reales en este informe.
+- El runner salió con código 0 y restauró fuente y build A con digest
+  verificado; no hay cambios en `packages/` o `apps/`.
+
+### Tiempo por brazo y posición
+
+Cada celda corresponde a tres bloques; **mediana [mínimo–máximo]**, en
+segundos, para NER y Ready. Las dos columnas de panel muestran medianas;
+sus rangos por importación están en los artefactos. «R1 2» significa la
+segunda importación de R1 (posición global 2); «R2 1/2», posiciones 3/4.
+`import` empieza en `DOCUMENT_IMPORTED`, selección antes de entregarlo a
+la UI. Cada métrica se agrega por separado: sumar medianas de etapas no
+reconstruye necesariamente la mediana del total.
+
+| brazo | documento/posición | NER, s | import→Ready, s | selección→panel, s | import→panel, s |
+|---|---|---:|---:|---:|---:|
+| A | R1 1 | 39,89 [34,30–40,74] | 40,27 [34,69–41,12] | 40,92 | 40,87 |
+| A | R1 2 | 39,64 [35,46–40,10] | 39,90 [35,71–40,36] | 40,44 | 40,39 |
+| A | R2 1 | 16,27 [15,49–16,44] | 49,59 [46,66–50,56] | 50,14 | 50,05 |
+| A | R2 2 | 16,43 [15,52–16,52] | 49,79 [47,05–49,90] | 50,37 | 50,29 |
+| 4 | R1 1 | 40,28 [38,13–41,38] | 40,66 [38,51–41,76] | 41,28 | 41,22 |
+| 4 | R1 2 | 38,17 [37,40–40,85] | 38,43 [37,65–41,12] | 38,95 | 38,88 |
+| 4 | R2 1 | 16,20 [15,67–16,66] | 49,21 [48,06–51,04] | 49,80 | 49,68 |
+| 4 | R2 2 | 16,28 [15,88–16,72] | 49,16 [48,04–50,70] | 49,68 | 49,60 |
+| 6 | R1 1 | 56,74 [55,27–57,06] | 57,20 [55,65–57,44] | 57,73 | 57,68 |
+| 6 | R1 2 | 54,45 [53,57–55,81] | 54,70 [53,82–56,07] | 55,24 | 55,19 |
+| 6 | R2 1 | 22,54 [22,48–22,77] | 56,51 [55,77–56,67] | 57,07 | 56,98 |
+| 6 | R2 2 | 22,34 [22,07–22,94] | 55,70 [54,52–56,78] | 56,27 | 56,19 |
+| 8 | R1 1 | 54,06 [53,08–54,75] | 54,44 [53,46–55,14] | 55,14 | 55,08 |
+| 8 | R1 2 | 52,76 [51,92–52,86] | 53,02 [52,18–53,11] | 53,56 | 53,52 |
+| 8 | R2 1 | 22,43 [22,15–22,97] | 56,47 [55,34–56,79] | 56,92 | 56,83 |
+| 8 | R2 2 | 21,99 [21,76–22,70] | 54,89 [54,72–56,46] | 55,45 | 55,37 |
+
+### Carga observable y panel
+
+**Mediana [mínimo–máximo]**. Carga = primer `NER_MODEL_LOADING`→
+`NER_MODEL_READY`; no es el antiguo `NER_STARTED`→`MODEL_READY`.
+«Después de carga» = `MODEL_READY`→`NER_FINISHED`, que incluye trabajo
+host posterior; **no es tiempo puro de inferencia ONNX**. «—» indica que
+no hubo eventos de carga, no una carga de cero milisegundos.
+
+| brazo | documento/posición | carga, ms | después de carga, s | Ready→panel DOM, ms |
+|---|---|---:|---:|---:|
+| A | R1 1 | 992,20 [965,81–997,65] | 38,87 [33,30–39,71] | 594,36 [576,17–600,06] |
+| A | R1 2 | — | — | 460,48 [170,70–497,77] |
+| A | R2 1 | 811,16 [806,27–822,82] | 15,42 [14,64–15,58] | 459,23 [448,04–472,67] |
+| A | R2 2 | 821,34 [810,21–824,88] | 15,57 [14,66–15,68] | 428,41 [420,70–500,86] |
+| 4 | R1 1 | 949,90 [903,77–1028,07] | 39,34 [37,15–40,32] | 586,72 [559,60–596,62] |
+| 4 | R1 2 | — | — | 461,07 [452,14–486,15] |
+| 4 | R2 1 | 812,41 [808,19–818,89] | 15,35 [14,83–15,81] | 462,03 [461,14–470,50] |
+| 4 | R2 2 | 817,67 [814,25–822,78] | 15,43 [15,02–15,87] | 425,96 [418,62–436,49] |
+| 6 | R1 1 | 958,79 [956,15–970,40] | 55,73 [54,28–56,07] | 561,92 [473,11–564,95] |
+| 6 | R1 2 | — | — | 488,83 [455,67–507,13] |
+| 6 | R2 1 | 833,93 [828,63–849,80] | 21,65 [21,62–21,90] | 470,52 [467,77–477,16] |
+| 6 | R2 2 | 856,71 [815,29–866,22] | 21,44 [21,21–22,04] | 456,14 [319,19–498,38] |
+| 8 | R1 1 | 1002,81 [998,27–1010,96] | 53,02 [52,03–53,72] | 595,83 [594,45–641,05] |
+| 8 | R1 2 | — | — | 492,20 [487,38–517,54] |
+| 8 | R2 1 | 838,71 [802,46–850,92] | 21,56 [21,26–22,13] | 469,12 [362,07–497,94] |
+| 8 | R2 2 | 829,53 [797,99–833,87] | 21,15 [20,89–21,83] | 456,97 [456,02–480,52] |
+
+Hubo **36 cargas observadas**, entre **797,99 y 1.028,07 ms**. La primera
+R1 de cada secuencia cargó; las doce segundas R1 reutilizaron el modelo.
+Las **24 importaciones de R2 recargaron**, incluida su repetición inmediata.
+Esto es compatible con el temporizador NER de 15 s (ADR-167,
+`NER_Engine.md` §6/§13): el OCR previo dura más que ese plazo. Los eventos
+prueban la recarga; esta sonda no instrumenta la causa del descarte para
+atribuirla de forma independiente. Compartir Electron no garantiza modelo
+caliente cuando la etapa anterior deja NER inactivo.
+
+En conjunto, Ready→panel DOM tuvo mediana **472,89 ms**, rango
+**170,70–641,05 ms**. R1 automática, segunda menos primera en Ready por
+bloque: **+1,02 / −1,22 / +0,09 s**. Reutilizar el modelo elimina la carga,
+pero no garantiza una reducción equivalente del tiempo total entre dos
+importaciones con deriva y otras etapas. Esta campaña no mide el costo de
+memoria de conservarlo ni justifica cambiar su temporizador.
+
+### Pares dentro del bloque y deriva
+
+Deltas en segundos contra **A del mismo bloque y posición**, bloques 1/2/3.
+Positivo = más lento. Los 24 pares de cada métrica para 6/8 fueron positivos;
+4 cambió de signo según el bloque y no sostuvo una ganancia frente a A.
+
+| brazo | documento/posición | Δ NER por bloque, s | Δ import→Ready por bloque, s |
+|---|---|---:|---:|
+| 4 | R1 1 | 3,83 / -0,46 / 1,49 | 3,82 / -0,46 / 1,49 |
+| 4 | R1 2 | 1,94 / -1,47 / 0,75 | 1,94 / -1,47 / 0,77 |
+| 4 | R2 1 | 0,18 / -0,07 / 0,23 | 1,39 / -0,38 / 0,48 |
+| 4 | R2 2 | 0,36 / -0,24 / 0,29 | 0,99 / -0,62 / 0,80 |
+| 6 | R1 1 | 20,97 / 15,99 / 17,17 | 20,96 / 16,09 / 17,17 |
+| 6 | R1 2 | 18,11 / 14,81 / 15,71 | 18,11 / 14,81 / 15,71 |
+| 6 | R2 1 | 7,28 / 6,21 / 6,10 | 9,10 / 6,92 / 6,11 |
+| 6 | R2 2 | 6,55 / 5,81 / 6,51 | 7,47 / 5,91 / 6,88 |
+| 8 | R1 1 | 18,78 / 14,01 / 14,17 | 18,77 / 14,02 / 14,17 |
+| 8 | R1 2 | 17,30 / 12,28 / 12,76 | 17,31 / 12,28 / 12,76 |
+| 8 | R2 1 | 7,49 / 5,88 / 6,00 | 9,81 / 5,75 / 6,23 |
+| 8 | R2 2 | 6,25 / 5,46 / 6,27 | 7,83 / 4,94 / 6,56 |
+
+El control A de R1 primera importación tuvo NER **34,30 / 40,74 / 39,89 s**
+(Ready **34,69 / 41,12 / 40,27 s**); la segunda tuvo NER **35,46 / 39,64 /
+40,10 s**. Hay deriva visible de hasta 6,44 s entre los controles de la
+primera posición: no se declara indistinguible del ruido ni se mezcla esta
+tanda con las medianas históricas. Aun así, la penalidad pareada de 6/8 se
+mantiene en los tres bloques y ambas posiciones: **12,28–20,97 s de NER**
+en R1 y **5,46–7,49 s** en R2. Las cargas duran alrededor de un segundo y
+la penalidad también aparece en la segunda R1 sin carga.
+
+En R2, A primera importación tuvo NER **15,49 / 16,27 / 16,44 s** y Ready
+**46,66 / 49,59 / 50,56 s**. Ready contiene OCR y otras etapas, por lo que
+sus deltas no se atribuyen enteros a NER. No hubo sensor térmico: el banco
+no identifica calentamiento, frecuencia o una causa física de la deriva.
+
+### Densidad, calidad y presión
+
+Conteos estables en todas las importaciones del mismo corpus. Caracteres =
+suma de `word.text.length` (unidades UTF-16 de palabras, sin separadores);
+**no son tokens**. Jobs = despachos `ner-page`, que pueden ser más que las
+páginas. P1/P2 son controles de calidad, no equivalentes en densidad a R1/R2.
+
+| corpus | páginas | palabras | caracteres | palabras/página: mediana [rango] | caracteres/página: mediana [rango] | jobs NER |
+|---|---:|---:|---:|---:|---:|---:|
+| P1 | 10 | 129 | 720 | 12 [12–16] | 66 [66–111] | 10 |
+| P2 | 50 | 1.038 | 5.501 | 20,5 [19–26] | 106,5 [102–137] | 50 |
+| R1 | 51 | 14.287 | 69.486 | 272 [124–380] | 1.372 [728–1.475] | 87 |
+| R2 | 20 | 5.581 | 28.109 | 297,5 [0–383] | 1.562,5 [0–1.809] | 36 |
+
+NER/OCR/Grouping exactos en los cuatro brazos y las dos posiciones:
+R1 **298 ocurrencias, 123 grupos**; R2 **193 ocurrencias, 72 grupos,
+5.581 palabras OCR**. Máximo de un job NER simultáneo en cada importación.
+La diferencia con conteos Windows no es una regresión de estos brazos: la
+salida OCR no es comparable entre plataformas sin fijar los píxeles
+(`OCR_Entre_Plataformas_Medicion.md`, ampliación macOS).
+
+Las 24 instantáneas de presión antes/después de secuencias registraron
+swap usado **1.600,31–1.664,31 MiB**, porcentaje libre informado por
+`memory_pressure -Q` **59–65 %**, **4.620 swapins** y **cero swapouts nuevos**
+entre la primera y la última. Son diagnósticos del sistema completo, sin
+atribución al proceso, hilos o carga. No se mide RSS/WASM por importación en
+esta pasada; la curva de memoria anterior conserva sus límites.
+
+### Cierre y pendientes
+
+Quedan cerrados en macOS **carga observable por brazo A/4/6/8, aparición del
+panel DOM y secuencia de cuatro importaciones por instancia**, con calidad
+exacta. Se confirma la dirección de la curva local: pedir 6/8 empeora y 4
+no sostiene ventaja sobre automático. **No cambia ningún default, contrato,
+modelo, temporizador ni perfil de producto.**
+
+Siguen separados: complemento equivalente en Windows, carga/panel/secuencia
+de A/1/2 si se requiere para perfilar Bajo, atribución de memoria a la carga,
+estrés de horas y decisión humana de perfiles. La medición del objetivo
+sobre un **PDF real nativo de diez páginas** sigue pendiente de disponer del
+corpus; P1 sintético y extrapolar desde R1 no la sustituyen.

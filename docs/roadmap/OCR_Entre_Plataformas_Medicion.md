@@ -1,12 +1,12 @@
-<!-- CONTEXT: scope=roadmap-medicion | dependencias=roadmap/Agrupacion_Difusa_Medicion.md,roadmap/Banco_Windows_Comparativa_Medicion.md,roadmap/Ciclos_Y_Documentos_Reales_Medicion.md,adr/ADR-158-El-Raster-De-OCR-Viaja-Codificado.md,adr/ADR-163-El-DPI-De-OCR-No-Supera-Al-Raster-Fuente.md,core/OCR_Engine.md,core/Render_Engine.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 (investigación de reproducibilidad 2026-09-25; sin cambio de producto) -->
+<!-- CONTEXT: scope=roadmap-medicion | dependencias=roadmap/Agrupacion_Difusa_Medicion.md,roadmap/Banco_Windows_Comparativa_Medicion.md,roadmap/Ciclos_Y_Documentos_Reales_Medicion.md,adr/ADR-158-El-Raster-De-OCR-Viaja-Codificado.md,adr/ADR-163-El-DPI-De-OCR-No-Supera-Al-Raster-Fuente.md,core/OCR_Engine.md,core/Render_Engine.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 (investigación Windows/WSL 2026-09-25 y ampliación macOS 2026-09-26 cerradas; sin cambio de producto) -->
 
 # El OCR de un escaneo cambia con la plataforma — medición
 
 > Medido el 2026-09-25. Windows 11 Pro 26200 nativo e Ubuntu bajo WSL2, **sobre
 > la misma máquina** (i5-12400) y el **mismo commit** (`45d07fd`; el código de
-> OCR, Render y PDF es idéntico desde `bbb32b8`). macOS no se midió en este
-> banco. Investigación de reproducibilidad de mediciones: no se modificó
-> código de producto.
+> OCR, Render y PDF es idéntico desde `bbb32b8`). Ampliación macOS M1 el
+> 2026-09-26 en `bd6bd92`, con los mismos PDF sintéticos originales: ver la
+> sección final. Investigación de reproducibilidad: sin cambio de producto.
 
 ## Veredicto
 
@@ -39,8 +39,11 @@ Entre Windows y Linux quedó aislado el mecanismo, etapa por etapa:
    1:1 con la imagen —P2 a 216 dpi, o un sintético a 300 dpi— Windows con GPU
    y Linux dan píxeles idénticos.
 
-**macOS** es un tercer backend de raster (Metal); un tercer resultado es
-consistente con este mecanismo, **pero no se verificó**.
+**macOS también quedó verificado** en la ampliación del 2026-09-26: GPU
+produce un tercer raster en los sintéticos reescalados; software converge con
+WSL, y Tesseract reproduce exactamente Windows/WSL cuando se fijan sus PNG.
+En R2 se verificó GPU/software dentro de macOS; no se recibió el JSON de R2
+de las otras plataformas para comparar sus hashes directamente.
 
 **La premisa del pedido era incorrecta**, y se controló antes de todo lo
 demás: la corrida de macOS (223) fue sobre `defa7a2` y la de Windows (227)
@@ -155,8 +158,9 @@ entera sí iguala las plataformas.
 
 ## Qué no se afirma
 
-- **macOS no se midió.** Que dé un tercer valor es consistente con otro
-  backend de raster, no está probado.
+- La campaña original no midió macOS. La ampliación final verifica su
+  divergencia de raster con GPU sobre el mismo corpus sintético y R2 local;
+  no vuelve a medir las ocurrencias/grupos históricos de la tabla inicial.
 - **No se identificó la operación exacta** de Skia, ANGLE o pdf.js que
   filtra distinto. Se probó qué la dispara (reescalado con GPU) y qué la
   elimina (raster por software o ráster 1:1).
@@ -228,3 +232,90 @@ ANONLY_OCR_PROBE_DOC=/ruta/neutral/R2.pdf ANONLY_OCR_PROBE_ID=R2 \
 ```
 
 En WSL, además, `DISPLAY=:0` para que Electron abra ventana bajo WSLg.
+
+## Ampliación macOS — protocolo previo (2026-09-26)
+
+Autorizada por el humano mientras continúan las otras campañas en Windows.
+Usar el instrumento existente y el mismo build macOS entre corridas, con una
+instancia nueva por caso. Sobre R2 ejecutar **GPU→software→software→GPU**;
+software significa únicamente `--disable-gpu` en el arnés. Comparar las 40
+imágenes y las 20 páginas por índices, dimensiones, DPI, hashes y conteos,
+incluyendo texto/cajas/confianzas reducidos a digestos. Un pipeline fallado,
+páginas/jobs ausentes o claves duplicadas invalidan el caso. No guardar texto ni
+PNG de R2; conservar los JSON crudos en una carpeta nueva bajo `.measure/`.
+Registrar versiones de Electron/Chromium y estado GPU real antes de atribuir
+el cambio al backend. Esta sonda intrusiva no mide rendimiento ni memoria.
+
+La comparación entre plataformas y el ensayo de Tesseract con píxeles fijados
+requieren los **PDF sintéticos originales y PNG/JSON de la campaña Windows/WSL**.
+No están en Git ni en el checkout macOS al declarar este protocolo. Se pidieron
+al humano; mientras no estén disponibles, el A/B de R2 puede cerrarse como
+evidencia local, pero no completa la comparación causal con Windows/WSL.
+Recibidos los artefactos, registrar hashes de los PDF sintéticos (permitidos),
+medir sus cuatro variantes con GPU/software y fijar el sintético de 1 bit a
+200 dpi con los PNG de ambas plataformas. Comparar contra la referencia,
+declarando diferencias de versiones/builds si las hay. No regenerar los PDF
+en macOS y presentarlos como el mismo corpus.
+
+
+## Ampliación macOS — resultados (2026-09-26)
+
+**Cerrada: 14 casos válidos, sin fallo ni suspensión.** MacBook Air M1,
+8 GiB, arm64, Node 26.5.1, Electron 44.2.0, Chromium 152.0.7977.76.
+Producto `bd6bd92`, sin cambios en `packages/` o `apps/`; el árbol contiene
+solo documentación e instrumentos de medición. Electron/Chromium
+coinciden con las referencias Windows/WSL `45d07fd`; el diff de PDF/Render/OCR,
+core-adapter y lockfile entre esas revisiones está vacío. Los builds completos
+no son idénticos entre plataformas; no se usa esta campaña para medir tiempo.
+
+El humano aportó un ZIP de los cuatro PDF sintéticos originales, PNG y JSON
+Windows/WSL. SHA-256 del ZIP y **68 entradas del manifiesto** verificadas antes
+de usarlos. Los PDF no se regeneraron. Todos los artefactos quedan ignorados en
+`.measure/ocr-platform/20260926-macos`; el contenido real no se guarda ni se
+incluye en esta documentación.
+
+### R2: GPU contra software, dos repeticiones por modo
+
+Cada caso completó 40 jobs (20 OCR + 20 orientación) y las 20 páginas,
+con las mismas dimensiones y DPI. `2d_canvas`/composición fue `enabled`
+por defecto y `disabled_software` con `--disable-gpu`.
+
+| comparación | imágenes PNG/RGBA distintas | páginas con texto distinto | cajas/confianzas distintas |
+|---|---:|---:|---:|
+| GPU contra GPU | 0/40 | 0/20 | 0/20 |
+| software contra software | 0/40 | 0/20 | 0/20 |
+| GPU contra software | **40/40** | **19/20** | **19/20** |
+
+Ambos modos cuentan **5.581 palabras**, pero GPU suma **28.109 caracteres**
+y software **28.119**. La página restante está vacía. Igualdad de conteos no
+significa igualdad de salida. El raster de reconocimiento por software tiene
+3.973.264 píxeles oscuros frente a 3.917.220 por GPU (**+1,43 %**).
+No hay verdad de referencia para declarar uno más preciso.
+
+### Mismos sintéticos que Windows/WSL
+
+Cada caso sintético completó 8 jobs y 4 páginas, con 1.879 palabras.
+Se ejecutaron las cuatro variantes con GPU y software, más dos corridas con
+los PNG de Windows/WSL fijados.
+
+| variante | macOS GPU contra Windows GPU y WSL | macOS software contra WSL |
+|---|---|---|
+| gris 1 bit, 200 dpi → 201 dpi | 8/8 raster distintos; texto igual; cajas/confianzas distintas en 4/4 | todo idéntico |
+| gris 8 bits, 200 dpi → 201 dpi | 8/8 raster distintos; texto igual; cajas/confianzas distintas en 4/4 | todo idéntico |
+| RGB, 200 dpi → 201 dpi | 8/8 raster distintos; texto igual; cajas/confianzas distintas en 4/4 | todo idéntico |
+| gris 1 bit, 300 dpi, raster 1:1 | raster, texto, cajas y confianzas idénticos | todo idéntico |
+
+Con el sintético de 1 bit/200 dpi y los PNG **fijados**, macOS reconoció
+exactamente la salida de Windows y exactamente la de WSL, respectivamente:
+8/8 jobs fijados en cada caso; cero diferencias de raster, texto, cajas y
+confianzas. Esto amplía el aislamiento de la causa a macOS: la divergencia
+entra al rasterizar con GPU y reescalar; no reaparece en Tesseract ante esos
+mismos píxeles. El ensayo 1:1 sigue limitado a los sintéticos; no se forzó
+sobre R2. No se identificó la operación concreta de Skia/ANGLE/pdf.js.
+
+**Cierre del pendiente macOS de reproducibilidad:** completado sobre R2 local
+y el mismo corpus sintético entre las tres plataformas. La comparación directa
+de hashes de R2 macOS contra Windows/WSL queda sin efectuar porque el ZIP trae
+solo referencias sintéticas. No hace falta otro documento real para el resultado
+causal obtenido. No se cambia raster, DPI, aceleración ni defaults de producto;
+una decisión futura conserva los requisitos de ADR de la sección anterior.

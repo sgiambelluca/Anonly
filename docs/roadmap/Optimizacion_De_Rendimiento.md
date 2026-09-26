@@ -253,9 +253,10 @@ compromiso por perfil. No se cambian presupuestos ni defaults con este plan.
 
 **Protocolo de ejecución (2026-09-23):**
 [`Rendimiento_Experimentos_Plan.md`](Rendimiento_Experimentos_Plan.md) fija brazos,
-controles, corpus, métricas y condiciones de avance. Esta sesión dispone solo
-de macOS; la validación en Windows nativo queda pendiente y no se sustituye
-con WSL ni se extrapola desde Mac.
+controles, corpus, métricas y condiciones de avance. Las curvas principales
+ya tienen repetición Windows nativa; sus límites y complementos pendientes
+se detallan en cada informe. WSL no sustituye esa validación y el resultado
+de Mac no se extrapola a Windows.
 
 Base: `Ciclos_Y_Documentos_Reales_Medicion.md` §9 y
 `Banco_Windows_Comparativa_Medicion.md`. NER domina el documento nativo real;
@@ -271,8 +272,13 @@ calidad idéntica y cancelación ejercitada. Ver
 [`Hilos_NER_Medicion.md`](Hilos_NER_Medicion.md) para pares y límites. No se
 adoptó configuración nueva. **Windows nativo (2026-09-25):** dirección
 contraria, 6 y 8 hilos aceleran NER hasta −24 % en R1, con calidad idéntica;
-el efecto depende del hardware. Carga por brazo, panel y estrés sostenido no quedaron
-separados en esta tanda (límite detallado en el informe).
+el efecto depende del hardware. **Ampliación macOS (2026-09-26):** 48
+importaciones válidas separaron carga observable (0,80–1,03 s), panel DOM
+(0,17–0,64 s después de Ready) y secuencia R1→R1→R2→R2. Se observó
+reutilización en la segunda R1 y recarga en ambas R2; 6/8 siguieron más
+lentos con calidad exacta. El complemento equivalente en Windows, memoria
+atribuible a la carga y estrés de horas siguen pendientes. La tanda local de
+cuatro documentos no cierra esos alcances.
 
 - Comparar el control efectivo actual con **4, 6 y 8 hilos de ONNX**, donde el
   hardware permita esas configuraciones. Registrar la cantidad efectiva, no solo
