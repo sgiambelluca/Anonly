@@ -25,6 +25,21 @@ locales no la sustituyen. También pasaron `pnpm lint`, `pnpm typecheck`,
 `pnpm test` (2716 aprobados, 1 omitido), `pnpm test:contract` (331),
 `pnpm format:check`, `git diff --check` y `actionlint` sobre `ci.yml`.
 
+**Windows nativo (2026-09-26):** los dos gates pasaron en Windows 11 x64
+(i5-12400, 16,9 GB, commit `bd6bd92`), con la misma config de Playwright.
+`test:stress` 3/3: razón M2 200/50 de 1,01 en frío y 1,03 en caliente; razón
+de tiempo 3,49 y 3,50; los 20 centinelas de 200p presentes. `test:leak` 3/3:
+L1/L2/L3 con diez ciclos completos, workers 9/9/0 y pendiente del heap
+principal de 0,136 / 0,114 / 0,124 MB/ciclo, sin veredicto de fuga. Sin
+lector de presión en `win32`, `rssConfounded` queda sin delta de compresor ni
+swap. En esa corrida, **los scripts `pnpm test:leak` y `pnpm test:stress` no
+corrían tal cual en Windows**: el prefijo `VITE_E2E=1` es sintaxis POSIX y
+pnpm ejecuta los scripts con `cmd.exe`, que lo rechaza antes del build. Se
+corrieron los mismos pasos a mano desde Git Bash. El mismo problema tenían
+`test:e2e` y `test:perf`; CI no lo detectaba porque sus jobs corren en
+`macos-latest`. **Resuelto por ADR-186** (2026-09-26): los cuatro scripts
+usan `cross-env VITE_E2E=1`.
+
 ## `test:leak`
 
 - Tres casos seriales L1/L2/L3, con el mismo fixture, régimen y timeouts de

@@ -246,7 +246,7 @@ La duplicación de lógica se apartó a [`Duplicacion_De_Logica.md`](./Duplicaci
 
 ## Próximos objetivos — tiempo, consumo y perfiles (2026-09-20)
 
-**Estado: los cinco puntos tienen resultados en macOS. Windows nativo se midió el 2026-09-25 para los puntos 1–4 con el código previo a ADR-184; faltan en Windows ADR-184 y los brazos de Bajo del punto 5.** Decisión del humano: explorar el beneficio
+**Estado: los cinco puntos tienen resultados en macOS. Windows nativo se midió el 2026-09-25 para los puntos 1–4 y el 2026-09-26 para ADR-184 y los brazos de Bajo del punto 5: las cinco curvas están en las dos plataformas.** Decisión del humano: explorar el beneficio
 de hilos/workers y su costo de memoria, conservando la calidad. Un mayor consumo
 puede justificar una mejora de velocidad; el resultado debe permitir elegir ese
 compromiso por perfil. No se cambian presupuestos ni defaults con este plan.
@@ -352,9 +352,12 @@ huellas idénticas en el banco sintético y en seis corridas R1/R2. El control
 repetido y los tiempos de proceso reales no mostraron regresión material. El
 índice retuvo unos 4,59 MiB adicionales en 2.000 alias; la curva puede seguir
 siendo cuadrática en corpus sin poda. Evidencia en
-`Agrupacion_Difusa_Medicion.md`. La repetición Windows del 2026-09-25 corrió
-sobre el código **previo** a ADR-184 (2,40 s a 2.000 distintos, ~1,6× la
-Mac con el mismo código); **ADR-184 en Windows sigue pendiente**.
+`Agrupacion_Difusa_Medicion.md`. **Windows nativo (2026-09-26):** el A/B de
+ADR-184 bajó el adverso de 2.000 de 2.660 a 382 ms (7,0×) con huellas
+idénticas y sin regresión en el control ni en R1/R2. El 1,6× que parecía
+separar Windows de la Mac era del motor JavaScript con que corre el banco
+sintético (Node 22 en Windows, Node 26 en la Mac): con el V8 de Electron, el
+del producto, Windows baja a 202 ms, por debajo de la Mac.
 
 Retomar los dos casos cuadráticos del relevamiento: patrón de email sobre texto
 adverso y búsqueda difusa con muchas entidades distintas. Primero reproducirlos
@@ -372,9 +375,11 @@ está validada para Windows ni cambió los settings del producto. La tanda local
 adicional OCR1/2/3/4 y NER Automático/1/2 cerró el 2026-09-25 con calidad y
 cancelación conservadas. Los tiempos, el RSS observado y las limitaciones de
 atribución WASM están en ese informe. Las curvas Windows de NER A/4/6/8 y
-OCR 2/3/4 ya están incorporadas a la revisión. **El punto queda pendiente de
-los brazos de Bajo en Windows, de la atribución de memoria por reconocedor y
-de la decisión humana**; no se adoptaron perfiles ni defaults nuevos.
+OCR 2/3/4 ya están incorporadas a la revisión, y los brazos de Bajo se
+midieron en Windows el 2026-09-26 (misma conclusión que en la Mac: reducir
+hilos NER no conviene; Automático usa 4 hilos efectivos en las dos). **El
+punto queda pendiente de la atribución de memoria por reconocedor y de la
+decisión humana**; no se adoptaron perfiles ni defaults nuevos.
 
 **Depende de los objetivos 1 y 2 y de revisar sus resultados.** Es el siguiente
 paso después de esas mediciones; no necesita esperar a que terminen 3 y 4. Si

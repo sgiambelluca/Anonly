@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-mvp | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,adr/ADR-011-Grouping-First.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-138-Instalador-Universal-De-macOS.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-168-Pantallas-De-Carga-Y-Escaneo-Tras-Pruebas-De-Usuario.md,adr/ADR-169-La-Pantalla-De-Trabajo-Tras-Pruebas-De-Usuario.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-173-El-Motor-Rechaza-Fusiones-Y-Divisiones-Invalidas.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,adr/ADR-175-Un-Choque-Manual-No-Queda-Colgado.md,adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md,adr/ADR-177-Una-Entidad-Eliminada-No-Ocupa-Lugar.md,adr/ADR-178-Lo-Contenido-Se-Oculta-Solo-Si-Su-Contenedor-Se-Elimina.md,adr/ADR-179-El-Empaquetado-De-NER-Se-Evalua-Sin-Cambiar-El-Modelo.md,adr/ADR-180-Los-PDFs-Pesados-Se-Miden-Hasta-El-Archivo-Exportado.md,adr/ADR-184-Indice-Exacto-De-Candidatos-Para-Grouping.md,adr/ADR-185-Gates-De-Leak-Y-Stress-En-Electron.md,roadmap/Optimizacion_De_Memoria_Plan.md,roadmap/PDFs_Pesados_Y_Exportacion_Plan.md,roadmap/PDFs_Pesados_Y_Exportacion_Medicion.md,roadmap/Empaquetado_NER_Medicion.md,roadmap/Optimizacion_De_Rendimiento.md | audiencia=humanos+IA | fase=11.6 (Hitos 1–10 cerrados; Hito 12.5 de UI y campaña de rendimiento documentados; escritorio y verificación de actualizaciones en validación; Grouping ADR-184 y gates Leak/Stress ADR-185 implementados localmente, Windows/CI pendientes) -->
+<!-- CONTEXT: scope=roadmap-mvp | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,adr/ADR-011-Grouping-First.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-138-Instalador-Universal-De-macOS.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-168-Pantallas-De-Carga-Y-Escaneo-Tras-Pruebas-De-Usuario.md,adr/ADR-169-La-Pantalla-De-Trabajo-Tras-Pruebas-De-Usuario.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-173-El-Motor-Rechaza-Fusiones-Y-Divisiones-Invalidas.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,adr/ADR-175-Un-Choque-Manual-No-Queda-Colgado.md,adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md,adr/ADR-177-Una-Entidad-Eliminada-No-Ocupa-Lugar.md,adr/ADR-178-Lo-Contenido-Se-Oculta-Solo-Si-Su-Contenedor-Se-Elimina.md,adr/ADR-179-El-Empaquetado-De-NER-Se-Evalua-Sin-Cambiar-El-Modelo.md,adr/ADR-180-Los-PDFs-Pesados-Se-Miden-Hasta-El-Archivo-Exportado.md,adr/ADR-184-Indice-Exacto-De-Candidatos-Para-Grouping.md,adr/ADR-185-Gates-De-Leak-Y-Stress-En-Electron.md,roadmap/Optimizacion_De_Memoria_Plan.md,roadmap/PDFs_Pesados_Y_Exportacion_Plan.md,roadmap/PDFs_Pesados_Y_Exportacion_Medicion.md,roadmap/Empaquetado_NER_Medicion.md,roadmap/Optimizacion_De_Rendimiento.md | audiencia=humanos+IA | fase=11.6 (Hitos 1–10 cerrados; Hito 12.5 de UI y campaña de rendimiento documentados; escritorio y verificación de actualizaciones en validación; Grouping ADR-184 y gates Leak/Stress ADR-185 implementados y validados en macOS y Windows; CI pendiente) -->
 # Anonly — Roadmap MVP
 
 > Define el alcance exacto del primer release. Cualquier cosa fuera de esta lista **no** entra en MVP. v1.0 y v2.0 viven en sus propios docs.
@@ -551,8 +551,12 @@ De las ~70: **~30 ya estaban cerradas** por hitos posteriores (ADR-053/054/056, 
 `test:leak` bloquea por workers/heap JS con GC, sin usar RSS como veredicto;
 `test:stress` es un centinela relativo 50/200 páginas, sin alterar los
 presupuestos contractuales. Ambos están implementados y pasaron localmente en
-macOS arm64 (Leak L1/L2/L3: 10/10 ciclos cada uno; Stress: 3/3 casos). La
-ejecución real del workflow en CI sigue pendiente.
+macOS arm64 (Leak L1/L2/L3: 10/10 ciclos cada uno; Stress: 3/3 casos) y en
+Windows x64 el 2026-09-26 con los mismos resultados. Esa corrida destapó que
+`test:e2e`, `test:perf`, `test:stress` y `test:leak` no arrancaban en Windows
+(prefijo `VITE_E2E=1` POSIX bajo `cmd.exe`); ADR-186 lo resuelve con
+`cross-env`, `devDependency` sin efecto en el producto. La ejecución real del
+workflow en CI sigue pendiente.
 - Campaña de memoria H-10: T-1/T-2 cerradas, T-3 cerrada inconclusa con la
   extrapolación lineal descartada; T-4 cerrada como compuerta exacta de franjas
   blancas (ADR-162), con 137/137 tests scoped verdes. La heurística calibrada para márgenes
@@ -629,10 +633,10 @@ ejecución real del workflow en CI sigue pendiente.
   más en Windows), `Lotes_NER_Factibilidad.md` (lotes NER — bloqueado en las
   dos plataformas por diferencias de calidad, no se adopta),
   `Patron_Email_Regex_Medicion.md` y `Agrupacion_Difusa_Medicion.md` (Regex ya
-  corregido por ADR-181, confirmado en Windows; Grouping: con ADR-182/183 el
-  peor caso sintético fue **más lento** en Windows que en macOS —2,40 s contra
-  1,50 s a 2.000 entidades con el mismo código, sin causa investigada—, y
-  después ADR-184 lo bajó en macOS a ~264 ms; ADR-184 en Windows pendiente). Los documentos escaneados dan conteos de detección
+  corregido por ADR-181, confirmado en Windows; Grouping: ADR-184 bajó el peor
+  caso de 2.000 entidades a ~264 ms en macOS y a ~382 ms en Windows, 7,0×, con
+  huellas idénticas. La brecha aparente entre plataformas era del motor
+  JavaScript del banco sintético: con el V8 de Electron, Windows da ~202 ms). Los documentos escaneados dan conteos de detección
   distintos por plataforma, porque el ráster que llega al OCR cambia con la
   aceleración por GPU del canvas: no se comparan entre plataformas
   (`OCR_Entre_Plataformas_Medicion.md`).

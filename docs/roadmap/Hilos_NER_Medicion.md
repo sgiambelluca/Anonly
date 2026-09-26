@@ -195,13 +195,19 @@ NER es una porción menor del tiempo total en un documento dominado por OCR).
 −0,16/+0,19/+0,01 s en R1; +0,02/+1,64/−0,01 s en R2).
 
 El observador de hilos efectivos por CDP (firma de URLs blob del pool ONNX,
-`support/cdpHeap.ts`) dio **`not observable` en los cuatro brazos, en las dos
-plataformas de este equipo** (ya lo era en macOS con 4/4/6/8 confirmados por
-otra vía) — el número de hilos no se pudo verificar directamente por CDP acá.
-La dependencia sistemática del tiempo con el brazo (6 y 8 sostenidamente más
+`support/cdpHeap.ts`) dio **`not observable` en los cuatro brazos** en esta
+corrida de Windows, mientras que en macOS había identificado 4/4/6/8. La
+dependencia sistemática del tiempo con el brazo (6 y 8 sostenidamente más
 rápidos, en el mismo orden que los parches) es la evidencia indirecta de que
 el override sí tomó efecto: son los mismos parches de una línea validados en
 macOS, sobre el mismo motor.
+
+> **Actualización (2026-09-26):** con el clasificador de hilos corregido
+> (`support/nerThreadAttribution.ts`), la fase `low` corrida en Windows
+> identificó **4 hilos efectivos para Automático** y 2 para el brazo de 2
+> hilos, igual que en macOS (`Perfiles_Rendimiento_Revision.md`, «Brazos de
+> Bajo en Windows nativo»). Automático usa 4 de los 12 hilos de esta máquina,
+> lo que explica por qué acá pedir 6 u 8 acelera y en la Mac no.
 
 ### Memoria (RSS_PEAK — M2, mediana de 3, MiB)
 

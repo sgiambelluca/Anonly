@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-plan | dependencias=roadmap/Rendimiento_Experimentos_Plan.md,roadmap/Hilos_NER_Medicion.md,roadmap/Reconocedores_OCR_Medicion.md,roadmap/Optimizacion_De_Rendimiento.md,ui/React_Client.md,core/Contracts.md | audiencia=humanos+IA | fase=11 (revisión provisional de perfiles tras las curvas macOS 1 y 2; Windows nativo medido el 2026-09-25 para NER A/4/6/8 y OCR 2/3/4; brazos de Bajo en Windows y memoria por reconocedor pendientes) -->
+<!-- CONTEXT: scope=roadmap-plan | dependencias=roadmap/Rendimiento_Experimentos_Plan.md,roadmap/Hilos_NER_Medicion.md,roadmap/Reconocedores_OCR_Medicion.md,roadmap/Optimizacion_De_Rendimiento.md,ui/React_Client.md,core/Contracts.md | audiencia=humanos+IA | fase=11 (revisión provisional de perfiles; curvas NER y OCR, incluidos los brazos de Bajo, medidas en macOS y Windows nativo 2026-09-23 a 2026-09-26; memoria por reconocedor y decisión humana pendientes) -->
 
 # Perfiles de rendimiento — revisión tras las curvas macOS y Windows
 
@@ -14,11 +14,13 @@ valor fijo. La curva OCR va en la misma dirección que en la Mac, con más
 ganancia (R2 `Ready` −26,0 % con 4). Ver
 [`Hilos_NER_Medicion.md`](Hilos_NER_Medicion.md) y
 [`Reconocedores_OCR_Medicion.md`](Reconocedores_OCR_Medicion.md).
+Los brazos de Bajo (OCR1, NER 1/2) ya tienen curva en las dos plataformas
+(Windows el 2026-09-26, al final de este documento), y en las dos el control
+automático de NER resolvió **4 hilos efectivos**.
 **No alcanzan para publicar perfiles nuevos**: falta una atribución
-concluyente de memoria WASM/native de los brazos OCR 2/3/4, y los brazos de
-Bajo (OCR1, NER 1/2) solo tienen curva macOS. La campaña local
-adicional midió tiempo y RSS, pero su cobertura CDP parcial no permite
-cuantificar el costo incremental por reconocedor. Esta revisión propone la
+concluyente de memoria WASM/native de los brazos OCR. Las dos campañas
+midieron tiempo y RSS, pero su cobertura CDP parcial no permite cuantificar
+el costo incremental por reconocedor. Esta revisión propone la
 forma de la decisión y explicita los huecos; no cambia settings, contratos,
 presupuesto ni código de producto.
 
@@ -48,8 +50,8 @@ permite atribuirle el resultado del brazo ONNX 8.
 
 | nivel futuro | ONNX NER | reconocedores OCR | otros pools | evidencia y decisión pendiente |
 |---|---|---|---|---|
-| Bajo | sin valor nuevo decidido | 1 actual | 1 actual | OCR1 y NER A/1/2 tienen curva macOS; faltan atribución de memoria OCR y esos brazos en Windows antes de redefinirlo. |
-| Intermedio | automático del runtime | 2 | PDF/Render actuales por capacidad | Ancla existente; en la Mac, NER automático efectivo 4 y OCR2 control. |
+| Bajo | sin valor nuevo decidido | 1 actual | 1 actual | OCR1 y NER A/1/2 tienen curva en la Mac y en Windows: 1 o 2 hilos NER cuestan 1,5–2,9× en R1 en las dos, y OCR1 casi duplica el OCR de R2. Falta atribución de memoria OCR antes de redefinirlo. |
+| Intermedio | automático del runtime | 2 | PDF/Render actuales por capacidad | Ancla existente; NER automático efectivo 4 en la Mac y en Windows, y OCR2 control. |
 | Alto | Mac: 6/8 empeoran NER. Windows (12 hilos): 6/8 lo aceleran, hasta −24 % en R1. Depende del hardware | 3 o 4, candidato | sin cambio decidido | En R2, 3 bajó `Ready` 13,7 % en la Mac y 13,8 % en Windows; 4 lo bajó 21,0 % y 26,0 %. En Windows el RSS durante OCR sube con el tamaño del pool (R2 frío 1398 → 1778 MiB de 2 a 4). Falta costo WASM/native atribuible. |
 | Automático | resolver a uno de los tres niveles anteriores | valor del nivel resuelto | valor del nivel resuelto | Umbrales y señales por plataforma aún sin validar; no usar cantidad de páginas como señal de carga. |
 
@@ -118,8 +120,8 @@ La puerta para ese ADR y el código de producto es:
    y los presupuestos. Si se quiere variar `LiveImageBudget`, hacer otra
    campaña con una variable por vez.
 3. Medir las variantes de Bajo y, al menos, los rangos de capacidad entre la
-   Mac de 8 GiB y Windows. Las variantes de Bajo ya tienen curva macOS
-   (2026-09-25, abajo); falta repetirlas en Windows. Definir reserva de SO y reglas cuando falta RAM.
+   Mac de 8 GiB y Windows. Las variantes de Bajo ya tienen curva en las dos
+   plataformas (2026-09-25 y 2026-09-26, abajo). Definir reserva de SO y reglas cuando falta RAM.
 4. Presentar al humano la matriz final, la política automática y la migración.
    Después de su decisión, redactar ADR y actualizar `Contracts.md`, specs de
    motores/UI y tests antes de tocar implementación. ADR-168 a ADR-178 están
@@ -246,8 +248,59 @@ de perfiles **pendientes de Windows nativo ventilado** y de la elección humana.
 Se mantienen `auto`/`low`/`high`, sus defaults y los presupuestos vigentes.
 
 > **Actualización (2026-09-26):** esta sección se escribió en la Mac mientras
-> la repetición Windows todavía corría. Ya está hecha para NER A/4/6/8 y
-> OCR 2/3/4 (punto 1 de la puerta, más arriba). De Windows falta solo lo que
-> agregó esta tanda: OCR1 y NER 1/2. La atribución de memoria por
+> la repetición Windows todavía corría. Windows ya cubre NER A/4/6/8 y OCR
+> 2/3/4 (punto 1 de la puerta, más arriba) y, desde el 2026-09-26, también
+> los brazos de esta tanda (sección siguiente). La atribución de memoria por
 > reconocedor sigue abierta en las dos plataformas, y la decisión de perfiles
 > sigue siendo del humano.
+
+## Brazos de Bajo en Windows nativo (2026-09-26)
+
+Mismas campañas y fases que en la Mac (`run-ocr-pool.sh` con `profiles-gap`,
+`run-ner-threads.sh` con `low`), corridas con puertos ad hoc de Windows, no
+commiteados: se retiró el gate `Darwin` y la guarda `pgrep`, y la presión y
+la detección de suspensión se reemplazaron por un snapshot de memoria y los
+eventos de suspensión/reanudación del log del sistema (no hubo ninguno).
+Commit `bd6bd92`, i5-12400 con 12 hilos, 16,9 GB. Salidas:
+`.measure/ocr-pool/profiles-gap-20260926T045927Z-win/` y
+`.measure/ner-threads/low-20260926T045927Z-win/`.
+
+### OCR1/2/3/4
+
+Todas las corridas válidas, sin faltantes. Huellas exactas de OCR/NER/Grouping
+entre los cuatro brazos, ocupación OCR 1/2/3/4 y cancelación con trabajo
+activo de 0–1 ms en los ocho pares.
+
+| corpus | OCR1 `Ready` / OCR | OCR2 | OCR3 | OCR4 |
+|---|---:|---:|---:|---:|
+| P2, medianas sin sonda | 36,69 / 31,61 s | 18,69 / 13,64 s | 18,32 / 13,30 s | 16,25 / 11,16 s |
+| R2, medianas sin sonda | 75,56 / 64,37 s | 43,92 / 32,68 s | 36,51 / 25,38 s | 32,07 / 21,05 s |
+| P2, mediana pico RSS del árbol durante OCR | 1273 MiB | 1830 MiB | 1926 MiB | 2285 MiB |
+| R2, mediana pico RSS del árbol durante OCR | 1064 MiB | 1374 MiB | 1535 MiB | 1818 MiB |
+
+Contra OCR2, OCR1 casi duplica el OCR de R2 (1,97×, igual que en la Mac) y
+OCR4 lo baja un 35,6 %. **En Windows el RSS sube de forma monótona con cada
+reconocedor** en los dos corpus (R2: +310 / +161 / +283 MiB por paso); en la
+Mac la curva no fue monótona. La sonda CDP volvió a tener cobertura parcial
+de targets WASM (23 corridas de memoria): **el costo por reconocedor sigue sin
+demostrarse** y estos deltas de RSS total no se dividen por reconocedor.
+
+### NER Automático/1/2
+
+Seis preflights con conteos y huellas exactas contra Automático, sin fallas
+ni corridas invalidadas, y cancelación durante inferencia en 0–2 ms en los
+seis brazos.
+
+| corpus | Automático `Ready` / NER | 1 hilo solicitado | 2 hilos solicitados |
+|---|---:|---:|---:|
+| R1, medianas sin sonda | 24,59 / 24,10 s | 65,68 / 65,19 s | 36,93 / 36,46 s |
+| R2, medianas sin sonda | 43,42 / 10,15 s | 58,57 / 25,49 s | 47,95 / 14,71 s |
+| Hilos ONNX identificados por CDP | 4 en R1/R2 | no observable | 2 en R1/R2 |
+
+Con el clasificador de hilos corregido, **Automático resolvió 4 hilos
+efectivos también en Windows** (la repetición del 2026-09-25 los había dejado
+«no observables»). Eso explica la curva de hilos de esta máquina: Automático
+usa 4 de 12 hilos disponibles, y por eso pedir 6 u 8 acelera, cosa que en la
+Mac no ocurre. Bajar a 1 o 2 hilos cuesta 2,7× y 1,5× en R1, en línea con la
+Mac (2,9× y 1,5×). **La nueva curva no favorece reducir hilos para Bajo en
+ninguna de las dos plataformas.**
