@@ -297,7 +297,10 @@ efectiva. P2 sintético respondió de otra manera; el informe
 de caracteres, memoria, una tanda excluida por suspensión y los límites del
 banco. No se adoptó configuración nueva. **Windows nativo (2026-09-25):**
 misma dirección, más ganancia; R2 `Ready` 43,2 / 37,2 / 32,0 s con 2/3/4 y
-RSS durante OCR creciente con el tamaño del pool.
+RSS durante OCR creciente con el tamaño del pool. **Atribución macOS cerrada el
+2026-09-26:** 36 corridas válidas y 54 snapshots completos. Las medianas WASM
+LSTM crecen en pasos de 141,125 MiB en P2 y 85,8125 MiB en R2; RSS total sin
+crecimiento lineal. Ver el cierre de memoria en el mismo informe.
 
 - Comparar **2, 3 y 4 reconocedores LSTM**, conservando el OSD compartido,
   la configuración de 300 DPI y las reglas actuales de calidad.
@@ -379,8 +382,9 @@ adicional OCR1/2/3/4 y NER Automático/1/2 cerró el 2026-09-25 con calidad y
 cancelación conservadas. Los tiempos, el RSS observado y las limitaciones de
 atribución WASM están en ese informe. Las curvas Windows de NER A/4/6/8 y
 OCR 2/3/4 ya están incorporadas a la revisión. **El punto queda pendiente de
-los brazos de Bajo en Windows, de la atribución de memoria por reconocedor y
-de la decisión humana**; no se adoptaron perfiles ni defaults nuevos.
+los brazos de Bajo y de la atribución de memoria en Windows y de la decisión
+humana**. La curva WASM por reconocedor en macOS cerró el 2026-09-26;
+no se adoptaron perfiles ni defaults nuevos.
 
 **Depende de los objetivos 1 y 2 y de revisar sus resultados.** Es el siguiente
 paso después de esas mediciones; no necesita esperar a que terminen 3 y 4. Si

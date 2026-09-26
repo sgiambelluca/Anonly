@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-plan | dependencias=roadmap/Rendimiento_Experimentos_Plan.md,roadmap/Hilos_NER_Medicion.md,roadmap/Reconocedores_OCR_Medicion.md,roadmap/Optimizacion_De_Rendimiento.md,ui/React_Client.md,core/Contracts.md | audiencia=humanos+IA | fase=11 (revisión provisional de perfiles tras las curvas macOS 1 y 2; Windows nativo medido el 2026-09-25 para NER A/4/6/8 y OCR 2/3/4; brazos de Bajo en Windows y memoria por reconocedor pendientes) -->
+<!-- CONTEXT: scope=roadmap-plan | dependencias=roadmap/Rendimiento_Experimentos_Plan.md,roadmap/Hilos_NER_Medicion.md,roadmap/Reconocedores_OCR_Medicion.md,roadmap/Optimizacion_De_Rendimiento.md,ui/React_Client.md,core/Contracts.md | audiencia=humanos+IA | fase=11 (revisión provisional de perfiles tras las curvas macOS 1 y 2; Windows nativo medido el 2026-09-25 para NER A/4/6/8 y OCR 2/3/4; atribución WASM por reconocedor macOS cerrada 2026-09-26; brazos de Bajo y atribución Windows pendientes) -->
 
 # Perfiles de rendimiento — revisión tras las curvas macOS y Windows
 
@@ -14,12 +14,13 @@ valor fijo. La curva OCR va en la misma dirección que en la Mac, con más
 ganancia (R2 `Ready` −26,0 % con 4). Ver
 [`Hilos_NER_Medicion.md`](Hilos_NER_Medicion.md) y
 [`Reconocedores_OCR_Medicion.md`](Reconocedores_OCR_Medicion.md).
-**No alcanzan para publicar perfiles nuevos**: falta una atribución
-concluyente de memoria WASM/native de los brazos OCR 2/3/4, y los brazos de
-Bajo (OCR1, NER 1/2) solo tienen curva macOS. La campaña local
-adicional midió tiempo y RSS, pero su cobertura CDP parcial no permite
-cuantificar el costo incremental por reconocedor. Esta revisión propone la
-forma de la decisión y explicita los huecos; no cambia settings, contratos,
+**No alcanzan para publicar perfiles nuevos**: los brazos de Bajo
+(OCR1, NER 1/2) y la atribución de memoria en Windows mantienen seguimiento
+pendiente. La curva WASM OCR 2/3/4 en macOS **cerró el 2026-09-26** con 54/54
+snapshots completos: incrementos medianos de 141,125 MiB en P2 y 85,8125 MiB
+en R2. El RSS total no creció linealmente; memoria nativa por worker sigue
+sin atribución. Ver el cierre en `Reconocedores_OCR_Medicion.md`.
+Esta revisión propone la forma de la decisión y explicita los huecos; no cambia settings, contratos,
 presupuesto ni código de producto.
 
 ## Qué configura hoy cada preferencia
@@ -50,7 +51,7 @@ permite atribuirle el resultado del brazo ONNX 8.
 |---|---|---|---|---|
 | Bajo | sin valor nuevo decidido | 1 actual | 1 actual | OCR1 y NER A/1/2 tienen curva macOS; faltan atribución de memoria OCR y esos brazos en Windows antes de redefinirlo. |
 | Intermedio | automático del runtime | 2 | PDF/Render actuales por capacidad | Ancla existente; en la Mac, NER automático efectivo 4 y OCR2 control. |
-| Alto | Mac: 6/8 empeoran NER. Windows (12 hilos): 6/8 lo aceleran, hasta −24 % en R1. Depende del hardware | 3 o 4, candidato | sin cambio decidido | En R2, 3 bajó `Ready` 13,7 % en la Mac y 13,8 % en Windows; 4 lo bajó 21,0 % y 26,0 %. En Windows el RSS durante OCR sube con el tamaño del pool (R2 frío 1398 → 1778 MiB de 2 a 4). Falta costo WASM/native atribuible. |
+| Alto | Mac: 6/8 empeoran NER. Windows (12 hilos): 6/8 lo aceleran, hasta −24 % en R1. Depende del hardware | 3 o 4, candidato | sin cambio decidido | En R2, 3 bajó `Ready` 13,7 % en la Mac y 13,8 % en Windows; 4 lo bajó 21,0 % y 26,0 %. En Windows el RSS durante OCR sube con el tamaño del pool (R2 frío 1398 → 1778 MiB de 2 a 4). WASM macOS atribuido: incremento mediano de 85,8125 MiB por LSTM en R2. Falta completar evidencia Windows; nativo sin atribución. |
 | Automático | resolver a uno de los tres niveles anteriores | valor del nivel resuelto | valor del nivel resuelto | Umbrales y señales por plataforma aún sin validar; no usar cantidad de páginas como señal de carga. |
 
 La matriz es **una propuesta de experimentación**, no valores aprobados. La
@@ -61,10 +62,11 @@ T-11/T-12 ya midieron **148 MB de WASM por worker** en P2 y **90 MB** en R2
 con dos reconocedores (`Ciclos_Y_Documentos_Reales_Medicion.md` §5.2/§6.5).
 Esa es una base útil, pero no una curva 2/3/4: no muestra el pico simultáneo
 de WASM, heap y otros targets al agregar plazas, ni prueba que el tercer y
-cuarto reconocedor sigan en el mismo escalón de memoria. El banco nuevo debe
-medirlos por target con CDP, junto con el total de la instancia, mientras
-los trabajos están activos; la cifra de 90 MB no se multiplica por cuatro
-para aprobar Alto.
+cuarto reconocedor sigan en el mismo escalón de memoria. La tanda del
+2026-09-26 completó los targets con una barrera al final de
+OCR y midió RSS natural en corridas separadas (protocolo al final de este
+documento). La cifra de 90 MB no se multiplica por cuatro para aprobar Alto:
+es reserva lineal, no costo total residente ni memoria nativa atribuida.
 Un nivel Alto podría justificar más memoria por una reducción material de
 tiempo, siempre que el costo medido, los presupuestos vigentes y la calidad lo
 permitan. El presupuesto de imágenes vivas sigue en 128 MiB hasta una campaña
@@ -113,9 +115,11 @@ La puerta para ese ADR y el código de producto es:
    con controles intercalados, densidad de caracteres, calidad y cancelación.~~
    **Hecho el 2026-09-25**: calidad exacta y cancelación de 0–1 ms en todos los
    brazos; NER en dirección contraria a la Mac, OCR en la misma.
-2. Obtener memoria WASM/native por reconocedor o declarar un límite de memoria
-   verificable por otra vía; decidir si 3 o 4 cumple el compromiso de memoria
-   y los presupuestos. Si se quiere variar `LiveImageBudget`, hacer otra
+2. WASM por reconocedor **completado en macOS el 2026-09-26**. Completar su
+   evidencia Windows y decidir si 3 o 4 cumple el compromiso de memoria y los
+   presupuestos. Memoria nativa por worker permanece sin atribución; una
+   política necesita un límite verificable de memoria total. Si se quiere
+   variar `LiveImageBudget`, hacer otra
    campaña con una variable por vez.
 3. Medir las variantes de Bajo y, al menos, los rangos de capacidad entre la
    Mac de 8 GiB y Windows. Las variantes de Bajo ya tienen curva macOS
@@ -199,7 +203,11 @@ memoria monótona ni un costo por reconocedor a partir de esos deltas.
 La sonda CDP obtuvo cobertura parcial de targets WASM en 23 de 24 corridas de
 memoria. También observó raíces de workers con aspecto OCR sin poder
 atribuirles formalmente el rol; los picos completos de WASM/heap y el costo
-incremental **por reconocedor** siguen sin demostrarse. Las muestras completas
+incremental **por reconocedor** no quedaron demostrados en esa tanda.
+La curva de reserva WASM macOS se completó el 2026-09-26 con el protocolo
+adicional del final y el informe en `Reconocedores_OCR_Medicion.md`; esto
+no convierte los snapshots parciales anteriores en lecturas completas.
+Las muestras completas
 puntuales sirven como cotas observadas, no como pico real simultáneo. La
 memoria nativa no atribuible tampoco se calcula restando muestras de RSS y
 WASM tomadas en instantes distintos. Se conserva el resultado de tiempo y
@@ -249,5 +257,51 @@ Se mantienen `auto`/`low`/`high`, sus defaults y los presupuestos vigentes.
 > la repetición Windows todavía corría. Ya está hecha para NER A/4/6/8 y
 > OCR 2/3/4 (punto 1 de la puerta, más arriba). De Windows falta solo lo que
 > agregó esta tanda: OCR1 y NER 1/2. La atribución de memoria por
-> reconocedor sigue abierta en las dos plataformas, y la decisión de perfiles
-> sigue siendo del humano.
+> reconocedor estaba abierta en las dos plataformas al cerrar esa tanda.
+> WASM macOS se completó el 2026-09-26 (protocolo de abajo e informe OCR);
+> Windows conserva su seguimiento y la decisión de perfiles sigue siendo del humano.
+
+## Protocolo adicional macOS — memoria OCR 2/3/4 (2026-09-26)
+
+Antes de medir se cierra este procedimiento. La sonda periódica anterior
+pierde targets ocupados y no reconoce los nombres `entry-<hash>` del build.
+Se separan dos observaciones, con el mismo build y una instancia Electron
+nueva por importación, P2 sintético y R2 real, tres rondas intercaladas
+`2/3/4`, `4/3/2`, `2/4/3` por corpus:
+
+1. **RSS natural**: muestreo del árbol Electron cada 150 ms, sin CDP ni
+   barrera. Se informa el pico durante OCR, su serie y duración. Sigue
+   siendo memoria residente total del árbol, sin atribución por worker.
+2. **WASM y heap al final de OCR**: el arnés envuelve `processSession` en
+   la instancia expuesta por `VITE_E2E`, espera su resolución normal y
+   retiene su retorno mientras realiza tres lecturas CDP consecutivas.
+   Esto impide la baja inmediata del pool y el comienzo de NER; todos los
+   jobs OCR ya terminaron. Se libera en `finally` y el pipeline debe llegar
+   a Ready. La barrera dura menos que el minuto de disposición por
+   inactividad. Los workers conservan su memoria lineal alcanzada; no se
+   presenta esta lectura como un pico activo de RSS, como tiempo natural,
+   ni como memoria nativa atribuida. CDP fuerza GC y `queryObjects` también
+   puede hacerlo; el heap informado es después de GC.
+
+Los roles LSTM/OSD se vinculan a los chunks mediante los sourcemaps del build
+medido, nunca por el tamaño de memoria. Cada snapshot debe observar exactamente
+el número solicitado de hijos LSTM y un OSD, una memoria privada positiva por
+hijo, sin errores de lectura y con heap legible para todos los targets. La
+serie incompleta invalida la atribución. El paso 0 de T-11 verifica el mecanismo
+antes de la campaña; un piloto comprueba la barrera y la clasificación.
+
+Se comparan las tres rondas y la identidad de OCR, ocurrencias y grupos contra
+OCR2 del mismo corpus, además de confirmar plazas ocupadas, ausencia de fallos
+y presupuesto de imágenes de 128 MiB. Se informan los bytes de cada LSTM,
+suma LSTM, OSD, suma WASM completa y heap; cada muestra registra principio y
+fin de lectura, RSS observado a ambos lados y duración de la barrera. Un
+incremento constante de la reserva lineal comprueba esa parte de la hipótesis;
+no autoriza inferir linealidad de RSS, sumar heap y WASM como RSS, ni obtener
+memoria nativa por resta. Las unidades publicadas serán MiB (2^20 bytes).
+
+El runner serializa Electron, previene suspensión, conserva presión/swap,
+verifica fuentes y build antes/después y restaura los dist previos por hash.
+Los artefactos crudos quedan en `.measure/`; la documentación contiene solo
+IDs neutros y agregados. Se deshabilita la copia automática de snapshots ARIA
+ante fallos para evitar persistir contenido real. No cambia producto, defaults,
+contratos ni dependencias. Windows nativo mantiene su campaña separada.
