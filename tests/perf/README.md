@@ -219,6 +219,34 @@ El heap JS solo se leyó antes/después de la tanda; bytes temporales WASM no so
 observables en este arnés. Smoke P1/P2 completado con captura, idle dispose y
 allowlist antes de la medición real. Windows nativo ventilado queda pendiente.
 
+## Sonda opt-in OCR: reproducibilidad entre plataformas
+
+`ocr-platform-probe.mjs` separa las dos etapas que pueden hacer que un escaneo
+dé palabras distintas en dos máquinas: los píxeles que Render entrega al OCR
+y lo que Tesseract devuelve sobre ellos. Intercepta los jobs `ocr-page` y
+`ocr-orient` en el renderer y registra, por imagen, SHA-256 del PNG y del
+RGBA decodificado; por página, conteos y SHA-256 de texto, cajas y
+confianzas; y el estado de GPU del proceso. Con un documento real solo salen
+hashes y conteos. Con uno sintético (`ANONLY_OCR_PROBE_SYNTHETIC=1`) puede
+guardar los PNG (`ANONLY_OCR_PROBE_SAVE_DIR`) y fijarlos en otra corrida
+(`ANONLY_OCR_PROBE_PIN_DIR`), para correr el OCR del producto sobre píxeles
+idénticos. `ANONLY_OCR_PROBE_ELECTRON_ARGS` pasa flags de Chromium, por
+ejemplo `--disable-gpu`.
+
+`ocr-platform-synthetic.mjs` genera los escaneos sintéticos. Se generan una
+sola vez y el mismo archivo se lleva a cada plataforma: regenerarlos cambia
+los píxeles de origen. El mismo cuidado vale para P2, que
+`getOrGenerateScannedFixture` genera en cada máquina.
+
+```bash
+node tests/perf/ocr-platform-synthetic.mjs <dir>
+ANONLY_OCR_PROBE_DOC=<dir>/syn-1bpc-200dpi.pdf ANONLY_OCR_PROBE_ID=S1 ANONLY_OCR_PROBE_SYNTHETIC=1 \
+  ANONLY_OCR_PROBE_OUT=<salida>.json node tests/perf/ocr-platform-probe.mjs
+```
+
+Resultado: `docs/roadmap/OCR_Entre_Plataformas_Medicion.md`. Los conteos y
+huellas de documentos escaneados no se comparan entre plataformas.
+
 ## Campaña opt-in OCR: reconocedores LSTM
 
 `run-ocr-pool.sh` compara el pool automático de 2 reconocedores con los brazos

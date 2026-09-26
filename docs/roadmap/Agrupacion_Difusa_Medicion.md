@@ -190,10 +190,12 @@ El costo sigue cuadrático y todavía supera un segundo.
 
 ### Hallazgo 1 — el peor caso sintético es más lento en Windows, no más rápido
 
-Con el mismo código (ADR-182+183 ya aplicados en las dos plataformas), el
-caso adverso de 2.000 entidades distintas de 36 caracteres tardó **2.595 ms**
-en esta máquina contra **1.499 ms** en la Mac — **~1,73× más lento**, pese a
-que esta CPU es más rápida que el M1 para inferencia ONNX (`Hilos_NER_Medicion.md`).
+Con ADR-182+183 aplicados en las dos plataformas, el caso adverso de 2.000
+entidades distintas de 36 caracteres tardó **2.595 ms** en esta máquina
+contra **1.499 ms** en la Mac — **~1,73× más lento**, pese a que esta CPU es
+más rápida que el M1 para inferencia ONNX (`Hilos_NER_Medicion.md`).
+**No era el mismo código** (ver la corrección antes del Hallazgo 2): sobre
+`defa7a2`, el commit de la Mac, Windows da 2.396 ms, **~1,6×**.
 El patrón se repite en los cuatro tamaños y en el corpus repetido:
 
 | Ocurrencias sintéticas | Windows distintas (proceso / lookup) | macOS distintas (proceso / lookup, ADR-183) | Windows repetidas (proceso / lookup) | macOS repetidas (proceso / lookup) |
@@ -215,40 +217,55 @@ así que el problema estructural (revisar todos los grupos candidatos) es el
 mismo; solo la constante cambia, y en la dirección contraria a lo que
 sugeriría "esta máquina es más rápida".
 
+> **Corrección (2026-09-25, `OCR_Entre_Plataformas_Medicion.md`):** esta
+> sección comparaba Windows sobre `ee5eeba` contra macOS sobre `defa7a2`, y
+> entre esos commits entraron 21 commits de producto (Grouping ADR-170 a 178,
+> `core`, `shared`). No era "el mismo código" como dice el encabezado. Se
+> repitió en Windows sobre `defa7a2` para separar plataforma de código; los
+> números corregidos van abajo, junto a los originales.
+
+Hallazgo 1 con el mismo código: el peor caso sintético de 2.000 distintas, en
+Windows sobre `defa7a2`, tardó **2.485 / 2.370 / 2.396 ms** (mediana 2.396),
+intercalado con `ee5eeba` en la misma sesión (**2.563 / 2.668 / 2.601 ms**,
+mediana 2.601; misma huella de grupos). La plataforma explica **~1,6×**
+contra los 1.499 ms de la Mac; los commits posteriores suman **~8,5 %**. La
+conclusión del Hallazgo 1 se sostiene, con ese ajuste de magnitud.
+
 ### Hallazgo 2 — R2 detectó 4 ocurrencias más que en macOS
 
-| Documento | Ocurrencias | Grupos / alias / miembros | `processOccurrence` mediana | Lookup elegible mediana |
+| Documento | Ocurrencias | Grupos / alias / miembros | `processOccurrence` | Lookup elegible |
 |---|---:|---:|---:|---:|
-| R1 nativo | 308 (igual a macOS) | 123 / 126 / 304 (igual) | 21,34 ms (macOS: 13,42 ms) | 5,34 ms (macOS: 4,40 ms) |
-| **R2 escaneado** | **227** (macOS: 223) | **76 / 83 / 182** (macOS: 72/82/179) | 15,83 ms (macOS: 6,70 ms) | 2,49 ms (macOS: 1,58 ms) |
+| R1 nativo, Windows `ee5eeba` | 308 | 123 / 126 / 304 | 21,34 ms (mediana) | 5,34 ms |
+| R1 nativo, Windows `defa7a2` | 308 | 123 / 126 / 304 | 15,93 ms (una ronda) | 5,39 ms |
+| R1 nativo, macOS `defa7a2` | 308 | 123 / 126 / 304 | 13,42 ms | 4,40 ms |
+| **R2 escaneado, Windows `ee5eeba`** | **227** | **76 / 83 / 182** | 15,83 ms (mediana) | 2,49 ms |
+| **R2 escaneado, Windows `defa7a2`** | **227** | **76 / 83 / 182** | 10,83 ms (mediana de 3) | 2,46 ms |
+| R2 escaneado, macOS `defa7a2` | 223 | 72 / 82 / 179 | 6,70 ms | 1,58 ms |
 
-R1 (texto nativo embebido en el PDF, sin OCR) da **exactamente** el mismo
-conteo de ocurrencias y grupos en las dos plataformas — esperable, Regex/NER
-corren sobre el mismo texto extraído determinísticamente. **R2 (escaneado,
-pasa por OCR) no**: 4 ocurrencias y 4 grupos más en Windows. No se investigó
-la causa en esta campaña — candidatos plausibles sin verificar son
-diferencias de anti-aliasing/rasterizado entre plataformas antes del OCR, o
-el propio Tesseract WASM comportándose distinto bajo builds de V8 distintas.
-Esto es una diferencia real de **qué detecta el pipeline completo**, no solo
-de tiempo, y no estaba cubierta por el alcance de esta campaña de Grouping en
-particular — la nota queda acá porque es donde se observó, pero pertenece
-más al motor OCR/NER que al de Grouping. Vale una investigación aparte si se
-necesita reproducibilidad exacta de detecciones entre plataformas.
+**Las 4 ocurrencias de más no son del código**: Windows da 227/76 en los dos
+commits, con el mismo `groupingFingerprint`. **Son del OCR según la
+plataforma**, y la causa quedó aislada en `OCR_Entre_Plataformas_Medicion.md`:
+el ráster de la página que llega a Tesseract difiere cuando el canvas 2D está
+acelerado por GPU y la imagen se reescala al rasterizar. Con píxeles
+idénticos, Tesseract da salida idéntica. Linux (WSL, raster por software) da
+un tercer valor, 225/73. Los conteos de documentos escaneados **no se
+comparan entre plataformas**.
 
-`processOccurrence` y el lookup elegible también salen más lentos en Windows
-en términos absolutos para los documentos reales (R1: 21,34 ms contra
-13,42 ms; R2: 15,83 ms contra 6,70 ms) — coherente con el Hallazgo 1: el
-mismo motor de Grouping, con más candidatos que revisar en R2 (76 grupos
-contra 72), tarda más en ambos sentidos.
+`processOccurrence` en documentos reales **sí mezclaba código y plataforma**.
+Con el mismo código, Windows queda ~19 % por encima de la Mac en R1 (15,93
+contra 13,42 ms; una sola ronda en `defa7a2`), y los commits posteriores
+suman otro ~34 % (21,34 ms). En R2 la comparación además arrastra 4 grupos
+más en Windows, así que no se separa limpio.
 
 ### Conclusión
 
 La robustez temporal del peor caso de Grouping **no está cerrada en ninguna
-plataforma**, y en esta máquina el número absoluto es peor que en la Mac
-(2,60 s contra 1,50 s a 2.000 entidades distintas), no mejor. La calidad
-(huellas, orden, conteos) es estable dentro de cada plataforma entre rondas,
-pero R2 mostró una diferencia real de conteo de ocurrencias entre
-plataformas que no se investigó acá. Ninguna de las dos observaciones cambia
+plataforma**, y en esta máquina el número absoluto es peor que en la Mac, no
+mejor: 2,40 s contra 1,50 s a 2.000 entidades distintas con el mismo código
+(2,60 s con el código de `ee5eeba`). La calidad (huellas, orden, conteos) es
+estable dentro de cada plataforma entre rondas. La diferencia de conteo de R2
+entre plataformas viene del OCR, no de Grouping
+(`OCR_Entre_Plataformas_Medicion.md`). Ninguna de las dos observaciones cambia
 la decisión ya tomada en ADR-182/183; ambas son datos nuevos para quien
 decida si hace falta un índice de candidatos de recall completo (la mejora
 pendiente que ya señalaba la sección de macOS).

@@ -623,7 +623,11 @@ De las ~70: **~30 ya estaban cerradas** por hitos posteriores (ADR-053/054/056, 
   `Patron_Email_Regex_Medicion.md` y `Agrupacion_Difusa_Medicion.md` (Regex ya
   corregido por ADR-181, confirmado en Windows; Grouping con ADR-182/183 ya
   aplicados, pero el peor caso sintético resultó **más lento** en Windows que
-  en macOS — 2,60 s contra 1,50 s a 2.000 entidades — sin causa investigada).
+  en macOS — 2,40 s contra 1,50 s a 2.000 entidades con el mismo código —
+  sin causa investigada). Los documentos escaneados dan conteos de detección
+  distintos por plataforma, porque el ráster que llega al OCR cambia con la
+  aceleración por GPU del canvas: no se comparan entre plataformas
+  (`OCR_Entre_Plataformas_Medicion.md`).
   Después de medir hilos NER y workers OCR, revisar los perfiles
   Bajo/Intermedio/Alto/Automático como propuesta, con Automático mostrando el
   nivel resuelto según recursos del equipo y evidencia de costo/beneficio.
