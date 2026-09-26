@@ -15,7 +15,7 @@ import {
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 import { inferPersonGender } from "../gender.js";
-import { GroupingEngine } from "../grouping.engine.js";
+import { GroupingEngine, passesNecessaryTrigramCondition } from "../grouping.engine.js";
 import { buildPlaceholderValue } from "../labels.js";
 import {
   levenshtein,
@@ -155,6 +155,246 @@ describe("GroupingEngine — unit tests", () => {
         expect(levenshteinNormalizedAtLeast(left, right, threshold)).toBe(similarity >= threshold);
       }
     }
+  });
+
+  it("indexed candidate filter has no false negatives", () => {
+    let seed = 0x184;
+    const random = (max: number): number => {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      return seed % max;
+    };
+    const alphabet = ["a", "b", "c", "ñ", "🙂", "𝄞"];
+    const thresholds = [Number.NaN, -1, 0, 0.01, 0.5, 0.88, 0.9, 1, 2, Number.POSITIVE_INFINITY];
+    const samples: string[] = ["", "a", "aa", "🙂", "abcabcabc", "𝄞𝄞𝄞abc"];
+    for (let i = 0; i < 500; i += 1) {
+      const length = random(81);
+      let value = "";
+      for (let j = 0; j < length; j += 1) value += alphabet[random(alphabet.length)] ?? "a";
+      samples.push(value);
+    }
+    for (let i = 0; i < 2500; i += 1) {
+      const left = samples[random(samples.length)] ?? "";
+      const right = samples[random(samples.length)] ?? "";
+      const threshold = thresholds[random(thresholds.length)] ?? 0.88;
+      const accepted = levenshteinNormalizedAtLeast(left, right, threshold);
+      if (accepted) expect(passesNecessaryTrigramCondition(left, right, threshold)).toBe(true);
+    }
+    for (const [left, right] of [
+      ["abcdef", "abcxef"],
+      ["abcdef", "abcdefx"],
+    ] as const) {
+      const similarity = levenshteinNormalized(left, right);
+      for (const threshold of [
+        similarity,
+        similarity + Number.EPSILON,
+        similarity - Number.EPSILON,
+      ]) {
+        if (levenshteinNormalizedAtLeast(left, right, threshold)) {
+          expect(passesNecessaryTrigramCondition(left, right, threshold)).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("indexed lookup preserves exact pass and first eligible alias", async () => {
+    const values = ["abcdefghij", "xbcdefghij"];
+    expect(Reflect.set(ctx.config.grouping, "similarityThreshold", 1)).toBe(true);
+    for (const value of values) {
+      ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: makeOccurrence({
+          entityType: EntityType.Person,
+          value,
+          normalizedValue: value,
+        }),
+      });
+    }
+    const before = engine.getSnapshot("doc-1");
+    const [fuzzyCandidate, exactGroup] = before.groups;
+    expect(before.groups).toHaveLength(2);
+
+    // Both distinct Person groups are seeded while fuzzy matching is disabled.
+    // After restoring the normal threshold, the exact later group must beat
+    // the earlier group that is also within fuzzy distance.
+    expect(Reflect.set(ctx.config.grouping, "similarityThreshold", 0.88)).toBe(true);
+    const exactOccurrence = makeOccurrence({
+      entityType: EntityType.Person,
+      value: values[1] ?? "",
+      normalizedValue: values[1] ?? "",
+    });
+    const eventSpy = vi.spyOn(ctx.bus, "emit");
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: exactOccurrence,
+    });
+
+    const afterExact = engine.getSnapshot("doc-1");
+    const exactAfter = afterExact.groups.find((group) => group.id === exactGroup?.id);
+    expect(exactAfter?.members).toHaveLength(2);
+    expect(
+      afterExact.groups.find((group) => group.id === fuzzyCandidate?.id)?.members,
+    ).toHaveLength(1);
+    expect(afterExact).toEqual({
+      documentId: before.documentId,
+      groups: before.groups.map((group) =>
+        group.id === exactGroup?.id
+          ? {
+              ...group,
+              members: [
+                ...group.members,
+                {
+                  occurrenceId: exactOccurrence.id,
+                  value: exactOccurrence.value,
+                  pageIndex: exactOccurrence.pageIndex,
+                  bbox: exactOccurrence.bbox,
+                  source: exactOccurrence.source,
+                },
+              ],
+              updatedAt: exactAfter?.updatedAt,
+            }
+          : group,
+      ),
+      conflicts: before.conflicts,
+      rules: before.rules,
+    });
+    const emittedUpdates = eventSpy.mock.calls.filter(
+      ([channel, event]) =>
+        channel === EventChannel.Grouping && event === EngineEvents.ENTITY_GROUP_UPDATED,
+    );
+    expect(emittedUpdates).toHaveLength(1);
+    expect(emittedUpdates[0]?.[2]).toEqual({
+      documentId: "doc-1",
+      group: exactAfter,
+      changes: ["members", "updatedAt", "replacementPreviews"],
+    });
+
+    // Reclassifying the earlier candidate must retain its absorbed detector
+    // type in the live filter; the next fuzzy Person detection still joins it.
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: fuzzyCandidate?.id ?? "missing",
+      patch: { type: EntityType.Organization },
+    });
+    eventSpy.mockClear();
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: "abcdefghijx",
+        normalizedValue: "abcdefghijx",
+      }),
+    });
+    const afterAbsorbed = engine.getSnapshot("doc-1");
+    expect(afterAbsorbed.groups).toHaveLength(2);
+    expect(afterAbsorbed.groups[0]?.type).toBe(EntityType.Organization);
+    expect(afterAbsorbed.groups[0]?.aliases).toEqual(["abcdefghij", "abcdefghijx"]);
+    expect(afterAbsorbed.groups[0]?.members).toHaveLength(2);
+    expect(
+      eventSpy.mock.calls.some(([, event]) => event === EngineEvents.ENTITY_GROUP_CREATED),
+    ).toBe(false);
+  });
+
+  it("indexed lookup selects the same first group as an exhaustive scan", () => {
+    let seed = 0x18473;
+    const random = (max: number): number => {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      return seed % max;
+    };
+    const alphabet = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"];
+    const corpus: string[] = [];
+    for (let i = 0; i < 72; i += 1) {
+      const length = 24 + (i % 57);
+      let tail = "";
+      for (let j = 0; j < length - 12; j += 1) tail += alphabet[random(alphabet.length)] ?? "a";
+      corpus.push(`${i % 4 === 0 ? "abababababab" : "sharedprefix"}${tail}`);
+    }
+    const addressValue = "sharedprefixaddressvalue-long";
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Address,
+        value: addressValue,
+        normalizedValue: addressValue,
+      }),
+    });
+    for (const value of corpus) {
+      ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: makeOccurrence({
+          entityType: EntityType.Person,
+          value,
+          normalizedValue: value,
+        }),
+      });
+    }
+
+    const sessionRegistry: unknown = Reflect.get(engine, "sessions");
+    const lookup: unknown = Reflect.get(engine, "findMatchingGroup");
+    if (!(sessionRegistry instanceof Map) || typeof lookup !== "function") {
+      throw new Error("No se pudo inspeccionar el lookup interno de Grouping.");
+    }
+    const session: unknown = sessionRegistry.get("doc-1");
+    const queries = [...corpus.slice(0, 36)];
+    for (let i = 0; i < corpus.length; i += 1) {
+      const source = corpus[i] ?? "";
+      const position = Math.min(source.length - 1, 14 + (i % 9));
+      const changed = source.charAt(position) === "x" ? "y" : "x";
+      queries.push(`${source.slice(0, position)}${changed}${source.slice(position + 1)}`);
+    }
+    queries.push("unrelated-value-with-no-candidate");
+
+    for (const query of queries) {
+      const occurrence = makeOccurrence({
+        entityType: EntityType.Person,
+        value: query,
+        normalizedValue: query,
+      });
+      const groups = engine.getSnapshot("doc-1").groups;
+      const eligible = groups.filter((group) => group.type === EntityType.Person);
+      const reference =
+        eligible.find((group) => group.aliases.includes(query)) ??
+        eligible.find((group) =>
+          group.aliases.some((alias) =>
+            levenshteinNormalizedAtLeast(query, alias, ctx.config.grouping.similarityThreshold),
+          ),
+        ) ??
+        null;
+      const actualUnknown: unknown = Reflect.apply(lookup, engine, [session, occurrence]);
+      const actualId = actualUnknown == null ? null : Reflect.get(actualUnknown, "id");
+      expect(actualId).toBe(reference?.id ?? null);
+    }
+  });
+
+  it("special threshold fallback keeps insertion order across length buckets", () => {
+    const entries = [
+      { value: "aaaaa", type: EntityType.Address },
+      { value: "zzzzzz", type: EntityType.Person },
+      { value: "bbbbb", type: EntityType.Person },
+    ];
+    for (const entry of entries) {
+      ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: makeOccurrence({
+          entityType: entry.type,
+          value: entry.value,
+          normalizedValue: entry.value,
+        }),
+      });
+    }
+    expect(Reflect.set(ctx.config.grouping, "similarityThreshold", -1)).toBe(true);
+    ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        value: "xxyz",
+        normalizedValue: "xxyz",
+      }),
+    });
+
+    const groups = engine.getSnapshot("doc-1").groups;
+    expect(groups[1]?.aliases).toContain("xxyz");
+    expect(groups[1]?.members).toHaveLength(2);
+    expect(groups[2]?.members).toHaveLength(1);
   });
 
   it("fuzzy matching preserves first eligible group and alias order", () => {

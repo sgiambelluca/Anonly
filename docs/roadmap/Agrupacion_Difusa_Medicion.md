@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-medicion | dependencias=roadmap/Rendimiento_Experimentos_Plan.md,roadmap/Optimizacion_De_Rendimiento.md,core/Grouping_Engine.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 (punto 4b, antes/después macOS 2026-09-24; Windows pendiente) -->
+<!-- CONTEXT: scope=roadmap-medicion | dependencias=roadmap/Rendimiento_Experimentos_Plan.md,roadmap/Optimizacion_De_Rendimiento.md,core/Grouping_Engine.md,adr/ADR-184-Indice-Exacto-De-Candidatos-Para-Grouping.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 (punto 4b, antes/después macOS 2026-09-24; ADR-184 sintético y R1/R2 medidos 2026-09-25; Windows pendiente) -->
 
 # Búsqueda difusa de Grouping — antes y después en macOS
 
@@ -135,12 +135,71 @@ ADR-182 especificó la distancia Levenshtein con banda y corte temprano;
 ADR-183, el recorte exacto de afijos antes de esa banda. Ambos conservan la
 comparación normalizada final y la **primera coincidencia elegible**. Las
 30 huellas y la mejora total de 9,70× a 2.000 distintos respaldan estas dos
-fases. El algoritmo aún revisa todos los grupos candidatos: la curva de
-250/500/1000/2000 continúa cerca de 4× por duplicación, y a 2.000 bloquea
-unos 1,50 s. **La robustez temporal del peor caso no está cerrada.** Un índice
-de candidatos de recall completo, con mantenimiento de alias, merges, splits
-y cambios de tipo, requerirá un ADR separado y su propio banco. Windows nativo
-ventilado se repetirá cuando el equipo esté disponible.
+fases. El algoritmo aún revisaba todos los grupos candidatos: la curva de
+250/500/1000/2000 continuaba cerca de 4× por duplicación, y a 2.000 bloqueaba
+unos 1,50 s. Un índice de candidatos de recall completo, con mantenimiento de
+alias, merges, splits y cambios de tipo, requería un ADR separado y su propio
+banco. **ADR-184 (2026-09-25) cerró ese diseño documental** y la comparación
+sintética siguiente mide su implementación. La decisión de conservarlo sigue
+pendiente de R1/R2. Windows nativo ventilado se repetirá cuando el equipo esté
+disponible.
+
+### ADR-184: índice de candidatos, comparación pareada provisional
+
+El índice interno por sesión ya se implementó y se midió en macOS con el
+mismo corpus y build por brazo, usando dos worktrees temporales aislados
+(baseline `ee5eeba` y cambio actual). Las huellas de grupos y de orden
+coincidieron en todos los tamaños. Fueron tres rondas, con orden AB/BA
+alternado por celda; Node 26.5.1 y el mismo arnés `grouping-worst-case.ts`,
+en serie. Los JSON por brazo están en `/tmp/anonly-ab-baseline/` y
+`/tmp/anonly-ab-variant/` (artefactos temporales, fuera de Git). Medianas en ms:
+
+| Ocurrencias distintas | Proceso baseline → índice | Lookup inclusivo baseline → índice | Timer baseline → índice |
+|---:|---:|---:|---:|
+| 250 | 38,58 → 18,71 | 27,48 → 4,54 | 38,65 → 18,78 |
+| 500 | 117,58 → 36,67 | 95,04 → 8,58 | 117,67 → 36,74 |
+| 1.000 | 416,43 → 88,35 | 358,51 → 20,61 | 416,51 → 88,42 |
+| 2.000 | 1.610,85 → 263,64 | 1.416,31 → 50,92 | 1.610,93 → 263,71 |
+
+El control de 2.000 ocurrencias con 24 alias repetidos dio 117,56 →
+116,39 ms en proceso y 3,26 → 1,32 ms en lookup inclusivo: no mostró una
+regresión material en esta comparación pareada. La diferencia frente a la
+mediana histórica de 75,31 ms refleja variación entre campañas y no debe
+atribuirse al índice. El bloqueo síncrono del adverso de 2.000 valores bajó
+a unos **264 ms** en este corpus, una mejora de **6,11×** en proceso; no hay
+garantía universal de complejidad
+subcuadrática, porque ciertos buckets requieren recorrido completo.
+
+Con GC forzado y siete observaciones por brazo, el aumento estimado de heap
+retenido fue **4.812.776 bytes** (4,59 MiB, unos 2,4 KiB por alias) en el
+corpus distinto de 2.000, y **100.968 bytes** (98,6 KiB) en el control de
+24 alias. Es una diferencia de estado de proceso, no una atribución exacta
+de bytes al objeto índice.
+
+En R1/R2 se usó el mismo arnés confidencial, tres rondas por perfil en cada
+brazo, con baseline `ee5eeba` y el índice en checkouts aislados. Los PDF se
+leyeron desde archivos locales mediante variables de entorno; solo se guardaron
+agregados numéricos y huellas en
+`.measure/grouping-worst-case/adr184-real-baseline-20260925/` y
+`.measure/grouping-worst-case/adr184-real-current-20260925/`. El baseline
+requirió copiar los assets locales ignorados de NER, Tesseract y ONNX al
+checkout temporal; los intentos previos sin esos assets fallaron antes de
+completar el pipeline y no se incluyen. Las **seis comparaciones** conservaron
+conteos, grupos, alias, miembros y ambas huellas exactas, sin fallo de
+pipeline.
+
+| Perfil | `processOccurrence` baseline → índice | Lookup elegible baseline → índice | Gap máximo de event loop baseline → índice |
+|:---|---:|---:|---:|
+| R1 | 18,72 → 17,91 ms | 4,03 → 2,67 ms | 11,88 → 11,93 ms |
+| R2 | 10,99 → 11,01 ms | 1,87 → 1,74 ms | 12,90 → 15,27 ms |
+
+Son medianas de tres rondas, no CPU de toda la sesión. En R1 el proceso
+mejoró ligeramente; en R2 la diferencia de 0,02 ms es ruido. El gap de R2
+variaba 12,75–16,18 ms en baseline y 15,10–15,50 ms con índice: no hay una
+atribución robusta de ese cambio al índice. El beneficio material en el
+adverso sintético, la paridad completa y la ausencia de regresión material en
+R1/R2 y el control repetido respaldan conservar ADR-184 en macOS. Queda
+abierta la medición en Windows nativo ventilado como validación de plataforma.
 
 ### Filtro por trigramas evaluado y descartado
 
@@ -156,6 +215,14 @@ un modelo reducido del lookup, no una nueva mediana del motor ni un resultado
 R1/R2. Los datos están en
 `.measure/grouping-trigram-feasibility/grouping-trigram-feasibility.json`.
 No se incorpora el filtro al producto.
+
+ADR-184 no reutiliza esa sonda: calcula la máxima distancia entera que la
+comparación flotante **acepta** (4 para 36 caracteres con umbral 0,88), en vez
+del radio conservador de la DP (6), y usa un índice invertido con cota explícita
+para trigramas frecuentes. En una comprobación local del corpus sintético de
+2.000 valores, esa condición dejó una media de 0,07 candidatos por consulta
+y un máximo de 3; es una prueba de la poda del diseño, **no** una medición del
+motor ni una promesa de tiempo o memoria. El banco completo decidirá.
 
 ### Recorte de afijos comunes: factibilidad y segunda fase
 
