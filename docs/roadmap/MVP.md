@@ -652,6 +652,12 @@ workflow en CI sigue pendiente.
   A en los 48 pares, con la misma reutilización y recarga del modelo. No
   atribuye memoria ni sustituye una prueba de horas. Ver las dos secciones
   finales de `Hilos_NER_Medicion.md`. No cambia defaults ni cierra los gates del hito.
+  La curva de **memoria WASM OCR 2/3/4 en macOS cerró el 2026-09-26**:
+  36 corridas válidas, 54 snapshots completos y calidad exacta. Incrementos
+  medianos de 141,125 MiB en P2 y 85,8125 MiB en R2; RSS total sin crecimiento
+  lineal. Memoria nativa por worker permanece sin atribución. Informe:
+  `Reconocedores_OCR_Medicion.md`; la evidencia Windows y la decisión de
+  perfiles conservan su seguimiento pendiente.
   Después de medir hilos NER y workers OCR, revisar los perfiles
   Bajo/Intermedio/Alto/Automático como propuesta, con Automático mostrando el
   nivel resuelto según recursos del equipo y evidencia de costo/beneficio.
