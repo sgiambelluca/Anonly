@@ -12,6 +12,8 @@ Vale la pena decirlo con precisión: **el Core nunca habla con la red** —hay u
 
 Los instaladores se construyen en CI con logs públicos, y cada release publica el sha256 de cada archivo más una atestación que ata el binario a un commit de este repositorio. Cualquiera puede verificar que lo que bajó salió de este código.
 
+Qué sale de tu computadora, qué queda y cómo borrarlo: [`PRIVACY.md`](./PRIVACY.md). Cómo se firma el instalador de Windows y cómo verificarlo: [`CODE_SIGNING.md`](./CODE_SIGNING.md).
+
 ---
 
 ## Empezar
