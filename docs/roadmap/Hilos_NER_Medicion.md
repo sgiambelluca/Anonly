@@ -263,9 +263,10 @@ Al portar la campaña vecina de Lotes NER (ver
 para extraer una sección de `ner-batch-feasibility.mjs`, y ese archivo está
 commiteado con **CRLF** (Windows, `core.autocrlf=true`) — el `\n` literal
 nunca matchea `\r\n`, así que la extracción fallaba antes de abrir Electron.
-Se corrigió a `` \r?\n `` localmente (sin commitear todavía; ver el cierre de
-la sesión para pedir autorización de commit). No afecta a esta campaña de
-hilos: `ner-threads.spec.ts` no usa esa extracción por regex.
+Se corrigió a `` \r?\n `` en `45d07fd`. Desde el 2026-09-26 la causa de fondo
+tampoco existe: `.gitattributes` fija `eol=lf` y la copia de Windows ya no
+escribe CRLF. No afecta a esta campaña de hilos: `ner-threads.spec.ts` no usa
+esa extracción por regex.
 
 
 ---

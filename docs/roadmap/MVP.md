@@ -747,7 +747,7 @@ entidad con supresión por sesión), ADR-172 (deshacer y rehacer exactos por pun
 
 **Revisión 1 (2026-09-24): REJECTED** con tres bloqueantes — B-1 (typecheck rojo en `tests/`), B-2 (ADR-170 enumeraba rechazos que el motor no hacía → ADR-173), B-3 (el toast de alta podía mentir → ADR-174) — y no bloqueantes N-1 a N-8. Las filas 10-14 los cierran. N-8 (`scenario-2`/`scenario-5` de E2E) es anterior a esta branch: va en un commit aparte sobre `hardening/plan-2026-09`.
 
-**Revisión 2 (2026-09-24): REJECTED**: B-1 y B-2 cerrados; B-3 abierto por dos caminos —un choque que se "resolvía" solo al desaparecer la detección, y `heldConflictIds` por igualdad exacta de texto—. ADR-175 los cierra (filas 15-18). También cae ahí `mac-packaging.test.ts` de `apps/desktop-shell`: falla fuera de esta branch por los CRLF de `electron-builder.yml` con `core.autocrlf=true`, igual que N-8.
+**Revisión 2 (2026-09-24): REJECTED**: B-1 y B-2 cerrados; B-3 abierto por dos caminos —un choque que se "resolvía" solo al desaparecer la detección, y `heldConflictIds` por igualdad exacta de texto—. ADR-175 los cierra (filas 15-18). También cae ahí `mac-packaging.test.ts` de `apps/desktop-shell`: falla fuera de esta branch por los CRLF de `electron-builder.yml` con `core.autocrlf=true`, igual que N-8 (resuelto el 2026-09-26: `.gitattributes` fija `eol=lf`).
 
 **Revisión 3 (2026-09-24): REJECTED**: los dos bloqueantes de la revisión 2 cerrados; tres nuevos —nada bloqueaba el export con un conflicto sin resolver, fusionar/dividir la detección dejaba el choque inalcanzable, y un agregado contenido (ADR-117) rompía el invariante de `groupIds`—. ADR-176 los cierra (filas 19-22).
 

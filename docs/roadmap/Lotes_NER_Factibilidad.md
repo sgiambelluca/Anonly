@@ -134,8 +134,9 @@ commiteado con **CRLF** (`core.autocrlf=true` en esta copia Windows), así que
 el `\n` literal del regex no matcheaba `\r\n` y la campaña fallaba de
 inmediato con «Synthetic browser probe source not found», antes de abrir
 Electron. Se corrigió a `` \r?\n `` — inocuo en Unix, donde `\r?` matchea
-cero apariciones. **El fix está aplicado localmente pero no commiteado**;
-sin él, este arnés no puede correr en ninguna copia Windows del repo.
+cero apariciones. El fix entró en `45d07fd`, y desde el 2026-09-26
+`.gitattributes` fija `eol=lf`, así que la copia de Windows tampoco escribe
+CRLF.
 
 ### Datos de entrada (idénticos en carga a los de macOS)
 
