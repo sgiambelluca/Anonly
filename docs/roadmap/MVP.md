@@ -629,10 +629,10 @@ ejecución real del workflow en CI sigue pendiente.
   más en Windows), `Lotes_NER_Factibilidad.md` (lotes NER — bloqueado en las
   dos plataformas por diferencias de calidad, no se adopta),
   `Patron_Email_Regex_Medicion.md` y `Agrupacion_Difusa_Medicion.md` (Regex ya
-  corregido por ADR-181, confirmado en Windows; Grouping con ADR-182/183 ya
-  aplicados, pero el peor caso sintético resultó **más lento** en Windows que
-  en macOS — 2,40 s contra 1,50 s a 2.000 entidades con el mismo código —
-  sin causa investigada). Los documentos escaneados dan conteos de detección
+  corregido por ADR-181, confirmado en Windows; Grouping: con ADR-182/183 el
+  peor caso sintético fue **más lento** en Windows que en macOS —2,40 s contra
+  1,50 s a 2.000 entidades con el mismo código, sin causa investigada—, y
+  después ADR-184 lo bajó en macOS a ~264 ms; ADR-184 en Windows pendiente). Los documentos escaneados dan conteos de detección
   distintos por plataforma, porque el ráster que llega al OCR cambia con la
   aceleración por GPU del canvas: no se comparan entre plataformas
   (`OCR_Entre_Plataformas_Medicion.md`).

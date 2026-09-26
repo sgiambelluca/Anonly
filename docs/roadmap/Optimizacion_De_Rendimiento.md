@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap | dependencias=architecture/07_Performance_Strategy.md,core/NER_Engine.md,core/OCR_Engine.md,core/Grouping_Engine.md,roadmap/Duplicacion_De_Logica.md,roadmap/Optimizacion_De_Memoria_Plan.md,roadmap/Ciclos_Y_Documentos_Reales_Medicion.md,roadmap/Banco_Windows_Comparativa_Medicion.md,ui/React_Client.md | audiencia=humanos+IA | fase=11 (campaña macOS medida el 2026-09-24; Windows nativo pendiente) -->
+<!-- CONTEXT: scope=roadmap | dependencias=architecture/07_Performance_Strategy.md,core/NER_Engine.md,core/OCR_Engine.md,core/Grouping_Engine.md,roadmap/Duplicacion_De_Logica.md,roadmap/Optimizacion_De_Memoria_Plan.md,roadmap/Ciclos_Y_Documentos_Reales_Medicion.md,roadmap/Banco_Windows_Comparativa_Medicion.md,ui/React_Client.md | audiencia=humanos+IA | fase=11 (campaña macOS medida el 2026-09-24; Windows nativo 2026-09-25 para los puntos 1–4, previo a ADR-184) -->
 
 # Optimización de rendimiento — hallazgos y plan
 
@@ -246,7 +246,7 @@ La duplicación de lógica se apartó a [`Duplicacion_De_Logica.md`](./Duplicaci
 
 ## Próximos objetivos — tiempo, consumo y perfiles (2026-09-20)
 
-**Estado: los cinco puntos tienen resultados en macOS; Windows nativo sigue pendiente.** Decisión del humano: explorar el beneficio
+**Estado: los cinco puntos tienen resultados en macOS. Windows nativo se midió el 2026-09-25 para los puntos 1–4 con el código previo a ADR-184; faltan en Windows ADR-184 y los brazos de Bajo del punto 5.** Decisión del humano: explorar el beneficio
 de hilos/workers y su costo de memoria, conservando la calidad. Un mayor consumo
 puede justificar una mejora de velocidad; el resultado debe permitir elegir ese
 compromiso por perfil. No se cambian presupuestos ni defaults con este plan.
@@ -269,8 +269,9 @@ en R2 los dos reconocedores OCR estuvieron ocupados ~98 % de su etapa, frente al
 4 hilos; 4 solicitado indistinguible, 6 y 8 más lentos sobre R1/R2 reales, con
 calidad idéntica y cancelación ejercitada. Ver
 [`Hilos_NER_Medicion.md`](Hilos_NER_Medicion.md) para pares y límites. No se
-adoptó configuración nueva; se repetirá en Windows nativo ventilado después
-de completar la campaña Mac. Carga por brazo, panel y estrés sostenido no quedaron
+adoptó configuración nueva. **Windows nativo (2026-09-25):** dirección
+contraria, 6 y 8 hilos aceleran NER hasta −24 % en R1, con calidad idéntica;
+el efecto depende del hardware. Carga por brazo, panel y estrés sostenido no quedaron
 separados en esta tanda (límite detallado en el informe).
 
 - Comparar el control efectivo actual con **4, 6 y 8 hilos de ONNX**, donde el
@@ -288,8 +289,9 @@ separados en esta tanda (límite detallado en el informe).
 efectiva. P2 sintético respondió de otra manera; el informe
 [`Reconocedores_OCR_Medicion.md`](Reconocedores_OCR_Medicion.md) registra la densidad
 de caracteres, memoria, una tanda excluida por suspensión y los límites del
-banco. No se adoptó configuración nueva; Windows nativo ventilado sigue
-pendiente.
+banco. No se adoptó configuración nueva. **Windows nativo (2026-09-25):**
+misma dirección, más ganancia; R2 `Ready` 43,2 / 37,2 / 32,0 s con 2/3/4 y
+RSS durante OCR creciente con el tamaño del pool.
 
 - Comparar **2, 3 y 4 reconocedores LSTM**, conservando el OSD compartido,
   la configuración de 300 DPI y las reglas actuales de calidad.
@@ -310,7 +312,9 @@ en Chromium/WASM y las muestras de R1/R2. Hubo diferencias de entidades y
 cruces del umbral de confianza frente a inferencias individuales; los lotes
 de cuatro no mejoraron la mediana de ninguna muestra real. No se cambió el
 producto. Se investigaría primero la equivalencia de salida y después el
-costo de una importación completa, si este enfoque se retomara.
+costo de una importación completa, si este enfoque se retomara. **Windows
+nativo (2026-09-25):** mismo bloqueo, con mismatches de etiqueta, geometría y
+umbral 0,7 en R1 y R2.
 
 Evaluar soporte y costo de procesar varias entradas en un mismo lote, agrupando
 longitudes similares. Preservar los límites de tokens y el contexto independiente
@@ -326,6 +330,8 @@ No hay ganancia cuantificada todavía.
 curva cuadrática de email hasta 160 KiB y el control rápido de R1/R2 reales.
 El arreglo lineal quedó decidido en ADR-181 y `Regex_Engine.md` v1.14.0;
 se implementó y repitió la curva adversa y R1/R2 sin cambios de detección.
+**Windows nativo (2026-09-25):** curva adversa y R1/R2 confirmados, sin
+bloqueo cuadrático (163.840 caracteres en 13–31 ms).
 
 **Grouping, línea base cerrada en macOS:**
 [`Agrupacion_Difusa_Medicion.md`](Agrupacion_Difusa_Medicion.md) registra la
@@ -346,7 +352,9 @@ huellas idénticas en el banco sintético y en seis corridas R1/R2. El control
 repetido y los tiempos de proceso reales no mostraron regresión material. El
 índice retuvo unos 4,59 MiB adicionales en 2.000 alias; la curva puede seguir
 siendo cuadrática en corpus sin poda. Evidencia en
-`Agrupacion_Difusa_Medicion.md`; Windows nativo pendiente.
+`Agrupacion_Difusa_Medicion.md`. La repetición Windows del 2026-09-25 corrió
+sobre el código **previo** a ADR-184 (2,40 s a 2.000 distintos, ~1,6× la
+Mac con el mismo código); **ADR-184 en Windows sigue pendiente**.
 
 Retomar los dos casos cuadráticos del relevamiento: patrón de email sobre texto
 adverso y búsqueda difusa con muchas entidades distintas. Primero reproducirlos
@@ -363,8 +371,10 @@ matriz candidata, señales, migración y condiciones pendientes. La política no
 está validada para Windows ni cambió los settings del producto. La tanda local
 adicional OCR1/2/3/4 y NER Automático/1/2 cerró el 2026-09-25 con calidad y
 cancelación conservadas. Los tiempos, el RSS observado y las limitaciones de
-atribución WASM están en ese informe. **El punto queda pendiente de Windows
-nativo y de la decisión humana**; no se adoptaron perfiles ni defaults nuevos.
+atribución WASM están en ese informe. Las curvas Windows de NER A/4/6/8 y
+OCR 2/3/4 ya están incorporadas a la revisión. **El punto queda pendiente de
+los brazos de Bajo en Windows, de la atribución de memoria por reconocedor y
+de la decisión humana**; no se adoptaron perfiles ni defaults nuevos.
 
 **Depende de los objetivos 1 y 2 y de revisar sus resultados.** Es el siguiente
 paso después de esas mediciones; no necesita esperar a que terminen 3 y 4. Si

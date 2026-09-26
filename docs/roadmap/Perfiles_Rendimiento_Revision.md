@@ -1,14 +1,22 @@
-<!-- CONTEXT: scope=roadmap-plan | dependencias=roadmap/Rendimiento_Experimentos_Plan.md,roadmap/Hilos_NER_Medicion.md,roadmap/Reconocedores_OCR_Medicion.md,roadmap/Optimizacion_De_Rendimiento.md,ui/React_Client.md,core/Contracts.md | audiencia=humanos+IA | fase=11 (revisión provisional de perfiles tras las curvas macOS 1 y 2; Windows nativo pendiente) -->
+<!-- CONTEXT: scope=roadmap-plan | dependencias=roadmap/Rendimiento_Experimentos_Plan.md,roadmap/Hilos_NER_Medicion.md,roadmap/Reconocedores_OCR_Medicion.md,roadmap/Optimizacion_De_Rendimiento.md,ui/React_Client.md,core/Contracts.md | audiencia=humanos+IA | fase=11 (revisión provisional de perfiles tras las curvas macOS 1 y 2; Windows nativo medido el 2026-09-25 para NER A/4/6/8 y OCR 2/3/4; brazos de Bajo en Windows y memoria por reconocedor pendientes) -->
 
-# Perfiles de rendimiento — revisión tras las curvas macOS
+# Perfiles de rendimiento — revisión tras las curvas macOS y Windows
 
 ## Estado de la decisión
 
 Las curvas permiten **descartar como mejora local** fijar 6 u 8 hilos ONNX
 para NER en la Mac medida, y muestran que 3/4 reconocedores OCR aceleran R2
-real sin cambiar detecciones. **No alcanzan para publicar perfiles nuevos**:
-falta repetirlas en Windows nativo ventilado y obtener una atribución
-concluyente de memoria WASM/native de los brazos OCR 2/3/4. La campaña local
+real sin cambiar detecciones. **La repetición en Windows nativo (2026-09-25,
+i5-12400 con 12 hilos visibles) cambia el primer punto**: allí 6 y 8 hilos
+**aceleran** NER (R1 de 24,3 a 21,2 y 18,6 s, −24 % con 8) con calidad
+idéntica, así que el efecto de los hilos depende del hardware y no admite un
+valor fijo. La curva OCR va en la misma dirección que en la Mac, con más
+ganancia (R2 `Ready` −26,0 % con 4). Ver
+[`Hilos_NER_Medicion.md`](Hilos_NER_Medicion.md) y
+[`Reconocedores_OCR_Medicion.md`](Reconocedores_OCR_Medicion.md).
+**No alcanzan para publicar perfiles nuevos**: falta una atribución
+concluyente de memoria WASM/native de los brazos OCR 2/3/4, y los brazos de
+Bajo (OCR1, NER 1/2) solo tienen curva macOS. La campaña local
 adicional midió tiempo y RSS, pero su cobertura CDP parcial no permite
 cuantificar el costo incremental por reconocedor. Esta revisión propone la
 forma de la decisión y explicita los huecos; no cambia settings, contratos,
@@ -36,13 +44,13 @@ eligió 4 hilos internos tanto para el control como para el brazo explícito 4.
 Por eso llamar «Alto» a `nerPoolSize = 2` no implica dos inferencias paralelas ni
 permite atribuirle el resultado del brazo ONNX 8.
 
-## Matriz candidata para revisar con Windows
+## Matriz candidata
 
 | nivel futuro | ONNX NER | reconocedores OCR | otros pools | evidencia y decisión pendiente |
 |---|---|---|---|---|
-| Bajo | sin valor nuevo decidido | 1 actual | 1 actual | OCR1 y NER A/1/2 ya tienen curva local; faltan atribución de memoria OCR y validación Windows antes de redefinirlo. |
+| Bajo | sin valor nuevo decidido | 1 actual | 1 actual | OCR1 y NER A/1/2 tienen curva macOS; faltan atribución de memoria OCR y esos brazos en Windows antes de redefinirlo. |
 | Intermedio | automático del runtime | 2 | PDF/Render actuales por capacidad | Ancla existente; en la Mac, NER automático efectivo 4 y OCR2 control. |
-| Alto | automático del runtime en la Mac; 6/8 no aportaron | 3 o 4, candidato | sin cambio decidido | En R2 Mac, 3 bajó `Ready` 13,7 % y 4 21,0 % en la primera curva; la nueva tanda confirmó la dirección. Falta costo WASM/native atribuible y curva Windows. |
+| Alto | Mac: 6/8 empeoran NER. Windows (12 hilos): 6/8 lo aceleran, hasta −24 % en R1. Depende del hardware | 3 o 4, candidato | sin cambio decidido | En R2, 3 bajó `Ready` 13,7 % en la Mac y 13,8 % en Windows; 4 lo bajó 21,0 % y 26,0 %. En Windows el RSS durante OCR sube con el tamaño del pool (R2 frío 1398 → 1778 MiB de 2 a 4). Falta costo WASM/native atribuible. |
 | Automático | resolver a uno de los tres niveles anteriores | valor del nivel resuelto | valor del nivel resuelto | Umbrales y señales por plataforma aún sin validar; no usar cantidad de páginas como señal de carga. |
 
 La matriz es **una propuesta de experimentación**, no valores aprobados. La
@@ -101,14 +109,17 @@ persistencia idempotente y texto de la migración antes de codificarla.
 
 La puerta para ese ADR y el código de producto es:
 
-1. Repetir NER A/4/6/8 y OCR 2/3/4 sobre R1/R2 en **Windows nativo ventilado**,
-   con controles intercalados, densidad de caracteres, calidad y cancelación.
+1. ~~Repetir NER A/4/6/8 y OCR 2/3/4 sobre R1/R2 en **Windows nativo ventilado**,
+   con controles intercalados, densidad de caracteres, calidad y cancelación.~~
+   **Hecho el 2026-09-25**: calidad exacta y cancelación de 0–1 ms en todos los
+   brazos; NER en dirección contraria a la Mac, OCR en la misma.
 2. Obtener memoria WASM/native por reconocedor o declarar un límite de memoria
    verificable por otra vía; decidir si 3 o 4 cumple el compromiso de memoria
    y los presupuestos. Si se quiere variar `LiveImageBudget`, hacer otra
    campaña con una variable por vez.
 3. Medir las variantes de Bajo y, al menos, los rangos de capacidad entre la
-   Mac de 8 GiB y Windows. Definir reserva de SO y reglas cuando falta RAM.
+   Mac de 8 GiB y Windows. Las variantes de Bajo ya tienen curva macOS
+   (2026-09-25, abajo); falta repetirlas en Windows. Definir reserva de SO y reglas cuando falta RAM.
 4. Presentar al humano la matriz final, la política automática y la migración.
    Después de su decisión, redactar ADR y actualizar `Contracts.md`, specs de
    motores/UI y tests antes de tocar implementación. ADR-168 a ADR-178 están
@@ -233,3 +244,10 @@ esta Mac; no fija el comportamiento de otros equipos.
 **Estado del punto 4:** mediciones locales cerradas; documentación y decisión
 de perfiles **pendientes de Windows nativo ventilado** y de la elección humana.
 Se mantienen `auto`/`low`/`high`, sus defaults y los presupuestos vigentes.
+
+> **Actualización (2026-09-26):** esta sección se escribió en la Mac mientras
+> la repetición Windows todavía corría. Ya está hecha para NER A/4/6/8 y
+> OCR 2/3/4 (punto 1 de la puerta, más arriba). De Windows falta solo lo que
+> agregó esta tanda: OCR1 y NER 1/2. La atribución de memoria por
+> reconocedor sigue abierta en las dos plataformas, y la decisión de perfiles
+> sigue siendo del humano.
