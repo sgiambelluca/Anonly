@@ -212,7 +212,7 @@ Invariantes que el agregador verifica y que hacen fallar la corrida:
   activas = franjas inspeccionadas.
 - La huella de calidad de P2 coincide con la histórica de la campaña A/B/C.
 
-Reporte final en `docs/roadmap/ImageData_Perfilado_Resultados.md`: sobrecosto
+Reporte final en `docs/roadmap/mediciones/ocr/ImageData_Perfilado_Resultados.md`: sobrecosto
 del instrumento primero, después el reparto por etapa con sus límites, el
 aporte de palabras por pasada del caso positivo, los conteos estructurales de
 los casos 2 y 4, y las corridas inválidas con su causa. **Sin recomendación de

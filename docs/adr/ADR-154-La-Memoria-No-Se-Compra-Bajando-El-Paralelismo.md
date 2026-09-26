@@ -175,7 +175,7 @@ necesita su propio ADR y una razón que no sea "así entra en el presupuesto".
    > El producto conserva el orden OCR → NER, y el modelo se carga dentro del
    > primer batch de NER, ya terminado el escaneo. Evidencia, límites y la
    > variante de arranque —descartada sin medir— en
-   > `roadmap/Precalentamiento_NER_Durante_OCR_Medicion.md` §7.
+   > `roadmap/mediciones/ner/Precalentamiento_NER_Durante_OCR_Medicion.md` §7.
 
 4. **Copias por página.** Verificado el 2026-09-11, y son **más de tres**: canvas
    del worker de Render, `ImageData` del host, clon estructurado en el worker de

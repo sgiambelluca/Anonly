@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=architecture/07_Performance_Strategy.md,roadmap/Ciclos_Y_Documentos_Reales_Plan.md,roadmap/Ciclos_Y_Documentos_Reales_Medicion.md,roadmap/Optimizacion_De_Memoria_Plan.md,roadmap/Gates_Leak_Stress_Plan.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-153-El-Gate-De-Tiempos-Se-Mide-Sobre-El-Producto.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=architecture/07_Performance_Strategy.md,roadmap/Ciclos_Y_Documentos_Reales_Plan.md,roadmap/mediciones/transversal/Ciclos_Y_Documentos_Reales_Medicion.md,roadmap/Optimizacion_De_Memoria_Plan.md,roadmap/Gates_Leak_Stress_Plan.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-153-El-Gate-De-Tiempos-Se-Mide-Sobre-El-Producto.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-185 — Gates de fuga y estrés sobre Electron empaquetado
 

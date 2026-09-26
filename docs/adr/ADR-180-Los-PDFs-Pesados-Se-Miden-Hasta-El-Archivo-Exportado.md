@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=roadmap/Optimizacion_De_Memoria_Plan.md,roadmap/PDFs_Pesados_Y_Exportacion_Plan.md,roadmap/PDFs_Pesados_Y_Exportacion_Medicion.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-148-Un-Export-Se-Verifica-Leyendo-El-PDF-Exportado.md,core/Contracts.md,core/Render_Engine.md,core/Export_Engine.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=roadmap/Optimizacion_De_Memoria_Plan.md,roadmap/PDFs_Pesados_Y_Exportacion_Plan.md,roadmap/mediciones/transversal/PDFs_Pesados_Y_Exportacion_Medicion.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-148-Un-Export-Se-Verifica-Leyendo-El-PDF-Exportado.md,core/Contracts.md,core/Render_Engine.md,core/Export_Engine.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-180 — Los PDFs pesados se miden hasta el archivo exportado
 
@@ -28,7 +28,7 @@ El renderer, los workers y pdf-lib pueden mantener copias y rásters que las API
 
 `roadmap/PDFs_Pesados_Y_Exportacion_Plan.md` fija perfiles, fases, campos y aceptación del banco. El implementador puede construir el instrumento y entregar datos, pero no modificar specs de motores ni convertir un hallazgo en cambio de contrato o presupuesto. Si falta una API pública para una medición exacta, informa el límite como “no observable”; no agrega instrumentación de producto por inferencia.
 
-La ejecución local y sus límites están en `roadmap/PDFs_Pesados_Y_Exportacion_Medicion.md`: nueve corridas intercaladas y una cancelación ejercitada, con calidad estructural/visual del export verificada. No se derivó un cambio de presupuesto ni una optimización del producto.
+La ejecución local y sus límites están en `roadmap/mediciones/transversal/PDFs_Pesados_Y_Exportacion_Medicion.md`: nueve corridas intercaladas y una cancelación ejercitada, con calidad estructural/visual del export verificada. No se derivó un cambio de presupuesto ni una optimización del producto.
 
 ## Consecuencias
 

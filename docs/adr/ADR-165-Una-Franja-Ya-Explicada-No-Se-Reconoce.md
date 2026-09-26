@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=core/OCR_Engine.md,adr/ADR-121-El-Sello-Rotado-Vive-En-El-Margen.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-149-El-Test-Que-No-Ve-El-Rojo-No-Mide.md,roadmap/Margenes_Menos_Pixeles_Plan.md,roadmap/Margenes_Menos_Pixeles_Resultados.md,roadmap/ImageData_Perfilado_Resultados.md | audiencia=planificador+implementador+revisor | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=core/OCR_Engine.md,adr/ADR-121-El-Sello-Rotado-Vive-En-El-Margen.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-149-El-Test-Que-No-Ve-El-Rojo-No-Mide.md,roadmap/Margenes_Menos_Pixeles_Plan.md,roadmap/mediciones/ocr/Margenes_Menos_Pixeles_Resultados.md,roadmap/mediciones/ocr/ImageData_Perfilado_Resultados.md | audiencia=planificador+implementador+revisor | fase=11 -->
 
 # ADR-165 — Una franja ya explicada no se reconoce
 
@@ -14,7 +14,7 @@ ADR-121 agregó cuatro pasadas de margen por página escaneada: dos franjas
 (20 % del ancho, alto completo) reconocidas cada una a 90° y 270°. Recupera
 15 de 15 palabras de un sello vertical, y es la razón por la que existe.
 
-El perfilado del 2026-09-15 (`roadmap/ImageData_Perfilado_Resultados.md`) midió
+El perfilado del 2026-09-15 (`roadmap/mediciones/ocr/ImageData_Perfilado_Resultados.md`) midió
 lo que cuesta: **~301 ms por página, de los cuales 74,4 % es `recognizeCall`**.
 Como cada franja es un quinto de la página, las cuatro pasadas son **el 80 % de
 una página adicional leída por cada página**, y ese 80 % es estructural, no
@@ -167,7 +167,7 @@ informa como tal.
 ### Resultado de aceptación (2026-09-17)
 
 La campaña reproducible de
-[`Margenes_Menos_Pixeles_Medicion_I1.md`](../roadmap/Margenes_Menos_Pixeles_Medicion_I1.md)
+[`Margenes_Menos_Pixeles_Medicion_I1.md`](../roadmap/mediciones/ocr/Margenes_Menos_Pixeles_Medicion_I1.md)
 cumplió las tres condiciones. En tres pares alternados de P2, el ahorro neto
 medio de `ocrDurationMs` fue **6,234 s por 50 páginas** (34,5 % del tiempo OCR
 del control); las seis comparaciones fueron positivas, entre 4,826 y 6,978 s.

@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-plan | dependencias=roadmap/Rendimiento_Experimentos_Plan.md,roadmap/Hilos_NER_Medicion.md,roadmap/Reconocedores_OCR_Medicion.md,roadmap/Optimizacion_De_Rendimiento.md,ui/React_Client.md,core/Contracts.md | audiencia=humanos+IA | fase=11 (revisión provisional de perfiles; curvas NER y OCR, incluidos los brazos de Bajo, medidas en macOS y Windows nativo 2026-09-23 a 2026-09-26; curva WASM OCR 2/3/4 macOS cerrada; atribución Windows y decisión humana pendientes) -->
+<!-- CONTEXT: scope=roadmap-plan | dependencias=roadmap/Rendimiento_Experimentos_Plan.md,roadmap/mediciones/ner/Hilos_NER_Medicion.md,roadmap/mediciones/ocr/Reconocedores_OCR_Medicion.md,roadmap/Optimizacion_De_Rendimiento.md,ui/React_Client.md,core/Contracts.md | audiencia=humanos+IA | fase=11 (revisión provisional de perfiles; curvas NER y OCR, incluidos los brazos de Bajo, medidas en macOS y Windows nativo 2026-09-23 a 2026-09-26; curva WASM OCR 2/3/4 macOS cerrada; atribución Windows y decisión humana pendientes) -->
 
 # Perfiles de rendimiento — revisión tras las curvas macOS y Windows
 
@@ -12,8 +12,8 @@ i5-12400 con 12 hilos visibles) cambia el primer punto**: allí 6 y 8 hilos
 idéntica, así que el efecto de los hilos depende del hardware y no admite un
 valor fijo. La curva OCR va en la misma dirección que en la Mac, con más
 ganancia (R2 `Ready` −26,0 % con 4). Ver
-[`Hilos_NER_Medicion.md`](Hilos_NER_Medicion.md) y
-[`Reconocedores_OCR_Medicion.md`](Reconocedores_OCR_Medicion.md).
+[`Hilos_NER_Medicion.md`](mediciones/ner/Hilos_NER_Medicion.md) y
+[`Reconocedores_OCR_Medicion.md`](mediciones/ocr/Reconocedores_OCR_Medicion.md).
 Los brazos de Bajo (OCR1, NER 1/2) ya tienen curva en las dos plataformas
 (Windows el 2026-09-26, al final de este documento), y en las dos el control
 automático de NER resolvió **4 hilos efectivos**.

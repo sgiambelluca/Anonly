@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-medicion | dependencias=roadmap/Agrupacion_Difusa_Medicion.md,roadmap/Banco_Windows_Comparativa_Medicion.md,roadmap/Ciclos_Y_Documentos_Reales_Medicion.md,adr/ADR-158-El-Raster-De-OCR-Viaja-Codificado.md,adr/ADR-163-El-DPI-De-OCR-No-Supera-Al-Raster-Fuente.md,core/OCR_Engine.md,core/Render_Engine.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 (investigación Windows/WSL 2026-09-25 y ampliación macOS 2026-09-26 cerradas; sin cambio de producto) -->
+<!-- CONTEXT: scope=roadmap-medicion | dependencias=roadmap/mediciones/grouping/Agrupacion_Difusa_Medicion.md,roadmap/mediciones/transversal/Banco_Windows_Comparativa_Medicion.md,roadmap/mediciones/transversal/Ciclos_Y_Documentos_Reales_Medicion.md,adr/ADR-158-El-Raster-De-OCR-Viaja-Codificado.md,adr/ADR-163-El-DPI-De-OCR-No-Supera-Al-Raster-Fuente.md,core/OCR_Engine.md,core/Render_Engine.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 (investigación Windows/WSL 2026-09-25 y ampliación macOS 2026-09-26 cerradas; sin cambio de producto) -->
 
 # El OCR de un escaneo cambia con la plataforma — medición
 

@@ -1,9 +1,9 @@
-<!-- CONTEXT: scope=roadmap-medicion | tarea=T-8 | dependencias=roadmap/AB_Intercalado_Plan.md,roadmap/Verificacion_Liberacion_NER_Medicion.md,roadmap/Optimizacion_De_Memoria_Plan.md,adr/ADR-166-El-Modelo-De-NER-Se-Libera-Al-Terminar-La-Deteccion.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,adr/ADR-149-Un-Gate-Que-No-Ejecuta-Nada-Es-Rojo.md,tests/perf/README.md | audiencia=planificador+humano | fase=11 -->
+<!-- CONTEXT: scope=roadmap-medicion | tarea=T-8 | dependencias=roadmap/AB_Intercalado_Plan.md,roadmap/mediciones/ner/Verificacion_Liberacion_NER_Medicion.md,roadmap/Optimizacion_De_Memoria_Plan.md,adr/ADR-166-El-Modelo-De-NER-Se-Libera-Al-Terminar-La-Deteccion.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,adr/ADR-149-Un-Gate-Que-No-Ejecuta-Nada-Es-Rojo.md,tests/perf/README.md | audiencia=planificador+humano | fase=11 -->
 
 # T-8 — Medición: A/B intercalado sobre la baja del modelo de NER
 
 Ejecutada el 2026-09-18 sobre el commit `e2e6d3e` en dos sesiones independientes,
-con el protocolo de [`AB_Intercalado_Plan.md`](AB_Intercalado_Plan.md):
+con el protocolo de [`AB_Intercalado_Plan.md`](../../AB_Intercalado_Plan.md):
 
 | sesión | brazos | datos crudos |
 | ------ | ------ | ------------ |

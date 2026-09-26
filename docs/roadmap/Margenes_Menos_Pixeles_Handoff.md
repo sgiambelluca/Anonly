@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=handoff-medicion | dependencias=roadmap/Margenes_Menos_Pixeles_Plan.md,roadmap/ImageData_Perfilado_Resultados.md,roadmap/ImageData_Perfilado_Handoff.md,adr/ADR-121-El-Sello-Rotado-Vive-En-El-Margen.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md | audiencia=implementador+revisor+humano | fase=11 -->
+<!-- CONTEXT: scope=handoff-medicion | dependencias=roadmap/Margenes_Menos_Pixeles_Plan.md,roadmap/mediciones/ocr/ImageData_Perfilado_Resultados.md,roadmap/ImageData_Perfilado_Handoff.md,adr/ADR-121-El-Sello-Rotado-Vive-En-El-Margen.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md | audiencia=implementador+revisor+humano | fase=11 -->
 
 # Márgenes — handoff de M-1 + M-2 (tinta residual y su caja)
 
@@ -223,7 +223,7 @@ calidad de P2 tiene que seguir dando `c723dace…`, 50 páginas, 1038 palabras.
 `.measure/margenes-tinta/<campaña>/<caso>/analysis.json` con el manifiesto de
 identidad, el fixture y los registros por tira.
 
-Reporte en `docs/roadmap/Margenes_Menos_Pixeles_Resultados.md`, en este orden:
+Reporte en `docs/roadmap/mediciones/ocr/Margenes_Menos_Pixeles_Resultados.md`, en este orden:
 
 1. **La correlación de §3**, con el conteo crudo. Va primero porque es lo que
    decide, y porque una fila de la segunda categoría cambia todo lo demás.

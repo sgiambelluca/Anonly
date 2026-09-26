@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap | dependencias=architecture/07_Performance_Strategy.md,core/NER_Engine.md,core/OCR_Engine.md,core/Grouping_Engine.md,roadmap/Duplicacion_De_Logica.md,roadmap/Optimizacion_De_Memoria_Plan.md,roadmap/Ciclos_Y_Documentos_Reales_Medicion.md,roadmap/Banco_Windows_Comparativa_Medicion.md,ui/React_Client.md | audiencia=humanos+IA | fase=11 (campaña macOS medida el 2026-09-24; Windows nativo 2026-09-25 para los puntos 1–4, previo a ADR-184) -->
+<!-- CONTEXT: scope=roadmap | dependencias=architecture/07_Performance_Strategy.md,core/NER_Engine.md,core/OCR_Engine.md,core/Grouping_Engine.md,roadmap/Duplicacion_De_Logica.md,roadmap/Optimizacion_De_Memoria_Plan.md,roadmap/mediciones/transversal/Ciclos_Y_Documentos_Reales_Medicion.md,roadmap/mediciones/transversal/Banco_Windows_Comparativa_Medicion.md,ui/React_Client.md | audiencia=humanos+IA | fase=11 (campaña macOS medida el 2026-09-24; Windows nativo 2026-09-25 para los puntos 1–4, previo a ADR-184) -->
 
 # Optimización de rendimiento — hallazgos y plan
 
@@ -191,7 +191,7 @@ plan nuevo empieza por reproducirlas contra el código vigente.
   fue de **0,06, 1,83 y 2,54 s** — el premio es más chico que el error de
   medición. Cargar el modelo al abrir la aplicación está descartado aparte, sin
   medir, por `idleDisposeMs` de 60 s y memoria ocupada sin documento. Ver
-  [`Precalentamiento_NER_Durante_OCR_Medicion.md`](Precalentamiento_NER_Durante_OCR_Medicion.md)
+  [`Precalentamiento_NER_Durante_OCR_Medicion.md`](mediciones/ner/Precalentamiento_NER_Durante_OCR_Medicion.md)
   §7 y ADR-154 §2 lever 3.
 
 ---
@@ -269,7 +269,7 @@ en R2 los dos reconocedores OCR estuvieron ocupados ~98 % de su etapa, frente al
 **Curva principal macOS medida (2026-09-23/24):** control automático efectivo de
 4 hilos; 4 solicitado indistinguible, 6 y 8 más lentos sobre R1/R2 reales, con
 calidad idéntica y cancelación ejercitada. Ver
-[`Hilos_NER_Medicion.md`](Hilos_NER_Medicion.md) para pares y límites. No se
+[`Hilos_NER_Medicion.md`](mediciones/ner/Hilos_NER_Medicion.md) para pares y límites. No se
 adoptó configuración nueva. **Windows nativo (2026-09-25):** dirección
 contraria, 6 y 8 hilos aceleran NER hasta −24 % en R1, con calidad idéntica;
 el efecto depende del hardware. **Ampliación macOS (2026-09-26):** 48
@@ -295,7 +295,7 @@ cuatro documentos no cierra esos alcances.
 **Curva macOS medida (2026-09-24):** R2 real llegó a `Ready` en medianas de
 48,0 / 41,4 / 37,9 s con 2/3/4 reconocedores, con salida idéntica y ocupación
 efectiva. P2 sintético respondió de otra manera; el informe
-[`Reconocedores_OCR_Medicion.md`](Reconocedores_OCR_Medicion.md) registra la densidad
+[`Reconocedores_OCR_Medicion.md`](mediciones/ocr/Reconocedores_OCR_Medicion.md) registra la densidad
 de caracteres, memoria, una tanda excluida por suspensión y los límites del
 banco. No se adoptó configuración nueva. **Windows nativo (2026-09-25):**
 misma dirección, más ganancia; R2 `Ready` 43,2 / 37,2 / 32,0 s con 2/3/4 y
@@ -337,7 +337,7 @@ No hay ganancia cuantificada todavía.
 ### 4. Acotar los peores casos de Regex y Grouping
 
 **Regex, línea base cerrada en macOS:**
-[`Patron_Email_Regex_Medicion.md`](Patron_Email_Regex_Medicion.md) registra la
+[`Patron_Email_Regex_Medicion.md`](mediciones/regex/Patron_Email_Regex_Medicion.md) registra la
 curva cuadrática de email hasta 160 KiB y el control rápido de R1/R2 reales.
 El arreglo lineal quedó decidido en ADR-181 y `Regex_Engine.md` v1.14.0;
 se implementó y repitió la curva adversa y R1/R2 sin cambios de detección.
@@ -345,7 +345,7 @@ se implementó y repitió la curva adversa y R1/R2 sin cambios de detección.
 bloqueo cuadrático (163.840 caracteres en 13–31 ms).
 
 **Grouping, línea base cerrada en macOS:**
-[`Agrupacion_Difusa_Medicion.md`](Agrupacion_Difusa_Medicion.md) registra la
+[`Agrupacion_Difusa_Medicion.md`](mediciones/grouping/Agrupacion_Difusa_Medicion.md) registra la
 curva de 250–2000 valores distintos, el control repetido y R1/R2 reales.
 El primer arreglo quedó especificado en ADR-182 y `Grouping_Engine.md`
 v1.11.0, se implementó y conservó huellas y orden en 30 controles. El peor

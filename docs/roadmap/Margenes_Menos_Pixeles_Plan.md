@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=plan-investigacion | dependencias=roadmap/ImageData_Perfilado_Resultados.md,roadmap/ImageData_Perfilado_Handoff.md,adr/ADR-121-El-Sello-Rotado-Vive-En-El-Margen.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,adr/ADR-163-El-DPI-De-OCR-No-Supera-Al-Raster-Fuente.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md | audiencia=humano+planificador | fase=11 -->
+<!-- CONTEXT: scope=plan-investigacion | dependencias=roadmap/mediciones/ocr/ImageData_Perfilado_Resultados.md,roadmap/ImageData_Perfilado_Handoff.md,adr/ADR-121-El-Sello-Rotado-Vive-En-El-Margen.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,adr/ADR-163-El-DPI-De-OCR-No-Supera-Al-Raster-Fuente.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md | audiencia=humano+planificador | fase=11 -->
 
 # Márgenes — leer menos píxeles
 
@@ -13,7 +13,7 @@ descartaron las dos candidatas de ImageData (0,54 % y 3,2 %, medidas).
 
 ## 1. De dónde sale esto
 
-De [`ImageData_Perfilado_Resultados.md`](ImageData_Perfilado_Resultados.md)
+De [`ImageData_Perfilado_Resultados.md`](mediciones/ocr/ImageData_Perfilado_Resultados.md)
 §11. Lo que hay que tener presente, con su rótulo:
 
 - **Medido:** las pasadas de margen cuestan ~301 ms por página escaneada, de
@@ -219,7 +219,7 @@ capacidad de margen sigue siendo decisión del humano.
 ## 8. Decisión del planificador tras M-1 + M-2 (2026-09-16)
 
 Con los histogramas sobre la mesa
-([`Margenes_Menos_Pixeles_Resultados.md`](Margenes_Menos_Pixeles_Resultados.md)),
+([`Margenes_Menos_Pixeles_Resultados.md`](mediciones/ocr/Margenes_Menos_Pixeles_Resultados.md)),
 se aplica el criterio de §5:
 
 - **I-1 pasa, y en su forma exacta.** 110 de 112 tiras con residuo
@@ -303,7 +303,7 @@ es un resultado publicable, no algo a rescatar ajustando el experimento.
 
 La secuencia de §8.1 está completa: errata de coordenadas, ADR-165 y spec,
 implementación en `b76d18c`, y campaña A/B reproducible. El reporte de
-[`Margenes_Menos_Pixeles_Medicion_I1.md`](Margenes_Menos_Pixeles_Medicion_I1.md)
+[`Margenes_Menos_Pixeles_Medicion_I1.md`](mediciones/ocr/Margenes_Menos_Pixeles_Medicion_I1.md)
 conserva los manifiestos, logs y resultados crudos de tres pares alternados.
 La primera campaña A/B se conserva como preliminar, pero no se usa para la
 decisión porque carecía de trazabilidad de build por sesión.
@@ -324,7 +324,7 @@ reales, así que esos resultados no se extrapolan.
 ## 10. Cierre de I-2 (2026-09-17)
 
 La medición experimental posterior a I-1 está documentada en
-[`Margenes_Menos_Pixeles_Medicion_I2.md`](Margenes_Menos_Pixeles_Medicion_I2.md).
+[`Margenes_Menos_Pixeles_Medicion_I2.md`](mediciones/ocr/Margenes_Menos_Pixeles_Medicion_I2.md).
 P2 no dejó franjas para recortar. En qa-stamp, los recortes de 0 y 32 px
 cambiaron la salida total (79→77 y 79→78), pero conservaron las 15 palabras
 reales del sello y folio; 64 y 128 px conservaron además la huella exacta.

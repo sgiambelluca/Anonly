@@ -143,7 +143,7 @@ está propuesta acá.
 #### Lo que T-11 midió adentro del renderer (2026-09-19)
 
 Con la memoria de WASM ya medida por worker
-(`roadmap/Ciclos_Y_Documentos_Reales_Medicion.md` §5 y §6), el proceso del renderer
+(`roadmap/mediciones/transversal/Ciclos_Y_Documentos_Reales_Medicion.md` §5 y §6), el proceso del renderer
 se parte así después de cargar NER, en lecturas completas:
 
 | | tamaño | qué pasa con Tauri |

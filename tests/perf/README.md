@@ -80,12 +80,12 @@ por cero. «Test pasado» exige pipeline completo y artefactos no truncados, no
 disponibilidad de todas las fases. El banco macOS recuperó la lectura a 60 s.
 El reporte conserva los fragmentos parciales crudos para diagnóstico.
 
-Resultado y revisión: `docs/roadmap/Atribucion_Recursos_Renderer_Medicion.md`.
+Resultado y revisión: `docs/roadmap/mediciones/transversal/Atribucion_Recursos_Renderer_Medicion.md`.
 Corrido también en Windows nativo el 2026-09-25, con el mismo comando y sin
 parches: 14/14 corridas, ~7,7 min — igual de rápido que macOS. El lector de
 presión de `win32` sigue sin implementarse (`systemMemoryPressure.ts`
 confirma `available: false`); eso no bloqueó la campaña, solo deja ese campo
-vacío en los reportes. Ver también `docs/roadmap/Banco_Windows_Comparativa_Medicion.md` §7.
+vacío en los reportes. Ver también `docs/roadmap/mediciones/transversal/Banco_Windows_Comparativa_Medicion.md` §7.
 
 ## Campaña opt-in NER: hilos internos de ONNX
 
@@ -135,7 +135,7 @@ La salida es única por sesión en `.measure/ner-threads/<UTC>/`; no se pisan
 resultados previos. Requiere macOS; la fase histórica A/4/6/8 requiere al
 menos ocho CPUs visibles. En Windows nativo la fase A/4/6/8 se corrió el
 2026-09-25 con un puerto ad hoc del mismo protocolo (no commiteado; ver
-`docs/roadmap/Hilos_NER_Medicion.md` §"Repetición Windows nativo") y dio la
+`docs/roadmap/mediciones/ner/Hilos_NER_Medicion.md` §"Repetición Windows nativo") y dio la
 dirección **contraria** a macOS: más hilos ayuda en una máquina con más
 núcleos reales libres. La fase `low` no se repitió en Windows. P1/P2 son
 fixtures sintéticos; las conclusiones de producto deben incorporar R1/R2, dado
@@ -262,7 +262,7 @@ ANONLY_OCR_PROBE_DOC=<dir>/syn-1bpc-200dpi.pdf ANONLY_OCR_PROBE_ID=S1 ANONLY_OCR
   ANONLY_OCR_PROBE_OUT=<salida>.json node tests/perf/ocr-platform-probe.mjs
 ```
 
-Resultado: `docs/roadmap/OCR_Entre_Plataformas_Medicion.md`. Los conteos y
+Resultado: `docs/roadmap/mediciones/ocr/OCR_Entre_Plataformas_Medicion.md`. Los conteos y
 huellas de documentos escaneados no se comparan entre plataformas.
 La ampliación macOS del 2026-09-26 completó R2 GPU/software y los mismos
 sintéticos Windows/WSL, incluidos PNG fijados: software y raster 1:1 convergen;
@@ -348,7 +348,7 @@ dentro de la app y no se copian a `.measure/`. La salida por sesión incluye
 cada corrida ordenada, series de memoria, presión del sistema, distribuciones
 numéricas por página y `summary.json`. Corre serial en macOS, o con un puerto
 ad hoc en Windows nativo (no commiteado; corrido el 2026-09-25, ver
-`docs/roadmap/Reconocedores_OCR_Medicion.md` §"Repetición Windows nativo").
+`docs/roadmap/mediciones/ocr/Reconocedores_OCR_Medicion.md` §"Repetición Windows nativo").
 El banco no cambia defaults ni presets.
 
 Si una suspensión invalida únicamente R2, la tanda previa conserva sus
@@ -378,7 +378,7 @@ tiempo, memoria y cancelación antes de marcar `summary.json` como completo.
 incluido un `@` tardío y un control normal. Cada caso corre en un proceso con
 timeout; su salida numérica queda bajo `.measure/regex-worst-case/`. El control
 R1/R2 usa Electron y `run-regex-real-docs.sh`, que requiere rutas solo mediante
-variables de entorno. El informe es `docs/roadmap/Patron_Email_Regex_Medicion.md`.
+variables de entorno. El informe es `docs/roadmap/mediciones/regex/Patron_Email_Regex_Medicion.md`.
 
 ```bash
 caffeinate -dimsu pnpm exec tsx --tsconfig tests/tsconfig.json tests/perf/regex-worst-case.ts
@@ -393,7 +393,7 @@ del timer, grupos, alias, miembros y huellas/orden. El runner construye el
 cliente y shell, restaura `dist`, impide carpetas de salida existentes y
 requiere macOS, `caffeinate` y las dos rutas reales. Para repetir únicamente
 R1/R2 después de un banco sintético, usar `ANONLY_GROUPING_REAL_ONLY=1` y
-otra carpeta de salida. El informe es `docs/roadmap/Agrupacion_Difusa_Medicion.md`.
+otra carpeta de salida. El informe es `docs/roadmap/mediciones/grouping/Agrupacion_Difusa_Medicion.md`.
 
 ```bash
 ANONLY_REAL_DOC_R1=/ruta/neutral/R1.pdf ANONLY_REAL_DOC_R2=/ruta/neutral/R2.pdf \
@@ -412,8 +412,8 @@ Grouping se repitieron en Windows nativo el 2026-09-25 — Grouping con un
 puerto ad hoc (no commiteado) por su gate de plataforma y su dependencia de
 `caffeinate`; Regex sin cambios, porque ni `run-regex-real-docs.sh` ni
 `regex-worst-case.ts` tenían gate de plataforma. Ver
-`docs/roadmap/Patron_Email_Regex_Medicion.md` y
-`docs/roadmap/Agrupacion_Difusa_Medicion.md`, secciones "Repetición Windows
+`docs/roadmap/mediciones/regex/Patron_Email_Regex_Medicion.md` y
+`docs/roadmap/mediciones/grouping/Agrupacion_Difusa_Medicion.md`, secciones "Repetición Windows
 nativo".
 
 ## `memory.spec.ts` — el instrumento de H-10 (ADR-146)
@@ -574,7 +574,7 @@ Dos hipótesis más en el mismo archivo, cada una con una corrida exploratoria (
 
 ## T-8 — A/B intercalado: comparar dos versiones del código
 
-La sección de arriba retira **restar corridas separadas** como método. Esto es lo que se usa cuando la pregunta es inevitablemente de ese tipo: **¿la versión B consume distinto que la A?** —algo que por definición no se contesta dentro de una sola corrida—. Protocolo en `docs/roadmap/AB_Intercalado_Plan.md`, resultado de su primer uso (ADR-166 contra un temporizador de 15 s) en `docs/roadmap/AB_Intercalado_Medicion.md`.
+La sección de arriba retira **restar corridas separadas** como método. Esto es lo que se usa cuando la pregunta es inevitablemente de ese tipo: **¿la versión B consume distinto que la A?** —algo que por definición no se contesta dentro de una sola corrida—. Protocolo en `docs/roadmap/AB_Intercalado_Plan.md`, resultado de su primer uso (ADR-166 contra un temporizador de 15 s) en `docs/roadmap/mediciones/ner/AB_Intercalado_Medicion.md`.
 
 Qué lo separa del método retirado:
 
@@ -664,7 +664,7 @@ El banco es una MacBook Air M1 sin ventilador: la primera corrida de una sesión
 
 ## Comparativa externa — el repo contra un binario ya instalado
 
-`external-baseline.spec.ts` mide tiempo y memoria **sin `__anonlyCore`**: el tiempo, del texto del `[role="status"]` (con un `MutationObserver` que registra cada etapa); la memoria, con el mismo `startMemorySampling` de H-10. Por eso sirve para un build de producción —un release instalado—, que el colector de T-10/T-13 no puede medir. `run-comparativa-externa.sh` alterna el build del repo (`repo`) y el binario de `ANONLY_EXT_EXE` (`installed`) sobre R1 y R2, tres rondas. Resultados y lectura: `docs/roadmap/Banco_Windows_Comparativa_Medicion.md`.
+`external-baseline.spec.ts` mide tiempo y memoria **sin `__anonlyCore`**: el tiempo, del texto del `[role="status"]` (con un `MutationObserver` que registra cada etapa); la memoria, con el mismo `startMemorySampling` de H-10. Por eso sirve para un build de producción —un release instalado—, que el colector de T-10/T-13 no puede medir. `run-comparativa-externa.sh` alterna el build del repo (`repo`) y el binario de `ANONLY_EXT_EXE` (`installed`) sobre R1 y R2, tres rondas. Resultados y lectura: `docs/roadmap/mediciones/transversal/Banco_Windows_Comparativa_Medicion.md`.
 
 ```
 ANONLY_REAL_DOC_R1=/ruta/nativo.pdf ANONLY_REAL_DOC_R2=/ruta/escaneado.pdf \

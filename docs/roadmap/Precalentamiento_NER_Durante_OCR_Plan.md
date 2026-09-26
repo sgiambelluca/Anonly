@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=medicion-precalentamiento-ner | dependencias=core/Contracts.md,core/NER_Engine.md,core/Orchestrator.md,roadmap/Perfilado_NER_Interno_Medicion.md,roadmap/H-10_Bitacora_De_Memoria.md,architecture/07_Performance_Strategy.md | audiencia=planificador+implementador+humano | fase=11 -->
+<!-- CONTEXT: scope=medicion-precalentamiento-ner | dependencias=core/Contracts.md,core/NER_Engine.md,core/Orchestrator.md,roadmap/mediciones/ner/Perfilado_NER_Interno_Medicion.md,roadmap/H-10_Bitacora_De_Memoria.md,architecture/07_Performance_Strategy.md | audiencia=planificador+implementador+humano | fase=11 -->
 
 # Cargar NER durante OCR — plan de medición y entrega
 

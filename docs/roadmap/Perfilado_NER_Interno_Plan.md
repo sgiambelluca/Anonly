@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=perfilado-ner-interno | dependencias=roadmap/Perfilado_Tiempo_Fuera_OCR_Plan.md,roadmap/Perfilado_Tiempo_Fuera_OCR_Medicion_M0_M1.md,core/NER_Engine.md,architecture/07_Performance_Strategy.md | audiencia=planificador+implementador+humano | fase=11 -->
+<!-- CONTEXT: scope=perfilado-ner-interno | dependencias=roadmap/Perfilado_Tiempo_Fuera_OCR_Plan.md,roadmap/mediciones/transversal/Perfilado_Tiempo_Fuera_OCR_Medicion_M0_M1.md,core/NER_Engine.md,architecture/07_Performance_Strategy.md | audiencia=planificador+implementador+humano | fase=11 -->
 
 # Perfilado interno de NER — plan y entrega al implementador
 

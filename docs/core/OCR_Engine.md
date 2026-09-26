@@ -12,7 +12,7 @@
 > reconoce)**: las cuatro pasadas de margen de ADR-121 cuestan **~301 ms por
 > página escaneada, 74,4 % en `recognizeCall`**, y como cada franja es un quinto
 > de la página son **el 80 % de una página adicional leída por cada página**
-> (medido, `roadmap/ImageData_Perfilado_Resultados.md` §11). Sobre P2 son 200
+> (medido, `roadmap/mediciones/ocr/ImageData_Perfilado_Resultados.md` §11). Sobre P2 son 200
 > pasadas que devuelven **cero palabras**. La compuerta de ADR-162 no las evita
 > porque es exacta y angosta: basta con que el cuerpo horizontal invada el 20 %
 > lateral —el caso normal— para que la franja quede activa. Medido: saltearía

@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=core/NER_Engine.md,core/Orchestrator.md,core/Contracts.md,adr/ADR-157-El-Pool-De-OCR-Se-Da-De-Baja-Al-Terminar-Su-Etapa.md,adr/ADR-080-Idle-Dispose-En-El-Pool-No-En-El-Manager.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,roadmap/Perfilado_Base_Caliente_Medicion.md,roadmap/Perfilado_NER_Interno_Medicion.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=core/NER_Engine.md,core/Orchestrator.md,core/Contracts.md,adr/ADR-157-El-Pool-De-OCR-Se-Da-De-Baja-Al-Terminar-Su-Etapa.md,adr/ADR-080-Idle-Dispose-En-El-Pool-No-En-El-Manager.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,roadmap/mediciones/transversal/Perfilado_Base_Caliente_Medicion.md,roadmap/mediciones/ner/Perfilado_NER_Interno_Medicion.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-166 — El modelo de NER se libera al terminar la detección
 
@@ -12,7 +12,7 @@
 
 ### 1. El número, medido
 
-T-7 (`roadmap/Perfilado_Base_Caliente_Medicion.md`) extendió la observación a
+T-7 (`roadmap/mediciones/transversal/Perfilado_Base_Caliente_Medicion.md`) extendió la observación a
 120 s después de cerrar el documento, con NER activo —el caso de uso real, no el
 corte de atribución sin NER—:
 
@@ -147,7 +147,7 @@ calentándose— no cambia nada: ese sigue deduplicado.
 
 Un reanálisis posterior —activar NER, o cambiar los idiomas de OCR— paga la
 recarga del modelo. Está medida: **942,94 ms en frío** (mediana de P2,
-`roadmap/Perfilado_NER_Interno_Medicion.md`), contra los ~1 GB que se recuperan
+`roadmap/mediciones/ner/Perfilado_NER_Interno_Medicion.md`), contra los ~1 GB que se recuperan
 durante todo el tiempo en que el usuario revisa.
 
 Es un intercambio mejor que el que ADR-157 ya aceptó: la recarga de Tesseract es
@@ -206,7 +206,7 @@ detección, ni el orden OCR → NER del pipeline (ADR-154 §2 lever 3, descarte 
 ## Enmienda (2026-09-18) — implementado, costo confirmado, beneficio sin demostrar
 
 Implementado y con los cuatro gates en verde. La verificación posterior
-([`roadmap/Verificacion_Liberacion_NER_Medicion.md`](../roadmap/Verificacion_Liberacion_NER_Medicion.md))
+([`roadmap/mediciones/ner/Verificacion_Liberacion_NER_Medicion.md`](../roadmap/mediciones/ner/Verificacion_Liberacion_NER_Medicion.md))
 dejó las dos mitades de este ADR en estados distintos, y conviene que se lea así
 antes de citarlo.
 
@@ -268,7 +268,7 @@ está en duda es si adelantarlo a este punto del pipeline lo consigue.
 ## Cierre (2026-09-18) — T-8 midió, y §1 se reemplaza
 
 T-8 corrió con A/B intercalado en dos sesiones independientes
-([`roadmap/AB_Intercalado_Medicion.md`](../roadmap/AB_Intercalado_Medicion.md)) y
+([`roadmap/mediciones/ner/AB_Intercalado_Medicion.md`](../roadmap/mediciones/ner/AB_Intercalado_Medicion.md)) y
 contestó las dos mitades de §1 por separado:
 
 - **«Baja el nivel sostenido mientras el usuario revisa»**: confirmado, pero son

@@ -3,7 +3,7 @@ set -uo pipefail
 # Comparativa externa: el build del repo contra un binario empaquetado ya
 # instalado, con el MISMO instrumento (external-baseline.spec.ts), que no
 # necesita __anonlyCore y por eso sirve para un build de produccion
-# (docs/roadmap/Banco_Windows_Comparativa_Medicion.md §2).
+# (docs/roadmap/mediciones/transversal/Banco_Windows_Comparativa_Medicion.md §2).
 #
 # Tres rondas, orden alternado entre versiones y entre documentos para que
 # ninguna quede siempre primera. Las rutas de R1, R2 y del binario instalado

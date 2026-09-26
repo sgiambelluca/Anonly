@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=revision-T5-separados | dependencias=roadmap/T5_OSD_Compartido_Resultados_Separados.md,roadmap/T5_OSD_Compartido_Handoff.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md | audiencia=humano+planificador+implementador | fase=11-aceptacion-pendiente -->
+<!-- CONTEXT: scope=revision-T5-separados | dependencias=roadmap/mediciones/ocr/T5_OSD_Compartido_Resultados_Separados.md,roadmap/T5_OSD_Compartido_Handoff.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md | audiencia=humano+planificador+implementador | fase=11-aceptacion-pendiente -->
 
 # T5 — Revisión independiente de la campaña A/B/C
 

@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=medicion-i1 | dependencias=roadmap/Margenes_Menos_Pixeles_Implementacion_Handoff.md,roadmap/Margenes_Menos_Pixeles_Handoff.md,roadmap/Margenes_Menos_Pixeles_Plan.md,roadmap/Margenes_Menos_Pixeles_Resultados.md | audiencia=planificador+humano | fase=11 -->
+<!-- CONTEXT: scope=medicion-i1 | dependencias=roadmap/Margenes_Menos_Pixeles_Implementacion_Handoff.md,roadmap/Margenes_Menos_Pixeles_Handoff.md,roadmap/Margenes_Menos_Pixeles_Plan.md,roadmap/mediciones/ocr/Margenes_Menos_Pixeles_Resultados.md | audiencia=planificador+humano | fase=11 -->
 
 # I-1 — medición A/B real (campaña reproducible v2)
 

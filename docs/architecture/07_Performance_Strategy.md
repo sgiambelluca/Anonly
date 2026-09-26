@@ -250,7 +250,7 @@ Fixtures pesados (> 5 MB) vía Git LFS o descargados en `postinstall` con hash v
    > función y `crossOriginIsolated` da `true`, pero al llamarla el runtime lanza
    > *«performance.measureUserAgentSpecificMemory is not available»*. El control de
    > la sonda confirmó que la memoria de prueba estaba montada, así que el negativo
-   > es de la API (`roadmap/AB_Intercalado_Medicion.md` §2). La causa probable es
+   > es de la API (`roadmap/mediciones/ner/AB_Intercalado_Medicion.md` §2). La causa probable es
    > que la app se sirve por `app://` (ADR-130/132) — **plausible, no verificado**, y
    > **no se probó contra el dev server**. Lo que sí queda establecido: **ADR-100 no
    > levantó el bloqueo de `test:leak` en el producto empaquetado**, que es sobre lo
@@ -258,7 +258,7 @@ Fixtures pesados (> 5 MB) vía Git LFS o descargados en `postinstall` con hash v
    > La fuente para `tests/leak/` queda decidida en ADR-185: heap JS con GC
    > forzado y workers vivos por CDP; RSS se conserva solo como diagnóstico.
    >
-   > **Medido el 2026-09-18 (T-9, `roadmap/Ciclos_Y_Documentos_Reales_Medicion.md`):
+   > **Medido el 2026-09-18 (T-9, `roadmap/mediciones/transversal/Ciclos_Y_Documentos_Reales_Medicion.md`):
    > el RSS no sirve para este gate.** En diez ciclos idénticos, dentro de una misma
    > instancia, el reposo se movió hasta ~250 MB de un ciclo al siguiente sin ninguna
    > fuga. Las dos señales que dieron lecturas limpias en las tres corridas son **la

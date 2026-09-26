@@ -8,7 +8,7 @@ Fecha de la medición: 2026-09-22. Esta entrega cubre únicamente el punto 2 de
 páginas de texto) y P2 (50 páginas escaneadas). No se usaron documentos reales.
 
 **Actualización del planificador:** la investigación posterior de
-[MemoryInfra](Memory_Infra_Viabilidad.md) ya comprobó categorías de buffers y
+[MemoryInfra](../../Memory_Infra_Viabilidad.md) ya comprobó categorías de buffers y
 recursos gráficos en este Electron. Esa investigación precedió a la campaña de
 pipeline y al cierre del punto 2 con el alcance medido.
 Los datos de este informe corresponden al piloto footprint; no se mezclan con
@@ -327,7 +327,7 @@ nueva conserva presión y estado de baseline; los JSON del piloto anterior no.
 El lector de presión de Windows sigue sin estar disponible.
 
 **El punto 2 queda cerrado**, con investigación, instrumentación, campaña P1/P2 y
-revisión local. La [viabilidad](Memory_Infra_Viabilidad.md) y esta campaña documentan
+revisión local. La [viabilidad](../../Memory_Infra_Viabilidad.md) y esta campaña documentan
 qué se observa y qué no. Windows y su lector de presión siguen como seguimiento
 separado, sin validación nativa. Los puntos 1 y 3 quedan sin iniciar para otra
 sesión; el siguiente es evaluar compatibilidad del empaquetado NER, sin atribuirle

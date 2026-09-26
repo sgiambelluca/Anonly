@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-plan | dependencias=roadmap/H-10_Bitacora_De_Memoria.md,architecture/07_Performance_Strategy.md,core/OCR_Engine.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-147-Perder-Un-Identificador-Cubierto-Es-Una-Regresion.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-157-El-Pool-De-OCR-Se-Da-De-Baja-Al-Terminar-Su-Etapa.md,adr/ADR-158-El-Raster-De-OCR-Viaja-Codificado.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md,adr/ADR-161-Una-Franja-Sin-Tinta-No-Se-Reconoce.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,tests/fixtures/README.md,tests/perf/README.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-166-El-Modelo-De-NER-Se-Libera-Al-Terminar-La-Deteccion.md,roadmap/Verificacion_Liberacion_NER_Medicion.md,roadmap/AB_Intercalado_Plan.md,roadmap/AB_Intercalado_Medicion.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md,adr/ADR-179-El-Empaquetado-De-NER-Se-Evalua-Sin-Cambiar-El-Modelo.md,adr/ADR-180-Los-PDFs-Pesados-Se-Miden-Hasta-El-Archivo-Exportado.md,roadmap/Empaquetado_NER_Medicion.md,roadmap/PDFs_Pesados_Y_Exportacion_Plan.md,roadmap/PDFs_Pesados_Y_Exportacion_Medicion.md,roadmap/Ciclos_Y_Documentos_Reales_Plan.md,roadmap/Ciclos_Y_Documentos_Reales_Medicion.md,roadmap/Optimizacion_De_Rendimiento.md,roadmap/Banco_Windows_Comparativa_Medicion.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=roadmap-plan | dependencias=roadmap/H-10_Bitacora_De_Memoria.md,architecture/07_Performance_Strategy.md,core/OCR_Engine.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-147-Perder-Un-Identificador-Cubierto-Es-Una-Regresion.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-157-El-Pool-De-OCR-Se-Da-De-Baja-Al-Terminar-Su-Etapa.md,adr/ADR-158-El-Raster-De-OCR-Viaja-Codificado.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md,adr/ADR-161-Una-Franja-Sin-Tinta-No-Se-Reconoce.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,tests/fixtures/README.md,tests/perf/README.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-166-El-Modelo-De-NER-Se-Libera-Al-Terminar-La-Deteccion.md,roadmap/mediciones/ner/Verificacion_Liberacion_NER_Medicion.md,roadmap/AB_Intercalado_Plan.md,roadmap/mediciones/ner/AB_Intercalado_Medicion.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md,adr/ADR-179-El-Empaquetado-De-NER-Se-Evalua-Sin-Cambiar-El-Modelo.md,adr/ADR-180-Los-PDFs-Pesados-Se-Miden-Hasta-El-Archivo-Exportado.md,roadmap/mediciones/ner/Empaquetado_NER_Medicion.md,roadmap/PDFs_Pesados_Y_Exportacion_Plan.md,roadmap/mediciones/transversal/PDFs_Pesados_Y_Exportacion_Medicion.md,roadmap/Ciclos_Y_Documentos_Reales_Plan.md,roadmap/mediciones/transversal/Ciclos_Y_Documentos_Reales_Medicion.md,roadmap/Optimizacion_De_Rendimiento.md,roadmap/mediciones/transversal/Banco_Windows_Comparativa_Medicion.md | audiencia=humanos+IA | fase=11 -->
 
 # Optimización de memoria — plan de campaña
 
@@ -44,7 +44,7 @@
 > Plan de las tres: [`Ciclos_Y_Documentos_Reales_Plan.md`](Ciclos_Y_Documentos_Reales_Plan.md).
 >
 > **Cierre de T-9 y T-10 (2026-09-18)**, datos en
-> [`Ciclos_Y_Documentos_Reales_Medicion.md`](Ciclos_Y_Documentos_Reales_Medicion.md):
+> [`Ciclos_Y_Documentos_Reales_Medicion.md`](mediciones/transversal/Ciclos_Y_Documentos_Reales_Medicion.md):
 > **no hay fuga**, y los documentos reales cuestan en **tiempo**, no en memoria: una
 > página real tiene ~15 veces más palabras que una del fixture. Quedan dos preguntas
 > para el humano (§5 puntos 7 y 8). T-11 sigue como siguiente paso.
@@ -124,7 +124,7 @@ nuestro.** En cambio el `angle` de `SetImageFile` va a `pixRotate` con
 ## 1bis. Corrección de rumbo (2026-09-17): el exceso no está en el pipeline
 
 > **Corregido por T-7 el 2026-09-17, con medición
-> ([`Perfilado_Base_Caliente_Medicion.md`](Perfilado_Base_Caliente_Medicion.md)).**
+> ([`Perfilado_Base_Caliente_Medicion.md`](mediciones/transversal/Perfilado_Base_Caliente_Medicion.md)).**
 > Esta sección concluía que había un residuo **estructural** de 700 MB–1,2 GB
 > retenido tras cerrar el documento. **No es así.** Esa base caliente se tomaba
 > en una ventana de ≤30 s (`HOT_BASELINE_SETTLE_CEILING_MS`) y la liberación por
@@ -615,7 +615,7 @@ ni se revierten capacidades para mejorar artificialmente el reloj. Ver
 [`ImageData_Perfilado_Plan.md`](ImageData_Perfilado_Plan.md), su handoff de
 perfilado [`ImageData_Perfilado_Handoff.md`](ImageData_Perfilado_Handoff.md)
 y los resultados de ese perfilado
-[`ImageData_Perfilado_Resultados.md`](ImageData_Perfilado_Resultados.md).
+[`ImageData_Perfilado_Resultados.md`](mediciones/ocr/ImageData_Perfilado_Resultados.md).
 El perfil está hecho. Las dos candidatas del plan original quedaron
 descartadas **por medición** (0,54 % y 3,2 % del costo de margen). La campaña
 posterior de márgenes eligió I-1 —no leer una franja cuya tinta ya está
@@ -624,7 +624,7 @@ medición A/B reproducible: **6,234 s de ahorro neto medio de OCR por 50 página
 P2**, con huella de calidad idéntica y el sello conservado. La decisión y sus
 límites están en
 [`Margenes_Menos_Pixeles_Plan.md`](Margenes_Menos_Pixeles_Plan.md) §9 y
-[`Margenes_Menos_Pixeles_Medicion_I1.md`](Margenes_Menos_Pixeles_Medicion_I1.md).
+[`Margenes_Menos_Pixeles_Medicion_I1.md`](mediciones/ocr/Margenes_Menos_Pixeles_Medicion_I1.md).
 
 Las alternativas de prepasada completa y dos páginas de adelanto permanecen
 registradas y no seleccionadas en
@@ -756,7 +756,7 @@ número con el que el humano decide si ADR-166 se conserva, se revierte o se
 reubica. **La desbloquea**: ADR-166 implementado (`6571a2e`, `18d4442`).
 **Plan detallado y protocolo**: [`AB_Intercalado_Plan.md`](AB_Intercalado_Plan.md).
 
-> **Cerrada con resultado** ([`AB_Intercalado_Medicion.md`](AB_Intercalado_Medicion.md),
+> **Cerrada con resultado** ([`AB_Intercalado_Medicion.md`](mediciones/ner/AB_Intercalado_Medicion.md),
 > dos sesiones, binarios idénticos por digest): la baja inmediata de ADR-166
 > suelta **~450 MB durante los primeros ~70 s** —no ~1 GB— y después A y B terminan
 > en el mismo lugar. Pero al encadenar documentos le cobra al siguiente **+1,2 s y
@@ -770,7 +770,7 @@ reubica. **La desbloquea**: ADR-166 implementado (`6571a2e`, `18d4442`).
 reposo de la aplicación, lo sube, o no lo mueve?
 
 La primera verificación
-([`Verificacion_Liberacion_NER_Medicion.md`](Verificacion_Liberacion_NER_Medicion.md))
+([`Verificacion_Liberacion_NER_Medicion.md`](mediciones/ner/Verificacion_Liberacion_NER_Medicion.md))
 dejó el costo confirmado (**+874 a +1127 ms** en el segundo documento, con los
 942,94 ms declarados en el medio) y **el beneficio de memoria sin demostrar**: se
 comparó contra una tanda de otro día, con el banco en otro régimen de presión, y
@@ -841,7 +841,7 @@ del documento (alternativa B, §5 punto 3), y dónde está una fuga que T-9 vea 
 RSS pero no en el heap de JS. Decisión del humano del 2026-09-18: se hace **después**
 de ver T-9 y T-10.
 
-> **Cerrada** ([`Ciclos_Y_Documentos_Reales_Medicion.md`](Ciclos_Y_Documentos_Reales_Medicion.md)
+> **Cerrada** ([`Ciclos_Y_Documentos_Reales_Medicion.md`](mediciones/transversal/Ciclos_Y_Documentos_Reales_Medicion.md)
 > §5). Tesseract ocupa 148 MB de WASM por worker de OCR y llega a ese techo en las
 > primeras cinco páginas; cuando NER carga, sus workers ya no existen. El modelo de
 > NER ocupa 487 MB de WASM más 94 MB de JS: es el mayor consumidor de la app. Quedan
@@ -853,7 +853,7 @@ de ver T-9 y T-10.
 **Dónde**: `tests/perf/` más tres parches de medición sobre
 `ner-engine/src/worker/kernel.ts` que el script aplica y revierte (mecanismo de T-8);
 nunca se commitean al producto. **Plan**: [`Ciclos_Y_Documentos_Reales_Plan.md`](Ciclos_Y_Documentos_Reales_Plan.md)
-§4bis. **Resultado**: [`Ciclos_Y_Documentos_Reales_Medicion.md`](Ciclos_Y_Documentos_Reales_Medicion.md) §6.
+§4bis. **Resultado**: [`Ciclos_Y_Documentos_Reales_Medicion.md`](mediciones/transversal/Ciclos_Y_Documentos_Reales_Medicion.md) §6.
 
 > **Cerrada**: sobre R1, intercalado, tres rondas. Optimización de grafo básica
 > cambia lo que detecta; sin *prepacking* no ahorra nada visible; dos hilos es ~45 %
@@ -940,7 +940,7 @@ están terminadas en macOS: 14 corridas, controles del instrumento y reposo hast
 120 s. Se observaron buffers transitorios que vuelven a cero y categorías del
 runtime que decaen; parte de NER sigue no observable por timeout. No se identificó
 una fuga ni un ahorro equivalente al residuo. El
-[informe de atribución y revisión](Atribucion_Recursos_Renderer_Medicion.md)
+[informe de atribución y revisión](mediciones/transversal/Atribucion_Recursos_Renderer_Medicion.md)
 cierra la caracterización local hasta esa resolución y conserva como siguiente
 intervención la evaluación de compatibilidad del empaquetado del mismo NER.
 **Seguimiento separado, no validado: Windows nativo y su lector de presión.**
@@ -1102,7 +1102,7 @@ estos levers importan.** No bloquea T-1 a T-4; sí bloquea dimensionar T-6.
    estable de `import→Ready`. Va en dirección contraria a ADR-157, que da de
    baja el pool de OCR para que Tesseract y ONNX no convivan. El descarte está
    anotado en el lever 3 de ADR-154 §2, con la evidencia en
-   [`Precalentamiento_NER_Durante_OCR_Medicion.md`](Precalentamiento_NER_Durante_OCR_Medicion.md)
+   [`Precalentamiento_NER_Durante_OCR_Medicion.md`](mediciones/ner/Precalentamiento_NER_Durante_OCR_Medicion.md)
    §7. No se reabre sin un `modelLoadMs` materialmente mayor o un banco menos
    ruidoso.
 

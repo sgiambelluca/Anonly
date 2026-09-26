@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=roadmap/Agrupacion_Difusa_Medicion.md,roadmap/Rendimiento_Experimentos_Plan.md,core/Grouping_Engine.md,core/Contracts.md,adr/ADR-073-Difuso-Solo-Para-Tipos-De-Texto-Libre.md,adr/ADR-085-Un-Cambio-De-Tipo-Se-Recuerda-Por-Valor.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=roadmap/mediciones/grouping/Agrupacion_Difusa_Medicion.md,roadmap/Rendimiento_Experimentos_Plan.md,core/Grouping_Engine.md,core/Contracts.md,adr/ADR-073-Difuso-Solo-Para-Tipos-De-Texto-Libre.md,adr/ADR-085-Un-Cambio-De-Tipo-Se-Recuerda-Por-Valor.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-182 — Descartar distancias imposibles antes de completar Levenshtein
 
@@ -6,7 +6,7 @@
 - **Fecha**: 2026-09-24.
 - **Decidido por**: planificador de la campaña de rendimiento.
 - **Numeración**: ADR-168 a ADR-178 pertenecen a la otra tarea; esta campaña ya usa ADR-179 a ADR-181.
-- **Relacionado con**: ADR-073 (tipos elegibles), ADR-085 (correcciones de tipo) y `roadmap/Agrupacion_Difusa_Medicion.md`.
+- **Relacionado con**: ADR-073 (tipos elegibles), ADR-085 (correcciones de tipo) y `roadmap/mediciones/grouping/Agrupacion_Difusa_Medicion.md`.
 
 ## Contexto
 

@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=roadmap/Patron_Email_Regex_Medicion.md,roadmap/Rendimiento_Experimentos_Plan.md,core/Regex_Engine.md,core/Contracts.md,ai/AI_Development_Guide.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=roadmap/mediciones/regex/Patron_Email_Regex_Medicion.md,roadmap/Rendimiento_Experimentos_Plan.md,core/Regex_Engine.md,core/Contracts.md,ai/AI_Development_Guide.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-181 — El email default se busca con un escáner lineal
 
@@ -6,7 +6,7 @@
 - **Fecha**: 2026-09-24.
 - **Decidido por**: planificador de la campaña de rendimiento.
 - **Numeración**: ADR-168 a ADR-178 pertenecen a la otra tarea. ADR-179 y ADR-180 preceden a esta decisión en la campaña; este ADR usa 181.
-- **Relacionado con**: `Regex_Engine.md` §§6, 12–15 y `roadmap/Patron_Email_Regex_Medicion.md`.
+- **Relacionado con**: `Regex_Engine.md` §§6, 12–15 y `roadmap/mediciones/regex/Patron_Email_Regex_Medicion.md`.
 
 ## Contexto
 

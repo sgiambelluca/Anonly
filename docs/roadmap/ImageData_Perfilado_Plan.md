@@ -66,7 +66,7 @@ Los pasos 1 a 4 tienen handoff cerrado por el planificador el 2026-09-15 en
 etapas cronometradas, casos, orden de corridas, invariantes y entrega.
 
 **Ejecutados y cerrados el 2026-09-15**, con resultados, límites y evidencia en
-[`ImageData_Perfilado_Resultados.md`](ImageData_Perfilado_Resultados.md). El
+[`ImageData_Perfilado_Resultados.md`](mediciones/ocr/ImageData_Perfilado_Resultados.md). El
 reparto medido ubica ~74 % del costo de margen en las pasadas de
 reconocimiento adicionales y ~0,5 % en la copia redundante. Los pasos 5 y 6
 siguen sin autorizar: con el perfil hecho, la decisión sobre qué hacer —o no

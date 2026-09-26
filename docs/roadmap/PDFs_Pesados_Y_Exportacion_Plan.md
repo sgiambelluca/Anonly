@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-plan | dependencias=roadmap/Optimizacion_De_Memoria_Plan.md,adr/ADR-180-Los-PDFs-Pesados-Se-Miden-Hasta-El-Archivo-Exportado.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-148-Un-Export-Se-Verifica-Leyendo-El-PDF-Exportado.md,core/Contracts.md,core/Render_Engine.md,core/Export_Engine.md,roadmap/PDFs_Pesados_Y_Exportacion_Medicion.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=roadmap-plan | dependencias=roadmap/Optimizacion_De_Memoria_Plan.md,adr/ADR-180-Los-PDFs-Pesados-Se-Miden-Hasta-El-Archivo-Exportado.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-148-Un-Export-Se-Verifica-Leyendo-El-PDF-Exportado.md,core/Contracts.md,core/Render_Engine.md,core/Export_Engine.md,roadmap/mediciones/transversal/PDFs_Pesados_Y_Exportacion_Medicion.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 -->
 
 # Punto 3 — Banco de PDFs pesados, render y exportación
 

@@ -1,9 +1,9 @@
-<!-- CONTEXT: scope=roadmap-plan | tarea=T-8 | dependencias=roadmap/Verificacion_Liberacion_NER_Medicion.md,roadmap/Optimizacion_De_Memoria_Plan.md,adr/ADR-166-El-Modelo-De-NER-Se-Libera-Al-Terminar-La-Deteccion.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-153-El-Gate-De-Tiempos-Se-Mide-Sobre-El-Producto.md,adr/ADR-149-Un-Gate-Que-No-Ejecuta-Nada-Es-Rojo.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,roadmap/Instrumento_De_Memoria_Arreglo_Plan.md,tests/perf/README.md | audiencia=planificador+implementador+humano | fase=11 -->
+<!-- CONTEXT: scope=roadmap-plan | tarea=T-8 | dependencias=roadmap/mediciones/ner/Verificacion_Liberacion_NER_Medicion.md,roadmap/Optimizacion_De_Memoria_Plan.md,adr/ADR-166-El-Modelo-De-NER-Se-Libera-Al-Terminar-La-Deteccion.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-153-El-Gate-De-Tiempos-Se-Mide-Sobre-El-Producto.md,adr/ADR-149-Un-Gate-Que-No-Ejecuta-Nada-Es-Rojo.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,roadmap/Instrumento_De_Memoria_Arreglo_Plan.md,tests/perf/README.md | audiencia=planificador+implementador+humano | fase=11 -->
 
 # T-8 — A/B intercalado: medir dos versiones del código en la misma sesión
 
 > **Ejecutada el 2026-09-18, en dos sesiones.** Resultado y datos en
-> [`AB_Intercalado_Medicion.md`](AB_Intercalado_Medicion.md); la decisión que salió
+> [`AB_Intercalado_Medicion.md`](mediciones/ner/AB_Intercalado_Medicion.md); la decisión que salió
 > de ahí es **ADR-167**. Dos cosas se agregaron sobre la marcha y no estaban en este
 > plan: un **tercer brazo C** (temporizador de 15 s solo para NER), pedido por el
 > humano después de la primera sesión, y una **espera de revisión configurable**
@@ -21,7 +21,7 @@ decisión sea del humano y no de una corazonada.
 reposo de la aplicación, lo **sube**, o **no lo mueve**?
 
 La primera tanda de verificación
-([`Verificacion_Liberacion_NER_Medicion.md`](Verificacion_Liberacion_NER_Medicion.md))
+([`Verificacion_Liberacion_NER_Medicion.md`](mediciones/ner/Verificacion_Liberacion_NER_Medicion.md))
 no pudo contestarla: midió las dos versiones en campañas separadas por horas, con
 el banco en regímenes de memoria distintos, y con una dispersión intra-condición
 de 255 MB contra una diferencia a explicar de ~380 MB.

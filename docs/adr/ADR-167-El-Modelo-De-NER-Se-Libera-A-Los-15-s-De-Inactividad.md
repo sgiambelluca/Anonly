@@ -1,11 +1,11 @@
-<!-- CONTEXT: scope=adr | dependencias=adr/ADR-166-El-Modelo-De-NER-Se-Libera-Al-Terminar-La-Deteccion.md,adr/ADR-080-Idle-Dispose-En-El-Pool-No-En-El-Manager.md,adr/ADR-135-El-Ciclo-Del-Modelo-Se-Deduplica-Entero.md,adr/ADR-157-El-Pool-De-OCR-Se-Da-De-Baja-Al-Terminar-Su-Etapa.md,adr/ADR-155-El-Arnes-De-Medicion-Configura-El-Core-Por-Un-Canal-Propio.md,adr/ADR-149-Un-Gate-Que-No-Ejecuta-Nada-Es-Rojo.md,core/Contracts.md,core/NER_Engine.md,core/Orchestrator.md,architecture/05_Worker_Architecture.md,roadmap/AB_Intercalado_Medicion.md,roadmap/AB_Intercalado_Plan.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=adr/ADR-166-El-Modelo-De-NER-Se-Libera-Al-Terminar-La-Deteccion.md,adr/ADR-080-Idle-Dispose-En-El-Pool-No-En-El-Manager.md,adr/ADR-135-El-Ciclo-Del-Modelo-Se-Deduplica-Entero.md,adr/ADR-157-El-Pool-De-OCR-Se-Da-De-Baja-Al-Terminar-Su-Etapa.md,adr/ADR-155-El-Arnes-De-Medicion-Configura-El-Core-Por-Un-Canal-Propio.md,adr/ADR-149-Un-Gate-Que-No-Ejecuta-Nada-Es-Rojo.md,core/Contracts.md,core/NER_Engine.md,core/Orchestrator.md,architecture/05_Worker_Architecture.md,roadmap/mediciones/ner/AB_Intercalado_Medicion.md,roadmap/AB_Intercalado_Plan.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-167 — El modelo de NER se libera a los 15 s de inactividad
 
 - **Estado**: Accepted, **implementado el 2026-09-18** (`c006059` contrato, `1b09383` core,
   `a9c0ac7` ner-engine) y **verificado de punta a punta** en la app empaquetada:
   tras 20 s de revisión la recarga emite `NER_MODEL_READY` (antes era muda); con
-  ~1,3 s entre documentos no recarga. Datos en `roadmap/AB_Intercalado_Medicion.md` §9.
+  ~1,3 s entre documentos no recarga. Datos en `roadmap/mediciones/ner/AB_Intercalado_Medicion.md` §9.
 - **Fecha**: 2026-09-18
 - **Decidido por**: El humano, sobre los tres brazos de T-8: _«Sí, vamos por C»_.
 - **Reemplaza**: ADR-166 §1 (la baja del pool al terminar la detección). **No
@@ -28,7 +28,7 @@ siguiente».
 T-8 lo midió con el método que el repo exige para comparar dos versiones del
 código: **alternadas corrida por corrida en la misma sesión**, con los brazos
 difiriendo en una sola línea
-([`roadmap/AB_Intercalado_Medicion.md`](../roadmap/AB_Intercalado_Medicion.md)).
+([`roadmap/mediciones/ner/AB_Intercalado_Medicion.md`](../roadmap/mediciones/ner/AB_Intercalado_Medicion.md)).
 Dos sesiones independientes, con binarios idénticos por digest, dieron lo mismo:
 
 | | sesión 1 | sesión 2 |

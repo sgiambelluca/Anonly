@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=handoff-implementacion | dependencias=adr/ADR-165-Una-Franja-Ya-Explicada-No-Se-Reconoce.md,core/OCR_Engine.md,roadmap/Margenes_Menos_Pixeles_Plan.md,roadmap/Margenes_Menos_Pixeles_Resultados.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,adr/ADR-149-El-Test-Que-No-Ve-El-Rojo-No-Mide.md | audiencia=implementador+revisor | fase=11 -->
+<!-- CONTEXT: scope=handoff-implementacion | dependencias=adr/ADR-165-Una-Franja-Ya-Explicada-No-Se-Reconoce.md,core/OCR_Engine.md,roadmap/Margenes_Menos_Pixeles_Plan.md,roadmap/mediciones/ocr/Margenes_Menos_Pixeles_Resultados.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,adr/ADR-149-El-Test-Que-No-Ve-El-Rojo-No-Mide.md | audiencia=implementador+revisor | fase=11 -->
 
 # I-1 — handoff de implementación y medición
 
@@ -123,7 +123,7 @@ repitas corridas buscando una cifra mejor; conservá las inválidas rotuladas.
 
 ### 2.5 Entrega
 
-`docs/roadmap/Margenes_Menos_Pixeles_Medicion_I1.md` con: identidad congelada,
+`docs/roadmap/mediciones/ocr/Margenes_Menos_Pixeles_Medicion_I1.md` con: identidad congelada,
 los tres pares crudos, el delta con su dispersión, la huella de calidad, el
 conteo de qa-stamp, el costo propio de la regla y las corridas inválidas. **Sin
 decidir si se conserva**: eso lo hace el planificador con el humano.

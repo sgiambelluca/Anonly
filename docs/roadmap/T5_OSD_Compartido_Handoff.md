@@ -531,7 +531,7 @@ como inconclusa, conservando implementación pendiente de aceptación.
 
 ## 4. Entrega del implementador
 
-Crear `docs/roadmap/T5_OSD_Compartido_Resultados.md` como **reporte de ejecución**,
+Crear `docs/roadmap/mediciones/ocr/T5_OSD_Compartido_Resultados.md` como **reporte de ejecución**,
 sin modificar ADR/specs/handoff ni marcar el roadmap cerrado por su cuenta.
 Esto autoriza escribir ese reporte, no decidir arquitectura. Debe contener:
 

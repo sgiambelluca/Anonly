@@ -3,7 +3,7 @@
 # ImageData — resultados del perfilado (pasos 1-4 del plan)
 
 Fecha: 2026-09-15. Ejecutado por el implementador según
-[`ImageData_Perfilado_Handoff.md`](ImageData_Perfilado_Handoff.md). Este es un
+[`ImageData_Perfilado_Handoff.md`](../../ImageData_Perfilado_Handoff.md). Este es un
 **reporte de ejecución**: mide y describe, no elige candidata ni recomienda
 una optimización — esa decisión es del planificador, con este perfil en la
 mano (Handoff §0, §5).
@@ -553,4 +553,4 @@ esta campaña no la midió.
    umbral de blanco aproximado: T-4b conserva sus prerrequisitos.
 
 Continúa en
-[`Margenes_Menos_Pixeles_Plan.md`](Margenes_Menos_Pixeles_Plan.md).
+[`Margenes_Menos_Pixeles_Plan.md`](../../Margenes_Menos_Pixeles_Plan.md).

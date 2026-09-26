@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=adr/ADR-182-Distancia-Acotada-Para-Grouping.md,core/Grouping_Engine.md,roadmap/Agrupacion_Difusa_Medicion.md,core/Contracts.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=adr/ADR-182-Distancia-Acotada-Para-Grouping.md,core/Grouping_Engine.md,roadmap/mediciones/grouping/Agrupacion_Difusa_Medicion.md,core/Contracts.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-183 — Recortar afijos comunes antes de calcular la distancia acotada
 
@@ -6,7 +6,7 @@
 - **Fecha**: 2026-09-24.
 - **Decidido por**: planificador de la campaña de rendimiento.
 - **Numeración**: ADR-168 a ADR-178 pertenecen a la otra tarea; esta campaña ya usa ADR-179 a ADR-182.
-- **Relacionado con**: ADR-182 y `roadmap/Agrupacion_Difusa_Medicion.md`.
+- **Relacionado con**: ADR-182 y `roadmap/mediciones/grouping/Agrupacion_Difusa_Medicion.md`.
 
 ## Contexto
 

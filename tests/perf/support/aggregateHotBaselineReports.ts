@@ -11,7 +11,7 @@
  * forma que se está buscando). Si hay un escalón cerca de los 60s
  * (`idleDisposeMs`, ADR-080) o no, y qué fracción del hueco de 700 MB–1,2 GB
  * queda sin atribuir, es una lectura del informe final
- * (`docs/roadmap/Perfilado_Base_Caliente_Medicion.md`), no de este script.
+ * (`docs/roadmap/mediciones/transversal/Perfilado_Base_Caliente_Medicion.md`), no de este script.
  *
  *   pnpm tsx tests/perf/support/aggregateHotBaselineReports.ts <dir>
  *

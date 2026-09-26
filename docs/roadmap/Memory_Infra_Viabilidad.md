@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=investigacion-memoria-renderer | dependencias=roadmap/Optimizacion_De_Memoria_Plan.md,roadmap/Atribucion_Recursos_Renderer_Medicion.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=investigacion-memoria-renderer | dependencias=roadmap/Optimizacion_De_Memoria_Plan.md,roadmap/mediciones/transversal/Atribucion_Recursos_Renderer_Medicion.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md | audiencia=humanos+IA | fase=11 -->
 
 # Viabilidad de atribución con MemoryInfra
 
@@ -10,7 +10,7 @@ No requirió cambiar Electron, el producto ni dependencias.
 
 **Actualización 2026-09-23:** el instrumento y la campaña definidos al final de
 este documento ya se ejecutaron en macOS. El
-[informe de atribución](Atribucion_Recursos_Renderer_Medicion.md) contiene las 14
+[informe de atribución](mediciones/transversal/Atribucion_Recursos_Renderer_Medicion.md) contiene las 14
 corridas, las fases observables/no observables y la revisión del plan. Se cierra
 el punto 2 con la caracterización local y sus límites; Windows queda como
 seguimiento separado sin validar. Los puntos 1 y 3 se trabajarán en otra sesión.

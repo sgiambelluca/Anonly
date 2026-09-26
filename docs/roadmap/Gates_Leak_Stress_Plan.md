@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-plan | dependencias=adr/ADR-185-Gates-De-Leak-Y-Stress-En-Electron.md,architecture/07_Performance_Strategy.md,roadmap/Ciclos_Y_Documentos_Reales_Plan.md,roadmap/Ciclos_Y_Documentos_Reales_Medicion.md,roadmap/Optimizacion_De_Memoria_Plan.md,tests/perf/README.md | audiencia=planificador+implementador | fase=11 -->
+<!-- CONTEXT: scope=roadmap-plan | dependencias=adr/ADR-185-Gates-De-Leak-Y-Stress-En-Electron.md,architecture/07_Performance_Strategy.md,roadmap/Ciclos_Y_Documentos_Reales_Plan.md,roadmap/mediciones/transversal/Ciclos_Y_Documentos_Reales_Medicion.md,roadmap/Optimizacion_De_Memoria_Plan.md,tests/perf/README.md | audiencia=planificador+implementador | fase=11 -->
 
 # Gates `test:leak` y `test:stress` — plan de implementación
 

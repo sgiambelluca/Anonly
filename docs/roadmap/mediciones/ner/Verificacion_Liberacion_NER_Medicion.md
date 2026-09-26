@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-medicion | tarea=T-8 | dependencias=adr/ADR-166-El-Modelo-De-NER-Se-Libera-Al-Terminar-La-Deteccion.md,roadmap/AB_Intercalado_Plan.md,roadmap/Perfilado_Base_Caliente_Medicion.md,roadmap/Optimizacion_De_Memoria_Plan.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,roadmap/Instrumento_De_Memoria_Arreglo_Plan.md,tests/perf/README.md | audiencia=planificador+humano | fase=11 -->
+<!-- CONTEXT: scope=roadmap-medicion | tarea=T-8 | dependencias=adr/ADR-166-El-Modelo-De-NER-Se-Libera-Al-Terminar-La-Deteccion.md,roadmap/AB_Intercalado_Plan.md,roadmap/mediciones/transversal/Perfilado_Base_Caliente_Medicion.md,roadmap/Optimizacion_De_Memoria_Plan.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,roadmap/Instrumento_De_Memoria_Arreglo_Plan.md,tests/perf/README.md | audiencia=planificador+humano | fase=11 -->
 
 # Verificación de ADR-166 — primera tanda, y por qué no alcanza
 
@@ -33,7 +33,7 @@ para producirla.
 
 No se propone revertir ni conservar ADR-166 sobre esta evidencia. La decisión
 necesita la campaña A/B intercalada de
-[`AB_Intercalado_Plan.md`](AB_Intercalado_Plan.md).
+[`AB_Intercalado_Plan.md`](../../AB_Intercalado_Plan.md).
 
 ## 1. Lo que sí quedó establecido
 
@@ -188,7 +188,7 @@ La lectura honesta de §2 no es «puede ser (a) o (b)»: es que con este diseño
 
 Lo que se perdió por no releer esa página antes de medir fue una campaña de 27
 minutos y un rato de análisis sobre ruido. La regla operativa quedó ahora también
-en [`Optimizacion_De_Memoria_Plan.md`](Optimizacion_De_Memoria_Plan.md) §2bis
+en [`Optimizacion_De_Memoria_Plan.md`](../../Optimizacion_De_Memoria_Plan.md) §2bis
 puntos 7 y 8, que es donde se busca antes de lanzar una medición.
 
 ## 4. Un dato que sí acota el problema
@@ -281,7 +281,7 @@ curva, no sobre su nivel:
 ## 8. Qué falta
 
 La campaña A/B intercalada, especificada en
-[`AB_Intercalado_Plan.md`](AB_Intercalado_Plan.md): las dos versiones del código
+[`AB_Intercalado_Plan.md`](../../AB_Intercalado_Plan.md): las dos versiones del código
 alternadas corrida por corrida en la misma sesión, de modo que el estado del
 banco afecte por igual a las dos y la diferencia entre ellas quede limpia.
 

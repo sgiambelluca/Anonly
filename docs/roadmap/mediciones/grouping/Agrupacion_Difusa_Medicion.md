@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-medicion | dependencias=roadmap/Rendimiento_Experimentos_Plan.md,roadmap/Optimizacion_De_Rendimiento.md,core/Grouping_Engine.md,adr/ADR-184-Indice-Exacto-De-Candidatos-Para-Grouping.md,tests/perf/README.md,roadmap/OCR_Entre_Plataformas_Medicion.md | audiencia=humanos+IA | fase=11 (punto 4b, antes/después macOS 2026-09-24; ADR-184 sintético y R1/R2 medidos en macOS 2026-09-25; repetición Windows 2026-09-25; ADR-184 y causa del 1,6× (motor JS) medidos en Windows 2026-09-26) -->
+<!-- CONTEXT: scope=roadmap-medicion | dependencias=roadmap/Rendimiento_Experimentos_Plan.md,roadmap/Optimizacion_De_Rendimiento.md,core/Grouping_Engine.md,adr/ADR-184-Indice-Exacto-De-Candidatos-Para-Grouping.md,tests/perf/README.md,roadmap/mediciones/ocr/OCR_Entre_Plataformas_Medicion.md | audiencia=humanos+IA | fase=11 (punto 4b, antes/después macOS 2026-09-24; ADR-184 sintético y R1/R2 medidos en macOS 2026-09-25; repetición Windows 2026-09-25; ADR-184 y causa del 1,6× (motor JS) medidos en Windows 2026-09-26) -->
 
 # Búsqueda difusa de Grouping — antes y después en macOS, repetido en Windows
 

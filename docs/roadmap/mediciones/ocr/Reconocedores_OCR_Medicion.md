@@ -226,7 +226,7 @@ por corrida, un mismo build, M1 arm64 de 8 GiB, Node 26.5.1 en el arnés
 producto, defaults, DPI, modelo, presupuesto de imágenes ni contratos.
 
 Protocolo cerrado antes de medir:
-[`Perfiles_Rendimiento_Revision.md`](Perfiles_Rendimiento_Revision.md#protocolo-adicional-macos--memoria-ocr-234-2026-09-26).
+[`Perfiles_Rendimiento_Revision.md`](../../Perfiles_Rendimiento_Revision.md#protocolo-adicional-macos--memoria-ocr-234-2026-09-26).
 Arnés: `tests/perf/run-ocr-memory.sh`, fases `pool-rss` y `pool-endstage`
 de `ocr-pool.spec.ts`, `support/ocrPoolEndStage.ts` y agregador
 `support/summarize-ocr-memory.mjs`. Artefactos ignorados:

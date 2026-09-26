@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-plan | tarea=T-9,T-10,T-11 | dependencias=roadmap/Optimizacion_De_Memoria_Plan.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md,adr/ADR-157-El-Pool-De-OCR-Se-Da-De-Baja-Al-Terminar-Su-Etapa.md,roadmap/Perfilado_Base_Caliente_Medicion.md,roadmap/AB_Intercalado_Medicion.md,architecture/07_Performance_Strategy.md,tests/perf/README.md | audiencia=planificador+implementador+humano | fase=11 -->
+<!-- CONTEXT: scope=roadmap-plan | tarea=T-9,T-10,T-11 | dependencias=roadmap/Optimizacion_De_Memoria_Plan.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md,adr/ADR-157-El-Pool-De-OCR-Se-Da-De-Baja-Al-Terminar-Su-Etapa.md,roadmap/mediciones/transversal/Perfilado_Base_Caliente_Medicion.md,roadmap/mediciones/ner/AB_Intercalado_Medicion.md,architecture/07_Performance_Strategy.md,tests/perf/README.md | audiencia=planificador+implementador+humano | fase=11 -->
 
 # T-9, T-10 y T-11 — ¿hay fuga?, ¿qué cuesta un documento real?, y el heap de WASM
 
@@ -10,7 +10,7 @@
 > (`Optimizacion_De_Memoria_Plan.md` §2bis).
 >
 > **T-9 y T-10 ejecutadas el mismo día**, sin cambios de protocolo. Resultado en
-> [`Ciclos_Y_Documentos_Reales_Medicion.md`](Ciclos_Y_Documentos_Reales_Medicion.md).
+> [`Ciclos_Y_Documentos_Reales_Medicion.md`](mediciones/transversal/Ciclos_Y_Documentos_Reales_Medicion.md).
 > T-11 ejecutada el 2026-09-19, con su sección (§4) reescrita antes de delegarla;
 > resultado en el mismo informe, §5.
 
@@ -414,7 +414,7 @@ worker en tres corridas, con P2-200p para la trayectoria de Tesseract.
 > documentos reales y pasar el instrumento de T-11 por ellos.
 >
 > **Ejecutada el mismo día.** Resultado en
-> [`Ciclos_Y_Documentos_Reales_Medicion.md`](Ciclos_Y_Documentos_Reales_Medicion.md) §6.
+> [`Ciclos_Y_Documentos_Reales_Medicion.md`](mediciones/transversal/Ciclos_Y_Documentos_Reales_Medicion.md) §6.
 > Un desvío declarado: el umbral de 20 MB de §4bis.4 resultó más fino de lo que el
 > instrumento resuelve (la memoria de WASM crece de a 20 %).
 
@@ -488,7 +488,7 @@ repo (dependencia nueva, R-12) y una decisión del humano.
 > tiempos reales de la aplicación sobre los dos documentos?
 >
 > **Ejecutada el mismo día.** Resultado en
-> [`Ciclos_Y_Documentos_Reales_Medicion.md`](Ciclos_Y_Documentos_Reales_Medicion.md) §7.
+> [`Ciclos_Y_Documentos_Reales_Medicion.md`](mediciones/transversal/Ciclos_Y_Documentos_Reales_Medicion.md) §7.
 
 Los tiempos de T-10 **no son los del producto**: `measureProfile` fuerza un GC por
 segundo en cada target (ADR-159), y T-10 §2.1 ya los rotuló «bajo instrumento». T-13

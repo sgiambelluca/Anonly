@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=perfilado-tiempo-fuera-ocr | dependencias=roadmap/Margenes_Menos_Pixeles_Medicion_I1.md,roadmap/Margenes_Menos_Pixeles_Medicion_I2.md,architecture/07_Performance_Strategy.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md | audiencia=planificador+humano | fase=11 -->
+<!-- CONTEXT: scope=perfilado-tiempo-fuera-ocr | dependencias=roadmap/mediciones/ocr/Margenes_Menos_Pixeles_Medicion_I1.md,roadmap/mediciones/ocr/Margenes_Menos_Pixeles_Medicion_I2.md,architecture/07_Performance_Strategy.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md | audiencia=planificador+humano | fase=11 -->
 
 # Tiempo fuera de OCR — plan de medición
 

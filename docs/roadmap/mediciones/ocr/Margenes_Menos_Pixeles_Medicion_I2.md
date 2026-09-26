@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=medicion-i2 | dependencias=roadmap/Margenes_Menos_Pixeles_Plan.md,roadmap/Margenes_Menos_Pixeles_Medicion_I1.md,adr/ADR-165-Una-Franja-Ya-Explicada-No-Se-Reconoce.md | audiencia=planificador+humano | fase=11 -->
+<!-- CONTEXT: scope=medicion-i2 | dependencias=roadmap/Margenes_Menos_Pixeles_Plan.md,roadmap/mediciones/ocr/Margenes_Menos_Pixeles_Medicion_I1.md,adr/ADR-165-Una-Franja-Ya-Explicada-No-Se-Reconoce.md | audiencia=planificador+humano | fase=11 -->
 
 # I-2 — medición del recorte vertical de franjas supervivientes
 
