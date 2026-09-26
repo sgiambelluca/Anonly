@@ -31,9 +31,10 @@ pnpm --filter @anonly/desktop-shell start
 | `src/main.ts` | Proceso principal: registra `app://`, crea la ventana, bloquea la navegación externa y arranca el actualizador que corresponda a la plataforma. |
 | `src/security.ts` | CSP, headers de aislamiento y `Content-Length`. **Fuente única**: si divergen de `08_Security_Model.md` §3.2, el gate `csp-under-app-protocol` falla. |
 | `src/paths.ts` | Traduce pathname → archivo, y rechaza todo lo que no sea un asset del build. |
-| `src/preload.ts` | La superficie main↔renderer completa: `check`, `install` y `onEvent`, todos del actualizador. |
+| `src/preload.ts` | La superficie main↔renderer completa: `check`, `install` y `setAutomaticChecks` salientes, y `onEvent` como suscripción, todos del actualizador (ADR-132 §3; el tercero saliente lo agregó ADR-188). |
 | `src/updater.ts` | Carga del puente nativo a Sparkle (macOS) y la lista blanca del payload que cruza al renderer. |
 | `src/windows-updater.ts` | Actualizador de Windows sobre `electron-updater`, traducido a los mismos eventos que emite Sparkle. Compone la verificación Ed25519 propia con Authenticode cuando esté disponible. |
+| `src/update-check-policy.ts` | Cuándo corresponde buscar actualizaciones según la preferencia del usuario (ADR-188): en Windows, a lo sumo una búsqueda automática por ejecución; en macOS, cuándo inicializar Sparkle y cuándo solo aplicar la preferencia. Puro, sin Electron. |
 | `src/windows-update-signature.ts` | Sobre firmado, decoder de `latest.yml` y verificación Ed25519 del instalador descargado. La pública está horneada acá; la privada nunca entra al repo. |
 | `scripts/sign-windows-update.ts` | Paso de release que recibe la privada por stdin y agrega la firma a `latest.yml`. |
 | `native/` | El puente N-API a Sparkle, vendoreado. Ver su README. |
