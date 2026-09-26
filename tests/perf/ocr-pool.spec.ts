@@ -11,6 +11,8 @@ import { generateText50p } from "../fixtures/generate.js";
 
 import { installEngineOverrides } from "./support/engineOverrides.js";
 import { measureProfile, type ProfileReport } from "./support/memoryProfile.js";
+import { startMemorySampling } from "./support/memorySampler.js";
+import { measureOcrEndStage } from "./support/ocrPoolEndStage.js";
 import { getOrGenerateScannedFixture } from "./support/scannedFixtureCache.js";
 import { hostIdentity, type TimeRun } from "./support/timeProfile.js";
 import {
@@ -67,6 +69,8 @@ declare global {
       }
     | undefined;
 }
+
+process.env.PLAYWRIGHT_NO_COPY_PROMPT = "1";
 
 const RUN_ID = process.env.ANONLY_OCR_POOL_RUN;
 const OUTPUT_DIR = process.env.ANONLY_OCR_POOL_OUTPUT_DIR;
@@ -619,6 +623,79 @@ test("OCR recognizer pool campaign — selected run", async ({
   await openApp(page, "networkidle");
   memoryRuns = [];
   if (run.kind !== "memory") await installProbe(page, { ...run, runId: RUN_ID ?? "" });
+
+  const measurementPhase = process.env.ANONLY_OCR_POOL_PHASE;
+  if (measurementPhase === "pool-rss" || measurementPhase === "pool-endstage") {
+    await installProbe(page, { ...run, runId: RUN_ID ?? "" });
+    let natural:
+      | { readonly samples: unknown; readonly rssPeakDuringOcrBytes: number | null }
+      | undefined;
+    let endStage: Awaited<ReturnType<typeof measureOcrEndStage>> | undefined;
+    if (measurementPhase === "pool-endstage") {
+      endStage = await measureOcrEndStage(page, electronApp, electronUserDataDir, file, run.arm);
+    } else {
+      const sampler = startMemorySampling(electronApp, 150);
+      try {
+        await runTimed(page, file, 600_000);
+        await sampler.sampleOnce();
+        const observed = await readProbe(page);
+        const samples = sampler.samples.filter((sample) => {
+          const epoch = sample.atMs + sampler.startedAtMs;
+          return (
+            observed.startedAt !== null &&
+            observed.finishedAt !== null &&
+            epoch >= observed.startedAt &&
+            epoch <= observed.finishedAt
+          );
+        });
+        natural = {
+          samples,
+          rssPeakDuringOcrBytes: samples.length
+            ? Math.max(...samples.map((sample) => sample.sumWorkingSetSizeBytes))
+            : null,
+        };
+      } finally {
+        sampler.stop();
+      }
+    }
+    const observed = await readProbe(page);
+    await writeFile(
+      resolve(
+        outputDir(),
+        `ocr-pool-${measurementPhase}-${run.arm}-${run.profile}-r${run.round}.json`,
+      ),
+      JSON.stringify(
+        {
+          runId: RUN_ID,
+          phase: measurementPhase,
+          arm: run.arm,
+          profile: run.profile,
+          round: run.round,
+          startedAtUtc,
+          completedAtUtc: new Date().toISOString(),
+          host: hostIdentity(),
+          probe: observed,
+          natural,
+          endStage,
+        },
+        null,
+        2,
+      ) + "\n",
+      { flag: "wx" },
+    );
+    expect(observed.failed).toBe(false);
+    expect(observed.ocrPageFailures).toBe(0);
+    expect(observed.missingWordCachePages).toBe(0);
+    expect(observed.effectiveBusyRecognizersPeak).toBe(run.arm);
+    expect(observed.effectiveBusyOsdPeak).toBe(1);
+    if (endStage !== undefined) {
+      expect(endStage.heldAtMs).toBeGreaterThan(0);
+      expect(endStage.releasedAtMs - endStage.heldAtMs).toBeLessThan(10_000);
+      expect(endStage.snapshots).toHaveLength(3);
+      for (const snapshot of endStage.snapshots) expect(snapshot.summary.complete).toBe(true);
+    } else expect(natural?.rssPeakDuringOcrBytes).toBeGreaterThan(0);
+    return;
+  }
 
   let report: ProfileReport | undefined;
   let timed: TimeRun | undefined;

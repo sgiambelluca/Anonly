@@ -800,3 +800,29 @@ perfiles. Los umbrales son
 centinelas relativos del host de la corrida, no el presupuesto contractual de
 memoria de §1. Los gates pueden tomar decenas de minutos y CI no conserva PDFs,
 trazas ni artefactos de contenido.
+
+## Memoria incremental del pool OCR en macOS (2/3/4)
+
+`bash tests/perf/run-ocr-memory.sh` ejecuta la comparación cerrada en
+`docs/roadmap/Perfiles_Rendimiento_Revision.md` §«Protocolo adicional macOS».
+Requiere `ANONLY_REAL_DOC_R2` con una entrada local legible; el nombre que
+recibe Electron es neutro. `ANONLY_OCR_POOL_OUTPUT_DIR` elige una carpeta
+nueva bajo `.measure/ocr-memory/`. No permite continuar ni sobrescribir una
+tanda. `ANONLY_OCR_MEMORY_PILOT=1` ejecuta solo el piloto P2 con 2/4 plazas.
+
+El runner construye una vez, verifica el paso 0 WASM, identifica los chunks
+LSTM/OSD por sourcemap y corre 36 importaciones frías intercaladas en P2/R2:
+18 con RSS natural (150 ms, sin CDP) y 18 con tres snapshots de WASM/heap al
+terminar OCR. La barrera de `processSession` vive exclusivamente en el arnés;
+retiene el retorno antes de la baja determinística y se libera en `finally`.
+Los snapshots son memoria del pool ocioso retenido y heap después de GC;
+no son picos activos de memoria nativa. No se resta WASM/heap de RSS.
+
+`support/summarize-ocr-memory.mjs` exige los 36 reportes y 54 snapshots
+completos, vuelve a sumar la evidencia por target y verifica calidad exacta
+contra el control OCR2 de cada ronda. Un fallo, suspensión, cobertura parcial
+o cambio de build impide aceptar la campaña. `summary.json` conserva rangos,
+medianas e incrementos. Se inhibe reposo y la copia de snapshots ARIA de
+Playwright; se registran presión/swap y se restauran los dist previos con
+verificación de hash. Fuentes, defaults y presupuestos de producto permanecen
+sin cambios.
