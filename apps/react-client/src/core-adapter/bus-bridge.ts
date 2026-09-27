@@ -137,9 +137,29 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribe {
   // `closeDocument` ya llama `usePipelineStore.getState().reset()`
   // (`actions.ts`), y `lastOcrPageIndex` vuelve a `null` con el resto del
   // estado por documento.
+  //
+  // ADR-152 §3: "el contador nunca retrocede dentro de una etapa". El OCR
+  // despacha en paralelo (`ocrPoolSize` páginas a la vez), así que
+  // `OCR_PAGE_FINISHED` no llega en orden de `pageIndex` — quedarse con el
+  // último que llegó, sin más, deja ver "página 2 de 20" y después "página 1
+  // de 20" bajo la misma etiqueta. `Math.max` conserva el mayor `pageIndex`
+  // visto hasta ahora en esta etapa; el reset a `null` de `closeDocument`
+  // (arriba) es lo que lo vuelve a poner en cero para el próximo documento,
+  // no un mínimo artificial acá.
+  //
+  // N-3 (revisión, ronda B): `ocr.engine.ts` (~607-613) emite
+  // `OCR_PAGE_FINISHED` sin chequear `abortSignal` — un evento tardío del
+  // documento A puede llegar después de que el usuario ya abrió B. Sin este
+  // filtro, `Math.max` lo dejaría pegado para TODA la etapa de OCR de B (un
+  // número alto de A nunca lo supera un B recién empezado). Mismo filtro por
+  // `documentId` que ya usa `PREVIEW_UPDATED` más abajo.
   unsubs.push(
     bus.on(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, (payload) => {
-      stores.pipeline.setState({ lastOcrPageIndex: payload.pageIndex });
+      if (payload.documentId !== stores.document.getState().id) return;
+      const previous = stores.pipeline.getState().lastOcrPageIndex;
+      stores.pipeline.setState({
+        lastOcrPageIndex: Math.max(previous ?? -1, payload.pageIndex),
+      });
     }),
   );
 

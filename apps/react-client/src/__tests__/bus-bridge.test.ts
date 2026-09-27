@@ -181,6 +181,94 @@ describe("bus-bridge", () => {
     unsubscribe();
   });
 
+  it("OCR_PAGE_FINISHED keeps the highest pageIndex seen — OCR dispatches in parallel, so it can arrive out of order (ADR-152 §3)", () => {
+    const bus = createEventBus({ logger: createTestLogger() });
+    const unsubscribe = subscribe(bus, stores);
+    // N-3: el puente descarta un OCR_PAGE_FINISHED de otro documento (ver el
+    // test dedicado más abajo) — sin un documento activo que coincida, no
+    // hay contador que actualizar. Mismo criterio que el `beforeEach` de
+    // "PREVIEW_UPDATED.degraded".
+    useDocumentStore.setState({ id: "doc-1" });
+
+    // Página 2 termina primero (despacho paralelo, ocrPoolSize > 1).
+    bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
+      documentId: "doc-1",
+      pageIndex: 2,
+      wordCount: 5,
+      confidence: 0.9,
+    });
+    expect(usePipelineStore.getState().lastOcrPageIndex).toBe(2);
+
+    // Página 1 termina después, aunque es anterior en el documento — no debe
+    // hacer retroceder "página 3 de N" a "página 2 de N" bajo la misma etapa.
+    bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
+      documentId: "doc-1",
+      pageIndex: 1,
+      wordCount: 4,
+      confidence: 0.9,
+    });
+    expect(usePipelineStore.getState().lastOcrPageIndex).toBe(2);
+
+    // Una página más adelante todavía avanza el contador con normalidad.
+    bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
+      documentId: "doc-1",
+      pageIndex: 4,
+      wordCount: 6,
+      confidence: 0.9,
+    });
+    expect(usePipelineStore.getState().lastOcrPageIndex).toBe(4);
+
+    unsubscribe();
+  });
+
+  // N-3 (revisión, ronda B): `ocr.engine.ts` (~607-613) emite
+  // `OCR_PAGE_FINISHED` sin chequear `abortSignal` — un evento tardío del
+  // documento A puede llegar después de que el usuario ya cerró A y abrió B.
+  // Con `Math.max` solo (sin filtrar por documento), un número alto de A
+  // quedaría pegado durante TODA la etapa de OCR de B, porque un B recién
+  // empezado nunca lo supera.
+  it("a late OCR_PAGE_FINISHED from a closed document is ignored — the counter follows the active document", () => {
+    const bus = createEventBus({ logger: createTestLogger() });
+    const unsubscribe = subscribe(bus, stores);
+
+    // El usuario abrió A e hizo bastante progreso...
+    useDocumentStore.setState({ id: "doc-A" });
+    bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
+      documentId: "doc-A",
+      pageIndex: 18,
+      wordCount: 5,
+      confidence: 0.9,
+    });
+    expect(usePipelineStore.getState().lastOcrPageIndex).toBe(18);
+
+    // ...cerró A y abrió B (mismo criterio que `closeDocument`/
+    // `DOCUMENT_IMPORTED`: el store pasa a apuntar al documento activo).
+    useDocumentStore.setState({ id: "doc-B" });
+    usePipelineStore.setState({ lastOcrPageIndex: null });
+
+    // Un OCR_PAGE_FINISHED tardío de A llega después — sin el filtro por
+    // documento, `Math.max(null ?? -1, 18)` volvería a fijarlo en 18 aunque
+    // B recién esté en su página 0.
+    bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
+      documentId: "doc-A",
+      pageIndex: 18,
+      wordCount: 5,
+      confidence: 0.9,
+    });
+    expect(usePipelineStore.getState().lastOcrPageIndex).toBeNull();
+
+    // B avanza con normalidad, sin que el 18 de A lo bloquee.
+    bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
+      documentId: "doc-B",
+      pageIndex: 0,
+      wordCount: 3,
+      confidence: 0.9,
+    });
+    expect(usePipelineStore.getState().lastOcrPageIndex).toBe(0);
+
+    unsubscribe();
+  });
+
   it("PIPELINE_READY sets stage Ready with group/conflict counts", () => {
     const bus = createEventBus({ logger: createTestLogger() });
     const unsubscribe = subscribe(bus, stores);
