@@ -55,7 +55,7 @@ export default tseslint.config(
     languageOptions: {
       parserOptions: {
         projectService: {
-          maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 17,
+          maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 18,
           allowDefaultProject: [
             "eslint.config.js",
             "commitlint.config.js",
@@ -74,6 +74,7 @@ export default tseslint.config(
             "tests/perf/ocr-platform-synthetic.mjs",
             "tests/perf/support/summarize-ocr-pool.mjs",
             "tests/perf/support/summarize-ocr-memory.mjs",
+            "scripts/ci/assert-min-tests.mjs",
           ],
         },
         tsconfigRootDir: import.meta.dirname,
@@ -93,6 +94,19 @@ export default tseslint.config(
         document: "readonly",
         crossOriginIsolated: "readonly",
         NerBatchProbe: "readonly",
+      },
+    },
+  },
+  {
+    // ADR-149: script de CI (Node puro, fuera de todo tsconfig — mismo
+    // criterio que el bloque de `tests/perf/*.mjs` arriba). `console.*` sí
+    // corre acá (a diferencia de `packages/**`, P-4): es lo que un step de
+    // CI necesita para reportar por qué falló.
+    files: ["scripts/ci/*.mjs"],
+    languageOptions: {
+      globals: {
+        process: "readonly",
+        console: "readonly",
       },
     },
   },

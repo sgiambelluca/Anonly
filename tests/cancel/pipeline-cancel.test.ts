@@ -425,24 +425,92 @@ describe("gate de cancelación — SLA de 200 ms sobre el façade real (ADR-149 
     expect(core.orchestrator.getState("doc-cancel-detecting").stage).toBe(PipelineStage.Cancelled);
   });
 
-  it("control discriminante (ADR-149 §2): la misma metodología detecta una violación del SLA", async () => {
-    // Doble sintético que ignora a propósito la señal de cancelación — no es
-    // ninguno de los 7 motores reales, así que este control no toca código
-    // de producción para fabricar el fallo (mismo criterio que ADR-148 §6
-    // para el gate de export). Demuestra que el patrón de medición usado en
-    // los tres casos de arriba SÍ es capaz de reportar una violación del SLA
-    // si un motor real dejara de chequear `abortSignal.aborted`: aplicado a
-    // un trabajo que no coopera, da un tiempo por encima de 200 ms.
-    const nonCooperatingWork = new Promise<void>((resolve) => {
-      setTimeout(resolve, 300);
-    });
+  it("control discriminante (ADR-149 §2): el mismo método, contra el façade real, reporta la violación cuando cancel() no corta nada", async () => {
+    // El control anterior (`setTimeout(300)` + `expect(elapsedMs).toBeGreaterThanOrEqual(200)`)
+    // era la tautología que ADR-149 §2 prohíbe ("Nada de `expect(true).toBe(true)`"):
+    // no tocaba `createCore()` ni ningún motor real, así que no demostraba que
+    // ESTE método de medición pudiera detectar algo.
+    //
+    // Este control usa el MISMO método que "Extracting (PdfEngine)" arriba —
+    // façade real, mismo checkpoint entre páginas, misma aserción ("no vuelve
+    // a pedir la página siguiente") — pero con la propiedad bajo prueba rota:
+    // se neutraliza `AbortController.prototype.abort` (SOLO en este test,
+    // restaurado en el `finally`) para que ningún `AbortSignal` real llegue a
+    // abortar, sin tocar código de producción — mismo criterio que ADR-148 §6
+    // para el gate de export. `AbortRegistry.abort()` (`abort-registry.ts`)
+    // llama `controller.abort()` de instancia, que es exactamente el método
+    // que este spy intercepta.
+    //
+    // Se reusa el escenario "Extracting" (no "OCRing"/"Detecting") a
+    // propósito: sin cancelación real, el checkpoint entre páginas de
+    // `pdf.engine.ts` deja de cortar y el pipeline sigue su curso normal
+    // hasta asentarse solo — sin colas de concurrencia ni reintentos de por
+    // medio que puedan quedar en vuelo tras la aserción (el escenario "OCRing"
+    // sí los tiene: liberar sus 2 páginas encoladas sin cancelación real
+    // deja al pool despachando de más de forma sostenida, y el `afterEach`
+    // de este archivo — `core.dispose()` — espera esas páginas para siempre).
+    const abortSpy = vi.spyOn(AbortController.prototype, "abort").mockImplementation(() => {});
+    try {
+      const page0 = createMockPdfPage([
+        { str: "DNI 34.567.891", x: 50, y: 800, width: 100, height: 12 },
+      ]);
+      const page1 = createMockPdfPage([
+        { str: "otro texto", x: 50, y: 700, width: 100, height: 12 },
+      ]);
 
-    const startedAt = Date.now();
-    // "cancel()" lógico: no hay nada que abortar, el trabajo de abajo no
-    // mira ninguna señal — es la propiedad bajo prueba, no un accidente.
-    await nonCooperatingWork;
-    const elapsedMs = Date.now() - startedAt;
+      let resolveGetTextContent: (() => void) | undefined;
+      page0.getTextContent = vi.fn(
+        () =>
+          new Promise((resolve) => {
+            resolveGetTextContent = () =>
+              resolve({
+                items: [
+                  {
+                    str: "DNI 34.567.891",
+                    transform: [1, 0, 0, 1, 50, 800],
+                    width: 100,
+                    height: 12,
+                  },
+                ],
+              });
+          }),
+      );
 
-    expect(elapsedMs).toBeGreaterThanOrEqual(SLA_MS);
+      const mockDoc = createMockPdfDocument([page0, page1]);
+      vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(mockDoc));
+      const getPageSpy = mockDoc.getPage as ReturnType<typeof vi.fn>;
+
+      core = await createCore();
+      const importPromise = core.orchestrator.importDocument({
+        documentId: "doc-cancel-control-broken-abort",
+        name: "native.pdf",
+        buffer: pdfBufferWithHeader(),
+      });
+
+      await vi.waitFor(() => expect(getPageSpy).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() => expect(page0.getTextContent).toHaveBeenCalledTimes(1));
+
+      // "cancel()" real, sobre el façade real — pero con abort() neutralizado
+      // no hay ningún `abortSignal.aborted` que se vuelva `true` en ningún
+      // motor: la propiedad bajo prueba, no un accidente ni un doble sintético.
+      await core.orchestrator.cancel("doc-cancel-control-broken-abort");
+      resolveGetTextContent?.();
+      await importPromise;
+
+      // El MISMO método que arriba —"¿vuelve a pedir la página siguiente
+      // después de cancelar?"— ahora SÍ detecta la violación: sin
+      // cancelación real, el checkpoint entre páginas de `pdf.engine.ts` no
+      // corta nada y `getPage` SÍ se vuelve a llamar con el número de la
+      // página 1 (`getPage(2)`, 1-based) — exactamente lo que el caso de
+      // arriba prueba que NO pasa cuando `cancel()` funciona de verdad. Se
+      // busca la llamada por argumento, no por conteo total: sin cancelación
+      // real el pipeline sigue de largo hasta `Ready` y dispara el seed del
+      // preview mediado (`RenderEngine`), que llama `getPage` por su cuenta
+      // — un conteo exacto sería frágil a esa cascada, que no es la
+      // propiedad bajo prueba acá.
+      expect(getPageSpy.mock.calls.some(([pageNumber]) => pageNumber === 2)).toBe(true);
+    } finally {
+      abortSpy.mockRestore();
+    }
   });
 });

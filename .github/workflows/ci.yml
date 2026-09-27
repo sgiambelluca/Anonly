@@ -337,24 +337,25 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Check if cancel tests exist
-        id: check_cancel
-        run: |
-          if [ -d "tests/cancel" ] && [ -n "$(find tests/cancel -name '*.test.ts' -type f 2>/dev/null)" ]; then
-            echo "has_tests=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_tests=false" >> "$GITHUB_OUTPUT"
-            echo "No cancel tests found, skipping."
-          fi
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # ADR-149 §1: sin "Check if cancel tests exist" ni `if:` — el job corre
+      # siempre y falla si el runner no ejecutó nada. `pnpm test:cancel`
+      # falla igual si `tests/cancel` no existe (Vitest no encuentra specs),
+      # así que ESTE step no necesita su propio guard — el mínimo real lo
+      # exige el siguiente.
       - name: Run cancel tests
-        if: steps.check_cancel.outputs.has_tests == 'true'
-        run: pnpm test:cancel
+        run: pnpm exec vitest run tests/cancel --reporter=default --reporter=json --outputFile=cancel-report.json
+      # El mínimo (4) es el número de tests que tiene hoy `tests/cancel` —
+      # se sube a mano cuando se agreguen más (nunca se calcula solo: un
+      # cálculo automático no distinguiría "se borró un test" de "nunca
+      # hizo falta tener más").
+      - name: Assert cancel tests actually ran (ADR-149 §1)
+        run: node scripts/ci/assert-min-tests.mjs --report cancel-report.json --min 4
 
   test-stress:
     name: Stress
