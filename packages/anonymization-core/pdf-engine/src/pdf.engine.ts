@@ -1203,6 +1203,15 @@ class CtmTracker {
   private insideAnnotationFlag = false;
   private annotationCurrent: Matrix2D = IDENTITY_MATRIX_2D;
   private readonly annotationStack: Matrix2D[] = [];
+  // ADR-141 §2, mismo criterio que `baseMatrix` para la pila de página: la
+  // semilla de la anotación vigente (`beginAnnotation.transform × CTM de
+  // página`, fijada en `beginAnnotation`), no la identidad cruda. Un
+  // `restore()` sin `save()` previo DENTRO de una anotación tiene que caer
+  // de vuelta a esa semilla — es la misma CTM con la que arrancó la
+  // anotación — y no a `IDENTITY_MATRIX_2D`, que ignora el flip/rotación de
+  // la página y deja el texto de la anotación espejado en una página sin
+  // rotar.
+  private annotationSeed: Matrix2D = IDENTITY_MATRIX_2D;
 
   constructor(private readonly baseMatrix: Matrix2D) {
     this.pageCurrent = baseMatrix;
@@ -1226,7 +1235,7 @@ class CtmTracker {
 
   restore(): void {
     if (this.insideAnnotationFlag) {
-      this.annotationCurrent = this.annotationStack.pop() ?? IDENTITY_MATRIX_2D;
+      this.annotationCurrent = this.annotationStack.pop() ?? this.annotationSeed;
     } else {
       this.pageCurrent = this.pageStack.pop() ?? this.baseMatrix;
     }
@@ -1246,12 +1255,17 @@ class CtmTracker {
   beginAnnotation(transform: Matrix2D): void {
     this.insideAnnotationFlag = true;
     this.annotationCurrent = composeMatrix(this.pageCurrent, transform);
+    // ADR-141 §2: guarda la semilla de ESTA anotación para que `restore()`
+    // tenga a qué caer de vuelta si el operator list de la anotación tiene
+    // más `restore` que `save` (O-2, unbalanced restore).
+    this.annotationSeed = this.annotationCurrent;
     this.annotationStack.length = 0;
   }
 
   endAnnotation(): void {
     this.insideAnnotationFlag = false;
     this.annotationCurrent = IDENTITY_MATRIX_2D;
+    this.annotationSeed = IDENTITY_MATRIX_2D;
     this.annotationStack.length = 0;
   }
 }

@@ -1852,6 +1852,86 @@ describe("PdfEngine — unit tests", () => {
       expect(word.bbox).toEqual({ x: 0, y: 798, width: 1, height: 2 });
     });
 
+    // O-2 (ADR-141 §2): un `restore` desbalanceado DENTRO de una anotación
+    // (más `restore` que `save`) caía a `IDENTITY_MATRIX_2D` — la identidad
+    // cruda, sin el flip Y de `baseMatrix` — en vez de la semilla propia de
+    // la anotación (`beginAnnotation.transform × CTM de página`). El
+    // síntoma es texto verticalmente espejado incluso en una página SIN
+    // rotación, porque toda página tiene el flip Y de `viewport.transform`
+    // (bottom-up de PDF a top-down del motor), rotada o no. La prueba: dos
+    // renders del MISMO textRun, uno sin ninguna operación de pila y otro
+    // con `save`/`transform`/`restore` balanceado + un `restore` EXTRA antes
+    // del texto — tienen que dar el mismo bbox, porque el extra debería
+    // recuperar exactamente la semilla en la que ya estaba (no una semilla
+    // distinta, y mucho menos la identidad cruda).
+    it("an unbalanced restore inside an annotation falls back to its own seed, not raw identity — text stays upright on an unrotated page", async () => {
+      const sharedTextRun: MockAnnotationSpec["innerOps"][number] = {
+        kind: "textRun",
+        textMatrix: MEASURED_TEXT_MATRIX,
+        glyphs: [
+          { unicode: "A", width: 500 },
+          { unicode: "B", width: 500 },
+        ],
+      };
+
+      async function renderAnnotationWords(
+        innerOps: MockAnnotationSpec["innerOps"],
+        documentId: string,
+      ) {
+        const annotationSpec: MockAnnotationSpec = {
+          id: "21R",
+          rect: MEASURED_RECT,
+          transform: MEASURED_ANNOTATION_TRANSFORM,
+          innerOps,
+        };
+        vi.mocked(getDocument).mockReturnValue(
+          mockGetDocumentResult(
+            // Página SIN rotación (595x842, `rotate: 0` por default en
+            // `createMockPage`) — el bug no depende de `/Rotate`, depende
+            // del flip Y que TODA página trae en `viewport.transform`.
+            createMockPdfDocument(1, () =>
+              createMockPage(0, [], [], { width: 595, height: 842 }, [annotationSpec]),
+            ),
+          ),
+        );
+        const output = await engine.process(createValidInput(documentId), ctx);
+        return output.document.pages[0]!.words;
+      }
+
+      await engine.init(ctx);
+
+      // Referencia: el texto es lo primero que corre en la anotación — nunca
+      // toca la pila, así que usa la semilla tal cual.
+      const reference = await renderAnnotationWords([sharedTextRun], "doc-restore-seed-ref");
+
+      // Mismo texto, pero después de save + transform + restore (balanceado,
+      // vuelve a la semilla) + un restore EXTRA (desbalanceado, la pila ya
+      // está vacía) — con el fix, cae de nuevo a la MISMA semilla; con el
+      // bug, cae a la identidad cruda y el resultado sale distinto.
+      const withExtraRestore = await renderAnnotationWords(
+        [
+          { kind: "save" },
+          { kind: "transform", matrix: MEASURED_INNER_TRANSFORM },
+          { kind: "restore" },
+          { kind: "restore" },
+          sharedTextRun,
+        ],
+        "doc-restore-seed-extra",
+      );
+
+      expect(withExtraRestore).toHaveLength(1);
+      expect(reference).toHaveLength(1);
+      expect(withExtraRestore[0]!.bbox).toEqual(reference[0]!.bbox);
+      // La composición además tiene que reflejar el flip Y real de la
+      // página (sin rotación aparente, no 180 — "espejado verticalmente" es
+      // exactamente eso con este textMatrix upright): confirma que la
+      // semilla recuperada trae el flip de `baseMatrix`, no una identidad
+      // sin flip. `rotation` ausente/0 es "sin rotación" (mismo criterio
+      // que el resto de este describe, que nunca fija `rotation` para el
+      // caso no rotado).
+      expect(withExtraRestore[0]!.bbox.rotation ?? 0).toBe(0);
+    });
+
     it("image inside an annotation is placed with the annotation transform", async () => {
       const annotationSpec: MockAnnotationSpec = {
         id: "33R",
