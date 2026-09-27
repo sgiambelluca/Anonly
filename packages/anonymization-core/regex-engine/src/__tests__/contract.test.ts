@@ -128,6 +128,28 @@ describe("RegexEngine — contract tests", () => {
     expect(payload.occurrence.confidence).toBe(1.0);
   });
 
+  it("default email scanner keeps events, normalization and bbox", async () => {
+    await engine.init(ctx);
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+    const document = makeSinglePageDocument("doc-email-mapping", ["Juan.Perez@Example.COM"]);
+    await engine.process({ document }, ctx);
+    const entityFoundCall = busEmitSpy.mock.calls.find(
+      ([, event]) => event === EngineEvents.ENTITY_FOUND,
+    );
+    const occurrence = (entityFoundCall?.[2] as EntityFound | undefined)?.occurrence;
+    expect(occurrence).toMatchObject({
+      value: "Juan.Perez@Example.COM",
+      normalizedValue: "juan.perez@example.com",
+      entityType: EntityType.Email,
+      pageIndex: 0,
+      source: "regex",
+      confidence: 1,
+      bbox: { x: 10, y: 100, width: "Juan.Perez@Example.COM".length * 6, height: 12 },
+      wordSpan: { startIndex: 0, endIndexExclusive: 1 },
+    });
+    expect(entityFoundCall).toBeDefined();
+  });
+
   it("RegexFinished payload matches RegexEngineOutput", async () => {
     await engine.init(ctx);
     const busEmitSpy = vi.spyOn(ctx.bus, "emit");
