@@ -5318,4 +5318,44 @@ describe("GroupingEngine — edge cases", () => {
     expect(snapshot.groups.some((g) => g.type === EntityType.Person)).toBe(true);
     expect(snapshot.groups.some((g) => g.type === EntityType.Email)).toBe(false);
   });
+
+  // ADR-085 §3: el guard difuso va sobre el tipo que emite el DETECTOR — no
+  // sobre el tipo (corregido) del grupo. Movido desde `unit.test.ts`
+  // (Grouping_Engine.md §14, fila del caso 70/ADR-182): "los dos call sites
+  // comparten el predicado" es exactamente la clase de caso límite que
+  // corresponde acá, no a `unit.test.ts`.
+  it("type correction fuzzy pass keeps the same destination", async () => {
+    // Reclasifica Address -> Organization (mismo criterio que `reclassify`
+    // de `unit.test.ts`, inline acá: no hay otro test en este archivo que lo
+    // necesite como helper compartido).
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        value: "Fiscalía de Quilmes",
+        normalizedValue: "fiscalia de quilmes",
+        entityType: EntityType.Address,
+        pageIndex: 0,
+      }),
+    });
+    const [reclassified] = engine.getSnapshot("doc-1").groups;
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: reclassified!.id,
+      patch: { type: EntityType.Organization },
+    });
+    engine.dropOccurrences("doc-1", { pageIndices: [0] });
+
+    // Distancia 1 sobre 19 caracteres: 0.947, por encima del umbral 0.88.
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        value: "Fiscalia de Quilmez",
+        normalizedValue: "fiscalia de quilmez",
+        entityType: EntityType.Address,
+        pageIndex: 0,
+      }),
+    });
+
+    expect(engine.getSnapshot("doc-1").groups[0]?.type).toBe(EntityType.Organization);
+  });
 });

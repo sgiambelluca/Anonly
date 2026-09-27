@@ -495,6 +495,13 @@ class GroupCandidateIndex {
   readonly trigramFrequency = new Map<number, Map<string, number>>();
   readonly groupOrders = new Map<string, number>();
   readonly aliasOrders = new Map<string, Map<string, number>>();
+  // O-4: aliases de CADA grupo, en aliasOrder (siempre se agregan, nunca se
+  // saca uno solo — la única baja es invalidar el índice entero, ver los
+  // call sites que ponen `session.candidateIndex = undefined`). Junto con
+  // `groupOrders` (Map, conserva el orden de PRIMERA aparición de cada
+  // grupo) alcanza para reconstruir el orden (groupOrder, aliasOrder) del
+  // fallback de `fuzzyCandidates` sin sort — ver su comentario.
+  private readonly aliasesByGroup = new Map<string, IndexedAlias[]>();
 
   constructor(groups: ReadonlyMap<string, InternalGroup>) {
     let groupOrder = 0;
@@ -534,6 +541,9 @@ class GroupCandidateIndex {
     if (aliasOrder === undefined) return;
     const trigrams = countTrigrams(value);
     const entry: IndexedAlias = { groupId, value, groupOrder, aliasOrder, trigrams };
+    const groupAliases = this.aliasesByGroup.get(groupId) ?? [];
+    groupAliases.push(entry);
+    this.aliasesByGroup.set(groupId, groupAliases);
     const exactEntries = this.exact.get(value) ?? [];
     exactEntries.push(entry);
     this.exact.set(value, exactEntries);
@@ -554,11 +564,21 @@ class GroupCandidateIndex {
 
   fuzzyCandidates(query: string, threshold: number): ReadonlyArray<IndexedAlias> {
     if (query.length < 3 || !Number.isFinite(threshold) || threshold <= 0 || threshold >= 1) {
-      return [...this.byLength.values()]
-        .flat()
-        .sort(
-          (left, right) => left.groupOrder - right.groupOrder || left.aliasOrder - right.aliasOrder,
-        );
+      // O-4: O(N) en vez de aplanar `byLength` (que mezcla el orden de
+      // longitudes) y ordenar — mismo resultado y mismo orden
+      // (groupOrder, aliasOrder) porque `groupOrders` (Map) conserva el
+      // orden de PRIMERA aparición de cada grupo y `aliasesByGroup` conserva
+      // el aliasOrder dentro de cada grupo (se agrega, nunca se saca un
+      // alias suelto — la única baja es invalidar el índice entero). Un
+      // `sort()` acá era O(N log N) por cada ocurrencia de query corto,
+      // contra O(N) antes de que este índice existiera (ADR-184).
+      const ordered: IndexedAlias[] = [];
+      for (const groupId of this.groupOrders.keys()) {
+        const groupAliases = this.aliasesByGroup.get(groupId);
+        if (groupAliases === undefined) continue;
+        for (const entry of groupAliases) ordered.push(entry);
+      }
+      return ordered;
     }
     const queryTrigrams = countTrigrams(query);
     const matching = new Map<IndexedAlias, number>();

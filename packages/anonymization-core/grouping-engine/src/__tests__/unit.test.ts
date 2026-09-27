@@ -47,7 +47,7 @@ describe("GroupingEngine — unit tests", () => {
     }
   });
 
-  it("bounded similarity predicate equals the full normalized comparator", () => {
+  it("bounded similarity predicate equals full normalized comparator", () => {
     let seed = 0x176;
     const random = (max: number): number => {
       seed = (seed * 1664525 + 1013904223) >>> 0;
@@ -1075,25 +1075,6 @@ describe("GroupingEngine — cambio de tipo del grupo (ADR-082)", () => {
     const snapshot = engine.getSnapshot("doc-1");
     expect(snapshot.groups).toHaveLength(1);
     expect(snapshot.groups[0]?.type).toBe(EntityType.Organization);
-  });
-
-  // ADR-085 §3: el guard difuso va sobre el tipo que emite el DETECTOR.
-  it("type correction fuzzy pass keeps the same destination", async () => {
-    await reclassify(EntityType.Address, EntityType.Organization);
-    engine.dropOccurrences("doc-1", { pageIndices: [0] });
-
-    // Distancia 1 sobre 19 caracteres: 0.947, por encima del umbral 0.88.
-    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
-      documentId: "doc-1",
-      occurrence: makeOccurrence({
-        value: "Fiscalia de Quilmez",
-        normalizedValue: "fiscalia de quilmez",
-        entityType: EntityType.Address,
-        pageIndex: 0,
-      }),
-    });
-
-    expect(engine.getSnapshot("doc-1").groups[0]?.type).toBe(EntityType.Organization);
   });
 
   it("el difuso NO hereda la corrección en un tipo estructurado (ADR-073)", async () => {
