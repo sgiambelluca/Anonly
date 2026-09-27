@@ -313,6 +313,10 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
   private readonly dirtyPagesByDocument = new Map<string, Set<number>>();
   // Evita agendar más de un flush por documento por ráfaga de eventos.
   private readonly flushScheduledDocuments = new Set<string>();
+  // ADR-189 §3: documentos que ya recibieron el precalentado de la página 1
+  // (ADR-151) — evita repetirlo en cada `Ready` posterior (agregado manual,
+  // reanálisis, eliminar, restaurar). Se limpia en `closeDocument`.
+  private readonly prewarmedDocuments = new Set<string>();
   // Controlador por documento del seed/flush del preview mediado (ADR-052
   // §3, v1.5.4): inmune a la cancelación del documento (abortRegistry) pero
   // NO a su baja — closeDocument/dispose lo abortan y lo limpian de acá,
@@ -973,6 +977,10 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     this.groupPagesByDocument.delete(documentId);
     this.dirtyPagesByDocument.delete(documentId);
     this.flushScheduledDocuments.delete(documentId);
+    // ADR-189 §3: la marca de precalentado muere con el documento — uno
+    // nuevo con el mismo id (tras un closeDocument real, nunca reusa la
+    // sesión) vuelve a precalentar en su propio primer Ready.
+    this.prewarmedDocuments.delete(documentId);
     // ADR-052 §3: la baja del documento aborta el controlador del preview
     // mediado (cancelReanalyze deliberadamente NO llega a esta línea — solo
     // closeDocument/dispose bajan el documento).
@@ -1015,6 +1023,7 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     this.groupPagesByDocument.clear();
     this.dirtyPagesByDocument.clear();
     this.flushScheduledDocuments.clear();
+    this.prewarmedDocuments.clear();
     // ADR-052 §3: dispose() global es una baja para todo documento con un
     // controlador de preview mediado todavía vivo.
     for (const controller of this.mediatedPreviewControllers.values()) controller.abort();
@@ -1800,7 +1809,15 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     // documento cancelado/fallido no llega acá — ver el early return de
     // arriba) ni al cargar el documento (se tiraría si el usuario cancela a
     // mitad del escaneo, ver "Alternativas consideradas" del ADR).
-    this.prewarmFirstPagePreview(payload.documentId);
+    // ADR-189 §3: solo la PRIMERA vez que este documento llega a `Ready` —
+    // un `Ready` posterior (agregado manual, reanálisis, eliminar o
+    // restaurar) no repite el precalentado; el preview mediado de ADR-044
+    // (`seedAnonymizedPreview`, ya invocado arriba) sigue actualizando las
+    // páginas afectadas en cada uno de esos casos.
+    if (!this.prewarmedDocuments.has(payload.documentId)) {
+      this.prewarmedDocuments.add(payload.documentId);
+      this.prewarmFirstPagePreview(payload.documentId);
+    }
   }
 
   // ─── Mediación grupos→Render del preview (ADR-044) ───

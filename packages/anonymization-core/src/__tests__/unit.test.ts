@@ -3715,6 +3715,39 @@ describe("Precalentado de la página 1 al llegar a Ready (ADR-151)", () => {
     expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
     expect(failedSpy).not.toHaveBeenCalled();
   });
+
+  it("first page is prewarmed only on the first Ready of a document", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    wireHappyPathSpies(engines, bus);
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    function prewarmCallCount(): number {
+      return (engines.render.renderPage as ReturnType<typeof vi.fn>).mock.calls.filter((c) => {
+        const input = c[0] as { readonly kind: string; readonly mode: string };
+        return input.kind === "original" && input.mode === "preview";
+      }).length;
+    }
+
+    await orchestrator.importDocument(createImportInput());
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    expect(prewarmCallCount()).toBe(1); // el primer Ready SÍ precalienta.
+
+    // Un segundo `Ready` del mismo documento — agregado manual, ADR-085 —
+    // no vuelve a llamar a `renderPage` para el precalentado (ADR-189 §3).
+    await orchestrator.addManualEntity("doc-1", {
+      value: "Jose Perez",
+      entityType: EntityType.Person,
+    });
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    expect(prewarmCallCount()).toBe(1); // sigue en 1, no en 2.
+  });
 });
 
 describe("Orchestrator — export failure propagation", () => {
