@@ -31,14 +31,25 @@ import { computeIdentity } from "./identity.js";
 import {
   BASELINE_SCHEMA_VERSION,
   type BaselineDocument,
+  type BaselineRuntime,
   type DetectionBaseline,
 } from "./schema.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MEASURE_DIR = resolve(HERE, "../../../.measure");
 
+/**
+ * `runtime` (ADR-147 §6): lo que de verdad corrió, escrito por
+ * `tests/measure/baseline.spec.ts` (el único lugar que lo sabe — ver su
+ * `detectRuntime`). Este script es una transformación pura de un JSON ya en
+ * disco: no tiene forma de observar qué runtime lo produjo salvo leyéndolo
+ * de acá. Antes de este fix, `computeIdentity("chromium-wasm")` lo asumía
+ * fijo sin mirar el dump, así que el chequeo de igualdad del comparador
+ * (ADR-147 §6) siempre pasaba, corriera lo que corriera.
+ */
 interface RawMeasureDump {
   readonly capturedAt: string;
+  readonly runtime: BaselineRuntime;
   readonly results: ReadonlyArray<MeasuredDocument>;
 }
 
@@ -86,6 +97,12 @@ async function main(): Promise<void> {
   const outputPath = resolve(MEASURE_DIR, `${label}-candidate.json`);
 
   const dump = JSON.parse(await readFile(inputPath, "utf-8")) as RawMeasureDump;
+  if (dump.runtime !== "node" && dump.runtime !== "chromium-wasm") {
+    throw new Error(
+      `${inputPath} no tiene un "runtime" reconocido (ADR-147 §6): "${String(dump.runtime)}". ` +
+        "Es una medición anterior a este fix — volvé a correr pnpm test:measure para regenerarla.",
+    );
+  }
   const dataset = await loadReferenceDataset();
   const truthByDocumentId = new Map(dataset.map((doc) => [doc.entry.documentId, doc.truth]));
 
@@ -101,7 +118,7 @@ async function main(): Promise<void> {
     return buildCandidateDocument(measured, truth);
   });
 
-  const identity = await computeIdentity("chromium-wasm");
+  const identity = await computeIdentity(dump.runtime);
 
   const candidate: DetectionBaseline = {
     schemaVersion: BASELINE_SCHEMA_VERSION,
