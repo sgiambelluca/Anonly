@@ -135,27 +135,69 @@ function buildOperatorList(
  * `textItems` vacío ⇒ página sin texto (`requiresOCR: true`).
  * `images` vacío ⇒ página sin imágenes ⇒ sin `ocrRegions` (ADR-065 §1).
  */
+/**
+ * Matriz de `viewport.transform` para un `/Rotate` dado (múltiplo de 90).
+ * `viewportWidth`/`viewportHeight` son los del VIEWPORT — los que
+ * `getViewport()` ya devuelve, DESPUÉS de intercambiar a 90°/270° — no los de
+ * la página sin rotar (N-1: pasarle los de la página sin rotar da la
+ * traslación equivocada a 270° en páginas no cuadradas: 200×300 con
+ * `/Rotate 270` tiene que dar traslación `(300, 200)`, no `(200, 300)`).
+ * Espejo de `viewportTransformFor` en
+ * `pdf-engine/src/__tests__/fixtures/test-helpers.ts` (que documenta la misma
+ * convención: "width/height acá son los que YA devuelve getViewport()") — no
+ * se importa de ahí (no es parte de ningún `index.ts` público, ver la nota de
+ * cabecera de este archivo) pero tiene que ser la MISMA fórmula: es justo la
+ * composición que B-5 (ADR-140 §2) necesita ejercitar de verdad, no aproximar.
+ */
+function viewportTransformFor(rotate: number, viewportWidth: number, viewportHeight: number): number[] {
+  switch (((rotate % 360) + 360) % 360) {
+    case 90:
+      return [0, 1, 1, 0, 0, 0];
+    case 180:
+      return [-1, 0, 0, 1, viewportWidth, 0];
+    case 270:
+      return [0, -1, -1, 0, viewportWidth, viewportHeight];
+    default:
+      return [1, 0, 0, -1, 0, viewportHeight];
+  }
+}
+
 export function createMockPdfPage(
   textItems: ReadonlyArray<MockTextItem>,
   images: ReadonlyArray<MockImageRect> = [],
   annotations: ReadonlyArray<MockSignatureAnnotation> = [],
+  // ADR-140 §2: `PDFPageProxy.rotate` real nunca es `undefined` — default 0
+  // (sin rotación). Sin esto, `pageProxy.rotate !== 0` de `parsePage`
+  // rechaza con `PdfPageRotatedError` cualquier página con texto nativo (no
+  // aplica a una página escaneada sin texto, que es justo el caso de B-5).
+  rotate = 0,
+  // Tamaño de página SIN rotar (espacio de usuario PDF) — default A4, mismo
+  // valor que el resto de este archivo usaba hardcodeado.
+  pageSize: { readonly width: number; readonly height: number } = { width: 595, height: 842 },
 ): Record<string, unknown> {
+  // A 90°/270°, `getViewport().width/height` viene INTERCAMBIADO respecto de
+  // la página sin rotar — es lo que pdf.js entrega de verdad, y es
+  // exactamente el marco que `Page.width`/`Page.height` hereda (ADR-141 §2).
+  const rotated = ((rotate % 360) + 360) % 360 === 90 || ((rotate % 360) + 360) % 360 === 270;
+  const unrotatedWidth = pageSize.width;
+  const unrotatedHeight = pageSize.height;
+  const viewportWidth = rotated ? unrotatedHeight : unrotatedWidth;
+  const viewportHeight = rotated ? unrotatedWidth : unrotatedHeight;
   return {
-    // ADR-140 §2: `PDFPageProxy.rotate` real nunca es `undefined` — default 0
-    // (sin rotación). Sin esto, `pageProxy.rotate !== 0` de `parsePage`
-    // rechaza con `PdfPageRotatedError` cualquier página con texto nativo.
-    rotate: 0,
+    rotate,
     // ADR-141 §5: los mocks de `getViewport()` tienen que declarar
     // `transform` — `pdf-engine` lo compone con `item.transform` para toda
     // la geometría (ADR-141 §2). Página sin rotación: `[scale, 0, 0, -scale,
     // 0, height]`, el mismo volteo que antes hacía `pageHeight - y` a mano,
-    // ahora adentro de la matriz (ver `viewportTransformFor` en
-    // `pdf-engine/src/__tests__/fixtures/test-helpers.ts` para el caso
-    // general con rotación).
+    // ahora adentro de la matriz.
     getViewport: vi.fn(({ scale }: { scale: number }) => ({
-      width: 595 * scale,
-      height: 842 * scale,
-      transform: [scale, 0, 0, -scale, 0, 842 * scale],
+      width: viewportWidth * scale,
+      height: viewportHeight * scale,
+      // El viewport a una `scale` distinta de 1 escala la matriz COMPLETA
+      // (los seis componentes) — no solo la traslación: es la misma
+      // convención que ya usaba este archivo para la página sin rotar
+      // (`[scale, 0, 0, -scale, 0, 842 * scale]`, antes de este cambio).
+      transform: viewportTransformFor(rotate, viewportWidth, viewportHeight).map((v) => v * scale),
     })),
     getTextContent: vi.fn(() =>
       Promise.resolve({
@@ -228,6 +270,18 @@ class StubCanvasContext2D {
   }
   drawImage(): void {}
   putImageData(): void {}
+  // `paintReplacements` (render-engine) envuelve cada reemplazo en
+  // save/restore, y rota alrededor de `translate` cuando `bbox.rotation` es
+  // 90/270 (ADR-066 §7) — sin este trío, cualquier render con un reemplazo
+  // real (no solo "página en blanco") revienta con
+  // "context.save is not a function". No modelan estado gráfico real (mismo
+  // criterio que el stub más rico de `render-engine/src/__tests__/fixtures/`):
+  // alcanza con que existan y no rompan nada; este archivo no verifica el
+  // árbol de transformaciones, solo coordenadas de `fillRect`/`fillText`.
+  save(): void {}
+  restore(): void {}
+  translate(): void {}
+  rotate(): void {}
   getImageData(x: number, y: number, w: number, h: number): ImageData {
     return { data: new Uint8ClampedArray(Math.max(w, 0) * Math.max(h, 0) * 4), width: w, height: h, colorSpace: "srgb" };
   }
