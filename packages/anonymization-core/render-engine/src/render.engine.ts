@@ -671,6 +671,13 @@ function isValidScale(scale: number): boolean {
   return Number.isFinite(scale) && scale > 0 && scale <= MAX_RENDER_SCALE;
 }
 
+// ADR-189 §1: clave de `currentPreviewScale` — por `(documentId, kind)`, sin
+// `pageIndex` (a diferencia de `supersedeKey`): la escala vigente es del
+// LADO, no de la página.
+function currentScaleKey(documentId: string, kind: "original" | "anonymized"): string {
+  return `${documentId}:${kind}`;
+}
+
 // ADR-144 §3: clave de coalescencia de PreviewRenderScheduler — construida
 // SOLO para mode "preview" ("full" nunca entra al scheduler). Deliberadamente
 // NO incluye `replacements`/`annotations` (`buildCacheKey`, arriba, sí): son
@@ -800,6 +807,16 @@ export class RenderEngine implements IEngine {
   // RENDER_REQUESTED. Poblada únicamente por handleRenderRequested y
   // consultada solo por renders con participatesInSupersede = true.
   private readonly pendingRenders = new Map<string, number>();
+  // ADR-189 §1: escala VIGENTE del preview por `(documentId, kind)` — clave
+  // `currentScaleKey`. La del último RENDER_REQUESTED válido con
+  // `mode: "preview"` para ese `kind`, o ausente hasta el primer pedido (cae
+  // a `previewScale` en ese caso). La usa una invocación DIRECTA de preview
+  // sin `scale` (preview mediado de ADR-044, precalentado de ADR-151) — a
+  // diferencia de `pendingRenders`, que es por página y solo lo consultan
+  // los renders con `participatesInSupersede = true`. Se borra con el resto
+  // del estado del documento: `unloadDocument`, `loadDocument` (reload) y
+  // `dispose`.
+  private readonly currentPreviewScale = new Map<string, number>();
   // ADR-144: planificador del trabajo pesado de "mode: preview" — coalesce
   // por clave (ADR-144 §3) y acota la concurrencia a
   // ctx.config.workerPool.renderPoolSize (§4). Construido en init() (recién
@@ -1027,9 +1044,18 @@ export class RenderEngine implements IEngine {
     // Caso 1: replacements ausente/vacío en "anonymized" = idéntico al original.
     const replacements = kind === "anonymized" ? (input.replacements ?? []) : [];
     const annotations = kind === "original" ? (input.annotations ?? []) : [];
+    // ADR-189 §2: una invocación de preview SIN `scale` explícita (el
+    // preview mediado de ADR-044, el precalentado de ADR-151 — nunca
+    // `RENDER_REQUESTED`, que siempre reconstruye `scale: effectiveScale`
+    // arriba) sigue la escala VIGENTE de su `kind`, no `previewScale` fijo.
+    // `followsCurrentPreviewScale` gobierna el loop de redespacho más abajo,
+    // que revalida esa escala en el momento de asentar (§2, "no se emite").
+    const followsCurrentPreviewScale = mode === "preview" && input.scale === undefined;
     const scale =
       input.scale ??
-      (mode === "preview" ? ctx.config.render.previewScale : ctx.config.render.fullScale);
+      (mode === "preview"
+        ? this.getCurrentPreviewScale(documentId, kind, ctx)
+        : ctx.config.render.fullScale);
     const imageFormat = input.imageFormat ?? (mode === "preview" ? "png" : "jpeg");
 
     // ADR-037 §4, alcance precisado por el hallazgo del PR4 (nota 6 de
@@ -1100,39 +1126,96 @@ export class RenderEngine implements IEngine {
     const priority = participatesInSupersede
       ? PREVIEW_PRIORITY_VISIBLE
       : PREVIEW_PRIORITY_NOT_VISIBLE;
-    const key = previewSchedulerKey(documentId, pageIndex, kind, mode, scale, imageFormat);
 
-    const result = await scheduler.schedule(
-      key,
-      priority,
-      ctx,
-      (currentPriority) => {
-        // ADR-144 §5: el input se lee al DESPACHAR, no al encolar/coalescer
-        // — nunca el `replacements`/`annotations`/`lineWords` de ESTA
-        // invocación de renderPageInternal (puede estar obsoleto para
-        // cuando el kernel efectivamente corre), sino el vigente
-        // (readFreshInputParts). `documentId`/`pageIndex`/`kind`/`scale`/
-        // `imageFormat` sí son fijos: forman parte de `key`, así que son
-        // idénticos para toda solicitud coalescida en esta entrada.
-        const fresh = this.readFreshInputParts(documentId, pageIndex, kind);
-        return this.runRenderKernelJob({
-          documentId,
-          pageIndex,
-          kind,
-          mode,
-          scale,
-          imageFormat,
-          replacements: fresh.replacements,
-          annotations: fresh.annotations,
-          lineWords: fresh.lineWords,
-          ctx,
-          checkpoint,
-          priority: currentPriority,
-        });
-      },
-      (settledResult) => this.settleRenderJob(ctx, mode, settledResult),
-    );
-    return result.output;
+    // ADR-189 §2: cuando la escala sigue a la VIGENTE (`followsCurrentPreviewScale`
+    // — sin `scale` explícita en la invocación), el resultado se revalida al
+    // asentar: si la vigente cambió mientras el kernel corría, se descarta
+    // sin cachear ni emitir y este loop redespacha a la escala nueva, con el
+    // input vigente — mismo criterio que la generación vieja de ADR-144,
+    // pero sobre otra dimensión: la clave del scheduler ya fija `scale`
+    // (`previewSchedulerKey`), así que un cambio de escala es una clave
+    // NUEVA, no una coalescencia sobre la misma entrada. Para cualquier otra
+    // invocación (export, escala explícita, o vía `RENDER_REQUESTED`, que
+    // siempre trae `scale: effectiveScale`) la escala es fija y el loop
+    // corre una sola vez, idéntico al despacho de antes de este ADR.
+    for (;;) {
+      const dispatchScale = followsCurrentPreviewScale
+        ? this.getCurrentPreviewScale(documentId, kind, ctx)
+        : scale;
+      const key = previewSchedulerKey(
+        documentId,
+        pageIndex,
+        kind,
+        mode,
+        dispatchScale,
+        imageFormat,
+      );
+
+      const result = await scheduler.schedule(
+        key,
+        priority,
+        ctx,
+        (currentPriority) => {
+          // ADR-144 §5: el input se lee al DESPACHAR, no al encolar/coalescer
+          // — nunca el `replacements`/`annotations`/`lineWords` de ESTA
+          // invocación de renderPageInternal (puede estar obsoleto para
+          // cuando el kernel efectivamente corre), sino el vigente
+          // (readFreshInputParts). `documentId`/`pageIndex`/`kind`/`scale`/
+          // `imageFormat` sí son fijos: forman parte de `key`, así que son
+          // idénticos para toda solicitud coalescida en esta entrada.
+          const fresh = this.readFreshInputParts(documentId, pageIndex, kind);
+          return this.runRenderKernelJob({
+            documentId,
+            pageIndex,
+            kind,
+            mode,
+            scale: dispatchScale,
+            imageFormat,
+            replacements: fresh.replacements,
+            annotations: fresh.annotations,
+            lineWords: fresh.lineWords,
+            ctx,
+            checkpoint,
+            priority: currentPriority,
+          });
+        },
+        (settledResult) => {
+          // ADR-189 §2: "nunca se emite un PREVIEW_UPDATED a una escala que
+          // ya no es la vigente" — no cachea, no emite. Este `onSettle` SOLO
+          // corre para quien creó la entrada del scheduler (ADR-144: una
+          // solicitud coalescida sobre la misma clave nunca vuelve a invocar
+          // `runJob`/`onSettle`, devuelve la MISMA promesa) — la revalidación
+          // de CADA llamador vive después del `await`, no acá (ver nota N-5
+          // más abajo).
+          if (
+            followsCurrentPreviewScale &&
+            this.getCurrentPreviewScale(documentId, kind, ctx) !== dispatchScale
+          ) {
+            return;
+          }
+          return this.settleRenderJob(ctx, mode, settledResult);
+        },
+      );
+
+      if (!followsCurrentPreviewScale) return result.output;
+
+      // N-5 (ADR-189 §2, revisión ronda B): esta revalidación es del
+      // LLAMADOR, no del `onSettle` de arriba — un segundo llamador
+      // coalescido sobre la MISMA entrada (misma clave: misma escala en el
+      // momento de encolar) nunca ejecuta SU `onSettle` propio (ADR-144: el
+      // coalescing descarta `runJob`/`onSettle` de la solicitud que llega
+      // después y devuelve la promesa compartida), así que su variable local
+      // de staleness nunca se pondría en `true` aunque el resultado
+      // compartido sea justo el que `onSettle` decidió no cachear/emitir.
+      // Chequear la escala vigente ACÁ, después del `await`, en vez de
+      // depender de un flag que solo actualiza el dueño del `onSettle`,
+      // hace que TODO llamador —dueño o coalescido— redespache si la
+      // vigente se movió, y la promesa "resuelve con el render final" (ADR-189
+      // §2) para los dos, no solo para el primero.
+      if (this.getCurrentPreviewScale(documentId, kind, ctx) === dispatchScale) {
+        return result.output;
+      }
+    }
   }
 
   /**
@@ -1583,6 +1666,7 @@ export class RenderEngine implements IEngine {
     this.lastAnonymizedInputs.clear();
     this.lastOriginalInputs.clear();
     this.pendingRenders.clear();
+    this.currentPreviewScale.clear();
     // ADR-144 §8: mismo criterio que `clearDocument` (ver
     // `clearDocumentState` más abajo) pero sin filtro de prefijo — rechaza
     // TODA entrada pendiente/en vuelo del scheduler. `?.` porque `dispose()`
@@ -1624,6 +1708,16 @@ export class RenderEngine implements IEngine {
     const effectiveScale =
       payload.scale ??
       (payload.mode === "preview" ? ctx.config.render.previewScale : ctx.config.render.fullScale);
+
+    // ADR-189 §1: se actualiza acá — ya pasado el guard de escala inválida
+    // (arriba), antes de tocar `pendingRenders`/reconstruir los inputs por
+    // página — y SOLO para "preview" ("full"/export nunca la toca).
+    if (payload.mode === "preview") {
+      this.currentPreviewScale.set(
+        currentScaleKey(payload.documentId, payload.kind),
+        effectiveScale,
+      );
+    }
 
     // ADR-056 §1/§4: RenderRequested trae kind requerido — se reconstruye un
     // solo RenderPageInput por página, del kind pedido, leyendo únicamente el
@@ -1695,6 +1789,22 @@ export class RenderEngine implements IEngine {
     scale: number,
   ): void {
     this.pendingRenders.set(supersedeKey(documentId, pageIndex, kind), scale);
+  }
+
+  /**
+   * Escala vigente del preview de `(documentId, kind)` (ADR-189 §1): la del
+   * último `RENDER_REQUESTED` válido con `mode: "preview"` para ese lado, o
+   * `previewScale` si todavía no hubo ninguno.
+   */
+  private getCurrentPreviewScale(
+    documentId: string,
+    kind: "original" | "anonymized",
+    ctx: EngineContext,
+  ): number {
+    return (
+      this.currentPreviewScale.get(currentScaleKey(documentId, kind)) ??
+      ctx.config.render.previewScale
+    );
   }
 
   /**
@@ -1825,6 +1935,12 @@ export class RenderEngine implements IEngine {
     }
     for (const key of [...this.pendingRenders.keys()]) {
       if (key.startsWith(prefix)) this.pendingRenders.delete(key);
+    }
+    // ADR-189 §1: la escala vigente del preview se borra con el resto del
+    // estado del documento — mismo criterio de prefijo que las tres de
+    // arriba (`currentScaleKey` también empieza por `${documentId}:`).
+    for (const key of [...this.currentPreviewScale.keys()]) {
+      if (key.startsWith(prefix)) this.currentPreviewScale.delete(key);
     }
     // ADR-144 §8: baja de documento — toda entrada pendiente/en vuelo del
     // scheduler para este documentId se rechaza (CancelledError) y se borra

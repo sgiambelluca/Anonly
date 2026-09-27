@@ -7,6 +7,7 @@ import {
   EngineNotInitializedError,
   EventChannel,
   InvalidInputError,
+  MAX_RENDER_SCALE,
   ReplacementMode,
   type EngineContext,
   REPLACEMENT_FONT_HEIGHT_RATIO,
@@ -489,6 +490,103 @@ describe("RenderEngine — edge cases", () => {
       expect.stringContaining("doc-unloaded"),
       expect.objectContaining({ documentId: "doc-unloaded" }),
     );
+  });
+
+  it("invalid RENDER_REQUESTED scale leaves the current scale untouched", async () => {
+    const docId = "doc-current-scale-invalid";
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+    );
+    const realCtx = createEngineContextWithRealBus();
+    await engine.init(realCtx);
+    await engine.loadDocument(docId, createValidBuffer());
+
+    let renderFinished = false;
+    realCtx.bus.on(EventChannel.Render, EngineEvents.RENDER_FINISHED, () => {
+      renderFinished = true;
+    });
+    realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+      documentId: docId,
+      pageIndices: [0],
+      mode: "preview",
+      kind: "anonymized",
+      scale: 1.5,
+    });
+    await vi.waitFor(() => expect(renderFinished).toBe(true));
+    // Acceso de caja blanca al Map privado — mismo criterio que
+    // `engine["documents"]` más abajo en este archivo (`loadDocument twice
+    // replaces previous proxy`). `currentScaleKey` no se exporta (helper de
+    // módulo, no público): se reconstruye a mano con el mismo formato
+    // (`${documentId}:${kind}`, ver su comentario en `render.engine.ts`).
+    const currentScale = engine["currentPreviewScale"] as Map<string, number>;
+    expect(currentScale.get(`${docId}:anonymized`)).toBe(1.5);
+
+    const warnSpy = vi.spyOn(realCtx.logger, "warn");
+    realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+      documentId: docId,
+      pageIndices: [0],
+      mode: "preview",
+      kind: "anonymized",
+      scale: MAX_RENDER_SCALE + 1, // fuera de rango — ADR-037 §2.
+    });
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("scale fuera de rango"),
+      expect.objectContaining({ documentId: docId }),
+    );
+    // La vigente sigue en 1.5 — el pedido inválido no la tocó.
+    expect(currentScale.get(`${docId}:anonymized`)).toBe(1.5);
+  });
+
+  it("current scale is cleared on unload and reload", async () => {
+    const docId = "doc-current-scale-cleared";
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+    );
+    const realCtx = createEngineContextWithRealBus();
+    await engine.init(realCtx);
+    await engine.loadDocument(docId, createValidBuffer());
+
+    let renderFinished = false;
+    realCtx.bus.on(EventChannel.Render, EngineEvents.RENDER_FINISHED, () => {
+      renderFinished = true;
+    });
+    realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+      documentId: docId,
+      pageIndices: [0],
+      mode: "preview",
+      kind: "anonymized",
+      scale: 1.5,
+    });
+    await vi.waitFor(() => expect(renderFinished).toBe(true));
+    const currentScale = engine["currentPreviewScale"] as Map<string, number>;
+    expect(currentScale.get(`${docId}:anonymized`)).toBe(1.5);
+
+    await engine.unloadDocument(docId);
+    expect(currentScale.has(`${docId}:anonymized`)).toBe(false);
+
+    // Recarga: vuelve a fijar la vigente, y una SEGUNDA recarga la borra de
+    // nuevo (loadDocument también pasa por `clearDocumentState`).
+    renderFinished = false;
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+    );
+    await engine.loadDocument(docId, createValidBuffer());
+    realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+      documentId: docId,
+      pageIndices: [0],
+      mode: "preview",
+      kind: "anonymized",
+      scale: 1.5,
+    });
+    await vi.waitFor(() => expect(renderFinished).toBe(true));
+    expect(currentScale.get(`${docId}:anonymized`)).toBe(1.5);
+
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+    );
+    await engine.loadDocument(docId, createValidBuffer());
+    expect(currentScale.has(`${docId}:anonymized`)).toBe(false);
   });
 
   it("loadDocument twice replaces previous proxy", async () => {

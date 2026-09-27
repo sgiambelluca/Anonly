@@ -237,6 +237,89 @@ describe("PreviewRenderScheduler", () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
   });
 
+  it("higher-priority waiter gets the next free slot", async () => {
+    const scheduler = new PreviewRenderScheduler<string>(1);
+    const ctx = createEngineContext();
+
+    const dispatchOrder: string[] = [];
+    const blockerControl = createControlled<string>();
+    const blockerRunJob = vi.fn(() => {
+      dispatchOrder.push("blocker");
+      return blockerControl.promise;
+    });
+    const blocker = scheduler.schedule("blocker", 20, ctx, blockerRunJob, () => {});
+    await vi.waitFor(() => expect(blockerRunJob).toHaveBeenCalledTimes(1));
+
+    // Tres claves de prioridad 20 quedan esperando turno — el único slot
+    // sigue ocupado por "blocker".
+    const lowKeys = ["low-a", "low-b", "low-c"];
+    const lowPromises = lowKeys.map((key) => {
+      const runJob = vi.fn(() => {
+        dispatchOrder.push(key);
+        return Promise.resolve(key);
+      });
+      return scheduler.schedule(key, 20, ctx, runJob, () => {});
+    });
+    // Deja correr los microtasks de `runDispatchLoop` para las tres — deben
+    // quedar encoladas, no despachadas (el slot sigue tomado).
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(dispatchOrder).toEqual(["blocker"]);
+
+    // Una solicitud de prioridad 70 llega DESPUÉS de que las tres de
+    // prioridad 20 ya estaban en la cola.
+    const highRunJob = vi.fn(() => {
+      dispatchOrder.push("high");
+      return Promise.resolve("high");
+    });
+    const highPromise = scheduler.schedule("high", 70, ctx, highRunJob, () => {});
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(dispatchOrder).toEqual(["blocker"]); // todavía nadie más despachó.
+
+    // Libera el único slot: a quien le toca el turno es "high" (prioridad
+    // 70), no "low-a" (prioridad 20, aunque encoló primero).
+    blockerControl.resolve("blocker-done");
+    await blocker;
+    await vi.waitFor(() => expect(dispatchOrder).toEqual(["blocker", "high"]));
+
+    // Deja drenar el resto: entre iguales, FIFO por orden de llegada.
+    await Promise.all([...lowPromises, highPromise]);
+    expect(dispatchOrder).toEqual(["blocker", "high", "low-a", "low-b", "low-c"]);
+  });
+
+  it("cancelled waiter leaves the queue without leaking a slot", async () => {
+    const scheduler = new PreviewRenderScheduler<string>(1);
+    const abortController = new AbortController();
+    const ctxAbortable = createEngineContext({ abortSignal: abortController.signal });
+    const ctx = createEngineContext();
+
+    const blockerControl = createControlled<string>();
+    const blockerRunJob = vi.fn(() => blockerControl.promise);
+    void scheduler.schedule("blocker", 20, ctx, blockerRunJob, () => {});
+    await vi.waitFor(() => expect(blockerRunJob).toHaveBeenCalledTimes(1));
+
+    // "cancelled" encola bajo un signal que va a abortar mientras espera.
+    const cancelledRunJob = vi.fn(() => Promise.resolve("should-not-run"));
+    const cancelled = scheduler.schedule("cancelled", 20, ctxAbortable, cancelledRunJob, () => {});
+
+    // "behind" encola justo después, misma prioridad, un signal que nunca aborta.
+    const behindRunJob = vi.fn(() => Promise.resolve("behind-done"));
+    const behind = scheduler.schedule("behind", 20, ctx, behindRunJob, () => {});
+
+    abortController.abort();
+    await expect(cancelled).rejects.toThrow(CancelledError);
+    expect(cancelledRunJob).not.toHaveBeenCalled();
+
+    // Libera el slot: tiene que ir a "behind" — ni se queda colgado en la
+    // entrada cancelada (bloquearía la cola) ni el slot queda sin otorgar
+    // (fuga).
+    blockerControl.resolve("blocker-done");
+    await expect(behind).resolves.toBe("behind-done");
+    expect(behindRunJob).toHaveBeenCalledTimes(1);
+  });
+
   it("wakes a reservation blocked waiting for a free slot when the signal aborts, instead of hanging forever", async () => {
     const scheduler = new PreviewRenderScheduler<string>(1);
     const abortController = new AbortController();

@@ -43,15 +43,22 @@
  *   detectando el caso que sí importa (una generación que cambia mientras
  *   `runJob` está GENUINAMENTE en vuelo, ver el test de generación vieja);
  *   ver el comentario puntual en `runDispatchLoop`.
- * - Concurrencia acotada por un semáforo simple (`reserve`/`release`),
- *   calcado del patrón de `LiveImageBudget` (`ocr-engine/src/ocr.engine.ts`,
- *   ADR-143 §3/§6, commit `bf6aa7f`): reserva cancelable que se despierta con
- *   `ctx.abortSignal` vía polling + listener de `abort`, nunca una espera
- *   ciega sin salida. No se reusa `LiveImageBudget` en sí (paquetes de motor
- *   distintos, P-1 prohíbe importar entre ellos) ni
+ * - Concurrencia acotada por un semáforo con **cola de admisión** (ADR-144
+ *   §7): cuando no hay slot libre, la reserva encola un waiter en vez de
+ *   pollear. `release()` despierta exactamente al siguiente waiter elegible
+ *   — el de **mayor prioridad** vigente (`Math.max` ya coalescido en la
+ *   `SchedulerEntry`, leído en el momento de otorgar el slot, no al encolar:
+ *   una entrada puede bumpear su prioridad mientras espera turno) y, entre
+ *   iguales, el de **menor orden de llegada** (FIFO). Sin `setTimeout`: nadie
+ *   espera más de lo que tarda el próximo `release()` o el propio abort. Esto
+ *   es lo que hace que "el usuario que abre la página 150 durante el seed no
+ *   espera a las 149 anteriores" (ADR-144 §7) — con polling ciego a
+ *   prioridad, las 150 solicitudes competían por el mismo temporizador de 10
+ *   ms sin que la prioridad reordenara nada. No se reusa `LiveImageBudget`
+ *   (`ocr-engine/src/ocr.engine.ts`, ADR-143 §3/§6) ni
  *   `WorkerPool.waitForCapacity` (mide la cola INTERNA del pool, no
- *   despachos de este planificador) — es un contador entero de slots, no un
- *   presupuesto de bytes.
+ *   despachos de este planificador) — paquetes de motor distintos, P-1
+ *   prohíbe importar entre ellos, y ninguno de los dos ordena por prioridad.
  *
  * Baja de documento (ADR-144 §8): `clearDocument`/`clear` rechazan
  * (`CancelledError`) y borran toda entrada pendiente o en vuelo de
@@ -68,12 +75,18 @@
 
 import { CancelledError, type EngineContext } from "@anonly/shared";
 
-// Mismo paso de polling que `LiveImageBudget` (ocr-engine) y
-// `WorkerPool.waitForCapacity` (05_Worker_Architecture.md §6.3) — no es una
-// medición propia, es consistencia de estilo. Constante propia porque los
-// paquetes de motor no se importan entre sí (P-1): no se reusa la de
-// `ocr-engine`.
-const SCHEDULER_POLL_INTERVAL_MS = 10;
+/**
+ * Waiter en la cola de admisión de `reserve()` (ADR-144 §7). `getPriority`
+ * lee la prioridad VIGENTE de la entrada en el momento de otorgar el slot —
+ * no un valor congelado al encolar — para que un bump de prioridad mientras
+ * el waiter espera turno (coalescencia sobre la misma clave) se refleje sin
+ * que el waiter tenga que volver a encolarse.
+ */
+interface QueuedWaiter {
+  readonly arrivalSeq: number;
+  readonly getPriority: () => number;
+  readonly grant: () => void;
+}
 
 interface SchedulerEntry<T> {
   generation: number;
@@ -107,6 +120,11 @@ function createDeferred<T>(): {
 export class PreviewRenderScheduler<T> {
   private readonly entries = new Map<string, SchedulerEntry<T>>();
   private activeCount = 0;
+  // Cola de admisión (ADR-144 §7): waiters sin slot todavía, en orden de
+  // llegada de inserción — el orden de GRANT no es el de este array, se
+  // decide en `pickNextWaiterIndex` por (prioridad desc, arrivalSeq asc).
+  private readonly waiters: QueuedWaiter[] = [];
+  private nextArrivalSeq = 0;
 
   constructor(private readonly maxConcurrency: number) {}
 
@@ -170,8 +188,11 @@ export class PreviewRenderScheduler<T> {
     for (;;) {
       try {
         // ADR-144 §4: el cupo se reserva ANTES de despachar, nunca se
-        // comprueba-y-después-se-toma.
-        await this.reserve(ctx.abortSignal, key);
+        // comprueba-y-después-se-toma. La prioridad se lee en vivo
+        // (`() => entry.priority`, no `entry.priority` congelado acá) para
+        // que un bump por coalescencia mientras este waiter espera turno
+        // cuente en el momento de otorgar el slot (§7).
+        await this.reserve(ctx.abortSignal, key, () => entry.priority);
       } catch (err) {
         this.settleRejected(key, entry, err);
         return;
@@ -259,38 +280,85 @@ export class PreviewRenderScheduler<T> {
     }
   }
 
-  // ─── Semáforo de despachos en vuelo (ADR-144 §4) — mismo patrón que
-  // `LiveImageBudget` (ocr-engine/src/ocr.engine.ts, ADR-143 §3/§6): reserva
-  // cancelable, sin polling ciego sin salida. Acá es un contador entero de
-  // slots en vez de un presupuesto de bytes. ───
+  // ─── Semáforo de despachos en vuelo con cola de admisión (ADR-144 §4/§7) ───
 
-  private async reserve(signal: AbortSignal, jobId: string): Promise<void> {
-    for (;;) {
-      if (signal.aborted) throw new CancelledError(jobId);
-      if (this.activeCount < this.maxConcurrency) {
-        this.activeCount += 1;
-        return;
-      }
-      await this.waitForChangeOrAbort(signal);
+  /**
+   * Reserva un slot para `jobId`. Si hay uno libre, lo toma de inmediato
+   * (síncrono salvo el `Promise.resolve()` de retorno) — sin encolar, así
+   * que nunca compite por orden con nadie. Si no hay slot libre, encola un
+   * waiter y devuelve una promesa que `release()` resuelve cuando le toca el
+   * turno (por prioridad, ver `pickNextWaiterIndex`), o que el propio abort
+   * rechaza — nunca queda colgada.
+   */
+  private reserve(signal: AbortSignal, jobId: string, getPriority: () => number): Promise<void> {
+    if (signal.aborted) return Promise.reject(new CancelledError(jobId));
+    if (this.activeCount < this.maxConcurrency) {
+      this.activeCount += 1;
+      return Promise.resolve();
     }
+
+    return new Promise<void>((resolve, reject) => {
+      // `arrivalSeq` se captura ANTES de armar `onAbort`/`waiter` — así
+      // `onAbort` busca por `arrivalSeq` (identidad estable) en vez de
+      // cerrar sobre el propio objeto `waiter`, que rompería el orden de
+      // declaración (necesitaría `waiter` antes de que exista).
+      const arrivalSeq = this.nextArrivalSeq;
+      this.nextArrivalSeq += 1;
+      const onAbort = (): void => {
+        const idx = this.waiters.findIndex((w) => w.arrivalSeq === arrivalSeq);
+        // Si ya no está en la cola, ya se le otorgó el slot (o ya fue
+        // rechazado por otro camino) — no-op, no se toca una promesa
+        // asentada (mismo criterio que `settleRejected`).
+        if (idx === -1) return;
+        this.waiters.splice(idx, 1);
+        reject(new CancelledError(jobId));
+      };
+      const grant = (): void => {
+        signal.removeEventListener("abort", onAbort);
+        resolve();
+      };
+      const waiter: QueuedWaiter = { arrivalSeq, getPriority, grant };
+      signal.addEventListener("abort", onAbort, { once: true });
+      this.waiters.push(waiter);
+    });
   }
 
   private release(): void {
     this.activeCount -= 1;
+    this.grantNextWaiter();
   }
 
-  private waitForChangeOrAbort(signal: AbortSignal): Promise<void> {
-    if (signal.aborted) return Promise.resolve();
-    return new Promise((resolve) => {
-      const timer = setTimeout(() => {
-        signal.removeEventListener("abort", onAbort);
-        resolve();
-      }, SCHEDULER_POLL_INTERVAL_MS);
-      const onAbort = (): void => {
-        clearTimeout(timer);
-        resolve();
-      };
-      signal.addEventListener("abort", onAbort, { once: true });
-    });
+  /**
+   * Otorga el slot que `release()` acaba de liberar al waiter elegible: el
+   * de mayor prioridad vigente y, entre iguales, el de menor `arrivalSeq`
+   * (FIFO). Sin `setTimeout` — se resuelve inmediato con lo que hay en la
+   * cola en este instante.
+   */
+  private grantNextWaiter(): void {
+    if (this.activeCount >= this.maxConcurrency) return;
+    const idx = this.pickNextWaiterIndex();
+    if (idx === null) return;
+    const waiter = this.waiters[idx];
+    if (waiter === undefined) return;
+    this.waiters.splice(idx, 1);
+    this.activeCount += 1;
+    waiter.grant();
+  }
+
+  private pickNextWaiterIndex(): number | null {
+    if (this.waiters.length === 0) return null;
+    let bestIdx = 0;
+    for (let i = 1; i < this.waiters.length; i += 1) {
+      const best = this.waiters[bestIdx];
+      const candidate = this.waiters[i];
+      if (best === undefined || candidate === undefined) continue;
+      const bestPriority = best.getPriority();
+      const candidatePriority = candidate.getPriority();
+      const candidateWins =
+        candidatePriority > bestPriority ||
+        (candidatePriority === bestPriority && candidate.arrivalSeq < best.arrivalSeq);
+      if (candidateWins) bestIdx = i;
+    }
+    return bestIdx;
   }
 }
