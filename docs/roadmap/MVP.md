@@ -673,6 +673,14 @@ workflow en CI sigue pendiente.
 - ~~Verificación de integridad en runtime de modelos/wasm (`crypto.subtle.digest` contra `assets.lock.json`, ADR-018 punto 3) en `ocr-engine` y `ner-engine`; hash mismatch → `OCR_MODEL_MISSING` / `NER_MODEL_LOAD_FAILED`. Incluye test de integridad: asset con hash alterado → error tipado, no se carga.~~ **Retirado por ADR-187 (2026-09-26)**: el verificador vive junto a los assets, fuera del `asar`, así que no cubre la manipulación después de instalar; exigiría además `fetch` desde el Core y una copia transitoria del modelo de NER. Esa amenaza la cubre la firma de código del instalador (Hito 11.5).
 - Audit `pnpm audit`.
 - Bundle size check.
+- **ABIERTO, BLOQUEANTE para la ronda B y para el merge — riesgo de fuga silenciosa en páginas escaneadas escasas (revisión de la ronda A, 2026-09-27).**
+  - Qué pasa: en una página con muy poco texto (dos líneas), el OSD de `orientation-kernel.ts` puede elegir un ángulo equivocado con confianza ≥ 1. `MIN_ORIENTATION_CONFIDENCE = 1` es muy bajo: ADR-119 §4 midió entre 1 y 2 de confianza con 0 de 4 ángulos acertados.
+  - Por qué es silencioso: el reconocimiento devuelve 0 palabras, se emite `OCR_PAGE_FINISHED { wordCount: 0 }` y no `OCR_PAGE_FAILED`, así que la UI no avisa nada. Una página de firma o un encabezado con solo un nombre y un DNI puede salir sin anonimizar.
+  - Origen: es anterior a esta branch (ADR-090/119, 2026-09-02) y es del bloque B5.
+  - Qué se pide: un ADR con cuatro partes: medir el OSD en páginas escasas; un fallback a 0° cuando el ángulo elegido da 0 palabras o muchas menos; una señal visible de "página con tinta sin texto reconocido" (cambio de contrato); y un fixture de regresión de punta a punta.
+  - Contradicción que el ADR tiene que resolver midiendo: `OCR_Engine.md` §13 caso 13 supone que una página escasa cae por debajo del piso de confianza.
+- **ABIERTO — aceptado sin implementar (anotado 2026-09-26, revisión de la ronda A, O-5).** Gate de export verificado leyendo el PDF exportado (ADR-148): rasterizar y pasar OCR al archivo exportado, con control sin anonimizar, prueba de geometría y prueba de extremo a extremo. ADR-148 §1 pide que su comando entre en `07_Performance_Strategy.md` §11.4 y en el workflow **en el mismo cambio que lo crea**, así que hasta entonces no figura en esa tabla.
+- **Implementación de ADR-149 §1 en CI (revisión de la ronda A, B-4).** Cancel: quitar el salteo "si existe la carpeta corre" y exigir un mínimo de tests ejecutados. Performance, Leak y Stress: lo mismo, pero antes hay que definir qué specs forman el gate de cada job, porque `tests/perf/` también contiene los arneses de campaña. Va en la ronda C de `Revision_Por_Bloques_Hardening.md`.
 
 ### Hito 11.5 — Escritorio (ADR-130, ADR-131, ADR-132)
 

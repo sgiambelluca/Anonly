@@ -27,6 +27,8 @@ En `grouping-engine`, `GROUP_TOGGLED` y `GROUP_REPLACEMENT_CHANGED` tienen **un 
 
 Además, `rememberInput` corre **síncrono** al comienzo de `renderPageInternal` (antes de cualquier `await`): una invocación directa de `renderPage` con reemplazos reales puebla `lastAnonymizedInputs` en el mismo tick, y las reconstrucciones de `RENDER_REQUESTED` posteriores parten de ese input. No hace falta tocar la reconstrucción.
 
+> **Nota del 2026-09-26 (ADR-189).** Los renders mediados siguen sin llevar escala, pero `RenderEngine` los dibuja a la escala vigente del lado anonimizado (la del último `RENDER_REQUESTED` del visor) y nunca emite un resultado a una escala obsoleta. Antes caían a `previewScale` y, con zoom distinto de 100%, una edición dejaba la página borrosa.
+
 ## Decisión
 
 ### 1. El Orchestrator media los eventos de estado de grupos hacia Render

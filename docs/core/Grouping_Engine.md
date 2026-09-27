@@ -576,6 +576,8 @@ Fixtures: `tests/fixtures/text-10p.pdf` con entidades conocidas que generan grup
 
 > **Regla de tests del léxico (ADR-069 §7)**: las tablas sintéticas armadas a mano siguen siendo válidas para probar el **orden de los pasos** de la inferencia (ADR-060 §4), donde la tabla es el fixture del algoritmo. Pero **todo enunciado sobre qué contesta el léxico** —iniciales, ambiguos, compuestos, un nombre que resuelve `f`— exige un test contra el **artefacto commiteado**, que es el único que corre en producción. La lista original de esta sección se cubría entera con léxicos de dos entradas inventados por test, y por eso el PR 11 pasó todos los gates mientras `"J. Pérez"` resolvía masculino contra la tabla real. Corolario para los docs: ningún ejemplo con nombre propio entra a un spec o a un ADR sin verificarse antes contra la fuente.
 
+> **Filas `perf opt-in`.** Las filas cuyo archivo es un script de `tests/perf/` y cuyo tipo es `perf opt-in` describen **qué tiene que cubrir el arnés**; no son tests de Vitest ni identificadores de Playwright, así que su texto no se exige como nombre literal. Esos arneses se corren a mano (`tests/perf/README.md`), no forman parte de `pnpm test` y no son gate. Las demás filas sí son nombres exactos de test.
+
 ---
 
 ## 15. Checklist de implementación

@@ -45,6 +45,8 @@ El usuario espera todo el escaneo y, al final, entra a un panel vacío que se
 llena. La página 1 está lista desde los 100 ms: lo único que falta es que
 alguien la haya pedido.
 
+> **Nota del 2026-09-26 (ADR-189).** El precalentado corre solo en el **primer** `Ready` de cada documento; antes se repetía en cada `Ready` posterior a una edición. Además, un preview sin escala explícita ya no cae siempre a `previewScale`: sigue la escala vigente del lado que se ve.
+
 ## Decisión
 
 ### 1. La página 1 se precalienta **al terminar el escaneo**, no al empezarlo

@@ -446,6 +446,8 @@ Casos de fragmentos y de la tabla de patrones (ADR-074, ADR-075):
 
 Fixtures: `tests/fixtures/text-10p.pdf` (con DNIs, CUITs, emails, teléfonos conocidos).
 
+> **Filas `perf opt-in`.** Las filas cuyo archivo es un script de `tests/perf/` y cuyo tipo es `perf opt-in` describen **qué tiene que cubrir el arnés**; no son tests de Vitest ni identificadores de Playwright, así que su texto no se exige como nombre literal. Esos arneses se corren a mano (`tests/perf/README.md`), no forman parte de `pnpm test` y no son gate. Las demás filas sí son nombres exactos de test.
+
 ---
 
 ## 15. Checklist de implementación

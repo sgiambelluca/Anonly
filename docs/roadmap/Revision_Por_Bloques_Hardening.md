@@ -183,6 +183,7 @@ veces.
   - E2E de orientación física.
 - **Leer:** ADR-164, ADR-165; `OCR_Engine.md` (contrato de orientación y errata de la franja rotada); `Contracts.md`; `05_Worker_Architecture.md`.
 - **Foco:**
+  - **bloqueante heredado de la ronda A:** el riesgo de fuga silenciosa del OSD en páginas escasas (`MVP.md`, Hito 11). La ronda B no cierra sin el ADR correspondiente y su implementación, o sin una decisión explícita del humano;
   - el ciclo de vida del pool de orientación (alta, baja, cancelación);
   - que las réplicas de `WorkerJobType` coincidan con la fuente;
   - el mapeo de coordenadas en páginas rotadas;
@@ -299,7 +300,7 @@ veces.
 |---|---|---|---|---|---|
 | — | E1 | Exceptuado (APPROVED en el Hito 12.5) | — | — | |
 | — | E2 | Exceptuado (APPROVED 2026-09-26) | 2 | — | |
-| A | B1, B2, B7 | En revisión (desde 2026-09-26) | | | |
+| A | B1, B2, B7 | **APPROVED** (2026-09-27) | 3 (R1 REJECTED 7 B / 6 O; R2 B2 y B7 APPROVED, B1 REJECTED por B-5; R3 APPROVED) | ver el commit de cierre de la ronda A | O-1 → ADR-189; B-4 de Performance/Leak/Stress → ronda C; riesgo de OSD en páginas escasas → bloqueante de la ronda B |
 | B | B4, B5, B6 | Pendiente | | | |
 | C | B3, B8 | Pendiente | | | |
 | D | B9, B10 | Pendiente | | | |
@@ -318,6 +319,33 @@ veces.
    del humano).
 4. Con la branch en `main`, siguen los pasos de SignPath
    (`SignPath_Postulacion.md` §2).
+
+## 6. Residuos registrados
+
+Hallazgos que no se pueden corregir sin reescribir la historia. Se dejan
+asentados, al estilo de ADR-124, en lugar de reescribirla.
+
+**Ronda A (O-6):**
+
+- **Commits que tocan archivos fuera de su módulo (R-1):**
+  - `cd622d4`: pdf-engine y `tests/integration/fixtures/mocks.ts`;
+  - `3a4b58b`: regex-engine y cinco archivos de `tests/perf`, incluidos `.py` y `.sh`;
+  - `defa7a2`: grouping-engine y cinco archivos de `tests/perf`.
+
+  En los tres casos, lo que queda afuera es el fixture o el arnés que mide
+  ese mismo cambio.
+- **Scope en el mensaje del commit (R-17).** Nueve commits llevan un scope
+  convencional en el mensaje, por ejemplo `fix(pdf-engine):` o
+  `feat(react-client):`.
+- **Plan de campaña fuera del repo.** El "plan de campaña de hardening" que
+  citan ADR-140 a ADR-151 ("resolviendo D-0x…") no está en el repo. Por eso
+  la declaración previa que exige ADR-124 §1 no se puede verificar desde acá.
+  Las decisiones sí están completas en cada ADR.
+- **R-21 no verificable.** Varios commits de implementación editan specs y
+  llevan `Co-Authored-By` de un modelo implementador. El repo no permite
+  saber quién editó el spec, así que R-21 no se puede verificar a posteriori.
+  Los arreglos de esta revisión sí respetan el reparto: los specs los edita el
+  planificador.
 
 ## Apéndice — commits por bloque
 
