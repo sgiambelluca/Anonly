@@ -1010,6 +1010,48 @@ describe("NerEngine — unit tests", () => {
 
       expect(releaseListener).toBeUndefined();
     });
+
+    // O-8: `dispose()` desuscribe (test de arriba); sin re-suscribir en
+    // `init()`, un segundo ciclo init→processPage→release dejaba
+    // `modelWarm` sin resetear para siempre — la baja del pool quedaba
+    // muda a partir del primer dispose(), no solo hasta el próximo.
+    it("re-subscribes on a second init() after dispose(), so a later release still resets modelWarm", async () => {
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockTokenClassificationPipeline(() => Promise.resolve([])),
+      );
+      let releaseListener: (() => void) | undefined;
+      const pool = {
+        dispatch: <T>(params: NerPoolDispatchParams<T>): Promise<T> => {
+          params.onProgress?.(1, { phase: "model-ready", modelId: "test-model-resubscribe" });
+          return params.run();
+        },
+        onWorkersReleased: (listener: () => void): (() => void) => {
+          releaseListener = listener;
+          return () => {
+            releaseListener = undefined;
+          };
+        },
+      };
+      const pooledEngine = new NerEngine(pool);
+
+      await pooledEngine.init(ctx);
+      await pooledEngine.processPage(makeNerPageInput("doc-resub-1", 0, ["Juan"]), ctx);
+      expect(pooledEngine.isModelReady()).toBe(true);
+
+      await pooledEngine.dispose();
+      expect(releaseListener).toBeUndefined();
+
+      await pooledEngine.init(ctx);
+      await pooledEngine.processPage(makeNerPageInput("doc-resub-2", 0, ["Pérez"]), ctx);
+      expect(pooledEngine.isModelReady()).toBe(true);
+      expect(releaseListener).toBeDefined();
+
+      releaseListener?.();
+
+      expect(pooledEngine.isModelReady()).toBe(false);
+
+      await pooledEngine.dispose();
+    });
   });
 
   it("deserialized NER_TIMEOUT is retried; deserialized NER_MODEL_MISSING aborts", async () => {

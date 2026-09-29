@@ -533,7 +533,11 @@ export class NerEngine implements IEngine {
   readonly id = EngineId.Ner;
 
   private readonly pool: NerJobPool;
-  private readonly unsubscribeFromPool: () => void;
+  // O-8: no `readonly` — `init()` la reasigna al re-suscribirse tras un
+  // `dispose()` (que se desuscribió). `subscribedToPool` evita duplicar la
+  // suscripción si `init()` corre dos veces sin `dispose()` en el medio.
+  private unsubscribeFromPool: () => void;
+  private subscribedToPool = false;
 
   private ctx: EngineContext | null = null;
   private modelId: string | null = null;
@@ -563,7 +567,12 @@ export class NerEngine implements IEngine {
    */
   constructor(pool?: NerJobPool) {
     this.pool = pool ?? IMMEDIATE_POOL;
-    this.unsubscribeFromPool = this.pool.onWorkersReleased(() => {
+    this.unsubscribeFromPool = this.subscribeToPoolReleases();
+  }
+
+  private subscribeToPoolReleases(): () => void {
+    this.subscribedToPool = true;
+    return this.pool.onWorkersReleased(() => {
       this.modelWarm = false;
     });
   }
@@ -574,6 +583,14 @@ export class NerEngine implements IEngine {
     this.modelWarm = false;
     this.initialized = true;
     this.disposed = false;
+    // O-8: `dispose()` se desuscribe de `onWorkersReleased` (ADR-167 §3);
+    // sin esto, un `init()` posterior a un `dispose()` dejaba una baja del
+    // pool sin efecto sobre `modelWarm` para siempre. `subscribedToPool`
+    // evita duplicar la suscripción si `init()` corre dos veces seguidas
+    // sin `dispose()` en el medio.
+    if (!this.subscribedToPool) {
+      this.unsubscribeFromPool = this.subscribeToPoolReleases();
+    }
     // Caso 11 (§13) / principio "Lazy loading" (§2): init NO carga el
     // modelo. Solo se carga en el primer processPage/processPages real,
     // dentro del kernel, cuando ner.enabled === true y hay texto.
@@ -780,7 +797,10 @@ export class NerEngine implements IEngine {
     if (kernelModule !== undefined) await (await kernelModule).kernelDispose();
     // ADR-167 §3: se desuscribe de onWorkersReleased — una baja del pool
     // después de dispose() no debe tocar el estado de esta instancia.
+    // `subscribedToPool = false` (O-8) para que un `init()` posterior
+    // re-suscriba en vez de dejar la baja sin efecto para siempre.
     this.unsubscribeFromPool();
+    this.subscribedToPool = false;
     this.modelWarm = false;
     this.disposed = true;
     this.initialized = false;
