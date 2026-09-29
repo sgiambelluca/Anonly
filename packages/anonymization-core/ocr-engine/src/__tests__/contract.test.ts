@@ -257,7 +257,14 @@ describe("OcrEngine — contract tests", () => {
   // ─── ADR-045 §2/§4/§5 — puerto interno OcrJobPool ───
 
   it("dispatch uses maxRetriesOverride 0 (pool never retries ocr-page)", async () => {
-    vi.mocked(createWorker).mockResolvedValue(mockTesseractWorker(mockEmptyRecognizeData()));
+    // ADR-190 §2: una palabra fiable evita que la cadena de verificación
+    // despache reconocimientos adicionales — este test mide UN despacho, no
+    // la cadena completa (que tiene sus propios tests dedicados).
+    vi.mocked(createWorker).mockResolvedValue(
+      mockTesseractWorker(
+        mockRecognizeData([{ text: "x", confidence: 95, bbox: { x0: 0, y0: 0, x1: 5, y1: 5 } }]),
+      ),
+    );
 
     const pool = createTrackingOcrPool();
     const pooledEngine = new OcrEngine(pool);
@@ -395,5 +402,43 @@ describe("OcrEngine — contract tests", () => {
     const outputs = await engine.processPages(inputs, tightCtx);
 
     expect(outputs.length).toBe(1);
+  });
+
+  // Caso 46 (§13), ADR-190 §4-§5: una página ENTERA con tinta que termina la
+  // cadena de verificación sin lectura fiable lleva `unreadableInk: true`, no
+  // emite `OCR_PAGE_FAILED`, y entrega la mejor lectura obtenida (aunque sean
+  // cero palabras). `orientationPool` inyectado a mano para que `inkRatio` no
+  // comparta el stub de píxeles con las franjas de margen (mismo criterio que
+  // "cadena de verificación (ADR-190 §2)" en unit.test.ts).
+  it("an unreadable page with ink finishes with unreadableInk", async () => {
+    vi.mocked(createWorker).mockResolvedValue(mockTesseractWorker(mockEmptyRecognizeData()));
+    const fakeOrientationPool = {
+      dispatch: (): Promise<unknown> =>
+        Promise.resolve({ orientation: 0, inkRatio: 1, osdHadVerdict: true }),
+      releaseIdleWorkers: (): boolean => false,
+    };
+    const pooledEngine = new OcrEngine(undefined, fakeOrientationPool);
+    await pooledEngine.init(ctx);
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+
+    const output = await pooledEngine.processPage(
+      createValidOcrPageInput("doc-190-unreadable", 0),
+      ctx,
+    );
+
+    expect(output.words).toEqual([]); // la mejor lectura obtenida: cero palabras
+    const failed = busEmitSpy.mock.calls.some(
+      ([channel, event]) => channel === EventChannel.Ocr && event === EngineEvents.OCR_PAGE_FAILED,
+    );
+    expect(failed).toBe(false);
+    const finished = busEmitSpy.mock.calls.find(
+      ([channel, event]) =>
+        channel === EventChannel.Ocr && event === EngineEvents.OCR_PAGE_FINISHED,
+    );
+    expect(finished).toBeDefined();
+    expect((finished?.[2] as { readonly unreadableInk?: true } | undefined)?.unreadableInk).toBe(
+      true,
+    );
+    await pooledEngine.dispose();
   });
 });

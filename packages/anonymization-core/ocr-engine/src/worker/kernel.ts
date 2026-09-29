@@ -3,7 +3,9 @@
  * al OcrWorker (espejo de `render-engine/src/worker/kernel.ts`, ADR-043).
  * Contiene TODO lo que toca `tesseract.js`: setup first-party (ADR-018),
  * reconocimiento con timeout/abort racing, extracción defensiva de
- * palabras/confidence, conversión `ImageData` → `OffscreenCanvas`.
+ * palabras/confidence, decodificación parcial de `EncodedPageImage` con
+ * `createImageBitmap` (franjas de margen recortadas; el camino común con
+ * orientación 0 no decodifica página completa, ADR-160).
  *
  * Este archivo lo importan DOS consumidores (mismo código, dos fronteras):
  * - `ocr.engine.ts` (host, in-process fallback): lo invoca directo desde el
@@ -40,6 +42,7 @@ import { createWorker, PSM } from "tesseract.js";
 
 import { OcrModelMissingError, OcrPageFailedError, OcrTimeoutError } from "../ocr.errors.js";
 
+import { isPixelPresent } from "./ink-predicate.js";
 import {
   resolveTesseractPath,
   TESSERACT_CORE_PATH,
@@ -135,18 +138,6 @@ type TesseractWorker = Awaited<ReturnType<typeof createWorker>>;
  */
 const PAGE_SEG_MODE = PSM.SPARSE_TEXT;
 
-/*
- * ADR-119 §2: la detección de orientación corre sobre el raster a MEDIA
- * escala. No es una optimización oportunista — es lo que hace que arreglar
- * OSD no cueste tiempo: 290 ms por página contra los 690 a escala completa, y
- * contra los 506 que hoy se pagan por una detección que no funciona.
- *
- * El barrido dice también por qué no bajar más. A 0,35 sigue acertando pero la
- * confianza cae a 1-2, pegada al piso; a 0,25 **acierta cero veces y sigue
- * devolviendo 1-2**, o sea por encima del piso. El modo de falla de un OSD mal
- * alimentado no es "no contesta", es "contesta mal con confianza suficiente",
- * y contra eso el piso no protege: protege el margen.
- */
 /** Instancia de tesseract cargada, y el set de idiomas con el que se cargó. */
 let worker: TesseractWorker | null = null;
 let loadedLanguages: ReadonlySet<string> = new Set();
@@ -192,7 +183,8 @@ async function ensureWorkerLoaded(languages: ReadonlyArray<string>): Promise<voi
      * `orientation_degrees: 0, orientation_confidence: 0` **siempre** —
      * medido sobre dos documentos y cuatro orientaciones cada uno—, y el piso
      * de confianza lo descarta. Para que conteste hace falta que el OEM sea
-     * legacy, y eso es incompatible con reconocer: ver `ensureOsdWorkerLoaded`.
+     * legacy, y eso es incompatible con reconocer: ver `createOrientationKernel`
+     * en `orientation-kernel.ts`, donde vive ese worker aparte (ADR-119 §1).
      */
     nextWorker = await createWorker([...languages], undefined, {
       langPath: resolveTesseractPath(TESSERACT_LANG_PATH),
@@ -268,26 +260,38 @@ function toTesseractImage(
   const canvas = new OffscreenCanvas(imageData.width, imageData.height);
   const context = canvas.getContext("2d");
   if (context === null) {
+    releaseCanvasBackingStore(canvas);
     throw new OcrPageFailedError(
       documentId,
       pageIndex,
       "No se pudo obtener un contexto 2D de OffscreenCanvas para convertir imageData.",
     );
   }
-  context.putImageData(imageData, 0, 0);
+  try {
+    context.putImageData(imageData, 0, 0);
+  } catch (error: unknown) {
+    releaseCanvasBackingStore(canvas);
+    throw error;
+  }
   return canvas;
 }
 
+/** Libera explícitamente el backing store del canvas cuando ningún consumidor lo usa. */
+function releaseCanvasBackingStore(canvas: OffscreenCanvas): void {
+  canvas.width = 0;
+  canvas.height = 0;
+}
+
 /*
- * ADR-158 §2/§3: `OcrPagePayload.image` llega CODIFICADA (PNG) — la decodifica
- * UNA sola vez, con `createImageBitmap`, al principio de `kernelRecognize`.
- * De acá para abajo el camino es idéntico al previo al ADR: el `ImageData`
- * resultante alimenta el reconocimiento principal, el enderezado de ADR-120 y
- * las franjas de margen de ADR-121 exactamente igual que cuando llegaba cruda
- * por transporte — la salvedad declarada en el ADR es justamente esa: el
- * worker sigue materializando una página entera de píxeles, lo que
- * desaparece es la copia que cruzaba el `postMessage` y la que retenía el
- * host.
+ * ADR-158 §2/§3 + ADR-160: `OcrPagePayload.image` llega CODIFICADA (PNG).
+ * Esta función la decodifica COMPLETA con `createImageBitmap`, pero desde
+ * ADR-160 ya no es el camino común de `kernelRecognize`: solo la llama
+ * `kernelRecognizeRotated` (orientación ≠ 0, el ~1 % de las páginas, ver más
+ * abajo), donde el enderezado de ADR-120 necesita la página entera en
+ * píxeles. El camino con orientación 0 (`kernelRecognizeUpright`) nunca pasa
+ * por acá: el reconocimiento principal usa el `Blob` directo y las franjas de
+ * margen decodifican solo su recorte (`decodeStrip`) — cero superficies de
+ * página completa.
  */
 async function decodeEncodedImage(
   image: EncodedPageImage,
@@ -319,18 +323,73 @@ async function decodeEncodedImage(
   // mismas que `maxLiveImageBytes`/`estimatedBytes` usaron para presupuestar
   // (ADR-158 §4) — no hace falta releerlas del bitmap decodificado.
   const canvas = new OffscreenCanvas(image.widthPx, image.heightPx);
-  const context = canvas.getContext("2d");
-  if (context === null) {
+  try {
+    const context = canvas.getContext("2d");
+    if (context === null) {
+      throw new OcrPageFailedError(
+        documentId,
+        pageIndex,
+        "No se pudo obtener un contexto 2D de OffscreenCanvas para decodificar la imagen.",
+      );
+    }
+    context.drawImage(bitmap, 0, 0);
+    return context.getImageData(0, 0, image.widthPx, image.heightPx);
+  } finally {
     bitmap.close();
+    releaseCanvasBackingStore(canvas);
+  }
+}
+
+/**
+ * ADR-190 §2 paso 4 / §5: agranda un `ImageData` ya decodificado (y,
+ * eventualmente, ya enderezado) por `factor`, antes de reconocer. Redibuja
+ * sobre un `OffscreenCanvas` del tamaño destino con `drawImage` — que SÍ
+ * escala, a diferencia de `putImageData` (colocación exacta sin escalado)
+ * que usan `toTesseractImage`/`decodeEncodedImage`.
+ */
+function upscaleImageData(
+  source: ImageData,
+  factor: number,
+  documentId: string,
+  pageIndex: number,
+): ImageData {
+  if (typeof OffscreenCanvas === "undefined") {
     throw new OcrPageFailedError(
       documentId,
       pageIndex,
-      "No se pudo obtener un contexto 2D de OffscreenCanvas para decodificar la imagen.",
+      "OffscreenCanvas no disponible en este entorno.",
     );
   }
-  context.drawImage(bitmap, 0, 0);
-  bitmap.close();
-  return context.getImageData(0, 0, image.widthPx, image.heightPx);
+  const sourceCanvas = new OffscreenCanvas(source.width, source.height);
+  let targetCanvas: OffscreenCanvas | undefined;
+  try {
+    const sourceContext = sourceCanvas.getContext("2d");
+    if (sourceContext === null) {
+      throw new OcrPageFailedError(
+        documentId,
+        pageIndex,
+        "No se pudo obtener un contexto 2D de OffscreenCanvas para agrandar la imagen.",
+      );
+    }
+    sourceContext.putImageData(source, 0, 0);
+
+    const targetWidth = Math.max(1, Math.round(source.width * factor));
+    const targetHeight = Math.max(1, Math.round(source.height * factor));
+    targetCanvas = new OffscreenCanvas(targetWidth, targetHeight);
+    const targetContext = targetCanvas.getContext("2d");
+    if (targetContext === null) {
+      throw new OcrPageFailedError(
+        documentId,
+        pageIndex,
+        "No se pudo obtener un contexto 2D de OffscreenCanvas para agrandar la imagen.",
+      );
+    }
+    targetContext.drawImage(sourceCanvas, 0, 0, targetWidth, targetHeight);
+    return targetContext.getImageData(0, 0, targetWidth, targetHeight);
+  } finally {
+    releaseCanvasBackingStore(sourceCanvas);
+    if (targetCanvas !== undefined) releaseCanvasBackingStore(targetCanvas);
+  }
 }
 
 function clampConfidence(value: number): number {
@@ -465,46 +524,6 @@ export function unrotateBbox(
   };
 }
 
-/**
- * ADR-119 §1: worker dedicado a la detección de orientación.
- *
- * `oem: 0` (legacy) es el punto entero de que exista aparte. Con el OEM por
- * default —LSTM— `detect()` no tira pero devuelve `0 / 0` siempre; con legacy
- * contesta las cuatro orientaciones con confianza 13-16. Y el OEM legacy no se
- * puede usar en el worker de reconocimiento porque `tessdata_best` no trae
- * componentes legacy para `spa`/`eng`.
- *
- * A diferencia del resto de las fallas de este camino, **no crear el worker no
- * degrada a `0`** (ADR-119 §3): que la detección no esté disponible no es lo
- * mismo que "todas las páginas están derechas", y esa confusión es
- * exactamente la que dejó a ADR-090 sin funcionar sin que nadie se enterara.
- */
-/*
- * ADR-160 §2: la imagen de OSD se decodifica YA reducida, en un solo paso
- * (`createImageBitmap(blob, { resizeWidth, resizeHeight })`) — la página
- * completa no se materializa en ningún momento de este camino, a diferencia
- * de `scaleForOsd` (retirada), que primero necesitaba un canvas de página
- * entera para achicarlo después.
- *
- * Falla de decodificación (`createImageBitmap` ausente o que rechaza, o sin
- * contexto 2D): `OcrPageFailedError` — caso 22 de §13, mismo tratamiento que
- * el resto de los fallos de página de este motor. A diferencia de que
- * `detect()` no concluya (degradación silenciosa, más abajo), acá no hay
- * imagen que ofrecerle a OSD: no es "no sé la orientación", es "no puedo
- * prepararle nada".
- */
-/*
- * ADR-090 §3, paso 1-2. Una falla de `detect` —que `DetectOS` no concluya, que
- * la página tenga muy poco texto— cae a `0`, que es exactamente el
- * comportamiento previo al ADR. El kernel no tiene logger (ADR-045 §2), así
- * que la degradación es silenciosa por construcción.
- *
- * ADR-119 §3 le pone un límite a esa degradación: **no** cubre que el worker
- * de OSD no se pueda crear. Eso sale por `ensureOsdWorkerLoaded` como
- * `OcrModelMissingError`. ADR-160 agrega el mismo límite para la imagen
- * misma: `buildOsdImage` corre AFUERA del try — una falla de decodificación
- * no es lo mismo que una falla de `detect()`.
- */
 /*
  * Orden **interno** de este motor, y no el que ve el detector (OCR_Engine.md
  * §10, ADR-110): `fuseOcrPage` re-ordena al fusionar, con el criterio de
@@ -917,11 +936,17 @@ async function recognizeWithTimeout(
     // de cancelación por-job, así que el mecanismo real de "dejar de esperar"
     // es este Promise.race contra el AbortSignal — la computación WASM en
     // curso no se interrumpe, el caller simplemente deja de esperarla.
-    const result = await Promise.race([
-      activeWorker.recognize(image, {}, { blocks: true }),
-      timeoutPromise,
-      abortPromise,
-    ]);
+    const job = Promise.resolve().then(() => activeWorker.recognize(image, {}, { blocks: true }));
+    // Un timeout/cancel solo deja de esperar; Tesseract no expone cancelación
+    // por job y todavía puede estar leyendo el canvas. Liberarlo al terminar
+    // el job real evita invalidar su input en ese caso.
+    if (typeof OffscreenCanvas !== "undefined" && image instanceof OffscreenCanvas) {
+      void job.then(
+        () => releaseCanvasBackingStore(image),
+        () => releaseCanvasBackingStore(image),
+      );
+    }
+    const result = await Promise.race([job, timeoutPromise, abortPromise]);
     return result.data;
   } finally {
     if (timeoutId !== undefined) clearTimeout(timeoutId);
@@ -958,18 +983,21 @@ async function decodeStrip(
   }
   const bitmap = await createImageBitmap(blob, x0, 0, width, heightPx);
   const canvas = new OffscreenCanvas(width, heightPx);
-  const context = canvas.getContext("2d");
-  if (context === null) {
+  try {
+    const context = canvas.getContext("2d");
+    if (context === null) {
+      throw new OcrPageFailedError(
+        documentId,
+        pageIndex,
+        "No se pudo obtener un contexto 2D de OffscreenCanvas para la franja.",
+      );
+    }
+    context.drawImage(bitmap, 0, 0);
+    return context.getImageData(0, 0, width, heightPx);
+  } finally {
     bitmap.close();
-    throw new OcrPageFailedError(
-      documentId,
-      pageIndex,
-      "No se pudo obtener un contexto 2D de OffscreenCanvas para la franja.",
-    );
+    releaseCanvasBackingStore(canvas);
   }
-  context.drawImage(bitmap, 0, 0);
-  bitmap.close();
-  return context.getImageData(0, 0, width, heightPx);
 }
 
 /**
@@ -1162,20 +1190,6 @@ async function recognizeRotatedMargins(params: {
   return found;
 }
 
-/**
- * ADR-162 §13 caso 23 / ADR-165 §2.1: predicado de "píxel presente",
- * reutilizado LITERAL por las dos reglas — una copia divergente mediría otra
- * cosa y ningún test lo detectaría (handoff §1.2).
- */
-function isPixelPresent(
-  r: number | undefined,
-  g: number | undefined,
-  b: number | undefined,
-  alpha: number | undefined,
-): boolean {
-  return alpha !== 0 && (r !== 255 || g !== 255 || b !== 255);
-}
-
 /** ADR-162: predicado exacto de blanco/transparencia, sin umbrales implícitos. */
 function isVisuallyWhiteStrip(image: ImageData): boolean {
   const { data } = image;
@@ -1255,6 +1269,15 @@ async function kernelRecognizeUpright(
  * entera en píxeles para el enderezado de ADR-120 (§4 del Contexto: el
  * `angle` de `SetImageFile` no sirve para esto). Decodifica completo, igual
  * que antes de ADR-160; es el ~1 % de las páginas.
+ *
+ * ADR-190 §2 paso 4 / §5: también es el camino de `upscale` — agrandar la
+ * imagen decodificada exige tenerla en píxeles, así que una página con
+ * `upscale > 1` pasa por acá aunque su orientación sea 0 (`kernelRecognize`
+ * la despacha para acá). El agrandado ocurre DESPUÉS de enderezar: las
+ * coordenadas que Tesseract devuelve están en el espacio ENDEREZADO Y
+ * AGRANDADO, así que `sourceWidth`/`sourceHeight` para `unrotateBbox` y el
+ * `dpi` para `toPagePoints` viajan multiplicados por `upscale` — es
+ * exactamente la conversión `dpi × upscale` que exige el contrato.
  */
 async function kernelRecognizeRotated(
   image: EncodedPageImage,
@@ -1263,34 +1286,43 @@ async function kernelRecognizeRotated(
   documentId: string,
   pageIndex: number,
   opts: KernelRecognizeOptions,
+  upscale = 1,
 ): Promise<KernelOcrResult> {
   const imageData = await decodeEncodedImage(image, documentId, pageIndex);
 
   if (opts.abortSignal.aborted) throw new CancelledError(documentId);
 
   const upright = rotateImageData(imageData, orientation);
+  const scaled = upscale > 1 ? upscaleImageData(upright, upscale, documentId, pageIndex) : upright;
+
+  if (opts.abortSignal.aborted) throw new CancelledError(documentId);
+
   const data = await recognizeWithTimeout(
-    toTesseractImage(upright, documentId, pageIndex),
+    toTesseractImage(scaled, documentId, pageIndex),
     documentId,
     pageIndex,
     opts.timeoutMs,
     opts.abortSignal,
   );
-  const words = toWords(data, pageIndex, dpi, orientation, image.widthPx, image.heightPx);
+  const effectiveDpi = dpi * upscale;
+  const scaledWidth = image.widthPx * upscale;
+  const scaledHeight = image.heightPx * upscale;
+  const words = toWords(data, pageIndex, effectiveDpi, orientation, scaledWidth, scaledHeight);
   const confidence = clampConfidence(extractPageConfidence(data) / 100);
 
   const rotated = await recognizeRotatedMargins({
-    getStrip: (x0, width) => Promise.resolve(cropImageData(upright, x0, width)),
-    uprightWidth: upright.width,
-    // v1.16.1: el raster ORIGINAL es `image`, no `upright` — en 90/270
-    // `upright` tiene el ancho y el alto intercambiados respecto de él.
-    originalWidth: image.widthPx,
-    originalHeight: image.heightPx,
+    getStrip: (x0, width) => Promise.resolve(cropImageData(scaled, x0, width)),
+    uprightWidth: scaled.width,
+    // v1.16.1: el raster ORIGINAL es `image` (acá, ya agrandado) — en 90/270
+    // `upright`/`scaled` tienen el ancho y el alto intercambiados respecto
+    // de él.
+    originalWidth: scaledWidth,
+    originalHeight: scaledHeight,
     words,
     orientation,
     documentId,
     pageIndex,
-    dpi,
+    dpi: effectiveDpi,
     opts,
   });
 
@@ -1309,6 +1341,9 @@ export async function kernelRecognize(
   opts: KernelRecognizeOptions,
 ): Promise<KernelOcrResult> {
   const { documentId, pageIndex, image, languages, dpi, orientation } = payload;
+  // ADR-190 §2 paso 4 / §5: factor con el que se agranda la imagen antes de
+  // reconocer. Default 1 (sin cambios de comportamiento previos al ADR).
+  const upscale = payload.upscale ?? 1;
 
   if (orientation !== 0 && orientation !== 90 && orientation !== 180 && orientation !== 270) {
     throw new InvalidInputError("orientation inválida en OcrPagePayload.", {
@@ -1320,10 +1355,19 @@ export async function kernelRecognize(
   if (opts.abortSignal.aborted) throw new CancelledError(documentId);
 
   await ensureWorkerLoaded(languages);
-  await ensureDpiApplied(dpi);
+  // ADR-090 §2: se le informa a Tesseract el dpi EFECTIVO de la imagen que va
+  // a leer — el de la imagen ya agrandada, no el original.
+  await ensureDpiApplied(dpi * upscale);
   await ensurePageSegModeApplied();
 
   if (opts.abortSignal.aborted) throw new CancelledError(documentId);
+
+  // ADR-190 §2 paso 4: agrandar exige decodificar la imagen completa (no hay
+  // agrandado sobre el `Blob` sin decodificar), así que una página con
+  // `upscale > 1` pasa por el camino lento aunque su orientación sea 0.
+  if (upscale > 1) {
+    return kernelRecognizeRotated(image, orientation, dpi, documentId, pageIndex, opts, upscale);
+  }
 
   // ADR-160 §1: el blob codificado (ADR-158 §2) es la única forma de imagen
   // que existe hasta que el camino lento decide que hace falta más.
@@ -1345,7 +1389,13 @@ export async function kernelRecognize(
  * protocolo, manejado en `worker/entry.ts`. Resiliente a que `terminate()`
  * rechace (best-effort, mismo criterio que `ocr.engine.ts` mantenía).
  */
-export async function kernelDispose(): Promise<void> {
+// O-6: devuelve si HABÍA una instancia viva para liberar — `kernelModule`
+// (el import cacheado a nivel de módulo en ocr.engine.ts) se queda definido
+// para siempre una vez cargado, así que no sirve como señal de "se liberó
+// algo esta vez"; esto sí, porque lee `worker` (el estado real) antes de
+// nulearlo.
+export async function kernelDispose(): Promise<boolean> {
+  const hadWorker = worker !== null;
   if (worker !== null) {
     const current = worker;
     worker = null;
@@ -1358,4 +1408,5 @@ export async function kernelDispose(): Promise<void> {
   loadedLanguages = new Set();
   appliedDpi = null;
   pageSegModeApplied = false;
+  return hadWorker;
 }

@@ -1,4 +1,4 @@
-import { startWorkerEntry, type OcrOrientationPayload } from "@anonly/shared";
+import { InvalidInputError, startWorkerEntry, type OcrOrientationPayload } from "@anonly/shared";
 
 import { createOrientationKernel } from "./orientation-kernel.js";
 
@@ -22,7 +22,13 @@ startWorkerEntry({
   jobType: "ocr-orient",
   capabilities: { maxPageBatchSize: 1 },
   run(payload, ctx) {
-    if (!isPayload(payload)) throw new Error("Payload inválido para ocr-orient.");
+    // Code_Standards.md §7: prohibido lanzar `Error` genérico — toda
+    // excepción del Core es una subclase de `EngineError` con `code`,
+    // `engineId` y `details` (mismo criterio que `ocr.engine.ts` para
+    // cualquier input malformado, ADR-049).
+    if (!isPayload(payload)) {
+      throw new InvalidInputError("Payload inválido para ocr-orient.", { jobType: "ocr-orient" });
+    }
     return kernel.detect(payload, ctx.abortSignal);
   },
   dispose() {

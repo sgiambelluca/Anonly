@@ -44,6 +44,7 @@ import {
   type EncodedPageImage,
   type EngineContext,
   type IEngine,
+  type OcrOrientation,
   type OcrPagePayload,
   type OcrOrientationPayload,
   type OcrOrientationResult,
@@ -90,6 +91,20 @@ const LOW_CONFIDENCE_THRESHOLD = 0.5;
 // ya despachaba el batch completo con 90 fijo antes de ADR-045). Preservado
 // tal cual al mover el despacho de por-batch a por-página.
 const DISPATCH_PRIORITY = 90;
+
+// ADR-190 §2: "lectura fiable" es la que tiene al menos una palabra con
+// confianza ≥ 60 — el mismo umbral que `ROTATED_MIN_CONFIDENCE` de
+// `worker/kernel.ts`, pero normalizado a [0,1] (acá `Word.confidence` ya
+// viene normalizado, no en la escala 0-100 cruda de Tesseract). Duplicado a
+// propósito y no importado: `worker/kernel.ts` se carga perezosamente
+// (`loadOcrKernel`) para no arrastrar tesseract.js al chunk inicial.
+const RELIABLE_WORD_CONFIDENCE = 0.6;
+
+// ADR-190 §3: mismo valor que `INK_PRESENT_RATIO` de
+// `worker/orientation-kernel.ts`, duplicado por el mismo motivo que
+// `RELIABLE_WORD_CONFIDENCE` — ese módulo también se importa dinámicamente
+// (`this.orientationKernelPromise`) para no cargar tesseract.js de entrada.
+const INK_PRESENT_RATIO = 0.002;
 
 function cacheKey(documentId: string, pageIndex: number): string {
   return `ocr-words:${documentId}:${pageIndex}`;
@@ -151,9 +166,12 @@ interface OcrJobPool {
    * ADR-157 §1bis: termina los workers vivos del pool sin disponerlo — el
    * pool sigue usable, el próximo `dispatch` lo reconstruye perezoso
    * (ADR-080). Espejo exacto de `WorkerPool.releaseIdleWorkers()`, mismo
-   * nombre y misma guarda (no hace nada si el pool no está ocioso).
+   * nombre, misma guarda (no hace nada si el pool no está ocioso) y mismo
+   * valor de retorno: `true` si la guarda no frenó la baja (se liberó algo
+   * de verdad), `false` si el pool no estaba ocioso (O-6: `OcrEngine` lo usa
+   * para no resetear `modelWarm` cuando no se liberó nada).
    */
-  releaseIdleWorkers(): void;
+  releaseIdleWorkers(): boolean;
 }
 
 type OcrOrientationPool = OcrJobPool;
@@ -173,7 +191,10 @@ type OcrOrientationPool = OcrJobPool;
 const IMMEDIATE_POOL: OcrJobPool = {
   dispatch: (params: OcrDispatchParams): Promise<unknown> => params.run(),
   // Sin pool real no hay ningún `WorkerLike` que terminar — no-op inocuo.
-  releaseIdleWorkers: (): void => undefined,
+  // `false`: este pool nunca libera nada por sí mismo (O-6) — lo que de
+  // verdad se libera en el fallback in-process es el kernel a nivel de
+  // módulo, que `OcrEngine#releaseIdleWorkers` chequea aparte.
+  releaseIdleWorkers: (): boolean => false,
 };
 
 function createImmediateOrientationPool(): OcrOrientationPool {
@@ -222,7 +243,10 @@ function createImmediateOrientationPool(): OcrOrientationPool {
         pump();
       });
     },
-    releaseIdleWorkers: (): void => undefined,
+    // `false` por el mismo motivo que `IMMEDIATE_POOL` (O-6): lo que de
+    // verdad se libera acá es `this.orientationKernel`, que `OcrEngine`
+    // chequea aparte antes de resetear `modelWarm`.
+    releaseIdleWorkers: (): boolean => false,
   };
 }
 
@@ -400,6 +424,58 @@ function normalizeModelMissing(err: unknown): OcrModelMissingError | null {
   return new OcrModelMissingError(languages, reason);
 }
 
+/** Una lectura de página, con el ángulo que la produjo (ADR-190 §2). */
+interface PageReading {
+  readonly words: ReadonlyArray<Word>;
+  readonly confidence: number;
+  readonly orientation: OcrOrientation;
+}
+
+function pickBestOsdRecoveryReading(
+  current: PageReading,
+  candidate: PageReading | null,
+): PageReading {
+  if (candidate === null) return current;
+  const currentReliable = isReliableReading(current.words);
+  const candidateReliable = isReliableReading(candidate.words);
+  if (currentReliable && !candidateReliable) return current;
+  if (!currentReliable && candidateReliable) return candidate;
+  if (!currentReliable) return current;
+  if (candidate.confidence !== current.confidence)
+    return candidate.confidence > current.confidence ? candidate : current;
+  return countReliableWords(candidate.words) > countReliableWords(current.words)
+    ? candidate
+    : current;
+}
+
+// ADR-190 §2: "lectura fiable" = al menos una palabra con confianza ≥
+// RELIABLE_WORD_CONFIDENCE.
+function isReliableReading(words: ReadonlyArray<Word>): boolean {
+  return words.some((word) => word.confidence >= RELIABLE_WORD_CONFIDENCE);
+}
+
+function countReliableWords(words: ReadonlyArray<Word>): number {
+  return words.filter((word) => word.confidence >= RELIABLE_WORD_CONFIDENCE).length;
+}
+
+/**
+ * ADR-190 §2: "entre dos lecturas gana la que tiene más palabras con
+ * confianza ≥ 60; si empatan, la de mayor confianza media." `confidence` de
+ * `KernelOcrResult`/`PageReading` YA es el promedio de la página (OCR_Engine.md
+ * §10), así que el desempate lo usa directo, sin recalcularlo de `words`.
+ * `candidate === null` es un paso que falló (ADR-190 §2: no hace fallar la
+ * página, se queda la mejor lectura obtenida hasta ahí).
+ */
+function pickBestReading(current: PageReading, candidate: PageReading | null): PageReading {
+  if (candidate === null) return current;
+  const currentReliable = countReliableWords(current.words);
+  const candidateReliable = countReliableWords(candidate.words);
+  if (candidateReliable !== currentReliable) {
+    return candidateReliable > currentReliable ? candidate : current;
+  }
+  return candidate.confidence > current.confidence ? candidate : current;
+}
+
 export class OcrEngine implements IEngine {
   readonly id = EngineId.Ocr;
 
@@ -448,76 +524,52 @@ export class OcrEngine implements IEngine {
     this.activeProcessPages += 1;
     try {
       await this.awaitCleanup();
-      return await this.processPageInternal(input, ctx);
+      return await this.processPageInternal(input, ctx, false);
     } finally {
       this.activeProcessPages -= 1;
       this.resolveActiveDrains();
     }
   }
 
-  private async processPageInternal(
+  /**
+   * ADR-190 §2: mismo wrapper que `processPage` (bookkeeping de
+   * `activeProcessPages`/`awaitCleanup`), para uso interno de
+   * `processOneRequest` — que sí sabe si el descriptor es una región
+   * (`OcrPageRequest.region`, ADR-065) y necesita pasar ese dato a
+   * `processPageInternal`: la cadena de reintentos no aplica el paso 4 a una
+   * región, y una región nunca lleva `unreadableInk`. No se expone como
+   * `processPage` público — el motor sigue sin conocer el concepto de región
+   * en su interfaz pública (OCR_Engine.md §9).
+   */
+  private async processPageForSession(
     input: OcrPageInput,
     ctx: EngineContext,
+    isRegion: boolean,
   ): Promise<OcrPageOutput> {
-    this.assertNotDisposed();
-    this.assertInitialized();
-
-    if (input == null) {
-      throw new InvalidInputError("Input es null o undefined.", { engineId: EngineId.Ocr });
+    this.activeProcessPages += 1;
+    try {
+      await this.awaitCleanup();
+      return await this.processPageInternal(input, ctx, isRegion);
+    } finally {
+      this.activeProcessPages -= 1;
+      this.resolveActiveDrains();
     }
+  }
 
-    const { documentId, pageIndex, image, languages, dpi } = input;
-
-    // ADR-064 §4: `dpi` es el divisor de la conversión px→pt del kernel
-    // (OCR_Engine.md §10). Antes del ADR el valor no se leía y un 0 era
-    // inocuo; ahora es una división por cero.
-    if (!Number.isFinite(dpi) || dpi <= 0) {
-      throw new InvalidInputError(
-        `dpi inválido en la página ${pageIndex}: ${dpi}. Debe ser finito y mayor a 0.`,
-        { documentId, pageIndex, dpi },
-      );
-    }
-
-    // ADR-158 §2: la validación de dimensiones pasa a leer el EncodedPageImage
-    // (widthPx/heightPx, ya conocidos sin decodificar) en vez de ImageData.
-    if (image.widthPx <= 0 || image.heightPx <= 0) {
-      throw new InvalidInputError(
-        `image inválida en la página ${pageIndex}: widthPx y heightPx deben ser mayores a 0.`,
-        { documentId, pageIndex, widthPx: image.widthPx, heightPx: image.heightPx },
-      );
-    }
-
-    if (pageIndex < 0) {
-      throw new InvalidInputError(`pageIndex inválido: ${pageIndex}. Debe ser >= 0.`, {
-        documentId,
-        pageIndex,
-      });
-    }
-
-    if (ctx.abortSignal.aborted) {
-      throw new CancelledError(documentId);
-    }
-
-    const configuredLanguages =
-      ctx.config.ocr.languages.length > 0 ? ctx.config.ocr.languages : DEFAULT_LANGUAGES;
-    this.assertLanguagesRequestable(languages, configuredLanguages, documentId, pageIndex);
-
-    const timeoutMs = ctx.config.workerPool.timeouts["ocr-page"] ?? DEFAULT_TIMEOUT_MS;
-    const orientationTimeoutMs = ctx.config.workerPool.timeouts["ocr-orient"] ?? DEFAULT_TIMEOUT_MS;
-    const maxRetries = ctx.config.workerPool.maxRetries["ocr-page"] ?? DEFAULT_MAX_RETRIES;
-    const startedAt = Date.now();
-
-    // El payload transporta la config EFECTIVA (con fallback de default ya
-    // resuelto), no `input.languages` crudo: es lo que el kernel debe tener
-    // cargado (ADR-045 §3); la restricción per-página ya se validó arriba.
-    const basePayload = {
-      documentId,
-      pageIndex,
-      image,
-      dpi: input.dpi,
-      languages: configuredLanguages,
-    } satisfies Omit<OcrPagePayload, "orientation">;
-
+  /**
+   * ADR-190 §2, paso 1: orienta y reconoce con el retry de timeout de
+   * siempre. Devuelve la lectura obtenida junto con `inkRatio` (§3) para que
+   * `processPageInternal` decida el resto de la cadena, o lanza la falla de
+   * página de siempre si se agotan los reintentos.
+   */
+  private async recognizeFirstPass(
+    basePayload: Omit<OcrPagePayload, "orientation">,
+    ctx: EngineContext,
+    timeoutMs: number,
+    orientationTimeoutMs: number,
+    maxRetries: number,
+  ): Promise<{ reading: PageReading; inkRatio: number; osdHadVerdict: boolean }> {
+    const { documentId, pageIndex, image, languages } = basePayload;
     let lastError: unknown = null;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -525,12 +577,19 @@ export class OcrEngine implements IEngine {
         throw new CancelledError(documentId);
       }
 
+      // O-5: qué dispatch está en vuelo cuando el catch de abajo recibe un
+      // error con `code === OCR_TIMEOUT` — el código NO alcanza para saberlo
+      // (un timeout de reconocimiento que cruzó un Worker real deserializa
+      // con el MISMO code que uno de orientación, Contracts.md §4). Sin esta
+      // bandera, cualquier timeout de reconocimiento se etiquetaba con
+      // `orientationTimeoutMs` en `details.timeoutMs`.
+      let recognitionDispatched = false;
       try {
         const orientationPayload: OcrOrientationPayload = {
           documentId,
           pageIndex,
           image,
-          languages: configuredLanguages,
+          languages,
           timeoutMs: orientationTimeoutMs,
         };
         const orientationResult = await this.orientationPool.dispatch({
@@ -540,11 +599,12 @@ export class OcrEngine implements IEngine {
           payload: orientationPayload,
           maxRetriesOverride: 0,
         });
-        const orientation = this.decodeOrientationResult(orientationResult);
-        const payload: OcrPagePayload = { ...basePayload, orientation };
+        const decoded = this.decodeOrientationResult(orientationResult);
+        const payload: OcrPagePayload = { ...basePayload, orientation: decoded.orientation };
         // ADR-045 §2: solo el reconocimiento cruza el puerto.
         // `maxRetriesOverride: 0` — el pool nunca reintenta un `ocr-page`; el
         // único loop de retry es este.
+        recognitionDispatched = true;
         const dispatchResult = await this.pool.dispatch({
           run: async () =>
             (await loadOcrKernel()).kernelRecognize(payload, {
@@ -584,35 +644,15 @@ export class OcrEngine implements IEngine {
         // (independientemente de si esta página en particular tuvo éxito).
         this.modelWarm = true;
 
-        const { words, confidence } = result;
-        const durationMs = Date.now() - startedAt;
-
-        // Caso 3 (§13): páginas con texto detectado pero de baja calidad. Las
-        // páginas genuinamente vacías/sin texto (casos 1-2) no disparan este
-        // warning: ahí confidence=0 es el resultado normal, no una señal de
-        // calidad baja sobre texto real.
-        if (words.length > 0 && confidence < LOW_CONFIDENCE_THRESHOLD) {
-          ctx.logger.warn(`OCR con confidence baja en la página ${pageIndex}: ${confidence}`, {
-            documentId,
-            pageIndex,
-            confidence,
-          });
-        }
-
-        // ADR-045 §1: depósito + emisión, en ese orden, host-side — restaura
-        // ADR-014 §1 literal y elimina la carrera EVENT/COMPLETED. ADR-145
-        // §2/§4: el tercer argumento no cambia ese orden, solo hace que la
-        // entrada cuente contra el límite de bytes de la LRU en vez de
-        // contar como 0 (el agujero de contabilidad que ADR-145 cierra).
-        ctx.cache.set(cacheKey(documentId, pageIndex), words, estimateWordsBytes(words));
-        ctx.bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
-          documentId,
-          pageIndex,
-          wordCount: words.length,
-          confidence,
-        });
-
-        return { documentId, pageIndex, words, confidence, durationMs };
+        return {
+          reading: {
+            words: result.words,
+            confidence: result.confidence,
+            orientation: decoded.orientation,
+          },
+          inkRatio: decoded.inkRatio,
+          osdHadVerdict: decoded.osdHadVerdict,
+        };
       } catch (err: unknown) {
         if (err instanceof CancelledError) throw err;
         // No recuperable y no es "esta página falló" — es "el modelo no
@@ -625,13 +665,14 @@ export class OcrEngine implements IEngine {
         // reconocimiento) implica que el modelo sí quedó cargado.
         this.modelWarm = true;
 
+        // El timeout de LA página que expiró: el de reconocimiento si el
+        // despacho de reconocimiento ya estaba en vuelo, el de orientación
+        // si no (antes se inferia del `code`, que no distingue).
         const normalized = normalizeTimeout(
           err,
           documentId,
           pageIndex,
-          err instanceof EngineError && err.code === EngineErrorCode.OCR_TIMEOUT
-            ? orientationTimeoutMs
-            : timeoutMs,
+          recognitionDispatched ? timeoutMs : orientationTimeoutMs,
         );
         lastError = normalized;
         if (!(normalized instanceof OcrTimeoutError)) break; // no recuperable: no reintentar
@@ -640,12 +681,242 @@ export class OcrEngine implements IEngine {
     }
 
     const failure = this.toPageFailure(lastError, documentId, pageIndex);
-    ctx.bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FAILED, {
+    throw failure;
+  }
+
+  /**
+   * ADR-190 §2, pasos 2-4: un reconocimiento más, en un ángulo dado (y
+   * opcionalmente agrandado). Un solo intento, sin el retry de timeout del
+   * paso 1: "un error en un paso posterior al primero no hace fallar la
+   * página, se queda la mejor lectura obtenida hasta ahí" — así que cualquier
+   * fallo que no sea `CancelledError` devuelve `null` en vez de reintentar
+   * o propagar, incluido un error de modelo posterior al primer paso.
+   */
+  private async tryRecognizeAt(
+    orientation: OcrOrientation,
+    basePayload: Omit<OcrPagePayload, "orientation">,
+    ctx: EngineContext,
+    timeoutMs: number,
+    upscale?: number,
+  ): Promise<PageReading | null> {
+    const { documentId } = basePayload;
+    if (ctx.abortSignal.aborted) throw new CancelledError(documentId);
+
+    const payload: OcrPagePayload = {
+      ...basePayload,
+      orientation,
+      ...(upscale !== undefined ? { upscale } : {}),
+    };
+    try {
+      const dispatchResult = await this.pool.dispatch({
+        run: async () =>
+          (await loadOcrKernel()).kernelRecognize(payload, {
+            timeoutMs,
+            abortSignal: ctx.abortSignal,
+          }),
+        signal: ctx.abortSignal,
+        priority: DISPATCH_PRIORITY,
+        payload,
+        maxRetriesOverride: 0,
+      });
+      const result = decodeKernelOcrResult(dispatchResult);
+      this.modelWarm = true;
+      return { words: result.words, confidence: result.confidence, orientation };
+    } catch (err: unknown) {
+      if (err instanceof CancelledError) throw err;
+      this.modelWarm = true;
+      return null;
+    }
+  }
+
+  private async processPageInternal(
+    input: OcrPageInput,
+    ctx: EngineContext,
+    isRegion: boolean,
+  ): Promise<OcrPageOutput> {
+    this.assertNotDisposed();
+    this.assertInitialized();
+
+    if (input == null) {
+      throw new InvalidInputError("Input es null o undefined.", { engineId: EngineId.Ocr });
+    }
+
+    const { documentId, pageIndex, image, languages, dpi } = input;
+
+    // ADR-064 §4: `dpi` es el divisor de la conversión px→pt del kernel
+    // (OCR_Engine.md §10). Antes del ADR el valor no se leía y un 0 era
+    // inocuo; ahora es una división por cero.
+    if (!Number.isFinite(dpi) || dpi <= 0) {
+      throw new InvalidInputError(
+        `dpi inválido en la página ${pageIndex}: ${dpi}. Debe ser finito y mayor a 0.`,
+        { documentId, pageIndex, dpi },
+      );
+    }
+
+    // ADR-158 §2: la validación de dimensiones pasa a leer el EncodedPageImage
+    // (widthPx/heightPx, ya conocidos sin decodificar) en vez de ImageData.
+    if (image.widthPx <= 0 || image.heightPx <= 0) {
+      throw new InvalidInputError(
+        `image inválida en la página ${pageIndex}: widthPx y heightPx deben ser mayores a 0.`,
+        { documentId, pageIndex, widthPx: image.widthPx, heightPx: image.heightPx },
+      );
+    }
+
+    // OCR_Engine.md §13 caso 4 / ADR-158 §5: un `image.bytes` detached (por
+    // ejemplo si un caller transfirió ese ArrayBuffer antes de llamar) tiene
+    // byteLength 0. No es alcanzable desde la frontera façade→worker (este
+    // motor clona, no transfiere), pero sigue siendo una entrada inválida.
+    if (image.bytes.byteLength === 0) {
+      throw new InvalidInputError(
+        `image inválida en la página ${pageIndex}: image.bytes está detached (byteLength 0).`,
+        { documentId, pageIndex },
+      );
+    }
+
+    if (pageIndex < 0) {
+      throw new InvalidInputError(`pageIndex inválido: ${pageIndex}. Debe ser >= 0.`, {
+        documentId,
+        pageIndex,
+      });
+    }
+
+    if (ctx.abortSignal.aborted) {
+      throw new CancelledError(documentId);
+    }
+
+    const configuredLanguages =
+      ctx.config.ocr.languages.length > 0 ? ctx.config.ocr.languages : DEFAULT_LANGUAGES;
+    this.assertLanguagesRequestable(languages, configuredLanguages, documentId, pageIndex);
+
+    const timeoutMs = ctx.config.workerPool.timeouts["ocr-page"] ?? DEFAULT_TIMEOUT_MS;
+    const orientationTimeoutMs = ctx.config.workerPool.timeouts["ocr-orient"] ?? DEFAULT_TIMEOUT_MS;
+    const maxRetries = ctx.config.workerPool.maxRetries["ocr-page"] ?? DEFAULT_MAX_RETRIES;
+    const startedAt = Date.now();
+
+    // El payload transporta la config EFECTIVA (con fallback de default ya
+    // resuelto), no `input.languages` crudo: es lo que el kernel debe tener
+    // cargado (ADR-045 §3); la restricción per-página ya se validó arriba.
+    const basePayload = {
       documentId,
       pageIndex,
-      error: failure.serialize(),
+      image,
+      dpi: input.dpi,
+      languages: configuredLanguages,
+    } satisfies Omit<OcrPagePayload, "orientation">;
+
+    // ── Paso 1 (ADR-190 §2): orientar + reconocer, con el retry de siempre.
+    // Si se agotan los reintentos, `recognizeFirstPass` ya emitió
+    // OCR_PAGE_FAILED (vía `toPageFailure`) y lanza — comportamiento idéntico
+    // al previo al ADR. ──
+    let firstPass: { reading: PageReading; inkRatio: number; osdHadVerdict: boolean };
+    try {
+      firstPass = await this.recognizeFirstPass(
+        basePayload,
+        ctx,
+        timeoutMs,
+        orientationTimeoutMs,
+        maxRetries,
+      );
+    } catch (err: unknown) {
+      if (err instanceof OcrPageFailedError) {
+        ctx.bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FAILED, {
+          documentId,
+          pageIndex,
+          error: err.serialize(),
+        });
+      }
+      throw err;
+    }
+
+    let reading = firstPass.reading;
+    const inkRatio = firstPass.inkRatio;
+
+    // ── Pasos 2-4 (ADR-190 §2/§3): solo páginas con tinta (caso 46: una
+    // página en blanco o de puro ruido no dispara ningún reintento). Las
+    // regiones (ADR-065) siguen la misma cadena, PERO sin el paso 4 — un
+    // recorte de región ya viene de un ráster a la resolución configurada. ──
+    if (
+      !isRegion &&
+      !firstPass.osdHadVerdict &&
+      (isReliableReading(reading.words) || inkRatio >= INK_PRESENT_RATIO)
+    ) {
+      // ADR-190 §2 enmienda: sin veredicto OSD, una primera lectura confiable
+      // puede ser basura de las franjas. Ensayar los tres giros con el mismo
+      // ráster/DPI y priorizar confianza de página para no premiar márgenes.
+      for (const angle of [90, 180, 270] as const) {
+        const attempt = await this.tryRecognizeAt(angle, basePayload, ctx, timeoutMs);
+        reading = pickBestOsdRecoveryReading(reading, attempt);
+      }
+    } else if (inkRatio >= INK_PRESENT_RATIO) {
+      const tried = new Set<OcrOrientation>([reading.orientation]);
+      if (reading.orientation !== 0) {
+        // Paso 2: siempre comparar con 0°, también ante basura que supera
+        // el umbral de confianza (enmienda de ADR-190 §2).
+        tried.add(0);
+        const attempt = await this.tryRecognizeAt(0, basePayload, ctx, timeoutMs);
+        reading = pickBestReading(reading, attempt);
+      }
+
+      if (!isReliableReading(reading.words)) {
+        // Paso 3: los ángulos que falten entre 0, 90, 180 y 270.
+        for (const angle of [0, 90, 180, 270] as const) {
+          if (tried.has(angle)) continue;
+          tried.add(angle);
+          if (isReliableReading(reading.words)) break;
+          const attempt = await this.tryRecognizeAt(angle, basePayload, ctx, timeoutMs);
+          reading = pickBestReading(reading, attempt);
+        }
+      }
+
+      if (!isRegion && !isReliableReading(reading.words) && input.dpi < 300) {
+        // Paso 4: agrandado hasta 300 dpi, en el mejor ángulo encontrado.
+        // Nunca para regiones (ADR-065): su ráster ya está a la resolución
+        // configurada.
+        const upscale = 300 / input.dpi;
+        const attempt = await this.tryRecognizeAt(
+          reading.orientation,
+          basePayload,
+          ctx,
+          timeoutMs,
+          upscale,
+        );
+        reading = pickBestReading(reading, attempt);
+      }
+    }
+
+    const { words, confidence } = reading;
+    const durationMs = Date.now() - startedAt;
+
+    // Caso 3 (§13): páginas con texto detectado pero de baja calidad. Las
+    // páginas genuinamente vacías/sin texto (casos 1-2) no disparan este
+    // warning: ahí confidence=0 es el resultado normal, no una señal de
+    // calidad baja sobre texto real.
+    if (words.length > 0 && confidence < LOW_CONFIDENCE_THRESHOLD) {
+      ctx.logger.warn(`OCR con confidence baja en la página ${pageIndex}: ${confidence}`, {
+        documentId,
+        pageIndex,
+        confidence,
+      });
+    }
+
+    // ADR-045 §1: depósito + emisión, en ese orden, host-side — restaura
+    // ADR-014 §1 literal y elimina la carrera EVENT/COMPLETED. ADR-145
+    // §2/§4: el tercer argumento no cambia ese orden, solo hace que la
+    // entrada cuente contra el límite de bytes de la LRU en vez de
+    // contar como 0 (el agujero de contabilidad que ADR-145 cierra).
+    ctx.cache.set(cacheKey(documentId, pageIndex), words, estimateWordsBytes(words));
+    // ADR-190 §4: `unreadableInk` solo en una página ENTERA con tinta que
+    // terminó la cadena sin lectura fiable. Ausente ≡ false (Contracts.md).
+    const unreadableInk = !isRegion && inkRatio >= INK_PRESENT_RATIO && !isReliableReading(words);
+    ctx.bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
+      documentId,
+      pageIndex,
+      wordCount: words.length,
+      confidence,
+      ...(unreadableInk ? { unreadableInk: true as const } : {}),
     });
-    throw failure;
+
+    return { documentId, pageIndex, words, confidence, durationMs };
   }
 
   /**
@@ -812,7 +1083,10 @@ export class OcrEngine implements IEngine {
         languages: request.languages,
       };
       try {
-        return await this.processPage(input, ctx);
+        // ADR-190 §2: `request.region` (ADR-065) le dice a la cadena de
+        // verificación que este descriptor es un recorte — sin el paso 4 y
+        // sin `unreadableInk` (regiones nunca pasan por esa marca).
+        return await this.processPageForSession(input, ctx, request.region !== undefined);
       } catch (err: unknown) {
         if (err instanceof CancelledError || err instanceof OcrModelMissingError) {
           throw err;
@@ -927,7 +1201,8 @@ export class OcrEngine implements IEngine {
    * vuelo dejaría esa promesa colgada para siempre. El pool sigue usable
    * después: el próximo `processPage`/`processSession` (p. ej. un
    * `reanalyze` que cambie `ocr.languages`) lo reconstruye perezoso,
-   * pagando la recarga del modelo como costo declarado.
+   * pagando la recarga del modelo como costo declarado. `modelWarm` solo se
+   * resetea si de verdad se liberó algo (O-6).
    */
   releaseIdleWorkers(): void {
     if (
@@ -937,14 +1212,31 @@ export class OcrEngine implements IEngine {
     )
       return;
     const cleanup = async (): Promise<void> => {
-      this.pool.releaseIdleWorkers();
-      this.orientationPool.releaseIdleWorkers();
+      // O-6: solo resetear `modelWarm` si ALGO se liberó de verdad. Antes se
+      // reseteaba incondicionalmente, así que un `releaseIdleWorkers()` que
+      // no liberó nada (pool remoto no ocioso, y sin kernel local cargado)
+      // hacía que la siguiente sesión anunciara `OCR_STARTED.modelLoading`
+      // sin haber descargado ni recargado nada.
+      const recognitionReleased = this.pool.releaseIdleWorkers();
+      const orientationReleased = this.orientationPool.releaseIdleWorkers();
       const kernel = this.orientationKernel;
       this.orientationKernel = null;
       this.orientationKernelPromise = null;
+      const orientationKernelWasLoaded = kernel !== null;
       if (kernel !== null) await kernel.dispose();
-      if (kernelModule !== undefined) await (await kernelModule).kernelDispose();
-      this.modelWarm = false;
+      // `kernelDispose()` devuelve si HABÍA una instancia viva (no si el
+      // módulo alguna vez se importó, que se queda `!== undefined` para
+      // siempre): esa es la señal real de "se liberó algo esta vez".
+      const recognitionKernelWasLoaded =
+        kernelModule !== undefined && (await (await kernelModule).kernelDispose());
+      if (
+        recognitionReleased ||
+        orientationReleased ||
+        orientationKernelWasLoaded ||
+        recognitionKernelWasLoaded
+      ) {
+        this.modelWarm = false;
+      }
     };
     const pending = this.cleanupPromise === null ? cleanup() : this.cleanupPromise.then(cleanup);
     this.cleanupPromise = pending.catch(() => undefined);
@@ -1017,20 +1309,45 @@ export class OcrEngine implements IEngine {
     return this.orientationKernel.detect(payload, signal);
   }
 
-  private decodeOrientationResult(value: unknown): OcrOrientationResult["orientation"] {
+  // ADR-190 §3/§5: además del ángulo, valida y devuelve `inkRatio` — el
+  // sobre cruzó un puerto (ADR-055 §2), así que no se desestructura a ciegas.
+  private decodeOrientationResult(value: unknown): OcrOrientationResult {
     if (typeof value !== "object" || value === null || !("orientation" in value)) {
       throw new InvalidInputError("Resultado de orientación inválido.", {
         engineId: EngineId.Ocr,
       });
     }
-    const orientation = (value as { readonly orientation: unknown }).orientation;
+    const record = value as {
+      readonly orientation: unknown;
+      readonly inkRatio?: unknown;
+      readonly osdHadVerdict?: unknown;
+    };
+    const orientation = record.orientation;
     if (orientation !== 0 && orientation !== 90 && orientation !== 180 && orientation !== 270) {
       throw new InvalidInputError("Ángulo de orientación inválido.", {
         engineId: EngineId.Ocr,
         orientation,
       });
     }
-    return orientation;
+    const inkRatio = record.inkRatio;
+    if (
+      typeof inkRatio !== "number" ||
+      !Number.isFinite(inkRatio) ||
+      inkRatio < 0 ||
+      inkRatio > 1
+    ) {
+      throw new InvalidInputError("inkRatio inválido en el resultado de orientación.", {
+        engineId: EngineId.Ocr,
+        inkRatio,
+      });
+    }
+    if (typeof record.osdHadVerdict !== "boolean") {
+      throw new InvalidInputError("osdHadVerdict inválido en el resultado de orientación.", {
+        engineId: EngineId.Ocr,
+        osdHadVerdict: record.osdHadVerdict,
+      });
+    }
+    return { orientation, inkRatio, osdHadVerdict: record.osdHadVerdict };
   }
 
   private assertLanguagesRequestable(

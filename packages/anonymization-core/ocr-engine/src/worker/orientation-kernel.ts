@@ -8,6 +8,7 @@ import { createWorker, OEM } from "tesseract.js";
 
 import { OcrModelMissingError, OcrPageFailedError, OcrTimeoutError } from "../ocr.errors.js";
 
+import { isPixelPresent } from "./ink-predicate.js";
 import {
   resolveTesseractPath,
   TESSERACT_CORE_PATH,
@@ -18,24 +19,81 @@ import {
 type TesseractWorker = Awaited<ReturnType<typeof createWorker>>;
 
 const OSD_LANGUAGE = "osd";
-const OSD_SCALE = 0.5;
+// ADR-190 §1: reemplaza el escalado relativo `OSD_SCALE = 0.5` — el OSD
+// dejaba de depender del ráster de entrada y pasaba a medir siempre sobre el
+// mismo tamaño de lado largo (A4 a 150 dpi). Factor = min(OSD_MAX_UPSCALE,
+// OSD_TARGET_LONG_SIDE_PX / ladoLargoPx): una imagen chica se agranda hasta
+// el doble, una grande se reduce como antes. Para una página A4 a 300 dpi
+// (lado largo ≈ 3508 px) el factor da 1754/3508 = 0,5 — idéntico al
+// `OSD_SCALE` anterior, byte a byte (caso 43, OCR_Engine.md §13).
+const OSD_TARGET_LONG_SIDE_PX = 1754;
+const OSD_MAX_UPSCALE = 2;
 const MIN_ORIENTATION_CONFIDENCE = 1;
+
+function releaseCanvasBackingStore(canvas: OffscreenCanvas): void {
+  canvas.width = 0;
+  canvas.height = 0;
+}
+
+/** ADR-190 §3: la página tiene tinta si `inkRatio >= INK_PRESENT_RATIO`. */
+export const INK_PRESENT_RATIO = 0.002;
+
+function osdScaleFactor(widthPx: number, heightPx: number): number {
+  const longSidePx = Math.max(widthPx, heightPx);
+  if (!Number.isFinite(longSidePx) || longSidePx <= 0) return OSD_MAX_UPSCALE;
+  return Math.min(OSD_MAX_UPSCALE, OSD_TARGET_LONG_SIDE_PX / longSidePx);
+}
+
+/**
+ * ADR-190 §3: fracción de píxeles "presentes" (predicado literal de
+ * ADR-162/ADR-165, `isPixelPresent`) sobre la imagen YA reducida del OSD —
+ * la misma que ve `detect()`, no la página completa. Falla abierto hacia
+ * "tiene tinta" (`1`): reportar de menos es el modo de falla peligroso (una
+ * página con datos sensibles que no dispara ni la cadena de reintentos del
+ * §2 ni el aviso del §4), y `getImageData` sobre un canvas propio no debería
+ * fallar en la práctica.
+ */
+function computeInkRatio(
+  context: OffscreenCanvasRenderingContext2D,
+  width: number,
+  height: number,
+): number {
+  try {
+    const { data } = context.getImageData(0, 0, width, height);
+    const totalPixels = width * height;
+    if (totalPixels <= 0) return 0;
+    let present = 0;
+    for (let index = 0; index < data.length; index += 4) {
+      if (isPixelPresent(data[index], data[index + 1], data[index + 2], data[index + 3])) {
+        present += 1;
+      }
+    }
+    return present / totalPixels;
+  } catch {
+    return 1;
+  }
+}
 
 function isOrientation(value: unknown): value is OcrOrientation {
   return value === 0 || value === 90 || value === 180 || value === 270;
 }
 
-function readOrientation(data: unknown): OcrOrientation {
-  if (typeof data !== "object" || data === null) return 0;
+function readOrientation(data: unknown): { orientation: OcrOrientation; osdHadVerdict: boolean } {
+  if (typeof data !== "object" || data === null) return { orientation: 0, osdHadVerdict: false };
   const record = data as {
     readonly orientation_degrees?: unknown;
     readonly orientation_confidence?: unknown;
   };
-  return typeof record.orientation_confidence === "number" &&
+  const osdHadVerdict =
+    typeof record.orientation_confidence === "number" &&
+    Number.isFinite(record.orientation_confidence) &&
     record.orientation_confidence >= MIN_ORIENTATION_CONFIDENCE &&
-    isOrientation(record.orientation_degrees)
-    ? record.orientation_degrees
-    : 0;
+    isOrientation(record.orientation_degrees);
+  return {
+    orientation:
+      osdHadVerdict && isOrientation(record.orientation_degrees) ? record.orientation_degrees : 0,
+    osdHadVerdict,
+  };
 }
 
 export interface OrientationKernel {
@@ -116,12 +174,17 @@ export function createOrientationKernel(): OrientationKernel {
     }
   };
 
+  interface OsdImage {
+    readonly canvas: OffscreenCanvas;
+    readonly inkRatio: number;
+  }
+
   const buildImage = async (
     payload: OcrOrientationPayload,
     signal: AbortSignal,
     interrupted: Promise<never>,
     isInterrupted: () => boolean,
-  ): Promise<OffscreenCanvas> => {
+  ): Promise<OsdImage> => {
     if (typeof OffscreenCanvas === "undefined" || typeof createImageBitmap === "undefined") {
       throw new OcrPageFailedError(
         payload.documentId,
@@ -130,8 +193,9 @@ export function createOrientationKernel(): OrientationKernel {
       );
     }
     const blob = new Blob([payload.image.bytes], { type: `image/${payload.image.format}` });
-    const width = Math.max(1, Math.round(payload.image.widthPx * OSD_SCALE));
-    const height = Math.max(1, Math.round(payload.image.heightPx * OSD_SCALE));
+    const factor = osdScaleFactor(payload.image.widthPx, payload.image.heightPx);
+    const width = Math.max(1, Math.round(payload.image.widthPx * factor));
+    const height = Math.max(1, Math.round(payload.image.heightPx * factor));
     let bitmap: ImageBitmap;
     const decoded = createImageBitmap(blob, { resizeWidth: width, resizeHeight: height });
     decoded.then(
@@ -151,18 +215,25 @@ export function createOrientationKernel(): OrientationKernel {
       );
     }
     const canvas = new OffscreenCanvas(width, height);
-    const context = canvas.getContext("2d");
-    if (context === null) {
+    let transferredToDetect = false;
+    try {
+      const context = canvas.getContext("2d");
+      if (context === null) {
+        throw new OcrPageFailedError(
+          payload.documentId,
+          payload.pageIndex,
+          "No se pudo obtener el contexto 2D para OSD.",
+        );
+      }
+      context.drawImage(bitmap, 0, 0);
+      // ADR-190 §3: sobre esta MISMA imagen reducida, antes de descartar nada.
+      const inkRatio = computeInkRatio(context, width, height);
+      transferredToDetect = true;
+      return { canvas, inkRatio };
+    } finally {
       bitmap.close();
-      throw new OcrPageFailedError(
-        payload.documentId,
-        payload.pageIndex,
-        "No se pudo obtener el contexto 2D para OSD.",
-      );
+      if (!transferredToDetect) releaseCanvasBackingStore(canvas);
     }
-    context.drawImage(bitmap, 0, 0);
-    bitmap.close();
-    return canvas;
   };
 
   const detect = async (
@@ -191,8 +262,13 @@ export function createOrientationKernel(): OrientationKernel {
     void aborted.catch(() => undefined);
     const activeGeneration = generation;
     const interrupt = Promise.race([timeout, aborted]);
+    // Fail-open solo hasta obtener la medición. Un fallo posterior de detect
+    // conserva la tinta observada, incluido 0 en una página blanca (ADR-190 §3).
+    let inkRatio = 1;
     let interruptedFlag = false;
     let interruption: unknown = null;
+    let osdCanvas: OffscreenCanvas | null = null;
+    let detectOwnsCanvas = false;
     interrupt.then(
       (value: never) => {
         interruptedFlag = true;
@@ -212,12 +288,20 @@ export function createOrientationKernel(): OrientationKernel {
         buildImage(payload, signal, interrupted, () => interruptedFlag),
         interrupt,
       ]);
+      osdCanvas = image.canvas;
+      inkRatio = image.inkRatio;
       if (interruption !== null) throwInterruption(interruption, payload.documentId);
       if (activeGeneration !== generation) throw new CancelledError(payload.documentId);
-      const result = await Promise.race([activeWorker.detect(image), interrupt]);
+      const detectJob = activeWorker.detect(image.canvas);
+      detectOwnsCanvas = true;
+      void detectJob.then(
+        () => releaseCanvasBackingStore(image.canvas),
+        () => releaseCanvasBackingStore(image.canvas),
+      );
+      const result = await Promise.race([detectJob, interrupt]);
       if (interruption !== null) throwInterruption(interruption, payload.documentId);
       if (activeGeneration !== generation) throw new CancelledError(payload.documentId);
-      return { orientation: readOrientation(result.data) };
+      return { ...readOrientation(result.data), inkRatio: image.inkRatio };
     } catch (err: unknown) {
       if (err instanceof OcrTimeoutError || err instanceof CancelledError) {
         if (activeGeneration === generation) await invalidate();
@@ -225,21 +309,21 @@ export function createOrientationKernel(): OrientationKernel {
       }
       if (err instanceof OcrPageFailedError) throw err;
       if (err instanceof OcrModelMissingError) throw err;
-      return { orientation: 0 };
+      return { orientation: 0, inkRatio, osdHadVerdict: false };
     } finally {
+      if (osdCanvas !== null && !detectOwnsCanvas) releaseCanvasBackingStore(osdCanvas);
       if (timer !== undefined) clearTimeout(timer);
       if (onAbort !== undefined) signal.removeEventListener("abort", onAbort);
     }
   };
 
   const dispose = async (): Promise<void> => {
+    // `disposed` ANTES de `invalidate()`: cierra la puerta de `ensureWorker`
+    // (su guard de tope) para que ninguna carga concurrente pueda arrancar
+    // durante la ventana de `invalidate` — que ya deja `initialization` en
+    // `null` y no espera una carga que puede quedar pendiente indefinidamente.
     disposed = true;
     await invalidate();
-    // `invalidate` desvincula una inicialización obsoleta. Observar su
-    // rechazo evita una promesa huérfana, pero dispose no espera una carga que
-    // puede quedar pendiente indefinidamente.
-    initialization?.catch(() => undefined);
-    initialization = null;
   };
 
   return { detect, dispose };

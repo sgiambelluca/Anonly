@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { OcrEngine } from "../ocr.engine.js";
 import { OcrModelMissingError, OcrTimeoutError } from "../ocr.errors.js";
+import type { OcrImageProducer } from "../ocr.types.js";
 
 import {
   createEncodedPageImage,
@@ -17,7 +18,10 @@ import {
   createValidOcrPageInput,
   createValidOcrPageRequest,
   createImageProducer,
+  mockDetectData,
+  mockRecognizeData,
   mockTesseractWorker,
+  setStubDecodedPixel,
 } from "./fixtures/test-helpers.js";
 
 vi.mock("tesseract.js", () => ({
@@ -31,7 +35,7 @@ interface FakePool {
     readonly payload?: unknown;
     readonly run: () => Promise<unknown>;
   }) => Promise<unknown>;
-  readonly releaseIdleWorkers: () => void;
+  readonly releaseIdleWorkers: () => boolean;
 }
 
 function contextWithConcurrency(ocrPoolSize: number): EngineContext {
@@ -65,7 +69,7 @@ describe("T-5 shared OSD contract", () => {
         const delay = orientationCall === 1 ? 0 : 10;
         await new Promise<void>((resolve) => setTimeout(resolve, delay));
         if (recognitionStarted) overlap = true;
-        return { orientation: 0 };
+        return { orientation: 0, inkRatio: 0, osdHadVerdict: true };
       },
       releaseIdleWorkers: vi.fn(),
     };
@@ -125,7 +129,7 @@ describe("T-5 shared OSD contract", () => {
     const orientationPool: FakePool = {
       dispatch: async (): Promise<unknown> => {
         orientationCalls += 1;
-        return { orientation: 0 };
+        return { orientation: 0, inkRatio: 0, osdHadVerdict: true };
       },
       releaseIdleWorkers: vi.fn(),
     };
@@ -168,7 +172,11 @@ describe("T-5 shared OSD contract", () => {
       releaseIdleWorkers: vi.fn(),
     };
     const orientationPool: FakePool = {
-      dispatch: async (): Promise<unknown> => ({ orientation: 0 }),
+      dispatch: async (): Promise<unknown> => ({
+        orientation: 0,
+        inkRatio: 0,
+        osdHadVerdict: true,
+      }),
       releaseIdleWorkers: vi.fn(),
     };
     const injectedEngine = new OcrEngine(recognitionPool, orientationPool);
@@ -216,7 +224,11 @@ describe("T-5 shared OSD contract", () => {
       releaseIdleWorkers: vi.fn(),
     };
     const orientationPool: FakePool = {
-      dispatch: async (): Promise<unknown> => ({ orientation: 0 }),
+      dispatch: async (): Promise<unknown> => ({
+        orientation: 0,
+        inkRatio: 0,
+        osdHadVerdict: true,
+      }),
       releaseIdleWorkers: vi.fn(),
     };
     const engine = new OcrEngine(recognitionPool, orientationPool);
@@ -265,7 +277,11 @@ describe("T-5 shared OSD contract", () => {
       releaseIdleWorkers: releaseRecognition,
     };
     const orientationPool: FakePool = {
-      dispatch: async (): Promise<unknown> => ({ orientation: 0 }),
+      dispatch: async (): Promise<unknown> => ({
+        orientation: 0,
+        inkRatio: 0,
+        osdHadVerdict: true,
+      }),
       releaseIdleWorkers: releaseOrientation,
     };
     const engine = new OcrEngine(recognitionPool, orientationPool);
@@ -367,7 +383,11 @@ describe("T-5 shared OSD contract", () => {
           maxDetectInFlight = Math.max(maxDetectInFlight, detectInFlight);
           await new Promise<void>((resolve) => setTimeout(resolve, 5));
           detectInFlight -= 1;
-          return { orientation: orientations.get(value.image.widthPx) ?? 0 };
+          return {
+            orientation: orientations.get(value.image.widthPx) ?? 0,
+            inkRatio: 0,
+            osdHadVerdict: true,
+          };
         });
         orientationTail = run.then(() => undefined);
         return run;
@@ -450,7 +470,7 @@ describe("T-5 shared OSD contract", () => {
         orientationCalls += 1;
         if (orientationCalls === 1)
           return Promise.reject(EngineError.deserialize(timeout.serialize()));
-        return { orientation: 0 };
+        return { orientation: 0, inkRatio: 0, osdHadVerdict: true };
       },
       releaseIdleWorkers: vi.fn(),
     };
@@ -498,7 +518,10 @@ describe("T-5 shared OSD contract", () => {
     const releaseRecognition = vi.fn();
     const engine = new OcrEngine(
       { ...createResolvedOcrPool(result()), releaseIdleWorkers: releaseRecognition },
-      { ...createResolvedOcrPool({ orientation: 0 }), releaseIdleWorkers: releaseOrientation },
+      {
+        ...createResolvedOcrPool({ orientation: 0, inkRatio: 0, osdHadVerdict: true }),
+        releaseIdleWorkers: releaseOrientation,
+      },
     );
     engines.push(engine);
     const ctx = contextWithConcurrency(1);
@@ -512,29 +535,113 @@ describe("T-5 shared OSD contract", () => {
     expect(releaseOrientation).toHaveBeenCalledTimes(1);
   });
 
-  it("rebuilds both real local services for a second session after release", async () => {
+  // OCR_Engine.md §13 caso 38 / §14: tras liberar los servicios, una segunda
+  // sesión REAL con idiomas cambiados recrea ambos servicios (no reutiliza
+  // ángulos ni instancias) y, dentro de ella, dos regiones de pageIndex
+  // repetido con distinta orientación conservan su identidad por índice del
+  // descriptor aunque terminen desordenadas.
+  it("recreates services in a second OCR session and preserves repeated-region identity", async () => {
     const firstOrientation = mockTesseractWorker({ confidence: 90, blocks: [] });
     const firstRecognition = mockTesseractWorker({ confidence: 90, blocks: [] });
-    const secondOrientation = mockTesseractWorker({ confidence: 90, blocks: [] });
-    const secondRecognition = mockTesseractWorker({ confidence: 90, blocks: [] });
     vi.mocked(createWorker)
       .mockResolvedValueOnce(firstOrientation)
-      .mockResolvedValueOnce(firstRecognition)
-      .mockResolvedValueOnce(secondOrientation)
-      .mockResolvedValueOnce(secondRecognition);
+      .mockResolvedValueOnce(firstRecognition);
     const engine = new OcrEngine();
     engines.push(engine);
-    const ctx = contextWithConcurrency(1);
-    await engine.init(ctx);
+    const firstCtx = contextWithConcurrency(1);
+    await engine.init(firstCtx);
 
-    await engine.processPage(createValidOcrPageInput("generation-1", 0), ctx);
+    await engine.processPage(createValidOcrPageInput("generation-1", 0), firstCtx);
     engine.releaseIdleWorkers();
     await vi.waitFor(() => expect(firstOrientation.terminate).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(firstRecognition.terminate).toHaveBeenCalledTimes(1));
 
-    await engine.processPage(createValidOcrPageInput("generation-2", 0), ctx);
+    // Segunda sesión real, con idiomas CAMBIADOS: no reutiliza ángulo ni PNG
+    // previos — cada llamada de detect()/recognize() de acá abajo es sobre
+    // instancias frescas. El orden de invocación de ambas se controla
+    // demorando la PRODUCCIÓN de la región 0, para que la región 1 —pese a
+    // estar segunda en el array de requests— sea la primera en pasar por
+    // orientación y reconocimiento.
+    // ADR-162: franjas de margen completamente blancas/transparentes no se
+    // reconocen — deja exactamente UNA llamada a `recognize` por página
+    // (la pasada principal), para que el conteo por orden de llamada de más
+    // abajo sea determinista.
+    setStubDecodedPixel([255, 255, 255, 255]);
+
+    let detectCallIndex = 0;
+    const secondOrientation = mockTesseractWorker(
+      { confidence: 90, blocks: [] },
+      {
+        detect: vi.fn(() => {
+          const idx = detectCallIndex++;
+          // idx 0 = la región que termina primero (request índice 1, 270°);
+          // idx 1 = la que termina después (request índice 0, 90°).
+          return Promise.resolve(mockDetectData(idx === 0 ? 270 : 90));
+        }),
+      },
+    );
+    let recognizeCallIndex = 0;
+    const secondRecognition = mockTesseractWorker(
+      { confidence: 90, blocks: [] },
+      {
+        recognize: vi.fn(() => {
+          const idx = recognizeCallIndex++;
+          const words =
+            idx === 0
+              ? [
+                  {
+                    text: "region-1-first-to-finish",
+                    confidence: 90,
+                    bbox: { x0: 0, y0: 0, x1: 1, y1: 1 },
+                  },
+                ]
+              : [
+                  {
+                    text: "region-0-second-to-finish",
+                    confidence: 90,
+                    bbox: { x0: 0, y0: 0, x1: 1, y1: 1 },
+                  },
+                ];
+          return Promise.resolve({ jobId: `mock-job-${idx}`, data: mockRecognizeData(words) });
+        }),
+      },
+    );
+    vi.mocked(createWorker)
+      .mockResolvedValueOnce(secondOrientation)
+      .mockResolvedValueOnce(secondRecognition);
+
+    const secondCtx = createEngineContext({
+      config: {
+        ...firstCtx.config,
+        workerPool: { ...firstCtx.config.workerPool, ocrPoolSize: 2 },
+        ocr: { ...firstCtx.config.ocr, languages: ["fra"] },
+      },
+    });
+    const requests = [
+      createValidOcrPageRequest("generation-2", 9, { languages: ["fra"] }),
+      createValidOcrPageRequest("generation-2", 9, { languages: ["fra"] }), // pageIndex repetido a propósito
+    ];
+    const produce: OcrImageProducer = (request) =>
+      new Promise((resolve) => {
+        const delayMs = request === requests[0] ? 20 : 0;
+        setTimeout(() => resolve(createEncodedPageImage(100, 40)), delayMs);
+      });
+
+    const outputs = await engine.processSession(requests, produce, secondCtx);
+
+    // Recrea: dos createWorker más (orientación + reconocimiento), ninguna
+    // instancia previa reusada.
     expect(createWorker).toHaveBeenCalledTimes(4);
     expect(secondOrientation.terminate).not.toHaveBeenCalled();
     expect(secondRecognition.terminate).not.toHaveBeenCalled();
+
+    // Identidad: aunque la región 1 terminó primero, `outputs` sigue el
+    // índice del descriptor, no el orden de llegada.
+    expect(outputs.map((output) => output.pageIndex)).toEqual([9, 9]);
+    expect(outputs[0]?.words.map((word) => word.text)).toEqual(["region-0-second-to-finish"]);
+    expect(outputs[1]?.words.map((word) => word.text)).toEqual(["region-1-first-to-finish"]);
+
+    setStubDecodedPixel([0, 0, 0, 255]); // restaura el default para los tests siguientes del archivo
   });
 
   it("does not release a pool while processPage is active, including recognition wait", async () => {
@@ -551,7 +658,11 @@ describe("T-5 shared OSD contract", () => {
       releaseIdleWorkers: releaseRecognition,
     };
     const orientationPool: FakePool = {
-      dispatch: async (): Promise<unknown> => ({ orientation: 0 }),
+      dispatch: async (): Promise<unknown> => ({
+        orientation: 0,
+        inkRatio: 0,
+        osdHadVerdict: true,
+      }),
       releaseIdleWorkers: releaseOrientation,
     };
     const engine = new OcrEngine(recognitionPool, orientationPool);
@@ -579,7 +690,11 @@ describe("T-5 shared OSD contract", () => {
       releaseIdleWorkers: releaseRecognition,
     };
     const orientationPool: FakePool = {
-      dispatch: async (): Promise<unknown> => ({ orientation: 0 }),
+      dispatch: async (): Promise<unknown> => ({
+        orientation: 0,
+        inkRatio: 0,
+        osdHadVerdict: true,
+      }),
       releaseIdleWorkers: releaseOrientation,
     };
     const engine = new OcrEngine(recognitionPool, orientationPool);
@@ -621,7 +736,7 @@ describe("T-5 shared OSD contract", () => {
         if (orientationCalls === 1) {
           throw EngineError.deserialize(missing.serialize());
         }
-        return { orientation: 0 };
+        return { orientation: 0, inkRatio: 0, osdHadVerdict: true };
       },
       releaseIdleWorkers: releaseOrientation,
     };
@@ -675,7 +790,7 @@ describe("T-5 shared OSD contract", () => {
       dispatch: async (): Promise<unknown> => {
         orientationCalls += 1;
         if (orientationCalls === 1) throw EngineError.deserialize(missing.serialize());
-        return { orientation: 0 };
+        return { orientation: 0, inkRatio: 0, osdHadVerdict: true };
       },
       releaseIdleWorkers: releaseOrientation,
     };
@@ -739,7 +854,11 @@ describe("T-5 shared OSD contract", () => {
     const orientationPool = (angles: ReadonlyMap<number, number>): FakePool => ({
       dispatch: async (params): Promise<unknown> => {
         const payload = params.payload as OcrOrientationPayload;
-        return { orientation: angles.get(payload.image.widthPx) ?? 0 };
+        return {
+          orientation: angles.get(payload.image.widthPx) ?? 0,
+          inkRatio: 0,
+          osdHadVerdict: true,
+        };
       },
       releaseIdleWorkers: vi.fn(),
     });

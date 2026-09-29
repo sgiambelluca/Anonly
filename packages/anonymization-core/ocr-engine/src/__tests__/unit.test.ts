@@ -4,6 +4,7 @@ import {
   EventChannel,
   type EncodedPageImage,
   type EngineContext,
+  type OcrPagePayload,
   type Word,
 } from "@anonly/shared";
 import { createWorker, OEM } from "tesseract.js";
@@ -28,6 +29,7 @@ import { OcrModelMissingError, OcrPageFailedError } from "../ocr.errors.js";
 import {
   createEncodedPageImage,
   createEngineContext,
+  createImageProducer,
   createMockConfig,
   createResolvedOcrPool,
   createTrackingOcrPool,
@@ -39,6 +41,7 @@ import {
   mockRecognizeData,
   mockTesseractWorker,
   setStubCanvasContextAvailable,
+  setStubPutImageDataThrowsOnce,
   setStubDecodedPixel,
   setStubDecodedPixelPainterSequence,
   setStubDecodedPixelSequence,
@@ -536,6 +539,34 @@ describe("OcrEngine — unit tests", () => {
       }
     });
 
+    it("releases the canvas if putImageData fails before handing it to Tesseract", async () => {
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockEmptyRecognizeData(), {
+          detect: vi.fn(() => Promise.resolve(mockDetectData(90))),
+        }),
+      );
+      await engine.init(ctx);
+      const tracker = trackOffscreenCanvasConstructions();
+      setStubPutImageDataThrowsOnce();
+      try {
+        await expect(
+          engine.processPage(
+            {
+              ...createValidOcrPageInput("doc-put-image-release", 0),
+              image: createEncodedPageImage(100, 40),
+            },
+            ctx,
+          ),
+        ).rejects.toThrow(OcrPageFailedError);
+        expect(tracker.canvases.length).toBeGreaterThan(0);
+        expect(tracker.canvases.every((canvas) => canvas.width === 0 && canvas.height === 0)).toBe(
+          true,
+        );
+      } finally {
+        tracker.restore();
+      }
+    });
+
     /*
      * `Duplicacion_De_Logica.md` §6: `render-engine` guardaba sus dos
      * construcciones de `OffscreenCanvas` y este motor no. Sin la guarda, el
@@ -679,6 +710,100 @@ describe("OcrEngine — unit tests", () => {
 
       await expect(resultPromise).rejects.toThrow(CancelledError);
     });
+
+    it("keeps a rotated OCR canvas alive after abort until the Tesseract job settles", async () => {
+      let finishRecognize: ((value: { jobId: string; data: unknown }) => void) | undefined;
+      const recognize = vi.fn(
+        (_image: unknown) =>
+          new Promise<{ jobId: string; data: unknown }>((resolve) => {
+            finishRecognize = resolve;
+          }),
+      );
+      const worker = mockTesseractWorker(mockEmptyRecognizeData(), {
+        recognize,
+        detect: vi.fn(() => Promise.resolve(mockDetectData(90))),
+      });
+      vi.mocked(createWorker).mockResolvedValue(worker);
+
+      const abortController = new AbortController();
+      const abortedCtx = createEngineContext({ abortSignal: abortController.signal });
+      await engine.init(abortedCtx);
+      const tracker = trackOffscreenCanvasConstructions();
+      const resultPromise = engine.processPage(
+        {
+          ...createValidOcrPageInput("doc-abort-canvas", 0),
+          image: createEncodedPageImage(100, 40),
+        },
+        abortedCtx,
+      );
+      try {
+        await vi.waitFor(() => expect(recognize).toHaveBeenCalled());
+        const canvas = recognize.mock.calls[0]?.[0];
+        if (!(canvas instanceof OffscreenCanvas)) throw new Error("expected OCR OffscreenCanvas");
+        const recognizedCanvas = canvas;
+        expect(recognizedCanvas.width).toBeGreaterThan(0);
+
+        abortController.abort();
+        await expect(resultPromise).rejects.toThrow(CancelledError);
+        expect(recognizedCanvas.width).toBeGreaterThan(0);
+
+        finishRecognize?.({ jobId: "late-after-abort", data: mockEmptyRecognizeData() });
+        await vi.waitFor(() => expect(recognizedCanvas.width).toBe(0));
+      } finally {
+        tracker.restore();
+      }
+    });
+
+    it("keeps a rotated OCR canvas alive after timeout until the Tesseract job settles", async () => {
+      const finishRecognizes: Array<(value: { jobId: string; data: unknown }) => void> = [];
+      const recognize = vi.fn(
+        (_image: unknown) =>
+          new Promise<{ jobId: string; data: unknown }>((resolve) => {
+            finishRecognizes.push(resolve);
+          }),
+      );
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockEmptyRecognizeData(), {
+          recognize,
+          detect: vi.fn(() => Promise.resolve(mockDetectData(90))),
+        }),
+      );
+
+      const timeoutCtx = createEngineContext({
+        config: createMockConfig({
+          workerPool: {
+            ...createMockConfig().workerPool,
+            timeouts: { ...createMockConfig().workerPool.timeouts, "ocr-page": 5 },
+          },
+        }),
+      });
+      await engine.init(timeoutCtx);
+      const tracker = trackOffscreenCanvasConstructions();
+      try {
+        await expect(
+          engine.processPage(
+            {
+              ...createValidOcrPageInput("doc-timeout-canvas", 0),
+              image: createEncodedPageImage(100, 40),
+            },
+            timeoutCtx,
+          ),
+        ).rejects.toThrow("Timeout");
+        await vi.waitFor(() => expect(recognize).toHaveBeenCalled());
+        const canvas = recognize.mock.calls[0]?.[0];
+        if (!(canvas instanceof OffscreenCanvas)) throw new Error("expected OCR OffscreenCanvas");
+        expect(canvas.width).toBeGreaterThan(0);
+
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        expect(canvas.width).toBeGreaterThan(0);
+        for (const finishRecognize of finishRecognizes) {
+          finishRecognize({ jobId: "late-after-timeout", data: mockEmptyRecognizeData() });
+        }
+        await vi.waitFor(() => expect(canvas.width).toBe(0));
+      } finally {
+        tracker.restore();
+      }
+    });
   });
 
   describe("processSession — presupuesto de bytes en vivo (ADR-143 §3/§6)", () => {
@@ -774,6 +899,97 @@ describe("OcrEngine — unit tests", () => {
       abortController.abort();
 
       await expect(sessionPromise).rejects.toThrow(CancelledError);
+    });
+
+    // ADR-143 + ADR-164: la reserva de una imagen se toma ANTES de producir y
+    // se libera recién cuando la página se asienta — eso incluye el tiempo
+    // que pasa ENCOLADA para su turno de orientación (el OSD es serial: una
+    // inicialización, un detect en vuelo) y no solo la espera de
+    // reconocimiento. Con presupuesto para dos imágenes y tres descriptores,
+    // la segunda retiene su reserva mientras espera el turno de detect() sin
+    // haber reconocido nada todavía, y la tercera no puede producir hasta que
+    // la PRIMERA se asienta — no la segunda, que sigue viva a mitad de su
+    // propio reconocimiento.
+    it("keeps the image reservation across orientation queue and recognition", async () => {
+      const pendingDetects: Array<() => void> = [];
+      const detect = vi.fn(
+        () =>
+          new Promise<ReturnType<typeof mockDetectData>>((resolve) => {
+            pendingDetects.push(() => resolve(mockDetectData(0)));
+          }),
+      );
+      const pendingRecognizes: Array<(value: unknown) => void> = [];
+      const recognize = vi.fn(
+        () =>
+          new Promise((resolve) => {
+            pendingRecognizes.push(resolve);
+          }),
+      );
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockEmptyRecognizeData(), { detect, recognize }),
+      );
+
+      const budgetCtx = createEngineContext({
+        config: createMockConfig({
+          workerPool: { ...createMockConfig().workerPool, ocrPoolSize: 2 },
+          ocr: { languages: ["spa", "eng"], dpi: 300, maxLiveImageBytes: 2 },
+        }),
+      });
+      await engine.init(budgetCtx);
+
+      const produce = vi.fn(() => Promise.resolve(createEncodedPageImage(1, 1)));
+      const requests = [
+        createValidOcrPageRequest("doc-budget-orient", 0, { estimatedBytes: 1 }),
+        createValidOcrPageRequest("doc-budget-orient", 1, { estimatedBytes: 1 }),
+        createValidOcrPageRequest("doc-budget-orient", 2, { estimatedBytes: 1 }),
+      ];
+
+      const sessionPromise = engine.processSession(requests, produce, budgetCtx);
+
+      // Las dos primeras páginas producen (presupuesto lleno: 2/2). El OSD es
+      // serial: la segunda queda encolada detrás de la primera sin llamar a
+      // detect() todavía.
+      await vi.waitFor(() => expect(produce).toHaveBeenCalledTimes(2));
+      await vi.waitFor(() => expect(detect).toHaveBeenCalledTimes(1));
+      expect(produce).toHaveBeenCalledTimes(2); // la 3ra sigue sin lugar
+
+      // Libera el detect de la página 0: pasa a esperar recognize(), y recién
+      // ENTONCES el OSD queda libre para atender a la página 1 encolada.
+      pendingDetects.shift()?.();
+      await vi.waitFor(() => expect(recognize).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() => expect(detect).toHaveBeenCalledTimes(2));
+      // La página 1, aunque solo encolada para orientación hasta hace un
+      // instante (sin haber reconocido nada todavía), sigue reteniendo su
+      // reserva: el presupuesto sigue lleno y la página 2 no pudo producir.
+      expect(produce).toHaveBeenCalledTimes(2);
+
+      // Libera el detect de la página 1: pasa a esperar su propio recognize().
+      pendingDetects.shift()?.();
+      await vi.waitFor(() => expect(recognize).toHaveBeenCalledTimes(2));
+      expect(produce).toHaveBeenCalledTimes(2); // las dos reservas siguen en pie
+
+      // Asienta la página 0 (libera SU reserva): recién ahí entra la página
+      // 2, aunque la página 1 sigue viva a mitad de su propio
+      // reconocimiento — prueba que la reserva de la página 1 es
+      // independiente y sigue en pie por su cuenta.
+      // ADR-190 §2: una palabra fiable evita que la cadena de verificación
+      // dispare pasos adicionales (que despacharían MÁS `recognize()` sobre
+      // esta misma promesa diferida, descolocando la coreografía del test).
+      const RELIABLE_DATA = mockRecognizeData([
+        { text: "x", confidence: 95, bbox: { x0: 0, y0: 0, x1: 5, y1: 5 } },
+      ]);
+      pendingRecognizes.shift()?.({ jobId: "job-0", data: RELIABLE_DATA });
+      await vi.waitFor(() => expect(produce).toHaveBeenCalledTimes(3));
+
+      // Termina de asentar las páginas 1 y 2.
+      await vi.waitFor(() => expect(detect).toHaveBeenCalledTimes(3));
+      pendingDetects.shift()?.();
+      await vi.waitFor(() => expect(recognize).toHaveBeenCalledTimes(3));
+      pendingRecognizes.shift()?.({ jobId: "job-1", data: RELIABLE_DATA });
+      pendingRecognizes.shift()?.({ jobId: "job-2", data: RELIABLE_DATA });
+
+      const outputs = await sessionPromise;
+      expect(outputs.map((o) => o.pageIndex)).toEqual([0, 1, 2]);
     });
   });
 
@@ -881,6 +1097,51 @@ describe("OcrEngine — unit tests", () => {
       ).resolves.toBeDefined();
 
       await inProcessEngine.dispose();
+    });
+
+    // O-6: `releaseIdleWorkers()` reseteaba `modelWarm` incondicionalmente,
+    // aunque ninguno de los dos pools inyectados liberara nada de verdad
+    // (no ociosos) y sin kernel local propio cargado (los dos `dispatch`
+    // de acá abajo nunca invocan `params.run()`, así que este engine nunca
+    // toca `this.orientationKernel` ni el kernel de reconocimiento a nivel
+    // de módulo). Consecuencia del bug: la sesión siguiente anunciaba
+    // `OCR_STARTED.modelLoading` sin haber descargado ni recargado nada.
+    it("does not reset modelWarm when neither pool actually releases anything", async () => {
+      const recognitionPool = {
+        dispatch: (): Promise<unknown> => Promise.resolve({ words: [], confidence: 0 }),
+        releaseIdleWorkers: (): boolean => false,
+      };
+      const orientationPool = {
+        dispatch: (): Promise<unknown> => Promise.resolve({ orientation: 0 }),
+        releaseIdleWorkers: (): boolean => false,
+      };
+      const pooledEngine = new OcrEngine(recognitionPool, orientationPool);
+      await pooledEngine.init(ctx);
+
+      // Calienta el modelo con una sesión exitosa.
+      await pooledEngine.processSession(
+        [createValidOcrPageRequest("doc-warm-release", 0)],
+        createImageProducer(),
+        ctx,
+      );
+
+      pooledEngine.releaseIdleWorkers();
+      await new Promise<void>((resolve) => setTimeout(resolve, 0)); // deja asentar el cleanup async
+
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      await pooledEngine.processSession(
+        [createValidOcrPageRequest("doc-warm-release", 1)],
+        createImageProducer(),
+        ctx,
+      );
+
+      const startedPayload = busEmitSpy.mock.calls.find(
+        ([channel, event]) => channel === EventChannel.Ocr && event === EngineEvents.OCR_STARTED,
+      )?.[2] as { readonly modelLoading?: boolean } | undefined;
+      // Nada se liberó: la sesión siguiente NO debería anunciar carga.
+      expect(startedPayload?.modelLoading).toBeUndefined();
+
+      await pooledEngine.dispose();
     });
   });
 
@@ -1034,14 +1295,18 @@ describe("OcrEngine — unit tests", () => {
       );
     });
 
-    it("detects orientation on a half-scale raster (ADR-119 §2)", async () => {
+    it("detects orientation on a fixed-size raster (ADR-119 §2, ADR-190 §1)", async () => {
       /*
-       * OSD solo elige entre cuatro orientaciones, no lee. A media escala
-       * acierta las cuatro con confianza 12-16 y tarda 290 ms en vez de 690 —
-       * y eso es lo que hace que arreglar OSD no cueste tiempo.
+       * OSD solo elige entre cuatro orientaciones, no lee. Al tamaño fijo de
+       * ADR-190 §1 acierta las cuatro con confianza 12-16 y tarda 290 ms en
+       * vez de 690 — y eso es lo que hace que arreglar OSD no cueste tiempo.
        */
       // Declarado CON parametro para poder inspeccionar el raster que recibe.
-      const detect = vi.fn((_image: unknown) => Promise.resolve(mockDetectData(0)));
+      const detectedSizes: Array<{ width: number; height: number }> = [];
+      const detect = vi.fn((image: { width: number; height: number }) => {
+        detectedSizes.push({ width: image.width, height: image.height });
+        return Promise.resolve(mockDetectData(0));
+      });
       vi.mocked(createWorker).mockResolvedValue(
         mockTesseractWorker(mockRecognizeData(UNA_PALABRA), { detect }),
       );
@@ -1050,10 +1315,12 @@ describe("OcrEngine — unit tests", () => {
       await engine.processPage(inputConRaster("doc-osd-escala"), ctx);
 
       expect(detect).toHaveBeenCalledTimes(1);
-      const recibido = detect.mock.calls[0]?.[0] as { width: number; height: number };
-      // el raster es 100 × 40
-      expect(recibido.width).toBe(50);
-      expect(recibido.height).toBe(20);
+      const recibido = detectedSizes[0]!;
+      // El raster es 100 × 40 (lado largo 100). ADR-190 §1: factor =
+      // min(OSD_MAX_UPSCALE=2, 1754/100=17.54) = 2 — el raster de fixture es
+      // mucho más chico que un A4 real, así que se agranda al tope.
+      expect(recibido.width).toBe(200);
+      expect(recibido.height).toBe(80);
     });
 
     it("a failing OSD worker throws instead of pretending every page is upright", async () => {
@@ -1237,15 +1504,31 @@ describe("OcrEngine — unit tests", () => {
       expect(output.words.map((w) => w.text)).toEqual(["cuerpo"]);
     });
 
+    // ADR-190 §2: las cuatro tests de acá abajo miden llamadas de MARGEN,
+    // ajenas a la cadena de verificación de lectura débil — la pasada
+    // principal devuelve una palabra fiable (confianza ≥ 60) para que la
+    // página se dé por resuelta en el paso 1 y la cadena no dispare pasos
+    // adicionales (que multiplicarían estos conteos). El contenido de las
+    // pasadas de margen no importa para estos tests (solo su CANTIDAD), así
+    // que reciben la misma palabra fiable sin afectar la aserción.
+    const UNA_PALABRA_FIABLE: ReadonlyArray<MockRecognizeWord> = [
+      { text: "x", confidence: 95, bbox: { x0: 0, y0: 0, x1: 5, y1: 5 } },
+    ];
+
     it("opaque white and transparent colored strips skip both margin recognizes", async () => {
       const recognize = vi.fn(() =>
-        Promise.resolve({ jobId: "j", data: mockEmptyRecognizeData() }),
+        Promise.resolve({ jobId: "j", data: mockRecognizeData(UNA_PALABRA_FIABLE) }),
       );
       vi.mocked(createWorker).mockResolvedValue(
-        mockTesseractWorker(mockEmptyRecognizeData(), { recognize }),
+        mockTesseractWorker(mockRecognizeData(UNA_PALABRA_FIABLE), { recognize }),
       );
       await engine.init(ctx);
       setStubDecodedPixelSequence([
+        // ADR-190 §3: el kernel de orientación lee la imagen reducida para
+        // `inkRatio` ANTES de que el kernel de reconocimiento decodifique
+        // las franjas — consume la primera entrada de la secuencia. El
+        // valor acá no importa (no se afirma sobre `inkRatio` en este test).
+        [0, 0, 0, 255],
         [255, 255, 255, 255],
         [10, 20, 30, 0],
       ]);
@@ -1255,10 +1538,10 @@ describe("OcrEngine — unit tests", () => {
 
     it("one near-white opaque pixel keeps both margin recognizes", async () => {
       const recognize = vi.fn(() =>
-        Promise.resolve({ jobId: "j", data: mockEmptyRecognizeData() }),
+        Promise.resolve({ jobId: "j", data: mockRecognizeData(UNA_PALABRA_FIABLE) }),
       );
       vi.mocked(createWorker).mockResolvedValue(
-        mockTesseractWorker(mockEmptyRecognizeData(), { recognize }),
+        mockTesseractWorker(mockRecognizeData(UNA_PALABRA_FIABLE), { recognize }),
       );
       await engine.init(ctx);
       setStubDecodedPixel([254, 255, 255, 255]);
@@ -1268,10 +1551,10 @@ describe("OcrEngine — unit tests", () => {
 
     it("one almost-transparent black pixel keeps both margin recognizes", async () => {
       const recognize = vi.fn(() =>
-        Promise.resolve({ jobId: "j", data: mockEmptyRecognizeData() }),
+        Promise.resolve({ jobId: "j", data: mockRecognizeData(UNA_PALABRA_FIABLE) }),
       );
       vi.mocked(createWorker).mockResolvedValue(
-        mockTesseractWorker(mockEmptyRecognizeData(), { recognize }),
+        mockTesseractWorker(mockRecognizeData(UNA_PALABRA_FIABLE), { recognize }),
       );
       await engine.init(ctx);
       setStubDecodedPixel([0, 0, 0, 1]);
@@ -1281,13 +1564,16 @@ describe("OcrEngine — unit tests", () => {
 
     it("one white strip and one active strip run exactly two margin recognizes", async () => {
       const recognize = vi.fn(() =>
-        Promise.resolve({ jobId: "j", data: mockEmptyRecognizeData() }),
+        Promise.resolve({ jobId: "j", data: mockRecognizeData(UNA_PALABRA_FIABLE) }),
       );
       vi.mocked(createWorker).mockResolvedValue(
-        mockTesseractWorker(mockEmptyRecognizeData(), { recognize }),
+        mockTesseractWorker(mockRecognizeData(UNA_PALABRA_FIABLE), { recognize }),
       );
       await engine.init(ctx);
       setStubDecodedPixelSequence([
+        // ADR-190 §3: consumida por el `inkRatio` del OSD (ver comentario
+        // equivalente arriba).
+        [0, 0, 0, 255],
         [255, 255, 255, 255],
         [0, 0, 0, 255],
       ]);
@@ -1336,7 +1622,9 @@ describe("OcrEngine — unit tests", () => {
         mockTesseractWorker(mockRecognizeData(CUBRE_TODA_LA_FRANJA), { recognize }),
       );
       await engine.init(ctx);
-      setStubDecodedPixelSequence([[0, 0, 0, 255], BLANCO]);
+      // ADR-190 §3: la primera entrada la consume el `inkRatio` del OSD; las
+      // dos siguientes son las franjas izquierda y derecha de siempre.
+      setStubDecodedPixelSequence([[0, 0, 0, 255], [0, 0, 0, 255], BLANCO]);
 
       await engine.processPage(createValidOcrPageInput("doc-165-explicada"), ctx);
 
@@ -1387,7 +1675,7 @@ describe("OcrEngine — unit tests", () => {
     });
 
     it("a failure while projecting or inspecting runs the passes", async () => {
-      // ADR-165 §2.5 / caso 28: una caja de la pasada derecha con datos
+      // ADR-165 §2.5 / caso 41: una caja de la pasada derecha con datos
       // incoherentes (NaN) no se puede proyectar. Fail-open: se ejecutan las
       // pasadas igual, sin importar que la tinta sea uniforme y "parecería"
       // explicable si la proyección funcionara.
@@ -1407,7 +1695,7 @@ describe("OcrEngine — unit tests", () => {
     });
 
     it("the recognized strip receives untouched pixels", async () => {
-      // ADR-165 §2.4 / caso 29: la mitad "explicada" (x < 10) lleva un color
+      // ADR-165 §2.4 / caso 42: la mitad "explicada" (x < 10) lleva un color
       // MARCA; la mitad de afuera lleva otro color, para forzar que la
       // franja igual se reconozca. Si una implementación tapara la región
       // explicada antes de reconocer, la marca desaparecería del canvas que
@@ -1419,7 +1707,13 @@ describe("OcrEngine — unit tests", () => {
         mockTesseractWorker(mockRecognizeData(CUERPO_MITAD_IZQUIERDA), { recognize }),
       );
       await engine.init(ctx);
-      setStubDecodedPixelPainterSequence([(x) => (x < 10 ? MARCA : OTRA_TINTA), () => BLANCO]);
+      // ADR-190 §3: el primer pintor lo consume el `inkRatio` del OSD antes
+      // de que el kernel de reconocimiento decodifique las dos franjas.
+      setStubDecodedPixelPainterSequence([
+        () => BLANCO,
+        (x) => (x < 10 ? MARCA : OTRA_TINTA),
+        () => BLANCO,
+      ]);
 
       await engine.processPage(createValidOcrPageInput("doc-165-sin-enmascarar"), ctx);
 
@@ -1607,7 +1901,14 @@ describe("OcrEngine — unit tests", () => {
 
     it("the common path builds no full-page OffscreenCanvas", async () => {
       // Fase 1 (orientación 0, camino común): cero canvas de página completa.
-      vi.mocked(createWorker).mockResolvedValue(mockTesseractWorker(mockEmptyRecognizeData()));
+      // ADR-190 §2: la palabra fiable evita que la cadena de verificación
+      // reintente en otros ángulos (que sí pasan por el camino lento,
+      // contaminando este conteo — ver el caso 21/rotado más abajo).
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(
+          mockRecognizeData([{ text: "x", confidence: 95, bbox: { x0: 0, y0: 0, x1: 5, y1: 5 } }]),
+        ),
+      );
       await engine.init(ctx);
       let tracker = trackOffscreenCanvasConstructions();
       try {
@@ -1659,6 +1960,31 @@ describe("OcrEngine — unit tests", () => {
       expect(mainImage).toBeInstanceOf(Blob);
     });
 
+    it("releases temporary canvas backing stores after rotated OCR settles", async () => {
+      const detect = vi.fn(() => Promise.resolve(mockDetectData(90)));
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(
+          mockRecognizeData([
+            { text: "x", confidence: 95, bbox: { x0: 10, y0: 10, x1: 40, y1: 25 } },
+          ]),
+          { detect },
+        ),
+      );
+      await engine.init(ctx);
+
+      const tracker = trackOffscreenCanvasConstructions();
+      try {
+        await engine.processPage(inputConRaster("doc-160-release-canvas"), ctx);
+      } finally {
+        tracker.restore();
+      }
+
+      expect(tracker.canvases.length).toBeGreaterThan(0);
+      expect(tracker.canvases.map((canvas) => [canvas.width, canvas.height])).toEqual(
+        tracker.canvases.map(() => [0, 0]),
+      );
+    });
+
     it("maps bboxes with image.widthPx/heightPx, not with a decoded ImageData", async () => {
       // 137 x 59: dimensiones fuera de lo común — si el mapeo alguna vez
       // leyera de otro lado (un ImageData decodificado, un default), este
@@ -1686,7 +2012,11 @@ describe("OcrEngine — unit tests", () => {
     });
 
     it("OSD receives an image already reduced to OSD_SCALE, never a full-page one", async () => {
-      const detect = vi.fn((_image: unknown) => Promise.resolve(mockDetectData(0)));
+      const detectedSizes: Array<{ width: number; height: number }> = [];
+      const detect = vi.fn((image: { width: number; height: number }) => {
+        detectedSizes.push({ width: image.width, height: image.height });
+        return Promise.resolve(mockDetectData(0));
+      });
       vi.mocked(createWorker).mockResolvedValue(
         mockTesseractWorker(mockEmptyRecognizeData(), { detect }),
       );
@@ -1695,11 +2025,69 @@ describe("OcrEngine — unit tests", () => {
       await engine.processPage(inputConRaster("doc-160-osd-scale"), ctx);
 
       expect(detect).toHaveBeenCalledTimes(1);
-      const osdImage = detect.mock.calls[0]?.[0] as { width: number; height: number };
-      // OSD_SCALE = 0.5 (ADR-119 §2), no exportada — se verifica el
-      // RESULTADO (mitad de cada dimensión de la página, 100x40).
-      expect(osdImage.width).toBe(50);
-      expect(osdImage.height).toBe(20);
+      const osdImage = detectedSizes[0]!;
+      // ADR-190 §1 reemplazó el escalado relativo (`OSD_SCALE = 0.5`) por un
+      // tamaño de lado largo fijo: para 100×40 (lado largo 100, bien menor a
+      // 1754), el factor es `min(OSD_MAX_UPSCALE=2, 1754/100)` = 2 — el
+      // nombre del test se conserva (OCR_Engine.md §14), solo cambia el
+      // valor esperado. Sigue siendo una imagen reducida/escalada, nunca la
+      // página completa sin tocar.
+      expect(osdImage.width).toBe(200);
+      expect(osdImage.height).toBe(80);
+    });
+
+    // Caso 43 (§13), ADR-190 §1: el OSD deja de depender del DPI del OCR.
+    it("osd input is scaled to a fixed long side", async () => {
+      const detectedSizes: Array<{ width: number; height: number }> = [];
+      const detect = vi.fn((image: { width: number; height: number }) => {
+        detectedSizes.push({ width: image.width, height: image.height });
+        return Promise.resolve(mockDetectData(0));
+      });
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockEmptyRecognizeData(), { detect }),
+      );
+      await engine.init(ctx);
+
+      // A4 a 150 dpi (1240×1754, lado largo YA en 1754) y a 300 dpi
+      // (2480×3508, lado largo el doble): factor = min(2, 1754/ladoLargo) da
+      // 1 y 0,5 respectivamente — las dos llegan al OSD con el MISMO tamaño.
+      const A4_150DPI = { widthPx: 1240, heightPx: 1754 };
+      const A4_300DPI = { widthPx: 2480, heightPx: 3508 };
+
+      await engine.processPage(
+        {
+          ...createValidOcrPageInput("doc-osd-fixed-150", 0),
+          image: createEncodedPageImage(A4_150DPI.widthPx, A4_150DPI.heightPx),
+        },
+        ctx,
+      );
+      await engine.processPage(
+        {
+          ...createValidOcrPageInput("doc-osd-fixed-300", 1),
+          image: createEncodedPageImage(A4_300DPI.widthPx, A4_300DPI.heightPx),
+        },
+        ctx,
+      );
+
+      expect(detect).toHaveBeenCalledTimes(2);
+      const image150 = detectedSizes[0]!;
+      const image300 = detectedSizes[1]!;
+      expect(image150).toEqual({ width: 1240, height: 1754 });
+      expect(image300).toEqual({ width: 1240, height: 1754 });
+
+      // El tope OSD_MAX_UPSCALE = 2: una imagen bien más chica que el
+      // objetivo no se agranda más allá del doble (mismo raster 100×40 que
+      // el test de arriba, que ya lo mide: min(2, 1754/100) = 2, no 17,54).
+      const tiny = { widthPx: 100, heightPx: 40 };
+      await engine.processPage(
+        {
+          ...createValidOcrPageInput("doc-osd-fixed-tiny", 2),
+          image: createEncodedPageImage(tiny.widthPx, tiny.heightPx),
+        },
+        ctx,
+      );
+      const imageTiny = detectedSizes[2]!;
+      expect(imageTiny).toEqual({ width: 200, height: 80 });
     });
 
     it("margin strips decode only their strip, not the whole page", async () => {
@@ -1861,6 +2249,409 @@ describe("OcrEngine — unit tests", () => {
       const real: unknown = await vi.importActual("tesseract.js");
       const psm = (real as { PSM?: Record<string, unknown> }).PSM;
       expect(psm?.["SPARSE_TEXT"]).toBe("11");
+    });
+  });
+
+  // ─── ADR-190 §2: cadena de verificación de una lectura débil ───
+  //
+  // Las cuatro tests de acá abajo inyectan un `orientationPool` FAKE (en vez
+  // de dejar que `processPage` use el kernel de orientación real) para que
+  // `inkRatio` sea un valor directo y no dependa del mismo stub de píxeles
+  // que también gobierna las franjas de margen de ADR-121/162/165 — si
+  // ambos compartieran el stub, cada intento de la cadena arrastraría de 0 a
+  // 4 llamadas de margen extra, además de las que mide el test (esa
+  // interacción ya tiene sus propios tests dedicados más arriba). La
+  // RECONOCIMIENTO sigue sin inyectar — corre el kernel real (`kernel.ts`) a
+  // través de `createWorker`/`recognize` mockeados, así que la conversión de
+  // coordenadas (`toWords`, `dpi × upscale`) es la real.
+  describe("cadena de verificación (ADR-190 §2)", () => {
+    function inputConRaster(
+      documentId: string,
+      overrides?: Partial<ReturnType<typeof createValidOcrPageInput>>,
+    ): ReturnType<typeof createValidOcrPageInput> {
+      return {
+        ...createValidOcrPageInput(documentId, 0),
+        image: createEncodedPageImage(100, 40),
+        ...overrides,
+      };
+    }
+    const PALABRA_FIABLE = [{ text: "x", confidence: 95, bbox: { x0: 0, y0: 0, x1: 5, y1: 5 } }];
+    const PALABRA_DEBIL = [{ text: "y", confidence: 40, bbox: { x0: 0, y0: 0, x1: 5, y1: 5 } }];
+
+    function fakeOrientationPool(
+      orientation: 0 | 90 | 180 | 270,
+      inkRatio: number,
+      osdHadVerdict = true,
+    ): { readonly dispatch: () => Promise<unknown>; readonly releaseIdleWorkers: () => boolean } {
+      return {
+        dispatch: (): Promise<unknown> => Promise.resolve({ orientation, inkRatio, osdHadVerdict }),
+        releaseIdleWorkers: (): boolean => false,
+      };
+    }
+
+    beforeEach(() => {
+      // Franjas de margen desactivadas (ADR-162): sin esto, CADA intento de
+      // la cadena (uno por ángulo probado) arrastraría hasta 4 llamadas de
+      // margen más, además de la principal que estos tests cuentan.
+      setStubDecodedPixel([255, 255, 255, 255]);
+    });
+
+    // Caso 44 (§13), ADR-190 §2 paso 2.
+    it("a wrong osd angle is corrected by recognizing upright", async () => {
+      let recognizeCalls = 0;
+      const recognize = vi.fn(() => {
+        recognizeCalls += 1;
+        // Llamada 1: orientation 180 (débil). Llamada 2: orientation 0 (fiable).
+        const data =
+          recognizeCalls === 1
+            ? mockRecognizeData(PALABRA_DEBIL)
+            : mockRecognizeData(PALABRA_FIABLE);
+        return Promise.resolve({ jobId: `j${recognizeCalls}`, data });
+      });
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(PALABRA_FIABLE), { recognize }),
+      );
+      // OSD "falso": ángulo 180, página con tinta.
+      const pooledEngine = new OcrEngine(undefined, fakeOrientationPool(180, 1));
+      await pooledEngine.init(ctx);
+
+      const output = await pooledEngine.processPage(inputConRaster("doc-190-wrong-angle"), ctx);
+
+      expect(recognize).toHaveBeenCalledTimes(2);
+      expect(output.words.map((w) => w.text)).toEqual(["x"]);
+      await pooledEngine.dispose();
+    });
+
+    // Caso 44 (§13), enmienda: la confianza sola no valida el ángulo del OSD.
+    it("a rotated osd verdict always compares against upright even when the first reading looks reliable", async () => {
+      const recognize = vi
+        .fn()
+        .mockResolvedValueOnce({
+          jobId: "rotated",
+          data: mockRecognizeData([
+            { text: "9NN", confidence: 90, bbox: { x0: 0, y0: 0, x1: 5, y1: 5 } },
+          ]),
+        })
+        .mockResolvedValueOnce({
+          jobId: "upright",
+          data: mockRecognizeData([
+            { text: "Nombre", confidence: 80, bbox: { x0: 0, y0: 0, x1: 20, y1: 5 } },
+            { text: "Apellido", confidence: 80, bbox: { x0: 25, y0: 0, x1: 50, y1: 5 } },
+          ]),
+        });
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockEmptyRecognizeData(), { recognize }),
+      );
+      const recognitionPool = createTrackingOcrPool();
+      const pooledEngine = new OcrEngine(recognitionPool, fakeOrientationPool(180, 1));
+      await pooledEngine.init(ctx);
+
+      const output = await pooledEngine.processPage(
+        inputConRaster("doc-190-reliable-garbage"),
+        ctx,
+      );
+
+      expect(recognize).toHaveBeenCalledTimes(2);
+      // El pool registra payloads producidos por este motor, con su forma validada.
+      const payloads = recognitionPool.calls.map(({ payload }) => payload as OcrPagePayload);
+      expect(payloads.map((payload) => payload.orientation)).toEqual([180, 0]);
+      expect(output.words.map((word) => word.text)).toEqual(["Nombre", "Apellido"]);
+      expect(output.confidence).toBeCloseTo(0.8);
+      expect(output.words.every((word) => word.bbox.rotation === undefined)).toBe(true);
+      await pooledEngine.dispose();
+    });
+
+    // Caso 44 (§13), ADR-190 §2 paso 3.
+    it("a weak reading with ink tries the remaining angles", async () => {
+      let recognizeCalls = 0;
+      const recognize = vi.fn(() => {
+        recognizeCalls += 1;
+        // Llamadas 1 (0°) y 2 (90°) débiles; llamada 3 (180°) fiable.
+        const data =
+          recognizeCalls <= 2
+            ? mockRecognizeData(PALABRA_DEBIL)
+            : mockRecognizeData(PALABRA_FIABLE);
+        return Promise.resolve({ jobId: `j${recognizeCalls}`, data });
+      });
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(PALABRA_FIABLE), { recognize }),
+      );
+      // OSD ya da 0: el paso 2 no corre.
+      const pooledEngine = new OcrEngine(undefined, fakeOrientationPool(0, 1));
+      await pooledEngine.init(ctx);
+
+      const output = await pooledEngine.processPage(
+        inputConRaster("doc-190-remaining-angles"),
+        ctx,
+      );
+
+      // 0° (paso 1) + 90° y 180° (paso 3, para en la primera fiable) = 3.
+      expect(recognize).toHaveBeenCalledTimes(3);
+      expect(output.words.map((w) => w.text)).toEqual(["x"]);
+      await pooledEngine.dispose();
+    });
+
+    // Caso 45 (§13), ADR-190 §2 paso 4: la conversión usa dpi × upscale.
+    it("a weak reading below 300 dpi retries upscaled", async () => {
+      let recognizeCalls = 0;
+      const recognize = vi.fn(() => {
+        recognizeCalls += 1;
+        if (recognizeCalls <= 4) {
+          // Paso 1 (0°) + paso 3 (90°, 180°, 270°): las cuatro débiles.
+          return Promise.resolve({
+            jobId: `j${recognizeCalls}`,
+            data: mockRecognizeData(PALABRA_DEBIL),
+          });
+        }
+        // Paso 4: agrandado. bbox crudo en el raster YA agrandado (x2).
+        return Promise.resolve({
+          jobId: "upscaled",
+          data: mockRecognizeData([
+            { text: "grande", confidence: 95, bbox: { x0: 10, y0: 20, x1: 110, y1: 120 } },
+          ]),
+        });
+      });
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(PALABRA_FIABLE), { recognize }),
+      );
+      const pooledEngine = new OcrEngine(undefined, fakeOrientationPool(0, 1));
+      await pooledEngine.init(ctx);
+
+      // dpi 150 < 300 -> upscale = 300/150 = 2 en el paso 4.
+      const output = await pooledEngine.processPage(
+        inputConRaster("doc-190-upscale", { dpi: 150 }),
+        ctx,
+      );
+
+      expect(recognize).toHaveBeenCalledTimes(5);
+      expect(output.words).toHaveLength(1);
+      const word = output.words[0]!;
+      expect(word.text).toBe("grande");
+      // pt = px_en_raster_agrandado * 72 / (dpi × upscale) = px * 72 / 300.
+      expect(word.bbox.x).toBeCloseTo(10 * (72 / 300), 6);
+      expect(word.bbox.y).toBeCloseTo(20 * (72 / 300), 6);
+      expect(word.bbox.width).toBeCloseTo(100 * (72 / 300), 6);
+      expect(word.bbox.height).toBeCloseTo(100 * (72 / 300), 6);
+      await pooledEngine.dispose();
+    });
+
+    it("a weak retry chain does not retry an already attempted angle", async () => {
+      const recognize = vi
+        .fn()
+        .mockResolvedValueOnce({ jobId: "rotated", data: mockRecognizeData(PALABRA_DEBIL) })
+        .mockResolvedValueOnce({
+          jobId: "upright",
+          data: mockRecognizeData([
+            { text: "mejor", confidence: 50, bbox: { x0: 0, y0: 0, x1: 5, y1: 5 } },
+          ]),
+        })
+        .mockRejectedValueOnce(new Error("fallo en 90 grados"))
+        .mockResolvedValue({ jobId: "weak", data: mockRecognizeData(PALABRA_DEBIL) });
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockEmptyRecognizeData(), { recognize }),
+      );
+      const recognitionPool = createTrackingOcrPool();
+      const pooledEngine = new OcrEngine(recognitionPool, fakeOrientationPool(180, 1));
+      await pooledEngine.init(ctx);
+
+      const output = await pooledEngine.processPage(
+        inputConRaster("doc-190-attempted-angles", { dpi: 150 }),
+        ctx,
+      );
+
+      // Ganar a 0° no borra el intento original de 180°. El fallo de 90°
+      // también cuenta; solo se repite 0° para la pasada agrandada final.
+      const payloads = recognitionPool.calls.map(({ payload }) => payload as OcrPagePayload);
+      expect(payloads.map((payload) => [payload.orientation, payload.upscale ?? 1])).toEqual([
+        [180, 1],
+        [0, 1],
+        [90, 1],
+        [270, 1],
+        [0, 2],
+      ]);
+      expect(recognize).toHaveBeenCalledTimes(5);
+      expect(output.words.map((word) => word.text)).toEqual(["mejor"]);
+      await pooledEngine.dispose();
+    });
+
+    // Caso 47 (§13), ADR-190 §2: sin costo extra con OSD 0 y lectura fiable.
+    it("a readable page pays no extra dispatch", async () => {
+      const orientationDispatch = vi.fn(() =>
+        Promise.resolve({ orientation: 0, inkRatio: 1, osdHadVerdict: true }),
+      );
+      const recognize = vi.fn(() =>
+        Promise.resolve({ jobId: "j", data: mockRecognizeData(PALABRA_FIABLE) }),
+      );
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockRecognizeData(PALABRA_FIABLE), { recognize }),
+      );
+      const pooledEngine = new OcrEngine(undefined, {
+        dispatch: orientationDispatch,
+        releaseIdleWorkers: (): boolean => false,
+      });
+      await pooledEngine.init(ctx);
+
+      await pooledEngine.processPage(inputConRaster("doc-190-no-extra"), ctx);
+
+      expect(orientationDispatch).toHaveBeenCalledTimes(1);
+      expect(recognize).toHaveBeenCalledTimes(1);
+      await pooledEngine.dispose();
+    });
+
+    it("verifies reliable text at every angle when OSD has no verdict, even below ink threshold", async () => {
+      const box = { x0: 0, y0: 0, x1: 40, y1: 10 };
+      const withWords = (words: Array<{ text: string; confidence: number }>, confidence: number) =>
+        mockRecognizeData(
+          words.map((word) => ({ ...word, bbox: box })),
+          confidence,
+        );
+      const recognize = vi
+        .fn()
+        .mockResolvedValueOnce({
+          jobId: "fallback-zero",
+          data: withWords(
+            [
+              { text: "168", confidence: 90 },
+              { text: "ING", confidence: 90 },
+              { text: "zeleg", confidence: 90 },
+              { text: "uenp", confidence: 90 },
+            ],
+            10,
+          ),
+        })
+        .mockResolvedValueOnce({
+          jobId: "empty-high-confidence",
+          data: mockRecognizeData([], 99),
+        })
+        .mockResolvedValueOnce({
+          jobId: "correct-180",
+          data: withWords(
+            [
+              { text: "Juan", confidence: 90 },
+              { text: "Perez", confidence: 90 },
+              { text: "DNI", confidence: 90 },
+              { text: "34567891", confidence: 90 },
+            ],
+            95,
+          ),
+        })
+        .mockResolvedValueOnce({
+          jobId: "lower-page-confidence-garbage",
+          data: withWords(
+            [
+              { text: "168", confidence: 90 },
+              { text: "ING", confidence: 90 },
+              { text: "zeleg", confidence: 90 },
+              { text: "uenp", confidence: 90 },
+              { text: "299", confidence: 90 },
+              { text: "7", confidence: 90 },
+            ],
+            90,
+          ),
+        });
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockEmptyRecognizeData(), { recognize }),
+      );
+      const recognitionPool = createTrackingOcrPool();
+      const pooledEngine = new OcrEngine(recognitionPool, fakeOrientationPool(0, 0.001, false));
+      await pooledEngine.init(ctx);
+
+      const output = await pooledEngine.processPage(inputConRaster("doc-190-osd-absent"), ctx);
+
+      const payloads = recognitionPool.calls.map(({ payload }) => payload as OcrPagePayload);
+      expect(payloads.map((payload) => payload.orientation)).toEqual([0, 90, 180, 270]);
+      expect(payloads.every((payload) => payload.upscale === undefined)).toBe(true);
+      expect(recognize).toHaveBeenCalledTimes(4);
+      expect(output.words.map((word) => word.text)).toEqual(["Juan", "Perez", "DNI", "34567891"]);
+      expect(output.confidence).toBeCloseTo(0.95);
+      await pooledEngine.dispose();
+    });
+
+    it("continues all angles when OSD is absent, ink is present, and the first reading is empty", async () => {
+      const box = { x0: 0, y0: 0, x1: 40, y1: 10 };
+      const words = (items: Array<{ text: string; confidence: number }>, confidence: number) =>
+        mockRecognizeData(
+          items.map((item) => ({ ...item, bbox: box })),
+          confidence,
+        );
+      const recognize = vi
+        .fn()
+        .mockResolvedValueOnce({ jobId: "first-empty", data: words([], 0) })
+        .mockResolvedValueOnce({
+          jobId: "false-reliable-90",
+          data: words(
+            [
+              { text: "108", confidence: 88 },
+              { text: "7€", confidence: 69 },
+              { text: "INC", confidence: 90 },
+            ],
+            66,
+          ),
+        })
+        .mockResolvedValueOnce({ jobId: "empty-180", data: words([], 0) })
+        .mockResolvedValueOnce({
+          jobId: "clean-270",
+          data: words(
+            [
+              { text: "Juan", confidence: 96 },
+              { text: "Perez", confidence: 96 },
+              { text: "DNI", confidence: 93 },
+              { text: "34.567.891", confidence: 76 },
+            ],
+            90,
+          ),
+        });
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockEmptyRecognizeData(), { recognize }),
+      );
+      const recognitionPool = createTrackingOcrPool();
+      const pooledEngine = new OcrEngine(recognitionPool, fakeOrientationPool(0, 0.03489, false));
+      await pooledEngine.init(ctx);
+
+      const output = await pooledEngine.processPage(inputConRaster("doc-190-empty-then-ink"), ctx);
+
+      const payloads = recognitionPool.calls.map(({ payload }) => payload as OcrPagePayload);
+      expect(payloads.map((payload) => payload.orientation)).toEqual([0, 90, 180, 270]);
+      expect(payloads.every((payload) => payload.upscale === undefined)).toBe(true);
+      expect(output.words.map((word) => word.text)).toEqual(["Juan", "Perez", "DNI", "34.567.891"]);
+      expect(output.confidence).toBeCloseTo(0.9);
+      await pooledEngine.dispose();
+    });
+
+    it("tries all angles for ink-only OSD fallbacks without promoting weak control words", async () => {
+      const recognize = vi
+        .fn()
+        .mockResolvedValueOnce({ jobId: "first-empty", data: mockRecognizeData([], 0) })
+        .mockResolvedValueOnce({
+          jobId: "shape-90",
+          data: mockRecognizeData(
+            [{ text: ">", confidence: 50, bbox: { x0: 0, y0: 0, x1: 5, y1: 5 } }],
+            50,
+          ),
+        })
+        .mockResolvedValueOnce({ jobId: "shape-180", data: mockRecognizeData([], 0) })
+        .mockResolvedValueOnce({
+          jobId: "shape-270",
+          data: mockRecognizeData(
+            [{ text: ">", confidence: 46, bbox: { x0: 0, y0: 0, x1: 5, y1: 5 } }],
+            46,
+          ),
+        });
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockEmptyRecognizeData(), { recognize }),
+      );
+      const recognitionPool = createTrackingOcrPool();
+      const pooledEngine = new OcrEngine(recognitionPool, fakeOrientationPool(0, 0.006, false));
+      await pooledEngine.init(ctx);
+
+      const output = await pooledEngine.processPage(inputConRaster("doc-190-shapes-control"), ctx);
+
+      const payloads = recognitionPool.calls.map(({ payload }) => payload as OcrPagePayload);
+      expect(payloads.map((payload) => payload.orientation)).toEqual([0, 90, 180, 270]);
+      expect(payloads.every((payload) => payload.upscale === undefined)).toBe(true);
+      expect(output.words).toEqual([]);
+      expect(recognize).toHaveBeenCalledTimes(4);
+      await pooledEngine.dispose();
     });
   });
 });

@@ -1,4 +1,4 @@
-import { CancelledError, InvalidInputError, type OcrOrientationPayload } from "@anonly/shared";
+import { InvalidInputError, type OcrOrientationPayload } from "@anonly/shared";
 import { createWorker, OEM } from "tesseract.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -16,6 +16,10 @@ import {
   createEncodedPageImage,
   mockDetectData,
   mockTesseractWorker,
+  setStubDrawImageThrowsOnce,
+  setStubDecodedDataReadThrowsOnce,
+  setStubDecodedPixelPainterSequence,
+  trackOffscreenCanvasConstructions,
   trackCreateImageBitmapCalls,
 } from "./fixtures/test-helpers.js";
 
@@ -49,6 +53,8 @@ describe("orientation kernel — OSD compartido por instancia", () => {
     try {
       await expect(kernel.detect(payload(), new AbortController().signal)).resolves.toEqual({
         orientation: 90,
+        inkRatio: 1,
+        osdHadVerdict: true,
       });
       expect(createWorker).toHaveBeenCalledTimes(1);
       expect(createWorker).toHaveBeenCalledWith(
@@ -56,9 +62,147 @@ describe("orientation kernel — OSD compartido por instancia", () => {
         OEM.TESSERACT_ONLY,
         expect.objectContaining({ legacyCore: true }),
       );
-      expect(tracked.calls[0]?.[1]).toEqual({ resizeWidth: 50, resizeHeight: 20 });
+      // ADR-190 §1: 100×40 (lado largo 100) escala con factor
+      // min(2, 1754/100) = 2 -> 200×80.
+      expect(tracked.calls[0]?.[1]).toEqual({ resizeWidth: 200, resizeHeight: 80 });
     } finally {
       tracked.restore();
+      await kernel.dispose();
+    }
+  });
+
+  it("does not treat a non-finite OSD confidence as a verdict", async () => {
+    const detect = vi.fn(() => Promise.resolve(mockDetectData(90, Number.POSITIVE_INFINITY)));
+    vi.mocked(createWorker).mockResolvedValue(
+      mockTesseractWorker({ confidence: 90, blocks: [] }, { detect }),
+    );
+    const kernel = createOrientationKernel();
+    try {
+      await expect(kernel.detect(payload(), new AbortController().signal)).resolves.toEqual({
+        orientation: 0,
+        inkRatio: 1,
+        osdHadVerdict: false,
+      });
+    } finally {
+      await kernel.dispose();
+    }
+  });
+
+  it("keeps the OSD canvas alive after timeout until the pending detect job settles", async () => {
+    let finishDetect: ((value: { jobId: string; data: unknown }) => void) | undefined;
+    const detect = vi.fn(
+      (_image: OffscreenCanvas) =>
+        new Promise<{ jobId: string; data: unknown }>((resolve) => {
+          finishDetect = resolve;
+        }),
+    );
+    const worker = mockTesseractWorker({ confidence: 0, blocks: [] }, { detect });
+    vi.mocked(createWorker).mockResolvedValue(worker);
+    const kernel = createOrientationKernel();
+
+    try {
+      await expect(
+        kernel.detect(payload({ timeoutMs: 5 }), new AbortController().signal),
+      ).rejects.toBeInstanceOf(OcrTimeoutError);
+      expect(detect).toHaveBeenCalledTimes(1);
+      const canvas = detect.mock.calls[0]?.[0];
+      if (canvas === undefined) throw new Error("expected OSD OffscreenCanvas");
+      expect(canvas.width).toBe(200);
+      expect(canvas.height).toBe(80);
+
+      finishDetect?.({ jobId: "late-after-timeout", data: mockDetectData(0) });
+      await vi.waitFor(() => {
+        expect(canvas.width).toBe(0);
+        expect(canvas.height).toBe(0);
+      });
+    } finally {
+      await kernel.dispose();
+    }
+  });
+
+  it("releases the OSD canvas when image drawing fails before detect owns it", async () => {
+    vi.mocked(createWorker).mockResolvedValue(mockTesseractWorker({ confidence: 0, blocks: [] }));
+    const tracked = trackOffscreenCanvasConstructions();
+    const kernel = createOrientationKernel();
+    setStubDrawImageThrowsOnce();
+
+    try {
+      await expect(kernel.detect(payload(), new AbortController().signal)).resolves.toEqual({
+        orientation: 0,
+        inkRatio: 1,
+        osdHadVerdict: false,
+      });
+      expect(tracked.canvases).toHaveLength(1);
+      expect(tracked.canvases[0]?.width).toBe(0);
+      expect(tracked.canvases[0]?.height).toBe(0);
+    } finally {
+      tracked.restore();
+      await kernel.dispose();
+    }
+  });
+
+  // Caso 46 (§13), ADR-190 §3: `inkRatio` usa el predicado LITERAL de
+  // ADR-162 (`isPixelPresent`) sobre la MISMA imagen reducida que ve
+  // `detect()` — acá 200×80 (factor 2 sobre el payload 100×40 default).
+  it("orientation result reports inkRatio with the ADR-162 predicate", async () => {
+    vi.mocked(createWorker).mockResolvedValue(mockTesseractWorker({ confidence: 90, blocks: [] }));
+    // Mitad izquierda negra opaca (presente), mitad derecha blanca opaca (no
+    // presente): con un canvas de 200 px de ancho, exactamente la mitad de
+    // los píxeles cumplen el predicado -> inkRatio = 0,5.
+    setStubDecodedPixelPainterSequence([(x) => (x < 100 ? [0, 0, 0, 255] : [255, 255, 255, 255])]);
+    const kernel = createOrientationKernel();
+
+    try {
+      await expect(kernel.detect(payload(), new AbortController().signal)).resolves.toEqual({
+        orientation: 0,
+        inkRatio: 0.5,
+        osdHadVerdict: true,
+      });
+    } finally {
+      await kernel.dispose();
+    }
+  });
+
+  it("orientation detection failure preserves measured inkRatio", async () => {
+    const detect = vi.fn(() => Promise.reject(new Error("Too few characters. Skipping this page")));
+    vi.mocked(createWorker).mockResolvedValue(
+      mockTesseractWorker({ confidence: 0, blocks: [] }, { detect }),
+    );
+
+    for (const inkRatio of [0, 0.5, 1]) {
+      // El raster reducido mide 200 × 80. Se mide antes de fallar detect().
+      setStubDecodedPixelPainterSequence([
+        (x) => (x < 200 * inkRatio ? [0, 0, 0, 255] : [255, 255, 255, 255]),
+      ]);
+      const kernel = createOrientationKernel();
+      try {
+        await expect(kernel.detect(payload(), new AbortController().signal)).resolves.toEqual({
+          orientation: 0,
+          inkRatio,
+          osdHadVerdict: false,
+        });
+      } finally {
+        await kernel.dispose();
+      }
+    }
+    expect(detect).toHaveBeenCalledTimes(3);
+  });
+
+  it("orientation detection failure fails open when ink measurement is unavailable", async () => {
+    const detect = vi.fn(() => Promise.reject(new Error("OSD failed")));
+    vi.mocked(createWorker).mockResolvedValue(
+      mockTesseractWorker({ confidence: 0, blocks: [] }, { detect }),
+    );
+    setStubDecodedDataReadThrowsOnce();
+    const kernel = createOrientationKernel();
+    try {
+      await expect(kernel.detect(payload(), new AbortController().signal)).resolves.toEqual({
+        orientation: 0,
+        inkRatio: 1,
+        osdHadVerdict: false,
+      });
+      expect(detect).toHaveBeenCalledTimes(1);
+    } finally {
       await kernel.dispose();
     }
   });
@@ -80,11 +224,15 @@ describe("orientation kernel — OSD compartido por instancia", () => {
         kernelA.detect(payload({ documentId: "A" }), new AbortController().signal),
       ).resolves.toEqual({
         orientation: 90,
+        inkRatio: 1,
+        osdHadVerdict: true,
       });
       await expect(
         kernelB.detect(payload({ documentId: "B" }), new AbortController().signal),
       ).resolves.toEqual({
         orientation: 270,
+        inkRatio: 1,
+        osdHadVerdict: true,
       });
       await kernelA.dispose();
       expect(terminateA).toHaveBeenCalledTimes(1);
@@ -92,6 +240,8 @@ describe("orientation kernel — OSD compartido por instancia", () => {
         kernelB.detect(payload({ documentId: "B", pageIndex: 1 }), new AbortController().signal),
       ).resolves.toEqual({
         orientation: 270,
+        inkRatio: 1,
+        osdHadVerdict: true,
       });
       expect(detectB).toHaveBeenCalledTimes(2);
       expect(terminateA).toHaveBeenCalledTimes(1);
@@ -109,69 +259,47 @@ describe("orientation kernel — OSD compartido por instancia", () => {
 
     await expect(kernel.detect(payload(), new AbortController().signal)).resolves.toEqual({
       orientation: 0,
+      inkRatio: 1,
+      osdHadVerdict: false,
     });
     await kernel.dispose();
   });
 
-  it("terminates OSD on abort and does not keep a late detection alive", async () => {
-    const terminate = vi.fn(() => Promise.resolve());
-    const detect = vi.fn(() => new Promise<never>(() => undefined));
+  it("distinguishes a valid detected zero-degree verdict from the zero fallback", async () => {
     vi.mocked(createWorker).mockResolvedValue(
-      mockTesseractWorker({ confidence: 90, blocks: [] }, { detect, terminate }),
-    );
-    const controller = new AbortController();
-    const kernel = createOrientationKernel();
-    const result = kernel.detect(payload(), controller.signal);
-    controller.abort();
-
-    await expect(result).rejects.toBeInstanceOf(CancelledError);
-    expect(terminate).toHaveBeenCalledTimes(1);
-    await kernel.dispose();
-  });
-
-  it("terminates OSD on timeout and reports OcrTimeoutError", async () => {
-    vi.useFakeTimers();
-    const terminate = vi.fn(() => Promise.resolve());
-    const detect = vi.fn(() => new Promise<never>(() => undefined));
-    vi.mocked(createWorker).mockResolvedValue(
-      mockTesseractWorker({ confidence: 90, blocks: [] }, { detect, terminate }),
+      mockTesseractWorker(
+        { confidence: 90, blocks: [] },
+        {
+          detect: vi.fn(() => Promise.resolve(mockDetectData(0, 1))),
+        },
+      ),
     );
     const kernel = createOrientationKernel();
-    const result = kernel.detect(payload({ timeoutMs: 10 }), new AbortController().signal);
-    const assertion = expect(result).rejects.toBeInstanceOf(OcrTimeoutError);
-    await vi.advanceTimersByTimeAsync(11);
-
-    await assertion;
-    expect(terminate).toHaveBeenCalledTimes(1);
-    await kernel.dispose();
-  });
-
-  it.each(["timeout", "abort"])(
-    "settles %s while OSD worker initialization is pending",
-    async (mode) => {
-      vi.useFakeTimers();
-      let release!: (worker: Awaited<ReturnType<typeof createWorker>>) => void;
-      vi.mocked(createWorker).mockImplementation(
-        () =>
-          new Promise((resolve) => {
-            release = resolve;
-          }),
-      );
-      const kernel = createOrientationKernel();
-      const controller = new AbortController();
-      const task = kernel.detect(payload({ timeoutMs: 10 }), controller.signal);
-      const assertion = expect(task).rejects.toBeInstanceOf(
-        mode === "abort" ? CancelledError : OcrTimeoutError,
-      );
-      if (mode === "abort") controller.abort();
-      await vi.advanceTimersByTimeAsync(11);
-      await assertion;
-      release(mockTesseractWorker({ confidence: 90, blocks: [] }));
+    try {
+      await expect(kernel.detect(payload(), new AbortController().signal)).resolves.toMatchObject({
+        orientation: 0,
+        osdHadVerdict: true,
+      });
+    } finally {
       await kernel.dispose();
-    },
-  );
+    }
+  });
 
-  it("starts a new generation after a timed out initialization and cleans a late worker", async () => {
+  // Las variantes de timeout/abort durante detect(), durante la carga del
+  // worker OSD y durante la decodificación del bitmap viven ahora en
+  // `edge.test.ts` ("terminates timed out or aborted OSD and ignores late
+  // initialization and decode", OCR_Engine.md §14, caso 28), junto con el
+  // caso de una orientación encolada que se cancela sin llegar a cargar ni
+  // reconocer ("cancels queued orientation without loading or recognizing").
+
+  // OCR_Engine.md §13 caso 28 / §14: "dos repros de r4, más resolución tardía
+  // sin pisar generación nueva". Repro 1: una inicialización que time-outea
+  // no bloquea la SIGUIENTE solicitud válida (nueva generación) ni impide que
+  // el worker viejo, cuando resuelve tarde, se libere sin pisar la nueva.
+  // Repro 2: `dispose()` tampoco espera una inicialización invalidada que
+  // nunca resuelve.
+  it("recovers and disposes without waiting for an invalidated initialization", async () => {
+    // Repro 1: recupera sin esperar la carga vieja; el worker tardío se termina.
     let releaseFirst!: (worker: Awaited<ReturnType<typeof createWorker>>) => void;
     const firstTerminate = vi.fn(() => Promise.resolve());
     const firstWorker = mockTesseractWorker(
@@ -196,52 +324,37 @@ describe("orientation kernel — OSD compartido por instancia", () => {
       kernel.detect(payload({ pageIndex: 1 }), new AbortController().signal),
     ).resolves.toEqual({
       orientation: 0,
+      inkRatio: 1,
+      osdHadVerdict: true,
     });
     expect(createWorker).toHaveBeenCalledTimes(2);
 
+    // Resolución tardía de la inicialización invalidada: se libera sin pisar
+    // la generación nueva (la segunda instancia sigue siendo la vigente).
     releaseFirst(firstWorker);
     await Promise.resolve();
     await Promise.resolve();
     expect(firstTerminate).toHaveBeenCalledTimes(1);
-    await kernel.dispose();
-  });
 
-  it("does not make dispose wait for an initialization that never resolves", async () => {
+    await kernel.dispose();
+
+    // Repro 2: dispose() no espera una inicialización invalidada que nunca
+    // resuelve — un kernel nuevo, para forzar una inicialización propia.
     vi.mocked(createWorker).mockImplementation(() => new Promise(() => undefined));
-    const kernel = createOrientationKernel();
-    const task = kernel.detect(payload({ timeoutMs: 5 }), new AbortController().signal);
-    await expect(task).rejects.toBeInstanceOf(OcrTimeoutError);
+    const kernel2 = createOrientationKernel();
+    const stuck = kernel2.detect(
+      payload({ documentId: "stuck", timeoutMs: 5 }),
+      new AbortController().signal,
+    );
+    await expect(stuck).rejects.toBeInstanceOf(OcrTimeoutError);
 
     let disposed = false;
-    const dispose = kernel.dispose().then(() => {
+    const dispose = kernel2.dispose().then(() => {
       disposed = true;
     });
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     expect(disposed).toBe(true);
     await dispose;
-  });
-
-  it("closes a bitmap that resolves after the OSD deadline", async () => {
-    vi.useFakeTimers();
-    vi.mocked(createWorker).mockResolvedValue(mockTesseractWorker({ confidence: 90, blocks: [] }));
-    const originalBitmap = await createImageBitmap(new Blob());
-    let release!: (bitmap: ImageBitmap) => void;
-    vi.spyOn(globalThis, "createImageBitmap").mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          release = resolve;
-        }),
-    );
-    const close = vi.spyOn(originalBitmap, "close");
-    const kernel = createOrientationKernel();
-    const task = kernel.detect(payload({ timeoutMs: 10 }), new AbortController().signal);
-    const assertion = expect(task).rejects.toBeInstanceOf(OcrTimeoutError);
-    await vi.advanceTimersByTimeAsync(11);
-    await assertion;
-    release(originalBitmap);
-    await Promise.resolve();
-    expect(close).toHaveBeenCalledTimes(1);
-    await kernel.dispose();
   });
 
   it("propagates OSD model load failure without pretending every page is upright", async () => {

@@ -186,12 +186,15 @@ export function createImageData(width: number, height: number): ImageData {
 }
 
 /**
- * ADR-158 §2: `EncodedPageImage` de prueba — `bytes` vacíos a propósito. La
- * decodificación real (`createImageBitmap`) está stubbeada acá abajo
- * (`installCreateImageBitmapStub`) y `decodeEncodedImage`
+ * ADR-158 §2: `EncodedPageImage` de prueba — `bytes` es un buffer no vacío
+ * de relleno. La decodificación real (`createImageBitmap`) está stubbeada
+ * acá abajo (`installCreateImageBitmapStub`) y `decodeEncodedImage`
  * (worker/kernel.ts) arma el canvas con `widthPx`/`heightPx` del propio
  * `EncodedPageImage` — nunca lee dimensiones del bitmap decodificado —, así
- * que el contenido de `bytes` nunca importa en tests, solo estos dos campos.
+ * que el CONTENIDO de `bytes` nunca importa en tests, solo estos dos campos.
+ * Tiene que ser no vacío: `byteLength === 0` es el guard de
+ * `OCR_Engine.md` §9/§13 caso 4 (`image.bytes` detached), y un default vacío
+ * dispararía ese guard en todos los tests que no lo ejercitan a propósito.
  */
 export function createEncodedPageImage(
   widthPx: number,
@@ -199,7 +202,7 @@ export function createEncodedPageImage(
   overrides?: Partial<EncodedPageImage>,
 ): EncodedPageImage {
   return {
-    bytes: new ArrayBuffer(0),
+    bytes: new ArrayBuffer(4),
     format: "png",
     widthPx,
     heightPx,
@@ -260,6 +263,8 @@ export function createImageProducer(
  * los píxeles.
  */
 let stubCanvasContextAvailable = true;
+let stubDrawImageThrowsOnce = false;
+let stubPutImageDataThrowsOnce = false;
 let stubDecodedPixel: readonly [number, number, number, number] = [0, 0, 0, 255];
 let stubDecodedPixelSequence: ReadonlyArray<readonly [number, number, number, number]> | undefined;
 let stubDecodedDataReadThrowsOnce = false;
@@ -337,9 +342,18 @@ class StubOffscreenCanvas {
     if (!stubCanvasContextAvailable) return null;
     return {
       putImageData: (imageData: ImageData): void => {
+        if (stubPutImageDataThrowsOnce) {
+          stubPutImageDataThrowsOnce = false;
+          throw new Error("stub putImageData failed");
+        }
         putImageDataCalls.push(imageData);
       },
-      drawImage: () => undefined,
+      drawImage: () => {
+        if (stubDrawImageThrowsOnce) {
+          stubDrawImageThrowsOnce = false;
+          throw new Error("stub drawImage failed");
+        }
+      },
       getImageData: (_x: number, _y: number, w: number, h: number) => {
         const image = createImageData(w, h);
         if (stubDecodedPixelPainterSequence !== undefined) {
@@ -406,6 +420,14 @@ export function setStubCanvasContextAvailable(available: boolean): void {
   stubCanvasContextAvailable = available;
 }
 
+export function setStubDrawImageThrowsOnce(): void {
+  stubDrawImageThrowsOnce = true;
+}
+
+export function setStubPutImageDataThrowsOnce(): void {
+  stubPutImageDataThrowsOnce = true;
+}
+
 function installOffscreenCanvasStub(): void {
   if (typeof globalThis.OffscreenCanvas !== "undefined") return;
 
@@ -457,14 +479,17 @@ export interface OffscreenCanvasConstruction {
  */
 export function trackOffscreenCanvasConstructions(): {
   readonly constructions: ReadonlyArray<OffscreenCanvasConstruction>;
+  readonly canvases: ReadonlyArray<OffscreenCanvas>;
   readonly restore: () => void;
 } {
   const original = globalThis.OffscreenCanvas;
   const constructions: OffscreenCanvasConstruction[] = [];
+  const canvases: OffscreenCanvas[] = [];
   class TrackingOffscreenCanvas extends original {
     constructor(width: number, height: number) {
       super(width, height);
       constructions.push({ width, height });
+      canvases.push(this);
     }
   }
   Object.defineProperty(globalThis, "OffscreenCanvas", {
@@ -474,6 +499,7 @@ export function trackOffscreenCanvasConstructions(): {
   });
   return {
     constructions,
+    canvases,
     restore: (): void => {
       Object.defineProperty(globalThis, "OffscreenCanvas", {
         value: original,
@@ -534,7 +560,7 @@ export interface OcrDispatchCall {
 export interface TrackingOcrPool {
   readonly dispatch: <T>(params: OcrPoolDispatchParams<T>) => Promise<T>;
   readonly calls: OcrDispatchCall[];
-  readonly releaseIdleWorkers: () => void;
+  readonly releaseIdleWorkers: () => boolean;
   readonly releaseIdleWorkersCallCount: () => number;
 }
 
@@ -562,8 +588,9 @@ export function createTrackingOcrPool(): TrackingOcrPool {
     // `worker-pool.test.ts`/`unit.test.ts` de `packages/anonymization-core/src`
     // (`releaseIdleWorkers es no-op si el pool NO está ocioso`); acá solo
     // hace falta confirmar que `OcrEngine.releaseIdleWorkers()` delega.
-    releaseIdleWorkers: (): void => {
+    releaseIdleWorkers: (): boolean => {
       releaseIdleWorkersCalls += 1;
+      return true;
     },
     releaseIdleWorkersCallCount: (): number => releaseIdleWorkersCalls,
   };
@@ -582,11 +609,11 @@ export function createTrackingOcrPool(): TrackingOcrPool {
  */
 export function createResolvedOcrPool(resolvedValue: unknown): {
   readonly dispatch: (params: OcrPoolDispatchParams<unknown>) => Promise<unknown>;
-  readonly releaseIdleWorkers: () => void;
+  readonly releaseIdleWorkers: () => boolean;
 } {
   return {
     dispatch: (): Promise<unknown> => Promise.resolve(resolvedValue),
-    releaseIdleWorkers: (): void => undefined,
+    releaseIdleWorkers: (): boolean => false,
   };
 }
 

@@ -22,14 +22,18 @@ vi.mock("tesseract.js", () => ({
 }));
 
 import { OcrEngine } from "../ocr.engine.js";
+import type { OcrImageProducer } from "../ocr.types.js";
 
 import {
   createEncodedPageImage,
   createEngineContext,
   createValidOcrPageInput,
+  createValidOcrPageRequest,
   mockDetectData,
+  mockEmptyRecognizeData,
   mockRecognizeData,
   mockTesseractWorker,
+  setStubDecodedPixel,
 } from "./fixtures/test-helpers.js";
 
 describe("OcrEngine — snapshot (ADR-160 §1/§6)", () => {
@@ -93,6 +97,77 @@ describe("OcrEngine — snapshot (ADR-160 §1/§6)", () => {
       ctx,
     );
     const { durationMs: _durationMs, ...comparable } = output;
+    expect(comparable).toMatchSnapshot();
+  });
+
+  // OCR_Engine.md §13 caso 33 / §14 (ADR-164): una sesión con las cuatro
+  // orientaciones 0/90/180/270, una de ellas producida con demora (página
+  // "tardía") y con el mecanismo de margen del ADR-121 ejecutándose para las
+  // cuatro (blanco/transparente: aporta 0 palabras, el caso normal — la
+  // recuperación de una franja con contenido real ya tiene su propio test,
+  // caso 16/25). Sirve como control congelado de que palabras, confianza,
+  // orden y cajas no se mueven entre orientaciones mezcladas, con transporte
+  // PNG sin transferencia (ADR-158 §5) y processSession (ventana/presupuesto
+  // de §6, degenerados acá a un único consumidor para que el orden de
+  // llegada sea determinista).
+  it("preserves words confidence and geometry for mixed page orientations", async () => {
+    setStubDecodedPixel([255, 255, 255, 255]); // ADR-162: franjas blancas -> 0 llamadas de margen
+
+    const orientationsByRequestIndex = [0, 90, 180, 270] as const;
+    let detectCallIndex = 0;
+    const detect = vi.fn(() =>
+      Promise.resolve(mockDetectData(orientationsByRequestIndex[detectCallIndex++] ?? 0)),
+    );
+
+    const wordsByRequestIndex = [
+      [{ text: "upright-word", confidence: 91, bbox: { x0: 5, y0: 5, x1: 40, y1: 20 } }],
+      [{ text: "ninety-word", confidence: 88, bbox: { x0: 6, y0: 6, x1: 42, y1: 21 } }],
+      [{ text: "upside-down-word", confidence: 93, bbox: { x0: 7, y0: 7, x1: 44, y1: 22 } }],
+      [{ text: "two-seventy-word", confidence: 85, bbox: { x0: 8, y0: 8, x1: 46, y1: 23 } }],
+    ];
+    let recognizeCallIndex = 0;
+    const recognize = vi.fn(() => {
+      const idx = recognizeCallIndex++;
+      return Promise.resolve({
+        jobId: `mock-job-${idx}`,
+        data: mockRecognizeData(wordsByRequestIndex[idx] ?? []),
+      });
+    });
+
+    vi.mocked(createWorker).mockResolvedValue(
+      mockTesseractWorker(mockEmptyRecognizeData(), { detect, recognize }),
+    );
+
+    // Un solo consumidor (ocrPoolSize: 1): el orden de llegada a detect()/
+    // recognize() queda determinado por el orden del array de requests, así
+    // que la demora de la página 270° ("tardía") no reordena nada — ejercita
+    // que una página rotada que llega después sigue geometrizándose bien, sin
+    // reintroducir el no-determinismo de la concurrencia real (esa la cubren
+    // los casos 34-38).
+    const serialCtx = createEngineContext({
+      config: { ...ctx.config, workerPool: { ...ctx.config.workerPool, ocrPoolSize: 1 } },
+    });
+    const requests = [
+      createValidOcrPageRequest("doc-mixed-orientations", 0),
+      createValidOcrPageRequest("doc-mixed-orientations", 1),
+      createValidOcrPageRequest("doc-mixed-orientations", 2),
+      createValidOcrPageRequest("doc-mixed-orientations", 3),
+    ];
+    const produce: OcrImageProducer = (request) =>
+      new Promise((resolve) => {
+        const delayMs = request.pageIndex === 3 ? 15 : 0;
+        setTimeout(() => resolve(createEncodedPageImage(100, 40)), delayMs);
+      });
+
+    await engine.init(serialCtx);
+    const outputs = await engine.processSession(requests, produce, serialCtx);
+
+    const comparable = outputs.map(({ documentId, pageIndex, words, confidence }) => ({
+      documentId,
+      pageIndex,
+      words,
+      confidence,
+    }));
     expect(comparable).toMatchSnapshot();
   });
 });
