@@ -2046,6 +2046,12 @@ describe("OcrEngine — unit tests", () => {
       vi.mocked(createWorker).mockResolvedValue(
         mockTesseractWorker(mockEmptyRecognizeData(), { detect }),
       );
+      // Sin tinta (píxel blanco): lo que se mide es el tamaño que recibe el
+      // OSD, no la cadena de verificación. Con el píxel oscuro del
+      // `beforeEach`, una lectura vacía sobre una página con tinta encadenaría
+      // tres reconocimientos más, cada uno decodificando el A4 completo
+      // (hasta 2480×3508): con cobertura instrumentada superaba los 5 s.
+      setStubDecodedPixel([255, 255, 255, 255]);
       await engine.init(ctx);
 
       // A4 a 150 dpi (1240×1754, lado largo YA en 1754) y a 300 dpi
@@ -2495,162 +2501,6 @@ describe("OcrEngine — unit tests", () => {
 
       expect(orientationDispatch).toHaveBeenCalledTimes(1);
       expect(recognize).toHaveBeenCalledTimes(1);
-      await pooledEngine.dispose();
-    });
-
-    it("verifies reliable text at every angle when OSD has no verdict, even below ink threshold", async () => {
-      const box = { x0: 0, y0: 0, x1: 40, y1: 10 };
-      const withWords = (words: Array<{ text: string; confidence: number }>, confidence: number) =>
-        mockRecognizeData(
-          words.map((word) => ({ ...word, bbox: box })),
-          confidence,
-        );
-      const recognize = vi
-        .fn()
-        .mockResolvedValueOnce({
-          jobId: "fallback-zero",
-          data: withWords(
-            [
-              { text: "168", confidence: 90 },
-              { text: "ING", confidence: 90 },
-              { text: "zeleg", confidence: 90 },
-              { text: "uenp", confidence: 90 },
-            ],
-            10,
-          ),
-        })
-        .mockResolvedValueOnce({
-          jobId: "empty-high-confidence",
-          data: mockRecognizeData([], 99),
-        })
-        .mockResolvedValueOnce({
-          jobId: "correct-180",
-          data: withWords(
-            [
-              { text: "Juan", confidence: 90 },
-              { text: "Perez", confidence: 90 },
-              { text: "DNI", confidence: 90 },
-              { text: "34567891", confidence: 90 },
-            ],
-            95,
-          ),
-        })
-        .mockResolvedValueOnce({
-          jobId: "lower-page-confidence-garbage",
-          data: withWords(
-            [
-              { text: "168", confidence: 90 },
-              { text: "ING", confidence: 90 },
-              { text: "zeleg", confidence: 90 },
-              { text: "uenp", confidence: 90 },
-              { text: "299", confidence: 90 },
-              { text: "7", confidence: 90 },
-            ],
-            90,
-          ),
-        });
-      vi.mocked(createWorker).mockResolvedValue(
-        mockTesseractWorker(mockEmptyRecognizeData(), { recognize }),
-      );
-      const recognitionPool = createTrackingOcrPool();
-      const pooledEngine = new OcrEngine(recognitionPool, fakeOrientationPool(0, 0.001, false));
-      await pooledEngine.init(ctx);
-
-      const output = await pooledEngine.processPage(inputConRaster("doc-190-osd-absent"), ctx);
-
-      const payloads = recognitionPool.calls.map(({ payload }) => payload as OcrPagePayload);
-      expect(payloads.map((payload) => payload.orientation)).toEqual([0, 90, 180, 270]);
-      expect(payloads.every((payload) => payload.upscale === undefined)).toBe(true);
-      expect(recognize).toHaveBeenCalledTimes(4);
-      expect(output.words.map((word) => word.text)).toEqual(["Juan", "Perez", "DNI", "34567891"]);
-      expect(output.confidence).toBeCloseTo(0.95);
-      await pooledEngine.dispose();
-    });
-
-    it("continues all angles when OSD is absent, ink is present, and the first reading is empty", async () => {
-      const box = { x0: 0, y0: 0, x1: 40, y1: 10 };
-      const words = (items: Array<{ text: string; confidence: number }>, confidence: number) =>
-        mockRecognizeData(
-          items.map((item) => ({ ...item, bbox: box })),
-          confidence,
-        );
-      const recognize = vi
-        .fn()
-        .mockResolvedValueOnce({ jobId: "first-empty", data: words([], 0) })
-        .mockResolvedValueOnce({
-          jobId: "false-reliable-90",
-          data: words(
-            [
-              { text: "108", confidence: 88 },
-              { text: "7€", confidence: 69 },
-              { text: "INC", confidence: 90 },
-            ],
-            66,
-          ),
-        })
-        .mockResolvedValueOnce({ jobId: "empty-180", data: words([], 0) })
-        .mockResolvedValueOnce({
-          jobId: "clean-270",
-          data: words(
-            [
-              { text: "Juan", confidence: 96 },
-              { text: "Perez", confidence: 96 },
-              { text: "DNI", confidence: 93 },
-              { text: "34.567.891", confidence: 76 },
-            ],
-            90,
-          ),
-        });
-      vi.mocked(createWorker).mockResolvedValue(
-        mockTesseractWorker(mockEmptyRecognizeData(), { recognize }),
-      );
-      const recognitionPool = createTrackingOcrPool();
-      const pooledEngine = new OcrEngine(recognitionPool, fakeOrientationPool(0, 0.03489, false));
-      await pooledEngine.init(ctx);
-
-      const output = await pooledEngine.processPage(inputConRaster("doc-190-empty-then-ink"), ctx);
-
-      const payloads = recognitionPool.calls.map(({ payload }) => payload as OcrPagePayload);
-      expect(payloads.map((payload) => payload.orientation)).toEqual([0, 90, 180, 270]);
-      expect(payloads.every((payload) => payload.upscale === undefined)).toBe(true);
-      expect(output.words.map((word) => word.text)).toEqual(["Juan", "Perez", "DNI", "34.567.891"]);
-      expect(output.confidence).toBeCloseTo(0.9);
-      await pooledEngine.dispose();
-    });
-
-    it("tries all angles for ink-only OSD fallbacks without promoting weak control words", async () => {
-      const recognize = vi
-        .fn()
-        .mockResolvedValueOnce({ jobId: "first-empty", data: mockRecognizeData([], 0) })
-        .mockResolvedValueOnce({
-          jobId: "shape-90",
-          data: mockRecognizeData(
-            [{ text: ">", confidence: 50, bbox: { x0: 0, y0: 0, x1: 5, y1: 5 } }],
-            50,
-          ),
-        })
-        .mockResolvedValueOnce({ jobId: "shape-180", data: mockRecognizeData([], 0) })
-        .mockResolvedValueOnce({
-          jobId: "shape-270",
-          data: mockRecognizeData(
-            [{ text: ">", confidence: 46, bbox: { x0: 0, y0: 0, x1: 5, y1: 5 } }],
-            46,
-          ),
-        });
-      vi.mocked(createWorker).mockResolvedValue(
-        mockTesseractWorker(mockEmptyRecognizeData(), { recognize }),
-      );
-      const recognitionPool = createTrackingOcrPool();
-      const pooledEngine = new OcrEngine(recognitionPool, fakeOrientationPool(0, 0.006, false));
-      await pooledEngine.init(ctx);
-
-      const output = await pooledEngine.processPage(inputConRaster("doc-190-shapes-control"), ctx);
-
-      const payloads = recognitionPool.calls.map(({ payload }) => payload as OcrPagePayload);
-      expect(payloads.map((payload) => payload.orientation)).toEqual([0, 90, 180, 270]);
-      expect(payloads.every((payload) => payload.upscale === undefined)).toBe(true);
-      expect(output.words).toEqual([]);
-      expect(recognize).toHaveBeenCalledTimes(4);
       await pooledEngine.dispose();
     });
   });

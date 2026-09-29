@@ -368,6 +368,10 @@ describe("T-5 shared OSD contract", () => {
       [100, 90],
       [200, 270],
     ]);
+    let release200!: () => void;
+    const finished200 = new Promise<void>((resolve) => {
+      release200 = resolve;
+    });
     const recognitionPayloads: unknown[] = [];
     const recognitionCompletions: number[] = [];
     let recognitionInFlight = 0;
@@ -400,11 +404,13 @@ describe("T-5 shared OSD contract", () => {
         const payload = params.payload as { readonly image: { readonly widthPx: number } };
         recognitionInFlight += 1;
         maxRecognitionInFlight = Math.max(maxRecognitionInFlight, recognitionInFlight);
-        await new Promise<void>((resolve) =>
-          setTimeout(resolve, payload.image.widthPx === 100 ? 20 : 0),
-        );
+        // Sin temporizadores (flaky bajo carga/cobertura): la lectura de 100
+        // espera a que la de 200 termine, así el orden de finalización y el
+        // solapamiento (2 en vuelo) son deterministas.
+        if (payload.image.widthPx === 100) await finished200;
         recognitionInFlight -= 1;
         recognitionCompletions.push(payload.image.widthPx);
+        if (payload.image.widthPx === 200) release200();
         return {
           confidence: 1,
           words: [

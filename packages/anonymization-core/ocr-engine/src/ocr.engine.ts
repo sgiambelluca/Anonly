@@ -1347,6 +1347,16 @@ export class OcrEngine implements IEngine {
         osdHadVerdict: record.osdHadVerdict,
       });
     }
+    // Contracts.md §7.2 / OCR_Engine.md caso 48: `false` significa "0° es
+    // fallback", así que cualquier otro ángulo sin veredicto es un sobre
+    // inconsistente. Normalizarlo a 0 escondería un bug del worker; la rama
+    // sin veredicto ensaya solo 90/180/270 y nunca reintentaría 0.
+    if (!record.osdHadVerdict && orientation !== 0) {
+      throw new InvalidInputError(
+        "osdHadVerdict=false exige orientación 0 en el resultado de orientación.",
+        { engineId: EngineId.Ocr, orientation, osdHadVerdict: record.osdHadVerdict },
+      );
+    }
     return { orientation, inkRatio, osdHadVerdict: record.osdHadVerdict };
   }
 

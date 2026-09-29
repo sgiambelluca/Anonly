@@ -1330,6 +1330,12 @@ async function kernelRecognizeRotated(
 }
 
 /**
+ * Tolerancia del tope `upscale ≤ 300/dpi` (Contracts.md §7.1): cubre solo el
+ * redondeo del cociente calculado en el host.
+ */
+const UPSCALE_RANGE_TOLERANCE = 1e-9;
+
+/**
  * Reconocimiento de una página (ADR-045 §2/§3): garantiza el idioma cargado
  * (recreando si `payload.languages` difiere del set vigente) y reconoce con
  * timeout/abort racing. `payload.languages` es la config efectiva que
@@ -1349,6 +1355,22 @@ export async function kernelRecognize(
     throw new InvalidInputError("orientation inválida en OcrPagePayload.", {
       engineId: "ocr",
       orientation,
+    });
+  }
+
+  // Contracts.md §7.1 (`OcrPagePayload.upscale`): rango 1 ≤ upscale ≤ 300/dpi.
+  // El payload cruza un puerto (ADR-055 §2): un NaN o un factor fuera de rango
+  // llegaría a `ensureDpiApplied` y a `upscaleImageData` sin control.
+  // Sin agrandar (upscale = 1) es válido con cualquier dpi, incluso > 300.
+  if (
+    !Number.isFinite(upscale) ||
+    upscale < 1 ||
+    (upscale > 1 && upscale > (300 / dpi) * (1 + UPSCALE_RANGE_TOLERANCE))
+  ) {
+    throw new InvalidInputError("upscale fuera de rango en OcrPagePayload.", {
+      engineId: "ocr",
+      upscale,
+      dpi,
     });
   }
 

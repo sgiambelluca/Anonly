@@ -8,6 +8,7 @@ import {
   type EncodedPageImage,
   type EngineContext,
   type OcrOrientationPayload,
+  type OcrPagePayload,
 } from "@anonly/shared";
 import { createWorker } from "tesseract.js";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -35,6 +36,7 @@ import {
   createEngineContext,
   createImageProducer,
   createResolvedOcrPool,
+  createTrackingOcrPool,
   createValidOcrPageInput,
   createValidOcrPageRequest,
   mockDetectData,
@@ -980,7 +982,7 @@ describe("OcrEngine — edge case tests", () => {
       }
     });
 
-    it("rejects orientation results without a boolean osdHadVerdict", async () => {
+    it("rejects orientation results without osdHadVerdict", async () => {
       for (const osdHadVerdict of [undefined, 0, "false"]) {
         const recognitionPool = createResolvedOcrPool({ words: [], confidence: 0 });
         const recognitionDispatch = vi.spyOn(recognitionPool, "dispatch");
@@ -996,6 +998,30 @@ describe("OcrEngine — edge case tests", () => {
           await expect(
             pooledEngine.processPage(createValidOcrPageInput("doc-190-invalid-verdict", 0), ctx),
           ).rejects.toThrow("osdHadVerdict inválido");
+          expect(recognitionDispatch).not.toHaveBeenCalled();
+        } finally {
+          await pooledEngine.dispose();
+        }
+      }
+    });
+
+    // Contracts §7.2: `osdHadVerdict: false` significa "0° es fallback". Un
+    // worker que devolviera {180, false} haría que la rama sin veredicto
+    // (que solo ensaya 90/180/270) nunca probara 0°.
+    it("rejects orientation results that claim no verdict with a non-zero angle", async () => {
+      for (const orientation of [90, 180, 270]) {
+        const recognitionPool = createResolvedOcrPool({ words: [], confidence: 0 });
+        const recognitionDispatch = vi.spyOn(recognitionPool, "dispatch");
+        const pooledEngine = new OcrEngine(recognitionPool, {
+          dispatch: (): Promise<unknown> =>
+            Promise.resolve({ orientation, inkRatio: 1, osdHadVerdict: false }),
+          releaseIdleWorkers: (): boolean => false,
+        });
+        await pooledEngine.init(ctx);
+        try {
+          await expect(
+            pooledEngine.processPage(createValidOcrPageInput("doc-190-verdict-angle", 0), ctx),
+          ).rejects.toThrow("osdHadVerdict=false exige orientación 0");
           expect(recognitionDispatch).not.toHaveBeenCalled();
         } finally {
           await pooledEngine.dispose();
@@ -1249,6 +1275,286 @@ describe("OcrEngine — edge case tests", () => {
         (finished?.[2] as { readonly unreadableInk?: true } | undefined)?.unreadableInk,
       ).toBeUndefined();
       await pooledEngine.dispose();
+    });
+
+    // Caso 48 (§13), ADR-190 enmienda 2026-09-28: OSD sin veredicto
+    // (`osdHadVerdict: false`, fallback a 0°). Los tests de abajo cuentan los
+    // reconocimientos por payload, sin franjas de margen (píxel blanco de
+    // `beforeEach`), con la misma imagen de 100×40 que la cadena general.
+    function inputConRaster(
+      documentId: string,
+      overrides?: Partial<ReturnType<typeof createValidOcrPageInput>>,
+    ): ReturnType<typeof createValidOcrPageInput> {
+      return {
+        ...createValidOcrPageInput(documentId, 0),
+        image: createEncodedPageImage(100, 40),
+        ...overrides,
+      };
+    }
+
+    it("a missing OSD verdict verifies reliable sparse text at every angle", async () => {
+      const box = { x0: 0, y0: 0, x1: 40, y1: 10 };
+      const withWords = (words: Array<{ text: string; confidence: number }>, confidence: number) =>
+        mockRecognizeData(
+          words.map((word) => ({ ...word, bbox: box })),
+          confidence,
+        );
+      const recognize = vi
+        .fn()
+        .mockResolvedValueOnce({
+          jobId: "fallback-zero",
+          data: withWords(
+            [
+              { text: "168", confidence: 90 },
+              { text: "ING", confidence: 90 },
+              { text: "zeleg", confidence: 90 },
+              { text: "uenp", confidence: 90 },
+            ],
+            10,
+          ),
+        })
+        .mockResolvedValueOnce({
+          jobId: "empty-high-confidence",
+          data: mockRecognizeData([], 99),
+        })
+        .mockResolvedValueOnce({
+          jobId: "correct-180",
+          data: withWords(
+            [
+              { text: "Juan", confidence: 90 },
+              { text: "Perez", confidence: 90 },
+              { text: "DNI", confidence: 90 },
+              { text: "34567891", confidence: 90 },
+            ],
+            95,
+          ),
+        })
+        .mockResolvedValueOnce({
+          jobId: "lower-page-confidence-garbage",
+          data: withWords(
+            [
+              { text: "168", confidence: 90 },
+              { text: "ING", confidence: 90 },
+              { text: "zeleg", confidence: 90 },
+              { text: "uenp", confidence: 90 },
+              { text: "299", confidence: 90 },
+              { text: "7", confidence: 90 },
+            ],
+            90,
+          ),
+        });
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockEmptyRecognizeData(), { recognize }),
+      );
+      const recognitionPool = createTrackingOcrPool();
+      const pooledEngine = new OcrEngine(recognitionPool, fakeOrientationPool(0, 0.001, false));
+      await pooledEngine.init(ctx);
+
+      const output = await pooledEngine.processPage(inputConRaster("doc-190-osd-absent"), ctx);
+
+      const payloads = recognitionPool.calls.map(({ payload }) => payload as OcrPagePayload);
+      expect(payloads.map((payload) => payload.orientation)).toEqual([0, 90, 180, 270]);
+      expect(payloads.every((payload) => payload.upscale === undefined)).toBe(true);
+      expect(recognize).toHaveBeenCalledTimes(4);
+      expect(output.words.map((word) => word.text)).toEqual(["Juan", "Perez", "DNI", "34567891"]);
+      expect(output.confidence).toBeCloseTo(0.95);
+      await pooledEngine.dispose();
+    });
+
+    it("a missing OSD verdict with ink tries all angles despite an early false reliable word", async () => {
+      const box = { x0: 0, y0: 0, x1: 40, y1: 10 };
+      const words = (items: Array<{ text: string; confidence: number }>, confidence: number) =>
+        mockRecognizeData(
+          items.map((item) => ({ ...item, bbox: box })),
+          confidence,
+        );
+      const recognize = vi
+        .fn()
+        .mockResolvedValueOnce({ jobId: "first-empty", data: words([], 0) })
+        .mockResolvedValueOnce({
+          jobId: "false-reliable-90",
+          data: words(
+            [
+              { text: "108", confidence: 88 },
+              { text: "7€", confidence: 69 },
+              { text: "INC", confidence: 90 },
+            ],
+            66,
+          ),
+        })
+        .mockResolvedValueOnce({ jobId: "empty-180", data: words([], 0) })
+        .mockResolvedValueOnce({
+          jobId: "clean-270",
+          data: words(
+            [
+              { text: "Juan", confidence: 96 },
+              { text: "Perez", confidence: 96 },
+              { text: "DNI", confidence: 93 },
+              { text: "34.567.891", confidence: 76 },
+            ],
+            90,
+          ),
+        });
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockEmptyRecognizeData(), { recognize }),
+      );
+      const recognitionPool = createTrackingOcrPool();
+      const pooledEngine = new OcrEngine(recognitionPool, fakeOrientationPool(0, 0.03489, false));
+      await pooledEngine.init(ctx);
+
+      const output = await pooledEngine.processPage(inputConRaster("doc-190-empty-then-ink"), ctx);
+
+      const payloads = recognitionPool.calls.map(({ payload }) => payload as OcrPagePayload);
+      expect(payloads.map((payload) => payload.orientation)).toEqual([0, 90, 180, 270]);
+      expect(payloads.every((payload) => payload.upscale === undefined)).toBe(true);
+      expect(output.words.map((word) => word.text)).toEqual(["Juan", "Perez", "DNI", "34.567.891"]);
+      expect(output.confidence).toBeCloseTo(0.9);
+      await pooledEngine.dispose();
+    });
+
+    it("a missing OSD verdict on shapes does not upscale a false punctuation word", async () => {
+      const recognize = vi
+        .fn()
+        .mockResolvedValueOnce({ jobId: "first-empty", data: mockRecognizeData([], 0) })
+        .mockResolvedValueOnce({
+          jobId: "shape-90",
+          data: mockRecognizeData(
+            [{ text: ">", confidence: 50, bbox: { x0: 0, y0: 0, x1: 5, y1: 5 } }],
+            50,
+          ),
+        })
+        .mockResolvedValueOnce({ jobId: "shape-180", data: mockRecognizeData([], 0) })
+        .mockResolvedValueOnce({
+          jobId: "shape-270",
+          data: mockRecognizeData(
+            [{ text: ">", confidence: 46, bbox: { x0: 0, y0: 0, x1: 5, y1: 5 } }],
+            46,
+          ),
+        });
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockEmptyRecognizeData(), { recognize }),
+      );
+      const recognitionPool = createTrackingOcrPool();
+      const pooledEngine = new OcrEngine(recognitionPool, fakeOrientationPool(0, 0.006, false));
+      await pooledEngine.init(ctx);
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+
+      // 150 dpi: la cadena general agregaría un quinto reconocimiento agrandado.
+      const output = await pooledEngine.processPage(
+        inputConRaster("doc-190-shapes-control", { dpi: 150 }),
+        ctx,
+      );
+
+      const payloads = recognitionPool.calls.map(({ payload }) => payload as OcrPagePayload);
+      expect(payloads.map((payload) => payload.orientation)).toEqual([0, 90, 180, 270]);
+      expect(payloads.every((payload) => payload.upscale === undefined)).toBe(true);
+      expect(output.words).toEqual([]);
+      expect(recognize).toHaveBeenCalledTimes(4);
+      // Ninguna lectura es fiable y la página tiene tinta: ADR-190 §4.
+      const finished = busEmitSpy.mock.calls.find(
+        ([channel, event]) =>
+          channel === EventChannel.Ocr && event === EngineEvents.OCR_PAGE_FINISHED,
+      );
+      expect(finished?.[2]).toMatchObject({
+        documentId: "doc-190-shapes-control",
+        pageIndex: 0,
+        wordCount: 0,
+        unreadableInk: true,
+      });
+      await pooledEngine.dispose();
+    });
+
+    // Caso 48 (§13): con veredicto válido y para recortes de región, la rama
+    // sin veredicto NO corre. `!isRegion` en `processPageInternal` es lo que
+    // hace fallar a este test si se quita.
+    it("a valid OSD verdict and regions keep their existing retry rules", async () => {
+      const RELIABLE = [{ text: "x", confidence: 95, bbox: { x0: 0, y0: 0, x1: 5, y1: 5 } }];
+      const WEAK = [{ text: "y", confidence: 40, bbox: { x0: 0, y0: 0, x1: 5, y1: 5 } }];
+      const region = { x: 0, y: 0, width: 50, height: 40 };
+
+      // Corre una página o una región con un OSD falso y devuelve los
+      // reconocimientos hechos (orientación, upscale) y el payload de
+      // `OCR_PAGE_FINISHED`.
+      const runChain = async (
+        words: typeof RELIABLE,
+        orientationPool: ReturnType<typeof fakeOrientationPool>,
+        target: "page" | "region",
+      ): Promise<{ attempts: Array<readonly [number, number]>; finished: unknown }> => {
+        vi.mocked(createWorker).mockResolvedValue(
+          mockTesseractWorker(mockEmptyRecognizeData(), {
+            recognize: vi.fn(() => Promise.resolve({ jobId: "j", data: mockRecognizeData(words) })),
+          }),
+        );
+        const recognitionPool = createTrackingOcrPool();
+        const pooledEngine = new OcrEngine(recognitionPool, orientationPool);
+        await pooledEngine.init(ctx);
+        const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+        busEmitSpy.mockClear();
+        try {
+          if (target === "page") {
+            await pooledEngine.processPage(inputConRaster("doc-190-chain", { dpi: 150 }), ctx);
+          } else {
+            await pooledEngine.processSession(
+              [createValidOcrPageRequest("doc-190-chain", 0, { region, dpi: 150 })],
+              createImageProducer(),
+              ctx,
+            );
+          }
+        } finally {
+          await pooledEngine.dispose();
+        }
+        return {
+          attempts: recognitionPool.calls.map(({ payload }) => {
+            const page = payload as OcrPagePayload;
+            return [page.orientation, page.upscale ?? 1] as const;
+          }),
+          finished: busEmitSpy.mock.calls.find(
+            ([channel, event]) =>
+              channel === EventChannel.Ocr && event === EngineEvents.OCR_PAGE_FINISHED,
+          )?.[2],
+        };
+      };
+
+      // Veredicto válido + lectura fiable: cero reconocimientos extra.
+      const validReliable = await runChain(RELIABLE, fakeOrientationPool(0, 1, true), "page");
+      expect(validReliable.attempts).toEqual([[0, 1]]);
+      expect(validReliable.finished).not.toHaveProperty("unreadableInk");
+
+      // Veredicto válido + lectura débil con tinta: cadena general (ángulos
+      // restantes y quinto reconocimiento agrandado a 300 dpi, que la rama
+      // sin veredicto nunca hace).
+      const validWeak = await runChain(WEAK, fakeOrientationPool(0, 1, true), "page");
+      expect(validWeak.attempts).toEqual([
+        [0, 1],
+        [90, 1],
+        [180, 1],
+        [270, 1],
+        [0, 2],
+      ]);
+      expect(validWeak.finished).toMatchObject({ unreadableInk: true });
+
+      // Región sin veredicto + lectura fiable: NO paga la rama sin veredicto
+      // (no se ensayan 90°/180°/270°), con o sin tinta, y no lleva `unreadableInk`.
+      for (const inkRatio of [0.001, 1]) {
+        const regionReliable = await runChain(
+          RELIABLE,
+          fakeOrientationPool(0, inkRatio, false),
+          "region",
+        );
+        expect(regionReliable.attempts).toEqual([[0, 1]]);
+        expect(regionReliable.finished).not.toHaveProperty("unreadableInk");
+      }
+
+      // Región sin veredicto + lectura débil con tinta: cadena general, sin
+      // upscale ni `unreadableInk` (las regiones nunca lo llevan).
+      const regionWeak = await runChain(WEAK, fakeOrientationPool(0, 1, false), "region");
+      expect(regionWeak.attempts).toEqual([
+        [0, 1],
+        [90, 1],
+        [180, 1],
+        [270, 1],
+      ]);
+      expect(regionWeak.finished).not.toHaveProperty("unreadableInk");
     });
   });
 });

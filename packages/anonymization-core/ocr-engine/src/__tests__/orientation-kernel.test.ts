@@ -265,20 +265,32 @@ describe("orientation kernel — OSD compartido por instancia", () => {
     await kernel.dispose();
   });
 
-  it("distinguishes a valid detected zero-degree verdict from the zero fallback", async () => {
+  // Caso 48 (§13), ADR-190 enmienda 2026-09-28: 0° detectado con confianza
+  // suficiente (`osdHadVerdict: true`) no es lo mismo que el fallback a 0°
+  // (`false`), ya sea por confianza insuficiente o por falla de `detect`.
+  it("reports whether OSD returned a real verdict or fell back to zero", async () => {
+    const detect = vi
+      .fn()
+      .mockResolvedValueOnce(mockDetectData(0, 1))
+      .mockResolvedValueOnce(mockDetectData(0, 0.2))
+      .mockRejectedValueOnce(new Error("Too few characters. Skipping this page"));
     vi.mocked(createWorker).mockResolvedValue(
-      mockTesseractWorker(
-        { confidence: 90, blocks: [] },
-        {
-          detect: vi.fn(() => Promise.resolve(mockDetectData(0, 1))),
-        },
-      ),
+      mockTesseractWorker({ confidence: 90, blocks: [] }, { detect }),
     );
     const kernel = createOrientationKernel();
     try {
-      await expect(kernel.detect(payload(), new AbortController().signal)).resolves.toMatchObject({
+      const signal = new AbortController().signal;
+      await expect(kernel.detect(payload({ pageIndex: 0 }), signal)).resolves.toMatchObject({
         orientation: 0,
         osdHadVerdict: true,
+      });
+      await expect(kernel.detect(payload({ pageIndex: 1 }), signal)).resolves.toMatchObject({
+        orientation: 0,
+        osdHadVerdict: false,
+      });
+      await expect(kernel.detect(payload({ pageIndex: 2 }), signal)).resolves.toMatchObject({
+        orientation: 0,
+        osdHadVerdict: false,
       });
     } finally {
       await kernel.dispose();
@@ -387,4 +399,37 @@ describe("orientation kernel — OSD compartido por instancia", () => {
     ).rejects.toBeInstanceOf(InvalidInputError);
     expect(createWorker).not.toHaveBeenCalled();
   });
+  // Contracts §7.1 (`OcrPagePayload.upscale`): 1 ≤ upscale ≤ 300/dpi. Un NaN
+  // llegaría a `ensureDpiApplied`/`upscaleImageData` sin este control.
+  it.each([
+    [Number.NaN, 150],
+    [Number.POSITIVE_INFINITY, 150],
+    [0, 150],
+    [-1, 150],
+    [0.5, 150],
+    [2.5, 150], // tope 300/150 = 2
+    [1.01, 300], // tope 300/300 = 1
+    [1.5, 600], // a más de 300 dpi no hay factor válido mayor que 1
+  ])(
+    "rejects an out-of-range recognition upscale %s at %s dpi without creating OSD",
+    async (upscale, dpi) => {
+      const invalidPayload = {
+        documentId: "invalid-upscale",
+        pageIndex: 0,
+        image: createEncodedPageImage(100, 40),
+        dpi,
+        languages: ["spa", "eng"],
+        orientation: 0 as const,
+        upscale,
+      };
+
+      await expect(
+        kernelRecognize(invalidPayload, {
+          timeoutMs: 100,
+          abortSignal: new AbortController().signal,
+        }),
+      ).rejects.toBeInstanceOf(InvalidInputError);
+      expect(createWorker).not.toHaveBeenCalled();
+    },
+  );
 });
