@@ -66,7 +66,13 @@ Reglas que se aplican a todos los bloques:
   - `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm test:contract` y
     `pnpm format:check`;
   - los tests del paquete tocado;
-  - cobertura ≥85% de los módulos que se corrijan.
+  - cobertura de líneas ≥85% de los módulos de **producto** que se corrijan,
+    incluidos los de `apps/` aunque el config de Vitest no les imponga un
+    umbral automático. Para arneses de `tests/` y scripts de medición, exigir
+    tests unitarios que distingan el defecto corregido; sus flujos sobre la
+    app empaquetada se validan en §5. El umbral de producto no se aplica al
+    archivo entero de un arnés Playwright cuya ejecución pesada queda fuera
+    de estas rondas.
 
   E2E, perf, leak y stress **no** corren en las rondas: son pesados y
   requieren la app empaquetada. Van en §5.
@@ -301,8 +307,8 @@ veces.
 | — | E1 | Exceptuado (APPROVED en el Hito 12.5) | — | — | |
 | — | E2 | Exceptuado (APPROVED 2026-09-26) | 2 | — | |
 | A | B1, B2, B7 | **APPROVED** (2026-09-27) | 3 (R1 REJECTED 7 B / 6 O; R2 B2 y B7 APPROVED, B1 REJECTED por B-5; R3 APPROVED) | ver el commit de cierre de la ronda A | O-1 → ADR-189; B-4 de Performance/Leak/Stress → ronda C; riesgo de OSD en páginas escasas → bloqueante de la ronda B |
-| B | B4, B5, B6 | **APPROVED** (cierre técnico R4; costo residual aceptado por el humano) | 4 (R1: B4/B5 REJECTED, B6 APPROVED; R2: B-7/B-8; R3: defectos de código anteriores cerrados; R4: ADR-190 y sondeos finales revisados) | commits de cierre de la ronda B | B-1/B-4/O-9 aprobados en calidad y cobertura. Sondeos finales nativos: +209,10 MiB de pico y +2.237 ms de tiempo mediano en 16 PDF escasos. El costo queda como posible trabajo futuro (`Future_Ideas.md` §6). No se demostró cumplimiento M2 de ADR-146, excedido históricamente en Windows. Cap nativo y OSD actual conservados |
-| C | B3, B8 | Pendiente | | | |
+| B | B4, B5, B6 | **APPROVED** (2026-09-29, R6: B5 reabierto y cerrado; B4 y B6 confirmados) | 6 (R1 a R4 con Codex, §4.1; R5 verificación independiente, B5 REJECTED; R6 APPROVED) | commits de cierre de la ronda B y de la reapertura de B5 | El humano aceptó como riesgo conocido el veredicto OSD equivocado con basura confiable (ADR-190, Consecuencias; `MVP.md`). ADR-146 M2 ABIERTO en `MVP.md`. Pendiente de decisión humana: el corrimiento del scroll durante un `reanalyze` de OCR (O-5, `Components.md` §5.3). Pendientes menores de comentarios para la ronda D: `viewerGestures.ts:38-40` y el docblock de `adr190-unreadable-page-cover.spec.ts` |
+| C | B3, B8 | **APPROVED** (revisión local; CI remoto aún sin observar) | 3 (R1: B3/B8 REJECTED; R2: B8 APPROVED, B3 REJECTED por reloj del caso escaneado; R3: B3/B8 APPROVED) | commits de cierre de la ronda C | Corregidos validación profunda de overrides ADR-155, M2 inconcluso sin muestras, ventana `import → Ready` y preparación del job `test-perf` en CI. Cobertura del adaptador de producto: 88,39% de líneas; tests unitarios dirigidos del arnés aprobados. O-B3-1: el empaquetado local puede reutilizar un `dist` E2E; el workflow de release reconstruye el cliente sin esa bandera. No se ejecutaron campañas pesadas en la revisión |
 | D | B9, B10 | Pendiente | | | |
 
 ### 4.1 Reanudación de la ronda B (2026-09-27)
@@ -470,6 +476,39 @@ ronda B siguen sin commit. No existe todavía un PR de esta branch a `main`.
   posible optimización posterior (`Future_Ideas.md` §6); esto no declara
   cumplido el presupuesto M2 de ADR-146.
 
+
+### 4.2 Verificación independiente de la ronda B (2026-09-29)
+
+El humano pidió volver a verificar el cierre de la ronda B que se había hecho
+con otra herramienta. Un revisor que no participó en R1 a R4 revisó los
+commits `d912cb3` a `f1c96a3` contra la versión final de ADR-190 y los specs.
+También recalculó desde los datos crudos las medianas de memoria y tiempo
+(+209,10 MiB y +2.237 ms) y corrió los cinco E2E de ADR-190 (12/12 verdes).
+
+- **B4 y B6: confirmados.**
+- **B5: reabierto** por cuatro bloqueantes:
+  - seis filas de §14 del caso 48 sin su nombre exacto, y el test de una
+    región sin veredicto OSD, que no existía;
+  - `pnpm test -- --coverage`, tal como corre en CI, rojo en Windows por dos
+    tests lentos (la R2 lo había corrido con dos workers);
+  - ADR-190 desactualizado y en contradicción con `MVP.md` sobre el riesgo
+    residual;
+  - el E2E de "página escasa" con un fixture engordado a cuatro renglones.
+- **Decisiones del humano (2026-09-29):**
+  - acepta como riesgo conocido el veredicto OSD equivocado con basura
+    confiable (ADR-190, Consecuencias; ABIERTO en `MVP.md`);
+  - mantiene R-17 sin scope, y los commits con scope se registran como
+    residuo (§6);
+  - el aviso de página ilegible (O-5) va en una franja fija arriba de la
+    imagen, fuera de ella.
+- **Planificador:** actualizó ADR-190 (estado, enmienda, §7 y Consecuencias,
+  cinco campos de contrato), `Contracts.md`, los checklists de OCR (ítems
+  37-38) y de Export (ítem 31), `MVP.md` (riesgo residual y M2 abiertos), la
+  medición DPI y su plan, y `Components.md` (la sección 8.9 estaba dentro de
+  la §7).
+- **Implementador:** B-1, B-2, B-4, O-2, O-3, O-4, O-10 y O-11 en curso;
+  después vuelve al revisor.
+
 ## 5. Después del último bloque: el merge a `main`
 
 1. **Suite pesada sobre la app empaquetada**, en Windows nativo, con la máquina
@@ -511,6 +550,21 @@ asentados, al estilo de ADR-124, en lugar de reescribirla.
   saber quién editó el spec, así que R-21 no se puede verificar a posteriori.
   Los arreglos de esta revisión sí respetan el reparto: los specs los edita el
   planificador.
+
+**Ronda B, verificación independiente (O-8):**
+
+- **Commits con scope en el mensaje (R-17).** Nueve de los once commits de cierre de
+  la ronda A (`e736797` a `506651b`) y los once de cierre de la ronda B
+  (`491a50b` a `f1c96a3`) llevan scope, por ejemplo `fix(ocr-engine):`. El
+  humano mantuvo R-17 sin scope el 2026-09-29, así que desde ahí se commitea
+  sin scope.
+- **Tramo que no compila.** Entre `491a50b` (contrato con
+  `osdHadVerdict` obligatorio) y `c325e73`, `ocr-engine` no compila: el
+  kernel de orientación todavía devuelve solo `{ orientation }`. Es el mismo
+  patrón de O-10.
+- **Mensaje que no describe el cambio.** `bced209` dice "propagar señal de
+  tinta ilegible", pero solo hace que `maxRetries["ocr-orient"]` se lea de la
+  configuración (`create-core.ts`).
 
 **Ronda B (O-10):**
 
