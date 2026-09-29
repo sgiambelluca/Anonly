@@ -2,15 +2,12 @@
 
 # ADR-190 — Una página con tinta no sale vacía en silencio
 
-- **Estado**: Aceptado; implementación revisada en R3 de la ronda B. Campaña
-  de §7 ejecutada y cap nativo de ADR-163 conservado por decisión humana.
-  Enmienda de recuperación OSD de 2026-09-28 especificada, pendiente de
-  implementación y revisión. La ronda B sigue abierta.
+- **Estado**: Aceptado e implementado, incluida la enmienda de recuperación OSD del 2026-09-28. Campaña de §7 ejecutada; cap nativo de ADR-163 conservado y costo residual aceptados por decisión humana. Riesgo residual de basura confiable con veredicto OSD aceptado por el humano el 2026-09-29 (Consecuencias).
 - **Fecha**: 2026-09-27.
 - **Decidido por**: el humano, a propuesta del planificador.
 - **Origen**: revisión de las rondas A y B (`Revision_Por_Bloques_Hardening.md`).
   En la ronda B, B-1 y B-4.
-- **Alcance**: `shared` (cuatro campos de contrato), `ocr-engine`, `export-engine` y
+- **Alcance**: `shared` (cinco campos de contrato: `unreadableInk`, `inkRatio`, `osdHadVerdict`, `upscale` y `coveredPages`), `ocr-engine`, `export-engine` y
   `apps/react-client`. El Orchestrator no cambia: el evento y las opciones de
   export viajan como hasta ahora.
 - **Relacionado con**:
@@ -121,7 +118,7 @@ lectura fiable:**
 > el costo del OCR. La medición decide si hace falta un criterio mejor, por
 > ejemplo la proporción de palabras confiables o la coherencia con la tinta.
 
-> **Enmienda del 2026-09-28 (pendiente de implementación).** La
+> **Enmienda del 2026-09-28 (implementada y revisada en la ronda B).** La
 > [campaña de recuperación](../roadmap/mediciones/ocr/ADR190_OSD_Recuperacion_2026-09-28.md)
 > ejecutó el OCR real en cuatro ángulos sobre 64 PDFs con texto. El OSD no dio
 > veredicto en 16 páginas de dos renglones; 12 estaban giradas. Las cuatro
@@ -207,7 +204,12 @@ región) que tiene tinta, `OCR_PAGE_FINISHED` lleva `unreadableInk: true`
 
 - **El visor marca la página** con el aviso *"Esta página tiene contenido que
   no se pudo leer. Revisala: si tiene datos sensibles, no se van a tapar
-  solos."*. Va en una ranura fija, sin desplazar el layout (regla UX-10).
+  solos."*. Va en una franja fija arriba de la imagen de la página, fuera de
+  ella (decisión del humano, 2026-09-29), reservada en toda página marcada:
+  agregar o quitar entidades no desplaza el layout (UX-10). Límite conocido:
+  un `reanalyze` de OCR que marca o desmarca una página por encima del scroll
+  corre lo visible 72 px por página, porque el scroll no se ancla
+  (`Components.md` §5.3).
 - **Al exportar**, la UI arma la lista de páginas pendientes: las que tienen
   `unreadableInk` y **no tienen ninguna entidad**. Una página tiene entidad si
   algún grupo no eliminado (ADR-171) tiene una ocurrencia en ella. Da igual
@@ -299,8 +301,9 @@ Además, los ocho casos de dos
 renglones girados 180° dieron basura confiable sin DNI en ambos brazos:
 OSD sin veredicto, tinta por debajo del umbral de §3 y un solo
 reconocimiento. **La condición de fiabilidad de §2 no queda validada** por
-la campaña; ese defecto requiere una enmienda y nueva revisión antes de
-cerrar la ronda B.
+la campaña. La enmienda del 2026-09-28 corrigió el caso sin veredicto OSD; el
+caso con veredicto equivocado quedó como riesgo residual aceptado
+(Consecuencias).
 
 El [sondeo posterior de escala OSD](../roadmap/mediciones/ocr/ADR190_OSD_Escala_2026-09-28.md)
 comparó la mitad histórica, el tamaño
@@ -368,8 +371,12 @@ E2E de regresión:
 
 - La cadena del §2 recupera lecturas débiles y el §4 avisa cuando una página
   con tinta sigue sin una lectura fiable. No garantiza que toda lectura
-  confiable sea correcta: el hueco de basura confiable descrito en §2 sigue
-  abierto hasta la medición y calibración de §7.
+  confiable sea correcta.
+- **Riesgo residual aceptado por el humano (2026-09-29).** Si el OSD **sí** devuelve un veredicto, pero equivocado (por ejemplo 0° sobre una página escasa que en realidad está girada), y la lectura en ese ángulo es basura con confianza ≥ 60, la cadena de §2 la considera fiable, no prueba otros ángulos ni marca `unreadableInk`, y la página se exporta sin tapar y sin aviso. Lo mismo vale para una página de figuras que recibe veredicto y produce un token falso confiable. No apareció en el corpus medido (§7), pero es posible. Cerrarlo exigiría reconocer todas las páginas en varios ángulos o recalibrar el criterio de lectura fiable. El humano lo aceptó como riesgo conocido para cerrar la ronda B; queda como ABIERTO en `MVP.md` (Hito 11) y como candidato de v1.0.
+- **Costo aceptado por el humano:** en páginas escasas nativas, +209,10 MiB
+  de pico mediano de suma de working sets y +2.237 ms de tiempo mediano
+  (sondeos de cierre de la ronda B). Queda como posible optimización
+  (`Future_Ideas.md` §6). No declara cumplido el presupuesto M2 de ADR-146.
 - Las páginas sospechosas cuestan más tiempo, hasta cuatro reconocimientos
   extra en el peor caso. La medición del §7 lo cuantifica.
 - Un documento con muchas páginas manuscritas va a mostrar varias páginas en

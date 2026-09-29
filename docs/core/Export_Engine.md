@@ -330,6 +330,8 @@ Garantías del PDF final:
 | `covered pages are exported fully black with the same size and no page render` | `contract.test.ts` | contract | ADR-190 §5 |
 | `coveredPages with an out-of-range index throws InvalidInputError` | `edge.test.ts` | edge | ADR-190 §5 |
 | `absent coveredPages leaves the export unchanged` | `contract.test.ts` | contract | ADR-190 §5: no-regresión |
+| `duplicate coveredPages entries are ignored` | `contract.test.ts` | contract | ADR-190 §5 |
+| `empty coveredPages leaves the export identical to an absent one` | `contract.test.ts` | contract | ADR-190 §5: no-regresión |
 
 Fixtures: `tests/fixtures/text-10p.pdf`, `text-50p.pdf`, `huge-1000p.pdf`.
 
@@ -375,7 +377,7 @@ Fixtures: `tests/fixtures/text-10p.pdf`, `text-50p.pdf`, `huge-1000p.pdf`.
 - [ ] 29. La imagen de la leyenda en `ExportSavePayload`; `includeMarkerLegend` en la validación de `options` (§9).
 - [ ] 30. Tests de §14, **incluidos los dos de `tests/security/`**. Verificación manual: abrir el PDF exportado e **intentar seleccionar texto en cualquier página, incluida la leyenda — no debe seleccionarse nada**. Es la verificación de un segundo que motivó rasterizarla (ADR-059 §4).
 
-- [ ] 31. (ADR-190 §5) `coveredPages`: validación en §9, página negra con las dimensiones del documento y sin `renderFull`, tests de §14.
+- [x] 31. (ADR-190 §5) `coveredPages`: validación en §9, página negra con las dimensiones del documento y sin `renderFull`, tests de §14.
 
 ---
 

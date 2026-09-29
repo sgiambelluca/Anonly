@@ -639,12 +639,13 @@ existen. Lo que se retira es la superficie de UI, no el modelo.
 
 ### 5.3 `PageVirtualizer`
 
-- **Props**: `pageCount`, `renderItem: (index) => ReactNode`, `visibleRange`, `pageSize`, `pageWidth`, `onVisibleRangeChange`, `onCurrentPageIndexChange`, `scrollRequest?`. **Sin `scrollToPageIndex`** (ADR-054 §6) y **sin `scrollSync` ni `kind`** (ADR-087 §2): con un solo panel no hay seguidor ni sincronización que instanciar, y `kind` solo servía para identificarse ante el controller.
+- **Props**: `pageCount`, `renderItem: (index) => ReactNode`, `visibleRange`, `slots`, `pageWidth`, `onVisibleRangeChange`, `onCurrentPageIndexChange`, `scrollRequest?`. **Sin `scrollToPageIndex`** (ADR-054 §6) y **sin `scrollSync` ni `kind`** (ADR-087 §2): con un solo panel no hay seguidor ni sincronización que instanciar, y `kind` solo servía para identificarse ante el controller.
   - Se retira con `scrollSync` el `ResizeObserver` que detectaba el panel volviéndose visible (alto 0 → alto > 0) para realinearlo: sin panel oculto no hay transición que observar.
   - `pageWidth` (post-Hito 10.7, hallazgo post-`APPROVED` 2026-08-15): el ancho de página en CSS px, mismo `pageWidth` que `PdfViewer` ya calcula. El contenedor con scroll lo usa como `width: max(pageWidth, 100%)` — no el 100% implícito de un bloque — para que a zoom alto, cuando `pageWidth` supera el ancho del panel, el contenedor **crezca** en vez de dejar que `PagePhantom` (`inset-x-0`) centre por flex un `renderItem` más ancho que él: ese centrado desborda por igual a los dos lados, pero un navegador en LTR solo cuenta el desborde a la **derecha** como `scrollWidth` — el borde izquierdo de la página queda a `scrollLeft` negativo, inalcanzable. Con el contenedor ya del ancho correcto, todo el desborde cae a la derecha y se alcanza scrolleando.
+  - `slots` (ADR-190 §4, 2026-09-29; reemplaza a `pageSize`): la geometría por fila que calcula `pageSlots.ts`, una función pura con test. Cada fila es la página más, si la página está marcada con `unreadableInk`, la franja fija del aviso arriba de la imagen (§5.4). Las filas dejan de tener alto uniforme. Con `slots` se calculan la altura total, la página actual (`computeCurrentPageIndexFromScroll`) y el destino de un salto (`scrollTopForPage`, que suma las franjas de las páginas anteriores). Límite conocido: si una página por encima del scroll actual gana la marca, lo visible se corre, porque no se ancla el scroll. En el flujo normal la marca llega durante el escaneo, antes de que exista el visor, así que esto solo puede pasar en un `reanalyze` de OCR.
   - `onVisibleRangeChange`: reporta al rango que detecta el `IntersectionObserver` (rango de **montaje** únicamente, ADR-054 §5) — cierra el loop de "usa `IntersectionObserver` para detectar visibilidad" hacia el estado controlado por `PdfViewer`.
   - `onCurrentPageIndexChange(pageIndex)`: página actual derivada por geometría de scroll (ADR-054 §5), reportada solo cuando cambia.
-- **Comportamiento**: mantiene un pool de `<canvas>` reutilizables. Calcula scroll height total con `pageCount × pageSize`. Solo renderiza items en `visibleRange` + 1 antes + 1 después. El contenedor con scroll es `overflow-auto` en los dos ejes (antes solo `overflow-y-auto`; el eje horizontal lo necesita `pageWidth` arriba).
+- **Comportamiento**: mantiene un pool de `<canvas>` reutilizables. Calcula el scroll height total como la suma de las filas de `slots`. Solo renderiza items en `visibleRange` + 1 antes + 1 después. El contenedor con scroll es `overflow-auto` en los dos ejes (antes solo `overflow-y-auto`; el eje horizontal lo necesita `pageWidth` arriba).
 - **Performance**: usa `IntersectionObserver` para detectar visibilidad y `requestAnimationFrame` para scroll suave.
 - **Alcance del `IntersectionObserver` (ADR-054 §5)**: decide **únicamente el rango de montaje**. Reducir el conjunto de índices que reporta a `min..max` es correcto para eso —un conjunto transitoriamente no contiguo monta una página de más, que es inofensivo— pero **no** sirve para derivar la página actual: ahí un índice viejo colapsaba el rango a `start: 0`. La página actual se calcula de la geometría del scroll (`React_Client.md` §3.5).
 
@@ -653,7 +654,7 @@ existen. Lo que se retira es la superficie de UI, no el modelo.
 - **Props**: `pageIndex`, `kind`, `blobUrl?`, `annotations?`, `highlights?`.
 - **Render**: `<canvas>` con dimensión correcta. Si `blobUrl`, dibuja la imagen. Si `annotations` (kind=original), dibuja bordes color por tipo. Si `highlights` con conflicto, dibuja borde rojo.
 - **Skeleton**: si `!blobUrl`, dibuja skeleton gris con dimensión.
-- **Página con contenido que no se pudo leer (ADR-190 §4)**: si la página tiene `unreadableInk` y **ninguna entidad**, `PageCanvas` muestra encima de la página el aviso *"Esta página tiene contenido que no se pudo leer. Revisala: si tiene datos sensibles, no se van a tapar solos."*. Una página tiene entidad si algún grupo no eliminado (ADR-171) tiene una ocurrencia en ella, sea automático o manual, habilitado o no. El aviso va en una ranura fija, sobre la imagen y sin cambiar su tamaño, así que no desplaza el layout (UX-10). Desaparece solo en cuanto la página recibe una entidad.
+- **Página con contenido que no se pudo leer (ADR-190 §4)**: si la página tiene `unreadableInk` y **ninguna entidad**, se muestra el aviso *"Esta página tiene contenido que no se pudo leer. Revisala: si tiene datos sensibles, no se van a tapar solos."*. Una página tiene entidad si algún grupo no eliminado (ADR-171) tiene una ocurrencia en ella, sea automático o manual, habilitado o no. **El aviso va en una franja fija justo arriba de la imagen de la página, fuera de ella**, para no tapar el contenido que pide revisar (decisión del humano, 2026-09-29; antes era una barra superpuesta a la parte inferior de la imagen). La franja queda reservada, con alto fijo, en toda página marcada con `unreadableInk`. Cuando la página recibe una entidad, el texto desaparece pero la franja sigue reservada hasta que cambie la marca, así que agregar o quitar entidades no desplaza el layout (UX-10). La marca cambia solo con un `reanalyze` de OCR o con un documento nuevo, y en ese momento se recalcula el layout de todas formas.
 - **Las dimensiones del `<canvas>` solo se asignan cuando cambian (ADR-056 §5)**. Asignar `canvas.width`/`canvas.height` **borra el bitmap aunque el valor sea idéntico** — es comportamiento del estándar HTML, no del navegador. Como el `blobUrl` cambia en cada `PREVIEW_UPDATED` aunque los píxeles sean los mismos (el motor acuña un `URL.createObjectURL` nuevo también en aciertos de cache, ADR-056 §6), asignarlas incondicionalmente al re-ejecutarse el efecto dejaba la página en gris hasta que la `Image` nueva terminaba de cargar: ese era el parpadeo constante que se veía al scrollear. La comprobación va en una **función pura testeable en Node** (los tests de `apps/react-client` corren sin jsdom), no en un `if` inline sin cobertura.
 - **Interacción**:
   - Hover sobre highlight → tooltip.
@@ -779,22 +780,6 @@ hay nada que sincronizar: se retira junto con `SideBySideViewer` y `scrollSyncCo
   documento, y que lista **tipos, nunca los valores originales**. Lo segundo importa: es lo primero
   que un usuario asume que hace, y no lo hace ni puede hacerlo.
 
-### 8.9 `Logo`
-
-- **Concepto**: un documento con una línea de texto reemplazada por una barra sólida. Es lo que hace
-  la app, y la barra sobre texto es el símbolo universal de "censurado".
-- **Se descartó** la alternativa "incógnito de Chrome + icono de PDF": el sombrero con anteojos es
-  una marca muy identificada con Chrome —usarla se lee como derivada— y su significado es "sin
-  historial de navegación", que no es la promesa de Anonly.
-- **`animated`**: la barra tapa el renglón que hay debajo, **una sola vez al montar**. La marca hace
-  lo que la app hace. En loop convertiría la identidad en un banner.
-- **El favicon (`public/favicon.svg`) no es una copia del componente**: tiene su propio ajuste
-  óptico (trazo más grueso, renglones más gordos, barra más grande). A 16 px lo único que tiene que
-  sobrevivir es "página con una barra cruzándola", y el detalle fino compite con eso. Colores
-  literales y no tokens: se sirve suelto, sin la hoja de estilos.
-
----
-
 - **Páginas que no se pudieron leer (ADR-190 §4)**: al pedir el export, la UI calcula las páginas pendientes: las que tienen `unreadableInk` y **ninguna entidad** (misma regla que `PageCanvas`, §5.4). La lista sale de una función pura con test. Si no está vacía, antes de exportar se abre una confirmación: *"Estas páginas tienen contenido que no se pudo leer y no tienen nada marcado para tapar."*, con una fila por página. Cada fila tiene **"Ir a la página"**, que cierra la confirmación sin exportar y lleva el visor a esa página, y el checkbox **"Tapar página entera"**, marcado por defecto. Los botones son "Cancelar" y "Exportar". Las páginas marcadas viajan en `ExportOptions.coveredPages`. No bloquea como ADR-176: siempre se puede exportar, pero después de ver la lista. Con la lista vacía no aparece nada y el flujo es el de siempre.
 
 ### 7.2 `ExportProgress`
@@ -859,6 +844,20 @@ hay nada que sincronizar: se retira junto con `SideBySideViewer` y `scrollSyncCo
 - Props: `width`, `height`.
 
 ---
+
+### 8.9 `Logo`
+
+- **Concepto**: un documento con una línea de texto reemplazada por una barra sólida. Es lo que hace
+  la app, y la barra sobre texto es el símbolo universal de "censurado".
+- **Se descartó** la alternativa "incógnito de Chrome + icono de PDF": el sombrero con anteojos es
+  una marca muy identificada con Chrome —usarla se lee como derivada— y su significado es "sin
+  historial de navegación", que no es la promesa de Anonly.
+- **`animated`**: la barra tapa el renglón que hay debajo, **una sola vez al montar**. La marca hace
+  lo que la app hace. En loop convertiría la identidad en un banner.
+- **El favicon (`public/favicon.svg`) no es una copia del componente**: tiene su propio ajuste
+  óptico (trazo más grueso, renglones más gordos, barra más grande). A 16 px lo único que tiene que
+  sobrevivir es "página con una barra cruzándola", y el detalle fino compite con eso. Colores
+  literales y no tokens: se sirve suelto, sin la hoja de estilos.
 
 ### 8.10 `EntityTypePicker` (ADR-169 §7)
 

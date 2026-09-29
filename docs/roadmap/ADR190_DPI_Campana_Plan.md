@@ -3,9 +3,9 @@
 # Campaña de DPI y fiabilidad de OCR — ADR-190 §7
 
 **Estado:** protocolo ejecutado; resultados en
-`mediciones/ocr/ADR190_DPI_2026-09-27.md`. Es parte del cierre de B-1 y B-4
-de la ronda B, que sigue pendiente de la decisión humana y de corregir la
-lectura escasa confiable pero falsa. El humano eligió las resoluciones y pidió
+`mediciones/ocr/ADR190_DPI_2026-09-27.md`. Fue parte del cierre de B-1 y B-4
+de la ronda B: el humano conservó el cap nativo, y la lectura escasa confiable
+pero falsa se corrigió con la enmienda de recuperación de ADR-190. El humano eligió las resoluciones y pidió
 implementar primero los reintentos y avisos de ADR-190.
 
 ## 1. Qué se compara

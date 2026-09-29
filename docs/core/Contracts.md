@@ -2,7 +2,7 @@
 
 # Anonly — Contratos Base (`@anonly/shared`)
 
-> **T-5 / ADR-164, revisión 2026-09-15**: orientación separada en `ocr-orient` y factory `ocr-orientation`; ver §7.2. La evolución añade un consumidor de preparación con dos LSTM (§6), sin nuevos tipos ni campos públicos. **Aceptado, implementado y validado** (T-5 cerrada el 2026-09-15, ADR-164). ADR-190 (2026-09-27) agrega `OcrOrientationResult.inkRatio` y `OcrPagePayload.upscale` (§7.1/§7.2); su enmienda de 2026-09-28 especifica `OcrOrientationResult.osdHadVerdict`, pendiente de implementación.
+> **T-5 / ADR-164, revisión 2026-09-15**: orientación separada en `ocr-orient` y factory `ocr-orientation`; ver §7.2. La evolución añade un consumidor de preparación con dos LSTM (§6), sin nuevos tipos ni campos públicos. **Aceptado, implementado y validado** (T-5 cerrada el 2026-09-15, ADR-164). ADR-190 (2026-09-27) agrega `OcrOrientationResult.inkRatio` y `OcrPagePayload.upscale` (§7.1/§7.2); su enmienda de 2026-09-28 agrega `OcrOrientationResult.osdHadVerdict` (implementada en la ronda B).
 
 > Define **todos** los tipos, interfaces, enums, error codes y contratos compartidos entre motores. Es el único paquete del que un motor puede importar tipos. Un implementador debe leer este archivo **completo** antes de tocar cualquier motor.
 
@@ -937,7 +937,9 @@ export interface OcrPagePayload {
   readonly dpi: number;
   readonly languages: ReadonlyArray<string>;
   // ADR-190 §2 paso 4 y §5: factor con el que el kernel agranda la imagen
-  // decodificada antes de reconocer. Default 1; rango 1 ≤ upscale ≤ 300/dpi.
+  // decodificada antes de reconocer. Default 1. upscale = 1 vale con cualquier
+  // dpi; si upscale > 1, además upscale ≤ 300/dpi. No finito o fuera de
+  // rango → InvalidInputError.
   // Las coordenadas se convierten con dpi × upscale (el bbox sigue en puntos).
   readonly upscale?: number;
 }

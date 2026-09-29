@@ -737,6 +737,8 @@ OcrPageOutput {
 | `orientation detection failure preserves measured inkRatio` | `orientation-kernel.test.ts` | unit | caso 46, ADR-190 §3: el fallback a 0° conserva la medición; fail-open solo si no está disponible |
 | `rejects orientation results whose inkRatio is outside [0,1]` | `edge.test.ts` | edge | caso 46, Contracts §7.2 y ADR-055: validar el rango del sobre antes de usarlo |
 | `reports whether OSD returned a real verdict or fell back to zero` | `orientation-kernel.test.ts` | unit | caso 48: distinguir 0° detectado de ausencia de veredicto/error |
+| `rejects orientation results that claim no verdict with a non-zero angle` | `edge.test.ts` | edge | caso 48: `osdHadVerdict: false` solo vale con orientación 0 (`Contracts.md` §7.2); lo demás es un sobre malformado (ADR-055) |
+| `rejects an out-of-range recognition upscale %s at %s dpi without creating OSD` (parametrizado, ocho casos) | `orientation-kernel.test.ts` | unit | caso 45: `upscale` no finito, menor que 1, o mayor que 1 y que `300/dpi` → `InvalidInputError` (`Contracts.md` §7.1) |
 | `a missing OSD verdict verifies reliable sparse text at every angle` | `edge.test.ts` | edge | caso 48: aun debajo del umbral de tinta; la confianza de página prevalece sobre palabras falsas de margen |
 | `a missing OSD verdict with ink tries all angles despite an early false reliable word` | `edge.test.ts` | edge | caso 48: primera lectura vacía; 90° falso y 270° con DNI limpio |
 | `a missing OSD verdict on shapes does not upscale a false punctuation word` | `edge.test.ts` | edge | caso 48: sin lectura confiable tras cuatro ángulos, `unreadableInk` |
@@ -855,7 +857,9 @@ OcrPageOutput {
 
 - [x] 34. (ADR-145 §2/§4) Depositar las palabras con `estimateWordsBytes(words)` como tercer argumento de `ctx.cache.set`, antes de `OCR_PAGE_FINISHED`; `estimateWordsBytes` queda interna (no se exporta desde `index.ts`).
 
-- [ ] 37. (ADR-190) Tamaño fijo del OSD e `inkRatio` en el kernel de orientación; cadena de verificación y reintentos en `OcrEngine` (casos 43–47); `upscale` en el kernel de reconocimiento; `unreadableInk` en `OCR_PAGE_FINISHED`. Contratos primero (`OcrPageFinished`, `OcrOrientationResult`, `OcrPagePayload`). Tests de §14.
+- [x] 37. (ADR-190) Tamaño fijo del OSD e `inkRatio` en el kernel de orientación; cadena de verificación y reintentos en `OcrEngine` (casos 43–47); `upscale` en el kernel de reconocimiento; `unreadableInk` en `OCR_PAGE_FINISHED`. Contratos primero (`OcrPageFinished`, `OcrOrientationResult`, `OcrPagePayload`). Tests de §14.
+
+- [x] 38. (ADR-190, enmienda del 2026-09-28) Rama de OSD sin veredicto (caso 48): `osdHadVerdict` en `OcrOrientationResult`, disparo por primera lectura fiable o tinta presente, reconocimiento en 90/180/270 sin upscale, ranking por confianza de página y sin rama para regiones. Tests de §14 del caso 48.
 
 ---
 
