@@ -308,6 +308,11 @@ describe("computeM2WithinPhases (ADR-146 §7ter)", () => {
   it("null sin segmentos — el llamador cae de vuelta al pico global en ese caso", () => {
     expect(computeM2WithinPhases([rssSample(0, { Tab: 1 })], [])).toBeNull();
   });
+
+  it("null si todas las muestras quedan fuera de la ventana de fases", () => {
+    const samples = [rssSample(100, { Tab: 800_000_000 }), rssSample(1200, { Tab: 900_000_000 })];
+    expect(computeM2WithinPhases(samples, [segment(500, 1000)])).toBeNull();
+  });
 });
 
 describe("computePostReadyPeakBytes (ADR-146 §7ter — métrica obligatoria, nunca fundida con M2)", () => {

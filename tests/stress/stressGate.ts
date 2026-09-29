@@ -1,7 +1,7 @@
 interface StressRunMeasurement {
   readonly ok: boolean;
   readonly totalMs: number | null;
-  readonly peakSumBytes: number;
+  readonly peakSumBytes: number | null;
   readonly groupCount: number;
   readonly groupPageIndices?: ReadonlyArray<number>;
   readonly groupPageIndicesComplete?: boolean;
@@ -48,7 +48,11 @@ function runFailures(
   if (typeof run.totalMs !== "number" || !Number.isFinite(run.totalMs) || run.totalMs <= 0) {
     failures.push(`${label}: import time unreadable`);
   }
-  if (!Number.isFinite(run.peakSumBytes) || run.peakSumBytes <= 0) {
+  if (
+    typeof run.peakSumBytes !== "number" ||
+    !Number.isFinite(run.peakSumBytes) ||
+    run.peakSumBytes <= 0
+  ) {
     failures.push(`${label}: M2 unreadable`);
   }
   if (!Number.isFinite(run.groupCount) || run.groupCount < minimumGroups) {
@@ -108,7 +112,7 @@ export function evaluateStressGate(
   for (const temperature of ["cold", "hot"] as const) {
     const base = profile50[temperature];
     const scaled = profile200[temperature];
-    const m2Ratio = scaled.peakSumBytes / base.peakSumBytes;
+    const m2Ratio = scaled.peakSumBytes! / base.peakSumBytes!;
     const timeRatio = (scaled.totalMs ?? Number.NaN) / (base.totalMs ?? Number.NaN);
     comparisons.push({ temperature, m2Ratio, timeRatio });
     if (!Number.isFinite(m2Ratio) || m2Ratio > 3)

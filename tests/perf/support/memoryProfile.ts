@@ -734,7 +734,7 @@ export interface RunReport {
    * (`rssPeakGlobalBytes`) solo cuando no hay segmentos de fase (corrida
    * fallida antes del segundo evento de fase).
    */
-  readonly peakSumBytes: number;
+  readonly peakSumBytes: number | null;
   /**
    * El pico posterior a la última fase (ADR-146 §7ter) — el precalentado de
    * la página 1 (ADR-151) y el seed de previews (ADR-044), trabajo real del
@@ -959,7 +959,7 @@ async function runImport(
   // base: es la misma resta de siempre, aplicada al pico ya corregido.
   const peakPosition = classifyPeakPosition(runSamples, phaseSegments);
   const m2WithinPhasesBytes = computeM2WithinPhases(runSamples, phaseSegments);
-  const reportedPeakBytes = m2WithinPhasesBytes ?? globalPeakBytes;
+  const reportedPeakBytes = phaseSegments.length === 0 ? globalPeakBytes : m2WithinPhasesBytes;
   const postReadyPeakBytes = computePostReadyPeakBytes(runSamples, phaseSegments);
   const workerEventsAtMs = run.workerEvents.map((e) => ({
     type: e.type,
@@ -994,7 +994,10 @@ async function runImport(
     baselineBytes,
     peakSumBytes: reportedPeakBytes,
     postReadyPeakBytes,
-    m1Bytes: temperature === "hot" ? reportedPeakBytes - baselineBytes : null,
+    m1Bytes:
+      temperature === "hot" && reportedPeakBytes !== null
+        ? reportedPeakBytes - baselineBytes
+        : null,
     phases: run.phases,
     workerPeakByType: run.workerPeakByType,
     startedAtMs,
@@ -1073,9 +1076,9 @@ export function classifyPeakPosition(
  * M2 (ADR-146 §7ter): el pico se mide sobre las muestras de la ventana de
  * fases, ya no sobre todo el run — así una corrida `"after-last-phase"` no
  * reporta como M2 el precalentado/seed posterior a `Ready`, que
- * `computePostReadyPeakBytes` cubre aparte. `null` sin segmentos (corrida
- * fallida antes del segundo evento de fase); el llamador cae de vuelta al
- * pico global en ese caso, igual que antes de esta enmienda.
+ * `computePostReadyPeakBytes` cubre aparte. `null` si no hay segmentos o no
+ * cayó ninguna muestra en la ventana. El llamador solo cae al pico global
+ * cuando no existen segmentos; una ventana vacía queda inconclusa.
  */
 export function computeM2WithinPhases(
   samples: ReadonlyArray<MemorySample>,
@@ -1084,7 +1087,8 @@ export function computeM2WithinPhases(
   const first = segments[0];
   const last = segments[segments.length - 1];
   if (first === undefined || last === undefined) return null;
-  return peakSumBytes(samplesBetween(samples, first.fromAtMs, last.toAtMs));
+  const windowSamples = samplesBetween(samples, first.fromAtMs, last.toAtMs);
+  return windowSamples.length === 0 ? null : peakSumBytes(windowSamples);
 }
 
 /**
@@ -1499,12 +1503,16 @@ function formatPostReadyPeak(bytes: number | null): string {
   return bytes === null ? "? (sin muestras posteriores a Ready)" : formatMB(bytes);
 }
 
+function formatM2(bytes: number | null): string {
+  return bytes === null ? "? (sin muestras en la ventana de fases)" : formatMB(bytes);
+}
+
 export function printReport(report: ProfileReport): void {
   const { cold, hot } = report;
   process.stdout.write(
     `\n=== H-10 — perfil ${report.profile} (${report.identity.platform}/${report.identity.arch}, ` +
       `${report.identity.cpuCount} CPUs, ${formatMB(report.identity.totalMemBytes)} RAM) ===\n` +
-      `  frío    — M2 (pico dentro de fase): ${formatMB(cold.peakSumBytes)}  ` +
+      `  frío    — M2 (pico dentro de fase): ${formatM2(cold.peakSumBytes)}  ` +
       `pico posterior a Ready: ${formatPostReadyPeak(cold.postReadyPeakBytes)}  ` +
       `posición del máximo: ${formatPeakPosition(cold.peakPosition)}  ` +
       `total: ${cold.totalMs?.toFixed(0) ?? "?"} ms  ok: ${cold.ok}  grupos: ${cold.groupCount}  ` +
@@ -1512,7 +1520,7 @@ export function printReport(report: ProfileReport): void {
       `    presión del sistema — apertura: ${formatSystemMemoryPressure(cold.systemPressureAtStart)}  ` +
       `cierre: ${formatSystemMemoryPressure(cold.systemPressureAtEnd)}\n` +
       formatPhaseSegments(cold.phaseSegments) +
-      `  caliente — M2 (pico dentro de fase): ${formatMB(hot.peakSumBytes)}  ` +
+      `  caliente — M2 (pico dentro de fase): ${formatM2(hot.peakSumBytes)}  ` +
       `pico posterior a Ready: ${formatPostReadyPeak(hot.postReadyPeakBytes)}  ` +
       `M1 (atribuible al documento): ${hot.m1Bytes !== null ? formatMB(hot.m1Bytes) : "?"}  ` +
       `línea de base: ${formatMB(hot.baselineBytes)} (asentada: ${formatFlag(hot.hotBaselineSettled, "venció el techo de 30s, ADR-146 §7bis")})  ` +

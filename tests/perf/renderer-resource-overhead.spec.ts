@@ -24,7 +24,7 @@ type Condition = "without-footprint" | "with-footprint";
 interface OverheadRun {
   readonly temperature: RunReport["temperature"];
   readonly totalMs: number | null;
-  readonly peakSumBytes: number;
+  readonly peakSumBytes: number | null;
   readonly baselineBytes: number;
   readonly m1Bytes: number | null;
   readonly postReadyPeakBytes: number | null;

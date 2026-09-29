@@ -104,9 +104,10 @@ async function readPerf(page: Page): Promise<{
 
 test("PDF 10 páginas con texto: import -> Ready en menos de 8s (Vision §7)", async ({ page }) => {
   await openApp(page, "networkidle");
-  await installCollector(page);
-
   const file = await textTenPagesFile();
+  // El SLA empieza justo antes de importar: generar el fixture es preparación
+  // del test, no trabajo del producto (ADR-153).
+  await installCollector(page);
   await page.locator('input[type="file"]').setInputFiles(file);
 
   await waitForSettled(page, BUDGETS_MS.nativeTextEndToEnd + 30_000);
@@ -122,7 +123,6 @@ test("PDF 10 páginas escaneadas: import -> Ready (vía OCR real) en menos de 60
   page,
 }) => {
   await openApp(page, "networkidle");
-  await installCollector(page);
 
   const textFile = await textTenPagesFile();
   // Mismo método que tests/measure/baseline.spec.ts (MEASURE_SCAN) y
@@ -131,6 +131,10 @@ test("PDF 10 páginas escaneadas: import -> Ready (vía OCR real) en menos de 60
   // real, no la capa textual del PDF de entrada.
   const scannedFile = await rasterizeToScannedPdf(page, new Uint8Array(textFile.buffer));
 
+  // El PDF de entrada y la rasterización son preparación del fixture, no
+  // parte del SLA import → Ready. Instalar el recolector acá deja el archivo
+  // listo y todavía precede a la importación real.
+  await installCollector(page);
   await page.locator('input[type="file"]').setInputFiles(scannedFile);
 
   await waitForSettled(page, BUDGETS_MS.scannedOcrEndToEnd + 60_000);

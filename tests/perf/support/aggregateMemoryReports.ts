@@ -201,9 +201,11 @@ async function main(): Promise<void> {
         const samples = r.run.samples ?? [];
         const segments = r.run.phaseSegments ?? [];
         const peakPosition: PeakPosition = classifyPeakPosition(samples, segments);
-        const m2Bytes = computeM2WithinPhases(samples, segments) ?? r.run.peakSumBytes;
+        const m2Bytes =
+          segments.length === 0 ? r.run.peakSumBytes : computeM2WithinPhases(samples, segments);
         const postReadyPeakBytes = computePostReadyPeakBytes(samples, segments);
-        const m1Bytes = temperature === "hot" ? m2Bytes - r.run.baselineBytes : null;
+        const m1Bytes =
+          temperature === "hot" && m2Bytes !== null ? m2Bytes - r.run.baselineBytes : null;
         return { ...r, peakPosition, m2Bytes, postReadyPeakBytes, m1Bytes };
       });
       // Solo "antes de DOCUMENT_IMPORTED" invalida (ADR-146 §7ter) — el caso
@@ -243,13 +245,23 @@ async function main(): Promise<void> {
         );
       }
 
-      const m2 = stats(valid.map((r) => r.m2Bytes));
+      const m2Values = valid.map((r) => r.m2Bytes).filter((v): v is number => v !== null);
+      if (m2Values.length < valid.length) {
+        process.stdout.write(
+          `  ${temperature}: ${valid.length - m2Values.length}/${valid.length} corridas sin muestras en la ventana; M2 inconcluso para esas corridas.\n`,
+        );
+      }
+      const m2 = m2Values.length > 0 ? stats(m2Values) : null;
       const totals = valid.map((r) => r.run.totalMs).filter((v): v is number => v !== null);
       const timeStats = totals.length > 0 ? stats(totals) : null;
       const groupCounts = valid.map((r) => r.run.groupCount);
 
       process.stdout.write(
-        `  ${temperature.padEnd(4)} — M2 pico (dentro de fase): min ${formatMB(m2.min)} / avg ${formatMB(m2.avg)} / max ${formatMB(m2.max)}` +
+        `  ${temperature.padEnd(4)} — M2 pico (dentro de fase): ${
+          m2
+            ? `min ${formatMB(m2.min)} / avg ${formatMB(m2.avg)} / max ${formatMB(m2.max)} (${m2Values.length}/${valid.length})`
+            : "inconcluso (sin muestras en ventana)"
+        }` +
           (timeStats
             ? `  |  tiempo: min ${timeStats.min.toFixed(0)}ms / avg ${timeStats.avg.toFixed(0)}ms / max ${timeStats.max.toFixed(0)}ms`
             : "") +
