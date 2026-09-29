@@ -383,6 +383,79 @@ export async function samplePdfPixels(
   });
 }
 
+export interface PdfSpaceRect {
+  readonly pageIndex: number;
+  /** Coordenadas en espacio PDF (origen abajo-izquierda), SIN rotar a mano. */
+  readonly x0: number;
+  readonly y0: number;
+  readonly x1: number;
+  readonly y1: number;
+}
+
+/**
+ * Convierte rectángulos en espacio PDF a regiones de canvas (origen
+ * arriba-izquierda), usando `viewport.convertToViewportPoint` de pdfjs-dist —
+ * que ya aplica el `/Rotate` de la página, sea cual sea (0/90/180/270) — en
+ * vez de una fórmula de rotación escrita a mano por ángulo (ADR-190, specs
+ * `adr190-*`: a diferencia de `scanned-rotated-export.spec.ts`, que solo
+ * necesita `/Rotate 90`, acá el mismo rectángulo se muestrea contra un mismo
+ * documento con o sin rotación).
+ */
+async function convertPdfRectsInBrowser(args: {
+  readonly pdfjsSource: string;
+  readonly workerSource: string;
+  readonly pdfBytesBase64: string;
+  readonly rects: ReadonlyArray<PdfSpaceRect>;
+}): Promise<ReadonlyArray<PdfRegionSample>> {
+  const pdfjsBlobUrl = URL.createObjectURL(
+    new Blob([args.pdfjsSource], { type: "text/javascript" }),
+  );
+  const workerBlobUrl = URL.createObjectURL(
+    new Blob([args.workerSource], { type: "text/javascript" }),
+  );
+  const pdfjsLib = (await import(pdfjsBlobUrl)) as typeof PdfjsModule;
+  pdfjsLib.GlobalWorkerOptions.workerSrc = workerBlobUrl;
+  const bytes = Uint8Array.from(atob(args.pdfBytesBase64), (char) => char.charCodeAt(0));
+  const pdfDocument = await pdfjsLib.getDocument({ data: bytes }).promise;
+
+  const viewportsByPage = new Map<number, ReturnType<PdfjsModule.PDFPageProxy["getViewport"]>>();
+  const output: PdfRegionSample[] = [];
+  for (const rect of args.rects) {
+    let viewport = viewportsByPage.get(rect.pageIndex);
+    if (viewport === undefined) {
+      const pdfPage = await pdfDocument.getPage(rect.pageIndex + 1);
+      viewport = pdfPage.getViewport({ scale: 1 });
+      viewportsByPage.set(rect.pageIndex, viewport);
+    }
+    const p0 = viewport.convertToViewportPoint(rect.x0, rect.y0);
+    const p1 = viewport.convertToViewportPoint(rect.x1, rect.y1);
+    const x0 = Math.min(p0[0], p1[0]);
+    const y0 = Math.min(p0[1], p1[1]);
+    const x1 = Math.max(p0[0], p1[0]);
+    const y1 = Math.max(p0[1], p1[1]);
+    output.push({ pageIndex: rect.pageIndex, x: x0, y: y0, width: x1 - x0, height: y1 - y0 });
+  }
+  return output;
+}
+
+/** Ver `convertPdfRectsInBrowser`: hace el trabajo pesado dentro del browser. */
+export async function convertPdfRectsToRegions(
+  page: Page,
+  pdfBytes: Uint8Array,
+  rects: ReadonlyArray<PdfSpaceRect>,
+): Promise<ReadonlyArray<PdfRegionSample>> {
+  const [pdfjsSource, workerSource] = await Promise.all([
+    readFile(PDFJS_MJS_PATH, "utf-8"),
+    readFile(PDFJS_WORKER_PATH, "utf-8"),
+  ]);
+  return page.evaluate(convertPdfRectsInBrowser, {
+    pdfjsSource,
+    workerSource,
+    pdfBytesBase64: Buffer.from(pdfBytes).toString("base64"),
+    rects,
+  });
+}
+
 /** Muestrea cada rectángulo de un PDF para probar cobertura y conservación. */
 export async function samplePdfRegions(
   page: Page,
