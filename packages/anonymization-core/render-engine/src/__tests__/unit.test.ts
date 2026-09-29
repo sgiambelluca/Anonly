@@ -524,7 +524,7 @@ describe("RenderEngine — unit tests", () => {
 
   // ─── ADR-065 §5 (Hito 10.8, PR6): rasterizePage con región ───
 
-  it("rasterizePage with a region returns only the cropped ImageData", async () => {
+  it("rasterizePage with a region returns only the cropped image, encoded", async () => {
     const docId = "doc-rasterize-region";
     vi.mocked(getDocument).mockReturnValue(
       mockGetDocumentResult(

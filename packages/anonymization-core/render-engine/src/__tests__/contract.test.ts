@@ -222,7 +222,7 @@ describe("RenderEngine — contract tests", () => {
 
   // ─── ADR-034 §1/§3 (Hito 9): rasterizePage + RenderPageOutput.encoded ───
 
-  it("rasterizePage returns ImageData without emitting events nor touching cache", async () => {
+  it("rasterizePage returns an EncodedPageImage (png) without emitting events nor touching cache", async () => {
     const docId = "doc-rasterize";
     vi.mocked(getDocument).mockReturnValue(
       mockGetDocumentResult(
@@ -236,9 +236,8 @@ describe("RenderEngine — contract tests", () => {
     await engine.loadDocument(docId, createValidBuffer());
     const emitSpy = vi.spyOn(ctx.bus, "emit");
 
-    // ADR-158 §1: rasterizePage ahora devuelve EncodedPageImage (PNG), no
-    // ImageData pelado — el nombre del test se conserva (Render_Engine.md
-    // §14), solo cambia la forma que se asertea.
+    // ADR-158 §1: rasterizePage devuelve EncodedPageImage (PNG), no ImageData
+    // pelado (Render_Engine.md §14).
     const encoded = await engine.rasterizePage(docId, 0, 2, ctx);
 
     expect(encoded.format).toBe("png");
