@@ -138,7 +138,10 @@ export async function createCore(
     jobType: "ocr-orient",
     size: 1,
     maxQueue: mergedConfig.workerPool.maxQueuePerPool.ocr,
-    maxRetries: 0,
+    // O-7: leer del config, como los demás pools — antes era un literal que
+    // dejaba muerto cualquier override de `maxRetries["ocr-orient"]`. El
+    // default sigue siendo 0 (Contracts.md §6, config.ts).
+    maxRetries: mergedConfig.workerPool.maxRetries["ocr-orient"],
     baseRetryDelayMs: mergedConfig.workerPool.baseRetryDelayMs,
     maxRetryDelayMs: mergedConfig.workerPool.maxRetryDelayMs,
     idleDisposeMs: mergedConfig.workerPool.idleDisposeMs,
