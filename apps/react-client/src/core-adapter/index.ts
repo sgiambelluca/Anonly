@@ -190,6 +190,95 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+const ENGINE_OVERRIDE_FIELDS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  workerPool: {
+    pdfPoolSize: "number",
+    ocrPoolSize: "number",
+    nerPoolSize: "number",
+    renderPoolSize: "number",
+    maxQueuePerPool: "object",
+    timeouts: "object",
+    maxRetries: "object",
+    baseRetryDelayMs: "number",
+    maxRetryDelayMs: "number",
+    cancelSlaMs: "number",
+    idleDisposeMs: "number",
+    nerIdleDisposeMs: "number",
+  },
+  pdf: { maxPageCount: "number" },
+  ner: {
+    modelId: "string",
+    quantization: "quantization",
+    confidenceThreshold: "number",
+    batchSize: "number",
+    enabled: "boolean",
+    wasmPaths: "wasmPaths",
+  },
+  ocr: { languages: "stringArray", dpi: "number", maxLiveImageBytes: "number" },
+  grouping: { similarityThreshold: "number", minAliasFrequency: "number" },
+  render: {
+    previewScale: "number",
+    fullScale: "number",
+    jpegQuality: "number",
+    cachePages: "number",
+  },
+  export: { defaultDpi: "number", defaultImageFormat: "imageFormat", defaultJpegQuality: "number" },
+};
+
+function matchesOverrideType(type: string, value: unknown): boolean {
+  switch (type) {
+    case "number":
+      return typeof value === "number" && Number.isFinite(value);
+    case "string":
+      return typeof value === "string";
+    case "boolean":
+      return typeof value === "boolean";
+    case "stringArray":
+      return Array.isArray(value) && value.every((item) => typeof item === "string");
+    case "quantization":
+      return value === "q8" || value === "q4" || value === "f32";
+    case "imageFormat":
+      return value === "png" || value === "jpeg";
+    case "wasmPaths":
+      return (
+        typeof value === "string" ||
+        (isPlainObject(value) &&
+          Object.entries(value).every(
+            ([key, item]) => (key === "wasm" || key === "mjs") && typeof item === "string",
+          ))
+      );
+    default:
+      return false;
+  }
+}
+
+function isValidOverrideSection(section: string, value: Record<string, unknown>): boolean {
+  const fields = ENGINE_OVERRIDE_FIELDS[section];
+  return (
+    fields !== undefined &&
+    Object.entries(value).every(([key, fieldValue]) => {
+      const expectedType = fields[key];
+      if (expectedType === "object") {
+        const allowedKeys =
+          key === "maxQueuePerPool"
+            ? ["pdf", "ocr", "ner", "render"]
+            : ["pdf-parse", "ocr-page", "ocr-orient", "ner-page", "render-page", "export-page"];
+        return (
+          isPlainObject(fieldValue) &&
+          allowedKeys.every((nestedKey) => nestedKey in fieldValue) &&
+          Object.entries(fieldValue).every(
+            ([nestedKey, nestedValue]) =>
+              allowedKeys.includes(nestedKey) &&
+              typeof nestedValue === "number" &&
+              Number.isFinite(nestedValue),
+          )
+        );
+      }
+      return expectedType !== undefined && matchesOverrideType(expectedType, fieldValue);
+    })
+  );
+}
+
 /**
  * Canal de overrides del arnés de medición (ADR-155, autorizado por el
  * planificador para H-10: atribuir memoria pool por pool exige mover
@@ -221,7 +310,7 @@ function readTestEngineOverrides(): EngineConfigOverrides | undefined {
     if (!isPlainObject(parsed)) return undefined;
     for (const [key, value] of Object.entries(parsed)) {
       if (!ENGINE_CONFIG_SECTIONS.has(key as keyof EngineConfigOverrides)) return undefined;
-      if (!isPlainObject(value)) return undefined;
+      if (!isPlainObject(value) || !isValidOverrideSection(key, value)) return undefined;
     }
     return parsed as EngineConfigOverrides;
   } catch {

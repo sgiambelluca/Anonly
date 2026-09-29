@@ -133,4 +133,21 @@ describe("core-adapter/index — canal de overrides del arnés de medición (ADR
     const received = createCoreMock.mock.calls[0]?.[0];
     expect(received?.workerPool).toEqual({ ocrPoolSize: 4 });
   });
+
+  it("una clave o un tipo inválido dentro de una sección descarta todo el override", async () => {
+    for (const invalid of [
+      { workerPool: { ocrPoolSize: 1, unknownPoolOption: 2 } },
+      { workerPool: { ocrPoolSize: "1" } },
+      { workerPool: { maxQueuePerPool: { pdf: 1, ocr: 1, ner: 1, render: 1, mystery: 1 } } },
+      { ner: { enabled: false, quantization: "q16" } },
+    ]) {
+      stubLocalStorage(JSON.stringify(invalid));
+      await initCore({ workerPool: { ocrPoolSize: 4 }, ner: { enabled: true } });
+      const received = createCoreMock.mock.calls[0]?.[0];
+      expect(received?.workerPool?.ocrPoolSize).toBe(4);
+      expect(received?.ner?.enabled).toBe(true);
+      await disposeCore();
+      createCoreMock.mockClear();
+    }
+  });
 });
