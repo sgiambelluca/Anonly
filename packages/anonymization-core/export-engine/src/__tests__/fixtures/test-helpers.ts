@@ -11,6 +11,8 @@
  * Los tests security/* usan `pdf-lib` REAL (no este mock) — ver
  * tests/security/security.test.ts.
  */
+import { inflateSync } from "node:zlib";
+
 import { DetectionSource, EntityType, ReplacementMode, type Document, type DocumentMetadata, type EntityGroup, type ExportOptions, type MarkerLegendRow, type Page, type Replacement } from "@anonly/shared";
 import type { EngineConfig, EngineContext } from "@anonly/shared";
 import { createEngineContext as sharedCreateEngineContext, createMockConfig as sharedCreateMockConfig } from "@anonly/test-utils";
@@ -440,4 +442,70 @@ export function createMockConfig(overrides?: Partial<EngineConfig>): EngineConfi
  */
 export function createEngineContext(overrides?: Partial<EngineContext>): EngineContext {
   return sharedCreateEngineContext({ config: createMockConfig(), ...overrides });
+}
+
+/** PNG decodificado: `pixels` son las filas ya sin el byte de filtro (`channels` bytes por píxel). */
+export interface DecodedPng {
+  readonly width: number;
+  readonly height: number;
+  readonly bitDepth: number;
+  readonly colorType: number;
+  readonly channels: number;
+  readonly pixels: Uint8Array;
+}
+
+/**
+ * Decodifica un PNG no entrelazado de 8 bits, RGB (color type 2) o RGBA (6), con
+ * filtro "None" en todas sus filas — el subconjunto que produce la imagen negra
+ * sintética de `coveredPages` (ADR-190 §5). Lanza ante cualquier otra forma en
+ * vez de adivinar: un test que "decodifica" bytes que no entiende no prueba nada.
+ * Inflar con `node:zlib` también verifica el adler32 del stream IDAT.
+ */
+export function decodePng(bytes: ArrayBuffer): DecodedPng {
+  const data = new Uint8Array(bytes);
+  const signature = [137, 80, 78, 71, 13, 10, 26, 10];
+  if (signature.some((byte, index) => data[index] !== byte)) {
+    throw new Error("decodePng: firma PNG inválida.");
+  }
+  const view = new DataView(bytes);
+  let header: { width: number; height: number; bitDepth: number; colorType: number } | undefined;
+  const idat: Uint8Array[] = [];
+  let sawEnd = false;
+  let offset = 8;
+  while (offset + 8 <= data.length && !sawEnd) {
+    const length = view.getUint32(offset);
+    const type = String.fromCharCode(...data.subarray(offset + 4, offset + 8));
+    const body = data.subarray(offset + 8, offset + 8 + length);
+    if (type === "IHDR") {
+      const interlace = body[12];
+      if (interlace !== 0) throw new Error("decodePng: PNG entrelazado no soportado.");
+      header = {
+        width: new DataView(body.buffer, body.byteOffset).getUint32(0),
+        height: new DataView(body.buffer, body.byteOffset).getUint32(4),
+        bitDepth: body[8] ?? 0,
+        colorType: body[9] ?? -1,
+      };
+    } else if (type === "IDAT") {
+      idat.push(body);
+    } else if (type === "IEND") {
+      sawEnd = true;
+    }
+    offset += 12 + length; // longitud + tipo + cuerpo + CRC
+  }
+  if (header === undefined || !sawEnd) throw new Error("decodePng: faltan IHDR o IEND.");
+  if (header.bitDepth !== 8 || (header.colorType !== 2 && header.colorType !== 6)) {
+    throw new Error("decodePng: solo se soporta RGB/RGBA de 8 bits.");
+  }
+  const channels = header.colorType === 2 ? 3 : 4;
+  const raw = new Uint8Array(inflateSync(Buffer.concat(idat)));
+  const stride = header.width * channels;
+  if (raw.length !== header.height * (stride + 1)) {
+    throw new Error("decodePng: tamaño de datos inesperado.");
+  }
+  const pixels = new Uint8Array(header.height * stride);
+  for (let row = 0; row < header.height; row++) {
+    if (raw[row * (stride + 1)] !== 0) throw new Error("decodePng: solo filtro None soportado.");
+    pixels.set(raw.subarray(row * (stride + 1) + 1, (row + 1) * (stride + 1)), row * stride);
+  }
+  return { ...header, channels, pixels };
 }
