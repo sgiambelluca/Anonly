@@ -67,6 +67,15 @@ export interface ViewerSlice {
    * "Agregar como…") sigue siendo local: es trabajo interno suyo.
    */
   readonly searchQuery: string;
+  /**
+   * ADR-190 §4: pedido de "ir a esta página" que no nace del buscador
+   * (`activeMatch`/`scrollNonce` de `PdfViewer`, ADR-169 §7) — hoy solo lo usa
+   * la fila "Ir a la página" de la confirmación de `ExportDialog`, que vive
+   * fuera del árbol del visor y no tiene cómo pasarle una prop. `nonce` fuerza
+   * el salto aunque se pida la misma página dos veces seguidas, mismo
+   * mecanismo que `scrollRequest` en `PageVirtualizer`.
+   */
+  readonly pageJumpRequest: { readonly pageIndex: number; readonly nonce: number } | null;
   setPage(index: number): void;
   setSearchQuery(query: string): void;
   setZoom(z: number): void;
@@ -74,6 +83,7 @@ export interface ViewerSlice {
   setPreview(pageIndex: number, kind: ViewerKind, blobUrl: string): void;
   setPageFailed(pageIndex: number): void;
   setVisibleRange(start: number, end: number): void;
+  requestPageJump(pageIndex: number): void;
   reset(): void;
 }
 
@@ -93,6 +103,7 @@ type ViewerData = Pick<
   | "failedPages"
   | "visibleRange"
   | "searchQuery"
+  | "pageJumpRequest"
 >;
 
 const initialState: ViewerData = {
@@ -105,6 +116,7 @@ const initialState: ViewerData = {
   failedPages: new Set(),
   searchQuery: "",
   visibleRange: { start: 0, end: 0 },
+  pageJumpRequest: null,
 };
 
 export const useViewerStore = create<ViewerSlice>((set) => ({
@@ -146,6 +158,11 @@ export const useViewerStore = create<ViewerSlice>((set) => ({
   },
   setVisibleRange(start, end) {
     set({ visibleRange: { start, end } });
+  },
+  requestPageJump(pageIndex) {
+    set((state) => ({
+      pageJumpRequest: { pageIndex, nonce: (state.pageJumpRequest?.nonce ?? 0) + 1 },
+    }));
   },
   reset() {
     set(initialState);

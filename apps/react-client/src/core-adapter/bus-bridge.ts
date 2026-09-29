@@ -39,6 +39,7 @@ import type { useEntitiesStore } from "../store/entities.store.js";
 import type { usePipelineStore } from "../store/pipeline.store.js";
 import type { useRulesStore } from "../store/rules.store.js";
 import type { useSettingsStore } from "../store/settings.store.js";
+import { useUnreadableInkStore } from "../store/unreadableInk.store.js";
 import type { useViewerStore } from "../store/viewer.store.js";
 
 /** Bundle de los 6 stores de Zustand (React_Client.md §3), inyectado para poder testear sin montar la app. */
@@ -160,6 +161,14 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribe {
       stores.pipeline.setState({
         lastOcrPageIndex: Math.max(previous ?? -1, payload.pageIndex),
       });
+
+      // ADR-190 §4: el veredicto viaja por página en el mismo evento —
+      // "ausente ≡ false" (`unreadableInk?: true`, `Contracts.md`), así que
+      // `?? false` y no un early-return: una página que ahora se lee bien
+      // (un `reanalyze` de OCR la reprocesó) tiene que poder apagar la marca.
+      useUnreadableInkStore
+        .getState()
+        .setPageVerdict(payload.pageIndex, payload.unreadableInk === true);
     }),
   );
 

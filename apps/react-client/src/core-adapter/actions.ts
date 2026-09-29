@@ -35,6 +35,7 @@ import { useDocumentStore } from "../store/document.store.js";
 import { useEntitiesStore } from "../store/entities.store.js";
 import { usePipelineStore } from "../store/pipeline.store.js";
 import { useRulesStore } from "../store/rules.store.js";
+import { useUnreadableInkStore } from "../store/unreadableInk.store.js";
 import { useViewerStore, type ViewerKind } from "../store/viewer.store.js";
 
 import { useHistoryStore } from "./history.js";
@@ -320,5 +321,8 @@ export const actions = {
     // advertencia sobre `groupId` que ya no existen (08_Security_Model.md
     // §10.2 tampoco lo dejaría persistir más allá de la sesión).
     useDegradedStore.getState().reset();
+    // ADR-190 §4: mismo criterio — la marca de "no se pudo leer" es del
+    // documento que se cierra, no debe sobrevivirlo.
+    useUnreadableInkStore.getState().reset();
   },
 };

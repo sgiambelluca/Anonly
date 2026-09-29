@@ -237,8 +237,37 @@ export function PdfViewer({ activeMatch, scrollNonce }: PdfViewerProps) {
     return () => node.removeEventListener("wheel", handleWheel);
   }, []);
 
-  const scrollRequest =
-    activeMatch === null ? null : { pageIndex: activeMatch.pageIndex, nonce: scrollNonce };
+  // ADR-190 §4: "Ir a la página" de la confirmación de `ExportDialog` pide un
+  // salto sin pasar por la lupa — `ExportDialog` no es descendiente de este
+  // componente (vive bajo `Toolbar`, no bajo `RightPanel`), así que el pedido
+  // viaja por `viewer.store.pageJumpRequest` en vez de una prop. Los dos
+  // nonces (el de la lupa y el del store) son contadores independientes: se
+  // fusionan localmente en `mergedScrollRequest`, con nonce propio, así que
+  // "cuál llegó después" siempre está bien definido sin comparar dominios
+  // distintos entre sí.
+  const pageJumpRequest = useViewerStore((state) => state.pageJumpRequest);
+  const [mergedScrollRequest, setMergedScrollRequest] = useState<{
+    pageIndex: number;
+    nonce: number;
+  } | null>(null);
+  const mergedNonceRef = useRef(0);
+
+  useEffect(() => {
+    if (activeMatch === null) return;
+    mergedNonceRef.current += 1;
+    setMergedScrollRequest({ pageIndex: activeMatch.pageIndex, nonce: mergedNonceRef.current });
+    // `scrollNonce` fuerza el salto aunque dos resultados de la lupa caigan en
+    // la misma página — sin él en las deps, un segundo click sobre el mismo
+    // resultado no dispararía este efecto.
+  }, [activeMatch, scrollNonce]);
+
+  useEffect(() => {
+    if (pageJumpRequest === null) return;
+    mergedNonceRef.current += 1;
+    setMergedScrollRequest({ pageIndex: pageJumpRequest.pageIndex, nonce: mergedNonceRef.current });
+  }, [pageJumpRequest]);
+
+  const scrollRequest = mergedScrollRequest;
 
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-hidden">

@@ -189,3 +189,26 @@ export const useEntitiesStore = create<EntitiesSlice>((set) => ({
     set({ groupsByType: emptyGroupsByType(), conflicts: [], flashGroupId: null });
   },
 }));
+
+/**
+ * ¿Esta página tiene alguna entidad? (ADR-190 §4, `ui/Components.md` §5.4 y
+ * §7.1 — misma regla en el aviso de `PageCanvas` y en la lista de pendientes
+ * de `ExportDialog`.) Cuenta cualquier miembro con ese `pageIndex`,
+ * automático o manual, del grupo esté `enabled` o no: lo que importa acá es
+ * si hay algo marcado sobre la página, no si se está tapando.
+ *
+ * Un grupo eliminado (ADR-171/ADR-177) no ocupa lugar en `groupsByType`
+ * —`removeGroup` lo saca del todo—, así que no hace falta filtrarlo acá: todo
+ * lo que este mapa contiene ya es "no eliminado".
+ */
+export function pageHasEntity(
+  groupsByType: ReadonlyMap<EntityType, ReadonlyArray<EntityGroup>>,
+  pageIndex: number,
+): boolean {
+  for (const groups of groupsByType.values()) {
+    for (const group of groups) {
+      if (group.members.some((member) => member.pageIndex === pageIndex)) return true;
+    }
+  }
+  return false;
+}

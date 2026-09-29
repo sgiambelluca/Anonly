@@ -24,6 +24,7 @@ import { useEntitiesStore } from "../store/entities.store.js";
 import { usePipelineStore } from "../store/pipeline.store.js";
 import { useRulesStore } from "../store/rules.store.js";
 import { useSettingsStore } from "../store/settings.store.js";
+import { selectPageHasUnreadableInk, useUnreadableInkStore } from "../store/unreadableInk.store.js";
 import { useViewerStore } from "../store/viewer.store.js";
 
 function createTestLogger(): ILogger {
@@ -102,6 +103,7 @@ describe("bus-bridge", () => {
     useRulesStore.getState().reset();
     usePipelineStore.getState().reset();
     useViewerStore.getState().reset();
+    useUnreadableInkStore.getState().reset();
   });
 
   it("DOCUMENT_IMPORTED sets id/name immediately, leaving pageCount/sourceKind at defaults", () => {
@@ -217,6 +219,44 @@ describe("bus-bridge", () => {
       confidence: 0.9,
     });
     expect(usePipelineStore.getState().lastOcrPageIndex).toBe(4);
+
+    unsubscribe();
+  });
+
+  // ADR-190 §4: el veredicto de "no se pudo leer" viaja en el mismo evento y
+  // se reemplaza por página, no se acumula — un reanalyze de OCR que vuelve a
+  // leer bien una página tiene que poder apagar la marca.
+  it("OCR_PAGE_FINISHED.unreadableInk se refleja en unreadableInk.store, y se apaga si un reanalyze la vuelve a leer", () => {
+    const bus = createEventBus({ logger: createTestLogger() });
+    const unsubscribe = subscribe(bus, stores);
+    useDocumentStore.setState({ id: "doc-1" });
+
+    bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
+      documentId: "doc-1",
+      pageIndex: 2,
+      wordCount: 0,
+      confidence: 0,
+      unreadableInk: true,
+    });
+    expect(selectPageHasUnreadableInk(useUnreadableInkStore.getState(), 2)).toBe(true);
+
+    // Ausente ≡ false: una página distinta que termina sin la marca no la trae.
+    bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
+      documentId: "doc-1",
+      pageIndex: 3,
+      wordCount: 20,
+      confidence: 0.9,
+    });
+    expect(selectPageHasUnreadableInk(useUnreadableInkStore.getState(), 3)).toBe(false);
+
+    // Reanalyze de OCR: la página 2 se reprocesa y esta vez se lee bien.
+    bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
+      documentId: "doc-1",
+      pageIndex: 2,
+      wordCount: 12,
+      confidence: 0.8,
+    });
+    expect(selectPageHasUnreadableInk(useUnreadableInkStore.getState(), 2)).toBe(false);
 
     unsubscribe();
   });

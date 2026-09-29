@@ -21,12 +21,28 @@
  * de tener una imagen real: las computa `PdfViewer`/`PageVirtualizer` a partir
  * de `pageLayout.ts` (no hay dimensiones de página reales expuestas por el
  * Core al cliente, ver esa nota en `pageLayout.ts`).
+ *
+ * **Aviso de contenido no leído** (ADR-190 §4, `ui/Components.md` §5.4): si la
+ * página tiene `unreadableInk` y ninguna entidad, se dibuja un aviso encima de
+ * la imagen. Va en una ranura absoluta dentro del mismo contenedor
+ * `relative` que ya envuelve el `<canvas>` — igual que el aviso de `failed`
+ * más abajo — así que nunca cambia el tamaño del contenedor ni desplaza el
+ * layout (UX-10): la condición de cuándo mostrarlo vive en
+ * `unreadableInkWarning.ts` (función pura testeable, mismo criterio que
+ * `shouldReassignCanvasDimensions`).
  */
 
-import { ImageOffIcon } from "lucide-react";
+import { AlertTriangleIcon, ImageOffIcon } from "lucide-react";
 import { memo, useEffect, useRef } from "react";
 
+import { useEntitiesStore, pageHasEntity } from "../../store/entities.store.js";
+import {
+  selectPageHasUnreadableInk,
+  useUnreadableInkStore,
+} from "../../store/unreadableInk.store.js";
+
 import { shouldReassignCanvasDimensions } from "./canvasDimensions.js";
+import { shouldShowUnreadableInkWarning } from "./unreadableInkWarning.js";
 
 export interface PageCanvasProps {
   readonly pageIndex: number;
@@ -47,6 +63,12 @@ const SKELETON_FILL = "#e5e7eb";
 
 function PageCanvasImpl({ pageIndex, kind, blobUrl, width, height, failed }: PageCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  const unreadableInk = useUnreadableInkStore((state) =>
+    selectPageHasUnreadableInk(state, pageIndex),
+  );
+  const hasEntity = useEntitiesStore((state) => pageHasEntity(state.groupsByType, pageIndex));
+  const showUnreadableWarning = shouldShowUnreadableInkWarning(unreadableInk, hasEntity);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -119,6 +141,18 @@ function PageCanvasImpl({ pageIndex, kind, blobUrl, width, height, failed }: Pag
             El documento no cambió: es la vista previa la que falló. Podés seguir revisando y
             exportar igual.
           </p>
+        </div>
+      ) : null}
+      {showUnreadableWarning ? (
+        <div
+          role="status"
+          className="absolute inset-x-0 bottom-0 flex items-start gap-2 border-t border-warning-strong/40 bg-warning/90 px-3 py-2 text-sm text-text-primary"
+        >
+          <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0 text-warning-strong" aria-hidden />
+          <span>
+            Esta página tiene contenido que no se pudo leer. Revisala: si tiene datos sensibles, no
+            se van a tapar solos.
+          </span>
         </div>
       ) : null}
     </div>

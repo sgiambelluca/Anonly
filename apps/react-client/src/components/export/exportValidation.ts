@@ -59,6 +59,13 @@ export interface ExportFormState {
    */
   readonly filename: string;
   readonly includeMarkerLegend: boolean;
+  /**
+   * ADR-190 §4: páginas a tapar enteras porque tienen contenido que el OCR no
+   * pudo leer y el usuario no marcó nada a mano — "Tapar página entera" de la
+   * confirmación de `ExportDialog`. Ausente/vacío dejan el export sin cambios
+   * (`ExportOptions.coveredPages` es opcional, `Contracts.md`).
+   */
+  readonly coveredPages?: ReadonlyArray<number>;
 }
 
 /**
@@ -87,5 +94,12 @@ export function buildExportOptions(form: ExportFormState): ExportOptions {
     includeOriginalMetadata: false,
     filename: normalizeExportFilename(form.filename),
     includeMarkerLegend: form.includeMarkerLegend,
+    // `exactOptionalPropertyTypes`: no se puede pasar `coveredPages` en
+    // `undefined` explícito a un campo opcional — se omite del todo cuando no
+    // hay páginas a tapar, que es exactamente "deja el export sin cambios"
+    // (ADR-190 §4).
+    ...(form.coveredPages !== undefined && form.coveredPages.length > 0
+      ? { coveredPages: form.coveredPages }
+      : {}),
   };
 }
