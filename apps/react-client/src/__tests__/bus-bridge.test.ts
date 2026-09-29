@@ -16,6 +16,7 @@ import {
   type SerializedEngineError,
 } from "@anonly/anonymization-core";
 import { beforeEach, describe, expect, it } from "vitest";
+import { create } from "zustand";
 
 import { subscribe, subscribePasswordRequired, type Stores } from "../core-adapter/bus-bridge.js";
 import { selectGroupIsDegraded, useDegradedStore } from "../store/degraded.store.js";
@@ -24,7 +25,11 @@ import { useEntitiesStore } from "../store/entities.store.js";
 import { usePipelineStore } from "../store/pipeline.store.js";
 import { useRulesStore } from "../store/rules.store.js";
 import { useSettingsStore } from "../store/settings.store.js";
-import { selectPageHasUnreadableInk, useUnreadableInkStore } from "../store/unreadableInk.store.js";
+import {
+  selectPageHasUnreadableInk,
+  useUnreadableInkStore,
+  type UnreadableInkSlice,
+} from "../store/unreadableInk.store.js";
 import { useViewerStore } from "../store/viewer.store.js";
 
 function createTestLogger(): ILogger {
@@ -43,6 +48,7 @@ const stores: Stores = {
   pipeline: usePipelineStore,
   viewer: useViewerStore,
   settings: useSettingsStore,
+  unreadableInk: useUnreadableInkStore,
 };
 
 function makeGroup(overrides: Partial<EntityGroup> = {}): EntityGroup {
@@ -257,6 +263,42 @@ describe("bus-bridge", () => {
       confidence: 0.8,
     });
     expect(selectPageHasUnreadableInk(useUnreadableInkStore.getState(), 2)).toBe(false);
+
+    unsubscribe();
+  });
+
+  // Revisión ronda B (O-10): el bridge escribe en el store INYECTADO, no en el
+  // singleton global. Con la misma instancia en ambos lados los otros tests no
+  // lo distinguen: acá se inyecta uno distinto y se mira que el global no se toque.
+  it("OCR_PAGE_FINISHED.unreadableInk se escribe en el store inyectado, no en el global", () => {
+    const injected = create<UnreadableInkSlice>((set) => ({
+      pages: new Set(),
+      setPageVerdict(pageIndex, unreadableInk) {
+        set((state) => {
+          const next = new Set(state.pages);
+          if (unreadableInk) next.add(pageIndex);
+          else next.delete(pageIndex);
+          return { pages: next };
+        });
+      },
+      reset() {
+        set({ pages: new Set() });
+      },
+    }));
+    const bus = createEventBus({ logger: createTestLogger() });
+    const unsubscribe = subscribe(bus, { ...stores, unreadableInk: injected });
+    useDocumentStore.setState({ id: "doc-1" });
+
+    bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
+      documentId: "doc-1",
+      pageIndex: 4,
+      wordCount: 0,
+      confidence: 0,
+      unreadableInk: true,
+    });
+
+    expect(selectPageHasUnreadableInk(injected.getState(), 4)).toBe(true);
+    expect(selectPageHasUnreadableInk(useUnreadableInkStore.getState(), 4)).toBe(false);
 
     unsubscribe();
   });

@@ -57,6 +57,7 @@ import { useEntitiesStore } from "../store/entities.store.js";
 import { usePipelineStore } from "../store/pipeline.store.js";
 import { useRulesStore } from "../store/rules.store.js";
 import { useSettingsStore } from "../store/settings.store.js";
+import { useUnreadableInkStore } from "../store/unreadableInk.store.js";
 import { useViewerStore } from "../store/viewer.store.js";
 
 import { subscribe, type Stores } from "./bus-bridge.js";
@@ -68,6 +69,7 @@ const stores: Stores = {
   pipeline: usePipelineStore,
   viewer: useViewerStore,
   settings: useSettingsStore,
+  unreadableInk: useUnreadableInkStore,
 };
 
 let core: IAnonymizationCore | undefined;

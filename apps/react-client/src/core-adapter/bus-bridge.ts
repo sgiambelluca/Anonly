@@ -39,10 +39,10 @@ import type { useEntitiesStore } from "../store/entities.store.js";
 import type { usePipelineStore } from "../store/pipeline.store.js";
 import type { useRulesStore } from "../store/rules.store.js";
 import type { useSettingsStore } from "../store/settings.store.js";
-import { useUnreadableInkStore } from "../store/unreadableInk.store.js";
+import type { useUnreadableInkStore } from "../store/unreadableInk.store.js";
 import type { useViewerStore } from "../store/viewer.store.js";
 
-/** Bundle de los 6 stores de Zustand (React_Client.md §3), inyectado para poder testear sin montar la app. */
+/** Bundle de los 7 stores de Zustand (React_Client.md §3), inyectado para poder testear sin montar la app. */
 export interface Stores {
   readonly document: typeof useDocumentStore;
   readonly entities: typeof useEntitiesStore;
@@ -50,6 +50,7 @@ export interface Stores {
   readonly pipeline: typeof usePipelineStore;
   readonly viewer: typeof useViewerStore;
   readonly settings: typeof useSettingsStore;
+  readonly unreadableInk: typeof useUnreadableInkStore;
 }
 
 /**
@@ -166,7 +167,7 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribe {
       // "ausente ≡ false" (`unreadableInk?: true`, `Contracts.md`), así que
       // `?? false` y no un early-return: una página que ahora se lee bien
       // (un `reanalyze` de OCR la reprocesó) tiene que poder apagar la marca.
-      useUnreadableInkStore
+      stores.unreadableInk
         .getState()
         .setPageVerdict(payload.pageIndex, payload.unreadableInk === true);
     }),

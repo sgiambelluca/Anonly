@@ -1,6 +1,6 @@
 /**
- * `unreadableInkWarning.ts` — ADR-190 §4: cuándo `PageCanvas` muestra el
- * aviso de "esta página tiene contenido que no se pudo leer" (`ui/Components.md`
+ * `unreadableInkWarning.ts` — ADR-190 §4: cuándo `UnreadablePageStrip` muestra el
+ * texto del aviso de "esta página tiene contenido que no se pudo leer" (`ui/Components.md`
  * §5.4). Separado del componente por el mismo motivo que
  * `canvasDimensions.ts`: los tests de `apps/react-client` corren en Node sin
  * jsdom, así que la condición vive en una función pura testeable y no en un

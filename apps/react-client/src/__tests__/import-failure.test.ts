@@ -24,6 +24,7 @@ import { useEntitiesStore } from "../store/entities.store.js";
 import { usePipelineStore } from "../store/pipeline.store.js";
 import { useRulesStore } from "../store/rules.store.js";
 import { useSettingsStore } from "../store/settings.store.js";
+import { useUnreadableInkStore } from "../store/unreadableInk.store.js";
 import { useViewerStore } from "../store/viewer.store.js";
 
 // ADR-168 §4: un fallo de importación vuelve a la zona de carga.
@@ -37,6 +38,7 @@ const stores: Stores = {
   pipeline: usePipelineStore,
   viewer: useViewerStore,
   settings: useSettingsStore,
+  unreadableInk: useUnreadableInkStore,
 };
 
 function pdfInvalid(): SerializedEngineError {

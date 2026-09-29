@@ -12,8 +12,8 @@
  *   `PageVirtualizer` ya monta con contenido real, incluyendo el buffer que
  *   existe para evitar pop-in al scrollear (`07_Performance_Strategy.md` §3).
  * - Cambio de `zoom` → el escalado CSS/canvas es inmediato porque
- *   `PageCanvas`/`PageVirtualizer` leen `zoom` reactivamente vía `pageSize`
- *   (`pageLayout.ts`); el re-render real se dispara **debounced**
+ *   `PageCanvas`/`PageVirtualizer` leen `zoom` reactivamente vía la geometría de
+ *   filas (`pageLayout.ts`, `pageSlots.ts`); el re-render real se dispara **debounced**
  *   (`ZOOM_RERENDER_DEBOUNCE_MS`, `zoomRenderScheduler.ts`) con
  *   `scale = previewScale × zoom` (`zoomRenderScale.ts`).
  * - Los tres emisores (render inicial al observar `Ready`, cambio de rango
@@ -44,13 +44,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { actions } from "../../core-adapter/actions.js";
 import { useDocumentStore } from "../../store/document.store.js";
 import { usePipelineStore } from "../../store/pipeline.store.js";
+import { useUnreadableInkStore } from "../../store/unreadableInk.store.js";
 import { useViewerStore, type ViewerKind } from "../../store/viewer.store.js";
 
 import { PageCanvas } from "./PageCanvas.js";
 import { computePageHeight, computePageWidth } from "./pageLayout.js";
+import { computePageSlots } from "./pageSlots.js";
 import { PageVirtualizer } from "./PageVirtualizer.js";
 import { PREVIEW_RETRY_INTERVAL_MS, pagesMissingPreview } from "./previewRetry.js";
 import { shouldTriggerReadyRender } from "./readyRenderTrigger.js";
+import { createScrollRequestMerger } from "./scrollRequestMerge.js";
+import { UnreadablePageStrip } from "./UnreadablePageStrip.js";
 import {
   describePageSeparator,
   PAGE_SEPARATOR_PX,
@@ -93,8 +97,24 @@ export function PdfViewer({ activeMatch, scrollNonce }: PdfViewerProps) {
   const previewByPage = useViewerStore((state) => state.previewByPage[kind]);
   const failedPages = useViewerStore((state) => state.failedPages);
 
+  // ADR-190 §4: las páginas marcadas `unreadableInk` reservan una franja de
+  // aviso arriba de su imagen, así que las filas del visor dejan de medir lo
+  // mismo (`pageSlots.ts`). Solo depende de la marca — no de las entidades —,
+  // que cambia con un `reanalyze` de OCR o un documento nuevo.
+  const unreadablePages = useUnreadableInkStore((state) => state.pages);
+
   const pageHeight = computePageHeight(zoom);
   const pageWidth = computePageWidth(pageHeight);
+  const slots = useMemo(
+    () =>
+      computePageSlots({
+        pageCount,
+        // El paso incluye el separador de arriba de cada página (ADR-169 §9).
+        baseHeight: pageStride(pageHeight),
+        stripPages: unreadablePages,
+      }),
+    [pageCount, pageHeight, unreadablePages],
+  );
 
   const mountRange = useMemo(
     () => computeMountRange(visibleRange, pageCount),
@@ -250,21 +270,25 @@ export function PdfViewer({ activeMatch, scrollNonce }: PdfViewerProps) {
     pageIndex: number;
     nonce: number;
   } | null>(null);
-  const mergedNonceRef = useRef(0);
+  const scrollMergerRef = useRef(createScrollRequestMerger());
 
   useEffect(() => {
     if (activeMatch === null) return;
-    mergedNonceRef.current += 1;
-    setMergedScrollRequest({ pageIndex: activeMatch.pageIndex, nonce: mergedNonceRef.current });
+    setMergedScrollRequest(scrollMergerRef.current.next(activeMatch.pageIndex));
     // `scrollNonce` fuerza el salto aunque dos resultados de la lupa caigan en
     // la misma página — sin él en las deps, un segundo click sobre el mismo
     // resultado no dispararía este efecto.
   }, [activeMatch, scrollNonce]);
 
+  // El pedido se **consume**: el store lo suelta apenas este efecto lo toma, así
+  // que un `PdfViewer` que se desmonta y vuelve a montarse con un pedido viejo
+  // todavía en el store no repite el salto. `consumePageJump` devuelve `null`
+  // si otro efecto ya lo tomó (p. ej. la segunda pasada de StrictMode).
   useEffect(() => {
     if (pageJumpRequest === null) return;
-    mergedNonceRef.current += 1;
-    setMergedScrollRequest({ pageIndex: pageJumpRequest.pageIndex, nonce: mergedNonceRef.current });
+    const request = useViewerStore.getState().consumePageJump();
+    if (request === null) return;
+    setMergedScrollRequest(scrollMergerRef.current.next(request.pageIndex));
   }, [pageJumpRequest]);
 
   const scrollRequest = mergedScrollRequest;
@@ -275,9 +299,9 @@ export function PdfViewer({ activeMatch, scrollNonce }: PdfViewerProps) {
         <PageVirtualizer
           pageCount={pageCount}
           visibleRange={visibleRange}
-          // El paso incluye el separador de arriba de cada página (ADR-169
-          // §9): toda la aritmética de scroll sigue siendo `índice × paso`.
-          pageSize={pageStride(pageHeight)}
+          // Geometría de filas: paso base (página + separador, ADR-169 §9) más
+          // la franja de aviso en las páginas `unreadableInk` (ADR-190 §4).
+          slots={slots}
           pageWidth={pageWidth}
           onVisibleRangeChange={handleVisibleRangeChange}
           onCurrentPageIndexChange={handleCurrentPageIndexChange}
@@ -291,6 +315,14 @@ export function PdfViewer({ activeMatch, scrollNonce }: PdfViewerProps) {
             return (
               <div className="flex shrink-0 flex-col items-center" style={{ width: pageWidth }}>
                 <PageSeparator pageIndex={pageIndex} pageCount={pageCount} />
+                {/*
+                  ADR-190 §4: franja fija justo arriba de la imagen, fuera de
+                  ella, en toda página `unreadableInk` (su alto ya está en
+                  `slots`). El texto aparece y desaparece dentro de la franja.
+                */}
+                {unreadablePages.has(pageIndex) ? (
+                  <UnreadablePageStrip pageIndex={pageIndex} width={pageWidth} />
+                ) : null}
                 {/*
                   Ancho/alto explícitos y `shrink-0`: `WordSelectionOverlay` y
                   `wordSelectionRect.ts` asumen que la página mide exactamente
