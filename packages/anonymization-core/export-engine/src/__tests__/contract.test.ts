@@ -269,4 +269,68 @@ describe("ExportEngine — contract tests", () => {
     expect(mockDoc["addPage"]).toHaveBeenCalledTimes(4);
     expect(provider.renderLegend).toHaveBeenCalledTimes(1);
   });
+
+  // ADR-190 §5, Export_Engine.md §13 caso 26.
+  it("covered pages are exported fully black with the same size and no page render", async () => {
+    const mockDoc = createMockPdfLibDocument();
+    vi.mocked(PDFDocument.create).mockResolvedValue(asPdfDocument(mockDoc));
+    await engine.init(ctx);
+    const provider = createMockRenderPageProvider();
+    const document = createDocumentWithPageCount(2, { width: 200, height: 300 });
+
+    await engine.export(
+      createExportEngineInput({
+        document,
+        options: createExportOptions({ coveredPages: [0] }),
+        renderPageProvider: provider,
+      }),
+      ctx,
+    );
+
+    // Página 0 (tapada): nunca se pide su render.
+    expect(provider.renderFull).not.toHaveBeenCalledWith(0, expect.anything(), expect.anything());
+    // Página 1, sin tapar, sigue pidiendo su render como siempre.
+    expect(provider.renderFull).toHaveBeenCalledWith(1, expect.anything(), expect.anything());
+
+    // Las dos páginas se agregan con las MISMAS dimensiones del documento —
+    // la tapada no cambia de tamaño por ser sintética.
+    const pages = mockDoc["pages"] as ReadonlyArray<{
+      readonly width: number;
+      readonly height: number;
+      readonly drawImage: ReturnType<typeof vi.fn>;
+    }>;
+    expect(pages).toHaveLength(2);
+    expect(pages[0]).toMatchObject({ width: 200, height: 300 });
+    expect(pages[1]).toMatchObject({ width: 200, height: 300 });
+    // `drawImage` estira la imagen embebida al tamaño completo de la
+    // página — "rectángulo negro lleno con las mismas dimensiones".
+    expect(pages[0]!.drawImage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ x: 0, y: 0, width: 200, height: 300 }),
+    );
+
+    // La imagen embebida para la página 0 es la sintética (PNG, 69 bytes),
+    // no la que devolvería el render provider (jpeg, 4 bytes por default).
+    const embedPngCalls = (mockDoc["embedPng"] as ReturnType<typeof vi.fn>).mock.calls;
+    expect(embedPngCalls).toHaveLength(1);
+    const [coveredBytes] = embedPngCalls[0] as [ArrayBuffer];
+    expect(coveredBytes.byteLength).toBe(69);
+    expect(mockDoc["embedJpg"]).toHaveBeenCalledTimes(1); // la página 1, sin tapar
+  });
+
+  it("absent coveredPages leaves the export unchanged", async () => {
+    const mockDoc = createMockPdfLibDocument();
+    vi.mocked(PDFDocument.create).mockResolvedValue(asPdfDocument(mockDoc));
+    await engine.init(ctx);
+    const provider = createMockRenderPageProvider();
+    const document = createDocumentWithPageCount(2);
+
+    await engine.export(createExportEngineInput({ document, renderPageProvider: provider }), ctx);
+
+    // Sin coveredPages: las dos páginas piden su render, como siempre.
+    expect(provider.renderFull).toHaveBeenCalledTimes(2);
+    expect(provider.renderFull).toHaveBeenCalledWith(0, expect.anything(), expect.anything());
+    expect(provider.renderFull).toHaveBeenCalledWith(1, expect.anything(), expect.anything());
+    expect(mockDoc["addPage"]).toHaveBeenCalledTimes(2);
+  });
 });
