@@ -383,6 +383,12 @@ export function mockRecognizeData(words: ReadonlyArray<MockRecognizeWord>): Reco
 export function mockTesseractWorker(recognizeData: unknown): TesseractWorker {
   return asTesseractWorker({
     recognize: vi.fn(() => Promise.resolve({ jobId: "mock-job", data: recognizeData })),
+    detect: vi.fn(() =>
+      Promise.resolve({
+        jobId: "mock-osd",
+        data: { orientation_degrees: 0, orientation_confidence: 2 },
+      }),
+    ),
     terminate: vi.fn(() => Promise.resolve()),
   });
 }
