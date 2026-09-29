@@ -102,6 +102,10 @@ export interface OcrPageFinished {
   readonly pageIndex: number;
   readonly wordCount: number;
   readonly confidence: number;
+  // ADR-190 §4: una página ENTERA (no una región) con tinta terminó la cadena
+  // de verificación sin lectura fiable. Ausente ≡ false, mismo criterio que
+  // `degraded` (ADR-062).
+  readonly unreadableInk?: true;
 }
 export interface OcrFinished {
   readonly documentId: string;

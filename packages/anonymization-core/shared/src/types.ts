@@ -470,6 +470,10 @@ export interface OcrPagePayload {
   readonly orientation: OcrOrientation;
   readonly dpi: number;
   readonly languages: ReadonlyArray<string>;
+  // ADR-190 §2 paso 4 y §5: factor con el que el kernel agranda la imagen
+  // decodificada antes de reconocer. Default 1; rango 1 ≤ upscale ≤ 300/dpi.
+  // Las coordenadas se convierten con dpi × upscale (el bbox sigue en puntos).
+  readonly upscale?: number;
 }
 
 export type OcrOrientation = 0 | 90 | 180 | 270;
@@ -484,6 +488,12 @@ export interface OcrOrientationPayload {
 
 export interface OcrOrientationResult {
   readonly orientation: OcrOrientation;
+  // ADR-190 §3: fracción de píxeles presentes (predicado de ADR-162) sobre la
+  // imagen reducida del OSD, en [0, 1]. La página tiene tinta si
+  // inkRatio ≥ INK_PRESENT_RATIO (0.002).
+  readonly inkRatio: number;
+  /** True only when OSD returned a valid angle with sufficient confidence. */
+  readonly osdHadVerdict: boolean;
 }
 
 // ADR-046 §3/§5: `text` es el texto de UN BATCH de NerConfig.batchSize
@@ -679,6 +689,10 @@ export interface ExportOptions {
   // que ADR-057 pudo abreviar. Default false: sin el flag, el export no cambia en
   // nada. Con el flag, el PDF tiene document.pageCount + 1 páginas.
   readonly includeMarkerLegend: boolean; // default false
+  // ADR-190 §5: páginas que se exportan enteramente negras, con sus mismas
+  // dimensiones, sin pedir su render. Fuera de rango → InvalidInputError;
+  // duplicados se ignoran; ausente o vacío → export idéntico al previo.
+  readonly coveredPages?: ReadonlyArray<number>;
 }
 
 export interface ExportMetadata {

@@ -1983,7 +1983,11 @@ describe("@anonly/shared — Contracts", () => {
         languages: ["spa", "eng"],
         timeoutMs: 60000,
       };
-      const orientationResult: OcrOrientationResult = { orientation: 270 };
+      const orientationResult: OcrOrientationResult = {
+        orientation: 270,
+        inkRatio: 0.5,
+        osdHadVerdict: true,
+      };
       const page: OcrPagePayload = {
         ...orientationPayload,
         dpi: 300,
