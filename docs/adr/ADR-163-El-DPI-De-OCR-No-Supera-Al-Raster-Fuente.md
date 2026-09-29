@@ -129,4 +129,16 @@ humano autoriza commitearlos. La implementación no edita documentación.
 - Los PDFs compuestos quedan deliberadamente en el comportamiento anterior.
 - El cambio es aditivo en el contrato, pero abarca `shared`, `pdf-engine` y el
   façade; no puede presentarse como un commit de un solo motor.
-- La curva de calidad T-6b sigue siendo posterior y no participa de esta regla.
+- La curva de calidad T-6b no participó de la implementación inicial de esta
+  regla. Su revalidación posterior se registra abajo.
+
+## Revalidación posterior — campaña ADR-190 §7
+
+El humano decidió **conservar el cap nativo** tras revisar la campaña de
+150/200/250/300 DPI de
+`roadmap/mediciones/ocr/ADR190_DPI_2026-09-27.md`. En 64 parejas del mismo PDF
+escaneado sintético, forzar OCR a 300 no mejoró recall ni recuperación de DNI;
+costó una mediana pareada de 722 ms más y un pico mediano pareado de 161,4 MB
+más de suma de working sets. Es evidencia para mantener esta regla en la branch,
+sin cambiar código ni agregar un piso de DPI. No resuelve por sí sola el caso
+de dos renglones girados 180°: esa enmienda pertenece a ADR-190.

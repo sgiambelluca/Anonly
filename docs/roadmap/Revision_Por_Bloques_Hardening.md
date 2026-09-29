@@ -301,9 +301,174 @@ veces.
 | — | E1 | Exceptuado (APPROVED en el Hito 12.5) | — | — | |
 | — | E2 | Exceptuado (APPROVED 2026-09-26) | 2 | — | |
 | A | B1, B2, B7 | **APPROVED** (2026-09-27) | 3 (R1 REJECTED 7 B / 6 O; R2 B2 y B7 APPROVED, B1 REJECTED por B-5; R3 APPROVED) | ver el commit de cierre de la ronda A | O-1 → ADR-189; B-4 de Performance/Leak/Stress → ronda C; riesgo de OSD en páginas escasas → bloqueante de la ronda B |
-| B | B4, B5, B6 | Pendiente | | | |
+| B | B4, B5, B6 | **APPROVED** (cierre técnico R4; costo residual aceptado por el humano) | 4 (R1: B4/B5 REJECTED, B6 APPROVED; R2: B-7/B-8; R3: defectos de código anteriores cerrados; R4: ADR-190 y sondeos finales revisados) | commits de cierre de la ronda B | B-1/B-4/O-9 aprobados en calidad y cobertura. Sondeos finales nativos: +209,10 MiB de pico y +2.237 ms de tiempo mediano en 16 PDF escasos. El costo queda como posible trabajo futuro (`Future_Ideas.md` §6). No se demostró cumplimiento M2 de ADR-146, excedido históricamente en Windows. Cap nativo y OSD actual conservados |
 | C | B3, B8 | Pendiente | | | |
 | D | B9, B10 | Pendiente | | | |
+
+### 4.1 Reanudación de la ronda B (2026-09-27)
+
+El planificador recuperó el historial local de Claude Code del chat
+"Mediciones de rendimiento en Windows" (sesión
+`5198b340-37e5-4d79-9a6c-efc485e6b415`) y lo contrastó con la copia de
+trabajo. La ronda A está cerrada en `HEAD` (`506651b`); los cambios de la
+ronda B siguen sin commit. No existe todavía un PR de esta branch a `main`.
+
+- **Informe anterior a la interrupción:** ADR-190 implementado; reportó 2.823
+  tests generales, 335 de contrato, los otros gates verdes y los dos E2E
+  nuevos aprobados. Son resultados históricos, no una verificación de la
+  enmienda posterior.
+- **Punto de interrupción:** después de ese informe, el planificador
+  enmendó ADR-190 §2 y `OCR_Engine.md` casos 44/47 y §14. Una lectura con
+  basura de confianza ≥ 60 no debe impedir la comparación con 0° cuando el
+  OSD eligió un ángulo distinto de 0. El implementador se interrumpió por
+  el límite de uso antes de aplicar la enmienda. Al recuperar la sesión,
+  `ocr.engine.ts` conservaba la condición anterior y faltaba el test nuevo.
+- **Implementación reanudada:** completó la comparación con 0°, la
+  conservación de ángulos ya intentados (máximo cuatro reconocimientos
+  adicionales) y la conservación de la mejor lectura ante un error de
+  modelo en un reintento. Los tres tests nuevos fallaron contra el código
+  anterior y pasaron con las correcciones. Gates scoped de OCR verdes:
+  194 tests en nueve archivos, 94,19 % de cobertura de líneas, lint y
+  typecheck. El planificador aclaró en el ADR y spec que la excepción para
+  páginas blancas o de ruido sigue vigente. Revisión global posterior
+  pendiente; estos resultados no aprueban la ronda.
+- **Revisión R2 independiente:** 2.826 tests generales aprobados y uno
+  omitido, 335 de contrato; lint, typecheck, formato y cobertura global
+  verdes (96,23 % de líneas; OCR 93,98 %). Se resolvió la ausencia del
+  Chromium requerido por Playwright y se ejecutó cobertura con dos workers
+  sin ampliar timeouts. B6 conserva APPROVED; las correcciones mecánicas de
+  R1 están cerradas. B4 sigue REJECTED por falta de medición y decisión.
+  B5 sigue REJECTED por dos regresiones nuevas reproducidas: B-7, el
+  fallback de orientación reemplaza por 1 una tinta ya medida como 0;
+  B-8, el host acepta `inkRatio` negativo o mayor que 1. Vuelven al mismo
+  implementador, con aclaración y filas de tests escritas por el planificador.
+- **Revisión R3:** B-7/B-8 cerrados y las cuatro reproducciones
+  independientes del revisor pasan. Implementación de ADR-190 revisada sin
+  defectos adicionales: gates globales verdes, 2.832 tests generales y uno
+  omitido, 335 de contrato; OCR 200/200 y 94,21 % de líneas de cobertura.
+  La ronda no se declara APPROVED: siguen B-1, el cierre empírico de B-4 y
+  O-9. Después se implementó el instrumento, se auditó su preflight y se
+  midió la matriz completa.
+- **Orden de continuación vigente:** el humano decidió conservar el cap
+  nativo de ADR-163; el sondeo posterior de escala OSD recomienda conservar
+  el lado largo de 1754 px. Preparar y validar una enmienda de ADR-190 para
+  el caso escaso con OSD ausente y basura confiable; volver al revisor para
+  cerrar B4/B5/B6.
+  B-1 no se considera cerrado solamente por implementar los reintentos.
+  Protocolo: `ADR190_DPI_Campana_Plan.md`; medición:
+  `mediciones/ocr/ADR190_DPI_2026-09-27.md`.
+- **Límite medido:** si el OSD no emite veredicto sobre una página escasa
+  girada 180° y la lectura a 0° es basura confiable, la cadena termina sin
+  probar otros ángulos. Los ocho casos de la matriz reprodujeron esto con
+  el fixture de dos renglones, sin densificarlo para esconder la falla.
+- **Preflight del instrumento (histórico):** las
+  ocho lecturas de dos renglones girados (cuatro DPI y dos brazos) terminaron
+  sin fallas del instrumento, recuperaron los cuatro tokens esperados y el
+  DNI, pero todas agregaron palabras incorrectas: precisión de tokens entre
+  0,50 y 0,67. En esas ocho celdas Tesseract no emitió veredicto OSD y el
+  `inkRatio` observado (aproximadamente 0,0012–0,0017) quedó por debajo del
+  umbral 0,002; se ejecutó un solo reconocimiento por celda. A 300 DPI,
+  ambos brazos produjeron las mismas palabras. Los
+  32 controles terminaron sin fallas del instrumento; las formas sin texto
+  produjeron palabras confiables en ambos brazos a 150 y 200 DPI (cuatro
+  casos). Los dos ensayos de cierre y reapertura liberaron y recrearon los
+  workers; la región recortada se verificó por separado. Las sesiones crudas
+  están en `.measure/adr190-dpi/2026-09-27T23-08-43-340Z-preflight-20288`
+  y `.measure/adr190-dpi/2026-09-27T23-06-38-426Z-controls-16888`. Estos
+  resultados aún no aprueban calidad ni el instrumento. La auditoría Sol
+  dictó **NO-GO temporal** para la matriz: el validador admitía una captura
+  sin reconocimiento y el control de DPI podía aprobar por ausencia de
+  despachos; falta además el test geométrico del giro real. Las 40 celdas
+  observadas sí tenían orientación y reconocimiento terminal. El
+  implementador Luna corrigió el registro vacío y el control geométrico, pero
+  la segunda revisión detectó un falso rechazo instrumental: una primera
+  lectura válida seguida de un reintento fallido debe conservar la mejor
+  lectura anterior, según ADR-190 §2. Luna corrigió ese caso y volvió al mismo
+  revisor. La tercera auditoría reprodujo
+  ese caso y los negativos, y dictó **GO para medir calidad, tiempo y
+  memoria**. Esto aprueba el instrumento, no la calidad observada ni la ronda
+  B.
+- **Coordinación:** el humano autorizó continuar aquí con implementador y
+  revisor, manteniendo un solo agente activo por vez. Implementación: GPT-6
+  Luna; revisión: GPT-6 Sol. Las rondas C y D
+  siguen pendientes; la suite pesada y el merge siguen el §5.
+- **Campaña terminada; ronda B todavía abierta:** el instrumento pasó tres
+  auditorías hasta GO. Calidad 128/128: 40 fallos, sin mejora de recall ni
+  DNI al forzar 300 en 64 parejas; ocho casos de dos renglones a 180°
+  produjeron basura confiable sin DNI en ambos brazos. Tiempo 384/384:
+  mediana de diferencia pareada +722 ms para forzar 300. Memoria 128/128:
+  mediana de diferencia pareada +161,4 MB de suma de working sets. Las tres
+  fases tuvieron cero fallas instrumentales y el mismo build y fixtures.
+  Evidencia y límites: `mediciones/ocr/ADR190_DPI_2026-09-27.md`.
+  El humano conservó el cap de ADR-163, conforme a ADR-154. Falta enmendar
+  ADR-190 para el caso escaso antes de aprobar B.
+- **Sondeo de escala OSD terminado:** 64 PDFs sintéticos y 12 controles,
+  tres tamaños y tres repeticiones: 684 detecciones, cero fallas del
+  instrumento. Actual y nativo coincidieron en 48 orientaciones correctas y
+  16 ausencias; el 50 % histórico empeoró 22 PDFs de bajo DPI. Las 16
+  ausencias son todos los casos de dos renglones, que permanecieron bajo el
+  umbral de tinta en los tres tamaños. La copia nativa agregó una mediana
+  pareada de +213,5 ms de `detect` por PDF frente al tamaño actual, sin
+  mejorar veredictos. Auditoría Sol apta para reporte; evidencia en
+  `mediciones/ocr/ADR190_OSD_Escala_2026-09-28.md`. La enmienda de fiabilidad
+  sigue pendiente. El siguiente instrumento está definido en
+  `ADR190_OSD_Ausente_Recuperacion_Plan.md`: medir reconocimientos a los
+  cuatro ángulos con el mismo ráster antes de fijar gatillo y ranking.
+- **Recuperación con OSD ausente medida:** 380/380 observaciones con OCR real,
+  64 PDFs con texto y 12 controles, cero fallas instrumentales. El ángulo
+  correcto recuperó tokens y DNI sin extras en los 16 PDFs de dos renglones;
+  el comparador actual elegiría una lectura contaminada en los 16 si se
+  ejecutaran los cuatro ángulos. La señal `OSD sin veredicto + primera palabra
+  confiable` seleccionó los 16 y ningún control en este corpus, pero también
+  cuatro páginas derechas que ya estaban bien. Tres reconocimientos extra
+  sumarían una mediana estimada de 3,814 s de worker por PDF seleccionado;
+  falta medir el pipeline real. Dos controles de figuras siguen produciendo
+  un `>` falsamente confiable en reintentos vigentes. Evidencia y límites en
+  `mediciones/ocr/ADR190_OSD_Recuperacion_2026-09-28.md`. ADR-190,
+  `Contracts.md` y `OCR_Engine.md` quedaron enmendados antes de tocar código;
+  la revisión independiente de la campaña y el cambio de producto siguen
+  pendientes. Un E2E con otra geometría añadió un segundo caso: primera
+  lectura vacía, tinta presente y basura confiable en 90° que detenía la
+  cadena antes del 270° correcto. El sondeo de las cuatro lecturas sobre el
+  mismo ráster recuperó el DNI a 270°; la enmienda se amplió a OSD ausente
+  con primera lectura confiable **o** tinta presente. Los controles de figuras
+  quedan bajo esta rama y requieren verificación del aviso en el pipeline.
+
+- **Producto medido, optimización pendiente:** la enmienda recuperó los 16/16
+  PDF escasos sin tokens extra y elevó el DNI nativo de 60/64 a 64/64; los
+  cuatro controles de figuras quedaron sin lectura fiable, con aviso y
+  exportación censurada. Sol aprobó calidad/cobertura de B-1/B-4/O-9. En el
+  pipeline completo, los 16 casos escasos nativos añadieron una mediana de
+  +2.086,5 ms (TIME 384/384) y +194,44 MiB de pico de suma de working sets
+  (MEMORY 128/128, 16/16 positivos), mientras los otros 48 quedaron cerca
+  de cero. La memoria incluye páginas compartidas y no es RSS exclusivo del
+  OCR. Sol revisó después una mitigación de canvas; QUALITY completo pasó
+  128/128 con salida idéntica al build anterior. El humano detuvo la campaña
+  TIME posterior en 373/384 registros y pidió no continuar las mediciones;
+  no hay MEMORY completo del build final. Tiempo y memoria finales siguen sin
+  validar, y no se usarán resultados parciales para aprobar la ronda. Sesiones,
+  método y límites en
+  `mediciones/ocr/ADR190_OSD_Recuperacion_2026-09-28.md`.
+- **Dictamen técnico R4 y sondeo mínimo:** QUALITY final 128/128, cero fallas
+  instrumentales y salida OCR idéntica al build anterior a la limpieza de
+  canvas. Un sondeo dirigido posterior, autorizado por el humano, completó
+  16 PDF escasos nativos y cuatro controles `full-0°` con el mismo build;
+  hashes, calidad, trabajos y picos fueron auditados independientemente por
+  Sol. Delta mediano de suma de working sets frente al baseline sin
+  recuperación: **+209,10 MiB** en escasos y −15,18 MiB en controles.
+  Sol dictó **APPROVED técnico** para B4, B5 y B6, y para B-1/B-4/O-9 en
+  calidad/cobertura. La primera repetición de TIME quedó abortada en
+  373/384, sin usarse como conclusión; un sondeo dirigido posterior del build
+  final completó 60/60 observaciones (20 PDF × tres repeticiones). En los 16
+  escasos nativos, el delta temporal mediano frente al baseline fue
+  **+2.237 ms** (16/16 positivos); cuatro controles comunes tuvieron −210 ms
+  de mediana. Sol auditó los archivos crudos y cerró la reserva temporal como
+  costo caracterizado. Los sondeos no son gate M2 de ADR-146; el perfil P2
+  de Windows ya superaba ~1,6 GB antes de ADR-190. La aceptación humana del
+  costo residual y del pendiente M2 no se infiere del dictamen técnico. El
+  humano aceptó el costo caracterizado para cerrar la ronda B y lo dejó como
+  posible optimización posterior (`Future_Ideas.md` §6); esto no declara
+  cumplido el presupuesto M2 de ADR-146.
 
 ## 5. Después del último bloque: el merge a `main`
 
@@ -346,6 +511,10 @@ asentados, al estilo de ADR-124, en lugar de reescribirla.
   saber quién editó el spec, así que R-21 no se puede verificar a posteriori.
   Los arreglos de esta revisión sí respetan el reparto: los specs los edita el
   planificador.
+
+**Ronda B (O-10):**
+
+- **Commits que no compilan solos.** `7f70cbc` (ADR-158, `shared`) deja Render, OCR y el Core sin compilar hasta `fde5bef`, `1a3cfa4` y `5af8d47`. `efbd0f4` (ADR-164, `shared`) deja las réplicas de `WorkerJobType` rotas hasta `67cf7b9` y `dbd5376`. Es inherente a R-1 combinado con tipos `Record` exhaustivos: el commit de contrato no puede incluir a sus consumidores. `git bisect` sobre esos tramos tiene que saltar esos commits.
 
 ## Apéndice — commits por bloque
 

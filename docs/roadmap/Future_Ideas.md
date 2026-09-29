@@ -310,6 +310,24 @@ Cargar solo las capas del modelo NER que se necesitan (cuando Transformers.js lo
 
 Para PDFs de > 10.000 páginas, indexar por `pageIndex → textHash` para re-procesamiento delta tras edición sin re-escanear todo.
 
+### Recuperación de OCR cuando el OSD no da veredicto
+
+**Posible trabajo posterior al cierre de la ronda B (ADR-190).** Conservar el
+techo de DPI del ráster fuente (ADR-163) y el OSD a 1754 px. La recuperación
+actual ejecuta lecturas adicionales solo en páginas con tinta cuyo OSD no dio
+un veredicto válido; en los 16 PDF sintéticos escasos del sondeo final sumó una
+mediana de **2.237 ms** y **209,10 MiB** al pico de suma de working sets frente
+al baseline sin recuperación. El humano aceptó ese costo residual para avanzar
+con la revisión de la branch; el sondeo no demuestra cumplimiento del
+presupuesto M2 de ADR-146, que ya estaba excedido históricamente en Windows.
+
+Si se retoma, buscar menos trabajo o menos memoria en esa rama sin volver a
+perder el DNI de los 16/16 PDF escasos ni convertir las cuatro páginas de
+figuras en lecturas fiables falsas. Comparar con el mismo corpus y build,
+incluyendo los controles que no entran en recuperación. Cualquier cambio del
+criterio de fiabilidad o del contrato de OCR requiere su propia decisión y
+revisión; no se programó una nueva campaña ahora.
+
 ---
 
 ## 7. Investigación abierta

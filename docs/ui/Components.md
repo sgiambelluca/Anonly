@@ -653,6 +653,7 @@ existen. Lo que se retira es la superficie de UI, no el modelo.
 - **Props**: `pageIndex`, `kind`, `blobUrl?`, `annotations?`, `highlights?`.
 - **Render**: `<canvas>` con dimensión correcta. Si `blobUrl`, dibuja la imagen. Si `annotations` (kind=original), dibuja bordes color por tipo. Si `highlights` con conflicto, dibuja borde rojo.
 - **Skeleton**: si `!blobUrl`, dibuja skeleton gris con dimensión.
+- **Página con contenido que no se pudo leer (ADR-190 §4)**: si la página tiene `unreadableInk` y **ninguna entidad**, `PageCanvas` muestra encima de la página el aviso *"Esta página tiene contenido que no se pudo leer. Revisala: si tiene datos sensibles, no se van a tapar solos."*. Una página tiene entidad si algún grupo no eliminado (ADR-171) tiene una ocurrencia en ella, sea automático o manual, habilitado o no. El aviso va en una ranura fija, sobre la imagen y sin cambiar su tamaño, así que no desplaza el layout (UX-10). Desaparece solo en cuanto la página recibe una entidad.
 - **Las dimensiones del `<canvas>` solo se asignan cuando cambian (ADR-056 §5)**. Asignar `canvas.width`/`canvas.height` **borra el bitmap aunque el valor sea idéntico** — es comportamiento del estándar HTML, no del navegador. Como el `blobUrl` cambia en cada `PREVIEW_UPDATED` aunque los píxeles sean los mismos (el motor acuña un `URL.createObjectURL` nuevo también en aciertos de cache, ADR-056 §6), asignarlas incondicionalmente al re-ejecutarse el efecto dejaba la página en gris hasta que la `Image` nueva terminaba de cargar: ese era el parpadeo constante que se veía al scrollear. La comprobación va en una **función pura testeable en Node** (los tests de `apps/react-client` corren sin jsdom), no en un `if` inline sin cobertura.
 - **Interacción**:
   - Hover sobre highlight → tooltip.
@@ -793,6 +794,8 @@ hay nada que sincronizar: se retira junto con `SideBySideViewer` y `scrollSyncCo
   literales y no tokens: se sirve suelto, sin la hoja de estilos.
 
 ---
+
+- **Páginas que no se pudieron leer (ADR-190 §4)**: al pedir el export, la UI calcula las páginas pendientes: las que tienen `unreadableInk` y **ninguna entidad** (misma regla que `PageCanvas`, §5.4). La lista sale de una función pura con test. Si no está vacía, antes de exportar se abre una confirmación: *"Estas páginas tienen contenido que no se pudo leer y no tienen nada marcado para tapar."*, con una fila por página. Cada fila tiene **"Ir a la página"**, que cierra la confirmación sin exportar y lleva el visor a esa página, y el checkbox **"Tapar página entera"**, marcado por defecto. Los botones son "Cancelar" y "Exportar". Las páginas marcadas viajan en `ExportOptions.coveredPages`. No bloquea como ADR-176: siempre se puede exportar, pero después de ver la lista. Con la lista vacía no aparece nada y el flujo es el de siempre.
 
 ### 7.2 `ExportProgress`
 

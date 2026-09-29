@@ -804,6 +804,10 @@ export interface ExportOptions {
   // que ADR-057 pudo abreviar. Default false: sin el flag, el export no cambia en
   // nada. Con el flag, el PDF tiene document.pageCount + 1 páginas.
   readonly includeMarkerLegend: boolean;    // default false
+  // ADR-190 §5: páginas que se exportan enteramente negras, con sus mismas
+  // dimensiones, sin pedir su render. Fuera de rango → InvalidInputError;
+  // duplicados se ignoran; ausente o vacío → export idéntico al previo.
+  readonly coveredPages?: ReadonlyArray<number>;
 }
 
 export interface ExportMetadata {

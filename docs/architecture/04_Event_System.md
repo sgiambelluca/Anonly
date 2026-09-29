@@ -53,7 +53,7 @@ El aviso de UI sigue contando OCR_PAGE_FAILED, sin duplicarlo por el job interno
 | Evento | Emisor | Receptores | Payload | Timing | Idempotente | Orden | Notas |
 |---|---|---|---|---|---|---|---|
 | `OCR_STARTED` | OCR Engine | UI | `{ documentId, pagesToProcess: number[], modelLoading? }` | async | sí | none | |
-| `OCR_PAGE_FINISHED` | OCR Engine | Orchestrator | `{ documentId, pageIndex, wordCount, confidence }` | async | sí | none | Orchestrator lee `Word[]` de `ctx.cache` (clave `ocr-words:<documentId>:<pageIndex>`) y aplica la función pura `fuseOcrPage` de `pdf-engine` sobre su `Document` retenido (ver ADR-014, ADR-041). PDF Engine no se suscribe a este evento. |
+| `OCR_PAGE_FINISHED` | OCR Engine | Orchestrator, UI | `{ documentId, pageIndex, wordCount, confidence, unreadableInk? }` | async | sí | none | Orchestrator lee `Word[]` de `ctx.cache` (clave `ocr-words:<documentId>:<pageIndex>`) y aplica la función pura `fuseOcrPage` de `pdf-engine` sobre su `Document` retenido (ver ADR-014, ADR-041). PDF Engine no se suscribe a este evento. `unreadableInk: true` (ADR-190 §4) marca una página entera con tinta que terminó sin lectura fiable: **ausente ≡ false**. La UI lo usa para el aviso de la página y la confirmación del export. |
 | `OCR_FINISHED` | OCR Engine | Orchestrator | `{ documentId, durationMs, modelDownloaded? }` | async | sí | none | Dispara detección. |
 | `OCR_PAGE_FAILED` | OCR Engine | Orchestrator | `{ documentId, pageIndex, error: SerializedEngineError }` | async | sí | none | Reintentable hasta `maxRetries`. (Errata ADR-036 §9: decía `EngineError`.) |
 

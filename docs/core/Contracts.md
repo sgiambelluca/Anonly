@@ -2,7 +2,7 @@
 
 # Anonly — Contratos Base (`@anonly/shared`)
 
-> **T-5 / ADR-164, revisión 2026-09-15**: orientación separada en `ocr-orient` y factory `ocr-orientation`; ver §7.2. Implementación inicial revisada con pendientes. La evolución añade un consumidor de preparación con dos LSTM (§6), sin nuevos tipos ni campos públicos; aceptación final pendiente.
+> **T-5 / ADR-164, revisión 2026-09-15**: orientación separada en `ocr-orient` y factory `ocr-orientation`; ver §7.2. La evolución añade un consumidor de preparación con dos LSTM (§6), sin nuevos tipos ni campos públicos. **Aceptado, implementado y validado** (T-5 cerrada el 2026-09-15, ADR-164). ADR-190 (2026-09-27) agrega `OcrOrientationResult.inkRatio` y `OcrPagePayload.upscale` (§7.1/§7.2); su enmienda de 2026-09-28 especifica `OcrOrientationResult.osdHadVerdict`, pendiente de implementación.
 
 > Define **todos** los tipos, interfaces, enums, error codes y contratos compartidos entre motores. Es el único paquete del que un motor puede importar tipos. Un implementador debe leer este archivo **completo** antes de tocar cualquier motor.
 
@@ -936,6 +936,10 @@ export interface OcrPagePayload {
   readonly orientation: OcrOrientation; // ADR-164: requerido; validado, nunca inferido por LSTM
   readonly dpi: number;
   readonly languages: ReadonlyArray<string>;
+  // ADR-190 §2 paso 4 y §5: factor con el que el kernel agranda la imagen
+  // decodificada antes de reconocer. Default 1; rango 1 ≤ upscale ≤ 300/dpi.
+  // Las coordenadas se convierten con dpi × upscale (el bbox sigue en puntos).
+  readonly upscale?: number;
 }
 ```
 
@@ -960,6 +964,13 @@ export interface OcrOrientationPayload {
 
 export interface OcrOrientationResult {
   readonly orientation: OcrOrientation;
+  // ADR-190 §3: fracción de píxeles presentes (predicado de ADR-162) sobre la
+  // imagen reducida del OSD, en [0, 1]. La página tiene tinta si
+  // inkRatio ≥ INK_PRESENT_RATIO (0.002).
+  readonly inkRatio: number;
+  // ADR-190, enmienda 2026-09-28: true solo si el OSD detectó un ángulo
+  // válido con confianza ≥ 1; false si orientation=0 es fallback.
+  readonly osdHadVerdict: boolean;
 }
 ```
 
@@ -997,7 +1008,7 @@ export interface PdfInvalid { readonly documentId: string; readonly reason: stri
 
 // OCR
 export interface OcrStarted { readonly documentId: string; readonly pagesToProcess: ReadonlyArray<number>; readonly modelLoading?: boolean; }
-export interface OcrPageFinished { readonly documentId: string; readonly pageIndex: number; readonly wordCount: number; readonly confidence: number; }
+export interface OcrPageFinished { readonly documentId: string; readonly pageIndex: number; readonly wordCount: number; readonly confidence: number; readonly unreadableInk?: true; } // unreadableInk (ADR-190 §4): una página entera con tinta terminó sin lectura fiable; ausente ≡ false
 export interface OcrFinished { readonly documentId: string; readonly durationMs: number; readonly modelDownloaded?: boolean; }
 export interface OcrPageFailed { readonly documentId: string; readonly pageIndex: number; readonly error: SerializedEngineError; }
 

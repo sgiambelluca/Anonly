@@ -443,7 +443,7 @@ Los tests de contract/unit/edge mockean los motores (interfaces de `Contracts.md
 
 ## 15. Checklist de implementación
 
-- [ ] 28. (ADR-164, T-5-F) Conectar orientationPool size 1 según §6; nuevos
+- [x] 28. (ADR-164, T-5-F) Conectar orientationPool size 1 según §6; nuevos
   defaults de config y PoolKey/ManagedPoolKey; dispose de ambos pools y pruebas
   de §14. Sin cambio en runOcrStage ni en los otros motores. Scopes/medición en
   `roadmap/T5_OSD_Compartido_Handoff.md`.
