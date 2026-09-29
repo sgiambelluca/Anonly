@@ -31,24 +31,18 @@
  *   pdf.js aplica esa rotación al renderizar, así que el ráster que el OCR
  *   real recibe queda visualmente girado sin tocar los píxeles a mano).
  *
- * **Hallazgo durante la implementación (diagnóstico manual, no queda en el
- * repo): dos líneas sueltas ("Juan Perez" / "DNI 34.567.891") giradas 90°
- * hacen que el OSD elija el cuadrante equivocado, y Tesseract "lee" ese
- * cuadrante con confianza alta pero texto basura ("168", "295", "INC" —
- * fragmentos irreconocibles, confianza hasta 0.94) — la cadena de ADR-190 §2
- * da esa lectura por confiable en el paso 1 (≥ 1 palabra con confianza ≥ 60,
- * la única condición que exige §2) y nunca prueba el resto de los ángulos,
- * así que nunca llega a la lectura correcta. Con CUATRO líneas cortas
- * (título + nombre + DNI + una cuarta línea) el mismo giro da `rotation: 270`
- * y el 94-96 % de confianza en las palabras reales. Este resultado mostró
- * el límite del criterio provisional de fiabilidad y motivó la enmienda de
- * ADR-190 §2: si el OSD indica girada y hay tinta, siempre se compara con
- * 0°, aunque la primera lectura parezca fiable. Sigue abierto el caso en
- * que el OSD devuelve 0° sobre una página girada y produce basura confiable.
- * El fixture existente usa cuatro líneas. Esta prueba cubre esas cuatro
- * líneas; no demuestra recuperación de dos renglones. La campaña de ADR-190
- * §7 debe conservar el caso original y se exige para cerrar la ronda B
- * antes del merge, según Revision_Por_Bloques_Hardening.md §4.1.
+ * **Fixture de dos líneas.** La página tiene solo dos renglones sueltos
+ * ("Juan Perez" / "DNI 34.567.891"), el caso escaso original de ADR-190. Con
+ * tan poca señal el OSD de Tesseract puede elegir el cuadrante equivocado
+ * (o no dar veredicto) y "leer" ese cuadrante con confianza alta pero texto
+ * basura ("168", "295", "INC"). La cadena de verificación de ADR-190 §2 lo
+ * resuelve: con veredicto girado y tinta siempre compara contra 0° (caso 44),
+ * y sin veredicto ensaya los cuatro ángulos y se queda con la lectura de mayor
+ * confianza de página (caso 48). Antes esta prueba engrosaba la fixture a
+ * cuatro líneas para esquivar el problema; ya no hace falta y no demuestra
+ * nada sobre el caso escaso, así que se volvió a las dos líneas. Si alguna
+ * combinación fallara con dos líneas, no se engrosa: se marca `test.fixme`
+ * apuntando a ADR-190 y se reporta.
  *
  * NER queda desactivado (`installSettingsOverride`, mismo criterio que
  * `scenario-2-scanned-ocr.spec.ts`): la entidad de control es el DNI
@@ -76,20 +70,16 @@ test.setTimeout(600_000);
 
 const FONT_SIZE = 26;
 const MARGIN = 24;
-const LINE_SPACING = 40;
-const TOP_BASELINE_Y = 170;
+const LINE_SPACING = 50;
+const TOP_BASELINE_Y = 160;
 const UNROTATED_WIDTH = 280;
 const UNROTATED_HEIGHT = 220;
 const RECT_PAD = 4;
-const TITLE_TEXT = "DOCUMENTO";
 const NAME_TEXT = "Juan Perez";
 const DNI_VALUE = "34.567.891";
 const DNI_LABEL = `DNI ${DNI_VALUE}`;
-const VALIDITY_TEXT = "Vigencia 2030";
-const TITLE_LINE_INDEX = 0;
-const NAME_LINE_INDEX = 1;
-const DNI_LINE_INDEX = 2;
-const VALIDITY_LINE_INDEX = 3;
+const NAME_LINE_INDEX = 0;
+const DNI_LINE_INDEX = 1;
 
 function baselineYForLine(lineIndex: number): number {
   return TOP_BASELINE_Y - lineIndex * LINE_SPACING;
@@ -101,10 +91,8 @@ interface SparsePageFixture {
 }
 
 /**
- * Página de cuatro líneas cortas — título, nombre, DNI y una cuarta línea de
- * vigencia — "escasa" en cualquier sentido razonable, pero con suficiente
- * señal para que el OSD no invierta el cuadrante (ver el hallazgo en el
- * docblock de cabecera).
+ * Página escasa de dos líneas cortas — nombre y DNI —, sin ningún renglón de
+ * relleno que le dé señal extra al OSD (ver el docblock de cabecera).
  */
 async function buildSparsePageFixture(): Promise<SparsePageFixture> {
   const doc = await PDFDocument.create();
@@ -115,10 +103,8 @@ async function buildSparsePageFixture(): Promise<SparsePageFixture> {
 
   const page = doc.addPage([UNROTATED_WIDTH, UNROTATED_HEIGHT]);
   const lines: ReadonlyArray<readonly [string, number]> = [
-    [TITLE_TEXT, TITLE_LINE_INDEX],
     [NAME_TEXT, NAME_LINE_INDEX],
     [DNI_LABEL, DNI_LINE_INDEX],
-    [VALIDITY_TEXT, VALIDITY_LINE_INDEX],
   ];
   for (const [text, lineIndex] of lines) {
     page.drawText(text, {
