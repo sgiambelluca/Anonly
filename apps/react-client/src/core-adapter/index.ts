@@ -33,9 +33,11 @@
 
 import {
   createCore,
+  type EngineConfig,
   type EngineConfigOverrides,
   type IAnonymizationCore,
   type Unsubscribe,
+  type WorkerJobType,
 } from "@anonly/anonymization-core";
 import ExportWorker from "@anonly/export-engine/worker?worker";
 import NerWorker from "@anonly/ner-engine/worker?worker";
@@ -176,29 +178,47 @@ function exposeCoreForMeasurement(instance: IAnonymizationCore): void {
 }
 
 const ENGINE_OVERRIDES_STORAGE_KEY = "anonly:engine-overrides";
-const ENGINE_CONFIG_SECTIONS: ReadonlySet<keyof EngineConfigOverrides> = new Set([
-  "workerPool",
-  "pdf",
-  "ner",
-  "ocr",
-  "grouping",
-  "render",
-  "export",
-]);
-
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-const ENGINE_OVERRIDE_FIELDS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+/**
+ * Tipos de valor que el canal de overrides valida. Los dos mapas anidados
+ * (`jobNumberMap`, `poolNumberMap`) son los `Record` de `WorkerPoolConfig`:
+ * exigen **todas** sus claves, porque el merge del Core es por sección y un
+ * mapa incompleto borraría los job types que falten.
+ */
+type OverrideType =
+  | "number"
+  | "string"
+  | "boolean"
+  | "stringArray"
+  | "quantization"
+  | "imageFormat"
+  | "wasmPaths"
+  | "jobNumberMap"
+  | "poolNumberMap";
+
+/**
+ * Un tipo por campo de **cada** sección de `EngineConfig`, y el compilador lo
+ * exige: si el Core agrega un campo (o una sección), esta tabla deja de
+ * compilar hasta que se lo declare acá; si se borra uno, la clave sobrante
+ * también falla (exceso de propiedades). `-?` incluye los campos opcionales,
+ * como `ner.wasmPaths`.
+ */
+type OverrideFieldTypes = {
+  readonly [S in keyof EngineConfig]: { readonly [F in keyof EngineConfig[S]]-?: OverrideType };
+};
+
+const ENGINE_OVERRIDE_FIELDS = {
   workerPool: {
     pdfPoolSize: "number",
     ocrPoolSize: "number",
     nerPoolSize: "number",
     renderPoolSize: "number",
-    maxQueuePerPool: "object",
-    timeouts: "object",
-    maxRetries: "object",
+    maxQueuePerPool: "poolNumberMap",
+    timeouts: "jobNumberMap",
+    maxRetries: "jobNumberMap",
     baseRetryDelayMs: "number",
     maxRetryDelayMs: "number",
     cancelSlaMs: "number",
@@ -223,9 +243,47 @@ const ENGINE_OVERRIDE_FIELDS: Readonly<Record<string, Readonly<Record<string, st
     cachePages: "number",
   },
   export: { defaultDpi: "number", defaultImageFormat: "imageFormat", defaultJpegQuality: "number" },
-};
+} as const satisfies OverrideFieldTypes;
 
-function matchesOverrideType(type: string, value: unknown): boolean {
+const ENGINE_CONFIG_SECTIONS: ReadonlySet<string> = new Set(Object.keys(ENGINE_OVERRIDE_FIELDS));
+
+/** Las claves de cada mapa anidado, verificadas contra `WorkerJobType` y los pools de `WorkerPoolConfig`. */
+const JOB_TYPE_KEYS = [
+  "pdf-parse",
+  "ocr-page",
+  "ocr-orient",
+  "ner-page",
+  "render-page",
+  "export-page",
+] as const satisfies ReadonlyArray<WorkerJobType>;
+const POOL_KEYS = ["pdf", "ocr", "ner", "render"] as const satisfies ReadonlyArray<
+  keyof EngineConfig["workerPool"]["maxQueuePerPool"]
+>;
+
+// Cierra el "satisfies" de arriba en el otro sentido: sin esto, agregar un
+// `WorkerJobType` (o un pool) nuevo no obligaría a actualizar las listas, y el
+// canal aceptaría mapas sin la clave nueva.
+type MissingJobTypes = Exclude<WorkerJobType, (typeof JOB_TYPE_KEYS)[number]>;
+type MissingPoolKeys = Exclude<
+  keyof EngineConfig["workerPool"]["maxQueuePerPool"],
+  (typeof POOL_KEYS)[number]
+>;
+const KEYS_ARE_COMPLETE: [MissingJobTypes, MissingPoolKeys] extends [never, never] ? true : never =
+  true;
+void KEYS_ARE_COMPLETE;
+
+/** Objeto plano con **exactamente** `keys` y un número finito en cada una. */
+function isCompleteNumberMap(value: unknown, keys: ReadonlyArray<string>): boolean {
+  return (
+    isPlainObject(value) &&
+    keys.every((key) => key in value) &&
+    Object.entries(value).every(
+      ([key, item]) => keys.includes(key) && typeof item === "number" && Number.isFinite(item),
+    )
+  );
+}
+
+function matchesOverrideType(type: OverrideType, value: unknown): boolean {
   switch (type) {
     case "number":
       return typeof value === "number" && Number.isFinite(value);
@@ -247,36 +305,23 @@ function matchesOverrideType(type: string, value: unknown): boolean {
             ([key, item]) => (key === "wasm" || key === "mjs") && typeof item === "string",
           ))
       );
-    default:
-      return false;
+    case "jobNumberMap":
+      return isCompleteNumberMap(value, JOB_TYPE_KEYS);
+    case "poolNumberMap":
+      return isCompleteNumberMap(value, POOL_KEYS);
   }
 }
 
 function isValidOverrideSection(section: string, value: Record<string, unknown>): boolean {
-  const fields = ENGINE_OVERRIDE_FIELDS[section];
-  return (
-    fields !== undefined &&
-    Object.entries(value).every(([key, fieldValue]) => {
-      const expectedType = fields[key];
-      if (expectedType === "object") {
-        const allowedKeys =
-          key === "maxQueuePerPool"
-            ? ["pdf", "ocr", "ner", "render"]
-            : ["pdf-parse", "ocr-page", "ocr-orient", "ner-page", "render-page", "export-page"];
-        return (
-          isPlainObject(fieldValue) &&
-          allowedKeys.every((nestedKey) => nestedKey in fieldValue) &&
-          Object.entries(fieldValue).every(
-            ([nestedKey, nestedValue]) =>
-              allowedKeys.includes(nestedKey) &&
-              typeof nestedValue === "number" &&
-              Number.isFinite(nestedValue),
-          )
-        );
-      }
-      return expectedType !== undefined && matchesOverrideType(expectedType, fieldValue);
-    })
-  );
+  // `Object.hasOwn`: una clave como "constructor" o "__proto__" no es una sección.
+  if (!Object.hasOwn(ENGINE_OVERRIDE_FIELDS, section)) return false;
+  const fields: Readonly<Record<string, OverrideType>> =
+    ENGINE_OVERRIDE_FIELDS[section as keyof typeof ENGINE_OVERRIDE_FIELDS];
+  return Object.entries(value).every(([key, fieldValue]) => {
+    if (!Object.hasOwn(fields, key)) return false;
+    const expectedType = fields[key];
+    return expectedType !== undefined && matchesOverrideType(expectedType, fieldValue);
+  });
 }
 
 /**
@@ -309,7 +354,7 @@ function readTestEngineOverrides(): EngineConfigOverrides | undefined {
     const parsed: unknown = JSON.parse(raw);
     if (!isPlainObject(parsed)) return undefined;
     for (const [key, value] of Object.entries(parsed)) {
-      if (!ENGINE_CONFIG_SECTIONS.has(key as keyof EngineConfigOverrides)) return undefined;
+      if (!ENGINE_CONFIG_SECTIONS.has(key)) return undefined;
       if (!isPlainObject(value) || !isValidOverrideSection(key, value)) return undefined;
     }
     return parsed as EngineConfigOverrides;
