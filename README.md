@@ -39,7 +39,7 @@ pnpm dev
 Antes de abrir un PR, el subset mínimo de gates:
 
 ```bash
-pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract
+pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract && pnpm format:check
 ```
 
 <details>
@@ -350,7 +350,7 @@ Resumen de reglas clave:
 Antes de abrir un PR, ejecutar:
 
 ```bash
-pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract
+pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract && pnpm format:check
 ```
 
 Todos los gates deben pasar (ver [`docs/architecture/07_Performance_Strategy.md`](./docs/architecture/07_Performance_Strategy.md) §11.4 para la lista completa).

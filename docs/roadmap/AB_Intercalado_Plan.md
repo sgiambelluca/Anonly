@@ -339,7 +339,7 @@ Y dos límites que hay que escribir antes de que alguien los pise:
 
 Trabajo acotado a `tests/perf/`:
 
-- `support/wasm-heap-probe.spec.ts` + su parche — el Paso 0 de §2ter, con el
+- `wasm-heap-probe.spec.ts` + su parche — el Paso 0 de §2ter, con el
   control discriminante. Se entrega **primero** y por separado: su resultado
   decide si el resto lleva una métrica más.
 - `support/ab-sin-baja-ner.patch` — el brazo B, una línea.

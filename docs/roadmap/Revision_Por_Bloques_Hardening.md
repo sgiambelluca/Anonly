@@ -307,9 +307,9 @@ veces.
 | — | E1 | Exceptuado (APPROVED en el Hito 12.5) | — | — | |
 | — | E2 | Exceptuado (APPROVED 2026-09-26) | 2 | — | |
 | A | B1, B2, B7 | **APPROVED** (2026-09-27) | 3 (R1 REJECTED 7 B / 6 O; R2 B2 y B7 APPROVED, B1 REJECTED por B-5; R3 APPROVED) | ver el commit de cierre de la ronda A | O-1 → ADR-189; B-4 de Performance/Leak/Stress → ronda C; riesgo de OSD en páginas escasas → bloqueante de la ronda B |
-| B | B4, B5, B6 | **APPROVED** (2026-09-29, R6: B5 reabierto y cerrado; B4 y B6 confirmados) | 6 (R1 a R4 con Codex, §4.1; R5 verificación independiente, B5 REJECTED; R6 APPROVED) | commits de cierre de la ronda B y de la reapertura de B5 | El humano aceptó como riesgo conocido el veredicto OSD equivocado con basura confiable (ADR-190, Consecuencias; `MVP.md`). ADR-146 M2 ABIERTO en `MVP.md`. Pendiente de decisión humana: el corrimiento del scroll durante un `reanalyze` de OCR (O-5, `Components.md` §5.3). Pendientes menores de comentarios para la ronda D: `viewerGestures.ts:38-40` y el docblock de `adr190-unreadable-page-cover.spec.ts` |
-| C | B3, B8 | **APPROVED** (revisión local; CI remoto aún sin observar) | 3 (R1: B3/B8 REJECTED; R2: B8 APPROVED, B3 REJECTED por reloj del caso escaneado; R3: B3/B8 APPROVED) | commits de cierre de la ronda C | Corregidos validación profunda de overrides ADR-155, M2 inconcluso sin muestras, ventana `import → Ready` y preparación del job `test-perf` en CI. Cobertura del adaptador de producto: 88,39% de líneas; tests unitarios dirigidos del arnés aprobados. O-B3-1: el empaquetado local puede reutilizar un `dist` E2E; el workflow de release reconstruye el cliente sin esa bandera. No se ejecutaron campañas pesadas en la revisión |
-| D | B9, B10 | Pendiente | | | |
+| B | B4, B5, B6 | **APPROVED** (2026-09-29, R6: B5 reabierto y cerrado; B4 y B6 confirmados) | 6 (R1 a R4 con Codex, §4.1; R5 verificación independiente, B5 REJECTED; R6 APPROVED) | commits de cierre de la ronda B y de la reapertura de B5 | El humano aceptó como riesgo conocido el veredicto OSD equivocado con basura confiable (ADR-190, Consecuencias; `MVP.md`). ADR-146 M2 ABIERTO en `MVP.md`. Corrimiento del scroll durante un `reanalyze` de OCR: el humano decidió anclarlo (2026-09-29, `Components.md` §5.3); implementado y APPROVED en la revisión de la ronda C. Pendientes menores de comentarios para la ronda D: `viewerGestures.ts:38-40` y el docblock de `adr190-unreadable-page-cover.spec.ts` |
+| C | B3, B8 | **APPROVED** (2026-09-29, R5 independiente; B3 y anclaje del scroll APPROVED en R4) | 5 (R1 a R3 con Codex; R4 independiente, B8 REJECTED; R5 APPROVED) | commits de cierre de la ronda C | Decisiones del humano: `test:perf` solo con `pipeline-timing`, CI mide sin umbral y el umbral de 8 s se aplica en local (§11.4); Leak y Stress rigen por ADR-149 (nota en ADR-185 §5). R5 estima en el runner de macOS Stress 25–35 min (tope 60) y Leak 40–50 min (tope 90); lo confirma la primera corrida de CI del PR. Pendiente de decisión humana, no bloqueante: si el instalador sigue llevando los sourcemaps del renderer (~15 MB) |
+| D | B9, B10 | **APPROVED** (2026-09-29, revisor Sonnet por ser revisión de texto y arneses) | 1 | commits de cierre de la ronda D | Sin datos reales en `HEAD`. Once observaciones no bloqueantes: diez resueltas en docs por el planificador (índice de mediciones, estados viejos, base del patch de I-2, gates alineados con CI, guía de IA, residuo de una ruta personal en el historial en §6) y los dos comentarios de código desactualizados, que resuelve el implementador junto con el anclaje del scroll |
 
 ### 4.1 Reanudación de la ronda B (2026-09-27)
 
@@ -565,6 +565,13 @@ asentados, al estilo de ADR-124, en lugar de reescribirla.
 - **Mensaje que no describe el cambio.** `bced209` dice "propagar señal de
   tinta ilegible", pero solo hace que `maxRetries["ocr-orient"]` se lea de la
   configuración (`create-core.ts`).
+
+**Ronda D (O-8):**
+
+- **Ruta personal en el historial.** Los commits `a32fcdb` y `e1aac58` contienen
+  una ruta absoluta de una máquina con un nombre de usuario personal. `149cb7b`
+  la retiró y `HEAD` no la contiene. Como no se reescribe la historia, queda
+  registrada acá sin repetir la ruta.
 
 **Ronda B (O-10):**
 

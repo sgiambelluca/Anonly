@@ -206,10 +206,9 @@ región) que tiene tinta, `OCR_PAGE_FINISHED` lleva `unreadableInk: true`
   no se pudo leer. Revisala: si tiene datos sensibles, no se van a tapar
   solos."*. Va en una franja fija arriba de la imagen de la página, fuera de
   ella (decisión del humano, 2026-09-29), reservada en toda página marcada:
-  agregar o quitar entidades no desplaza el layout (UX-10). Límite conocido:
-  un `reanalyze` de OCR que marca o desmarca una página por encima del scroll
-  corre lo visible 72 px por página, porque el scroll no se ancla
-  (`Components.md` §5.3).
+  agregar o quitar entidades no desplaza el layout (UX-10). Si un `reanalyze` de OCR marca o desmarca una página por encima
+  de lo visible, el visor ancla el scroll para que el contenido en pantalla no
+  se corra (decisión del humano, 2026-09-29; `Components.md` §5.3).
 - **Al exportar**, la UI arma la lista de páginas pendientes: las que tienen
   `unreadableInk` y **no tienen ninguna entidad**. Una página tiene entidad si
   algún grupo no eliminado (ADR-171) tiene una ocurrencia en ella. Da igual

@@ -72,7 +72,10 @@ antes de convertir el perfil en un gate; no se cambia el objetivo contractual.
    512 MB/8 s/60 s de §1 ni un presupuesto aprobado para 200 páginas.
 5. Ambos jobs de CI corren en macOS con assets first-party mirroreados y
    cacheados, Chromium de Playwright instalado y timeout explícito; detectan
-   `.spec.ts` en sus directorios. No se usan documentos reales ni se suben
+   `.spec.ts` en sus directorios. **Aclaración (2026-09-29):** eso describe
+   dónde están las specs, no habilita saltear el job. Rige ADR-149 §1: sin specs
+   el job falla, y se exige un mínimo de tests ejecutados y cero salteados
+   (decisión del humano en la revisión de la ronda C). No se usan documentos reales ni se suben
    PDFs o trazas como artefactos. Los scripts y la tabla canónica §11.4 se
    actualizan juntos. Windows nativo sigue como validación separada; un verde
    Mac no afirma igualdad de consumo ni tiempo en Windows.

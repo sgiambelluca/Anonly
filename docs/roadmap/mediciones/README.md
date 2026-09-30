@@ -29,6 +29,9 @@ documentos de trabajo. Los arneses que producen estos números están en
 | OCR | [`Margenes_Menos_Pixeles_Resultados.md`](./ocr/Margenes_Menos_Pixeles_Resultados.md) | Márgenes: tinta residual y su caja (M-1, M-2, M-1b) |
 | OCR | [`Margenes_Menos_Pixeles_Medicion_I1.md`](./ocr/Margenes_Menos_Pixeles_Medicion_I1.md) | Márgenes I-1: A/B real |
 | OCR | [`Margenes_Menos_Pixeles_Medicion_I2.md`](./ocr/Margenes_Menos_Pixeles_Medicion_I2.md) | Márgenes I-2: recorte vertical de franjas |
+| OCR | [`ADR190_DPI_2026-09-27.md`](./ocr/ADR190_DPI_2026-09-27.md) | ADR-190 §7: OCR a DPI nativo frente a 300 forzado (150/200/250/300) |
+| OCR | [`ADR190_OSD_Escala_2026-09-28.md`](./ocr/ADR190_OSD_Escala_2026-09-28.md) | ADR-190: tamaño de la imagen del OSD |
+| OCR | [`ADR190_OSD_Recuperacion_2026-09-28.md`](./ocr/ADR190_OSD_Recuperacion_2026-09-28.md) | ADR-190: recuperación con OSD sin veredicto |
 | NER | [`Hilos_NER_Medicion.md`](./ner/Hilos_NER_Medicion.md) | Hilos de ONNX, macOS y Windows nativo |
 | NER | [`Empaquetado_NER_Medicion.md`](./ner/Empaquetado_NER_Medicion.md) | Empaquetado del modelo |
 | NER | [`Perfilado_NER_Interno_Medicion.md`](./ner/Perfilado_NER_Interno_Medicion.md) | Perfilado interno A1/B/A2 |

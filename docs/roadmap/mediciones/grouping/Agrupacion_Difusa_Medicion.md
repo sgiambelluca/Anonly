@@ -142,7 +142,8 @@ alias, merges, splits y cambios de tipo, requería un ADR separado y su propio
 banco. **ADR-184 (2026-09-25) cerró ese diseño documental** y la comparación
 sintética siguiente mide su implementación. La decisión de conservarlo sigue
 pendiente de R1/R2. Windows nativo ventilado se repetirá cuando el equipo esté
-disponible.
+disponible. **Actualización:** R1/R2 y Windows nativo se midieron más abajo en
+este mismo informe.
 
 ### ADR-184: índice de candidatos, comparación pareada provisional
 

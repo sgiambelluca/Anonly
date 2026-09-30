@@ -151,7 +151,7 @@ CHECKLIST DE REVISIÓN
 6. ¿Los tests cubren TODA la sección 14 "Casos de prueba"? Si no, RECHAZA con lista de tests faltantes.
 7. ¿Los casos límite de la sección 13 están todos cubiertos? Si no, RECHAZA.
 8. ¿El checklist de implementación (sección 15) está completo? Si no, RECHAZA con items pendientes.
-9. Lint, typecheck, tests pasan: `pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract`. Si no, RECHAZA.
+9. Lint, typecheck, tests pasan: `pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract && pnpm format:check`. Si no, RECHAZA.
 10. Verificar prohibiciones: sin `any`, sin `console.`, sin `react` en packages/, sin imports entre motores. Usa grep.
 
 SALIDA ESPERADA
@@ -438,7 +438,7 @@ Para un bug reportado por el revisor o por tests:
 ## 13. Reglas transversales a todos los prompts
 
 - **Nunca** enviar un prompt sin haber adjuntado el contexto indicado.
-- **Nunca** aceptar output sin gates verdes al alcance que le corresponde a cada rol (`ai/AI_Development_Guide.md` §4): el implementador, scoped a su módulo; el revisor, `pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract` sobre el repo completo, una sola vez por PR.
+- **Nunca** aceptar output sin gates verdes al alcance que le corresponde a cada rol (`ai/AI_Development_Guide.md` §4): el implementador, scoped a su módulo; el revisor, `pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract && pnpm format:check` sobre el repo completo, una sola vez por PR.
 - **Nunca** permitir `git commit` o `git push` sin autorización explícita del humano.
 - **Siempre** reportar ambigüedades en lugar de improvisar.
 - **Siempre** respetar las prohibiciones absolutas de `ai/Code_Standards.md` §12.

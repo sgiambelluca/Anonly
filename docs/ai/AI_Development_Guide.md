@@ -14,7 +14,7 @@ El proyecto se desarrolla bajo un modelo **planificador + implementador**:
 |---|---|---|
 | Planificador / Arquitecto | modelo potente | mantiene `docs/`, escribe specs, ADRs, refactors grandes, resolución de ambigüedades. |
 | Implementador | modelo económico | toma un spec de motor + `core/Contracts.md` y produce código + tests que respetan el contrato. |
-| Revisor | modelo intermedio | valida PRs contra el spec y las reglas de esta guía. |
+| Revisor | modelo de más capacidad (Opus); para una revisión solo de documentación o arneses alcanza uno intermedio | valida PRs contra el spec y las reglas de esta guía. |
 
 **Regla de oro**: el implementador nunca decide arquitectura. Solo traduce specs a código. Si encuentra una ambigüedad o un vacío en el spec, **detiene la tarea** y reporta el issue, sin improvisar.
 
@@ -51,7 +51,7 @@ El proyecto se desarrolla bajo un modelo **planificador + implementador**:
 | R-13 | **Cada PR generado por IA debe incluir tests** (contract + unit + edge según el spec). Un PR sin tests se rechaza. |
 | R-14 | Cada módulo debe tener su `README.md` apuntando al spec, y el spec debe estar actualizado antes del PR. |
 | R-15 | Cada cambio debe respetar las **interfaces existentes**. Si las extiende, documentarlo en el spec. |
-| R-16 | Antes de marcar un PR como listo, ejecutar `pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract`. Verde obligatorio. |
+| R-16 | Antes de marcar un PR como listo, ejecutar `pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract && pnpm format:check`. Verde obligatorio. |
 | R-17 | El mensaje de commit sigue Conventional Commits sin scope. **El commit toca un solo módulo** (R-1, ADR-124 §1). |
 | R-22 | La **higiene de datos** —sacar nombres, números de expediente o cualquier dato de un documento real— va en su **propio commit**, nunca adentro de uno funcional (ADR-124 §3). Es lo que más necesita ser trazable, y es lo que un revisor no puede auditar si viaja escondido en un fix. |
 
@@ -93,7 +93,7 @@ El proyecto se desarrolla bajo un modelo **planificador + implementador**:
 
 Un PR se considera mergeable solo si cumple **todos** los gates.
 
-**Gates ejecutables**: la tabla canónica (única fuente de verdad, con comandos y estado de activación) vive en `architecture/07_Performance_Strategy.md` §11.4. No se duplica acá. Comando mínimo pre-PR: `pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract`.
+**Gates ejecutables**: la tabla canónica (única fuente de verdad, con comandos y estado de activación) vive en `architecture/07_Performance_Strategy.md` §11.4. No se duplica acá. Comando mínimo pre-PR: `pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract && pnpm format:check`.
 
 **Quién corre qué alcance**: ese comando mínimo (repo completo) es responsabilidad del **revisor** — lo confirma una sola vez por PR, no en cada iteración. El **implementador**, mientras itera, corre el equivalente **scoped al módulo que está tocando** (lint/typecheck/test filtrados a su paquete) — nunca el lint/test del monorepo completo. Motivo: el lint type-aware del monorepo tarda ~10-12 min; repetirlo en cada ajuste chico durante la implementación no detecta nada que el scoped no detecte ya para ese módulo, y de todos modos el revisor hace la pasada completa sobre el diff final antes de aprobar. Si un implementador maneja varias tareas encadenadas en la misma branch, el revisor entra recién cuando **todas** están code-complete, no después de cada una.
 

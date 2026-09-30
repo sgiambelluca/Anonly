@@ -13,7 +13,9 @@ que justificó I-1, ya no ejecuta ninguna pasada de margen: I-2 ahorra 0 allí.
 
 Se partió del producto con I-1 (`b76d18c`, árbol actual en `0017f8c`) y de
 los cuatro PDF congelados de la campaña M-1/M-2. Un patch experimental de
-6.666 bytes (`tests/perf/support/margin-i2-instrument.patch`, copia idéntica en
+6.666 bytes, que aplica sobre `0017f8c` y **no** sobre `HEAD` actual (el kernel
+cambió después; el runner lo rechaza con `git apply --check`)
+(`tests/perf/support/margin-i2-instrument.patch`, copia idéntica en
 `.measure/margenes-i2/20260917-probe/instrument.patch`, SHA-256
 `2000e95a76076d0a5262aae760da287f5b6a2827c5aa40c130e0d311197c3e7e`)
 analizó las franjas que I-1 **no** salta. Para cada una calculó la primera y

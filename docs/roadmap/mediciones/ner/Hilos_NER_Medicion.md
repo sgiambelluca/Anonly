@@ -99,7 +99,8 @@ carga o al panel. Esas tres mediciones no quedaron cerradas por esta tanda;
 la conclusión histórica se limita a inferencia, `Ready`, pico RSS, calidad y
 cancelación. La ampliación macOS del 2026-09-26 las separa con el alcance
 descrito al final de este informe; el complemento equivalente en Windows
-sigue pendiente.
+sigue pendiente. **Actualización:** el complemento Windows está cerrado más
+abajo, en "Complemento Windows nativo — carga, panel y secuencia".
 
 **Ampliación macOS autorizada el 2026-09-26:**
 `Rendimiento_Experimentos_Plan.md` §1.1 define carga observable, panel DOM y
