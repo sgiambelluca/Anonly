@@ -124,6 +124,13 @@ jobs:
       - name: Build renderer
         run: pnpm --filter @anonly/react-client build
 
+      # El instalador no puede llevar los ganchos de medición de los E2E
+      # (`__anonlyCore`, el canal `anonly:engine-overrides`, `VITE_E2E`): con
+      # `VITE_E2E=1` en el build quedan en el bundle y expondrían el Core. Se
+      # verifica el resultado, no que el workflow no defina la variable.
+      - name: Verificar que el renderer no tiene ganchos de E2E
+        run: node scripts/ci/assert-no-e2e-hooks.mjs apps/react-client/dist
+
       # Solo macOS: baja Sparkle (verificando sha256) y compila el addon nativo
       # del actualizador. Tiene que pasar ANTES de empaquetar — `extraResources`
       # referencia el `.node` y `extraFiles` el framework.

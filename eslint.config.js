@@ -55,7 +55,7 @@ export default tseslint.config(
     languageOptions: {
       parserOptions: {
         projectService: {
-          maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 18,
+          maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 19,
           allowDefaultProject: [
             "eslint.config.js",
             "commitlint.config.js",
@@ -75,6 +75,7 @@ export default tseslint.config(
             "tests/perf/support/summarize-ocr-pool.mjs",
             "tests/perf/support/summarize-ocr-memory.mjs",
             "scripts/ci/assert-min-tests.mjs",
+            "scripts/ci/assert-no-e2e-hooks.mjs",
           ],
         },
         tsconfigRootDir: import.meta.dirname,
