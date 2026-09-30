@@ -18,7 +18,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   classifyPeakPosition,
-  computeM2WithinPhases,
+  resolveM2Bytes,
   computePostReadyPeakBytes,
   type PeakPosition,
   type ProfileReport,
@@ -201,8 +201,7 @@ async function main(): Promise<void> {
         const samples = r.run.samples ?? [];
         const segments = r.run.phaseSegments ?? [];
         const peakPosition: PeakPosition = classifyPeakPosition(samples, segments);
-        const m2Bytes =
-          segments.length === 0 ? r.run.peakSumBytes : computeM2WithinPhases(samples, segments);
+        const m2Bytes = resolveM2Bytes(samples, segments, r.run.peakSumBytes);
         const postReadyPeakBytes = computePostReadyPeakBytes(samples, segments);
         const m1Bytes =
           temperature === "hot" && m2Bytes !== null ? m2Bytes - r.run.baselineBytes : null;

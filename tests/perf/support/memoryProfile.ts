@@ -958,8 +958,7 @@ async function runImport(
   // `peakFallsWithinPhases` antes de esta enmienda. `m1Bytes` comparte esta
   // base: es la misma resta de siempre, aplicada al pico ya corregido.
   const peakPosition = classifyPeakPosition(runSamples, phaseSegments);
-  const m2WithinPhasesBytes = computeM2WithinPhases(runSamples, phaseSegments);
-  const reportedPeakBytes = phaseSegments.length === 0 ? globalPeakBytes : m2WithinPhasesBytes;
+  const reportedPeakBytes = resolveM2Bytes(runSamples, phaseSegments, globalPeakBytes);
   const postReadyPeakBytes = computePostReadyPeakBytes(runSamples, phaseSegments);
   const workerEventsAtMs = run.workerEvents.map((e) => ({
     type: e.type,
@@ -1089,6 +1088,23 @@ export function computeM2WithinPhases(
   if (first === undefined || last === undefined) return null;
   const windowSamples = samplesBetween(samples, first.fromAtMs, last.toAtMs);
   return windowSamples.length === 0 ? null : peakSumBytes(windowSamples);
+}
+
+/**
+ * El M2 que se reporta (ADR-146 §7ter): el de la ventana de fases, y **solo
+ * cuando no existen segmentos** (corrida fallida antes del segundo evento de
+ * fase) cae al pico global. Con segmentos pero sin ninguna muestra en la
+ * ventana devuelve `null` — inconcluso — y NO cae al global: un M2 inventado
+ * con el pico de otra fase es justo lo que la enmienda evita. Es la decisión
+ * que comparten `memoryProfile.ts` (al medir) y `aggregateMemoryReports.ts`
+ * (al recalcular sobre un reporte guardado).
+ */
+export function resolveM2Bytes(
+  samples: ReadonlyArray<MemorySample>,
+  segments: ReadonlyArray<PhaseSegment>,
+  globalPeakBytes: number | null,
+): number | null {
+  return segments.length === 0 ? globalPeakBytes : computeM2WithinPhases(samples, segments);
 }
 
 /**

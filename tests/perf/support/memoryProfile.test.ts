@@ -13,6 +13,7 @@ import {
   attributedIsolateBytes,
   classifyPeakPosition,
   computeM2WithinPhases,
+  resolveM2Bytes,
   computePhaseSegments,
   computePostReadyPeakBytes,
   computeTargetCoverage,
@@ -312,6 +313,24 @@ describe("computeM2WithinPhases (ADR-146 §7ter)", () => {
   it("null si todas las muestras quedan fuera de la ventana de fases", () => {
     const samples = [rssSample(100, { Tab: 800_000_000 }), rssSample(1200, { Tab: 900_000_000 })];
     expect(computeM2WithinPhases(samples, [segment(500, 1000)])).toBeNull();
+  });
+});
+
+describe("resolveM2Bytes — el respaldo del pico global solo sin segmentos (ADR-146 §7ter)", () => {
+  const samples = [rssSample(700, { Tab: 400_000_000 }), rssSample(1200, { Tab: 900_000_000 })];
+
+  it("sin segmentos cae al pico global", () => {
+    expect(resolveM2Bytes(samples, [], 900_000_000)).toBe(900_000_000);
+    expect(resolveM2Bytes(samples, [], null)).toBeNull();
+  });
+
+  it("con segmentos usa la ventana de fases y NO el pico global", () => {
+    expect(resolveM2Bytes(samples, [segment(500, 1000)], 900_000_000)).toBe(400_000_000);
+  });
+
+  it("con segmentos pero ninguna muestra en la ventana es null: no cae al global", () => {
+    const outside = [rssSample(100, { Tab: 800_000_000 }), rssSample(1200, { Tab: 900_000_000 })];
+    expect(resolveM2Bytes(outside, [segment(500, 1000)], 900_000_000)).toBeNull();
   });
 });
 

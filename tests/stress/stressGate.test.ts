@@ -83,6 +83,22 @@ describe("evaluateStressGate", () => {
     expect(result.comparisons).toEqual([]);
   });
 
+  it('fails closed with "M2 unreadable" when a run has no M2 (null, zero or non-finite)', () => {
+    // `null` es lo que devuelve `resolveM2Bytes` con segmentos pero sin ninguna
+    // muestra en la ventana de fases: una corrida inconclusa, no un M2 de 0.
+    for (const peakSumBytes of [null, 0, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const complete = profile(200, 200, 200);
+      const result = evaluateStressGate(
+        profile(50, 100, 100),
+        { ...complete, cold: { ...complete.cold, peakSumBytes } },
+        SENTINELS[50],
+        SENTINELS[200],
+      );
+      expect(result.failures).toEqual(["200p cold: M2 unreadable"]);
+      expect(result.comparisons).toEqual([]);
+    }
+  });
+
   it("does not compare profiles from different builds or hosts", () => {
     const original = profile(200, 200, 200);
     const differentHost = {
