@@ -28,7 +28,7 @@ Dónde está el estado real:
   - El commit que cambia un contrato es la excepción, y lleva su ADR.
   - La higiene de datos va en commit propio (R-22).
 - **Nunca** romper contratos públicos de `docs/core/Contracts.md`. Un cambio de contrato va primero como ADR y docs, y después como código (R-2, R-19).
-- **Nunca importar un motor desde otro motor**, ni React desde `packages/`, ni `@anonly/event-system` directo desde un motor (P-1, P-2).
+- **Nunca importar un motor desde otro motor**, ni React desde `packages/`, ni `@anonly/event-system` directo desde un motor (P-1, P-2; para `@anonly/event-system`, `ai/Code_Standards.md` §12).
   - ESLint lo bloquea con los patrones `@anonly/*-engine` y `@anonly/event-system` en `no-restricted-imports`, salvo en los `__tests__` de cada paquete.
   - Solo el façade `packages/anonymization-core/src/` importa motores. Los motores usan el `IEventBus` que reciben por `ctx`.
 - **Prohibiciones de código** (R-6 a R-11):
@@ -62,7 +62,7 @@ Antes de publicar un ADR, buscar con grep cada tipo, evento y error code que cit
 
 ## Gates
 
-**Subset mínimo antes de dar una tarea por lista.** Los cinco corren en CI.
+**Subset mínimo antes de dar una tarea por lista** (el mismo de `07_Performance_Strategy.md` §11.4 y de R-16). CI los cubre: `format:check` dentro del job Lint, y los tests de contrato dentro de `pnpm test`.
 
 ```bash
 pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract && pnpm format:check
