@@ -12,9 +12,12 @@
  *   (`inkRatio` del OSD, ADR-190 §3, la ve sin problema) pero nada que
  *   Tesseract pueda leer como palabra. Es el caso que
  *   `ocr.engine.ts#processPageInternal` marca `unreadableInk: true` en vez de
- *   fallar en silencio (ADR-190 §2/§4): la cadena entera (pasos 2-4) prueba
- *   ángulos y upscale sin encontrar ninguna lectura confiable, y termina la
- *   página igual, con el aviso prendido.
+ *   fallar en silencio (ADR-190 §2/§4). Unos rectángulos no le dan al OSD
+ *   ningún veredicto: cae al fallback de 0° (`osdHadVerdict: false`) y, como
+ *   hay tinta, entra la rama del caso 48 (enmienda de ADR-190 del 2026-09-28).
+ *   Esa rama reemplaza a la cadena general: reconoce una sola vez en cada uno
+ *   de los cuatro ángulos, sin upscale, y como ninguna lectura es confiable
+ *   termina la página igual, con `unreadableInk` y el aviso prendido.
  *
  *   **Solo rectángulos sólidos, nada de líneas finas ni elipses** (hallazgo
  *   durante la implementación, diagnóstico manual, no queda en el repo): una
