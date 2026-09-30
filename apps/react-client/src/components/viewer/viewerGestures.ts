@@ -35,9 +35,11 @@ export function zoomFromWheel(zoom: number, deltaY: number): number {
 /**
  * ADR-169 §9: alto del separador entre páginas — un espacio con una línea
  * punteada y la etiqueta *"Página N de M"* centrada. Va arriba de cada página
- * y forma parte del paso del virtualizador (`pageStride`), así que toda la
- * aritmética de scroll (página actual, salto de la lupa) sigue siendo
- * `índice × paso`.
+ * y forma parte del paso base de cada fila (`pageStride`). Desde ADR-190 §4 las
+ * filas ya no miden todas lo mismo (las páginas `unreadableInk` suman una
+ * franja), así que la aritmética de scroll —página actual, salto de la lupa
+ * o de "Ir a la página"— sale de `pageSlots.ts` (`computePageSlots`,
+ * `scrollTopForPage`) y no de `índice × paso`.
  */
 export const PAGE_SEPARATOR_PX = 44;
 

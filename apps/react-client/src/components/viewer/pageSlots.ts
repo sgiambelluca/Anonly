@@ -30,6 +30,12 @@ export interface PageSlots {
   readonly heights: ReadonlyArray<number>;
   /** Alto total del contenido con scroll: suma de todas las filas. */
   readonly totalHeight: number;
+  /**
+   * Alto base de una fila sin franja (el `baseHeight` con el que se calculó).
+   * Distingue un cambio de franjas de un cambio de zoom: el zoom cambia el alto
+   * base, la marca `unreadableInk` no (`isStripOnlyChange`).
+   */
+  readonly baseHeight: number;
 }
 
 export interface ComputePageSlotsParams {
@@ -52,7 +58,7 @@ export function computePageSlots(params: ComputePageSlotsParams): PageSlots {
     heights.push(height);
     total += height;
   }
-  return { offsets, heights, totalHeight: total };
+  return { offsets, heights, totalHeight: total, baseHeight };
 }
 
 /**
@@ -77,4 +83,61 @@ export function slotIndexAtOffset(slots: PageSlots, y: number): number {
 /** `scrollTop` que deja una página al comienzo del viewport (`0` si el índice no existe). */
 export function scrollTopForPage(slots: PageSlots, pageIndex: number): number {
   return slots.offsets[pageIndex] ?? 0;
+}
+
+/**
+ * ¿La geometría cambió **solo** porque alguna página ganó o perdió su franja?
+ * Es así cuando hay la misma cantidad de páginas, el mismo alto base y alguna
+ * fila con otro alto. Un cambio de zoom (otro alto base) o de documento (otra
+ * cantidad de páginas) no lo es, y no se ancla: conserva su comportamiento de
+ * siempre.
+ *
+ * Se comparan los altos **fila por fila**, no el alto total: una franja que
+ * aparece en una fila y desaparece en otra deja el total igual y mueve todo lo
+ * que queda entre las dos.
+ */
+export function isStripOnlyChange(previous: PageSlots, next: PageSlots): boolean {
+  return (
+    previous.offsets.length === next.offsets.length &&
+    previous.baseHeight === next.baseHeight &&
+    previous.heights.some((height, index) => height !== next.heights[index])
+  );
+}
+
+/**
+ * Anclaje del scroll (ADR-190 §4, `ui/Components.md` §5.3). Cuando una página
+ * gana o pierde su franja —en la práctica durante un `reanalyze` de OCR—, todo
+ * lo que está debajo se desplaza. Para que el usuario siga viendo lo mismo, se
+ * toma la fila visible de arriba **antes** del cambio, con su desplazamiento
+ * dentro de la vista, y se devuelve el `scrollTop` que deja esa fila en el
+ * mismo lugar con la geometría nueva.
+ *
+ * - Cambio arriba de la fila de arriba: el desplazamiento de esa fila cambia
+ *   y hay corrección.
+ * - Cambio en la propia fila de arriba (su franja va dentro de ella, sobre su
+ *   imagen) o debajo: su desplazamiento no cambia y se devuelve `scrollTop`
+ *   tal cual, sin corrección.
+ * - Solo se ancla un cambio que causó la marca (`isStripOnlyChange`); si el
+ *   cambio de `slots` viene del zoom o del documento, se devuelve `scrollTop`
+ *   sin tocarlo.
+ *
+ * `scrollTop` es el de **antes** del cambio: si el contenido se achicó, el
+ * navegador ya pudo recortarlo. `clientHeight` acota el resultado al máximo
+ * que el navegador permite (`totalHeight - clientHeight`).
+ */
+export function anchorScrollTop(
+  previous: PageSlots,
+  next: PageSlots,
+  scrollTop: number,
+  clientHeight = 0,
+): number {
+  if (!isStripOnlyChange(previous, next)) return scrollTop;
+  const anchor = slotIndexAtOffset(previous, scrollTop);
+  const previousOffset = previous.offsets[anchor] ?? 0;
+  const nextOffset = next.offsets[anchor] ?? 0;
+  if (nextOffset === previousOffset) return scrollTop;
+  const withinRow = scrollTop - previousOffset;
+  const target = nextOffset + withinRow;
+  const max = Math.max(0, next.totalHeight - clientHeight);
+  return Math.min(max, Math.max(0, target));
 }

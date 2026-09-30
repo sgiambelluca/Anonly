@@ -12,7 +12,9 @@ import { describe, expect, it } from "vitest";
 import { computeCurrentPageIndexFromScroll } from "../components/viewer/currentPageIndex.js";
 import {
   UNREADABLE_STRIP_PX,
+  anchorScrollTop,
   computePageSlots,
+  isStripOnlyChange,
   scrollTopForPage,
   slotIndexAtOffset,
 } from "../components/viewer/pageSlots.js";
@@ -85,7 +87,7 @@ describe("computePageSlots", () => {
   it("sin páginas (o con un conteo negativo) no hay filas", () => {
     for (const pageCount of [0, -3]) {
       const slots = computePageSlots({ pageCount, baseHeight: BASE, stripPages: new Set() });
-      expect(slots).toEqual({ offsets: [], heights: [], totalHeight: 0 });
+      expect(slots).toEqual({ offsets: [], heights: [], totalHeight: 0, baseHeight: BASE });
     }
   });
 });
@@ -141,7 +143,9 @@ describe("slotIndexAtOffset", () => {
   });
 
   it("es 0 si no hay filas o el layout todavía no tiene alto", () => {
-    expect(slotIndexAtOffset({ offsets: [], heights: [], totalHeight: 0 }, 500)).toBe(0);
+    expect(
+      slotIndexAtOffset({ offsets: [], heights: [], totalHeight: 0, baseHeight: 0 }, 500),
+    ).toBe(0);
     const zero = computePageSlots({ pageCount: 3, baseHeight: 0, stripPages: new Set() });
     expect(slotIndexAtOffset(zero, 500)).toBe(0);
   });
@@ -161,5 +165,175 @@ describe("página actual con franjas", () => {
     // en 150 daría la página 1; con la geometría real todavía es la 0.
     expect(computeCurrentPageIndexFromScroll({ scrollTop: 150, clientHeight: 0, slots })).toBe(0);
     expect(computeCurrentPageIndexFromScroll({ scrollTop: 180, clientHeight: 0, slots })).toBe(1);
+  });
+});
+
+// ─── Anclaje del scroll (ADR-190 §4, ui/Components.md §5.3) ────────────────
+
+/** Filas de 100 px (franja de 72 px en las marcadas): la aritmética se lee a ojo. */
+function layout(pageCount: number, marked: ReadonlyArray<number>, baseHeight = 100) {
+  return computePageSlots({ pageCount, baseHeight, stripPages: new Set(marked) });
+}
+
+describe("isStripOnlyChange", () => {
+  it("es verdadero cuando cambian solo las franjas", () => {
+    expect(isStripOnlyChange(layout(5, []), layout(5, [1]))).toBe(true);
+    expect(isStripOnlyChange(layout(5, [1]), layout(5, []))).toBe(true);
+  });
+
+  it("una franja que se muda de una fila a otra deja el alto total igual y sí es un cambio de franjas", () => {
+    const before = layout(6, [5]);
+    const after = layout(6, [1]);
+    expect(after.totalHeight).toBe(before.totalHeight);
+    expect(isStripOnlyChange(before, after)).toBe(true);
+  });
+
+  it("es falso sin cambio real, con otro zoom o con otro documento", () => {
+    expect(isStripOnlyChange(layout(5, [1]), layout(5, [1]))).toBe(false);
+    expect(isStripOnlyChange(layout(5, [1]), layout(5, [1], 180))).toBe(false);
+    expect(isStripOnlyChange(layout(5, [1]), layout(6, [1]))).toBe(false);
+  });
+
+  it("un cambio de zoom que suma justo 72 px a cada fila no se confunde con franjas", () => {
+    // Antes de `baseHeight` esto era indistinguible de "todas las páginas ganaron franja".
+    expect(isStripOnlyChange(layout(4, []), layout(4, [], 100 + UNREADABLE_STRIP_PX))).toBe(false);
+  });
+});
+
+describe("anchorScrollTop", () => {
+  // Filas sin marcas: [0,100) [100,200) [200,300) [300,400) [400,500) [500,600)
+  it("una franja que aparece arriba de la vista empuja el scroll el alto de la franja", () => {
+    const before = layout(6, []);
+    const after = layout(6, [1]);
+    // Arriba de la vista: fila 3 (offset 300) visible desde scrollTop 350.
+    const anchored = anchorScrollTop(before, after, 350);
+    expect(anchored).toBe(350 + UNREADABLE_STRIP_PX);
+    // La fila de arriba quedó en el mismo lugar de la vista: mismo punto de esa fila.
+    expect((after.offsets[3] ?? 0) + 50).toBe(anchored);
+  });
+
+  it("una franja que desaparece arriba de la vista tira el scroll hacia arriba", () => {
+    const before = layout(6, [1]);
+    const after = layout(6, []);
+    const anchored = anchorScrollTop(before, after, 350 + UNREADABLE_STRIP_PX);
+    expect(anchored).toBe(350);
+  });
+
+  it("un cambio en la propia fila de arriba no corrige nada", () => {
+    // scrollTop 350 está dentro de la fila 3: su franja va dentro de ella.
+    expect(anchorScrollTop(layout(6, []), layout(6, [3]), 350)).toBe(350);
+    expect(anchorScrollTop(layout(6, [3]), layout(6, []), 350 + UNREADABLE_STRIP_PX)).toBe(
+      350 + UNREADABLE_STRIP_PX,
+    );
+  });
+
+  it("un cambio debajo de la vista no corrige nada", () => {
+    expect(anchorScrollTop(layout(6, []), layout(6, [4]), 350)).toBe(350);
+    expect(anchorScrollTop(layout(6, []), layout(6, [5]), 350)).toBe(350);
+  });
+
+  it("varios cambios a la vez suman solo los que quedan arriba de la fila de arriba", () => {
+    const before = layout(8, [0]);
+    // Se apaga la 0 y se prenden la 1 y la 2 (arriba de la fila 4, que es la de
+    // arriba), la 4 (su propia fila) y la 6 (abajo). Cuentan solo las de arriba:
+    // +2 franjas −1 franja.
+    const after = layout(8, [1, 2, 4, 6]);
+    const scrollTop = (before.offsets[4] ?? 0) + 30;
+    const anchored = anchorScrollTop(before, after, scrollTop);
+    expect(anchored).toBe((after.offsets[4] ?? 0) + 30);
+    expect(anchored - scrollTop).toBe(UNREADABLE_STRIP_PX); // +2 franjas −1 franja arriba
+  });
+
+  it("con scroll en 0 no se mueve, ni siquiera si la primera página gana franja", () => {
+    expect(anchorScrollTop(layout(6, []), layout(6, [0]), 0)).toBe(0);
+    expect(anchorScrollTop(layout(6, [0]), layout(6, []), 0)).toBe(0);
+    expect(anchorScrollTop(layout(6, []), layout(6, [2, 3]), 0)).toBe(0);
+  });
+
+  it("al final del scroll, sigue anclado a la última fila y respeta el máximo", () => {
+    const before = layout(6, []); // total 600
+    const after = layout(6, [1]); // total 672
+    const clientHeight = 250;
+    const atEnd = before.totalHeight - clientHeight; // 350: la fila de arriba es la 3
+    const anchored = anchorScrollTop(before, after, atEnd, clientHeight);
+    expect(anchored).toBe(atEnd + UNREADABLE_STRIP_PX);
+    expect(anchored).toBeLessThanOrEqual(after.totalHeight - clientHeight);
+  });
+
+  it("si el contenido se achica, no pasa del nuevo máximo", () => {
+    const before = layout(6, [1, 2]); // total 744
+    const after = layout(6, []); // total 600
+    const clientHeight = 250;
+    const scrollTop = before.totalHeight - clientHeight; // 494, al final
+    const anchored = anchorScrollTop(before, after, scrollTop, clientHeight);
+    expect(anchored).toBe(after.totalHeight - clientHeight);
+  });
+
+  it("un cambio de zoom no se ancla: devuelve el scrollTop tal cual", () => {
+    expect(anchorScrollTop(layout(6, [1]), layout(6, [1], 180), 350)).toBe(350);
+    // Ni siquiera con marcas distintas a la vez: mandan los cambios de alto base.
+    expect(anchorScrollTop(layout(6, []), layout(6, [1], 180), 350)).toBe(350);
+  });
+
+  it("un documento distinto (otra cantidad de páginas) no se ancla", () => {
+    expect(anchorScrollTop(layout(6, []), layout(9, [0]), 350)).toBe(350);
+  });
+
+  it("una franja que se muda de abajo de la vista a arriba de ella mueve el scroll aunque el alto total no cambie", () => {
+    // scrollTop 350: la fila de arriba es la 3 (offset 300, 50 px adentro). La
+    // franja pasa de la fila 5 (debajo de la vista) a la 1 (arriba de ella).
+    const before = layout(6, [5]);
+    const after = layout(6, [1]);
+    expect(after.totalHeight).toBe(before.totalHeight);
+    expect(isStripOnlyChange(before, after)).toBe(true);
+
+    const anchored = anchorScrollTop(before, after, 350);
+
+    expect(anchored).toBe(422);
+    // La fila de arriba sigue 50 px adentro de la vista, como antes.
+    expect(anchored - (after.offsets[3] ?? 0)).toBe(50);
+  });
+
+  it("sin filas no hace nada", () => {
+    expect(anchorScrollTop(layout(0, []), layout(0, []), 0)).toBe(0);
+  });
+
+  it("no pelea con el salto a una página: el destino del salto se calcula con la geometría nueva", () => {
+    const before = layout(6, []);
+    const after = layout(6, [1]);
+    // Si en el mismo commit hay un salto, el salto tiene la última palabra y
+    // usa `scrollTopForPage` sobre los `slots` nuevos, no el valor anclado.
+    expect(scrollTopForPage(after, 4)).toBe(4 * 100 + UNREADABLE_STRIP_PX);
+    // Y anclar sobre el scroll que dejó un salto lo deja en la misma página.
+    const jumped = scrollTopForPage(before, 4);
+    const anchored = anchorScrollTop(before, after, jumped);
+    expect(anchored).toBe(scrollTopForPage(after, 4));
+  });
+});
+
+describe("página actual tras un cambio de franja sin corrección de scroll", () => {
+  it("una franja entre la fila de arriba y el centro puede cambiar la página actual sin mover el scroll", () => {
+    // Filas de 100: [0,100) [100,200) [200,300) [300,400)... Viewport de 300 px
+    // con scrollTop 100: la fila de arriba es la 1 y el centro (250) cae en la 2.
+    const before = layout(6, []);
+    const scrollTop = 100;
+    const clientHeight = 300;
+    expect(computeCurrentPageIndexFromScroll({ scrollTop, clientHeight, slots: before })).toBe(2);
+
+    // La página 2 gana una franja (debajo de la fila de arriba, sin corrección):
+    // la fila 2 pasa a medir 172 px, sigue conteniendo el centro.
+    const stripOnRow2 = layout(6, [2]);
+    expect(anchorScrollTop(before, stripOnRow2, scrollTop, clientHeight)).toBe(scrollTop);
+    expect(computeCurrentPageIndexFromScroll({ scrollTop, clientHeight, slots: stripOnRow2 })).toBe(
+      2,
+    );
+
+    // La página 1 (la de arriba) gana una franja: no hay corrección, pero su fila
+    // se estira a 172 px y el centro (250) cae ahora adentro de ELLA, no de la 2.
+    const stripOnRow1 = layout(6, [1]);
+    expect(anchorScrollTop(before, stripOnRow1, scrollTop, clientHeight)).toBe(scrollTop);
+    expect(computeCurrentPageIndexFromScroll({ scrollTop, clientHeight, slots: stripOnRow1 })).toBe(
+      1,
+    );
   });
 });

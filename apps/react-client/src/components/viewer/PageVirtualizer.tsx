@@ -41,10 +41,15 @@
  * buscador, que necesita el valor exacto.
  */
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { computeCurrentPageIndexFromScroll } from "./currentPageIndex.js";
-import { scrollTopForPage, type PageSlots } from "./pageSlots.js";
+import {
+  anchorScrollTop,
+  isStripOnlyChange,
+  scrollTopForPage,
+  type PageSlots,
+} from "./pageSlots.js";
 import {
   computeMountRange,
   computeVisibleRangeFromIndices,
@@ -102,6 +107,67 @@ export function PageVirtualizer({
   const lastReportedRef = useRef<VisibleRange | undefined>(undefined);
   const lastReportedPageIndexRef = useRef<number | undefined>(undefined);
 
+  // Último `scrollTop` que el usuario (o un salto) dejó, por evento de scroll.
+  // El anclaje de abajo lo necesita **de antes** del cambio de `slots`: si el
+  // contenido se achica, el navegador recorta `scrollTop` en el mismo commit y
+  // leerlo del DOM daría el valor ya recortado (el evento de scroll de ese
+  // recorte llega después del efecto).
+  const lastScrollTopRef = useRef(0);
+  const previousSlotsRef = useRef(slots);
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    lastScrollTopRef.current = container.scrollTop;
+    function trackScroll(): void {
+      if (container) lastScrollTopRef.current = container.scrollTop;
+    }
+    container.addEventListener("scroll", trackScroll);
+    return () => container.removeEventListener("scroll", trackScroll);
+  }, []);
+
+  // Anclaje del scroll (ADR-190 §4, `ui/Components.md` §5.3): si `slots` cambia
+  // porque una página ganó o perdió su franja, se corrige `scrollTop` para que
+  // la fila visible de arriba quede donde estaba. Solo ese tipo de cambio
+  // (`isStripOnlyChange`): un cambio de zoom o de documento no se ancla. Es un
+  // efecto de layout —antes de pintar— para que no haya un cuadro con el
+  // contenido corrido; va **antes** del efecto del salto explícito, así que si
+  // en el mismo commit hay un salto, el salto tiene la última palabra.
+  useLayoutEffect(() => {
+    const previous = previousSlotsRef.current;
+    previousSlotsRef.current = slots;
+    const container = containerRef.current;
+    if (!container || previous === slots || !isStripOnlyChange(previous, slots)) return;
+    const anchored = anchorScrollTop(
+      previous,
+      slots,
+      lastScrollTopRef.current,
+      container.clientHeight,
+    );
+    if (anchored !== lastScrollTopRef.current) {
+      container.scrollTop = anchored;
+      lastScrollTopRef.current = anchored;
+    }
+    // Aunque no haga falta corregir `scrollTop` (no se dispara ningún evento de
+    // scroll), una franja que aparece o desaparece entre la fila de arriba y el
+    // centro de la vista puede cambiar qué página ocupa el centro: se recalcula
+    // la página actual acá. Solo para cambios de franja: el zoom conserva su
+    // comportamiento de siempre.
+    reportCurrentPage(container);
+  }, [slots]);
+
+  // Deriva la página actual por geometría (ADR-054 §5) y la reporta solo si
+  // cambió. Lo usan el listener de scroll y el anclaje de arriba.
+  function reportCurrentPage(container: HTMLDivElement): void {
+    const pageIndex = computeCurrentPageIndexFromScroll({
+      scrollTop: container.scrollTop,
+      clientHeight: container.clientHeight,
+      slots,
+    });
+    if (lastReportedPageIndexRef.current === pageIndex) return;
+    lastReportedPageIndexRef.current = pageIndex;
+    onCurrentPageIndexChange(pageIndex);
+  }
+
   // Listener nativo de scroll: deriva la página actual por geometría
   // (ADR-054 §5). Deliberadamente sin rAF: es aritmética barata sobre un solo número, y el
   // reporte a React ya está dedupeado por `lastReportedPageIndexRef` (solo
@@ -113,15 +179,7 @@ export function PageVirtualizer({
     if (!container) return;
 
     function handleScroll(): void {
-      if (!container) return;
-      const pageIndex = computeCurrentPageIndexFromScroll({
-        scrollTop: container.scrollTop,
-        clientHeight: container.clientHeight,
-        slots,
-      });
-      if (lastReportedPageIndexRef.current === pageIndex) return;
-      lastReportedPageIndexRef.current = pageIndex;
-      onCurrentPageIndexChange(pageIndex);
+      if (container) reportCurrentPage(container);
     }
 
     container.addEventListener("scroll", handleScroll);
@@ -140,6 +198,7 @@ export function PageVirtualizer({
     const container = containerRef.current;
     if (!container) return;
     container.scrollTop = scrollTopForPage(slots, scrollRequest.pageIndex);
+    lastScrollTopRef.current = container.scrollTop;
     // Deps acotadas a propósito a `nonce`: no a `slots` (evitar re-saltar en
     // cada cambio de zoom o de franjas) ni a `scrollRequest.pageIndex` solo (el
     // `nonce` es lo que fuerza el salto cuando dos matches caen en la misma
@@ -213,7 +272,11 @@ export function PageVirtualizer({
   );
 
   return (
-    <div ref={containerRef} className="relative h-full w-full overflow-auto">
+    <div
+      ref={containerRef}
+      data-testid="page-virtualizer-scroll"
+      className="relative h-full w-full overflow-auto"
+    >
       {/*
        * `width: max(pageWidth, 100%)` en vez de dejarlo en el 100% implícito
        * de un bloque: a zoom alto `pageWidth` supera el ancho del panel, y
