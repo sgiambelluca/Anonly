@@ -4,6 +4,12 @@
 
 Dos instrumentos, un mismo arnés (`tests/e2e/support/electronApp.ts`): `pipeline-timing.spec.ts` mide tiempos (H-07, ADR-149) y `memory.spec.ts` mide memoria M1/M2 (H-10, ADR-146). `memory-attribution.spec.ts` son corridas de atribución del exceso encontrado en P2 — no forman parte de la caracterización base.
 
+## Qué corre `pnpm test:perf`
+
+**Solo `tests/perf/pipeline-timing.spec.ts`** (decisión del humano, 2026-09-29; `07_Performance_Strategy.md` §11.4). Todo lo demás de este directorio son campañas y arneses de medición que se corren **por archivo explícito** —con sus `run-*.sh` o con `pnpm exec playwright test --config=playwright.perf.config.ts <archivo>`— y no forman parte del gate. Ningún `run-*.sh` invoca `pnpm test:perf`; si uno lo hiciera, su archivo se sumaría a `pipeline-timing.spec.ts` en vez de reemplazarlo.
+
+`pipeline-timing.spec.ts` **siempre** exige que el pipeline llegue a `Ready` y que se haya medido un tiempo positivo, y reporta cada tiempo. Los umbrales (8 s nativo, 60 s escaneado y la primera fila de ADR-151 §3) se aplican **solo** con `ANONLY_PERF_ENFORCE_BUDGET=1`, antes de cada release y en el hardware de referencia; la decisión vive en `support/pipelineTiming.ts`, con test. En CI el job mide y reporta sin umbral.
+
 ## Por qué Electron y no un servidor de desarrollo
 
 `test:perf` corría antes contra `vite preview`. ADR-153 midió, intercalando corridas en la misma máquina: shell de Electron empaquetado 2258-2917 ms, `vite preview` 8625-9715 ms — un sobrecosto de ~5 s **sin causa identificada** (se descartaron compresión, MIME, aislamiento, headers de caché, `Content-Length` y tamaño de chunk). El producto no se sirve por HTTP (ADR-130): un gate de tiempos o de memoria tiene que medir el artefacto que se instala, no un servidor que ningún usuario ejecuta.
@@ -434,7 +440,7 @@ piso de memoria continúa creciendo con el largo del documento. **No es P3**:
 ADR-146 §4 reserva P3 para el ciclo de 10 open/close.
 
 El perfil queda saltado salvo que `ANONLY_MEMORY_200P=1`; por tanto,
-`pnpm test:perf` conserva su duración y alcance cotidianos. No se trata de un
+`pnpm test:perf` (solo `pipeline-timing.spec.ts`) conserva su duración y alcance cotidianos. No se trata de un
 gate omitido: este archivo es un instrumento de caracterización sin threshold.
 Su corrida explícita, después de construir ambas mitades del producto, es:
 
@@ -516,9 +522,9 @@ En ninguna de las dos hay una caída **inmediatamente** al terminar OCR, lo que 
 ### Correr
 
 ```bash
-pnpm test:perf                                    # tiempos + memoria + atribución
+pnpm test:perf                                    # el gate: SOLO pipeline-timing.spec.ts (mide; umbral con ANONLY_PERF_ENFORCE_BUDGET=1)
 npx playwright test --config=playwright.perf.config.ts tests/perf/memory.spec.ts
-npx playwright test --config=playwright.perf.config.ts --repeat-each=3   # caracterización estadística
+npx playwright test --config=playwright.perf.config.ts tests/perf/memory.spec.ts --repeat-each=3   # caracterización estadística
 ```
 
 Requiere el build de producción con el hook de medición expuesto:
@@ -546,8 +552,8 @@ Lee todo `.measure/memory-*-run*.json`, agrupa por perfil/temperatura y reporta 
 
 - Bajo la misma guarda que `__anonlyCore`: no existe fuera de `DEV`/`VITE_E2E=1`.
 - Se escribe **antes** de `openApp` (`page.addInitScript` o `page.evaluate` previo a la navegación) — se lee una sola vez en el boot, escribirlo después no tiene efecto.
-- JSON inválido, una clave fuera de `EngineConfig`, o cualquier sección que no sea un objeto descartan el valor **entero** — el boot sigue con los settings normales, nunca a medias.
-- No pasa por `SettingsSlice`: no hay helper de test-support específico todavía, se escribe con `page.evaluate(() => localStorage.setItem("anonly:engine-overrides", JSON.stringify({...})))` o un init script equivalente.
+- JSON inválido, una clave fuera de `EngineConfig` en cualquier nivel, un valor de tipo equivocado, o un mapa incompleto (`timeouts`, `maxRetries` o `maxQueuePerPool` sin todos sus job types) descartan el valor **entero**: el boot sigue con los settings normales, nunca a medias. Un override parcial de `timeouts` se ignora completo.
+- No pasa por `SettingsSlice`: el helper es `tests/perf/support/engineOverrides.ts`; también se puede escribir con `page.evaluate(() => localStorage.setItem("anonly:engine-overrides", JSON.stringify({...})))` o un init script equivalente.
 
 ## `memory-attribution.spec.ts` — de dónde sale el exceso de P2
 
@@ -702,7 +708,7 @@ actual ni un ahorro prometido.
 
 ## ADR-179 — empaquetado experimental de NER
 
-Opt-in. `ner-packaging.spec.ts` se omite en `pnpm test:perf` normal. El runner
+Opt-in. `ner-packaging.spec.ts` no forma parte de `pnpm test:perf` (que corre solo `pipeline-timing.spec.ts`) y se corre por archivo explícito. El runner
 `run-ner-packaging.sh` valida y convierte el ONNX original en un entorno Python
 aislado, construye A y B y corre primero el gate de compatibilidad/calidad
 Chromium/WASM sobre el corpus de referencia. B usa el parche temporal
