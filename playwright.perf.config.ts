@@ -1,6 +1,18 @@
 import { defineConfig } from "@playwright/test";
 
 /**
+ * **Alcance de `pnpm test:perf` (decisión del humano, 2026-09-29).** El gate es
+ * **solo** `tests/perf/pipeline-timing.spec.ts`: el script lo nombra
+ * explícitamente. El resto de `tests/perf/` son campañas y arneses de
+ * medición (decenas de specs, muchas con variables de entorno obligatorias,
+ * horas de corrida) que se corren **por archivo explícito** con sus `run-*.sh`
+ * o con `playwright test --config=playwright.perf.config.ts <archivo>`; este
+ * config sirve a las dos cosas y por eso no fija `testMatch` a un solo
+ * archivo. Ningún `run-*.sh` pasa por `pnpm test:perf`: si alguno lo hiciera,
+ * el argumento se sumaría al spec del gate en vez de reemplazarlo. El umbral
+ * de tiempo del gate solo se aplica con `ANONLY_PERF_ENFORCE_BUDGET=1`
+ * (`tests/perf/support/pipelineTiming.ts`); sin la variable mide y reporta.
+ *
  * Config del gate `pnpm test:perf` (H-07, ADR-149 §3/§4, ADR-153), separada
  * de `playwright.electron.config.ts` (E2E) por las mismas razones que
  * `playwright.measure.config.ts` está separada de la suya: `retries: 0` (un
@@ -43,7 +55,10 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   retries: 0,
-  reporter: "list",
+  // ADR-149 §1: con `PLAYWRIGHT_JSON_OUTPUT_NAME` (lo pone CI) además del listado
+  // se escribe el reporte JSON que lee `scripts/ci/assert-min-tests.mjs`. Va por
+  // variable y no por `--reporter`: `pnpm` tiene su propio `--reporter`.
+  reporter: process.env.PLAYWRIGHT_JSON_OUTPUT_NAME ? [["list"], ["json"]] : "list",
   timeout: 180_000,
   use: {
     baseURL: "app://local",

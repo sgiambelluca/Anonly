@@ -8,7 +8,10 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   retries: 0,
-  reporter: "list",
+  // ADR-149 §1: con `PLAYWRIGHT_JSON_OUTPUT_NAME` (lo pone CI) además del listado
+  // se escribe el reporte JSON que lee `scripts/ci/assert-min-tests.mjs`. Va por
+  // variable y no por `--reporter`: `pnpm` tiene su propio `--reporter`.
+  reporter: process.env.PLAYWRIGHT_JSON_OUTPUT_NAME ? [["list"], ["json"]] : "list",
   timeout: 600_000,
   use: {
     baseURL: "app://local",

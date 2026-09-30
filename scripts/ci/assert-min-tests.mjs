@@ -3,10 +3,9 @@
  * ADR-149 §1: "un gate que no ejecuta nada es rojo". Este script cierra el
  * agujero que motivó el ADR — un job de CI que sale verde con `has_tests=false`
  * cuando el directorio no existe o cuando Vitest saltea todos los tests — leyendo
- * el reporte JSON real del runner (Vitest hoy; Playwright, para perf/leak/stress,
- * queda soportado desde el día uno aunque la ronda A solo lo cablea para
- * `test:cancel` — Performance/Leak/Stress se cablean en la ronda C) y
- * comparando contra un mínimo explícito.
+ * el reporte JSON real del runner y comparando contra un mínimo explícito.
+ * Vitest lo usa `test:cancel` (ronda A); Playwright lo usan Performance, Leak y
+ * Stress (ronda C: `PLAYWRIGHT_JSON_OUTPUT_NAME` hace que su config escriba el JSON).
  *
  * Falla (`process.exitCode = 1`) si:
  *   - el archivo de reporte no existe o no es JSON válido ("inconcluso" — el
@@ -21,7 +20,7 @@
  * `--format` default `vitest`. El propio caller (el step de CI) es responsable
  * de correr el runner con el reporter JSON apuntando a `--report` ANTES de
  * invocar este script — no lo hace por sí solo, para no atarse a un comando de
- * runner particular (Vitest hoy, Playwright en la ronda C).
+ * runner particular.
  */
 import { readFile } from "node:fs/promises";
 
@@ -55,8 +54,8 @@ function countsFromVitestReport(report) {
 /**
  * Playwright `--reporter=json`: `stats.expected`/`unexpected`/`flaky` son
  * ejecutados (corrieron de verdad, hayan pasado o no); `stats.skipped` no.
- * Sin cablear a ningún job todavía (ronda C) — implementado para que el
- * script no cambie de forma cuando llegue ese cableado.
+ * Cableado a Performance, Leak y Stress. Verificado contra un reporte real de
+ * Playwright: `stats` trae `expected`, `unexpected`, `flaky` y `skipped`.
  * @param {unknown} report
  * @returns {Counts}
  */

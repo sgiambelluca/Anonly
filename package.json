@@ -29,7 +29,7 @@
     "test:coverage": "vitest run --coverage",
     "test:e2e": "cross-env VITE_E2E=1 pnpm --filter @anonly/react-client build && pnpm --filter @anonly/desktop-shell build && playwright test --config=playwright.electron.config.ts",
     "test:measure": "playwright test --config=playwright.measure.config.ts",
-    "test:perf": "cross-env VITE_E2E=1 pnpm --filter @anonly/react-client build && pnpm --filter @anonly/desktop-shell build && playwright test --config=playwright.perf.config.ts",
+    "test:perf": "cross-env VITE_E2E=1 pnpm --filter @anonly/react-client build && pnpm --filter @anonly/desktop-shell build && playwright test --config=playwright.perf.config.ts tests/perf/pipeline-timing.spec.ts",
     "test:stress": "pnpm assets:mirror && cross-env VITE_E2E=1 pnpm --filter @anonly/react-client build && pnpm --filter @anonly/desktop-shell build && playwright test --config=playwright.stress.config.ts",
     "test:leak": "pnpm assets:mirror && cross-env VITE_E2E=1 pnpm --filter @anonly/react-client build && pnpm --filter @anonly/desktop-shell build && playwright test --config=playwright.leak.config.ts",
     "test:cancel": "vitest run tests/cancel",
