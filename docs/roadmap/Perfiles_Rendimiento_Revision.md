@@ -504,3 +504,98 @@ El script tiene dependencias de macOS (`caffeinate`, `pmset`, `vm_stat`); la
 tanda de Windows del 2026-09-26 usó un puerto ad hoc sin commitear. Hay que
 portar esta fase de la misma forma, o hacerla portable, antes de correrla.
 
+### Por qué el presupuesto no frenó, y lo que eso implica (2026-09-30)
+
+Al arreglar el instrumento de reserva, el arnés estimó 33,2 MiB por página
+de P2 (595 × 842 pt a los 300 dpi configurados). Con eso, 128 MiB admiten
+tres páginas, pero se midieron cuatro y cinco reconocedores ocupados. La
+explicación está en el código, no en una medición:
+
+- El Core no reserva con el DPI configurado sino con
+  `effectiveOcrDpi = min(ocr.dpi, page.ocrDpiCap)` (`orchestrator.ts`,
+  ADR-163). El tope de la página es la resolución nativa de su única imagen
+  (`deriveOcrDpiCap`, `pdf.engine.ts`).
+- El fixture P2 se genera con `DEFAULT_SCALE = 3` (`scannedPdf.ts`), o sea a
+  216 dpi. Su reserva calculada es `1785 × 2526 × 4` = 17,2 MiB por página,
+  y 128 MiB admiten siete. **El presupuesto nunca pudo frenar a seis
+  reconocedores en P2.** Es un cálculo sobre el código y el fixture; el
+  `ocrDpiCap` efectivo no es observable desde el arnés.
+- La estimación del arnés con el DPI configurado es una **cota superior**, y
+  en P2 queda al doble del valor real. Su indicador de «la ventana excede el
+  presupuesto» no se puede leer como medición.
+- En R2 la cota por ocupación (seis ocupados con 128 MiB) da 21,3 MiB o
+  menos por página: tampoco es un escaneo A4 a 300 dpi.
+
+**Consecuencia para los perfiles, todavía sin medir.** Ninguno de los dos
+corpus ejercitó una A4 a 300 dpi, de 33,2 MiB por página. Se la toma como
+caso de referencia porque 300 dpi es una resolución habitual de escaneo,
+pero **su prevalencia entre los documentos de los usuarios es un supuesto,
+no un dato**: el único documento real medido (R2) no lo es. Con el presupuesto actual, ese documento admite **tres** páginas
+vivas. Alto (4) y Ultra (6) quedarían frenados a tres reconocedores, y Ultra
+no rendiría más que Alto ni Alto mucho más que Intermedio. Si se confirma,
+`maxLiveImageBytes` tiene que crecer con los reconocedores del perfil (del
+orden de 34 MiB por reconocedor), y ese aumento entra en el techo de memoria
+de cada perfil.
+
+**Qué hay que medir.** Un corpus sintético a 300 dpi nativos en la fase
+`ultra`, con los mismos brazos. Lo esperado por el código es ocupación 2, 3,
+3 y 6 en `2`, `4`, `6` y `6b`. Si la medición da otra cosa, hay algo del
+presupuesto que no se entendió. Sigue sin explicación por qué P2 llegó a
+cinco y no a seis reconocedores ocupados, sin que el presupuesto lo frene.
+
+### Resultado del corpus a 300 dpi en la Mac (2026-10-01)
+
+Fase `ultra` con `ANONLY_OCR_POOL_ULTRA_HIDPI=1`, salida neutral
+`.measure/ocr-pool/ultra-hidpi-20261001-mac/summary.json`. Misma Mac, sobre
+`b936342` más el arnés de esta fase, sin cambios de producto. Corpus P2 y
+`P2H`; R2 no entró en esta tanda. `P2H` son las primeras 20 páginas de P2
+rasterizadas a 300 dpi nativos (33,2 MiB de reserva por página). Las 56
+corridas fueron válidas, con huellas idénticas a las del brazo `2` de cada
+corpus y cancelaciones de 0–1 ms.
+
+| corpus | brazo | presupuesto | `Ready` (mediana) | OCR (mediana) | ocupación pico (mín–máx de las corridas) |
+|---|---|---:|---:|---:|---:|
+| P2H | `2` | 128 MiB | 15,50 s | 11,99 s | 2–2 |
+| P2H | `4` | 128 MiB | 14,39 s | 10,93 s | 3–3 |
+| P2H | `6` | 128 MiB | 14,78 s | 11,26 s | 3–3 |
+| P2H | `6b` | 200 MiB | 12,64 s | 9,24 s | 6–6 |
+| P2 | `2` | 128 MiB | 17,85 s | 12,10 s | 2–2 |
+| P2 | `4` | 128 MiB | 17,31 s | 11,66 s | 4–4 |
+| P2 | `6` | 128 MiB | 17,32 s | 11,53 s | 5–5 |
+| P2 | `6b` | 200 MiB | 17,03 s | 11,43 s | 5–5 |
+
+- **El presupuesto frena a Alto y a Ultra en un escaneo a 300 dpi.** Con
+  128 MiB, `4` y `6` quedaron en tres reconocedores ocupados en todas las
+  corridas, y no se distinguen entre sí: 14,39 y 14,78 s de `Ready`, con
+  rangos de 0,2 s. La ocupación coincide con lo que predice el código (2, 3,
+  3 y 6).
+- **Subir el presupuesto destraba a Ultra.** `6b` llegó a seis ocupados y
+  bajó `Ready` 18,4 % y el OCR 22,9 % contra `2`; contra `6` con 128 MiB,
+  `Ready` bajó 14,5 %. Las tres rondas de `6b` quedaron por debajo de todas
+  las de los otros brazos.
+- **Alto con su presupuesto no se midió.** No hubo un brazo de cuatro
+  reconocedores con presupuesto para cuatro páginas (~136 MiB). Lo medido
+  para `4` es Alto frenado a tres.
+- **P2 repite la tanda anterior:** casi plano, con cinco de seis ocupados y
+  la estimación a 300 dpi contradicha por la ocupación en `4` y `6`, como
+  corresponde a un fixture de 216 dpi.
+- **Memoria: no usar.** La Mac terminó con 2,3 GB de swap en uso. Los picos
+  de RSS de P2H (2088, 2179, 2319 y 2134 MiB) no ordenan los brazos y no
+  sirven para fijar techos.
+
+**Lo que queda establecido para los perfiles.** El presupuesto de imágenes
+vivas tiene que acompañar a la cantidad de reconocedores: con el valor único
+de hoy, Alto y Ultra rinden como tres reconocedores en un escaneo A4 a
+300 dpi. Con qué frecuencia aparece ese documento no está medido. Cuánto presupuesto lleva cada perfil, y cuánta memoria cuesta, se
+decide con la tanda de Windows, que además tiene que incluir un brazo de
+Alto con presupuesto para cuatro páginas.
+
+**Brazo `4b` (2026-10-01).** La fase `ultra` ganó un quinto brazo, `4b`:
+cuatro reconocedores con 136 MiB, que alcanzan para cuatro A4 a 300 dpi. En
+un humo de una corrida sobre P2H llegó a cuatro ocupados, contra tres del
+brazo `4` con 128 MiB. Es una sola corrida: no hay comparación de tiempos
+todavía. Las dos tandas de la Mac son anteriores a este brazo. Sus `summary.json` en
+disco no se regeneraron y siguen diciendo `complete: true`; regenerados con
+el agregador actual, lo declaran faltante (`missingArms: ["4b"]`). La tanda de Windows
+mide los cinco brazos.
+
