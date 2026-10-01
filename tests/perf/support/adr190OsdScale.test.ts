@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -22,9 +25,16 @@ describe("ADR190 OSD scale probe", () => {
     expect(scaledOsdDimensions(2480, 3507, historical)).toEqual({ widthPx: 1240, heightPx: 1754 });
   });
 
-  it("resolves the Tesseract browser API from the exact built orientation-kernel import", async () => {
-    const bundle = await discoverTesseractBrowserBundle();
-    expect(bundle.modulePath).toMatch(/^\/assets\/tesseract-paths-.+\.js$/);
-    expect(bundle.namespaceExport).toBe(bundle.oemExport);
-  });
+  // Lee el bundle ya construido del renderer: sin ese build (el job de tests
+  // unitarios de CI no lo hace) no hay nada que inspeccionar.
+  const rendererBuilt = existsSync(resolve("apps/react-client/dist/assets"));
+
+  it.skipIf(!rendererBuilt)(
+    "resolves the Tesseract browser API from the exact built orientation-kernel import",
+    async () => {
+      const bundle = await discoverTesseractBrowserBundle();
+      expect(bundle.modulePath).toMatch(/^\/assets\/tesseract-paths-.+\.js$/);
+      expect(bundle.namespaceExport).toBe(bundle.oemExport);
+    },
+  );
 });

@@ -1,5 +1,7 @@
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 
+import { chromium } from "@playwright/test";
 import { PDFDocument } from "pdf-lib";
 import { describe, expect, it } from "vitest";
 
@@ -63,13 +65,20 @@ describe("heavy PDF fixture harness", () => {
     600_000,
   );
 
-  it("rechaza un PDF en blanco como negativo artificial de fidelidad", async () => {
-    const blank = await PDFDocument.create();
-    blank.addPage([595, 842]);
-    const bytes = await blank.save();
-    const result = await validateExportPdf(bytes, bytes, 6, "H1");
-    expect(result.valid).toBe(false);
-    expect(result.failures).toContain("page-count:1/6");
-    expect(result.failures).toContain("page-1:source-marker-missing");
-  });
+  // `validateExportPdf` rasteriza en Chromium: sin los navegadores de
+  // Playwright instalados (el job de tests unitarios de CI) no puede correr.
+  const chromiumInstalled = existsSync(chromium.executablePath());
+
+  it.skipIf(!chromiumInstalled)(
+    "rechaza un PDF en blanco como negativo artificial de fidelidad",
+    async () => {
+      const blank = await PDFDocument.create();
+      blank.addPage([595, 842]);
+      const bytes = await blank.save();
+      const result = await validateExportPdf(bytes, bytes, 6, "H1");
+      expect(result.valid).toBe(false);
+      expect(result.failures).toContain("page-count:1/6");
+      expect(result.failures).toContain("page-1:source-marker-missing");
+    },
+  );
 });

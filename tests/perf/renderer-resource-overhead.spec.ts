@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
@@ -15,7 +15,7 @@ const execFileAsync = promisify(execFile);
 const SESSION_ID = `${new Date()
   .toISOString()
   .replaceAll(/[^0-9]/g, "")
-  .slice(0, 14)}-${Math.random().toString(16).slice(2, 10)}`;
+  .slice(0, 14)}-${randomUUID().slice(0, 8)}`;
 const OUT_DIR = resolve(process.cwd(), ".measure/renderer-resource-overhead", SESSION_ID);
 const NATIVE_INTERVAL_MS = 1_000;
 
