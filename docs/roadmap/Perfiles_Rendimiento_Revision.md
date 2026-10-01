@@ -705,3 +705,66 @@ baje el RSS.
   ahora) ni el mismo commit, así que la diferencia no se puede atribuir al
   producto ni al instrumento sin medir los dos commits en la misma sesión.
 
+### Lectura del `summary.json` de Windows (2026-10-01)
+
+El humano trajo el `summary.json` de la tanda de Windows. No contiene rutas
+ni nombres de archivo. Trae los valores por corrida, que el reporte de
+medianas no tenía. Cabecera: `complete: true`, sin corridas inválidas ni
+faltantes, sin brazos faltantes, `sleepDetection.available: true`, sin
+salvedades, huellas idénticas al brazo `2` en los 12 brazos comparados.
+
+**Pico de RSS durante el OCR, por corrida (MiB):**
+
+| corpus | brazo | ocupación | corridas | mediana | máximo |
+|---|---|---:|---|---:|---:|
+| P2H | `2` | 2 | 2760 / 3011 / 2928 | 2928 | 3011 |
+| P2H | `4` | 3 | 3177 / 3110 / 3045 | 3110 | 3177 |
+| P2H | `6` | 3 | 3302 / 3015 / 3032 | 3032 | 3302 |
+| P2H | `4b` | 4 | 3682 / 3917 / 3630 | 3682 | 3917 |
+| P2H | `6b` | 6 | 3945 / 4205 / 4139 | 4139 | 4205 |
+| R2 | `2` | 2 | 1664 / 1727 / 1787 | 1727 | 1787 |
+| R2 | `4` | 4 | 2270 / 2225 / 2248 | 2248 | 2270 |
+| R2 | `4b` | 4 | 2260 / 2244 / 2223 | 2244 | 2260 |
+| R2 | `6` | 6 | 2593 / 2655 / 2643 | 2643 | 2655 |
+| R2 | `6b` | 6 | 2567 / 2573 / 2646 | 2573 | 2646 |
+| P2 | `2` | 2 | 2217 / 2304 / 2071 | 2217 | 2304 |
+| P2 | `4` | 4 | 2903 / 2566 / 2604 | 2604 | 2903 |
+| P2 | `4b` | 4 | 2713 / 2616 / 2594 | 2616 | 2713 |
+| P2 | `6` | 5 | 2611 / 2946 / 2947 | 2946 | 2947 |
+| P2 | `6b` | 5 | 2777 / 2787 / 2901 | 2787 | 2901 |
+
+Conclusiones, todas para este equipo y estos tres documentos:
+
+1. **Los máximos a 300 dpi son 3011, 3917 y 4205 MiB** para dos, cuatro y
+   seis reconocedores ocupados: 3,16, 4,11 y 4,41 GB decimales. La
+   dispersión dentro de un brazo llega a unos 340 MiB (P2 `4`: 2566 a 2903),
+   del orden del ruido de M2 que midió ADR-146 §7.
+2. **La memoria sigue a las páginas en proceso, no al tamaño del pool.** En
+   P2H con 128 MiB, `4` y `6` tienen tres reconocedores ocupados y dan 3110
+   y 3032 MiB: lo mismo, aunque uno tenga cuatro reconocedores y el otro
+   seis. Un reconocedor que espera presupuesto casi no cuesta.
+3. **A la misma ocupación, 300 dpi cuesta mucho más que 216 dpi.** Con dos
+   ocupados, P2H da 2928 MiB y P2 2217 (+711). Con cuatro, 3682 y 2616
+   (+1066). Es mucho más que la diferencia del ráster RGBA de la página
+   (33,2 contra 17,2 MiB): el costo por página en proceso incluye lo que
+   Tesseract y el rasterizado arman alrededor de esa imagen, y eso crece
+   con los píxeles. Los dos corpus difieren además en cantidad de páginas
+   (20 y 50), así que la cifra no es un costo por dpi limpio.
+4. **R2 no es un escaneo a 300 dpi.** Llegó a seis ocupados con 128 MiB, o
+   sea 21,3 MiB o menos por página, contra los 33,2 de la estimación a 300
+   dpi. Con esa cota, su resolución nativa es de unos 240 dpi o menos. Es
+   una inferencia de la ocupación.
+5. **Los tiempos separan bien los brazos.** En R2, las tres corridas de `6`
+   (27,3 a 28,0 s) quedan por debajo de las tres de `4` (31,6 a 32,5 s), y
+   estas por debajo de las de `2` (43,3 a 43,8 s). En P2H pasa lo mismo con
+   `2`, `4b` y `6b`. P2 es casi plano y tiene dos corridas lentas sueltas
+   (21,3 y 20,4 s).
+6. **`4` y `4b` no se distinguen en R2 ni en P2**, ni `6` y `6b`: donde el
+   presupuesto no frena, subirlo no cambia nada.
+
+**Decisión del humano (2026-10-01): no se fijan techos por perfil
+todavía.** La conclusión 3 dice que la palanca de memoria es la resolución
+del OCR. Primero se mide si el OCR puede leer a 250 o 200 dpi sin perder
+detecciones (`OCR_DPI_Descendente_Campana_Plan.md`); los techos se deciden
+con ese resultado.
+
