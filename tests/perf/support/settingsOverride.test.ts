@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { baseSettings, isMeasurementSuite } from "./settingsOverride.js";
+import { baseSettings, isMeasurementSuite } from "../../e2e/support/settingsOverride.js";
 
 describe("settingsOverride: perfil fijo de las suites de medición (ADR-194 §8)", () => {
   it.each([
