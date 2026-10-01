@@ -389,12 +389,16 @@ usa `grep -E`, así que una repetición puede invalidar corridas que antes pasab
 Una instancia fría por corrida,
 mismo build, serial, y solo macOS como el resto del runner.
 
-Brazos: `2` (control), `4`, `6` con `ocr.maxLiveImageBytes` de 128 MiB y `6b`
-(seis reconocedores con 200 MiB, vía `installEngineOverrides`). El spec verifica
-que el tamaño de pool configurado y el presupuesto pedidos sean los efectivos
-en cada brazo. El pico de reconocedores ocupados se afirma en `2` y `4`; en `6`
-y `6b` solo se registra (`effectiveBusyRecognizersPeak`), porque el presupuesto
-de imágenes vivas puede frenar al quinto y al sexto y eso es lo que se mide.
+Brazos: `2` (control), `4` y `6` con `ocr.maxLiveImageBytes` de 128 MiB; `4b`
+(cuatro reconocedores con 136 MiB: cuatro A4 a 300 dpi de 33,2 MiB) y `6b`
+(seis con 200 MiB), vía `installEngineOverrides`. El spec verifica que el tamaño
+de pool configurado y el presupuesto pedidos sean los efectivos en cada brazo. El
+pico de reconocedores ocupados se afirma solo en `2` y `4`; en `4b`, `6` y `6b`
+se registra (`effectiveBusyRecognizersPeak`) y no se afirma, porque el
+presupuesto de imágenes vivas puede frenar a los últimos y eso es lo que se mide.
+Una tanda anterior a `4b` (con cuatro brazos) no se da por completa: `summary.json`
+lista el brazo en `missingArms`, sus siete corridas por corpus en `missingRuns`,
+y `complete` queda en `false`.
 
 Corpus: P2 siempre. R2 solo si `ANONLY_REAL_DOC_R2` es una ruta absoluta
 legible; si no, la fase corre solo P2, lo deja dicho en `campaign.log` y en
@@ -411,8 +415,8 @@ ANONLY_OCR_POOL_PHASE=ultra ANONLY_REAL_DOC_R2=/ruta/neutral/R2.pdf \
 
 Por corpus:
 
-- **Tiempo:** tres rondas intercaladas sin sonda, órdenes `2 4 6 6b`,
-  `6b 6 4 2` y `4 6b 2 6`.
+- **Tiempo:** tres rondas intercaladas sin sonda, órdenes `2 4 4b 6 6b`,
+  `6b 6 4b 4 2` y `4b 6b 2 6 4`.
 - **Memoria:** tres instancias frías por brazo (mismos órdenes) con el RSS
   natural del árbol cada 150 ms, sin CDP ni barrera. Reusa la fase `pool-rss`
   del spec (la de `run-ocr-memory.sh`); el pico es el de la ventana OCR.
@@ -437,11 +441,178 @@ cancelación, y las corridas faltantes o inválidas. Sale con código distinto d
 cero si no está completo.
 
 `ANONLY_OCR_POOL_ULTRA_SMOKE=1` hace solo una corrida de tiempo por brazo sobre
-P2, sin resumen; `=2` agrega una de memoria y una de cancelación del brazo `6b`.
+P2, sin resumen; `=2` agrega una de memoria y una de cancelación del brazo `6b`. Con cinco brazos, una
+ronda de tiempo por corpus son cinco corridas.
 Sirve para comprobar que cada brazo arranca y aplica su override antes de gastar
 la campaña. Como en las demás fases, el producto en `packages/` y `apps/` debe
 estar sin cambios sin commitear. Los números de macOS M1 de 8 GB para seis
 reconocedores son informativos; el banco que decide es Windows nativo.
+
+#### `ultra` en Windows nativo (Git Bash)
+
+La fase `ultra` corre también en Windows nativo, desde Git Bash y sin WSL. Las
+demás fases siguen solo en macOS y abortan con un mensaje claro si se las
+invoca en Windows; cualquier otra plataforma aborta. Las funciones por
+plataforma viven en `support/ocr-pool-platform.sh` (cargada con `source`).
+
+Primer paso en una máquina nueva, antes de la tanda completa (una corrida de
+tiempo por brazo sobre P2, unos minutos):
+
+```bash
+pnpm install && pnpm assets:mirror
+ANONLY_OCR_POOL_PHASE=ultra ANONLY_OCR_POOL_ULTRA_SMOKE=1 ./tests/perf/run-ocr-pool.sh
+```
+
+Tanda completa con R2 (las comillas simples conservan las barras; sirve también
+`/c/ruta/R2.pdf`):
+
+```bash
+ANONLY_OCR_POOL_PHASE=ultra ANONLY_REAL_DOC_R2='C:\ruta\neutra\R2.pdf' ./tests/perf/run-ocr-pool.sh
+```
+
+Principio: ningún chequeo informa «activo» o «sin novedad» sin una señal positiva
+(el defecto de `rg` fue justo un instrumento que no medía y no avisaba). Cuando
+una guarda no se puede confirmar, el runner la deja como salvedad
+(`caveats.json`, `sleep-detection.json`) y el resumen la lista en
+`validityCaveats`; `complete` no cambia, pero hay que leerlas.
+
+Qué cambia respecto de macOS:
+
+- **Presión del sistema:** `system-pressure.txt` lleva un snapshot de memoria
+  (física total y libre, memoria virtual y uso del archivo de paginación) vía
+  `Get-CimInstance`.
+- **Detección de suspensión:** digest de los últimos eventos
+  `Microsoft-Windows-Kernel-Power` (ids 42 y 107, y 506 y 507 de Modern Standby) y
+  `Microsoft-Windows-Power-Troubleshooter` (id 1) del log System. El script de
+  PowerShell termina con una línea `QUERY_OK`; sin ella, o con cualquier error
+  (permisos, log no disponible), la consulta cuenta como fallo, no como «sin
+  suspensión». «Sin eventos» da un digest constante.
+- **`sleepDetection` en el resumen, igual en las dos plataformas:**
+  `available: true` (la consulta funcionó al arrancar y en cada corrida),
+  `available: false` (falló en algún momento; las corridas desde ahí no tienen
+  detección y queda la salvedad `sleep-detection-unavailable`) o `available: null`
+  (tanda anterior al campo, sin `sleep-detection.json`; salvedad
+  `sleep-detection-unknown`). Un `false` previo no se pisa con `APPEND=1`.
+  En macOS un log de `pmset` sin eventos es normal; un `pmset` que falla o no
+  devuelve nada es un fallo.
+- **Procesos concurrentes:** en lugar de `pgrep`, se consulta la línea de comandos
+  de los procesos con `Get-CimInstance Win32_Process`: solo cuentan los de Playwright
+  (`playwright test --config`, `cli.js test --config`) o `vitest run|watch` que
+  mencionan este repo, así que la extensión de Vitest de un IDE abierto sobre otro
+  proyecto no cuenta. Si el IDE tiene este repo con tests en curso, cerralo. Si
+  no se puede consultar (o la salida no es un número), queda la salvedad
+  `concurrent-process-guard-unavailable-*` y la tanda sigue sin esa guarda.
+- **Suspensión del equipo:** el script lanza un `powershell` de fondo con
+  `SetThreadExecutionState([uint32]2147483649)` (`ES_CONTINUOUS | ES_SYSTEM_REQUIRED`)
+  y lo mata al terminar (vence solo a las 24 h). Se considera activa solo si el
+  script escribe un marcador después de que la API devuelva distinto de cero; que
+  el proceso siga vivo no cuenta. Sin marcador queda la salvedad
+  `sleep-prevention-unavailable`. Tampoco cubre el cierre de tapa ni el botón de
+  encendido: en el plan de energía, poné «Suspender» en «Nunca» (con corriente) y la
+  tapa en «No hacer nada».
+- **Rutas:** `ANONLY_REAL_DOC_R1`/`R2` aceptan `C:\...`, `C:/...` o `/c/...`.
+  Se exportan en forma nativa (`C:/...`) porque Node no lee `/c/...`. La ruta no se
+  escribe en ningún log ni JSON (los mensajes de error de PowerShell se redactan).
+- **Hashes y utilidades:** `sha256sum` si está; si no, `shasum`. `find` y `sort` se
+  fijan a `/usr/bin` (System32 puede ir antes en el `PATH`), y el runner aborta si
+  el digest de un directorio con archivos sale igual al de la entrada vacía.
+- **Tests del script:** `ocrPoolPlatform.test.ts` usa stubs POSIX (`powershell.exe`
+  falso con shebang, `pmset`, `cygpath`) y se **saltea en Windows** con un motivo
+  escrito: ahí los stubs no se ejecutan por shebang, `bash` puede resolver a
+  `System32\bash.exe` (WSL) y el caso «sin `powershell.exe`» encontraría el real.
+  El camino real de Windows se valida con el humo, no con ese test.
+
+**Qué mirar en la primera corrida en Windows** (humo, antes de la tanda):
+
+1. `campaign.log`: que no aparezcan «detección de suspensión no disponible»,
+   «salvedad registrada» ni errores de PowerShell, y que diga «Prevención de
+   suspensión activa (confirmada por el marcador...)».
+2. `sleep-detection.json` con `available: true`, y `caveats.json` ausente. Si hay
+   salvedades, la causa de PowerShell quedó en el log: la política de ejecución
+   (`-ExecutionPolicy Bypass` puede estar bloqueada por política de grupo) y los
+   permisos del log System son los sospechosos.
+3. Que `Get-WinEvent` con «sin eventos» (máquina que nunca suspendió) devuelva
+   `QUERY_OK` y no un error: es el caso más fácil de que falle sin querer.
+4. `system-pressure.txt` con los snapshots antes y después de cada corrida.
+5. Que el humo llegue a `Ready` en los cinco brazos (el humo no genera `summary.json`;
+   la detección se mira en `sleep-detection.json`).
+6. Que el aviso de digest vacío no aparezca (si aparece, `find`/`sort` no son los
+   de MSYS).
+7. Sin `caffeinate`: no dejar que el equipo duerma ni cerrar la tapa; no abrir un
+   IDE con tests de este repo corriendo.
+
+Comprobaciones de señal positiva, opcionales pero recomendadas (confirman que las
+guardas funcionan, no solo que no fallan):
+
+8. **Sin `powershell.exe` colgado:** al terminar la corrida, `tasklist | grep -i powershell`
+   no debe mostrar el de la prevención de suspensión. Si queda uno vivo, la limpieza
+   falló y el equipo seguiría sin dormir. En el medio de la campaña tampoco debe
+   morir: si pasa, el resumen trae la salvedad `sleep-prevention-lost`.
+9. **La guarda de procesos aborta de verdad:** lanzá a propósito un `vitest` del
+   repo (`pnpm exec vitest watch`) antes del humo; el script tiene que cortar con
+   «hay otro Vitest activo». Si sigue de largo, la regex no coincide con la línea de
+   comandos real de esa máquina.
+10. **La detección invalida de verdad:** suspendé el equipo a propósito durante una
+    corrida de humo; esa corrida tiene que quedar en `validity.json` con
+    `sleep-wake-event-during-run`. Es la única forma de confirmar que los ids de
+    evento (42, 107, 506, 507, y 1) son los de esa máquina.
+
+Al final, el log de campaña y la salida del resumen repiten una línea como
+`complete=true salvedades=1 [sleep-detection-unavailable]`: `complete` conserva su
+significado (corridas completas, huellas idénticas) y las salvedades se leen al
+lado, con su cantidad y sus códigos.
+
+#### Reserva por página
+
+El JSON de cada corrida lleva `pageRgbaEstimates` (ancho y alto en puntos de
+`getPageSize`, leídos en `OCR_STARTED`, cuando el documento ya está registrado
+en el Orchestrator) y la ventana pico con el DPI configurado.
+**Es una cota superior estimada con el DPI configurado, no la reserva real**
+(`reservationEstimateBasis`): el Core reserva con el DPI efectivo por página,
+`min(ocr.dpi, page.ocrDpiCap)` (ADR-163: el tope sale de la resolución nativa de
+la imagen y solo puede bajarlo), y por región cuando hay `ocrRegions`. Ninguno de
+los dos es observable desde el arnés. En P2, generado a 216 dpi, la estimación a
+300 dpi (33,2 MiB) es el doble de la reserva real (17,2 MiB). Por eso el indicador
+de la ventana se llama `estimatedWindowExceedsBudgetAtConfiguredDpiUpperBound`:
+no mide espera ni exceso reales. Si `getPageSize` falla, el motivo queda en
+`reservationEstimateErrors` y los valores quedan en `null`, no en cero.
+
+Lo que sí sale de lo observado:
+
+- `impliedMaxReservationBytesPerPage = floor(maxLiveImageBytes / busyRecognizersPeak)`:
+  si hubo N ocupados a la vez con ese presupuesto, cada reserva real fue como
+  mucho ese valor.
+- `estimateContradictedByOccupancy`: `true` cuando las N páginas más chicas,
+  estimadas con el DPI configurado, suman más que el presupuesto. Entonces la
+  estimación es demostrablemente una sobreestimación. `false` no la confirma.
+
+El resumen de `ultra` agrega, por corpus, `reservation` (reserva estimada por
+página mínima, mediana y máxima, y cuántas páginas de ese tamaño admiten 128 y
+200 MiB) y, por brazo, `occupancy.impliedMaxReservationBytesPerPage`
+(con el pico máximo de ocupados del brazo) y `occupancy.estimateContradictedByOccupancy`.
+
+#### Corpus `P2H`: 300 dpi nativos (opt-in)
+
+`ANONLY_OCR_POOL_ULTRA_HIDPI=1` agrega el corpus `P2H` a la fase `ultra`: las
+primeras 20 páginas del texto de P2 rasterizadas con `scale = 300 / 72`
+(A4 a 300 dpi, 33,2 MiB por página: 128 MiB admiten tres y 200 MiB admiten seis).
+Es el caso típico de un escáner, que ni P2 (216 dpi) ni R2 ejercitan. Son 20
+páginas para acotar la duración y porque alcanzan para más de tres tandas de
+seis reconocedores. El PDF se cachea en `.measure/fixtures/`; la escala y la
+cantidad de páginas forman parte del hash de la clave.
+
+Mismos brazos (`2`, `4`, `4b`, `6`, `6b`), mismas tres rondas de tiempo, memoria y
+cancelación, y huellas comparadas contra el brazo `2` del mismo corpus. **El spec
+no afirma ninguna ocupación para `P2H`**: por el código se espera 2, 3, 3 y 6,
+pero eso es lo que se mide; queda registrado en `effectiveBusyRecognizersPeak`.
+El humo (`ANONLY_OCR_POOL_ULTRA_SMOKE=1`) lo incluye si la variable está puesta.
+
+```bash
+# macOS
+ANONLY_OCR_POOL_PHASE=ultra ANONLY_OCR_POOL_ULTRA_HIDPI=1 caffeinate -dimsu ./tests/perf/run-ocr-pool.sh
+# Windows (Git Bash), con R2 además
+ANONLY_OCR_POOL_PHASE=ultra ANONLY_OCR_POOL_ULTRA_HIDPI=1 ANONLY_REAL_DOC_R2='C:\ruta\neutra\R2.pdf' ./tests/perf/run-ocr-pool.sh
+```
 
 ## Campaña opt-in Regex y Grouping: peores casos
 

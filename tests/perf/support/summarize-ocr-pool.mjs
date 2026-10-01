@@ -32,6 +32,25 @@ function readRun(kind, arm, profile, round) {
 }
 
 if (process.env.ANONLY_OCR_POOL_PHASE === "ultra") {
+  // El agregador de ultra es TypeScript: la fase se invoca con tsx; las demás siguen con node.
+  const { createUltraReader, summarizeUltra, ultraResultLine, validityCaveatsOf } =
+    await import("./ocrPoolUltraSummary.ts");
+  const readOptional = (name) => {
+    const file = join(outputDir, name);
+    return existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : undefined;
+  };
+  if (process.env.ANONLY_OCR_POOL_ULTRA_LINE_ONLY === "1") {
+    // Humo: no hay corridas que agregar, pero las salvedades se tienen que ver igual.
+    const sleep = readOptional("sleep-detection.json") ?? {
+      available: null,
+      note: "tanda anterior al campo: no se sabe si la detección de suspensión estuvo activa",
+    };
+    writeSync(
+      1,
+      `${ultraResultLine({ complete: null, validityCaveats: validityCaveatsOf(sleep, readOptional("caveats.json")?.items ?? []) })}\n`,
+    );
+    process.exit(0);
+  }
   const corpusFile = join(outputDir, "ultra-corpus.json");
   if (!existsSync(corpusFile)) throw new Error("Falta ultra-corpus.json en la carpeta de salida.");
   const affectedRunIds = new Set();
@@ -43,11 +62,17 @@ if (process.env.ANONLY_OCR_POOL_PHASE === "ultra") {
       Object.assign(reasonsByRunId, JSON.parse(readFileSync(file, "utf8")).reasonsByRunId ?? {});
     }
   }
-  // El agregador de ultra es TypeScript: la fase se invoca con tsx; las demás siguen con node.
-  const { createUltraReader, summarizeUltra } = await import("./ocrPoolUltraSummary.ts");
   const ultra = summarizeUltra({
     corpus: JSON.parse(readFileSync(corpusFile, "utf8")),
     validity: { affectedRunIds: [...affectedRunIds], reasonsByRunId },
+    ...(existsSync(join(outputDir, "sleep-detection.json"))
+      ? {
+          sleepDetection: JSON.parse(readFileSync(join(outputDir, "sleep-detection.json"), "utf8")),
+        }
+      : {}),
+    caveats: existsSync(join(outputDir, "caveats.json"))
+      ? (JSON.parse(readFileSync(join(outputDir, "caveats.json"), "utf8")).items ?? [])
+      : [],
     readRun: createUltraReader(
       sources.map((dir) => ({
         name: dir,
@@ -66,7 +91,7 @@ if (process.env.ANONLY_OCR_POOL_PHASE === "ultra") {
   );
   writeSync(
     1,
-    `${JSON.stringify({ summaryPath: ultraOutput, complete: ultra.complete, r2Present: ultra.corpus.r2Present, missingRuns: ultra.missingRuns.length, invalidRuns: ultra.invalidRuns.length, qualityExactAcrossArms: ultra.qualityExactAcrossArms }, null, 2)}\n`,
+    `${JSON.stringify({ summaryPath: ultraOutput, complete: ultra.complete, r2Present: ultra.corpus.r2Present, missingRuns: ultra.missingRuns.length, invalidRuns: ultra.invalidRuns.length, qualityExactAcrossArms: ultra.qualityExactAcrossArms, validityCaveats: ultra.validityCaveats }, null, 2)}\n${ultraResultLine(ultra)}\n`,
   );
   // Salida síncrona: el resto del archivo es el agregador histórico y no debe pisar este resumen.
   process.exit(ultra.complete ? 0 : 1);

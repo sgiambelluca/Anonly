@@ -3,6 +3,15 @@ import { describe, expect, it } from "vitest";
 import { assertsFullOccupancy, parseArmLabel } from "./ocrPoolArms.js";
 
 describe("parseArmLabel", () => {
+  it("el brazo 4b pide cuatro reconocedores con 136 MiB (cuatro A4 a 300 dpi)", () => {
+    expect(parseArmLabel("4b")).toEqual({
+      label: "4b",
+      poolSize: 4,
+      maxLiveImageBytes: 136 * 1024 * 1024,
+    });
+    expect((136 * 1024 * 1024) / (2481 * 3508 * 4)).toBeGreaterThanOrEqual(4);
+  });
+
   it("el brazo 6b pide seis reconocedores con 200 MiB", () => {
     expect(parseArmLabel("6b")).toEqual({
       label: "6b",
@@ -25,11 +34,11 @@ describe("parseArmLabel", () => {
 });
 
 describe("assertsFullOccupancy", () => {
-  it("afirma ocupación completa hasta 4 y solo registra en 6 y 6b", () => {
-    const asserted = ["1", "2", "3", "4", "6", "6b"].map((label) => {
+  it("afirma ocupación completa hasta 4 con 128 MiB y solo registra en 4b, 6 y 6b", () => {
+    const asserted = ["1", "2", "3", "4", "4b", "6", "6b"].map((label) => {
       const arm = parseArmLabel(label);
       return arm !== undefined && assertsFullOccupancy(arm);
     });
-    expect(asserted).toEqual([true, true, true, true, false, false]);
+    expect(asserted).toEqual([true, true, true, true, false, false, false]);
   });
 });

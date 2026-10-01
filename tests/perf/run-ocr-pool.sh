@@ -5,6 +5,9 @@ export LC_ALL=C LANG=C
 # Sequential OCR LSTM pool campaign plus opt-in profile-gap and ultra (6 recognizers) phases.
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT_DIR"
+# shellcheck source=support/ocr-pool-platform.sh
+source "$ROOT_DIR/tests/perf/support/ocr-pool-platform.sh"
+PLATFORM="$(detect_platform)"
 
 RUN_DIR="${ANONLY_OCR_POOL_OUTPUT_DIR:-.measure/ocr-pool/$(date -u +%Y%m%dT%H%M%SZ)}"
 PHASE="${ANONLY_OCR_POOL_PHASE:-all}"
@@ -26,16 +29,13 @@ case "$PHASE" in all|r2-time|memory-cancel|profiles-gap|ultra) ;; *) echo "Fase 
 
 log() { echo "[$(date -u +%H:%M:%S)] $*" | tee -a "$RUN_DIR/campaign.log"; }
 fail() { log "ABORTA: $*"; exit 1; }
-sha() { LC_ALL=C shasum -a 256 "$@" 2>/dev/null | awk '{print $1}'; }
-digest_dir() {
-  (cd "$1" && find . -type f | LC_ALL=C sort | while IFS= read -r file; do sha "$file"; done) | sha
-}
 capture_pressure() {
   local label="$1"
+  if [[ "$PLATFORM" == "windows" ]]; then
+    { echo "=== $label $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="; capture_pressure_windows || echo "snapshot de memoria no disponible"; } >>"$RUN_DIR/system-pressure.txt" 2>&1
+    return 0
+  fi
   { echo "=== $label $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="; pmset -g batt; pmset -g assertions | grep -E 'PreventSystemSleep|PreventUserIdleSystemSleep' || true; vm_stat; sysctl vm.swapusage; } >>"$RUN_DIR/system-pressure.txt" 2>&1
-}
-sleep_wake_digest() {
-  pmset -g log 2>/dev/null | grep -E 'Entering Sleep state|Wake from' | tail -n 10 | shasum -a 256 | awk '{print $1}'
 }
 record_invalid_run() {
   local run_id="$1" reason="$2"
@@ -76,15 +76,49 @@ cleanup() {
   fi
   if [[ "$REMOVE_CLIENT_DIST" -eq 1 ]]; then rm -rf "$DIST_DIR"; fi
   if [[ "$REMOVE_SHELL_DIST" -eq 1 ]]; then rm -rf "$SHELL_DIST_DIR"; fi
+  stop_keep_awake
+  ps_cleanup
   exit "$status"
 }
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-if [[ "$(uname -s)" != "Darwin" ]]; then fail "esta campaña está habilitada solo para macOS."; fi
-if pgrep -f '[p]laywright test --config' >/dev/null; then fail "hay otro Playwright activo."; fi
-if pgrep -f '[v]itest run' >/dev/null; then fail "hay otro Vitest activo."; fi
+case "$PLATFORM" in
+  darwin) ;;
+  windows)
+    [[ "$PHASE" == "ultra" ]] || fail "en Windows nativo solo está soportada la fase ultra; las demás corren en macOS."
+    ps_init || fail "no se pudo crear el directorio temporal de PowerShell."
+    ;;
+  *) fail "plataforma no soportada ($(uname -s)): esta campaña corre en macOS y, la fase ultra, en Windows nativo (Git Bash)." ;;
+esac
+if [[ "$PLATFORM" == "windows" ]]; then
+  # Mejor esfuerzo: sin pgrep, se consulta la línea de comandos de los procesos con PowerShell.
+  # Solo cuentan los procesos que mencionan este repo (corridas de Playwright o Vitest lanzadas desde él).
+  for guard in 'playwright test --config|cli\.js test --config:Playwright' 'vitest(\.mjs)? (run|watch):Vitest'; do
+    if count="$(windows_process_count "${guard%%:*}" "$ROOT_DIR")"; then
+      [[ "$count" == "0" ]] || fail "hay otro ${guard##*:} activo."
+    else
+      guard_detail="$(ps_last_error 'sin detalle (salida no numérica o vacía)')"
+      add_caveat "concurrent-process-guard-unavailable-${guard##*:}" "no se pudo consultar procesos (${guard##*:}): $guard_detail; la tanda corrió sin esa guarda"
+    fi
+  done
+  if start_keep_awake_windows; then
+    log "Prevención de suspensión activa (confirmada por el marcador de SetThreadExecutionState); no cubre el cierre de tapa."
+  else
+    add_caveat "sleep-prevention-unavailable" "no se confirmó SetThreadExecutionState: configurá el plan de energía (ver README)"
+  fi
+else
+  if pgrep -f '[p]laywright test --config' >/dev/null; then fail "hay otro Playwright activo."; fi
+  if pgrep -f '[v]itest run' >/dev/null; then fail "hay otro Vitest activo."; fi
+fi
+if [[ "$PHASE" == "profiles-gap" || "$PHASE" == "ultra" ]]; then
+  if sleep_wake_digest >/dev/null; then
+    write_sleep_detection true ""
+  else
+    sleep_detection_failed "al inicio"
+  fi
+fi
 if [[ "$PHASE" != "profiles-gap" ]] && ! git diff --quiet -- packages/ apps/; then
   fail "hay cambios sin commitear en packages/ o apps/; la campaña histórica exige producto limpio."
 fi
@@ -95,7 +129,7 @@ ULTRA_PROFILES=(P2)
 ULTRA_R2_NOTE="null"
 if [[ "$PHASE" == "ultra" ]]; then
   VALIDATION_PROFILES=(P2)
-  if [[ "${ANONLY_REAL_DOC_R2:-}" = /* && -r "$ANONLY_REAL_DOC_R2" ]]; then
+  if readable_abs_file "${ANONLY_REAL_DOC_R2:-}"; then
     ULTRA_PROFILES=(P2 R2)
   elif [[ -z "${ANONLY_REAL_DOC_R2:-}" ]]; then
     ULTRA_R2_NOTE='"ANONLY_REAL_DOC_R2 no definido: la fase corrió solo P2"'
@@ -103,14 +137,22 @@ if [[ "$PHASE" == "ultra" ]]; then
     ULTRA_R2_NOTE='"ANONLY_REAL_DOC_R2 definido pero no es una ruta absoluta legible: la fase corrió solo P2"'
   fi
 fi
+# Opt-in: P2H (P2 a 300 dpi nativos, 20 páginas) es el escaneo A4 típico; alarga la tanda.
+if [[ "$PHASE" == "ultra" && "${ANONLY_OCR_POOL_ULTRA_HIDPI:-0}" == "1" ]]; then ULTRA_PROFILES+=(P2H); fi
 for profile in "${VALIDATION_PROFILES[@]}"; do
   case "$profile" in
     P1|P2) ;;
-    R1) [[ "${ANONLY_REAL_DOC_R1:-}" = /* && -r "$ANONLY_REAL_DOC_R1" ]] || fail "R1 requiere ANONLY_REAL_DOC_R1 con ruta absoluta legible." ;;
-    R2) [[ "${ANONLY_REAL_DOC_R2:-}" = /* && -r "$ANONLY_REAL_DOC_R2" ]] || fail "R2 requiere ANONLY_REAL_DOC_R2 con ruta absoluta legible." ;;
+    R1) readable_abs_file "${ANONLY_REAL_DOC_R1:-}" || fail "R1 requiere ANONLY_REAL_DOC_R1 con ruta absoluta legible." ;;
+    R2) readable_abs_file "${ANONLY_REAL_DOC_R2:-}" || fail "R2 requiere ANONLY_REAL_DOC_R2 con ruta absoluta legible." ;;
   esac
 done
 
+# Node (el spec) lee C:/..., no /c/...: se exporta la forma nativa. La ruta no se loguea.
+if [[ "$PLATFORM" == "windows" ]]; then
+  for var in ANONLY_REAL_DOC_R1 ANONLY_REAL_DOC_R2; do
+    if readable_abs_file "${!var:-}"; then export "$var=$(to_native_path "${!var}")"; fi
+  done
+fi
 if [[ "$PHASE" == "ultra" ]]; then
   node -e 'const [profiles, note] = process.argv.slice(1); process.stdout.write(JSON.stringify({profiles: profiles.split(" "), r2Present: profiles.includes("R2"), r2Note: JSON.parse(note)}, null, 2) + "\n")' "${ULTRA_PROFILES[*]}" "$ULTRA_R2_NOTE" >"$RUN_DIR/ultra-corpus.json"
 fi
@@ -118,7 +160,7 @@ git rev-parse HEAD >"$RUN_DIR/commit.txt"
 git status --short >"$RUN_DIR/git-status.txt"
 git diff HEAD --binary -- packages/ apps/ | sha >"$RUN_DIR/product-tree.diff.sha256"
 node -e 'const os=require("node:os"); process.stdout.write(JSON.stringify({platform:process.platform,arch:process.arch,cpuCount:os.cpus().length,cpuModel:os.cpus()[0]?.model,totalMemBytes:os.totalmem(),node:process.version},null,2)+"\n")' >"$RUN_DIR/host.json"
-if [[ -d "$DIST_DIR" && ! -d "$RUN_DIR/dist-original" ]]; then cp -R "$DIST_DIR" "$RUN_DIR/dist-original"; digest_dir "$RUN_DIR/dist-original" >"$RUN_DIR/dist-original.digest"; fi
+if [[ -d "$DIST_DIR" && ! -d "$RUN_DIR/dist-original" ]]; then cp -R "$DIST_DIR" "$RUN_DIR/dist-original"; digest_dir "$RUN_DIR/dist-original" >"$RUN_DIR/dist-original.digest"; digest_is_plausible "$(cat "$RUN_DIR/dist-original.digest")" || fail "el digest del dist original salió vacío o igual al de la entrada vacía: find/sort no son los de MSYS."; fi
 if [[ -d "$DIST_DIR" && -d "$RUN_DIR/dist-original" ]]; then RESTORE_CLIENT_DIST=1; fi
 if [[ -d "$SHELL_DIST_DIR" && ! -d "$RUN_DIR/shell-dist-original" ]]; then cp -R "$SHELL_DIST_DIR" "$RUN_DIR/shell-dist-original"; fi
 if [[ -d "$SHELL_DIST_DIR" && -d "$RUN_DIR/shell-dist-original" ]]; then RESTORE_SHELL_DIST=1; fi
@@ -135,6 +177,7 @@ log "Build único empaquetado para la campaña OCR..."
 pnpm --filter @anonly/desktop-shell build >>"$RUN_DIR/build.log" 2>&1 || fail "falló el build del shell."
 VITE_E2E=1 pnpm --filter @anonly/react-client build >>"$RUN_DIR/build.log" 2>&1 || fail "falló el build del cliente."
 digest_dir "$DIST_DIR" >"$RUN_DIR/client-dist.digest"
+digest_is_plausible "$(cat "$RUN_DIR/client-dist.digest")" || fail "el digest del dist del cliente salió vacío o igual al de la entrada vacía: find/sort no son los de MSYS o el dist está vacío."
 sha assets.lock.json >"$RUN_DIR/assets-lock.sha256"
 sha pnpm-lock.yaml >"$RUN_DIR/pnpm-lock.sha256"
 git diff HEAD --binary -- packages/ apps/ | sha >"$RUN_DIR/product-tree.after-build.diff.sha256"
@@ -168,8 +211,10 @@ run_one() {
   local id="${kind}-${arm}-${profile}-r${round}"
   log "Corrida $id"
   capture_pressure "before-$id"
-  local before_sleep_wake=""
-  if [[ "$PHASE" == "profiles-gap" || "$PHASE" == "ultra" ]]; then before_sleep_wake="$(sleep_wake_digest)"; fi
+  local before_sleep_wake="" after_sleep_wake=""
+  if [[ ( "$PHASE" == "profiles-gap" || "$PHASE" == "ultra" ) && "$SLEEP_DETECTION_OK" == "1" ]]; then
+    before_sleep_wake="$(sleep_wake_digest)" || sleep_detection_failed "antes de $id"
+  fi
   local status=0
   local spec_phase="$PHASE" artifact="ocr-pool-${id}.json"
   # ultra: la memoria usa el RSS natural del árbol (fase pool-rss del spec), sin CDP ni barrera.
@@ -197,9 +242,12 @@ run_one() {
     fi
   fi
   capture_pressure "after-$id"
-  if [[ ( "$PHASE" == "profiles-gap" || "$PHASE" == "ultra" ) && "$(sleep_wake_digest)" != "$before_sleep_wake" ]]; then
-    record_invalid_run "$id" "sleep-wake-event-during-run"
-    status=1
+  if [[ ( "$PHASE" == "profiles-gap" || "$PHASE" == "ultra" ) && "$SLEEP_DETECTION_OK" == "1" ]]; then
+    after_sleep_wake="$(sleep_wake_digest)" || { after_sleep_wake=""; sleep_detection_failed "después de $id"; }
+    if [[ "$SLEEP_DETECTION_OK" == "1" && "$after_sleep_wake" != "$before_sleep_wake" ]]; then
+      record_invalid_run "$id" "sleep-wake-event-during-run"
+      status=1
+    fi
   fi
   if [[ "$status" -ne 0 ]]; then FAILED=$((FAILED + 1)); fi
 }
@@ -216,10 +264,14 @@ fi
 ROUNDS=(0 1 2)
 SMOKE="${ANONLY_OCR_POOL_ULTRA_SMOKE:-0}"
 if [[ "$PHASE" == "ultra" ]]; then
-  TIME_ORDERS=("2 4 6 6b" "6b 6 4 2" "4 6b 2 6")
+  TIME_ORDERS=("2 4 4b 6 6b" "6b 6 4b 4 2" "4b 6b 2 6 4")
   TIME_PROFILES=("${ULTRA_PROFILES[@]}")
   # Humo (SMOKE=1 o 2): una sola corrida de tiempo por brazo en P2; sin resumen agregado.
-  if [[ "$SMOKE" != "0" ]]; then TIME_PROFILES=(P2); ROUNDS=(0); fi
+  if [[ "$SMOKE" != "0" ]]; then
+    TIME_PROFILES=(P2)
+    if [[ "${ANONLY_OCR_POOL_ULTRA_HIDPI:-0}" == "1" ]]; then TIME_PROFILES=(P2 P2H); fi
+    ROUNDS=(0)
+  fi
 fi
 if [[ "$PHASE" == "all" || "$PHASE" == "r2-time" || "$PHASE" == "profiles-gap" || "$PHASE" == "ultra" ]]; then
 for profile in "${TIME_PROFILES[@]}"; do
@@ -236,7 +288,7 @@ if [[ "$PHASE" == "r2-time" ]]; then MEMORY_PROFILES=(); fi
 if [[ "$PHASE" == "memory-cancel" ]]; then MEMORY_PROFILES=(P2 R2); fi
 if [[ "$PHASE" == "profiles-gap" ]]; then MEMORY_ORDERS=("1 2 3 4" "4 3 2 1" "2 4 1 3"); fi
 if [[ "$PHASE" == "ultra" ]]; then
-  MEMORY_ORDERS=("2 4 6 6b" "6b 6 4 2" "4 6b 2 6")
+  MEMORY_ORDERS=("2 4 4b 6 6b" "6b 6 4b 4 2" "4b 6b 2 6 4")
   MEMORY_PROFILES=("${ULTRA_PROFILES[@]}")
   if [[ "$SMOKE" != "0" ]]; then MEMORY_PROFILES=(); fi
 fi
@@ -253,7 +305,7 @@ CANCEL_PROFILES=(P2 R2)
 if [[ "$PHASE" == "ultra" ]]; then CANCEL_PROFILES=("${ULTRA_PROFILES[@]}"); if [[ "$SMOKE" != "0" ]]; then CANCEL_PROFILES=(); fi; fi
 if [[ "$PHASE" == "all" || "$PHASE" == "memory-cancel" || "$PHASE" == "profiles-gap" || "$PHASE" == "ultra" ]]; then
 for profile in ${CANCEL_PROFILES[@]+"${CANCEL_PROFILES[@]}"}; do
-  if [[ "$PHASE" == "profiles-gap" ]]; then CANCEL_ARMS=(1 2 3 4); elif [[ "$PHASE" == "ultra" ]]; then CANCEL_ARMS=(2 4 6 6b); else CANCEL_ARMS=(2 3 4); fi
+  if [[ "$PHASE" == "profiles-gap" ]]; then CANCEL_ARMS=(1 2 3 4); elif [[ "$PHASE" == "ultra" ]]; then CANCEL_ARMS=(2 4 4b 6 6b); else CANCEL_ARMS=(2 3 4); fi
   for arm in "${CANCEL_ARMS[@]}"; do run_one cancel "$arm" "$profile" 0; done
 done
 fi
@@ -264,6 +316,10 @@ if [[ "$PHASE" == "ultra" && "$SMOKE" == "2" ]]; then
   run_one cancel 6b P2 0
 fi
 
+# Windows: la prevención de suspensión tiene que seguir viva al final; si murió, la salvedad entra al resumen.
+if [[ "$PLATFORM" == "windows" ]] && ! keep_awake_alive; then
+  add_caveat "sleep-prevention-lost" "el powershell de prevención de suspensión murió durante la campaña: el equipo pudo suspenderse sin que se registre"
+fi
 if [[ "$PHASE" != "ultra" ]]; then
 node - "$RUN_DIR" "$PHASE" <<'NODE'
 const fs = require("node:fs");
@@ -330,10 +386,14 @@ fi
 # When a campaign is continued, merge valid artifacts from prior folders and
 # honor each source's validity.json; never let a later phase replace earlier
 # phase measurements in the combined report.
+RESULT_LINE=""
 if [[ "$PHASE" == "ultra" && "$SMOKE" != "0" ]]; then
   log "Humo ultra: sin resumen agregado; los JSON por corrida quedan en $RUN_DIR."
+  RESULT_LINE="$(ANONLY_OCR_POOL_PHASE=ultra ANONLY_OCR_POOL_ULTRA_LINE_ONLY=1 pnpm exec tsx tests/perf/support/summarize-ocr-pool.mjs "$RUN_DIR" "$RUN_DIR" | tail -n 1)"
 elif [[ "$PHASE" == "ultra" ]]; then
-  ANONLY_OCR_POOL_PHASE=ultra pnpm exec tsx tests/perf/support/summarize-ocr-pool.mjs "$RUN_DIR" "$RUN_DIR" || FAILED=$((FAILED + 1))
+  summary_out="$(ANONLY_OCR_POOL_PHASE=ultra pnpm exec tsx tests/perf/support/summarize-ocr-pool.mjs "$RUN_DIR" "$RUN_DIR")" || FAILED=$((FAILED + 1))
+  printf '%s\n' "$summary_out"
+  RESULT_LINE="$(printf '%s\n' "$summary_out" | tail -n 1)"
 elif [[ "$PHASE" == "all" || "$PHASE" == "profiles-gap" || -n "${ANONLY_OCR_POOL_PRIOR_DIR:-}" ]]; then
   SUMMARY_SOURCES=("$RUN_DIR")
   if [[ -n "${ANONLY_OCR_POOL_PRIOR_DIR:-}" ]]; then
@@ -347,5 +407,5 @@ elif [[ "$PHASE" == "all" || "$PHASE" == "profiles-gap" || -n "${ANONLY_OCR_POOL
   fi
 fi
 
-log "Campaña terminada: $RUN_DIR; fallidas=$FAILED. Sin cambios de producto ni defaults."
+log "Campaña terminada: $RUN_DIR; fallidas=$FAILED${RESULT_LINE:+; $RESULT_LINE}. Sin cambios de producto ni defaults."
 exit "$((FAILED > 0))"

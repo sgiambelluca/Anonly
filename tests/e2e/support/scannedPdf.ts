@@ -505,6 +505,7 @@ export async function rasterizeToScannedPdf(
   page: Page,
   sourcePdfBytes: Uint8Array,
   scale: number = DEFAULT_SCALE,
+  pageCount?: number,
 ): Promise<E2eFilePayload> {
   const [pdfjsSource, workerSource, pdfLibSource] = await Promise.all([
     readFile(PDFJS_MJS_PATH, "utf-8"),
@@ -520,6 +521,7 @@ export async function rasterizeToScannedPdf(
     pdfLibSource,
     sourceBase64,
     scale,
+    ...(pageCount === undefined ? {} : { pageCount }),
   });
 
   return {

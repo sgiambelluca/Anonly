@@ -18,6 +18,7 @@ import {
   parseArmLabel,
 } from "./support/ocrPoolArms.js";
 import { measureOcrEndStage } from "./support/ocrPoolEndStage.js";
+import { buildReservationReport } from "./support/ocrReservation.js";
 import { getOrGenerateScannedFixture } from "./support/scannedFixtureCache.js";
 import { hostIdentity, type TimeRun } from "./support/timeProfile.js";
 import {
@@ -48,9 +49,12 @@ declare global {
           readonly wordCount: number;
           readonly requiresOCR: boolean;
         }>;
-        rgbaEstimates: Array<{
+        configuredDpi: number | null;
+        pageSizes: Array<{
           readonly pageIndex: number;
-          readonly estimatedBytes: number | null;
+          readonly widthPoints: number | null;
+          readonly heightPoints: number | null;
+          readonly error: string | null;
         }>;
         ocrPages: Array<{
           readonly pageIndex: number;
@@ -82,7 +86,11 @@ process.env.PLAYWRIGHT_NO_COPY_PROMPT = "1";
 const RUN_ID = process.env.ANONLY_OCR_POOL_RUN;
 const OUTPUT_DIR = process.env.ANONLY_OCR_POOL_OUTPUT_DIR;
 const CANCELLATION_SLA_MS = 200;
-type Profile = "P1" | "P2" | "R1" | "R2";
+// P2H: P2 rasterizado a 300 dpi nativos (opt-in de ultra), el escaneo A4 típico: 33,2 MiB por página.
+type Profile = "P1" | "P2" | "P2H" | "R1" | "R2";
+const P2H_PAGES = 20;
+const isScannedProfile = (profile: Profile): boolean =>
+  profile === "P2" || profile === "R2" || profile === "P2H";
 type RunKind = "memory" | "time" | "cancel";
 type MemoryProbeRun = { readonly temperature: string; readonly probe: Record<string, unknown> };
 let memoryRuns: MemoryProbeRun[] = [];
@@ -114,9 +122,18 @@ async function p2File(): Promise<E2eFilePayload> {
   );
 }
 
+async function p2hFile(): Promise<E2eFilePayload> {
+  return getOrGenerateScannedFixture(
+    "ocr-pool-p2h-scanned-20p-300dpi",
+    new Uint8Array(await generateText50p()),
+    { scale: 300 / 72, pageCount: P2H_PAGES },
+  );
+}
+
 async function inputFile(profile: Profile): Promise<E2eFilePayload> {
   if (profile === "P1") return textTenPagesFile();
   if (profile === "P2") return p2File();
+  if (profile === "P2H") return p2hFile();
   const envKey = profile === "R1" ? "ANONLY_REAL_DOC_R1" : "ANONLY_REAL_DOC_R2";
   const path = process.env[envKey];
   if (path === undefined || path === "") throw new Error(`${envKey} no está definido.`);
@@ -137,7 +154,7 @@ function parseRunId(): {
   readonly kind: RunKind;
 } {
   if (RUN_ID === undefined || RUN_ID === "") throw new Error("ANONLY_OCR_POOL_RUN no definido.");
-  const match = /^(memory|time|cancel)-(1|2|3|4|6|6b)-(P1|P2|R1|R2)-r([0-2])$/.exec(RUN_ID);
+  const match = /^(memory|time|cancel)-(1|2|3|4|4b|6|6b)-(P1|P2|P2H|R1|R2)-r([0-2])$/.exec(RUN_ID);
   const arm = parseArmLabel(match?.[2] ?? "");
   if (match === null || arm === undefined) throw new Error(`Corrida desconocida: ${RUN_ID}`);
   return {
@@ -145,7 +162,8 @@ function parseRunId(): {
     arm: arm.poolSize,
     armLabel: arm.label,
     maxLiveImageBytes: arm.maxLiveImageBytes,
-    fullOccupancy: assertsFullOccupancy(arm),
+    // P2H no afirma ocupación: el presupuesto puede frenar y eso es lo que se mide.
+    fullOccupancy: assertsFullOccupancy(arm) && match[3] !== "P2H",
     profile: match[3] as Profile,
     round: Number(match[4]),
   };
@@ -184,7 +202,8 @@ async function installProbe(
         cancelActiveOcrJobs: 0,
         ocrPageFailures: 0,
         pageParsed: [],
-        rgbaEstimates: [],
+        configuredDpi: null,
+        pageSizes: [],
         ocrPages: [],
         nerPages: [],
         workerEvents: [],
@@ -235,7 +254,7 @@ async function installProbe(
       };
       core.bus.on("pipeline", "DOCUMENT_IMPORTED", (payload: unknown) => {
         probe.pageParsed = [];
-        probe.rgbaEstimates = [];
+        probe.pageSizes = [];
         probe.ocrPages = [];
         probe.nerPages = [];
         probe.workerEvents = [];
@@ -275,28 +294,43 @@ async function installProbe(
             wordCount: value.wordCount,
             requiresOCR: value.requiresOCR,
           });
-          if (value.requiresOCR) {
-            let size: { readonly width: number; readonly height: number } | undefined;
-            try {
-              size =
-                typeof documentId === "string" &&
-                typeof probeCore.orchestrator?.getPageSize === "function"
-                  ? probeCore.orchestrator.getPageSize(documentId, value.pageIndex)
-                  : undefined;
-            } catch {
-              size = undefined;
-            }
-            const dpi = effective.ocr?.dpi ?? 300;
-            const estimatedBytes =
-              size === undefined
-                ? null
-                : Math.ceil((size.width * dpi) / 72) * Math.ceil((size.height * dpi) / 72) * 4;
-            probe.rgbaEstimates.push({ pageIndex: value.pageIndex, estimatedBytes });
-          }
         }
       });
-      core.bus.on("ocr", "OCR_STARTED", () => {
+      probe.configuredDpi = typeof effective.ocr?.dpi === "number" ? effective.ocr.dpi : null;
+      // El documento recién queda registrado en el Orchestrator después de PAGE_PARSED: acá sí.
+      core.bus.on("ocr", "OCR_STARTED", (payload: unknown) => {
         probe.startedAt = Date.now();
+        const pages =
+          typeof payload === "object" &&
+          payload !== null &&
+          "pagesToProcess" in payload &&
+          Array.isArray(payload.pagesToProcess)
+            ? payload.pagesToProcess.filter((page): page is number => typeof page === "number")
+            : [];
+        for (const pageIndex of pages) {
+          probe.pageSizes = probe.pageSizes.filter((item) => item.pageIndex !== pageIndex);
+          try {
+            if (
+              documentId === undefined ||
+              typeof probeCore.orchestrator?.getPageSize !== "function"
+            )
+              throw new Error("orchestrator.getPageSize o documentId no disponible");
+            const size = probeCore.orchestrator.getPageSize(documentId, pageIndex);
+            probe.pageSizes.push({
+              pageIndex,
+              widthPoints: size.width,
+              heightPoints: size.height,
+              error: null,
+            });
+          } catch (error) {
+            probe.pageSizes.push({
+              pageIndex,
+              widthPoints: null,
+              heightPoints: null,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
       });
       core.bus.on("ocr", "OCR_PAGE_FINISHED", (payload: unknown) => {
         if (typeof payload !== "object" || payload === null) return;
@@ -447,7 +481,7 @@ async function installProbe(
   );
 }
 
-async function readProbe(page: Page): Promise<OcrPoolSummary> {
+async function readRawProbe(page: Page) {
   return page.evaluate(async () => {
     const probe = globalThis.__anonlyOcrPoolProbe;
     if (probe === undefined) throw new Error("OCR probe ausente");
@@ -505,13 +539,6 @@ async function readProbe(page: Page): Promise<OcrPoolSummary> {
     }
     const parsed = [...probe.pageParsed].sort((a, b) => a.pageIndex - b.pageIndex);
     const requestWindow = probe.requestedPoolSize === 2 ? 3 : probe.requestedPoolSize;
-    const estimates = [...probe.rgbaEstimates].sort((a, b) => a.pageIndex - b.pageIndex);
-    let estimatedReservationWindowPeakBytes = 0;
-    for (let start = 0; start < estimates.length; start += 1) {
-      const window = estimates.slice(start, start + requestWindow);
-      const sum = window.reduce((total, item) => total + (item.estimatedBytes ?? 0), 0);
-      estimatedReservationWindowPeakBytes = Math.max(estimatedReservationWindowPeakBytes, sum);
-    }
     const ocrValues = pageValues.map(([, values]) => values);
     const wordCounts = ocrValues.map((values) => values[0] ?? 0);
     const characterCounts = ocrValues.map((values) => values[1] ?? 0);
@@ -536,17 +563,10 @@ async function readProbe(page: Page): Promise<OcrPoolSummary> {
       textlessPageCount: parsed.filter((page) => page.wordCount === 0).length,
       requiresOcrPageCount: parsed.filter((page) => page.requiresOCR).length,
       nerJobsByPage: [...probe.nerPages].sort((a, b) => a.pageIndex - b.pageIndex),
-      pageRgbaEstimates: probe.rgbaEstimates,
-      maxSinglePageRgbaEstimateBytes: Math.max(
-        0,
-        ...probe.rgbaEstimates.flatMap((item) =>
-          item.estimatedBytes === null ? [] : [item.estimatedBytes],
-        ),
-      ),
-      estimatedReservationWindowPeakBytes,
+      pageSizes: probe.pageSizes,
+      configuredDpi: probe.configuredDpi,
+      requestWindow,
       reservationBudgetBytes: probe.maxLiveImageBytes,
-      estimatedWindowExceedsReservationBudget:
-        estimatedReservationWindowPeakBytes > probe.maxLiveImageBytes,
       reservationWaitObserved: false,
       reservationWaitObservation:
         "LiveImageBudget no publica evento ni getter; el exceso de suma es un indicador de espera potencial, no una medición de espera real.",
@@ -616,6 +636,18 @@ async function runTimed(page: Page, file: E2eFilePayload, timeoutMs: number): Pr
   };
 }
 
+async function readProbe(page: Page): Promise<OcrPoolSummary> {
+  const { pageSizes, configuredDpi, requestWindow, ...rest } = await readRawProbe(page);
+  const reservation = buildReservationReport({
+    pageSizes,
+    configuredDpi,
+    requestWindow,
+    budgetBytes: rest.reservationBudgetBytes,
+    busyRecognizersPeak: rest.effectiveBusyRecognizersPeak,
+  });
+  return { ...rest, ...reservation };
+}
+
 function outputDir(): string {
   if (OUTPUT_DIR === undefined || OUTPUT_DIR === "")
     throw new Error("ANONLY_OCR_POOL_OUTPUT_DIR no definido.");
@@ -630,11 +662,7 @@ test("OCR recognizer pool campaign — selected run", async ({
   const run = parseRunId();
   const startedAtUtc = new Date().toISOString();
   test.setTimeout(
-    run.kind === "cancel"
-      ? 300_000
-      : run.profile === "P2" || run.profile === "R2"
-        ? 1_800_000
-        : 600_000,
+    run.kind === "cancel" ? 300_000 : isScannedProfile(run.profile) ? 1_800_000 : 600_000,
   );
   const file = await inputFile(run.profile);
   if (run.arm !== 2 || run.maxLiveImageBytes !== DEFAULT_MAX_LIVE_IMAGE_BYTES)
@@ -738,7 +766,7 @@ test("OCR recognizer pool campaign — selected run", async ({
         `ocr-pool-${run.profile}-${run.arm}-r${run.round}`,
         run.profile,
         file,
-        run.profile === "P2" || run.profile === "R2" ? 600_000 : 300_000,
+        isScannedProfile(run.profile) ? 600_000 : 300_000,
       );
       wasmSamples = wasmAttribution.wasmSamples;
       wasmSamplerStartedAtMs = wasmAttribution.wasmSamplerStartedAtMs ?? null;
@@ -751,7 +779,7 @@ test("OCR recognizer pool campaign — selected run", async ({
         electronUserDataDir,
         `ocr-pool-${run.profile}-${run.arm}-r${run.round}`,
         file,
-        run.profile === "P2" || run.profile === "R2" ? 600_000 : 300_000,
+        isScannedProfile(run.profile) ? 600_000 : 300_000,
         [async (currentPage) => installProbe(currentPage, { ...run, runId: RUN_ID ?? "" })],
         async (currentPage, temperature) => {
           memoryRuns.push({ temperature, probe: await readProbe(currentPage) });
@@ -761,11 +789,7 @@ test("OCR recognizer pool campaign — selected run", async ({
       );
     }
   } else if (run.kind === "time") {
-    timed = await runTimed(
-      page,
-      file,
-      run.profile === "P2" || run.profile === "R2" ? 600_000 : 300_000,
-    );
+    timed = await runTimed(page, file, isScannedProfile(run.profile) ? 600_000 : 300_000);
   } else {
     await page.locator('input[type="file"]').setInputFiles(file);
     await page.waitForFunction(
@@ -1037,7 +1061,7 @@ test("OCR recognizer pool campaign — selected run", async ({
     expect(probe.missingWordCachePages).toBe(0);
     expect(probe.effectiveBusyOsdPeak).toBeLessThanOrEqual(1);
     expect(probe.effectiveConfiguredRecognizerPoolSize).toBe(run.arm);
-    if (run.profile === "P2" || run.profile === "R2") {
+    if (isScannedProfile(run.profile)) {
       if (run.fullOccupancy) expect(probe.effectiveBusyRecognizersPeak).toBe(run.arm);
       expect(report?.cold.ocrWords ?? []).toEqual([]);
       expect(report?.hot.ocrWords ?? []).toEqual([]);

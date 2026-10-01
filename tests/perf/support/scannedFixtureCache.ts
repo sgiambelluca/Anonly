@@ -33,6 +33,28 @@ import { rasterizeToScannedPdf } from "../../e2e/support/scannedPdf.js";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CACHE_DIR = resolve(HERE, "../../../.measure/fixtures");
 
+export interface ScannedFixtureOptions {
+  /** Escala de rasterizado (dpi / 72). Sin valor, la de `rasterizeToScannedPdf`. */
+  readonly scale?: number;
+  /** Cantidad de páginas de la fuente a rasterizar. Sin valor, todas. */
+  readonly pageCount?: number;
+}
+
+/**
+ * Hash de la clave de cache. La escala y la cantidad de páginas entran en el hash: sin eso, un
+ * fixture a 300 dpi serviría el de 216 dpi. Sin opciones el hash es el de siempre, para no
+ * invalidar los fixtures ya cacheados.
+ */
+export function scannedFixtureHash(
+  sourceBytes: Uint8Array,
+  options: ScannedFixtureOptions = {},
+): string {
+  const hash = createHash("sha256").update(sourceBytes);
+  if (options.scale !== undefined) hash.update(`|scale=${options.scale}`);
+  if (options.pageCount !== undefined) hash.update(`|pages=${options.pageCount}`);
+  return hash.digest("hex").slice(0, 16);
+}
+
 /**
  * Devuelve el PDF escaneado correspondiente a `sourceBytes`, generándolo
  * (en un browser aparte) solo si no está cacheado. `cacheKey` es un nombre
@@ -42,9 +64,10 @@ const CACHE_DIR = resolve(HERE, "../../../.measure/fixtures");
 export async function getOrGenerateScannedFixture(
   cacheKey: string,
   sourceBytes: Uint8Array,
+  options: ScannedFixtureOptions = {},
 ): Promise<E2eFilePayload> {
   await mkdir(CACHE_DIR, { recursive: true });
-  const hash = createHash("sha256").update(sourceBytes).digest("hex").slice(0, 16);
+  const hash = scannedFixtureHash(sourceBytes, options);
   const cachePath = resolve(CACHE_DIR, `${cacheKey}-${hash}.pdf`);
 
   const cached = await readFile(cachePath).catch(() => undefined);
@@ -55,7 +78,12 @@ export async function getOrGenerateScannedFixture(
   const browser = await chromium.launch();
   try {
     const page = await browser.newPage();
-    const generated = await rasterizeToScannedPdf(page, sourceBytes);
+    const generated = await rasterizeToScannedPdf(
+      page,
+      sourceBytes,
+      options.scale,
+      options.pageCount,
+    );
     await writeFile(cachePath, generated.buffer);
     return generated;
   } finally {

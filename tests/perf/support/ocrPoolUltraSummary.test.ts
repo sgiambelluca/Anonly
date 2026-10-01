@@ -3,7 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   createUltraReader,
   median,
+  summarizeReservation,
   summarizeUltra,
+  ultraResultLine,
+  validityCaveatsOf,
   ultraArtifactName,
   type UltraKind,
   type UltraRunData,
@@ -11,7 +14,7 @@ import {
 
 type Store = Map<string, UltraRunData>;
 
-const POOL: Record<string, number> = { "2": 2, "4": 4, "6": 6, "6b": 6 };
+const POOL: Record<string, number> = { "2": 2, "4": 4, "4b": 4, "6": 6, "6b": 6 };
 
 function probe(arm: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -21,7 +24,8 @@ function probe(arm: string, overrides: Record<string, unknown> = {}): Record<str
     groupSha256: "grp",
     effectiveBusyRecognizersPeak: POOL[arm],
     effectiveConfiguredRecognizerPoolSize: POOL[arm],
-    effectiveMaxLiveImageBytes: arm === "6b" ? 200 * 1024 * 1024 : 128 * 1024 * 1024,
+    effectiveMaxLiveImageBytes:
+      arm === "6b" ? 200 * 1024 * 1024 : arm === "4b" ? 136 * 1024 * 1024 : 128 * 1024 * 1024,
     failed: false,
     ocrPageFailures: 0,
     missingWordCachePages: 0,
@@ -247,5 +251,239 @@ describe("lectura de artefactos de ultra", () => {
       () => ({ runId: "x" }),
     );
     expect(read("time", "2", "P2", 0)).toBeNull();
+  });
+});
+
+describe("reserva por página en el resumen", () => {
+  const a4 = 2481 * 3508 * 4;
+  const probeWith = (bytes: ReadonlyArray<number | null>): Record<string, unknown> => ({
+    pageRgbaEstimates: bytes.map((estimatedBytes, pageIndex) => ({ pageIndex, estimatedBytes })),
+  });
+
+  it("da min, mediana y máximo, y cuántas páginas admite cada presupuesto", () => {
+    const summary = summarizeReservation([probeWith([a4, a4, 2 * a4])]);
+    expect(summary.perPageBytes).toEqual({ min: a4, median: a4, max: 2 * a4 });
+    expect(summary.pagesAdmittedByBudget?.["128MiB"]).toMatchObject({ atMin: 3, atMax: 1 });
+    expect(summary.pagesAdmittedByBudget?.["200MiB"]).toMatchObject({ atMin: 6, atMax: 3 });
+    expect(summary.basis).toContain("upper-bound");
+    expect(summary.unavailableReason).toBeNull();
+  });
+
+  it("usa la primera corrida con estimaciones completas y descarta las nulas", () => {
+    const summary = summarizeReservation([probeWith([null, a4]), probeWith([a4])]);
+    expect(summary.pagesObserved).toBe(1);
+  });
+
+  it("si ninguna corrida las trae, queda no disponible con motivo y no en cero", () => {
+    const summary = summarizeReservation([probeWith([null]), {}]);
+    expect(summary.perPageBytes).toBeNull();
+    expect(summary.pagesAdmittedByBudget).toBeNull();
+    expect(summary.unavailableReason).toContain("null");
+  });
+
+  it("el resumen de ultra la incluye por corpus", () => {
+    const store = fullStore();
+    for (const [id, data] of store) {
+      if (/^time-/.test(id) && data.probe !== undefined)
+        store.set(id, { ...data, probe: { ...data.probe, ...probeWith([a4, a4]) } });
+    }
+    expect(summarize(store).byCorpus.P2?.reservation.perPageBytes?.max).toBe(a4);
+  });
+});
+
+describe("detección de suspensión en el resumen", () => {
+  it("si no estuvo disponible lo declara como salvedad y no como 'sin suspensión'", () => {
+    const summary = summarizeUltra({
+      corpus: { profiles: ["P2"], r2Present: false, r2Note: null },
+      readRun: () => null,
+      sleepDetection: { available: false, note: "Get-WinEvent falló" },
+    });
+    expect(summary.sleepDetection?.available).toBe(false);
+    expect(summary.validityCaveats[0]).toContain("sleep-detection-unavailable");
+  });
+
+  const base = {
+    corpus: { profiles: ["P2"], r2Present: false, r2Note: null },
+    readRun: () => null,
+  };
+
+  it("disponible no agrega salvedades", () => {
+    const summary = summarizeUltra({
+      ...base,
+      sleepDetection: { available: true, note: null },
+    });
+    expect(summary.validityCaveats).toEqual([]);
+    expect(summary.sleepDetection.available).toBe(true);
+  });
+
+  it("una tanda anterior al campo queda como 'desconocida', no como disponible ni como null silencioso", () => {
+    const summary = summarizeUltra(base);
+    expect(summary.sleepDetection.available).toBeNull();
+    expect(summary.sleepDetection.note).toContain("anterior al campo");
+    expect(summary.validityCaveats[0]).toContain("sleep-detection-unknown");
+  });
+
+  it("las salvedades del runner (guarda o prevención no disponibles) llegan al resumen", () => {
+    const summary = summarizeUltra({
+      ...base,
+      sleepDetection: { available: true, note: null },
+      caveats: [
+        { id: "sleep-prevention-unavailable", note: "no se confirmó SetThreadExecutionState" },
+        { id: "concurrent-process-guard-unavailable-Vitest", note: "no se pudo consultar" },
+      ],
+    });
+    expect(summary.validityCaveats).toEqual([
+      "sleep-prevention-unavailable: no se confirmó SetThreadExecutionState",
+      "concurrent-process-guard-unavailable-Vitest: no se pudo consultar",
+    ]);
+  });
+});
+
+describe("cota por ocupación en el resumen de brazos", () => {
+  const a4At300 = 2481 * 3508 * 4;
+  const withEstimates = (bytes: number): Map<string, UltraRunData> => {
+    const store = fullStore();
+    for (const [id, data] of store) {
+      if (/^(time|memory)-/.test(id) && data.probe !== undefined) {
+        const pageRgbaEstimates = Array.from({ length: 12 }, (_, pageIndex) => ({
+          pageIndex,
+          estimatedBytes: bytes,
+        }));
+        store.set(id, { ...data, probe: { ...data.probe, pageRgbaEstimates } });
+      }
+    }
+    return store;
+  };
+
+  it("da floor(presupuesto / pico) por brazo", () => {
+    const arms = summarize(withEstimates(a4At300)).byCorpus.P2?.arms;
+    expect(arms?.["4"]?.occupancy.impliedMaxReservationBytesPerPage).toBe(
+      Math.floor((128 * 1024 * 1024) / 4),
+    );
+    expect(arms?.["6b"]?.occupancy.impliedMaxReservationBytesPerPage).toBe(
+      Math.floor((200 * 1024 * 1024) / 6),
+    );
+  });
+
+  it("marca la estimación como contradicha donde la ocupación la desmiente y no donde cuadra", () => {
+    // Con 33,2 MiB por página: 6 y 4 ocupados no caben en 128 MiB; 2 sí; 6 caben en 200 MiB.
+    const arms = summarize(withEstimates(a4At300)).byCorpus.P2?.arms;
+    expect(arms?.["6"]?.occupancy.estimateContradictedByOccupancy).toBe(true);
+    expect(arms?.["4"]?.occupancy.estimateContradictedByOccupancy).toBe(true);
+    expect(arms?.["2"]?.occupancy.estimateContradictedByOccupancy).toBe(false);
+    expect(arms?.["6b"]?.occupancy.estimateContradictedByOccupancy).toBe(false);
+  });
+
+  it("sin estimaciones completas no afirma contradicción", () => {
+    const arms = summarize(fullStore()).byCorpus.P2?.arms;
+    expect(arms?.["6"]?.occupancy.estimateContradictedByOccupancy).toBeNull();
+  });
+});
+
+describe("cinco brazos y tandas anteriores a 4b", () => {
+  const withoutArm = (arm: string): Map<string, UltraRunData> => {
+    const store = fullStore();
+    for (const id of [...store.keys()]) if (id.split("-")[1] === arm) store.delete(id);
+    return store;
+  };
+
+  it("una tanda completa con 4b no tiene brazos faltantes y resume el presupuesto de 136 MiB", () => {
+    const summary = summarize(fullStore());
+    expect(summary.missingArms).toEqual([]);
+    expect(Object.keys(summary.byCorpus.P2?.arms ?? {}).sort()).toEqual([
+      "2",
+      "4",
+      "4b",
+      "6",
+      "6b",
+    ]);
+    expect(summary.byCorpus.P2?.arms["4b"]?.effectiveMaxLiveImageBytes).toBe(136 * 1024 * 1024);
+    expect(summary.byCorpus.P2?.arms["4b"]?.fingerprints.identicalToArm2).toBe(true);
+    expect(summary.complete).toBe(true);
+  });
+
+  it("una tanda anterior sin 4b no se da por completa: declara el brazo y las 7 corridas faltantes", () => {
+    const summary = summarize(withoutArm("4b"));
+    expect(summary.missingArms).toEqual(["4b"]);
+    expect(summary.missingRuns).toHaveLength(7);
+    expect(summary.complete).toBe(false);
+    const arm4b = summary.byCorpus.P2?.arms["4b"];
+    expect(arm4b?.time.medianReadyMs).toBeNull();
+    expect(arm4b?.cancellation).toBeNull();
+  });
+
+  it("un brazo con solo algunas corridas faltantes no es un brazo faltante", () => {
+    const store = fullStore();
+    store.delete("time-4b-P2-r0");
+    expect(summarize(store).missingArms).toEqual([]);
+  });
+
+  it("con dos corpus, un brazo es faltante solo si falta en todos", () => {
+    const store = fullStore("P2");
+    for (const [id, data] of fullStore("P2H")) if (!id.includes("-4b-")) store.set(id, data);
+    expect(summarize(store, ["P2", "P2H"]).missingArms).toEqual([]);
+    const both = withoutArm("4b");
+    for (const [id, data] of fullStore("P2H")) if (!id.includes("-4b-")) both.set(id, data);
+    expect(summarize(both, ["P2", "P2H"]).missingArms).toEqual(["4b"]);
+  });
+});
+
+describe("presupuestos de la reserva", () => {
+  it("incluye los 136 MiB del brazo 4b además de 128 y 200", () => {
+    const a4 = 2481 * 3508 * 4;
+    const summary = summarizeReservation([
+      { pageRgbaEstimates: [{ pageIndex: 0, estimatedBytes: a4 }] },
+    ]);
+    expect(Object.keys(summary.pagesAdmittedByBudget ?? {})).toEqual([
+      "128MiB",
+      "136MiB",
+      "200MiB",
+    ]);
+    expect(summary.pagesAdmittedByBudget?.["136MiB"]?.atMax).toBe(4);
+  });
+});
+
+describe("línea final con las salvedades", () => {
+  it("muestra cantidad y códigos junto a complete, sin cambiar su significado", () => {
+    expect(ultraResultLine({ complete: true, validityCaveats: [] })).toBe(
+      "complete=true salvedades=0",
+    );
+    expect(
+      ultraResultLine({
+        complete: true,
+        validityCaveats: [
+          "sleep-detection-unavailable: falló la consulta",
+          "sleep-prevention-lost: murió",
+        ],
+      }),
+    ).toBe("complete=true salvedades=2 [sleep-detection-unavailable, sleep-prevention-lost]");
+    expect(ultraResultLine({ complete: false, validityCaveats: ["a: b"] })).toBe(
+      "complete=false salvedades=1 [a]",
+    );
+  });
+
+  it("el humo (complete null) se muestra como n/a, no como true ni false", () => {
+    expect(ultraResultLine({ complete: null, validityCaveats: [] })).toBe(
+      "complete=n/a salvedades=0",
+    );
+  });
+
+  it("una tanda real con salvedades produce la línea con sus códigos", () => {
+    const summary = summarizeUltra({
+      corpus: { profiles: ["P2"], r2Present: false, r2Note: null },
+      readRun: () => null,
+      sleepDetection: { available: false, note: "x" },
+      caveats: [{ id: "sleep-prevention-lost", note: "y" }],
+    });
+    expect(ultraResultLine(summary)).toBe(
+      "complete=false salvedades=2 [sleep-detection-unavailable, sleep-prevention-lost]",
+    );
+  });
+
+  it("validityCaveatsOf combina la de suspensión con las del runner, en ese orden", () => {
+    expect(validityCaveatsOf({ available: null, note: "n" }, [{ id: "z", note: "w" }])).toEqual([
+      "sleep-detection-unknown: n",
+      "z: w",
+    ]);
   });
 });
