@@ -79,6 +79,14 @@ antes de convertir el perfil en un gate; no se cambia el objetivo contractual.
    PDFs o trazas como artefactos. Los scripts y la tabla canónica §11.4 se
    actualizan juntos. Windows nativo sigue como validación separada; un verde
    Mac no afirma igualdad de consumo ni tiempo en Windows.
+   **Enmienda (2026-10-01, decisión del humano):** los dos jobs **dejan de
+   correr en cada push de un PR**. Tardan unos 29 y 14 minutos, y frenaban el
+   veredicto del PR. Corren al mergear a `main` (`push`) y cuando se los
+   lanza a mano (`workflow_dispatch`, sobre cualquier branch). No corren por
+   horario: sobre un `main` que no cambió no agregan nada. El costo aceptado
+   es que una fuga se detecta al mergear y no en el PR; antes de un merge
+   grande conviene lanzarlos a mano. Cuando corren, rige igual ADR-149 §1.
+
 6. **Desviación acotada de R-11/P-8:** `playwright.leak.config.ts` y
    `playwright.stress.config.ts` exportan por defecto el objeto de configuración
    que carga Playwright, siguiendo los cuatro `playwright*.config.ts`
