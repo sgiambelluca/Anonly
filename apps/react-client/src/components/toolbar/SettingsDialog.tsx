@@ -41,7 +41,6 @@ import {
   GaugeIcon,
   GlobeIcon,
   InfoIcon,
-  LanguagesIcon,
   RefreshCwIcon,
   SunMoonIcon,
   TriangleAlertIcon,
@@ -101,10 +100,11 @@ import {
 } from "./settingsCopy.js";
 import { syncAutomaticChecksPreference } from "./updatePreferenceSync.js";
 
-const LANGUAGE_OPTIONS: ReadonlyArray<SelectOption<Language>> = [
-  { value: "es", label: "Español" },
-  { value: "en", label: "English" },
-];
+// Vuelve junto con la sección "Idioma de la interfaz", comentada más abajo.
+// const LANGUAGE_OPTIONS: ReadonlyArray<SelectOption<Language>> = [
+//   { value: "es", label: "Español" },
+//   { value: "en", label: "English" },
+// ];
 
 const UPDATE_MODE_OPTIONS: ReadonlyArray<SelectOption<UpdateMode>> = UPDATE_MODE_ORDER.map(
   (value) => ({ value, label: UPDATE_MODE_LABEL[value] }),
@@ -372,6 +372,11 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
         }
       >
         <div className="flex flex-col gap-3.5">
+          {/*
+            Oculta hasta que exista la traducción: la app todavía no tiene
+            textos en inglés, y ofrecer el selector es prometer algo que no
+            pasa. El setting `language` se conserva y se sigue persistiendo.
+
           <Section
             icon={<LanguagesIcon className="h-5 w-5" aria-hidden />}
             title="Idioma de la interfaz"
@@ -387,6 +392,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
               </div>
             }
           />
+          */}
 
           <Section
             icon={<GaugeIcon className="h-5 w-5" aria-hidden />}
