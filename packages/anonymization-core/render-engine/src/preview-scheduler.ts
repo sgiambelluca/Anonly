@@ -198,6 +198,13 @@ export class PreviewRenderScheduler<T> {
         return;
       }
 
+      // ADR-144 §8: si la entrada fue dada de baja mientras esperaba el cupo,
+      // el cupo se devuelve y no se despacha nada.
+      if (this.entries.get(key) !== entry) {
+        this.release();
+        return;
+      }
+
       // Capturada DESPUÉS de reservar el slot, no antes: `await` cede el
       // turno al menos un microtask aunque el slot esté libre de entrada, y
       // una ráfaga de `schedule()` síncronos sobre la misma clave (coalesce
@@ -240,7 +247,13 @@ export class PreviewRenderScheduler<T> {
       // ADR-144 §6: único punto donde se cachea/emite — la generación
       // coincide, este es el trabajo que efectivamente corrió para la clave.
       this.entries.delete(key);
-      await onSettle(result);
+      try {
+        await onSettle(result);
+      } catch (err) {
+        // ADR-144 §6: un `onSettle` que lanza no deja la promesa colgada.
+        entry.reject(err);
+        return;
+      }
       entry.resolve(result);
       return;
     }

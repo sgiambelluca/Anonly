@@ -373,4 +373,38 @@ describe("PreviewRenderScheduler", () => {
     expect(onSettle).not.toHaveBeenCalled();
     expect((scheduler["entries"] as Map<string, unknown>).has("k1")).toBe(false);
   });
+
+  it("a descriptor waiting for a slot is not dispatched after clearDocument (ADR-144 §8)", async () => {
+    const scheduler = new PreviewRenderScheduler<string>(1);
+    const ctx = createEngineContext();
+    const control = createControlled<string>();
+    const runJob = vi.fn(() => control.promise);
+
+    const inFlight = scheduler.schedule("doc1|0|original|preview|1|png", 20, ctx, runJob, () => {});
+    const waiting = scheduler.schedule("doc1|1|original|preview|1|png", 20, ctx, runJob, () => {});
+    await vi.waitFor(() => expect(runJob).toHaveBeenCalledTimes(1));
+
+    scheduler.clearDocument("doc1");
+    await expect(inFlight).rejects.toThrow(CancelledError);
+    await expect(waiting).rejects.toThrow(CancelledError);
+
+    // El kernel en vuelo termina: el cupo se libera y le toca al waiter ya dado de baja.
+    control.resolve("stale");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(runJob).toHaveBeenCalledTimes(1);
+    expect(scheduler["activeCount"]).toBe(0);
+  });
+
+  it("rejects the shared promise with the onSettle error instead of leaving it pending (ADR-144 §6)", async () => {
+    const scheduler = new PreviewRenderScheduler<string>(5);
+    const ctx = createEngineContext();
+    const boom = new Error("settle failed");
+    const onSettle = vi.fn(() => Promise.reject(boom));
+
+    const promise = scheduler.schedule("k1", 20, ctx, () => Promise.resolve("value"), onSettle);
+
+    await expect(promise).rejects.toBe(boom);
+    expect((scheduler["entries"] as Map<string, unknown>).has("k1")).toBe(false);
+  });
 });
