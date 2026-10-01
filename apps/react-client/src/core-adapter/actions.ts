@@ -35,12 +35,14 @@ import { useDocumentStore } from "../store/document.store.js";
 import { useEntitiesStore } from "../store/entities.store.js";
 import { usePipelineStore } from "../store/pipeline.store.js";
 import { useRulesStore } from "../store/rules.store.js";
+import { useSettingsStore } from "../store/settings.store.js";
 import { useUnreadableInkStore } from "../store/unreadableInk.store.js";
 import { useViewerStore, type ViewerKind } from "../store/viewer.store.js";
 
 import { useHistoryStore } from "./history.js";
+import { deriveEngineConfigOverrides } from "./settingsToEngineConfig.js";
 
-import { getCore } from "./index.js";
+import { getCore, getCoreWhenReady, recreateCoreIfOverridesChanged } from "./index.js";
 
 /** `null` si no hay documento activo; las acciones que lo requieren no-opean en ese caso. */
 function activeDocumentId(): string | null {
@@ -55,7 +57,10 @@ export const actions = {
     const buffer = await file.arrayBuffer();
     // DOCUMENT_IMPORTED lo emite el Orchestrator; la UI nunca invoca motores
     // directamente para el flujo del pipeline (core/Orchestrator.md §6).
-    await getCore().orchestrator.importDocument({ documentId, name: file.name, buffer });
+    // Espera una recreación del Core en curso (ADR-194 §9).
+    await (
+      await getCoreWhenReady()
+    ).orchestrator.importDocument({ documentId, name: file.name, buffer });
   },
 
   updateGroup(
@@ -330,5 +335,7 @@ export const actions = {
     // ADR-190 §4: mismo criterio — la marca de "no se pudo leer" es del
     // documento que se cierra, no debe sobrevivirlo.
     useUnreadableInkStore.getState().reset();
+    // ADR-194 §9: un perfil elegido con el documento abierto rige desde acá.
+    recreateCoreIfOverridesChanged(deriveEngineConfigOverrides(useSettingsStore.getState()));
   },
 };

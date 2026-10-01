@@ -33,8 +33,8 @@ const restoreEditCheckpoint = vi.fn();
 const discardEditCheckpoints = vi.fn();
 const getSnapshot = vi.fn();
 
-vi.mock("../core-adapter/index.js", () => ({
-  getCore: () => ({
+vi.mock("../core-adapter/index.js", () => {
+  const getCore = () => ({
     bus: { emit, on: vi.fn(), once: vi.fn(), off: vi.fn(), emitAsync: vi.fn() },
     orchestrator: {
       importDocument,
@@ -54,8 +54,13 @@ vi.mock("../core-adapter/index.js", () => ({
       dispose: vi.fn(),
     },
     engines: { grouping: { getSnapshot } },
-  }),
-}));
+  });
+  return {
+    getCore,
+    getCoreWhenReady: async () => getCore(),
+    recreateCoreIfOverridesChanged: vi.fn(),
+  };
+});
 
 const { actions } = await import("../core-adapter/actions.js");
 const { useHistoryStore } = await import("../core-adapter/history.js");

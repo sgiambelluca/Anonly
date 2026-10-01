@@ -63,6 +63,7 @@ import { useUnreadableInkStore } from "../store/unreadableInk.store.js";
 import { useViewerStore } from "../store/viewer.store.js";
 
 import { subscribe, type Stores } from "./bus-bridge.js";
+import { sameEngineConfigOverrides } from "./settingsToEngineConfig.js";
 
 const stores: Stores = {
   document: useDocumentStore,
@@ -113,6 +114,15 @@ function createDeferred<T>(): Deferred<T> {
 // esperar la instancia ya en curso" (`getCoreAsync`, que nunca llama
 // `createCore`) — el resultado no depende del orden de montaje.
 let creationStarted = false;
+
+/**
+ * El override con el que se creó el Core vivo (ADR-194 §9), antes de mezclar
+ * los overrides de medición. Sale de acá y no del store porque el store ya
+ * cambió cuando se necesita compararlo.
+ */
+let liveOverrides: EngineConfigOverrides | undefined;
+/** La recreación en curso al cerrar un documento, si hay una (ADR-194 §9). */
+let pendingRecreation: Promise<void> | undefined;
 let deferredCore = createDeferred<IAnonymizationCore>();
 
 /**
@@ -411,6 +421,8 @@ export async function initCore(config?: EngineConfigOverrides): Promise<IAnonymi
     });
     unsubscribeBridge = subscribe(instance.bus, stores);
     core = instance;
+    for (const consumer of busConsumers) consumer.detach = consumer.attach(instance.bus);
+    liveOverrides = config ?? {};
     exposeCoreForMeasurement(instance);
     deferredCore.resolve(instance);
     return instance;
@@ -443,13 +455,6 @@ export function getCore(): IAnonymizationCore {
 }
 
 /**
- * Libera la instancia actual del Core y desuscribe el bus-bridge. No forma
- * parte del contrato de UI (`React_Client.md` §2.1 no lo declara): existe
- * para poder testear `initCore`/`getCore` de forma aislada entre casos y,
- * eventualmente, para un flujo futuro de recreación del core (ADR-038 §7,
- * `performancePreset` sin documento abierto).
- */
-/**
  * Recrea el Core con un `EngineConfigOverrides` nuevo (ADR-125 §2, que
  * implementa lo que ADR-038 §7 ya había decidido: "sin documento abierto, la
  * UI recrea el core al vuelo — nada que perder").
@@ -465,24 +470,135 @@ export function getCore(): IAnonymizationCore {
  * llama con su modal todavía arriba, que es lo que hace que no haya dónde
  * soltar un PDF mientras tanto (ADR-125 §3).
  */
-export async function recreateCore(config: EngineConfigOverrides): Promise<void> {
-  await disposeCore();
-  await initCore(config);
+export function recreateCore(config: EngineConfigOverrides): Promise<void> {
+  return runExclusive(() => recreateCoreNow(config));
 }
 
+async function recreateCoreNow(config: EngineConfigOverrides): Promise<void> {
+  let disposeError: unknown;
+  try {
+    await disposeCore();
+  } catch (error) {
+    // `disposeCore` ya dejó el estado limpio: el Core viejo se da por perdido
+    // y se crea el nuevo, con su bridge y sus consumidores.
+    disposeError = error;
+  }
+  await initCore(config);
+  if (disposeError !== undefined) {
+    console.error("El Core anterior no se liberó del todo.", disposeError);
+  }
+}
+
+/**
+ * Dos recreaciones no corren a la vez (ADR-194 §9): cada una espera a la
+ * pendiente. `pendingRecreation` nunca rechaza; el error le llega solo a
+ * quien pidió la recreación.
+ */
+function runExclusive(task: () => Promise<void>): Promise<void> {
+  const previous = pendingRecreation;
+  const run = (async () => {
+    if (previous !== undefined) await previous;
+    await task();
+  })();
+  const settled = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  pendingRecreation = settled;
+  void settled.then(() => {
+    if (pendingRecreation === settled) pendingRecreation = undefined;
+  });
+  return run;
+}
+
+/**
+ * ADR-194 §9: al quedar la aplicación sin documento, si el override derivado
+ * difiere del que tiene el Core vivo, lo recrea. Sin diferencia no hace nada.
+ *
+ * Arranca de forma síncrona y deja la recreación en `pendingRecreation`:
+ * quien importa un documento espera `getCoreWhenReady()`, así que un PDF
+ * soltado mientras se recrea espera al Core nuevo en vez de encontrar ninguno
+ * (acá no hay modal, a diferencia de ADR-125 §3). La comparación se hace
+ * cuando le toca el turno, contra el Core que quede vivo. Si recrear falla,
+ * vuelve a crear el Core con el override anterior: la app queda usable.
+ */
+export function recreateCoreIfOverridesChanged(next: EngineConfigOverrides): void {
+  void runExclusive(async () => {
+    const previous = liveOverrides;
+    if (previous === undefined || core === undefined) return;
+    if (sameEngineConfigOverrides(previous, next)) return;
+    try {
+      await recreateCoreNow(next);
+    } catch (error) {
+      console.error("No se pudo aplicar el perfil de rendimiento.", error);
+      await initCore(previous);
+    }
+  });
+}
+
+/** El Core, esperando antes una recreación en curso (`recreateCoreIfOverridesChanged`). */
+export async function getCoreWhenReady(): Promise<IAnonymizationCore> {
+  while (pendingRecreation !== undefined) await pendingRecreation;
+  return getCoreAsync();
+}
+
+type BusConsumer = {
+  readonly attach: (bus: IAnonymizationCore["bus"]) => Unsubscribe;
+  detach?: Unsubscribe | undefined;
+};
+const busConsumers = new Set<BusConsumer>();
+
+/**
+ * Suscribe un consumidor al bus del Core **vivo** (ADR-194 §9). Cada Core
+ * tiene su propio bus: quien se suscribe una sola vez queda escuchando el de
+ * un Core que ya no existe. `attach` se llama con el bus de cada Core nuevo,
+ * y la suscripción anterior se suelta antes (al liberar el Core viejo), así
+ * que nunca hay dos a la vez. Si todavía no hay Core, se suscribe cuando
+ * `initCore` lo cree. Devuelve la función que da de baja al consumidor.
+ */
+export function subscribeToLiveCore(attach: BusConsumer["attach"]): Unsubscribe {
+  const consumer: BusConsumer = { attach };
+  busConsumers.add(consumer);
+  if (core !== undefined) consumer.detach = attach(core.bus);
+  return () => {
+    consumer.detach?.();
+    consumer.detach = undefined;
+    busConsumers.delete(consumer);
+  };
+}
+
+function detachBusConsumers(): void {
+  for (const consumer of busConsumers) {
+    consumer.detach?.();
+    consumer.detach = undefined;
+  }
+}
+
+/**
+ * Libera la instancia actual del Core y desuscribe el bus-bridge y los consumidores
+ * del bus. Si `dispose` del Core falla, igual deja el estado limpio y propaga el error. No forma
+ * parte del contrato de UI (`React_Client.md` §2.1 no lo declara): existe
+ * para poder testear `initCore`/`getCore` de forma aislada entre casos y,
+ * eventualmente, para un flujo futuro de recreación del core (ADR-038 §7,
+ * `performancePreset` sin documento abierto).
+ */
 export async function disposeCore(): Promise<void> {
+  detachBusConsumers();
   if (unsubscribeBridge) {
     unsubscribeBridge();
     unsubscribeBridge = undefined;
   }
-  if (core) {
-    await core.dispose();
-    core = undefined;
+  const instance = core;
+  core = undefined;
+  try {
+    if (instance) await instance.dispose();
+  } finally {
+    // Resetea también el estado de arranque (PR17.3): sin esto, un
+    // `getCoreAsync()` posterior a `disposeCore()` colgaría esperando el
+    // `deferredCore` ya resuelto/rechazado del ciclo anterior en vez de uno
+    // limpio para el próximo `initCore()`.
+    creationStarted = false;
+    liveOverrides = undefined;
+    deferredCore = createDeferred<IAnonymizationCore>();
   }
-  // Resetea también el estado de arranque (PR17.3): sin esto, un
-  // `getCoreAsync()` posterior a `disposeCore()` colgaría esperando el
-  // `deferredCore` ya resuelto/rechazado del ciclo anterior en vez de uno
-  // limpio para el próximo `initCore()`.
-  creationStarted = false;
-  deferredCore = createDeferred<IAnonymizationCore>();
 }
