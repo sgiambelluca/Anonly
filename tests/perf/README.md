@@ -1071,3 +1071,299 @@ medianas e incrementos. Se inhibe reposo y la copia de snapshots ARIA de
 Playwright; se registran presión/swap y se restauran los dist previos con
 verificación de hash. Fuentes, defaults y presupuestos de producto permanecen
 sin cambios.
+
+## Campaña de DPI descendente del OCR (`ocr-dpi-down`, `ultra-dpi`)
+
+Arnés de `docs/roadmap/OCR_DPI_Descendente_Campana_Plan.md`: ¿puede el OCR leer a 250
+o 200 dpi un escaneo de 300 dpi nativos sin perder detecciones, y cuánta memoria y
+tiempo ahorra? Dos fases, las dos en **Windows nativo (Git Bash)**, que es el banco que
+decide. En macOS el arnés solo sirve de humo: sus números no se informan ni se comparan
+con los de Windows (el rasterizado con GPU cambia los píxeles que recibe Tesseract).
+
+El arnés no cambia producto: aplica `ocr.dpi` por el canal de overrides de ADR-155
+(`installEngineOverrides`) y el Core reconoce a `min(ocr.dpi, tope de la página)`
+(ADR-163). El DPI efectivo de **cada** despacho `ocr-page` se demuestra con el observador
+de transporte de ADR-190 (`support/adr190Browser.ts`); una celda o corrida cuyo DPI
+efectivo no es el esperado queda **inválida**, y un brazo cuyo DPI efectivo no es el
+pedido (p. ej. `300` y `250` sobre un escaneo de unos 240 dpi) se marca «no efectivo en
+este corpus», no como fallo.
+
+### Primer paso en Windows: los dos humos
+
+Antes de gastar la matriz (Git Bash, sin WSL, sin Playwright ni Vitest abiertos, producto
+sin cambios sin commitear en `packages/` y `apps/`):
+
+```bash
+pnpm install && pnpm assets:mirror
+# Fase 1 (calidad): S10 con los brazos 300 y 150 (tres celdas, unos minutos)
+ANONLY_OCR_DPI_DOWN_SMOKE=1 ./tests/perf/run-ocr-dpi-down.sh
+# Fase 2 (tiempo y memoria): P2H, 2 reconocedores, 300 y 200 dpi (dos corridas de tiempo)
+ANONLY_OCR_POOL_DPI_SMOKE=1 ANONLY_OCR_POOL_PHASE=ultra-dpi ./tests/perf/run-ocr-pool.sh
+```
+
+Cada humo construye, corre, escribe sus archivos y agrega. El de la fase 1 tiene que
+mostrar `complete=true`, `armEffective: true` en las tres celdas, el brazo `150` perdiendo
+entidades que el `300` detecta y `sleep-detection.json` con `available: true`. El de la
+fase 2 imprime `complete=n/a` (le faltan rondas a propósito); lo que se mira es que cada
+JSON traiga `dpiEvidence.dispatch.effectiveDpis` igual al DPI pedido y que la reserva
+estimada baje con el DPI. `ANONLY_OCR_POOL_DPI_SMOKE=2` agrega una corrida de memoria
+(RSS natural) y una de cancelación. Humos con otros corpus:
+`ANONLY_OCR_DPI_DOWN_CORPUS=SR`, `ANONLY_OCR_POOL_DPI_PROFILES=SR`.
+
+### Fase 1: calidad (`run-ocr-dpi-down.sh`, `ocr-dpi-down.spec.ts`)
+
+```bash
+# Matriz completa: S12 S10 S8 S6 SD1..SD5 SE SR (+ R2 y R3 si están), brazos 300 250 200 150
+./tests/perf/run-ocr-dpi-down.sh
+# Con los reales (las comillas simples conservan las barras; sirve también /c/ruta/R2.pdf)
+ANONLY_REAL_DOC_R2='C:\ruta\neutra\R2.pdf' ./tests/perf/run-ocr-dpi-down.sh
+# Un corpus o unos brazos (p. ej. repetir un corpus invalidado, en otra carpeta)
+ANONLY_OCR_DPI_DOWN_CORPUS="S8 SD1" ANONLY_OCR_DPI_DOWN_ARMS="300 200" ./tests/perf/run-ocr-dpi-down.sh
+```
+
+Una instancia fría de Electron por celda (corpus x brazo), un reconocedor
+(`ocrPoolSize: 1`), NER activado. El brazo `300` se corre **dos veces** por corpus: la
+repetición 1 es la referencia y la 2 mide cuánto varían las cajas entre dos corridas
+idénticas. El runner invoca Playwright una vez por corpus (la referencia vive en memoria
+de ese proceso, que es lo que permite comparar los reales sin escribir su contenido) y
+vigila suspensión antes y después de cada corpus: un evento lo invalida entero.
+
+Variables de entorno:
+
+| Variable                         | Qué hace                                                                                       |
+| -------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `ANONLY_OCR_DPI_DOWN_SMOKE`      | `1`: humo (corpus `S10`, brazos `300 150`)                                                     |
+| `ANONLY_OCR_DPI_DOWN_CORPUS`     | Corpus a medir, separados por espacio (`S12 S10 S8 S6 SD1 SD2 SD3 SD4 SD5 SE SR R2 R3`)                         |
+| `ANONLY_OCR_DPI_DOWN_ARMS`       | DPI de los brazos (por defecto `300 250 200 150`); el `300` va siempre primero                 |
+| `ANONLY_OCR_DPI_DOWN_MIN_COVERAGE` | **Solo para explorar.** El umbral de cobertura del criterio 2 es 0,95, constante del arnés (decisión del humano, 2026-10-01) y se aplica sin la variable. Otro valor, o uno que no sea un número entre 0 y 1, se acepta pero **ningún brazo sale `pasa`** (quedan `indeterminado`), con la salvedad `min-coverage-override` o `min-coverage-invalid` y `cobertura=<valor>(EXPLORATORIO)` en la línea final. `summary.json` registra el valor crudo, el efectivo y si es el oficial |
+| `ANONLY_OCR_DPI_DOWN_ALLOW_PARTIAL` | `1`: seguir aunque falte `R2` (la matriz sale `parcial`). Sin esta variable y sin `R2`, el runner corta al inicio, antes del build; el humo no la necesita |
+| `ANONLY_OCR_DPI_DOWN_DRY_RUN`    | `1`: valida argumentos, escribe `ocr-dpi-down-run.json` y sale sin medir |
+| `ANONLY_OCR_DPI_DOWN_OUTPUT_DIR` | Carpeta de salida nueva (por defecto `.measure/ocr-dpi-down/<fecha>`); no se pisa una existente |
+| `ANONLY_REAL_DOC_R2`, `_R3`      | Rutas absolutas de los reales. Sin la variable, o con una ruta ilegible, el corpus se saltea y queda dicho |
+
+**Qué produce** (en `.measure/ocr-dpi-down/<carpeta>/`, ignorada por git):
+`ocr-dpi-down-cell-<corpus>-d<dpi>-rep<n>.json` por celda; `ocr-dpi-down-run.json`
+(corpus incluidos, saltados, brazos, umbral); `summary.json`; `validity.json`,
+`caveats.json` y `sleep-detection.json`; `campaign.log`, `playwright.log`,
+`system-pressure.txt`; commit, estado, hash del árbol de producto y de `tests/`, host,
+digest del build. Cada celda lleva: DPI efectivo por despacho y topes de página;
+entidades por tipo (esperadas, detectadas, perdidas, agregadas) contra la verdad
+(sintéticos) y contra el brazo `300` repetición 1; recall y precisión de tokens; cobertura
+de la caja de referencia por cada entidad común; veredicto del OSD con su `inkRatio`, pasos de
+recuperación, `upscale` y `unreadableInk`; y los motivos de invalidez. **Los registros de
+los reales llevan solo conteos por tipo, distribuciones y huellas**: nunca texto, valores
+de entidades, nombres de archivo ni rutas (el spec descarta las listas con valores y no
+escribe `ocrWords`); solo los sintéticos traen `syntheticDetail` con lo perdido y agregado.
+
+El resumen (`support/ocrDpiDownSummary.ts`, ejecutado con `tsx` desde
+`support/summarizeOcrDpiDownCli.ts`) aplica la regla de §6 y da, por brazo, uno de cuatro
+veredictos. **Solo dice `pasa` cuando midió todo lo que la regla exige; lo ausente, lo
+inválido y lo indeterminado nunca cuentan a favor.**
+
+- `parcial`: la matriz no está completa (§6.1). Corpus que deciden: `S12`, `S10`, `S8`, `SE`,
+  `SR`, `R2` y `SD1` a `SD5` juntas (`S6` no decide; `R3` decide solo si está en la
+  matriz). Falta un corpus, una celda de uno de ellos, el brazo `300` o el `150`, es un humo
+  (`smoke: true`), un subconjunto de corpus o no hay `ANONLY_REAL_DOC_R2`: todos los brazos
+  salen `parcial`, con los motivos en `matrix.reasons` y `PARCIAL` en la línea final. El
+  runner corre igual sin `R2`.
+- `no-pasa`: falla algún criterio en algún corpus que decide.
+- `indeterminado`: no falla ninguno, pero algún corpus o criterio quedó indeterminado (celda
+  inválida, piso del control, umbral de cobertura distinto del oficial, entidad común sin
+  caja medible, brazo efectivo solo en parte de las páginas o no efectivo en algún
+  sintético, control discriminante sin cumplir).
+- `pasa`: matriz completa, control discriminante en orden y los tres criterios cumplidos en
+  todos los corpus donde el brazo se evalúa.
+
+**DPI efectivo (§6.1).** Es por página (`effectivePages` en cada resultado). Si en ninguna
+página de un real el DPI efectivo es el pedido (`250` sobre `R2`), el brazo **no se evalúa
+ahí** y la línea final lo nombra (`no-evaluado=250@R2`); su despacho es el de `300`, así que
+si aun así difiere del control en entidades queda como `controlInconsistencies` y la
+salvedad `control-inconsistente`, sin cambiar el veredicto del brazo ahí. Si se aplicó en
+unas páginas y en otras no, el corpus es `indeterminado` y el informe dice en cuántas. En
+los sintéticos (300 dpi nativos) todo brazo tiene que ser efectivo: uno que no se evalúa en
+alguno que decide queda `indeterminado`.
+
+1. **Entidades.** Corpus limpios y reales, cada uno por separado: *piso del control* (las dos
+   repeticiones de `300` detectan exactamente lo mismo y, en sintéticos, al menos el 90 % de
+   la verdad; si no, el corpus queda `indeterminado` y se revisa el fixture,
+   `controlFloor`); el brazo no pasa si pierde una sola entidad que `300` detecta. `SD`, las
+   cinco variantes juntas (80 entidades): piso del control al 90 % de las 80, si no
+   `indeterminado`; el brazo no pasa si su total de pérdidas contra la verdad supera al de
+   `300`, y con un total igual o menor pasa (`sd`; el detalle por variante se informa y no
+   decide; no hay compensaciones ni «no concluyente»; `sd.perVariant` lista, por variante,
+   qué entidades de la verdad perdió cada uno, `lostByControl` y `lostByArm`, solo en
+   sintéticos: con totales un brazo puede pasar habiendo perdido entidades que `300` lee si
+   `300` pierde otras tantas, y el piso permite hasta 8 de cada lado). Lo que `300` ya pierde contra la
+   verdad no se le carga al brazo y queda en `controlIncompleteCorpora`. El resumen
+   muestra **siempre**, por corpus y brazo (incluido `300`), las pérdidas contra la verdad
+   (`entitiesLostVsTruth`) además de las pérdidas contra `300` (`entitiesLostVsControl`).
+2. **Cajas: cobertura**, la fracción del área de la caja de referencia (la de `300`) que queda
+   dentro de la del brazo (una caja que crece no penaliza). El brazo no pasa si alguna
+   entidad queda bajo 0,95; con una entidad común sin caja medible, el criterio es
+   `indeterminado`; un umbral distinto del oficial deja a todos `indeterminado`. La cobertura
+   entre las dos repeticiones de `300` va en `controlVariation`.
+3. **Cadena de ADR-190.** El brazo no pasa si tiene más páginas con `unreadableInk` o más
+   pasos de recuperación que la peor de las dos repeticiones de `300` en el corpus.
+
+`S6` se informa aparte (`nonDecidingCorpusReport`) y no decide. **Control discriminante
+(§6.5):** `150` tiene que perder al menos una entidad que `300` detecta en algún corpus que
+decide **donde `150` fue efectivo** (`S6` no cuenta, ni un corpus donde no se despachó a
+150 dpi). Si no pierde ninguna, sea cual sea su veredicto,
+`discriminantControlFailed` es `true`, la línea final dice `DETENER-CAMPANA=true` y ningún
+brazo sale `pasa`. Una celda ausente, inválida (sin `Ready`, sin despacho, DPI efectivo
+distinto del esperado, NER sin terminar, fuente sintética que no es de 300 dpi, hash de
+fixture distinto) o de un corpus invalidado por el runner deja ese corpus `indeterminado` y
+`complete: false`; nunca es un cero.
+
+**Continuaciones.** Cada corpus se toma **entero de una sola carpeta**: la última que lo
+tenga completo y sin invalidar; si ninguna lo tiene completo, la última no invalidada que
+tenga alguna celda, y el corpus queda incompleto (nunca se mezclan celdas de carpetas
+distintas dentro de un corpus). `validity.json` se aplica **por carpeta** (`corpus-<ID>`
+invalida ese corpus solo ahí): si solo carpetas que invalidaron el corpus lo tienen, sus
+celdas salen inválidas, no ausentes. La detección de suspensión y las salvedades de **todas**
+las carpetas llegan al resumen: `available` es `true` solo si lo fue en todas las que
+aportan celdas, y una continuación sin detección deja la salvedad. Lanzar el corpus de
+nuevo en otra carpeta (`ANONLY_OCR_DPI_DOWN_CORPUS=... ANONLY_OCR_DPI_DOWN_OUTPUT_DIR=...`) y
+agregar con las dos, en orden. `S6` ausente deja la salvedad `s6-ausente` y `S6-AUSENTE` en la
+línea final. Para reagregar sin volver a medir (un umbral distinto de 0,95 es solo exploratorio):
+
+```bash
+ANONLY_OCR_DPI_DOWN_MIN_COVERAGE=0.95 pnpm exec tsx tests/perf/support/summarizeOcrDpiDownCli.ts <carpeta> <carpeta> [continuación...]
+```
+
+**Corpus** (todos a 300 dpi nativos; el PDF se genera en un Chromium aparte que se cierra
+antes de medir y se cachea en `.measure/fixtures/`, con corpus, tamaño de letra,
+degradación, giros y escala en la clave):
+
+- `S12`, `S10`, `S8`, `S6`: una página A4, Helvetica a 12, 10, 8 y 6 pt, con las mismas 16
+  entidades (4 nombres para NER; 2 DNI, CUIT, teléfono, email, fecha, IBAN para Regex; CUIT
+  e IBAN con dígitos verificadores válidos), cada una en un renglón propio, repartidas en
+  la página; el relleno crece al achicar la letra. Los valores los reconocen los patrones
+  por defecto de `regex-engine` (lo verifica un test).
+- `SD1` a `SD5`: `S10` degradado de forma determinista al rasterizar (no dentro de la app),
+  **cinco variantes que difieren solo en la semilla del ruido** (190001 a 190005), cada una
+  con su fixture, su hash y su cache. **La receta no se calibra contra ningún brazo**: se
+  fijó por su aspecto, como una fotocopia legible para una persona (`photocopy-v2`):
+  desenfoque gaussiano de 1,0 px (0,085 mm a 300 dpi, menos que el de un escáner de
+  oficina), negro llevado a 40/255 y blanco a 235/255 (papel gris y tóner flojo, relación
+  de luminancia de casi 6 a 1, bien legible a simple vista) y ruido gaussiano de σ = 6
+  niveles (~2,4 % del rango: granulado visible que no se come los trazos). Todo en JS, sin
+  filtros del canvas, para no depender de la GPU. Si a 300 dpi pierde entidades, se
+  informa: no es un requisito que no pierda. (La receta anterior, calibrada hasta que `300`
+  leyera todo, dio un resultado no monótono con el DPI y se descartó.) El doble control de
+  `300` (dos corridas idénticas) se hace solo en `SD1`. **Dato del corpus:** el `inkRatio`
+  del OSD da 1 en `SD`, porque el ruido deja sin píxeles de blanco puro y el predicado de
+  ADR-190 cuenta como tinta cualquier píxel que no lo sea; ADR-190 nunca considera escasa
+  esta página. Queda en `corpusFacts` del resumen y en cada celda (`chain.osd`); no se
+  «arregla» recortando el ruido. El hash del fixture va en cada celda (`fixtureSha256`) y el
+  resumen verifica que sea el mismo en todas las celdas de un corpus; si una variante se
+  regeneró distinta a mitad de campaña, sus celdas quedan inválidas
+  (`fixtureHashMismatches`, `FIXTURE-REGENERADO` en la línea final).
+- `SE`: dos páginas de dos renglones (nombre y DNI) a 10 pt, la primera a 0° y la segunda
+  girada 180° al rasterizar.
+- `SR`: 20 páginas A4 con la **forma de R2** (palabras por página 290, 300, 335, 280, 270,
+  315, 340, 350, 385, 295, 360, 330, 295, 290, 305, 355, 285, 150, 60 y 0; densidad de R2
+  redondeada a 5, constantes del generador `support/ocrDpiDownSr.ts`), Helvetica 12 pt con
+  interlineado 1,5 (18 pt) y márgenes de 50 pt (la página de 385 palabras usa 39 de los 41
+  renglones: no hizo falta tocarlos), 9 entidades por página, texto inventado con semilla
+  `sr-v1`. La última página queda en blanco. Copia la densidad, no el contenido ni la
+  calidad de un escaneo real: **no reemplaza a un real a 300 dpi**.
+- `R2` (real, resolución nativa inferida de unos 240 dpi: `300` y `250` son el mismo
+  despacho) y `R3` (real a 300 dpi, opcional): por `ANONLY_REAL_DOC_R2` y `_R3`.
+
+**Tamaño y duración.** Con todos los corpus sintéticos son 51 celdas: 6 corpus (`S12`, `S10`,
+`S8`, `S6`, `SE`, `SR`) x 5 celdas, `SD1` con 5 y `SD2` a `SD5` con 4 cada una (`300` dos
+veces solo en `SD1`; `250`, `200`, `150` una). `R2` agrega 5 y `R3`, otras 5. En la Mac una celda
+de una página tardó entre 15 y 40 s y una de `S6` unos 40 s más por la recuperación del OSD;
+una de `SR` va de 1,5 a 3 min por celda a 300 dpi con un reconocedor. Estimación para el
+i5-12400: de 2 a 3,5 horas la matriz sin reales, más lo que tarde `R2`, más el build.
+
+### Fase 2: tiempo y memoria (`run-ocr-pool-dpi.sh`, fase `ultra-dpi`)
+
+La fase `ultra` con una dimensión de DPI. `ANONLY_OCR_POOL_PHASE=ultra-dpi
+./tests/perf/run-ocr-pool.sh` delega en `run-ocr-pool-dpi.sh` (o se lo invoca directo); las
+fases `ultra`, `profiles-gap` y las demás no cambian. Reconocedores 2, 4 y 6, todos con
+128 MiB de presupuesto de imágenes vivas; corpus `P2H` (20 páginas a 300 dpi, texto de P2),
+`SR` y `R3` si existe. **La lista de DPI es un parámetro**: la decide el planificador con el
+resultado de la fase 1.
+
+```bash
+# Tanda completa con los DPI que pasaron la fase 1 (300 siempre: es el control)
+ANONLY_OCR_POOL_PHASE=ultra-dpi ANONLY_OCR_POOL_DPI_ARMS="300 250 200" ./tests/perf/run-ocr-pool.sh
+# Con R3
+ANONLY_OCR_POOL_PHASE=ultra-dpi ANONLY_REAL_DOC_R3='C:\ruta\neutra\R3.pdf' ./tests/perf/run-ocr-pool.sh
+```
+
+| Variable                        | Qué hace                                                                                  |
+| ------------------------------- | ----------------------------------------------------------------------------------------- |
+| `ANONLY_OCR_POOL_DPI_ARMS`      | DPI a medir (por defecto `300 250 200`); tiene que incluir `300`                           |
+| `ANONLY_OCR_POOL_DPI_POOLS`     | Reconocedores (por defecto `2 4 6`); tiene que incluir `2` (referencia de las huellas)     |
+| `ANONLY_OCR_POOL_DPI_PROFILES`  | Corpus (por defecto `P2H SR R3`); `R3` sin variable se saltea y queda dicho                |
+| `ANONLY_OCR_POOL_DPI_SMOKE`     | `1`: humo (`P2H`, 2 reconocedores, `300 200`, una corrida de tiempo por combinación); `2`: más una de memoria y una de cancelación |
+| `ANONLY_OCR_POOL_OUTPUT_DIR`    | Carpeta nueva (por defecto `.measure/ocr-pool/<fecha>-dpi`)                                |
+| `ANONLY_REAL_DOC_R3`            | Ruta absoluta del real a 300 dpi (opcional)                                                |
+
+Por corpus y combinación (reconocedores x DPI), como en `ultra`: tres rondas de tiempo
+intercaladas (adelante, al revés y rotadas), tres instancias frías de RSS natural del árbol
+(fase `pool-rss`, cada 150 ms, sin CDP ni barrera), huellas de OCR, NER y Grouping contra
+`dpi 300` con dos reconocedores del mismo corpus y la misma ronda, ocupación pico y una
+cancelación con trabajo activo (fuera de SLA se conserva y se marca). Cada corrida lleva
+`dpiEvidence` (DPI efectivo por despacho, pasos de recuperación, `upscale`, tinta ilegible)
+y pide el override con el DPI (`-d<dpi>` en el run ID y en el nombre del artefacto); un DPI
+efectivo distinto del esperado invalida la corrida.
+
+**Qué produce** (`.measure/ocr-pool/<carpeta>/`): `ocr-pool-<tipo>-<pool>-<corpus>-d<dpi>-r<n>.json`
+(la memoria queda como `ocr-pool-pool-rss-...`), `ocr-pool-dpi-run.json`, `validity.json`,
+`caveats.json`, `sleep-detection.json`, presión del sistema y `summary.json`
+(`support/ocrPoolDpiSummary.ts` vía `support/summarizeOcrPoolDpiCli.ts`). El resumen da, por
+corpus, DPI y reconocedores: medianas de `Ready` y de OCR, mediana del pico de RSS, ocupación
+(si alcanzó el tamaño del pool), reserva estimada por página y cuántas páginas entran en
+128 MiB (con 300 dpi tres; con 200, ocho), DPI efectivo, huellas contra la referencia
+(deben coincidir con el DPI de control; con otro DPI se informa si difieren), cancelación y
+el ahorro contra el mismo pool a 300 dpi (`versusControlDpi`: cociente de RSS, delta en
+bytes, cocientes de OCR y de `Ready`). Sale con 1 si no está completo. **Con P2H y SR no se
+afirma ocupación** (el presupuesto puede frenar, y eso es lo que se mide).
+
+**Tamaño y duración.** Con la lista por defecto son 9 combinaciones por corpus: 27 de
+tiempo, 27 de memoria y 9 de cancelación = 63 corridas por corpus (P2H y SR: 126). En la Mac,
+con 2 reconocedores, `P2H` tardó 16 s a 300 dpi y 9 s a 200; `SR` 59 s y 52 s. Estimación
+para el i5-12400: de 1 a 1,5 horas por corpus.
+
+### Qué mirar en la primera corrida
+
+1. `campaign.log` sin `ABORTA`; `sleep-detection.json` con `available: true` y `caveats.json`
+   ausente o con salvedades que se entiendan. Una salvedad no cambia `complete`, pero hay que
+   leerla (`validityCaveats` en `summary.json` y al final de la línea).
+2. Fase 1: en cada celda `dispatch.effectiveDpis` es el DPI del brazo, los topes de página
+   son ~301 (la fuente de 300 dpi) y `armEffective` es `true` (salvo `R2`).
+3. Mirar `controlIncompleteCorpora` (lo que `300` ya pierde contra la verdad; en `SD` ya no es
+   un requisito que no pierda). En la Mac, `S6` perdió a 300
+   dpi el email `contacto.estudio@example.org` aunque el recall de tokens era 1 (el `@`): si
+   pasa también en Windows es un hallazgo del producto o del fixture, no un brazo.
+4. `150` pierde entidades en algún corpus (en la Mac, los dos emails de `S10`); si no
+   (`DETENER-CAMPANA=true`), parar y revisar el instrumento.
+5. Cadena de ADR-190: en la Mac, `S6` dispara un paso de recuperación (el OSD da 180 sobre
+   una página derecha); mirar si pasa lo mismo y a qué DPI.
+6. `controlVariation.overallCoverage`: la cobertura entre las dos corridas de `300`.
+   `thresholdBelowControlVariation` avisa si el umbral queda por debajo de lo que varía el
+   propio control.
+7. `SR`, página en blanco: se despacha OCR (0 palabras, sin `unreadableInk`, sin fallo);
+   queda registrado en las celdas y en las corridas de la fase 2.
+8. Fase 2: `reservation.perPageBytes` baja con el DPI, `pagesAdmittedAt128MiB` sube,
+   `fingerprintsVsReference` coincide a 300 dpi con cualquier pool (`qualityExactAtControlDpi`)
+   y `invalidRuns` está vacío.
+9. En los reales, abrir un JSON de celda y confirmar que no hay texto ni valores (solo
+   conteos por tipo, distribuciones y huellas).
+10. Tope de página de los sintéticos: se espera ~301 (la fuente de 300 dpi; el 300 se pide y
+    sale a 300). Si en Windows sale 299, el fixture se sigue aceptando (tolerancia de ±1 dpi)
+    pero el brazo `300` sale a 299: el DPI efectivo es `min(pedido, tope)` y la celda queda
+    «no efectiva» para `300`; revisar el resumen antes de seguir.
+11. Los hashes de los fixtures (`fixtureSha256`) van a diferir de los de la Mac: el
+    rasterizado del texto depende de la plataforma. Lo que importa es que sean iguales en todas
+    las celdas de un corpus; si no, `fixtureHashMismatches` y `FIXTURE-REGENERADO`.
+12. Si NER no reconoce los nombres de `SR` a 300 dpi, el corpus queda `indeterminado` por el
+    piso del control (`controlFloor.SR`), no aprobado ni reprobado: es un hallazgo.
+13. La referencia de los reales vive solo en la memoria del proceso de cada corpus (no se
+    escriben valores): si el proceso muere a mitad de un corpus real, sus celdas siguientes
+    quedan sin comparación y el corpus `indeterminado`. Los sintéticos rehidratan la
+    referencia desde el JSON de la celda.
