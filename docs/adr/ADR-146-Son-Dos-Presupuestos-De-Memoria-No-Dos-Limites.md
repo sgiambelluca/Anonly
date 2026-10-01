@@ -3,6 +3,7 @@
 # ADR-146 — Son dos presupuestos de memoria, no dos límites del mismo
 
 - **Estado**: Accepted (**§1 precisado y §6 ampliado el 2026-09-10**, tras medir con el instrumento ya corregido: M1 es una **cota inferior**, no una medida de demanda, y la atribución compara **picos entre sí**, no diferencias contra una línea de base. Ver la enmienda al final de la Decisión. **§7ter, 2026-09-17, decidido por el humano**: «fuera de fase» mezclaba dos casos y descartó 12 corridas válidas; M2 pasa a medirse dentro de la ventana de fases y el pico posterior a `Ready` se reporta como métrica propia)
+- **Enmendado por**: ADR-192 (2026-09-30): el presupuesto de M2 de §1 (~1,6 GB con OCR y NER, ~870 MB sin ellos) se reemplaza por techos medidos por perfil, **P1 ≤ 2,0 GB y P2 ≤ 3,0 GB**, para un equipo mínimo de 8 GB; §6 se aplica en Windows nativo antes de cada release. M1 no cambia.
 - **Fecha**: 2026-09-09
 - **Decidido por**: El planificador, resolviendo D-06 del plan de campaña de hardening (§2, §2.1, §15).
 - **Relacionado con**: `00_Project_Vision.md` §7 (la métrica contractual), `07_Performance_Strategy.md` §1/§7/§11.4, ADR-130/132 (el contenedor, que es dónde se mide ahora), ADR-080 (workers liberables por idle)
@@ -63,7 +64,8 @@ de la aplicación durante la corrida. Es la métrica que gobierna "¿entra en el
 equipo del usuario?".
 
 - Presupuesto: **~1,6 GB** con OCR y NER cargados; **~870 MB** sin ellos, que es
-  lo que ya dice §7.1 y que ahora queda etiquetado como M2.
+  lo que ya dice §7.1 y que ahora queda etiquetado como M2. **Reemplazado por
+  ADR-192 (2026-09-30)**: techos medidos por perfil, P1 ≤ 2,0 GB y P2 ≤ 3,0 GB.
 
 Ningún reporte de memoria puede omitir de cuál de las dos habla. "Bajó la
 memoria" sin la etiqueta no es un resultado.

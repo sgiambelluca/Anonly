@@ -2,7 +2,7 @@
 
 > Plataforma de **anonimización documental 100% local**. Detecta, agrupa y reemplaza información sensible en archivos PDF y produce un PDF completamente nuevo donde la información original no es recuperable. Ningún byte del documento sale de la máquina del usuario.
 
-**Anonly se entrega como aplicación de escritorio** para macOS y Windows (ADR-130). Se baja el instalador una vez y desde ahí funciona sin conexión: el modelo de detección de nombres y los binarios de OCR viajan adentro del paquete, así que no se descarga nada en el primer uso.
+**Anonly se entrega como aplicación de escritorio** para macOS y Windows (ADR-130). **Equipo mínimo soportado: 8 GB de RAM** (ADR-192): un documento escaneado largo puede usar hasta unos 3 GB mientras se procesa. Se baja el instalador una vez y desde ahí funciona sin conexión: el modelo de detección de nombres y los binarios de OCR viajan adentro del paquete, así que no se descarga nada en el primer uso.
 
 ### Lo único que la app le pide a internet
 

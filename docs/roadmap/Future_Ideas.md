@@ -320,6 +320,9 @@ mediana de **2.237 ms** y **209,10 MiB** al pico de suma de working sets frente
 al baseline sin recuperación. El humano aceptó ese costo residual para avanzar
 con la revisión de la branch; el sondeo no demuestra cumplimiento del
 presupuesto M2 de ADR-146, que ya estaba excedido históricamente en Windows.
+**ADR-192 (2026-09-30)** reemplazó ese presupuesto por techos medidos (P1 2,0 GB,
+P2 3,0 GB, equipo mínimo de 8 GB) y dejó como meta de la v1.0 bajarlos para
+soportar equipos más chicos: esta rama es una de las palancas.
 
 Si se retoma, buscar menos trabajo o menos memoria en esa rama sin volver a
 perder el DNI de los 16/16 PDF escasos ni convertir las cuatro páginas de

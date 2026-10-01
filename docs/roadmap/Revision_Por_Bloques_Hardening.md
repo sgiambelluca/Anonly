@@ -703,6 +703,13 @@ cosmético: un `unsubscribe()` fuera de `finally` en un test.
    exacto leído por OCR, que difiere entre plataformas por la rasterización
    con GPU (`OCR_Entre_Plataformas_Medicion.md`), y `scenario-5` depende del
    modelo de NER real y de una ventana de 30 s para el texto de estado.
+
+   **M2 de memoria (ADR-192, 2026-09-30).** En la misma sesión de Windows,
+   con la app construida: `pnpm exec playwright test
+   --config=playwright.perf.config.ts tests/perf/memory.spec.ts
+   --repeat-each=3`. El máximo de M2 de P1 no puede superar 2,0 GB ni el de
+   P2 3,0 GB. Si alguno lo supera, la decisión vuelve al humano con el
+   número.
 2. **PR a `main`.** CI (`.github/workflows/ci.yml`) solo corre en push o PR
    contra `main`, así que **nunca corrió sobre esta branch**. El PR es la
    primera vez: esperar CI verde antes de mergear. CI corre en Linux y macOS, no en Windows: Windows queda cubierto por los gates locales de cada ronda y por la suite pesada del punto 1.
