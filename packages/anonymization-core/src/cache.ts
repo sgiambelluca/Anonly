@@ -29,7 +29,12 @@ export interface LruCacheOptions {
   readonly maxBytes?: number;
 }
 
-export class LruCache implements ICache {
+/** Caché del host: `ICache` más el borrado por prefijo (interno al façade, no es contrato público). */
+export interface PrefixDeletableCache extends ICache {
+  deleteByPrefix(prefix: string): void;
+}
+
+export class LruCache implements PrefixDeletableCache {
   private readonly store = new Map<string, CacheEntry>();
   private readonly maxItems: number;
   private readonly maxBytes: number;
@@ -76,6 +81,13 @@ export class LruCache implements ICache {
     if (existing === undefined) return;
     this.totalBytes -= existing.bytes;
     this.store.delete(key);
+  }
+
+  /** ADR-145 §5: borra toda entrada cuya clave empieza con `prefix`. */
+  deleteByPrefix(prefix: string): void {
+    for (const key of [...this.store.keys()]) {
+      if (key.startsWith(prefix)) this.delete(key);
+    }
   }
 
   clear(): void {

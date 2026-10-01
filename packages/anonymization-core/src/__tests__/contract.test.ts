@@ -33,8 +33,11 @@ import {
   createMockLogger,
   createPage,
   createPdfEngineOutput,
+  createOcrWorkerHarness,
   createRealBus,
   createWord,
+  runMessagesOf,
+  runOcrPage,
   makeOrchestratorWithRealDetection,
   wireHappyPathSpies,
 } from "./fixtures/test-helpers.js";
@@ -131,6 +134,49 @@ describe("Orchestrator — contract tests", () => {
       }
     } finally {
       vi.useRealTimers();
+    }
+  });
+
+  // T-5 / ADR-164 (Orchestrator §14).
+  it("createCore wires the ocr-orientation factory to ocr-orient jobs", async () => {
+    const harness = createOcrWorkerHarness(new Map([[0, 90]]));
+    const core = await createCore(undefined, {
+      workers: { ocr: harness.pageFactory, "ocr-orientation": harness.orientationFactory },
+    });
+    try {
+      await runOcrPage(core, 0);
+
+      expect(harness.orientationWorkers).toHaveLength(1);
+      const [orientRun] = runMessagesOf(harness.orientationWorkers[0]!);
+      expect(orientRun).toMatchObject({
+        type: "RUN",
+        jobType: "ocr-orient",
+        payload: { documentId: "doc-1", pageIndex: 0, timeoutMs: 60000 },
+      });
+      // La factory de ocr-page nunca recibe el job de orientación.
+      const pageJobTypes = harness.pageWorkers
+        .flatMap((w) => runMessagesOf(w))
+        .map((m) => m.jobType);
+      expect(pageJobTypes.length).toBeGreaterThan(0);
+      expect(pageJobTypes.every((type) => type === "ocr-page")).toBe(true);
+    } finally {
+      await core.dispose();
+    }
+  });
+
+  it("dispose releases the ocr-page and ocr-orientation pools", async () => {
+    const harness = createOcrWorkerHarness(new Map([[0, 0]]));
+    const core = await createCore(undefined, {
+      workers: { ocr: harness.pageFactory, "ocr-orientation": harness.orientationFactory },
+    });
+    await runOcrPage(core, 0);
+    expect(harness.orientationWorkers.length).toBeGreaterThan(0);
+    expect(harness.pageWorkers.length).toBeGreaterThan(0);
+
+    await core.dispose();
+
+    for (const worker of [...harness.orientationWorkers, ...harness.pageWorkers]) {
+      expect(worker.terminate).toHaveBeenCalled();
     }
   });
 

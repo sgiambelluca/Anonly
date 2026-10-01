@@ -52,7 +52,11 @@ import { vi } from "vitest";
 import { LruCache } from "../../cache.js";
 import { mergeEngineConfig } from "../../config.js";
 import { PipelineOrchestrator } from "../../orchestrator.js";
-import type { AnonymizationCoreEngines, ImportDocumentInput } from "../../types.js";
+import type {
+  AnonymizationCoreEngines,
+  IAnonymizationCore,
+  ImportDocumentInput,
+} from "../../types.js";
 import type { WorkerPool } from "../../worker-pool.js";
 
 export function createMockLogger(): ILogger {
@@ -539,4 +543,158 @@ export function createFakeWorker(): FakeWorker {
       for (const listener of [...errorListeners]) listener(errorEvent);
     },
   };
+}
+
+// ─── T-5 / ADR-164: workers remotos falsos para ocr-page y ocr-orient ───
+
+type OcrAngle = 0 | 90 | 180 | 270;
+
+export interface OcrWorkerHarness {
+  readonly orientationWorkers: FakeWorker[];
+  readonly pageWorkers: FakeWorker[];
+  readonly orientationFactory: () => FakeWorker;
+  readonly pageFactory: () => FakeWorker;
+}
+
+/**
+ * Fakes remotos que responden el sobre real (`{ orientation, inkRatio,
+ * osdHadVerdict }` y `{ words, confidence }`) sin ejecutar `run()` (Orchestrator
+ * §14, T-5). El ángulo de cada página sale de `anglesByPage`.
+ */
+export function createOcrWorkerHarness(anglesByPage: ReadonlyMap<number, OcrAngle>): OcrWorkerHarness {
+  const orientationWorkers: FakeWorker[] = [];
+  const pageWorkers: FakeWorker[] = [];
+
+  const autoReply = (
+    worker: FakeWorker,
+    result: (payload: { pageIndex: number }) => unknown,
+  ): void => {
+    worker.postMessage.mockImplementation(
+      (message: { type: string; jobId: string; payload: { pageIndex: number } }) => {
+        // Solo los `RUN`: un `CANCEL` (p. ej. al disponer) no trae payload.
+        if (message.type !== "RUN") return;
+        setTimeout(() => {
+          worker.emitMessage({
+            type: "COMPLETED",
+            jobId: message.jobId,
+            result: result(message.payload),
+          });
+        }, 0);
+      },
+    );
+  };
+
+  return {
+    orientationWorkers,
+    pageWorkers,
+    orientationFactory: () => {
+      const worker = createFakeWorker();
+      autoReply(worker, ({ pageIndex }) => ({
+        orientation: anglesByPage.get(pageIndex) ?? 0,
+        inkRatio: 0.5,
+        osdHadVerdict: true,
+      }));
+      orientationWorkers.push(worker);
+      return worker;
+    },
+    pageFactory: () => {
+      const worker = createFakeWorker();
+      autoReply(worker, ({ pageIndex }) => ({
+        words: [createWord({ text: "Hola", pageIndex, source: "ocr", confidence: 0.9 })],
+        confidence: 0.9,
+      }));
+      pageWorkers.push(worker);
+      return worker;
+    },
+  };
+}
+
+/** Mensajes `RUN` que recibió un worker falso, en orden. */
+export function runMessagesOf(worker: FakeWorker): ReadonlyArray<{
+  readonly type: string;
+  readonly jobType: string;
+  readonly payload: { readonly pageIndex: number; readonly orientation?: number };
+}> {
+  return worker.postMessage.mock.calls.map(
+    ([message]) =>
+      message as {
+        readonly type: string;
+        readonly jobType: string;
+        readonly payload: { readonly pageIndex: number; readonly orientation?: number };
+      },
+  );
+}
+
+/** Procesa una página por `core.engines.ocr` con una imagen mínima (ADR-164). */
+export function runOcrPage(core: IAnonymizationCore, pageIndex: number): Promise<unknown> {
+  return core.engines.ocr.processPage(
+    {
+      documentId: "doc-1",
+      pageIndex,
+      image: { bytes: new ArrayBuffer(8), format: "png", widthPx: 10, heightPx: 10 },
+      dpi: 300,
+      languages: ["spa"],
+    },
+    {
+      bus: core.bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      abortSignal: new AbortController().signal,
+      config: mergeEngineConfig(),
+    },
+  );
+}
+
+/**
+ * Pipeline falso de Transformers para `createCore` sin factory de `ner`: carga
+ * (reportando progreso, como la librería) y clasifica sin entidades.
+ * `classifyGate` permite dejar una inferencia en vuelo.
+ */
+export function createInProcessNerPipelineMock(classifyGate?: () => Promise<void>): {
+  readonly implementation: (
+    task: string,
+    model: string,
+    options?: { readonly progress_callback?: (event: unknown) => void },
+  ) => Promise<unknown>;
+} {
+  const classifier = Object.assign(
+    async (): Promise<ReadonlyArray<never>> => {
+      await classifyGate?.();
+      return [];
+    },
+    { dispose: (): Promise<void> => Promise.resolve() },
+  );
+  return {
+    implementation: (_task, _model, options) => {
+      options?.progress_callback?.({ status: "progress", progress: 50, loaded: 50, total: 100 });
+      return Promise.resolve(classifier);
+    },
+  };
+}
+
+/** Eventos `NER_MODEL_*` del bus del core, en orden. */
+export function recordNerModelEvents(core: IAnonymizationCore): string[] {
+  const seen: string[] = [];
+  core.bus.on(EventChannel.Ner, EngineEvents.NER_MODEL_LOADING, () => seen.push("loading"));
+  core.bus.on(EventChannel.Ner, EngineEvents.NER_MODEL_READY, () => seen.push("ready"));
+  return seen;
+}
+
+/** Procesa una página de NER por `core.engines.ner` (`createCore` real). */
+export function runNerPage(core: IAnonymizationCore, pageIndex: number): Promise<unknown> {
+  return core.engines.ner.processPage(
+    {
+      documentId: "doc-1",
+      pageIndex,
+      text: "Juan",
+      words: [createWord({ text: "Juan", pageIndex })],
+    },
+    {
+      bus: core.bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      abortSignal: new AbortController().signal,
+      config: mergeEngineConfig({ workerPool: { nerIdleDisposeMs: 500 } }),
+    },
+  );
 }

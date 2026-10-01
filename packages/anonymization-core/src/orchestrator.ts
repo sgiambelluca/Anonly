@@ -55,7 +55,6 @@ import {
   type ExportOptions,
   type ExportRequested,
   type GroupingFinished,
-  type ICache,
   type IEventBus,
   type ILogger,
   type ManualEntityRequest,
@@ -91,6 +90,7 @@ import {
   previewBlobKey,
   previewPrefixFor,
 } from "./blob-tracker.js";
+import type { PrefixDeletableCache } from "./cache.js";
 import { OrchestratorDisposedError } from "./errors.js";
 import { selectLineWords } from "./line-words.js";
 import { PipelineStateStore } from "./pipeline-state.js";
@@ -102,10 +102,12 @@ import type {
 } from "./types.js";
 import { WorkerPoolManager, type ManagedPoolKey } from "./worker-pool.js";
 
+const OCR_WORDS_PREFIX = "ocr-words:";
+
 function ocrWordsCacheKey(documentId: string, pageIndex: number): string {
   // Formato de clave documentado (ADR-014 §Decisión, ADR-021 §4): el lado
   // host del OcrPool deposita las Word[] acá — hoy, el propio OcrEngine.
-  return `ocr-words:${documentId}:${pageIndex}`;
+  return `${OCR_WORDS_PREFIX}${documentId}:${pageIndex}`;
 }
 
 /**
@@ -229,7 +231,7 @@ const CHECKPOINT_BLOCKED_STAGES: ReadonlySet<PipelineStage> = new Set([
 export interface PipelineOrchestratorOptions {
   readonly bus: IEventBus;
   readonly logger: ILogger;
-  readonly cache: ICache;
+  readonly cache: PrefixDeletableCache;
   readonly config: EngineConfig;
   readonly engines: AnonymizationCoreEngines;
   /**
@@ -249,7 +251,7 @@ export interface PipelineOrchestratorOptions {
 export class PipelineOrchestrator implements IPipelineOrchestrator {
   private readonly bus: IEventBus;
   private readonly logger: ILogger;
-  private readonly cache: ICache;
+  private readonly cache: PrefixDeletableCache;
   private readonly config: EngineConfig;
   private readonly engines: AnonymizationCoreEngines;
 
@@ -988,6 +990,8 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     this.mediatedPreviewControllers.delete(documentId);
     this.blobTracker.revokeByPrefix(previewPrefixFor(documentId));
     this.blobTracker.revokeByPrefix(exportPrefixFor(documentId));
+    // ADR-145 §5: los depósitos de palabras de OCR mueren con el documento.
+    this.cache.deleteByPrefix(`${OCR_WORDS_PREFIX}${documentId}:`);
     this.state.delete(documentId);
     this.releaseActiveDocument(documentId);
 
@@ -1003,6 +1007,7 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     this.disposed = true;
 
     this.abortRegistry.clear();
+    this.cache.deleteByPrefix(OCR_WORDS_PREFIX);
     this.pools.disposeAll();
     this.blobTracker.revokeAll();
     this.state.clear();

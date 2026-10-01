@@ -15,8 +15,16 @@ import {
 } from "@anonly/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const pipelineMock = vi.hoisted(() => vi.fn());
+
+vi.mock("@huggingface/transformers", () => ({
+  pipeline: pipelineMock,
+  env: { allowRemoteModels: true, localModelPath: "/models/", backends: { onnx: { wasm: {} } } },
+}));
+
 import { exportBlobKey, previewBlobKey } from "../blob-tracker.js";
 import { LruCache } from "../cache.js";
+import { createCore } from "../index.js";
 import { selectLineWords } from "../line-words.js";
 import { PipelineOrchestrator } from "../orchestrator.js";
 import { WorkerPool } from "../worker-pool.js";
@@ -29,19 +37,88 @@ import {
   createFakeWorker,
   createImportInput,
   createMockEngines,
+  createInProcessNerPipelineMock,
   createMockLogger,
+  createOcrWorkerHarness,
   createPage,
   createPdfEngineOutput,
   createRealBus,
   createRenderPageOutput,
   createReplacement,
   createWord,
+  recordNerModelEvents,
+  runMessagesOf,
+  runNerPage,
+  runOcrPage,
   wireHappyPathSpies,
 } from "./fixtures/test-helpers.js";
 
 describe("Orchestrator — edge cases", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  // NER §13 caso 33, última frase (ADR-167 §4): la baja no toca un pool con trabajo.
+  it("an idle release blocked by an in-flight ner job unloads nothing", async () => {
+    let gate: Promise<void> = Promise.resolve();
+    let openGate: () => void = () => {};
+    pipelineMock.mockReset();
+    pipelineMock.mockImplementation(createInProcessNerPipelineMock(() => gate).implementation);
+    vi.useFakeTimers();
+    try {
+      const core = await createCore({ workerPool: { nerIdleDisposeMs: 500 } });
+      try {
+        const events = recordNerModelEvents(core);
+        await runNerPage(core, 0);
+
+        // Vence el temporizador a los 500 ms contados desde la página 0; una
+        // inferencia en vuelo lo tiene que encontrar sin nada que soltar.
+        await vi.advanceTimersByTimeAsync(400);
+        gate = new Promise<void>((resolve) => {
+          openGate = resolve;
+        });
+        const inFlight = runNerPage(core, 1);
+        await vi.advanceTimersByTimeAsync(0);
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(core.engines.ner.isModelReady()).toBe(true);
+
+        openGate();
+        await inFlight;
+        await runNerPage(core, 2);
+
+        expect(pipelineMock).toHaveBeenCalledTimes(1);
+        expect(events).toEqual(["loading", "ready"]);
+      } finally {
+        await core.dispose();
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // T-5 / ADR-164 (Orchestrator §14).
+  it("two cores do not share OSD workers", async () => {
+    const harnessA = createOcrWorkerHarness(new Map([[0, 90]]));
+    const harnessB = createOcrWorkerHarness(new Map([[0, 180]]));
+    const coreA = await createCore(undefined, {
+      workers: { ocr: harnessA.pageFactory, "ocr-orientation": harnessA.orientationFactory },
+    });
+    const coreB = await createCore(undefined, {
+      workers: { ocr: harnessB.pageFactory, "ocr-orientation": harnessB.orientationFactory },
+    });
+    try {
+      await runOcrPage(coreA, 0);
+      expect(harnessA.orientationWorkers).toHaveLength(1);
+      expect(harnessB.orientationWorkers).toHaveLength(0);
+
+      await runOcrPage(coreB, 0);
+      expect(harnessB.orientationWorkers).toHaveLength(1);
+      expect(runMessagesOf(harnessA.orientationWorkers[0]!)).toHaveLength(1);
+      expect(runMessagesOf(harnessB.orientationWorkers[0]!)).toHaveLength(1);
+    } finally {
+      await coreA.dispose();
+      await coreB.dispose();
+    }
   });
 
   function makeOrchestrator(overrides?: { readonly nerEnabled?: boolean }): {

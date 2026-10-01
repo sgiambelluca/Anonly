@@ -17,13 +17,20 @@ import {
   ReplacementMode,
   WorkerCrashedError,
   type EngineContext,
-  type ICache,
 } from "@anonly/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { LruCache } from "../cache.js";
+const pipelineMock = vi.hoisted(() => vi.fn());
+
+vi.mock("@huggingface/transformers", () => ({
+  pipeline: pipelineMock,
+  env: { allowRemoteModels: true, localModelPath: "/models/", backends: { onnx: { wasm: {} } } },
+}));
+
+import { LruCache, type PrefixDeletableCache } from "../cache.js";
 import { buildDefaultEngineConfig } from "../config.js";
 import { OrchestratorDisposedError } from "../errors.js";
+import { createCore } from "../index.js";
 import { selectLineWords } from "../line-words.js";
 import { PipelineOrchestrator } from "../orchestrator.js";
 import { WorkerPool, WorkerPoolManager } from "../worker-pool.js";
@@ -36,20 +43,184 @@ import {
   createImportInput,
   createMockEngines,
   createMockEnginesWithNerPool,
+  createInProcessNerPipelineMock,
   createMockLogger,
   createPage,
   createPdfEngineOutput,
+  createOcrWorkerHarness,
   createRealBus,
   createRenderPageOutput,
   createReplacement,
   createWord,
   makeOrchestratorWithRealDetection,
+  recordNerModelEvents,
+  runMessagesOf,
+  runNerPage,
+  runOcrPage,
   wireHappyPathSpies,
 } from "./fixtures/test-helpers.js";
 
 describe("Orchestrator — unit tests", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  // Enmienda de ADR-167 / NER §13 caso 33: la cadena real, sin factory de `ner`.
+  it("createCore without a ner factory unloads the in-process model on idle release", async () => {
+    pipelineMock.mockReset();
+    pipelineMock.mockImplementation(createInProcessNerPipelineMock().implementation);
+    vi.useFakeTimers();
+    try {
+      const core = await createCore({ workerPool: { nerIdleDisposeMs: 500 } });
+      try {
+        const events = recordNerModelEvents(core);
+
+        await runNerPage(core, 0);
+        expect(core.engines.ner.isModelReady()).toBe(true);
+
+        await vi.advanceTimersByTimeAsync(500);
+        expect(core.engines.ner.isModelReady()).toBe(false);
+
+        await runNerPage(core, 1);
+
+        expect(core.engines.ner.isModelReady()).toBe(true);
+        expect(pipelineMock).toHaveBeenCalledTimes(2);
+        expect(events).toEqual(["loading", "ready", "loading", "ready"]);
+      } finally {
+        await core.dispose();
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // T-5 / ADR-164 (Orchestrator §14).
+  it("two oriented pages reach the ocr-page pool with their own angles", async () => {
+    const harness = createOcrWorkerHarness(
+      new Map([
+        [0, 90],
+        [1, 270],
+      ]),
+    );
+    const core = await createCore(undefined, {
+      workers: { ocr: harness.pageFactory, "ocr-orientation": harness.orientationFactory },
+    });
+    try {
+      await Promise.all([runOcrPage(core, 0), runOcrPage(core, 1)]);
+
+      // Una página girada se compara también contra 0° (ADR-190): cada página
+      // lleva su ángulo y nunca el de la otra.
+      const anglesByPage = new Map<number, Set<number | undefined>>();
+      for (const run of harness.pageWorkers.flatMap((w) => runMessagesOf(w))) {
+        const angles = anglesByPage.get(run.payload.pageIndex) ?? new Set();
+        angles.add(run.payload.orientation);
+        anglesByPage.set(run.payload.pageIndex, angles);
+      }
+      expect(anglesByPage.get(0)).toContain(90);
+      expect(anglesByPage.get(0)).not.toContain(270);
+      expect(anglesByPage.get(1)).toContain(270);
+      expect(anglesByPage.get(1)).not.toContain(90);
+    } finally {
+      await core.dispose();
+    }
+  });
+
+  it("the worker pool manager does not manage the ocr-orientation key", () => {
+    const manager = new WorkerPoolManager({
+      bus: createRealBus(),
+      logger: createMockLogger(),
+      getPoolSize: () => 1,
+      getMaxQueue: () => 10,
+      getMaxRetries: () => 0,
+      baseRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      idleDisposeMs: 60_000,
+      // @ts-expect-error ManagedPoolKey excluye "ocr-orientation" (ADR-164)
+      workerFactories: { "ocr-orientation": () => createFakeWorker() },
+    });
+    const probe = (): void => {
+      // @ts-expect-error ManagedPoolKey excluye "ocr-orientation" (ADR-164)
+      manager.getPool("ocr-orientation");
+    };
+    void probe;
+    for (const key of ["pdf", "ocr", "ner", "render"] as const) manager.getPool(key);
+    expect([...(manager["pools"] as Map<string, unknown>).keys()].sort()).toEqual([
+      "ner",
+      "ocr",
+      "pdf",
+      "render",
+    ]);
+    manager.disposeAll();
+  });
+
+  // ADR-059 §5. Afirma las dos mitades que le tocan al façade: `export` recibe
+  // `options.includeMarkerLegend === false` y el Orchestrator no invoca la
+  // leyenda por su cuenta.
+  it("renderLegend is not invoked when includeMarkerLegend is false", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    wireHappyPathSpies(engines, bus);
+    const legendSpy = vi.spyOn(engines.render, "renderLegendPage");
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+    await orchestrator.importDocument(createImportInput());
+
+    bus.emit(EventChannel.UI, EngineEvents.EXPORT_REQUESTED, {
+      documentId: "doc-1",
+      options: {
+        imageFormat: "jpeg",
+        jpegQuality: 0.85,
+        dpi: 150,
+        includeOriginalMetadata: false,
+        includeMarkerLegend: false,
+        filename: "out.pdf",
+      },
+    });
+    await vi.waitFor(() => expect(engines.export.export).toHaveBeenCalled());
+
+    const exportInput = vi.mocked(engines.export.export).mock.calls[0]?.[0];
+    expect(exportInput?.options.includeMarkerLegend).toBe(false);
+    expect(legendSpy).not.toHaveBeenCalled();
+  });
+
+  // ADR-145 §5, Orchestrator §15.10. Control: falla contra 768e5d3.
+  it("closeDocument and dispose drop the document's ocr-words entries", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    wireHappyPathSpies(engines, bus);
+    const cache = new LruCache();
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache,
+      config: createEngineConfig(),
+      engines,
+    });
+    await orchestrator.importDocument(createImportInput());
+
+    cache.set("ocr-words:doc-1:0", [createWord()]);
+    cache.set("ocr-words:doc-1:1", [createWord()]);
+    cache.set("ocr-words:doc-10:0", [createWord()]);
+    cache.set("ocr-words:doc-2:0", [createWord()]);
+    cache.set("unrelated", "keep");
+
+    await orchestrator.closeDocument("doc-1");
+
+    expect(cache.get("ocr-words:doc-1:0")).toBeUndefined();
+    expect(cache.get("ocr-words:doc-1:1")).toBeUndefined();
+    expect(cache.get("ocr-words:doc-10:0")).toBeDefined();
+    expect(cache.get("ocr-words:doc-2:0")).toBeDefined();
+
+    await orchestrator.dispose();
+
+    expect(cache.get("ocr-words:doc-10:0")).toBeUndefined();
+    expect(cache.get("ocr-words:doc-2:0")).toBeUndefined();
+    expect(cache.get("unrelated")).toBe("keep");
   });
 
   // ─── ADR-034 §5: blob URLs ───
@@ -3113,8 +3284,9 @@ describe("PIPELINE_PROGRESS (Orchestrator.md §8, ADR-034 §4)", () => {
     // Caché mínima (ADR-145 §1): `get()` nunca encuentra nada, `set()` no
     // hace nada — fuerza la rama que la protección de LruCache vuelve
     // inalcanzable en el handoff real, sin tocar su implementación.
-    const emptyCache: ICache = {
+    const emptyCache: PrefixDeletableCache = {
       get: () => undefined,
+      deleteByPrefix: () => undefined,
       set: () => undefined,
       delete: () => undefined,
       clear: () => undefined,
