@@ -32,10 +32,10 @@ digest_dir() {
 }
 capture_pressure() {
   local label="$1"
-  { echo "=== $label $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="; pmset -g batt; pmset -g assertions | rg 'PreventSystemSleep|PreventUserIdleSystemSleep' || true; vm_stat; sysctl vm.swapusage; } >>"$RUN_DIR/system-pressure.txt" 2>&1
+  { echo "=== $label $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="; pmset -g batt; pmset -g assertions | grep -E 'PreventSystemSleep|PreventUserIdleSystemSleep' || true; vm_stat; sysctl vm.swapusage; } >>"$RUN_DIR/system-pressure.txt" 2>&1
 }
 sleep_wake_digest() {
-  pmset -g log 2>/dev/null | rg 'Entering Sleep state|Wake from' | tail -n 10 | shasum -a 256 | awk '{print $1}'
+  pmset -g log 2>/dev/null | grep -E 'Entering Sleep state|Wake from' | tail -n 10 | shasum -a 256 | awk '{print $1}'
 }
 record_invalid_run() {
   local run_id="$1" reason="$2"
