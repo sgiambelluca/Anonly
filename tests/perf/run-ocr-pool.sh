@@ -5,6 +5,8 @@ export LC_ALL=C LANG=C
 # Sequential OCR LSTM pool campaign plus opt-in profile-gap and ultra (6 recognizers) phases.
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT_DIR"
+# Fase 2 de la campaña de DPI descendente: tiene su propio runner, para no tocar el comportamiento de `ultra`.
+if [[ "${ANONLY_OCR_POOL_PHASE:-}" == "ultra-dpi" ]]; then exec "${BASH:-bash}" "$ROOT_DIR/tests/perf/run-ocr-pool-dpi.sh" "$@"; fi
 # shellcheck source=support/ocr-pool-platform.sh
 source "$ROOT_DIR/tests/perf/support/ocr-pool-platform.sh"
 PLATFORM="$(detect_platform)"

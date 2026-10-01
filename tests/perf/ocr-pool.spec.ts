@@ -9,9 +9,16 @@ import { expect, openApp, test } from "../e2e/support/electronApp.js";
 import { textTenPagesFile, type E2eFilePayload } from "../e2e/support/fixtures.js";
 import { generateText50p } from "../fixtures/generate.js";
 
+import {
+  installTransportObserver,
+  installDocumentControl,
+  readDocumentRun,
+} from "./support/adr190Browser.js";
 import { installEngineOverrides } from "./support/engineOverrides.js";
 import { measureProfile, type ProfileReport } from "./support/memoryProfile.js";
 import { startMemorySampling } from "./support/memorySampler.js";
+import { summarizeChain, summarizeDispatches } from "./support/ocrDpiDownChain.js";
+import { prepareSynthetic } from "./support/ocrDpiDownFixtures.js";
 import {
   assertsFullOccupancy,
   DEFAULT_MAX_LIVE_IMAGE_BYTES,
@@ -33,6 +40,7 @@ declare global {
   var __anonlyOcrPoolProbe:
     | {
         readonly requestedPoolSize: number;
+        readonly requestedDpi: number | null;
         readonly armLabel: string;
         readonly maxLiveImageBytes: number;
         readonly profile: string;
@@ -87,10 +95,12 @@ const RUN_ID = process.env.ANONLY_OCR_POOL_RUN;
 const OUTPUT_DIR = process.env.ANONLY_OCR_POOL_OUTPUT_DIR;
 const CANCELLATION_SLA_MS = 200;
 // P2H: P2 rasterizado a 300 dpi nativos (opt-in de ultra), el escaneo A4 típico: 33,2 MiB por página.
-type Profile = "P1" | "P2" | "P2H" | "R1" | "R2";
+// SR (sintético con la forma de R2, 20 páginas a 300 dpi) y R3 (real a 300 dpi, opcional) solo corren
+// con la dimensión de DPI de run-ocr-pool-dpi.sh.
+type Profile = "P1" | "P2" | "P2H" | "R1" | "R2" | "R3" | "SR";
 const P2H_PAGES = 20;
 const isScannedProfile = (profile: Profile): boolean =>
-  profile === "P2" || profile === "R2" || profile === "P2H";
+  profile === "P2" || profile === "R2" || profile === "P2H" || profile === "R3" || profile === "SR";
 type RunKind = "memory" | "time" | "cancel";
 type MemoryProbeRun = { readonly temperature: string; readonly probe: Record<string, unknown> };
 let memoryRuns: MemoryProbeRun[] = [];
@@ -134,7 +144,8 @@ async function inputFile(profile: Profile): Promise<E2eFilePayload> {
   if (profile === "P1") return textTenPagesFile();
   if (profile === "P2") return p2File();
   if (profile === "P2H") return p2hFile();
-  const envKey = profile === "R1" ? "ANONLY_REAL_DOC_R1" : "ANONLY_REAL_DOC_R2";
+  if (profile === "SR") return (await prepareSynthetic("SR")).file;
+  const envKey = `ANONLY_REAL_DOC_${profile}`;
   const path = process.env[envKey];
   if (path === undefined || path === "") throw new Error(`${envKey} no está definido.`);
   return {
@@ -146,6 +157,7 @@ async function inputFile(profile: Profile): Promise<E2eFilePayload> {
 
 function parseRunId(): {
   readonly arm: number;
+  readonly dpi: number | undefined;
   readonly armLabel: string;
   readonly maxLiveImageBytes: number;
   readonly fullOccupancy: boolean;
@@ -154,18 +166,26 @@ function parseRunId(): {
   readonly kind: RunKind;
 } {
   if (RUN_ID === undefined || RUN_ID === "") throw new Error("ANONLY_OCR_POOL_RUN no definido.");
-  const match = /^(memory|time|cancel)-(1|2|3|4|4b|6|6b)-(P1|P2|P2H|R1|R2)-r([0-2])$/.exec(RUN_ID);
+  const match =
+    /^(memory|time|cancel)-(1|2|3|4|4b|6|6b)-(P1|P2|P2H|R1|R2|R3|SR)(?:-d(\d{2,3}))?-r([0-2])$/.exec(
+      RUN_ID,
+    );
   const arm = parseArmLabel(match?.[2] ?? "");
   if (match === null || arm === undefined) throw new Error(`Corrida desconocida: ${RUN_ID}`);
   return {
     kind: match[1] as RunKind,
     arm: arm.poolSize,
+    dpi: match[4] === undefined ? undefined : Number(match[4]),
     armLabel: arm.label,
     maxLiveImageBytes: arm.maxLiveImageBytes,
-    // P2H no afirma ocupación: el presupuesto puede frenar y eso es lo que se mide.
-    fullOccupancy: assertsFullOccupancy(arm) && match[3] !== "P2H",
+    // P2H, SR y toda corrida con DPI pedido no afirman ocupación: el presupuesto puede frenar y eso es lo que se mide.
+    fullOccupancy:
+      assertsFullOccupancy(arm) &&
+      match[3] !== "P2H" &&
+      match[3] !== "SR" &&
+      match[4] === undefined,
     profile: match[3] as Profile,
-    round: Number(match[4]),
+    round: Number(match[5]),
   };
 }
 
@@ -190,6 +210,7 @@ async function installProbe(
       };
       const probe: NonNullable<typeof globalThis.__anonlyOcrPoolProbe> = {
         requestedPoolSize: input.arm,
+        requestedDpi: input.dpi ?? null,
         armLabel: input.armLabel,
         maxLiveImageBytes: input.maxLiveImageBytes,
         profile: input.profile,
@@ -232,6 +253,10 @@ async function installProbe(
       if (effective?.workerPool?.ocrPoolSize !== input.arm)
         throw new Error(
           `Override OCR no efectivo: pedido=${input.arm}, efectivo=${effective?.workerPool?.ocrPoolSize ?? "no observable"}`,
+        );
+      if (input.dpi !== undefined && effective.ocr?.dpi !== input.dpi)
+        throw new Error(
+          `Override de DPI no efectivo: pedido=${input.dpi}, efectivo=${effective.ocr?.dpi ?? "no observable"}`,
         );
       if (effective.ocr?.maxLiveImageBytes !== input.maxLiveImageBytes)
         throw new Error(
@@ -545,6 +570,7 @@ async function readRawProbe(page: Page) {
     const confidences = ocrValues.map((values) => values[2] ?? 0);
     return {
       requestedPoolSize: probe.requestedPoolSize,
+      requestedDpi: probe.requestedDpi,
       armLabel: probe.armLabel,
       profile: probe.profile,
       runId: probe.runId,
@@ -648,6 +674,19 @@ async function readProbe(page: Page): Promise<OcrPoolSummary> {
   return { ...rest, ...reservation };
 }
 
+/** Evidencia del DPI efectivo por despacho y de la cadena de ADR-190; solo metadatos, nunca texto. */
+async function readDpiEvidence(page: Page, requestedDpi: number) {
+  const observed = await readDocumentRun(page);
+  return {
+    dispatch: summarizeDispatches(
+      observed.capture.jobs,
+      observed.caps.map((cap) => ({ pageIndex: cap.pageIndex, originalCap: cap.originalCap })),
+      requestedDpi,
+    ),
+    chain: summarizeChain(observed.capture.jobs, observed.ocrPages),
+  };
+}
+
 function outputDir(): string {
   if (OUTPUT_DIR === undefined || OUTPUT_DIR === "")
     throw new Error("ANONLY_OCR_POOL_OUTPUT_DIR no definido.");
@@ -665,14 +704,32 @@ test("OCR recognizer pool campaign — selected run", async ({
     run.kind === "cancel" ? 300_000 : isScannedProfile(run.profile) ? 1_800_000 : 600_000,
   );
   const file = await inputFile(run.profile);
-  if (run.arm !== 2 || run.maxLiveImageBytes !== DEFAULT_MAX_LIVE_IMAGE_BYTES)
+  if (
+    run.arm !== 2 ||
+    run.maxLiveImageBytes !== DEFAULT_MAX_LIVE_IMAGE_BYTES ||
+    run.dpi !== undefined
+  )
     await installEngineOverrides(page, {
       workerPool: { ocrPoolSize: run.arm },
-      ...(run.maxLiveImageBytes === DEFAULT_MAX_LIVE_IMAGE_BYTES
+      ...(run.maxLiveImageBytes === DEFAULT_MAX_LIVE_IMAGE_BYTES && run.dpi === undefined
         ? {}
-        : { ocr: { maxLiveImageBytes: run.maxLiveImageBytes } }),
+        : {
+            ocr: {
+              ...(run.maxLiveImageBytes === DEFAULT_MAX_LIVE_IMAGE_BYTES
+                ? {}
+                : { maxLiveImageBytes: run.maxLiveImageBytes }),
+              ...(run.dpi === undefined ? {} : { dpi: run.dpi }),
+            },
+          }),
     });
+  // Con DPI pedido, el DPI efectivo de cada despacho se demuestra (mismo observador de metadatos en todos los brazos).
+  const observeDispatches = run.dpi !== undefined && run.kind !== "cancel";
+  if (observeDispatches) await installTransportObserver(page);
   await openApp(page, "networkidle");
+  if (observeDispatches) {
+    await page.waitForFunction(() => globalThis.__anonlyCore !== undefined);
+    await installDocumentControl(page, "native");
+  }
   memoryRuns = [];
   if (run.kind !== "memory") await installProbe(page, { ...run, runId: RUN_ID ?? "" });
 
@@ -711,10 +768,14 @@ test("OCR recognizer pool campaign — selected run", async ({
       }
     }
     const observed = await readProbe(page);
+    const rssDpiEvidence =
+      run.dpi === undefined || !observeDispatches
+        ? undefined
+        : await readDpiEvidence(page, run.dpi);
     await writeFile(
       resolve(
         outputDir(),
-        `ocr-pool-${measurementPhase}-${run.armLabel}-${run.profile}-r${run.round}.json`,
+        `ocr-pool-${measurementPhase}-${run.armLabel}-${run.profile}${run.dpi === undefined ? "" : `-d${run.dpi}`}-r${run.round}.json`,
       ),
       JSON.stringify(
         {
@@ -723,6 +784,7 @@ test("OCR recognizer pool campaign — selected run", async ({
           arm: run.arm,
           armLabel: run.armLabel,
           profile: run.profile,
+          requestedDpi: run.dpi ?? null,
           round: run.round,
           startedAtUtc,
           completedAtUtc: new Date().toISOString(),
@@ -730,6 +792,7 @@ test("OCR recognizer pool campaign — selected run", async ({
           probe: observed,
           natural,
           endStage,
+          dpiEvidence: rssDpiEvidence,
         },
         null,
         2,
@@ -739,6 +802,8 @@ test("OCR recognizer pool campaign — selected run", async ({
     expect(observed.failed).toBe(false);
     expect(observed.ocrPageFailures).toBe(0);
     expect(observed.missingWordCachePages).toBe(0);
+    if (rssDpiEvidence !== undefined)
+      expect(rssDpiEvidence.dispatch.issues, "DPI efectivo por despacho").toEqual([]);
     if (run.fullOccupancy) expect(observed.effectiveBusyRecognizersPeak).toBe(run.arm);
     expect(observed.effectiveBusyOsdPeak).toBe(1);
     if (endStage !== undefined) {
@@ -800,6 +865,8 @@ test("OCR recognizer pool campaign — selected run", async ({
   }
 
   const probe = await readProbe(page);
+  const dpiEvidence =
+    run.dpi === undefined || !observeDispatches ? undefined : await readDpiEvidence(page, run.dpi);
   const rssSamplesDuringOcr = (() => {
     const attribution = wasmAttribution;
     const rssSamplerStartedAtMs = attribution?.rssSamplerStartedAtMs;
@@ -1013,6 +1080,8 @@ test("OCR recognizer pool campaign — selected run", async ({
     arm: run.arm,
     armLabel: run.armLabel,
     profile: run.profile,
+    requestedDpi: run.dpi ?? null,
+    dpiEvidence,
     round: run.round,
     kind: run.kind,
     startedAtUtc,
@@ -1068,4 +1137,6 @@ test("OCR recognizer pool campaign — selected run", async ({
     }
   }
   if (run.kind === "time") expect(timed?.ok).toBe(true);
+  if (dpiEvidence !== undefined)
+    expect(dpiEvidence.dispatch.issues, "DPI efectivo por despacho").toEqual([]);
 });
