@@ -3,7 +3,7 @@
  * `Components.md` §2.6).
  *
  * **Diseño estable** (UX-10, ADR-169 §1): la descripción del perfil de
- * rendimiento ocupa siempre el mismo renglón para los tres perfiles, y el
+ * rendimiento ocupa siempre una ranura de alto fijo para los cinco perfiles (ADR-194 §6), y el
  * error "Elegí al menos un idioma" y el aviso de re-análisis comparten una
  * ranura de alto fijo con un texto neutro cuando no hay nada que avisar.
  * Cambiar una opción no cambia el alto del diálogo.
@@ -11,13 +11,57 @@
  * Módulo puro: los tests de `apps/react-client` corren en Node sin jsdom.
  */
 
+import {
+  resolvePerformanceLevel,
+  type DeviceSignals,
+  type PerformanceLevel,
+} from "../../core-adapter/settingsToEngineConfig.js";
 import type { PerformancePreset, Theme } from "../../store/settings.store.js";
 
-export const PERFORMANCE_PRESET_DESCRIPTION: Readonly<Record<PerformancePreset, string>> = {
-  auto: "Anonly se ajusta a tu equipo. Es lo recomendado.",
-  low: "Usa menos memoria y procesador. Puede tardar más.",
-  high: "Termina antes a cambio de usar más recursos del equipo.",
+/** Nombre en la UI de cada nivel (ADR-194 §1). */
+export const PERFORMANCE_LEVEL_LABEL: Readonly<Record<PerformanceLevel, string>> = {
+  low: "Bajo consumo",
+  medium: "Intermedio",
+  high: "Alto rendimiento",
+  ultra: "Ultra",
 };
+
+export const PERFORMANCE_PRESET_LABEL: Readonly<Record<PerformancePreset, string>> = {
+  auto: "Automático",
+  ...PERFORMANCE_LEVEL_LABEL,
+};
+
+/** Orden del selector (ADR-194 §6). */
+export const PERFORMANCE_PRESET_ORDER: ReadonlyArray<PerformancePreset> = [
+  "auto",
+  "low",
+  "medium",
+  "high",
+  "ultra",
+];
+
+/** Descripción de los niveles; la de `auto` depende del equipo (`describePerformancePreset`). */
+export const PERFORMANCE_LEVEL_DESCRIPTION: Readonly<Record<PerformanceLevel, string>> = {
+  low: "Usa menos memoria y procesador. Puede tardar más.",
+  medium: "Equilibrio entre velocidad y uso de memoria.",
+  high: "Termina antes en documentos escaneados. Usa más memoria.",
+  ultra: "El más rápido en escaneados. Para equipos con 16 GB o más.",
+};
+
+/**
+ * La línea bajo el selector de rendimiento (ADR-194 §6). Con `auto` nombra el
+ * nivel que resolvió `resolvePerformanceLevel`, la misma función que deriva el
+ * override: no puede decir un nivel distinto del que se aplica.
+ */
+export function describePerformancePreset(
+  preset: PerformancePreset,
+  signals: DeviceSignals,
+): string {
+  const level = resolvePerformanceLevel(preset, signals);
+  return preset === "auto"
+    ? `Anonly elige según tu equipo. En este equipo usa: ${PERFORMANCE_LEVEL_LABEL[level]}.`
+    : PERFORMANCE_LEVEL_DESCRIPTION[level];
+}
 
 export const THEME_LABEL: Readonly<Record<Theme, string>> = {
   system: "Como el sistema",

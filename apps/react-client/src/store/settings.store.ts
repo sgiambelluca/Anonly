@@ -5,8 +5,8 @@
  * Fuente de verdad: docs/ui/React_Client.md §3.6. Defaults:
  * - `language`/`defaultReplacementMode`: docs/roadmap/MVP.md §2.3 (es default)
  *   y docs/ui/UX_Guidelines.md UX-7 ("placeholder por defecto, más informativo").
- * - `performancePreset`: "auto" (docs/ui/React_Client.md §3.7: "auto = defaults
- *   ... derivados de hardwareConcurrency").
+ * - `performancePreset`: "auto" (ADR-194: se resuelve a un nivel según la RAM
+ *   y los hilos del equipo, docs/ui/React_Client.md §3.7).
  * - `nerEnabled`/`ocrLanguages`: mismos defaults que `EngineConfig` del Core
  *   (`ner.enabled = true`, `ocr.languages = ["spa", "eng"]`), replicados acá
  *   a propósito — el cliente no importa el façade del Core para esto porque
@@ -53,7 +53,38 @@ export type Language = "es" | "en";
  * volver a hacerlo por aplicación.
  */
 export type Theme = "system" | "light" | "dark";
-export type PerformancePreset = "auto" | "low" | "high";
+/**
+ * ADR-194 §1: cuatro niveles y `auto`, que no es un nivel: se resuelve a uno
+ * (`core-adapter/settingsToEngineConfig.ts`).
+ */
+export type PerformancePreset = "auto" | "low" | "medium" | "high" | "ultra";
+
+const PERFORMANCE_PRESETS: ReadonlySet<string> = new Set<PerformancePreset>([
+  "auto",
+  "low",
+  "medium",
+  "high",
+  "ultra",
+]);
+
+/**
+ * Versión del formato persistido. 2 = ADR-194: `high` pasó de dos a cuatro
+ * reconocedores, así que un `high` guardado sin versión (o con una menor) no
+ * se respeta.
+ */
+const SETTINGS_VERSION = 2;
+
+/**
+ * El preset a cargar (ADR-194 §5). Un `high` de una versión anterior vuelve a
+ * `auto` y un valor desconocido también; `load()` no escribe, así que la
+ * migración se repite igual hasta el primer `persist()`.
+ */
+function migratePerformancePreset(value: unknown, version: unknown): PerformancePreset {
+  if (typeof value !== "string" || !PERFORMANCE_PRESETS.has(value)) return "auto";
+  const preset = value as PerformancePreset;
+  const outdated = typeof version !== "number" || version < SETTINGS_VERSION;
+  return preset === "high" && outdated ? "auto" : preset;
+}
 
 export interface SettingsSlice {
   readonly language: Language;
@@ -155,7 +186,7 @@ const DEFAULT_SETTINGS: SettingsData = {
   dismissedHints: [],
 };
 
-type PersistedSettings = Partial<SettingsData>;
+type PersistedSettings = Partial<SettingsData> & { readonly settingsVersion?: number };
 
 function isPersistedSettings(value: unknown): value is PersistedSettings {
   return typeof value === "object" && value !== null;
@@ -166,6 +197,7 @@ export const useSettingsStore = create<SettingsSlice>((set, get) => ({
   persist() {
     const state = get();
     const toStore: PersistedSettings = {
+      settingsVersion: SETTINGS_VERSION,
       language: state.language,
       performancePreset: state.performancePreset,
       defaultReplacementMode: state.defaultReplacementMode,
@@ -205,7 +237,12 @@ export const useSettingsStore = create<SettingsSlice>((set, get) => ({
     set({
       ...(parsed.language !== undefined ? { language: parsed.language } : {}),
       ...(parsed.performancePreset !== undefined
-        ? { performancePreset: parsed.performancePreset }
+        ? {
+            performancePreset: migratePerformancePreset(
+              parsed.performancePreset,
+              parsed.settingsVersion,
+            ),
+          }
         : {}),
       ...(parsed.defaultReplacementMode !== undefined
         ? { defaultReplacementMode: parsed.defaultReplacementMode }

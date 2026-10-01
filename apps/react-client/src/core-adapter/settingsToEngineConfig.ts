@@ -4,25 +4,18 @@
  * persistidos (`store/settings.store.ts`), antes de que haya ningún
  * documento abierto.
  *
- * Fuente de verdad: docs/ui/React_Client.md §3.7 ("Mapeo settings →
- * EngineConfig"), tabla + párrafo "Bootstrap: los settings persistidos se
- * aplican al crear el core (PR16.5, ADR-048 §7 punto 2)".
+ * Fuente de verdad: docs/ui/React_Client.md §3.7 y ADR-194 (§2 qué manda cada
+ * nivel, §3 la regla de Automático).
  *
- * Mapeo (directo, sin condicionales, para `ner`/`ocr`): `nerEnabled` →
- * `ner.enabled`, `ocrLanguages` → `ocr.languages`. `performancePreset` →
- * `workerPool.*PoolSize`: `auto` **omite** la sección `workerPool` completa
- * del override devuelto — ni `{}` ni `workerPool: undefined` explícito
- * (`exactOptionalPropertyTypes` lo trataría distinto de "ausente") — para no
- * pisar los defaults derivados de `hardwareConcurrency`
- * (`05_Worker_Architecture.md` §1.1, que sigue calculándolos en
- * `buildDefaultEngineConfig`); `low`/`high` mandan los tamaños fijos de la
- * tabla.
+ * `nerEnabled` → `ner.enabled` y `ocrLanguages` → `ocr.languages` son directos.
+ * `performancePreset` se deriva del **nivel**: `auto` se resuelve a uno de los
+ * cuatro con las señales del equipo (`resolveAutoLevel`, función pura) y manda
+ * el override de ese nivel. Lo que un nivel no nombra no se envía: queda en el
+ * default del Core (`05_Worker_Architecture.md` §1.1). Las claves ausentes lo
+ * son de verdad, no `undefined` (`exactOptionalPropertyTypes`).
  *
- * Función pura, sin efectos — mismo tipo de código que
- * `components/toolbar/reanalyzePlan.ts` (derivación de config a partir de
- * settings), pero para el caso "sin documento abierto" (bootstrap) en vez de
- * "con documento abierto" (`reanalyze`); ese caso sigue sin cambios por este
- * PR.
+ * La lectura de `window.anonlyDevice` y de `navigator` vive en un solo punto,
+ * `readDeviceSignals`; el resto es puro y no toca el DOM.
  *
  * `initCore` (`core-adapter/index.ts`) mergea por debajo la inyección de
  * `ner.wasmPaths` (ADR-039: `{ wasmPaths: {...}, ...config?.ner }`), así que
@@ -38,61 +31,124 @@ export type BootstrapSettings = Pick<
   "performancePreset" | "nerEnabled" | "ocrLanguages"
 >;
 
-type WorkerPoolSizes = Pick<
-  WorkerPoolConfig,
-  "pdfPoolSize" | "ocrPoolSize" | "nerPoolSize" | "renderPoolSize"
+type WorkerPoolSizes = Partial<
+  Pick<WorkerPoolConfig, "pdfPoolSize" | "ocrPoolSize" | "nerPoolSize" | "renderPoolSize">
 >;
 
-const LOW_POOL_SIZES: WorkerPoolSizes = {
-  pdfPoolSize: 1,
-  ocrPoolSize: 1,
-  nerPoolSize: 1,
-  renderPoolSize: 1,
-};
+export type PerformanceLevel = "low" | "medium" | "high" | "ultra";
 
-const HIGH_POOL_SIZES: WorkerPoolSizes = {
-  pdfPoolSize: 4,
-  ocrPoolSize: 2,
-  nerPoolSize: 2,
-  renderPoolSize: 4,
-};
+/** Las señales del equipo que usa la regla de Automático (ADR-194 §3). */
+export interface DeviceSignals {
+  readonly totalMemoryBytes?: number;
+  readonly hardwareConcurrency?: number;
+  readonly deviceMemory?: number;
+}
 
-type WorkerPoolOverride = { readonly workerPool: WorkerPoolSizes } | Record<string, never>;
+const GIB = 1024 ** 3;
+const MIB = 1024 ** 2;
 
-/**
- * `auto` devuelve `{}` (sin la clave `workerPool`) a propósito: el override
- * tiene que **no existir**, no existir con valor `undefined`. Al nivel del
- * runtime las dos formas son equivalentes —`mergeEngineConfig` hace spread
- * (`{ ...base.workerPool, ...overrides.workerPool }`) y difundir `undefined`
- * es un no-op—, así que la razón no es evitar que se pisen los defaults: es
- * que el tipo diga la verdad. Bajo `exactOptionalPropertyTypes`, declarar
- * `workerPool: undefined` afirma un override que no existe, y obliga a todo
- * consumidor del tipo a contemplar un caso que nunca se produce.
- *
- * El `switch` sin `default` sobre un union de 3 valores hace que
- * `noImplicitReturns` (tsconfig.base.json) marque error si
- * `PerformancePreset` gana un cuarto valor sin actualizar acá.
- */
-function workerPoolOverride(preset: SettingsSlice["performancePreset"]): WorkerPoolOverride {
-  switch (preset) {
-    case "low":
-      return { workerPool: LOW_POOL_SIZES };
-    case "high":
-      return { workerPool: HIGH_POOL_SIZES };
-    case "auto":
-      return {};
-  }
+// Los umbrales son «8 GB» y «16 GB» con tolerancia: un equipo de 16 GB informa
+// menos de 16 GiB (ADR-194 §3).
+const LOW_MEMORY_GIB = 7;
+const MEDIUM_MEMORY_GIB = 15;
+// Mismo default que el Core cuando `hardwareConcurrency` no existe.
+const DEFAULT_THREADS = 4;
+
+function isPositiveFinite(value: number | undefined): value is number {
+  return value !== undefined && Number.isFinite(value) && value > 0;
 }
 
 /**
- * Deriva el `EngineConfigOverrides` para `initCore` en el bootstrap
- * (`App.tsx`), según la tabla de `React_Client.md` §3.7.
+ * El nivel al que resuelve `auto` en este equipo (ADR-194 §3). Función pura
+ * de las señales: no mira memoria libre, páginas ni documento.
  */
-export function deriveEngineConfigOverrides(settings: BootstrapSettings): EngineConfigOverrides {
+export function resolveAutoLevel(signals: DeviceSignals): PerformanceLevel {
+  const threads = isPositiveFinite(signals.hardwareConcurrency)
+    ? signals.hardwareConcurrency
+    : DEFAULT_THREADS;
+
+  if (!isPositiveFinite(signals.totalMemoryBytes)) {
+    const smallMemory = signals.deviceMemory !== undefined && signals.deviceMemory < 4;
+    return threads < 4 || smallMemory ? "low" : "medium";
+  }
+
+  const memoryGib = signals.totalMemoryBytes / GIB;
+  if (threads < 4 || memoryGib < LOW_MEMORY_GIB) return "low";
+  if (memoryGib < MEDIUM_MEMORY_GIB) return "medium";
+  if (threads >= 12) return "ultra";
+  if (threads >= 8) return "high";
+  return "medium";
+}
+
+/** El nivel que se aplica: el elegido, o el que resuelve `auto`. */
+export function resolvePerformanceLevel(
+  preset: SettingsSlice["performancePreset"],
+  signals: DeviceSignals,
+): PerformanceLevel {
+  return preset === "auto" ? resolveAutoLevel(signals) : preset;
+}
+
+/**
+ * Lee las señales del equipo. Único lugar del cliente que sabe que
+ * `window.anonlyDevice` existe (ADR-194 §4): fuera del shell, o con un valor
+ * que no es un número finito y positivo, no hay dato de RAM.
+ */
+export function readDeviceSignals(): DeviceSignals {
+  const device: unknown = typeof window === "undefined" ? undefined : window.anonlyDevice;
+  const totalMemoryBytes =
+    typeof device === "object" && device !== null
+      ? (device as { readonly totalMemoryBytes?: unknown }).totalMemoryBytes
+      : undefined;
+  const nav = typeof navigator === "undefined" ? undefined : navigator;
+  const deviceMemory = (nav as { readonly deviceMemory?: unknown } | undefined)?.deviceMemory;
+  return {
+    ...(typeof totalMemoryBytes === "number" && isPositiveFinite(totalMemoryBytes)
+      ? { totalMemoryBytes }
+      : {}),
+    ...(typeof nav?.hardwareConcurrency === "number"
+      ? { hardwareConcurrency: nav.hardwareConcurrency }
+      : {}),
+    ...(typeof deviceMemory === "number" ? { deviceMemory } : {}),
+  };
+}
+
+declare global {
+  interface Window {
+    readonly anonlyDevice?: unknown;
+  }
+}
+
+interface LevelOverride {
+  readonly workerPool: WorkerPoolSizes;
+  readonly maxLiveImageBytes?: number;
+}
+
+const LEVEL_OVERRIDE: Readonly<Record<PerformanceLevel, LevelOverride>> = {
+  low: { workerPool: { pdfPoolSize: 1, ocrPoolSize: 1, nerPoolSize: 1, renderPoolSize: 1 } },
+  medium: { workerPool: { ocrPoolSize: 2, nerPoolSize: 2 } },
+  high: { workerPool: { ocrPoolSize: 4, nerPoolSize: 2 }, maxLiveImageBytes: 136 * MIB },
+  ultra: { workerPool: { ocrPoolSize: 6, nerPoolSize: 2 }, maxLiveImageBytes: 200 * MIB },
+};
+
+/**
+ * Deriva el `EngineConfigOverrides` para `initCore` en el bootstrap
+ * (`App.tsx`), según la tabla de ADR-194 §2. `signals` solo importa con
+ * `auto`.
+ */
+export function deriveEngineConfigOverrides(
+  settings: BootstrapSettings,
+  signals: DeviceSignals = readDeviceSignals(),
+): EngineConfigOverrides {
+  const level = LEVEL_OVERRIDE[resolvePerformanceLevel(settings.performancePreset, signals)];
   return {
     ner: { enabled: settings.nerEnabled },
-    ocr: { languages: settings.ocrLanguages },
-    ...workerPoolOverride(settings.performancePreset),
+    ocr: {
+      languages: settings.ocrLanguages,
+      ...(level.maxLiveImageBytes !== undefined
+        ? { maxLiveImageBytes: level.maxLiveImageBytes }
+        : {}),
+    },
+    workerPool: level.workerPool,
   };
 }
 
@@ -106,9 +162,9 @@ export function deriveEngineConfigOverrides(settings: BootstrapSettings): Engine
  * crudos, que es lo que hace que la respuesta sea exactamente "¿cambia algo
  * que el Core vaya a leer?".
  *
- * Comparación explícita y no `JSON.stringify`: `workerPool` está presente o
- * ausente según el preset (ver `workerPoolOverride`), y dos objetos iguales
- * pueden serializar distinto según el orden en que se armaron.
+ * Comparación explícita y no `JSON.stringify`: dos objetos iguales pueden
+ * serializar distinto según el orden en que se armaron, y cada nivel manda un
+ * subconjunto distinto de claves.
  */
 export function sameEngineConfigOverrides(
   a: EngineConfigOverrides,
@@ -121,18 +177,17 @@ export function sameEngineConfigOverrides(
   if (langsA.length !== langsB.length) return false;
   if (langsA.some((lang, i) => lang !== langsB[i])) return false;
 
+  if (a.ocr?.maxLiveImageBytes !== b.ocr?.maxLiveImageBytes) return false;
+
   const poolA = a.workerPool;
   const poolB = b.workerPool;
-  if ((poolA === undefined) !== (poolB === undefined)) return false;
-  if (poolA !== undefined && poolB !== undefined) {
-    if (
-      poolA.pdfPoolSize !== poolB.pdfPoolSize ||
-      poolA.ocrPoolSize !== poolB.ocrPoolSize ||
-      poolA.nerPoolSize !== poolB.nerPoolSize ||
-      poolA.renderPoolSize !== poolB.renderPoolSize
-    ) {
-      return false;
-    }
+  if (
+    poolA?.pdfPoolSize !== poolB?.pdfPoolSize ||
+    poolA?.ocrPoolSize !== poolB?.ocrPoolSize ||
+    poolA?.nerPoolSize !== poolB?.nerPoolSize ||
+    poolA?.renderPoolSize !== poolB?.renderPoolSize
+  ) {
+    return false;
   }
 
   return true;

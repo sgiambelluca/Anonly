@@ -220,3 +220,67 @@ describe("theme", () => {
     expect(useSettingsStore.getState().theme).toBe("dark");
   });
 });
+
+describe("migración de performancePreset (ADR-194 §5)", () => {
+  beforeEach(() => {
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const loadWith = (stored: Record<string, unknown>) => {
+    const storage = stubLocalStorage(JSON.stringify(stored));
+    useSettingsStore.getState().load();
+    return { preset: useSettingsStore.getState().performancePreset, storage };
+  };
+
+  it("un `high` sin versión carga como `auto`", () => {
+    expect(loadWith({ performancePreset: "high" }).preset).toBe("auto");
+  });
+
+  it("un `high` con una versión menor que 2 carga como `auto`", () => {
+    expect(loadWith({ performancePreset: "high", settingsVersion: 1 }).preset).toBe("auto");
+  });
+
+  it("un `high` con `settingsVersion: 2` carga como `high`", () => {
+    expect(loadWith({ performancePreset: "high", settingsVersion: 2 }).preset).toBe("high");
+  });
+
+  it("`low` y `auto` sin versión se conservan", () => {
+    expect(loadWith({ performancePreset: "low" }).preset).toBe("low");
+    expect(loadWith({ performancePreset: "auto" }).preset).toBe("auto");
+  });
+
+  it("`medium` y `ultra` guardados se conservan", () => {
+    expect(loadWith({ performancePreset: "medium", settingsVersion: 2 }).preset).toBe("medium");
+    expect(loadWith({ performancePreset: "ultra", settingsVersion: 2 }).preset).toBe("ultra");
+  });
+
+  it("un valor desconocido carga como `auto`", () => {
+    useSettingsStore.setState({ performancePreset: "low" });
+    expect(loadWith({ performancePreset: "turbo", settingsVersion: 2 }).preset).toBe("auto");
+    expect(loadWith({ performancePreset: 7 }).preset).toBe("auto");
+  });
+
+  it("`load()` no escribe: el JSON guardado queda como estaba", () => {
+    const original = JSON.stringify({ performancePreset: "high" });
+    const storage = stubLocalStorage(original);
+    useSettingsStore.getState().load();
+    expect(storage.written()).toBe(original);
+  });
+
+  it("`persist()` escribe `settingsVersion: 2`, y desde ahí un `high` se respeta", () => {
+    const storage = stubLocalStorage(JSON.stringify({ performancePreset: "high" }));
+    useSettingsStore.getState().load();
+    useSettingsStore.getState().persist();
+    expect(JSON.parse(storage.written() ?? "{}")).toHaveProperty("settingsVersion", 2);
+
+    useSettingsStore.setState({ performancePreset: "high" });
+    useSettingsStore.getState().persist();
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+    useSettingsStore.getState().load();
+    expect(useSettingsStore.getState().performancePreset).toBe("high");
+  });
+});

@@ -1,7 +1,7 @@
 /**
  * `SettingsDialog` (`ui/Components.md` §2.6, ADR-038 §7).
  *
- * Form: idioma (`es` default), performance preset (`auto`/`low`/`high`), NER
+ * Form: idioma (`es` default), performance preset (`auto`/`low`/`medium`/`high`/`ultra`), NER
  * toggle, OCR languages (`docs/roadmap/MVP.md` §2.3, `settings.store.ts` §3.6).
  * `defaultReplacementMode` **no** es parte de este form: ni `Components.md`
  * §2.6 ni el prompt de este PR lo mencionan como campo de Settings.
@@ -46,12 +46,13 @@ import {
   SunMoonIcon,
   TriangleAlertIcon,
 } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { actions } from "../../core-adapter/actions.js";
 import { recreateCore } from "../../core-adapter/index.js";
 import {
   deriveEngineConfigOverrides,
+  readDeviceSignals,
   sameEngineConfigOverrides,
 } from "../../core-adapter/settingsToEngineConfig.js";
 import { useDocumentStore } from "../../store/document.store.js";
@@ -81,7 +82,9 @@ import { diffReanalyzeChange, planReanalyzePatches } from "./reanalyzePlan.js";
 import {
   describeTheme,
   OCR_LANGUAGES_SLOT_TEXT,
-  PERFORMANCE_PRESET_DESCRIPTION,
+  describePerformancePreset,
+  PERFORMANCE_PRESET_LABEL,
+  PERFORMANCE_PRESET_ORDER,
   resolveOcrLanguagesSlot,
   resolveSaveErrorSlot,
   THEME_LABEL,
@@ -99,11 +102,8 @@ const LANGUAGE_OPTIONS: ReadonlyArray<SelectOption<Language>> = [
   { value: "en", label: "English" },
 ];
 
-const PERFORMANCE_PRESET_OPTIONS: ReadonlyArray<SelectOption<PerformancePreset>> = [
-  { value: "auto", label: "Automático" },
-  { value: "low", label: "Bajo consumo" },
-  { value: "high", label: "Alto rendimiento" },
-];
+const PERFORMANCE_PRESET_OPTIONS: ReadonlyArray<SelectOption<PerformancePreset>> =
+  PERFORMANCE_PRESET_ORDER.map((value) => ({ value, label: PERFORMANCE_PRESET_LABEL[value] }));
 
 // Únicos idiomas de OCR documentados (docs/core/OCR_Engine.md, MVP.md §2.3,
 // default de settings.store.ts): ampliar esta lista requiere actualizar esos
@@ -134,6 +134,8 @@ export interface SettingsDialogProps {
 
 export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
   const documentId = useDocumentStore((state) => state.id);
+  // Valor fijo del equipo: se lee una vez (ADR-194 §4).
+  const deviceSignals = useMemo(() => readDeviceSignals(), []);
 
   const [language, setLanguage] = useState<Language>(() => useSettingsStore.getState().language);
   const [performancePreset, setPerformancePreset] = useState<PerformancePreset>(
@@ -243,10 +245,13 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
      * garantiza que nadie suelte un PDF en la ventana sin core, donde
      * `getCore()` lanzaría.
      */
-    const nextOverrides = deriveEngineConfigOverrides(next);
+    const nextOverrides = deriveEngineConfigOverrides(next, deviceSignals);
     const needsRecreate =
       documentId === null &&
-      !sameEngineConfigOverrides(deriveEngineConfigOverrides(previous), nextOverrides);
+      !sameEngineConfigOverrides(
+        deriveEngineConfigOverrides(previous, deviceSignals),
+        nextOverrides,
+      );
 
     if (needsRecreate) {
       setSaving(true);
@@ -397,9 +402,9 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                   aria-label="Preset de rendimiento"
                 />
               </div>
-              {/* Un renglón fijo para los tres perfiles (UX-10). */}
+              {/* Ranura de alto fijo para los cinco perfiles (UX-10, ADR-194 §6). */}
               <p className="h-5 truncate text-sm text-text-secondary">
-                {PERFORMANCE_PRESET_DESCRIPTION[performancePreset]}
+                {describePerformancePreset(performancePreset, deviceSignals)}
               </p>
               {/* Ranura reservada aunque no haya documento: no cambia el alto. */}
               <p

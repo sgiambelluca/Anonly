@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   describeTheme,
   OCR_LANGUAGES_SLOT_TEXT,
-  PERFORMANCE_PRESET_DESCRIPTION,
+  describePerformancePreset,
   resolveOcrLanguagesSlot,
   resolveSaveErrorSlot,
   THEME_LABEL,
@@ -29,9 +29,9 @@ describe("Configuración (ADR-169 §8)", () => {
     expect(describeTheme("dark")).toBe("Se aplica al guardar.");
   });
 
-  it("los tres perfiles tienen descripción (un renglón fijo)", () => {
-    for (const preset of ["auto", "low", "high"] as const) {
-      expect(PERFORMANCE_PRESET_DESCRIPTION[preset].length).toBeGreaterThan(0);
+  it("los cinco perfiles tienen descripción", () => {
+    for (const preset of ["auto", "low", "medium", "high", "ultra"] as const) {
+      expect(describePerformancePreset(preset, {}).length).toBeGreaterThan(0);
     }
   });
 
