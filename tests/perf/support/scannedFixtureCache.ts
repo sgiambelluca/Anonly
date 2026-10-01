@@ -28,7 +28,11 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "@playwright/test";
 
 import type { E2eFilePayload } from "../../e2e/support/fixtures.js";
-import { rasterizeToScannedPdf } from "../../e2e/support/scannedPdf.js";
+import {
+  rasterizePixelRotationsToScannedPdf,
+  rasterizeToScannedPdf,
+  type ScanDegradation,
+} from "../../e2e/support/scannedPdf.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CACHE_DIR = resolve(HERE, "../../../.measure/fixtures");
@@ -38,6 +42,10 @@ export interface ScannedFixtureOptions {
   readonly scale?: number;
   /** Cantidad de páginas de la fuente a rasterizar. Sin valor, todas. */
   readonly pageCount?: number;
+  /** Giro físico por página (una entrada por página). Sin valor, sin giros. */
+  readonly rotations?: ReadonlyArray<0 | 90 | 180 | 270>;
+  /** Degradación determinista de fotocopia (receta y semilla incluidas). */
+  readonly degradation?: ScanDegradation;
 }
 
 /**
@@ -52,6 +60,9 @@ export function scannedFixtureHash(
   const hash = createHash("sha256").update(sourceBytes);
   if (options.scale !== undefined) hash.update(`|scale=${options.scale}`);
   if (options.pageCount !== undefined) hash.update(`|pages=${options.pageCount}`);
+  if (options.rotations !== undefined) hash.update(`|rotations=${options.rotations.join(",")}`);
+  if (options.degradation !== undefined)
+    hash.update(`|degradation=${JSON.stringify(options.degradation)}`);
   return hash.digest("hex").slice(0, 16);
 }
 
@@ -78,12 +89,22 @@ export async function getOrGenerateScannedFixture(
   const browser = await chromium.launch();
   try {
     const page = await browser.newPage();
-    const generated = await rasterizeToScannedPdf(
-      page,
-      sourceBytes,
-      options.scale,
-      options.pageCount,
-    );
+    const generated =
+      options.rotations === undefined
+        ? await rasterizeToScannedPdf(
+            page,
+            sourceBytes,
+            options.scale,
+            options.pageCount,
+            options.degradation,
+          )
+        : await rasterizePixelRotationsToScannedPdf(
+            page,
+            sourceBytes,
+            options.rotations,
+            options.scale,
+            options.degradation,
+          );
     await writeFile(cachePath, generated.buffer);
     return generated;
   } finally {

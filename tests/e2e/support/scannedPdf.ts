@@ -51,6 +51,22 @@ const PDF_LIB_MJS_PATH = fileURLToPath(
 
 const DEFAULT_SCALE = 3; // resolución generosa para que Tesseract reconozca el texto de forma confiable.
 
+/**
+ * Degradación determinista de fotocopia, aplicada al bitmap antes de armar el PDF (no dentro de la
+ * app medida). Desenfoque gaussiano, pérdida de contraste y ruido con semilla fija; todo en JS, sin
+ * filtros del canvas, para que el resultado no dependa de la GPU.
+ */
+export interface ScanDegradation {
+  readonly recipe: string;
+  readonly seed: number;
+  readonly blurSigmaPx: number;
+  /** Nivel de gris (0 a 255) al que pasa el negro puro. */
+  readonly blackLevel: number;
+  /** Nivel de gris (0 a 255) al que pasa el blanco puro. */
+  readonly whiteLevel: number;
+  readonly noiseSigma: number;
+}
+
 interface BrowserRasterizeArgs {
   readonly pdfjsSource: string;
   readonly workerSource: string;
@@ -59,6 +75,7 @@ interface BrowserRasterizeArgs {
   readonly scale: number;
   readonly rotations?: ReadonlyArray<0 | 90 | 180 | 270>;
   readonly pageCount?: number;
+  readonly degradation?: ScanDegradation;
 }
 
 export interface PdfPixelSample {
@@ -98,8 +115,16 @@ export interface PdfRegionStats {
  * el origen (`any`) ya es asignable a cualquier tipo con un solo `as`.
  */
 async function rasterizeInBrowser(args: BrowserRasterizeArgs): Promise<string> {
-  const { pdfjsSource, workerSource, pdfLibSource, sourceBase64, scale, rotations, pageCount } =
-    args;
+  const {
+    pdfjsSource,
+    workerSource,
+    pdfLibSource,
+    sourceBase64,
+    scale,
+    rotations,
+    pageCount,
+    degradation,
+  } = args;
 
   function base64ToBytes(base64: string): Uint8Array {
     const binary = atob(base64);
@@ -166,6 +191,80 @@ async function rasterizeInBrowser(args: BrowserRasterizeArgs): Promise<string> {
     // acepta el mismo shape que usa `render-engine` (Core) en su propio
     // `rasterizePage` — mismo patrón, sin necesidad de castear.
     await sourcePage.render({ canvasContext: sourceContext, viewport: renderViewport }).promise;
+
+    if (degradation !== undefined) {
+      const width = sourceCanvas.width;
+      const height = sourceCanvas.height;
+      const image = sourceContext.getImageData(0, 0, width, height);
+      const pixels = image.data;
+      const plane = new Float32Array(width * height);
+      for (let index = 0; index < plane.length; index += 1) {
+        plane[index] =
+          0.299 * (pixels[index * 4] ?? 255) +
+          0.587 * (pixels[index * 4 + 1] ?? 255) +
+          0.114 * (pixels[index * 4 + 2] ?? 255);
+      }
+      if (degradation.blurSigmaPx > 0) {
+        const radius = Math.ceil(3 * degradation.blurSigmaPx);
+        const kernel = new Float32Array(2 * radius + 1);
+        let kernelSum = 0;
+        for (let offset = -radius; offset <= radius; offset += 1) {
+          const weight = Math.exp(-(offset * offset) / (2 * degradation.blurSigmaPx ** 2));
+          kernel[offset + radius] = weight;
+          kernelSum += weight;
+        }
+        for (let index = 0; index < kernel.length; index += 1)
+          kernel[index] = (kernel[index] ?? 0) / kernelSum;
+        const scratch = new Float32Array(plane.length);
+        for (let row = 0; row < height; row += 1) {
+          for (let column = 0; column < width; column += 1) {
+            let sum = 0;
+            for (let offset = -radius; offset <= radius; offset += 1) {
+              const at = Math.min(width - 1, Math.max(0, column + offset));
+              sum += (kernel[offset + radius] ?? 0) * (plane[row * width + at] ?? 0);
+            }
+            scratch[row * width + column] = sum;
+          }
+        }
+        for (let row = 0; row < height; row += 1) {
+          for (let column = 0; column < width; column += 1) {
+            let sum = 0;
+            for (let offset = -radius; offset <= radius; offset += 1) {
+              const at = Math.min(height - 1, Math.max(0, row + offset));
+              sum += (kernel[offset + radius] ?? 0) * (scratch[at * width + column] ?? 0);
+            }
+            plane[row * width + column] = sum;
+          }
+        }
+      }
+      // mulberry32 con semilla fija; Box-Muller para el ruido gaussiano.
+      let state = degradation.seed >>> 0;
+      const uniform = (): number => {
+        state = (state + 0x6d2b79f5) >>> 0;
+        let mixed = Math.imul(state ^ (state >>> 15), 1 | state);
+        mixed = (mixed + Math.imul(mixed ^ (mixed >>> 7), 61 | mixed)) ^ mixed;
+        return ((mixed ^ (mixed >>> 14)) >>> 0) / 4294967296;
+      };
+      const span = degradation.whiteLevel - degradation.blackLevel;
+      let darkest = 255;
+      for (let index = 0; index < plane.length; index += 1) {
+        const noise =
+          degradation.noiseSigma *
+          Math.sqrt(-2 * Math.log(1 - uniform())) *
+          Math.cos(2 * Math.PI * uniform());
+        const value = degradation.blackLevel + ((plane[index] ?? 255) / 255) * span + noise;
+        const byte = Math.min(255, Math.max(0, Math.round(value)));
+        if (byte < darkest) darkest = byte;
+        pixels[index * 4] = byte;
+        pixels[index * 4 + 1] = byte;
+        pixels[index * 4 + 2] = byte;
+        pixels[index * 4 + 3] = 255;
+      }
+      // Una página que sale sin tinta es un fixture roto: se corta aquí y no se cachea.
+      if (darkest >= degradation.blackLevel + span / 2)
+        throw new Error(`degradación: la página ${pageNumber} quedó sin tinta`);
+      sourceContext.putImageData(image, 0, 0);
+    }
 
     const rotation = rotations?.[pageNumber - 1] ?? 0;
     const quarterTurn = rotation === 90 || rotation === 270;
@@ -506,6 +605,7 @@ export async function rasterizeToScannedPdf(
   sourcePdfBytes: Uint8Array,
   scale: number = DEFAULT_SCALE,
   pageCount?: number,
+  degradation?: ScanDegradation,
 ): Promise<E2eFilePayload> {
   const [pdfjsSource, workerSource, pdfLibSource] = await Promise.all([
     readFile(PDFJS_MJS_PATH, "utf-8"),
@@ -522,6 +622,7 @@ export async function rasterizeToScannedPdf(
     sourceBase64,
     scale,
     ...(pageCount === undefined ? {} : { pageCount }),
+    ...(degradation === undefined ? {} : { degradation }),
   });
 
   return {
@@ -538,6 +639,7 @@ export async function rasterizePixelRotationsToScannedPdf(
   sourcePdfBytes: Uint8Array,
   rotations: ReadonlyArray<0 | 90 | 180 | 270>,
   scale: number = DEFAULT_SCALE,
+  degradation?: ScanDegradation,
 ): Promise<E2eFilePayload> {
   const [pdfjsSource, workerSource, pdfLibSource] = await Promise.all([
     readFile(PDFJS_MJS_PATH, "utf-8"),
@@ -552,6 +654,7 @@ export async function rasterizePixelRotationsToScannedPdf(
     scale,
     rotations,
     pageCount: rotations.length,
+    ...(degradation === undefined ? {} : { degradation }),
   });
   return {
     name: "t5-orientation-pixel.pdf",

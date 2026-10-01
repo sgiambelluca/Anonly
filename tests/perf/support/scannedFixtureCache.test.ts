@@ -27,6 +27,30 @@ describe("scannedFixtureHash", () => {
     expect(scannedFixtureHash(bytes, { pageCount: 20 })).not.toBe(scannedFixtureHash(bytes));
   });
 
+  it("la degradación y los giros distinguen la clave", () => {
+    const degradation = {
+      recipe: "r",
+      seed: 1,
+      blurSigmaPx: 1,
+      blackLevel: 50,
+      whiteLevel: 230,
+      noiseSigma: 8,
+    };
+    const plain = scannedFixtureHash(bytes, { scale: 4 });
+    const degraded = scannedFixtureHash(bytes, { scale: 4, degradation });
+    expect(degraded).not.toBe(plain);
+    expect(
+      scannedFixtureHash(bytes, { scale: 4, degradation: { ...degradation, seed: 2 } }),
+    ).not.toBe(degraded);
+    expect(
+      scannedFixtureHash(bytes, { scale: 4, degradation: { ...degradation, blurSigmaPx: 1.5 } }),
+    ).not.toBe(degraded);
+    expect(scannedFixtureHash(bytes, { scale: 4, rotations: [0, 180] })).not.toBe(plain);
+    expect(scannedFixtureHash(bytes, { scale: 4, rotations: [0, 180] })).not.toBe(
+      scannedFixtureHash(bytes, { scale: 4, rotations: [180, 0] }),
+    );
+  });
+
   it("es determinista", () => {
     expect(scannedFixtureHash(bytes, { scale: 4, pageCount: 2 })).toBe(
       scannedFixtureHash(bytes, { scale: 4, pageCount: 2 }),
