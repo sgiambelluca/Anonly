@@ -726,6 +726,7 @@ Insertado con la convención decimal del repo, sin renumerar Release. Adelantado
 - Revisión de `hardening/plan-2026-09` antes del merge a `main`, por bloques y con un revisor por bloque: `Revision_Por_Bloques_Hardening.md` (plan, orden, seguimiento y commits de cada bloque).
 - Docs finales, README del repo, demo.
 - README: guía del primer arranque en macOS. La app no está notarizada (`08_Security_Model.md` §2.3), así que Gatekeeper la bloquea la primera vez y el usuario tiene que permitirla desde Ajustes → Privacidad y seguridad.
+- **El instalador no lleva los sourcemaps del renderer** (decisión del humano, 2026-09-30). `vite.config.ts` los sigue generando (`sourcemap: true`), pero `electron-builder.yml` los excluye del `extraResources` del renderer: eran ~15 MB en cada instalación y en cada actualización, y la app no reporta errores a ningún lado, así que solo servían a quien abriera las DevTools de la app instalada. Un stack minificado reportado por un usuario se traduce localmente con los `.map` del build del mismo commit. Además, los `.map` llevan el texto fuente (`sourcesContent`), incluidos los ganchos de E2E que `scripts/ci/assert-no-e2e-hooks.mjs` verifica que no estén en el código del release.
 - Publicación de instaladores en GitHub Releases. ~~deploy a CDN estático~~ — no hay hosting: la app no se sirve, se descarga (ADR-130, ADR-131 §1).
 
 ### Hito 12.5 — Rediseño desde las pruebas de usuario (ADR-168 a ADR-172)

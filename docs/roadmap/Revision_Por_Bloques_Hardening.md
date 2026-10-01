@@ -308,7 +308,7 @@ veces.
 | — | E2 | Exceptuado (APPROVED 2026-09-26) | 2 | — | |
 | A | B1, B2, B7 | **APPROVED** (2026-09-27) | 3 (R1 REJECTED 7 B / 6 O; R2 B2 y B7 APPROVED, B1 REJECTED por B-5; R3 APPROVED) | ver el commit de cierre de la ronda A | O-1 → ADR-189; B-4 de Performance/Leak/Stress → ronda C; riesgo de OSD en páginas escasas → bloqueante de la ronda B |
 | B | B4, B5, B6 | **APPROVED** (2026-09-29, R6: B5 reabierto y cerrado; B4 y B6 confirmados) | 6 (R1 a R4 con Codex, §4.1; R5 verificación independiente, B5 REJECTED; R6 APPROVED) | commits de cierre de la ronda B y de la reapertura de B5 | El humano aceptó como riesgo conocido el veredicto OSD equivocado con basura confiable (ADR-190, Consecuencias; `MVP.md`). ADR-146 M2 ABIERTO en `MVP.md`. Corrimiento del scroll durante un `reanalyze` de OCR: el humano decidió anclarlo (2026-09-29, `Components.md` §5.3); implementado y APPROVED en la revisión de la ronda C. Pendientes menores de comentarios para la ronda D: `viewerGestures.ts:38-40` y el docblock de `adr190-unreadable-page-cover.spec.ts` |
-| C | B3, B8 | **APPROVED** (2026-09-29, R5 independiente; B3 y anclaje del scroll APPROVED en R4) | 5 (R1 a R3 con Codex; R4 independiente, B8 REJECTED; R5 APPROVED) | commits de cierre de la ronda C | Decisiones del humano: `test:perf` solo con `pipeline-timing`, CI mide sin umbral y el umbral de 8 s se aplica en local (§11.4); Leak y Stress rigen por ADR-149 (nota en ADR-185 §5). R5 estima en el runner de macOS Stress 25–35 min (tope 60) y Leak 40–50 min (tope 90); lo confirma la primera corrida de CI del PR. Pendiente de decisión humana, no bloqueante: si el instalador sigue llevando los sourcemaps del renderer (~15 MB) |
+| C | B3, B8 | **APPROVED** (2026-09-29, R5 independiente; B3 y anclaje del scroll APPROVED en R4) | 5 (R1 a R3 con Codex; R4 independiente, B8 REJECTED; R5 APPROVED) | commits de cierre de la ronda C | Decisiones del humano: `test:perf` solo con `pipeline-timing`, CI mide sin umbral y el umbral de 8 s se aplica en local (§11.4); Leak y Stress rigen por ADR-149 (nota en ADR-185 §5). R5 estima en el runner de macOS Stress 25–35 min (tope 60) y Leak 40–50 min (tope 90); lo confirma la primera corrida de CI del PR. Sourcemaps del renderer: el humano decidió sacarlos del instalador (2026-09-30, `MVP.md` Hito 12) |
 | D | B9, B10 | **APPROVED** (2026-09-29, revisor Sonnet por ser revisión de texto y arneses) | 1 | commits de cierre de la ronda D | Sin datos reales en `HEAD`. Once observaciones no bloqueantes: diez resueltas en docs por el planificador (índice de mediciones, estados viejos, base del patch de I-2, gates alineados con CI, guía de IA, residuo de una ruta personal en el historial en §6) y los dos comentarios de código desactualizados, que resuelve el implementador junto con el anclaje del scroll |
 | E | Hallazgos huérfanos de la revisión del 2026-09-26 (§4.3) | **APPROVED** (2026-09-30, R3) | 3 (R1 REJECTED 19/21; R2 REJECTED por un test; R3 APPROVED) | ver los commits de la ronda E | 21 vigentes, 7 resueltos en rondas previas. ADR-191, enmienda de ADR-167 y dos decisiones de UX del humano (§4.3.3) |
 
@@ -693,6 +693,16 @@ cosmético: un `unsubscribe()` fuera de `finally` en un test.
    `pnpm test:leak` y `pnpm test:stress`. Quedan abiertas las fallas E2E de
    los escenarios 2 y 5 (N-8, Hito 11). Hay que resolverlas o registrarlas
    como conocidas antes del merge.
+
+   **Estado de N-8 (2026-09-30).** Se reportaron en Windows nativo el
+   2026-09-24, sin causa registrada. En macOS, sobre `5ceb1e6` y con la app
+   reconstruida, `scenario-2` y `scenario-5` pasan 4 de 4 cada uno (una
+   corrida y después `--repeat-each=3`). Falta correrlos en Windows y, si
+   fallan, diagnosticar con la salida real antes de tocar nada. Los dos
+   tienen aserciones que dependen de la plataforma: `scenario-2` busca el DNI
+   exacto leído por OCR, que difiere entre plataformas por la rasterización
+   con GPU (`OCR_Entre_Plataformas_Medicion.md`), y `scenario-5` depende del
+   modelo de NER real y de una ventana de 30 s para el texto de estado.
 2. **PR a `main`.** CI (`.github/workflows/ci.yml`) solo corre en push o PR
    contra `main`, así que **nunca corrió sobre esta branch**. El PR es la
    primera vez: esperar CI verde antes de mergear. CI corre en Linux y macOS, no en Windows: Windows queda cubierto por los gates locales de cada ronda y por la suite pesada del punto 1.
