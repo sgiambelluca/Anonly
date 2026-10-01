@@ -663,9 +663,11 @@ workflow en CI sigue pendiente.
   Después de medir hilos NER y workers OCR, revisar los perfiles
   Bajo/Intermedio/Alto/Automático como propuesta, con Automático mostrando el
   nivel resuelto según recursos del equipo y evidencia de costo/beneficio.
-  **Esa revisión de perfiles sigue sin hacerse**: los datos de las dos
-  plataformas están, pero decidir un perfil o cambiar cualquier default
-  requiere ADR propio del planificador, no se infiere de esta medición.
+  **Hecha el 2026-10-01 (ADR-194):** cinco perfiles (Bajo, Intermedio, Alto,
+  Ultra y Automático), con Automático resolviendo el nivel según la RAM y los
+  hilos del equipo y mostrándolo en Configuración. Techos de memoria por
+  perfil en ADR-194 §7; el de Bajo es provisorio hasta medirlo en Windows.
+  La campaña de DPI descendente cerró sin bajar la resolución del OCR.
   Los valores actuales no cambian con este plan; un perfil podrá consumir más
   memoria si la mejora de tiempo lo justifica, con presupuestos explícitos.
   Alcance y dependencias: `Optimizacion_De_Rendimiento.md`, «Próximos objetivos».

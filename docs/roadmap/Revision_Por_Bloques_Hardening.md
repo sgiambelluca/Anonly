@@ -686,6 +686,41 @@ cerrados. Gates: `lint`, `typecheck`, `test` (3011), `test:contract` (340) y
 entonces solo cambiaron comentarios en ese componente. Queda un no bloqueante
 cosmético: un `unsubscribe()` fuera de `finally` en un test.
 
+### 4.4 Lotes posteriores a la ronda E (2026-10-01)
+
+Entraron después de la suite pesada de Windows (§5, sobre `ebd030d`). Los
+que tocan producto **no están cubiertos por esa suite**.
+
+| Lote | Commits | Toca producto | Revisión |
+|---|---|---|---|
+| Campaña de DPI descendente: plan, arnés y cierre. Ningún brazo pasa; la resolución del OCR no se baja | `6d948bd` a `5e7c9e8`, `708310d`, `ac6db58`, `f25bdbc` | no (`tests/` y docs) | arnés APPROVED en la ronda 3 |
+| ADR-193: dos escrituras que solo difieren en mayúsculas no son un empate | `0aacc5a`, `e488a75` | sí (`grouping-engine`) | **sin revisor**, por decisión del humano |
+| Rediseño de los diálogos de exportar y de conflicto, y pantalla inicial sin scroll | `91c2ada` | sí (`react-client`) | **sin revisor**, por decisión del humano |
+| ADR-194: cinco perfiles de rendimiento, Automático según el equipo, RAM desde el shell, el perfil rige al cerrar el documento, y las suites de medición fijan Intermedio | `da40aa0` a `e95da1b` | sí (`react-client`, `desktop-shell`) y `tests/` | APPROVED en la ronda 3 |
+| ADR-195: las actualizaciones se eligen en un solo selector | `3f72a3e` (docs en `da40aa0`) | sí (`react-client`) | **sin revisor**, por decisión del humano; lo implementó y repasó el planificador |
+
+Hallazgos de la revisión de ADR-194 que quedaron corregidos en el lote:
+
+- El arnés del pool de OCR asumía que Automático usaba dos reconocedores;
+  con la regla nueva abortaba en el banco de Windows. Ahora fija siempre
+  reconocedores y tope de imágenes.
+- `PasswordDialog` quedaba suscripto al bus del Core anterior tras una
+  recreación: un PDF protegido no pedía la contraseña. El defecto era
+  anterior al lote (camino de ADR-125).
+- Un cambio de perfil con un documento abierto regía recién al reiniciar la
+  aplicación, no «al próximo documento».
+
+Sin verificar en la aplicación empaquetada, al cierre de este registro:
+
+- que `window.anonlyDevice` llegue en Windows (se comprobó en macOS);
+- el PDF protegido después de una recreación del Core;
+- que el arnés del pool corra en el banco de Windows con Automático en
+  Ultra.
+
+Pendientes que no bloquean el merge: el techo de memoria de Bajo (ADR-194
+§7, provisorio) y la pérdida de emails al leer a menos de 300 dpi (`MVP.md`,
+Hito 11).
+
 ## 5. Después del último bloque: el merge a `main`
 
 1. **Suite pesada sobre la app empaquetada**, en Windows nativo, con la máquina
@@ -736,6 +771,20 @@ cosmético: un `unsubscribe()` fuera de `finally` en un test.
    iguales. Además, la tanda de perfiles encontró que un escaneo a 300 dpi
    usa más memoria que el fixture de P2 con la misma configuración (ADR-192,
    «Medición del 2026-10-01»).
+
+   **La suite del 2026-10-01 es anterior a los lotes de §4.4.** ADR-193, el
+   rediseño de diálogos, ADR-194 y ADR-195 cambian producto y entraron
+   después. Antes del PR se corren, de a uno, los E2E afectados sobre el
+   `HEAD` nuevo; el resultado se anota acá.
+
+   **E2E sobre `3f72a3e`, en macOS (2026-10-01): 39 pasan, 0 fallan, 1
+   salteado** (`t5-orientation-pixel`, marcado `skip`), en 3,4 minutos. La
+   primera corrida abortó sin ejecutar ningún spec: el lote de ADR-194 había
+   dejado un test de Vitest (`settingsOverride.test.ts`) en `tests/e2e/`,
+   que Playwright tomaba como spec y que Vitest excluye. Se movió a
+   `tests/perf/support/`, donde corre. En Windows no se repitió; `test:perf`,
+   `test:leak` y `test:stress` tampoco se volvieron a correr sobre este
+   `HEAD`.
 
 2. **PR a `main`.** CI (`.github/workflows/ci.yml`) solo corre en push o PR
    contra `main`, así que **nunca corrió sobre esta branch**. El PR es la
