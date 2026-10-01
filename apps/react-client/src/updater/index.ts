@@ -16,8 +16,8 @@
  * ADR-132 §3.** Aquel colgaba del toggle de instalar y confundía buscar con
  * instalar; se sacó y el shell pasó a buscar siempre, lo que dejó sin cumplir
  * ADR-131 §5 ("el chequeo es desactivable"). Este mensaje cuelga de una
- * preferencia propia, `checkUpdates`, que vive en `settings.store.ts` igual
- * que `autoUpdate` y significa lo mismo que la propiedad de Sparkle: buscar,
+ * preferencia, `updateMode` (ADR-195; `off` es no buscar), que vive en
+ * `settings.store.ts` y significa lo mismo que la propiedad de Sparkle: buscar,
  * no instalar. El shell no busca nada hasta que se lo llama.
  */
 

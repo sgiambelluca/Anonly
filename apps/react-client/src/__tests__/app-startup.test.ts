@@ -11,7 +11,7 @@ import { describe, expect, it, vi } from "vitest";
 import { bootstrapAutomaticChecksPreference } from "../appStartup.js";
 
 describe("bootstrapAutomaticChecksPreference (ADR-188 §2)", () => {
-  it("carga la configuración antes de leer y enviar checkUpdates", () => {
+  it("carga la configuración antes de leer y enviar la preferencia de búsqueda", () => {
     const calls: string[] = [];
 
     bootstrapAutomaticChecksPreference({

@@ -16,7 +16,7 @@ import {
   type DeviceSignals,
   type PerformanceLevel,
 } from "../../core-adapter/settingsToEngineConfig.js";
-import type { PerformancePreset, Theme } from "../../store/settings.store.js";
+import type { PerformancePreset, Theme, UpdateMode } from "../../store/settings.store.js";
 
 /** Nombre en la UI de cada nivel (ADR-194 §1). */
 export const PERFORMANCE_LEVEL_LABEL: Readonly<Record<PerformanceLevel, string>> = {
@@ -88,24 +88,29 @@ export const UPDATE_NETWORK_NOTICE =
 export const UPDATE_NETWORK_NOTICE_EMPHASIS =
   "Nunca se envía el contenido ni el nombre de un documento.";
 /**
- * ADR-188 §5: oración agregada al final del aviso de red. Con la búsqueda
- * automática apagada, la única conexión de la app queda del todo bajo control
- * del usuario.
+ * ADR-195 §3: última oración del aviso de red. Con "No buscar", la única
+ * conexión de la app queda del todo bajo control del usuario.
  */
 export const UPDATE_NETWORK_NOTICE_CHECK_OFF =
-  'Si desactivás la búsqueda automática, Anonly no se conecta a internet salvo que toques "Buscar actualizaciones ahora".';
+  'Si elegís "No buscar", Anonly no se conecta a internet salvo que toques "Buscar actualizaciones ahora".';
 
-/** ADR-188 §5: subtítulo de la sección «Actualizaciones», con los dos controles. */
-export const UPDATE_SECTION_SUBTITLE =
-  "Elegí si Anonly busca versiones nuevas por su cuenta y si las instala sola al reiniciar o te avisa.";
+/** ADR-195 §3: subtítulo de la sección «Actualizaciones». */
+export const UPDATE_SECTION_SUBTITLE = "Elegí qué hace Anonly con las versiones nuevas.";
 
-/**
- * ADR-188 §5: label del interruptor nuevo. Es una constante y no un literal
- * en el JSX de `SettingsDialog` para que el test estático de esa sección
- * (`settings-dialog-updates-section.test.ts`) pueda afirmar que el control
- * usa este texto exacto sin depender de que el JSX no cambie de forma.
- */
-export const UPDATE_CHECK_LABEL = "Buscar actualizaciones automáticamente";
+/** Orden del selector (ADR-195 §3). */
+export const UPDATE_MODE_ORDER: ReadonlyArray<UpdateMode> = ["install", "notify", "off"];
+
+export const UPDATE_MODE_LABEL: Readonly<Record<UpdateMode, string>> = {
+  install: "Instalar automáticamente",
+  notify: "Avisarme",
+  off: "No buscar",
+};
+
+export const UPDATE_MODE_DESCRIPTION: Readonly<Record<UpdateMode, string>> = {
+  install: "Busca versiones nuevas y las instala al reiniciar.",
+  notify: "Busca versiones nuevas y te avisa antes de instalar.",
+  off: "No se conecta a internet. Podés buscar con el botón de abajo.",
+};
 
 /** Qué muestra la ranura fija bajo "Idiomas del documento". */
 export type OcrLanguagesSlot = "idle" | "empty" | "reanalyze";

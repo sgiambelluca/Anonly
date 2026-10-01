@@ -86,6 +86,34 @@ function migratePerformancePreset(value: unknown, version: unknown): Performance
   return preset === "high" && outdated ? "auto" : preset;
 }
 
+/** ADR-195 §1: una sola preferencia en lugar de `autoUpdate` y `checkUpdates`. */
+export type UpdateMode = "install" | "notify" | "off";
+
+const UPDATE_MODES: ReadonlySet<string> = new Set<UpdateMode>(["install", "notify", "off"]);
+
+/** Lo que se le informa al shell con `setAutomaticChecks` (ADR-188 §2). */
+export function searchesAutomatically(mode: UpdateMode): boolean {
+  return mode !== "off";
+}
+
+/** Con una versión lista, ¿se aplica sin preguntar? Solo en `install` (ADR-195 §1). */
+export function installsWithoutAsking(mode: UpdateMode): boolean {
+  return mode === "install";
+}
+
+/**
+ * El modo a cargar (ADR-195 §2). Sin `updateMode` guardado se deduce de las
+ * dos claves anteriores; la búsqueda apagada gana sobre la instalación.
+ */
+function migrateUpdateMode(parsed: PersistedSettings): UpdateMode {
+  if (parsed.updateMode !== undefined) {
+    const value: unknown = parsed.updateMode;
+    return typeof value === "string" && UPDATE_MODES.has(value) ? (value as UpdateMode) : "notify";
+  }
+  if (parsed.checkUpdates === false) return "off";
+  return parsed.autoUpdate === true ? "install" : "notify";
+}
+
 export interface SettingsSlice {
   readonly language: Language;
   readonly performancePreset: PerformancePreset;
@@ -93,31 +121,18 @@ export interface SettingsSlice {
   readonly nerEnabled: boolean;
   readonly ocrLanguages: ReadonlyArray<string>;
   /**
-   * `false` = preguntar antes de instalar una actualización; `true` = aplicarla
-   * sola.
+   * Qué hace Anonly con las versiones nuevas (ADR-195): `install` busca y
+   * aplica sola al reiniciar, `notify` busca y pregunta, `off` no se conecta
+   * salvo con "Buscar actualizaciones ahora".
    *
-   * El default es preguntar, y es una decisión de producto, no una comodidad:
-   * reemplazarle la aplicación en silencio a alguien que está anonimizando
-   * pericias es exactamente lo que genera desconfianza en una herramienta que
-   * se vende como local. Quien prefiera que no le pregunten más lo apaga acá.
+   * El default es preguntar, y es una decisión de producto: reemplazarle la
+   * aplicación en silencio a alguien que está anonimizando pericias es lo que
+   * genera desconfianza en una herramienta que se vende como local.
    *
    * Solo tiene efecto dentro del contenedor de escritorio (ADR-131 §3). En un
    * navegador no hay actualizador y el control no se muestra.
    */
-  readonly autoUpdate: boolean;
-  /**
-   * Si Anonly consulta a GitHub por su cuenta, sin que el usuario toque
-   * "Buscar actualizaciones ahora" (ADR-188). Independiente de `autoUpdate`,
-   * que decide qué hacer con una actualización ya descargada: este control
-   * decide si se busca.
-   *
-   * Default `true` — las actualizaciones llevan correcciones, y así una
-   * configuración persistida sin esta clave (instalaciones existentes) se
-   * comporta igual que hoy. Solo tiene efecto dentro del contenedor de
-   * escritorio: en un navegador no hay actualizador y el control no se
-   * muestra.
-   */
-  readonly checkUpdates: boolean;
+  readonly updateMode: UpdateMode;
   readonly theme: Theme;
   /**
    * ADR-169 §7: avisos de descubrimiento que el usuario cerró
@@ -168,8 +183,7 @@ type SettingsData = Pick<
   | "defaultReplacementMode"
   | "nerEnabled"
   | "ocrLanguages"
-  | "autoUpdate"
-  | "checkUpdates"
+  | "updateMode"
   | "theme"
   | "dismissedHints"
 >;
@@ -180,13 +194,17 @@ const DEFAULT_SETTINGS: SettingsData = {
   defaultReplacementMode: ReplacementMode.Placeholder,
   nerEnabled: true,
   ocrLanguages: ["spa", "eng"],
-  autoUpdate: false,
-  checkUpdates: true,
+  updateMode: "notify",
   theme: "system",
   dismissedHints: [],
 };
 
-type PersistedSettings = Partial<SettingsData> & { readonly settingsVersion?: number };
+type PersistedSettings = Partial<SettingsData> & {
+  readonly settingsVersion?: number;
+  // Claves anteriores a ADR-195: se leen para migrar y ya no se escriben.
+  readonly autoUpdate?: unknown;
+  readonly checkUpdates?: unknown;
+};
 
 function isPersistedSettings(value: unknown): value is PersistedSettings {
   return typeof value === "object" && value !== null;
@@ -202,8 +220,7 @@ export const useSettingsStore = create<SettingsSlice>((set, get) => ({
       performancePreset: state.performancePreset,
       defaultReplacementMode: state.defaultReplacementMode,
       ocrLanguages: state.ocrLanguages,
-      autoUpdate: state.autoUpdate,
-      checkUpdates: state.checkUpdates,
+      updateMode: state.updateMode,
       theme: state.theme,
       dismissedHints: state.dismissedHints,
     };
@@ -249,8 +266,7 @@ export const useSettingsStore = create<SettingsSlice>((set, get) => ({
         : {}),
       ...(parsed.nerEnabled !== undefined ? { nerEnabled: parsed.nerEnabled } : {}),
       ...(parsed.ocrLanguages !== undefined ? { ocrLanguages: parsed.ocrLanguages } : {}),
-      ...(parsed.autoUpdate !== undefined ? { autoUpdate: parsed.autoUpdate } : {}),
-      ...(parsed.checkUpdates !== undefined ? { checkUpdates: parsed.checkUpdates } : {}),
+      updateMode: migrateUpdateMode(parsed),
       ...(parsed.theme !== undefined ? { theme: parsed.theme } : {}),
       // Se filtra contra los avisos que existen: una clave vieja o corrupta no
       // puede esconder un aviso nuevo.

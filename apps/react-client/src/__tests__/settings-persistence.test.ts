@@ -18,7 +18,11 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { useSettingsStore } from "../store/settings.store.js";
+import {
+  installsWithoutAsking,
+  searchesAutomatically,
+  useSettingsStore,
+} from "../store/settings.store.js";
 
 const STORAGE_KEY = "anonly:settings";
 
@@ -98,13 +102,10 @@ describe("settings.store persistence", () => {
   });
 });
 
-describe("autoUpdate", () => {
+describe("updateMode (ADR-195)", () => {
   beforeEach(() => {
-    // Reconstruye el estado desde el default REAL del módulo
-    // (`useSettingsStore.getInitialState()`, Zustand v5) en vez de forzar
-    // `{ autoUpdate: false }` a mano: forzar el valor esperado hace que
-    // "arranca en false" compare ese valor contra sí mismo y nunca pueda
-    // fallar, ni siquiera si `DEFAULT_SETTINGS.autoUpdate` cambiara a `true`.
+    // Desde el default REAL del módulo (`getInitialState()`), no forzando el
+    // literal que se espera: así "arranca en notify" puede fallar.
     useSettingsStore.setState(useSettingsStore.getInitialState());
   });
 
@@ -112,88 +113,79 @@ describe("autoUpdate", () => {
     vi.unstubAllGlobals();
   });
 
-  it("arranca en false: se pregunta antes de instalar", () => {
-    // No es una comodidad: reemplazarle la app en silencio a alguien que está
-    // anonimizando pericias es lo que erosiona la confianza en una herramienta
-    // que se vende como local (ADR-131 §3). El default es preguntar.
-    //
-    // Contra `getInitialState()` y no contra `getState()`: con el `beforeEach`
-    // de arriba dan lo mismo ACÁ, pero esta aserción sigue siendo la que
-    // importa aunque alguien saque ese `beforeEach` más adelante.
-    expect(useSettingsStore.getInitialState().autoUpdate).toBe(false);
+  it("arranca en notify: busca y pregunta antes de instalar", () => {
+    // Reemplazarle la app en silencio a alguien que está anonimizando pericias
+    // es lo que erosiona la confianza en una herramienta que se vende como
+    // local (ADR-131 §3). El default es preguntar.
+    expect(useSettingsStore.getInitialState().updateMode).toBe("notify");
   });
 
-  it("se persiste y sobrevive a una sesión nueva", () => {
+  it("se persiste, sobrevive a una sesión nueva y no escribe las claves viejas", () => {
     const storage = stubLocalStorage();
-    useSettingsStore.setState({ autoUpdate: true });
+    useSettingsStore.setState({ updateMode: "install" });
     useSettingsStore.getState().persist();
 
-    expect(JSON.parse(storage.written() ?? "{}")).toHaveProperty("autoUpdate", true);
+    const written = JSON.parse(storage.written() ?? "{}") as Record<string, unknown>;
+    expect(written).toHaveProperty("updateMode", "install");
+    expect(written).not.toHaveProperty("autoUpdate");
+    expect(written).not.toHaveProperty("checkUpdates");
 
-    // Simula el arranque siguiente: estado limpio, se hidrata de localStorage.
     useSettingsStore.setState(useSettingsStore.getInitialState());
     useSettingsStore.getState().load();
 
-    expect(useSettingsStore.getState().autoUpdate).toBe(true);
+    expect(useSettingsStore.getState().updateMode).toBe("install");
   });
 
-  it("una preferencia ausente no pisa el default", () => {
-    // Alguien que actualiza desde una versión sin este setting no debería
-    // encontrarse con que la app se actualiza sola sin habérselo pedido.
-    // Comparado contra `getInitialState()`, no contra un `false` literal: si
-    // el default cambiara, este test tiene que fallar junto con el de arriba,
-    // no quedarse en verde porque el literal coincide por casualidad.
-    stubLocalStorage(JSON.stringify({ language: "en" }));
+  // ADR-195 §2: la tabla de migración, combinación por combinación.
+  it.each([
+    [{ checkUpdates: false, autoUpdate: true }, "off"],
+    [{ checkUpdates: false, autoUpdate: false }, "off"],
+    [{ checkUpdates: false }, "off"],
+    [{ checkUpdates: true, autoUpdate: true }, "install"],
+    [{ autoUpdate: true }, "install"],
+    [{ checkUpdates: true, autoUpdate: false }, "notify"],
+    [{ checkUpdates: true }, "notify"],
+    [{ language: "en" }, "notify"],
+  ] as const)("sin updateMode guardado, %j carga como %s", (stored, expected) => {
+    stubLocalStorage(JSON.stringify(stored));
     useSettingsStore.getState().load();
 
-    expect(useSettingsStore.getState().autoUpdate).toBe(
-      useSettingsStore.getInitialState().autoUpdate,
-    );
-  });
-});
-
-describe("checkUpdates (ADR-188)", () => {
-  beforeEach(() => {
-    // Mismo criterio que `autoUpdate` arriba: reconstruir desde el default
-    // real, no forzar el literal que se espera.
-    useSettingsStore.setState(useSettingsStore.getInitialState());
+    expect(useSettingsStore.getState().updateMode).toBe(expected);
   });
 
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it("arranca en true: las actualizaciones llevan correcciones", () => {
-    expect(useSettingsStore.getInitialState().checkUpdates).toBe(true);
-  });
-
-  it("se persiste y sobrevive a una sesión nueva", () => {
-    const storage = stubLocalStorage();
-    useSettingsStore.setState({ checkUpdates: false });
-    useSettingsStore.getState().persist();
-
-    expect(JSON.parse(storage.written() ?? "{}")).toHaveProperty("checkUpdates", false);
-
-    // Simula el arranque siguiente: estado limpio, se hidrata de localStorage.
-    useSettingsStore.setState(useSettingsStore.getInitialState());
+  it("un updateMode guardado gana sobre las claves viejas", () => {
+    stubLocalStorage(JSON.stringify({ updateMode: "off", checkUpdates: true, autoUpdate: true }));
     useSettingsStore.getState().load();
 
-    expect(useSettingsStore.getState().checkUpdates).toBe(false);
+    expect(useSettingsStore.getState().updateMode).toBe("off");
   });
 
-  it("una configuración persistida sin la clave se lee como el default", () => {
-    // Instalaciones existentes, de antes de ADR-188: tienen que seguir
-    // buscando actualizaciones igual que hoy, sin que nadie se los pida. El
-    // `beforeEach` reconstruye el estado desde `getInitialState()`; acá se
-    // confirma que un `load()` con otras claves presentes pero sin
-    // `checkUpdates` no lo mueve del default real.
-    stubLocalStorage(JSON.stringify({ language: "en" }));
-
+  it("un updateMode desconocido carga como notify", () => {
+    stubLocalStorage(JSON.stringify({ updateMode: "siempre", checkUpdates: false }));
     useSettingsStore.getState().load();
 
-    expect(useSettingsStore.getState().checkUpdates).toBe(
-      useSettingsStore.getInitialState().checkUpdates,
-    );
+    expect(useSettingsStore.getState().updateMode).toBe("notify");
+  });
+
+  it("load() no escribe: la migración se repite hasta el primer persist()", () => {
+    const stored = JSON.stringify({ checkUpdates: false });
+    const storage = stubLocalStorage(stored);
+    useSettingsStore.getState().load();
+
+    expect(storage.written()).toBe(stored);
+  });
+
+  it("solo off deja de buscar, y solo install instala sin preguntar", () => {
+    expect((["install", "notify", "off"] as const).map(searchesAutomatically)).toEqual([
+      true,
+      true,
+      false,
+    ]);
+    expect((["install", "notify", "off"] as const).map(installsWithoutAsking)).toEqual([
+      true,
+      false,
+      false,
+    ]);
   });
 });
 

@@ -20,7 +20,7 @@ export interface UpdatePreferenceSyncDeps {
 }
 
 /**
- * Persiste y, solo si `checkUpdates` cambió respecto del valor previo, avisa
+ * Persiste y, solo si cambió que se busque o no (`updateMode`, ADR-195), avisa
  * al shell — en ese orden ("en el mismo punto donde se persiste", ADR-188 §2).
  */
 export function syncAutomaticChecksPreference(

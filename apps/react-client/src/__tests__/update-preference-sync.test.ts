@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 import { syncAutomaticChecksPreference } from "../components/toolbar/updatePreferenceSync.js";
 
 describe("syncAutomaticChecksPreference (ADR-188 §2)", () => {
-  it("persiste antes de avisar, cuando checkUpdates cambió", () => {
+  it("persiste antes de avisar, cuando cambió que se busque o no", () => {
     const calls: string[] = [];
 
     syncAutomaticChecksPreference(true, false, {
@@ -21,7 +21,7 @@ describe("syncAutomaticChecksPreference (ADR-188 §2)", () => {
     expect(calls).toEqual(["persist", "send:false"]);
   });
 
-  it("no avisa al shell si checkUpdates no cambió (ADR-188 §2: 'guarda un CAMBIO')", () => {
+  it("no avisa al shell si no cambió que se busque (ADR-188 §2; de Avisarme a Instalar no manda nada)", () => {
     const send = vi.fn();
 
     syncAutomaticChecksPreference(true, true, { persist: () => undefined, send });
@@ -29,7 +29,7 @@ describe("syncAutomaticChecksPreference (ADR-188 §2)", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it("persiste igual, haya cambiado checkUpdates o no", () => {
+  it("persiste igual, haya cambiado la búsqueda o no", () => {
     const persist = vi.fn();
 
     syncAutomaticChecksPreference(false, false, { persist, send: () => undefined });

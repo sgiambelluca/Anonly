@@ -56,7 +56,7 @@ import { ZoomControls } from "./components/viewer/ZoomControls.js";
 import { initCore } from "./core-adapter/index.js";
 import { deriveEngineConfigOverrides } from "./core-adapter/settingsToEngineConfig.js";
 import { useEntitiesStore } from "./store/entities.store.js";
-import { useSettingsStore } from "./store/settings.store.js";
+import { searchesAutomatically, useSettingsStore } from "./store/settings.store.js";
 import { applyTheme } from "./theme.js";
 import { sendAutomaticChecksPreference } from "./updater/index.js";
 
@@ -75,10 +75,10 @@ export function App() {
     // `SettingsDialog.applyToStore`). Sale a una función aparte, con sus
     // dependencias inyectadas, porque este componente no tiene tests de
     // render (sin jsdom/testing-library, R-12) y el ORDEN —cargar antes de
-    // leer y enviar `checkUpdates`— es justo lo que hay que probar.
+    // leer y enviar la preferencia— es justo lo que hay que probar.
     bootstrapAutomaticChecksPreference({
       load: () => useSettingsStore.getState().load(),
-      getCheckUpdates: () => useSettingsStore.getState().checkUpdates,
+      getCheckUpdates: () => searchesAutomatically(useSettingsStore.getState().updateMode),
       sendAutomaticChecksPreference,
     });
     // Después de hidratar y antes del primer render con contenido: si se

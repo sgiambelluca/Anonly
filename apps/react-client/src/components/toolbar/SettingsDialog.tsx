@@ -57,10 +57,12 @@ import {
 } from "../../core-adapter/settingsToEngineConfig.js";
 import { useDocumentStore } from "../../store/document.store.js";
 import {
+  searchesAutomatically,
   useSettingsStore,
   type Language,
   type Theme,
   type PerformancePreset,
+  type UpdateMode,
 } from "../../store/settings.store.js";
 import { useViewerStore } from "../../store/viewer.store.js";
 import { applyTheme } from "../../theme.js";
@@ -89,7 +91,9 @@ import {
   resolveSaveErrorSlot,
   THEME_LABEL,
   THEME_ORDER,
-  UPDATE_CHECK_LABEL,
+  UPDATE_MODE_DESCRIPTION,
+  UPDATE_MODE_LABEL,
+  UPDATE_MODE_ORDER,
   UPDATE_NETWORK_NOTICE,
   UPDATE_NETWORK_NOTICE_CHECK_OFF,
   UPDATE_NETWORK_NOTICE_EMPHASIS,
@@ -101,6 +105,10 @@ const LANGUAGE_OPTIONS: ReadonlyArray<SelectOption<Language>> = [
   { value: "es", label: "Español" },
   { value: "en", label: "English" },
 ];
+
+const UPDATE_MODE_OPTIONS: ReadonlyArray<SelectOption<UpdateMode>> = UPDATE_MODE_ORDER.map(
+  (value) => ({ value, label: UPDATE_MODE_LABEL[value] }),
+);
 
 const PERFORMANCE_PRESET_OPTIONS: ReadonlyArray<SelectOption<PerformancePreset>> =
   PERFORMANCE_PRESET_ORDER.map((value) => ({ value, label: PERFORMANCE_PRESET_LABEL[value] }));
@@ -151,11 +159,8 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     () => useSettingsStore.getState().ocrLanguages,
   );
 
-  const [autoUpdate, setAutoUpdate] = useState<boolean>(
-    () => useSettingsStore.getState().autoUpdate,
-  );
-  const [checkUpdates, setCheckUpdates] = useState<boolean>(
-    () => useSettingsStore.getState().checkUpdates,
+  const [updateMode, setUpdateMode] = useState<UpdateMode>(
+    () => useSettingsStore.getState().updateMode,
   );
   /*
    * `null` fuera del contenedor de escritorio: en un navegador no hay
@@ -175,8 +180,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     setLanguage(current.language);
     setPerformancePreset(current.performancePreset);
     setOcrLanguages(current.ocrLanguages);
-    setAutoUpdate(current.autoUpdate);
-    setCheckUpdates(current.checkUpdates);
+    setUpdateMode(current.updateMode);
     setTheme(current.theme);
     setSaveError(null);
   }, [open]);
@@ -186,22 +190,21 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     performancePreset: PerformancePreset;
     nerEnabled: boolean;
     ocrLanguages: ReadonlyArray<string>;
-    autoUpdate: boolean;
-    checkUpdates: boolean;
+    updateMode: UpdateMode;
     theme: Theme;
   }): void {
-    const previousCheckUpdates = useSettingsStore.getState().checkUpdates;
+    const previousSearches = searchesAutomatically(useSettingsStore.getState().updateMode);
     useSettingsStore.setState(next);
     /*
      * ADR-188 §2: el otro de los dos momentos en que el renderer avisa la
      * preferencia (el otro es el arranque, en `App.tsx`, vía
      * `appStartup.ts`). Sale a `syncAutomaticChecksPreference` —misma razón
      * que esa función: probar sin jsdom que se persiste ANTES de avisar, y
-     * que se avisa SOLO si `checkUpdates` cambió (ADR-188 §2 dice "guarda un
-     * CAMBIO de checkUpdates", no "guarda", a secas). Sin contenedor,
+     * que se avisa SOLO si cambió que se busque o no (ADR-188 §2, ADR-195 §1:
+     * pasar de "Avisarme" a "Instalar" no manda nada). Sin contenedor,
      * `sendAutomaticChecksPreference` no hace nada.
      */
-    syncAutomaticChecksPreference(previousCheckUpdates, next.checkUpdates, {
+    syncAutomaticChecksPreference(previousSearches, searchesAutomatically(next.updateMode), {
       persist: () => useSettingsStore.getState().persist(),
       send: sendAutomaticChecksPreference,
     });
@@ -218,8 +221,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
       performancePreset,
       nerEnabled,
       ocrLanguages,
-      autoUpdate,
-      checkUpdates,
+      updateMode,
       theme,
     };
     const change = diffReanalyzeChange(previous, next);
@@ -279,8 +281,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
       performancePreset,
       nerEnabled,
       ocrLanguages,
-      autoUpdate,
-      checkUpdates,
+      updateMode,
       theme,
     };
     const change = diffReanalyzeChange(previous, next);
@@ -516,30 +517,27 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
               title="Actualizaciones"
               subtitle={UPDATE_SECTION_SUBTITLE}
             >
-              {/*
-                ADR-188 §5: dos interruptores, en este orden. El primero decide
-                si se busca; el segundo (ya existía) qué hacer con lo que se
-                encuentra. Son independientes: apagar uno no oculta el otro
-                (diseño estático, UX-10).
-              */}
-              <Checkbox
-                id="settings-check-updates"
-                checked={checkUpdates}
-                onCheckedChange={setCheckUpdates}
-                label={UPDATE_CHECK_LABEL}
-              />
-              <Checkbox
-                id="settings-auto-update"
-                checked={autoUpdate}
-                onCheckedChange={setAutoUpdate}
-                label="Actualizar automáticamente"
-              />
+              {/* ADR-195 §3: un selector en lugar de los dos interruptores de ADR-188 §5. */}
+              <div className="flex flex-col gap-2">
+                <div className="w-56">
+                  <Select
+                    value={updateMode}
+                    onChange={setUpdateMode}
+                    options={UPDATE_MODE_OPTIONS}
+                    aria-label="Actualizaciones"
+                  />
+                </div>
+                {/* Un renglón de alto fijo para las tres opciones (UX-10). */}
+                <p className="h-5 truncate text-sm text-text-secondary">
+                  {UPDATE_MODE_DESCRIPTION[updateMode]}
+                </p>
+              </div>
               {/*
                 ADR-131 §5: buscar actualizaciones es la **única** salida de
                 red del producto, y el usuario tiene que enterarse por la app.
                 Texto de `Components.md` §2.6: sigue diciendo que GitHub ve la
-                IP y la versión, y ADR-188 §5 agrega la oración sobre apagar la
-                búsqueda automática.
+                IP y la versión, y la última oración dice cómo no conectarse
+                (ADR-195 §3).
               */}
               <div className="flex gap-2.5 rounded-lg bg-bg-tertiary px-3 py-2.5 text-sm leading-snug text-text-secondary">
                 <GlobeIcon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />

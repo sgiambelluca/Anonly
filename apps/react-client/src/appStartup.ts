@@ -15,7 +15,7 @@
 export interface SettingsBootstrapDeps {
   /** Hidrata el store desde `localStorage` (`useSettingsStore.getState().load`). */
   readonly load: () => void;
-  /** Lee `checkUpdates`. Se llama DESPUÉS de `load()`, nunca antes. */
+  /** Si la app busca por su cuenta (`updateMode !== "off"`, ADR-195). Se llama DESPUÉS de `load()`, nunca antes. */
   readonly getCheckUpdates: () => boolean;
   /** `sendAutomaticChecksPreference` real, o un doble en los tests. */
   readonly sendAutomaticChecksPreference: (enabled: boolean) => void;
