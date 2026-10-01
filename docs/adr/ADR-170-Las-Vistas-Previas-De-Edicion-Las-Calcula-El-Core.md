@@ -3,6 +3,7 @@
 # ADR-170 — Las vistas previas de edición las calcula el Core
 
 - **Estado**: Accepted
+- **Precisado por**: ADR-191 (2026-09-30): el valor vigente se recalcula cuando entra un miembro (§1), el simulacro de un split usa el `id` reservado de la sesión (§2) y restaurar emite toda diferencia de un conflicto (§3). Los tres eran caminos donde la vista previa no coincidía con el resultado.
 - **Fecha**: 2026-09-23
 - **Decidido por**: El humano, entre calcular las vistas previas en el Core (cambio de contrato) o
   dejarlas esquemáticas en la UI: *"Que el Core los calcule"*.

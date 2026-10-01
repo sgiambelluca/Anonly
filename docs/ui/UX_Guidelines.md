@@ -353,7 +353,11 @@ el mismo número y el mismo token.
 (UX-11). Los barridos de modo de tipo y documento y el cambio de habilitado ya lo tenían y lo
 conservan. **La fila sigue sin toast al cambiar de modo** (§3.4d: es la acción más frecuente y es
 autoevidente), pero ese cambio también se deshace con `Ctrl+Z`. Hay un solo toast de edición a la vez:
-el botón deshace la última edición, que es siempre la que el toast nombra.
+el botón deshace la última edición, que es siempre la que el toast nombra. **Para que eso sea cierto,
+toda edición nueva retira el toast vigente, aunque ella no muestre uno** (decisión del humano,
+2026-09-30): si el usuario edita el reemplazo de una Persona y, con el toast todavía a la vista, cambia
+el modo de otra fila, el toast de la primera desaparece. Si quedara, su "Deshacer" desharía el cambio
+de modo, que es la última edición, y no el reemplazo que nombra. `Ctrl+Z` sigue deshaciendo en orden.
 
 **Qué no se deshace**: ordenar o filtrar la lista, el zoom, la vista, Configuración y exportar — no son
 ediciones del documento. **La pila no cruza un re-análisis**: cambiar los idiomas de OCR con un

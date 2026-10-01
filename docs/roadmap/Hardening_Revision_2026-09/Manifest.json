@@ -1,0 +1,3304 @@
+{
+  "base": "bbb015f169b3590767565c9908f4bb879d27c91c",
+  "head": "bea529507d8d21b345f6135dfb14dddcfcb1d4f4",
+  "branch": "hardening/plan-2026-09",
+  "created": "2026-09-26",
+  "model": "gpt-6-sol",
+  "excluded_scope": [
+    "SignPath y documentación nueva trabajada/revisada en otra computadora"
+  ],
+  "blocks": {
+    "B01": {
+      "title": "Contratos compartidos y eventos",
+      "specs": [
+        "docs/core/Contracts.md",
+        "docs/architecture/03_Data_Model.md",
+        "docs/architecture/04_Event_System.md"
+      ],
+      "focus": "Tipos públicos, enums, eventos, inmutabilidad, correspondencia docs/shared y consumidores; réplicas de tipos en test-utils.",
+      "files": [
+        {
+          "path": "docs/architecture/03_Data_Model.md",
+          "block": "B01",
+          "added": 34,
+          "deleted": 7
+        },
+        {
+          "path": "docs/architecture/04_Event_System.md",
+          "block": "B01",
+          "added": 10,
+          "deleted": 3
+        },
+        {
+          "path": "docs/core/Contracts.md",
+          "block": "B01",
+          "added": 212,
+          "deleted": 3
+        },
+        {
+          "path": "packages/anonymization-core/event-system/src/__tests__/contract.test.ts",
+          "block": "B01",
+          "added": 6,
+          "deleted": 0
+        },
+        {
+          "path": "packages/anonymization-core/shared/src/__tests__/contract.test.ts",
+          "block": "B01",
+          "added": 263,
+          "deleted": 3
+        },
+        {
+          "path": "packages/anonymization-core/shared/src/constants.ts",
+          "block": "B01",
+          "added": 8,
+          "deleted": 0
+        },
+        {
+          "path": "packages/anonymization-core/shared/src/enums.ts",
+          "block": "B01",
+          "added": 18,
+          "deleted": 1
+        },
+        {
+          "path": "packages/anonymization-core/shared/src/events.ts",
+          "block": "B01",
+          "added": 16,
+          "deleted": 0
+        },
+        {
+          "path": "packages/anonymization-core/shared/src/index.ts",
+          "block": "B01",
+          "added": 9,
+          "deleted": 0
+        },
+        {
+          "path": "packages/anonymization-core/shared/src/interfaces.ts",
+          "block": "B01",
+          "added": 8,
+          "deleted": 1
+        },
+        {
+          "path": "packages/anonymization-core/shared/src/types.ts",
+          "block": "B01",
+          "added": 84,
+          "deleted": 5
+        },
+        {
+          "path": "packages/anonymization-core/test-utils/src/index.ts",
+          "block": "B01",
+          "added": 4,
+          "deleted": 1
+        }
+      ]
+    },
+    "B02": {
+      "title": "Façade, Orchestrator y ciclo de workers",
+      "specs": [
+        "docs/core/Orchestrator.md",
+        "docs/architecture/05_Worker_Architecture.md",
+        "docs/architecture/06_Pipeline.md"
+      ],
+      "focus": "Abort listeners, cache LRU, OCR bajo demanda y DPI, preview inicial, OSD, baja y recarga de NER, checkpoints, agregado manual y guard de export.",
+      "files": [
+        {
+          "path": "docs/adr/ADR-145-El-Deposito-No-Expulsa-Lo-Que-Acaba-De-Guardar.md",
+          "block": "B02",
+          "added": 143,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-151-La-Primera-Pagina-Ya-Esta-Dibujada-Cuando-Se-Abre-El-Panel.md",
+          "block": "B02",
+          "added": 159,
+          "deleted": 0
+        },
+        {
+          "path": "docs/architecture/05_Worker_Architecture.md",
+          "block": "B02",
+          "added": 53,
+          "deleted": 9
+        },
+        {
+          "path": "docs/architecture/06_Pipeline.md",
+          "block": "B02",
+          "added": 6,
+          "deleted": 6
+        },
+        {
+          "path": "docs/core/Orchestrator.md",
+          "block": "B02",
+          "added": 102,
+          "deleted": 7
+        },
+        {
+          "path": "packages/anonymization-core/src/__tests__/contract.test.ts",
+          "block": "B02",
+          "added": 218,
+          "deleted": 37
+        },
+        {
+          "path": "packages/anonymization-core/src/__tests__/edge.test.ts",
+          "block": "B02",
+          "added": 150,
+          "deleted": 27
+        },
+        {
+          "path": "packages/anonymization-core/src/__tests__/fixtures/test-helpers.ts",
+          "block": "B02",
+          "added": 57,
+          "deleted": 7
+        },
+        {
+          "path": "packages/anonymization-core/src/__tests__/unit.test.ts",
+          "block": "B02",
+          "added": 1464,
+          "deleted": 191
+        },
+        {
+          "path": "packages/anonymization-core/src/cache.ts",
+          "block": "B02",
+          "added": 24,
+          "deleted": 2
+        },
+        {
+          "path": "packages/anonymization-core/src/config.ts",
+          "block": "B02",
+          "added": 15,
+          "deleted": 1
+        },
+        {
+          "path": "packages/anonymization-core/src/create-core.ts",
+          "block": "B02",
+          "added": 22,
+          "deleted": 6
+        },
+        {
+          "path": "packages/anonymization-core/src/orchestrator.ts",
+          "block": "B02",
+          "added": 386,
+          "deleted": 79
+        },
+        {
+          "path": "packages/anonymization-core/src/types.ts",
+          "block": "B02",
+          "added": 39,
+          "deleted": 0
+        },
+        {
+          "path": "packages/anonymization-core/src/worker-pool.ts",
+          "block": "B02",
+          "added": 118,
+          "deleted": 14
+        }
+      ]
+    },
+    "B03": {
+      "title": "PDF y Render",
+      "specs": [
+        "docs/core/PDF_Engine.md",
+        "docs/core/Render_Engine.md"
+      ],
+      "focus": "Geometría/viewport, palabras partidas, páginas rotadas, ráster codificado, scheduler/coalescencia/generaciones, cache y errores de workers.",
+      "files": [
+        {
+          "path": "docs/adr/ADR-063-Bbox-De-Texto-Rotado.md",
+          "block": "B03",
+          "added": 1,
+          "deleted": 1
+        },
+        {
+          "path": "docs/adr/ADR-140-Una-Pagina-Rotada-Bloquea-El-Documento.md",
+          "block": "B03",
+          "added": 151,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-141-La-Geometria-Se-Entrega-En-La-Pagina-Que-Se-Ve.md",
+          "block": "B03",
+          "added": 240,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-142-Una-Palabra-Partida-Entre-Dos-Items-Sigue-Siendo-Una-Palabra.md",
+          "block": "B03",
+          "added": 171,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-144-El-Input-Se-Registra-Ya-El-Trabajo-Se-Planifica.md",
+          "block": "B03",
+          "added": 154,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-156-El-Preview-No-Guarda-Los-Pixeles-Que-Nadie-Lee.md",
+          "block": "B03",
+          "added": 118,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-158-El-Raster-De-OCR-Viaja-Codificado.md",
+          "block": "B03",
+          "added": 158,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-163-El-DPI-De-OCR-No-Supera-Al-Raster-Fuente.md",
+          "block": "B03",
+          "added": 132,
+          "deleted": 0
+        },
+        {
+          "path": "docs/core/PDF_Engine.md",
+          "block": "B03",
+          "added": 67,
+          "deleted": 3
+        },
+        {
+          "path": "docs/core/Render_Engine.md",
+          "block": "B03",
+          "added": 56,
+          "deleted": 15
+        },
+        {
+          "path": "packages/anonymization-core/pdf-engine/src/__tests__/contract.test.ts",
+          "block": "B03",
+          "added": 5,
+          "deleted": 1
+        },
+        {
+          "path": "packages/anonymization-core/pdf-engine/src/__tests__/edge.test.ts",
+          "block": "B03",
+          "added": 25,
+          "deleted": 5
+        },
+        {
+          "path": "packages/anonymization-core/pdf-engine/src/__tests__/fixtures/raw-pdf.ts",
+          "block": "B03",
+          "added": 41,
+          "deleted": 0
+        },
+        {
+          "path": "packages/anonymization-core/pdf-engine/src/__tests__/fixtures/test-helpers.ts",
+          "block": "B03",
+          "added": 38,
+          "deleted": 3
+        },
+        {
+          "path": "packages/anonymization-core/pdf-engine/src/__tests__/page-rotation-guard.test.ts",
+          "block": "B03",
+          "added": 152,
+          "deleted": 0
+        },
+        {
+          "path": "packages/anonymization-core/pdf-engine/src/__tests__/snapshot.test.ts",
+          "block": "B03",
+          "added": 6,
+          "deleted": 3
+        },
+        {
+          "path": "packages/anonymization-core/pdf-engine/src/__tests__/split-word-merge.test.ts",
+          "block": "B03",
+          "added": 123,
+          "deleted": 0
+        },
+        {
+          "path": "packages/anonymization-core/pdf-engine/src/__tests__/unit.test.ts",
+          "block": "B03",
+          "added": 291,
+          "deleted": 15
+        },
+        {
+          "path": "packages/anonymization-core/pdf-engine/src/__tests__/worker-entry.test.ts",
+          "block": "B03",
+          "added": 1,
+          "deleted": 0
+        },
+        {
+          "path": "packages/anonymization-core/pdf-engine/src/pdf.engine.ts",
+          "block": "B03",
+          "added": 467,
+          "deleted": 108
+        },
+        {
+          "path": "packages/anonymization-core/pdf-engine/src/pdf.errors.ts",
+          "block": "B03",
+          "added": 22,
+          "deleted": 0
+        },
+        {
+          "path": "packages/anonymization-core/pdf-engine/src/worker/entry.ts",
+          "block": "B03",
+          "added": 4,
+          "deleted": 1
+        },
+        {
+          "path": "packages/anonymization-core/render-engine/src/__tests__/contract.test.ts",
+          "block": "B03",
+          "added": 30,
+          "deleted": 10
+        },
+        {
+          "path": "packages/anonymization-core/render-engine/src/__tests__/edge.test.ts",
+          "block": "B03",
+          "added": 199,
+          "deleted": 10
+        },
+        {
+          "path": "packages/anonymization-core/render-engine/src/__tests__/fixtures/test-helpers.ts",
+          "block": "B03",
+          "added": 17,
+          "deleted": 1
+        },
+        {
+          "path": "packages/anonymization-core/render-engine/src/__tests__/preview-scheduler.test.ts",
+          "block": "B03",
+          "added": 293,
+          "deleted": 0
+        },
+        {
+          "path": "packages/anonymization-core/render-engine/src/__tests__/unit.test.ts",
+          "block": "B03",
+          "added": 332,
+          "deleted": 43
+        },
+        {
+          "path": "packages/anonymization-core/render-engine/src/__tests__/worker-entry.test.ts",
+          "block": "B03",
+          "added": 15,
+          "deleted": 6
+        },
+        {
+          "path": "packages/anonymization-core/render-engine/src/preview-scheduler.ts",
+          "block": "B03",
+          "added": 296,
+          "deleted": 0
+        },
+        {
+          "path": "packages/anonymization-core/render-engine/src/render.engine.ts",
+          "block": "B03",
+          "added": 376,
+          "deleted": 47
+        },
+        {
+          "path": "packages/anonymization-core/render-engine/src/render.types.ts",
+          "block": "B03",
+          "added": 7,
+          "deleted": 1
+        },
+        {
+          "path": "packages/anonymization-core/render-engine/src/worker/kernel.ts",
+          "block": "B03",
+          "added": 65,
+          "deleted": 8
+        }
+      ]
+    },
+    "B04": {
+      "title": "OCR y orientación",
+      "specs": [
+        "docs/core/OCR_Engine.md"
+      ],
+      "focus": "Presupuesto de imágenes vivas, limpieza/cancelación, decodificación, OSD compartido/adelanto, franjas blancas/explicadas, cajas y fronteras de workers.",
+      "files": [
+        {
+          "path": "docs/adr/ADR-065-OCR-Por-Region.md",
+          "block": "B04",
+          "added": 1,
+          "deleted": 1
+        },
+        {
+          "path": "docs/adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md",
+          "block": "B04",
+          "added": 174,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-157-El-Pool-De-OCR-Se-Da-De-Baja-Al-Terminar-Su-Etapa.md",
+          "block": "B04",
+          "added": 207,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md",
+          "block": "B04",
+          "added": 230,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-161-Una-Franja-Sin-Tinta-No-Se-Reconoce.md",
+          "block": "B04",
+          "added": 184,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md",
+          "block": "B04",
+          "added": 172,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-164-Un-OSD-Compartido-Por-Core.md",
+          "block": "B04",
+          "added": 374,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-165-Una-Franja-Ya-Explicada-No-Se-Reconoce.md",
+          "block": "B04",
+          "added": 179,
+          "deleted": 0
+        },
+        {
+          "path": "docs/core/OCR_Engine.md",
+          "block": "B04",
+          "added": 499,
+          "deleted": 24
+        },
+        {
+          "path": "packages/anonymization-core/ocr-engine/package.json",
+          "block": "B04",
+          "added": 8,
+          "deleted": 0
+        },
+        {
+          "path": "packages/anonymization-core/ocr-engine/src/__tests__/__snapshots__/snapshot.test.ts.snap",
+          "block": "B04",
+          "added": 109,
+          "deleted": 0
+        },
+        {
+          "path": "packages/anonymization-core/ocr-engine/src/__tests__/contract.test.ts",
+          "block": "B04",
+          "added": 87,
+          "deleted": 1
+        },
+        {
+          "path": "packages/anonymization-core/ocr-engine/src/__tests__/edge.test.ts",
+          "block": "B04",
+          "added": 230,
+          "deleted": 5
+        },
+        {
+          "path": "packages/anonymization-core/ocr-engine/src/__tests__/fixtures/test-helpers.ts",
+          "block": "B04",
+          "added": 279,
+          "deleted": 6
+        },
+        {
+          "path": "packages/anonymization-core/ocr-engine/src/__tests__/kernel.test.ts",
+          "block": "B04",
+          "added": 119,
+          "deleted": 1
+        },
+        {
+          "path": "packages/anonymization-core/ocr-engine/src/__tests__/orientation-entry.test.ts",
+          "block": "B04",
+          "added": 101,
+          "deleted": 0
+        },
+        {
+          "path": "packages/anonymization-core/ocr-engine/src/__tests__/orientation-kernel.test.ts",
+          "block": "B04",
+          "added": 277,
+          "deleted": 0
+        },
+        {
+          "path": "packages/anonymization-core/ocr-engine/src/__tests__/snapshot.test.ts",
+          "block": "B04",
+          "added": 98,
+          "deleted": 0
+        },
+        {
+          "path": "packages/anonymization-core/ocr-engine/src/__tests__/t5-shared-osd.test.ts",
+          "block": "B04",
+          "added": 798,
+          "deleted": 0
+        },
+        {
+          "path": "packages/anonymization-core/ocr-engine/src/__tests__/unit.test.ts",
+          "block": "B04",
+          "added": 738,
+          "deleted": 9
+        },
+        {
+          "path": "packages/anonymization-core/ocr-engine/src/__tests__/worker-entry.test.ts",
+          "block": "B04",
+          "added": 15,
+          "deleted": 22
+        },
+        {
+          "path": "packages/anonymization-core/ocr-engine/src/index.ts",
+          "block": "B04",
+          "added": 2,
+          "deleted": 2
+        },
+        {
+          "path": "packages/anonymization-core/ocr-engine/src/ocr.engine.ts",
+          "block": "B04",
+          "added": 565,
+          "deleted": 63
+        },
+        {
+          "path": "packages/anonymization-core/ocr-engine/src/ocr.errors.ts",
+          "block": "B04",
+          "added": 13,
+          "deleted": 1
+        },
+        {
+          "path": "packages/anonymization-core/ocr-engine/src/ocr.types.ts",
+          "block": "B04",
+          "added": 36,
+          "deleted": 3
+        },
+        {
+          "path": "packages/anonymization-core/ocr-engine/src/worker/kernel.ts",
+          "block": "B04",
+          "added": 509,
+          "deleted": 141
+        },
+        {
+          "path": "packages/anonymization-core/ocr-engine/src/worker/orientation-entry.ts",
+          "block": "B04",
+          "added": 31,
+          "deleted": 0
+        },
+        {
+          "path": "packages/anonymization-core/ocr-engine/src/worker/orientation-kernel.ts",
+          "block": "B04",
+          "added": 246,
+          "deleted": 0
+        },
+        {
+          "path": "packages/anonymization-core/ocr-engine/src/worker/tesseract-paths.ts",
+          "block": "B04",
+          "added": 10,
+          "deleted": 0
+        }
+      ]
+    },
+    "B05": {
+      "title": "Grouping: edición, conflictos y rendimiento",
+      "specs": [
+        "docs/core/Grouping_Engine.md"
+      ],
+      "focus": "Previews exactas, eliminación/supresión, undo/checkpoints, merge/split inválidos, choques manuales, bloqueo de export, distancia acotada e índice exacto.",
+      "files": [
+        {
+          "path": "docs/adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md",
+          "block": "B05",
+          "added": 170,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md",
+          "block": "B05",
+          "added": 136,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md",
+          "block": "B05",
+          "added": 165,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-173-El-Motor-Rechaza-Fusiones-Y-Divisiones-Invalidas.md",
+          "block": "B05",
+          "added": 43,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md",
+          "block": "B05",
+          "added": 118,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-175-Un-Choque-Manual-No-Queda-Colgado.md",
+          "block": "B05",
+          "added": 145,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md",
+          "block": "B05",
+          "added": 156,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-177-Una-Entidad-Eliminada-No-Ocupa-Lugar.md",
+          "block": "B05",
+          "added": 122,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-178-Lo-Contenido-Se-Oculta-Solo-Si-Su-Contenedor-Se-Elimina.md",
+          "block": "B05",
+          "added": 97,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-182-Distancia-Acotada-Para-Grouping.md",
+          "block": "B05",
+          "added": 85,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-183-Recortar-Afijos-Comunes-En-Distancia-Acotada.md",
+          "block": "B05",
+          "added": 64,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-184-Indice-Exacto-De-Candidatos-Para-Grouping.md",
+          "block": "B05",
+          "added": 39,
+          "deleted": 0
+        },
+        {
+          "path": "docs/core/Grouping_Engine.md",
+          "block": "B05",
+          "added": 186,
+          "deleted": 17
+        },
+        {
+          "path": "packages/anonymization-core/grouping-engine/src/__tests__/__snapshots__/snapshot.test.ts.snap",
+          "block": "B05",
+          "added": 61,
+          "deleted": 0
+        },
+        {
+          "path": "packages/anonymization-core/grouping-engine/src/__tests__/contract.test.ts",
+          "block": "B05",
+          "added": 198,
+          "deleted": 0
+        },
+        {
+          "path": "packages/anonymization-core/grouping-engine/src/__tests__/edge.test.ts",
+          "block": "B05",
+          "added": 1964,
+          "deleted": 54
+        },
+        {
+          "path": "packages/anonymization-core/grouping-engine/src/__tests__/fixtures/test-helpers.ts",
+          "block": "B05",
+          "added": 7,
+          "deleted": 1
+        },
+        {
+          "path": "packages/anonymization-core/grouping-engine/src/__tests__/snapshot.test.ts",
+          "block": "B05",
+          "added": 14,
+          "deleted": 2
+        },
+        {
+          "path": "packages/anonymization-core/grouping-engine/src/__tests__/unit.test.ts",
+          "block": "B05",
+          "added": 1520,
+          "deleted": 3
+        },
+        {
+          "path": "packages/anonymization-core/grouping-engine/src/grouping.engine.ts",
+          "block": "B05",
+          "added": 1541,
+          "deleted": 73
+        },
+        {
+          "path": "packages/anonymization-core/grouping-engine/src/labels.ts",
+          "block": "B05",
+          "added": 31,
+          "deleted": 2
+        },
+        {
+          "path": "packages/anonymization-core/grouping-engine/src/levenshtein.ts",
+          "block": "B05",
+          "added": 74,
+          "deleted": 0
+        }
+      ]
+    },
+    "B06": {
+      "title": "NER y Regex",
+      "specs": [
+        "docs/core/NER_Engine.md",
+        "docs/core/Regex_Engine.md"
+      ],
+      "focus": "Ciclo modelWarm/baja/recarga, liberación del pool, frontera de modelos, escáner lineal de email y no regresión de detección.",
+      "files": [
+        {
+          "path": "docs/adr/ADR-023-NER-Config-Canonical-Model-Multilingue.md",
+          "block": "B06",
+          "added": 1,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-135-El-Ciclo-Del-Modelo-Se-Deduplica-Entero.md",
+          "block": "B06",
+          "added": 22,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-166-El-Modelo-De-NER-Se-Libera-Al-Terminar-La-Deteccion.md",
+          "block": "B06",
+          "added": 289,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md",
+          "block": "B06",
+          "added": 224,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-181-Email-Default-Con-Escaner-Lineal.md",
+          "block": "B06",
+          "added": 92,
+          "deleted": 0
+        },
+        {
+          "path": "docs/core/NER_Engine.md",
+          "block": "B06",
+          "added": 57,
+          "deleted": 9
+        },
+        {
+          "path": "docs/core/Regex_Engine.md",
+          "block": "B06",
+          "added": 17,
+          "deleted": 5
+        },
+        {
+          "path": "packages/anonymization-core/ner-engine/src/__tests__/fixtures/test-helpers.ts",
+          "block": "B06",
+          "added": 18,
+          "deleted": 2
+        },
+        {
+          "path": "packages/anonymization-core/ner-engine/src/__tests__/unit.test.ts",
+          "block": "B06",
+          "added": 182,
+          "deleted": 0
+        },
+        {
+          "path": "packages/anonymization-core/ner-engine/src/ner.engine.ts",
+          "block": "B06",
+          "added": 40,
+          "deleted": 8
+        },
+        {
+          "path": "packages/anonymization-core/regex-engine/src/__tests__/edge.test.ts",
+          "block": "B06",
+          "added": 46,
+          "deleted": 0
+        },
+        {
+          "path": "packages/anonymization-core/regex-engine/src/__tests__/unit.test.ts",
+          "block": "B06",
+          "added": 80,
+          "deleted": 0
+        },
+        {
+          "path": "packages/anonymization-core/regex-engine/src/email-scanner.ts",
+          "block": "B06",
+          "added": 90,
+          "deleted": 0
+        },
+        {
+          "path": "packages/anonymization-core/regex-engine/src/regex.engine.ts",
+          "block": "B06",
+          "added": 30,
+          "deleted": 14
+        }
+      ]
+    },
+    "B07": {
+      "title": "UI: adapter, stores e historial",
+      "specs": [
+        "docs/ui/React_Client.md",
+        "docs/core/Orchestrator.md",
+        "docs/core/Grouping_Engine.md"
+      ],
+      "focus": "Eventos y stages, errores, previews de edición, historial async, choques manuales, export preflight, cierre/reanálisis y sincronización de stores. Todos los tests unitarios de UI tienen este responsable; B08 los consulta como evidencia secundaria.",
+      "files": [
+        {
+          "path": "apps/react-client/src/__tests__/actions.test.ts",
+          "block": "B07",
+          "added": 178,
+          "deleted": 2
+        },
+        {
+          "path": "apps/react-client/src/__tests__/add-manual-entity.test.ts",
+          "block": "B07",
+          "added": 244,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/__tests__/apply-edits.test.ts",
+          "block": "B07",
+          "added": 455,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/__tests__/bus-bridge.test.ts",
+          "block": "B07",
+          "added": 13,
+          "deleted": 1
+        },
+        {
+          "path": "apps/react-client/src/__tests__/conflict-resolution.test.ts",
+          "block": "B07",
+          "added": 143,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/__tests__/core-adapter-test-overrides.test.ts",
+          "block": "B07",
+          "added": 136,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/__tests__/drop-zone-state.test.ts",
+          "block": "B07",
+          "added": 62,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/__tests__/edit-history.test.ts",
+          "block": "B07",
+          "added": 362,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/__tests__/edit-previews.test.ts",
+          "block": "B07",
+          "added": 305,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/__tests__/entities-store-retype.test.ts",
+          "block": "B07",
+          "added": 6,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/__tests__/entity-list.test.ts",
+          "block": "B07",
+          "added": 215,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/__tests__/entity-tree.test.ts",
+          "block": "B07",
+          "added": 6,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/__tests__/export-block-reason.test.ts",
+          "block": "B07",
+          "added": 138,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/__tests__/export-preflight.test.ts",
+          "block": "B07",
+          "added": 6,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/__tests__/import-failure.test.ts",
+          "block": "B07",
+          "added": 268,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/__tests__/manual-add-toast.test.ts",
+          "block": "B07",
+          "added": 108,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/__tests__/manual-entity-feedback.test.ts",
+          "block": "B07",
+          "added": 35,
+          "deleted": 8
+        },
+        {
+          "path": "apps/react-client/src/__tests__/manual-overlap-controller.test.ts",
+          "block": "B07",
+          "added": 141,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/__tests__/manual-overlap-warning.test.ts",
+          "block": "B07",
+          "added": 177,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/__tests__/merge-validation.test.ts",
+          "block": "B07",
+          "added": 6,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/__tests__/mode-levels.test.ts",
+          "block": "B07",
+          "added": 5,
+          "deleted": 20
+        },
+        {
+          "path": "apps/react-client/src/__tests__/needs-review-badge.test.ts",
+          "block": "B07",
+          "added": 6,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/__tests__/needs-review-row.test.ts",
+          "block": "B07",
+          "added": 6,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/__tests__/person-gender-visibility.test.ts",
+          "block": "B07",
+          "added": 6,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/__tests__/pipeline-error-presentation.test.ts",
+          "block": "B07",
+          "added": 15,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/__tests__/scan-advance.test.ts",
+          "block": "B07",
+          "added": 85,
+          "deleted": 112
+        },
+        {
+          "path": "apps/react-client/src/__tests__/scan-progress.test.ts",
+          "block": "B07",
+          "added": 99,
+          "deleted": 27
+        },
+        {
+          "path": "apps/react-client/src/__tests__/scan-steps.test.ts",
+          "block": "B07",
+          "added": 104,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/__tests__/search-results.test.ts",
+          "block": "B07",
+          "added": 159,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/__tests__/settings-redesign.test.ts",
+          "block": "B07",
+          "added": 140,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/__tests__/split-validation.test.ts",
+          "block": "B07",
+          "added": 6,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/__tests__/toast.test.ts",
+          "block": "B07",
+          "added": 100,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/__tests__/undoable-edits.test.ts",
+          "block": "B07",
+          "added": 4,
+          "deleted": 5
+        },
+        {
+          "path": "apps/react-client/src/__tests__/viewer-gestures.test.ts",
+          "block": "B07",
+          "added": 65,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/core-adapter/actions.ts",
+          "block": "B07",
+          "added": 71,
+          "deleted": 2
+        },
+        {
+          "path": "apps/react-client/src/core-adapter/bus-bridge.ts",
+          "block": "B07",
+          "added": 39,
+          "deleted": 3
+        },
+        {
+          "path": "apps/react-client/src/core-adapter/history.ts",
+          "block": "B07",
+          "added": 42,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/core-adapter/index.ts",
+          "block": "B07",
+          "added": 91,
+          "deleted": 8
+        },
+        {
+          "path": "apps/react-client/src/store/entities.store.ts",
+          "block": "B07",
+          "added": 32,
+          "deleted": 2
+        },
+        {
+          "path": "apps/react-client/src/store/history.store.ts",
+          "block": "B07",
+          "added": 220,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/store/pipeline.store.ts",
+          "block": "B07",
+          "added": 26,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/store/rules.store.ts",
+          "block": "B07",
+          "added": 9,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/store/settings.store.ts",
+          "block": "B07",
+          "added": 44,
+          "deleted": 0
+        }
+      ]
+    },
+    "B08": {
+      "title": "UI: pantallas, componentes e interacción",
+      "specs": [
+        "docs/ui/React_Client.md",
+        "docs/ui/Components.md",
+        "docs/ui/UX_Guidelines.md"
+      ],
+      "focus": "Carga/escaneo/trabajo, diálogos de edición y conflictos, visor/búsqueda/gestos, mensajes, teclado/foco/accesibilidad y estilos. Aplicar skill ui-ux-pro-max al contexto desktop; no inventar requisitos mobile.",
+      "files": [
+        {
+          "path": "apps/react-client/src/App.tsx",
+          "block": "B08",
+          "added": 34,
+          "deleted": 7
+        },
+        {
+          "path": "apps/react-client/src/components/common/Banner.tsx",
+          "block": "B08",
+          "added": 7,
+          "deleted": 4
+        },
+        {
+          "path": "apps/react-client/src/components/common/Button.tsx",
+          "block": "B08",
+          "added": 15,
+          "deleted": 1
+        },
+        {
+          "path": "apps/react-client/src/components/common/Checkbox.tsx",
+          "block": "B08",
+          "added": 1,
+          "deleted": 1
+        },
+        {
+          "path": "apps/react-client/src/components/common/Dialog.tsx",
+          "block": "B08",
+          "added": 14,
+          "deleted": 1
+        },
+        {
+          "path": "apps/react-client/src/components/common/ThemePreview.tsx",
+          "block": "B08",
+          "added": 18,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/components/common/ToastHost.tsx",
+          "block": "B08",
+          "added": 83,
+          "deleted": 26
+        },
+        {
+          "path": "apps/react-client/src/components/common/Tooltip.tsx",
+          "block": "B08",
+          "added": 6,
+          "deleted": 1
+        },
+        {
+          "path": "apps/react-client/src/components/common/toast.ts",
+          "block": "B08",
+          "added": 49,
+          "deleted": 9
+        },
+        {
+          "path": "apps/react-client/src/components/conflicts/ConflictBadge.tsx",
+          "block": "B08",
+          "added": 50,
+          "deleted": 11
+        },
+        {
+          "path": "apps/react-client/src/components/conflicts/ConflictDialog.tsx",
+          "block": "B08",
+          "added": 12,
+          "deleted": 7
+        },
+        {
+          "path": "apps/react-client/src/components/conflicts/ManualOverlapDialog.tsx",
+          "block": "B08",
+          "added": 153,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/components/conflicts/ManualOverlapDialogHost.tsx",
+          "block": "B08",
+          "added": 81,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/components/conflicts/conflictResolution.ts",
+          "block": "B08",
+          "added": 69,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/components/conflicts/manualOverlapController.ts",
+          "block": "B08",
+          "added": 63,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/components/conflicts/manualOverlapWarning.ts",
+          "block": "B08",
+          "added": 115,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/components/entities/AddEntityDialog.tsx",
+          "block": "B08",
+          "added": 221,
+          "deleted": 75
+        },
+        {
+          "path": "apps/react-client/src/components/entities/ChangeTypeDialog.tsx",
+          "block": "B08",
+          "added": 105,
+          "deleted": 65
+        },
+        {
+          "path": "apps/react-client/src/components/entities/DegradedBadge.tsx",
+          "block": "B08",
+          "added": 8,
+          "deleted": 7
+        },
+        {
+          "path": "apps/react-client/src/components/entities/DocumentModeSelect.tsx",
+          "block": "B08",
+          "added": 47,
+          "deleted": 28
+        },
+        {
+          "path": "apps/react-client/src/components/entities/EditReplacementDialog.tsx",
+          "block": "B08",
+          "added": 217,
+          "deleted": 64
+        },
+        {
+          "path": "apps/react-client/src/components/entities/EntitiesPanel.tsx",
+          "block": "B08",
+          "added": 194,
+          "deleted": 129
+        },
+        {
+          "path": "apps/react-client/src/components/entities/EntityGroupItem.tsx",
+          "block": "B08",
+          "added": 131,
+          "deleted": 97
+        },
+        {
+          "path": "apps/react-client/src/components/entities/EntityLine.tsx",
+          "block": "B08",
+          "added": 46,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/components/entities/EntityTypeGroup.tsx",
+          "block": "B08",
+          "added": 38,
+          "deleted": 13
+        },
+        {
+          "path": "apps/react-client/src/components/entities/EntityTypePicker.tsx",
+          "block": "B08",
+          "added": 121,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/components/entities/GroupContextMenu.tsx",
+          "block": "B08",
+          "added": 118,
+          "deleted": 111
+        },
+        {
+          "path": "apps/react-client/src/components/entities/MergeDialog.tsx",
+          "block": "B08",
+          "added": 200,
+          "deleted": 160
+        },
+        {
+          "path": "apps/react-client/src/components/entities/ModeSelectMenu.tsx",
+          "block": "B08",
+          "added": 91,
+          "deleted": 41
+        },
+        {
+          "path": "apps/react-client/src/components/entities/NeedsReviewBadge.tsx",
+          "block": "B08",
+          "added": 11,
+          "deleted": 5
+        },
+        {
+          "path": "apps/react-client/src/components/entities/PersonGenderToggle.tsx",
+          "block": "B08",
+          "added": 13,
+          "deleted": 7
+        },
+        {
+          "path": "apps/react-client/src/components/entities/ReplacementModeSelect.tsx",
+          "block": "B08",
+          "added": 22,
+          "deleted": 24
+        },
+        {
+          "path": "apps/react-client/src/components/entities/SplitDialog.tsx",
+          "block": "B08",
+          "added": 182,
+          "deleted": 92
+        },
+        {
+          "path": "apps/react-client/src/components/entities/TypeModeSelect.tsx",
+          "block": "B08",
+          "added": 16,
+          "deleted": 11
+        },
+        {
+          "path": "apps/react-client/src/components/entities/addManualEntity.ts",
+          "block": "B08",
+          "added": 116,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/components/entities/applyEdits.ts",
+          "block": "B08",
+          "added": 203,
+          "deleted": 51
+        },
+        {
+          "path": "apps/react-client/src/components/entities/applyMode.ts",
+          "block": "B08",
+          "added": 23,
+          "deleted": 43
+        },
+        {
+          "path": "apps/react-client/src/components/entities/editHistory.ts",
+          "block": "B08",
+          "added": 51,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/components/entities/editPreviews.ts",
+          "block": "B08",
+          "added": 220,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/components/entities/entityRowLayout.ts",
+          "block": "B08",
+          "added": 20,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/components/entities/entityTree.ts",
+          "block": "B08",
+          "added": 55,
+          "deleted": 2
+        },
+        {
+          "path": "apps/react-client/src/components/entities/entityTypeColors.ts",
+          "block": "B08",
+          "added": 21,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/components/entities/entityTypeLabels.ts",
+          "block": "B08",
+          "added": 41,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/components/entities/manualEntityFeedback.ts",
+          "block": "B08",
+          "added": 81,
+          "deleted": 7
+        },
+        {
+          "path": "apps/react-client/src/components/entities/modeLevels.ts",
+          "block": "B08",
+          "added": 29,
+          "deleted": 16
+        },
+        {
+          "path": "apps/react-client/src/components/entities/needsReviewBadgeCopy.ts",
+          "block": "B08",
+          "added": 17,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/components/entities/replacementFit.ts",
+          "block": "B08",
+          "added": 50,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/components/entities/replacementModeOptions.ts",
+          "block": "B08",
+          "added": 44,
+          "deleted": 47
+        },
+        {
+          "path": "apps/react-client/src/components/entities/undoableEdits.ts",
+          "block": "B08",
+          "added": 31,
+          "deleted": 39
+        },
+        {
+          "path": "apps/react-client/src/components/entities/warningSymbols.tsx",
+          "block": "B08",
+          "added": 114,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/components/screens/AboutDialog.tsx",
+          "block": "B08",
+          "added": 155,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/components/screens/DropZone.tsx",
+          "block": "B08",
+          "added": 238,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/components/screens/EntitiesDrawer.tsx",
+          "block": "B08",
+          "added": 4,
+          "deleted": 1
+        },
+        {
+          "path": "apps/react-client/src/components/screens/HowItWorks.tsx",
+          "block": "B08",
+          "added": 257,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/components/screens/LoadScreen.tsx",
+          "block": "B08",
+          "added": 160,
+          "deleted": 143
+        },
+        {
+          "path": "apps/react-client/src/components/screens/ScanScreen.tsx",
+          "block": "B08",
+          "added": 122,
+          "deleted": 68
+        },
+        {
+          "path": "apps/react-client/src/components/screens/ScanSteps.tsx",
+          "block": "B08",
+          "added": 102,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/components/screens/dropZoneState.ts",
+          "block": "B08",
+          "added": 46,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/components/screens/externalLinks.ts",
+          "block": "B08",
+          "added": 26,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/components/screens/historyShortcuts.ts",
+          "block": "B08",
+          "added": 74,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/components/screens/importFailure.ts",
+          "block": "B08",
+          "added": 126,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/components/screens/scanAdvance.ts",
+          "block": "B08",
+          "added": 50,
+          "deleted": 78
+        },
+        {
+          "path": "apps/react-client/src/components/screens/scanPhrase.ts",
+          "block": "B08",
+          "added": 7,
+          "deleted": 3
+        },
+        {
+          "path": "apps/react-client/src/components/screens/scanProgress.ts",
+          "block": "B08",
+          "added": 54,
+          "deleted": 24
+        },
+        {
+          "path": "apps/react-client/src/components/screens/scanStepFlow.ts",
+          "block": "B08",
+          "added": 103,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/components/screens/useAppPhase.ts",
+          "block": "B08",
+          "added": 61,
+          "deleted": 18
+        },
+        {
+          "path": "apps/react-client/src/components/screens/useHistoryShortcuts.ts",
+          "block": "B08",
+          "added": 48,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/components/toolbar/CancelButton.tsx",
+          "block": "B08",
+          "added": 26,
+          "deleted": 4
+        },
+        {
+          "path": "apps/react-client/src/components/toolbar/ExportButton.tsx",
+          "block": "B08",
+          "added": 83,
+          "deleted": 5
+        },
+        {
+          "path": "apps/react-client/src/components/toolbar/SettingsDialog.tsx",
+          "block": "B08",
+          "added": 251,
+          "deleted": 188
+        },
+        {
+          "path": "apps/react-client/src/components/toolbar/exportBlockReason.ts",
+          "block": "B08",
+          "added": 60,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/components/toolbar/pipelineErrorPresentation.ts",
+          "block": "B08",
+          "added": 8,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/components/toolbar/settingsCopy.ts",
+          "block": "B08",
+          "added": 85,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/components/toolbar/thirdPartyCredits.ts",
+          "block": "B08",
+          "added": 2,
+          "deleted": 2
+        },
+        {
+          "path": "apps/react-client/src/components/viewer/DocumentSearchBox.tsx",
+          "block": "B08",
+          "added": 354,
+          "deleted": 130
+        },
+        {
+          "path": "apps/react-client/src/components/viewer/PdfViewer.tsx",
+          "block": "B08",
+          "added": 110,
+          "deleted": 77
+        },
+        {
+          "path": "apps/react-client/src/components/viewer/SelectionHintCard.tsx",
+          "block": "B08",
+          "added": 68,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/components/viewer/WordSelectionOverlay.tsx",
+          "block": "B08",
+          "added": 160,
+          "deleted": 112
+        },
+        {
+          "path": "apps/react-client/src/components/viewer/ZoomControls.tsx",
+          "block": "B08",
+          "added": 32,
+          "deleted": 25
+        },
+        {
+          "path": "apps/react-client/src/components/viewer/searchResults.ts",
+          "block": "B08",
+          "added": 121,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/components/viewer/viewerGestures.ts",
+          "block": "B08",
+          "added": 72,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/index.css",
+          "block": "B08",
+          "added": 488,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/src/vite-env.d.ts",
+          "block": "B08",
+          "added": 3,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/tailwind.config.js",
+          "block": "B08",
+          "added": 3,
+          "deleted": 0
+        },
+        {
+          "path": "apps/react-client/vite.config.ts",
+          "block": "B08",
+          "added": 39,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-070-Atribucion-Visible-En-El-Producto.md",
+          "block": "B08",
+          "added": 6,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-087-La-Herramienta-Tiene-Tres-Momentos-No-Cuatro-Paneles.md",
+          "block": "B08",
+          "added": 16,
+          "deleted": 2
+        },
+        {
+          "path": "docs/adr/ADR-150-La-Pantalla-De-Escaneo-Dura-Lo-Que-Dura-El-Escaneo.md",
+          "block": "B08",
+          "added": 157,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-152-La-Pantalla-De-Escaneo-Dice-En-Que-Pagina-Va.md",
+          "block": "B08",
+          "added": 166,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-168-Pantallas-De-Carga-Y-Escaneo-Tras-Pruebas-De-Usuario.md",
+          "block": "B08",
+          "added": 189,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-169-La-Pantalla-De-Trabajo-Tras-Pruebas-De-Usuario.md",
+          "block": "B08",
+          "added": 259,
+          "deleted": 0
+        },
+        {
+          "path": "docs/ui/Components.md",
+          "block": "B08",
+          "added": 213,
+          "deleted": 78
+        },
+        {
+          "path": "docs/ui/React_Client.md",
+          "block": "B08",
+          "added": 110,
+          "deleted": 3
+        },
+        {
+          "path": "docs/ui/UX_Guidelines.md",
+          "block": "B08",
+          "added": 270,
+          "deleted": 138
+        }
+      ]
+    },
+    "B09": {
+      "title": "Instrumentos de memoria y atribución",
+      "specs": [
+        "docs/architecture/07_Performance_Strategy.md",
+        "docs/roadmap/Instrumento_De_Memoria_Arreglo_Plan.md"
+      ],
+      "focus": "Ventanas/picos M1/M2, baseline caliente, fases, RSS/heap/GC/WASM/workers, muestras ausentes, sesgo de sonda, cleanup y agregaciones. Distinguir medición de inferencia.",
+      "files": [
+        {
+          "path": "docs/adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md",
+          "block": "B09",
+          "added": 299,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md",
+          "block": "B09",
+          "added": 301,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/aggregateHotBaselineReports.test.ts",
+          "block": "B09",
+          "added": 100,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/aggregateHotBaselineReports.ts",
+          "block": "B09",
+          "added": 221,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/aggregateMemoryReports.test.ts",
+          "block": "B09",
+          "added": 157,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/aggregateMemoryReports.ts",
+          "block": "B09",
+          "added": 309,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/cdpHeap.test.ts",
+          "block": "B09",
+          "added": 198,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/cdpHeap.ts",
+          "block": "B09",
+          "added": 1067,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/hotBaselineCurve.test.ts",
+          "block": "B09",
+          "added": 125,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/hotBaselineCurve.ts",
+          "block": "B09",
+          "added": 312,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/imageDataProfile.test.ts",
+          "block": "B09",
+          "added": 361,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/imageDataProfile.ts",
+          "block": "B09",
+          "added": 710,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/leakCycles.test.ts",
+          "block": "B09",
+          "added": 236,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/leakCycles.ts",
+          "block": "B09",
+          "added": 625,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/marginInk.test.ts",
+          "block": "B09",
+          "added": 409,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/marginInk.ts",
+          "block": "B09",
+          "added": 845,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/marginPassCount.test.ts",
+          "block": "B09",
+          "added": 15,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/marginPassCount.ts",
+          "block": "B09",
+          "added": 94,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/memoryInfra.test.ts",
+          "block": "B09",
+          "added": 360,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/memoryInfra.ts",
+          "block": "B09",
+          "added": 317,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/memoryProfile.test.ts",
+          "block": "B09",
+          "added": 367,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/memoryProfile.ts",
+          "block": "B09",
+          "added": 1538,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/memorySampler.ts",
+          "block": "B09",
+          "added": 170,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/nativeMemory.test.ts",
+          "block": "B09",
+          "added": 59,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/nativeMemory.ts",
+          "block": "B09",
+          "added": 132,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/nativeMemorySampler.test.ts",
+          "block": "B09",
+          "added": 84,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/nativeMemorySampler.ts",
+          "block": "B09",
+          "added": 125,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/nerThreadAttribution.test.ts",
+          "block": "B09",
+          "added": 75,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/nerThreadAttribution.ts",
+          "block": "B09",
+          "added": 48,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/ocrPoolEndStage.test.ts",
+          "block": "B09",
+          "added": 98,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/ocrPoolEndStage.ts",
+          "block": "B09",
+          "added": 199,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/systemMemoryPressure.test.ts",
+          "block": "B09",
+          "added": 150,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/systemMemoryPressure.ts",
+          "block": "B09",
+          "added": 184,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/t5Instrumentation.test.ts",
+          "block": "B09",
+          "added": 63,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/t5Instrumentation.ts",
+          "block": "B09",
+          "added": 174,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/timeProfile.ts",
+          "block": "B09",
+          "added": 397,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/wasmMemory.test.ts",
+          "block": "B09",
+          "added": 550,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/wasmMemory.ts",
+          "block": "B09",
+          "added": 1161,
+          "deleted": 0
+        }
+      ]
+    },
+    "B10": {
+      "title": "Bancos y campañas de rendimiento",
+      "specs": [
+        "tests/perf/README.md",
+        "docs/roadmap/Rendimiento_Experimentos_Plan.md"
+      ],
+      "focus": "Diseños A/B, fingerprints/calidad, warm/cold, fixtures, runners/patches, overrides, NER/OCR, márgenes, documentos pesados/reales y portabilidad. No ejecutar campañas opt-in ni modificar/patchar producción en esta revisión.",
+      "files": [
+        {
+          "path": "docs/adr/ADR-155-El-Arnes-De-Medicion-Configura-El-Core-Por-Un-Canal-Propio.md",
+          "block": "B10",
+          "added": 99,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-179-El-Empaquetado-De-NER-Se-Evalua-Sin-Cambiar-El-Modelo.md",
+          "block": "B10",
+          "added": 95,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-180-Los-PDFs-Pesados-Se-Miden-Hasta-El-Archivo-Exportado.md",
+          "block": "B10",
+          "added": 35,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/README.md",
+          "block": "B10",
+          "added": 831,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/ab-preflight.spec.ts",
+          "block": "B10",
+          "added": 115,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/ab-release-curve.spec.ts",
+          "block": "B10",
+          "added": 75,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/external-baseline.spec.ts",
+          "block": "B10",
+          "added": 277,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/grouping-common-affix-feasibility.ts",
+          "block": "B10",
+          "added": 277,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/grouping-real-docs.spec.ts",
+          "block": "B10",
+          "added": 337,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/grouping-trigram-feasibility.ts",
+          "block": "B10",
+          "added": 311,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/grouping-worst-case.ts",
+          "block": "B10",
+          "added": 257,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/heavy-export-memory.spec.ts",
+          "block": "B10",
+          "added": 792,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/hot-baseline-attribution.spec.ts",
+          "block": "B10",
+          "added": 134,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/imagedata-profile-campaign.spec.ts",
+          "block": "B10",
+          "added": 285,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/imagedata-profile.spec.ts",
+          "block": "B10",
+          "added": 94,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/leak-cycles.spec.ts",
+          "block": "B10",
+          "added": 100,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/margin-i1-campaign.spec.ts",
+          "block": "B10",
+          "added": 113,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/margin-i2-probe.spec.ts",
+          "block": "B10",
+          "added": 209,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/margin-ink-campaign.spec.ts",
+          "block": "B10",
+          "added": 273,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/margin-ink.spec.ts",
+          "block": "B10",
+          "added": 91,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/memory-attribution.spec.ts",
+          "block": "B10",
+          "added": 196,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/memory-infra-control.spec.ts",
+          "block": "B10",
+          "added": 237,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/memory-infra-pipeline.spec.ts",
+          "block": "B10",
+          "added": 381,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/memory.spec.ts",
+          "block": "B10",
+          "added": 184,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/native-memory-probe.spec.ts",
+          "block": "B10",
+          "added": 151,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/ner-batch-feasibility.mjs",
+          "block": "B10",
+          "added": 181,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/ner-batch-real.mjs",
+          "block": "B10",
+          "added": 321,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/ner-gaps.spec.ts",
+          "block": "B10",
+          "added": 679,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/ner-internal-profile.spec.ts",
+          "block": "B10",
+          "added": 127,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/ner-packaging-memory.spec.ts",
+          "block": "B10",
+          "added": 178,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/ner-packaging.spec.ts",
+          "block": "B10",
+          "added": 343,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/ner-preload-ocr.spec.ts",
+          "block": "B10",
+          "added": 131,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/ner-threads.spec.ts",
+          "block": "B10",
+          "added": 324,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/ocr-platform-probe.mjs",
+          "block": "B10",
+          "added": 245,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/ocr-platform-synthetic.mjs",
+          "block": "B10",
+          "added": 115,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/ocr-pool.spec.ts",
+          "block": "B10",
+          "added": 1021,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/osd-sharing.spec.ts",
+          "block": "B10",
+          "added": 135,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/real-docs-timing.spec.ts",
+          "block": "B10",
+          "added": 81,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/real-docs.spec.ts",
+          "block": "B10",
+          "added": 179,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/regex-real-docs.spec.ts",
+          "block": "B10",
+          "added": 316,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/regex-worst-case.ts",
+          "block": "B10",
+          "added": 518,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/renderer-resource-overhead.spec.ts",
+          "block": "B10",
+          "added": 197,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/renderer-resource-pilot.spec.ts",
+          "block": "B10",
+          "added": 172,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/run-ab-etapa2.sh",
+          "block": "B10",
+          "added": 37,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/run-ab-intercalado.sh",
+          "block": "B10",
+          "added": 184,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/run-ciclos.sh",
+          "block": "B10",
+          "added": 71,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/run-comparativa-externa.sh",
+          "block": "B10",
+          "added": 71,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/run-documentos-reales.sh",
+          "block": "B10",
+          "added": 81,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/run-grouping-worst-case.sh",
+          "block": "B10",
+          "added": 94,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/run-heavy-export.sh",
+          "block": "B10",
+          "added": 14,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/run-hot-baseline-campaign.sh",
+          "block": "B10",
+          "added": 126,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/run-margin-i1-campaign-v2.sh",
+          "block": "B10",
+          "added": 144,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/run-margin-i2-probe.sh",
+          "block": "B10",
+          "added": 114,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/run-ner-batch-feasibility.sh",
+          "block": "B10",
+          "added": 39,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/run-ner-batch-real.sh",
+          "block": "B10",
+          "added": 57,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/run-ner-gaps.sh",
+          "block": "B10",
+          "added": 243,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/run-ner-internal-profile.sh",
+          "block": "B10",
+          "added": 187,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/run-ner-opciones.sh",
+          "block": "B10",
+          "added": 139,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/run-ner-packaging.sh",
+          "block": "B10",
+          "added": 139,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/run-ner-preload-ocr.sh",
+          "block": "B10",
+          "added": 109,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/run-ner-threads.sh",
+          "block": "B10",
+          "added": 261,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/run-ocr-memory.sh",
+          "block": "B10",
+          "added": 201,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/run-ocr-pool.sh",
+          "block": "B10",
+          "added": 277,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/run-regex-real-docs.sh",
+          "block": "B10",
+          "added": 47,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/run-tiempos-reales.sh",
+          "block": "B10",
+          "added": 57,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/run-wasm.sh",
+          "block": "B10",
+          "added": 84,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/ab-sin-baja-ner.patch",
+          "block": "B10",
+          "added": 16,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/ab-timer-15s-ner.patch",
+          "block": "B10",
+          "added": 36,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/benchmark-with-restored-dist.py",
+          "block": "B10",
+          "added": 60,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/convert-ner-external-data.py",
+          "block": "B10",
+          "added": 155,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/m2-instrumentation.patch",
+          "block": "B10",
+          "added": 67,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/margin-i2-instrument.patch",
+          "block": "B10",
+          "added": 188,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/ner-arm-b-cuatro-hilos.patch",
+          "block": "B10",
+          "added": 10,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/ner-arm-b-graph-basic.patch",
+          "block": "B10",
+          "added": 12,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/ner-arm-c-seis-hilos.patch",
+          "block": "B10",
+          "added": 10,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/ner-arm-c-sin-prepacking.patch",
+          "block": "B10",
+          "added": 12,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/ner-arm-d-dos-hilos.patch",
+          "block": "B10",
+          "added": 12,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/ner-arm-d-ocho-hilos.patch",
+          "block": "B10",
+          "added": 10,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/ner-external-data-requirements.txt",
+          "block": "B10",
+          "added": 5,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/ner-external-data.patch",
+          "block": "B10",
+          "added": 10,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/ner-internal-instrumentation.patch",
+          "block": "B10",
+          "added": 195,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/ner-low-arm-b-un-hilo.patch",
+          "block": "B10",
+          "added": 10,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/ner-low-arm-c-dos-hilos.patch",
+          "block": "B10",
+          "added": 10,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/ner-preload-ocr.patch",
+          "block": "B10",
+          "added": 110,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/nerGaps.test.ts",
+          "block": "B10",
+          "added": 294,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/nerGaps.ts",
+          "block": "B10",
+          "added": 357,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/nerGapsAggregate.ts",
+          "block": "B10",
+          "added": 180,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/nerGapsDecode.test.ts",
+          "block": "B10",
+          "added": 156,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/nerGapsDecode.ts",
+          "block": "B10",
+          "added": 222,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/nerGapsTypes.ts",
+          "block": "B10",
+          "added": 74,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/nerPackaging.test.ts",
+          "block": "B10",
+          "added": 94,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/nerPackaging.ts",
+          "block": "B10",
+          "added": 255,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/nerPreloadProbe.ts",
+          "block": "B10",
+          "added": 26,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/summarize-ocr-memory.mjs",
+          "block": "B10",
+          "added": 149,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/summarize-ocr-pool.mjs",
+          "block": "B10",
+          "added": 276,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/test_convert_ner_external_data.py",
+          "block": "B10",
+          "added": 58,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/timeout-command.py",
+          "block": "B10",
+          "added": 25,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/time-outside-ocr.spec.ts",
+          "block": "B10",
+          "added": 137,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/wasm-attribution.spec.ts",
+          "block": "B10",
+          "added": 252,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/wasm-heap-probe.spec.ts",
+          "block": "B10",
+          "added": 186,
+          "deleted": 0
+        }
+      ]
+    },
+    "B11": {
+      "title": "QA integrada, gates, seguridad y CI",
+      "specs": [
+        "docs/architecture/07_Performance_Strategy.md",
+        "docs/architecture/08_Security_Model.md",
+        "docs/core/Export_Engine.md"
+      ],
+      "focus": "Gates no vacíos, leak/stress/cancel/security/quality/E2E, fixtures deterministas, configs y CI, dependencias/ADR. Único responsable de ejecutar gates globales una vez y registrar resultados reales.",
+      "files": [
+        {
+          "path": ".gitattributes",
+          "block": "B11",
+          "added": 5,
+          "deleted": 2
+        },
+        {
+          "path": ".github/workflows/ci.yml",
+          "block": "B11",
+          "added": 36,
+          "deleted": 4
+        },
+        {
+          "path": ".prettierignore",
+          "block": "B11",
+          "added": 2,
+          "deleted": 1
+        },
+        {
+          "path": "README.md",
+          "block": "B11",
+          "added": 1,
+          "deleted": 1
+        },
+        {
+          "path": "docs/adr/ADR-018-First-Party-Assets.md",
+          "block": "B11",
+          "added": 4,
+          "deleted": 2
+        },
+        {
+          "path": "docs/adr/ADR-147-Perder-Un-Identificador-Cubierto-Es-Una-Regresion.md",
+          "block": "B11",
+          "added": 158,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-148-Un-Export-Se-Verifica-Leyendo-El-PDF-Exportado.md",
+          "block": "B11",
+          "added": 139,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-149-Un-Gate-Que-No-Ejecuta-Nada-Es-Rojo.md",
+          "block": "B11",
+          "added": 136,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-153-El-Gate-De-Tiempos-Se-Mide-Sobre-El-Producto.md",
+          "block": "B11",
+          "added": 138,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-185-Gates-De-Leak-Y-Stress-En-Electron.md",
+          "block": "B11",
+          "added": 94,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-186-Variables-De-Entorno-Portables-En-Scripts.md",
+          "block": "B11",
+          "added": 61,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-187-La-Integridad-De-Los-Assets-No-Se-Verifica-En-Runtime.md",
+          "block": "B11",
+          "added": 92,
+          "deleted": 0
+        },
+        {
+          "path": "docs/architecture/07_Performance_Strategy.md",
+          "block": "B11",
+          "added": 43,
+          "deleted": 7
+        },
+        {
+          "path": "docs/architecture/08_Security_Model.md",
+          "block": "B11",
+          "added": 27,
+          "deleted": 4
+        },
+        {
+          "path": "eslint.config.js",
+          "block": "B11",
+          "added": 23,
+          "deleted": 0
+        },
+        {
+          "path": "package.json",
+          "block": "B11",
+          "added": 5,
+          "deleted": 4
+        },
+        {
+          "path": "packages/anonymization-core/export-engine/src/__tests__/fixtures/test-helpers.ts",
+          "block": "B11",
+          "added": 6,
+          "deleted": 0
+        },
+        {
+          "path": "playwright.leak.config.ts",
+          "block": "B11",
+          "added": 19,
+          "deleted": 0
+        },
+        {
+          "path": "playwright.perf.config.ts",
+          "block": "B11",
+          "added": 55,
+          "deleted": 0
+        },
+        {
+          "path": "playwright.stress.config.ts",
+          "block": "B11",
+          "added": 19,
+          "deleted": 0
+        },
+        {
+          "path": "pnpm-lock.yaml",
+          "block": "B11",
+          "added": 19,
+          "deleted": 9
+        },
+        {
+          "path": "tests/cancel/pipeline-cancel.test.ts",
+          "block": "B11",
+          "added": 448,
+          "deleted": 0
+        },
+        {
+          "path": "tests/e2e/scenario-10-merge-split-groups.spec.ts",
+          "block": "B11",
+          "added": 21,
+          "deleted": 26
+        },
+        {
+          "path": "tests/e2e/scenario-2-scanned-ocr.spec.ts",
+          "block": "B11",
+          "added": 3,
+          "deleted": 7
+        },
+        {
+          "path": "tests/e2e/scenario-5-edit-during-ner.spec.ts",
+          "block": "B11",
+          "added": 4,
+          "deleted": 5
+        },
+        {
+          "path": "tests/e2e/scenario-6-corrupt-pdf.spec.ts",
+          "block": "B11",
+          "added": 15,
+          "deleted": 26
+        },
+        {
+          "path": "tests/e2e/scenario-9-reanalyze-preserves-edits.spec.ts",
+          "block": "B11",
+          "added": 22,
+          "deleted": 19
+        },
+        {
+          "path": "tests/e2e/support/electronApp.ts",
+          "block": "B11",
+          "added": 69,
+          "deleted": 19
+        },
+        {
+          "path": "tests/e2e/support/fixtures.ts",
+          "block": "B11",
+          "added": 132,
+          "deleted": 0
+        },
+        {
+          "path": "tests/e2e/support/scannedPdf.ts",
+          "block": "B11",
+          "added": 306,
+          "deleted": 13
+        },
+        {
+          "path": "tests/e2e/t5-orientation-pixel.spec.ts",
+          "block": "B11",
+          "added": 507,
+          "deleted": 0
+        },
+        {
+          "path": "tests/fixtures/README.md",
+          "block": "B11",
+          "added": 22,
+          "deleted": 3
+        },
+        {
+          "path": "tests/fixtures/generate.test.ts",
+          "block": "B11",
+          "added": 197,
+          "deleted": 1
+        },
+        {
+          "path": "tests/fixtures/generate.ts",
+          "block": "B11",
+          "added": 298,
+          "deleted": 0
+        },
+        {
+          "path": "tests/integration/fixtures/mocks.ts",
+          "block": "B11",
+          "added": 42,
+          "deleted": 1
+        },
+        {
+          "path": "tests/integration/multi-line-fragments.test.ts",
+          "block": "B11",
+          "added": 4,
+          "deleted": 1
+        },
+        {
+          "path": "tests/integration/ocr-pdf-fusion.test.ts",
+          "block": "B11",
+          "added": 70,
+          "deleted": 61
+        },
+        {
+          "path": "tests/integration/ocr-region.test.ts",
+          "block": "B11",
+          "added": 2,
+          "deleted": 0
+        },
+        {
+          "path": "tests/integration/regex-ner-grouping.test.ts",
+          "block": "B11",
+          "added": 4,
+          "deleted": 1
+        },
+        {
+          "path": "tests/invariants/checks.test.ts",
+          "block": "B11",
+          "added": 8,
+          "deleted": 0
+        },
+        {
+          "path": "tests/leak/leak.spec.ts",
+          "block": "B11",
+          "added": 92,
+          "deleted": 0
+        },
+        {
+          "path": "tests/leak/leakGate.test.ts",
+          "block": "B11",
+          "added": 87,
+          "deleted": 0
+        },
+        {
+          "path": "tests/leak/leakGate.ts",
+          "block": "B11",
+          "added": 106,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/pipeline-timing.spec.ts",
+          "block": "B11",
+          "added": 191,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/checkFreshBuild.ts",
+          "block": "B11",
+          "added": 70,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/engineOverrides.ts",
+          "block": "B11",
+          "added": 34,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/globalSetup.config.ts",
+          "block": "B11",
+          "added": 11,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/heavyPdfFixtures.test.ts",
+          "block": "B11",
+          "added": 75,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/heavyPdfFixtures.ts",
+          "block": "B11",
+          "added": 293,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/heavyPdfValidation.ts",
+          "block": "B11",
+          "added": 265,
+          "deleted": 0
+        },
+        {
+          "path": "tests/perf/support/scannedFixtureCache.ts",
+          "block": "B11",
+          "added": 64,
+          "deleted": 0
+        },
+        {
+          "path": "tests/quality/baseline/compare.test.ts",
+          "block": "B11",
+          "added": 324,
+          "deleted": 0
+        },
+        {
+          "path": "tests/quality/baseline/compare.ts",
+          "block": "B11",
+          "added": 314,
+          "deleted": 0
+        },
+        {
+          "path": "tests/quality/baseline/entity-id.test.ts",
+          "block": "B11",
+          "added": 99,
+          "deleted": 0
+        },
+        {
+          "path": "tests/quality/baseline/entity-id.ts",
+          "block": "B11",
+          "added": 59,
+          "deleted": 0
+        },
+        {
+          "path": "tests/quality/baseline/gate.test.ts",
+          "block": "B11",
+          "added": 152,
+          "deleted": 0
+        },
+        {
+          "path": "tests/quality/baseline/gate.ts",
+          "block": "B11",
+          "added": 81,
+          "deleted": 0
+        },
+        {
+          "path": "tests/quality/baseline/generate-candidate.ts",
+          "block": "B11",
+          "added": 126,
+          "deleted": 0
+        },
+        {
+          "path": "tests/quality/baseline/identity.ts",
+          "block": "B11",
+          "added": 122,
+          "deleted": 0
+        },
+        {
+          "path": "tests/quality/baseline/print-comparison-report.ts",
+          "block": "B11",
+          "added": 46,
+          "deleted": 0
+        },
+        {
+          "path": "tests/quality/baseline/schema.ts",
+          "block": "B11",
+          "added": 215,
+          "deleted": 0
+        },
+        {
+          "path": "tests/quality/baselines/reference-v1.json",
+          "block": "B11",
+          "added": 767,
+          "deleted": 0
+        },
+        {
+          "path": "tests/security/security.test.ts",
+          "block": "B11",
+          "added": 18,
+          "deleted": 1
+        },
+        {
+          "path": "tests/stress/stress.spec.ts",
+          "block": "B11",
+          "added": 111,
+          "deleted": 0
+        },
+        {
+          "path": "tests/stress/stressGate.test.ts",
+          "block": "B11",
+          "added": 131,
+          "deleted": 0
+        },
+        {
+          "path": "tests/stress/stressGate.ts",
+          "block": "B11",
+          "added": 121,
+          "deleted": 0
+        },
+        {
+          "path": "tests/tsconfig.json",
+          "block": "B11",
+          "added": 1,
+          "deleted": 1
+        }
+      ]
+    },
+    "B12": {
+      "title": "Documentación, decisiones y evidencia de cierre",
+      "specs": [
+        "docs/roadmap/MVP.md",
+        "docs/roadmap/Optimizacion_De_Memoria_Plan.md",
+        "docs/roadmap/Optimizacion_De_Rendimiento.md"
+      ],
+      "focus": "Coherencia entre ADR/spec/roadmap y reportes, descartes vs implementaciones, límites de medición, diferencias de plataformas, pendientes y declaraciones de cierre; auditoría histórica de alcance, sin exigir preservar commits tras squash.",
+      "files": [
+        {
+          "path": "docs/adr/ADR-003-Workers.md",
+          "block": "B12",
+          "added": 2,
+          "deleted": 0
+        },
+        {
+          "path": "docs/adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md",
+          "block": "B12",
+          "added": 326,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/AB_Intercalado_Medicion.md",
+          "block": "B12",
+          "added": 309,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/AB_Intercalado_Plan.md",
+          "block": "B12",
+          "added": 360,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/Agrupacion_Difusa_Medicion.md",
+          "block": "B12",
+          "added": 389,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/Atribucion_Recursos_Renderer_Medicion.md",
+          "block": "B12",
+          "added": 440,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/Banco_Windows_Comparativa_Medicion.md",
+          "block": "B12",
+          "added": 409,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/Ciclos_Y_Documentos_Reales_Medicion.md",
+          "block": "B12",
+          "added": 752,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/Ciclos_Y_Documentos_Reales_Plan.md",
+          "block": "B12",
+          "added": 516,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/Empaquetado_NER_Medicion.md",
+          "block": "B12",
+          "added": 79,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/Future_Ideas.md",
+          "block": "B12",
+          "added": 104,
+          "deleted": 1
+        },
+        {
+          "path": "docs/roadmap/Gates_Leak_Stress_Plan.md",
+          "block": "B12",
+          "added": 122,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/H-10_Bitacora_De_Memoria.md",
+          "block": "B12",
+          "added": 466,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/Hilos_NER_Medicion.md",
+          "block": "B12",
+          "added": 537,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/Hito12.5_Revision_R4_Handoff.md",
+          "block": "B12",
+          "added": 155,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/ImageData_Perfilado_Handoff.md",
+          "block": "B12",
+          "added": 246,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/ImageData_Perfilado_Plan.md",
+          "block": "B12",
+          "added": 92,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/ImageData_Perfilado_Resultados.md",
+          "block": "B12",
+          "added": 556,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/Instrumento_De_Memoria_Arreglo_Plan.md",
+          "block": "B12",
+          "added": 185,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/Lotes_NER_Factibilidad.md",
+          "block": "B12",
+          "added": 191,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/MVP.md",
+          "block": "B12",
+          "added": 187,
+          "deleted": 5
+        },
+        {
+          "path": "docs/roadmap/Margenes_Menos_Pixeles_Handoff.md",
+          "block": "B12",
+          "added": 350,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/Margenes_Menos_Pixeles_Implementacion_Handoff.md",
+          "block": "B12",
+          "added": 136,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/Margenes_Menos_Pixeles_Medicion_I1.md",
+          "block": "B12",
+          "added": 121,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/Margenes_Menos_Pixeles_Medicion_I2.md",
+          "block": "B12",
+          "added": 124,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/Margenes_Menos_Pixeles_Plan.md",
+          "block": "B12",
+          "added": 340,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/Margenes_Menos_Pixeles_Resultados.md",
+          "block": "B12",
+          "added": 320,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/Memory_Infra_Viabilidad.md",
+          "block": "B12",
+          "added": 172,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/OCR_Entre_Plataformas_Medicion.md",
+          "block": "B12",
+          "added": 321,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/Optimizacion_De_Memoria_Plan.md",
+          "block": "B12",
+          "added": 1167,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/Optimizacion_De_Rendimiento.md",
+          "block": "B12",
+          "added": 255,
+          "deleted": 19
+        },
+        {
+          "path": "docs/roadmap/PDFs_Pesados_Y_Exportacion_Medicion.md",
+          "block": "B12",
+          "added": 72,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/PDFs_Pesados_Y_Exportacion_Plan.md",
+          "block": "B12",
+          "added": 51,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/Patron_Email_Regex_Medicion.md",
+          "block": "B12",
+          "added": 191,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/Perfilado_Base_Caliente_Medicion.md",
+          "block": "B12",
+          "added": 626,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/Perfilado_Base_Caliente_Plan.md",
+          "block": "B12",
+          "added": 145,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/Perfilado_NER_Interno_Medicion.md",
+          "block": "B12",
+          "added": 182,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/Perfilado_NER_Interno_Plan.md",
+          "block": "B12",
+          "added": 180,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/Perfilado_Tiempo_Fuera_OCR_Medicion_M0_M1.md",
+          "block": "B12",
+          "added": 142,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/Perfilado_Tiempo_Fuera_OCR_Plan.md",
+          "block": "B12",
+          "added": 157,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/Perfiles_Rendimiento_Revision.md",
+          "block": "B12",
+          "added": 361,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/Post_Hito10.8_Pendientes.md",
+          "block": "B12",
+          "added": 18,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/Precalentamiento_NER_Durante_OCR_Medicion.md",
+          "block": "B12",
+          "added": 128,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/Precalentamiento_NER_Durante_OCR_Plan.md",
+          "block": "B12",
+          "added": 77,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/Reconocedores_OCR_Medicion.md",
+          "block": "B12",
+          "added": 329,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/Rendimiento_Experimentos_Plan.md",
+          "block": "B12",
+          "added": 308,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/T5_ImageData_Investigacion.md",
+          "block": "B12",
+          "added": 124,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/T5_OSD_Compartido_Cierre_Final.md",
+          "block": "B12",
+          "added": 108,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/T5_OSD_Compartido_Cierre_Funcional.md",
+          "block": "B12",
+          "added": 89,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/T5_OSD_Compartido_Handoff.md",
+          "block": "B12",
+          "added": 546,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/T5_OSD_Compartido_Resultados.md",
+          "block": "B12",
+          "added": 45,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/T5_OSD_Compartido_Resultados_Adelanto.md",
+          "block": "B12",
+          "added": 139,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/T5_OSD_Compartido_Resultados_Separados.md",
+          "block": "B12",
+          "added": 136,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/T5_OSD_Compartido_Revision.md",
+          "block": "B12",
+          "added": 70,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/T5_OSD_Compartido_Revision_Adelanto.md",
+          "block": "B12",
+          "added": 155,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/T5_OSD_Compartido_Revision_Cierre_Funcional.md",
+          "block": "B12",
+          "added": 89,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/T5_OSD_Compartido_Revision_R4.md",
+          "block": "B12",
+          "added": 58,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/T5_OSD_Compartido_Revision_Separados.md",
+          "block": "B12",
+          "added": 162,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/T5_OSD_Investigacion_Scheduling.md",
+          "block": "B12",
+          "added": 104,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/Verificacion_Liberacion_NER_Medicion.md",
+          "block": "B12",
+          "added": 295,
+          "deleted": 0
+        },
+        {
+          "path": "docs/roadmap/Version_1.0.md",
+          "block": "B12",
+          "added": 1,
+          "deleted": 1
+        },
+        {
+          "path": "docs/roadmap/Version_2.0.md",
+          "block": "B12",
+          "added": 1,
+          "deleted": 1
+        }
+      ]
+    }
+  }
+}

@@ -87,7 +87,7 @@ Estos son los eventos que la UI **sí** escucha para construir el árbol de enti
 | `GROUP_REPLACEMENT_CHANGED` | Grouping Engine | UI | `{ documentId, groupId, mode, value }` | async | sí | none | Render ya no se suscribe (ADR-044): el re-render de páginas afectadas lo media el Orchestrator vía el `ENTITY_GROUP_UPDATED` que siempre acompaña a este evento (punto único de emisión en Grouping). |
 | `GROUP_TOGGLED` | Grouping Engine | UI | `{ documentId, groupId, enabled }` | async | sí | none | Ídem `GROUP_REPLACEMENT_CHANGED`: sin receptor en Render desde ADR-044. |
 | `CONFLICT_DETECTED` | Grouping Engine | UI | `{ documentId, conflict: Conflict }` | async | sí | none | |
-| `CONFLICT_RESOLVED` | Grouping Engine | UI | `{ documentId, conflictId, mode }` | async | sí | none | |
+| `CONFLICT_RESOLVED` | Grouping Engine | UI | `{ documentId, conflictId, entityType }` (ADR-083: el tipo con que se resolvió, no un modo) | async | sí | none | |
 | `GROUPING_FINISHED` | Grouping Engine | Orchestrator | `{ documentId, groupCount, conflictCount, durationMs }` | async | sí | none | Dispara `PIPELINE_READY`. Puede emitirse **más de una vez** por documento tras `reopenSession`/`finishSession` re-ejecutado tras un `reanalyze` (ADR-038 §2, §5). |
 
 ---

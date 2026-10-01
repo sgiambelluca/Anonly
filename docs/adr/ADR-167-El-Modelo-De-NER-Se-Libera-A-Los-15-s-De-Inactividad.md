@@ -222,3 +222,37 @@ Cada uno tiene que fallar contra el código de hoy (ADR-149 §2):
 **Lo que no toca**: la baja de OCR al terminar su etapa (ADR-157), `idleDisposeMs`
 de los demás pools, la detección, los presupuestos de `00_Project_Vision.md`
 §7, y el orden OCR → NER.
+
+## Enmienda (2026-09-30) — el despacho in-process también suelta el modelo
+
+Origen: ronda E de la revisión de `hardening/plan-2026-09`, hallazgo B06-F01
+(`Revision_Por_Bloques_Hardening.md` §4.3).
+
+§4 define una baja efectiva como «ningún worker del pool conserva estado
+cargado», y acepta el caso de cero workers vivos. Hay un camino donde eso es
+cierto y el modelo **sigue cargado**: `createCore` sin factory para `ner`
+inyecta un `WorkerPool` real que despacha in-process. El kernel corre en el
+mismo hilo que el motor, el temporizador vence, el pool notifica la baja y el
+listener de §3 pone `modelWarm = false`, pero el clasificador sigue en
+memoria. La siguiente página lo reusa sin `model-ready`: `isModelReady()`
+queda en `false` con el modelo listo y `NER_STARTED` anuncia una carga que no
+ocurre. No afecta al producto empaquetado, que siempre despacha a workers,
+pero sí a todo consumidor del Core sin workers (tests, Node) y contradice
+NER §6 («`isModelReady()` válido en modo pool y en fallback»).
+
+**Decisión.** El listener de §3, además de reiniciar `modelWarm`, **descarta
+el kernel in-process si el motor lo cargó** (`kernelDispose()`, el mismo que
+usa `dispose()`). Así la baja es efectiva también en ese camino: el modelo se
+suelta, la siguiente carga emite `NER_MODEL_LOADING`/`NER_MODEL_READY` como
+cualquier recarga, y el flag vuelve a decir la verdad. El listener es
+sincrónico: lanza el descarte sin esperarlo, y la siguiente carga in-process
+**espera** a que ese descarte termine antes de cargar, para no reusar un
+clasificador a medio liberar. La guarda de §4 sigue valiendo: el pool solo
+notifica estando ocioso, así que nunca se descarta un kernel con una
+inferencia en curso. `IMMEDIATE_POOL` no cambia: su `onWorkersReleased`
+sigue siendo no-op.
+
+**Prueba exigida** (NER §13 caso 33, §14): con `WorkerPool` real sin factory,
+inferir, vencer `nerIdleDisposeMs` e inferir otra página: la segunda emite
+`NER_MODEL_LOADING`/`NER_MODEL_READY`, `isModelReady()` es `true` al
+terminar, y el kernel se cargó dos veces. Tiene que fallar contra `768e5d3`.

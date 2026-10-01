@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=ui-contract | dependencias=01_Technical_Architecture_Document.md,03_Data_Model.md,04_Event_System.md,ADR-005-State-Management.md,adr/ADR-034-Auditoria-Pre-Hito9-Orchestrator.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-054-Scroll-Independiente-Por-Panel.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-069-Lexico-De-Genero-Fuente-Unica-Y-Canal-Del-Usuario.md,adr/ADR-134-Cancelled-Es-Terminal.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-168-Pantallas-De-Carga-Y-Escaneo-Tras-Pruebas-De-Usuario.md,adr/ADR-169-La-Pantalla-De-Trabajo-Tras-Pruebas-De-Usuario.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md | audiencia=IA-implementador-ui | fase=4 (reconciliado en fase 10 por ADR-036: acciones completas §2.3, workers §2.4, settings §3.7, zoom §7, errores §8; §2.3/§3.7/§7 reescritos por ADR-037 —zoom con re-render real— y ADR-038 —reanalyze preservando ediciones, supersede el flujo "recrear el core"; §2.3/§7 en fase 11 por ADR-056 —requestRender con kind requerido, cada panel pide lo suyo—; §2.3 en fase 10.6 por ADR-069 §4 —`updateGroup.patch` gana `personGender?: PersonGenderChoice`, para el control de género del PR 12, que ADR-071 rebautiza `PersonGenderToggle` sin tocar este contrato—; post-Hito 10.10: §2.2 y §3.6b nuevas por ADR-062 —`degraded.store`, el séptimo slice: convierte el veredicto por página que trae `PREVIEW_UPDATED.degraded` en la marca por grupo del árbol, con sus tres reglas de consumo—; §3.5 pierde `sideBySide`, que estaba declarado sin setter ni consumidor desde PR7); §3.5/§3.6/§6 reescritos en el rediseño post-10.9 por **ADR-087** —un solo visor con toggle: `viewer.currentPageIndex`/`visibleRange` dejan de ser por `kind` y aparece `viewer.mode`; `settings.scrollSyncEnabled` se retira; el recap de layout pasa a los tres momentos—; §2.2 ignora carga NER tardía después de Cancelled por ADR-134 -->
+<!-- CONTEXT: scope=ui-contract | dependencias=adr/ADR-191-Lo-Que-Muestra-La-Vista-Previa-Es-Lo-Que-Se-Exporta.md,01_Technical_Architecture_Document.md,03_Data_Model.md,04_Event_System.md,ADR-005-State-Management.md,adr/ADR-034-Auditoria-Pre-Hito9-Orchestrator.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-054-Scroll-Independiente-Por-Panel.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-069-Lexico-De-Genero-Fuente-Unica-Y-Canal-Del-Usuario.md,adr/ADR-134-Cancelled-Es-Terminal.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-168-Pantallas-De-Carga-Y-Escaneo-Tras-Pruebas-De-Usuario.md,adr/ADR-169-La-Pantalla-De-Trabajo-Tras-Pruebas-De-Usuario.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md | audiencia=IA-implementador-ui | fase=4 (reconciliado en fase 10 por ADR-036: acciones completas §2.3, workers §2.4, settings §3.7, zoom §7, errores §8; §2.3/§3.7/§7 reescritos por ADR-037 —zoom con re-render real— y ADR-038 —reanalyze preservando ediciones, supersede el flujo "recrear el core"; §2.3/§7 en fase 11 por ADR-056 —requestRender con kind requerido, cada panel pide lo suyo—; §2.3 en fase 10.6 por ADR-069 §4 —`updateGroup.patch` gana `personGender?: PersonGenderChoice`, para el control de género del PR 12, que ADR-071 rebautiza `PersonGenderToggle` sin tocar este contrato—; post-Hito 10.10: §2.2 y §3.6b nuevas por ADR-062 —`degraded.store`, el séptimo slice: convierte el veredicto por página que trae `PREVIEW_UPDATED.degraded` en la marca por grupo del árbol, con sus tres reglas de consumo—; §3.5 pierde `sideBySide`, que estaba declarado sin setter ni consumidor desde PR7); §3.5/§3.6/§6 reescritos en el rediseño post-10.9 por **ADR-087** —un solo visor con toggle: `viewer.currentPageIndex`/`visibleRange` dejan de ser por `kind` y aparece `viewer.mode`; `settings.scrollSyncEnabled` se retira; el recap de layout pasa a los tres momentos—; §2.2 ignora carga NER tardía después de Cancelled por ADR-134 -->
 
 # Anonly — React Client (UI Contract, TAD bloque 9)
 
@@ -153,6 +153,11 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribes {
   return () => unsubs.forEach((u) => u());
 }
 ```
+
+**Dos reglas del bridge que el código de arriba no muestra** (ronda E de la revisión de la branch):
+
+1. **`CONFLICT_DETECTED` reemplaza por `id`** (ADR-191 §3). Grouping lo declara idempotente (`Grouping_Engine.md` §7) y lo reemite con el mismo `id` al restaurar un checkpoint (deshacer, rehacer) cuando un conflicto cambió. `entities.store.addConflict` **actualiza en el lugar** el conflicto con ese `id` y solo agrega si no existía: nunca deja dos conflictos con el mismo `id`. `resolveConflict` deja el conflicto `resolved: true` **sin** `heldManual` (ADR-175 §1). Si el store duplicara, la copia pendiente bloquearía el export (ADR-176) sin que el diálogo pudiera resolverla, porque `.find(id)` encuentra la resuelta.
+2. **`PIPELINE_CANCELLED` de un reanálisis vuelve a `Ready`** (Orchestrator §13.22, ADR-038 §6). Cancelar una importación lleva a `Cancelled`, que es terminal (ADR-134). Cancelar un `reanalyze` no: el Core deja el documento en `Ready`, editable y exportable, y no emite `PIPELINE_READY` después. **El bridge distingue los dos casos por `pipeline.reanalyzeInFlight`** (§3.4), que `actions.reanalyze` enciende antes de llamar al Core y apaga en un `finally` cuando la promesa se asienta. No alcanza con saber si el documento ya llegó a `Ready`: el Core admite `reanalyze` también desde `Failed` (Orchestrator §6, ADR-040), así que un documento cuya importación falló en `OCRing` o `Detecting` puede re-analizarse y cancelarse sin haber pasado nunca por `Ready`, y el Core igual lo deja en `Ready`. Con `reanalyzeInFlight` encendido, `PIPELINE_CANCELLED` deja `stage: Ready`, limpia `modelLoading` y conserva `groupCount`/`conflictCount`; apagado, `stage: Cancelled` como siempre. Cuatro tests. En el bridge, tres: cancelar una importación, cancelar un reanálisis de un documento que llegó a `Ready`, y cancelar un reanálisis de un documento que había quedado en `Failed`. En `actions`, uno: `reanalyzeInFlight` está encendido mientras corre `orchestrator.reanalyze` y apagado cuando la promesa resuelve o rechaza; con el bridge real suscripto y un `PIPELINE_CANCELLED` emitido antes de que la promesa se asiente, la etapa termina en `Ready`. Ese test fija el orden del que depende la regla: el Core emite `PIPELINE_CANCELLED` antes de asentar la promesa de `reanalyze` (Orchestrator §13.22).
 
 ### 2.3 Zustand → Bus (acciones)
 
@@ -390,6 +395,13 @@ interface PipelineSlice {
   readonly failedAtStage: PipelineStage | null;
   /** Etapas atravesadas por el pipeline en el documento vigente (para `ScanSteps`, ADR-168 §5). */
   readonly visitedStages: ReadonlySet<PipelineStage>;
+  /**
+   * Hay un `reanalyze` en curso: lo enciende `actions.reanalyze` antes de llamar
+   * al Core y lo apaga en un `finally`. El bridge lo usa para que
+   * `PIPELINE_CANCELLED` de un reanálisis deje `Ready` y no `Cancelled` (§2.2
+   * regla 2, Orchestrator §13.22).
+   */
+  readonly reanalyzeInFlight: boolean;
   /** Jobs que fallaron sin tumbar el pipeline, por `WorkerJobType`. `{}` es el caso sano. */
   readonly failedJobs: Readonly<Partial<Record<WorkerJobType, number>>>;
   setState(patch: Partial<PipelineSlice>): void;
@@ -494,7 +506,12 @@ interface HistorySlice {
   `Ctrl/Cmd+Y` y `Ctrl/Cmd+Shift+Z` → `redo`. No actúa con el foco en `input`/`textarea`/
   `contenteditable`, con un diálogo abierto, durante una pasada de detección ni durante un export.
 - **Toasts**: el "Deshacer" de todo toast de edición llama a `undo()`. Un solo toast de edición a la
-  vez; una edición nueva lo reemplaza y un undo/redo por atajo lo cierra.
+  vez; una edición nueva lo reemplaza y un undo/redo por atajo lo cierra. **Toda edición que entra a
+  la pila retira el toast de edición vigente, tenga o no toast propio** (decisión del humano,
+  2026-09-30; `UX_Guidelines.md` §3.3b): el modo en la fila y el género no muestran toast, pero si
+  dejaran el anterior a la vista, su "Deshacer" desharía la edición silenciosa y no la que nombra. El
+  punto natural es `record()`: si registra una entrada, avisa al host de toasts que cierre el de
+  edición. Ctrl+Z sigue deshaciendo en orden.
 - **Reemplaza** al snapshot de reglas del toast de los barridos (`Components.md` §3.11) y a la
   restitución grupo por grupo de `components/entities/undoableEdits.ts`.
 

@@ -310,6 +310,7 @@ veces.
 | B | B4, B5, B6 | **APPROVED** (2026-09-29, R6: B5 reabierto y cerrado; B4 y B6 confirmados) | 6 (R1 a R4 con Codex, §4.1; R5 verificación independiente, B5 REJECTED; R6 APPROVED) | commits de cierre de la ronda B y de la reapertura de B5 | El humano aceptó como riesgo conocido el veredicto OSD equivocado con basura confiable (ADR-190, Consecuencias; `MVP.md`). ADR-146 M2 ABIERTO en `MVP.md`. Corrimiento del scroll durante un `reanalyze` de OCR: el humano decidió anclarlo (2026-09-29, `Components.md` §5.3); implementado y APPROVED en la revisión de la ronda C. Pendientes menores de comentarios para la ronda D: `viewerGestures.ts:38-40` y el docblock de `adr190-unreadable-page-cover.spec.ts` |
 | C | B3, B8 | **APPROVED** (2026-09-29, R5 independiente; B3 y anclaje del scroll APPROVED en R4) | 5 (R1 a R3 con Codex; R4 independiente, B8 REJECTED; R5 APPROVED) | commits de cierre de la ronda C | Decisiones del humano: `test:perf` solo con `pipeline-timing`, CI mide sin umbral y el umbral de 8 s se aplica en local (§11.4); Leak y Stress rigen por ADR-149 (nota en ADR-185 §5). R5 estima en el runner de macOS Stress 25–35 min (tope 60) y Leak 40–50 min (tope 90); lo confirma la primera corrida de CI del PR. Pendiente de decisión humana, no bloqueante: si el instalador sigue llevando los sourcemaps del renderer (~15 MB) |
 | D | B9, B10 | **APPROVED** (2026-09-29, revisor Sonnet por ser revisión de texto y arneses) | 1 | commits de cierre de la ronda D | Sin datos reales en `HEAD`. Once observaciones no bloqueantes: diez resueltas en docs por el planificador (índice de mediciones, estados viejos, base del patch de I-2, gates alineados con CI, guía de IA, residuo de una ruta personal en el historial en §6) y los dos comentarios de código desactualizados, que resuelve el implementador junto con el anclaje del scroll |
+| E | Hallazgos huérfanos de la revisión del 2026-09-26 (§4.3) | **APPROVED** (2026-09-30, R3) | 3 (R1 REJECTED 19/21; R2 REJECTED por un test; R3 APPROVED) | ver los commits de la ronda E | 21 vigentes, 7 resueltos en rondas previas. ADR-191, enmienda de ADR-167 y dos decisiones de UX del humano (§4.3.3) |
 
 ### 4.1 Reanudación de la ronda B (2026-09-27)
 
@@ -508,6 +509,182 @@ También recalculó desde los datos crudos las medianas de memoria y tiempo
   la §7).
 - **Implementador:** B-1, B-2, B-4, O-2, O-3, O-4, O-10 y O-11 en curso;
   después vuelve al revisor.
+
+### 4.3 Ronda E: hallazgos huérfanos de la revisión del 2026-09-26
+
+**Origen.** El 2026-09-26, antes de escribir este plan, una revisión con
+GPT-6 Sol partió la branch en doce bloques propios (B01–B12) sobre `bea5295`.
+Sus rondas 1 a 4 dejaron B01–B08 en REJECTED; B09–B12 no se revisaron. Los
+informes quedaron en `roadmap/Hardening_Revision_2026-09/` sin trackear, y
+ningún documento del plan los incorporó. Las rondas A a D cubrieron parte
+del mismo código con otra división. Los B07 y B08 de esa revisión caen en
+E1 (§2), que este plan exceptuó, así que nadie volvió a mirarlos.
+
+El planificador contrastó cada hallazgo con `HEAD` (`768e5d3`) el
+2026-09-30. Los IDs son los de esa revisión, para no confundirlos con los
+B-n de este plan.
+
+#### 4.3.1 Ya resueltos en `HEAD`
+
+| ID | Hallazgo | Dónde se cerró |
+|---|---|---|
+| B03-F03 | La prioridad visible no intervenía en la admisión al scheduler | `5194b13` (ronda A, B-2): cola de admisión por prioridad |
+| B03-F04 | Dos nombres de test de Render con `ImageData` | Nombres de §14 en `contract.test.ts:225` y `unit.test.ts:527` |
+| B04-F01 | El host aceptaba `image.bytes` detached | `ocr.engine.ts:769` rechaza `byteLength === 0`; `edge.test.ts:194` |
+| B04-F02 | Falla de canvas del OSD → orientación 0 con el bitmap abierto | `orientation-kernel.ts`: `finally` cierra el bitmap y un contexto nulo es fallo de página. Si `drawImage` lanza queda `osdHadVerdict: false`, que ahora dispara la recuperación de ADR-190: ya no es silencioso |
+| B04-F03 | Cuatro pruebas de §14 de OCR faltantes | Presentes con su nombre exacto (`t5-shared-osd`, `edge`, `snapshot`, `unit`) |
+| B06-F02 | Falta el test contractual del escáner de email | `regex-engine/.../contract.test.ts:131` |
+| B01 (obs.) | Scope en commits | Ya registrado en §6 |
+
+#### 4.3.2 Vigentes en `HEAD`
+
+Prioridad de la revisión original, revalidada. **Bloquean el merge** los P1
+y los P2 de producto; los de documentación los resuelve el planificador.
+
+| ID | Prio. | Módulo | Hallazgo | Evidencia en `HEAD` |
+|---|---|---|---|---|
+| B07-F01 | P1 | `apps/react-client` | Restaurar un checkpoint tras resolver un choque manual duplica el conflicto en la UI; queda uno pendiente irresoluble y el export se bloquea sin salida | `entities.store.ts:161` agrega sin upsert; `resolveConflict` conserva `heldManual` por spread |
+| B07-F02 | P1 | `apps/react-client` | Cancelar un `reanalyze` deja la UI en `Cancelled` con el Core en `Ready`; desaparece Exportar (Orchestrator §13.22) | `bus-bridge.ts:208` pasa a `Cancelled` sin distinguir importación de reanálisis. Anterior a la branch |
+| B08-F01 | P1 | `apps/react-client` | El selector del diálogo de choques devuelve un array nuevo en cada llamada (zustand 5, sin `useShallow`): render en bucle posible y diálogo inutilizable | `ManualOverlapDialog.tsx:50`. Ningún test ni E2E monta el diálogo |
+| B08-F02 | P1 | `apps/react-client` | La búsqueda muestra como «oculto» el texto de un grupo deshabilitado o `needsReview`, que se exporta visible | `searchResults.ts:89` compara geometría y no mira `enabled` |
+| B08-F03 | P2 | `apps/react-client` | El «Deshacer» de un toast deshace la última edición de la pila, no la que el toast nombra (UX §3.3b) | `editHistory.ts:29`, `editToast` enlaza `undoLastEdit` |
+| B08-F04 | P3 | `apps/react-client` | Dos `text-xs` nuevos incumplen el piso de 14 px (UX §9) | `ManualOverlapDialog.tsx:148`, `ExportButton.tsx:108` |
+| B05-F01 | P2 | `grouping-engine` | La vista previa de un split en modo `synthetic` no coincide con el resultado aplicado (caso 47, ADR-170 §2) | `grouping.engine.ts:2183`: `randomUUID()` para el grupo nuevo, y el sintético se siembra con `groupId` |
+| B05-F02 | P2 | `grouping-engine` | Un miembro angosto que entra al grupo cambia la vista previa del placeholder pero no el `replacementValue` vigente (caso 46) | `grouping.engine.ts:3638` agrega sin recalcular. **Contradicción de spec**, §4.3.3 |
+| B05-F03 | P2 | `grouping-engine` | `restoreCheckpoint` cambia el `groupId` de un conflicto sin emitir diferencia (caso 52, ADR-172 §1) | `grouping.engine.ts:2940` compara solo `resolved`/`resolvedType` |
+| B03-F01 | P2 | `render-engine` | Un descriptor que espera cupo se despacha después de `clearDocument` (ADR-144 §8) | `preview-scheduler.ts`: tras `reserve()` corre `runJob` sin comprobar la identidad de la entrada |
+| B03-F02 | P2 | `render-engine` | Si `onSettle` lanza, la promesa queda pendiente y el rechazo sin manejar (ADR-144 §6) | `await onSettle(result)` fuera de `try` en `runDispatchLoop` |
+| B02-F01 | P2 | façade | Los depósitos `ocr-words:` sobreviven a `closeDocument` y `dispose` (ADR-145 §5, Orchestrator §15.10) | `orchestrator.ts:948` y `:1001` no tocan `this.cache` |
+| B02-F02 | P2 | façade (tests) | Faltan los tests de `createCore` que exige Orchestrator §14 para el pool `ocr-orientation` (T-5 / ADR-164) | Ningún test de `src/__tests__` ni de `tests/` hace esas afirmaciones |
+| B06-F01 | P2 | `ner-engine` | En el fallback in-process, una baja del pool pone `modelWarm = false` con el modelo todavía cargado; `NER_STARTED` anuncia una carga que no ocurre | Listener de `ner.engine.ts:575`. No afecta al transporte con workers del producto |
+| B01-F01 | P2 | `shared` | `WorkerJobPayload` no incluye `OcrOrientationPayload` | `types.ts:447`. Sin efecto en runtime (el transporte usa `unknown`); afecta la API pública |
+| B02 (obs.) | P3 | façade (tests) | Tres nombres de §14 sin test: `renderLegend is not invoked when includeMarkerLegend is false`, `textless pages rasterized via RenderEngine before OCR dispatch`, `cancel aborts all jobs of documentId within SLA` | `grep` sin resultados. La segunda fila necesita actualizarse con ADR-143 |
+| B01 (obs.) | P3 | `shared` (tests) | El test de `GROUP_REMOVE_REQUESTED` en `EventPayloadMap` no indexa el map | `shared/src/__tests__/contract.test.ts:916` |
+| B02 (obs.) | P3 | façade | Comentario de `types.ts:61-68` que cita `normalizedValue`/ADR-175, reemplazado por `manualOutcome`/ADR-176 | Comentario desactualizado |
+| B01-A01 | P2 | docs | `03_Data_Model.md` §18 replica `OcrPagePayload` sin `orientation` | Planificador |
+| B01 (obs.) | P3 | docs | `04_Event_System.md:90` describe `CONFLICT_RESOLVED.mode`; el contrato usa `entityType` (ADR-083) | Planificador |
+| B02-F03 / F04 | P3 | docs | Orchestrator §6 publica `createCore(config?: Partial<EngineConfig>)` (el código usa `EngineConfigOverrides`, ADR-039) y promete que `reanalyze` rechaza si termina `Failed` | Planificador |
+
+#### 4.3.3 Decisiones y documentación (cerradas el 2026-09-30)
+
+Todo lo que el implementador necesita quedó escrito antes de lanzarlo, para
+que no tenga que frenar a mitad de la ronda.
+
+- **ADR-191** (decidido por el humano): lo que muestra la vista previa es lo
+  que se exporta. Recalcular el placeholder cuando entra un miembro (B05-F02),
+  `id` reservado por sesión para el split (B05-F01), y diferencia completa de
+  conflictos al restaurar con reemplazo por `id` en la UI (B05-F03, B07-F01).
+  Grouping §13 casos 47, 52 y 74-76, §14 y §15 ítem 15ad; enmiendas anotadas
+  en ADR-057 y ADR-170.
+- **Enmienda de ADR-167** (B06-F01): la baja de un pool que despacha
+  in-process también descarta el kernel. NER §6, §13 caso 33, §14 y §15
+  ítem 33.
+- **UX, decisiones del humano:** toda edición nueva retira el toast de
+  edición vigente (B08-F03; `UX_Guidelines.md` §3.3b y `React_Client.md`
+  §3.6c). Un match sobre un grupo deshabilitado cuenta como «Sin ocultar ·
+  <Tipo> N.º NN desactivada», sin «Agregar como…» (B08-F02;
+  `Components.md` §5.4c).
+- **`React_Client.md` §2.2:** `CONFLICT_DETECTED` reemplaza por `id` y
+  `PIPELINE_CANCELLED` de un reanálisis vuelve a `Ready` (B07-F01, B07-F02).
+- **Sincronizaciones sin cambio de comportamiento:** `03_Data_Model.md` §18
+  (`OcrPagePayload.orientation` y `OcrOrientationPayload` en
+  `WorkerJobPayload`, B01-A01 y B01-F01); `04_Event_System.md`
+  (`CONFLICT_RESOLVED.entityType`); Orchestrator §6 (`createCore` con
+  `EngineConfigOverrides`; `reanalyze` admite `Done` y resuelve al terminar
+  en `Failed`, B02-F03 y B02-F04) y §14 (filas de T-5, de `ocr-words:`, de
+  rasterización por ADR-143 y del gate de cancelación).
+
+#### 4.3.4 Reparto
+
+Un solo implementador (`general-purpose`, Sonnet), un commit por módulo
+(ADR-124), en este orden: `shared` → `render-engine` → `grouping-engine` →
+`ner-engine` → façade → `apps/react-client`. Cada arreglo trae un test que
+falla contra `768e5d3` (ADR-149 §2), con el nombre exacto de §14 cuando el
+spec lo fija. Hoy ningún test ejercita el diálogo de choques ni la búsqueda,
+y `apps/react-client` no tiene una librería de DOM para tests (sumarla
+pediría un ADR, R-12). Por eso el selector del diálogo se prueba como
+función pura, con estabilidad de referencia ante el mismo estado; el estado
+de la búsqueda, con `resolveMatchStatus`; y un E2E nuevo abre y resuelve el
+diálogo de choques sobre la app empaquetada, corrido solo. Después, el
+revisor sobre la ronda entera.
+
+#### 4.3.5 Implementación (2026-09-30)
+
+Un implementador Sonnet cerró los 21 hallazgos en los seis módulos, con los
+cinco gates del comando mínimo en verde (3005 tests y 340 de contrato) y un
+E2E nuevo, `tests/e2e/manual-overlap-conflict.spec.ts`. Cada arreglo trae un
+test que falló contra el código previo, salvo los tests que solo faltaban
+(T-5 y `renderLegend`), que cubren código ya correcto.
+
+**Control del planificador sobre B08-F01.** El hallazgo original infería el
+efecto sin haberlo observado. Con el selector sin `useShallow` y el renderer
+reconstruido, el E2E falla: el diálogo nunca aparece y la app queda en una
+**pantalla en blanco** al agregar a mano una entidad que choca. Con el
+arreglo, pasa. El componente no existe en `main` ni en `v0.9.2`, así que el
+defecto no llegó a ningún release.
+
+#### 4.3.6 Revisión R1 (2026-09-30): REJECTED
+
+El revisor (Opus) aprobó 19 de 21 hallazgos, con los cinco gates y el E2E en
+verde. Hubo tres bloqueantes:
+
+- **B-1 (B07-F02).** `reachedReady` no cubre el reanálisis de un documento
+  cuya importación falló en `OCRing` o `Detecting`. Ese documento queda
+  abierto, el Core admite `reanalyze` desde `Failed`, y al cancelar el Core
+  vuelve a `Ready` mientras la UI queda en `Cancelled`.
+- **B-2 (docs).** React_Client §2.2 decía que un reanálisis solo se pide
+  sobre un documento que ya llegó a `Ready`, y Orchestrator §6 admite
+  `Failed`. **Resuelto por el planificador:** vale Orchestrator §6, que
+  coincide con el código y con ADR-040. React_Client §2.2 regla 2 pasa a un
+  flag `pipeline.reanalyzeInFlight`, declarado en §3.4, con tres tests.
+- **B-3 (B06-F01).** El test del motor no ejercita la cadena real ni la
+  guarda. El planificador agregó dos filas al §14 del Orchestrator, en el
+  façade, y precisó NER §13 caso 33 y §14.
+
+**No bloqueantes resueltos en docs:** O-2 (caso 75 y ADR-191: la vista previa
+muestra `groupId: null`), O-3 (ADR-191, dónde están los nombres) y la fila de
+`renderLegend` en Orchestrator §14 (O-1). **Al implementador:** O-1, O-5
+(comentarios que citan IDs de esta revisión en vez del ADR o del spec) y
+O-6 (el caso 76 cubre también `candidates` y `heldManual`). El ítem 33 de
+NER §15 lo tilda el planificador cuando B-3 quede aprobado (O-4).
+
+**Residuo aceptado (O-7).** Un conflicto que cambió de grupo y sigue
+resuelto se emite como `CONFLICT_RESOLVED`, que no lleva `groupId`. La UI
+conserva el `groupId` anterior de un conflicto ya resuelto. No tiene efecto
+sobre la UI ni sobre el export, porque un conflicto resuelto no se muestra
+ni bloquea. Queda anotado en Grouping §13 caso 76.
+
+**Commits (O-8), cuando se apruebe:**
+
+1. Docs y ADR-191 (R-19).
+2. Un commit por módulo, en el orden de §4.3.4.
+3. El E2E nuevo, en un commit propio después del de `apps/react-client`.
+
+#### 4.3.7 Revisión R2 (2026-09-30): REJECTED por un test
+
+Quedaron cerrados B-1 (código), B-2, B-3, O-1, O-5 y O-6. Hay un bloqueante
+nuevo:
+
+- **B-4.** Ningún test cubre el flag que arma `actions.reanalyze`: si se
+  borra, la suite sigue en verde y vuelve el defecto de B07-F02. React_Client
+  §2.2 regla 2 pasa a pedir cuatro tests. El de `actions` usa el bridge real,
+  para fijar además el orden del que depende la regla: `PIPELINE_CANCELLED`
+  llega antes de que se asiente la promesa (O-1 de la R2).
+
+Precisada en docs la fila de la guarda de NER en Orchestrator §14 (O-2).
+Para el implementador: descartar un hunk de `bus-bridge.ts` que solo
+reformatea (O-3) y actualizar el comentario del test de `renderLegend`.
+
+#### 4.3.8 Revisión R3 (2026-09-30): APPROVED
+
+El implementador agregó tres tests de `reanalyzeInFlight` en
+`actions.test.ts`, uno de ellos con el bridge real. Fallan si se borra el
+flag de `actions.reanalyze`. Con los tres del bridge suman los cuatro que
+pide React_Client §2.2. El revisor aprobó la ronda con los 21 hallazgos
+cerrados. Gates: `lint`, `typecheck`, `test` (3011), `test:contract` (340) y
+`format:check` en verde. El E2E del diálogo de choques pasó en la R1 y desde
+entonces solo cambiaron comentarios en ese componente. Queda un no bloqueante
+cosmético: un `unsubscribe()` fuera de `finally` en un test.
 
 ## 5. Después del último bloque: el merge a `main`
 
