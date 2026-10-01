@@ -81,14 +81,14 @@ export function LoadScreen() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="mx-auto flex min-h-full w-full max-w-6xl flex-col gap-5 px-4 py-6 sm:px-8">
-        <header className="anonly-rise flex items-center justify-between rounded-xl border border-border bg-bg-primary py-2.5 pl-4 pr-3 shadow-sm">
+      <div className="mx-auto flex min-h-full w-full max-w-6xl flex-col gap-3 px-4 py-4 sm:px-6 [@media(max-height:760px)]:py-3">
+        <header className="anonly-rise flex items-center justify-between rounded-xl border border-border bg-bg-primary py-1.5 pl-4 pr-3 shadow-sm">
           <div className="flex items-center gap-3">
             {/*
               El logo se dibuja censurando su propio renglón (`animated`): la
               marca hace lo que la app hace. Una sola vez al montar.
             */}
-            <Logo size={32} animated />
+            <Logo size={28} animated />
             <span className="text-lg font-semibold tracking-tight text-text-primary">Anonly</span>
           </div>
           {/*
@@ -98,22 +98,22 @@ export function LoadScreen() {
           <SettingsButton />
         </header>
 
-        <main className="grid flex-1 grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+        <main className="grid flex-1 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
           <section
             aria-labelledby="load-title"
-            className="anonly-rise anonly-rise-1 flex flex-col gap-4 rounded-2xl border border-border bg-bg-primary p-6 shadow-sm sm:p-8"
+            className="anonly-rise anonly-rise-1 flex flex-col gap-3.5 rounded-2xl border border-border bg-bg-primary p-5 shadow-sm"
           >
-            <div className="flex flex-col gap-2.5">
-              <span className="text-sm font-semibold uppercase tracking-wider text-accent">
+            <div className="flex flex-col gap-2">
+              <span className="text-sm font-semibold uppercase tracking-wider text-accent [@media(max-height:760px)]:hidden">
                 Empezá acá
               </span>
               <h1
                 id="load-title"
-                className="text-2xl font-semibold leading-tight tracking-tight text-text-primary sm:text-[1.75rem]"
+                className="text-2xl font-semibold leading-tight tracking-tight text-text-primary"
               >
                 Anonimizá PDFs sin que salgan de tu computadora
               </h1>
-              <p className="text-base leading-relaxed text-text-secondary">
+              <p className="text-sm leading-relaxed text-text-secondary">
                 Elegí un documento y Anonly detecta los datos sensibles para que revises qué se
                 reemplaza antes de exportar una copia anonimizada.
               </p>
@@ -121,12 +121,12 @@ export function LoadScreen() {
             <DropZone openingFileName={openingFileName} error={error} onFile={accept} />
           </section>
 
-          <div className="anonly-rise anonly-rise-2">
+          <div className="anonly-rise anonly-rise-2 flex">
             <HowItWorks />
           </div>
         </main>
 
-        <dl className="anonly-rise anonly-rise-3 grid grid-cols-1 gap-5 md:grid-cols-3">
+        <dl className="anonly-rise anonly-rise-3 grid grid-cols-1 gap-3 md:grid-cols-3">
           <Feature
             icon={<ShieldCheckIcon className="h-5 w-5" aria-hidden />}
             iconClass="bg-success/15 text-text-primary"
@@ -147,7 +147,7 @@ export function LoadScreen() {
           />
         </dl>
 
-        <footer className="anonly-rise anonly-rise-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-bg-primary py-2 pl-4 pr-2">
+        <footer className="anonly-rise anonly-rise-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-bg-primary py-1.5 pl-4 pr-1.5">
           <p className="text-sm text-text-secondary">
             Anonly {__ANONLY_VERSION__} · Software libre, licencia {PRODUCT_LICENSE}
           </p>
@@ -155,7 +155,7 @@ export function LoadScreen() {
             <button
               type="button"
               onClick={() => setAboutOpen(true)}
-              className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-border bg-bg-primary px-3.5 text-sm font-medium text-text-primary hover:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-border bg-bg-primary px-3.5 text-sm font-medium text-text-primary hover:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
               <InfoIcon className="h-4 w-4" aria-hidden />
               Acerca de…
@@ -164,7 +164,7 @@ export function LoadScreen() {
               href={REPORT_ISSUE_URL}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-border bg-bg-primary px-3.5 text-sm font-medium text-text-primary hover:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-border bg-bg-primary px-3.5 text-sm font-medium text-text-primary hover:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
               <BugIcon className="h-4 w-4" aria-hidden />
               Reportar un problema
@@ -191,10 +191,8 @@ function Feature({
   readonly description: string;
 }) {
   return (
-    <div className="flex items-start gap-3.5 rounded-xl border border-border bg-bg-primary px-4 py-4 shadow-sm">
-      <span
-        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${iconClass}`}
-      >
+    <div className="flex items-start gap-3 rounded-xl border border-border bg-bg-primary px-3.5 py-3 shadow-sm">
+      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${iconClass}`}>
         {icon}
       </span>
       <div className="flex flex-col gap-0.5">

@@ -92,7 +92,7 @@ export function HowItWorks() {
   return (
     <section
       aria-labelledby="how-it-works-title"
-      className="flex flex-col gap-3.5 rounded-2xl border border-border bg-bg-primary p-5 shadow-sm"
+      className="flex w-full flex-col gap-3 rounded-2xl border border-border bg-bg-primary p-4 shadow-sm"
     >
       <div className="flex items-baseline justify-between">
         <h2 id="how-it-works-title" className="text-base font-semibold text-text-primary">
@@ -103,14 +103,14 @@ export function HowItWorks() {
 
       <div
         aria-hidden
-        className="anonly-dots flex h-40 items-center justify-center overflow-hidden rounded-xl border border-border bg-bg-secondary"
+        className="anonly-dots relative min-h-[5.5rem] flex-1 overflow-hidden rounded-xl border border-border bg-bg-secondary"
       >
         <svg
           width="300"
           height="156"
           viewBox="0 0 300 156"
           fill="none"
-          className="overflow-visible"
+          className="absolute left-1/2 top-1/2 h-full max-h-[156px] w-auto -translate-x-1/2 -translate-y-1/2 overflow-visible"
         >
           <g className="anonly-hw-doc">
             <path
@@ -231,11 +231,11 @@ export function HowItWorks() {
         </svg>
       </div>
 
-      <ol className="flex flex-col gap-2">
+      <ol className="flex flex-col gap-1.5">
         {STEPS.map((step, index) => (
           <li
             key={step.title}
-            className="relative flex items-start gap-3 rounded-lg border border-border px-3 py-2.5"
+            className="relative flex items-start gap-3 rounded-lg border border-border px-3 py-1.5"
           >
             {/* El resaltado del paso que acompaña a la fase de la animación. */}
             <span

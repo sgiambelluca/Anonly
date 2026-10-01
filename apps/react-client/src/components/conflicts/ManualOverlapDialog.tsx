@@ -37,6 +37,7 @@ import { useEntitiesStore } from "../../store/entities.store.js";
 import { Button } from "../common/Button.js";
 import { Dialog } from "../common/Dialog.js";
 import { applyManualOverlapResolution } from "../entities/applyEdits.js";
+import { ENTITY_TYPE_COLOR } from "../entities/entityTypeColors.js";
 import { ENTITY_TYPE_SINGULAR } from "../entities/entityTypeLabels.js";
 
 import { conflictsByIds, manualOverlapCandidates } from "./conflictResolution.js";
@@ -85,6 +86,7 @@ export function ManualOverlapDialog({ conflictIds, open, onClose }: ManualOverla
       open={open}
       onClose={onClose}
       title="Se superpone con una detección"
+      size="lg"
       description={
         count === 1
           ? "Lo que marcaste se superpone con un dato ya detectado. ¿Qué querés ocultar?"
@@ -92,17 +94,17 @@ export function ManualOverlapDialog({ conflictIds, open, onClose }: ManualOverla
       }
       footer={
         first !== undefined ? (
-          <div className="flex flex-wrap justify-end gap-2.5">
+          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
             <Button
               variant="secondary"
-              className="w-64"
+              className="min-h-10"
               onClick={() => choose("detected", first.manual.value)}
             >
               Dejar lo que ya estaba detectado
             </Button>
             <Button
               variant="primary"
-              className="w-64"
+              className="min-h-10"
               onClick={() => choose("manual", first.manual.value)}
             >
               Ocultar lo que marqué
@@ -112,7 +114,7 @@ export function ManualOverlapDialog({ conflictIds, open, onClose }: ManualOverla
       }
     >
       {first !== undefined ? (
-        <div className="flex flex-col gap-3 text-sm">
+        <div className="flex flex-col gap-2.5 text-sm">
           <CandidateCard
             label="Lo que marcaste"
             value={first.manual.value}
@@ -145,10 +147,17 @@ function CandidateCard({
   readonly type: EntityType;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-bg-secondary px-3 py-2.5">
-      <p className="text-sm font-semibold uppercase tracking-wide text-text-secondary">{label}</p>
-      <p className="mt-1 font-medium text-text-primary">«{value}»</p>
-      <p className="text-text-secondary">{ENTITY_TYPE_SINGULAR[type]}</p>
+    <div className="flex flex-col gap-1 rounded-lg border border-border bg-bg-secondary px-3.5 py-3">
+      <p className="font-semibold text-text-secondary">{label}</p>
+      <p className="break-words font-semibold text-text-primary">«{value}»</p>
+      <p className="flex items-center gap-2 text-text-secondary">
+        <span
+          aria-hidden
+          className="h-2 w-2 shrink-0 rounded-full"
+          style={{ background: ENTITY_TYPE_COLOR[type] }}
+        />
+        {ENTITY_TYPE_SINGULAR[type]}
+      </p>
     </div>
   );
 }

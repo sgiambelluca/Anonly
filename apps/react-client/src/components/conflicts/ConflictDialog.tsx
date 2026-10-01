@@ -20,13 +20,16 @@
  */
 
 import { ConflictReason, type EntityType } from "@anonly/anonymization-core";
-import { useEffect, useState } from "react";
+import { CheckIcon, InfoIcon } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { useEntitiesStore } from "../../store/entities.store.js";
 import { Button } from "../common/Button.js";
 import { Dialog } from "../common/Dialog.js";
 import { applyConflictResolution } from "../entities/applyEdits.js";
-import { ENTITY_TYPE_LABEL } from "../entities/entityTypeLabels.js";
+import { ENTITY_TYPE_COLOR } from "../entities/entityTypeColors.js";
+import { ENTITY_TYPE_SINGULAR } from "../entities/entityTypeLabels.js";
+import { ConflictSymbol } from "../entities/warningSymbols.js";
 
 import { CONFLICT_REASON_LABEL } from "./conflictLabels.js";
 import { candidateTypes, defaultCandidate, spellingChoices } from "./conflictResolution.js";
@@ -41,6 +44,16 @@ export function ConflictDialog({ conflictId, open, onClose }: ConflictDialogProp
   const conflict = useEntitiesStore((state) =>
     state.conflicts.find((candidate) => candidate.id === conflictId),
   );
+  // El grupo vigente, para marcar "Actual" la opción que ya está aplicada.
+  const groupId = conflict?.groupId;
+  const group = useEntitiesStore((state) => {
+    if (groupId === undefined) return undefined;
+    for (const groups of state.groupsByType.values()) {
+      const found = groups.find((candidate) => candidate.id === groupId);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  });
   const [selectedType, setSelectedType] = useState<EntityType | null>(null);
   const [selectedSpelling, setSelectedSpelling] = useState<string | null>(null);
 
@@ -117,70 +130,160 @@ export function ConflictDialog({ conflictId, open, onClose }: ConflictDialogProp
   };
 
   return (
-    <Dialog open={open} onClose={onClose} title="Revisar entidad">
-      <div className="flex flex-col gap-3 text-sm">
-        <p className="text-text-primary">
-          <span className="font-medium">&quot;{value}&quot;</span>
-        </p>
-        <p className="text-sm text-text-secondary">{CONFLICT_REASON_LABEL[conflict.reason]}</p>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title="Revisar entidad"
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={onClose}>
+            Cerrar
+          </Button>
+          <Button variant="primary" className="min-w-[6rem]" onClick={handleApply}>
+            {hasChoice || hasSpellingChoice ? "Aplicar" : "Descartar"}
+          </Button>
+        </div>
+      }
+    >
+      <div className="flex flex-col gap-4 text-sm">
+        <div className="flex items-center gap-3 rounded-lg border border-border bg-bg-secondary px-3 py-2.5">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-error/10 text-error">
+            <ConflictSymbol />
+          </span>
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <b className="break-words font-semibold text-text-primary">{value}</b>
+            <span className="text-text-secondary">{CONFLICT_REASON_LABEL[conflict.reason]}</span>
+          </div>
+        </div>
 
         {hasSpellingChoice ? (
-          <fieldset className="flex flex-col gap-1.5">
-            <legend className="mb-1 text-sm font-medium text-text-secondary">
-              ¿Cuál de estas escrituras usamos?
-            </legend>
+          <ChoiceGroup
+            id={`conflict-spelling-${conflict.id}`}
+            label="¿Cuál de estas escrituras usamos?"
+          >
             {spellings.map((spelling) => (
-              <label key={spelling} className="flex items-center gap-2 text-sm text-text-primary">
-                <input
-                  type="radio"
-                  name={`conflict-spelling-${conflict.id}`}
-                  value={spelling}
-                  checked={selectedSpelling === spelling}
-                  onChange={() => setSelectedSpelling(spelling)}
-                />
+              <ChoiceOption
+                key={spelling}
+                name={`conflict-spelling-${conflict.id}`}
+                value={spelling}
+                checked={selectedSpelling === spelling}
+                isCurrent={group?.canonicalValue === spelling}
+                onSelect={() => setSelectedSpelling(spelling)}
+              >
                 {spelling}
-              </label>
+              </ChoiceOption>
             ))}
-          </fieldset>
+          </ChoiceGroup>
         ) : hasChoice ? (
-          <fieldset className="flex flex-col gap-1.5">
-            <legend className="mb-1 text-sm font-medium text-text-secondary">
-              ¿Con qué se identifica?
-            </legend>
+          <ChoiceGroup id={`conflict-type-${conflict.id}`} label="¿Con qué se identifica?">
             {types.map((type) => (
-              <label key={type} className="flex items-center gap-2 text-sm text-text-primary">
-                <input
-                  type="radio"
-                  name={`conflict-type-${conflict.id}`}
-                  value={type}
-                  checked={selectedType === type}
-                  onChange={() => setSelectedType(type)}
-                />
-                {ENTITY_TYPE_LABEL[type]}
-              </label>
+              <ChoiceOption
+                key={type}
+                name={`conflict-type-${conflict.id}`}
+                value={type}
+                checked={selectedType === type}
+                isCurrent={group?.type === type}
+                dotColor={ENTITY_TYPE_COLOR[type]}
+                onSelect={() => setSelectedType(type)}
+              >
+                {ENTITY_TYPE_SINGULAR[type]}
+              </ChoiceOption>
             ))}
-          </fieldset>
+          </ChoiceGroup>
         ) : (
-          <p className="text-sm text-text-secondary">
+          <p className="flex items-start gap-2 rounded-lg border border-border bg-bg-secondary px-3 py-2.5 text-text-secondary">
+            <InfoIcon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
             No hay nada entre qué elegir: este aviso solo se puede descartar.
           </p>
         )}
 
         {conflict.resolved ? (
-          <p className="text-sm text-success">
+          <p className="flex items-center gap-1.5 text-success">
+            <CheckIcon className="h-4 w-4 shrink-0" aria-hidden />
             Ya revisado
-            {conflict.resolvedType ? ` (${ENTITY_TYPE_LABEL[conflict.resolvedType]})` : ""}.
+            {conflict.resolvedType ? ` (${ENTITY_TYPE_SINGULAR[conflict.resolvedType]})` : ""}.
           </p>
         ) : null}
       </div>
-      <div className="mt-4 flex justify-end gap-2">
-        <Button variant="secondary" onClick={onClose}>
-          Cerrar
-        </Button>
-        <Button variant="primary" onClick={handleApply}>
-          {hasChoice ? "Aplicar" : "Descartar"}
-        </Button>
-      </div>
     </Dialog>
+  );
+}
+
+/** La pregunta y sus opciones, en la misma caja gris de `EntityTypePicker`. */
+function ChoiceGroup({
+  id,
+  label,
+  children,
+}: {
+  readonly id: string;
+  readonly label: string;
+  readonly children: ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span id={id} className="font-semibold text-text-secondary">
+        {label}
+      </span>
+      <div
+        role="radiogroup"
+        aria-labelledby={id}
+        className="flex flex-col gap-0.5 rounded-lg border border-border bg-bg-tertiary p-1.5"
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function ChoiceOption({
+  name,
+  value,
+  checked,
+  isCurrent,
+  dotColor,
+  onSelect,
+  children,
+}: {
+  readonly name: string;
+  readonly value: string;
+  readonly checked: boolean;
+  /** La opción que ya está aplicada en el documento. */
+  readonly isCurrent: boolean;
+  readonly dotColor?: string;
+  readonly onSelect: () => void;
+  readonly children: ReactNode;
+}) {
+  return (
+    <label
+      className={`flex min-h-9 cursor-pointer items-center gap-2 rounded-md border px-2 py-1 text-text-primary has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent ${
+        checked
+          ? "border-accent bg-bg-primary font-semibold ring-2 ring-accent/15"
+          : "border-transparent hover:border-border hover:bg-bg-primary"
+      }`}
+    >
+      <input
+        type="radio"
+        name={name}
+        value={value}
+        checked={checked}
+        onChange={onSelect}
+        className="sr-only"
+      />
+      {dotColor !== undefined ? (
+        <span
+          aria-hidden
+          className="h-2 w-2 shrink-0 rounded-full"
+          style={{ background: dotColor }}
+        />
+      ) : null}
+      <span className="min-w-0 flex-1 break-words">{children}</span>
+      {isCurrent ? <span className="shrink-0 font-normal text-text-secondary">Actual</span> : null}
+      <span
+        aria-hidden
+        className={`h-3.5 w-3.5 shrink-0 rounded-full ${
+          checked ? "border-4 border-accent" : "border-[1.5px] border-text-secondary/60"
+        }`}
+      />
+    </label>
   );
 }

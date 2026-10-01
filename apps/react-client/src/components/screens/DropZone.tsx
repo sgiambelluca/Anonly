@@ -74,8 +74,9 @@ export function DropZone({ openingFileName, error, onFile }: DropZoneProps) {
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       data-state={state}
-      // Alto fijo: el recuadro es el mismo en los cuatro estados (UX-10).
-      className={`anonly-dots relative flex h-72 w-full items-center justify-center overflow-hidden rounded-xl border-2 p-6 transition-colors ${frameClass}`}
+      // El alto lo da el layout, no el contenido: el recuadro es el mismo en
+      // los cuatro estados (UX-10) y se achica con la ventana hasta el mínimo.
+      className={`anonly-dots relative flex min-h-[16rem] w-full flex-1 items-center justify-center overflow-hidden rounded-xl border-2 p-4 [@media(max-height:760px)]:min-h-[15rem] [@media(max-height:760px)]:p-2 transition-colors ${frameClass}`}
     >
       <input
         ref={inputRef}
@@ -117,11 +118,11 @@ export function DropZone({ openingFileName, error, onFile }: DropZoneProps) {
               </div>
               <GhostPdf />
             </div>
-            <p className="mt-1.5 text-lg font-semibold text-text-primary">Arrastrá un PDF acá</p>
+            <p className="mt-1 text-lg font-semibold text-text-primary">Arrastrá un PDF acá</p>
             <p className="text-sm text-text-secondary">o</p>
             <button
               type="button"
-              className="anonly-button-primary min-h-11 px-5"
+              className="anonly-button-primary min-h-10 px-5"
               onClick={pickFile}
             >
               <FileIcon className="h-4 w-4" aria-hidden />
@@ -170,14 +171,14 @@ export function DropZone({ openingFileName, error, onFile }: DropZoneProps) {
             </svg>
             <FileIcon className="h-6 w-6 text-text-secondary" aria-hidden />
           </span>
-          <p className="mt-1.5 text-lg font-semibold text-text-primary">Abriendo el documento…</p>
+          <p className="mt-1 text-lg font-semibold text-text-primary">Abriendo el documento…</p>
           <p
             className="max-w-[26rem] truncate text-sm text-text-secondary"
             title={openingFileName ?? ""}
           >
             {openingFileName}
           </p>
-          <button type="button" className="anonly-button-primary min-h-11 px-5" disabled>
+          <button type="button" className="anonly-button-primary min-h-10 px-5" disabled>
             Elegir archivo
           </button>
         </div>
@@ -185,10 +186,10 @@ export function DropZone({ openingFileName, error, onFile }: DropZoneProps) {
 
       {state === "error" && error !== null ? (
         <div className="flex max-w-full flex-col items-center gap-2.5 text-center">
-          <span className="inline-flex h-16 w-16 items-center justify-center rounded-2xl border border-error/50 bg-error/10 text-error">
+          <span className="inline-flex h-14 w-14 items-center justify-center rounded-2xl border border-error/50 bg-error/10 text-error">
             <FileXIcon className="h-7 w-7" aria-hidden />
           </span>
-          <p className="mt-1.5 text-lg font-semibold text-text-primary">
+          <p className="mt-1 text-lg font-semibold text-text-primary">
             No se pudo abrir el archivo
           </p>
           <div role="alert" className="flex max-w-[28rem] flex-col items-center gap-0.5">
@@ -199,7 +200,7 @@ export function DropZone({ openingFileName, error, onFile }: DropZoneProps) {
             ) : null}
             <p className="line-clamp-2 text-sm font-medium text-error">{error.message}</p>
           </div>
-          <button type="button" className="anonly-button-primary min-h-11 px-5" onClick={pickFile}>
+          <button type="button" className="anonly-button-primary min-h-10 px-5" onClick={pickFile}>
             <RefreshCwIcon className="h-4 w-4" aria-hidden />
             Elegir otro archivo
           </button>

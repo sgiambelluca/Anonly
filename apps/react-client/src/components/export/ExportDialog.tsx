@@ -37,6 +37,7 @@
  * usuario reabre el diálogo sin haber vuelto a exportar.
  */
 
+import { FileTextIcon, FileWarningIcon } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { actions } from "../../core-adapter/actions.js";
@@ -70,6 +71,7 @@ export interface ExportDialogProps {
 
 export function ExportDialog({ open, onClose }: ExportDialogProps) {
   const pageCount = useDocumentStore((state) => state.pageCount);
+  const documentName = useDocumentStore((state) => state.name);
   const groupsByType = useEntitiesStore((state) => state.groupsByType);
   const unreadableInkPages = useUnreadableInkStore((state) => state.pages);
 
@@ -163,8 +165,30 @@ export function ExportDialog({ open, onClose }: ExportDialogProps) {
     onClose();
   }
 
+  const exportedPageCount = includeMarkerLegend ? pageCount + 1 : pageCount;
+
   return (
-    <Dialog open={open} onClose={onClose} title="Exportar documento anonimizado">
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title="Exportar documento anonimizado"
+      size="lg"
+      {...(submitted
+        ? {}
+        : { description: "Revisá qué se va a generar y elegí el nombre de la copia." })}
+      footer={
+        submitted ? undefined : (
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={onClose}>
+              Cancelar
+            </Button>
+            <Button variant="primary" className="min-w-[6rem]" onClick={handleSubmit}>
+              Exportar
+            </Button>
+          </div>
+        )
+      }
+    >
       {submitted ? (
         <ExportProgress
           filename={normalizeExportFilename(filename)}
@@ -172,52 +196,73 @@ export function ExportDialog({ open, onClose }: ExportDialogProps) {
           onClose={onClose}
         />
       ) : (
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-1 text-sm text-text-primary">
-            <p>
-              <strong className="font-medium">
-                {counts.enabled} de {counts.total}
-              </strong>{" "}
-              {counts.total === 1 ? "entidad será anonimizada" : "entidades serán anonimizadas"}
-            </p>
-            <p className="text-text-secondary">
-              {includeMarkerLegend ? pageCount + 1 : pageCount}{" "}
-              {pageCount === 1 && !includeMarkerLegend ? "página" : "páginas"}
-            </p>
+        <div className="flex flex-col gap-4 text-sm">
+          <div className="flex items-center gap-3.5 rounded-xl border border-border bg-bg-secondary px-4 py-3.5">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-accent/10 text-accent">
+              <FileTextIcon className="h-5 w-5" aria-hidden />
+            </span>
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <span className="truncate font-semibold text-text-primary">
+                {documentName ?? "Documento"}
+              </span>
+              <span className="text-text-secondary">Documento original</span>
+            </span>
           </div>
 
-          <FormRow label="Nombre del archivo">
+          <div className="grid grid-cols-2 gap-3">
+            <SummaryTile label="Entidades" value={`${counts.enabled} de ${counts.total}`}>
+              {counts.total === 1 ? "entidad será anonimizada" : "entidades serán anonimizadas"}
+              {counts.disabled > 0 ? (
+                <span className="block text-warning-strong">
+                  {counts.disabled === 1
+                    ? "1 queda sin anonimizar"
+                    : `${counts.disabled} quedan sin anonimizar`}
+                </span>
+              ) : null}
+            </SummaryTile>
+            <SummaryTile label="Páginas" value={String(exportedPageCount)}>
+              {includeMarkerLegend
+                ? `${pageCount} del documento + 1 de referencia`
+                : "en la copia anonimizada"}
+            </SummaryTile>
+          </div>
+
+          <FormRow label="Nombre del archivo" htmlFor="export-filename">
             <input
+              id="export-filename"
               type="text"
               value={filename}
+              autoComplete="off"
               onChange={(event) => setFilename(event.target.value)}
               aria-label="Nombre del archivo"
-              className="w-full rounded-md border border-border px-3 py-1.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent"
+              className="h-10 w-full rounded-lg border border-border bg-bg-primary px-3 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent"
             />
+            <span className="text-text-secondary">
+              Si lo dejás vacío, se usa {DEFAULT_EXPORT_FILENAME}.
+            </span>
           </FormRow>
 
-          <Checkbox
-            id="export-include-marker-legend"
-            checked={includeMarkerLegend}
-            onCheckedChange={setIncludeMarkerLegend}
-            label={
-              <span className="flex flex-col gap-0.5">
-                <span>Agregar una página con la referencia de marcadores</span>
-                <span className="text-sm text-text-secondary">
-                  Explica qué significa cada marcador (PRS = Persona, MAT = Matrícula…). Solo los
-                  tipos: nunca los datos originales.
+          <div
+            className={`flex flex-col gap-2.5 rounded-lg border px-3.5 py-3 ${
+              includeMarkerLegend ? "border-accent/35 bg-accent/5" : "border-border bg-bg-secondary"
+            }`}
+          >
+            <Checkbox
+              id="export-include-marker-legend"
+              checked={includeMarkerLegend}
+              onCheckedChange={setIncludeMarkerLegend}
+              label={
+                <span className="flex flex-col gap-0.5">
+                  <span className="font-semibold">
+                    Agregar una página con la referencia de marcadores
+                  </span>
+                  <span className="text-sm text-text-secondary">
+                    Explica qué significa cada marcador (PRS = Persona, MAT = Matrícula…). Solo los
+                    tipos: nunca los datos originales.
+                  </span>
                 </span>
-              </span>
-            }
-          />
-
-          <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={onClose}>
-              Cancelar
-            </Button>
-            <Button variant="primary" onClick={handleSubmit}>
-              Exportar
-            </Button>
+              }
+            />
           </div>
         </div>
       )}
@@ -275,11 +320,42 @@ export function shouldReopenOnResult(exportResult: { readonly blobUrl: string } 
   return exportResult !== null;
 }
 
-function FormRow({ label, children }: { readonly label: string; readonly children: ReactNode }) {
+function FormRow({
+  label,
+  htmlFor,
+  children,
+}: {
+  readonly label: string;
+  readonly htmlFor: string;
+  readonly children: ReactNode;
+}) {
   return (
-    <div className="flex flex-col gap-1.5">
-      <span className="text-sm font-medium text-text-secondary">{label}</span>
+    <div className="flex flex-col gap-2">
+      <label htmlFor={htmlFor} className="font-semibold text-text-secondary">
+        {label}
+      </label>
       {children}
+    </div>
+  );
+}
+
+/** Un dato del resumen: la cifra grande y, debajo, qué cuenta. */
+function SummaryTile({
+  label,
+  value,
+  children,
+}: {
+  readonly label: string;
+  readonly value: string;
+  readonly children: ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-0.5 rounded-lg border border-border bg-bg-primary px-3.5 py-3">
+      <span className="font-semibold text-text-secondary">{label}</span>
+      <span className="text-2xl font-semibold tabular-nums leading-tight tracking-tight text-text-primary">
+        {value}
+      </span>
+      <span className="text-text-secondary">{children}</span>
     </div>
   );
 }
@@ -314,15 +390,28 @@ function PendingPagesDialog({
       onClose={onCancel}
       title="Páginas que no se pudieron leer"
       description="Estas páginas tienen contenido que no se pudo leer y no tienen nada marcado para tapar."
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={onCancel}>
+            Cancelar
+          </Button>
+          <Button variant="primary" className="min-w-[6rem]" onClick={onConfirm}>
+            Exportar
+          </Button>
+        </div>
+      }
     >
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-2 text-sm">
         {pendingPages.map((pageIndex) => (
           <div
             key={pageIndex}
-            className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
+            className="flex items-center gap-3 rounded-lg border border-border bg-bg-secondary px-3 py-2.5"
           >
-            <div className="flex flex-col gap-1">
-              <span className="text-sm font-medium text-text-primary">Página {pageIndex + 1}</span>
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-warning/15 text-warning-strong">
+              <FileWarningIcon className="h-4 w-4" aria-hidden />
+            </span>
+            <div className="flex min-w-0 flex-1 flex-col gap-1">
+              <span className="font-semibold text-text-primary">Página {pageIndex + 1}</span>
               <Checkbox
                 id={`pending-page-${pageIndex}-cover`}
                 checked={!uncheckedPages.has(pageIndex)}
@@ -335,15 +424,6 @@ function PendingPagesDialog({
             </Button>
           </div>
         ))}
-      </div>
-
-      <div className="mt-4 flex justify-end gap-2">
-        <Button variant="secondary" onClick={onCancel}>
-          Cancelar
-        </Button>
-        <Button variant="primary" onClick={onConfirm}>
-          Exportar
-        </Button>
       </div>
     </Dialog>
   );

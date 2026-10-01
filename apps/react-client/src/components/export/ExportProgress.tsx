@@ -30,7 +30,8 @@
  * > resultado es el archivo, esa es exactamente la mentira que más caro sale.
  */
 
-import { CheckCircle2Icon } from "lucide-react";
+import { CheckIcon, DownloadIcon, FileCheck2Icon, Loader2Icon } from "lucide-react";
+import type { ReactNode } from "react";
 import { useState } from "react";
 
 import { actions } from "../../core-adapter/actions.js";
@@ -67,20 +68,18 @@ export function ExportProgress({ filename, onExportAnother, onClose }: ExportPro
   if (phase === "done" && result !== null) {
     if (downloaded) {
       return (
-        <div className="flex flex-col gap-4">
-          <div className="flex items-start gap-3">
-            <CheckCircle2Icon className="mt-0.5 h-5 w-5 shrink-0 text-success" aria-hidden />
-            <div className="flex min-w-0 flex-col gap-1">
-              <p className="text-sm font-medium text-text-primary">
+        <div className="flex flex-col gap-4 text-sm">
+          <ResultCard
+            icon={<CheckIcon className="h-5 w-5" aria-hidden />}
+            title={
+              <>
                 Se descargó <span className="break-all">{filename}</span>
-              </p>
-              <p className="text-sm text-text-secondary">
-                Si no aparece en tus descargas, probá de nuevo.
-              </p>
-            </div>
-          </div>
-          <div className="flex flex-wrap justify-end gap-2">
-            <Button variant="ghost" onClick={() => actions.closeDocument()}>
+              </>
+            }
+            detail="Si no aparece en tus descargas, probá de nuevo."
+          />
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Button variant="ghost" className="mr-auto" onClick={() => actions.closeDocument()}>
               Abrir otro documento
             </Button>
             <a
@@ -91,7 +90,7 @@ export function ExportProgress({ filename, onExportAnother, onClose }: ExportPro
             >
               Descargar de nuevo
             </a>
-            <Button variant="primary" onClick={onClose}>
+            <Button variant="primary" className="min-w-[6rem]" onClick={onClose}>
               Listo
             </Button>
           </div>
@@ -100,10 +99,16 @@ export function ExportProgress({ filename, onExportAnother, onClose }: ExportPro
     }
 
     return (
-      <div className="flex flex-col gap-3">
-        <p className="text-sm text-text-primary">
-          Exportación completa ({formatFileSize(result.sizeBytes)}).
-        </p>
+      <div className="flex flex-col gap-4 text-sm">
+        <ResultCard
+          icon={<FileCheck2Icon className="h-5 w-5" aria-hidden />}
+          title="Exportación completa"
+          detail={
+            <>
+              <span className="break-all">{filename}</span> · {formatFileSize(result.sizeBytes)}
+            </>
+          }
+        />
         <div className="flex justify-end gap-2">
           <Button variant="secondary" onClick={onExportAnother}>
             Exportar otro
@@ -111,9 +116,10 @@ export function ExportProgress({ filename, onExportAnother, onClose }: ExportPro
           <a
             href={result.blobUrl}
             download={filename}
-            className="anonly-button-primary"
+            className="anonly-button-primary min-w-[6rem]"
             onClick={() => setDownloaded(true)}
           >
+            <DownloadIcon className="h-4 w-4" aria-hidden />
             Descargar
           </a>
         </div>
@@ -123,7 +129,7 @@ export function ExportProgress({ filename, onExportAnother, onClose }: ExportPro
 
   if (phase === "error") {
     return (
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-4 text-sm">
         <Banner variant="error">No se pudo exportar. Reintentá.</Banner>
         <div className="flex justify-end gap-2">
           <Button variant="secondary" onClick={onClose}>
@@ -139,13 +145,51 @@ export function ExportProgress({ filename, onExportAnother, onClose }: ExportPro
 
   const percent = exportProgressPercent(progress);
   return (
-    <div className="flex flex-col gap-3" role="status" aria-live="polite">
-      <p className="text-sm text-text-primary">{formatExportProgressLabel(progress)}</p>
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-bg-tertiary">
+    <div
+      className="flex flex-col gap-3.5 rounded-xl border border-border bg-bg-secondary px-4 py-3.5 text-sm"
+      role="status"
+      aria-live="polite"
+    >
+      <div className="flex items-center gap-3.5">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-accent/10 text-accent">
+          <Loader2Icon className="anonly-spin h-5 w-5" aria-hidden />
+        </span>
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <p className="font-semibold text-text-primary">Generando la copia anonimizada</p>
+          <p className="text-text-secondary">{formatExportProgressLabel(progress)}</p>
+        </div>
+        <span className="shrink-0 font-semibold tabular-nums text-text-primary" aria-hidden>
+          {percent}%
+        </span>
+      </div>
+      <div className="h-2 w-full overflow-hidden rounded-full bg-bg-tertiary">
         <div
           className="h-full rounded-full bg-accent transition-[width]"
           style={{ width: `${percent}%` }}
         />
+      </div>
+    </div>
+  );
+}
+
+/** La tarjeta del resultado: ícono en verde, qué pasó y el detalle del archivo. */
+function ResultCard({
+  icon,
+  title,
+  detail,
+}: {
+  readonly icon: ReactNode;
+  readonly title: ReactNode;
+  readonly detail: ReactNode;
+}) {
+  return (
+    <div className="flex items-center gap-3.5 rounded-xl border border-border bg-bg-secondary px-4 py-3.5">
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-success/15 text-text-primary">
+        {icon}
+      </span>
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <p className="font-semibold text-text-primary">{title}</p>
+        <p className="text-text-secondary">{detail}</p>
       </div>
     </div>
   );
