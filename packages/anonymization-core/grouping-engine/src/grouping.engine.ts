@@ -473,6 +473,12 @@ interface Session {
    */
   readonly manualOutcomes: Map<string, ManualOutcomeAnnotation>;
   readonly seed: string;
+  /**
+   * ADR-191 §2: `id` del próximo grupo que cree una división. La división real
+   * lo consume y reserva otro; el simulacro de `previewEdit` y los checkpoints
+   * lo heredan por `cloneSession`, así que vista previa y pedido real coinciden.
+   */
+  reservedSplitGroupId: string;
   readonly startedAt: number;
   regexFinished: boolean;
   nerFinished: boolean;
@@ -690,6 +696,17 @@ function cloneInternalGroup(group: InternalGroup): InternalGroup {
   };
 }
 
+/** ADR-191 §3: un conflicto "cambió" si difiere en cualquiera de estos campos. */
+function conflictChanged(a: Conflict, b: Conflict): boolean {
+  return (
+    a.groupId !== b.groupId ||
+    a.resolved !== b.resolved ||
+    a.resolvedType !== b.resolvedType ||
+    a.heldManual !== b.heldManual ||
+    JSON.stringify(a.candidates) !== JSON.stringify(b.candidates)
+  );
+}
+
 /**
  * ADR-170 §2 / ADR-172 §1: la misma función de copia para el simulacro de
  * `previewEdit` y para los puntos de restauración de `createCheckpoint`. Una
@@ -726,6 +743,7 @@ function cloneSession(session: Session): Session {
     // peor, un grupo/conflicto que el punto restaurado no tiene más.
     manualOutcomes: new Map(),
     seed: session.seed,
+    reservedSplitGroupId: session.reservedSplitGroupId,
     startedAt: session.startedAt,
     regexFinished: session.regexFinished,
     nerFinished: session.nerFinished,
@@ -1323,6 +1341,7 @@ export class GroupingEngine implements IEngine {
       containedManualOccurrences: new Map(),
       manualOutcomes: new Map(),
       seed: crypto.randomUUID(),
+      reservedSplitGroupId: crypto.randomUUID(),
       startedAt: Date.now(),
       regexFinished: false,
       nerFinished: false,
@@ -2179,8 +2198,11 @@ export class GroupingEngine implements IEngine {
 
     const now = Date.now();
     const newIndex = this.nextIndex(session, group.type);
+    // ADR-191 §2: consume el id reservado y reserva uno nuevo.
+    const createdId = session.reservedSplitGroupId;
+    session.reservedSplitGroupId = crypto.randomUUID();
     const created: InternalGroup = {
-      id: crypto.randomUUID(),
+      id: createdId,
       type: group.type,
       canonicalValue: "",
       members: movedMembers,
@@ -2937,12 +2959,7 @@ export class GroupingEngine implements IEngine {
           });
           continue;
         }
-        if (
-          previous.resolved === conflict.resolved &&
-          previous.resolvedType === conflict.resolvedType
-        ) {
-          continue;
-        }
+        if (!conflictChanged(previous, conflict)) continue;
         if (conflict.resolved && conflict.resolvedType !== undefined) {
           this.ctx?.bus.emit(EventChannel.Grouping, EngineEvents.CONFLICT_RESOLVED, {
             documentId,
@@ -3663,6 +3680,19 @@ export class GroupingEngine implements IEngine {
       const before = group.canonicalValue;
       this.recomputeCanonicalValue(session, group);
       if (group.canonicalValue !== before) changed.add("canonicalValue");
+    }
+
+    // ADR-191 §1: el nivel de la escalera depende de la caja más angosta del
+    // grupo; solo `placeholder` sin valor manual depende de los miembros.
+    if (group.replacementMode === ReplacementMode.Placeholder && !group.replacementValueUserSet) {
+      const beforeReplacement = {
+        replacementMode: group.replacementMode,
+        replacementValue: group.replacementValue,
+      };
+      group.replacementValue = computeReplacementValue(group, session.seed, "");
+      for (const key of this.emitReplacementChangeIfNeeded(session, group, beforeReplacement)) {
+        changed.add(key);
+      }
     }
 
     group.updatedAt = Date.now();

@@ -1601,6 +1601,156 @@ describe("GroupingEngine — puntos de restauración (ADR-172)", () => {
     }
   });
 
+  // Caso 75 (§13, ADR-191 §2).
+  it("split preview and the real split create the same group", async () => {
+    const occA = makeOccurrence({
+      entityType: EntityType.Person,
+      value: "Juan Pérez",
+      normalizedValue: "juan perez",
+    });
+    const occB = makeOccurrence({
+      entityType: EntityType.Person,
+      value: "J. Pérez",
+      normalizedValue: "juan perez",
+    });
+    for (const occurrence of [occA, occB]) {
+      ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence,
+      });
+    }
+    const [group] = engine.getSnapshot("doc-1").groups;
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: group!.id,
+      patch: { replacementMode: ReplacementMode.Synthetic },
+    });
+    const checkpointId = engine.createCheckpoint("doc-1");
+    const request = {
+      kind: "split",
+      groupId: group!.id,
+      occurrenceIds: [occB.id],
+    } as const;
+
+    const previews = Array.from({ length: 5 }, () => engine.previewEdit("doc-1", request));
+    const previewValues = new Set(previews.map((p) => p.groups[1]?.replacementValue));
+    expect(previewValues.size).toBe(1);
+    const reserved = engine["sessions"].get("doc-1")?.reservedSplitGroupId;
+    expect(typeof reserved).toBe("string");
+
+    const { created } = await engine.applyGroupSplit({
+      documentId: "doc-1",
+      groupId: group!.id,
+      occurrenceIds: [occB.id],
+    });
+    expect(created.id).toBe(reserved);
+    expect(created.replacementValue).toBe(previews[0]?.groups[1]?.replacementValue);
+    const renewed = engine["sessions"].get("doc-1")?.reservedSplitGroupId;
+    expect(renewed).not.toBe(reserved);
+
+    // Restaurar devuelve el id reservado anterior: repetir la división da el mismo grupo.
+    await engine.restoreCheckpoint("doc-1", checkpointId);
+    expect(engine["sessions"].get("doc-1")?.reservedSplitGroupId).toBe(reserved);
+    const again = await engine.applyGroupSplit({
+      documentId: "doc-1",
+      groupId: group!.id,
+      occurrenceIds: [occB.id],
+    });
+    expect(again.created.id).toBe(created.id);
+    expect(again.created.replacementValue).toBe(created.replacementValue);
+  });
+
+  // Caso 76 (§13, ADR-191 §3).
+  it("restoreCheckpoint emits a conflict that moved to another group", async () => {
+    const first = makeOccurrence({
+      entityType: EntityType.Email,
+      value: "a@x.com",
+      normalizedValue: "a@x.com",
+      bbox: makeBBox(0, 0, 100, 12),
+    });
+    const second = makeOccurrence({
+      entityType: EntityType.Email,
+      value: "zzz@qq.org",
+      normalizedValue: "zzz@qq.org",
+      bbox: makeBBox(0, 200, 100, 12),
+    });
+    for (const occurrence of [first, second]) {
+      ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence,
+      });
+    }
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: EntityType.Person,
+        source: DetectionSource.Manual,
+        value: "texto",
+        normalizedValue: "texto",
+        bbox: makeBBox(0, 200, 100, 12),
+      }),
+    });
+    const [g1, g2] = [...engine.getSnapshot("doc-1").groups].sort(
+      (a, b) => a.indexInType - b.indexInType,
+    );
+    const held = engine.getSnapshot("doc-1").conflicts.find((c) => c.heldManual === true);
+    if (!g1 || !g2 || !held) throw new Error("expected two groups and a held conflict");
+    expect(held.groupId).toBe(g2.id);
+
+    await engine.applyGroupMerge({
+      documentId: "doc-1",
+      sourceGroupId: g2.id,
+      targetGroupId: g1.id,
+    });
+    const survivor = engine.getSnapshot("doc-1").groups[0];
+    expect(engine.getSnapshot("doc-1").conflicts.find((c) => c.id === held.id)?.groupId).toBe(
+      survivor?.id,
+    );
+    const checkpointId = engine.createCheckpoint("doc-1");
+
+    await engine.applyGroupSplit({
+      documentId: "doc-1",
+      groupId: survivor!.id,
+      occurrenceIds: [second.id],
+    });
+    const moved = engine.getSnapshot("doc-1").conflicts.find((c) => c.id === held.id);
+    expect(moved?.groupId).not.toBe(survivor?.id);
+
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+    await engine.restoreCheckpoint("doc-1", checkpointId);
+
+    const detected = busEmitSpy.mock.calls
+      .filter(([, event]) => event === EngineEvents.CONFLICT_DETECTED)
+      .map(([, , payload]) => (payload as ConflictDetected).conflict);
+    expect(detected).toHaveLength(1);
+    expect(detected[0]?.id).toBe(held.id);
+    expect(detected[0]?.groupId).toBe(survivor?.id);
+    expect(engine.getSnapshot("doc-1").conflicts.find((c) => c.id === held.id)?.groupId).toBe(
+      survivor?.id,
+    );
+
+    // Lo mismo si lo único que difiere es `candidates` o `heldManual`.
+    const sameGroupCheckpoint = engine.createCheckpoint("doc-1");
+    const current = engine["sessions"].get("doc-1")!.conflicts.get(held.id)!;
+    const mutations = [
+      { ...current, candidates: current.candidates.slice(0, 1) },
+      (({ heldManual: _heldManual, ...rest }) => rest)(current),
+    ];
+    for (const mutated of mutations) {
+      // restoreCheckpoint reemplaza la sesión: la Map se pide de nuevo en cada vuelta.
+      engine["sessions"].get("doc-1")!.conflicts.set(held.id, mutated);
+      busEmitSpy.mockClear();
+
+      await engine.restoreCheckpoint("doc-1", sameGroupCheckpoint);
+
+      const reemitted = busEmitSpy.mock.calls
+        .filter(([, event]) => event === EngineEvents.CONFLICT_DETECTED)
+        .map(([, , payload]) => (payload as ConflictDetected).conflict);
+      expect(reemitted).toHaveLength(1);
+      expect(reemitted[0]).toEqual(current);
+    }
+  });
+
   // Caso 52 (§13).
   it("restoreCheckpoint emits only the diff", async () => {
     ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {

@@ -3048,10 +3048,8 @@ describe("GroupingEngine — edge cases", () => {
     expect(updated.replacementValue).toBe("[CUSTOM TEXT]");
 
     // Member nuevo, MUY angosto, que degradaría un placeholder
-    // auto-generado hasta el fallback de nivel 2 — pero agregar una
-    // ocurrencia a un grupo existente nunca recalcula replacementValue
-    // (spec §13 caso 17), así que ni siquiera llega a competir con la
-    // edición manual.
+    // auto-generado hasta el fallback de nivel 2 — pero el recálculo al
+    // entrar un miembro (ADR-191 §1) respeta `replacementValueUserSet`.
     ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
       documentId: "doc-1",
       occurrence: makeOccurrence({
@@ -5357,5 +5355,134 @@ describe("GroupingEngine — edge cases", () => {
     });
 
     expect(engine.getSnapshot("doc-1").groups[0]?.type).toBe(EntityType.Organization);
+  });
+
+  // Caso 74 (§13, ADR-191 §1).
+  describe("a narrow member entering the group (ADR-191 §1)", () => {
+    function emitBruno(
+      source: DetectionSource,
+      bbox: ReturnType<typeof makeBBox>,
+      channel: EventChannel = EventChannel.Regex,
+    ): void {
+      ctx.bus.emit(channel, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: makeOccurrence({
+          entityType: EntityType.Person,
+          source,
+          value: "Bruno Diaz",
+          normalizedValue: "bruno diaz",
+          bbox,
+        }),
+      });
+    }
+
+    function replacementEvents(spy: ReturnType<typeof vi.spyOn>): unknown[] {
+      return spy.mock.calls.filter(([, event]) => event === EngineEvents.GROUP_REPLACEMENT_CHANGED);
+    }
+
+    it("a narrow member entering the group recalculates the placeholder value", () => {
+      emitBruno(DetectionSource.Regex, makeBBox(0, 0, 150, 20));
+      const [group] = engine.getSnapshot("doc-1").groups;
+      expect(group?.replacementValue).toBe("[HOMBRE 01]");
+
+      const spy = vi.spyOn(ctx.bus, "emit");
+      emitBruno(DetectionSource.Regex, makeBBox(0, 100, 10, 12));
+
+      const detected = engine.getSnapshot("doc-1").groups[0];
+      expect(detected?.replacementValue).toBe("[HOM-01]");
+      expect(detected?.replacementValue).toBe(detected?.replacementPreviews?.placeholder);
+      expect(replacementEvents(spy)).toHaveLength(1);
+      const updated = spy.mock.calls.find(
+        ([, event]) => event === EngineEvents.ENTITY_GROUP_UPDATED,
+      );
+      expect((updated?.[2] as EntityGroupUpdated).changes).toContain("replacementValue");
+
+      ctx.bus.emit(EventChannel.Regex, EngineEvents.REGEX_FINISHED, {
+        documentId: "doc-1",
+        occurrenceCount: 2,
+        durationMs: 1,
+      });
+      ctx.bus.emit(EventChannel.Ner, EngineEvents.NER_FINISHED, {
+        documentId: "doc-1",
+        occurrenceCount: 0,
+        durationMs: 1,
+      });
+      expect(engine.getSnapshot("doc-1").groups[0]?.replacementValue).toBe("[HOM-01]");
+
+      // Un miembro angosto que entra por agregado manual hace lo mismo.
+      const manualDoc = "doc-manual";
+      engine.startSession(manualDoc);
+      const emitManual = (bbox: ReturnType<typeof makeBBox>): void => {
+        ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+          documentId: manualDoc,
+          occurrence: makeOccurrence({
+            entityType: EntityType.Person,
+            source: DetectionSource.Manual,
+            value: "Bruno Diaz",
+            normalizedValue: "bruno diaz",
+            bbox,
+          }),
+        });
+      };
+      emitManual(makeBBox(0, 0, 150, 20));
+      expect(engine.getSnapshot(manualDoc).groups[0]?.replacementValue).toBe("[HOMBRE 01]");
+      emitManual(makeBBox(0, 100, 10, 12));
+      const manual = engine.getSnapshot(manualDoc).groups[0];
+      expect(manual?.replacementValue).toBe("[HOM-01]");
+      expect(manual?.replacementValue).toBe(manual?.replacementPreviews?.placeholder);
+    });
+
+    it("keeps the value when it was edited by hand, in other modes, or when the member is wide", async () => {
+      emitBruno(DetectionSource.Regex, makeBBox(0, 0, 150, 20));
+      const [group] = engine.getSnapshot("doc-1").groups;
+      const spy = vi.spyOn(ctx.bus, "emit");
+
+      // Una ocurrencia holgada no cambia el nivel ni emite nada.
+      emitBruno(DetectionSource.Regex, makeBBox(0, 50, 150, 20));
+      expect(engine.getSnapshot("doc-1").groups[0]?.replacementValue).toBe("[HOMBRE 01]");
+      expect(replacementEvents(spy)).toHaveLength(0);
+
+      await engine.applyGroupUpdate({
+        documentId: "doc-1",
+        groupId: group!.id,
+        patch: { replacementValue: "[CUSTOM]" },
+      });
+      spy.mockClear();
+      emitBruno(DetectionSource.Regex, makeBBox(0, 100, 10, 12));
+      expect(engine.getSnapshot("doc-1").groups[0]?.replacementValue).toBe("[CUSTOM]");
+      expect(replacementEvents(spy)).toHaveLength(0);
+
+      for (const mode of [
+        ReplacementMode.Mask,
+        ReplacementMode.Synthetic,
+        ReplacementMode.Redact,
+      ]) {
+        const docId = `doc-${mode}`;
+        engine.startSession(docId);
+        const emitIn = (bbox: ReturnType<typeof makeBBox>): void => {
+          ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+            documentId: docId,
+            occurrence: makeOccurrence({
+              entityType: EntityType.Person,
+              value: "Bruno Diaz",
+              normalizedValue: "bruno diaz",
+              bbox,
+            }),
+          });
+        };
+        emitIn(makeBBox(0, 0, 150, 20));
+        const [g] = engine.getSnapshot(docId).groups;
+        await engine.applyGroupUpdate({
+          documentId: docId,
+          groupId: g!.id,
+          patch: { replacementMode: mode },
+        });
+        const before = engine.getSnapshot(docId).groups[0]?.replacementValue;
+        spy.mockClear();
+        emitIn(makeBBox(0, 100, 10, 12));
+        expect(engine.getSnapshot(docId).groups[0]?.replacementValue).toBe(before);
+        expect(replacementEvents(spy)).toHaveLength(0);
+      }
+    });
   });
 });
