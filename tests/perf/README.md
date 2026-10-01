@@ -378,6 +378,71 @@ cierre de tapa. `summarize-ocr-pool.mjs` combina carpetas en orden de prioridad,
 filtra run IDs listados como invalidados y valida que estén todos los pares de
 tiempo, memoria y cancelación antes de marcar `summary.json` como completo.
 
+### Fase `ultra`: seis reconocedores
+
+`ANONLY_OCR_POOL_PHASE=ultra` mide el perfil Ultra propuesto en
+`docs/roadmap/Perfiles_Rendimiento_Revision.md` (sección «Decisiones del humano
+y medición de Ultra»). Está aislada de las demás fases: `all`, `r2-time` y
+`memory-cancel` no cambian; `profiles-gap` gana la detección de suspensión, que
+antes era un no-op porque el script llamaba a `rg` (ausente en esta Mac) y ahora
+usa `grep -E`, así que una repetición puede invalidar corridas que antes pasaban.
+Una instancia fría por corrida,
+mismo build, serial, y solo macOS como el resto del runner.
+
+Brazos: `2` (control), `4`, `6` con `ocr.maxLiveImageBytes` de 128 MiB y `6b`
+(seis reconocedores con 200 MiB, vía `installEngineOverrides`). El spec verifica
+que el tamaño de pool configurado y el presupuesto pedidos sean los efectivos
+en cada brazo. El pico de reconocedores ocupados se afirma en `2` y `4`; en `6`
+y `6b` solo se registra (`effectiveBusyRecognizersPeak`), porque el presupuesto
+de imágenes vivas puede frenar al quinto y al sexto y eso es lo que se mide.
+
+Corpus: P2 siempre. R2 solo si `ANONLY_REAL_DOC_R2` es una ruta absoluta
+legible; si no, la fase corre solo P2, lo deja dicho en `campaign.log` y en
+`ultra-corpus.json`, y el resumen lo hace constar (`corpus.r2Present: false`).
+No falla ni inventa datos. La ruta nunca se escribe en la salida.
+
+```bash
+# solo P2
+ANONLY_OCR_POOL_PHASE=ultra caffeinate -dimsu ./tests/perf/run-ocr-pool.sh
+# P2 y R2
+ANONLY_OCR_POOL_PHASE=ultra ANONLY_REAL_DOC_R2=/ruta/neutral/R2.pdf \
+  caffeinate -dimsu ./tests/perf/run-ocr-pool.sh
+```
+
+Por corpus:
+
+- **Tiempo:** tres rondas intercaladas sin sonda, órdenes `2 4 6 6b`,
+  `6b 6 4 2` y `4 6b 2 6`.
+- **Memoria:** tres instancias frías por brazo (mismos órdenes) con el RSS
+  natural del árbol cada 150 ms, sin CDP ni barrera. Reusa la fase `pool-rss`
+  del spec (la de `run-ocr-memory.sh`); el pico es el de la ventana OCR.
+- **Cancelación:** una corrida por brazo con trabajo activo. Una cancelación
+  fuera del SLA de 200 ms no invalida la corrida: el resumen la marca.
+- **Validez:** error de Playwright o evento de suspensión/reanudación durante
+  la corrida la invalida (`validity.json`); la única excepción es una
+  cancelación cuyo JSON muestra trabajo activo y latencia medida por encima del
+  SLA, que se conserva para que el resumen la marque; una corrida con pipeline fallado,
+  páginas OCR fallidas, tiempo o RSS ausentes se excluye y se lista en
+  `invalidRuns`. Nada se promedia ni se convierte en cero.
+
+Salida bajo `.measure/ocr-pool/<carpeta>/` (ignorada por git): un
+`ocr-pool-<tipo>-<brazo>-<corpus>-r<n>.json` por corrida (la memoria queda como
+`ocr-pool-pool-rss-...`), `ultra-corpus.json`, `validity.json`, presión del
+sistema y `summary.json`. El resumen (`support/ocrPoolUltraSummary.ts`,
+ejecutado con `tsx` desde `summarize-ocr-pool.mjs`) da, por corpus y brazo:
+medianas de `Ready` y de OCR, mediana del pico de RSS durante OCR, ocupación
+pico (máximo, mínimo y si alcanzó el tamaño del pool), identidad de huellas de
+OCR, NER y Grouping contra el brazo `2` de la misma ronda, resultado de
+cancelación, y las corridas faltantes o inválidas. Sale con código distinto de
+cero si no está completo.
+
+`ANONLY_OCR_POOL_ULTRA_SMOKE=1` hace solo una corrida de tiempo por brazo sobre
+P2, sin resumen; `=2` agrega una de memoria y una de cancelación del brazo `6b`.
+Sirve para comprobar que cada brazo arranca y aplica su override antes de gastar
+la campaña. Como en las demás fases, el producto en `packages/` y `apps/` debe
+estar sin cambios sin commitear. Los números de macOS M1 de 8 GB para seis
+reconocedores son informativos; el banco que decide es Windows nativo.
+
 ## Campaña opt-in Regex y Grouping: peores casos
 
 `regex-worst-case.ts` mide el patrón de email en textos sintéticos de 2–160 KiB,

@@ -12,6 +12,11 @@ import { generateText50p } from "../fixtures/generate.js";
 import { installEngineOverrides } from "./support/engineOverrides.js";
 import { measureProfile, type ProfileReport } from "./support/memoryProfile.js";
 import { startMemorySampling } from "./support/memorySampler.js";
+import {
+  assertsFullOccupancy,
+  DEFAULT_MAX_LIVE_IMAGE_BYTES,
+  parseArmLabel,
+} from "./support/ocrPoolArms.js";
 import { measureOcrEndStage } from "./support/ocrPoolEndStage.js";
 import { getOrGenerateScannedFixture } from "./support/scannedFixtureCache.js";
 import { hostIdentity, type TimeRun } from "./support/timeProfile.js";
@@ -27,6 +32,8 @@ declare global {
   var __anonlyOcrPoolProbe:
     | {
         readonly requestedPoolSize: number;
+        readonly armLabel: string;
+        readonly maxLiveImageBytes: number;
         readonly profile: string;
         readonly runId: string;
         startedAt: number | null;
@@ -76,7 +83,6 @@ const RUN_ID = process.env.ANONLY_OCR_POOL_RUN;
 const OUTPUT_DIR = process.env.ANONLY_OCR_POOL_OUTPUT_DIR;
 const CANCELLATION_SLA_MS = 200;
 type Profile = "P1" | "P2" | "R1" | "R2";
-type Arm = 1 | 2 | 3 | 4;
 type RunKind = "memory" | "time" | "cancel";
 type MemoryProbeRun = { readonly temperature: string; readonly probe: Record<string, unknown> };
 let memoryRuns: MemoryProbeRun[] = [];
@@ -122,17 +128,24 @@ async function inputFile(profile: Profile): Promise<E2eFilePayload> {
 }
 
 function parseRunId(): {
-  readonly arm: Arm;
+  readonly arm: number;
+  readonly armLabel: string;
+  readonly maxLiveImageBytes: number;
+  readonly fullOccupancy: boolean;
   readonly profile: Profile;
   readonly round: number;
   readonly kind: RunKind;
 } {
   if (RUN_ID === undefined || RUN_ID === "") throw new Error("ANONLY_OCR_POOL_RUN no definido.");
-  const match = /^(memory|time|cancel)-(1|2|3|4)-(P1|P2|R1|R2)-r([0-2])$/.exec(RUN_ID);
-  if (match === null) throw new Error(`Corrida desconocida: ${RUN_ID}`);
+  const match = /^(memory|time|cancel)-(1|2|3|4|6|6b)-(P1|P2|R1|R2)-r([0-2])$/.exec(RUN_ID);
+  const arm = parseArmLabel(match?.[2] ?? "");
+  if (match === null || arm === undefined) throw new Error(`Corrida desconocida: ${RUN_ID}`);
   return {
     kind: match[1] as RunKind,
-    arm: Number(match[2]) as Arm,
+    arm: arm.poolSize,
+    armLabel: arm.label,
+    maxLiveImageBytes: arm.maxLiveImageBytes,
+    fullOccupancy: assertsFullOccupancy(arm),
     profile: match[3] as Profile,
     round: Number(match[4]),
   };
@@ -159,6 +172,8 @@ async function installProbe(
       };
       const probe: NonNullable<typeof globalThis.__anonlyOcrPoolProbe> = {
         requestedPoolSize: input.arm,
+        armLabel: input.armLabel,
+        maxLiveImageBytes: input.maxLiveImageBytes,
         profile: input.profile,
         runId: input.runId,
         startedAt: null,
@@ -199,8 +214,10 @@ async function installProbe(
         throw new Error(
           `Override OCR no efectivo: pedido=${input.arm}, efectivo=${effective?.workerPool?.ocrPoolSize ?? "no observable"}`,
         );
-      if (effective.ocr?.maxLiveImageBytes !== 128 * 1024 * 1024)
-        throw new Error("ocr.maxLiveImageBytes no es 128 MiB");
+      if (effective.ocr?.maxLiveImageBytes !== input.maxLiveImageBytes)
+        throw new Error(
+          `Override de presupuesto no efectivo: pedido=${input.maxLiveImageBytes}, efectivo=${effective.ocr?.maxLiveImageBytes ?? "no observable"}`,
+        );
       const active = new Map<string, string>();
       let documentId: string | undefined;
       let cancellationScheduled = false;
@@ -501,6 +518,7 @@ async function readProbe(page: Page): Promise<OcrPoolSummary> {
     const confidences = ocrValues.map((values) => values[2] ?? 0);
     return {
       requestedPoolSize: probe.requestedPoolSize,
+      armLabel: probe.armLabel,
       profile: probe.profile,
       runId: probe.runId,
       startedAt: probe.startedAt,
@@ -526,9 +544,9 @@ async function readProbe(page: Page): Promise<OcrPoolSummary> {
         ),
       ),
       estimatedReservationWindowPeakBytes,
-      reservationBudgetBytes: 128 * 1024 * 1024,
+      reservationBudgetBytes: probe.maxLiveImageBytes,
       estimatedWindowExceedsReservationBudget:
-        estimatedReservationWindowPeakBytes > 128 * 1024 * 1024,
+        estimatedReservationWindowPeakBytes > probe.maxLiveImageBytes,
       reservationWaitObserved: false,
       reservationWaitObservation:
         "LiveImageBudget no publica evento ni getter; el exceso de suma es un indicador de espera potencial, no una medición de espera real.",
@@ -550,7 +568,7 @@ async function readProbe(page: Page): Promise<OcrPoolSummary> {
       effectiveBusyRecognizersPeak: ocrPeak,
       effectiveBusyOsdPeak: orientationPeak,
       effectiveConfiguredRecognizerPoolSize: probe.requestedPoolSize,
-      effectiveMaxLiveImageBytes: 128 * 1024 * 1024,
+      effectiveMaxLiveImageBytes: probe.maxLiveImageBytes,
       workerPoolSaturationEvents: probe.saturationEvents,
       rasterJobsPeakDuringOcr: renderPeak,
       requestedConcurrentRequestsByContract:
@@ -619,7 +637,13 @@ test("OCR recognizer pool campaign — selected run", async ({
         : 600_000,
   );
   const file = await inputFile(run.profile);
-  if (run.arm !== 2) await installEngineOverrides(page, { workerPool: { ocrPoolSize: run.arm } });
+  if (run.arm !== 2 || run.maxLiveImageBytes !== DEFAULT_MAX_LIVE_IMAGE_BYTES)
+    await installEngineOverrides(page, {
+      workerPool: { ocrPoolSize: run.arm },
+      ...(run.maxLiveImageBytes === DEFAULT_MAX_LIVE_IMAGE_BYTES
+        ? {}
+        : { ocr: { maxLiveImageBytes: run.maxLiveImageBytes } }),
+    });
   await openApp(page, "networkidle");
   memoryRuns = [];
   if (run.kind !== "memory") await installProbe(page, { ...run, runId: RUN_ID ?? "" });
@@ -662,13 +686,14 @@ test("OCR recognizer pool campaign — selected run", async ({
     await writeFile(
       resolve(
         outputDir(),
-        `ocr-pool-${measurementPhase}-${run.arm}-${run.profile}-r${run.round}.json`,
+        `ocr-pool-${measurementPhase}-${run.armLabel}-${run.profile}-r${run.round}.json`,
       ),
       JSON.stringify(
         {
           runId: RUN_ID,
           phase: measurementPhase,
           arm: run.arm,
+          armLabel: run.armLabel,
           profile: run.profile,
           round: run.round,
           startedAtUtc,
@@ -686,7 +711,7 @@ test("OCR recognizer pool campaign — selected run", async ({
     expect(observed.failed).toBe(false);
     expect(observed.ocrPageFailures).toBe(0);
     expect(observed.missingWordCachePages).toBe(0);
-    expect(observed.effectiveBusyRecognizersPeak).toBe(run.arm);
+    if (run.fullOccupancy) expect(observed.effectiveBusyRecognizersPeak).toBe(run.arm);
     expect(observed.effectiveBusyOsdPeak).toBe(1);
     if (endStage !== undefined) {
       expect(endStage.heldAtMs).toBeGreaterThan(0);
@@ -962,6 +987,7 @@ test("OCR recognizer pool campaign — selected run", async ({
   const payload = {
     runId: RUN_ID,
     arm: run.arm,
+    armLabel: run.armLabel,
     profile: run.profile,
     round: run.round,
     kind: run.kind,
@@ -1012,7 +1038,7 @@ test("OCR recognizer pool campaign — selected run", async ({
     expect(probe.effectiveBusyOsdPeak).toBeLessThanOrEqual(1);
     expect(probe.effectiveConfiguredRecognizerPoolSize).toBe(run.arm);
     if (run.profile === "P2" || run.profile === "R2") {
-      expect(probe.effectiveBusyRecognizersPeak).toBe(run.arm);
+      if (run.fullOccupancy) expect(probe.effectiveBusyRecognizersPeak).toBe(run.arm);
       expect(report?.cold.ocrWords ?? []).toEqual([]);
       expect(report?.hot.ocrWords ?? []).toEqual([]);
     }

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, writeSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 
 const [outputArg, ...sourceArgs] = process.argv.slice(2);
@@ -29,6 +29,47 @@ function readRun(kind, arm, profile, round) {
     }
   }
   return null;
+}
+
+if (process.env.ANONLY_OCR_POOL_PHASE === "ultra") {
+  const corpusFile = join(outputDir, "ultra-corpus.json");
+  if (!existsSync(corpusFile)) throw new Error("Falta ultra-corpus.json en la carpeta de salida.");
+  const affectedRunIds = new Set();
+  const reasonsByRunId = {};
+  for (const [dir, invalid] of invalidBySource) {
+    for (const id of invalid) affectedRunIds.add(id);
+    const file = join(dir, "validity.json");
+    if (existsSync(file)) {
+      Object.assign(reasonsByRunId, JSON.parse(readFileSync(file, "utf8")).reasonsByRunId ?? {});
+    }
+  }
+  // El agregador de ultra es TypeScript: la fase se invoca con tsx; las demás siguen con node.
+  const { createUltraReader, summarizeUltra } = await import("./ocrPoolUltraSummary.ts");
+  const ultra = summarizeUltra({
+    corpus: JSON.parse(readFileSync(corpusFile, "utf8")),
+    validity: { affectedRunIds: [...affectedRunIds], reasonsByRunId },
+    readRun: createUltraReader(
+      sources.map((dir) => ({
+        name: dir,
+        invalidRunIds: invalidBySource.get(dir) ?? new Set(),
+      })),
+      (dir, fileName) => {
+        const file = join(dir, fileName);
+        return existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : null;
+      },
+    ),
+  });
+  const ultraOutput = join(outputDir, "summary.json");
+  writeFileSync(
+    ultraOutput,
+    `${JSON.stringify({ generatedAtUtc: new Date().toISOString(), sources: sources.map((dir) => basename(dir)), ...ultra }, null, 2)}\n`,
+  );
+  writeSync(
+    1,
+    `${JSON.stringify({ summaryPath: ultraOutput, complete: ultra.complete, r2Present: ultra.corpus.r2Present, missingRuns: ultra.missingRuns.length, invalidRuns: ultra.invalidRuns.length, qualityExactAcrossArms: ultra.qualityExactAcrossArms }, null, 2)}\n`,
+  );
+  // Salida síncrona: el resto del archivo es el agregador histórico y no debe pisar este resumen.
+  process.exit(ultra.complete ? 0 : 1);
 }
 
 const profilesGap = process.env.ANONLY_OCR_POOL_PHASE === "profiles-gap";

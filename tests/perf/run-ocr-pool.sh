@@ -2,7 +2,7 @@
 set -uo pipefail
 export LC_ALL=C LANG=C
 
-# Sequential OCR LSTM pool campaign plus an opt-in profile-gap extension.
+# Sequential OCR LSTM pool campaign plus opt-in profile-gap and ultra (6 recognizers) phases.
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT_DIR"
 
@@ -22,7 +22,7 @@ else
   fi
   mkdir -p "$RUN_DIR"
 fi
-case "$PHASE" in all|r2-time|memory-cancel|profiles-gap) ;; *) echo "Fase desconocida: $PHASE" >&2; exit 1 ;; esac
+case "$PHASE" in all|r2-time|memory-cancel|profiles-gap|ultra) ;; *) echo "Fase desconocida: $PHASE" >&2; exit 1 ;; esac
 
 log() { echo "[$(date -u +%H:%M:%S)] $*" | tee -a "$RUN_DIR/campaign.log"; }
 fail() { log "ABORTA: $*"; exit 1; }
@@ -90,6 +90,19 @@ if [[ "$PHASE" != "profiles-gap" ]] && ! git diff --quiet -- packages/ apps/; th
 fi
 VALIDATION_PROFILES=(P1 P2 R1 R2)
 if [[ "$PHASE" == "profiles-gap" ]]; then VALIDATION_PROFILES=(P2 R2); fi
+# ultra: P2 siempre; R2 solo si la variable apunta a un archivo legible (nunca se loguea la ruta).
+ULTRA_PROFILES=(P2)
+ULTRA_R2_NOTE="null"
+if [[ "$PHASE" == "ultra" ]]; then
+  VALIDATION_PROFILES=(P2)
+  if [[ "${ANONLY_REAL_DOC_R2:-}" = /* && -r "$ANONLY_REAL_DOC_R2" ]]; then
+    ULTRA_PROFILES=(P2 R2)
+  elif [[ -z "${ANONLY_REAL_DOC_R2:-}" ]]; then
+    ULTRA_R2_NOTE='"ANONLY_REAL_DOC_R2 no definido: la fase corrió solo P2"'
+  else
+    ULTRA_R2_NOTE='"ANONLY_REAL_DOC_R2 definido pero no es una ruta absoluta legible: la fase corrió solo P2"'
+  fi
+fi
 for profile in "${VALIDATION_PROFILES[@]}"; do
   case "$profile" in
     P1|P2) ;;
@@ -98,6 +111,9 @@ for profile in "${VALIDATION_PROFILES[@]}"; do
   esac
 done
 
+if [[ "$PHASE" == "ultra" ]]; then
+  node -e 'const [profiles, note] = process.argv.slice(1); process.stdout.write(JSON.stringify({profiles: profiles.split(" "), r2Present: profiles.includes("R2"), r2Note: JSON.parse(note)}, null, 2) + "\n")' "${ULTRA_PROFILES[*]}" "$ULTRA_R2_NOTE" >"$RUN_DIR/ultra-corpus.json"
+fi
 git rev-parse HEAD >"$RUN_DIR/commit.txt"
 git status --short >"$RUN_DIR/git-status.txt"
 git diff HEAD --binary -- packages/ apps/ | sha >"$RUN_DIR/product-tree.diff.sha256"
@@ -106,11 +122,15 @@ if [[ -d "$DIST_DIR" && ! -d "$RUN_DIR/dist-original" ]]; then cp -R "$DIST_DIR"
 if [[ -d "$DIST_DIR" && -d "$RUN_DIR/dist-original" ]]; then RESTORE_CLIENT_DIST=1; fi
 if [[ -d "$SHELL_DIST_DIR" && ! -d "$RUN_DIR/shell-dist-original" ]]; then cp -R "$SHELL_DIST_DIR" "$RUN_DIR/shell-dist-original"; fi
 if [[ -d "$SHELL_DIST_DIR" && -d "$RUN_DIR/shell-dist-original" ]]; then RESTORE_SHELL_DIST=1; fi
-if [[ "$PHASE" == "profiles-gap" ]]; then
+if [[ "$PHASE" == "profiles-gap" || "$PHASE" == "ultra" ]]; then
   if [[ "$RESTORE_CLIENT_DIST" -eq 0 ]]; then REMOVE_CLIENT_DIST=1; fi
   if [[ "$RESTORE_SHELL_DIST" -eq 0 ]]; then REMOVE_SHELL_DIST=1; fi
 fi
 
+if [[ "$PHASE" == "ultra" ]]; then
+  log "Fase ultra: corpus ${ULTRA_PROFILES[*]}."
+  [[ "${ULTRA_PROFILES[*]}" == *R2* ]] || log "R2 ausente: la fase corre solo P2 y el resumen lo hace constar."
+fi
 log "Build único empaquetado para la campaña OCR..."
 pnpm --filter @anonly/desktop-shell build >>"$RUN_DIR/build.log" 2>&1 || fail "falló el build del shell."
 VITE_E2E=1 pnpm --filter @anonly/react-client build >>"$RUN_DIR/build.log" 2>&1 || fail "falló el build del cliente."
@@ -131,26 +151,53 @@ if [[ "$PHASE" == "profiles-gap" ]]; then
   fi
 fi
 
+# El spec escribe el JSON antes de sus expect: con trabajo activo y latencia medida por encima
+# del SLA, el único assert que pudo fallar es el de la latencia. Sin JSON o sin esas marcas, fue otra causa.
+cancel_failed_only_on_sla() {
+  node - "$1" <<'NODE'
+const fs = require("node:fs");
+if (!fs.existsSync(process.argv[2])) process.exit(1);
+const probe = JSON.parse(fs.readFileSync(process.argv[2], "utf8")).probe;
+const ok = probe?.failed === false && probe.cancelActiveOcrJobs > 0 && Number.isFinite(probe.cancelLatencyMs) && probe.cancelLatencyMs > 200;
+process.exit(ok ? 0 : 1);
+NODE
+}
+
 run_one() {
   local kind="$1" arm="$2" profile="$3" round="$4"
   local id="${kind}-${arm}-${profile}-r${round}"
-  [[ ! -e "$RUN_DIR/ocr-pool-${id}.json" ]] || fail "el artefacto ya existe; no se sobrescribe: $id"
   log "Corrida $id"
   capture_pressure "before-$id"
   local before_sleep_wake=""
-  if [[ "$PHASE" == "profiles-gap" ]]; then before_sleep_wake="$(sleep_wake_digest)"; fi
+  if [[ "$PHASE" == "profiles-gap" || "$PHASE" == "ultra" ]]; then before_sleep_wake="$(sleep_wake_digest)"; fi
   local status=0
-  if ANONLY_OCR_POOL_RUN="$id" ANONLY_OCR_POOL_PHASE="$PHASE" ANONLY_OCR_POOL_OUTPUT_DIR="$RUN_DIR" \
+  local spec_phase="$PHASE" artifact="ocr-pool-${id}.json"
+  # ultra: la memoria usa el RSS natural del árbol (fase pool-rss del spec), sin CDP ni barrera.
+  if [[ "$PHASE" == "ultra" && "$kind" == "memory" ]]; then
+    spec_phase="pool-rss"
+    artifact="ocr-pool-pool-rss-${arm}-${profile}-r${round}.json"
+  fi
+  [[ ! -e "$RUN_DIR/$artifact" ]] || fail "el artefacto ya existe; no se sobrescribe: $id"
+  if ANONLY_OCR_POOL_RUN="$id" ANONLY_OCR_POOL_PHASE="$spec_phase" ANONLY_OCR_POOL_OUTPUT_DIR="$RUN_DIR" \
     pnpm exec playwright test --config=playwright.perf.config.ts tests/perf/ocr-pool.spec.ts \
       --workers=1 --retries=0 >>"$RUN_DIR/playwright.log" 2>&1; then
     log "OK $id"
   else
     status=$?
     log "FALLO $id"
-    if [[ "$PHASE" == "profiles-gap" ]]; then record_invalid_run "$id" "playwright-failure"; fi
+    if [[ "$PHASE" == "profiles-gap" ]]; then
+      record_invalid_run "$id" "playwright-failure"
+    elif [[ "$PHASE" == "ultra" ]]; then
+      # Una cancelación que solo excede el SLA se conserva y el resumen la marca; cualquier otro fallo invalida.
+      if [[ "$kind" == "cancel" ]] && cancel_failed_only_on_sla "$RUN_DIR/$artifact"; then
+        log "Cancelación $id fuera de SLA: se conserva, el resumen la marca."
+      else
+        record_invalid_run "$id" "playwright-failure"
+      fi
+    fi
   fi
   capture_pressure "after-$id"
-  if [[ "$PHASE" == "profiles-gap" && "$(sleep_wake_digest)" != "$before_sleep_wake" ]]; then
+  if [[ ( "$PHASE" == "profiles-gap" || "$PHASE" == "ultra" ) && "$(sleep_wake_digest)" != "$before_sleep_wake" ]]; then
     record_invalid_run "$id" "sleep-wake-event-during-run"
     status=1
   fi
@@ -166,9 +213,17 @@ if [[ "$PHASE" == "profiles-gap" ]]; then
   TIME_ORDERS=("1 2 3 4" "4 3 2 1" "2 4 1 3")
   TIME_PROFILES=(P2 R2)
 fi
-if [[ "$PHASE" == "all" || "$PHASE" == "r2-time" || "$PHASE" == "profiles-gap" ]]; then
+ROUNDS=(0 1 2)
+SMOKE="${ANONLY_OCR_POOL_ULTRA_SMOKE:-0}"
+if [[ "$PHASE" == "ultra" ]]; then
+  TIME_ORDERS=("2 4 6 6b" "6b 6 4 2" "4 6b 2 6")
+  TIME_PROFILES=("${ULTRA_PROFILES[@]}")
+  # Humo (SMOKE=1 o 2): una sola corrida de tiempo por brazo en P2; sin resumen agregado.
+  if [[ "$SMOKE" != "0" ]]; then TIME_PROFILES=(P2); ROUNDS=(0); fi
+fi
+if [[ "$PHASE" == "all" || "$PHASE" == "r2-time" || "$PHASE" == "profiles-gap" || "$PHASE" == "ultra" ]]; then
 for profile in "${TIME_PROFILES[@]}"; do
-  for round in 0 1 2; do
+  for round in "${ROUNDS[@]}"; do
     for arm in ${TIME_ORDERS[$round]}; do run_one time "$arm" "$profile" "$round"; done
   done
 done
@@ -180,8 +235,13 @@ MEMORY_PROFILES=(P2 R2)
 if [[ "$PHASE" == "r2-time" ]]; then MEMORY_PROFILES=(); fi
 if [[ "$PHASE" == "memory-cancel" ]]; then MEMORY_PROFILES=(P2 R2); fi
 if [[ "$PHASE" == "profiles-gap" ]]; then MEMORY_ORDERS=("1 2 3 4" "4 3 2 1" "2 4 1 3"); fi
-if [[ "$PHASE" == "all" || "$PHASE" == "memory-cancel" || "$PHASE" == "profiles-gap" ]]; then
-for profile in "${MEMORY_PROFILES[@]}"; do
+if [[ "$PHASE" == "ultra" ]]; then
+  MEMORY_ORDERS=("2 4 6 6b" "6b 6 4 2" "4 6b 2 6")
+  MEMORY_PROFILES=("${ULTRA_PROFILES[@]}")
+  if [[ "$SMOKE" != "0" ]]; then MEMORY_PROFILES=(); fi
+fi
+if [[ "$PHASE" == "all" || "$PHASE" == "memory-cancel" || "$PHASE" == "profiles-gap" || "$PHASE" == "ultra" ]]; then
+for profile in ${MEMORY_PROFILES[@]+"${MEMORY_PROFILES[@]}"}; do
   for round in 0 1 2; do
     for arm in ${MEMORY_ORDERS[$round]}; do run_one memory "$arm" "$profile" "$round"; done
   done
@@ -189,13 +249,22 @@ done
 fi
 
 # Active OCR cancellation: both scanned corpora, once per requested pool size.
-if [[ "$PHASE" == "all" || "$PHASE" == "memory-cancel" || "$PHASE" == "profiles-gap" ]]; then
-for profile in P2 R2; do
-  if [[ "$PHASE" == "profiles-gap" ]]; then CANCEL_ARMS=(1 2 3 4); else CANCEL_ARMS=(2 3 4); fi
+CANCEL_PROFILES=(P2 R2)
+if [[ "$PHASE" == "ultra" ]]; then CANCEL_PROFILES=("${ULTRA_PROFILES[@]}"); if [[ "$SMOKE" != "0" ]]; then CANCEL_PROFILES=(); fi; fi
+if [[ "$PHASE" == "all" || "$PHASE" == "memory-cancel" || "$PHASE" == "profiles-gap" || "$PHASE" == "ultra" ]]; then
+for profile in ${CANCEL_PROFILES[@]+"${CANCEL_PROFILES[@]}"}; do
+  if [[ "$PHASE" == "profiles-gap" ]]; then CANCEL_ARMS=(1 2 3 4); elif [[ "$PHASE" == "ultra" ]]; then CANCEL_ARMS=(2 4 6 6b); else CANCEL_ARMS=(2 3 4); fi
   for arm in "${CANCEL_ARMS[@]}"; do run_one cancel "$arm" "$profile" 0; done
 done
 fi
 
+# Humo ampliado (SMOKE=2): además, una corrida de memoria (RSS natural) y una de cancelación del brazo 6b.
+if [[ "$PHASE" == "ultra" && "$SMOKE" == "2" ]]; then
+  run_one memory 6b P2 0
+  run_one cancel 6b P2 0
+fi
+
+if [[ "$PHASE" != "ultra" ]]; then
 node - "$RUN_DIR" "$PHASE" <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
@@ -256,11 +325,16 @@ process.stdout.write(JSON.stringify({summaryPath:path.join(dir,"summary.json"),q
 if(!exact) process.exitCode=1;
 NODE
 [[ "$?" -eq 0 ]] || FAILED=$((FAILED + 1))
+fi
 
 # When a campaign is continued, merge valid artifacts from prior folders and
 # honor each source's validity.json; never let a later phase replace earlier
 # phase measurements in the combined report.
-if [[ "$PHASE" == "all" || "$PHASE" == "profiles-gap" || -n "${ANONLY_OCR_POOL_PRIOR_DIR:-}" ]]; then
+if [[ "$PHASE" == "ultra" && "$SMOKE" != "0" ]]; then
+  log "Humo ultra: sin resumen agregado; los JSON por corrida quedan en $RUN_DIR."
+elif [[ "$PHASE" == "ultra" ]]; then
+  ANONLY_OCR_POOL_PHASE=ultra pnpm exec tsx tests/perf/support/summarize-ocr-pool.mjs "$RUN_DIR" "$RUN_DIR" || FAILED=$((FAILED + 1))
+elif [[ "$PHASE" == "all" || "$PHASE" == "profiles-gap" || -n "${ANONLY_OCR_POOL_PRIOR_DIR:-}" ]]; then
   SUMMARY_SOURCES=("$RUN_DIR")
   if [[ -n "${ANONLY_OCR_POOL_PRIOR_DIR:-}" ]]; then
     [[ -d "$ANONLY_OCR_POOL_PRIOR_DIR" ]] || fail "la carpeta previa del agregador no existe."
