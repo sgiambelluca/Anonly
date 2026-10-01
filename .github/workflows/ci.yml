@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Para lanzar a mano, sobre cualquier branch, los gates que no corren en
+  # cada PR (fugas y estrés).
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -206,9 +209,16 @@ jobs:
   # Gates que se activan en hitos posteriores.
   # Cada uno corre solo si su directorio de tests existe (hashFiles check).
 
-  test-e2e:
-    name: E2E (Playwright)
+  # Partido en dos mitades en paralelo: de a uno, los E2E tardaban más de diez
+  # minutos en el runner. El check requerido para mergear sigue siendo
+  # "E2E (Playwright)", que es el job de más abajo y junta las dos mitades.
+  test-e2e-shard:
+    name: E2E mitad ${{ matrix.shard }}/2
     needs: install
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     # macOS y no ubuntu: desde ADR-130 los E2E corren contra el contenedor
     # de escritorio, o sea una app de Electron con ventana. En un runner de
     # Linux eso necesita un display virtual (xvfb) — y encima probaría una
@@ -257,7 +267,22 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
       - name: Run e2e tests
         if: steps.check_e2e.outputs.has_tests == 'true'
-        run: pnpm test:e2e
+        run: pnpm test:e2e --shard=${{ matrix.shard }}/2
+
+  test-e2e:
+    name: E2E (Playwright)
+    needs: test-e2e-shard
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Las dos mitades de E2E pasaron
+        env:
+          SHARDS_RESULT: ${{ needs.test-e2e-shard.result }}
+        run: |
+          if [ "$SHARDS_RESULT" != "success" ]; then
+            echo "::error::Los E2E no pasaron (resultado de las mitades: $SHARDS_RESULT)."
+            exit 1
+          fi
 
   test-perf:
     name: Performance
@@ -315,6 +340,10 @@ jobs:
   test-leak:
     name: Memory leak
     needs: install
+    # No corre en cada push de un PR (tarda entre 15 y 30 minutos): corre al
+    # mergear a `main` y cuando se lo lanza a mano (ADR-185, enmienda del
+    # 2026-10-01).
+    if: github.event_name != 'pull_request'
     runs-on: macos-latest
     timeout-minutes: 90
     steps:
@@ -387,6 +416,10 @@ jobs:
   test-stress:
     name: Stress
     needs: install
+    # No corre en cada push de un PR (tarda entre 15 y 30 minutos): corre al
+    # mergear a `main` y cuando se lo lanza a mano (ADR-185, enmienda del
+    # 2026-10-01).
+    if: github.event_name != 'pull_request'
     runs-on: macos-latest
     timeout-minutes: 60
     steps:
