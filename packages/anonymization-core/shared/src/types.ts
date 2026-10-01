@@ -447,6 +447,7 @@ export interface WorkerJob {
 export type WorkerJobPayload =
   | PdfParsePayload
   | OcrPagePayload
+  | OcrOrientationPayload
   | NerPagePayload
   | RenderPagePayload
   | ExportPagePayload;

@@ -58,6 +58,7 @@ import type {
   ExportSavePayload,
   GroupRemoveRequested,
   GroupUpdateRequested,
+  EventPayloadMap,
   ICache,
   IEngine,
   IEventBus,
@@ -77,6 +78,8 @@ import type {
   PersonGenderChoice,
   PreviewUpdated,
   RenderLegendPayload,
+  WorkerJob,
+  WorkerJobPayload,
   RenderPagePayload,
   RenderRequested,
   Replacement,
@@ -914,10 +917,12 @@ describe("@anonly/shared — Contracts", () => {
     });
 
     it("EventPayloadMap tiene entrada para GROUP_REMOVE_REQUESTED (ADR-171 §1)", () => {
-      const handler = (payload: GroupRemoveRequested): void => {
+      // Indexa el map: sin la entrada, el typecheck falla (ADR-171 §1).
+      const handler = (payload: EventPayloadMap[EngineEvents.GROUP_REMOVE_REQUESTED]): void => {
         expect(payload.groupId).toBe("g1");
       };
-      handler({ documentId: "d1", groupId: "g1" });
+      const typed: GroupRemoveRequested = { documentId: "d1", groupId: "g1" };
+      handler(typed);
     });
   });
 
@@ -1996,6 +2001,28 @@ describe("@anonly/shared — Contracts", () => {
 
       expect(orientationPayload.timeoutMs).toBe(60000);
       expect(page.orientation).toBe(270);
+    });
+
+    it("WorkerJobPayload admits OcrOrientationPayload (ADR-164 §2.1)", () => {
+      const payload: WorkerJobPayload = {
+        documentId: "doc-orientation",
+        pageIndex: 0,
+        image: { bytes: new ArrayBuffer(0), format: "png", widthPx: 10, heightPx: 10 },
+        languages: ["spa"],
+        timeoutMs: 1000,
+      } satisfies OcrOrientationPayload;
+      const job: WorkerJob = {
+        id: "j1",
+        type: "ocr-orient",
+        payload,
+        priority: 0,
+        signalId: "s1",
+        createdAt: 0,
+        retries: 0,
+        maxRetries: 0,
+        timeoutMs: 1000,
+      };
+      expect(job.payload).toBe(payload);
     });
   });
 });
