@@ -359,3 +359,148 @@ Los artefactos crudos quedan en `.measure/`; la documentación contiene solo
 IDs neutros y agregados. Se deshabilita la copia automática de snapshots ARIA
 ante fallos para evitar persistir contenido real. No cambia producto, defaults,
 contratos ni dependencias. Windows nativo mantiene su campaña separada.
+
+## Decisiones del humano y medición de Ultra (2026-09-30)
+
+Con la revisión de la branch cerrada y el M2 decidido (ADR-192), el humano
+retomó los perfiles. Decisiones tomadas:
+
+| Perfil | Reconocedores OCR | PDF / Render | Hilos de NER |
+|---|---:|---|---|
+| Bajo | 1 | 1 / 1 | automático del runtime |
+| Intermedio | 2 | según núcleos, tope del Core | automático del runtime |
+| Alto | 4 | según núcleos, tope del Core | automático del runtime |
+| **Ultra** (nuevo) | **6** | según núcleos, tope del Core | automático del runtime |
+| Automático (por defecto) | el del nivel que resuelva | | |
+
+- **NER queda en automático en todos los perfiles.** Bajar hilos cuesta entre
+  1,5 y 2,9 veces el tiempo sin ahorrar memoria, y subirlos depende del
+  equipo. No entra en esta etapa.
+- **Migración:** un `high` ya guardado pasa a **Automático**, que decide el
+  nivel. `low` se conserva como Bajo.
+- **La regla de Automático no está decidida.** El humano pidió volver a medir
+  con Ultra incluido antes de fijarla.
+- **Quedan pendientes** los techos de memoria de Bajo, Alto y Ultra (ADR-192
+  §5) y la fuente de la RAM real para Automático: `navigator.deviceMemory`
+  no informa más de 8 GB, así que no distingue un equipo de 8 de uno de 32.
+
+### Lo que hay que saber antes de medir Ultra
+
+`ocr.maxLiveImageBytes` vale 128 MiB (ADR-143 §3) y la reserva se hace por
+página antes de rasterizar. Una A4 a 300 dpi reserva 33,2 MiB, así que el
+presupuesto admite tres o cuatro páginas vivas. **Con seis reconocedores, el
+quinto y el sexto pueden quedar esperando presupuesto**, y la ocupación real
+sería menor que seis. Un perfil Ultra que use los seis necesita subir ese
+tope, y eso es una segunda variable: se mide por separado.
+
+### Protocolo
+
+Extensión de `tests/perf/run-ocr-pool.sh` con una fase nueva, `ultra`. Mismo
+criterio que `profiles-gap`: una instancia fría por corrida, mismo build,
+corridas en serie, sin otra medición en paralelo.
+
+- **Brazos:** `2` (control), `4`, `6` con `maxLiveImageBytes` de 128 MiB, y
+  `6b` con 200 MiB (seis A4 a 300 dpi). El resto de la configuración, igual.
+- **Corpus:** P2 sintético siempre. R2 real solo si `ANONLY_REAL_DOC_R2` está
+  definido; si no, se informa que falta y no se inventa.
+- **Tiempo:** tres rondas intercaladas sin sonda (`2 4 6 6b`, `6b 6 4 2`,
+  `4 6b 2 6`), con medianas de `Ready` y de OCR.
+- **Memoria:** tres instancias frías por brazo con el muestreo de RSS del
+  árbol cada 150 ms, sin CDP. Se informa el pico durante OCR.
+- **Ocupación:** el máximo de trabajos `ocr-page` simultáneos por brazo. Es
+  el dato que dice si `6` usó seis reconocedores o lo frenó el presupuesto.
+- **Calidad:** huellas de OCR, NER y Grouping idénticas a las del brazo `2`.
+- **Cancelación:** una vez por brazo con trabajo activo, dentro del SLA.
+- **Validez:** suspensión del equipo, error de Playwright o salida faltante
+  invalidan la corrida; no se promedia ni se convierte en cero.
+
+**Bancos.** La Mac M1 de 8 GB tiene ocho núcleos, cuatro de ellos de
+eficiencia, y poca memoria libre: su resultado para seis reconocedores es
+informativo y probablemente pesimista. El banco que decide Ultra es Windows
+nativo (i5-12400, 12 hilos, 16 GB), que corre el humano. Un delta de RSS
+total no se divide por reconocedor, y los números de las dos plataformas no
+se restan entre sí.
+
+**Con los resultados** se presenta al humano la matriz final, los techos de
+memoria por perfil y la regla de Automático. Después van el ADR, `Contracts.md`,
+los specs de UI y recién entonces el código.
+
+### Resultado en la Mac (2026-09-30)
+
+Fase `ultra` de `tests/perf/run-ocr-pool.sh`, salida neutral
+`.measure/ocr-pool/ultra-20260930-mac/summary.json`. MacBook Air M1, 8
+núcleos y 8 GB, sobre `1ab2c31` más el arnés de esta fase, sin cambios de
+producto. Las 56 corridas fueron válidas: ninguna fallida, faltante ni
+invalidada. Las huellas de OCR, NER y Grouping fueron idénticas a las del
+brazo `2` en los dos corpus, y las ocho cancelaciones con trabajo activo
+quedaron en 0–1 ms.
+
+| corpus | brazo | `Ready` (mediana) | OCR (mediana) | pico de RSS durante OCR (mediana) | ocupación pico |
+|---|---|---:|---:|---:|---:|
+| P2 | `2` | 18,65 s | 12,56 s | 1581 MiB | 2 |
+| P2 | `4` | 18,60 s | 12,21 s | 1825 MiB | 4 |
+| P2 | `6` | 17,97 s | 11,95 s | 1851 MiB | 5 |
+| P2 | `6b` | 17,85 s | 11,98 s | 1821 MiB | 5 |
+| R2 | `2` | 51,42 s | 33,80 s | 1328 MiB | 2 |
+| R2 | `4` | 41,94 s | 23,81 s | 1548 MiB | 4 |
+| R2 | `6` | 39,64 s | 20,88 s | 1610 MiB | 6 |
+| R2 | `6b` | 38,67 s | 20,82 s | 1504 MiB | 6 |
+
+Lo que se lee, solo para esta máquina:
+
+- **R2 (real escaneado).** Contra `2`, `Ready` baja 18,4 % con `4`, 22,9 %
+  con `6` y 24,8 % con `6b`. De `4` a `6` la ganancia es de 2,3 s (5,5 %),
+  con rangos entre rondas de 1,3 a 1,9 s: es chica, pero las tres rondas de
+  `6` quedaron por debajo de las tres de `4`.
+- **P2 (sintético).** Prácticamente plano: de 18,65 a 17,85 s entre `2` y
+  `6b`, con rangos de hasta 1,0 s. En esta Mac, más reconocedores no
+  aceleran este fixture.
+- **En estos dos documentos, `6` y `6b` no se distinguen.** Misma ocupación
+  en los dos corpus, y en R2 las medianas de `Ready` difieren 1,0 s con
+  rangos solapados: tres rondas no alcanzan para separarlos. En R2 los seis
+  reconocedores trabajaron a la vez con 128 MiB.
+- **Pero la tanda no ejercitó el caso que motivó el brazo `6b`**, así que
+  **no permite decidir si Ultra necesita subir `maxLiveImageBytes`**. La
+  reserva de una página dura todo su reconocimiento, de modo que una
+  ocupación pico de N con 128 MiB implica páginas de 128/N MiB o menos: a lo
+  sumo ~21 MiB en R2 (seis ocupados) y ~26 MiB en P2 (cinco ocupados). Es una cota inferida de la ocupación,
+  no una medición. Ninguno de los dos corpus tiene páginas de 33,2 MiB (A4 a
+  300 dpi), que es el tamaño con el que 128 MiB admite tres reconocedores y
+  200 MiB admite seis. La variable queda abierta hasta medir un documento
+  con páginas de ese tamaño.
+- **El instrumento que mediría la reserva no funciona.** En los crudos,
+  `pageRgbaEstimates[].estimatedBytes` es `null` y
+  `estimatedReservationWindowPeakBytes` es 0 en las 24 corridas de tiempo
+  (`ocr-pool.spec.ts`, el tamaño de página no es observable desde el
+  arnés). Es anterior a esta fase. Mientras siga así,
+  `estimatedWindowExceedsReservationBudget: false` no significa nada.
+- **En P2 la ocupación quedó en 5 de 6, con los dos presupuestos.** No es el
+  presupuesto, porque `6b` tampoco llegó a 6. **La causa no está
+  identificada** y no se infiere de estos datos.
+- **Memoria.** El pico de RSS sube 243 MiB en P2 y 220 MiB en R2 de `2` a `4`,
+  y casi nada de `4` a `6`. Estas cifras tienen un problema de banco: la Mac tenía
+  2,1 GB de swap en uso al terminar la tanda, y la presión de memoria baja
+  el RSS por evicción (el mismo confound de las campañas anteriores). En R2
+  el brazo `2` dio 1682, 1328 y 1284 MiB en sus tres rondas. **No sirven
+  para fijar techos de memoria**; esos salen de Windows.
+
+**Un defecto del instrumento que apareció al extenderlo.** El script
+detectaba la suspensión del equipo con `rg`, que no está instalado en esta
+Mac fuera del shell de Claude Code. El chequeo no fallaba: no hacía nada. Las
+campañas anteriores de `run-ocr-pool.sh` en esta Mac que informan «sin
+suspensiones» no lo verificaron de verdad. Desde esta fase usa `grep -E`, y
+en esta tanda la detección sí estuvo activa. No hay indicio de que una
+suspensión haya afectado los resultados anteriores, pero tampoco prueba de
+lo contrario.
+
+**Qué falta.** La misma fase en Windows nativo, que es el banco que decide
+Ultra y los techos de memoria:
+
+```bash
+ANONLY_OCR_POOL_PHASE=ultra ANONLY_REAL_DOC_R2=<ruta absoluta> ./tests/perf/run-ocr-pool.sh
+```
+
+El script tiene dependencias de macOS (`caffeinate`, `pmset`, `vm_stat`); la
+tanda de Windows del 2026-09-26 usó un puerto ad hoc sin commitear. Hay que
+portar esta fase de la misma forma, o hacerla portable, antes de correrla.
+
