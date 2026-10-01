@@ -554,6 +554,11 @@ export class NerEngine implements IEngine {
   // efectiva del pool: a partir de ahí deja de ser "una vez por instancia" y
   // pasa a ser "una vez por ciclo de carga" (spec §13 casos 28/30).
   private modelWarm = false;
+  // Enmienda de ADR-167: `true` si `run()` cargó el kernel en este hilo (pool
+  // in-process). `pendingKernelDispose` es el descarte lanzado por la última
+  // baja; la próxima carga in-process lo espera.
+  private kernelLoadedInProcess = false;
+  private pendingKernelDispose: Promise<void> | null = null;
 
   /**
    * `pool` (ADR-046 §2): inyectada por el façade en `createCore`
@@ -574,6 +579,14 @@ export class NerEngine implements IEngine {
     this.subscribedToPool = true;
     return this.pool.onWorkersReleased(() => {
       this.modelWarm = false;
+      if (!this.kernelLoadedInProcess) return;
+      // Enmienda de ADR-167: el kernel vive en este hilo; sin descartarlo, el
+      // modelo sigue cargado y `modelWarm = false` miente. `kernelDispose` es
+      // best-effort; el import fallido tampoco debe dejar un rechazo suelto.
+      this.kernelLoadedInProcess = false;
+      this.pendingKernelDispose = loadNerKernel()
+        .then((kernel) => kernel.kernelDispose())
+        .catch(() => undefined);
     });
   }
 
@@ -794,7 +807,9 @@ export class NerEngine implements IEngine {
     // puerto) — libera directo el kernel local. La liberación server-side en
     // un NerWorker real llega por el mensaje genérico DISPOSE del protocolo.
     // Si el kernel nunca se cargó no hay nada que liberar (ADR-099).
+    await this.pendingKernelDispose;
     if (kernelModule !== undefined) await (await kernelModule).kernelDispose();
+    this.kernelLoadedInProcess = false;
     // ADR-167 §3: se desuscribe de onWorkersReleased — una baja del pool
     // después de dispose() no debe tocar el estado de esta instancia.
     // `subscribedToPool = false` (O-8) para que un `init()` posterior
@@ -896,12 +911,16 @@ export class NerEngine implements IEngine {
         this.handleKernelProgress(progress, partial, ctx);
 
       const dispatchResult = await this.pool.dispatch({
-        run: async () =>
-          (await loadNerKernel()).kernelClassify(payload, {
+        run: async () => {
+          await this.pendingKernelDispose;
+          const kernel = await loadNerKernel();
+          this.kernelLoadedInProcess = true;
+          return kernel.kernelClassify(payload, {
             timeoutMs,
             abortSignal: ctx.abortSignal,
             onProgress,
-          }),
+          });
+        },
         signal: ctx.abortSignal,
         priority: DISPATCH_PRIORITY,
         payload,

@@ -936,6 +936,59 @@ describe("NerEngine — unit tests", () => {
       await pooledEngine.dispose();
     });
 
+    // Caso 33 (enmienda de ADR-167): un pool que despacha in-process (`WorkerPool`
+    // sin `workerFactory`) corre `run()` en este hilo, así que el kernel y el
+    // modelo viven acá y la baja tiene que soltarlos de verdad. El doble es
+    // equivalente: `dispatch` ejecuta `run()` y la baja se notifica a mano.
+    it("an in-process pool release unloads the model and the next page reloads it", async () => {
+      asPipelineMock(pipeline).mockImplementation((_task, _model, options) => {
+        options?.progress_callback?.({ status: "progress", progress: 50, loaded: 50, total: 100 });
+        return Promise.resolve(mockTokenClassificationPipeline(() => Promise.resolve([])));
+      });
+      const config = createMockConfig({
+        ner: {
+          modelId: "test-model-inprocess-release",
+          quantization: "q8",
+          confidenceThreshold: 0.7,
+          batchSize: 1,
+          enabled: true,
+        },
+      });
+      const inProcessCtx = createEngineContext({ config });
+
+      let releaseListener: (() => void) | undefined;
+      const pool = {
+        dispatch: <T>(params: NerPoolDispatchParams<T>): Promise<T> => params.run(),
+        onWorkersReleased: (listener: () => void): (() => void) => {
+          releaseListener = listener;
+          return () => {
+            releaseListener = undefined;
+          };
+        },
+      };
+      const pooledEngine = new NerEngine(pool);
+      await pooledEngine.init(inProcessCtx);
+      const busEmitSpy = vi.spyOn(inProcessCtx.bus, "emit");
+
+      await pooledEngine.processPage(makeNerPageInput("doc-inproc-1", 0, ["Juan"]), inProcessCtx);
+      expect(pooledEngine.isModelReady()).toBe(true);
+      expect(asPipelineMock(pipeline)).toHaveBeenCalledTimes(1);
+
+      releaseListener?.();
+      expect(pooledEngine.isModelReady()).toBe(false);
+
+      await pooledEngine.processPage(makeNerPageInput("doc-inproc-2", 0, ["Pérez"]), inProcessCtx);
+      expect(pooledEngine.isModelReady()).toBe(true);
+      expect(asPipelineMock(pipeline)).toHaveBeenCalledTimes(2);
+
+      const countOf = (event: EngineEvents): number =>
+        busEmitSpy.mock.calls.filter(([, name]) => name === event).length;
+      expect(countOf(EngineEvents.NER_MODEL_LOADING)).toBe(2);
+      expect(countOf(EngineEvents.NER_MODEL_READY)).toBe(2);
+
+      await pooledEngine.dispose();
+    });
+
     it("without a release notification between two loads, the model is reused: no reload, no LOADING/READY pair (caso 31)", async () => {
       asPipelineMock(pipeline).mockResolvedValue(
         mockTokenClassificationPipeline(() => Promise.resolve([])),
