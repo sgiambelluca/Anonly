@@ -1,7 +1,8 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 /**
- * La superficie main↔renderer, completa (ADR-132 §3).
+ * La superficie main↔renderer, completa (ADR-132 §3): `anonlyUpdater` y, desde
+ * ADR-194, `anonlyDevice`, un dato de solo lectura (más abajo).
  *
  * Volvió a existir —ADR-132 §3 anticipaba que el actualizador traería el
  * primer canal real— y es lo más chica que resuelve el caso: **tres mensajes
@@ -48,3 +49,25 @@ contextBridge.exposeInMainWorld("anonlyUpdater", {
     ipcRenderer.send("updater:set-automatic-checks", enabled);
   },
 });
+
+/*
+ * `anonlyDevice` (ADR-194 §4): la RAM instalada, que el main pasa como
+ * argumento (`--anonly-total-memory-bytes=<entero>`) y no por IPC. Se expone
+ * solo si es un entero positivo; si no, el objeto no existe y el renderer cae
+ * en la rama «sin el dato». Es el único campo del sistema que cruza.
+ */
+const TOTAL_MEMORY_ARG = "--anonly-total-memory-bytes=";
+
+function readTotalMemoryBytes(argv: ReadonlyArray<string>): number | null {
+  const arg = argv.find((entry) => entry.startsWith(TOTAL_MEMORY_ARG));
+  if (arg === undefined) return null;
+  const raw = arg.slice(TOTAL_MEMORY_ARG.length);
+  if (!/^\d+$/.test(raw)) return null;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value > 0 ? value : null;
+}
+
+const totalMemoryBytes = readTotalMemoryBytes(process.argv);
+if (totalMemoryBytes !== null) {
+  contextBridge.exposeInMainWorld("anonlyDevice", { totalMemoryBytes });
+}

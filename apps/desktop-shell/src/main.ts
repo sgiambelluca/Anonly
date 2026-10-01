@@ -1,4 +1,5 @@
 import { stat } from "node:fs/promises";
+import { totalmem } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -156,14 +157,20 @@ function createWindow(): BrowserWindow {
     backgroundColor: "#ffffff",
     title: "Anonly",
     /*
-     * El `preload` expone exactamente tres mensajes salientes y un
-     * suscriptor, todos del actualizador (ver `preload.ts`; el tercer
-     * saliente, `setAutomaticChecks`, lo agregó ADR-188). `contextIsolation` y
-     * `sandbox` siguen puestos: el preload corre aislado y no le da al
+     * El `preload` expone tres mensajes salientes y un suscriptor del
+     * actualizador (ver `preload.ts`; el tercer saliente, `setAutomaticChecks`,
+     * lo agregó ADR-188) y un dato de solo lectura, `anonlyDevice` (ADR-194
+     * §4). `contextIsolation` y `sandbox` siguen puestos: el preload corre aislado y no le da al
      * renderer acceso a Node ni a `ipcRenderer` crudo.
      */
     webPreferences: {
       preload: join(__dirname, "preload.js"),
+      /*
+       * La RAM instalada llega al preload como argumento, sin canal de IPC
+       * (ADR-194 §4): es un valor fijo del equipo y el perfil Automático lo
+       * necesita porque `navigator.deviceMemory` no informa más de 8 GB.
+       */
+      additionalArguments: [`--anonly-total-memory-bytes=${Math.trunc(totalmem())}`],
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
