@@ -105,7 +105,7 @@ export function ExportButton() {
           <div
             role={blockReason !== null ? "alert" : undefined}
             aria-live="polite"
-            className={`absolute right-0 top-full z-[35] mt-1 flex w-max max-w-[min(20rem,calc(100vw-2rem))] items-start gap-1.5 rounded-xl border border-border bg-bg-primary p-2 text-xs shadow-md ${
+            className={`absolute right-0 top-full z-[35] mt-1 flex w-max max-w-[min(20rem,calc(100vw-2rem))] items-start gap-1.5 rounded-xl border border-border bg-bg-primary p-2 text-sm shadow-md ${
               blockReason !== null ? "" : "invisible"
             }`}
           >

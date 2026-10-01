@@ -130,6 +130,21 @@ export function heldManualConflictIdsForGroup(
 }
 
 /**
+ * Los conflictos de `ids`, en el orden de `ids` (los que ya no existen se
+ * omiten). Devuelve un array nuevo en cada llamada: quien lo use como selector
+ * de Zustand 5 tiene que envolverlo en `useShallow`, o el render entra en
+ * bucle.
+ */
+export function conflictsByIds(
+  conflicts: ReadonlyArray<Conflict>,
+  ids: ReadonlyArray<string>,
+): ReadonlyArray<Conflict> {
+  return ids
+    .map((id) => conflicts.find((candidate) => candidate.id === id))
+    .filter((candidate): candidate is Conflict => candidate !== undefined);
+}
+
+/**
  * ADR-175 §1 / `Components.md` §3.5 (menú ⋯, "Eliminar entidad"): si eliminar
  * el grupo **detectado** de un conflicto `heldManual` lo resuelve solo —se
  * oculta la ocurrencia retenida en vez de quedar colgada—, el toast de

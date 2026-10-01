@@ -29,8 +29,9 @@
  * particular vino de "elegir" o de "abandonar".
  */
 
-import type { Conflict, EntityType } from "@anonly/anonymization-core";
+import type { EntityType } from "@anonly/anonymization-core";
 import { useEffect } from "react";
+import { useShallow } from "zustand/react/shallow";
 
 import { useEntitiesStore } from "../../store/entities.store.js";
 import { Button } from "../common/Button.js";
@@ -38,7 +39,7 @@ import { Dialog } from "../common/Dialog.js";
 import { applyManualOverlapResolution } from "../entities/applyEdits.js";
 import { ENTITY_TYPE_SINGULAR } from "../entities/entityTypeLabels.js";
 
-import { manualOverlapCandidates } from "./conflictResolution.js";
+import { conflictsByIds, manualOverlapCandidates } from "./conflictResolution.js";
 
 export interface ManualOverlapDialogProps {
   readonly conflictIds: ReadonlyArray<string>;
@@ -47,10 +48,10 @@ export interface ManualOverlapDialogProps {
 }
 
 export function ManualOverlapDialog({ conflictIds, open, onClose }: ManualOverlapDialogProps) {
-  const conflicts = useEntitiesStore((state) =>
-    conflictIds
-      .map((id) => state.conflicts.find((candidate) => candidate.id === id))
-      .filter((candidate): candidate is Conflict => candidate !== undefined),
+  // `useShallow`: el selector devuelve un array nuevo en cada llamada; sin él,
+  // Zustand 5 re-renderiza en bucle.
+  const conflicts = useEntitiesStore(
+    useShallow((state) => conflictsByIds(state.conflicts, conflictIds)),
   );
   const unresolved = conflicts.filter((conflict) => !conflict.resolved);
 
@@ -145,7 +146,7 @@ function CandidateCard({
 }) {
   return (
     <div className="rounded-lg border border-border bg-bg-secondary px-3 py-2.5">
-      <p className="text-xs font-semibold uppercase tracking-wide text-text-secondary">{label}</p>
+      <p className="text-sm font-semibold uppercase tracking-wide text-text-secondary">{label}</p>
       <p className="mt-1 font-medium text-text-primary">«{value}»</p>
       <p className="text-text-secondary">{ENTITY_TYPE_SINGULAR[type]}</p>
     </div>

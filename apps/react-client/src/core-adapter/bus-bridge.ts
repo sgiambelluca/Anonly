@@ -213,7 +213,13 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribe {
        * hasta que la carga terminara sola — y recién ahí aparecía "Cancelado".
        * Al usuario le parecía que cancelar no había hecho nada.
        */
-      stores.pipeline.setState({ stage: PipelineStage.Cancelled, modelLoading: null });
+      // React_Client.md §2.2 regla 2: cancelar un reanálisis deja el documento
+      // en `Ready` (Orchestrator §13.22); solo la importación termina en
+      // `Cancelled`. `groupCount`/`conflictCount` se conservan.
+      const stage = stores.pipeline.getState().reanalyzeInFlight
+        ? PipelineStage.Ready
+        : PipelineStage.Cancelled;
+      stores.pipeline.setState({ stage, modelLoading: null });
     }),
   );
 

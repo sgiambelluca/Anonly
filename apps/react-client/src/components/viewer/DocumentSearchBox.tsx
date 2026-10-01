@@ -337,7 +337,9 @@ function ResultItem({
             </span>
           ) : (
             <span className="rounded-md bg-warning/15 px-2 py-0.5 text-sm font-medium text-warning-strong">
-              Sin ocultar
+              {status.kind === "disabled"
+                ? `Sin ocultar · ${describeEntityNumber(status.type, status.indexInType)} desactivada`
+                : "Sin ocultar"}
             </span>
           )}
         </span>
@@ -347,7 +349,7 @@ function ResultItem({
           {context.after}…
         </span>
       </button>
-      {hidden ? null : (
+      {hidden || status.kind === "disabled" ? null : (
         <span className="flex justify-end">
           <button
             type="button"

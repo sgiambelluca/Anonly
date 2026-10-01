@@ -223,7 +223,13 @@ export const actions = {
     // ADR-172 §1-§2: la pila no cruza un re-análisis (el Core descarta sus
     // puntos al reabrir la sesión).
     useHistoryStore.getState().clear();
-    await getCore().orchestrator.reanalyze(documentId, patch);
+    // React_Client.md §2.2 regla 2: el bridge lo lee ante PIPELINE_CANCELLED.
+    usePipelineStore.getState().setState({ reanalyzeInFlight: true });
+    try {
+      await getCore().orchestrator.reanalyze(documentId, patch);
+    } finally {
+      usePipelineStore.getState().setState({ reanalyzeInFlight: false });
+    }
   },
 
   // ADR-061 §6: agrega a mano una entidad que el detector no encontró. Las

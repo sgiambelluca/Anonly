@@ -390,6 +390,93 @@ describe("bus-bridge", () => {
     unsubscribe();
   });
 
+  it("PIPELINE_CANCELLED of an import stays Cancelled", () => {
+    const bus = createEventBus({ logger: createTestLogger() });
+    const unsubscribe = subscribe(bus, stores);
+
+    bus.emit(EventChannel.Pipeline, EngineEvents.PIPELINE_READY, {
+      documentId: "doc-1",
+      groupCount: 1,
+      conflictCount: 0,
+    });
+    bus.emit(EventChannel.Pipeline, EngineEvents.DOCUMENT_IMPORTED, {
+      documentId: "doc-2",
+      name: "b.pdf",
+      sizeBytes: 1,
+    });
+    bus.emit(EventChannel.Pipeline, EngineEvents.PIPELINE_CANCELLED, {
+      documentId: "doc-2",
+      reason: "user requested",
+    });
+
+    expect(usePipelineStore.getState().stage).toBe(PipelineStage.Cancelled);
+
+    unsubscribe();
+  });
+
+  it("PIPELINE_CANCELLED of a reanalysis of a Ready document returns to Ready and keeps the counts", () => {
+    const bus = createEventBus({ logger: createTestLogger() });
+    const unsubscribe = subscribe(bus, stores);
+
+    bus.emit(EventChannel.Pipeline, EngineEvents.PIPELINE_READY, {
+      documentId: "doc-1",
+      groupCount: 3,
+      conflictCount: 1,
+    });
+    usePipelineStore.getState().setState({ reanalyzeInFlight: true });
+    bus.emit(EventChannel.Pipeline, EngineEvents.PIPELINE_STAGE_CHANGED, {
+      documentId: "doc-1",
+      stage: PipelineStage.Detecting,
+      progress: 0.5,
+    });
+    bus.emit(EventChannel.Ner, EngineEvents.NER_MODEL_LOADING, { modelId: "m", progress: 0.2 });
+
+    bus.emit(EventChannel.Pipeline, EngineEvents.PIPELINE_CANCELLED, {
+      documentId: "doc-1",
+      reason: "user requested",
+    });
+
+    const state = usePipelineStore.getState();
+    expect(state.stage).toBe(PipelineStage.Ready);
+    expect(state.modelLoading).toBeNull();
+    expect(state.groupCount).toBe(3);
+    expect(state.conflictCount).toBe(1);
+
+    unsubscribe();
+  });
+
+  it("PIPELINE_CANCELLED of a reanalysis of a document that failed on import returns to Ready", () => {
+    const bus = createEventBus({ logger: createTestLogger() });
+    const unsubscribe = subscribe(bus, stores);
+
+    // La importación falló en Detecting: el documento nunca pasó por Ready,
+    // pero el Core admite `reanalyze` desde Failed (ADR-040).
+    bus.emit(EventChannel.Pipeline, EngineEvents.DOCUMENT_IMPORTED, {
+      documentId: "doc-1",
+      name: "a.pdf",
+      sizeBytes: 1,
+    });
+    bus.emit(EventChannel.Pipeline, EngineEvents.PIPELINE_STAGE_CHANGED, {
+      documentId: "doc-1",
+      stage: PipelineStage.Detecting,
+      progress: 0.5,
+    });
+    bus.emit(EventChannel.Pipeline, EngineEvents.PIPELINE_FAILED, {
+      documentId: "doc-1",
+      error: makeSerializedError({ message: "NER down" }),
+    });
+    usePipelineStore.getState().setState({ reanalyzeInFlight: true });
+
+    bus.emit(EventChannel.Pipeline, EngineEvents.PIPELINE_CANCELLED, {
+      documentId: "doc-1",
+      reason: "user requested",
+    });
+
+    expect(usePipelineStore.getState().stage).toBe(PipelineStage.Ready);
+
+    unsubscribe();
+  });
+
   it("PIPELINE_FAILED sets stage Failed with the serialized error", () => {
     const bus = createEventBus({ logger: createTestLogger() });
     const unsubscribe = subscribe(bus, stores);

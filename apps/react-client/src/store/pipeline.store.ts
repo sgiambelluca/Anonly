@@ -55,6 +55,12 @@ export interface PipelineSlice {
    * `DOCUMENT_IMPORTED`.
    */
   readonly visitedStages: ReadonlySet<PipelineStage>;
+  /**
+   * Hay un `reanalyze` en curso: lo enciende `actions.reanalyze` y lo apaga en
+   * un `finally`. Con él, `PIPELINE_CANCELLED` deja `Ready` y no `Cancelled`
+   * (`React_Client.md` §2.2 regla 2, Orchestrator §13.22).
+   */
+  readonly reanalyzeInFlight: boolean;
   setState(patch: Partial<PipelineSlice>): void;
   reset(): void;
 }
@@ -76,6 +82,7 @@ const initialState: PipelineData = {
   failedJobs: {},
   failedAtStage: null,
   visitedStages: new Set(),
+  reanalyzeInFlight: false,
 };
 
 export const usePipelineStore = create<PipelineSlice>((set) => ({

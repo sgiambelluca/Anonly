@@ -5,8 +5,8 @@
  *
  * Por cada `TextMatch`: la página, la frase alrededor (armada con
  * `getPageWords` y el `wordSpan` del match) y su estado — **oculto como
- * Persona N.º 02** (el resultado cae sobre un miembro de un grupo) o **Sin
- * ocultar**.
+ * Persona N.º 02** (el resultado cae sobre un miembro de un grupo habilitado)
+ * o **Sin ocultar**.
  *
  * **Se compara contra los fragmentos, no contra la envolvente** (ADR-169, "En
  * contra"; ADR-074): una entidad partida en dos renglones tiene un `bbox` que
@@ -79,30 +79,43 @@ export type MatchStatus =
       readonly type: EntityType;
       readonly indexInType: number;
     }
+  // Cae sobre un grupo `enabled: false`: no tapa nada (Contracts.md §5), cuenta
+  // como "sin ocultar" y no ofrece "Agregar como…" (Components.md §5.4c).
+  | {
+      readonly kind: "disabled";
+      readonly groupId: string;
+      readonly type: EntityType;
+      readonly indexInType: number;
+    }
   | { readonly kind: "unhidden" };
 
-/** El estado de un resultado: sobre qué grupo cae, o "Sin ocultar". */
+/**
+ * El estado de un resultado: sobre qué grupo habilitado cae, o "Sin ocultar".
+ * Un grupo deshabilitado no oculta (Components.md §5.4c); si el match cae sobre uno
+ * habilitado y sobre uno deshabilitado, gana el habilitado.
+ */
 export function resolveMatchStatus(
   match: TextMatch,
   groupsByType: ReadonlyMap<EntityType, ReadonlyArray<EntityGroup>>,
 ): MatchStatus {
+  let disabled: MatchStatus = { kind: "unhidden" };
   for (const groups of groupsByType.values()) {
     for (const group of groups) {
       for (const member of group.members) {
         if (member.pageIndex !== match.pageIndex) continue;
         const boxes = member.fragments ?? [member.bbox];
-        if (boxes.some((box) => coveredBy(match, box))) {
-          return {
-            kind: "hidden",
-            groupId: group.id,
-            type: group.type,
-            indexInType: group.indexInType,
-          };
-        }
+        if (!boxes.some((box) => coveredBy(match, box))) continue;
+        const found = {
+          groupId: group.id,
+          type: group.type,
+          indexInType: group.indexInType,
+        };
+        if (group.enabled) return { kind: "hidden", ...found };
+        if (disabled.kind === "unhidden") disabled = { kind: "disabled", ...found };
       }
     }
   }
-  return { kind: "unhidden" };
+  return disabled;
 }
 
 /** El encabezado de la lista: "N ocultos · M sin ocultar", los dos siempre presentes. */

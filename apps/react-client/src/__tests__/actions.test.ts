@@ -1,17 +1,22 @@
 import {
   ConflictReason,
+  createEventBus,
   EngineEvents,
   EntityType,
   EventChannel,
+  PipelineStage,
   ReplacementMode,
   type Rule,
 } from "@anonly/anonymization-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { subscribe } from "../core-adapter/bus-bridge.js";
 import { useDocumentStore } from "../store/document.store.js";
 import { useEntitiesStore } from "../store/entities.store.js";
 import { usePipelineStore } from "../store/pipeline.store.js";
 import { useRulesStore } from "../store/rules.store.js";
+import { useSettingsStore } from "../store/settings.store.js";
+import { useUnreadableInkStore } from "../store/unreadableInk.store.js";
 import { useViewerStore } from "../store/viewer.store.js";
 
 const emit = vi.fn();
@@ -326,6 +331,63 @@ describe("actions", () => {
     it("reanalyze forwards the patch to orchestrator.reanalyze", async () => {
       await actions.reanalyze({ ocr: { languages: ["spa"] } });
       expect(reanalyze).toHaveBeenCalledWith("doc-1", { ocr: { languages: ["spa"] } });
+    });
+
+    describe("reanalyzeInFlight (React_Client §2.2 regla 2)", () => {
+      const inFlight = (): boolean => usePipelineStore.getState().reanalyzeInFlight;
+
+      it("is true during the call and false once it resolves", async () => {
+        let seenDuring: boolean | undefined;
+        reanalyze.mockImplementation(() => {
+          seenDuring = inFlight();
+          return Promise.resolve();
+        });
+
+        await actions.reanalyze({ ocr: { languages: ["spa"] } });
+
+        expect(seenDuring).toBe(true);
+        expect(inFlight()).toBe(false);
+      });
+
+      it("is false again when the call rejects", async () => {
+        let seenDuring: boolean | undefined;
+        reanalyze.mockImplementation(() => {
+          seenDuring = inFlight();
+          return Promise.reject(new Error("boom"));
+        });
+
+        await expect(actions.reanalyze({ ocr: { languages: ["spa"] } })).rejects.toThrow("boom");
+
+        expect(seenDuring).toBe(true);
+        expect(inFlight()).toBe(false);
+      });
+
+      it("a PIPELINE_CANCELLED emitted during the reanalysis leaves the stage in Ready (real bridge)", async () => {
+        const bus = createEventBus({
+          logger: { debug() {}, info() {}, warn() {}, error() {} },
+        });
+        const unsubscribe = subscribe(bus, {
+          document: useDocumentStore,
+          entities: useEntitiesStore,
+          rules: useRulesStore,
+          pipeline: usePipelineStore,
+          viewer: useViewerStore,
+          settings: useSettingsStore,
+          unreadableInk: useUnreadableInkStore,
+        });
+        reanalyze.mockImplementation(() => {
+          bus.emit(EventChannel.Pipeline, EngineEvents.PIPELINE_CANCELLED, {
+            documentId: "doc-1",
+            reason: "user requested",
+          });
+          return Promise.resolve();
+        });
+
+        await actions.reanalyze({ ocr: { languages: ["spa"] } });
+
+        expect(usePipelineStore.getState().stage).toBe(PipelineStage.Ready);
+        unsubscribe();
+      });
     });
 
     it("retryWithPassword forwards the password to orchestrator.retryWithPassword", async () => {

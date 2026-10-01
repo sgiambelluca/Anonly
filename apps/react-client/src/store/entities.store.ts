@@ -79,6 +79,12 @@ function findGroupType(
   return undefined;
 }
 
+/** ADR-175 §1 / ADR-191 §3: ningún camino deja `resolved: true` con `heldManual`. */
+function withoutHeldManual(conflict: Conflict): Conflict {
+  const { heldManual: _heldManual, ...rest } = conflict;
+  return rest;
+}
+
 type EntitiesData = Pick<
   EntitiesSlice,
   "groupsByType" | "conflicts" | "sortOrder" | "flashGroupId"
@@ -159,14 +165,19 @@ export const useEntitiesStore = create<EntitiesSlice>((set) => ({
     });
   },
   addConflict(conflict) {
-    set((state) => ({ conflicts: [...state.conflicts, conflict] }));
+    // ADR-191 §3: CONFLICT_DETECTED es idempotente por `id`; reemplaza en el lugar.
+    set((state) => ({
+      conflicts: state.conflicts.some((existing) => existing.id === conflict.id)
+        ? state.conflicts.map((existing) => (existing.id === conflict.id ? conflict : existing))
+        : [...state.conflicts, conflict],
+    }));
   },
   resolveConflict(conflictId, resolvedType) {
     set((state) => ({
       conflicts: state.conflicts.map((conflict) =>
         conflict.id === conflictId
           ? {
-              ...conflict,
+              ...withoutHeldManual(conflict),
               resolved: true,
               // ADR-083 §3: el tipo con el que quedó clasificado el grupo. Sin
               // esto, el diálogo muestra el `resolvedType` que traía el

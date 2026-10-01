@@ -139,6 +139,41 @@ describe("resolveMatchStatus", () => {
     expect(status.kind).toBe("unhidden");
   });
 
+  it("a disabled group does not hide: the match is reported as disabled (Components.md §5.4c)", () => {
+    const status = resolveMatchStatus(
+      match(box),
+      new Map([
+        [
+          EntityType.Person,
+          [{ ...group([member({ x: 60, y: 10, width: 80, height: 10 })]), enabled: false }],
+        ],
+      ]),
+    );
+    expect(status).toEqual({
+      kind: "disabled",
+      groupId: "g2",
+      type: EntityType.Person,
+      indexInType: 2,
+    });
+    expect(summarizeMatchStatuses([status])).toEqual({ hidden: 0, unhidden: 1 });
+  });
+
+  it("an enabled group wins over a disabled one covering the same match, in any order", () => {
+    const covering = member({ x: 60, y: 10, width: 80, height: 10 });
+    const enabled = { ...group([covering]), id: "g-on", indexInType: 3 };
+    const disabled = { ...group([covering]), id: "g-off", enabled: false };
+
+    for (const groups of [
+      [disabled, enabled],
+      [enabled, disabled],
+    ]) {
+      expect(resolveMatchStatus(match(box), new Map([[EntityType.Person, groups]]))).toMatchObject({
+        kind: "hidden",
+        groupId: "g-on",
+      });
+    }
+  });
+
   it("el resumen cuenta los dos estados, los dos siempre presentes", () => {
     expect(
       summarizeMatchStatuses([

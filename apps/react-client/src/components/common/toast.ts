@@ -46,6 +46,12 @@ export interface ToastInput {
    * `TOAST_DURATION_MS` de siempre (`ToastHost`).
    */
   readonly persistent?: boolean;
+  /**
+   * Toast de una edición con "Deshacer" (`editHistory.editToast`). Una edición
+   * nueva lo retira (`dismissEditToast`, UX §3.3b): su "Deshacer" ya no sería
+   * el de la última edición.
+   */
+  readonly edit?: true;
 }
 
 export interface ToastMessage extends ToastInput {
@@ -57,6 +63,9 @@ type Listener = (toast: ToastMessage | null) => void;
 
 const listeners = new Set<Listener>();
 let nextId = 0;
+// El toast que se mostró por último. Puede haber expirado en el host; cerrar
+// uno ya cerrado es inocuo.
+let current: ToastMessage | null = null;
 
 export function subscribeToToasts(listener: Listener): () => void {
   listeners.add(listener);
@@ -73,11 +82,18 @@ export function subscribeToToasts(listener: Listener): () => void {
 export function showToast(input: ToastInput): ToastMessage {
   nextId += 1;
   const toast: ToastMessage = { id: nextId, ...input };
+  current = toast;
   for (const listener of listeners) listener(toast);
   return toast;
 }
 
 /** Cierra el toast vigente, si hay uno. */
 export function dismissToast(): void {
+  current = null;
   for (const listener of listeners) listener(null);
+}
+
+/** Cierra el toast vigente solo si es el de una edición (React_Client §3.6c). */
+export function dismissEditToast(): void {
+  if (current?.edit === true) dismissToast();
 }

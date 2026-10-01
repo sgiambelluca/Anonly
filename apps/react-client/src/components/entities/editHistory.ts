@@ -17,13 +17,17 @@
  */
 
 import { useHistoryStore } from "../../core-adapter/history.js";
-import type { ToastAction, ToastInput } from "../common/toast.js";
+import { dismissEditToast, type ToastAction, type ToastInput } from "../common/toast.js";
 
 /** La pista del atajo en el botón del toast (ADR-172 §3). */
 export const UNDO_SHORTCUT_HINT = "Ctrl+Z";
 
 export function recordEdit(label: string): boolean {
-  return useHistoryStore.getState().record(label);
+  const recorded = useHistoryStore.getState().record(label);
+  // React_Client §3.6c: el "Deshacer" de un toast anterior desharía esta edición, no la
+  // que nombra; toda edición que entra a la pila lo retira.
+  if (recorded) dismissEditToast();
+  return recorded;
 }
 
 export function undoLastEdit(): void {
@@ -47,5 +51,5 @@ export function withUndoAction(input: ToastInput, recorded: boolean, undo: () =>
 }
 
 export function editToast(input: ToastInput, recorded: boolean): ToastInput {
-  return withUndoAction(input, recorded, undoLastEdit);
+  return { ...withUndoAction(input, recorded, undoLastEdit), edit: true };
 }
