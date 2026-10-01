@@ -782,7 +782,7 @@ Lee todo `.measure/memory-*-run*.json`, agrupa por perfil/temperatura y reporta 
 
 ### Canal de overrides del arnés (ADR-155): `localStorage["anonly:engine-overrides"]`
 
-`performancePreset` (`installSettingsOverride`, `tests/e2e/support/settingsOverride.ts`) es el único lever de tamaño de pool alcanzable desde los settings del usuario, y es un balde: `low`/`high` mueven `pdfPoolSize`/`ocrPoolSize`/`nerPoolSize`/`renderPoolSize` los cuatro juntos. La atribución de H-10 (más abajo) necesita mover uno por vez — `ocrPoolSize` sin tocar `nerPoolSize` — y eso no tiene forma de expresarse por ahí.
+`performancePreset` (`installSettingsOverride`, `tests/e2e/support/settingsOverride.ts`) es el único lever de tamaño de pool alcanzable desde los settings del usuario, y es un balde: cada nivel (`low`, `medium`, `high`, `ultra`; ADR-194 §2) mueve varios tamaños a la vez, y `auto` se resuelve a un nivel según el equipo. **Las suites de medición fijan `medium`** cuando no fijan otra cosa, y el arnés del pool de OCR fija siempre el tamaño del pool y el tope de imágenes (ADR-194 §8): Automático da un nivel distinto en cada banco. La atribución de H-10 (más abajo) necesita mover uno por vez — `ocrPoolSize` sin tocar `nerPoolSize` — y eso no tiene forma de expresarse por ahí.
 
 `initCore` (`apps/react-client/src/core-adapter/index.ts`) lee `localStorage["anonly:engine-overrides"]` una sola vez en el boot y lo mergea por encima del override derivado de los settings, sección por sección — mismo `EngineConfigOverrides` (ADR-039) que `createCore` ya acepta, ningún tipo nuevo. Documentado en detalle en `docs/ui/React_Client.md` §3.7; acá solo lo que hace falta para escribir un test:
 

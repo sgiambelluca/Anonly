@@ -603,7 +603,7 @@ async function runProfile(
       nerEnabled: true,
       ocrEnabled: true,
       ocrLanguages: ["spa", "eng"],
-      performancePreset: "auto",
+      performancePreset: "medium",
     },
     memory: {
       definition: "sum of Electron workingSetSize (RSS; shared pages may be double-counted)",

@@ -30,6 +30,7 @@ import {
   invalidatedCell,
   type CellRecord,
 } from "./support/ocrDpiDownSummary.js";
+import { DEFAULT_MAX_LIVE_IMAGE_BYTES } from "./support/ocrPoolArms.js";
 
 process.env.PLAYWRIGHT_NO_COPY_PROMPT = "1";
 
@@ -132,7 +133,8 @@ for (const corpus of corpora) {
         await installTransportObserver(page);
         await installEngineOverrides(page, {
           ner: { enabled: true },
-          ocr: { dpi: key.dpi },
+          // Pool y tope fijos: no depende del nivel vigente (ADR-194 §8).
+          ocr: { dpi: key.dpi, maxLiveImageBytes: DEFAULT_MAX_LIVE_IMAGE_BYTES },
           workerPool: { ocrPoolSize: 1 },
         });
         try {
@@ -162,7 +164,10 @@ for (const corpus of corpora) {
             text: observed.run.words.map((word) => word.text).join(" "),
             nerFinished: observed.nerFinished,
             overrideEffective:
-              config.ocrDpi === key.dpi && config.ocrPoolSize === 1 && config.nerEnabled === true,
+              config.ocrDpi === key.dpi &&
+              config.ocrPoolSize === 1 &&
+              config.maxLiveImageBytes === DEFAULT_MAX_LIVE_IMAGE_BYTES &&
+              config.nerEnabled === true,
           };
           const isReference = key.dpi === CONTROL_DPI && key.repetition === 1;
           const result = buildCellRecord({

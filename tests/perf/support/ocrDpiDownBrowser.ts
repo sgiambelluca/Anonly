@@ -12,6 +12,7 @@ import { installDocumentControl, readDocumentRun, type BrowserRun } from "./adr1
 export interface EffectiveConfig {
   readonly ocrDpi: number | null;
   readonly ocrPoolSize: number | null;
+  readonly maxLiveImageBytes: number | null;
   readonly nerEnabled: boolean | null;
 }
 
@@ -57,7 +58,7 @@ export async function installDpiDownObserver(page: Page): Promise<EffectiveConfi
           readonly ctx?: {
             readonly config?: {
               readonly workerPool?: { readonly ocrPoolSize?: number };
-              readonly ocr?: { readonly dpi?: number };
+              readonly ocr?: { readonly dpi?: number; readonly maxLiveImageBytes?: number };
               readonly ner?: { readonly enabled?: boolean };
             };
           };
@@ -69,6 +70,8 @@ export async function installDpiDownObserver(page: Page): Promise<EffectiveConfi
       ocrDpi: typeof config?.ocr?.dpi === "number" ? config.ocr.dpi : null,
       ocrPoolSize:
         typeof config?.workerPool?.ocrPoolSize === "number" ? config.workerPool.ocrPoolSize : null,
+      maxLiveImageBytes:
+        typeof config?.ocr?.maxLiveImageBytes === "number" ? config.ocr.maxLiveImageBytes : null,
       nerEnabled: typeof config?.ner?.enabled === "boolean" ? config.ner.enabled : null,
     };
   });

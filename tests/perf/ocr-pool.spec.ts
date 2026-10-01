@@ -19,11 +19,7 @@ import { measureProfile, type ProfileReport } from "./support/memoryProfile.js";
 import { startMemorySampling } from "./support/memorySampler.js";
 import { summarizeChain, summarizeDispatches } from "./support/ocrDpiDownChain.js";
 import { prepareSynthetic } from "./support/ocrDpiDownFixtures.js";
-import {
-  assertsFullOccupancy,
-  DEFAULT_MAX_LIVE_IMAGE_BYTES,
-  parseArmLabel,
-} from "./support/ocrPoolArms.js";
+import { assertsFullOccupancy, parseArmLabel } from "./support/ocrPoolArms.js";
 import { measureOcrEndStage } from "./support/ocrPoolEndStage.js";
 import { buildReservationReport } from "./support/ocrReservation.js";
 import { getOrGenerateScannedFixture } from "./support/scannedFixtureCache.js";
@@ -704,24 +700,19 @@ test("OCR recognizer pool campaign — selected run", async ({
     run.kind === "cancel" ? 300_000 : isScannedProfile(run.profile) ? 1_800_000 : 600_000,
   );
   const file = await inputFile(run.profile);
-  if (
-    run.arm !== 2 ||
-    run.maxLiveImageBytes !== DEFAULT_MAX_LIVE_IMAGE_BYTES ||
-    run.dpi !== undefined
-  )
-    await installEngineOverrides(page, {
-      workerPool: { ocrPoolSize: run.arm },
-      ...(run.maxLiveImageBytes === DEFAULT_MAX_LIVE_IMAGE_BYTES && run.dpi === undefined
-        ? {}
-        : {
-            ocr: {
-              ...(run.maxLiveImageBytes === DEFAULT_MAX_LIVE_IMAGE_BYTES
-                ? {}
-                : { maxLiveImageBytes: run.maxLiveImageBytes }),
-              ...(run.dpi === undefined ? {} : { dpi: run.dpi }),
-            },
-          }),
-    });
+  /*
+   * Pool y tope se fijan SIEMPRE, también en el brazo de control (2 con 128
+   * MiB): el arnés no asume qué manda el nivel vigente (ADR-194 §8). Sin esto,
+   * un equipo donde Automático resuelve a `ultra` abortaba el control en la
+   * comprobación de override efectivo.
+   */
+  await installEngineOverrides(page, {
+    workerPool: { ocrPoolSize: run.arm },
+    ocr: {
+      maxLiveImageBytes: run.maxLiveImageBytes,
+      ...(run.dpi === undefined ? {} : { dpi: run.dpi }),
+    },
+  });
   // Con DPI pedido, el DPI efectivo de cada despacho se demuestra (mismo observador de metadatos en todos los brazos).
   const observeDispatches = run.dpi !== undefined && run.kind !== "cancel";
   if (observeDispatches) await installTransportObserver(page);
