@@ -3817,7 +3817,17 @@ export class GroupingEngine implements IEngine {
     const tieValues = new Set(topByLen.map(([v]) => v));
     const first = group.aliases.find((a) => tieValues.has(a));
     group.canonicalValue = first ?? topByLen[0]?.[0] ?? group.canonicalValue;
-    this.raiseAmbiguousCanonicalConflict(session, group, [...tieValues]);
+
+    // ADR-193: las formas que solo difieren en mayúsculas no son un empate;
+    // se pregunta por la primera insertada de cada forma distinta.
+    const byLowerCase = new Map<string, string>();
+    for (const alias of group.aliases) {
+      if (!tieValues.has(alias)) continue;
+      const key = alias.toLowerCase();
+      if (!byLowerCase.has(key)) byLowerCase.set(key, alias);
+    }
+    if (byLowerCase.size < 2) return;
+    this.raiseAmbiguousCanonicalConflict(session, group, [...byLowerCase.values()]);
   }
 
   private raiseAmbiguousCanonicalConflict(

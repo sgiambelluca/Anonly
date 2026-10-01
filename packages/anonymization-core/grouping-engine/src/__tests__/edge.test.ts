@@ -1679,8 +1679,8 @@ describe("GroupingEngine — edge cases", () => {
       documentId: "doc-1",
       occurrence: makeOccurrence({
         entityType: EntityType.Person,
-        value: "Maria",
-        normalizedValue: "maria",
+        value: "José",
+        normalizedValue: "jose",
       }),
     });
     const busEmitSpy = vi.spyOn(ctx.bus, "emit");
@@ -1688,8 +1688,8 @@ describe("GroupingEngine — edge cases", () => {
       documentId: "doc-1",
       occurrence: makeOccurrence({
         entityType: EntityType.Person,
-        value: "MARIA",
-        normalizedValue: "maria",
+        value: "Jose",
+        normalizedValue: "jose",
       }),
     });
 
@@ -1701,6 +1701,58 @@ describe("GroupingEngine — edge cases", () => {
     expect((conflictCalls[0]?.[2] as ConflictDetected).conflict.reason).toBe(
       ConflictReason.AmbiguousCanonical,
     );
+  });
+
+  it("case-only spelling tie does not raise ambiguous_canonical", () => {
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+    for (const value of ["Argentina", "argentina"]) {
+      ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: makeOccurrence({
+          entityType: EntityType.Address,
+          value,
+          normalizedValue: "argentina",
+        }),
+      });
+    }
+
+    const conflictCalls = busEmitSpy.mock.calls.filter(
+      ([channel, event]) =>
+        channel === EventChannel.Grouping && event === EngineEvents.CONFLICT_DETECTED,
+    );
+    expect(
+      conflictCalls.some(
+        ([, , payload]) =>
+          (payload as ConflictDetected).conflict.reason === ConflictReason.AmbiguousCanonical,
+      ),
+    ).toBe(false);
+    const groups = engine.getSnapshot("doc-1").groups;
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.canonicalValue).toBe("Argentina");
+  });
+
+  it("mixed spelling tie offers one candidate per case-insensitive form", () => {
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+    for (const value of ["José", "JOSÉ", "Jose"]) {
+      ctx.bus.emit(EventChannel.Ner, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence: makeOccurrence({
+          entityType: EntityType.Person,
+          value,
+          normalizedValue: "jose",
+        }),
+      });
+    }
+
+    const ambiguous = busEmitSpy.mock.calls
+      .filter(
+        ([channel, event]) =>
+          channel === EventChannel.Grouping && event === EngineEvents.CONFLICT_DETECTED,
+      )
+      .map(([, , payload]) => (payload as ConflictDetected).conflict)
+      .filter((c) => c.reason === ConflictReason.AmbiguousCanonical);
+    const last = ambiguous[ambiguous.length - 1];
+    expect(last?.candidates.map((c) => c.value)).toEqual(["José", "Jose"]);
   });
 
   // Caso 11 (§13)
