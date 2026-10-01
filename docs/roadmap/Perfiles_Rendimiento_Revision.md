@@ -769,3 +769,22 @@ del OCR. Primero se mide si el OCR puede leer a 250 o 200 dpi sin perder
 detecciones (`OCR_DPI_Descendente_Campana_Plan.md`); los techos se deciden
 con ese resultado.
 
+
+## Cierre: decisiones finales y ADR-194 (2026-10-01)
+
+La campaña de DPI descendente cerró sin bajar la resolución
+(`mediciones/ocr/DPI_Descendente_Fase1_Windows_2026-10-01.md`), así que los
+perfiles se definen a 300 dpi. Decisiones del humano del mismo día:
+
+- **Tope de imágenes vivas por perfil:** 128 MiB en Bajo e Intermedio, 136
+  MiB en Alto y 200 MiB en Ultra.
+- **Techos de memoria** sobre el escaneo de 300 dpi (`P2H`), con el arnés
+  del pool: 3,5 GB en Intermedio, 4,5 GB en Alto y 5,0 GB en Ultra. Bajo
+  queda en 3,5 GB provisorio, sin medir.
+- **Configuración muestra el nivel** que Automático resolvió para el equipo.
+
+Todo lo decidido en este documento queda normado en **ADR-194**. Lo que el
+ADR completa por su cuenta, y dice: los umbrales de RAM con tolerancia (7 y
+15 GiB), y que un equipo de 16 GB con 4 a 7 hilos recibe Intermedio.
+
+Pendiente: medir Bajo sobre `P2H` en Windows antes del release.

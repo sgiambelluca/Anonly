@@ -27,7 +27,7 @@ Cada tipo de trabajo tiene su **propio pool**, separado. No se mezclan tipos en 
 | `RenderPool` | `render-page` (incluye la rasterización para OCR — `RasterizePagePayload`, ADR-034 §1/ADR-036 §4) | `min(max(nCPU-1, 1), 4)` | Canvas + pdfjs son razonablemente paralelizables. |
 | ExportWorker (único, **no** es un pool) | `export-page` | `1` fijo | Ensamblado pdf-lib estrictamente secuencial sobre un solo `PDFDocument` (no thread-safe); una cola multi-worker no aporta. Dueño: lado host de `export-engine` (ADR-036 §1). Desde ADR-047 §2 su transporte es una instancia de `WorkerPool` con `size: 1` construida por el façade — reuso de mensajería, **no** un quinto pool: sigue sin clave propia en `WorkerPoolConfig` y sin cola prioritaria. |
 
-`nCPU = navigator.hardwareConcurrency ?? 4`. Override por config del usuario (setting "Rendimiento").
+`nCPU = navigator.hardwareConcurrency ?? 4`. Override por config del usuario (setting "Rendimiento"): los perfiles de ADR-194 mandan `ocrPoolSize` de 1, 2, 4 o 6, y los de 4 y 6 suben además `ocr.maxLiveImageBytes`. Los defaults de esta tabla no cambian.
 
 ### 1.2 Componentes
 

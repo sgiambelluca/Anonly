@@ -46,6 +46,8 @@ Consecuencias directas:
 
 > **ADR-188 (2026-09-26) agrega `setAutomaticChecks`, y no es el mensaje retirado.** Aquel colgaba del toggle de **instalar**. Este cuelga de una preferencia propia, «Buscar actualizaciones automáticamente», que significa lo mismo que la propiedad de Sparkle. Hacía falta porque el chequeo incondicional contradecía ADR-131 §5, que lo declara desactivable. El main no hace ninguna consulta automática hasta recibir este mensaje, y el payload que no sea booleano se ignora.
 
+> **ADR-194 (2026-10-01) agrega un dato de solo lectura, sin mensaje.** El preload expone un segundo objeto, `anonlyDevice`, con un único campo: `totalMemoryBytes`, la RAM instalada. El main la lee una vez y la pasa por `webPreferences.additionalArguments`; no hay canal de IPC, suscripción ni refresco. La usa el perfil de rendimiento Automático, porque `navigator.deviceMemory` no informa más de 8 GB. Los cuatro mensajes del actualizador siguen siendo los únicos mensajes.
+
 **Lo que viaja por `onEvent` se arma por lista blanca**, no por copia (`toUpdateEventPayload`): tipo, versión y progreso. Un campo nuevo del actualizador no llega al renderer sin que alguien lo decida, y el `message` de error queda afuera a propósito porque nada garantiza que no incluya una ruta del sistema.
 
 Además: navegación externa y `window.open` bloqueados por defecto — cualquier URL que no sea `app://` se rechaza o se delega al navegador del sistema, nunca se carga adentro de la app.

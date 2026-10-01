@@ -42,6 +42,8 @@ si el usuario puede cortar la única conexión.
 
 ### 1. Dos preferencias distintas, con nombres distintos
 
+> **Enmendado por ADR-195 (2026-10-01).** Las dos preferencias pasan a ser una, `updateMode` (`install`, `notify`, `off`), elegida en un selector. Lo que esta sección llama `checkUpdates` es `updateMode !== "off"`, y `autoUpdate` es `updateMode === "install"`. El mensaje al shell y §2 a §4 no cambian.
+
 | Preferencia | Qué decide | Default |
 |---|---|---|
 | `checkUpdates` — «Buscar actualizaciones automáticamente» | si la app consulta a GitHub por su cuenta | **activada** |
@@ -113,6 +115,8 @@ toggle de **instalar**. Este cuelga de un toggle propio que significa
 exactamente lo que significa la propiedad de Sparkle: buscar.
 
 ### 5. Interfaz
+
+> **Reemplazada por ADR-195 §3**: un selector de tres opciones en lugar de los dos interruptores.
 
 En la sección **Actualizaciones** de Configuración:
 

@@ -460,14 +460,17 @@ interface ViewerSlice {
 ```ts
 interface SettingsSlice {
   readonly language: "es" | "en";
-  readonly performancePreset: "auto" | "low" | "high";
+  // ADR-194 §1: cuatro niveles y `auto`, que se resuelve a uno de ellos.
+  readonly performancePreset: "auto" | "low" | "medium" | "high" | "ultra";
   readonly defaultReplacementMode: ReplacementMode;
   readonly nerEnabled: boolean;
   readonly ocrLanguages: ReadonlyArray<string>;
   // `scrollSyncEnabled` retirado por ADR-087 §2: sin lado a lado no hay dos
   // scrolls que sincronizar.
   readonly theme: "system" | "light" | "dark";
-  readonly autoUpdate: boolean;
+  // ADR-195: una sola preferencia reemplaza a `autoUpdate` y `checkUpdates`.
+  // `updateMode !== "off"` es lo que se le informa al shell (ADR-188 §2).
+  readonly updateMode: "install" | "notify" | "off";
   /**
    * ADR-169 §7: avisos de descubrimiento que el usuario cerró
    * ("selection-hint" = tarjeta sobre el visor, "panel-footer-hint" = nota al
@@ -548,7 +551,7 @@ Se guarda por página, y no como un `Set` plano de `groupId`, porque sin la clav
 |---|---|---|
 | `nerEnabled` | `ner.enabled` | directo. **Ya no es un setting del usuario** (ADR-126): sin control en el formulario, `persist()` no lo escribe y ningún camino de producto lo apaga. `load()` lo lee si está presente, que es el canal de override de los E2E |
 | `ocrLanguages` | `ocr.languages` | directo |
-| `performancePreset` | `workerPool.*PoolSize` | `auto` = defaults de `05_Worker_Architecture.md` §1.1 (derivados de `hardwareConcurrency`; la serialización OCR/NER por `deviceMemory < 4` GB la aplica el Orchestrator solo); `low` = `{ pdf: 1, ocr: 1, ner: 1, render: 1 }`; `high` = `{ pdf: 4, ocr: 2, ner: 2, render: 4 }` |
+| `performancePreset` | `workerPool.*PoolSize`, `ocr.maxLiveImageBytes` | **ADR-194.** El override se deriva del **nivel**: `low` = `{ pdf: 1, ocr: 1, ner: 1, render: 1 }`; `medium` = `{ ocr: 2, ner: 2 }`; `high` = `{ ocr: 4, ner: 2 }` con `ocr.maxLiveImageBytes` de 136 MiB; `ultra` = `{ ocr: 6, ner: 2 }` con 200 MiB. Lo que un nivel no nombra queda en el default del Core (`05_Worker_Architecture.md` §1.1). `auto` **se resuelve a un nivel** con la regla de ADR-194 §3 (RAM instalada que informa el shell en `window.anonlyDevice.totalMemoryBytes`, y `navigator.hardwareConcurrency`) y manda el override de ese nivel |
 | `language` | (UI-only) | i18n del cliente; el Core no lo conoce |
 | `defaultReplacementMode` | (UI-only) | se materializa como regla global default vía `RULE_CREATED` |
 
@@ -556,7 +559,8 @@ Se guarda por página, y no como un `Set` plano de `groupId`, porque sin la clav
 
 **Bootstrap: los settings persistidos se aplican al crear el core (PR16.5, ADR-048 §7 punto 2)**. La tabla de arriba rige en **dos** momentos, no solo con documento abierto. Al montar la app, el bootstrap carga los settings persistidos (`settings.store.load()`, que ya existe) y llama `initCore(overrides)` con el `EngineConfigOverrides` derivado de la tabla — `initCore` acepta overrides desde ADR-039. Reglas:
 
-- `performancePreset: "auto"` ⇒ **se omite** la sección `workerPool` del override, para no pisar los defaults derivados de `hardwareConcurrency` (`05_Worker_Architecture.md` §1.1). `low`/`high` mandan los tamaños de la tabla.
+- `performancePreset: "auto"` ⇒ se resuelve a un nivel (ADR-194 §3) y manda el override de ese nivel. **Reemplaza** la regla anterior, que omitía la sección `workerPool`. La resolución es una función pura de las señales del equipo; el mismo resultado alimenta el texto de Configuración (`Components.md` §2.6). Sin `window.anonlyDevice` (fuera del shell), la regla cae en `low` o `medium`.
+- **Migración (ADR-194 §5)**: `load()` lee `settingsVersion`; si falta o es menor que 2, un `performancePreset: "high"` guardado se carga como `"auto"`. Un valor desconocido se carga como `"auto"`. `persist()` escribe `settingsVersion: 2`.
 - El override de `ner.wasmPaths` que `initCore` ya inyecta (ADR-039) **gana siempre**: los overrides del usuario se mergean por debajo, nunca lo sobreescriben.
 - Sin este wiring —el estado hasta PR16.5— `nerEnabled: false` persistido antes de la primera importación no tenía **ningún** efecto observable: `App.tsx` llamaba `initCore()` sin argumentos una sola vez por carga de pestaña. Era la causa del Escenario 8 E2E bloqueado desde PR10 (`07_Performance_Strategy.md` §11.3).
 
@@ -567,7 +571,7 @@ Se guarda por página, y no como un `Set` plano de `groupId`, porque sin la clav
 
 Sin documento abierto, `nerEnabled`/`ocrLanguages` se persisten y aplican al **próximo `createCore`** — que desde PR16.5 es un momento real (recarga de la pestaña), no una promesa vacía.
 
-**`performancePreset` con documento abierto**: **no** dispara `reanalyze` (no afecta resultados de detección, solo tamaños de pool) — el cambio queda persistido (`settings.persist()`) y aplica recién al próximo documento (hint visible en el `SettingsDialog`); efecto inmediato exigiría redimensionar pools en caliente, fuera de alcance MVP (ADR-038 §7, Q3).
+**`performancePreset` con documento abierto**: **no** dispara `reanalyze` (no afecta resultados de detección, solo tamaños de pool) — el cambio queda persistido (`settings.persist()`) y aplica recién al próximo documento (hint visible en el `SettingsDialog`): al quedar la app sin documento, si el override derivado difiere del que tiene el Core vivo, el Core se recrea (ADR-194 §9; antes de ese ADR el cambio regía recién al reiniciar); efecto inmediato exigiría redimensionar pools en caliente, fuera de alcance MVP (ADR-038 §7, Q3).
 
 El escenario E2E 9 (`07_Performance_Strategy.md` §11.3: "activar NER en runtime → descarga modelo y reanaliza preservando las ediciones previas del usuario") se cumple con el flujo de `reanalyze`.
 
