@@ -676,6 +676,8 @@ existen. Lo que se retira es la superficie de UI, no el modelo.
 
 ### 5.4c `DocumentSearchBox` (ADR-061 §8)
 
+> **Ancho de la barra (2026-10-01).** El conmutador de vista se centra recién desde 1536 px de ventana (`2xl`). Por debajo, la lupa toma todo el espacio que sobra, y por debajo de 1160 px el contador de resultados queda solo para lectores de pantalla. Con tres columnas simétricas el campo de texto medía 0 px a 1024 px, el ancho mínimo de la ventana. Lo cubre `tests/e2e/search-box-narrow-window.spec.ts`.
+
 - **Ubicación** (ADR-169 §7): a la izquierda de la barra del visor, **siempre visible y habilitada, en Original y en Anonimizado** — antes aparecía y desaparecía al conmutar. Campo *"Buscar un texto en el documento…"*, un contador en **ranura de ancho fijo** y un botón **"+ Agregar"** aparte, habilitado cuando hay resultados.
 - **La consulta vive en `viewer.store.searchQuery`** (ADR-084 §1), no en el estado local del componente: "Ver ocurrencias" del panel de entidades (§3.5) la escribe desde el otro extremo del árbol. **No es por panel** —a diferencia de `currentPageIndex`/`visibleRange` desde ADR-054 §1— porque el buscador existe una sola vez, sobre el `original`. El resto de su estado (matches, `activeIndex`, el tipo del "Agregar como…") **sigue siendo local**: es trabajo interno suyo.
 - **Acción**: `actions.findText(query)` → `TextMatch[]` con bbox por coincidencia (el adaptador resuelve el documento activo por su cuenta, igual que `getPageWords`/`getPageSize`). Consulta **sincrónica** y de solo lectura: buscar no crea grupos ni modifica la sesión (errata de ADR-061 §8).
