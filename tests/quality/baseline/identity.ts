@@ -23,14 +23,16 @@ const ASSETS_LOCK_PATH = resolve(REPO_ROOT, "assets.lock.json");
 /**
  * Config efectiva de `tests/measure/baseline.spec.ts`: ese harness NO llama
  * `initCore` con overrides — usa el bootstrap de la app tal cual arranca en
- * `apps/react-client` (`store/settings.store.ts`, `DEFAULT_SETTINGS`). Este
- * objeto documenta esos defaults; es informativo (el comparador no exige que
+ * `apps/react-client` (`store/settings.store.ts`, `DEFAULT_SETTINGS`), salvo el
+ * perfil de rendimiento: fija `medium` para no depender del nivel que Automático
+ * resuelva en el equipo (ADR-194 §8, `installSettingsOverride`). Este objeto
+ * documenta esa config; es informativo (el comparador no exige que
  * coincida, ver `compare.ts`), así que un desvío acá no rompe el gate — pero
  * si `baseline.spec.ts` alguna vez pasa overrides explícitos, esta constante
  * queda desactualizada y hay que actualizarla en el mismo cambio.
  */
 export const MEASURE_DEFAULT_EFFECTIVE_CONFIG = {
-  performancePreset: "auto",
+  performancePreset: "medium",
   ner: { enabled: true },
   ocr: { languages: ["spa", "eng"] },
 } as const;

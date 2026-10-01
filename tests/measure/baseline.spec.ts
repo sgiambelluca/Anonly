@@ -27,6 +27,7 @@ import { fileURLToPath } from "node:url";
 import { expect, test, type Page } from "@playwright/test";
 
 import { rasterizeToScannedPdf } from "../e2e/support/scannedPdf.js";
+import { installSettingsOverride } from "../e2e/support/settingsOverride.js";
 import type { BaselineRuntime } from "../quality/baseline/schema.js";
 import { classifyGroups } from "../quality/classify-groups.js";
 import { aggregateEvaluations, evaluateDocument } from "../quality/evaluate.js";
@@ -163,6 +164,8 @@ async function measureOne(
    * Se reporta aparte —columna `modelo`— justamente para poder descontarlo:
    * lo que comparan A/B/C es el tiempo POR PÁGINA, no el arranque.
    */
+  // ADR-194 §8: la medición no deja que Automático elija el nivel del equipo.
+  await installSettingsOverride(page, {});
   await page.goto("/", { waitUntil: "networkidle" });
   // El hook de dev de `core-adapter/index.ts`; sin él no hay bus que escuchar.
   await page.waitForFunction(() => "__anonlyCore" in globalThis, undefined, { timeout: 60_000 });

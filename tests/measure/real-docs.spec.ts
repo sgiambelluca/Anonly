@@ -21,6 +21,7 @@ import { basename } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
 import { rasterizeToScannedPdf } from "../e2e/support/scannedPdf.js";
+import { installSettingsOverride } from "../e2e/support/settingsOverride.js";
 import {
   checkFragments,
   checkIndexInType,
@@ -95,6 +96,8 @@ async function measureFile(
   documentId: string,
   pdfBuffer: ArrayBuffer,
 ): Promise<MeasuredDocument> {
+  // ADR-194 §8: la medición no deja que Automático elija el nivel del equipo.
+  await installSettingsOverride(page, {});
   await page.goto("/", { waitUntil: "networkidle" });
   await page.waitForFunction(() => "__anonlyCore" in globalThis, undefined, { timeout: 60_000 });
 
