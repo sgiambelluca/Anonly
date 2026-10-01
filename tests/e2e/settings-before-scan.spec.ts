@@ -64,12 +64,12 @@ test("la configuración elegida antes de cargar el PDF se aplica al análisis", 
   await markCore(page);
   expect(await coreUnchanged(page)).toBe(true);
 
-  // 1. Un cambio que NO toca el EngineConfig: el idioma de la interfaz.
+  // 1. Un cambio que NO toca el EngineConfig: la apariencia. (Era el idioma
+  // de la interfaz, cuyo selector está oculto hasta que haya traducción.)
   await settingsButton.click();
   const dialog = page.getByRole("dialog", { name: "Configuración" });
   await expect(dialog).toBeVisible();
-  await dialog.getByRole("combobox", { name: "Idioma" }).click();
-  await page.getByRole("option", { name: "English" }).click();
+  await dialog.getByRole("radio", { name: "Oscuro" }).click();
   await dialog.getByRole("button", { name: "Guardar" }).click();
   await expect(dialog).toHaveCount(0);
 
