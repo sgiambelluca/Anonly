@@ -104,7 +104,7 @@ ps_last_error() {
   local text=""
   [[ -n "$PS_DIR" && -s "$PS_DIR/last-error.txt" ]] && text="$(tr -d '\r' <"$PS_DIR/last-error.txt" | head -n 3 | tr '\n' ' ')"
   local var value
-  for var in ANONLY_REAL_DOC_R1 ANONLY_REAL_DOC_R2; do
+  for var in ANONLY_REAL_DOC_R1 ANONLY_REAL_DOC_R2 ANONLY_REAL_DOC_R3; do
     value="${!var:-}"
     [[ -n "$value" ]] && text="${text//"$value"/<ruta-redactada>}" && text="${text//"$(to_shell_path "$value")"/<ruta-redactada>}"
   done
