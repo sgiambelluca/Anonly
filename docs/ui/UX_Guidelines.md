@@ -617,7 +617,8 @@ Dos detecciones se superponen
 - **No se nombra a Regex ni a NER** (ADR-083 §6), ni se muestran números de confidence: son detalles de implementación del pipeline. La confidence **ordena** las opciones —la mayor va primera y preseleccionada— pero no se imprime.
 - Las opciones son los tipos **distintos** entre los candidatos del conflicto, no el catálogo completo. Corregir libremente la categoría de cualquier grupo es "Cambiar categoría" (`Components.md` §3.5), disponible con o sin conflicto.
 - **Aplicar** emite `CONFLICT_RESOLVE_REQUESTED { conflictId, entityType? }`, que reclasifica el grupo y marca el conflicto resuelto. **Sin elección explícita** gana el candidato de mayor confidence — que coincide con la resolución automática ya vigente, así que confirmar no cambia datos.
-- Si todos los candidatos comparten tipo (`low_confidence`/`ambiguous_canonical`, que no son conflictos de clasificación), no hay radios y el botón dice **"Descartar"**.
+- **`ambiguous_canonical`** (ADR-106): los radios son las escrituras empatadas, con la vigente preseleccionada, y el botón dice **"Aplicar"** (ADR-193 §4).
+- **`low_confidence`**: no hay nada entre qué elegir; no hay radios y el botón dice **"Descartar"**.
 
 > **Redacción anterior (retirada por ADR-083)**: el mockup ofrecía `[Usar Regex] [Usar NER] [Personalizado ▾]` y decía que emitía el evento "con el modo elegido". Eran dos cosas incompatibles —`ReplacementMode` no tiene valores "regex"/"ner"— y lo que se implementó (elegir un `ReplacementMode`) **no resolvía el desacuerdo**: `applyConflictResolve` no tocaba el `entityType`, así que el usuario aplicaba y la discrepancia quedaba igual.
 
