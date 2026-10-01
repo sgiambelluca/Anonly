@@ -31,8 +31,12 @@ afterPack: scripts/adhoc-sign.cjs
 # jerarquía `native/build/Release` porque el `rpath` compilado en el addon la
 # asume (ver `native/README.md`).
 extraResources:
+  # Sin sourcemaps en el instalador (MVP.md Hito 12); el build los sigue generando.
   - from: ../react-client/dist
     to: renderer
+    filter:
+      - "**/*"
+      - "!**/*.map"
   - from: native/build/Release/sparkle_bridge.node
     to: native/build/Release/sparkle_bridge.node
 
