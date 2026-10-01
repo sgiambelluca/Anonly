@@ -1,9 +1,13 @@
-<!-- CONTEXT: scope=campana-ocr-dpi-descendente | dependencias=roadmap/Perfiles_Rendimiento_Revision.md,roadmap/ADR190_DPI_Campana_Plan.md,roadmap/mediciones/ocr/ADR190_DPI_2026-09-27.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-163-El-DPI-De-OCR-No-Supera-Al-Raster-Fuente.md,adr/ADR-190-Una-Pagina-Con-Tinta-No-Sale-Vacia-En-Silencio.md,adr/ADR-192-El-Pico-Total-De-Memoria-Tiene-Un-Techo-Medido-Por-Perfil.md,adr/ADR-155-El-Arnes-De-Medicion-Configura-El-Core-Por-Un-Canal-Propio.md,core/OCR_Engine.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 (protocolo; sin ejecutar) -->
+<!-- CONTEXT: scope=campana-ocr-dpi-descendente | dependencias=roadmap/Perfiles_Rendimiento_Revision.md,roadmap/ADR190_DPI_Campana_Plan.md,roadmap/mediciones/ocr/ADR190_DPI_2026-09-27.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-163-El-DPI-De-OCR-No-Supera-Al-Raster-Fuente.md,adr/ADR-190-Una-Pagina-Con-Tinta-No-Sale-Vacia-En-Silencio.md,adr/ADR-192-El-Pico-Total-De-Memoria-Tiene-Un-Techo-Medido-Por-Perfil.md,adr/ADR-155-El-Arnes-De-Medicion-Configura-El-Core-Por-Un-Canal-Propio.md,core/OCR_Engine.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 (protocolo; fase 1 ejecutada, campaña cerrada) -->
 
 # Campaña de DPI descendente: ¿puede el OCR leer a 250 o 200 dpi?
 
-**Estado:** protocolo escrito el 2026-10-01, a pedido del humano. Sin
-ejecutar. No cambia producto, defaults ni contratos. **Todas las mediciones
+**Estado:** **cerrada el 2026-10-01.** La fase 1 se corrió en Windows y
+ningún brazo pasó; el humano decidió no bajar la resolución por defecto y no
+correr la fase 2 completa. Resultados y lo que la regla no pudo juzgar:
+`mediciones/ocr/DPI_Descendente_Fase1_Windows_2026-10-01.md`. Lo que sigue
+es el protocolo tal como se escribió antes de medir. No cambia producto,
+defaults ni contratos. **Todas las mediciones
 se corren en Windows nativo** (§7).
 
 ## 1. Por qué
@@ -107,7 +111,7 @@ todas las fotocopias.
 
 | ID | Qué es |
 |---|---|
-| `R2` | El escaneado real ya usado. **Obligatorio** para que la matriz esté completa (§6.1). Su resolución nativa inferida es de unos 240 dpi o menos, así que los brazos `300` y `250` son el mismo despacho y solo `200` y `150` bajan de verdad: en `R2`, el brazo `250` no se evalúa y el informe lo dice |
+| `R2` | El escaneado real ya usado. **Obligatorio** para que la matriz esté completa (§6.1). Su resolución nativa se infería de unos 240 dpi o menos (la corrida midió un tope de página de 201 dpi: es un escaneo de unos 200), así que los brazos `300` y `250` son el mismo despacho y solo `200` y `150` bajan de verdad: en `R2`, el brazo `250` no se evalúa y el informe lo dice |
 | `R3` | Un escaneo real a 300 dpi, **si aparece**. El humano no tiene uno hoy (2026-10-01), y `SR` ocupa su lugar. Entra solo por `ANONLY_REAL_DOC_R3` y es opcional |
 
 Para los reales la referencia es el brazo `300` del mismo documento. No se

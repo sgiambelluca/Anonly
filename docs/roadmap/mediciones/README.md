@@ -32,6 +32,7 @@ documentos de trabajo. Los arneses que producen estos números están en
 | OCR | [`ADR190_DPI_2026-09-27.md`](./ocr/ADR190_DPI_2026-09-27.md) | ADR-190 §7: OCR a DPI nativo frente a 300 forzado (150/200/250/300) |
 | OCR | [`ADR190_OSD_Escala_2026-09-28.md`](./ocr/ADR190_OSD_Escala_2026-09-28.md) | ADR-190: tamaño de la imagen del OSD |
 | OCR | [`ADR190_OSD_Recuperacion_2026-09-28.md`](./ocr/ADR190_OSD_Recuperacion_2026-09-28.md) | ADR-190: recuperación con OSD sin veredicto |
+| OCR | [`DPI_Descendente_Fase1_Windows_2026-10-01.md`](./ocr/DPI_Descendente_Fase1_Windows_2026-10-01.md) | DPI descendente (300/250/200/150): ningún brazo pasa; se pierden emails al bajar |
 | NER | [`Hilos_NER_Medicion.md`](./ner/Hilos_NER_Medicion.md) | Hilos de ONNX, macOS y Windows nativo |
 | NER | [`Empaquetado_NER_Medicion.md`](./ner/Empaquetado_NER_Medicion.md) | Empaquetado del modelo |
 | NER | [`Perfilado_NER_Interno_Medicion.md`](./ner/Perfilado_NER_Interno_Medicion.md) | Perfilado interno A1/B/A2 |

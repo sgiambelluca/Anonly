@@ -753,7 +753,8 @@ Conclusiones, todas para este equipo y estos tres documentos:
 4. **R2 no es un escaneo a 300 dpi.** Llegó a seis ocupados con 128 MiB, o
    sea 21,3 MiB o menos por página, contra los 33,2 de la estimación a 300
    dpi. Con esa cota, su resolución nativa es de unos 240 dpi o menos. Es
-   una inferencia de la ocupación.
+   una inferencia de la ocupación. **Medido después (2026-10-01, campaña de
+   DPI descendente): el tope de página de R2 es 201 dpi en sus 20 páginas.**
 5. **Los tiempos separan bien los brazos.** En R2, las tres corridas de `6`
    (27,3 a 28,0 s) quedan por debajo de las tres de `4` (31,6 a 32,5 s), y
    estas por debajo de las de `2` (43,3 a 43,8 s). En P2H pasa lo mismo con
