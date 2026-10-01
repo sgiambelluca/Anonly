@@ -270,8 +270,13 @@ function RightPanel() {
         La lupa a la izquierda (ADR-169 §7: siempre visible, en las dos
         vistas), el toggle centrado y el zoom a la derecha (ADR-087 §2). La
         barra no cambia al conmutar.
+
+        El toggle se centra recién desde `2xl`: con tres columnas simétricas,
+        en una ventana más angosta el campo de la lupa se quedaba sin ancho
+        (0 px a 1024, el mínimo de la ventana). Por debajo, la lupa toma todo
+        el espacio que sobra.
       */}
-      <div className="relative z-30 grid h-[52px] shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4 border-b border-border bg-bg-primary px-4">
+      <div className="relative z-30 grid h-[52px] shrink-0 grid-cols-[minmax(0,1fr)_auto_auto] items-center 2xl:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] gap-4 border-b border-border bg-bg-primary px-4">
         <DocumentSearchBox onActiveMatchChange={handleActiveMatchChange} />
         <ViewerModeToggle />
         <div className="flex justify-end">

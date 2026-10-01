@@ -191,10 +191,14 @@ export function DocumentSearchBox({ onActiveMatchChange }: DocumentSearchBoxProp
           aria-label="Buscar en el documento"
           className="min-w-0 flex-1 border-0 bg-transparent text-sm text-text-primary outline-none placeholder:text-text-secondary"
         />
-        {/* Ranura de ancho fijo (UX-10): el contador no empuja el campo. */}
+        {/*
+          Ranura de ancho fijo (UX-10): el contador no empuja el campo. En una
+          ventana angosta no entra junto al campo, así que queda solo para
+          lectores de pantalla; el panel de resultados ya dice cuántos hay.
+        */}
         <span
           aria-live="polite"
-          className="w-[4.75rem] shrink-0 text-right text-sm tabular-nums text-text-secondary"
+          className="sr-only text-right text-sm tabular-nums text-text-secondary min-[1160px]:not-sr-only min-[1160px]:w-[4.75rem] min-[1160px]:shrink-0"
         >
           {counter}
         </span>
