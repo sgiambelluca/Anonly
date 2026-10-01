@@ -2,7 +2,7 @@
 
 # ADR-192 — El pico total de memoria tiene un techo medido por perfil
 
-- **Estado**: Aceptado. **Falta una medición para cerrarlo** (§4).
+- **Estado**: Aceptado. **Medido el 2026-10-01: P1 y P2 cumplen** (ver «Medición del 2026-10-01»), con un margen en P2 menor que el ruido.
 - **Fecha**: 2026-09-30.
 - **Decidido por**: el humano, a propuesta del planificador. Equipo mínimo:
   «8 GB de momento, con plan de poder optimizar a futuro aún más para
@@ -124,6 +124,33 @@ El humano quiere extender el producto a equipos más chicos. Eso queda como
 meta de la v1.0 (`Version_1.0.md` §3): bajar los techos de M2 y revisar el
 equipo mínimo. Las palancas conocidas están en `Future_Ideas.md` §6. Este
 ADR no las descarta: fija desde dónde se parte.
+
+## Medición del 2026-10-01
+
+Windows nativo (i5-12400, 12 hilos, 15,8 GB), sobre `ebd030d`, con
+`tests/perf/memory.spec.ts --repeat-each=3`. Nueve corridas, todas `ok`.
+
+| Perfil | M2 frío (MB) | M2 caliente (MB) | Máximo | Techo | Veredicto |
+|---|---|---|---:|---:|---|
+| P1 | 1582,5 / 1573,4 / 1596,8 | 1284,4 / 1280,9 / 1291,2 | 1596,8 MB | 2,0 GB | **cumple** |
+| P2 | 2005,3 / 2031,6 / 1968,1 | 2660,9 / 2894,2 / 2705,3 | 2894,2 MB | 3,0 GB | **cumple** |
+| P2-dense (informativo) | 2281,6 / 2080,0 / 2164,0 | 2620,3 / 2758,1 / 2691,3 | 2758,1 MB | sin techo | — |
+
+Dos salvedades que quedan abiertas:
+
+- **El margen de P2 es de 106 MB, menor que el ruido de M2** (~345 MB,
+  ADR-146 §7). «Cumple» es el resultado de esta tanda; otra tanda sobre el
+  mismo código puede dar «no cumple». Si pasa, la decisión vuelve al humano
+  (§4), y no se sube el techo en silencio.
+- **P2 no es el peor caso.** El fixture de P2 se rasteriza a 216 dpi. La
+  tanda de perfiles del mismo día midió un corpus a 300 dpi nativos (`P2H`,
+  20 páginas) con la configuración por defecto de dos reconocedores: 2928 MiB
+  de mediana de pico de RSS durante el OCR, contra 2217 MiB de P2 en el mismo
+  instrumento. Ese instrumento (`run-ocr-pool.sh`, RSS natural del árbol) no
+  es el de este gate, así que el número no se compara contra el techo de
+  3,0 GB. Lo que sí muestra es que un escaneo a 300 dpi consume del orden de
+  700 MiB más que P2. Un perfil de medición a 300 dpi, con su techo, se
+  define junto con los perfiles de rendimiento (§5).
 
 ## Consecuencias
 

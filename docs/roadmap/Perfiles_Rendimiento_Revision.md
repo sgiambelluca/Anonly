@@ -599,3 +599,109 @@ disco no se regeneraron y siguen diciendo `complete: true`; regenerados con
 el agregador actual, lo declaran faltante (`missingArms: ["4b"]`). La tanda de Windows
 mide los cinco brazos.
 
+## Tanda de Ultra en Windows nativo (2026-10-01)
+
+Fase `ultra` con `ANONLY_OCR_POOL_ULTRA_HIDPI=1` y R2, sobre `ebd030d`,
+en el i5-12400 (6 núcleos, 12 hilos, 15,8 GB, Windows 11). La corrió un
+agente que solo ejecutó y reportó; los crudos están en
+`.measure/ocr-pool/20261001T054724Z/` de esa máquina y este informe se basa
+en su reporte de medianas. Resumen: `complete=true salvedades=0`, sin
+corridas inválidas ni faltantes, `sleepDetection.available: true`, huellas
+idénticas al brazo `2` en los tres corpus y cancelaciones de 0–1 ms. La
+portabilidad del script a Git Bash funcionó en su primera ejecución. Las
+comprobaciones 9 y 10 del README (que la guarda de procesos y la detección
+de suspensión corten de verdad) **no se ejecutaron**.
+
+| corpus | brazo | presupuesto | `Ready` | OCR | pico de RSS durante OCR | ocupación |
+|---|---|---:|---:|---:|---:|---:|
+| R2 | `2` | 128 MiB | 43,41 s | 32,60 s | 1727 MiB | 2 |
+| R2 | `4` | 128 MiB | 31,72 s | 20,89 s | 2248 MiB | 4 |
+| R2 | `4b` | 136 MiB | 32,65 s | 21,89 s | 2244 MiB | 4 |
+| R2 | `6` | 128 MiB | 27,67 s | 16,78 s | 2643 MiB | 6 |
+| R2 | `6b` | 200 MiB | 27,84 s | 16,86 s | 2573 MiB | 6 |
+| P2H | `2` | 128 MiB | 19,17 s | 16,01 s | 2928 MiB | 2 |
+| P2H | `4` | 128 MiB | 17,28 s | 14,21 s | 3110 MiB | 3 |
+| P2H | `6` | 128 MiB | 17,41 s | 14,35 s | 3032 MiB | 3 |
+| P2H | `4b` | 136 MiB | 14,88 s | 11,85 s | 3682 MiB | 4 |
+| P2H | `6b` | 200 MiB | 13,15 s | 10,06 s | 4139 MiB | 6 |
+| P2 | `2` | 128 MiB | 19,78 s | 14,67 s | 2217 MiB | 2 |
+| P2 | `4` | 128 MiB | 18,93 s | 13,84 s | 2604 MiB | 4 |
+| P2 | `4b` | 136 MiB | 18,90 s | 13,77 s | 2616 MiB | 4 |
+| P2 | `6` | 128 MiB | 18,58 s | 13,56 s | 2946 MiB | 5 |
+| P2 | `6b` | 200 MiB | 18,63 s | 13,61 s | 2787 MiB | 5 |
+
+Son medianas de tres corridas. El reporte no trae los valores por corrida,
+así que acá no hay rangos ni máximos.
+
+**Tiempo, contra Intermedio (`2`):**
+
+| corpus | Alto (4 reconocedores con su presupuesto) | Ultra (6 con su presupuesto) |
+|---|---:|---:|
+| R2, real escaneado de 20 páginas | −24,8 % (`4b`); −26,9 % (`4`) | −35,9 % (`6b`); −36,3 % (`6`) |
+| P2H, sintético a 300 dpi | −22,4 % (`4b`) | −31,4 % (`6b`) |
+| P2, sintético a 216 dpi | −4,4 % (`4b`) | −5,8 % (`6b`) |
+
+- **Ultra rinde en Windows.** En R2 baja `Ready` unos 4 s más que Alto, de
+  ~32 a ~28 s. En la Mac la diferencia había sido de 2,3 s.
+- **El presupuesto frena igual que en la Mac.** En P2H con 128 MiB, `4` y
+  `6` quedaron en tres ocupados y rinden lo mismo (17,3 y 17,4 s). Con su
+  presupuesto, `4b` llegó a cuatro y `6b` a seis.
+- **En R2 el presupuesto no importa:** `4` y `4b` no se distinguen, ni `6`
+  y `6b`. Sus páginas reservan menos de 22 MiB.
+- **P2 sigue casi plano** y con cinco de seis ocupados, sin explicación.
+
+**Memoria (pico de RSS del árbol durante el OCR, suma de working sets).**
+Windows tuvo entre 8,7 y 9,1 GiB de RAM libre y 319–335 MB de paginación en
+uso durante toda la tanda: a diferencia de la Mac, acá no hubo presión que
+baje el RSS.
+
+| | Intermedio (`2`) | Alto (`4b`) | Ultra (`6b`) |
+|---|---:|---:|---:|
+| R2 | 1727 MiB | 2244 MiB (+517) | 2573 MiB (+846) |
+| P2H (300 dpi) | 2928 MiB | 3682 MiB (+754) | 4139 MiB (+1211) |
+| P2 (216 dpi) | 2217 MiB | 2616 MiB (+399) | 2787 MiB (+570) |
+
+- **El costo de memoria depende de la resolución del escaneo.** A 300 dpi,
+  Alto usa ~3,7 GiB y Ultra ~4,1 GiB de pico; el mismo perfil sobre R2 usa
+  2,2 y 2,6 GiB.
+- **Intermedio a 300 dpi ya ronda los 2,9 GiB** (3,07 GB decimales), con la
+  configuración por defecto de hoy. El techo de 3,0 GB de ADR-192 se midió
+  sobre P2, que es un caso más liviano, y con otro instrumento.
+- Un delta de RSS total no se divide por reconocedor, y estos números no se
+  restan contra los de la Mac.
+
+**Lo que falta para cerrar los perfiles.**
+
+- El brazo de **Bajo** (un reconocedor) no entró en esta tanda. Su curva es
+  la del 2026-09-26, anterior a ADR-190 y sin corpus a 300 dpi.
+- Los **máximos por corrida**, para fijar techos con el criterio de ADR-146
+  §6 (el máximo, no la mediana). Están en el `summary.json` de Windows.
+- Las **decisiones del humano**: techos de memoria por perfil, regla de
+  Automático y de dónde sale la RAM real del equipo.
+
+### Decisiones del humano tras la tanda de Windows (2026-10-01)
+
+- **Regla de Automático.** Menos de 8 GB de RAM o menos de 4 núcleos: Bajo.
+  De 8 a 15 GB: Intermedio. 16 GB o más con 12 hilos o más: **Ultra**. 16 GB
+  o más con 8 a 11 hilos: Alto. El único equipo medido con Ultra es el
+  i5-12400 de 16 GB, con ~9 GiB libres durante la tanda; no hay medición con
+  otras aplicaciones abiertas.
+- **La RAM real la pasa el shell de Electron** al renderer al arrancar.
+  `navigator.deviceMemory` no informa más de 8 GB. Es un dato nuevo que
+  cruza del proceso principal al renderer: va con su ADR y con un test de
+  que no pasa nada más.
+- **Techos de memoria por perfil: sin decidir.** El humano pidió más
+  explicación antes de fijarlos.
+- **El humano preguntó por qué el pico «subió».** Con el instrumento del
+  gate (`memory.spec.ts`), la misma configuración y el mismo fixture, no
+  subió: P2 daba 2204 MB en frío y 2763 MB en caliente antes de ADR-190, y
+  ahora da 1968–2032 MB y 2661–2894 MB. Los números más altos de esta tanda
+  son de un documento más pesado (300 dpi) y de perfiles con más
+  reconocedores, que antes no se medían. Queda una diferencia sin explicar:
+  con `run-ocr-pool.sh`, el pico de RSS durante el OCR de P2 con dos
+  reconocedores fue de 1830 MiB el 2026-09-26 y de 2217 MiB hoy, y el de R2
+  pasó de 1374 a 1727 MiB. Las dos tandas no usan el mismo modo de medición
+  (instancias instrumentadas con CDP entonces, RSS natural cada 150 ms
+  ahora) ni el mismo commit, así que la diferencia no se puede atribuir al
+  producto ni al instrumento sin medir los dos commits en la misma sesión.
+

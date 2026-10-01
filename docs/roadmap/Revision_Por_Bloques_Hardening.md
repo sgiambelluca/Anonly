@@ -690,9 +690,9 @@ cosmético: un `unsubscribe()` fuera de `finally` en un test.
 
 1. **Suite pesada sobre la app empaquetada**, en Windows nativo, con la máquina
    sin otras mediciones: `pnpm test:e2e`, `pnpm test:perf`,
-   `pnpm test:leak` y `pnpm test:stress`. Quedan abiertas las fallas E2E de
-   los escenarios 2 y 5 (N-8, Hito 11). Hay que resolverlas o registrarlas
-   como conocidas antes del merge.
+   `pnpm test:leak` y `pnpm test:stress`. **Hecha el 2026-10-01, en verde**
+   (tabla más abajo). Las fallas E2E de los escenarios 2 y 5 (N-8, Hito 11)
+   no se reproducen.
 
    **Estado de N-8 (2026-09-30).** Se reportaron en Windows nativo el
    2026-09-24, sin causa registrada. En macOS, sobre `5ceb1e6` y con la app
@@ -710,6 +710,33 @@ cosmético: un `unsubscribe()` fuera de `finally` en un test.
    --repeat-each=3`. El máximo de M2 de P1 no puede superar 2,0 GB ni el de
    P2 3,0 GB. Si alguno lo supera, la decisión vuelve al humano con el
    número.
+   **Sesión de Windows (2026-10-01): todo en verde.** Sobre `ebd030d`, con el
+   árbol limpio, en el i5-12400 (12 hilos, 15,8 GB, Windows 11). La corrió un
+   agente que solo ejecutó y reportó; los crudos quedaron en `.measure/` de
+   esa máquina.
+
+   | Qué | Resultado |
+   |---|---|
+   | Gates mínimos | `lint`, `typecheck`, `test` (3074 pasan, 54 salteados), `test:contract` (340) y `format:check`: código 0, sin archivos modificados por CRLF |
+   | **N-8**: `scenario-2` y `scenario-5`, `--repeat-each=3` | **6 de 6 pasan** |
+   | `test:e2e` | 39 pasan, 0 fallan, 1 salteado (`t5-orientation-pixel`, marcado `skip` en el spec) |
+   | `test:perf` con `ANONLY_PERF_ENFORCE_BUDGET=1` | 4 de 4: texto de 10 páginas 1830 ms (umbral 8000); escaneado de 10 páginas 6041 ms (umbral 60000) |
+   | `test:leak` | 3 de 3, 1348 s |
+   | `test:stress` | 3 de 3, 208 s |
+   | M2 (ADR-192) | P1 máximo 1596,8 MB (techo 2,0 GB) y P2 máximo 2894,2 MB (techo 3,0 GB): **cumplen** |
+
+   **N-8 queda cerrado.** Pasa en macOS (4 de 4) y en Windows (6 de 6) sobre
+   el `HEAD` de la branch. La causa de las fallas del 2026-09-24 nunca se
+   identificó: no hay registro de ella, y los commits intermedios tocan OCR,
+   NER y el arnés. Se cierra como «no se reproduce», no como «causa
+   corregida».
+
+   **M2: cumple con un margen menor que el ruido.** El máximo de P2 queda a
+   106 MB del techo, y ADR-146 §7 midió ~345 MB de ruido entre corridas
+   iguales. Además, la tanda de perfiles encontró que un escaneo a 300 dpi
+   usa más memoria que el fixture de P2 con la misma configuración (ADR-192,
+   «Medición del 2026-10-01»).
+
 2. **PR a `main`.** CI (`.github/workflows/ci.yml`) solo corre en push o PR
    contra `main`, así que **nunca corrió sobre esta branch**. El PR es la
    primera vez: esperar CI verde antes de mergear. CI corre en Linux y macOS, no en Windows: Windows queda cubierto por los gates locales de cada ronda y por la suite pesada del punto 1.
