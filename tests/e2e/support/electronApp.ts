@@ -30,6 +30,8 @@ import {
   type Page,
 } from "@playwright/test";
 
+import { installSettingsOverride, isMeasurementSuite } from "./settingsOverride.js";
+
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const SHELL_DIR = resolve(ROOT, "apps/desktop-shell");
 const ELECTRON_BIN = resolve(SHELL_DIR, "node_modules/.bin/electron");
@@ -94,9 +96,13 @@ export const test = base.extend<ElectronFixtures>({
    * que los specs no cambien: siguen recibiendo `page` y no necesitan saber
    * que del otro lado hay un proceso de Electron y no un navegador.
    */
-  page: async ({ electronApp }, use) => {
+  page: async ({ electronApp }, use, testInfo) => {
     const window: Page = await electronApp.firstWindow();
     await window.waitForLoadState("domcontentloaded");
+    // ADR-194 §8: un punto común para que ninguna suite de medición dependa
+    // del nivel que Automático resuelva en el equipo. `openApp` recarga y el
+    // init script corre antes del bootstrap. Los E2E funcionales no entran.
+    if (isMeasurementSuite(testInfo.file)) await installSettingsOverride(window, {}, testInfo.file);
     await use(window);
   },
 });
