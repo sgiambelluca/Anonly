@@ -1074,6 +1074,11 @@ sin cambios.
 
 ## Campaña de DPI descendente del OCR (`ocr-dpi-down`, `ultra-dpi`)
 
+**Campaña cerrada el 2026-10-01:** la fase 1 se corrió en Windows, ningún brazo pasó y la
+resolución no se baja (`docs/roadmap/mediciones/ocr/DPI_Descendente_Fase1_Windows_2026-10-01.md`).
+El arnés queda para una eventual reapertura, que pide una regla nueva con control de
+perturbación.
+
 Arnés de `docs/roadmap/OCR_DPI_Descendente_Campana_Plan.md`: ¿puede el OCR leer a 250
 o 200 dpi un escaneo de 300 dpi nativos sin perder detecciones, y cuánta memoria y
 tiempo ahorra? Dos fases, las dos en **Windows nativo (Git Bash)**, que es el banco que
@@ -1085,7 +1090,7 @@ El arnés no cambia producto: aplica `ocr.dpi` por el canal de overrides de ADR-
 (ADR-163). El DPI efectivo de **cada** despacho `ocr-page` se demuestra con el observador
 de transporte de ADR-190 (`support/adr190Browser.ts`); una celda o corrida cuyo DPI
 efectivo no es el esperado queda **inválida**, y un brazo cuyo DPI efectivo no es el
-pedido (p. ej. `300` y `250` sobre un escaneo de unos 240 dpi) se marca «no efectivo en
+pedido (p. ej. `300` y `250` sobre un escaneo de unos 200 dpi) se marca «no efectivo en
 este corpus», no como fallo.
 
 ### Primer paso en Windows: los dos humos
@@ -1268,8 +1273,8 @@ degradación, giros y escala en la clave):
   renglones: no hizo falta tocarlos), 9 entidades por página, texto inventado con semilla
   `sr-v1`. La última página queda en blanco. Copia la densidad, no el contenido ni la
   calidad de un escaneo real: **no reemplaza a un real a 300 dpi**.
-- `R2` (real, resolución nativa inferida de unos 240 dpi: `300` y `250` son el mismo
-  despacho) y `R3` (real a 300 dpi, opcional): por `ANONLY_REAL_DOC_R2` y `_R3`.
+- `R2` (real, de unos 200 dpi nativos, tope de página medido 201: `300` y `250` son el mismo
+  despacho, y `200` baja 1 dpi) y `R3` (real a 300 dpi, opcional): por `ANONLY_REAL_DOC_R2` y `_R3`.
 
 **Tamaño y duración.** Con todos los corpus sintéticos son 51 celdas: 6 corpus (`S12`, `S10`,
 `S8`, `S6`, `SE`, `SR`) x 5 celdas, `SD1` con 5 y `SD2` a `SD5` con 4 cada una (`300` dos
