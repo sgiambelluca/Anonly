@@ -301,6 +301,8 @@ apps/react-client/src/components/
 
 ### 3.4 `ReplacementModeSelect`
 
+> **El menú de modos abre hacia arriba si abajo no entra (2026-10-01, pedido del humano).** Al abrirse mide el lugar que queda entre el disparador y el borde del área que lo recorta (la lista que scrollea, o la ventana). Abajo si entra; si no, arriba; si no entra en ninguno, el lado con más lugar. Antes abría siempre hacia abajo y en las últimas filas había que scrollear para leerlo. Regla pura en `entities/menuPlacement.ts`, con tests; `tests/e2e/mode-menu-opens-upward.spec.ts` lo cubre en la app.
+
 - **Props**: `groupId`, `currentMode`.
 - **Opciones**: `placeholder` (default), `mask`, `synthetic`, `redact` — con las **etiquetas de
   `UX_Guidelines.md` §3.5** (ADR-087 §4): "Etiquetar", "Ocultar parcialmente", "Reemplazar por dato
@@ -707,6 +709,8 @@ hay nada que sincronizar: se retira junto con `SideBySideViewer` y `scrollSyncCo
 - **Click**: abre `ConflictDialog`.
 
 ### 6.2 `ConflictDialog`
+
+> **Recorrido desde «Resolver» (2026-10-01, pedido del humano).** El «Resolver» del globo de Exportar (§2.5) ya no abre un solo conflicto: arma la cola de **todos** los conflictos pendientes que no son `heldManual`, en el orden del árbol (`pendingConflictIdsInTreeOrder`), y el diálogo los muestra uno detrás del otro. A la derecha del título va un contador «5/9» (posición sobre el total que había al empezar; no se muestra si hay uno solo). «Aplicar» o «Descartar» pasa al siguiente sin cerrar; al terminar el último, el diálogo se cierra. **«Saltear»** pasa al siguiente sin aplicar nada: ese conflicto queda pendiente y el export sigue bloqueado (no aparece si hay uno solo). «Cerrar» corta el recorrido. Los que dejaron de estar pendientes mientras tanto se saltean. Abierto desde el ⚠ de una fila, el diálogo sigue mostrando un solo conflicto, sin contador. Los choques `heldManual` siguen yendo primero por `ManualOverlapDialog`. Lógica en `conflicts/conflictWalk.ts`, con tests.
 
 - **Props**: `conflictId`.
 - **Stores**: `entities.conflicts`.
